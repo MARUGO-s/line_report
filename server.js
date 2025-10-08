@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
 
@@ -11,7 +12,69 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
+// Supabase クライアントの初期化
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
+
 const app = express();
+
+// Supabaseストレージから会社規約を取得する関数
+async function getCompanyRules() {
+  try {
+    // ストレージからファイル一覧を取得
+    const { data: files, error } = await supabase.storage
+      .from('company-rules')
+      .list('', {
+        limit: 100,
+        offset: 0,
+        sortBy: { column: 'created_at', order: 'desc' }
+      });
+
+    if (error) {
+      console.error('Error fetching files:', error);
+      return null;
+    }
+
+    if (!files || files.length === 0) {
+      console.log('No files found in storage');
+      return null;
+    }
+
+    // 全てのファイルの内容を取得
+    const fileContents = [];
+    for (const file of files) {
+      try {
+        // ファイルのURLを取得
+        const { data: urlData } = supabase.storage
+          .from('company-rules')
+          .getPublicUrl(file.name);
+
+        if (urlData?.publicUrl) {
+          // ファイルをダウンロード
+          const response = await fetch(urlData.publicUrl);
+          const text = await response.text();
+          
+          // TXTファイルの場合はそのまま、PDFの場合は一部のみ
+          if (file.name.endsWith('.txt')) {
+            fileContents.push(`【${file.name}】\n${text}\n`);
+          } else if (file.name.endsWith('.pdf')) {
+            // PDFは現時点ではテキスト抽出できないため、ファイル名のみ記録
+            fileContents.push(`【${file.name}】（PDFファイル - 内容は直接参照できません）\n`);
+          }
+        }
+      } catch (err) {
+        console.error(`Error reading file ${file.name}:`, err);
+      }
+    }
+
+    return fileContents.join('\n---\n\n');
+  } catch (error) {
+    console.error('Error in getCompanyRules:', error);
+    return null;
+  }
+}
 
 // CORS設定
 app.use((req, res, next) => {
@@ -46,13 +109,28 @@ app.post("/webhook", async (req, res) => {
         const userMessage = event.message.text;
 
         try {
-          // Groq AIで応答を生成
+          // Supabaseから会社規約を取得
           console.log("User message:", userMessage);
+          console.log("Fetching company rules from Supabase...");
+          const companyRules = await getCompanyRules();
+          
+          // システムプロンプトを構築
+          let systemPrompt = "あなたは会社の規約について答えるAIアシスタントです。日本語で簡潔かつ正確に応答してください。";
+          
+          if (companyRules) {
+            systemPrompt += "\n\n以下は会社規約のファイル内容です。この情報を参考にして質問に答えてください：\n\n" + companyRules;
+            console.log("Company rules loaded successfully");
+          } else {
+            systemPrompt += "\n\n注意：現在、会社規約ファイルが読み込めていません。一般的な回答を提供してください。";
+            console.log("No company rules found");
+          }
+
+          // Groq AIで応答を生成
           const chatCompletion = await groq.chat.completions.create({
             messages: [
               {
                 role: "system",
-                content: "あなたは親切で役立つAIアシスタントです。日本語で簡潔に応答してください。",
+                content: systemPrompt,
               },
               {
                 role: "user",
@@ -60,8 +138,8 @@ app.post("/webhook", async (req, res) => {
               },
             ],
             model: "llama-3.3-70b-versatile",
-            temperature: 0.7,
-            max_tokens: 1000,
+            temperature: 0.5,
+            max_tokens: 1500,
           });
 
           const aiResponse = chatCompletion.choices[0]?.message?.content || "申し訳ございません、応答を生成できませんでした。";
