@@ -25,7 +25,7 @@ async function getCompanyRules() {
   try {
     // ストレージからファイル一覧を取得
     const { data: files, error } = await supabase.storage
-      .from('company-rules')
+      .from('company-documents')
       .list('', {
         limit: 100,
         offset: 0,
@@ -46,26 +46,37 @@ async function getCompanyRules() {
     const fileContents = [];
     for (const file of files) {
       try {
-        // ファイルのURLを取得
-        const { data: urlData } = supabase.storage
-          .from('company-rules')
-          .getPublicUrl(file.name);
+        // .emptyファイルや隠しファイルをスキップ
+        if (file.name === '.emptyFolderPlaceholder' || file.name.startsWith('.')) {
+          continue;
+        }
 
-        if (urlData?.publicUrl) {
-          // ファイルをダウンロード
-          const response = await fetch(urlData.publicUrl);
-          const text = await response.text();
-          
-          // TXTファイルの場合はそのまま、PDFの場合は一部のみ
-          if (file.name.endsWith('.txt')) {
-            fileContents.push(`【${file.name}】\n${text}\n`);
-          } else if (file.name.endsWith('.pdf')) {
-            // PDFは現時点ではテキスト抽出できないため、ファイル名のみ記録
-            fileContents.push(`【${file.name}】（PDFファイル - 内容は直接参照できません）\n`);
-          }
+        console.log(`Processing file: ${file.name}`);
+        
+        // ファイルをダウンロード（download メソッドを使用）
+        const { data: fileData, error: downloadError } = await supabase.storage
+          .from('company-documents')
+          .download(file.name);
+
+        if (downloadError) {
+          console.error(`Error downloading ${file.name}:`, downloadError);
+          continue;
+        }
+
+        // TXTファイルの場合はテキストとして読み込み
+        if (file.name.endsWith('.txt')) {
+          const text = await fileData.text();
+          const displayName = file.name.split('.')[0];
+          fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
+          console.log(`Loaded TXT file: ${file.name} (${text.length} chars)`);
+        } else if (file.name.endsWith('.pdf')) {
+          // PDFは現時点ではテキスト抽出できないため、ファイル名のみ記録
+          const displayName = file.name.split('.')[0];
+          fileContents.push(`【ファイル: ${displayName}】（PDFファイル - テキスト抽出未対応）\n`);
+          console.log(`Found PDF file: ${file.name}`);
         }
       } catch (err) {
-        console.error(`Error reading file ${file.name}:`, err);
+        console.error(`Error processing file ${file.name}:`, err);
       }
     }
 
