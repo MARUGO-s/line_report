@@ -283,12 +283,14 @@
       progressFill.style.width = '0%';
 
       try {
-        const fileName = `${Date.now()}_${file.name}`;
+        // ファイル名をURLエンコード（日本語対応）
+        const timestamp = Date.now();
+        const encodedFileName = `${timestamp}_${encodeURIComponent(file.name)}`;
         
         // Supabase Storageにアップロード
         const { data, error } = await supabase.storage
           .from('company-documents')
-          .upload(fileName, file);
+          .upload(encodedFileName, file);
 
         if (error) throw error;
 
@@ -326,10 +328,15 @@
 
         listElement.innerHTML = data
           .filter(file => file.name.endsWith('.pdf') || file.name.endsWith('.txt'))
-          .map(file => `
+          .map(file => {
+            // ファイル名をデコード
+            const parts = file.name.split('_');
+            const encodedName = parts.slice(1).join('_');
+            const displayName = decodeURIComponent(encodedName) || file.name;
+            return `
             <li class="document-item">
               <div class="document-info">
-                <div class="document-name">${file.name.split('_').slice(1).join('_') || file.name}</div>
+                <div class="document-name">${displayName}</div>`
                 <div class="document-meta">
                   サイズ: ${(file.metadata?.size / 1024).toFixed(2)} KB | 
                   アップロード: ${new Date(file.created_at).toLocaleString('ja-JP')}
@@ -340,7 +347,7 @@
                 <button class="btn-small btn-delete" onclick="deleteDocument('${file.name}')">削除</button>
               </div>
             </li>
-          `).join('');
+          `}).join('');
       } catch (error) {
         console.error('Load error:', error);
         listElement.innerHTML = '<li class="loading">エラーが発生しました</li>';
