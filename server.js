@@ -8,33 +8,31 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.json());
 
-// LINE Webhook エンドポイント
+// ✅ LINE Webhook エンドポイント
 app.post("/webhook", async (req, res) => {
   try {
     const events = req.body.events;
-
     if (!events || events.length === 0) {
       return res.status(200).send("No events");
     }
 
-    // メッセージを取得
+    // メッセージを順に処理
     for (const event of events) {
       if (event.type === "message" && event.message.type === "text") {
         const replyToken = event.replyToken;
         const userMessage = event.message.text;
 
-        // 返信メッセージを生成
         const replyMessage = {
           replyToken: replyToken,
           messages: [
             {
               type: "text",
-              text: `受け取りました：「${userMessage}」`,
+              text: `受け取りました: ${userMessage}`,
             },
           ],
         };
 
-        // LINE Messaging APIに返信
+        // LINE Messaging APIに返信送信
         await fetch("https://api.line.me/v2/bot/message/reply", {
           method: "POST",
           headers: {
@@ -53,7 +51,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// 動作確認用ルート
+// ✅ 動作確認用ルート（Renderチェック用）
 app.get("/", (req, res) => {
   res.send("✅ Server is running and ready for LINE webhook!");
 });
