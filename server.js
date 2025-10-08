@@ -126,14 +126,23 @@ app.post("/webhook", async (req, res) => {
           const companyRules = await getCompanyRules();
           
           // システムプロンプトを構築
-          let systemPrompt = "あなたは会社の規約について答えるAIアシスタントです。日本語で簡潔かつ正確に応答してください。";
+          let systemPrompt = `あなたは会社規約に関する質問に答える専門AIアシスタントです。
+
+【重要な指示】
+1. 必ず提供された会社規約ファイルの内容のみに基づいて回答してください。
+2. 規約ファイルに記載されていない内容について質問された場合は、以下のように対応してください：
+   - まず「その内容は現在の規約資料には記載されていません」と明確に伝える
+   - 次に「一般的な情報としてお答えしてもよろしいでしょうか？」と必ず確認を求める
+   - 確認なしに規約外の情報を提供してはいけません
+3. 回答する際は、どのファイルのどの部分に基づいているかを明示してください。
+4. 不明確な場合は推測せず、「規約資料からは確認できません」と正直に答えてください。`;
           
-          if (companyRules) {
-            systemPrompt += "\n\n以下は会社規約のファイル内容です。この情報を参考にして質問に答えてください：\n\n" + companyRules;
+          if (companyRules && companyRules.trim().length > 0) {
+            systemPrompt += "\n\n【会社規約ファイルの内容】\n" + companyRules;
             console.log("Company rules loaded successfully");
           } else {
-            systemPrompt += "\n\n注意：現在、会社規約ファイルが読み込めていません。一般的な回答を提供してください。";
-            console.log("No company rules found");
+            systemPrompt += "\n\n【注意】現在、会社規約ファイルが読み込めていません。すべての質問に対して「申し訳ございません。現在、会社規約ファイルを読み込めていないため、正確な情報を提供できません。管理者にお問い合わせください。」と回答してください。";
+            console.log("No company rules found - will inform user");
           }
 
           // Groq AIで応答を生成
@@ -149,7 +158,7 @@ app.post("/webhook", async (req, res) => {
               },
             ],
             model: "llama-3.3-70b-versatile",
-            temperature: 0.5,
+            temperature: 0.2, // より正確で一貫性のある回答のため低めに設定
             max_tokens: 1500,
           });
 
