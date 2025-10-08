@@ -240,8 +240,9 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script>
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+    
     // Supabase設定（環境変数から取得するため、サーバー経由で取得）
     let supabase;
 
@@ -250,12 +251,19 @@
       try {
         const response = await fetch('/api/config');
         const config = await response.json();
-        supabase = window.supabase.createClient(config.supabaseUrl, config.supabaseKey);
+        supabase = createClient(config.supabaseUrl, config.supabaseKey);
         loadDocuments();
       } catch (error) {
         showMessage('設定の読み込みに失敗しました', 'error');
       }
     }
+    
+    // グローバルに公開
+    window.initSupabase = initSupabase;
+    window.uploadFile = uploadFile;
+    window.loadDocuments = loadDocuments;
+    window.viewDocument = viewDocument;
+    window.deleteDocument = deleteDocument;
 
     // メッセージ表示
     function showMessage(text, type = 'success') {
@@ -404,7 +412,9 @@
     });
 
     // 初期化
-    initSupabase();
+    window.addEventListener('DOMContentLoaded', () => {
+      initSupabase();
+    });
   </script>
 </body>
 </html>
