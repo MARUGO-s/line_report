@@ -283,14 +283,19 @@
       progressFill.style.width = '0%';
 
       try {
-        // ファイル名をURLエンコード（日本語対応）
+        // ファイル名から拡張子を取得
         const timestamp = Date.now();
-        const encodedFileName = `${timestamp}_${encodeURIComponent(file.name)}`;
+        const extension = file.name.split('.').pop();
+        const safeFileName = `${timestamp}.${extension}`;
         
-        // Supabase Storageにアップロード
+        // 元のファイル名をメタデータとして保存
         const { data, error } = await supabase.storage
           .from('company-documents')
-          .upload(encodedFileName, file);
+          .upload(safeFileName, file, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: file.type
+          });
 
         if (error) throw error;
 
@@ -329,10 +334,10 @@
         listElement.innerHTML = data
           .filter(file => file.name.endsWith('.pdf') || file.name.endsWith('.txt'))
           .map(file => {
-            // ファイル名をデコード
-            const parts = file.name.split('_');
-            const encodedName = parts.slice(1).join('_');
-            const displayName = decodeURIComponent(encodedName) || file.name;
+            // タイムスタンプから日時を表示名として使用
+            const timestamp = file.name.split('.')[0];
+            const extension = file.name.split('.').pop();
+            const displayName = `規約文書_${new Date(parseInt(timestamp)).toLocaleString('ja-JP')}.${extension}`;
             return `
             <li class="document-item">
               <div class="document-info">
