@@ -13,6 +13,7 @@ const groq = new Groq({
 
 const app = express();
 app.use(bodyParser.json());
+app.use(express.static('public'));
 
 // LINE Webhook エンドポイント
 app.post("/webhook", async (req, res) => {
@@ -91,6 +92,14 @@ app.post("/webhook", async (req, res) => {
   } catch (error) {
     console.error("Error handling webhook:", error);
   }
+});
+
+// 設定APIエンドポイント
+app.get("/api/config", (req, res) => {
+  res.json({
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseKey: process.env.SUPABASE_ANON_KEY,
+  });
 });
 
 // 動作確認ルート（Render チェック用）
