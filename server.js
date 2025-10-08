@@ -8,7 +8,6 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.json());
 
-// LINE Webhook エンドポイント
 app.post("/webhook", async (req, res) => {
   try {
     const events = req.body.events;
@@ -16,13 +15,11 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).send("No events");
     }
 
-    // イベント処理
     for (const event of events) {
       if (event.type === "message" && event.message.type === "text") {
         const replyToken = event.replyToken;
         const userMessage = event.message.text;
 
-        // 返信メッセージ
         const replyMessage = {
           replyToken: replyToken,
           messages: [
@@ -33,8 +30,8 @@ app.post("/webhook", async (req, res) => {
           ],
         };
 
-        // LINE Messaging API に送信
-        await fetch("https://api.line.me/v2/bot/message/reply", {
+        console.log("Sending reply message:", JSON.stringify(replyMessage, null, 2));
+        const response = await fetch("https://api.line.me/v2/bot/message/reply", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -42,6 +39,14 @@ app.post("/webhook", async (req, res) => {
           },
           body: JSON.stringify(replyMessage),
         });
+        
+        console.log("LINE API response status:", response.status);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("LINE API error:", errorText);
+        } else {
+          console.log("Reply sent successfully");
+        }
       }
     }
 
@@ -52,7 +57,6 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// 動作確認ルート（Render チェック用）
 app.get("/", (req, res) => {
   res.send("✅ Server is running and ready for LINE webhook!");
 });
