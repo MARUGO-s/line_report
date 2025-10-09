@@ -286,9 +286,7 @@ async function getCompanyRules() {
 
         if (extension === 'txt') {
           const text = await fileData.text();
-          fileContents.push(`【ファイル: ${originalName}】
-${text}
-`);
+          fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
           console.log(`Loaded TXT file: ${storageName} (${text.length} chars)`);
         } else if (extension === 'pdf') {
           const pdfParse = await getPdfParse();
@@ -310,9 +308,7 @@ ${text}
 `);
               console.warn(`PDF parsing produced empty text for ${storageName}`);
             } else {
-              fileContents.push(`【ファイル: ${originalName}】
-${text}
-`);
+              fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
               console.log(`Parsed PDF file: ${storageName} (${text.length} chars)`);
             }
           } catch (parseError) {
@@ -340,9 +336,7 @@ ${text}
 `);
               console.warn(`DOCX parsing produced empty text for ${storageName}`);
             } else {
-              fileContents.push(`【ファイル: ${originalName}】
-${text}
-`);
+              fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
               console.log(`Parsed DOCX file: ${storageName} (${text.length} chars)`);
             }
           } catch (docxError) {
@@ -379,8 +373,7 @@ ${text}
                 return null;
               }
 
-              return `【シート: ${sheetName}】
-${sheetText}`;
+              return `【シート: ${sheetName}】\n${sheetText}`;
             }).filter(Boolean);
 
             if (sheetTexts.length === 0) {
@@ -404,9 +397,7 @@ ${sheetTexts.join('
         } else if (extension === 'csv') {
           try {
             const text = await fileData.text();
-            fileContents.push(`【ファイル: ${originalName}】
-${text}
-`);
+            fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
             console.log(`Loaded CSV file: ${storageName} (${text.length} chars)`);
           } catch (csvError) {
             fileContents.push(`【ファイル: ${originalName}】（CSVの解析中にエラーが発生しました）
