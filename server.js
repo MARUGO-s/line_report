@@ -5,7 +5,6 @@ import dotenv from "dotenv";
 import Groq from "groq-sdk";
 import { createClient } from "@supabase/supabase-js";
 import { createRequire } from "module";
-import OpenAI from "openai";
 
 const require = createRequire(import.meta.url);
 let cachedPdfParse = null;
@@ -13,6 +12,68 @@ let cachedDocxParser = null;
 let cachedXlsxParser = null;
 let cachedOpenAIClient = null;
 const conversationMemory = new Map();
+
+function decodeStoredName(storageName) {
+  const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
+  const match = raw.match(/^(\d+)_([^.]*)\.(.+)$/);
+  if (match) {
+    try {
+      const decoded = decodeURIComponent(match[2]);
+      return `${decoded}
+
+
+async function listAllStorageFiles(prefix = 'uploads') {
+  const collected = [];
+  let page = 0;
+
+  while (true) {
+    const { data, error } = await supabase.storage
+      .from('company-documents')
+      .list(prefix, {
+        limit: 100,
+        offset: page * 100,
+        sortBy: { column: 'created_at', order: 'desc' }
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    for (const item of data) {
+      const isFolder = !item.metadata && !item.name.includes('.');
+      const fullPath = prefix ? `${prefix}/${item.name}` : item.name;
+
+      if (isFolder) {
+        const nested = await listAllStorageFiles(fullPath);
+        collected.push(...nested);
+      } else {
+        collected.push({ ...item, fullPath });
+      }
+    }
+
+    if (data.length < 100) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return collected;
+}
+
+.${match[3]}`;
+    } catch (err) {
+      console.warn('Failed to decode file name', raw, err);
+      return `${match[2]}.${match[3]}`;
+    }
+  }
+  return raw;
+}
+
 const userStates = new Map();
 const MAX_HISTORY_MESSAGES = 10; // store up to 10 prior turns (5 user/assistant pairs)
 
@@ -21,7 +82,7 @@ const MODEL_OPTIONS = {
     key: "8b",
     displayNumber: "1",
     name: "コスト重視",
-    description: "Groq Llama-3.1 8B（高速・低コスト）",
+    description: "Groq Llama-3.1 8B (高速・低コスト)",
     provider: "groq",
     model: "llama-3.1-8b-instant",
   },
@@ -29,28 +90,15 @@ const MODEL_OPTIONS = {
     key: "70b",
     displayNumber: "2",
     name: "精度重視",
-    description: "Groq Llama-3.3 70B（高精度）",
+    description: "Groq Llama-3.3 70B (高精度)",
     provider: "groq",
     model: "llama-3.3-70b-versatile",
   },
-  "gpt4oMini": {
-    key: "gpt4oMini",
-    displayNumber: "3",
-    name: "高品質",
-    description: "OpenAI GPT-4o mini（ChatGPT）",
-    provider: "openai",
-    model: "gpt-4o-mini",
-  },
 };
 
-const MODEL_SELECTION_SEQUENCE = ["8b", "70b", "gpt4oMini"];
-
 const MODEL_SELECTION_MESSAGE = `利用するAIモデルを選択してください:\n` +
-  MODEL_SELECTION_SEQUENCE
-    .map((key) => {
-      const option = MODEL_OPTIONS[key];
-      return `${option.displayNumber}. ${option.name}: ${option.description}`;
-    })
+  Object.values(MODEL_OPTIONS)
+    .map((option) => `${option.displayNumber}. ${option.name}: ${option.description}`)
     .join("\n") +
   `\n\n番号を送信してください。\n「モデル変更」と送るといつでも再選択できます。`;
 
@@ -94,44 +142,15 @@ function getOrCreateUserState(key) {
   return userStates.get(key);
 }
 
-function normalizeDigits(value) {
-  if (!value) return value;
-  return value.replace(/[０-９]/g, (digit) =>
-    String.fromCharCode(digit.charCodeAt(0) - 0xFEE0)
-  );
-}
-
 function parseModelSelection(text) {
   if (!text) return null;
-  const normalized = normalizeDigits(text.trim().toLowerCase());
+  const normalized = text.trim().toLowerCase();
 
-  if (
-    normalized === MODEL_OPTIONS["8b"].displayNumber ||
-    normalized.includes("8b") ||
-    normalized.includes("8") ||
-    normalized.includes("コスト")
-  ) {
+  if (normalized === MODEL_OPTIONS["8b"].displayNumber || normalized.includes("8") || normalized.includes("８")) {
     return "8b";
   }
-
-  if (
-    normalized === MODEL_OPTIONS["70b"].displayNumber ||
-    normalized.includes("70") ||
-    normalized.includes("精度")
-  ) {
+  if (normalized === MODEL_OPTIONS["70b"].displayNumber || normalized.includes("70")) {
     return "70b";
-  }
-
-  if (
-    normalized === MODEL_OPTIONS["gpt4oMini"].displayNumber ||
-    normalized.includes("3") ||
-    normalized.includes("gpt") ||
-    normalized.includes("chatgpi") ||
-    normalized.includes("chatgpt") ||
-    normalized.includes("openai") ||
-    normalized.includes("高品質")
-  ) {
-    return "gpt4oMini";
   }
 
   return null;
@@ -146,6 +165,8 @@ function getConversationHistory(key) {
   if (!key) return [];
   return conversationMemory.get(key) ?? [];
 }
+
+const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'docx', 'xlsx', 'csv'];
 
 async function sendLineMessage(replyToken, messages) {
   if (!replyToken) return;
@@ -220,26 +241,6 @@ async function getXlsxParser() {
   return cachedXlsxParser;
 }
 
-function getOpenAIClient() {
-  if (cachedOpenAIClient) {
-    return cachedOpenAIClient;
-  }
-
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.error("OPENAI_API_KEY is not set. ChatGPTモデルは利用できません。");
-    return null;
-  }
-
-  try {
-    cachedOpenAIClient = new OpenAI({ apiKey });
-    return cachedOpenAIClient;
-  } catch (error) {
-    console.error("Failed to initialize OpenAI client:", error);
-    return null;
-  }
-}
-
 dotenv.config();
 
 // Groq クライアントの初期化
@@ -255,93 +256,46 @@ const supabase = createClient(
 
 const app = express();
 
-async function listAllFiles(prefix = '') {
-  const collected = [];
-  let page = 0;
-
-  while (true) {
-    const { data, error } = await supabase.storage
-      .from('company-documents')
-      .list(prefix, {
-        limit: 100,
-        offset: page * 100,
-        sortBy: { column: 'created_at', order: 'desc' }
-      });
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data || data.length === 0) {
-      break;
-    }
-
-    for (const entry of data) {
-      const isFolder = !entry.id && !entry.name.includes('.');
-      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-
-      if (isFolder) {
-        const nestedFiles = await listAllFiles(entryPath);
-        collected.push(...nestedFiles);
-      } else {
-        collected.push({ ...entry, fullPath: entryPath });
-      }
-    }
-
-    if (data.length < 100) {
-      break;
-    }
-
-    page += 1;
-  }
-
-  return collected;
-}
-
 // Supabaseストレージから会社規約を取得する関数
 async function getCompanyRules() {
   try {
-    const files = await listAllFiles('');
+    const files = await listAllStorageFiles('uploads');
 
     if (!files || files.length === 0) {
       console.log('No files found in storage');
       return null;
     }
 
-    // 全てのファイルの内容を取得
     const fileContents = [];
     for (const file of files) {
       try {
-        // .emptyファイルや隠しファイルをスキップ
-        if (file.name === '.emptyFolderPlaceholder' || file.name.startsWith('.')) {
-          continue;
-        }
+        const storageName = file.fullPath || `uploads/${file.name}`;
+        const originalName = decodeStoredName(storageName);
+        console.log(`Processing file: ${storageName} (original: ${originalName})`);
 
-        const filePath = file.fullPath || file.name;
-        console.log(`Processing file: ${filePath}`);
-        const originalName = file.metadata?.originalName || file.name;
-        
-        // ファイルをダウンロード（download メソッドを使用）
         const { data: fileData, error: downloadError } = await supabase.storage
           .from('company-documents')
-          .download(filePath);
+          .download(storageName);
 
         if (downloadError) {
-          console.error(`Error downloading ${filePath}:`, downloadError);
+          console.error(`Error downloading ${storageName}:`, downloadError);
           continue;
         }
 
-        const extension = file.name.split('.').pop().toLowerCase();
+        const extension = storageName.split('.').pop().toLowerCase();
 
         if (extension === 'txt') {
           const text = await fileData.text();
-          fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-          console.log(`Loaded TXT file: ${filePath} (${text.length} chars)`);
+          fileContents.push(`【ファイル: ${originalName}】
+${text}
+`);
+          console.log(`Loaded TXT file: ${storageName} (${text.length} chars)`);
         } else if (extension === 'pdf') {
           const pdfParse = await getPdfParse();
 
           if (!pdfParse) {
-            fileContents.push(`【ファイル: ${originalName}】（PDFの解析モジュールを読み込めませんでした）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（PDFの解析モジュールを読み込めませんでした）
+`);
             continue;
           }
 
@@ -349,24 +303,29 @@ async function getCompanyRules() {
             const arrayBuffer = await fileData.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
             const parsed = await pdfParse(buffer);
-            const text = (parsed.text || "").trim();
+            const text = (parsed.text || '').trim();
 
             if (!text) {
-              fileContents.push(`【ファイル: ${originalName}】（PDFからテキストを抽出できませんでした）\n`);
-              console.warn(`PDF parsing produced empty text for ${filePath}`);
+              fileContents.push(`【ファイル: ${originalName}】（PDFからテキストを抽出できませんでした）
+`);
+              console.warn(`PDF parsing produced empty text for ${storageName}`);
             } else {
-              fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-              console.log(`Parsed PDF file: ${filePath} (${text.length} chars)`);
+              fileContents.push(`【ファイル: ${originalName}】
+${text}
+`);
+              console.log(`Parsed PDF file: ${storageName} (${text.length} chars)`);
             }
           } catch (parseError) {
-            fileContents.push(`【ファイル: ${originalName}】（PDFの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing PDF ${filePath}:`, parseError);
+            fileContents.push(`【ファイル: ${originalName}】（PDFの解析中にエラーが発生しました）
+`);
+            console.error(`Error parsing PDF ${storageName}:`, parseError);
           }
         } else if (extension === 'docx') {
           const mammoth = await getDocxParser();
 
           if (!mammoth) {
-            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析モジュールを読み込めませんでした）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析モジュールを読み込めませんでした）
+`);
             continue;
           }
 
@@ -374,39 +333,45 @@ async function getCompanyRules() {
             const arrayBuffer = await fileData.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
             const result = await mammoth.extractRawText({ buffer });
-            const text = (result.value || "").trim();
+            const text = (result.value || '').trim();
 
             if (!text) {
-              fileContents.push(`【ファイル: ${originalName}】（DOCXからテキストを抽出できませんでした）\n`);
-              console.warn(`DOCX parsing produced empty text for ${filePath}`);
+              fileContents.push(`【ファイル: ${originalName}】（DOCXからテキストを抽出できませんでした）
+`);
+              console.warn(`DOCX parsing produced empty text for ${storageName}`);
             } else {
-              fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-              console.log(`Parsed DOCX file: ${filePath} (${text.length} chars)`);
+              fileContents.push(`【ファイル: ${originalName}】
+${text}
+`);
+              console.log(`Parsed DOCX file: ${storageName} (${text.length} chars)`);
             }
           } catch (docxError) {
-            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing DOCX ${filePath}:`, docxError);
+            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析中にエラーが発生しました）
+`);
+            console.error(`Error parsing DOCX ${storageName}:`, docxError);
           }
         } else if (extension === 'xlsx') {
           const xlsx = await getXlsxParser();
 
           if (!xlsx) {
-            fileContents.push(`【ファイル: ${originalName}】（XLSXの解析モジュールを読み込めませんでした）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（XLSXの解析モジュールを読み込めませんでした）
+`);
             continue;
           }
 
           try {
             const arrayBuffer = await fileData.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
-            const workbook = xlsx.read(buffer, { type: "buffer" });
+            const workbook = xlsx.read(buffer, { type: 'buffer' });
             const sheetTexts = workbook.SheetNames.map((sheetName) => {
               const worksheet = workbook.Sheets[sheetName];
               if (!worksheet) {
                 return null;
               }
               const sheetText = xlsx.utils.sheet_to_csv(worksheet, {
-                FS: '\t',
-                RS: '\n',
+                FS: '	',
+                RS: '
+',
                 blankrows: false,
               }).trim();
 
@@ -414,19 +379,27 @@ async function getCompanyRules() {
                 return null;
               }
 
-              return `【シート: ${sheetName}】\n${sheetText}`;
+              return `【シート: ${sheetName}】
+${sheetText}`;
             }).filter(Boolean);
 
             if (sheetTexts.length === 0) {
-              fileContents.push(`【ファイル: ${originalName}】（XLSXからテキストを抽出できませんでした）\n`);
-              console.warn(`XLSX parsing produced empty text for ${filePath}`);
+              fileContents.push(`【ファイル: ${originalName}】（XLSXからテキストを抽出できませんでした）
+`);
+              console.warn(`XLSX parsing produced empty text for ${storageName}`);
             } else {
-              fileContents.push(`【ファイル: ${originalName}】\n${sheetTexts.join('\n\n')}\n`);
-              console.log(`Parsed XLSX file: ${filePath} (${sheetTexts.join('\n').length} chars)`);
+              fileContents.push(`【ファイル: ${originalName}】
+${sheetTexts.join('
+
+')}
+`);
+              console.log(`Parsed XLSX file: ${storageName} (${sheetTexts.join('
+').length} chars)`);
             }
           } catch (xlsxError) {
-            fileContents.push(`【ファイル: ${originalName}】（XLSXの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing XLSX ${filePath}:`, xlsxError);
+            fileContents.push(`【ファイル: ${originalName}】（XLSXの解析中にエラーが発生しました）
+`);
+            console.error(`Error parsing XLSX ${storageName}:`, xlsxError);
           }
         }
       } catch (err) {
@@ -434,12 +407,16 @@ async function getCompanyRules() {
       }
     }
 
-    return fileContents.join('\n---\n\n');
+    return fileContents.join('
+---
+
+');
   } catch (error) {
     console.error('Error in getCompanyRules:', error);
     return null;
   }
 }
+
 
 // CORS設定
 app.use((req, res, next) => {
@@ -517,21 +494,16 @@ app.post("/webhook", async (req, res) => {
           const companyRules = await getCompanyRules();
           
           // システムプロンプトを構築
-          let systemPrompt = `あなたは会社規約およびワインリストに関する情報を扱う専門AIアシスタントです。ワインの仕入れ値・販売価格・原価率・粗利といった数値分析にも長けており、提供された資料だけを用いて正確かつ透明な説明を行います。
+          let systemPrompt = `あなたは会社規約に関する質問に答える専門AIアシスタントです。
 
 【重要な指示】
-1. 必ず提供されたファイル（会社規約・ワインリストなど）の内容のみに基づいて回答してください。外部のWebサイトや一般常識を勝手に参照してはいけません。
-2. 資料に記載されていない内容について質問された場合は、以下のように対応してください：
-   - まず「その内容は現在の資料には記載されていません」と明確に伝える
-   - その上で「一般的な情報として推測でお答えしてもよろしいでしょうか？」と必ず許可を求める
-   - ユーザーから明示的な許可が得られない限り、推測・一般的知識を提供してはいけません。許可が得られた場合のみ「【推測】」と明記し、推測範囲を最小限に留めてください。
-3. ワインの仕入れ値・販売価格・原価率などを尋ねられた場合は、提供されているデータを丁寧に参照し、計算過程や根拠ファイルを明示してください。計算ができない場合は理由を添えて回答してください。
-4. Web検索や外部データの取得が必要な場合は、必ず事前に「外部情報を参照してもよろしいですか？」とユーザーに確認し、許可が得られない限り実行しないでください（現在の環境では実行できないことがある旨も伝えてください）。
-5. 回答する際は、どのファイル（元のファイル名）・どの内容に基づいているかを明示してください。
-6. 不明確な場合や断定できない場合は推測せず、「資料からは確認できません」などの一言を添えて不確かさを明示してください。資料外の内容を創作することは禁止です。
-7. 資料に根拠がある回答でも、自信が持てない場合は簡潔な注意書きを添え、勝手な想像で補完しないでください。
-8. ユーザーから推測の許可が得られた場合でも、文中で必ず「【推測】」と明記し、回答末尾に「（不確実）」を付記してください。
-9. LINEのスマートフォン画面で読みやすいよう、段落や箇条書きを活用し、長文は適切に改行してください。`;
+1. 必ず提供された会社規約ファイルの内容のみに基づいて回答してください。
+2. 規約ファイルに記載されていない内容について質問された場合は、以下のように対応してください：
+   - まず「その内容は現在の規約資料には記載されていません」と明確に伝える
+   - 次に「一般的な情報としてお答えしてもよろしいでしょうか？」と必ず確認を求める
+   - 確認なしに規約外の情報を提供してはいけません
+3. 回答する際は、どのファイルのどの部分に基づいているかを明示してください。
+4. 不明確な場合は推測せず、「規約資料からは確認できません」と正直に答えてください。`;
           
           if (companyRules && companyRules.trim().length > 0) {
             systemPrompt += "\n\n【会社規約ファイルの内容】\n" + companyRules;
@@ -564,36 +536,6 @@ app.post("/webhook", async (req, res) => {
             });
 
             aiResponse = chatCompletion.choices[0]?.message?.content || aiResponse;
-          } else if (selectedModel.provider === "openai") {
-            const openaiClient = getOpenAIClient();
-
-            if (!openaiClient) {
-              aiResponse = "申し訳ございません。OpenAIのAPIキーが設定されていないため、このモデルは利用できません。別のモデルを選択してください。";
-            } else {
-              try {
-                const chatCompletion = await openaiClient.chat.completions.create({
-                  model: selectedModel.model,
-                  messages: [
-                    {
-                      role: "system",
-                      content: systemPrompt,
-                    },
-                    ...historyMessages,
-                    {
-                      role: "user",
-                      content: userMessage,
-                    },
-                  ],
-                  temperature: 0.2,
-                  max_tokens: 1500,
-                });
-
-                aiResponse = chatCompletion.choices[0]?.message?.content || aiResponse;
-              } catch (openAiError) {
-                console.error("OpenAI API error:", openAiError);
-                aiResponse = "申し訳ございません。ChatGPTでの応答生成に失敗しました。少し時間を置いてから再度お試しください。";
-              }
-            }
           } else {
             console.error(`Unsupported provider: ${selectedModel.provider}`);
             aiResponse = "申し訳ございません。現在選択されたAIモデルには対応していません。別のモデルを選択してください。";
