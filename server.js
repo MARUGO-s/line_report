@@ -12,6 +12,9 @@ let cachedDocxParser = null;
 let cachedXlsxParser = null;
 let cachedOpenAIClient = null;
 const conversationMemory = new Map();
+const userStates = new Map();
+const MAX_HISTORY_MESSAGES = 10; // store up to 10 prior turns (5 user/assistant pairs)
+const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'docx', 'xlsx', 'csv'];
 
 function decodeStoredName(storageName) {
   const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
@@ -19,8 +22,14 @@ function decodeStoredName(storageName) {
   if (match) {
     try {
       const decoded = decodeURIComponent(match[2]);
-      return `${decoded}
-
+      return `${decoded}.${match[3]}`;
+    } catch (err) {
+      console.warn('Failed to decode file name', raw, err);
+      return `${match[2]}.${match[3]}`;
+    }
+  }
+  return raw;
+}
 
 async function listAllStorageFiles(prefix = 'uploads') {
   const collected = [];
@@ -64,18 +73,6 @@ async function listAllStorageFiles(prefix = 'uploads') {
 
   return collected;
 }
-
-.${match[3]}`;
-    } catch (err) {
-      console.warn('Failed to decode file name', raw, err);
-      return `${match[2]}.${match[3]}`;
-    }
-  }
-  return raw;
-}
-
-const userStates = new Map();
-const MAX_HISTORY_MESSAGES = 10; // store up to 10 prior turns (5 user/assistant pairs)
 
 const MODEL_OPTIONS = {
   "8b": {
@@ -284,6 +281,11 @@ async function getCompanyRules() {
 
         const extension = storageName.split('.').pop().toLowerCase();
 
+        if (!ALLOWED_EXTENSIONS.includes(extension)) {
+          console.log(`Skipping unsupported file type: ${storageName}`);
+          continue;
+        }
+
         if (extension === 'txt') {
           const text = await fileData.text();
           fileContents.push(`【ファイル: ${originalName}】
@@ -400,6 +402,18 @@ ${sheetTexts.join('
             fileContents.push(`【ファイル: ${originalName}】（XLSXの解析中にエラーが発生しました）
 `);
             console.error(`Error parsing XLSX ${storageName}:`, xlsxError);
+          }
+        } else if (extension === 'csv') {
+          try {
+            const text = await fileData.text();
+            fileContents.push(`【ファイル: ${originalName}】
+${text}
+`);
+            console.log(`Loaded CSV file: ${storageName} (${text.length} chars)`);
+          } catch (csvError) {
+            fileContents.push(`【ファイル: ${originalName}】（CSVの解析中にエラーが発生しました）
+`);
+            console.error(`Error processing CSV ${storageName}:`, csvError);
           }
         }
       } catch (err) {
