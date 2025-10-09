@@ -4,7 +4,25 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
 import { createClient } from "@supabase/supabase-js";
-import pdf from "pdf-parse";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+let cachedPdfParse = null;
+
+async function getPdfParse() {
+  if (!cachedPdfParse) {
+    try {
+      // Load the core parser directly to skip the package entry's debug routine
+      const module = require("pdf-parse/lib/pdf-parse.js");
+      cachedPdfParse = module.default ?? module;
+    } catch (error) {
+      console.error("Failed to load pdf-parse. PDF files will be skipped.", error);
+      cachedPdfParse = null;
+    }
+  }
+
+  return cachedPdfParse;
+}
 
 dotenv.config();
 
@@ -71,19 +89,30 @@ async function getCompanyRules() {
           fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
           console.log(`Loaded TXT file: ${file.name} (${text.length} chars)`);
         } else if (file.name.endsWith('.pdf')) {
-          // PDFファイルからテキストを抽出
+          const pdfParse = await getPdfParse();
+          const displayName = file.name.split('.')[0];
+
+          if (!pdfParse) {
+            fileContents.push(`【ファイル: ${displayName}】（PDFの解析モジュールを読み込めませんでした）\n`);
+            continue;
+          }
+
           try {
-            const displayName = file.name.split('.')[0];
             const arrayBuffer = await fileData.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
-            const pdfData = await pdf(buffer);
-            const text = pdfData.text;
-            fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
-            console.log(`Loaded PDF file: ${file.name} (${text.length} chars, ${pdfData.numpages} pages)`);
-          } catch (pdfError) {
-            console.error(`Error extracting PDF ${file.name}:`, pdfError);
-            const displayName = file.name.split('.')[0];
-            fileContents.push(`【ファイル: ${displayName}】（PDFファイル - テキスト抽出エラー）\n`);
+            const parsed = await pdfParse(buffer);
+            const text = (parsed.text || "").trim();
+
+            if (!text) {
+              fileContents.push(`【ファイル: ${displayName}】（PDFからテキストを抽出できませんでした）\n`);
+              console.warn(`PDF parsing produced empty text for ${file.name}`);
+            } else {
+              fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
+              console.log(`Parsed PDF file: ${file.name} (${text.length} chars)`);
+            }
+          } catch (parseError) {
+            fileContents.push(`【ファイル: ${displayName}】（PDFの解析中にエラーが発生しました）\n`);
+            console.error(`Error parsing PDF ${file.name}:`, parseError);
           }
         }
       } catch (err) {
