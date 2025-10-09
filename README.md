@@ -8,6 +8,8 @@
 ### ✅ PDFファイル読み込み対応
 - **TXTファイル**: そのままテキストとして読み込み
 - **PDFファイル**: 自動的にテキストを抽出して読み込み（pdf-parseライブラリを使用）
+- **DOCXファイル**: mammothでテキストを抽出して読み込み
+- **XLSXファイル**: シートごとにテキスト化して読み込み（xlsxライブラリを使用）
 - Supabaseストレージに保存されたファイルを自動的に読み込み、AIアシスタントの知識ベースとして活用
 
 ### 📄 ドキュメント管理
@@ -53,4 +55,6 @@ npm start
 - **AI**: Groq SDK (llama-3.3-70b-versatile)
 - **ストレージ**: Supabase Storage
 - **PDF処理**: pdf-parse
+- **Word処理**: mammoth
+- **Excel処理**: xlsx
 - **メッセージング**: LINE Messaging API

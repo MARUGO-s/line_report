@@ -8,6 +8,8 @@ import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
 let cachedPdfParse = null;
+let cachedDocxParser = null;
+let cachedXlsxParser = null;
 
 async function getPdfParse() {
   if (!cachedPdfParse) {
@@ -22,6 +24,33 @@ async function getPdfParse() {
   }
 
   return cachedPdfParse;
+}
+
+async function getDocxParser() {
+  if (!cachedDocxParser) {
+    cachedDocxParser = import("mammoth")
+      .then((module) => module.default ?? module)
+      .catch((error) => {
+        console.error("Failed to load mammoth. DOCX files will be skipped.", error);
+        return null;
+      });
+  }
+
+  return cachedDocxParser;
+}
+
+async function getXlsxParser() {
+  if (!cachedXlsxParser) {
+    try {
+      const module = require("xlsx");
+      cachedXlsxParser = module.default ?? module;
+    } catch (error) {
+      console.error("Failed to load xlsx library. XLSX files will be skipped.", error);
+      cachedXlsxParser = null;
+    }
+  }
+
+  return cachedXlsxParser;
 }
 
 dotenv.config();
@@ -82,13 +111,14 @@ async function getCompanyRules() {
           continue;
         }
 
-        // TXTファイルの場合はテキストとして読み込み
-        if (file.name.endsWith('.txt')) {
+        const extension = file.name.split('.').pop().toLowerCase();
+
+        if (extension === 'txt') {
           const text = await fileData.text();
           const displayName = file.name.split('.')[0];
           fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
           console.log(`Loaded TXT file: ${file.name} (${text.length} chars)`);
-        } else if (file.name.endsWith('.pdf')) {
+        } else if (extension === 'pdf') {
           const pdfParse = await getPdfParse();
           const displayName = file.name.split('.')[0];
 
@@ -113,6 +143,74 @@ async function getCompanyRules() {
           } catch (parseError) {
             fileContents.push(`【ファイル: ${displayName}】（PDFの解析中にエラーが発生しました）\n`);
             console.error(`Error parsing PDF ${file.name}:`, parseError);
+          }
+        } else if (extension === 'docx') {
+          const mammoth = await getDocxParser();
+          const displayName = file.name.split('.')[0];
+
+          if (!mammoth) {
+            fileContents.push(`【ファイル: ${displayName}】（DOCXの解析モジュールを読み込めませんでした）\n`);
+            continue;
+          }
+
+          try {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const result = await mammoth.extractRawText({ buffer });
+            const text = (result.value || "").trim();
+
+            if (!text) {
+              fileContents.push(`【ファイル: ${displayName}】（DOCXからテキストを抽出できませんでした）\n`);
+              console.warn(`DOCX parsing produced empty text for ${file.name}`);
+            } else {
+              fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
+              console.log(`Parsed DOCX file: ${file.name} (${text.length} chars)`);
+            }
+          } catch (docxError) {
+            fileContents.push(`【ファイル: ${displayName}】（DOCXの解析中にエラーが発生しました）\n`);
+            console.error(`Error parsing DOCX ${file.name}:`, docxError);
+          }
+        } else if (extension === 'xlsx') {
+          const xlsx = await getXlsxParser();
+          const displayName = file.name.split('.')[0];
+
+          if (!xlsx) {
+            fileContents.push(`【ファイル: ${displayName}】（XLSXの解析モジュールを読み込めませんでした）\n`);
+            continue;
+          }
+
+          try {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const workbook = xlsx.read(buffer, { type: "buffer" });
+            const sheetTexts = workbook.SheetNames.map((sheetName) => {
+              const worksheet = workbook.Sheets[sheetName];
+              if (!worksheet) {
+                return null;
+              }
+              const sheetText = xlsx.utils.sheet_to_csv(worksheet, {
+                FS: '\t',
+                RS: '\n',
+                blankrows: false,
+              }).trim();
+
+              if (!sheetText) {
+                return null;
+              }
+
+              return `【シート: ${sheetName}】\n${sheetText}`;
+            }).filter(Boolean);
+
+            if (sheetTexts.length === 0) {
+              fileContents.push(`【ファイル: ${displayName}】（XLSXからテキストを抽出できませんでした）\n`);
+              console.warn(`XLSX parsing produced empty text for ${file.name}`);
+            } else {
+              fileContents.push(`【ファイル: ${displayName}】\n${sheetTexts.join('\n\n')}\n`);
+              console.log(`Parsed XLSX file: ${file.name} (${sheetTexts.join('\n').length} chars)`);
+            }
+          } catch (xlsxError) {
+            fileContents.push(`【ファイル: ${displayName}】（XLSXの解析中にエラーが発生しました）\n`);
+            console.error(`Error parsing XLSX ${file.name}:`, xlsxError);
           }
         }
       } catch (err) {
