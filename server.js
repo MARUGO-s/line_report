@@ -11,7 +11,33 @@ let cachedPdfParse = null;
 let cachedDocxParser = null;
 let cachedXlsxParser = null;
 const conversationMemory = new Map();
+const userStates = new Map();
 const MAX_HISTORY_MESSAGES = 10; // store up to 10 prior turns (5 user/assistant pairs)
+
+const MODEL_OPTIONS = {
+  "8b": {
+    key: "8b",
+    displayNumber: "1",
+    name: "コスト重視",
+    description: "Groq Llama-3.1 8B (高速・低コスト)",
+    provider: "groq",
+    model: "llama-3.1-8b-instant",
+  },
+  "70b": {
+    key: "70b",
+    displayNumber: "2",
+    name: "精度重視",
+    description: "Groq Llama-3.3 70B (高精度)",
+    provider: "groq",
+    model: "llama-3.3-70b-versatile",
+  },
+};
+
+const MODEL_SELECTION_MESSAGE = `利用するAIモデルを選択してください:\n` +
+  Object.values(MODEL_OPTIONS)
+    .map((option) => `${option.displayNumber}. ${option.name}: ${option.description}`)
+    .join("\n") +
+  `\n\n番号を送信してください。\n「モデル変更」と送るといつでも再選択できます。`;
 
 function getConversationKey(event) {
   if (event.source?.userId) {
@@ -40,9 +66,72 @@ function updateConversationHistory(key, userMessage, assistantMessage) {
   conversationMemory.set(key, history);
 }
 
+function resetConversationHistory(key) {
+  if (!key) return;
+  conversationMemory.delete(key);
+}
+
+function getOrCreateUserState(key) {
+  if (!key) return null;
+  if (!userStates.has(key)) {
+    userStates.set(key, { modelKey: null, awaitingSelection: true });
+  }
+  return userStates.get(key);
+}
+
+function parseModelSelection(text) {
+  if (!text) return null;
+  const normalized = text.trim().toLowerCase();
+
+  if (normalized === MODEL_OPTIONS["8b"].displayNumber || normalized.includes("8") || normalized.includes("８")) {
+    return "8b";
+  }
+  if (normalized === MODEL_OPTIONS["70b"].displayNumber || normalized.includes("70")) {
+    return "70b";
+  }
+
+  return null;
+}
+
+function isModelChangeRequest(text) {
+  if (!text) return false;
+  return /(モデル変更|ai変更|model\s*change)/i.test(text.trim());
+}
+
 function getConversationHistory(key) {
   if (!key) return [];
   return conversationMemory.get(key) ?? [];
+}
+
+async function sendLineMessage(replyToken, messages) {
+  if (!replyToken) return;
+
+  const payload = {
+    replyToken,
+    messages,
+  };
+
+  console.log("Sending reply message");
+  const response = await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  console.log("LINE API response status:", response.status);
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("LINE API error:", errorText);
+  } else {
+    console.log("Reply sent successfully");
+  }
+}
+
+async function sendLineText(replyToken, text) {
+  return sendLineMessage(replyToken, [{ type: "text", text }]);
 }
 
 async function getPdfParse() {
@@ -291,8 +380,44 @@ app.post("/webhook", async (req, res) => {
         const replyToken = event.replyToken;
         const userMessage = event.message.text;
         const conversationKey = getConversationKey(event);
+        const userState = getOrCreateUserState(conversationKey);
+
+        const parsedSelection = parseModelSelection(userMessage);
 
         try {
+          if (parsedSelection && MODEL_OPTIONS[parsedSelection]) {
+            userState.modelKey = parsedSelection;
+            userState.awaitingSelection = false;
+            resetConversationHistory(conversationKey);
+
+            const selected = MODEL_OPTIONS[parsedSelection];
+            await sendLineText(
+              replyToken,
+              `AIモデルを「${selected.name}」(${selected.description})に設定しました。ご質問をどうぞ。`
+            );
+            continue;
+          }
+
+          if (isModelChangeRequest(userMessage)) {
+            userState.awaitingSelection = true;
+            await sendLineText(replyToken, MODEL_SELECTION_MESSAGE);
+            continue;
+          }
+
+          if (userState.awaitingSelection || !userState.modelKey) {
+            userState.awaitingSelection = true;
+            await sendLineText(replyToken, MODEL_SELECTION_MESSAGE);
+            continue;
+          }
+
+          const selectedModel = MODEL_OPTIONS[userState.modelKey];
+
+          if (!selectedModel) {
+            userState.awaitingSelection = true;
+            await sendLineText(replyToken, MODEL_SELECTION_MESSAGE);
+            continue;
+          }
+
           // Supabaseから会社規約を取得
           console.log("User message:", userMessage);
           console.log("Fetching company rules from Supabase...");
@@ -320,58 +445,37 @@ app.post("/webhook", async (req, res) => {
 
           // Groq AIで応答を生成
           const historyMessages = getConversationHistory(conversationKey);
-          const chatCompletion = await groq.chat.completions.create({
-            messages: [
-              {
-                role: "system",
-                content: systemPrompt,
-              },
-              ...historyMessages,
-              {
-                role: "user",
-                content: userMessage,
-              },
-            ],
-            model: "llama-3.3-70b-versatile",
-            temperature: 0.2, // より正確で一貫性のある回答のため低めに設定
-            max_tokens: 1500,
-          });
+          let aiResponse = "申し訳ございません、応答を生成できませんでした。";
 
-          const aiResponse = chatCompletion.choices[0]?.message?.content || "申し訳ございません、応答を生成できませんでした。";
+          if (selectedModel.provider === "groq") {
+            const chatCompletion = await groq.chat.completions.create({
+              messages: [
+                {
+                  role: "system",
+                  content: systemPrompt,
+                },
+                ...historyMessages,
+                {
+                  role: "user",
+                  content: userMessage,
+                },
+              ],
+              model: selectedModel.model,
+              temperature: 0.2, // より正確で一貫性のある回答のため低めに設定
+              max_tokens: 1500,
+            });
+
+            aiResponse = chatCompletion.choices[0]?.message?.content || aiResponse;
+          } else {
+            console.error(`Unsupported provider: ${selectedModel.provider}`);
+            aiResponse = "申し訳ございません。現在選択されたAIモデルには対応していません。別のモデルを選択してください。";
+          }
           console.log("AI response:", aiResponse);
 
           // 会話履歴を更新
           updateConversationHistory(conversationKey, userMessage, aiResponse);
 
-          // 返信メッセージ
-          const replyMessage = {
-            replyToken: replyToken,
-            messages: [
-              {
-                type: "text",
-                text: aiResponse,
-              },
-            ],
-          };
-
-          // LINE Messaging API に送信
-          console.log("Sending reply message");
-          const response = await fetch("https://api.line.me/v2/bot/message/reply", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
-            },
-            body: JSON.stringify(replyMessage),
-          });
-          
-          console.log("LINE API response status:", response.status);
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error("LINE API error:", errorText);
-          } else {
-            console.log("Reply sent successfully");
-          }
+          await sendLineText(replyToken, aiResponse);
         } catch (error) {
           console.error("Error processing message:", error);
         }

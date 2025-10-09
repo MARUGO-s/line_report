@@ -47,13 +47,13 @@ npm start
 ## 使い方
 
 1. サーバーを起動
-2. `/public/admin.html` にアクセスして規約ファイル（PDF/TXT）をアップロード
-3. LINE Botにメッセージを送信して質問
+2. `/public/admin.html` にアクセスして規約ファイル（PDF/TXT/DOCX/XLSX）をアップロード
+3. LINE Bot で最初に利用する AI モデルを選択（`1` = コスト重視 8B / `2` = 精度重視 70B。`モデル変更` で再選択）
 4. AIアシスタントがアップロードされた規約に基づいて回答
 
 ## 技術スタック
 - **バックエンド**: Node.js + Express
-- **AI**: Groq SDK (llama-3.3-70b-versatile)
+- **AI**: Groq SDK (Llama 3 系 8B / 70B を切り替え)
 - **ストレージ**: Supabase Storage
 - **PDF処理**: pdf-parse
 - **Word処理**: mammoth
