@@ -5,11 +5,13 @@ import dotenv from "dotenv";
 import Groq from "groq-sdk";
 import { createClient } from "@supabase/supabase-js";
 import { createRequire } from "module";
+import OpenAI from "openai";
 
 const require = createRequire(import.meta.url);
 let cachedPdfParse = null;
 let cachedDocxParser = null;
 let cachedXlsxParser = null;
+let cachedOpenAIClient = null;
 const conversationMemory = new Map();
 const userStates = new Map();
 const MAX_HISTORY_MESSAGES = 10; // store up to 10 prior turns (5 user/assistant pairs)
@@ -19,7 +21,7 @@ const MODEL_OPTIONS = {
     key: "8b",
     displayNumber: "1",
     name: "コスト重視",
-    description: "Groq Llama-3.1 8B (高速・低コスト)",
+    description: "Groq Llama-3.1 8B（高速・低コスト）",
     provider: "groq",
     model: "llama-3.1-8b-instant",
   },
@@ -27,15 +29,28 @@ const MODEL_OPTIONS = {
     key: "70b",
     displayNumber: "2",
     name: "精度重視",
-    description: "Groq Llama-3.3 70B (高精度)",
+    description: "Groq Llama-3.3 70B（高精度）",
     provider: "groq",
     model: "llama-3.3-70b-versatile",
   },
+  "gpt4oMini": {
+    key: "gpt4oMini",
+    displayNumber: "3",
+    name: "高品質",
+    description: "OpenAI GPT-4o mini（ChatGPT）",
+    provider: "openai",
+    model: "gpt-4o-mini",
+  },
 };
 
+const MODEL_SELECTION_SEQUENCE = ["8b", "70b", "gpt4oMini"];
+
 const MODEL_SELECTION_MESSAGE = `利用するAIモデルを選択してください:\n` +
-  Object.values(MODEL_OPTIONS)
-    .map((option) => `${option.displayNumber}. ${option.name}: ${option.description}`)
+  MODEL_SELECTION_SEQUENCE
+    .map((key) => {
+      const option = MODEL_OPTIONS[key];
+      return `${option.displayNumber}. ${option.name}: ${option.description}`;
+    })
     .join("\n") +
   `\n\n番号を送信してください。\n「モデル変更」と送るといつでも再選択できます。`;
 
@@ -79,15 +94,44 @@ function getOrCreateUserState(key) {
   return userStates.get(key);
 }
 
+function normalizeDigits(value) {
+  if (!value) return value;
+  return value.replace(/[０-９]/g, (digit) =>
+    String.fromCharCode(digit.charCodeAt(0) - 0xFEE0)
+  );
+}
+
 function parseModelSelection(text) {
   if (!text) return null;
-  const normalized = text.trim().toLowerCase();
+  const normalized = normalizeDigits(text.trim().toLowerCase());
 
-  if (normalized === MODEL_OPTIONS["8b"].displayNumber || normalized.includes("8") || normalized.includes("８")) {
+  if (
+    normalized === MODEL_OPTIONS["8b"].displayNumber ||
+    normalized.includes("8b") ||
+    normalized.includes("8") ||
+    normalized.includes("コスト")
+  ) {
     return "8b";
   }
-  if (normalized === MODEL_OPTIONS["70b"].displayNumber || normalized.includes("70")) {
+
+  if (
+    normalized === MODEL_OPTIONS["70b"].displayNumber ||
+    normalized.includes("70") ||
+    normalized.includes("精度")
+  ) {
     return "70b";
+  }
+
+  if (
+    normalized === MODEL_OPTIONS["gpt4oMini"].displayNumber ||
+    normalized.includes("3") ||
+    normalized.includes("gpt") ||
+    normalized.includes("chatgpi") ||
+    normalized.includes("chatgpt") ||
+    normalized.includes("openai") ||
+    normalized.includes("高品質")
+  ) {
+    return "gpt4oMini";
   }
 
   return null;
@@ -176,6 +220,26 @@ async function getXlsxParser() {
   return cachedXlsxParser;
 }
 
+function getOpenAIClient() {
+  if (cachedOpenAIClient) {
+    return cachedOpenAIClient;
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.error("OPENAI_API_KEY is not set. ChatGPTモデルは利用できません。");
+    return null;
+  }
+
+  try {
+    cachedOpenAIClient = new OpenAI({ apiKey });
+    return cachedOpenAIClient;
+  } catch (error) {
+    console.error("Failed to initialize OpenAI client:", error);
+    return null;
+  }
+}
+
 dotenv.config();
 
 // Groq クライアントの初期化
@@ -223,6 +287,7 @@ async function getCompanyRules() {
         }
 
         console.log(`Processing file: ${file.name}`);
+        const originalName = file.metadata?.originalName || file.name;
         
         // ファイルをダウンロード（download メソッドを使用）
         const { data: fileData, error: downloadError } = await supabase.storage
@@ -238,15 +303,13 @@ async function getCompanyRules() {
 
         if (extension === 'txt') {
           const text = await fileData.text();
-          const displayName = file.name.split('.')[0];
-          fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
+          fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
           console.log(`Loaded TXT file: ${file.name} (${text.length} chars)`);
         } else if (extension === 'pdf') {
           const pdfParse = await getPdfParse();
-          const displayName = file.name.split('.')[0];
 
           if (!pdfParse) {
-            fileContents.push(`【ファイル: ${displayName}】（PDFの解析モジュールを読み込めませんでした）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（PDFの解析モジュールを読み込めませんでした）\n`);
             continue;
           }
 
@@ -257,22 +320,21 @@ async function getCompanyRules() {
             const text = (parsed.text || "").trim();
 
             if (!text) {
-              fileContents.push(`【ファイル: ${displayName}】（PDFからテキストを抽出できませんでした）\n`);
+              fileContents.push(`【ファイル: ${originalName}】（PDFからテキストを抽出できませんでした）\n`);
               console.warn(`PDF parsing produced empty text for ${file.name}`);
             } else {
-              fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
+              fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
               console.log(`Parsed PDF file: ${file.name} (${text.length} chars)`);
             }
           } catch (parseError) {
-            fileContents.push(`【ファイル: ${displayName}】（PDFの解析中にエラーが発生しました）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（PDFの解析中にエラーが発生しました）\n`);
             console.error(`Error parsing PDF ${file.name}:`, parseError);
           }
         } else if (extension === 'docx') {
           const mammoth = await getDocxParser();
-          const displayName = file.name.split('.')[0];
 
           if (!mammoth) {
-            fileContents.push(`【ファイル: ${displayName}】（DOCXの解析モジュールを読み込めませんでした）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析モジュールを読み込めませんでした）\n`);
             continue;
           }
 
@@ -283,22 +345,21 @@ async function getCompanyRules() {
             const text = (result.value || "").trim();
 
             if (!text) {
-              fileContents.push(`【ファイル: ${displayName}】（DOCXからテキストを抽出できませんでした）\n`);
+              fileContents.push(`【ファイル: ${originalName}】（DOCXからテキストを抽出できませんでした）\n`);
               console.warn(`DOCX parsing produced empty text for ${file.name}`);
             } else {
-              fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
+              fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
               console.log(`Parsed DOCX file: ${file.name} (${text.length} chars)`);
             }
           } catch (docxError) {
-            fileContents.push(`【ファイル: ${displayName}】（DOCXの解析中にエラーが発生しました）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析中にエラーが発生しました）\n`);
             console.error(`Error parsing DOCX ${file.name}:`, docxError);
           }
         } else if (extension === 'xlsx') {
           const xlsx = await getXlsxParser();
-          const displayName = file.name.split('.')[0];
 
           if (!xlsx) {
-            fileContents.push(`【ファイル: ${displayName}】（XLSXの解析モジュールを読み込めませんでした）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（XLSXの解析モジュールを読み込めませんでした）\n`);
             continue;
           }
 
@@ -325,14 +386,14 @@ async function getCompanyRules() {
             }).filter(Boolean);
 
             if (sheetTexts.length === 0) {
-              fileContents.push(`【ファイル: ${displayName}】（XLSXからテキストを抽出できませんでした）\n`);
+              fileContents.push(`【ファイル: ${originalName}】（XLSXからテキストを抽出できませんでした）\n`);
               console.warn(`XLSX parsing produced empty text for ${file.name}`);
             } else {
-              fileContents.push(`【ファイル: ${displayName}】\n${sheetTexts.join('\n\n')}\n`);
+              fileContents.push(`【ファイル: ${originalName}】\n${sheetTexts.join('\n\n')}\n`);
               console.log(`Parsed XLSX file: ${file.name} (${sheetTexts.join('\n').length} chars)`);
             }
           } catch (xlsxError) {
-            fileContents.push(`【ファイル: ${displayName}】（XLSXの解析中にエラーが発生しました）\n`);
+            fileContents.push(`【ファイル: ${originalName}】（XLSXの解析中にエラーが発生しました）\n`);
             console.error(`Error parsing XLSX ${file.name}:`, xlsxError);
           }
         }
@@ -433,7 +494,9 @@ app.post("/webhook", async (req, res) => {
    - 次に「一般的な情報としてお答えしてもよろしいでしょうか？」と必ず確認を求める
    - 確認なしに規約外の情報を提供してはいけません
 3. 回答する際は、どのファイルのどの部分に基づいているかを明示してください。
-4. 不明確な場合は推測せず、「規約資料からは確認できません」と正直に答えてください。`;
+4. 不明確な場合や断定できない場合は推測せず、「規約資料からは確認できません」などの一言を添えて不確かさを明示してください。
+5. 規約に根拠がある回答でも、自信が持てない場合は簡潔な注意書きを添え、勝手な想像で補完しないでください。
+6. 回答の最後に、不確実な点がある場合のみ「（不確実）」と付記してください。`;
           
           if (companyRules && companyRules.trim().length > 0) {
             systemPrompt += "\n\n【会社規約ファイルの内容】\n" + companyRules;
@@ -466,6 +529,36 @@ app.post("/webhook", async (req, res) => {
             });
 
             aiResponse = chatCompletion.choices[0]?.message?.content || aiResponse;
+          } else if (selectedModel.provider === "openai") {
+            const openaiClient = getOpenAIClient();
+
+            if (!openaiClient) {
+              aiResponse = "申し訳ございません。OpenAIのAPIキーが設定されていないため、このモデルは利用できません。別のモデルを選択してください。";
+            } else {
+              try {
+                const chatCompletion = await openaiClient.chat.completions.create({
+                  model: selectedModel.model,
+                  messages: [
+                    {
+                      role: "system",
+                      content: systemPrompt,
+                    },
+                    ...historyMessages,
+                    {
+                      role: "user",
+                      content: userMessage,
+                    },
+                  ],
+                  temperature: 0.2,
+                  max_tokens: 1500,
+                });
+
+                aiResponse = chatCompletion.choices[0]?.message?.content || aiResponse;
+              } catch (openAiError) {
+                console.error("OpenAI API error:", openAiError);
+                aiResponse = "申し訳ございません。ChatGPTでの応答生成に失敗しました。少し時間を置いてから再度お試しください。";
+              }
+            }
           } else {
             console.error(`Unsupported provider: ${selectedModel.provider}`);
             aiResponse = "申し訳ございません。現在選択されたAIモデルには対応していません。別のモデルを選択してください。";
