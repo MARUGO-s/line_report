@@ -10,6 +10,40 @@ const require = createRequire(import.meta.url);
 let cachedPdfParse = null;
 let cachedDocxParser = null;
 let cachedXlsxParser = null;
+const conversationMemory = new Map();
+const MAX_HISTORY_MESSAGES = 10; // store up to 10 prior turns (5 user/assistant pairs)
+
+function getConversationKey(event) {
+  if (event.source?.userId) {
+    return `user:${event.source.userId}`;
+  }
+  if (event.source?.groupId) {
+    return `group:${event.source.groupId}`;
+  }
+  if (event.source?.roomId) {
+    return `room:${event.source.roomId}`;
+  }
+  return `reply:${event.replyToken}`;
+}
+
+function updateConversationHistory(key, userMessage, assistantMessage) {
+  if (!key) return;
+  const history = conversationMemory.get(key) ?? [];
+  history.push({ role: "user", content: userMessage });
+  history.push({ role: "assistant", content: assistantMessage });
+
+  // Trim history to the maximum number of stored messages
+  while (history.length > MAX_HISTORY_MESSAGES) {
+    history.shift();
+  }
+
+  conversationMemory.set(key, history);
+}
+
+function getConversationHistory(key) {
+  if (!key) return [];
+  return conversationMemory.get(key) ?? [];
+}
 
 async function getPdfParse() {
   if (!cachedPdfParse) {
@@ -256,6 +290,7 @@ app.post("/webhook", async (req, res) => {
       if (event.type === "message" && event.message.type === "text") {
         const replyToken = event.replyToken;
         const userMessage = event.message.text;
+        const conversationKey = getConversationKey(event);
 
         try {
           // Supabaseから会社規約を取得
@@ -284,12 +319,14 @@ app.post("/webhook", async (req, res) => {
           }
 
           // Groq AIで応答を生成
+          const historyMessages = getConversationHistory(conversationKey);
           const chatCompletion = await groq.chat.completions.create({
             messages: [
               {
                 role: "system",
                 content: systemPrompt,
               },
+              ...historyMessages,
               {
                 role: "user",
                 content: userMessage,
@@ -302,6 +339,9 @@ app.post("/webhook", async (req, res) => {
 
           const aiResponse = chatCompletion.choices[0]?.message?.content || "申し訳ございません、応答を生成できませんでした。";
           console.log("AI response:", aiResponse);
+
+          // 会話履歴を更新
+          updateConversationHistory(conversationKey, userMessage, aiResponse);
 
           // 返信メッセージ
           const replyMessage = {
