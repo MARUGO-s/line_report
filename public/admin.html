@@ -427,8 +427,8 @@
               return ['pdf', 'txt', 'docx', 'xlsx'].includes(ext);
             })
             .map(async (file) => {
-              let originalName = file.metadata?.originalName || file.fullPath;
-              let uploadedAtIso = file.metadata?.uploadedAt;
+              let originalName = file.metadata?.customMetadata?.originalName || file.metadata?.originalName || file.fullPath;
+              let uploadedAtIso = file.metadata?.customMetadata?.uploadedAt || file.metadata?.uploadedAt;
 
               try {
                 const { data: metaData, error: metaError } = await supabase.storage
@@ -445,7 +445,8 @@
 
               const sizeBytes = file.metadata?.size ?? file.size ?? 0;
               const uploadedAt = uploadedAtIso ? new Date(uploadedAtIso) : new Date(file.created_at);
-              const displayName = originalName || `${file.fullPath}（保存名）`;
+              const baseDisplay = originalName || `${file.fullPath}（保存名）`;
+              const displayName = baseDisplay.includes('/') ? baseDisplay.split('/').pop() : baseDisplay;
 
               return {
                 storageName: file.fullPath,
