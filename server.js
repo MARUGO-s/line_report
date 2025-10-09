@@ -163,8 +163,6 @@ function getConversationHistory(key) {
   return conversationMemory.get(key) ?? [];
 }
 
-const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'docx', 'xlsx', 'csv'];
-
 async function sendLineMessage(replyToken, messages) {
   if (!replyToken) return;
 
