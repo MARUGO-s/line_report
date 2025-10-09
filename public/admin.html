@@ -275,7 +275,7 @@
         <button class="btn" onclick="document.getElementById('fileInput').click()">
           ファイルを選択
         </button>
-        <input type="file" id="fileInput" accept=".pdf,.txt" multiple>
+        <input type="file" id="fileInput" accept=".pdf,.txt,.docx,.xlsx" multiple>
       </div>
       <div class="progress-bar" id="progressBar">
         <div class="progress-fill" id="progressFill"></div>
@@ -322,8 +322,11 @@
 
     // ファイルアップロード
     async function uploadFile(file) {
-      if (!file.type.includes('pdf') && !file.type.includes('text')) {
-        showMessage('PDFまたはTXTファイルのみアップロード可能です', 'error');
+      const allowedExtensions = ['pdf', 'txt', 'docx', 'xlsx'];
+      const extension = file.name.split('.').pop().toLowerCase();
+
+      if (!allowedExtensions.includes(extension)) {
+        showMessage('PDF, TXT, DOCX, XLSX ファイルのみアップロード可能です', 'error');
         return;
       }
 
@@ -335,7 +338,7 @@
       try {
         // ファイル名から拡張子を取得
         const timestamp = Date.now();
-        const extension = file.name.split('.').pop();
+        const extension = file.name.split('.').pop().toLowerCase();
         const safeFileName = `${timestamp}.${extension}`;
         
         // 元のファイル名をメタデータとして保存
@@ -344,7 +347,10 @@
           .upload(safeFileName, file, {
             cacheControl: '3600',
             upsert: false,
-            contentType: file.type
+            contentType: file.type || 'application/octet-stream',
+            metadata: {
+              originalName: file.name,
+            }
           });
 
         if (error) throw error;
@@ -382,19 +388,22 @@
         }
 
         listElement.innerHTML = data
-          .filter(file => file.name.endsWith('.pdf') || file.name.endsWith('.txt'))
+          .filter(file => {
+            const ext = file.name.split('.').pop().toLowerCase();
+            return ['pdf', 'txt', 'docx', 'xlsx'].includes(ext);
+          })
           .map(file => {
-            // タイムスタンプから日時を表示名として使用
-            const timestamp = file.name.split('.')[0];
-            const extension = file.name.split('.').pop();
-            const displayName = `規約文書_${new Date(parseInt(timestamp)).toLocaleString('ja-JP')}.${extension}`;
+            const originalName = file.metadata?.originalName || file.name;
+            const timestamp = parseInt(file.name.split('.')[0], 10);
+            const uploadedAt = Number.isNaN(timestamp) ? new Date(file.created_at) : new Date(timestamp);
+            const displayName = originalName;
             return `
             <li class="document-item">
               <div class="document-info">
                 <div class="document-name">${displayName}</div>
                 <div class="document-meta">
                   サイズ: ${(file.metadata?.size / 1024).toFixed(2)} KB | 
-                  アップロード: ${new Date(file.created_at).toLocaleString('ja-JP')}
+                  アップロード: ${uploadedAt.toLocaleString('ja-JP')}
                 </div>
               </div>
               <div class="document-actions">
@@ -476,4 +485,3 @@
   </script>
 </body>
 </html>
-
