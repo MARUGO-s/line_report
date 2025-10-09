@@ -4,6 +4,7 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
 import { createClient } from "@supabase/supabase-js";
+import pdf from "pdf-parse";
 
 dotenv.config();
 
@@ -70,10 +71,20 @@ async function getCompanyRules() {
           fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
           console.log(`Loaded TXT file: ${file.name} (${text.length} chars)`);
         } else if (file.name.endsWith('.pdf')) {
-          // PDFは現時点ではテキスト抽出できないため、ファイル名のみ記録
-          const displayName = file.name.split('.')[0];
-          fileContents.push(`【ファイル: ${displayName}】（PDFファイル - テキスト抽出未対応）\n`);
-          console.log(`Found PDF file: ${file.name}`);
+          // PDFファイルからテキストを抽出
+          try {
+            const displayName = file.name.split('.')[0];
+            const arrayBuffer = await fileData.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const pdfData = await pdf(buffer);
+            const text = pdfData.text;
+            fileContents.push(`【ファイル: ${displayName}】\n${text}\n`);
+            console.log(`Loaded PDF file: ${file.name} (${text.length} chars, ${pdfData.numpages} pages)`);
+          } catch (pdfError) {
+            console.error(`Error extracting PDF ${file.name}:`, pdfError);
+            const displayName = file.name.split('.')[0];
+            fileContents.push(`【ファイル: ${displayName}】（PDFファイル - テキスト抽出エラー）\n`);
+          }
         }
       } catch (err) {
         console.error(`Error processing file ${file.name}:`, err);
