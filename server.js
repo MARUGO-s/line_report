@@ -255,22 +255,53 @@ const supabase = createClient(
 
 const app = express();
 
-// Supabaseストレージから会社規約を取得する関数
-async function getCompanyRules() {
-  try {
-    // ストレージからファイル一覧を取得
-    const { data: files, error } = await supabase.storage
+async function listAllFiles(prefix = '') {
+  const collected = [];
+  let page = 0;
+
+  while (true) {
+    const { data, error } = await supabase.storage
       .from('company-documents')
-      .list('', {
+      .list(prefix, {
         limit: 100,
-        offset: 0,
+        offset: page * 100,
         sortBy: { column: 'created_at', order: 'desc' }
       });
 
     if (error) {
-      console.error('Error fetching files:', error);
-      return null;
+      throw error;
     }
+
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    for (const entry of data) {
+      const isFolder = !entry.id && !entry.name.includes('.');
+      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+
+      if (isFolder) {
+        const nestedFiles = await listAllFiles(entryPath);
+        collected.push(...nestedFiles);
+      } else {
+        collected.push({ ...entry, fullPath: entryPath });
+      }
+    }
+
+    if (data.length < 100) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return collected;
+}
+
+// Supabaseストレージから会社規約を取得する関数
+async function getCompanyRules() {
+  try {
+    const files = await listAllFiles('');
 
     if (!files || files.length === 0) {
       console.log('No files found in storage');
@@ -286,16 +317,17 @@ async function getCompanyRules() {
           continue;
         }
 
-        console.log(`Processing file: ${file.name}`);
+        const filePath = file.fullPath || file.name;
+        console.log(`Processing file: ${filePath}`);
         const originalName = file.metadata?.originalName || file.name;
         
         // ファイルをダウンロード（download メソッドを使用）
         const { data: fileData, error: downloadError } = await supabase.storage
           .from('company-documents')
-          .download(file.name);
+          .download(filePath);
 
         if (downloadError) {
-          console.error(`Error downloading ${file.name}:`, downloadError);
+          console.error(`Error downloading ${filePath}:`, downloadError);
           continue;
         }
 
@@ -304,7 +336,7 @@ async function getCompanyRules() {
         if (extension === 'txt') {
           const text = await fileData.text();
           fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-          console.log(`Loaded TXT file: ${file.name} (${text.length} chars)`);
+          console.log(`Loaded TXT file: ${filePath} (${text.length} chars)`);
         } else if (extension === 'pdf') {
           const pdfParse = await getPdfParse();
 
@@ -321,14 +353,14 @@ async function getCompanyRules() {
 
             if (!text) {
               fileContents.push(`【ファイル: ${originalName}】（PDFからテキストを抽出できませんでした）\n`);
-              console.warn(`PDF parsing produced empty text for ${file.name}`);
+              console.warn(`PDF parsing produced empty text for ${filePath}`);
             } else {
               fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-              console.log(`Parsed PDF file: ${file.name} (${text.length} chars)`);
+              console.log(`Parsed PDF file: ${filePath} (${text.length} chars)`);
             }
           } catch (parseError) {
             fileContents.push(`【ファイル: ${originalName}】（PDFの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing PDF ${file.name}:`, parseError);
+            console.error(`Error parsing PDF ${filePath}:`, parseError);
           }
         } else if (extension === 'docx') {
           const mammoth = await getDocxParser();
@@ -346,14 +378,14 @@ async function getCompanyRules() {
 
             if (!text) {
               fileContents.push(`【ファイル: ${originalName}】（DOCXからテキストを抽出できませんでした）\n`);
-              console.warn(`DOCX parsing produced empty text for ${file.name}`);
+              console.warn(`DOCX parsing produced empty text for ${filePath}`);
             } else {
               fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-              console.log(`Parsed DOCX file: ${file.name} (${text.length} chars)`);
+              console.log(`Parsed DOCX file: ${filePath} (${text.length} chars)`);
             }
           } catch (docxError) {
             fileContents.push(`【ファイル: ${originalName}】（DOCXの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing DOCX ${file.name}:`, docxError);
+            console.error(`Error parsing DOCX ${filePath}:`, docxError);
           }
         } else if (extension === 'xlsx') {
           const xlsx = await getXlsxParser();
@@ -387,18 +419,18 @@ async function getCompanyRules() {
 
             if (sheetTexts.length === 0) {
               fileContents.push(`【ファイル: ${originalName}】（XLSXからテキストを抽出できませんでした）\n`);
-              console.warn(`XLSX parsing produced empty text for ${file.name}`);
+              console.warn(`XLSX parsing produced empty text for ${filePath}`);
             } else {
               fileContents.push(`【ファイル: ${originalName}】\n${sheetTexts.join('\n\n')}\n`);
-              console.log(`Parsed XLSX file: ${file.name} (${sheetTexts.join('\n').length} chars)`);
+              console.log(`Parsed XLSX file: ${filePath} (${sheetTexts.join('\n').length} chars)`);
             }
           } catch (xlsxError) {
             fileContents.push(`【ファイル: ${originalName}】（XLSXの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing XLSX ${file.name}:`, xlsxError);
+            console.error(`Error parsing XLSX ${filePath}:`, xlsxError);
           }
         }
       } catch (err) {
-        console.error(`Error processing file ${file.name}:`, err);
+        console.error(`Error processing file ${file.fullPath || file.name}:`, err);
       }
     }
 
@@ -485,18 +517,20 @@ app.post("/webhook", async (req, res) => {
           const companyRules = await getCompanyRules();
           
           // システムプロンプトを構築
-          let systemPrompt = `あなたは会社規約に関する質問に答える専門AIアシスタントです。
+          let systemPrompt = `あなたは会社規約およびワインリストに関する情報を扱う専門AIアシスタントです。ワインの仕入れ値・販売価格・原価率・粗利といった数値分析にも長けており、提供された資料だけを用いて正確かつ透明な説明を行います。
 
 【重要な指示】
-1. 必ず提供された会社規約ファイルの内容のみに基づいて回答してください。
-2. 規約ファイルに記載されていない内容について質問された場合は、以下のように対応してください：
-   - まず「その内容は現在の規約資料には記載されていません」と明確に伝える
+1. 必ず提供されたファイル（会社規約・ワインリストなど）の内容のみに基づいて回答してください。外部のWebサイトや一般常識を勝手に参照してはいけません。
+2. 規約やワインリストに記載されていない内容について質問された場合は、以下のように対応してください：
+   - まず「その内容は現在の資料には記載されていません」と明確に伝える
    - 次に「一般的な情報としてお答えしてもよろしいでしょうか？」と必ず確認を求める
-   - 確認なしに規約外の情報を提供してはいけません
-3. 回答する際は、どのファイルのどの部分に基づいているかを明示してください。
-4. 不明確な場合や断定できない場合は推測せず、「規約資料からは確認できません」などの一言を添えて不確かさを明示してください。
-5. 規約に根拠がある回答でも、自信が持てない場合は簡潔な注意書きを添え、勝手な想像で補完しないでください。
-6. 回答の最後に、不確実な点がある場合のみ「（不確実）」と付記してください。`;
+   - 確認なしに資料外の情報を提供してはいけません。許可があっても推測や一般的知識を述べる際は必ず「【推測】」などのラベルを付けて明示してください。
+3. ワインの仕入れ値・販売価格・原価率などを尋ねられた場合は、提供されているデータを丁寧に参照し、計算過程や根拠ファイルを明示してください。計算ができない場合は理由を添えて回答してください。
+4. Web検索や外部データの取得が必要な場合は、必ず事前に「外部情報を参照してもよろしいですか？」とユーザーに確認し、許可が得られない限り実行しないでください（現在の環境では実行できないことがある旨も伝えてください）。
+5. 回答する際は、どのファイル（元のファイル名）・どの内容に基づいているかを明示してください。
+6. 不明確な場合や断定できない場合は推測せず、「資料からは確認できません」などの一言を添えて不確かさを明示してください。
+7. 資料に根拠がある回答でも、自信が持てない場合は簡潔な注意書きを添え、勝手な想像で補完しないでください。
+8. 推測を述べる必要があるときは必ず文中で「【推測】」と明記し、回答末尾に「（不確実）」を付記してください。`;
           
           if (companyRules && companyRules.trim().length > 0) {
             systemPrompt += "\n\n【会社規約ファイルの内容】\n" + companyRules;
