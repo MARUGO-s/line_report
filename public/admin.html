@@ -339,7 +339,10 @@
         const timestamp = Date.now();
         const extension = file.name.split('.').pop().toLowerCase();
         const safeFolder = 'uploads';
-        const safeFileName = `${timestamp}.${extension}`;
+        
+        // ファイル名をエンコードしてパスに含める
+        const encodedOriginalName = encodeURIComponent(file.name.replace(/\.[^/.]+$/, '')); // 拡張子を除く
+        const safeFileName = `${timestamp}_${encodedOriginalName}.${extension}`;
         const storagePath = `${safeFolder}/${safeFileName}`;
 
         const { data, error } = await supabase.storage
@@ -348,13 +351,7 @@
             cacheControl: '3600',
             upsert: false,
             contentType: file.type || 'application/octet-stream',
-            metadata: {
-              originalName: file.name,
-              uploadedAt: new Date().toISOString(),
-            }
           });
-
-        if (error) throw error;
 
         progressFill.style.width = '100%';
         showMessage(`${file.name} をアップロードしました`, 'success');
@@ -427,26 +424,25 @@
               return ['pdf', 'txt', 'docx', 'xlsx'].includes(ext);
             })
             .map(async (file) => {
-              let originalName = file.metadata?.customMetadata?.originalName || file.metadata?.originalName || file.fullPath;
-              let uploadedAtIso = file.metadata?.customMetadata?.uploadedAt || file.metadata?.uploadedAt;
-
-              try {
-                const { data: metaData, error: metaError } = await supabase.storage
-                  .from('company-documents')
-                  .getMetadata(file.fullPath);
-
-                if (!metaError && metaData) {
-                  originalName = metaData.metadata?.originalName || metaData.customMetadata?.originalName || originalName;
-                  uploadedAtIso = metaData.metadata?.uploadedAt || metaData.customMetadata?.uploadedAt || uploadedAtIso;
+              // ファイル名から元の名前を復元
+              const fileName = file.fullPath.split('/').pop(); // 例: "1760038957588_株式会社ワルツ　ハウスルール.pdf"
+              let displayName = fileName;
+              
+              // タイムスタンプ_元のファイル名.拡張子 のパターンをチェック
+              const match = fileName.match(/^\d+_(.+)\.([^.]+)$/);
+              if (match) {
+                try {
+                  const encodedName = match[1];
+                  const extension = match[2];
+                  displayName = decodeURIComponent(encodedName) + '.' + extension;
+                } catch (decodeError) {
+                  console.warn('ファイル名のデコードに失敗:', fileName);
+                  displayName = fileName; // デコード失敗時は元の名前を使用
                 }
-              } catch (metaErr) {
-                console.error('Metadata fetch error:', metaErr);
               }
 
               const sizeBytes = file.metadata?.size ?? file.size ?? 0;
-              const uploadedAt = uploadedAtIso ? new Date(uploadedAtIso) : new Date(file.created_at);
-              const baseDisplay = originalName || `${file.fullPath}（保存名）`;
-              const displayName = baseDisplay.includes('/') ? baseDisplay.split('/').pop() : baseDisplay;
+              const uploadedAt = new Date(file.created_at);
 
               return {
                 storageName: file.fullPath,

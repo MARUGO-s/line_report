@@ -319,7 +319,23 @@ async function getCompanyRules() {
 
         const filePath = file.fullPath || file.name;
         console.log(`Processing file: ${filePath}`);
-        const originalName = file.metadata?.originalName || file.name;
+        
+        // ファイル名から元の名前を復元
+        const fileName = filePath.split('/').pop();
+        let originalName = fileName;
+        
+        // タイムスタンプ_元のファイル名.拡張子 のパターンをチェック
+        const match = fileName.match(/^\d+_(.+)\.([^.]+)$/);
+        if (match) {
+          try {
+            const encodedName = match[1];
+            const extension = match[2];
+            originalName = decodeURIComponent(encodedName) + '.' + extension;
+          } catch (decodeError) {
+            console.warn('ファイル名のデコードに失敗:', fileName);
+            originalName = fileName;
+          }
+        }
         
         // ファイルをダウンロード（download メソッドを使用）
         const { data: fileData, error: downloadError } = await supabase.storage
