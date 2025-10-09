@@ -147,7 +147,6 @@
       color: #ffffff;
       margin-bottom: 6px;
       font-size: 15px;
-      word-break: break-all;
     }
 
     .document-meta {
@@ -200,43 +199,62 @@
       font-size: 14px;
     }
 
+    .error {
+      background: #1a0000;
+      border: 1px solid #330000;
+      color: #ff6666;
+      padding: 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .success {
+      background: #001a00;
+      border: 1px solid #003300;
+      color: #66ff66;
+      padding: 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
     .progress-bar {
-      height: 6px;
       width: 100%;
-      background: #1f1f1f;
-      border-radius: 3px;
+      height: 4px;
+      background: #1a1a1a;
+      border-radius: 2px;
       overflow: hidden;
-      margin-top: 16px;
+      margin-top: 20px;
       display: none;
     }
 
     .progress-fill {
       height: 100%;
-      width: 0;
-      background: linear-gradient(90deg, #ffffff, #808080);
+      background: #ffffff;
       transition: width 0.3s ease;
+      width: 0%;
     }
 
-    #message {
-      margin-bottom: 16px;
-      padding: 12px 16px;
-      border-radius: 4px;
+    h2 {
+      color: #ffffff;
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 24px;
+      letter-spacing: -0.3px;
+    }
+
+    .upload-area p {
+      color: #808080;
       font-size: 14px;
-      display: none;
+      margin-bottom: 20px;
     }
 
-    #message.success {
-      display: block;
-      background: rgba(124, 252, 0, 0.1);
-      color: #9aff6b;
-      border: 1px solid rgba(124, 252, 0, 0.2);
-    }
-
-    #message.error {
-      display: block;
-      background: rgba(255, 68, 68, 0.1);
-      color: #ff7777;
-      border: 1px solid rgba(255, 68, 68, 0.2);
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #606060;
+      font-size: 14px;
     }
   </style>
 </head>
@@ -257,7 +275,7 @@
         <button class="btn" onclick="document.getElementById('fileInput').click()">
           ファイルを選択
         </button>
-        <input type="file" id="fileInput" accept=".pdf,.txt" multiple>
+        <input type="file" id="fileInput" accept=".pdf,.txt,.docx,.xlsx,.csv" multiple>
       </div>
       <div class="progress-bar" id="progressBar">
         <div class="progress-fill" id="progressFill"></div>
@@ -274,32 +292,11 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    function encodeFileName(name) {
-      return encodeURIComponent(name.replace(/[\\s\\/:*?\"<>|]+/g, '_'));
-    }
-
-    function decodeFileName(encoded) {
-      try {
-        return decodeURIComponent(encoded);
-      } catch (error) {
-        console.error('ファイル名のデコードに失敗:', encoded, error);
-        return encoded;
-      }
-    }
-
-    function extractOriginalName(storagePath) {
-      const rawName = storagePath.includes('/') ? storagePath.split('/').pop() : storagePath;
-      const match = rawName.match(/^(\d+)_([^.]*)\.(.+)$/);
-      if (match) {
-        const encodedOriginal = match[2];
-        const extension = match[3];
-        return `${decodeFileName(encodedOriginal)}.${extension}`;
-    }
-      return decodeFileName(rawName);
-    }
-
+    
+    // Supabase設定（環境変数から取得するため、サーバー経由で取得）
     let supabase;
 
+    // 設定を取得
     async function initSupabase() {
       try {
         const response = await fetch('/api/config');
@@ -312,21 +309,44 @@
       }
     }
 
+    // メッセージ表示
     function showMessage(text, type = 'success') {
       const messageDiv = document.getElementById('message');
       messageDiv.className = type;
       messageDiv.textContent = text;
-      messageDiv.style.display = 'block';
       setTimeout(() => {
         messageDiv.textContent = '';
         messageDiv.className = '';
-        messageDiv.style.display = 'none';
       }, 5000);
     }
 
+    const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'docx', 'xlsx', 'csv'];
+
+    function encodeForStorage(name) {
+      return encodeURIComponent(name.replace(/[\\\\/:*?\"<>|\s]+/g, '_'));
+    }
+
+    function decodeStoredName(storagePath) {
+      const raw = storagePath.includes('/') ? storagePath.split('/').pop() : storagePath;
+      const match = raw.match(/^(\d+)_([^.]*)\.(.+)$/);
+      if (match) {
+        try {
+          const decoded = decodeURIComponent(match[2]);
+          return `${decoded}.${match[3]}`;
+        } catch (err) {
+          console.error('ファイル名のデコードに失敗:', err);
+          return `${match[2]}.${match[3]}`;
+        }
+      }
+      return raw;
+    }
+
+    // ファイルアップロード
     async function uploadFile(file) {
-      if (!file.type.includes('pdf') && !file.type.includes('text')) {
-        showMessage('PDFまたはTXTファイルのみアップロード可能です', 'error');
+      const extension = file.name.split('.').pop().toLowerCase();
+
+      if (!ALLOWED_EXTENSIONS.includes(extension)) {
+        showMessage('PDF, TXT, DOCX, XLSX ファイルのみアップロード可能です', 'error');
         return;
       }
 
@@ -337,10 +357,8 @@
 
       try {
         const timestamp = Date.now();
-        const extension = file.name.split('.').pop();
-        const encodedName = encodeFileName(file.name.replace(`.${extension}`, ''));
-        const safeFileName = `${timestamp}_${encodedName}.${extension}`;
-        const storagePath = `uploads/${safeFileName}`;
+        const encodedName = encodeForStorage(file.name.replace(`.${extension}`, ''));
+        const storagePath = `uploads/${timestamp}_${encodedName}.${extension}`;
 
         const { error } = await supabase.storage
           .from('company-documents')
@@ -354,7 +372,7 @@
 
         progressFill.style.width = '100%';
         showMessage(`${file.name} をアップロードしました`, 'success');
-        
+
         setTimeout(() => {
           progressBar.style.display = 'none';
           progressFill.style.width = '0%';
@@ -368,6 +386,7 @@
       }
     }
 
+    // Supabase Storage から全ファイルを取得（フォルダ対応）
     async function listAllFiles(prefix = '') {
       const collected = [];
       let page = 0;
@@ -403,44 +422,33 @@
       return collected;
     }
 
+    // ドキュメント一覧を読み込み
     async function loadDocuments() {
       const listElement = document.getElementById('documentList');
       
       try {
-        const files = await listAllFiles('uploads');
+        const allFiles = await listAllFiles('uploads');
 
-        if (!files || files.length === 0) {
+        if (!allFiles || allFiles.length === 0) {
           listElement.innerHTML = '<li class="loading">アップロード済みのファイルはありません</li>';
           return;
         }
 
-        const filesWithMetadata = files
-          .filter(file => file.fullPath.split('.').pop().toLowerCase())
-          .map((file) => {
-            try {
-              const originalName = extractOriginalName(file.fullPath);
-              const sizeBytes = file.metadata?.size ?? file.size ?? 0;
-              const uploadedAt = new Date(file.created_at);
+        const filesWithNames = allFiles
+          .filter(file => ALLOWED_EXTENSIONS.includes(file.fullPath.split('.').pop().toLowerCase()))
+          .map(file => ({
+            storageName: file.fullPath,
+            displayName: decodeStoredName(file.fullPath),
+            uploadedAt: new Date(file.created_at),
+            sizeKb: ((file.metadata?.size ?? file.size ?? 0) / 1024).toFixed(2),
+          }));
 
-              return {
-                storageName: file.fullPath,
-                displayName: originalName,
-                uploadedAt,
-                sizeKb: (sizeBytes / 1024).toFixed(2),
-              };
-            } catch (err) {
-              console.error('File processing error:', err, file);
-              return null;
-            }
-          })
-          .filter(f => f !== null);
-
-        if (filesWithMetadata.length === 0) {
+        if (filesWithNames.length === 0) {
           listElement.innerHTML = '<li class="loading">アップロード済みのファイルはありません</li>';
           return;
         }
 
-        listElement.innerHTML = filesWithMetadata.map(fileInfo => `
+        listElement.innerHTML = filesWithNames.map(fileInfo => `
           <li class="document-item">
             <div class="document-info">
               <div class="document-name">${fileInfo.displayName}</div>
@@ -460,6 +468,7 @@
       }
     }
 
+    // ドキュメント表示
     async function viewDocument(fileName) {
       try {
         const { data } = await supabase.storage
@@ -472,6 +481,7 @@
       }
     }
 
+    // ドキュメント削除
     async function deleteDocument(fileName) {
       if (!confirm('このファイルを削除しますか？')) return;
 
@@ -489,6 +499,7 @@
       }
     }
 
+    // ドラッグ&ドロップ
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
 
@@ -504,27 +515,23 @@
     uploadArea.addEventListener('drop', (e) => {
       e.preventDefault();
       uploadArea.classList.remove('dragover');
-
-      const files = e.dataTransfer.files;
-      if (!files || files.length === 0) return;
-
-      for (const file of files) {
-        uploadFile(file);
-      }
+      
+      const files = Array.from(e.dataTransfer.files);
+      files.forEach(uploadFile);
     });
 
     fileInput.addEventListener('change', (e) => {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-
-      for (const file of files) {
-        uploadFile(file);
-      }
-
-      fileInput.value = '';
+      const files = Array.from(e.target.files);
+      files.forEach(uploadFile);
+      e.target.value = '';
     });
 
-    document.addEventListener('DOMContentLoaded', initSupabase);
+    // 初期化
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initSupabase);
+    } else {
+      initSupabase();
+    }
   </script>
 </body>
 </html>
