@@ -255,22 +255,53 @@ const supabase = createClient(
 
 const app = express();
 
-// Supabaseストレージから会社規約を取得する関数
-async function getCompanyRules() {
-  try {
-    // ストレージからファイル一覧を取得
-    const { data: files, error } = await supabase.storage
+async function listAllFiles(prefix = '') {
+  const collected = [];
+  let page = 0;
+
+  while (true) {
+    const { data, error } = await supabase.storage
       .from('company-documents')
-      .list('', {
+      .list(prefix, {
         limit: 100,
-        offset: 0,
+        offset: page * 100,
         sortBy: { column: 'created_at', order: 'desc' }
       });
 
     if (error) {
-      console.error('Error fetching files:', error);
-      return null;
+      throw error;
     }
+
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    for (const entry of data) {
+      const isFolder = !entry.id && !entry.name.includes('.');
+      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+
+      if (isFolder) {
+        const nestedFiles = await listAllFiles(entryPath);
+        collected.push(...nestedFiles);
+      } else {
+        collected.push({ ...entry, fullPath: entryPath });
+      }
+    }
+
+    if (data.length < 100) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return collected;
+}
+
+// Supabaseストレージから会社規約を取得する関数
+async function getCompanyRules() {
+  try {
+    const files = await listAllFiles('');
 
     if (!files || files.length === 0) {
       console.log('No files found in storage');
@@ -286,16 +317,17 @@ async function getCompanyRules() {
           continue;
         }
 
-        console.log(`Processing file: ${file.name}`);
+        const filePath = file.fullPath || file.name;
+        console.log(`Processing file: ${filePath}`);
         const originalName = file.metadata?.originalName || file.name;
         
         // ファイルをダウンロード（download メソッドを使用）
         const { data: fileData, error: downloadError } = await supabase.storage
           .from('company-documents')
-          .download(file.name);
+          .download(filePath);
 
         if (downloadError) {
-          console.error(`Error downloading ${file.name}:`, downloadError);
+          console.error(`Error downloading ${filePath}:`, downloadError);
           continue;
         }
 
@@ -304,7 +336,7 @@ async function getCompanyRules() {
         if (extension === 'txt') {
           const text = await fileData.text();
           fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-          console.log(`Loaded TXT file: ${file.name} (${text.length} chars)`);
+          console.log(`Loaded TXT file: ${filePath} (${text.length} chars)`);
         } else if (extension === 'pdf') {
           const pdfParse = await getPdfParse();
 
@@ -321,14 +353,14 @@ async function getCompanyRules() {
 
             if (!text) {
               fileContents.push(`【ファイル: ${originalName}】（PDFからテキストを抽出できませんでした）\n`);
-              console.warn(`PDF parsing produced empty text for ${file.name}`);
+              console.warn(`PDF parsing produced empty text for ${filePath}`);
             } else {
               fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-              console.log(`Parsed PDF file: ${file.name} (${text.length} chars)`);
+              console.log(`Parsed PDF file: ${filePath} (${text.length} chars)`);
             }
           } catch (parseError) {
             fileContents.push(`【ファイル: ${originalName}】（PDFの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing PDF ${file.name}:`, parseError);
+            console.error(`Error parsing PDF ${filePath}:`, parseError);
           }
         } else if (extension === 'docx') {
           const mammoth = await getDocxParser();
@@ -346,14 +378,14 @@ async function getCompanyRules() {
 
             if (!text) {
               fileContents.push(`【ファイル: ${originalName}】（DOCXからテキストを抽出できませんでした）\n`);
-              console.warn(`DOCX parsing produced empty text for ${file.name}`);
+              console.warn(`DOCX parsing produced empty text for ${filePath}`);
             } else {
               fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
-              console.log(`Parsed DOCX file: ${file.name} (${text.length} chars)`);
+              console.log(`Parsed DOCX file: ${filePath} (${text.length} chars)`);
             }
           } catch (docxError) {
             fileContents.push(`【ファイル: ${originalName}】（DOCXの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing DOCX ${file.name}:`, docxError);
+            console.error(`Error parsing DOCX ${filePath}:`, docxError);
           }
         } else if (extension === 'xlsx') {
           const xlsx = await getXlsxParser();
@@ -387,18 +419,18 @@ async function getCompanyRules() {
 
             if (sheetTexts.length === 0) {
               fileContents.push(`【ファイル: ${originalName}】（XLSXからテキストを抽出できませんでした）\n`);
-              console.warn(`XLSX parsing produced empty text for ${file.name}`);
+              console.warn(`XLSX parsing produced empty text for ${filePath}`);
             } else {
               fileContents.push(`【ファイル: ${originalName}】\n${sheetTexts.join('\n\n')}\n`);
-              console.log(`Parsed XLSX file: ${file.name} (${sheetTexts.join('\n').length} chars)`);
+              console.log(`Parsed XLSX file: ${filePath} (${sheetTexts.join('\n').length} chars)`);
             }
           } catch (xlsxError) {
             fileContents.push(`【ファイル: ${originalName}】（XLSXの解析中にエラーが発生しました）\n`);
-            console.error(`Error parsing XLSX ${file.name}:`, xlsxError);
+            console.error(`Error parsing XLSX ${filePath}:`, xlsxError);
           }
         }
       } catch (err) {
-        console.error(`Error processing file ${file.name}:`, err);
+        console.error(`Error processing file ${file.fullPath || file.name}:`, err);
       }
     }
 
