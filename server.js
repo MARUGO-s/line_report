@@ -143,10 +143,17 @@ function parseModelSelection(text) {
   if (!text) return null;
   const normalized = text.trim().toLowerCase();
 
-  if (normalized === MODEL_OPTIONS["8b"].displayNumber || normalized.includes("8") || normalized.includes("８")) {
+  // より厳密な判定：完全一致または明示的なモデル選択のみ
+  if (normalized === MODEL_OPTIONS["8b"].displayNumber || 
+      normalized === "1" || 
+      normalized === "8b" || 
+      normalized === "コスト重視") {
     return "8b";
   }
-  if (normalized === MODEL_OPTIONS["70b"].displayNumber || normalized.includes("70")) {
+  if (normalized === MODEL_OPTIONS["70b"].displayNumber || 
+      normalized === "2" || 
+      normalized === "70b" || 
+      normalized === "精度重視") {
     return "70b";
   }
 
@@ -364,8 +371,7 @@ async function getCompanyRules() {
               }
               const sheetText = xlsx.utils.sheet_to_csv(worksheet, {
                 FS: '	',
-                RS: '
-',
+                RS: '\n',
                 blankrows: false,
               }).trim();
 
@@ -382,12 +388,9 @@ async function getCompanyRules() {
               console.warn(`Excel parsing produced empty text for ${storageName}`);
             } else {
               fileContents.push(`【ファイル: ${originalName}】
-${sheetTexts.join('
-
-')}
+${sheetTexts.join('\n\n')}
 `);
-              console.log(`Parsed Excel file: ${storageName} (${sheetTexts.join('
-').length} chars)`);
+              console.log(`Parsed Excel file: ${storageName} (${sheetTexts.join('\n').length} chars)`);
             }
           } catch (xlsxError) {
             fileContents.push(`【ファイル: ${originalName}】（Excelファイルの解析中にエラーが発生しました）
@@ -410,10 +413,7 @@ ${sheetTexts.join('
       }
     }
 
-    return fileContents.join('
----
-
-');
+    return fileContents.join('\n---\n\n');
   } catch (error) {
     console.error('Error in getCompanyRules:', error);
     return null;
@@ -505,8 +505,12 @@ app.post("/webhook", async (req, res) => {
    - まず「その内容は現在の規約資料には記載されていません」と明確に伝える
    - 次に「一般的な情報としてお答えしてもよろしいでしょうか？」と必ず確認を求める
    - 確認なしに規約外の情報を提供してはいけません
-3. 回答する際は、どのファイルのどの部分に基づいているかを明示してください。
-4. 不明確な場合は推測せず、「規約資料からは確認できません」と正直に答えてください。`;
+3. 回答する際は、以下の形式で正確に情報源を明示してください：
+   - 「【ファイル: 正確なファイル名】」の形式で必ず記載
+   - ファイル名は推測せず、提供された情報から正確に引用
+   - シート名がある場合は「【シート: シート名】」も併記
+4. 不明確な場合は推測せず、「規約資料からは確認できません」と正直に答えてください。
+5. ファイル名やシート名を間違えて表示することは絶対に避けてください。`;
           
           if (companyRules && companyRules.trim().length > 0) {
             systemPrompt += "\n\n【会社規約ファイルの内容】\n" + companyRules;
