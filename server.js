@@ -388,11 +388,22 @@ async function getCompanyRules() {
             const arrayBuffer = await fileData.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
             const workbook = xlsx.read(buffer, { type: 'buffer' });
-            const sheetTexts = workbook.SheetNames.map((sheetName) => {
+            
+            // ワークブック全体の情報を取得
+            const totalSheets = workbook.SheetNames.length;
+            
+            const sheetTexts = workbook.SheetNames.map((sheetName, index) => {
               const worksheet = workbook.Sheets[sheetName];
               if (!worksheet) {
                 return null;
               }
+              
+              // シートの範囲を取得
+              const range = xlsx.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+              const rowCount = range.e.r + 1;
+              const colCount = range.e.c + 1;
+              
+              // より構造化されたテキスト形式で出力
               const sheetText = xlsx.utils.sheet_to_csv(worksheet, {
                 FS: '	',
                 RS: '\n',
@@ -403,7 +414,11 @@ async function getCompanyRules() {
                 return null;
               }
 
-              return `【シート: ${sheetName}】\n${sheetText}`;
+              // シートの詳細情報を含めて出力
+              return `【シート${index + 1}/${totalSheets}: ${sheetName}】
+【構造情報: ${rowCount}行 × ${colCount}列】
+【データ内容】
+${sheetText}`;
             }).filter(Boolean);
 
             if (sheetTexts.length === 0) {
@@ -411,10 +426,14 @@ async function getCompanyRules() {
 `);
               console.warn(`Excel parsing produced empty text for ${storageName}`);
             } else {
+              // ファイル全体の構造情報を追加
               fileContents.push(`【ファイル: ${originalName}】
+【Excel構造: 全${totalSheets}シート】
+【シート一覧: ${workbook.SheetNames.join(', ')}】
+
 ${sheetTexts.join('\n\n')}
 `);
-              console.log(`Parsed Excel file: ${storageName} (${sheetTexts.join('\n').length} chars)`);
+              console.log(`Parsed Excel file: ${storageName} (${totalSheets} sheets, ${sheetTexts.join('\n').length} chars)`);
             }
           } catch (xlsxError) {
             fileContents.push(`【ファイル: ${originalName}】（Excelファイルの解析中にエラーが発生しました）
@@ -534,12 +553,31 @@ app.post("/webhook", async (req, res) => {
    - まず「その内容は現在の規約資料には記載されていません」と明確に伝える
    - 次に「一般的な情報としてお答えしてもよろしいでしょうか？」と必ず確認を求める
    - 確認なしに規約外の情報を提供してはいけません
+
+【Excelファイルの構造認識について】
+Excelファイルが含まれている場合、以下の構造情報を正確に理解してください：
+- 【Excel構造: 全Xシート】: ファイル内の総シート数
+- 【シート一覧: A, B, C】: 全てのシート名
+- 【シートX/Y: シート名】: 各シートの番号と名前
+- 【構造情報: X行 × Y列】: 各シートの行数と列数
+- 【データ内容】: 実際のデータ（タブ区切り形式）
+
+【回答時の情報源明示】
 3. 回答する際は、以下の形式で正確に情報源を明示してください：
    - 「【ファイル: 正確なファイル名】」の形式で必ず記載
    - ファイル名は推測せず、提供された情報から正確に引用
-   - シート名がある場合は「【シート: シート名】」も併記
-4. 不明確な場合は推測せず、「規約資料からは確認できません」と正直に答えてください。
-5. ファイル名やシート名を間違えて表示することは絶対に避けてください。`;
+   - Excelファイルの場合：「【シート: 正確なシート名】」も併記
+   - シートの構造情報（行数×列数）も参考にしてください
+
+【Excelデータの解釈】
+4. Excelデータは以下のように解釈してください：
+   - タブ区切り（\t）で列が分離されています
+   - 改行（\n）で行が分離されています
+   - 最初の行はヘッダー（項目名）の可能性が高いです
+   - 空のセルや行は省略されています
+
+5. 不明確な場合は推測せず、「規約資料からは確認できません」と正直に答えてください。
+6. ファイル名やシート名を間違えて表示することは絶対に避けてください。`;
           
           if (companyRules && companyRules.trim().length > 0) {
             systemPrompt += "\n\n【会社規約ファイルの内容】\n" + companyRules;
