@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
+import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { createRequire } from "module";
 
@@ -91,6 +92,14 @@ const MODEL_OPTIONS = {
     provider: "groq",
     model: "llama-3.3-70b-versatile",
   },
+  "gpt": {
+    key: "gpt",
+    displayNumber: "3",
+    name: "ChatGPT",
+    description: "OpenAI GPT-4 (高精度・多機能)",
+    provider: "openai",
+    model: "gpt-4",
+  },
 };
 
 const MODEL_SELECTION_MESSAGE = `利用するAIモデルを選択してください:\n` +
@@ -143,18 +152,28 @@ function parseModelSelection(text) {
   if (!text) return null;
   const normalized = text.trim().toLowerCase();
 
-  // より厳密な判定：完全一致または明示的なモデル選択のみ
+  // 極めて厳密な判定：モデル選択の明示的な指示のみ
+  // 数字のみのメッセージや、数字を含む通常の質問では反応しない
   if (normalized === MODEL_OPTIONS["8b"].displayNumber || 
-      normalized === "1" || 
       normalized === "8b" || 
-      normalized === "コスト重視") {
+      normalized === "コスト重視" ||
+      normalized === "1番" ||
+      normalized === "モデル1") {
     return "8b";
   }
   if (normalized === MODEL_OPTIONS["70b"].displayNumber || 
-      normalized === "2" || 
       normalized === "70b" || 
-      normalized === "精度重視") {
+      normalized === "精度重視" ||
+      normalized === "2番" ||
+      normalized === "モデル2") {
     return "70b";
+  }
+  if (normalized === MODEL_OPTIONS["gpt"].displayNumber || 
+      normalized === "gpt" || 
+      normalized === "chatgpt" ||
+      normalized === "3番" ||
+      normalized === "モデル3") {
+    return "gpt";
   }
 
   return null;
@@ -248,6 +267,11 @@ dotenv.config();
 // Groq クライアントの初期化
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
+});
+
+// OpenAI クライアントの初期化
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 // Supabase クライアントの初期化
@@ -458,7 +482,12 @@ app.post("/webhook", async (req, res) => {
         const parsedSelection = parseModelSelection(userMessage);
 
         try {
-          if (parsedSelection && MODEL_OPTIONS[parsedSelection]) {
+          // モデル選択の判定をより厳密にする
+          const isExplicitModelSelection = parsedSelection && 
+            MODEL_OPTIONS[parsedSelection] && 
+            (userState.awaitingSelection || userMessage.trim().length <= 10); // 短いメッセージのみ
+
+          if (isExplicitModelSelection) {
             userState.modelKey = parsedSelection;
             userState.awaitingSelection = false;
             resetConversationHistory(conversationKey);
@@ -539,6 +568,25 @@ app.post("/webhook", async (req, res) => {
               ],
               model: selectedModel.model,
               temperature: 0.2, // より正確で一貫性のある回答のため低めに設定
+              max_tokens: 1500,
+            });
+
+            aiResponse = chatCompletion.choices[0]?.message?.content || aiResponse;
+          } else if (selectedModel.provider === "openai") {
+            const chatCompletion = await openai.chat.completions.create({
+              messages: [
+                {
+                  role: "system",
+                  content: systemPrompt,
+                },
+                ...historyMessages,
+                {
+                  role: "user",
+                  content: userMessage,
+                },
+              ],
+              model: selectedModel.model,
+              temperature: 0.2,
               max_tokens: 1500,
             });
 
