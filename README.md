@@ -5,23 +5,25 @@
 
 ## 主な機能
 
-### ✅ PDFファイル読み込み対応
+### ✅ 多様なファイル形式対応
 - **TXTファイル**: そのままテキストとして読み込み
+- **Markdownファイル（.md）**: そのままテキストとして読み込み
 - **PDFファイル**: 自動的にテキストを抽出して読み込み（pdf-parseライブラリを使用）
-- **DOCXファイル**: mammothでテキストを抽出して読み込み
-- **XLSXファイル**: シートごとにテキスト化して読み込み（xlsxライブラリを使用）
+- **Word文書（.docx）**: mammothライブラリでテキストを抽出して読み込み
+- **Excel文書（.xlsx/.xls）**: シートごとにテキスト化して読み込み（xlsxライブラリを使用）
+- **CSVファイル**: そのままテキストとして読み込み
 - **会話履歴**: ユーザーごとに直近のやり取り（最大5往復）を保持して文脈を維持（サーバー再起動でリセット）
 - Supabaseストレージに保存されたファイルを自動的に読み込み、AIアシスタントの知識ベースとして活用
 
 ### 📄 ドキュメント管理
-- `/public/admin.html` から規約ファイル（PDF/TXT/DOCX/XLSX）をアップロード
+- `/public/admin.html` から規約ファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
+- 対応形式: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.md`, `.txt`, `.csv`
 - アップロードされたファイルはSupabaseストレージに保存
-- 日本語名を含む元のファイル名はメタデータとして保持され、一覧表示やAI応答で確認可能（既存ファイルで表示されない場合は再アップロードしてください）
 - ファイル一覧の表示、ダウンロード、削除が可能
 
 ### 🤖 LINE Bot連携
 - LINE Messaging API経由でユーザーの質問を受け付け
-- Groq AI（Llama 3 系 8B / 70B）や OpenAI GPT-4o mini（任意）を使用してアップロードされた規約に基づいて回答
+- Groq AI（llama-3.3-70b-versatile）を使用してアップロードされた規約に基づいて回答
 - 規約に記載されていない内容については明示的に通知
 
 ## セットアップ
@@ -32,7 +34,6 @@ GROQ_API_KEY=your_groq_api_key
 SUPABASE_URL=your_supabase_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
 LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
-OPENAI_API_KEY=your_openai_api_key # ChatGPTを使う場合のみ
 PORT=3000
 ```
 
@@ -49,13 +50,13 @@ npm start
 ## 使い方
 
 1. サーバーを起動
-2. `/public/admin.html` にアクセスして規約ファイル（PDF/TXT/DOCX/XLSX）をアップロード
-3. LINE Bot で最初に利用する AI モデルを選択（`1` = コスト重視 8B / `2` = 精度重視 70B / `3` = 高品質 ChatGPT。`モデル変更` で再選択）
+2. `/public/admin.html` にアクセスして規約ファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
+3. LINE Bot で最初に利用する AI モデルを選択（`1` = コスト重視 8B / `2` = 精度重視 70B。`モデル変更` で再選択）
 4. AIアシスタントがアップロードされた規約に基づいて回答
 
 ## 技術スタック
 - **バックエンド**: Node.js + Express
-- **AI**: Groq SDK (Llama 3 系 8B / 70B) + OpenAI (GPT-4o mini)
+- **AI**: Groq SDK (Llama 3 系 8B / 70B を切り替え)
 - **ストレージ**: Supabase Storage
 - **PDF処理**: pdf-parse
 - **Word処理**: mammoth
