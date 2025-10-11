@@ -504,13 +504,13 @@ async function getCompanyRules() {
 
         if (extension === 'txt' || extension === 'md') {
           const text = await fileData.text();
-          fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
+          fileContents.push(`【${originalName}】\n${text}\n`);
           console.log(`Loaded ${extension.toUpperCase()} file: ${storageName} (${text.length} chars)`);
         } else if (extension === 'pdf') {
           const pdfParse = await getPdfParse();
 
           if (!pdfParse) {
-            fileContents.push(`【ファイル: ${originalName}】（PDFの解析モジュールを読み込めませんでした）
+            fileContents.push(`【${originalName}】（PDFの解析モジュールを読み込めませんでした）
 `);
             continue;
           }
@@ -522,15 +522,15 @@ async function getCompanyRules() {
             const text = (parsed.text || '').trim();
 
             if (!text) {
-              fileContents.push(`【ファイル: ${originalName}】（PDFからテキストを抽出できませんでした）
+              fileContents.push(`【${originalName}】（PDFからテキストを抽出できませんでした）
 `);
               console.warn(`PDF parsing produced empty text for ${storageName}`);
             } else {
-              fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
+              fileContents.push(`【${originalName}】\n${text}\n`);
               console.log(`Parsed PDF file: ${storageName} (${text.length} chars)`);
             }
           } catch (parseError) {
-            fileContents.push(`【ファイル: ${originalName}】（PDFの解析中にエラーが発生しました）
+            fileContents.push(`【${originalName}】（PDFの解析中にエラーが発生しました）
 `);
             console.error(`Error parsing PDF ${storageName}:`, parseError);
           }
@@ -538,7 +538,7 @@ async function getCompanyRules() {
           const mammoth = await getDocxParser();
 
           if (!mammoth) {
-            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析モジュールを読み込めませんでした）
+            fileContents.push(`【${originalName}】（DOCXの解析モジュールを読み込めませんでした）
 `);
             continue;
           }
@@ -550,22 +550,22 @@ async function getCompanyRules() {
             const text = (result.value || '').trim();
 
             if (!text) {
-              fileContents.push(`【ファイル: ${originalName}】（DOCXからテキストを抽出できませんでした）
+              fileContents.push(`【${originalName}】（DOCXからテキストを抽出できませんでした）
 `);
               console.warn(`DOCX parsing produced empty text for ${storageName}`);
             } else {
-              fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
+              fileContents.push(`【${originalName}】\n${text}\n`);
               console.log(`Parsed DOCX file: ${storageName} (${text.length} chars)`);
             }
           } catch (docxError) {
-            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析中にエラーが発生しました）\n`);
+            fileContents.push(`【${originalName}】（DOCXの解析中にエラーが発生しました）\n`);
             console.error(`Error parsing DOCX ${storageName}:`, docxError);
           }
         } else if (extension === 'xlsx' || extension === 'xls') {
           const xlsx = await getXlsxParser();
 
           if (!xlsx) {
-            fileContents.push(`【ファイル: ${originalName}】（Excelの解析モジュールを読み込めませんでした）
+            fileContents.push(`【${originalName}】（Excelの解析モジュールを読み込めませんでした）
 `);
             continue;
           }
@@ -608,12 +608,12 @@ ${sheetText}`;
             }).filter(Boolean);
 
             if (sheetTexts.length === 0) {
-              fileContents.push(`【ファイル: ${originalName}】（Excelファイルからテキストを抽出できませんでした）
+              fileContents.push(`【${originalName}】（Excelファイルからテキストを抽出できませんでした）
 `);
               console.warn(`Excel parsing produced empty text for ${storageName}`);
             } else {
               // ファイル全体の構造情報を追加
-              fileContents.push(`【ファイル: ${originalName}】
+              fileContents.push(`【${originalName}】
 【Excel構造: 全${totalSheets}シート】
 【シート一覧: ${workbook.SheetNames.join(', ')}】
 
@@ -622,17 +622,17 @@ ${sheetTexts.join('\n\n')}
               console.log(`Parsed Excel file: ${storageName} (${totalSheets} sheets, ${sheetTexts.join('\n').length} chars)`);
             }
           } catch (xlsxError) {
-            fileContents.push(`【ファイル: ${originalName}】（Excelファイルの解析中にエラーが発生しました）
+            fileContents.push(`【${originalName}】（Excelファイルの解析中にエラーが発生しました）
 `);
             console.error(`Error parsing Excel ${storageName}:`, xlsxError);
           }
         } else if (extension === 'csv') {
           try {
             const text = await fileData.text();
-            fileContents.push(`【ファイル: ${originalName}】\n${text}\n`);
+            fileContents.push(`【${originalName}】\n${text}\n`);
             console.log(`Loaded CSV file: ${storageName} (${text.length} chars)`);
           } catch (csvError) {
-            fileContents.push(`【ファイル: ${originalName}】（CSVの解析中にエラーが発生しました）
+            fileContents.push(`【${originalName}】（CSVの解析中にエラーが発生しました）
 `);
             console.error(`Error processing CSV ${storageName}:`, csvError);
           }
