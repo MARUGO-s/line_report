@@ -1000,11 +1000,12 @@ function estimateOriginalFileName(storageName, fileExtension) {
   
   // より詳細なパターンマッチング（優先順位付き）
   const detailedPatterns = [
-    // 最も具体的なパターン（最優先）
-    { pattern: /202509.*仕入|仕入.*202509/i, replacement: '202509仕入れ額' },
-    { pattern: /set.*2025|2025.*set/i, replacement: 'set20250911' },
-    { pattern: /検索.*2025.*10.*11|2025.*10.*11.*検索/i, replacement: '検索結果_2025-10-11' },
-    { pattern: /ワルツ.*ハウス.*ルール|ハウス.*ルール.*ワルツ/i, replacement: '株式会社ワルツ ハウスルール' },
+    // 最も具体的なパターン（最優先）- 実際のファイル名パターンに基づく
+    { pattern: /202509.*仕入|仕入.*202509|202509____/i, replacement: '202509仕入れ額' },
+    { pattern: /set.*2025|2025.*set|set20250911/i, replacement: 'set20250911' },
+    { pattern: /検索.*2025.*10.*11|2025.*10.*11.*検索|______2025-10-11/i, replacement: '検索結果_2025-10-11' },
+    { pattern: /ワルツ.*ハウス.*ルール|ハウス.*ルール.*ワルツ|_______________/i, replacement: '株式会社ワルツ ハウスルール' },
+    { pattern: /ワイン.*原価|原価.*ワイン|______/i, replacement: 'ワイン原価' },
     
     // 会社規約関連
     { pattern: /会社.*規約|規約.*会社/i, replacement: '会社規約' },
