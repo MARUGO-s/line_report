@@ -293,15 +293,16 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     
-    // Supabase設定（環境変数から取得するため、サーバー経由で取得）
+    // Supabase設定（GitHub Pages用に直接設定）
     let supabase;
 
-    // 設定を取得
-    async function initSupabase() {
+    // Supabase設定を直接初期化（GitHub Pages対応）
+    function initSupabase() {
       try {
-        const response = await fetch('/api/config');
-        const config = await response.json();
-        supabase = window.supabase.createClient(config.supabaseUrl, config.supabaseKey);
+        const supabaseUrl = 'https://hjrkthuufhkdocloyizq.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhqcmt0aHV1ZmhrZG9jbG95aXpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5MTA1NzQsImV4cCI6MjA3NTQ4NjU3NH0.pubjRcaDg9F2fKBYxmb7jPzFaqG-q1nge2tlLAPFilA';
+        
+        supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
         loadDocuments();
       } catch (error) {
         console.error('Init error:', error);
