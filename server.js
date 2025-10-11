@@ -706,12 +706,85 @@ app.get("/api/file-mapping/:storageName", (req, res) => {
   }
 });
 
+// 手動でファイル名マッピングを設定するエンドポイント（デバッグ用）
+app.post("/api/file-mapping/manual", (req, res) => {
+  try {
+    const { storageName, originalName } = req.body;
+    if (!storageName || !originalName) {
+      return res.status(400).json({ error: "storageName and originalName are required" });
+    }
+    
+    saveFileNameMapping(storageName, originalName);
+    console.log(`Manual file mapping saved: ${storageName} -> ${originalName}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error saving manual file mapping:", error);
+    res.status(500).json({ error: "Failed to save manual file mapping" });
+  }
+});
+
+// 現在のファイル名マッピング一覧を取得するエンドポイント（デバッグ用）
+app.get("/api/file-mapping-debug", (req, res) => {
+  try {
+    const mappings = {};
+    for (const [key, value] of fileNameMapping.entries()) {
+      mappings[key] = value;
+    }
+    res.json({ mappings, count: fileNameMapping.size });
+  } catch (error) {
+    console.error("Error getting file mappings:", error);
+    res.status(500).json({ error: "Failed to get file mappings" });
+  }
+});
+
 // 動作確認ルート（Render チェック用）
 app.get("/", (req, res) => {
   res.send("✅ Server is running and ready for LINE webhook!");
 });
 
+// サーバー起動時に既存ファイルのマッピングを復元
+async function restoreFileMappings() {
+  try {
+    console.log('🔄 Restoring file name mappings...');
+    const files = await listAllStorageFiles('uploads');
+    
+    for (const file of files) {
+      const storageName = file.fullPath || `uploads/${file.name}`;
+      const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
+      
+      // 既存のファイル名パターンを解析
+      const match = raw.match(/^(\d+)_(.+)\.(.+)$/);
+      if (match) {
+        const timestamp = match[1];
+        const encodedName = match[2];
+        const extension = match[3];
+        
+        // エンコードされた名前をデコードして元のファイル名を推定
+        let originalName;
+        try {
+          // URLデコードを試行
+          const decoded = decodeURIComponent(encodedName);
+          originalName = `${decoded}.${extension}`;
+        } catch (e) {
+          // デコードに失敗した場合は、_を元に戻して推定
+          const estimatedName = encodedName.replace(/_/g, '');
+          originalName = estimatedName ? `${estimatedName}.${extension}` : `file_${timestamp}.${extension}`;
+        }
+        
+        // マッピングを保存
+        fileNameMapping.set(raw, originalName);
+        console.log(`📁 Mapped: ${raw} -> ${originalName}`);
+      }
+    }
+    
+    console.log(`✅ Restored ${fileNameMapping.size} file name mappings`);
+  } catch (error) {
+    console.error('❌ Error restoring file mappings:', error);
+  }
+}
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server is running on port ${PORT}`);
+  await restoreFileMappings();
 });
