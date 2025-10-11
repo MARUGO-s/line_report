@@ -1,7 +1,7 @@
 {
-  "name": "company-terms",
+  "name": "marugo-s-files",
   "version": "1.0.0",
-  "description": "",
+  "description": "MARUGO-s ファイル管理システム",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

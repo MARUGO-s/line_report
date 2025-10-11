@@ -1,7 +1,7 @@
-# Company-terms
+# MARUGO-s ファイル管理システム
 
 ## 概要
-会社規約を管理し、LINE Bot経由でAIアシスタントが規約に関する質問に答えるシステムです。
+各種ドキュメントファイルを管理し、LINE Bot経由でAIアシスタントがファイル内容に関する質問に答えるシステムです。
 
 ## 主な機能
 
@@ -16,15 +16,15 @@
 - Supabaseストレージに保存されたファイルを自動的に読み込み、AIアシスタントの知識ベースとして活用
 
 ### 📄 ドキュメント管理
-- `/public/admin.html` から規約ファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
+- `/` または `/public/admin.html` からファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
 - 対応形式: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.md`, `.txt`, `.csv`
 - アップロードされたファイルはSupabaseストレージに保存
 - ファイル一覧の表示、ダウンロード、削除が可能
 
 ### 🤖 LINE Bot連携
 - LINE Messaging API経由でユーザーの質問を受け付け
-- Groq AI（llama-3.3-70b-versatile）を使用してアップロードされた規約に基づいて回答
-- 規約に記載されていない内容については明示的に通知
+- Groq AI（llama-3.1-8b / llama-3.3-70b）またはChatGPT（gpt-4o-mini）を使用してアップロードされたファイルに基づいて回答
+- ファイルに記載されていない内容については明示的に通知
 
 ## セットアップ
 
@@ -50,16 +50,16 @@ npm start
 ## 使い方
 
 1. サーバーを起動
-2. `/public/admin.html` にアクセスして規約ファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
-3. LINE Bot で最初に利用する AI モデルを選択（`1` = コスト重視 8B / `2` = 精度重視 70B。`モデル変更` で再選択）
-4. AIアシスタントがアップロードされた規約に基づいて回答
+2. `/` または `/public/admin.html` にアクセスしてファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
+3. LINE Bot で最初に利用する AI モデルを選択（`1` = Llama 8B / `2` = Llama 70B / `3` = ChatGPT。`モデル変更` で再選択）
+4. AIアシスタントがアップロードされたファイルに基づいて回答
 
 ## 技術スタック
 - **バックエンド**: Node.js + Express
-- **AI**: Groq SDK (Llama 3 系 8B / 70B を切り替え)
+- **AI**: Groq SDK (Llama 3.1 8B / Llama 3.3 70B) + OpenAI API (GPT-4o-mini)
 - **ストレージ**: Supabase Storage
 - **PDF処理**: pdf-parse
 - **Word処理**: mammoth
 - **Excel処理**: xlsx
-- **会話管理**: Groq API + インメモリ履歴
+- **会話管理**: インメモリ履歴（ユーザーごとに最大5往復）
 - **メッセージング**: LINE Messaging API
