@@ -1,0 +1,26 @@
+{
+  "name": "company-terms",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.74.0",
+    "body-parser": "^1.20.2",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "groq-sdk": "^0.8.0",
+    "mammoth": "^1.7.1",
+    "node-fetch": "^3.3.2",
+    "openai": "^6.3.0",
+    "pdf-parse": "^1.1.1",
+    "xlsx": "^0.18.5"
+  },
+  "type": "module"
+}

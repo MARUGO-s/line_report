@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>会社規約管理システム</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0a0a;
+      min-height: 100vh;
+      padding: 40px 20px;
+      color: #e0e0e0;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: linear-gradient(145deg, #1a1a1a, #121212);
+      padding: 40px;
+      border-radius: 4px;
+      border: 1px solid #2a2a2a;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    .header h1 {
+      color: #ffffff;
+      font-size: 28px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+    }
+
+    .header p {
+      color: #808080;
+      font-size: 14px;
+      font-weight: 400;
+    }
+
+    .upload-section {
+      background: linear-gradient(145deg, #1a1a1a, #121212);
+      padding: 32px;
+      border-radius: 4px;
+      border: 1px solid #2a2a2a;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    .upload-area {
+      border: 2px dashed #404040;
+      border-radius: 4px;
+      padding: 60px 40px;
+      text-align: center;
+      background: #0f0f0f;
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+
+    .upload-area:hover {
+      background: #151515;
+      border-color: #606060;
+    }
+
+    .upload-area.dragover {
+      background: #1a1a1a;
+      border-color: #808080;
+    }
+
+    .upload-icon {
+      font-size: 36px;
+      margin-bottom: 16px;
+      opacity: 0.6;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .btn {
+      background: #ffffff;
+      color: #000000;
+      padding: 12px 32px;
+      border: none;
+      border-radius: 2px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      letter-spacing: 0.3px;
+    }
+
+    .btn:hover {
+      background: #e0e0e0;
+      transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .documents-section {
+      background: linear-gradient(145deg, #1a1a1a, #121212);
+      padding: 32px;
+      border-radius: 4px;
+      border: 1px solid #2a2a2a;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    .document-list {
+      list-style: none;
+    }
+
+    .document-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 0;
+      border-bottom: 1px solid #222;
+      transition: all 0.2s ease;
+    }
+
+    .document-item:last-child {
+      border-bottom: none;
+    }
+
+    .document-item:hover {
+      padding-left: 8px;
+    }
+
+    .document-info {
+      flex: 1;
+    }
+
+    .document-name {
+      font-weight: 500;
+      color: #ffffff;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .document-meta {
+      font-size: 12px;
+      color: #606060;
+      font-weight: 400;
+    }
+
+    .document-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-small {
+      padding: 8px 20px;
+      font-size: 13px;
+      border-radius: 2px;
+      border: 1px solid #404040;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-weight: 500;
+      letter-spacing: 0.2px;
+    }
+
+    .btn-view {
+      background: #ffffff;
+      color: #000000;
+      border: none;
+    }
+
+    .btn-view:hover {
+      background: #e0e0e0;
+    }
+
+    .btn-delete {
+      background: transparent;
+      color: #808080;
+    }
+
+    .btn-delete:hover {
+      background: #ff4444;
+      color: #ffffff;
+      border-color: #ff4444;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #606060;
+      font-size: 14px;
+    }
+
+    .error {
+      background: #1a0000;
+      border: 1px solid #330000;
+      color: #ff6666;
+      padding: 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .success {
+      background: #001a00;
+      border: 1px solid #003300;
+      color: #66ff66;
+      padding: 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      background: #1a1a1a;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 20px;
+      display: none;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: #ffffff;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+
+    h2 {
+      color: #ffffff;
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 24px;
+      letter-spacing: -0.3px;
+    }
+
+    .upload-area p {
+      color: #808080;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #606060;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>会社規約管理</h1>
+      <p>規約ドキュメントの一元管理</p>
+    </div>
+
+    <div id="message"></div>
+
+    <div class="upload-section">
+      <h2>ファイルアップロード</h2>
+      <div class="upload-area" id="uploadArea">
+        <div class="upload-icon">↑</div>
+        <p>PDF、Word、Excel、Markdown、TXT、CSVファイルをドラッグ＆ドロップ</p>
+        <button class="btn" onclick="document.getElementById('fileInput').click()">
+          ファイルを選択
+        </button>
+        <input type="file" id="fileInput" accept=".pdf,.txt,.md,.docx,.xlsx,.xls,.csv" multiple>
+      </div>
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <div class="documents-section">
+      <h2>ドキュメント一覧</h2>
+      <ul class="document-list" id="documentList">
+        <li class="loading">読み込み中...</li>
+      </ul>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    
+    // Supabase設定（環境変数から取得するため、サーバー経由で取得）
+    let supabase;
+
+    // 設定を取得
+    async function initSupabase() {
+      try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        supabase = window.supabase.createClient(config.supabaseUrl, config.supabaseKey);
+        loadDocuments();
+      } catch (error) {
+        console.error('Init error:', error);
+        showMessage('設定の読み込みに失敗しました: ' + error.message, 'error');
+      }
+    }
+
+    // メッセージ表示
+    function showMessage(text, type = 'success') {
+      const messageDiv = document.getElementById('message');
+      messageDiv.className = type;
+      messageDiv.textContent = text;
+      setTimeout(() => {
+        messageDiv.textContent = '';
+        messageDiv.className = '';
+      }, 5000);
+    }
+
+    const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'md', 'docx', 'xlsx', 'xls', 'csv'];
+
+    // ファイル名マッピングを保存するためのオブジェクト
+    const fileNameMapping = JSON.parse(localStorage.getItem('fileNameMapping') || '{}');
+
+    function encodeForStorage(name) {
+      // 日本語文字を安全な文字に変換（Supabase Storage対応）
+      return name
+        .replace(/[\\\\/:*?\"<>|\s]+/g, '_')  // 特殊文字を_に変換
+        .replace(/[^\x00-\x7F]/g, '_');      // 非ASCII文字（日本語等）を_に変換
+    }
+
+    function saveFileNameMapping(storageName, originalName) {
+      fileNameMapping[storageName] = originalName;
+      localStorage.setItem('fileNameMapping', JSON.stringify(fileNameMapping));
+    }
+
+    function getOriginalFileName(storageName) {
+      return fileNameMapping[storageName] || storageName;
+    }
+
+    function decodeStoredName(storagePath) {
+      const raw = storagePath.includes('/') ? storagePath.split('/').pop() : storagePath;
+      const match = raw.match(/^(\d+)_([^.]*)\.(.+)$/);
+      if (match) {
+        try {
+          const decoded = decodeURIComponent(match[2]);
+          return `${decoded}.${match[3]}`;
+        } catch (err) {
+          console.error('ファイル名のデコードに失敗:', err);
+          return `${match[2]}.${match[3]}`;
+        }
+      }
+      return raw;
+    }
+
+    // ファイルアップロード
+    async function uploadFile(file) {
+      const extension = file.name.split('.').pop().toLowerCase();
+
+      if (!ALLOWED_EXTENSIONS.includes(extension)) {
+        showMessage('PDF、Word（.docx）、Excel（.xlsx/.xls）、Markdown（.md）、TXT、CSVファイルのみアップロード可能です', 'error');
+        return;
+      }
+
+      const progressBar = document.getElementById('progressBar');
+      const progressFill = document.getElementById('progressFill');
+      progressBar.style.display = 'block';
+      progressFill.style.width = '0%';
+
+      try {
+        const timestamp = Date.now();
+        const fileNameWithoutExt = file.name.replace(`.${extension}`, '');
+        const encodedName = encodeForStorage(fileNameWithoutExt);
+        const storagePath = `uploads/${timestamp}_${encodedName}.${extension}`;
+        
+        // console.log(`Upload file info: ${file.name} -> ${storagePath}`);
+
+        // ファイル名マッピングを保存
+        saveFileNameMapping(storagePath, file.name);
+
+        const { error } = await supabase.storage
+          .from('company-documents')
+          .upload(storagePath, file, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: file.type || 'application/octet-stream'
+          });
+
+        if (error) throw error;
+
+        progressFill.style.width = '100%';
+        showMessage(`${file.name} をアップロードしました`, 'success');
+
+        setTimeout(() => {
+          progressBar.style.display = 'none';
+          progressFill.style.width = '0%';
+        }, 1000);
+
+        loadDocuments();
+      } catch (error) {
+        console.error('Upload error:', error);
+        showMessage('アップロードに失敗しました: ' + error.message, 'error');
+        progressBar.style.display = 'none';
+      }
+    }
+
+    // Supabase Storage から全ファイルを取得（フォルダ対応）
+    async function listAllFiles(prefix = '') {
+      const collected = [];
+      let page = 0;
+
+      while (true) {
+        const { data, error } = await supabase.storage
+          .from('company-documents')
+          .list(prefix, {
+            limit: 100,
+            offset: page * 100,
+            sortBy: { column: 'created_at', order: 'desc' }
+          });
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+
+        for (const item of data) {
+          const isFolder = !item.metadata && !item.name.includes('.');
+          const fullPath = prefix ? `${prefix}/${item.name}` : item.name;
+
+          if (isFolder) {
+            const nested = await listAllFiles(fullPath);
+            collected.push(...nested);
+          } else {
+            collected.push({ ...item, fullPath });
+          }
+        }
+
+        if (data.length < 100) break;
+        page += 1;
+      }
+
+      return collected;
+    }
+
+    // ドキュメント一覧を読み込み
+    async function loadDocuments() {
+      const listElement = document.getElementById('documentList');
+      
+      try {
+        const allFiles = await listAllFiles('uploads');
+
+        if (!allFiles || allFiles.length === 0) {
+          listElement.innerHTML = '<li class="loading">アップロード済みのファイルはありません</li>';
+          return;
+        }
+
+        const filesWithNames = allFiles
+          .filter(file => ALLOWED_EXTENSIONS.includes(file.fullPath.split('.').pop().toLowerCase()))
+          .map(file => {
+            const originalName = getOriginalFileName(file.fullPath);
+            // console.log(`File list decode: ${file.fullPath} -> ${originalName}`);
+            return {
+              storageName: file.fullPath,
+              displayName: originalName,
+              uploadedAt: new Date(file.created_at),
+              sizeKb: ((file.metadata?.size ?? file.size ?? 0) / 1024).toFixed(2),
+            };
+          });
+
+        if (filesWithNames.length === 0) {
+          listElement.innerHTML = '<li class="loading">アップロード済みのファイルはありません</li>';
+          return;
+        }
+
+        listElement.innerHTML = filesWithNames.map(fileInfo => `
+          <li class="document-item">
+            <div class="document-info">
+              <div class="document-name">${fileInfo.displayName}</div>
+              <div class="document-meta">
+                サイズ: ${fileInfo.sizeKb} KB | アップロード: ${fileInfo.uploadedAt.toLocaleString('ja-JP')}
+              </div>
+            </div>
+            <div class="document-actions">
+              <button class="btn-small btn-view" onclick="viewDocument('${fileInfo.storageName}')">表示</button>
+              <button class="btn-small btn-delete" onclick="deleteDocument('${fileInfo.storageName}')">削除</button>
+            </div>
+          </li>
+        `).join('');
+      } catch (error) {
+        console.error('Load error:', error);
+        listElement.innerHTML = '<li class="loading">エラーが発生しました</li>';
+      }
+    }
+
+    // ドキュメント表示
+    async function viewDocument(fileName) {
+      try {
+        const { data } = await supabase.storage
+          .from('company-documents')
+          .getPublicUrl(fileName);
+
+        window.open(data.publicUrl, '_blank');
+      } catch (error) {
+        showMessage('ファイルを開けませんでした', 'error');
+      }
+    }
+
+    // ドキュメント削除
+    async function deleteDocument(fileName) {
+      if (!confirm('このファイルを削除しますか？')) return;
+
+      try {
+        const { error } = await supabase.storage
+          .from('company-documents')
+          .remove([fileName]);
+
+        if (error) throw error;
+
+        showMessage('ファイルを削除しました', 'success');
+        loadDocuments();
+      } catch (error) {
+        showMessage('削除に失敗しました', 'error');
+      }
+    }
+
+    // ドラッグ&ドロップ
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragover');
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      
+      const files = Array.from(e.dataTransfer.files);
+      files.forEach(uploadFile);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files);
+      files.forEach(uploadFile);
+      e.target.value = '';
+    });
+
+    // 初期化
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initSupabase);
+    } else {
+      initSupabase();
+    }
+  </script>
+</body>
+</html>
