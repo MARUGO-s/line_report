@@ -377,7 +377,7 @@
         const encodedName = encodeForStorage(fileNameWithoutExt);
         const storagePath = `uploads/${timestamp}_${encodedName}.${extension}`;
         
-        // ファイル名マッピングを保存
+        // ファイル名マッピングを保存（ローカル）
         saveFileNameMapping(storagePath, file.name);
 
         const { error } = await supabase.storage
@@ -389,6 +389,22 @@
           });
 
         if (error) throw error;
+
+        // サーバーにもファイル名マッピングを送信
+        try {
+          await fetch('/api/file-mapping', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              storageName: storagePath,
+              originalName: file.name
+            })
+          });
+        } catch (mappingError) {
+          console.warn('Failed to save file mapping to server:', mappingError);
+        }
 
         progressFill.style.width = '100%';
         showMessage(`${file.name} をアップロードしました`, 'success');

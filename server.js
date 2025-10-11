@@ -17,13 +17,20 @@ const userStates = new Map();
 const MAX_HISTORY_MESSAGES = 10; // store up to 10 prior turns (5 user/assistant pairs)
 const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'md', 'docx', 'xlsx', 'xls', 'csv'];
 
+// ファイル名マッピングを管理するMap
+const fileNameMapping = new Map();
+
 function decodeStoredName(storageName) {
   const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
   
+  // マッピングから元のファイル名を取得
+  if (fileNameMapping.has(raw)) {
+    return fileNameMapping.get(raw);
+  }
+  
   const match = raw.match(/^(\d+)_([^.]*)\.(.+)$/);
   if (match) {
-    // 日本語文字は既に_に変換されているため、元のファイル名は復元できない
-    // 代わりに、タイムスタンプと拡張子から推測可能な名前を生成
+    // マッピングがない場合は、タイムスタンプと拡張子から推測可能な名前を生成
     const timestamp = match[1];
     const extension = match[3];
     const result = `file_${timestamp}.${extension}`;
@@ -31,6 +38,18 @@ function decodeStoredName(storageName) {
   }
   
   return raw;
+}
+
+// ファイル名マッピングを保存する関数
+function saveFileNameMapping(storageName, originalName) {
+  const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
+  fileNameMapping.set(raw, originalName);
+}
+
+// ファイル名マッピングを取得する関数
+function getOriginalFileName(storageName) {
+  const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
+  return fileNameMapping.get(raw) || raw;
 }
 
 async function listAllStorageFiles(prefix = 'uploads') {
@@ -656,6 +675,35 @@ app.get("/api/config", (req, res) => {
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseKey: process.env.SUPABASE_ANON_KEY,
   });
+});
+
+// ファイル名マッピングを保存するエンドポイント
+app.post("/api/file-mapping", (req, res) => {
+  try {
+    const { storageName, originalName } = req.body;
+    if (!storageName || !originalName) {
+      return res.status(400).json({ error: "storageName and originalName are required" });
+    }
+    
+    saveFileNameMapping(storageName, originalName);
+    console.log(`File mapping saved: ${storageName} -> ${originalName}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error saving file mapping:", error);
+    res.status(500).json({ error: "Failed to save file mapping" });
+  }
+});
+
+// ファイル名マッピングを取得するエンドポイント
+app.get("/api/file-mapping/:storageName", (req, res) => {
+  try {
+    const { storageName } = req.params;
+    const originalName = getOriginalFileName(storageName);
+    res.json({ originalName });
+  } catch (error) {
+    console.error("Error getting file mapping:", error);
+    res.status(500).json({ error: "Failed to get file mapping" });
+  }
 });
 
 // 動作確認ルート（Render チェック用）
