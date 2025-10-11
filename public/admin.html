@@ -357,8 +357,15 @@
 
       try {
         const timestamp = Date.now();
-        const encodedName = encodeForStorage(file.name.replace(`.${extension}`, ''));
+        const fileNameWithoutExt = file.name.replace(`.${extension}`, '');
+        const encodedName = encodeForStorage(fileNameWithoutExt);
         const storagePath = `uploads/${timestamp}_${encodedName}.${extension}`;
+        
+        console.log(`[DEBUG] Upload file info:`);
+        console.log(`  Original name: ${file.name}`);
+        console.log(`  Name without ext: ${fileNameWithoutExt}`);
+        console.log(`  Encoded name: ${encodedName}`);
+        console.log(`  Storage path: ${storagePath}`);
 
         const { error } = await supabase.storage
           .from('company-documents')
@@ -436,12 +443,16 @@
 
         const filesWithNames = allFiles
           .filter(file => ALLOWED_EXTENSIONS.includes(file.fullPath.split('.').pop().toLowerCase()))
-          .map(file => ({
-            storageName: file.fullPath,
-            displayName: decodeStoredName(file.fullPath),
-            uploadedAt: new Date(file.created_at),
-            sizeKb: ((file.metadata?.size ?? file.size ?? 0) / 1024).toFixed(2),
-          }));
+          .map(file => {
+            const displayName = decodeStoredName(file.fullPath);
+            console.log(`[DEBUG] File list decode: ${file.fullPath} -> ${displayName}`);
+            return {
+              storageName: file.fullPath,
+              displayName: displayName,
+              uploadedAt: new Date(file.created_at),
+              sizeKb: ((file.metadata?.size ?? file.size ?? 0) / 1024).toFixed(2),
+            };
+          });
 
         if (filesWithNames.length === 0) {
           listElement.innerHTML = '<li class="loading">アップロード済みのファイルはありません</li>';

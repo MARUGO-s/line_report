@@ -19,16 +19,22 @@ const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'md', 'docx', 'xlsx', 'xls', 'csv'];
 
 function decodeStoredName(storageName) {
   const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
+  console.log(`[DEBUG] decodeStoredName input: ${storageName} -> raw: ${raw}`);
+  
   const match = raw.match(/^(\d+)_([^.]*)\.(.+)$/);
   if (match) {
     try {
       const decoded = decodeURIComponent(match[2]);
-      return `${decoded}.${match[3]}`;
+      const result = `${decoded}.${match[3]}`;
+      console.log(`[DEBUG] decodeStoredName success: ${raw} -> ${result}`);
+      return result;
     } catch (err) {
       console.warn('Failed to decode file name', raw, err);
       return `${match[2]}.${match[3]}`;
     }
   }
+  
+  console.log(`[DEBUG] decodeStoredName no match, returning raw: ${raw}`);
   return raw;
 }
 
@@ -297,7 +303,7 @@ async function getCompanyRules() {
       try {
         const storageName = file.fullPath || `uploads/${file.name}`;
         const originalName = decodeStoredName(storageName);
-        console.log(`Processing file: ${storageName} (original: ${originalName})`);
+        console.log(`[DEBUG] Processing file: ${storageName} (original: ${originalName})`);
 
         const { data: fileData, error: downloadError } = await supabase.storage
           .from('company-documents')
@@ -582,6 +588,7 @@ Excelファイルが含まれている場合、以下の構造情報を正確に
           if (companyRules && companyRules.trim().length > 0) {
             systemPrompt += "\n\n【会社規約ファイルの内容】\n" + companyRules;
             console.log("Company rules loaded successfully");
+            console.log(`[DEBUG] First 500 chars of company rules: ${companyRules.substring(0, 500)}...`);
           } else {
             systemPrompt += "\n\n【注意】現在、会社規約ファイルが読み込めていません。すべての質問に対して「申し訳ございません。現在、会社規約ファイルを読み込めていないため、正確な情報を提供できません。管理者にお問い合わせください。」と回答してください。";
             console.log("No company rules found - will inform user");
