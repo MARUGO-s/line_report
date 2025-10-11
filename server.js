@@ -14,7 +14,7 @@ let cachedXlsxParser = null;
 let cachedOpenAIClient = null;
 const conversationMemory = new Map();
 const userStates = new Map();
-const MAX_HISTORY_MESSAGES = 10; // store up to 10 prior turns (5 user/assistant pairs)
+const MAX_HISTORY_MESSAGES = 20; // store up to 20 prior turns (10 user/assistant pairs)
 const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'md', 'docx', 'xlsx', 'xls', 'csv'];
 
 // ファイル名マッピングを管理するMap
@@ -707,12 +707,13 @@ app.post("/webhook", async (req, res) => {
           if (isExplicitModelSelection) {
             userState.modelKey = parsedSelection;
             userState.awaitingSelection = false;
-            resetConversationHistory(conversationKey);
+            // 会話履歴をリセットしない - 文脈を保持
+            // resetConversationHistory(conversationKey);
 
             const selected = MODEL_OPTIONS[parsedSelection];
             await sendLineText(
               replyToken,
-              `AIモデルを「${selected.name}」(${selected.description})に設定しました。ご質問をどうぞ。`
+              `AIモデルを「${selected.name}」(${selected.description})に設定しました。会話を続けられます。`
             );
             continue;
           }
@@ -763,6 +764,13 @@ app.post("/webhook", async (req, res) => {
      以上2ファイルです
    - 長い回答は適度に改行し、スマートフォンで読みやすくする
    - 重要な情報は改行で区切り、視認性を向上させる
+
+【会話の文脈保持】
+8. 会話の文脈をしっかりと理解し、前の会話内容を踏まえて回答してください：
+   - 前回の質問や回答内容を参考に、自然な会話の流れを保つ
+   - 「先ほどの質問に関連して」や「先ほどお答えした内容について」などの表現を適切に使用
+   - 同じ話題について深掘りする質問には、前の回答を前提として回答する
+   - 会話の継続性を重視し、一問一答ではなく対話的な応答を心がける
 
 【Excelファイルの構造認識について】
 Excelファイルが含まれている場合、以下の構造情報を正確に理解してください：
