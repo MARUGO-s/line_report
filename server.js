@@ -124,10 +124,22 @@ async function getFileNameFromContent(storageName) {
         const excelBuffer = await fileData.arrayBuffer();
         const workbook = xlsx.read(Buffer.from(excelBuffer), { type: 'buffer' });
         
-        // シート名から推定
+        // シート名と内容から推定
         const sheetNames = workbook.SheetNames.join(' ').toLowerCase();
+        const allContent = workbook.SheetNames.map(name => {
+          const sheet = workbook.Sheets[name];
+          return xlsx.utils.sheet_to_csv(sheet, { blankrows: false });
+        }).join(' ').toLowerCase();
+        
+        // シート名ベースの推定
         if (sheetNames.includes('仕入') || sheetNames.includes('価格')) return '仕入れ価格.xlsx';
         if (sheetNames.includes('検索')) return '検索結果.xlsx';
+        if (sheetNames.includes('ワイン') && sheetNames.includes('原価')) return 'ワイン原価.xlsx';
+        
+        // 内容ベースの推定
+        if (allContent.includes('仕入') && allContent.includes('価格')) return '仕入れ価格.xlsx';
+        if (allContent.includes('ワイン') && allContent.includes('原価')) return 'ワイン原価.xlsx';
+        if (allContent.includes('検索') && allContent.includes('結果')) return '検索結果.xlsx';
       }
     }
     
@@ -958,16 +970,24 @@ function estimateOriginalFileName(storageName, fileExtension) {
     { pattern: /ハウス.*ルール|ルール.*ハウス/i, replacement: 'ハウスルール' },
     { pattern: /ワルツ.*ハウス|ハウス.*ワルツ/i, replacement: '株式会社ワルツ ハウスルール' },
     
-    // 価格・原価関連
+    // 価格・原価関連（拡張）
     { pattern: /ワイン.*原価|原価.*ワイン/i, replacement: 'ワイン原価' },
-    { pattern: /仕入.*価格|価格.*仕入/i, replacement: '仕入れ価格' },
+    { pattern: /仕入.*価格|価格.*仕入|仕入.*価格|価格.*仕入/i, replacement: '仕入れ価格' },
     { pattern: /購入.*価格|価格.*購入/i, replacement: '購入価格' },
+    { pattern: /原価.*管理|管理.*原価/i, replacement: '原価管理' },
+    { pattern: /価格.*表|表.*価格/i, replacement: '価格表' },
     
-    // その他
+    // 検索・結果関連
+    { pattern: /検索.*結果|結果.*検索/i, replacement: '検索結果' },
+    { pattern: /検索.*データ|データ.*検索/i, replacement: '検索データ' },
+    
+    // その他（拡張）
     { pattern: /テスト/i, replacement: 'テスト' },
     { pattern: /サンプル/i, replacement: 'サンプル' },
     { pattern: /資料/i, replacement: '資料' },
-    { pattern: /データ/i, replacement: 'データ' }
+    { pattern: /データ/i, replacement: 'データ' },
+    { pattern: /レポート/i, replacement: 'レポート' },
+    { pattern: /報告書/i, replacement: '報告書' }
   ];
   
   // パターンマッチングで推定
