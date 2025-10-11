@@ -385,7 +385,10 @@
           .upload(storagePath, file, {
             cacheControl: '3600',
             upsert: false,
-            contentType: file.type || 'application/octet-stream'
+            contentType: file.type || 'application/octet-stream',
+            metadata: {
+              originalName: file.name
+            }
           });
 
         if (error) throw error;

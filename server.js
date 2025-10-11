@@ -20,7 +20,7 @@ const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'md', 'docx', 'xlsx', 'xls', 'csv'];
 // ファイル名マッピングを管理するMap
 const fileNameMapping = new Map();
 
-function decodeStoredName(storageName) {
+async function decodeStoredName(storageName) {
   const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
   
   // マッピングから元のファイル名を取得
@@ -28,13 +28,27 @@ function decodeStoredName(storageName) {
     return fileNameMapping.get(raw);
   }
   
+  // Supabaseメタデータからファイル名を取得を試行
+  try {
+    const metadataName = await getFileNameFromMetadata(storageName);
+    if (metadataName) {
+      // メタデータから取得したファイル名をマッピングに保存
+      fileNameMapping.set(raw, metadataName);
+      return metadataName;
+    }
+  } catch (error) {
+    console.warn('Failed to get file name from metadata:', error);
+  }
+  
   const match = raw.match(/^(\d+)_([^.]*)\.(.+)$/);
   if (match) {
-    // マッピングがない場合は、タイムスタンプと拡張子から推測可能な名前を生成
-    const timestamp = match[1];
+    // マッピングがない場合は、改善された推定ロジックを使用
     const extension = match[3];
-    const result = `file_${timestamp}.${extension}`;
-    return result;
+    const estimatedName = estimateOriginalFileName(raw, extension);
+    
+    // 推定された名前をマッピングに保存
+    fileNameMapping.set(raw, estimatedName);
+    return estimatedName;
   }
   
   return raw;
@@ -44,6 +58,42 @@ function decodeStoredName(storageName) {
 function saveFileNameMapping(storageName, originalName) {
   const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
   fileNameMapping.set(raw, originalName);
+}
+
+// Supabaseのメタデータからファイル名を取得する関数
+async function getFileNameFromMetadata(storageName) {
+  try {
+    const { data, error } = await supabase.storage
+      .from('company-documents')
+      .getPublicUrl(storageName);
+    
+    if (error) throw error;
+    
+    // メタデータを取得するためにファイル情報を取得
+    const pathParts = storageName.split('/');
+    const fileName = pathParts[pathParts.length - 1];
+    const folderPath = pathParts.slice(0, -1).join('/');
+    
+    const { data: files, error: listError } = await supabase.storage
+      .from('company-documents')
+      .list(folderPath || '', {
+        search: fileName
+      });
+    
+    if (listError) throw listError;
+    
+    if (files && files.length > 0) {
+      const fileInfo = files.find(f => f.name === fileName);
+      if (fileInfo && fileInfo.metadata && fileInfo.metadata.originalName) {
+        return fileInfo.metadata.originalName;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error getting file name from metadata:', error);
+    return null;
+  }
 }
 
 // ファイル名マッピングを取得する関数
@@ -316,7 +366,7 @@ async function getCompanyRules() {
     for (const file of files) {
       try {
         const storageName = file.fullPath || `uploads/${file.name}`;
-        const originalName = decodeStoredName(storageName);
+        const originalName = await decodeStoredName(storageName);
         // console.log(`Processing file: ${storageName} (original: ${originalName})`);
 
         const { data: fileData, error: downloadError } = await supabase.storage
@@ -742,6 +792,51 @@ app.get("/", (req, res) => {
   res.send("✅ Server is running and ready for LINE webhook!");
 });
 
+// ファイル名の推定ロジックを改善
+function estimateOriginalFileName(storageName, fileExtension) {
+  const match = storageName.match(/^(\d+)_(.+)\.(.+)$/);
+  if (!match) return `file_${Date.now()}.${fileExtension}`;
+  
+  const timestamp = match[1];
+  const encodedName = match[2];
+  const extension = match[3];
+  
+  // 一般的な日本語ファイル名パターンを推定
+  const commonPatterns = [
+    { pattern: /会社.*規約/i, replacement: '会社規約' },
+    { pattern: /ハウス.*ルール/i, replacement: 'ハウスルール' },
+    { pattern: /ワイン.*原価/i, replacement: 'ワイン原価' },
+    { pattern: /仕入.*価格/i, replacement: '仕入れ価格' },
+    { pattern: /テスト/i, replacement: 'テスト' },
+    { pattern: /社内.*規則/i, replacement: '社内規則' },
+    { pattern: /就業.*規則/i, replacement: '就業規則' },
+    { pattern: /賃金.*規程/i, replacement: '賃金規程' },
+    { pattern: /福利.*厚生/i, replacement: '福利厚生' },
+    { pattern: /人事.*制度/i, replacement: '人事制度' }
+  ];
+  
+  // パターンマッチングで推定
+  for (const { pattern, replacement } of commonPatterns) {
+    if (pattern.test(encodedName)) {
+      return `${replacement}.${extension}`;
+    }
+  }
+  
+  // ファイル拡張子に基づく推定
+  const extensionBasedNames = {
+    'pdf': 'ドキュメント',
+    'xlsx': 'エクセルファイル',
+    'xls': 'エクセルファイル',
+    'docx': 'ワードファイル',
+    'txt': 'テキストファイル',
+    'csv': 'CSVファイル',
+    'md': 'マークダウンファイル'
+  };
+  
+  const baseName = extensionBasedNames[extension] || 'ファイル';
+  return `${baseName}_${timestamp.slice(-4)}.${extension}`;
+}
+
 // サーバー起動時に既存ファイルのマッピングを復元
 async function restoreFileMappings() {
   try {
@@ -755,25 +850,14 @@ async function restoreFileMappings() {
       // 既存のファイル名パターンを解析
       const match = raw.match(/^(\d+)_(.+)\.(.+)$/);
       if (match) {
-        const timestamp = match[1];
-        const encodedName = match[2];
         const extension = match[3];
         
-        // エンコードされた名前をデコードして元のファイル名を推定
-        let originalName;
-        try {
-          // URLデコードを試行
-          const decoded = decodeURIComponent(encodedName);
-          originalName = `${decoded}.${extension}`;
-        } catch (e) {
-          // デコードに失敗した場合は、_を元に戻して推定
-          const estimatedName = encodedName.replace(/_/g, '');
-          originalName = estimatedName ? `${estimatedName}.${extension}` : `file_${timestamp}.${extension}`;
-        }
+        // 改善された推定ロジックを使用
+        const estimatedName = estimateOriginalFileName(raw, extension);
         
         // マッピングを保存
-        fileNameMapping.set(raw, originalName);
-        console.log(`📁 Mapped: ${raw} -> ${originalName}`);
+        fileNameMapping.set(raw, estimatedName);
+        console.log(`📁 Mapped: ${raw} -> ${estimatedName}`);
       }
     }
     
