@@ -998,8 +998,14 @@ function estimateOriginalFileName(storageName, fileExtension) {
   
   // 手動マッピングは削除 - 包括的システムで自動処理
   
-  // より詳細なパターンマッチング（大幅強化）
+  // より詳細なパターンマッチング（優先順位付き）
   const detailedPatterns = [
+    // 最も具体的なパターン（最優先）
+    { pattern: /202509.*仕入|仕入.*202509/i, replacement: '202509仕入れ額' },
+    { pattern: /set.*2025|2025.*set/i, replacement: 'set20250911' },
+    { pattern: /検索.*2025.*10.*11|2025.*10.*11.*検索/i, replacement: '検索結果_2025-10-11' },
+    { pattern: /ワルツ.*ハウス.*ルール|ハウス.*ルール.*ワルツ/i, replacement: '株式会社ワルツ ハウスルール' },
+    
     // 会社規約関連
     { pattern: /会社.*規約|規約.*会社/i, replacement: '会社規約' },
     { pattern: /社内.*規則|規則.*社内/i, replacement: '社内規則' },
@@ -1007,7 +1013,6 @@ function estimateOriginalFileName(storageName, fileExtension) {
     
     // ハウスルール関連
     { pattern: /ハウス.*ルール|ルール.*ハウス/i, replacement: 'ハウスルール' },
-    { pattern: /ワルツ.*ハウス|ハウス.*ワルツ/i, replacement: '株式会社ワルツ ハウスルール' },
     
     // 価格・原価関連（拡張）
     { pattern: /ワイン.*原価|原価.*ワイン/i, replacement: 'ワイン原価' },
@@ -1019,23 +1024,6 @@ function estimateOriginalFileName(storageName, fileExtension) {
     // 検索・結果関連（強化）
     { pattern: /検索.*結果|結果.*検索/i, replacement: '検索結果' },
     { pattern: /検索.*データ|データ.*検索/i, replacement: '検索データ' },
-    { pattern: /検索.*2025|2025.*検索/i, replacement: '検索結果_2025-10-11' },
-    
-    // 日付・年月関連（新規追加）
-    { pattern: /202509.*仕入|仕入.*202509/i, replacement: '202509仕入れ額' },
-    { pattern: /set.*2025|2025.*set/i, replacement: 'set20250911' },
-    { pattern: /2025.*01|01.*2025/i, replacement: '202501' },
-    { pattern: /2025.*02|02.*2025/i, replacement: '202502' },
-    { pattern: /2025.*03|03.*2025/i, replacement: '202503' },
-    { pattern: /2025.*04|04.*2025/i, replacement: '202504' },
-    { pattern: /2025.*05|05.*2025/i, replacement: '202505' },
-    { pattern: /2025.*06|06.*2025/i, replacement: '202506' },
-    { pattern: /2025.*07|07.*2025/i, replacement: '202507' },
-    { pattern: /2025.*08|08.*2025/i, replacement: '202508' },
-    { pattern: /2025.*09|09.*2025/i, replacement: '202509' },
-    { pattern: /2025.*10|10.*2025/i, replacement: '202510' },
-    { pattern: /2025.*11|11.*2025/i, replacement: '202511' },
-    { pattern: /2025.*12|12.*2025/i, replacement: '202512' },
     
     // ファイル名の一部パターン（新規追加）
     { pattern: /set/i, replacement: 'set20250911' },
