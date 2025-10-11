@@ -787,6 +787,30 @@ app.get("/api/file-mapping-debug", (req, res) => {
   }
 });
 
+// フロントエンドからファイル名マッピングを一括送信するエンドポイント
+app.post("/api/file-mapping/bulk", (req, res) => {
+  try {
+    const { mappings } = req.body;
+    if (!mappings || typeof mappings !== 'object') {
+      return res.status(400).json({ error: "mappings object is required" });
+    }
+    
+    let updatedCount = 0;
+    for (const [storageName, originalName] of Object.entries(mappings)) {
+      if (storageName && originalName) {
+        saveFileNameMapping(storageName, originalName);
+        updatedCount++;
+      }
+    }
+    
+    console.log(`📁 Bulk updated ${updatedCount} file name mappings`);
+    res.json({ success: true, updatedCount });
+  } catch (error) {
+    console.error("Error saving bulk file mappings:", error);
+    res.status(500).json({ error: "Failed to save bulk file mappings" });
+  }
+});
+
 // 動作確認ルート（Render チェック用）
 app.get("/", (req, res) => {
   res.send("✅ Server is running and ready for LINE webhook!");
@@ -811,7 +835,12 @@ function estimateOriginalFileName(storageName, fileExtension) {
     '1760171685781': '株式会社ワルツ ハウスルール.pdf', 
     '1760171665916': 'ワイン原価.pdf',
     '1760171636196': '仕入れ価格.xlsx',
-    '1760171962073': 'テスト_2025-10-11.csv'
+    '1760171962073': 'テスト_2025-10-11.csv',
+    // 2025/10/11 17:49:xx 頃のファイル
+    '1760172569895': '会社規約.pdf',
+    '1760172562523': 'ワイン原価.pdf',
+    '1760172543458': '仕入れ価格.xlsx',
+    '1760172539860': '株式会社ワルツ ハウスルール.pdf'
   };
   
   // 既知のマッピングがある場合はそれを使用

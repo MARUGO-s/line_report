@@ -568,11 +568,35 @@
       e.target.value = '';
     });
 
+    // サーバーにファイル名マッピングを送信する関数
+    async function syncFileMappingsToServer() {
+      try {
+        const mappings = JSON.parse(localStorage.getItem('fileNameMapping') || '{}');
+        if (Object.keys(mappings).length > 0) {
+          await fetch('/api/file-mapping/bulk', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ mappings })
+          });
+          console.log('✅ File name mappings synced to server');
+        }
+      } catch (error) {
+        console.warn('Failed to sync file mappings to server:', error);
+      }
+    }
+
     // 初期化
+    async function initializeApp() {
+      await initSupabase();
+      await syncFileMappingsToServer();
+    }
+
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initSupabase);
+      document.addEventListener('DOMContentLoaded', initializeApp);
     } else {
-      initSupabase();
+      initializeApp();
     }
   </script>
 </body>
