@@ -96,9 +96,9 @@ const MODEL_OPTIONS = {
     key: "gpt",
     displayNumber: "3",
     name: "ChatGPT",
-    description: "OpenAI GPT-4 (高精度・多機能)",
+    description: "OpenAI GPT-4o-mini (高速・コスト効率)",
     provider: "openai",
-    model: "gpt-4",
+    model: "gpt-4o-mini",
   },
 };
 
