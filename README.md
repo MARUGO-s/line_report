@@ -16,7 +16,7 @@
 - Supabaseストレージに保存されたファイルを自動的に読み込み、AIアシスタントの知識ベースとして活用
 
 ### 📄 ドキュメント管理
-- `/` または `/public/admin.html` からファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
+- `/` (index.html) からファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
 - 対応形式: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.md`, `.txt`, `.csv`
 - アップロードされたファイルはSupabaseストレージに保存
 - ファイル一覧の表示、ダウンロード、削除が可能
@@ -50,7 +50,7 @@ npm start
 ## 使い方
 
 1. サーバーを起動
-2. `/` または `/public/admin.html` にアクセスしてファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
+2. `/` にアクセスしてファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
 3. LINE Bot で最初に利用する AI モデルを選択（`1` = Llama 8B / `2` = Llama 70B / `3` = ChatGPT。`モデル変更` で再選択）
 4. AIアシスタントがアップロードされたファイルに基づいて回答
 
