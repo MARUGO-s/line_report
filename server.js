@@ -372,8 +372,7 @@ async function getCompanyRules() {
               console.log(`Parsed DOCX file: ${storageName} (${text.length} chars)`);
             }
           } catch (docxError) {
-            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析中にエラーが発生しました）
-`);
+            fileContents.push(`【ファイル: ${originalName}】（DOCXの解析中にエラーが発生しました）\n`);
             console.error(`Error parsing DOCX ${storageName}:`, docxError);
           }
         } else if (extension === 'xlsx' || extension === 'xls') {
