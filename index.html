@@ -568,6 +568,72 @@
       e.target.value = '';
     });
 
+    // ファイルアップロード関数
+    async function uploadFile(file) {
+      if (!file) return;
+
+      const extension = file.name.split('.').pop().toLowerCase();
+      if (!ALLOWED_EXTENSIONS.includes(extension)) {
+        showMessage(`対応していないファイル形式です: ${extension}`, 'error');
+        return;
+      }
+
+      try {
+        showMessage('アップロード中...', 'info');
+        
+        const timestamp = Date.now();
+        const encodedName = encodeForStorage(file.name);
+        const storagePath = `uploads/${timestamp}_${encodedName}`;
+        
+        // Supabaseにアップロード（メタデータに元のファイル名を保存）
+        const { error } = await supabase.storage
+          .from('company-documents')
+          .upload(storagePath, file, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: file.type || 'application/octet-stream',
+            metadata: {
+              originalName: file.name
+            }
+          });
+
+        if (error) throw error;
+
+        // ファイル名マッピングを保存
+        saveFileNameMapping(storagePath, file.name);
+        
+        showMessage(`アップロード完了: ${file.name}`, 'success');
+        loadDocuments();
+        
+        // サーバーにマッピングを送信
+        await syncFileMappingsToServer();
+        
+      } catch (error) {
+        console.error('Upload error:', error);
+        showMessage('アップロードに失敗しました', 'error');
+      }
+    }
+
+    // ファイル名をストレージ用にエンコード
+    function encodeForStorage(fileName) {
+      return fileName.replace(/[^\x00-\x7F]/g, '_').replace(/[^a-zA-Z0-9._-]/g, '_');
+    }
+
+    // ファイル名マッピングを保存
+    function saveFileNameMapping(storageName, originalName) {
+      const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
+      const mappings = JSON.parse(localStorage.getItem('fileNameMapping') || '{}');
+      mappings[raw] = originalName;
+      localStorage.setItem('fileNameMapping', JSON.stringify(mappings));
+    }
+
+    // 元のファイル名を取得
+    function getOriginalFileName(storageName) {
+      const raw = storageName.includes('/') ? storageName.split('/').pop() : storageName;
+      const mappings = JSON.parse(localStorage.getItem('fileNameMapping') || '{}');
+      return mappings[raw] || raw;
+    }
+
     // サーバーにファイル名マッピングを送信する関数
     async function syncFileMappingsToServer() {
       try {
@@ -586,6 +652,9 @@
         console.warn('Failed to sync file mappings to server:', error);
       }
     }
+
+    // 対応ファイル形式
+    const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'md', 'docx', 'xlsx', 'xls', 'csv'];
 
     // 初期化
     async function initializeApp() {
