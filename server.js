@@ -357,7 +357,8 @@ function resetConversationHistory(key) {
 function getOrCreateUserState(key) {
   if (!key) return null;
   if (!userStates.has(key)) {
-    userStates.set(key, { modelKey: null, awaitingSelection: true });
+    // Default model: Groq Llama 3.1 8B unless user explicitly changes it
+    userStates.set(key, { modelKey: "8b", awaitingSelection: false });
   }
   return userStates.get(key);
 }
@@ -885,10 +886,12 @@ app.post("/webhook", async (req, res) => {
         const parsedSelection = parseModelSelection(userMessage);
 
         try {
-          // モデル選択の判定をより厳密にする
-          const isExplicitModelSelection = parsedSelection && 
-            MODEL_OPTIONS[parsedSelection] && 
-            (userState.awaitingSelection || userMessage.trim().length <= 10); // 短いメッセージのみ
+          // Only accept model selection when user is explicitly in selection flow.
+          // Default is 8b; switching requires "モデル変更" then a selection.
+          const isExplicitModelSelection =
+            Boolean(userState?.awaitingSelection) &&
+            Boolean(parsedSelection) &&
+            Boolean(MODEL_OPTIONS[parsedSelection]);
 
           if (isExplicitModelSelection) {
             userState.modelKey = parsedSelection;
