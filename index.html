@@ -325,7 +325,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     let supabaseClient = null;
-    let storageMode = "supabase"; // 'supabase' | 'local'
+    let storageMode = "supabase"; // 'supabase' | 'local' | 'disabled'
+    let hasServerApi = false; // true when running behind the Node server (Render/local)
     const BUCKET = "company-documents";
     const ALLOWED_EXTENSIONS = ["pdf", "txt", "md", "docx", "xlsx", "xls", "csv"];
 
@@ -398,6 +399,7 @@
     }
 
     async function syncFileMappingsToServer() {
+      if (!hasServerApi) return;
       try {
         const mappings = JSON.parse(localStorage.getItem("fileNameMapping") || "{}");
         if (!Object.keys(mappings).length) return;
@@ -416,6 +418,7 @@
       try {
         const res = await fetch("/api/config");
         if (res.ok) {
+          hasServerApi = true;
           const cfg = await res.json();
           if (cfg?.supabaseUrl && cfg?.supabaseKey) {
             supabaseClient = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
@@ -425,14 +428,30 @@
       } catch (_) {
         // ignore (e.g. static hosting)
       }
-      // No hardcoded keys here (avoid leaking secrets). If not configured, we fallback to local mode.
+
+      // 2) Static hosting (GitHub Pages): read config.json from the same origin
+      try {
+        const res = await fetch("./config.json", { cache: "no-store" });
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg?.supabaseUrl && cfg?.supabaseKey) {
+            supabaseClient = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+            return;
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+
       supabaseClient = null;
     }
 
     async function decideStorageMode() {
-      // Default: Supabase. If network/DNS fails, fallback to local.
+      // If supabase is not configured:
+      // - with server API: fallback to local mode
+      // - without server API (e.g. GitHub Pages): disable (can't call /api/local/*)
       if (!supabaseClient) {
-        storageMode = "local";
+        storageMode = hasServerApi ? "local" : "disabled";
         return;
       }
       try {
@@ -443,16 +462,19 @@
           // fallback to local to keep the app usable.
           const msg = String(error?.message || "");
           if (/load failed|fetch failed|network|enotfound/i.test(msg)) {
-            storageMode = "local";
+            storageMode = hasServerApi ? "local" : "disabled";
           }
         }
       } catch (e) {
         console.warn("Supabase connectivity check failed:", e);
-        storageMode = "local";
+        storageMode = hasServerApi ? "local" : "disabled";
       }
     }
 
     async function uploadSingleFile(file, index, total) {
+      if (storageMode === "disabled") {
+        throw new Error("Supabase設定が無いためアップロードできません（GitHub Pagesの場合は config.json を設定してください）。");
+      }
       if (storageMode === "local") {
         const form = new FormData();
         form.append("files", file, file.name);
@@ -486,14 +508,16 @@
 
       saveFileNameMapping(storagePath, file.name);
 
-      try {
-        await fetch("/api/file-mapping", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ storageName: storagePath, originalName: file.name }),
-        });
-      } catch (e) {
-        console.warn("Failed to save mapping to server:", e);
+      if (hasServerApi) {
+        try {
+          await fetch("/api/file-mapping", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ storageName: storagePath, originalName: file.name }),
+          });
+        } catch (e) {
+          console.warn("Failed to save mapping to server:", e);
+        }
       }
 
       return storagePath;
@@ -580,6 +604,12 @@
 
     async function loadDocuments() {
       const listElement = document.getElementById("documentList");
+
+      if (storageMode === "disabled") {
+        listElement.innerHTML =
+          '<li class="loading">Supabase設定がありません（GitHub Pagesの場合は config.json を設定してください）</li>';
+        return;
+      }
 
       if (storageMode === "supabase" && !supabaseClient) {
         listElement.innerHTML = '<li class="loading">Supabase設定がありません</li>';
@@ -725,7 +755,10 @@
         attachHandlers();
         await syncFileMappingsToServer();
         await loadDocuments();
-        if (storageMode === "local") {
+        if (storageMode === "disabled") {
+          uploadBtn.disabled = true;
+          showMessage("Supabase設定が無いため利用できません。GitHub Pagesの場合は config.json を設定してください。", "error");
+        } else if (storageMode === "local") {
           uploadBtn.disabled = false;
           showMessage("準備完了（ローカル保存モード）。ファイルを選択してアップロードしてください。", "success");
         } else {
