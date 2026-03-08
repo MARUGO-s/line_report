@@ -371,6 +371,8 @@ const ensureDefaultTemplates = () => {
     "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n※Web参照の要約です。";
   const webSummaryBodyV2 =
     "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n※Web参照の要約です。";
+  const webSummaryBodyV3 =
+    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n※Web参照の要約です。";
 
   const defaults = [
     { key: "price_found", body: "{{product_name}} の最新価格です。\n{{lines}}" },
@@ -387,7 +389,7 @@ const ensureDefaultTemplates = () => {
     },
     {
       key: "image_ocr_web_summary",
-      body: webSummaryBodyV2
+      body: webSummaryBodyV3
     }
   ];
 
@@ -403,12 +405,15 @@ const ensureDefaultTemplates = () => {
     }
 
     // Upgrade only known default body so user-customized templates are preserved.
-    if (template.key === "image_ocr_web_summary" && existingBody.trim() === webSummaryBodyV1.trim()) {
-      upsertReplyTemplate({
-        templateKey: template.key,
-        body: webSummaryBodyV2,
-        isActive: true
-      });
+    if (template.key === "image_ocr_web_summary") {
+      const trimmed = existingBody.trim();
+      if (trimmed === webSummaryBodyV1.trim() || trimmed === webSummaryBodyV2.trim()) {
+        upsertReplyTemplate({
+          templateKey: template.key,
+          body: webSummaryBodyV3,
+          isActive: true
+        });
+      }
     }
   }
 };
@@ -1348,6 +1353,134 @@ const collectFeatureHintsFromText = (text) => {
   return dedupeTextArray(found).slice(0, 10);
 };
 
+const ratingSourcePatterns = [
+  { label: "WA", regex: /(?:\bWA\b|Wine Advocate|Robert Parker|Parker|RP)[^0-9]{0,12}([8-9][0-9]|100)(?:\+)?(?:\s*\/\s*100|\s*(?:pts?|points?|点|ポイント))?/gi },
+  { label: "JS", regex: /(?:\bJS\b|James Suckling)[^0-9]{0,12}([8-9][0-9]|100)(?:\+)?(?:\s*\/\s*100|\s*(?:pts?|points?|点|ポイント))?/gi },
+  { label: "WS", regex: /(?:\bWS\b|Wine Spectator)[^0-9]{0,12}([8-9][0-9]|100)(?:\+)?(?:\s*\/\s*100|\s*(?:pts?|points?|点|ポイント))?/gi },
+  { label: "WE", regex: /(?:\bWE\b|Wine Enthusiast)[^0-9]{0,12}([8-9][0-9]|100)(?:\+)?(?:\s*\/\s*100|\s*(?:pts?|points?|点|ポイント))?/gi },
+  { label: "JD", regex: /(?:\bJD\b|Jeb Dunnuck)[^0-9]{0,12}([8-9][0-9]|100)(?:\+)?(?:\s*\/\s*100|\s*(?:pts?|points?|点|ポイント))?/gi },
+  { label: "VN", regex: /(?:\bVN\b|Vinous)[^0-9]{0,12}([8-9][0-9]|100)(?:\+)?(?:\s*\/\s*100|\s*(?:pts?|points?|点|ポイント))?/gi },
+  { label: "Decanter", regex: /(?:Decanter|DWWA)[^0-9]{0,12}([8-9][0-9]|100)(?:\+)?(?:\s*\/\s*100|\s*(?:pts?|points?|点|ポイント))?/gi }
+];
+
+const collectRatingHintsFromText = (text) => {
+  const body = String(text || "");
+  if (!body) {
+    return [];
+  }
+
+  const found = [];
+  for (const source of ratingSourcePatterns) {
+    for (const match of body.matchAll(source.regex)) {
+      const score = String(match[1] || "").trim();
+      if (!score) {
+        continue;
+      }
+      found.push(`${source.label} ${score}`);
+    }
+  }
+
+  for (const match of body.matchAll(/\b([8-9][0-9]|100)(?:\+)?\s*(?:\/\s*100|\s*(?:pts?|points?|点|ポイント))\b/gi)) {
+    const score = String(match[1] || "").trim();
+    if (score) {
+      found.push(`評価 ${score}`);
+    }
+  }
+  return dedupeTextArray(found).slice(0, 8);
+};
+
+const collectAwardHintsFromText = (text) => {
+  const body = String(text || "");
+  if (!body) {
+    return [];
+  }
+  const matches = [
+    ...body.matchAll(
+      /[^。.!?\n]{0,90}(?:受賞|金賞|銀賞|銅賞|グランプリ|Best|Award|Trophy|Medal|Top\s*100|サクラアワード|IWC|IWSC|Decanter)[^。.!?\n]{0,120}/giu
+    )
+  ];
+  return dedupeTextArray(
+    matches
+      .map((match) => truncateText(String(match[0] || "").replace(/\s+/g, " ").trim(), 130))
+      .filter(Boolean)
+  ).slice(0, 6);
+};
+
+const collectDrinkingWindowHintsFromText = (text) => {
+  const body = String(text || "");
+  if (!body) {
+    return [];
+  }
+  const found = [];
+
+  for (const match of body.matchAll(/\b((?:19|20)\d{2})\s*(?:-|–|〜|~|to)\s*((?:19|20)\d{2})\b/g)) {
+    const start = String(match[1] || "").trim();
+    const end = String(match[2] || "").trim();
+    if (start && end) {
+      found.push(`${start}-${end}`);
+    }
+  }
+
+  for (const match of body.matchAll(
+    /(?:drink(?:ing)?\s*(?:window|from|through)?|best\s*from|peak|ready\s*to\s*drink|飲み頃|飲み時)[^0-9]{0,15}((?:19|20)\d{2}(?:\s*(?:-|–|〜|~|to)\s*(?:19|20)\d{2})?)/giu
+  )) {
+    const value = String(match[1] || "").replace(/\s+/g, "").trim();
+    if (value) {
+      found.push(value.replace(/to/gi, "-").replace(/[–〜~]/g, "-"));
+    }
+  }
+
+  return dedupeTextArray(found).slice(0, 5);
+};
+
+const collectHistoryHintsFromText = (text) => {
+  const body = String(text || "");
+  if (!body) {
+    return [];
+  }
+  const matches = [
+    ...body.matchAll(
+      /[^。.!?\n]{0,90}(?:Founded|Established|Since|History|創業|設立|創立|創設|起源|歴史|老舗)[^。.!?\n]{0,160}/giu
+    )
+  ];
+  return dedupeTextArray(
+    matches
+      .map((match) => truncateText(String(match[0] || "").replace(/\s+/g, " ").trim(), 150))
+      .filter(Boolean)
+  ).slice(0, 4);
+};
+
+const buildRatingPointsFromHints = (ratingHints = []) => {
+  const hints = dedupeTextArray(ratingHints).slice(0, 4);
+  return hints.length > 0 ? hints.join(", ") : "不明";
+};
+
+const buildAwardsFromHints = (awardHints = []) => {
+  const hints = dedupeTextArray(awardHints).slice(0, 3);
+  return hints.length > 0 ? hints.join(" / ") : "不明";
+};
+
+const buildDrinkingWindowFromHints = (drinkingWindowHints = []) => {
+  const hints = dedupeTextArray(drinkingWindowHints);
+  if (!hints.length) {
+    return "不明";
+  }
+  const ranged = hints.find((item) => /(?:19|20)\d{2}\s*-\s*(?:19|20)\d{2}/.test(item));
+  if (ranged) {
+    return ranged;
+  }
+  const withYear = hints.find((item) => /(?:19|20)\d{2}/.test(item));
+  return withYear || "不明";
+};
+
+const buildWineryHistoryFromHints = (historyHints = []) => {
+  const hints = dedupeTextArray(historyHints);
+  if (!hints.length) {
+    return "不明";
+  }
+  return truncateText(hints[0], 140);
+};
+
 const parsePriceHintValue = (value) => {
   const matched = String(value || "")
     .trim()
@@ -1442,7 +1575,11 @@ const sanitizeSummaryWithEvidence = ({
   priceHints,
   varietyHints,
   tasteHints,
-  featureHints
+  featureHints,
+  ratingHints,
+  awardHints,
+  drinkingWindowHints,
+  historyHints
 }) => {
   const safe = {
     region: normalizeSummaryField(summary.region),
@@ -1450,7 +1587,11 @@ const sanitizeSummaryWithEvidence = ({
     market_price: normalizeSummaryField(summary.market_price),
     varieties: normalizeVarieties(summary.varieties),
     taste: normalizeSummaryField(summary.taste),
-    features: normalizeSummaryField(summary.features)
+    features: normalizeSummaryField(summary.features),
+    rating_points: normalizeSummaryField(summary.rating_points),
+    awards: normalizeSummaryField(summary.awards),
+    drinking_window: normalizeSummaryField(summary.drinking_window),
+    winery_history: normalizeSummaryField(summary.winery_history)
   };
 
   const regionMatch = countTokenMatches(safe.region, contextText);
@@ -1517,6 +1658,58 @@ const sanitizeSummaryWithEvidence = ({
     safe.features =
       !isUnknownSummaryField(safe.features) && featureMatch.total > 0 && featureMatch.matched > 0
         ? safe.features
+        : "不明";
+  }
+
+  const modelRatingHints = collectRatingHintsFromText(safe.rating_points);
+  const mergedRatings = dedupeTextArray([...modelRatingHints, ...(ratingHints || [])]).slice(0, 6);
+  if (mergedRatings.length > 0) {
+    safe.rating_points = buildRatingPointsFromHints(mergedRatings);
+  } else {
+    const ratingMatch = countTokenMatches(safe.rating_points, contextText);
+    safe.rating_points =
+      !isUnknownSummaryField(safe.rating_points) && ratingMatch.total > 0 && ratingMatch.matched > 0
+        ? safe.rating_points
+        : "不明";
+  }
+
+  const modelAwardHints = collectAwardHintsFromText(safe.awards);
+  const mergedAwards = dedupeTextArray([...modelAwardHints, ...(awardHints || [])]).slice(0, 5);
+  if (mergedAwards.length > 0) {
+    safe.awards = buildAwardsFromHints(mergedAwards);
+  } else {
+    const awardsMatch = countTokenMatches(safe.awards, contextText);
+    safe.awards =
+      !isUnknownSummaryField(safe.awards) && awardsMatch.total > 0 && awardsMatch.matched > 0
+        ? safe.awards
+        : "不明";
+  }
+
+  const modelDrinkingWindowHints = collectDrinkingWindowHintsFromText(safe.drinking_window);
+  const mergedDrinkingWindow = dedupeTextArray([...modelDrinkingWindowHints, ...(drinkingWindowHints || [])]).slice(
+    0,
+    5
+  );
+  if (mergedDrinkingWindow.length > 0) {
+    safe.drinking_window = buildDrinkingWindowFromHints(mergedDrinkingWindow);
+  } else {
+    const drinkingMatch = countTokenMatches(safe.drinking_window, contextText);
+    safe.drinking_window =
+      !isUnknownSummaryField(safe.drinking_window) &&
+      ((drinkingMatch.total > 0 && drinkingMatch.matched > 0) || /(?:19|20)\d{2}/.test(safe.drinking_window))
+        ? safe.drinking_window
+        : "不明";
+  }
+
+  const modelHistoryHints = collectHistoryHintsFromText(safe.winery_history);
+  const mergedHistory = dedupeTextArray([...modelHistoryHints, ...(historyHints || [])]).slice(0, 4);
+  if (mergedHistory.length > 0) {
+    safe.winery_history = buildWineryHistoryFromHints(mergedHistory);
+  } else {
+    const historyMatch = countTokenMatches(safe.winery_history, contextText);
+    safe.winery_history =
+      !isUnknownSummaryField(safe.winery_history) && historyMatch.total > 0 && historyMatch.matched > 0
+        ? safe.winery_history
         : "不明";
   }
 
@@ -1616,7 +1809,7 @@ const fetchHtmlMetaSummary = async (urlText) => {
       .replace(/\s+/g, " ")
       .trim();
     const keywordMatches = plainText.match(
-      /[^。.!?\n]{0,80}(?:セパージュ|品種|ブレンド|grape|blend|variet(?:y|ies)|価格|price|market|円|¥|\$|€|味わい|香り|特徴|テイスティング|tasting|aroma|flavor|body|酸味|タンニン)[^。.!?\n]{0,120}/giu
+      /[^。.!?\n]{0,80}(?:セパージュ|品種|ブレンド|grape|blend|variet(?:y|ies)|価格|price|market|円|¥|\$|€|味わい|香り|特徴|テイスティング|tasting|aroma|flavor|body|酸味|タンニン|評価|point|score|parker|wine advocate|james suckling|受賞|award|medal|trophy|飲み頃|drinking window|history|歴史|創業|設立|founded|established)[^。.!?\n]{0,120}/giu
     );
     const evidenceLines = [...(keywordMatches || []), ...jsonLdBlocks]
       .map((item) => truncateText(item, 220))
@@ -1644,6 +1837,10 @@ const buildWebSummaryContext = async (webCandidates) => {
   const varietyHints = [];
   const tasteHints = [];
   const featureHints = [];
+  const ratingHints = [];
+  const awardHints = [];
+  const drinkingWindowHints = [];
+  const historyHints = [];
   const seenUrl = new Set();
 
   for (const item of webCandidates.slice(0, webSearchConfig.summaryMaxSources)) {
@@ -1680,6 +1877,10 @@ const buildWebSummaryContext = async (webCandidates) => {
       varietyHints.push(...collectVarietyHintsFromText(combined));
       tasteHints.push(...collectTasteHintsFromText(combined));
       featureHints.push(...collectFeatureHintsFromText(combined));
+      ratingHints.push(...collectRatingHintsFromText(combined));
+      awardHints.push(...collectAwardHintsFromText(combined));
+      drinkingWindowHints.push(...collectDrinkingWindowHintsFromText(combined));
+      historyHints.push(...collectHistoryHintsFromText(combined));
     }
   }
 
@@ -1688,7 +1889,11 @@ const buildWebSummaryContext = async (webCandidates) => {
     priceHints: dedupeTextArray(priceHints).slice(0, 8),
     varietyHints: dedupeTextArray(varietyHints).slice(0, 8),
     tasteHints: dedupeTextArray(tasteHints).slice(0, 6),
-    featureHints: dedupeTextArray(featureHints).slice(0, 10)
+    featureHints: dedupeTextArray(featureHints).slice(0, 10),
+    ratingHints: dedupeTextArray(ratingHints).slice(0, 8),
+    awardHints: dedupeTextArray(awardHints).slice(0, 6),
+    drinkingWindowHints: dedupeTextArray(drinkingWindowHints).slice(0, 5),
+    historyHints: dedupeTextArray(historyHints).slice(0, 4)
   };
 };
 
@@ -1698,7 +1903,11 @@ const requestGroqWineSummaryFromWeb = async ({
   priceHints = [],
   varietyHints = [],
   tasteHints = [],
-  featureHints = []
+  featureHints = [],
+  ratingHints = [],
+  awardHints = [],
+  drinkingWindowHints = [],
+  historyHints = []
 }) => {
   if (!groqConfig.apiKey) {
     return null;
@@ -1719,12 +1928,12 @@ const requestGroqWineSummaryFromWeb = async ({
       body: JSON.stringify({
         model: groqConfig.model,
         temperature: 0.1,
-        max_tokens: 220,
+        max_tokens: 300,
         messages: [
           {
             role: "system",
             content:
-              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","varieties":"","taste":"","features":""}. Use only evidence in context/hints. If uncertain, use "不明".'
+              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","varieties":"","taste":"","features":"","rating_points":"","awards":"","drinking_window":"","winery_history":""}. Use only evidence in context/hints. If uncertain, use "不明".'
           },
           {
             role: "user",
@@ -1735,6 +1944,10 @@ const requestGroqWineSummaryFromWeb = async ({
               `Variety hints: ${varietyHints.join(", ") || "none"}\n\n` +
               `Taste hints: ${tasteHints.join(", ") || "none"}\n\n` +
               `Feature hints: ${featureHints.join(", ") || "none"}\n\n` +
+              `Rating hints: ${ratingHints.join(", ") || "none"}\n\n` +
+              `Award hints: ${awardHints.join(", ") || "none"}\n\n` +
+              `Drinking window hints: ${drinkingWindowHints.join(", ") || "none"}\n\n` +
+              `Winery history hints: ${historyHints.join(", ") || "none"}\n\n` +
               "Return only JSON."
           }
         ]
@@ -1758,13 +1971,21 @@ const requestGroqWineSummaryFromWeb = async ({
         market_price: normalizeSummaryField(parsed.market_price),
         varieties: normalizeVarieties(parsed.varieties),
         taste: normalizeSummaryField(parsed.taste),
-        features: normalizeSummaryField(parsed.features)
+        features: normalizeSummaryField(parsed.features),
+        rating_points: normalizeSummaryField(parsed.rating_points),
+        awards: normalizeSummaryField(parsed.awards),
+        drinking_window: normalizeSummaryField(parsed.drinking_window),
+        winery_history: normalizeSummaryField(parsed.winery_history)
       },
       contextText,
       priceHints,
       varietyHints,
       tasteHints,
-      featureHints
+      featureHints,
+      ratingHints,
+      awardHints,
+      drinkingWindowHints,
+      historyHints
     });
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -1993,7 +2214,20 @@ const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCan
   const missingVarieties = isUnknownSummaryField(summary?.varieties);
   const missingTaste = isUnknownSummaryField(summary?.taste);
   const missingFeatures = isUnknownSummaryField(summary?.features);
-  if (!missingPrice && !missingVarieties && !missingTaste && !missingFeatures) {
+  const missingRatings = isUnknownSummaryField(summary?.rating_points);
+  const missingAwards = isUnknownSummaryField(summary?.awards);
+  const missingDrinkingWindow = isUnknownSummaryField(summary?.drinking_window);
+  const missingHistory = isUnknownSummaryField(summary?.winery_history);
+  if (
+    !missingPrice &&
+    !missingVarieties &&
+    !missingTaste &&
+    !missingFeatures &&
+    !missingRatings &&
+    !missingAwards &&
+    !missingDrinkingWindow &&
+    !missingHistory
+  ) {
     return existingCandidates;
   }
 
@@ -2013,9 +2247,26 @@ const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCan
       `${query} flavor profile`
     );
   }
+  if (missingRatings) {
+    enrichmentQueries.push(
+      `${query} Parker points`,
+      `${query} Wine Advocate score`,
+      `${query} James Suckling score`,
+      `${query} rating points`
+    );
+  }
+  if (missingAwards) {
+    enrichmentQueries.push(`${query} 受賞`, `${query} awards`, `${query} medal`, `${query} trophy`);
+  }
+  if (missingDrinkingWindow) {
+    enrichmentQueries.push(`${query} 飲み頃`, `${query} drinking window`, `${query} best from`);
+  }
+  if (missingHistory) {
+    enrichmentQueries.push(`${query} ワイナリー 歴史`, `${query} winery history`, `${query} founded`);
+  }
 
   let merged = [...(existingCandidates || [])];
-  for (const extraQuery of dedupeTextArray(enrichmentQueries).slice(0, 4)) {
+  for (const extraQuery of dedupeTextArray(enrichmentQueries).slice(0, 6)) {
     try {
       const found = await searchWebCandidates(extraQuery);
       merged = mergeWebCandidatesByUrl(merged, found, webSearchConfig.summaryMaxSources + 4);
@@ -2076,13 +2327,21 @@ const resolvePriceByOcrText = async (text) => {
           market_price: buildMarketPriceFromHints(webContext.priceHints),
           varieties: webContext.varietyHints.length > 0 ? webContext.varietyHints.join(", ") : "不明",
           taste: webContext.tasteHints.length > 0 ? webContext.tasteHints.join(", ") : "不明",
-          features: webContext.featureHints.length > 0 ? webContext.featureHints.join(", ") : "不明"
+          features: webContext.featureHints.length > 0 ? webContext.featureHints.join(", ") : "不明",
+          rating_points: buildRatingPointsFromHints(webContext.ratingHints),
+          awards: buildAwardsFromHints(webContext.awardHints),
+          drinking_window: buildDrinkingWindowFromHints(webContext.drinkingWindowHints),
+          winery_history: buildWineryHistoryFromHints(webContext.historyHints)
         },
         contextText: webContext.contextText,
         priceHints: webContext.priceHints,
         varietyHints: webContext.varietyHints,
         tasteHints: webContext.tasteHints,
-        featureHints: webContext.featureHints
+        featureHints: webContext.featureHints,
+        ratingHints: webContext.ratingHints,
+        awardHints: webContext.awardHints,
+        drinkingWindowHints: webContext.drinkingWindowHints,
+        historyHints: webContext.historyHints
       });
 
     let summary =
@@ -2092,14 +2351,22 @@ const resolvePriceByOcrText = async (text) => {
         priceHints: webContext.priceHints,
         varietyHints: webContext.varietyHints,
         tasteHints: webContext.tasteHints,
-        featureHints: webContext.featureHints
+        featureHints: webContext.featureHints,
+        ratingHints: webContext.ratingHints,
+        awardHints: webContext.awardHints,
+        drinkingWindowHints: webContext.drinkingWindowHints,
+        historyHints: webContext.historyHints
       })) || buildHeuristicSummary();
 
     if (
       isUnknownSummaryField(summary.market_price) ||
       isUnknownSummaryField(summary.varieties) ||
       isUnknownSummaryField(summary.taste) ||
-      isUnknownSummaryField(summary.features)
+      isUnknownSummaryField(summary.features) ||
+      isUnknownSummaryField(summary.rating_points) ||
+      isUnknownSummaryField(summary.awards) ||
+      isUnknownSummaryField(summary.drinking_window) ||
+      isUnknownSummaryField(summary.winery_history)
     ) {
       finalCandidates = await enrichWebCandidatesForMissingFields({
         query: queryUsedForWeb,
@@ -2109,13 +2376,17 @@ const resolvePriceByOcrText = async (text) => {
       webContext = await buildWebSummaryContext(finalCandidates);
       summary =
         (await requestGroqWineSummaryFromWeb({
-        query: queryUsedForWeb,
-        contextText: webContext.contextText,
-        priceHints: webContext.priceHints,
-        varietyHints: webContext.varietyHints,
-        tasteHints: webContext.tasteHints,
-        featureHints: webContext.featureHints
-      })) || buildHeuristicSummary();
+          query: queryUsedForWeb,
+          contextText: webContext.contextText,
+          priceHints: webContext.priceHints,
+          varietyHints: webContext.varietyHints,
+          tasteHints: webContext.tasteHints,
+          featureHints: webContext.featureHints,
+          ratingHints: webContext.ratingHints,
+          awardHints: webContext.awardHints,
+          drinkingWindowHints: webContext.drinkingWindowHints,
+          historyHints: webContext.historyHints
+        })) || buildHeuristicSummary();
     }
 
     return {
@@ -2127,12 +2398,16 @@ const resolvePriceByOcrText = async (text) => {
           query: queryUsedForWeb,
           region: summary.region,
           producer: summary.producer,
-          market_price: summary.market_price,
-          varieties: summary.varieties,
-          taste: summary.taste,
-          features: summary.features
-        },
-        `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n※Web参照の要約です。`
+              market_price: summary.market_price,
+              varieties: summary.varieties,
+              taste: summary.taste,
+              features: summary.features,
+              rating_points: summary.rating_points,
+              awards: summary.awards,
+              drinking_window: summary.drinking_window,
+              winery_history: summary.winery_history
+            },
+            `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n評価ポイント: ${summary.rating_points}\n受賞歴: ${summary.awards}\n飲み頃: ${summary.drinking_window}\nワイナリーの歴史: ${summary.winery_history}\n※Web参照の要約です。`
       ),
       matches: [],
       webCandidates: finalCandidates,
