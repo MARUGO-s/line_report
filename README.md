@@ -53,6 +53,8 @@ GROQ_WINE_FLOW_ENABLED=true
 GROQ_WINE_ANALYSIS_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 GROQ_WINE_REPLY_MODEL=llama-3.1-8b-instant
 GROQ_WINE_TIMEOUT_MS=12000
+USD_TO_JPY=150
+EUR_TO_JPY=165
 GROQ_VISION_ENABLED=true
 GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 GROQ_VISION_TIMEOUT_MS=12000
@@ -126,6 +128,8 @@ GROQ_WINE_FLOW_ENABLED=true
 GROQ_WINE_ANALYSIS_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 GROQ_WINE_REPLY_MODEL=llama-3.1-8b-instant
 GROQ_WINE_TIMEOUT_MS=12000
+USD_TO_JPY=150
+EUR_TO_JPY=165
 GROQ_VISION_ENABLED=true
 GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 GROQ_VISION_TIMEOUT_MS=12000
@@ -141,6 +145,7 @@ GROQ_VISION_MAX_IMAGE_BYTES=3500000
 - `GROQ_API_KEY` を設定すると、OCR誤字を補正した候補名を先に生成してから Web 検索します。
 - `GROQ_VISION_ENABLED=true` で、画像から Groq Vision 候補名を抽出して DB照合精度を上げます。
 - `GROQ_WINE_FLOW_ENABLED=true` で、DB未一致時に「画像+Web根拠」から構造化JSONを作成し、LINE向けに再要約して返信します。
+- `USD_TO_JPY` / `EUR_TO_JPY` で価格換算レートを固定指定できます（LINE返信の価格帯は常に日本円表示）。
 - DB未一致時の返信は `1.このワインの正体 / 2.生産者・産地 / 3.セパージュ / 4.味わい / 5.受賞・評価ポイント / 6.市場での立ち位置 / 7.日本での流通 / 8.価格帯` の順で返し、末尾に `参照ソース / 検索モード / 参照URL` を付与します。
 
 ## 3. 管理認証

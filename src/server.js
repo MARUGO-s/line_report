@@ -138,6 +138,11 @@ const groqWineFlowConfig = {
   timeoutMs: Math.max(1000, Number(process.env.GROQ_WINE_TIMEOUT_MS || 12000) || 12000)
 };
 
+const pricingConfig = {
+  usdToJpy: Math.max(1, Number(process.env.USD_TO_JPY || 150) || 150),
+  eurToJpy: Math.max(1, Number(process.env.EUR_TO_JPY || 165) || 165)
+};
+
 const parseOcrExtraFields = (rawValue) => {
   const text = String(rawValue || "").trim();
   if (!text) {
@@ -1610,6 +1615,14 @@ const parseCriticScoresFromText = (value) => {
     return [];
   }
 
+  const findYearNear = (fullText, matchIndex) => {
+    const start = Math.max(0, Number(matchIndex || 0) - 24);
+    const end = Math.min(fullText.length, Number(matchIndex || 0) + 32);
+    const near = fullText.slice(start, end);
+    const year = near.match(/\b((?:19|20)\d{2})\b/);
+    return year ? year[1] : null;
+  };
+
   const patterns = [
     { source: "Robert Parker / WA", regex: /(?:Robert Parker|Parker|Wine Advocate|\bWA\b|\bRP\b)[^0-9]{0,14}([8-9][0-9]|100)(?:\+)?/gi },
     { source: "James Suckling", regex: /(?:James Suckling|\bJS\b)[^0-9]{0,14}([8-9][0-9]|100)(?:\+)?/gi },
@@ -1628,6 +1641,7 @@ const parseCriticScoresFromText = (value) => {
       }
       rows.push({
         source: rule.source,
+        year: findYearNear(text, match.index),
         score,
         scale: 100,
         note: null
@@ -1642,6 +1656,7 @@ const parseCriticScoresFromText = (value) => {
     }
     rows.push({
       source: "Critic",
+      year: findYearNear(text, match.index),
       score,
       scale: 100,
       note: null
@@ -2085,6 +2100,67 @@ const computeWineConfidence = (item) => {
   return "low";
 };
 
+const toJpyAmount = (amount, currency) => {
+  const value = Number(amount);
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  const unit = String(currency || "").toUpperCase();
+  if (unit === "JPY" || !unit) {
+    return value;
+  }
+  if (unit === "USD") {
+    return value * pricingConfig.usdToJpy;
+  }
+  if (unit === "EUR") {
+    return value * pricingConfig.eurToJpy;
+  }
+  return null;
+};
+
+const buildJpyPriceRangeInfo = (priceRange) => {
+  if (!priceRange) {
+    return { minJpy: null, maxJpy: null, note: null };
+  }
+  const minJpy = toJpyAmount(priceRange.min, priceRange.currency);
+  const maxJpy = toJpyAmount(priceRange.max, priceRange.currency);
+  if (Number.isFinite(minJpy) && Number.isFinite(maxJpy)) {
+    const sourceCurrency = String(priceRange.currency || "").toUpperCase();
+    const note =
+      sourceCurrency && sourceCurrency !== "JPY"
+        ? `${sourceCurrency}→JPY換算 (USD=${pricingConfig.usdToJpy}, EUR=${pricingConfig.eurToJpy})`
+        : "JPY";
+    return {
+      minJpy: Math.round(Math.min(minJpy, maxJpy)),
+      maxJpy: Math.round(Math.max(minJpy, maxJpy)),
+      note
+    };
+  }
+
+  const noteText = String(priceRange.note || "");
+  for (const match of noteText.matchAll(/([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:円|¥|￥)/gi)) {
+    const amount = Number(String(match[1] || "").replace(/,/g, ""));
+    if (Number.isFinite(amount) && amount > 0) {
+      return {
+        minJpy: Math.round(amount),
+        maxJpy: Math.round(amount),
+        note: "JPY"
+      };
+    }
+  }
+  return { minJpy: null, maxJpy: null, note: null };
+};
+
+const formatJpyRangeText = (minJpy, maxJpy) => {
+  if (!Number.isFinite(minJpy) || !Number.isFinite(maxJpy) || minJpy <= 0 || maxJpy <= 0) {
+    return "不明（円換算不可）";
+  }
+  if (Math.abs(minJpy - maxJpy) < 1) {
+    return `${Math.round(minJpy).toLocaleString("ja-JP")}円`;
+  }
+  return `${Math.round(Math.min(minJpy, maxJpy)).toLocaleString("ja-JP")}円 - ${Math.round(Math.max(minJpy, maxJpy)).toLocaleString("ja-JP")}円`;
+};
+
 const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
   const base = fallbackValue ? { ...fallbackValue } : emptyWineAnalysisResult();
   const raw = rawValue && typeof rawValue === "object" ? rawValue : {};
@@ -2172,9 +2248,11 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
             }
             const score = normalizeNumber(item?.score);
             const scale = normalizeNumber(item?.scale);
+            const year = asNullableWineField(item?.year);
             const note = asNullableWineField(item?.note);
             return {
               source,
+              year,
               score,
               scale,
               note
@@ -2228,6 +2306,18 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
     confidence: confidenceSet.has(raw.confidence) ? raw.confidence : "low",
     sources
   };
+
+  if (normalized.price_range) {
+    const converted = buildJpyPriceRangeInfo(normalized.price_range);
+    if (Number.isFinite(converted.minJpy) && Number.isFinite(converted.maxJpy)) {
+      normalized.price_range = {
+        min: converted.minJpy,
+        max: converted.maxJpy,
+        currency: "JPY",
+        note: converted.note || normalized.price_range.note
+      };
+    }
+  }
 
   if (!normalized.wine_name && !normalized.producer && normalized.sources.length === 0) {
     normalized.identified_wine = false;
@@ -2302,7 +2392,7 @@ const wineAnalysisOutputGuide = {
     oak_character: "string|null",
     notable_notes: ["string"]
   },
-  critic_scores: [{ source: "string", score: "number|null", scale: "number|null", note: "string|null" }],
+  critic_scores: [{ source: "string", year: "string|null", score: "number|null", scale: "number|null", note: "string|null" }],
   awards: [{ name: "string", year: "string|null", note: "string|null" }],
   market_position: "string|null",
   availability_japan: "confirmed|possible|not_found|null",
@@ -2384,7 +2474,7 @@ const requestGroqWineAnalysisFromImage = async ({
           {
             role: "system",
             content:
-              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists."
+              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available."
           },
           {
             role: "user",
@@ -2418,18 +2508,10 @@ const requestGroqWineAnalysisFromImage = async ({
 
 const formatWinePriceRangeText = (priceRange) => {
   if (!priceRange) {
-    return "不明";
+    return "不明（円換算不可）";
   }
-  const currency = asNullableWineField(priceRange.currency) || "";
-  const min = Number(priceRange.min);
-  const max = Number(priceRange.max);
-  if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max > 0) {
-    if (Math.abs(min - max) < 0.001) {
-      return `${currency} ${formatPriceAmount(min)}`.trim();
-    }
-    return `${currency} ${formatPriceAmount(Math.min(min, max))} - ${formatPriceAmount(Math.max(min, max))}`.trim();
-  }
-  return asNullableWineField(priceRange.note) || "不明";
+  const converted = buildJpyPriceRangeInfo(priceRange);
+  return formatJpyRangeText(converted.minJpy, converted.maxJpy);
 };
 
 const buildLineWineReplyFallback = (wineData) => {
@@ -2463,38 +2545,39 @@ const buildLineWineReplyFallback = (wineData) => {
     not_found: "確認できず"
   };
   const availability = availabilityMap[wineData.availability_japan] || "不明";
-  const criticScoreText =
+  const criticScoreHistoryText =
     Array.isArray(wineData.critic_scores) && wineData.critic_scores.length > 0
       ? wineData.critic_scores
           .map((item) => {
             const source = item.source || "評価";
+            const year = item.year ? `${item.year}年` : "年不明";
             const score = Number(item.score);
             const scale = Number(item.scale);
             if (Number.isFinite(score) && Number.isFinite(scale) && scale > 0) {
-              return `${source} ${score}/${scale}`;
+              return `${year} ${source} ${score}/${scale}`;
             }
             if (Number.isFinite(score)) {
-              return `${source} ${score}`;
+              return `${year} ${source} ${score}`;
             }
-            return source;
+            return `${year} ${source}`;
           })
           .join(" / ")
       : "不明";
-  const awardsText =
+  const awardsHistoryText =
     Array.isArray(wineData.awards) && wineData.awards.length > 0
       ? wineData.awards
           .map((item) => {
             const name = item.name || "";
-            const year = item.year ? `(${item.year})` : "";
-            return `${name}${year}`.trim();
+            const year = item.year ? `${item.year}年` : "年不明";
+            return `${year} ${name}`.trim();
           })
           .filter(Boolean)
           .join(" / ")
       : "不明";
   const criticAwardsText =
-    criticScoreText === "不明" && awardsText === "不明"
+    criticScoreHistoryText === "不明" && awardsHistoryText === "不明"
       ? "不明"
-      : `評価: ${criticScoreText}${awardsText !== "不明" ? ` / 受賞: ${awardsText}` : ""}`;
+      : `評価履歴: ${criticScoreHistoryText}${awardsHistoryText !== "不明" ? ` / 受賞履歴: ${awardsHistoryText}` : ""}`;
 
   return (
     `${confidencePrefix}「${identity}」です。\n` +
@@ -2531,7 +2614,7 @@ const renderLineWineReplyWithGroq = async (wineData) => {
           {
             role: "system",
             content:
-              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.セパージュ 4.味わい 5.受賞・評価ポイント（Robert Parker/WAなどがあれば明記） 6.市場での立ち位置 7.日本での流通 8.価格帯。誇張しない。JSONにない情報を書かない。"
+              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.セパージュ 4.味わい 5.受賞・評価ポイント（必ず年付き履歴。例: 2020年 WA 96/100） 6.市場での立ち位置 7.日本での流通 8.価格帯（必ず円表示）。誇張しない。JSONにない情報を書かない。"
           },
           {
             role: "user",
