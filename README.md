@@ -55,6 +55,23 @@ OCR_EXTRA_FIELDS=apikey=helloworld&language=jpn&isOverlayRequired=false&OCREngin
 
 本番利用では `helloworld` ではなく、正式APIキーへ置き換えてください。
 
+### 国会図書館OCR-Liteを使う場合（推奨）
+
+NDLOCR-Lite は公式にHTTP APIを提供していないため、このリポジトリ内の `ocr-bridge` でAPI化して利用します。
+
+- 詳細手順: `ocr-bridge/README.md`
+
+`line-wine-api` 側の設定例:
+
+```env
+OCR_ENDPOINT=https://<your-ocr-bridge>.onrender.com/ocr
+OCR_AUTH_TOKEN=<OCR_BRIDGE_TOKEN>
+OCR_REQUEST_FORMAT=multipart
+OCR_IMAGE_FIELD=image
+OCR_EXTRA_FIELDS=
+OCR_TIMEOUT_MS=60000
+```
+
 ## 3. 管理認証
 
 - 管理画面の「管理認証」で `ADMIN_TOKEN` を保存すると、以降のAPI呼び出しに `x-admin-token` ヘッダーが付きます。
@@ -107,6 +124,7 @@ curl -sS -X POST 'http://127.0.0.1:3200/api/admin/backup' \
 5. 定期バックアップ（例: cronで `POST /api/admin/backup` を1日1回）
 6. `backups/` を別ストレージへ二次保管
 7. LINE DevelopersでWebhook URLを本番URLに設定
+8. NDLOCR-Lite を使う場合は `ocr-bridge` の `/health` と `/ocr` も監視
 
 ## 7. 備考
 
