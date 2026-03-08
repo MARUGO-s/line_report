@@ -1604,6 +1604,119 @@ const buildWineryHistoryFromHints = (historyHints = []) => {
   return truncateText(hints[0], 140);
 };
 
+const parseCriticScoresFromText = (value) => {
+  const text = String(value || "");
+  if (!text.trim()) {
+    return [];
+  }
+
+  const patterns = [
+    { source: "Robert Parker / WA", regex: /(?:Robert Parker|Parker|Wine Advocate|\bWA\b|\bRP\b)[^0-9]{0,14}([8-9][0-9]|100)(?:\+)?/gi },
+    { source: "James Suckling", regex: /(?:James Suckling|\bJS\b)[^0-9]{0,14}([8-9][0-9]|100)(?:\+)?/gi },
+    { source: "Wine Spectator", regex: /(?:Wine Spectator|\bWS\b)[^0-9]{0,14}([8-9][0-9]|100)(?:\+)?/gi },
+    { source: "Wine Enthusiast", regex: /(?:Wine Enthusiast|\bWE\b)[^0-9]{0,14}([8-9][0-9]|100)(?:\+)?/gi },
+    { source: "Vinous", regex: /(?:Vinous|\bVN\b)[^0-9]{0,14}([8-9][0-9]|100)(?:\+)?/gi },
+    { source: "Decanter", regex: /(?:Decanter|DWWA)[^0-9]{0,14}([8-9][0-9]|100)(?:\+)?/gi }
+  ];
+
+  const rows = [];
+  for (const rule of patterns) {
+    for (const match of text.matchAll(rule.regex)) {
+      const score = Number(match[1]);
+      if (!Number.isFinite(score)) {
+        continue;
+      }
+      rows.push({
+        source: rule.source,
+        score,
+        scale: 100,
+        note: null
+      });
+    }
+  }
+
+  for (const match of text.matchAll(/\b([8-9][0-9]|100)(?:\+)?\s*(?:\/\s*100|\s*(?:pts?|points?|点|ポイント))\b/gi)) {
+    const score = Number(match[1]);
+    if (!Number.isFinite(score)) {
+      continue;
+    }
+    rows.push({
+      source: "Critic",
+      score,
+      scale: 100,
+      note: null
+    });
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  for (const row of rows) {
+    const key = `${String(row.source || "").toLowerCase()}-${String(row.score)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(row);
+    if (deduped.length >= 8) {
+      break;
+    }
+  }
+  return deduped;
+};
+
+const parseAwardsFromText = (value) => {
+  const text = String(value || "");
+  if (!text.trim()) {
+    return [];
+  }
+
+  const candidates = [];
+  const matched = [...text.matchAll(/[^。.!?\n]{0,90}(?:受賞|金賞|銀賞|銅賞|トロフィー|Best|Award|Trophy|Medal|Top\s*100|IWC|IWSC|Decanter)[^。.!?\n]{0,120}/giu)];
+  for (const match of matched) {
+    const name = truncateText(String(match[0] || "").replace(/\s+/g, " ").trim(), 140);
+    if (!name) {
+      continue;
+    }
+    const yearMatch = name.match(/\b((?:19|20)\d{2})\b/);
+    candidates.push({
+      name,
+      year: yearMatch ? yearMatch[1] : null,
+      note: null
+    });
+  }
+
+  if (candidates.length === 0) {
+    const splitted = text
+      .split(/[\/|]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 6);
+    for (const item of splitted) {
+      const yearMatch = item.match(/\b((?:19|20)\d{2})\b/);
+      candidates.push({
+        name: truncateText(item, 140),
+        year: yearMatch ? yearMatch[1] : null,
+        note: null
+      });
+    }
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  for (const item of candidates) {
+    const key = String(item.name || "").toLowerCase();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(item);
+    if (deduped.length >= 6) {
+      break;
+    }
+  }
+  return deduped;
+};
+
 const parsePriceHintValue = (value) => {
   const matched = String(value || "")
     .trim()
@@ -1926,6 +2039,8 @@ const emptyWineAnalysisResult = () => ({
     oak_character: null,
     notable_notes: []
   },
+  critic_scores: [],
+  awards: [],
   market_position: null,
   availability_japan: null,
   price_range: null,
@@ -1945,6 +2060,12 @@ const computeWineConfidence = (item) => {
     score += 1;
   }
   if (item.grapes.length > 0) {
+    score += 1;
+  }
+  if (item.critic_scores.length > 0) {
+    score += 1;
+  }
+  if (item.awards.length > 0) {
     score += 1;
   }
   if (item.sources.length >= 3) {
@@ -2041,6 +2162,52 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
         .slice(0, 6)
     : base.sources;
 
+  const criticScores =
+    Array.isArray(raw.critic_scores)
+      ? raw.critic_scores
+          .map((item) => {
+            const source = asNullableWineField(item?.source);
+            if (!source) {
+              return null;
+            }
+            const score = normalizeNumber(item?.score);
+            const scale = normalizeNumber(item?.scale);
+            const note = asNullableWineField(item?.note);
+            return {
+              source,
+              score,
+              scale,
+              note
+            };
+          })
+          .filter(Boolean)
+          .slice(0, 8)
+      : parseCriticScoresFromText(raw.rating_points || "").length > 0
+        ? parseCriticScoresFromText(raw.rating_points || "")
+        : base.critic_scores;
+
+  const awards =
+    Array.isArray(raw.awards)
+      ? raw.awards
+          .map((item) => {
+            const name = asNullableWineField(item?.name);
+            if (!name) {
+              return null;
+            }
+            const year = asNullableWineField(item?.year);
+            const note = asNullableWineField(item?.note);
+            return {
+              name,
+              year,
+              note
+            };
+          })
+          .filter(Boolean)
+          .slice(0, 6)
+      : parseAwardsFromText(raw.awards || "").length > 0
+        ? parseAwardsFromText(raw.awards || "")
+        : base.awards;
+
   const normalized = {
     identified_wine: Boolean(raw.identified_wine ?? base.identified_wine),
     wine_name: normalizeString(raw.wine_name ?? base.wine_name),
@@ -2053,6 +2220,8 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
     wine_type: wineTypeSet.has(raw.wine_type) ? raw.wine_type : base.wine_type,
     style_summary: normalizeString(raw.style_summary ?? base.style_summary),
     tasting_profile: tastingProfile,
+    critic_scores: criticScores,
+    awards,
     market_position: normalizeString(raw.market_position ?? base.market_position),
     availability_japan: availabilitySet.has(raw.availability_japan) ? raw.availability_japan : base.availability_japan,
     price_range: priceRange,
@@ -2087,6 +2256,8 @@ const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = ""
     ? [summary?.taste, summary?.features].filter(Boolean).join(" / ")
     : asNullableWineField(summary?.features);
   const sources = buildWineSources(webCandidates);
+  const criticScores = parseCriticScoresFromText(summary?.rating_points || "");
+  const awards = parseAwardsFromText(summary?.awards || "");
 
   const fallback = {
     identified_wine: Boolean(wineName || producer || sources.length > 0),
@@ -2100,6 +2271,8 @@ const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = ""
     wine_type: inferWineTypeFromTexts(query, ocrText, summary?.taste, summary?.features, summary?.varieties),
     style_summary: styleSummary,
     tasting_profile: tastingProfile,
+    critic_scores: criticScores,
+    awards,
     market_position: inferMarketPositionFromPriceRange(priceRange),
     availability_japan: inferAvailabilityInJapan(webCandidates),
     price_range: priceRange,
@@ -2129,6 +2302,8 @@ const wineAnalysisOutputGuide = {
     oak_character: "string|null",
     notable_notes: ["string"]
   },
+  critic_scores: [{ source: "string", score: "number|null", scale: "number|null", note: "string|null" }],
+  awards: [{ name: "string", year: "string|null", note: "string|null" }],
   market_position: "string|null",
   availability_japan: "confirmed|possible|not_found|null",
   price_range: {
@@ -2209,7 +2384,7 @@ const requestGroqWineAnalysisFromImage = async ({
           {
             role: "system",
             content:
-              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null."
+              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists."
           },
           {
             role: "user",
@@ -2288,6 +2463,38 @@ const buildLineWineReplyFallback = (wineData) => {
     not_found: "確認できず"
   };
   const availability = availabilityMap[wineData.availability_japan] || "不明";
+  const criticScoreText =
+    Array.isArray(wineData.critic_scores) && wineData.critic_scores.length > 0
+      ? wineData.critic_scores
+          .map((item) => {
+            const source = item.source || "評価";
+            const score = Number(item.score);
+            const scale = Number(item.scale);
+            if (Number.isFinite(score) && Number.isFinite(scale) && scale > 0) {
+              return `${source} ${score}/${scale}`;
+            }
+            if (Number.isFinite(score)) {
+              return `${source} ${score}`;
+            }
+            return source;
+          })
+          .join(" / ")
+      : "不明";
+  const awardsText =
+    Array.isArray(wineData.awards) && wineData.awards.length > 0
+      ? wineData.awards
+          .map((item) => {
+            const name = item.name || "";
+            const year = item.year ? `(${item.year})` : "";
+            return `${name}${year}`.trim();
+          })
+          .filter(Boolean)
+          .join(" / ")
+      : "不明";
+  const criticAwardsText =
+    criticScoreText === "不明" && awardsText === "不明"
+      ? "不明"
+      : `評価: ${criticScoreText}${awardsText !== "不明" ? ` / 受賞: ${awardsText}` : ""}`;
 
   return (
     `${confidencePrefix}「${identity}」です。\n` +
@@ -2295,9 +2502,10 @@ const buildLineWineReplyFallback = (wineData) => {
     `2. 生産者・産地: ${producerRegion}\n` +
     `3. セパージュ: ${grapesText}\n` +
     `4. 味わい: ${tasteText}\n` +
-    `5. 市場での立ち位置: ${wineData.market_position || "不明"}\n` +
-    `6. 日本での流通: ${availability}\n` +
-    `7. 価格帯: ${formatWinePriceRangeText(wineData.price_range)}`
+    `5. 受賞・評価ポイント: ${criticAwardsText}\n` +
+    `6. 市場での立ち位置: ${wineData.market_position || "不明"}\n` +
+    `7. 日本での流通: ${availability}\n` +
+    `8. 価格帯: ${formatWinePriceRangeText(wineData.price_range)}`
   );
 };
 
@@ -2323,7 +2531,7 @@ const renderLineWineReplyWithGroq = async (wineData) => {
           {
             role: "system",
             content:
-              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.セパージュ 4.味わい 5.市場での立ち位置 6.日本での流通 7.価格帯。誇張しない。JSONにない情報を書かない。"
+              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.セパージュ 4.味わい 5.受賞・評価ポイント（Robert Parker/WAなどがあれば明記） 6.市場での立ち位置 7.日本での流通 8.価格帯。誇張しない。JSONにない情報を書かない。"
           },
           {
             role: "user",
