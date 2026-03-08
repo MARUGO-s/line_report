@@ -81,6 +81,17 @@ const groqConfig = {
   maxCandidates: Math.max(1, Math.min(5, Number(process.env.GROQ_MAX_CANDIDATES || 3) || 3))
 };
 
+const groqVisionConfig = {
+  enabled: asBooleanEnv(process.env.GROQ_VISION_ENABLED, true),
+  model: String(process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct").trim(),
+  timeoutMs: Math.max(1000, Number(process.env.GROQ_VISION_TIMEOUT_MS || 12000) || 12000),
+  maxCandidates: Math.max(1, Math.min(5, Number(process.env.GROQ_VISION_MAX_CANDIDATES || 3) || 3)),
+  maxImageBytes: Math.max(
+    256 * 1024,
+    Number(process.env.GROQ_VISION_MAX_IMAGE_BYTES || 3_500_000) || 3_500_000
+  )
+};
+
 const parseOcrExtraFields = (rawValue) => {
   const text = String(rawValue || "").trim();
   if (!text) {
@@ -763,6 +774,34 @@ const fetchJsonWithTimeout = async (url, timeoutMs) => {
   }
 };
 
+const fetchImageBufferByUrl = async (imageUrl, timeoutMs, maxBytes) => {
+  const urlText = String(imageUrl || "").trim();
+  if (!/^https?:\/\//i.test(urlText)) {
+    throw new Error("imageUrl must start with http:// or https://");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(urlText, {
+      method: "GET",
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`image fetch failed ${response.status}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const imageBuffer = Buffer.from(arrayBuffer);
+    if (imageBuffer.length > maxBytes) {
+      throw new Error(`image too large (${imageBuffer.length} > ${maxBytes})`);
+    }
+    const contentType = String(response.headers.get("content-type") || "image/jpeg").trim();
+    return { imageBuffer, contentType };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const searchWikipediaCandidates = async (query) => {
   const results = [];
   for (const lang of webSearchConfig.wikipediaLangs) {
@@ -935,6 +974,11 @@ const extractSuggestionsFromGroqText = (content) => {
       for (const item of jsonCandidates) {
         suggestions.push(String(item || ""));
       }
+      for (const key of ["wine_name", "product_name", "normalized_name", "name"]) {
+        if (parsed?.[key]) {
+          suggestions.push(String(parsed[key]));
+        }
+      }
     } catch (error) {
       // ignore parse error and continue with line parsing
     }
@@ -1006,6 +1050,95 @@ const requestGroqQuerySuggestions = async ({ ocrText, candidates }) => {
       return [];
     }
     console.warn("Groq suggestion failed", error?.message || error);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const asGroqVisionContentType = (contentType) => {
+  const normalized = String(contentType || "").toLowerCase().trim();
+  if (["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(normalized)) {
+    return normalized === "image/jpg" ? "image/jpeg" : normalized;
+  }
+  return null;
+};
+
+const requestGroqVisionSuggestions = async ({ imageBuffer, contentType, ocrHint = "" }) => {
+  if (!groqVisionConfig.enabled || !groqConfig.apiKey) {
+    return [];
+  }
+  if (!imageBuffer || imageBuffer.length <= 0) {
+    return [];
+  }
+  if (imageBuffer.length > groqVisionConfig.maxImageBytes) {
+    console.warn(
+      `Skip Groq vision: image too large (${imageBuffer.length} > ${groqVisionConfig.maxImageBytes})`
+    );
+    return [];
+  }
+
+  const mimeType = asGroqVisionContentType(contentType);
+  if (!mimeType) {
+    console.warn("Skip Groq vision: unsupported content type", contentType);
+    return [];
+  }
+
+  const dataUrl = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), groqVisionConfig.timeoutMs);
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${groqConfig.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: groqVisionConfig.model,
+        temperature: 0.1,
+        max_tokens: 180,
+        messages: [
+          {
+            role: "system",
+            content:
+              'Extract wine label names from images. Return strict JSON only: {"candidates":["name1","name2"]}'
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  `Find likely wine product names from this label image. Return up to ${groqVisionConfig.maxCandidates} short candidates. ` +
+                  "Prefer official bottle label names in Latin letters when possible." +
+                  (ocrHint ? ` OCR hint: ${truncateText(ocrHint, 250)}` : "")
+              },
+              {
+                type: "image_url",
+                image_url: { url: dataUrl }
+              }
+            ]
+          }
+        ]
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`groq vision request failed ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content || "";
+    const candidates = extractSuggestionsFromGroqText(content);
+    return candidates.slice(0, groqVisionConfig.maxCandidates);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      console.warn("Groq vision timed out");
+      return [];
+    }
+    console.warn("Groq vision failed", error?.message || error);
     return [];
   } finally {
     clearTimeout(timer);
@@ -1280,17 +1413,51 @@ const processImageEvent = async (event, canReply) => {
   let confidence = null;
   let resolvedByOcr = null;
 
-  if (imageId && lineConfig.ocrEndpoint) {
+  if (imageId) {
     try {
       const { imageBuffer, contentType } = await fetchLineImageBuffer(imageId);
-      const ocr = await requestOcr(imageBuffer, contentType);
-      if (ocr?.text) {
-        extractedText = ocr.text;
-        confidence = ocr.confidence;
-        resolvedByOcr = await resolvePriceByOcrText(ocr.text);
+      let ocrText = "";
+      if (lineConfig.ocrEndpoint) {
+        try {
+          const ocr = await requestOcr(imageBuffer, contentType);
+          if (ocr?.text) {
+            ocrText = ocr.text;
+            extractedText = ocr.text;
+            confidence = ocr.confidence;
+          }
+        } catch (error) {
+          console.error("Image OCR failed", error);
+        }
+      }
+
+      let visionCandidates = [];
+      try {
+        visionCandidates = await requestGroqVisionSuggestions({
+          imageBuffer,
+          contentType,
+          ocrHint: ocrText
+        });
+      } catch (error) {
+        console.error("Groq vision extraction failed", error);
+      }
+
+      if (!ocrText && visionCandidates.length > 0) {
+        extractedText = visionCandidates.join("\n");
+      }
+
+      const candidateBlocks = [];
+      if (visionCandidates.length > 0) {
+        candidateBlocks.push(visionCandidates.join("\n"));
+      }
+      if (ocrText) {
+        candidateBlocks.push(ocrText);
+      }
+
+      if (candidateBlocks.length > 0) {
+        resolvedByOcr = await resolvePriceByOcrText(candidateBlocks.join("\n"));
       }
     } catch (error) {
-      console.error("Image OCR failed", error);
+      console.error("Image processing failed", error);
     }
   }
 
@@ -1401,6 +1568,8 @@ app.get("/api/health", (req, res) => {
     webSearchEnabled: webSearchConfig.enabled,
     webSearchMaxResults: webSearchConfig.maxResults,
     groqConfigured: Boolean(groqConfig.apiKey),
+    groqVisionEnabled: Boolean(groqConfig.apiKey) && groqVisionConfig.enabled,
+    groqVisionModel: groqVisionConfig.model,
     backupRetention: opsConfig.backupRetention
   });
 });
@@ -1741,6 +1910,34 @@ app.post("/api/ocr/resolve", async (req, res) => {
 
   const resolved = await resolvePriceByOcrText(text);
   return res.json(resolved);
+});
+
+app.post("/api/ocr/vision-url", async (req, res) => {
+  const imageUrl = String(req.body?.imageUrl || "").trim();
+  if (!imageUrl) {
+    return sendError(res, 400, "imageUrl is required");
+  }
+
+  try {
+    const { imageBuffer, contentType } = await fetchImageBufferByUrl(
+      imageUrl,
+      groqVisionConfig.timeoutMs,
+      groqVisionConfig.maxImageBytes
+    );
+    const candidates = await requestGroqVisionSuggestions({ imageBuffer, contentType });
+    const resolved = candidates.length > 0 ? await resolvePriceByOcrText(candidates.join("\n")) : null;
+
+    return res.json({
+      imageUrl,
+      contentType,
+      byteSize: imageBuffer.length,
+      candidates,
+      resolved
+    });
+  } catch (error) {
+    console.error("Vision url test failed", error);
+    return sendError(res, 500, String(error?.message || "vision url test failed"));
+  }
 });
 
 app.post("/api/line/simulate", (req, res) => {

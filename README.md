@@ -93,9 +93,15 @@ GROQ_API_KEY=<Renderの秘密環境変数>
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_TIMEOUT_MS=5000
 GROQ_MAX_CANDIDATES=3
+GROQ_VISION_ENABLED=true
+GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+GROQ_VISION_TIMEOUT_MS=12000
+GROQ_VISION_MAX_CANDIDATES=3
+GROQ_VISION_MAX_IMAGE_BYTES=3500000
 ```
 
 - `GROQ_API_KEY` を設定すると、OCR誤字を補正した候補名を先に生成してから Web 検索します。
+- `GROQ_VISION_ENABLED=true` で、画像から Groq Vision 候補名を抽出して DB照合精度を上げます。
 
 ## 3. 管理認証
 
@@ -137,6 +143,7 @@ curl -sS -X POST 'http://127.0.0.1:3200/api/admin/backup' \
 - `GET /api/reply-templates`
 - `POST /api/reply-templates`
 - `POST /api/ocr/resolve`
+- `POST /api/ocr/vision-url`
 - `POST /api/line/simulate`
 - `POST /webhooks/line`
 
