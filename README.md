@@ -72,6 +72,8 @@ OCR_EXTRA_FIELDS=
 OCR_TIMEOUT_MS=60000
 ```
 
+注: `line-wine-ocr` を Render Free で動かすと、OCR実行時にメモリ不足になる可能性があります。実運用は `Starter` 以上を推奨します。
+
 ## 3. 管理認証
 
 - 管理画面の「管理認証」で `ADMIN_TOKEN` を保存すると、以降のAPI呼び出しに `x-admin-token` ヘッダーが付きます。
