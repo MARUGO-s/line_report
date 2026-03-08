@@ -127,11 +127,11 @@ GROQ_VISION_MAX_IMAGE_BYTES=3500000
 
 - `WEB_SEARCH_PROVIDER=auto` の場合、`SERPAPI_API_KEY` が設定されていれば SerpAPI（Google検索）を優先し、未設定時は Wikipedia / DuckDuckGo を使います。
 - `WEB_SEARCH_PRIORITY_DOMAINS` を設定すると、まずそのドメイン内（例: `www.enoteca.co.jp`）を検索し、ヒットが弱い/無い場合に通常Web検索へフォールバックします。
-- `WEB_SUMMARY_MAX_SOURCES` は要約時に参照するWebソース数です。市場価格/セパージュの抽出率を上げたい場合は `6-8` を推奨します。
+- `WEB_SUMMARY_MAX_SOURCES` は要約時に参照するWebソース数です。市場価格/セパージュ/味わい/特徴の抽出率を上げたい場合は `6-8` を推奨します。
 - `WEB_SEARCH_PROVIDER=serpapi` で SerpAPI のみ、`WEB_SEARCH_PROVIDER=free` で無料ソースのみを使います。
 - `GROQ_API_KEY` を設定すると、OCR誤字を補正した候補名を先に生成してから Web 検索します。
 - `GROQ_VISION_ENABLED=true` で、画像から Groq Vision 候補名を抽出して DB照合精度を上げます。
-- DB未一致時の返信は `産地 / 生産者 / 市場価格 / セパージュ` の順で Web要約を返します。
+- DB未一致時の返信は `産地 / 生産者 / 市場価格 / セパージュ / 味わい / 特徴` の順で Web要約を返します。
 
 ## 3. 管理認証
 

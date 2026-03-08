@@ -366,7 +366,12 @@ const buildTextByTemplate = (templateKey, variables, fallbackText) => {
 };
 
 const ensureDefaultTemplates = () => {
-  const existingKeys = new Set(listReplyTemplates().map((item) => item.template_key));
+  const existingMap = new Map(listReplyTemplates().map((item) => [item.template_key, item.body]));
+  const webSummaryBodyV1 =
+    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n※Web参照の要約です。";
+  const webSummaryBodyV2 =
+    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n※Web参照の要約です。";
+
   const defaults = [
     { key: "price_found", body: "{{product_name}} の最新価格です。\n{{lines}}" },
     { key: "price_not_found", body: "{{query}} に一致する価格が見つかりませんでした。" },
@@ -382,20 +387,29 @@ const ensureDefaultTemplates = () => {
     },
     {
       key: "image_ocr_web_summary",
-      body:
-        "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n※Web参照の要約です。"
+      body: webSummaryBodyV2
     }
   ];
 
   for (const template of defaults) {
-    if (existingKeys.has(template.key)) {
+    const existingBody = existingMap.get(template.key);
+    if (!existingBody) {
+      upsertReplyTemplate({
+        templateKey: template.key,
+        body: template.body,
+        isActive: true
+      });
       continue;
     }
-    upsertReplyTemplate({
-      templateKey: template.key,
-      body: template.body,
-      isActive: true
-    });
+
+    // Upgrade only known default body so user-customized templates are preserved.
+    if (template.key === "image_ocr_web_summary" && existingBody.trim() === webSummaryBodyV1.trim()) {
+      upsertReplyTemplate({
+        templateKey: template.key,
+        body: webSummaryBodyV2,
+        isActive: true
+      });
+    }
   }
 };
 
@@ -1274,6 +1288,66 @@ const collectVarietyHintsFromText = (text) => {
   return dedupeTextArray(found).slice(0, 8);
 };
 
+const tastePatterns = [
+  { label: "フルボディ", patterns: [/\bfull[-\s]?bod(?:y|ied)\b/i, /フルボディ/u] },
+  { label: "ミディアムボディ", patterns: [/\bmedium[-\s]?bod(?:y|ied)\b/i, /ミディアムボディ/u] },
+  { label: "ライトボディ", patterns: [/\blight[-\s]?bod(?:y|ied)\b/i, /ライトボディ/u] },
+  { label: "辛口", patterns: [/\bdry\b/i, /辛口/u] },
+  { label: "やや辛口", patterns: [/\boff[-\s]?dry\b/i, /やや辛口/u] },
+  { label: "甘口", patterns: [/\bsweet\b/i, /甘口/u] },
+  { label: "高い酸味", patterns: [/\bhigh\s+acidity\b/i, /酸味(が)?高/u] },
+  { label: "穏やかな酸味", patterns: [/\blow\s+acidity\b/i, /酸味(が)?穏やか/u] },
+  { label: "しっかりしたタンニン", patterns: [/\btannic\b/i, /タンニン(が)?強/u, /しっかりしたタンニン/u] },
+  { label: "まろやか", patterns: [/\bsmooth\b/i, /まろやか/u] },
+  { label: "エレガント", patterns: [/\belegant\b/i, /エレガント/u] },
+  { label: "力強い", patterns: [/\bpowerful\b/i, /力強/u] }
+];
+
+const collectTasteHintsFromText = (text) => {
+  const body = String(text || "");
+  if (!body) {
+    return [];
+  }
+
+  const found = [];
+  for (const entry of tastePatterns) {
+    if (entry.patterns.some((pattern) => pattern.test(body))) {
+      found.push(entry.label);
+    }
+  }
+  return dedupeTextArray(found).slice(0, 6);
+};
+
+const featurePatterns = [
+  { label: "赤系果実", patterns: [/\bred\s+fruit(s)?\b/i, /\bcherry\b/i, /\brasberry\b/i, /赤系果実/u, /チェリー/u] },
+  { label: "黒系果実", patterns: [/\bblack\s+fruit(s)?\b/i, /\bblackcurrant\b/i, /\bcassis\b/i, /\bplum\b/i, /黒系果実/u, /カシス/u, /プラム/u] },
+  { label: "柑橘", patterns: [/\bcitrus\b/i, /柑橘/u] },
+  { label: "フローラル", patterns: [/\bfloral\b/i, /花/u] },
+  { label: "ハーブ", patterns: [/\bherb(al)?\b/i, /ハーブ/u] },
+  { label: "スパイス", patterns: [/\bspice(d)?\b/i, /スパイス/u] },
+  { label: "オーク", patterns: [/\boak\b/i, /オーク/u, /樽/u] },
+  { label: "バニラ", patterns: [/\bvanilla\b/i, /バニラ/u] },
+  { label: "チョコレート", patterns: [/\bchocolate\b/i, /チョコレート/u] },
+  { label: "スモーキー", patterns: [/\bsmoky\b/i, /スモーキー/u] },
+  { label: "ミネラル", patterns: [/\bminerality?\b/i, /ミネラル/u] },
+  { label: "長い余韻", patterns: [/\blong\s+finish\b/i, /余韻(が)?長/u] }
+];
+
+const collectFeatureHintsFromText = (text) => {
+  const body = String(text || "");
+  if (!body) {
+    return [];
+  }
+
+  const found = [];
+  for (const entry of featurePatterns) {
+    if (entry.patterns.some((pattern) => pattern.test(body))) {
+      found.push(entry.label);
+    }
+  }
+  return dedupeTextArray(found).slice(0, 10);
+};
+
 const parsePriceHintValue = (value) => {
   const matched = String(value || "")
     .trim()
@@ -1362,12 +1436,21 @@ const isUnknownSummaryField = (value) => {
   return !text || text === "不明";
 };
 
-const sanitizeSummaryWithEvidence = ({ summary, contextText, priceHints, varietyHints }) => {
+const sanitizeSummaryWithEvidence = ({
+  summary,
+  contextText,
+  priceHints,
+  varietyHints,
+  tasteHints,
+  featureHints
+}) => {
   const safe = {
     region: normalizeSummaryField(summary.region),
     producer: normalizeSummaryField(summary.producer),
     market_price: normalizeSummaryField(summary.market_price),
-    varieties: normalizeVarieties(summary.varieties)
+    varieties: normalizeVarieties(summary.varieties),
+    taste: normalizeSummaryField(summary.taste),
+    features: normalizeSummaryField(summary.features)
   };
 
   const regionMatch = countTokenMatches(safe.region, contextText);
@@ -1412,6 +1495,30 @@ const sanitizeSummaryWithEvidence = ({ summary, contextText, priceHints, variety
   const modelVarieties = collectVarietyHintsFromText(safe.varieties);
   const mergedVarieties = dedupeTextArray([...modelVarieties, ...(varietyHints || [])]).slice(0, 6);
   safe.varieties = mergedVarieties.length > 0 ? mergedVarieties.join(", ") : "不明";
+
+  const modelTasteHints = collectTasteHintsFromText(safe.taste);
+  const mergedTaste = dedupeTextArray([...modelTasteHints, ...(tasteHints || [])]).slice(0, 5);
+  if (mergedTaste.length > 0) {
+    safe.taste = mergedTaste.join(", ");
+  } else {
+    const tasteMatch = countTokenMatches(safe.taste, contextText);
+    safe.taste =
+      !isUnknownSummaryField(safe.taste) && tasteMatch.total > 0 && tasteMatch.matched > 0
+        ? safe.taste
+        : "不明";
+  }
+
+  const modelFeatureHints = collectFeatureHintsFromText(safe.features);
+  const mergedFeatures = dedupeTextArray([...modelFeatureHints, ...(featureHints || [])]).slice(0, 8);
+  if (mergedFeatures.length > 0) {
+    safe.features = mergedFeatures.join(", ");
+  } else {
+    const featureMatch = countTokenMatches(safe.features, contextText);
+    safe.features =
+      !isUnknownSummaryField(safe.features) && featureMatch.total > 0 && featureMatch.matched > 0
+        ? safe.features
+        : "不明";
+  }
 
   return safe;
 };
@@ -1509,7 +1616,7 @@ const fetchHtmlMetaSummary = async (urlText) => {
       .replace(/\s+/g, " ")
       .trim();
     const keywordMatches = plainText.match(
-      /[^。.!?\n]{0,80}(?:セパージュ|品種|ブレンド|grape|blend|variet(?:y|ies)|価格|price|market|円|¥|\$|€)[^。.!?\n]{0,120}/giu
+      /[^。.!?\n]{0,80}(?:セパージュ|品種|ブレンド|grape|blend|variet(?:y|ies)|価格|price|market|円|¥|\$|€|味わい|香り|特徴|テイスティング|tasting|aroma|flavor|body|酸味|タンニン)[^。.!?\n]{0,120}/giu
     );
     const evidenceLines = [...(keywordMatches || []), ...jsonLdBlocks]
       .map((item) => truncateText(item, 220))
@@ -1535,6 +1642,8 @@ const buildWebSummaryContext = async (webCandidates) => {
   const contextBlocks = [];
   const priceHints = [];
   const varietyHints = [];
+  const tasteHints = [];
+  const featureHints = [];
   const seenUrl = new Set();
 
   for (const item of webCandidates.slice(0, webSearchConfig.summaryMaxSources)) {
@@ -1569,13 +1678,17 @@ const buildWebSummaryContext = async (webCandidates) => {
       contextBlocks.push(`[source=${sourceName}] ${url}\n${truncateText(combined, 420)}`);
       priceHints.push(...collectPriceHintsFromText(combined));
       varietyHints.push(...collectVarietyHintsFromText(combined));
+      tasteHints.push(...collectTasteHintsFromText(combined));
+      featureHints.push(...collectFeatureHintsFromText(combined));
     }
   }
 
   return {
     contextText: contextBlocks.join("\n\n"),
     priceHints: dedupeTextArray(priceHints).slice(0, 8),
-    varietyHints: dedupeTextArray(varietyHints).slice(0, 8)
+    varietyHints: dedupeTextArray(varietyHints).slice(0, 8),
+    tasteHints: dedupeTextArray(tasteHints).slice(0, 6),
+    featureHints: dedupeTextArray(featureHints).slice(0, 10)
   };
 };
 
@@ -1583,7 +1696,9 @@ const requestGroqWineSummaryFromWeb = async ({
   query,
   contextText,
   priceHints = [],
-  varietyHints = []
+  varietyHints = [],
+  tasteHints = [],
+  featureHints = []
 }) => {
   if (!groqConfig.apiKey) {
     return null;
@@ -1609,7 +1724,7 @@ const requestGroqWineSummaryFromWeb = async ({
           {
             role: "system",
             content:
-              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","varieties":""}. Use only evidence in context/hints. If uncertain, use "不明".'
+              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","varieties":"","taste":"","features":""}. Use only evidence in context/hints. If uncertain, use "不明".'
           },
           {
             role: "user",
@@ -1618,6 +1733,8 @@ const requestGroqWineSummaryFromWeb = async ({
               `Web context:\n${truncateText(contextText, 3000)}\n\n` +
               `Price hints: ${priceHints.join(", ") || "none"}\n\n` +
               `Variety hints: ${varietyHints.join(", ") || "none"}\n\n` +
+              `Taste hints: ${tasteHints.join(", ") || "none"}\n\n` +
+              `Feature hints: ${featureHints.join(", ") || "none"}\n\n` +
               "Return only JSON."
           }
         ]
@@ -1639,11 +1756,15 @@ const requestGroqWineSummaryFromWeb = async ({
         region: normalizeSummaryField(parsed.region),
         producer: normalizeSummaryField(parsed.producer),
         market_price: normalizeSummaryField(parsed.market_price),
-        varieties: normalizeVarieties(parsed.varieties)
+        varieties: normalizeVarieties(parsed.varieties),
+        taste: normalizeSummaryField(parsed.taste),
+        features: normalizeSummaryField(parsed.features)
       },
       contextText,
       priceHints,
-      varietyHints
+      varietyHints,
+      tasteHints,
+      featureHints
     });
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -1870,7 +1991,9 @@ const mergeWebCandidatesByUrl = (baseItems, extraItems, maxItems = 12) => {
 const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCandidates }) => {
   const missingPrice = isUnknownSummaryField(summary?.market_price);
   const missingVarieties = isUnknownSummaryField(summary?.varieties);
-  if (!missingPrice && !missingVarieties) {
+  const missingTaste = isUnknownSummaryField(summary?.taste);
+  const missingFeatures = isUnknownSummaryField(summary?.features);
+  if (!missingPrice && !missingVarieties && !missingTaste && !missingFeatures) {
     return existingCandidates;
   }
 
@@ -1880,6 +2003,15 @@ const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCan
   }
   if (missingVarieties) {
     enrichmentQueries.push(`${query} セパージュ`, `${query} 品種`, `${query} grape variety`, `${query} blend`);
+  }
+  if (missingTaste || missingFeatures) {
+    enrichmentQueries.push(
+      `${query} 味わい`,
+      `${query} 特徴`,
+      `${query} テイスティングノート`,
+      `${query} tasting notes`,
+      `${query} flavor profile`
+    );
   }
 
   let merged = [...(existingCandidates || [])];
@@ -1942,11 +2074,15 @@ const resolvePriceByOcrText = async (text) => {
           region: "不明",
           producer: queryUsedForWeb || "不明",
           market_price: buildMarketPriceFromHints(webContext.priceHints),
-          varieties: webContext.varietyHints.length > 0 ? webContext.varietyHints.join(", ") : "不明"
+          varieties: webContext.varietyHints.length > 0 ? webContext.varietyHints.join(", ") : "不明",
+          taste: webContext.tasteHints.length > 0 ? webContext.tasteHints.join(", ") : "不明",
+          features: webContext.featureHints.length > 0 ? webContext.featureHints.join(", ") : "不明"
         },
         contextText: webContext.contextText,
         priceHints: webContext.priceHints,
-        varietyHints: webContext.varietyHints
+        varietyHints: webContext.varietyHints,
+        tasteHints: webContext.tasteHints,
+        featureHints: webContext.featureHints
       });
 
     let summary =
@@ -1954,10 +2090,17 @@ const resolvePriceByOcrText = async (text) => {
         query: queryUsedForWeb,
         contextText: webContext.contextText,
         priceHints: webContext.priceHints,
-        varietyHints: webContext.varietyHints
+        varietyHints: webContext.varietyHints,
+        tasteHints: webContext.tasteHints,
+        featureHints: webContext.featureHints
       })) || buildHeuristicSummary();
 
-    if (isUnknownSummaryField(summary.market_price) || isUnknownSummaryField(summary.varieties)) {
+    if (
+      isUnknownSummaryField(summary.market_price) ||
+      isUnknownSummaryField(summary.varieties) ||
+      isUnknownSummaryField(summary.taste) ||
+      isUnknownSummaryField(summary.features)
+    ) {
       finalCandidates = await enrichWebCandidatesForMissingFields({
         query: queryUsedForWeb,
         summary,
@@ -1966,11 +2109,13 @@ const resolvePriceByOcrText = async (text) => {
       webContext = await buildWebSummaryContext(finalCandidates);
       summary =
         (await requestGroqWineSummaryFromWeb({
-          query: queryUsedForWeb,
-          contextText: webContext.contextText,
-          priceHints: webContext.priceHints,
-          varietyHints: webContext.varietyHints
-        })) || buildHeuristicSummary();
+        query: queryUsedForWeb,
+        contextText: webContext.contextText,
+        priceHints: webContext.priceHints,
+        varietyHints: webContext.varietyHints,
+        tasteHints: webContext.tasteHints,
+        featureHints: webContext.featureHints
+      })) || buildHeuristicSummary();
     }
 
     return {
@@ -1983,9 +2128,11 @@ const resolvePriceByOcrText = async (text) => {
           region: summary.region,
           producer: summary.producer,
           market_price: summary.market_price,
-          varieties: summary.varieties
+          varieties: summary.varieties,
+          taste: summary.taste,
+          features: summary.features
         },
-        `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n※Web参照の要約です。`
+        `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n※Web参照の要約です。`
       ),
       matches: [],
       webCandidates: finalCandidates,
