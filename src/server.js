@@ -2170,6 +2170,7 @@ const emptyWineAnalysisResult = () => ({
   identified_wine: false,
   wine_name: null,
   producer: null,
+  winery_history: null,
   vintage: null,
   country: null,
   region: null,
@@ -2201,6 +2202,9 @@ const computeWineConfidence = (item) => {
     score += 2;
   }
   if (item.producer) {
+    score += 1;
+  }
+  if (item.winery_history) {
     score += 1;
   }
   if (item.country || item.region) {
@@ -2329,6 +2333,7 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null, options = {
     evidenceTexts: [
       ...evidenceTexts,
       raw.varieties || "",
+      raw.winery_history || "",
       raw.style_summary || "",
       raw.rating_points || "",
       raw.awards || ""
@@ -2434,6 +2439,7 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null, options = {
     identified_wine: Boolean(raw.identified_wine ?? base.identified_wine),
     wine_name: normalizeString(raw.wine_name ?? base.wine_name),
     producer: normalizeString(raw.producer ?? base.producer),
+    winery_history: normalizeString(raw.winery_history ?? base.winery_history),
     vintage: normalizeString(raw.vintage ?? base.vintage),
     country: normalizeString(raw.country ?? base.country),
     region: normalizeString(raw.region ?? base.region),
@@ -2500,6 +2506,7 @@ const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = ""
     identified_wine: Boolean(wineName || producer || sources.length > 0),
     wine_name: wineName,
     producer,
+    winery_history: asNullableWineField(summary?.winery_history),
     vintage,
     country,
     region,
@@ -2525,6 +2532,7 @@ const wineAnalysisOutputGuide = {
   identified_wine: true,
   wine_name: "string|null",
   producer: "string|null",
+  winery_history: "string|null",
   vintage: "string|null",
   country: "string|null",
   region: "string|null",
@@ -2624,7 +2632,7 @@ const requestGroqWineAnalysisFromImage = async ({
           {
             role: "system",
             content:
-              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available. For grape percentages, use percentages only when explicitly shown in evidence; never guess split ratios; never output 0%."
+              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include winery_history as a brief factual note when evidence exists. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available. For grape percentages, use percentages only when explicitly shown in evidence; never guess split ratios; never output 0%."
           },
           {
             role: "user",
@@ -2675,6 +2683,7 @@ const buildLineWineReplyFallback = (wineData) => {
   const confidencePrefix = confidencePrefixMap[wineData.confidence] || confidencePrefixMap.low;
   const identity = wineData.wine_name || "銘柄特定はできませんでした";
   const producerRegion = [wineData.producer, wineData.region || wineData.country].filter(Boolean).join(" / ") || "不明";
+  const wineryHistory = asNullableWineField(wineData.winery_history) || "不明";
   const grapesText =
     wineData.grapes.length > 0
       ? wineData.grapes
@@ -2729,10 +2738,11 @@ const buildLineWineReplyFallback = (wineData) => {
     `${confidencePrefix}「${identity}」です。\n` +
     `1. このワインの正体: ${identity}\n` +
     `2. 生産者・産地: ${producerRegion}\n` +
-    `3. セパージュ: ${grapesText}\n` +
-    `4. 味わい: ${tasteText}\n` +
-    `5. 受賞・評価ポイント: ${criticAwardsText}\n` +
-    `6. 価格帯(円): ${formatWinePriceRangeText(wineData.price_range)}`
+    `3. 生産者・ワイナリーの歴史: ${wineryHistory}\n` +
+    `4. セパージュ: ${grapesText}\n` +
+    `5. 味わい: ${tasteText}\n` +
+    `6. 受賞・評価ポイント: ${criticAwardsText}\n` +
+    `7. 価格帯(円): ${formatWinePriceRangeText(wineData.price_range)}`
   );
 };
 
@@ -2765,7 +2775,7 @@ const renderLineWineReplyWithGroq = async (wineData) => {
           {
             role: "system",
             content:
-              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.セパージュ（複数ぶどうは比率付き） 4.味わい 5.受賞・評価ポイント（必ず年付き履歴。例: 2020年 WA 96/100） 6.価格帯（必ず日本円）。「市場での立ち位置」「日本での流通」は書かない。誇張しない。JSONにない情報を書かない。"
+              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.生産者・ワイナリーの歴史（1〜2文で簡潔） 4.セパージュ（複数ぶどうは比率付き。比率不明なら品種名のみ） 5.味わい 6.受賞・評価ポイント（必ず年付き履歴。例: 2020年 WA 96/100） 7.価格帯（必ず日本円）。「市場での立ち位置」「日本での流通」は書かない。誇張しない。JSONにない情報を書かない。"
           },
           {
             role: "user",
