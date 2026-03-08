@@ -1,67 +1,102 @@
-# MARUGO-s ファイル管理システム
+# Wine Price Admin (Company-terms-main-5)
 
-## 概要
-各種ドキュメントファイルを管理し、LINE Bot経由でAIアシスタントがファイル内容に関する質問に答えるシステムです。
+このフォルダは、ワイン価格管理DB (`wine_price.db`) を操作する管理画面/APIです。  
+LINE Webhookにも対応しています。
 
-## 主な機能
+## 含まれるもの
 
-### ✅ 多様なファイル形式対応
-- **TXTファイル**: そのままテキストとして読み込み
-- **Markdownファイル（.md）**: そのままテキストとして読み込み
-- **PDFファイル**: 自動的にテキストを抽出して読み込み（pdf-parseライブラリを使用）
-- **Word文書（.docx）**: mammothライブラリでテキストを抽出して読み込み
-- **Excel文書（.xlsx/.xls）**: シートごとにテキスト化して読み込み（xlsxライブラリを使用）
-- **CSVファイル**: そのままテキストとして読み込み
-- **会話履歴**: ユーザーごとに直近のやり取り（最大5往復）を保持して文脈を維持（サーバー再起動でリセット）
-- Supabaseストレージに保存されたファイルを自動的に読み込み、AIアシスタントの知識ベースとして活用
-
-### 📄 ドキュメント管理
-- `/` (index.html) からファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
-- 対応形式: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.md`, `.txt`, `.csv`
-- アップロードされたファイルはSupabaseストレージに保存
-- ファイル一覧の表示、ダウンロード、削除が可能
-
-### 🤖 LINE Bot連携
-- LINE Messaging API経由でユーザーの質問を受け付け
-- Groq AI（llama-3.1-8b / llama-3.3-70b）またはChatGPT（gpt-4o-mini）を使用してアップロードされたファイルに基づいて回答
-- ファイルに記載されていない内容については明示的に通知
+- `wine_price.db`: SQLite本体
+- `schema.sql`: DBスキーマ
+- `src/server.js`: Express API + LINE Webhook
+- `src/db.js`: DBアクセス層
+- `public/`: 管理画面 (`/admin`)
 
 ## セットアップ
 
-### 必要な環境変数（`.env`）
-```
-GROQ_API_KEY=your_groq_api_key
-OPENAI_API_KEY=your_openai_api_key
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
-HOST=127.0.0.1
-PORT=3000
-```
-
-### インストール
 ```bash
+cd /Users/yoshito/Downloads/Company-terms-main-5
 npm install
+cp .env.example .env
+npm run start
 ```
 
-### 起動
-```bash
-npm start
+デフォルトURL:
+
+- 管理画面: `http://127.0.0.1:3200/admin/`
+- ヘルス: `http://127.0.0.1:3200/api/health`
+- LINE Webhook: `http://127.0.0.1:3200/webhooks/line`
+
+## 環境変数
+
+```env
+PORT=3200
+HOST=127.0.0.1
+DB_PATH=./wine_price.db
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=
+OCR_ENDPOINT=
+OCR_AUTH_TOKEN=
+OCR_REQUEST_FORMAT=json_base64
+OCR_BASE64_FIELD=imageBase64
+OCR_IMAGE_FIELD=image
+OCR_TIMEOUT_MS=12000
 ```
 
-## 使い方
+- `LINE_CHANNEL_SECRET`: LINE署名検証に使用
+- `LINE_CHANNEL_ACCESS_TOKEN`: LINE返信・画像取得に使用
+- `OCR_ENDPOINT`: 任意。画像OCR APIエンドポイント
+- `OCR_AUTH_TOKEN`: 任意。OCR APIへのBearerトークン
+- `OCR_REQUEST_FORMAT`: `json_base64` または `multipart`
+- `OCR_BASE64_FIELD`: `json_base64` 時の画像Base64フィールド名
+- `OCR_IMAGE_FIELD`: `multipart` 時の画像フィールド名
+- `OCR_TIMEOUT_MS`: OCR APIタイムアウト（ms）
 
-1. サーバーを起動
-2. `/` にアクセスしてファイル（PDF、Word、Excel、Markdown、TXT、CSV）をアップロード
-3. LINE Bot で最初に利用する AI モデルを選択（`1` = Llama 8B / `2` = Llama 70B / `3` = ChatGPT。`モデル変更` で再選択）
-4. AIアシスタントがアップロードされたファイルに基づいて回答
+## 主なAPI
 
-## 技術スタック
-- **バックエンド**: Node.js + Express
-- **AI**: Groq SDK (Llama 3.1 8B / Llama 3.3 70B) + OpenAI API (GPT-4o-mini)
-- **ストレージ**: Supabase Storage
-- **PDF処理**: pdf-parse
-- **Word処理**: mammoth
-- **Excel処理**: xlsx
-- **会話管理**: インメモリ履歴（ユーザーごとに最大5往復）
-- **メッセージング**: LINE Messaging API
+- `GET /api/stores`
+- `POST /api/stores`
+- `GET /api/products`
+- `POST /api/products`
+- `GET /api/prices/current`
+- `GET /api/prices/history`
+- `POST /api/prices`
+- `GET /api/ingestion/files`
+- `GET /api/ingestion/files/:id/errors`
+- `GET /api/ingestion/template`
+- `GET /api/ingestion/mappings`
+- `GET /api/ingestion/mappings/:storeId`
+- `POST /api/ingestion/mappings`
+- `POST /api/ingestion/csv`
+- `GET /api/reply-templates`
+- `POST /api/reply-templates`
+- `POST /api/ocr/resolve`
+- `POST /api/line/simulate`
+- `POST /webhooks/line`
+
+## LINE連携の動作
+
+- テキスト: `価格 シャブリ` のように送ると `current_prices` から返信
+- 画像: 受信イベントを `ocr_results` に記録。`OCR_ENDPOINT` が設定されていればOCR実行し、抽出テキストから価格照合を試行
+- 受信イベントは `line_events` に保存（重複イベントは無視）
+
+## CSV取り込み
+
+- 管理画面の「CSV取り込み」から実行可能
+- テンプレートは `GET /api/ingestion/template` から取得可能
+- 取り込み結果は `ingestion_files`、行エラーは `ingestion_errors` に保存
+- 正常行のみ `price_history` / `current_prices` に反映
+- 同一CSV（同一ハッシュ）は重複投入を拒否（`409 Conflict`）
+- 店舗ごとに `store_csv_mappings` でヘッダーマッピングを保存可能
+
+対応列（列名ゆれを吸収）:
+
+- 商品: `product_id` / `sku` / `product_name`（`商品名`, `ワイン名`）
+- 店舗: `store_id` / `store_code` / `store_name`（画面の店舗IDをデフォルトにも指定可）
+- 価格: `price`（`価格`）
+- 適用日: `effective_date`（`適用日`, `日付`）
+- 任意: `currency`
+
+## 備考
+
+- 価格登録は `price_history` に追記され、`current_prices` が自動更新されます。
+- LINE Webhookをローカルで使う場合はトンネリング（例: ngrok, Cloudflare Tunnel）で公開URLを作成してください。
