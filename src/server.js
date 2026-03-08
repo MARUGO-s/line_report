@@ -1088,7 +1088,7 @@ const isLikelyRelevantPriorityCandidate = (item, query, domain) => {
   // Keep only likely product/info pages from the prioritized domain.
   const host = extractHostname(url);
   const wineSearcherPath = /\/find\/|\/wine-\d+|\/merchant\//i.test(url);
-  const vivinoPath = /\/wines\/|\/explore\//i.test(url);
+  const vivinoPath = /\/wines\/|\/explore\/|\/w\/[0-9a-z-]+/i.test(url);
   const cellarTrackerPath = /\/wine\.asp|\/list\.asp|\/producer\.asp/i.test(url);
   const genericWinePath = /\/item\/|\/archives\/|\/article\/|\/producer\/|\/shop\//i.test(url);
 
@@ -1301,7 +1301,19 @@ const searchWebCandidates = async (query, options = {}) => {
       break;
     }
   }
-  return deduped;
+
+  // Prefer diversity across prioritized wine domains first, then fill with remaining.
+  const prioritized = [];
+  const prioritizedSeen = new Set();
+  for (const domain of webSearchConfig.priorityDomains) {
+    const first = deduped.find((item) => isUrlInDomain(item.url, domain) && !prioritizedSeen.has(item.url));
+    if (first) {
+      prioritized.push(first);
+      prioritizedSeen.add(first.url);
+    }
+  }
+  const rest = deduped.filter((item) => !prioritizedSeen.has(item.url));
+  return [...prioritized, ...rest].slice(0, targetCount);
 };
 
 const parseJsonObjectFromText = (value) => {
@@ -3065,17 +3077,35 @@ const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCan
 
   let merged = [...(existingCandidates || [])];
   const keepPriorityOnly = hasPriorityDomainCandidates(existingCandidates || []);
-  for (const extraQuery of dedupeTextArray(enrichmentQueries).slice(0, 6)) {
-    try {
-      const found = await searchWebCandidates(extraQuery, {
-        fallbackToBroad: !keepPriorityOnly
-      });
-      merged = mergeWebCandidatesByUrl(merged, found, webSearchConfig.summaryMaxSources + 4);
-      if (merged.length >= webSearchConfig.summaryMaxSources) {
-        break;
+
+  const runEnrichment = async (allowBroadFallback) => {
+    for (const extraQuery of dedupeTextArray(enrichmentQueries).slice(0, 6)) {
+      try {
+        const found = await searchWebCandidates(extraQuery, {
+          fallbackToBroad: allowBroadFallback
+        });
+        merged = mergeWebCandidatesByUrl(merged, found, webSearchConfig.summaryMaxSources + 4);
+        if (merged.length >= webSearchConfig.summaryMaxSources) {
+          break;
+        }
+      } catch (error) {
+        console.warn("Web enrichment search failed", extraQuery, error?.message || error);
       }
-    } catch (error) {
-      console.warn("Web enrichment search failed", extraQuery, error?.message || error);
+    }
+  };
+
+  await runEnrichment(!keepPriorityOnly);
+
+  // If we only hit one prioritized source (e.g. only Wine-Searcher),
+  // run one broad supplement pass to recover missing fields like grapes/tasting notes.
+  if (keepPriorityOnly) {
+    const uniqueHosts = new Set(
+      merged
+        .map((item) => extractHostname(item?.url || ""))
+        .filter(Boolean)
+    );
+    if (uniqueHosts.size < 2) {
+      await runEnrichment(true);
     }
   }
   return merged;
