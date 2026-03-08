@@ -1877,6 +1877,45 @@ const normalizeGrapeComposition = (items = []) => {
   return normalized.slice(0, 8);
 };
 
+const normalizeSummaryGrapes = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return normalizeGrapeComposition(
+    value
+      .map((item) => {
+        if (typeof item === "string") {
+          const name = asNullableWineField(item);
+          return name ? { name, percentage: null } : null;
+        }
+        const name = asNullableWineField(item?.name);
+        if (!name) {
+          return null;
+        }
+        const percentage = Number(item?.percentage);
+        return {
+          name,
+          percentage: Number.isFinite(percentage) && percentage > 0 && percentage <= 100 ? percentage : null
+        };
+      })
+      .filter(Boolean)
+  );
+};
+
+const formatSummaryVarietiesFromGrapes = (grapes = []) => {
+  const normalized = normalizeGrapeComposition(grapes);
+  if (!normalized.length) {
+    return "不明";
+  }
+  return normalized
+    .map((item) =>
+      Number.isFinite(Number(item.percentage)) && Number(item.percentage) > 0
+        ? `${item.name} (${item.percentage}%)`
+        : item.name
+    )
+    .join(", ");
+};
+
 const extractGrapeCompositionFromText = (value) => {
   const text = String(value || "");
   if (!text.trim()) {
@@ -1928,8 +1967,11 @@ const extractGrapeCompositionFromText = (value) => {
   return normalizeGrapeComposition(merged);
 };
 
-const buildGrapeCompositionFromEvidence = ({ rawGrapes = [], evidenceTexts = [] }) => {
+const buildGrapeCompositionFromEvidence = ({ rawGrapes = [], evidenceTexts = [], preferRawOnly = false }) => {
   const rawNormalized = normalizeGrapeComposition(rawGrapes);
+  if (preferRawOnly && rawNormalized.length > 0) {
+    return rawNormalized;
+  }
   const fromEvidence = normalizeGrapeComposition(
     (evidenceTexts || [])
       .flatMap((text) => extractGrapeCompositionFromText(text))
@@ -2330,14 +2372,8 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null, options = {
     : base.grapes;
   const grapes = buildGrapeCompositionFromEvidence({
     rawGrapes,
-    evidenceTexts: [
-      ...evidenceTexts,
-      raw.varieties || "",
-      raw.winery_history || "",
-      raw.style_summary || "",
-      raw.rating_points || "",
-      raw.awards || ""
-    ]
+    evidenceTexts,
+    preferRawOnly: hasRawGrapes
   });
 
   const rawPriceRange = raw.price_range && typeof raw.price_range === "object" ? raw.price_range : null;
@@ -2488,11 +2524,14 @@ const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = ""
   const region = asNullableWineField(summary?.region);
   const country = inferCountryFromRegionText(region, query, ocrText);
   const vintage = extractVintageFromTexts(query, ocrText);
-  const grapeNames = splitVarietyNames(summary?.varieties);
-  const grapes = buildGrapeCompositionFromEvidence({
-    rawGrapes: grapeNames.map((name) => ({ name, percentage: null })),
-    evidenceTexts: [ocrText, webContextText, summary?.varieties || "", summary?.taste || "", summary?.features || ""]
-  });
+  const summaryGrapes = normalizeSummaryGrapes(summary?.grapes);
+  const grapes =
+    summaryGrapes.length > 0
+      ? summaryGrapes
+      : buildGrapeCompositionFromEvidence({
+          rawGrapes: [],
+          evidenceTexts: [ocrText, webContextText]
+        });
   const priceRange = parseMarketPriceRange(summary?.market_price);
   const tastingProfile = inferTastingProfileFromSummary(summary || {});
   const styleSummary = asNullableWineField(summary?.taste)
@@ -2512,7 +2551,7 @@ const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = ""
     region,
     appellation: region,
     grapes,
-    wine_type: inferWineTypeFromTexts(query, ocrText, summary?.taste, summary?.features, summary?.varieties),
+    wine_type: inferWineTypeFromTexts(query, ocrText, summary?.taste, summary?.features),
     style_summary: styleSummary,
     tasting_profile: tastingProfile,
     critic_scores: criticScores,
@@ -2524,7 +2563,7 @@ const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = ""
     sources
   };
   return normalizeWineAnalysisResult(fallback, null, {
-    evidenceTexts: [ocrText, webContextText, summary?.varieties || "", summary?.taste || "", summary?.features || ""]
+    evidenceTexts: [ocrText, webContextText]
   });
 };
 
@@ -2652,7 +2691,7 @@ const requestGroqWineAnalysisFromImage = async ({
       return fallback;
     }
     return normalizeWineAnalysisResult(parsed, fallback, {
-      evidenceTexts: [ocrText, webContextText, summary?.varieties || "", summary?.taste || "", summary?.features || ""]
+      evidenceTexts: [ocrText, webContextText]
     });
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -2836,6 +2875,7 @@ const sanitizeSummaryWithEvidence = ({
   contextText,
   priceHints,
   varietyHints,
+  grapeCompositionHints,
   tasteHints,
   featureHints,
   ratingHints,
@@ -2847,6 +2887,7 @@ const sanitizeSummaryWithEvidence = ({
     region: normalizeSummaryField(summary.region),
     producer: normalizeSummaryField(summary.producer),
     market_price: normalizeSummaryField(summary.market_price),
+    grapes: normalizeSummaryGrapes(summary.grapes),
     varieties: normalizeVarieties(summary.varieties),
     taste: normalizeSummaryField(summary.taste),
     features: normalizeSummaryField(summary.features),
@@ -2895,9 +2936,13 @@ const sanitizeSummaryWithEvidence = ({
     }
   }
 
-  const modelVarieties = collectVarietyHintsFromText(safe.varieties);
-  const mergedVarieties = dedupeTextArray([...modelVarieties, ...(varietyHints || [])]).slice(0, 6);
-  safe.varieties = mergedVarieties.length > 0 ? mergedVarieties.join(", ") : "不明";
+  const mergedStructuredGrapes = normalizeGrapeComposition([
+    ...safe.grapes,
+    ...(Array.isArray(grapeCompositionHints) ? grapeCompositionHints : []),
+    ...(Array.isArray(varietyHints) ? varietyHints.map((name) => ({ name, percentage: null })) : [])
+  ]);
+  safe.grapes = mergedStructuredGrapes;
+  safe.varieties = formatSummaryVarietiesFromGrapes(safe.grapes);
 
   const modelTasteHints = collectTasteHintsFromText(safe.taste);
   const mergedTaste = dedupeTextArray([...modelTasteHints, ...(tasteHints || [])]).slice(0, 5);
@@ -3097,6 +3142,7 @@ const buildWebSummaryContext = async (webCandidates) => {
   const contextBlocks = [];
   const priceHints = [];
   const varietyHints = [];
+  const grapeCompositionHints = [];
   const tasteHints = [];
   const featureHints = [];
   const ratingHints = [];
@@ -3137,6 +3183,7 @@ const buildWebSummaryContext = async (webCandidates) => {
       contextBlocks.push(`[source=${sourceName}] ${url}\n${truncateText(combined, 420)}`);
       priceHints.push(...collectPriceHintsFromText(combined));
       varietyHints.push(...collectVarietyHintsFromText(combined));
+      grapeCompositionHints.push(...extractGrapeCompositionFromText(combined));
       tasteHints.push(...collectTasteHintsFromText(combined));
       featureHints.push(...collectFeatureHintsFromText(combined));
       ratingHints.push(...collectRatingHintsFromText(combined));
@@ -3150,6 +3197,7 @@ const buildWebSummaryContext = async (webCandidates) => {
     contextText: contextBlocks.join("\n\n"),
     priceHints: dedupeTextArray(priceHints).slice(0, 8),
     varietyHints: dedupeTextArray(varietyHints).slice(0, 8),
+    grapeCompositionHints: normalizeGrapeComposition(grapeCompositionHints).slice(0, 8),
     tasteHints: dedupeTextArray(tasteHints).slice(0, 6),
     featureHints: dedupeTextArray(featureHints).slice(0, 10),
     ratingHints: dedupeTextArray(ratingHints).slice(0, 8),
@@ -3164,6 +3212,7 @@ const requestGroqWineSummaryFromWeb = async ({
   contextText,
   priceHints = [],
   varietyHints = [],
+  grapeCompositionHints = [],
   tasteHints = [],
   featureHints = [],
   ratingHints = [],
@@ -3195,7 +3244,7 @@ const requestGroqWineSummaryFromWeb = async ({
           {
             role: "system",
             content:
-              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","varieties":"","taste":"","features":"","rating_points":"","awards":"","drinking_window":"","winery_history":""}. Use only evidence in context/hints. If uncertain, use "不明".'
+              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","grapes":[{"name":"","percentage":null}],"taste":"","features":"","rating_points":"","awards":"","drinking_window":"","winery_history":""}. Use only evidence in context/hints. If uncertain, use "不明". Always return grapes as an array, do not return grape information as prose.'
           },
           {
             role: "user",
@@ -3204,6 +3253,7 @@ const requestGroqWineSummaryFromWeb = async ({
               `Web context:\n${truncateText(contextText, 3000)}\n\n` +
               `Price hints: ${priceHints.join(", ") || "none"}\n\n` +
               `Variety hints: ${varietyHints.join(", ") || "none"}\n\n` +
+              `Grape composition hints (structured): ${JSON.stringify(grapeCompositionHints.slice(0, 8))}\n\n` +
               `Taste hints: ${tasteHints.join(", ") || "none"}\n\n` +
               `Feature hints: ${featureHints.join(", ") || "none"}\n\n` +
               `Rating hints: ${ratingHints.join(", ") || "none"}\n\n` +
@@ -3231,7 +3281,8 @@ const requestGroqWineSummaryFromWeb = async ({
         region: normalizeSummaryField(parsed.region),
         producer: normalizeSummaryField(parsed.producer),
         market_price: normalizeSummaryField(parsed.market_price),
-        varieties: normalizeVarieties(parsed.varieties),
+        grapes: normalizeSummaryGrapes(parsed.grapes),
+        varieties: "不明",
         taste: normalizeSummaryField(parsed.taste),
         features: normalizeSummaryField(parsed.features),
         rating_points: normalizeSummaryField(parsed.rating_points),
@@ -3242,6 +3293,7 @@ const requestGroqWineSummaryFromWeb = async ({
       contextText,
       priceHints,
       varietyHints,
+      grapeCompositionHints,
       tasteHints,
       featureHints,
       ratingHints,
@@ -3473,7 +3525,7 @@ const mergeWebCandidatesByUrl = (baseItems, extraItems, maxItems = 12) => {
 
 const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCandidates }) => {
   const missingPrice = isUnknownSummaryField(summary?.market_price);
-  const missingVarieties = isUnknownSummaryField(summary?.varieties);
+  const missingVarieties = !Array.isArray(summary?.grapes) || summary.grapes.length === 0;
   const missingTaste = isUnknownSummaryField(summary?.taste);
   const missingFeatures = isUnknownSummaryField(summary?.features);
   const missingRatings = isUnknownSummaryField(summary?.rating_points);
@@ -3618,6 +3670,10 @@ const resolvePriceByOcrText = async (text, options = {}) => {
           region: "不明",
           producer: queryUsedForWeb || "不明",
           market_price: buildMarketPriceFromHints(webContext.priceHints),
+          grapes: normalizeGrapeComposition([
+            ...(webContext.grapeCompositionHints || []),
+            ...((webContext.varietyHints || []).map((name) => ({ name, percentage: null })))
+          ]),
           varieties: webContext.varietyHints.length > 0 ? webContext.varietyHints.join(", ") : "不明",
           taste: webContext.tasteHints.length > 0 ? webContext.tasteHints.join(", ") : "不明",
           features: webContext.featureHints.length > 0 ? webContext.featureHints.join(", ") : "不明",
@@ -3629,6 +3685,7 @@ const resolvePriceByOcrText = async (text, options = {}) => {
         contextText: webContext.contextText,
         priceHints: webContext.priceHints,
         varietyHints: webContext.varietyHints,
+        grapeCompositionHints: webContext.grapeCompositionHints,
         tasteHints: webContext.tasteHints,
         featureHints: webContext.featureHints,
         ratingHints: webContext.ratingHints,
@@ -3643,6 +3700,7 @@ const resolvePriceByOcrText = async (text, options = {}) => {
         contextText: webContext.contextText,
         priceHints: webContext.priceHints,
         varietyHints: webContext.varietyHints,
+        grapeCompositionHints: webContext.grapeCompositionHints,
         tasteHints: webContext.tasteHints,
         featureHints: webContext.featureHints,
         ratingHints: webContext.ratingHints,
@@ -3673,6 +3731,7 @@ const resolvePriceByOcrText = async (text, options = {}) => {
           contextText: webContext.contextText,
           priceHints: webContext.priceHints,
           varietyHints: webContext.varietyHints,
+          grapeCompositionHints: webContext.grapeCompositionHints,
           tasteHints: webContext.tasteHints,
           featureHints: webContext.featureHints,
           ratingHints: webContext.ratingHints,
@@ -3725,9 +3784,8 @@ const resolvePriceByOcrText = async (text, options = {}) => {
 
     if (!Array.isArray(wineAnalysis.grapes) || wineAnalysis.grapes.length === 0) {
       const recoveredGrapes = buildGrapeCompositionFromEvidence({
-        rawGrapes: [],
+        rawGrapes: normalizeSummaryGrapes(summary?.grapes),
         evidenceTexts: [
-          summary?.varieties || "",
           webContext.contextText || "",
           ocrContextText || "",
           queryUsedForWeb || ""
