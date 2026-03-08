@@ -385,6 +385,8 @@ const ensureDefaultTemplates = () => {
     "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n※Web参照の要約です。";
   const webSummaryBodyV4 =
     "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n※Web参照の要約です。";
+  const webSummaryBodyV5 =
+    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n検索モード: {{search_mode}}\n参照URL:\n{{source_urls}}\n※Web参照の要約です。";
 
   const defaults = [
     { key: "price_found", body: "{{product_name}} の最新価格です。\n{{lines}}" },
@@ -401,7 +403,7 @@ const ensureDefaultTemplates = () => {
     },
     {
       key: "image_ocr_web_summary",
-      body: webSummaryBodyV4
+      body: webSummaryBodyV5
     }
   ];
 
@@ -422,11 +424,12 @@ const ensureDefaultTemplates = () => {
       if (
         trimmed === webSummaryBodyV1.trim() ||
         trimmed === webSummaryBodyV2.trim() ||
-        trimmed === webSummaryBodyV3.trim()
+        trimmed === webSummaryBodyV3.trim() ||
+        trimmed === webSummaryBodyV4.trim()
       ) {
         upsertReplyTemplate({
           templateKey: template.key,
-          body: webSummaryBodyV4,
+          body: webSummaryBodyV5,
           isActive: true
         });
       }
@@ -978,6 +981,12 @@ const extractHostname = (urlText) => {
   }
 };
 
+const isPriorityDomainUrl = (urlText) =>
+  webSearchConfig.priorityDomains.some((domain) => isUrlInDomain(urlText, domain));
+
+const hasPriorityDomainCandidates = (items = []) =>
+  (items || []).some((item) => isPriorityDomainUrl(item?.url));
+
 const asSourceDisplayName = (urlText) => {
   const host = extractHostname(urlText);
   if (!host) {
@@ -999,6 +1008,29 @@ const buildSourceSummary = (items = []) => {
   const sources = dedupeTextArray((items || []).map((item) => asSourceDisplayName(item?.url))).slice(0, 4);
   return sources.length > 0 ? sources.join(" / ") : "不明";
 };
+
+const buildSourceUrlLines = (items = []) => {
+  const urls = [];
+  const seen = new Set();
+  for (const item of items || []) {
+    const url = String(item?.url || "").trim();
+    if (!url || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+    urls.push(truncateText(url, 140));
+    if (urls.length >= 3) {
+      break;
+    }
+  }
+  if (urls.length === 0) {
+    return "不明";
+  }
+  return urls.map((url, index) => `${index + 1}. ${url}`).join("\n");
+};
+
+const detectSearchMode = (items = []) =>
+  hasPriorityDomainCandidates(items) ? "3サイト優先検索" : "全体Webフォールバック";
 
 const isUrlInDomain = (urlText, domain) => {
   const host = extractHostname(urlText);
@@ -1143,10 +1175,11 @@ const searchSerpApiCandidates = async (query, options = {}) => {
   return items;
 };
 
-const searchWebCandidates = async (query) => {
+const searchWebCandidates = async (query, options = {}) => {
   if (!webSearchConfig.enabled) {
     return [];
   }
+  const fallbackToBroad = options.fallbackToBroad !== false;
   const normalizeAscii = (value) =>
     String(value || "")
       .normalize("NFKD")
@@ -1204,7 +1237,7 @@ const searchWebCandidates = async (query) => {
 
   // If none of the designated wine sites match, then fallback to broad web search.
   const candidates = [...domainCandidates];
-  if (domainCandidates.length === 0) {
+  if (domainCandidates.length === 0 && fallbackToBroad) {
     for (const searchQuery of queryVariants) {
       if (candidates.length >= targetCount) {
         break;
@@ -2335,9 +2368,12 @@ const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCan
   }
 
   let merged = [...(existingCandidates || [])];
+  const keepPriorityOnly = hasPriorityDomainCandidates(existingCandidates || []);
   for (const extraQuery of dedupeTextArray(enrichmentQueries).slice(0, 6)) {
     try {
-      const found = await searchWebCandidates(extraQuery);
+      const found = await searchWebCandidates(extraQuery, {
+        fallbackToBroad: !keepPriorityOnly
+      });
       merged = mergeWebCandidatesByUrl(merged, found, webSearchConfig.summaryMaxSources + 4);
       if (merged.length >= webSearchConfig.summaryMaxSources) {
         break;
@@ -2475,9 +2511,11 @@ const resolvePriceByOcrText = async (text) => {
           awards: summary.awards,
           drinking_window: summary.drinking_window,
           winery_history: summary.winery_history,
-          sources: buildSourceSummary(finalCandidates)
+          sources: buildSourceSummary(finalCandidates),
+          search_mode: detectSearchMode(finalCandidates),
+          source_urls: buildSourceUrlLines(finalCandidates)
         },
-        `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n評価ポイント: ${summary.rating_points}\n受賞歴: ${summary.awards}\n飲み頃: ${summary.drinking_window}\nワイナリーの歴史: ${summary.winery_history}\n参照ソース: ${buildSourceSummary(finalCandidates)}\n※Web参照の要約です。`
+        `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n評価ポイント: ${summary.rating_points}\n受賞歴: ${summary.awards}\n飲み頃: ${summary.drinking_window}\nワイナリーの歴史: ${summary.winery_history}\n参照ソース: ${buildSourceSummary(finalCandidates)}\n検索モード: ${detectSearchMode(finalCandidates)}\n参照URL:\n${buildSourceUrlLines(finalCandidates)}\n※Web参照の要約です。`
       ),
       matches: [],
       webCandidates: finalCandidates,

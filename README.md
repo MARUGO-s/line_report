@@ -132,7 +132,7 @@ GROQ_VISION_MAX_IMAGE_BYTES=3500000
 - `WEB_SEARCH_PROVIDER=serpapi` で SerpAPI のみ、`WEB_SEARCH_PROVIDER=free` で無料ソースのみを使います。
 - `GROQ_API_KEY` を設定すると、OCR誤字を補正した候補名を先に生成してから Web 検索します。
 - `GROQ_VISION_ENABLED=true` で、画像から Groq Vision 候補名を抽出して DB照合精度を上げます。
-- DB未一致時の返信は `産地 / 生産者 / 市場価格 / セパージュ / 味わい / 特徴 / 評価ポイント / 受賞歴 / 飲み頃 / ワイナリーの歴史 / 参照ソース` の順で Web要約を返します。
+- DB未一致時の返信は `産地 / 生産者 / 市場価格 / セパージュ / 味わい / 特徴 / 評価ポイント / 受賞歴 / 飲み頃 / ワイナリーの歴史 / 参照ソース / 検索モード / 参照URL` の順で Web要約を返します。
 
 ## 3. 管理認証
 
