@@ -7,3 +7,5 @@ wine_price.db-shm
 wine_price.db-wal
 data/
 backups/
+
+ocr-bridge/__pycache__/
