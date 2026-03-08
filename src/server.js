@@ -2307,7 +2307,8 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null, options = {
     return Number.isFinite(number) ? number : null;
   };
 
-  const rawGrapes = Array.isArray(raw.grapes)
+  const hasRawGrapes = Array.isArray(raw.grapes) && raw.grapes.length > 0;
+  const rawGrapes = hasRawGrapes
     ? raw.grapes
         .map((item) => {
           const name = asNullableWineField(item?.name);
@@ -3703,6 +3704,24 @@ const resolvePriceByOcrText = async (text, options = {}) => {
           webCandidates: finalCandidates,
           summary
         })) || wineAnalysis;
+    }
+
+    if (!Array.isArray(wineAnalysis.grapes) || wineAnalysis.grapes.length === 0) {
+      const recoveredGrapes = buildGrapeCompositionFromEvidence({
+        rawGrapes: [],
+        evidenceTexts: [
+          summary?.varieties || "",
+          webContext.contextText || "",
+          ocrContextText || "",
+          queryUsedForWeb || ""
+        ]
+      });
+      if (recoveredGrapes.length > 0) {
+        wineAnalysis = {
+          ...wineAnalysis,
+          grapes: recoveredGrapes
+        };
+      }
     }
 
     const renderedMessage = await renderLineWineReplyWithGroq(wineAnalysis);
