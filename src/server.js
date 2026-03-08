@@ -111,6 +111,13 @@ const webSearchConfig = {
     .slice(0, 3)
 };
 
+const llmConfig = {
+  provider: (() => {
+    const raw = String(process.env.LLM_PROVIDER || "auto").trim().toLowerCase();
+    return ["auto", "groq", "gemini"].includes(raw) ? raw : "auto";
+  })()
+};
+
 const groqConfig = {
   apiKey: String(process.env.GROQ_API_KEY || "").trim(),
   model: String(process.env.GROQ_MODEL || "llama-3.1-8b-instant").trim(),
@@ -136,6 +143,59 @@ const groqWineFlowConfig = {
   ).trim(),
   replyModel: String(process.env.GROQ_WINE_REPLY_MODEL || process.env.GROQ_MODEL || "llama-3.1-8b-instant").trim(),
   timeoutMs: Math.max(1000, Number(process.env.GROQ_WINE_TIMEOUT_MS || 12000) || 12000)
+};
+
+const geminiConfig = {
+  apiKey: String(process.env.GEMINI_API_KEY || "").trim(),
+  model: String(process.env.GEMINI_MODEL || "gemini-2.0-flash-lite").trim(),
+  timeoutMs: Math.max(1000, Number(process.env.GEMINI_TIMEOUT_MS || 5000) || 5000),
+  maxCandidates: Math.max(1, Math.min(5, Number(process.env.GEMINI_MAX_CANDIDATES || 3) || 3))
+};
+
+const geminiVisionConfig = {
+  enabled: asBooleanEnv(process.env.GEMINI_VISION_ENABLED, true),
+  model: String(process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || "gemini-2.0-flash-lite").trim(),
+  timeoutMs: Math.max(1000, Number(process.env.GEMINI_VISION_TIMEOUT_MS || 12000) || 12000),
+  maxCandidates: Math.max(1, Math.min(5, Number(process.env.GEMINI_VISION_MAX_CANDIDATES || 3) || 3)),
+  maxImageBytes: Math.max(
+    256 * 1024,
+    Number(process.env.GEMINI_VISION_MAX_IMAGE_BYTES || 3_500_000) || 3_500_000
+  )
+};
+
+const geminiWineFlowConfig = {
+  enabled: asBooleanEnv(process.env.GEMINI_WINE_FLOW_ENABLED, true),
+  analysisModel: String(
+    process.env.GEMINI_WINE_ANALYSIS_MODEL || process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || "gemini-2.0-flash-lite"
+  ).trim(),
+  replyModel: String(process.env.GEMINI_WINE_REPLY_MODEL || process.env.GEMINI_MODEL || "gemini-2.0-flash-lite").trim(),
+  timeoutMs: Math.max(1000, Number(process.env.GEMINI_WINE_TIMEOUT_MS || 12000) || 12000)
+};
+
+const resolveActiveLlmProvider = () => {
+  if (llmConfig.provider === "gemini") {
+    return geminiConfig.apiKey ? "gemini" : null;
+  }
+  if (llmConfig.provider === "groq") {
+    return groqConfig.apiKey ? "groq" : null;
+  }
+  if (geminiConfig.apiKey) {
+    return "gemini";
+  }
+  if (groqConfig.apiKey) {
+    return "groq";
+  }
+  return null;
+};
+
+const isWineFlowEnabledForProvider = (provider) => {
+  if (provider === "gemini") {
+    return geminiWineFlowConfig.enabled;
+  }
+  if (provider === "groq") {
+    return groqWineFlowConfig.enabled;
+  }
+  return false;
 };
 
 const pricingConfig = {
@@ -853,6 +913,84 @@ const fetchJsonWithTimeout = async (url, timeoutMs) => {
       throw new Error(`request failed ${response.status}`);
     }
     return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const extractTextFromGeminiResponse = (payload) => {
+  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+  const parts = [];
+  for (const candidate of candidates) {
+    const contentParts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    for (const part of contentParts) {
+      if (typeof part?.text === "string" && part.text.trim()) {
+        parts.push(part.text);
+      }
+    }
+  }
+  return parts.join("\n").trim();
+};
+
+const requestGeminiGenerateText = async ({
+  model,
+  systemPrompt = "",
+  userPrompt = "",
+  imagePart = null,
+  temperature = 0.1,
+  maxOutputTokens = 512,
+  timeoutMs = 12000
+}) => {
+  if (!geminiConfig.apiKey) {
+    throw new Error("gemini api key is missing");
+  }
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const parts = [{ text: String(userPrompt || "") }];
+  if (imagePart?.data && imagePart?.mimeType) {
+    parts.push({
+      inline_data: {
+        mime_type: String(imagePart.mimeType),
+        data: String(imagePart.data)
+      }
+    });
+  }
+
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts
+      }
+    ],
+    generationConfig: {
+      temperature,
+      maxOutputTokens
+    }
+  };
+  if (String(systemPrompt || "").trim()) {
+    body.system_instruction = {
+      parts: [{ text: String(systemPrompt) }]
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiConfig.apiKey
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`gemini request failed ${response.status} ${truncateText(text, 240)}`);
+    }
+    const payload = await response.json();
+    return extractTextFromGeminiResponse(payload);
   } finally {
     clearTimeout(timer);
   }
@@ -2611,9 +2749,12 @@ const requestGroqWineAnalysisFromImage = async ({
   webCandidates = [],
   summary = {}
 }) => {
-  if (!groqWineFlowConfig.enabled || !groqConfig.apiKey) {
+  const provider = resolveActiveLlmProvider();
+  if (!provider || !isWineFlowEnabledForProvider(provider)) {
     return null;
   }
+  const flowConfig = provider === "gemini" ? geminiWineFlowConfig : groqWineFlowConfig;
+  const maxImageBytes = provider === "gemini" ? geminiVisionConfig.maxImageBytes : groqVisionConfig.maxImageBytes;
 
   const fallback = buildWineAnalysisFallback({
     query,
@@ -2623,69 +2764,95 @@ const requestGroqWineAnalysisFromImage = async ({
     webContextText
   });
 
-  const userContent = [
-    {
-      type: "text",
-      text:
-        `OCR text:\n${truncateText(ocrText, 700)}\n\n` +
-        `Query candidate: ${query}\n\n` +
-        `Web evidence:\n${truncateText(webContextText, 2600)}\n\n` +
-        `Known summary:\n${JSON.stringify(summary)}\n\n` +
-        `Candidate URLs:\n${(webCandidates || [])
-          .slice(0, 6)
-          .map((item) => `- ${item.title}\n  ${item.url}`)
-          .join("\n")}\n\n` +
-        `Output JSON shape exactly like:\n${JSON.stringify(wineAnalysisOutputGuide, null, 2)}`
-    }
-  ];
+  const promptText =
+    `OCR text:\n${truncateText(ocrText, 700)}\n\n` +
+    `Query candidate: ${query}\n\n` +
+    `Web evidence:\n${truncateText(webContextText, 2600)}\n\n` +
+    `Known summary:\n${JSON.stringify(summary)}\n\n` +
+    `Candidate URLs:\n${(webCandidates || [])
+      .slice(0, 6)
+      .map((item) => `- ${item.title}\n  ${item.url}`)
+      .join("\n")}\n\n` +
+    `Output JSON shape exactly like:\n${JSON.stringify(wineAnalysisOutputGuide, null, 2)}`;
 
-  if (imageBuffer && imageBuffer.length > 0 && imageBuffer.length <= groqVisionConfig.maxImageBytes) {
-    const normalized = String(contentType || "").toLowerCase().trim();
-    const mimeType = ["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(normalized)
-      ? normalized.replace("image/jpg", "image/jpeg")
-      : null;
+  const systemPrompt =
+    "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include winery_history as a brief factual note when evidence exists. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available. For grape percentages, use percentages only when explicitly shown in evidence; never guess split ratios; never output 0%.";
+
+  let imagePart = null;
+  if (imageBuffer && imageBuffer.length > 0 && imageBuffer.length <= maxImageBytes) {
+    const mimeType = asGroqVisionContentType(contentType);
     if (mimeType) {
-      userContent.push({
-        type: "image_url",
-        image_url: {
-          url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`
-        }
-      });
+      imagePart = {
+        mimeType,
+        data: imageBuffer.toString("base64")
+      };
     }
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), groqWineFlowConfig.timeoutMs);
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqConfig.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: groqWineFlowConfig.analysisModel,
+    let content = "";
+    if (provider === "gemini") {
+      content = await requestGeminiGenerateText({
+        model: flowConfig.analysisModel,
+        systemPrompt,
+        userPrompt: promptText,
+        imagePart,
         temperature: 0.1,
-        max_tokens: 900,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include winery_history as a brief factual note when evidence exists. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available. For grape percentages, use percentages only when explicitly shown in evidence; never guess split ratios; never output 0%."
-          },
-          {
-            role: "user",
-            content: userContent
+        maxOutputTokens: 900,
+        timeoutMs: flowConfig.timeoutMs
+      });
+    } else {
+      const userContent = [
+        {
+          type: "text",
+          text: promptText
+        }
+      ];
+      if (imagePart?.mimeType && imagePart?.data) {
+        userContent.push({
+          type: "image_url",
+          image_url: {
+            url: `data:${imagePart.mimeType};base64,${imagePart.data}`
           }
-        ]
-      }),
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      throw new Error(`groq wine analysis request failed ${response.status}`);
+        });
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), flowConfig.timeoutMs);
+      try {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${groqConfig.apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: flowConfig.analysisModel,
+            temperature: 0.1,
+            max_tokens: 900,
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt
+              },
+              {
+                role: "user",
+                content: userContent
+              }
+            ]
+          }),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`groq wine analysis request failed ${response.status}`);
+        }
+        const payload = await response.json();
+        content = payload?.choices?.[0]?.message?.content || "";
+      } finally {
+        clearTimeout(timer);
+      }
     }
-    const payload = await response.json();
-    const content = payload?.choices?.[0]?.message?.content || "";
+
     const parsed = parseJsonObjectFromText(content);
     if (!parsed || typeof parsed !== "object") {
       return fallback;
@@ -2695,13 +2862,11 @@ const requestGroqWineAnalysisFromImage = async ({
     });
   } catch (error) {
     if (error?.name === "AbortError") {
-      console.warn("Groq wine analysis timed out");
+      console.warn(`${provider} wine analysis timed out`);
       return fallback;
     }
-    console.warn("Groq wine analysis failed", error?.message || error);
+    console.warn(`${provider} wine analysis failed`, error?.message || error);
     return fallback;
-  } finally {
-    clearTimeout(timer);
   }
 };
 
@@ -2793,52 +2958,68 @@ const sanitizeLineWineReplyText = (value) =>
     .trim();
 
 const renderLineWineReplyWithGroq = async (wineData) => {
-  if (!groqWineFlowConfig.enabled || !groqConfig.apiKey) {
+  const provider = resolveActiveLlmProvider();
+  if (!provider || !isWineFlowEnabledForProvider(provider)) {
     return buildLineWineReplyFallback(wineData);
   }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), groqWineFlowConfig.timeoutMs);
+  const flowConfig = provider === "gemini" ? geminiWineFlowConfig : groqWineFlowConfig;
+  const systemPrompt =
+    "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.生産者・ワイナリーの歴史（1〜2文で簡潔） 4.セパージュ（複数ぶどうは比率付き。比率不明なら品種名のみ） 5.味わい 6.受賞・評価ポイント（必ず年付き履歴。例: 2020年 WA 96/100） 7.価格帯（必ず日本円）。「市場での立ち位置」「日本での流通」は書かない。誇張しない。JSONにない情報を書かない。";
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqConfig.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: groqWineFlowConfig.replyModel,
+    let content = "";
+    if (provider === "gemini") {
+      content = await requestGeminiGenerateText({
+        model: flowConfig.replyModel,
+        systemPrompt,
+        userPrompt: JSON.stringify(wineData, null, 2),
         temperature: 0.2,
-        max_tokens: 420,
-        messages: [
-          {
-            role: "system",
-            content:
-              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.生産者・ワイナリーの歴史（1〜2文で簡潔） 4.セパージュ（複数ぶどうは比率付き。比率不明なら品種名のみ） 5.味わい 6.受賞・評価ポイント（必ず年付き履歴。例: 2020年 WA 96/100） 7.価格帯（必ず日本円）。「市場での立ち位置」「日本での流通」は書かない。誇張しない。JSONにない情報を書かない。"
+        maxOutputTokens: 420,
+        timeoutMs: flowConfig.timeoutMs
+      });
+    } else {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), flowConfig.timeoutMs);
+      try {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${groqConfig.apiKey}`,
+            "Content-Type": "application/json"
           },
-          {
-            role: "user",
-            content: JSON.stringify(wineData, null, 2)
-          }
-        ]
-      }),
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      throw new Error(`groq line reply request failed ${response.status}`);
+          body: JSON.stringify({
+            model: flowConfig.replyModel,
+            temperature: 0.2,
+            max_tokens: 420,
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt
+              },
+              {
+                role: "user",
+                content: JSON.stringify(wineData, null, 2)
+              }
+            ]
+          }),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`groq line reply request failed ${response.status}`);
+        }
+        const payload = await response.json();
+        content = String(payload?.choices?.[0]?.message?.content || "").trim();
+      } finally {
+        clearTimeout(timer);
+      }
     }
-    const payload = await response.json();
-    const content = String(payload?.choices?.[0]?.message?.content || "").trim();
     return sanitizeLineWineReplyText(content) || buildLineWineReplyFallback(wineData);
   } catch (error) {
     if (error?.name === "AbortError") {
-      console.warn("Groq line reply timed out");
+      console.warn(`${provider} line reply timed out`);
       return buildLineWineReplyFallback(wineData);
     }
-    console.warn("Groq line reply failed", error?.message || error);
+    console.warn(`${provider} line reply failed`, error?.message || error);
     return buildLineWineReplyFallback(wineData);
-  } finally {
-    clearTimeout(timer);
   }
 };
 
@@ -3220,57 +3401,76 @@ const requestGroqWineSummaryFromWeb = async ({
   drinkingWindowHints = [],
   historyHints = []
 }) => {
-  if (!groqConfig.apiKey) {
+  const provider = resolveActiveLlmProvider();
+  if (!provider) {
     return null;
   }
   if (!contextText.trim()) {
     return null;
   }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), groqConfig.timeoutMs);
+  const systemPrompt =
+    'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","grapes":[{"name":"","percentage":null}],"taste":"","features":"","rating_points":"","awards":"","drinking_window":"","winery_history":""}. Use only evidence in context/hints. If uncertain, use "不明". Always return grapes as an array, do not return grape information as prose.';
+  const userPrompt =
+    `Query: ${query}\n\n` +
+    `Web context:\n${truncateText(contextText, 3000)}\n\n` +
+    `Price hints: ${priceHints.join(", ") || "none"}\n\n` +
+    `Variety hints: ${varietyHints.join(", ") || "none"}\n\n` +
+    `Grape composition hints (structured): ${JSON.stringify(grapeCompositionHints.slice(0, 8))}\n\n` +
+    `Taste hints: ${tasteHints.join(", ") || "none"}\n\n` +
+    `Feature hints: ${featureHints.join(", ") || "none"}\n\n` +
+    `Rating hints: ${ratingHints.join(", ") || "none"}\n\n` +
+    `Award hints: ${awardHints.join(", ") || "none"}\n\n` +
+    `Drinking window hints: ${drinkingWindowHints.join(", ") || "none"}\n\n` +
+    `Winery history hints: ${historyHints.join(", ") || "none"}\n\n` +
+    "Return only JSON.";
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqConfig.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: groqConfig.model,
+    let content = "";
+    if (provider === "gemini") {
+      content = await requestGeminiGenerateText({
+        model: geminiConfig.model,
+        systemPrompt,
+        userPrompt,
         temperature: 0.1,
-        max_tokens: 300,
-        messages: [
-          {
-            role: "system",
-            content:
-              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","grapes":[{"name":"","percentage":null}],"taste":"","features":"","rating_points":"","awards":"","drinking_window":"","winery_history":""}. Use only evidence in context/hints. If uncertain, use "不明". Always return grapes as an array, do not return grape information as prose.'
+        maxOutputTokens: 300,
+        timeoutMs: geminiConfig.timeoutMs
+      });
+    } else {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), groqConfig.timeoutMs);
+      try {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${groqConfig.apiKey}`,
+            "Content-Type": "application/json"
           },
-          {
-            role: "user",
-            content:
-              `Query: ${query}\n\n` +
-              `Web context:\n${truncateText(contextText, 3000)}\n\n` +
-              `Price hints: ${priceHints.join(", ") || "none"}\n\n` +
-              `Variety hints: ${varietyHints.join(", ") || "none"}\n\n` +
-              `Grape composition hints (structured): ${JSON.stringify(grapeCompositionHints.slice(0, 8))}\n\n` +
-              `Taste hints: ${tasteHints.join(", ") || "none"}\n\n` +
-              `Feature hints: ${featureHints.join(", ") || "none"}\n\n` +
-              `Rating hints: ${ratingHints.join(", ") || "none"}\n\n` +
-              `Award hints: ${awardHints.join(", ") || "none"}\n\n` +
-              `Drinking window hints: ${drinkingWindowHints.join(", ") || "none"}\n\n` +
-              `Winery history hints: ${historyHints.join(", ") || "none"}\n\n` +
-              "Return only JSON."
-          }
-        ]
-      }),
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      throw new Error(`groq web summary request failed ${response.status}`);
+          body: JSON.stringify({
+            model: groqConfig.model,
+            temperature: 0.1,
+            max_tokens: 300,
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt
+              },
+              {
+                role: "user",
+                content: userPrompt
+              }
+            ]
+          }),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`groq web summary request failed ${response.status}`);
+        }
+        const payload = await response.json();
+        content = payload?.choices?.[0]?.message?.content || "";
+      } finally {
+        clearTimeout(timer);
+      }
     }
-    const payload = await response.json();
-    const content = payload?.choices?.[0]?.message?.content || "";
+
     const parsed = parseJsonObjectFromText(content);
     if (!parsed || typeof parsed !== "object") {
       return null;
@@ -3303,17 +3503,15 @@ const requestGroqWineSummaryFromWeb = async ({
     });
   } catch (error) {
     if (error?.name === "AbortError") {
-      console.warn("Groq web summary timed out");
+      console.warn(`${provider} web summary timed out`);
       return null;
     }
-    console.warn("Groq web summary failed", error?.message || error);
+    console.warn(`${provider} web summary failed`, error?.message || error);
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 };
 
-const extractSuggestionsFromGroqText = (content) => {
+const extractSuggestionsFromGroqText = (content, maxCandidates = groqConfig.maxCandidates) => {
   const raw = String(content || "").trim();
   if (!raw) {
     return [];
@@ -3355,58 +3553,75 @@ const extractSuggestionsFromGroqText = (content) => {
       .filter((item) => item.length >= 4 && item.length <= 80)
       .filter((item) => !isLikelyNoiseLine(item))
   );
-  return normalized.slice(0, groqConfig.maxCandidates);
+  const limit = Math.max(1, Number(maxCandidates) || groqConfig.maxCandidates);
+  return normalized.slice(0, limit);
 };
 
 const requestGroqQuerySuggestions = async ({ ocrText, candidates }) => {
-  if (!groqConfig.apiKey) {
+  const provider = resolveActiveLlmProvider();
+  if (!provider) {
     return [];
   }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), groqConfig.timeoutMs);
+  const systemPrompt =
+    'You correct OCR text into likely wine product names. Return compact JSON only: {"candidates":["name1","name2"]}';
+  const userPrompt = `OCR text:\n${truncateText(ocrText, 800)}\n\nCurrent candidates:\n${candidates.join("\n")}\n\nReturn up to ${provider === "gemini" ? geminiConfig.maxCandidates : groqConfig.maxCandidates} corrected wine names.`;
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqConfig.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: groqConfig.model,
+    let content = "";
+    if (provider === "gemini") {
+      content = await requestGeminiGenerateText({
+        model: geminiConfig.model,
+        systemPrompt,
+        userPrompt,
         temperature: 0.1,
-        max_tokens: 120,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You correct OCR text into likely wine product names. Return compact JSON only: {\"candidates\":[\"name1\",\"name2\"]}"
+        maxOutputTokens: 120,
+        timeoutMs: geminiConfig.timeoutMs
+      });
+    } else {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), groqConfig.timeoutMs);
+      try {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${groqConfig.apiKey}`,
+            "Content-Type": "application/json"
           },
-          {
-            role: "user",
-            content: `OCR text:\n${truncateText(ocrText, 800)}\n\nCurrent candidates:\n${candidates.join("\n")}\n\nReturn up to ${groqConfig.maxCandidates} corrected wine names.`
-          }
-        ]
-      }),
-      signal: controller.signal
-    });
+          body: JSON.stringify({
+            model: groqConfig.model,
+            temperature: 0.1,
+            max_tokens: 120,
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt
+              },
+              {
+                role: "user",
+                content: userPrompt
+              }
+            ]
+          }),
+          signal: controller.signal
+        });
 
-    if (!response.ok) {
-      throw new Error(`groq request failed ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`groq request failed ${response.status}`);
+        }
+
+        const payload = await response.json();
+        content = payload?.choices?.[0]?.message?.content || "";
+      } finally {
+        clearTimeout(timer);
+      }
     }
-
-    const payload = await response.json();
-    const content = payload?.choices?.[0]?.message?.content || "";
-    return extractSuggestionsFromGroqText(content);
+    return extractSuggestionsFromGroqText(content, provider === "gemini" ? geminiConfig.maxCandidates : groqConfig.maxCandidates);
   } catch (error) {
     if (error?.name === "AbortError") {
-      console.warn("Groq suggestion timed out");
+      console.warn(`${provider} suggestion timed out`);
       return [];
     }
-    console.warn("Groq suggestion failed", error?.message || error);
+    console.warn(`${provider} suggestion failed`, error?.message || error);
     return [];
-  } finally {
-    clearTimeout(timer);
   }
 };
 
@@ -3419,83 +3634,106 @@ const asGroqVisionContentType = (contentType) => {
 };
 
 const requestGroqVisionSuggestions = async ({ imageBuffer, contentType, ocrHint = "" }) => {
-  if (!groqVisionConfig.enabled || !groqConfig.apiKey) {
+  const provider = resolveActiveLlmProvider();
+  const visionEnabled = provider === "gemini" ? geminiVisionConfig.enabled : groqVisionConfig.enabled;
+  if (!provider || !visionEnabled) {
     return [];
   }
   if (!imageBuffer || imageBuffer.length <= 0) {
     return [];
   }
-  if (imageBuffer.length > groqVisionConfig.maxImageBytes) {
+  const maxImageBytes = provider === "gemini" ? geminiVisionConfig.maxImageBytes : groqVisionConfig.maxImageBytes;
+  const maxCandidates = provider === "gemini" ? geminiVisionConfig.maxCandidates : groqVisionConfig.maxCandidates;
+  if (imageBuffer.length > maxImageBytes) {
     console.warn(
-      `Skip Groq vision: image too large (${imageBuffer.length} > ${groqVisionConfig.maxImageBytes})`
+      `Skip ${provider} vision: image too large (${imageBuffer.length} > ${maxImageBytes})`
     );
     return [];
   }
 
   const mimeType = asGroqVisionContentType(contentType);
   if (!mimeType) {
-    console.warn("Skip Groq vision: unsupported content type", contentType);
+    console.warn(`Skip ${provider} vision: unsupported content type`, contentType);
     return [];
   }
 
-  const dataUrl = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), groqVisionConfig.timeoutMs);
+  const promptText =
+    `Find likely wine product names from this label image. Return up to ${maxCandidates} short candidates. ` +
+    "Prefer official bottle label names in Latin letters when possible." +
+    (ocrHint ? ` OCR hint: ${truncateText(ocrHint, 250)}` : "");
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqConfig.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: groqVisionConfig.model,
+    let content = "";
+    if (provider === "gemini") {
+      content = await requestGeminiGenerateText({
+        model: geminiVisionConfig.model,
+        systemPrompt: 'Extract wine label names from images. Return strict JSON only: {"candidates":["name1","name2"]}',
+        userPrompt: promptText,
+        imagePart: {
+          mimeType,
+          data: imageBuffer.toString("base64")
+        },
         temperature: 0.1,
-        max_tokens: 180,
-        messages: [
-          {
-            role: "system",
-            content:
-              'Extract wine label names from images. Return strict JSON only: {"candidates":["name1","name2"]}'
+        maxOutputTokens: 180,
+        timeoutMs: geminiVisionConfig.timeoutMs
+      });
+    } else {
+      const dataUrl = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), groqVisionConfig.timeoutMs);
+      try {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${groqConfig.apiKey}`,
+            "Content-Type": "application/json"
           },
-          {
-            role: "user",
-            content: [
+          body: JSON.stringify({
+            model: groqVisionConfig.model,
+            temperature: 0.1,
+            max_tokens: 180,
+            messages: [
               {
-                type: "text",
-                text:
-                  `Find likely wine product names from this label image. Return up to ${groqVisionConfig.maxCandidates} short candidates. ` +
-                  "Prefer official bottle label names in Latin letters when possible." +
-                  (ocrHint ? ` OCR hint: ${truncateText(ocrHint, 250)}` : "")
+                role: "system",
+                content:
+                  'Extract wine label names from images. Return strict JSON only: {"candidates":["name1","name2"]}'
               },
               {
-                type: "image_url",
-                image_url: { url: dataUrl }
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: promptText
+                  },
+                  {
+                    type: "image_url",
+                    image_url: { url: dataUrl }
+                  }
+                ]
               }
             ]
-          }
-        ]
-      }),
-      signal: controller.signal
-    });
+          }),
+          signal: controller.signal
+        });
 
-    if (!response.ok) {
-      throw new Error(`groq vision request failed ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`groq vision request failed ${response.status}`);
+        }
+
+        const payload = await response.json();
+        content = payload?.choices?.[0]?.message?.content || "";
+      } finally {
+        clearTimeout(timer);
+      }
     }
-
-    const payload = await response.json();
-    const content = payload?.choices?.[0]?.message?.content || "";
     const candidates = extractSuggestionsFromGroqText(content);
-    return candidates.slice(0, groqVisionConfig.maxCandidates);
+    return candidates.slice(0, maxCandidates);
   } catch (error) {
     if (error?.name === "AbortError") {
-      console.warn("Groq vision timed out");
+      console.warn(`${provider} vision timed out`);
       return [];
     }
-    console.warn("Groq vision failed", error?.message || error);
+    console.warn(`${provider} vision failed`, error?.message || error);
     return [];
-  } finally {
-    clearTimeout(timer);
   }
 };
 
@@ -3769,7 +4007,8 @@ const resolvePriceByOcrText = async (text, options = {}) => {
       ocrText: ocrContextText,
       webContextText: webContext.contextText
     });
-    if (groqWineFlowConfig.enabled && groqConfig.apiKey) {
+    const activeLlmProvider = resolveActiveLlmProvider();
+    if (activeLlmProvider && isWineFlowEnabledForProvider(activeLlmProvider)) {
       wineAnalysis =
         (await requestGroqWineAnalysisFromImage({
           imageBuffer,
@@ -4174,6 +4413,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
+  const activeLlmProvider = resolveActiveLlmProvider();
   res.json({
     ok: true,
     dbPath,
@@ -4191,6 +4431,15 @@ app.get("/api/health", (req, res) => {
     webSearchMaxResults: webSearchConfig.maxResults,
     webSummaryMaxSources: webSearchConfig.summaryMaxSources,
     serpApiConfigured: Boolean(webSearchConfig.serpApiKey),
+    llmProviderPreference: llmConfig.provider,
+    llmProviderActive: activeLlmProvider || "none",
+    geminiConfigured: Boolean(geminiConfig.apiKey),
+    geminiModel: geminiConfig.model,
+    geminiVisionEnabled: Boolean(geminiConfig.apiKey) && geminiVisionConfig.enabled,
+    geminiVisionModel: geminiVisionConfig.model,
+    geminiWineFlowEnabled: Boolean(geminiConfig.apiKey) && geminiWineFlowConfig.enabled,
+    geminiWineAnalysisModel: geminiWineFlowConfig.analysisModel,
+    geminiWineReplyModel: geminiWineFlowConfig.replyModel,
     groqConfigured: Boolean(groqConfig.apiKey),
     groqVisionEnabled: Boolean(groqConfig.apiKey) && groqVisionConfig.enabled,
     groqVisionModel: groqVisionConfig.model,
