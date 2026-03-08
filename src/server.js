@@ -352,6 +352,11 @@ const ensureDefaultTemplates = () => {
       key: "image_ocr_web_candidates",
       body:
         "価格DBには見つかりませんでした。\n抽出候補: {{query}}\nWeb候補:\n{{web_lines}}\n※この候補は参考情報です。"
+    },
+    {
+      key: "image_ocr_web_summary",
+      body:
+        "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n※Web参照の要約です。"
     }
   ];
 
@@ -959,6 +964,271 @@ const searchWebCandidates = async (query) => {
   return deduped;
 };
 
+const parseJsonObjectFromText = (value) => {
+  const text = String(value || "").trim();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    // fall through
+  }
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) {
+    return null;
+  }
+  try {
+    return JSON.parse(match[0]);
+  } catch (error) {
+    return null;
+  }
+};
+
+const normalizeSummaryField = (value) => {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text || "不明";
+};
+
+const normalizeVarieties = (value) => {
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .slice(0, 5);
+    return items.length ? items.join(", ") : "不明";
+  }
+  const text = String(value || "").trim();
+  return text || "不明";
+};
+
+const collectPriceHintsFromText = (text) => {
+  const body = String(text || "");
+  if (!body) {
+    return [];
+  }
+
+  const hits = [];
+  const patterns = [
+    { currency: "JPY", regex: /(?:¥|￥|JPY)\s*([0-9][0-9,]{2,}(?:\.[0-9]+)?)/gi },
+    { currency: "USD", regex: /(?:USD|\$)\s*([0-9][0-9,]{1,}(?:\.[0-9]+)?)/gi },
+    { currency: "EUR", regex: /(?:EUR|€)\s*([0-9][0-9,]{1,}(?:\.[0-9]+)?)/gi },
+    { currency: "JPY", regex: /([0-9][0-9,]{2,}(?:\.[0-9]+)?)\s*(?:円|yen)/gi }
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of body.matchAll(pattern.regex)) {
+      const raw = String(match[1] || "").trim();
+      if (!raw) {
+        continue;
+      }
+      hits.push(`${pattern.currency} ${raw}`);
+    }
+  }
+  return dedupeTextArray(hits).slice(0, 5);
+};
+
+const parseWikipediaPageFromUrl = (urlText) => {
+  try {
+    const parsed = new URL(urlText);
+    if (!parsed.hostname.endsWith("wikipedia.org")) {
+      return null;
+    }
+    const marker = "/wiki/";
+    const index = parsed.pathname.indexOf(marker);
+    if (index < 0) {
+      return null;
+    }
+    const title = decodeURIComponent(parsed.pathname.slice(index + marker.length)).replace(/_/g, " ").trim();
+    if (!title) {
+      return null;
+    }
+    return {
+      title,
+      langHost: parsed.hostname
+    };
+  } catch (error) {
+    return null;
+  }
+};
+
+const fetchWikipediaSummary = async (urlText) => {
+  const wiki = parseWikipediaPageFromUrl(urlText);
+  if (!wiki) {
+    return null;
+  }
+
+  const endpoint = `https://${wiki.langHost}/api/rest_v1/page/summary/${encodeURIComponent(wiki.title)}`;
+  try {
+    const payload = await fetchJsonWithTimeout(endpoint, webSearchConfig.timeoutMs);
+    const title = String(payload?.title || wiki.title).trim();
+    const description = String(payload?.description || "").trim();
+    const extract = truncateText(payload?.extract || "", 500);
+    if (!title && !extract) {
+      return null;
+    }
+    return {
+      title: title || wiki.title,
+      description,
+      extract
+    };
+  } catch (error) {
+    return null;
+  }
+};
+
+const fetchHtmlMetaSummary = async (urlText) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), webSearchConfig.timeoutMs);
+  try {
+    const response = await fetch(urlText, {
+      method: "GET",
+      headers: {
+        "User-Agent": "line-wine-bot/1.0 (+https://line-wine-api.onrender.com)"
+      },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+    if (!contentType.includes("text/html")) {
+      return null;
+    }
+    const html = String(await response.text());
+    const compact = html.slice(0, 180000);
+    const title =
+      compact.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() || "";
+    const description =
+      compact
+        .match(/<meta[^>]+name=["']description["'][^>]+content=["']([\s\S]*?)["'][^>]*>/i)?.[1]
+        ?.replace(/\s+/g, " ")
+        .trim() || "";
+
+    if (!title && !description) {
+      return null;
+    }
+    return {
+      title: truncateText(title, 140),
+      description: truncateText(description, 280)
+    };
+  } catch (error) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const buildWebSummaryContext = async (webCandidates) => {
+  const contextBlocks = [];
+  const priceHints = [];
+  const seenUrl = new Set();
+
+  for (const item of webCandidates.slice(0, webSearchConfig.maxResults)) {
+    const url = String(item?.url || "").trim();
+    if (!url || seenUrl.has(url)) {
+      continue;
+    }
+    seenUrl.add(url);
+
+    let title = String(item?.title || "").trim();
+    let snippet = String(item?.snippet || "").trim();
+    let sourceName = String(item?.source || "web").trim();
+
+    const wikiSummary = await fetchWikipediaSummary(url);
+    if (wikiSummary) {
+      title = wikiSummary.title || title;
+      snippet = [wikiSummary.description, wikiSummary.extract].filter(Boolean).join(" / ").trim() || snippet;
+      sourceName = "wikipedia";
+    } else {
+      const metaSummary = await fetchHtmlMetaSummary(url);
+      if (metaSummary) {
+        title = metaSummary.title || title;
+        snippet = metaSummary.description || snippet;
+      }
+    }
+
+    const combined = [title, snippet].filter(Boolean).join("\n");
+    if (combined) {
+      contextBlocks.push(`[source=${sourceName}] ${url}\n${truncateText(combined, 420)}`);
+      priceHints.push(...collectPriceHintsFromText(combined));
+    }
+  }
+
+  return {
+    contextText: contextBlocks.join("\n\n"),
+    priceHints: dedupeTextArray(priceHints).slice(0, 6)
+  };
+};
+
+const requestGroqWineSummaryFromWeb = async ({ query, contextText, priceHints = [] }) => {
+  if (!groqConfig.apiKey) {
+    return null;
+  }
+  if (!contextText.trim()) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), groqConfig.timeoutMs);
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${groqConfig.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: groqConfig.model,
+        temperature: 0.1,
+        max_tokens: 220,
+        messages: [
+          {
+            role: "system",
+            content:
+              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","varieties":""}. If unknown use "不明".'
+          },
+          {
+            role: "user",
+            content:
+              `Query: ${query}\n\n` +
+              `Web context:\n${truncateText(contextText, 3000)}\n\n` +
+              `Price hints: ${priceHints.join(", ") || "none"}\n\n` +
+              "Return only JSON."
+          }
+        ]
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`groq web summary request failed ${response.status}`);
+    }
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content || "";
+    const parsed = parseJsonObjectFromText(content);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    const marketPriceFromHints = priceHints.length > 0 ? `参考: ${priceHints[0]}` : "不明";
+    return {
+      region: normalizeSummaryField(parsed.region),
+      producer: normalizeSummaryField(parsed.producer),
+      market_price: normalizeSummaryField(parsed.market_price || marketPriceFromHints),
+      varieties: normalizeVarieties(parsed.varieties)
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      console.warn("Groq web summary timed out");
+      return null;
+    }
+    console.warn("Groq web summary failed", error?.message || error);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const extractSuggestionsFromGroqText = (content) => {
   const raw = String(content || "").trim();
   if (!raw) {
@@ -1188,17 +1458,36 @@ const resolvePriceByOcrText = async (text) => {
   }
 
   if (webCandidates.length > 0) {
-    const webLines = buildWebCandidateLines(webCandidates);
+    const webContext = await buildWebSummaryContext(webCandidates);
+    const summarized = await requestGroqWineSummaryFromWeb({
+      query: queryUsedForWeb,
+      contextText: webContext.contextText,
+      priceHints: webContext.priceHints
+    });
+    const summary = summarized || {
+      region: "不明",
+      producer: queryUsedForWeb || "不明",
+      market_price: webContext.priceHints[0] ? `参考: ${webContext.priceHints[0]}` : "不明",
+      varieties: "不明"
+    };
+
     return {
       queryUsed: queryUsedForWeb,
       extractedText: text,
       message: buildTextByTemplate(
-        "image_ocr_web_candidates",
-        { query: queryUsedForWeb, web_lines: webLines },
-        `価格DBには見つかりませんでした。\n抽出候補: ${queryUsedForWeb}\nWeb候補:\n${webLines}\n※この候補は参考情報です。`
+        "image_ocr_web_summary",
+        {
+          query: queryUsedForWeb,
+          region: summary.region,
+          producer: summary.producer,
+          market_price: summary.market_price,
+          varieties: summary.varieties
+        },
+        `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n※Web参照の要約です。`
       ),
       matches: [],
-      webCandidates
+      webCandidates,
+      webSummary: summary
     };
   }
 
