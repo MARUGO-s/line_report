@@ -74,6 +74,13 @@ const webSearchConfig = {
     .slice(0, 3)
 };
 
+const groqConfig = {
+  apiKey: String(process.env.GROQ_API_KEY || "").trim(),
+  model: String(process.env.GROQ_MODEL || "llama-3.1-8b-instant").trim(),
+  timeoutMs: Math.max(1000, Number(process.env.GROQ_TIMEOUT_MS || 5000) || 5000),
+  maxCandidates: Math.max(1, Math.min(5, Number(process.env.GROQ_MAX_CANDIDATES || 3) || 3))
+};
+
 const parseOcrExtraFields = (rawValue) => {
   const text = String(rawValue || "").trim();
   if (!text) {
@@ -896,6 +903,98 @@ const searchWebCandidates = async (query) => {
   return deduped;
 };
 
+const extractSuggestionsFromGroqText = (content) => {
+  const raw = String(content || "").trim();
+  if (!raw) {
+    return [];
+  }
+
+  const suggestions = [];
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const jsonCandidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+      for (const item of jsonCandidates) {
+        suggestions.push(String(item || ""));
+      }
+    } catch (error) {
+      // ignore parse error and continue with line parsing
+    }
+  }
+
+  const lineCandidates = raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-*0-9.)\s]+/, "").trim())
+    .filter(Boolean);
+  suggestions.push(...lineCandidates);
+
+  const normalized = dedupeTextArray(
+    suggestions
+      .map((item) =>
+        String(item || "")
+          .replace(/^["'`]+|["'`]+$/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+      )
+      .filter((item) => item.length >= 4 && item.length <= 80)
+      .filter((item) => !isLikelyNoiseLine(item))
+  );
+  return normalized.slice(0, groqConfig.maxCandidates);
+};
+
+const requestGroqQuerySuggestions = async ({ ocrText, candidates }) => {
+  if (!groqConfig.apiKey) {
+    return [];
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), groqConfig.timeoutMs);
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${groqConfig.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: groqConfig.model,
+        temperature: 0.1,
+        max_tokens: 120,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You correct OCR text into likely wine product names. Return compact JSON only: {\"candidates\":[\"name1\",\"name2\"]}"
+          },
+          {
+            role: "user",
+            content: `OCR text:\n${truncateText(ocrText, 800)}\n\nCurrent candidates:\n${candidates.join("\n")}\n\nReturn up to ${groqConfig.maxCandidates} corrected wine names.`
+          }
+        ]
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`groq request failed ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content || "";
+    return extractSuggestionsFromGroqText(content);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      console.warn("Groq suggestion timed out");
+      return [];
+    }
+    console.warn("Groq suggestion failed", error?.message || error);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const buildWebCandidateLines = (items) =>
   items
     .slice(0, webSearchConfig.maxResults)
@@ -918,23 +1017,35 @@ const resolvePriceByOcrText = async (text) => {
 
   const fallbackQuery = truncateText(candidates[0] || String(text || "").replace(/\s+/g, " "), 80);
   let webCandidates = [];
+  let queryUsedForWeb = fallbackQuery;
+
   if (webSearchConfig.enabled && fallbackQuery) {
-    try {
-      webCandidates = await searchWebCandidates(fallbackQuery);
-    } catch (error) {
-      console.warn("Web search fallback failed", error?.message || error);
+    const groqSuggestions = await requestGroqQuerySuggestions({ ocrText: text, candidates });
+    const searchQueries = dedupeTextArray([...groqSuggestions, ...candidates]).slice(0, 3);
+
+    for (const query of searchQueries) {
+      try {
+        const found = await searchWebCandidates(query);
+        if (found.length > 0) {
+          webCandidates = found;
+          queryUsedForWeb = query;
+          break;
+        }
+      } catch (error) {
+        console.warn("Web search fallback failed", query, error?.message || error);
+      }
     }
   }
 
   if (webCandidates.length > 0) {
     const webLines = buildWebCandidateLines(webCandidates);
     return {
-      queryUsed: fallbackQuery,
+      queryUsed: queryUsedForWeb,
       extractedText: text,
       message: buildTextByTemplate(
         "image_ocr_web_candidates",
-        { query: fallbackQuery, web_lines: webLines },
-        `価格DBには見つかりませんでした。\n抽出候補: ${fallbackQuery}\nWeb候補:\n${webLines}\n※この候補は参考情報です。`
+        { query: queryUsedForWeb, web_lines: webLines },
+        `価格DBには見つかりませんでした。\n抽出候補: ${queryUsedForWeb}\nWeb候補:\n${webLines}\n※この候補は参考情報です。`
       ),
       matches: [],
       webCandidates
@@ -1272,6 +1383,7 @@ app.get("/api/health", (req, res) => {
     ocrTimeoutMs: lineConfig.ocrTimeoutMs,
     webSearchEnabled: webSearchConfig.enabled,
     webSearchMaxResults: webSearchConfig.maxResults,
+    groqConfigured: Boolean(groqConfig.apiKey),
     backupRetention: opsConfig.backupRetention
   });
 });
