@@ -62,6 +62,12 @@ const lineConfig = {
   ocrTimeoutMs: Math.max(1000, Number(process.env.OCR_TIMEOUT_MS || 12000) || 12000)
 };
 
+const defaultWineSearchDomains = [
+  "www.wine-searcher.com",
+  "www.vivino.com",
+  "www.cellartracker.com"
+];
+
 const webSearchConfig = {
   enabled: asBooleanEnv(process.env.WEB_SEARCH_ENABLED, false),
   timeoutMs: Math.max(1000, Number(process.env.WEB_SEARCH_TIMEOUT_MS || 5000) || 5000),
@@ -86,7 +92,11 @@ const webSearchConfig = {
       )
       .filter(Boolean)
       .slice(0, 5);
-    return parsed.length > 0 ? parsed : ["www.enoteca.co.jp"];
+    // Keep backward compatibility while migrating old default to wine-focused sources.
+    if (parsed.length === 0 || (parsed.length === 1 && parsed[0] === "www.enoteca.co.jp")) {
+      return [...defaultWineSearchDomains];
+    }
+    return parsed;
   })(),
   querySuffix: String(process.env.WEB_SEARCH_QUERY_SUFFIX || " wine").trim(),
   serpApiKey: String(process.env.SERPAPI_API_KEY || "").trim(),
@@ -373,6 +383,8 @@ const ensureDefaultTemplates = () => {
     "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n※Web参照の要約です。";
   const webSummaryBodyV3 =
     "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n※Web参照の要約です。";
+  const webSummaryBodyV4 =
+    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n※Web参照の要約です。";
 
   const defaults = [
     { key: "price_found", body: "{{product_name}} の最新価格です。\n{{lines}}" },
@@ -389,7 +401,7 @@ const ensureDefaultTemplates = () => {
     },
     {
       key: "image_ocr_web_summary",
-      body: webSummaryBodyV3
+      body: webSummaryBodyV4
     }
   ];
 
@@ -407,10 +419,14 @@ const ensureDefaultTemplates = () => {
     // Upgrade only known default body so user-customized templates are preserved.
     if (template.key === "image_ocr_web_summary") {
       const trimmed = existingBody.trim();
-      if (trimmed === webSummaryBodyV1.trim() || trimmed === webSummaryBodyV2.trim()) {
+      if (
+        trimmed === webSummaryBodyV1.trim() ||
+        trimmed === webSummaryBodyV2.trim() ||
+        trimmed === webSummaryBodyV3.trim()
+      ) {
         upsertReplyTemplate({
           templateKey: template.key,
-          body: webSummaryBodyV3,
+          body: webSummaryBodyV4,
           isActive: true
         });
       }
@@ -962,6 +978,28 @@ const extractHostname = (urlText) => {
   }
 };
 
+const asSourceDisplayName = (urlText) => {
+  const host = extractHostname(urlText);
+  if (!host) {
+    return "web";
+  }
+  if (host.endsWith("wine-searcher.com")) {
+    return "Wine-Searcher";
+  }
+  if (host.endsWith("vivino.com")) {
+    return "Vivino";
+  }
+  if (host.endsWith("cellartracker.com")) {
+    return "CellarTracker";
+  }
+  return host.replace(/^www\./, "");
+};
+
+const buildSourceSummary = (items = []) => {
+  const sources = dedupeTextArray((items || []).map((item) => asSourceDisplayName(item?.url))).slice(0, 4);
+  return sources.length > 0 ? sources.join(" / ") : "不明";
+};
+
 const isUrlInDomain = (urlText, domain) => {
   const host = extractHostname(urlText);
   const normalizedDomain = String(domain || "").trim().toLowerCase();
@@ -1006,8 +1044,22 @@ const isLikelyRelevantPriorityCandidate = (item, query, domain) => {
     (token) => normalizedBody.includes(token) || normalizedUrl.includes(token)
   ).length;
 
-  // Keep only likely product/info pages from the priority domain.
-  if (/\/item\/|\/archives\/|\/article\/|\/producer\/|\/shop\//.test(url)) {
+  // Keep only likely product/info pages from the prioritized domain.
+  const host = extractHostname(url);
+  const wineSearcherPath = /\/find\/|\/wine-\d+|\/merchant\//i.test(url);
+  const vivinoPath = /\/wines\/|\/explore\//i.test(url);
+  const cellarTrackerPath = /\/wine\.asp|\/list\.asp|\/producer\.asp/i.test(url);
+  const genericWinePath = /\/item\/|\/archives\/|\/article\/|\/producer\/|\/shop\//i.test(url);
+
+  if (
+    (host.endsWith("wine-searcher.com") && wineSearcherPath) ||
+    (host.endsWith("vivino.com") && vivinoPath) ||
+    (host.endsWith("cellartracker.com") && cellarTrackerPath) ||
+    genericWinePath
+  ) {
+    return matched >= 1;
+  }
+  if (tokens.length <= 2) {
     return matched >= 1;
   }
   return matched >= 2;
@@ -1020,14 +1072,15 @@ const searchSerpApiCandidates = async (query, options = {}) => {
   const preferredDomain = String(options.preferredDomain || "")
     .trim()
     .toLowerCase();
+  const limit = Math.max(
+    1,
+    Math.min(12, Number(options.limit || webSearchConfig.maxResults) || webSearchConfig.maxResults)
+  );
 
   const endpoint = new URL("https://serpapi.com/search.json");
   endpoint.searchParams.set("engine", webSearchConfig.serpApiEngine || "google");
   endpoint.searchParams.set("q", query);
-  endpoint.searchParams.set(
-    "num",
-    String(Math.max(webSearchConfig.maxResults, webSearchConfig.serpApiNum))
-  );
+  endpoint.searchParams.set("num", String(Math.max(limit, webSearchConfig.serpApiNum)));
   endpoint.searchParams.set("api_key", webSearchConfig.serpApiKey);
   if (webSearchConfig.serpApiLanguage) {
     endpoint.searchParams.set("hl", webSearchConfig.serpApiLanguage);
@@ -1043,7 +1096,7 @@ const searchSerpApiCandidates = async (query, options = {}) => {
 
   const items = [];
   const pushItem = (item) => {
-    if (items.length >= webSearchConfig.maxResults) {
+    if (items.length >= limit) {
       return;
     }
     const title = String(item?.title || "").trim();
@@ -1111,64 +1164,80 @@ const searchWebCandidates = async (query) => {
     webSearchConfig.provider === "auto" ||
     webSearchConfig.provider === "free" ||
     (webSearchConfig.provider === "serpapi" && !webSearchConfig.serpApiKey);
+  const targetCount = Math.max(
+    webSearchConfig.maxResults,
+    webSearchConfig.summaryMaxSources,
+    webSearchConfig.priorityDomains.length * 2
+  );
 
-  const candidates = [];
-  for (const searchQuery of queryVariants) {
-    if (candidates.length >= webSearchConfig.maxResults) {
-      break;
-    }
-
-    if (trySerpApi && webSearchConfig.serpApiKey) {
+  const domainCandidates = [];
+  if (trySerpApi && webSearchConfig.serpApiKey) {
+    for (const searchQuery of queryVariants) {
+      if (domainCandidates.length >= targetCount) {
+        break;
+      }
       for (const domain of webSearchConfig.priorityDomains) {
-        if (candidates.length >= webSearchConfig.maxResults) {
+        if (domainCandidates.length >= targetCount) {
           break;
         }
         try {
           const siteQuery = `site:${domain} ${searchQuery}`.trim();
-          const serpSiteRaw = await searchSerpApiCandidates(siteQuery, { preferredDomain: domain });
+          const serpSiteRaw = await searchSerpApiCandidates(siteQuery, {
+            preferredDomain: domain,
+            limit: 2
+          });
           const serpSite = serpSiteRaw.filter((item) =>
             isLikelyRelevantPriorityCandidate(item, searchQuery, domain)
           );
-          candidates.push(
+          domainCandidates.push(
             ...serpSite.map((item) => ({
               ...item,
-              source: `${item.source || "serpapi"}-priority:${domain}`
+              source: `${item.source || "serpapi"}-site:${domain}`
             }))
           );
         } catch (error) {
-          console.warn("SerpAPI priority search failed", domain, error?.message || error);
+          console.warn("SerpAPI domain search failed", domain, error?.message || error);
         }
       }
-      if (candidates.length >= webSearchConfig.maxResults) {
+    }
+  }
+
+  // If none of the designated wine sites match, then fallback to broad web search.
+  const candidates = [...domainCandidates];
+  if (domainCandidates.length === 0) {
+    for (const searchQuery of queryVariants) {
+      if (candidates.length >= targetCount) {
+        break;
+      }
+
+      if (trySerpApi && webSearchConfig.serpApiKey) {
+        try {
+          const serp = await searchSerpApiCandidates(searchQuery, { limit: webSearchConfig.maxResults });
+          candidates.push(...serp);
+        } catch (error) {
+          console.warn("SerpAPI search failed", error?.message || error);
+        }
+        if (candidates.length >= targetCount) {
+          break;
+        }
+      }
+
+      if (!tryFreeSources) {
+        continue;
+      }
+
+      const wiki = await searchWikipediaCandidates(searchQuery);
+      candidates.push(...wiki);
+      if (candidates.length >= targetCount) {
         break;
       }
 
       try {
-        const serp = await searchSerpApiCandidates(searchQuery);
-        candidates.push(...serp);
+        const ddg = await searchDuckDuckGoCandidates(searchQuery);
+        candidates.push(...ddg);
       } catch (error) {
-        console.warn("SerpAPI search failed", error?.message || error);
+        console.warn("DuckDuckGo search failed", error?.message || error);
       }
-      if (candidates.length >= webSearchConfig.maxResults) {
-        break;
-      }
-    }
-
-    if (!tryFreeSources) {
-      continue;
-    }
-
-    const wiki = await searchWikipediaCandidates(searchQuery);
-    candidates.push(...wiki);
-    if (candidates.length >= webSearchConfig.maxResults) {
-      break;
-    }
-
-    try {
-      const ddg = await searchDuckDuckGoCandidates(searchQuery);
-      candidates.push(...ddg);
-    } catch (error) {
-      console.warn("DuckDuckGo search failed", error?.message || error);
     }
   }
 
@@ -1186,7 +1255,7 @@ const searchWebCandidates = async (query) => {
       snippet: truncateText(item?.snippet || "", 120),
       source: item?.source || "web"
     });
-    if (deduped.length >= webSearchConfig.maxResults) {
+    if (deduped.length >= targetCount) {
       break;
     }
   }
@@ -2398,16 +2467,17 @@ const resolvePriceByOcrText = async (text) => {
           query: queryUsedForWeb,
           region: summary.region,
           producer: summary.producer,
-              market_price: summary.market_price,
-              varieties: summary.varieties,
-              taste: summary.taste,
-              features: summary.features,
-              rating_points: summary.rating_points,
-              awards: summary.awards,
-              drinking_window: summary.drinking_window,
-              winery_history: summary.winery_history
-            },
-            `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n評価ポイント: ${summary.rating_points}\n受賞歴: ${summary.awards}\n飲み頃: ${summary.drinking_window}\nワイナリーの歴史: ${summary.winery_history}\n※Web参照の要約です。`
+          market_price: summary.market_price,
+          varieties: summary.varieties,
+          taste: summary.taste,
+          features: summary.features,
+          rating_points: summary.rating_points,
+          awards: summary.awards,
+          drinking_window: summary.drinking_window,
+          winery_history: summary.winery_history,
+          sources: buildSourceSummary(finalCandidates)
+        },
+        `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n評価ポイント: ${summary.rating_points}\n受賞歴: ${summary.awards}\n飲み頃: ${summary.drinking_window}\nワイナリーの歴史: ${summary.winery_history}\n参照ソース: ${buildSourceSummary(finalCandidates)}\n※Web参照の要約です。`
       ),
       matches: [],
       webCandidates: finalCandidates,
