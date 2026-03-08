@@ -50,6 +50,102 @@ const api = {
   }
 };
 
+const previewData = {
+  stores: [{ id: 1, store_code: "SHINJUKU", name: "新宿店" }],
+  products: [
+    {
+      id: 1,
+      sku: "WINE-0001",
+      name: "Chablis Premier Cru",
+      producer: "Domaine X",
+      vintage: "2022",
+      aliases: ["シャブリ"]
+    }
+  ],
+  currentPrices: [
+    {
+      product_id: 1,
+      product_name: "Chablis Premier Cru",
+      sku: "WINE-0001",
+      producer: "Domaine X",
+      vintage: "2022",
+      store_id: 1,
+      store_code: "SHINJUKU",
+      store_name: "新宿店",
+      latest_price: 4400,
+      currency: "JPY",
+      effective_date: "2026-03-22",
+      updated_at: "2026-03-08T10:42:23.298Z"
+    }
+  ],
+  templates: [
+    { id: 1, template_key: "price_found", is_active: 1, updated_at: "2026-03-08T10:00:00.000Z" },
+    {
+      id: 2,
+      template_key: "price_not_found",
+      is_active: 1,
+      updated_at: "2026-03-08T10:00:00.000Z"
+    },
+    {
+      id: 3,
+      template_key: "image_received",
+      is_active: 1,
+      updated_at: "2026-03-08T10:00:00.000Z"
+    }
+  ],
+  ingestionFiles: [
+    {
+      id: 2,
+      file_name: "import_jp_header_2026-03.csv",
+      status: "SUCCESS",
+      total_rows: 2,
+      accepted_rows: 2,
+      rejected_rows: 0,
+      uploaded_at: "2026-03-08T10:42:23.297Z"
+    },
+    {
+      id: 1,
+      file_name: "import_2026-03.csv",
+      status: "PARTIAL",
+      total_rows: 2,
+      accepted_rows: 1,
+      rejected_rows: 1,
+      uploaded_at: "2026-03-08T10:38:35.068Z"
+    }
+  ],
+  ingestionErrorsByFile: {
+    "1": {
+      items: [
+        {
+          id: 1,
+          ingestion_file_id: 1,
+          row_no: 3,
+          error_code: "PRODUCT_NOT_FOUND",
+          error_message: "product_id / sku / product_name から商品を特定できません"
+        }
+      ]
+    },
+    "2": { items: [] }
+  },
+  mappingsByStore: {
+    "1": {
+      store_id: 1,
+      store_code: "SHINJUKU",
+      store_name: "新宿店",
+      delimiter: null,
+      header_mapping: {
+        商品コード: "sku",
+        商品名: "product_name",
+        店舗コード: "store_code",
+        価格: "price",
+        適用日: "effective_date"
+      }
+    }
+  }
+};
+
+let isStaticPreview = false;
+
 const notify = (message, isError = false) => {
   flashEl.textContent = message;
   flashEl.className = isError ? "flash error" : "flash";
@@ -163,38 +259,186 @@ const renderIngestionFiles = (items) => {
   }
 };
 
+const findPreviewMatches = (query) => {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) {
+    return [];
+  }
+
+  return previewData.currentPrices.filter((item) => {
+    const names = [
+      item.product_name,
+      item.sku,
+      item.producer,
+      ...(previewData.products.find((p) => p.id === item.product_id)?.aliases || [])
+    ]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase();
+
+    return names.includes(q);
+  });
+};
+
+const buildPreviewSimulate = (query) => {
+  const q = String(query || "").trim();
+  const matches = findPreviewMatches(q);
+  if (!matches.length) {
+    return {
+      query: q,
+      message: `${q} に一致する価格が見つかりませんでした。`,
+      matches: []
+    };
+  }
+
+  const lines = matches
+    .slice(0, 5)
+    .map((item) => `・${item.store_name}: ${Number(item.latest_price).toLocaleString("ja-JP")}円 (${item.effective_date})`)
+    .join("\n");
+
+  return {
+    query: q,
+    message: `${matches[0].product_name} の最新価格です。\n${lines}`,
+    matches
+  };
+};
+
+const buildPreviewOcrResolve = (text) => {
+  const raw = String(text || "").trim();
+  const candidates = [
+    raw,
+    ...raw
+      .split(/[\n\r,，、/|]/)
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+  ];
+
+  for (const candidate of candidates) {
+    const simulated = buildPreviewSimulate(candidate);
+    if (simulated.matches.length) {
+      return {
+        queryUsed: candidate,
+        extractedText: raw,
+        message: simulated.message,
+        matches: simulated.matches
+      };
+    }
+  }
+
+  return {
+    queryUsed: candidates[0] || "",
+    extractedText: raw,
+    message: `OCR結果から価格を照合できませんでした。\n抽出候補: ${candidates[0] || ""}`,
+    matches: []
+  };
+};
+
+const disableMutationFormsForStaticPreview = () => {
+  const forms = [storeForm, productForm, priceForm, templateForm, csvIngestionForm, csvMappingForm];
+  for (const form of forms) {
+    for (const element of form.elements) {
+      element.disabled = true;
+    }
+  }
+  loadCsvMappingBtn.disabled = true;
+};
+
+const activateStaticPreviewMode = (reason = "") => {
+  isStaticPreview = true;
+  systemStatusEl.textContent = "GitHub Pages 静的プレビューモード（保存APIは無効）";
+  disableMutationFormsForStaticPreview();
+
+  renderStores(previewData.stores);
+  renderProducts(previewData.products);
+  renderCurrentPrices(previewData.currentPrices);
+  renderTemplates(previewData.templates);
+  renderIngestionFiles(previewData.ingestionFiles);
+
+  csvIngestionResult.textContent = "静的プレビューではCSV取り込みAPIは利用できません。";
+  ingestionErrorsResult.textContent = "履歴行をクリックするとデモのエラー詳細を表示します。";
+  csvMappingResult.textContent = "静的プレビューではマッピング保存APIは利用できません。";
+
+  const suffix = reason ? ` (${reason})` : "";
+  notify(`静的プレビューモードで表示中です${suffix}`);
+};
+
 const loadSystem = async () => {
+  if (isStaticPreview) {
+    return;
+  }
+
   const result = await api.get("/api/health");
   systemStatusEl.textContent = `${result.host}:${result.port} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"} / OCR: ${result.ocrEndpointReady ? "OK" : "NG"}`;
 };
 
 const loadStores = async () => {
+  if (isStaticPreview) {
+    renderStores(previewData.stores);
+    return;
+  }
+
   const result = await api.get("/api/stores");
   renderStores(result.items || []);
 };
 
 const loadProducts = async () => {
   const q = productSearchEl.value.trim();
+
+  if (isStaticPreview) {
+    const filtered = q
+      ? previewData.products.filter((item) => {
+          const text = [item.name, item.sku, item.producer, ...(item.aliases || [])]
+            .filter(Boolean)
+            .join("\n")
+            .toLowerCase();
+          return text.includes(q.toLowerCase());
+        })
+      : previewData.products;
+    renderProducts(filtered);
+    return;
+  }
+
   const result = await api.get(`/api/products?query=${encodeURIComponent(q)}`);
   renderProducts(result.items || []);
 };
 
 const loadCurrentPrices = async () => {
+  if (isStaticPreview) {
+    renderCurrentPrices(previewData.currentPrices);
+    return;
+  }
+
   const result = await api.get("/api/prices/current?limit=100");
   renderCurrentPrices(result.items || []);
 };
 
 const loadTemplates = async () => {
+  if (isStaticPreview) {
+    renderTemplates(previewData.templates);
+    return;
+  }
+
   const result = await api.get("/api/reply-templates");
   renderTemplates(result.items || []);
 };
 
 const loadIngestionFiles = async () => {
+  if (isStaticPreview) {
+    renderIngestionFiles(previewData.ingestionFiles);
+    return;
+  }
+
   const result = await api.get("/api/ingestion/files?limit=100");
   renderIngestionFiles(result.items || []);
 };
 
 const loadIngestionErrors = async (ingestionFileId) => {
+  if (isStaticPreview) {
+    const result = previewData.ingestionErrorsByFile[String(ingestionFileId)] || { items: [] };
+    ingestionErrorsResult.textContent = JSON.stringify(result, null, 2);
+    return;
+  }
+
   const result = await api.get(`/api/ingestion/files/${encodeURIComponent(ingestionFileId)}/errors`);
   ingestionErrorsResult.textContent = JSON.stringify(result, null, 2);
 };
@@ -211,6 +455,17 @@ const normalizeDelimiterValue = (value) => {
 };
 
 const loadCsvMapping = async (storeId) => {
+  if (isStaticPreview) {
+    const result = previewData.mappingsByStore[String(storeId)];
+    if (!result) {
+      throw new Error("preview mapping not found");
+    }
+    csvMappingResult.textContent = JSON.stringify(result, null, 2);
+    csvMappingForm.elements.headerMappingJson.value = JSON.stringify(result.header_mapping || {}, null, 2);
+    csvMappingForm.elements.delimiter.value = result.delimiter || "";
+    return result;
+  }
+
   const result = await api.get(`/api/ingestion/mappings/${encodeURIComponent(storeId)}`);
   csvMappingResult.textContent = JSON.stringify(result, null, 2);
   csvMappingForm.elements.headerMappingJson.value = JSON.stringify(result.header_mapping || {}, null, 2);
@@ -220,6 +475,11 @@ const loadCsvMapping = async (storeId) => {
 
 storeForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (isStaticPreview) {
+    notify("静的プレビューでは店舗保存できません。", true);
+    return;
+  }
+
   const formData = new FormData(storeForm);
 
   try {
@@ -237,6 +497,11 @@ storeForm.addEventListener("submit", async (event) => {
 
 productForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (isStaticPreview) {
+    notify("静的プレビューでは商品保存できません。", true);
+    return;
+  }
+
   const formData = new FormData(productForm);
   const aliasesRaw = String(formData.get("aliases") || "").trim();
 
@@ -258,6 +523,11 @@ productForm.addEventListener("submit", async (event) => {
 
 priceForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (isStaticPreview) {
+    notify("静的プレビューでは価格保存できません。", true);
+    return;
+  }
+
   const formData = new FormData(priceForm);
 
   try {
@@ -278,6 +548,11 @@ priceForm.addEventListener("submit", async (event) => {
 
 templateForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (isStaticPreview) {
+    notify("静的プレビューではテンプレート保存できません。", true);
+    return;
+  }
+
   const formData = new FormData(templateForm);
 
   try {
@@ -295,6 +570,11 @@ templateForm.addEventListener("submit", async (event) => {
 
 csvIngestionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (isStaticPreview) {
+    notify("静的プレビューではCSV取り込みできません。", true);
+    return;
+  }
+
   const formData = new FormData(csvIngestionForm);
   const file = formData.get("csvFile");
 
@@ -339,6 +619,11 @@ ingestionFilesTable.addEventListener("click", (event) => {
 
 csvMappingForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (isStaticPreview) {
+    notify("静的プレビューではCSVマッピング保存できません。", true);
+    return;
+  }
+
   const formData = new FormData(csvMappingForm);
   const storeId = Number(formData.get("storeId"));
   const delimiter = normalizeDelimiterValue(formData.get("delimiter"));
@@ -347,7 +632,7 @@ csvMappingForm.addEventListener("submit", async (event) => {
   let headerMapping;
   try {
     headerMapping = JSON.parse(headerMappingJson);
-  } catch (error) {
+  } catch {
     notify("ヘッダーマッピングJSONの形式が不正です。", true);
     return;
   }
@@ -384,11 +669,12 @@ loadCsvMappingBtn.addEventListener("click", async () => {
 simulateForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(simulateForm);
+  const query = String(formData.get("query") || "").trim();
 
   try {
-    const result = await api.post("/api/line/simulate", {
-      query: String(formData.get("query") || "").trim()
-    });
+    const result = isStaticPreview
+      ? buildPreviewSimulate(query)
+      : await api.post("/api/line/simulate", { query });
     simulateResult.textContent = JSON.stringify(result, null, 2);
     notify("シミュレーションを実行しました。");
   } catch (error) {
@@ -399,11 +685,12 @@ simulateForm.addEventListener("submit", async (event) => {
 ocrResolveForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(ocrResolveForm);
+  const text = String(formData.get("text") || "").trim();
 
   try {
-    const result = await api.post("/api/ocr/resolve", {
-      text: String(formData.get("text") || "").trim()
-    });
+    const result = isStaticPreview
+      ? buildPreviewOcrResolve(text)
+      : await api.post("/api/ocr/resolve", { text });
     ocrResolveResult.textContent = JSON.stringify(result, null, 2);
     notify("OCR照合テストを実行しました。");
   } catch (error) {
@@ -431,7 +718,7 @@ const boot = async () => {
     ]);
     notify("初期化しました。");
   } catch (error) {
-    notify(`初期化に失敗: ${error.message}`, true);
+    activateStaticPreviewMode(String(error?.message || "API unavailable"));
   }
 };
 
