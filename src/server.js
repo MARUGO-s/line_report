@@ -66,7 +66,30 @@ const webSearchConfig = {
   enabled: asBooleanEnv(process.env.WEB_SEARCH_ENABLED, false),
   timeoutMs: Math.max(1000, Number(process.env.WEB_SEARCH_TIMEOUT_MS || 5000) || 5000),
   maxResults: Math.max(1, Math.min(5, Number(process.env.WEB_SEARCH_MAX_RESULTS || 3) || 3)),
+  provider: (() => {
+    const raw = String(process.env.WEB_SEARCH_PROVIDER || "auto").trim().toLowerCase();
+    return ["auto", "free", "serpapi"].includes(raw) ? raw : "auto";
+  })(),
+  priorityDomains: (() => {
+    const parsed = String(process.env.WEB_SEARCH_PRIORITY_DOMAINS || "")
+      .split(",")
+      .map((item) =>
+        String(item || "")
+          .trim()
+          .toLowerCase()
+          .replace(/^https?:\/\//, "")
+          .replace(/\/.*$/, "")
+      )
+      .filter(Boolean)
+      .slice(0, 5);
+    return parsed.length > 0 ? parsed : ["www.enoteca.co.jp"];
+  })(),
   querySuffix: String(process.env.WEB_SEARCH_QUERY_SUFFIX || " wine").trim(),
+  serpApiKey: String(process.env.SERPAPI_API_KEY || "").trim(),
+  serpApiEngine: String(process.env.WEB_SEARCH_SERPAPI_ENGINE || "google").trim(),
+  serpApiLanguage: String(process.env.WEB_SEARCH_SERPAPI_HL || "ja").trim(),
+  serpApiCountry: String(process.env.WEB_SEARCH_SERPAPI_GL || "jp").trim(),
+  serpApiNum: Math.max(1, Math.min(10, Number(process.env.WEB_SEARCH_SERPAPI_NUM || 5) || 5)),
   wikipediaLangs: String(process.env.WEB_SEARCH_WIKIPEDIA_LANGS || "en,ja")
     .split(",")
     .map((item) => item.trim().toLowerCase())
@@ -907,6 +930,143 @@ const searchDuckDuckGoCandidates = async (query) => {
   return items;
 };
 
+const extractHostname = (urlText) => {
+  try {
+    const url = new URL(String(urlText || "").trim());
+    return String(url.hostname || "").trim().toLowerCase();
+  } catch (error) {
+    return "";
+  }
+};
+
+const isUrlInDomain = (urlText, domain) => {
+  const host = extractHostname(urlText);
+  const normalizedDomain = String(domain || "").trim().toLowerCase();
+  if (!host || !normalizedDomain) {
+    return false;
+  }
+  return host === normalizedDomain || host.endsWith(`.${normalizedDomain}`);
+};
+
+const normalizeSearchText = (value) =>
+  String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const splitSearchTokens = (value) =>
+  normalizeSearchText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+    .slice(0, 8);
+
+const isLikelyRelevantPriorityCandidate = (item, query, domain) => {
+  const url = String(item?.url || "").trim();
+  if (!url || !isUrlInDomain(url, domain)) {
+    return false;
+  }
+
+  const normalizedUrl = normalizeSearchText(url);
+  const normalizedBody = normalizeSearchText(
+    `${String(item?.title || "")} ${String(item?.snippet || "")}`
+  );
+  const tokens = splitSearchTokens(query);
+  if (!tokens.length) {
+    return true;
+  }
+
+  const matched = tokens.filter(
+    (token) => normalizedBody.includes(token) || normalizedUrl.includes(token)
+  ).length;
+
+  // Keep only likely product/info pages from the priority domain.
+  if (/\/item\/|\/archives\/|\/article\/|\/producer\/|\/shop\//.test(url)) {
+    return matched >= 1;
+  }
+  return matched >= 2;
+};
+
+const searchSerpApiCandidates = async (query, options = {}) => {
+  if (!webSearchConfig.serpApiKey) {
+    return [];
+  }
+  const preferredDomain = String(options.preferredDomain || "")
+    .trim()
+    .toLowerCase();
+
+  const endpoint = new URL("https://serpapi.com/search.json");
+  endpoint.searchParams.set("engine", webSearchConfig.serpApiEngine || "google");
+  endpoint.searchParams.set("q", query);
+  endpoint.searchParams.set(
+    "num",
+    String(Math.max(webSearchConfig.maxResults, webSearchConfig.serpApiNum))
+  );
+  endpoint.searchParams.set("api_key", webSearchConfig.serpApiKey);
+  if (webSearchConfig.serpApiLanguage) {
+    endpoint.searchParams.set("hl", webSearchConfig.serpApiLanguage);
+  }
+  if (webSearchConfig.serpApiCountry) {
+    endpoint.searchParams.set("gl", webSearchConfig.serpApiCountry);
+  }
+
+  const payload = await fetchJsonWithTimeout(endpoint.toString(), webSearchConfig.timeoutMs);
+  if (payload?.error) {
+    throw new Error(`serpapi error: ${payload.error}`);
+  }
+
+  const items = [];
+  const pushItem = (item) => {
+    if (items.length >= webSearchConfig.maxResults) {
+      return;
+    }
+    const title = String(item?.title || "").trim();
+    const url = String(item?.url || "").trim();
+    if (!title || !url) {
+      return;
+    }
+    if (preferredDomain && !isUrlInDomain(url, preferredDomain)) {
+      return;
+    }
+    items.push({
+      title: truncateText(title, 90),
+      url,
+      snippet: truncateText(item?.snippet || "", 120),
+      source: item?.source || "serpapi"
+    });
+  };
+
+  const knowledge = payload?.knowledge_graph;
+  const knowledgeTitle = String(knowledge?.title || "").trim();
+  const knowledgeUrl = String(knowledge?.website || knowledge?.description_link || "").trim();
+  if (knowledgeTitle && knowledgeUrl) {
+    pushItem({
+      title: knowledgeTitle,
+      url: knowledgeUrl,
+      snippet: String(knowledge?.description || "").trim(),
+      source: "serpapi-knowledge"
+    });
+  }
+
+  const organicResults = Array.isArray(payload?.organic_results) ? payload.organic_results : [];
+  for (const result of organicResults) {
+    if (items.length >= webSearchConfig.maxResults) {
+      break;
+    }
+    pushItem({
+      title: result?.title,
+      url: result?.link || result?.redirect_link,
+      snippet: result?.snippet,
+      source: "serpapi-organic"
+    });
+  }
+
+  return items;
+};
+
 const searchWebCandidates = async (query) => {
   if (!webSearchConfig.enabled) {
     return [];
@@ -923,10 +1083,56 @@ const searchWebCandidates = async (query) => {
     webSearchConfig.querySuffix ? `${normalizeAscii(base)} ${webSearchConfig.querySuffix}` : ""
   ]).filter(Boolean);
 
+  const trySerpApi = webSearchConfig.provider === "auto" || webSearchConfig.provider === "serpapi";
+  const tryFreeSources =
+    webSearchConfig.provider === "auto" ||
+    webSearchConfig.provider === "free" ||
+    (webSearchConfig.provider === "serpapi" && !webSearchConfig.serpApiKey);
+
   const candidates = [];
   for (const searchQuery of queryVariants) {
     if (candidates.length >= webSearchConfig.maxResults) {
       break;
+    }
+
+    if (trySerpApi && webSearchConfig.serpApiKey) {
+      for (const domain of webSearchConfig.priorityDomains) {
+        if (candidates.length >= webSearchConfig.maxResults) {
+          break;
+        }
+        try {
+          const siteQuery = `site:${domain} ${searchQuery}`.trim();
+          const serpSiteRaw = await searchSerpApiCandidates(siteQuery, { preferredDomain: domain });
+          const serpSite = serpSiteRaw.filter((item) =>
+            isLikelyRelevantPriorityCandidate(item, searchQuery, domain)
+          );
+          candidates.push(
+            ...serpSite.map((item) => ({
+              ...item,
+              source: `${item.source || "serpapi"}-priority:${domain}`
+            }))
+          );
+        } catch (error) {
+          console.warn("SerpAPI priority search failed", domain, error?.message || error);
+        }
+      }
+      if (candidates.length >= webSearchConfig.maxResults) {
+        break;
+      }
+
+      try {
+        const serp = await searchSerpApiCandidates(searchQuery);
+        candidates.push(...serp);
+      } catch (error) {
+        console.warn("SerpAPI search failed", error?.message || error);
+      }
+      if (candidates.length >= webSearchConfig.maxResults) {
+        break;
+      }
+    }
+
+    if (!tryFreeSources) {
+      continue;
     }
 
     const wiki = await searchWikipediaCandidates(searchQuery);
@@ -1855,7 +2061,10 @@ app.get("/api/health", (req, res) => {
     ocrRequestFormat: lineConfig.ocrRequestFormat,
     ocrTimeoutMs: lineConfig.ocrTimeoutMs,
     webSearchEnabled: webSearchConfig.enabled,
+    webSearchProvider: webSearchConfig.provider,
+    webSearchPriorityDomains: webSearchConfig.priorityDomains,
     webSearchMaxResults: webSearchConfig.maxResults,
+    serpApiConfigured: Boolean(webSearchConfig.serpApiKey),
     groqConfigured: Boolean(groqConfig.apiKey),
     groqVisionEnabled: Boolean(groqConfig.apiKey) && groqVisionConfig.enabled,
     groqVisionModel: groqVisionConfig.model,

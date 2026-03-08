@@ -35,8 +35,15 @@ OCR_TIMEOUT_MS=12000
 WEB_SEARCH_ENABLED=false
 WEB_SEARCH_TIMEOUT_MS=5000
 WEB_SEARCH_MAX_RESULTS=3
+WEB_SEARCH_PROVIDER=auto
+WEB_SEARCH_PRIORITY_DOMAINS=www.enoteca.co.jp
 WEB_SEARCH_QUERY_SUFFIX=wine
 WEB_SEARCH_WIKIPEDIA_LANGS=en,ja
+SERPAPI_API_KEY=
+WEB_SEARCH_SERPAPI_ENGINE=google
+WEB_SEARCH_SERPAPI_HL=ja
+WEB_SEARCH_SERPAPI_GL=jp
+WEB_SEARCH_SERPAPI_NUM=5
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_TIMEOUT_MS=5000
@@ -90,14 +97,21 @@ OCR_TIMEOUT_MS=60000
 
 ### DB未一致時のWeb検索フォールバック
 
-`WEB_SEARCH_ENABLED=true` を設定すると、OCRでDB照合できなかった場合に Web 候補（Wikipedia/ DuckDuckGo）を返信します。
+`WEB_SEARCH_ENABLED=true` を設定すると、OCRでDB照合できなかった場合に Web 候補を返信します。
 
 ```env
 WEB_SEARCH_ENABLED=true
 WEB_SEARCH_TIMEOUT_MS=5000
 WEB_SEARCH_MAX_RESULTS=3
+WEB_SEARCH_PROVIDER=auto
+WEB_SEARCH_PRIORITY_DOMAINS=www.enoteca.co.jp
 WEB_SEARCH_QUERY_SUFFIX=wine
 WEB_SEARCH_WIKIPEDIA_LANGS=en,ja
+SERPAPI_API_KEY=<Renderの秘密環境変数>
+WEB_SEARCH_SERPAPI_ENGINE=google
+WEB_SEARCH_SERPAPI_HL=ja
+WEB_SEARCH_SERPAPI_GL=jp
+WEB_SEARCH_SERPAPI_NUM=5
 GROQ_API_KEY=<Renderの秘密環境変数>
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_TIMEOUT_MS=5000
@@ -109,6 +123,9 @@ GROQ_VISION_MAX_CANDIDATES=3
 GROQ_VISION_MAX_IMAGE_BYTES=3500000
 ```
 
+- `WEB_SEARCH_PROVIDER=auto` の場合、`SERPAPI_API_KEY` が設定されていれば SerpAPI（Google検索）を優先し、未設定時は Wikipedia / DuckDuckGo を使います。
+- `WEB_SEARCH_PRIORITY_DOMAINS` を設定すると、まずそのドメイン内（例: `www.enoteca.co.jp`）を検索し、ヒットが弱い/無い場合に通常Web検索へフォールバックします。
+- `WEB_SEARCH_PROVIDER=serpapi` で SerpAPI のみ、`WEB_SEARCH_PROVIDER=free` で無料ソースのみを使います。
 - `GROQ_API_KEY` を設定すると、OCR誤字を補正した候補名を先に生成してから Web 検索します。
 - `GROQ_VISION_ENABLED=true` で、画像から Groq Vision 候補名を抽出して DB照合精度を上げます。
 - DB未一致時の返信は `産地 / 生産者 / 市場価格 / セパージュ` の順で Web要約を返します。
