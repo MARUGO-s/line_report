@@ -1666,7 +1666,7 @@ const parseCriticScoresFromText = (value) => {
   const deduped = [];
   const seen = new Set();
   for (const row of rows) {
-    const key = `${String(row.source || "").toLowerCase()}-${String(row.score)}`;
+    const key = `${String(row.source || "").toLowerCase()}-${String(row.year || "")}-${String(row.score)}`;
     if (seen.has(key)) {
       continue;
     }
@@ -1822,6 +1822,138 @@ const splitVarietyNames = (value) =>
       .filter(Boolean)
       .filter((item) => !["不明", "unknown", "none"].includes(item.toLowerCase ? item.toLowerCase() : item))
   ).slice(0, 6);
+
+const parsePercentFromNearbyText = (text, anchorIndex, maxDistance = 22) => {
+  const body = String(text || "");
+  if (!body) {
+    return null;
+  }
+  let best = null;
+  for (const match of body.matchAll(/([0-9]{1,3}(?:\.[0-9]+)?)\s*%/g)) {
+    const value = Number(match[1]);
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      continue;
+    }
+    const index = Number(match.index || 0);
+    const distance = Math.abs(index - Number(anchorIndex || 0));
+    if (distance > maxDistance) {
+      continue;
+    }
+    if (!best || distance < best.distance) {
+      best = { value, distance, index };
+    }
+  }
+  return best;
+};
+
+const normalizeGrapeComposition = (items = []) => {
+  const normalized = [];
+  const seen = new Set();
+  for (const item of items) {
+    const name = asNullableWineField(item?.name);
+    if (!name) {
+      continue;
+    }
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const percentageRaw = Number(item?.percentage);
+    normalized.push({
+      name,
+      percentage: Number.isFinite(percentageRaw) && percentageRaw >= 0 && percentageRaw <= 100 ? percentageRaw : null
+    });
+  }
+
+  const percentages = normalized.map((item) => item.percentage).filter((value) => Number.isFinite(value));
+  if (percentages.length >= 2) {
+    const total = percentages.reduce((sum, value) => sum + value, 0);
+    if (total > 105) {
+      // If total percentage is clearly impossible, keep grape names only.
+      return normalized.map((item) => ({ ...item, percentage: null }));
+    }
+  }
+  return normalized.slice(0, 8);
+};
+
+const extractGrapeCompositionFromText = (value) => {
+  const text = String(value || "");
+  if (!text.trim()) {
+    return [];
+  }
+
+  const hits = [];
+  for (const entry of grapeVarietyPatterns) {
+    for (const pattern of entry.patterns) {
+      const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+      const regex = new RegExp(pattern.source, flags);
+      for (const match of text.matchAll(regex)) {
+        const index = Number(match.index || 0);
+        const near = parsePercentFromNearbyText(text, index);
+        hits.push({
+          name: entry.label,
+          percentage: near ? near.value : null,
+          distance: near ? near.distance : Number.POSITIVE_INFINITY,
+          index
+        });
+      }
+    }
+  }
+
+  const sorted = hits.sort((a, b) => a.index - b.index);
+  const byName = new Map();
+  for (const row of sorted) {
+    const key = row.name.toLowerCase();
+    const current = byName.get(key);
+    if (!current) {
+      byName.set(key, row);
+      continue;
+    }
+    if (current.percentage === null && row.percentage !== null) {
+      byName.set(key, row);
+      continue;
+    }
+    if (current.percentage !== null && row.percentage !== null && row.distance < current.distance) {
+      byName.set(key, row);
+    }
+  }
+
+  const merged = [...byName.values()]
+    .sort((a, b) => a.index - b.index)
+    .map((item) => ({
+      name: item.name,
+      percentage: item.percentage
+    }));
+  return normalizeGrapeComposition(merged);
+};
+
+const buildGrapeCompositionFromEvidence = ({ rawGrapes = [], evidenceTexts = [] }) => {
+  const rawNormalized = normalizeGrapeComposition(rawGrapes);
+  const fromEvidence = normalizeGrapeComposition(
+    (evidenceTexts || [])
+      .flatMap((text) => extractGrapeCompositionFromText(text))
+      .slice(0, 24)
+  );
+
+  if (fromEvidence.length === 0) {
+    return rawNormalized;
+  }
+
+  const resultMap = new Map(fromEvidence.map((item) => [item.name.toLowerCase(), item]));
+  for (const raw of rawNormalized) {
+    const key = raw.name.toLowerCase();
+    if (!resultMap.has(key)) {
+      resultMap.set(key, { name: raw.name, percentage: raw.percentage });
+    } else {
+      const existing = resultMap.get(key);
+      if (existing.percentage === null && raw.percentage !== null) {
+        resultMap.set(key, { name: existing.name, percentage: raw.percentage });
+      }
+    }
+  }
+  return normalizeGrapeComposition([...resultMap.values()]);
+};
 
 const inferWineTypeFromTexts = (...values) => {
   const normalized = normalizeSearchText(values.map((value) => String(value || "")).join(" "));
@@ -2161,9 +2293,10 @@ const formatJpyRangeText = (minJpy, maxJpy) => {
   return `${Math.round(Math.min(minJpy, maxJpy)).toLocaleString("ja-JP")}円 - ${Math.round(Math.max(minJpy, maxJpy)).toLocaleString("ja-JP")}円`;
 };
 
-const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
+const normalizeWineAnalysisResult = (rawValue, fallbackValue = null, options = {}) => {
   const base = fallbackValue ? { ...fallbackValue } : emptyWineAnalysisResult();
   const raw = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const evidenceTexts = Array.isArray(options?.evidenceTexts) ? options.evidenceTexts : [];
   const wineTypeSet = new Set(["red", "white", "rose", "sparkling", "dessert", "fortified"]);
   const availabilitySet = new Set(["confirmed", "possible", "not_found"]);
   const confidenceSet = new Set(["high", "medium", "low"]);
@@ -2174,7 +2307,7 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
     return Number.isFinite(number) ? number : null;
   };
 
-  const grapes = Array.isArray(raw.grapes)
+  const rawGrapes = Array.isArray(raw.grapes)
     ? raw.grapes
         .map((item) => {
           const name = asNullableWineField(item?.name);
@@ -2190,6 +2323,16 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
         .filter(Boolean)
         .slice(0, 8)
     : base.grapes;
+  const grapes = buildGrapeCompositionFromEvidence({
+    rawGrapes,
+    evidenceTexts: [
+      ...evidenceTexts,
+      raw.varieties || "",
+      raw.style_summary || "",
+      raw.rating_points || "",
+      raw.awards || ""
+    ]
+  });
 
   const rawPriceRange = raw.price_range && typeof raw.price_range === "object" ? raw.price_range : null;
   const priceRange =
@@ -2332,14 +2475,17 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
   return normalized;
 };
 
-const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = "" }) => {
+const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = "", webContextText = "" }) => {
   const wineName = asNullableWineField(query);
   const producer = asNullableWineField(summary?.producer);
   const region = asNullableWineField(summary?.region);
   const country = inferCountryFromRegionText(region, query, ocrText);
   const vintage = extractVintageFromTexts(query, ocrText);
   const grapeNames = splitVarietyNames(summary?.varieties);
-  const grapes = grapeNames.map((name) => ({ name, percentage: null }));
+  const grapes = buildGrapeCompositionFromEvidence({
+    rawGrapes: grapeNames.map((name) => ({ name, percentage: null })),
+    evidenceTexts: [ocrText, webContextText, summary?.varieties || "", summary?.taste || "", summary?.features || ""]
+  });
   const priceRange = parseMarketPriceRange(summary?.market_price);
   const tastingProfile = inferTastingProfileFromSummary(summary || {});
   const styleSummary = asNullableWineField(summary?.taste)
@@ -2369,7 +2515,9 @@ const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = ""
     confidence: "medium",
     sources
   };
-  return normalizeWineAnalysisResult(fallback);
+  return normalizeWineAnalysisResult(fallback, null, {
+    evidenceTexts: [ocrText, webContextText, summary?.varieties || "", summary?.taste || "", summary?.features || ""]
+  });
 };
 
 const wineAnalysisOutputGuide = {
@@ -2423,7 +2571,8 @@ const requestGroqWineAnalysisFromImage = async ({
     query,
     summary,
     webCandidates,
-    ocrText
+    ocrText,
+    webContextText
   });
 
   const userContent = [
@@ -2474,7 +2623,7 @@ const requestGroqWineAnalysisFromImage = async ({
           {
             role: "system",
             content:
-              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available."
+              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available. For grape percentages, use percentages only when explicitly shown in evidence; never guess split ratios."
           },
           {
             role: "user",
@@ -2493,7 +2642,9 @@ const requestGroqWineAnalysisFromImage = async ({
     if (!parsed || typeof parsed !== "object") {
       return fallback;
     }
-    return normalizeWineAnalysisResult(parsed, fallback);
+    return normalizeWineAnalysisResult(parsed, fallback, {
+      evidenceTexts: [ocrText, webContextText, summary?.varieties || "", summary?.taste || "", summary?.features || ""]
+    });
   } catch (error) {
     if (error?.name === "AbortError") {
       console.warn("Groq wine analysis timed out");
@@ -2539,12 +2690,6 @@ const buildLineWineReplyFallback = (wineData) => {
       .filter(Boolean)
       .join(", ") ||
     "不明";
-  const availabilityMap = {
-    confirmed: "確認できました",
-    possible: "可能性あり",
-    not_found: "確認できず"
-  };
-  const availability = availabilityMap[wineData.availability_japan] || "不明";
   const criticScoreHistoryText =
     Array.isArray(wineData.critic_scores) && wineData.critic_scores.length > 0
       ? wineData.critic_scores
@@ -2586,11 +2731,16 @@ const buildLineWineReplyFallback = (wineData) => {
     `3. セパージュ: ${grapesText}\n` +
     `4. 味わい: ${tasteText}\n` +
     `5. 受賞・評価ポイント: ${criticAwardsText}\n` +
-    `6. 市場での立ち位置: ${wineData.market_position || "不明"}\n` +
-    `7. 日本での流通: ${availability}\n` +
-    `8. 価格帯: ${formatWinePriceRangeText(wineData.price_range)}`
+    `6. 価格帯(円): ${formatWinePriceRangeText(wineData.price_range)}`
   );
 };
+
+const sanitizeLineWineReplyText = (value) =>
+  String(value || "")
+    .split(/\r?\n/)
+    .filter((line) => !/市場での立ち位置|日本での流通/.test(line))
+    .join("\n")
+    .trim();
 
 const renderLineWineReplyWithGroq = async (wineData) => {
   if (!groqWineFlowConfig.enabled || !groqConfig.apiKey) {
@@ -2614,7 +2764,7 @@ const renderLineWineReplyWithGroq = async (wineData) => {
           {
             role: "system",
             content:
-              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.セパージュ 4.味わい 5.受賞・評価ポイント（必ず年付き履歴。例: 2020年 WA 96/100） 6.市場での立ち位置 7.日本での流通 8.価格帯（必ず円表示）。誇張しない。JSONにない情報を書かない。"
+              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.セパージュ（複数ぶどうは比率付き） 4.味わい 5.受賞・評価ポイント（必ず年付き履歴。例: 2020年 WA 96/100） 6.価格帯（必ず日本円）。「市場での立ち位置」「日本での流通」は書かない。誇張しない。JSONにない情報を書かない。"
           },
           {
             role: "user",
@@ -2629,7 +2779,7 @@ const renderLineWineReplyWithGroq = async (wineData) => {
     }
     const payload = await response.json();
     const content = String(payload?.choices?.[0]?.message?.content || "").trim();
-    return content || buildLineWineReplyFallback(wineData);
+    return sanitizeLineWineReplyText(content) || buildLineWineReplyFallback(wineData);
   } catch (error) {
     if (error?.name === "AbortError") {
       console.warn("Groq line reply timed out");
@@ -3539,7 +3689,8 @@ const resolvePriceByOcrText = async (text, options = {}) => {
       query: queryUsedForWeb,
       summary,
       webCandidates: finalCandidates,
-      ocrText: ocrContextText
+      ocrText: ocrContextText,
+      webContextText: webContext.contextText
     });
     if (groqWineFlowConfig.enabled && groqConfig.apiKey) {
       wineAnalysis =
