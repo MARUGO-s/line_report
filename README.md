@@ -49,6 +49,10 @@ GROQ_API_KEY=
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_TIMEOUT_MS=5000
 GROQ_MAX_CANDIDATES=3
+GROQ_WINE_FLOW_ENABLED=true
+GROQ_WINE_ANALYSIS_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+GROQ_WINE_REPLY_MODEL=llama-3.1-8b-instant
+GROQ_WINE_TIMEOUT_MS=12000
 GROQ_VISION_ENABLED=true
 GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 GROQ_VISION_TIMEOUT_MS=12000
@@ -118,6 +122,10 @@ GROQ_API_KEY=<Renderの秘密環境変数>
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_TIMEOUT_MS=5000
 GROQ_MAX_CANDIDATES=3
+GROQ_WINE_FLOW_ENABLED=true
+GROQ_WINE_ANALYSIS_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+GROQ_WINE_REPLY_MODEL=llama-3.1-8b-instant
+GROQ_WINE_TIMEOUT_MS=12000
 GROQ_VISION_ENABLED=true
 GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 GROQ_VISION_TIMEOUT_MS=12000
@@ -132,7 +140,8 @@ GROQ_VISION_MAX_IMAGE_BYTES=3500000
 - `WEB_SEARCH_PROVIDER=serpapi` で SerpAPI のみ、`WEB_SEARCH_PROVIDER=free` で無料ソースのみを使います。
 - `GROQ_API_KEY` を設定すると、OCR誤字を補正した候補名を先に生成してから Web 検索します。
 - `GROQ_VISION_ENABLED=true` で、画像から Groq Vision 候補名を抽出して DB照合精度を上げます。
-- DB未一致時の返信は `産地 / 生産者 / 市場価格 / セパージュ / 味わい / 特徴 / 評価ポイント / 受賞歴 / 飲み頃 / ワイナリーの歴史 / 参照ソース / 検索モード / 参照URL` の順で Web要約を返します。
+- `GROQ_WINE_FLOW_ENABLED=true` で、DB未一致時に「画像+Web根拠」から構造化JSONを作成し、LINE向けに再要約して返信します。
+- DB未一致時の返信は `1.このワインの正体 / 2.生産者・産地 / 3.セパージュ / 4.味わい / 5.市場での立ち位置 / 6.日本での流通 / 7.価格帯` の順で返し、末尾に `参照ソース / 検索モード / 参照URL` を付与します。
 
 ## 3. 管理認証
 

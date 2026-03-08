@@ -129,6 +129,15 @@ const groqVisionConfig = {
   )
 };
 
+const groqWineFlowConfig = {
+  enabled: asBooleanEnv(process.env.GROQ_WINE_FLOW_ENABLED, true),
+  analysisModel: String(
+    process.env.GROQ_WINE_ANALYSIS_MODEL || process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
+  ).trim(),
+  replyModel: String(process.env.GROQ_WINE_REPLY_MODEL || process.env.GROQ_MODEL || "llama-3.1-8b-instant").trim(),
+  timeoutMs: Math.max(1000, Number(process.env.GROQ_WINE_TIMEOUT_MS || 12000) || 12000)
+};
+
 const parseOcrExtraFields = (rawValue) => {
   const text = String(rawValue || "").trim();
   if (!text) {
@@ -1643,6 +1652,693 @@ const buildMarketPriceFromHints = (priceHints = []) => {
   return `参考レンジ: ${selectedCurrency} ${formatPriceAmount(min)} - ${formatPriceAmount(max)}`;
 };
 
+const asNullableWineField = (value) => {
+  const text = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return null;
+  }
+  const lowered = text.toLowerCase();
+  if (["不明", "unknown", "n/a", "na", "none", "null", "未確認", "未取得"].includes(text) || ["unknown", "n/a", "na", "none", "null"].includes(lowered)) {
+    return null;
+  }
+  return text;
+};
+
+const extractVintageFromTexts = (...values) => {
+  const merged = values
+    .map((value) => String(value || ""))
+    .join(" ");
+  const match = merged.match(/\b((?:19|20)\d{2})\b/);
+  return match ? match[1] : null;
+};
+
+const splitVarietyNames = (value) =>
+  dedupeTextArray(
+    String(value || "")
+      .split(/[,/、・|]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .filter((item) => !["不明", "unknown", "none"].includes(item.toLowerCase ? item.toLowerCase() : item))
+  ).slice(0, 6);
+
+const inferWineTypeFromTexts = (...values) => {
+  const normalized = normalizeSearchText(values.map((value) => String(value || "")).join(" "));
+  if (!normalized) {
+    return null;
+  }
+  if (/\bsparkling\b|シャンパーニュ|スパークリング/.test(normalized)) {
+    return "sparkling";
+  }
+  if (/\brose\b|ロゼ/.test(normalized)) {
+    return "rose";
+  }
+  if (/\bwhite\b|白ワイン|blanc/.test(normalized)) {
+    return "white";
+  }
+  if (/\bred\b|赤ワイン|rouge/.test(normalized)) {
+    return "red";
+  }
+  if (/\bdessert\b|甘口|late harvest|ice wine/.test(normalized)) {
+    return "dessert";
+  }
+  if (/\bfortified\b|ポート|シェリー|マデイラ/.test(normalized)) {
+    return "fortified";
+  }
+  return null;
+};
+
+const inferCountryFromRegionText = (...values) => {
+  const text = normalizeSearchText(values.map((value) => String(value || "")).join(" "));
+  if (!text) {
+    return null;
+  }
+
+  const countryRules = [
+    { country: "France", patterns: [/france/, /bordeaux/, /bourgogne/, /burgundy/, /champagne/, /rhone/, /ローヌ/, /フランス/] },
+    { country: "Italy", patterns: [/italy/, /toscana/, /piemonte/, /veneto/, /italia/, /イタリア/] },
+    { country: "Spain", patterns: [/spain/, /rioja/, /ribera/, /priorat/, /espa(na|ña)/, /スペイン/] },
+    { country: "United States", patterns: [/united states/, /\busa\b/, /california/, /napa/, /sonoma/, /アメリカ/] },
+    { country: "Chile", patterns: [/chile/, /チリ/] },
+    { country: "Argentina", patterns: [/argentina/, /アルゼンチン/] },
+    { country: "Australia", patterns: [/australia/, /barossa/, /mclaren vale/, /オーストラリア/] },
+    { country: "New Zealand", patterns: [/new zealand/, /marlborough/, /ニュージーランド/] },
+    { country: "Germany", patterns: [/germany/, /mosel/, /rheingau/, /ドイツ/] },
+    { country: "Portugal", patterns: [/portugal/, /douro/, /ポルトガル/] }
+  ];
+
+  for (const rule of countryRules) {
+    if (rule.patterns.some((pattern) => pattern.test(text))) {
+      return rule.country;
+    }
+  }
+  return null;
+};
+
+const parseMarketPriceRange = (value) => {
+  const text = asNullableWineField(value);
+  if (!text) {
+    return null;
+  }
+
+  const rangeMatch = text.match(/\b(JPY|USD|EUR)\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:-|–|〜|~|to)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+  if (rangeMatch) {
+    const currency = String(rangeMatch[1] || "").toUpperCase();
+    const min = Number(String(rangeMatch[2] || "").replace(/,/g, ""));
+    const max = Number(String(rangeMatch[3] || "").replace(/,/g, ""));
+    if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max > 0) {
+      return {
+        min: Math.min(min, max),
+        max: Math.max(min, max),
+        currency,
+        note: text
+      };
+    }
+  }
+
+  const single = parsePriceHintValue(text);
+  if (single) {
+    return {
+      min: single.amount,
+      max: single.amount,
+      currency: single.currency,
+      note: text
+    };
+  }
+
+  const yenRange = text.match(/([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:円|¥|￥)\s*(?:-|–|〜|~|to)\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:円|¥|￥)?/i);
+  if (yenRange) {
+    const min = Number(String(yenRange[1] || "").replace(/,/g, ""));
+    const max = Number(String(yenRange[2] || "").replace(/,/g, ""));
+    if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max > 0) {
+      return {
+        min: Math.min(min, max),
+        max: Math.max(min, max),
+        currency: "JPY",
+        note: text
+      };
+    }
+  }
+  return null;
+};
+
+const inferMarketPositionFromPriceRange = (priceRange) => {
+  if (!priceRange || !Number.isFinite(priceRange.min)) {
+    return null;
+  }
+  const currency = String(priceRange.currency || "").toUpperCase();
+  const min = Number(priceRange.min);
+  if (currency === "JPY") {
+    if (min >= 50000) {
+      return "ラグジュアリー";
+    }
+    if (min >= 15000) {
+      return "プレミアム";
+    }
+    if (min >= 7000) {
+      return "ミドルレンジ";
+    }
+    return "デイリー〜ミドル";
+  }
+  if (currency === "USD") {
+    if (min >= 250) {
+      return "ラグジュアリー";
+    }
+    if (min >= 80) {
+      return "プレミアム";
+    }
+    if (min >= 30) {
+      return "ミドルレンジ";
+    }
+    return "デイリー〜ミドル";
+  }
+  return null;
+};
+
+const inferAvailabilityInJapan = (webCandidates = []) => {
+  if (!Array.isArray(webCandidates) || webCandidates.length === 0) {
+    return "not_found";
+  }
+  const hasJapanSignals = webCandidates.some((item) => {
+    const url = String(item?.url || "");
+    const host = extractHostname(url);
+    return (
+      host.endsWith(".jp") ||
+      host.includes(".co.jp") ||
+      /\/ja(\/|$)|lang=ja|currency=JPY/i.test(url)
+    );
+  });
+  return hasJapanSignals ? "confirmed" : "possible";
+};
+
+const buildWineSources = (webCandidates = []) =>
+  (Array.isArray(webCandidates) ? webCandidates : [])
+    .slice(0, 6)
+    .map((item) => {
+      const title = truncateText(String(item?.title || "").trim() || "source", 120);
+      const url = String(item?.url || "").trim();
+      const sourceLabel = asSourceDisplayName(url);
+      return {
+        title,
+        url,
+        reason: `${sourceLabel} で同名/近似銘柄情報を確認`
+      };
+    })
+    .filter((item) => item.title && item.url && /^https?:\/\//i.test(item.url));
+
+const inferTastingProfileFromSummary = (summary = {}) => {
+  const combined = normalizeSearchText(`${summary?.taste || ""} ${summary?.features || ""}`);
+  const body =
+    /full|力強|重め/.test(combined) ? "full" : /light|軽やか/.test(combined) ? "light" : /medium|中程度/.test(combined) ? "medium" : null;
+  const acidity =
+    /高い酸|high acidity|fresh|フレッシュ/.test(combined)
+      ? "high"
+      : /穏やかな酸|low acidity|まろやか/.test(combined)
+        ? "low"
+        : /medium/.test(combined)
+          ? "medium"
+          : null;
+  const tannin =
+    /タンニン.*強|tannic|firm tannin/.test(combined)
+      ? "high"
+      : /タンニン.*穏|soft tannin/.test(combined)
+        ? "low"
+        : /medium/.test(combined)
+          ? "medium"
+          : null;
+  const fruitCharacter =
+    /赤系果実|red fruit/.test(combined)
+      ? "red fruit"
+      : /黒系果実|black fruit/.test(combined)
+        ? "black fruit"
+        : /柑橘|citrus/.test(combined)
+          ? "citrus"
+          : null;
+  const oakCharacter = /オーク|樽|oak|vanilla/.test(combined) ? "oak-influenced" : null;
+  const notableNotes = dedupeTextArray(
+    [`${summary?.features || ""}`]
+      .flatMap((item) => String(item || "").split(/[,、]/))
+      .map((item) => item.trim())
+      .filter(Boolean)
+  ).slice(0, 6);
+
+  return {
+    body,
+    acidity,
+    tannin,
+    alcohol_impression: null,
+    fruit_character: fruitCharacter,
+    oak_character: oakCharacter,
+    notable_notes: notableNotes
+  };
+};
+
+const emptyWineAnalysisResult = () => ({
+  identified_wine: false,
+  wine_name: null,
+  producer: null,
+  vintage: null,
+  country: null,
+  region: null,
+  appellation: null,
+  grapes: [],
+  wine_type: null,
+  style_summary: null,
+  tasting_profile: {
+    body: null,
+    acidity: null,
+    tannin: null,
+    alcohol_impression: null,
+    fruit_character: null,
+    oak_character: null,
+    notable_notes: []
+  },
+  market_position: null,
+  availability_japan: null,
+  price_range: null,
+  confidence: "low",
+  sources: []
+});
+
+const computeWineConfidence = (item) => {
+  let score = 0;
+  if (item.wine_name) {
+    score += 2;
+  }
+  if (item.producer) {
+    score += 1;
+  }
+  if (item.country || item.region) {
+    score += 1;
+  }
+  if (item.grapes.length > 0) {
+    score += 1;
+  }
+  if (item.sources.length >= 3) {
+    score += 2;
+  } else if (item.sources.length > 0) {
+    score += 1;
+  }
+  if (item.price_range) {
+    score += 1;
+  }
+  if (score >= 6) {
+    return "high";
+  }
+  if (score >= 3) {
+    return "medium";
+  }
+  return "low";
+};
+
+const normalizeWineAnalysisResult = (rawValue, fallbackValue = null) => {
+  const base = fallbackValue ? { ...fallbackValue } : emptyWineAnalysisResult();
+  const raw = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const wineTypeSet = new Set(["red", "white", "rose", "sparkling", "dessert", "fortified"]);
+  const availabilitySet = new Set(["confirmed", "possible", "not_found"]);
+  const confidenceSet = new Set(["high", "medium", "low"]);
+
+  const normalizeString = (value) => asNullableWineField(value);
+  const normalizeNumber = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+
+  const grapes = Array.isArray(raw.grapes)
+    ? raw.grapes
+        .map((item) => {
+          const name = asNullableWineField(item?.name);
+          if (!name) {
+            return null;
+          }
+          const percentage = normalizeNumber(item?.percentage);
+          return {
+            name,
+            percentage: percentage !== null && percentage >= 0 && percentage <= 100 ? percentage : null
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 8)
+    : base.grapes;
+
+  const rawPriceRange = raw.price_range && typeof raw.price_range === "object" ? raw.price_range : null;
+  const priceRange =
+    rawPriceRange
+      ? {
+          min: normalizeNumber(rawPriceRange.min),
+          max: normalizeNumber(rawPriceRange.max),
+          currency: asNullableWineField(rawPriceRange.currency)
+            ? String(rawPriceRange.currency).toUpperCase()
+            : null,
+          note: asNullableWineField(rawPriceRange.note)
+        }
+      : base.price_range;
+
+  const tasting = raw.tasting_profile && typeof raw.tasting_profile === "object" ? raw.tasting_profile : {};
+  const tastingProfile = {
+    body: normalizeString(tasting.body ?? base.tasting_profile.body),
+    acidity: normalizeString(tasting.acidity ?? base.tasting_profile.acidity),
+    tannin: normalizeString(tasting.tannin ?? base.tasting_profile.tannin),
+    alcohol_impression: normalizeString(tasting.alcohol_impression ?? base.tasting_profile.alcohol_impression),
+    fruit_character: normalizeString(tasting.fruit_character ?? base.tasting_profile.fruit_character),
+    oak_character: normalizeString(tasting.oak_character ?? base.tasting_profile.oak_character),
+    notable_notes: dedupeTextArray(
+      (Array.isArray(tasting.notable_notes) ? tasting.notable_notes : base.tasting_profile.notable_notes || [])
+        .map((note) => String(note || "").trim())
+        .filter(Boolean)
+    ).slice(0, 8)
+  };
+
+  const sources = Array.isArray(raw.sources)
+    ? raw.sources
+        .map((item) => {
+          const title = String(item?.title || "").trim();
+          const url = String(item?.url || "").trim();
+          const reason = String(item?.reason || "").trim();
+          if (!title || !url || !reason || !/^https?:\/\//i.test(url)) {
+            return null;
+          }
+          return {
+            title: truncateText(title, 140),
+            url,
+            reason: truncateText(reason, 180)
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 6)
+    : base.sources;
+
+  const normalized = {
+    identified_wine: Boolean(raw.identified_wine ?? base.identified_wine),
+    wine_name: normalizeString(raw.wine_name ?? base.wine_name),
+    producer: normalizeString(raw.producer ?? base.producer),
+    vintage: normalizeString(raw.vintage ?? base.vintage),
+    country: normalizeString(raw.country ?? base.country),
+    region: normalizeString(raw.region ?? base.region),
+    appellation: normalizeString(raw.appellation ?? base.appellation),
+    grapes,
+    wine_type: wineTypeSet.has(raw.wine_type) ? raw.wine_type : base.wine_type,
+    style_summary: normalizeString(raw.style_summary ?? base.style_summary),
+    tasting_profile: tastingProfile,
+    market_position: normalizeString(raw.market_position ?? base.market_position),
+    availability_japan: availabilitySet.has(raw.availability_japan) ? raw.availability_japan : base.availability_japan,
+    price_range: priceRange,
+    confidence: confidenceSet.has(raw.confidence) ? raw.confidence : "low",
+    sources
+  };
+
+  if (!normalized.wine_name && !normalized.producer && normalized.sources.length === 0) {
+    normalized.identified_wine = false;
+  } else if (normalized.wine_name || normalized.producer) {
+    normalized.identified_wine = true;
+  }
+
+  if (!confidenceSet.has(raw.confidence)) {
+    normalized.confidence = computeWineConfidence(normalized);
+  }
+
+  return normalized;
+};
+
+const buildWineAnalysisFallback = ({ query, summary, webCandidates, ocrText = "" }) => {
+  const wineName = asNullableWineField(query);
+  const producer = asNullableWineField(summary?.producer);
+  const region = asNullableWineField(summary?.region);
+  const country = inferCountryFromRegionText(region, query, ocrText);
+  const vintage = extractVintageFromTexts(query, ocrText);
+  const grapeNames = splitVarietyNames(summary?.varieties);
+  const grapes = grapeNames.map((name) => ({ name, percentage: null }));
+  const priceRange = parseMarketPriceRange(summary?.market_price);
+  const tastingProfile = inferTastingProfileFromSummary(summary || {});
+  const styleSummary = asNullableWineField(summary?.taste)
+    ? [summary?.taste, summary?.features].filter(Boolean).join(" / ")
+    : asNullableWineField(summary?.features);
+  const sources = buildWineSources(webCandidates);
+
+  const fallback = {
+    identified_wine: Boolean(wineName || producer || sources.length > 0),
+    wine_name: wineName,
+    producer,
+    vintage,
+    country,
+    region,
+    appellation: region,
+    grapes,
+    wine_type: inferWineTypeFromTexts(query, ocrText, summary?.taste, summary?.features, summary?.varieties),
+    style_summary: styleSummary,
+    tasting_profile: tastingProfile,
+    market_position: inferMarketPositionFromPriceRange(priceRange),
+    availability_japan: inferAvailabilityInJapan(webCandidates),
+    price_range: priceRange,
+    confidence: "medium",
+    sources
+  };
+  return normalizeWineAnalysisResult(fallback);
+};
+
+const wineAnalysisOutputGuide = {
+  identified_wine: true,
+  wine_name: "string|null",
+  producer: "string|null",
+  vintage: "string|null",
+  country: "string|null",
+  region: "string|null",
+  appellation: "string|null",
+  grapes: [{ name: "string", percentage: "number|null" }],
+  wine_type: "red|white|rose|sparkling|dessert|fortified|null",
+  style_summary: "string|null",
+  tasting_profile: {
+    body: "string|null",
+    acidity: "string|null",
+    tannin: "string|null",
+    alcohol_impression: "string|null",
+    fruit_character: "string|null",
+    oak_character: "string|null",
+    notable_notes: ["string"]
+  },
+  market_position: "string|null",
+  availability_japan: "confirmed|possible|not_found|null",
+  price_range: {
+    min: "number|null",
+    max: "number|null",
+    currency: "string|null",
+    note: "string|null"
+  },
+  confidence: "high|medium|low",
+  sources: [{ title: "string", url: "string", reason: "string" }]
+};
+
+const requestGroqWineAnalysisFromImage = async ({
+  imageBuffer = null,
+  contentType = "",
+  ocrText = "",
+  query,
+  webContextText = "",
+  webCandidates = [],
+  summary = {}
+}) => {
+  if (!groqWineFlowConfig.enabled || !groqConfig.apiKey) {
+    return null;
+  }
+
+  const fallback = buildWineAnalysisFallback({
+    query,
+    summary,
+    webCandidates,
+    ocrText
+  });
+
+  const userContent = [
+    {
+      type: "text",
+      text:
+        `OCR text:\n${truncateText(ocrText, 700)}\n\n` +
+        `Query candidate: ${query}\n\n` +
+        `Web evidence:\n${truncateText(webContextText, 2600)}\n\n` +
+        `Known summary:\n${JSON.stringify(summary)}\n\n` +
+        `Candidate URLs:\n${(webCandidates || [])
+          .slice(0, 6)
+          .map((item) => `- ${item.title}\n  ${item.url}`)
+          .join("\n")}\n\n` +
+        `Output JSON shape exactly like:\n${JSON.stringify(wineAnalysisOutputGuide, null, 2)}`
+    }
+  ];
+
+  if (imageBuffer && imageBuffer.length > 0 && imageBuffer.length <= groqVisionConfig.maxImageBytes) {
+    const normalized = String(contentType || "").toLowerCase().trim();
+    const mimeType = ["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(normalized)
+      ? normalized.replace("image/jpg", "image/jpeg")
+      : null;
+    if (mimeType) {
+      userContent.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`
+        }
+      });
+    }
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), groqWineFlowConfig.timeoutMs);
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${groqConfig.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: groqWineFlowConfig.analysisModel,
+        temperature: 0.1,
+        max_tokens: 900,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null."
+          },
+          {
+            role: "user",
+            content: userContent
+          }
+        ]
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`groq wine analysis request failed ${response.status}`);
+    }
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content || "";
+    const parsed = parseJsonObjectFromText(content);
+    if (!parsed || typeof parsed !== "object") {
+      return fallback;
+    }
+    return normalizeWineAnalysisResult(parsed, fallback);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      console.warn("Groq wine analysis timed out");
+      return fallback;
+    }
+    console.warn("Groq wine analysis failed", error?.message || error);
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const formatWinePriceRangeText = (priceRange) => {
+  if (!priceRange) {
+    return "不明";
+  }
+  const currency = asNullableWineField(priceRange.currency) || "";
+  const min = Number(priceRange.min);
+  const max = Number(priceRange.max);
+  if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max > 0) {
+    if (Math.abs(min - max) < 0.001) {
+      return `${currency} ${formatPriceAmount(min)}`.trim();
+    }
+    return `${currency} ${formatPriceAmount(Math.min(min, max))} - ${formatPriceAmount(Math.max(min, max))}`.trim();
+  }
+  return asNullableWineField(priceRange.note) || "不明";
+};
+
+const buildLineWineReplyFallback = (wineData) => {
+  const confidencePrefixMap = {
+    high: "かなり高い確率で",
+    medium: "高い確率で",
+    low: "候補としては"
+  };
+  const confidencePrefix = confidencePrefixMap[wineData.confidence] || confidencePrefixMap.low;
+  const identity = wineData.wine_name || "銘柄特定はできませんでした";
+  const producerRegion = [wineData.producer, wineData.region || wineData.country].filter(Boolean).join(" / ") || "不明";
+  const grapesText =
+    wineData.grapes.length > 0
+      ? wineData.grapes
+          .map((item) =>
+            item.percentage !== null && item.percentage !== undefined
+              ? `${item.name} (${item.percentage}%)`
+              : item.name
+          )
+          .join(", ")
+      : "不明";
+  const tasteText =
+    wineData.style_summary ||
+    [wineData.tasting_profile.body, wineData.tasting_profile.fruit_character, wineData.tasting_profile.oak_character]
+      .filter(Boolean)
+      .join(", ") ||
+    "不明";
+  const availabilityMap = {
+    confirmed: "確認できました",
+    possible: "可能性あり",
+    not_found: "確認できず"
+  };
+  const availability = availabilityMap[wineData.availability_japan] || "不明";
+
+  return (
+    `${confidencePrefix}「${identity}」です。\n` +
+    `1. このワインの正体: ${identity}\n` +
+    `2. 生産者・産地: ${producerRegion}\n` +
+    `3. セパージュ: ${grapesText}\n` +
+    `4. 味わい: ${tasteText}\n` +
+    `5. 市場での立ち位置: ${wineData.market_position || "不明"}\n` +
+    `6. 日本での流通: ${availability}\n` +
+    `7. 価格帯: ${formatWinePriceRangeText(wineData.price_range)}`
+  );
+};
+
+const renderLineWineReplyWithGroq = async (wineData) => {
+  if (!groqWineFlowConfig.enabled || !groqConfig.apiKey) {
+    return buildLineWineReplyFallback(wineData);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), groqWineFlowConfig.timeoutMs);
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${groqConfig.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: groqWineFlowConfig.replyModel,
+        temperature: 0.2,
+        max_tokens: 420,
+        messages: [
+          {
+            role: "system",
+            content:
+              "あなたはワイン説明文をLINE向けに短く分かりやすくまとめるアシスタントです。与えられたJSONだけを根拠に日本語で説明してください。項目順は固定: 1.このワインの正体 2.生産者・産地 3.セパージュ 4.味わい 5.市場での立ち位置 6.日本での流通 7.価格帯。誇張しない。JSONにない情報を書かない。"
+          },
+          {
+            role: "user",
+            content: JSON.stringify(wineData, null, 2)
+          }
+        ]
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`groq line reply request failed ${response.status}`);
+    }
+    const payload = await response.json();
+    const content = String(payload?.choices?.[0]?.message?.content || "").trim();
+    return content || buildLineWineReplyFallback(wineData);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      console.warn("Groq line reply timed out");
+      return buildLineWineReplyFallback(wineData);
+    }
+    console.warn("Groq line reply failed", error?.message || error);
+    return buildLineWineReplyFallback(wineData);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const countTokenMatches = (value, contextText) => {
   const tokens = splitSearchTokens(value).filter(
     (token) =>
@@ -2385,8 +3081,11 @@ const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCan
   return merged;
 };
 
-const resolvePriceByOcrText = async (text) => {
+const resolvePriceByOcrText = async (text, options = {}) => {
   const candidates = extractQueryCandidatesFromOcrText(text);
+  const ocrContextText = String(options.ocrText || text || "");
+  const imageBuffer = options.imageBuffer || null;
+  const contentType = String(options.contentType || "").trim();
 
   for (const query of candidates) {
     const resolved = buildSimulatedPriceReply(query);
@@ -2404,7 +3103,7 @@ const resolvePriceByOcrText = async (text) => {
   let queryUsedForWeb = fallbackQuery;
 
   if (webSearchConfig.enabled && fallbackQuery) {
-    const groqSuggestions = await requestGroqQuerySuggestions({ ocrText: text, candidates });
+    const groqSuggestions = await requestGroqQuerySuggestions({ ocrText: ocrContextText, candidates });
     const searchQueries = dedupeTextArray([...groqSuggestions, ...candidates]).slice(0, 3);
 
     for (const query of searchQueries) {
@@ -2494,32 +3193,61 @@ const resolvePriceByOcrText = async (text) => {
         })) || buildHeuristicSummary();
     }
 
+    const fallbackSummaryMessage = buildTextByTemplate(
+      "image_ocr_web_summary",
+      {
+        query: queryUsedForWeb,
+        region: summary.region,
+        producer: summary.producer,
+        market_price: summary.market_price,
+        varieties: summary.varieties,
+        taste: summary.taste,
+        features: summary.features,
+        rating_points: summary.rating_points,
+        awards: summary.awards,
+        drinking_window: summary.drinking_window,
+        winery_history: summary.winery_history,
+        sources: buildSourceSummary(finalCandidates),
+        search_mode: detectSearchMode(finalCandidates),
+        source_urls: buildSourceUrlLines(finalCandidates)
+      },
+      `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n評価ポイント: ${summary.rating_points}\n受賞歴: ${summary.awards}\n飲み頃: ${summary.drinking_window}\nワイナリーの歴史: ${summary.winery_history}\n参照ソース: ${buildSourceSummary(finalCandidates)}\n検索モード: ${detectSearchMode(finalCandidates)}\n参照URL:\n${buildSourceUrlLines(finalCandidates)}\n※Web参照の要約です。`
+    );
+
+    let wineAnalysis = buildWineAnalysisFallback({
+      query: queryUsedForWeb,
+      summary,
+      webCandidates: finalCandidates,
+      ocrText: ocrContextText
+    });
+    if (groqWineFlowConfig.enabled && groqConfig.apiKey) {
+      wineAnalysis =
+        (await requestGroqWineAnalysisFromImage({
+          imageBuffer,
+          contentType,
+          ocrText: ocrContextText,
+          query: queryUsedForWeb,
+          webContextText: webContext.contextText,
+          webCandidates: finalCandidates,
+          summary
+        })) || wineAnalysis;
+    }
+
+    const renderedMessage = await renderLineWineReplyWithGroq(wineAnalysis);
+    const withSourceFooter =
+      `${renderedMessage}\n\n` +
+      `参照ソース: ${buildSourceSummary(finalCandidates)}\n` +
+      `検索モード: ${detectSearchMode(finalCandidates)}\n` +
+      `参照URL:\n${buildSourceUrlLines(finalCandidates)}`;
+
     return {
       queryUsed: queryUsedForWeb,
       extractedText: text,
-      message: buildTextByTemplate(
-        "image_ocr_web_summary",
-        {
-          query: queryUsedForWeb,
-          region: summary.region,
-          producer: summary.producer,
-          market_price: summary.market_price,
-          varieties: summary.varieties,
-          taste: summary.taste,
-          features: summary.features,
-          rating_points: summary.rating_points,
-          awards: summary.awards,
-          drinking_window: summary.drinking_window,
-          winery_history: summary.winery_history,
-          sources: buildSourceSummary(finalCandidates),
-          search_mode: detectSearchMode(finalCandidates),
-          source_urls: buildSourceUrlLines(finalCandidates)
-        },
-        `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n評価ポイント: ${summary.rating_points}\n受賞歴: ${summary.awards}\n飲み頃: ${summary.drinking_window}\nワイナリーの歴史: ${summary.winery_history}\n参照ソース: ${buildSourceSummary(finalCandidates)}\n検索モード: ${detectSearchMode(finalCandidates)}\n参照URL:\n${buildSourceUrlLines(finalCandidates)}\n※Web参照の要約です。`
-      ),
+      message: withSourceFooter || fallbackSummaryMessage,
       matches: [],
       webCandidates: finalCandidates,
-      webSummary: summary
+      webSummary: summary,
+      wineAnalysis
     };
   }
 
@@ -2774,9 +3502,14 @@ const processImageEvent = async (event, canReply) => {
         candidateBlocks.push(ocrText);
       }
 
-      if (candidateBlocks.length > 0) {
-        resolvedByOcr = await resolvePriceByOcrText(candidateBlocks.join("\n"));
-      }
+	      if (candidateBlocks.length > 0) {
+	        resolvedByOcr = await resolvePriceByOcrText(candidateBlocks.join("\n"), {
+	          imageBuffer,
+	          contentType,
+	          ocrText,
+	          visionCandidates
+	        });
+	      }
     } catch (error) {
       console.error("Image processing failed", error);
     }
@@ -2895,6 +3628,9 @@ app.get("/api/health", (req, res) => {
     groqConfigured: Boolean(groqConfig.apiKey),
     groqVisionEnabled: Boolean(groqConfig.apiKey) && groqVisionConfig.enabled,
     groqVisionModel: groqVisionConfig.model,
+    groqWineFlowEnabled: Boolean(groqConfig.apiKey) && groqWineFlowConfig.enabled,
+    groqWineAnalysisModel: groqWineFlowConfig.analysisModel,
+    groqWineReplyModel: groqWineFlowConfig.replyModel,
     backupRetention: opsConfig.backupRetention
   });
 });
@@ -3233,7 +3969,7 @@ app.post("/api/ocr/resolve", async (req, res) => {
     return sendError(res, 400, "text is required");
   }
 
-  const resolved = await resolvePriceByOcrText(text);
+	  const resolved = await resolvePriceByOcrText(text);
   return res.json(resolved);
 });
 
@@ -3250,7 +3986,14 @@ app.post("/api/ocr/vision-url", async (req, res) => {
       groqVisionConfig.maxImageBytes
     );
     const candidates = await requestGroqVisionSuggestions({ imageBuffer, contentType });
-    const resolved = candidates.length > 0 ? await resolvePriceByOcrText(candidates.join("\n")) : null;
+	    const resolved =
+	      candidates.length > 0
+	        ? await resolvePriceByOcrText(candidates.join("\n"), {
+	            imageBuffer,
+	            contentType,
+	            visionCandidates: candidates
+	          })
+	        : null;
 
     return res.json({
       imageUrl,
