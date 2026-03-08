@@ -867,13 +867,30 @@ const searchWebCandidates = async (query) => {
   if (!webSearchConfig.enabled) {
     return [];
   }
-  const searchQuery = `${query}${webSearchConfig.querySuffix ? ` ${webSearchConfig.querySuffix}` : ""}`.trim();
+  const normalizeAscii = (value) =>
+    String(value || "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "");
+  const base = String(query || "").trim();
+  const queryVariants = dedupeTextArray([
+    base,
+    normalizeAscii(base),
+    webSearchConfig.querySuffix ? `${base} ${webSearchConfig.querySuffix}` : "",
+    webSearchConfig.querySuffix ? `${normalizeAscii(base)} ${webSearchConfig.querySuffix}` : ""
+  ]).filter(Boolean);
+
   const candidates = [];
+  for (const searchQuery of queryVariants) {
+    if (candidates.length >= webSearchConfig.maxResults) {
+      break;
+    }
 
-  const wiki = await searchWikipediaCandidates(searchQuery);
-  candidates.push(...wiki);
+    const wiki = await searchWikipediaCandidates(searchQuery);
+    candidates.push(...wiki);
+    if (candidates.length >= webSearchConfig.maxResults) {
+      break;
+    }
 
-  if (candidates.length < webSearchConfig.maxResults) {
     try {
       const ddg = await searchDuckDuckGoCandidates(searchQuery);
       candidates.push(...ddg);
