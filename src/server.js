@@ -66,6 +66,10 @@ const webSearchConfig = {
   enabled: asBooleanEnv(process.env.WEB_SEARCH_ENABLED, false),
   timeoutMs: Math.max(1000, Number(process.env.WEB_SEARCH_TIMEOUT_MS || 5000) || 5000),
   maxResults: Math.max(1, Math.min(5, Number(process.env.WEB_SEARCH_MAX_RESULTS || 3) || 3)),
+  summaryMaxSources: Math.max(
+    3,
+    Math.min(12, Number(process.env.WEB_SUMMARY_MAX_SOURCES || 6) || 6)
+  ),
   provider: (() => {
     const raw = String(process.env.WEB_SEARCH_PROVIDER || "auto").trim().toLowerCase();
     return ["auto", "free", "serpapi"].includes(raw) ? raw : "auto";
@@ -1234,6 +1238,184 @@ const collectPriceHintsFromText = (text) => {
   return dedupeTextArray(hits).slice(0, 5);
 };
 
+const grapeVarietyPatterns = [
+  { label: "Cabernet Sauvignon", patterns: [/\bcabernet\s+sauvignon\b/i, /カベルネ[・\s]?ソーヴィニヨン/u] },
+  { label: "Cabernet Franc", patterns: [/\bcabernet\s+franc\b/i, /カベルネ[・\s]?フラン/u] },
+  { label: "Merlot", patterns: [/\bmerlot\b/i, /メルロ[ー]?/u] },
+  { label: "Pinot Noir", patterns: [/\bpinot\s+noir\b/i, /ピノ[・\s]?ノワール/u] },
+  { label: "Syrah", patterns: [/\bsyrah\b/i, /シラー/u] },
+  { label: "Shiraz", patterns: [/\bshiraz\b/i, /シラーズ/u] },
+  { label: "Tempranillo", patterns: [/\btempranillo\b/i, /テンプラニーリョ/u] },
+  { label: "Garnacha", patterns: [/\bgarnacha\b/i, /\bgrenache\b/i, /ガルナッチャ/u, /グルナッシュ/u] },
+  { label: "Graciano", patterns: [/\bgraciano\b/i, /グラシアーノ/u] },
+  { label: "Mazuelo", patterns: [/\bmazuelo\b/i, /\bcarignan\b/i, /マスエロ/u, /カリニャン/u] },
+  { label: "Chardonnay", patterns: [/\bchardonnay\b/i, /シャルドネ/u] },
+  { label: "Sauvignon Blanc", patterns: [/\bsauvignon\s+blanc\b/i, /ソーヴィニヨン[・\s]?ブラン/u] },
+  { label: "Riesling", patterns: [/\briesling\b/i, /リースリング/u] },
+  { label: "Sangiovese", patterns: [/\bsangiovese\b/i, /サンジョヴェーゼ/u] },
+  { label: "Nebbiolo", patterns: [/\bnebbiolo\b/i, /ネッビオーロ/u] },
+  { label: "Malbec", patterns: [/\bmalbec\b/i, /マルベック/u] },
+  { label: "Zinfandel", patterns: [/\bzinfandel\b/i, /ジンファンデル/u] },
+  { label: "Viura", patterns: [/\bviura\b/i, /\bmacabeo\b/i, /ビウラ/u, /マカベオ/u] }
+];
+
+const collectVarietyHintsFromText = (text) => {
+  const body = String(text || "");
+  if (!body) {
+    return [];
+  }
+
+  const found = [];
+  for (const entry of grapeVarietyPatterns) {
+    if (entry.patterns.some((pattern) => pattern.test(body))) {
+      found.push(entry.label);
+    }
+  }
+  return dedupeTextArray(found).slice(0, 8);
+};
+
+const parsePriceHintValue = (value) => {
+  const matched = String(value || "")
+    .trim()
+    .match(/\b(JPY|USD|EUR)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+  if (!matched) {
+    return null;
+  }
+
+  const currency = String(matched[1] || "").toUpperCase();
+  const amountRaw = String(matched[2] || "").replace(/,/g, "");
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+  return { currency, amount };
+};
+
+const formatPriceAmount = (value) => {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+  if (Math.abs(value - Math.round(value)) < 0.0001) {
+    return Math.round(value).toLocaleString("en-US");
+  }
+  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+};
+
+const buildMarketPriceFromHints = (priceHints = []) => {
+  const parsed = priceHints.map((item) => parsePriceHintValue(item)).filter(Boolean);
+  if (!parsed.length) {
+    return "不明";
+  }
+
+  const grouped = new Map();
+  for (const item of parsed) {
+    if (!grouped.has(item.currency)) {
+      grouped.set(item.currency, []);
+    }
+    grouped.get(item.currency).push(item.amount);
+  }
+
+  const selectedCurrency = [...grouped.entries()].sort((a, b) => b[1].length - a[1].length)[0][0];
+  const values = [...(grouped.get(selectedCurrency) || [])].sort((a, b) => a - b);
+  if (!values.length) {
+    return "不明";
+  }
+
+  const min = values[0];
+  const max = values[values.length - 1];
+  if (values.length === 1) {
+    return `参考: ${selectedCurrency} ${formatPriceAmount(min)}`;
+  }
+
+  const relativeGap = min > 0 ? Math.abs(max - min) / min : 1;
+  if (relativeGap <= 0.06) {
+    return `参考: ${selectedCurrency} ${formatPriceAmount((min + max) / 2)}`;
+  }
+  return `参考レンジ: ${selectedCurrency} ${formatPriceAmount(min)} - ${formatPriceAmount(max)}`;
+};
+
+const countTokenMatches = (value, contextText) => {
+  const tokens = splitSearchTokens(value).filter(
+    (token) =>
+      ![
+        "wine",
+        "vin",
+        "red",
+        "white",
+        "grand",
+        "cru",
+        "classico",
+        "clasico",
+        "vino"
+      ].includes(token)
+  );
+  if (!tokens.length) {
+    return { matched: 0, total: 0 };
+  }
+  const normalizedContext = normalizeSearchText(contextText);
+  const matched = tokens.filter((token) => normalizedContext.includes(token)).length;
+  return { matched, total: tokens.length };
+};
+
+const isUnknownSummaryField = (value) => {
+  const text = String(value || "").trim();
+  return !text || text === "不明";
+};
+
+const sanitizeSummaryWithEvidence = ({ summary, contextText, priceHints, varietyHints }) => {
+  const safe = {
+    region: normalizeSummaryField(summary.region),
+    producer: normalizeSummaryField(summary.producer),
+    market_price: normalizeSummaryField(summary.market_price),
+    varieties: normalizeVarieties(summary.varieties)
+  };
+
+  const regionMatch = countTokenMatches(safe.region, contextText);
+  if (
+    !isUnknownSummaryField(safe.region) &&
+    regionMatch.total > 0 &&
+    regionMatch.matched === 0
+  ) {
+    safe.region = "不明";
+  }
+
+  const producerMatch = countTokenMatches(safe.producer, contextText);
+  if (
+    !isUnknownSummaryField(safe.producer) &&
+    producerMatch.total > 0 &&
+    producerMatch.matched === 0
+  ) {
+    safe.producer = "不明";
+  }
+
+  const hintedMarketPrice = buildMarketPriceFromHints(priceHints);
+  const parsedModelPrice = parsePriceHintValue(safe.market_price);
+  const parsedHintPrices = priceHints.map((item) => parsePriceHintValue(item)).filter(Boolean);
+
+  if (!parsedModelPrice) {
+    safe.market_price = hintedMarketPrice;
+  } else if (parsedHintPrices.length > 0) {
+    const sameCurrency = parsedHintPrices.filter((item) => item.currency === parsedModelPrice.currency);
+    if (!sameCurrency.length) {
+      safe.market_price = hintedMarketPrice;
+    } else {
+      const closestGap = sameCurrency.reduce(
+        (best, item) => Math.min(best, Math.abs(item.amount - parsedModelPrice.amount) / item.amount),
+        Number.POSITIVE_INFINITY
+      );
+      if (!Number.isFinite(closestGap) || closestGap > 0.35) {
+        safe.market_price = hintedMarketPrice;
+      }
+    }
+  }
+
+  const modelVarieties = collectVarietyHintsFromText(safe.varieties);
+  const mergedVarieties = dedupeTextArray([...modelVarieties, ...(varietyHints || [])]).slice(0, 6);
+  safe.varieties = mergedVarieties.length > 0 ? mergedVarieties.join(", ") : "不明";
+
+  return safe;
+};
+
 const parseWikipediaPageFromUrl = (urlText) => {
   try {
     const parsed = new URL(urlText);
@@ -1310,13 +1492,37 @@ const fetchHtmlMetaSummary = async (urlText) => {
         .match(/<meta[^>]+name=["']description["'][^>]+content=["']([\s\S]*?)["'][^>]*>/i)?.[1]
         ?.replace(/\s+/g, " ")
         .trim() || "";
+    const ogDescription =
+      compact
+        .match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([\s\S]*?)["'][^>]*>/i)?.[1]
+        ?.replace(/\s+/g, " ")
+        .trim() || "";
+    const jsonLdBlocks = [...compact.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+      .map((match) => String(match[1] || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, 4);
 
-    if (!title && !description) {
+    const plainText = compact
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const keywordMatches = plainText.match(
+      /[^。.!?\n]{0,80}(?:セパージュ|品種|ブレンド|grape|blend|variet(?:y|ies)|価格|price|market|円|¥|\$|€)[^。.!?\n]{0,120}/giu
+    );
+    const evidenceLines = [...(keywordMatches || []), ...jsonLdBlocks]
+      .map((item) => truncateText(item, 220))
+      .filter(Boolean)
+      .slice(0, 8);
+
+    if (!title && !description && !ogDescription && evidenceLines.length === 0) {
       return null;
     }
     return {
       title: truncateText(title, 140),
-      description: truncateText(description, 280)
+      description: truncateText(description || ogDescription, 280),
+      evidenceText: evidenceLines.join(" / ")
     };
   } catch (error) {
     return null;
@@ -1328,9 +1534,10 @@ const fetchHtmlMetaSummary = async (urlText) => {
 const buildWebSummaryContext = async (webCandidates) => {
   const contextBlocks = [];
   const priceHints = [];
+  const varietyHints = [];
   const seenUrl = new Set();
 
-  for (const item of webCandidates.slice(0, webSearchConfig.maxResults)) {
+  for (const item of webCandidates.slice(0, webSearchConfig.summaryMaxSources)) {
     const url = String(item?.url || "").trim();
     if (!url || seenUrl.has(url)) {
       continue;
@@ -1350,7 +1557,10 @@ const buildWebSummaryContext = async (webCandidates) => {
       const metaSummary = await fetchHtmlMetaSummary(url);
       if (metaSummary) {
         title = metaSummary.title || title;
-        snippet = metaSummary.description || snippet;
+        snippet = [metaSummary.description, metaSummary.evidenceText]
+          .filter(Boolean)
+          .join(" / ")
+          .trim() || snippet;
       }
     }
 
@@ -1358,16 +1568,23 @@ const buildWebSummaryContext = async (webCandidates) => {
     if (combined) {
       contextBlocks.push(`[source=${sourceName}] ${url}\n${truncateText(combined, 420)}`);
       priceHints.push(...collectPriceHintsFromText(combined));
+      varietyHints.push(...collectVarietyHintsFromText(combined));
     }
   }
 
   return {
     contextText: contextBlocks.join("\n\n"),
-    priceHints: dedupeTextArray(priceHints).slice(0, 6)
+    priceHints: dedupeTextArray(priceHints).slice(0, 8),
+    varietyHints: dedupeTextArray(varietyHints).slice(0, 8)
   };
 };
 
-const requestGroqWineSummaryFromWeb = async ({ query, contextText, priceHints = [] }) => {
+const requestGroqWineSummaryFromWeb = async ({
+  query,
+  contextText,
+  priceHints = [],
+  varietyHints = []
+}) => {
   if (!groqConfig.apiKey) {
     return null;
   }
@@ -1392,7 +1609,7 @@ const requestGroqWineSummaryFromWeb = async ({ query, contextText, priceHints = 
           {
             role: "system",
             content:
-              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","varieties":""}. If unknown use "不明".'
+              'Extract wine info from web context. Return strict JSON: {"region":"","producer":"","market_price":"","varieties":""}. Use only evidence in context/hints. If uncertain, use "不明".'
           },
           {
             role: "user",
@@ -1400,6 +1617,7 @@ const requestGroqWineSummaryFromWeb = async ({ query, contextText, priceHints = 
               `Query: ${query}\n\n` +
               `Web context:\n${truncateText(contextText, 3000)}\n\n` +
               `Price hints: ${priceHints.join(", ") || "none"}\n\n` +
+              `Variety hints: ${varietyHints.join(", ") || "none"}\n\n` +
               "Return only JSON."
           }
         ]
@@ -1416,13 +1634,17 @@ const requestGroqWineSummaryFromWeb = async ({ query, contextText, priceHints = 
       return null;
     }
 
-    const marketPriceFromHints = priceHints.length > 0 ? `参考: ${priceHints[0]}` : "不明";
-    return {
-      region: normalizeSummaryField(parsed.region),
-      producer: normalizeSummaryField(parsed.producer),
-      market_price: normalizeSummaryField(parsed.market_price || marketPriceFromHints),
-      varieties: normalizeVarieties(parsed.varieties)
-    };
+    return sanitizeSummaryWithEvidence({
+      summary: {
+        region: normalizeSummaryField(parsed.region),
+        producer: normalizeSummaryField(parsed.producer),
+        market_price: normalizeSummaryField(parsed.market_price),
+        varieties: normalizeVarieties(parsed.varieties)
+      },
+      contextText,
+      priceHints,
+      varietyHints
+    });
   } catch (error) {
     if (error?.name === "AbortError") {
       console.warn("Groq web summary timed out");
@@ -1627,6 +1849,54 @@ const buildWebCandidateLines = (items) =>
     .map((item, index) => `${index + 1}. ${item.title}\n${item.url}`)
     .join("\n");
 
+const mergeWebCandidatesByUrl = (baseItems, extraItems, maxItems = 12) => {
+  const merged = [];
+  const seen = new Set();
+
+  for (const item of [...(baseItems || []), ...(extraItems || [])]) {
+    const url = String(item?.url || "").trim();
+    if (!url || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+    merged.push(item);
+    if (merged.length >= maxItems) {
+      break;
+    }
+  }
+  return merged;
+};
+
+const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCandidates }) => {
+  const missingPrice = isUnknownSummaryField(summary?.market_price);
+  const missingVarieties = isUnknownSummaryField(summary?.varieties);
+  if (!missingPrice && !missingVarieties) {
+    return existingCandidates;
+  }
+
+  const enrichmentQueries = [];
+  if (missingPrice) {
+    enrichmentQueries.push(`${query} 価格`, `${query} market price`, `${query} price`);
+  }
+  if (missingVarieties) {
+    enrichmentQueries.push(`${query} セパージュ`, `${query} 品種`, `${query} grape variety`, `${query} blend`);
+  }
+
+  let merged = [...(existingCandidates || [])];
+  for (const extraQuery of dedupeTextArray(enrichmentQueries).slice(0, 4)) {
+    try {
+      const found = await searchWebCandidates(extraQuery);
+      merged = mergeWebCandidatesByUrl(merged, found, webSearchConfig.summaryMaxSources + 4);
+      if (merged.length >= webSearchConfig.summaryMaxSources) {
+        break;
+      }
+    } catch (error) {
+      console.warn("Web enrichment search failed", extraQuery, error?.message || error);
+    }
+  }
+  return merged;
+};
+
 const resolvePriceByOcrText = async (text) => {
   const candidates = extractQueryCandidatesFromOcrText(text);
 
@@ -1664,18 +1934,44 @@ const resolvePriceByOcrText = async (text) => {
   }
 
   if (webCandidates.length > 0) {
-    const webContext = await buildWebSummaryContext(webCandidates);
-    const summarized = await requestGroqWineSummaryFromWeb({
-      query: queryUsedForWeb,
-      contextText: webContext.contextText,
-      priceHints: webContext.priceHints
-    });
-    const summary = summarized || {
-      region: "不明",
-      producer: queryUsedForWeb || "不明",
-      market_price: webContext.priceHints[0] ? `参考: ${webContext.priceHints[0]}` : "不明",
-      varieties: "不明"
-    };
+    let finalCandidates = [...webCandidates];
+    let webContext = await buildWebSummaryContext(finalCandidates);
+    const buildHeuristicSummary = () =>
+      sanitizeSummaryWithEvidence({
+        summary: {
+          region: "不明",
+          producer: queryUsedForWeb || "不明",
+          market_price: buildMarketPriceFromHints(webContext.priceHints),
+          varieties: webContext.varietyHints.length > 0 ? webContext.varietyHints.join(", ") : "不明"
+        },
+        contextText: webContext.contextText,
+        priceHints: webContext.priceHints,
+        varietyHints: webContext.varietyHints
+      });
+
+    let summary =
+      (await requestGroqWineSummaryFromWeb({
+        query: queryUsedForWeb,
+        contextText: webContext.contextText,
+        priceHints: webContext.priceHints,
+        varietyHints: webContext.varietyHints
+      })) || buildHeuristicSummary();
+
+    if (isUnknownSummaryField(summary.market_price) || isUnknownSummaryField(summary.varieties)) {
+      finalCandidates = await enrichWebCandidatesForMissingFields({
+        query: queryUsedForWeb,
+        summary,
+        existingCandidates: finalCandidates
+      });
+      webContext = await buildWebSummaryContext(finalCandidates);
+      summary =
+        (await requestGroqWineSummaryFromWeb({
+          query: queryUsedForWeb,
+          contextText: webContext.contextText,
+          priceHints: webContext.priceHints,
+          varietyHints: webContext.varietyHints
+        })) || buildHeuristicSummary();
+    }
 
     return {
       queryUsed: queryUsedForWeb,
@@ -1692,7 +1988,7 @@ const resolvePriceByOcrText = async (text) => {
         `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n※Web参照の要約です。`
       ),
       matches: [],
-      webCandidates,
+      webCandidates: finalCandidates,
       webSummary: summary
     };
   }
@@ -2064,6 +2360,7 @@ app.get("/api/health", (req, res) => {
     webSearchProvider: webSearchConfig.provider,
     webSearchPriorityDomains: webSearchConfig.priorityDomains,
     webSearchMaxResults: webSearchConfig.maxResults,
+    webSummaryMaxSources: webSearchConfig.summaryMaxSources,
     serpApiConfigured: Boolean(webSearchConfig.serpApiKey),
     groqConfigured: Boolean(groqConfig.apiKey),
     groqVisionEnabled: Boolean(groqConfig.apiKey) && groqVisionConfig.enabled,
