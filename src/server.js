@@ -42,6 +42,14 @@ const app = express();
 const PORT = Number(process.env.PORT || 3200);
 const HOST = process.env.HOST || "127.0.0.1";
 
+const asBooleanEnv = (value, defaultValue = false) => {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text) {
+    return defaultValue;
+  }
+  return ["1", "true", "yes", "on"].includes(text);
+};
+
 const lineConfig = {
   channelSecret: String(process.env.LINE_CHANNEL_SECRET || "").trim(),
   accessToken: String(process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim(),
@@ -52,6 +60,18 @@ const lineConfig = {
   ocrImageField: String(process.env.OCR_IMAGE_FIELD || "image").trim(),
   ocrExtraFields: String(process.env.OCR_EXTRA_FIELDS || "").trim(),
   ocrTimeoutMs: Math.max(1000, Number(process.env.OCR_TIMEOUT_MS || 12000) || 12000)
+};
+
+const webSearchConfig = {
+  enabled: asBooleanEnv(process.env.WEB_SEARCH_ENABLED, false),
+  timeoutMs: Math.max(1000, Number(process.env.WEB_SEARCH_TIMEOUT_MS || 5000) || 5000),
+  maxResults: Math.max(1, Math.min(5, Number(process.env.WEB_SEARCH_MAX_RESULTS || 3) || 3)),
+  querySuffix: String(process.env.WEB_SEARCH_QUERY_SUFFIX || " wine").trim(),
+  wikipediaLangs: String(process.env.WEB_SEARCH_WIKIPEDIA_LANGS || "en,ja")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 3)
 };
 
 const parseOcrExtraFields = (rawValue) => {
@@ -309,6 +329,11 @@ const ensureDefaultTemplates = () => {
     {
       key: "image_ocr_not_found",
       body: "OCR結果から価格を照合できませんでした。\n抽出候補: {{query}}"
+    },
+    {
+      key: "image_ocr_web_candidates",
+      body:
+        "価格DBには見つかりませんでした。\n抽出候補: {{query}}\nWeb候補:\n{{web_lines}}\n※この候補は参考情報です。"
     }
   ];
 
@@ -580,23 +605,304 @@ const buildSimulatedPriceReply = (query) => {
   };
 };
 
+const truncateText = (value, maxLength = 120) => {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`;
+};
+
+const isLikelyNoiseLine = (value) => {
+  const text = String(value || "").trim();
+  if (!text) {
+    return true;
+  }
+  const lowered = text.toLowerCase();
+  if (
+    /https?:\/\/|api\.render\.com|cli\.yaml|render|bearer|select\(|jq|\/tmp\/|^key=/.test(lowered) ||
+    /(do you want me to|verify|week|週間|移動|ツール|ウィンドウ|ヘルプ)/.test(lowered)
+  ) {
+    return true;
+  }
+
+  const letterCount = (text.match(/\p{L}/gu) || []).length;
+  const digitCount = (text.match(/\p{N}/gu) || []).length;
+  if (letterCount < 3) {
+    return true;
+  }
+  if (digitCount >= 6 && digitCount > letterCount) {
+    return true;
+  }
+  return false;
+};
+
+const dedupeTextArray = (items) => {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    const normalized = String(item || "").trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(String(item || "").trim());
+  }
+  return result;
+};
+
+const scoreQueryCandidate = (value) => {
+  const text = String(value || "").trim();
+  if (!text) {
+    return 0;
+  }
+  const lowered = text.toLowerCase();
+  const keywords = [
+    "chateau",
+    "domaine",
+    "estate",
+    "grand",
+    "cru",
+    "classe",
+    "class",
+    "vin",
+    "reserve",
+    "cabernet",
+    "merlot",
+    "pinot",
+    "sauvignon",
+    "bordeaux",
+    "bourgogne",
+    "margaux",
+    "riesling",
+    "shiraz",
+    "sweet",
+    "red",
+    "white",
+    "wine",
+    "ワイン"
+  ];
+  let score = 0;
+  for (const keyword of keywords) {
+    if (lowered.includes(keyword)) {
+      score += 2;
+    }
+  }
+  const words = text.split(/\s+/).filter(Boolean).length;
+  if (words >= 2 && words <= 8) {
+    score += 2;
+  }
+  if (text.length >= 8 && text.length <= 70) {
+    score += 1;
+  }
+  return score;
+};
+
 const extractQueryCandidatesFromOcrText = (text) => {
   const base = String(text || "").trim();
   if (!base) {
     return [];
   }
 
-  const splitCandidates = base
+  const rawLines = base
     .split(/[\n\r\t,，、/|]/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
+    .map((line) =>
+      String(line || "")
+        .replace(/[^\p{L}\p{N}\s'’-]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
     .filter(Boolean)
-    .map((line) => line.replace(/[0-9０-９]+(?:円|ml|ML|年|本|%|度)?/g, " ").replace(/\s+/g, " ").trim())
-    .filter((line) => line.length >= 2 && line.length <= 80);
+    .map((line) =>
+      line
+        .replace(/[0-9０-９]+(?:円|ml|ML|年|本|%|度)?/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter((line) => line.length >= 3 && line.length <= 80)
+    .filter((line) => !isLikelyNoiseLine(line));
 
-  return [...new Set([base, ...splitCandidates])].slice(0, 10);
+  const uniqueLines = dedupeTextArray(rawLines);
+  if (!uniqueLines.length) {
+    return [truncateText(base.replace(/\s+/g, " "), 80)];
+  }
+
+  const sorted = [...uniqueLines].sort((a, b) => scoreQueryCandidate(b) - scoreQueryCandidate(a));
+  const combined =
+    sorted.length >= 2
+      ? truncateText(`${sorted[0]} ${sorted[1]}`.replace(/\s+/g, " "), 80)
+      : null;
+  const candidates = dedupeTextArray([combined, ...sorted]).filter(Boolean);
+  return candidates.slice(0, 8);
 };
 
-const resolvePriceByOcrText = (text) => {
+const fetchJsonWithTimeout = async (url, timeoutMs) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json"
+      },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`request failed ${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const searchWikipediaCandidates = async (query) => {
+  const results = [];
+  for (const lang of webSearchConfig.wikipediaLangs) {
+    if (results.length >= webSearchConfig.maxResults) {
+      break;
+    }
+
+    const endpoint = new URL(`https://${lang}.wikipedia.org/w/api.php`);
+    endpoint.searchParams.set("action", "opensearch");
+    endpoint.searchParams.set("search", query);
+    endpoint.searchParams.set("limit", String(webSearchConfig.maxResults));
+    endpoint.searchParams.set("namespace", "0");
+    endpoint.searchParams.set("format", "json");
+
+    try {
+      const payload = await fetchJsonWithTimeout(endpoint.toString(), webSearchConfig.timeoutMs);
+      const titles = Array.isArray(payload?.[1]) ? payload[1] : [];
+      const descriptions = Array.isArray(payload?.[2]) ? payload[2] : [];
+      const urls = Array.isArray(payload?.[3]) ? payload[3] : [];
+      for (let i = 0; i < titles.length; i += 1) {
+        if (results.length >= webSearchConfig.maxResults) {
+          break;
+        }
+        const title = String(titles[i] || "").trim();
+        const url = String(urls[i] || "").trim();
+        if (!title || !url) {
+          continue;
+        }
+        results.push({
+          title,
+          url,
+          snippet: truncateText(descriptions[i], 120),
+          source: `wikipedia-${lang}`
+        });
+      }
+    } catch (error) {
+      console.warn("Wikipedia search failed", lang, error?.message || error);
+    }
+  }
+  return results;
+};
+
+const flattenDuckDuckGoTopics = (topics) => {
+  const stack = Array.isArray(topics) ? [...topics] : [];
+  const flattened = [];
+  while (stack.length > 0) {
+    const item = stack.shift();
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    if (Array.isArray(item.Topics)) {
+      stack.push(...item.Topics);
+      continue;
+    }
+    flattened.push(item);
+  }
+  return flattened;
+};
+
+const searchDuckDuckGoCandidates = async (query) => {
+  const endpoint = new URL("https://api.duckduckgo.com/");
+  endpoint.searchParams.set("q", query);
+  endpoint.searchParams.set("format", "json");
+  endpoint.searchParams.set("no_html", "1");
+  endpoint.searchParams.set("skip_disambig", "1");
+
+  const payload = await fetchJsonWithTimeout(endpoint.toString(), webSearchConfig.timeoutMs);
+  const items = [];
+  const heading = String(payload?.Heading || "").trim();
+  const abstractText = String(payload?.AbstractText || "").trim();
+  const abstractUrl = String(payload?.AbstractURL || "").trim();
+  if (heading && abstractUrl) {
+    items.push({
+      title: heading,
+      url: abstractUrl,
+      snippet: truncateText(abstractText, 120),
+      source: "duckduckgo"
+    });
+  }
+
+  const topics = flattenDuckDuckGoTopics(payload?.RelatedTopics || []);
+  for (const topic of topics) {
+    if (items.length >= webSearchConfig.maxResults) {
+      break;
+    }
+    const title = truncateText(topic?.Text || "", 80);
+    const url = String(topic?.FirstURL || "").trim();
+    if (!title || !url) {
+      continue;
+    }
+    items.push({
+      title,
+      url,
+      snippet: "",
+      source: "duckduckgo"
+    });
+  }
+  return items;
+};
+
+const searchWebCandidates = async (query) => {
+  if (!webSearchConfig.enabled) {
+    return [];
+  }
+  const searchQuery = `${query}${webSearchConfig.querySuffix ? ` ${webSearchConfig.querySuffix}` : ""}`.trim();
+  const candidates = [];
+
+  const wiki = await searchWikipediaCandidates(searchQuery);
+  candidates.push(...wiki);
+
+  if (candidates.length < webSearchConfig.maxResults) {
+    try {
+      const ddg = await searchDuckDuckGoCandidates(searchQuery);
+      candidates.push(...ddg);
+    } catch (error) {
+      console.warn("DuckDuckGo search failed", error?.message || error);
+    }
+  }
+
+  const deduped = [];
+  const seenUrl = new Set();
+  for (const item of candidates) {
+    const url = String(item?.url || "").trim();
+    if (!url || seenUrl.has(url)) {
+      continue;
+    }
+    seenUrl.add(url);
+    deduped.push({
+      title: truncateText(item?.title || "", 90),
+      url,
+      snippet: truncateText(item?.snippet || "", 120),
+      source: item?.source || "web"
+    });
+    if (deduped.length >= webSearchConfig.maxResults) {
+      break;
+    }
+  }
+  return deduped;
+};
+
+const buildWebCandidateLines = (items) =>
+  items
+    .slice(0, webSearchConfig.maxResults)
+    .map((item, index) => `${index + 1}. ${item.title}\n${item.url}`)
+    .join("\n");
+
+const resolvePriceByOcrText = async (text) => {
   const candidates = extractQueryCandidatesFromOcrText(text);
 
   for (const query of candidates) {
@@ -610,16 +916,41 @@ const resolvePriceByOcrText = (text) => {
     }
   }
 
-  const fallbackQuery = candidates[0] || String(text || "").trim();
+  const fallbackQuery = truncateText(candidates[0] || String(text || "").replace(/\s+/g, " "), 80);
+  let webCandidates = [];
+  if (webSearchConfig.enabled && fallbackQuery) {
+    try {
+      webCandidates = await searchWebCandidates(fallbackQuery);
+    } catch (error) {
+      console.warn("Web search fallback failed", error?.message || error);
+    }
+  }
+
+  if (webCandidates.length > 0) {
+    const webLines = buildWebCandidateLines(webCandidates);
+    return {
+      queryUsed: fallbackQuery,
+      extractedText: text,
+      message: buildTextByTemplate(
+        "image_ocr_web_candidates",
+        { query: fallbackQuery, web_lines: webLines },
+        `価格DBには見つかりませんでした。\n抽出候補: ${fallbackQuery}\nWeb候補:\n${webLines}\n※この候補は参考情報です。`
+      ),
+      matches: [],
+      webCandidates
+    };
+  }
+
   return {
     queryUsed: fallbackQuery,
     extractedText: text,
     message: buildTextByTemplate(
       "image_ocr_not_found",
       { query: fallbackQuery, extracted_text: text },
-      `OCR結果から価格を照合できませんでした。\n抽出: ${String(text || "").slice(0, 100)}`
+      `OCR結果から価格を照合できませんでした。\n抽出候補: ${fallbackQuery}`
     ),
-    matches: []
+    matches: [],
+    webCandidates: []
   };
 };
 
@@ -828,7 +1159,7 @@ const processImageEvent = async (event, canReply) => {
       if (ocr?.text) {
         extractedText = ocr.text;
         confidence = ocr.confidence;
-        resolvedByOcr = resolvePriceByOcrText(ocr.text);
+        resolvedByOcr = await resolvePriceByOcrText(ocr.text);
       }
     } catch (error) {
       console.error("Image OCR failed", error);
@@ -939,6 +1270,8 @@ app.get("/api/health", (req, res) => {
     ocrEndpointReady: Boolean(lineConfig.ocrEndpoint),
     ocrRequestFormat: lineConfig.ocrRequestFormat,
     ocrTimeoutMs: lineConfig.ocrTimeoutMs,
+    webSearchEnabled: webSearchConfig.enabled,
+    webSearchMaxResults: webSearchConfig.maxResults,
     backupRetention: opsConfig.backupRetention
   });
 });
@@ -1271,13 +1604,13 @@ app.post("/api/reply-templates", (req, res) => {
   res.status(201).json(row);
 });
 
-app.post("/api/ocr/resolve", (req, res) => {
+app.post("/api/ocr/resolve", async (req, res) => {
   const text = String(req.body?.text || "").trim();
   if (!text) {
     return sendError(res, 400, "text is required");
   }
 
-  const resolved = resolvePriceByOcrText(text);
+  const resolved = await resolvePriceByOcrText(text);
   return res.json(resolved);
 });
 

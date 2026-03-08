@@ -32,6 +32,11 @@ OCR_BASE64_FIELD=imageBase64
 OCR_IMAGE_FIELD=image
 OCR_EXTRA_FIELDS=
 OCR_TIMEOUT_MS=12000
+WEB_SEARCH_ENABLED=false
+WEB_SEARCH_TIMEOUT_MS=5000
+WEB_SEARCH_MAX_RESULTS=3
+WEB_SEARCH_QUERY_SUFFIX=wine
+WEB_SEARCH_WIKIPEDIA_LANGS=en,ja
 
 ADMIN_TOKEN=
 BACKUP_DIR=./backups
@@ -72,7 +77,19 @@ OCR_EXTRA_FIELDS=
 OCR_TIMEOUT_MS=60000
 ```
 
-注: `line-wine-ocr` を Render Free で動かすと、OCR実行時にメモリ不足になる可能性があります。実運用は `Starter` 以上を推奨します。
+注: `line-wine-ocr` を Render Free で動かすと、OCR実行時にメモリ不足になる可能性があります。実運用は `Standard (2GB)` 以上を推奨します。
+
+### DB未一致時のWeb検索フォールバック
+
+`WEB_SEARCH_ENABLED=true` を設定すると、OCRでDB照合できなかった場合に Web 候補（Wikipedia/ DuckDuckGo）を返信します。
+
+```env
+WEB_SEARCH_ENABLED=true
+WEB_SEARCH_TIMEOUT_MS=5000
+WEB_SEARCH_MAX_RESULTS=3
+WEB_SEARCH_QUERY_SUFFIX=wine
+WEB_SEARCH_WIKIPEDIA_LANGS=en,ja
+```
 
 ## 3. 管理認証
 
