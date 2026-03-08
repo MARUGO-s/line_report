@@ -1831,7 +1831,7 @@ const parsePercentFromNearbyText = (text, anchorIndex, maxDistance = 22) => {
   let best = null;
   for (const match of body.matchAll(/([0-9]{1,3}(?:\.[0-9]+)?)\s*%/g)) {
     const value = Number(match[1]);
-    if (!Number.isFinite(value) || value < 0 || value > 100) {
+    if (!Number.isFinite(value) || value <= 0 || value > 100) {
       continue;
     }
     const index = Number(match.index || 0);
@@ -1862,7 +1862,7 @@ const normalizeGrapeComposition = (items = []) => {
     const percentageRaw = Number(item?.percentage);
     normalized.push({
       name,
-      percentage: Number.isFinite(percentageRaw) && percentageRaw >= 0 && percentageRaw <= 100 ? percentageRaw : null
+      percentage: Number.isFinite(percentageRaw) && percentageRaw > 0 && percentageRaw <= 100 ? percentageRaw : null
     });
   }
 
@@ -2318,7 +2318,7 @@ const normalizeWineAnalysisResult = (rawValue, fallbackValue = null, options = {
           const percentage = normalizeNumber(item?.percentage);
           return {
             name,
-            percentage: percentage !== null && percentage >= 0 && percentage <= 100 ? percentage : null
+            percentage: percentage !== null && percentage > 0 && percentage <= 100 ? percentage : null
           };
         })
         .filter(Boolean)
@@ -2624,7 +2624,7 @@ const requestGroqWineAnalysisFromImage = async ({
           {
             role: "system",
             content:
-              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available. For grape percentages, use percentages only when explicitly shown in evidence; never guess split ratios."
+              "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available. For grape percentages, use percentages only when explicitly shown in evidence; never guess split ratios; never output 0%."
           },
           {
             role: "user",
@@ -2679,7 +2679,7 @@ const buildLineWineReplyFallback = (wineData) => {
     wineData.grapes.length > 0
       ? wineData.grapes
           .map((item) =>
-            item.percentage !== null && item.percentage !== undefined
+            Number.isFinite(Number(item.percentage)) && Number(item.percentage) > 0
               ? `${item.name} (${item.percentage}%)`
               : item.name
           )
