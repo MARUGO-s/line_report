@@ -3061,7 +3061,7 @@ const fetchHtmlMetaSummary = async (urlText) => {
       .replace(/\s+/g, " ")
       .trim();
     const keywordMatches = plainText.match(
-      /[^。.!?\n]{0,80}(?:セパージュ|品種|ブレンド|grape|blend|variet(?:y|ies)|価格|price|market|円|¥|\$|€|味わい|香り|特徴|テイスティング|tasting|aroma|flavor|body|酸味|タンニン|評価|point|score|parker|wine advocate|james suckling|受賞|award|medal|trophy|飲み頃|drinking window|history|歴史|創業|設立|founded|established)[^。.!?\n]{0,120}/giu
+      /[^。.!?\n]{0,80}(?:セパージュ|品種|ブレンド|grape|blend|variet(?:y|ies)|composition|cépage|cabernet|merlot|tempranillo|pinot|chardonnay|sauvignon|garnacha|grenache|syrah|shiraz|graciano|mazuelo|malbec|sangiovese|nebbiolo|riesling|%|価格|price|market|円|¥|\$|€|味わい|香り|特徴|テイスティング|tasting|aroma|flavor|body|酸味|タンニン|評価|point|score|parker|wine advocate|james suckling|受賞|award|medal|trophy|飲み頃|drinking window|history|歴史|創業|設立|founded|established)[^。.!?\n]{0,120}/giu
     );
     const evidenceLines = [...(keywordMatches || []), ...jsonLdBlocks]
       .map((item) => truncateText(item, 220))
@@ -3488,7 +3488,14 @@ const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCan
     enrichmentQueries.push(`${query} 価格`, `${query} market price`, `${query} price`);
   }
   if (missingVarieties) {
-    enrichmentQueries.push(`${query} セパージュ`, `${query} 品種`, `${query} grape variety`, `${query} blend`);
+    enrichmentQueries.push(
+      `${query} セパージュ`,
+      `${query} 品種`,
+      `${query} grape variety`,
+      `${query} blend`,
+      `${query} blend percentage`,
+      `${query} grape composition`
+    );
   }
   if (missingTaste || missingFeatures) {
     enrichmentQueries.push(
