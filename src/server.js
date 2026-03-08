@@ -50,8 +50,29 @@ const lineConfig = {
   ocrRequestFormat: String(process.env.OCR_REQUEST_FORMAT || "json_base64").trim(),
   ocrBase64Field: String(process.env.OCR_BASE64_FIELD || "imageBase64").trim(),
   ocrImageField: String(process.env.OCR_IMAGE_FIELD || "image").trim(),
+  ocrExtraFields: String(process.env.OCR_EXTRA_FIELDS || "").trim(),
   ocrTimeoutMs: Math.max(1000, Number(process.env.OCR_TIMEOUT_MS || 12000) || 12000)
 };
+
+const parseOcrExtraFields = (rawValue) => {
+  const text = String(rawValue || "").trim();
+  if (!text) {
+    return {};
+  }
+
+  const parsed = {};
+  const params = new URLSearchParams(text);
+  for (const [key, value] of params.entries()) {
+    const normalizedKey = String(key || "").trim();
+    if (!normalizedKey) {
+      continue;
+    }
+    parsed[normalizedKey] = String(value || "").trim();
+  }
+  return parsed;
+};
+
+const ocrExtraFields = parseOcrExtraFields(lineConfig.ocrExtraFields);
 
 const securityConfig = {
   adminToken: String(process.env.ADMIN_TOKEN || "").trim()
@@ -471,6 +492,9 @@ const requestOcr = async (imageBuffer, contentType = "image/jpeg") => {
           ? "webp"
           : "jpg";
       const formData = new FormData();
+      for (const [key, value] of Object.entries(ocrExtraFields)) {
+        formData.append(key, value);
+      }
       formData.append(
         lineConfig.ocrImageField || "image",
         new Blob([imageBuffer], { type: contentType }),
@@ -480,6 +504,7 @@ const requestOcr = async (imageBuffer, contentType = "image/jpeg") => {
     } else {
       headers["Content-Type"] = "application/json";
       body = JSON.stringify({
+        ...ocrExtraFields,
         [lineConfig.ocrBase64Field || "imageBase64"]: imageBuffer.toString("base64")
       });
     }
@@ -500,6 +525,13 @@ const requestOcr = async (imageBuffer, contentType = "image/jpeg") => {
     const payload = contentHeader.includes("application/json")
       ? await response.json()
       : { text: await response.text() };
+
+    if (payload?.IsErroredOnProcessing === true) {
+      const details = Array.isArray(payload?.ErrorMessage)
+        ? payload.ErrorMessage.join("; ")
+        : String(payload?.ErrorMessage || "unknown OCR error");
+      throw new Error(`OCR provider error: ${details}`);
+    }
 
     const candidates = [...new Set(extractOcrTextCandidates(payload).filter(Boolean))];
     const text = candidates.join("\n").trim();

@@ -30,6 +30,7 @@ OCR_AUTH_TOKEN=
 OCR_REQUEST_FORMAT=json_base64
 OCR_BASE64_FIELD=imageBase64
 OCR_IMAGE_FIELD=image
+OCR_EXTRA_FIELDS=
 OCR_TIMEOUT_MS=12000
 
 ADMIN_TOKEN=
@@ -40,6 +41,19 @@ BACKUP_RETENTION=30
 - `ADMIN_TOKEN`: 設定すると `/api/*`（`/api/health` 以外）で管理認証が必須
 - `BACKUP_DIR`: バックアップ `.db` の保存先
 - `BACKUP_RETENTION`: 保持世代数（古いファイルは自動削除）
+
+### OCR設定例（無料テスト向け）
+
+`ocr.space` を使う場合:
+
+```env
+OCR_ENDPOINT=https://api.ocr.space/parse/image
+OCR_REQUEST_FORMAT=multipart
+OCR_IMAGE_FIELD=file
+OCR_EXTRA_FIELDS=apikey=helloworld&language=jpn&isOverlayRequired=false&OCREngine=1
+```
+
+本番利用では `helloworld` ではなく、正式APIキーへ置き換えてください。
 
 ## 3. 管理認証
 
