@@ -6,3 +6,4 @@ wine_price.db
 wine_price.db-shm
 wine_price.db-wal
 data/
+backups/

@@ -1,6 +1,14 @@
 const flashEl = document.getElementById("flash");
 const systemStatusEl = document.getElementById("systemStatus");
 
+const authForm = document.getElementById("authForm");
+const clearTokenBtn = document.getElementById("clearTokenBtn");
+const authStatusEl = document.getElementById("authStatus");
+
+const backupForm = document.getElementById("backupForm");
+const backupsTable = document.getElementById("backupsTable");
+const backupResult = document.getElementById("backupResult");
+
 const storeForm = document.getElementById("storeForm");
 const storesTable = document.getElementById("storesTable");
 
@@ -29,24 +37,105 @@ const simulateResult = document.getElementById("simulateResult");
 const ocrResolveForm = document.getElementById("ocrResolveForm");
 const ocrResolveResult = document.getElementById("ocrResolveResult");
 
-const api = {
-  async get(path) {
-    const response = await fetch(path);
-    if (!response.ok) {
-      throw new Error(await response.text());
+const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
+
+const STORAGE_ADMIN_TOKEN_KEY = "line_wine_admin_token";
+
+const readStoredAdminToken = () => {
+  try {
+    return String(localStorage.getItem(STORAGE_ADMIN_TOKEN_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const writeStoredAdminToken = (value) => {
+  try {
+    if (value) {
+      localStorage.setItem(STORAGE_ADMIN_TOKEN_KEY, value);
+    } else {
+      localStorage.removeItem(STORAGE_ADMIN_TOKEN_KEY);
     }
-    return response.json();
+  } catch {
+    // ignore storage errors in private mode
+  }
+};
+
+const state = {
+  adminToken: readStoredAdminToken(),
+  adminAuthRequired: false
+};
+
+const buildAuthHeaders = () => (state.adminToken ? { "x-admin-token": state.adminToken } : {});
+
+class ApiError extends Error {
+  constructor(message, status, bodyText) {
+    super(message);
+    this.name = "ApiError";
+    this.status = Number(status) || 0;
+    this.bodyText = String(bodyText || "");
+  }
+}
+
+const parseApiErrorMessage = (status, bodyText) => {
+  if (!bodyText) {
+    return `HTTP ${status}`;
+  }
+
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed?.error) {
+      return String(parsed.error);
+    }
+  } catch {
+    // not json
+  }
+
+  return bodyText.length > 300 ? `${bodyText.slice(0, 300)}...` : bodyText;
+};
+
+const api = {
+  async request(path, { method = "GET", headers = {}, body, responseType = "json" } = {}) {
+    const response = await fetch(path, {
+      method,
+      headers: {
+        ...buildAuthHeaders(),
+        ...headers
+      },
+      body
+    });
+
+    if (!response.ok) {
+      const bodyText = await response.text();
+      throw new ApiError(parseApiErrorMessage(response.status, bodyText), response.status, bodyText);
+    }
+
+    if (responseType === "blob") {
+      return {
+        blob: await response.blob(),
+        disposition: String(response.headers.get("content-disposition") || "")
+      };
+    }
+
+    if (responseType === "text") {
+      return response.text();
+    }
+
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
+  },
+  async get(path) {
+    return this.request(path);
   },
   async post(path, body) {
-    const response = await fetch(path, {
+    return this.request(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-    return response.json();
+  },
+  async getBlob(path) {
+    return this.request(path, { responseType: "blob" });
   }
 };
 
@@ -141,7 +230,14 @@ const previewData = {
         適用日: "effective_date"
       }
     }
-  }
+  },
+  backups: [
+    {
+      fileName: "wine_price_20260308_194523_before_release.db",
+      sizeBytes: 118784,
+      createdAt: "2026-03-08T10:45:23.000Z"
+    }
+  ]
 };
 
 let isStaticPreview = false;
@@ -149,6 +245,46 @@ let isStaticPreview = false;
 const notify = (message, isError = false) => {
   flashEl.textContent = message;
   flashEl.className = isError ? "flash error" : "flash";
+};
+
+const isAuthError = (error) => error instanceof ApiError && error.status === 401;
+
+const handleAuthError = () => {
+  updateAuthStatus("認証エラー: ADMIN_TOKENを確認してください。");
+  notify("認証エラー: 管理トークンが無効です。", true);
+};
+
+const handleOperationError = (prefix, error) => {
+  if (isAuthError(error)) {
+    handleAuthError();
+    return;
+  }
+  notify(`${prefix}: ${error.message}`, true);
+};
+
+const syncAuthInput = () => {
+  authForm.elements.adminToken.value = state.adminToken;
+};
+
+const updateAuthStatus = (message = "") => {
+  if (isStaticPreview) {
+    authStatusEl.textContent = "静的プレビューでは認証確認は行いません。";
+    return;
+  }
+
+  if (message) {
+    authStatusEl.textContent = message;
+    return;
+  }
+
+  if (!state.adminAuthRequired) {
+    authStatusEl.textContent = "このサーバーでは管理認証は任意です。";
+    return;
+  }
+
+  authStatusEl.textContent = state.adminToken
+    ? "管理認証が有効です。保存済みトークンで接続します。"
+    : "管理認証が必須です。ADMIN_TOKEN を入力して保存してください。";
 };
 
 const safeDate = (value) => {
@@ -160,6 +296,20 @@ const safeDate = (value) => {
     return value;
   }
   return d.toLocaleString("ja-JP");
+};
+
+const formatBytes = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) {
+    return "-";
+  }
+  if (num < 1024) {
+    return `${num} B`;
+  }
+  if (num < 1024 * 1024) {
+    return `${(num / 1024).toFixed(1)} KB`;
+  }
+  return `${(num / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 const renderStores = (items) => {
@@ -259,6 +409,24 @@ const renderIngestionFiles = (items) => {
   }
 };
 
+const renderBackups = (items) => {
+  backupsTable.innerHTML = "";
+  if (!items.length) {
+    backupsTable.innerHTML = '<tr><td colspan="3">バックアップはありません</td></tr>';
+    return;
+  }
+
+  for (const item of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${item.fileName}</td>
+      <td>${formatBytes(item.sizeBytes)}</td>
+      <td>${safeDate(item.createdAt)}</td>
+    `;
+    backupsTable.appendChild(tr);
+  }
+};
+
 const findPreviewMatches = (query) => {
   const q = String(query || "").trim().toLowerCase();
   if (!q) {
@@ -333,14 +501,48 @@ const buildPreviewOcrResolve = (text) => {
   };
 };
 
+const extractFileNameFromDisposition = (dispositionHeader, fallback = "download.csv") => {
+  const raw = String(dispositionHeader || "");
+  const utf8Match = raw.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1].trim());
+  }
+  const plainMatch = raw.match(/filename="?([^\";]+)"?/i);
+  if (plainMatch?.[1]) {
+    return plainMatch[1].trim();
+  }
+  return fallback;
+};
+
+const saveBlobToFile = (blob, fileName) => {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+};
+
 const disableMutationFormsForStaticPreview = () => {
-  const forms = [storeForm, productForm, priceForm, templateForm, csvIngestionForm, csvMappingForm];
+  const forms = [
+    authForm,
+    backupForm,
+    storeForm,
+    productForm,
+    priceForm,
+    templateForm,
+    csvIngestionForm,
+    csvMappingForm
+  ];
   for (const form of forms) {
     for (const element of form.elements) {
       element.disabled = true;
     }
   }
   loadCsvMappingBtn.disabled = true;
+  downloadTemplateBtn.disabled = true;
 };
 
 const activateStaticPreviewMode = (reason = "") => {
@@ -353,7 +555,10 @@ const activateStaticPreviewMode = (reason = "") => {
   renderCurrentPrices(previewData.currentPrices);
   renderTemplates(previewData.templates);
   renderIngestionFiles(previewData.ingestionFiles);
+  renderBackups(previewData.backups);
 
+  updateAuthStatus();
+  backupResult.textContent = "静的プレビューではバックアップAPIは利用できません。";
   csvIngestionResult.textContent = "静的プレビューではCSV取り込みAPIは利用できません。";
   ingestionErrorsResult.textContent = "履歴行をクリックするとデモのエラー詳細を表示します。";
   csvMappingResult.textContent = "静的プレビューではマッピング保存APIは利用できません。";
@@ -368,7 +573,9 @@ const loadSystem = async () => {
   }
 
   const result = await api.get("/api/health");
-  systemStatusEl.textContent = `${result.host}:${result.port} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"} / OCR: ${result.ocrEndpointReady ? "OK" : "NG"}`;
+  state.adminAuthRequired = Boolean(result.adminAuthRequired);
+  updateAuthStatus();
+  systemStatusEl.textContent = `${result.host}:${result.port} / Auth: ${result.adminAuthRequired ? (state.adminToken ? "ON" : "REQUIRED") : "OFF"} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"} / OCR: ${result.ocrEndpointReady ? "OK" : "NG"} / Backup保持: ${result.backupRetention}`;
 };
 
 const loadStores = async () => {
@@ -432,6 +639,40 @@ const loadIngestionFiles = async () => {
   renderIngestionFiles(result.items || []);
 };
 
+const loadBackups = async () => {
+  if (isStaticPreview) {
+    renderBackups(previewData.backups);
+    return;
+  }
+
+  const result = await api.get("/api/admin/backups");
+  renderBackups(result.items || []);
+};
+
+const clearProtectedViews = () => {
+  renderStores([]);
+  renderProducts([]);
+  renderCurrentPrices([]);
+  renderTemplates([]);
+  renderIngestionFiles([]);
+  renderBackups([]);
+  backupResult.textContent = "認証後にバックアップを実行できます。";
+  csvIngestionResult.textContent = "認証後にCSV取り込みを実行できます。";
+  ingestionErrorsResult.textContent = "認証後にエラー詳細を表示できます。";
+  csvMappingResult.textContent = "認証後にマッピングを保存できます。";
+};
+
+const loadProtectedData = async () => {
+  await Promise.all([
+    loadStores(),
+    loadProducts(),
+    loadCurrentPrices(),
+    loadTemplates(),
+    loadIngestionFiles(),
+    loadBackups()
+  ]);
+};
+
 const loadIngestionErrors = async (ingestionFileId) => {
   if (isStaticPreview) {
     const result = previewData.ingestionErrorsByFile[String(ingestionFileId)] || { items: [] };
@@ -473,6 +714,88 @@ const loadCsvMapping = async (storeId) => {
   return result;
 };
 
+authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (isStaticPreview) {
+    notify("静的プレビューでは認証設定は利用できません。", true);
+    return;
+  }
+
+  const formData = new FormData(authForm);
+  state.adminToken = String(formData.get("adminToken") || "").trim();
+  writeStoredAdminToken(state.adminToken);
+  updateAuthStatus();
+
+  try {
+    await loadSystem();
+    await loadProtectedData();
+    notify("管理認証トークンを保存しました。");
+  } catch (error) {
+    handleOperationError("認証確認に失敗", error);
+  }
+});
+
+clearTokenBtn.addEventListener("click", async () => {
+  if (isStaticPreview) {
+    notify("静的プレビューでは認証設定は利用できません。", true);
+    return;
+  }
+
+  state.adminToken = "";
+  writeStoredAdminToken("");
+  syncAuthInput();
+  updateAuthStatus();
+
+  if (state.adminAuthRequired) {
+    clearProtectedViews();
+    notify("管理トークンをクリアしました。", false);
+    return;
+  }
+
+  try {
+    await loadProtectedData();
+    notify("管理トークンをクリアしました。");
+  } catch (error) {
+    handleOperationError("再読込に失敗", error);
+  }
+});
+
+backupForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (isStaticPreview) {
+    notify("静的プレビューではバックアップ実行できません。", true);
+    return;
+  }
+
+  const formData = new FormData(backupForm);
+  const reason = String(formData.get("reason") || "").trim() || "manual";
+
+  try {
+    const result = await api.post("/api/admin/backup", { reason });
+    backupResult.textContent = JSON.stringify(result, null, 2);
+    await loadBackups();
+    notify("バックアップを作成しました。");
+  } catch (error) {
+    handleOperationError("バックアップ作成に失敗", error);
+  }
+});
+
+downloadTemplateBtn.addEventListener("click", async () => {
+  if (isStaticPreview) {
+    notify("静的プレビューではCSVテンプレート取得は利用できません。", true);
+    return;
+  }
+
+  try {
+    const response = await api.getBlob("/api/ingestion/template");
+    const fileName = extractFileNameFromDisposition(response.disposition, "wine_price_template.csv");
+    saveBlobToFile(response.blob, fileName);
+    notify("テンプレートCSVをダウンロードしました。");
+  } catch (error) {
+    handleOperationError("テンプレートCSV取得に失敗", error);
+  }
+});
+
 storeForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (isStaticPreview) {
@@ -491,7 +814,7 @@ storeForm.addEventListener("submit", async (event) => {
     await loadStores();
     notify("店舗を保存しました。");
   } catch (error) {
-    notify(`店舗保存に失敗: ${error.message}`, true);
+    handleOperationError("店舗保存に失敗", error);
   }
 });
 
@@ -517,7 +840,7 @@ productForm.addEventListener("submit", async (event) => {
     await loadProducts();
     notify("商品を保存しました。");
   } catch (error) {
-    notify(`商品保存に失敗: ${error.message}`, true);
+    handleOperationError("商品保存に失敗", error);
   }
 });
 
@@ -542,7 +865,7 @@ priceForm.addEventListener("submit", async (event) => {
     await loadCurrentPrices();
     notify("価格を保存しました。");
   } catch (error) {
-    notify(`価格保存に失敗: ${error.message}`, true);
+    handleOperationError("価格保存に失敗", error);
   }
 });
 
@@ -564,7 +887,7 @@ templateForm.addEventListener("submit", async (event) => {
     await loadTemplates();
     notify("テンプレートを保存しました。");
   } catch (error) {
-    notify(`テンプレート保存に失敗: ${error.message}`, true);
+    handleOperationError("テンプレート保存に失敗", error);
   }
 });
 
@@ -601,7 +924,7 @@ csvIngestionForm.addEventListener("submit", async (event) => {
     await Promise.all([loadIngestionFiles(), loadCurrentPrices()]);
     notify("CSV取り込みを実行しました。");
   } catch (error) {
-    notify(`CSV取り込み失敗: ${error.message}`, true);
+    handleOperationError("CSV取り込み失敗", error);
   }
 });
 
@@ -614,7 +937,7 @@ ingestionFilesTable.addEventListener("click", (event) => {
   const ingestionId = row.dataset.ingestionId;
   loadIngestionErrors(ingestionId)
     .then(() => notify(`取り込みID ${ingestionId} のエラー詳細を読み込みました。`))
-    .catch((error) => notify(`エラー詳細取得に失敗: ${error.message}`, true));
+    .catch((error) => handleOperationError("エラー詳細取得に失敗", error));
 });
 
 csvMappingForm.addEventListener("submit", async (event) => {
@@ -647,7 +970,7 @@ csvMappingForm.addEventListener("submit", async (event) => {
     csvMappingResult.textContent = JSON.stringify(result, null, 2);
     notify("店舗別CSVマッピングを保存しました。");
   } catch (error) {
-    notify(`CSVマッピング保存に失敗: ${error.message}`, true);
+    handleOperationError("CSVマッピング保存に失敗", error);
   }
 });
 
@@ -662,7 +985,7 @@ loadCsvMappingBtn.addEventListener("click", async () => {
     await loadCsvMapping(storeIdRaw);
     notify("CSVマッピングを読み込みました。");
   } catch (error) {
-    notify(`CSVマッピング読込に失敗: ${error.message}`, true);
+    handleOperationError("CSVマッピング読込に失敗", error);
   }
 });
 
@@ -678,7 +1001,7 @@ simulateForm.addEventListener("submit", async (event) => {
     simulateResult.textContent = JSON.stringify(result, null, 2);
     notify("シミュレーションを実行しました。");
   } catch (error) {
-    notify(`シミュレーション失敗: ${error.message}`, true);
+    handleOperationError("シミュレーション失敗", error);
   }
 });
 
@@ -694,30 +1017,32 @@ ocrResolveForm.addEventListener("submit", async (event) => {
     ocrResolveResult.textContent = JSON.stringify(result, null, 2);
     notify("OCR照合テストを実行しました。");
   } catch (error) {
-    notify(`OCR照合テスト失敗: ${error.message}`, true);
+    handleOperationError("OCR照合テスト失敗", error);
   }
 });
 
 refreshProductsButton.addEventListener("click", () => {
-  loadProducts().catch((error) => notify(`商品再読込に失敗: ${error.message}`, true));
+  loadProducts().catch((error) => handleOperationError("商品再読込に失敗", error));
 });
 
 productSearchEl.addEventListener("input", () => {
-  loadProducts().catch((error) => notify(`商品検索に失敗: ${error.message}`, true));
+  loadProducts().catch((error) => handleOperationError("商品検索に失敗", error));
 });
 
 const boot = async () => {
+  syncAuthInput();
+  updateAuthStatus("接続確認中...");
+
   try {
-    await Promise.all([
-      loadSystem(),
-      loadStores(),
-      loadProducts(),
-      loadCurrentPrices(),
-      loadTemplates(),
-      loadIngestionFiles()
-    ]);
+    await loadSystem();
+    await loadProtectedData();
     notify("初期化しました。");
   } catch (error) {
+    if (isAuthError(error)) {
+      clearProtectedViews();
+      handleAuthError();
+      return;
+    }
     activateStaticPreviewMode(String(error?.message || "API unavailable"));
   }
 };

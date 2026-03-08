@@ -22,6 +22,39 @@
 
       <section class="grid two-col">
         <article class="panel">
+          <h2>管理認証</h2>
+          <form id="authForm" class="toolbar">
+            <input name="adminToken" type="password" placeholder="ADMIN_TOKEN を入力" />
+            <button type="submit">保存</button>
+            <button id="clearTokenBtn" type="button">クリア</button>
+          </form>
+          <p id="authStatus" class="sub">認証状態を確認中...</p>
+        </article>
+
+        <article class="panel">
+          <h2>バックアップ</h2>
+          <form id="backupForm" class="toolbar">
+            <input name="reason" placeholder="backup reason (例: before_release)" />
+            <button type="submit">今すぐバックアップ</button>
+          </form>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>ファイル</th>
+                  <th>サイズ</th>
+                  <th>作成日時</th>
+                </tr>
+              </thead>
+              <tbody id="backupsTable"></tbody>
+            </table>
+          </div>
+          <pre id="backupResult" class="result">バックアップ実行結果を表示します。</pre>
+        </article>
+      </section>
+
+      <section class="grid two-col">
+        <article class="panel">
           <h2>店舗登録</h2>
           <form id="storeForm" class="stack">
             <label>
@@ -167,7 +200,7 @@
       <section class="grid two-col">
         <article class="panel">
           <h2>CSV取り込み</h2>
-          <p><a href="/api/ingestion/template" target="_blank" rel="noreferrer">テンプレートCSVをダウンロード</a></p>
+          <p><button id="downloadTemplateBtn" type="button">テンプレートCSVをダウンロード</button></p>
           <form id="csvIngestionForm" class="stack">
             <label>
               CSVファイル *

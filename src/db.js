@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
@@ -13,6 +14,12 @@ export const dbPath = process.env.DB_PATH
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
+
+const schemaPath = path.join(projectRoot, "schema.sql");
+if (fs.existsSync(schemaPath)) {
+  const schemaSql = fs.readFileSync(schemaPath, "utf8");
+  db.exec(schemaSql);
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS store_csv_mappings (
@@ -409,6 +416,17 @@ export const saveOcrResult = ({
     confidence: confidence === null || confidence === undefined ? null : Number(confidence),
     created_at: nowIso()
   });
+};
+
+export const backupDatabaseTo = (destinationPath) => {
+  const safePath = String(destinationPath || "").replace(/'/g, "''");
+  if (!safePath) {
+    throw new Error("destinationPath is required");
+  }
+
+  db.pragma("wal_checkpoint(FULL)");
+  db.exec(`VACUUM INTO '${safePath}'`);
+  return destinationPath;
 };
 
 const getProductBySkuStmt = db.prepare(

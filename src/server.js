@@ -1,5 +1,6 @@
 import "dotenv/config";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -23,6 +24,7 @@ import {
   listReplyTemplates,
   listStoreCsvMappings,
   listStores,
+  backupDatabaseTo,
   renderTemplate,
   resolveProductId,
   resolveStoreId,
@@ -51,7 +53,44 @@ const lineConfig = {
   ocrTimeoutMs: Math.max(1000, Number(process.env.OCR_TIMEOUT_MS || 12000) || 12000)
 };
 
+const securityConfig = {
+  adminToken: String(process.env.ADMIN_TOKEN || "").trim()
+};
+
+const opsConfig = {
+  backupDir: String(process.env.BACKUP_DIR || "").trim() || path.join(projectRoot, "backups"),
+  backupRetention: Math.max(0, Number(process.env.BACKUP_RETENTION || 30) || 30)
+};
+
 const sendError = (res, status, message) => res.status(status).json({ error: message });
+
+const extractAdminTokenFromRequest = (req) => {
+  const headerToken = String(req.header("x-admin-token") || "").trim();
+  if (headerToken) {
+    return headerToken;
+  }
+
+  const authorization = String(req.header("authorization") || "").trim();
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i);
+  return bearer ? String(bearer[1]).trim() : "";
+};
+
+const requireAdminAuth = (req, res, next) => {
+  if (!securityConfig.adminToken) {
+    return next();
+  }
+
+  if (req.path === "/health") {
+    return next();
+  }
+
+  const token = extractAdminTokenFromRequest(req);
+  if (token && token === securityConfig.adminToken) {
+    return next();
+  }
+
+  return sendError(res, 401, "admin authentication required");
+};
 
 const asPositiveInt = (v) => {
   const parsed = Number.parseInt(String(v), 10);
@@ -660,6 +699,71 @@ const processCsvIngestionRows = ({
   };
 };
 
+const ensureBackupDirectory = () => {
+  fs.mkdirSync(opsConfig.backupDir, { recursive: true });
+};
+
+const asBackupTimestamp = (date = new Date()) =>
+  date.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "_");
+
+const listBackupFiles = () => {
+  ensureBackupDirectory();
+  const files = fs
+    .readdirSync(opsConfig.backupDir)
+    .filter((name) => name.endsWith(".db"))
+    .map((name) => {
+      const fullPath = path.join(opsConfig.backupDir, name);
+      const stat = fs.statSync(fullPath);
+      return {
+        fileName: name,
+        fullPath,
+        sizeBytes: stat.size,
+        createdAt: stat.mtime.toISOString()
+      };
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return files;
+};
+
+const pruneBackupFiles = () => {
+  if (opsConfig.backupRetention <= 0) {
+    return;
+  }
+
+  const backups = listBackupFiles();
+  const toDelete = backups.slice(opsConfig.backupRetention);
+  for (const item of toDelete) {
+    try {
+      fs.unlinkSync(item.fullPath);
+    } catch (error) {
+      console.warn("Failed to prune backup file", item.fullPath, error);
+    }
+  }
+};
+
+const createBackup = ({ reason = "manual" } = {}) => {
+  ensureBackupDirectory();
+  const timestamp = asBackupTimestamp();
+  const safeReason = String(reason || "manual")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 40) || "manual";
+  const fileName = `wine_price_${timestamp}_${safeReason}.db`;
+  const destination = path.join(opsConfig.backupDir, fileName);
+
+  backupDatabaseTo(destination);
+  pruneBackupFiles();
+
+  const stat = fs.statSync(destination);
+  return {
+    fileName,
+    fullPath: destination,
+    sizeBytes: stat.size,
+    createdAt: stat.mtime.toISOString()
+  };
+};
+
 const processTextEvent = async (event, canReply) => {
   if (!canReply) {
     return;
@@ -784,6 +888,7 @@ app.post("/webhooks/line", express.raw({ type: "application/json" }), async (req
 });
 
 app.use(express.json({ limit: "1mb" }));
+app.use("/api", requireAdminAuth);
 app.use("/admin", express.static(path.join(projectRoot, "public"), { extensions: ["html"] }));
 
 app.get("/", (req, res) => {
@@ -794,14 +899,35 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     dbPath,
+    adminAuthRequired: Boolean(securityConfig.adminToken),
     host: HOST,
     port: PORT,
     lineWebhookReady: Boolean(lineConfig.channelSecret),
     lineReplyReady: Boolean(lineConfig.accessToken),
     ocrEndpointReady: Boolean(lineConfig.ocrEndpoint),
     ocrRequestFormat: lineConfig.ocrRequestFormat,
-    ocrTimeoutMs: lineConfig.ocrTimeoutMs
+    ocrTimeoutMs: lineConfig.ocrTimeoutMs,
+    backupRetention: opsConfig.backupRetention
   });
+});
+
+app.get("/api/admin/backups", (req, res) => {
+  const items = listBackupFiles();
+  return res.json({ items });
+});
+
+app.post("/api/admin/backup", (req, res) => {
+  try {
+    const reason = String(req.body?.reason || "manual").trim() || "manual";
+    const backup = createBackup({ reason });
+    return res.status(201).json({
+      ok: true,
+      backup
+    });
+  } catch (error) {
+    console.error(error);
+    return sendError(res, 500, "failed to create backup");
+  }
 });
 
 app.get("/api/stores", (req, res) => {
