@@ -744,83 +744,65 @@ const buildTextByTemplate = (templateKey, variables, fallbackText) => {
 
 const ensureDefaultTemplates = () => {
   const existingMap = new Map(listReplyTemplates().map((item) => [item.template_key, item.body]));
-  const priceFoundBodyV1 = "{{product_name}} の最新価格です。\n{{lines}}";
-  const priceFoundBodyV2 = "{{product_name}} の検索結果です。\n{{lines}}";
   const normalizeTemplateBody = (value) =>
     String(value || "")
       .trim()
       .replace(/\\n/g, "\n");
-  const webSummaryBodyV1 =
-    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n※Web参照の要約です。";
-  const webSummaryBodyV2 =
-    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n※Web参照の要約です。";
-  const webSummaryBodyV3 =
-    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n※Web参照の要約です。";
-  const webSummaryBodyV4 =
-    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n※Web参照の要約です。";
-  const webSummaryBodyV5 =
-    "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n検索モード: {{search_mode}}\n参照URL:\n{{source_urls}}\n※Web参照の要約です。";
+  const defaultBodies = {
+    price_found: "【{{product_name}}】\n{{lines}}",
+    price_not_found: "「{{query}}」は価格DBで見つかりませんでした。",
+    image_received: "画像を受け取りました。ラベル文字を解析します。",
+    image_ocr_failed:
+      "ラベル文字を読み取れませんでした。\nラベル全体を正面から、明るい場所で再撮影してください。",
+    image_ocr_not_found:
+      "画像から候補を抽出しましたが、価格DBに一致しませんでした。\n抽出候補: {{query}}",
+    image_ocr_web_candidates:
+      "価格DBには一致しませんでした。\n抽出候補: {{query}}\n外部候補:\n{{web_lines}}\n※参考情報です。",
+    image_ocr_web_summary:
+      "価格DBには一致しませんでした。Web要約です。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n検索モード: {{search_mode}}\n参照URL:\n{{source_urls}}"
+  };
 
-  const defaults = [
-    { key: "price_found", body: priceFoundBodyV2 },
-    { key: "price_not_found", body: "{{query}} に一致する価格が見つかりませんでした。" },
-    { key: "image_received", body: "画像を受け取りました。OCR解析後に価格候補を返します。" },
-    {
-      key: "image_ocr_failed",
-      body:
-        "画像を受け取りましたが、今回はラベル文字を抽出できませんでした。\nラベルを正面から明るい場所で撮影して、もう一度送ってください。"
-    },
-    {
-      key: "image_ocr_not_found",
-      body: "OCR結果から価格を照合できませんでした。\n抽出候補: {{query}}"
-    },
-    {
-      key: "image_ocr_web_candidates",
-      body:
-        "価格DBには見つかりませんでした。\n抽出候補: {{query}}\nWeb候補:\n{{web_lines}}\n※この候補は参考情報です。"
-    },
-    {
-      key: "image_ocr_web_summary",
-      body: webSummaryBodyV5
-    }
-  ];
+  const upgradeCandidates = {
+    price_found: ["{{product_name}} の最新価格です。\n{{lines}}", "{{product_name}} の検索結果です。\n{{lines}}"],
+    price_not_found: ["{{query}} に一致する価格が見つかりませんでした。"],
+    image_received: ["画像を受け取りました。OCR解析後に価格候補を返します。"],
+    image_ocr_failed: [
+      "画像を受け取りましたが、今回はラベル文字を抽出できませんでした。\nラベルを正面から明るい場所で撮影して、もう一度送ってください。"
+    ],
+    image_ocr_not_found: ["OCR結果から価格を照合できませんでした。\n抽出候補: {{query}}"],
+    image_ocr_web_candidates: [
+      "価格DBには見つかりませんでした。\n抽出候補: {{query}}\nWeb候補:\n{{web_lines}}\n※この候補は参考情報です。"
+    ],
+    image_ocr_web_summary: [
+      "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n※Web参照の要約です。",
+      "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n※Web参照の要約です。",
+      "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n※Web参照の要約です。",
+      "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n※Web参照の要約です。",
+      "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n検索モード: {{search_mode}}\n参照URL:\n{{source_urls}}\n※Web参照の要約です。"
+    ]
+  };
 
-  for (const template of defaults) {
-    const existingBody = existingMap.get(template.key);
+  for (const [templateKey, defaultBody] of Object.entries(defaultBodies)) {
+    const existingBody = existingMap.get(templateKey);
     if (!existingBody) {
       upsertReplyTemplate({
-        templateKey: template.key,
-        body: template.body,
+        templateKey,
+        body: defaultBody,
         isActive: true
       });
       continue;
     }
 
-    // Upgrade only known default body so user-customized templates are preserved.
-    if (template.key === "price_found") {
-      if (normalizeTemplateBody(existingBody) === normalizeTemplateBody(priceFoundBodyV1)) {
-        upsertReplyTemplate({
-          templateKey: template.key,
-          body: priceFoundBodyV2,
-          isActive: true
-        });
-      }
-    }
-
-    if (template.key === "image_ocr_web_summary") {
-      const trimmed = normalizeTemplateBody(existingBody);
-      if (
-        trimmed === normalizeTemplateBody(webSummaryBodyV1) ||
-        trimmed === normalizeTemplateBody(webSummaryBodyV2) ||
-        trimmed === normalizeTemplateBody(webSummaryBodyV3) ||
-        trimmed === normalizeTemplateBody(webSummaryBodyV4)
-      ) {
-        upsertReplyTemplate({
-          templateKey: template.key,
-          body: webSummaryBodyV5,
-          isActive: true
-        });
-      }
+    const normalizedExisting = normalizeTemplateBody(existingBody);
+    const normalizedCandidates = new Set(
+      (upgradeCandidates[templateKey] || []).map((value) => normalizeTemplateBody(value))
+    );
+    if (normalizedCandidates.has(normalizedExisting)) {
+      upsertReplyTemplate({
+        templateKey,
+        body: defaultBody,
+        isActive: true
+      });
     }
   }
 };
