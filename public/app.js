@@ -38,6 +38,11 @@ const ocrResolveForm = document.getElementById("ocrResolveForm");
 const ocrResolveResult = document.getElementById("ocrResolveResult");
 
 const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
+const templateCsvText = [
+  "sku,product_name,store_code,price,effective_date,currency",
+  "WINE-0001,Chablis Premier Cru,SHINJUKU,4200,2026-03-15,JPY",
+  "WINE-0002,Sancerre Blanc,GINZA,4980,2026-03-15,JPY"
+].join("\n");
 
 const STORAGE_ADMIN_TOKEN_KEY = "line_wine_admin_token";
 
@@ -782,12 +787,18 @@ backupForm.addEventListener("submit", async (event) => {
 
 downloadTemplateBtn.addEventListener("click", async () => {
   if (isStaticPreview) {
-    notify("静的プレビューではCSVテンプレート取得は利用できません。", true);
+    saveBlobToFile(new Blob([templateCsvText], { type: "text/csv;charset=utf-8" }), "wine_price_template.csv");
+    notify("テンプレートCSVをダウンロードしました。");
     return;
   }
 
   try {
-    const response = await api.getBlob("/api/ingestion/template");
+    let response = null;
+    try {
+      response = await api.getBlob("/template/wine_price_template.csv");
+    } catch {
+      response = await api.getBlob("/api/ingestion/template");
+    }
     const fileName = extractFileNameFromDisposition(response.disposition, "wine_price_template.csv");
     saveBlobToFile(response.blob, fileName);
     notify("テンプレートCSVをダウンロードしました。");

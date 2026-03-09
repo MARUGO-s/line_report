@@ -4411,15 +4411,23 @@ app.get("/api/ingestion/files", (req, res) => {
   return res.json({ items });
 });
 
-app.get("/api/ingestion/template", (req, res) => {
-  const template = [
+const buildIngestionTemplateCsv = () =>
+  [
     "sku,product_name,store_code,price,effective_date,currency",
     "WINE-0001,Chablis Premier Cru,SHINJUKU,4200,2026-03-15,JPY",
     "WINE-0002,Sancerre Blanc,GINZA,4980,2026-03-15,JPY"
   ].join("\n");
+
+app.get("/template/wine_price_template.csv", (req, res) => {
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", "attachment; filename=\"wine_price_template.csv\"");
-  return res.send(template);
+  return res.send(buildIngestionTemplateCsv());
+});
+
+app.get("/api/ingestion/template", (req, res) => {
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", "attachment; filename=\"wine_price_template.csv\"");
+  return res.send(buildIngestionTemplateCsv());
 });
 
 app.get("/api/ingestion/mappings", (req, res) => {
