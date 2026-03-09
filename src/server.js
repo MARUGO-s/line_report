@@ -528,25 +528,104 @@ const buildCurrentPriceLines = (rows) =>
     .map((row) => `・${row.store_name}: ${Number(row.latest_price).toLocaleString("ja-JP")}円 (${row.effective_date})`)
     .join("\n");
 
-const buildCatalogMatchLines = (rows) =>
-  rows
-    .map((row, index) => {
-      const title =
-        row.name_en && row.name_en !== row.name
-          ? `${row.name} / ${row.name_en}`
-          : row.name || row.name_en || row.sku || "(名称不明)";
-      const blocks = [
-        `【候補${index + 1}】 ${title}`,
-        `年代: ${row.vintage || "不明"}`,
-        `納品価格: ${formatYen(row.purchase_price)}`,
-        `販売価格: ${formatYen(row.retail_price)}`,
-        `納品業者: ${row.supplier_name || "不明"}`,
-        `在庫数: ${row.stock_qty === null || row.stock_qty === undefined ? "不明" : row.stock_qty}`,
-        `在庫店舗: ${row.stock_store || "不明"}`
-      ];
-      return blocks.join("\n");
-    })
-    .join("\n\n");
+const formatCatalogTitle = (row) =>
+  row.name_en && row.name_en !== row.name
+    ? `${row.name || "(名称不明)"} / ${row.name_en}`
+    : row.name || row.name_en || row.sku || "(名称不明)";
+
+const buildCatalogDetailLines = (row) =>
+  [
+    `ワイン名: ${formatCatalogTitle(row)}`,
+    `年代: ${row.vintage || "不明"}`,
+    `納品価格: ${formatYen(row.purchase_price)}`,
+    `販売価格: ${formatYen(row.retail_price)}`,
+    `納品業者: ${row.supplier_name || "不明"}`,
+    `在庫数: ${row.stock_qty === null || row.stock_qty === undefined ? "不明" : row.stock_qty}`,
+    `在庫店舗: ${row.stock_store || "不明"}`
+  ].join("\n");
+
+const buildCatalogChoiceLine = (row, index) =>
+  `第${index + 1}候補 (${index + 1}) ${formatCatalogTitle(row)}\n  年代: ${
+    row.vintage || "不明"
+  } / 販売価格: ${formatYen(row.retail_price)} / 納品価格: ${formatYen(row.purchase_price)}`;
+
+const toKatakana = (value) =>
+  String(value || "").replace(/[\u3041-\u3096]/g, (ch) =>
+    String.fromCharCode(ch.charCodeAt(0) + 0x60)
+  );
+
+const foldDiacritics = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "");
+
+const compactSearchText = (value) =>
+  String(value || "")
+    .replace(/[\s　・･'’"“”`´~〜!！?？,，.。:：;；/／\\\-‐‑‒–—―ー_()（）\[\]{}｛｝【】]/g, "")
+    .trim();
+
+const buildSearchQueryVariants = (query) => {
+  const base = String(query || "").normalize("NFKC").trim();
+  if (!base) {
+    return [];
+  }
+
+  const variants = [
+    base,
+    base.toLowerCase(),
+    toKatakana(base),
+    foldDiacritics(base),
+    foldDiacritics(base).toLowerCase(),
+    compactSearchText(base),
+    compactSearchText(base.toLowerCase()),
+    compactSearchText(toKatakana(base)),
+    compactSearchText(foldDiacritics(base)),
+    compactSearchText(foldDiacritics(base).toLowerCase())
+  ].filter(Boolean);
+
+  return [...new Set(variants)];
+};
+
+const searchCatalogMatchesByQuery = (query, limit = 20) => {
+  const variants = buildSearchQueryVariants(query);
+  const merged = new Map();
+  for (const variant of variants) {
+    const rows = findCatalogProductsByQuery(variant, limit);
+    for (const row of rows) {
+      if (!merged.has(row.id)) {
+        merged.set(row.id, row);
+      }
+      if (merged.size >= limit) {
+        break;
+      }
+    }
+    if (merged.size >= limit) {
+      break;
+    }
+  }
+  return [...merged.values()];
+};
+
+const buildCatalogCandidatesMessage = (query, matches) => {
+  const header = `${query} に一致する候補が ${matches.length} 件見つかりました。`;
+  const footer = "番号だけ送ってください（例: 1）。";
+  const maxChars = 4500;
+
+  const blocks = [];
+  for (let i = 0; i < matches.length; i += 1) {
+    const block = buildCatalogChoiceLine(matches[i], i);
+    const nextBody = blocks.concat(block).join("\n");
+    const preview = [header, nextBody, footer].join("\n\n");
+    if (preview.length > maxChars) {
+      break;
+    }
+    blocks.push(block);
+  }
+
+  const truncated = blocks.length < matches.length;
+  const notice = truncated
+    ? `表示上限のため ${matches.length} 件中 ${blocks.length} 件を表示しています。絞り込み語を追加してください。`
+    : "";
+
+  return [header, blocks.join("\n"), notice, footer].filter(Boolean).join("\n\n");
+};
 
 const buildTextByTemplate = (templateKey, variables, fallbackText) => {
   const template = getActiveReplyTemplateByKey(templateKey);
@@ -869,9 +948,9 @@ const requestOcr = async (imageBuffer, contentType = "image/jpeg") => {
 };
 
 const buildSimulatedPriceReply = (query) => {
-  const catalogMatches = findCatalogProductsByQuery(query, 5);
-  if (catalogMatches.length) {
-    const lines = buildCatalogMatchLines(catalogMatches.slice(0, 3));
+  const catalogMatches = searchCatalogMatchesByQuery(query, 20);
+  if (catalogMatches.length === 1) {
+    const lines = buildCatalogDetailLines(catalogMatches[0]);
     return {
       message: buildTextByTemplate(
         "price_found",
@@ -882,7 +961,16 @@ const buildSimulatedPriceReply = (query) => {
         },
         `${catalogMatches[0].name || catalogMatches[0].name_en || query} の検索結果です。\n${lines}`
       ),
-      matches: catalogMatches
+      matches: catalogMatches,
+      requiresSelection: false
+    };
+  }
+
+  if (catalogMatches.length > 1) {
+    return {
+      message: buildCatalogCandidatesMessage(query, catalogMatches),
+      matches: catalogMatches,
+      requiresSelection: true
     };
   }
 
@@ -894,7 +982,8 @@ const buildSimulatedPriceReply = (query) => {
         { query },
         `${query} に一致する価格が見つかりませんでした。`
       ),
-      matches: []
+      matches: [],
+      requiresSelection: false
     };
   }
 
@@ -908,7 +997,8 @@ const buildSimulatedPriceReply = (query) => {
       },
       `${matches[0].product_name} の最新価格\n${buildCurrentPriceLines(matches.slice(0, 5))}`
     ),
-    matches
+    matches,
+    requiresSelection: false
   };
 };
 
@@ -4276,6 +4366,75 @@ const createBackup = ({ reason = "manual" } = {}) => {
   };
 };
 
+const lineSelectionState = new Map();
+const lineSelectionTtlMs = 30 * 60 * 1000;
+
+const getConversationKey = (event) => {
+  const userId = String(event?.source?.userId || "").trim();
+  if (userId) {
+    return `user:${userId}`;
+  }
+  const groupId = String(event?.source?.groupId || "").trim();
+  if (groupId) {
+    return `group:${groupId}`;
+  }
+  const roomId = String(event?.source?.roomId || "").trim();
+  if (roomId) {
+    return `room:${roomId}`;
+  }
+  return "";
+};
+
+const pruneLineSelectionState = () => {
+  const now = Date.now();
+  for (const [key, item] of lineSelectionState.entries()) {
+    if (now - Number(item?.updatedAt || 0) > lineSelectionTtlMs) {
+      lineSelectionState.delete(key);
+    }
+  }
+};
+
+const setLineSelectionState = (conversationKey, query, matches) => {
+  if (!conversationKey || !Array.isArray(matches) || matches.length < 2) {
+    return;
+  }
+  pruneLineSelectionState();
+  lineSelectionState.set(conversationKey, {
+    query: String(query || "").trim(),
+    matches,
+    updatedAt: Date.now()
+  });
+};
+
+const clearLineSelectionState = (conversationKey) => {
+  if (!conversationKey) {
+    return;
+  }
+  lineSelectionState.delete(conversationKey);
+};
+
+const getLineSelectionState = (conversationKey) => {
+  if (!conversationKey) {
+    return null;
+  }
+  pruneLineSelectionState();
+  const item = lineSelectionState.get(conversationKey);
+  if (!item) {
+    return null;
+  }
+  item.updatedAt = Date.now();
+  return item;
+};
+
+const parseSelectionNumber = (value) => {
+  const text = String(value || "").normalize("NFKC").trim();
+  const matched = text.match(/^([1-9]\d?)$/);
+  if (!matched) {
+    return null;
+  }
+  return Number(matched[1]);
+};
+
 const processTextEvent = async (event, canReply) => {
   if (!canReply) {
     return;
@@ -4284,6 +4443,7 @@ const processTextEvent = async (event, canReply) => {
   const text = String(event.message?.text || "").trim();
   const match = text.match(/^価格[\s:：]+(.+)$/);
   const query = (match ? match[1] : text).trim();
+  const conversationKey = getConversationKey(event);
 
   if (!query) {
     const guidance = "価格を調べるには「価格 シャブリ」の形式で送ってください。";
@@ -4291,7 +4451,36 @@ const processTextEvent = async (event, canReply) => {
     return;
   }
 
-  const { message } = buildSimulatedPriceReply(query);
+  const selectedNumber = parseSelectionNumber(query);
+  if (selectedNumber !== null && conversationKey) {
+    const selection = getLineSelectionState(conversationKey);
+    if (selection?.matches?.length) {
+      if (selectedNumber >= 1 && selectedNumber <= selection.matches.length) {
+        const selected = selection.matches[selectedNumber - 1];
+        const detail = [
+          `${selection.query} の第${selectedNumber}候補です。`,
+          buildCatalogDetailLines(selected)
+        ].join("\n\n");
+        await sendLineReply(event.replyToken, detail);
+        return;
+      }
+
+      await sendLineReply(
+        event.replyToken,
+        `候補番号は 1〜${selection.matches.length} の範囲で入力してください。`
+      );
+      return;
+    }
+  }
+
+  const { message, requiresSelection, matches } = buildSimulatedPriceReply(query);
+  if (conversationKey) {
+    if (requiresSelection) {
+      setLineSelectionState(conversationKey, query, matches);
+    } else {
+      clearLineSelectionState(conversationKey);
+    }
+  }
   await sendLineReply(event.replyToken, message);
 };
 
@@ -4339,6 +4528,10 @@ const processImageEvent = async (event, canReply) => {
   }
 
   if (resolvedByOcr) {
+    const conversationKey = getConversationKey(event);
+    if (conversationKey && resolvedByOcr?.requiresSelection) {
+      setLineSelectionState(conversationKey, resolvedByOcr.queryUsed || "", resolvedByOcr.matches || []);
+    }
     await sendLineReply(event.replyToken, resolvedByOcr.message);
     return;
   }

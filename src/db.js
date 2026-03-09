@@ -580,7 +580,7 @@ const searchCatalogProductsStmt = db.prepare(`
   LIMIT @limit
 `);
 
-export const findCatalogProductsByQuery = (query, limit = 5) => {
+export const findCatalogProductsByQuery = (query, limit = 50) => {
   const q = String(query).trim();
   if (!q) {
     return [];
