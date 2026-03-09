@@ -85,6 +85,7 @@
       <section class="panel">
         <h2>LINE返信テンプレート</h2>
         <p class="sub">キーを選んで編集し、変数ボタンで本文へ挿入できます。</p>
+        <p id="templateEditTarget" class="sub top-gap">新規作成モード</p>
 
         <div class="helper-block top-gap">
           <p class="helper-title">テンプレートキー（クリックで入力）</p>
@@ -109,7 +110,10 @@
             <p class="helper-title">変数を挿入（本文カーソル位置に入ります）</p>
             <div id="templateVariableShortcuts" class="token-list"></div>
           </div>
-          <button type="submit">テンプレートを保存</button>
+          <div class="toolbar">
+            <button type="submit">テンプレートを保存</button>
+            <button id="resetTemplateFormBtn" type="button">新規作成に戻す</button>
+          </div>
         </form>
 
         <div class="top-gap">

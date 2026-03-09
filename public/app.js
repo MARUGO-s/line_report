@@ -13,6 +13,8 @@ const ingestionFilesTable = document.getElementById("ingestionFilesTable");
 const ingestionErrorsResult = document.getElementById("ingestionErrorsResult");
 
 const templateForm = document.getElementById("templateForm");
+const templateEditTarget = document.getElementById("templateEditTarget");
+const resetTemplateFormBtn = document.getElementById("resetTemplateFormBtn");
 const templatesTable = document.getElementById("templatesTable");
 const templatePreview = document.getElementById("templatePreview");
 const templateKeyShortcuts = document.getElementById("templateKeyShortcuts");
@@ -100,7 +102,8 @@ const state = {
   adminToken: readStoredAdminToken(),
   adminAuthRequired: false,
   isStaticPreview: false,
-  templates: []
+  templates: [],
+  templateEditOriginalKey: ""
 };
 
 const buildAuthHeaders = () => (state.adminToken ? { "x-admin-token": state.adminToken } : {});
@@ -231,6 +234,21 @@ const updateTemplatePreview = () => {
   templatePreview.textContent = buildPreviewText(body);
 };
 
+const setTemplateEditMode = (originalKey = "") => {
+  state.templateEditOriginalKey = String(originalKey || "").trim();
+  if (state.templateEditOriginalKey) {
+    templateEditTarget.textContent = `編集中: ${state.templateEditOriginalKey}（キー名を変更して保存できます）`;
+    return;
+  }
+  templateEditTarget.textContent = "新規作成モード";
+};
+
+const resetTemplateForm = () => {
+  templateForm.reset();
+  setTemplateEditMode("");
+  updateTemplatePreview();
+};
+
 const escapeHtml = (value) =>
   String(value || "")
     .replace(/&/g, "&amp;")
@@ -350,6 +368,7 @@ const activateStaticPreviewMode = (reason = "") => {
   state.isStaticPreview = true;
   systemStatusEl.textContent = "GitHub Pages 静的プレビューモード（保存APIは無効）";
   updateAuthStatus();
+  setTemplateEditMode("");
   renderTemplates([
     { template_key: "price_found", is_active: 1, updated_at: new Date().toISOString(), body: "{{product_name}} の検索結果です。\\n{{lines}}" },
     { template_key: "price_not_found", is_active: 1, updated_at: new Date().toISOString(), body: "{{query}} に一致する価格が見つかりませんでした。" }
@@ -533,9 +552,22 @@ templateForm.addEventListener("submit", async (event) => {
   }
 
   try {
+    const beforeKey = state.templateEditOriginalKey;
+    const renamed = Boolean(beforeKey && beforeKey !== payload.templateKey);
+    if (renamed) {
+      await api.post("/api/reply-templates/rename", {
+        oldTemplateKey: beforeKey,
+        newTemplateKey: payload.templateKey
+      });
+    }
     await api.post("/api/reply-templates", payload);
     await loadTemplates();
-    notify("テンプレートを保存しました。");
+    setTemplateEditMode(payload.templateKey);
+    notify(
+      renamed
+        ? `テンプレートキーを ${beforeKey} から ${payload.templateKey} に変更して保存しました。`
+        : "テンプレートを保存しました。"
+    );
   } catch (error) {
     handleOperationError("テンプレート保存に失敗", error);
   }
@@ -574,9 +606,15 @@ templatesTable.addEventListener("click", (event) => {
   const row = state.templates[index];
   templateForm.elements.templateKey.value = String(row.template_key || "");
   templateForm.elements.body.value = String(row.body || "");
+  setTemplateEditMode(row.template_key || "");
   updateTemplatePreview();
   templateForm.elements.body.focus();
   notify(`テンプレート ${row.template_key} を編集欄に読み込みました。`);
+});
+
+resetTemplateFormBtn.addEventListener("click", () => {
+  resetTemplateForm();
+  notify("新規作成モードに戻しました。");
 });
 
 templateForm.elements.body.addEventListener("input", () => {
@@ -587,6 +625,7 @@ const boot = async () => {
   syncAuthInput();
   renderTemplateKeyShortcuts();
   renderTemplateVariableShortcuts();
+  setTemplateEditMode("");
   updateTemplatePreview();
   updateAuthStatus("接続確認中...");
 

@@ -753,6 +753,46 @@ export const upsertReplyTemplate = ({ templateKey, body, isActive = true }) => {
   return getTemplateByKeyStmt.get(String(templateKey).trim());
 };
 
+const renameTemplateKeyStmt = db.prepare(`
+  UPDATE line_reply_templates
+  SET template_key = @new_key,
+      updated_at = @updated_at
+  WHERE template_key = @old_key
+`);
+
+const renameReplyTemplateKeyTx = db.transaction(({ oldTemplateKey, newTemplateKey }) => {
+  const oldKey = String(oldTemplateKey || "").trim();
+  const newKey = String(newTemplateKey || "").trim();
+  if (!oldKey || !newKey) {
+    throw new Error("oldTemplateKey and newTemplateKey are required");
+  }
+
+  const source = getTemplateByKeyStmt.get(oldKey);
+  if (!source) {
+    return null;
+  }
+  if (oldKey === newKey) {
+    return source;
+  }
+
+  const target = getTemplateByKeyStmt.get(newKey);
+  if (target) {
+    const error = new Error("template key already exists");
+    error.code = "TEMPLATE_KEY_CONFLICT";
+    throw error;
+  }
+
+  renameTemplateKeyStmt.run({
+    old_key: oldKey,
+    new_key: newKey,
+    updated_at: nowIso()
+  });
+
+  return getTemplateByKeyStmt.get(newKey);
+});
+
+export const renameReplyTemplateKey = (payload) => renameReplyTemplateKeyTx(payload);
+
 const getActiveTemplateByKeyStmt = db.prepare(
   "SELECT id, template_key, body, is_active, updated_at FROM line_reply_templates WHERE template_key = ? AND is_active = 1"
 );

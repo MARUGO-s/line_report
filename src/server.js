@@ -28,6 +28,7 @@ import {
   listStoreCsvMappings,
   listStores,
   backupDatabaseTo,
+  renameReplyTemplateKey,
   renderTemplate,
   resolveProductId,
   resolveStoreId,
@@ -5173,6 +5174,34 @@ app.post("/api/reply-templates", (req, res) => {
     isActive: req.body?.isActive !== false
   });
   res.status(201).json(row);
+});
+
+app.post("/api/reply-templates/rename", (req, res) => {
+  const oldTemplateKey = String(req.body?.oldTemplateKey || "").trim();
+  const newTemplateKey = String(req.body?.newTemplateKey || "").trim();
+  if (!oldTemplateKey || !newTemplateKey) {
+    return sendError(res, 400, "oldTemplateKey and newTemplateKey are required");
+  }
+
+  try {
+    const row = renameReplyTemplateKey({
+      oldTemplateKey,
+      newTemplateKey
+    });
+    if (!row) {
+      return sendError(res, 404, "source template key not found");
+    }
+    return res.json(row);
+  } catch (error) {
+    if (error?.code === "TEMPLATE_KEY_CONFLICT") {
+      return sendError(res, 409, "newTemplateKey already exists");
+    }
+    if (String(error?.message || "").includes("UNIQUE")) {
+      return sendError(res, 409, "newTemplateKey already exists");
+    }
+    console.error(error);
+    return sendError(res, 500, "failed to rename template key");
+  }
 });
 
 app.post("/api/ocr/resolve", async (req, res) => {
