@@ -467,6 +467,11 @@ const ensureDefaultTemplates = () => {
     { key: "price_not_found", body: "{{query}} に一致する価格が見つかりませんでした。" },
     { key: "image_received", body: "画像を受け取りました。OCR解析後に価格候補を返します。" },
     {
+      key: "image_ocr_failed",
+      body:
+        "画像を受け取りましたが、今回はラベル文字を抽出できませんでした。\nラベルを正面から明るい場所で撮影して、もう一度送ってください。"
+    },
+    {
       key: "image_ocr_not_found",
       body: "OCR結果から価格を照合できませんでした。\n抽出候補: {{query}}"
     },
@@ -4338,9 +4343,9 @@ const processImageEvent = async (event, canReply) => {
   }
 
   const fallback = buildTextByTemplate(
-    "image_received",
+    "image_ocr_failed",
     {},
-    "画像を受け取りました。OCR解析後に価格候補を返します。"
+    "画像を受け取りましたが、今回はラベル文字を抽出できませんでした。ラベルを正面から明るい場所で撮影して、もう一度送ってください。"
   );
   await sendLineReply(event.replyToken, fallback);
 };
