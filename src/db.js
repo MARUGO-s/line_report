@@ -31,13 +31,95 @@ db.exec(`
   );
 `);
 
+const ensureColumn = (tableName, columnName, columnDefinition) => {
+  const columns = db
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all()
+    .map((row) => String(row.name || ""));
+  if (columns.includes(columnName)) {
+    return;
+  }
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+};
+
+ensureColumn("products", "name_en", "TEXT");
+ensureColumn("products", "retail_price", "INTEGER");
+ensureColumn("products", "purchase_price", "INTEGER");
+ensureColumn("products", "stock_qty", "INTEGER");
+ensureColumn("products", "stock_store", "TEXT");
+ensureColumn("products", "supplier_name", "TEXT");
+ensureColumn("products", "cost_rate", "REAL");
+
 const nowIso = () => new Date().toISOString();
+
+const toNullableText = (value) => {
+  const text = String(value ?? "").trim();
+  return text ? text : null;
+};
+
+const toNullableInteger = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+  const normalized = text.replace(/[,\s￥¥円%]/g, "");
+  if (!normalized) {
+    return null;
+  }
+  const num = Number(normalized);
+  if (!Number.isFinite(num)) {
+    return null;
+  }
+  return Math.round(num);
+};
+
+const toNullableReal = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+  const normalized = text.replace(/[,\s％%]/g, "");
+  if (!normalized) {
+    return null;
+  }
+  const num = Number(normalized);
+  if (!Number.isFinite(num)) {
+    return null;
+  }
+  return Math.round(num * 100) / 100;
+};
 
 const normalizeAliases = (aliases) => {
   if (!Array.isArray(aliases)) {
     return [];
   }
-  return [...new Set(aliases.map((v) => String(v).trim()).filter(Boolean))];
+  const values = [];
+  for (const raw of aliases) {
+    const base = String(raw || "").trim();
+    if (!base) {
+      continue;
+    }
+    values.push(base);
+    const normalized = base.normalize("NFKC").trim();
+    if (normalized && normalized !== base) {
+      values.push(normalized);
+    }
+    const compact = normalized.replace(/\s+/g, "");
+    if (compact && compact !== normalized) {
+      values.push(compact);
+    }
+    const lowered = normalized.toLowerCase();
+    if (lowered && lowered !== normalized) {
+      values.push(lowered);
+    }
+  }
+  return [...new Set(values)];
 };
 
 const getStoreByCodeStmt = db.prepare(
@@ -74,10 +156,24 @@ const readAliasesStmt = db.prepare(
 );
 
 const listProductsStmt = db.prepare(`
-  SELECT id, sku, name, producer, vintage, unit, created_at, updated_at
-  FROM products
-  WHERE (@query = '' OR name LIKE @like OR IFNULL(producer, '') LIKE @like OR IFNULL(sku, '') LIKE @like)
-  ORDER BY updated_at DESC
+  SELECT
+    p.id, p.sku, p.name, p.name_en, p.producer, p.vintage, p.unit,
+    p.retail_price, p.purchase_price, p.stock_qty, p.stock_store, p.supplier_name, p.cost_rate,
+    p.created_at, p.updated_at
+  FROM products p
+  WHERE (
+    @query = ''
+    OR p.name LIKE @like
+    OR IFNULL(p.name_en, '') LIKE @like
+    OR IFNULL(p.producer, '') LIKE @like
+    OR IFNULL(p.sku, '') LIKE @like
+    OR EXISTS (
+      SELECT 1
+      FROM product_aliases pa
+      WHERE pa.product_id = p.id AND pa.alias LIKE @like
+    )
+  )
+  ORDER BY p.updated_at DESC
   LIMIT @limit
 `);
 
@@ -94,8 +190,35 @@ export const listProducts = ({ query = "", limit = 200 } = {}) => {
 };
 
 const insertProductStmt = db.prepare(`
-  INSERT INTO products (sku, name, producer, vintage, unit, created_at, updated_at)
-  VALUES (@sku, @name, @producer, @vintage, @unit, @created_at, @updated_at)
+  INSERT INTO products (
+    sku, name, name_en, producer, vintage, unit,
+    retail_price, purchase_price, stock_qty, stock_store, supplier_name, cost_rate,
+    created_at, updated_at
+  )
+  VALUES (
+    @sku, @name, @name_en, @producer, @vintage, @unit,
+    @retail_price, @purchase_price, @stock_qty, @stock_store, @supplier_name, @cost_rate,
+    @created_at, @updated_at
+  )
+`);
+
+const updateProductStmt = db.prepare(`
+  UPDATE products
+  SET
+    sku = @sku,
+    name = @name,
+    name_en = @name_en,
+    producer = @producer,
+    vintage = @vintage,
+    unit = @unit,
+    retail_price = @retail_price,
+    purchase_price = @purchase_price,
+    stock_qty = @stock_qty,
+    stock_store = @stock_store,
+    supplier_name = @supplier_name,
+    cost_rate = @cost_rate,
+    updated_at = @updated_at
+  WHERE id = @id
 `);
 
 const insertAliasStmt = db.prepare(`
@@ -105,24 +228,51 @@ const insertAliasStmt = db.prepare(`
 `);
 
 const getProductByIdStmt = db.prepare(`
-  SELECT id, sku, name, producer, vintage, unit, created_at, updated_at
+  SELECT
+    id, sku, name, name_en, producer, vintage, unit,
+    retail_price, purchase_price, stock_qty, stock_store, supplier_name, cost_rate,
+    created_at, updated_at
   FROM products WHERE id = ?
 `);
 
+const buildProductWritePayload = (payload = {}) => ({
+  sku: toNullableText(payload.sku),
+  name: toNullableText(payload.name),
+  name_en: toNullableText(payload.nameEn ?? payload.name_en),
+  producer: toNullableText(payload.producer),
+  vintage: toNullableText(payload.vintage),
+  unit: toNullableText(payload.unit),
+  retail_price: toNullableInteger(payload.retailPrice ?? payload.retail_price),
+  purchase_price: toNullableInteger(payload.purchasePrice ?? payload.purchase_price),
+  stock_qty: toNullableInteger(payload.stockQty ?? payload.stock_qty),
+  stock_store: toNullableText(payload.stockStore ?? payload.stock_store),
+  supplier_name: toNullableText(payload.supplierName ?? payload.supplier_name),
+  cost_rate: toNullableReal(payload.costRate ?? payload.cost_rate)
+});
+
 const createProductTx = db.transaction((payload) => {
   const timestamp = nowIso();
+  const normalized = buildProductWritePayload(payload);
+  if (!normalized.name && !normalized.name_en) {
+    throw new Error("name is required");
+  }
+
+  if (!normalized.name) {
+    normalized.name = normalized.name_en;
+  }
   const info = insertProductStmt.run({
-    sku: payload.sku || null,
-    name: payload.name,
-    producer: payload.producer || null,
-    vintage: payload.vintage || null,
-    unit: payload.unit || null,
+    ...normalized,
     created_at: timestamp,
     updated_at: timestamp
   });
 
   const productId = Number(info.lastInsertRowid);
-  for (const alias of normalizeAliases(payload.aliases)) {
+  const aliasCandidates = normalizeAliases([
+    ...(Array.isArray(payload.aliases) ? payload.aliases : []),
+    normalized.name,
+    normalized.name_en
+  ]);
+  for (const alias of aliasCandidates) {
     insertAliasStmt.run(productId, alias);
   }
 
@@ -144,6 +294,94 @@ export const createProduct = (payload) => {
   const id = createProductTx(payload);
   return getProductById(id);
 };
+
+const findCatalogProductByIdentityStmt = db.prepare(`
+  SELECT p.id
+  FROM products p
+  LEFT JOIN product_aliases pa ON pa.product_id = p.id
+  WHERE (
+    @sku IS NOT NULL
+    AND @sku <> ''
+    AND IFNULL(p.sku, '') = @sku
+  )
+  OR (
+    @name IS NOT NULL
+    AND @name <> ''
+    AND (
+      p.name = @name
+      OR IFNULL(p.name_en, '') = @name
+      OR pa.alias = @name
+    )
+  )
+  OR (
+    @name_en IS NOT NULL
+    AND @name_en <> ''
+    AND (
+      p.name = @name_en
+      OR IFNULL(p.name_en, '') = @name_en
+      OR pa.alias = @name_en
+    )
+  )
+  ORDER BY p.updated_at DESC
+  LIMIT 1
+`);
+
+const upsertCatalogProductTx = db.transaction((payload) => {
+  const normalized = buildProductWritePayload(payload);
+  if (!normalized.name && !normalized.name_en && !normalized.sku) {
+    throw new Error("sku or name is required");
+  }
+
+  const lookupName = normalized.name || normalized.name_en || normalized.sku;
+  const existing = findCatalogProductByIdentityStmt.get({
+    sku: normalized.sku,
+    name: normalized.name || lookupName,
+    name_en: normalized.name_en || lookupName
+  });
+
+  if (!existing) {
+    const id = createProductTx({
+      ...normalized,
+      name: normalized.name || normalized.name_en || lookupName,
+      aliases: payload.aliases
+    });
+    return getProductById(id);
+  }
+
+  const current = getProductById(existing.id);
+  const updated = {
+    id: current.id,
+    sku: normalized.sku ?? current.sku ?? null,
+    name: normalized.name ?? current.name ?? normalized.name_en ?? current.name_en ?? lookupName,
+    name_en: normalized.name_en ?? current.name_en ?? null,
+    producer: normalized.producer ?? current.producer ?? null,
+    vintage: normalized.vintage ?? current.vintage ?? null,
+    unit: normalized.unit ?? current.unit ?? null,
+    retail_price: normalized.retail_price ?? current.retail_price ?? null,
+    purchase_price: normalized.purchase_price ?? current.purchase_price ?? null,
+    stock_qty: normalized.stock_qty ?? current.stock_qty ?? null,
+    stock_store: normalized.stock_store ?? current.stock_store ?? null,
+    supplier_name: normalized.supplier_name ?? current.supplier_name ?? null,
+    cost_rate: normalized.cost_rate ?? current.cost_rate ?? null,
+    updated_at: nowIso()
+  };
+
+  updateProductStmt.run(updated);
+
+  const aliasCandidates = normalizeAliases([
+    ...(Array.isArray(current.aliases) ? current.aliases : []),
+    ...(Array.isArray(payload.aliases) ? payload.aliases : []),
+    updated.name,
+    updated.name_en
+  ]);
+  for (const alias of aliasCandidates) {
+    insertAliasStmt.run(current.id, alias);
+  }
+
+  return getProductById(current.id);
+});
+
+export const upsertCatalogProduct = (payload) => upsertCatalogProductTx(payload);
 
 const listCurrentPricesStmt = db.prepare(`
   SELECT cp.product_id, p.name AS product_name, p.sku, p.producer, p.vintage,
@@ -274,6 +512,7 @@ const searchProductIdsStmt = db.prepare(`
   FROM products p
   LEFT JOIN product_aliases pa ON pa.product_id = p.id
   WHERE p.name LIKE @like
+     OR IFNULL(p.name_en, '') LIKE @like
      OR IFNULL(p.sku, '') LIKE @like
      OR IFNULL(p.producer, '') LIKE @like
      OR IFNULL(pa.alias, '') LIKE @like
@@ -308,6 +547,55 @@ export const findCurrentPricesByQuery = (query, limitProducts = 3) => {
   }
 
   return currentByIdsStmt.all({ idsJson: JSON.stringify(idRows.map((v) => v.id)) });
+};
+
+const searchCatalogProductsStmt = db.prepare(`
+  SELECT
+    p.id, p.sku, p.name, p.name_en, p.producer, p.vintage, p.unit,
+    p.retail_price, p.purchase_price, p.stock_qty, p.stock_store, p.supplier_name, p.cost_rate,
+    p.created_at, p.updated_at
+  FROM products p
+  WHERE (
+    p.name LIKE @like
+    OR IFNULL(p.name_en, '') LIKE @like
+    OR IFNULL(p.sku, '') LIKE @like
+    OR IFNULL(p.producer, '') LIKE @like
+    OR EXISTS (
+      SELECT 1
+      FROM product_aliases pa
+      WHERE pa.product_id = p.id AND pa.alias LIKE @like
+    )
+  )
+  ORDER BY
+    CASE
+      WHEN p.name = @exact OR IFNULL(p.name_en, '') = @exact OR EXISTS (
+        SELECT 1 FROM product_aliases pa WHERE pa.product_id = p.id AND pa.alias = @exact
+      ) THEN 0
+      WHEN p.name LIKE @prefix OR IFNULL(p.name_en, '') LIKE @prefix OR EXISTS (
+        SELECT 1 FROM product_aliases pa WHERE pa.product_id = p.id AND pa.alias LIKE @prefix
+      ) THEN 1
+      ELSE 2
+    END,
+    p.updated_at DESC
+  LIMIT @limit
+`);
+
+export const findCatalogProductsByQuery = (query, limit = 5) => {
+  const q = String(query).trim();
+  if (!q) {
+    return [];
+  }
+  return searchCatalogProductsStmt
+    .all({
+      like: `%${q}%`,
+      exact: q,
+      prefix: `${q}%`,
+      limit: Number(limit) || 5
+    })
+    .map((row) => ({
+      ...row,
+      aliases: readAliasesStmt.all(row.id).map((v) => v.alias)
+    }));
 };
 
 const listReplyTemplatesStmt = db.prepare(`
@@ -437,7 +725,12 @@ const getProductByNameOrAliasStmt = db.prepare(`
   SELECT p.id, p.sku, p.name
   FROM products p
   LEFT JOIN product_aliases pa ON pa.product_id = p.id
-  WHERE p.name = @name OR pa.alias = @name
+  WHERE p.name = @name
+     OR IFNULL(p.name_en, '') = @name
+     OR LOWER(p.name) = LOWER(@name)
+     OR LOWER(IFNULL(p.name_en, '')) = LOWER(@name)
+     OR pa.alias = @name
+     OR LOWER(IFNULL(pa.alias, '')) = LOWER(@name)
   ORDER BY p.updated_at DESC
   LIMIT 1
 `);

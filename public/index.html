@@ -86,24 +86,44 @@
           <h2>商品登録</h2>
           <form id="productForm" class="stack">
             <label>
-              SKU
-              <input name="sku" placeholder="例: WINE-0001" />
-            </label>
-            <label>
               ワイン名 *
-              <input name="name" required placeholder="例: Chablis Premier Cru" />
+              <input name="name" required placeholder="例: シャトー・マルゴー" />
             </label>
             <label>
-              生産者
-              <input name="producer" placeholder="例: Domaine X" />
+              wine_name（英字）
+              <input name="nameEn" placeholder="例: Chateau Margaux" />
             </label>
             <label>
-              ヴィンテージ
-              <input name="vintage" placeholder="例: 2022" />
+              年代
+              <input name="vintage" placeholder="例: 2021" />
+            </label>
+            <label>
+              販売価格(円)
+              <input name="retailPrice" inputmode="numeric" placeholder="例: 6980" />
+            </label>
+            <label>
+              納品価格(円)
+              <input name="purchasePrice" inputmode="numeric" placeholder="例: 4200" />
+            </label>
+            <label>
+              在庫数
+              <input name="stockQty" inputmode="numeric" placeholder="例: 24" />
+            </label>
+            <label>
+              在庫店舗
+              <input name="stockStore" placeholder="例: 新宿倉庫" />
+            </label>
+            <label>
+              納品業者
+              <input name="supplierName" placeholder="例: ABCトレーディング" />
+            </label>
+            <label>
+              原価率(%)
+              <input name="costRate" inputmode="decimal" placeholder="例: 60.2" />
             </label>
             <label>
               別名(カンマ区切り)
-              <input name="aliases" placeholder="例: シャブリ, Chablis" />
+              <input name="aliases" placeholder="例: マルゴー, Margaux" />
             </label>
             <button type="submit">商品を保存</button>
           </form>
@@ -118,9 +138,12 @@
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>SKU</th>
                   <th>商品名</th>
-                  <th>別名</th>
+                  <th>wine_name</th>
+                  <th>納品価格</th>
+                  <th>販売価格</th>
+                  <th>納品業者</th>
+                  <th>在庫</th>
                 </tr>
               </thead>
               <tbody id="productsTable"></tbody>
@@ -260,7 +283,7 @@
               name="headerMappingJson"
               rows="6"
               required
-              placeholder='例: {"商品コード":"sku","商品名":"product_name","店舗コード":"store_code","価格":"price","適用日":"effective_date"}'
+              placeholder='例: {"ワイン名":"product_name","wine_name":"name_en","販売価格":"retail_price","納品価格":"purchase_price","在庫数":"stock_qty","在庫店舗":"stock_store","納品業者":"supplier_name","原価率":"cost_rate","年代":"vintage"}'
             ></textarea>
           </label>
           <div class="toolbar">

@@ -39,9 +39,9 @@ const ocrResolveResult = document.getElementById("ocrResolveResult");
 
 const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
 const templateCsvText = [
-  "sku,product_name,store_code,price,effective_date,currency",
-  "WINE-0001,Chablis Premier Cru,SHINJUKU,4200,2026-03-15,JPY",
-  "WINE-0002,Sancerre Blanc,GINZA,4980,2026-03-15,JPY"
+  "年代,ワイン名,wine_name,販売価格,納品価格,在庫数,在庫店舗,納品業者,原価率",
+  "2021,マコン・クラシコ,Macan Clasico,6980,4200,24,新宿倉庫,ABCトレーディング,60.2",
+  "2019,シャトー・マルゴー,Chateau Margaux,198000,132000,2,銀座店,XYZインポーター,66.7"
 ].join("\n");
 
 const STORAGE_ADMIN_TOKEN_KEY = "line_wine_admin_token";
@@ -149,11 +149,17 @@ const previewData = {
   products: [
     {
       id: 1,
-      sku: "WINE-0001",
-      name: "Chablis Premier Cru",
-      producer: "Domaine X",
+      sku: null,
+      name: "マコン・クラシコ",
+      name_en: "Macan Clasico",
       vintage: "2022",
-      aliases: ["シャブリ"]
+      retail_price: 6980,
+      purchase_price: 4200,
+      stock_qty: 24,
+      stock_store: "新宿倉庫",
+      supplier_name: "ABCトレーディング",
+      cost_rate: 60.2,
+      aliases: ["マコン", "Macan Clasico"]
     }
   ],
   currentPrices: [
@@ -228,11 +234,15 @@ const previewData = {
       store_name: "新宿店",
       delimiter: null,
       header_mapping: {
-        商品コード: "sku",
-        商品名: "product_name",
-        店舗コード: "store_code",
-        価格: "price",
-        適用日: "effective_date"
+        ワイン名: "product_name",
+        wine_name: "name_en",
+        販売価格: "retail_price",
+        納品価格: "purchase_price",
+        在庫数: "stock_qty",
+        在庫店舗: "stock_store",
+        納品業者: "supplier_name",
+        原価率: "cost_rate",
+        年代: "vintage"
       }
     }
   },
@@ -338,7 +348,7 @@ const renderStores = (items) => {
 const renderProducts = (items) => {
   productsTable.innerHTML = "";
   if (!items.length) {
-    productsTable.innerHTML = '<tr><td colspan="4">データがありません</td></tr>';
+    productsTable.innerHTML = '<tr><td colspan="8">データがありません</td></tr>';
     return;
   }
 
@@ -346,9 +356,12 @@ const renderProducts = (items) => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${item.id}</td>
-      <td>${item.sku ?? ""}</td>
       <td>${item.name}</td>
-      <td>${(item.aliases || []).join(", ")}</td>
+      <td>${item.name_en ?? ""}</td>
+      <td>${item.purchase_price ? `${Number(item.purchase_price).toLocaleString("ja-JP")}円` : "-"}</td>
+      <td>${item.retail_price ? `${Number(item.retail_price).toLocaleString("ja-JP")}円` : "-"}</td>
+      <td>${item.supplier_name ?? "-"}</td>
+      <td>${item.stock_qty ?? "-"}</td>
     `;
     productsTable.appendChild(tr);
   }
@@ -438,12 +451,12 @@ const findPreviewMatches = (query) => {
     return [];
   }
 
-  return previewData.currentPrices.filter((item) => {
+  return previewData.products.filter((item) => {
     const names = [
-      item.product_name,
+      item.name,
+      item.name_en,
       item.sku,
-      item.producer,
-      ...(previewData.products.find((p) => p.id === item.product_id)?.aliases || [])
+      ...(item.aliases || [])
     ]
       .filter(Boolean)
       .join("\n")
@@ -465,13 +478,24 @@ const buildPreviewSimulate = (query) => {
   }
 
   const lines = matches
-    .slice(0, 5)
-    .map((item) => `・${item.store_name}: ${Number(item.latest_price).toLocaleString("ja-JP")}円 (${item.effective_date})`)
-    .join("\n");
+    .slice(0, 3)
+    .map((item, index) => {
+      const title = item.name_en ? `${item.name} / ${item.name_en}` : item.name;
+      return [
+        `【候補${index + 1}】 ${title}`,
+        `年代: ${item.vintage || "不明"}`,
+        `納品価格: ${item.purchase_price ? `${Number(item.purchase_price).toLocaleString("ja-JP")}円` : "不明"}`,
+        `販売価格: ${item.retail_price ? `${Number(item.retail_price).toLocaleString("ja-JP")}円` : "不明"}`,
+        `納品業者: ${item.supplier_name || "不明"}`,
+        `在庫数: ${item.stock_qty ?? "不明"}`,
+        `在庫店舗: ${item.stock_store || "不明"}`
+      ].join("\n");
+    })
+    .join("\n\n");
 
   return {
     query: q,
-    message: `${matches[0].product_name} の最新価格です。\n${lines}`,
+    message: `${matches[0].name} の検索結果です。\n${lines}`,
     matches
   };
 };
@@ -599,7 +623,14 @@ const loadProducts = async () => {
   if (isStaticPreview) {
     const filtered = q
       ? previewData.products.filter((item) => {
-          const text = [item.name, item.sku, item.producer, ...(item.aliases || [])]
+          const text = [
+            item.name,
+            item.name_en,
+            item.sku,
+            item.supplier_name,
+            item.stock_store,
+            ...(item.aliases || [])
+          ]
             .filter(Boolean)
             .join("\n")
             .toLowerCase();
@@ -787,7 +818,10 @@ backupForm.addEventListener("submit", async (event) => {
 
 downloadTemplateBtn.addEventListener("click", async () => {
   if (isStaticPreview) {
-    saveBlobToFile(new Blob([templateCsvText], { type: "text/csv;charset=utf-8" }), "wine_price_template.csv");
+    saveBlobToFile(
+      new Blob([templateCsvText], { type: "text/csv;charset=utf-8" }),
+      "wine_master_template.csv"
+    );
     notify("テンプレートCSVをダウンロードしました。");
     return;
   }
@@ -799,7 +833,7 @@ downloadTemplateBtn.addEventListener("click", async () => {
     } catch {
       response = await api.getBlob("/api/ingestion/template");
     }
-    const fileName = extractFileNameFromDisposition(response.disposition, "wine_price_template.csv");
+    const fileName = extractFileNameFromDisposition(response.disposition, "wine_master_template.csv");
     saveBlobToFile(response.blob, fileName);
     notify("テンプレートCSVをダウンロードしました。");
   } catch (error) {
@@ -841,10 +875,15 @@ productForm.addEventListener("submit", async (event) => {
 
   try {
     await api.post("/api/products", {
-      sku: String(formData.get("sku") || "").trim(),
       name: String(formData.get("name") || "").trim(),
-      producer: String(formData.get("producer") || "").trim(),
+      nameEn: String(formData.get("nameEn") || "").trim(),
       vintage: String(formData.get("vintage") || "").trim(),
+      retailPrice: String(formData.get("retailPrice") || "").trim(),
+      purchasePrice: String(formData.get("purchasePrice") || "").trim(),
+      stockQty: String(formData.get("stockQty") || "").trim(),
+      stockStore: String(formData.get("stockStore") || "").trim(),
+      supplierName: String(formData.get("supplierName") || "").trim(),
+      costRate: String(formData.get("costRate") || "").trim(),
       aliases: aliasesRaw ? aliasesRaw.split(",").map((v) => v.trim()) : []
     });
     productForm.reset();

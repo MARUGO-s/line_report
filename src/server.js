@@ -12,6 +12,7 @@ import {
   createStore,
   createIngestionFile,
   dbPath,
+  findCatalogProductsByQuery,
   findCurrentPricesByQuery,
   getIngestionFileByHash,
   getActiveReplyTemplateByKey,
@@ -30,6 +31,7 @@ import {
   resolveStoreId,
   saveLineEvent,
   saveOcrResult,
+  upsertCatalogProduct,
   upsertStoreCsvMapping,
   upsertReplyTemplate
 } from "./db.js";
@@ -316,6 +318,38 @@ const parsePriceValue = (v) => {
   return Math.round(number);
 };
 
+const hasValue = (value) => String(value ?? "").trim() !== "";
+
+const parseIntegerAllowZero = (value) => {
+  if (!hasValue(value)) {
+    return null;
+  }
+  const normalized = String(value).replace(/[,\s]/g, "");
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return Math.round(parsed);
+};
+
+const parseRateValue = (value) => {
+  if (!hasValue(value)) {
+    return null;
+  }
+  const normalized = String(value).replace(/[,\s％%]/g, "");
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return Math.round(parsed * 100) / 100;
+};
+
 const detectCsvDelimiter = (headerLine) => {
   const line = String(headerLine || "");
   const comma = (line.match(/,/g) || []).length;
@@ -374,10 +408,14 @@ const HEADER_MAP = {
   code: "sku",
   商品コード: "sku",
   productname: "product_name",
-  winename: "product_name",
+  winename: "name_en",
+  nameen: "name_en",
+  englishname: "name_en",
   itemname: "product_name",
   商品名: "product_name",
   ワイン名: "product_name",
+  年代: "vintage",
+  vintage: "vintage",
   storeid: "store_id",
   店舗id: "store_id",
   storecode: "store_code",
@@ -393,7 +431,25 @@ const HEADER_MAP = {
   適用日: "effective_date",
   日付: "effective_date",
   currency: "currency",
-  通貨: "currency"
+  通貨: "currency",
+  販売価格: "retail_price",
+  売価: "retail_price",
+  retailprice: "retail_price",
+  salesprice: "retail_price",
+  納品価格: "purchase_price",
+  仕入価格: "purchase_price",
+  purchaseprice: "purchase_price",
+  deliveryprice: "purchase_price",
+  在庫数: "stock_qty",
+  stockqty: "stock_qty",
+  quantity: "stock_qty",
+  在庫店舗: "stock_store",
+  stockstore: "stock_store",
+  納品業者: "supplier_name",
+  supplier: "supplier_name",
+  suppliername: "supplier_name",
+  原価率: "cost_rate",
+  costrate: "cost_rate"
 };
 
 const buildCustomHeaderMap = (headerMapping) => {
@@ -459,10 +515,38 @@ const parseCsvText = (csvText, { headerMapping = null, delimiter: fixedDelimiter
   return { headers, rows };
 };
 
-const buildPriceLines = (rows) =>
+const formatYen = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) {
+    return "不明";
+  }
+  return `${Math.round(num).toLocaleString("ja-JP")}円`;
+};
+
+const buildCurrentPriceLines = (rows) =>
   rows
     .map((row) => `・${row.store_name}: ${Number(row.latest_price).toLocaleString("ja-JP")}円 (${row.effective_date})`)
     .join("\n");
+
+const buildCatalogMatchLines = (rows) =>
+  rows
+    .map((row, index) => {
+      const title =
+        row.name_en && row.name_en !== row.name
+          ? `${row.name} / ${row.name_en}`
+          : row.name || row.name_en || row.sku || "(名称不明)";
+      const blocks = [
+        `【候補${index + 1}】 ${title}`,
+        `年代: ${row.vintage || "不明"}`,
+        `納品価格: ${formatYen(row.purchase_price)}`,
+        `販売価格: ${formatYen(row.retail_price)}`,
+        `納品業者: ${row.supplier_name || "不明"}`,
+        `在庫数: ${row.stock_qty === null || row.stock_qty === undefined ? "不明" : row.stock_qty}`,
+        `在庫店舗: ${row.stock_store || "不明"}`
+      ];
+      return blocks.join("\n");
+    })
+    .join("\n\n");
 
 const buildTextByTemplate = (templateKey, variables, fallbackText) => {
   const template = getActiveReplyTemplateByKey(templateKey);
@@ -474,6 +558,12 @@ const buildTextByTemplate = (templateKey, variables, fallbackText) => {
 
 const ensureDefaultTemplates = () => {
   const existingMap = new Map(listReplyTemplates().map((item) => [item.template_key, item.body]));
+  const priceFoundBodyV1 = "{{product_name}} の最新価格です。\n{{lines}}";
+  const priceFoundBodyV2 = "{{product_name}} の検索結果です。\n{{lines}}";
+  const normalizeTemplateBody = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/\\n/g, "\n");
   const webSummaryBodyV1 =
     "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n※Web参照の要約です。";
   const webSummaryBodyV2 =
@@ -486,7 +576,7 @@ const ensureDefaultTemplates = () => {
     "価格DBには見つかりませんでした。Web情報を要約します。\n産地: {{region}}\n生産者: {{producer}}\n市場価格: {{market_price}}\nセパージュ: {{varieties}}\n味わい: {{taste}}\n特徴: {{features}}\n評価ポイント: {{rating_points}}\n受賞歴: {{awards}}\n飲み頃: {{drinking_window}}\nワイナリーの歴史: {{winery_history}}\n参照ソース: {{sources}}\n検索モード: {{search_mode}}\n参照URL:\n{{source_urls}}\n※Web参照の要約です。";
 
   const defaults = [
-    { key: "price_found", body: "{{product_name}} の最新価格です。\n{{lines}}" },
+    { key: "price_found", body: priceFoundBodyV2 },
     { key: "price_not_found", body: "{{query}} に一致する価格が見つかりませんでした。" },
     { key: "image_received", body: "画像を受け取りました。OCR解析後に価格候補を返します。" },
     {
@@ -521,13 +611,23 @@ const ensureDefaultTemplates = () => {
     }
 
     // Upgrade only known default body so user-customized templates are preserved.
+    if (template.key === "price_found") {
+      if (normalizeTemplateBody(existingBody) === normalizeTemplateBody(priceFoundBodyV1)) {
+        upsertReplyTemplate({
+          templateKey: template.key,
+          body: priceFoundBodyV2,
+          isActive: true
+        });
+      }
+    }
+
     if (template.key === "image_ocr_web_summary") {
-      const trimmed = existingBody.trim();
+      const trimmed = normalizeTemplateBody(existingBody);
       if (
-        trimmed === webSummaryBodyV1.trim() ||
-        trimmed === webSummaryBodyV2.trim() ||
-        trimmed === webSummaryBodyV3.trim() ||
-        trimmed === webSummaryBodyV4.trim()
+        trimmed === normalizeTemplateBody(webSummaryBodyV1) ||
+        trimmed === normalizeTemplateBody(webSummaryBodyV2) ||
+        trimmed === normalizeTemplateBody(webSummaryBodyV3) ||
+        trimmed === normalizeTemplateBody(webSummaryBodyV4)
       ) {
         upsertReplyTemplate({
           templateKey: template.key,
@@ -769,6 +869,23 @@ const requestOcr = async (imageBuffer, contentType = "image/jpeg") => {
 };
 
 const buildSimulatedPriceReply = (query) => {
+  const catalogMatches = findCatalogProductsByQuery(query, 5);
+  if (catalogMatches.length) {
+    const lines = buildCatalogMatchLines(catalogMatches.slice(0, 3));
+    return {
+      message: buildTextByTemplate(
+        "price_found",
+        {
+          query,
+          product_name: catalogMatches[0].name || catalogMatches[0].name_en || query,
+          lines
+        },
+        `${catalogMatches[0].name || catalogMatches[0].name_en || query} の検索結果です。\n${lines}`
+      ),
+      matches: catalogMatches
+    };
+  }
+
   const matches = findCurrentPricesByQuery(query, 3);
   if (!matches.length) {
     return {
@@ -787,9 +904,9 @@ const buildSimulatedPriceReply = (query) => {
       {
         query,
         product_name: matches[0].product_name,
-        lines: buildPriceLines(matches.slice(0, 5))
+        lines: buildCurrentPriceLines(matches.slice(0, 5))
       },
-      `${matches[0].product_name} の最新価格\n${buildPriceLines(matches.slice(0, 5))}`
+      `${matches[0].product_name} の最新価格\n${buildCurrentPriceLines(matches.slice(0, 5))}`
     ),
     matches
   };
@@ -3930,80 +4047,150 @@ const processCsvIngestionRows = ({
 
   for (const rowItem of rows) {
     const { rowNo, row } = rowItem;
-    const rowProductId = resolveProductId({
-      productId: asPositiveInt(row.product_id),
-      sku: row.sku || "",
-      name: row.product_name || ""
-    });
+    const productName = String(row.product_name || "").trim();
+    const nameEn = String(row.name_en || "").trim();
+    const sku = String(row.sku || "").trim();
 
-    if (!rowProductId) {
+    if (!productName && !nameEn && !sku) {
       addIngestionError({
         ingestionFileId,
         rowNo,
-        errorCode: "PRODUCT_NOT_FOUND",
-        errorMessage: "product_id / sku / product_name から商品を特定できません",
+        errorCode: "PRODUCT_NAME_REQUIRED",
+        errorMessage: "ワイン名（ワイン名 or wine_name）が必要です",
         rawPayload: JSON.stringify(row)
       });
       rejectedRows += 1;
       continue;
     }
 
-    const rowStoreId =
-      resolveStoreId({
-        storeId: asPositiveInt(row.store_id),
-        storeCode: row.store_code || "",
-        storeName: row.store_name || ""
-      }) || defaultStoreId;
-
-    if (!rowStoreId) {
+    const retailPrice = hasValue(row.retail_price) ? parsePriceValue(row.retail_price) : null;
+    if (hasValue(row.retail_price) && retailPrice === null) {
       addIngestionError({
         ingestionFileId,
         rowNo,
-        errorCode: "STORE_NOT_FOUND",
-        errorMessage: "store_id / store_code / store_name が不足しています",
+        errorCode: "INVALID_RETAIL_PRICE",
+        errorMessage: "販売価格が不正です",
         rawPayload: JSON.stringify(row)
       });
       rejectedRows += 1;
       continue;
     }
 
-    const price = parsePriceValue(row.price);
-    if (!price) {
+    const purchasePrice = hasValue(row.purchase_price) ? parsePriceValue(row.purchase_price) : null;
+    if (hasValue(row.purchase_price) && purchasePrice === null) {
       addIngestionError({
         ingestionFileId,
         rowNo,
-        errorCode: "INVALID_PRICE",
-        errorMessage: "price が不正です",
+        errorCode: "INVALID_PURCHASE_PRICE",
+        errorMessage: "納品価格が不正です",
         rawPayload: JSON.stringify(row)
       });
       rejectedRows += 1;
       continue;
     }
 
-    const effectiveDate = asDate(row.effective_date) || defaultEffectiveDate;
-    if (!effectiveDate) {
+    const stockQty = hasValue(row.stock_qty) ? parseIntegerAllowZero(row.stock_qty) : null;
+    if (hasValue(row.stock_qty) && stockQty === null) {
       addIngestionError({
         ingestionFileId,
         rowNo,
-        errorCode: "INVALID_EFFECTIVE_DATE",
-        errorMessage: "effective_date が不正です（YYYY-MM-DD）",
+        errorCode: "INVALID_STOCK_QTY",
+        errorMessage: "在庫数が不正です",
         rawPayload: JSON.stringify(row)
       });
       rejectedRows += 1;
       continue;
     }
+
+    const costRate = hasValue(row.cost_rate) ? parseRateValue(row.cost_rate) : null;
+    if (hasValue(row.cost_rate) && costRate === null) {
+      addIngestionError({
+        ingestionFileId,
+        rowNo,
+        errorCode: "INVALID_COST_RATE",
+        errorMessage: "原価率が不正です",
+        rawPayload: JSON.stringify(row)
+      });
+      rejectedRows += 1;
+      continue;
+    }
+
+    const aliasCandidates = [productName, nameEn];
 
     try {
-      addPriceHistory({
-        productId: rowProductId,
-        storeId: rowStoreId,
-        price,
-        effectiveDate,
-        currency: String(row.currency || "JPY").trim() || "JPY",
-        sourceFileId: ingestionFileId,
-        sourceRowNo: rowNo,
-        createdBy: uploadedBy
+      const product = upsertCatalogProduct({
+        sku,
+        name: productName || nameEn || sku,
+        nameEn: nameEn || null,
+        vintage: String(row.vintage || "").trim() || null,
+        retailPrice,
+        purchasePrice,
+        stockQty,
+        stockStore: String(row.stock_store || "").trim() || null,
+        supplierName: String(row.supplier_name || "").trim() || null,
+        costRate,
+        aliases: aliasCandidates
       });
+
+      const hasLegacyPrice = hasValue(row.price);
+      const legacyPrice = hasLegacyPrice ? parsePriceValue(row.price) : null;
+      if (hasLegacyPrice && legacyPrice === null) {
+        addIngestionError({
+          ingestionFileId,
+          rowNo,
+          errorCode: "INVALID_PRICE",
+          errorMessage: "price が不正です",
+          rawPayload: JSON.stringify(row)
+        });
+        rejectedRows += 1;
+        continue;
+      }
+
+      if (legacyPrice) {
+        const rowStoreId =
+          resolveStoreId({
+            storeId: asPositiveInt(row.store_id),
+            storeCode: row.store_code || "",
+            storeName: row.store_name || ""
+          }) || defaultStoreId;
+
+        if (!rowStoreId) {
+          addIngestionError({
+            ingestionFileId,
+            rowNo,
+            errorCode: "STORE_NOT_FOUND",
+            errorMessage: "store_id / store_code / store_name が不足しています",
+            rawPayload: JSON.stringify(row)
+          });
+          rejectedRows += 1;
+          continue;
+        }
+
+        const effectiveDate = asDate(row.effective_date) || defaultEffectiveDate;
+        if (!effectiveDate) {
+          addIngestionError({
+            ingestionFileId,
+            rowNo,
+            errorCode: "INVALID_EFFECTIVE_DATE",
+            errorMessage: "effective_date が不正です（YYYY-MM-DD）",
+            rawPayload: JSON.stringify(row)
+          });
+          rejectedRows += 1;
+          continue;
+        }
+
+        addPriceHistory({
+          productId: product.id,
+          storeId: rowStoreId,
+          price: legacyPrice,
+          effectiveDate,
+          currency: String(row.currency || "JPY").trim() || "JPY",
+          sourceFileId: ingestionFileId,
+          sourceRowNo: rowNo,
+          createdBy: uploadedBy
+        });
+      }
+
       acceptedRows += 1;
     } catch (error) {
       addIngestionError({
@@ -4329,17 +4516,61 @@ app.get("/api/products", (req, res) => {
 
 app.post("/api/products", (req, res) => {
   const name = String(req.body?.name || "").trim();
-  if (!name) {
-    return sendError(res, 400, "name is required");
+  const nameEn = String(req.body?.nameEn || req.body?.name_en || "").trim();
+  if (!name && !nameEn) {
+    return sendError(res, 400, "name or nameEn is required");
+  }
+
+  const retailPrice =
+    hasValue(req.body?.retailPrice) || hasValue(req.body?.retail_price)
+      ? parsePriceValue(req.body?.retailPrice ?? req.body?.retail_price)
+      : null;
+  const purchasePrice =
+    hasValue(req.body?.purchasePrice) || hasValue(req.body?.purchase_price)
+      ? parsePriceValue(req.body?.purchasePrice ?? req.body?.purchase_price)
+      : null;
+  const stockQty =
+    hasValue(req.body?.stockQty) || hasValue(req.body?.stock_qty)
+      ? parseIntegerAllowZero(req.body?.stockQty ?? req.body?.stock_qty)
+      : null;
+  const costRate =
+    hasValue(req.body?.costRate) || hasValue(req.body?.cost_rate)
+      ? parseRateValue(req.body?.costRate ?? req.body?.cost_rate)
+      : null;
+
+  if (
+    (hasValue(req.body?.retailPrice) || hasValue(req.body?.retail_price)) &&
+    retailPrice === null
+  ) {
+    return sendError(res, 400, "retailPrice is invalid");
+  }
+  if (
+    (hasValue(req.body?.purchasePrice) || hasValue(req.body?.purchase_price)) &&
+    purchasePrice === null
+  ) {
+    return sendError(res, 400, "purchasePrice is invalid");
+  }
+  if ((hasValue(req.body?.stockQty) || hasValue(req.body?.stock_qty)) && stockQty === null) {
+    return sendError(res, 400, "stockQty is invalid");
+  }
+  if ((hasValue(req.body?.costRate) || hasValue(req.body?.cost_rate)) && costRate === null) {
+    return sendError(res, 400, "costRate is invalid");
   }
 
   try {
     const product = createProduct({
       sku: String(req.body?.sku || "").trim() || null,
-      name,
+      name: name || nameEn,
+      nameEn: nameEn || null,
       producer: String(req.body?.producer || "").trim() || null,
       vintage: String(req.body?.vintage || "").trim() || null,
       unit: String(req.body?.unit || "").trim() || null,
+      retailPrice,
+      purchasePrice,
+      stockQty,
+      stockStore: String(req.body?.stockStore || req.body?.stock_store || "").trim() || null,
+      supplierName: String(req.body?.supplierName || req.body?.supplier_name || "").trim() || null,
+      costRate,
       aliases: Array.isArray(req.body?.aliases) ? req.body.aliases : []
     });
     res.status(201).json(product);
@@ -4413,20 +4644,20 @@ app.get("/api/ingestion/files", (req, res) => {
 
 const buildIngestionTemplateCsv = () =>
   [
-    "sku,product_name,store_code,price,effective_date,currency",
-    "WINE-0001,Chablis Premier Cru,SHINJUKU,4200,2026-03-15,JPY",
-    "WINE-0002,Sancerre Blanc,GINZA,4980,2026-03-15,JPY"
+    "年代,ワイン名,wine_name,販売価格,納品価格,在庫数,在庫店舗,納品業者,原価率",
+    "2021,マコン・クラシコ,Macan Clasico,6980,4200,24,新宿倉庫,ABCトレーディング,60.2",
+    "2019,シャトー・マルゴー,Chateau Margaux,198000,132000,2,銀座店,XYZインポーター,66.7"
   ].join("\n");
 
 app.get("/template/wine_price_template.csv", (req, res) => {
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader("Content-Disposition", "attachment; filename=\"wine_price_template.csv\"");
+  res.setHeader("Content-Disposition", "attachment; filename=\"wine_master_template.csv\"");
   return res.send(buildIngestionTemplateCsv());
 });
 
 app.get("/api/ingestion/template", (req, res) => {
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader("Content-Disposition", "attachment; filename=\"wine_price_template.csv\"");
+  res.setHeader("Content-Disposition", "attachment; filename=\"wine_master_template.csv\"");
   return res.send(buildIngestionTemplateCsv());
 });
 

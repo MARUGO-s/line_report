@@ -12,9 +12,16 @@ CREATE TABLE IF NOT EXISTS products (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sku TEXT UNIQUE,
   name TEXT NOT NULL,
+  name_en TEXT,
   producer TEXT,
   vintage TEXT,
   unit TEXT,
+  retail_price INTEGER,
+  purchase_price INTEGER,
+  stock_qty INTEGER,
+  stock_store TEXT,
+  supplier_name TEXT,
+  cost_rate REAL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -121,6 +128,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type, cre
 
 INSERT OR IGNORE INTO line_reply_templates(template_key, body, is_active)
 VALUES
-  ('price_found', '{{product_name}} の最新価格です。\n{{lines}}', 1),
+  ('price_found', '{{product_name}} の検索結果です。\n{{lines}}', 1),
   ('price_not_found', '{{query}} に一致する価格が見つかりませんでした。', 1),
   ('image_received', '画像を受け取りました。解析結果を返します。', 1);
