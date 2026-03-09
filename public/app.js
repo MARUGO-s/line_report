@@ -4,6 +4,8 @@ const systemStatusEl = document.getElementById("systemStatus");
 const authForm = document.getElementById("authForm");
 const clearTokenBtn = document.getElementById("clearTokenBtn");
 const authStatusEl = document.getElementById("authStatus");
+const adminTokenRotateForm = document.getElementById("adminTokenRotateForm");
+const adminTokenRotateResult = document.getElementById("adminTokenRotateResult");
 
 const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
 const csvIngestionForm = document.getElementById("csvIngestionForm");
@@ -249,6 +251,12 @@ const resetTemplateForm = () => {
   updateTemplatePreview();
 };
 
+const refreshAdminTokenRotateFormState = () => {
+  const useEnv = adminTokenRotateForm.elements.useEnvToken.checked;
+  adminTokenRotateForm.elements.newAdminToken.disabled = useEnv;
+  adminTokenRotateForm.elements.confirmAdminToken.disabled = useEnv;
+};
+
 const escapeHtml = (value) =>
   String(value || "")
     .replace(/&/g, "&amp;")
@@ -389,7 +397,7 @@ const loadSystem = async () => {
   const result = await api.get("/api/health");
   state.adminAuthRequired = Boolean(result.adminAuthRequired);
   updateAuthStatus();
-  systemStatusEl.textContent = `${result.host}:${result.port} / Auth: ${result.adminAuthRequired ? (state.adminToken ? "ON" : "REQUIRED") : "OFF"} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"}`;
+  systemStatusEl.textContent = `${result.host}:${result.port} / Auth: ${result.adminAuthRequired ? (state.adminToken ? "ON" : "REQUIRED") : "OFF"} / Source: ${result.adminTokenSource || "-"} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"}`;
 };
 
 const loadTemplates = async () => {
@@ -460,6 +468,53 @@ clearTokenBtn.addEventListener("click", () => {
   syncAuthInput();
   updateAuthStatus();
   notify("管理トークンをクリアしました。");
+});
+
+adminTokenRotateForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.isStaticPreview) {
+    notify("静的プレビューではトークン更新できません。", true);
+    return;
+  }
+
+  const formData = new FormData(adminTokenRotateForm);
+  const useEnvToken = formData.get("useEnvToken") === "on";
+  const newAdminToken = String(formData.get("newAdminToken") || "").trim();
+  const confirmAdminToken = String(formData.get("confirmAdminToken") || "").trim();
+
+  if (!useEnvToken) {
+    if (newAdminToken.length < 8) {
+      notify("新しいトークンは8文字以上にしてください。", true);
+      return;
+    }
+    if (newAdminToken !== confirmAdminToken) {
+      notify("確認用トークンが一致しません。", true);
+      return;
+    }
+  }
+
+  try {
+    const result = await api.post("/api/admin/auth-token", {
+      useEnvToken,
+      newAdminToken: useEnvToken ? "" : newAdminToken
+    });
+    adminTokenRotateResult.textContent = JSON.stringify(result, null, 2);
+    if (!useEnvToken) {
+      state.adminToken = newAdminToken;
+      writeStoredAdminToken(newAdminToken);
+      syncAuthInput();
+    }
+    adminTokenRotateForm.reset();
+    await loadSystem();
+    await loadProtectedData();
+    notify(useEnvToken ? "管理認証トークンを環境変数設定へ戻しました。" : "管理認証トークンを更新しました。");
+  } catch (error) {
+    handleOperationError("管理認証トークン更新に失敗", error);
+  }
+});
+
+adminTokenRotateForm.elements.useEnvToken.addEventListener("change", () => {
+  refreshAdminTokenRotateFormState();
 });
 
 downloadTemplateBtn.addEventListener("click", async () => {
@@ -625,6 +680,7 @@ const boot = async () => {
   syncAuthInput();
   renderTemplateKeyShortcuts();
   renderTemplateVariableShortcuts();
+  refreshAdminTokenRotateFormState();
   setTemplateEditMode("");
   updateTemplatePreview();
   updateAuthStatus("接続確認中...");

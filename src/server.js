@@ -17,6 +17,7 @@ import {
   findCatalogProductsByVintage,
   findCurrentPricesByQuery,
   getIngestionFileByHash,
+  getAdminTokenOverride,
   getActiveReplyTemplateByKey,
   getStoreCsvMapping,
   listIngestionErrors,
@@ -34,6 +35,7 @@ import {
   resolveStoreId,
   saveLineEvent,
   saveOcrResult,
+  setAdminTokenOverride,
   upsertCatalogProduct,
   upsertStoreCsvMapping,
   upsertReplyTemplate
@@ -252,7 +254,7 @@ const parseOcrExtraFields = (rawValue) => {
 const ocrExtraFields = parseOcrExtraFields(lineConfig.ocrExtraFields);
 
 const securityConfig = {
-  adminToken: String(process.env.ADMIN_TOKEN || "").trim()
+  envAdminToken: String(process.env.ADMIN_TOKEN || "").trim()
 };
 
 const opsConfig = {
@@ -273,8 +275,41 @@ const extractAdminTokenFromRequest = (req) => {
   return bearer ? String(bearer[1]).trim() : "";
 };
 
+const resolveAdminTokenState = () => {
+  const dbOverrideToken = String(getAdminTokenOverride() || "").trim();
+  if (dbOverrideToken) {
+    return {
+      token: dbOverrideToken,
+      source: "db_override"
+    };
+  }
+
+  const envToken = String(securityConfig.envAdminToken || "").trim();
+  if (envToken) {
+    return {
+      token: envToken,
+      source: "env"
+    };
+  }
+
+  return {
+    token: "",
+    source: "none"
+  };
+};
+
+const isSameAdminToken = (receivedToken, requiredToken) => {
+  const receivedBuffer = Buffer.from(String(receivedToken || ""));
+  const requiredBuffer = Buffer.from(String(requiredToken || ""));
+  if (receivedBuffer.length !== requiredBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(receivedBuffer, requiredBuffer);
+};
+
 const requireAdminAuth = (req, res, next) => {
-  if (!securityConfig.adminToken) {
+  const tokenState = resolveAdminTokenState();
+  if (!tokenState.token) {
     return next();
   }
 
@@ -283,7 +318,7 @@ const requireAdminAuth = (req, res, next) => {
   }
 
   const token = extractAdminTokenFromRequest(req);
-  if (token && token === securityConfig.adminToken) {
+  if (token && isSameAdminToken(token, tokenState.token)) {
     return next();
   }
 
@@ -4758,10 +4793,12 @@ app.get("/", (req, res) => {
 app.get("/api/health", (req, res) => {
   const activeLlmProvider = resolveActiveLlmProvider();
   const activeVisionProvider = resolveActiveVisionProvider();
+  const adminTokenState = resolveAdminTokenState();
   res.json({
     ok: true,
     dbPath,
-    adminAuthRequired: Boolean(securityConfig.adminToken),
+    adminAuthRequired: Boolean(adminTokenState.token),
+    adminTokenSource: adminTokenState.source,
     host: HOST,
     port: PORT,
     lineWebhookReady: Boolean(lineConfig.channelSecret),
@@ -4794,6 +4831,36 @@ app.get("/api/health", (req, res) => {
     groqWineReplyModel: groqWineFlowConfig.replyModel,
     backupRetention: opsConfig.backupRetention
   });
+});
+
+app.post("/api/admin/auth-token", (req, res) => {
+  const useEnvToken = req.body?.useEnvToken === true;
+  const newAdminToken = String(req.body?.newAdminToken || "").trim();
+  if (!useEnvToken) {
+    if (!newAdminToken) {
+      return sendError(res, 400, "newAdminToken is required");
+    }
+    if (newAdminToken.length < 8) {
+      return sendError(res, 400, "newAdminToken must be at least 8 characters");
+    }
+    if (newAdminToken.length > 200) {
+      return sendError(res, 400, "newAdminToken is too long");
+    }
+  }
+
+  try {
+    const result = setAdminTokenOverride(useEnvToken ? "" : newAdminToken);
+    const tokenState = resolveAdminTokenState();
+    return res.json({
+      ok: true,
+      adminAuthRequired: Boolean(tokenState.token),
+      adminTokenSource: tokenState.source,
+      updatedAt: result.updatedAt
+    });
+  } catch (error) {
+    console.error(error);
+    return sendError(res, 500, "failed to update admin token");
+  }
 });
 
 app.get("/api/admin/backups", (req, res) => {

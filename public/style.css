@@ -121,6 +121,17 @@ label {
   color: var(--muted);
 }
 
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
 input,
 textarea,
 button {

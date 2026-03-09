@@ -31,6 +31,14 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_security_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    admin_token TEXT,
+    updated_at TEXT NOT NULL
+  );
+`);
+
 const ensureColumn = (tableName, columnName, columnDefinition) => {
   const columns = db
     .prepare(`PRAGMA table_info(${tableName})`)
@@ -799,6 +807,37 @@ const getActiveTemplateByKeyStmt = db.prepare(
 
 export const getActiveReplyTemplateByKey = (templateKey) =>
   getActiveTemplateByKeyStmt.get(String(templateKey).trim());
+
+const getSecuritySettingsStmt = db.prepare(
+  "SELECT id, admin_token, updated_at FROM app_security_settings WHERE id = 1"
+);
+
+const upsertSecuritySettingsStmt = db.prepare(`
+  INSERT INTO app_security_settings (id, admin_token, updated_at)
+  VALUES (1, @admin_token, @updated_at)
+  ON CONFLICT(id) DO UPDATE SET
+    admin_token = excluded.admin_token,
+    updated_at = excluded.updated_at
+`);
+
+export const getAdminTokenOverride = () => {
+  const row = getSecuritySettingsStmt.get();
+  const token = toNullableText(row?.admin_token);
+  return token || null;
+};
+
+export const setAdminTokenOverride = (value) => {
+  const normalized = toNullableText(value);
+  upsertSecuritySettingsStmt.run({
+    admin_token: normalized,
+    updated_at: nowIso()
+  });
+  const row = getSecuritySettingsStmt.get();
+  return {
+    hasAdminToken: Boolean(toNullableText(row?.admin_token)),
+    updatedAt: row?.updated_at || nowIso()
+  };
+};
 
 export const renderTemplate = (body, variables) =>
   String(body).replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_, key) => {

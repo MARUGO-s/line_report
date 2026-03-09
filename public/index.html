@@ -28,6 +28,26 @@
           <button id="clearTokenBtn" type="button">クリア</button>
         </form>
         <p id="authStatus" class="sub">認証状態を確認中...</p>
+
+        <div class="helper-block top-gap">
+          <p class="helper-title">管理認証トークンを変更</p>
+          <form id="adminTokenRotateForm" class="stack">
+            <label>
+              新しいトークン
+              <input name="newAdminToken" type="password" placeholder="8文字以上" />
+            </label>
+            <label>
+              新しいトークン（確認）
+              <input name="confirmAdminToken" type="password" placeholder="同じ値を再入力" />
+            </label>
+            <label class="inline-check">
+              <input name="useEnvToken" type="checkbox" />
+              DB上書きを解除して環境変数のトークンに戻す
+            </label>
+            <button type="submit">トークンを更新</button>
+          </form>
+          <pre id="adminTokenRotateResult" class="result">ここに更新結果が表示されます。</pre>
+        </div>
       </section>
 
       <section class="panel">
