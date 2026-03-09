@@ -535,9 +535,27 @@ const formatCatalogTitle = (row) =>
     ? `${row.name || "(名称不明)"} / ${row.name_en}`
     : row.name || row.name_en || row.sku || "(名称不明)";
 
+const formatCatalogPrimaryName = (row) => row.name || row.name_en || row.sku || "(名称不明)";
+
+const formatCatalogSecondaryName = (row) => {
+  const nameEn = String(row.name_en || "").trim();
+  const producer = String(row.producer || "").trim();
+  if (nameEn && producer) {
+    return `${nameEn} (${producer})`;
+  }
+  if (nameEn) {
+    return nameEn;
+  }
+  if (producer) {
+    return producer;
+  }
+  return "";
+};
+
 const buildCatalogDetailLines = (row) =>
   [
     `ワイン名: ${formatCatalogTitle(row)}`,
+    `生産者: ${row.producer || "不明"}`,
     `年代: ${row.vintage || "不明"}`,
     `納品価格: ${formatYen(row.purchase_price)}`,
     `販売価格: ${formatYen(row.retail_price)}`,
@@ -546,10 +564,16 @@ const buildCatalogDetailLines = (row) =>
     `在庫店舗: ${row.stock_store || "不明"}`
   ].join("\n");
 
-const buildCatalogChoiceLine = (row, index) =>
-  `第${index + 1}候補 (${index + 1}) ${formatCatalogTitle(row)}\n  年代: ${
-    row.vintage || "不明"
-  } / 販売価格: ${formatYen(row.retail_price)} / 納品価格: ${formatYen(row.purchase_price)}`;
+const buildCatalogChoiceLine = (row, index) => {
+  const headline = row.vintage
+    ? `${index + 1}. ${formatCatalogPrimaryName(row)} ${row.vintage}`
+    : `${index + 1}. ${formatCatalogPrimaryName(row)}`;
+  const subline = formatCatalogSecondaryName(row);
+  if (!subline) {
+    return headline;
+  }
+  return `${headline}\n   ${subline}`;
+};
 
 const toKatakana = (value) =>
   String(value || "").replace(/[\u3041-\u3096]/g, (ch) =>
@@ -672,7 +696,7 @@ const buildNumberedCandidatesMessage = ({ header, matches }) => {
   const blocks = [];
   for (let i = 0; i < matches.length; i += 1) {
     const block = buildCatalogChoiceLine(matches[i], i);
-    const nextBody = blocks.concat(block).join("\n");
+    const nextBody = blocks.concat(block).join("\n\n");
     const preview = [normalizedHeader, nextBody, footer].join("\n\n");
     if (preview.length > maxChars) {
       break;
@@ -685,7 +709,7 @@ const buildNumberedCandidatesMessage = ({ header, matches }) => {
     ? `表示上限のため ${matches.length} 件中 ${blocks.length} 件を表示しています。絞り込み語を追加してください。`
     : "";
 
-  return [normalizedHeader, blocks.join("\n"), notice, footer].filter(Boolean).join("\n\n");
+  return [normalizedHeader, blocks.join("\n\n"), notice, footer].filter(Boolean).join("\n\n");
 };
 
 const buildCatalogCandidatesMessage = (query, matches) =>
@@ -4595,7 +4619,7 @@ const processTextEvent = async (event, canReply) => {
       if (selectedNumber >= 1 && selectedNumber <= selection.matches.length) {
         const selected = selection.matches[selectedNumber - 1];
         const detail = [
-          `${selection.query} の第${selectedNumber}候補です。`,
+          `${selection.query} の ${selectedNumber}. を表示します。`,
           buildCatalogDetailLines(selected)
         ].join("\n\n");
         await sendLineReply(event.replyToken, detail);
