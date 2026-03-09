@@ -118,6 +118,13 @@ const llmConfig = {
   })()
 };
 
+const visionLlmConfig = {
+  provider: (() => {
+    const raw = String(process.env.VISION_PROVIDER || "groq").trim().toLowerCase();
+    return ["auto", "groq", "gemini"].includes(raw) ? raw : "groq";
+  })()
+};
+
 const groqConfig = {
   apiKey: String(process.env.GROQ_API_KEY || "").trim(),
   model: String(process.env.GROQ_MODEL || "llama-3.1-8b-instant").trim(),
@@ -184,6 +191,22 @@ const resolveActiveLlmProvider = () => {
   }
   if (groqConfig.apiKey) {
     return "groq";
+  }
+  return null;
+};
+
+const resolveActiveVisionProvider = () => {
+  if (visionLlmConfig.provider === "gemini") {
+    return geminiConfig.apiKey ? "gemini" : null;
+  }
+  if (visionLlmConfig.provider === "groq") {
+    return groqConfig.apiKey ? "groq" : null;
+  }
+  if (groqConfig.apiKey) {
+    return "groq";
+  }
+  if (geminiConfig.apiKey) {
+    return "gemini";
   }
   return null;
 };
@@ -2759,7 +2782,8 @@ const requestGroqWineAnalysisFromImage = async ({
     return null;
   }
   const flowConfig = provider === "gemini" ? geminiWineFlowConfig : groqWineFlowConfig;
-  const maxImageBytes = provider === "gemini" ? geminiVisionConfig.maxImageBytes : groqVisionConfig.maxImageBytes;
+  const includeImageInput = provider === "groq";
+  const maxImageBytes = groqVisionConfig.maxImageBytes;
 
   const fallback = buildWineAnalysisFallback({
     query,
@@ -2784,7 +2808,7 @@ const requestGroqWineAnalysisFromImage = async ({
     "You are a wine research analyst. Read label clues, then use provided web evidence only. Return strict JSON only. Do not add keys outside the requested shape. Unknown fields must be null. Include winery_history as a brief factual note when evidence exists. Include critic_scores (e.g., Robert Parker/WA, James Suckling, WS, WE) and awards when evidence exists. For critic_scores and awards, include year when available. For grape percentages, use percentages only when explicitly shown in evidence; never guess split ratios; never output 0%.";
 
   let imagePart = null;
-  if (imageBuffer && imageBuffer.length > 0 && imageBuffer.length <= maxImageBytes) {
+  if (includeImageInput && imageBuffer && imageBuffer.length > 0 && imageBuffer.length <= maxImageBytes) {
     const mimeType = asGroqVisionContentType(contentType);
     if (mimeType) {
       imagePart = {
@@ -2801,7 +2825,6 @@ const requestGroqWineAnalysisFromImage = async ({
         model: flowConfig.analysisModel,
         systemPrompt,
         userPrompt: promptText,
-        imagePart,
         temperature: 0.1,
         maxOutputTokens: 900,
         timeoutMs: flowConfig.timeoutMs
@@ -3639,7 +3662,7 @@ const asGroqVisionContentType = (contentType) => {
 };
 
 const requestGroqVisionSuggestions = async ({ imageBuffer, contentType, ocrHint = "" }) => {
-  const provider = resolveActiveLlmProvider();
+  const provider = resolveActiveVisionProvider();
   const visionEnabled = provider === "gemini" ? geminiVisionConfig.enabled : groqVisionConfig.enabled;
   if (!provider || !visionEnabled) {
     return [];
@@ -4419,6 +4442,7 @@ app.get("/", (req, res) => {
 
 app.get("/api/health", (req, res) => {
   const activeLlmProvider = resolveActiveLlmProvider();
+  const activeVisionProvider = resolveActiveVisionProvider();
   res.json({
     ok: true,
     dbPath,
@@ -4438,6 +4462,8 @@ app.get("/api/health", (req, res) => {
     serpApiConfigured: Boolean(webSearchConfig.serpApiKey),
     llmProviderPreference: llmConfig.provider,
     llmProviderActive: activeLlmProvider || "none",
+    visionProviderPreference: visionLlmConfig.provider,
+    visionProviderActive: activeVisionProvider || "none",
     geminiConfigured: Boolean(geminiConfig.apiKey),
     geminiModel: geminiConfig.model,
     geminiVisionEnabled: Boolean(geminiConfig.apiKey) && geminiVisionConfig.enabled,

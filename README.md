@@ -46,6 +46,7 @@ WEB_SEARCH_SERPAPI_HL=ja
 WEB_SEARCH_SERPAPI_GL=jp
 WEB_SEARCH_SERPAPI_NUM=5
 LLM_PROVIDER=auto
+VISION_PROVIDER=groq
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.0-flash-lite
 GEMINI_TIMEOUT_MS=5000
@@ -135,6 +136,7 @@ WEB_SEARCH_SERPAPI_HL=ja
 WEB_SEARCH_SERPAPI_GL=jp
 WEB_SEARCH_SERPAPI_NUM=5
 LLM_PROVIDER=auto
+VISION_PROVIDER=groq
 GEMINI_API_KEY=<Renderの秘密環境変数>
 GEMINI_MODEL=gemini-2.0-flash-lite
 GEMINI_TIMEOUT_MS=5000
@@ -170,9 +172,10 @@ GROQ_VISION_MAX_IMAGE_BYTES=3500000
 - 3サイトでヒットしない場合のみ、通常のWeb検索（SerpAPI全体検索 / Wikipedia / DuckDuckGo）へフォールバックします。
 - `WEB_SUMMARY_MAX_SOURCES` は要約時に参照するWebソース数です。市場価格/セパージュ/味わい/特徴/評価ポイント/受賞歴/飲み頃/ワイナリー歴史の抽出率を上げたい場合は `6-8` を推奨します。
 - `WEB_SEARCH_PROVIDER=serpapi` で SerpAPI のみ、`WEB_SEARCH_PROVIDER=free` で無料ソースのみを使います。
-- `LLM_PROVIDER=auto` では Gemini APIキーがあれば Gemini を優先し、未設定なら Groq を使います。固定する場合は `gemini` か `groq` を指定します。
+- `LLM_PROVIDER=auto` では Gemini APIキーがあれば Gemini を優先し、未設定なら Groq を使います。固定する場合は `gemini` か `groq` を指定します（Web要約/解析のLLM）。
+- `VISION_PROVIDER=groq` で、画像候補抽出（ラベル画像入力）は Groq を優先します。`auto` の場合は `groq -> gemini` の順で利用します。
 - Gemini最小コスト運用は `GEMINI_MODEL=gemini-2.0-flash-lite` を推奨します。
-- `GEMINI_API_KEY` を設定すると、OCR誤字補正・画像候補抽出・Web要約・LINE返信を Gemini で実行できます。
+- `GEMINI_API_KEY` を設定すると、OCR誤字補正・Web要約・LINE返信を Gemini で実行できます。
 - `GROQ_API_KEY` を設定すると、OCR誤字を補正した候補名を先に生成してから Web 検索します。
 - `GROQ_VISION_ENABLED=true` で、画像から Groq Vision 候補名を抽出して DB照合精度を上げます。
 - `GROQ_WINE_FLOW_ENABLED=true` で、DB未一致時に「画像+Web根拠」から構造化JSONを作成し、LINE向けに再要約して返信します。
