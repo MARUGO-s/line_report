@@ -12,7 +12,9 @@ import {
   createStore,
   createIngestionFile,
   dbPath,
+  findCatalogProductsByPriceRange,
   findCatalogProductsByQuery,
+  findCatalogProductsByVintage,
   findCurrentPricesByQuery,
   getIngestionFileByHash,
   getActiveReplyTemplateByKey,
@@ -603,8 +605,67 @@ const searchCatalogMatchesByQuery = (query, limit = 20) => {
   return [...merged.values()];
 };
 
-const buildCatalogCandidatesMessage = (query, matches) => {
-  const header = `${query} に一致する候補が ${matches.length} 件見つかりました。`;
+const parseYearSearchQuery = (query) => {
+  const normalized = String(query || "").normalize("NFKC").trim();
+  const matched = normalized.match(/^((?:19|20)\d{2})(?:年)?$/);
+  return matched ? matched[1] : null;
+};
+
+const parsePriceSearchQuery = (query) => {
+  const normalized = String(query || "").normalize("NFKC").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const hasYen = /円/.test(normalized);
+  const hasPriceKeyword = /(売り?値|売価|販売価格|仕入れ?値|仕入価格|納品価格|原価|価格|retail|purchase|cost|buy)/i.test(
+    normalized
+  );
+  if (!hasYen && !hasPriceKeyword) {
+    return null;
+  }
+
+  const numberMatched = normalized.match(/([0-9][0-9,]*)/);
+  if (!numberMatched) {
+    return null;
+  }
+
+  const targetPrice = Number(String(numberMatched[1] || "").replace(/,/g, ""));
+  if (!Number.isFinite(targetPrice) || targetPrice <= 0) {
+    return null;
+  }
+
+  const hasRetailKeyword = /(売り?値|売価|販売価格|retail|sell)/i.test(normalized);
+  const hasPurchaseKeyword = /(仕入れ?値|仕入価格|納品価格|原価|purchase|cost|buy)/i.test(normalized);
+  let priceType = "both";
+  if (hasRetailKeyword && !hasPurchaseKeyword) {
+    priceType = "retail";
+  } else if (hasPurchaseKeyword && !hasRetailKeyword) {
+    priceType = "purchase";
+  }
+
+  const minPrice = Math.max(1, Math.floor(targetPrice * 0.7));
+  const maxPrice = Math.ceil(targetPrice * 1.3);
+  return {
+    targetPrice,
+    minPrice,
+    maxPrice,
+    priceType
+  };
+};
+
+const toPriceTypeLabel = (priceType) => {
+  if (priceType === "retail") {
+    return "販売価格";
+  }
+  if (priceType === "purchase") {
+    return "納品価格";
+  }
+  return "販売価格/納品価格";
+};
+
+const buildNumberedCandidatesMessage = ({ header, matches }) => {
+  const normalizedHeader = String(header || "").trim() || "候補一覧";
   const footer = "番号だけ送ってください（例: 1）。";
   const maxChars = 4500;
 
@@ -612,7 +673,7 @@ const buildCatalogCandidatesMessage = (query, matches) => {
   for (let i = 0; i < matches.length; i += 1) {
     const block = buildCatalogChoiceLine(matches[i], i);
     const nextBody = blocks.concat(block).join("\n");
-    const preview = [header, nextBody, footer].join("\n\n");
+    const preview = [normalizedHeader, nextBody, footer].join("\n\n");
     if (preview.length > maxChars) {
       break;
     }
@@ -624,8 +685,30 @@ const buildCatalogCandidatesMessage = (query, matches) => {
     ? `表示上限のため ${matches.length} 件中 ${blocks.length} 件を表示しています。絞り込み語を追加してください。`
     : "";
 
-  return [header, blocks.join("\n"), notice, footer].filter(Boolean).join("\n\n");
+  return [normalizedHeader, blocks.join("\n"), notice, footer].filter(Boolean).join("\n\n");
 };
+
+const buildCatalogCandidatesMessage = (query, matches) =>
+  buildNumberedCandidatesMessage({
+    header: `${query} に一致する候補が ${matches.length} 件見つかりました。`,
+    matches
+  });
+
+const buildVintageCandidatesMessage = (vintage, matches) =>
+  buildNumberedCandidatesMessage({
+    header: `${vintage}年のワイン候補が ${matches.length} 件見つかりました。`,
+    matches
+  });
+
+const buildPriceCandidatesMessage = (priceSearch, matches) =>
+  buildNumberedCandidatesMessage({
+    header: `${toPriceTypeLabel(priceSearch.priceType)}で ${priceSearch.targetPrice.toLocaleString(
+      "ja-JP"
+    )}円（±30%: ${priceSearch.minPrice.toLocaleString("ja-JP")}〜${priceSearch.maxPrice.toLocaleString(
+      "ja-JP"
+    )}円）の候補が ${matches.length} 件見つかりました。`,
+    matches
+  });
 
 const buildTextByTemplate = (templateKey, variables, fallbackText) => {
   const template = getActiveReplyTemplateByKey(templateKey);
@@ -948,6 +1031,67 @@ const requestOcr = async (imageBuffer, contentType = "image/jpeg") => {
 };
 
 const buildSimulatedPriceReply = (query) => {
+  const vintageSearch = parseYearSearchQuery(query);
+  if (vintageSearch) {
+    const vintageMatches = findCatalogProductsByVintage(vintageSearch, 50);
+    if (vintageMatches.length > 1) {
+      return {
+        message: buildVintageCandidatesMessage(vintageSearch, vintageMatches),
+        matches: vintageMatches,
+        requiresSelection: true
+      };
+    }
+    if (vintageMatches.length === 1) {
+      const lines = buildCatalogDetailLines(vintageMatches[0]);
+      return {
+        message: `${vintageSearch}年の検索結果です。\n${lines}`,
+        matches: vintageMatches,
+        requiresSelection: false
+      };
+    }
+    return {
+      message: `${vintageSearch}年に一致するワインが見つかりませんでした。`,
+      matches: [],
+      requiresSelection: false
+    };
+  }
+
+  const priceSearch = parsePriceSearchQuery(query);
+  if (priceSearch) {
+    const priceMatches = findCatalogProductsByPriceRange({
+      targetPrice: priceSearch.targetPrice,
+      minPrice: priceSearch.minPrice,
+      maxPrice: priceSearch.maxPrice,
+      priceType: priceSearch.priceType,
+      limit: 50
+    });
+
+    if (priceMatches.length > 1) {
+      return {
+        message: buildPriceCandidatesMessage(priceSearch, priceMatches),
+        matches: priceMatches,
+        requiresSelection: true
+      };
+    }
+    if (priceMatches.length === 1) {
+      const lines = buildCatalogDetailLines(priceMatches[0]);
+      return {
+        message: `${toPriceTypeLabel(priceSearch.priceType)} ${priceSearch.targetPrice.toLocaleString(
+          "ja-JP"
+        )}円（±30%）の検索結果です。\n${lines}`,
+        matches: priceMatches,
+        requiresSelection: false
+      };
+    }
+    return {
+      message: `${toPriceTypeLabel(priceSearch.priceType)} ${priceSearch.targetPrice.toLocaleString(
+        "ja-JP"
+      )}円（±30%）に一致するワインが見つかりませんでした。`,
+      matches: [],
+      requiresSelection: false
+    };
+  }
+
   const catalogMatches = searchCatalogMatchesByQuery(query, 20);
   if (catalogMatches.length === 1) {
     const lines = buildCatalogDetailLines(catalogMatches[0]);

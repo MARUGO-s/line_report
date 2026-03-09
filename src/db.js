@@ -298,28 +298,35 @@ export const createProduct = (payload) => {
 const findCatalogProductByIdentityStmt = db.prepare(`
   SELECT p.id
   FROM products p
-  LEFT JOIN product_aliases pa ON pa.product_id = p.id
   WHERE (
     @sku IS NOT NULL
     AND @sku <> ''
     AND IFNULL(p.sku, '') = @sku
   )
   OR (
-    @name IS NOT NULL
-    AND @name <> ''
+    (@sku IS NULL OR @sku = '')
     AND (
-      p.name = @name
-      OR IFNULL(p.name_en, '') = @name
-      OR pa.alias = @name
+      (
+        @name IS NOT NULL
+        AND @name <> ''
+        AND (p.name = @name OR IFNULL(p.name_en, '') = @name)
+      )
+      OR (
+        @name_en IS NOT NULL
+        AND @name_en <> ''
+        AND (p.name = @name_en OR IFNULL(p.name_en, '') = @name_en)
+      )
     )
-  )
-  OR (
-    @name_en IS NOT NULL
-    AND @name_en <> ''
     AND (
-      p.name = @name_en
-      OR IFNULL(p.name_en, '') = @name_en
-      OR pa.alias = @name_en
+      (
+        @vintage IS NOT NULL
+        AND @vintage <> ''
+        AND IFNULL(p.vintage, '') = @vintage
+      )
+      OR (
+        (@vintage IS NULL OR @vintage = '')
+        AND IFNULL(p.vintage, '') = ''
+      )
     )
   )
   ORDER BY p.updated_at DESC
@@ -336,7 +343,8 @@ const upsertCatalogProductTx = db.transaction((payload) => {
   const existing = findCatalogProductByIdentityStmt.get({
     sku: normalized.sku,
     name: normalized.name || lookupName,
-    name_en: normalized.name_en || lookupName
+    name_en: normalized.name_en || lookupName,
+    vintage: normalized.vintage || ""
   });
 
   if (!existing) {
@@ -580,6 +588,43 @@ const searchCatalogProductsStmt = db.prepare(`
   LIMIT @limit
 `);
 
+const searchCatalogByVintageStmt = db.prepare(`
+  SELECT
+    p.id, p.sku, p.name, p.name_en, p.producer, p.vintage, p.unit,
+    p.retail_price, p.purchase_price, p.stock_qty, p.stock_store, p.supplier_name, p.cost_rate,
+    p.created_at, p.updated_at
+  FROM products p
+  WHERE IFNULL(TRIM(p.vintage), '') = @vintage
+  ORDER BY p.updated_at DESC
+  LIMIT @limit
+`);
+
+const searchCatalogByPriceRangeStmt = db.prepare(`
+  SELECT
+    p.id, p.sku, p.name, p.name_en, p.producer, p.vintage, p.unit,
+    p.retail_price, p.purchase_price, p.stock_qty, p.stock_store, p.supplier_name, p.cost_rate,
+    p.created_at, p.updated_at
+  FROM products p
+  WHERE (
+    (@priceType = 'retail' AND p.retail_price IS NOT NULL AND p.retail_price BETWEEN @minPrice AND @maxPrice)
+    OR (@priceType = 'purchase' AND p.purchase_price IS NOT NULL AND p.purchase_price BETWEEN @minPrice AND @maxPrice)
+    OR (
+      @priceType = 'both'
+      AND (
+        (p.retail_price IS NOT NULL AND p.retail_price BETWEEN @minPrice AND @maxPrice)
+        OR (p.purchase_price IS NOT NULL AND p.purchase_price BETWEEN @minPrice AND @maxPrice)
+      )
+    )
+  )
+  ORDER BY p.updated_at DESC
+  LIMIT @scanLimit
+`);
+
+const attachAliases = (row) => ({
+  ...row,
+  aliases: readAliasesStmt.all(row.id).map((v) => v.alias)
+});
+
 export const findCatalogProductsByQuery = (query, limit = 50) => {
   const q = String(query).trim();
   if (!q) {
@@ -590,12 +635,91 @@ export const findCatalogProductsByQuery = (query, limit = 50) => {
       like: `%${q}%`,
       exact: q,
       prefix: `${q}%`,
-      limit: Number(limit) || 5
+      limit: Number(limit) || 50
     })
-    .map((row) => ({
-      ...row,
-      aliases: readAliasesStmt.all(row.id).map((v) => v.alias)
-    }));
+    .map((row) => attachAliases(row));
+};
+
+export const findCatalogProductsByVintage = (vintage, limit = 50) => {
+  const normalized = String(vintage || "").trim();
+  if (!normalized) {
+    return [];
+  }
+  return searchCatalogByVintageStmt
+    .all({
+      vintage: normalized,
+      limit: Number(limit) || 50
+    })
+    .map((row) => attachAliases(row));
+};
+
+const getPriceDistance = (row, targetPrice, priceType) => {
+  const target = Number(targetPrice);
+  if (!Number.isFinite(target) || target <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const retail = row.retail_price === null || row.retail_price === undefined
+    ? null
+    : Math.abs(Number(row.retail_price) - target);
+  const purchase = row.purchase_price === null || row.purchase_price === undefined
+    ? null
+    : Math.abs(Number(row.purchase_price) - target);
+
+  if (priceType === "retail") {
+    return retail === null ? Number.POSITIVE_INFINITY : retail;
+  }
+  if (priceType === "purchase") {
+    return purchase === null ? Number.POSITIVE_INFINITY : purchase;
+  }
+  if (retail === null && purchase === null) {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (retail === null) {
+    return purchase;
+  }
+  if (purchase === null) {
+    return retail;
+  }
+  return Math.min(retail, purchase);
+};
+
+export const findCatalogProductsByPriceRange = ({
+  targetPrice,
+  minPrice,
+  maxPrice,
+  priceType = "both",
+  limit = 50
+} = {}) => {
+  const target = Number(targetPrice);
+  const min = Number(minPrice);
+  const max = Number(maxPrice);
+  const normalizedType = ["retail", "purchase", "both"].includes(String(priceType))
+    ? String(priceType)
+    : "both";
+
+  if (!Number.isFinite(target) || !Number.isFinite(min) || !Number.isFinite(max)) {
+    return [];
+  }
+  if (target <= 0 || min <= 0 || max <= 0 || min > max) {
+    return [];
+  }
+
+  const scanLimit = Math.max(Number(limit) || 50, 50) * 5;
+  return searchCatalogByPriceRangeStmt
+    .all({
+      priceType: normalizedType,
+      minPrice: Math.round(min),
+      maxPrice: Math.round(max),
+      scanLimit
+    })
+    .sort(
+      (a, b) =>
+        getPriceDistance(a, target, normalizedType) - getPriceDistance(b, target, normalizedType) ||
+        String(b.updated_at || "").localeCompare(String(a.updated_at || ""))
+    )
+    .slice(0, Math.max(Number(limit) || 50, 1))
+    .map((row) => attachAliases(row));
 };
 
 const listReplyTemplatesStmt = db.prepare(`
