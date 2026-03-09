@@ -10,225 +10,39 @@
     <div class="bg-shape bg-1"></div>
     <div class="bg-shape bg-2"></div>
 
-    <main class="shell">
+    <main class="shell shell-narrow">
       <header class="header">
         <div>
           <p class="eyebrow">WINE PRICE DB</p>
           <h1>管理コンソール</h1>
-          <p class="sub">店舗、商品、価格、LINE返信テンプレートを管理します。</p>
+          <p class="sub">CSVアップロードとLINE返信テンプレート管理のみを行います。</p>
         </div>
         <div class="status" id="systemStatus">読み込み中...</div>
       </header>
 
-      <section class="grid two-col">
-        <article class="panel">
-          <h2>管理認証</h2>
-          <form id="authForm" class="toolbar">
-            <input name="adminToken" type="password" placeholder="ADMIN_TOKEN を入力" />
-            <button type="submit">保存</button>
-            <button id="clearTokenBtn" type="button">クリア</button>
-          </form>
-          <p id="authStatus" class="sub">認証状態を確認中...</p>
-        </article>
-
-        <article class="panel">
-          <h2>バックアップ</h2>
-          <form id="backupForm" class="toolbar">
-            <input name="reason" placeholder="backup reason (例: before_release)" />
-            <button type="submit">今すぐバックアップ</button>
-          </form>
-          <div class="table-wrap compact">
-            <table>
-              <thead>
-                <tr>
-                  <th>ファイル</th>
-                  <th>サイズ</th>
-                  <th>作成日時</th>
-                </tr>
-              </thead>
-              <tbody id="backupsTable"></tbody>
-            </table>
-          </div>
-          <pre id="backupResult" class="result">バックアップ実行結果を表示します。</pre>
-        </article>
+      <section class="panel">
+        <h2>管理認証</h2>
+        <form id="authForm" class="toolbar">
+          <input name="adminToken" type="password" placeholder="ADMIN_TOKEN を入力" />
+          <button type="submit">保存</button>
+          <button id="clearTokenBtn" type="button">クリア</button>
+        </form>
+        <p id="authStatus" class="sub">認証状態を確認中...</p>
       </section>
 
-      <section class="grid two-col">
-        <article class="panel">
-          <h2>店舗登録</h2>
-          <form id="storeForm" class="stack">
-            <label>
-              店舗コード *
-              <input name="storeCode" required placeholder="例: SHINJUKU" />
-            </label>
-            <label>
-              店舗名 *
-              <input name="name" required placeholder="例: 新宿店" />
-            </label>
-            <button type="submit">店舗を保存</button>
-          </form>
+      <section class="panel">
+        <h2>CSV取り込み</h2>
+        <p class="sub">商品・価格データはCSVアップロードで一括更新します。</p>
+        <div class="panel-actions">
+          <button id="downloadTemplateBtn" type="button">テンプレートCSVをダウンロード</button>
+        </div>
 
-          <div class="table-wrap compact">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>店舗コード</th>
-                  <th>店舗名</th>
-                </tr>
-              </thead>
-              <tbody id="storesTable"></tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="panel">
-          <h2>商品登録</h2>
-          <form id="productForm" class="stack">
-            <label>
-              ワイン名 *
-              <input name="name" required placeholder="例: シャトー・マルゴー" />
-            </label>
-            <label>
-              wine_name（英字）
-              <input name="nameEn" placeholder="例: Chateau Margaux" />
-            </label>
-            <label>
-              年代
-              <input name="vintage" placeholder="例: 2021" />
-            </label>
-            <label>
-              販売価格(円)
-              <input name="retailPrice" inputmode="numeric" placeholder="例: 6980" />
-            </label>
-            <label>
-              納品価格(円)
-              <input name="purchasePrice" inputmode="numeric" placeholder="例: 4200" />
-            </label>
-            <label>
-              在庫数
-              <input name="stockQty" inputmode="numeric" placeholder="例: 24" />
-            </label>
-            <label>
-              在庫店舗
-              <input name="stockStore" placeholder="例: 新宿倉庫" />
-            </label>
-            <label>
-              納品業者
-              <input name="supplierName" placeholder="例: ABCトレーディング" />
-            </label>
-            <label>
-              原価率(%)
-              <input name="costRate" inputmode="decimal" placeholder="例: 60.2" />
-            </label>
-            <label>
-              別名(カンマ区切り)
-              <input name="aliases" placeholder="例: マルゴー, Margaux" />
-            </label>
-            <button type="submit">商品を保存</button>
-          </form>
-
-          <div class="toolbar">
-            <input id="productSearch" placeholder="商品検索" />
-            <button id="refreshProducts" type="button">再読込</button>
-          </div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>商品名</th>
-                  <th>wine_name</th>
-                  <th>納品価格</th>
-                  <th>販売価格</th>
-                  <th>納品業者</th>
-                  <th>在庫</th>
-                </tr>
-              </thead>
-              <tbody id="productsTable"></tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-
-      <section class="grid two-col">
-        <article class="panel">
-          <h2>価格登録</h2>
-          <form id="priceForm" class="stack">
-            <label>
-              商品ID *
-              <input name="productId" required inputmode="numeric" placeholder="例: 1" />
-            </label>
-            <label>
-              店舗ID *
-              <input name="storeId" required inputmode="numeric" placeholder="例: 1" />
-            </label>
-            <label>
-              価格(円) *
-              <input name="price" required inputmode="numeric" placeholder="例: 3980" />
-            </label>
-            <label>
-              適用日 *
-              <input name="effectiveDate" type="date" required />
-            </label>
-            <button type="submit">価格を保存</button>
-          </form>
-
-          <div class="table-wrap compact">
-            <table>
-              <thead>
-                <tr>
-                  <th>商品</th>
-                  <th>店舗</th>
-                  <th>最新価格</th>
-                  <th>適用日</th>
-                </tr>
-              </thead>
-              <tbody id="currentPricesTable"></tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="panel">
-          <h2>LINE返信テンプレート</h2>
-          <form id="templateForm" class="stack">
-            <label>
-              キー *
-              <input name="templateKey" required placeholder="例: price_found" />
-            </label>
-            <label>
-              本文 *
-              <textarea name="body" required rows="5" placeholder="{{product_name}} の最新価格です。\n{{lines}}"></textarea>
-            </label>
-            <button type="submit">テンプレートを保存</button>
-          </form>
-
-          <div class="table-wrap compact">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>キー</th>
-                  <th>有効</th>
-                  <th>更新日時</th>
-                </tr>
-              </thead>
-              <tbody id="templatesTable"></tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-
-      <section class="grid two-col">
-        <article class="panel">
-          <h2>CSV取り込み</h2>
-          <p><button id="downloadTemplateBtn" type="button">テンプレートCSVをダウンロード</button></p>
-          <form id="csvIngestionForm" class="stack">
-            <label>
-              CSVファイル *
-              <input name="csvFile" type="file" accept=".csv,text/csv" required />
-            </label>
+        <form id="csvIngestionForm" class="stack top-gap">
+          <label>
+            CSVファイル *
+            <input name="csvFile" type="file" accept=".csv,text/csv" required />
+          </label>
+          <div class="split">
             <label>
               店舗ID（任意）
               <input name="storeId" inputmode="numeric" placeholder="例: 1" />
@@ -237,87 +51,85 @@
               期間（任意）
               <input name="periodYm" placeholder="YYYY-MM 例: 2026-03" />
             </label>
-            <label>
-              取込者
-              <input name="uploadedBy" placeholder="例: admin" />
-            </label>
-            <button type="submit">CSVを取り込む</button>
-          </form>
-          <pre id="csvIngestionResult" class="result">ここに取り込み結果が表示されます。</pre>
-        </article>
-
-        <article class="panel">
-          <h2>取り込み履歴</h2>
-          <div class="table-wrap compact">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>ファイル</th>
-                  <th>状態</th>
-                  <th>件数</th>
-                  <th>取込日時</th>
-                </tr>
-              </thead>
-              <tbody id="ingestionFilesTable"></tbody>
-            </table>
           </div>
-          <pre id="ingestionErrorsResult" class="result">履歴行をクリックするとエラー詳細を表示します。</pre>
-        </article>
+          <label>
+            取込者
+            <input name="uploadedBy" placeholder="例: admin" />
+          </label>
+          <button type="submit">CSVを取り込む</button>
+        </form>
+
+        <pre id="csvIngestionResult" class="result">ここに取り込み結果が表示されます。</pre>
       </section>
 
       <section class="panel">
-        <h2>店舗別CSV列マッピング</h2>
-        <form id="csvMappingForm" class="stack">
+        <h2>取り込み履歴</h2>
+        <p class="sub">行をクリックするとエラー詳細を表示します。</p>
+        <div class="table-wrap compact top-gap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>ファイル</th>
+                <th>状態</th>
+                <th>件数</th>
+                <th>取込日時</th>
+              </tr>
+            </thead>
+            <tbody id="ingestionFilesTable"></tbody>
+          </table>
+        </div>
+        <pre id="ingestionErrorsResult" class="result">ここに取り込みエラー詳細が表示されます。</pre>
+      </section>
+
+      <section class="panel">
+        <h2>LINE返信テンプレート</h2>
+        <p class="sub">キーを選んで編集し、変数ボタンで本文へ挿入できます。</p>
+
+        <div class="helper-block top-gap">
+          <p class="helper-title">テンプレートキー（クリックで入力）</p>
+          <div id="templateKeyShortcuts" class="token-list"></div>
+        </div>
+
+        <form id="templateForm" class="stack top-gap">
           <label>
-            店舗ID *
-            <input name="storeId" inputmode="numeric" required placeholder="例: 1" />
+            キー *
+            <input name="templateKey" required placeholder="例: price_found" />
           </label>
           <label>
-            delimiter（任意: `,` / `;` / TAB）
-            <input name="delimiter" placeholder="例: ," />
-          </label>
-          <label>
-            ヘッダーマッピングJSON（sourceHeader -> canonical）
+            本文 *
             <textarea
-              name="headerMappingJson"
-              rows="6"
+              name="body"
               required
-              placeholder='例: {"ワイン名":"product_name","wine_name":"name_en","販売価格":"retail_price","納品価格":"purchase_price","在庫数":"stock_qty","在庫店舗":"stock_store","納品業者":"supplier_name","原価率":"cost_rate","年代":"vintage"}'
+              rows="8"
+              placeholder="{{product_name}} の検索結果です。\n{{lines}}"
             ></textarea>
           </label>
-          <div class="toolbar">
-            <button type="submit">マッピング保存</button>
-            <button id="loadCsvMappingBtn" type="button">既存読込</button>
+          <div class="helper-block">
+            <p class="helper-title">変数を挿入（本文カーソル位置に入ります）</p>
+            <div id="templateVariableShortcuts" class="token-list"></div>
           </div>
+          <button type="submit">テンプレートを保存</button>
         </form>
-        <pre id="csvMappingResult" class="result">ここにマッピング結果が表示されます。</pre>
-      </section>
 
-      <section class="panel">
-        <h2>LINE返信シミュレータ</h2>
-        <form id="simulateForm" class="toolbar">
-          <input name="query" required placeholder="例: シャブリ" />
-          <button type="submit">返信をテスト</button>
-        </form>
-        <pre id="simulateResult" class="result">ここに結果が表示されます。</pre>
-      </section>
+        <div class="top-gap">
+          <p class="helper-title">プレビュー</p>
+          <pre id="templatePreview" class="result">テンプレート本文を入力するとプレビューされます。</pre>
+        </div>
 
-      <section class="panel">
-        <h2>OCRテキスト照合テスト</h2>
-        <form id="ocrResolveForm" class="stack">
-          <label>
-            OCR抽出テキスト
-            <textarea
-              name="text"
-              rows="5"
-              required
-              placeholder="例: Chablis Premier Cru 2022&#10;DOMAINE X"
-            ></textarea>
-          </label>
-          <button type="submit">OCR照合をテスト</button>
-        </form>
-        <pre id="ocrResolveResult" class="result">ここにOCR照合結果が表示されます。</pre>
+        <div class="table-wrap compact top-gap">
+          <table>
+            <thead>
+              <tr>
+                <th>キー</th>
+                <th>有効</th>
+                <th>更新日時</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="templatesTable"></tbody>
+          </table>
+        </div>
       </section>
 
       <p id="flash" class="flash"></p>

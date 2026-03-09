@@ -5,39 +5,19 @@ const authForm = document.getElementById("authForm");
 const clearTokenBtn = document.getElementById("clearTokenBtn");
 const authStatusEl = document.getElementById("authStatus");
 
-const backupForm = document.getElementById("backupForm");
-const backupsTable = document.getElementById("backupsTable");
-const backupResult = document.getElementById("backupResult");
-
-const storeForm = document.getElementById("storeForm");
-const storesTable = document.getElementById("storesTable");
-
-const productForm = document.getElementById("productForm");
-const productSearchEl = document.getElementById("productSearch");
-const refreshProductsButton = document.getElementById("refreshProducts");
-const productsTable = document.getElementById("productsTable");
-
-const priceForm = document.getElementById("priceForm");
-const currentPricesTable = document.getElementById("currentPricesTable");
-
-const templateForm = document.getElementById("templateForm");
-const templatesTable = document.getElementById("templatesTable");
-
+const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
 const csvIngestionForm = document.getElementById("csvIngestionForm");
 const csvIngestionResult = document.getElementById("csvIngestionResult");
+
 const ingestionFilesTable = document.getElementById("ingestionFilesTable");
 const ingestionErrorsResult = document.getElementById("ingestionErrorsResult");
 
-const csvMappingForm = document.getElementById("csvMappingForm");
-const loadCsvMappingBtn = document.getElementById("loadCsvMappingBtn");
-const csvMappingResult = document.getElementById("csvMappingResult");
+const templateForm = document.getElementById("templateForm");
+const templatesTable = document.getElementById("templatesTable");
+const templatePreview = document.getElementById("templatePreview");
+const templateKeyShortcuts = document.getElementById("templateKeyShortcuts");
+const templateVariableShortcuts = document.getElementById("templateVariableShortcuts");
 
-const simulateForm = document.getElementById("simulateForm");
-const simulateResult = document.getElementById("simulateResult");
-const ocrResolveForm = document.getElementById("ocrResolveForm");
-const ocrResolveResult = document.getElementById("ocrResolveResult");
-
-const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
 const templateCsvText = [
   "年代,ワイン名,wine_name,販売価格,納品価格,在庫数,在庫店舗,納品業者,原価率",
   "2021,マコン・クラシコ,Macan Clasico,6980,4200,24,新宿倉庫,ABCトレーディング,60.2",
@@ -45,6 +25,56 @@ const templateCsvText = [
 ].join("\n");
 
 const STORAGE_ADMIN_TOKEN_KEY = "line_wine_admin_token";
+
+const TEMPLATE_KEY_SUGGESTIONS = [
+  "price_found",
+  "price_not_found",
+  "image_received",
+  "image_ocr_failed",
+  "image_ocr_not_found",
+  "image_ocr_web_candidates",
+  "image_ocr_web_summary"
+];
+
+const TEMPLATE_VARIABLE_SUGGESTIONS = [
+  "{{query}}",
+  "{{product_name}}",
+  "{{lines}}",
+  "{{region}}",
+  "{{producer}}",
+  "{{market_price}}",
+  "{{varieties}}",
+  "{{taste}}",
+  "{{features}}",
+  "{{rating_points}}",
+  "{{awards}}",
+  "{{drinking_window}}",
+  "{{winery_history}}",
+  "{{sources}}",
+  "{{search_mode}}",
+  "{{source_urls}}",
+  "{{web_lines}}"
+];
+
+const TEMPLATE_PREVIEW_VALUES = {
+  query: "ドンペリニョン",
+  product_name: "ドンペリニョン・ヴィンテージ 2012",
+  lines: "年代: 2012\n納品価格: 15,000円\n販売価格: 22,000円\n納品業者: Sample Supplier",
+  region: "シャンパーニュ",
+  producer: "Dom Perignon",
+  market_price: "参考レンジ: JPY 21,000 - 24,000",
+  varieties: "シャルドネ, ピノ・ノワール",
+  taste: "果実味とミネラルが調和したエレガントな味わい",
+  features: "繊細な泡立ち、長い余韻",
+  rating_points: "2012: 96/100",
+  awards: "2019 Decanter Gold",
+  drinking_window: "2024-2035",
+  winery_history: "歴史あるシャンパーニュメゾン。",
+  sources: "Wine-Searcher, Vivino",
+  search_mode: "DB優先検索",
+  source_urls: "https://example.com/wine-1",
+  web_lines: "1. 候補A\n2. 候補B"
+};
 
 const readStoredAdminToken = () => {
   try {
@@ -62,13 +92,15 @@ const writeStoredAdminToken = (value) => {
       localStorage.removeItem(STORAGE_ADMIN_TOKEN_KEY);
     }
   } catch {
-    // ignore storage errors in private mode
+    // ignore
   }
 };
 
 const state = {
   adminToken: readStoredAdminToken(),
-  adminAuthRequired: false
+  adminAuthRequired: false,
+  isStaticPreview: false,
+  templates: []
 };
 
 const buildAuthHeaders = () => (state.adminToken ? { "x-admin-token": state.adminToken } : {});
@@ -86,7 +118,6 @@ const parseApiErrorMessage = (status, bodyText) => {
   if (!bodyText) {
     return `HTTP ${status}`;
   }
-
   try {
     const parsed = JSON.parse(bodyText);
     if (parsed?.error) {
@@ -95,7 +126,6 @@ const parseApiErrorMessage = (status, bodyText) => {
   } catch {
     // not json
   }
-
   return bodyText.length > 300 ? `${bodyText.slice(0, 300)}...` : bodyText;
 };
 
@@ -144,146 +174,27 @@ const api = {
   }
 };
 
-const previewData = {
-  stores: [{ id: 1, store_code: "SHINJUKU", name: "新宿店" }],
-  products: [
-    {
-      id: 1,
-      sku: null,
-      name: "マコン・クラシコ",
-      name_en: "Macan Clasico",
-      vintage: "2022",
-      retail_price: 6980,
-      purchase_price: 4200,
-      stock_qty: 24,
-      stock_store: "新宿倉庫",
-      supplier_name: "ABCトレーディング",
-      cost_rate: 60.2,
-      aliases: ["マコン", "Macan Clasico"]
-    }
-  ],
-  currentPrices: [
-    {
-      product_id: 1,
-      product_name: "Chablis Premier Cru",
-      sku: "WINE-0001",
-      producer: "Domaine X",
-      vintage: "2022",
-      store_id: 1,
-      store_code: "SHINJUKU",
-      store_name: "新宿店",
-      latest_price: 4400,
-      currency: "JPY",
-      effective_date: "2026-03-22",
-      updated_at: "2026-03-08T10:42:23.298Z"
-    }
-  ],
-  templates: [
-    { id: 1, template_key: "price_found", is_active: 1, updated_at: "2026-03-08T10:00:00.000Z" },
-    {
-      id: 2,
-      template_key: "price_not_found",
-      is_active: 1,
-      updated_at: "2026-03-08T10:00:00.000Z"
-    },
-    {
-      id: 3,
-      template_key: "image_received",
-      is_active: 1,
-      updated_at: "2026-03-08T10:00:00.000Z"
-    }
-  ],
-  ingestionFiles: [
-    {
-      id: 2,
-      file_name: "import_jp_header_2026-03.csv",
-      status: "SUCCESS",
-      total_rows: 2,
-      accepted_rows: 2,
-      rejected_rows: 0,
-      uploaded_at: "2026-03-08T10:42:23.297Z"
-    },
-    {
-      id: 1,
-      file_name: "import_2026-03.csv",
-      status: "PARTIAL",
-      total_rows: 2,
-      accepted_rows: 1,
-      rejected_rows: 1,
-      uploaded_at: "2026-03-08T10:38:35.068Z"
-    }
-  ],
-  ingestionErrorsByFile: {
-    "1": {
-      items: [
-        {
-          id: 1,
-          ingestion_file_id: 1,
-          row_no: 3,
-          error_code: "PRODUCT_NOT_FOUND",
-          error_message: "product_id / sku / product_name から商品を特定できません"
-        }
-      ]
-    },
-    "2": { items: [] }
-  },
-  mappingsByStore: {
-    "1": {
-      store_id: 1,
-      store_code: "SHINJUKU",
-      store_name: "新宿店",
-      delimiter: null,
-      header_mapping: {
-        ワイン名: "product_name",
-        wine_name: "name_en",
-        販売価格: "retail_price",
-        納品価格: "purchase_price",
-        在庫数: "stock_qty",
-        在庫店舗: "stock_store",
-        納品業者: "supplier_name",
-        原価率: "cost_rate",
-        年代: "vintage"
-      }
-    }
-  },
-  backups: [
-    {
-      fileName: "wine_price_20260308_194523_before_release.db",
-      sizeBytes: 118784,
-      createdAt: "2026-03-08T10:45:23.000Z"
-    }
-  ]
-};
-
-let isStaticPreview = false;
-
 const notify = (message, isError = false) => {
   flashEl.textContent = message;
   flashEl.className = isError ? "flash error" : "flash";
 };
 
+const safeDate = (value) => {
+  if (!value) {
+    return "-";
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.valueOf())) {
+    return value;
+  }
+  return d.toLocaleString("ja-JP");
+};
+
 const isAuthError = (error) => error instanceof ApiError && error.status === 401;
 
-const handleAuthError = () => {
-  updateAuthStatus("認証エラー: ADMIN_TOKENを確認してください。");
-  notify("認証エラー: 管理トークンが無効です。", true);
-};
-
-const handleOperationError = (prefix, error) => {
-  if (isAuthError(error)) {
-    handleAuthError();
-    return;
-  }
-  notify(`${prefix}: ${error.message}`, true);
-};
-
-const syncAuthInput = () => {
-  authForm.elements.adminToken.value = state.adminToken;
-};
-
 const updateAuthStatus = (message = "") => {
-  if (isStaticPreview) {
-    authStatusEl.textContent = "静的プレビューでは認証確認は行いません。";
+  if (state.isStaticPreview) {
+    authStatusEl.textContent = "静的プレビューモードです。保存APIは無効です。";
     return;
   }
 
@@ -299,235 +210,116 @@ const updateAuthStatus = (message = "") => {
 
   authStatusEl.textContent = state.adminToken
     ? "管理認証が有効です。保存済みトークンで接続します。"
-    : "管理認証が必須です。ADMIN_TOKEN を入力して保存してください。";
+    : "管理認証が必須です。ADMIN_TOKENを入力して保存してください。";
 };
 
-const safeDate = (value) => {
-  if (!value) {
-    return "-";
-  }
-  const d = new Date(value);
-  if (Number.isNaN(d.valueOf())) {
-    return value;
-  }
-  return d.toLocaleString("ja-JP");
+const syncAuthInput = () => {
+  authForm.elements.adminToken.value = state.adminToken;
 };
 
-const formatBytes = (value) => {
-  const num = Number(value);
-  if (!Number.isFinite(num) || num < 0) {
-    return "-";
-  }
-  if (num < 1024) {
-    return `${num} B`;
-  }
-  if (num < 1024 * 1024) {
-    return `${(num / 1024).toFixed(1)} KB`;
-  }
-  return `${(num / (1024 * 1024)).toFixed(1)} MB`;
-};
+const buildPreviewText = (templateBody) =>
+  String(templateBody || "").replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_, key) => {
+    return TEMPLATE_PREVIEW_VALUES[key] ?? `{{${key}}}`;
+  });
 
-const renderStores = (items) => {
-  storesTable.innerHTML = "";
-  if (!items.length) {
-    storesTable.innerHTML = '<tr><td colspan="3">データがありません</td></tr>';
+const updateTemplatePreview = () => {
+  const body = String(templateForm.elements.body.value || "").trim();
+  if (!body) {
+    templatePreview.textContent = "テンプレート本文を入力するとプレビューされます。";
     return;
   }
+  templatePreview.textContent = buildPreviewText(body);
+};
 
-  for (const item of items) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${item.id}</td>
-      <td>${item.store_code}</td>
-      <td>${item.name}</td>
-    `;
-    storesTable.appendChild(tr);
+const escapeHtml = (value) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const renderTemplateKeyShortcuts = () => {
+  templateKeyShortcuts.innerHTML = "";
+  for (const key of TEMPLATE_KEY_SUGGESTIONS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip";
+    btn.dataset.key = key;
+    btn.textContent = key;
+    templateKeyShortcuts.appendChild(btn);
   }
 };
 
-const renderProducts = (items) => {
-  productsTable.innerHTML = "";
-  if (!items.length) {
-    productsTable.innerHTML = '<tr><td colspan="8">データがありません</td></tr>';
-    return;
-  }
-
-  for (const item of items) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${item.id}</td>
-      <td>${item.name}</td>
-      <td>${item.name_en ?? ""}</td>
-      <td>${item.purchase_price ? `${Number(item.purchase_price).toLocaleString("ja-JP")}円` : "-"}</td>
-      <td>${item.retail_price ? `${Number(item.retail_price).toLocaleString("ja-JP")}円` : "-"}</td>
-      <td>${item.supplier_name ?? "-"}</td>
-      <td>${item.stock_qty ?? "-"}</td>
-    `;
-    productsTable.appendChild(tr);
+const renderTemplateVariableShortcuts = () => {
+  templateVariableShortcuts.innerHTML = "";
+  for (const variable of TEMPLATE_VARIABLE_SUGGESTIONS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip chip-soft";
+    btn.dataset.variable = variable;
+    btn.textContent = variable;
+    templateVariableShortcuts.appendChild(btn);
   }
 };
 
-const renderCurrentPrices = (items) => {
-  currentPricesTable.innerHTML = "";
-  if (!items.length) {
-    currentPricesTable.innerHTML = '<tr><td colspan="4">データがありません</td></tr>';
+const insertTextAtCursor = (textarea, value) => {
+  if (!(textarea instanceof HTMLTextAreaElement)) {
     return;
   }
-
-  for (const item of items) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${item.product_name}</td>
-      <td>${item.store_name}</td>
-      <td>${Number(item.latest_price).toLocaleString("ja-JP")}円</td>
-      <td>${item.effective_date}</td>
-    `;
-    currentPricesTable.appendChild(tr);
-  }
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  const before = textarea.value.slice(0, start);
+  const after = textarea.value.slice(end);
+  textarea.value = `${before}${value}${after}`;
+  const pos = start + value.length;
+  textarea.focus();
+  textarea.selectionStart = pos;
+  textarea.selectionEnd = pos;
 };
 
 const renderTemplates = (items) => {
+  state.templates = Array.isArray(items) ? items : [];
   templatesTable.innerHTML = "";
-  if (!items.length) {
-    templatesTable.innerHTML = '<tr><td colspan="4">データがありません</td></tr>';
+
+  if (!state.templates.length) {
+    templatesTable.innerHTML = '<tr><td colspan="4">テンプレートがありません</td></tr>';
     return;
   }
 
-  for (const item of items) {
+  state.templates.forEach((item, index) => {
     const tr = document.createElement("tr");
+    tr.dataset.index = String(index);
     tr.innerHTML = `
-      <td>${item.id}</td>
-      <td><code>${item.template_key}</code></td>
+      <td><code>${escapeHtml(item.template_key)}</code></td>
       <td>${item.is_active ? "有効" : "無効"}</td>
       <td>${safeDate(item.updated_at)}</td>
+      <td><button type="button" class="chip" data-template-edit="${index}">編集</button></td>
     `;
     templatesTable.appendChild(tr);
-  }
+  });
 };
 
 const renderIngestionFiles = (items) => {
   ingestionFilesTable.innerHTML = "";
-  if (!items.length) {
-    ingestionFilesTable.innerHTML = '<tr><td colspan="5">データがありません</td></tr>';
+  if (!Array.isArray(items) || !items.length) {
+    ingestionFilesTable.innerHTML = '<tr><td colspan="5">履歴がありません</td></tr>';
     return;
   }
 
   for (const item of items) {
     const tr = document.createElement("tr");
-    tr.dataset.ingestionId = item.id;
+    tr.dataset.ingestionId = String(item.id);
     tr.style.cursor = "pointer";
     tr.innerHTML = `
       <td>${item.id}</td>
-      <td>${item.file_name}</td>
-      <td>${item.status}</td>
+      <td>${escapeHtml(item.file_name)}</td>
+      <td>${escapeHtml(item.status)}</td>
       <td>${item.accepted_rows}/${item.total_rows} (err:${item.rejected_rows})</td>
       <td>${safeDate(item.uploaded_at)}</td>
     `;
     ingestionFilesTable.appendChild(tr);
   }
-};
-
-const renderBackups = (items) => {
-  backupsTable.innerHTML = "";
-  if (!items.length) {
-    backupsTable.innerHTML = '<tr><td colspan="3">バックアップはありません</td></tr>';
-    return;
-  }
-
-  for (const item of items) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${item.fileName}</td>
-      <td>${formatBytes(item.sizeBytes)}</td>
-      <td>${safeDate(item.createdAt)}</td>
-    `;
-    backupsTable.appendChild(tr);
-  }
-};
-
-const findPreviewMatches = (query) => {
-  const q = String(query || "").trim().toLowerCase();
-  if (!q) {
-    return [];
-  }
-
-  return previewData.products.filter((item) => {
-    const names = [
-      item.name,
-      item.name_en,
-      item.sku,
-      ...(item.aliases || [])
-    ]
-      .filter(Boolean)
-      .join("\n")
-      .toLowerCase();
-
-    return names.includes(q);
-  });
-};
-
-const buildPreviewSimulate = (query) => {
-  const q = String(query || "").trim();
-  const matches = findPreviewMatches(q);
-  if (!matches.length) {
-    return {
-      query: q,
-      message: `${q} に一致する価格が見つかりませんでした。`,
-      matches: []
-    };
-  }
-
-  const lines = matches
-    .slice(0, 3)
-    .map((item, index) => {
-      const title = item.name_en ? `${item.name} / ${item.name_en}` : item.name;
-      return [
-        `【候補${index + 1}】 ${title}`,
-        `年代: ${item.vintage || "不明"}`,
-        `納品価格: ${item.purchase_price ? `${Number(item.purchase_price).toLocaleString("ja-JP")}円` : "不明"}`,
-        `販売価格: ${item.retail_price ? `${Number(item.retail_price).toLocaleString("ja-JP")}円` : "不明"}`,
-        `納品業者: ${item.supplier_name || "不明"}`,
-        `在庫数: ${item.stock_qty ?? "不明"}`,
-        `在庫店舗: ${item.stock_store || "不明"}`
-      ].join("\n");
-    })
-    .join("\n\n");
-
-  return {
-    query: q,
-    message: `${matches[0].name} の検索結果です。\n${lines}`,
-    matches
-  };
-};
-
-const buildPreviewOcrResolve = (text) => {
-  const raw = String(text || "").trim();
-  const candidates = [
-    raw,
-    ...raw
-      .split(/[\n\r,，、/|]/)
-      .map((line) => line.replace(/\s+/g, " ").trim())
-      .filter(Boolean)
-  ];
-
-  for (const candidate of candidates) {
-    const simulated = buildPreviewSimulate(candidate);
-    if (simulated.matches.length) {
-      return {
-        queryUsed: candidate,
-        extractedText: raw,
-        message: simulated.message,
-        matches: simulated.matches
-      };
-    }
-  }
-
-  return {
-    queryUsed: candidates[0] || "",
-    extractedText: raw,
-    message: `OCR結果から価格を照合できませんでした。\n抽出候補: ${candidates[0] || ""}`,
-    matches: []
-  };
 };
 
 const extractFileNameFromDisposition = (dispositionHeader, fallback = "download.csv") => {
@@ -536,7 +328,7 @@ const extractFileNameFromDisposition = (dispositionHeader, fallback = "download.
   if (utf8Match?.[1]) {
     return decodeURIComponent(utf8Match[1].trim());
   }
-  const plainMatch = raw.match(/filename="?([^\";]+)"?/i);
+  const plainMatch = raw.match(/filename="?([^";]+)"?/i);
   if (plainMatch?.[1]) {
     return plainMatch[1].trim();
   }
@@ -554,205 +346,73 @@ const saveBlobToFile = (blob, fileName) => {
   URL.revokeObjectURL(url);
 };
 
-const disableMutationFormsForStaticPreview = () => {
-  const forms = [
-    authForm,
-    backupForm,
-    storeForm,
-    productForm,
-    priceForm,
-    templateForm,
-    csvIngestionForm,
-    csvMappingForm
-  ];
-  for (const form of forms) {
-    for (const element of form.elements) {
-      element.disabled = true;
-    }
-  }
-  loadCsvMappingBtn.disabled = true;
-  downloadTemplateBtn.disabled = true;
-};
-
 const activateStaticPreviewMode = (reason = "") => {
-  isStaticPreview = true;
+  state.isStaticPreview = true;
   systemStatusEl.textContent = "GitHub Pages 静的プレビューモード（保存APIは無効）";
-  disableMutationFormsForStaticPreview();
-
-  renderStores(previewData.stores);
-  renderProducts(previewData.products);
-  renderCurrentPrices(previewData.currentPrices);
-  renderTemplates(previewData.templates);
-  renderIngestionFiles(previewData.ingestionFiles);
-  renderBackups(previewData.backups);
-
   updateAuthStatus();
-  backupResult.textContent = "静的プレビューではバックアップAPIは利用できません。";
+  renderTemplates([
+    { template_key: "price_found", is_active: 1, updated_at: new Date().toISOString(), body: "{{product_name}} の検索結果です。\\n{{lines}}" },
+    { template_key: "price_not_found", is_active: 1, updated_at: new Date().toISOString(), body: "{{query}} に一致する価格が見つかりませんでした。" }
+  ]);
+  renderIngestionFiles([]);
   csvIngestionResult.textContent = "静的プレビューではCSV取り込みAPIは利用できません。";
-  ingestionErrorsResult.textContent = "履歴行をクリックするとデモのエラー詳細を表示します。";
-  csvMappingResult.textContent = "静的プレビューではマッピング保存APIは利用できません。";
+  ingestionErrorsResult.textContent = "静的プレビューではエラー詳細取得は利用できません。";
 
   const suffix = reason ? ` (${reason})` : "";
   notify(`静的プレビューモードで表示中です${suffix}`);
 };
 
 const loadSystem = async () => {
-  if (isStaticPreview) {
+  if (state.isStaticPreview) {
     return;
   }
 
   const result = await api.get("/api/health");
   state.adminAuthRequired = Boolean(result.adminAuthRequired);
   updateAuthStatus();
-  systemStatusEl.textContent = `${result.host}:${result.port} / Auth: ${result.adminAuthRequired ? (state.adminToken ? "ON" : "REQUIRED") : "OFF"} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"} / OCR: ${result.ocrEndpointReady ? "OK" : "NG"} / Backup保持: ${result.backupRetention}`;
-};
-
-const loadStores = async () => {
-  if (isStaticPreview) {
-    renderStores(previewData.stores);
-    return;
-  }
-
-  const result = await api.get("/api/stores");
-  renderStores(result.items || []);
-};
-
-const loadProducts = async () => {
-  const q = productSearchEl.value.trim();
-
-  if (isStaticPreview) {
-    const filtered = q
-      ? previewData.products.filter((item) => {
-          const text = [
-            item.name,
-            item.name_en,
-            item.sku,
-            item.supplier_name,
-            item.stock_store,
-            ...(item.aliases || [])
-          ]
-            .filter(Boolean)
-            .join("\n")
-            .toLowerCase();
-          return text.includes(q.toLowerCase());
-        })
-      : previewData.products;
-    renderProducts(filtered);
-    return;
-  }
-
-  const result = await api.get(`/api/products?query=${encodeURIComponent(q)}`);
-  renderProducts(result.items || []);
-};
-
-const loadCurrentPrices = async () => {
-  if (isStaticPreview) {
-    renderCurrentPrices(previewData.currentPrices);
-    return;
-  }
-
-  const result = await api.get("/api/prices/current?limit=100");
-  renderCurrentPrices(result.items || []);
+  systemStatusEl.textContent = `${result.host}:${result.port} / Auth: ${result.adminAuthRequired ? (state.adminToken ? "ON" : "REQUIRED") : "OFF"} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"}`;
 };
 
 const loadTemplates = async () => {
-  if (isStaticPreview) {
-    renderTemplates(previewData.templates);
+  if (state.isStaticPreview) {
     return;
   }
-
   const result = await api.get("/api/reply-templates");
   renderTemplates(result.items || []);
 };
 
 const loadIngestionFiles = async () => {
-  if (isStaticPreview) {
-    renderIngestionFiles(previewData.ingestionFiles);
+  if (state.isStaticPreview) {
     return;
   }
-
   const result = await api.get("/api/ingestion/files?limit=100");
   renderIngestionFiles(result.items || []);
 };
 
-const loadBackups = async () => {
-  if (isStaticPreview) {
-    renderBackups(previewData.backups);
-    return;
-  }
-
-  const result = await api.get("/api/admin/backups");
-  renderBackups(result.items || []);
-};
-
-const clearProtectedViews = () => {
-  renderStores([]);
-  renderProducts([]);
-  renderCurrentPrices([]);
-  renderTemplates([]);
-  renderIngestionFiles([]);
-  renderBackups([]);
-  backupResult.textContent = "認証後にバックアップを実行できます。";
-  csvIngestionResult.textContent = "認証後にCSV取り込みを実行できます。";
-  ingestionErrorsResult.textContent = "認証後にエラー詳細を表示できます。";
-  csvMappingResult.textContent = "認証後にマッピングを保存できます。";
-};
-
-const loadProtectedData = async () => {
-  await Promise.all([
-    loadStores(),
-    loadProducts(),
-    loadCurrentPrices(),
-    loadTemplates(),
-    loadIngestionFiles(),
-    loadBackups()
-  ]);
-};
-
 const loadIngestionErrors = async (ingestionFileId) => {
-  if (isStaticPreview) {
-    const result = previewData.ingestionErrorsByFile[String(ingestionFileId)] || { items: [] };
-    ingestionErrorsResult.textContent = JSON.stringify(result, null, 2);
+  if (state.isStaticPreview) {
     return;
   }
-
   const result = await api.get(`/api/ingestion/files/${encodeURIComponent(ingestionFileId)}/errors`);
   ingestionErrorsResult.textContent = JSON.stringify(result, null, 2);
 };
 
-const normalizeDelimiterValue = (value) => {
-  const text = String(value || "").trim();
-  if (!text) {
-    return null;
-  }
-  if (text.toUpperCase() === "TAB" || text === "\\t") {
-    return "\t";
-  }
-  return text;
+const loadProtectedData = async () => {
+  await Promise.all([loadTemplates(), loadIngestionFiles()]);
 };
 
-const loadCsvMapping = async (storeId) => {
-  if (isStaticPreview) {
-    const result = previewData.mappingsByStore[String(storeId)];
-    if (!result) {
-      throw new Error("preview mapping not found");
-    }
-    csvMappingResult.textContent = JSON.stringify(result, null, 2);
-    csvMappingForm.elements.headerMappingJson.value = JSON.stringify(result.header_mapping || {}, null, 2);
-    csvMappingForm.elements.delimiter.value = result.delimiter || "";
-    return result;
+const handleOperationError = (prefix, error) => {
+  if (isAuthError(error)) {
+    updateAuthStatus("認証エラー: ADMIN_TOKENを確認してください。");
+    notify("認証エラー: 管理トークンが無効です。", true);
+    return;
   }
-
-  const result = await api.get(`/api/ingestion/mappings/${encodeURIComponent(storeId)}`);
-  csvMappingResult.textContent = JSON.stringify(result, null, 2);
-  csvMappingForm.elements.headerMappingJson.value = JSON.stringify(result.header_mapping || {}, null, 2);
-  csvMappingForm.elements.delimiter.value = result.delimiter || "";
-  return result;
+  notify(`${prefix}: ${error.message}`, true);
 };
 
 authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (isStaticPreview) {
+  if (state.isStaticPreview) {
     notify("静的プレビューでは認証設定は利用できません。", true);
     return;
   }
@@ -771,63 +431,27 @@ authForm.addEventListener("submit", async (event) => {
   }
 });
 
-clearTokenBtn.addEventListener("click", async () => {
-  if (isStaticPreview) {
+clearTokenBtn.addEventListener("click", () => {
+  if (state.isStaticPreview) {
     notify("静的プレビューでは認証設定は利用できません。", true);
     return;
   }
-
   state.adminToken = "";
   writeStoredAdminToken("");
   syncAuthInput();
   updateAuthStatus();
-
-  if (state.adminAuthRequired) {
-    clearProtectedViews();
-    notify("管理トークンをクリアしました。", false);
-    return;
-  }
-
-  try {
-    await loadProtectedData();
-    notify("管理トークンをクリアしました。");
-  } catch (error) {
-    handleOperationError("再読込に失敗", error);
-  }
-});
-
-backupForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (isStaticPreview) {
-    notify("静的プレビューではバックアップ実行できません。", true);
-    return;
-  }
-
-  const formData = new FormData(backupForm);
-  const reason = String(formData.get("reason") || "").trim() || "manual";
-
-  try {
-    const result = await api.post("/api/admin/backup", { reason });
-    backupResult.textContent = JSON.stringify(result, null, 2);
-    await loadBackups();
-    notify("バックアップを作成しました。");
-  } catch (error) {
-    handleOperationError("バックアップ作成に失敗", error);
-  }
+  notify("管理トークンをクリアしました。");
 });
 
 downloadTemplateBtn.addEventListener("click", async () => {
-  if (isStaticPreview) {
-    saveBlobToFile(
-      new Blob([templateCsvText], { type: "text/csv;charset=utf-8" }),
-      "wine_master_template.csv"
-    );
+  if (state.isStaticPreview) {
+    saveBlobToFile(new Blob([templateCsvText], { type: "text/csv;charset=utf-8" }), "wine_master_template.csv");
     notify("テンプレートCSVをダウンロードしました。");
     return;
   }
 
   try {
-    let response = null;
+    let response;
     try {
       response = await api.getBlob("/template/wine_price_template.csv");
     } catch {
@@ -841,116 +465,15 @@ downloadTemplateBtn.addEventListener("click", async () => {
   }
 });
 
-storeForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (isStaticPreview) {
-    notify("静的プレビューでは店舗保存できません。", true);
-    return;
-  }
-
-  const formData = new FormData(storeForm);
-
-  try {
-    await api.post("/api/stores", {
-      storeCode: String(formData.get("storeCode") || "").trim(),
-      name: String(formData.get("name") || "").trim()
-    });
-    storeForm.reset();
-    await loadStores();
-    notify("店舗を保存しました。");
-  } catch (error) {
-    handleOperationError("店舗保存に失敗", error);
-  }
-});
-
-productForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (isStaticPreview) {
-    notify("静的プレビューでは商品保存できません。", true);
-    return;
-  }
-
-  const formData = new FormData(productForm);
-  const aliasesRaw = String(formData.get("aliases") || "").trim();
-
-  try {
-    await api.post("/api/products", {
-      name: String(formData.get("name") || "").trim(),
-      nameEn: String(formData.get("nameEn") || "").trim(),
-      vintage: String(formData.get("vintage") || "").trim(),
-      retailPrice: String(formData.get("retailPrice") || "").trim(),
-      purchasePrice: String(formData.get("purchasePrice") || "").trim(),
-      stockQty: String(formData.get("stockQty") || "").trim(),
-      stockStore: String(formData.get("stockStore") || "").trim(),
-      supplierName: String(formData.get("supplierName") || "").trim(),
-      costRate: String(formData.get("costRate") || "").trim(),
-      aliases: aliasesRaw ? aliasesRaw.split(",").map((v) => v.trim()) : []
-    });
-    productForm.reset();
-    await loadProducts();
-    notify("商品を保存しました。");
-  } catch (error) {
-    handleOperationError("商品保存に失敗", error);
-  }
-});
-
-priceForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (isStaticPreview) {
-    notify("静的プレビューでは価格保存できません。", true);
-    return;
-  }
-
-  const formData = new FormData(priceForm);
-
-  try {
-    await api.post("/api/prices", {
-      productId: Number(formData.get("productId")),
-      storeId: Number(formData.get("storeId")),
-      price: Number(formData.get("price")),
-      effectiveDate: String(formData.get("effectiveDate") || "").trim(),
-      createdBy: "admin"
-    });
-    priceForm.reset();
-    await loadCurrentPrices();
-    notify("価格を保存しました。");
-  } catch (error) {
-    handleOperationError("価格保存に失敗", error);
-  }
-});
-
-templateForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (isStaticPreview) {
-    notify("静的プレビューではテンプレート保存できません。", true);
-    return;
-  }
-
-  const formData = new FormData(templateForm);
-
-  try {
-    await api.post("/api/reply-templates", {
-      templateKey: String(formData.get("templateKey") || "").trim(),
-      body: String(formData.get("body") || "").trim()
-    });
-    templateForm.reset();
-    await loadTemplates();
-    notify("テンプレートを保存しました。");
-  } catch (error) {
-    handleOperationError("テンプレート保存に失敗", error);
-  }
-});
-
 csvIngestionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (isStaticPreview) {
+  if (state.isStaticPreview) {
     notify("静的プレビューではCSV取り込みできません。", true);
     return;
   }
 
   const formData = new FormData(csvIngestionForm);
   const file = formData.get("csvFile");
-
   if (!(file instanceof File) || !file.size) {
     notify("CSVファイルを選択してください。", true);
     return;
@@ -958,20 +481,21 @@ csvIngestionForm.addEventListener("submit", async (event) => {
 
   try {
     const csvText = await file.text();
-    const storeIdRaw = String(formData.get("storeId") || "").trim();
     const payload = {
       fileName: file.name,
       csvText,
       periodYm: String(formData.get("periodYm") || "").trim(),
       uploadedBy: String(formData.get("uploadedBy") || "").trim() || "admin"
     };
+
+    const storeIdRaw = String(formData.get("storeId") || "").trim();
     if (storeIdRaw) {
       payload.storeId = Number(storeIdRaw);
     }
 
     const result = await api.post("/api/ingestion/csv", payload);
     csvIngestionResult.textContent = JSON.stringify(result, null, 2);
-    await Promise.all([loadIngestionFiles(), loadCurrentPrices()]);
+    await loadIngestionFiles();
     notify("CSV取り込みを実行しました。");
   } catch (error) {
     handleOperationError("CSV取り込み失敗", error);
@@ -990,97 +514,80 @@ ingestionFilesTable.addEventListener("click", (event) => {
     .catch((error) => handleOperationError("エラー詳細取得に失敗", error));
 });
 
-csvMappingForm.addEventListener("submit", async (event) => {
+templateForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (isStaticPreview) {
-    notify("静的プレビューではCSVマッピング保存できません。", true);
+  if (state.isStaticPreview) {
+    notify("静的プレビューではテンプレート保存できません。", true);
     return;
   }
 
-  const formData = new FormData(csvMappingForm);
-  const storeId = Number(formData.get("storeId"));
-  const delimiter = normalizeDelimiterValue(formData.get("delimiter"));
-  const headerMappingJson = String(formData.get("headerMappingJson") || "").trim();
+  const formData = new FormData(templateForm);
+  const payload = {
+    templateKey: String(formData.get("templateKey") || "").trim(),
+    body: String(formData.get("body") || "").trim()
+  };
 
-  let headerMapping;
-  try {
-    headerMapping = JSON.parse(headerMappingJson);
-  } catch {
-    notify("ヘッダーマッピングJSONの形式が不正です。", true);
-    return;
-  }
-
-  try {
-    const result = await api.post("/api/ingestion/mappings", {
-      storeId,
-      delimiter,
-      headerMapping,
-      updatedBy: "admin"
-    });
-    csvMappingResult.textContent = JSON.stringify(result, null, 2);
-    notify("店舗別CSVマッピングを保存しました。");
-  } catch (error) {
-    handleOperationError("CSVマッピング保存に失敗", error);
-  }
-});
-
-loadCsvMappingBtn.addEventListener("click", async () => {
-  const storeIdRaw = String(csvMappingForm.elements.storeId.value || "").trim();
-  if (!storeIdRaw) {
-    notify("店舗IDを入力してください。", true);
+  if (!payload.templateKey || !payload.body) {
+    notify("キーと本文を入力してください。", true);
     return;
   }
 
   try {
-    await loadCsvMapping(storeIdRaw);
-    notify("CSVマッピングを読み込みました。");
+    await api.post("/api/reply-templates", payload);
+    await loadTemplates();
+    notify("テンプレートを保存しました。");
   } catch (error) {
-    handleOperationError("CSVマッピング読込に失敗", error);
+    handleOperationError("テンプレート保存に失敗", error);
   }
 });
 
-simulateForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const formData = new FormData(simulateForm);
-  const query = String(formData.get("query") || "").trim();
-
-  try {
-    const result = isStaticPreview
-      ? buildPreviewSimulate(query)
-      : await api.post("/api/line/simulate", { query });
-    simulateResult.textContent = JSON.stringify(result, null, 2);
-    notify("シミュレーションを実行しました。");
-  } catch (error) {
-    handleOperationError("シミュレーション失敗", error);
+templateKeyShortcuts.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-key]");
+  if (!button) {
+    return;
   }
+  templateForm.elements.templateKey.value = button.dataset.key;
+  templateForm.elements.body.focus();
+  notify(`テンプレートキー ${button.dataset.key} を入力しました。`);
 });
 
-ocrResolveForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const formData = new FormData(ocrResolveForm);
-  const text = String(formData.get("text") || "").trim();
-
-  try {
-    const result = isStaticPreview
-      ? buildPreviewOcrResolve(text)
-      : await api.post("/api/ocr/resolve", { text });
-    ocrResolveResult.textContent = JSON.stringify(result, null, 2);
-    notify("OCR照合テストを実行しました。");
-  } catch (error) {
-    handleOperationError("OCR照合テスト失敗", error);
+templateVariableShortcuts.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-variable]");
+  if (!button) {
+    return;
   }
+  insertTextAtCursor(templateForm.elements.body, button.dataset.variable);
+  updateTemplatePreview();
 });
 
-refreshProductsButton.addEventListener("click", () => {
-  loadProducts().catch((error) => handleOperationError("商品再読込に失敗", error));
+templatesTable.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-template-edit]");
+  if (!button) {
+    return;
+  }
+
+  const index = Number(button.dataset.templateEdit);
+  if (!Number.isInteger(index) || index < 0 || index >= state.templates.length) {
+    return;
+  }
+
+  const row = state.templates[index];
+  templateForm.elements.templateKey.value = String(row.template_key || "");
+  templateForm.elements.body.value = String(row.body || "");
+  updateTemplatePreview();
+  templateForm.elements.body.focus();
+  notify(`テンプレート ${row.template_key} を編集欄に読み込みました。`);
 });
 
-productSearchEl.addEventListener("input", () => {
-  loadProducts().catch((error) => handleOperationError("商品検索に失敗", error));
+templateForm.elements.body.addEventListener("input", () => {
+  updateTemplatePreview();
 });
 
 const boot = async () => {
   syncAuthInput();
+  renderTemplateKeyShortcuts();
+  renderTemplateVariableShortcuts();
+  updateTemplatePreview();
   updateAuthStatus("接続確認中...");
 
   try {
@@ -1089,8 +596,8 @@ const boot = async () => {
     notify("初期化しました。");
   } catch (error) {
     if (isAuthError(error)) {
-      clearProtectedViews();
-      handleAuthError();
+      updateAuthStatus("認証エラー: ADMIN_TOKENを確認してください。");
+      notify("認証エラー: 管理トークンが無効です。", true);
       return;
     }
     activateStaticPreviewMode(String(error?.message || "API unavailable"));
