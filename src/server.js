@@ -4192,17 +4192,10 @@ const processCsvIngestionRows = ({
       continue;
     }
 
-    const costRate = hasValue(row.cost_rate) ? parseRateValue(row.cost_rate) : null;
+    let costRate = hasValue(row.cost_rate) ? parseRateValue(row.cost_rate) : null;
     if (hasValue(row.cost_rate) && costRate === null) {
-      addIngestionError({
-        ingestionFileId,
-        rowNo,
-        errorCode: "INVALID_COST_RATE",
-        errorMessage: "原価率が不正です",
-        rawPayload: JSON.stringify(row)
-      });
-      rejectedRows += 1;
-      continue;
+      // e.g. #DIV/0! should not block catalog ingestion.
+      costRate = null;
     }
 
     const aliasCandidates = [productName, nameEn];
