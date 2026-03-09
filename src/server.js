@@ -3888,11 +3888,8 @@ const enrichWebCandidatesForMissingFields = async ({ query, summary, existingCan
   return merged;
 };
 
-const resolvePriceByOcrText = async (text, options = {}) => {
+const resolvePriceByOcrText = async (text) => {
   const candidates = extractQueryCandidatesFromOcrText(text);
-  const ocrContextText = String(options.ocrText || text || "");
-  const imageBuffer = options.imageBuffer || null;
-  const contentType = String(options.contentType || "").trim();
 
   for (const query of candidates) {
     const resolved = buildSimulatedPriceReply(query);
@@ -3906,191 +3903,13 @@ const resolvePriceByOcrText = async (text, options = {}) => {
   }
 
   const fallbackQuery = truncateText(candidates[0] || String(text || "").replace(/\s+/g, " "), 80);
-  let webCandidates = [];
-  let queryUsedForWeb = fallbackQuery;
-
-  if (webSearchConfig.enabled && fallbackQuery) {
-    const groqSuggestions = await requestGroqQuerySuggestions({ ocrText: ocrContextText, candidates });
-    const searchQueries = dedupeTextArray([...groqSuggestions, ...candidates]).slice(0, 3);
-
-    for (const query of searchQueries) {
-      try {
-        const found = await searchWebCandidates(query);
-        if (found.length > 0) {
-          webCandidates = found;
-          queryUsedForWeb = query;
-          break;
-        }
-      } catch (error) {
-        console.warn("Web search fallback failed", query, error?.message || error);
-      }
-    }
-  }
-
-  if (webCandidates.length > 0) {
-    let finalCandidates = [...webCandidates];
-    let webContext = await buildWebSummaryContext(finalCandidates);
-    const buildHeuristicSummary = () =>
-      sanitizeSummaryWithEvidence({
-        summary: {
-          region: "不明",
-          producer: queryUsedForWeb || "不明",
-          market_price: buildMarketPriceFromHints(webContext.priceHints),
-          grapes: normalizeGrapeComposition([
-            ...(webContext.grapeCompositionHints || []),
-            ...((webContext.varietyHints || []).map((name) => ({ name, percentage: null })))
-          ]),
-          varieties: webContext.varietyHints.length > 0 ? webContext.varietyHints.join(", ") : "不明",
-          taste: webContext.tasteHints.length > 0 ? webContext.tasteHints.join(", ") : "不明",
-          features: webContext.featureHints.length > 0 ? webContext.featureHints.join(", ") : "不明",
-          rating_points: buildRatingPointsFromHints(webContext.ratingHints),
-          awards: buildAwardsFromHints(webContext.awardHints),
-          drinking_window: buildDrinkingWindowFromHints(webContext.drinkingWindowHints),
-          winery_history: buildWineryHistoryFromHints(webContext.historyHints)
-        },
-        contextText: webContext.contextText,
-        priceHints: webContext.priceHints,
-        varietyHints: webContext.varietyHints,
-        grapeCompositionHints: webContext.grapeCompositionHints,
-        tasteHints: webContext.tasteHints,
-        featureHints: webContext.featureHints,
-        ratingHints: webContext.ratingHints,
-        awardHints: webContext.awardHints,
-        drinkingWindowHints: webContext.drinkingWindowHints,
-        historyHints: webContext.historyHints
-      });
-
-    let summary =
-      (await requestGroqWineSummaryFromWeb({
-        query: queryUsedForWeb,
-        contextText: webContext.contextText,
-        priceHints: webContext.priceHints,
-        varietyHints: webContext.varietyHints,
-        grapeCompositionHints: webContext.grapeCompositionHints,
-        tasteHints: webContext.tasteHints,
-        featureHints: webContext.featureHints,
-        ratingHints: webContext.ratingHints,
-        awardHints: webContext.awardHints,
-        drinkingWindowHints: webContext.drinkingWindowHints,
-        historyHints: webContext.historyHints
-      })) || buildHeuristicSummary();
-
-    if (
-      isUnknownSummaryField(summary.market_price) ||
-      isUnknownSummaryField(summary.varieties) ||
-      isUnknownSummaryField(summary.taste) ||
-      isUnknownSummaryField(summary.features) ||
-      isUnknownSummaryField(summary.rating_points) ||
-      isUnknownSummaryField(summary.awards) ||
-      isUnknownSummaryField(summary.drinking_window) ||
-      isUnknownSummaryField(summary.winery_history)
-    ) {
-      finalCandidates = await enrichWebCandidatesForMissingFields({
-        query: queryUsedForWeb,
-        summary,
-        existingCandidates: finalCandidates
-      });
-      webContext = await buildWebSummaryContext(finalCandidates);
-      summary =
-        (await requestGroqWineSummaryFromWeb({
-          query: queryUsedForWeb,
-          contextText: webContext.contextText,
-          priceHints: webContext.priceHints,
-          varietyHints: webContext.varietyHints,
-          grapeCompositionHints: webContext.grapeCompositionHints,
-          tasteHints: webContext.tasteHints,
-          featureHints: webContext.featureHints,
-          ratingHints: webContext.ratingHints,
-          awardHints: webContext.awardHints,
-          drinkingWindowHints: webContext.drinkingWindowHints,
-          historyHints: webContext.historyHints
-        })) || buildHeuristicSummary();
-    }
-
-    const fallbackSummaryMessage = buildTextByTemplate(
-      "image_ocr_web_summary",
-      {
-        query: queryUsedForWeb,
-        region: summary.region,
-        producer: summary.producer,
-        market_price: summary.market_price,
-        varieties: summary.varieties,
-        taste: summary.taste,
-        features: summary.features,
-        rating_points: summary.rating_points,
-        awards: summary.awards,
-        drinking_window: summary.drinking_window,
-        winery_history: summary.winery_history,
-        sources: buildSourceSummary(finalCandidates),
-        search_mode: detectSearchMode(finalCandidates),
-        source_urls: buildSourceUrlLines(finalCandidates)
-      },
-      `価格DBには見つかりませんでした。Web情報を要約します。\n産地: ${summary.region}\n生産者: ${summary.producer}\n市場価格: ${summary.market_price}\nセパージュ: ${summary.varieties}\n味わい: ${summary.taste}\n特徴: ${summary.features}\n評価ポイント: ${summary.rating_points}\n受賞歴: ${summary.awards}\n飲み頃: ${summary.drinking_window}\nワイナリーの歴史: ${summary.winery_history}\n参照ソース: ${buildSourceSummary(finalCandidates)}\n検索モード: ${detectSearchMode(finalCandidates)}\n参照URL:\n${buildSourceUrlLines(finalCandidates)}\n※Web参照の要約です。`
-    );
-
-    let wineAnalysis = buildWineAnalysisFallback({
-      query: queryUsedForWeb,
-      summary,
-      webCandidates: finalCandidates,
-      ocrText: ocrContextText,
-      webContextText: webContext.contextText
-    });
-    const activeLlmProvider = resolveActiveLlmProvider();
-    if (activeLlmProvider && isWineFlowEnabledForProvider(activeLlmProvider)) {
-      wineAnalysis =
-        (await requestGroqWineAnalysisFromImage({
-          imageBuffer,
-          contentType,
-          ocrText: ocrContextText,
-          query: queryUsedForWeb,
-          webContextText: webContext.contextText,
-          webCandidates: finalCandidates,
-          summary
-        })) || wineAnalysis;
-    }
-
-    if (!Array.isArray(wineAnalysis.grapes) || wineAnalysis.grapes.length === 0) {
-      const recoveredGrapes = buildGrapeCompositionFromEvidence({
-        rawGrapes: normalizeSummaryGrapes(summary?.grapes),
-        evidenceTexts: [
-          webContext.contextText || "",
-          ocrContextText || "",
-          queryUsedForWeb || ""
-        ]
-      });
-      if (recoveredGrapes.length > 0) {
-        wineAnalysis = {
-          ...wineAnalysis,
-          grapes: recoveredGrapes
-        };
-      }
-    }
-
-    const renderedMessage = await renderLineWineReplyWithGroq(wineAnalysis);
-    const withSourceFooter =
-      `${renderedMessage}\n\n` +
-      `参照ソース: ${buildSourceSummary(finalCandidates)}\n` +
-      `検索モード: ${detectSearchMode(finalCandidates)}\n` +
-      `参照URL:\n${buildSourceUrlLines(finalCandidates)}`;
-
-    return {
-      queryUsed: queryUsedForWeb,
-      extractedText: text,
-      message: withSourceFooter || fallbackSummaryMessage,
-      matches: [],
-      webCandidates: finalCandidates,
-      webSummary: summary,
-      wineAnalysis
-    };
-  }
-
   return {
     queryUsed: fallbackQuery,
     extractedText: text,
     message: buildTextByTemplate(
       "image_ocr_not_found",
       { query: fallbackQuery, extracted_text: text },
-      `OCR結果から価格を照合できませんでした。\n抽出候補: ${fallbackQuery}`
+      `OCR結果から価格DBを照合できませんでした。\n抽出候補: ${fallbackQuery}`
     ),
     matches: [],
     webCandidates: []
@@ -4312,37 +4131,9 @@ const processImageEvent = async (event, canReply) => {
         }
       }
 
-      let visionCandidates = [];
-      try {
-        visionCandidates = await requestGroqVisionSuggestions({
-          imageBuffer,
-          contentType,
-          ocrHint: ocrText
-        });
-      } catch (error) {
-        console.error("Groq vision extraction failed", error);
-      }
-
-      if (!ocrText && visionCandidates.length > 0) {
-        extractedText = visionCandidates.join("\n");
-      }
-
-      const candidateBlocks = [];
-      if (visionCandidates.length > 0) {
-        candidateBlocks.push(visionCandidates.join("\n"));
-      }
       if (ocrText) {
-        candidateBlocks.push(ocrText);
+        resolvedByOcr = await resolvePriceByOcrText(ocrText);
       }
-
-	      if (candidateBlocks.length > 0) {
-	        resolvedByOcr = await resolvePriceByOcrText(candidateBlocks.join("\n"), {
-	          imageBuffer,
-	          contentType,
-	          ocrText,
-	          visionCandidates
-	        });
-	      }
     } catch (error) {
       console.error("Image processing failed", error);
     }
@@ -4815,43 +4606,12 @@ app.post("/api/ocr/resolve", async (req, res) => {
     return sendError(res, 400, "text is required");
   }
 
-	  const resolved = await resolvePriceByOcrText(text);
+  const resolved = await resolvePriceByOcrText(text);
   return res.json(resolved);
 });
 
 app.post("/api/ocr/vision-url", async (req, res) => {
-  const imageUrl = String(req.body?.imageUrl || "").trim();
-  if (!imageUrl) {
-    return sendError(res, 400, "imageUrl is required");
-  }
-
-  try {
-    const { imageBuffer, contentType } = await fetchImageBufferByUrl(
-      imageUrl,
-      groqVisionConfig.timeoutMs,
-      groqVisionConfig.maxImageBytes
-    );
-    const candidates = await requestGroqVisionSuggestions({ imageBuffer, contentType });
-	    const resolved =
-	      candidates.length > 0
-	        ? await resolvePriceByOcrText(candidates.join("\n"), {
-	            imageBuffer,
-	            contentType,
-	            visionCandidates: candidates
-	          })
-	        : null;
-
-    return res.json({
-      imageUrl,
-      contentType,
-      byteSize: imageBuffer.length,
-      candidates,
-      resolved
-    });
-  } catch (error) {
-    console.error("Vision url test failed", error);
-    return sendError(res, 500, String(error?.message || "vision url test failed"));
-  }
+  return sendError(res, 410, "vision-url endpoint is disabled in DB-only reset mode");
 });
 
 app.post("/api/line/simulate", (req, res) => {
