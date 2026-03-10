@@ -271,6 +271,20 @@ const callLineBotInfo = async ({ accessToken, timeoutMs }) =>
     timeoutMs
   );
 
+const callLineWebhookEndpointInfo = async ({ accessToken, timeoutMs }) =>
+  withTimeout(
+    (signal) =>
+      fetch("https://api.line.me/v2/bot/channel/webhook/endpoint", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json"
+        },
+        signal
+      }),
+    timeoutMs
+  );
+
 const parseRenderErrorDetail = (detailText) => {
   const text = String(detailText || "").trim();
   if (!text) {
@@ -918,18 +932,37 @@ export default {
         });
       }
       try {
-        const response = await callLineBotInfo({
-          accessToken: lineAccessToken,
-          timeoutMs: Math.max(2000, timeoutMs + 2000)
-        });
-        const bodyText = await response.text().catch(() => "");
+        const lineApiTimeoutMs = Math.max(2000, timeoutMs + 2000);
+        const [botInfoResponse, webhookResponse] = await Promise.all([
+          callLineBotInfo({
+            accessToken: lineAccessToken,
+            timeoutMs: lineApiTimeoutMs
+          }),
+          callLineWebhookEndpointInfo({
+            accessToken: lineAccessToken,
+            timeoutMs: lineApiTimeoutMs
+          })
+        ]);
+        const botInfoBodyText = await botInfoResponse.text().catch(() => "");
+        const webhookBodyText = await webhookResponse.text().catch(() => "");
+        let webhookInfo = {};
+        try {
+          webhookInfo = JSON.parse(webhookBodyText || "{}");
+        } catch {
+          webhookInfo = {};
+        }
         return asJson(200, {
           ok: true,
           hasAccessToken: true,
           hasChannelSecret: Boolean(lineChannelSecret),
-          lineApiOk: response.ok,
-          lineApiStatus: response.status,
-          lineApiBody: bodyText.slice(0, 300)
+          lineApiOk: botInfoResponse.ok,
+          lineApiStatus: botInfoResponse.status,
+          lineApiBody: botInfoBodyText.slice(0, 300),
+          webhookApiOk: webhookResponse.ok,
+          webhookApiStatus: webhookResponse.status,
+          webhookEndpoint: String(webhookInfo?.endpoint || ""),
+          webhookActive: Boolean(webhookInfo?.active),
+          webhookApiBody: webhookBodyText.slice(0, 300)
         });
       } catch (error) {
         return asJson(200, {
@@ -938,7 +971,12 @@ export default {
           hasChannelSecret: Boolean(lineChannelSecret),
           lineApiOk: false,
           lineApiStatus: null,
-          lineApiBody: String(error?.message || "LINE API check failed").slice(0, 300)
+          lineApiBody: String(error?.message || "LINE API check failed").slice(0, 300),
+          webhookApiOk: false,
+          webhookApiStatus: null,
+          webhookEndpoint: "",
+          webhookActive: false,
+          webhookApiBody: String(error?.message || "LINE webhook API check failed").slice(0, 300)
         });
       }
     }
