@@ -298,6 +298,20 @@ const callLineWebhookEndpointInfo = async ({ accessToken, timeoutMs }) =>
     timeoutMs
   );
 
+const callLineMessageQuota = async ({ accessToken, timeoutMs }) =>
+  withTimeout(
+    (signal) =>
+      fetch("https://api.line.me/v2/bot/message/quota", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json"
+        },
+        signal
+      }),
+    timeoutMs
+  );
+
 const parseRenderErrorDetail = (detailText) => {
   const text = String(detailText || "").trim();
   if (!text) {
@@ -1063,7 +1077,7 @@ export default {
       }
       try {
         const lineApiTimeoutMs = Math.max(2000, timeoutMs + 2000);
-        const [botInfoResponse, webhookResponse] = await Promise.all([
+        const [botInfoResponse, webhookResponse, quotaResponse] = await Promise.all([
           callLineBotInfo({
             accessToken: lineAccessToken,
             timeoutMs: lineApiTimeoutMs
@@ -1071,10 +1085,15 @@ export default {
           callLineWebhookEndpointInfo({
             accessToken: lineAccessToken,
             timeoutMs: lineApiTimeoutMs
+          }),
+          callLineMessageQuota({
+            accessToken: lineAccessToken,
+            timeoutMs: lineApiTimeoutMs
           })
         ]);
         const botInfoBodyText = await botInfoResponse.text().catch(() => "");
         const webhookBodyText = await webhookResponse.text().catch(() => "");
+        const quotaBodyText = await quotaResponse.text().catch(() => "");
         let webhookInfo = {};
         try {
           webhookInfo = JSON.parse(webhookBodyText || "{}");
@@ -1092,7 +1111,10 @@ export default {
           webhookApiStatus: webhookResponse.status,
           webhookEndpoint: String(webhookInfo?.endpoint || ""),
           webhookActive: Boolean(webhookInfo?.active),
-          webhookApiBody: webhookBodyText.slice(0, 300)
+          webhookApiBody: webhookBodyText.slice(0, 300),
+          quotaApiOk: quotaResponse.ok,
+          quotaApiStatus: quotaResponse.status,
+          quotaApiBody: quotaBodyText.slice(0, 300)
         });
       } catch (error) {
         return asJson(200, {
@@ -1106,7 +1128,10 @@ export default {
           webhookApiStatus: null,
           webhookEndpoint: "",
           webhookActive: false,
-          webhookApiBody: String(error?.message || "LINE webhook API check failed").slice(0, 300)
+          webhookApiBody: String(error?.message || "LINE webhook API check failed").slice(0, 300),
+          quotaApiOk: false,
+          quotaApiStatus: null,
+          quotaApiBody: String(error?.message || "LINE quota API check failed").slice(0, 300)
         });
       }
     }
