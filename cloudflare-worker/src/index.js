@@ -138,6 +138,7 @@ const jsonHeaders = {
   "cache-control": "no-store"
 };
 const lineReplyApiUrl = "https://api.line.me/v2/bot/message/reply";
+const linePushApiUrl = "https://api.line.me/v2/bot/message/push";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -342,6 +343,80 @@ const sendPausedLineReply = async ({ accessToken, replyToken, message, timeoutMs
   };
 };
 
+const sendLinePushMessage = async ({ accessToken, to, message, timeoutMs }) => {
+  const response = await withTimeout(
+    (signal) =>
+      fetch(linePushApiUrl, {
+        method: "POST",
+        signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          to,
+          messages: [{ type: "text", text: message }]
+        })
+      }),
+    timeoutMs
+  );
+  if (response.ok) {
+    return { ok: true };
+  }
+  const bodyText = await response.text().catch(() => "");
+  return {
+    ok: false,
+    status: response.status,
+    detail: bodyText.slice(0, 300)
+  };
+};
+
+const resolvePushTarget = (event) => {
+  const source = event && typeof event === "object" ? event.source : null;
+  return String(source?.groupId || source?.roomId || source?.userId || "").trim();
+};
+
+const sendLineMessageWithFallback = async ({ accessToken, replyToken, pushTo, message, timeoutMs }) => {
+  if (replyToken && replyToken !== "00000000000000000000000000000000") {
+    const replyResult = await sendPausedLineReply({
+      accessToken,
+      replyToken,
+      message,
+      timeoutMs
+    });
+    if (replyResult.ok) {
+      return replyResult;
+    }
+    if (!pushTo) {
+      return replyResult;
+    }
+    const pushResult = await sendLinePushMessage({
+      accessToken,
+      to: pushTo,
+      message,
+      timeoutMs
+    });
+    if (pushResult.ok) {
+      return pushResult;
+    }
+    return {
+      ok: false,
+      status: pushResult.status,
+      detail: `reply:${replyResult.status} ${replyResult.detail || ""} / push:${pushResult.status} ${pushResult.detail || ""}`.slice(0, 300)
+    };
+  }
+
+  if (!pushTo) {
+    return { ok: false, status: 400, detail: "no replyToken and no push target" };
+  }
+  return sendLinePushMessage({
+    accessToken,
+    to: pushTo,
+    message,
+    timeoutMs
+  });
+};
+
 const normalizeCommandText = (value) =>
   String(value || "")
     .toLowerCase()
@@ -415,6 +490,7 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
   const replyTargets = events
     .map((event) => ({
       replyToken: String(event?.replyToken || "").trim(),
+      pushTo: resolvePushTarget(event),
       type: String(event?.type || ""),
       messageType: String(event?.message?.type || ""),
       messageText: String(event?.message?.text || "").trim()
@@ -460,11 +536,12 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
       } else if (event.type === "message" && event.messageType === "text" && isSuspendCommand(event.messageText)) {
         replyText = "休止完了しています。再開する場合は「起動」と送信してください。";
       }
-      return sendPausedLineReply({
+      return sendLineMessageWithFallback({
         accessToken: lineAccessToken,
         replyToken: event.replyToken,
+        pushTo: event.pushTo,
         message: replyText,
-        timeoutMs: Math.max(2000, timeoutMs + 3000)
+        timeoutMs: Math.max(5000, timeoutMs + 6000)
       });
     })
   );
@@ -605,6 +682,7 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
   const events = Array.isArray(payload?.events) ? payload.events : [];
   const parsedEvents = events.map((event) => ({
     replyToken: String(event?.replyToken || "").trim(),
+    pushTo: resolvePushTarget(event),
     type: String(event?.type || ""),
     messageType: String(event?.message?.type || ""),
     messageText: String(event?.message?.text || "").trim()
@@ -673,11 +751,12 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
           replyText = "再開に失敗しました。時間をおいて再試行してください。";
         }
       }
-      return sendPausedLineReply({
+      return sendLineMessageWithFallback({
         accessToken: lineAccessToken,
         replyToken: event.replyToken,
+        pushTo: event.pushTo,
         message: replyText,
-        timeoutMs: Math.max(2000, timeoutMs + 3000)
+        timeoutMs: Math.max(5000, timeoutMs + 6000)
       });
     })
   );
