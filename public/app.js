@@ -23,9 +23,9 @@ const templateKeyShortcuts = document.getElementById("templateKeyShortcuts");
 const templateVariableShortcuts = document.getElementById("templateVariableShortcuts");
 
 const templateCsvText = [
-  "年代,ワイン名,wine_name,販売価格,納品価格,在庫数,在庫店舗,納品業者,原価率",
-  "2021,マコン・クラシコ,Macan Clasico,6980,4200,24,新宿倉庫,ABCトレーディング,60.2",
-  "2019,シャトー・マルゴー,Chateau Margaux,198000,132000,2,銀座店,XYZインポーター,66.7"
+  "年代,ワイン名,wine_name,生産者,セパージュ,販売価格,納品価格,在庫数,在庫店舗,納品業者,原価率",
+  "2021,マコン・クラシコ,Macan Clasico,Bodegas Benjamin de Rothschild & Vega Sicilia,Tempranillo,6980,4200,24,新宿倉庫,ABCトレーディング,60.2",
+  "2019,シャトー・マルゴー,Chateau Margaux,Chateau Margaux,Cabernet Sauvignon/Merlot,198000,132000,2,銀座店,XYZインポーター,66.7"
 ].join("\n");
 
 const STORAGE_ADMIN_TOKEN_KEY = "line_wine_admin_token";
@@ -197,6 +197,24 @@ const safeDate = (value) => {
   }
   return d.toLocaleString("ja-JP");
 };
+
+const getFileExtension = (fileName) => {
+  const name = String(fileName || "");
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot).toLowerCase() : "";
+};
+
+const readFileAsBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("failed to read file"));
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
 
 const isAuthError = (error) => error instanceof ApiError && error.status === 401;
 
@@ -386,7 +404,7 @@ const activateStaticPreviewMode = (reason = "") => {
     { template_key: "price_not_found", is_active: 1, updated_at: new Date().toISOString(), body: "{{query}} に一致する価格が見つかりませんでした。" }
   ]);
   renderIngestionFiles([]);
-  csvIngestionResult.textContent = "静的プレビューではCSV取り込みAPIは利用できません。";
+  csvIngestionResult.textContent = "静的プレビューではファイル取り込みAPIは利用できません。";
   ingestionErrorsResult.textContent = "静的プレビューではエラー詳細取得は利用できません。";
 
   const suffix = reason ? ` (${reason})` : "";
@@ -572,25 +590,37 @@ downloadTemplateBtn.addEventListener("click", async () => {
 csvIngestionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.isStaticPreview) {
-    notify("静的プレビューではCSV取り込みできません。", true);
+    notify("静的プレビューではファイル取り込みできません。", true);
     return;
   }
 
   const formData = new FormData(csvIngestionForm);
   const file = formData.get("csvFile");
   if (!(file instanceof File) || !file.size) {
-    notify("CSVファイルを選択してください。", true);
+    notify("取込ファイルを選択してください。", true);
     return;
   }
 
   try {
-    const csvText = await file.text();
+    const extension = getFileExtension(file.name);
+    const isCsvLike = [".csv", ".tsv", ".txt"].includes(extension);
+    const isExcel = [".xlsx", ".xls"].includes(extension);
+    if (!isCsvLike && !isExcel) {
+      notify("対応形式は CSV / TSV / TXT / XLSX / XLS です。", true);
+      return;
+    }
+
     const payload = {
       fileName: file.name,
-      csvText,
+      fileMimeType: String(file.type || ""),
       periodYm: String(formData.get("periodYm") || "").trim(),
       uploadedBy: String(formData.get("uploadedBy") || "").trim() || "admin"
     };
+    if (isCsvLike) {
+      payload.csvText = await file.text();
+    } else {
+      payload.fileBase64 = await readFileAsBase64(file);
+    }
 
     const storeIdRaw = String(formData.get("storeId") || "").trim();
     if (storeIdRaw) {
@@ -600,9 +630,9 @@ csvIngestionForm.addEventListener("submit", async (event) => {
     const result = await api.post("/api/ingestion/csv", payload);
     csvIngestionResult.textContent = JSON.stringify(result, null, 2);
     await loadIngestionFiles();
-    notify("CSV取り込みを実行しました。");
+    notify("ファイル取り込みを実行しました。");
   } catch (error) {
-    handleOperationError("CSV取り込み失敗", error);
+    handleOperationError("ファイル取り込み失敗", error);
   }
 });
 

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS products (
   name TEXT NOT NULL,
   name_en TEXT,
   producer TEXT,
+  cepage TEXT,
   vintage TEXT,
   unit TEXT,
   retail_price INTEGER,

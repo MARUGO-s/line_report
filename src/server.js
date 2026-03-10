@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import XLSX from "xlsx";
 import {
   adjustProductStockQty,
   addIngestionError,
@@ -392,6 +393,18 @@ const parseRateValue = (value) => {
   return Math.round(parsed * 100) / 100;
 };
 
+const pickFirstNonEmptyText = (...values) => {
+  for (const raw of values) {
+    const text = String(raw ?? "").trim();
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+};
+
+const looksLikeNumericCell = (value) => /^[-+]?[\d,\s.]+$/.test(String(value || "").trim());
+
 const detectCsvDelimiter = (headerLine) => {
   const line = String(headerLine || "");
   const comma = (line.match(/,/g) || []).length;
@@ -458,6 +471,29 @@ const HEADER_MAP = {
   ワイン名: "product_name",
   年代: "vintage",
   vintage: "vintage",
+  producer: "producer",
+  winery: "producer",
+  producername: "producer",
+  maker: "producer",
+  生産者: "producer",
+  生産者名: "producer",
+  作り手: "producer",
+  ワイナリー: "producer",
+  cepage: "cepage",
+  cépage: "cepage",
+  grape: "cepage",
+  grapes: "cepage",
+  grapevarieties: "cepage",
+  grapvarieties: "cepage",
+  variety: "cepage",
+  varieties: "cepage",
+  varietal: "cepage",
+  varietals: "cepage",
+  品種: "cepage",
+  ぶどう品種: "cepage",
+  葡萄品種: "cepage",
+  ブドウ品種: "cepage",
+  セパージュ: "cepage",
   storeid: "store_id",
   店舗id: "store_id",
   storecode: "store_code",
@@ -557,6 +593,83 @@ const parseCsvText = (csvText, { headerMapping = null, delimiter: fixedDelimiter
   return { headers, rows };
 };
 
+const parseExcelBuffer = (fileBuffer, { headerMapping = null } = {}) => {
+  const workbook = XLSX.read(fileBuffer, {
+    type: "buffer",
+    raw: false
+  });
+  const firstSheetName = Array.isArray(workbook.SheetNames) ? workbook.SheetNames[0] : "";
+  if (!firstSheetName) {
+    return { headers: [], rows: [] };
+  }
+
+  const sheet = workbook.Sheets[firstSheetName];
+  if (!sheet) {
+    return { headers: [], rows: [] };
+  }
+
+  const matrix = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+    blankrows: true
+  });
+
+  const headerRowIndex = matrix.findIndex(
+    (rowValues) =>
+      Array.isArray(rowValues) &&
+      rowValues.some((value) => String(value ?? "").trim() !== "")
+  );
+  if (headerRowIndex < 0) {
+    return { headers: [], rows: [] };
+  }
+
+  const rawHeaders = (Array.isArray(matrix[headerRowIndex]) ? matrix[headerRowIndex] : []).map((value) =>
+    String(value ?? "").trim()
+  );
+  const headers = normalizeCsvHeaders(rawHeaders, buildCustomHeaderMap(headerMapping));
+  const rows = [];
+
+  for (let i = headerRowIndex + 1; i < matrix.length; i += 1) {
+    const values = Array.isArray(matrix[i]) ? matrix[i].map((value) => String(value ?? "").trim()) : [];
+    if (!values.some((value) => value !== "")) {
+      continue;
+    }
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header] = values[index] ?? "";
+    });
+    rows.push({
+      rowNo: i + 1,
+      row
+    });
+  }
+
+  return { headers, rows };
+};
+
+const decodeBase64Payload = (value) => {
+  const text = String(value || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const rawPayload = text.startsWith("data:")
+    ? text.slice(text.indexOf(",") + 1)
+    : text;
+  const normalized = rawPayload.replace(/\s+/g, "");
+  if (!normalized || !/^[A-Za-z0-9+/=]+$/.test(normalized)) {
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(normalized, "base64");
+    return decoded.length ? decoded : null;
+  } catch {
+    return null;
+  }
+};
+
 const formatYen = (value) => {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) {
@@ -596,6 +709,7 @@ const buildCatalogDetailLines = (row) =>
   [
     `ワイン名: ${formatCatalogTitle(row)}`,
     `生産者: ${row.producer || "不明"}`,
+    `セパージュ: ${row.cepage || "不明"}`,
     `年代: ${row.vintage || "不明"}`,
     `納品価格: ${formatYen(row.purchase_price)}`,
     `販売価格: ${formatYen(row.retail_price)}`,
@@ -4330,6 +4444,29 @@ const processCsvIngestionRows = ({
     const productName = String(row.product_name || "").trim();
     const nameEn = String(row.name_en || "").trim();
     const sku = String(row.sku || "").trim();
+    const producerFromKnownHeaders = pickFirstNonEmptyText(
+      row.producer,
+      row.producer_name,
+      row.winery,
+      row.winery_name,
+      row.maker
+    );
+    const cepageFromKnownHeaders = pickFirstNonEmptyText(
+      row.cepage,
+      row.grape,
+      row.grapes,
+      row.variety,
+      row.varieties,
+      row.varietal
+    );
+    // D列/E列固定フォーマット向けフォールバック:
+    // ヘッダー名が揺れて col_4/col_5 になった場合でも生産者/セパージュを吸収する。
+    const producerFromPosition =
+      !producerFromKnownHeaders && !looksLikeNumericCell(row.col_4) ? String(row.col_4 || "").trim() : "";
+    const cepageFromPosition =
+      !cepageFromKnownHeaders && !looksLikeNumericCell(row.col_5) ? String(row.col_5 || "").trim() : "";
+    const resolvedProducer = pickFirstNonEmptyText(producerFromKnownHeaders, producerFromPosition);
+    const resolvedCepage = pickFirstNonEmptyText(cepageFromKnownHeaders, cepageFromPosition);
 
     if (!productName && !nameEn && !sku) {
       addIngestionError({
@@ -4443,6 +4580,8 @@ const processCsvIngestionRows = ({
       sku,
       name: productName || nameEn || sku,
       nameEn: nameEn || null,
+      producer: resolvedProducer || null,
+      cepage: resolvedCepage || null,
       vintage: String(row.vintage || "").trim() || null,
       retailPrice,
       purchasePrice,
@@ -4909,7 +5048,7 @@ app.post("/webhooks/line", express.raw({ type: "application/json" }), async (req
   }
 });
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "20mb" }));
 app.use("/api", requireAdminAuth);
 app.use("/admin", express.static(path.join(projectRoot, "public"), { extensions: ["html"] }));
 
@@ -5094,6 +5233,7 @@ app.post("/api/products", (req, res) => {
       name: name || nameEn,
       nameEn: nameEn || null,
       producer: String(req.body?.producer || "").trim() || null,
+      cepage: String(req.body?.cepage || "").trim() || null,
       vintage: String(req.body?.vintage || "").trim() || null,
       unit: String(req.body?.unit || "").trim() || null,
       retailPrice,
@@ -5175,9 +5315,9 @@ app.get("/api/ingestion/files", (req, res) => {
 
 const buildIngestionTemplateCsv = () =>
   [
-    "年代,ワイン名,wine_name,販売価格,納品価格,在庫数,在庫店舗,納品業者,原価率",
-    "2021,マコン・クラシコ,Macan Clasico,6980,4200,24,新宿倉庫,ABCトレーディング,60.2",
-    "2019,シャトー・マルゴー,Chateau Margaux,198000,132000,2,銀座店,XYZインポーター,66.7"
+    "年代,ワイン名,wine_name,生産者,セパージュ,販売価格,納品価格,在庫数,在庫店舗,納品業者,原価率",
+    "2021,マコン・クラシコ,Macan Clasico,Bodegas Benjamin de Rothschild & Vega Sicilia,Tempranillo,6980,4200,24,新宿倉庫,ABCトレーディング,60.2",
+    "2019,シャトー・マルゴー,Chateau Margaux,Chateau Margaux,Cabernet Sauvignon/Merlot,198000,132000,2,銀座店,XYZインポーター,66.7"
   ].join("\n");
 
 app.get("/template/wine_price_template.csv", (req, res) => {
@@ -5296,9 +5436,10 @@ app.delete("/api/ingestion/files/:id", (req, res) => {
 
 app.post("/api/ingestion/csv", (req, res) => {
   const csvText = String(req.body?.csvText || "");
-  if (!csvText.trim()) {
-    return sendError(res, 400, "csvText is required");
-  }
+  const fileBase64 = String(req.body?.fileBase64 || "");
+  const fileMimeType = String(req.body?.fileMimeType || "").trim().toLowerCase();
+  const fileName = String(req.body?.fileName || "upload.csv").trim() || "upload.csv";
+  const fileExtension = String(path.extname(fileName) || "").trim().toLowerCase();
 
   const inputPeriodYm = String(req.body?.periodYm || "").trim();
   const periodYm = inputPeriodYm ? asPeriodYm(inputPeriodYm) : null;
@@ -5313,17 +5454,56 @@ app.post("/api/ingestion/csv", (req, res) => {
   });
 
   const storeMapping = defaultStoreId ? getStoreCsvMapping(defaultStoreId) : null;
-  const parsed = parseCsvText(csvText, {
+  const parseOptions = {
     headerMapping: storeMapping?.header_mapping || null,
     delimiter: storeMapping?.delimiter || null
-  });
+  };
+
+  let parsed = null;
+  let fileHashInput = "";
+  if (csvText.trim()) {
+    parsed = parseCsvText(csvText, parseOptions);
+    fileHashInput = csvText;
+  } else if (fileBase64.trim()) {
+    const fileBuffer = decodeBase64Payload(fileBase64);
+    if (!fileBuffer) {
+      return sendError(res, 400, "fileBase64 is invalid");
+    }
+
+    const isExcel =
+      [".xlsx", ".xls"].includes(fileExtension) ||
+      fileMimeType.includes("spreadsheetml") ||
+      fileMimeType.includes("ms-excel");
+    const isCsvLike =
+      [".csv", ".txt", ".tsv"].includes(fileExtension) ||
+      fileMimeType.includes("csv") ||
+      fileMimeType === "text/plain";
+
+    if (isExcel) {
+      try {
+        parsed = parseExcelBuffer(fileBuffer, {
+          headerMapping: parseOptions.headerMapping
+        });
+      } catch (error) {
+        return sendError(res, 400, `failed to parse excel: ${String(error?.message || "invalid file")}`);
+      }
+    } else if (isCsvLike || !fileExtension) {
+      parsed = parseCsvText(fileBuffer.toString("utf8"), parseOptions);
+    } else {
+      return sendError(res, 400, "unsupported file format (allowed: csv, xlsx, xls)");
+    }
+
+    fileHashInput = fileBuffer;
+  } else {
+    return sendError(res, 400, "csvText or fileBase64 is required");
+  }
+
   if (!parsed.rows.length) {
-    return sendError(res, 400, "CSV rows are empty");
+    return sendError(res, 400, "ingestion rows are empty");
   }
 
   const uploadedBy = String(req.body?.uploadedBy || "admin").trim() || "admin";
-  const fileName = String(req.body?.fileName || "upload.csv").trim() || "upload.csv";
-  const fileHash = crypto.createHash("sha256").update(csvText).digest("hex");
+  const fileHash = crypto.createHash("sha256").update(fileHashInput).digest("hex");
 
   let ingestionFile = null;
   try {
@@ -5390,7 +5570,7 @@ app.post("/api/ingestion/csv", (req, res) => {
       acceptedRows: 0,
       rejectedRows: parsed.rows.length
     });
-    return sendError(res, 500, "csv ingestion failed");
+    return sendError(res, 500, "ingestion failed");
   }
 });
 

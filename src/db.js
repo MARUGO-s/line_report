@@ -74,6 +74,7 @@ ensureColumn("products", "stock_qty", "INTEGER");
 ensureColumn("products", "stock_store", "TEXT");
 ensureColumn("products", "supplier_name", "TEXT");
 ensureColumn("products", "cost_rate", "REAL");
+ensureColumn("products", "cepage", "TEXT");
 
 const nowIso = () => new Date().toISOString();
 
@@ -182,7 +183,7 @@ const readAliasesStmt = db.prepare(
 
 const listProductsStmt = db.prepare(`
   SELECT
-    p.id, p.sku, p.name, p.name_en, p.producer, p.vintage, p.unit,
+    p.id, p.sku, p.name, p.name_en, p.producer, p.cepage, p.vintage, p.unit,
     p.retail_price, p.purchase_price, p.stock_qty, p.stock_store, p.supplier_name, p.cost_rate,
     p.created_at, p.updated_at
   FROM products p
@@ -191,6 +192,7 @@ const listProductsStmt = db.prepare(`
     OR p.name LIKE @like
     OR IFNULL(p.name_en, '') LIKE @like
     OR IFNULL(p.producer, '') LIKE @like
+    OR IFNULL(p.cepage, '') LIKE @like
     OR IFNULL(p.sku, '') LIKE @like
     OR EXISTS (
       SELECT 1
@@ -216,12 +218,12 @@ export const listProducts = ({ query = "", limit = 200 } = {}) => {
 
 const insertProductStmt = db.prepare(`
   INSERT INTO products (
-    sku, name, name_en, producer, vintage, unit,
+    sku, name, name_en, producer, cepage, vintage, unit,
     retail_price, purchase_price, stock_qty, stock_store, supplier_name, cost_rate,
     created_at, updated_at
   )
   VALUES (
-    @sku, @name, @name_en, @producer, @vintage, @unit,
+    @sku, @name, @name_en, @producer, @cepage, @vintage, @unit,
     @retail_price, @purchase_price, @stock_qty, @stock_store, @supplier_name, @cost_rate,
     @created_at, @updated_at
   )
@@ -234,6 +236,7 @@ const updateProductStmt = db.prepare(`
     name = @name,
     name_en = @name_en,
     producer = @producer,
+    cepage = @cepage,
     vintage = @vintage,
     unit = @unit,
     retail_price = @retail_price,
@@ -254,7 +257,7 @@ const insertAliasStmt = db.prepare(`
 
 const getProductByIdStmt = db.prepare(`
   SELECT
-    id, sku, name, name_en, producer, vintage, unit,
+    id, sku, name, name_en, producer, cepage, vintage, unit,
     retail_price, purchase_price, stock_qty, stock_store, supplier_name, cost_rate,
     created_at, updated_at
   FROM products WHERE id = ?
@@ -272,6 +275,7 @@ const buildProductWritePayload = (payload = {}) => ({
   name: toNullableText(payload.name),
   name_en: toNullableText(payload.nameEn ?? payload.name_en),
   producer: toNullableText(payload.producer),
+  cepage: toNullableText(payload.cepage),
   vintage: toNullableText(payload.vintage),
   unit: toNullableText(payload.unit),
   retail_price: toNullableInteger(payload.retailPrice ?? payload.retail_price),
@@ -458,6 +462,7 @@ const upsertCatalogProductTx = db.transaction((payload) => {
     name: normalized.name ?? current.name ?? normalized.name_en ?? current.name_en ?? lookupName,
     name_en: normalized.name_en ?? current.name_en ?? null,
     producer: normalized.producer ?? current.producer ?? null,
+    cepage: normalized.cepage ?? current.cepage ?? null,
     vintage: normalized.vintage ?? current.vintage ?? null,
     unit: normalized.unit ?? current.unit ?? null,
     retail_price: normalized.retail_price ?? current.retail_price ?? null,
@@ -618,6 +623,7 @@ const searchProductIdsStmt = db.prepare(`
      OR IFNULL(p.name_en, '') LIKE @like
      OR IFNULL(p.sku, '') LIKE @like
      OR IFNULL(p.producer, '') LIKE @like
+     OR IFNULL(p.cepage, '') LIKE @like
      OR IFNULL(pa.alias, '') LIKE @like
   ORDER BY p.updated_at DESC
   LIMIT @limit
@@ -654,7 +660,7 @@ export const findCurrentPricesByQuery = (query, limitProducts = 3) => {
 
 const searchCatalogProductsStmt = db.prepare(`
   SELECT
-    p.id, p.sku, p.name, p.name_en, p.producer, p.vintage, p.unit,
+    p.id, p.sku, p.name, p.name_en, p.producer, p.cepage, p.vintage, p.unit,
     p.retail_price, p.purchase_price, p.stock_qty, p.stock_store, p.supplier_name, p.cost_rate,
     p.created_at, p.updated_at
   FROM products p
@@ -663,6 +669,7 @@ const searchCatalogProductsStmt = db.prepare(`
     OR IFNULL(p.name_en, '') LIKE @like
     OR IFNULL(p.sku, '') LIKE @like
     OR IFNULL(p.producer, '') LIKE @like
+    OR IFNULL(p.cepage, '') LIKE @like
     OR EXISTS (
       SELECT 1
       FROM product_aliases pa
@@ -685,7 +692,7 @@ const searchCatalogProductsStmt = db.prepare(`
 
 const searchCatalogByVintageStmt = db.prepare(`
   SELECT
-    p.id, p.sku, p.name, p.name_en, p.producer, p.vintage, p.unit,
+    p.id, p.sku, p.name, p.name_en, p.producer, p.cepage, p.vintage, p.unit,
     p.retail_price, p.purchase_price, p.stock_qty, p.stock_store, p.supplier_name, p.cost_rate,
     p.created_at, p.updated_at
   FROM products p
@@ -696,7 +703,7 @@ const searchCatalogByVintageStmt = db.prepare(`
 
 const searchCatalogByPriceRangeStmt = db.prepare(`
   SELECT
-    p.id, p.sku, p.name, p.name_en, p.producer, p.vintage, p.unit,
+    p.id, p.sku, p.name, p.name_en, p.producer, p.cepage, p.vintage, p.unit,
     p.retail_price, p.purchase_price, p.stock_qty, p.stock_store, p.supplier_name, p.cost_rate,
     p.created_at, p.updated_at
   FROM products p
@@ -1327,6 +1334,7 @@ const deleteIngestionFileTx = db.transaction((id) => {
       name: toNullableText(before.name) || toNullableText(before.name_en),
       name_en: toNullableText(before.name_en),
       producer: toNullableText(before.producer),
+      cepage: toNullableText(before.cepage),
       vintage: toNullableText(before.vintage),
       unit: toNullableText(before.unit),
       retail_price: toNullableInteger(before.retail_price),

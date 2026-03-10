@@ -51,16 +51,21 @@
       </section>
 
       <section class="panel">
-        <h2>CSV取り込み</h2>
-        <p class="sub">商品・価格データはCSVアップロードで一括更新します。</p>
+        <h2>CSV / Excel取り込み</h2>
+        <p class="sub">商品・価格データはCSVまたはExcelアップロードで一括更新します。</p>
         <div class="panel-actions">
           <button id="downloadTemplateBtn" type="button">テンプレートCSVをダウンロード</button>
         </div>
 
         <form id="csvIngestionForm" class="stack top-gap">
           <label>
-            CSVファイル *
-            <input name="csvFile" type="file" accept=".csv,text/csv" required />
+            取込ファイル *
+            <input
+              name="csvFile"
+              type="file"
+              accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              required
+            />
           </label>
           <div class="split">
             <label>
@@ -76,7 +81,7 @@
             取込者
             <input name="uploadedBy" placeholder="例: admin" />
           </label>
-          <button type="submit">CSVを取り込む</button>
+          <button type="submit">ファイルを取り込む</button>
         </form>
 
         <pre id="csvIngestionResult" class="result">ここに取り込み結果が表示されます。</pre>
