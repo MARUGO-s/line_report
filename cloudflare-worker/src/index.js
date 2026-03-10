@@ -141,6 +141,19 @@ const lineReplyApiUrl = "https://api.line.me/v2/bot/message/reply";
 const linePushApiUrl = "https://api.line.me/v2/bot/message/push";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const runtimeDiagnostics = {
+  lastWebhook: null
+};
+
+const setRuntimeWebhookDiag = (update) => {
+  runtimeDiagnostics.lastWebhook = {
+    ...(runtimeDiagnostics.lastWebhook && typeof runtimeDiagnostics.lastWebhook === "object"
+      ? runtimeDiagnostics.lastWebhook
+      : {}),
+    updatedAt: new Date().toISOString(),
+    ...update
+  };
+};
 
 const toBase64 = (buffer) => {
   const bytes = new Uint8Array(buffer);
@@ -389,7 +402,7 @@ const sendLinePushMessage = async ({ accessToken, to, message, timeoutMs }) => {
     timeoutMs
   );
   if (response.ok) {
-    return { ok: true };
+    return { ok: true, via: "push" };
   }
   const bodyText = await response.text().catch(() => "");
   return {
@@ -413,7 +426,7 @@ const sendLineMessageWithFallback = async ({ accessToken, replyToken, pushTo, me
       timeoutMs
     });
     if (replyResult.ok) {
-      return replyResult;
+      return { ok: true, via: "reply" };
     }
     if (!pushTo) {
       return replyResult;
@@ -425,7 +438,7 @@ const sendLineMessageWithFallback = async ({ accessToken, replyToken, pushTo, me
       timeoutMs
     });
     if (pushResult.ok) {
-      return pushResult;
+      return { ok: true, via: "push_fallback", replyStatus: replyResult.status };
     }
     return {
       ok: false,
@@ -437,12 +450,16 @@ const sendLineMessageWithFallback = async ({ accessToken, replyToken, pushTo, me
   if (!pushTo) {
     return { ok: false, status: 400, detail: "no replyToken and no push target" };
   }
-  return sendLinePushMessage({
+  const pushResult = await sendLinePushMessage({
     accessToken,
     to: pushTo,
     message,
     timeoutMs
   });
+  if (pushResult.ok) {
+    return { ok: true, via: "push" };
+  }
+  return pushResult;
 };
 
 const sleep = (ms) =>
@@ -536,7 +553,7 @@ const isSuspendCommand = (text) => {
 
 const buildSuspendLineSuccessText = () => "休止完了しました。";
 
-const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, backgroundTask }) => {
+const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, backgroundTask, recordDiag }) => {
   const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
   if (!lineAccessToken) {
     return asJson(500, { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です。" });
@@ -550,6 +567,12 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
       channelSecret: lineChannelSecret
     });
     if (!valid) {
+      if (typeof recordDiag === "function") {
+        recordDiag({
+          stage: "signature_invalid",
+          mode: "paused"
+        });
+      }
       return asJson(401, { ok: false, error: "invalid line signature" });
     }
   }
@@ -565,6 +588,12 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
     || "ただいまの時間はサーバーが休止中です。";
   const pausedWithGuide = `${pausedMessage}\n再開する場合は「起動」と送信してください。`;
   const events = Array.isArray(payload?.events) ? payload.events : [];
+  const resumeCommandCount = events.filter(
+    (event) =>
+      String(event?.type || "") === "message"
+      && String(event?.message?.type || "") === "text"
+      && isResumeCommand(String(event?.message?.text || "").trim())
+  ).length;
   const replyTargets = events
     .map((event) => ({
       replyToken: String(event?.replyToken || "").trim(),
@@ -574,6 +603,16 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
       messageText: String(event?.message?.text || "").trim()
     }))
     .filter((event) => event.replyToken && event.replyToken !== "00000000000000000000000000000000");
+
+  if (typeof recordDiag === "function") {
+    recordDiag({
+      stage: "parsed",
+      mode: "paused",
+      eventCount: events.length,
+      replyTargetCount: replyTargets.length,
+      resumeCommandCount
+    });
+  }
 
   if (!replyTargets.length) {
     return asJson(200, { ok: true, paused: true, replied: 0 });
@@ -638,10 +677,35 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
 
   const failed = results.find((result) => !result.ok);
   if (failed) {
+    if (typeof recordDiag === "function") {
+      recordDiag({
+        stage: "reply_failed",
+        mode: "paused",
+        failedStatus: failed.status || null,
+        failedDetail: String(failed.detail || "").slice(0, 160),
+        replyResults: results.map((x) => ({
+          ok: Boolean(x?.ok),
+          status: x?.status ?? null,
+          via: String(x?.via || "")
+        }))
+      });
+    }
     return asJson(502, {
       ok: false,
       error: `LINE reply failed (${failed.status})`,
       detail: failed.detail || ""
+    });
+  }
+
+  if (typeof recordDiag === "function") {
+    recordDiag({
+      stage: "reply_sent",
+      mode: "paused",
+      replyResults: results.map((x) => ({
+        ok: Boolean(x?.ok),
+        status: x?.status ?? null,
+        via: String(x?.via || "")
+      }))
     });
   }
 
@@ -749,7 +813,7 @@ const handleSuspendRequest = async ({ env, timeoutMs }) => {
   }
 };
 
-const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, request, appUrl, backgroundTask }) => {
+const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, request, appUrl, backgroundTask, recordDiag }) => {
   const lineChannelSecret = String(env.LINE_CHANNEL_SECRET || "").trim();
   if (lineChannelSecret) {
     const valid = await verifyLineSignature({
@@ -758,6 +822,12 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
       channelSecret: lineChannelSecret
     });
     if (!valid) {
+      if (typeof recordDiag === "function") {
+        recordDiag({
+          stage: "signature_invalid",
+          mode: "live"
+        });
+      }
       return asJson(401, { ok: false, error: "invalid line signature" });
     }
   }
@@ -791,7 +861,23 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
     events.length > 0 &&
     commandEvents.length === events.length;
 
+  if (typeof recordDiag === "function") {
+    recordDiag({
+      stage: "parsed",
+      mode: "live",
+      eventCount: events.length,
+      commandCount: commandEvents.length,
+      allEventsAreCommand
+    });
+  }
+
   if (!allEventsAreCommand) {
+    if (typeof recordDiag === "function") {
+      recordDiag({
+        stage: "forward_to_app",
+        mode: "live"
+      });
+    }
     return forwardRequestToApp({ request, appUrl, bodyBuffer });
   }
 
@@ -865,10 +951,35 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
 
   const failed = results.find((result) => !result.ok);
   if (failed) {
+    if (typeof recordDiag === "function") {
+      recordDiag({
+        stage: "reply_failed",
+        mode: "live",
+        failedStatus: failed.status || null,
+        failedDetail: String(failed.detail || "").slice(0, 160),
+        replyResults: results.map((x) => ({
+          ok: Boolean(x?.ok),
+          status: x?.status ?? null,
+          via: String(x?.via || "")
+        }))
+      });
+    }
     return asJson(502, {
       ok: false,
       error: `LINE reply failed (${failed.status})`,
       detail: failed.detail || ""
+    });
+  }
+
+  if (typeof recordDiag === "function") {
+    recordDiag({
+      stage: "reply_sent",
+      mode: "live",
+      replyResults: results.map((x) => ({
+        ok: Boolean(x?.ok),
+        status: x?.status ?? null,
+        via: String(x?.via || "")
+      }))
     });
   }
 
@@ -887,10 +998,23 @@ export default {
     };
     const url = new URL(request.url);
     const path = url.pathname;
+    const webhookDiagBase = {
+      requestId: String(request.headers.get("cf-ray") || ""),
+      path,
+      method: request.method
+    };
+    const recordDiag = (partial) => {
+      setRuntimeWebhookDiag({
+        ...webhookDiagBase,
+        ...partial
+      });
+    };
 
     if (path === "/webhooks/line" && request.method === "POST") {
+      recordDiag({ stage: "received" });
       const bodyBuffer = await request.arrayBuffer();
       const healthy = await isHealthy(healthUrl, timeoutMs);
+      recordDiag({ stage: "health_checked", healthy, mode: healthy ? "live" : "paused" });
       if (healthy) {
         return handleLiveLineWebhook({
           env,
@@ -900,7 +1024,8 @@ export default {
           healthUrl,
           request,
           appUrl,
-          backgroundTask
+          backgroundTask,
+          recordDiag
         });
       }
       return handlePausedLineWebhook({
@@ -909,7 +1034,8 @@ export default {
         timeoutMs,
         signature: request.headers.get("x-line-signature"),
         healthUrl,
-        backgroundTask
+        backgroundTask,
+        recordDiag
       });
     }
 
@@ -979,6 +1105,13 @@ export default {
           webhookApiBody: String(error?.message || "LINE webhook API check failed").slice(0, 300)
         });
       }
+    }
+
+    if (path === "/__diag/last-webhook" && request.method === "GET") {
+      return asJson(200, {
+        ok: true,
+        lastWebhook: runtimeDiagnostics.lastWebhook
+      });
     }
 
     if (path === "/__resume" && request.method === "POST") {
