@@ -458,7 +458,7 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
           }
         }
       } else if (event.type === "message" && event.messageType === "text" && isSuspendCommand(event.messageText)) {
-        replyText = "現在は休止中です。再開する場合は「起動」と送信してください。";
+        replyText = "休止完了しています。再開する場合は「起動」と送信してください。";
       }
       return sendPausedLineReply({
         accessToken: lineAccessToken,
