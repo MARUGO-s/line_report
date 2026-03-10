@@ -417,6 +417,64 @@ const sendLineMessageWithFallback = async ({ accessToken, replyToken, pushTo, me
   });
 };
 
+const sleep = (ms) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const isResumeAlreadyRunningMessage = (payload) =>
+  String(payload?.message || "").includes("すでに稼働中");
+
+const buildResumeLineAcceptedText = (payload) => {
+  if (isResumeAlreadyRunningMessage(payload)) {
+    return "起動完了しています（すでに稼働中です）。";
+  }
+  return "起動リクエストを受け付けました。起動完了まで20〜90秒ほどかかる場合があります。完了したら「起動完了」と送信します。";
+};
+
+const tryQueueResumeCompletionNotice = ({
+  backgroundTask,
+  env,
+  accessToken,
+  pushTo,
+  healthUrl,
+  timeoutMs,
+  resumePayload
+}) => {
+  if (typeof backgroundTask !== "function" || !accessToken || !pushTo) {
+    return false;
+  }
+  if (isResumeAlreadyRunningMessage(resumePayload)) {
+    return false;
+  }
+
+  const completionText = String(env.RESUME_COMPLETE_PUSH_TEXT || "").trim() || "起動完了しました。";
+  const pollIntervalMs = Math.max(3000, Number(env.RESUME_COMPLETE_POLL_MS || 5000) || 5000);
+  const maxWaitMs = Math.max(30000, Number(env.RESUME_COMPLETE_MAX_WAIT_MS || 180000) || 180000);
+  const pollTimeoutMs = Math.max(1000, timeoutMs);
+
+  const task = (async () => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < maxWaitMs) {
+      await sleep(pollIntervalMs);
+      const healthy = await isHealthy(healthUrl, pollTimeoutMs);
+      if (!healthy) {
+        continue;
+      }
+      await sendLinePushMessage({
+        accessToken,
+        to: pushTo,
+        message: completionText,
+        timeoutMs: Math.max(5000, pollTimeoutMs + 3000)
+      });
+      return;
+    }
+  })().catch(() => {});
+
+  backgroundTask(task);
+  return true;
+};
+
 const normalizeCommandText = (value) =>
   String(value || "")
     .toLowerCase()
@@ -448,17 +506,9 @@ const isSuspendCommand = (text) => {
   ].includes(normalized);
 };
 
-const buildResumeLineSuccessText = (payload) => {
-  const message = String(payload?.message || "").trim();
-  if (message.includes("すでに稼働中")) {
-    return "起動しました（すでに稼働中です）。";
-  }
-  return "起動しました。利用可能になるまで20〜60秒ほどお待ちください。";
-};
-
 const buildSuspendLineSuccessText = () => "休止完了しました。";
 
-const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl }) => {
+const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, backgroundTask }) => {
   const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
   if (!lineAccessToken) {
     return asJson(500, { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です。" });
@@ -512,6 +562,7 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
     }
     return resumeResultPromise;
   };
+  let resumeCompletionQueued = false;
 
   const results = await Promise.all(
     replyTargets.map(async (event) => {
@@ -519,7 +570,18 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
       if (event.type === "message" && event.messageType === "text" && isResumeCommand(event.messageText)) {
         const resumeResult = await getResumeResult();
         if (resumeResult.ok) {
-          replyText = buildResumeLineSuccessText(resumeResult.payload);
+          replyText = buildResumeLineAcceptedText(resumeResult.payload);
+          if (!resumeCompletionQueued) {
+            resumeCompletionQueued = tryQueueResumeCompletionNotice({
+              backgroundTask,
+              env,
+              accessToken: lineAccessToken,
+              pushTo: event.pushTo,
+              healthUrl,
+              timeoutMs,
+              resumePayload: resumeResult.payload
+            });
+          }
         } else {
           const detail = parseRenderErrorDetail(resumeResult.payload?.detail).message;
           if (/only services suspended by a user can be resumed/i.test(detail)) {
@@ -659,7 +721,7 @@ const handleSuspendRequest = async ({ env, timeoutMs }) => {
   }
 };
 
-const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, request, appUrl }) => {
+const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, request, appUrl, backgroundTask }) => {
   const lineChannelSecret = String(env.LINE_CHANNEL_SECRET || "").trim();
   if (lineChannelSecret) {
     const valid = await verifyLineSignature({
@@ -732,6 +794,7 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
     }
     return resumeResultPromise;
   };
+  let resumeCompletionQueued = false;
 
   const results = await Promise.all(
     commandEvents.map(async (event) => {
@@ -746,7 +809,18 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
       } else if (isResumeCommand(event.messageText)) {
         const resumeResult = await getResumeResult();
         if (resumeResult.ok) {
-          replyText = buildResumeLineSuccessText(resumeResult.payload);
+          replyText = buildResumeLineAcceptedText(resumeResult.payload);
+          if (!resumeCompletionQueued) {
+            resumeCompletionQueued = tryQueueResumeCompletionNotice({
+              backgroundTask,
+              env,
+              accessToken: lineAccessToken,
+              pushTo: event.pushTo,
+              healthUrl,
+              timeoutMs,
+              resumePayload: resumeResult.payload
+            });
+          }
         } else {
           replyText = "再開に失敗しました。時間をおいて再試行してください。";
         }
@@ -774,10 +848,15 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
 };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const appUrl = trimSlash(env.APP_URL || "https://line-wine-api.onrender.com");
     const healthUrl = String(env.HEALTH_URL || `${appUrl}/api/health`).trim();
     const timeoutMs = Math.max(500, Number(env.HEALTH_TIMEOUT_MS || 2500) || 2500);
+    const backgroundTask = (promise) => {
+      if (ctx && typeof ctx.waitUntil === "function") {
+        ctx.waitUntil(promise);
+      }
+    };
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -792,7 +871,8 @@ export default {
           signature: request.headers.get("x-line-signature"),
           healthUrl,
           request,
-          appUrl
+          appUrl,
+          backgroundTask
         });
       }
       return handlePausedLineWebhook({
@@ -800,7 +880,8 @@ export default {
         bodyBuffer,
         timeoutMs,
         signature: request.headers.get("x-line-signature"),
-        healthUrl
+        healthUrl,
+        backgroundTask
       });
     }
 
