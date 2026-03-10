@@ -257,6 +257,20 @@ const callRenderServiceStatus = async ({ apiKey, serviceId, timeoutMs }) => {
   );
 };
 
+const callLineBotInfo = async ({ accessToken, timeoutMs }) =>
+  withTimeout(
+    (signal) =>
+      fetch("https://api.line.me/v2/bot/info", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json"
+        },
+        signal
+      }),
+    timeoutMs
+  );
+
 const parseRenderErrorDetail = (detailText) => {
   const text = String(detailText || "").trim();
   if (!text) {
@@ -888,6 +902,45 @@ export default {
     if (path === "/__health" && request.method === "GET") {
       const healthy = await isHealthy(healthUrl, timeoutMs);
       return asJson(200, { ok: true, healthy });
+    }
+
+    if (path === "/__diag/line" && request.method === "GET") {
+      const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
+      const lineChannelSecret = String(env.LINE_CHANNEL_SECRET || "").trim();
+      if (!lineAccessToken) {
+        return asJson(200, {
+          ok: true,
+          hasAccessToken: false,
+          hasChannelSecret: Boolean(lineChannelSecret),
+          lineApiOk: false,
+          lineApiStatus: null,
+          lineApiBody: "LINE_CHANNEL_ACCESS_TOKEN が未設定です。"
+        });
+      }
+      try {
+        const response = await callLineBotInfo({
+          accessToken: lineAccessToken,
+          timeoutMs: Math.max(2000, timeoutMs + 2000)
+        });
+        const bodyText = await response.text().catch(() => "");
+        return asJson(200, {
+          ok: true,
+          hasAccessToken: true,
+          hasChannelSecret: Boolean(lineChannelSecret),
+          lineApiOk: response.ok,
+          lineApiStatus: response.status,
+          lineApiBody: bodyText.slice(0, 300)
+        });
+      } catch (error) {
+        return asJson(200, {
+          ok: true,
+          hasAccessToken: true,
+          hasChannelSecret: Boolean(lineChannelSecret),
+          lineApiOk: false,
+          lineApiStatus: null,
+          lineApiBody: String(error?.message || "LINE API check failed").slice(0, 300)
+        });
+      }
     }
 
     if (path === "/__resume" && request.method === "POST") {
