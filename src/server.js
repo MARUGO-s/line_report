@@ -14,6 +14,7 @@ import {
   createIngestionFile,
   deleteIngestionFile,
   dbPath,
+  findCatalogProductByIdentity,
   findCatalogProductsByPriceRange,
   findCatalogProductsByQuery,
   findCatalogProductsByVintage,
@@ -37,6 +38,7 @@ import {
   resolveStoreId,
   saveLineEvent,
   saveOcrResult,
+  recordIngestionProductSnapshot,
   setAdminTokenOverride,
   upsertCatalogProduct,
   upsertStoreCsvMapping,
@@ -4386,70 +4388,84 @@ const processCsvIngestionRows = ({
       costRate = null;
     }
 
-    const aliasCandidates = [productName, nameEn];
-
-    try {
-      const product = upsertCatalogProduct({
-        sku,
-        name: productName || nameEn || sku,
-        nameEn: nameEn || null,
-        vintage: String(row.vintage || "").trim() || null,
-        retailPrice,
-        purchasePrice,
-        stockQty,
-        stockStore: String(row.stock_store || "").trim() || null,
-        supplierName: String(row.supplier_name || "").trim() || null,
-        costRate,
-        aliases: aliasCandidates
+    const hasLegacyPrice = hasValue(row.price);
+    const legacyPrice = hasLegacyPrice ? parsePriceValue(row.price) : null;
+    if (hasLegacyPrice && legacyPrice === null) {
+      addIngestionError({
+        ingestionFileId,
+        rowNo,
+        errorCode: "INVALID_PRICE",
+        errorMessage: "price が不正です",
+        rawPayload: JSON.stringify(row)
       });
+      rejectedRows += 1;
+      continue;
+    }
 
-      const hasLegacyPrice = hasValue(row.price);
-      const legacyPrice = hasLegacyPrice ? parsePriceValue(row.price) : null;
-      if (hasLegacyPrice && legacyPrice === null) {
+    let rowStoreId = null;
+    let effectiveDate = null;
+    if (legacyPrice) {
+      rowStoreId =
+        resolveStoreId({
+          storeId: asPositiveInt(row.store_id),
+          storeCode: row.store_code || "",
+          storeName: row.store_name || ""
+        }) || defaultStoreId;
+
+      if (!rowStoreId) {
         addIngestionError({
           ingestionFileId,
           rowNo,
-          errorCode: "INVALID_PRICE",
-          errorMessage: "price が不正です",
+          errorCode: "STORE_NOT_FOUND",
+          errorMessage: "store_id / store_code / store_name が不足しています",
           rawPayload: JSON.stringify(row)
         });
         rejectedRows += 1;
         continue;
       }
 
+      effectiveDate = asDate(row.effective_date) || defaultEffectiveDate;
+      if (!effectiveDate) {
+        addIngestionError({
+          ingestionFileId,
+          rowNo,
+          errorCode: "INVALID_EFFECTIVE_DATE",
+          errorMessage: "effective_date が不正です（YYYY-MM-DD）",
+          rawPayload: JSON.stringify(row)
+        });
+        rejectedRows += 1;
+        continue;
+      }
+    }
+
+    const aliasCandidates = [productName, nameEn];
+    const productPayload = {
+      sku,
+      name: productName || nameEn || sku,
+      nameEn: nameEn || null,
+      vintage: String(row.vintage || "").trim() || null,
+      retailPrice,
+      purchasePrice,
+      stockQty,
+      stockStore: String(row.stock_store || "").trim() || null,
+      supplierName: String(row.supplier_name || "").trim() || null,
+      costRate,
+      aliases: aliasCandidates
+    };
+
+    try {
+      const beforeProduct = findCatalogProductByIdentity(productPayload);
+      const product = upsertCatalogProduct(productPayload);
+
+      recordIngestionProductSnapshot({
+        ingestionFileId,
+        productId: product.id,
+        rowNo,
+        wasCreated: !beforeProduct,
+        beforeProduct
+      });
+
       if (legacyPrice) {
-        const rowStoreId =
-          resolveStoreId({
-            storeId: asPositiveInt(row.store_id),
-            storeCode: row.store_code || "",
-            storeName: row.store_name || ""
-          }) || defaultStoreId;
-
-        if (!rowStoreId) {
-          addIngestionError({
-            ingestionFileId,
-            rowNo,
-            errorCode: "STORE_NOT_FOUND",
-            errorMessage: "store_id / store_code / store_name が不足しています",
-            rawPayload: JSON.stringify(row)
-          });
-          rejectedRows += 1;
-          continue;
-        }
-
-        const effectiveDate = asDate(row.effective_date) || defaultEffectiveDate;
-        if (!effectiveDate) {
-          addIngestionError({
-            ingestionFileId,
-            rowNo,
-            errorCode: "INVALID_EFFECTIVE_DATE",
-            errorMessage: "effective_date が不正です（YYYY-MM-DD）",
-            rawPayload: JSON.stringify(row)
-          });
-          rejectedRows += 1;
-          continue;
-        }
-
         addPriceHistory({
           productId: product.id,
           storeId: rowStoreId,
@@ -5251,6 +5267,28 @@ app.delete("/api/ingestion/files/:id", (req, res) => {
       ...deleted
     });
   } catch (error) {
+    if (error?.code === "ROLLBACK_DATA_MISSING") {
+      return sendError(
+        res,
+        409,
+        "この履歴はロールバック情報が無いため削除できません。新仕様適用後の取込データのみロールバック対応です。"
+      );
+    }
+    if (error?.code === "ROLLBACK_CONFLICT") {
+      const productHint = error?.productName
+        ? `（競合商品: ${error.productName}）`
+        : error?.productId
+          ? `（競合商品ID: ${error.productId}）`
+          : "";
+      return sendError(
+        res,
+        409,
+        `この履歴より新しいCSVが同一商品を更新しているため、先に新しい履歴を削除してください${productHint}`
+      );
+    }
+    if (error?.code === "ROLLBACK_DATA_CORRUPTED") {
+      return sendError(res, 500, "ロールバック情報が壊れているため削除できません");
+    }
     console.error(error);
     return sendError(res, 500, "failed to delete ingestion file");
   }

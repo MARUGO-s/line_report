@@ -441,12 +441,17 @@ const deleteIngestionFileEntry = async (ingestionFileId) => {
   const result = await api.delete(`/api/ingestion/files/${encodeURIComponent(ingestionFileId)}`);
   ingestionErrorsResult.textContent = JSON.stringify(result, null, 2);
   await loadIngestionFiles();
-  notify(
-    `取り込み履歴 ID ${ingestionFileId} を削除しました。` +
-      (Number(result?.detachedPriceHistoryCount || 0) > 0
-        ? ` 価格履歴 ${result.detachedPriceHistoryCount} 件の紐付けは解除されました。`
-        : "")
-  );
+  const rollback = result?.rollback || {};
+  const restoredProducts = Number(rollback.restoredProducts || 0);
+  const deletedProducts = Number(rollback.deletedProducts || 0);
+  const removedPriceHistory = Number(rollback.removedPriceHistory || 0);
+  const summary = [
+    `取り込み履歴 ID ${ingestionFileId} をロールバック削除しました。`,
+    `商品復元: ${restoredProducts}件`,
+    `商品削除: ${deletedProducts}件`,
+    `価格履歴削除: ${removedPriceHistory}件`
+  ];
+  notify(summary.join(" "));
 };
 
 const loadProtectedData = async () => {

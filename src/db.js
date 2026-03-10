@@ -39,6 +39,23 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ingestion_product_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingestion_file_id INTEGER NOT NULL REFERENCES ingestion_files(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    row_no INTEGER,
+    was_created INTEGER NOT NULL DEFAULT 0,
+    before_json TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(ingestion_file_id, product_id)
+  );
+`);
+
+db.exec(
+  "CREATE INDEX IF NOT EXISTS idx_ingestion_product_snapshots_file ON ingestion_product_snapshots(ingestion_file_id)"
+);
+
 const ensureColumn = (tableName, columnName, columnDefinition) => {
   const columns = db
     .prepare(`PRAGMA table_info(${tableName})`)
@@ -395,10 +412,10 @@ const findCatalogProductByIdentityStmt = db.prepare(`
   LIMIT 1
 `);
 
-const upsertCatalogProductTx = db.transaction((payload) => {
+const resolveCatalogProductIdentity = (payload = {}) => {
   const normalized = buildProductWritePayload(payload);
   if (!normalized.name && !normalized.name_en && !normalized.sku) {
-    throw new Error("sku or name is required");
+    return null;
   }
 
   const lookupName = normalized.name || normalized.name_en || normalized.sku;
@@ -408,6 +425,22 @@ const upsertCatalogProductTx = db.transaction((payload) => {
     name_en: normalized.name_en || lookupName,
     vintage: normalized.vintage || ""
   });
+  if (!existing) {
+    return null;
+  }
+  return getProductById(existing.id);
+};
+
+export const findCatalogProductByIdentity = (payload = {}) => resolveCatalogProductIdentity(payload);
+
+const upsertCatalogProductTx = db.transaction((payload) => {
+  const normalized = buildProductWritePayload(payload);
+  if (!normalized.name && !normalized.name_en && !normalized.sku) {
+    throw new Error("sku or name is required");
+  }
+
+  const lookupName = normalized.name || normalized.name_en || normalized.sku;
+  const existing = resolveCatalogProductIdentity(payload);
 
   if (!existing) {
     const id = createProductTx({
@@ -418,7 +451,7 @@ const upsertCatalogProductTx = db.transaction((payload) => {
     return getProductById(id);
   }
 
-  const current = getProductById(existing.id);
+  const current = existing;
   const updated = {
     id: current.id,
     sku: normalized.sku ?? current.sku ?? null,
@@ -1054,9 +1087,74 @@ const updateIngestionFileStmt = db.prepare(`
   WHERE id = @id
 `);
 
+const insertIngestionProductSnapshotStmt = db.prepare(`
+  INSERT INTO ingestion_product_snapshots (
+    ingestion_file_id, product_id, row_no, was_created, before_json, created_at
+  ) VALUES (
+    @ingestion_file_id, @product_id, @row_no, @was_created, @before_json, @created_at
+  )
+  ON CONFLICT(ingestion_file_id, product_id) DO NOTHING
+`);
+
+const listIngestionProductSnapshotsStmt = db.prepare(`
+  SELECT id, ingestion_file_id, product_id, row_no, was_created, before_json, created_at
+  FROM ingestion_product_snapshots
+  WHERE ingestion_file_id = ?
+  ORDER BY row_no DESC, id DESC
+`);
+
+const countIngestionProductSnapshotsByFileStmt = db.prepare(
+  "SELECT COUNT(1) AS count FROM ingestion_product_snapshots WHERE ingestion_file_id = ?"
+);
+
+const hasNewerProductSnapshotStmt = db.prepare(`
+  SELECT 1
+  FROM ingestion_product_snapshots s
+  JOIN ingestion_files f ON f.id = s.ingestion_file_id
+  WHERE s.product_id = @product_id
+    AND s.ingestion_file_id <> @ingestion_file_id
+    AND (
+      f.uploaded_at > @uploaded_at
+      OR (f.uploaded_at = @uploaded_at AND f.id > @ingestion_file_id)
+    )
+  LIMIT 1
+`);
+
+const countIngestionErrorsByFileStmt = db.prepare(
+  "SELECT COUNT(1) AS count FROM ingestion_errors WHERE ingestion_file_id = ?"
+);
+
+const listPriceHistoryPairsByIngestionFileStmt = db.prepare(`
+  SELECT DISTINCT product_id, store_id
+  FROM price_history
+  WHERE source_file_id = ?
+`);
+
+const deletePriceHistoryByIngestionFileStmt = db.prepare(
+  "DELETE FROM price_history WHERE source_file_id = ?"
+);
+
+const latestPriceHistoryByPairStmt = db.prepare(`
+  SELECT id, product_id, store_id, price, currency, effective_date, created_at
+  FROM price_history
+  WHERE product_id = ? AND store_id = ?
+  ORDER BY effective_date DESC, created_at DESC, id DESC
+  LIMIT 1
+`);
+
+const deleteCurrentPriceByPairStmt = db.prepare(
+  "DELETE FROM current_prices WHERE product_id = ? AND store_id = ?"
+);
+
 const countPriceHistoryByIngestionFileStmt = db.prepare(
   "SELECT COUNT(1) AS count FROM price_history WHERE source_file_id = ?"
 );
+
+const deleteProductAliasesByProductIdStmt = db.prepare(
+  "DELETE FROM product_aliases WHERE product_id = ?"
+);
+
+const deleteProductByIdStmt = db.prepare("DELETE FROM products WHERE id = ?");
 
 const deleteIngestionFileStmt = db.prepare("DELETE FROM ingestion_files WHERE id = ?");
 
@@ -1089,6 +1187,32 @@ export const createIngestionFile = ({
 export const getIngestionFileByHash = (fileHash) =>
   getIngestionFileByHashStmt.get(String(fileHash).trim());
 
+export const recordIngestionProductSnapshot = ({
+  ingestionFileId,
+  productId,
+  rowNo = null,
+  wasCreated = false,
+  beforeProduct = null
+}) => {
+  const normalizedIngestionFileId = Number(ingestionFileId);
+  const normalizedProductId = Number(productId);
+  if (!Number.isInteger(normalizedIngestionFileId) || normalizedIngestionFileId <= 0) {
+    throw new Error("ingestionFileId is invalid");
+  }
+  if (!Number.isInteger(normalizedProductId) || normalizedProductId <= 0) {
+    throw new Error("productId is invalid");
+  }
+
+  insertIngestionProductSnapshotStmt.run({
+    ingestion_file_id: normalizedIngestionFileId,
+    product_id: normalizedProductId,
+    row_no: rowNo === null || rowNo === undefined ? null : Number(rowNo),
+    was_created: wasCreated ? 1 : 0,
+    before_json: beforeProduct ? JSON.stringify(beforeProduct) : null,
+    created_at: nowIso()
+  });
+};
+
 export const completeIngestionFile = ({
   id,
   status,
@@ -1117,12 +1241,130 @@ const deleteIngestionFileTx = db.transaction((id) => {
     return null;
   }
 
-  const linked = countPriceHistoryByIngestionFileStmt.get(ingestionFileId);
+  const snapshots = listIngestionProductSnapshotsStmt.all(ingestionFileId);
+  const hasSnapshots =
+    Number(countIngestionProductSnapshotsByFileStmt.get(ingestionFileId)?.count || 0) > 0;
+  if (Number(target.accepted_rows || 0) > 0 && !hasSnapshots) {
+    const error = new Error("rollback snapshot is not available for this ingestion file");
+    error.code = "ROLLBACK_DATA_MISSING";
+    throw error;
+  }
+
+  for (const snapshot of snapshots) {
+    const hasNewer = hasNewerProductSnapshotStmt.get({
+      product_id: Number(snapshot.product_id),
+      ingestion_file_id: ingestionFileId,
+      uploaded_at: target.uploaded_at
+    });
+    if (hasNewer) {
+      const conflict = getProductById(Number(snapshot.product_id));
+      const error = new Error("newer ingestion data exists for at least one product");
+      error.code = "ROLLBACK_CONFLICT";
+      error.productId = Number(snapshot.product_id);
+      error.productName = conflict?.name || conflict?.name_en || "";
+      throw error;
+    }
+  }
+
+  const affectedPricePairs = listPriceHistoryPairsByIngestionFileStmt.all(ingestionFileId);
+  const removedPriceHistory = Number(
+    countPriceHistoryByIngestionFileStmt.get(ingestionFileId)?.count || 0
+  );
+  deletePriceHistoryByIngestionFileStmt.run(ingestionFileId);
+
+  let rebuiltCurrentPrices = 0;
+  let removedCurrentPrices = 0;
+  for (const pair of affectedPricePairs) {
+    const productId = Number(pair.product_id);
+    const storeId = Number(pair.store_id);
+    const latest = latestPriceHistoryByPairStmt.get(productId, storeId);
+    if (latest) {
+      upsertCurrentStmt.run({
+        product_id: productId,
+        store_id: storeId,
+        latest_price: Number(latest.price),
+        currency: String(latest.currency || "JPY") || "JPY",
+        effective_date: String(latest.effective_date || ""),
+        history_id: Number(latest.id),
+        updated_at: nowIso()
+      });
+      rebuiltCurrentPrices += 1;
+    } else {
+      removedCurrentPrices += deleteCurrentPriceByPairStmt.run(productId, storeId).changes;
+    }
+  }
+
+  let restoredProducts = 0;
+  let deletedProducts = 0;
+
+  for (const snapshot of snapshots) {
+    const productId = Number(snapshot.product_id);
+    const current = getProductById(productId);
+    if (!current) {
+      continue;
+    }
+
+    if (Number(snapshot.was_created) === 1) {
+      deletedProducts += deleteProductByIdStmt.run(productId).changes;
+      continue;
+    }
+
+    let before = null;
+    try {
+      before = snapshot.before_json ? JSON.parse(snapshot.before_json) : null;
+    } catch {
+      before = null;
+    }
+    if (!before || typeof before !== "object") {
+      const error = new Error(`rollback snapshot is invalid for product ${productId}`);
+      error.code = "ROLLBACK_DATA_CORRUPTED";
+      throw error;
+    }
+
+    const restored = {
+      id: productId,
+      sku: toNullableText(before.sku),
+      name: toNullableText(before.name) || toNullableText(before.name_en),
+      name_en: toNullableText(before.name_en),
+      producer: toNullableText(before.producer),
+      vintage: toNullableText(before.vintage),
+      unit: toNullableText(before.unit),
+      retail_price: toNullableInteger(before.retail_price),
+      purchase_price: toNullableInteger(before.purchase_price),
+      stock_qty: toNullableInteger(before.stock_qty),
+      stock_store: toNullableText(before.stock_store),
+      supplier_name: toNullableText(before.supplier_name),
+      cost_rate: toNullableReal(before.cost_rate),
+      updated_at: nowIso()
+    };
+    if (!restored.name) {
+      const error = new Error(`rollback snapshot is missing product name for product ${productId}`);
+      error.code = "ROLLBACK_DATA_CORRUPTED";
+      throw error;
+    }
+
+    updateProductStmt.run(restored);
+    deleteProductAliasesByProductIdStmt.run(productId);
+    const aliases = normalizeAliases(Array.isArray(before.aliases) ? before.aliases : []);
+    for (const alias of aliases) {
+      insertAliasStmt.run(productId, alias);
+    }
+    restoredProducts += 1;
+  }
+
+  const removedIngestionErrors = Number(countIngestionErrorsByFileStmt.get(ingestionFileId)?.count || 0);
   deleteIngestionFileStmt.run(ingestionFileId);
 
   return {
     deleted: target,
-    detachedPriceHistoryCount: Number(linked?.count || 0)
+    rollback: {
+      restoredProducts,
+      deletedProducts,
+      removedPriceHistory,
+      rebuiltCurrentPrices,
+      removedCurrentPrices,
+      removedIngestionErrors
+    }
   };
 });
 
