@@ -666,6 +666,12 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
   try {
     payload = JSON.parse(textDecoder.decode(bodyBuffer));
   } catch {
+    if (typeof recordDiag === "function") {
+      recordDiag({
+        stage: "parse_error",
+        mode: "paused"
+      });
+    }
     return asJson(400, { ok: false, error: "invalid webhook payload" });
   }
 
@@ -707,6 +713,12 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
   }
 
   if (!replyTargets.length) {
+    if (typeof recordDiag === "function") {
+      recordDiag({
+        stage: "no_reply_target",
+        mode: "paused"
+      });
+    }
     return asJson(200, { ok: true, paused: true, replied: 0 });
   }
 
@@ -936,6 +948,12 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
   try {
     payload = JSON.parse(textDecoder.decode(bodyBuffer));
   } catch {
+    if (typeof recordDiag === "function") {
+      recordDiag({
+        stage: "parse_error",
+        mode: "live"
+      });
+    }
     return asJson(400, { ok: false, error: "invalid webhook payload" });
   }
 
@@ -1134,27 +1152,45 @@ export default {
       const healthy = await isHealthy(healthUrl, timeoutMs);
       recordDiag({ stage: "health_checked", healthy, mode: healthy ? "live" : "paused" });
       if (healthy) {
-        return handleLiveLineWebhook({
+        try {
+          return await handleLiveLineWebhook({
+            env,
+            bodyBuffer,
+            timeoutMs,
+            signature: request.headers.get("x-line-signature"),
+            healthUrl,
+            request,
+            appUrl,
+            backgroundTask,
+            recordDiag
+          });
+        } catch (error) {
+          recordDiag({
+            stage: "handler_crash",
+            mode: "live",
+            error: String(error?.message || "unknown").slice(0, 220)
+          });
+          return asJson(500, { ok: false, error: "live webhook handler crashed" });
+        }
+      }
+      try {
+        return await handlePausedLineWebhook({
           env,
           bodyBuffer,
           timeoutMs,
           signature: request.headers.get("x-line-signature"),
           healthUrl,
-          request,
-          appUrl,
           backgroundTask,
           recordDiag
         });
+      } catch (error) {
+        recordDiag({
+          stage: "handler_crash",
+          mode: "paused",
+          error: String(error?.message || "unknown").slice(0, 220)
+        });
+        return asJson(500, { ok: false, error: "paused webhook handler crashed" });
       }
-      return handlePausedLineWebhook({
-        env,
-        bodyBuffer,
-        timeoutMs,
-        signature: request.headers.get("x-line-signature"),
-        healthUrl,
-        backgroundTask,
-        recordDiag
-      });
     }
 
     if (path === "/__health" && request.method === "GET") {
