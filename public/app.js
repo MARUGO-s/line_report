@@ -6,6 +6,8 @@ const clearTokenBtn = document.getElementById("clearTokenBtn");
 const authStatusEl = document.getElementById("authStatus");
 const adminTokenRotateForm = document.getElementById("adminTokenRotateForm");
 const adminTokenRotateResult = document.getElementById("adminTokenRotateResult");
+const suspendServiceBtn = document.getElementById("suspendServiceBtn");
+const suspendServiceResult = document.getElementById("suspendServiceResult");
 
 const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
 const csvIngestionForm = document.getElementById("csvIngestionForm");
@@ -103,6 +105,7 @@ const writeStoredAdminToken = (value) => {
 const state = {
   adminToken: readStoredAdminToken(),
   adminAuthRequired: false,
+  renderControlConfigured: false,
   isStaticPreview: false,
   templates: [],
   templateEditOriginalKey: ""
@@ -278,6 +281,29 @@ const refreshAdminTokenRotateFormState = () => {
   adminTokenRotateForm.elements.confirmAdminToken.disabled = useEnv;
 };
 
+const refreshServiceControlState = () => {
+  if (!suspendServiceBtn || !suspendServiceResult) {
+    return;
+  }
+
+  if (state.isStaticPreview) {
+    suspendServiceBtn.disabled = true;
+    suspendServiceResult.textContent = "静的プレビューではサービス制御は利用できません。";
+    return;
+  }
+
+  if (!state.renderControlConfigured) {
+    suspendServiceBtn.disabled = true;
+    suspendServiceResult.textContent = "RENDER_API_KEY / RENDER_SERVICE_ID 未設定のため休止できません。";
+    return;
+  }
+
+  if (!suspendServiceResult.textContent.trim()) {
+    suspendServiceResult.textContent = "Renderを休止する場合は上のボタンを押してください。";
+  }
+  suspendServiceBtn.disabled = false;
+};
+
 const escapeHtml = (value) =>
   String(value || "")
     .replace(/&/g, "&amp;")
@@ -406,6 +432,7 @@ const activateStaticPreviewMode = (reason = "") => {
   renderIngestionFiles([]);
   csvIngestionResult.textContent = "静的プレビューではファイル取り込みAPIは利用できません。";
   ingestionErrorsResult.textContent = "静的プレビューではエラー詳細取得は利用できません。";
+  refreshServiceControlState();
 
   const suffix = reason ? ` (${reason})` : "";
   notify(`静的プレビューモードで表示中です${suffix}`);
@@ -418,7 +445,9 @@ const loadSystem = async () => {
 
   const result = await api.get("/api/health");
   state.adminAuthRequired = Boolean(result.adminAuthRequired);
+  state.renderControlConfigured = Boolean(result.renderControlConfigured);
   updateAuthStatus();
+  refreshServiceControlState();
   systemStatusEl.textContent = `${result.host}:${result.port} / Auth: ${result.adminAuthRequired ? (state.adminToken ? "ON" : "REQUIRED") : "OFF"} / Source: ${result.adminTokenSource || "-"} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"}`;
 };
 
@@ -564,6 +593,40 @@ adminTokenRotateForm.addEventListener("submit", async (event) => {
 adminTokenRotateForm.elements.useEnvToken.addEventListener("change", () => {
   refreshAdminTokenRotateFormState();
 });
+
+if (suspendServiceBtn) {
+  suspendServiceBtn.addEventListener("click", async () => {
+    if (state.isStaticPreview) {
+      notify("静的プレビューではサービス制御は利用できません。", true);
+      return;
+    }
+    if (!state.renderControlConfigured) {
+      notify("Render制御が未設定です。環境変数を確認してください。", true);
+      return;
+    }
+
+    const ok = window.confirm(
+      "Renderサービスを休止します。停止後はこの管理画面も開けなくなります。実行しますか？"
+    );
+    if (!ok) {
+      return;
+    }
+
+    const originalLabel = suspendServiceBtn.textContent;
+    suspendServiceBtn.disabled = true;
+    suspendServiceBtn.textContent = "休止リクエスト送信中...";
+    try {
+      const result = await api.post("/api/admin/render/suspend", {});
+      suspendServiceResult.textContent = JSON.stringify(result, null, 2);
+      suspendServiceBtn.textContent = "休止リクエスト送信済み";
+      notify("休止リクエストを送信しました。数十秒後にサービスが停止します。");
+    } catch (error) {
+      suspendServiceBtn.disabled = false;
+      suspendServiceBtn.textContent = originalLabel;
+      handleOperationError("Render休止に失敗", error);
+    }
+  });
+}
 
 downloadTemplateBtn.addEventListener("click", async () => {
   if (state.isStaticPreview) {
@@ -755,6 +818,7 @@ const boot = async () => {
   setTemplateEditMode("");
   updateTemplatePreview();
   updateAuthStatus("接続確認中...");
+  refreshServiceControlState();
 
   try {
     await loadSystem();

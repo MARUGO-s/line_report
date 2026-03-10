@@ -267,7 +267,46 @@ const opsConfig = {
   backupRetention: Math.max(0, Number(process.env.BACKUP_RETENTION || 30) || 30)
 };
 
+const renderControlConfig = {
+  apiBaseUrl: String(process.env.RENDER_API_BASE_URL || "https://api.render.com/v1")
+    .trim()
+    .replace(/\/+$/, ""),
+  apiKey: String(process.env.RENDER_API_KEY || "").trim(),
+  serviceId: String(process.env.RENDER_SERVICE_ID || "").trim(),
+  timeoutMs: Math.max(1000, Number(process.env.RENDER_API_TIMEOUT_MS || 10000) || 10000)
+};
+
 const sendError = (res, status, message) => res.status(status).json({ error: message });
+
+const isRenderControlConfigured = () => Boolean(renderControlConfig.apiKey && renderControlConfig.serviceId);
+
+const callRenderServiceAction = async (action) => {
+  if (!["suspend", "resume"].includes(action)) {
+    throw new Error("unsupported render action");
+  }
+  if (!isRenderControlConfigured()) {
+    throw new Error("render control is not configured");
+  }
+
+  const endpoint =
+    `${renderControlConfig.apiBaseUrl}/services/` +
+    `${encodeURIComponent(renderControlConfig.serviceId)}/${encodeURIComponent(action)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), renderControlConfig.timeoutMs);
+  try {
+    return await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${renderControlConfig.apiKey}`,
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const extractAdminTokenFromRequest = (req) => {
   const headerToken = String(req.header("x-admin-token") || "").trim();
@@ -5100,7 +5139,9 @@ app.get("/api/health", (req, res) => {
     groqWineFlowEnabled: Boolean(groqConfig.apiKey) && groqWineFlowConfig.enabled,
     groqWineAnalysisModel: groqWineFlowConfig.analysisModel,
     groqWineReplyModel: groqWineFlowConfig.replyModel,
-    backupRetention: opsConfig.backupRetention
+    backupRetention: opsConfig.backupRetention,
+    renderControlConfigured: isRenderControlConfigured(),
+    renderControlledServiceId: renderControlConfig.serviceId || null
   });
 });
 
@@ -5150,6 +5191,40 @@ app.post("/api/admin/backup", (req, res) => {
   } catch (error) {
     console.error(error);
     return sendError(res, 500, "failed to create backup");
+  }
+});
+
+app.post("/api/admin/render/suspend", async (req, res) => {
+  if (!isRenderControlConfigured()) {
+    return sendError(res, 400, "RENDER_API_KEY and RENDER_SERVICE_ID are required");
+  }
+
+  try {
+    const response = await callRenderServiceAction("suspend");
+    const bodyText = await response.text();
+    if (!response.ok && response.status !== 409) {
+      return sendError(
+        res,
+        502,
+        `render suspend failed: ${response.status} ${truncateText(bodyText || "", 220)}`
+      );
+    }
+    return res.status(202).json({
+      ok: true,
+      action: "suspend",
+      accepted: true,
+      status: response.status,
+      message:
+        response.status === 409
+          ? "already suspended or suspend in progress"
+          : "suspend request accepted"
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return sendError(res, 504, `render suspend timed out after ${renderControlConfig.timeoutMs}ms`);
+    }
+    console.error(error);
+    return sendError(res, 500, "failed to request render suspend");
   }
 });
 

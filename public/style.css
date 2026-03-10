@@ -166,6 +166,14 @@ button:disabled {
   filter: none;
 }
 
+button.danger-btn {
+  background: linear-gradient(135deg, #c62828 0%, #7f1d1d 100%);
+}
+
+button.danger-btn:hover {
+  filter: brightness(1.04);
+}
+
 .toolbar {
   display: flex;
   gap: 10px;
@@ -233,6 +241,10 @@ th {
   padding: 14px;
   overflow: auto;
   white-space: pre-wrap;
+}
+
+.result.result-compact {
+  min-height: 72px;
 }
 
 .helper-block {
