@@ -312,6 +312,22 @@ const callLineMessageQuota = async ({ accessToken, timeoutMs }) =>
     timeoutMs
   );
 
+const callLineWebhookTest = async ({ accessToken, timeoutMs }) =>
+  withTimeout(
+    (signal) =>
+      fetch("https://api.line.me/v2/bot/channel/webhook/test", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: "{}",
+        signal
+      }),
+    timeoutMs
+  );
+
 const parseRenderErrorDetail = (detailText) => {
   const text = String(detailText || "").trim();
   if (!text) {
@@ -1132,6 +1148,34 @@ export default {
           quotaApiOk: false,
           quotaApiStatus: null,
           quotaApiBody: String(error?.message || "LINE quota API check failed").slice(0, 300)
+        });
+      }
+    }
+
+    if (path === "/__diag/line-webhook-test" && request.method === "POST") {
+      const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
+      if (!lineAccessToken) {
+        return asJson(500, {
+          ok: false,
+          error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です。"
+        });
+      }
+      try {
+        const response = await callLineWebhookTest({
+          accessToken: lineAccessToken,
+          timeoutMs: Math.max(2000, timeoutMs + 2000)
+        });
+        const bodyText = await response.text().catch(() => "");
+        return asJson(200, {
+          ok: response.ok,
+          status: response.status,
+          body: bodyText.slice(0, 500)
+        });
+      } catch (error) {
+        return asJson(502, {
+          ok: false,
+          status: 0,
+          error: String(error?.message || "LINE webhook test failed").slice(0, 300)
         });
       }
     }
