@@ -3,8 +3,14 @@ main = "src/index.js"
 compatibility_date = "2026-03-10"
 workers_dev = true
 
+[triggers]
+crons = ["0 17 * * *", "0 3 * * *"]
+
 [vars]
 APP_URL = "https://line-wine-api.onrender.com"
 HEALTH_URL = "https://line-wine-api.onrender.com/api/health"
 HEALTH_TIMEOUT_MS = "2500"
 RENDER_SERVICE_ID = "srv-d6mmfgvtskes73e082ag"
+AUTO_SUSPEND_RESUME_ENABLED = "true"
+SUSPEND_CRON_UTC = "0 17 * * *"
+RESUME_CRON_UTC = "0 3 * * *"

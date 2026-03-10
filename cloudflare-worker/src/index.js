@@ -143,9 +143,20 @@ const lineDummyReplyToken = "00000000000000000000000000000000";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const diagCacheRequest = new Request("https://linewine-internal.local/__diag/last-webhook");
+const DEFAULT_SUSPEND_CRON_UTC = "0 17 * * *";
+const DEFAULT_RESUME_CRON_UTC = "0 3 * * *";
 const runtimeDiagnostics = {
   lastWebhook: null
 };
+
+const isFalseLike = (value) =>
+  ["0", "false", "off", "no", "disabled"].includes(String(value || "").trim().toLowerCase());
+
+const getAutoScheduleConfig = (env) => ({
+  enabled: !isFalseLike(env.AUTO_SUSPEND_RESUME_ENABLED),
+  suspendCronUtc: String(env.SUSPEND_CRON_UTC || DEFAULT_SUSPEND_CRON_UTC).trim() || DEFAULT_SUSPEND_CRON_UTC,
+  resumeCronUtc: String(env.RESUME_CRON_UTC || DEFAULT_RESUME_CRON_UTC).trim() || DEFAULT_RESUME_CRON_UTC
+});
 
 const setRuntimeWebhookDiag = (update) => {
   runtimeDiagnostics.lastWebhook = {
@@ -1053,6 +1064,19 @@ const handleSuspendRequest = async ({ env, timeoutMs }) => {
   }
 };
 
+const runScheduledRenderControl = async ({ env, healthUrl, timeoutMs, action }) => {
+  const response =
+    action === "suspend"
+      ? await handleSuspendRequest({ env, timeoutMs })
+      : await handleResumeRequest({ env, healthUrl, timeoutMs });
+  const payload = await response.json().catch(() => ({}));
+  const summary = String(payload?.message || payload?.error || payload?.detail || "").slice(0, 260);
+  console.log(
+    `[schedule:${action}] status=${response.status} ok=${Boolean(payload?.ok)} message="${summary}"`
+  );
+  return { status: response.status, payload };
+};
+
 const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, request, appUrl, backgroundTask, recordDiag }) => {
   const lineChannelSecret = String(env.LINE_CHANNEL_SECRET || "").trim();
   if (lineChannelSecret) {
@@ -1413,6 +1437,16 @@ export default {
       });
     }
 
+    if (path === "/__diag/schedule" && request.method === "GET") {
+      const scheduleConfig = getAutoScheduleConfig(env);
+      return asJson(200, {
+        ok: true,
+        ...scheduleConfig,
+        timezone: "Asia/Tokyo",
+        pauseWindowJst: "02:00-12:00"
+      });
+    }
+
     if (path === "/__resume" && request.method === "POST") {
       return handleResumeRequest({ env, healthUrl, timeoutMs });
     }
@@ -1431,5 +1465,47 @@ export default {
         "cache-control": "no-store"
       }
     });
+  },
+
+  async scheduled(controller, env, ctx) {
+    const appUrl = trimSlash(env.APP_URL || "https://line-wine-api.onrender.com");
+    const healthUrl = String(env.HEALTH_URL || `${appUrl}/api/health`).trim();
+    const timeoutMs = Math.max(500, Number(env.HEALTH_TIMEOUT_MS || 2500) || 2500);
+    const cron = String(controller?.cron || "").trim();
+    const scheduleConfig = getAutoScheduleConfig(env);
+
+    if (!scheduleConfig.enabled) {
+      console.log(`[schedule] skipped: disabled (cron=${cron || "unknown"})`);
+      return;
+    }
+
+    let action = "";
+    if (cron === scheduleConfig.suspendCronUtc) {
+      action = "suspend";
+    } else if (cron === scheduleConfig.resumeCronUtc) {
+      action = "resume";
+    } else {
+      console.log(
+        `[schedule] ignored cron=${cron || "unknown"} expected suspend=${scheduleConfig.suspendCronUtc} resume=${scheduleConfig.resumeCronUtc}`
+      );
+      return;
+    }
+
+    const task = runScheduledRenderControl({
+      env,
+      healthUrl,
+      timeoutMs,
+      action
+    }).catch((error) => {
+      const message = String(error?.message || "unknown");
+      console.log(`[schedule:${action}] unexpected error: ${message}`);
+      throw error;
+    });
+
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(task);
+      return;
+    }
+    await task;
   }
 };
