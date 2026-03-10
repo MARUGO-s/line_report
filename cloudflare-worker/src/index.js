@@ -223,6 +223,63 @@ const callRenderResume = async ({ apiKey, serviceId, timeoutMs }) => {
   );
 };
 
+const callRenderServiceStatus = async ({ apiKey, serviceId, timeoutMs }) => {
+  const endpoint = `https://api.render.com/v1/services/${encodeURIComponent(serviceId)}`;
+  return withTimeout(
+    (signal) =>
+      fetch(endpoint, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json"
+        },
+        signal
+      }),
+    timeoutMs
+  );
+};
+
+const parseRenderErrorDetail = (detailText) => {
+  const text = String(detailText || "").trim();
+  if (!text) {
+    return { message: "" };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return { message: String(parsed?.message || text) };
+  } catch {
+    return { message: text };
+  }
+};
+
+const fetchRenderState = async ({ env, timeoutMs }) => {
+  const renderApiKey = String(env.RENDER_API_KEY || "").trim();
+  const renderServiceId = String(env.RENDER_SERVICE_ID || "").trim();
+  if (!renderApiKey || !renderServiceId) {
+    return null;
+  }
+  try {
+    const response = await callRenderServiceStatus({
+      apiKey: renderApiKey,
+      serviceId: renderServiceId,
+      timeoutMs: Math.max(2000, timeoutMs + 2000)
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    return {
+      suspended: String(payload.suspended || ""),
+      suspenders: Array.isArray(payload.suspenders) ? payload.suspenders.map((x) => String(x || "")) : []
+    };
+  } catch {
+    return null;
+  }
+};
+
 const verifyLineSignature = async ({ bodyBuffer, signature, channelSecret }) => {
   const normalizedSignature = String(signature || "").trim();
   if (!normalizedSignature) {
@@ -350,9 +407,14 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
           replyText = String(resumeResult.payload?.message || "").trim()
             || "起動リクエストを受け付けました。20〜60秒ほどで利用可能になります。";
         } else {
-          const detail = String(resumeResult.payload?.detail || "");
+          const detail = parseRenderErrorDetail(resumeResult.payload?.detail).message;
           if (/only services suspended by a user can be resumed/i.test(detail)) {
-            replyText = "現在の停止状態ではLINEから再開できません。管理画面から再開してください。";
+            const state = await fetchRenderState({ env, timeoutMs });
+            if (state?.suspended === "not_suspended") {
+              replyText = "再開処理中の可能性があります。30〜90秒待ってからもう一度メッセージを送ってください。";
+            } else {
+              replyText = "現在の停止状態ではLINEから再開できません。管理画面から再開してください。";
+            }
           } else {
             replyText = "再開に失敗しました。時間をおいて再試行してください。";
           }
