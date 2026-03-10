@@ -414,59 +414,75 @@ const verifyLineSignature = async ({ bodyBuffer, signature, channelSecret }) => 
 };
 
 const sendPausedLineReply = async ({ accessToken, replyToken, message, timeoutMs }) => {
-  const response = await withTimeout(
-    (signal) =>
-      fetch(lineReplyApiUrl, {
-        method: "POST",
-        signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`
-        },
-        body: JSON.stringify({
-          replyToken,
-          messages: [{ type: "text", text: message }]
-        })
-      }),
-    timeoutMs
-  );
-  if (response.ok) {
-    return { ok: true };
+  try {
+    const response = await withTimeout(
+      (signal) =>
+        fetch(lineReplyApiUrl, {
+          method: "POST",
+          signal,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            replyToken,
+            messages: [{ type: "text", text: message }]
+          })
+        }),
+      timeoutMs
+    );
+    if (response.ok) {
+      return { ok: true };
+    }
+    const bodyText = await response.text().catch(() => "");
+    return {
+      ok: false,
+      status: response.status,
+      detail: bodyText.slice(0, 300)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      detail: `reply exception: ${String(error?.message || "unknown").slice(0, 260)}`
+    };
   }
-  const bodyText = await response.text().catch(() => "");
-  return {
-    ok: false,
-    status: response.status,
-    detail: bodyText.slice(0, 300)
-  };
 };
 
 const sendLinePushMessage = async ({ accessToken, to, message, timeoutMs }) => {
-  const response = await withTimeout(
-    (signal) =>
-      fetch(linePushApiUrl, {
-        method: "POST",
-        signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`
-        },
-        body: JSON.stringify({
-          to,
-          messages: [{ type: "text", text: message }]
-        })
-      }),
-    timeoutMs
-  );
-  if (response.ok) {
-    return { ok: true, via: "push" };
+  try {
+    const response = await withTimeout(
+      (signal) =>
+        fetch(linePushApiUrl, {
+          method: "POST",
+          signal,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            to,
+            messages: [{ type: "text", text: message }]
+          })
+        }),
+      timeoutMs
+    );
+    if (response.ok) {
+      return { ok: true, via: "push" };
+    }
+    const bodyText = await response.text().catch(() => "");
+    return {
+      ok: false,
+      status: response.status,
+      detail: bodyText.slice(0, 300)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      detail: `push exception: ${String(error?.message || "unknown").slice(0, 260)}`
+    };
   }
-  const bodyText = await response.text().catch(() => "");
-  return {
-    ok: false,
-    status: response.status,
-    detail: bodyText.slice(0, 300)
-  };
 };
 
 const resolvePushTarget = (event) => {
@@ -690,45 +706,53 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
 
   const results = await Promise.all(
     replyTargets.map(async (event) => {
-      let replyText = pausedWithGuide;
-      if (event.type === "message" && event.messageType === "text" && isResumeCommand(event.messageText)) {
-        const resumeResult = await getResumeResult();
-        if (resumeResult.ok) {
-          replyText = buildResumeLineAcceptedText(resumeResult.payload);
-          if (!resumeCompletionQueued) {
-            resumeCompletionQueued = tryQueueResumeCompletionNotice({
-              backgroundTask,
-              env,
-              accessToken: lineAccessToken,
-              pushTo: event.pushTo,
-              healthUrl,
-              timeoutMs,
-              resumePayload: resumeResult.payload
-            });
-          }
-        } else {
-          const detail = parseRenderErrorDetail(resumeResult.payload?.detail).message;
-          if (/only services suspended by a user can be resumed/i.test(detail)) {
-            const state = await fetchRenderState({ env, timeoutMs });
-            if (state?.suspended === "not_suspended") {
-              replyText = "再開処理中の可能性があります。30〜90秒待ってからもう一度メッセージを送ってください。";
-            } else {
-              replyText = "現在の停止状態ではLINEから再開できません。管理画面から再開してください。";
+      try {
+        let replyText = pausedWithGuide;
+        if (event.type === "message" && event.messageType === "text" && isResumeCommand(event.messageText)) {
+          const resumeResult = await getResumeResult();
+          if (resumeResult.ok) {
+            replyText = buildResumeLineAcceptedText(resumeResult.payload);
+            if (!resumeCompletionQueued) {
+              resumeCompletionQueued = tryQueueResumeCompletionNotice({
+                backgroundTask,
+                env,
+                accessToken: lineAccessToken,
+                pushTo: event.pushTo,
+                healthUrl,
+                timeoutMs,
+                resumePayload: resumeResult.payload
+              });
             }
           } else {
-            replyText = "再開に失敗しました。時間をおいて再試行してください。";
+            const detail = parseRenderErrorDetail(resumeResult.payload?.detail).message;
+            if (/only services suspended by a user can be resumed/i.test(detail)) {
+              const state = await fetchRenderState({ env, timeoutMs });
+              if (state?.suspended === "not_suspended") {
+                replyText = "再開処理中の可能性があります。30〜90秒待ってからもう一度メッセージを送ってください。";
+              } else {
+                replyText = "現在の停止状態ではLINEから再開できません。管理画面から再開してください。";
+              }
+            } else {
+              replyText = "再開に失敗しました。時間をおいて再試行してください。";
+            }
           }
+        } else if (event.type === "message" && event.messageType === "text" && isSuspendCommand(event.messageText)) {
+          replyText = "休止完了しています。再開する場合は「起動」と送信してください。";
         }
-      } else if (event.type === "message" && event.messageType === "text" && isSuspendCommand(event.messageText)) {
-        replyText = "休止完了しています。再開する場合は「起動」と送信してください。";
+        return await sendLineMessageWithFallback({
+          accessToken: lineAccessToken,
+          replyToken: event.replyToken,
+          pushTo: event.pushTo,
+          message: replyText,
+          timeoutMs: Math.max(5000, timeoutMs + 6000)
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          status: 0,
+          detail: `paused handler exception: ${String(error?.message || "unknown").slice(0, 260)}`
+        };
       }
-      return sendLineMessageWithFallback({
-        accessToken: lineAccessToken,
-        replyToken: event.replyToken,
-        pushTo: event.pushTo,
-        message: replyText,
-        timeoutMs: Math.max(5000, timeoutMs + 6000)
-      });
     })
   );
 
@@ -973,40 +997,48 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
 
   const results = await Promise.all(
     commandEvents.map(async (event) => {
-      let replyText = "コマンドを受け付けました。";
-      if (isSuspendCommand(event.messageText)) {
-        const suspendResult = await getSuspendResult();
-        if (suspendResult.ok) {
-          replyText = buildSuspendLineSuccessText();
-        } else {
-          replyText = "休止に失敗しました。時間をおいて再試行してください。";
-        }
-      } else if (isResumeCommand(event.messageText)) {
-        const resumeResult = await getResumeResult();
-        if (resumeResult.ok) {
-          replyText = buildResumeLineAcceptedText(resumeResult.payload);
-          if (!resumeCompletionQueued) {
-            resumeCompletionQueued = tryQueueResumeCompletionNotice({
-              backgroundTask,
-              env,
-              accessToken: lineAccessToken,
-              pushTo: event.pushTo,
-              healthUrl,
-              timeoutMs,
-              resumePayload: resumeResult.payload
-            });
+      try {
+        let replyText = "コマンドを受け付けました。";
+        if (isSuspendCommand(event.messageText)) {
+          const suspendResult = await getSuspendResult();
+          if (suspendResult.ok) {
+            replyText = buildSuspendLineSuccessText();
+          } else {
+            replyText = "休止に失敗しました。時間をおいて再試行してください。";
           }
-        } else {
-          replyText = "再開に失敗しました。時間をおいて再試行してください。";
+        } else if (isResumeCommand(event.messageText)) {
+          const resumeResult = await getResumeResult();
+          if (resumeResult.ok) {
+            replyText = buildResumeLineAcceptedText(resumeResult.payload);
+            if (!resumeCompletionQueued) {
+              resumeCompletionQueued = tryQueueResumeCompletionNotice({
+                backgroundTask,
+                env,
+                accessToken: lineAccessToken,
+                pushTo: event.pushTo,
+                healthUrl,
+                timeoutMs,
+                resumePayload: resumeResult.payload
+              });
+            }
+          } else {
+            replyText = "再開に失敗しました。時間をおいて再試行してください。";
+          }
         }
+        return await sendLineMessageWithFallback({
+          accessToken: lineAccessToken,
+          replyToken: event.replyToken,
+          pushTo: event.pushTo,
+          message: replyText,
+          timeoutMs: Math.max(5000, timeoutMs + 6000)
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          status: 0,
+          detail: `live handler exception: ${String(error?.message || "unknown").slice(0, 260)}`
+        };
       }
-      return sendLineMessageWithFallback({
-        accessToken: lineAccessToken,
-        replyToken: event.replyToken,
-        pushTo: event.pushTo,
-        message: replyText,
-        timeoutMs: Math.max(5000, timeoutMs + 6000)
-      });
     })
   );
 
