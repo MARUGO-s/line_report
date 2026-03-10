@@ -504,6 +504,21 @@ const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
     });
     if (!response.ok && response.status !== 409) {
       const bodyText = await response.text().catch(() => "");
+      if (response.status === 400 && /only services suspended by a user can be resumed/i.test(bodyText)) {
+        const state = await fetchRenderState({ env, timeoutMs });
+        if (state?.suspended === "not_suspended") {
+          return asJson(200, {
+            ok: true,
+            message: "現在、再開処理中または稼働中です。30〜90秒待って再読み込みしてください。"
+          });
+        }
+        if (state?.suspended === "suspended" && !state.suspenders.includes("user")) {
+          return asJson(409, {
+            ok: false,
+            error: "現在の停止状態では再開できません。Render管理画面から再開してください。"
+          });
+        }
+      }
       return asJson(502, {
         ok: false,
         error: `Render再開APIで失敗しました (${response.status})`,
