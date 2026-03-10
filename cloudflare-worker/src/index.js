@@ -857,21 +857,17 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
       (isSuspendCommand(event.messageText) || isResumeCommand(event.messageText))
   );
 
-  const allEventsAreCommand =
-    events.length > 0 &&
-    commandEvents.length === events.length;
-
   if (typeof recordDiag === "function") {
     recordDiag({
       stage: "parsed",
       mode: "live",
       eventCount: events.length,
       commandCount: commandEvents.length,
-      allEventsAreCommand
+      allEventsAreCommand: events.length > 0 && commandEvents.length === events.length
     });
   }
 
-  if (!allEventsAreCommand) {
+  if (commandEvents.length === 0) {
     if (typeof recordDiag === "function") {
       recordDiag({
         stage: "forward_to_app",
@@ -879,6 +875,14 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
       });
     }
     return forwardRequestToApp({ request, appUrl, bodyBuffer });
+  }
+
+  if (typeof recordDiag === "function" && commandEvents.length !== events.length) {
+    recordDiag({
+      stage: "mixed_events_command_only",
+      mode: "live",
+      ignoredEventCount: events.length - commandEvents.length
+    });
   }
 
   const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
