@@ -139,6 +139,7 @@ const jsonHeaders = {
 };
 const lineReplyApiUrl = "https://api.line.me/v2/bot/message/reply";
 const linePushApiUrl = "https://api.line.me/v2/bot/message/push";
+const lineDummyReplyToken = "00000000000000000000000000000000";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const diagCacheRequest = new Request("https://linewine-internal.local/__diag/last-webhook");
@@ -491,7 +492,7 @@ const resolvePushTarget = (event) => {
 };
 
 const sendLineMessageWithFallback = async ({ accessToken, replyToken, pushTo, message, timeoutMs }) => {
-  if (replyToken && replyToken !== "00000000000000000000000000000000") {
+  if (hasUsableReplyToken(replyToken)) {
     const replyResult = await sendPausedLineReply({
       accessToken,
       replyToken,
@@ -596,12 +597,21 @@ const tryQueueResumeCompletionNotice = ({
 const normalizeCommandText = (value) =>
   String(value || "")
     .toLowerCase()
+    .replace(/[。．｡、，,!！?？]/g, "")
     .replace(/\s+/g, "")
     .trim();
 
+const hasUsableReplyToken = (replyToken) => {
+  const token = String(replyToken || "").trim();
+  return Boolean(token) && token !== lineDummyReplyToken;
+};
+
+const includesAnyKeyword = (text, keywords) =>
+  keywords.some((keyword) => text === keyword || text.includes(keyword));
+
 const isResumeCommand = (text) => {
   const normalized = normalizeCommandText(text);
-  return [
+  const resumeKeywords = [
     "起動",
     "再開",
     "再稼働",
@@ -609,19 +619,21 @@ const isResumeCommand = (text) => {
     "サーバー再開",
     "resume",
     "start"
-  ].includes(normalized);
+  ];
+  return includesAnyKeyword(normalized, resumeKeywords);
 };
 
 const isSuspendCommand = (text) => {
   const normalized = normalizeCommandText(text);
-  return [
+  const suspendKeywords = [
     "休止",
     "停止",
     "サーバー休止",
     "サーバー停止",
     "suspend",
     "stop"
-  ].includes(normalized);
+  ];
+  return includesAnyKeyword(normalized, suspendKeywords);
 };
 
 const buildSuspendLineSuccessText = () => "休止完了しました。";
@@ -675,7 +687,7 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
       messageType: String(event?.message?.type || ""),
       messageText: String(event?.message?.text || "").trim()
     }))
-    .filter((event) => event.replyToken && event.replyToken !== "00000000000000000000000000000000");
+    .filter((event) => hasUsableReplyToken(event.replyToken) || Boolean(event.pushTo));
 
   if (typeof recordDiag === "function") {
     recordDiag({
@@ -683,7 +695,14 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
       mode: "paused",
       eventCount: events.length,
       replyTargetCount: replyTargets.length,
-      resumeCommandCount
+      resumeCommandCount,
+      eventSamples: replyTargets.slice(0, 3).map((event) => ({
+        type: event.type,
+        messageType: event.messageType,
+        text: event.messageText.slice(0, 24),
+        hasReplyToken: hasUsableReplyToken(event.replyToken),
+        hasPushTo: Boolean(event.pushTo)
+      }))
     });
   }
 
@@ -931,10 +950,9 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
 
   const commandEvents = parsedEvents.filter(
     (event) =>
-      event.replyToken &&
-      event.replyToken !== "00000000000000000000000000000000" &&
       event.type === "message" &&
       event.messageType === "text" &&
+      (hasUsableReplyToken(event.replyToken) || Boolean(event.pushTo)) &&
       (isSuspendCommand(event.messageText) || isResumeCommand(event.messageText))
   );
 
@@ -944,7 +962,12 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
       mode: "live",
       eventCount: events.length,
       commandCount: commandEvents.length,
-      allEventsAreCommand: events.length > 0 && commandEvents.length === events.length
+      allEventsAreCommand: events.length > 0 && commandEvents.length === events.length,
+      commandSamples: commandEvents.slice(0, 3).map((event) => ({
+        text: event.messageText.slice(0, 24),
+        hasReplyToken: hasUsableReplyToken(event.replyToken),
+        hasPushTo: Boolean(event.pushTo)
+      }))
     });
   }
 
