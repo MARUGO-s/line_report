@@ -141,6 +141,7 @@ const lineReplyApiUrl = "https://api.line.me/v2/bot/message/reply";
 const linePushApiUrl = "https://api.line.me/v2/bot/message/push";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const diagCacheRequest = new Request("https://linewine-internal.local/__diag/last-webhook");
 const runtimeDiagnostics = {
   lastWebhook: null
 };
@@ -153,6 +154,32 @@ const setRuntimeWebhookDiag = (update) => {
     updatedAt: new Date().toISOString(),
     ...update
   };
+};
+
+const persistRuntimeWebhookDiag = async (payload) => {
+  try {
+    await caches.default.put(
+      diagCacheRequest,
+      new Response(JSON.stringify(payload || null), {
+        headers: {
+          "content-type": "application/json; charset=UTF-8",
+          "cache-control": "max-age=1800"
+        }
+      })
+    );
+  } catch {}
+};
+
+const loadPersistedRuntimeWebhookDiag = async () => {
+  try {
+    const response = await caches.default.match(diagCacheRequest);
+    if (!response) {
+      return null;
+    }
+    return response.json().catch(() => null);
+  } catch {
+    return null;
+  }
 };
 
 const toBase64 = (buffer) => {
@@ -1038,10 +1065,12 @@ export default {
       method: request.method
     };
     const recordDiag = (partial) => {
-      setRuntimeWebhookDiag({
+      const snapshot = {
         ...webhookDiagBase,
         ...partial
-      });
+      };
+      setRuntimeWebhookDiag(snapshot);
+      backgroundTask(persistRuntimeWebhookDiag(runtimeDiagnostics.lastWebhook));
     };
 
     if (path === "/webhooks/line" && request.method === "POST") {
@@ -1181,9 +1210,10 @@ export default {
     }
 
     if (path === "/__diag/last-webhook" && request.method === "GET") {
+      const persisted = await loadPersistedRuntimeWebhookDiag();
       return asJson(200, {
         ok: true,
-        lastWebhook: runtimeDiagnostics.lastWebhook
+        lastWebhook: runtimeDiagnostics.lastWebhook || persisted || null
       });
     }
 
