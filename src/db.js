@@ -243,6 +243,13 @@ const getProductByIdStmt = db.prepare(`
   FROM products WHERE id = ?
 `);
 
+const updateProductStockQtyStmt = db.prepare(`
+  UPDATE products
+  SET stock_qty = @stock_qty,
+      updated_at = @updated_at
+  WHERE id = @id
+`);
+
 const buildProductWritePayload = (payload = {}) => ({
   sku: toNullableText(payload.sku),
   name: toNullableText(payload.name),
@@ -297,6 +304,53 @@ export const getProductById = (id) => {
     aliases: readAliasesStmt.all(row.id).map((v) => v.alias)
   };
 };
+
+const adjustProductStockQtyTx = db.transaction(({ productId, delta }) => {
+  const normalizedProductId = Number(productId);
+  const normalizedDelta = Number(delta);
+
+  if (!Number.isInteger(normalizedProductId) || normalizedProductId <= 0) {
+    throw new Error("productId is invalid");
+  }
+  if (!Number.isInteger(normalizedDelta)) {
+    throw new Error("delta must be an integer");
+  }
+
+  const current = getProductByIdStmt.get(normalizedProductId);
+  if (!current) {
+    return null;
+  }
+
+  const currentQtyRaw = current.stock_qty;
+  const currentQty =
+    currentQtyRaw === null || currentQtyRaw === undefined ? 0 : Number(currentQtyRaw);
+  if (!Number.isFinite(currentQty)) {
+    throw new Error("current stock is invalid");
+  }
+
+  const nextQty = Math.round(currentQty + normalizedDelta);
+  if (nextQty < 0) {
+    const error = new Error("stock would become negative");
+    error.code = "NEGATIVE_STOCK";
+    error.currentQty = Math.round(currentQty);
+    error.nextQty = nextQty;
+    throw error;
+  }
+
+  updateProductStockQtyStmt.run({
+    id: normalizedProductId,
+    stock_qty: nextQty,
+    updated_at: nowIso()
+  });
+
+  return {
+    product: getProductById(normalizedProductId),
+    previousQty: Math.round(currentQty),
+    nextQty
+  };
+});
+
+export const adjustProductStockQty = (payload) => adjustProductStockQtyTx(payload);
 
 export const createProduct = (payload) => {
   const id = createProductTx(payload);

@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import {
+  adjustProductStockQty,
   addIngestionError,
   addPriceHistory,
   completeIngestionFile,
@@ -4579,10 +4580,26 @@ const setLineSelectionState = (conversationKey, query, matches) => {
   }
   pruneLineSelectionState();
   lineSelectionState.set(conversationKey, {
+    mode: "select_candidate",
     query: String(query || "").trim(),
     matches,
     updatedAt: Date.now()
   });
+};
+
+const setLineStockAdjustState = (conversationKey, selectedProduct) => {
+  const productId = Number(selectedProduct?.id);
+  if (!conversationKey || !Number.isInteger(productId) || productId <= 0) {
+    return false;
+  }
+  pruneLineSelectionState();
+  lineSelectionState.set(conversationKey, {
+    mode: "adjust_stock",
+    productId,
+    productLabel: formatCatalogPrimaryName(selectedProduct),
+    updatedAt: Date.now()
+  });
+  return true;
 };
 
 const clearLineSelectionState = (conversationKey) => {
@@ -4605,6 +4622,17 @@ const getLineSelectionState = (conversationKey) => {
   return item;
 };
 
+const resolveLineSelectionMode = (item) => {
+  const mode = String(item?.mode || "").trim();
+  if (mode === "select_candidate" || mode === "adjust_stock") {
+    return mode;
+  }
+  if (Array.isArray(item?.matches)) {
+    return "select_candidate";
+  }
+  return "";
+};
+
 const parseSelectionNumber = (value) => {
   const text = String(value || "").normalize("NFKC").trim();
   const matched = text.match(/^([1-9]\d?)$/);
@@ -4614,15 +4642,91 @@ const parseSelectionNumber = (value) => {
   return Number(matched[1]);
 };
 
+const parseStockDelta = (value) => {
+  const text = String(value || "").normalize("NFKC").trim();
+  const matched = text.match(/^([+-]?\d{1,4})$/);
+  if (!matched) {
+    return null;
+  }
+  return Number(matched[1]);
+};
+
+const formatSignedDelta = (value) => {
+  const delta = Number(value);
+  if (!Number.isFinite(delta)) {
+    return "0";
+  }
+  return delta >= 0 ? `+${Math.round(delta)}` : String(Math.round(delta));
+};
+
 const processTextEvent = async (event, canReply) => {
   if (!canReply) {
     return;
   }
 
   const text = String(event.message?.text || "").trim();
+  const conversationKey = getConversationKey(event);
+  const conversationState = conversationKey ? getLineSelectionState(conversationKey) : null;
+  const stateMode = resolveLineSelectionMode(conversationState);
+
+  if (stateMode === "adjust_stock" && conversationKey) {
+    const delta = parseStockDelta(text);
+    if (delta !== null) {
+      try {
+        const adjusted = adjustProductStockQty({
+          productId: conversationState.productId,
+          delta
+        });
+
+        if (!adjusted?.product) {
+          clearLineSelectionState(conversationKey);
+          await sendLineReply(
+            event.replyToken,
+            "選択中のアイテムが見つからなくなりました。もう一度商品名を送ってください。"
+          );
+          return;
+        }
+
+        setLineStockAdjustState(conversationKey, adjusted.product);
+        await sendLineReply(
+          event.replyToken,
+          [
+            `${adjusted.product.name || adjusted.product.name_en || conversationState.productLabel || "対象商品"} の在庫を ${formatSignedDelta(delta)} しました。`,
+            `在庫数: ${adjusted.previousQty} → ${adjusted.nextQty}`,
+            "続けて増減する場合は 1 / -1 を送ってください。別の商品を探す場合は商品名を送ってください。"
+          ].join("\n")
+        );
+        return;
+      } catch (error) {
+        if (error?.code === "NEGATIVE_STOCK") {
+          await sendLineReply(
+            event.replyToken,
+            `在庫は 0 未満にできません。現在在庫: ${error.currentQty}`
+          );
+          return;
+        }
+        console.error("Stock adjustment failed", error);
+        await sendLineReply(
+          event.replyToken,
+          "在庫更新に失敗しました。時間をおいてもう一度お試しください。"
+        );
+        return;
+      }
+    }
+
+    if (/^[+-]?\d/.test(String(text || "").normalize("NFKC").trim())) {
+      await sendLineReply(
+        event.replyToken,
+        "在庫増減は整数で送ってください（例: 1 / -1）。"
+      );
+      return;
+    }
+
+    clearLineSelectionState(conversationKey);
+  }
+
   const match = text.match(/^価格[\s:：]+(.+)$/);
   const query = (match ? match[1] : text).trim();
-  const conversationKey = getConversationKey(event);
 
   if (!query) {
     const guidance = "価格を調べるには「価格 シャブリ」の形式で送ってください。";
@@ -4633,13 +4737,19 @@ const processTextEvent = async (event, canReply) => {
   const selectedNumber = parseSelectionNumber(query);
   if (selectedNumber !== null && conversationKey) {
     const selection = getLineSelectionState(conversationKey);
-    if (selection?.matches?.length) {
+    if (resolveLineSelectionMode(selection) === "select_candidate" && selection?.matches?.length) {
       if (selectedNumber >= 1 && selectedNumber <= selection.matches.length) {
         const selected = selection.matches[selectedNumber - 1];
-        const detail = [
+        const detailLines = [
           `${selection.query} の ${selectedNumber}. を表示します。`,
           buildCatalogDetailLines(selected)
-        ].join("\n\n");
+        ];
+        if (setLineStockAdjustState(conversationKey, selected)) {
+          detailLines.push("在庫を増減する場合は、次のメッセージで 1 / -1 のように送ってください。");
+        } else {
+          clearLineSelectionState(conversationKey);
+        }
+        const detail = detailLines.join("\n\n");
         await sendLineReply(event.replyToken, detail);
         return;
       }
