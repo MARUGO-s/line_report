@@ -137,6 +137,31 @@ const jsonHeaders = {
   "content-type": "application/json; charset=UTF-8",
   "cache-control": "no-store"
 };
+const lineReplyApiUrl = "https://api.line.me/v2/bot/message/reply";
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+const toBase64 = (buffer) => {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+};
+
+const timingSafeEqual = (left, right) => {
+  const leftText = String(left || "");
+  const rightText = String(right || "");
+  if (leftText.length !== rightText.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < leftText.length; i += 1) {
+    diff |= leftText.charCodeAt(i) ^ rightText.charCodeAt(i);
+  }
+  return diff === 0;
+};
 
 const withTimeout = async (promise, timeoutMs) => {
   const controller = new AbortController();
@@ -198,6 +223,119 @@ const callRenderResume = async ({ apiKey, serviceId, timeoutMs }) => {
   );
 };
 
+const verifyLineSignature = async ({ bodyBuffer, signature, channelSecret }) => {
+  const normalizedSignature = String(signature || "").trim();
+  if (!normalizedSignature) {
+    return false;
+  }
+  const key = await crypto.subtle.importKey(
+    "raw",
+    textEncoder.encode(String(channelSecret || "")),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signed = await crypto.subtle.sign("HMAC", key, bodyBuffer);
+  const expected = toBase64(signed);
+  return timingSafeEqual(expected, normalizedSignature);
+};
+
+const sendPausedLineReply = async ({ accessToken, replyToken, message, timeoutMs }) => {
+  const response = await withTimeout(
+    (signal) =>
+      fetch(lineReplyApiUrl, {
+        method: "POST",
+        signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          replyToken,
+          messages: [{ type: "text", text: message }]
+        })
+      }),
+    timeoutMs
+  );
+  if (response.ok) {
+    return { ok: true };
+  }
+  const bodyText = await response.text().catch(() => "");
+  return {
+    ok: false,
+    status: response.status,
+    detail: bodyText.slice(0, 300)
+  };
+};
+
+const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature }) => {
+  const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
+  if (!lineAccessToken) {
+    return asJson(500, { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です。" });
+  }
+
+  const lineChannelSecret = String(env.LINE_CHANNEL_SECRET || "").trim();
+  if (lineChannelSecret) {
+    const valid = await verifyLineSignature({
+      bodyBuffer,
+      signature,
+      channelSecret: lineChannelSecret
+    });
+    if (!valid) {
+      return asJson(401, { ok: false, error: "invalid line signature" });
+    }
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(textDecoder.decode(bodyBuffer));
+  } catch {
+    return asJson(400, { ok: false, error: "invalid webhook payload" });
+  }
+
+  const pausedMessage = String(env.PAUSED_LINE_REPLY_TEXT || "").trim()
+    || "ただいまの時間はサーバーが休止中です。";
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  const replyTargets = events
+    .map((event) => String(event?.replyToken || "").trim())
+    .filter((token) => token && token !== "00000000000000000000000000000000");
+
+  if (!replyTargets.length) {
+    return asJson(200, { ok: true, paused: true, replied: 0 });
+  }
+
+  const results = await Promise.all(
+    replyTargets.map((token) =>
+      sendPausedLineReply({
+        accessToken: lineAccessToken,
+        replyToken: token,
+        message: pausedMessage,
+        timeoutMs: Math.max(2000, timeoutMs + 3000)
+      })
+    )
+  );
+
+  const failed = results.find((result) => !result.ok);
+  if (failed) {
+    return asJson(502, {
+      ok: false,
+      error: `LINE reply failed (${failed.status})`,
+      detail: failed.detail || ""
+    });
+  }
+
+  return asJson(200, { ok: true, paused: true, replied: replyTargets.length });
+};
+
+const forwardRequestToApp = async ({ request, appUrl, bodyBuffer }) => {
+  const targetUrl = buildRedirectUrl(request.url, appUrl);
+  return fetch(targetUrl, {
+    method: request.method,
+    headers: request.headers,
+    body: bodyBuffer
+  });
+};
+
 const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
   const renderApiKey = String(env.RENDER_API_KEY || "").trim();
   const renderServiceId = String(env.RENDER_SERVICE_ID || "").trim();
@@ -246,6 +384,20 @@ export default {
     const timeoutMs = Math.max(500, Number(env.HEALTH_TIMEOUT_MS || 2500) || 2500);
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if (path === "/webhooks/line" && request.method === "POST") {
+      const bodyBuffer = await request.arrayBuffer();
+      const healthy = await isHealthy(healthUrl, timeoutMs);
+      if (healthy) {
+        return forwardRequestToApp({ request, appUrl, bodyBuffer });
+      }
+      return handlePausedLineWebhook({
+        env,
+        bodyBuffer,
+        timeoutMs,
+        signature: request.headers.get("x-line-signature")
+      });
+    }
 
     if (path === "/__health" && request.method === "GET") {
       const healthy = await isHealthy(healthUrl, timeoutMs);
