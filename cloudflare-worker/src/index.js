@@ -38,24 +38,12 @@ const DEFAULT_MAINTENANCE_HTML = `<!doctype html>
     }
     .controls {
       margin-top: 18px;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-    }
-    input {
-      width: 100%;
-      box-sizing: border-box;
-      border: 1px solid #334155;
-      background: #0b1220;
-      color: #e2e8f0;
-      border-radius: 10px;
-      padding: 11px 12px;
-      font-size: 14px;
+      display: flex;
     }
     button {
       border: 0;
       border-radius: 10px;
-      padding: 11px 16px;
+      padding: 11px 20px;
       font-size: 14px;
       font-weight: 600;
       color: #ffffff;
@@ -78,9 +66,8 @@ const DEFAULT_MAINTENANCE_HTML = `<!doctype html>
 <body>
   <main class="card">
     <h1>サービス休止中</h1>
-    <p>現在は稼働時間外です。必要な場合は管理キーを入力して起動してください。</p>
+    <p>現在は稼働時間外です。必要な場合は下のボタンで起動してください。</p>
     <div class="controls">
-      <input id="resume-key" type="password" placeholder="管理キーを入力" autocomplete="off" />
       <button id="resume-btn" type="button">稼働させる</button>
     </div>
     <div id="status" class="status"></div>
@@ -88,7 +75,6 @@ const DEFAULT_MAINTENANCE_HTML = `<!doctype html>
   </main>
   <script>
     const statusEl = document.getElementById("status");
-    const keyInput = document.getElementById("resume-key");
     const resumeBtn = document.getElementById("resume-btn");
     let pollingId = null;
 
@@ -123,20 +109,11 @@ const DEFAULT_MAINTENANCE_HTML = `<!doctype html>
     };
 
     resumeBtn.addEventListener("click", async () => {
-      const key = keyInput.value.trim();
-      if (!key) {
-        setStatus("管理キーを入力してください。");
-        return;
-      }
       resumeBtn.disabled = true;
       setStatus("起動リクエストを送信しています...");
       try {
         const response = await fetch("/__resume", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({ key })
+          method: "POST"
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -221,39 +198,7 @@ const callRenderResume = async ({ apiKey, serviceId, timeoutMs }) => {
   );
 };
 
-const parseRequestJson = async (request) => {
-  try {
-    return await request.json();
-  } catch {
-    return {};
-  }
-};
-
-const toSha256Hex = async (value) => {
-  const data = new TextEncoder().encode(String(value || ""));
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-};
-
-const handleResumeRequest = async ({ request, env, healthUrl, timeoutMs }) => {
-  const expectedKeyHash = String(env.RESUME_KEY_SHA256 || "").trim().toLowerCase();
-  if (!expectedKeyHash) {
-    return asJson(500, { ok: false, error: "RESUME_KEY_SHA256 が未設定です。" });
-  }
-
-  const payload = await parseRequestJson(request);
-  const inputKey = String(payload?.key || "").trim();
-  if (!inputKey) {
-    return asJson(400, { ok: false, error: "管理キーを入力してください。" });
-  }
-
-  const inputHash = await toSha256Hex(inputKey);
-  if (inputHash !== expectedKeyHash) {
-    return asJson(401, { ok: false, error: "管理キーが正しくありません。" });
-  }
-
+const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
   const renderApiKey = String(env.RENDER_API_KEY || "").trim();
   const renderServiceId = String(env.RENDER_SERVICE_ID || "").trim();
   if (!renderApiKey || !renderServiceId) {
@@ -308,7 +253,7 @@ export default {
     }
 
     if (path === "/__resume" && request.method === "POST") {
-      return handleResumeRequest({ request, env, healthUrl, timeoutMs });
+      return handleResumeRequest({ env, healthUrl, timeoutMs });
     }
 
     const healthy = await isHealthy(healthUrl, timeoutMs);

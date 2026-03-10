@@ -37,15 +37,6 @@ npm run deploy
 
 - `RENDER_API_KEY` (Secret)
 - `RENDER_SERVICE_ID` (Plain text): `srv-d6mmfgvtskes73e082ag`
-- `RESUME_KEY_SHA256` (Plain text/Secret): 管理キーのSHA-256ハッシュ値
-
-管理キーの生成例:
-
-```bash
-node -e "const c=require('crypto');const k=c.randomBytes(24).toString('base64url');console.log('KEY='+k);console.log('SHA256='+c.createHash('sha256').update(k).digest('hex'));"
-```
-
-休止ページには `KEY` を入力し、Workerには `SHA256` を設定します。
 
 ## 4. 休止中ページをカスタマイズ
 
