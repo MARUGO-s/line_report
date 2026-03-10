@@ -51,6 +51,9 @@ LINE Developers の Webhook URL を Worker 側に向けます。
 これで Render が休止中でも、Worker が
 `PAUSED_LINE_REPLY_TEXT`（未設定時は「ただいまの時間はサーバーが休止中です。」）を返信します。
 
+休止中にユーザーが `起動` / `再開` / `resume` と送ると、
+Worker が Render 再開APIを呼び、結果をLINEに返信します。
+
 ## 5. 休止中ページをカスタマイズ
 
 Cloudflare Dashboard > Worker > Settings > Variables で

@@ -268,7 +268,26 @@ const sendPausedLineReply = async ({ accessToken, replyToken, message, timeoutMs
   };
 };
 
-const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature }) => {
+const normalizeCommandText = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .trim();
+
+const isResumeCommand = (text) => {
+  const normalized = normalizeCommandText(text);
+  return [
+    "起動",
+    "再開",
+    "再稼働",
+    "サーバー起動",
+    "サーバー再開",
+    "resume",
+    "start"
+  ].includes(normalized);
+};
+
+const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl }) => {
   const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
   if (!lineAccessToken) {
     return asJson(500, { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です。" });
@@ -295,24 +314,57 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature }
 
   const pausedMessage = String(env.PAUSED_LINE_REPLY_TEXT || "").trim()
     || "ただいまの時間はサーバーが休止中です。";
+  const pausedWithGuide = `${pausedMessage}\n再開する場合は「起動」と送信してください。`;
   const events = Array.isArray(payload?.events) ? payload.events : [];
   const replyTargets = events
-    .map((event) => String(event?.replyToken || "").trim())
-    .filter((token) => token && token !== "00000000000000000000000000000000");
+    .map((event) => ({
+      replyToken: String(event?.replyToken || "").trim(),
+      type: String(event?.type || ""),
+      messageType: String(event?.message?.type || ""),
+      messageText: String(event?.message?.text || "").trim()
+    }))
+    .filter((event) => event.replyToken && event.replyToken !== "00000000000000000000000000000000");
 
   if (!replyTargets.length) {
     return asJson(200, { ok: true, paused: true, replied: 0 });
   }
 
+  let resumeResultPromise = null;
+  const getResumeResult = async () => {
+    if (!resumeResultPromise) {
+      resumeResultPromise = (async () => {
+        const response = await handleResumeRequest({ env, healthUrl, timeoutMs });
+        const payload = await response.json().catch(() => ({}));
+        return { ok: response.ok, status: response.status, payload };
+      })();
+    }
+    return resumeResultPromise;
+  };
+
   const results = await Promise.all(
-    replyTargets.map((token) =>
-      sendPausedLineReply({
+    replyTargets.map(async (event) => {
+      let replyText = pausedWithGuide;
+      if (event.type === "message" && event.messageType === "text" && isResumeCommand(event.messageText)) {
+        const resumeResult = await getResumeResult();
+        if (resumeResult.ok) {
+          replyText = String(resumeResult.payload?.message || "").trim()
+            || "起動リクエストを受け付けました。20〜60秒ほどで利用可能になります。";
+        } else {
+          const detail = String(resumeResult.payload?.detail || "");
+          if (/only services suspended by a user can be resumed/i.test(detail)) {
+            replyText = "現在の停止状態ではLINEから再開できません。管理画面から再開してください。";
+          } else {
+            replyText = "再開に失敗しました。時間をおいて再試行してください。";
+          }
+        }
+      }
+      return sendPausedLineReply({
         accessToken: lineAccessToken,
-        replyToken: token,
-        message: pausedMessage,
+        replyToken: event.replyToken,
+        message: replyText,
         timeoutMs: Math.max(2000, timeoutMs + 3000)
-      })
-    )
+      });
+    })
   );
 
   const failed = results.find((result) => !result.ok);
@@ -395,7 +447,8 @@ export default {
         env,
         bodyBuffer,
         timeoutMs,
-        signature: request.headers.get("x-line-signature")
+        signature: request.headers.get("x-line-signature"),
+        healthUrl
       });
     }
 
