@@ -7,4 +7,4 @@ workers_dev = true
 APP_URL = "https://line-wine-api.onrender.com"
 HEALTH_URL = "https://line-wine-api.onrender.com/api/health"
 HEALTH_TIMEOUT_MS = "2500"
-RESUME_KEY = "DycnTG_VgUU-FYa-TXqKYr0C-JoT7kyi"
+RESUME_KEY_SHA256 = "0fd2cb87184c184ad503fcb33d65b3fb54940791563c2b47c2cb22ac118a2d74"

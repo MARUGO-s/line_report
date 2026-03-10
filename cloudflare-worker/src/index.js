@@ -229,10 +229,18 @@ const parseRequestJson = async (request) => {
   }
 };
 
+const toSha256Hex = async (value) => {
+  const data = new TextEncoder().encode(String(value || ""));
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+};
+
 const handleResumeRequest = async ({ request, env, healthUrl, timeoutMs }) => {
-  const expectedKey = String(env.RESUME_KEY || "").trim();
-  if (!expectedKey) {
-    return asJson(500, { ok: false, error: "RESUME_KEY が未設定です。" });
+  const expectedKeyHash = String(env.RESUME_KEY_SHA256 || "").trim().toLowerCase();
+  if (!expectedKeyHash) {
+    return asJson(500, { ok: false, error: "RESUME_KEY_SHA256 が未設定です。" });
   }
 
   const payload = await parseRequestJson(request);
@@ -240,7 +248,9 @@ const handleResumeRequest = async ({ request, env, healthUrl, timeoutMs }) => {
   if (!inputKey) {
     return asJson(400, { ok: false, error: "管理キーを入力してください。" });
   }
-  if (inputKey !== expectedKey) {
+
+  const inputHash = await toSha256Hex(inputKey);
+  if (inputHash !== expectedKeyHash) {
     return asJson(401, { ok: false, error: "管理キーが正しくありません。" });
   }
 
