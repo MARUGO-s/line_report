@@ -1,0 +1,9 @@
+name = "line-wine-gateway"
+main = "src/index.js"
+compatibility_date = "2026-03-11"
+workers_dev = true
+
+[vars]
+APP_URL = "https://line-wine-api.onrender.com"
+HEALTH_URL = "https://line-wine-api.onrender.com/api/health"
+HEALTH_TIMEOUT_MS = "2500"
