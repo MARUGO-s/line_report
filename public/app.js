@@ -294,7 +294,8 @@ const refreshServiceControlState = () => {
 
   if (!state.renderControlConfigured) {
     suspendServiceBtn.disabled = true;
-    suspendServiceResult.textContent = "RENDER_API_KEY / RENDER_SERVICE_ID 未設定のため休止できません。";
+    suspendServiceResult.textContent =
+      "RENDER_CONTROL_API_KEY / RENDER_CONTROL_SERVICE_ID 未設定のため休止できません。";
     return;
   }
 

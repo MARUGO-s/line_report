@@ -268,12 +268,17 @@ const opsConfig = {
 };
 
 const renderControlConfig = {
-  apiBaseUrl: String(process.env.RENDER_API_BASE_URL || "https://api.render.com/v1")
+  apiBaseUrl: String(
+    process.env.RENDER_CONTROL_API_BASE_URL || process.env.RENDER_API_BASE_URL || "https://api.render.com/v1"
+  )
     .trim()
     .replace(/\/+$/, ""),
-  apiKey: String(process.env.RENDER_API_KEY || "").trim(),
-  serviceId: String(process.env.RENDER_SERVICE_ID || "").trim(),
-  timeoutMs: Math.max(1000, Number(process.env.RENDER_API_TIMEOUT_MS || 10000) || 10000)
+  apiKey: String(process.env.RENDER_CONTROL_API_KEY || process.env.RENDER_API_KEY || "").trim(),
+  serviceId: String(process.env.RENDER_CONTROL_SERVICE_ID || process.env.RENDER_SERVICE_ID || "").trim(),
+  timeoutMs: Math.max(
+    1000,
+    Number(process.env.RENDER_CONTROL_API_TIMEOUT_MS || process.env.RENDER_API_TIMEOUT_MS || 10000) || 10000
+  )
 };
 
 const sendError = (res, status, message) => res.status(status).json({ error: message });
@@ -5196,7 +5201,7 @@ app.post("/api/admin/backup", (req, res) => {
 
 app.post("/api/admin/render/suspend", async (req, res) => {
   if (!isRenderControlConfigured()) {
-    return sendError(res, 400, "RENDER_API_KEY and RENDER_SERVICE_ID are required");
+    return sendError(res, 400, "RENDER_CONTROL_API_KEY and RENDER_CONTROL_SERVICE_ID are required");
   }
 
   try {
