@@ -551,6 +551,9 @@ const buildResumeLineAcceptedText = (payload) => {
   return "起動リクエストを受け付けました。起動完了まで20〜90秒ほどかかる場合があります。完了したら「起動完了」と送信します。";
 };
 
+const buildResumeImmediateAckText = () =>
+  "起動リクエストを受け付けました。起動完了まで20〜90秒ほどかかる場合があります。";
+
 const tryQueueResumeCompletionNotice = ({
   backgroundTask,
   env,
@@ -589,6 +592,114 @@ const tryQueueResumeCompletionNotice = ({
       return;
     }
   })().catch(() => {});
+
+  backgroundTask(task);
+  return true;
+};
+
+const queueResumeBackgroundFlow = ({
+  backgroundTask,
+  env,
+  accessToken,
+  pushTo,
+  healthUrl,
+  timeoutMs
+}) => {
+  if (typeof backgroundTask !== "function") {
+    return false;
+  }
+  const task = (async () => {
+    const response = await handleResumeRequest({ env, healthUrl, timeoutMs });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      if (accessToken && pushTo) {
+        await sendLinePushMessage({
+          accessToken,
+          to: pushTo,
+          message: "起動に失敗しました。時間をおいて再試行してください。",
+          timeoutMs: Math.max(5000, timeoutMs + 3000)
+        });
+      }
+      return;
+    }
+
+    if (isResumeAlreadyRunningMessage(payload)) {
+      if (accessToken && pushTo) {
+        await sendLinePushMessage({
+          accessToken,
+          to: pushTo,
+          message: "起動完了しています（すでに稼働中です）。",
+          timeoutMs: Math.max(5000, timeoutMs + 3000)
+        });
+      }
+      return;
+    }
+
+    tryQueueResumeCompletionNotice({
+      backgroundTask,
+      env,
+      accessToken,
+      pushTo,
+      healthUrl,
+      timeoutMs,
+      resumePayload: payload
+    });
+  })().catch(async () => {
+    if (accessToken && pushTo) {
+      await sendLinePushMessage({
+        accessToken,
+        to: pushTo,
+        message: "起動処理でエラーが発生しました。管理画面で状態を確認してください。",
+        timeoutMs: Math.max(5000, timeoutMs + 3000)
+      });
+    }
+  });
+
+  backgroundTask(task);
+  return true;
+};
+
+const queueSuspendBackgroundFlow = ({
+  backgroundTask,
+  env,
+  accessToken,
+  pushTo,
+  timeoutMs
+}) => {
+  if (typeof backgroundTask !== "function") {
+    return false;
+  }
+  const task = (async () => {
+    const response = await handleSuspendRequest({ env, timeoutMs });
+    if (!accessToken || !pushTo) {
+      return;
+    }
+    if (!response.ok) {
+      await sendLinePushMessage({
+        accessToken,
+        to: pushTo,
+        message: "休止に失敗しました。時間をおいて再試行してください。",
+        timeoutMs: Math.max(5000, timeoutMs + 3000)
+      });
+      return;
+    }
+    await sendLinePushMessage({
+      accessToken,
+      to: pushTo,
+      message: "休止完了しました。",
+      timeoutMs: Math.max(5000, timeoutMs + 3000)
+    });
+  })().catch(async () => {
+    if (accessToken && pushTo) {
+      await sendLinePushMessage({
+        accessToken,
+        to: pushTo,
+        message: "休止処理でエラーが発生しました。管理画面で状態を確認してください。",
+        timeoutMs: Math.max(5000, timeoutMs + 3000)
+      });
+    }
+  });
 
   backgroundTask(task);
   return true;
@@ -722,50 +833,23 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
     return asJson(200, { ok: true, paused: true, replied: 0 });
   }
 
-  let resumeResultPromise = null;
-  const getResumeResult = async () => {
-    if (!resumeResultPromise) {
-      resumeResultPromise = (async () => {
-        const response = await handleResumeRequest({ env, healthUrl, timeoutMs });
-        const payload = await response.json().catch(() => ({}));
-        return { ok: response.ok, status: response.status, payload };
-      })();
-    }
-    return resumeResultPromise;
-  };
-  let resumeCompletionQueued = false;
+  let resumeJobQueued = false;
 
   const results = await Promise.all(
     replyTargets.map(async (event) => {
       try {
         let replyText = pausedWithGuide;
         if (event.type === "message" && event.messageType === "text" && isResumeCommand(event.messageText)) {
-          const resumeResult = await getResumeResult();
-          if (resumeResult.ok) {
-            replyText = buildResumeLineAcceptedText(resumeResult.payload);
-            if (!resumeCompletionQueued) {
-              resumeCompletionQueued = tryQueueResumeCompletionNotice({
-                backgroundTask,
-                env,
-                accessToken: lineAccessToken,
-                pushTo: event.pushTo,
-                healthUrl,
-                timeoutMs,
-                resumePayload: resumeResult.payload
-              });
-            }
-          } else {
-            const detail = parseRenderErrorDetail(resumeResult.payload?.detail).message;
-            if (/only services suspended by a user can be resumed/i.test(detail)) {
-              const state = await fetchRenderState({ env, timeoutMs });
-              if (state?.suspended === "not_suspended") {
-                replyText = "再開処理中の可能性があります。30〜90秒待ってからもう一度メッセージを送ってください。";
-              } else {
-                replyText = "現在の停止状態ではLINEから再開できません。管理画面から再開してください。";
-              }
-            } else {
-              replyText = "再開に失敗しました。時間をおいて再試行してください。";
-            }
+          replyText = buildResumeImmediateAckText();
+          if (!resumeJobQueued) {
+            resumeJobQueued = queueResumeBackgroundFlow({
+              backgroundTask,
+              env,
+              accessToken: lineAccessToken,
+              pushTo: event.pushTo,
+              healthUrl,
+              timeoutMs
+            });
           }
         } else if (event.type === "message" && event.messageType === "text" && isSuspendCommand(event.messageText)) {
           replyText = "休止完了しています。再開する場合は「起動」と送信してください。";
@@ -1012,58 +1096,35 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
     return asJson(500, { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です。" });
   }
 
-  let suspendResultPromise = null;
-  let resumeResultPromise = null;
-  const getSuspendResult = async () => {
-    if (!suspendResultPromise) {
-      suspendResultPromise = (async () => {
-        const response = await handleSuspendRequest({ env, timeoutMs });
-        const payload = await response.json().catch(() => ({}));
-        return { ok: response.ok, status: response.status, payload };
-      })();
-    }
-    return suspendResultPromise;
-  };
-  const getResumeResult = async () => {
-    if (!resumeResultPromise) {
-      resumeResultPromise = (async () => {
-        const response = await handleResumeRequest({ env, healthUrl, timeoutMs });
-        const payload = await response.json().catch(() => ({}));
-        return { ok: response.ok, status: response.status, payload };
-      })();
-    }
-    return resumeResultPromise;
-  };
-  let resumeCompletionQueued = false;
+  let suspendJobQueued = false;
+  let resumeJobQueued = false;
 
   const results = await Promise.all(
     commandEvents.map(async (event) => {
       try {
         let replyText = "コマンドを受け付けました。";
         if (isSuspendCommand(event.messageText)) {
-          const suspendResult = await getSuspendResult();
-          if (suspendResult.ok) {
-            replyText = buildSuspendLineSuccessText();
-          } else {
-            replyText = "休止に失敗しました。時間をおいて再試行してください。";
+          replyText = "休止リクエストを受け付けました。完了まで30秒前後かかる場合があります。";
+          if (!suspendJobQueued) {
+            suspendJobQueued = queueSuspendBackgroundFlow({
+              backgroundTask,
+              env,
+              accessToken: lineAccessToken,
+              pushTo: event.pushTo,
+              timeoutMs
+            });
           }
         } else if (isResumeCommand(event.messageText)) {
-          const resumeResult = await getResumeResult();
-          if (resumeResult.ok) {
-            replyText = buildResumeLineAcceptedText(resumeResult.payload);
-            if (!resumeCompletionQueued) {
-              resumeCompletionQueued = tryQueueResumeCompletionNotice({
-                backgroundTask,
-                env,
-                accessToken: lineAccessToken,
-                pushTo: event.pushTo,
-                healthUrl,
-                timeoutMs,
-                resumePayload: resumeResult.payload
-              });
-            }
-          } else {
-            replyText = "再開に失敗しました。時間をおいて再試行してください。";
+          replyText = buildResumeImmediateAckText();
+          if (!resumeJobQueued) {
+            resumeJobQueued = queueResumeBackgroundFlow({
+              backgroundTask,
+              env,
+              accessToken: lineAccessToken,
+              pushTo: event.pushTo,
+              healthUrl,
+              timeoutMs
+            });
           }
         }
         return await sendLineMessageWithFallback({
