@@ -57,6 +57,28 @@
           </div>
           <pre id="suspendServiceResult" class="result result-compact">ここに休止操作の結果が表示されます。</pre>
         </div>
+
+        <div class="helper-block top-gap">
+          <p class="helper-title">自動休止/再開 時刻設定（JST）</p>
+          <p class="sub">ここで保存した時刻に合わせて、Cloudflare WorkerがRenderを自動で休止/再開します。</p>
+          <form id="scheduleWindowForm" class="stack top-gap">
+            <div class="split">
+              <label>
+                休止時刻（JST）
+                <input name="suspendTimeJst" type="time" step="60" required />
+              </label>
+              <label>
+                再開時刻（JST）
+                <input name="resumeTimeJst" type="time" step="60" required />
+              </label>
+            </div>
+            <div class="toolbar">
+              <button type="submit">時刻を保存</button>
+              <button id="reloadScheduleBtn" type="button">現在設定を再読込</button>
+            </div>
+          </form>
+          <pre id="scheduleWindowResult" class="result result-compact">ここに時刻設定の結果が表示されます。</pre>
+        </div>
       </section>
 
       <section class="panel">

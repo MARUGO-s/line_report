@@ -8,6 +8,9 @@ const adminTokenRotateForm = document.getElementById("adminTokenRotateForm");
 const adminTokenRotateResult = document.getElementById("adminTokenRotateResult");
 const suspendServiceBtn = document.getElementById("suspendServiceBtn");
 const suspendServiceResult = document.getElementById("suspendServiceResult");
+const scheduleWindowForm = document.getElementById("scheduleWindowForm");
+const scheduleWindowResult = document.getElementById("scheduleWindowResult");
+const reloadScheduleBtn = document.getElementById("reloadScheduleBtn");
 
 const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
 const csvIngestionForm = document.getElementById("csvIngestionForm");
@@ -106,6 +109,7 @@ const state = {
   adminToken: readStoredAdminToken(),
   adminAuthRequired: false,
   renderControlConfigured: false,
+  workerScheduleConfigured: false,
   isStaticPreview: false,
   templates: [],
   templateEditOriginalKey: ""
@@ -201,6 +205,25 @@ const safeDate = (value) => {
   return d.toLocaleString("ja-JP");
 };
 
+const normalizeJstTimeText = (value) => {
+  const text = String(value || "").trim();
+  const match = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) {
+    return "";
+  }
+  return `${String(match[1]).padStart(2, "0")}:${String(match[2]).padStart(2, "0")}`;
+};
+
+const setScheduleFormValues = (payload = {}) => {
+  if (!scheduleWindowForm) {
+    return;
+  }
+  scheduleWindowForm.elements.suspendTimeJst.value =
+    normalizeJstTimeText(payload.suspendTimeJst) || "02:00";
+  scheduleWindowForm.elements.resumeTimeJst.value =
+    normalizeJstTimeText(payload.resumeTimeJst) || "12:00";
+};
+
 const getFileExtension = (fileName) => {
   const name = String(fileName || "");
   const dot = name.lastIndexOf(".");
@@ -282,27 +305,49 @@ const refreshAdminTokenRotateFormState = () => {
 };
 
 const refreshServiceControlState = () => {
-  if (!suspendServiceBtn || !suspendServiceResult) {
-    return;
+  if (suspendServiceBtn && suspendServiceResult) {
+    if (state.isStaticPreview) {
+      suspendServiceBtn.disabled = true;
+      suspendServiceResult.textContent = "静的プレビューではサービス制御は利用できません。";
+    } else if (!state.renderControlConfigured) {
+      suspendServiceBtn.disabled = true;
+      suspendServiceResult.textContent =
+        "RENDER_CONTROL_API_KEY / RENDER_CONTROL_SERVICE_ID 未設定のため休止できません。";
+    } else {
+      if (!suspendServiceResult.textContent.trim()) {
+        suspendServiceResult.textContent = "Renderを休止する場合は上のボタンを押してください。";
+      }
+      suspendServiceBtn.disabled = false;
+    }
   }
 
-  if (state.isStaticPreview) {
-    suspendServiceBtn.disabled = true;
-    suspendServiceResult.textContent = "静的プレビューではサービス制御は利用できません。";
-    return;
+  if (scheduleWindowForm && scheduleWindowResult && reloadScheduleBtn) {
+    const controls = Array.from(scheduleWindowForm.elements || []);
+    if (state.isStaticPreview) {
+      controls.forEach((element) => {
+        element.disabled = true;
+      });
+      reloadScheduleBtn.disabled = true;
+      scheduleWindowResult.textContent = "静的プレビューでは時刻設定は利用できません。";
+      return;
+    }
+    if (!state.workerScheduleConfigured) {
+      controls.forEach((element) => {
+        element.disabled = true;
+      });
+      reloadScheduleBtn.disabled = true;
+      scheduleWindowResult.textContent =
+        "WORKER_SCHEDULE_BASE_URL 未設定のため時刻設定を変更できません。";
+      return;
+    }
+    controls.forEach((element) => {
+      element.disabled = false;
+    });
+    reloadScheduleBtn.disabled = false;
+    if (!scheduleWindowResult.textContent.trim()) {
+      scheduleWindowResult.textContent = "現在の設定を読み込んでください。";
+    }
   }
-
-  if (!state.renderControlConfigured) {
-    suspendServiceBtn.disabled = true;
-    suspendServiceResult.textContent =
-      "RENDER_CONTROL_API_KEY / RENDER_CONTROL_SERVICE_ID 未設定のため休止できません。";
-    return;
-  }
-
-  if (!suspendServiceResult.textContent.trim()) {
-    suspendServiceResult.textContent = "Renderを休止する場合は上のボタンを押してください。";
-  }
-  suspendServiceBtn.disabled = false;
 };
 
 const escapeHtml = (value) =>
@@ -447,6 +492,7 @@ const loadSystem = async () => {
   const result = await api.get("/api/health");
   state.adminAuthRequired = Boolean(result.adminAuthRequired);
   state.renderControlConfigured = Boolean(result.renderControlConfigured);
+  state.workerScheduleConfigured = Boolean(result.workerScheduleConfigured);
   updateAuthStatus();
   refreshServiceControlState();
   systemStatusEl.textContent = `${result.host}:${result.port} / Auth: ${result.adminAuthRequired ? (state.adminToken ? "ON" : "REQUIRED") : "OFF"} / Source: ${result.adminTokenSource || "-"} / Webhook: ${result.lineWebhookReady ? "OK" : "NG"} / Reply: ${result.lineReplyReady ? "OK" : "NG"}`;
@@ -466,6 +512,30 @@ const loadIngestionFiles = async () => {
   }
   const result = await api.get("/api/ingestion/files?limit=100");
   renderIngestionFiles(result.items || []);
+};
+
+const loadScheduleWindow = async () => {
+  if (state.isStaticPreview || !scheduleWindowForm || !scheduleWindowResult) {
+    return;
+  }
+  if (!state.workerScheduleConfigured) {
+    refreshServiceControlState();
+    return;
+  }
+  const result = await api.get("/api/admin/schedule-window");
+  setScheduleFormValues(result);
+  scheduleWindowResult.textContent = JSON.stringify(result, null, 2);
+};
+
+const loadScheduleWindowSafe = async () => {
+  try {
+    await loadScheduleWindow();
+  } catch (error) {
+    if (scheduleWindowResult) {
+      scheduleWindowResult.textContent = `時刻設定の取得に失敗: ${error.message}`;
+    }
+    notify(`時刻設定の取得に失敗: ${error.message}`, true);
+  }
 };
 
 const loadIngestionErrors = async (ingestionFileId) => {
@@ -530,6 +600,7 @@ authForm.addEventListener("submit", async (event) => {
   try {
     await loadSystem();
     await loadProtectedData();
+    await loadScheduleWindowSafe();
     notify("管理認証トークンを保存しました。");
   } catch (error) {
     handleOperationError("認証確認に失敗", error);
@@ -585,6 +656,7 @@ adminTokenRotateForm.addEventListener("submit", async (event) => {
     adminTokenRotateForm.reset();
     await loadSystem();
     await loadProtectedData();
+    await loadScheduleWindowSafe();
     notify(useEnvToken ? "管理認証トークンを環境変数設定へ戻しました。" : "管理認証トークンを更新しました。");
   } catch (error) {
     handleOperationError("管理認証トークン更新に失敗", error);
@@ -626,6 +698,58 @@ if (suspendServiceBtn) {
       suspendServiceBtn.textContent = originalLabel;
       handleOperationError("Render休止に失敗", error);
     }
+  });
+}
+
+if (scheduleWindowForm) {
+  scheduleWindowForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (state.isStaticPreview) {
+      notify("静的プレビューでは時刻設定を変更できません。", true);
+      return;
+    }
+    if (!state.workerScheduleConfigured) {
+      notify("Worker時刻設定APIが未設定です。", true);
+      return;
+    }
+    const formData = new FormData(scheduleWindowForm);
+    const suspendTimeJst = normalizeJstTimeText(formData.get("suspendTimeJst"));
+    const resumeTimeJst = normalizeJstTimeText(formData.get("resumeTimeJst"));
+    if (!suspendTimeJst || !resumeTimeJst) {
+      notify("時刻は HH:MM 形式で入力してください。", true);
+      return;
+    }
+    if (suspendTimeJst === resumeTimeJst) {
+      notify("休止時刻と再開時刻は別の値にしてください。", true);
+      return;
+    }
+    const submitButton = scheduleWindowForm.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.disabled = true;
+    }
+    try {
+      const result = await api.post("/api/admin/schedule-window", {
+        suspendTimeJst,
+        resumeTimeJst
+      });
+      setScheduleFormValues(result);
+      if (scheduleWindowResult) {
+        scheduleWindowResult.textContent = JSON.stringify(result, null, 2);
+      }
+      notify(`自動時刻を保存しました（休止 ${suspendTimeJst} / 再開 ${resumeTimeJst}）。`);
+    } catch (error) {
+      handleOperationError("時刻設定の保存に失敗", error);
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+      }
+    }
+  });
+}
+
+if (reloadScheduleBtn) {
+  reloadScheduleBtn.addEventListener("click", () => {
+    loadScheduleWindowSafe();
   });
 }
 
@@ -818,12 +942,17 @@ const boot = async () => {
   refreshAdminTokenRotateFormState();
   setTemplateEditMode("");
   updateTemplatePreview();
+  setScheduleFormValues({
+    suspendTimeJst: "02:00",
+    resumeTimeJst: "12:00"
+  });
   updateAuthStatus("接続確認中...");
   refreshServiceControlState();
 
   try {
     await loadSystem();
     await loadProtectedData();
+    await loadScheduleWindowSafe();
     notify("初期化しました。");
   } catch (error) {
     if (isAuthError(error)) {

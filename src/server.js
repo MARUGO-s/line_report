@@ -281,9 +281,32 @@ const renderControlConfig = {
   )
 };
 
+const workerScheduleConfig = {
+  baseUrl: String(
+    process.env.WORKER_SCHEDULE_BASE_URL ||
+      process.env.WORKER_GATEWAY_URL ||
+      "https://linewine.pingus0428.workers.dev"
+  )
+    .trim()
+    .replace(/\/+$/, ""),
+  apiKey: String(process.env.WORKER_SCHEDULE_API_KEY || process.env.SCHEDULE_ADMIN_KEY || "").trim(),
+  timeoutMs: Math.max(1000, Number(process.env.WORKER_SCHEDULE_API_TIMEOUT_MS || 8000) || 8000)
+};
+
 const sendError = (res, status, message) => res.status(status).json({ error: message });
 
 const isRenderControlConfigured = () => Boolean(renderControlConfig.apiKey && renderControlConfig.serviceId);
+
+const normalizeJstTimeText = (value) => {
+  const text = String(value || "").trim();
+  const match = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) {
+    return "";
+  }
+  return `${String(match[1]).padStart(2, "0")}:${String(match[2]).padStart(2, "0")}`;
+};
+
+const isWorkerScheduleConfigured = () => Boolean(workerScheduleConfig.baseUrl);
 
 const callRenderServiceAction = async (action) => {
   if (!["suspend", "resume"].includes(action)) {
@@ -306,6 +329,33 @@ const callRenderServiceAction = async (action) => {
         Accept: "application/json",
         "Content-Type": "application/json"
       },
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const callWorkerScheduleApi = async ({ method = "GET", body = null }) => {
+  if (!isWorkerScheduleConfigured()) {
+    throw new Error("worker schedule endpoint is not configured");
+  }
+  const endpoint = `${workerScheduleConfig.baseUrl}/__admin/schedule`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), workerScheduleConfig.timeoutMs);
+  try {
+    return await fetch(endpoint, {
+      method,
+      headers: {
+        Accept: "application/json",
+        ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
+        ...(workerScheduleConfig.apiKey
+          ? {
+              "x-schedule-admin-key": workerScheduleConfig.apiKey
+            }
+          : {})
+      },
+      body: method === "GET" ? undefined : JSON.stringify(body || {}),
       signal: controller.signal
     });
   } finally {
@@ -5146,7 +5196,8 @@ app.get("/api/health", (req, res) => {
     groqWineReplyModel: groqWineFlowConfig.replyModel,
     backupRetention: opsConfig.backupRetention,
     renderControlConfigured: isRenderControlConfigured(),
-    renderControlledServiceId: renderControlConfig.serviceId || null
+    renderControlledServiceId: renderControlConfig.serviceId || null,
+    workerScheduleConfigured: isWorkerScheduleConfigured()
   });
 });
 
@@ -5230,6 +5281,104 @@ app.post("/api/admin/render/suspend", async (req, res) => {
     }
     console.error(error);
     return sendError(res, 500, "failed to request render suspend");
+  }
+});
+
+app.get("/api/admin/schedule-window", async (req, res) => {
+  if (!isWorkerScheduleConfigured()) {
+    return sendError(res, 400, "WORKER_SCHEDULE_BASE_URL is required");
+  }
+  try {
+    const response = await callWorkerScheduleApi({ method: "GET" });
+    const bodyText = await response.text().catch(() => "");
+    let payload = {};
+    try {
+      payload = bodyText ? JSON.parse(bodyText) : {};
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      return sendError(
+        res,
+        502,
+        `worker schedule fetch failed: ${response.status} ${truncateText(String(payload?.error || bodyText || ""), 220)}`
+      );
+    }
+    return res.json({
+      ok: true,
+      enabled: payload?.enabled !== false,
+      suspendTimeJst: normalizeJstTimeText(payload?.suspendTimeJst) || "02:00",
+      resumeTimeJst: normalizeJstTimeText(payload?.resumeTimeJst) || "12:00",
+      updatedAt: payload?.updatedAt || null,
+      timezone: payload?.timezone || "Asia/Tokyo",
+      source: payload?.source || null
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return sendError(
+        res,
+        504,
+        `worker schedule fetch timed out after ${workerScheduleConfig.timeoutMs}ms`
+      );
+    }
+    console.error(error);
+    return sendError(res, 500, "failed to fetch worker schedule");
+  }
+});
+
+app.post("/api/admin/schedule-window", async (req, res) => {
+  if (!isWorkerScheduleConfigured()) {
+    return sendError(res, 400, "WORKER_SCHEDULE_BASE_URL is required");
+  }
+  const suspendTimeJst = normalizeJstTimeText(req.body?.suspendTimeJst);
+  const resumeTimeJst = normalizeJstTimeText(req.body?.resumeTimeJst);
+  if (!suspendTimeJst || !resumeTimeJst) {
+    return sendError(res, 400, "suspendTimeJst and resumeTimeJst must be HH:MM");
+  }
+  if (suspendTimeJst === resumeTimeJst) {
+    return sendError(res, 400, "suspendTimeJst and resumeTimeJst must be different");
+  }
+  try {
+    const response = await callWorkerScheduleApi({
+      method: "POST",
+      body: {
+        suspendTimeJst,
+        resumeTimeJst
+      }
+    });
+    const bodyText = await response.text().catch(() => "");
+    let payload = {};
+    try {
+      payload = bodyText ? JSON.parse(bodyText) : {};
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      return sendError(
+        res,
+        502,
+        `worker schedule update failed: ${response.status} ${truncateText(String(payload?.error || bodyText || ""), 220)}`
+      );
+    }
+    return res.status(200).json({
+      ok: true,
+      enabled: payload?.enabled !== false,
+      suspendTimeJst: normalizeJstTimeText(payload?.suspendTimeJst) || suspendTimeJst,
+      resumeTimeJst: normalizeJstTimeText(payload?.resumeTimeJst) || resumeTimeJst,
+      updatedAt: payload?.updatedAt || null,
+      timezone: payload?.timezone || "Asia/Tokyo",
+      source: payload?.source || null
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return sendError(
+        res,
+        504,
+        `worker schedule update timed out after ${workerScheduleConfig.timeoutMs}ms`
+      );
+    }
+    console.error(error);
+    return sendError(res, 500, "failed to update worker schedule");
   }
 });
 

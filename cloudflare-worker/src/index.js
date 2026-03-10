@@ -143,8 +143,9 @@ const lineDummyReplyToken = "00000000000000000000000000000000";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const diagCacheRequest = new Request("https://linewine-internal.local/__diag/last-webhook");
-const DEFAULT_SUSPEND_CRON_UTC = "0 17 * * *";
-const DEFAULT_RESUME_CRON_UTC = "0 3 * * *";
+const DEFAULT_SUSPEND_TIME_JST = "02:00";
+const DEFAULT_RESUME_TIME_JST = "12:00";
+const scheduleStoreObjectName = "global";
 const runtimeDiagnostics = {
   lastWebhook: null
 };
@@ -152,10 +153,55 @@ const runtimeDiagnostics = {
 const isFalseLike = (value) =>
   ["0", "false", "off", "no", "disabled"].includes(String(value || "").trim().toLowerCase());
 
+const normalizeJstTimeText = (value, fallback = "") => {
+  const text = String(value || "").trim();
+  const match = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) {
+    return String(fallback || "").trim();
+  }
+  const hour = String(match[1] || "").padStart(2, "0");
+  const minute = String(match[2] || "").padStart(2, "0");
+  return `${hour}:${minute}`;
+};
+
+const getJstClockParts = (value = Date.now()) => {
+  const date = value instanceof Date ? value : new Date(Number(value) || Date.now());
+  const formatter = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+  const parts = formatter.formatToParts(date);
+  const map = {};
+  for (const item of parts) {
+    if (item.type !== "literal") {
+      map[item.type] = item.value;
+    }
+  }
+  const yyyy = String(map.year || "0000").padStart(4, "0");
+  const mm = String(map.month || "01").padStart(2, "0");
+  const dd = String(map.day || "01").padStart(2, "0");
+  const hh = String(map.hour || "00").padStart(2, "0");
+  const mi = String(map.minute || "00").padStart(2, "0");
+  return {
+    date: `${yyyy}-${mm}-${dd}`,
+    time: `${hh}:${mi}`,
+    minuteKey: `${yyyy}-${mm}-${dd} ${hh}:${mi}`
+  };
+};
+
+const getDefaultScheduleWindow = (env) => ({
+  suspendTimeJst: normalizeJstTimeText(env.SUSPEND_TIME_JST, DEFAULT_SUSPEND_TIME_JST),
+  resumeTimeJst: normalizeJstTimeText(env.RESUME_TIME_JST, DEFAULT_RESUME_TIME_JST)
+});
+
 const getAutoScheduleConfig = (env) => ({
   enabled: !isFalseLike(env.AUTO_SUSPEND_RESUME_ENABLED),
-  suspendCronUtc: String(env.SUSPEND_CRON_UTC || DEFAULT_SUSPEND_CRON_UTC).trim() || DEFAULT_SUSPEND_CRON_UTC,
-  resumeCronUtc: String(env.RESUME_CRON_UTC || DEFAULT_RESUME_CRON_UTC).trim() || DEFAULT_RESUME_CRON_UTC
+  ...getDefaultScheduleWindow(env)
 });
 
 const setRuntimeWebhookDiag = (update) => {
@@ -223,6 +269,152 @@ const withTimeout = async (promise, timeoutMs) => {
     return await promise(controller.signal);
   } finally {
     clearTimeout(timer);
+  }
+};
+
+const getScheduleStoreStub = (env) => {
+  if (!env?.SCHEDULE_STORE || typeof env.SCHEDULE_STORE.idFromName !== "function") {
+    return null;
+  }
+  const id = env.SCHEDULE_STORE.idFromName(scheduleStoreObjectName);
+  return env.SCHEDULE_STORE.get(id);
+};
+
+const isScheduleAdminAuthorized = (request, env) => {
+  const required = String(env.SCHEDULE_ADMIN_KEY || "").trim();
+  if (!required) {
+    return true;
+  }
+  const headerToken = String(request.headers.get("x-schedule-admin-key") || "").trim();
+  const bearer = String(request.headers.get("authorization") || "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+  const received = headerToken || bearer;
+  if (!received) {
+    return false;
+  }
+  return timingSafeEqual(received, required);
+};
+
+const readScheduleWindow = async ({ env, timeoutMs }) => {
+  const defaults = getDefaultScheduleWindow(env);
+  const stub = getScheduleStoreStub(env);
+  if (!stub) {
+    return {
+      ...defaults,
+      updatedAt: null,
+      source: "env_defaults"
+    };
+  }
+  try {
+    const response = await withTimeout(
+      (signal) =>
+        stub.fetch("https://schedule.local/config", {
+          method: "GET",
+          signal
+        }),
+      Math.max(1000, timeoutMs)
+    );
+    if (!response.ok) {
+      return {
+        ...defaults,
+        updatedAt: null,
+        source: "env_fallback"
+      };
+    }
+    const payload = await response.json().catch(() => ({}));
+    return {
+      suspendTimeJst: normalizeJstTimeText(payload?.suspendTimeJst, defaults.suspendTimeJst),
+      resumeTimeJst: normalizeJstTimeText(payload?.resumeTimeJst, defaults.resumeTimeJst),
+      updatedAt: payload?.updatedAt || null,
+      source: "durable_object"
+    };
+  } catch {
+    return {
+      ...defaults,
+      updatedAt: null,
+      source: "env_fallback"
+    };
+  }
+};
+
+const writeScheduleWindow = async ({ env, timeoutMs, suspendTimeJst, resumeTimeJst }) => {
+  const normalizedSuspend = normalizeJstTimeText(suspendTimeJst, "");
+  const normalizedResume = normalizeJstTimeText(resumeTimeJst, "");
+  if (!normalizedSuspend || !normalizedResume) {
+    return { ok: false, status: 400, error: "time format must be HH:MM" };
+  }
+  const stub = getScheduleStoreStub(env);
+  if (!stub) {
+    return { ok: false, status: 500, error: "SCHEDULE_STORE binding is not configured" };
+  }
+  try {
+    const response = await withTimeout(
+      (signal) =>
+        stub.fetch("https://schedule.local/config", {
+          method: "POST",
+          headers: { "content-type": "application/json; charset=UTF-8" },
+          body: JSON.stringify({
+            suspendTimeJst: normalizedSuspend,
+            resumeTimeJst: normalizedResume
+          }),
+          signal
+        }),
+      Math.max(1000, timeoutMs)
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: String(payload?.error || "failed to update schedule").slice(0, 240)
+      };
+    }
+    return {
+      ok: true,
+      status: response.status,
+      schedule: {
+        suspendTimeJst: normalizeJstTimeText(payload?.suspendTimeJst, normalizedSuspend),
+        resumeTimeJst: normalizeJstTimeText(payload?.resumeTimeJst, normalizedResume),
+        updatedAt: payload?.updatedAt || null,
+        source: "durable_object"
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 502,
+      error: `failed to update schedule: ${String(error?.message || "unknown").slice(0, 200)}`
+    };
+  }
+};
+
+const claimScheduledExecution = async ({ env, timeoutMs, action, minuteKey }) => {
+  const stub = getScheduleStoreStub(env);
+  if (!stub) {
+    return true;
+  }
+  try {
+    const response = await withTimeout(
+      (signal) =>
+        stub.fetch("https://schedule.local/claim", {
+          method: "POST",
+          headers: { "content-type": "application/json; charset=UTF-8" },
+          body: JSON.stringify({
+            action: String(action || "").trim(),
+            minuteKey: String(minuteKey || "").trim()
+          }),
+          signal
+        }),
+      Math.max(1000, timeoutMs)
+    );
+    if (!response.ok) {
+      return false;
+    }
+    const payload = await response.json().catch(() => ({}));
+    return Boolean(payload?.claimed);
+  } catch {
+    return false;
   }
 };
 
@@ -1077,6 +1269,106 @@ const runScheduledRenderControl = async ({ env, healthUrl, timeoutMs, action }) 
   return { status: response.status, payload };
 };
 
+export class ScheduleStore {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  json(status, payload) {
+    return new Response(JSON.stringify(payload), {
+      status,
+      headers: jsonHeaders
+    });
+  }
+
+  async getConfig() {
+    const defaults = getDefaultScheduleWindow(this.env);
+    const current = await this.state.storage.get("config");
+    return {
+      suspendTimeJst: normalizeJstTimeText(current?.suspendTimeJst, defaults.suspendTimeJst),
+      resumeTimeJst: normalizeJstTimeText(current?.resumeTimeJst, defaults.resumeTimeJst),
+      updatedAt: String(current?.updatedAt || "")
+    };
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/config" && request.method === "GET") {
+      const config = await this.getConfig();
+      return this.json(200, {
+        ok: true,
+        ...config
+      });
+    }
+
+    if (url.pathname === "/config" && request.method === "POST") {
+      let payload = {};
+      try {
+        payload = await request.json();
+      } catch {
+        return this.json(400, { ok: false, error: "invalid json body" });
+      }
+      const current = await this.getConfig();
+      const suspendTimeJst = normalizeJstTimeText(payload?.suspendTimeJst, "");
+      const resumeTimeJst = normalizeJstTimeText(payload?.resumeTimeJst, "");
+      if (!suspendTimeJst || !resumeTimeJst) {
+        return this.json(400, { ok: false, error: "suspendTimeJst and resumeTimeJst must be HH:MM" });
+      }
+      if (suspendTimeJst === resumeTimeJst) {
+        return this.json(400, { ok: false, error: "suspend and resume time must be different" });
+      }
+      const next = {
+        suspendTimeJst,
+        resumeTimeJst,
+        updatedAt: new Date().toISOString()
+      };
+      if (
+        current.suspendTimeJst === next.suspendTimeJst &&
+        current.resumeTimeJst === next.resumeTimeJst
+      ) {
+        return this.json(200, {
+          ok: true,
+          ...current,
+          unchanged: true
+        });
+      }
+      await this.state.storage.put("config", next);
+      return this.json(200, {
+        ok: true,
+        ...next
+      });
+    }
+
+    if (url.pathname === "/claim" && request.method === "POST") {
+      let payload = {};
+      try {
+        payload = await request.json();
+      } catch {
+        return this.json(400, { ok: false, error: "invalid json body" });
+      }
+      const action = String(payload?.action || "").trim();
+      const minuteKey = String(payload?.minuteKey || "").trim();
+      if (!["suspend", "resume"].includes(action) || !minuteKey) {
+        return this.json(400, { ok: false, error: "action and minuteKey are required" });
+      }
+      const last = await this.state.storage.get("last_execution");
+      if (last?.action === action && last?.minuteKey === minuteKey) {
+        return this.json(200, { ok: true, claimed: false });
+      }
+      await this.state.storage.put("last_execution", {
+        action,
+        minuteKey,
+        updatedAt: new Date().toISOString()
+      });
+      return this.json(200, { ok: true, claimed: true });
+    }
+
+    return this.json(404, { ok: false, error: "not found" });
+  }
+}
+
 const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, request, appUrl, backgroundTask, recordDiag }) => {
   const lineChannelSecret = String(env.LINE_CHANNEL_SECRET || "").trim();
   if (lineChannelSecret) {
@@ -1439,11 +1731,67 @@ export default {
 
     if (path === "/__diag/schedule" && request.method === "GET") {
       const scheduleConfig = getAutoScheduleConfig(env);
+      const storedWindow = await readScheduleWindow({ env, timeoutMs });
+      const nowJst = getJstClockParts();
       return asJson(200, {
         ok: true,
-        ...scheduleConfig,
+        enabled: scheduleConfig.enabled,
+        ...storedWindow,
         timezone: "Asia/Tokyo",
-        pauseWindowJst: "02:00-12:00"
+        nowJst: `${nowJst.date} ${nowJst.time}`
+      });
+    }
+
+    if (path === "/__admin/schedule" && request.method === "GET") {
+      if (!isScheduleAdminAuthorized(request, env)) {
+        return asJson(401, { ok: false, error: "unauthorized schedule admin request" });
+      }
+      const scheduleConfig = getAutoScheduleConfig(env);
+      const storedWindow = await readScheduleWindow({ env, timeoutMs });
+      return asJson(200, {
+        ok: true,
+        enabled: scheduleConfig.enabled,
+        ...storedWindow,
+        timezone: "Asia/Tokyo"
+      });
+    }
+
+    if (path === "/__admin/schedule" && request.method === "POST") {
+      if (!isScheduleAdminAuthorized(request, env)) {
+        return asJson(401, { ok: false, error: "unauthorized schedule admin request" });
+      }
+      let payload = {};
+      try {
+        payload = await request.json();
+      } catch {
+        return asJson(400, { ok: false, error: "invalid json body" });
+      }
+      const suspendTimeJst = normalizeJstTimeText(payload?.suspendTimeJst, "");
+      const resumeTimeJst = normalizeJstTimeText(payload?.resumeTimeJst, "");
+      if (!suspendTimeJst || !resumeTimeJst) {
+        return asJson(400, { ok: false, error: "suspendTimeJst and resumeTimeJst must be HH:MM" });
+      }
+      if (suspendTimeJst === resumeTimeJst) {
+        return asJson(400, { ok: false, error: "suspend and resume time must be different" });
+      }
+      const saved = await writeScheduleWindow({
+        env,
+        timeoutMs,
+        suspendTimeJst,
+        resumeTimeJst
+      });
+      if (!saved.ok) {
+        return asJson(saved.status || 500, {
+          ok: false,
+          error: saved.error || "failed to save schedule"
+        });
+      }
+      const scheduleConfig = getAutoScheduleConfig(env);
+      return asJson(200, {
+        ok: true,
+        enabled: scheduleConfig.enabled,
+        ...saved.schedule,
+        timezone: "Asia/Tokyo"
       });
     }
 
@@ -1479,15 +1827,30 @@ export default {
       return;
     }
 
+    const scheduledTime = Number(controller?.scheduledTime || Date.now()) || Date.now();
+    const nowJst = getJstClockParts(scheduledTime);
+    const storedWindow = await readScheduleWindow({ env, timeoutMs });
+
     let action = "";
-    if (cron === scheduleConfig.suspendCronUtc) {
+    if (nowJst.time === storedWindow.suspendTimeJst) {
       action = "suspend";
-    } else if (cron === scheduleConfig.resumeCronUtc) {
+    } else if (nowJst.time === storedWindow.resumeTimeJst) {
       action = "resume";
     } else {
       console.log(
-        `[schedule] ignored cron=${cron || "unknown"} expected suspend=${scheduleConfig.suspendCronUtc} resume=${scheduleConfig.resumeCronUtc}`
+        `[schedule] no action at ${nowJst.time} JST (cron=${cron || "unknown"}, suspend=${storedWindow.suspendTimeJst}, resume=${storedWindow.resumeTimeJst})`
       );
+      return;
+    }
+
+    const claimed = await claimScheduledExecution({
+      env,
+      timeoutMs,
+      action,
+      minuteKey: nowJst.minuteKey
+    });
+    if (!claimed) {
+      console.log(`[schedule:${action}] skipped duplicate execution for ${nowJst.minuteKey} JST`);
       return;
     }
 

@@ -6,7 +6,7 @@ Render本番APIの生存確認を行い、状態に応じて次を返します�
 - 生存確認NG: 休止中HTML (`503`) を表示
 - 休止中ページの「稼働させる」押下: Worker経由で Render `resume` API を実行
 - `POST /webhooks/line` 受信時: 稼働中はRenderへ中継、休止中は固定メッセージをLINE返信
-- Cloudflare Cronで毎日 02:00 JST に休止、12:00 JST に再開（設定変更可）
+- Cloudflare Cron + Durable Objectで、管理画面から休止/再開時刻を変更可能
 
 ## 1. 前提
 
@@ -43,19 +43,24 @@ npm run deploy
 - `LINE_CHANNEL_SECRET` (Secret): 休止中返信時の署名検証に使用（推奨）
 - `PAUSED_LINE_REPLY_TEXT` (Plain text, 任意): 休止中に返す文言
 - `AUTO_SUSPEND_RESUME_ENABLED` (Plain text, 任意): `false` で自動休止/再開を無効化
-- `SUSPEND_CRON_UTC` (Plain text, 任意): 休止実行cron（UTC）
-- `RESUME_CRON_UTC` (Plain text, 任意): 再開実行cron（UTC）
+- `SUSPEND_TIME_JST` (Plain text, 任意): 既定の休止時刻（`HH:MM`）
+- `RESUME_TIME_JST` (Plain text, 任意): 既定の再開時刻（`HH:MM`）
+- `SCHEDULE_ADMIN_KEY` (Secret, 任意): Workerの時刻設定API保護キー
 
 ## 4. 自動休止/再開スケジュール
 
-既定値は以下です（Cloudflare cronはUTC基準）。
+既定値は以下です（JST）。
 
-- 休止: `0 17 * * *` (UTC) = 毎日 `02:00` (JST)
-- 再開: `0 3 * * *` (UTC) = 毎日 `12:00` (JST)
+- 休止: `02:00`
+- 再開: `12:00`
+
+Cloudflare cron は `* * * * *`（毎分）で実行し、現在設定されたJST時刻と一致したタイミングで
+Renderの `suspend` / `resume` を実行します。
 
 設定確認:
 
 - `GET /__diag/schedule`
+- `GET /__admin/schedule`（管理用）
 
 ## 5. LINE休止中返信を有効化
 
