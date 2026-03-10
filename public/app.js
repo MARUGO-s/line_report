@@ -174,6 +174,9 @@ const api = {
       body: JSON.stringify(body)
     });
   },
+  async delete(path) {
+    return this.request(path, { method: "DELETE" });
+  },
   async getBlob(path) {
     return this.request(path, { responseType: "blob" });
   }
@@ -329,7 +332,7 @@ const renderTemplates = (items) => {
 const renderIngestionFiles = (items) => {
   ingestionFilesTable.innerHTML = "";
   if (!Array.isArray(items) || !items.length) {
-    ingestionFilesTable.innerHTML = '<tr><td colspan="5">履歴がありません</td></tr>';
+    ingestionFilesTable.innerHTML = '<tr><td colspan="6">履歴がありません</td></tr>';
     return;
   }
 
@@ -343,6 +346,7 @@ const renderIngestionFiles = (items) => {
       <td>${escapeHtml(item.status)}</td>
       <td>${item.accepted_rows}/${item.total_rows} (err:${item.rejected_rows})</td>
       <td>${safeDate(item.uploaded_at)}</td>
+      <td><button type="button" class="chip chip-soft" data-ingestion-delete="${item.id}">削除</button></td>
     `;
     ingestionFilesTable.appendChild(tr);
   }
@@ -422,6 +426,27 @@ const loadIngestionErrors = async (ingestionFileId) => {
   }
   const result = await api.get(`/api/ingestion/files/${encodeURIComponent(ingestionFileId)}/errors`);
   ingestionErrorsResult.textContent = JSON.stringify(result, null, 2);
+};
+
+const deleteIngestionFileEntry = async (ingestionFileId) => {
+  if (state.isStaticPreview) {
+    notify("静的プレビューでは履歴削除できません。", true);
+    return;
+  }
+
+  if (!window.confirm(`取り込み履歴 ID ${ingestionFileId} を削除します。よろしいですか？`)) {
+    return;
+  }
+
+  const result = await api.delete(`/api/ingestion/files/${encodeURIComponent(ingestionFileId)}`);
+  ingestionErrorsResult.textContent = JSON.stringify(result, null, 2);
+  await loadIngestionFiles();
+  notify(
+    `取り込み履歴 ID ${ingestionFileId} を削除しました。` +
+      (Number(result?.detachedPriceHistoryCount || 0) > 0
+        ? ` 価格履歴 ${result.detachedPriceHistoryCount} 件の紐付けは解除されました。`
+        : "")
+  );
 };
 
 const loadProtectedData = async () => {
@@ -577,6 +602,17 @@ csvIngestionForm.addEventListener("submit", async (event) => {
 });
 
 ingestionFilesTable.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest("button[data-ingestion-delete]");
+  if (deleteButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    const ingestionId = deleteButton.dataset.ingestionDelete;
+    deleteIngestionFileEntry(ingestionId).catch((error) =>
+      handleOperationError("取り込み履歴の削除に失敗", error)
+    );
+    return;
+  }
+
   const row = event.target.closest("tr[data-ingestion-id]");
   if (!row) {
     return;

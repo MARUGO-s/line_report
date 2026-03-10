@@ -12,6 +12,7 @@ import {
   createProduct,
   createStore,
   createIngestionFile,
+  deleteIngestionFile,
   dbPath,
   findCatalogProductsByPriceRange,
   findCatalogProductsByQuery,
@@ -5232,6 +5233,27 @@ app.get("/api/ingestion/files/:id/errors", (req, res) => {
     limit: req.query.limit ? Number(req.query.limit) : 500
   });
   return res.json({ items });
+});
+
+app.delete("/api/ingestion/files/:id", (req, res) => {
+  const ingestionFileId = asPositiveInt(req.params.id);
+  if (!ingestionFileId) {
+    return sendError(res, 400, "invalid ingestion file id");
+  }
+
+  try {
+    const deleted = deleteIngestionFile(ingestionFileId);
+    if (!deleted) {
+      return sendError(res, 404, "ingestion file not found");
+    }
+    return res.json({
+      ok: true,
+      ...deleted
+    });
+  } catch (error) {
+    console.error(error);
+    return sendError(res, 500, "failed to delete ingestion file");
+  }
 });
 
 app.post("/api/ingestion/csv", (req, res) => {

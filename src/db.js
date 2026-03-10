@@ -1054,6 +1054,12 @@ const updateIngestionFileStmt = db.prepare(`
   WHERE id = @id
 `);
 
+const countPriceHistoryByIngestionFileStmt = db.prepare(
+  "SELECT COUNT(1) AS count FROM price_history WHERE source_file_id = ?"
+);
+
+const deleteIngestionFileStmt = db.prepare("DELETE FROM ingestion_files WHERE id = ?");
+
 export const createIngestionFile = ({
   storeId = null,
   fileName,
@@ -1099,6 +1105,28 @@ export const completeIngestionFile = ({
   });
   return getIngestionFileByIdStmt.get(Number(id));
 };
+
+const deleteIngestionFileTx = db.transaction((id) => {
+  const ingestionFileId = Number(id);
+  if (!Number.isInteger(ingestionFileId) || ingestionFileId <= 0) {
+    throw new Error("invalid ingestion file id");
+  }
+
+  const target = getIngestionFileByIdStmt.get(ingestionFileId);
+  if (!target) {
+    return null;
+  }
+
+  const linked = countPriceHistoryByIngestionFileStmt.get(ingestionFileId);
+  deleteIngestionFileStmt.run(ingestionFileId);
+
+  return {
+    deleted: target,
+    detachedPriceHistoryCount: Number(linked?.count || 0)
+  };
+});
+
+export const deleteIngestionFile = (id) => deleteIngestionFileTx(id);
 
 const insertIngestionErrorStmt = db.prepare(`
   INSERT INTO ingestion_errors (
