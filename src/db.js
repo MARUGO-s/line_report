@@ -76,6 +76,44 @@ ensureColumn("products", "supplier_name", "TEXT");
 ensureColumn("products", "cost_rate", "REAL");
 ensureColumn("products", "cepage", "TEXT");
 
+const runHardResetIfRequestedByMarker = () => {
+  const dbDir = path.dirname(dbPath);
+  const markerPath = path.join(dbDir, ".hard-reset-20260310.done");
+  const shouldRun =
+    dbPath.startsWith("/var/data/") &&
+    !fs.existsSync(markerPath);
+  if (!shouldRun) {
+    return;
+  }
+
+  // One-time production reset requested by operator.
+  db.exec("PRAGMA foreign_keys = OFF;");
+  const tableNames = [
+    "current_prices",
+    "price_history",
+    "ingestion_errors",
+    "ingestion_product_snapshots",
+    "ingestion_files",
+    "ocr_results",
+    "product_aliases",
+    "products",
+    "store_csv_mappings",
+    "stores",
+    "line_events",
+    "audit_events",
+    "line_reply_templates",
+    "app_security_settings"
+  ];
+  for (const tableName of tableNames) {
+    db.exec(`DELETE FROM ${tableName};`);
+  }
+  db.exec("DELETE FROM sqlite_sequence;");
+  db.exec("PRAGMA foreign_keys = ON;");
+  fs.writeFileSync(markerPath, new Date().toISOString(), "utf8");
+};
+
+runHardResetIfRequestedByMarker();
+
 const nowIso = () => new Date().toISOString();
 
 const toNullableText = (value) => {
