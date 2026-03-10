@@ -223,6 +223,23 @@ const callRenderResume = async ({ apiKey, serviceId, timeoutMs }) => {
   );
 };
 
+const callRenderSuspend = async ({ apiKey, serviceId, timeoutMs }) => {
+  const endpoint = `https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/suspend`;
+  return withTimeout(
+    (signal) =>
+      fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        signal
+      }),
+    timeoutMs
+  );
+};
+
 const callRenderServiceStatus = async ({ apiKey, serviceId, timeoutMs }) => {
   const endpoint = `https://api.render.com/v1/services/${encodeURIComponent(serviceId)}`;
   return withTimeout(
@@ -344,6 +361,18 @@ const isResumeCommand = (text) => {
   ].includes(normalized);
 };
 
+const isSuspendCommand = (text) => {
+  const normalized = normalizeCommandText(text);
+  return [
+    "休止",
+    "停止",
+    "サーバー休止",
+    "サーバー停止",
+    "suspend",
+    "stop"
+  ].includes(normalized);
+};
+
 const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl }) => {
   const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
   if (!lineAccessToken) {
@@ -419,6 +448,8 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
             replyText = "再開に失敗しました。時間をおいて再試行してください。";
           }
         }
+      } else if (event.type === "message" && event.messageType === "text" && isSuspendCommand(event.messageText)) {
+        replyText = "現在は休止中です。再開する場合は「起動」と送信してください。";
       }
       return sendPausedLineReply({
         accessToken: lineAccessToken,
@@ -491,6 +522,156 @@ const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
   }
 };
 
+const handleSuspendRequest = async ({ env, timeoutMs }) => {
+  const renderApiKey = String(env.RENDER_API_KEY || "").trim();
+  const renderServiceId = String(env.RENDER_SERVICE_ID || "").trim();
+  if (!renderApiKey || !renderServiceId) {
+    return asJson(500, {
+      ok: false,
+      error: "RENDER_API_KEY または RENDER_SERVICE_ID が未設定です。"
+    });
+  }
+
+  try {
+    const response = await callRenderSuspend({
+      apiKey: renderApiKey,
+      serviceId: renderServiceId,
+      timeoutMs: Math.max(2000, timeoutMs + 2000)
+    });
+    if (!response.ok && response.status !== 409) {
+      const bodyText = await response.text().catch(() => "");
+      return asJson(502, {
+        ok: false,
+        error: `Render休止APIで失敗しました (${response.status})`,
+        detail: bodyText.slice(0, 300)
+      });
+    }
+    return asJson(200, {
+      ok: true,
+      message: "休止リクエストを受け付けました。数十秒で休止状態になります。"
+    });
+  } catch (error) {
+    return asJson(502, {
+      ok: false,
+      error: `Render休止APIに接続できませんでした: ${error?.message || "unknown"}`
+    });
+  }
+};
+
+const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, request, appUrl }) => {
+  const lineChannelSecret = String(env.LINE_CHANNEL_SECRET || "").trim();
+  if (lineChannelSecret) {
+    const valid = await verifyLineSignature({
+      bodyBuffer,
+      signature,
+      channelSecret: lineChannelSecret
+    });
+    if (!valid) {
+      return asJson(401, { ok: false, error: "invalid line signature" });
+    }
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(textDecoder.decode(bodyBuffer));
+  } catch {
+    return asJson(400, { ok: false, error: "invalid webhook payload" });
+  }
+
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  const parsedEvents = events.map((event) => ({
+    replyToken: String(event?.replyToken || "").trim(),
+    type: String(event?.type || ""),
+    messageType: String(event?.message?.type || ""),
+    messageText: String(event?.message?.text || "").trim()
+  }));
+
+  const commandEvents = parsedEvents.filter(
+    (event) =>
+      event.replyToken &&
+      event.replyToken !== "00000000000000000000000000000000" &&
+      event.type === "message" &&
+      event.messageType === "text" &&
+      (isSuspendCommand(event.messageText) || isResumeCommand(event.messageText))
+  );
+
+  const allEventsAreCommand =
+    events.length > 0 &&
+    commandEvents.length === events.length;
+
+  if (!allEventsAreCommand) {
+    return forwardRequestToApp({ request, appUrl, bodyBuffer });
+  }
+
+  const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
+  if (!lineAccessToken) {
+    return asJson(500, { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です。" });
+  }
+
+  let suspendResultPromise = null;
+  let resumeResultPromise = null;
+  const getSuspendResult = async () => {
+    if (!suspendResultPromise) {
+      suspendResultPromise = (async () => {
+        const response = await handleSuspendRequest({ env, timeoutMs });
+        const payload = await response.json().catch(() => ({}));
+        return { ok: response.ok, status: response.status, payload };
+      })();
+    }
+    return suspendResultPromise;
+  };
+  const getResumeResult = async () => {
+    if (!resumeResultPromise) {
+      resumeResultPromise = (async () => {
+        const response = await handleResumeRequest({ env, healthUrl, timeoutMs });
+        const payload = await response.json().catch(() => ({}));
+        return { ok: response.ok, status: response.status, payload };
+      })();
+    }
+    return resumeResultPromise;
+  };
+
+  const results = await Promise.all(
+    commandEvents.map(async (event) => {
+      let replyText = "コマンドを受け付けました。";
+      if (isSuspendCommand(event.messageText)) {
+        const suspendResult = await getSuspendResult();
+        if (suspendResult.ok) {
+          replyText = String(suspendResult.payload?.message || "").trim()
+            || "休止リクエストを受け付けました。数十秒で休止状態になります。";
+        } else {
+          replyText = "休止に失敗しました。時間をおいて再試行してください。";
+        }
+      } else if (isResumeCommand(event.messageText)) {
+        const resumeResult = await getResumeResult();
+        if (resumeResult.ok) {
+          replyText = String(resumeResult.payload?.message || "").trim()
+            || "起動リクエストを受け付けました。";
+        } else {
+          replyText = "再開に失敗しました。時間をおいて再試行してください。";
+        }
+      }
+      return sendPausedLineReply({
+        accessToken: lineAccessToken,
+        replyToken: event.replyToken,
+        message: replyText,
+        timeoutMs: Math.max(2000, timeoutMs + 3000)
+      });
+    })
+  );
+
+  const failed = results.find((result) => !result.ok);
+  if (failed) {
+    return asJson(502, {
+      ok: false,
+      error: `LINE reply failed (${failed.status})`,
+      detail: failed.detail || ""
+    });
+  }
+
+  return asJson(200, { ok: true, live: true, handledCommands: commandEvents.length });
+};
+
 export default {
   async fetch(request, env) {
     const appUrl = trimSlash(env.APP_URL || "https://line-wine-api.onrender.com");
@@ -503,7 +684,15 @@ export default {
       const bodyBuffer = await request.arrayBuffer();
       const healthy = await isHealthy(healthUrl, timeoutMs);
       if (healthy) {
-        return forwardRequestToApp({ request, appUrl, bodyBuffer });
+        return handleLiveLineWebhook({
+          env,
+          bodyBuffer,
+          timeoutMs,
+          signature: request.headers.get("x-line-signature"),
+          healthUrl,
+          request,
+          appUrl
+        });
       }
       return handlePausedLineWebhook({
         env,

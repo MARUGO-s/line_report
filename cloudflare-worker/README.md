@@ -54,6 +54,9 @@ LINE Developers の Webhook URL を Worker 側に向けます。
 休止中にユーザーが `起動` / `再開` / `resume` と送ると、
 Worker が Render 再開APIを呼び、結果をLINEに返信します。
 
+稼働中にユーザーが `休止` / `停止` / `suspend` と送ると、
+Worker が Render 休止APIを呼び、結果をLINEに返信します。
+
 ## 5. 休止中ページをカスタマイズ
 
 Cloudflare Dashboard > Worker > Settings > Variables で
