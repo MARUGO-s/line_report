@@ -536,6 +536,44 @@ const sendLineMessageWithFallback = async ({ accessToken, replyToken, pushTo, me
   return pushResult;
 };
 
+const sendLineMessagePushPreferred = async ({ accessToken, replyToken, pushTo, message, timeoutMs }) => {
+  if (pushTo) {
+    const pushResult = await sendLinePushMessage({
+      accessToken,
+      to: pushTo,
+      message,
+      timeoutMs
+    });
+    if (pushResult.ok) {
+      return { ok: true, via: "push" };
+    }
+    if (hasUsableReplyToken(replyToken)) {
+      const replyResult = await sendPausedLineReply({
+        accessToken,
+        replyToken,
+        message,
+        timeoutMs
+      });
+      if (replyResult.ok) {
+        return { ok: true, via: "reply_fallback", pushStatus: pushResult.status };
+      }
+      return {
+        ok: false,
+        status: replyResult.status || pushResult.status,
+        detail: `push:${pushResult.status} ${pushResult.detail || ""} / reply:${replyResult.status} ${replyResult.detail || ""}`.slice(0, 300)
+      };
+    }
+    return pushResult;
+  }
+  return sendLineMessageWithFallback({
+    accessToken,
+    replyToken,
+    pushTo,
+    message,
+    timeoutMs
+  });
+};
+
 const sleep = (ms) =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -854,7 +892,13 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
         } else if (event.type === "message" && event.messageType === "text" && isSuspendCommand(event.messageText)) {
           replyText = "休止完了しています。再開する場合は「起動」と送信してください。";
         }
-        return await sendLineMessageWithFallback({
+        const isCommand =
+          event.type === "message" &&
+          event.messageType === "text" &&
+          (isResumeCommand(event.messageText) || isSuspendCommand(event.messageText));
+
+        const sendFn = isCommand ? sendLineMessagePushPreferred : sendLineMessageWithFallback;
+        return await sendFn({
           accessToken: lineAccessToken,
           replyToken: event.replyToken,
           pushTo: event.pushTo,
@@ -1127,7 +1171,7 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
             });
           }
         }
-        return await sendLineMessageWithFallback({
+        return await sendLineMessagePushPreferred({
           accessToken: lineAccessToken,
           replyToken: event.replyToken,
           pushTo: event.pushTo,
