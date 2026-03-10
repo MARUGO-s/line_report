@@ -4854,10 +4854,15 @@ const processTextEvent = async (event, canReply) => {
         );
         return;
       } catch (error) {
-        if (error?.code === "NEGATIVE_STOCK") {
+        if (error?.code === "NON_POSITIVE_STOCK" || error?.code === "NEGATIVE_STOCK") {
+          const currentQty = Number.isFinite(Number(error.currentQty))
+            ? Math.round(Number(error.currentQty))
+            : null;
+          const stockNotice =
+            currentQty !== null && currentQty <= 0 ? "在庫がありません。" : "在庫が不足しています。";
           await sendLineReply(
             event.replyToken,
-            `在庫は 0 未満にできません。現在在庫: ${error.currentQty}`
+            `${stockNotice} 在庫を0以下にはできません。現在在庫: ${currentQty ?? "不明"}`
           );
           return;
         }

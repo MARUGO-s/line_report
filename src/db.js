@@ -388,9 +388,9 @@ const adjustProductStockQtyTx = db.transaction(({ productId, delta }) => {
   }
 
   const nextQty = Math.round(currentQty + normalizedDelta);
-  if (nextQty < 0) {
-    const error = new Error("stock would become negative");
-    error.code = "NEGATIVE_STOCK";
+  if (normalizedDelta < 0 && nextQty <= 0) {
+    const error = new Error("stock would become non-positive");
+    error.code = "NON_POSITIVE_STOCK";
     error.currentQty = Math.round(currentQty);
     error.nextQty = nextQty;
     throw error;
