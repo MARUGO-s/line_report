@@ -4,6 +4,7 @@ Render本番APIの生存確認を行い、状態に応じて次を返します�
 
 - 生存確認OK: Render本番URLへ `302` リダイレクト
 - 生存確認NG: 休止中HTML (`503`) を表示
+- 休止中ページの「稼働させる」押下: Worker経由で Render `resume` API を実行
 
 ## 1. 前提
 
@@ -31,6 +32,12 @@ npm run deploy
 - `APP_URL = "https://line-wine-api.onrender.com"`
 - `HEALTH_URL = "https://line-wine-api.onrender.com/api/health"`
 - `HEALTH_TIMEOUT_MS = "2500"`
+
+追加で Dashboard > Worker > Settings > Variables へ以下を設定してください。
+
+- `RENDER_API_KEY` (Secret)
+- `RENDER_SERVICE_ID` (Plain text): `srv-d6mmfgvtskes73e082ag`
+- `RESUME_KEY` (Secret): 休止ページで入力する管理キー
 
 ## 4. 休止中ページをカスタマイズ
 
