@@ -373,6 +373,16 @@ const isSuspendCommand = (text) => {
   ].includes(normalized);
 };
 
+const buildResumeLineSuccessText = (payload) => {
+  const message = String(payload?.message || "").trim();
+  if (message.includes("すでに稼働中")) {
+    return "起動しました（すでに稼働中です）。";
+  }
+  return "起動しました。利用可能になるまで20〜60秒ほどお待ちください。";
+};
+
+const buildSuspendLineSuccessText = () => "休止完了しました。";
+
 const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl }) => {
   const lineAccessToken = String(env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
   if (!lineAccessToken) {
@@ -433,8 +443,7 @@ const handlePausedLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, 
       if (event.type === "message" && event.messageType === "text" && isResumeCommand(event.messageText)) {
         const resumeResult = await getResumeResult();
         if (resumeResult.ok) {
-          replyText = String(resumeResult.payload?.message || "").trim()
-            || "起動リクエストを受け付けました。20〜60秒ほどで利用可能になります。";
+          replyText = buildResumeLineSuccessText(resumeResult.payload);
         } else {
           const detail = parseRenderErrorDetail(resumeResult.payload?.detail).message;
           if (/only services suspended by a user can be resumed/i.test(detail)) {
@@ -652,16 +661,14 @@ const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, he
       if (isSuspendCommand(event.messageText)) {
         const suspendResult = await getSuspendResult();
         if (suspendResult.ok) {
-          replyText = String(suspendResult.payload?.message || "").trim()
-            || "休止リクエストを受け付けました。数十秒で休止状態になります。";
+          replyText = buildSuspendLineSuccessText();
         } else {
           replyText = "休止に失敗しました。時間をおいて再試行してください。";
         }
       } else if (isResumeCommand(event.messageText)) {
         const resumeResult = await getResumeResult();
         if (resumeResult.ok) {
-          replyText = String(resumeResult.payload?.message || "").trim()
-            || "起動リクエストを受け付けました。";
+          replyText = buildResumeLineSuccessText(resumeResult.payload);
         } else {
           replyText = "再開に失敗しました。時間をおいて再試行してください。";
         }
