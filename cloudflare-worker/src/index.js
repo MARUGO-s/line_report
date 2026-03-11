@@ -1179,6 +1179,40 @@ const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
     return asJson(200, { ok: true, message: "すでに稼働中です。画面を切り替えます..." });
   }
 
+  const attemptSuspendThenResume = async () => {
+    const suspendResponse = await callRenderSuspend({
+      apiKey: renderApiKey,
+      serviceId: renderServiceId,
+      timeoutMs: Math.max(2000, timeoutMs + 2000)
+    });
+    if (!suspendResponse.ok && suspendResponse.status !== 409) {
+      const suspendBody = await suspendResponse.text().catch(() => "");
+      return asJson(502, {
+        ok: false,
+        error: `Render再起動準備(休止)で失敗しました (${suspendResponse.status})`,
+        detail: suspendBody.slice(0, 300)
+      });
+    }
+    await sleep(2000);
+    const resumeResponse = await callRenderResume({
+      apiKey: renderApiKey,
+      serviceId: renderServiceId,
+      timeoutMs: Math.max(2000, timeoutMs + 2000)
+    });
+    if (!resumeResponse.ok && resumeResponse.status !== 409) {
+      const resumeBody = await resumeResponse.text().catch(() => "");
+      return asJson(502, {
+        ok: false,
+        error: `Render再起動(再開)で失敗しました (${resumeResponse.status})`,
+        detail: resumeBody.slice(0, 300)
+      });
+    }
+    return asJson(200, {
+      ok: true,
+      message: "起動リクエストを送信しました。起動完了まで20〜90秒ほどかかる場合があります。"
+    });
+  };
+
   try {
     const response = await callRenderResume({
       apiKey: renderApiKey,
@@ -1190,10 +1224,14 @@ const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
       if (response.status === 400 && /only services suspended by a user can be resumed/i.test(bodyText)) {
         const state = await fetchRenderState({ env, timeoutMs });
         if (state?.suspended === "not_suspended") {
-          return asJson(200, {
-            ok: true,
-            message: "現在、再開処理中または稼働中です。30〜90秒待って再読み込みしてください。"
-          });
+          const healthyNow = await isHealthy(healthUrl, timeoutMs);
+          if (healthyNow) {
+            return asJson(200, {
+              ok: true,
+              message: "すでに稼働中です。画面を切り替えます..."
+            });
+          }
+          return attemptSuspendThenResume();
         }
         if (state?.suspended === "suspended" && !state.suspenders.includes("user")) {
           return asJson(409, {
