@@ -386,19 +386,31 @@ const asJson = (status, payload) =>
   });
 
 const isHealthy = async (healthUrl, timeoutMs) => {
+  const probe = async (probeTimeoutMs) => {
+    try {
+      const response = await withTimeout(
+        (signal) =>
+          fetch(healthUrl, {
+            method: "GET",
+            signal,
+            headers: {
+              "cache-control": "no-cache"
+            }
+          }),
+        probeTimeoutMs
+      );
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
+
+  if (await probe(timeoutMs)) {
+    return true;
+  }
+  await sleep(300);
   try {
-    const response = await withTimeout(
-      (signal) =>
-        fetch(healthUrl, {
-          method: "GET",
-          signal,
-          headers: {
-            "cache-control": "no-cache"
-          }
-        }),
-      timeoutMs
-    );
-    return response.ok;
+    return await probe(Math.max(timeoutMs, 4000));
   } catch {
     return false;
   }
@@ -1183,7 +1195,6 @@ const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
     if (!response.ok && response.status !== 409) {
       const bodyText = await response.text().catch(() => "");
       if (response.status === 400) {
-        const state = await fetchRenderState({ env, timeoutMs });
         const healthyNow = await isHealthy(healthUrl, timeoutMs);
         if (healthyNow) {
           return asJson(200, {
@@ -1191,7 +1202,8 @@ const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
             message: "すでに稼働中です。画面を切り替えます..."
           });
         }
-        if (state?.suspended === "suspended" || state?.suspended === "not_suspended") {
+        const state = await fetchRenderState({ env, timeoutMs });
+        if (!state || state.suspended === "suspended" || state.suspended === "not_suspended") {
           return attemptSuspendThenResume();
         }
       }
@@ -1438,7 +1450,7 @@ export default {
   async fetch(request, env, ctx) {
     const appUrl = trimSlash(env.APP_URL || "https://line-wine-api.onrender.com");
     const healthUrl = String(env.HEALTH_URL || `${appUrl}/api/health`).trim();
-    const timeoutMs = Math.max(500, Number(env.HEALTH_TIMEOUT_MS || 2500) || 2500);
+    const timeoutMs = Math.max(4000, Number(env.HEALTH_TIMEOUT_MS || 2500) || 2500);
     const backgroundTask = (promise) => {
       if (ctx && typeof ctx.waitUntil === "function") {
         ctx.waitUntil(promise);
@@ -1711,7 +1723,7 @@ export default {
   async scheduled(controller, env, ctx) {
     const appUrl = trimSlash(env.APP_URL || "https://line-wine-api.onrender.com");
     const healthUrl = String(env.HEALTH_URL || `${appUrl}/api/health`).trim();
-    const timeoutMs = Math.max(500, Number(env.HEALTH_TIMEOUT_MS || 2500) || 2500);
+    const timeoutMs = Math.max(4000, Number(env.HEALTH_TIMEOUT_MS || 2500) || 2500);
     const cron = String(controller?.cron || "").trim();
     const scheduleConfig = getAutoScheduleConfig(env);
 
