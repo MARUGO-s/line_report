@@ -6,13 +6,6 @@ workers_dev = true
 [triggers]
 crons = ["* * * * *"]
 
-[durable_objects]
-bindings = [{ name = "SCHEDULE_STORE", class_name = "ScheduleStore" }]
-
-[[migrations]]
-tag = "v1"
-new_classes = ["ScheduleStore"]
-
 [vars]
 APP_URL = "https://line-wine-api.onrender.com"
 HEALTH_URL = "https://line-wine-api.onrender.com/api/health"

@@ -143,9 +143,10 @@ const lineDummyReplyToken = "00000000000000000000000000000000";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const diagCacheRequest = new Request("https://linewine-internal.local/__diag/last-webhook");
+const scheduleConfigCacheRequest = new Request("https://linewine-internal.local/__schedule/config");
+const scheduleExecutionCacheRequest = new Request("https://linewine-internal.local/__schedule/last_execution");
 const DEFAULT_SUSPEND_TIME_JST = "02:00";
 const DEFAULT_RESUME_TIME_JST = "12:00";
-const scheduleStoreObjectName = "global";
 const runtimeDiagnostics = {
   lastWebhook: null
 };
@@ -272,14 +273,6 @@ const withTimeout = async (promise, timeoutMs) => {
   }
 };
 
-const getScheduleStoreStub = (env) => {
-  if (!env?.SCHEDULE_STORE || typeof env.SCHEDULE_STORE.idFromName !== "function") {
-    return null;
-  }
-  const id = env.SCHEDULE_STORE.idFromName(scheduleStoreObjectName);
-  return env.SCHEDULE_STORE.get(id);
-};
-
 const isScheduleAdminAuthorized = (request, env) => {
   const required = String(env.SCHEDULE_ADMIN_KEY || "").trim();
   if (!required) {
@@ -298,36 +291,14 @@ const isScheduleAdminAuthorized = (request, env) => {
 
 const readScheduleWindow = async ({ env, timeoutMs }) => {
   const defaults = getDefaultScheduleWindow(env);
-  const stub = getScheduleStoreStub(env);
-  if (!stub) {
-    return {
-      ...defaults,
-      updatedAt: null,
-      source: "env_defaults"
-    };
-  }
   try {
-    const response = await withTimeout(
-      (signal) =>
-        stub.fetch("https://schedule.local/config", {
-          method: "GET",
-          signal
-        }),
-      Math.max(1000, timeoutMs)
-    );
-    if (!response.ok) {
-      return {
-        ...defaults,
-        updatedAt: null,
-        source: "env_fallback"
-      };
-    }
-    const payload = await response.json().catch(() => ({}));
+    const matched = await caches.default.match(scheduleConfigCacheRequest);
+    const payload = matched ? await matched.json().catch(() => ({})) : {};
     return {
       suspendTimeJst: normalizeJstTimeText(payload?.suspendTimeJst, defaults.suspendTimeJst),
       resumeTimeJst: normalizeJstTimeText(payload?.resumeTimeJst, defaults.resumeTimeJst),
       updatedAt: payload?.updatedAt || null,
-      source: "durable_object"
+      source: payload?.updatedAt ? "cache_store" : "env_defaults"
     };
   } catch {
     return {
@@ -344,40 +315,29 @@ const writeScheduleWindow = async ({ env, timeoutMs, suspendTimeJst, resumeTimeJ
   if (!normalizedSuspend || !normalizedResume) {
     return { ok: false, status: 400, error: "time format must be HH:MM" };
   }
-  const stub = getScheduleStoreStub(env);
-  if (!stub) {
-    return { ok: false, status: 500, error: "SCHEDULE_STORE binding is not configured" };
-  }
   try {
-    const response = await withTimeout(
-      (signal) =>
-        stub.fetch("https://schedule.local/config", {
-          method: "POST",
-          headers: { "content-type": "application/json; charset=UTF-8" },
-          body: JSON.stringify({
-            suspendTimeJst: normalizedSuspend,
-            resumeTimeJst: normalizedResume
-          }),
-          signal
-        }),
-      Math.max(1000, timeoutMs)
+    const payload = {
+      suspendTimeJst: normalizedSuspend,
+      resumeTimeJst: normalizedResume,
+      updatedAt: new Date().toISOString()
+    };
+    await caches.default.put(
+      scheduleConfigCacheRequest,
+      new Response(JSON.stringify(payload), {
+        headers: {
+          "content-type": "application/json; charset=UTF-8",
+          "cache-control": "max-age=2592000"
+        }
+      })
     );
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        error: String(payload?.error || "failed to update schedule").slice(0, 240)
-      };
-    }
     return {
       ok: true,
-      status: response.status,
+      status: 200,
       schedule: {
-        suspendTimeJst: normalizeJstTimeText(payload?.suspendTimeJst, normalizedSuspend),
-        resumeTimeJst: normalizeJstTimeText(payload?.resumeTimeJst, normalizedResume),
-        updatedAt: payload?.updatedAt || null,
-        source: "durable_object"
+        suspendTimeJst: payload.suspendTimeJst,
+        resumeTimeJst: payload.resumeTimeJst,
+        updatedAt: payload.updatedAt,
+        source: "cache_store"
       }
     };
   } catch (error) {
@@ -390,31 +350,32 @@ const writeScheduleWindow = async ({ env, timeoutMs, suspendTimeJst, resumeTimeJ
 };
 
 const claimScheduledExecution = async ({ env, timeoutMs, action, minuteKey }) => {
-  const stub = getScheduleStoreStub(env);
-  if (!stub) {
-    return true;
-  }
   try {
-    const response = await withTimeout(
-      (signal) =>
-        stub.fetch("https://schedule.local/claim", {
-          method: "POST",
-          headers: { "content-type": "application/json; charset=UTF-8" },
-          body: JSON.stringify({
-            action: String(action || "").trim(),
-            minuteKey: String(minuteKey || "").trim()
-          }),
-          signal
-        }),
-      Math.max(1000, timeoutMs)
-    );
-    if (!response.ok) {
+    const existing = await caches.default.match(scheduleExecutionCacheRequest);
+    const last = existing ? await existing.json().catch(() => ({})) : {};
+    if (
+      String(last?.action || "") === String(action || "").trim() &&
+      String(last?.minuteKey || "") === String(minuteKey || "").trim()
+    ) {
       return false;
     }
-    const payload = await response.json().catch(() => ({}));
-    return Boolean(payload?.claimed);
+    const next = {
+      action: String(action || "").trim(),
+      minuteKey: String(minuteKey || "").trim(),
+      updatedAt: new Date().toISOString()
+    };
+    await caches.default.put(
+      scheduleExecutionCacheRequest,
+      new Response(JSON.stringify(next), {
+        headers: {
+          "content-type": "application/json; charset=UTF-8",
+          "cache-control": "max-age=604800"
+        }
+      })
+    );
+    return true;
   } catch {
-    return false;
+    return true;
   }
 };
 
@@ -1221,23 +1182,17 @@ const handleResumeRequest = async ({ env, healthUrl, timeoutMs }) => {
     });
     if (!response.ok && response.status !== 409) {
       const bodyText = await response.text().catch(() => "");
-      if (response.status === 400 && /only services suspended by a user can be resumed/i.test(bodyText)) {
+      if (response.status === 400) {
         const state = await fetchRenderState({ env, timeoutMs });
-        if (state?.suspended === "not_suspended") {
-          const healthyNow = await isHealthy(healthUrl, timeoutMs);
-          if (healthyNow) {
-            return asJson(200, {
-              ok: true,
-              message: "すでに稼働中です。画面を切り替えます..."
-            });
-          }
-          return attemptSuspendThenResume();
-        }
-        if (state?.suspended === "suspended" && !state.suspenders.includes("user")) {
-          return asJson(409, {
-            ok: false,
-            error: "現在の停止状態では再開できません。Render管理画面から再開してください。"
+        const healthyNow = await isHealthy(healthUrl, timeoutMs);
+        if (healthyNow) {
+          return asJson(200, {
+            ok: true,
+            message: "すでに稼働中です。画面を切り替えます..."
           });
+        }
+        if (state?.suspended === "suspended" || state?.suspended === "not_suspended") {
+          return attemptSuspendThenResume();
         }
       }
       return asJson(502, {
@@ -1306,106 +1261,6 @@ const runScheduledRenderControl = async ({ env, healthUrl, timeoutMs, action }) 
   );
   return { status: response.status, payload };
 };
-
-export class ScheduleStore {
-  constructor(state, env) {
-    this.state = state;
-    this.env = env;
-  }
-
-  json(status, payload) {
-    return new Response(JSON.stringify(payload), {
-      status,
-      headers: jsonHeaders
-    });
-  }
-
-  async getConfig() {
-    const defaults = getDefaultScheduleWindow(this.env);
-    const current = await this.state.storage.get("config");
-    return {
-      suspendTimeJst: normalizeJstTimeText(current?.suspendTimeJst, defaults.suspendTimeJst),
-      resumeTimeJst: normalizeJstTimeText(current?.resumeTimeJst, defaults.resumeTimeJst),
-      updatedAt: String(current?.updatedAt || "")
-    };
-  }
-
-  async fetch(request) {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/config" && request.method === "GET") {
-      const config = await this.getConfig();
-      return this.json(200, {
-        ok: true,
-        ...config
-      });
-    }
-
-    if (url.pathname === "/config" && request.method === "POST") {
-      let payload = {};
-      try {
-        payload = await request.json();
-      } catch {
-        return this.json(400, { ok: false, error: "invalid json body" });
-      }
-      const current = await this.getConfig();
-      const suspendTimeJst = normalizeJstTimeText(payload?.suspendTimeJst, "");
-      const resumeTimeJst = normalizeJstTimeText(payload?.resumeTimeJst, "");
-      if (!suspendTimeJst || !resumeTimeJst) {
-        return this.json(400, { ok: false, error: "suspendTimeJst and resumeTimeJst must be HH:MM" });
-      }
-      if (suspendTimeJst === resumeTimeJst) {
-        return this.json(400, { ok: false, error: "suspend and resume time must be different" });
-      }
-      const next = {
-        suspendTimeJst,
-        resumeTimeJst,
-        updatedAt: new Date().toISOString()
-      };
-      if (
-        current.suspendTimeJst === next.suspendTimeJst &&
-        current.resumeTimeJst === next.resumeTimeJst
-      ) {
-        return this.json(200, {
-          ok: true,
-          ...current,
-          unchanged: true
-        });
-      }
-      await this.state.storage.put("config", next);
-      return this.json(200, {
-        ok: true,
-        ...next
-      });
-    }
-
-    if (url.pathname === "/claim" && request.method === "POST") {
-      let payload = {};
-      try {
-        payload = await request.json();
-      } catch {
-        return this.json(400, { ok: false, error: "invalid json body" });
-      }
-      const action = String(payload?.action || "").trim();
-      const minuteKey = String(payload?.minuteKey || "").trim();
-      if (!["suspend", "resume"].includes(action) || !minuteKey) {
-        return this.json(400, { ok: false, error: "action and minuteKey are required" });
-      }
-      const last = await this.state.storage.get("last_execution");
-      if (last?.action === action && last?.minuteKey === minuteKey) {
-        return this.json(200, { ok: true, claimed: false });
-      }
-      await this.state.storage.put("last_execution", {
-        action,
-        minuteKey,
-        updatedAt: new Date().toISOString()
-      });
-      return this.json(200, { ok: true, claimed: true });
-    }
-
-    return this.json(404, { ok: false, error: "not found" });
-  }
-}
 
 const handleLiveLineWebhook = async ({ env, bodyBuffer, timeoutMs, signature, healthUrl, request, appUrl, backgroundTask, recordDiag }) => {
   const lineChannelSecret = String(env.LINE_CHANNEL_SECRET || "").trim();
