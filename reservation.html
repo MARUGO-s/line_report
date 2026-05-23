@@ -1,0 +1,1521 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <base href="/line_report/">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#006c3a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="LINE Summary">
+  <link rel="icon" href="icons/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <title>LINE Reservation Calendar</title>
+  <style>
+    :root {
+      --bg0: #061320;
+      --bg1: #173247;
+      --card: rgba(8, 21, 35, 0.84);
+      --line: rgba(155, 220, 255, 0.25);
+      --txt: #e7f6ff;
+      --sub: #a6cadf;
+      --ok: #69edbf;
+      --accent: #57d8ff;
+      --radius: 16px;
+      --shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--txt);
+      font-family: "Zen Kaku Gothic New", sans-serif;
+      background:
+        radial-gradient(900px 500px at -20% -10%, #215f84 0%, transparent 60%),
+        radial-gradient(900px 500px at 120% 0%, #185273 0%, transparent 55%),
+        linear-gradient(145deg, var(--bg0), var(--bg1));
+      padding: 20px;
+      transition: background 0.25s ease, color 0.2s ease;
+    }
+
+    body[data-theme='light'] {
+      --bg0: #f5fbff;
+      --bg1: #deedf8;
+      --card: rgba(255, 255, 255, 0.9);
+      --line: rgba(45, 106, 151, 0.24);
+      --txt: #132a3b;
+      --sub: #4f7187;
+      --ok: #0f8d5f;
+      --accent: #157fba;
+      --shadow: 0 14px 34px rgba(20, 59, 89, 0.16);
+      background:
+        radial-gradient(900px 500px at -20% -10%, #d0ebfb 0%, transparent 60%),
+        radial-gradient(900px 500px at 120% 0%, #c6e0f3 0%, transparent 55%),
+        linear-gradient(145deg, var(--bg0), var(--bg1));
+    }
+
+    .app {
+      max-width: 1360px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero, .card {
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 18px 20px;
+      background: linear-gradient(160deg, rgba(87, 216, 255, 0.15), rgba(8, 21, 35, 0.65));
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-family: "Barlow Condensed", sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      font-size: clamp(2rem, 3.2vw, 2.8rem);
+      line-height: 0.95;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      color: var(--sub);
+    }
+
+    .status {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--sub);
+      font-size: 0.88rem;
+      align-items: center;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: rgba(8, 21, 35, 0.6);
+    }
+
+    button.pill {
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .pill.ok {
+      color: var(--ok);
+      border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+    }
+
+    .pill.link {
+      color: #9be8ff;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .pill.theme-toggle {
+      padding-inline: 12px;
+    }
+
+    .card {
+      background: var(--card);
+      padding: 16px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .input, .select, .button {
+      min-height: 39px;
+      border-radius: 11px;
+      border: 1px solid var(--line);
+      background: rgba(8, 21, 35, 0.6);
+      color: var(--txt);
+      padding: 0 11px;
+      font: inherit;
+    }
+
+    .button {
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .button.primary {
+      border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+      background: linear-gradient(180deg, rgba(87, 216, 255, 0.32), rgba(10, 116, 158, 0.32));
+    }
+
+    .button.link {
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .meta {
+      margin-top: 8px;
+      color: var(--sub);
+      font-size: 0.87rem;
+    }
+
+    .month-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .month-title {
+      margin: 0;
+      font-size: 1.25rem;
+      letter-spacing: 0.02em;
+    }
+
+    .calendar {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .weekday {
+      text-align: center;
+      color: #a7d2ea;
+      font-size: 0.78rem;
+      padding: 6px 0;
+      border: 1px solid rgba(155, 220, 255, 0.15);
+      border-radius: 10px;
+      background: rgba(8, 21, 35, 0.45);
+    }
+
+    .day-cell {
+      min-height: 130px;
+      border: 1px solid rgba(155, 220, 255, 0.2);
+      border-radius: 12px;
+      padding: 8px;
+      background: rgba(5, 17, 28, 0.55);
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 6px;
+      overflow: hidden;
+    }
+
+    .day-cell.outside {
+      opacity: 0.45;
+    }
+
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .day-number {
+      font-size: 0.83rem;
+      color: #d9f0ff;
+      font-weight: 700;
+    }
+
+    .count-chip {
+      font-size: 0.7rem;
+      border-radius: 999px;
+      padding: 2px 7px;
+      border: 1px solid rgba(155, 220, 255, 0.3);
+      color: #b8e5ff;
+    }
+
+    .day-items {
+      display: grid;
+      gap: 5px;
+      align-content: start;
+      overflow: auto;
+      max-height: 148px;
+      padding-right: 2px;
+    }
+
+    .resv {
+      border-radius: 8px;
+      border: 1px solid rgba(155, 220, 255, 0.22);
+      background: rgba(10, 35, 54, 0.62);
+      padding: 5px 6px;
+      font-size: 0.72rem;
+      line-height: 1.35;
+      cursor: pointer;
+    }
+
+    .resv:focus-visible {
+      outline: 2px solid rgba(135, 220, 255, 0.9);
+      outline-offset: 1px;
+    }
+
+    .resv.jump-target {
+      box-shadow: 0 0 0 2px rgba(147, 233, 255, 0.95), 0 0 24px rgba(120, 216, 255, 0.5);
+      animation: jumpPulse 1.2s ease-out;
+    }
+
+    @keyframes jumpPulse {
+      0% { transform: scale(1); }
+      35% { transform: scale(1.02); }
+      100% { transform: scale(1); }
+    }
+
+    .resv.source-tabelog {
+      border-color: rgba(255, 190, 122, 0.7);
+      background: rgba(91, 48, 8, 0.62);
+    }
+
+    .resv.source-ikyu {
+      border-color: rgba(133, 238, 173, 0.75);
+      background: rgba(16, 78, 45, 0.62);
+    }
+
+    .resv-summary {
+      display: grid;
+      gap: 2px;
+    }
+
+    .resv-summary-name {
+      color: #e4f5ff;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .resv-summary-sub {
+      color: #b7d6ea;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .resv-modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(3, 11, 19, 0.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+
+    .resv-modal-overlay.open {
+      display: flex;
+    }
+
+    .resv-modal {
+      width: min(700px, 100%);
+      max-height: min(86vh, 940px);
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid rgba(155, 220, 255, 0.34);
+      background: linear-gradient(168deg, rgba(8, 24, 39, 0.97), rgba(6, 16, 28, 0.97));
+      box-shadow: 0 24px 58px rgba(0, 0, 0, 0.45);
+      padding: 14px;
+    }
+
+    .resv-modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .resv-modal-title {
+      margin: 0;
+      font-size: 1.08rem;
+      color: #e9f8ff;
+    }
+
+    .resv-modal-sub {
+      color: #a6cbdf;
+      font-size: 0.82rem;
+      margin-top: 2px;
+    }
+
+    .resv-modal-close {
+      min-height: 34px;
+      border-radius: 10px;
+      border: 1px solid rgba(155, 220, 255, 0.34);
+      background: rgba(12, 41, 61, 0.78);
+      color: #d7f1ff;
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0 10px;
+      cursor: pointer;
+    }
+
+    .resv-modal-rows {
+      display: grid;
+      gap: 5px;
+    }
+
+    .resv-modal-row {
+      display: grid;
+      grid-template-columns: 8em 1fr;
+      align-items: start;
+      gap: 6px;
+      border-radius: 9px;
+      border: 1px solid rgba(155, 220, 255, 0.14);
+      background: rgba(8, 24, 39, 0.5);
+      padding: 5px 7px;
+    }
+
+    .resv-modal-label {
+      color: #9bc8df;
+      white-space: nowrap;
+    }
+
+    .resv-modal-value {
+      color: #e8f7ff;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .search-hit-summary {
+      color: #9fc9df;
+      font-size: 0.82rem;
+      margin-bottom: 8px;
+    }
+
+    .search-hit-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .search-hit-item {
+      width: 100%;
+      text-align: left;
+      border-radius: 10px;
+      border: 1px solid rgba(155, 220, 255, 0.2);
+      background: rgba(9, 31, 49, 0.66);
+      color: #e8f7ff;
+      font: inherit;
+      padding: 8px 9px;
+      cursor: pointer;
+    }
+
+    .search-hit-item:hover {
+      border-color: rgba(155, 220, 255, 0.44);
+      background: rgba(12, 43, 66, 0.78);
+    }
+
+    .search-hit-title {
+      font-weight: 700;
+      margin-bottom: 2px;
+      color: #eaf8ff;
+    }
+
+    .search-hit-sub {
+      color: #9cc6de;
+      font-size: 0.8rem;
+    }
+
+    body[data-theme='light'] .hero {
+      background: linear-gradient(160deg, rgba(98, 189, 239, 0.24), rgba(255, 255, 255, 0.86));
+    }
+
+    body[data-theme='light'] .pill {
+      background: rgba(255, 255, 255, 0.86);
+      color: var(--txt);
+    }
+
+    body[data-theme='light'] .pill.link {
+      color: #0a6b9e;
+    }
+
+    body[data-theme='light'] .input,
+    body[data-theme='light'] .select,
+    body[data-theme='light'] .button {
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--txt);
+      border-color: rgba(60, 122, 168, 0.28);
+    }
+
+    body[data-theme='light'] .button.primary {
+      background: linear-gradient(180deg, rgba(32, 157, 217, 0.22), rgba(53, 122, 177, 0.18));
+      border-color: rgba(30, 129, 184, 0.44);
+    }
+
+    body[data-theme='light'] .weekday {
+      color: #4f7288;
+      border-color: rgba(75, 128, 166, 0.24);
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    body[data-theme='light'] .day-cell {
+      border-color: rgba(75, 128, 166, 0.27);
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    body[data-theme='light'] .day-number {
+      color: #20415a;
+    }
+
+    body[data-theme='light'] .count-chip {
+      color: #356684;
+      border-color: rgba(64, 119, 158, 0.34);
+      background: rgba(238, 249, 255, 0.94);
+    }
+
+    body[data-theme='light'] .resv {
+      border-color: rgba(63, 122, 164, 0.28);
+      background: rgba(236, 248, 255, 0.9);
+    }
+
+    body[data-theme='light'] .resv-summary-name {
+      color: #1d3d56;
+    }
+
+    body[data-theme='light'] .resv-summary-sub {
+      color: #4b6f87;
+    }
+
+    body[data-theme='light'] .resv.source-tabelog {
+      border-color: rgba(190, 128, 65, 0.58);
+      background: rgba(255, 242, 225, 0.92);
+    }
+
+    body[data-theme='light'] .resv.source-ikyu {
+      border-color: rgba(73, 160, 109, 0.58);
+      background: rgba(234, 250, 241, 0.92);
+    }
+
+    body[data-theme='light'] .resv-modal-overlay {
+      background: rgba(30, 67, 96, 0.28);
+    }
+
+    body[data-theme='light'] .resv-modal {
+      border-color: rgba(71, 125, 164, 0.32);
+      background: linear-gradient(168deg, rgba(255, 255, 255, 0.98), rgba(241, 249, 255, 0.98));
+      box-shadow: 0 20px 46px rgba(34, 69, 97, 0.2);
+    }
+
+    body[data-theme='light'] .resv-modal-title {
+      color: #17354c;
+    }
+
+    body[data-theme='light'] .resv-modal-sub {
+      color: #4f7086;
+    }
+
+    body[data-theme='light'] .resv-modal-close {
+      border-color: rgba(70, 126, 166, 0.35);
+      background: rgba(244, 251, 255, 0.95);
+      color: #1a3b53;
+    }
+
+    body[data-theme='light'] .resv-modal-row {
+      border-color: rgba(76, 128, 164, 0.22);
+      background: rgba(249, 253, 255, 0.98);
+    }
+
+    body[data-theme='light'] .resv-modal-label {
+      color: #537990;
+    }
+
+    body[data-theme='light'] .resv-modal-value {
+      color: #1b3c54;
+    }
+
+    body[data-theme='light'] .search-hit-summary {
+      color: #4d7289;
+    }
+
+    body[data-theme='light'] .search-hit-item {
+      border-color: rgba(80, 132, 169, 0.25);
+      background: rgba(247, 252, 255, 0.98);
+      color: #1a3a52;
+    }
+
+    body[data-theme='light'] .search-hit-item:hover {
+      border-color: rgba(70, 129, 169, 0.44);
+      background: rgba(234, 247, 255, 0.98);
+    }
+
+    body[data-theme='light'] .search-hit-title {
+      color: #1a3a52;
+    }
+
+    body[data-theme='light'] .search-hit-sub {
+      color: #547b92;
+    }
+
+    @media (max-width: 980px) {
+      .calendar {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+      }
+      .weekday {
+        display: none;
+      }
+      .day-cell {
+        min-height: auto;
+      }
+      .day-items {
+        max-height: none;
+      }
+      .resv-modal-row {
+        grid-template-columns: 6.4em 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="hero">
+      <h1>LINE Reservation Calendar</h1>
+      <p>食べログ / 一休の予約履歴を月間カレンダーで確認します（閲覧専用）。</p>
+      <div class="status">
+        <span id="authState" class="pill">未接続</span>
+        <span id="lastRefresh" class="pill">最終更新: なし</span>
+        <a href="./index.html" class="pill link">管理画面</a>
+        <a href="./media.html" class="pill link">メディア閲覧</a>
+        <a href="./analytics.html" class="pill link">売上グラフ</a>
+        <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>接続</h2>
+      <div class="controls">
+        <input id="projectUrlInput" class="input" style="min-width:320px" type="text" readonly tabindex="-1" aria-readonly="true">
+        <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+        <button id="saveTokenBtn" class="button primary">保存して接続</button>
+        <button id="clearTokenBtn" class="button">削除</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="month-head">
+        <h2 class="month-title" id="monthTitle">予約表</h2>
+        <div class="controls">
+          <button id="prevMonthBtn" class="button">前月</button>
+          <button id="thisMonthBtn" class="button">今月</button>
+          <button id="nextMonthBtn" class="button">翌月</button>
+          <select id="sourceFilter" class="select" aria-label="予約ソース絞り込み">
+            <option value="all">全て</option>
+            <option value="tabelog">食べログ</option>
+            <option value="ikyu">一休</option>
+          </select>
+          <input id="nameFilterInput" class="input" type="text" placeholder="名前検索（例: 石田）" aria-label="予約者名検索">
+          <button id="openSearchHitsBtn" class="button">候補一覧</button>
+          <button id="reloadBtn" class="button primary">再読み込み</button>
+        </div>
+      </div>
+      <div id="summary" class="meta">未取得</div>
+      <div id="calendar" class="calendar"></div>
+    </section>
+  </div>
+  <div id="resvModalOverlay" class="resv-modal-overlay" aria-hidden="true">
+    <div class="resv-modal" role="dialog" aria-modal="true" aria-labelledby="resvModalTitle">
+      <div class="resv-modal-head">
+        <div>
+          <h3 id="resvModalTitle" class="resv-modal-title">予約詳細</h3>
+          <div id="resvModalSub" class="resv-modal-sub"></div>
+        </div>
+        <button id="resvModalClose" type="button" class="resv-modal-close">閉じる</button>
+      </div>
+      <div id="resvModalRows" class="resv-modal-rows"></div>
+    </div>
+  </div>
+  <div id="searchHitsOverlay" class="resv-modal-overlay" aria-hidden="true">
+    <div class="resv-modal" role="dialog" aria-modal="true" aria-labelledby="searchHitsTitle">
+      <div class="resv-modal-head">
+        <div>
+          <h3 id="searchHitsTitle" class="resv-modal-title">名前検索結果</h3>
+          <div id="searchHitsSummary" class="search-hit-summary"></div>
+        </div>
+        <button id="searchHitsClose" type="button" class="resv-modal-close">閉じる</button>
+      </div>
+      <div id="searchHitsList" class="search-hit-list"></div>
+    </div>
+  </div>
+
+  <script src="pages-config.js"></script>
+  <script>
+    const STORE_TOKEN_KEY = 'line_summary_admin_token';
+    const STORE_THEME_KEY = 'line_reservation_calendar_theme';
+    const FIXED_PROJECT_URL = LINE_REPORT_PAGES.PROJECT_URL;
+    const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+    const JST = 'Asia/Tokyo';
+    const SEARCH_FALLBACK_PAST_MONTHS = 48;
+    const SEARCH_FALLBACK_FUTURE_MONTHS = 12;
+    const SEARCH_FALLBACK_BATCH_SIZE = 6;
+    const SEARCH_FALLBACK_MAX_HITS = 240;
+
+    const state = {
+      currentMonth: getCurrentMonthJst(),
+      source: 'all',
+      items: [],
+      popupItems: {},
+      searchHits: [],
+      nameQuery: '',
+      visibleCount: 0,
+      apiTotal: 0,
+      apiSourceCounts: { tabelog: 0, ikyu: 0 },
+      jumpTimerId: null,
+      theme: 'dark',
+    };
+
+    const dom = {
+      authState: document.getElementById('authState'),
+      lastRefresh: document.getElementById('lastRefresh'),
+      projectUrlInput: document.getElementById('projectUrlInput'),
+      tokenInput: document.getElementById('tokenInput'),
+      saveTokenBtn: document.getElementById('saveTokenBtn'),
+      clearTokenBtn: document.getElementById('clearTokenBtn'),
+      monthTitle: document.getElementById('monthTitle'),
+      prevMonthBtn: document.getElementById('prevMonthBtn'),
+      thisMonthBtn: document.getElementById('thisMonthBtn'),
+      nextMonthBtn: document.getElementById('nextMonthBtn'),
+      sourceFilter: document.getElementById('sourceFilter'),
+      nameFilterInput: document.getElementById('nameFilterInput'),
+      openSearchHitsBtn: document.getElementById('openSearchHitsBtn'),
+      reloadBtn: document.getElementById('reloadBtn'),
+      summary: document.getElementById('summary'),
+      calendar: document.getElementById('calendar'),
+      resvModalOverlay: document.getElementById('resvModalOverlay'),
+      resvModalTitle: document.getElementById('resvModalTitle'),
+      resvModalSub: document.getElementById('resvModalSub'),
+      resvModalRows: document.getElementById('resvModalRows'),
+      resvModalClose: document.getElementById('resvModalClose'),
+      searchHitsOverlay: document.getElementById('searchHitsOverlay'),
+      searchHitsTitle: document.getElementById('searchHitsTitle'),
+      searchHitsSummary: document.getElementById('searchHitsSummary'),
+      searchHitsList: document.getElementById('searchHitsList'),
+      searchHitsClose: document.getElementById('searchHitsClose'),
+      themeToggleBtn: document.getElementById('themeToggleBtn'),
+    };
+
+    function getToken() {
+      return localStorage.getItem(STORE_TOKEN_KEY) || '';
+    }
+
+    function setToken(value) {
+      if (value) localStorage.setItem(STORE_TOKEN_KEY, value);
+      else localStorage.removeItem(STORE_TOKEN_KEY);
+      updateAuthState();
+    }
+
+    function normalizeTheme(value) {
+      const theme = String(value || '').trim().toLowerCase();
+      return theme === 'light' ? 'light' : 'dark';
+    }
+
+    function getTheme() {
+      return normalizeTheme(localStorage.getItem(STORE_THEME_KEY));
+    }
+
+    function updateThemeToggleButton() {
+      const isLight = state.theme === 'light';
+      dom.themeToggleBtn.textContent = isLight ? 'ダークモード' : 'ライトモード';
+      dom.themeToggleBtn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+      dom.themeToggleBtn.title = isLight ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
+    }
+
+    function applyTheme(theme) {
+      state.theme = normalizeTheme(theme);
+      document.body.setAttribute('data-theme', state.theme);
+      updateThemeToggleButton();
+    }
+
+    function setTheme(theme) {
+      const normalized = normalizeTheme(theme);
+      localStorage.setItem(STORE_THEME_KEY, normalized);
+      applyTheme(normalized);
+    }
+
+    function toggleTheme() {
+      setTheme(state.theme === 'light' ? 'dark' : 'light');
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function getCurrentMonthJst() {
+      const now = new Date();
+      const parts = new Intl.DateTimeFormat('ja-JP', { timeZone: JST, year: 'numeric', month: '2-digit' }).formatToParts(now);
+      const y = parts.find((part) => part.type === 'year')?.value || String(now.getUTCFullYear());
+      const m = parts.find((part) => part.type === 'month')?.value || '01';
+      return y + '-' + m;
+    }
+
+    function formatMonthLabel(month) {
+      const m = String(month || '');
+      const hit = m.match(/^(\d{4})-(\d{2})$/);
+      if (!hit) return m;
+      return hit[1] + '年' + Number(hit[2]) + '月';
+    }
+
+    function parseMonth(month) {
+      const hit = String(month || '').match(/^(\d{4})-(\d{2})$/);
+      if (!hit) return null;
+      return { year: Number(hit[1]), month: Number(hit[2]) };
+    }
+
+    function shiftMonth(month, delta) {
+      const parsed = parseMonth(month);
+      if (!parsed) return month;
+      const date = new Date(Date.UTC(parsed.year, parsed.month - 1 + delta, 1));
+      const y = date.getUTCFullYear();
+      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+      return y + '-' + m;
+    }
+
+    function formatDateJst(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '-';
+      return new Intl.DateTimeFormat('ja-JP', {
+        timeZone: JST,
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(date);
+    }
+
+    function formatTimeJst(value) {
+      if (!value) return null;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      const parts = new Intl.DateTimeFormat('ja-JP', {
+        timeZone: JST,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(date);
+      const hh = parts.find((part) => part.type === 'hour')?.value;
+      const mm = parts.find((part) => part.type === 'minute')?.value;
+      if (!hh || !mm) return null;
+      return hh + ':' + mm;
+    }
+
+    function normalizeCardField(value, fallback = '不明') {
+      const text = String(value || '').trim();
+      if (!text) return fallback;
+      return text;
+    }
+
+    function normalizeNameSearchKey(value) {
+      return String(value || '')
+        .replace(/[（(][^）)]*[）)]/g, '')
+        .replace(/\u3000/g, ' ')
+        .replace(/\s+/g, '')
+        .replace(/様/g, '')
+        .trim()
+        .toLowerCase();
+    }
+
+    function matchesNameFilter(item, query) {
+      const queryKey = normalizeNameSearchKey(query);
+      if (!queryKey) return true;
+      const candidates = [
+        item && item.customer_name_label,
+        item && item.customer_name,
+        item && item.reservation_detail,
+      ];
+      return candidates.some((candidate) => {
+        const key = normalizeNameSearchKey(candidate);
+        return key.includes(queryKey);
+      });
+    }
+
+    function withHonorificName(value) {
+      const name = normalizeCardField(value, '不明');
+      if (name === '不明') return name;
+      const baseName = name.replace(/\s*様$/, '').trim();
+      if (!baseName) return '不明';
+      return baseName + ' 様';
+    }
+
+    function formatDateTimeDetailJst(value) {
+      if (!value) return '不明';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return normalizeCardField(value, '不明');
+      const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+      const parts = new Intl.DateTimeFormat('ja-JP', {
+        timeZone: JST,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(date);
+      const year = parts.find((part) => part.type === 'year')?.value || '0000';
+      const month = parts.find((part) => part.type === 'month')?.value || '00';
+      const day = parts.find((part) => part.type === 'day')?.value || '00';
+      const hour = parts.find((part) => part.type === 'hour')?.value || '--';
+      const minute = parts.find((part) => part.type === 'minute')?.value || '--';
+      const weekdayIndex = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))).getUTCDay();
+      const weekdayLabel = weekdays[Number.isFinite(weekdayIndex) ? weekdayIndex : 0];
+      return year + '/' + month + '/' + day + '(' + weekdayLabel + ') ' + hour + ':' + minute;
+    }
+
+    function sourceLabelFromItem(item) {
+      const source = String(item.source || '').trim();
+      if (source === 'ikyu') return '一休.comレストラン';
+      if (source === 'tabelog') return '食べログ';
+      return normalizeCardField(source, '不明');
+    }
+
+    function buildReservationSummary(item) {
+      const customerName = withHonorificName(item.customer_name_label || item.customer_name);
+      const visitTime = normalizeCardField(item.visit_time_label || formatTimeJst(item.visit_at), '不明');
+      const partySize = normalizeCardField(item.party_size_label, '不明');
+      return {
+        customerName,
+        visitTime,
+        partySize,
+      };
+    }
+
+    function buildReservationDetailRows(item) {
+      const sourceLabel = sourceLabelFromItem(item);
+      const route = normalizeCardField(item.route_label, sourceLabel);
+      const customerName = withHonorificName(item.customer_name_label || item.customer_name);
+      const dateTime = formatDateTimeDetailJst(item.visit_at);
+      const visitTime = normalizeCardField(item.visit_time_label || formatTimeJst(item.visit_at), '不明');
+      const partySize = normalizeCardField(item.party_size_label, '不明');
+      const plan = normalizeCardField(item.plan_label || item.reservation_detail, '不明');
+      const phone = normalizeCardField(item.customer_phone, '不明');
+      const allergyRaw = String(item.allergy_label || '').trim();
+      const allergy = allergyRaw ? allergyRaw : 'なし';
+      const visitCount = Number(item.visit_count || 0);
+      const visitCountLabel = Number.isFinite(visitCount) && visitCount > 0 ? String(visitCount) + '回' : '不明';
+      return [
+        { label: '予約サイト', value: sourceLabel },
+        { label: '経路', value: route },
+        { label: '予約者名', value: customerName },
+        { label: '来店日時', value: dateTime },
+        { label: '来店時間', value: visitTime },
+        { label: '人数', value: partySize },
+        { label: 'コース', value: plan },
+        { label: 'アレルギー', value: allergy },
+        { label: 'TEL', value: phone },
+        { label: '来店履歴', value: visitCountLabel },
+      ];
+    }
+
+    function buildReservationDetailRowHtml(row) {
+      const safeLabel = escapeHtml(String(row.label || '項目'));
+      const safeValue = escapeHtml(String(row.value || '不明'));
+      return '<div class="resv-modal-row"><div class="resv-modal-label">' + safeLabel + '</div><div class="resv-modal-value">' + safeValue + '</div></div>';
+    }
+
+    function closeSearchHitsModal() {
+      dom.searchHitsOverlay.classList.remove('open');
+      dom.searchHitsOverlay.setAttribute('aria-hidden', 'true');
+      dom.searchHitsList.innerHTML = '';
+      dom.searchHitsSummary.textContent = '';
+      state.searchHits = [];
+    }
+
+    function buildSearchHitRows(items) {
+      const rows = Array.isArray(items) ? items.map((item) => {
+        const summary = buildReservationSummary(item);
+        const sourceLabel = sourceLabelFromItem(item);
+        const visitDateTime = formatDateTimeDetailJst(item.visit_at);
+        const eventId = String(item && item.id != null ? item.id : '');
+        const month = String(item && item.visit_month || '').trim() || formatMonthKeyJst(item && item.visit_at);
+        return {
+          item,
+          source: String(item && item.source || '').trim(),
+          eventId,
+          month,
+          sourceLabel,
+          summary,
+          visitDateTime,
+          visitAt: String(item && item.visit_at || ''),
+        };
+      }) : [];
+      rows.sort((a, b) => String(b.visitAt).localeCompare(String(a.visitAt)));
+      return rows;
+    }
+
+    function buildSearchHitHtml(hit, index) {
+      const title = escapeHtml(hit.summary.customerName + ' / ' + hit.summary.visitTime + ' / ' + hit.summary.partySize);
+      const sub = escapeHtml(hit.sourceLabel + ' / ' + hit.visitDateTime);
+      return [
+        '<button type="button" class="search-hit-item" data-hit-index="' + escapeHtml(String(index)) + '">',
+        '<div class="search-hit-title">' + title + '</div>',
+        '<div class="search-hit-sub">' + sub + '</div>',
+        '</button>',
+      ].join('');
+    }
+
+    function shouldUseCalendarSearchFallback(error) {
+      const message = String(error && error.message || error || '').toLowerCase();
+      return message.includes('not found') || message.includes('api error: 404');
+    }
+
+    function buildFallbackSearchMonths(centerMonth) {
+      const months = [];
+      const seen = new Set();
+      const maxStep = Math.max(SEARCH_FALLBACK_PAST_MONTHS, SEARCH_FALLBACK_FUTURE_MONTHS);
+      for (let step = 0; step <= maxStep; step += 1) {
+        if (step === 0) {
+          const key = centerMonth;
+          if (key && !seen.has(key)) {
+            seen.add(key);
+            months.push(key);
+          }
+          continue;
+        }
+        if (step <= SEARCH_FALLBACK_PAST_MONTHS) {
+          const past = shiftMonth(centerMonth, -step);
+          if (past && !seen.has(past)) {
+            seen.add(past);
+            months.push(past);
+          }
+        }
+        if (step <= SEARCH_FALLBACK_FUTURE_MONTHS) {
+          const future = shiftMonth(centerMonth, step);
+          if (future && !seen.has(future)) {
+            seen.add(future);
+            months.push(future);
+          }
+        }
+      }
+      return months;
+    }
+
+    async function fetchSearchHitsViaCalendarFallback(query) {
+      const months = buildFallbackSearchMonths(getCurrentMonthJst());
+      const dedup = new Set();
+      const collected = [];
+      let scannedMonths = 0;
+
+      for (let i = 0; i < months.length; i += SEARCH_FALLBACK_BATCH_SIZE) {
+        const batch = months.slice(i, i + SEARCH_FALLBACK_BATCH_SIZE);
+        const batchResults = await Promise.all(batch.map(async function(month) {
+          try {
+            const params = new URLSearchParams();
+            params.set('month', month);
+            params.set('source', 'all');
+            params.set('_ts', String(Date.now()));
+            const data = await api('/reservations/calendar?' + params.toString());
+            const items = Array.isArray(data && data.items) ? data.items : [];
+            return items.filter((item) => matchesNameFilter(item, query));
+          } catch (_) {
+            return [];
+          }
+        }));
+
+        scannedMonths += batch.length;
+        for (const list of batchResults) {
+          for (const item of list) {
+            const source = String(item && item.source || '');
+            const id = String(item && item.id != null ? item.id : '');
+            const visitAt = String(item && item.visit_at || '');
+            const key = source + '::' + id + '::' + visitAt;
+            if (dedup.has(key)) continue;
+            dedup.add(key);
+            collected.push(item);
+            if (collected.length >= SEARCH_FALLBACK_MAX_HITS) {
+              return {
+                items: collected,
+                scannedMonths,
+                totalMonths: months.length,
+                truncated: true,
+              };
+            }
+          }
+        }
+      }
+
+      return {
+        items: collected,
+        scannedMonths,
+        totalMonths: months.length,
+        truncated: false,
+      };
+    }
+
+    async function openSearchHitsModal() {
+      const query = String(dom.nameFilterInput.value || state.nameQuery || '').trim();
+      if (!query) {
+        alert('名前を入力してください。');
+        dom.nameFilterInput.focus();
+        return;
+      }
+      state.nameQuery = query;
+      dom.searchHitsTitle.textContent = '名前検索結果';
+      dom.searchHitsSummary.textContent = '検索中...';
+      dom.searchHitsList.innerHTML = '<div class="meta">検索中...</div>';
+      dom.searchHitsOverlay.classList.add('open');
+      dom.searchHitsOverlay.setAttribute('aria-hidden', 'false');
+
+      const params = new URLSearchParams();
+      params.set('q', query);
+      params.set('source', 'all');
+      params.set('limit', '160');
+      params.set('_ts', String(Date.now()));
+
+      let items = [];
+      let truncated = false;
+      let usedFallback = false;
+      let fallbackScannedMonths = 0;
+      let fallbackTotalMonths = 0;
+
+      try {
+        const data = await api('/reservations/search?' + params.toString());
+        items = Array.isArray(data && data.items) ? data.items : [];
+        truncated = data && data.truncated === true;
+      } catch (error) {
+        if (!shouldUseCalendarSearchFallback(error)) {
+          state.searchHits = [];
+          dom.searchHitsSummary.textContent = '検索エラー';
+          dom.searchHitsList.innerHTML = '<div class="meta">検索に失敗しました。</div>';
+          throw error;
+        }
+
+        usedFallback = true;
+        const fallback = await fetchSearchHitsViaCalendarFallback(query);
+        items = fallback.items;
+        truncated = fallback.truncated;
+        fallbackScannedMonths = fallback.scannedMonths;
+        fallbackTotalMonths = fallback.totalMonths;
+      }
+
+      const hits = buildSearchHitRows(items);
+      state.searchHits = hits;
+      let suffix = truncated ? '（上位表示）' : '';
+      if (usedFallback) {
+        suffix += '（互換検索: ' + String(fallbackScannedMonths) + '/' + String(fallbackTotalMonths) + 'か月）';
+      }
+      dom.searchHitsSummary.textContent = '検索: ' + query + ' / ' + String(hits.length) + '件（全期間）' + suffix;
+      if (hits.length === 0) {
+        dom.searchHitsList.innerHTML = '<div class="meta">該当する予約はありません。</div>';
+        return;
+      }
+      dom.searchHitsList.innerHTML = hits.map((hit, index) => buildSearchHitHtml(hit, index)).join('');
+    }
+
+    function findPopupIdBySourceAndEventId(source, eventId) {
+      if (!source || !eventId) return '';
+      for (const [popupId, item] of Object.entries(state.popupItems)) {
+        const itemSource = String(item && item.source || '').trim();
+        const itemId = String(item && item.id != null ? item.id : '');
+        if (itemSource === source && itemId === eventId) {
+          return popupId;
+        }
+      }
+      return '';
+    }
+
+    function formatMonthKeyJst(value) {
+      const dayKey = formatDayKeyJst(value);
+      return dayKey ? dayKey.slice(0, 7) : '';
+    }
+
+    function syncSourceFilterUi() {
+      dom.sourceFilter.value = state.source;
+    }
+
+    async function jumpToSearchHit(hit) {
+      const source = String(hit && hit.source || '').trim();
+      const eventId = String(hit && hit.eventId || '').trim();
+      const month = String(hit && hit.month || '').trim();
+      let requiresReload = false;
+
+      if (month && month !== state.currentMonth) {
+        state.currentMonth = month;
+        requiresReload = true;
+      }
+
+      if (source && state.source !== 'all' && state.source !== source) {
+        state.source = source;
+        requiresReload = true;
+      }
+
+      if (requiresReload) {
+        syncSourceFilterUi();
+        await loadCalendar();
+      }
+
+      let popupId = findPopupIdBySourceAndEventId(source, eventId);
+      if (!popupId && state.source !== 'all') {
+        state.source = 'all';
+        syncSourceFilterUi();
+        await loadCalendar();
+        popupId = findPopupIdBySourceAndEventId(source, eventId);
+      }
+
+      if (!popupId) {
+        alert('対象予約が見つかりませんでした。');
+        return;
+      }
+      jumpToReservationCardByPopupId(popupId);
+    }
+
+    function jumpToReservationCardByPopupId(popupId) {
+      const selector = '.js-resv-card[data-popup-id="' + String(popupId) + '"]';
+      const card = dom.calendar.querySelector(selector);
+      if (!card) return false;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('jump-target');
+      if (state.jumpTimerId) {
+        clearTimeout(state.jumpTimerId);
+      }
+      state.jumpTimerId = setTimeout(function() {
+        card.classList.remove('jump-target');
+        state.jumpTimerId = null;
+      }, 1300);
+      openReservationModalById(popupId);
+      return true;
+    }
+
+    function closeReservationModal() {
+      dom.resvModalOverlay.classList.remove('open');
+      dom.resvModalOverlay.setAttribute('aria-hidden', 'true');
+      dom.resvModalRows.innerHTML = '';
+    }
+
+    function openReservationModalById(popupId) {
+      const item = state.popupItems[popupId];
+      if (!item) return;
+      const sourceLabel = sourceLabelFromItem(item);
+      const summary = buildReservationSummary(item);
+      dom.resvModalTitle.textContent = '予約詳細';
+      dom.resvModalSub.textContent = sourceLabel + ' / ' + summary.customerName + ' / ' + summary.visitTime;
+      const rows = buildReservationDetailRows(item);
+      dom.resvModalRows.innerHTML = rows.map((row) => buildReservationDetailRowHtml(row)).join('');
+      dom.resvModalOverlay.classList.add('open');
+      dom.resvModalOverlay.setAttribute('aria-hidden', 'false');
+    }
+
+    function bindReservationCardPopupEvents() {
+      const cards = dom.calendar.querySelectorAll('.js-resv-card[data-popup-id]');
+      cards.forEach((card) => {
+        const popupId = String(card.getAttribute('data-popup-id') || '');
+        if (!popupId) return;
+        card.addEventListener('click', function() {
+          openReservationModalById(popupId);
+        });
+        card.addEventListener('keydown', function(event) {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openReservationModalById(popupId);
+          }
+        });
+      });
+    }
+
+    function formatDayKeyJst(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      const parts = new Intl.DateTimeFormat('ja-JP', { timeZone: JST, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+      const y = parts.find((part) => part.type === 'year')?.value;
+      const m = parts.find((part) => part.type === 'month')?.value;
+      const d = parts.find((part) => part.type === 'day')?.value;
+      if (!y || !m || !d) return '';
+      return y + '-' + m + '-' + d;
+    }
+
+    async function api(path) {
+      const token = getToken();
+      if (!token) throw new Error('先に管理トークンを保存してください。');
+      const url = LINE_REPORT_PAGES.adminApiUrl(path);
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'x-admin-token': token },
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+      });
+      const text = await res.text();
+      let body = {};
+      try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { raw: text }; }
+      if (!res.ok) {
+        throw new Error(body.error || ('API error: ' + res.status));
+      }
+      return body;
+    }
+
+    function updateAuthState() {
+      const hasToken = !!getToken();
+      dom.authState.textContent = hasToken ? '接続準備OK' : '未接続';
+      dom.authState.className = hasToken ? 'pill ok' : 'pill';
+    }
+
+    function updateSummaryText() {
+      const total = Number(state.apiTotal || state.items.length || 0);
+      const tabelogCount = Number(state.apiSourceCounts && state.apiSourceCounts.tabelog || 0);
+      const ikyuCount = Number(state.apiSourceCounts && state.apiSourceCounts.ikyu || 0);
+      let text =
+        '総件数: ' + total + '件'
+        + ' | 食べログ: ' + tabelogCount + '件'
+        + ' | 一休: ' + ikyuCount + '件';
+      if (state.nameQuery && state.nameQuery.trim()) {
+        text += ' | 名前検索表示: ' + Number(state.visibleCount || 0) + '件';
+      }
+      dom.summary.textContent = text;
+    }
+
+    function renderCalendar(items) {
+      const parsed = parseMonth(state.currentMonth);
+      if (!parsed) {
+        dom.calendar.innerHTML = '<div class="meta">月の形式が不正です。</div>';
+        state.popupItems = {};
+        closeSearchHitsModal();
+        closeReservationModal();
+        return 0;
+      }
+
+      closeSearchHitsModal();
+      closeReservationModal();
+
+      const first = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
+      const firstWeekday = (first.getUTCDay() + 0) % 7;
+      const daysInMonth = new Date(Date.UTC(parsed.year, parsed.month, 0)).getUTCDate();
+      const daysPrevMonth = new Date(Date.UTC(parsed.year, parsed.month - 1, 0)).getUTCDate();
+      const filteredItems = Array.isArray(items)
+        ? items.filter((item) => matchesNameFilter(item, state.nameQuery))
+        : [];
+
+      const byDay = new Map();
+      for (const item of filteredItems) {
+        const key = formatDayKeyJst(item.visit_at);
+        if (!key) continue;
+        if (!byDay.has(key)) byDay.set(key, []);
+        byDay.get(key).push(item);
+      }
+
+      const html = [];
+      const popupItems = {};
+      let popupSeq = 0;
+      for (const weekday of WEEKDAYS) {
+        html.push('<div class="weekday">' + escapeHtml(weekday) + '</div>');
+      }
+
+      for (let cell = 0; cell < 42; cell += 1) {
+        const dayNum = cell - firstWeekday + 1;
+        let y = parsed.year;
+        let m = parsed.month;
+        let d = dayNum;
+        let outside = false;
+        if (dayNum <= 0) {
+          outside = true;
+          m = parsed.month - 1;
+          if (m <= 0) { m = 12; y -= 1; }
+          d = daysPrevMonth + dayNum;
+        } else if (dayNum > daysInMonth) {
+          outside = true;
+          m = parsed.month + 1;
+          if (m > 12) { m = 1; y += 1; }
+          d = dayNum - daysInMonth;
+        }
+        const key = String(y).padStart(4, '0') + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const dayItems = byDay.get(key) || [];
+        const itemHtml = dayItems.map((item) => {
+          const source = String(item.source || '');
+          popupSeq += 1;
+          const popupId = 'popup-' + String(popupSeq);
+          popupItems[popupId] = item;
+          const summary = buildReservationSummary(item);
+          return [
+            '<div class="resv source-' + escapeHtml(source) + ' js-resv-card" role="button" tabindex="0" data-popup-id="' + escapeHtml(popupId) + '">',
+            '<div class="resv-summary">',
+            '<div class="resv-summary-name" title="' + escapeHtml(summary.customerName) + '">' + escapeHtml(summary.customerName) + '</div>',
+            '<div class="resv-summary-sub">人数: ' + escapeHtml(summary.partySize) + '</div>',
+            '<div class="resv-summary-sub">時間: ' + escapeHtml(summary.visitTime) + '</div>',
+            '</div>',
+            '</div>',
+          ].join('');
+        }).join('');
+        html.push([
+          '<div class="day-cell' + (outside ? ' outside' : '') + '">',
+          '<div class="day-head"><span class="day-number">' + escapeHtml(String(d)) + '</span><span class="count-chip">' + dayItems.length + '件</span></div>',
+          '<div></div>',
+          '<div class="day-items">' + itemHtml + '</div>',
+          '</div>',
+        ].join(''));
+      }
+
+      dom.calendar.innerHTML = html.join('');
+      state.popupItems = popupItems;
+      bindReservationCardPopupEvents();
+      return filteredItems.length;
+    }
+
+    async function loadCalendar() {
+      const params = new URLSearchParams();
+      params.set('month', state.currentMonth);
+      params.set('source', state.source);
+      params.set('_ts', String(Date.now()));
+      const data = await api('/reservations/calendar?' + params.toString());
+      const items = Array.isArray(data.items) ? data.items : [];
+      state.items = items;
+      state.apiTotal = Number(data.total || items.length || 0);
+      state.apiSourceCounts = {
+        tabelog: Number(data.source_counts && data.source_counts.tabelog || 0),
+        ikyu: Number(data.source_counts && data.source_counts.ikyu || 0),
+      };
+      dom.monthTitle.textContent = '予約表 ' + formatMonthLabel(state.currentMonth);
+      dom.lastRefresh.textContent = '最終更新: ' + formatDateJst(data.generated_at || new Date().toISOString());
+      state.visibleCount = renderCalendar(items);
+      updateSummaryText();
+    }
+
+    dom.saveTokenBtn.addEventListener('click', async function() {
+      setToken(String(dom.tokenInput.value || '').trim());
+      dom.tokenInput.value = '';
+      try {
+        await loadCalendar();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.clearTokenBtn.addEventListener('click', function() {
+      setToken('');
+      dom.calendar.innerHTML = '';
+      dom.summary.textContent = '未取得';
+      dom.lastRefresh.textContent = '最終更新: なし';
+      state.apiTotal = 0;
+      state.apiSourceCounts = { tabelog: 0, ikyu: 0 };
+      state.visibleCount = 0;
+      state.popupItems = {};
+      closeSearchHitsModal();
+      closeReservationModal();
+    });
+
+    dom.prevMonthBtn.addEventListener('click', async function() {
+      state.currentMonth = shiftMonth(state.currentMonth, -1);
+      try { await loadCalendar(); } catch (error) { alert(error.message || String(error)); }
+    });
+
+    dom.thisMonthBtn.addEventListener('click', async function() {
+      state.currentMonth = getCurrentMonthJst();
+      try { await loadCalendar(); } catch (error) { alert(error.message || String(error)); }
+    });
+
+    dom.nextMonthBtn.addEventListener('click', async function() {
+      state.currentMonth = shiftMonth(state.currentMonth, 1);
+      try { await loadCalendar(); } catch (error) { alert(error.message || String(error)); }
+    });
+
+    dom.sourceFilter.addEventListener('change', async function() {
+      state.source = String(dom.sourceFilter.value || 'all');
+      try { await loadCalendar(); } catch (error) { alert(error.message || String(error)); }
+    });
+
+    dom.nameFilterInput.addEventListener('input', function() {
+      state.nameQuery = String(dom.nameFilterInput.value || '').trim();
+      state.visibleCount = renderCalendar(state.items);
+      updateSummaryText();
+    });
+
+    dom.nameFilterInput.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        openSearchHitsModal().catch(function(error) {
+          alert(error && error.message ? error.message : String(error));
+        });
+      }
+    });
+
+    dom.openSearchHitsBtn.addEventListener('click', function() {
+      openSearchHitsModal().catch(function(error) {
+        alert(error && error.message ? error.message : String(error));
+      });
+    });
+
+    dom.reloadBtn.addEventListener('click', async function() {
+      try { await loadCalendar(); } catch (error) { alert(error.message || String(error)); }
+    });
+
+    dom.themeToggleBtn.addEventListener('click', function() {
+      toggleTheme();
+    });
+
+    dom.resvModalClose.addEventListener('click', function() {
+      closeReservationModal();
+    });
+
+    dom.resvModalOverlay.addEventListener('click', function(event) {
+      if (event.target === dom.resvModalOverlay) {
+        closeReservationModal();
+      }
+    });
+
+    dom.searchHitsClose.addEventListener('click', function() {
+      closeSearchHitsModal();
+    });
+
+    dom.searchHitsOverlay.addEventListener('click', function(event) {
+      if (event.target === dom.searchHitsOverlay) {
+        closeSearchHitsModal();
+      }
+    });
+
+    dom.searchHitsList.addEventListener('click', function(event) {
+      const button = event.target && event.target.closest
+        ? event.target.closest('.search-hit-item[data-hit-index]')
+        : null;
+      if (!button) return;
+      const index = Number(button.getAttribute('data-hit-index'));
+      if (!Number.isInteger(index) || index < 0) return;
+      const hit = state.searchHits[index];
+      if (!hit) return;
+      closeSearchHitsModal();
+      jumpToSearchHit(hit).catch(function(error) {
+        alert(error && error.message ? error.message : String(error));
+      });
+    });
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape' && dom.searchHitsOverlay.classList.contains('open')) {
+        closeSearchHitsModal();
+        return;
+      }
+      if (event.key === 'Escape' && dom.resvModalOverlay.classList.contains('open')) {
+        closeReservationModal();
+      }
+    });
+
+    (function init() {
+      dom.projectUrlInput.value = FIXED_PROJECT_URL;
+      dom.sourceFilter.value = state.source;
+      dom.nameFilterInput.value = state.nameQuery;
+      applyTheme(getTheme());
+      updateAuthState();
+      dom.monthTitle.textContent = '予約表 ' + formatMonthLabel(state.currentMonth);
+      if (getToken()) {
+        loadCalendar().catch(function(error) {
+          alert(error.message || String(error));
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

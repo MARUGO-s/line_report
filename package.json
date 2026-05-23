@@ -1,0 +1,16 @@
+{
+  "name": "wine-price-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.9.1",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "xlsx": "^0.18.5"
+  }
+}

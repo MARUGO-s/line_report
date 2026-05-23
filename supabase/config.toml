@@ -1,0 +1,19 @@
+project_id = "line_report"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+
+[db]
+port = 54322
+major_version = 17
+
+[db.migrations]
+enabled = true
+
+[functions.line-webhook]
+verify_jwt = false
+
+[functions.admin-api]
+verify_jwt = false

@@ -1,0 +1,13 @@
+node_modules/
+.env
+.DS_Store
+npm-debug.log*
+wine_price.db
+wine_price.db-shm
+wine_price.db-wal
+data/
+backups/
+
+supabase/.temp/
+
+ocr-bridge/__pycache__/
