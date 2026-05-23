@@ -1,7 +1,12 @@
-# GitHub Pages（売上分析）
+# GitHub Pages
 
-- **公開URL（固定）**: https://marugo-s.github.io/line_report/
-- **分析画面**: https://marugo-s.github.io/line_report/analytics.html
-- **Supabase（移行先）**: `hocbnifuactbvmyjraxy`
+## いま（本番と同じ動作）
 
-ワイン管理の静的UI（`public/`）は Pages から削除済み。Node サーバー（`src/`）は Render 用にリポジトリ内に残しています。
+- **https://marugo-s.github.io/line_report/** → 本番の売上分析へリダイレクト  
+  → https://marugo-s.github.io/LINE-management/analytics.html  
+- Supabase は本番 **LINE**（`jhpmzqxqvapdkyvvhyra`）
+
+## 将来（段階的移行後）
+
+- このリポジトリを正の表示先にし、Supabase を `hocbnifuactbvmyjraxy` に切替予定。  
+- 手順: リポジトリ親の `docs/MIGRATION_HOCBN.md`
