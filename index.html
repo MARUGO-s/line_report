@@ -1942,7 +1942,7 @@
         <a href="./media.html" class="pill link">LINEメディアビューアー</a>
         <a href="./reservation.html" class="pill link">予約表</a>
         <a href="./analytics.html" class="pill link">売上分析</a>
-        <a id="receiptSheetsPilotHeaderLink" href="#" class="pill link" target="_blank" rel="noopener noreferrer" style="display:none">売上シート</a>
+        <a id="receiptSheetsPilotHeaderLink" href="#" class="pill link" target="_blank" rel="noopener noreferrer" style="display:none" hidden aria-hidden="true">売上シート</a>
         <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
       </div>
     </header>
@@ -1965,7 +1965,7 @@
               <a href="./media.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">メディア閲覧</a>
               <a href="./reservation.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">予約表</a>
               <a href="./analytics.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">売上分析</a>
-              <a id="receiptSheetsPilotActionLink" href="#" class="button media-highlight" target="_blank" rel="noopener noreferrer" style="display:none;align-items:center;text-decoration:none;">売上シート</a>
+              <a id="receiptSheetsPilotActionLink" href="#" class="button media-highlight" target="_blank" rel="noopener noreferrer" style="display:none;align-items:center;text-decoration:none;" hidden aria-hidden="true">売上シート</a>
             </div>
           </div>
           <div class="setting-block">
@@ -3186,7 +3186,14 @@
       renderGmailAccountState(response && response.gmail_account ? response.gmail_account : null);
     }
 
+    function isReceiptSheetsPilotEnabled() {
+      return LINE_REPORT_PAGES.RECEIPT_SHEETS_PILOT_ENABLED === true;
+    }
+
     function setReceiptSheetsPilotLinkVisible(visible, url, title) {
+      if (!isReceiptSheetsPilotEnabled()) {
+        visible = false;
+      }
       const links = [
         document.getElementById('receiptSheetsPilotHeaderLink'),
         document.getElementById('receiptSheetsPilotActionLink'),
@@ -3205,6 +3212,10 @@
     }
 
     async function refreshReceiptSheetsPilotLink() {
+      if (!isReceiptSheetsPilotEnabled()) {
+        setReceiptSheetsPilotLinkVisible(false);
+        return;
+      }
       if (!getToken()) {
         setReceiptSheetsPilotLinkVisible(false);
         return;
@@ -3229,6 +3240,10 @@
     }
 
     async function safeRefreshReceiptSheetsPilotLink(options) {
+      if (!isReceiptSheetsPilotEnabled()) {
+        setReceiptSheetsPilotLinkVisible(false);
+        return;
+      }
       const opts = options || {};
       try {
         await refreshReceiptSheetsPilotLink();

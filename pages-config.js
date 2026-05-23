@@ -15,6 +15,9 @@
   /** 売上分析・予算 API（店舗別レシートテーブル） */
   const RECEIPT_ADMIN_PROJECT_URL = WEBHOOK_PROJECT_URL;
 
+  /** Google スプレッドシート（売上シート pilot）連携 — 新サイトでは一旦オフ */
+  const RECEIPT_SHEETS_PILOT_ENABLED = false;
+
   /** store_partition_key → 表示名（analytics / 管理画面で共通） */
   const STORE_NAMES = {
     marugo: 'マルゴ',
@@ -159,6 +162,7 @@
     PROJECT_URL: PROJECT_URL,
     WEBHOOK_PROJECT_URL: WEBHOOK_PROJECT_URL,
     RECEIPT_ADMIN_PROJECT_URL: RECEIPT_ADMIN_PROJECT_URL,
+    RECEIPT_SHEETS_PILOT_ENABLED: RECEIPT_SHEETS_PILOT_ENABLED,
     STORE_NAMES: STORE_NAMES,
     adminApiPath: adminApiPath,
     adminApiUrl: adminApiUrl,

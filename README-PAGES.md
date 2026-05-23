@@ -17,6 +17,7 @@
   - LINE Webhook: `/functions/v1/line-webhook/{store_partition_key}`（店舗別・hocbn）
   - 店舗別テーブル: `line_webhook_raw__{key}`（生イベント）, `line_receipt__{key}`（レシート）
   - 設定の単一ソース: `pages-config.js`
+  - Google スプレッドシート（売上シート）: **新サイトでは無効**（`RECEIPT_SHEETS_PILOT_ENABLED = false`）
 - **DB マイグレーション**: `supabase/migrations/20260523140000_store_partition_webhook_tables.sql`, `20260523150000_sales_budget_tables.sql`
 - **Edge Functions（hocbn）**: `line-webhook`, `admin-api`（売上・予算・月次集計）
 - **Edge Secrets（hocbn）**: `GROQ_API_KEY`, `LINE_CHANNEL_ACCESS_TOKEN`（または店舗別）, `LINE_CHANNEL_SECRET`（または店舗別）, `ADMIN_DASHBOARD_TOKEN`（analytics 認証）
