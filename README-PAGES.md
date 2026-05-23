@@ -26,7 +26,11 @@
   npx supabase db push
   npx supabase functions deploy line-webhook admin-api --project-ref hocbnifuactbvmyjraxy
   ```
-- **ダミー売上（テスト）**: `./scripts/dummy-sales-seed.sh seed` で全店舗に過去3年分を投入。削除は `./scripts/dummy-sales-seed.sh delete`（識別子 `raw_payload._seed_tag = line_report_dummy_sales_v1`）
+- **ダミー売上・予算（テスト）**:
+  - 投入: `./scripts/dummy-sales-seed.sh seed-all`（売上＋予算）
+  - 削除: `./scripts/dummy-sales-seed.sh delete-all`
+  - 売上識別: `raw_payload._seed_tag = line_report_dummy_sales_v1`
+  - 予算識別: `store_closed_dates._seed_tag = line_report_dummy_budget_v1`
   店舗ごとの LINE 署名検証は Edge Secret `LINE_CHANNEL_SECRET__{STORE_KEY}`（例: `LINE_CHANNEL_SECRET__MARUGO`）または共通 `LINE_CHANNEL_SECRET`。
 - **本番反映**: このリポジトリへ commit & push（GitHub Pages が自動配信）
 - **ローカル確認**: `./scripts/local-line-report-pages.sh`
