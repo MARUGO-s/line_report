@@ -1,12 +1,11 @@
-# GitHub Pages
+# GitHub Pages（line_report）
 
-## いま（本番と同じ動作）
+**公開 URL（正）**
 
-- **https://marugo-s.github.io/line_report/** → 本番の売上分析へリダイレクト  
-  → https://marugo-s.github.io/LINE-management/analytics.html  
-- Supabase は本番 **LINE**（`jhpmzqxqvapdkyvvhyra`）
+- https://marugo-s.github.io/line_report/
+- https://marugo-s.github.io/line_report/analytics.html
+- https://marugo-s.github.io/line_report/media.html
 
-## 将来（段階的移行後）
+Supabase は当面 **本番 LINE**（`jhpmzqxqvapdkyvvhyra`）。段階的に `hocbn` へ移行する場合は `docs/MIGRATION_HOCBN.md`（親リポジトリ `LINE-management-main-3`）を参照。
 
-- このリポジトリを正の表示先にし、Supabase を `hocbnifuactbvmyjraxy` に切替予定。  
-- 手順: リポジトリ親の `docs/MIGRATION_HOCBN.md`
+旧 URL `LINE-management` は使わない。

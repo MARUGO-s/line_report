@@ -1,7 +1,7 @@
 {
   "name": "LINE 売上レポート",
-  "short_name": "売上レポート",
-  "description": "LINE売上分析",
+  "short_name": "line_report",
+  "description": "LINE運用向けの管理コンソール",
   "start_url": "/line_report/analytics.html",
   "scope": "/line_report/",
   "display": "standalone",

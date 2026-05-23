@@ -1,0 +1,2692 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <base href="/line_report/">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#006c3a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="LINE Summary">
+  <link rel="icon" href="icons/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <title>LINE Media Viewer</title>
+  <style>
+    :root {
+      --bg0: #061320;
+      --bg1: #173247;
+      --card: rgba(8, 21, 35, 0.84);
+      --line: rgba(155, 220, 255, 0.25);
+      --txt: #e7f6ff;
+      --sub: #a6cadf;
+      --ok: #69edbf;
+      --accent: #57d8ff;
+      --radius: 16px;
+      --shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--txt);
+      font-family: "Zen Kaku Gothic New", sans-serif;
+      background:
+        radial-gradient(900px 500px at -20% -10%, #215f84 0%, transparent 60%),
+        radial-gradient(900px 500px at 120% 0%, #185273 0%, transparent 55%),
+        linear-gradient(145deg, var(--bg0), var(--bg1));
+      padding: 20px;
+      transition: background 0.25s ease, color 0.2s ease;
+    }
+
+    body[data-theme='light'] {
+      --bg0: #f5fbff;
+      --bg1: #deedf8;
+      --card: rgba(255, 255, 255, 0.9);
+      --line: rgba(45, 106, 151, 0.24);
+      --txt: #132a3b;
+      --sub: #4f7187;
+      --ok: #0f8d5f;
+      --accent: #157fba;
+      --shadow: 0 14px 34px rgba(20, 59, 89, 0.16);
+      background:
+        radial-gradient(900px 500px at -20% -10%, #d0ebfb 0%, transparent 60%),
+        radial-gradient(900px 500px at 120% 0%, #c6e0f3 0%, transparent 55%),
+        linear-gradient(145deg, var(--bg0), var(--bg1));
+    }
+
+    .app {
+      max-width: 1320px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero, .card {
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 18px 20px;
+      background: linear-gradient(160deg, rgba(87, 216, 255, 0.15), rgba(8, 21, 35, 0.65));
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-family: "Barlow Condensed", sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      font-size: clamp(2rem, 3.2vw, 2.8rem);
+      line-height: 0.95;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      color: var(--sub);
+    }
+
+    .status {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--sub);
+      font-size: 0.88rem;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: rgba(8, 21, 35, 0.6);
+    }
+
+    button.pill {
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .pill.ok {
+      color: var(--ok);
+      border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+    }
+
+    .pill.theme-toggle {
+      padding-inline: 12px;
+    }
+
+    .card {
+      background: var(--card);
+      padding: 16px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .input, .select, .button {
+      min-height: 39px;
+      border-radius: 11px;
+      border: 1px solid var(--line);
+      background: rgba(8, 21, 35, 0.6);
+      color: var(--txt);
+      padding: 0 11px;
+      font: inherit;
+    }
+
+    .input::placeholder { color: #83abc2; }
+
+    .button {
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .button.primary {
+      border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+      background: linear-gradient(180deg, rgba(87, 216, 255, 0.32), rgba(10, 116, 158, 0.32));
+    }
+
+    .button.danger {
+      border-color: rgba(255, 124, 159, 0.55);
+      color: #ffbdd0;
+      background: rgba(80, 10, 28, 0.4);
+    }
+
+    .button.link {
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .meta {
+      margin-top: 8px;
+      color: var(--sub);
+      font-size: 0.87rem;
+    }
+
+    .document-drop-zone {
+      margin-top: 10px;
+      border: 1px dashed rgba(155, 220, 255, 0.4);
+      border-radius: 12px;
+      background: rgba(5, 17, 28, 0.45);
+      padding: 14px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+    }
+
+    .document-drop-zone:focus-visible {
+      outline: 2px solid rgba(87, 216, 255, 0.65);
+      outline-offset: 1px;
+    }
+
+    .document-drop-zone .drop-main {
+      color: #dff3ff;
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .document-drop-zone .drop-sub {
+      margin-top: 4px;
+      color: #8fb9d1;
+      font-size: 0.82rem;
+    }
+
+    .document-drop-zone.dragover {
+      border-color: rgba(87, 216, 255, 0.9);
+      background: rgba(16, 53, 77, 0.45);
+      transform: translateY(-1px);
+    }
+
+    .usage-wrap {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid rgba(155, 220, 255, 0.22);
+      border-radius: 12px;
+      background: rgba(5, 17, 28, 0.55);
+    }
+
+    .usage-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 0.84rem;
+      color: #d7eeff;
+      margin-bottom: 8px;
+    }
+
+    .usage-track {
+      height: 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(155, 220, 255, 0.3);
+      background: rgba(2, 10, 18, 0.72);
+      overflow: hidden;
+    }
+
+    .usage-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #40d8ff, #55efc0);
+      transition: width 220ms ease;
+    }
+
+    .usage-fill.warn {
+      background: linear-gradient(90deg, #ffc062, #ff8e54);
+    }
+
+    .usage-fill.full {
+      background: linear-gradient(90deg, #ff7c9f, #ff5f78);
+    }
+
+    .usage-scale {
+      margin-top: 6px;
+      display: flex;
+      justify-content: space-between;
+      color: #8fbad2;
+      font-size: 0.77rem;
+    }
+
+    .list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .view-switch {
+      display: inline-flex;
+      gap: 6px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(8, 21, 35, 0.45);
+    }
+
+    .view-tab {
+      min-height: 32px;
+      padding: 0 10px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--sub);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .view-tab.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(87, 216, 255, 0.12);
+    }
+
+    .item {
+      border: 1px solid rgba(155, 220, 255, 0.22);
+      border-radius: 12px;
+      background: rgba(5, 17, 28, 0.65);
+      overflow: hidden;
+    }
+
+    .media-name-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .media-name-row {
+      border: 1px solid rgba(155, 220, 255, 0.22);
+      border-radius: 10px;
+      background: rgba(5, 17, 28, 0.55);
+      padding: 10px 12px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .media-name-title {
+      font-size: 0.92rem;
+      color: var(--txt);
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .media-name-meta {
+      font-size: 0.79rem;
+      color: var(--sub);
+      word-break: break-word;
+    }
+
+    .media-name-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .preview {
+      min-height: 160px;
+      max-height: 260px;
+      display: grid;
+      place-items: center;
+      background: rgba(0, 0, 0, 0.26);
+      border-bottom: 1px solid rgba(155, 220, 255, 0.14);
+    }
+
+    .preview img,
+    .preview video {
+      width: 100%;
+      max-height: 260px;
+      object-fit: contain;
+      display: block;
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    .preview img.media-preview-img {
+      cursor: zoom-in;
+    }
+
+    .image-lightbox-dialog {
+      position: relative;
+      max-width: min(96vw, 1400px);
+      max-height: 92vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .image-lightbox-img {
+      max-width: 100%;
+      max-height: 88vh;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      display: block;
+      border-radius: 10px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+    }
+
+    .image-lightbox-close {
+      position: absolute;
+      top: -12px;
+      right: -12px;
+      z-index: 2;
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      border: 1px solid rgba(155, 220, 255, 0.35);
+      background: rgba(8, 21, 35, 0.92);
+      color: var(--txt);
+      font-size: 1.35rem;
+      line-height: 1;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+
+    .image-lightbox-close:hover {
+      border-color: rgba(87, 216, 255, 0.55);
+      background: rgba(14, 43, 63, 0.95);
+    }
+
+    body[data-theme='light'] .image-lightbox-close {
+      background: rgba(255, 255, 255, 0.95);
+      border-color: rgba(45, 106, 151, 0.35);
+      color: var(--txt);
+    }
+
+    .preview audio {
+      width: calc(100% - 18px);
+      margin: 10px;
+    }
+
+    .preview .empty {
+      color: #8bb5ce;
+      font-size: 0.86rem;
+      padding: 18px;
+      text-align: center;
+    }
+
+    .item-body {
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      padding: 3px 9px;
+      font-size: 0.72rem;
+      color: #9be8ff;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      width: fit-content;
+    }
+
+    .item-line {
+      font-size: 0.84rem;
+      color: #d8efff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .item-line.sub {
+      color: #93bdd5;
+    }
+
+    .file-preview-hint {
+      font-size: 0.72rem;
+      color: #7aa8c4;
+      line-height: 1.45;
+      padding: 0 12px 12px;
+      margin: 0;
+      white-space: normal;
+    }
+
+    .file-preview-hint strong {
+      color: #b8dff5;
+      font-weight: 600;
+    }
+
+    .file-preview-hint .hint-note {
+      color: #6a9ab8;
+      font-size: 0.68rem;
+    }
+
+    .content-preview-missing {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: unset;
+      font-size: 0.78rem;
+      line-height: 1.45;
+    }
+
+    .content-preview-missing .muted {
+      color: #7a9aaf;
+    }
+
+    .content-preview-line {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: unset;
+      line-height: 1.35;
+      max-height: 5.4em;
+    }
+
+    .extract-block {
+      border: 1px solid rgba(100, 200, 255, 0.28);
+      border-radius: 10px;
+      background: rgba(8, 32, 52, 0.55);
+      padding: 8px 10px;
+      margin-top: 2px;
+    }
+
+    .extract-label {
+      font-size: 0.72rem;
+      color: #7dd3a8;
+      letter-spacing: 0.02em;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    .extract-text {
+      font-size: 0.8rem;
+      color: #d4eefc;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 9em;
+      overflow-y: auto;
+    }
+
+    .extract-analysis {
+      margin-top: 7px;
+      border-top: 1px solid rgba(125, 211, 168, 0.28);
+      padding-top: 6px;
+      font-size: 0.76rem;
+      color: #bde9d2;
+      line-height: 1.4;
+      white-space: normal;
+    }
+
+    .item-line a {
+      color: #8de3ff;
+      text-decoration: underline;
+    }
+
+    .media-select-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(155, 220, 255, 0.2);
+      border-radius: 9px;
+      padding: 6px 8px;
+      background: rgba(12, 38, 56, 0.4);
+      color: #cbe9fb;
+      font-size: 0.8rem;
+    }
+
+    .media-select-row input {
+      width: 17px;
+      height: 17px;
+      margin: 0;
+      accent-color: #48d1ff;
+    }
+
+    .context-block {
+      margin-top: 2px;
+      border: 1px solid rgba(155, 220, 255, 0.18);
+      border-radius: 10px;
+      background: rgba(6, 24, 39, 0.58);
+      overflow: hidden;
+    }
+
+    .context-toggle {
+      cursor: pointer;
+      list-style: none;
+      font-size: 0.78rem;
+      color: #95c4dc;
+      padding: 7px 9px;
+      user-select: none;
+    }
+
+    .context-toggle::-webkit-details-marker {
+      display: none;
+    }
+
+    .context-toggle::before {
+      content: "▶";
+      display: inline-block;
+      margin-right: 6px;
+      font-size: 0.7rem;
+      transform: translateY(-1px);
+      transition: transform 120ms ease;
+    }
+
+    .context-block[open] .context-toggle::before {
+      transform: rotate(90deg) translateY(-1px);
+    }
+
+    .context-list {
+      display: grid;
+      gap: 7px;
+      padding: 0 9px 9px;
+    }
+
+    .context-row {
+      border-left: 2px solid rgba(87, 216, 255, 0.35);
+      padding-left: 7px;
+    }
+
+    .context-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #83b4cd;
+      font-size: 0.72rem;
+      margin-bottom: 2px;
+    }
+
+    .context-label {
+      display: inline-block;
+      min-width: 2.4em;
+      color: #a2dbff;
+    }
+
+    .context-text {
+      color: #d0ebfb;
+      font-size: 0.77rem;
+      line-height: 1.38;
+      word-break: break-word;
+    }
+
+    .item-actions {
+      margin-top: 4px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .item-actions .button {
+      min-height: 30px;
+      font-size: 0.76rem;
+      padding: 0 10px;
+    }
+
+    .pager {
+      margin-top: 12px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(1, 8, 15, 0.68);
+      backdrop-filter: blur(3px);
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(720px, calc(100vw - 28px));
+      max-height: calc(100vh - 36px);
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid rgba(155, 220, 255, 0.28);
+      background: rgba(8, 21, 35, 0.95);
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+      padding: 16px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .modal-title {
+      margin: 0;
+      font-size: 1.35rem;
+      color: #e6f6ff;
+      letter-spacing: 0.01em;
+    }
+
+    .modal-meta {
+      color: #a9ccdf;
+      font-size: 0.88rem;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .permission-user-list {
+      border: 1px solid rgba(155, 220, 255, 0.24);
+      border-radius: 12px;
+      background: rgba(5, 17, 28, 0.55);
+      padding: 8px;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      max-height: 52vh;
+      overflow-y: auto;
+    }
+
+    .permission-user-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      padding: 8px 9px;
+      border-radius: 10px;
+      border: 1px solid rgba(155, 220, 255, 0.1);
+      background: rgba(14, 43, 63, 0.35);
+      cursor: pointer;
+    }
+
+    .permission-user-option:hover {
+      border-color: rgba(87, 216, 255, 0.35);
+      background: rgba(16, 53, 77, 0.35);
+    }
+
+    .permission-user-option input {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: #48d1ff;
+    }
+
+    .permission-user-name {
+      color: #e4f4ff;
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1.22;
+      word-break: break-word;
+    }
+
+    .modal-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: -2px;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 2px;
+    }
+
+    body[data-theme='light'] .hero {
+      background: linear-gradient(160deg, rgba(98, 189, 239, 0.24), rgba(255, 255, 255, 0.86));
+    }
+
+    body[data-theme='light'] .pill {
+      background: rgba(255, 255, 255, 0.86);
+      color: var(--txt);
+    }
+
+    body[data-theme='light'] .input,
+    body[data-theme='light'] .select,
+    body[data-theme='light'] .button {
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--txt);
+      border-color: rgba(60, 122, 168, 0.28);
+    }
+
+    body[data-theme='light'] .button.primary {
+      background: linear-gradient(180deg, rgba(32, 157, 217, 0.22), rgba(53, 122, 177, 0.18));
+      border-color: rgba(30, 129, 184, 0.44);
+    }
+
+    body[data-theme='light'] .button.danger {
+      color: #a53556;
+      border-color: rgba(213, 76, 116, 0.46);
+      background: rgba(255, 237, 244, 0.95);
+    }
+
+    body[data-theme='light'] .document-drop-zone,
+    body[data-theme='light'] .usage-wrap,
+    body[data-theme='light'] .item,
+    body[data-theme='light'] .context-block,
+    body[data-theme='light'] .extract-block,
+    body[data-theme='light'] .permission-user-list,
+    body[data-theme='light'] .permission-user-option {
+      background: rgba(249, 253, 255, 0.95);
+      border-color: rgba(76, 128, 164, 0.22);
+    }
+
+    body[data-theme='light'] .document-drop-zone .drop-main,
+    body[data-theme='light'] .usage-head,
+    body[data-theme='light'] .item-line,
+    body[data-theme='light'] .extract-text,
+    body[data-theme='light'] .context-text,
+    body[data-theme='light'] .permission-user-name {
+      color: #1f3f57;
+    }
+
+    body[data-theme='light'] .document-drop-zone .drop-sub,
+    body[data-theme='light'] .usage-scale,
+    body[data-theme='light'] .item-line.sub,
+    body[data-theme='light'] .context-meta,
+    body[data-theme='light'] .modal-meta,
+    body[data-theme='light'] .file-preview-hint,
+    body[data-theme='light'] .preview .empty {
+      color: #547a91;
+    }
+
+    body[data-theme='light'] .extract-label {
+      color: #1f7a53;
+    }
+
+    body[data-theme='light'] .extract-analysis {
+      color: #2a5f45;
+      border-top-color: rgba(31, 122, 83, 0.36);
+    }
+
+    body[data-theme='light'] .content-preview-missing .muted {
+      color: #3f687f;
+    }
+
+    body[data-theme='light'] .tag,
+    body[data-theme='light'] .media-select-row {
+      color: #2f5b76;
+      background: rgba(245, 252, 255, 0.95);
+      border-color: rgba(75, 128, 166, 0.25);
+    }
+
+    body[data-theme='light'] .preview {
+      background: rgba(211, 229, 242, 0.45);
+      border-bottom-color: rgba(76, 128, 164, 0.16);
+    }
+
+    body[data-theme='light'] .preview img,
+    body[data-theme='light'] .preview video {
+      background: rgba(242, 250, 255, 0.95);
+    }
+
+    body[data-theme='light'] .modal-backdrop {
+      background: rgba(30, 67, 96, 0.28);
+    }
+
+    body[data-theme='light'] .modal-card {
+      border-color: rgba(71, 125, 164, 0.32);
+      background: linear-gradient(168deg, rgba(255, 255, 255, 0.98), rgba(241, 249, 255, 0.98));
+      box-shadow: 0 20px 46px rgba(34, 69, 97, 0.2);
+    }
+
+    body[data-theme='light'] .modal-title {
+      color: #17354c;
+    }
+
+    @media (max-width: 760px) {
+      body { padding: 12px; }
+      .list { grid-template-columns: 1fr; }
+      .modal-card {
+        width: min(740px, calc(100vw - 14px));
+        max-height: calc(100vh - 18px);
+        padding: 12px;
+      }
+      .permission-user-list {
+        grid-template-columns: 1fr;
+        max-height: 58vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="hero">
+      <h1>LINE Media Viewer</h1>
+      <p>LINEの添付ファイル（画像/動画/音声/ファイル）を表示します。</p>
+      <div class="status">
+        <span id="authState" class="pill">未接続</span>
+        <span id="lastRefresh" class="pill">最終更新: なし</span>
+        <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>接続</h2>
+      <div class="controls">
+        <input id="projectUrlInput" class="input" style="min-width:320px" type="text" readonly tabindex="-1" aria-readonly="true">
+        <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+        <button id="saveTokenBtn" class="button primary">保存して接続</button>
+        <button id="clearTokenBtn" class="button">削除</button>
+        <a class="button link" href="./index.html">管理画面に戻る</a>
+        <a class="button link" href="./reservation.html">予約表を開く</a>
+        <a class="button link" href="./analytics.html">売上グラフを開く</a>
+      </div>
+      <div class="meta">署名付きURLは一定時間で期限切れになります。見えなくなった場合は再読み込みしてください。</div>
+    </section>
+
+    <section class="card">
+      <h2>メディア一覧</h2>
+      <div class="controls">
+        <select id="typeFilter" class="select" aria-label="メディア種別">
+          <option value="">全種別</option>
+          <option value="image">画像</option>
+          <option value="video">動画</option>
+          <option value="audio">音声</option>
+          <option value="file">ファイル</option>
+        </select>
+        <select id="roomFilter" class="select" aria-label="ルームで絞り込み" style="min-width:240px">
+          <option value="">全ルーム</option>
+        </select>
+        <select id="limitSelect" class="select" aria-label="表示件数">
+          <option value="12">12件</option>
+          <option value="24" selected>24件</option>
+          <option value="48">48件</option>
+        </select>
+        <button id="applyFilterBtn" class="button primary">表示</button>
+        <button id="reloadBtn" class="button">再読み込み</button>
+        <button id="toggleMediaBulkDeleteBtn" class="button danger">一括削除</button>
+        <div class="view-switch" role="tablist" aria-label="メディア表示切替">
+          <button id="mediaViewCardBtn" class="view-tab active" type="button" role="tab" aria-selected="true">写真付き</button>
+          <button id="mediaViewNameBtn" class="view-tab" type="button" role="tab" aria-selected="false">ファイル名一覧</button>
+        </div>
+      </div>
+      <div class="controls" style="margin-top:8px;">
+        <span class="meta" style="margin:0;">アップロード上限（MB未満）</span>
+        <input id="mediaUploadMaxMbInput" class="input" type="number" min="1" max="20" step="1" placeholder="10">
+        <button id="saveMediaUploadLimitBtn" class="button primary">上限を保存</button>
+        <span id="mediaUploadLimitMeta" class="meta" style="margin:0;"></span>
+      </div>
+      <div id="summary" class="meta">未取得</div>
+      <div id="usageWrap" class="usage-wrap">
+        <div class="usage-head">
+          <span>メディア容量使用率</span>
+          <span id="usageText">0 MB / 2 GB (0%)</span>
+        </div>
+        <div class="usage-track">
+          <div id="usageFill" class="usage-fill"></div>
+        </div>
+        <div class="usage-scale">
+          <span>0 MB</span>
+          <span id="usageCapLabel">2 GB</span>
+        </div>
+      </div>
+      <div id="mediaList" class="list"></div>
+      <div class="pager">
+        <button id="prevBtn" class="button">前へ</button>
+        <button id="nextBtn" class="button">次へ</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>資料ライブラリ（TXT / PDF / Word / Excel）</h2>
+      <div class="controls">
+        <select id="documentUploadRoomSelect" class="select" aria-label="資料の紐付けルーム" style="min-width:240px">
+          <option value="">共通資料（ルーム未指定）</option>
+        </select>
+        <input id="documentFileInput" class="input" type="file" accept=".txt,.pdf,.docx,.xlsx,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+        <button id="uploadDocumentBtn" class="button primary">資料をアップロード</button>
+      </div>
+      <div id="documentDropZone" class="document-drop-zone" role="button" tabindex="0" aria-label="資料をドラッグ＆ドロップまたはクリックして選択">
+        <div class="drop-main">ここにTXT/PDF/Word/Excelをドラッグ＆ドロップ</div>
+        <div class="drop-sub">ドロップでそのままアップロード（PDF含む）／クリックでファイル選択</div>
+      </div>
+      <div id="documentSelectedMeta" class="meta">選択中: なし</div>
+      <div class="meta">TXT/PDF/DOCX/XLSX は抽出できた本文を検索対象化します（画像だけのPDFは抽出できない場合があります）。</div>
+      <div class="controls" style="margin-top:10px;">
+        <select id="documentRoomFilter" class="select" aria-label="資料ルームで絞り込み" style="min-width:240px">
+          <option value="">全ルーム</option>
+        </select>
+        <select id="documentLimitSelect" class="select" aria-label="資料の表示件数">
+          <option value="12" selected>12件</option>
+          <option value="24">24件</option>
+          <option value="48">48件</option>
+        </select>
+        <button id="applyDocumentFilterBtn" class="button primary">表示</button>
+        <button id="reloadDocumentsBtn" class="button">再読み込み</button>
+      </div>
+      <div id="documentSummary" class="meta">未取得</div>
+      <div id="documentList" class="list"></div>
+      <div class="pager">
+        <button id="documentPrevBtn" class="button">前へ</button>
+        <button id="documentNextBtn" class="button">次へ</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="documentPermissionModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="documentPermissionModalTitle">
+      <h3 id="documentPermissionModalTitle" class="modal-title">資料の閲覧許可ユーザー選択</h3>
+      <div id="documentPermissionModalMeta" class="modal-meta">対象資料: -</div>
+      <div class="modal-tools">
+        <button id="selectAllDocumentPermissionBtn" class="button" type="button">全員一括選択</button>
+      </div>
+      <div id="documentPermissionUserList" class="permission-user-list"></div>
+      <div class="modal-actions">
+        <button id="cancelDocumentPermissionBtn" class="button">キャンセル</button>
+        <button id="saveDocumentPermissionBtn" class="button primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mediaDeleteConfirmModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mediaDeleteConfirmTitle">
+      <h3 id="mediaDeleteConfirmTitle" class="modal-title">削除の確認</h3>
+      <div id="mediaDeleteConfirmModalMeta" class="modal-meta"></div>
+      <div class="modal-tools" style="flex-direction:column;align-items:stretch;gap:10px;">
+        <label for="deleteConfirmInput" class="modal-meta" style="margin:0;">確認のため「delete」と入力してください。</label>
+        <input id="deleteConfirmInput" class="input" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="削除確認の入力">
+      </div>
+      <div class="modal-actions">
+        <button id="deleteConfirmCancelBtn" class="button" type="button">キャンセル</button>
+        <button id="deleteConfirmOkBtn" class="button danger" type="button">削除を実行</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="imageLightboxModal" class="modal-backdrop image-lightbox-wrap" aria-hidden="true">
+    <div class="image-lightbox-dialog" role="dialog" aria-modal="true" aria-label="画像の拡大表示">
+      <button type="button" id="imageLightboxCloseBtn" class="image-lightbox-close" aria-label="閉じる">×</button>
+      <img id="imageLightboxImg" class="image-lightbox-img" alt="">
+    </div>
+  </div>
+
+  <script>
+    const STORE_TOKEN_KEY = 'line_summary_admin_token';
+    const STORE_THEME_KEY = 'line_reservation_calendar_theme';
+    const FIXED_PROJECT_URL = 'https://jhpmzqxqvapdkyvvhyra.supabase.co';
+
+    const state = {
+      offset: 0,
+      limit: 24,
+      total: 0,
+      hasMore: false,
+      docsOffset: 0,
+      docsLimit: 12,
+      docsTotal: 0,
+      docsHasMore: false,
+      selectedDocumentFile: null,
+      documentDropDepth: 0,
+      permissionUsers: [],
+      permissionUsersLoaded: false,
+      permissionTargetDocumentId: null,
+      permissionTargetDocumentName: '',
+      permissionSelectedUserIds: new Set(),
+      mediaBulkDeleteMode: false,
+      mediaSelectedIds: new Set(),
+      mediaItems: [],
+      mediaView: 'card',
+      theme: 'dark',
+    };
+
+    const dom = {
+      authState: document.getElementById('authState'),
+      lastRefresh: document.getElementById('lastRefresh'),
+      projectUrlInput: document.getElementById('projectUrlInput'),
+      tokenInput: document.getElementById('tokenInput'),
+      saveTokenBtn: document.getElementById('saveTokenBtn'),
+      clearTokenBtn: document.getElementById('clearTokenBtn'),
+      typeFilter: document.getElementById('typeFilter'),
+      roomFilter: document.getElementById('roomFilter'),
+      limitSelect: document.getElementById('limitSelect'),
+      applyFilterBtn: document.getElementById('applyFilterBtn'),
+      reloadBtn: document.getElementById('reloadBtn'),
+      toggleMediaBulkDeleteBtn: document.getElementById('toggleMediaBulkDeleteBtn'),
+      mediaViewCardBtn: document.getElementById('mediaViewCardBtn'),
+      mediaViewNameBtn: document.getElementById('mediaViewNameBtn'),
+      mediaUploadMaxMbInput: document.getElementById('mediaUploadMaxMbInput'),
+      saveMediaUploadLimitBtn: document.getElementById('saveMediaUploadLimitBtn'),
+      mediaUploadLimitMeta: document.getElementById('mediaUploadLimitMeta'),
+      summary: document.getElementById('summary'),
+      usageWrap: document.getElementById('usageWrap'),
+      usageText: document.getElementById('usageText'),
+      usageFill: document.getElementById('usageFill'),
+      usageCapLabel: document.getElementById('usageCapLabel'),
+      mediaList: document.getElementById('mediaList'),
+      prevBtn: document.getElementById('prevBtn'),
+      nextBtn: document.getElementById('nextBtn'),
+      documentUploadRoomSelect: document.getElementById('documentUploadRoomSelect'),
+      documentFileInput: document.getElementById('documentFileInput'),
+      documentDropZone: document.getElementById('documentDropZone'),
+      documentSelectedMeta: document.getElementById('documentSelectedMeta'),
+      uploadDocumentBtn: document.getElementById('uploadDocumentBtn'),
+      documentRoomFilter: document.getElementById('documentRoomFilter'),
+      documentLimitSelect: document.getElementById('documentLimitSelect'),
+      applyDocumentFilterBtn: document.getElementById('applyDocumentFilterBtn'),
+      reloadDocumentsBtn: document.getElementById('reloadDocumentsBtn'),
+      documentSummary: document.getElementById('documentSummary'),
+      documentList: document.getElementById('documentList'),
+      documentPrevBtn: document.getElementById('documentPrevBtn'),
+      documentNextBtn: document.getElementById('documentNextBtn'),
+      documentPermissionModal: document.getElementById('documentPermissionModal'),
+      documentPermissionModalMeta: document.getElementById('documentPermissionModalMeta'),
+      documentPermissionUserList: document.getElementById('documentPermissionUserList'),
+      selectAllDocumentPermissionBtn: document.getElementById('selectAllDocumentPermissionBtn'),
+      cancelDocumentPermissionBtn: document.getElementById('cancelDocumentPermissionBtn'),
+      saveDocumentPermissionBtn: document.getElementById('saveDocumentPermissionBtn'),
+      themeToggleBtn: document.getElementById('themeToggleBtn'),
+      mediaDeleteConfirmModal: document.getElementById('mediaDeleteConfirmModal'),
+      mediaDeleteConfirmModalMeta: document.getElementById('mediaDeleteConfirmModalMeta'),
+      deleteConfirmInput: document.getElementById('deleteConfirmInput'),
+      deleteConfirmCancelBtn: document.getElementById('deleteConfirmCancelBtn'),
+      deleteConfirmOkBtn: document.getElementById('deleteConfirmOkBtn'),
+      imageLightboxModal: document.getElementById('imageLightboxModal'),
+      imageLightboxImg: document.getElementById('imageLightboxImg'),
+      imageLightboxCloseBtn: document.getElementById('imageLightboxCloseBtn'),
+    };
+    const MEDIA_CAP_DEFAULT_BYTES = 500 * 1024 * 1024;
+    const DOCUMENT_UPLOAD_ALLOWED_EXTENSIONS = new Set(['txt', 'pdf', 'docx', 'xlsx']);
+    const DOCUMENT_UPLOAD_ALLOWED_MIME_TYPES = new Set([
+      'text/plain',
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ]);
+
+    function getToken() {
+      return localStorage.getItem(STORE_TOKEN_KEY) || '';
+    }
+
+    function setToken(value) {
+      if (value) localStorage.setItem(STORE_TOKEN_KEY, value);
+      else localStorage.removeItem(STORE_TOKEN_KEY);
+      updateAuthState();
+    }
+
+    function normalizeTheme(value) {
+      const theme = String(value || '').trim().toLowerCase();
+      return theme === 'light' ? 'light' : 'dark';
+    }
+
+    function getTheme() {
+      return normalizeTheme(localStorage.getItem(STORE_THEME_KEY));
+    }
+
+    function updateThemeToggleButton() {
+      const isLight = state.theme === 'light';
+      dom.themeToggleBtn.textContent = isLight ? 'ダークモード' : 'ライトモード';
+      dom.themeToggleBtn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+      dom.themeToggleBtn.title = isLight ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
+    }
+
+    function applyTheme(theme) {
+      state.theme = normalizeTheme(theme);
+      document.body.setAttribute('data-theme', state.theme);
+      updateThemeToggleButton();
+    }
+
+    function setTheme(theme) {
+      const normalized = normalizeTheme(theme);
+      localStorage.setItem(STORE_THEME_KEY, normalized);
+      applyTheme(normalized);
+    }
+
+    function toggleTheme() {
+      setTheme(state.theme === 'light' ? 'dark' : 'light');
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function formatDate(value) {
+      if (!value) return '-';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '-';
+      return d.toLocaleString('ja-JP', { hour12: false });
+    }
+
+    function formatBytes(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0) return '-';
+      if (n < 1024) return Math.floor(n) + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + ' MB';
+      return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    }
+
+    function resolveMediaDisplayName(item) {
+      const type = String(item && item.media_type || 'file');
+      const originalName = item && item.original_file_name ? String(item.original_file_name) : '(名称なし)';
+      if (type !== 'image') return originalName;
+      const preview = String(item && item.content_preview || '').replace(/\s+/g, ' ').trim();
+      if (!preview) return originalName;
+      if (preview.length <= 80) return preview;
+      return preview.slice(0, 79).trimEnd() + '…';
+    }
+
+    function getFileExtension(fileName) {
+      const name = String(fileName || '').trim();
+      const idx = name.lastIndexOf('.');
+      if (idx < 0 || idx === name.length - 1) return '';
+      return name.slice(idx + 1).toLowerCase();
+    }
+
+    const DOCUMENT_MIME_BY_EXTENSION = {
+      txt: 'text/plain',
+      pdf: 'application/pdf',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+
+    function isPdfHeaderBytes(bytes) {
+      return bytes.length >= 4
+        && bytes[0] === 0x25
+        && bytes[1] === 0x50
+        && bytes[2] === 0x44
+        && bytes[3] === 0x46;
+    }
+
+    function isZipHeaderBytes(bytes) {
+      return bytes.length >= 4
+        && bytes[0] === 0x50
+        && bytes[1] === 0x4b
+        && bytes[2] === 0x03
+        && bytes[3] === 0x04;
+    }
+
+    async function readFileHeaderBytes(file, length) {
+      const buffer = await file.slice(0, length).arrayBuffer();
+      return new Uint8Array(buffer);
+    }
+
+    function extensionFromDocumentMimeType(mimeType) {
+      if (mimeType === 'text/plain') return 'txt';
+      if (mimeType === 'application/pdf') return 'pdf';
+      if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        return 'docx';
+      }
+      if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+        return 'xlsx';
+      }
+      return '';
+    }
+
+    function withNormalizedDocumentFile(file, ext) {
+      const normalizedExt = String(ext || '').toLowerCase();
+      const mimeType = DOCUMENT_MIME_BY_EXTENSION[normalizedExt] || String(file.type || '');
+      const rawName = String(file.name || '').trim() || 'document';
+      const baseName = rawName.replace(/[\\/]+$/, '').replace(/\.[^.\\/]+$/, '') || 'document';
+      const nextName = getFileExtension(rawName) === normalizedExt
+        ? rawName
+        : baseName + '.' + normalizedExt;
+      if (file.name === nextName && file.type === mimeType) return file;
+      return new File([file], nextName, {
+        type: mimeType,
+        lastModified: file.lastModified,
+      });
+    }
+
+    function isSupportedDocumentFile(file) {
+      if (!(file instanceof File)) return false;
+      const ext = getFileExtension(file.name);
+      if (DOCUMENT_UPLOAD_ALLOWED_EXTENSIONS.has(ext)) return true;
+      const mimeType = String(file.type || '').split(';')[0].trim().toLowerCase();
+      if (DOCUMENT_UPLOAD_ALLOWED_MIME_TYPES.has(mimeType)) return true;
+      if (mimeType === 'application/octet-stream' || mimeType === 'binary/octet-stream') {
+        return DOCUMENT_UPLOAD_ALLOWED_EXTENSIONS.has(ext);
+      }
+      return false;
+    }
+
+    async function sniffDocumentExtension(file) {
+      if (!(file instanceof File)) return '';
+      const ext = getFileExtension(file.name);
+      if (DOCUMENT_UPLOAD_ALLOWED_EXTENSIONS.has(ext)) return ext;
+      const mimeType = String(file.type || '').split(';')[0].trim().toLowerCase();
+      const extFromMime = extensionFromDocumentMimeType(mimeType);
+      if (extFromMime) return extFromMime;
+      let header;
+      try {
+        header = await readFileHeaderBytes(file, 8);
+      } catch (_) {
+        return '';
+      }
+      if (isPdfHeaderBytes(header)) return 'pdf';
+      if (isZipHeaderBytes(header) && (ext === 'docx' || ext === 'xlsx')) return ext;
+      if (
+        (mimeType === 'application/octet-stream' || mimeType === 'binary/octet-stream' || mimeType === '')
+        && (ext === 'txt' || ext === 'log' || ext === 'md' || ext === 'csv')
+      ) {
+        return 'txt';
+      }
+      return '';
+    }
+
+    async function normalizeDocumentFile(file) {
+      if (!(file instanceof File)) {
+        throw new Error('アップロードするファイルを選択してください。');
+      }
+      if (isSupportedDocumentFile(file)) {
+        const ext = getFileExtension(file.name) || extensionFromDocumentMimeType(
+          String(file.type || '').split(';')[0].trim().toLowerCase(),
+        );
+        if (ext) return withNormalizedDocumentFile(file, ext);
+      }
+      const sniffedExt = await sniffDocumentExtension(file);
+      if (!sniffedExt) {
+        throw new Error('TXT / PDF / DOCX / XLSX ファイルを選択してください。');
+      }
+      return withNormalizedDocumentFile(file, sniffedExt);
+    }
+
+    function resolveDroppedDocumentFile(event) {
+      const dataTransfer = event && event.dataTransfer ? event.dataTransfer : null;
+      if (!dataTransfer) return null;
+      const items = dataTransfer.items;
+      if (items && items.length > 0) {
+        for (let i = 0; i < items.length; i += 1) {
+          const item = items[i];
+          if (!item || item.kind !== 'file') continue;
+          const file = item.getAsFile();
+          if (file instanceof File) return file;
+        }
+      }
+      const files = dataTransfer.files;
+      return files && files.length > 0 ? files[0] : null;
+    }
+
+    function syncDocumentInputFile(file) {
+      if (!dom.documentFileInput) return;
+      if (!(file instanceof File)) {
+        dom.documentFileInput.value = '';
+        return;
+      }
+      if (typeof DataTransfer !== 'undefined') {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        dom.documentFileInput.files = dt.files;
+      }
+    }
+
+    function updateSelectedDocumentMeta() {
+      if (!dom.documentSelectedMeta) return;
+      const file = state.selectedDocumentFile;
+      if (!(file instanceof File)) {
+        dom.documentSelectedMeta.textContent = '選択中: なし';
+        return;
+      }
+      dom.documentSelectedMeta.textContent = '選択中: ' + file.name + '（' + formatBytes(file.size) + '）';
+    }
+
+    function clearSelectedDocumentFile() {
+      state.selectedDocumentFile = null;
+      syncDocumentInputFile(null);
+      updateSelectedDocumentMeta();
+    }
+
+    function setSelectedDocumentFile(file) {
+      if (!(file instanceof File)) {
+        clearSelectedDocumentFile();
+        return;
+      }
+      if (!isSupportedDocumentFile(file)) {
+        throw new Error('TXT / PDF / DOCX / XLSX ファイルを選択してください。');
+      }
+      const ext = getFileExtension(file.name) || extensionFromDocumentMimeType(
+        String(file.type || '').split(';')[0].trim().toLowerCase(),
+      );
+      const normalized = ext ? withNormalizedDocumentFile(file, ext) : file;
+      state.selectedDocumentFile = normalized;
+      syncDocumentInputFile(normalized);
+      updateSelectedDocumentMeta();
+    }
+
+    async function setSelectedDocumentFileAsync(file) {
+      if (!(file instanceof File)) {
+        clearSelectedDocumentFile();
+        return;
+      }
+      const normalized = await normalizeDocumentFile(file);
+      state.selectedDocumentFile = normalized;
+      syncDocumentInputFile(normalized);
+      updateSelectedDocumentMeta();
+    }
+
+    function dragEventHasFiles(event) {
+      const types = event && event.dataTransfer ? event.dataTransfer.types : null;
+      if (!types || typeof types[Symbol.iterator] !== 'function') return false;
+      for (const t of types) {
+        if (t === 'Files') return true;
+      }
+      return false;
+    }
+
+    function compactContextText(value, maxChars) {
+      const src = String(value || '').replace(/\s+/g, ' ').trim();
+      if (!src) return '';
+      const max = Number.isFinite(Number(maxChars)) && Number(maxChars) > 0 ? Number(maxChars) : 72;
+      if (src.length <= max) return src;
+      return src.slice(0, max).trimEnd() + '…';
+    }
+
+    /** ルールは supabase/functions/_shared/line_media_file_purpose_infer.ts と同一に保つこと（LINE 返信の解析行にも使用）。 */
+    function inferFilePurpose(fileName, mimeType, contentPreview) {
+      const text = (String(fileName || '') + ' ' + String(contentPreview || '')).toLowerCase();
+      if (!text.trim()) return '';
+
+      // HACCP-related files should be labeled explicitly, not as generic operations docs.
+      const hasHaccpTopic = /haccp|hasap|ハサップ|衛生|点検/.test(text);
+      const hasHaccpSchedule = /スケジュール|予定表|予定|実施日|点検実施日|日程|schedule/.test(text);
+      if (hasHaccpTopic && hasHaccpSchedule) {
+        return 'HACCP日程表（衛生点検スケジュール）資料の可能性が高いです。';
+      }
+      if (hasHaccpTopic) {
+        return 'HACCP関連資料（衛生点検・衛生管理）の可能性が高いです。';
+      }
+
+      const categories = [
+        {
+          key: 'labor',
+          label: 'アルバイト・労働条件・労務関連の資料',
+          keywords: ['労働', '労務', '雇用', '就業', '労働条件', '労働相談', 'アルバイト', 'パート', '求人', '採用', '時給', '賃金', '最低賃金', '残業', '有給', '社会保険', '労働基準', '労基', 'labour', 'labor standards'],
+        },
+        {
+          key: 'shift',
+          label: 'シフト・勤怠管理資料',
+          keywords: ['シフト', '勤怠', '出勤', '退勤', '勤務', '勤務表', 'シフト表', '打刻', '勤怠表', 'タイムカード', '出退勤'],
+        },
+        {
+          key: 'cost_inventory',
+          label: '原価・棚卸管理資料',
+          keywords: ['原価', '棚卸', '在庫', 'stock', '仕入', '単価', 'ロス率', '原価率', '在庫数', '棚卸表'],
+        },
+        {
+          key: 'recipe',
+          label: 'レシピ・仕込み資料',
+          keywords: ['レシピ', '配合', '仕込み', '分量', '歩留', '手順', '材料', '調理', 'g', 'ml'],
+        },
+        {
+          key: 'billing',
+          label: '請求・支払管理資料',
+          keywords: ['請求', 'invoice', '支払', '入金', '振込', '締日', '請求先', '支払期日', '買掛', '売掛'],
+        },
+        {
+          key: 'sales',
+          label: '売上・予実管理資料',
+          keywords: ['売上', 'sales', '予算', '実績', '前年差', '目標', '客単価', '来客数', '日次売上', '月次売上'],
+        },
+        {
+          key: 'procurement',
+          label: '発注・納品管理資料',
+          keywords: ['発注', '納品', '納品書', '発注書', '納入', '納品業者', '仕入先', '数量', 'リードタイム'],
+        },
+        {
+          key: 'haccp',
+          label: '衛生・HACCP関連資料',
+          keywords: ['衛生', 'haccp', '温度管理', '消毒', '清掃', '点検表', '衛生管理', '冷蔵温度', '賞味期限', '消費期限'],
+        },
+        {
+          key: 'manual',
+          label: 'マニュアル・業務手順資料',
+          keywords: ['マニュアル', '手順書', '運用手順', '業務フロー', 'オペレーション', '研修', '教育', 'ルール'],
+        },
+      ];
+
+      const scoreCategory = function(category) {
+        return category.keywords.reduce(function(total, keyword) {
+          return total + (text.includes(keyword) ? 1 : 0);
+        }, 0);
+      };
+
+      let best = null;
+      for (const category of categories) {
+        const score = scoreCategory(category);
+        if (score <= 0) continue;
+        if (!best || score > best.score) {
+          best = { key: category.key, label: category.label, score: score };
+        }
+      }
+
+      if (best && best.score >= 2) {
+        return best.label + 'の可能性が高いです。';
+      }
+      if (best && best.score === 1 && String(mimeType || '').includes('spreadsheetml')) {
+        return best.label + 'の可能性があります。';
+      }
+      if (String(mimeType || '').includes('spreadsheetml')) return 'Excel台帳系ファイルの可能性があります（項目ベースで管理する資料）。';
+      return '業務資料ファイル（飲食店運用資料）の可能性があります。';
+    }
+
+    function safeDownloadName(value, fallback) {
+      const normalized = String(value || '')
+        .replace(/[\\/:*?"<>|]+/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const src = normalized || String(fallback || 'line-media');
+      return src.length <= 120 ? src : src.slice(0, 120).trimEnd();
+    }
+
+    function normalizeLineUserId(value) {
+      return String(value || '').trim();
+    }
+
+    function normalizeDisplayName(value) {
+      return String(value || '').trim();
+    }
+
+    function getLineUserDisplayLabel(user) {
+      const name = normalizeDisplayName(user && user.display_name);
+      return name || '名称未設定ユーザー';
+    }
+
+    async function loadPermissionSelectableUsers(forceReload) {
+      if (!forceReload && state.permissionUsersLoaded) {
+        return state.permissionUsers;
+      }
+      const result = await api('/permissions/users?limit=300&offset=0');
+      const items = Array.isArray(result && result.items) ? result.items : [];
+      state.permissionUsers = items
+        .map(function(row) {
+          const lineUserId = normalizeLineUserId(row && row.line_user_id);
+          if (!lineUserId) return null;
+          return {
+            line_user_id: lineUserId,
+            display_name: normalizeDisplayName(row && row.display_name),
+            is_active: row && row.is_active !== false,
+          };
+        })
+        .filter(function(row) { return !!row; });
+      state.permissionUsersLoaded = true;
+      return state.permissionUsers;
+    }
+
+    function buildDocumentPermissionUserList(users, selectedUserIds) {
+      if (!Array.isArray(users) || users.length === 0) {
+        return '<div class="meta" style="margin:2px 4px;">選択可能なユーザーがありません。先に管理画面でユーザー権限を作成してください。</div>';
+      }
+      return users.map(function(user) {
+        const lineUserId = normalizeLineUserId(user && user.line_user_id);
+        const displayLabel = getLineUserDisplayLabel(user);
+        const isChecked = selectedUserIds.has(lineUserId);
+        return [
+          '<label class="permission-user-option">',
+          '<input class="document-permission-check" type="checkbox" data-line-user-id="' + escapeHtml(lineUserId) + '" ' + (isChecked ? 'checked' : '') + '>',
+          '<div>',
+          '<div class="permission-user-name">' + escapeHtml(displayLabel) + '</div>',
+          '</div>',
+          '</label>',
+        ].join('');
+      }).join('');
+    }
+
+    function updateSelectAllButtonLabel() {
+      const checks = Array.from(dom.documentPermissionUserList.querySelectorAll('.document-permission-check'));
+      if (checks.length === 0) {
+        dom.selectAllDocumentPermissionBtn.textContent = '全員一括選択';
+        return;
+      }
+      const allChecked = checks.every(function(input) {
+        return input instanceof HTMLInputElement && input.checked;
+      });
+      dom.selectAllDocumentPermissionBtn.textContent = allChecked ? '全選択を解除' : '全員一括選択';
+    }
+
+    function toggleSelectAllUsersInPermissionModal() {
+      const checks = Array.from(dom.documentPermissionUserList.querySelectorAll('.document-permission-check'));
+      const allChecked = checks.length > 0 && checks.every(function(input) {
+        return input instanceof HTMLInputElement && input.checked;
+      });
+      for (const input of checks) {
+        if (!(input instanceof HTMLInputElement)) continue;
+        input.checked = !allChecked;
+      }
+      updateSelectAllButtonLabel();
+    }
+
+    function closeDocumentPermissionModal() {
+      state.permissionTargetDocumentId = null;
+      state.permissionTargetDocumentName = '';
+      state.permissionSelectedUserIds = new Set();
+      dom.documentPermissionModal.classList.remove('open');
+      dom.documentPermissionModal.setAttribute('aria-hidden', 'true');
+      dom.documentPermissionUserList.innerHTML = '';
+    }
+
+    function openImageLightbox(url) {
+      const normalized = String(url || '').trim();
+      if (!normalized || !dom.imageLightboxModal || !dom.imageLightboxImg) return;
+      dom.imageLightboxImg.alt = '拡大画像';
+      dom.imageLightboxImg.src = normalized;
+      dom.imageLightboxModal.classList.add('open');
+      dom.imageLightboxModal.setAttribute('aria-hidden', 'false');
+      try {
+        dom.imageLightboxCloseBtn.focus();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+
+    function closeImageLightbox() {
+      if (!dom.imageLightboxModal || !dom.imageLightboxImg) return;
+      dom.imageLightboxModal.classList.remove('open');
+      dom.imageLightboxModal.setAttribute('aria-hidden', 'true');
+      dom.imageLightboxImg.removeAttribute('src');
+    }
+
+    function getSelectedUserIdsFromPermissionModal() {
+      const checks = Array.from(dom.documentPermissionUserList.querySelectorAll('.document-permission-check'));
+      const selected = [];
+      for (const input of checks) {
+        if (!(input instanceof HTMLInputElement)) continue;
+        if (!input.checked) continue;
+        const lineUserId = normalizeLineUserId(input.getAttribute('data-line-user-id'));
+        if (!lineUserId) continue;
+        selected.push(lineUserId);
+      }
+      return Array.from(new Set(selected));
+    }
+
+    async function saveDocumentPermissionsFromModal() {
+      const documentId = Number(state.permissionTargetDocumentId || 0);
+      if (!Number.isInteger(documentId) || documentId <= 0) {
+        throw new Error('権限設定対象の資料IDが不正です。');
+      }
+      const selectedUserIds = getSelectedUserIdsFromPermissionModal();
+      await api('/documents/' + encodeURIComponent(String(documentId)) + '/permissions', {
+        method: 'PUT',
+        body: JSON.stringify({ line_user_ids: selectedUserIds }),
+      });
+      closeDocumentPermissionModal();
+      await loadDocuments();
+      alert(selectedUserIds.length > 0
+        ? ('閲覧権限を更新しました（' + selectedUserIds.length + 'ユーザー）。')
+        : '閲覧権限を全ユーザーに戻しました。');
+    }
+
+    function buildContextRowHtml(label, at, text) {
+      const normalizedText = compactContextText(text, 88);
+      if (!normalizedText) return '';
+      const ts = formatDate(at);
+      return [
+        '<div class="context-row">',
+        '<div class="context-meta">',
+        '<span class="context-label">', escapeHtml(label), '</span>',
+        '<span>', escapeHtml(ts), '</span>',
+        '</div>',
+        '<div class="context-text">', escapeHtml(normalizedText), '</div>',
+        '</div>',
+      ].join('');
+    }
+
+    function updateAuthState() {
+      const hasToken = !!getToken();
+      dom.authState.textContent = hasToken ? '接続準備OK' : '未接続';
+      dom.authState.className = hasToken ? 'pill ok' : 'pill';
+    }
+
+    function updateMediaBulkDeleteButtonLabel() {
+      if (!state.mediaBulkDeleteMode) {
+        dom.toggleMediaBulkDeleteBtn.textContent = '一括削除';
+        return;
+      }
+      const selectedCount = state.mediaSelectedIds.size;
+      dom.toggleMediaBulkDeleteBtn.textContent = selectedCount > 0
+        ? ('選択削除を実行（' + selectedCount + '件）')
+        : '選択削除を実行';
+    }
+
+    function enterMediaBulkDeleteMode() {
+      state.mediaBulkDeleteMode = true;
+      state.mediaSelectedIds = new Set();
+      updateMediaBulkDeleteButtonLabel();
+    }
+
+    function exitMediaBulkDeleteMode() {
+      state.mediaBulkDeleteMode = false;
+      state.mediaSelectedIds = new Set();
+      updateMediaBulkDeleteButtonLabel();
+    }
+
+    async function api(path, options) {
+      const token = getToken();
+      if (!token) throw new Error('先に管理トークンを保存してください。');
+      const req = options || {};
+      const url = FIXED_PROJECT_URL.replace(/\/+$/, '') + '/functions/v1/admin-api' + path;
+      const isFormDataBody = req.body instanceof FormData;
+      const headers = {
+        'x-admin-token': token,
+        ...(isFormDataBody ? {} : { 'Content-Type': 'application/json' }),
+        ...(req.headers || {}),
+      };
+      const res = await fetch(url, {
+        method: req.method || 'GET',
+        headers: headers,
+        body: req.body,
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+      });
+      const text = await res.text();
+      let body = {};
+      try {
+        body = text ? JSON.parse(text) : {};
+      } catch (_) {
+        body = { raw: text };
+      }
+      if (!res.ok) {
+        throw new Error(body.error || ('API error: ' + res.status));
+      }
+      return body;
+    }
+
+    function buildQuery() {
+      const params = new URLSearchParams();
+      params.set('limit', String(state.limit));
+      params.set('offset', String(state.offset));
+      const type = String(dom.typeFilter.value || '').trim();
+      const roomId = String(dom.roomFilter.value || '').trim();
+      if (type) params.set('media_type', type);
+      if (roomId) params.set('room_id', roomId);
+      params.set('_ts', String(Date.now()));
+      return '/media?' + params.toString();
+    }
+
+    function setRoomFilterOptions(options) {
+      const prevMediaValue = String(dom.roomFilter.value || '');
+      const prevDocFilterValue = String(dom.documentRoomFilter.value || '');
+      const prevDocUploadValue = String(dom.documentUploadRoomSelect.value || '');
+
+      function refillSelect(selectEl, emptyLabel) {
+        selectEl.innerHTML = '';
+        const allOption = document.createElement('option');
+        allOption.value = '';
+        allOption.textContent = emptyLabel;
+        selectEl.appendChild(allOption);
+        for (const option of options) {
+          const roomId = String(option && option.room_id || '').trim();
+          const roomLabel = String(option && option.label || '').trim();
+          if (!roomId || !roomLabel) continue;
+          const el = document.createElement('option');
+          el.value = roomId;
+          el.textContent = roomLabel;
+          selectEl.appendChild(el);
+        }
+      }
+
+      refillSelect(dom.roomFilter, '全ルーム');
+      refillSelect(dom.documentRoomFilter, '全ルーム');
+      refillSelect(dom.documentUploadRoomSelect, '共通資料（ルーム未指定）');
+
+      dom.roomFilter.value = Array.from(dom.roomFilter.options).some(function(opt) { return opt.value === prevMediaValue; })
+        ? prevMediaValue
+        : '';
+      dom.documentRoomFilter.value = Array.from(dom.documentRoomFilter.options).some(function(opt) { return opt.value === prevDocFilterValue; })
+        ? prevDocFilterValue
+        : '';
+      dom.documentUploadRoomSelect.value = Array.from(dom.documentUploadRoomSelect.options).some(function(opt) { return opt.value === prevDocUploadValue; })
+        ? prevDocUploadValue
+        : '';
+    }
+
+    function collectRoomFilterOptions(stateBody) {
+      const nameByRoomId = new Map();
+
+      function upsertRoom(roomIdValue, roomNameValue) {
+        const roomId = String(roomIdValue || '').trim();
+        if (!roomId) return;
+        const roomName = String(roomNameValue || '').trim();
+        const existing = nameByRoomId.get(roomId);
+        if (!existing) {
+          nameByRoomId.set(roomId, roomName || roomId);
+          return;
+        }
+        if (existing === roomId && roomName) {
+          nameByRoomId.set(roomId, roomName);
+        }
+      }
+
+      const roomSettings = Array.isArray(stateBody && stateBody.room_settings) ? stateBody.room_settings : [];
+      for (const row of roomSettings) {
+        upsertRoom(row && row.room_id, row && row.room_name);
+      }
+
+      const roomOverview = Array.isArray(stateBody && stateBody.room_overview) ? stateBody.room_overview : [];
+      for (const row of roomOverview) {
+        upsertRoom(row && row.room_id, row && row.room_name);
+      }
+
+      const baseList = Array.from(nameByRoomId.entries()).map(function(entry) {
+        return { room_id: entry[0], room_name: entry[1] };
+      });
+      baseList.sort(function(a, b) {
+        return String(a.room_name || '').localeCompare(String(b.room_name || ''), 'ja');
+      });
+
+      const nameCount = new Map();
+      for (const row of baseList) {
+        const key = String(row.room_name || '').trim();
+        nameCount.set(key, (nameCount.get(key) || 0) + 1);
+      }
+
+      return baseList.map(function(row) {
+        const roomId = String(row.room_id || '').trim();
+        const roomName = String(row.room_name || '').trim() || roomId;
+        const duplicate = (nameCount.get(roomName) || 0) > 1;
+        const shortId = roomId.length > 8 ? (roomId.slice(0, 8) + '…') : roomId;
+        const label = duplicate ? (roomName + ' [' + shortId + ']') : roomName;
+        return { room_id: roomId, label: label };
+      });
+    }
+
+    async function loadRoomFilterOptions() {
+      try {
+        const stateBody = await api('/state?logs_limit=10');
+        const options = collectRoomFilterOptions(stateBody);
+        setRoomFilterOptions(options);
+      } catch (error) {
+        console.warn('ルーム一覧の取得に失敗しました:', error);
+        setRoomFilterOptions([]);
+      }
+    }
+
+    function renderMediaItem(item) {
+      const type = String(item.media_type || 'file');
+      const signedUrl = String(item.signed_url || '');
+      const downloadUrl = String(item.download_url || signedUrl || '');
+      const name = resolveMediaDisplayName(item);
+      const originalName = item.original_file_name ? String(item.original_file_name) : '(名称なし)';
+      const downloadName = safeDownloadName(name === '(名称なし)' ? '' : name, String(item.line_message_id || 'line-media'));
+      const mime = item.mime_type ? String(item.mime_type) : '-';
+      const beforeContext = buildContextRowHtml('直前', item.context_before_at, item.context_before_text);
+      const afterContext = buildContextRowHtml('直後', item.context_after_at, item.context_after_text);
+      const contextBlock = (beforeContext || afterContext)
+        ? [
+          '<details class="context-block">',
+          '<summary class="context-toggle">前後の会話</summary>',
+          '<div class="context-list">',
+          beforeContext,
+          afterContext,
+          '</div>',
+          '</details>',
+        ].join('')
+        : '';
+
+      let preview = '<div class="empty">プレビュー不可</div>';
+      if (!signedUrl) {
+        preview = '<div class="empty">URL生成失敗（再読み込みしてください）</div>';
+      } else if (type === 'image') {
+        // 外部URLへのページ遷移（<a href>）は Cursor Simple Browser 等でブロックされるため使わない。
+        // クリックは同一ページ内のライトボックスで拡大表示する。
+        preview =
+          '<img loading="lazy" src="' + escapeHtml(signedUrl) + '" alt="保存画像のプレビュー" class="media-preview-img" tabindex="0" role="button" aria-label="クリックで拡大表示" data-full-url="' + escapeHtml(signedUrl) + '">';
+      } else if (type === 'video') {
+        preview = '<video controls preload="metadata" src="' + escapeHtml(signedUrl) + '"></video>';
+      } else if (type === 'audio') {
+        preview = '<audio controls preload="metadata" src="' + escapeHtml(signedUrl) + '"></audio>';
+      } else {
+        preview = [
+          '<div class="empty"><a href="' + escapeHtml(downloadUrl) + '" target="_blank" rel="noopener noreferrer" download="' + escapeHtml(downloadName) + '">ダウンロード</a></div>',
+          '<p class="file-preview-hint">左はプレビュー画像ではありません。<strong>下の「抽出テキスト」</strong>に、サーバーがファイル内から読み取った文字列（Excel のセル・PDF のテキスト層など）が載ります。<span class="hint-note">（AI による意味分析・要約ではなく、形式に沿った自動抽出です。）</span></p>',
+        ].join('');
+      }
+
+      const downloadAction = downloadUrl
+        ? '<a class="button" href="' + escapeHtml(downloadUrl) + '" target="_blank" rel="noopener noreferrer" download="' + escapeHtml(downloadName) + '">ダウンロード</a>'
+        : '';
+      const mediaId = Number(item && item.id || 0);
+      const mediaSelected = Number.isInteger(mediaId) && state.mediaSelectedIds.has(mediaId);
+      const selectBlock = state.mediaBulkDeleteMode
+        ? [
+          '<label class="media-select-row">',
+          '<input class="media-select-check" type="checkbox" data-media-id="' + escapeHtml(String(mediaId)) + '" ' + (mediaSelected ? 'checked' : '') + '>',
+          '<span>このファイルを削除対象にする</span>',
+          '</label>',
+        ].join('')
+        : '';
+
+      return [
+        '<article class="item">',
+        '<div class="preview">', preview, '</div>',
+        '<div class="item-body">',
+        '<span class="tag">' + escapeHtml(type) + '</span>',
+        '<div class="item-line" title="' + escapeHtml(name) + '">' + escapeHtml(name) + '</div>',
+        '<div class="item-line sub" title="投稿者: ' + escapeHtml(String(item.sender_display_name || '').trim() || '（記録なし）') + '">投稿者: ' + escapeHtml(String(item.sender_display_name || '').trim() || '（記録なし）') + '</div>',
+        '<div class="item-line sub" title="ルーム: ' + escapeHtml(item.room_name || '（未設定）') + '">ルーム: ' + escapeHtml(item.room_name || '（未設定）') + '</div>',
+        '<div class="item-line sub">日時: ' + escapeHtml(formatDate(item.created_at)) + '</div>',
+        '<div class="item-line sub">サイズ: ' + escapeHtml(formatBytes(item.file_size_bytes)) + '</div>',
+        ((type === 'file' || type === 'image')
+          ? (function() {
+              const cp = item.content_preview != null && String(item.content_preview).trim()
+                ? String(item.content_preview).trim()
+                : '';
+              if (type === 'image') {
+                if (!cp) return '';
+                return [
+                  '<div class="extract-block">',
+                  '<div class="extract-label">画像解析結果（Llama 4 Scout）</div>',
+                  '<div class="extract-text">', escapeHtml(cp), '</div>',
+                  '</div>',
+                ].join('');
+              }
+              if (cp) {
+                const analysis = inferFilePurpose(originalName, mime, cp);
+                return [
+                  '<div class="extract-block">',
+                  '<div class="extract-label">抽出テキストあり（サーバーがファイルを解析して取得・先頭付近）</div>',
+                  '<div class="extract-text">', escapeHtml(cp), '</div>',
+                  (analysis
+                    ? '<div class="extract-analysis">解析結果（推定）: ' + escapeHtml(analysis) + '</div>'
+                    : ''),
+                  '</div>',
+                ].join('');
+              }
+              return '<div class="item-line sub content-preview-missing"><strong>抽出テキストなし</strong> — この行にはまだ文字列が保存されていません。保存時に Excel / PDF / Word / テキストから<strong>セル・本文を機械的に抜き出し</strong>ます（AI の意味分析ではありません）。<strong>機能追加前の保存</strong>や取得失敗時は空のままです。同じファイルを<strong>再送</strong>すると付くことがあります。</div>';
+            })()
+          : ''),
+        selectBlock,
+        contextBlock,
+        '<div class="item-actions">' + downloadAction + '<button class="button danger media-delete-btn" type="button" data-media-id="' + escapeHtml(String(item.id || '')) + '">削除</button></div>',
+        '</div>',
+        '</article>',
+      ].join('');
+    }
+
+    function renderMediaNameItem(item) {
+      const type = String(item.media_type || 'file');
+      const signedUrl = String(item.signed_url || '');
+      const downloadUrl = String(item.download_url || signedUrl || '');
+      const name = resolveMediaDisplayName(item);
+      const downloadName = safeDownloadName(name === '(名称なし)' ? '' : name, String(item.line_message_id || 'line-media'));
+      const mediaId = Number(item && item.id || 0);
+      const mediaSelected = Number.isInteger(mediaId) && state.mediaSelectedIds.has(mediaId);
+      const selectBlock = state.mediaBulkDeleteMode
+        ? [
+          '<label class="media-select-row">',
+          '<input class="media-select-check" type="checkbox" data-media-id="' + escapeHtml(String(mediaId)) + '" ' + (mediaSelected ? 'checked' : '') + '>',
+          '<span>削除対象</span>',
+          '</label>',
+        ].join('')
+        : '';
+      const downloadAction = downloadUrl
+        ? '<a class="button" href="' + escapeHtml(downloadUrl) + '" target="_blank" rel="noopener noreferrer" download="' + escapeHtml(downloadName) + '">ダウンロード</a>'
+        : '';
+      return [
+        '<article class="media-name-row">',
+        '<div class="media-name-title">' + escapeHtml(name) + '</div>',
+        '<div class="media-name-meta">種別: ' + escapeHtml(type) + ' / ルーム: ' + escapeHtml(item.room_name || '（未設定）') + '</div>',
+        '<div class="media-name-meta">投稿者: ' + escapeHtml(String(item.sender_display_name || '').trim() || '（記録なし）') + ' / 日時: ' + escapeHtml(formatDate(item.created_at)) + '</div>',
+        '<div class="media-name-meta">サイズ: ' + escapeHtml(formatBytes(item.file_size_bytes)) + '</div>',
+        selectBlock,
+        '<div class="media-name-actions">' + downloadAction + '<button class="button danger media-delete-btn" type="button" data-media-id="' + escapeHtml(String(item.id || '')) + '">削除</button></div>',
+        '</article>',
+      ].join('');
+    }
+
+    function updateMediaViewTabs() {
+      const isCard = state.mediaView === 'card';
+      dom.mediaViewCardBtn.classList.toggle('active', isCard);
+      dom.mediaViewNameBtn.classList.toggle('active', !isCard);
+      dom.mediaViewCardBtn.setAttribute('aria-selected', isCard ? 'true' : 'false');
+      dom.mediaViewNameBtn.setAttribute('aria-selected', !isCard ? 'true' : 'false');
+    }
+
+    function renderMediaList(items) {
+      if (!Array.isArray(items) || items.length === 0) {
+        dom.mediaList.className = 'list';
+        dom.mediaList.innerHTML = '<div class="item"><div class="preview"><div class="empty">該当データなし</div></div></div>';
+        return;
+      }
+      if (state.mediaView === 'names') {
+        dom.mediaList.className = 'media-name-list';
+        dom.mediaList.innerHTML = items.map(renderMediaNameItem).join('');
+        return;
+      }
+      dom.mediaList.className = 'list';
+      dom.mediaList.innerHTML = items.map(renderMediaItem).join('');
+    }
+
+    function updatePager() {
+      dom.prevBtn.disabled = state.offset <= 0;
+      dom.nextBtn.disabled = !state.hasMore;
+    }
+
+    function updateDocumentPager() {
+      dom.documentPrevBtn.disabled = state.docsOffset <= 0;
+      dom.documentNextBtn.disabled = !state.docsHasMore;
+    }
+
+    function renderUsageBar(totalBytes, capBytes) {
+      const cap = Number.isFinite(Number(capBytes)) && Number(capBytes) > 0
+        ? Number(capBytes)
+        : MEDIA_CAP_DEFAULT_BYTES;
+      const used = Number.isFinite(Number(totalBytes)) && Number(totalBytes) > 0
+        ? Number(totalBytes)
+        : 0;
+      const ratioRaw = cap > 0 ? (used / cap) : 0;
+      const ratio = Math.max(0, Math.min(1, ratioRaw));
+      const percent = Math.round(ratioRaw * 1000) / 10;
+
+      dom.usageCapLabel.textContent = formatBytes(cap);
+      dom.usageText.textContent = formatBytes(used) + ' / ' + formatBytes(cap) + ' (' + percent + '%)';
+      dom.usageFill.style.width = (ratio * 100) + '%';
+      dom.usageFill.classList.remove('warn', 'full');
+      if (ratioRaw >= 1) {
+        dom.usageFill.classList.add('full');
+      } else if (ratioRaw >= 0.85) {
+        dom.usageFill.classList.add('warn');
+      }
+    }
+
+    async function loadMedia() {
+      const result = await api(buildQuery());
+      const items = Array.isArray(result.items) ? result.items : [];
+      state.mediaItems = items;
+      state.total = Number(result.total || 0);
+      state.hasMore = !!result.has_more;
+
+      renderMediaList(items);
+      if (state.mediaBulkDeleteMode) {
+        const visibleIds = new Set(items
+          .map(function(item) { return Number(item && item.id || 0); })
+          .filter(function(id) { return Number.isInteger(id) && id > 0; }));
+        const keepIds = new Set();
+        for (const id of state.mediaSelectedIds) {
+          if (visibleIds.has(id)) keepIds.add(id);
+        }
+        state.mediaSelectedIds = keepIds;
+      }
+      updateMediaBulkDeleteButtonLabel();
+
+      const from = state.total === 0 ? 0 : state.offset + 1;
+      const to = Math.min(state.offset + items.length, state.total);
+      const filteredTotalBytes = Number(result.total_file_bytes || 0);
+      const filteredTotalCount = Number(result.total_file_count || state.total || 0);
+      const allTotalBytes = Number(result.all_file_bytes || filteredTotalBytes || 0);
+      const allTotalCount = Number(result.all_file_count || filteredTotalCount || 0);
+      const capBytes = Number(result.media_storage_cap_bytes || MEDIA_CAP_DEFAULT_BYTES);
+      const uploadLimitMb = Number(result.media_upload_max_mb || 10);
+      const uploadLimitMbSafe = Number.isInteger(uploadLimitMb) ? uploadLimitMb : 10;
+      dom.mediaUploadMaxMbInput.value = String(uploadLimitMbSafe);
+      dom.mediaUploadLimitMeta.textContent = '現在: ' + uploadLimitMbSafe + 'MB未満';
+      const hasFilter = String(dom.typeFilter.value || '').trim() || String(dom.roomFilter.value || '').trim();
+      dom.summary.textContent =
+        '表示: ' + from + '-' + to + ' / 全' + state.total + '件'
+        + ' | この条件の合計: ' + formatBytes(filteredTotalBytes) + '（' + filteredTotalCount + '件）'
+        + (hasFilter ? (' | 全体合計: ' + formatBytes(allTotalBytes) + '（' + allTotalCount + '件）') : '')
+        + ' | アップロード上限: ' + uploadLimitMbSafe + 'MB未満';
+      renderUsageBar(allTotalBytes, capBytes);
+      dom.lastRefresh.textContent = '最終更新: ' + formatDate(result.generated_at || new Date().toISOString());
+      updatePager();
+    }
+
+    async function loadFirstPage() {
+      state.offset = 0;
+      state.limit = Number(dom.limitSelect.value || 24);
+      await loadMedia();
+    }
+
+    function buildDocumentQuery() {
+      const params = new URLSearchParams();
+      params.set('limit', String(state.docsLimit));
+      params.set('offset', String(state.docsOffset));
+      const roomId = String(dom.documentRoomFilter.value || '').trim();
+      if (roomId) params.set('room_id', roomId);
+      params.set('_ts', String(Date.now()));
+      return '/documents?' + params.toString();
+    }
+
+    function renderDocumentItem(item) {
+      const fileName = String(item && item.original_file_name || '(名称なし)');
+      const roomName = String(item && item.room_name || '共通資料');
+      const mimeType = String(item && item.mime_type || '-');
+      const permissionMode = String(item && item.permission_mode || 'public') === 'restricted' ? 'restricted' : 'public';
+      const allowedUserCountRaw = Number(item && item.allowed_user_count || 0);
+      const allowedUserCount = Number.isFinite(allowedUserCountRaw) && allowedUserCountRaw > 0 ? Math.floor(allowedUserCountRaw) : 0;
+      const permissionLabel = permissionMode === 'restricted'
+        ? ('指定ユーザーのみ（' + allowedUserCount + '人）')
+        : '全ユーザー';
+      const snippet = String(item && item.snippet || '').trim();
+      const excerpt = snippet ? snippet : '本文抽出なし（ファイル名一致または未抽出）';
+      const downloadUrl = String(item && item.signed_url || '');
+      const downloadName = safeDownloadName(fileName === '(名称なし)' ? '' : fileName, 'line-document');
+      const extractedCharCount = Number(item && item.extracted_char_count || 0);
+      const hasExtractedText = !!(item && item.has_extracted_text);
+      const downloadAction = downloadUrl
+        ? '<a class="button" href="' + escapeHtml(downloadUrl) + '" target="_blank" rel="noopener noreferrer" download="' + escapeHtml(downloadName) + '">ダウンロード</a>'
+        : '';
+      return [
+        '<article class="item">',
+        '<div class="preview"><div class="empty">資料</div></div>',
+        '<div class="item-body">',
+        '<span class="tag">' + escapeHtml(mimeType) + '</span>',
+        '<div class="item-line" title="' + escapeHtml(fileName) + '">' + escapeHtml(fileName) + '</div>',
+        '<div class="item-line sub">ルーム: ' + escapeHtml(roomName) + '</div>',
+        '<div class="item-line sub">日時: ' + escapeHtml(formatDate(item && item.created_at)) + '</div>',
+        '<div class="item-line sub">サイズ: ' + escapeHtml(formatBytes(item && item.file_size_bytes)) + '</div>',
+        '<div class="item-line sub">抽出: ' + escapeHtml(hasExtractedText ? (extractedCharCount + '文字') : 'なし') + '</div>',
+        '<div class="item-line sub">閲覧権限: ' + escapeHtml(permissionLabel) + '</div>',
+        '<div class="item-line sub" title="' + escapeHtml(excerpt) + '">抜粋: ' + escapeHtml(excerpt) + '</div>',
+        '<div class="item-actions">'
+          + downloadAction
+          + '<button class="button document-permission-btn" type="button" data-document-id="' + escapeHtml(String(item && item.id || '')) + '" data-document-name="' + escapeHtml(fileName) + '">閲覧設定</button>'
+          + '<button class="button danger document-delete-btn" type="button" data-document-id="' + escapeHtml(String(item && item.id || '')) + '">削除</button>'
+          + '</div>',
+        '</div>',
+        '</article>',
+      ].join('');
+    }
+
+    async function loadDocuments() {
+      const result = await api(buildDocumentQuery());
+      const items = Array.isArray(result.items) ? result.items : [];
+      state.docsTotal = Number(result.total || 0);
+      state.docsHasMore = !!result.has_more;
+
+      if (items.length === 0) {
+        dom.documentList.innerHTML = '<div class="item"><div class="preview"><div class="empty">該当データなし</div></div></div>';
+      } else {
+        dom.documentList.innerHTML = items.map(renderDocumentItem).join('');
+      }
+
+      const from = state.docsTotal === 0 ? 0 : state.docsOffset + 1;
+      const to = Math.min(state.docsOffset + items.length, state.docsTotal);
+      const filteredTotalBytes = Number(result.total_file_bytes || 0);
+      const filteredTotalCount = Number(result.total_file_count || state.docsTotal || 0);
+      const allTotalBytes = Number(result.all_file_bytes || filteredTotalBytes || 0);
+      const allTotalCount = Number(result.all_file_count || filteredTotalCount || 0);
+      const hasFilter = String(dom.documentRoomFilter.value || '').trim();
+      dom.documentSummary.textContent =
+        '表示: ' + from + '-' + to + ' / 全' + state.docsTotal + '件'
+        + ' | この条件の合計: ' + formatBytes(filteredTotalBytes) + '（' + filteredTotalCount + '件）'
+        + (hasFilter ? (' | 全体合計: ' + formatBytes(allTotalBytes) + '（' + allTotalCount + '件）') : '');
+      updateDocumentPager();
+    }
+
+    async function loadFirstDocumentPage() {
+      state.docsOffset = 0;
+      state.docsLimit = Number(dom.documentLimitSelect.value || 12);
+      await loadDocuments();
+    }
+
+    async function deleteDocumentItem(documentId) {
+      const id = Number(documentId);
+      if (!Number.isInteger(id) || id <= 0) throw new Error('削除対象の資料IDが不正です。');
+      const confirmed = await confirmDeletionByTyping('この資料');
+      if (!confirmed) return;
+      await api('/documents/' + encodeURIComponent(String(id)), { method: 'DELETE' });
+      await loadDocuments();
+      if (state.docsTotal > 0 && state.docsOffset >= state.docsTotal && state.docsOffset > 0) {
+        state.docsOffset = Math.max(0, state.docsOffset - state.docsLimit);
+        await loadDocuments();
+      }
+    }
+
+    async function configureDocumentPermissions(documentId, documentName) {
+      const id = Number(documentId);
+      if (!Number.isInteger(id) || id <= 0) throw new Error('権限設定対象の資料IDが不正です。');
+      const [users, current] = await Promise.all([
+        loadPermissionSelectableUsers(false),
+        api('/documents/' + encodeURIComponent(String(id)) + '/permissions'),
+      ]);
+      const permissions = current && current.permissions ? current.permissions : {};
+      const currentIds = Array.isArray(permissions.allowed_user_ids)
+        ? permissions.allowed_user_ids
+          .map(function(value) { return normalizeLineUserId(value); })
+          .filter(function(value) { return value.length > 0; })
+        : [];
+      const userMap = new Map();
+      for (const user of users) {
+        const lineUserId = normalizeLineUserId(user && user.line_user_id);
+        if (!lineUserId) continue;
+        if (!userMap.has(lineUserId)) userMap.set(lineUserId, user);
+      }
+      for (const lineUserId of currentIds) {
+        if (userMap.has(lineUserId)) continue;
+        userMap.set(lineUserId, { line_user_id: lineUserId, display_name: '', is_active: true });
+      }
+      const mergedUsers = Array.from(userMap.values()).sort(function(a, b) {
+        return getLineUserDisplayLabel(a).localeCompare(getLineUserDisplayLabel(b), 'ja');
+      });
+
+      state.permissionTargetDocumentId = id;
+      state.permissionTargetDocumentName = String(documentName || '(名称なし)');
+      state.permissionSelectedUserIds = new Set(currentIds);
+      dom.documentPermissionModalMeta.textContent =
+        '対象資料: ' + state.permissionTargetDocumentName
+        + ' | チェックしたユーザーのみ閲覧可能（未チェック=全ユーザー閲覧）';
+      dom.documentPermissionUserList.innerHTML = buildDocumentPermissionUserList(
+        mergedUsers,
+        state.permissionSelectedUserIds,
+      );
+      updateSelectAllButtonLabel();
+      dom.documentPermissionModal.classList.add('open');
+      dom.documentPermissionModal.setAttribute('aria-hidden', 'false');
+    }
+
+    async function uploadDocument() {
+      const inputFiles = dom.documentFileInput.files;
+      const rawFile = state.selectedDocumentFile || (inputFiles && inputFiles.length > 0 ? inputFiles[0] : null);
+      const file = await normalizeDocumentFile(rawFile);
+      state.selectedDocumentFile = file;
+      syncDocumentInputFile(file);
+      updateSelectedDocumentMeta();
+      const roomId = String(dom.documentUploadRoomSelect.value || '').trim();
+      const formData = new FormData();
+      formData.append('file', file);
+      if (roomId) {
+        formData.append('room_id', roomId);
+      }
+
+      await api('/documents', {
+        method: 'POST',
+        body: formData,
+      });
+      clearSelectedDocumentFile();
+      await loadFirstDocumentPage();
+      alert('資料をアップロードしました。');
+    }
+
+    async function deleteMediaItem(mediaId) {
+      const id = Number(mediaId);
+      if (!Number.isInteger(id) || id <= 0) throw new Error('削除対象のIDが不正です。');
+      const confirmed = await confirmDeletionByTyping('このメディア');
+      if (!confirmed) return;
+      await api('/media/' + encodeURIComponent(String(id)), { method: 'DELETE' });
+      await loadMedia();
+      if (state.total > 0 && state.offset >= state.total && state.offset > 0) {
+        state.offset = Math.max(0, state.offset - state.limit);
+        await loadMedia();
+      }
+    }
+
+    async function executeBulkDeleteSelectedMedia() {
+      const selectedIds = Array.from(state.mediaSelectedIds).filter(function(id) {
+        return Number.isInteger(id) && id > 0;
+      });
+      if (selectedIds.length === 0) {
+        throw new Error('削除対象を1件以上チェックしてください。');
+      }
+
+      const confirmed = await confirmDeletionByTyping('選択した ' + selectedIds.length + ' 件');
+      if (!confirmed) return;
+
+      const failedIds = [];
+      for (const mediaId of selectedIds) {
+        try {
+          await api('/media/' + encodeURIComponent(String(mediaId)), { method: 'DELETE' });
+        } catch (_) {
+          failedIds.push(mediaId);
+        }
+      }
+
+      exitMediaBulkDeleteMode();
+      await loadMedia();
+      if (state.total > 0 && state.offset >= state.total && state.offset > 0) {
+        state.offset = Math.max(0, state.offset - state.limit);
+        await loadMedia();
+      }
+
+      if (failedIds.length > 0) {
+        alert((selectedIds.length - failedIds.length) + '件削除しました。' + failedIds.length + '件は削除に失敗しました。');
+      } else {
+        alert(selectedIds.length + '件を削除しました。');
+      }
+    }
+
+    /**
+     * LINE アプリ内ブラウザ等では window.prompt が使えないため、モーダルで確認する。
+     */
+    function confirmDeletionByTyping(targetLabel) {
+      const label = String(targetLabel || '対象').trim() || '対象';
+      if (!dom.mediaDeleteConfirmModal || !dom.mediaDeleteConfirmModalMeta || !dom.deleteConfirmInput) {
+        return Promise.resolve(false);
+      }
+
+      dom.mediaDeleteConfirmModalMeta.textContent =
+        label + 'を削除するには、下に delete と入力して削除を実行してください。';
+
+      dom.mediaDeleteConfirmModal.classList.add('open');
+      dom.mediaDeleteConfirmModal.setAttribute('aria-hidden', 'false');
+
+      return new Promise(function(resolve) {
+        dom.deleteConfirmInput.value = '';
+
+        function closeModal() {
+          dom.mediaDeleteConfirmModal.classList.remove('open');
+          dom.mediaDeleteConfirmModal.setAttribute('aria-hidden', 'true');
+        }
+
+        function cleanup() {
+          dom.deleteConfirmOkBtn.removeEventListener('click', onOk);
+          dom.deleteConfirmCancelBtn.removeEventListener('click', onCancel);
+          dom.mediaDeleteConfirmModal.removeEventListener('click', onBackdrop);
+          document.removeEventListener('keydown', onDocumentKeydown);
+          dom.deleteConfirmInput.removeEventListener('keydown', onInputKeydown);
+        }
+
+        function finish(result) {
+          cleanup();
+          closeModal();
+          resolve(result);
+        }
+
+        function onOk() {
+          if (String(dom.deleteConfirmInput.value).trim().toLowerCase() !== 'delete') {
+            alert('入力が一致しないため削除を中止しました。');
+            finish(false);
+            return;
+          }
+          finish(true);
+        }
+
+        function onCancel() {
+          finish(false);
+        }
+
+        function onBackdrop(ev) {
+          if (ev.target === dom.mediaDeleteConfirmModal) finish(false);
+        }
+
+        function onDocumentKeydown(ev) {
+          if (ev.key === 'Escape') finish(false);
+        }
+
+        function onInputKeydown(ev) {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            onOk();
+          }
+        }
+
+        dom.deleteConfirmOkBtn.addEventListener('click', onOk);
+        dom.deleteConfirmCancelBtn.addEventListener('click', onCancel);
+        dom.mediaDeleteConfirmModal.addEventListener('click', onBackdrop);
+        document.addEventListener('keydown', onDocumentKeydown);
+        dom.deleteConfirmInput.addEventListener('keydown', onInputKeydown);
+
+        requestAnimationFrame(function() {
+          try {
+            dom.deleteConfirmInput.focus();
+          } catch (_) {
+            /* ignore */
+          }
+        });
+      });
+    }
+
+    async function saveMediaUploadLimit() {
+      const mb = Number(dom.mediaUploadMaxMbInput.value || 0);
+      if (!Number.isInteger(mb) || mb < 1 || mb > 20) {
+        throw new Error('アップロード上限は 1〜20 MB の整数で入力してください。');
+      }
+      await api('/settings/media-upload-limit', {
+        method: 'PUT',
+        body: JSON.stringify({ media_upload_max_mb: mb }),
+      });
+      await loadMedia();
+      alert('メディアアップロード上限を保存しました。');
+    }
+
+    dom.saveTokenBtn.addEventListener('click', async function() {
+      setToken(String(dom.tokenInput.value || '').trim());
+      dom.tokenInput.value = '';
+      try {
+        await loadRoomFilterOptions();
+        await loadFirstPage();
+        await loadFirstDocumentPage();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.clearTokenBtn.addEventListener('click', function() {
+      setToken('');
+      state.offset = 0;
+      state.hasMore = false;
+      state.total = 0;
+      state.docsOffset = 0;
+      state.docsHasMore = false;
+      state.docsTotal = 0;
+      state.documentDropDepth = 0;
+      exitMediaBulkDeleteMode();
+      if (dom.documentDropZone) {
+        dom.documentDropZone.classList.remove('dragover');
+      }
+      clearSelectedDocumentFile();
+      dom.mediaList.innerHTML = '';
+      dom.documentList.innerHTML = '';
+      dom.summary.textContent = '未取得';
+      dom.documentSummary.textContent = '未取得';
+      dom.mediaUploadLimitMeta.textContent = '';
+      setRoomFilterOptions([]);
+      renderUsageBar(0, MEDIA_CAP_DEFAULT_BYTES);
+      dom.lastRefresh.textContent = '最終更新: なし';
+      updatePager();
+      updateDocumentPager();
+    });
+
+    dom.applyFilterBtn.addEventListener('click', async function() {
+      try {
+        await loadFirstPage();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.reloadBtn.addEventListener('click', async function() {
+      try {
+        await loadMedia();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.themeToggleBtn.addEventListener('click', function() {
+      toggleTheme();
+    });
+
+    dom.toggleMediaBulkDeleteBtn.addEventListener('click', async function() {
+      try {
+        if (!state.mediaBulkDeleteMode) {
+          enterMediaBulkDeleteMode();
+          await loadMedia();
+          return;
+        }
+        await executeBulkDeleteSelectedMedia();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.saveMediaUploadLimitBtn.addEventListener('click', async function() {
+      try {
+        await saveMediaUploadLimit();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.prevBtn.addEventListener('click', async function() {
+      if (state.offset <= 0) return;
+      state.offset = Math.max(0, state.offset - state.limit);
+      try {
+        await loadMedia();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.nextBtn.addEventListener('click', async function() {
+      if (!state.hasMore) return;
+      state.offset += state.limit;
+      try {
+        await loadMedia();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.documentFileInput.addEventListener('change', function() {
+      const files = dom.documentFileInput.files;
+      const file = files && files.length > 0 ? files[0] : null;
+      void (async function() {
+        try {
+          await setSelectedDocumentFileAsync(file);
+        } catch (error) {
+          clearSelectedDocumentFile();
+          alert(error.message || String(error));
+        }
+      })();
+    });
+
+    if (dom.documentDropZone) {
+      dom.documentDropZone.addEventListener('click', function() {
+        dom.documentFileInput.click();
+      });
+
+      dom.documentDropZone.addEventListener('keydown', function(event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        dom.documentFileInput.click();
+      });
+
+      dom.documentDropZone.addEventListener('dragenter', function(event) {
+        if (!dragEventHasFiles(event)) return;
+        event.preventDefault();
+        state.documentDropDepth += 1;
+        dom.documentDropZone.classList.add('dragover');
+      });
+
+      dom.documentDropZone.addEventListener('dragover', function(event) {
+        if (!dragEventHasFiles(event)) return;
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = 'copy';
+        }
+        dom.documentDropZone.classList.add('dragover');
+      });
+
+      dom.documentDropZone.addEventListener('dragleave', function(event) {
+        if (!dragEventHasFiles(event)) return;
+        event.preventDefault();
+        state.documentDropDepth = Math.max(0, state.documentDropDepth - 1);
+        if (state.documentDropDepth === 0) {
+          dom.documentDropZone.classList.remove('dragover');
+        }
+      });
+
+      dom.documentDropZone.addEventListener('drop', function(event) {
+        if (!dragEventHasFiles(event)) return;
+        event.preventDefault();
+        state.documentDropDepth = 0;
+        dom.documentDropZone.classList.remove('dragover');
+        const file = resolveDroppedDocumentFile(event);
+        void (async function() {
+          try {
+            if (!(file instanceof File)) return;
+            await setSelectedDocumentFileAsync(file);
+            await uploadDocument();
+          } catch (error) {
+            clearSelectedDocumentFile();
+            alert(error.message || String(error));
+          }
+        })();
+      });
+    }
+
+    dom.uploadDocumentBtn.addEventListener('click', async function() {
+      try {
+        await uploadDocument();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.applyDocumentFilterBtn.addEventListener('click', async function() {
+      try {
+        await loadFirstDocumentPage();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.reloadDocumentsBtn.addEventListener('click', async function() {
+      try {
+        await loadDocuments();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.documentPrevBtn.addEventListener('click', async function() {
+      if (state.docsOffset <= 0) return;
+      state.docsOffset = Math.max(0, state.docsOffset - state.docsLimit);
+      try {
+        await loadDocuments();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.documentNextBtn.addEventListener('click', async function() {
+      if (!state.docsHasMore) return;
+      state.docsOffset += state.docsLimit;
+      try {
+        await loadDocuments();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.mediaList.addEventListener('click', async function(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const thumb = target.closest('img.media-preview-img');
+      if (thumb) {
+        const url = thumb.getAttribute('data-full-url');
+        if (url) {
+          event.preventDefault();
+          openImageLightbox(url);
+        }
+        return;
+      }
+      if (!target.classList.contains('media-delete-btn')) return;
+      const mediaId = target.getAttribute('data-media-id') || '';
+      try {
+        await deleteMediaItem(mediaId);
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.mediaList.addEventListener('keydown', function(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.classList.contains('media-preview-img')) return;
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      const url = target.getAttribute('data-full-url');
+      if (url) openImageLightbox(url);
+    });
+
+    dom.mediaList.addEventListener('change', function(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.classList.contains('media-select-check')) return;
+      const mediaId = Number(target.getAttribute('data-media-id') || 0);
+      if (!Number.isInteger(mediaId) || mediaId <= 0) return;
+      if (target.checked) state.mediaSelectedIds.add(mediaId);
+      else state.mediaSelectedIds.delete(mediaId);
+      updateMediaBulkDeleteButtonLabel();
+    });
+
+    dom.mediaViewCardBtn.addEventListener('click', function() {
+      state.mediaView = 'card';
+      updateMediaViewTabs();
+      renderMediaList(state.mediaItems);
+    });
+
+    dom.mediaViewNameBtn.addEventListener('click', function() {
+      state.mediaView = 'names';
+      updateMediaViewTabs();
+      renderMediaList(state.mediaItems);
+    });
+
+    dom.documentList.addEventListener('click', async function(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const documentId = target.getAttribute('data-document-id') || '';
+      try {
+        if (target.classList.contains('document-permission-btn')) {
+          const documentName = target.getAttribute('data-document-name') || '';
+          await configureDocumentPermissions(documentId, documentName);
+          return;
+        }
+        if (target.classList.contains('document-delete-btn')) {
+          await deleteDocumentItem(documentId);
+        }
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.cancelDocumentPermissionBtn.addEventListener('click', function() {
+      closeDocumentPermissionModal();
+    });
+
+    dom.selectAllDocumentPermissionBtn.addEventListener('click', function() {
+      toggleSelectAllUsersInPermissionModal();
+    });
+
+    dom.documentPermissionUserList.addEventListener('change', function(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.classList.contains('document-permission-check')) return;
+      updateSelectAllButtonLabel();
+    });
+
+    dom.saveDocumentPermissionBtn.addEventListener('click', async function() {
+      try {
+        await saveDocumentPermissionsFromModal();
+      } catch (error) {
+        alert(error.message || String(error));
+      }
+    });
+
+    dom.documentPermissionModal.addEventListener('click', function(event) {
+      if (event.target === dom.documentPermissionModal) {
+        closeDocumentPermissionModal();
+      }
+    });
+
+    window.addEventListener('keydown', function(event) {
+      if (event.key !== 'Escape') return;
+      if (dom.documentPermissionModal.classList.contains('open')) {
+        closeDocumentPermissionModal();
+        return;
+      }
+      if (dom.imageLightboxModal && dom.imageLightboxModal.classList.contains('open')) {
+        closeImageLightbox();
+      }
+    });
+
+    if (dom.imageLightboxModal && dom.imageLightboxCloseBtn) {
+      dom.imageLightboxModal.addEventListener('click', function(event) {
+        if (event.target === dom.imageLightboxModal) closeImageLightbox();
+      });
+      dom.imageLightboxCloseBtn.addEventListener('click', function() {
+        closeImageLightbox();
+      });
+    }
+
+    (function init() {
+      dom.projectUrlInput.value = FIXED_PROJECT_URL;
+      applyTheme(getTheme());
+      updateAuthState();
+      updateMediaBulkDeleteButtonLabel();
+      updateMediaViewTabs();
+      updatePager();
+      updateDocumentPager();
+      setRoomFilterOptions([]);
+      dom.mediaUploadMaxMbInput.value = '10';
+      dom.mediaUploadLimitMeta.textContent = '現在: 10MB未満';
+      clearSelectedDocumentFile();
+      renderUsageBar(0, MEDIA_CAP_DEFAULT_BYTES);
+      if (getToken()) {
+        Promise.all([loadRoomFilterOptions(), loadFirstPage(), loadFirstDocumentPage()]).catch(function(error) {
+          alert(error.message || String(error));
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
