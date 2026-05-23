@@ -4,9 +4,10 @@
 
 ## 公開 URL（line_report）
 
-- https://marugo-s.github.io/line_report/
-- https://marugo-s.github.io/line_report/analytics.html
+- https://marugo-s.github.io/line_report/index.html（管理画面）
+- https://marugo-s.github.io/line_report/analytics.html（売上分析）
 - https://marugo-s.github.io/line_report/media.html
+- https://marugo-s.github.io/line_report/reservation.html（予約表）
 
 ## もう1つのサイト（従来）
 
