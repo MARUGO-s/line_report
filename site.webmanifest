@@ -2,7 +2,7 @@
   "name": "LINE 売上レポート",
   "short_name": "line_report",
   "description": "LINE運用向けの管理コンソール",
-  "start_url": "/line_report/analytics.html",
+  "start_url": "/line_report/index.html",
   "scope": "/line_report/",
   "display": "standalone",
   "background_color": "#006c3a",

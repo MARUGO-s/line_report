@@ -652,10 +652,11 @@
     </div>
   </div>
 
+  <script src="pages-config.js"></script>
   <script>
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
-    const FIXED_PROJECT_URL = 'https://jhpmzqxqvapdkyvvhyra.supabase.co';
+    const FIXED_PROJECT_URL = LINE_REPORT_PAGES.PROJECT_URL;
     const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
     const JST = 'Asia/Tokyo';
     const SEARCH_FALLBACK_PAST_MONTHS = 48;
@@ -1244,7 +1245,7 @@
     async function api(path) {
       const token = getToken();
       if (!token) throw new Error('先に管理トークンを保存してください。');
-      const url = FIXED_PROJECT_URL.replace(/\/+$/, '') + '/functions/v1/admin-api' + path;
+      const url = LINE_REPORT_PAGES.adminApiUrl(path);
       const res = await fetch(url, {
         method: 'GET',
         headers: { 'x-admin-token': token },

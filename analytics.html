@@ -526,6 +526,8 @@
       <span id="authState" class="pill">未接続</span>
       <span id="lastRefresh" class="pill">最終更新: なし</span>
       <a href="./index.html" class="pill link" id="adminLink">管理画面</a>
+      <a href="./media.html" class="pill link" id="mediaLink">メディア閲覧</a>
+      <a href="./reservation.html" class="pill link" id="reservationLink">予約表</a>
       <button id="themeBtn" type="button" class="pill">ライトモード</button>
     </div>
   </header>
@@ -777,13 +779,14 @@
   </div>
 </div>
 
+<script src="pages-config.js"></script>
 <script>
 'use strict';
 
 const TOKEN_KEY = 'line_summary_admin_token';
 const THEME_KEY = 'line_reservation_calendar_theme';
 const COMPARE_YEAR_STORAGE_KEY = 'line_analytics_compare_year_v2';
-const PROJECT_URL = 'https://jhpmzqxqvapdkyvvhyra.supabase.co';
+const PROJECT_URL = LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL;
 
 function readCompareYearFromStorage() {
   try {
@@ -854,30 +857,7 @@ const STORE_ADDRESS = {
   marugoD:             '愛知県刈谷市中山町',
 };
 
-const STORE_NAMES = {
-  marugo:              'マルゴ',
-  marugosecond:        'マルゴ セカンド',
-  marugogrande:        'マルゴ グランデ',
-  sannanaichi:         'サンナナイチ バル',
-  shenlong:            'シェンロン&クラウディア',
-  claudia2:            'クラウディア2',
-  sauvage:             'ソバージュ',
-  barpelota:           'バルぺロタ',
-  briccola:            'トラットリア ブリッコラ',
-  violette:            'ヴィオレット',
-  marugootto:          'マルゴ オット',
-  donaiya:             '元祖どないや 新宿三丁目店',
-  marugoyotsuya:       'マルゴ 四谷',
-  sushikoruri:         '鮨こるり',
-  bistrocavacava:      'BISTRO CAVA CAVA',
-  marugoS:             'マルゴエス',
-  marugoshinbashi:     'マルゴ 新橋',
-  marugomarunouchi:    'マルゴ丸の内',
-  yakinikumarugo:      '焼肉マルゴ',
-  erics:               'エリックスバイエリックトロション',
-  mitan:               'ミタン',
-  marugoD:             'マルゴ D',
-};
+const STORE_NAMES = LINE_REPORT_PAGES.STORE_NAMES;
 
 /* ── 日本の祝日 2022-2028 ── */
 const JAPANESE_HOLIDAYS = new Map([
@@ -2420,7 +2400,7 @@ dom.storeSelect.addEventListener('change', () => {
 async function apiFetch(path, options = {}) {
   const token = getToken();
   if (!token) throw new Error('トークンが未設定です。');
-  const url = PROJECT_URL.replace(/\/+$/, '') + '/functions/v1/admin-api' + path;
+  const url = LINE_REPORT_PAGES.receiptAdminApiUrl(path);
   const method = options.method || 'GET';
   const headers = { 'x-admin-token': token };
   if (options.body !== undefined) {

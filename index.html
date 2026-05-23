@@ -145,6 +145,7 @@
 
     .auth { grid-column: span 12; }
     .global { grid-column: span 12; }
+    .store-webhooks { grid-column: span 12; }
     .logs { grid-column: span 12; }
     .rooms { grid-column: span 12; }
     .permissions { grid-column: span 12; }
@@ -709,6 +710,63 @@
     }
     .log-table--webhook th:nth-child(7),
     .log-table--webhook td:nth-child(7) { width: 56px; white-space: nowrap; }
+
+    .store-webhook-table {
+      width: 100%;
+      min-width: 960px;
+      border-collapse: collapse;
+      table-layout: auto;
+    }
+
+    .store-webhook-table th,
+    .store-webhook-table td {
+      white-space: normal;
+      vertical-align: middle;
+    }
+
+    .store-webhook-table th:nth-child(1),
+    .store-webhook-table td:nth-child(1) {
+      min-width: 10.5rem;
+      width: 20%;
+      white-space: nowrap;
+    }
+
+    .store-webhook-table th:nth-child(2),
+    .store-webhook-table td:nth-child(2) {
+      min-width: 6.5rem;
+      width: 12%;
+      white-space: nowrap;
+    }
+
+    .store-webhook-table th:nth-child(3),
+    .store-webhook-table td:nth-child(3) {
+      min-width: 11rem;
+      width: 14%;
+      font-size: 0.78rem;
+    }
+
+    .store-webhook-table th:nth-child(4),
+    .store-webhook-table td:nth-child(4) {
+      min-width: 18rem;
+      width: auto;
+    }
+
+    .store-webhook-table th:nth-child(5),
+    .store-webhook-table td:nth-child(5) {
+      width: 4.5rem;
+      min-width: 4.5rem;
+      white-space: nowrap;
+      text-align: center;
+    }
+
+    .store-webhook-table .webhook-url-cell code {
+      font-size: 0.78rem;
+      word-break: break-all;
+    }
+
+    .card.store-webhooks .table-wrap {
+      overflow-x: auto;
+    }
 
     .log-table .tag {
       white-space: nowrap;
@@ -1811,7 +1869,7 @@
 
     @media (max-width: 1080px) {
       body { padding: 14px; }
-      .global, .logs { grid-column: span 12; }
+      .global, .logs, .store-webhooks { grid-column: span 12; }
     }
 
     @media (max-width: 760px) {
@@ -1980,6 +2038,32 @@
             </div>
           </div>
           <div id="storageUsageLegend" class="storage-legend"></div>
+        </div>
+      </section>
+
+      <section class="card store-webhooks">
+        <h2>店舗別 Webhook URL</h2>
+        <p class="muted" style="margin:0 0 10px 0;">各店舗の LINE Messaging API チャネルに店舗専用 URL を登録してください。受信イベントは店舗ごとの <code>line_webhook_raw__{店舗キー}</code> に保存され、レシート解析結果は <code>line_receipt__{店舗キー}</code> に保存します（Supabase: <code>hocbn</code>）。</p>
+        <div class="controls">
+          <input id="storeWebhookFilter" class="input" type="search" placeholder="店舗名・キーで絞り込み" autocomplete="off">
+        </div>
+        <div class="meta" style="margin-top:8px;">
+          移行期間の共通 URL（非推奨）: <code id="storeWebhookLegacyUrl">-</code>
+          <button type="button" id="copyLegacyWebhookBtn" class="button" style="margin-left:8px;">コピー</button>
+        </div>
+        <div class="table-wrap" style="margin-top:12px;">
+          <table class="store-webhook-table">
+            <thead>
+              <tr>
+                <th>店舗</th>
+                <th>キー</th>
+                <th>受信テーブル</th>
+                <th>Webhook URL</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="storeWebhookTableBody"></tbody>
+          </table>
         </div>
       </section>
 
@@ -2224,10 +2308,11 @@
     </div>
   </div>
 
+  <script src="pages-config.js"></script>
   <script>
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
-    const FIXED_PROJECT_URL = 'https://jhpmzqxqvapdkyvvhyra.supabase.co';
+    const FIXED_PROJECT_URL = LINE_REPORT_PAGES.PROJECT_URL;
     const NEW_ROOM_DEFAULT_BOT_REPLY_KEY = 'line_summary_new_room_default_bot_reply_enabled';
     const NEW_ROOM_DEFAULT_MESSAGE_SEARCH_KEY = 'line_summary_new_room_default_message_search_enabled';
     const NEW_ROOM_DEFAULT_MESSAGE_SEARCH_LIBRARY_KEY = 'line_summary_new_room_default_message_search_library_enabled';
@@ -2289,6 +2374,10 @@
       logTabSummary: document.getElementById('logTabSummary'),
       logTabWebhook: document.getElementById('logTabWebhook'),
       webhookQuotaSummary: document.getElementById('webhookQuotaSummary'),
+      storeWebhookFilter: document.getElementById('storeWebhookFilter'),
+      storeWebhookTableBody: document.getElementById('storeWebhookTableBody'),
+      storeWebhookLegacyUrl: document.getElementById('storeWebhookLegacyUrl'),
+      copyLegacyWebhookBtn: document.getElementById('copyLegacyWebhookBtn'),
       userPermissionTabCards: document.getElementById('userPermissionTabCards'),
       userPermissionTabNames: document.getElementById('userPermissionTabNames'),
       userPermissionCardsPane: document.getElementById('userPermissionCardsPane'),
@@ -3285,7 +3374,7 @@
         'Content-Type': 'application/json',
       }, request.headers || {});
       const res = await fetch(
-        base + '/functions/v1/admin-api' + requestPath,
+        LINE_REPORT_PAGES.adminApiUrl(requestPath, base),
         Object.assign({}, request, { headers, cache: 'no-store', referrerPolicy: 'no-referrer' }),
       );
       const text = await res.text();
@@ -4589,6 +4678,44 @@
       dom.roomIdModal.setAttribute('aria-hidden', 'true');
     }
 
+    function renderStoreWebhookTable(extraOptions) {
+      const extra = extraOptions != null
+        ? extraOptions
+        : (currentState && currentState.receipt_store_options) || [];
+      const filter = String(dom.storeWebhookFilter && dom.storeWebhookFilter.value || '').trim().toLowerCase();
+      const rows = LINE_REPORT_PAGES.listStores(extra);
+      const filtered = filter
+        ? rows.filter(function(r) {
+          return r.store_key.toLowerCase().includes(filter)
+            || r.store_name.toLowerCase().includes(filter);
+        })
+        : rows;
+      if (dom.storeWebhookLegacyUrl) {
+        dom.storeWebhookLegacyUrl.textContent = LINE_REPORT_PAGES.lineWebhookLegacyUrl();
+      }
+      if (!dom.storeWebhookTableBody) return;
+      dom.storeWebhookTableBody.innerHTML = filtered.map(function(r) {
+        return (
+          '<tr data-store-key="' + escapeHtml(r.store_key) + '">' +
+          '<td>' + escapeHtml(r.store_name) + '</td>' +
+          '<td><code>' + escapeHtml(r.store_key) + '</code></td>' +
+          '<td><code>' + escapeHtml(r.webhook_raw_table || '') + '</code><br><code class="meta">' + escapeHtml(r.receipt_table || '') + '</code></td>' +
+          '<td class="webhook-url-cell"><code>' + escapeHtml(r.webhook_url) + '</code></td>' +
+          '<td><button type="button" class="button store-webhook-copy" data-url="' + escapeHtml(r.webhook_url) + '">コピー</button></td>' +
+          '</tr>'
+        );
+      }).join('');
+    }
+
+    async function copyTextToClipboard(text, okMessage) {
+      try {
+        await navigator.clipboard.writeText(String(text || ''));
+        if (okMessage) alert(okMessage);
+      } catch (_) {
+        alert('クリップボードへのコピーに失敗しました。');
+      }
+    }
+
     async function copyRoomIdToClipboard() {
       const roomId = dom.roomIdModalValue.textContent || '';
       if (!roomId || roomId === '-') return;
@@ -4604,6 +4731,7 @@
       const state = await api('/state?logs_limit=30');
       currentState = state;
       renderGlobal(state.global_settings || {});
+      renderStoreWebhookTable(state.receipt_store_options || []);
       renderDeliverySection(state);
       renderRooms(state.room_overview || [], state.room_settings || []);
       renderUserPermissions(state.user_permissions || []);
@@ -5657,6 +5785,24 @@
       }
     });
 
+    if (dom.storeWebhookFilter) {
+      dom.storeWebhookFilter.addEventListener('input', function() {
+        renderStoreWebhookTable();
+      });
+    }
+    if (dom.storeWebhookTableBody) {
+      dom.storeWebhookTableBody.addEventListener('click', async function(event) {
+        const btn = event.target.closest('.store-webhook-copy');
+        if (!btn) return;
+        await copyTextToClipboard(btn.getAttribute('data-url') || '', 'Webhook URL をコピーしました。');
+      });
+    }
+    if (dom.copyLegacyWebhookBtn) {
+      dom.copyLegacyWebhookBtn.addEventListener('click', async function() {
+        await copyTextToClipboard(LINE_REPORT_PAGES.lineWebhookLegacyUrl(), '共通 Webhook URL をコピーしました。');
+      });
+    }
+
     dom.copyRoomIdBtn.addEventListener('click', async function() {
       await copyRoomIdToClipboard();
     });
@@ -5737,6 +5883,7 @@
 
     (function init() {
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
+      renderStoreWebhookTable([]);
       applyNewRoomDefaultCheckboxes();
       applyTheme(getTheme());
       setRoomViewTab('cards');
