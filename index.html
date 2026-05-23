@@ -2045,7 +2045,9 @@
         <h2>店舗別 Webhook URL</h2>
         <p class="muted" style="margin:0 0 10px 0;">各店舗の LINE Messaging API チャネルに店舗専用 URL を登録してください。受信イベントは店舗ごとの <code>line_webhook_raw__{店舗キー}</code> に保存され、レシート解析結果は <code>line_receipt__{店舗キー}</code> に保存します（Supabase: <code>hocbn</code>）。</p>
         <div class="controls">
-          <input id="storeWebhookFilter" class="input" type="search" placeholder="店舗名・キーで絞り込み" autocomplete="off">
+          <select id="storeWebhookFilter" class="select" aria-label="店舗で絞り込み">
+            <option value="">店舗選択</option>
+          </select>
         </div>
         <div class="meta" style="margin-top:8px;">
           移行期間の共通 URL（非推奨）: <code id="storeWebhookLegacyUrl">-</code>
@@ -4693,18 +4695,31 @@
       dom.roomIdModal.setAttribute('aria-hidden', 'true');
     }
 
+    function initStoreWebhookFilterOptions(extraOptions) {
+      if (!dom.storeWebhookFilter) return;
+      const extra = extraOptions != null
+        ? extraOptions
+        : (currentState && currentState.receipt_store_options) || [];
+      const prev = dom.storeWebhookFilter.value || '';
+      const rows = LINE_REPORT_PAGES.listStores(extra);
+      dom.storeWebhookFilter.innerHTML = '<option value="">店舗選択</option>' + rows.map(function(r) {
+        return '<option value="' + escapeHtml(r.store_key) + '">' + escapeHtml(r.store_name) + '</option>';
+      }).join('');
+      if (prev && rows.some(function(r) { return r.store_key === prev; })) {
+        dom.storeWebhookFilter.value = prev;
+      }
+    }
+
     function renderStoreWebhookTable(extraOptions) {
       const extra = extraOptions != null
         ? extraOptions
         : (currentState && currentState.receipt_store_options) || [];
-      const filter = String(dom.storeWebhookFilter && dom.storeWebhookFilter.value || '').trim().toLowerCase();
+      initStoreWebhookFilterOptions(extra);
+      const selectedKey = String(dom.storeWebhookFilter && dom.storeWebhookFilter.value || '').trim();
       const rows = LINE_REPORT_PAGES.listStores(extra);
-      const filtered = filter
-        ? rows.filter(function(r) {
-          return r.store_key.toLowerCase().includes(filter)
-            || r.store_name.toLowerCase().includes(filter);
-        })
-        : rows;
+      const filtered = selectedKey
+        ? rows.filter(function(r) { return r.store_key === selectedKey; })
+        : [];
       if (dom.storeWebhookLegacyUrl) {
         dom.storeWebhookLegacyUrl.textContent = LINE_REPORT_PAGES.lineWebhookLegacyUrl();
       }
@@ -5801,7 +5816,7 @@
     });
 
     if (dom.storeWebhookFilter) {
-      dom.storeWebhookFilter.addEventListener('input', function() {
+      dom.storeWebhookFilter.addEventListener('change', function() {
         renderStoreWebhookTable();
       });
     }

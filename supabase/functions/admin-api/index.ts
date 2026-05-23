@@ -8,6 +8,7 @@ import {
   upsertManualMonthEntries,
   upsertReceiptSalesBudget,
 } from '../_shared/admin_receipt_sales.ts'
+import { fetchWeatherDailyState } from '../_shared/weather_daily.ts'
 import {
   isRecord,
   json,
@@ -155,6 +156,11 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET' && path === '/analytics/monthly') {
       const result = await fetchAnalyticsMonthly(supabase, url)
+      return json(result, 200)
+    }
+
+    if (req.method === 'GET' && path === '/weather/daily') {
+      const result = await fetchWeatherDailyState(supabase, url)
       return json(result, 200)
     }
 

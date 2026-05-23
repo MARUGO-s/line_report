@@ -2423,13 +2423,98 @@ async function apiFetch(path, options = {}) {
   return res.json();
 }
 
-/* ── weather fetch (Open-Meteo, direct from browser) ── */
-async function fetchWeather(storeKey, fromDate, toDate) {
-  const coords = STORE_COORDS[storeKey];
-  if (!coords) return { map: {}, forecastLimited: false };
-  // toDate は表示範囲の翌日（排他）なので末日に補正
+function splitInclusiveRangeByMonth(from, to) {
+  if (!from || !to || from > to) return [];
+  const parse = (s) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (!m) return null;
+    return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+  };
+  const start = parse(from);
+  const end = parse(to);
+  if (!start || !end) return [];
+  const ranges = [];
+  let y = start.y;
+  let mo = start.m;
+  while (y < end.y || (y === end.y && mo <= end.m)) {
+    const monthStart = `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-01`;
+    const monthEnd = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
+    ranges.push({
+      from: monthStart < from ? from : monthStart,
+      to: monthEnd > to ? to : monthEnd,
+    });
+    mo += 1;
+    if (mo > 12) { mo = 1; y += 1; }
+  }
+  return ranges;
+}
+
+function mergeOpenMeteoDaily(target, data) {
+  const dates = data?.daily?.time ?? [];
+  const temps = data?.daily?.temperature_2m_max ?? [];
+  const rains = data?.daily?.precipitation_sum ?? [];
+  dates.forEach((dStr, i) => {
+    target[dStr] = { temp: temps[i] ?? null, rain: rains[i] ?? null };
+  });
+}
+
+async function fetchOpenMeteoDailyUrl(url, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function fetchWeatherViaAdminApi(coords, storeKey, fromDate, displayTo) {
+  const q = new URLSearchParams({
+    lat: String(coords.lat),
+    lon: String(coords.lon),
+    from: fromDate,
+    to: displayTo,
+    include_forecast: '1',
+  });
+  if (storeKey) q.set('store_key', storeKey);
+  const data = await apiFetch(`/weather/daily?${q.toString()}`);
+  return {
+    map: data?.map ?? {},
+    forecastLimited: !!data?.forecast_limited,
+    archivePartial: !!data?.archive_partial,
+    cacheHits: Number(data?.cache_hits ?? 0),
+    fetchedNew: Number(data?.fetched_new ?? 0),
+    source: data?.source ?? 'mixed',
+  };
+}
+
+async function fetchForecastPastDaysWindow(coords, from, to, includeForecast) {
+  const params = new URLSearchParams({
+    latitude: coords.lat,
+    longitude: coords.lon,
+    daily: 'temperature_2m_max,precipitation_sum',
+    timezone: 'Asia/Tokyo',
+    past_days: '92',
+    forecast_days: includeForecast ? '10' : '0',
+  });
+  const data = await fetchOpenMeteoDailyUrl(`https://api.open-meteo.com/v1/forecast?${params}`);
+  if (!data) return {};
+  const all = {};
+  mergeOpenMeteoDaily(all, data);
+  const filtered = {};
+  for (const [dateKey, value] of Object.entries(all)) {
+    if (dateKey >= from && dateKey <= to) filtered[dateKey] = value;
+  }
+  return filtered;
+}
+
+/* ── weather fetch (admin-api 経由 + Open-Meteo 直接フォールバック) ── */
+async function fetchWeatherDirect(coords, fromDate, toDate) {
   const displayTo = shiftDateString(toDate, -1);
-  // 実績は「前日まで」、加えて今日〜10日先の予報を表示
   const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
   const today = new Date(todayStr);
   const y = new Date(today); y.setDate(y.getDate() - 1);
@@ -2440,41 +2525,50 @@ async function fetchWeather(storeKey, fromDate, toDate) {
   const safeFrom = fromDate;
   const safeToHistory = displayTo > yesterdayStr ? yesterdayStr : displayTo;
 
-  // アーカイブAPIは直近3日分を持たないため、
-  // それより前は archive、直近数日は forecast を併用して埋める
   const dArchiveEnd = new Date(today); dArchiveEnd.setDate(dArchiveEnd.getDate() - 3);
   const archiveCap = dArchiveEnd.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
 
   const result = {};
 
-  // 1) 過去分: archive API （from〜min(safeToHistory, archiveCap)）
-  if (safeFrom <= archiveCap && safeToHistory >= safeFrom) {
+  const recentPart = await fetchForecastPastDaysWindow(coords, fromDate, displayTo, true);
+  Object.assign(result, recentPart);
+
+  const pastDaysEarliest = shiftDateString(todayStr, -92);
+  if (safeFrom <= archiveCap && safeToHistory >= safeFrom && safeFrom < pastDaysEarliest) {
     const archiveTo = safeToHistory > archiveCap ? archiveCap : safeToHistory;
-    const paramsArchive = new URLSearchParams({
-      latitude: coords.lat,
-      longitude: coords.lon,
-      start_date: safeFrom,
-      end_date: archiveTo,
-      daily: 'temperature_2m_max,precipitation_sum',
-      timezone: 'Asia/Tokyo',
-    });
-    try {
-      const res = await fetch(`https://archive-api.open-meteo.com/v1/archive?${paramsArchive}`);
-      if (res.ok) {
-        const data = await res.json();
-        const dates = data?.daily?.time ?? [];
-        const temps = data?.daily?.temperature_2m_max ?? [];
-        const rains = data?.daily?.precipitation_sum ?? [];
-        dates.forEach((dStr, i) => {
-          result[dStr] = { temp: temps[i], rain: rains[i] };
+    const archiveEnd = archiveTo < pastDaysEarliest
+      ? archiveTo
+      : shiftDateString(pastDaysEarliest, -1);
+    if (safeFrom <= archiveEnd) {
+      const archiveChunks = splitInclusiveRangeByMonth(safeFrom, archiveEnd);
+      for (const monthChunk of archiveChunks) {
+        const paramsArchive = new URLSearchParams({
+          latitude: coords.lat,
+          longitude: coords.lon,
+          start_date: monthChunk.from,
+          end_date: monthChunk.to,
+          daily: 'temperature_2m_max,precipitation_sum',
+          timezone: 'Asia/Tokyo',
         });
+        let data = await fetchOpenMeteoDailyUrl(
+          `https://archive-api.open-meteo.com/v1/archive?${paramsArchive}`,
+        );
+        if (!data?.daily?.time?.length) {
+          data = await fetchOpenMeteoDailyUrl(
+            `https://historical-forecast-api.open-meteo.com/v1/forecast?${paramsArchive}`,
+          );
+        }
+        if (data) {
+          const part = {};
+          mergeOpenMeteoDaily(part, data);
+          for (const [dateKey, value] of Object.entries(part)) {
+            if (!result[dateKey]) result[dateKey] = value;
+          }
+        }
       }
-    } catch {
-      // ignore archive failure
     }
   }
 
-  // 2) 直近分: forecast API （max(archiveCap+1, safeFrom)〜safeTo）
   const dArchiveNext = new Date(dArchiveEnd); dArchiveNext.setDate(dArchiveNext.getDate() + 1);
   const archiveNextStr = dArchiveNext.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
   const forecastHistoryFrom = safeFrom > archiveNextStr ? safeFrom : archiveNextStr;
@@ -2487,26 +2581,18 @@ async function fetchWeather(storeKey, fromDate, toDate) {
       daily: 'temperature_2m_max,precipitation_sum',
       timezone: 'Asia/Tokyo',
     });
-    try {
-      const res = await fetch(`https://api.open-meteo.com/v1/forecast?${paramsForecast}`);
-      if (res.ok) {
-        const data = await res.json();
-        const dates = data?.daily?.time ?? [];
-        const temps = data?.daily?.temperature_2m_max ?? [];
-        const rains = data?.daily?.precipitation_sum ?? [];
-        dates.forEach((dStr, i) => {
-          result[dStr] = { temp: temps[i], rain: rains[i] };
-        });
+    const data = await fetchOpenMeteoDailyUrl(`https://api.open-meteo.com/v1/forecast?${paramsForecast}`);
+    if (data) {
+      const chunk = {};
+      mergeOpenMeteoDaily(chunk, data);
+      for (const [dateKey, value] of Object.entries(chunk)) {
+        if (!result[dateKey]) result[dateKey] = value;
       }
-    } catch {
-      // ignore forecast failure
     }
   }
 
-  // 3) 将来分: 今日〜10日先（表示範囲内）の予報
   const forecastFutureFrom = todayStr > safeFrom ? todayStr : safeFrom;
   if (forecastFutureFrom <= forecastToStr) {
-    // end_date が長いと環境によって失敗するため、失敗時は短い期間で段階リトライ
     const futureRanges = buildForecastRetryRanges(forecastFutureFrom, forecastToStr);
     for (const range of futureRanges) {
       const paramsForecastFuture = new URLSearchParams({
@@ -2517,24 +2603,42 @@ async function fetchWeather(storeKey, fromDate, toDate) {
         daily: 'temperature_2m_max,precipitation_sum',
         timezone: 'Asia/Tokyo',
       });
-      try {
-        const res = await fetch(`https://api.open-meteo.com/v1/forecast?${paramsForecastFuture}`);
-        if (!res.ok) continue;
-        const data = await res.json();
-        const dates = data?.daily?.time ?? [];
-        const temps = data?.daily?.temperature_2m_max ?? [];
-        const rains = data?.daily?.precipitation_sum ?? [];
-        dates.forEach((dStr, i) => {
-          result[dStr] = { temp: temps[i], rain: rains[i] };
-        });
-        if (dates.length > 0) break;
-      } catch {
-        // try shorter range
+      const data = await fetchOpenMeteoDailyUrl(`https://api.open-meteo.com/v1/forecast?${paramsForecastFuture}`);
+      if (data?.daily?.time?.length) {
+        const chunk = {};
+        mergeOpenMeteoDaily(chunk, data);
+        Object.assign(result, chunk);
+        break;
       }
     }
   }
 
-  return { map: result, forecastLimited: displayTo > forecastCapStr };
+  const filledPast = Object.keys(result).filter((d) => d >= safeFrom && d <= safeToHistory).length;
+  let expectedPast = 0;
+  for (let d = safeFrom; d <= safeToHistory; d = shiftDateString(d, 1)) expectedPast += 1;
+
+  return {
+    map: result,
+    forecastLimited: displayTo > forecastCapStr,
+    archivePartial: expectedPast > 0 && filledPast < expectedPast && safeFrom < archiveCap,
+    source: 'direct',
+  };
+}
+
+async function fetchWeather(storeKey, fromDate, toDate) {
+  const coords = STORE_COORDS[storeKey];
+  if (!coords) return { map: {}, forecastLimited: false, source: 'none' };
+  const displayTo = shiftDateString(toDate, -1);
+
+  if (getToken()) {
+    try {
+      return await fetchWeatherViaAdminApi(coords, storeKey, fromDate, displayTo);
+    } catch {
+      // admin-api 未デプロイ時などは直接取得へ
+    }
+  }
+
+  return fetchWeatherDirect(coords, fromDate, toDate);
 }
 
 /* ── main load ── */
@@ -2571,14 +2675,21 @@ async function loadAll() {
     /** 売上・月次と並行で開始し、UI は先に描画してから await する（体感の待ち時間を短くする） */
     let weatherPromise;
 
+    /** 店舗プルダウンの「当該月: レシート0件」表示用（全店舗横断の store_options） */
+    let storeOptionsForSelect = null;
+
     if (state.storeKey) {
       const sk = state.storeKey;
       weatherPromise = fetchWeather(sk, from, to);
       dom.weatherStatus.textContent = '天候取得中…';
-      const [salesResults, monthlyData] = await Promise.all([
+      const [salesResults, monthlyData, allStoresSales] = await Promise.all([
         Promise.all(sortedMonths.map((m) => fetchSalesMonth(m, sk).catch(() => null))),
         fetchMonthly(sk),
+        fetchSalesMonth(displayMonth, '').catch(() => null),
       ]);
+      if (allStoresSales?.store_options?.length) {
+        storeOptionsForSelect = allStoresSales.store_options;
+      }
       const byMonth = new Map(
         (salesResults.filter(Boolean)).map((r) => [r.month, r]),
       );
@@ -2590,7 +2701,7 @@ async function loadAll() {
     } else {
       salesData = await fetchSalesMonth(displayMonth, '');
       if (salesData.store_options?.length) {
-        updateStoreSelect(salesData.store_options, salesData.selected_store_key);
+        storeOptionsForSelect = salesData.store_options;
       }
       if (!state.storeKey && salesData.selected_store_key) {
         state.storeKey = salesData.selected_store_key;
@@ -2628,8 +2739,9 @@ async function loadAll() {
 
     state.dailySeries = dailySeries;
 
-    if (state.storeKey && salesData.store_options?.length) {
-      updateStoreSelect(salesData.store_options, salesData.selected_store_key);
+    const selectOptions = storeOptionsForSelect ?? salesData.store_options;
+    if (selectOptions?.length) {
+      updateStoreSelect(selectOptions, state.storeKey || salesData.selected_store_key);
     }
 
     state.weather = {};
@@ -2706,9 +2818,19 @@ async function loadAll() {
     const weatherResult = await (weatherPromise ?? Promise.resolve({ map: {} })).catch(() => ({ map: {} }));
     state.weather = weatherResult?.map ?? {};
     const weatherCount = Object.keys(state.weather).length;
-    dom.weatherStatus.textContent = weatherCount > 0
-      ? `天候データ ${weatherCount}日分（実績+予報10日）`
-      : '天候データなし';
+    const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+    const pastCount = Object.keys(state.weather).filter((d) => d < todayStr).length;
+    if (weatherCount > 0) {
+      const parts = [`天候 ${weatherCount}日分`];
+      if (pastCount > 0) parts.push(`過去 ${pastCount}日`);
+      if (weatherResult?.cacheHits > 0) parts.push(`保存済 ${weatherResult.cacheHits}日`);
+      if (weatherResult?.fetchedNew > 0) parts.push(`新規 ${weatherResult.fetchedNew}日`);
+      if (weatherResult?.forecastLimited) parts.push('予報10日まで');
+      if (weatherResult?.archivePartial) parts.push('3ヶ月超は一部未取得');
+      dom.weatherStatus.textContent = parts.join(' / ');
+    } else {
+      dom.weatherStatus.textContent = '天候データなし';
+    }
 
     renderAllCharts();
   } catch (e) {
