@@ -164,6 +164,21 @@
       align-items: center;
     }
 
+    .remember-login-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 0.86rem;
+      color: #b8d9ec;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .remember-login-label input {
+      margin: 0;
+    }
+
     .setting-stack {
       display: grid;
       gap: 10px;
@@ -560,7 +575,7 @@
     }
 
     .webhook-card {
-      border: 1px solid rgba(155, 220, 255, 0.24);
+      border: 3px solid rgba(155, 220, 255, 0.36);
       border-radius: 14px;
       background: rgba(7, 20, 34, 0.78);
       padding: 14px;
@@ -621,14 +636,18 @@
     }
 
     .webhook-card.is-active {
-      border-color: rgba(100, 220, 160, 0.38);
-      background: rgba(8, 28, 22, 0.82);
+      border-color: rgba(230, 160, 70, 0.52);
+      background: linear-gradient(180deg, rgba(42, 28, 14, 0.88), rgba(34, 22, 10, 0.92));
     }
 
     .webhook-card-status {
       font-size: 0.78rem;
       color: #9fdcc0;
       line-height: 1.45;
+    }
+
+    .webhook-card.is-active .webhook-card-status {
+      color: #f0c992;
     }
 
     .webhook-card-status-badge {
@@ -641,6 +660,12 @@
       color: #b8f0d0;
       font-size: 0.72rem;
       font-weight: 700;
+    }
+
+    .webhook-card.is-active .webhook-card-status-badge {
+      background: rgba(220, 140, 45, 0.22);
+      color: #ffd9a8;
+      border: 1px solid rgba(230, 160, 70, 0.28);
     }
 
     .webhook-card-receipt-features {
@@ -687,12 +712,128 @@
       color: var(--muted);
     }
 
-    .modal-card[data-webhook-mode="permission"] label.room-scope-option:not(.receipt-scope-option) {
+    .modal-card[data-webhook-mode="permission"] label.room-scope-option:not(.receipt-scope-option):not(.store-permission-option) {
       display: none;
+    }
+
+    .modal-card[data-webhook-mode="permission"] .store-permission-inline-hidden {
+      display: none !important;
+    }
+
+    .modal-card[data-webhook-mode="setup"] .store-permission-panel {
+      display: none !important;
     }
 
     .modal-card[data-webhook-mode="permission"] .receipt-permission-only-hidden {
       display: none !important;
+    }
+
+    .modal-card[data-webhook-mode="permission"] {
+      max-height: min(90vh, 760px);
+      overflow-y: auto;
+    }
+
+    .receipt-schedule-panel {
+      margin-top: 10px;
+      padding: 12px;
+      border: 1px solid rgba(155, 220, 255, 0.18);
+      border-radius: 10px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .receipt-schedule-bulk-hint {
+      font-size: 0.76rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .receipt-schedule-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+    }
+
+    .receipt-schedule-row .input.schedule-num {
+      width: 64px;
+      min-width: 64px;
+      text-align: center;
+    }
+
+    .receipt-schedule-row .input.schedule-time {
+      width: 88px;
+      min-width: 88px;
+      text-align: center;
+    }
+
+    .receipt-schedule-fields[hidden] {
+      display: none !important;
+    }
+
+    .new-room-extra-settings-panel[hidden] {
+      display: none !important;
+    }
+
+    .new-room-receipt-panel {
+      margin-top: 10px;
+      padding: 12px;
+      border: 1px solid rgba(155, 220, 255, 0.18);
+      border-radius: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    body[data-theme='light'] .new-room-receipt-panel {
+      border-color: rgba(76, 128, 164, 0.24);
+      background: rgba(249, 253, 255, 0.92);
+    }
+
+    body[data-theme='light'] .receipt-schedule-panel {
+      border-color: rgba(76, 128, 164, 0.24);
+      background: rgba(249, 253, 255, 0.92);
+    }
+
+    body[data-theme='light'] .receipt-schedule-bulk-hint {
+      color: #4f7187;
+    }
+
+    .webhook-card-unlinked-hint {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px dashed rgba(255, 180, 90, 0.45);
+      background: rgba(255, 160, 60, 0.08);
+      font-size: 0.78rem;
+      color: #ffc98a;
+      line-height: 1.45;
+    }
+
+    body[data-theme='light'] .webhook-card-unlinked-hint {
+      color: #9a5a12;
+      border-color: rgba(200, 120, 40, 0.35);
+      background: rgba(255, 248, 236, 0.95);
+    }
+
+    .receipt-schedule-detected-wrap {
+      padding: 10px;
+      border: 1px dashed rgba(255, 180, 90, 0.45);
+      border-radius: 8px;
+      background: rgba(255, 160, 60, 0.06);
+    }
+
+    .receipt-schedule-detected-list {
+      margin: 6px 0 0;
+      padding-left: 18px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+
+    body[data-theme='light'] .receipt-schedule-detected-wrap {
+      border-color: rgba(200, 120, 40, 0.35);
+      background: rgba(255, 248, 236, 0.95);
     }
 
     .webhook-linked-rooms {
@@ -1287,31 +1428,6 @@
       padding: 0 12px;
     }
 
-    .room-scope-badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 98px;
-      min-height: 30px;
-      padding: 0 8px;
-      border-radius: 999px;
-      border: 1px solid rgba(155, 220, 255, 0.24);
-      background: rgba(8, 21, 35, 0.55);
-      color: #bde6ff;
-      font-size: 0.75rem;
-      max-width: 100%;
-    }
-
-    .room-scope-badge.warn {
-      color: #fff0d2;
-      border-color: rgba(255, 188, 92, 0.58);
-      background: linear-gradient(180deg, rgba(141, 80, 24, 0.72), rgba(106, 58, 16, 0.74));
-      box-shadow:
-        0 0 0 1px rgba(255, 218, 152, 0.22) inset,
-        0 2px 8px rgba(0, 0, 0, 0.2);
-      font-weight: 700;
-    }
-
     @media (max-width: 960px) {
       .user-permission-controls {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1392,6 +1508,90 @@
 
     .modal-backdrop.open {
       display: flex;
+    }
+
+    #syncOverlay {
+      z-index: 2000;
+      background: rgba(2, 10, 18, 0.78);
+      backdrop-filter: blur(4px);
+    }
+
+    .sync-overlay-card {
+      width: min(420px, 92vw);
+      border-radius: 18px;
+      border: 1px solid rgba(155, 220, 255, 0.28);
+      background: linear-gradient(165deg, rgba(12, 32, 52, 0.98), rgba(8, 20, 34, 0.98));
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+        0 18px 48px rgba(0, 0, 0, 0.45);
+      padding: 22px 22px 18px;
+      text-align: center;
+    }
+
+    .sync-overlay-spinner {
+      width: 52px;
+      height: 52px;
+      margin: 0 auto 14px;
+      border-radius: 50%;
+      border: 3px solid rgba(120, 190, 230, 0.18);
+      border-top-color: #45c2ff;
+      animation: syncSpin 0.85s linear infinite;
+    }
+
+    @keyframes syncSpin {
+      to { transform: rotate(360deg); }
+    }
+
+    .sync-overlay-title {
+      margin: 0 0 8px;
+      font-size: 1.12rem;
+      color: #e8f6ff;
+      letter-spacing: 0.02em;
+    }
+
+    .sync-overlay-message {
+      margin: 0 0 10px;
+      font-size: 0.92rem;
+      color: #a8d0e8;
+      line-height: 1.55;
+    }
+
+    .sync-overlay-step {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 188, 92, 0.42);
+      background: rgba(141, 80, 24, 0.22);
+      color: #ffe8c2;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    body[data-theme='light'] #syncOverlay {
+      background: rgba(244, 250, 255, 0.82);
+    }
+
+    body[data-theme='light'] .sync-overlay-card {
+      background: linear-gradient(165deg, rgba(255, 255, 255, 0.98), rgba(244, 250, 255, 0.98));
+      border-color: rgba(102, 142, 174, 0.34);
+      box-shadow: 0 16px 40px rgba(40, 72, 98, 0.14);
+    }
+
+    body[data-theme='light'] .sync-overlay-title {
+      color: #1f4258;
+    }
+
+    body[data-theme='light'] .sync-overlay-message {
+      color: #4f7088;
+    }
+
+    body[data-theme='light'] .sync-overlay-step {
+      color: #6f4513;
+      background: rgba(255, 244, 220, 0.95);
+      border-color: rgba(196, 140, 58, 0.38);
     }
 
     #userPermissionEditModal {
@@ -1781,21 +1981,10 @@
     body[data-theme='light'] .storage-pie-center-value,
     body[data-theme='light'] .tag,
     body[data-theme='light'] .room-config-badge,
-    body[data-theme='light'] .new-room-config-summary,
-    body[data-theme='light'] .room-scope-badge {
+    body[data-theme='light'] .new-room-config-summary {
       color: #365a73;
       background: rgba(242, 248, 255, 0.95);
       border-color: rgba(102, 142, 174, 0.34);
-    }
-
-    body[data-theme='light'] .room-scope-badge.warn {
-      color: #6f4513;
-      background: linear-gradient(180deg, rgba(255, 250, 233, 0.98), rgba(255, 239, 196, 0.97));
-      border-color: rgba(196, 140, 58, 0.42);
-      box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.68) inset,
-        0 1px 3px rgba(170, 98, 13, 0.1);
-      font-weight: 700;
     }
 
     body[data-theme='light'] .user-permission-name-text {
@@ -2072,6 +2261,172 @@
       color: #17354c;
     }
 
+    body[data-theme='light'] .card.webhook-settings h2 {
+      color: #17354c;
+    }
+
+    body[data-theme='light'] .card.webhook-settings .muted,
+    body[data-theme='light'] .card.webhook-settings .meta {
+      color: #3d6278;
+    }
+
+    body[data-theme='light'] .webhook-card {
+      border-width: 3px;
+      border-color: rgba(63, 104, 139, 0.5);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 248, 255, 0.98));
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.92) inset,
+        0 8px 20px rgba(22, 59, 92, 0.08);
+    }
+
+    body[data-theme='light'] .webhook-card.is-active {
+      border-width: 3px;
+      border-color: rgba(200, 120, 28, 0.58);
+      background: linear-gradient(180deg, rgba(255, 248, 236, 0.98), rgba(255, 232, 200, 0.98));
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.92) inset,
+        0 8px 20px rgba(180, 110, 20, 0.1);
+    }
+
+    body[data-theme='light'] .webhook-card.unassigned {
+      border-width: 3px;
+      border-color: rgba(182, 122, 30, 0.54);
+      background: linear-gradient(180deg, rgba(255, 252, 245, 0.98), rgba(255, 244, 226, 0.98));
+    }
+
+    body[data-theme='light'] .webhook-card-title {
+      color: #17354c;
+    }
+
+    body[data-theme='light'] .webhook-card-key code {
+      color: #4f7187;
+      background: rgba(226, 240, 252, 0.9);
+      border: 1px solid rgba(76, 128, 164, 0.18);
+      border-radius: 6px;
+      padding: 2px 6px;
+    }
+
+    body[data-theme='light'] .webhook-card-url code,
+    body[data-theme='light'] .webhook-card-tables code {
+      color: #0a5a82;
+      background: rgba(226, 240, 252, 0.72);
+      border-radius: 6px;
+      padding: 2px 4px;
+    }
+
+    body[data-theme='light'] .webhook-card-tables {
+      color: #3d6278;
+    }
+
+    body[data-theme='light'] .webhook-card.is-active .webhook-card-status {
+      color: #9a5a12;
+    }
+
+    body[data-theme='light'] .webhook-card.is-active .webhook-card-status-badge {
+      background: rgba(210, 130, 40, 0.18);
+      color: #9a5a12;
+      border: 1px solid rgba(200, 120, 28, 0.32);
+    }
+
+    body[data-theme='light'] .webhook-card-receipt-features {
+      color: #3d6278;
+    }
+
+    body[data-theme='light'] .webhook-card-perm-users {
+      border-color: rgba(76, 128, 164, 0.22);
+      background: rgba(249, 253, 255, 0.94);
+    }
+
+    body[data-theme='light'] .webhook-card-perm-users-title {
+      color: #17354c;
+    }
+
+    body[data-theme='light'] .webhook-card-perm-user-item {
+      color: #24465f;
+    }
+
+    body[data-theme='light'] .webhook-setup-details summary,
+    body[data-theme='light'] .webhook-linked-rooms summary {
+      color: #24465f;
+    }
+
+    body[data-theme='light'] .webhook-linked-rooms {
+      border-top-color: rgba(76, 128, 164, 0.18);
+    }
+
+    body[data-theme='light'] .webhook-room-item {
+      border-color: rgba(76, 128, 164, 0.2);
+      background: rgba(249, 253, 255, 0.96);
+    }
+
+    body[data-theme='light'] .webhook-room-item-title {
+      color: #17354c;
+    }
+
+    body[data-theme='light'] .webhook-room-item-meta {
+      color: #4f7187;
+    }
+
+    body[data-theme='light'] .webhook-card .button {
+      color: #24465f;
+      border-color: rgba(76, 128, 164, 0.28);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(236, 246, 255, 0.98));
+    }
+
+    body[data-theme='light'] .webhook-card .button:hover {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(226, 240, 252, 1));
+      border-color: rgba(63, 104, 139, 0.36);
+    }
+
+    body[data-theme='light'] .webhook-card .button.primary {
+      color: #ffffff;
+      border-color: rgba(21, 127, 186, 0.42);
+      background: linear-gradient(180deg, rgba(31, 136, 194, 0.96), rgba(18, 108, 160, 0.96));
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset;
+    }
+
+    body[data-theme='light'] .webhook-card .button.primary:hover {
+      background: linear-gradient(180deg, rgba(36, 146, 206, 0.98), rgba(21, 118, 172, 0.98));
+      border-color: rgba(21, 127, 186, 0.52);
+    }
+
+    body[data-theme='light'] .webhook-card .button.warn {
+      color: #8f3a22;
+      border-color: rgba(184, 132, 99, 0.34);
+      background: linear-gradient(180deg, rgba(255, 247, 242, 0.98), rgba(255, 236, 226, 0.98));
+    }
+
+    body[data-theme='light'] .webhook-card .input,
+    body[data-theme='light'] .webhook-card .select {
+      color: #17354c;
+      background: rgba(255, 255, 255, 0.98);
+      border-color: rgba(76, 128, 164, 0.28);
+    }
+
+    body[data-theme='light'] .webhook-card .room-config-badge {
+      color: #24465f;
+      background: rgba(226, 240, 252, 0.88);
+      border: 1px solid rgba(76, 128, 164, 0.2);
+    }
+
+    body[data-theme='light'] .webhook-card .room-config-badge.high {
+      color: #0b6844;
+      background: rgba(214, 245, 230, 0.92);
+      border-color: rgba(15, 141, 95, 0.24);
+    }
+
+    body[data-theme='light'] .webhook-card .room-config-badge.mid {
+      color: #7a5610;
+      background: rgba(255, 244, 220, 0.94);
+      border-color: rgba(182, 122, 30, 0.24);
+    }
+
+    body[data-theme='light'] .webhook-card .room-config-badge.low {
+      color: #6a3040;
+      background: rgba(255, 236, 242, 0.94);
+      border-color: rgba(213, 76, 116, 0.2);
+    }
+
     @media (max-width: 1080px) {
       body { padding: 14px; }
       .global, .logs, .webhook-settings { grid-column: span 12; }
@@ -2140,7 +2495,7 @@
   <div class="app">
     <header class="hero">
       <h1>Line Summary Console</h1>
-      <p>配信時刻（=配信回数）、Webhook別設定、配信ログを管理します。</p>
+      <p>店舗別 Webhook 設定、レシート機能、配信ログを管理します。</p>
       <div class="status">
         <span id="authState" class="pill">未接続</span>
         <span id="lastRefresh" class="pill">最終更新: なし</span>
@@ -2161,12 +2516,15 @@
             <div class="controls">
               <input id="projectUrlInput" class="input long" type="text" value="https://jhpmzqxqvapdkyvvhyra.supabase.co" readonly tabindex="-1" aria-readonly="true" onfocus="this.blur()">
               <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+              <label class="remember-login-label" for="rememberLoginCheck">
+                <input id="rememberLoginCheck" type="checkbox" checked>
+                <span>ログイン状態を保持</span>
+              </label>
               <button id="saveTokenBtn" class="button primary">保存して接続</button>
               <button id="clearTokenBtn" class="button">削除</button>
             </div>
             <div class="controls" style="margin-top:8px;">
               <button id="reloadBtn" class="button">再読み込み</button>
-              <button id="runNowBtn" class="button">今すぐ要約実行</button>
               <a href="./media.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">メディア閲覧</a>
               <a href="./reservation.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">予約表</a>
               <a href="./analytics.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">売上分析</a>
@@ -2189,48 +2547,11 @@
             </div>
           </div>
         </div>
-        <div class="meta">Project URL は固定です。トークンはブラウザの LocalStorage に保存されます。</div>
+        <div class="meta" id="authPersistMeta">「ログイン状態を保持」ON のとき、次回アクセスから自動で接続します。</div>
       </section>
 
       <section class="card global">
-        <h2>全体設定</h2>
-        <div class="setting-stack">
-          <div class="setting-block">
-            <p class="setting-block-title">配信設定</p>
-            <label class="switch"><input id="globalEnabled" type="checkbox">配信を有効化</label>
-            <div class="controls" style="margin-top:8px;">
-              <input id="globalHoursInput" class="input" type="text" placeholder="例: 12,17,23">
-              <select id="lastDeliverySummaryMode" class="select" aria-label="最終配信の集計方式">
-                <option value="independent">各回独立で要約（従来）</option>
-                <option value="daily_rollup">最終配信のみ1日まとめ</option>
-              </select>
-              <select id="messageRetentionDays" class="select" aria-label="メッセージ保持期間">
-                <option value="365">会話保持: 1年（推奨）</option>
-                <option value="730">会話保持: 2年</option>
-                <option value="1095">会話保持: 3年</option>
-                <option value="0">会話保持: 無制限</option>
-                <option value="60">会話保持: 60日</option>
-                <option value="120">会話保持: 120日</option>
-                <option value="180">会話保持: 180日</option>
-              </select>
-              <button id="saveGlobalBtn" class="button primary">全体設定を保存</button>
-            </div>
-          </div>
-          <div class="setting-block">
-            <p class="setting-block-title">翌日予定通知</p>
-            <div class="controls">
-              <label class="switch"><input id="tomorrowReminderEnabled" type="checkbox">翌日予定通知を有効化</label>
-              <input id="tomorrowReminderHoursInput" class="input" type="text" placeholder="翌日予定通知の時刻 例: 19">
-              <select id="tomorrowReminderOnlyIfEvents" class="select" aria-label="予定なし時の通知">
-                <option value="false">予定なしの日も通知</option>
-                <option value="true">予定がある日だけ通知</option>
-              </select>
-              <input id="tomorrowReminderMaxItems" class="input short" type="number" min="1" max="50" step="1" placeholder="表示件数">
-              <button id="saveTomorrowReminderBtn" class="button primary">翌日予定通知を保存</button>
-            </div>
-          </div>
-        </div>
-        <div id="globalMeta" class="meta preline"></div>
+        <h2>利用状況</h2>
         <div id="storageUsageSummary" class="meta usage-summary"></div>
         <div id="storageUsageDetails" class="meta usage-details"></div>
         <div id="pushUsageSummary" class="meta usage-summary"></div>
@@ -2270,17 +2591,15 @@
       </section>
 
       <section class="card logs">
-        <h2>配信ログ（最新）</h2>
+        <h2>Webhookログ（最新）</h2>
         <div id="webhookQuotaSummary" class="meta usage-summary"></div>
-        <div class="log-tabs" role="tablist" aria-label="配信ログの種類">
-          <button type="button" class="log-tab active" id="logTabSummary" data-log-tab="summary" role="tab" aria-selected="true">定期・ジョブ配信</button>
-          <button type="button" class="log-tab" id="logTabWebhook" data-log-tab="webhook" role="tab" aria-selected="false">Webhook（LINE返信）</button>
-        </div>
         <div class="table-wrap log-table-wrap">
-          <table class="log-table log-table--summary" id="deliveryLogTable">
+          <table class="log-table log-table--webhook" id="deliveryLogTable">
             <thead id="logTableHead">
               <tr>
                 <th>実行時刻</th>
+                <th>方式</th>
+                <th>種別</th>
                 <th>状態</th>
                 <th>理由</th>
                 <th>対象</th>
@@ -2354,7 +2673,6 @@
 
       <div class="user-room-scope-cell" style="margin-top:10px;">
         <button id="userPermissionEditScopeBtn" class="button" type="button">ルーム選択</button>
-        <div id="userPermissionEditScopeBadge" class="room-scope-badge">全ルーム対象</div>
       </div>
 
       <div class="user-perm-meta-row" style="margin-top:10px;">
@@ -2390,15 +2708,78 @@
         <label class="room-scope-option"><input id="roomConfigMessageSearchLibraryEnabled" type="checkbox">資料検索（2段階目）</label>
         <label class="room-scope-option"><input id="roomConfigSendSummary" type="checkbox">ルーム要約配信（このルーム単体）</label>
         <label class="room-scope-option" title="全体の定期要約レポートをこのトークにも送ります。LINE_OVERALL_ROOM_ID のルームと同じ内容です。ルーム単体の要約とは同時にONにできません。"><input id="roomConfigReceiveOverallSummary" type="checkbox">全体要約レポートをこのルームに配信</label>
-        <label class="room-scope-option"><input id="roomConfigTomorrowReminder" type="checkbox">明日予定配信</label>
+        <label class="room-scope-option store-permission-inline-hidden"><input id="roomConfigTomorrowReminder" type="checkbox">明日予定配信</label>
         <label class="room-scope-option receipt-scope-option"><input id="roomConfigMediaAccess" type="checkbox">LINE添付保存（ルーム）</label>
         <label class="room-scope-option receipt-scope-option"><input id="roomConfigImageAnalysisReplyEnabled" type="checkbox">画像解析結果をLINE返信</label>
-        <label class="room-scope-option" title="連携カレンダーへ、AIが予定と判断した場合の扱いです。信頼度が高いときは通常LINEで返信せず登録します（下の「登録内容をLINEで返信」で高確度でも返信可能）。信頼度が低いときは、さらに下の「低確度のときは確認の返信」がOFFなら無返信のまま件名に（仮）の仮登録、ONならLINEではい／いいえで確認します。"><input id="roomConfigGoogleCalendarAutoRegister" type="checkbox">会話から予定を検知したら「Googleカレンダー」へ無返信で自動登録する</label>
-        <label class="room-scope-option" title="無返信自動登録がONで、AIが高確度と判断してカレンダーに書き込んだあと、登録内容（日時・件名など）をこのトークに返信します。AI会話返信もONが必要です。低確度の確認返信とは別に設定できます。"><input id="roomConfigCalendarRegistrationReply" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
-        <label class="room-scope-option" title="無返信自動登録がONのときのみ有効です。AIの信頼度が「要確認」レンジのとき、LINEで「登録しますか？」と返信し、はい／いいえで確定します。OFFのときは無言のまま件名に（仮）を付けて登録します（AI会話返信もONが必要）。"><input id="roomConfigCalendarLowConfidenceConfirmReply" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
-        <label class="room-scope-option"><input id="roomConfigGmailAlert" type="checkbox">Gmail予約通知</label>
-        <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMidreportEnabled" type="checkbox">売上中間報告をこのルームに送信（16日 10:00）</label>
-        <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMonthendReportEnabled" type="checkbox">売上月末レポートをこのルームに送信（翌月1日 10:00）</label>
+        <label class="room-scope-option store-permission-inline-hidden" title="連携カレンダーへ、AIが予定と判断した場合の扱いです。信頼度が高いときは通常LINEで返信せず登録します（下の「登録内容をLINEで返信」で高確度でも返信可能）。信頼度が低いときは、さらに下の「低確度のときは確認の返信」がOFFなら無返信のまま件名に（仮）の仮登録、ONならLINEではい／いいえで確認します。"><input id="roomConfigGoogleCalendarAutoRegister" type="checkbox">会話から予定を検知したら「Googleカレンダー」へ無返信で自動登録する</label>
+        <label class="room-scope-option store-permission-inline-hidden" title="無返信自動登録がONで、AIが高確度と判断してカレンダーに書き込んだあと、登録内容（日時・件名など）をこのトークに返信します。AI会話返信もONが必要です。低確度の確認返信とは別に設定できます。"><input id="roomConfigCalendarRegistrationReply" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
+        <label class="room-scope-option store-permission-inline-hidden" title="無返信自動登録がONのときのみ有効です。AIの信頼度が「要確認」レンジのとき、LINEで「登録しますか？」と返信し、はい／いいえで確定します。OFFのときは無言のまま件名に（仮）を付けて登録します（AI会話返信もONが必要）。"><input id="roomConfigCalendarLowConfidenceConfirmReply" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
+        <label class="room-scope-option store-permission-inline-hidden"><input id="roomConfigGmailAlert" type="checkbox">Gmail予約通知</label>
+        <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMidreportEnabled" type="checkbox"><span id="roomConfigReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
+        <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMonthendReportEnabled" type="checkbox"><span id="roomConfigReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
+      </div>
+      <div id="roomConfigReceiptScheduleWrap" class="receipt-schedule-panel receipt-scope-option">
+        <div id="roomConfigReceiptScheduleRoomWrap" class="receipt-schedule-row">
+          <span>対象ルーム</span>
+          <select id="roomConfigReceiptScheduleRoomSelect" class="select" style="flex:1; min-width:0;" aria-label="送信時刻を設定するルーム"></select>
+        </div>
+        <div id="roomConfigReceiptScheduleNoRoomHint" class="receipt-schedule-bulk-hint" hidden>
+          「通信中」は Webhook でメッセージを受信している状態です。売上レポートの送信先として使うには、下の「受信済みルームを連携」を実行するか、店舗カードの「連携ルーム」から room_id を追加してください。
+        </div>
+        <div id="roomConfigReceiptDetectedRoomsWrap" class="receipt-schedule-detected-wrap" hidden>
+          <div id="roomConfigReceiptDetectedRoomsHint" class="receipt-schedule-bulk-hint">Webhook で受信済み（未連携）:</div>
+          <ul id="roomConfigReceiptDetectedRoomsList" class="receipt-schedule-detected-list"></ul>
+          <button id="roomConfigLinkDetectedRoomsBtn" class="button primary" type="button" style="margin-top:8px;">受信済みルームを連携する</button>
+        </div>
+        <div id="roomConfigReceiptScheduleBulkHint" class="receipt-schedule-bulk-hint">一括設定: -</div>
+        <label class="room-scope-option receipt-schedule-override-toggle"><input id="roomConfigReceiptScheduleOverride" type="checkbox">このルームで送信時刻を個別設定する（OFFのときは一括設定を使用）</label>
+        <div id="roomConfigReceiptScheduleFields" class="receipt-schedule-fields" hidden>
+          <div class="receipt-schedule-row">
+            <span>中間報告</span>
+            <span>毎月</span>
+            <input id="roomConfigReceiptMidreportDay" class="input schedule-num" type="number" min="1" max="28" step="1" aria-label="中間報告の日">
+            <span>日</span>
+            <input id="roomConfigReceiptMidreportTime" class="input schedule-time" type="time" aria-label="中間報告の時刻">
+          </div>
+          <div class="receipt-schedule-row">
+            <span>月末レポート</span>
+            <span>翌月</span>
+            <input id="roomConfigReceiptMonthendDay" class="input schedule-num" type="number" min="1" max="28" step="1" aria-label="月末レポートの日">
+            <span>日</span>
+            <input id="roomConfigReceiptMonthendTime" class="input schedule-time" type="time" aria-label="月末レポートの時刻">
+          </div>
+        </div>
+      </div>
+      <div id="roomConfigCalendarGmailWrap" class="receipt-schedule-panel store-permission-panel store-permission-option">
+        <div class="modal-meta" style="margin-bottom:4px;">予約・予定登録（ルーム個別）</div>
+        <div class="receipt-schedule-bulk-hint">対象ルームは上の「送信時刻」と同じ選択を使います。</div>
+        <div id="roomConfigCalendarGmailBulkHint" class="receipt-schedule-bulk-hint">一括設定: -</div>
+        <label class="room-scope-option store-permission-option"><input id="roomConfigCalendarGmailOverride" type="checkbox">このルームで予約・予定登録を個別設定する（OFFのときは一括設定を使用）</label>
+        <div id="roomConfigCalendarGmailFields" class="room-scope-modal-list receipt-schedule-fields" hidden>
+          <label class="room-scope-option store-permission-option"><input id="roomConfigTomorrowReminderPerm" type="checkbox">明日予定配信</label>
+          <div id="roomConfigTomorrowReminderScheduleFields" class="receipt-schedule-fields" hidden>
+            <div class="receipt-schedule-row">
+              <span>配信時刻</span>
+              <input id="roomConfigTomorrowReminderHours" class="input" type="text" placeholder="19 または 12,17,19" aria-label="明日予定配信の時刻">
+              <span class="modal-meta">0〜23時（カンマ区切り）</span>
+            </div>
+            <div class="receipt-schedule-row">
+              <span>予定がある日のみ</span>
+              <select id="roomConfigTomorrowReminderOnlyIfEvents" class="select" aria-label="予定がある日のみ送信">
+                <option value="1">ON（予定があるときだけ送信）</option>
+                <option value="0">OFF（毎日送信）</option>
+              </select>
+            </div>
+            <div class="receipt-schedule-row">
+              <span>最大件数</span>
+              <input id="roomConfigTomorrowReminderMaxItems" class="input schedule-num" type="number" min="1" max="50" step="1" aria-label="明日予定の最大件数">
+            </div>
+          </div>
+          <label class="room-scope-option store-permission-option" title="連携カレンダーへ、AIが予定と判断した場合の扱いです。"><input id="roomConfigGoogleCalendarAutoRegisterPerm" type="checkbox">会話から予定を検知したら「Googleカレンダー」へ無返信で自動登録する</label>
+          <label class="room-scope-option store-permission-option" title="無返信自動登録がONのあと、登録内容をLINEで返信します。"><input id="roomConfigCalendarRegistrationReplyPerm" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
+          <label class="room-scope-option store-permission-option" title="低確度のときは確認の返信（はい／いいえ）を送ります。"><input id="roomConfigCalendarLowConfidenceConfirmReplyPerm" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
+          <label class="room-scope-option store-permission-option"><input id="roomConfigGmailAlertPerm" type="checkbox">Gmail予約通知</label>
+        </div>
       </div>
       <div id="roomConfigStoreSelectWrap" class="modal-meta receipt-permission-only-hidden" style="margin-top:12px; display:none;" hidden aria-hidden="true">
         <div>売上レポート（中間・月末）の集計店舗</div>
@@ -2439,9 +2820,38 @@
 
   <div id="newRoomConfigModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="newRoomConfigModalTitle">
-      <h3 id="newRoomConfigModalTitle" class="modal-title">新規ルーム追加時の設定</h3>
-      <div class="modal-meta">ここで選んだ値が次の追加に使われます。</div>
-      <div class="room-scope-modal-list" style="margin-top:12px;">
+      <h3 id="newRoomConfigModalTitle" class="modal-title">新規ルーム追加時の設定（一括）</h3>
+      <div class="modal-meta">レシート解析・売上レポート用の基本設定です。<strong>AI会話返信は通常OFF</strong>（質問には沈黙）。画像解析結果の返信と売上レポートが主な用途です。</div>
+      <div class="new-room-receipt-panel">
+        <div class="modal-meta" style="margin-bottom:2px;">レシート関連（基本）</div>
+        <div class="room-scope-modal-list">
+          <label class="room-scope-option"><input id="newRoomMediaFileAccessEnabled" type="checkbox">LINE添付保存（ルーム）</label>
+          <label class="room-scope-option"><input id="newRoomImageAnalysisReplyEnabled" type="checkbox">画像解析結果をLINE返信</label>
+          <label class="room-scope-option"><input id="newRoomReceiptMidreportEnabled" type="checkbox"><span id="newRoomReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
+          <label class="room-scope-option"><input id="newRoomReceiptMonthendReportEnabled" type="checkbox"><span id="newRoomReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
+        </div>
+        <div class="receipt-schedule-panel" style="margin-top:4px; padding:10px;">
+          <div class="modal-meta" style="margin-bottom:6px;">売上レポート送信時刻（一括・全店舗のデフォルト）</div>
+          <div class="receipt-schedule-row">
+            <span>中間報告</span>
+            <span>毎月</span>
+            <input id="newRoomReceiptMidreportDay" class="input schedule-num" type="number" min="1" max="28" step="1" aria-label="中間報告の日">
+            <span>日</span>
+            <input id="newRoomReceiptMidreportTime" class="input schedule-time" type="time" aria-label="中間報告の時刻">
+          </div>
+          <div class="receipt-schedule-row">
+            <span>月末レポート</span>
+            <span>翌月</span>
+            <input id="newRoomReceiptMonthendDay" class="input schedule-num" type="number" min="1" max="28" step="1" aria-label="月末レポートの日">
+            <span>日</span>
+            <input id="newRoomReceiptMonthendTime" class="input schedule-time" type="time" aria-label="月末レポートの時刻">
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label class="room-scope-option"><input id="newRoomExtraSettingsToggle" type="checkbox">その他設定（AI会話・検索・要約・予定・予約など）</label>
+      </div>
+      <div id="newRoomExtraSettingsPanel" class="new-room-extra-settings-panel room-scope-modal-list" style="margin-top:8px;" hidden>
         <label class="room-scope-option"><input id="newRoomBotReplyEnabled" type="checkbox">AI会話返信</label>
         <label class="room-scope-option"><input id="newRoomBotReplyHardMute" type="checkbox">AI返信完全無し（このルームは返信しない）</label>
         <label class="room-scope-option"><input id="newRoomMessageSearchEnabled" type="checkbox">会話検索（ルーム）</label>
@@ -2449,22 +2859,37 @@
         <label class="room-scope-option"><input id="newRoomSendSummary" type="checkbox">ルーム要約配信（このルーム単体）</label>
         <label class="room-scope-option" title="全体の定期要約レポートをこのトークにも送ります。ルーム単体の要約とは同時にONにできません。"><input id="newRoomReceiveOverallSummary" type="checkbox">全体要約レポートをこのルームに配信</label>
         <label class="room-scope-option"><input id="newRoomTomorrowReminder" type="checkbox">明日予定配信</label>
-        <label class="room-scope-option"><input id="newRoomMediaFileAccessEnabled" type="checkbox">LINE添付保存（ルーム）</label>
-        <label class="room-scope-option"><input id="newRoomImageAnalysisReplyEnabled" type="checkbox">画像解析結果をLINE返信</label>
-        <label class="room-scope-option" title="連携カレンダーへ、AIが予定と判断した場合の扱いです。信頼度が高いときは通常LINEで返信せず登録します（下の「登録内容をLINEで返信」で高確度でも返信可能）。信頼度が低いときは、さらに下の「低確度のときは確認の返信」がOFFなら無返信のまま件名に（仮）の仮登録、ONならLINEではい／いいえで確認します。"><input id="newRoomGoogleCalendarAutoRegister" type="checkbox">会話から予定を検知したら「Googleカレンダー」へ無返信で自動登録する</label>
+        <div id="newRoomTomorrowReminderSchedulePanel" class="receipt-schedule-panel" style="margin-top:4px;padding:8px;" hidden>
+          <div class="modal-meta" style="margin-bottom:6px;">明日予定配信の時間（一括・全ルームのデフォルト）</div>
+          <div class="receipt-schedule-row">
+            <span>配信時刻</span>
+            <input id="newRoomTomorrowReminderHours" class="input" type="text" placeholder="19 または 12,17,19" aria-label="明日予定配信の時刻">
+            <span class="modal-meta">0〜23時（カンマ区切り）</span>
+          </div>
+          <div class="receipt-schedule-row">
+            <span>予定がある日のみ</span>
+            <select id="newRoomTomorrowReminderOnlyIfEvents" class="select" aria-label="予定がある日のみ送信">
+              <option value="1">ON（予定があるときだけ送信）</option>
+              <option value="0">OFF（毎日送信）</option>
+            </select>
+          </div>
+          <div class="receipt-schedule-row">
+            <span>最大件数</span>
+            <input id="newRoomTomorrowReminderMaxItems" class="input schedule-num" type="number" min="1" max="50" step="1" aria-label="明日予定の最大件数">
+          </div>
+        </div>
+        <label class="room-scope-option" title="連携カレンダーへ、AIが予定と判断した場合の扱いです。"><input id="newRoomGoogleCalendarAutoRegister" type="checkbox">会話から予定を検知したら「Googleカレンダー」へ無返信で自動登録する</label>
         <label class="room-scope-option" title="無返信自動登録がONで高確度登録のあと、登録内容をLINEで返信します。AI会話返信もONが必要です。"><input id="newRoomCalendarRegistrationReply" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
-        <label class="room-scope-option" title="無返信自動登録がONのときのみ有効です。AIの信頼度が「要確認」レンジのとき、LINEで「登録しますか？」と返信し、はい／いいえで確定します。OFFのときは無言のまま件名に（仮）を付けて登録します（AI会話返信もONが必要）。"><input id="newRoomCalendarLowConfidenceConfirmReply" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
+        <label class="room-scope-option" title="無返信自動登録がONのときのみ有効です。"><input id="newRoomCalendarLowConfidenceConfirmReply" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
         <label class="room-scope-option"><input id="newRoomGmailAlertEnabled" type="checkbox">Gmail予約通知</label>
-        <label class="room-scope-option"><input id="newRoomReceiptMidreportEnabled" type="checkbox">売上中間報告をこのルームに送信（16日 10:00）</label>
-        <label class="room-scope-option"><input id="newRoomReceiptMonthendReportEnabled" type="checkbox">売上月末レポートをこのルームに送信（翌月1日 10:00）</label>
-      </div>
-      <div class="modal-meta" style="margin-top:8px;">※資料ライブラリの閲覧権限は資料ごとに「メディア閲覧」画面で設定します。</div>
-      <div class="controls" style="margin-top:10px;">
-        <select id="newRoomSummaryMode" class="select" aria-label="ルーム最終配信の集計方式">
-          <option value="">最終回: 全体設定を継承</option>
-          <option value="independent">最終回: 各回独立</option>
-          <option value="daily_rollup">最終回: 1日まとめ</option>
-        </select>
+        <div class="controls" style="margin-top:6px;">
+          <select id="newRoomSummaryMode" class="select" aria-label="ルーム最終配信の集計方式">
+            <option value="">最終回: 全体設定を継承</option>
+            <option value="independent">最終回: 各回独立</option>
+            <option value="daily_rollup">最終回: 1日まとめ</option>
+          </select>
+        </div>
+        <div class="modal-meta" style="margin-top:6px;">※資料ライブラリの閲覧権限は資料ごとに「メディア閲覧」画面で設定します。</div>
       </div>
       <div class="modal-actions">
         <button id="cancelNewRoomConfigBtn" class="button">閉じる</button>
@@ -2473,7 +2898,18 @@
     </div>
   </div>
 
+  <div id="syncOverlay" class="modal-backdrop" aria-hidden="true" aria-live="polite">
+    <div class="sync-overlay-card" role="status" aria-live="polite" aria-busy="true">
+      <div class="sync-overlay-spinner" aria-hidden="true"></div>
+      <h3 id="syncOverlayTitle" class="sync-overlay-title">同期中</h3>
+      <p id="syncOverlayMessage" class="sync-overlay-message">サーバーとデータを照合しています…</p>
+      <div id="syncOverlayStep" class="sync-overlay-step">接続中</div>
+    </div>
+  </div>
+
   <script src="pages-config.js"></script>
+  <script src="auth-session.js"></script>
+  <script src="site-cache.js"></script>
   <script>
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
@@ -2484,6 +2920,9 @@
     const NEW_ROOM_DEFAULT_SEND_SUMMARY_KEY = 'line_summary_new_room_default_send_summary';
     const NEW_ROOM_DEFAULT_RECEIVE_OVERALL_SUMMARY_KEY = 'line_summary_new_room_default_receive_overall_summary';
     const NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY = 'line_summary_new_room_default_tomorrow_reminder';
+    const NEW_ROOM_DEFAULT_TOMORROW_REMINDER_HOURS_KEY = 'line_summary_new_room_default_tomorrow_reminder_hours';
+    const NEW_ROOM_DEFAULT_TOMORROW_REMINDER_ONLY_IF_EVENTS_KEY = 'line_summary_new_room_default_tomorrow_reminder_only_if_events';
+    const NEW_ROOM_DEFAULT_TOMORROW_REMINDER_MAX_ITEMS_KEY = 'line_summary_new_room_default_tomorrow_reminder_max_items';
     const NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY = 'line_summary_new_room_default_media_file_access';
     const NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY = 'line_summary_new_room_default_image_analysis_reply';
     const NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY = 'line_summary_new_room_default_google_calendar_auto_register';
@@ -2492,34 +2931,52 @@
     const NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY = 'line_summary_new_room_default_gmail_alert';
     const NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY = 'line_summary_new_room_default_receipt_midreport';
     const NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_REPORT_KEY = 'line_summary_new_room_default_receipt_monthend_report';
+    const NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_DAY_KEY = 'line_summary_new_room_default_receipt_midreport_day';
+    const NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_HOUR_KEY = 'line_summary_new_room_default_receipt_midreport_hour';
+    const NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_MINUTE_KEY = 'line_summary_new_room_default_receipt_midreport_minute';
+    const NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_DAY_KEY = 'line_summary_new_room_default_receipt_monthend_day';
+    const NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_HOUR_KEY = 'line_summary_new_room_default_receipt_monthend_hour';
+    const NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_MINUTE_KEY = 'line_summary_new_room_default_receipt_monthend_minute';
+    const RECEIPT_SCHEDULE_DEFAULTS = {
+      midreport_day: 16,
+      midreport_hour: 10,
+      midreport_minute: 0,
+      monthend_day: 1,
+      monthend_hour: 10,
+      monthend_minute: 0,
+    };
+    const CALENDAR_REMINDER_SCHEDULE_DEFAULTS = {
+      hours: [19],
+      only_if_events: true,
+      max_items: 20,
+    };
     const NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY = 'line_summary_new_room_default_calendar_low_conf_confirm';
     const NEW_ROOM_DEFAULT_CALENDAR_REGISTRATION_REPLY_KEY = 'line_summary_new_room_default_calendar_registration_reply';
     const NEW_ROOM_DEFAULT_BOT_REPLY_HARD_MUTE_KEY = 'line_summary_new_room_default_bot_reply_hard_mute';
+    const NEW_ROOM_DEFAULT_EXTRA_SETTINGS_OPEN_KEY = 'line_summary_new_room_extra_settings_open';
+    const NEW_ROOM_RECEIPT_SITE_DEFAULTS = {
+      bot_reply: false,
+      media_access: true,
+      image_analysis_reply: true,
+      receipt_midreport: true,
+      receipt_monthend: true,
+      calendar_auto: false,
+    };
     const dom = {
       authState: document.getElementById('authState'),
       lastRefresh: document.getElementById('lastRefresh'),
       projectUrlInput: document.getElementById('projectUrlInput'),
       tokenInput: document.getElementById('tokenInput'),
+      rememberLoginCheck: document.getElementById('rememberLoginCheck'),
+      authPersistMeta: document.getElementById('authPersistMeta'),
       newTokenInput: document.getElementById('newTokenInput'),
       newTokenConfirmInput: document.getElementById('newTokenConfirmInput'),
       changeTokenBtn: document.getElementById('changeTokenBtn'),
       saveTokenBtn: document.getElementById('saveTokenBtn'),
       clearTokenBtn: document.getElementById('clearTokenBtn'),
       reloadBtn: document.getElementById('reloadBtn'),
-      runNowBtn: document.getElementById('runNowBtn'),
       checkGmailAccountBtn: document.getElementById('checkGmailAccountBtn'),
       gmailAccountMeta: document.getElementById('gmailAccountMeta'),
-      globalEnabled: document.getElementById('globalEnabled'),
-      globalHoursInput: document.getElementById('globalHoursInput'),
-      lastDeliverySummaryMode: document.getElementById('lastDeliverySummaryMode'),
-      messageRetentionDays: document.getElementById('messageRetentionDays'),
-      tomorrowReminderEnabled: document.getElementById('tomorrowReminderEnabled'),
-      tomorrowReminderHoursInput: document.getElementById('tomorrowReminderHoursInput'),
-      tomorrowReminderOnlyIfEvents: document.getElementById('tomorrowReminderOnlyIfEvents'),
-      tomorrowReminderMaxItems: document.getElementById('tomorrowReminderMaxItems'),
-      saveTomorrowReminderBtn: document.getElementById('saveTomorrowReminderBtn'),
-      saveGlobalBtn: document.getElementById('saveGlobalBtn'),
-      globalMeta: document.getElementById('globalMeta'),
       storageUsageSummary: document.getElementById('storageUsageSummary'),
       storageUsageDetails: document.getElementById('storageUsageDetails'),
       pushUsageSummary: document.getElementById('pushUsageSummary'),
@@ -2533,8 +2990,6 @@
       deliveryLogTable: document.getElementById('deliveryLogTable'),
       logTableHead: document.getElementById('logTableHead'),
       logTableBody: document.getElementById('logTableBody'),
-      logTabSummary: document.getElementById('logTabSummary'),
-      logTabWebhook: document.getElementById('logTabWebhook'),
       webhookQuotaSummary: document.getElementById('webhookQuotaSummary'),
       storeWebhookLegacyUrl: document.getElementById('storeWebhookLegacyUrl'),
       copyLegacyWebhookBtn: document.getElementById('copyLegacyWebhookBtn'),
@@ -2552,6 +3007,10 @@
       newRoomSendSummary: document.getElementById('newRoomSendSummary'),
       newRoomReceiveOverallSummary: document.getElementById('newRoomReceiveOverallSummary'),
       newRoomTomorrowReminder: document.getElementById('newRoomTomorrowReminder'),
+      newRoomTomorrowReminderSchedulePanel: document.getElementById('newRoomTomorrowReminderSchedulePanel'),
+      newRoomTomorrowReminderHours: document.getElementById('newRoomTomorrowReminderHours'),
+      newRoomTomorrowReminderOnlyIfEvents: document.getElementById('newRoomTomorrowReminderOnlyIfEvents'),
+      newRoomTomorrowReminderMaxItems: document.getElementById('newRoomTomorrowReminderMaxItems'),
       newRoomMediaFileAccessEnabled: document.getElementById('newRoomMediaFileAccessEnabled'),
       newRoomImageAnalysisReplyEnabled: document.getElementById('newRoomImageAnalysisReplyEnabled'),
       newRoomGoogleCalendarAutoRegister: document.getElementById('newRoomGoogleCalendarAutoRegister'),
@@ -2560,7 +3019,15 @@
       newRoomGmailAlertEnabled: document.getElementById('newRoomGmailAlertEnabled'),
       newRoomReceiptMidreportEnabled: document.getElementById('newRoomReceiptMidreportEnabled'),
       newRoomReceiptMonthendReportEnabled: document.getElementById('newRoomReceiptMonthendReportEnabled'),
+      newRoomReceiptMidreportLabel: document.getElementById('newRoomReceiptMidreportLabel'),
+      newRoomReceiptMonthendReportLabel: document.getElementById('newRoomReceiptMonthendReportLabel'),
+      newRoomReceiptMidreportDay: document.getElementById('newRoomReceiptMidreportDay'),
+      newRoomReceiptMidreportTime: document.getElementById('newRoomReceiptMidreportTime'),
+      newRoomReceiptMonthendDay: document.getElementById('newRoomReceiptMonthendDay'),
+      newRoomReceiptMonthendTime: document.getElementById('newRoomReceiptMonthendTime'),
       newRoomSummaryMode: document.getElementById('newRoomSummaryMode'),
+      newRoomExtraSettingsToggle: document.getElementById('newRoomExtraSettingsToggle'),
+      newRoomExtraSettingsPanel: document.getElementById('newRoomExtraSettingsPanel'),
       openNewRoomConfigBtn: document.getElementById('openNewRoomConfigBtn'),
       newRoomConfigSummary: document.getElementById('newRoomConfigSummary'),
       newRoomConfigModal: document.getElementById('newRoomConfigModal'),
@@ -2587,7 +3054,6 @@
       userPermissionEditCanCalendarUpdate: document.getElementById('userPermissionEditCanCalendarUpdate'),
       userPermissionEditCanMediaAccess: document.getElementById('userPermissionEditCanMediaAccess'),
       userPermissionEditScopeBtn: document.getElementById('userPermissionEditScopeBtn'),
-      userPermissionEditScopeBadge: document.getElementById('userPermissionEditScopeBadge'),
       userPermissionEditAssignedStore: document.getElementById('userPermissionEditAssignedStore'),
       userPermissionEditAssignedJobTitle: document.getElementById('userPermissionEditAssignedJobTitle'),
       cancelUserPermissionEditBtn: document.getElementById('cancelUserPermissionEditBtn'),
@@ -2610,6 +3076,36 @@
       roomConfigGmailAlert: document.getElementById('roomConfigGmailAlert'),
       roomConfigReceiptMidreportEnabled: document.getElementById('roomConfigReceiptMidreportEnabled'),
       roomConfigReceiptMonthendReportEnabled: document.getElementById('roomConfigReceiptMonthendReportEnabled'),
+      roomConfigReceiptMidreportLabel: document.getElementById('roomConfigReceiptMidreportLabel'),
+      roomConfigReceiptMonthendReportLabel: document.getElementById('roomConfigReceiptMonthendReportLabel'),
+      roomConfigReceiptScheduleWrap: document.getElementById('roomConfigReceiptScheduleWrap'),
+      roomConfigReceiptScheduleRoomWrap: document.getElementById('roomConfigReceiptScheduleRoomWrap'),
+      roomConfigReceiptScheduleRoomSelect: document.getElementById('roomConfigReceiptScheduleRoomSelect'),
+      roomConfigReceiptScheduleNoRoomHint: document.getElementById('roomConfigReceiptScheduleNoRoomHint'),
+      roomConfigReceiptDetectedRoomsWrap: document.getElementById('roomConfigReceiptDetectedRoomsWrap'),
+      roomConfigReceiptDetectedRoomsHint: document.getElementById('roomConfigReceiptDetectedRoomsHint'),
+      roomConfigReceiptDetectedRoomsList: document.getElementById('roomConfigReceiptDetectedRoomsList'),
+      roomConfigLinkDetectedRoomsBtn: document.getElementById('roomConfigLinkDetectedRoomsBtn'),
+      roomConfigCalendarGmailWrap: document.getElementById('roomConfigCalendarGmailWrap'),
+      roomConfigCalendarGmailBulkHint: document.getElementById('roomConfigCalendarGmailBulkHint'),
+      roomConfigCalendarGmailOverride: document.getElementById('roomConfigCalendarGmailOverride'),
+      roomConfigCalendarGmailFields: document.getElementById('roomConfigCalendarGmailFields'),
+      roomConfigTomorrowReminderPerm: document.getElementById('roomConfigTomorrowReminderPerm'),
+      roomConfigTomorrowReminderScheduleFields: document.getElementById('roomConfigTomorrowReminderScheduleFields'),
+      roomConfigTomorrowReminderHours: document.getElementById('roomConfigTomorrowReminderHours'),
+      roomConfigTomorrowReminderOnlyIfEvents: document.getElementById('roomConfigTomorrowReminderOnlyIfEvents'),
+      roomConfigTomorrowReminderMaxItems: document.getElementById('roomConfigTomorrowReminderMaxItems'),
+      roomConfigGoogleCalendarAutoRegisterPerm: document.getElementById('roomConfigGoogleCalendarAutoRegisterPerm'),
+      roomConfigCalendarRegistrationReplyPerm: document.getElementById('roomConfigCalendarRegistrationReplyPerm'),
+      roomConfigCalendarLowConfidenceConfirmReplyPerm: document.getElementById('roomConfigCalendarLowConfidenceConfirmReplyPerm'),
+      roomConfigGmailAlertPerm: document.getElementById('roomConfigGmailAlertPerm'),
+      roomConfigReceiptScheduleBulkHint: document.getElementById('roomConfigReceiptScheduleBulkHint'),
+      roomConfigReceiptScheduleOverride: document.getElementById('roomConfigReceiptScheduleOverride'),
+      roomConfigReceiptScheduleFields: document.getElementById('roomConfigReceiptScheduleFields'),
+      roomConfigReceiptMidreportDay: document.getElementById('roomConfigReceiptMidreportDay'),
+      roomConfigReceiptMidreportTime: document.getElementById('roomConfigReceiptMidreportTime'),
+      roomConfigReceiptMonthendDay: document.getElementById('roomConfigReceiptMonthendDay'),
+      roomConfigReceiptMonthendTime: document.getElementById('roomConfigReceiptMonthendTime'),
       roomConfigStoreSelectWrap: document.getElementById('roomConfigStoreSelectWrap'),
       roomConfigReceiptReportStoreKey: document.getElementById('roomConfigReceiptReportStoreKey'),
       cancelRoomConfigBtn: document.getElementById('cancelRoomConfigBtn'),
@@ -2624,20 +3120,28 @@
       confirmRoomConfigEffectBtn: document.getElementById('confirmRoomConfigEffectBtn'),
       newRoomBotReplyHardMute: document.getElementById('newRoomBotReplyHardMute'),
       themeToggleBtn: document.getElementById('themeToggleBtn'),
+      syncOverlay: document.getElementById('syncOverlay'),
+      syncOverlayTitle: document.getElementById('syncOverlayTitle'),
+      syncOverlayMessage: document.getElementById('syncOverlayMessage'),
+      syncOverlayStep: document.getElementById('syncOverlayStep'),
     };
     let currentTheme = 'dark';
     const AUTO_REFRESH_MS_VISIBLE = 5000;
     const AUTO_REFRESH_MS_HIDDEN = 15000;
     let autoRefreshTimer = null;
     let isStateLoading = false;
-    let isGlobalDirty = false;
+    let syncOverlayToken = 0;
+    let syncOverlayDelayTimer = null;
+    let stateLoadPromise = null;
+    let lastStateLoadedAt = 0;
+    const MIN_SILENT_RELOAD_MS = 8000;
     let isRoomDirty = false;
     let isUserPermissionDirty = false;
     let currentState = null;
     let receiptWebhookStatusByStore = {};
     let activeWebhookPermissionFilterStore = '';
-    /** @type {'summary' | 'webhook'} */
-    let deliveryLogTab = 'summary';
+    /** @type {'webhook'} */
+    let deliveryLogTab = 'webhook';
     let activeUserPermissionTab = 'names';
     let activeUserRoomScopeRow = null;
     let activeUserPermissionEditRow = null;
@@ -2647,13 +3151,38 @@
     let roomConfigPreviewSignature = '';
     const UNASSIGNED_WEBHOOK_KEY = '__unassigned__';
     const WEBHOOK_DEFAULT_CONFIG_KEY_PREFIX = 'line_webhook_default_config__';
+    const ROOM_RECEIPT_SCHEDULE_KEY_PREFIX = 'line_room_receipt_schedule__';
+    const ROOM_CALENDAR_GMAIL_SETTINGS_KEY_PREFIX = 'line_room_calendar_gmail_settings__';
+    let activeReceiptScheduleRoomId = '';
+    let activeCalendarGmailRoomId = '';
 
-    function getToken() { return localStorage.getItem(STORE_TOKEN_KEY) || ''; }
+    function getToken() {
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+    }
+
+    function clearSiteCacheForToken(token, projectUrl) {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      if (!SC || !token) return;
+      SC.clearAuth(token, projectUrl || getProjectUrl());
+      SC.clearAuth(token, LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL);
+    }
+
     function getProjectUrl() { return FIXED_PROJECT_URL; }
 
     function setToken(v) {
-      if (v) localStorage.setItem(STORE_TOKEN_KEY, v);
-      else localStorage.removeItem(STORE_TOKEN_KEY);
+      const prev = getToken();
+      const next = v ? String(v) : '';
+      if (prev && prev !== next) {
+        clearSiteCacheForToken(prev, getProjectUrl());
+      }
+      if (window.LINE_REPORT_AUTH) {
+        if (next) LINE_REPORT_AUTH.setToken(next);
+        else LINE_REPORT_AUTH.clearToken();
+      } else if (next) {
+        localStorage.setItem(STORE_TOKEN_KEY, next);
+      } else {
+        localStorage.removeItem(STORE_TOKEN_KEY);
+      }
       updateAuthPill();
     }
 
@@ -2700,6 +3229,1058 @@
 
     function saveBooleanSetting(key, value) {
       localStorage.setItem(key, value ? '1' : '0');
+    }
+
+    function clampScheduleInteger(value, fallback, min, max) {
+      const n = Number(value);
+      if (!Number.isInteger(n)) return fallback;
+      if (n < min) return min;
+      if (n > max) return max;
+      return n;
+    }
+
+    function loadIntegerSetting(key, fallback, min, max) {
+      const raw = localStorage.getItem(key);
+      if (raw == null || String(raw).trim() === '') return fallback;
+      return clampScheduleInteger(raw, fallback, min, max);
+    }
+
+    function saveIntegerSetting(key, value, fallback, min, max) {
+      localStorage.setItem(key, String(clampScheduleInteger(value, fallback, min, max)));
+    }
+
+    function pad2(n) {
+      return String(n).padStart(2, '0');
+    }
+
+    function formatReceiptScheduleClock(hour, minute) {
+      return pad2(hour) + ':' + pad2(minute);
+    }
+
+    function parseTimeInputValue(raw) {
+      const text = String(raw || '').trim();
+      const match = text.match(/^(\d{1,2}):(\d{2})$/);
+      if (!match) {
+        return {
+          hour: RECEIPT_SCHEDULE_DEFAULTS.midreport_hour,
+          minute: RECEIPT_SCHEDULE_DEFAULTS.midreport_minute,
+        };
+      }
+      return {
+        hour: clampScheduleInteger(match[1], RECEIPT_SCHEDULE_DEFAULTS.midreport_hour, 0, 23),
+        minute: clampScheduleInteger(match[2], RECEIPT_SCHEDULE_DEFAULTS.midreport_minute, 0, 59),
+      };
+    }
+
+    function composeTimeInputValue(hour, minute) {
+      return formatReceiptScheduleClock(
+        clampScheduleInteger(hour, RECEIPT_SCHEDULE_DEFAULTS.midreport_hour, 0, 23),
+        clampScheduleInteger(minute, RECEIPT_SCHEDULE_DEFAULTS.midreport_minute, 0, 59),
+      );
+    }
+
+    function getBulkReceiptSchedule() {
+      return {
+        receipt_midreport_day: loadIntegerSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_DAY_KEY,
+          RECEIPT_SCHEDULE_DEFAULTS.midreport_day,
+          1,
+          28,
+        ),
+        receipt_midreport_hour: loadIntegerSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_HOUR_KEY,
+          RECEIPT_SCHEDULE_DEFAULTS.midreport_hour,
+          0,
+          23,
+        ),
+        receipt_midreport_minute: loadIntegerSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_MINUTE_KEY,
+          RECEIPT_SCHEDULE_DEFAULTS.midreport_minute,
+          0,
+          59,
+        ),
+        receipt_monthend_day: loadIntegerSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_DAY_KEY,
+          RECEIPT_SCHEDULE_DEFAULTS.monthend_day,
+          1,
+          28,
+        ),
+        receipt_monthend_hour: loadIntegerSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_HOUR_KEY,
+          RECEIPT_SCHEDULE_DEFAULTS.monthend_hour,
+          0,
+          23,
+        ),
+        receipt_monthend_minute: loadIntegerSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_MINUTE_KEY,
+          RECEIPT_SCHEDULE_DEFAULTS.monthend_minute,
+          0,
+          59,
+        ),
+      };
+    }
+
+    function normalizeTomorrowReminderHours(value, fallback) {
+      const fb = Array.isArray(fallback) && fallback.length
+        ? fallback.slice()
+        : CALENDAR_REMINDER_SCHEDULE_DEFAULTS.hours.slice();
+      if (Array.isArray(value) && value.length) {
+        const uniq = [];
+        value.forEach(function(raw) {
+          const n = Number(raw);
+          if (Number.isInteger(n) && n >= 0 && n <= 23 && !uniq.includes(n)) uniq.push(n);
+        });
+        uniq.sort(function(a, b) { return a - b; });
+        if (uniq.length) return uniq;
+      }
+      if (typeof value === 'string' && value.trim()) {
+        try {
+          const parsed = parseHours(value, false);
+          if (parsed && parsed.length) return parsed;
+        } catch (_) {}
+      }
+      return fb;
+    }
+
+    function loadTomorrowReminderHoursDefault() {
+      try {
+        const raw = localStorage.getItem(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_HOURS_KEY);
+        if (raw == null || String(raw).trim() === '') {
+          return CALENDAR_REMINDER_SCHEDULE_DEFAULTS.hours.slice();
+        }
+        return normalizeTomorrowReminderHours(raw, CALENDAR_REMINDER_SCHEDULE_DEFAULTS.hours);
+      } catch (_) {
+        return CALENDAR_REMINDER_SCHEDULE_DEFAULTS.hours.slice();
+      }
+    }
+
+    function saveTomorrowReminderHoursDefault(hours) {
+      const normalized = normalizeTomorrowReminderHours(hours, CALENDAR_REMINDER_SCHEDULE_DEFAULTS.hours);
+      localStorage.setItem(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_HOURS_KEY, normalized.join(','));
+    }
+
+    function getBulkTomorrowReminderSchedule() {
+      return {
+        calendar_tomorrow_reminder_hours: loadTomorrowReminderHoursDefault(),
+        calendar_tomorrow_reminder_only_if_events: loadBooleanSetting(
+          NEW_ROOM_DEFAULT_TOMORROW_REMINDER_ONLY_IF_EVENTS_KEY,
+          CALENDAR_REMINDER_SCHEDULE_DEFAULTS.only_if_events,
+        ),
+        calendar_tomorrow_reminder_max_items: loadIntegerSetting(
+          NEW_ROOM_DEFAULT_TOMORROW_REMINDER_MAX_ITEMS_KEY,
+          CALENDAR_REMINDER_SCHEDULE_DEFAULTS.max_items,
+          1,
+          50,
+        ),
+      };
+    }
+
+    function formatTomorrowReminderHoursLabel(hours) {
+      const arr = normalizeTomorrowReminderHours(hours, []);
+      if (!arr.length) return '未設定';
+      return arr.map(function(h) { return h + '時'; }).join('・');
+    }
+
+    function formatTomorrowReminderScheduleLabel(settings) {
+      const s = settings || {};
+      if (!s.calendar_tomorrow_reminder_enabled) return '明日予定OFF';
+      const parts = [formatTomorrowReminderHoursLabel(s.calendar_tomorrow_reminder_hours)];
+      parts.push(s.calendar_tomorrow_reminder_only_if_events ? '予定がある日のみ' : '毎日');
+      parts.push('最大' + clampScheduleInteger(
+        s.calendar_tomorrow_reminder_max_items,
+        CALENDAR_REMINDER_SCHEDULE_DEFAULTS.max_items,
+        1,
+        50,
+      ) + '件');
+      return parts.join(' / ');
+    }
+
+    function readTomorrowReminderScheduleFromInputs(hoursInput, onlyIfEventsSelect, maxItemsInput) {
+      let hours = CALENDAR_REMINDER_SCHEDULE_DEFAULTS.hours.slice();
+      try {
+        if (hoursInput && String(hoursInput.value || '').trim()) {
+          hours = parseHours(hoursInput.value, false);
+        }
+      } catch (_) {}
+      return {
+        calendar_tomorrow_reminder_hours: hours,
+        calendar_tomorrow_reminder_only_if_events: !!(onlyIfEventsSelect && onlyIfEventsSelect.value === '1'),
+        calendar_tomorrow_reminder_max_items: clampScheduleInteger(
+          maxItemsInput ? maxItemsInput.value : CALENDAR_REMINDER_SCHEDULE_DEFAULTS.max_items,
+          CALENDAR_REMINDER_SCHEDULE_DEFAULTS.max_items,
+          1,
+          50,
+        ),
+      };
+    }
+
+    function applyTomorrowReminderScheduleToInputs(values, hoursInput, onlyIfEventsSelect, maxItemsInput) {
+      const v = values || {};
+      if (hoursInput) {
+        hoursInput.value = normalizeTomorrowReminderHours(v.calendar_tomorrow_reminder_hours, []).join(',');
+      }
+      if (onlyIfEventsSelect) {
+        onlyIfEventsSelect.value = v.calendar_tomorrow_reminder_only_if_events ? '1' : '0';
+      }
+      if (maxItemsInput) {
+        maxItemsInput.value = String(clampScheduleInteger(
+          v.calendar_tomorrow_reminder_max_items,
+          CALENDAR_REMINDER_SCHEDULE_DEFAULTS.max_items,
+          1,
+          50,
+        ));
+      }
+    }
+
+    function saveNewRoomBulkTomorrowReminderScheduleFromModal() {
+      const schedule = readTomorrowReminderScheduleFromInputs(
+        dom.newRoomTomorrowReminderHours,
+        dom.newRoomTomorrowReminderOnlyIfEvents,
+        dom.newRoomTomorrowReminderMaxItems,
+      );
+      saveTomorrowReminderHoursDefault(schedule.calendar_tomorrow_reminder_hours);
+      saveBooleanSetting(
+        NEW_ROOM_DEFAULT_TOMORROW_REMINDER_ONLY_IF_EVENTS_KEY,
+        schedule.calendar_tomorrow_reminder_only_if_events,
+      );
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_TOMORROW_REMINDER_MAX_ITEMS_KEY,
+        schedule.calendar_tomorrow_reminder_max_items,
+        CALENDAR_REMINDER_SCHEDULE_DEFAULTS.max_items,
+        1,
+        50,
+      );
+    }
+
+    function applyBulkTomorrowReminderScheduleToNewRoomModal() {
+      const bulk = Object.assign({ calendar_tomorrow_reminder_enabled: true }, getBulkTomorrowReminderSchedule());
+      applyTomorrowReminderScheduleToInputs(
+        bulk,
+        dom.newRoomTomorrowReminderHours,
+        dom.newRoomTomorrowReminderOnlyIfEvents,
+        dom.newRoomTomorrowReminderMaxItems,
+      );
+      syncNewRoomTomorrowReminderSchedulePanel();
+    }
+
+    function syncNewRoomTomorrowReminderSchedulePanel() {
+      const enabled = !!(dom.newRoomTomorrowReminder && dom.newRoomTomorrowReminder.checked);
+      const open = !!(dom.newRoomExtraSettingsToggle && dom.newRoomExtraSettingsToggle.checked);
+      if (dom.newRoomTomorrowReminderSchedulePanel) {
+        dom.newRoomTomorrowReminderSchedulePanel.hidden = !open || !enabled;
+      }
+      [
+        dom.newRoomTomorrowReminderHours,
+        dom.newRoomTomorrowReminderOnlyIfEvents,
+        dom.newRoomTomorrowReminderMaxItems,
+      ].forEach(function(el) {
+        if (el) el.disabled = !open || !enabled;
+      });
+    }
+
+    function pickReceiptScheduleRawFields(config) {
+      if (!config || typeof config !== 'object') return {};
+      const out = {};
+      if (config.receipt_schedule_override != null) {
+        out.receipt_schedule_override = !!config.receipt_schedule_override;
+      }
+      [
+        'receipt_midreport_day',
+        'receipt_midreport_hour',
+        'receipt_midreport_minute',
+        'receipt_monthend_day',
+        'receipt_monthend_hour',
+        'receipt_monthend_minute',
+      ].forEach(function(key) {
+        if (config[key] != null && config[key] !== '') out[key] = config[key];
+      });
+      return out;
+    }
+
+    function stripReceiptScheduleFields(config) {
+      const next = Object.assign({}, config || {});
+      delete next.receipt_schedule_override;
+      delete next.receipt_midreport_day;
+      delete next.receipt_midreport_hour;
+      delete next.receipt_midreport_minute;
+      delete next.receipt_monthend_day;
+      delete next.receipt_monthend_hour;
+      delete next.receipt_monthend_minute;
+      return next;
+    }
+
+    function roomReceiptScheduleStorageKey(roomId) {
+      return ROOM_RECEIPT_SCHEDULE_KEY_PREFIX + String(roomId || '').trim();
+    }
+
+    function loadRoomReceiptSchedule(roomId) {
+      const key = String(roomId || '').trim();
+      if (!key) return null;
+      try {
+        const raw = localStorage.getItem(roomReceiptScheduleStorageKey(key));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function saveRoomReceiptSchedule(roomId, scheduleFields) {
+      const key = String(roomId || '').trim();
+      if (!key) return;
+      localStorage.setItem(roomReceiptScheduleStorageKey(key), JSON.stringify(scheduleFields || {}));
+    }
+
+    function resolveReceiptScheduleFromConfig(config) {
+      const bulk = getBulkReceiptSchedule();
+      const cfg = config || {};
+      const override = !!cfg.receipt_schedule_override;
+      return {
+        receipt_schedule_override: override,
+        receipt_midreport_day: override && cfg.receipt_midreport_day != null
+          ? clampScheduleInteger(cfg.receipt_midreport_day, bulk.receipt_midreport_day, 1, 28)
+          : bulk.receipt_midreport_day,
+        receipt_midreport_hour: override && cfg.receipt_midreport_hour != null
+          ? clampScheduleInteger(cfg.receipt_midreport_hour, bulk.receipt_midreport_hour, 0, 23)
+          : bulk.receipt_midreport_hour,
+        receipt_midreport_minute: override && cfg.receipt_midreport_minute != null
+          ? clampScheduleInteger(cfg.receipt_midreport_minute, bulk.receipt_midreport_minute, 0, 59)
+          : bulk.receipt_midreport_minute,
+        receipt_monthend_day: override && cfg.receipt_monthend_day != null
+          ? clampScheduleInteger(cfg.receipt_monthend_day, bulk.receipt_monthend_day, 1, 28)
+          : bulk.receipt_monthend_day,
+        receipt_monthend_hour: override && cfg.receipt_monthend_hour != null
+          ? clampScheduleInteger(cfg.receipt_monthend_hour, bulk.receipt_monthend_hour, 0, 23)
+          : bulk.receipt_monthend_hour,
+        receipt_monthend_minute: override && cfg.receipt_monthend_minute != null
+          ? clampScheduleInteger(cfg.receipt_monthend_minute, bulk.receipt_monthend_minute, 0, 59)
+          : bulk.receipt_monthend_minute,
+      };
+    }
+
+    function resolveReceiptScheduleForRoom(roomId) {
+      const roomCfg = loadRoomReceiptSchedule(roomId);
+      if (!roomCfg) return resolveReceiptScheduleFromConfig({});
+      return resolveReceiptScheduleFromConfig(roomCfg);
+    }
+
+    function receiptScheduleSignature(schedule) {
+      return [
+        schedule.receipt_midreport_day,
+        schedule.receipt_midreport_hour,
+        schedule.receipt_midreport_minute,
+        schedule.receipt_monthend_day,
+        schedule.receipt_monthend_hour,
+        schedule.receipt_monthend_minute,
+        schedule.receipt_schedule_override ? '1' : '0',
+      ].join(':');
+    }
+
+    function getReceiptScheduleSummaryForStore(storeKey, config) {
+      const rows = findRoomRowsByStoreKey(storeKey);
+      if (rows.length === 0) return resolveReceiptScheduleFromConfig({});
+      const signatures = rows.map(function(tr) {
+        return receiptScheduleSignature(resolveReceiptScheduleForRoom(tr.dataset.roomId));
+      });
+      const unique = signatures.filter(function(sig, index) { return signatures.indexOf(sig) === index; });
+      if (unique.length === 1) return resolveReceiptScheduleForRoom(rows[0].dataset.roomId);
+      return { mixed: true };
+    }
+
+    function getRoomLabelFromRow(tr) {
+      if (!tr) return '';
+      const nameInput = tr.querySelector('.room-name');
+      const roomName = nameInput ? String(nameInput.value || '').trim() : '';
+      const roomId = String(tr.dataset.roomId || '').trim();
+      return roomName || roomId || '(未設定)';
+    }
+
+    function getActiveRoomConfigRoomId() {
+      if (dom.roomConfigReceiptScheduleRoomSelect) {
+        const selected = String(dom.roomConfigReceiptScheduleRoomSelect.value || '').trim();
+        if (selected) return selected;
+      }
+      if (activeRoomConfigRow && activeRoomConfigRow.dataset) {
+        return String(activeRoomConfigRow.dataset.roomId || '').trim();
+      }
+      return '';
+    }
+
+    function persistReceiptScheduleDraftForRoom(roomId) {
+      const targetRoomId = String(roomId || '').trim();
+      if (!targetRoomId) return;
+      saveRoomReceiptSchedule(targetRoomId, buildReceiptScheduleDraftFromRoomModal());
+    }
+
+    function getDetectedRoomIdsForStore(storeKey) {
+      const status = getStoreWebhookStatus(storeKey);
+      const ids = status && Array.isArray(status.detected_room_ids) ? status.detected_room_ids : [];
+      return ids.map(function(id) { return String(id || '').trim(); }).filter(Boolean);
+    }
+
+    function getUnlinkedDetectedRoomIdsForStore(storeKey) {
+      const detected = getDetectedRoomIdsForStore(storeKey);
+      const linkedIds = new Set(findRoomRowsByStoreKey(storeKey).map(function(tr) {
+        return String(tr.dataset.roomId || '').trim();
+      }).filter(Boolean));
+      return detected.filter(function(roomId) { return !linkedIds.has(roomId); });
+    }
+
+    function formatRoomIdShort(roomId) {
+      const id = String(roomId || '').trim();
+      if (id.length <= 16) return id;
+      return id.slice(0, 8) + '…' + id.slice(-6);
+    }
+
+    function renderRoomConfigDetectedRoomsPanel(storeKey) {
+      const unlinked = getUnlinkedDetectedRoomIdsForStore(storeKey);
+      const isCommunicating = isStoreWebhookCommunicationActive(storeKey);
+      const linkedCount = findRoomRowsByStoreKey(storeKey).length;
+      if (dom.roomConfigReceiptDetectedRoomsWrap) {
+        dom.roomConfigReceiptDetectedRoomsWrap.hidden = !(isCommunicating && unlinked.length > 0);
+      }
+      if (dom.roomConfigReceiptDetectedRoomsList) {
+        dom.roomConfigReceiptDetectedRoomsList.innerHTML = unlinked.map(function(roomId) {
+          return '<li><code>' + escapeHtml(formatRoomIdShort(roomId)) + '</code></li>';
+        }).join('');
+      }
+      if (dom.roomConfigReceiptDetectedRoomsHint) {
+        dom.roomConfigReceiptDetectedRoomsHint.textContent =
+          'Webhook で受信済み（未連携）: ' + unlinked.length + ' 件' +
+          (linkedCount > 0 ? ' ※連携済み ' + linkedCount + ' 件とは別管理です' : '');
+      }
+      if (dom.roomConfigReceiptScheduleNoRoomHint) {
+        dom.roomConfigReceiptScheduleNoRoomHint.hidden = !(linkedCount === 0);
+      }
+    }
+
+    async function linkDetectedRoomsForStore(storeKey) {
+      const key = String(storeKey || activeWebhookConfigStoreKey || '').trim();
+      if (!key) throw new Error('店舗が選択されていません。');
+      const unlinked = getUnlinkedDetectedRoomIdsForStore(key);
+      if (unlinked.length === 0) {
+        alert('連携する受信済みルームがありません。');
+        return;
+      }
+      const stores = LINE_REPORT_PAGES.listStores(
+        (currentState && currentState.receipt_store_options) || [],
+      );
+      const store = stores.find(function(s) { return s.store_key === key; });
+      const storeLabel = store ? (store.store_name || key) : key;
+      if (!window.confirm(
+        'Webhook で受信済みのルーム ' + unlinked.length + ' 件を「' + storeLabel + '」に連携します。\n\n' +
+        '売上レポートの送信先として使えるようになります。実行しますか？',
+      )) {
+        return;
+      }
+      for (let i = 0; i < unlinked.length; i++) {
+        await addRoomToWebhook(key, unlinked[i], '', '');
+      }
+      receiptWebhookStatusByStore = await fetchReceiptWebhookStatusMap();
+      await safeLoadState();
+      if (activeWebhookConfigStoreKey === key) {
+        const stores = LINE_REPORT_PAGES.listStores(
+          (currentState && currentState.receipt_store_options) || [],
+        );
+        const store = stores.find(function(s) { return s.store_key === key; });
+        applyConfigToWebhookModal(
+          aggregateWebhookConfig(key),
+          key,
+          store ? store.store_name : key,
+          unlinked[0],
+        );
+      }
+      alert('受信済みルーム ' + unlinked.length + ' 件を連携しました。');
+    }
+
+    function populateRoomConfigReceiptScheduleRoomSelect(linkedRows, selectedRoomId, storeKey) {
+      if (!dom.roomConfigReceiptScheduleRoomSelect) return;
+      const select = dom.roomConfigReceiptScheduleRoomSelect;
+      const prev = String(selectedRoomId || select.value || '').trim();
+      select.innerHTML = '';
+      linkedRows.forEach(function(tr) {
+        const roomId = String(tr.dataset.roomId || '').trim();
+        if (!roomId) return;
+        const opt = document.createElement('option');
+        opt.value = roomId;
+        opt.textContent = getRoomLabelFromRow(tr);
+        select.appendChild(opt);
+      });
+      if (prev && Array.from(select.options).some(function(opt) { return opt.value === prev; })) {
+        select.value = prev;
+      } else if (select.options.length > 0) {
+        select.selectedIndex = 0;
+      }
+      if (storeKey) renderRoomConfigDetectedRoomsPanel(storeKey);
+    }
+
+    function formatReceiptMidreportScheduleLabel(schedule) {
+      return '毎月' + schedule.receipt_midreport_day + '日 ' + formatReceiptScheduleClock(
+        schedule.receipt_midreport_hour,
+        schedule.receipt_midreport_minute,
+      );
+    }
+
+    function formatReceiptMonthendScheduleLabel(schedule) {
+      return '翌月' + schedule.receipt_monthend_day + '日 ' + formatReceiptScheduleClock(
+        schedule.receipt_monthend_hour,
+        schedule.receipt_monthend_minute,
+      );
+    }
+
+    function formatReceiptMidreportCheckboxLabel(schedule) {
+      return '売上中間報告をこのルームに送信（' + formatReceiptMidreportScheduleLabel(schedule) + '）';
+    }
+
+    function formatReceiptMonthendCheckboxLabel(schedule) {
+      return '売上月末レポートをこのルームに送信（' + formatReceiptMonthendScheduleLabel(schedule) + '）';
+    }
+
+    function readReceiptScheduleFromNewRoomModal() {
+      const bulk = getBulkReceiptSchedule();
+      const midTime = parseTimeInputValue(dom.newRoomReceiptMidreportTime && dom.newRoomReceiptMidreportTime.value);
+      const monthendTime = parseTimeInputValue(dom.newRoomReceiptMonthendTime && dom.newRoomReceiptMonthendTime.value);
+      return {
+        receipt_midreport_day: clampScheduleInteger(
+          dom.newRoomReceiptMidreportDay && dom.newRoomReceiptMidreportDay.value,
+          bulk.receipt_midreport_day,
+          1,
+          28,
+        ),
+        receipt_midreport_hour: midTime.hour,
+        receipt_midreport_minute: midTime.minute,
+        receipt_monthend_day: clampScheduleInteger(
+          dom.newRoomReceiptMonthendDay && dom.newRoomReceiptMonthendDay.value,
+          bulk.receipt_monthend_day,
+          1,
+          28,
+        ),
+        receipt_monthend_hour: monthendTime.hour,
+        receipt_monthend_minute: monthendTime.minute,
+      };
+    }
+
+    function readReceiptScheduleFromRoomConfigModal() {
+      const bulk = getBulkReceiptSchedule();
+      const midTime = parseTimeInputValue(dom.roomConfigReceiptMidreportTime && dom.roomConfigReceiptMidreportTime.value);
+      const monthendTime = parseTimeInputValue(dom.roomConfigReceiptMonthendTime && dom.roomConfigReceiptMonthendTime.value);
+      return {
+        receipt_midreport_day: clampScheduleInteger(
+          dom.roomConfigReceiptMidreportDay && dom.roomConfigReceiptMidreportDay.value,
+          bulk.receipt_midreport_day,
+          1,
+          28,
+        ),
+        receipt_midreport_hour: midTime.hour,
+        receipt_midreport_minute: midTime.minute,
+        receipt_monthend_day: clampScheduleInteger(
+          dom.roomConfigReceiptMonthendDay && dom.roomConfigReceiptMonthendDay.value,
+          bulk.receipt_monthend_day,
+          1,
+          28,
+        ),
+        receipt_monthend_hour: monthendTime.hour,
+        receipt_monthend_minute: monthendTime.minute,
+      };
+    }
+
+    function saveNewRoomBulkReceiptScheduleFromModal() {
+      const schedule = readReceiptScheduleFromNewRoomModal();
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_DAY_KEY,
+        schedule.receipt_midreport_day,
+        RECEIPT_SCHEDULE_DEFAULTS.midreport_day,
+        1,
+        28,
+      );
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_HOUR_KEY,
+        schedule.receipt_midreport_hour,
+        RECEIPT_SCHEDULE_DEFAULTS.midreport_hour,
+        0,
+        23,
+      );
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_MINUTE_KEY,
+        schedule.receipt_midreport_minute,
+        RECEIPT_SCHEDULE_DEFAULTS.midreport_minute,
+        0,
+        59,
+      );
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_DAY_KEY,
+        schedule.receipt_monthend_day,
+        RECEIPT_SCHEDULE_DEFAULTS.monthend_day,
+        1,
+        28,
+      );
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_HOUR_KEY,
+        schedule.receipt_monthend_hour,
+        RECEIPT_SCHEDULE_DEFAULTS.monthend_hour,
+        0,
+        23,
+      );
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_MINUTE_KEY,
+        schedule.receipt_monthend_minute,
+        RECEIPT_SCHEDULE_DEFAULTS.monthend_minute,
+        0,
+        59,
+      );
+    }
+
+    function refreshNewRoomReceiptCheckboxLabels() {
+      const bulk = getBulkReceiptSchedule();
+      if (dom.newRoomReceiptMidreportLabel) {
+        dom.newRoomReceiptMidreportLabel.textContent = formatReceiptMidreportCheckboxLabel(bulk);
+      }
+      if (dom.newRoomReceiptMonthendReportLabel) {
+        dom.newRoomReceiptMonthendReportLabel.textContent = formatReceiptMonthendCheckboxLabel(bulk);
+      }
+    }
+
+    function applyBulkReceiptScheduleToNewRoomModal() {
+      const bulk = getBulkReceiptSchedule();
+      if (dom.newRoomReceiptMidreportDay) dom.newRoomReceiptMidreportDay.value = String(bulk.receipt_midreport_day);
+      if (dom.newRoomReceiptMidreportTime) {
+        dom.newRoomReceiptMidreportTime.value = composeTimeInputValue(bulk.receipt_midreport_hour, bulk.receipt_midreport_minute);
+      }
+      if (dom.newRoomReceiptMonthendDay) dom.newRoomReceiptMonthendDay.value = String(bulk.receipt_monthend_day);
+      if (dom.newRoomReceiptMonthendTime) {
+        dom.newRoomReceiptMonthendTime.value = composeTimeInputValue(bulk.receipt_monthend_hour, bulk.receipt_monthend_minute);
+      }
+      refreshNewRoomReceiptCheckboxLabels();
+    }
+
+    function syncRoomConfigReceiptScheduleFields() {
+      const override = !!(dom.roomConfigReceiptScheduleOverride && dom.roomConfigReceiptScheduleOverride.checked);
+      if (dom.roomConfigReceiptScheduleFields) dom.roomConfigReceiptScheduleFields.hidden = !override;
+      [
+        dom.roomConfigReceiptMidreportDay,
+        dom.roomConfigReceiptMidreportTime,
+        dom.roomConfigReceiptMonthendDay,
+        dom.roomConfigReceiptMonthendTime,
+      ].forEach(function(el) {
+        if (el) el.disabled = !override;
+      });
+    }
+
+    function refreshRoomConfigReceiptCheckboxLabels(config) {
+      const resolved = resolveReceiptScheduleFromConfig(config || {});
+      if (dom.roomConfigReceiptMidreportLabel) {
+        dom.roomConfigReceiptMidreportLabel.textContent = formatReceiptMidreportCheckboxLabel(resolved);
+      }
+      if (dom.roomConfigReceiptMonthendReportLabel) {
+        dom.roomConfigReceiptMonthendReportLabel.textContent = formatReceiptMonthendCheckboxLabel(resolved);
+      }
+    }
+
+    function applyReceiptScheduleToRoomConfigModal(roomId) {
+      const bulk = getBulkReceiptSchedule();
+      const raw = loadRoomReceiptSchedule(roomId) || {};
+      const resolved = resolveReceiptScheduleForRoom(roomId);
+      const hasLinkedRooms = !!(dom.roomConfigReceiptScheduleRoomSelect && dom.roomConfigReceiptScheduleRoomSelect.options.length > 0);
+      if (dom.roomConfigReceiptScheduleRoomWrap) {
+        dom.roomConfigReceiptScheduleRoomWrap.hidden = !hasLinkedRooms;
+      }
+      if (dom.roomConfigReceiptScheduleOverride) {
+        dom.roomConfigReceiptScheduleOverride.disabled = !hasLinkedRooms;
+      }
+      if (activeWebhookConfigStoreKey) {
+        renderRoomConfigDetectedRoomsPanel(activeWebhookConfigStoreKey);
+      } else if (dom.roomConfigReceiptScheduleNoRoomHint) {
+        dom.roomConfigReceiptScheduleNoRoomHint.hidden = hasLinkedRooms;
+      }
+      if (dom.roomConfigReceiptScheduleBulkHint) {
+        dom.roomConfigReceiptScheduleBulkHint.textContent =
+          '一括設定: 中間 ' + formatReceiptMidreportScheduleLabel(bulk) +
+          ' ／ 月末 ' + formatReceiptMonthendScheduleLabel(bulk);
+      }
+      refreshRoomConfigReceiptCheckboxLabels(
+        Object.assign({ receipt_schedule_override: !!raw.receipt_schedule_override }, pickReceiptScheduleRawFields(raw)),
+      );
+      if (dom.roomConfigReceiptScheduleOverride) {
+        dom.roomConfigReceiptScheduleOverride.checked = !!raw.receipt_schedule_override;
+      }
+      const editSource = raw.receipt_schedule_override ? raw : bulk;
+      if (dom.roomConfigReceiptMidreportDay) {
+        dom.roomConfigReceiptMidreportDay.value = String(
+          editSource.receipt_midreport_day != null ? editSource.receipt_midreport_day : bulk.receipt_midreport_day,
+        );
+      }
+      if (dom.roomConfigReceiptMidreportTime) {
+        dom.roomConfigReceiptMidreportTime.value = composeTimeInputValue(
+          editSource.receipt_midreport_hour != null ? editSource.receipt_midreport_hour : bulk.receipt_midreport_hour,
+          editSource.receipt_midreport_minute != null ? editSource.receipt_midreport_minute : bulk.receipt_midreport_minute,
+        );
+      }
+      if (dom.roomConfigReceiptMonthendDay) {
+        dom.roomConfigReceiptMonthendDay.value = String(
+          editSource.receipt_monthend_day != null ? editSource.receipt_monthend_day : bulk.receipt_monthend_day,
+        );
+      }
+      if (dom.roomConfigReceiptMonthendTime) {
+        dom.roomConfigReceiptMonthendTime.value = composeTimeInputValue(
+          editSource.receipt_monthend_hour != null ? editSource.receipt_monthend_hour : bulk.receipt_monthend_hour,
+          editSource.receipt_monthend_minute != null ? editSource.receipt_monthend_minute : bulk.receipt_monthend_minute,
+        );
+      }
+      syncRoomConfigReceiptScheduleFields();
+      activeReceiptScheduleRoomId = String(roomId || '').trim();
+    }
+
+    function onRoomConfigReceiptScheduleRoomChange() {
+      if (activeReceiptScheduleRoomId) {
+        persistReceiptScheduleDraftForRoom(activeReceiptScheduleRoomId);
+      }
+      if (activeCalendarGmailRoomId) {
+        persistCalendarGmailDraftForRoom(activeCalendarGmailRoomId);
+      }
+      const roomId = getActiveRoomConfigRoomId();
+      const tr = findRoomTableRowById(roomId);
+      if (tr) activeRoomConfigRow = tr;
+      applyReceiptScheduleToRoomConfigModal(roomId);
+      applyCalendarGmailToRoomConfigModal(roomId);
+      invalidateRoomConfigReview();
+    }
+
+    function getBulkCalendarGmailSettings() {
+      const gCal = loadMergedGoogleCalendarAutoRegisterDefault();
+      const reminderSchedule = getBulkTomorrowReminderSchedule();
+      return Object.assign({
+        calendar_tomorrow_reminder_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY, false),
+        calendar_ai_auto_create_enabled: gCal,
+        calendar_silent_auto_register_enabled: gCal,
+        calendar_registration_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_REGISTRATION_REPLY_KEY, false),
+        calendar_low_confidence_confirm_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, false),
+        gmail_reservation_alert_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, false),
+      }, reminderSchedule);
+    }
+
+    function pickCalendarGmailRawFields(config) {
+      if (!config || typeof config !== 'object') return {};
+      const out = {};
+      if (config.calendar_gmail_settings_override != null) {
+        out.calendar_gmail_settings_override = !!config.calendar_gmail_settings_override;
+      }
+      [
+        'calendar_tomorrow_reminder_enabled',
+        'calendar_ai_auto_create_enabled',
+        'calendar_silent_auto_register_enabled',
+        'calendar_registration_reply_enabled',
+        'calendar_low_confidence_confirm_reply_enabled',
+        'gmail_reservation_alert_enabled',
+        'calendar_tomorrow_reminder_only_if_events',
+      ].forEach(function(key) {
+        if (config[key] != null) out[key] = !!config[key];
+      });
+      if (Array.isArray(config.calendar_tomorrow_reminder_hours)) {
+        out.calendar_tomorrow_reminder_hours = config.calendar_tomorrow_reminder_hours.slice();
+      }
+      if (config.calendar_tomorrow_reminder_max_items != null) {
+        out.calendar_tomorrow_reminder_max_items = clampScheduleInteger(
+          config.calendar_tomorrow_reminder_max_items,
+          CALENDAR_REMINDER_SCHEDULE_DEFAULTS.max_items,
+          1,
+          50,
+        );
+      }
+      return out;
+    }
+
+    function stripCalendarGmailFields(config) {
+      const next = Object.assign({}, config || {});
+      delete next.calendar_gmail_settings_override;
+      delete next.calendar_tomorrow_reminder_enabled;
+      delete next.calendar_ai_auto_create_enabled;
+      delete next.calendar_silent_auto_register_enabled;
+      delete next.calendar_registration_reply_enabled;
+      delete next.calendar_low_confidence_confirm_reply_enabled;
+      delete next.gmail_reservation_alert_enabled;
+      delete next.calendar_tomorrow_reminder_hours;
+      delete next.calendar_tomorrow_reminder_only_if_events;
+      delete next.calendar_tomorrow_reminder_max_items;
+      return next;
+    }
+
+    function roomCalendarGmailSettingsStorageKey(roomId) {
+      return ROOM_CALENDAR_GMAIL_SETTINGS_KEY_PREFIX + String(roomId || '').trim();
+    }
+
+    function loadRoomCalendarGmailSettings(roomId) {
+      const key = String(roomId || '').trim();
+      if (!key) return null;
+      try {
+        const raw = localStorage.getItem(roomCalendarGmailSettingsStorageKey(key));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function saveRoomCalendarGmailSettings(roomId, fields) {
+      const key = String(roomId || '').trim();
+      if (!key) return;
+      localStorage.setItem(roomCalendarGmailSettingsStorageKey(key), JSON.stringify(fields || {}));
+    }
+
+    function resolveCalendarGmailSettingsForRoom(roomId) {
+      const bulk = getBulkCalendarGmailSettings();
+      const roomCfg = loadRoomCalendarGmailSettings(roomId);
+      if (!roomCfg || !roomCfg.calendar_gmail_settings_override) {
+        return Object.assign({ calendar_gmail_settings_override: false }, bulk);
+      }
+      const gCal = !!(roomCfg.calendar_ai_auto_create_enabled && roomCfg.calendar_silent_auto_register_enabled);
+      const bulkSchedule = getBulkTomorrowReminderSchedule();
+      return {
+        calendar_gmail_settings_override: true,
+        calendar_tomorrow_reminder_enabled: !!roomCfg.calendar_tomorrow_reminder_enabled,
+        calendar_tomorrow_reminder_hours: normalizeTomorrowReminderHours(
+          roomCfg.calendar_tomorrow_reminder_hours,
+          bulkSchedule.calendar_tomorrow_reminder_hours,
+        ),
+        calendar_tomorrow_reminder_only_if_events: roomCfg.calendar_tomorrow_reminder_only_if_events != null
+          ? !!roomCfg.calendar_tomorrow_reminder_only_if_events
+          : bulkSchedule.calendar_tomorrow_reminder_only_if_events,
+        calendar_tomorrow_reminder_max_items: roomCfg.calendar_tomorrow_reminder_max_items != null
+          ? clampScheduleInteger(
+            roomCfg.calendar_tomorrow_reminder_max_items,
+            bulkSchedule.calendar_tomorrow_reminder_max_items,
+            1,
+            50,
+          )
+          : bulkSchedule.calendar_tomorrow_reminder_max_items,
+        calendar_ai_auto_create_enabled: gCal,
+        calendar_silent_auto_register_enabled: gCal,
+        calendar_registration_reply_enabled: gCal && !!roomCfg.calendar_registration_reply_enabled,
+        calendar_low_confidence_confirm_reply_enabled: gCal && !!roomCfg.calendar_low_confidence_confirm_reply_enabled,
+        gmail_reservation_alert_enabled: !!roomCfg.gmail_reservation_alert_enabled,
+      };
+    }
+
+    function formatCalendarGmailBulkLabel(settings) {
+      const s = settings || getBulkCalendarGmailSettings();
+      const parts = [];
+      if (s.calendar_tomorrow_reminder_enabled) {
+        parts.push('明日予定ON(' + formatTomorrowReminderHoursLabel(s.calendar_tomorrow_reminder_hours) + ')');
+      } else {
+        parts.push('明日予定OFF');
+      }
+      if (s.calendar_ai_auto_create_enabled && s.calendar_silent_auto_register_enabled) {
+        parts.push('カレンダー自動登録ON');
+        if (s.calendar_registration_reply_enabled) parts.push('登録内容返信ON');
+        if (s.calendar_low_confidence_confirm_reply_enabled) parts.push('低確度確認ON');
+      } else {
+        parts.push('カレンダー自動登録OFF');
+      }
+      parts.push(s.gmail_reservation_alert_enabled ? 'Gmail予約ON' : 'Gmail予約OFF');
+      return parts.join(' / ');
+    }
+
+    function readCalendarGmailFromInlineModal() {
+      const gCal = !!(dom.roomConfigGoogleCalendarAutoRegister && dom.roomConfigGoogleCalendarAutoRegister.checked);
+      return {
+        calendar_tomorrow_reminder_enabled: !!(dom.roomConfigTomorrowReminder && dom.roomConfigTomorrowReminder.checked),
+        calendar_ai_auto_create_enabled: gCal,
+        calendar_silent_auto_register_enabled: gCal,
+        calendar_registration_reply_enabled: gCal && !!(dom.roomConfigCalendarRegistrationReply && dom.roomConfigCalendarRegistrationReply.checked),
+        calendar_low_confidence_confirm_reply_enabled: gCal && !!(dom.roomConfigCalendarLowConfidenceConfirmReply && dom.roomConfigCalendarLowConfidenceConfirmReply.checked),
+        gmail_reservation_alert_enabled: !!(dom.roomConfigGmailAlert && dom.roomConfigGmailAlert.checked),
+      };
+    }
+
+    function readCalendarGmailFromPermModal() {
+      const gCal = !!(dom.roomConfigGoogleCalendarAutoRegisterPerm && dom.roomConfigGoogleCalendarAutoRegisterPerm.checked);
+      const schedule = readTomorrowReminderScheduleFromInputs(
+        dom.roomConfigTomorrowReminderHours,
+        dom.roomConfigTomorrowReminderOnlyIfEvents,
+        dom.roomConfigTomorrowReminderMaxItems,
+      );
+      return Object.assign({
+        calendar_tomorrow_reminder_enabled: !!(dom.roomConfigTomorrowReminderPerm && dom.roomConfigTomorrowReminderPerm.checked),
+        calendar_ai_auto_create_enabled: gCal,
+        calendar_silent_auto_register_enabled: gCal,
+        calendar_registration_reply_enabled: gCal && !!(dom.roomConfigCalendarRegistrationReplyPerm && dom.roomConfigCalendarRegistrationReplyPerm.checked),
+        calendar_low_confidence_confirm_reply_enabled: gCal && !!(dom.roomConfigCalendarLowConfidenceConfirmReplyPerm && dom.roomConfigCalendarLowConfidenceConfirmReplyPerm.checked),
+        gmail_reservation_alert_enabled: !!(dom.roomConfigGmailAlertPerm && dom.roomConfigGmailAlertPerm.checked),
+      }, schedule);
+    }
+
+    function applyCalendarGmailValuesToInlineFields(values) {
+      const v = values || {};
+      const gCal = !!(v.calendar_ai_auto_create_enabled && v.calendar_silent_auto_register_enabled);
+      if (dom.roomConfigTomorrowReminder) dom.roomConfigTomorrowReminder.checked = !!v.calendar_tomorrow_reminder_enabled;
+      if (dom.roomConfigGoogleCalendarAutoRegister) dom.roomConfigGoogleCalendarAutoRegister.checked = gCal;
+      if (dom.roomConfigCalendarRegistrationReply) dom.roomConfigCalendarRegistrationReply.checked = gCal && !!v.calendar_registration_reply_enabled;
+      if (dom.roomConfigCalendarLowConfidenceConfirmReply) {
+        dom.roomConfigCalendarLowConfidenceConfirmReply.checked = gCal && !!v.calendar_low_confidence_confirm_reply_enabled;
+      }
+      if (dom.roomConfigGmailAlert) dom.roomConfigGmailAlert.checked = !!v.gmail_reservation_alert_enabled;
+      syncRoomConfigCalendarSubOptions();
+    }
+
+    function applyCalendarGmailValuesToPermFields(values) {
+      const v = values || {};
+      const gCal = !!(v.calendar_ai_auto_create_enabled && v.calendar_silent_auto_register_enabled);
+      if (dom.roomConfigTomorrowReminderPerm) dom.roomConfigTomorrowReminderPerm.checked = !!v.calendar_tomorrow_reminder_enabled;
+      applyTomorrowReminderScheduleToInputs(
+        v,
+        dom.roomConfigTomorrowReminderHours,
+        dom.roomConfigTomorrowReminderOnlyIfEvents,
+        dom.roomConfigTomorrowReminderMaxItems,
+      );
+      if (dom.roomConfigGoogleCalendarAutoRegisterPerm) dom.roomConfigGoogleCalendarAutoRegisterPerm.checked = gCal;
+      if (dom.roomConfigCalendarRegistrationReplyPerm) {
+        dom.roomConfigCalendarRegistrationReplyPerm.checked = gCal && !!v.calendar_registration_reply_enabled;
+      }
+      if (dom.roomConfigCalendarLowConfidenceConfirmReplyPerm) {
+        dom.roomConfigCalendarLowConfidenceConfirmReplyPerm.checked = gCal && !!v.calendar_low_confidence_confirm_reply_enabled;
+      }
+      if (dom.roomConfigGmailAlertPerm) dom.roomConfigGmailAlertPerm.checked = !!v.gmail_reservation_alert_enabled;
+      syncRoomConfigCalendarGmailPermSubOptions();
+    }
+
+    function syncRoomConfigCalendarGmailPermSubOptions() {
+      const gCal = dom.roomConfigGoogleCalendarAutoRegisterPerm && dom.roomConfigGoogleCalendarAutoRegisterPerm.checked;
+      if (dom.roomConfigCalendarRegistrationReplyPerm) dom.roomConfigCalendarRegistrationReplyPerm.disabled = !gCal;
+      if (dom.roomConfigCalendarLowConfidenceConfirmReplyPerm) {
+        dom.roomConfigCalendarLowConfidenceConfirmReplyPerm.disabled = !gCal;
+      }
+    }
+
+    function syncRoomConfigTomorrowReminderScheduleFields() {
+      const enabled = !!(dom.roomConfigTomorrowReminderPerm && dom.roomConfigTomorrowReminderPerm.checked);
+      const override = !!(dom.roomConfigCalendarGmailOverride && dom.roomConfigCalendarGmailOverride.checked);
+      const hasLinkedRooms = !!(dom.roomConfigReceiptScheduleRoomSelect && dom.roomConfigReceiptScheduleRoomSelect.options.length > 0);
+      if (dom.roomConfigTomorrowReminderScheduleFields) {
+        dom.roomConfigTomorrowReminderScheduleFields.hidden = !override || !enabled;
+      }
+      [
+        dom.roomConfigTomorrowReminderHours,
+        dom.roomConfigTomorrowReminderOnlyIfEvents,
+        dom.roomConfigTomorrowReminderMaxItems,
+      ].forEach(function(el) {
+        if (el) el.disabled = !override || !enabled || !hasLinkedRooms;
+      });
+    }
+
+    function syncRoomConfigCalendarGmailPermFields() {
+      const override = !!(dom.roomConfigCalendarGmailOverride && dom.roomConfigCalendarGmailOverride.checked);
+      const hasLinkedRooms = !!(dom.roomConfigReceiptScheduleRoomSelect && dom.roomConfigReceiptScheduleRoomSelect.options.length > 0);
+      if (dom.roomConfigCalendarGmailFields) dom.roomConfigCalendarGmailFields.hidden = !override;
+      if (dom.roomConfigCalendarGmailOverride) dom.roomConfigCalendarGmailOverride.disabled = !hasLinkedRooms;
+      [
+        dom.roomConfigTomorrowReminderPerm,
+        dom.roomConfigGoogleCalendarAutoRegisterPerm,
+        dom.roomConfigCalendarRegistrationReplyPerm,
+        dom.roomConfigCalendarLowConfidenceConfirmReplyPerm,
+        dom.roomConfigGmailAlertPerm,
+      ].forEach(function(el) {
+        if (el) el.disabled = !override || !hasLinkedRooms;
+      });
+      syncRoomConfigCalendarGmailPermSubOptions();
+      syncRoomConfigTomorrowReminderScheduleFields();
+    }
+
+    function applyCalendarGmailToRoomConfigModal(roomId) {
+      const bulk = getBulkCalendarGmailSettings();
+      const raw = loadRoomCalendarGmailSettings(roomId) || {};
+      const resolved = resolveCalendarGmailSettingsForRoom(roomId);
+      if (dom.roomConfigCalendarGmailBulkHint) {
+        dom.roomConfigCalendarGmailBulkHint.textContent = '一括設定: ' + formatCalendarGmailBulkLabel(bulk);
+      }
+      if (dom.roomConfigCalendarGmailOverride) {
+        dom.roomConfigCalendarGmailOverride.checked = !!raw.calendar_gmail_settings_override;
+      }
+      const editSource = raw.calendar_gmail_settings_override ? resolved : bulk;
+      applyCalendarGmailValuesToPermFields(editSource);
+      applyCalendarGmailValuesToInlineFields(resolved);
+      syncRoomConfigCalendarGmailPermFields();
+      activeCalendarGmailRoomId = String(roomId || '').trim();
+    }
+
+    function buildCalendarGmailDraftFromRoomModal() {
+      const override = !!(dom.roomConfigCalendarGmailOverride && dom.roomConfigCalendarGmailOverride.checked);
+      if (!override) return { calendar_gmail_settings_override: false };
+      const values = readCalendarGmailFromPermModal();
+      return Object.assign({ calendar_gmail_settings_override: true }, values);
+    }
+
+    function persistCalendarGmailDraftForRoom(roomId) {
+      const targetRoomId = String(roomId || '').trim();
+      if (!targetRoomId) return;
+      saveRoomCalendarGmailSettings(targetRoomId, buildCalendarGmailDraftFromRoomModal());
+    }
+
+    function onRoomConfigCalendarGmailInputChange() {
+      syncRoomConfigCalendarGmailPermSubOptions();
+      invalidateRoomConfigReview();
+    }
+
+    function getCalendarGmailSummaryForStore(storeKey) {
+      const rows = findRoomRowsByStoreKey(storeKey);
+      if (rows.length === 0) return resolveCalendarGmailSettingsForRoom('');
+      const signatures = rows.map(function(tr) {
+        const s = resolveCalendarGmailSettingsForRoom(tr.dataset.roomId);
+        return [
+          s.calendar_tomorrow_reminder_enabled ? '1' : '0',
+          formatTomorrowReminderHoursLabel(s.calendar_tomorrow_reminder_hours),
+          s.calendar_tomorrow_reminder_only_if_events ? '1' : '0',
+          String(s.calendar_tomorrow_reminder_max_items),
+          s.calendar_ai_auto_create_enabled ? '1' : '0',
+          s.calendar_registration_reply_enabled ? '1' : '0',
+          s.calendar_low_confidence_confirm_reply_enabled ? '1' : '0',
+          s.gmail_reservation_alert_enabled ? '1' : '0',
+          s.calendar_gmail_settings_override ? '1' : '0',
+        ].join(':');
+      });
+      const unique = signatures.filter(function(sig, index) { return signatures.indexOf(sig) === index; });
+      if (unique.length === 1) return resolveCalendarGmailSettingsForRoom(rows[0].dataset.roomId);
+      return { mixed: true };
+    }
+
+    function buildReceiptScheduleDraftFromRoomModal() {
+      const override = !!(dom.roomConfigReceiptScheduleOverride && dom.roomConfigReceiptScheduleOverride.checked);
+      if (!override) {
+        return { receipt_schedule_override: false };
+      }
+      const schedule = readReceiptScheduleFromRoomConfigModal();
+      return {
+        receipt_schedule_override: true,
+        receipt_midreport_day: schedule.receipt_midreport_day,
+        receipt_midreport_hour: schedule.receipt_midreport_hour,
+        receipt_midreport_minute: schedule.receipt_midreport_minute,
+        receipt_monthend_day: schedule.receipt_monthend_day,
+        receipt_monthend_hour: schedule.receipt_monthend_hour,
+        receipt_monthend_minute: schedule.receipt_monthend_minute,
+      };
+    }
+
+    function onRoomConfigReceiptScheduleInputChange() {
+      refreshRoomConfigReceiptCheckboxLabels(
+        Object.assign({ receipt_schedule_override: !!(dom.roomConfigReceiptScheduleOverride && dom.roomConfigReceiptScheduleOverride.checked) }, buildReceiptScheduleDraftFromRoomModal()),
+      );
+      invalidateRoomConfigReview();
+    }
+
+    function onNewRoomReceiptScheduleInputChange() {
+      saveNewRoomBulkReceiptScheduleFromModal();
+      refreshNewRoomReceiptCheckboxLabels();
+      refreshNewRoomConfigSummary();
+    }
+
+    function onNewRoomTomorrowReminderScheduleInputChange() {
+      saveNewRoomBulkTomorrowReminderScheduleFromModal();
+      refreshNewRoomConfigSummary();
+    }
+
+    function onRoomConfigTomorrowReminderScheduleInputChange() {
+      syncRoomConfigTomorrowReminderScheduleFields();
+      onRoomConfigCalendarGmailInputChange();
     }
 
     function syncRoomConfigCalendarSubOptions() {
@@ -2762,12 +4343,25 @@
 
     function loadMergedGoogleCalendarAutoRegisterDefault() {
       var v = localStorage.getItem(NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY);
-      if (v != null) return loadBooleanSetting(NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY, true);
-      return loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_AUTO_CREATE_KEY, true) && loadBooleanSetting(NEW_ROOM_DEFAULT_SILENT_AUTO_REGISTER_KEY, true);
+      if (v != null) return loadBooleanSetting(NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.calendar_auto);
+      if (localStorage.getItem(NEW_ROOM_DEFAULT_CALENDAR_AUTO_CREATE_KEY) != null
+        || localStorage.getItem(NEW_ROOM_DEFAULT_SILENT_AUTO_REGISTER_KEY) != null) {
+        return loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_AUTO_CREATE_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.calendar_auto)
+          && loadBooleanSetting(NEW_ROOM_DEFAULT_SILENT_AUTO_REGISTER_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.calendar_auto);
+      }
+      return NEW_ROOM_RECEIPT_SITE_DEFAULTS.calendar_auto;
+    }
+
+    function syncNewRoomExtraSettingsPanel() {
+      const open = !!(dom.newRoomExtraSettingsToggle && dom.newRoomExtraSettingsToggle.checked);
+      if (dom.newRoomExtraSettingsPanel) dom.newRoomExtraSettingsPanel.hidden = !open;
     }
 
     function applyNewRoomDefaultCheckboxes() {
-      dom.newRoomBotReplyEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_BOT_REPLY_KEY, true);
+      dom.newRoomBotReplyEnabled.checked = loadBooleanSetting(
+        NEW_ROOM_DEFAULT_BOT_REPLY_KEY,
+        NEW_ROOM_RECEIPT_SITE_DEFAULTS.bot_reply,
+      );
       if (dom.newRoomBotReplyHardMute) {
         dom.newRoomBotReplyHardMute.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_BOT_REPLY_HARD_MUTE_KEY, false);
       }
@@ -2779,9 +4373,15 @@
       }
       syncNewRoomSummaryMutualExclusion();
       dom.newRoomTomorrowReminder.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY, false);
-      dom.newRoomMediaFileAccessEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY, true);
+      dom.newRoomMediaFileAccessEnabled.checked = loadBooleanSetting(
+        NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY,
+        NEW_ROOM_RECEIPT_SITE_DEFAULTS.media_access,
+      );
       if (dom.newRoomImageAnalysisReplyEnabled) {
-        dom.newRoomImageAnalysisReplyEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, true);
+        dom.newRoomImageAnalysisReplyEnabled.checked = loadBooleanSetting(
+          NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY,
+          NEW_ROOM_RECEIPT_SITE_DEFAULTS.image_analysis_reply,
+        );
       }
       dom.newRoomGoogleCalendarAutoRegister.checked = loadMergedGoogleCalendarAutoRegisterDefault();
       if (dom.newRoomCalendarRegistrationReply) {
@@ -2790,38 +4390,59 @@
       dom.newRoomCalendarLowConfidenceConfirmReply.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, false);
       dom.newRoomGmailAlertEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, false);
       if (dom.newRoomReceiptMidreportEnabled) {
-        dom.newRoomReceiptMidreportEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY, true);
+        dom.newRoomReceiptMidreportEnabled.checked = loadBooleanSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY,
+          NEW_ROOM_RECEIPT_SITE_DEFAULTS.receipt_midreport,
+        );
       }
       if (dom.newRoomReceiptMonthendReportEnabled) {
-        dom.newRoomReceiptMonthendReportEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_REPORT_KEY, true);
+        dom.newRoomReceiptMonthendReportEnabled.checked = loadBooleanSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_REPORT_KEY,
+          NEW_ROOM_RECEIPT_SITE_DEFAULTS.receipt_monthend,
+        );
       }
+      if (dom.newRoomExtraSettingsToggle) {
+        const anyExtraEnabled =
+          dom.newRoomBotReplyEnabled.checked ||
+          (dom.newRoomBotReplyHardMute && dom.newRoomBotReplyHardMute.checked) ||
+          dom.newRoomMessageSearchEnabled.checked ||
+          dom.newRoomMessageSearchLibraryEnabled.checked ||
+          dom.newRoomSendSummary.checked ||
+          (dom.newRoomReceiveOverallSummary && dom.newRoomReceiveOverallSummary.checked) ||
+          dom.newRoomTomorrowReminder.checked ||
+          dom.newRoomGoogleCalendarAutoRegister.checked ||
+          dom.newRoomGmailAlertEnabled.checked;
+        dom.newRoomExtraSettingsToggle.checked =
+          loadBooleanSetting(NEW_ROOM_DEFAULT_EXTRA_SETTINGS_OPEN_KEY, false) || anyExtraEnabled;
+      }
+      syncNewRoomExtraSettingsPanel();
       syncNewRoomCalendarSubOptions();
       syncNewRoomMediaSubOptions();
+      applyBulkReceiptScheduleToNewRoomModal();
+      applyBulkTomorrowReminderScheduleToNewRoomModal();
       refreshNewRoomConfigSummary();
     }
 
     function buildNewRoomConfigSummary() {
-      const enabledCount =
+      const receiptCount =
+        (dom.newRoomMediaFileAccessEnabled.checked ? 1 : 0) +
+        (dom.newRoomMediaFileAccessEnabled.checked && dom.newRoomImageAnalysisReplyEnabled && dom.newRoomImageAnalysisReplyEnabled.checked ? 1 : 0) +
+        (dom.newRoomReceiptMidreportEnabled && dom.newRoomReceiptMidreportEnabled.checked ? 1 : 0) +
+        (dom.newRoomReceiptMonthendReportEnabled && dom.newRoomReceiptMonthendReportEnabled.checked ? 1 : 0);
+      const extraCount =
         (dom.newRoomBotReplyEnabled.checked ? 1 : 0) +
         (dom.newRoomBotReplyHardMute && dom.newRoomBotReplyHardMute.checked ? 1 : 0) +
         (dom.newRoomMessageSearchEnabled.checked ? 1 : 0) +
         (dom.newRoomMessageSearchLibraryEnabled.checked ? 1 : 0) +
         (dom.newRoomSendSummary.checked || (dom.newRoomReceiveOverallSummary && dom.newRoomReceiveOverallSummary.checked) ? 1 : 0) +
         (dom.newRoomTomorrowReminder.checked ? 1 : 0) +
-        (dom.newRoomMediaFileAccessEnabled.checked ? 1 : 0) +
-        (dom.newRoomMediaFileAccessEnabled.checked && dom.newRoomImageAnalysisReplyEnabled && dom.newRoomImageAnalysisReplyEnabled.checked ? 1 : 0) +
         (dom.newRoomGoogleCalendarAutoRegister.checked ? 1 : 0) +
         (dom.newRoomGoogleCalendarAutoRegister.checked && dom.newRoomCalendarRegistrationReply && dom.newRoomCalendarRegistrationReply.checked ? 1 : 0) +
         (dom.newRoomGoogleCalendarAutoRegister.checked && dom.newRoomCalendarLowConfidenceConfirmReply.checked ? 1 : 0) +
-        (dom.newRoomGmailAlertEnabled.checked ? 1 : 0) +
-        (dom.newRoomReceiptMidreportEnabled && dom.newRoomReceiptMidreportEnabled.checked ? 1 : 0) +
-        (dom.newRoomReceiptMonthendReportEnabled && dom.newRoomReceiptMonthendReportEnabled.checked ? 1 : 0);
-      const summary = dom.newRoomSummaryMode.value === 'daily_rollup'
-        ? '1日まとめ'
-        : dom.newRoomSummaryMode.value === 'independent'
-        ? '各回独立'
-        : '継承';
-      return enabledCount + '/14 有効 ・ 最終回:' + summary;
+        (dom.newRoomGmailAlertEnabled.checked ? 1 : 0);
+      const bulk = getBulkReceiptSchedule();
+      const scheduleText = formatReceiptMidreportScheduleLabel(bulk) + ' / ' + formatReceiptMonthendScheduleLabel(bulk);
+      return 'レシート ' + receiptCount + '/4 有効 ・ その他 ' + extraCount + ' ・ 時刻:' + scheduleText;
     }
 
     function refreshNewRoomConfigSummary() {
@@ -2830,28 +4451,27 @@
     }
 
     function buildRoomConfigDraftFromModal() {
-      return {
+      const permissionMode = !!(dom.roomConfigModalCard && dom.roomConfigModalCard.dataset.webhookMode === 'permission');
+      const roomId = getActiveRoomConfigRoomId();
+      const calendarPart = permissionMode
+        ? resolveCalendarGmailSettingsForRoom(roomId)
+        : readCalendarGmailFromInlineModal();
+      return Object.assign({
         bot_reply_enabled: !!dom.roomConfigBotReplyEnabled.checked,
         bot_reply_hard_mute_enabled: !!(dom.roomConfigBotReplyHardMute && dom.roomConfigBotReplyHardMute.checked),
         message_search_enabled: !!dom.roomConfigMessageSearchEnabled.checked,
         message_search_library_enabled: !!dom.roomConfigMessageSearchLibraryEnabled.checked,
         send_room_summary: !!dom.roomConfigSendSummary.checked,
         receive_overall_summary_enabled: !!(dom.roomConfigReceiveOverallSummary && dom.roomConfigReceiveOverallSummary.checked),
-        calendar_tomorrow_reminder_enabled: !!dom.roomConfigTomorrowReminder.checked,
         media_file_access_enabled: !!dom.roomConfigMediaAccess.checked,
         image_analysis_reply_enabled: !!(dom.roomConfigImageAnalysisReplyEnabled && dom.roomConfigImageAnalysisReplyEnabled.checked),
-        calendar_ai_auto_create_enabled: !!dom.roomConfigGoogleCalendarAutoRegister.checked,
-        calendar_silent_auto_register_enabled: !!dom.roomConfigGoogleCalendarAutoRegister.checked,
-        calendar_low_confidence_confirm_reply_enabled: !!dom.roomConfigGoogleCalendarAutoRegister.checked && !!dom.roomConfigCalendarLowConfidenceConfirmReply.checked,
-        calendar_registration_reply_enabled: !!dom.roomConfigGoogleCalendarAutoRegister.checked && !!(dom.roomConfigCalendarRegistrationReply && dom.roomConfigCalendarRegistrationReply.checked),
-        gmail_reservation_alert_enabled: !!dom.roomConfigGmailAlert.checked,
         receipt_midreport_enabled: !!(dom.roomConfigReceiptMidreportEnabled && dom.roomConfigReceiptMidreportEnabled.checked),
         receipt_monthend_report_enabled: !!(dom.roomConfigReceiptMonthendReportEnabled && dom.roomConfigReceiptMonthendReportEnabled.checked),
         receipt_report_store_partition_key: activeWebhookConfigStoreKey
           || (dom.roomConfigReceiptReportStoreKey
             ? String(dom.roomConfigReceiptReportStoreKey.value || '').trim()
             : ''),
-      };
+      }, calendarPart, buildReceiptScheduleDraftFromRoomModal());
     }
 
     function receiptStoreLabelForKey(storeKey) {
@@ -2939,8 +4559,13 @@
         if (calLowConf) enabledFeatures.push('低確度のとき確認返信（はい／いいえ）');
       }
       if (config.gmail_reservation_alert_enabled) enabledFeatures.push('Gmail予約通知');
-      if (config.receipt_midreport_enabled) enabledFeatures.push('売上中間報告をこのルームに送信（16日 10:00）');
-      if (config.receipt_monthend_report_enabled) enabledFeatures.push('売上月末レポートをこのルームに送信（翌月1日 10:00）');
+      const receiptSchedule = resolveReceiptScheduleFromConfig(config);
+      if (config.receipt_midreport_enabled) {
+        enabledFeatures.push(formatReceiptMidreportCheckboxLabel(receiptSchedule));
+      }
+      if (config.receipt_monthend_report_enabled) {
+        enabledFeatures.push(formatReceiptMonthendCheckboxLabel(receiptSchedule));
+      }
       if (config.receipt_midreport_enabled || config.receipt_monthend_report_enabled) {
         const storeKey = String(config.receipt_report_store_partition_key || '').trim();
         if (storeKey) {
@@ -3001,13 +4626,21 @@
         scheduledAndAlerts.push('全体向け定期要約レポートを、このトークにも配信する設定です。');
       }
       if (config.calendar_tomorrow_reminder_enabled) {
-        scheduledAndAlerts.push('翌日予定の事前通知を、このトークへ送る設定です（翌日通知ジョブが有効な場合）。');
+        scheduledAndAlerts.push(
+          '翌日予定の事前通知（' + formatTomorrowReminderScheduleLabel(config) + '）を、このトークへ送る設定です（翌日通知ジョブが有効な場合）。',
+        );
       }
       if (config.receipt_midreport_enabled) {
-        scheduledAndAlerts.push('月途中の売上レポートを、このルームへ送る設定です（通常は毎月16日 10:00・バッチ処理）。');
+        scheduledAndAlerts.push(
+          '月途中の売上レポートを、このルームへ送る設定です（' +
+          formatReceiptMidreportScheduleLabel(receiptSchedule) + '・バッチ処理）。',
+        );
       }
       if (config.receipt_monthend_report_enabled) {
-        scheduledAndAlerts.push('月末の売上レポートを、このルームへ送る設定です（通常は翌月1日 10:00・バッチ処理）。');
+        scheduledAndAlerts.push(
+          '月末の売上レポートを、このルームへ送る設定です（' +
+          formatReceiptMonthendScheduleLabel(receiptSchedule) + '・バッチ処理）。',
+        );
       }
 
       if (config.send_room_summary && config.receive_overall_summary_enabled) {
@@ -3072,6 +4705,7 @@
     }
 
     function openNewRoomConfigModal() {
+      applyNewRoomDefaultCheckboxes();
       dom.newRoomConfigModal.classList.add('open');
       dom.newRoomConfigModal.setAttribute('aria-hidden', 'false');
     }
@@ -3083,8 +4717,23 @@
 
     function updateAuthPill() {
       const hasToken = !!getToken();
-      dom.authState.textContent = hasToken ? '接続準備OK' : '未接続';
-      dom.authState.className = hasToken ? 'pill ok' : 'pill';
+      if (!hasToken) {
+        dom.authState.textContent = '未接続';
+        dom.authState.className = 'pill';
+      } else {
+        const remember = window.LINE_REPORT_AUTH && LINE_REPORT_AUTH.isRememberEnabled();
+        dom.authState.textContent = remember ? 'ログイン済み（保持）' : 'ログイン済み';
+        dom.authState.className = 'pill ok';
+      }
+      if (dom.authPersistMeta) {
+        if (!hasToken) {
+          dom.authPersistMeta.textContent = '「ログイン状態を保持」ON のとき、次回アクセスから自動で接続します。';
+        } else if (window.LINE_REPORT_AUTH && LINE_REPORT_AUTH.isRememberEnabled()) {
+          dom.authPersistMeta.textContent = 'ログイン状態を保持中です。次回このページを開くと自動で接続します。';
+        } else {
+          dom.authPersistMeta.textContent = 'このブラウザを閉じるとログアウトします（保持 OFF）。';
+        }
+      }
     }
 
     function parseHours(raw, allowEmpty) {
@@ -3345,7 +4994,18 @@
     }
 
     async function checkGmailAccount() {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      const token = getToken();
+      const cached = SC && token
+        ? SC.get(token, getProjectUrl(), 'admin-api', 'GET', '/gmail/account')
+        : null;
+      if (cached && cached.data) {
+        renderGmailAccountState(cached.data.gmail_account ? cached.data.gmail_account : null);
+      }
       const response = await api('/gmail/account');
+      if (SC && token) {
+        SC.set(token, getProjectUrl(), 'admin-api', 'GET', '/gmail/account', response);
+      }
       renderGmailAccountState(response && response.gmail_account ? response.gmail_account : null);
     }
 
@@ -3536,12 +5196,17 @@
       return '';
     }
 
-    async function fetchReceiptWebhookStatusMap() {
+    async function fetchReceiptWebhookStatusMap(options) {
+      const opts = options || {};
+      const includeDetectedRooms = opts.includeDetectedRooms !== false;
       try {
         const token = getToken();
         if (!token) return {};
+        const apiPath = includeDetectedRooms
+          ? '/receipts/webhook-status'
+          : '/receipts/webhook-status?include_detected_rooms=0';
         const res = await fetch(
-          LINE_REPORT_PAGES.receiptAdminApiUrl('/receipts/webhook-status'),
+          LINE_REPORT_PAGES.receiptAdminApiUrl(apiPath),
           {
             method: 'GET',
             headers: { 'x-admin-token': token },
@@ -3559,10 +5224,195 @@
           if (!key) return;
           map[key] = row;
         });
+        const SC = window.LINE_REPORT_SITE_CACHE;
+        if (SC && includeDetectedRooms) {
+          SC.set(token, LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL, 'receipt-admin-api', 'GET', '/receipts/webhook-status', map);
+        }
         return map;
       } catch (_) {
         return {};
       }
+    }
+
+    function readCachedWebhookMap() {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      const token = getToken();
+      if (!SC || !token) return null;
+      const webhookEntry = SC.get(
+        token,
+        LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL,
+        'receipt-admin-api',
+        'GET',
+        '/receipts/webhook-status',
+      );
+      return webhookEntry && webhookEntry.data ? webhookEntry.data : null;
+    }
+
+    function mergeWebhookStatusMaps(primary, secondary) {
+      const merged = Object.assign({}, secondary || {}, primary || {});
+      const prev = secondary || {};
+      Object.keys(merged).forEach(function(key) {
+        const nextRow = merged[key];
+        const prevRow = prev[key];
+        if (
+          prevRow &&
+          Array.isArray(prevRow.detected_room_ids) &&
+          prevRow.detected_room_ids.length > 0 &&
+          (!nextRow.detected_room_ids || !nextRow.detected_room_ids.length)
+        ) {
+          merged[key] = Object.assign({}, nextRow, {
+            detected_room_ids: prevRow.detected_room_ids,
+          });
+        }
+      });
+      return merged;
+    }
+
+    function refreshWebhookCardsFromCurrentState() {
+      if (!currentState || !dom.webhookCardListBody) return;
+      renderWebhookCards(
+        currentState.room_overview || [],
+        currentState.room_settings || [],
+        currentState.receipt_store_options || [],
+      );
+    }
+
+    function shouldRunBackgroundStateReload() {
+      return Date.now() - lastStateLoadedAt >= MIN_SILENT_RELOAD_MS;
+    }
+
+    function refreshWebhookStatusDetailsInBackground() {
+      fetchReceiptWebhookStatusMap({ includeDetectedRooms: true })
+        .then(function(fullMap) {
+          receiptWebhookStatusByStore = mergeWebhookStatusMaps(fullMap, receiptWebhookStatusByStore);
+          refreshWebhookCardsFromCurrentState();
+          if (currentState) {
+            persistAdminPayloadToCache(currentState, receiptWebhookStatusByStore);
+          }
+        })
+        .catch(function(e) {
+          console.error(e);
+        });
+    }
+
+    function cancelSyncOverlayDelay() {
+      if (syncOverlayDelayTimer !== null) {
+        clearTimeout(syncOverlayDelayTimer);
+        syncOverlayDelayTimer = null;
+      }
+    }
+
+    function updateSyncOverlay(meta) {
+      if (!dom.syncOverlay) return;
+      const m = meta || {};
+      if (dom.syncOverlayTitle) dom.syncOverlayTitle.textContent = m.title || '同期中';
+      if (dom.syncOverlayMessage) {
+        dom.syncOverlayMessage.textContent = m.message || 'サーバーとデータを照合しています…';
+      }
+      if (dom.syncOverlayStep) {
+        const stepText = m.step != null ? String(m.step) : '接続中';
+        dom.syncOverlayStep.textContent = stepText;
+        dom.syncOverlayStep.hidden = stepText === '';
+      }
+    }
+
+    function showSyncOverlay(meta) {
+      cancelSyncOverlayDelay();
+      syncOverlayToken += 1;
+      if (!dom.syncOverlay) return syncOverlayToken;
+      updateSyncOverlay(meta);
+      dom.syncOverlay.classList.add('open');
+      dom.syncOverlay.setAttribute('aria-hidden', 'false');
+      return syncOverlayToken;
+    }
+
+    function scheduleSyncOverlay(meta, delayMs) {
+      cancelSyncOverlayDelay();
+      const wait = Number.isFinite(Number(delayMs)) ? Math.max(0, Number(delayMs)) : 350;
+      syncOverlayDelayTimer = window.setTimeout(function() {
+        syncOverlayDelayTimer = null;
+        showSyncOverlay(meta);
+      }, wait);
+    }
+
+    function hideSyncOverlay(expectedToken) {
+      cancelSyncOverlayDelay();
+      if (expectedToken && expectedToken !== syncOverlayToken) return;
+      if (!dom.syncOverlay) return;
+      dom.syncOverlay.classList.remove('open');
+      dom.syncOverlay.setAttribute('aria-hidden', 'true');
+    }
+
+    function readCachedAdminPayload() {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      if (!SC) return null;
+      const token = getToken();
+      if (!token) return null;
+      const stateEntry = SC.get(token, getProjectUrl(), 'admin-api', 'GET', '/state?logs_limit=30');
+      if (!stateEntry || !stateEntry.data) return null;
+      const webhookEntry = SC.get(
+        token,
+        LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL,
+        'receipt-admin-api',
+        'GET',
+        '/receipts/webhook-status',
+      );
+      return {
+        state: stateEntry.data,
+        webhookMap: webhookEntry && webhookEntry.data ? webhookEntry.data : {},
+        savedAt: stateEntry.savedAt,
+      };
+    }
+
+    function persistAdminPayloadToCache(state, webhookMap) {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      const token = getToken();
+      if (!SC || !token || !state) return;
+      SC.set(token, getProjectUrl(), 'admin-api', 'GET', '/state?logs_limit=30', state);
+      SC.set(
+        token,
+        LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL,
+        'receipt-admin-api',
+        'GET',
+        '/receipts/webhook-status',
+        webhookMap || {},
+      );
+    }
+
+    function applyLoadedState(state, webhookMap, meta) {
+      const options = meta || {};
+      currentState = state;
+      receiptWebhookStatusByStore = webhookMap || {};
+      renderDeliverySection(state);
+      renderWebhookSettingsSection(
+        state.room_overview || [],
+        state.room_settings || [],
+        state.receipt_store_options || [],
+      );
+      renderUserPermissions(state.user_permissions || []);
+      renderStorageUsage(state.storage_usage, state.storage_usage_error, state.generated_at);
+      renderPushUsage(state.push_usage_monthly);
+      if (options.fromCache) {
+        dom.lastRefresh.textContent =
+          '最終更新: ' + formatDate(state.generated_at) + '（キャッシュ表示・更新中…）';
+      } else {
+        dom.lastRefresh.textContent = '最終更新: ' + formatDate(state.generated_at);
+      }
+    }
+
+    function hydrateFromSiteCache() {
+      const cached = readCachedAdminPayload();
+      if (!cached || !cached.state) return false;
+      applyLoadedState(cached.state, cached.webhookMap, { fromCache: true });
+      return true;
+    }
+
+    function primeWebhookCardsFromCache() {
+      const cachedWebhook = readCachedWebhookMap();
+      if (!cachedWebhook || !Object.keys(cachedWebhook).length) return false;
+      receiptWebhookStatusByStore = cachedWebhook;
+      refreshWebhookCardsFromCurrentState();
+      return true;
     }
 
     function normalizeStoreLabelForMatch(label) {
@@ -3579,12 +5429,29 @@
       return !!(status && status.is_communicating);
     }
 
-    function buildReceiptFeatureSummaryText(config) {
+    function buildReceiptFeatureSummaryText(config, storeKey) {
       const parts = [];
+      const scheduleSummary = storeKey ? getReceiptScheduleSummaryForStore(storeKey, config) : resolveReceiptScheduleFromConfig(config);
+      const calendarSummary = storeKey ? getCalendarGmailSummaryForStore(storeKey) : resolveCalendarGmailSettingsForRoom('');
       if (config.media_file_access_enabled !== false) parts.push('添付保存');
       if (config.image_analysis_reply_enabled !== false) parts.push('解析返信');
-      if (config.receipt_midreport_enabled !== false) parts.push('中間報告');
-      if (config.receipt_monthend_report_enabled !== false) parts.push('月末レポート');
+      if (calendarSummary.mixed) {
+        parts.push('予定（ルームごと）');
+      } else {
+        if (calendarSummary.calendar_tomorrow_reminder_enabled) {
+          parts.push('明日予定 ' + formatTomorrowReminderHoursLabel(calendarSummary.calendar_tomorrow_reminder_hours));
+        }
+        if (calendarSummary.calendar_ai_auto_create_enabled && calendarSummary.calendar_silent_auto_register_enabled) {
+          parts.push('カレンダー自動');
+        }
+        if (calendarSummary.gmail_reservation_alert_enabled) parts.push('Gmail予約');
+      }
+      if (config.receipt_midreport_enabled !== false) {
+        parts.push(scheduleSummary.mixed ? '中間（ルームごと）' : ('中間 ' + formatReceiptMidreportScheduleLabel(scheduleSummary)));
+      }
+      if (config.receipt_monthend_report_enabled !== false) {
+        parts.push(scheduleSummary.mixed ? '月末（ルームごと）' : ('月末 ' + formatReceiptMonthendScheduleLabel(scheduleSummary)));
+      }
       return parts.length ? parts.join(' / ') : '未設定';
     }
 
@@ -3665,6 +5532,7 @@
       const headers = Object.assign({
         'x-admin-token': t,
         'Content-Type': 'application/json',
+        'x-admin-surface': LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report',
       }, request.headers || {});
       const res = await fetch(
         LINE_REPORT_PAGES.adminApiUrl(requestPath, base),
@@ -3694,10 +5562,6 @@
       if (active.isContentEditable) return true;
       if (active.matches('input, textarea, select')) return true;
       return !!active.closest('#roomTableBody');
-    }
-
-    function markGlobalDirty() {
-      isGlobalDirty = true;
     }
 
     function markRoomDirty() {
@@ -3759,16 +5623,28 @@
 
     async function safeLoadState(options) {
       const opts = options || {};
-      if (isStateLoading) return;
-      isStateLoading = true;
-      try {
-        await loadState();
-      } catch (e) {
-        if (!opts.silent) throw e;
-        console.error(e);
-      } finally {
-        isStateLoading = false;
-      }
+      if (stateLoadPromise) return stateLoadPromise;
+      stateLoadPromise = (async function() {
+        isStateLoading = true;
+        try {
+          await loadState(opts);
+          lastStateLoadedAt = Date.now();
+        } catch (e) {
+          if (opts.silent && hydrateFromSiteCache()) {
+            if (dom.lastRefresh) {
+              dom.lastRefresh.textContent = dom.lastRefresh.textContent.replace(/（キャッシュ表示・更新中…）?$/, '') + '（更新失敗・キャッシュ表示）';
+            }
+            console.error(e);
+            return;
+          }
+          if (!opts.silent) throw e;
+          console.error(e);
+        } finally {
+          isStateLoading = false;
+          stateLoadPromise = null;
+        }
+      })();
+      return stateLoadPromise;
     }
 
     async function safeCheckGmailAccount(options) {
@@ -3786,43 +5662,11 @@
       stopAutoRefresh();
       if (!getToken()) return;
       autoRefreshTimer = window.setTimeout(async function() {
-        if (!isEditingRoomForm() && !isGlobalDirty && !isRoomDirty && !isUserPermissionDirty) {
+        if (!isEditingRoomForm() && !isRoomDirty && !isUserPermissionDirty) {
           await safeLoadState({ silent: true });
         }
         scheduleAutoRefresh();
       }, nextAutoRefreshMs());
-    }
-
-    function renderGlobal(settings) {
-      dom.globalEnabled.checked = !!settings.is_enabled;
-      dom.globalHoursInput.value = Array.isArray(settings.delivery_hours) ? settings.delivery_hours.join(',') : '12,17,23';
-      dom.lastDeliverySummaryMode.value = settings.last_delivery_summary_mode === 'daily_rollup' ? 'daily_rollup' : 'independent';
-      const retentionDays = Number(settings.message_retention_days);
-      dom.messageRetentionDays.value = ([0, 60, 120, 180, 365, 730, 1095].includes(retentionDays))
-        ? String(retentionDays)
-        : '365';
-      dom.tomorrowReminderEnabled.checked = settings.calendar_tomorrow_reminder_enabled !== false;
-      dom.tomorrowReminderHoursInput.value = Array.isArray(settings.calendar_tomorrow_reminder_hours)
-        ? settings.calendar_tomorrow_reminder_hours.join(',')
-        : '19';
-      dom.tomorrowReminderOnlyIfEvents.value = settings.calendar_tomorrow_reminder_only_if_events ? 'true' : 'false';
-      const maxItems = Number(settings.calendar_tomorrow_reminder_max_items);
-      dom.tomorrowReminderMaxItems.value = Number.isInteger(maxItems) && maxItems >= 1 && maxItems <= 50
-        ? String(maxItems)
-        : '20';
-      const count = Array.isArray(settings.delivery_hours) ? settings.delivery_hours.length : 0;
-      const reminderHours = Array.isArray(settings.calendar_tomorrow_reminder_hours)
-        ? settings.calendar_tomorrow_reminder_hours.join(',')
-        : '19';
-      dom.globalMeta.textContent =
-        '配信: ' + count + '回/日'
-        + '  |  最終回: ' + summaryModeLabel(dom.lastDeliverySummaryMode.value)
-        + '\n'
-        + '会話保持: ' + messageRetentionLabel(dom.messageRetentionDays.value)
-        + '  |  翌日予定通知: ' + (dom.tomorrowReminderEnabled.checked ? ('ON (' + reminderHours + '時)') : 'OFF')
-        + '  |  予定なし時: ' + (dom.tomorrowReminderOnlyIfEvents.value === 'true' ? '送らない' : '送る')
-        + '  |  表示上限: ' + dom.tomorrowReminderMaxItems.value + '件';
-      isGlobalDirty = false;
     }
 
     function webhookMethodJa(method) {
@@ -3831,23 +5675,33 @@
       return '返信';
     }
 
-    function renderSummaryLogRows(logs) {
-      dom.logTableBody.innerHTML = '';
-      const rows = Array.isArray(logs) ? logs.slice(0, 30) : [];
-      if (rows.length === 0) {
-        dom.logTableBody.innerHTML = '<tr><td class="empty" colspan="5">ログはありません。</td></tr>';
-        return;
+    function renderDeliverySection(state) {
+      const st = state || {};
+      const webhookLogs = Array.isArray(st.webhook_delivery_logs) ? st.webhook_delivery_logs : [];
+      const usage = st.push_usage_monthly && typeof st.push_usage_monthly === 'object' ? st.push_usage_monthly : null;
+      if (dom.webhookQuotaSummary) {
+        if (!usage) {
+          dom.webhookQuotaSummary.textContent = 'Webhook無料枠（200）残り: 取得待ち';
+        } else {
+          const month = String(usage.month_jst || '').trim() || '-';
+          const limit = Number(usage.free_quota_limit || 200);
+          const used = Number(usage.webhook_reply_rows || 0);
+          const remaining = Math.max(0, Number(usage.free_quota_remaining != null ? usage.free_quota_remaining : (limit - used)));
+          dom.webhookQuotaSummary.textContent =
+            'Webhook無料枠（' + month + ' JST / 上限' + limit + '） 残り: '
+            + remaining + '回（使用: ' + used + '回）';
+        }
       }
-      for (const row of rows) {
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td>' + formatDate(row.run_at) + '</td>' +
-          '<td><span class="tag ' + tagClass(row.status) + '">' + escapeHtml(row.status || '-') + '</span></td>' +
-          '<td>' + escapeHtml(logReasonJa(row)) + '</td>' +
-          '<td>' + Number(row.rooms_targeted || 0) + ' rooms</td>' +
-          '<td>' + (row.line_send_success ? '成功' : (row.line_send_attempted ? '失敗' : '未実行')) + '</td>';
-        dom.logTableBody.appendChild(tr);
+      if (dom.deliveryLogTable) {
+        dom.deliveryLogTable.className = 'log-table log-table--webhook';
       }
+      if (dom.logTableHead) {
+        dom.logTableHead.innerHTML =
+          '<tr>' +
+          '<th>実行時刻</th><th>方式</th><th>コンテキスト</th><th>状態</th><th>理由</th><th>ルーム</th><th>送信</th>' +
+          '</tr>';
+      }
+      renderWebhookLogRows(webhookLogs);
     }
 
     function renderWebhookLogRows(logs) {
@@ -3869,53 +5723,6 @@
           '<td>' + escapeHtml(String(row.target_room_id || '-')) + '</td>' +
           '<td>' + (row.line_send_success ? '成功' : (row.line_send_attempted ? '失敗' : '未実行')) + '</td>';
         dom.logTableBody.appendChild(tr);
-      }
-    }
-
-    function renderDeliverySection(state) {
-      const st = state || {};
-      const summaryLogs = Array.isArray(st.delivery_logs) ? st.delivery_logs : [];
-      const webhookLogs = Array.isArray(st.webhook_delivery_logs) ? st.webhook_delivery_logs : [];
-      const usage = st.push_usage_monthly && typeof st.push_usage_monthly === 'object' ? st.push_usage_monthly : null;
-      if (dom.webhookQuotaSummary) {
-        if (!usage) {
-          dom.webhookQuotaSummary.textContent = 'Webhook無料枠（200）残り: 取得待ち';
-        } else {
-          const month = String(usage.month_jst || '').trim() || '-';
-          const limit = Number(usage.free_quota_limit || 200);
-          const used = Number(usage.webhook_reply_rows || 0);
-          const remaining = Math.max(0, Number(usage.free_quota_remaining != null ? usage.free_quota_remaining : (limit - used)));
-          dom.webhookQuotaSummary.textContent =
-            'Webhook無料枠（' + month + ' JST / 上限' + limit + '） 残り: '
-            + remaining + '回（使用: ' + used + '回）';
-        }
-      }
-      if (dom.logTabSummary && dom.logTabWebhook) {
-        dom.logTabSummary.classList.toggle('active', deliveryLogTab === 'summary');
-        dom.logTabWebhook.classList.toggle('active', deliveryLogTab === 'webhook');
-        dom.logTabSummary.setAttribute('aria-selected', deliveryLogTab === 'summary' ? 'true' : 'false');
-        dom.logTabWebhook.setAttribute('aria-selected', deliveryLogTab === 'webhook' ? 'true' : 'false');
-      }
-      if (dom.deliveryLogTable) {
-        dom.deliveryLogTable.className =
-          'log-table ' + (deliveryLogTab === 'webhook' ? 'log-table--webhook' : 'log-table--summary');
-      }
-      if (deliveryLogTab === 'webhook') {
-        if (dom.logTableHead) {
-          dom.logTableHead.innerHTML =
-            '<tr>' +
-            '<th>実行時刻</th><th>方式</th><th>コンテキスト</th><th>状態</th><th>理由</th><th>ルーム</th><th>送信</th>' +
-            '</tr>';
-        }
-        renderWebhookLogRows(webhookLogs);
-      } else {
-        if (dom.logTableHead) {
-          dom.logTableHead.innerHTML =
-            '<tr>' +
-            '<th>実行時刻</th><th>状態</th><th>理由</th><th>対象</th><th>送信</th>' +
-            '</tr>';
-        }
-        renderSummaryLogRows(summaryLogs);
       }
     }
 
@@ -4005,24 +5812,6 @@
       }
     }
 
-    function buildUserScopeBadgeState(excludedRoomIds) {
-      const ids = filterExcludedMessageSearchRoomIdsToKnownRooms(excludedRoomIds);
-      return {
-        className: ids.length > 0 ? 'room-scope-badge warn' : 'room-scope-badge',
-        text: ids.length > 0 ? ('除外 ' + ids.length + '件') : '全ルーム対象',
-      };
-    }
-
-    function applyUserScopeBadgeToCard(card) {
-      if (!card) return;
-      const badge = card.querySelector('.room-scope-badge');
-      if (!badge) return;
-      const excludedRoomIds = parseExcludedMessageSearchRoomIdsFromDataset(card.dataset.excludedMessageSearchRoomIds);
-      const badgeState = buildUserScopeBadgeState(excludedRoomIds);
-      badge.className = badgeState.className;
-      badge.textContent = badgeState.text;
-    }
-
     function getUserPermissionEnabledCount(row) {
       var count = 0;
       if (row.is_active !== false) count += 1;
@@ -4088,11 +5877,6 @@
     function buildUserPermissionNameListItem(row) {
       const lineUserId = String(row.line_user_id || '').trim();
       const displayName = String(row.display_name || '').trim() || '(未設定)';
-      const rawExcluded = Array.isArray(row.excluded_message_search_room_ids)
-        ? row.excluded_message_search_room_ids
-        : [];
-      const excludedRoomIds = filterExcludedMessageSearchRoomIdsToKnownRooms(rawExcluded);
-      const badgeState = buildUserScopeBadgeState(excludedRoomIds);
       const enabledCount = getUserPermissionEnabledCount(row);
       const assignedStore = normalizeAssignedStoreDisplayLabel(row.assigned_store);
       const assignedJobTitle = normalizeAssignedJobTitleDisplayLabel(row.assigned_job_title);
@@ -4103,7 +5887,6 @@
         escapeHtml(displayName) +
         '</button>' +
         '<div class="user-permission-list-meta">' +
-        '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">会話検索ルーム:</span><span class="user-permission-list-kv-value">' + escapeHtml(badgeState.text) + '</span></div>' +
         '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">有効権限:</span><span class="user-permission-list-kv-value">' + enabledCount + '/7</span></div>' +
         '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">所属店舗:</span><span class="user-permission-list-kv-value">' + escapeHtml(assignedStore) + '</span></div>' +
         '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">役職:</span><span class="user-permission-list-kv-value">' + escapeHtml(assignedJobTitle) + '</span></div>' +
@@ -4294,16 +6077,6 @@
       }
     }
 
-    function syncUserPermissionEditScopeBadgeFromRow(row) {
-      if (!dom.userPermissionEditScopeBadge) return;
-      const targetRow = row || activeUserPermissionEditRow;
-      if (!targetRow) return;
-      const excludedRoomIds = parseExcludedMessageSearchRoomIdsFromDataset(targetRow.dataset.excludedMessageSearchRoomIds);
-      const badgeState = buildUserScopeBadgeState(excludedRoomIds);
-      dom.userPermissionEditScopeBadge.className = badgeState.className;
-      dom.userPermissionEditScopeBadge.textContent = badgeState.text;
-    }
-
     function openUserPermissionEditModal(row) {
       if (!row) return;
       activeUserPermissionEditRow = row;
@@ -4330,7 +6103,6 @@
       dom.userPermissionEditCanMediaAccess.checked = !!(canMediaAccessInput && canMediaAccessInput.checked);
       populateSelectOptions(dom.userPermissionEditAssignedStore, getMarugoGroupStoreOptions(), assignedStoreSelect ? assignedStoreSelect.value : '');
       populateSelectOptions(dom.userPermissionEditAssignedJobTitle, getJobTitleOptions(), assignedJobTitleSelect ? assignedJobTitleSelect.value : '');
-      syncUserPermissionEditScopeBadgeFromRow(row);
       syncUserPermissionEditCalendarDependency();
 
       dom.userPermissionEditModal.classList.add('open');
@@ -4384,7 +6156,6 @@
       applyUserPermissionEditFormToRow(activeUserPermissionEditRow);
       markUserPermissionDirty();
       await saveSingleUserPermissionRow(activeUserPermissionEditRow, { reload: false });
-      applyUserScopeBadgeToCard(activeUserPermissionEditRow);
       renderUserPermissionNameList(currentState && currentState.user_permissions ? currentState.user_permissions : []);
       isUserPermissionDirty = false;
       closeUserPermissionEditModal();
@@ -4414,7 +6185,6 @@
         const excludedRoomIds = filterExcludedMessageSearchRoomIdsToKnownRooms(rawExcluded);
         row.excluded_message_search_room_ids = excludedRoomIds;
         card.dataset.excludedMessageSearchRoomIds = JSON.stringify(excludedRoomIds);
-        const badgeState = buildUserScopeBadgeState(excludedRoomIds);
         card.innerHTML =
           '<div class="user-permission-header">' +
           '<div class="user-permission-name"><span class="user-permission-name-text">' + escapeHtml(row.display_name || '-') + '</span></div>' +
@@ -4430,7 +6200,7 @@
           '<label class="user-permission-control"><span>メディア</span><input class="user-permission-check user-can-media-access" type="checkbox" ' + (row.can_media_access !== false ? 'checked' : '') + '></label>' +
           '</div>' +
           '<div class="user-permission-foot">' +
-          '<div class="user-room-scope-cell"><button class="button user-room-scope" type="button">ルーム選択</button><div class="' + badgeState.className + '">' + escapeHtml(badgeState.text) + '</div></div>' +
+          '<div class="user-room-scope-cell"><button class="button user-room-scope" type="button">ルーム選択</button></div>' +
           '<div class="user-perm-meta-row">' +
           buildAssignedStoreSelectHtml(row.assigned_store) +
           buildJobTitleSelectHtml(row.assigned_job_title) +
@@ -4519,12 +6289,7 @@
         await saveSingleUserPermissionRow(activeUserRoomScopeRow, { reload: false });
       } catch (error) {
         activeUserRoomScopeRow.dataset.excludedMessageSearchRoomIds = previousRaw;
-        applyUserScopeBadgeToCard(activeUserRoomScopeRow);
         throw error;
-      }
-      applyUserScopeBadgeToCard(activeUserRoomScopeRow);
-      if (activeUserPermissionEditRow && activeUserPermissionEditRow === activeUserRoomScopeRow) {
-        syncUserPermissionEditScopeBadgeFromRow(activeUserRoomScopeRow);
       }
       renderUserPermissionNameList(currentState && currentState.user_permissions ? currentState.user_permissions : []);
       isUserPermissionDirty = false;
@@ -4691,22 +6456,22 @@
     function buildNewRoomDefaultFeatureConfig() {
       const gCal = loadMergedGoogleCalendarAutoRegisterDefault();
       return {
-        bot_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_BOT_REPLY_KEY, true),
+        bot_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_BOT_REPLY_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.bot_reply),
         bot_reply_hard_mute_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_BOT_REPLY_HARD_MUTE_KEY, false),
         message_search_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_MESSAGE_SEARCH_KEY, false),
         message_search_library_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_MESSAGE_SEARCH_LIBRARY_KEY, false),
         send_room_summary: loadBooleanSetting(NEW_ROOM_DEFAULT_SEND_SUMMARY_KEY, false),
         receive_overall_summary_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIVE_OVERALL_SUMMARY_KEY, false),
         calendar_tomorrow_reminder_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY, false),
-        media_file_access_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY, true),
-        image_analysis_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, true),
+        media_file_access_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.media_access),
+        image_analysis_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.image_analysis_reply),
         calendar_ai_auto_create_enabled: gCal,
         calendar_silent_auto_register_enabled: gCal,
         calendar_low_confidence_confirm_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, false),
         calendar_registration_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_REGISTRATION_REPLY_KEY, false),
         gmail_reservation_alert_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, false),
-        receipt_midreport_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY, true),
-        receipt_monthend_report_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_REPORT_KEY, true),
+        receipt_midreport_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.receipt_midreport),
+        receipt_monthend_report_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_REPORT_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.receipt_monthend),
         receipt_report_store_partition_key: '',
       };
     }
@@ -4740,7 +6505,7 @@
       const rows = findRoomRowsByStoreKey(storeKey);
       if (rows.length > 0) return getRoomConfigStateFromRow(rows[0]);
       const saved = loadWebhookDefaultConfig(storeKey);
-      if (saved) return saved;
+      if (saved) return stripReceiptScheduleFields(saved);
       const defaults = buildNewRoomDefaultFeatureConfig();
       if (storeKey && storeKey !== UNASSIGNED_WEBHOOK_KEY) {
         defaults.receipt_report_store_partition_key = storeKey;
@@ -4833,6 +6598,56 @@
       );
     }
 
+    function buildWebhookDetectedRoomsSectionHtml(storeKey) {
+      const key = String(storeKey || '').trim();
+      if (!isStoreWebhookCommunicationActive(key)) return '';
+      const unlinked = getUnlinkedDetectedRoomIdsForStore(key);
+      if (unlinked.length > 0) {
+        const items = unlinked.map(function(roomId) {
+          return '<li><code>' + escapeHtml(formatRoomIdShort(roomId)) + '</code></li>';
+        }).join('');
+        return (
+          '<div class="webhook-detected-rooms">' +
+          '<div class="webhook-card-unlinked-hint" style="margin-top:8px;">Webhook で受信済み（未連携）: ' + unlinked.length + ' 件</div>' +
+          '<ul class="receipt-schedule-detected-list">' + items + '</ul>' +
+          '<button type="button" class="button primary webhook-link-detected-btn" data-store-key="' + escapeHtml(key) + '" style="margin-top:8px;">受信済みルームを連携する</button>' +
+          '</div>'
+        );
+      }
+      if (findRoomRowsByStoreKey(key).length === 0) {
+        return (
+          '<div class="meta" style="margin-top:8px;">' +
+          '通信中ですが、管理画面に連携ルームが未登録です。' +
+          '下の「受信済みルームを連携する」が表示されない場合は room_id を手入力するか、ページを再読込してください。' +
+          '</div>'
+        );
+      }
+      return '';
+    }
+
+    function buildWebhookLinkedRoomsSectionHtml(storeKey, roomCount, roomItems) {
+      const emptyLinkedHtml = roomCount > 0
+        ? '<ul class="webhook-room-list">' + roomItems + '</ul>'
+        : '';
+      return (
+        '<details class="webhook-linked-rooms">' +
+        '<summary>連携ルーム (' + roomCount + ')</summary>' +
+        buildWebhookDetectedRoomsSectionHtml(storeKey) +
+        (roomCount > 0
+          ? emptyLinkedHtml
+          : (getUnlinkedDetectedRoomIdsForStore(storeKey).length > 0
+            ? ''
+            : '<div class="meta" style="margin-top:8px;">連携ルームがありません。下のフォームから room_id を追加してください。</div>')) +
+        '<div class="webhook-add-room" style="margin-top:10px;">' +
+        '<input class="input webhook-new-room-id" type="text" placeholder="room_id" data-store-key="' + escapeHtml(storeKey) + '">' +
+        '<input class="input webhook-new-room-name" type="text" placeholder="表示名（任意）" data-store-key="' + escapeHtml(storeKey) + '">' +
+        '<input class="input webhook-new-room-hours short" type="text" placeholder="時刻: 12,17" data-store-key="' + escapeHtml(storeKey) + '">' +
+        '<button type="button" class="button webhook-add-room-btn" data-store-key="' + escapeHtml(storeKey) + '">ルーム追加</button>' +
+        '</div>' +
+        '</details>'
+      );
+    }
+
     function buildStoreWebhookCardHtml(store, overview, stores, userPermissions) {
       const storeKey = String(store.store_key || '').trim();
       const linkedRows = findRoomRowsByStoreKey(storeKey);
@@ -4852,7 +6667,12 @@
           : '-';
         const eventCount = status ? Number(status.webhook_event_count || 0) : 0;
         const receiptCount = status ? Number(status.receipt_count || 0) : 0;
-        const featureSummary = buildReceiptFeatureSummaryText(config);
+        const featureSummary = buildReceiptFeatureSummaryText(config, storeKey);
+        const unlinkedDetected = getUnlinkedDetectedRoomIdsForStore(storeKey);
+        const unlinkedNote = unlinkedDetected.length > 0
+          ? '<div class="webhook-card-unlinked-hint">受信済みルーム ' + unlinkedDetected.length +
+            ' 件が未連携です。下の「連携ルーム」から「受信済みルームを連携する」を押してください。</div>'
+          : '';
         return (
           '<article class="' + cardClass + '" data-store-key="' + escapeHtml(storeKey) + '">' +
           '<div class="webhook-card-header">' +
@@ -4863,6 +6683,7 @@
           '最終受信: ' + escapeHtml(lastReceived) +
           ' ／ 受信 ' + eventCount + ' 件 ／ レシート ' + receiptCount + ' 件' +
           '</div>' +
+          unlinkedNote +
           '<div class="webhook-card-receipt-features">有効機能: ' + escapeHtml(featureSummary) + '</div>' +
           buildWebhookCardPermissionUsersHtml(store.store_name || storeKey, userPermissions) +
           '<div class="webhook-card-config">' +
@@ -4880,22 +6701,12 @@
           'レシート: <code>' + escapeHtml(store.receipt_table || '') + '</code>' +
           '</div>' +
           '</details>' +
-          '<details class="webhook-linked-rooms"' + (roomCount > 0 ? ' open' : '') + '>' +
-          '<summary>連携ルーム (' + roomCount + ')</summary>' +
-          (roomCount > 0
-            ? '<ul class="webhook-room-list">' + roomItems + '</ul>'
-            : '<div class="meta" style="margin-top:8px;">連携ルームがありません。下のフォームから追加してください。</div>') +
-          '<div class="webhook-add-room" style="margin-top:10px;">' +
-          '<input class="input webhook-new-room-id" type="text" placeholder="room_id" data-store-key="' + escapeHtml(storeKey) + '">' +
-          '<input class="input webhook-new-room-name" type="text" placeholder="表示名（任意）" data-store-key="' + escapeHtml(storeKey) + '">' +
-          '<input class="input webhook-new-room-hours short" type="text" placeholder="時刻: 12,17" data-store-key="' + escapeHtml(storeKey) + '">' +
-          '<button type="button" class="button webhook-add-room-btn" data-store-key="' + escapeHtml(storeKey) + '">ルーム追加</button>' +
-          '</div>' +
-          '</details>' +
+          buildWebhookLinkedRoomsSectionHtml(storeKey, roomCount, roomItems) +
           '</article>'
         );
       }
 
+      const unlinkedDetectedInactive = getUnlinkedDetectedRoomIdsForStore(storeKey);
       return (
         '<article class="' + cardClass + '" data-store-key="' + escapeHtml(storeKey) + '">' +
         '<div class="webhook-card-header">' +
@@ -4915,18 +6726,7 @@
         '<button type="button" class="button primary webhook-config-open" data-store-key="' + escapeHtml(storeKey) + '">Webhook設定</button>' +
         '<div class="room-config-badge ' + summary.tone + '">' + escapeHtml(summary.text) + '</div>' +
         '</div>' +
-        '<details class="webhook-linked-rooms"' + (roomCount > 0 ? ' open' : '') + '>' +
-        '<summary>連携ルーム (' + roomCount + ')</summary>' +
-        (roomCount > 0
-          ? '<ul class="webhook-room-list">' + roomItems + '</ul>'
-          : '<div class="meta" style="margin-top:8px;">連携ルームがありません。下のフォームから追加してください。</div>') +
-        '<div class="webhook-add-room" style="margin-top:10px;">' +
-        '<input class="input webhook-new-room-id" type="text" placeholder="room_id" data-store-key="' + escapeHtml(storeKey) + '">' +
-        '<input class="input webhook-new-room-name" type="text" placeholder="表示名（任意）" data-store-key="' + escapeHtml(storeKey) + '">' +
-        '<input class="input webhook-new-room-hours short" type="text" placeholder="時刻: 12,17" data-store-key="' + escapeHtml(storeKey) + '">' +
-        '<button type="button" class="button webhook-add-room-btn" data-store-key="' + escapeHtml(storeKey) + '">ルーム追加</button>' +
-        '</div>' +
-        '</details>' +
+        buildWebhookLinkedRoomsSectionHtml(storeKey, roomCount, roomItems) +
         '</article>'
       );
     }
@@ -5094,7 +6894,7 @@
       });
     }
 
-    function applyConfigToWebhookModal(config, storeKey, storeName) {
+    function applyConfigToWebhookModal(config, storeKey, storeName, preferredRoomId) {
       dom.roomConfigBotReplyEnabled.checked = !!config.bot_reply_enabled;
       if (dom.roomConfigBotReplyHardMute) {
         dom.roomConfigBotReplyHardMute.checked = !!config.bot_reply_hard_mute_enabled;
@@ -5106,17 +6906,10 @@
         dom.roomConfigReceiveOverallSummary.checked = !!config.receive_overall_summary_enabled;
       }
       syncRoomSummaryMutualExclusion();
-      dom.roomConfigTomorrowReminder.checked = !!config.calendar_tomorrow_reminder_enabled;
       dom.roomConfigMediaAccess.checked = !!config.media_file_access_enabled;
       if (dom.roomConfigImageAnalysisReplyEnabled) {
         dom.roomConfigImageAnalysisReplyEnabled.checked = !!config.image_analysis_reply_enabled;
       }
-      dom.roomConfigGoogleCalendarAutoRegister.checked = !!config.calendar_ai_auto_create_enabled && !!config.calendar_silent_auto_register_enabled;
-      if (dom.roomConfigCalendarRegistrationReply) {
-        dom.roomConfigCalendarRegistrationReply.checked = !!config.calendar_registration_reply_enabled;
-      }
-      dom.roomConfigCalendarLowConfidenceConfirmReply.checked = !!config.calendar_low_confidence_confirm_reply_enabled;
-      dom.roomConfigGmailAlert.checked = !!config.gmail_reservation_alert_enabled;
       if (dom.roomConfigReceiptMidreportEnabled) {
         dom.roomConfigReceiptMidreportEnabled.checked = config.receipt_midreport_enabled !== false;
       }
@@ -5132,6 +6925,18 @@
       }
       syncRoomConfigCalendarSubOptions();
       syncRoomConfigMediaSubOptions();
+      populateRoomConfigReceiptScheduleRoomSelect(
+        findRoomRowsByStoreKey(storeKey),
+        preferredRoomId || (activeRoomConfigRow && activeRoomConfigRow.dataset ? activeRoomConfigRow.dataset.roomId : ''),
+        storeKey,
+      );
+      const scheduleRoomId = getActiveRoomConfigRoomId();
+      if (scheduleRoomId) {
+        const scheduleRow = findRoomTableRowById(scheduleRoomId);
+        if (scheduleRow) activeRoomConfigRow = scheduleRow;
+      }
+      applyReceiptScheduleToRoomConfigModal(scheduleRoomId);
+      applyCalendarGmailToRoomConfigModal(scheduleRoomId);
       invalidateRoomConfigReview();
       dom.roomConfigModalMeta.textContent = '対象Webhook: ' + (storeName || storeKey || '(未設定)');
     }
@@ -5151,9 +6956,21 @@
       const store = stores.find(function(s) { return s.store_key === key; });
       const storeName = store ? store.store_name : key;
       const linkedRows = findRoomRowsByStoreKey(key);
-      activeRoomConfigRow = linkedRows[0] || null;
+      const preferredRoomId = String(opts.roomId || '').trim();
+      if (opts.roomRow) {
+        activeRoomConfigRow = opts.roomRow;
+      } else if (preferredRoomId) {
+        activeRoomConfigRow = findRoomTableRowById(preferredRoomId) || linkedRows[0] || null;
+      } else {
+        activeRoomConfigRow = linkedRows[0] || null;
+      }
       setWebhookModalDisplayMode(permissionMode ? 'permission' : 'setup');
-      applyConfigToWebhookModal(aggregateWebhookConfig(key), key, storeName);
+      applyConfigToWebhookModal(
+        aggregateWebhookConfig(key),
+        key,
+        storeName,
+        preferredRoomId || (activeRoomConfigRow && activeRoomConfigRow.dataset ? activeRoomConfigRow.dataset.roomId : ''),
+      );
       dom.roomConfigModal.classList.add('open');
       dom.roomConfigModal.setAttribute('aria-hidden', 'false');
     }
@@ -5161,15 +6978,23 @@
     function openRoomConfigModal(tr) {
       const storeKey = getStoreKeyFromRoomRow(tr);
       if (storeKey) {
-        openWebhookConfigModal(storeKey);
+        openWebhookConfigModal(storeKey, { roomRow: tr });
         return;
       }
       alert('このルームは Webhook 未割当です。未割当カードから店舗を選んで割り当ててください。');
     }
 
     function closeRoomConfigModal() {
+      if (activeReceiptScheduleRoomId) {
+        persistReceiptScheduleDraftForRoom(activeReceiptScheduleRoomId);
+      }
+      if (activeCalendarGmailRoomId) {
+        persistCalendarGmailDraftForRoom(activeCalendarGmailRoomId);
+      }
       activeRoomConfigRow = null;
       activeWebhookConfigStoreKey = null;
+      activeReceiptScheduleRoomId = '';
+      activeCalendarGmailRoomId = '';
       invalidateRoomConfigReview();
       dom.roomConfigModal.classList.remove('open');
       dom.roomConfigModal.setAttribute('aria-hidden', 'true');
@@ -5235,17 +7060,31 @@
         alert('Webhook が選択されていません。');
         return;
       }
-      const nextConfig = buildRoomConfigDraftFromModal();
+      const scheduleRoomId = getActiveRoomConfigRoomId();
+      if (scheduleRoomId) {
+        persistReceiptScheduleDraftForRoom(scheduleRoomId);
+        persistCalendarGmailDraftForRoom(scheduleRoomId);
+      }
+      const permissionMode = !!(dom.roomConfigModalCard && dom.roomConfigModalCard.dataset.webhookMode === 'permission');
+      let nextConfig = stripCalendarGmailFields(stripReceiptScheduleFields(buildRoomConfigDraftFromModal()));
+      if (!permissionMode) {
+        nextConfig = Object.assign(nextConfig, readCalendarGmailFromInlineModal());
+      }
       nextConfig.receipt_report_store_partition_key = storeKey;
       saveWebhookDefaultConfig(storeKey, nextConfig);
       const linkedRows = findRoomRowsByStoreKey(storeKey);
       for (let i = 0; i < linkedRows.length; i++) {
-        applyRoomConfigStateToRow(linkedRows[i], nextConfig);
-        await saveRoomRow(linkedRows[i], { overrideConfig: nextConfig, reload: false });
+        const roomId = String(linkedRows[i].dataset.roomId || '').trim();
+        const roomConfig = Object.assign({}, nextConfig, permissionMode
+          ? resolveCalendarGmailSettingsForRoom(roomId)
+          : readCalendarGmailFromInlineModal());
+        applyRoomConfigStateToRow(linkedRows[i], roomConfig);
+        await saveRoomRow(linkedRows[i], { overrideConfig: roomConfig, reload: false });
       }
       isRoomDirty = false;
       await safeLoadState();
-      alert(buildRoomConfigSavedMessage(storeKey, linkedRows.length));
+      const scheduleNote = scheduleRoomId ? '\n送信時刻は選択中ルーム（' + getRoomLabelFromRow(findRoomTableRowById(scheduleRoomId)) + '）に保存しました。' : '';
+      alert(buildRoomConfigSavedMessage(storeKey, linkedRows.length) + scheduleNote);
       closeRoomConfigModal();
     }
 
@@ -5347,21 +7186,50 @@
       }
     }
 
-    async function loadState() {
-      const state = await api('/state?logs_limit=30');
-      currentState = state;
-      receiptWebhookStatusByStore = await fetchReceiptWebhookStatusMap();
-      renderGlobal(state.global_settings || {});
-      renderDeliverySection(state);
-      renderWebhookSettingsSection(
-        state.room_overview || [],
-        state.room_settings || [],
-        state.receipt_store_options || [],
-      );
-      renderUserPermissions(state.user_permissions || []);
-      renderStorageUsage(state.storage_usage, state.storage_usage_error, state.generated_at);
-      renderPushUsage(state.push_usage_monthly);
-      dom.lastRefresh.textContent = '最終更新: ' + formatDate(state.generated_at);
+    async function loadState(options) {
+      const opts = options || {};
+      const showOverlay = !opts.silent && opts.showSyncOverlay !== false;
+      let overlayToken = 0;
+
+      if (showOverlay) {
+        overlayToken = showSyncOverlay({
+          title: '同期中',
+          message: 'データを同期しています…',
+          step: '',
+        });
+      }
+
+      try {
+        primeWebhookCardsFromCache();
+
+        const liteWebhookPromise = fetchReceiptWebhookStatusMap({ includeDetectedRooms: false })
+          .then(function(liteMap) {
+            receiptWebhookStatusByStore = mergeWebhookStatusMaps(liteMap, receiptWebhookStatusByStore);
+            refreshWebhookCardsFromCurrentState();
+            return liteMap;
+          });
+
+        const statePromise = api('/state?logs_limit=30');
+        const [state, liteMap] = await Promise.all([statePromise, liteWebhookPromise]);
+
+        currentState = state;
+        receiptWebhookStatusByStore = mergeWebhookStatusMaps(liteMap, receiptWebhookStatusByStore);
+        renderDeliverySection(state);
+        renderWebhookSettingsSection(
+          state.room_overview || [],
+          state.room_settings || [],
+          state.receipt_store_options || [],
+        );
+        renderUserPermissions(state.user_permissions || []);
+        renderStorageUsage(state.storage_usage, state.storage_usage_error, state.generated_at);
+        renderPushUsage(state.push_usage_monthly);
+        dom.lastRefresh.textContent = '最終更新: ' + formatDate(state.generated_at);
+        persistAdminPayloadToCache(state, receiptWebhookStatusByStore);
+      } finally {
+        if (showOverlay) hideSyncOverlay(overlayToken);
+      }
+
+      refreshWebhookStatusDetailsInBackground();
     }
 
     function buildUserPermissionPayloadFromRow(tr) {
@@ -5436,58 +7304,6 @@
         + '\n既存: ' + Number(stats.already_existing || 0) + '件'
         + '\n表示名更新: ' + Number(stats.display_name_updated || 0) + '件'
       );
-    }
-
-    async function saveGlobal(options) {
-      const opts = options || {};
-      validateGlobalModeCombination();
-      const reminderMaxItems = Number(dom.tomorrowReminderMaxItems.value);
-      if (!Number.isInteger(reminderMaxItems) || reminderMaxItems < 1 || reminderMaxItems > 50) {
-        throw new Error('翌日予定通知の表示件数は 1〜50 の整数で入力してください。');
-      }
-      await api('/settings/global', {
-        method: 'PUT',
-        body: JSON.stringify({
-          is_enabled: !!dom.globalEnabled.checked,
-          delivery_hours: parseHours(dom.globalHoursInput.value, false),
-          message_cleanup_timing: 'end_of_day',
-          last_delivery_summary_mode: dom.lastDeliverySummaryMode.value,
-          message_retention_days: Number(dom.messageRetentionDays.value),
-          calendar_tomorrow_reminder_enabled: !!dom.tomorrowReminderEnabled.checked,
-          calendar_tomorrow_reminder_hours: parseHours(dom.tomorrowReminderHoursInput.value, false),
-          calendar_tomorrow_reminder_only_if_events: dom.tomorrowReminderOnlyIfEvents.value === 'true',
-          calendar_tomorrow_reminder_max_items: reminderMaxItems,
-        }),
-      });
-      isGlobalDirty = false;
-      await safeLoadState();
-      if (opts.notify !== false) {
-        alert('全体設定を保存しました。');
-      }
-    }
-
-    async function saveTomorrowReminder() {
-      await saveGlobal({ notify: false });
-      alert('翌日予定通知の設定を保存しました。');
-    }
-
-    function validateGlobalModeCombination() {
-      if (dom.lastDeliverySummaryMode.value !== 'daily_rollup' && dom.lastDeliverySummaryMode.value !== 'independent') {
-        throw new Error('最終回集計方式の値が不正です。');
-      }
-    }
-
-    function summaryModeLabel(value) {
-      return value === 'daily_rollup' ? '最終回のみ1日まとめ' : '各回独立';
-    }
-
-    function messageRetentionLabel(value) {
-      const days = Number(value || 0);
-      if (days <= 0) return '無制限';
-      if (days === 365) return '1年';
-      if (days === 730) return '2年';
-      if (days === 1095) return '3年';
-      return days + '日';
     }
 
     function parseRoomSortOrder(value) {
@@ -5625,37 +7441,6 @@
       }
     }
 
-    function formatManualRunResultMessage(latest) {
-      const lines = [
-        '手動実行結果',
-        '状態: ' + String(latest && latest.status ? latest.status : '-'),
-        '実行時刻: ' + formatDate(latest && latest.run_at ? latest.run_at : ''),
-        '理由: ' + logReasonJa(latest || {}),
-      ];
-      return lines.join('\n');
-    }
-
-    async function waitForLatestLogAfter(beforeLogId, maxAttempts, intervalMs) {
-      const targetId = Number(beforeLogId);
-      if (!Number.isFinite(targetId) || targetId < 0) return null;
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (attempt > 0) {
-          await new Promise(function(resolve) { setTimeout(resolve, intervalMs); });
-        }
-        try {
-          const state = await api('/state?logs_limit=30');
-          const logs = Array.isArray(state && state.delivery_logs) ? state.delivery_logs : [];
-          const row = logs.find(function(item) {
-            return Number(item && item.id) > targetId;
-          });
-          if (row) return row;
-        } catch (_) {
-          // ignore transient fetch errors while waiting for async cron log
-        }
-      }
-      return null;
-    }
-
     async function resetRoomRow(tr) {
       const roomId = tr.dataset.roomId || '';
       await api('/settings/rooms/' + encodeURIComponent(roomId), { method: 'DELETE' });
@@ -5673,29 +7458,11 @@
       const nameInput = tr.querySelector('.room-name');
       const roomName = nameInput ? nameInput.value.trim() : '';
       const label = roomName || roomId;
-      const ok = window.confirm('ルーム「' + label + '」を削除します。\\nこの操作で当該ルームの保存メッセージと設定を削除します。よろしいですか？');
+      const ok = window.confirm('ルーム「' + label + '」をこのサイト（Webhook管理）の一覧から外します。\\n旧サイトのルーム一覧・保存データには影響しません。よろしいですか？');
       if (!ok) return;
       await api('/rooms/' + encodeURIComponent(roomId), { method: 'DELETE' });
       isRoomDirty = false;
       await safeLoadState();
-    }
-
-    async function runNow() {
-      const res = await api('/actions/run-summary', { method: 'POST', body: JSON.stringify({ force: true }) });
-      let latest = res && res.latest_log ? res.latest_log : null;
-      if (!latest) {
-        latest = await waitForLatestLogAfter(res && res.before_log_id, 12, 2000);
-      }
-      await safeLoadState();
-      if (latest && latest.status) {
-        alert(formatManualRunResultMessage(latest));
-        return;
-      }
-      if (res && res.warning) {
-        alert('手動実行結果:\n' + res.warning + '\n少し待ってから「再読み込み」を押してください。');
-        return;
-      }
-      alert('手動実行を受け付けました。ログ反映まで数秒かかる場合があります。');
     }
 
     async function changeAdminToken() {
@@ -5731,27 +7498,23 @@
     });
 
     dom.clearTokenBtn.addEventListener('click', function() {
+      clearSiteCacheForToken(getToken(), getProjectUrl());
       setToken('');
       setReceiptSheetsPilotLinkVisible(false);
       stopAutoRefresh();
-      deliveryLogTab = 'summary';
+      deliveryLogTab = 'webhook';
       if (dom.logTableHead) {
         dom.logTableHead.innerHTML =
-          '<tr><th>実行時刻</th><th>状態</th><th>理由</th><th>対象</th><th>送信</th></tr>';
+          '<tr><th>実行時刻</th><th>方式</th><th>コンテキスト</th><th>状態</th><th>理由</th><th>ルーム</th><th>送信</th></tr>';
       }
       if (dom.deliveryLogTable) {
-        dom.deliveryLogTable.className = 'log-table log-table--summary';
-      }
-      if (dom.logTabSummary && dom.logTabWebhook) {
-        dom.logTabSummary.classList.add('active');
-        dom.logTabWebhook.classList.remove('active');
+        dom.deliveryLogTable.className = 'log-table log-table--webhook';
       }
       dom.logTableBody.innerHTML = '';
       dom.roomTableBody.innerHTML = '';
       if (dom.webhookCardListBody) dom.webhookCardListBody.innerHTML = '';
       dom.userPermissionTableBody.innerHTML = '';
       if (dom.userPermissionNameListBody) dom.userPermissionNameListBody.innerHTML = '';
-      dom.globalMeta.textContent = '';
       dom.storageUsageSummary.textContent = '';
       dom.storageUsageDetails.textContent = '';
       dom.pushUsageSummary.textContent = '';
@@ -5761,19 +7524,6 @@
       closeUserPermissionEditModal();
       isUserPermissionDirty = false;
     });
-
-    if (dom.logTabSummary) {
-      dom.logTabSummary.addEventListener('click', function() {
-        deliveryLogTab = 'summary';
-        renderDeliverySection(currentState || {});
-      });
-    }
-    if (dom.logTabWebhook) {
-      dom.logTabWebhook.addEventListener('click', function() {
-        deliveryLogTab = 'webhook';
-        renderDeliverySection(currentState || {});
-      });
-    }
 
     dom.reloadBtn.addEventListener('click', async function() {
       try { await safeLoadState(); } catch (e) { alert(e.message || String(e)); }
@@ -5828,6 +7578,11 @@
             await copyTextToClipboard(target.getAttribute('data-url') || '', 'Webhook URL をコピーしました。');
             return;
           }
+          if (target.classList.contains('webhook-link-detected-btn')) {
+            const storeKey = String(target.getAttribute('data-store-key') || '').trim();
+            await linkDetectedRoomsForStore(storeKey);
+            return;
+          }
           if (target.classList.contains('webhook-add-room-btn')) {
             const storeKey = String(target.getAttribute('data-store-key') || '').trim();
             const card = target.closest('.webhook-card');
@@ -5861,7 +7616,7 @@
             alert('ルーム設定を削除して全体設定継承に戻しました。');
           } else if (target.classList.contains('webhook-room-delete')) {
             await deleteRoomRow(tr);
-            alert('ルームを削除しました。');
+            alert('ルームをこのサイトの一覧から外しました。（旧サイト・保存データはそのままです）');
           } else if (target.classList.contains('webhook-room-show-id')) {
             openRoomIdModal(tr);
           } else if (target.classList.contains('webhook-room-sync')) {
@@ -6029,39 +7784,12 @@
       markUserPermissionDirty();
     });
 
-    dom.runNowBtn.addEventListener('click', async function() {
-      try { await runNow(); } catch (e) { alert(e.message || String(e)); }
-    });
-
     dom.checkGmailAccountBtn.addEventListener('click', async function() {
       try { await checkGmailAccount(); } catch (e) { alert(e.message || String(e)); }
     });
 
     dom.changeTokenBtn.addEventListener('click', async function() {
       try { await changeAdminToken(); } catch (e) { alert(e.message || String(e)); }
-    });
-
-    dom.saveGlobalBtn.addEventListener('click', async function() {
-      try { await saveGlobal(); } catch (e) { alert(e.message || String(e)); }
-    });
-
-    dom.saveTomorrowReminderBtn.addEventListener('click', async function() {
-      try { await saveTomorrowReminder(); } catch (e) { alert(e.message || String(e)); }
-    });
-
-    [
-      dom.globalEnabled,
-      dom.globalHoursInput,
-      dom.lastDeliverySummaryMode,
-      dom.messageRetentionDays,
-      dom.tomorrowReminderEnabled,
-      dom.tomorrowReminderHoursInput,
-      dom.tomorrowReminderOnlyIfEvents,
-      dom.tomorrowReminderMaxItems,
-    ].forEach(function(el) {
-      if (!el) return;
-      el.addEventListener('input', markGlobalDirty);
-      el.addEventListener('change', markGlobalDirty);
     });
 
     dom.roomTableBody.addEventListener('input', function(event) {
@@ -6151,6 +7879,9 @@
       dom.newRoomSendSummary,
       dom.newRoomReceiveOverallSummary,
       dom.newRoomTomorrowReminder,
+      dom.newRoomTomorrowReminderHours,
+      dom.newRoomTomorrowReminderOnlyIfEvents,
+      dom.newRoomTomorrowReminderMaxItems,
       dom.newRoomMediaFileAccessEnabled,
       dom.newRoomImageAnalysisReplyEnabled,
       dom.newRoomGoogleCalendarAutoRegister,
@@ -6159,6 +7890,10 @@
       dom.newRoomGmailAlertEnabled,
       dom.newRoomReceiptMidreportEnabled,
       dom.newRoomReceiptMonthendReportEnabled,
+      dom.newRoomReceiptMidreportDay,
+      dom.newRoomReceiptMidreportTime,
+      dom.newRoomReceiptMonthendDay,
+      dom.newRoomReceiptMonthendTime,
       dom.newRoomSummaryMode,
     ].forEach(function(el) {
       if (!el) return;
@@ -6169,6 +7904,14 @@
     dom.newRoomBotReplyEnabled.addEventListener('change', function() {
       saveBooleanSetting(NEW_ROOM_DEFAULT_BOT_REPLY_KEY, !!dom.newRoomBotReplyEnabled.checked);
     });
+    if (dom.newRoomExtraSettingsToggle) {
+      dom.newRoomExtraSettingsToggle.addEventListener('change', function() {
+        saveBooleanSetting(NEW_ROOM_DEFAULT_EXTRA_SETTINGS_OPEN_KEY, !!dom.newRoomExtraSettingsToggle.checked);
+        syncNewRoomExtraSettingsPanel();
+        syncNewRoomTomorrowReminderSchedulePanel();
+        refreshNewRoomConfigSummary();
+      });
+    }
     if (dom.newRoomBotReplyHardMute) {
       dom.newRoomBotReplyHardMute.addEventListener('change', function() {
         saveBooleanSetting(NEW_ROOM_DEFAULT_BOT_REPLY_HARD_MUTE_KEY, !!dom.newRoomBotReplyHardMute.checked);
@@ -6192,6 +7935,8 @@
     }
     dom.newRoomTomorrowReminder.addEventListener('change', function() {
       saveBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY, !!dom.newRoomTomorrowReminder.checked);
+      syncNewRoomTomorrowReminderSchedulePanel();
+      refreshNewRoomConfigSummary();
     });
     dom.newRoomMediaFileAccessEnabled.addEventListener('change', function() {
       saveBooleanSetting(NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY, !!dom.newRoomMediaFileAccessEnabled.checked);
@@ -6231,6 +7976,25 @@
       });
     }
     [
+      dom.newRoomReceiptMidreportDay,
+      dom.newRoomReceiptMidreportTime,
+      dom.newRoomReceiptMonthendDay,
+      dom.newRoomReceiptMonthendTime,
+    ].forEach(function(el) {
+      if (!el) return;
+      el.addEventListener('change', onNewRoomReceiptScheduleInputChange);
+      el.addEventListener('input', onNewRoomReceiptScheduleInputChange);
+    });
+    [
+      dom.newRoomTomorrowReminderHours,
+      dom.newRoomTomorrowReminderOnlyIfEvents,
+      dom.newRoomTomorrowReminderMaxItems,
+    ].forEach(function(el) {
+      if (!el) return;
+      el.addEventListener('change', onNewRoomTomorrowReminderScheduleInputChange);
+      el.addEventListener('input', onNewRoomTomorrowReminderScheduleInputChange);
+    });
+    [
       dom.newRoomBotReplyEnabled,
       dom.newRoomBotReplyHardMute,
       dom.newRoomMessageSearchEnabled,
@@ -6238,6 +8002,9 @@
       dom.newRoomSendSummary,
       dom.newRoomReceiveOverallSummary,
       dom.newRoomTomorrowReminder,
+      dom.newRoomTomorrowReminderHours,
+      dom.newRoomTomorrowReminderOnlyIfEvents,
+      dom.newRoomTomorrowReminderMaxItems,
       dom.newRoomMediaFileAccessEnabled,
       dom.newRoomImageAnalysisReplyEnabled,
       dom.newRoomGoogleCalendarAutoRegister,
@@ -6246,6 +8013,10 @@
       dom.newRoomGmailAlertEnabled,
       dom.newRoomReceiptMidreportEnabled,
       dom.newRoomReceiptMonthendReportEnabled,
+      dom.newRoomReceiptMidreportDay,
+      dom.newRoomReceiptMidreportTime,
+      dom.newRoomReceiptMonthendDay,
+      dom.newRoomReceiptMonthendTime,
       dom.newRoomSummaryMode,
     ].forEach(function(el) {
       if (!el) return;
@@ -6265,6 +8036,12 @@
     });
 
     dom.saveNewRoomConfigBtn.addEventListener('click', function() {
+      if (dom.newRoomExtraSettingsToggle) {
+        saveBooleanSetting(NEW_ROOM_DEFAULT_EXTRA_SETTINGS_OPEN_KEY, !!dom.newRoomExtraSettingsToggle.checked);
+      }
+      saveNewRoomBulkReceiptScheduleFromModal();
+      saveNewRoomBulkTomorrowReminderScheduleFromModal();
+      refreshNewRoomReceiptCheckboxLabels();
       refreshNewRoomConfigSummary();
       closeNewRoomConfigModal();
     });
@@ -6290,10 +8067,87 @@
       dom.roomConfigGmailAlert,
       dom.roomConfigReceiptMidreportEnabled,
       dom.roomConfigReceiptMonthendReportEnabled,
+      dom.roomConfigReceiptScheduleOverride,
+      dom.roomConfigReceiptMidreportDay,
+      dom.roomConfigReceiptMidreportTime,
+      dom.roomConfigReceiptMonthendDay,
+      dom.roomConfigReceiptMonthendTime,
+      dom.roomConfigCalendarGmailOverride,
+      dom.roomConfigTomorrowReminderPerm,
+      dom.roomConfigTomorrowReminderHours,
+      dom.roomConfigTomorrowReminderOnlyIfEvents,
+      dom.roomConfigTomorrowReminderMaxItems,
+      dom.roomConfigGoogleCalendarAutoRegisterPerm,
+      dom.roomConfigCalendarRegistrationReplyPerm,
+      dom.roomConfigCalendarLowConfidenceConfirmReplyPerm,
+      dom.roomConfigGmailAlertPerm,
       dom.roomConfigReceiptReportStoreKey,
     ].forEach(function(el) {
       if (!el) return;
       el.addEventListener('change', invalidateRoomConfigReview);
+    });
+
+    if (dom.roomConfigReceiptScheduleOverride) {
+      dom.roomConfigReceiptScheduleOverride.addEventListener('change', function() {
+        syncRoomConfigReceiptScheduleFields();
+        onRoomConfigReceiptScheduleInputChange();
+      });
+    }
+    if (dom.roomConfigReceiptScheduleRoomSelect) {
+      dom.roomConfigReceiptScheduleRoomSelect.addEventListener('change', onRoomConfigReceiptScheduleRoomChange);
+    }
+    if (dom.roomConfigLinkDetectedRoomsBtn) {
+      dom.roomConfigLinkDetectedRoomsBtn.addEventListener('click', async function() {
+        try {
+          await linkDetectedRoomsForStore(activeWebhookConfigStoreKey);
+        } catch (e) {
+          alert(e && e.message ? e.message : String(e));
+        }
+      });
+    }
+    [
+      dom.roomConfigReceiptMidreportDay,
+      dom.roomConfigReceiptMidreportTime,
+      dom.roomConfigReceiptMonthendDay,
+      dom.roomConfigReceiptMonthendTime,
+    ].forEach(function(el) {
+      if (!el) return;
+      el.addEventListener('change', onRoomConfigReceiptScheduleInputChange);
+      el.addEventListener('input', onRoomConfigReceiptScheduleInputChange);
+    });
+
+    if (dom.roomConfigCalendarGmailOverride) {
+      dom.roomConfigCalendarGmailOverride.addEventListener('change', function() {
+        syncRoomConfigCalendarGmailPermFields();
+        onRoomConfigCalendarGmailInputChange();
+      });
+    }
+    if (dom.roomConfigGoogleCalendarAutoRegisterPerm) {
+      dom.roomConfigGoogleCalendarAutoRegisterPerm.addEventListener('change', function() {
+        syncRoomConfigCalendarGmailPermSubOptions();
+        onRoomConfigCalendarGmailInputChange();
+      });
+    }
+    [
+      dom.roomConfigTomorrowReminderPerm,
+      dom.roomConfigCalendarRegistrationReplyPerm,
+      dom.roomConfigCalendarLowConfidenceConfirmReplyPerm,
+      dom.roomConfigGmailAlertPerm,
+    ].forEach(function(el) {
+      if (!el) return;
+      el.addEventListener('change', function() {
+        syncRoomConfigTomorrowReminderScheduleFields();
+        onRoomConfigCalendarGmailInputChange();
+      });
+    });
+    [
+      dom.roomConfigTomorrowReminderHours,
+      dom.roomConfigTomorrowReminderOnlyIfEvents,
+      dom.roomConfigTomorrowReminderMaxItems,
+    ].forEach(function(el) {
+      if (!el) return;
+      el.addEventListener('change', onRoomConfigTomorrowReminderScheduleInputChange);
+      el.addEventListener('input', onRoomConfigTomorrowReminderScheduleInputChange);
     });
 
     if (dom.reviewRoomConfigBtn) {
@@ -6402,13 +8256,25 @@
     document.addEventListener('visibilitychange', function() {
       if (!getToken()) return;
       scheduleAutoRefresh();
-      if (document.visibilityState === 'visible' && !isEditingRoomForm() && !isGlobalDirty && !isRoomDirty && !isUserPermissionDirty) {
+      if (
+        document.visibilityState === 'visible' &&
+        shouldRunBackgroundStateReload() &&
+        !isEditingRoomForm() &&
+        !isRoomDirty &&
+        !isUserPermissionDirty
+      ) {
         safeLoadState({ silent: true });
       }
     });
 
     window.addEventListener('focus', function() {
-      if (!getToken() || isEditingRoomForm() || isGlobalDirty || isRoomDirty || isUserPermissionDirty) return;
+      if (
+        !getToken() ||
+        !shouldRunBackgroundStateReload() ||
+        isEditingRoomForm() ||
+        isRoomDirty ||
+        isUserPermissionDirty
+      ) return;
       safeLoadState({ silent: true });
     });
 
@@ -6434,6 +8300,12 @@
     });
 
     (function init() {
+      if (window.LINE_REPORT_AUTH) {
+        LINE_REPORT_AUTH.consumeUrlTokenParam();
+        if (dom.rememberLoginCheck) {
+          LINE_REPORT_AUTH.bindRememberCheckbox(dom.rememberLoginCheck, updateAuthPill);
+        }
+      }
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
       applyNewRoomDefaultCheckboxes();
       refreshNewRoomConfigSummary();
@@ -6448,13 +8320,17 @@
       renderGmailAccountState(null);
       setReceiptSheetsPilotLinkVisible(false);
       if (getToken()) {
-        safeLoadState().then(function() {
+        hydrateFromSiteCache();
+        primeWebhookCardsFromCache();
+        safeLoadState({ silent: true }).then(function() {
           scheduleAutoRefresh();
           safeCheckGmailAccount({ silent: true });
           safeRefreshReceiptSheetsPilotLink({ silent: true });
         }).catch(function(e) {
           stopAutoRefresh();
-          alert(e.message || String(e));
+          if (!hydrateFromSiteCache()) {
+            alert(e.message || String(e));
+          }
         });
       }
     })();

@@ -21,6 +21,9 @@
   /** Google スプレッドシート（売上シート pilot）連携 — 新サイトでは一旦オフ */
   const RECEIPT_SHEETS_PILOT_ENABLED = false;
 
+  /** jhpm admin-api 向け管理画面種別（旧サイトとルーム一覧除外を分離） */
+  const ADMIN_SURFACE = 'line_report';
+
   /** store_partition_key → 表示名（analytics / 管理画面で共通） */
   const STORE_NAMES = {
     marugo: 'マルゴ',
@@ -179,6 +182,7 @@
     RECEIPT_ADMIN_PROJECT_URL: RECEIPT_ADMIN_PROJECT_URL,
     RECEIPT_ADMIN_ANON_KEY: RECEIPT_ADMIN_ANON_KEY,
     RECEIPT_SHEETS_PILOT_ENABLED: RECEIPT_SHEETS_PILOT_ENABLED,
+    ADMIN_SURFACE: ADMIN_SURFACE,
     STORE_NAMES: STORE_NAMES,
     adminApiPath: adminApiPath,
     adminApiUrl: adminApiUrl,
