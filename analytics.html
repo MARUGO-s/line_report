@@ -1,0 +1,3326 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <base href="/line_report/">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#006c3a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="LINE Analytics">
+  <link rel="icon" href="icons/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&family=Barlow+Condensed:wght@600;700&display=swap">
+  <title>売上分析</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg0: #061320;
+      --bg1: #173247;
+      --card: rgba(8,21,35,0.84);
+      --line: rgba(155,220,255,0.25);
+      --txt: #e7f6ff;
+      --sub: #a6cadf;
+      --ok: #69edbf;
+      --accent: #57d8ff;
+      --warn: #ffd17e;
+      --bad: #ff7c9f;
+      --radius: 16px;
+      --shadow: 0 20px 45px rgba(0,0,0,0.35);
+      --c-gross: #59dcff;
+      --c-net: #6cf0be;
+      --c-tax: #ffd07d;
+      --c-party: #9de6b6;
+      --c-guest: #ff9fbf;
+      --c-rain: #7ab4ff;
+      --c-temp: #ffb347;
+    }
+    body[data-theme='light'] {
+      --bg0: #f0f8ff; --bg1: #d8ecf8;
+      --card: rgba(255,255,255,0.95); --line: rgba(45,106,151,0.22);
+      --txt: #0f2436; --sub: #4a6d85; --ok: #0b7d52;
+      --accent: #0f73b0; --warn: #a06b10; --bad: #c0405f;
+      --shadow: 0 8px 28px rgba(15,50,80,0.12);
+      background:
+        radial-gradient(900px 500px at -20% -10%,#c8e8f8 0%,transparent 60%),
+        radial-gradient(900px 500px at 120% 0%,#bcd8f0 0%,transparent 55%),
+        linear-gradient(145deg,var(--bg0),var(--bg1)) !important;
+    }
+    body[data-theme='light'] .hero {
+      background: linear-gradient(160deg,rgba(15,115,176,0.10),rgba(180,218,240,0.55));
+      border-color: rgba(45,106,151,0.20);
+    }
+    body[data-theme='light'] .pill {
+      background: rgba(255,255,255,0.80);
+      border-color: rgba(45,106,151,0.28);
+      color: var(--txt);
+    }
+    body[data-theme='light'] .pill.ok {
+      background: rgba(11,125,82,0.08);
+      color: var(--ok);
+    }
+    body[data-theme='light'] .pill.link {
+      color: var(--accent);
+      background: rgba(15,115,176,0.08);
+      border-color: rgba(15,115,176,0.30);
+    }
+    body[data-theme='light'] button.pill[style*="border-color: var(--warn)"],
+    body[data-theme='light'] button.pill.warn { border-color: var(--warn); color: var(--warn); }
+    body[data-theme='light'] .input,
+    body[data-theme='light'] .select {
+      background: rgba(255,255,255,0.90);
+      border-color: rgba(45,106,151,0.28);
+      color: var(--txt);
+    }
+    body[data-theme='light'] .btn {
+      background: rgba(240,248,255,0.90);
+      border-color: rgba(45,106,151,0.28);
+      color: var(--txt);
+    }
+    body[data-theme='light'] .btn.primary {
+      background: linear-gradient(180deg,rgba(15,115,176,0.18),rgba(15,115,176,0.10));
+      border-color: rgba(15,115,176,0.40);
+      color: var(--accent);
+    }
+    body[data-theme='light'] .btn.active {
+      background: rgba(15,115,176,0.16);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    body[data-theme='light'] .chart-tab {
+      background: rgba(255,255,255,0.75);
+      border-color: rgba(45,106,151,0.24);
+      color: var(--sub);
+    }
+    body[data-theme='light'] .chart-tab.active {
+      background: rgba(15,115,176,0.14);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    body[data-theme='light'] .loading-overlay {
+      background: rgba(230,243,253,0.88);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      color: var(--txt);
+      font-family: "Zen Kaku Gothic New", sans-serif;
+      background:
+        radial-gradient(900px 500px at -20% -10%,#215f84 0%,transparent 60%),
+        radial-gradient(900px 500px at 120% 0%,#185273 0%,transparent 55%),
+        linear-gradient(145deg,var(--bg0),var(--bg1));
+      padding: 20px;
+    }
+    .app { max-width: 1360px; margin: 0 auto; display: grid; gap: 16px; }
+    .hero, .card {
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+    .hero {
+      padding: 18px 20px;
+      background: linear-gradient(160deg,rgba(87,216,255,0.15),rgba(8,21,35,0.65));
+    }
+    .hero h1 {
+      font-family: "Barlow Condensed", sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      font-size: clamp(2rem,3.2vw,2.8rem);
+      line-height: 0.95;
+    }
+    .hero p { margin-top: 10px; color: var(--sub); }
+    .status { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; color: var(--sub); font-size: 0.88rem; align-items: center; }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: rgba(8,21,35,0.6);
+      text-decoration: none;
+      color: inherit;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    button.pill { font: inherit; cursor: pointer; }
+    .pill.ok { color: var(--ok); border-color: color-mix(in srgb,var(--ok) 55%,transparent); }
+    .pill.link { color: #9be8ff; display: inline-flex; align-items: center; }
+    .card { background: var(--card); padding: 16px; }
+    .card-title { font-size: 1.08rem; padding-bottom: 8px; border-bottom: 1px solid rgba(155,220,255,0.18); margin-bottom: 14px; }
+    .controls { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+    .input, .select, .btn {
+      min-height: 38px; border-radius: 11px;
+      border: 1px solid var(--line);
+      background: rgba(8,21,35,0.6);
+      color: var(--txt); padding: 0 12px; font: inherit;
+    }
+    .btn { cursor: pointer; font-weight: 700; }
+    .btn.primary {
+      border-color: color-mix(in srgb,var(--accent) 60%,transparent);
+      background: linear-gradient(180deg,rgba(87,216,255,0.32),rgba(10,116,158,0.32));
+    }
+    .btn.active {
+      background: linear-gradient(180deg,rgba(87,216,255,0.45),rgba(10,116,158,0.45));
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .meta { margin-top: 8px; color: var(--sub); font-size: 0.87rem; }
+
+    /* KPI cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 10px; }
+    .kpi-card {
+      border: 1px solid rgba(155,220,255,0.18);
+      border-radius: 12px;
+      background: rgba(5,17,28,0.5);
+      padding: 12px 14px;
+    }
+    body[data-theme='light'] .kpi-card { background: rgba(230,243,253,0.6); }
+    .kpi-label { font-size: 0.78rem; color: var(--sub); margin-bottom: 4px; }
+    .kpi-value { font-family: "Barlow Condensed", sans-serif; font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+    .kpi-value.kpi-budget-atrisk { color: #ff5c5c; }
+    body[data-theme='light'] .kpi-value.kpi-budget-atrisk { color: #d92d20; }
+    .kpi-value.kpi-yoy-up { color: var(--ok); }
+    .kpi-value.kpi-yoy-down { color: var(--bad); }
+    .kpi-value.kpi-yoy-neutral { color: var(--sub); }
+    .kpi-sub { font-size: 0.78rem; color: var(--sub); margin-top: 2px; }
+    .kpi-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; min-height: 1.4em; }
+    .kpi-badge { font-size: 0.72rem; font-weight: 700; border-radius: 4px; padding: 1px 5px; }
+    .kpi-badge.up { color: var(--ok); background: rgba(105,237,191,0.12); }
+    .kpi-badge.down { color: var(--bad); background: rgba(255,124,159,0.12); }
+    .kpi-badge.flat { color: var(--sub); }
+
+    /* Chart layout */
+    .charts-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 760px) { .charts-row { grid-template-columns: 1fr; } }
+    .chart-card { background: var(--card); border-radius: var(--radius); border: 1px solid var(--line); padding: 16px; box-shadow: var(--shadow); }
+    .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+    .chart-title { font-size: 0.95rem; font-weight: 700; }
+    .chart-wrap { position: relative; height: 260px; }
+    .chart-wrap.tall { height: 320px; }
+    .chart-wrap.short { height: 200px; }
+    .chart-tab-group { display: flex; gap: 6px; }
+    .chart-tab {
+      font-size: 0.78rem; padding: 3px 10px; border-radius: 8px;
+      border: 1px solid var(--line); background: rgba(8,21,35,0.5);
+      color: var(--sub); cursor: pointer; font: inherit;
+    }
+    .chart-tab.active { background: rgba(87,216,255,0.18); border-color: var(--accent); color: var(--accent); }
+
+    /* weather badge */
+    .weather-badge { font-size: 0.78rem; color: var(--sub); display: flex; gap: 8px; flex-wrap: wrap; }
+    .weather-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+
+    /* loading / error */
+    .loading-overlay {
+      display: none; position: absolute; inset: 0;
+      background: rgba(6,19,32,0.7); border-radius: 8px;
+      align-items: center; justify-content: center;
+      font-size: 0.9rem; color: var(--sub);
+    }
+    .loading-overlay.show { display: flex; }
+
+    /* weekday labels */
+    .weekday-note { font-size: 0.78rem; color: var(--sub); margin-top: 6px; }
+
+    /* weather cross table */
+    .cross-table { border-collapse: collapse; font-size: 0.82rem; min-width: 100%; }
+    .cross-table th, .cross-table td { padding: 7px 10px; text-align: center; border: 1px solid var(--line); white-space: nowrap; }
+    .cross-table thead th { color: var(--sub); font-weight: 600; background: rgba(155,220,255,0.06); }
+    .cross-table tbody th { font-weight: 700; color: var(--txt); background: rgba(155,220,255,0.04); }
+    .cross-table tfoot th, .cross-table tfoot td { color: var(--sub); font-weight: 700; background: rgba(155,220,255,0.06); }
+    .cross-table td.hot { background: rgba(105,237,191,0.18); color: var(--ok); font-weight: 700; }
+    .cross-table td.cold { background: rgba(255,124,159,0.12); color: var(--bad); }
+    .cross-table td.empty { color: var(--sub); opacity: 0.5; }
+    body[data-theme='light'] .cross-table thead th,
+    body[data-theme='light'] .cross-table tfoot td { background: rgba(45,106,151,0.08); }
+    body[data-theme='light'] .cross-table tbody th { background: rgba(45,106,151,0.04); }
+
+    /* 日次売上（数値表）— 1〜4ブロックはビューポート連動。1ブロック=6列（日付・総売上・組数・客数・予算・差額） */
+    .receipt-daily { padding: 14px 16px; }
+    .receipt-daily .card-title { margin-bottom: 8px; }
+    .receipt-daily-table-wrap {
+      margin-top: 8px;
+      max-height: min(52vh, 380px);
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(8,21,35,0.35);
+    }
+    body[data-theme='light'] .receipt-daily-table-wrap {
+      background: rgba(230,243,253,0.55);
+    }
+    .receipt-daily #receiptDailyTable {
+      width: 100%;
+      min-width: 0;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .receipt-daily #receiptDailyTable th,
+    .receipt-daily #receiptDailyTable td {
+      padding: 2px 4px;
+      font-size: 0.68rem;
+      line-height: 1.25;
+      border-bottom: 1px solid var(--line);
+      overflow: visible;
+      white-space: nowrap;
+    }
+    .receipt-daily #receiptDailyTable th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      font-size: 0.58rem;
+      padding: 3px 4px;
+      letter-spacing: 0.02em;
+      color: var(--sub);
+      text-transform: uppercase;
+      background: color-mix(in srgb, var(--card) 92%, transparent);
+      box-shadow: 0 1px 0 var(--line);
+    }
+    body[data-theme='light'] .receipt-daily #receiptDailyTable th {
+      background: color-mix(in srgb, var(--card) 95%, #fff);
+    }
+    .receipt-daily.receipt-daily--blocks-1 #receiptDailyTable { min-width: min(100%, 28rem); }
+    .receipt-daily.receipt-daily--blocks-2 #receiptDailyTable { min-width: 46rem; }
+    .receipt-daily.receipt-daily--blocks-3 #receiptDailyTable { min-width: 66rem; }
+    .receipt-daily.receipt-daily--blocks-4 #receiptDailyTable { min-width: 86rem; }
+    .receipt-daily #receiptDailyTable th:nth-child(6n+1),
+    .receipt-daily #receiptDailyTable td:nth-child(6n+1) {
+      width: 12%;
+      min-width: 5.75rem;
+      white-space: nowrap;
+    }
+    .receipt-daily .receipt-daily-wd { font-weight: 600; }
+    .receipt-daily .receipt-daily-wd-sun { color: var(--bad); }
+    .receipt-daily .receipt-daily-wd-sat { color: var(--c-rain); }
+    .receipt-daily #receiptDailyTable th:nth-child(6n+2),
+    .receipt-daily #receiptDailyTable td:nth-child(6n+2) { width: 14%; }
+    .receipt-daily #receiptDailyTable th:nth-child(6n+3),
+    .receipt-daily #receiptDailyTable td:nth-child(6n+3),
+    .receipt-daily #receiptDailyTable th:nth-child(6n+4),
+    .receipt-daily #receiptDailyTable td:nth-child(6n+4) { width: 8%; }
+    .receipt-daily #receiptDailyTable th:nth-child(6n+5),
+    .receipt-daily #receiptDailyTable td:nth-child(6n+5),
+    .receipt-daily #receiptDailyTable th:nth-child(6n+6),
+    .receipt-daily #receiptDailyTable td:nth-child(6n+6) { width: 11%; }
+    .receipt-daily.receipt-daily--blocks-2 #receiptDailyTable th:nth-child(6),
+    .receipt-daily.receipt-daily--blocks-2 #receiptDailyTable td:nth-child(6) {
+      border-right: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    }
+    .receipt-daily.receipt-daily--blocks-3 #receiptDailyTable th:nth-child(6),
+    .receipt-daily.receipt-daily--blocks-3 #receiptDailyTable td:nth-child(6),
+    .receipt-daily.receipt-daily--blocks-3 #receiptDailyTable th:nth-child(12),
+    .receipt-daily.receipt-daily--blocks-3 #receiptDailyTable td:nth-child(12) {
+      border-right: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    }
+    .receipt-daily.receipt-daily--blocks-4 #receiptDailyTable th:nth-child(6),
+    .receipt-daily.receipt-daily--blocks-4 #receiptDailyTable td:nth-child(6),
+    .receipt-daily.receipt-daily--blocks-4 #receiptDailyTable th:nth-child(12),
+    .receipt-daily.receipt-daily--blocks-4 #receiptDailyTable td:nth-child(12),
+    .receipt-daily.receipt-daily--blocks-4 #receiptDailyTable th:nth-child(18),
+    .receipt-daily.receipt-daily--blocks-4 #receiptDailyTable td:nth-child(18) {
+      border-right: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    }
+    .receipt-daily #receiptDailyTable th:nth-child(n+2):not(:nth-child(6n+1)),
+    .receipt-daily #receiptDailyTable td:nth-child(n+2):not(:nth-child(6n+1)) {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .receipt-daily-diff-pos { color: var(--ok); font-weight: 600; }
+    .receipt-daily-diff-neg { color: var(--bad); font-weight: 600; }
+    .receipt-daily #receiptDailyTable td.empty {
+      text-align: center;
+      color: var(--sub);
+      padding: 12px;
+    }
+    .receipt-daily--blocks-2 .receipt-daily-block0-empty td:nth-child(-n+6) { opacity: 0.48; }
+    .receipt-daily--blocks-2 .receipt-daily-block1-empty td:nth-child(n+7) { opacity: 0.48; }
+    .receipt-daily--blocks-3 .receipt-daily-block0-empty td:nth-child(-n+6) { opacity: 0.48; }
+    .receipt-daily--blocks-3 .receipt-daily-block1-empty td:nth-child(n+7):nth-child(-n+12) { opacity: 0.48; }
+    .receipt-daily--blocks-3 .receipt-daily-block2-empty td:nth-child(n+13) { opacity: 0.48; }
+    .receipt-daily--blocks-4 .receipt-daily-block0-empty td:nth-child(-n+6) { opacity: 0.48; }
+    .receipt-daily--blocks-4 .receipt-daily-block1-empty td:nth-child(n+7):nth-child(-n+12) { opacity: 0.48; }
+    .receipt-daily--blocks-4 .receipt-daily-block2-empty td:nth-child(n+13):nth-child(-n+18) { opacity: 0.48; }
+    .receipt-daily--blocks-4 .receipt-daily-block3-empty td:nth-child(n+19) { opacity: 0.48; }
+    .receipt-daily--blocks-1 .receipt-daily-block0-empty td:nth-child(-n+6) { opacity: 0.48; }
+
+    /* 予算モーダル */
+    .budget-modal-backdrop {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(6, 19, 32, 0.72);
+      display: none; align-items: center; justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .budget-modal-backdrop.show { display: flex; }
+    body[data-theme='light'] .budget-modal-backdrop { background: rgba(15, 36, 54, 0.45); }
+    .budget-modal {
+      width: min(520px, calc(100vw - 32px));
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      max-height: min(88vh, 720px);
+      overflow: auto;
+      overflow-x: hidden;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px 18px;
+    }
+    .budget-modal h3 { margin: 0 0 8px; font-size: 1.05rem; }
+    /* 比率入力：狭い画面は縦並び（521〜767px で3列が潰れる問題を回避） */
+    .budget-ratio-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-top: 10px;
+      width: 100%;
+      min-width: 0;
+    }
+    @media (min-width: 768px) {
+      .budget-ratio-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+    .budget-ratio-grid label {
+      display: block;
+      min-width: 0;
+    }
+    .budget-modal label input.input,
+    .budget-modal label .input {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+    }
+    .budget-modal label span { display: block; font-size: 0.78rem; color: var(--sub); margin-bottom: 4px; }
+    .budget-modal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+    .manual-month-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+      gap: 10px 12px;
+      margin-top: 8px;
+      max-height: min(52vh, 28rem);
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .manual-month-grid .manual-month-block {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .manual-month-grid .manual-month-block-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .manual-month-grid label span { display: block; font-size: 0.68rem; color: var(--sub); margin-bottom: 3px; }
+    .budget-preview-wrap { margin-top: 12px; max-height: min(40vh, 280px); overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+    .budget-preview-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+    .budget-preview-table th, .budget-preview-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+    .budget-preview-table th { position: sticky; top: 0; background: color-mix(in srgb, var(--card) 92%, transparent); }
+    .budget-preview-table .budget-store-closed-cell { text-align: center; width: 4.5rem; vertical-align: middle; }
+    .budget-preview-table .budget-store-closed-cb { cursor: pointer; }
+    .budget-weekday-bulk-row {
+      margin: 8px 0 6px;
+      font-size: 0.72rem;
+      color: var(--sub);
+    }
+    .budget-weekday-bulk-row .budget-weekday-bulk-label { display: block; margin-bottom: 6px; }
+    .budget-weekday-bulk-cbs {
+      display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center;
+    }
+    .budget-weekday-bulk-cbs label {
+      display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+      color: var(--text);
+      user-select: none;
+    }
+    .budget-weekday-bulk-cbs input { cursor: pointer; }
+
+    /* canvas overflow 防止 / grid item min-width reset */
+    html { overflow-x: hidden; }
+    .chart-wrap canvas { max-width: 100% !important; display: block; }
+    .chart-card { overflow: hidden; min-width: 0; }
+    .chart-wrap { overflow: hidden; min-width: 0; width: 100%; }
+    .charts-grid, .charts-row { min-width: 0; }
+    .app { min-width: 0; }
+    /* grid items must not expand beyond their track */
+    .app > * { min-width: 0; }
+    .hero, .card { min-width: 0; overflow: hidden; }
+
+    /* ── mobile ── */
+    @media (max-width: 600px) {
+      body { padding: 10px; overflow-x: hidden; }
+      .app { gap: 10px; }
+
+      /* hero */
+      .hero { padding: 14px; }
+      .hero h1 { font-size: 1.7rem; }
+      .hero p { display: none; }
+      .status { gap: 6px; font-size: 0.8rem; }
+      .pill { padding: 3px 8px; }
+      /* ナビリンクをスクロール可能な1行に */
+      .status { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .status::-webkit-scrollbar { display: none; }
+
+      /* cards */
+      .card { padding: 12px; }
+      .card-title { font-size: 0.97rem; margin-bottom: 10px; }
+
+      /* 接続カード：トークン保存済みなら折りたたみ */
+      .auth-saved .auth-url-row { display: none; }
+      .auth-saved .auth-full-row { display: none; }
+      .auth-compact { display: flex !important; }
+
+      /* 接続フォームをフル幅縦並びに */
+      .controls { flex-direction: column; align-items: stretch; }
+      .controls .input, .controls .select, .controls .btn { width: 100%; min-width: 0; }
+      /* 接続ボタン行だけ横並び */
+      .btn-row { flex-direction: row !important; }
+      .btn-row .btn { flex: 1; }
+
+      /* 絞り込み：店舗select フル幅、タブはスクロール */
+      #storeSelect { width: 100%; }
+      #periodTabs {
+        overflow-x: auto; -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap; width: 100%;
+        padding-bottom: 4px;
+      }
+      #periodTabs::-webkit-scrollbar { display: none; }
+      .chart-tab { white-space: nowrap; padding: 5px 12px; font-size: 0.82rem; }
+      #reloadBtn { width: 100%; }
+
+      /* KPI: 2列固定 */
+      .kpi-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .kpi-card { padding: 10px 10px; }
+      .kpi-value { font-size: 1.3rem; }
+      .kpi-label { font-size: 0.72rem; }
+
+      /* charts */
+      .chart-card { padding: 12px; }
+      .chart-wrap { height: 220px; }
+      .chart-wrap.tall { height: 250px; }
+      .chart-head { margin-bottom: 8px; }
+      .chart-title { font-size: 0.88rem; }
+      /* 天候バッジをコンパクト化 */
+      .weather-badge { font-size: 0.72rem; gap: 6px; }
+      #weatherStatus { display: none; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header class="hero">
+    <h1>売上分析</h1>
+    <p>レシートデータの多角的な分析ダッシュボード</p>
+    <div class="status">
+      <span id="authState" class="pill">未接続</span>
+      <span id="lastRefresh" class="pill">最終更新: なし</span>
+      <a href="./index.html" class="pill link" id="adminLink">管理画面</a>
+      <button id="themeBtn" type="button" class="pill">ライトモード</button>
+    </div>
+  </header>
+
+  <!-- Auth -->
+  <section class="card" id="authCard">
+    <h2 class="card-title">接続</h2>
+    <div class="controls">
+      <input id="projectUrlInput" class="input" type="text" readonly tabindex="-1">
+      <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+      <div class="controls btn-row">
+        <button id="saveTokenBtn" class="btn primary">保存して接続</button>
+        <button id="clearTokenBtn" class="btn">削除</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Filters -->
+  <section class="card">
+    <h2 class="card-title">絞り込み</h2>
+    <div class="controls">
+      <select id="storeSelect" class="select" aria-label="店舗選択">
+        <option value="">（店舗を選択）</option>
+      </select>
+      <input id="monthPicker" class="input" type="month" aria-label="対象月">
+      <div class="chart-tab-group" id="periodTabs">
+        <button class="chart-tab active" data-period="month">今月</button>
+        <button class="chart-tab" data-period="prev">先月</button>
+        <button class="chart-tab" data-period="3m">3ヶ月</button>
+        <button class="chart-tab" data-period="6m">6ヶ月</button>
+        <button class="chart-tab" data-period="12m">12ヶ月</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+        <span class="meta">比較西暦</span>
+        <select id="compareYearSelect" class="select" aria-label="売上比較で使う西暦年" title="前年比の基準となる年（対象月と同じ月日付で結びつけます）"></select>
+      </label>
+      <button id="reloadBtn" class="btn primary">再読み込み</button>
+    </div>
+    <div class="controls budget-row" style="margin-top:10px;flex-wrap:wrap;align-items:center;gap:8px">
+      <button id="openBudgetModalBtn" type="button" class="btn primary">予算・日別配分を設定</button>
+      <button id="openPriorYearModalBtn" type="button" class="btn primary">月別売上を入力（西暦）</button>
+      <span class="meta" style="flex:1;min-width:12rem">表示月・店舗ごとに保存。予算は按分比率／比較売上は<strong>西暦×各月</strong>で登録（複数年可）</span>
+      <span id="budgetRowHint" class="meta"></span>
+      <span id="priorYearRowHint" class="meta"></span>
+    </div>
+    <div id="filterMeta" class="meta">未取得</div>
+  </section>
+
+  <!-- KPI -->
+  <section class="card">
+    <h2 class="card-title">月間サマリー <span id="kpiPeriodLabel" style="font-size:0.85rem;color:var(--sub);font-weight:400"></span></h2>
+    <div class="kpi-grid" id="kpiGrid">
+      <div class="kpi-card"><div class="kpi-label">月間総売上</div><div class="kpi-value" id="kpiGross">-</div><div class="kpi-badges"><span class="kpi-badge flat" id="kpiBadgeGrossMom"></span><span class="kpi-badge flat" id="kpiBadgeGrossYoy"></span></div></div>
+
+      <div class="kpi-card"><div class="kpi-label">月間会計組数</div><div class="kpi-value" id="kpiParty">-</div><div class="kpi-sub" id="kpiPartyAvg"></div><div class="kpi-badges"><span class="kpi-badge flat" id="kpiBadgePartyMom"></span><span class="kpi-badge flat" id="kpiBadgePartyYoy"></span></div></div>
+      <div class="kpi-card"><div class="kpi-label">月間客数</div><div class="kpi-value" id="kpiGuest">-</div><div class="kpi-sub" id="kpiGuestAvg"></div><div class="kpi-badges"><span class="kpi-badge flat" id="kpiBadgeGuestMom"></span><span class="kpi-badge flat" id="kpiBadgeGuestYoy"></span></div></div>
+      <div class="kpi-card"><div class="kpi-label">客単価（平均）</div><div class="kpi-value" id="kpiUnit">-</div><div class="kpi-badges"><span class="kpi-badge flat" id="kpiBadgeUnitMom"></span><span class="kpi-badge flat" id="kpiBadgeUnitYoy"></span></div></div>
+      <div class="kpi-card"><div class="kpi-label">営業日数</div><div class="kpi-value" id="kpiDays">-</div><div class="kpi-sub" id="kpiReceipts"></div></div>
+      <div class="kpi-card"><div class="kpi-label">月間予算（設定）</div><div class="kpi-value" id="kpiBudget">-</div><div class="kpi-sub" id="kpiBudgetSub"></div></div>
+      <div class="kpi-card"><div class="kpi-label">予算達成率</div><div class="kpi-value" id="kpiBudgetAchieve">-</div><div class="kpi-sub" id="kpiBudgetDiff"></div></div>
+      <div class="kpi-card"><div class="kpi-label">日次予算差（累計）</div><div class="kpi-value" id="kpiReceiptDailyDiff">-</div></div>
+      <div class="kpi-card"><div class="kpi-label">前年同月対比</div><div class="kpi-value" id="kpiYoyPct">-</div></div>
+    </div>
+  </section>
+
+  <!-- 日次売上（数値表）— 絞り込みと連動 -->
+  <section class="card receipt-daily receipt-daily--blocks-2" aria-labelledby="receiptDailyHeading">
+    <h2 class="card-title" id="receiptDailyHeading">日次売上（数値）</h2>
+    <p class="meta" style="margin-top:0">絞り込みの店舗・対象期間に連動します（複数月のときは<span style="white-space:nowrap">最終月</span>の日別）。</p>
+    <div id="receiptDailyMeta" class="meta"></div>
+    <div class="receipt-daily-table-wrap">
+      <table id="receiptDailyTable" aria-describedby="receiptDailyHeading">
+        <thead>
+          <tr>
+            <th>日付</th><th>総売上</th><th>組数</th><th>客数</th><th>予算</th><th>差額</th>
+            <th>日付</th><th>総売上</th><th>組数</th><th>客数</th><th>予算</th><th>差額</th>
+          </tr>
+        </thead>
+        <tbody id="receiptDailyTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Charts -->
+  <div class="charts-grid">
+
+    <!-- Chart 1: 日次売上推移 + 降水量 -->
+    <div class="chart-card">
+      <div class="chart-head">
+        <span class="chart-title">日次売上推移</span>
+        <div class="weather-badge">
+          <span><span class="weather-dot" style="background:var(--c-rain)"></span>降水量</span>
+          <span><span class="weather-dot" style="background:var(--c-temp)"></span>最高気温</span>
+          <span id="weatherStatus" style="color:var(--sub)"></span>
+          <span id="weatherAddress" style="color:var(--sub)"></span>
+        </div>
+      </div>
+      <div class="chart-wrap tall" style="position:relative">
+        <canvas id="chartDaily"></canvas>
+        <div class="loading-overlay" id="loadingDaily">読み込み中…</div>
+      </div>
+    </div>
+
+    <!-- Charts row: 曜日別 + 客数組数 -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="chart-title">曜日別平均</span>
+          <div class="chart-tab-group" id="weekdayMetricTabs">
+            <button class="chart-tab active" data-metric="gross">売上</button>
+            <button class="chart-tab" data-metric="guest">客数</button>
+            <button class="chart-tab" data-metric="party">組数</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chartWeekday"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="chart-title">客数・組数推移</span>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chartCount"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 4: 天候相関 散布図 -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="chart-title">天候相関（気温 vs 売上）</span>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chartTempScatter"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="chart-title">天候相関（降水量 vs 売上）</span>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chartRainScatter"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 5: 月別推移 -->
+    <div class="chart-card">
+      <div class="chart-head">
+        <span class="chart-title">月別売上推移（直近12ヶ月）</span>
+      </div>
+      <div class="chart-wrap tall" style="position:relative">
+        <canvas id="chartMonthly"></canvas>
+        <div class="loading-overlay" id="loadingMonthly">読み込み中…</div>
+      </div>
+    </div>
+
+    <!-- Chart 6: 曜日×天候クロス表 -->
+    <div class="chart-card">
+      <div class="chart-head">
+        <span class="chart-title">曜日 × 天候 クロス表</span>
+        <span style="font-size:0.78rem;color:var(--sub)">平均総売上（円）</span>
+      </div>
+      <div id="weatherCrossTable" style="overflow-x:auto"></div>
+    </div>
+
+  </div><!-- /charts-grid -->
+</div><!-- /app -->
+
+<div id="budgetModalBackdrop" class="budget-modal-backdrop" aria-hidden="true">
+  <div class="budget-modal" role="dialog" aria-modal="true" aria-labelledby="budgetModalTitle">
+    <h3 id="budgetModalTitle">月間予算・日別配分</h3>
+    <p class="meta" style="margin:0 0 12px;font-size:0.82rem;line-height:1.45">
+      月間予算を <strong>平日</strong>・<strong>休日前日</strong>・<strong>休日（日曜・祝日）</strong>の比率で各日に分配します（例 1 : 1.5 : 2）。
+      <strong>店舗休日</strong>にチェックした日は按分から除外され、その分がほかの営業日に振り分けられます。
+    </p>
+    <label>
+      <span>月間予算（円）</span>
+      <input id="budgetModalTotal" class="input" type="number" min="0" step="1000" inputmode="numeric" placeholder="未設定" style="width:100%;max-width:20rem">
+    </label>
+    <div class="budget-ratio-grid">
+      <label>
+        <span>平日の重み</span>
+        <input id="budgetModalWWeekday" class="input" type="number" min="0.1" step="0.1" value="1">
+      </label>
+      <label>
+        <span>休日前日の重み</span>
+        <input id="budgetModalWPre" class="input" type="number" min="0.1" step="0.1" value="1.5">
+      </label>
+      <label>
+        <span>休日の重み（日曜・祝）</span>
+        <input id="budgetModalWHoliday" class="input" type="number" min="0.1" step="0.1" value="2">
+      </label>
+    </div>
+    <p class="meta" style="margin:10px 0 4px;font-size:0.78rem">プレビュー（対象月の日別予算）</p>
+    <div id="budgetWeekdayBulkRow" class="budget-weekday-bulk-row" hidden>
+      <span class="budget-weekday-bulk-label">店舗休日を曜日で一括（チェックでその曜日の全日を店舗休日に）</span>
+      <div class="budget-weekday-bulk-cbs" role="group" aria-label="曜日で店舗休日を一括選択">
+        <label><input type="checkbox" class="budget-weekday-bulk-cb" data-weekday="1" /><span>月</span></label>
+        <label><input type="checkbox" class="budget-weekday-bulk-cb" data-weekday="2" /><span>火</span></label>
+        <label><input type="checkbox" class="budget-weekday-bulk-cb" data-weekday="3" /><span>水</span></label>
+        <label><input type="checkbox" class="budget-weekday-bulk-cb" data-weekday="4" /><span>木</span></label>
+        <label><input type="checkbox" class="budget-weekday-bulk-cb" data-weekday="5" /><span>金</span></label>
+        <label><input type="checkbox" class="budget-weekday-bulk-cb" data-weekday="6" /><span>土</span></label>
+        <label><input type="checkbox" class="budget-weekday-bulk-cb" data-weekday="0" /><span>日</span></label>
+      </div>
+    </div>
+    <div class="budget-preview-wrap">
+      <table class="budget-preview-table" id="budgetPreviewTable">
+        <thead><tr><th>日付</th><th>区分</th><th class="budget-store-closed-cell">店舗休日</th><th>日別予算</th></tr></thead>
+        <tbody id="budgetPreviewBody"></tbody>
+      </table>
+    </div>
+    <div class="budget-modal-actions">
+      <button id="budgetModalSave" type="button" class="btn primary">保存</button>
+      <button id="budgetModalClear" type="button" class="btn">予算クリア</button>
+      <button id="budgetModalClose" type="button" class="btn">閉じる</button>
+    </div>
+    <div id="budgetModalHint" class="meta" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<div id="priorYearModalBackdrop" class="budget-modal-backdrop" aria-hidden="true">
+  <div class="budget-modal" role="dialog" aria-modal="true" aria-labelledby="priorYearModalTitle" style="max-width:min(40rem,96vw)">
+    <h3 id="priorYearModalTitle">月別売上の手入力（西暦）</h3>
+    <p class="meta" style="margin:0 0 12px;font-size:0.82rem;line-height:1.45">
+      <strong>店舗</strong>ごとに、任意の<strong>西暦</strong>の<strong>1〜12月</strong>の<strong>総売上・会計組数・客数</strong>を登録できます。複数の年を順に選んで入力してください。
+      ダッシュボードの「比較西暦」で選んだ年の<strong>同じ月番号</strong>と突き合わせて前年比を計算します（前年固定ではありません）。
+      手入力がある項目は<strong>レシート集計より手入力が優先</strong>されます（組数・客数は未入力ならレシート集計を使用）。
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:8px">
+      <label>
+        <span style="display:block;font-size:0.78rem;color:var(--sub);margin-bottom:4px">入力する西暦</span>
+        <select id="manualMonthYearSelect" class="select" aria-label="手入力する西暦年"></select>
+      </label>
+      <span class="meta" style="font-size:0.78rem;flex:1;min-width:10rem">年を変更すると、その年の登録済みデータを読み込みます。</span>
+    </div>
+    <div id="manualMonthGrid" class="manual-month-grid"></div>
+    <div class="budget-modal-actions">
+      <button id="priorYearModalSave" type="button" class="btn primary">この年を保存</button>
+      <button id="priorYearModalClear" type="button" class="btn">この年をすべてクリア</button>
+      <button id="priorYearModalClose" type="button" class="btn">閉じる</button>
+    </div>
+    <div id="priorYearModalHint" class="meta" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const TOKEN_KEY = 'line_summary_admin_token';
+const THEME_KEY = 'line_reservation_calendar_theme';
+const COMPARE_YEAR_STORAGE_KEY = 'line_analytics_compare_year_v2';
+const PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
+
+function readCompareYearFromStorage() {
+  try {
+    const s = localStorage.getItem(COMPARE_YEAR_STORAGE_KEY);
+    if (s === null || s === '') return null;
+    const n = Number(s);
+    return Number.isFinite(n) && n >= 1900 && n <= 2100 ? Math.floor(n) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/* ── store coordinates for weather (store_partition_key → {lat,lon}) ── */
+const STORE_COORDS = {
+  // 新宿三丁目エリア
+  marugo:              { lat: 35.6911, lon: 139.7060 },
+  marugosecond:        { lat: 35.6912, lon: 139.7066 },
+  marugogrande:        { lat: 35.6910, lon: 139.7058 },
+  sannanaichi:         { lat: 35.6907, lon: 139.7062 },
+  shenlong:            { lat: 35.6907, lon: 139.7064 },
+  claudia2:            { lat: 35.6912, lon: 139.7065 },
+  sauvage:             { lat: 35.6911, lon: 139.7064 },
+  barpelota:           { lat: 35.6892, lon: 139.7073 },
+  briccola:            { lat: 35.6919, lon: 139.7067 },
+  violette:            { lat: 35.6918, lon: 139.7068 },
+  marugootto:          { lat: 35.6931, lon: 139.7024 },
+  donaiya:             { lat: 35.6911, lon: 139.7066 },
+  // 四谷エリア
+  marugoyotsuya:       { lat: 35.6877, lon: 139.7291 },
+  sushikoruri:         { lat: 35.6877, lon: 139.7291 },
+  // 荒木町エリア
+  bistrocavacava:      { lat: 35.6905, lon: 139.7222 },
+  // 後楽・文京エリア
+  marugoS:             { lat: 35.7032, lon: 139.7522 },
+  // 新橋エリア
+  marugoshinbashi:     { lat: 35.6658, lon: 139.7562 },
+  // 丸の内エリア
+  marugomarunouchi:    { lat: 35.6788, lon: 139.7631 },
+  yakinikumarugo:      { lat: 35.6778, lon: 139.7614 },
+  erics:               { lat: 35.6826, lon: 139.7643 },
+  mitan:               { lat: 35.6826, lon: 139.7643 },
+  // 刈谷
+  marugoD:             { lat: 34.9922, lon: 137.0127 },
+};
+
+const STORE_ADDRESS = {
+  marugo:              '新宿区新宿3丁目',
+  marugosecond:        '新宿区新宿3丁目',
+  marugogrande:        '新宿区新宿3丁目',
+  sannanaichi:         '新宿区新宿3丁目',
+  shenlong:            '新宿区新宿3丁目',
+  claudia2:            '新宿区新宿3丁目',
+  sauvage:             '新宿区新宿3丁目',
+  barpelota:           '新宿区新宿2丁目',
+  briccola:            '新宿区新宿3丁目',
+  violette:            '新宿区新宿3丁目',
+  marugootto:          '新宿区新宿3丁目',
+  donaiya:             '新宿区新宿3丁目',
+  marugoyotsuya:       '新宿区四谷1丁目',
+  sushikoruri:         '新宿区四谷1丁目',
+  bistrocavacava:      '新宿区荒木町',
+  marugoS:             '文京区後楽',
+  marugoshinbashi:     '港区新橋3丁目',
+  marugomarunouchi:    '千代田区丸の内2丁目',
+  yakinikumarugo:      '千代田区丸の内3丁目',
+  erics:               '千代田区丸の内1丁目',
+  mitan:               '千代田区丸の内1丁目',
+  marugoD:             '愛知県刈谷市中山町',
+};
+
+const STORE_NAMES = {
+  marugo:              'マルゴ',
+  marugosecond:        'マルゴ セカンド',
+  marugogrande:        'マルゴ グランデ',
+  sannanaichi:         'サンナナイチ バル',
+  shenlong:            'シェンロン&クラウディア',
+  claudia2:            'クラウディア2',
+  sauvage:             'ソバージュ',
+  barpelota:           'バルぺロタ',
+  briccola:            'トラットリア ブリッコラ',
+  violette:            'ヴィオレット',
+  marugootto:          'マルゴ オット',
+  donaiya:             '元祖どないや 新宿三丁目店',
+  marugoyotsuya:       'マルゴ 四谷',
+  sushikoruri:         '鮨こるり',
+  bistrocavacava:      'BISTRO CAVA CAVA',
+  marugoS:             'マルゴエス',
+  marugoshinbashi:     'マルゴ 新橋',
+  marugomarunouchi:    'マルゴ丸の内',
+  yakinikumarugo:      '焼肉マルゴ',
+  erics:               'エリックスバイエリックトロション',
+  mitan:               'ミタン',
+  marugoD:             'マルゴ D',
+};
+
+/* ── 日本の祝日 2022-2028 ── */
+const JAPANESE_HOLIDAYS = new Map([
+  // 2022
+  ['2022-01-01','元日'],['2022-01-10','成人の日'],
+  ['2022-02-11','建国記念の日'],['2022-02-23','天皇誕生日'],
+  ['2022-03-21','春分の日'],['2022-04-29','昭和の日'],
+  ['2022-05-03','憲法記念日'],['2022-05-04','みどりの日'],['2022-05-05','こどもの日'],
+  ['2022-07-18','海の日'],['2022-08-11','山の日'],
+  ['2022-09-19','敬老の日'],['2022-09-23','秋分の日'],
+  ['2022-10-10','スポーツの日'],['2022-11-03','文化の日'],['2022-11-23','勤労感謝の日'],
+  // 2023
+  ['2023-01-01','元日'],['2023-01-02','振替休日'],['2023-01-09','成人の日'],
+  ['2023-02-11','建国記念の日'],['2023-02-23','天皇誕生日'],
+  ['2023-03-21','春分の日'],['2023-04-29','昭和の日'],
+  ['2023-05-03','憲法記念日'],['2023-05-04','みどりの日'],['2023-05-05','こどもの日'],
+  ['2023-07-17','海の日'],['2023-08-11','山の日'],
+  ['2023-09-18','敬老の日'],['2023-09-23','秋分の日'],
+  ['2023-10-09','スポーツの日'],['2023-11-03','文化の日'],['2023-11-23','勤労感謝の日'],
+  // 2024
+  ['2024-01-01','元日'],['2024-01-08','成人の日'],
+  ['2024-02-11','建国記念の日'],['2024-02-12','振替休日'],['2024-02-23','天皇誕生日'],
+  ['2024-03-20','春分の日'],['2024-04-29','昭和の日'],
+  ['2024-05-03','憲法記念日'],['2024-05-04','みどりの日'],['2024-05-05','こどもの日'],['2024-05-06','振替休日'],
+  ['2024-07-15','海の日'],['2024-08-11','山の日'],['2024-08-12','振替休日'],
+  ['2024-09-16','敬老の日'],['2024-09-22','秋分の日'],['2024-09-23','振替休日'],
+  ['2024-10-14','スポーツの日'],
+  ['2024-11-03','文化の日'],['2024-11-04','振替休日'],['2024-11-23','勤労感謝の日'],
+  // 2025
+  ['2025-01-01','元日'],['2025-01-13','成人の日'],
+  ['2025-02-11','建国記念の日'],['2025-02-23','天皇誕生日'],['2025-02-24','振替休日'],
+  ['2025-03-20','春分の日'],['2025-04-29','昭和の日'],
+  ['2025-05-03','憲法記念日'],['2025-05-04','みどりの日'],['2025-05-05','こどもの日'],['2025-05-06','振替休日'],
+  ['2025-07-21','海の日'],['2025-08-11','山の日'],
+  ['2025-09-15','敬老の日'],['2025-09-23','秋分の日'],
+  ['2025-10-13','スポーツの日'],['2025-11-03','文化の日'],
+  ['2025-11-23','勤労感謝の日'],['2025-11-24','振替休日'],
+  // 2026
+  ['2026-01-01','元日'],['2026-01-12','成人の日'],
+  ['2026-02-11','建国記念の日'],['2026-02-23','天皇誕生日'],
+  ['2026-03-20','春分の日'],['2026-04-29','昭和の日'],
+  ['2026-05-03','憲法記念日'],['2026-05-04','みどりの日'],['2026-05-05','こどもの日'],['2026-05-06','振替休日'],
+  ['2026-07-20','海の日'],['2026-08-11','山の日'],
+  ['2026-09-21','敬老の日'],['2026-09-22','国民の休日'],['2026-09-23','秋分の日'],
+  ['2026-10-12','スポーツの日'],['2026-11-03','文化の日'],['2026-11-23','勤労感謝の日'],
+  // 2027
+  ['2027-01-01','元日'],['2027-01-11','成人の日'],
+  ['2027-02-11','建国記念の日'],['2027-02-23','天皇誕生日'],
+  ['2027-03-21','春分の日'],['2027-03-22','振替休日'],
+  ['2027-04-29','昭和の日'],
+  ['2027-05-03','憲法記念日'],['2027-05-04','みどりの日'],['2027-05-05','こどもの日'],
+  ['2027-07-19','海の日'],['2027-08-11','山の日'],
+  ['2027-09-20','敬老の日'],['2027-09-23','秋分の日'],
+  ['2027-10-11','スポーツの日'],['2027-11-03','文化の日'],['2027-11-23','勤労感謝の日'],
+  // 2028
+  ['2028-01-01','元日'],['2028-01-10','成人の日'],
+  ['2028-02-11','建国記念の日'],['2028-02-23','天皇誕生日'],
+  ['2028-03-20','春分の日'],['2028-04-29','昭和の日'],
+  ['2028-05-03','憲法記念日'],['2028-05-04','みどりの日'],['2028-05-05','こどもの日'],
+  ['2028-07-17','海の日'],['2028-08-11','山の日'],
+  ['2028-09-18','敬老の日'],['2028-09-22','秋分の日'],
+  ['2028-10-09','スポーツの日'],['2028-11-03','文化の日'],['2028-11-23','勤労感謝の日'],
+]);
+
+function addCalendarDaysIsoJs(isoDate, deltaDays) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate).trim());
+  if (!m) return isoDate;
+  const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const next = new Date(t + deltaDays * 86400000);
+  const yy = next.getUTCFullYear();
+  const mm = String(next.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(next.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+/** 日次予算・差額の「進行日」（JST）。暦 0〜4 時は前日扱い（営業日切り替え 5:00）。`sales_budget_allocation.ts` と同一定義。 */
+const RECEIPT_BUDGET_BUSINESS_DAY_START_HOUR_JST = 5;
+
+function getJstBusinessDateStringForReceiptBudgetJs(now) {
+  const base = now || new Date();
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(base);
+  const y = Number(parts.find((p) => p.type === 'year')?.value);
+  const mo = Number(parts.find((p) => p.type === 'month')?.value);
+  const d = Number(parts.find((p) => p.type === 'day')?.value);
+  const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) {
+    return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  }
+  let iso = `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  if (Number.isFinite(h) && h < RECEIPT_BUDGET_BUSINESS_DAY_START_HOUR_JST) {
+    iso = addCalendarDaysIsoJs(iso, -1);
+  }
+  return iso;
+}
+
+/** 暦の当日で JST 5 時前・店休でないときは按分待ち（0〜4 時は新暦日の receipt に寄っていても当日按分はまだ立てない）。5 時以降に按分表示。 */
+function receiptDailyDeferDailyBudgetJs(dateKey, r, storeClosedSet, nowRef) {
+  const closed = storeClosedSet instanceof Set ? storeClosedSet : new Set(storeClosedSet || []);
+  const dk = String(dateKey || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || closed.has(dk)) return false;
+  const base = nowRef || new Date();
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(base);
+  const y = Number(parts.find((p) => p.type === 'year')?.value);
+  const mo = Number(parts.find((p) => p.type === 'month')?.value);
+  const d = Number(parts.find((p) => p.type === 'day')?.value);
+  const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return false;
+  const cal = `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  if (dk !== cal) return false;
+  if (!Number.isFinite(h) || h >= RECEIPT_BUDGET_BUSINESS_DAY_START_HOUR_JST) return false;
+  return true;
+}
+
+function isHolidayLikeDayJs(isoDate) {
+  if (JAPANESE_HOLIDAYS.has(isoDate)) return true;
+  const dt = new Date(`${isoDate}T12:00:00+09:00`);
+  if (Number.isNaN(dt.getTime())) return false;
+  return dt.getDay() === 0;
+}
+
+function classifySalesBudgetDayJs(isoDate) {
+  if (isHolidayLikeDayJs(isoDate)) return 'holiday';
+  if (isHolidayLikeDayJs(addCalendarDaysIsoJs(isoDate, 1))) return 'pre_holiday';
+  return 'weekday';
+}
+
+function kindLabelJa(kind) {
+  if (kind === 'holiday') return '休日';
+  if (kind === 'pre_holiday') return '休日前日';
+  return '平日';
+}
+
+const BUDGET_WEEKDAY_JA = ['日', '月', '火', '水', '木', '金', '土'];
+
+function getJsWeekdayJstFromIso(isoDate) {
+  const dt = new Date(`${isoDate}T12:00:00+09:00`);
+  if (Number.isNaN(dt.getTime())) return 0;
+  return dt.getDay();
+}
+
+function formatBudgetPreviewDateCell(isoDate) {
+  const md = `${Number(isoDate.slice(5, 7))}/${Number(isoDate.slice(8, 10))}`;
+  const wd = getJsWeekdayJstFromIso(isoDate);
+  return `${md}（${BUDGET_WEEKDAY_JA[wd]}）`;
+}
+
+function enumerateMonthDatesJs(targetMonth) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(targetMonth).trim());
+  if (!m) return [];
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const out = [];
+  for (let day = 1; day <= lastDay; day++) {
+    out.push(`${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+function allocateDailyBudgetsClient(targetMonth, monthBudgetYen, ww, pw, hw, storeClosedSet) {
+  const closed = storeClosedSet instanceof Set ? storeClosedSet : new Set(storeClosedSet || []);
+  const days = enumerateMonthDatesJs(targetMonth);
+  if (!days.length || !Number.isFinite(monthBudgetYen) || monthBudgetYen <= 0) return new Map();
+  const rawWeights = days.map((d) => {
+    if (closed.has(d)) return 0;
+    const k = classifySalesBudgetDayJs(d);
+    if (k === 'holiday') return hw;
+    if (k === 'pre_holiday') return pw;
+    return ww;
+  });
+  const sumW = rawWeights.reduce((a, b) => a + b, 0);
+  if (sumW <= 0) {
+    const z = new Map();
+    for (const d of days) z.set(d, 0);
+    return z;
+  }
+  const fractions = rawWeights.map((rw) => (monthBudgetYen * rw) / sumW);
+  const floors = fractions.map((x) => Math.floor(x));
+  let allocated = floors.reduce((a, b) => a + b, 0);
+  const remainder = monthBudgetYen - allocated;
+  const remainders = fractions
+    .map((x, i) => ({ i, r: x - floors[i] }))
+    .filter((x) => rawWeights[x.i] > 0);
+  remainders.sort((a, b) => b.r - a.r);
+  const result = new Map();
+  for (let i = 0; i < days.length; i++) result.set(days[i], floors[i]);
+  for (let k = 0; k < remainder && k < remainders.length; k++) {
+    const idx = remainders[k].i;
+    const ds = days[idx];
+    result.set(ds, (result.get(ds) ?? 0) + 1);
+  }
+  return result;
+}
+
+/* ── state ── */
+const state = {
+  theme: localStorage.getItem(THEME_KEY) || 'dark',
+  period: 'month',    // month | prev | 3m | 6m | 12m
+  customMonth: '',
+  storeKey: '',
+  storeOptions: [],
+  dailySeries: [],    // [{date, gross_sales_yen, net_sales_yen, party_count, guest_count, receipt_count}]
+  monthlySeries: [],  // [{month, gross_sales_yen, ...}]
+  weather: {},        // date → {temp, rain}
+  charts: {},
+  weekdayMetric: 'gross',
+  lastGrossYen: null,
+  lastMonthBudgetYen: null,
+  lastBudgetWeekdayWeight: null,
+  lastBudgetPreHolidayWeight: null,
+  lastBudgetHolidayWeight: null,
+  /** API の store_closed_dates（YYYY-MM-DD）。モーダルでは modalStoreClosedDates を編集 */
+  lastStoreClosedDates: [],
+  modalStoreClosedDates: null,
+  budgetKpiSingleMonth: false,
+  lastYoyGrossYen: null,
+  lastManualPriorYearGrossYen: null,
+  compareYear: readCompareYearFromStorage(),
+};
+
+/* ── dom refs ── */
+const $ = (id) => document.getElementById(id);
+const dom = {
+  authState: $('authState'), lastRefresh: $('lastRefresh'),
+  projectUrl: $('projectUrlInput'), tokenInput: $('tokenInput'),
+  saveToken: $('saveTokenBtn'), clearToken: $('clearTokenBtn'),
+  storeSelect: $('storeSelect'), monthPicker: $('monthPicker'), reloadBtn: $('reloadBtn'), compareYearSelect: $('compareYearSelect'),
+  filterMeta: $('filterMeta'), themeBtn: $('themeBtn'),
+  kpiPeriodLabel: $('kpiPeriodLabel'),
+  kpiGross: $('kpiGross'),
+  kpiParty: $('kpiParty'), kpiPartyAvg: $('kpiPartyAvg'),
+  kpiGuest: $('kpiGuest'), kpiGuestAvg: $('kpiGuestAvg'),
+  kpiUnit: $('kpiUnit'), kpiDays: $('kpiDays'), kpiReceipts: $('kpiReceipts'),
+  kpiBudget: $('kpiBudget'), kpiBudgetSub: $('kpiBudgetSub'),
+  kpiBudgetAchieve: $('kpiBudgetAchieve'), kpiBudgetDiff: $('kpiBudgetDiff'),
+  kpiReceiptDailyDiff: $('kpiReceiptDailyDiff'),
+  kpiYoyPct: $('kpiYoyPct'),
+  openBudgetModalBtn: $('openBudgetModalBtn'), budgetRowHint: $('budgetRowHint'),
+  openPriorYearModalBtn: $('openPriorYearModalBtn'), priorYearRowHint: $('priorYearRowHint'),
+  priorYearModalBackdrop: $('priorYearModalBackdrop'),
+  manualMonthYearSelect: $('manualMonthYearSelect'),
+  manualMonthGrid: $('manualMonthGrid'),
+  priorYearModalSave: $('priorYearModalSave'),
+  priorYearModalClear: $('priorYearModalClear'),
+  priorYearModalClose: $('priorYearModalClose'),
+  priorYearModalHint: $('priorYearModalHint'),
+  budgetModalBackdrop: $('budgetModalBackdrop'),
+  budgetModalTotal: $('budgetModalTotal'),
+  budgetModalWWeekday: $('budgetModalWWeekday'),
+  budgetModalWPre: $('budgetModalWPre'),
+  budgetModalWHoliday: $('budgetModalWHoliday'),
+  budgetWeekdayBulkRow: $('budgetWeekdayBulkRow'),
+  budgetPreviewBody: $('budgetPreviewBody'),
+  budgetModalSave: $('budgetModalSave'),
+  budgetModalClear: $('budgetModalClear'),
+  budgetModalClose: $('budgetModalClose'),
+  budgetModalHint: $('budgetModalHint'),
+  kpiBadgeGrossMom: $('kpiBadgeGrossMom'), kpiBadgeGrossYoy: $('kpiBadgeGrossYoy'),
+  kpiBadgePartyMom: $('kpiBadgePartyMom'), kpiBadgePartyYoy: $('kpiBadgePartyYoy'),
+  kpiBadgeGuestMom: $('kpiBadgeGuestMom'), kpiBadgeGuestYoy: $('kpiBadgeGuestYoy'),
+  kpiBadgeUnitMom: $('kpiBadgeUnitMom'), kpiBadgeUnitYoy: $('kpiBadgeUnitYoy'),
+  weatherStatus: $('weatherStatus'),
+  weatherAddress: $('weatherAddress'),
+  loadingDaily: $('loadingDaily'), loadingMonthly: $('loadingMonthly'),
+  receiptDailyMeta: $('receiptDailyMeta'),
+  receiptDailyTable: $('receiptDailyTable'),
+  receiptDailyTableBody: $('receiptDailyTableBody'),
+};
+
+initCompareYearSelect();
+if (dom.compareYearSelect) {
+  dom.compareYearSelect.addEventListener('change', () => {
+    const v = dom.compareYearSelect.value;
+    state.compareYear = v === '' ? null : Math.floor(Number(v));
+    try {
+      if (state.compareYear != null) localStorage.setItem(COMPARE_YEAR_STORAGE_KEY, String(state.compareYear));
+      else localStorage.removeItem(COMPARE_YEAR_STORAGE_KEY);
+    } catch (_) {}
+    if (getToken()) loadAll();
+  });
+}
+
+/** 日次売上数値表：ビューポート変更時の再描画用 */
+let lastReceiptDailyData = null;
+
+/* ── helpers ── */
+function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+function removeToken() { localStorage.removeItem(TOKEN_KEY); }
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatReceiptDailyUpdatedAt(iso) {
+  if (!iso) return '-';
+  try {
+    return new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  } catch {
+    return String(iso);
+  }
+}
+
+function formatYenReceiptInt(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return '-';
+  return '¥' + Math.round(x).toLocaleString('ja-JP');
+}
+
+/** 差額（実績−予算）。符号付き・絶対値は通貨書式 */
+function formatYenSignedReceiptDiff(n) {
+  const x = Math.round(Number(n));
+  if (!Number.isFinite(x)) return '-';
+  const absStr = '¥' + Math.abs(x).toLocaleString('ja-JP');
+  if (x > 0) return '+' + absStr;
+  if (x < 0) return '-' + absStr;
+  return '¥0';
+}
+
+const RECEIPT_DAILY_COLS = 6;
+
+/** 日付列: M/D + 曜（Asia/Tokyo）。曜部分のみ色分け（祝日・日曜は同一色、土曜は別色） */
+function receiptDailyDateCellInnerHtml(raw) {
+  const s = String(raw || '').trim();
+  if (!s || s === '-') return escapeHtml('-');
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return escapeHtml(s);
+  const iso = `${m[1]}-${m[2]}-${m[3]}T12:00:00+09:00`;
+  const d = new Date(iso);
+  const md = `${Number(m[2])}/${Number(m[3])}`;
+  if (Number.isNaN(d.getTime())) return escapeHtml(md);
+  const dateStr = `${m[1]}-${m[2]}-${m[3]}`;
+  const isHoliday = JAPANESE_HOLIDAYS.has(dateStr);
+  const day = d.getDay();
+  const wd = ['日', '月', '火', '水', '木', '金', '土'][day];
+  const wdPart = `(${wd})`;
+  if (isHoliday || day === 0) {
+    return `${escapeHtml(md)}<span class="receipt-daily-wd receipt-daily-wd-sun">${escapeHtml(wdPart)}</span>`;
+  }
+  if (day === 6) {
+    return `${escapeHtml(md)}<span class="receipt-daily-wd receipt-daily-wd-sat">${escapeHtml(wdPart)}</span>`;
+  }
+  return escapeHtml(`${md}${wdPart}`);
+}
+
+function receiptDailyDateKey(raw) {
+  const s = String(raw ?? '').trim();
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return m ? m[1] : s.slice(0, 10);
+}
+
+/**
+ * 進行日（JST・5 時切り替え）より後の暦日なら true（差額は ¥0 扱い）。
+ * asOf は表の1描画で固定すること（行ループ中に日付が跨がないようにする）。
+ */
+function receiptDailyIsAfterProgressDay(dateKey, asOf) {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return false;
+  const p = String(asOf || getJstBusinessDateStringForReceiptBudgetJs()).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(p)) return false;
+  return dateKey > p;
+}
+
+function receiptDailyBudgetLookup(budgetByDate, r) {
+  if (!budgetByDate || r == null || r.date == null) return null;
+  const key = receiptDailyDateKey(r.date);
+  const a = Number(budgetByDate[r.date]);
+  if (Number.isFinite(a) && a >= 0) return a;
+  const b = Number(budgetByDate[key]);
+  if (Number.isFinite(b) && b >= 0) return b;
+  return null;
+}
+
+function receiptDailyCellsForDay(r, budgetByDate, storeClosedSet, asOfJst, nowRef) {
+  const empty6 = '<td></td><td></td><td></td><td></td><td></td><td></td>';
+  if (!r) return empty6;
+  const closed =
+    storeClosedSet instanceof Set ? storeClosedSet : new Set(storeClosedSet || []);
+  const dateKey = receiptDailyDateKey(r.date);
+  const storeClosed = dateKey && closed.has(dateKey);
+  const gross = Number(r.gross_sales_yen);
+  let budgetCell = '-';
+  let diffCell = '-';
+  let diffClass = '';
+  if (storeClosed) {
+    budgetCell = formatYenReceiptInt(0);
+    if (Number.isFinite(gross) && gross !== 0) {
+      const d = Math.round(gross);
+      diffCell = formatYenSignedReceiptDiff(d);
+      diffClass = d < 0 ? 'receipt-daily-diff-neg' : d > 0 ? 'receipt-daily-diff-pos' : '';
+    }
+  } else if (budgetByDate && typeof budgetByDate === 'object' && r.date != null) {
+    const b = receiptDailyBudgetLookup(budgetByDate, r);
+    if (b != null && Number.isFinite(b) && b >= 0) {
+      if (receiptDailyDeferDailyBudgetJs(dateKey, r, storeClosedSet, nowRef)) {
+        budgetCell = formatYenReceiptInt(b);
+        diffCell = formatYenSignedReceiptDiff(0);
+        diffClass = '';
+      } else {
+        budgetCell = formatYenReceiptInt(b);
+        if (receiptDailyIsAfterProgressDay(dateKey, asOfJst)) {
+          diffCell = formatYenSignedReceiptDiff(0);
+          diffClass = '';
+        } else {
+          const gOp = Number.isFinite(gross) ? gross : 0;
+          const d = Math.round(gOp - b);
+          diffCell = formatYenSignedReceiptDiff(d);
+          diffClass = d < 0 ? 'receipt-daily-diff-neg' : d > 0 ? 'receipt-daily-diff-pos' : '';
+        }
+      }
+    }
+  }
+  const diffAttr = diffClass ? ` class="${diffClass}"` : '';
+  return (
+    `<td>${receiptDailyDateCellInnerHtml(r.date)}</td>` +
+    `<td style="text-align:right">${formatYenReceiptInt(r.gross_sales_yen)}</td>` +
+    `<td style="text-align:right">${Number(r.party_count || 0)}</td>` +
+    `<td style="text-align:right">${Number(r.guest_count || 0)}</td>` +
+    `<td style="text-align:right">${budgetCell}</td>` +
+    `<td style="text-align:right"${diffAttr}>${diffCell}</td>`
+  );
+}
+
+function receiptDailyFooterBudgets(series, budgetByDate, storeClosedSet, asOfJst, nowRef) {
+  const closed =
+    storeClosedSet instanceof Set ? storeClosedSet : new Set(storeClosedSet || []);
+  if (!budgetByDate || typeof budgetByDate !== 'object' || !Array.isArray(series)) {
+    return { budgetTotal: null, diffTotal: null };
+  }
+  let budgetTotal = 0;
+  let diffTotal = 0;
+  let anyB = false;
+  const todayJst = String(asOfJst || getJstBusinessDateStringForReceiptBudgetJs(nowRef)).trim();
+  const tRef = nowRef || new Date();
+  for (const r of series) {
+    const dk = receiptDailyDateKey(r.date);
+    let b;
+    if (dk && closed.has(dk)) b = 0;
+    else {
+      const lb = receiptDailyBudgetLookup(budgetByDate, r);
+      if (lb == null || !Number.isFinite(lb) || lb < 0) continue;
+      b = lb;
+    }
+    anyB = true;
+    budgetTotal += b;
+    if (dk && closed.has(dk)) continue;
+    if (dk && dk > todayJst) continue;
+    const g = Number(r.gross_sales_yen);
+    const gOp = Number.isFinite(g) ? g : 0;
+    if (receiptDailyDeferDailyBudgetJs(dk, r, closed, tRef)) {
+      diffTotal += Math.round(gOp - 0);
+    } else {
+      diffTotal += Math.round(gOp - b);
+    }
+  }
+  if (!anyB) return { budgetTotal: null, diffTotal: null };
+  return { budgetTotal, diffTotal };
+}
+
+/** 日次売上（数値）表の「月間合計」差額と同じ値を KPI に反映 */
+function updateReceiptDailyDiffKpi(payload) {
+  if (!dom.kpiReceiptDailyDiff) return;
+  const series = Array.isArray(payload?.series) ? payload.series : [];
+  const budgetByDate =
+    payload?.daily_budget_yen_by_date && typeof payload.daily_budget_yen_by_date === 'object'
+      ? payload.daily_budget_yen_by_date
+      : null;
+  const rawClosed = payload?.store_closed_dates;
+  const storeClosedSet = new Set(
+    Array.isArray(rawClosed) ? rawClosed.map((x) => receiptDailyDateKey(x)) : [],
+  );
+  const nowRef = new Date();
+  const asOfJst = getJstBusinessDateStringForReceiptBudgetJs(nowRef);
+  const { diffTotal } = receiptDailyFooterBudgets(series, budgetByDate, storeClosedSet, asOfJst, nowRef);
+  dom.kpiReceiptDailyDiff.classList.remove('kpi-yoy-up', 'kpi-yoy-down', 'kpi-yoy-neutral');
+  if (diffTotal == null) {
+    dom.kpiReceiptDailyDiff.textContent = '-';
+    return;
+  }
+  dom.kpiReceiptDailyDiff.textContent = formatYenSignedReceiptDiff(diffTotal);
+  if (diffTotal > 0) dom.kpiReceiptDailyDiff.classList.add('kpi-yoy-up');
+  else if (diffTotal < 0) dom.kpiReceiptDailyDiff.classList.add('kpi-yoy-down');
+  else dom.kpiReceiptDailyDiff.classList.add('kpi-yoy-neutral');
+}
+
+function receiptDailyBlockCount() {
+  if (typeof window.matchMedia !== 'function') return 2;
+  if (window.matchMedia('(min-width: 1320px)').matches) return 4;
+  if (window.matchMedia('(min-width: 980px)').matches) return 3;
+  if (window.matchMedia('(min-width: 640px)').matches) return 2;
+  return 1;
+}
+
+function receiptDailyColspan() {
+  return receiptDailyBlockCount() * RECEIPT_DAILY_COLS;
+}
+
+function receiptDailySyncLayoutChrome(optBlocks) {
+  const n = optBlocks != null ? optBlocks : receiptDailyBlockCount();
+  const card = dom.receiptDailyTable?.closest('.receipt-daily');
+  if (card) {
+    card.classList.toggle('receipt-daily--blocks-4', n === 4);
+    card.classList.toggle('receipt-daily--blocks-3', n === 3);
+    card.classList.toggle('receipt-daily--blocks-2', n === 2);
+    card.classList.toggle('receipt-daily--blocks-1', n === 1);
+  }
+  const hr = dom.receiptDailyTable?.querySelector('thead tr');
+  if (!hr) return;
+  const one =
+    '<th>日付</th><th>総売上</th><th>組数</th><th>客数</th><th>予算</th><th>差額</th>';
+  hr.innerHTML = one.repeat(n);
+}
+
+function splitReceiptDailySeries(series, numBlocks) {
+  const n = series.length;
+  const chunks = [];
+  let start = 0;
+  for (let c = 0; c < numBlocks; c++) {
+    const remaining = n - start;
+    const slots = numBlocks - c;
+    const size = Math.ceil(remaining / slots);
+    chunks.push(series.slice(start, start + size));
+    start += size;
+  }
+  return chunks;
+}
+
+function receiptDailyOnViewportChange() {
+  if (lastReceiptDailyData) {
+    renderReceiptDailyTable(lastReceiptDailyData);
+    return;
+  }
+  receiptDailySyncLayoutChrome();
+  const td = dom.receiptDailyTableBody?.querySelector('tr:first-child td.empty');
+  if (td) td.colSpan = receiptDailyColspan();
+}
+
+function renderReceiptDailyTable(data) {
+  if (!dom.receiptDailyTableBody || !dom.receiptDailyMeta) return;
+  const numBlocks = receiptDailyBlockCount();
+  receiptDailySyncLayoutChrome(numBlocks);
+  const colspan = numBlocks * RECEIPT_DAILY_COLS;
+  const month = data?.month ? String(data.month) : '-';
+  let storeHead = data?.selected_store_name ? String(data.selected_store_name) : '';
+  if (!storeHead && data?.selected_store_key) storeHead = String(data.selected_store_key);
+  if (!storeHead) storeHead = '-';
+  const nowRef = new Date();
+  const asOfJst = getJstBusinessDateStringForReceiptBudgetJs(nowRef);
+  dom.receiptDailyMeta.textContent =
+    `対象: ${storeHead} / ${month} — 更新: ${formatReceiptDailyUpdatedAt(data?.generated_at)} · 進行日(JST): ${asOfJst}（5:00 切替。暦当日 5:00 前は差のみ ¥0・予算は按分表示。進行日より後は差 ¥0）`;
+  const series = Array.isArray(data?.series) ? data.series : [];
+  const budgetByDate =
+    data?.daily_budget_yen_by_date && typeof data.daily_budget_yen_by_date === 'object'
+      ? data.daily_budget_yen_by_date
+      : null;
+  const rawClosed = data?.store_closed_dates;
+  const storeClosedSet = new Set(
+    Array.isArray(rawClosed) ? rawClosed.map((x) => receiptDailyDateKey(x)) : [],
+  );
+  const tb = dom.receiptDailyTableBody;
+  tb.innerHTML = '';
+  if (series.length === 0) {
+    const trE = document.createElement('tr');
+    trE.innerHTML = `<td class="empty" colspan="${colspan}">データがありません。</td>`;
+    tb.appendChild(trE);
+    return;
+  }
+  const chunks = splitReceiptDailySeries(series, numBlocks);
+  let nRows = 0;
+  for (let ci = 0; ci < chunks.length; ci++) {
+    if (chunks[ci].length > nRows) nRows = chunks[ci].length;
+  }
+  for (let ri = 0; ri < nRows; ri++) {
+    const tr = document.createElement('tr');
+    for (let bi = 0; bi < numBlocks; bi++) {
+      const row = chunks[bi][ri];
+      if (row && Number(row.receipt_count || 0) === 0) {
+        tr.classList.add(`receipt-daily-block${bi}-empty`);
+      }
+    }
+    let rowHtml = '';
+    for (let bi = 0; bi < numBlocks; bi++) {
+      rowHtml += receiptDailyCellsForDay(chunks[bi][ri], budgetByDate, storeClosedSet, asOfJst, nowRef);
+    }
+    tr.innerHTML = rowHtml;
+    tb.appendChild(tr);
+  }
+  const t = data?.totals ?? {};
+  const { budgetTotal, diffTotal } = receiptDailyFooterBudgets(series, budgetByDate, storeClosedSet, asOfJst, nowRef);
+  const bCell = budgetTotal == null ? '-' : formatYenReceiptInt(budgetTotal);
+  const dCell = diffTotal == null ? '-' : formatYenSignedReceiptDiff(diffTotal);
+  const diffSumCls =
+    diffTotal == null
+      ? ''
+      : diffTotal < 0
+        ? ' class="receipt-daily-diff-neg"'
+        : diffTotal > 0
+          ? ' class="receipt-daily-diff-pos"'
+          : '';
+  const tailColspan = RECEIPT_DAILY_COLS * (numBlocks - 1);
+  const trSum = document.createElement('tr');
+  trSum.style.fontWeight = 'bold';
+  trSum.style.borderTop = '2px solid rgba(128, 160, 188, 0.45)';
+  trSum.innerHTML =
+    '<td>月間合計</td>' +
+    `<td style="text-align:right">${formatYenReceiptInt(t.total_gross_sales_yen)}</td>` +
+    `<td style="text-align:right">${Number(t.total_party_count || 0)}</td>` +
+    `<td style="text-align:right">${Number(t.total_guest_count || 0)}</td>` +
+    `<td style="text-align:right">${bCell}</td>` +
+    `<td style="text-align:right"${diffSumCls}>${dCell}</td>` +
+    (tailColspan > 0 ? `<td colspan="${tailColspan}"></td>` : '');
+  tb.appendChild(trSum);
+}
+
+function buildReceiptDailyTablePayload(salesData, displayMonth, isSingleMonth) {
+  const storeName = salesData?.selected_store_name ?? '';
+  const storeKey = salesData?.selected_store_key ?? '';
+  if (isSingleMonth) {
+    return {
+      month: salesData?.month ?? displayMonth,
+      series: salesData?.series ?? [],
+      totals: salesData?.totals ?? {},
+      generated_at: salesData?.generated_at,
+      selected_store_name: storeName,
+      selected_store_key: storeKey,
+      daily_budget_yen_by_date:
+        salesData?.daily_budget_yen_by_date &&
+        typeof salesData.daily_budget_yen_by_date === 'object'
+          ? salesData.daily_budget_yen_by_date
+          : null,
+      store_closed_dates: Array.isArray(salesData?.store_closed_dates)
+        ? salesData.store_closed_dates.map(String)
+        : [],
+    };
+  }
+  const prefix = `${displayMonth}-`;
+  const series = (state.dailySeries ?? []).filter((d) => String(d.date).startsWith(prefix));
+  const totals = {
+    total_gross_sales_yen: series.reduce((a, r) => a + (Number(r.gross_sales_yen) || 0), 0),
+    total_party_count: series.reduce((a, r) => a + (Number(r.party_count) || 0), 0),
+    total_guest_count: series.reduce((a, r) => a + (Number(r.guest_count) || 0), 0),
+  };
+  return {
+    month: displayMonth,
+    series,
+    totals,
+    generated_at: salesData?.generated_at,
+    selected_store_name: storeName,
+    selected_store_key: storeKey,
+    daily_budget_yen_by_date: null,
+    store_closed_dates: Array.isArray(state.lastStoreClosedDates)
+      ? [...state.lastStoreClosedDates]
+      : [],
+  };
+}
+
+function resetReceiptDailyDisconnected() {
+  lastReceiptDailyData = null;
+  resetBudgetKpis({ clearInput: true });
+  if (dom.receiptDailyMeta) dom.receiptDailyMeta.textContent = 'トークンを保存すると表示できます。';
+  receiptDailySyncLayoutChrome();
+  if (dom.receiptDailyTableBody) {
+    dom.receiptDailyTableBody.innerHTML =
+      `<tr><td class="empty" colspan="${receiptDailyColspan()}">未接続</td></tr>`;
+  }
+}
+
+function yen(v) {
+  if (v == null) return '-';
+  return '¥' + Number(v).toLocaleString('ja-JP');
+}
+function num(v) { return v == null ? '-' : Number(v).toLocaleString('ja-JP'); }
+
+function syncBudgetModalFromState() {
+  if (dom.budgetModalTotal) {
+    const b = state.lastMonthBudgetYen;
+    dom.budgetModalTotal.value = b != null ? String(b) : '';
+  }
+  const ww = state.lastBudgetWeekdayWeight != null ? state.lastBudgetWeekdayWeight : 1;
+  const pw = state.lastBudgetPreHolidayWeight != null ? state.lastBudgetPreHolidayWeight : 1.5;
+  const hw = state.lastBudgetHolidayWeight != null ? state.lastBudgetHolidayWeight : 2;
+  if (dom.budgetModalWWeekday) dom.budgetModalWWeekday.value = String(ww);
+  if (dom.budgetModalWPre) dom.budgetModalWPre.value = String(pw);
+  if (dom.budgetModalWHoliday) dom.budgetModalWHoliday.value = String(hw);
+}
+
+function compareYearForApi(displayMonth) {
+  if (state.compareYear != null && Number.isFinite(state.compareYear)) {
+    return state.compareYear;
+  }
+  const y = Number(String(displayMonth || '').slice(0, 4));
+  return Number.isFinite(y) ? y - 1 : new Date().getFullYear() - 1;
+}
+
+function formatYearMonthJa(ym) {
+  const s = String(ym || '').trim();
+  const m = /^(\d{4})-(\d{2})$/.exec(s);
+  if (!m) return s || '';
+  return `${m[1]}年${Number(m[2])}月`;
+}
+
+function initCompareYearSelect() {
+  const sel = dom.compareYearSelect;
+  if (!sel) return;
+  sel.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = '自動（前年）';
+  sel.appendChild(auto);
+  for (let y = 2035; y >= 2015; y--) {
+    const o = document.createElement('option');
+    o.value = String(y);
+    o.textContent = `${y}年`;
+    sel.appendChild(o);
+  }
+  sel.value = state.compareYear != null ? String(state.compareYear) : '';
+}
+
+function appendManualMonthField(parent, labelText, id, step) {
+  const lab = document.createElement('label');
+  const sp = document.createElement('span');
+  sp.textContent = labelText;
+  const inp = document.createElement('input');
+  inp.type = 'number';
+  inp.min = '0';
+  inp.step = step;
+  inp.className = 'input';
+  inp.id = id;
+  inp.setAttribute('inputmode', 'numeric');
+  lab.appendChild(sp);
+  lab.appendChild(inp);
+  parent.appendChild(lab);
+}
+
+function ensureManualMonthGridBuilt() {
+  const grid = dom.manualMonthGrid;
+  if (!grid || grid.dataset.built === '1') return;
+  grid.dataset.built = '1';
+  for (let mi = 1; mi <= 12; mi++) {
+    const suffix = String(mi).padStart(2, '0');
+    const block = document.createElement('div');
+    block.className = 'manual-month-block';
+    const title = document.createElement('div');
+    title.className = 'manual-month-block-title';
+    title.textContent = `${mi}月`;
+    block.appendChild(title);
+    appendManualMonthField(block, '総売上（円）', 'manualG' + suffix, '1000');
+    appendManualMonthField(block, '会計組数', 'manualP' + suffix, '1');
+    appendManualMonthField(block, '客数', 'manualC' + suffix, '1');
+    appendManualMonthField(block, '営業日数', 'manualO' + suffix, '1');
+    grid.appendChild(block);
+  }
+}
+
+function populateManualMonthYearSelect() {
+  const sel = dom.manualMonthYearSelect;
+  if (!sel || sel.dataset.populated === '1') return;
+  sel.dataset.populated = '1';
+  sel.innerHTML = '';
+  for (let y = 2035; y >= 2015; y--) {
+    const o = document.createElement('option');
+    o.value = String(y);
+    o.textContent = `${y}年`;
+    sel.appendChild(o);
+  }
+}
+
+async function refreshManualMonthForm(year) {
+  ensureManualMonthGridBuilt();
+  const sk = state.storeKey || '';
+  const data = await apiFetch(
+    `/receipts/sales-manual-months?year=${year}&store_key=${encodeURIComponent(sk)}`,
+  );
+  const months = data?.months ?? {};
+  for (let mi = 1; mi <= 12; mi++) {
+    const suffix = String(mi).padStart(2, '0');
+    const key = `${year}-${suffix}`;
+    const elG = document.getElementById('manualG' + suffix);
+    const elP = document.getElementById('manualP' + suffix);
+    const elC = document.getElementById('manualC' + suffix);
+    const elO = document.getElementById('manualO' + suffix);
+    const raw = months[key];
+    const row = raw != null && typeof raw === 'object' ? raw : null;
+    const gross = row ? row.gross_sales_yen : raw;
+    if (elG) {
+      elG.value = gross != null && Number.isFinite(Number(gross)) ? String(gross) : '';
+    }
+    if (elP) {
+      const p = row?.party_count;
+      elP.value = p != null && Number.isFinite(Number(p)) ? String(p) : '';
+    }
+    if (elC) {
+      const g = row?.guest_count;
+      elC.value = g != null && Number.isFinite(Number(g)) ? String(g) : '';
+    }
+    if (elO) {
+      const o = row?.operating_days_count;
+      elO.value = o != null && Number.isFinite(Number(o)) ? String(o) : '';
+    }
+  }
+}
+
+function parseManualMonthOptionalCount(raw) {
+  const s = String(raw ?? '').trim();
+  if (s === '') return null;
+  const n = Number(s.replace(/,/g, ''));
+  if (!Number.isFinite(n) || n < 0) return NaN;
+  return Math.round(n);
+}
+
+function syncBudgetWeekdayBulkCheckboxes(targetMonth, closed) {
+  const row = dom.budgetWeekdayBulkRow;
+  if (!row) return;
+  const days = enumerateMonthDatesJs(targetMonth);
+  row.querySelectorAll('.budget-weekday-bulk-cb').forEach((cb) => {
+    const wd = Number(cb.getAttribute('data-weekday'));
+    const dates = days.filter((d) => getJsWeekdayJstFromIso(d) === wd);
+    if (!dates.length) {
+      cb.checked = false;
+      cb.disabled = true;
+      return;
+    }
+    cb.disabled = false;
+    cb.checked = dates.every((d) => closed.has(d));
+  });
+}
+
+function renderBudgetPreview() {
+  if (!dom.budgetPreviewBody) return;
+  const dm = normalizeYmForBudgetApi(displayMonthFromPeriod());
+  if (!dm || !/^\d{4}-\d{2}$/.test(dm)) {
+    dom.budgetPreviewBody.innerHTML =
+      '<tr><td colspan="4" style="text-align:center;color:var(--sub);padding:12px">表示範囲の月を選んでください</td></tr>';
+    if (dom.budgetWeekdayBulkRow) dom.budgetWeekdayBulkRow.hidden = true;
+    return;
+  }
+  const totalRaw = dom.budgetModalTotal?.value?.trim() ?? '';
+  const total = totalRaw === '' ? 0 : Number(totalRaw.replace(/,/g, ''));
+  const ww = Number(dom.budgetModalWWeekday?.value);
+  const pw = Number(dom.budgetModalWPre?.value);
+  const hw = Number(dom.budgetModalWHoliday?.value);
+  const nww = Number.isFinite(ww) && ww > 0 ? ww : 1;
+  const npw = Number.isFinite(pw) && pw > 0 ? pw : 1.5;
+  const nhw = Number.isFinite(hw) && hw > 0 ? hw : 2;
+  const closed =
+    state.modalStoreClosedDates instanceof Set
+      ? state.modalStoreClosedDates
+      : new Set(state.lastStoreClosedDates || []);
+  if (!Number.isFinite(total) || total <= 0) {
+    dom.budgetPreviewBody.innerHTML =
+      '<tr><td colspan="4" style="text-align:center;color:var(--sub);padding:12px">月間予算を入力するとプレビュー表示されます</td></tr>';
+    if (dom.budgetWeekdayBulkRow) dom.budgetWeekdayBulkRow.hidden = true;
+    return;
+  }
+  const map = allocateDailyBudgetsClient(dm, Math.round(total), nww, npw, nhw, closed);
+  const days = enumerateMonthDatesJs(dm);
+  const rows = days.map((d) => {
+    const isClosed = closed.has(d);
+    const kind = classifySalesBudgetDayJs(d);
+    const label = isClosed ? '店舗休日' : kindLabelJa(kind);
+    const yen = map.get(d) ?? 0;
+    const dateCell = formatBudgetPreviewDateCell(d);
+    const chk = isClosed ? ' checked' : '';
+    return (
+      `<tr><td>${escapeHtml(dateCell)}</td><td>${escapeHtml(label)}</td>` +
+      `<td class="budget-store-closed-cell"><input type="checkbox" class="budget-store-closed-cb" data-closed-date="${d}"${chk} aria-label="店舗休日 ${escapeHtml(dateCell)}" /></td>` +
+      `<td style="text-align:right">${yen.toLocaleString('ja-JP')}円</td></tr>`
+    );
+  });
+  dom.budgetPreviewBody.innerHTML = rows.join('');
+  if (dom.budgetWeekdayBulkRow) dom.budgetWeekdayBulkRow.hidden = false;
+  syncBudgetWeekdayBulkCheckboxes(dm, closed);
+}
+
+function openBudgetModal() {
+  state.modalStoreClosedDates = new Set(state.lastStoreClosedDates || []);
+  syncBudgetModalFromState();
+  renderBudgetPreview();
+  if (dom.budgetModalBackdrop) {
+    dom.budgetModalBackdrop.classList.add('show');
+    dom.budgetModalBackdrop.setAttribute('aria-hidden', 'false');
+  }
+  if (dom.budgetModalHint) dom.budgetModalHint.textContent = '';
+}
+
+function closeBudgetModal() {
+  if (dom.budgetModalBackdrop) {
+    dom.budgetModalBackdrop.classList.remove('show');
+    dom.budgetModalBackdrop.setAttribute('aria-hidden', 'true');
+  }
+}
+
+async function openPriorYearModal() {
+  populateManualMonthYearSelect();
+  ensureManualMonthGridBuilt();
+  const dm = displayMonthFromPeriod();
+  const yDefault = compareYearForApi(dm);
+  if (dom.manualMonthYearSelect) dom.manualMonthYearSelect.value = String(yDefault);
+  if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '読み込み中…';
+  try {
+    await refreshManualMonthForm(yDefault);
+    if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '';
+  } catch (e) {
+    if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '取得に失敗: ' + (e && e.message ? e.message : String(e));
+  }
+  if (dom.priorYearModalBackdrop) {
+    dom.priorYearModalBackdrop.classList.add('show');
+    dom.priorYearModalBackdrop.setAttribute('aria-hidden', 'false');
+  }
+}
+
+function closePriorYearModal() {
+  if (dom.priorYearModalBackdrop) {
+    dom.priorYearModalBackdrop.classList.remove('show');
+    dom.priorYearModalBackdrop.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function setYoyPctTone(el, tone) {
+  if (!el) return;
+  el.classList.remove('kpi-yoy-up', 'kpi-yoy-down', 'kpi-yoy-neutral');
+  if (tone === 'up') el.classList.add('kpi-yoy-up');
+  else if (tone === 'down') el.classList.add('kpi-yoy-down');
+  else el.classList.add('kpi-yoy-neutral');
+}
+
+function setBothYoyPctDisplay(text, tone) {
+  if (!dom.kpiYoyPct) return;
+  dom.kpiYoyPct.textContent = text;
+  setYoyPctTone(dom.kpiYoyPct, tone);
+}
+
+function effectivePriorYearGrossYen() {
+  if (state.lastManualPriorYearGrossYen != null && Number.isFinite(Number(state.lastManualPriorYearGrossYen))) {
+    return Number(state.lastManualPriorYearGrossYen);
+  }
+  const s = state.lastYoyGrossYen;
+  if (s != null && Number.isFinite(Number(s))) return Number(s);
+  return null;
+}
+
+function updateYoyKpiCard(grossYen) {
+  const gross = Number(grossYen);
+  const gOk = Number.isFinite(gross);
+  if (!dom.kpiYoyPct) return;
+  if (!state.budgetKpiSingleMonth || !gOk) {
+    setBothYoyPctDisplay('-', 'neutral');
+    return;
+  }
+  const yoyRaw = effectivePriorYearGrossYen();
+  if (yoyRaw == null || !Number.isFinite(yoyRaw)) {
+    setBothYoyPctDisplay('-', 'neutral');
+    return;
+  }
+  const yoy = Number(yoyRaw);
+  if (yoy === 0) {
+    setBothYoyPctDisplay('―', 'neutral');
+    return;
+  }
+  const yoyPct = ((gross - yoy) / yoy) * 100;
+  const yoySign = yoyPct >= 0 ? '+' : '';
+  const pctText = `${yoySign}${yoyPct.toFixed(1)}%`;
+  const tone = yoyPct > 0 ? 'up' : yoyPct < 0 ? 'down' : 'neutral';
+  setBothYoyPctDisplay(pctText, tone);
+}
+
+function updateBudgetKpis(grossYen, monthLabel) {
+  const mo = String(monthLabel || '').trim();
+  const b = state.lastMonthBudgetYen;
+  const gross = Number(grossYen);
+  const gOk = Number.isFinite(gross);
+  if (dom.kpiBudget) {
+    dom.kpiBudget.textContent = b != null ? yen(b) : '未設定';
+    dom.kpiBudgetSub.textContent = mo ? `${mo}・比率按分・DB保存` : '';
+  }
+  if (dom.kpiBudgetAchieve && dom.kpiBudgetDiff) {
+    if (b != null && b > 0 && gOk) {
+      const pct = (gross / b) * 100;
+      dom.kpiBudgetAchieve.textContent = pct.toFixed(1) + '%';
+      dom.kpiBudgetAchieve.classList.toggle('kpi-budget-atrisk', pct <= 100);
+      const diff = gross - b;
+      const sign = diff >= 0 ? '+' : '-';
+      dom.kpiBudgetDiff.textContent = `予算差 ${sign}${yen(Math.abs(diff))}`;
+    } else {
+      dom.kpiBudgetAchieve.textContent = '-';
+      dom.kpiBudgetAchieve.classList.remove('kpi-budget-atrisk');
+      dom.kpiBudgetDiff.textContent = '';
+    }
+  }
+  updateYoyKpiCard(grossYen);
+}
+
+function resetBudgetKpis(opts) {
+  const clearInput = opts && opts.clearInput;
+  if (dom.kpiBudget) dom.kpiBudget.textContent = '-';
+  if (dom.kpiBudgetSub) dom.kpiBudgetSub.textContent = '';
+  if (dom.kpiBudgetAchieve) {
+    dom.kpiBudgetAchieve.textContent = '-';
+    dom.kpiBudgetAchieve.classList.remove('kpi-budget-atrisk');
+  }
+  if (dom.kpiBudgetDiff) dom.kpiBudgetDiff.textContent = '';
+  if (dom.kpiReceiptDailyDiff) {
+    dom.kpiReceiptDailyDiff.textContent = '-';
+    dom.kpiReceiptDailyDiff.classList.remove('kpi-yoy-up', 'kpi-yoy-down', 'kpi-yoy-neutral');
+  }
+  if (dom.kpiYoyPct) {
+    dom.kpiYoyPct.textContent = '-';
+    dom.kpiYoyPct.classList.remove('kpi-yoy-up', 'kpi-yoy-down', 'kpi-yoy-neutral');
+  }
+  if (dom.budgetModalHint) dom.budgetModalHint.textContent = '';
+  if (dom.budgetRowHint) dom.budgetRowHint.textContent = '';
+  if (dom.priorYearRowHint) dom.priorYearRowHint.textContent = '';
+  state.lastGrossYen = null;
+  state.lastMonthBudgetYen = null;
+  state.budgetKpiSingleMonth = false;
+  state.lastYoyGrossYen = null;
+  state.lastManualPriorYearGrossYen = null;
+  state.lastBudgetWeekdayWeight = null;
+  state.lastBudgetPreHolidayWeight = null;
+  state.lastBudgetHolidayWeight = null;
+  state.lastStoreClosedDates = [];
+  state.modalStoreClosedDates = null;
+  if (clearInput) syncBudgetModalFromState();
+}
+
+function setBadge(el, cur, prev, label) {
+  if (!el) return;
+  if (cur == null || prev == null || prev === 0) { el.textContent = ''; el.className = 'kpi-badge flat'; return; }
+  const pct = ((cur - prev) / prev) * 100;
+  const sign = pct >= 0 ? '+' : '';
+  el.textContent = `${label} ${sign}${pct.toFixed(1)}%`;
+  el.className = 'kpi-badge ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat');
+}
+
+function applyKpiBadges(displayMonth, monthlySeries) {
+  const clearAll = () => {
+    ['GrossMom','GrossYoy','PartyMom','PartyYoy','GuestMom','GuestYoy','UnitMom','UnitYoy']
+      .forEach(k => { const el = dom['kpiBadge' + k]; if (el) { el.textContent = ''; el.className = 'kpi-badge flat'; } });
+  };
+  if (!displayMonth || !Array.isArray(monthlySeries) || monthlySeries.length === 0) { clearAll(); return; }
+  const byMonth = Object.fromEntries(monthlySeries.map(r => [r.month, r]));
+  const cur = byMonth[displayMonth];
+  if (!cur) { clearAll(); return; }
+  const [y, mo] = displayMonth.split('-').map(Number);
+  const prevMo = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+  const yoyMo = `${y - 1}-${String(mo).padStart(2, '0')}`;
+  const prev = byMonth[prevMo];
+  const yoy = byMonth[yoyMo];
+  setBadge(dom.kpiBadgeGrossMom,  cur.gross_sales_yen,   prev?.gross_sales_yen,   '前月比');
+  setBadge(dom.kpiBadgeGrossYoy,  cur.gross_sales_yen,   yoy?.gross_sales_yen,    '前年比');
+  setBadge(dom.kpiBadgePartyMom,  cur.party_count,       prev?.party_count,       '前月比');
+  setBadge(dom.kpiBadgePartyYoy,  cur.party_count,       yoy?.party_count,        '前年比');
+  setBadge(dom.kpiBadgeGuestMom,  cur.guest_count,       prev?.guest_count,       '前月比');
+  setBadge(dom.kpiBadgeGuestYoy,  cur.guest_count,       yoy?.guest_count,        '前年比');
+  setBadge(dom.kpiBadgeUnitMom,   cur.avg_unit_price_yen, prev?.avg_unit_price_yen, '前月比');
+  setBadge(dom.kpiBadgeUnitYoy,   cur.avg_unit_price_yen, yoy?.avg_unit_price_yen,  '前年比');
+}
+
+function currentJstMonth() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit' }).formatToParts(now);
+  const y = parts.find(p => p.type === 'year')?.value;
+  const m = parts.find(p => p.type === 'month')?.value;
+  return `${y}-${m}`;
+}
+
+function prevMonth(m) {
+  const [y, mo] = m.split('-').map(Number);
+  return mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+}
+
+function periodToMonths(period) {
+  const baseMonth = isValidMonthString(state.customMonth) ? state.customMonth : currentJstMonth();
+  if (period === 'month') {
+    return [baseMonth];
+  }
+  if (period === 'prev') return [prevMonth(baseMonth)];
+  const n = parseInt(period);
+  const cur = baseMonth;
+  const result = [];
+  for (let i = n - 1; i >= 0; i--) {
+    let [y, mo] = cur.split('-').map(Number);
+    const total = y * 12 + mo - 1 - i;
+    result.push(`${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`);
+  }
+  return result;
+}
+
+function displayMonthFromPeriod() {
+  const months = periodToMonths(state.period);
+  return months[months.length - 1] || '';
+}
+
+/** 予算APIの month と一致させる（1桁月・日付付き文字列でも YYYY-MM に正規化） */
+function normalizeYmForBudgetApi(ym) {
+  const s = String(ym ?? '').trim();
+  const m = /^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/.exec(s);
+  if (!m) return s;
+  const y = Number(m[1]);
+  const mo = Math.min(12, Math.max(1, Math.floor(Number(m[2]))));
+  if (!Number.isFinite(y) || y < 1900 || y > 2100) return s;
+  return `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}`;
+}
+
+function isValidMonthString(value) {
+  return /^\d{4}-\d{2}$/.test(String(value ?? ''));
+}
+
+function dateRange(months) {
+  const sorted = [...months].sort();
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const [y, mo] = last.split('-').map(Number);
+  const ny = mo === 12 ? y + 1 : y;
+  const nm = mo === 12 ? 1 : mo + 1;
+  return {
+    from: `${first}-01`,
+    to: `${String(ny).padStart(4,'0')}-${String(nm).padStart(2,'0')}-01`,
+  };
+}
+
+function shiftDateString(dateStr, days) {
+  const dt = new Date(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(dt.getTime())) return dateStr;
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function diffDateDaysInclusive(from, to) {
+  const a = new Date(`${from}T00:00:00Z`).getTime();
+  const b = new Date(`${to}T00:00:00Z`).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0;
+  return Math.floor((b - a) / 86400000) + 1;
+}
+
+function buildForecastRetryRanges(from, to) {
+  if (!from || !to || from > to) return [];
+  const maxDays = diffDateDaysInclusive(from, to);
+  const candidates = [maxDays, 14, 10, 7, 5, 3, 1]
+    .filter((n, i, arr) => n >= 1 && arr.indexOf(n) === i)
+    .sort((a, b) => b - a);
+  const ranges = [];
+  for (const days of candidates) {
+    const end = shiftDateString(from, days - 1);
+    const clamped = end > to ? to : end;
+    if (clamped < from) continue;
+    ranges.push({ from, to: clamped });
+    if (clamped === to) break;
+  }
+  return ranges;
+}
+
+function dayOfWeek(dateStr) {
+  // 0=Sun ... 6=Sat
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/* ── auth ── */
+function updateAuthBadge() {
+  const ok = !!getToken();
+  dom.authState.textContent = ok ? 'トークン保存済み' : '未接続';
+  dom.authState.classList.toggle('ok', ok);
+  dom.projectUrl.value = PROJECT_URL;
+  // モバイル: トークン保存済みなら接続カードを折りたたむ
+  const authCard = document.getElementById('authCard');
+  if (authCard) authCard.style.display = ok ? 'none' : '';
+}
+
+dom.saveToken.addEventListener('click', () => {
+  const t = dom.tokenInput.value.trim();
+  if (!t) return alert('トークンを入力してください。');
+  setToken(t);
+  dom.tokenInput.value = '';
+  updateAuthBadge();
+  loadAll();
+});
+
+dom.clearToken.addEventListener('click', () => {
+  removeToken();
+  dom.tokenInput.value = '';
+  updateAuthBadge();
+  resetReceiptDailyDisconnected();
+});
+
+if (dom.openBudgetModalBtn) {
+  dom.openBudgetModalBtn.addEventListener('click', () => openBudgetModal());
+}
+['budgetModalTotal', 'budgetModalWWeekday', 'budgetModalWPre', 'budgetModalWHoliday'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', () => renderBudgetPreview());
+});
+if (dom.budgetPreviewBody) {
+  dom.budgetPreviewBody.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!t || t.type !== 'checkbox' || !t.classList.contains('budget-store-closed-cb')) return;
+    const d = t.getAttribute('data-closed-date');
+    if (!d || !(state.modalStoreClosedDates instanceof Set)) return;
+    if (t.checked) state.modalStoreClosedDates.add(d);
+    else state.modalStoreClosedDates.delete(d);
+    renderBudgetPreview();
+  });
+}
+if (dom.budgetWeekdayBulkRow) {
+  dom.budgetWeekdayBulkRow.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!t || t.type !== 'checkbox' || !t.classList.contains('budget-weekday-bulk-cb')) return;
+    const wd = Number(t.getAttribute('data-weekday'));
+    if (!Number.isFinite(wd)) return;
+    if (!(state.modalStoreClosedDates instanceof Set)) return;
+    const dm = normalizeYmForBudgetApi(displayMonthFromPeriod());
+    if (!dm || !/^\d{4}-\d{2}$/.test(dm)) return;
+    const dates = enumerateMonthDatesJs(dm).filter((d) => getJsWeekdayJstFromIso(d) === wd);
+    if (t.checked) {
+      for (const d of dates) state.modalStoreClosedDates.add(d);
+    } else {
+      for (const d of dates) state.modalStoreClosedDates.delete(d);
+    }
+    renderBudgetPreview();
+  });
+}
+if (dom.budgetModalClose) {
+  dom.budgetModalClose.addEventListener('click', () => closeBudgetModal());
+}
+if (dom.budgetModalBackdrop) {
+  dom.budgetModalBackdrop.addEventListener('click', (e) => {
+    if (e.target === dom.budgetModalBackdrop) closeBudgetModal();
+  });
+}
+if (dom.budgetModalSave) {
+  dom.budgetModalSave.addEventListener('click', async () => {
+    const dm = normalizeYmForBudgetApi(displayMonthFromPeriod());
+    if (!dm || !/^\d{4}-\d{2}$/.test(dm)) {
+      if (dom.budgetModalHint) dom.budgetModalHint.textContent = '対象月が無効です。カレンダーで月を選び直してください。';
+      return;
+    }
+    const raw = dom.budgetModalTotal?.value?.trim() ?? '';
+    let budget_yen = null;
+    if (raw !== '') {
+      const n = Number(raw.replace(/,/g, ''));
+      if (!Number.isFinite(n) || n < 0) {
+        if (dom.budgetModalHint) dom.budgetModalHint.textContent = '月間予算は0以上の数値を入力してください';
+        return;
+      }
+      budget_yen = Math.round(n);
+      if (budget_yen <= 0) budget_yen = null;
+    }
+    const ww = Number(dom.budgetModalWWeekday?.value);
+    const pw = Number(dom.budgetModalWPre?.value);
+    const hw = Number(dom.budgetModalWHoliday?.value);
+    if (budget_yen != null) {
+      if (!Number.isFinite(ww) || ww <= 0 || !Number.isFinite(pw) || pw <= 0 || !Number.isFinite(hw) || hw <= 0) {
+        if (dom.budgetModalHint) dom.budgetModalHint.textContent = '各重みは正の数で入力してください';
+        return;
+      }
+    }
+    if (dom.budgetModalHint) dom.budgetModalHint.textContent = '保存中…';
+    try {
+      const sk = (dom.storeSelect && dom.storeSelect.value) || state.storeKey || '';
+      if (!String(sk).trim()) {
+        if (dom.budgetModalHint) dom.budgetModalHint.textContent = '先に店舗を選んでから保存してください（未選択だと予算が別キーに保存され、再読み込みで休日が消えます）';
+        return;
+      }
+      const closedArr =
+        state.modalStoreClosedDates instanceof Set
+          ? Array.from(state.modalStoreClosedDates).sort()
+          : [...(state.lastStoreClosedDates || [])].sort();
+      const body = budget_yen == null
+        ? { store_key: sk, month: dm, budget_yen: null }
+        : {
+          store_key: sk,
+          month: dm,
+          budget_yen,
+          weekday_weight: ww,
+          pre_holiday_weight: pw,
+          holiday_weight: hw,
+          store_closed_dates: closedArr,
+        };
+      const result = await apiFetch('/receipts/sales-budget', { method: 'PUT', body });
+      const mb = result?.month_budget_yen;
+      state.lastMonthBudgetYen = mb != null && Number.isFinite(Number(mb)) ? Math.round(Number(mb)) : null;
+      if (state.lastMonthBudgetYen != null) {
+        state.lastBudgetWeekdayWeight = result?.weekday_weight != null ? Number(result.weekday_weight) : ww;
+        state.lastBudgetPreHolidayWeight = result?.pre_holiday_weight != null ? Number(result.pre_holiday_weight) : pw;
+        state.lastBudgetHolidayWeight = result?.holiday_weight != null ? Number(result.holiday_weight) : hw;
+        const sc = result?.store_closed_dates;
+        state.lastStoreClosedDates = Array.isArray(sc) ? sc.map(String) : closedArr;
+      } else {
+        state.lastBudgetWeekdayWeight = null;
+        state.lastBudgetPreHolidayWeight = null;
+        state.lastBudgetHolidayWeight = null;
+        state.lastStoreClosedDates = [];
+      }
+      syncBudgetModalFromState();
+      updateBudgetKpis(state.lastGrossYen, dm);
+      if (dom.budgetModalHint) dom.budgetModalHint.textContent = dm ? `保存しました（${dm}）` : '保存しました';
+      if (dom.budgetRowHint) dom.budgetRowHint.textContent = '保存済み';
+      closeBudgetModal();
+      if (getToken()) void loadAll();
+    } catch (e) {
+      if (dom.budgetModalHint) dom.budgetModalHint.textContent = '保存に失敗: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.budgetModalClear) {
+  dom.budgetModalClear.addEventListener('click', async () => {
+    const dm = normalizeYmForBudgetApi(displayMonthFromPeriod());
+    if (!dm || !/^\d{4}-\d{2}$/.test(dm)) {
+      if (dom.budgetModalHint) dom.budgetModalHint.textContent = '対象月が無効です';
+      return;
+    }
+    if (dom.budgetModalHint) dom.budgetModalHint.textContent = '保存中…';
+    try {
+      const sk = (dom.storeSelect && dom.storeSelect.value) || state.storeKey || '';
+      if (!String(sk).trim()) {
+        if (dom.budgetModalHint) dom.budgetModalHint.textContent = '先に店舗を選択してください';
+        return;
+      }
+      await apiFetch('/receipts/sales-budget', {
+        method: 'PUT',
+        body: { store_key: sk, month: dm, budget_yen: null },
+      });
+      state.lastMonthBudgetYen = null;
+      state.lastBudgetWeekdayWeight = null;
+      state.lastBudgetPreHolidayWeight = null;
+      state.lastBudgetHolidayWeight = null;
+      state.lastStoreClosedDates = [];
+      state.modalStoreClosedDates = new Set();
+      syncBudgetModalFromState();
+      updateBudgetKpis(state.lastGrossYen, dm);
+      renderBudgetPreview();
+      if (dom.budgetModalHint) dom.budgetModalHint.textContent = '予算をクリアしました';
+      if (dom.budgetRowHint) dom.budgetRowHint.textContent = '予算未設定';
+      closeBudgetModal();
+      if (getToken()) void loadAll();
+    } catch (e) {
+      if (dom.budgetModalHint) dom.budgetModalHint.textContent = 'クリアに失敗: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+
+if (dom.openPriorYearModalBtn) {
+  dom.openPriorYearModalBtn.addEventListener('click', () => openPriorYearModal());
+}
+if (dom.priorYearModalClose) {
+  dom.priorYearModalClose.addEventListener('click', () => closePriorYearModal());
+}
+if (dom.priorYearModalBackdrop) {
+  dom.priorYearModalBackdrop.addEventListener('click', (e) => {
+    if (e.target === dom.priorYearModalBackdrop) closePriorYearModal();
+  });
+}
+if (dom.manualMonthYearSelect) {
+  dom.manualMonthYearSelect.addEventListener('change', async () => {
+    const y = Number(dom.manualMonthYearSelect.value);
+    if (!Number.isFinite(y)) return;
+    if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '読み込み中…';
+    try {
+      await refreshManualMonthForm(y);
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '';
+    } catch (e) {
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent =
+        '取得に失敗: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.priorYearModalSave) {
+  dom.priorYearModalSave.addEventListener('click', async () => {
+    const year = Number(dom.manualMonthYearSelect?.value);
+    if (!Number.isFinite(year)) {
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '西暦を選択してください';
+      return;
+    }
+    ensureManualMonthGridBuilt();
+    const entries = [];
+    for (let mi = 1; mi <= 12; mi++) {
+      const suffix = String(mi).padStart(2, '0');
+      const key = `${year}-${suffix}`;
+      const rawG = document.getElementById('manualG' + suffix)?.value?.trim() ?? '';
+      const rawP = document.getElementById('manualP' + suffix)?.value?.trim() ?? '';
+      const rawC = document.getElementById('manualC' + suffix)?.value?.trim() ?? '';
+      const rawO = document.getElementById('manualO' + suffix)?.value?.trim() ?? '';
+      if (rawG !== '') {
+        const n = Number(rawG.replace(/,/g, ''));
+        if (!Number.isFinite(n) || n < 0) {
+          if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = `${mi}月・総売上: 0以上の数値を入力してください`;
+          return;
+        }
+      }
+      const party = parseManualMonthOptionalCount(rawP);
+      if (Number.isNaN(party)) {
+        if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = `${mi}月・会計組数: 0以上の数値を入力してください`;
+        return;
+      }
+      const guest = parseManualMonthOptionalCount(rawC);
+      if (Number.isNaN(guest)) {
+        if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = `${mi}月・客数: 0以上の数値を入力してください`;
+        return;
+      }
+      const opDays = parseManualMonthOptionalCount(rawO);
+      if (Number.isNaN(opDays)) {
+        if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = `${mi}月・営業日数: 1以上の整数を入力してください`;
+        return;
+      }
+      if (opDays != null && opDays < 1) {
+        if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = `${mi}月・営業日数: 1以上の整数を入力してください`;
+        return;
+      }
+      entries.push({
+        sales_month: key,
+        gross_sales_yen: rawG === '' ? null : Math.round(Number(rawG.replace(/,/g, ''))),
+        party_count: party,
+        guest_count: guest,
+        operating_days_count: opDays,
+      });
+    }
+    if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '保存中…';
+    try {
+      await apiFetch('/receipts/sales-manual-months', {
+        method: 'PUT',
+        body: { store_key: state.storeKey, entries },
+      });
+      await refreshManualMonthForm(year);
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = `${year}年を保存しました`;
+      closePriorYearModal();
+      loadAll();
+    } catch (e) {
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '保存に失敗: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.priorYearModalClear) {
+  dom.priorYearModalClear.addEventListener('click', async () => {
+    const year = Number(dom.manualMonthYearSelect?.value);
+    if (!Number.isFinite(year)) {
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '西暦を選択してください';
+      return;
+    }
+    ensureManualMonthGridBuilt();
+    const entries = [];
+    for (let mi = 1; mi <= 12; mi++) {
+      entries.push({
+        sales_month: `${year}-${String(mi).padStart(2, '0')}`,
+        gross_sales_yen: null,
+      });
+    }
+    if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '保存中…';
+    try {
+      await apiFetch('/receipts/sales-manual-months', {
+        method: 'PUT',
+        body: { store_key: state.storeKey, entries },
+      });
+      await refreshManualMonthForm(year);
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = `${year}年の登録をすべて削除しました`;
+      closePriorYearModal();
+      loadAll();
+    } catch (e) {
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = 'クリアに失敗: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+
+/* ── theme ── */
+function applyTheme(t) {
+  state.theme = t;
+  document.body.setAttribute('data-theme', t);
+  dom.themeBtn.textContent = t === 'dark' ? 'ライトモード' : 'ダークモード';
+  localStorage.setItem(THEME_KEY, t);
+  refreshAllCharts();
+}
+
+dom.themeBtn.addEventListener('click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
+
+/* LINEブラウザからのアクセス時は管理画面リンクを非表示 */
+if (/Line\//i.test(navigator.userAgent)) {
+  const adminLink = document.getElementById('adminLink');
+  if (adminLink) adminLink.style.display = 'none';
+}
+
+/* ── period tabs ── */
+document.getElementById('periodTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-period]');
+  if (!btn) return;
+  document.querySelectorAll('#periodTabs .chart-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.period = btn.dataset.period;
+  loadAll();
+});
+
+dom.monthPicker.addEventListener('change', () => {
+  const picked = String(dom.monthPicker.value || '').trim();
+  if (!isValidMonthString(picked)) return;
+  state.customMonth = picked;
+  state.period = 'month';
+  document.querySelectorAll('#periodTabs .chart-tab').forEach(b => b.classList.remove('active'));
+  const monthTab = document.querySelector('#periodTabs .chart-tab[data-period="month"]');
+  if (monthTab) monthTab.classList.add('active');
+  loadAll();
+});
+
+/* ── weekday metric tabs ── */
+document.getElementById('weekdayMetricTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-metric]');
+  if (!btn) return;
+  document.querySelectorAll('#weekdayMetricTabs .chart-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.weekdayMetric = btn.dataset.metric;
+  renderWeekdayChart();
+});
+
+/* ── reload ── */
+dom.reloadBtn.addEventListener('click', loadAll);
+
+/* ── store select ── */
+dom.storeSelect.addEventListener('change', () => {
+  state.storeKey = dom.storeSelect.value;
+  loadAll();
+});
+
+/* ── API fetch ── */
+async function apiFetch(path, options = {}) {
+  const token = getToken();
+  if (!token) throw new Error('トークンが未設定です。');
+  const url = PROJECT_URL.replace(/\/+$/, '') + '/functions/v1/admin-api' + path;
+  const method = options.method || 'GET';
+  const headers = { 'x-admin-token': token };
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json; charset=utf-8';
+  }
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`API error ${res.status}: ${text.slice(0, 160)}`);
+  }
+  return res.json();
+}
+
+/* ── weather fetch (Open-Meteo, direct from browser) ── */
+async function fetchWeather(storeKey, fromDate, toDate) {
+  const coords = STORE_COORDS[storeKey];
+  if (!coords) return { map: {}, forecastLimited: false };
+  // toDate は表示範囲の翌日（排他）なので末日に補正
+  const displayTo = shiftDateString(toDate, -1);
+  // 実績は「前日まで」、加えて今日〜10日先の予報を表示
+  const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  const today = new Date(todayStr);
+  const y = new Date(today); y.setDate(y.getDate() - 1);
+  const yesterdayStr = y.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  const f = new Date(today); f.setDate(f.getDate() + 10);
+  const forecastCapStr = f.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  const forecastToStr = displayTo > forecastCapStr ? forecastCapStr : displayTo;
+  const safeFrom = fromDate;
+  const safeToHistory = displayTo > yesterdayStr ? yesterdayStr : displayTo;
+
+  // アーカイブAPIは直近3日分を持たないため、
+  // それより前は archive、直近数日は forecast を併用して埋める
+  const dArchiveEnd = new Date(today); dArchiveEnd.setDate(dArchiveEnd.getDate() - 3);
+  const archiveCap = dArchiveEnd.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+
+  const result = {};
+
+  // 1) 過去分: archive API （from〜min(safeToHistory, archiveCap)）
+  if (safeFrom <= archiveCap && safeToHistory >= safeFrom) {
+    const archiveTo = safeToHistory > archiveCap ? archiveCap : safeToHistory;
+    const paramsArchive = new URLSearchParams({
+      latitude: coords.lat,
+      longitude: coords.lon,
+      start_date: safeFrom,
+      end_date: archiveTo,
+      daily: 'temperature_2m_max,precipitation_sum',
+      timezone: 'Asia/Tokyo',
+    });
+    try {
+      const res = await fetch(`https://archive-api.open-meteo.com/v1/archive?${paramsArchive}`);
+      if (res.ok) {
+        const data = await res.json();
+        const dates = data?.daily?.time ?? [];
+        const temps = data?.daily?.temperature_2m_max ?? [];
+        const rains = data?.daily?.precipitation_sum ?? [];
+        dates.forEach((dStr, i) => {
+          result[dStr] = { temp: temps[i], rain: rains[i] };
+        });
+      }
+    } catch {
+      // ignore archive failure
+    }
+  }
+
+  // 2) 直近分: forecast API （max(archiveCap+1, safeFrom)〜safeTo）
+  const dArchiveNext = new Date(dArchiveEnd); dArchiveNext.setDate(dArchiveNext.getDate() + 1);
+  const archiveNextStr = dArchiveNext.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  const forecastHistoryFrom = safeFrom > archiveNextStr ? safeFrom : archiveNextStr;
+  if (forecastHistoryFrom <= safeToHistory) {
+    const paramsForecast = new URLSearchParams({
+      latitude: coords.lat,
+      longitude: coords.lon,
+      start_date: forecastHistoryFrom,
+      end_date: safeToHistory,
+      daily: 'temperature_2m_max,precipitation_sum',
+      timezone: 'Asia/Tokyo',
+    });
+    try {
+      const res = await fetch(`https://api.open-meteo.com/v1/forecast?${paramsForecast}`);
+      if (res.ok) {
+        const data = await res.json();
+        const dates = data?.daily?.time ?? [];
+        const temps = data?.daily?.temperature_2m_max ?? [];
+        const rains = data?.daily?.precipitation_sum ?? [];
+        dates.forEach((dStr, i) => {
+          result[dStr] = { temp: temps[i], rain: rains[i] };
+        });
+      }
+    } catch {
+      // ignore forecast failure
+    }
+  }
+
+  // 3) 将来分: 今日〜10日先（表示範囲内）の予報
+  const forecastFutureFrom = todayStr > safeFrom ? todayStr : safeFrom;
+  if (forecastFutureFrom <= forecastToStr) {
+    // end_date が長いと環境によって失敗するため、失敗時は短い期間で段階リトライ
+    const futureRanges = buildForecastRetryRanges(forecastFutureFrom, forecastToStr);
+    for (const range of futureRanges) {
+      const paramsForecastFuture = new URLSearchParams({
+        latitude: coords.lat,
+        longitude: coords.lon,
+        start_date: range.from,
+        end_date: range.to,
+        daily: 'temperature_2m_max,precipitation_sum',
+        timezone: 'Asia/Tokyo',
+      });
+      try {
+        const res = await fetch(`https://api.open-meteo.com/v1/forecast?${paramsForecastFuture}`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const dates = data?.daily?.time ?? [];
+        const temps = data?.daily?.temperature_2m_max ?? [];
+        const rains = data?.daily?.precipitation_sum ?? [];
+        dates.forEach((dStr, i) => {
+          result[dStr] = { temp: temps[i], rain: rains[i] };
+        });
+        if (dates.length > 0) break;
+      } catch {
+        // try shorter range
+      }
+    }
+  }
+
+  return { map: result, forecastLimited: displayTo > forecastCapStr };
+}
+
+/* ── main load ── */
+async function loadAll() {
+  const token = getToken();
+  if (!token) {
+    dom.filterMeta.textContent = 'トークンを保存してください。';
+    resetReceiptDailyDisconnected();
+    return;
+  }
+
+  const months = periodToMonths(state.period);
+  const { from, to } = dateRange(months);
+  const isSingleMonth = months.length === 1;
+  const displayMonth = months[months.length - 1];
+  const sortedMonths = [...months].sort();
+
+  dom.filterMeta.textContent = '読み込み中…';
+  dom.loadingDaily.classList.add('show');
+  dom.loadingMonthly.classList.add('show');
+
+  try {
+    const fetchSalesMonth = (m, storeKey) => {
+      const cy = compareYearForApi(m);
+      return apiFetch(
+        `/receipts/sales?month=${encodeURIComponent(m)}&store_key=${encodeURIComponent(storeKey ?? '')}&compare_year=${cy}`,
+      );
+    };
+    const fetchMonthly = (storeKey) =>
+      apiFetch(`/analytics/monthly?months=14&store_key=${encodeURIComponent(storeKey ?? '')}`).catch(() => null);
+
+    let salesData;
+    let dailySeries;
+    /** 売上・月次と並行で開始し、UI は先に描画してから await する（体感の待ち時間を短くする） */
+    let weatherPromise;
+
+    if (state.storeKey) {
+      const sk = state.storeKey;
+      weatherPromise = fetchWeather(sk, from, to);
+      dom.weatherStatus.textContent = '天候取得中…';
+      const [salesResults, monthlyData] = await Promise.all([
+        Promise.all(sortedMonths.map((m) => fetchSalesMonth(m, sk).catch(() => null))),
+        fetchMonthly(sk),
+      ]);
+      const byMonth = new Map(
+        (salesResults.filter(Boolean)).map((r) => [r.month, r]),
+      );
+      salesData = byMonth.get(displayMonth) ?? salesResults.filter(Boolean).slice(-1)[0];
+      if (!salesData) throw new Error('売上データを取得できませんでした。');
+      dailySeries = sortedMonths.flatMap((m) => byMonth.get(m)?.series ?? []);
+
+      state.monthlySeries = monthlyData?.series ?? [];
+    } else {
+      salesData = await fetchSalesMonth(displayMonth, '');
+      if (salesData.store_options?.length) {
+        updateStoreSelect(salesData.store_options, salesData.selected_store_key);
+      }
+      if (!state.storeKey && salesData.selected_store_key) {
+        state.storeKey = salesData.selected_store_key;
+      }
+      const sk = state.storeKey || '';
+      // 初回は store_key 無しで呼ぶため予算が __all__ キーになる。既定店舗が決まったら同じ月を店舗指定で取り直し、予算・按分を一致させる
+      if (sk) {
+        const refined = await fetchSalesMonth(displayMonth, sk).catch(() => null);
+        if (refined) salesData = refined;
+      }
+      const otherMonths = sortedMonths.filter((m) => m !== displayMonth);
+
+      weatherPromise = fetchWeather(sk, from, to);
+      dom.weatherStatus.textContent = '天候取得中…';
+      const parallel = [fetchMonthly(sk)];
+      if (otherMonths.length > 0) {
+        parallel.push(
+          Promise.all(otherMonths.map((m) => fetchSalesMonth(m, sk).catch(() => null))),
+        );
+      }
+      const wave = await Promise.all(parallel);
+      const monthlyData = wave[0];
+      const extraResults = otherMonths.length > 0 ? wave[1] : [];
+
+      state.monthlySeries = monthlyData?.series ?? [];
+
+      const extraByMonth = new Map(
+        (Array.isArray(extraResults) ? extraResults : []).filter(Boolean).map((r) => [r.month, r]),
+      );
+      dailySeries = sortedMonths.flatMap((m) => {
+        if (m === displayMonth) return salesData.series ?? [];
+        return extraByMonth.get(m)?.series ?? [];
+      });
+    }
+
+    state.dailySeries = dailySeries;
+
+    if (state.storeKey && salesData.store_options?.length) {
+      updateStoreSelect(salesData.store_options, salesData.selected_store_key);
+    }
+
+    state.weather = {};
+    const addr = STORE_ADDRESS[state.storeKey];
+    dom.weatherAddress.textContent = addr ? `📍 ${addr}` : '';
+
+    // KPI（天候より先に表示）
+    const totals = salesData.totals;
+    dom.kpiPeriodLabel.textContent = isSingleMonth ? `（${displayMonth}）` : `（${months[0]}〜${displayMonth}）`;
+    dom.kpiGross.textContent = yen(totals?.total_gross_sales_yen);
+    dom.kpiParty.textContent = num(totals?.total_party_count) + ' 組';
+    dom.kpiPartyAvg.textContent = totals?.avg_party_count ? `1日平均 ${totals.avg_party_count} 組` : '';
+    dom.kpiGuest.textContent = num(totals?.total_guest_count) + ' 名';
+    dom.kpiGuestAvg.textContent = totals?.avg_guest_count ? `1日平均 ${totals.avg_guest_count} 名` : '';
+    dom.kpiUnit.textContent = yen(totals?.avg_unit_price_yen);
+    const activeDays = dailySeries.filter(d => d.receipt_count > 0).length;
+    dom.kpiDays.textContent = activeDays + ' 日';
+    dom.kpiReceipts.textContent = totals?.receipt_count ? `レシート ${totals.receipt_count} 件` : '';
+
+    state.lastGrossYen = totals?.total_gross_sales_yen ?? null;
+    {
+      const mb = salesData?.month_budget_yen;
+      state.lastMonthBudgetYen = mb != null && Number.isFinite(Number(mb)) ? Math.round(Number(mb)) : null;
+      const bw = salesData?.budget_weekday_weight;
+      const bp = salesData?.budget_pre_holiday_weight;
+      const bh = salesData?.budget_holiday_weight;
+      state.lastBudgetWeekdayWeight = bw != null && Number.isFinite(Number(bw)) ? Number(bw) : null;
+      state.lastBudgetPreHolidayWeight = bp != null && Number.isFinite(Number(bp)) ? Number(bp) : null;
+      state.lastBudgetHolidayWeight = bh != null && Number.isFinite(Number(bh)) ? Number(bh) : null;
+      const sclosed = salesData?.store_closed_dates;
+      state.lastStoreClosedDates = Array.isArray(sclosed) ? sclosed.map(String) : [];
+      const pm =
+        salesData?.manual_comparison_gross_yen ?? salesData?.prior_year_gross_yen_manual;
+      state.lastManualPriorYearGrossYen =
+        pm != null && Number.isFinite(Number(pm)) ? Math.round(Number(pm)) : null;
+    }
+    if (dom.priorYearRowHint) {
+      const cmp = salesData?.comparison_sales_month;
+      const pm = state.lastManualPriorYearGrossYen;
+      const parts = [];
+      if (cmp) parts.push(`比較 ${formatYearMonthJa(cmp)}`);
+      parts.push(pm != null ? '手入力あり' : '手入力なし');
+      dom.priorYearRowHint.textContent = parts.join(' · ');
+    }
+    state.budgetKpiSingleMonth = isSingleMonth;
+    if (isSingleMonth && displayMonth) {
+      const byMonth = Object.fromEntries((state.monthlySeries || []).map((r) => [r.month, r]));
+      const [y, mo] = displayMonth.split('-').map(Number);
+      const yoyMo = `${y - 1}-${String(mo).padStart(2, '0')}`;
+      const yoyRow = byMonth[yoyMo];
+      const yg = yoyRow?.gross_sales_yen;
+      state.lastYoyGrossYen = yg != null && Number.isFinite(Number(yg)) ? Number(yg) : null;
+    } else {
+      state.lastYoyGrossYen = null;
+    }
+    syncBudgetModalFromState();
+    updateBudgetKpis(totals?.total_gross_sales_yen, displayMonth);
+
+    if (isSingleMonth) applyKpiBadges(displayMonth, state.monthlySeries);
+    else applyKpiBadges(null, state.monthlySeries);
+
+    dom.filterMeta.textContent = `対象: ${salesData.selected_store_name ?? '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件`;
+    dom.lastRefresh.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
+
+    renderAllCharts();
+
+    lastReceiptDailyData = buildReceiptDailyTablePayload(salesData, displayMonth, isSingleMonth);
+    renderReceiptDailyTable(lastReceiptDailyData);
+    updateReceiptDailyDiffKpi(lastReceiptDailyData);
+
+    dom.loadingDaily.classList.remove('show');
+    dom.loadingMonthly.classList.remove('show');
+
+    const weatherResult = await (weatherPromise ?? Promise.resolve({ map: {} })).catch(() => ({ map: {} }));
+    state.weather = weatherResult?.map ?? {};
+    const weatherCount = Object.keys(state.weather).length;
+    dom.weatherStatus.textContent = weatherCount > 0
+      ? `天候データ ${weatherCount}日分（実績+予報10日）`
+      : '天候データなし';
+
+    renderAllCharts();
+  } catch (e) {
+    dom.filterMeta.textContent = 'エラー: ' + e.message;
+    resetBudgetKpis();
+    lastReceiptDailyData = null;
+    if (dom.receiptDailyMeta) dom.receiptDailyMeta.textContent = '取得失敗: ' + e.message;
+    receiptDailySyncLayoutChrome();
+    if (dom.receiptDailyTableBody) {
+      dom.receiptDailyTableBody.innerHTML =
+        `<tr><td class="empty" colspan="${receiptDailyColspan()}">取得に失敗しました</td></tr>`;
+    }
+  } finally {
+    dom.loadingDaily.classList.remove('show');
+    dom.loadingMonthly.classList.remove('show');
+  }
+}
+
+function updateStoreSelect(options, selectedKey) {
+  const prev = dom.storeSelect.value || state.storeKey;
+  dom.storeSelect.innerHTML = '';
+
+  // APIから返ってきた店舗（レシートあり）
+  const apiKeys = new Set(options.map(o => o.store_key));
+  for (const opt of options) {
+    const el = document.createElement('option');
+    el.value = opt.store_key;
+    el.textContent = opt.store_name;
+    dom.storeSelect.appendChild(el);
+  }
+
+  // 座標登録済みでAPIに未登場の店舗（レシートなし）
+  for (const key of Object.keys(STORE_COORDS)) {
+    if (apiKeys.has(key)) continue;
+    const el = document.createElement('option');
+    el.value = key;
+    el.textContent = (STORE_NAMES[key] ?? key) + '　（データなし）';
+    dom.storeSelect.appendChild(el);
+  }
+
+  const allKeys = [...apiKeys, ...Object.keys(STORE_COORDS)];
+  if (prev && allKeys.includes(prev)) dom.storeSelect.value = prev;
+  state.storeOptions = options;
+}
+
+/* ── Chart.js defaults ── */
+function chartDefaults() {
+  const isDark = state.theme === 'dark';
+  return {
+    gridColor: isDark ? 'rgba(155,220,255,0.12)' : 'rgba(45,106,151,0.15)',
+    tickColor: isDark ? '#a6cadf' : '#4f7187',
+    legendColor: isDark ? '#e7f6ff' : '#132a3b',
+  };
+}
+
+function destroyChart(key) {
+  if (state.charts[key]) { state.charts[key].destroy(); delete state.charts[key]; }
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.body).getPropertyValue(name).trim();
+}
+
+/* ── 天気アイコン変換 ── */
+function weatherIcon(rain, temp) {
+  if (rain == null && temp == null) return '';
+  if (rain != null && rain > 10) return '🌧';
+  if (rain != null && rain > 0.5) return '🌦';
+  if (temp != null && temp >= 30) return '🌡';
+  if (temp != null && temp >= 23) return '☀️';
+  if (temp != null && temp >= 15) return '🌤';
+  if (temp != null && temp >= 5)  return '⛅';
+  if (temp != null && temp < 5)   return '❄️';
+  return '';
+}
+
+/* ── Chart 1: daily sales + weather ── */
+function renderDailyChart() {
+  destroyChart('daily');
+  const series = state.dailySeries;
+  if (!series.length) return;
+  const { gridColor, tickColor, legendColor } = chartDefaults();
+  const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  const salesMap = {};
+  series.forEach((d) => { salesMap[d.date] = d; });
+  const chartDates = buildDailyChartDates(series, state.weather);
+  const labels = chartDates.map(d => d.slice(5)); // MM-DD
+  const gross = chartDates.map(d => salesMap[d]?.gross_sales_yen ?? null);
+  const rain = chartDates.map(d => state.weather[d]?.rain ?? null);
+  const temp = chartDates.map(d => state.weather[d]?.temp ?? null);
+
+  const datasets = [
+    {
+      type: 'bar', label: '降水量(mm)', data: rain, yAxisID: 'yRain',
+      backgroundColor: 'rgba(122,180,255,0.62)', borderColor: 'rgba(122,180,255,0.95)',
+      borderWidth: 1, order: 3,
+    },
+    {
+      type: 'line', label: '総売上', data: gross, yAxisID: 'ySales',
+      borderColor: cssVar('--c-gross'), backgroundColor: 'rgba(89,220,255,0.1)',
+      tension: 0.3, pointRadius: 3, fill: true, order: 1,
+    },
+    {
+      type: 'line', label: '最高気温(℃)', data: temp, yAxisID: 'yTemp',
+      borderColor: cssVar('--c-temp'), backgroundColor: 'transparent',
+      tension: 0.4, pointRadius: 2, borderDash: [2, 4], order: 2,
+    },
+  ];
+
+  // 祝日バンドを描くプラグイン
+  const holidayPlugin = {
+    id: 'holidayBands',
+    afterDraw(chart) {
+      const { ctx, chartArea } = chart;
+      if (!chartArea) return;
+      // 総売上ライン（dataset index 1）の要素座標を使う（常にデータあり）
+      const meta = chart.getDatasetMeta(1);
+      if (!meta?.data?.length) return;
+      ctx.save();
+      const barW = chartArea.width / Math.max(chartDates.length, 1);
+      chartDates.forEach((dateStr, i) => {
+        const x = meta.data[i]?.x;
+        if (x == null) return;
+        const dow = new Date(dateStr).getDay(); // 0=日, 6=土
+        const isHoliday = JAPANESE_HOLIDAYS.has(dateStr);
+        const isSat = dow === 6;
+        const isSun = dow === 0;
+        if (!isHoliday && !isSat && !isSun) return;
+
+        // 背景バンド（祝日 > 日曜 > 土曜の優先順で色を決定）
+        if (isHoliday) {
+          ctx.fillStyle = 'rgba(255,90,90,0.12)';
+        } else if (isSun) {
+          ctx.fillStyle = 'rgba(255,110,110,0.08)';
+        } else {
+          ctx.fillStyle = 'rgba(100,160,255,0.08)';
+        }
+        ctx.fillRect(x - barW / 2, chartArea.top, barW, chartArea.bottom - chartArea.top);
+
+        // ラベル（祝日優先、次に曜日）
+        const label = isHoliday ? '祝' : isSun ? '日' : '土';
+        const color = (isHoliday || isSun) ? 'rgba(255,90,90,0.9)' : 'rgba(100,160,255,0.9)';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(label, x, chartArea.top + 2);
+      });
+      ctx.restore();
+    },
+  };
+
+  // 天気アイコンをx軸ラベルの上に描くプラグイン
+  const weatherIconPlugin = {
+    id: 'weatherIcons',
+    afterDraw(chart) {
+      const { ctx, chartArea } = chart;
+      if (!chartArea) return;
+      const meta = chart.getDatasetMeta(1);
+      if (!meta?.data?.length) return;
+      ctx.save();
+      ctx.font = '13px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      chartDates.forEach((dateStr, i) => {
+        const w = state.weather[dateStr];
+        const icon = weatherIcon(w?.rain ?? null, w?.temp ?? null);
+        if (!icon) return;
+        const x = meta.data[i]?.x;
+        if (x == null) return;
+        const y = chart.scales.x.bottom + 2;
+        ctx.textBaseline = 'top';
+        ctx.fillText(icon, x, y);
+      });
+      ctx.restore();
+    },
+  };
+
+  state.charts.daily = new Chart($('chartDaily').getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      layout: { padding: { bottom: 26 } },
+      plugins: {
+        legend: { labels: { color: legendColor, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const idx = items[0]?.dataIndex;
+              const dateStr = chartDates[idx];
+              const holidayName = dateStr ? JAPANESE_HOLIDAYS.get(dateStr) : null;
+              const label = items[0]?.label ?? '';
+              return holidayName ? `${label}（${holidayName}）` : label;
+            },
+            label: (ctx) => {
+              const v = ctx.raw;
+              if (v == null) return null;
+              if (ctx.dataset.yAxisID === 'ySales') return ` ${ctx.dataset.label}: ¥${Number(v).toLocaleString()}`;
+              if (ctx.dataset.yAxisID === 'yTemp') return ` 最高気温: ${v}℃`;
+              if (ctx.dataset.yAxisID === 'yRain') return ` 降水量: ${v}mm`;
+              return ` ${ctx.dataset.label}: ${v}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: tickColor, font: { size: 10 }, maxRotation: 45, padding: 2 }, grid: { color: gridColor } },
+        ySales: {
+          type: 'linear', position: 'left', ticks: { color: tickColor, font: { size: 10 }, callback: v => '¥' + (v/10000).toFixed(0) + '万' },
+          grid: { color: gridColor },
+        },
+        yRain: {
+          type: 'linear', position: 'right', min: 0,
+          ticks: { color: cssVar('--c-rain'), font: { size: 10 }, callback: v => v + 'mm' },
+          grid: { display: false },
+        },
+        yTemp: {
+          type: 'linear', position: 'right', display: false,
+        },
+      },
+    },
+    plugins: [holidayPlugin, weatherIconPlugin],
+  });
+}
+
+function buildDailyChartDates(series, weatherMap) {
+  const dates = [];
+  const seen = new Set();
+  const salesDates = series.map(d => d.date).sort();
+  for (const d of salesDates) {
+    if (!seen.has(d)) { seen.add(d); dates.push(d); }
+  }
+
+  const keys = Object.keys(weatherMap || {});
+  if (salesDates.length === 0) return keys.sort();
+  const lastSalesDate = salesDates[salesDates.length - 1];
+  for (const d of keys.sort()) {
+    if (d > lastSalesDate && !seen.has(d)) {
+      seen.add(d);
+      dates.push(d);
+    }
+  }
+  return dates;
+}
+
+/* ── Chart 2: weekday avg ── */
+function renderWeekdayChart() {
+  destroyChart('weekday');
+  const series = state.dailySeries.filter(d => d.receipt_count > 0);
+  if (!series.length) return;
+  const { gridColor, tickColor, legendColor } = chartDefaults();
+  const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+  const buckets = Array.from({ length: 7 }, () => ({ sum: 0, count: 0 }));
+  for (const d of series) {
+    const dow = dayOfWeek(d.date);
+    const metric = state.weekdayMetric === 'gross' ? d.gross_sales_yen
+      : state.weekdayMetric === 'guest' ? d.guest_count : d.party_count;
+    buckets[dow].sum += metric;
+    buckets[dow].count += 1;
+  }
+  const avgs = buckets.map(b => b.count > 0 ? Math.round(b.sum / b.count) : 0);
+  const maxAvg = Math.max(...avgs);
+  const bgColors = DOW.map((_, i) => {
+    if (i === 0 || i === 6) return 'rgba(255,156,159,0.7)'; // 休日
+    return 'rgba(89,220,255,0.55)';
+  });
+
+  const labelMap = { gross: '平均総売上', guest: '平均客数', party: '平均組数' };
+  const valueLabel = state.weekdayMetric === 'gross'
+    ? v => '¥' + Number(v).toLocaleString()
+    : v => v + (state.weekdayMetric === 'guest' ? '名' : '組');
+
+  state.charts.weekday = new Chart($('chartWeekday').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: DOW,
+      datasets: [{
+        label: labelMap[state.weekdayMetric], data: avgs,
+        backgroundColor: bgColors, borderRadius: 6, borderSkipped: false,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ' ' + valueLabel(ctx.raw) } },
+      },
+      scales: {
+        x: { ticks: { color: tickColor, font: { size: 12 } }, grid: { color: gridColor } },
+        y: { ticks: { color: tickColor, font: { size: 10 }, callback: valueLabel }, grid: { color: gridColor }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+/* ── Chart 3: guest / party count ── */
+function renderCountChart() {
+  destroyChart('count');
+  const series = state.dailySeries;
+  if (!series.length) return;
+  const { gridColor, tickColor, legendColor } = chartDefaults();
+  const labels = series.map(d => d.date.slice(5));
+
+  state.charts.count = new Chart($('chartCount').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '客数', data: series.map(d => d.guest_count),
+          borderColor: cssVar('--c-guest'), backgroundColor: 'rgba(255,159,191,0.08)',
+          tension: 0.3, pointRadius: 3, fill: true,
+        },
+        {
+          label: '組数', data: series.map(d => d.party_count),
+          borderColor: cssVar('--c-party'), backgroundColor: 'transparent',
+          tension: 0.3, pointRadius: 3, borderDash: [5, 3],
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color: legendColor, font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { color: tickColor, font: { size: 10 }, maxRotation: 45 }, grid: { color: gridColor } },
+        y: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+function showNoData(canvasId, message = 'データなし') {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(166,202,223,0.4)';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+}
+
+/* ── Chart 4a: temp scatter ── */
+function renderTempScatter() {
+  destroyChart('tempScatter');
+  const pts = state.dailySeries
+    .filter(d => d.receipt_count > 0 && state.weather[d.date]?.temp != null)
+    .map(d => ({ x: state.weather[d.date].temp, y: d.gross_sales_yen, date: d.date }));
+  if (!pts.length) { showNoData('chartTempScatter', '天候データなし'); return; }
+  const { gridColor, tickColor, legendColor } = chartDefaults();
+
+  state.charts.tempScatter = new Chart($('chartTempScatter').getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: '総売上 vs 最高気温',
+        data: pts,
+        backgroundColor: 'rgba(255,179,71,0.65)',
+        pointRadius: 6, pointHoverRadius: 8,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => [`${ctx.raw.date}`, `気温: ${ctx.raw.x}℃`, `売上: ¥${Number(ctx.raw.y).toLocaleString()}`],
+          },
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: '最高気温 (℃)', color: tickColor }, ticks: { color: tickColor }, grid: { color: gridColor } },
+        y: { title: { display: true, text: '総売上', color: tickColor }, ticks: { color: tickColor, callback: v => '¥' + (v/10000).toFixed(0) + '万' }, grid: { color: gridColor } },
+      },
+    },
+  });
+}
+
+/* ── Chart 4b: rain scatter ── */
+function renderRainScatter() {
+  destroyChart('rainScatter');
+  const pts = state.dailySeries
+    .filter(d => d.receipt_count > 0 && state.weather[d.date]?.rain != null)
+    .map(d => ({ x: state.weather[d.date].rain, y: d.gross_sales_yen, date: d.date }));
+  if (!pts.length) { showNoData('chartRainScatter', '天候データなし'); return; }
+  const { gridColor, tickColor } = chartDefaults();
+
+  state.charts.rainScatter = new Chart($('chartRainScatter').getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: '総売上 vs 降水量',
+        data: pts,
+        backgroundColor: 'rgba(122,180,255,0.65)',
+        pointRadius: 6, pointHoverRadius: 8,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => [`${ctx.raw.date}`, `降水量: ${ctx.raw.x}mm`, `売上: ¥${Number(ctx.raw.y).toLocaleString()}`],
+          },
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: '降水量 (mm)', color: tickColor }, ticks: { color: tickColor }, grid: { color: gridColor }, min: 0 },
+        y: { title: { display: true, text: '総売上', color: tickColor }, ticks: { color: tickColor, callback: v => '¥' + (v/10000).toFixed(0) + '万' }, grid: { color: gridColor } },
+      },
+    },
+  });
+}
+
+/* ── Chart 5: monthly trend ── */
+function renderMonthlyChart() {
+  destroyChart('monthly');
+  const series = state.monthlySeries;
+  if (!series.length) { showNoData('chartMonthly', 'データなし'); return; }
+  const { gridColor, tickColor, legendColor } = chartDefaults();
+  const labels = series.map(d => d.month.slice(0, 7));
+
+  state.charts.monthly = new Chart($('chartMonthly').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar', label: '月間総売上',
+          data: series.map(d => d.gross_sales_yen),
+          backgroundColor: 'rgba(89,220,255,0.5)', borderColor: cssVar('--c-gross'),
+          borderWidth: 1, yAxisID: 'ySales', order: 2,
+        },
+        {
+          type: 'line', label: '月間客数',
+          data: series.map(d => d.guest_count),
+          borderColor: cssVar('--c-guest'), backgroundColor: 'transparent',
+          tension: 0.3, pointRadius: 4, yAxisID: 'yCount', order: 1,
+        },
+        {
+          type: 'line', label: '月間組数',
+          data: series.map(d => d.party_count),
+          borderColor: cssVar('--c-party'), backgroundColor: 'transparent',
+          tension: 0.3, pointRadius: 4, yAxisID: 'yCount', order: 1, borderDash: [5, 3],
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color: legendColor, font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { color: tickColor, font: { size: 11 } }, grid: { color: gridColor } },
+        ySales: {
+          type: 'linear', position: 'left',
+          ticks: { color: tickColor, font: { size: 10 }, callback: v => '¥' + (v/10000).toFixed(0) + '万' },
+          grid: { color: gridColor },
+        },
+        yCount: {
+          type: 'linear', position: 'right',
+          ticks: { color: tickColor, font: { size: 10 } },
+          grid: { display: false }, beginAtZero: true,
+        },
+      },
+    },
+  });
+}
+
+/* ── Chart 6: weekday × weather cross table ── */
+function weatherCategory(rain) {
+  if (rain == null) return null;
+  if (rain < 1)  return '晴れ';
+  if (rain < 5)  return '小雨';
+  if (rain < 20) return '雨';
+  return '大雨';
+}
+
+function renderWeatherCrossTable() {
+  const container = document.getElementById('weatherCrossTable');
+  if (!container) return;
+
+  const series = state.dailySeries.filter(d => d.receipt_count > 0);
+  if (!series.length) { container.innerHTML = '<p style="color:var(--sub);font-size:0.85rem;padding:12px">データなし</p>'; return; }
+
+  const DAYS = ['月', '火', '水', '木', '金', '土', '日'];
+  const CATS = ['晴れ', '小雨', '雨', '大雨'];
+  const CAT_ICON = { '晴れ': '☀️', '小雨': '🌦', '雨': '🌧', '大雨': '⛈' };
+
+  // acc[day][cat] = { sum, count }
+  const acc = {};
+  DAYS.forEach(d => { acc[d] = {}; CATS.forEach(c => { acc[d][c] = { sum: 0, n: 0 }; }); acc[d]['_all'] = { sum: 0, n: 0 }; });
+  const catAcc = {}; CATS.forEach(c => { catAcc[c] = { sum: 0, n: 0 }; }); catAcc['_all'] = { sum: 0, n: 0 };
+
+  for (const row of series) {
+    const date = new Date(row.date + 'T00:00:00+09:00');
+    const dow = DAYS[(date.getDay() + 6) % 7]; // 0=Mon
+    const w = state.weather[row.date];
+    const cat = w ? weatherCategory(w.rain) : null;
+    const g = row.gross_sales_yen;
+    acc[dow]['_all'].sum += g; acc[dow]['_all'].n++;
+    catAcc['_all'].sum += g; catAcc['_all'].n++;
+    if (cat) {
+      acc[dow][cat].sum += g; acc[dow][cat].n++;
+      catAcc[cat].sum += g; catAcc[cat].n++;
+    }
+  }
+
+  const avg = (b) => b.n ? Math.round(b.sum / b.n) : null;
+
+  // Collect all non-null values for heatmap scale
+  const allVals = [];
+  DAYS.forEach(d => CATS.forEach(c => { const v = avg(acc[d][c]); if (v) allVals.push(v); }));
+  const maxVal = allVals.length ? Math.max(...allVals) : 1;
+  const minVal = allVals.length ? Math.min(...allVals) : 0;
+
+  function cellClass(v) {
+    if (v == null) return 'empty';
+    const ratio = maxVal === minVal ? 0.5 : (v - minVal) / (maxVal - minVal);
+    if (ratio >= 0.7) return 'hot';
+    if (ratio <= 0.3) return 'cold';
+    return '';
+  }
+
+  const fmt = v => v == null ? '-' : '¥' + v.toLocaleString('ja-JP');
+
+  let html = '<table class="cross-table"><thead><tr><th>曜日</th>';
+  CATS.forEach(c => { html += `<th>${CAT_ICON[c]} ${c}</th>`; });
+  html += '<th>全天候平均</th><th>日数</th></tr></thead><tbody>';
+
+  DAYS.forEach(d => {
+    html += `<tr><th>${d}</th>`;
+    CATS.forEach(c => {
+      const v = avg(acc[d][c]);
+      const cls = cellClass(v);
+      html += `<td class="${cls}">${fmt(v)}${acc[d][c].n ? `<br><span style="font-size:0.68rem;opacity:0.6">${acc[d][c].n}日</span>` : ''}</td>`;
+    });
+    const allV = avg(acc[d]['_all']);
+    html += `<td style="font-weight:700;color:var(--accent)">${fmt(allV)}</td><td style="color:var(--sub)">${acc[d]['_all'].n}</td></tr>`;
+  });
+
+  html += '</tbody><tfoot><tr><th>天候平均</th>';
+  CATS.forEach(c => {
+    const v = avg(catAcc[c]);
+    html += `<td>${fmt(v)}${catAcc[c].n ? `<br><span style="font-size:0.68rem;opacity:0.6">${catAcc[c].n}日</span>` : ''}</td>`;
+  });
+  const grandAvg = avg(catAcc['_all']);
+  html += `<td style="font-weight:700;color:var(--accent)">${fmt(grandAvg)}</td><td style="color:var(--sub)">${catAcc['_all'].n}</td></tr></tfoot></table>`;
+
+  container.innerHTML = html;
+}
+
+function renderAllCharts() {
+  renderDailyChart();
+  renderWeekdayChart();
+  renderCountChart();
+  renderTempScatter();
+  renderRainScatter();
+  renderMonthlyChart();
+  renderWeatherCrossTable();
+}
+
+function refreshAllCharts() {
+  // Re-render after theme change
+  renderAllCharts();
+  if (lastReceiptDailyData) renderReceiptDailyTable(lastReceiptDailyData);
+}
+
+/* ── init ── */
+applyTheme(state.theme);
+state.customMonth = currentJstMonth();
+dom.monthPicker.value = state.customMonth;
+
+// URL引数 ?t= からトークンを自動設定（LINEボタン経由アクセス用）
+(function () {
+  const urlToken = new URLSearchParams(location.search).get('t');
+  if (urlToken) {
+    setToken(urlToken);
+    history.replaceState(null, '', location.pathname); // トークンをURLから除去
+  }
+})();
+
+updateAuthBadge();
+dom.tokenInput.value = getToken() ? '' : '';
+(function setupReceiptDailyViewportListener() {
+  function addMq(query) {
+    const mq = window.matchMedia(query);
+    if (mq.addEventListener) mq.addEventListener('change', receiptDailyOnViewportChange);
+    else if (mq.addListener) mq.addListener(receiptDailyOnViewportChange);
+  }
+  addMq('(min-width: 640px)');
+  addMq('(min-width: 980px)');
+  addMq('(min-width: 1320px)');
+})();
+if (!getToken()) resetReceiptDailyDisconnected();
+if (getToken()) loadAll();
+</script>
+</body>
+</html>
