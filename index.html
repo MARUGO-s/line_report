@@ -2514,7 +2514,7 @@
           <div class="setting-block">
             <p class="setting-block-title">接続と実行</p>
             <div class="controls">
-              <input id="projectUrlInput" class="input long" type="text" value="https://jhpmzqxqvapdkyvvhyra.supabase.co" readonly tabindex="-1" aria-readonly="true" onfocus="this.blur()">
+              <input id="projectUrlInput" class="input long" type="text" value="https://hocbnifuactbvmyjraxy.supabase.co" readonly tabindex="-1" aria-readonly="true" onfocus="this.blur()">
               <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
               <label class="remember-login-label" for="rememberLoginCheck">
                 <input id="rememberLoginCheck" type="checkbox" checked>
@@ -2914,6 +2914,7 @@
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
     const FIXED_PROJECT_URL = LINE_REPORT_PAGES.PROJECT_URL;
+    const GMAIL_SHARED_PROJECT_URL = LINE_REPORT_PAGES.GMAIL_SHARED_PROJECT_URL;
     const NEW_ROOM_DEFAULT_BOT_REPLY_KEY = 'line_summary_new_room_default_bot_reply_enabled';
     const NEW_ROOM_DEFAULT_MESSAGE_SEARCH_KEY = 'line_summary_new_room_default_message_search_enabled';
     const NEW_ROOM_DEFAULT_MESSAGE_SEARCH_LIBRARY_KEY = 'line_summary_new_room_default_message_search_library_enabled';
@@ -3165,6 +3166,7 @@
       if (!SC || !token) return;
       SC.clearAuth(token, projectUrl || getProjectUrl());
       SC.clearAuth(token, LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL);
+      SC.clearAuth(token, GMAIL_SHARED_PROJECT_URL);
     }
 
     function getProjectUrl() { return FIXED_PROJECT_URL; }
@@ -4997,14 +4999,14 @@
       const SC = window.LINE_REPORT_SITE_CACHE;
       const token = getToken();
       const cached = SC && token
-        ? SC.get(token, getProjectUrl(), 'admin-api', 'GET', '/gmail/account')
+        ? SC.get(token, GMAIL_SHARED_PROJECT_URL, 'admin-api', 'GET', '/gmail/account')
         : null;
       if (cached && cached.data) {
         renderGmailAccountState(cached.data.gmail_account ? cached.data.gmail_account : null);
       }
-      const response = await api('/gmail/account');
+      const response = await gmailSharedApi('/gmail/account');
       if (SC && token) {
-        SC.set(token, getProjectUrl(), 'admin-api', 'GET', '/gmail/account', response);
+        SC.set(token, GMAIL_SHARED_PROJECT_URL, 'admin-api', 'GET', '/gmail/account', response);
       }
       renderGmailAccountState(response && response.gmail_account ? response.gmail_account : null);
     }
@@ -5516,6 +5518,28 @@
         permissionsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
       renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
+    }
+
+    async function gmailSharedApi(path, options) {
+      const t = getToken();
+      if (!t) throw new Error('先に管理トークンを保存してください。');
+      const base = String(GMAIL_SHARED_PROJECT_URL || '').replace(/\/+$/, '');
+      if (!base) throw new Error('Gmail 共通 Project URL が未設定です。');
+
+      const request = options || {};
+      const headers = Object.assign({
+        'x-admin-token': t,
+        'Content-Type': 'application/json',
+      }, request.headers || {});
+      const res = await fetch(
+        LINE_REPORT_PAGES.gmailSharedAdminApiUrl(path),
+        Object.assign({}, request, { headers, cache: 'no-store', referrerPolicy: 'no-referrer' }),
+      );
+      const text = await res.text();
+      let body = {};
+      try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { raw: text }; }
+      if (!res.ok) throw new Error(body.error || ('API error: ' + res.status));
+      return body;
     }
 
     async function api(path, options) {

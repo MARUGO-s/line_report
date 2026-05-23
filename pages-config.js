@@ -2,18 +2,20 @@
  * GitHub Pages 静的 UI 共通設定（line_report）
  *
  * API 方針:
- * - admin-api（管理）… jhpm（index / media / reservation）
- * - admin-api（売上分析）… hocbn（店舗別 line_receipt__* テーブル）
- * - line-webhook … 店舗ごとにパス分割（LINE Developers に登録する URL）
+ * - admin-api（管理・メディア・予約表・Webhook設定）… hocbn（新サイト専用 DB）
+ * - admin-api（Gmail 予約登録の参照のみ）… jhpm（旧サイトと共通）
+ * - line-webhook … 店舗ごとにパス分割（hocbn）
  */
 (function (global) {
   'use strict';
 
-  const PROJECT_URL = 'https://jhpmzqxqvapdkyvvhyra.supabase.co';
-  /** LINE Webhook 受信先（新 DB・移行先） */
-  const WEBHOOK_PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
+  const PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
+  /** Gmail 予約登録のみ旧本番（jhpm）と共通 */
+  const GMAIL_SHARED_PROJECT_URL = 'https://jhpmzqxqvapdkyvvhyra.supabase.co';
+  /** LINE Webhook 受信先（新 DB） */
+  const WEBHOOK_PROJECT_URL = PROJECT_URL;
   /** 売上分析・予算 API（店舗別レシートテーブル） */
-  const RECEIPT_ADMIN_PROJECT_URL = WEBHOOK_PROJECT_URL;
+  const RECEIPT_ADMIN_PROJECT_URL = PROJECT_URL;
   /** analytics から Edge Function を呼ぶ際の anon key（公開可） */
   const RECEIPT_ADMIN_ANON_KEY =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvY2JuaWZ1YWN0YnZteWpyYXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNzQ2OTgsImV4cCI6MjA4Mjk1MDY5OH0.q33wfcASsQf0Fec3S6fa5CVG2KC9m5Q912Szu7KIyN0';
@@ -21,7 +23,7 @@
   /** Google スプレッドシート（売上シート pilot）連携 — 新サイトでは一旦オフ */
   const RECEIPT_SHEETS_PILOT_ENABLED = false;
 
-  /** jhpm admin-api 向け管理画面種別（旧サイトとルーム一覧除外を分離） */
+  /** hocbn admin-api 向け管理画面種別（旧 jhpm サイトとルーム一覧除外を分離） */
   const ADMIN_SURFACE = 'line_report';
 
   /** store_partition_key → 表示名（analytics / 管理画面で共通） */
@@ -67,9 +69,14 @@
     return normalizeBaseUrl(base) + adminApiPath(path);
   }
 
-  /** analytics.html 向け（hocbn の admin-api） */
+  /** analytics / 売上 API（hocbn = PROJECT_URL と同一） */
   function receiptAdminApiUrl(path) {
     return adminApiUrl(path, RECEIPT_ADMIN_PROJECT_URL);
+  }
+
+  /** Gmail 予約登録のみ jhpm（旧本番）と共通 */
+  function gmailSharedAdminApiUrl(path) {
+    return adminApiUrl(path, GMAIL_SHARED_PROJECT_URL);
   }
 
   /** 店舗別 LINE Webhook（新） */
@@ -178,6 +185,7 @@
 
   global.LINE_REPORT_PAGES = {
     PROJECT_URL: PROJECT_URL,
+    GMAIL_SHARED_PROJECT_URL: GMAIL_SHARED_PROJECT_URL,
     WEBHOOK_PROJECT_URL: WEBHOOK_PROJECT_URL,
     RECEIPT_ADMIN_PROJECT_URL: RECEIPT_ADMIN_PROJECT_URL,
     RECEIPT_ADMIN_ANON_KEY: RECEIPT_ADMIN_ANON_KEY,
@@ -187,6 +195,7 @@
     adminApiPath: adminApiPath,
     adminApiUrl: adminApiUrl,
     receiptAdminApiUrl: receiptAdminApiUrl,
+    gmailSharedAdminApiUrl: gmailSharedAdminApiUrl,
     lineWebhookPath: lineWebhookPath,
     lineWebhookUrl: lineWebhookUrl,
     lineWebhookLegacyUrl: lineWebhookLegacyUrl,
