@@ -779,7 +779,7 @@
   </div>
 </div>
 
-<script src="pages-config.js"></script>
+<script src="pages-config.js?v=20260524"></script>
 <script>
 'use strict';
 
@@ -2403,6 +2403,11 @@ async function apiFetch(path, options = {}) {
   const url = LINE_REPORT_PAGES.receiptAdminApiUrl(path);
   const method = options.method || 'GET';
   const headers = { 'x-admin-token': token };
+  const anonKey = LINE_REPORT_PAGES.RECEIPT_ADMIN_ANON_KEY || '';
+  if (anonKey) {
+    headers.apikey = anonKey;
+    headers.Authorization = 'Bearer ' + anonKey;
+  }
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json; charset=utf-8';
   }
@@ -2686,7 +2691,7 @@ async function loadAll() {
     if (isSingleMonth) applyKpiBadges(displayMonth, state.monthlySeries);
     else applyKpiBadges(null, state.monthlySeries);
 
-    dom.filterMeta.textContent = `対象: ${salesData.selected_store_name ?? '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件`;
+    dom.filterMeta.textContent = `対象: ${salesData.selected_store_name ?? '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件 / API生データ ${salesData.source_row_count ?? 0}件`;
     dom.lastRefresh.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
 
     renderAllCharts();
@@ -2722,31 +2727,48 @@ async function loadAll() {
   }
 }
 
-function updateStoreSelect(options, selectedKey) {
+function initStoreSelectOptions() {
+  const stores = LINE_REPORT_PAGES.listStores();
   const prev = dom.storeSelect.value || state.storeKey;
   dom.storeSelect.innerHTML = '';
-
-  // APIから返ってきた店舗（レシートあり）
-  const apiKeys = new Set(options.map(o => o.store_key));
-  for (const opt of options) {
+  for (const s of stores) {
     const el = document.createElement('option');
-    el.value = opt.store_key;
-    el.textContent = opt.store_name;
+    el.value = s.store_key;
+    el.textContent = s.store_name;
+    dom.storeSelect.appendChild(el);
+  }
+  const keys = stores.map((s) => s.store_key);
+  if (prev && keys.includes(prev)) {
+    dom.storeSelect.value = prev;
+    state.storeKey = prev;
+  } else if (stores.length) {
+    dom.storeSelect.value = stores[0].store_key;
+    state.storeKey = stores[0].store_key;
+  }
+}
+
+function updateStoreSelect(options, selectedKey) {
+  const prev = dom.storeSelect.value || state.storeKey || selectedKey;
+  const stores = LINE_REPORT_PAGES.listStores();
+  const apiKeys = new Set((options || []).map((o) => o.store_key));
+  const nameByKey = new Map((options || []).map((o) => [o.store_key, o.store_name]));
+
+  dom.storeSelect.innerHTML = '';
+  for (const s of stores) {
+    const el = document.createElement('option');
+    el.value = s.store_key;
+    const label = nameByKey.get(s.store_key) || s.store_name;
+    el.textContent = apiKeys.has(s.store_key)
+      ? label
+      : label + '（当該月: レシート0件）';
     dom.storeSelect.appendChild(el);
   }
 
-  // 座標登録済みでAPIに未登場の店舗（レシートなし）
-  for (const key of Object.keys(STORE_COORDS)) {
-    if (apiKeys.has(key)) continue;
-    const el = document.createElement('option');
-    el.value = key;
-    el.textContent = (STORE_NAMES[key] ?? key) + '　（データなし）';
-    dom.storeSelect.appendChild(el);
-  }
-
-  const allKeys = [...apiKeys, ...Object.keys(STORE_COORDS)];
+  const allKeys = stores.map((s) => s.store_key);
   if (prev && allKeys.includes(prev)) dom.storeSelect.value = prev;
-  state.storeOptions = options;
+  else if (selectedKey && allKeys.includes(selectedKey)) dom.storeSelect.value = selectedKey;
+  state.storeKey = dom.storeSelect.value || state.storeKey;
+  state.storeOptions = options || [];
 }
 
 /* ── Chart.js defaults ── */
@@ -3277,6 +3299,7 @@ function refreshAllCharts() {
 applyTheme(state.theme);
 state.customMonth = currentJstMonth();
 dom.monthPicker.value = state.customMonth;
+initStoreSelectOptions();
 
 // URL引数 ?t= からトークンを自動設定（LINEボタン経由アクセス用）
 (function () {

@@ -14,6 +14,9 @@
   const WEBHOOK_PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
   /** 売上分析・予算 API（店舗別レシートテーブル） */
   const RECEIPT_ADMIN_PROJECT_URL = WEBHOOK_PROJECT_URL;
+  /** analytics から Edge Function を呼ぶ際の anon key（公開可） */
+  const RECEIPT_ADMIN_ANON_KEY =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvY2JuaWZ1YWN0YnZteWpyYXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNzQ2OTgsImV4cCI6MjA4Mjk1MDY5OH0.q33wfcASsQf0Fec3S6fa5CVG2KC9m5Q912Szu7KIyN0';
 
   /** Google スプレッドシート（売上シート pilot）連携 — 新サイトでは一旦オフ */
   const RECEIPT_SHEETS_PILOT_ENABLED = false;
@@ -162,6 +165,7 @@
     PROJECT_URL: PROJECT_URL,
     WEBHOOK_PROJECT_URL: WEBHOOK_PROJECT_URL,
     RECEIPT_ADMIN_PROJECT_URL: RECEIPT_ADMIN_PROJECT_URL,
+    RECEIPT_ADMIN_ANON_KEY: RECEIPT_ADMIN_ANON_KEY,
     RECEIPT_SHEETS_PILOT_ENABLED: RECEIPT_SHEETS_PILOT_ENABLED,
     STORE_NAMES: STORE_NAMES,
     adminApiPath: adminApiPath,
