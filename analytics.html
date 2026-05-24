@@ -147,6 +147,14 @@
     button.pill { font: inherit; cursor: pointer; }
     .pill.ok { color: var(--ok); border-color: color-mix(in srgb,var(--ok) 55%,transparent); }
     .pill.link { color: #9be8ff; display: inline-flex; align-items: center; }
+    .line-locked-store-label {
+      font-weight: 600;
+      color: var(--accent);
+      min-width: 8rem;
+    }
+    body[data-entry="line"] #storeSelect {
+      display: none !important;
+    }
     .card { background: var(--card); padding: 16px; }
     .card-title { font-size: 1.08rem; padding-bottom: 8px; border-bottom: 1px solid rgba(155,220,255,0.18); margin-bottom: 14px; }
     .controls { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
@@ -572,6 +580,7 @@
   <section class="card">
     <h2 class="card-title">絞り込み</h2>
     <div class="controls">
+      <span id="lineLockedStoreLabel" class="pill line-locked-store-label" style="display:none" hidden aria-hidden="true"></span>
       <select id="storeSelect" class="select" aria-label="店舗選択">
         <option value="">店舗を選択してください</option>
       </select>
@@ -1142,6 +1151,8 @@ const state = {
   period: 'month',    // month | prev | 3m | 6m | 12m
   customMonth: '',
   storeKey: '',
+  /** LINE 経由で URL の店舗に固定（他店舗は選択不可） */
+  lineLockedStoreKey: '',
   storeOptions: [],
   dailySeries: [],    // [{date, gross_sales_yen, net_sales_yen, party_count, guest_count, receipt_count}]
   monthlySeries: [],  // [{month, gross_sales_yen, ...}]
@@ -2501,6 +2512,77 @@ function isLineEntryAnalytics() {
   return /Line\//i.test(navigator.userAgent);
 }
 
+function captureLineEntryUrlParams() {
+  if (!isLineEntryAnalytics()) return null;
+  try {
+    const params = new URLSearchParams(location.search);
+    const rawKey = String(params.get('store_key') || params.get('store') || '').trim();
+    if (!rawKey) return null;
+    const storeKey = typeof LINE_REPORT_PAGES.resolveStoreKey === 'function'
+      ? LINE_REPORT_PAGES.resolveStoreKey(rawKey, '')
+      : rawKey.toLowerCase();
+    if (!storeKey) return null;
+    const monthRaw = String(params.get('month') || '').trim().slice(0, 7);
+    const month = isValidMonthString(monthRaw) ? monthRaw : null;
+    return { storeKey, month };
+  } catch (_) {
+    return null;
+  }
+}
+
+function lineLockedStoreDisplayName(storeKey) {
+  const key = String(storeKey || '').trim();
+  if (!key) return '';
+  if (LINE_REPORT_PAGES.STORE_NAMES && LINE_REPORT_PAGES.STORE_NAMES[key]) {
+    return LINE_REPORT_PAGES.STORE_NAMES[key];
+  }
+  if (typeof LINE_REPORT_PAGES.resolveStoreName === 'function') {
+    return LINE_REPORT_PAGES.resolveStoreName(key, key);
+  }
+  return key;
+}
+
+function applyLineEntryStoreLock(entry) {
+  if (!entry || !entry.storeKey) return false;
+  state.lineLockedStoreKey = entry.storeKey;
+  state.storeKey = entry.storeKey;
+
+  if (entry.month) {
+    state.customMonth = entry.month;
+    state.period = 'month';
+    if (dom.monthPicker) dom.monthPicker.value = entry.month;
+    document.querySelectorAll('#periodTabs .chart-tab').forEach((b) => b.classList.remove('active'));
+    const monthTab = document.querySelector('#periodTabs .chart-tab[data-period="month"]');
+    if (monthTab) monthTab.classList.add('active');
+  }
+
+  const storeName = lineLockedStoreDisplayName(entry.storeKey);
+  if (dom.storeSelect) {
+    dom.storeSelect.innerHTML = '';
+    const opt = document.createElement('option');
+    opt.value = entry.storeKey;
+    opt.textContent = storeName;
+    dom.storeSelect.appendChild(opt);
+    dom.storeSelect.value = entry.storeKey;
+    dom.storeSelect.disabled = true;
+    dom.storeSelect.setAttribute('aria-hidden', 'true');
+  }
+
+  const label = document.getElementById('lineLockedStoreLabel');
+  if (label) {
+    label.textContent = storeName;
+    label.style.display = 'inline-flex';
+    label.removeAttribute('hidden');
+    label.setAttribute('aria-hidden', 'false');
+    label.title = 'この店舗のLINEから開いています（他店舗は選択できません）';
+  }
+
+  if (dom.filterMeta) {
+    dom.filterMeta.textContent = '対象店舗: ' + storeName + (entry.month ? ' / ' + entry.month : '');
+  }
+  return true;
+}
+
 function applyLineEntryChrome() {
   if (!isLineEntryAnalytics()) return;
   document.body.setAttribute('data-entry', 'line');
@@ -2563,6 +2645,10 @@ dom.reloadBtn.addEventListener('click', loadAll);
 
 /* ── store select ── */
 dom.storeSelect.addEventListener('change', () => {
+  if (state.lineLockedStoreKey) {
+    dom.storeSelect.value = state.lineLockedStoreKey;
+    return;
+  }
   state.storeKey = String(dom.storeSelect.value || '').trim();
   if (!state.storeKey) {
     clearAnalyticsAwaitingStore();
@@ -2609,6 +2695,7 @@ function appendStoreSelectPlaceholder() {
 }
 
 function clearAnalyticsAwaitingStore() {
+  if (state.lineLockedStoreKey) return;
   state.storeKey = '';
   if (dom.storeSelect) dom.storeSelect.value = '';
   state.dailySeries = [];
@@ -2956,7 +3043,8 @@ async function loadAll() {
 
   await refreshReceiptSheetsPilotLink();
 
-  state.storeKey = String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  state.storeKey = state.lineLockedStoreKey
+    || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
   if (!state.storeKey) {
     clearAnalyticsAwaitingStore();
     return;
@@ -3135,6 +3223,10 @@ async function loadAll() {
 }
 
 function initStoreSelectOptions() {
+  if (state.lineLockedStoreKey) {
+    applyLineEntryStoreLock({ storeKey: state.lineLockedStoreKey, month: state.customMonth || null });
+    return;
+  }
   const stores = LINE_REPORT_PAGES.listStores();
   const prev = dom.storeSelect.value || state.storeKey;
   dom.storeSelect.innerHTML = '';
@@ -3156,6 +3248,11 @@ function initStoreSelectOptions() {
 }
 
 function updateStoreSelect(options, selectedKey) {
+  if (state.lineLockedStoreKey) {
+    state.storeKey = state.lineLockedStoreKey;
+    if (dom.storeSelect) dom.storeSelect.value = state.lineLockedStoreKey;
+    return;
+  }
   const prev = dom.storeSelect.value || state.storeKey || '';
   const stores = LINE_REPORT_PAGES.listStores();
   const apiKeys = new Set((options || []).map((o) => o.store_key));
@@ -3711,9 +3808,13 @@ function refreshAllCharts() {
 
 /* ── init ── */
 applyTheme(state.theme);
-state.customMonth = currentJstMonth();
+const lineEntryFromUrl = captureLineEntryUrlParams();
+state.customMonth = (lineEntryFromUrl && lineEntryFromUrl.month)
+  ? lineEntryFromUrl.month
+  : currentJstMonth();
 dom.monthPicker.value = state.customMonth;
 initStoreSelectOptions();
+if (lineEntryFromUrl) applyLineEntryStoreLock(lineEntryFromUrl);
 
 // URL引数 ?t= からトークンを自動設定（LINEボタン経由アクセス用）
 if (window.LINE_REPORT_AUTH) {
@@ -3722,10 +3823,13 @@ if (window.LINE_REPORT_AUTH) {
   if (rememberEl) LINE_REPORT_AUTH.bindRememberCheckbox(rememberEl, updateAuthBadge);
 } else {
   (function () {
-    const urlToken = new URLSearchParams(location.search).get('t');
+    const params = new URLSearchParams(location.search);
+    const urlToken = params.get('t');
     if (urlToken) {
       setToken(urlToken);
-      history.replaceState(null, '', location.pathname);
+      params.delete('t');
+      const qs = params.toString();
+      history.replaceState(null, '', location.pathname + (qs ? ('?' + qs) : '') + (location.hash || ''));
     }
   })();
 }
