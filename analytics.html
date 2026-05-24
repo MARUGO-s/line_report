@@ -150,6 +150,17 @@
     .card { background: var(--card); padding: 16px; }
     .card-title { font-size: 1.08rem; padding-bottom: 8px; border-bottom: 1px solid rgba(155,220,255,0.18); margin-bottom: 14px; }
     .controls { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+    .remember-login-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 0.86rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+    }
+    .remember-login-label input { margin: 0; }
     .input, .select, .btn {
       min-height: 38px; border-radius: 11px;
       border: 1px solid var(--line);
@@ -528,6 +539,7 @@
       <a href="./index.html" class="pill link" id="adminLink">管理画面</a>
       <a href="./media.html" class="pill link" id="mediaLink">メディア閲覧</a>
       <a href="./reservation.html" class="pill link" id="reservationLink">予約表</a>
+      <a id="receiptSheetsPilotHeaderLink" href="#" class="pill link" target="_blank" rel="noopener noreferrer" style="display:none" hidden aria-hidden="true">売上シート</a>
       <button id="themeBtn" type="button" class="pill">ライトモード</button>
     </div>
   </header>
@@ -538,6 +550,10 @@
     <div class="controls">
       <input id="projectUrlInput" class="input" type="text" readonly tabindex="-1">
       <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+      <label class="remember-login-label" for="rememberLoginCheck">
+        <input id="rememberLoginCheck" type="checkbox" checked>
+        <span>ログイン状態を保持</span>
+      </label>
       <div class="controls btn-row">
         <button id="saveTokenBtn" class="btn primary">保存して接続</button>
         <button id="clearTokenBtn" class="btn">削除</button>
@@ -569,7 +585,9 @@
     <div class="controls budget-row" style="margin-top:10px;flex-wrap:wrap;align-items:center;gap:8px">
       <button id="openBudgetModalBtn" type="button" class="btn primary">予算・日別配分を設定</button>
       <button id="openPriorYearModalBtn" type="button" class="btn primary">月別売上を入力（西暦）</button>
+      <a id="receiptSheetsPilotLink" href="#" class="btn" target="_blank" rel="noopener noreferrer" style="display:none" hidden aria-hidden="true">売上シート（スプレッドシート）</a>
       <span class="meta" style="flex:1;min-width:12rem">表示月・店舗ごとに保存。予算は按分比率／比較売上は<strong>西暦×各月</strong>で登録（複数年可）</span>
+      <span id="receiptSheetsPilotHint" class="meta" style="display:none"></span>
       <span id="budgetRowHint" class="meta"></span>
       <span id="priorYearRowHint" class="meta"></span>
     </div>
@@ -780,6 +798,7 @@
 </div>
 
 <script src="pages-config.js?v=20260524"></script>
+<script src="auth-session.js"></script>
 <script>
 'use strict';
 
@@ -1113,6 +1132,9 @@ const dom = {
   kpiYoyPct: $('kpiYoyPct'),
   openBudgetModalBtn: $('openBudgetModalBtn'), budgetRowHint: $('budgetRowHint'),
   openPriorYearModalBtn: $('openPriorYearModalBtn'), priorYearRowHint: $('priorYearRowHint'),
+  receiptSheetsPilotLink: $('receiptSheetsPilotLink'),
+  receiptSheetsPilotHint: $('receiptSheetsPilotHint'),
+  receiptSheetsPilotHeaderLink: $('receiptSheetsPilotHeaderLink'),
   priorYearModalBackdrop: $('priorYearModalBackdrop'),
   manualMonthYearSelect: $('manualMonthYearSelect'),
   manualMonthGrid: $('manualMonthGrid'),
@@ -1160,9 +1182,17 @@ if (dom.compareYearSelect) {
 let lastReceiptDailyData = null;
 
 /* ── helpers ── */
-function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
-function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
-function removeToken() { localStorage.removeItem(TOKEN_KEY); }
+function getToken() {
+  return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(TOKEN_KEY) || '');
+}
+function setToken(t) {
+  if (window.LINE_REPORT_AUTH) LINE_REPORT_AUTH.setToken(t);
+  else localStorage.setItem(TOKEN_KEY, t);
+}
+function removeToken() {
+  if (window.LINE_REPORT_AUTH) LINE_REPORT_AUTH.clearToken();
+  else localStorage.removeItem(TOKEN_KEY);
+}
 
 function escapeHtml(s) {
   return String(s ?? '')
@@ -2038,7 +2068,8 @@ function dayOfWeek(dateStr) {
 /* ── auth ── */
 function updateAuthBadge() {
   const ok = !!getToken();
-  dom.authState.textContent = ok ? 'トークン保存済み' : '未接続';
+  const remember = ok && window.LINE_REPORT_AUTH && LINE_REPORT_AUTH.isRememberEnabled();
+  dom.authState.textContent = ok ? (remember ? 'ログイン済み（保持）' : 'ログイン済み') : '未接続';
   dom.authState.classList.toggle('ok', ok);
   dom.projectUrl.value = PROJECT_URL;
   // モバイル: トークン保存済みなら接続カードを折りたたむ
@@ -2393,8 +2424,88 @@ dom.reloadBtn.addEventListener('click', loadAll);
 /* ── store select ── */
 dom.storeSelect.addEventListener('change', () => {
   state.storeKey = dom.storeSelect.value;
+  updateReceiptSheetsPilotUi();
   loadAll();
 });
+
+function isReceiptSheetsPilotEnabled() {
+  return LINE_REPORT_PAGES.RECEIPT_SHEETS_PILOT_ENABLED === true;
+}
+
+function isReceiptSheetsPilotStore(storeKey) {
+  if (typeof LINE_REPORT_PAGES.isReceiptSheetsPilotStore === 'function') {
+    return LINE_REPORT_PAGES.isReceiptSheetsPilotStore(storeKey);
+  }
+  return String(storeKey || '').trim().toLowerCase() === 'bistrocavacava';
+}
+
+function setReceiptSheetsPilotLinkElement(el, visible, url, title) {
+  if (!el) return;
+  if (visible && url) {
+    el.href = url;
+    el.title = title || '';
+    el.style.display = el.classList.contains('pill') ? '' : 'inline-flex';
+    el.hidden = false;
+    el.removeAttribute('aria-hidden');
+  } else {
+    el.removeAttribute('href');
+    el.style.display = 'none';
+    el.hidden = true;
+    el.setAttribute('aria-hidden', 'true');
+  }
+}
+
+let receiptSheetsPilotLinkCache = null;
+
+async function refreshReceiptSheetsPilotLink() {
+  if (!isReceiptSheetsPilotEnabled() || !getToken()) {
+    receiptSheetsPilotLinkCache = null;
+    return null;
+  }
+  try {
+    const r = await apiFetch('/receipts/sheets-pilot-link');
+    receiptSheetsPilotLinkCache = r && r.configured ? r : null;
+    return receiptSheetsPilotLinkCache;
+  } catch (e) {
+    receiptSheetsPilotLinkCache = null;
+    console.error(e);
+    return null;
+  }
+}
+
+function updateReceiptSheetsPilotUi() {
+  const storeKey = (dom.storeSelect && dom.storeSelect.value) || state.storeKey || '';
+
+  if (!isReceiptSheetsPilotEnabled()) {
+    setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotLink, false);
+    setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotHeaderLink, false);
+    if (dom.receiptSheetsPilotHint) dom.receiptSheetsPilotHint.style.display = 'none';
+    return;
+  }
+
+  if (dom.receiptSheetsPilotHint) dom.receiptSheetsPilotHint.style.display = 'none';
+
+  const r = receiptSheetsPilotLinkCache;
+  const url = r && r.spreadsheet_url ? String(r.spreadsheet_url) : '';
+  if (!url) {
+    setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotLink, false);
+    setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotHeaderLink, false);
+    return;
+  }
+
+  const storeName = (LINE_REPORT_PAGES.STORE_NAMES && LINE_REPORT_PAGES.STORE_NAMES[storeKey]) || storeKey;
+  const titleParts = [];
+  if (r.access_note) titleParts.push(String(r.access_note));
+  if (storeKey) {
+    titleParts.push('選択中: ' + storeName + '（タブ: ' + storeKey + '_月間予算 等）');
+  }
+  if (r.suggested_google_user) {
+    titleParts.push('推奨Googleアカウント: ' + String(r.suggested_google_user));
+  }
+  const title = titleParts.join(' ');
+  setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotLink, true, url, title);
+  setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotHeaderLink, true, url, title);
+}
 
 /* ── API fetch ── */
 async function apiFetch(path, options = {}) {
@@ -2647,8 +2758,12 @@ async function loadAll() {
   if (!token) {
     dom.filterMeta.textContent = 'トークンを保存してください。';
     resetReceiptDailyDisconnected();
+    updateReceiptSheetsPilotUi();
     return;
   }
+
+  await refreshReceiptSheetsPilotLink();
+  updateReceiptSheetsPilotUi();
 
   const months = periodToMonths(state.period);
   const { from, to } = dateRange(months);
@@ -3424,13 +3539,19 @@ dom.monthPicker.value = state.customMonth;
 initStoreSelectOptions();
 
 // URL引数 ?t= からトークンを自動設定（LINEボタン経由アクセス用）
-(function () {
-  const urlToken = new URLSearchParams(location.search).get('t');
-  if (urlToken) {
-    setToken(urlToken);
-    history.replaceState(null, '', location.pathname); // トークンをURLから除去
-  }
-})();
+if (window.LINE_REPORT_AUTH) {
+  LINE_REPORT_AUTH.consumeUrlTokenParam();
+  const rememberEl = document.getElementById('rememberLoginCheck');
+  if (rememberEl) LINE_REPORT_AUTH.bindRememberCheckbox(rememberEl, updateAuthBadge);
+} else {
+  (function () {
+    const urlToken = new URLSearchParams(location.search).get('t');
+    if (urlToken) {
+      setToken(urlToken);
+      history.replaceState(null, '', location.pathname);
+    }
+  })();
+}
 
 updateAuthBadge();
 dom.tokenInput.value = getToken() ? '' : '';

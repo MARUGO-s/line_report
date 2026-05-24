@@ -142,6 +142,21 @@
       align-items: center;
     }
 
+    .remember-login-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 0.86rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .remember-login-label input {
+      margin: 0;
+    }
+
     .input, .select, .button {
       min-height: 39px;
       border-radius: 11px;
@@ -601,6 +616,10 @@
       <div class="controls">
         <input id="projectUrlInput" class="input" style="min-width:320px" type="text" readonly tabindex="-1" aria-readonly="true">
         <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+        <label class="remember-login-label" for="rememberLoginCheck">
+          <input id="rememberLoginCheck" type="checkbox" checked>
+          <span>ログイン状態を保持</span>
+        </label>
         <button id="saveTokenBtn" class="button primary">保存して接続</button>
         <button id="clearTokenBtn" class="button">削除</button>
       </div>
@@ -653,6 +672,8 @@
   </div>
 
   <script src="pages-config.js"></script>
+  <script src="auth-session.js"></script>
+  <script src="site-cache.js"></script>
   <script>
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
@@ -683,6 +704,7 @@
       lastRefresh: document.getElementById('lastRefresh'),
       projectUrlInput: document.getElementById('projectUrlInput'),
       tokenInput: document.getElementById('tokenInput'),
+      rememberLoginCheck: document.getElementById('rememberLoginCheck'),
       saveTokenBtn: document.getElementById('saveTokenBtn'),
       clearTokenBtn: document.getElementById('clearTokenBtn'),
       monthTitle: document.getElementById('monthTitle'),
@@ -709,13 +731,38 @@
     };
 
     function getToken() {
-      return localStorage.getItem(STORE_TOKEN_KEY) || '';
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+    }
+
+    function clearSiteCacheForToken(token, projectUrl) {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      if (!SC || !token) return;
+      SC.clearAuth(token, projectUrl || FIXED_PROJECT_URL);
     }
 
     function setToken(value) {
-      if (value) localStorage.setItem(STORE_TOKEN_KEY, value);
-      else localStorage.removeItem(STORE_TOKEN_KEY);
+      const prev = getToken();
+      const next = value ? String(value) : '';
+      if (prev && prev !== next) {
+        clearSiteCacheForToken(prev, FIXED_PROJECT_URL);
+      }
+      if (window.LINE_REPORT_AUTH) {
+        if (next) LINE_REPORT_AUTH.setToken(next);
+        else LINE_REPORT_AUTH.clearToken();
+      } else if (next) {
+        localStorage.setItem(STORE_TOKEN_KEY, next);
+      } else {
+        localStorage.removeItem(STORE_TOKEN_KEY);
+      }
       updateAuthState();
+    }
+
+    function updateAuthState() {
+      const hasToken = !!getToken();
+      dom.authState.textContent = hasToken
+        ? ((window.LINE_REPORT_AUTH && LINE_REPORT_AUTH.isRememberEnabled()) ? 'ログイン済み（保持）' : 'ログイン済み')
+        : '未接続';
+      dom.authState.className = hasToken ? 'pill ok' : 'pill';
     }
 
     function normalizeTheme(value) {
@@ -1261,12 +1308,6 @@
       return body;
     }
 
-    function updateAuthState() {
-      const hasToken = !!getToken();
-      dom.authState.textContent = hasToken ? '接続準備OK' : '未接続';
-      dom.authState.className = hasToken ? 'pill ok' : 'pill';
-    }
-
     function updateSummaryText() {
       const total = Number(state.apiTotal || state.items.length || 0);
       const tabelogCount = Number(state.apiSourceCounts && state.apiSourceCounts.tabelog || 0);
@@ -1367,12 +1408,7 @@
       return filteredItems.length;
     }
 
-    async function loadCalendar() {
-      const params = new URLSearchParams();
-      params.set('month', state.currentMonth);
-      params.set('source', state.source);
-      params.set('_ts', String(Date.now()));
-      const data = await api('/reservations/calendar?' + params.toString());
+    function applyCalendarPayload(data, fromCache) {
       const items = Array.isArray(data.items) ? data.items : [];
       state.items = items;
       state.apiTotal = Number(data.total || items.length || 0);
@@ -1381,9 +1417,42 @@
         ikyu: Number(data.source_counts && data.source_counts.ikyu || 0),
       };
       dom.monthTitle.textContent = '予約表 ' + formatMonthLabel(state.currentMonth);
-      dom.lastRefresh.textContent = '最終更新: ' + formatDateJst(data.generated_at || new Date().toISOString());
+      dom.lastRefresh.textContent = fromCache
+        ? ('最終更新: ' + formatDateJst(data.generated_at || new Date().toISOString()) + '（キャッシュ表示・更新中…）')
+        : ('最終更新: ' + formatDateJst(data.generated_at || new Date().toISOString()));
       state.visibleCount = renderCalendar(items);
       updateSummaryText();
+    }
+
+    function hydrateCalendarFromCache() {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      const token = getToken();
+      if (!SC || !token) return false;
+      const params = new URLSearchParams();
+      params.set('month', state.currentMonth);
+      params.set('source', state.source);
+      const cachePath = '/reservations/calendar?' + params.toString();
+      const cached = SC.get(token, FIXED_PROJECT_URL, 'admin-api', 'GET', cachePath);
+      if (!cached || !cached.data) return false;
+      applyCalendarPayload(cached.data, true);
+      return true;
+    }
+
+    async function loadCalendar() {
+      const params = new URLSearchParams();
+      params.set('month', state.currentMonth);
+      params.set('source', state.source);
+      params.set('_ts', String(Date.now()));
+      const data = await api('/reservations/calendar?' + params.toString());
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      const token = getToken();
+      if (SC && token) {
+        const saveParams = new URLSearchParams();
+        saveParams.set('month', state.currentMonth);
+        saveParams.set('source', state.source);
+        SC.set(token, FIXED_PROJECT_URL, 'admin-api', 'GET', '/reservations/calendar?' + saveParams.toString(), data);
+      }
+      applyCalendarPayload(data, false);
     }
 
     dom.saveTokenBtn.addEventListener('click', async function() {
@@ -1397,6 +1466,7 @@
     });
 
     dom.clearTokenBtn.addEventListener('click', function() {
+      clearSiteCacheForToken(getToken(), FIXED_PROJECT_URL);
       setToken('');
       dom.calendar.innerHTML = '';
       dom.summary.textContent = '未取得';
@@ -1504,6 +1574,12 @@
     });
 
     (function init() {
+      if (window.LINE_REPORT_AUTH) {
+        LINE_REPORT_AUTH.consumeUrlTokenParam();
+        if (dom.rememberLoginCheck) {
+          LINE_REPORT_AUTH.bindRememberCheckbox(dom.rememberLoginCheck, updateAuthState);
+        }
+      }
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
       dom.sourceFilter.value = state.source;
       dom.nameFilterInput.value = state.nameQuery;
@@ -1511,8 +1587,11 @@
       updateAuthState();
       dom.monthTitle.textContent = '予約表 ' + formatMonthLabel(state.currentMonth);
       if (getToken()) {
+        hydrateCalendarFromCache();
         loadCalendar().catch(function(error) {
-          alert(error.message || String(error));
+          if (!hydrateCalendarFromCache()) {
+            alert(error.message || String(error));
+          }
         });
       }
     })();

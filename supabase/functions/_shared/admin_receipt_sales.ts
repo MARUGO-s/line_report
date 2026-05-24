@@ -734,51 +734,82 @@ export type ReceiptWebhookStatusRow = {
   receipt_count: number
   last_receipt_at: string | null
   is_communicating: boolean
+  /** Webhook 生ログに記録された room_id（管理画面未登録含む） */
+  detected_room_ids: string[]
+}
+
+async function fetchDistinctRoomIdsFromRawTable(
+  supabase: SupabaseClient,
+  rawTable: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from(rawTable)
+    .select('room_id, received_at')
+    .not('room_id', 'is', null)
+    .order('received_at', { ascending: false })
+    .limit(1000)
+  if (error || !Array.isArray(data)) return []
+  const seen = new Set<string>()
+  const roomIds: string[] = []
+  for (const row of data) {
+    const roomId = String(row?.room_id || '').trim()
+    if (!roomId || seen.has(roomId)) continue
+    seen.add(roomId)
+    roomIds.push(roomId)
+  }
+  return roomIds
 }
 
 export async function fetchReceiptWebhookStatus(
   supabase: SupabaseClient,
+  options: { includeDetectedRooms?: boolean } = {},
 ): Promise<ReceiptWebhookStatusRow[]> {
+  const includeDetectedRooms = options.includeDetectedRooms !== false
   const registry = await loadStoreRegistry(supabase)
-  const results: ReceiptWebhookStatusRow[] = []
 
-  for (const entry of registry) {
+  return Promise.all(registry.map(async (entry) => {
     let webhookEventCount = 0
     let lastWebhookReceivedAt: string | null = null
     let receiptCount = 0
     let lastReceiptAt: string | null = null
 
-    const { count: whCount, error: whCountErr } = await supabase
-      .from(entry.webhook_raw_table)
-      .select('*', { count: 'exact', head: true })
-    if (!whCountErr && whCount != null) webhookEventCount = whCount
+    const [
+      { count: whCount, error: whCountErr },
+      { data: whLast, error: whLastErr },
+      { count: rcCount, error: rcCountErr },
+      { data: rcLast, error: rcLastErr },
+    ] = await Promise.all([
+      supabase.from(entry.webhook_raw_table).select('*', { count: 'exact', head: true }),
+      supabase
+        .from(entry.webhook_raw_table)
+        .select('received_at')
+        .order('received_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase.from(entry.receipt_table).select('*', { count: 'exact', head: true }),
+      supabase
+        .from(entry.receipt_table)
+        .select('created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
 
-    const { data: whLast, error: whLastErr } = await supabase
-      .from(entry.webhook_raw_table)
-      .select('received_at')
-      .order('received_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    if (!whCountErr && whCount != null) webhookEventCount = whCount
     if (!whLastErr && whLast?.received_at) {
       lastWebhookReceivedAt = String(whLast.received_at)
     }
-
-    const { count: rcCount, error: rcCountErr } = await supabase
-      .from(entry.receipt_table)
-      .select('*', { count: 'exact', head: true })
     if (!rcCountErr && rcCount != null) receiptCount = rcCount
-
-    const { data: rcLast, error: rcLastErr } = await supabase
-      .from(entry.receipt_table)
-      .select('created_at')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
     if (!rcLastErr && rcLast?.created_at) {
       lastReceiptAt = String(rcLast.created_at)
     }
 
-    results.push({
+    const detectedRoomIds =
+      includeDetectedRooms && webhookEventCount > 0
+        ? await fetchDistinctRoomIdsFromRawTable(supabase, entry.webhook_raw_table)
+        : []
+
+    return {
       store_partition_key: entry.store_partition_key,
       display_name: entry.display_name,
       webhook_event_count: webhookEventCount,
@@ -786,8 +817,7 @@ export async function fetchReceiptWebhookStatus(
       receipt_count: receiptCount,
       last_receipt_at: lastReceiptAt,
       is_communicating: webhookEventCount > 0,
-    })
-  }
-
-  return results
+      detected_room_ids: detectedRoomIds,
+    }
+  }))
 }

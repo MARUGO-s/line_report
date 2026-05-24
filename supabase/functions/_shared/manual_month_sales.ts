@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { canonicalStorePartitionKeyForDb } from "./receipt_sheets_store_catalog.ts"
 
 export type ManualMonthSalesRecord = {
   gross_sales_yen: number
@@ -113,7 +114,7 @@ export async function fetchManualMonthSales(
   storePartitionKey: string,
   salesMonthYyyyMm: string,
 ): Promise<ManualMonthSalesRecord | null> {
-  const key = String(storePartitionKey ?? "").trim().toLowerCase()
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
   const month = String(salesMonthYyyyMm ?? "").trim().slice(0, 7)
   if (!key || !/^\d{4}-\d{2}$/.test(month)) return null
 
@@ -136,7 +137,7 @@ export async function fetchManualMonthSalesMapForStore(
   storePartitionKey: string,
   salesMonths: string[],
 ): Promise<Map<string, ManualMonthSalesRecord>> {
-  const key = String(storePartitionKey ?? "").trim().toLowerCase()
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
   const months = [...new Set(
     salesMonths.map((m) => String(m ?? "").trim().slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m)),
   )]
@@ -168,7 +169,7 @@ export async function upsertManualMonthSalesEntries(
   storePartitionKey: string,
   entries: ManualMonthSalesUpsertEntry[],
 ): Promise<void> {
-  const key = String(storePartitionKey ?? "").trim().toLowerCase()
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
   const updatedAt = new Date().toISOString()
 
   for (const entry of entries) {

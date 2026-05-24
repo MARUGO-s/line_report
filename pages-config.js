@@ -20,8 +20,12 @@
   const RECEIPT_ADMIN_ANON_KEY =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvY2JuaWZ1YWN0YnZteWpyYXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNzQ2OTgsImV4cCI6MjA4Mjk1MDY5OH0.q33wfcASsQf0Fec3S6fa5CVG2KC9m5Q912Szu7KIyN0';
 
-  /** Google スプレッドシート（売上シート pilot）連携 — 新サイトでは一旦オフ */
-  const RECEIPT_SHEETS_PILOT_ENABLED = false;
+  /** Google スプレッドシート（売上シート）— 全店舗（店舗ごとタブ） */
+  const RECEIPT_SHEETS_PILOT_ENABLED = true;
+
+  /** @deprecated 単店舗時代の互換。全店舗対応後は参照のみ */
+  const RECEIPT_SHEETS_PILOT_STORE_KEY = 'bistrocavacava';
+  const RECEIPT_SHEETS_PILOT_STORE_NAME = 'BISTRO CAVA CAVA';
 
   /** hocbn admin-api 向け管理画面種別（旧 jhpm サイトとルーム一覧除外を分離） */
   const ADMIN_SURFACE = 'line_report';
@@ -190,6 +194,12 @@
     RECEIPT_ADMIN_PROJECT_URL: RECEIPT_ADMIN_PROJECT_URL,
     RECEIPT_ADMIN_ANON_KEY: RECEIPT_ADMIN_ANON_KEY,
     RECEIPT_SHEETS_PILOT_ENABLED: RECEIPT_SHEETS_PILOT_ENABLED,
+    RECEIPT_SHEETS_PILOT_STORE_KEY: RECEIPT_SHEETS_PILOT_STORE_KEY,
+    RECEIPT_SHEETS_PILOT_STORE_NAME: RECEIPT_SHEETS_PILOT_STORE_NAME,
+    isReceiptSheetsPilotStore: function (storeKey) {
+      const key = String(storeKey || '').trim().toLowerCase();
+      return !!key && Object.prototype.hasOwnProperty.call(STORE_NAMES, key);
+    },
     ADMIN_SURFACE: ADMIN_SURFACE,
     STORE_NAMES: STORE_NAMES,
     adminApiPath: adminApiPath,

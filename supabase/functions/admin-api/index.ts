@@ -1598,30 +1598,22 @@ type ReceiptSheetsPilotLinkState = {
 
 async function fetchReceiptSheetsPilotLinkState(): Promise<ReceiptSheetsPilotLinkState> {
   const spreadsheetId = String(Deno.env.get("RECEIPT_SHEETS_PILOT_SPREADSHEET_ID") ?? "").trim()
-  const storeKey = String(Deno.env.get("RECEIPT_SHEETS_PILOT_STORE_KEY") ?? "bistrocavacava").trim().toLowerCase()
-  const storeName = String(Deno.env.get("RECEIPT_SHEETS_PILOT_STORE_NAME") ?? "").trim()
+  const suggestedGoogleUser = String(Deno.env.get("RECEIPT_SHEETS_PILOT_SUGGESTED_GOOGLE_USER") ?? "").trim() || null
   const accessNote =
-    "Google スプレッドシートはブラウザにログイン中の Google アカウントで開きます。編集にはシートの共有（編集者）が必要です。当画面の管理トークンは Supabase 管理 API 用で、Google へのログインには使いません。"
+    "Google スプレッドシート連携は **全店舗** 対応です。" +
+    "スプレッドシート内の `{店舗キー}_月間予算` / `{店舗キー}_過去売上` / `{店舗キー}_日次売上` タブごとに同期されます。" +
+    "シートはブラウザにログイン中の Google アカウントで開きます。編集にはシートの共有（編集者）が必要です。"
 
   if (!spreadsheetId) {
     return {
       configured: false,
       spreadsheet_id: null,
       spreadsheet_url: null,
-      store_partition_key: storeKey || null,
-      store_display_name: storeName || null,
+      store_partition_key: null,
+      store_display_name: null,
       suggested_google_user: null,
       access_note: "サーバーに RECEIPT_SHEETS_PILOT_SPREADSHEET_ID が未設定のため、リンクを出せません。",
     }
-  }
-
-  let suggestedGoogleUser: string | null = null
-  try {
-    const gmail = await fetchGmailLinkedAccountState()
-    const email = String(gmail.email_address ?? "").trim()
-    if (email) suggestedGoogleUser = email
-  } catch {
-    // Gmail 未設定時は authuser なしで開く
   }
 
   let spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit`
@@ -1633,8 +1625,8 @@ async function fetchReceiptSheetsPilotLinkState(): Promise<ReceiptSheetsPilotLin
     configured: true,
     spreadsheet_id: spreadsheetId,
     spreadsheet_url: spreadsheetUrl,
-    store_partition_key: storeKey || null,
-    store_display_name: storeName || null,
+    store_partition_key: null,
+    store_display_name: "全店舗",
     suggested_google_user: suggestedGoogleUser,
     access_note: accessNote,
   }

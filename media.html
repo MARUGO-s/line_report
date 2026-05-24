@@ -134,6 +134,21 @@
       align-items: center;
     }
 
+    .remember-login-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 0.86rem;
+      color: #b8d9ec;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .remember-login-label input {
+      margin: 0;
+    }
+
     .input, .select, .button {
       min-height: 39px;
       border-radius: 11px;
@@ -870,6 +885,10 @@
       <div class="controls">
         <input id="projectUrlInput" class="input" style="min-width:320px" type="text" readonly tabindex="-1" aria-readonly="true">
         <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+        <label class="remember-login-label" for="rememberLoginCheck">
+          <input id="rememberLoginCheck" type="checkbox" checked>
+          <span>ログイン状態を保持</span>
+        </label>
         <button id="saveTokenBtn" class="button primary">保存して接続</button>
         <button id="clearTokenBtn" class="button">削除</button>
         <a class="button link" href="./index.html">管理画面に戻る</a>
@@ -1006,6 +1025,8 @@
   </div>
 
   <script src="pages-config.js"></script>
+  <script src="auth-session.js"></script>
+  <script src="site-cache.js"></script>
   <script>
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
@@ -1039,6 +1060,7 @@
       lastRefresh: document.getElementById('lastRefresh'),
       projectUrlInput: document.getElementById('projectUrlInput'),
       tokenInput: document.getElementById('tokenInput'),
+      rememberLoginCheck: document.getElementById('rememberLoginCheck'),
       saveTokenBtn: document.getElementById('saveTokenBtn'),
       clearTokenBtn: document.getElementById('clearTokenBtn'),
       typeFilter: document.getElementById('typeFilter'),
@@ -1099,13 +1121,38 @@
     ]);
 
     function getToken() {
-      return localStorage.getItem(STORE_TOKEN_KEY) || '';
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+    }
+
+    function clearSiteCacheForToken(token, projectUrl) {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      if (!SC || !token) return;
+      SC.clearAuth(token, projectUrl || FIXED_PROJECT_URL);
     }
 
     function setToken(value) {
-      if (value) localStorage.setItem(STORE_TOKEN_KEY, value);
-      else localStorage.removeItem(STORE_TOKEN_KEY);
+      const prev = getToken();
+      const next = value ? String(value) : '';
+      if (prev && prev !== next) {
+        clearSiteCacheForToken(prev, FIXED_PROJECT_URL);
+      }
+      if (window.LINE_REPORT_AUTH) {
+        if (next) LINE_REPORT_AUTH.setToken(next);
+        else LINE_REPORT_AUTH.clearToken();
+      } else if (next) {
+        localStorage.setItem(STORE_TOKEN_KEY, next);
+      } else {
+        localStorage.removeItem(STORE_TOKEN_KEY);
+      }
       updateAuthState();
+    }
+
+    function updateAuthState() {
+      const hasToken = !!getToken();
+      dom.authState.textContent = hasToken
+        ? ((window.LINE_REPORT_AUTH && LINE_REPORT_AUTH.isRememberEnabled()) ? 'ログイン済み（保持）' : 'ログイン済み')
+        : '未接続';
+      dom.authState.className = hasToken ? 'pill ok' : 'pill';
     }
 
     function normalizeTheme(value) {
@@ -1629,12 +1676,6 @@
       ].join('');
     }
 
-    function updateAuthState() {
-      const hasToken = !!getToken();
-      dom.authState.textContent = hasToken ? '接続準備OK' : '未接続';
-      dom.authState.className = hasToken ? 'pill ok' : 'pill';
-    }
-
     function updateMediaBulkDeleteButtonLabel() {
       if (!state.mediaBulkDeleteMode) {
         dom.toggleMediaBulkDeleteBtn.textContent = '一括削除';
@@ -1789,13 +1830,26 @@
     }
 
     async function loadRoomFilterOptions() {
+      const SC = window.LINE_REPORT_SITE_CACHE;
+      const token = getToken();
+      const statePath = '/state?logs_limit=10';
+      if (SC && token) {
+        const cached = SC.get(token, FIXED_PROJECT_URL, 'admin-api', 'GET', statePath);
+        if (cached && cached.data) {
+          setRoomFilterOptions(collectRoomFilterOptions(cached.data));
+        }
+      }
       try {
-        const stateBody = await api('/state?logs_limit=10');
-        const options = collectRoomFilterOptions(stateBody);
-        setRoomFilterOptions(options);
+        const stateBody = await api(statePath);
+        if (SC && token) {
+          SC.set(token, FIXED_PROJECT_URL, 'admin-api', 'GET', statePath, stateBody);
+        }
+        setRoomFilterOptions(collectRoomFilterOptions(stateBody));
       } catch (error) {
         console.warn('ルーム一覧の取得に失敗しました:', error);
-        setRoomFilterOptions([]);
+        if (!(SC && token && SC.get(token, FIXED_PROJECT_URL, 'admin-api', 'GET', statePath))) {
+          setRoomFilterOptions([]);
+        }
       }
     }
 
@@ -2350,6 +2404,7 @@
     });
 
     dom.clearTokenBtn.addEventListener('click', function() {
+      clearSiteCacheForToken(getToken(), FIXED_PROJECT_URL);
       setToken('');
       state.offset = 0;
       state.hasMore = false;
@@ -2670,6 +2725,12 @@
     }
 
     (function init() {
+      if (window.LINE_REPORT_AUTH) {
+        LINE_REPORT_AUTH.consumeUrlTokenParam();
+        if (dom.rememberLoginCheck) {
+          LINE_REPORT_AUTH.bindRememberCheckbox(dom.rememberLoginCheck, updateAuthState);
+        }
+      }
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
       applyTheme(getTheme());
       updateAuthState();

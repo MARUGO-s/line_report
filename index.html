@@ -5053,6 +5053,9 @@
           return;
         }
         const parts = [];
+        if (r.store_display_name) {
+          parts.push('対象: 全店舗（店舗ごとタブ）');
+        }
         if (r.access_note) parts.push(String(r.access_note));
         if (r.suggested_google_user) {
           parts.push('推奨Googleアカウント: ' + String(r.suggested_google_user));
