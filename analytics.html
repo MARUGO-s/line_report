@@ -5,9 +5,11 @@
   <base href="/line_report/">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co https://jhpmzqxqvapdkyvvhyra.supabase.co https://api.open-meteo.com https://archive-api.open-meteo.com https://historical-forecast-api.open-meteo.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; media-src 'self' blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests">
   <meta name="theme-color" content="#006c3a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="LINE Analytics">
+  <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
   <link rel="icon" href="icons/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
@@ -16,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&family=Barlow+Condensed:wght@600;700&display=swap">
   <title>売上分析</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
   <style>
     :root {
       --bg0: #061320;
@@ -566,8 +568,8 @@
       <input id="projectUrlInput" class="input" type="text" readonly tabindex="-1">
       <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
       <label class="remember-login-label" for="rememberLoginCheck">
-        <input id="rememberLoginCheck" type="checkbox" checked>
-        <span>ログイン状態を保持</span>
+        <input id="rememberLoginCheck" type="checkbox" disabled>
+        <span>セキュリティ上、このタブだけ有効</span>
       </label>
       <div class="controls btn-row">
         <button id="saveTokenBtn" class="btn primary">保存して接続</button>
@@ -1264,6 +1266,16 @@ function setToken(t) {
 function removeToken() {
   if (window.LINE_REPORT_AUTH) LINE_REPORT_AUTH.clearToken();
   else localStorage.removeItem(TOKEN_KEY);
+}
+async function logoutToken() {
+  if (window.LINE_REPORT_AUTH) {
+    await LINE_REPORT_AUTH.logout({
+      logoutUrl: LINE_REPORT_PAGES.receiptAdminApiUrl('/auth/logout'),
+      adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE,
+    });
+  } else {
+    removeToken();
+  }
 }
 
 function escapeHtml(s) {
@@ -2158,8 +2170,7 @@ function dayOfWeek(dateStr) {
 /* ── auth ── */
 function updateAuthBadge() {
   const ok = !!getToken();
-  const remember = ok && window.LINE_REPORT_AUTH && LINE_REPORT_AUTH.isRememberEnabled();
-  dom.authState.textContent = ok ? (remember ? 'ログイン済み（保持）' : 'ログイン済み') : '未接続';
+  dom.authState.textContent = ok ? 'ログイン済み' : '未接続';
   dom.authState.classList.toggle('ok', ok);
   dom.projectUrl.value = PROJECT_URL;
   // モバイル: トークン保存済みなら接続カードを折りたたむ
@@ -2176,8 +2187,8 @@ dom.saveToken.addEventListener('click', () => {
   loadAll();
 });
 
-dom.clearToken.addEventListener('click', () => {
-  removeToken();
+dom.clearToken.addEventListener('click', async () => {
+  await logoutToken();
   dom.tokenInput.value = '';
   updateAuthBadge();
   resetReceiptDailyDisconnected();

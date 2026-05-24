@@ -1,7 +1,8 @@
 /**
- * 管理トークンの保持（ログイン状態を保持）
- * - ON（既定）: localStorage → 次回アクセス時も自動ログイン
- * - OFF: sessionStorage → タブを閉じるとログアウト
+ * 管理トークンの保持
+ * - セッショントークンは常に sessionStorage のみ
+ * - 旧 localStorage 保存は初回読込時に sessionStorage へ移して削除
+ * - 旧 `?t=` ログインは受け付けず、URL から除去のみ行う
  */
 (function (global) {
   'use strict';
@@ -9,47 +10,53 @@
   var PERSIST_TOKEN_KEY = 'line_summary_admin_token';
   var SESSION_TOKEN_KEY = 'line_summary_admin_token__session';
   var REMEMBER_KEY = 'line_summary_remember_login';
+  var SESSION_PREFIX = 'lrst_';
 
-  function isRememberEnabled() {
-    var raw = localStorage.getItem(REMEMBER_KEY);
-    if (raw == null) return true;
-    var normalized = String(raw).trim().toLowerCase();
-    return !(normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no');
+  function migrateLegacyPersistentToken() {
+    try {
+      var existing = sessionStorage.getItem(SESSION_TOKEN_KEY) || '';
+      var legacy = localStorage.getItem(PERSIST_TOKEN_KEY) || '';
+      if (!existing && legacy) {
+        sessionStorage.setItem(SESSION_TOKEN_KEY, legacy);
+      }
+      localStorage.removeItem(PERSIST_TOKEN_KEY);
+      localStorage.removeItem(REMEMBER_KEY);
+    } catch (_) {}
   }
 
-  function setRememberEnabled(value) {
-    localStorage.setItem(REMEMBER_KEY, value ? '1' : '0');
-    var token = readTokenFromAnyStorage();
-    if (token) {
-      writeToken(token);
-    }
+  function isRememberEnabled() {
+    return false;
+  }
+
+  function setRememberEnabled() {
+    try {
+      localStorage.removeItem(REMEMBER_KEY);
+    } catch (_) {}
   }
 
   function readTokenFromAnyStorage() {
-    return localStorage.getItem(PERSIST_TOKEN_KEY) || sessionStorage.getItem(SESSION_TOKEN_KEY) || '';
+    migrateLegacyPersistentToken();
+    return sessionStorage.getItem(SESSION_TOKEN_KEY) || localStorage.getItem(PERSIST_TOKEN_KEY) || '';
   }
 
   function clearTokenStorage() {
-    localStorage.removeItem(PERSIST_TOKEN_KEY);
-    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    try {
+      localStorage.removeItem(PERSIST_TOKEN_KEY);
+      localStorage.removeItem(REMEMBER_KEY);
+      sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    } catch (_) {}
   }
 
   function writeToken(value) {
     var next = String(value || '').trim();
     clearTokenStorage();
     if (!next) return;
-    if (isRememberEnabled()) {
-      localStorage.setItem(PERSIST_TOKEN_KEY, next);
-    } else {
-      sessionStorage.setItem(SESSION_TOKEN_KEY, next);
-    }
+    sessionStorage.setItem(SESSION_TOKEN_KEY, next);
   }
 
   function getToken() {
-    if (isRememberEnabled()) {
-      return localStorage.getItem(PERSIST_TOKEN_KEY) || '';
-    }
-    return sessionStorage.getItem(SESSION_TOKEN_KEY) || localStorage.getItem(PERSIST_TOKEN_KEY) || '';
+    migrateLegacyPersistentToken();
+    return sessionStorage.getItem(SESSION_TOKEN_KEY) || '';
   }
 
   function setToken(value) {
@@ -83,13 +90,38 @@
   function consumeUrlTokenParam() {
     try {
       var params = new URLSearchParams(global.location.search);
-      var urlToken = String(params.get('t') || '').trim();
-      if (!urlToken) return false;
-      setToken(urlToken);
+      if (!params.has('t')) return false;
       stripUrlParams(['t']);
       return true;
     } catch (_) {
       return false;
+    }
+  }
+
+  function isSessionToken(value) {
+    return String(value || '').trim().indexOf(SESSION_PREFIX) === 0;
+  }
+
+  async function logout(options) {
+    options = options || {};
+    var token = getToken();
+    var logoutUrl = String(options.logoutUrl || '').trim();
+    var adminSurface = String(options.adminSurface || '').trim() || 'line_report';
+    try {
+      if (token && isSessionToken(token) && logoutUrl) {
+        await fetch(logoutUrl, {
+          method: 'POST',
+          keepalive: true,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'x-admin-token': token,
+            'x-admin-surface': adminSurface,
+          },
+          body: JSON.stringify({}),
+        });
+      }
+    } finally {
+      clearTokenStorage();
     }
   }
 
@@ -134,27 +166,32 @@
 
   function syncRememberCheckbox(checkbox) {
     if (!(checkbox instanceof HTMLInputElement)) return;
-    checkbox.checked = isRememberEnabled();
+    checkbox.checked = false;
+    checkbox.disabled = true;
+    checkbox.setAttribute('aria-disabled', 'true');
   }
 
   function bindRememberCheckbox(checkbox, onChange) {
     if (!(checkbox instanceof HTMLInputElement)) return;
     syncRememberCheckbox(checkbox);
-    checkbox.addEventListener('change', function () {
-      setRememberEnabled(!!checkbox.checked);
-      if (typeof onChange === 'function') onChange();
-    });
+    if (typeof onChange === 'function') onChange();
   }
+
+  migrateLegacyPersistentToken();
 
   global.LINE_REPORT_AUTH = {
     PERSIST_TOKEN_KEY: PERSIST_TOKEN_KEY,
     SESSION_TOKEN_KEY: SESSION_TOKEN_KEY,
     REMEMBER_KEY: REMEMBER_KEY,
+    SESSION_PREFIX: SESSION_PREFIX,
+    supportsPersistentLogin: false,
     isRememberEnabled: isRememberEnabled,
     setRememberEnabled: setRememberEnabled,
     getToken: getToken,
     setToken: setToken,
     clearToken: clearToken,
+    isSessionToken: isSessionToken,
+    logout: logout,
     consumeUrlTokenParam: consumeUrlTokenParam,
     consumeUrlLoginTicketParam: consumeUrlLoginTicketParam,
     consumeUrlAuthParams: consumeUrlAuthParams,

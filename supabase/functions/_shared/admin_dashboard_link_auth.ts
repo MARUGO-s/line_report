@@ -143,3 +143,33 @@ export async function authenticateAdminDashboardSessionToken(
   }
   return !!data
 }
+
+export async function revokeAdminDashboardSessionToken(
+  supabase: SupabaseClient,
+  rawToken: string,
+): Promise<boolean> {
+  const token = String(rawToken ?? "").trim()
+  if (!token.startsWith(SESSION_PREFIX)) return false
+  const tokenHash = await hashToken(token)
+  const { error, count } = await supabase
+    .from(TOKEN_TABLE)
+    .delete({ count: "exact" })
+    .eq("token_kind", "session")
+    .eq("token_hash", tokenHash)
+  if (error) {
+    throw new Error(`Failed to revoke session token: ${error.message}`)
+  }
+  return Number(count ?? 0) > 0
+}
+
+export async function revokeAllAdminDashboardAuthTokens(
+  supabase: SupabaseClient,
+): Promise<void> {
+  const { error } = await supabase
+    .from(TOKEN_TABLE)
+    .delete()
+    .in("token_kind", ["login_link", "session"])
+  if (error) {
+    throw new Error(`Failed to revoke dashboard auth tokens: ${error.message}`)
+  }
+}

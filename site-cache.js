@@ -1,6 +1,6 @@
 /**
- * LINE Report 静的 UI 向け localStorage キャッシュ
- * 同一トークン・同一 Project URL からの再訪問時に API 応答を即表示し、裏で更新する。
+ * LINE Report 静的 UI 向け sessionStorage キャッシュ
+ * 認証済みレスポンスをタブ単位に閉じ込め、ブラウザ再起動後へは持ち越さない。
  */
 (function (global) {
   'use strict';
@@ -11,6 +11,23 @@
   var DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
   /** 1認証あたりの localStorage 上限目安 */
   var MAX_STORE_BYTES = 4 * 1024 * 1024;
+
+  function activeStorage() {
+    return sessionStorage;
+  }
+
+  function clearLegacyPersistentCaches() {
+    try {
+      var keys = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(STORAGE_PREFIX) === 0) keys.push(k);
+      }
+      keys.forEach(function (k) {
+        localStorage.removeItem(k);
+      });
+    } catch (_) {}
+  }
 
   function hashString(input) {
     var h = 2166136261;
@@ -28,7 +45,7 @@
 
   function readStore(token, projectUrl) {
     try {
-      var raw = localStorage.getItem(storageKey(token, projectUrl));
+      var raw = activeStorage().getItem(storageKey(token, projectUrl));
       if (!raw) return null;
       var parsed = JSON.parse(raw);
       if (!parsed || parsed.v !== CACHE_VERSION || !parsed.entries) return null;
@@ -57,12 +74,12 @@
         pruneStore(store, false);
         json = JSON.stringify(store);
       }
-      localStorage.setItem(storageKey(token, projectUrl), json);
+      activeStorage().setItem(storageKey(token, projectUrl), json);
       return true;
     } catch (_) {
       try {
         pruneStore(store, true);
-        localStorage.setItem(storageKey(token, projectUrl), JSON.stringify(store));
+        activeStorage().setItem(storageKey(token, projectUrl), JSON.stringify(store));
         return true;
       } catch (__) {
         return false;
@@ -127,6 +144,7 @@
 
     clearAuth: function (token, projectUrl) {
       try {
+        activeStorage().removeItem(storageKey(token, projectUrl));
         localStorage.removeItem(storageKey(token, projectUrl));
       } catch (_) {}
     },
@@ -134,16 +152,20 @@
     clearAll: function () {
       try {
         var keys = [];
-        for (var i = 0; i < localStorage.length; i++) {
-          var k = localStorage.key(i);
+        var storage = activeStorage();
+        for (var i = 0; i < storage.length; i++) {
+          var k = storage.key(i);
           if (k && k.indexOf(STORAGE_PREFIX) === 0) keys.push(k);
         }
         keys.forEach(function (k) {
-          localStorage.removeItem(k);
+          storage.removeItem(k);
         });
       } catch (_) {}
+      clearLegacyPersistentCaches();
     },
   };
+
+  clearLegacyPersistentCaches();
 
   global.LINE_REPORT_SITE_CACHE = SiteCache;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

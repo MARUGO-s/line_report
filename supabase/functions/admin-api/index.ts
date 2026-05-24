@@ -33,6 +33,8 @@ import {
 import {
   authenticateAdminDashboardSessionToken,
   exchangeAdminDashboardLoginLinkToken,
+  revokeAdminDashboardSessionToken,
+  revokeAllAdminDashboardAuthTokens,
 } from "../_shared/admin_dashboard_link_auth.ts"
 import { fetchWeatherDailyState } from "../_shared/weather_daily.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
@@ -320,6 +322,12 @@ Deno.serve(async (req) => {
   }
 
   try {
+    if (req.method === "POST" && path === "/auth/logout") {
+      const provided = req.headers.get("x-admin-token") ?? ""
+      const revoked = await revokeAdminDashboardSessionToken(supabase, provided)
+      return json({ success: true, revoked }, 200)
+    }
+
     if (req.method === "GET" && path === "/state") {
       const adminSurface = resolveAdminSurface(req, url)
       const state = await fetchState(supabase, url, adminSurface)
@@ -515,6 +523,8 @@ Deno.serve(async (req) => {
       if (error) {
         throw { status: 500, message: `Failed to update admin token: ${error.message}` } satisfies AppError
       }
+
+      await revokeAllAdminDashboardAuthTokens(supabase)
 
       return json({
         success: true,
@@ -860,11 +870,6 @@ async function authenticate(
   if (dbHashResult.hash) {
     const providedHash = await hashToken(provided)
     if (secureEqual(providedHash, dbHashResult.hash)) {
-      return { ok: true }
-    }
-    // Break-glass path: allow fallback secret token even when DB hash exists.
-    // This keeps recovery possible if the hashed dashboard token is lost.
-    if (fallbackToken && secureEqual(provided, fallbackToken)) {
       return { ok: true }
     }
     return { ok: false, status: 401, message: "Unauthorized." }

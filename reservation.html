@@ -5,9 +5,11 @@
   <base href="/line_report/">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co https://jhpmzqxqvapdkyvvhyra.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests">
   <meta name="theme-color" content="#006c3a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="LINE Summary">
+  <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
   <link rel="icon" href="icons/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
@@ -617,8 +619,8 @@
         <input id="projectUrlInput" class="input" style="min-width:320px" type="text" readonly tabindex="-1" aria-readonly="true">
         <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
         <label class="remember-login-label" for="rememberLoginCheck">
-          <input id="rememberLoginCheck" type="checkbox" checked>
-          <span>ログイン状態を保持</span>
+          <input id="rememberLoginCheck" type="checkbox" disabled>
+          <span>セキュリティ上、このタブだけ有効</span>
         </label>
         <button id="saveTokenBtn" class="button primary">保存して接続</button>
         <button id="clearTokenBtn" class="button">削除</button>
@@ -757,11 +759,20 @@
       updateAuthState();
     }
 
+    async function logoutToken() {
+      if (window.LINE_REPORT_AUTH) {
+        await LINE_REPORT_AUTH.logout({
+          logoutUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/logout', FIXED_PROJECT_URL),
+          adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE,
+        });
+      } else {
+        setToken('');
+      }
+    }
+
     function updateAuthState() {
       const hasToken = !!getToken();
-      dom.authState.textContent = hasToken
-        ? ((window.LINE_REPORT_AUTH && LINE_REPORT_AUTH.isRememberEnabled()) ? 'ログイン済み（保持）' : 'ログイン済み')
-        : '未接続';
+      dom.authState.textContent = hasToken ? 'ログイン済み' : '未接続';
       dom.authState.className = hasToken ? 'pill ok' : 'pill';
     }
 
@@ -1465,9 +1476,10 @@
       }
     });
 
-    dom.clearTokenBtn.addEventListener('click', function() {
+    dom.clearTokenBtn.addEventListener('click', async function() {
       clearSiteCacheForToken(getToken(), FIXED_PROJECT_URL);
-      setToken('');
+      await logoutToken();
+      updateAuthState();
       dom.calendar.innerHTML = '';
       dom.summary.textContent = '未取得';
       dom.lastRefresh.textContent = '最終更新: なし';
