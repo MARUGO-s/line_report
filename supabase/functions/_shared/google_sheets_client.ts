@@ -50,6 +50,27 @@ export async function getSpreadsheetValues(
   ) : []
 }
 
+/** 指定範囲のセル内容をクリア（値・書式は残る） */
+export async function clearSpreadsheetRange(
+  spreadsheetId: string,
+  rangeA1: string,
+): Promise<void> {
+  const accessToken = await fetchGoogleServiceAccountAccessToken([SHEETS_SCOPE])
+  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:clear`
+  const response = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Sheets values.clear failed (${response.status}): ${text}`)
+  }
+}
+
 export async function updateSpreadsheetValues(
   spreadsheetId: string,
   rangeA1: string,

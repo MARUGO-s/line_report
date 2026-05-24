@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { writeGasSyncConfigToSpreadsheet } from "../_shared/receipt_sheets_gas_config.ts"
+import { clearBistrocavacavaSheetDataRowsAndPushFromDb } from "../_shared/bistrocavacava_sheet_push.ts"
 import {
   runReceiptSheetsPilotSync,
   runReceiptSheetsPilotSyncViaGas,
@@ -70,6 +71,30 @@ Deno.serve(async (req) => {
       return json({ ok: true, ...result }, 200)
     } catch (e) {
       console.error("write_gas_config failed:", e)
+      return json({ ok: false, error: String(e) }, 500)
+    }
+  }
+
+  if (body?.bistrocavacava_cleanup_and_push === true) {
+    const canRun = (await isServiceRoleAuthorized(req)) || isAuthorized(req)
+    if (!canRun) {
+      return json({ ok: false, error: "Forbidden." }, 403)
+    }
+    const spreadsheetId = String(Deno.env.get("RECEIPT_SHEETS_PILOT_SPREADSHEET_ID") ?? "").trim()
+    if (!spreadsheetId) {
+      return json({ ok: false, error: "RECEIPT_SHEETS_PILOT_SPREADSHEET_ID is not set." }, 500)
+    }
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    if (!supabaseUrl || !serviceRoleKey) {
+      return json({ ok: false, error: "Supabase env is missing." }, 500)
+    }
+    const sb = createClient(supabaseUrl, serviceRoleKey)
+    try {
+      const result = await clearBistrocavacavaSheetDataRowsAndPushFromDb(sb, spreadsheetId)
+      return json({ ok: true, ...result }, 200)
+    } catch (e) {
+      console.error("bistrocavacava_cleanup_and_push failed:", e)
       return json({ ok: false, error: String(e) }, 500)
     }
   }

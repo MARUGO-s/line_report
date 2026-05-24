@@ -5273,8 +5273,69 @@
       return merged;
     }
 
+    /** Webhook 店舗カード内の <details> が開いているか（自動更新で閉じないよう） */
+    function isAnyWebhookCardDetailsOpen() {
+      if (!dom.webhookCardListBody) return false;
+      return !!dom.webhookCardListBody.querySelector('details[open]');
+    }
+
+    function captureWebhookCardDetailsState() {
+      const openByStore = {};
+      if (!dom.webhookCardListBody) return openByStore;
+      dom.webhookCardListBody.querySelectorAll('article.webhook-card[data-store-key]').forEach(function(card) {
+        const storeKey = String(card.getAttribute('data-store-key') || '').trim();
+        if (!storeKey) return;
+        const openClasses = [];
+        card.querySelectorAll('details').forEach(function(detailsEl) {
+          if (!detailsEl.open) return;
+          const cls = String(detailsEl.className || '').trim();
+          if (cls) openClasses.push(cls);
+        });
+        if (openClasses.length) openByStore[storeKey] = openClasses;
+      });
+      return openByStore;
+    }
+
+    function restoreWebhookCardDetailsState(openByStore) {
+      if (!openByStore || !dom.webhookCardListBody) return;
+      dom.webhookCardListBody.querySelectorAll('article.webhook-card[data-store-key]').forEach(function(card) {
+        const storeKey = String(card.getAttribute('data-store-key') || '').trim();
+        const openClasses = openByStore[storeKey];
+        if (!openClasses || !openClasses.length) return;
+        card.querySelectorAll('details').forEach(function(detailsEl) {
+          const cls = String(detailsEl.className || '').trim();
+          if (openClasses.indexOf(cls) >= 0) detailsEl.open = true;
+        });
+      });
+    }
+
+    /** カード全体を再描画せず通信状況だけ更新（連携ルームを開いたままにする） */
+    function patchWebhookCardLiveStatusFromMap() {
+      if (!dom.webhookCardListBody) return;
+      dom.webhookCardListBody.querySelectorAll('article.webhook-card.is-active[data-store-key]').forEach(function(card) {
+        const storeKey = String(card.getAttribute('data-store-key') || '').trim();
+        const status = getStoreWebhookStatus(storeKey);
+        if (!status) return;
+        const statusEl = card.querySelector('.webhook-card-status');
+        if (statusEl) {
+          const lastReceived = status.last_webhook_received_at
+            ? formatDate(status.last_webhook_received_at)
+            : '-';
+          const eventCount = Number(status.webhook_event_count || 0);
+          const receiptCount = Number(status.receipt_count || 0);
+          statusEl.textContent =
+            '最終受信: ' + lastReceived +
+            ' ／ 受信 ' + eventCount + ' 件 ／ レシート ' + receiptCount + ' 件';
+        }
+      });
+    }
+
     function refreshWebhookCardsFromCurrentState() {
       if (!currentState || !dom.webhookCardListBody) return;
+      if (isAnyWebhookCardDetailsOpen()) {
+        patchWebhookCardLiveStatusFromMap();
+        return;
+      }
       renderWebhookCards(
         currentState.room_overview || [],
         currentState.room_settings || [],
@@ -5290,7 +5351,11 @@
       fetchReceiptWebhookStatusMap({ includeDetectedRooms: true })
         .then(function(fullMap) {
           receiptWebhookStatusByStore = mergeWebhookStatusMaps(fullMap, receiptWebhookStatusByStore);
-          refreshWebhookCardsFromCurrentState();
+          if (isAnyWebhookCardDetailsOpen()) {
+            patchWebhookCardLiveStatusFromMap();
+          } else {
+            refreshWebhookCardsFromCurrentState();
+          }
           if (currentState) {
             persistAdminPayloadToCache(currentState, receiptWebhookStatusByStore);
           }
@@ -5689,8 +5754,15 @@
       stopAutoRefresh();
       if (!getToken()) return;
       autoRefreshTimer = window.setTimeout(async function() {
-        if (!isEditingRoomForm() && !isRoomDirty && !isUserPermissionDirty) {
+        if (
+          !isEditingRoomForm() &&
+          !isRoomDirty &&
+          !isUserPermissionDirty &&
+          !isAnyWebhookCardDetailsOpen()
+        ) {
           await safeLoadState({ silent: true });
+        } else if (isAnyWebhookCardDetailsOpen()) {
+          patchWebhookCardLiveStatusFromMap();
         }
         scheduleAutoRefresh();
       }, nextAutoRefreshMs());
@@ -6822,9 +6894,11 @@
           currentState && currentState.user_permissions ? currentState.user_permissions : [],
         ));
       });
+      const detailsState = captureWebhookCardDetailsState();
       dom.webhookCardListBody.innerHTML = cards.length
         ? cards.join('')
         : '<div class="empty">表示対象の Webhook がありません。</div>';
+      restoreWebhookCardDetailsState(detailsState);
     }
 
     function renderWebhookSettingsSection(overview, settingsList, extraOptions) {

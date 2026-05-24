@@ -70,20 +70,33 @@ export function parseManualMonthPartyGuestFromUnknown(
   }
 }
 
-/** 過去売上シート行（8列=更新日時あり / 7列=営業日数あり / 6列=組数客数あり / 4列=旧形式） */
+/** 過去売上シート行（9列=店舗名あり / 8列=更新日時あり / 7列=営業日数あり / 6列=組数客数あり / 4列=旧形式） */
 export function parsePastSalesSheetRow(row: unknown[]): {
   enabledCol: number
   updatedAtCol: number | null
+  grossCol: number
   party_count: number | null
   guest_count: number | null
   operating_days_count: number | null
 } {
   const len = row.length
+  if (len >= 9) {
+    const counts = parseManualMonthPartyGuestFromUnknown(row[4], row[5])
+    return {
+      enabledCol: 7,
+      updatedAtCol: 8,
+      grossCol: 3,
+      party_count: counts.party_count,
+      guest_count: counts.guest_count,
+      operating_days_count: parseManualMonthOperatingDays(row[6]),
+    }
+  }
   if (len >= 8) {
     const counts = parseManualMonthPartyGuestFromUnknown(row[3], row[4])
     return {
       enabledCol: 6,
       updatedAtCol: 7,
+      grossCol: 2,
       party_count: counts.party_count,
       guest_count: counts.guest_count,
       operating_days_count: parseManualMonthOperatingDays(row[5]),
@@ -94,6 +107,7 @@ export function parsePastSalesSheetRow(row: unknown[]): {
     return {
       enabledCol: 6,
       updatedAtCol: null,
+      grossCol: 2,
       party_count: counts.party_count,
       guest_count: counts.guest_count,
       operating_days_count: parseManualMonthOperatingDays(row[5]),
@@ -104,6 +118,7 @@ export function parsePastSalesSheetRow(row: unknown[]): {
     return {
       enabledCol: 5,
       updatedAtCol: null,
+      grossCol: 2,
       party_count: counts.party_count,
       guest_count: counts.guest_count,
       operating_days_count: null,
@@ -112,6 +127,7 @@ export function parsePastSalesSheetRow(row: unknown[]): {
   return {
     enabledCol: 3,
     updatedAtCol: null,
+    grossCol: 2,
     party_count: null,
     guest_count: null,
     operating_days_count: null,

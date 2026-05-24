@@ -371,7 +371,7 @@ export async function runReceiptSheetsPilotSync(
     : { ok: false, store_partition_key: "", spreadsheet_id: spreadsheetId, direction, log_appended: false, generated_at: new Date().toISOString() }
 }
 
-async function runReceiptSheetsPilotSyncForStore(
+export async function runReceiptSheetsPilotSyncForStore(
   supabase: ReturnType<typeof createClient>,
   config: ReceiptSheetsPilotConfig,
   direction: ReceiptSheetsSyncDirection,
@@ -401,7 +401,7 @@ async function runReceiptSheetsPilotSyncForStore(
 
   const [budgetTabData, pastTabData] = await Promise.all([
     getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500"),
-    getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:H500"),
+    getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:I500"),
   ])
 
   // both: 先にシート→DB、後に DB→シート（シートで直した値をサイトへ反映するため）
@@ -598,7 +598,7 @@ async function pullFromSheetsToDb(
   const legacyPastTabs = config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []
   const [{ values: budgetRows }, { values: pastRows }] = await Promise.all([
     getSheetValuesForTab(config.spreadsheetId, [...budgetTabs, ...legacyBudgetTabs], "A2:Q500"),
-    getSheetValuesForTab(config.spreadsheetId, [...pastTabs, ...legacyPastTabs], "A2:H500"),
+    getSheetValuesForTab(config.spreadsheetId, [...pastTabs, ...legacyPastTabs], "A2:I500"),
   ])
   return processPullRowsToDb(supabase, config, budgetRows, pastRows, logLines, { bothMerge })
 }
@@ -857,7 +857,7 @@ async function processPullRowsToDb(
     const row = budgetRows[i]
     const rowNum = i + 2
     const month = normalizeMonthCell(row[0])
-    const storeKey = normalizePilotStoreKey(row[2])
+    const storeKey = storeKeyFromBudgetRow(row)
     const budgetCols = parseMonthlyBudgetSheetRow(row)
     const enabled = parseEnabledCell(row[budgetCols.enabledCol])
     if (!enabled) {
@@ -972,7 +972,7 @@ async function processPullRowsToDb(
     const sheetUpdatedAt = pastCols.updatedAtCol != null
       ? normalizeSyncUpdatedAt(row[pastCols.updatedAtCol])
       : null
-    const rawGross = String(row[2] ?? "").trim()
+    const rawGross = String(row[pastCols.grossCol] ?? "").trim()
     if (rawGross === "") {
       const db = dbMap.get(salesMonth)
       if (bothMerge && db && isDbNewerThanSheet(db.updated_at, sheetUpdatedAt)) {
@@ -1164,7 +1164,7 @@ function collectPilotMonthsFromBudgetRows(
   const months = new Set(listPilotSyncMonthsJst())
   for (const row of budgetRows) {
     const month = normalizeMonthCell(row[0])
-    const storeKey = normalizePilotStoreKey(row[2])
+    const storeKey = storeKeyFromBudgetRow(row)
     if (month && pilotStorePartitionKeysMatch(storeKey, storePartitionKey)) {
       months.add(month)
     }
@@ -1371,11 +1371,13 @@ function parseOptionalPastSalesInt(value: unknown): number | null {
 
 function pastSalesSheetRowValues(
   storePartitionKey: string,
+  storeDisplayName: string,
   update: ReceiptSheetsGasPastSalesUpdate,
 ): SheetValues {
   return [[
     update.sales_month,
     storePartitionKey,
+    storeDisplayName,
     update.gross_sales_yen,
     update.party_count ?? "",
     update.guest_count ?? "",
@@ -1406,7 +1408,7 @@ async function buildBudgetSheetRowUpdatesFromDb(
   const monthToRowIndex = new Map<string, number>()
   for (let i = 0; i < sheetRows.length; i += 1) {
     const month = normalizeMonthCell(sheetRows[i][0])
-    const rowStore = normalizePilotStoreKey(sheetRows[i][2])
+    const rowStore = storeKeyFromBudgetRow(sheetRows[i])
     if (month && pilotStorePartitionKeysMatch(rowStore, config.storePartitionKey)) {
       monthToRowIndex.set(month, i)
     }
@@ -1436,8 +1438,8 @@ async function buildBudgetSheetRowUpdatesFromDb(
     const phw = Number(row.pre_holiday_weight)
     const values = [
       month,
-      config.storeDisplayName,
       config.storePartitionKey,
+      config.storeDisplayName,
       String(budgetYen),
       String(parsePositiveWeight(row.mon_weight, 1)),
       String(parsePositiveWeight(row.tue_weight, 1)),
@@ -1509,7 +1511,7 @@ async function exportPastSalesFromDbToPastSheet(
       ...receiptSheetsTabCandidates(config.storePartitionKey, "past"),
       ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []),
     ]
-    return getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:H500")
+    return getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:I500")
   })()
   const monthToRowIndex = new Map<string, number>()
   for (let i = 0; i < pastRows.length; i += 1) {
@@ -1526,8 +1528,8 @@ async function exportPastSalesFromDbToPastSheet(
       monthToRowIndex.set(update.sales_month, rowNum - 2)
     }
     batch.push({
-      range: formatSheetA1Range(tabName, `A${rowNum}:H${rowNum}`),
-      values: pastSalesSheetRowValues(config.storePartitionKey, update),
+      range: formatSheetA1Range(tabName, `A${rowNum}:I${rowNum}`),
+      values: pastSalesSheetRowValues(config.storePartitionKey, config.storeDisplayName, update),
     })
   }
 
@@ -1550,7 +1552,7 @@ async function exportPastSalesFromDbToPastSheet(
   return { rows_written: batch.length }
 }
 
-/** DB の休業日を「月間予算」シートの休業日列（H）へ書き戻す */
+/** DB の休業日を「月間予算」シートの休業日列（N・17列形式）へ書き戻す */
 async function exportClosedDatesFromDbToBudgetSheet(
   supabase: ReturnType<typeof createClient>,
   config: ReceiptSheetsPilotConfig,
@@ -1570,7 +1572,7 @@ async function exportClosedDatesFromDbToBudgetSheet(
   const months: string[] = []
   for (const row of budgetRows) {
     const month = normalizeMonthCell(row[0])
-    const storeKey = normalizePilotStoreKey(row[2])
+    const storeKey = storeKeyFromBudgetRow(row)
     if (month && pilotStorePartitionKeysMatch(storeKey, config.storePartitionKey) && !months.includes(month)) {
       months.push(month)
     }
@@ -1581,14 +1583,14 @@ async function exportClosedDatesFromDbToBudgetSheet(
   for (let i = 0; i < budgetRows.length; i += 1) {
     const row = budgetRows[i]
     const month = normalizeMonthCell(row[0])
-    const storeKey = normalizePilotStoreKey(row[2])
+    const storeKey = storeKeyFromBudgetRow(row)
     if (!month || !pilotStorePartitionKeysMatch(storeKey, config.storePartitionKey)) continue
 
     const closed = closedByMonth.get(month) ?? []
     datesByMonth[month] = closed
     const rowNum = i + 2
     batch.push({
-      range: formatSheetA1Range(tabName, `H${rowNum}`),
+      range: formatSheetA1Range(tabName, `N${rowNum}`),
       values: [[formatClosedDatesForSheetCell(closed, month)]],
     })
     rowsUpdated += 1
@@ -1608,6 +1610,25 @@ async function exportClosedDatesFromDbToBudgetSheet(
 function normalizePilotStoreKey(raw: unknown): string {
   const resolved = resolveReceiptSheetsStoreKey(String(raw ?? ""))
   return resolved ?? String(raw ?? "").trim().toLowerCase()
+}
+
+/** 月間予算: B=店舗キー(1) / 旧形式 C=店舗キー(2) */
+function budgetRowStoreKeyIndex(row: unknown[]): 1 | 2 {
+  const c1 = String(row[1] ?? "").trim()
+  const c2 = String(row[2] ?? "").trim()
+  if (!c1 && !c2) return 2
+  if (/^[a-zA-Z][a-zA-Z0-9_]*$/.test(c1) && c2 && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(c2)) return 1
+  if (/^[a-zA-Z][a-zA-Z0-9_]*$/.test(c2) && c1 && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(c1)) return 2
+  const k1 = normalizePilotStoreKey(c1)
+  const k2 = normalizePilotStoreKey(c2)
+  if (k1 && c1 === k1) return 1
+  if (k2 && c2 === k2) return 2
+  return 2
+}
+
+function storeKeyFromBudgetRow(row: unknown[]): string {
+  const idx = budgetRowStoreKeyIndex(row)
+  return normalizePilotStoreKey(row[idx]) ?? ""
 }
 
 /** シート表示用: 同月内は M/D、連休は 5/3〜5/6（常に1行・「、」区切り） */
@@ -2071,7 +2092,7 @@ export function buildBudgetOperatingDaysSheetUpdates(
   for (let i = 0; i < budgetRows.length; i += 1) {
     const row = budgetRows[i]
     const month = normalizeMonthCell(row[0])
-    const storeKey = normalizePilotStoreKey(row[2])
+    const storeKey = storeKeyFromBudgetRow(row)
     const budgetCols = parseMonthlyBudgetSheetRow(row)
     if (!month || !pilotStorePartitionKeysMatch(storeKey, storePartitionKey)) continue
     if (!parseEnabledCell(row[budgetCols.enabledCol])) continue

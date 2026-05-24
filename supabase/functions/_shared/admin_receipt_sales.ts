@@ -10,6 +10,7 @@ import {
   fetchManualMonthSales,
   fetchManualMonthSalesMapForStore,
   upsertManualMonthSalesEntries,
+  type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
 import { queryStoreReceiptRows, loadStoreRegistry } from './store_receipt_query.ts'
 import {
@@ -32,6 +33,55 @@ function parsePositiveWeight(value: unknown, fallback: number): number {
   const n = Number(value)
   if (!Number.isFinite(n) || n <= 0) return fallback
   return n
+}
+
+type ReceiptSalesTotals = {
+  receipt_count: number
+  total_gross_sales_yen: number
+  total_net_sales_yen: number
+  total_tax_amount_yen: number
+  total_party_count: number
+  total_guest_count: number
+  avg_gross_sales_yen: number | null
+  avg_party_count: number | null
+  avg_guest_count: number | null
+  avg_unit_price_yen: number | null
+}
+
+/** 月別手入力がある場合は売上分析の説明どおりレシートより優先（組数・客数は未入力ならレシート） */
+function mergeSalesTotalsWithManualMonth(
+  receiptTotals: ReceiptSalesTotals,
+  manual: ManualMonthSalesRecord | null,
+): ReceiptSalesTotals {
+  if (!manual) return receiptTotals
+
+  const gross = manual.gross_sales_yen
+  const party = manual.party_count != null
+    ? manual.party_count
+    : receiptTotals.total_party_count
+  const guest = manual.guest_count != null
+    ? manual.guest_count
+    : receiptTotals.total_guest_count
+  const receiptCount = receiptTotals.receipt_count
+
+  return {
+    receipt_count: receiptCount,
+    total_gross_sales_yen: gross,
+    total_net_sales_yen: receiptTotals.total_net_sales_yen,
+    total_tax_amount_yen: receiptTotals.total_tax_amount_yen,
+    total_party_count: party,
+    total_guest_count: guest,
+    avg_gross_sales_yen: receiptCount > 0
+      ? Math.round(gross / receiptCount)
+      : null,
+    avg_party_count: receiptCount > 0
+      ? roundToScale(party / receiptCount, 2)
+      : null,
+    avg_guest_count: receiptCount > 0
+      ? roundToScale(guest / receiptCount, 2)
+      : null,
+    avg_unit_price_yen: guest > 0 ? Math.round(gross / guest) : null,
+  }
 }
 
 type SalesBudgetRow = {
@@ -587,14 +637,22 @@ export async function fetchReceiptSalesState(
 
   const compareYear = parseCompareYearQueryParam(url.searchParams.get('compare_year'), month)
   const comparison_sales_month = comparisonSalesMonth(month, compareYear)
+  const storeKeyForManual = normalizeBudgetStoreKey(selectedStoreKeyRaw || selectedStoreKey || '')
+  const manualThisMonth = selectedStoreKey
+    ? await fetchManualMonthSales(supabase, storeKeyForManual, month)
+    : null
   const manualComparison = await fetchManualMonthSales(
     supabase,
-    normalizeBudgetStoreKey(selectedStoreKeyRaw || selectedStoreKey || ''),
+    storeKeyForManual,
     comparison_sales_month,
   )
   const manual_comparison_gross_yen = manualComparison?.gross_sales_yen ?? null
   const manual_comparison_party_count = manualComparison?.party_count ?? null
   const manual_comparison_guest_count = manualComparison?.guest_count ?? null
+  const manual_month_gross_yen = manualThisMonth?.gross_sales_yen ?? null
+  const manual_month_party_count = manualThisMonth?.party_count ?? null
+  const manual_month_guest_count = manualThisMonth?.guest_count ?? null
+  const manual_month_operating_days_count = manualThisMonth?.operating_days_count ?? null
 
   let daily_budget_yen_by_date: Record<string, number> | null = null
   if (budgetRow && month_budget_yen != null && month_budget_yen > 0) {
@@ -637,6 +695,11 @@ export async function fetchReceiptSalesState(
     manual_comparison_gross_yen,
     manual_comparison_party_count,
     manual_comparison_guest_count,
+    manual_month_gross_yen,
+    manual_month_party_count,
+    manual_month_guest_count,
+    manual_month_operating_days_count,
+    manual_month_has_entry: manualThisMonth != null,
     daily_budget_yen_by_date,
     month_start_iso: range.startIso,
     month_end_iso: range.endIso,
@@ -645,26 +708,29 @@ export async function fetchReceiptSalesState(
     selected_store_key: selectedStoreKey || null,
     selected_store_name: selectedStore?.store_name ?? null,
     store_options: storeOptions,
-    totals: {
-      receipt_count: selectedStore?.receipt_count ?? 0,
-      total_gross_sales_yen: selectedStore?.total_gross_sales_yen ?? 0,
-      total_net_sales_yen: selectedStore?.total_net_sales_yen ?? 0,
-      total_tax_amount_yen: selectedStore?.total_tax_amount_yen ?? 0,
-      total_party_count: selectedStore?.total_party_count ?? 0,
-      total_guest_count: selectedStore?.total_guest_count ?? 0,
-      avg_gross_sales_yen: selectedStore && selectedStore.receipt_count > 0
-        ? Math.round(selectedStore.total_gross_sales_yen / selectedStore.receipt_count)
-        : null,
-      avg_party_count: selectedStore && selectedStore.receipt_count > 0
-        ? roundToScale(selectedStore.total_party_count / selectedStore.receipt_count, 2)
-        : null,
-      avg_guest_count: selectedStore && selectedStore.receipt_count > 0
-        ? roundToScale(selectedStore.total_guest_count / selectedStore.receipt_count, 2)
-        : null,
-      avg_unit_price_yen: selectedStore && selectedStore.total_guest_count > 0
-        ? Math.round(selectedStore.total_gross_sales_yen / selectedStore.total_guest_count)
-        : null,
-    },
+    totals: mergeSalesTotalsWithManualMonth(
+      {
+        receipt_count: selectedStore?.receipt_count ?? 0,
+        total_gross_sales_yen: selectedStore?.total_gross_sales_yen ?? 0,
+        total_net_sales_yen: selectedStore?.total_net_sales_yen ?? 0,
+        total_tax_amount_yen: selectedStore?.total_tax_amount_yen ?? 0,
+        total_party_count: selectedStore?.total_party_count ?? 0,
+        total_guest_count: selectedStore?.total_guest_count ?? 0,
+        avg_gross_sales_yen: selectedStore && selectedStore.receipt_count > 0
+          ? Math.round(selectedStore.total_gross_sales_yen / selectedStore.receipt_count)
+          : null,
+        avg_party_count: selectedStore && selectedStore.receipt_count > 0
+          ? roundToScale(selectedStore.total_party_count / selectedStore.receipt_count, 2)
+          : null,
+        avg_guest_count: selectedStore && selectedStore.receipt_count > 0
+          ? roundToScale(selectedStore.total_guest_count / selectedStore.receipt_count, 2)
+          : null,
+        avg_unit_price_yen: selectedStore && selectedStore.total_guest_count > 0
+          ? Math.round(selectedStore.total_gross_sales_yen / selectedStore.total_guest_count)
+          : null,
+      },
+      manualThisMonth,
+    ),
     series,
     available_store_count: storeOptions.length,
     source_row_count: rows.length,

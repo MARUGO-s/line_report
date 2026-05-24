@@ -2995,9 +2995,15 @@ async function loadAll() {
     dom.kpiGuest.textContent = num(totals?.total_guest_count) + ' 名';
     dom.kpiGuestAvg.textContent = totals?.avg_guest_count ? `1日平均 ${totals.avg_guest_count} 名` : '';
     dom.kpiUnit.textContent = yen(totals?.avg_unit_price_yen);
-    const activeDays = dailySeries.filter(d => d.receipt_count > 0).length;
-    dom.kpiDays.textContent = activeDays + ' 日';
-    dom.kpiReceipts.textContent = totals?.receipt_count ? `レシート ${totals.receipt_count} 件` : '';
+    const receiptActiveDays = dailySeries.filter(d => d.receipt_count > 0).length;
+    const manualOpDays = salesData?.manual_month_operating_days_count;
+    const activeDays = receiptActiveDays > 0
+      ? receiptActiveDays
+      : (manualOpDays != null && Number.isFinite(Number(manualOpDays)) ? Math.round(Number(manualOpDays)) : 0);
+    dom.kpiDays.textContent = activeDays > 0 ? activeDays + ' 日' : '0 日';
+    const receiptHint = totals?.receipt_count ? `レシート ${totals.receipt_count} 件` : '';
+    const manualHint = salesData?.manual_month_has_entry ? '月計は手入力' : '';
+    dom.kpiReceipts.textContent = [receiptHint, manualHint].filter(Boolean).join(' · ');
 
     state.lastGrossYen = totals?.total_gross_sales_yen ?? null;
     {
@@ -3045,7 +3051,8 @@ async function loadAll() {
     if (isSingleMonth) applyKpiBadges(displayMonth, state.monthlySeries);
     else applyKpiBadges(null, state.monthlySeries);
 
-    dom.filterMeta.textContent = `対象: ${salesData.selected_store_name ?? '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件 / API生データ ${salesData.source_row_count ?? 0}件`;
+    const manualMeta = salesData?.manual_month_has_entry ? ' / 月計手入力あり' : '';
+    dom.filterMeta.textContent = `対象: ${salesData.selected_store_name ?? '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件 / API生データ ${salesData.source_row_count ?? 0}件${manualMeta}`;
     dom.lastRefresh.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
 
     renderAllCharts();
