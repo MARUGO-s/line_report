@@ -6,7 +6,6 @@ import {
 } from './receipt_reply_context.ts'
 import {
   buildReceiptAnalysisDeletionCommandTextForLineMessageId,
-  buildReceiptAnalyticsDashboardUri,
   buildReceiptCorrectionCommandTextForLineMessageId,
   clampLineMessageActionText,
 } from './receipt_line_actions.ts'
@@ -194,7 +193,7 @@ export function buildReceiptFlexMessage(context: ReceiptReplyContext): Record<st
     )
   }
 
-  const trendUrl = buildReceiptAnalyticsDashboardUri(context.storePartitionKey, context.targetMonth)
+  const trendUrl = context.analyticsDashboardUrl
 
   return {
     type: 'flex',

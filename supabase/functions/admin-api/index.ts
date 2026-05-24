@@ -30,6 +30,10 @@ import {
   upsertReceiptSalesBudget as upsertStoreReceiptSalesBudget,
   updateStoreReceiptPhones,
 } from "../_shared/admin_receipt_sales.ts"
+import {
+  authenticateAdminDashboardSessionToken,
+  exchangeAdminDashboardLoginLinkToken,
+} from "../_shared/admin_dashboard_link_auth.ts"
 import { fetchWeatherDailyState } from "../_shared/weather_daily.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
@@ -274,6 +278,39 @@ Deno.serve(async (req) => {
       code: "rate_limited",
       retry_after_ms: rateLimitResult.retryAfterMs,
     }, 429)
+  }
+
+  if (req.method === "POST" && path === "/auth/link-login") {
+    try {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const loginToken = String(body.login_token ?? "").trim()
+      if (!loginToken) {
+        throw { status: 400, message: "login_token is required." } satisfies AppError
+      }
+      const rememberLogin = body.remember_login !== false
+      const adminSurface = resolveAdminSurface(req, url)
+      const session = await exchangeAdminDashboardLoginLinkToken(supabase, loginToken, {
+        rememberLogin,
+        metadata: {
+          admin_surface: adminSurface,
+          exchanged_via: "admin_api",
+        },
+      })
+      return json({
+        ok: true,
+        session_token: session.token,
+        expires_at: session.expires_at,
+      }, 200)
+    } catch (e) {
+      if (e instanceof Error && /invalid, expired, or already used/i.test(e.message)) {
+        return json({ error: e.message }, 401)
+      }
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
   }
 
   const fallbackAdminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
@@ -809,6 +846,10 @@ async function authenticate(
   const provided = req.headers.get("x-admin-token") ?? ""
   if (!provided) {
     return { ok: false, status: 401, message: "Unauthorized." }
+  }
+
+  if (await authenticateAdminDashboardSessionToken(supabase, provided)) {
+    return { ok: true }
   }
 
   const dbHashResult = await getStoredAdminTokenHash(supabase)
@@ -3893,6 +3934,12 @@ function extractClientIp(headers: Headers): string {
 }
 
 function resolveAdminRateLimit(method: string, path: string): { maxRequests: number; windowMs: number } {
+  if (method === "POST" && path === "/auth/link-login") {
+    return {
+      maxRequests: 20,
+      windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,
+    }
+  }
   if (method === "POST" && path === "/documents") {
     return {
       maxRequests: ADMIN_RATE_LIMIT_UPLOAD_MAX_REQUESTS,

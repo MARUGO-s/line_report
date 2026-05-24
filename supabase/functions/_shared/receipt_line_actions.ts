@@ -33,17 +33,18 @@ export function clampLineMessageActionText(text: string): string {
 export function buildReceiptAnalyticsDashboardUri(
   storePartitionKey: string,
   targetMonth: string,
+  options?: { loginToken?: string | null },
 ): string {
   const params = new URLSearchParams({
     store_key: storePartitionKey,
     month: targetMonth,
     from: 'line',
   })
-  const token = String(Deno.env.get('ADMIN_DASHBOARD_TOKEN') ?? '').trim()
-  if (token) params.set('t', token)
+  const loginToken = String(options?.loginToken ?? '').trim()
+  if (loginToken) params.set('lt', loginToken)
   const candidate = `${ANALYTICS_BASE}?${params.toString()}`
   if (candidate.length <= LINE_MESSAGING_URI_MAX_LEN) return candidate
-  if (token) {
+  if (loginToken) {
     const withoutToken = `${ANALYTICS_BASE}?${new URLSearchParams({
       store_key: storePartitionKey,
       month: targetMonth,

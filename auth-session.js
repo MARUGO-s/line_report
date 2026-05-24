@@ -60,13 +60,17 @@
     clearTokenStorage();
   }
 
-  function consumeUrlTokenParam() {
+  function stripUrlParams(paramNames) {
     try {
       var params = new URLSearchParams(global.location.search);
-      var urlToken = String(params.get('t') || '').trim();
-      if (!urlToken) return false;
-      setToken(urlToken);
-      params.delete('t');
+      var changed = false;
+      (paramNames || []).forEach(function (name) {
+        if (params.has(name)) {
+          params.delete(name);
+          changed = true;
+        }
+      });
+      if (!changed) return false;
       var qs = params.toString();
       var nextUrl = global.location.pathname + (qs ? ('?' + qs) : '') + (global.location.hash || '');
       global.history.replaceState(null, '', nextUrl);
@@ -74,6 +78,58 @@
     } catch (_) {
       return false;
     }
+  }
+
+  function consumeUrlTokenParam() {
+    try {
+      var params = new URLSearchParams(global.location.search);
+      var urlToken = String(params.get('t') || '').trim();
+      if (!urlToken) return false;
+      setToken(urlToken);
+      stripUrlParams(['t']);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function consumeUrlLoginTicketParam(options) {
+    options = options || {};
+    var exchangeUrl = String(options.exchangeUrl || '').trim();
+    if (!exchangeUrl) return false;
+    var adminSurface = String(options.adminSurface || '').trim() || 'line_report';
+    var params = new URLSearchParams(global.location.search);
+    var loginToken = String(params.get('lt') || '').trim();
+    if (!loginToken) return false;
+    var response = await fetch(exchangeUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'x-admin-surface': adminSurface,
+      },
+      body: JSON.stringify({
+        login_token: loginToken,
+        remember_login: isRememberEnabled(),
+      }),
+    });
+    if (!response.ok) {
+      var text = await response.text().catch(function () { return ''; });
+      throw new Error('自動ログインに失敗しました (' + response.status + '): ' + text.slice(0, 160));
+    }
+    var body = await response.json().catch(function () { return {}; });
+    var sessionToken = String(body && body.session_token || '').trim();
+    if (!sessionToken) {
+      throw new Error('自動ログインに失敗しました。session_token がありません。');
+    }
+    setToken(sessionToken);
+    stripUrlParams(['lt']);
+    return true;
+  }
+
+  async function consumeUrlAuthParams(options) {
+    var consumedLoginTicket = await consumeUrlLoginTicketParam(options || {});
+    if (consumedLoginTicket) return true;
+    return consumeUrlTokenParam();
   }
 
   function syncRememberCheckbox(checkbox) {
@@ -100,6 +156,8 @@
     setToken: setToken,
     clearToken: clearToken,
     consumeUrlTokenParam: consumeUrlTokenParam,
+    consumeUrlLoginTicketParam: consumeUrlLoginTicketParam,
+    consumeUrlAuthParams: consumeUrlAuthParams,
     syncRememberCheckbox: syncRememberCheckbox,
     bindRememberCheckbox: bindRememberCheckbox,
   };

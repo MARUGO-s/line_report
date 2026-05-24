@@ -3816,26 +3816,6 @@ dom.monthPicker.value = state.customMonth;
 initStoreSelectOptions();
 if (lineEntryFromUrl) applyLineEntryStoreLock(lineEntryFromUrl);
 
-// URL引数 ?t= からトークンを自動設定（LINEボタン経由アクセス用）
-if (window.LINE_REPORT_AUTH) {
-  LINE_REPORT_AUTH.consumeUrlTokenParam();
-  const rememberEl = document.getElementById('rememberLoginCheck');
-  if (rememberEl) LINE_REPORT_AUTH.bindRememberCheckbox(rememberEl, updateAuthBadge);
-} else {
-  (function () {
-    const params = new URLSearchParams(location.search);
-    const urlToken = params.get('t');
-    if (urlToken) {
-      setToken(urlToken);
-      params.delete('t');
-      const qs = params.toString();
-      history.replaceState(null, '', location.pathname + (qs ? ('?' + qs) : '') + (location.hash || ''));
-    }
-  })();
-}
-
-updateAuthBadge();
-dom.tokenInput.value = getToken() ? '' : '';
 (function setupReceiptDailyViewportListener() {
   function addMq(query) {
     const mq = window.matchMedia(query);
@@ -3846,8 +3826,37 @@ dom.tokenInput.value = getToken() ? '' : '';
   addMq('(min-width: 980px)');
   addMq('(min-width: 1320px)');
 })();
-if (!getToken()) resetReceiptDailyDisconnected();
-if (getToken()) loadAll();
+(async function initAuthAndLoad() {
+  if (window.LINE_REPORT_AUTH) {
+    try {
+      await LINE_REPORT_AUTH.consumeUrlAuthParams({
+        exchangeUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/link-login', LINE_REPORT_PAGES.PROJECT_URL),
+        adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report',
+      });
+    } catch (error) {
+      console.error('consumeUrlAuthParams failed:', error);
+      alert(error.message || String(error));
+    }
+    const rememberEl = document.getElementById('rememberLoginCheck');
+    if (rememberEl) LINE_REPORT_AUTH.bindRememberCheckbox(rememberEl, updateAuthBadge);
+  } else {
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const urlToken = params.get('t');
+      if (urlToken) {
+        setToken(urlToken);
+        params.delete('t');
+        const qs = params.toString();
+        history.replaceState(null, '', location.pathname + (qs ? ('?' + qs) : '') + (location.hash || ''));
+      }
+    })();
+  }
+
+  updateAuthBadge();
+  dom.tokenInput.value = getToken() ? '' : '';
+  if (!getToken()) resetReceiptDailyDisconnected();
+  if (getToken()) await loadAll();
+})();
 </script>
 </body>
 </html>

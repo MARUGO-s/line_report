@@ -12,10 +12,13 @@ import {
   shouldDeferDailyBudgetUntilJstOpen,
   type SalesBudgetAllocationWeights,
 } from './sales_budget_allocation.ts'
+import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import { buildReceiptAnalyticsDashboardUri } from './receipt_line_actions.ts'
 
 export type ReceiptReplyContext = {
   storeDisplayName: string
   storePartitionKey: string
+  analyticsDashboardUrl: string
   receiptDateText: string
   receiptDateIso: string
   taxAmountYen: number | null
@@ -120,6 +123,26 @@ async function fetchBudgetForStoreMonth(
     holiday_weight: (Number.isFinite(hw) && hw > 0) ? hw : null,
     pre_holiday_weight: (Number.isFinite(phw) && phw > 0) ? phw : null,
     store_closed_dates: storeClosedDates,
+  }
+}
+
+async function buildReceiptAnalyticsDashboardUrlForLine(
+  supabase: SupabaseClient,
+  storePartitionKey: string,
+  targetMonth: string,
+): Promise<string> {
+  try {
+    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+      source: 'line_receipt_report',
+      store_partition_key: storePartitionKey,
+      target_month: targetMonth,
+    })
+    return buildReceiptAnalyticsDashboardUri(storePartitionKey, targetMonth, {
+      loginToken: issued.token,
+    })
+  } catch (error) {
+    console.error('buildReceiptAnalyticsDashboardUrlForLine failed:', error)
+    return buildReceiptAnalyticsDashboardUri(storePartitionKey, targetMonth)
   }
 }
 
@@ -255,6 +278,11 @@ export async function loadReceiptReplyContext(
   },
 ): Promise<ReceiptReplyContext> {
   const month = params.receiptDateIso.slice(0, 7)
+  const analyticsDashboardUrl = await buildReceiptAnalyticsDashboardUrlForLine(
+    supabase,
+    params.storePartitionKey,
+    month,
+  )
   const monthAgg = await loadMonthAggUpToDate(
     supabase,
     params.receiptTable,
@@ -293,6 +321,7 @@ export async function loadReceiptReplyContext(
   return {
     storeDisplayName: params.storeDisplayName,
     storePartitionKey: params.storePartitionKey,
+    analyticsDashboardUrl,
     receiptDateText: params.receipt.date ?? params.receiptDateIso,
     receiptDateIso: params.receiptDateIso,
     taxAmountYen: parseCurrencyAmount(params.receipt.taxAmount),

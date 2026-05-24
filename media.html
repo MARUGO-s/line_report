@@ -2724,9 +2724,17 @@
       });
     }
 
-    (function init() {
+    (async function init() {
       if (window.LINE_REPORT_AUTH) {
-        LINE_REPORT_AUTH.consumeUrlTokenParam();
+        try {
+          await LINE_REPORT_AUTH.consumeUrlAuthParams({
+            exchangeUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/link-login', FIXED_PROJECT_URL),
+            adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report',
+          });
+        } catch (error) {
+          console.error('consumeUrlAuthParams failed:', error);
+          alert(error.message || String(error));
+        }
         if (dom.rememberLoginCheck) {
           LINE_REPORT_AUTH.bindRememberCheckbox(dom.rememberLoginCheck, updateAuthState);
         }
