@@ -307,7 +307,7 @@ Deno.serve(async (req) => {
         expires_at: session.expires_at,
       }, 200)
     } catch (e) {
-      if (e instanceof Error && /invalid, expired, or already used/i.test(e.message)) {
+      if (e instanceof Error && /invalid|expired/i.test(e.message)) {
         return json({ error: e.message }, 401)
       }
       const err = asAppError(e)

@@ -9,9 +9,19 @@
 
   var PERSIST_TOKEN_KEY = 'line_summary_admin_token';
   var SESSION_TOKEN_KEY = 'line_summary_admin_token__session';
+  /** LINE 経由で交換した session token（lrst_）のみ端末に保持 */
+  var LINE_SESSION_TOKEN_KEY = 'line_summary_admin_session__line';
   var REMEMBER_KEY = 'line_summary_remember_login';
   var SESSION_PREFIX = 'lrst_';
   var LEGACY_TOKEN_NOTICE_KEY = 'line_report_legacy_token_notice';
+
+  function isLineEntryUrl() {
+    try {
+      var params = new URLSearchParams(global.location.search);
+      if (params.get('from') === 'line') return true;
+    } catch (_) {}
+    return /Line\//i.test(String(global.navigator && global.navigator.userAgent || ''));
+  }
 
   function purgeLegacyPersistentToken() {
     try {
@@ -28,6 +38,13 @@
     return false;
   }
 
+  function shouldPersistLineSession(token, options) {
+    options = options || {};
+    if (options.persistLine === true) return true;
+    if (options.persistLine === false) return false;
+    return isLineEntryUrl() && isSessionToken(token);
+  }
+
   function setRememberEnabled() {
     try {
       localStorage.removeItem(REMEMBER_KEY);
@@ -36,31 +53,39 @@
 
   function readTokenFromAnyStorage() {
     purgeLegacyPersistentToken();
-    return sessionStorage.getItem(SESSION_TOKEN_KEY) || localStorage.getItem(PERSIST_TOKEN_KEY) || '';
+    return sessionStorage.getItem(SESSION_TOKEN_KEY)
+      || localStorage.getItem(LINE_SESSION_TOKEN_KEY)
+      || '';
   }
 
   function clearTokenStorage() {
     try {
       localStorage.removeItem(PERSIST_TOKEN_KEY);
       localStorage.removeItem(REMEMBER_KEY);
+      localStorage.removeItem(LINE_SESSION_TOKEN_KEY);
       sessionStorage.removeItem(SESSION_TOKEN_KEY);
     } catch (_) {}
   }
 
-  function writeToken(value) {
+  function writeToken(value, options) {
     var next = String(value || '').trim();
     clearTokenStorage();
     if (!next) return;
     sessionStorage.setItem(SESSION_TOKEN_KEY, next);
+    if (shouldPersistLineSession(next, options)) {
+      localStorage.setItem(LINE_SESSION_TOKEN_KEY, next);
+    }
   }
 
   function getToken() {
     purgeLegacyPersistentToken();
-    return sessionStorage.getItem(SESSION_TOKEN_KEY) || '';
+    return sessionStorage.getItem(SESSION_TOKEN_KEY)
+      || localStorage.getItem(LINE_SESSION_TOKEN_KEY)
+      || '';
   }
 
-  function setToken(value) {
-    writeToken(value);
+  function setToken(value, options) {
+    writeToken(value, options || {});
   }
 
   function clearToken() {
@@ -133,6 +158,11 @@
     var params = new URLSearchParams(global.location.search);
     var loginToken = String(params.get('lt') || '').trim();
     if (!loginToken) return false;
+    var existing = getToken();
+    if (existing && isSessionToken(existing)) {
+      stripUrlParams(['lt']);
+      return true;
+    }
     var response = await fetch(exchangeUrl, {
       method: 'POST',
       headers: {
@@ -141,7 +171,7 @@
       },
       body: JSON.stringify({
         login_token: loginToken,
-        remember_login: isRememberEnabled(),
+        remember_login: isLineEntryUrl(),
       }),
     });
     if (!response.ok) {
@@ -153,7 +183,8 @@
     if (!sessionToken) {
       throw new Error('自動ログインに失敗しました。session_token がありません。');
     }
-    setToken(sessionToken);
+    var persistLine = isLineEntryUrl();
+    setToken(sessionToken, { persistLine: persistLine });
     stripUrlParams(['lt']);
     return true;
   }
@@ -193,7 +224,9 @@
   global.LINE_REPORT_AUTH = {
     PERSIST_TOKEN_KEY: PERSIST_TOKEN_KEY,
     SESSION_TOKEN_KEY: SESSION_TOKEN_KEY,
+    LINE_SESSION_TOKEN_KEY: LINE_SESSION_TOKEN_KEY,
     REMEMBER_KEY: REMEMBER_KEY,
+    isLineEntryUrl: isLineEntryUrl,
     SESSION_PREFIX: SESSION_PREFIX,
     supportsPersistentLogin: false,
     isRememberEnabled: isRememberEnabled,

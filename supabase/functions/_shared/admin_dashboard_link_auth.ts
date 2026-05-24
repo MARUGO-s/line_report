@@ -3,7 +3,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.44.0
 const TOKEN_TABLE = "admin_dashboard_auth_tokens"
 const LOGIN_LINK_PREFIX = "lrlt_"
 const SESSION_PREFIX = "lrst_"
-const LOGIN_LINK_TTL_SEC = 10 * 60
+const LOGIN_LINK_TTL_SEC = 30 * 24 * 60 * 60
 const SESSION_TTL_REMEMBER_SEC = 30 * 24 * 60 * 60
 const SESSION_TTL_EPHEMERAL_SEC = 12 * 60 * 60
 
@@ -98,18 +98,23 @@ export async function exchangeAdminDashboardLoginLinkToken(
   const nowIso = new Date().toISOString()
   const { data, error } = await supabase
     .from(TOKEN_TABLE)
-    .update({ used_at: nowIso })
+    .select("id, metadata")
     .eq("token_kind", "login_link")
     .eq("token_hash", tokenHash)
-    .is("used_at", null)
     .gt("expires_at", nowIso)
-    .select("metadata")
     .maybeSingle()
   if (error) {
     throw new Error(`Failed to exchange login link token: ${error.message}`)
   }
   if (!data) {
-    throw new Error("Login link is invalid, expired, or already used.")
+    throw new Error("Login link is invalid or expired.")
+  }
+  const { error: markUsedError } = await supabase
+    .from(TOKEN_TABLE)
+    .update({ used_at: nowIso })
+    .eq("id", data.id)
+  if (markUsedError) {
+    console.error("Failed to update login link used_at:", markUsedError.message)
   }
   const mergedMetadata = {
     ...normalizeMetadata(data.metadata),
