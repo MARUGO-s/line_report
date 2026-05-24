@@ -2,6 +2,8 @@
 
 **編集・デプロイともにこのリポジトリ（`MARUGO-s/line_report`）が本体です。**
 
+**2026年5月の機能追加・仕様変更のまとめ:** [CHANGELOG-2026-05.md](./CHANGELOG-2026-05.md)（レシート電話照合・シート同期マージ・LINE 売上分析 UI など）
+
 | 画面 | URL |
 |------|-----|
 | 管理画面 | https://marugo-s.github.io/line_report/index.html |
