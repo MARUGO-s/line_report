@@ -1,7 +1,8 @@
 /**
  * 管理トークンの保持
- * - セッショントークンは常に sessionStorage のみ
- * - 旧 localStorage 保存は初回読込時に削除
+ * - 通常: lrst_ セッションは sessionStorage のみ
+ * - LINE 経由: lrst_ を localStorage（line_summary_admin_session__line）にも保存（サーバー TTL 3 日）
+ * - 旧 localStorage の生トークンは初回読込時に削除
  * - 旧 `?t=` ログインは受け付けず、URL から除去のみ行う
  */
 (function (global) {

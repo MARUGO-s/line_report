@@ -21,6 +21,7 @@
 | 管理画面 | Webhook 別設定の整理、**レシート照合電話**の編集 API・UI |
 | スプレッドシート | 双方向同期で **更新日時の新しい側を優先**。シート削除が DB に反映 |
 | 売上分析 | LINE 経由は **1 店舗固定表示**・メディア/予約表/売上シート非表示 |
+| セキュリティ | **`?t=` 廃止・`lt` ログイン・LINE セッション 3 日保持・`/auth/logout`・CSP** |
 | DB | `store_webhook_tables.receipt_phones` 列追加 |
 | GAS | タブ先頭行に同期用ウォーターマーク、日次タブの更新日時 |
 
@@ -171,7 +172,7 @@ https://marugo-s.github.io/line_report/analytics.html
   ?store_key=marugoyotsuya
   &month=2025-05
   &from=line
-  &t={ADMIN_DASHBOARD_TOKEN}   # Secret 設定時のみ
+  &lt={ONE_TIME_LOGIN_TOKEN}
 ```
 
 | クエリ | 用途 |
@@ -179,7 +180,7 @@ https://marugo-s.github.io/line_report/analytics.html
 | `store_key` | 対象店舗（partition key） |
 | `month` | 対象月（`YYYY-MM`） |
 | `from=line` | LINE 経由であることを UI が判定 |
-| `t` | 管理トークン（自動ログイン用・URL から除去後も `store_key` 等は残る） |
+| `lt` | 短命のワンタイムログインチケット（交換後に URL から除去） |
 
 ### 5.2 LINE 経由で非表示にするもの
 
@@ -207,11 +208,53 @@ LINE 経由かつ URL に `store_key` がある場合:
 
 | 条件 | 動作 |
 |------|------|
-| `ADMIN_DASHBOARD_TOKEN` が hocbn Edge Secret に設定されている | URL の `?t=` で **自動保存** → 接続カード非表示 → データ読み込み |
-| トークン未設定・URL に `t` なし | 「接続」で手動入力（従来どおり） |
-| ログイン状態を保持（既定 ON） | localStorage に保持 → 次回も自動 |
+| URL に `lt` がある | `/auth/link-login` で **session token（`lrst_`）に交換** → URL から `lt` を除去 → 接続カード非表示 |
+| すでに有効な `lrst_` がある | `lt` が使い済みでもエラーにせず、そのまま利用（同じ LINE メッセージの再タップ向け） |
+| `lt` が無い・期限切れ | 「接続」で固定トークンを手動入力（従来どおり） |
+| **LINE 経由**（`from=line` または LINE アプリ内ブラウザ） | 交換した `lrst_` を **`localStorage`（`line_summary_admin_session__line`）にも保存**。次回 LINE から開いても再入力不要になりやすい |
+| **管理画面・通常ブラウザ** | **`sessionStorage` のみ**（タブを閉じるとログアウト） |
 
-※ Face ID / 指紋認証への置き換えは **未実装**（WebAuthn 等の別途開発が必要）。
+※ 旧 `?t=` 直ログインは **無効化**。URL に付いていても保存せず除去のみ行う。
+
+**サーバー側セッション有効期限（`admin_dashboard_link_auth.ts`）**
+
+| 種別 | 有効期限 |
+|------|----------|
+| LINE 経由で交換（`remember_login: true`） | **3 日** |
+| 通常タブ（`remember_login: false`） | **12 時間** |
+| URL の `lt`（ログインリンク） | **30 日**（再タップ・古いメッセージからの再開用。交換後は `used_at` が付くが、有効な `lrst_` があれば再交換不要） |
+
+### 5.5 セキュリティ強化（2026-05-25 追記）
+
+この回で、管理画面まわりの認証と公開ページ配信を次のように強化した。
+
+| 項目 | 変更内容 |
+|------|----------|
+| 自動ログイン | 生の `ADMIN_DASHBOARD_TOKEN` を URL に載せる方式を廃止し、`lt` ワンタイムチケット方式へ統一 |
+| トークン保存 | `auth-session.js` の保存先を **localStorage から sessionStorage に変更**。旧 persistent token は初回読込時に移して削除 |
+| API キャッシュ | `site-cache.js` の保存先も **sessionStorage** に変更。旧 localStorage キャッシュは削除 |
+| セッション失効 | `admin-api` に `POST /auth/logout` を追加。ログアウト時に **サーバー側 session token を revoke** |
+| トークンローテーション | `PUT /auth/token` 実行時、既存の login link / session token を **全 revoke** |
+| 固定トークン fallback | DB に `admin_dashboard_token_hash` がある場合、Edge Secret fallback では通らないように変更 |
+| 公開ページ保護 | `index.html` / `analytics.html` / `media.html` / `reservation.html` に **meta CSP** と frame-busting を追加 |
+| 外部 JS | `analytics.html` の `Chart.js` を CDN 直読みから **`vendor/chart.umd.min.js` のローカル配信**へ変更 |
+
+補足:
+
+- 固定トークンの手入力ログインは残しているが、**このタブだけ有効**で永続保持しない（生トークンは `localStorage` に保存しない）。
+- `GitHub Pages` はレスポンスヘッダで `CSP` や `X-Frame-Options` を返せないため、現状は **meta CSP + frame-busting** で補っている。
+
+### 5.6 LINE 再ログイン問題の修正（2026-05-23 追記）
+
+LINE アプリ内ブラウザは **`sessionStorage` が閉じるたびに消える**ため、セキュリティ強化後に「売上推移を見る」のたびに管理トークン入力が必要になっていた。
+
+| 対応 | 内容 |
+|------|------|
+| `auth-session.js` | LINE 経由の `lt` 交換時に `remember_login: true` を送り、返却 `lrst_` を **LINE 専用 `localStorage` キー**にも保存 |
+| 再タップ | 有効な `lrst_` があるときは `lt` の再交換をスキップ |
+| `admin_dashboard_link_auth.ts` | LINE セッション（remember）の TTL を **3 日**に設定（`SESSION_TTL_REMEMBER_SEC`） |
+
+**デプロイ:** `auth-session.js` は GitHub Pages、`admin-api` / `line-webhook` は Edge Functions の再デプロイが必要。
 
 ---
 
@@ -292,6 +335,10 @@ npx supabase functions deploy admin-api line-webhook receipt-sheets-sync-cron \
 | `5354dba` | 管理画面のレシート電話編集・シート同期マージ・DB 列 |
 | `0d259fe` | LINE 時に売上シートボタン非表示 |
 | `3cf1f98` | LINE 時に店舗固定表示 |
+| `de55cdc` | LINE 自動ログインを短命ログインチケット方式へ変更 |
+| `59ad7b1` | `?t=` 廃止、sessionStorage 化、`/auth/logout`、CSP、ローカル Chart.js |
+| `e1e23e2` | LINE ログインリンクの再タップ対応（有効 `lrst_` 時は `lt` 再交換をスキップ） |
+| （本番反映） | LINE セッション **3 日**保持・`auth-session.js` の LINE `localStorage` 保存 |
 
 ---
 
@@ -314,6 +361,15 @@ npx supabase functions deploy admin-api line-webhook receipt-sheets-sync-cron \
 
 **A.** はい。次のレシート画像から `line-webhook` が DB の `receipt_phones` を読みます。コード内フォールバックは DB が空のときのみ使われます。
 
+### Q. LINE から開くたびに管理トークンを入れないといけない
+
+**A.** 2026-05-23 以降は、LINE 経由で一度 `lt` からログインできれば **`lrst_` を端末に最大 3 日保持**します。次を確認してください。
+
+1. GitHub Pages の `auth-session.js` が最新か（ハードリロード）
+2. `admin-api` / `line-webhook` が再デプロイ済みか（`lt` 発行・3 日セッション）
+3. **新しい日報メッセージ**の「売上推移を見る」から開いているか（古い `?t=` 付きリンクは無効）
+4. 3 日経過・ログアウト・別端末の場合は、新しい日報リンクから再度開く
+
 ---
 
 ## 10. 変更ファイル一覧（主要）
@@ -328,6 +384,8 @@ npx supabase functions deploy admin-api line-webhook receipt-sheets-sync-cron \
 | `supabase/functions/_shared/clear_store_sheet_budget_tabs.ts` | 店舗タブクリア |
 | `supabase/functions/_shared/admin_receipt_sales.ts` | 予算 API・電話 PUT |
 | `supabase/functions/_shared/receipt_line_actions.ts` | 売上分析 URL 生成 |
+| `supabase/functions/_shared/admin_dashboard_link_auth.ts` | `lt` / `lrst_` 発行・TTL（LINE セッション 3 日） |
+| `auth-session.js` | ログイン保持・LINE `localStorage`・`lt` 交換 |
 | `supabase/functions/admin-api/index.ts` | REST ルーティング |
 | `supabase/functions/line-webhook/index.ts` | レシート受信 |
 | `supabase/functions/receipt-sheets-sync-cron/index.ts` | 同期 cron |
@@ -339,4 +397,4 @@ npx supabase functions deploy admin-api line-webhook receipt-sheets-sync-cron \
 
 ---
 
-*最終更新: 2026-05-25（会話・実装内容に基づく）*
+*最終更新: 2026-05-23（LINE セッション 3 日・ドキュメント追記）*

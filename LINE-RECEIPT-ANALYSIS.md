@@ -76,7 +76,7 @@ https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook/marugoyotsuya
 | `LINE_CHANNEL_ACCESS_TOKEN__{STORE_KEY}` | 店舗別トークン（任意・優先） |
 | `LINE_CHANNEL_SECRET` | 共通チャネルシークレット |
 | `LINE_CHANNEL_SECRET__{STORE_KEY}` | 店舗別シークレット（任意・優先） |
-| `ADMIN_DASHBOARD_TOKEN` | 管理画面の固定トークン認証。LINE の「売上推移を見る」は短命ログインチケット経由で利用 |
+| `ADMIN_DASHBOARD_TOKEN` | 管理画面の固定トークン認証。LINE の「売上推移を見る」は URL の `lt` を `/auth/link-login` で `lrst_` セッションに交換して利用（LINE 経由は端末に **最大 3 日** 保持） |
 
 `{STORE_KEY}` は `store_partition_key` を大文字化したもの（例: `marugoyotsuya` → `MARUGOYOTSUya` ではなく `MARUGOYOTSUya` — 実装では `[^a-zA-Z0-9_]` を `_` に置換して大文字化）。
 
@@ -296,4 +296,5 @@ Flex の「売上推移を見る」は同画面へ遷移します。LINE 経由�
 - 管理画面から `receipt_phones` 編集
 - スプレッドシート双方向同期の **更新日時マージ**・シート削除の DB 反映
 - 売上分析: LINE 経由は **1 店舗固定**・メディア/予約表/売上シート非表示
-- 「売上推移を見る」URL に `from=line`・`store_key`・`month`
+- 「売上推移を見る」URL に `from=line`・`store_key`・`month`・`lt`（ログインリンク）
+- LINE 経由の自動ログイン: `lrst_` を端末 `localStorage` に保持（**3 日**でサーバー失効）。詳細は [CHANGELOG-2026-05.md §5.4–5.6](./CHANGELOG-2026-05.md)

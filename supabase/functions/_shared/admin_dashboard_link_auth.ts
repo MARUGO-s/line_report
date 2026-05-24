@@ -4,7 +4,7 @@ const TOKEN_TABLE = "admin_dashboard_auth_tokens"
 const LOGIN_LINK_PREFIX = "lrlt_"
 const SESSION_PREFIX = "lrst_"
 const LOGIN_LINK_TTL_SEC = 30 * 24 * 60 * 60
-const SESSION_TTL_REMEMBER_SEC = 30 * 24 * 60 * 60
+const SESSION_TTL_REMEMBER_SEC = 3 * 24 * 60 * 60
 const SESSION_TTL_EPHEMERAL_SEC = 12 * 60 * 60
 
 function toIsoAfterSeconds(seconds: number): string {
