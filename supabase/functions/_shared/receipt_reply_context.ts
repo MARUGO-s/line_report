@@ -13,6 +13,10 @@ import {
   type SalesBudgetAllocationWeights,
 } from './sales_budget_allocation.ts'
 import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import {
+  fetchManualMonthSales,
+  type ManualMonthSalesRecord,
+} from './manual_month_sales.ts'
 import { buildReceiptAnalyticsDashboardUri } from './receipt_line_actions.ts'
 
 export type ReceiptReplyContext = {
@@ -74,6 +78,76 @@ function formatSignedPct(value: number | null): string | null {
   if (value == null || !Number.isFinite(value)) return null
   const sign = value >= 0 ? '+' : ''
   return `${sign}${value.toFixed(1)}%`
+}
+
+function parseYearMonth(month: string): { year: number; month: number } | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(month)
+  if (!match) return null
+  const year = Number(match[1])
+  const monthNumber = Number(match[2])
+  if (!Number.isFinite(year) || !Number.isFinite(monthNumber) || monthNumber < 1 || monthNumber > 12) {
+    return null
+  }
+  return { year, month: monthNumber }
+}
+
+function daysInMonth(month: string): number | null {
+  const parsed = parseYearMonth(month)
+  if (!parsed) return null
+  return new Date(Date.UTC(parsed.year, parsed.month, 0)).getUTCDate()
+}
+
+function dayOfMonthFromIso(dateIso: string): number | null {
+  const match = /^\d{4}-\d{2}-(\d{2})$/.exec(dateIso)
+  if (!match) return null
+  const day = Number(match[1])
+  if (!Number.isFinite(day) || day < 1 || day > 31) return null
+  return day
+}
+
+function buildComparableEndDateForMonth(month: string, dayOfMonth: number | null): string {
+  const parsed = parseYearMonth(month)
+  const totalDays = daysInMonth(month)
+  if (!parsed || !totalDays) return `${month}-01`
+  const safeDay = Number.isFinite(dayOfMonth) && dayOfMonth != null
+    ? Math.min(Math.max(Math.round(dayOfMonth), 1), totalDays)
+    : 1
+  return `${parsed.year}-${String(parsed.month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`
+}
+
+function computeComparableMonthProgressRatio(month: string, endDateIso: string): number | null {
+  const totalDays = daysInMonth(month)
+  const dayOfMonth = dayOfMonthFromIso(endDateIso)
+  if (!totalDays || !dayOfMonth) return null
+  return Math.max(0, Math.min(dayOfMonth / totalDays, 1))
+}
+
+function prorateManualWholeMonthValue(
+  value: number | null | undefined,
+  ratio: number | null,
+): number | null {
+  if (value == null) return null
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) return null
+  if (ratio == null) return Math.round(n)
+  return Math.round(n * ratio)
+}
+
+function mergePriorAggWithManualMonth(
+  priorAgg: MonthAgg,
+  manualMonth: ManualMonthSalesRecord | null,
+  priorMonth: string,
+  priorEndDate: string,
+): MonthAgg {
+  if (!manualMonth) return priorAgg
+  const ratio = computeComparableMonthProgressRatio(priorMonth, priorEndDate)
+  return {
+    gross: prorateManualWholeMonthValue(manualMonth.gross_sales_yen, ratio) ?? priorAgg.gross,
+    party: prorateManualWholeMonthValue(manualMonth.party_count, ratio) ?? priorAgg.party,
+    guest: prorateManualWholeMonthValue(manualMonth.guest_count, ratio) ?? priorAgg.guest,
+    businessDays: prorateManualWholeMonthValue(manualMonth.operating_days_count, ratio) ?? priorAgg.businessDays,
+    byDate: priorAgg.byDate,
+  }
 }
 
 async function fetchBudgetForStoreMonth(
@@ -303,10 +377,24 @@ export async function loadReceiptReplyContext(
 
   const priorYear = Number(month.slice(0, 4)) - 1
   const priorMonth = `${priorYear}-${month.slice(5, 7)}`
-  const priorEndDate = `${priorYear}-${params.receiptDateIso.slice(5, 10)}`
-  const priorAgg = await loadMonthAggUpToDate(
+  const priorEndDate = buildComparableEndDateForMonth(
+    priorMonth,
+    dayOfMonthFromIso(params.receiptDateIso),
+  )
+  const priorReceiptAgg = await loadMonthAggUpToDate(
     supabase,
     params.receiptTable,
+    priorMonth,
+    priorEndDate,
+  )
+  const priorManualMonth = await fetchManualMonthSales(
+    supabase,
+    params.storePartitionKey,
+    priorMonth,
+  )
+  const priorAgg = mergePriorAggWithManualMonth(
+    priorReceiptAgg,
+    priorManualMonth,
     priorMonth,
     priorEndDate,
   )
