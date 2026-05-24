@@ -1,7 +1,7 @@
 /**
  * 管理トークンの保持
  * - セッショントークンは常に sessionStorage のみ
- * - 旧 localStorage 保存は初回読込時に sessionStorage へ移して削除
+ * - 旧 localStorage 保存は初回読込時に削除
  * - 旧 `?t=` ログインは受け付けず、URL から除去のみ行う
  */
 (function (global) {
@@ -11,13 +11,13 @@
   var SESSION_TOKEN_KEY = 'line_summary_admin_token__session';
   var REMEMBER_KEY = 'line_summary_remember_login';
   var SESSION_PREFIX = 'lrst_';
+  var LEGACY_TOKEN_NOTICE_KEY = 'line_report_legacy_token_notice';
 
-  function migrateLegacyPersistentToken() {
+  function purgeLegacyPersistentToken() {
     try {
-      var existing = sessionStorage.getItem(SESSION_TOKEN_KEY) || '';
       var legacy = localStorage.getItem(PERSIST_TOKEN_KEY) || '';
-      if (!existing && legacy) {
-        sessionStorage.setItem(SESSION_TOKEN_KEY, legacy);
+      if (legacy) {
+        sessionStorage.setItem(LEGACY_TOKEN_NOTICE_KEY, '1');
       }
       localStorage.removeItem(PERSIST_TOKEN_KEY);
       localStorage.removeItem(REMEMBER_KEY);
@@ -35,7 +35,7 @@
   }
 
   function readTokenFromAnyStorage() {
-    migrateLegacyPersistentToken();
+    purgeLegacyPersistentToken();
     return sessionStorage.getItem(SESSION_TOKEN_KEY) || localStorage.getItem(PERSIST_TOKEN_KEY) || '';
   }
 
@@ -55,7 +55,7 @@
   }
 
   function getToken() {
-    migrateLegacyPersistentToken();
+    purgeLegacyPersistentToken();
     return sessionStorage.getItem(SESSION_TOKEN_KEY) || '';
   }
 
@@ -164,6 +164,17 @@
     return consumeUrlTokenParam();
   }
 
+  function consumeLegacyTokenNotice() {
+    try {
+      var raw = sessionStorage.getItem(LEGACY_TOKEN_NOTICE_KEY);
+      if (!raw) return false;
+      sessionStorage.removeItem(LEGACY_TOKEN_NOTICE_KEY);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function syncRememberCheckbox(checkbox) {
     if (!(checkbox instanceof HTMLInputElement)) return;
     checkbox.checked = false;
@@ -177,7 +188,7 @@
     if (typeof onChange === 'function') onChange();
   }
 
-  migrateLegacyPersistentToken();
+  purgeLegacyPersistentToken();
 
   global.LINE_REPORT_AUTH = {
     PERSIST_TOKEN_KEY: PERSIST_TOKEN_KEY,
@@ -192,6 +203,7 @@
     clearToken: clearToken,
     isSessionToken: isSessionToken,
     logout: logout,
+    consumeLegacyTokenNotice: consumeLegacyTokenNotice,
     consumeUrlTokenParam: consumeUrlTokenParam,
     consumeUrlLoginTicketParam: consumeUrlLoginTicketParam,
     consumeUrlAuthParams: consumeUrlAuthParams,

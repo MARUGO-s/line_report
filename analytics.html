@@ -2819,6 +2819,11 @@ async function apiFetch(path, options = {}) {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    if (res.status === 401) {
+      await logoutToken();
+      updateAuthBadge();
+      throw new Error('ログインの有効期限が切れたか、古いリンクです。LINEの新しいメッセージから開くか、管理トークンを再入力してください。');
+    }
     throw new Error(`API error ${res.status}: ${text.slice(0, 160)}`);
   }
   return res.json();
@@ -3093,19 +3098,29 @@ async function loadAll() {
     const sk = state.storeKey;
     weatherPromise = fetchWeather(sk, from, to);
     dom.weatherStatus.textContent = '天候取得中…';
-    const [salesResults, monthlyData, allStoresSales] = await Promise.all([
-      Promise.all(sortedMonths.map((m) => fetchSalesMonth(m, sk).catch(() => null))),
+    const [salesResultsWrapped, monthlyData, allStoresSales] = await Promise.all([
+      Promise.all(sortedMonths.map(async (m) => {
+        try {
+          return { data: await fetchSalesMonth(m, sk), error: null };
+        } catch (error) {
+          return { data: null, error };
+        }
+      })),
       fetchMonthly(sk),
       fetchSalesMonth(displayMonth, '').catch(() => null),
     ]);
+    const salesResults = salesResultsWrapped.map((entry) => entry.data).filter(Boolean);
+    const salesErrors = salesResultsWrapped.map((entry) => entry.error).filter(Boolean);
     if (allStoresSales?.store_options?.length) {
       storeOptionsForSelect = allStoresSales.store_options;
     }
-    const byMonth = new Map(
-      (salesResults.filter(Boolean)).map((r) => [r.month, r]),
-    );
-    salesData = byMonth.get(displayMonth) ?? salesResults.filter(Boolean).slice(-1)[0];
-    if (!salesData) throw new Error('売上データを取得できませんでした。');
+    const byMonth = new Map(salesResults.map((r) => [r.month, r]));
+    salesData = byMonth.get(displayMonth) ?? salesResults.slice(-1)[0];
+    if (!salesData) {
+      const authError = salesErrors.find((error) => /ログインの有効期限が切れた|古いリンク/.test(String(error && error.message || '')));
+      if (authError) throw authError;
+      throw new Error('売上データを取得できませんでした。');
+    }
     dailySeries = sortedMonths.flatMap((m) => byMonth.get(m)?.series ?? []);
 
     state.monthlySeries = monthlyData?.series ?? [];
@@ -3850,6 +3865,9 @@ if (lineEntryFromUrl) applyLineEntryStoreLock(lineEntryFromUrl);
     }
     const rememberEl = document.getElementById('rememberLoginCheck');
     if (rememberEl) LINE_REPORT_AUTH.bindRememberCheckbox(rememberEl, updateAuthBadge);
+    if (LINE_REPORT_AUTH.consumeLegacyTokenNotice && LINE_REPORT_AUTH.consumeLegacyTokenNotice()) {
+      alert('以前保存されていた古いログイン情報は削除しました。LINEの新しいメッセージから開くか、管理トークンを再入力してください。');
+    }
   } else {
     (function () {
       const params = new URLSearchParams(location.search);
