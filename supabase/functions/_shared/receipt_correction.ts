@@ -88,6 +88,7 @@ function normalizeReceiptCorrectionDraft(raw: unknown): LineImageReceiptAnalysis
   const source = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {}
   return {
     storeName: source.storeName != null ? String(source.storeName) : null,
+    storePhone: source.storePhone != null ? String(source.storePhone) : null,
     date: source.date != null ? String(source.date) : null,
     netSales: source.netSales != null ? String(source.netSales) : null,
     taxAmount: source.taxAmount != null ? String(source.taxAmount) : null,

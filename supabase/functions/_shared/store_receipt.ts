@@ -30,6 +30,7 @@ export function receiptRowToAnalysis(row: StoreReceiptRow): LineImageReceiptAnal
     const source = raw as Record<string, unknown>
     return {
       storeName: source.storeName != null ? String(source.storeName) : row.store_name,
+      storePhone: source.storePhone != null ? String(source.storePhone) : null,
       date: source.date != null ? String(source.date) : row.receipt_date_text,
       netSales: source.netSales != null ? String(source.netSales) : formatYenField(row.net_sales_yen),
       taxAmount: source.taxAmount != null ? String(source.taxAmount) : formatYenField(row.tax_amount_yen),
@@ -42,6 +43,7 @@ export function receiptRowToAnalysis(row: StoreReceiptRow): LineImageReceiptAnal
   }
   return {
     storeName: row.store_name,
+    storePhone: null,
     date: row.receipt_date_text,
     netSales: formatYenField(row.net_sales_yen),
     taxAmount: formatYenField(row.tax_amount_yen),

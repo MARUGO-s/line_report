@@ -4,6 +4,10 @@ import {
   resolveReceiptNamePartitionKey,
   sanitizeReceiptOcrStoreName,
 } from './receipt_store_name_resolve.ts'
+import {
+  receiptPhoneMatchesRegistry,
+  resolveReceiptPhonePartitionKey,
+} from './store_receipt_phones.ts'
 
 function normalizeStoreCompareKey(raw: string): string {
   return normalizeInlineText(String(raw ?? '').normalize('NFKC'))
@@ -13,15 +17,24 @@ function normalizeStoreCompareKey(raw: string): string {
     .replace(/[・·\-ー—―_]/g, '')
 }
 
-/** Webhook 登録店名とレシート解析店名が実質同じか */
+/**
+ * Webhook 登録店舗とレシートが同一か。
+ * 店名（揺らぎ補正あり）または電話番号のどちらかが一致すれば true。
+ */
 export function receiptStoreNameMatchesRegistry(
   registryDisplayName: string,
   registryPartitionKey: string,
   receiptStoreName: string | null,
+  receiptStorePhone?: string | null,
 ): boolean {
+  const registryPk = String(registryPartitionKey ?? '').trim().toLowerCase()
+  if (registryPk && receiptPhoneMatchesRegistry(registryPk, receiptStorePhone)) {
+    return true
+  }
+
   const parsedRaw = normalizeReceiptFieldText(receiptStoreName, 80)
   const parsed = parsedRaw ? sanitizeReceiptOcrStoreName(parsedRaw) : null
-  if (!parsed) return true
+  if (!parsed) return !!receiptPhoneMatchesRegistry(registryPk, receiptStorePhone)
 
   const registered =
     normalizeReceiptFieldText(registryDisplayName, 80)
@@ -38,9 +51,12 @@ export function receiptStoreNameMatchesRegistry(
     return true
   }
 
-  const registryPk = String(registryPartitionKey ?? '').trim().toLowerCase()
   const parsedPk = resolveReceiptNamePartitionKey(parsed)
+  const phonePk = resolveReceiptPhonePartitionKey(receiptStorePhone)
   if (registryPk && parsedPk && registryPk === parsedPk) {
+    return true
+  }
+  if (registryPk && phonePk && registryPk === phonePk) {
     return true
   }
 
@@ -75,7 +91,15 @@ export function findRegistryEntryForParsedStoreName<T extends StoreRegistryMatch
   registry: T[],
   parsedStoreName: string,
   excludePartitionKey?: string,
+  receiptStorePhone?: string | null,
 ): T | null {
+  const phonePk = resolveReceiptPhonePartitionKey(receiptStorePhone)
+  if (phonePk && phonePk !== excludePartitionKey) {
+    for (const entry of registry) {
+      if (entry.store_partition_key === phonePk) return entry
+    }
+  }
+
   const parsed = normalizeReceiptFieldText(parsedStoreName, 80)
   if (!parsed) return null
 
@@ -85,6 +109,7 @@ export function findRegistryEntryForParsedStoreName<T extends StoreRegistryMatch
       entry.display_name,
       entry.store_partition_key,
       parsed,
+      receiptStorePhone,
     )) {
       return entry
     }

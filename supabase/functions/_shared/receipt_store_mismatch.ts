@@ -70,9 +70,11 @@ export function buildReceiptStoreMismatchFlexReply(
   const { registeredStoreName, parsedStoreName, receipt, suggestedStore, webhookUrl } = guidance
   const parsedDateIso = parseReceiptDateToIso(receipt.date)
   const displayDate = formatJapaneseReceiptDateFromIso(parsedDateIso) ?? capText(receipt.date, 80)
+  const phoneLabel = receipt.storePhone ? capText(receipt.storePhone, 24) : '-'
   const detailRows = [
     kvRow('このWebhook', registeredStoreName, '#B45309'),
     kvRow('解析店名', parsedStoreName, '#B45309'),
+    kvRow('解析電話', phoneLabel),
     kvRow('日付', displayDate),
     kvRow('総売上', capText(receipt.grossSales, 40)),
     kvRow('会計組数', capText(receipt.partyCount, 20)),
@@ -158,6 +160,7 @@ export async function buildStoreMismatchGuidance(
     allStores,
     parsedStoreName,
     registry.store_partition_key,
+    receipt.storePhone,
   )
   const webhookUrl = suggestedStore
     ? resolveLineWebhookUrl(suggestedStore.store_partition_key)
@@ -257,6 +260,7 @@ export async function tryHandlePendingStoreNameMismatchConfirmation(
     parsedStoreName,
     {
       storeName: parsedStoreName,
+      storePhone: null,
       date: null,
       netSales: null,
       taxAmount: null,

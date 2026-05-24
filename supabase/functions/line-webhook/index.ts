@@ -202,7 +202,12 @@ async function processReceiptImageEvent(
     sender_display_name: null as string | null,
   }
 
-  if (!receiptStoreNameMatchesRegistry(storeDisplayName, registry.store_partition_key, receipt.storeName)) {
+  if (!receiptStoreNameMatchesRegistry(
+    storeDisplayName,
+    registry.store_partition_key,
+    receipt.storeName,
+    receipt.storePhone,
+  )) {
     await clearPendingReceiptCorrection(supabase, roomId, userId)
     await clearPendingReceiptDuplicate(supabase, roomId, userId)
     await clearPendingStoreNameMismatch(supabase, roomId, userId)

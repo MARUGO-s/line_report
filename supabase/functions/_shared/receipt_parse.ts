@@ -1,5 +1,6 @@
 import type { LineImageReceiptAnalysis } from './receipt_types.ts'
 import { RECEIPT_BUDGET_BUSINESS_DAY_START_HOUR_JST } from './receipt_types.ts'
+import { extractJapanesePhoneFromText } from './store_receipt_phones.ts'
 
 export function normalizeInlineText(raw: string): string {
   return String(raw ?? '').replace(/\s+/g, ' ').trim()
@@ -204,11 +205,18 @@ function formatJapaneseReceiptDateFromIso(iso: string | null): string | null {
   return `${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日`
 }
 
-export function normalizeLineImageReceiptAnalysis(raw: unknown): LineImageReceiptAnalysis | null {
+export function normalizeLineImageReceiptAnalysis(
+  raw: unknown,
+  extraTextForPhone?: string | null,
+): LineImageReceiptAnalysis | null {
   if (!raw || typeof raw !== 'object') return null
   const data = raw as Record<string, unknown>
 
   let storeName = normalizeReceiptFieldText(data.store_name ?? data.store ?? data.shop_name, 80)
+  let storePhone = normalizeReceiptFieldText(
+    data.store_phone ?? data.phone ?? data.tel ?? data.telephone,
+    40,
+  )
   let date = normalizeReceiptFieldText(data.date ?? data.issued_at ?? data.issued_date, 80)
   let netSales = normalizeReceiptFieldText(data.net_sales ?? data.subtotal ?? data.net_amount, 40)
   let taxAmount = normalizeReceiptFieldText(data.tax_amount ?? data.consumption_tax ?? data.tax, 40)
@@ -265,10 +273,32 @@ export function normalizeLineImageReceiptAnalysis(raw: unknown): LineImageReceip
   const dateIso = parseReceiptDateToIso(date)
   if (dateIso) date = formatJapaneseReceiptDateFromIso(dateIso)
 
-  const hasAnyField = !!(storeName || date || netSales || taxAmount || grossSales || partyCount || guestCount || unitPrice || items.length)
+  if (!storePhone) {
+    storePhone = extractJapanesePhoneFromText(
+      storeName,
+      extraTextForPhone,
+      JSON.stringify(data),
+    )
+  } else {
+    const fromFields = extractJapanesePhoneFromText(storePhone, storeName, extraTextForPhone)
+    if (fromFields) storePhone = fromFields
+  }
+
+  const hasAnyField = !!(
+    storeName ||
+    storePhone ||
+    date ||
+    netSales ||
+    taxAmount ||
+    grossSales ||
+    partyCount ||
+    guestCount ||
+    unitPrice ||
+    items.length
+  )
   if (!hasAnyField) return null
 
-  return { storeName, date, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items }
+  return { storeName, storePhone, date, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items }
 }
 
 export function parseFirstJsonObject(raw: string): unknown | null {
@@ -292,7 +322,7 @@ export function parseFirstJsonObject(raw: string): unknown | null {
 export function normalizeLineImageAnalysisResult(raw: Record<string, unknown>): import('./receipt_types.ts').LineImageAnalysisResult | null {
   const summary = normalizeInlineText(String(raw.summary ?? '')).slice(0, 240)
   const kind = String(raw.kind ?? '').trim().toLowerCase()
-  const receipt = normalizeLineImageReceiptAnalysis(raw.receipt)
+  const receipt = normalizeLineImageReceiptAnalysis(raw.receipt, summary)
   const receiptModelConfidence = parseModelReceiptConfidence(
     raw.receipt_confidence ?? raw.receiptConfidence ?? raw.confidence,
   )

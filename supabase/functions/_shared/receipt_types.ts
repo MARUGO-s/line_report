@@ -1,5 +1,7 @@
 export type LineImageReceiptAnalysis = {
   storeName: string | null
+  /** レシート印字の電話番号（03-xxxx-xxxx 等） */
+  storePhone: string | null
   date: string | null
   netSales: string | null
   taxAmount: string | null

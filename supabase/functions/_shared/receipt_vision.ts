@@ -54,7 +54,7 @@ export async function analyzeLineImageWithGroqScout(
     body: JSON.stringify({
       model: 'meta-llama/llama-4-scout-17b-16e-instruct',
       temperature: 0.1,
-      max_tokens: 340,
+      max_tokens: 380,
       messages: [
         {
           role: 'system',
@@ -64,7 +64,8 @@ export async function analyzeLineImageWithGroqScout(
             '画像がレシート/領収書なら kind を receipt にし、主要項目を抽出してください。',
             'レシートでない場合は kind を general にし、summary に1文（80文字以内）で内容を入れてください。',
             'JSONスキーマ:',
-            '{"kind":"receipt|general","summary":"string","receipt_confidence":0.0,"receipt":{"store_name":"string|null","date":"string|null","net_sales":"string|null","tax_amount":"string|null","gross_sales":"string|null","party_count":"string|null","guest_count":"string|null","unit_price":"string|null","items":["string"]}}',
+            '{"kind":"receipt|general","summary":"string","receipt_confidence":0.0,"receipt":{"store_name":"string|null","store_phone":"string|null","date":"string|null","net_sales":"string|null","tax_amount":"string|null","gross_sales":"string|null","party_count":"string|null","guest_count":"string|null","unit_price":"string|null","items":["string"]}}',
+            'store_phone はレシート上部の電話番号（例: 03-5361-6205）。読めない場合は null。',
             'receipt は kind=general の時は null でも可。items は最大5件まで。読めない項目は null。',
             'kind=receipt のときは receipt_confidence に 0.0〜1.0 の数値を必ず入れる。',
             '金額は可能なら「¥7,700」の形式。会計組数・客数は数値として抽出。summary は必須。',
