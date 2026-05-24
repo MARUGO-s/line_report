@@ -2,6 +2,7 @@
  * レシート・帳票から得た店名を、既知のグループ店舗名へ正規化する。
  * OCR の語順入れ替え・綴り揺れに対し、既存店舗一覧（MARUGO_GROUP_STORE_OPTIONS）へ寄せる。
  */
+import { normalizeInlineText } from './receipt_parse.ts'
 import { MARUGO_GROUP_STORE_OPTIONS } from './marugo_group_stores.ts'
 
 export function normalizeStoreToken(value: string): string {
@@ -12,9 +13,35 @@ export function normalizeStoreToken(value: string): string {
     .trim()
 }
 
-/** レシートに英字で出るブランド。displayName は line_receipt_entries / 返信で使う表記に合わせる。 */
-const RECEIPT_LATIN_BRAND_PROFILES: ReadonlyArray<{ displayName: string; latinCanonical: string }> = [
-  { displayName: 'BISTRO CAVA CAVA', latinCanonical: 'bistrocavacava' },
+/** レシートに英字で出るブランド。partitionKey は Webhook の store_partition_key。 */
+const RECEIPT_LATIN_BRAND_PROFILES: ReadonlyArray<{
+  displayName: string
+  latinCanonical: string
+  partitionKey: string
+}> = [
+  {
+    displayName: 'BISTRO CAVA CAVA',
+    latinCanonical: 'bistrocavacava',
+    partitionKey: 'bistrocavacava',
+  },
+]
+
+/** Webhook 登録名（カタカナ等）とレシート OCR 名（英字等）を同一店舗として扱う */
+const RECEIPT_BRAND_PARTITION_ALIASES: ReadonlyArray<{
+  partitionKey: string
+  labels: string[]
+}> = [
+  {
+    partitionKey: 'bistrocavacava',
+    labels: [
+      'BISTRO CAVA CAVA',
+      'BISTROCAVACAVA',
+      'CAVA CAVA',
+      'ビストロ サヴァサヴァ',
+      'ビストロサヴァサヴァ',
+      'ÇAVA ÇAVA',
+    ],
+  },
 ]
 
 const STORE_ALIAS_MAP: Record<string, string> = {
@@ -81,12 +108,16 @@ function tryMatchReceiptLatinBrand(rawName: string): string | null {
   const sortedInput = sortedLatinFingerprint(latin)
 
   for (const p of RECEIPT_LATIN_BRAND_PROFILES) {
+    if (latin === p.latinCanonical || latin.includes(p.latinCanonical) || p.latinCanonical.includes(latin)) {
+      hits.push({ displayName: p.displayName, score: 1, anagram: false })
+      continue
+    }
     if (sortedInput === sortedLatinFingerprint(p.latinCanonical)) {
       hits.push({ displayName: p.displayName, score: 1, anagram: true })
       continue
     }
     const maxLen = Math.max(latin.length, p.latinCanonical.length)
-    if (maxLen < 8) continue
+    if (maxLen < 6) continue
     const dist = levenshtein(latin, p.latinCanonical)
     const score = 1 - dist / maxLen
     if (score >= 0.84) hits.push({ displayName: p.displayName, score, anagram: false })
@@ -145,4 +176,63 @@ export function findBestStoreNameInText(text: string): string | null {
     }
   }
   return tryMatchReceiptLatinBrand(String(text || '').trim())
+}
+
+function collectNameMatchTokens(rawName: string): Set<string> {
+  const tokens = new Set<string>()
+  const trimmed = String(rawName || '').trim()
+  if (!trimmed) return tokens
+
+  const norm = normalizeStoreToken(trimmed)
+  if (norm) tokens.add(norm)
+
+  const resolved = resolveBestStoreName(trimmed)
+  if (resolved) {
+    const resolvedNorm = normalizeStoreToken(resolved)
+    if (resolvedNorm) tokens.add(resolvedNorm)
+  }
+
+  const latin = extractLatinLettersLower(trimmed)
+  if (latin.length >= 4) tokens.add(latin)
+
+  const compact = normalizeInlineText(trimmed.normalize('NFKC'))
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[・·\-ー—―_]/g, '')
+  if (compact) tokens.add(compact)
+
+  return tokens
+}
+
+/** レシート OCR 店名がどの store_partition_key に属するか（揺らぎ・英字/カタカナ混在） */
+export function resolveReceiptNamePartitionKey(rawName: string | null | undefined): string | null {
+  const trimmed = String(rawName ?? '').trim()
+  if (!trimmed) return null
+
+  const tokens = collectNameMatchTokens(trimmed)
+
+  for (const brand of RECEIPT_BRAND_PARTITION_ALIASES) {
+    for (const label of brand.labels) {
+      const labelTokens = collectNameMatchTokens(label)
+      for (const t of tokens) {
+        for (const lt of labelTokens) {
+          if (!t || !lt) continue
+          if (t === lt) return brand.partitionKey
+          const minLen = Math.min(t.length, lt.length)
+          if (minLen >= 4 && (t.includes(lt) || lt.includes(t))) {
+            return brand.partitionKey
+          }
+        }
+      }
+    }
+  }
+
+  const latinBrand = tryMatchReceiptLatinBrand(trimmed)
+  if (latinBrand) {
+    for (const p of RECEIPT_LATIN_BRAND_PROFILES) {
+      if (p.displayName === latinBrand) return p.partitionKey
+    }
+  }
+
+  return null
 }
