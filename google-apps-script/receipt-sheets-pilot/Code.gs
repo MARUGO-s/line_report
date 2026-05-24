@@ -58,6 +58,14 @@ var SYNC_TIME_BUDGET_MS = 4.5 * 60 * 1000;
 var SYNC_PARALLEL_BATCH = 6;
 var SYNC_RESUME_INDEX_KEY = 'SYNC_RESUME_INDEX';
 var SYNC_RESUME_DIRECTION_KEY = 'SYNC_RESUME_DIRECTION';
+var STORE_BUDGET_HEADERS = ['対象月', '店舗名', '店舗キー', '月間予算円', '月比率', '火比率', '水比率', '木比率', '金比率', '土比率', '日比率', '祭日比率', '祭日前日比率', '休業日', '営業日数', '有効', '更新日時'];
+var STORE_PAST_HEADERS = ['対象月', '店舗キー', '総売上円', '会計組数', '客数', '営業日数', '有効', '更新日時'];
+var STORE_BUDGET_COLS = 17;
+var STORE_PAST_COLS = 8;
+var STORE_BUDGET_EDITABLE_COLS = 16;
+var STORE_PAST_EDITABLE_COLS = 7;
+var STORE_BUDGET_UPDATED_AT_COL = 17;
+var STORE_PAST_UPDATED_AT_COL = 8;
 
 function onOpen() {
   try {
@@ -91,6 +99,46 @@ function onOpen() {
 function syncBoth() { runSyncAllStores_('both'); }
 function syncPull() { runSyncAllStores_('pull'); }
 function syncPush() { runSyncAllStores_('push'); }
+
+function onEdit(e) {
+  try {
+    touchStoreSyncRowUpdatedAt_(e);
+  } catch (err) {
+    Logger.log('touchStoreSyncRowUpdatedAt_: ' + err);
+  }
+}
+
+function touchStoreSyncRowUpdatedAt_(e) {
+  if (!e || !e.range) return;
+  var target = resolveStoreSyncUpdatedAtTarget_(e.range.getSheet().getName());
+  if (!target) return;
+  var startCol = e.range.getColumn();
+  var endCol = startCol + e.range.getNumColumns() - 1;
+  if (startCol > target.updatedAtCol) return;
+  if (startCol === target.updatedAtCol && endCol === target.updatedAtCol) return;
+  if (startCol > target.editableMaxCol) return;
+  var startRow = Math.max(2, e.range.getRow());
+  var endRow = e.range.getRow() + e.range.getNumRows() - 1;
+  if (endRow < startRow) return;
+  var values = [];
+  var stamp = new Date().toISOString();
+  for (var row = startRow; row <= endRow; row++) values.push([stamp]);
+  e.range.getSheet().getRange(startRow, target.updatedAtCol, values.length, 1).setValues(values);
+}
+
+function resolveStoreSyncUpdatedAtTarget_(sheetName) {
+  var name = String(sheetName || '').trim();
+  for (var i = 0; i < STORE_CATALOG.length; i++) {
+    var tabs = storeTabNames_(STORE_CATALOG[i].key);
+    if (name === tabs.budgets[0] || name === tabs.budgets[1]) {
+      return { updatedAtCol: STORE_BUDGET_UPDATED_AT_COL, editableMaxCol: STORE_BUDGET_EDITABLE_COLS };
+    }
+    if (name === tabs.past[0] || name === tabs.past[1]) {
+      return { updatedAtCol: STORE_PAST_UPDATED_AT_COL, editableMaxCol: STORE_PAST_EDITABLE_COLS };
+    }
+  }
+  return null;
+}
 
 /** サーバーが Sheets API で全店舗同期（GAS は開始だけ ≈10秒） */
 function syncBothServerFast() {
@@ -526,7 +574,7 @@ function normalizeBudgetSheetForStore_(cfg) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
   var numRows = lastRow - 1;
-  var values = sheet.getRange(2, 1, numRows, 10).getValues();
+  var values = sheet.getRange(2, 1, numRows, STORE_BUDGET_COLS).getValues();
   var changed = false;
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
@@ -534,7 +582,7 @@ function normalizeBudgetSheetForStore_(cfg) {
     if (row[1] !== cfg.storeName) { row[1] = cfg.storeName; changed = true; }
     if (!storeKeysMatch_(row[2], cfg.storeKey)) { row[2] = cfg.storeKey; changed = true; }
   }
-  if (changed) sheet.getRange(2, 1, numRows, 10).setValues(values);
+  if (changed) sheet.getRange(2, 1, numRows, STORE_BUDGET_COLS).setValues(values);
 }
 
 function normalizePastSalesSheetForStore_(cfg) {
@@ -542,14 +590,14 @@ function normalizePastSalesSheetForStore_(cfg) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
   var numRows = lastRow - 1;
-  var values = sheet.getRange(2, 1, numRows, 7).getValues();
+  var values = sheet.getRange(2, 1, numRows, STORE_PAST_COLS).getValues();
   var changed = false;
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
     if (!rowHasContent_(row) || !normalizeMonthCell_(row[0])) continue;
     if (!storeKeysMatch_(row[1], cfg.storeKey)) { row[1] = cfg.storeKey; changed = true; }
   }
-  if (changed) sheet.getRange(2, 1, numRows, 7).setValues(values);
+  if (changed) sheet.getRange(2, 1, numRows, STORE_PAST_COLS).setValues(values);
 }
 
 function prepareStoreSheetsForSync_(cfg) {
@@ -561,11 +609,11 @@ function prepareStoreSheetsForSync_(cfg) {
 }
 
 function readStoreBudgetRows_(cfg) {
-  return readSheetDataFromSheet_(getStoreBudgetSheet_(cfg.storeKey), 2, 1, 500, 10);
+  return readSheetDataFromSheet_(getStoreBudgetSheet_(cfg.storeKey), 2, 1, 500, STORE_BUDGET_COLS);
 }
 
 function readStorePastSalesRows_(cfg) {
-  return readSheetDataFromSheet_(getStorePastSheet_(cfg.storeKey), 2, 1, 500, 7, [2, 3, 4, 5]);
+  return readSheetDataFromSheet_(getStorePastSheet_(cfg.storeKey), 2, 1, 500, STORE_PAST_COLS, [2, 3, 4, 5]);
 }
 
 function readSheetDataFromSheet_(sheet, startRow, startCol, numRows, numCols, integerColumnIndexes) {
@@ -985,14 +1033,14 @@ function ensureTableOfContentsSheet_() {
 function setupStoreSheets_(entry, month, ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
   var tabs = storeTabNames_(entry.key);
-  var budget = ensureSheetWithHeader_(ss, tabs.budgets, ['対象月', '店舗名', '店舗キー', '月間予算円', '平日比率', '休日前比率', '休日比率', '休業日', '営業日数', '有効']);
-  var past = ensureSheetWithHeader_(ss, tabs.past, ['対象月', '店舗キー', '総売上円', '会計組数', '客数', '営業日数', '有効']);
+  var budget = ensureSheetWithHeader_(ss, tabs.budgets, STORE_BUDGET_HEADERS);
+  var past = ensureSheetWithHeader_(ss, tabs.past, STORE_PAST_HEADERS);
   var daily = ensureSheetWithHeader_(ss, tabs.daily, ['日付', '店舗キー', '店舗名', '総売上', '組数', '客数', '日別予算', '差額', 'レシート件数', '更新日時']);
   if (budget.getLastRow() < 2) {
-    budget.getRange(2, 1, 1, 10).setValues([[month, entry.name, entry.key, '', 1, 1.5, 2, '', '', true]]);
+    budget.getRange(2, 1, 1, STORE_BUDGET_COLS).setValues([[month, entry.name, entry.key, '', 1, 1, 1, 1, 1, 1.5, 2, '', '', '', '', true, '']]);
   }
   if (past.getLastRow() < 2) {
-    past.getRange(2, 1, 1, 7).setValues([['', entry.key, '', '', '', '', true]]);
+    past.getRange(2, 1, 1, STORE_PAST_COLS).setValues([['', entry.key, '', '', '', '', true, '']]);
   }
   styleClosedDatesColumn_(budget);
   installBackToTocButton_(budget);
@@ -1135,53 +1183,97 @@ function runSyncViaGasSingle_(direction, opts) {
   return out;
 }
 
-/** 月間予算を A〜J（I=営業日数, J=有効）。取込時に自動実行。 */
+/** 月間予算を A〜O（15列・曜日別重み版）。取込時に自動実行。 */
 function upgradeMonthlyBudgetSheetLayout_(sheet) {
   if (!sheet) throw new Error('月間予算シートがありません');
-  var headerI = String(sheet.getRange(1, 9).getValue() || '').trim();
-  var headerJ = String(sheet.getRange(1, 10).getValue() || '').trim();
+  var headerP = String(sheet.getRange(1, 16).getValue() || '').trim();
+  var headerQ = String(sheet.getRange(1, 17).getValue() || '').trim();
 
-  if (headerI === '営業日数' && headerJ === '有効') {
-    return '月間予算タブはすでに10列形式です（I=営業日数, J=有効）。';
+  // すでに17列形式
+  if (headerP === '有効' && headerQ === '更新日時') {
+    return '月間予算タブはすでに17列形式です（L=祭日比率, M=祭日前日比率, N=休業日, O=営業日数, P=有効, Q=更新日時）。';
   }
 
+  var headerM = String(sheet.getRange(1, 13).getValue() || '').trim();
+  var headerN = String(sheet.getRange(1, 14).getValue() || '').trim();
+  var headerO = String(sheet.getRange(1, 15).getValue() || '').trim();
+
+  // 15列形式（M=営業日数, N=有効, O=更新日時）→ 17列へ移行
+  // L=祭日比率, M=祭日前日比率を L 列に挿入して、N=休業日, O=営業日数, P=有効, Q=更新日時
+  if (headerM === '営業日数' && headerN === '有効' && headerO === '更新日時') {
+    var lastRow = sheet.getLastRow();
+    var numDataRows = Math.max(0, lastRow - 1);
+    // 旧L列(休業日)の前に2列追加: L=祭日比率, M=祭日前日比率
+    sheet.insertColumnsBefore(12, 2);
+    if (numDataRows > 0) {
+      // 新列は空欄のまま（既存データはシフト済み）
+      var vals = sheet.getRange(2, 1, numDataRows, 17).getValues();
+      for (var i = 0; i < vals.length; i++) {
+        vals[i][11] = ''; // L=祭日比率（空）
+        vals[i][12] = ''; // M=祭日前日比率（空）
+      }
+      sheet.getRange(2, 1, numDataRows, 17).setValues(vals);
+    }
+    sheet.getRange(1, 1, 1, STORE_BUDGET_COLS).setValues([STORE_BUDGET_HEADERS]);
+    fillMonthlyBudgetOperatingDays_(sheet);
+    normalizeAllClosedDatesCellsToSingleLine_(sheet);
+    return '月間予算タブを15列から17列形式（祭日比率・祭日前日比率追加）に移行しました。';
+  }
+
+  var headerI = String(sheet.getRange(1, 9).getValue() || '').trim();
+  var headerJ = String(sheet.getRange(1, 10).getValue() || '').trim();
+  var headerK = String(sheet.getRange(1, 11).getValue() || '').trim();
+
+  // 旧11列形式（I=営業日数, J=有効, K=更新日時）→ 15列を経由して17列へ
+  if (headerI === '営業日数' && headerJ === '有効' && headerK === '更新日時') {
+    var lastRow2 = sheet.getLastRow();
+    var numDataRows2 = Math.max(0, lastRow2 - 1);
+    // E(平日)→E(月), F(火)新, G(水)新, H(木)新, I(金)新 の4列を F 列前に追加
+    sheet.insertColumnsBefore(6, 4);
+    if (numDataRows2 > 0) {
+      var vals2 = sheet.getRange(2, 1, numDataRows2, 15).getValues();
+      for (var j = 0; j < vals2.length; j++) {
+        var r = vals2[j];
+        r[5] = r[4]; // 火 ← 平日
+        r[6] = r[4]; // 水 ← 平日
+        r[7] = r[4]; // 木 ← 平日
+        r[8] = r[4]; // 金 ← 平日
+      }
+      sheet.getRange(2, 1, numDataRows2, 15).setValues(vals2);
+    }
+    // 15列ヘッダーを一時セット（再帰呼び出しで17列へ）
+    sheet.getRange(1, 1, 1, 15).setValues([['対象月', '店舗名', '店舗キー', '月間予算円', '月比率', '火比率', '水比率', '木比率', '金比率', '土比率', '日比率', '休業日', '営業日数', '有効', '更新日時']]);
+    fillMonthlyBudgetOperatingDays_(sheet);
+    normalizeAllClosedDatesCellsToSingleLine_(sheet);
+    // 再帰呼び出しで15列→17列へ
+    return upgradeMonthlyBudgetSheetLayout_(sheet);
+  }
+
+  // 旧10列形式（I=有効）または旧9列形式→ まず11列相当に整形してから再帰的に17列へ
   if (headerI === '有効') {
     sheet.insertColumnBefore(9);
     sheet.getRange(1, 9).setValue('営業日数');
     sheet.getRange(1, 10).setValue('有効');
-    fillMonthlyBudgetOperatingDays_(sheet);
-    normalizeAllClosedDatesCellsToSingleLine_(sheet);
-    return (
-      'I列に「営業日数」を追加しました。\n' +
-      '「有効」は J列 に移っています。\n' +
-      'H列の休業日から営業日数を自動計算して I列 に書き込みました。'
-    );
+    sheet.insertColumnAfter(10);
+    sheet.getRange(1, 11).setValue('更新日時');
+  } else {
+    // 9列以下または不明フォーマット: まず11列ヘッダーだけ書く
+    sheet.getRange(1, 1, 1, 11).setValues([['対象月', '店舗名', '店舗キー', '月間予算円', '平日比率', '休日前比率', '休日比率', '休業日', '営業日数', '有効', '更新日時']]);
   }
-
-  sheet.getRange(1, 1, 1, 10).setValues([[
-    '対象月',
-    '店舗名',
-    '店舗キー',
-    '月間予算円',
-    '平日比率',
-    '休日前比率',
-    '休日比率',
-    '休業日',
-    '営業日数',
-    '有効',
-  ]]);
-  fillMonthlyBudgetOperatingDays_(sheet);
-  normalizeAllClosedDatesCellsToSingleLine_(sheet);
-  return '1行目のヘッダーを10列形式にしました。休業日から営業日数を自動計算します。';
+  // 再帰呼び出しで11列→17列へ
+  return upgradeMonthlyBudgetSheetLayout_(sheet);
 }
 
-/** H列の休業日を1行表記に揃える（既存の改行入りセルを修正） */
+/** 休業日列を1行表記に揃える（既存の改行入りセルを修正）。17列形式=N列(14)、15列形式=L列(12)、旧形式=H列(8） */
 function normalizeAllClosedDatesCellsToSingleLine_(sheet) {
   if (!sheet) return;
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
+  var headerP = String(sheet.getRange(1, 16).getValue() || '').trim();
+  var headerM = String(sheet.getRange(1, 13).getValue() || '').trim();
+  var closedCol = (headerP === '有効') ? 14 : (headerM === '営業日数') ? 12 : 8;
   var numRows = lastRow - 1;
-  var range = sheet.getRange(2, 8, numRows, 1);
+  var range = sheet.getRange(2, closedCol, numRows, 1);
   var values = range.getValues();
   var changed = false;
   for (var i = 0; i < values.length; i++) {
@@ -1195,41 +1287,54 @@ function normalizeAllClosedDatesCellsToSingleLine_(sheet) {
     range.setValues(values);
   }
   for (var r = 2; r <= lastRow; r++) {
-    styleClosedDatesCell_(sheet.getRange(r, 8));
+    styleClosedDatesCell_(sheet.getRange(r, closedCol));
   }
 }
 
-/** H列（休業日）から I列（営業日数）を再計算 */
+/** 休業日列から営業日数列を再計算（17列形式=N/O列、15列形式=L/M列、旧11列形式=H/I列） */
 function fillMonthlyBudgetOperatingDays_(sheet) {
   if (!sheet) return;
+  var headerP = String(sheet.getRange(1, 16).getValue() || '').trim();
+  var headerM = String(sheet.getRange(1, 13).getValue() || '').trim();
   var headerI = String(sheet.getRange(1, 9).getValue() || '').trim();
-  if (headerI !== '営業日数') return;
+  var is17 = headerP === '有効';
+  var is15 = !is17 && headerM === '営業日数';
+  var isOld = !is17 && !is15 && headerI === '営業日数';
+  if (!is17 && !is15 && !isOld) return;
+
+  var closedColIdx = is17 ? 13 : is15 ? 11 : 7;   // 0-based: N=13, L=11, H=7
+  var opDaysColIdx = is17 ? 14 : is15 ? 12 : 8;   // 0-based: O=14, M=12, I=8
+  var totalCols = (is17 || is15) ? STORE_BUDGET_COLS : 11;
 
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
   var numRows = lastRow - 1;
-  var values = sheet.getRange(2, 1, numRows, 10).getValues();
+  var values = sheet.getRange(2, 1, numRows, totalCols).getValues();
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
     if (!rowHasContent_(row)) continue;
     var month = normalizeMonthCell_(row[0]);
     if (!month) continue;
-    var opDays = countOperatingDaysFromClosedCell_(month, row[7]);
-    row[8] = opDays > 0 ? opDays : '';
-    row[7] = normalizeClosedDatesCellText_(row[7]);
+    var opDays = countOperatingDaysFromClosedCell_(month, row[closedColIdx]);
+    row[opDaysColIdx] = opDays > 0 ? opDays : '';
+    row[closedColIdx] = normalizeClosedDatesCellText_(row[closedColIdx]);
   }
-  sheet.getRange(2, 1, values.length, 10).setValues(values);
+  sheet.getRange(2, 1, values.length, totalCols).setValues(values);
   normalizeAllClosedDatesCellsToSingleLine_(sheet);
 }
 
 function applyBudgetOperatingDaysUpdates_(updates, storePartitionKey) {
   var sheet = getStoreBudgetSheet_(storePartitionKey);
+  // 17列形式では O列(15)が営業日数、15列形式では M列(13)、旧11列形式では I列(9)
+  var headerP = String(sheet.getRange(1, 16).getValue() || '').trim();
+  var headerM = String(sheet.getRange(1, 13).getValue() || '').trim();
+  var opDaysCol = (headerP === '有効') ? 15 : (headerM === '営業日数') ? 13 : 9;
   for (var u = 0; u < updates.length; u++) {
     var item = updates[u];
     var row = Number(item.row);
     if (!row || row < 2) continue;
-    sheet.getRange(row, 9).setValue(item.operating_days);
+    sheet.getRange(row, opDaysCol).setValue(item.operating_days);
   }
 }
 
@@ -1341,31 +1446,41 @@ function daysInRangeGas_(month, startDay, endDay, allowed) {
   return out;
 }
 
-/** 過去売上を A〜G（F=営業日数, G=有効）。取込時に自動実行。 */
+/** 過去売上を A〜H（F=営業日数, G=有効, H=更新日時）。取込時に自動実行。 */
 function upgradePastSalesSheetLayout_(sheet) {
   if (!sheet) throw new Error('過去売上シートがありません');
   var headerF = String(sheet.getRange(1, 6).getValue() || '').trim();
   var headerG = String(sheet.getRange(1, 7).getValue() || '').trim();
+  var headerH = String(sheet.getRange(1, 8).getValue() || '').trim();
+
+  if (headerF === '営業日数' && headerG === '有効' && headerH === '更新日時') {
+    return '過去売上タブはすでに8列形式です（F=営業日数, G=有効, H=更新日時）。';
+  }
 
   if (headerF === '営業日数' && headerG === '有効') {
-    return '過去売上タブはすでに7列形式です（F=営業日数, G=有効）。';
+    sheet.insertColumnAfter(7);
+    sheet.getRange(1, 8).setValue('更新日時');
+    return 'H列に「更新日時」を追加しました。';
   }
 
   if (headerF === '有効') {
     sheet.insertColumnBefore(6);
     sheet.getRange(1, 6).setValue('営業日数');
     sheet.getRange(1, 7).setValue('有効');
+    sheet.insertColumnAfter(7);
+    sheet.getRange(1, 8).setValue('更新日時');
     return (
       'F列に「営業日数」を追加しました。\n' +
       'もとの「有効」は G列 に移っています。\n\n' +
+      'H列に「更新日時」を追加しました。\n\n' +
       '各月の F列にその月の営業日数（例: 20）を入力してから取込してください。'
     );
   }
 
   sheet
-    .getRange(1, 1, 1, 7)
-    .setValues([['対象月', '店舗キー', '総売上円', '会計組数', '客数', '営業日数', '有効']]);
-  return '1行目のヘッダーを7列形式にしました。F列に営業日数、G列に有効（TRUE）を入力してください。';
+    .getRange(1, 1, 1, STORE_PAST_COLS)
+    .setValues([STORE_PAST_HEADERS]);
+  return '1行目のヘッダーを8列形式にしました。F列に営業日数、G列に有効（TRUE）、H列に更新日時が入ります。';
 }
 
 function readSheetData_(tabNames, startRow, startCol, numRows, numCols, integerColumnIndexes) {
@@ -1445,8 +1560,8 @@ function applyBudgetRowUpdates_(updates, storePartitionKey) {
     var row = Number(item.row);
     if (!row || row < 2) continue;
     var values = item.values;
-    if (!values || values.length < 10) continue;
-    sheet.getRange(row, 1, 1, 10).setValues([values]);
+    if (!values || values.length < STORE_BUDGET_COLS) continue;
+    sheet.getRange(row, 1, 1, STORE_BUDGET_COLS).setValues([values]);
   }
   styleClosedDatesColumn_(sheet);
   installBackToTocButton_(sheet);
@@ -1458,7 +1573,7 @@ function applyPastSalesUpdates_(updates, storePartitionKey) {
   upgradePastSalesSheetLayout_(sheet);
   var lastRow = Math.max(sheet.getLastRow(), 1);
   var scanRows = Math.max(lastRow - 1, 1);
-  var existing = sheet.getRange(2, 1, scanRows, 7).getValues();
+  var existing = sheet.getRange(2, 1, scanRows, STORE_PAST_COLS).getValues();
   var monthToRow = {};
   for (var i = 0; i < existing.length; i++) {
     var m = normalizeMonthCell_(existing[i][0]);
@@ -1478,7 +1593,7 @@ function applyPastSalesUpdates_(updates, storePartitionKey) {
       if (row < 2) row = 2;
       monthToRow[month] = row;
     }
-    sheet.getRange(row, 1, 1, 7).setValues([[
+    sheet.getRange(row, 1, 1, STORE_PAST_COLS).setValues([[
       month,
       storeKey,
       item.gross_sales_yen,
@@ -1486,6 +1601,7 @@ function applyPastSalesUpdates_(updates, storePartitionKey) {
       item.guest_count != null ? item.guest_count : '',
       item.operating_days_count != null ? item.operating_days_count : '',
       item.from_receipt ? false : true,
+      item.updated_at || '',
     ]]);
   }
 }
@@ -1668,13 +1784,16 @@ function columnToLetter_(column) {
 function applyClosedDatesUpdates_(updates, storePartitionKey) {
   var sheet = getStoreBudgetSheet_(storePartitionKey);
   styleClosedDatesColumn_(sheet);
+  // 15列形式では L列(12)が休業日、旧形式では H列(8)
+  var headerM = String(sheet.getRange(1, 13).getValue() || '').trim();
+  var closedCol = (headerM === '営業日数') ? 12 : 8;
   for (var u = 0; u < updates.length; u++) {
     var item = updates[u];
     var row = Number(item.row);
     if (!row || row < 2) {
       continue;
     }
-    var cell = sheet.getRange(row, 8);
+    var cell = sheet.getRange(row, closedCol);
     cell.setValue(normalizeClosedDatesCellText_(item.value || ''));
     styleClosedDatesCell_(cell);
   }
@@ -1737,8 +1856,11 @@ function compressClosedDaysToSegmentsGas_(days, monthNum) {
 }
 
 function styleClosedDatesColumn_(sheet) {
-  if (sheet.getColumnWidth(8) < 120) {
-    sheet.setColumnWidth(8, 148);
+  // 15列形式では L列(12)が休業日、旧形式では H列(8)
+  var headerM = String(sheet.getRange(1, 13).getValue() || '').trim();
+  var closedCol = (headerM === '営業日数') ? 12 : 8;
+  if (sheet.getColumnWidth(closedCol) < 120) {
+    sheet.setColumnWidth(closedCol, 148);
   }
 }
 
@@ -1750,7 +1872,11 @@ function styleClosedDatesCell_(range) {
 
 function applyClosedDatesToBudgetSheet_(datesByMonth, storePartitionKey) {
   var sheet = getStoreBudgetSheet_(storePartitionKey);
-  var values = sheet.getRange(2, 1, 500, 9).getValues();
+  // 15列形式では L列(12)が休業日、旧形式では H列(8)
+  var headerM = String(sheet.getRange(1, 13).getValue() || '').trim();
+  var closedCol = (headerM === '営業日数') ? 12 : 8;
+  var readCols = closedCol + 1;
+  var values = sheet.getRange(2, 1, 500, readCols).getValues();
   var pilotKey = String(storePartitionKey || '')
     .trim()
     .toLowerCase();
@@ -1767,7 +1893,7 @@ function applyClosedDatesToBudgetSheet_(datesByMonth, storePartitionKey) {
       continue;
     }
     var closed = datesByMonth[month] || [];
-    var cellRange = sheet.getRange(i + 2, 8);
+    var cellRange = sheet.getRange(i + 2, closedCol);
     cellRange.setValue(closed.length > 0 ? formatClosedDatesForSheetCellGas_(closed, month) : '');
     styleClosedDatesCell_(cellRange);
   }

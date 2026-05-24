@@ -16,6 +16,16 @@ export type ManualMonthSalesUpsertEntry = {
   party_count?: number | null
   guest_count?: number | null
   operating_days_count?: number | null
+  updated_at?: string | null
+}
+
+function normalizeUpdatedAtInput(value: unknown): string | null {
+  if (value == null) return null
+  const s = String(value).trim()
+  if (!s) return null
+  const ms = Date.parse(s)
+  if (!Number.isFinite(ms)) return null
+  return new Date(ms).toISOString()
 }
 
 /** シート入力の数字文字列を半角・連続に正規化（全角数字・空白・カンマ混在対応） */
@@ -60,18 +70,30 @@ export function parseManualMonthPartyGuestFromUnknown(
   }
 }
 
-/** 過去売上シート行（7列=営業日数あり / 6列=組数客数あり / 4列=旧形式） */
+/** 過去売上シート行（8列=更新日時あり / 7列=営業日数あり / 6列=組数客数あり / 4列=旧形式） */
 export function parsePastSalesSheetRow(row: unknown[]): {
   enabledCol: number
+  updatedAtCol: number | null
   party_count: number | null
   guest_count: number | null
   operating_days_count: number | null
 } {
   const len = row.length
+  if (len >= 8) {
+    const counts = parseManualMonthPartyGuestFromUnknown(row[3], row[4])
+    return {
+      enabledCol: 6,
+      updatedAtCol: 7,
+      party_count: counts.party_count,
+      guest_count: counts.guest_count,
+      operating_days_count: parseManualMonthOperatingDays(row[5]),
+    }
+  }
   if (len >= 7) {
     const counts = parseManualMonthPartyGuestFromUnknown(row[3], row[4])
     return {
       enabledCol: 6,
+      updatedAtCol: null,
       party_count: counts.party_count,
       guest_count: counts.guest_count,
       operating_days_count: parseManualMonthOperatingDays(row[5]),
@@ -81,6 +103,7 @@ export function parsePastSalesSheetRow(row: unknown[]): {
     const counts = parseManualMonthPartyGuestFromUnknown(row[3], row[4])
     return {
       enabledCol: 5,
+      updatedAtCol: null,
       party_count: counts.party_count,
       guest_count: counts.guest_count,
       operating_days_count: null,
@@ -88,6 +111,7 @@ export function parsePastSalesSheetRow(row: unknown[]): {
   }
   return {
     enabledCol: 3,
+    updatedAtCol: null,
     party_count: null,
     guest_count: null,
     operating_days_count: null,
@@ -170,7 +194,6 @@ export async function upsertManualMonthSalesEntries(
   entries: ManualMonthSalesUpsertEntry[],
 ): Promise<void> {
   const key = canonicalStorePartitionKeyForDb(storePartitionKey)
-  const updatedAt = new Date().toISOString()
 
   for (const entry of entries) {
     const salesMonth = String(entry.sales_month ?? "").trim().slice(0, 7)
@@ -195,6 +218,7 @@ export async function upsertManualMonthSalesEntries(
     const operatingDays = entry.operating_days_count === undefined
       ? null
       : parseManualMonthOperatingDays(entry.operating_days_count)
+    const updatedAt = normalizeUpdatedAtInput(entry.updated_at) ?? new Date().toISOString()
 
     const { error } = await supabase
       .from("line_sales_manual_month_gross")

@@ -9,7 +9,6 @@ import {
 } from "./manual_month_sales.ts"
 import {
   allocateDailyBudgetsForMonth,
-  getDefaultJapaneseHolidaySet,
   countOperatingDaysInCalendarMonth,
   parseStoreClosedDatesForMonth,
   type SalesBudgetAllocationWeights,
@@ -181,6 +180,7 @@ export type ReceiptSheetsGasPastSalesUpdate = {
   party_count: number | null
   guest_count: number | null
   operating_days_count: number | null
+  updated_at?: string | null
   /** true = レシート集計由来（pull で DB に取り込まない） */
   from_receipt?: boolean
 }
@@ -194,7 +194,7 @@ export type ReceiptSheetsGasSheetExport = {
   budget_operating_days_updates?: ReceiptSheetsGasOperatingDaysUpdate[]
   /** DB の手入力過去売上 → 過去売上タブ（売上分析で保存した値の反映） */
   past_sales_updates?: ReceiptSheetsGasPastSalesUpdate[]
-  /** DB の月間予算 → 月間予算タブ（A〜J 行まるごと） */
+  /** DB の月間予算 → 月間予算タブ（A〜K 行まるごと） */
   budget_row_updates?: ReceiptSheetsGasBudgetRowUpdate[]
 }
 
@@ -202,6 +202,48 @@ export type ReceiptSheetsGasBudgetRowUpdate = {
   row?: number
   sales_month: string
   values: string[]
+}
+
+type BudgetComparable = {
+  budget_yen: number
+  mon_weight: number
+  tue_weight: number
+  wed_weight: number
+  thu_weight: number
+  fri_weight: number
+  sat_weight: number
+  sun_weight: number
+  holiday_weight: number | null
+  pre_holiday_weight: number | null
+  store_closed_dates: string[]
+  updated_at?: string | null
+}
+
+function normalizeSyncUpdatedAt(value: unknown): string | null {
+  if (value == null) return null
+  const s = String(value).trim()
+  if (!s) return null
+  const ms = Date.parse(s)
+  if (!Number.isFinite(ms)) return null
+  return new Date(ms).toISOString()
+}
+
+function updatedAtMillis(value: unknown): number | null {
+  const normalized = normalizeSyncUpdatedAt(value)
+  if (!normalized) return null
+  const ms = Date.parse(normalized)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function isDbNewerThanSheet(
+  dbUpdatedAt: unknown,
+  sheetUpdatedAt: unknown,
+): boolean {
+  const dbMs = updatedAtMillis(dbUpdatedAt)
+  const sheetMs = updatedAtMillis(sheetUpdatedAt)
+  if (dbMs == null) return false
+  if (sheetMs == null) return true
+  return dbMs > sheetMs
 }
 
 function readReceiptSheetsPilotStoreConfig(
@@ -358,8 +400,8 @@ async function runReceiptSheetsPilotSyncForStore(
   ]
 
   const [budgetTabData, pastTabData] = await Promise.all([
-    getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:J500"),
-    getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:G500"),
+    getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500"),
+    getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:H500"),
   ])
 
   // both: 先にシート→DB、後に DB→シート（シートで直した値をサイトへ反映するため）
@@ -555,8 +597,8 @@ async function pullFromSheetsToDb(
   const legacyBudgetTabs = config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []
   const legacyPastTabs = config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []
   const [{ values: budgetRows }, { values: pastRows }] = await Promise.all([
-    getSheetValuesForTab(config.spreadsheetId, [...budgetTabs, ...legacyBudgetTabs], "A2:J500"),
-    getSheetValuesForTab(config.spreadsheetId, [...pastTabs, ...legacyPastTabs], "A2:G500"),
+    getSheetValuesForTab(config.spreadsheetId, [...budgetTabs, ...legacyBudgetTabs], "A2:Q500"),
+    getSheetValuesForTab(config.spreadsheetId, [...pastTabs, ...legacyPastTabs], "A2:H500"),
   ])
   return processPullRowsToDb(supabase, config, budgetRows, pastRows, logLines, { bothMerge })
 }
@@ -595,6 +637,105 @@ function pastSalesComparableEqual(a: PastSalesComparable, b: PastSalesComparable
     && a.party_count === b.party_count
     && a.guest_count === b.guest_count
     && a.operating_days_count === b.operating_days_count
+}
+
+function budgetComparableFromRow(
+  row: Record<string, unknown>,
+): BudgetComparable | null {
+  const month = normalizeMonthCell(row.target_month)
+  if (!month) return null
+  const budgetYen = parseNonNegativeInt(row.budget_yen)
+  if (budgetYen <= 0) return null
+  const hw = Number(row.holiday_weight)
+  const phw = Number(row.pre_holiday_weight)
+  return {
+    budget_yen: budgetYen,
+    mon_weight: parsePositiveWeight(row.mon_weight, 1),
+    tue_weight: parsePositiveWeight(row.tue_weight, 1),
+    wed_weight: parsePositiveWeight(row.wed_weight, 1),
+    thu_weight: parsePositiveWeight(row.thu_weight, 1),
+    fri_weight: parsePositiveWeight(row.fri_weight, 1),
+    sat_weight: parsePositiveWeight(row.sat_weight, 1.5),
+    sun_weight: parsePositiveWeight(row.sun_weight, 2),
+    holiday_weight: (Number.isFinite(hw) && hw > 0) ? hw : null,
+    pre_holiday_weight: (Number.isFinite(phw) && phw > 0) ? phw : null,
+    store_closed_dates: parseStoreClosedDatesForMonth(row.store_closed_dates, month).sort(),
+    updated_at: normalizeSyncUpdatedAt(row.updated_at),
+  }
+}
+
+function budgetComparableFromSheetRow(
+  row: unknown[],
+  month: string,
+  budgetCols: { closedCol: number; holidayWeightCol?: number; preHolidayWeightCol?: number },
+  storeClosedDates?: string[],
+): BudgetComparable | null {
+  const budgetYen = parseNonNegativeInt(row[3])
+  if (budgetYen <= 0) return null
+  const hwRaw = budgetCols.holidayWeightCol != null ? Number(row[budgetCols.holidayWeightCol]) : NaN
+  const phwRaw = budgetCols.preHolidayWeightCol != null ? Number(row[budgetCols.preHolidayWeightCol]) : NaN
+  return {
+    budget_yen: budgetYen,
+    mon_weight: parsePositiveWeight(row[4], 1),
+    tue_weight: parsePositiveWeight(row[5], 1),
+    wed_weight: parsePositiveWeight(row[6], 1),
+    thu_weight: parsePositiveWeight(row[7], 1),
+    fri_weight: parsePositiveWeight(row[8], 1),
+    sat_weight: parsePositiveWeight(row[9], 1.5),
+    sun_weight: parsePositiveWeight(row[10], 2),
+    holiday_weight: (Number.isFinite(hwRaw) && hwRaw > 0) ? hwRaw : null,
+    pre_holiday_weight: (Number.isFinite(phwRaw) && phwRaw > 0) ? phwRaw : null,
+    store_closed_dates: (storeClosedDates ?? parseClosedDatesCell(row[budgetCols.closedCol], month)).sort(),
+    updated_at: null,
+  }
+}
+
+function budgetComparableEqual(a: BudgetComparable, b: BudgetComparable): boolean {
+  return a.budget_yen === b.budget_yen
+    && a.mon_weight === b.mon_weight
+    && a.tue_weight === b.tue_weight
+    && a.wed_weight === b.wed_weight
+    && a.thu_weight === b.thu_weight
+    && a.fri_weight === b.fri_weight
+    && a.sat_weight === b.sat_weight
+    && a.sun_weight === b.sun_weight
+    && a.holiday_weight === b.holiday_weight
+    && a.pre_holiday_weight === b.pre_holiday_weight
+    && a.store_closed_dates.length === b.store_closed_dates.length
+    && a.store_closed_dates.every((date, idx) => date === b.store_closed_dates[idx])
+}
+
+async function fetchBudgetMapForStore(
+  supabase: ReturnType<typeof createClient>,
+  storePartitionKey: string,
+  months: string[],
+): Promise<Map<string, BudgetComparable>> {
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
+  const normalizedMonths = [...new Set(
+    months.map((m) => String(m ?? "").trim().slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m)),
+  )]
+  const out = new Map<string, BudgetComparable>()
+  if (!key || normalizedMonths.length === 0) return out
+
+  const { data, error } = await supabase
+    .from("line_sales_month_budgets")
+    .select("target_month, budget_yen, mon_weight, tue_weight, wed_weight, thu_weight, fri_weight, sat_weight, sun_weight, holiday_weight, pre_holiday_weight, store_closed_dates, updated_at")
+    .eq("store_partition_key", key)
+    .in("target_month", normalizedMonths)
+
+  if (error) {
+    console.error(`fetchBudgetMapForStore failed (store=${key}):`, error.message)
+    return out
+  }
+
+  for (const row of Array.isArray(data) ? data : []) {
+    const r = row as Record<string, unknown>
+    const month = normalizeMonthCell(r.target_month)
+    if (!month) continue
+    const parsed = budgetComparableFromRow(r)
+    if (parsed) out.set(month, parsed)
+  }
+  return out
 }
 
 async function fetchPastSalesSnapshotMap(
@@ -684,6 +825,32 @@ async function processPullRowsToDb(
   let budgetsSkipped = 0
   let pastApplied = 0
   let pastSkipped = 0
+  const bothMerge = opts?.bothMerge === true
+  const budgetMonthsForDb: string[] = []
+  const pastMonthsForDb: string[] = []
+  if (bothMerge) {
+    for (const row of budgetRows) {
+      const month = normalizeMonthCell(row[0])
+      if (month) budgetMonthsForDb.push(month)
+    }
+    for (const row of pastRows) {
+      const month = normalizeMonthCell(row[0])
+      if (month) pastMonthsForDb.push(month)
+    }
+  }
+  const [budgetDbMap, dbMap, snapMap] = bothMerge
+    ? await Promise.all([
+      fetchBudgetMapForStore(supabase, config.storePartitionKey, budgetMonthsForDb),
+      fetchManualMonthSalesMapForStore(supabase, config.storePartitionKey, pastMonthsForDb),
+      fetchPastSalesSnapshotMap(supabase, config.storePartitionKey),
+    ])
+    : [
+      new Map<string, BudgetComparable>(),
+      new Map<string, ManualMonthSalesRecord>(),
+      new Map<string, PastSalesComparable>(),
+    ]
+  let budgetDbWins = 0
+  let pastDbWins = 0
   const budgetOperatingDaysByMonth = new Map<string, number>()
 
   for (let i = 0; i < budgetRows.length; i += 1) {
@@ -712,51 +879,74 @@ async function processPullRowsToDb(
       budgetsSkipped += 1
       continue
     }
+    const sheetUpdatedAt = budgetCols.updatedAtCol != null
+      ? normalizeSyncUpdatedAt(row[budgetCols.updatedAtCol])
+      : null
+    const dbBudget = budgetDbMap.get(month)
+    const closedCellRaw = String(row[budgetCols.closedCol] ?? "").trim()
+    const sheetSpecifiedClosed = closedCellRaw.length > 0
+    const storeClosedDates = sheetSpecifiedClosed
+      ? parseClosedDatesCell(row[budgetCols.closedCol], month)
+      : (dbBudget?.store_closed_dates ?? [])
+    const operatingDays = countOperatingDaysInCalendarMonth(month, storeClosedDates)
+    if (operatingDays > 0) {
+      budgetOperatingDaysByMonth.set(month, operatingDays)
+    }
+    const sheetComparable = budgetComparableFromSheetRow(row, month, budgetCols, storeClosedDates)
+    if (!sheetComparable) {
+      errors.push(`${SHEET_MONTHLY_BUDGETS} 行${rowNum}: 予算行の解析に失敗しました`)
+      budgetsSkipped += 1
+      continue
+    }
+    if (bothMerge) {
+      if (dbBudget) {
+        if (budgetComparableEqual(sheetComparable, dbBudget)) {
+          budgetsSkipped += 1
+          continue
+        }
+        if (isDbNewerThanSheet(dbBudget.updated_at, sheetUpdatedAt)) {
+          budgetsSkipped += 1
+          budgetDbWins += 1
+          continue
+        }
+      }
+    }
     try {
-      const closedCellRaw = String(row[budgetCols.closedCol] ?? "").trim()
-      const sheetSpecifiedClosed = closedCellRaw.length > 0
-      let storeClosedDates = parseClosedDatesCell(row[budgetCols.closedCol], month)
+      let effectiveClosedDates = storeClosedDates
       if (!sheetSpecifiedClosed) {
-        storeClosedDates = await loadStoreClosedDatesForMonth(
+        effectiveClosedDates = await loadStoreClosedDatesForMonth(
           supabase,
           config.storePartitionKey,
           month,
         )
       }
-      const operatingDays = countOperatingDaysInCalendarMonth(month, storeClosedDates)
+      const operatingDays = countOperatingDaysInCalendarMonth(month, effectiveClosedDates)
       if (operatingDays > 0) {
         budgetOperatingDaysByMonth.set(month, operatingDays)
       }
+      const hwRaw = budgetCols.holidayWeightCol != null ? Number(row[budgetCols.holidayWeightCol]) : NaN
+      const phwRaw = budgetCols.preHolidayWeightCol != null ? Number(row[budgetCols.preHolidayWeightCol]) : NaN
       await upsertBudgetRow(supabase, {
         store_partition_key: config.storePartitionKey,
         month,
         budget_yen: budgetYen,
-        weekday_weight: parsePositiveWeight(row[4], 1),
-        pre_holiday_weight: parsePositiveWeight(row[5], 1.5),
-        holiday_weight: parsePositiveWeight(row[6], 2),
-        store_closed_dates: storeClosedDates,
+        mon_weight: parsePositiveWeight(row[4], 1),
+        tue_weight: parsePositiveWeight(row[5], 1),
+        wed_weight: parsePositiveWeight(row[6], 1),
+        thu_weight: parsePositiveWeight(row[7], 1),
+        fri_weight: parsePositiveWeight(row[8], 1),
+        sat_weight: parsePositiveWeight(row[9], 1.5),
+        sun_weight: parsePositiveWeight(row[10], 2),
+        holiday_weight: (Number.isFinite(hwRaw) && hwRaw > 0) ? hwRaw : null,
+        pre_holiday_weight: (Number.isFinite(phwRaw) && phwRaw > 0) ? phwRaw : null,
+        store_closed_dates: effectiveClosedDates,
+        updated_at: sheetUpdatedAt ?? undefined,
       })
       budgetsApplied += 1
     } catch (e) {
       errors.push(`${SHEET_MONTHLY_BUDGETS} 行${rowNum}: ${String(e)}`)
     }
   }
-
-  const bothMerge = opts?.bothMerge === true
-  const pastMonthsForDb: string[] = []
-  if (bothMerge) {
-    for (let i = 0; i < pastRows.length; i += 1) {
-      const m = normalizeMonthCell(pastRows[i][0])
-      if (m) pastMonthsForDb.push(m)
-    }
-  }
-  const dbMap = bothMerge
-    ? await fetchManualMonthSalesMapForStore(supabase, config.storePartitionKey, pastMonthsForDb)
-    : new Map<string, ManualMonthSalesRecord>()
-  const snapMap = bothMerge
-    ? await fetchPastSalesSnapshotMap(supabase, config.storePartitionKey)
-    : new Map<string, PastSalesComparable>()
-  let pastDbWins = 0
 
   const pastEntries: ManualMonthSalesUpsertEntry[] = []
   const pastSnapshotWrites: PastSalesComparable[] = []
@@ -779,8 +969,17 @@ async function processPullRowsToDb(
       pastSkipped += 1
       continue
     }
+    const sheetUpdatedAt = pastCols.updatedAtCol != null
+      ? normalizeSyncUpdatedAt(row[pastCols.updatedAtCol])
+      : null
     const rawGross = String(row[2] ?? "").trim()
     if (rawGross === "") {
+      const db = dbMap.get(salesMonth)
+      if (bothMerge && db && isDbNewerThanSheet(db.updated_at, sheetUpdatedAt)) {
+        pastSkipped += 1
+        pastDbWins += 1
+        continue
+      }
       pastEntries.push({ sales_month: salesMonth, gross_sales_yen: null })
       pastSnapshotDeletes.push(salesMonth)
       pastApplied += 1
@@ -793,21 +992,23 @@ async function processPullRowsToDb(
         party_count: pastCols.party_count,
         guest_count: pastCols.guest_count,
         operating_days_count: pastCols.operating_days_count ?? opDaysFromBudget,
+        updated_at: sheetUpdatedAt ?? undefined,
       }
       const sheetComparable = pastSalesComparableFromEntry(
         entry as ManualMonthSalesUpsertEntry & { gross_sales_yen: number },
       )
       const db = dbMap.get(salesMonth)
       const snap = snapMap.get(salesMonth)
-      if (bothMerge && db && !pastSalesComparableEqual(sheetComparable, pastSalesComparableFromManual(db))) {
+      if (bothMerge && db) {
+        if (pastSalesComparableEqual(sheetComparable, pastSalesComparableFromManual(db))) {
+          pastSkipped += 1
+          continue
+        }
         let dbWins = false
-        if (snap && pastSalesComparableEqual(sheetComparable, snap)) {
+        if (isDbNewerThanSheet(db.updated_at, sheetUpdatedAt)) {
           dbWins = true
-        } else if (!snap && db.updated_at) {
-          const updatedMs = new Date(db.updated_at).getTime()
-          if (Number.isFinite(updatedMs) && updatedMs > Date.now() - 20 * 60 * 1000) {
-            dbWins = true
-          }
+        } else if (!sheetUpdatedAt && snap && pastSalesComparableEqual(sheetComparable, snap)) {
+          dbWins = true
         }
         if (dbWins) {
           pastSkipped += 1
@@ -841,6 +1042,9 @@ async function processPullRowsToDb(
     }
   }
 
+  if (bothMerge && budgetDbWins > 0) {
+    logLines.push(`both budget_db_wins=${budgetDbWins}`)
+  }
   if (bothMerge && pastDbWins > 0) {
     logLines.push(`both past_db_wins=${pastDbWins}`)
   }
@@ -885,15 +1089,20 @@ async function buildDailySalesExportRows(
     let dailyBudgetMap: Map<string, number> | null = null
     if (budgetRow && budgetRow.budget_yen > 0) {
       const weights: SalesBudgetAllocationWeights = {
-        weekday: budgetRow.weekday_weight,
-        pre_holiday: budgetRow.pre_holiday_weight,
+        mon: budgetRow.mon_weight,
+        tue: budgetRow.tue_weight,
+        wed: budgetRow.wed_weight,
+        thu: budgetRow.thu_weight,
+        fri: budgetRow.fri_weight,
+        sat: budgetRow.sat_weight,
+        sun: budgetRow.sun_weight,
         holiday: budgetRow.holiday_weight,
+        pre_holiday: budgetRow.pre_holiday_weight,
       }
       dailyBudgetMap = allocateDailyBudgetsForMonth(
         month,
         budgetRow.budget_yen,
         weights,
-        getDefaultJapaneseHolidaySet(),
         new Set(budgetRow.store_closed_dates),
       )
     }
@@ -1035,91 +1244,39 @@ async function buildClosedDatesExportFromDb(
   }
 }
 
-const RECEIPT_MONTHLY_AGGREGATE_PAGE_SIZE = 1000
-
 /** store_webhook_tables からレシートテーブル名を取得して月次集計を返す
  * DB の store_partition_key と catalog のキーで大文字小文字が異なる場合があるため
- * 全件取得してクライアント側で小文字照合する */
+ * DB 側の集計関数へ寄せて取得する */
 async function fetchReceiptMonthlyAggregatesForStore(
   supabase: ReturnType<typeof createClient>,
   storePartitionKey: string,
 ): Promise<Map<string, { gross_sales_yen: number; party_count: number; guest_count: number }>> {
-  const normalizedKey = storePartitionKey.toLowerCase().trim()
-
-  // まず完全一致で試みる
-  const { data: reg } = await supabase
-    .from("store_webhook_tables")
-    .select("receipt_table")
-    .eq("store_partition_key", storePartitionKey)
-    .maybeSingle()
-
-  let receiptTable = typeof (reg as Record<string, unknown> | null)?.receipt_table === "string"
-    ? (reg as Record<string, unknown>).receipt_table as string
-    : null
-
-  // 完全一致で見つからなかった場合: 全件取得して小文字で照合（大文字小文字の不一致対策）
-  if (!receiptTable) {
-    const { data: allStores } = await supabase
-      .from("store_webhook_tables")
-      .select("store_partition_key, receipt_table")
-    const matched = (allStores ?? []).find(
-      (s: Record<string, unknown>) => String(s.store_partition_key ?? "").toLowerCase().trim() === normalizedKey,
-    ) as Record<string, unknown> | null | undefined
-    receiptTable = typeof matched?.receipt_table === "string" ? matched.receipt_table as string : null
-    if (receiptTable) {
-      console.log(`fetchReceiptMonthlyAggregatesForStore: fallback match for "${storePartitionKey}" → "${matched?.store_partition_key}" → table "${receiptTable}"`)
-    }
-  }
-
-  if (!receiptTable) {
-    console.warn(`fetchReceiptMonthlyAggregatesForStore: no receipt table found for store_partition_key="${storePartitionKey}"`)
-    return new Map()
-  }
-
   const threeYearsAgo = new Date()
   threeYearsAgo.setFullYear(threeYearsAgo.getFullYear() - 3)
   const fromDate = threeYearsAgo.toISOString().slice(0, 10)
 
   const byMonth = new Map<string, { gross_sales_yen: number; party_count: number; guest_count: number }>()
-  let offset = 0
-
-  while (true) {
-    // PostgREST / Supabase の既定取得件数で途中打ち切りにならないよう、全件をページングで読む。
-    const { data, error } = await supabase
-      .from(receiptTable)
-      .select("id, receipt_date, gross_sales_yen, party_count, guest_count")
-      .not("receipt_date", "is", null)
-      .not("gross_sales_yen", "is", null)
-      .gte("receipt_date", fromDate)
-      .order("id", { ascending: true })
-      .range(offset, offset + RECEIPT_MONTHLY_AGGREGATE_PAGE_SIZE - 1)
-
-    if (error) {
-      console.error(`fetchReceiptMonthlyAggregatesForStore failed (${receiptTable} offset=${offset}):`, error.message)
-      return new Map()
-    }
-
-    const rows = Array.isArray(data) ? data : []
-    for (const row of rows) {
-      const r = row as Record<string, unknown>
-      const date = String(r.receipt_date ?? "").slice(0, 10)
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
-      const month = date.slice(0, 7)
-      const gross = Number(r.gross_sales_yen)
-      if (!Number.isFinite(gross) || gross <= 0) continue
-      const existing = byMonth.get(month) ?? { gross_sales_yen: 0, party_count: 0, guest_count: 0 }
-      existing.gross_sales_yen += Math.round(gross)
-      existing.party_count += Math.max(0, Math.round(Number(r.party_count) || 0))
-      existing.guest_count += Math.max(0, Math.round(Number(r.guest_count) || 0))
-      byMonth.set(month, existing)
-    }
-
-    if (rows.length < RECEIPT_MONTHLY_AGGREGATE_PAGE_SIZE) {
-      break
-    }
-    offset += rows.length
+  const { data, error } = await supabase.rpc("aggregate_store_receipt_monthly_sales", {
+    p_store_partition_key: storePartitionKey,
+    p_from_date: fromDate,
+  })
+  if (error) {
+    console.error(`fetchReceiptMonthlyAggregatesForStore rpc failed (store=${storePartitionKey}):`, error.message)
+    return byMonth
   }
 
+  for (const row of Array.isArray(data) ? data : []) {
+    const r = row as Record<string, unknown>
+    const month = String(r.sales_month ?? "").trim().slice(0, 7)
+    if (!/^\d{4}-\d{2}$/.test(month)) continue
+    const gross = Number(r.gross_sales_yen)
+    if (!Number.isFinite(gross) || gross <= 0) continue
+    byMonth.set(month, {
+      gross_sales_yen: Math.round(gross),
+      party_count: parseOptionalPastSalesInt(r.party_count) ?? 0,
+      guest_count: parseOptionalPastSalesInt(r.guest_count) ?? 0,
+    })
+  }
   return byMonth
 }
 
@@ -1134,7 +1291,7 @@ async function buildPastSalesSheetUpdatesFromDb(
   const [manualResult, receiptByMonth] = await Promise.all([
     supabase
       .from("line_sales_manual_month_gross")
-      .select("sales_month, gross_sales_yen, party_count, guest_count, operating_days_count")
+      .select("sales_month, gross_sales_yen, party_count, guest_count, operating_days_count, updated_at")
       .eq("store_partition_key", key)
       .order("sales_month", { ascending: true }),
     fetchReceiptMonthlyAggregatesForStore(supabase, key),
@@ -1149,6 +1306,7 @@ async function buildPastSalesSheetUpdatesFromDb(
     party_count: number | null
     guest_count: number | null
     operating_days_count: number | null
+    updated_at: string | null
   }>()
   for (const row of Array.isArray(manualResult.data) ? manualResult.data : []) {
     const r = row as Record<string, unknown>
@@ -1161,6 +1319,7 @@ async function buildPastSalesSheetUpdatesFromDb(
       party_count: parseOptionalPastSalesInt(r.party_count),
       guest_count: parseOptionalPastSalesInt(r.guest_count),
       operating_days_count: parseOptionalPastSalesInt(r.operating_days_count),
+      updated_at: normalizeSyncUpdatedAt(r.updated_at),
     })
   }
 
@@ -1185,6 +1344,7 @@ async function buildPastSalesSheetUpdatesFromDb(
         party_count: manual.party_count,
         guest_count: manual.guest_count,
         operating_days_count: manual.operating_days_count,
+        updated_at: manual.updated_at,
       })
     } else {
       const agg = receiptByMonth.get(month)!
@@ -1221,6 +1381,7 @@ function pastSalesSheetRowValues(
     update.guest_count ?? "",
     update.operating_days_count ?? "",
     update.from_receipt ? "FALSE" : "TRUE",
+    update.updated_at ?? "",
   ]]
 }
 
@@ -1233,7 +1394,7 @@ async function buildBudgetSheetRowUpdatesFromDb(
   const { data, error } = await supabase
     .from("line_sales_month_budgets")
     .select(
-      "target_month, budget_yen, weekday_weight, pre_holiday_weight, holiday_weight",
+      "target_month, budget_yen, mon_weight, tue_weight, wed_weight, thu_weight, fri_weight, sat_weight, sun_weight, holiday_weight, pre_holiday_weight, updated_at",
     )
     .eq("store_partition_key", dbKey)
     .order("target_month", { ascending: true })
@@ -1271,17 +1432,26 @@ async function buildBudgetSheetRowUpdatesFromDb(
     if (budgetYen <= 0) continue
     const closed = closedByMonth.get(month) ?? []
     const operatingDays = countOperatingDaysInCalendarMonth(month, closed)
+    const hw = Number(row.holiday_weight)
+    const phw = Number(row.pre_holiday_weight)
     const values = [
       month,
       config.storeDisplayName,
       config.storePartitionKey,
       String(budgetYen),
-      String(parsePositiveWeight(row.weekday_weight, 1)),
-      String(parsePositiveWeight(row.pre_holiday_weight, 1.5)),
-      String(parsePositiveWeight(row.holiday_weight, 2)),
+      String(parsePositiveWeight(row.mon_weight, 1)),
+      String(parsePositiveWeight(row.tue_weight, 1)),
+      String(parsePositiveWeight(row.wed_weight, 1)),
+      String(parsePositiveWeight(row.thu_weight, 1)),
+      String(parsePositiveWeight(row.fri_weight, 1)),
+      String(parsePositiveWeight(row.sat_weight, 1.5)),
+      String(parsePositiveWeight(row.sun_weight, 2)),
+      (Number.isFinite(hw) && hw > 0) ? String(hw) : "",
+      (Number.isFinite(phw) && phw > 0) ? String(phw) : "",
       formatClosedDatesForSheetCell(closed, month),
       operatingDays > 0 ? String(operatingDays) : "",
       "TRUE",
+      normalizeSyncUpdatedAt(row.updated_at) ?? "",
     ]
     const idx = monthToRowIndex.get(month)
     const rowNum = idx !== undefined ? idx + 2 : nextAppendRow++
@@ -1303,7 +1473,7 @@ async function exportBudgetFromDbToBudgetSheet(
       ...receiptSheetsTabCandidates(config.storePartitionKey, "budgets"),
       ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []),
     ]
-    return getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:J500")
+    return getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500")
   })()
   const updates = await buildBudgetSheetRowUpdatesFromDb(supabase, config, sheetRows)
   if (updates.length === 0) {
@@ -1311,7 +1481,7 @@ async function exportBudgetFromDbToBudgetSheet(
     return { rows_written: 0 }
   }
   const batch: Array<{ range: string; values: SheetValues }> = updates.map((u) => ({
-    range: formatSheetA1Range(tabName, `A${u.row}:J${u.row}`),
+    range: formatSheetA1Range(tabName, `A${u.row}:Q${u.row}`),
     values: [u.values],
   }))
   await batchUpdateSpreadsheetValues(config.spreadsheetId, batch)
@@ -1339,7 +1509,7 @@ async function exportPastSalesFromDbToPastSheet(
       ...receiptSheetsTabCandidates(config.storePartitionKey, "past"),
       ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []),
     ]
-    return getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:G500")
+    return getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:H500")
   })()
   const monthToRowIndex = new Map<string, number>()
   for (let i = 0; i < pastRows.length; i += 1) {
@@ -1356,7 +1526,7 @@ async function exportPastSalesFromDbToPastSheet(
       monthToRowIndex.set(update.sales_month, rowNum - 2)
     }
     batch.push({
-      range: formatSheetA1Range(tabName, `A${rowNum}:G${rowNum}`),
+      range: formatSheetA1Range(tabName, `A${rowNum}:H${rowNum}`),
       values: pastSalesSheetRowValues(config.storePartitionKey, update),
     })
   }
@@ -1394,7 +1564,7 @@ async function exportClosedDatesFromDbToBudgetSheet(
       ...receiptSheetsTabCandidates(config.storePartitionKey, "budgets"),
       ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []),
     ]
-    return getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:J500")
+    return getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500")
   })()
 
   const months: string[] = []
@@ -1561,9 +1731,15 @@ async function buildDailySeriesForStoreMonth(
 
 type BudgetRow = {
   budget_yen: number
-  weekday_weight: number
-  pre_holiday_weight: number
-  holiday_weight: number
+  mon_weight: number
+  tue_weight: number
+  wed_weight: number
+  thu_weight: number
+  fri_weight: number
+  sat_weight: number
+  sun_weight: number
+  holiday_weight: number | null
+  pre_holiday_weight: number | null
   store_closed_dates: string[]
 }
 
@@ -1574,7 +1750,7 @@ async function fetchBudgetRow(
 ): Promise<BudgetRow | null> {
   const { data, error } = await supabase
     .from("line_sales_month_budgets")
-    .select("budget_yen, weekday_weight, pre_holiday_weight, holiday_weight, store_closed_dates")
+    .select("budget_yen, mon_weight, tue_weight, wed_weight, thu_weight, fri_weight, sat_weight, sun_weight, holiday_weight, pre_holiday_weight, store_closed_dates")
     .eq("store_partition_key", storePartitionKey)
     .eq("target_month", month)
     .maybeSingle()
@@ -1587,12 +1763,6 @@ async function fetchBudgetRow(
   const budgetYen = parseNonNegativeInt(row.budget_yen)
   if (budgetYen <= 0) return null
 
-  const { data: closedRows } = await supabase
-    .from("line_sales_month_store_closed_days")
-    .select("closed_on")
-    .eq("store_partition_key", storePartitionKey)
-    .eq("target_month", month)
-
   const closedMerged = await loadStoreClosedDatesForMonth(
     supabase,
     storePartitionKey,
@@ -1600,11 +1770,19 @@ async function fetchBudgetRow(
     row.store_closed_dates,
   )
 
+  const hw = Number(row.holiday_weight)
+  const phw = Number(row.pre_holiday_weight)
   return {
     budget_yen: budgetYen,
-    weekday_weight: parsePositiveWeight(row.weekday_weight, 1),
-    pre_holiday_weight: parsePositiveWeight(row.pre_holiday_weight, 1.5),
-    holiday_weight: parsePositiveWeight(row.holiday_weight, 2),
+    mon_weight: parsePositiveWeight(row.mon_weight, 1),
+    tue_weight: parsePositiveWeight(row.tue_weight, 1),
+    wed_weight: parsePositiveWeight(row.wed_weight, 1),
+    thu_weight: parsePositiveWeight(row.thu_weight, 1),
+    fri_weight: parsePositiveWeight(row.fri_weight, 1),
+    sat_weight: parsePositiveWeight(row.sat_weight, 1.5),
+    sun_weight: parsePositiveWeight(row.sun_weight, 2),
+    holiday_weight: (Number.isFinite(hw) && hw > 0) ? hw : null,
+    pre_holiday_weight: (Number.isFinite(phw) && phw > 0) ? phw : null,
     store_closed_dates: closedMerged,
   }
 }
@@ -1722,13 +1900,20 @@ async function upsertBudgetRow(
     store_partition_key: string
     month: string
     budget_yen: number
-    weekday_weight: number
-    pre_holiday_weight: number
-    holiday_weight: number
+    mon_weight: number
+    tue_weight: number
+    wed_weight: number
+    thu_weight: number
+    fri_weight: number
+    sat_weight: number
+    sun_weight: number
+    holiday_weight: number | null
+    pre_holiday_weight: number | null
     store_closed_dates: string[]
+    updated_at?: string
   },
 ): Promise<void> {
-  const updatedAt = new Date().toISOString()
+  const updatedAt = normalizeSyncUpdatedAt(input.updated_at) ?? new Date().toISOString()
   const { error } = await supabase
     .from("line_sales_month_budgets")
     .upsert(
@@ -1736,9 +1921,15 @@ async function upsertBudgetRow(
         store_partition_key: input.store_partition_key,
         target_month: input.month,
         budget_yen: input.budget_yen,
-        weekday_weight: input.weekday_weight,
-        pre_holiday_weight: input.pre_holiday_weight,
+        mon_weight: input.mon_weight,
+        tue_weight: input.tue_weight,
+        wed_weight: input.wed_weight,
+        thu_weight: input.thu_weight,
+        fri_weight: input.fri_weight,
+        sat_weight: input.sat_weight,
+        sun_weight: input.sun_weight,
         holiday_weight: input.holiday_weight,
+        pre_holiday_weight: input.pre_holiday_weight,
         store_closed_dates: input.store_closed_dates,
         updated_at: updatedAt,
       },
@@ -1821,23 +2012,55 @@ function formatYearMonthJst(d: Date): string {
   return `${y}-${m}`
 }
 
-/** 月間予算シート行（10列=営業日数あり / 9列=旧形式） */
+/** 月間予算シート行（17列=祭日重みあり / 15列=7曜日重みのみ / 11列=旧3区分版 / 10列=旧営業日数あり / 9列=旧形式） */
 export function parseMonthlyBudgetSheetRow(row: unknown[]): {
   enabledCol: number
   closedCol: number
   operatingDaysCol: number | null
+  updatedAtCol: number | null
+  holidayWeightCol?: number
+  preHolidayWeightCol?: number
 } {
   const len = Array.isArray(row) ? row.length : 0
+  // 17列形式: A-Q (enabledCol=P=15, closedCol=N=13, opDaysCol=O=14, updatedAtCol=Q=16, holiday=L=11, pre_holiday=M=12)
+  if (len >= 17) {
+    const enabledRaw = String(row[15] ?? "").trim().toLowerCase()
+    if (
+      enabledRaw === "true" || enabledRaw === "false" || enabledRaw === "有効"
+      || enabledRaw === "0" || enabledRaw === ""
+    ) {
+      return { enabledCol: 15, closedCol: 13, operatingDaysCol: 14, updatedAtCol: 16, holidayWeightCol: 11, preHolidayWeightCol: 12 }
+    }
+  }
+  // 15列形式: A-O (enabledCol=N=13, closedCol=L=11, opDaysCol=M=12, updatedAtCol=O=14)
+  if (len >= 15) {
+    const enabledRaw = String(row[13] ?? "").trim().toLowerCase()
+    if (
+      enabledRaw === "true" || enabledRaw === "false" || enabledRaw === "有効"
+      || enabledRaw === "0" || enabledRaw === ""
+    ) {
+      return { enabledCol: 13, closedCol: 11, operatingDaysCol: 12, updatedAtCol: 14 }
+    }
+  }
+  if (len >= 11) {
+    const enabledRaw = String(row[9] ?? "").trim().toLowerCase()
+    if (
+      enabledRaw === "true" || enabledRaw === "false" || enabledRaw === "有効"
+      || enabledRaw === "0" || enabledRaw === ""
+    ) {
+      return { enabledCol: 9, closedCol: 7, operatingDaysCol: 8, updatedAtCol: 10 }
+    }
+  }
   if (len >= 10) {
     const enabledRaw = String(row[9] ?? "").trim().toLowerCase()
     if (
       enabledRaw === "true" || enabledRaw === "false" || enabledRaw === "有効"
       || enabledRaw === "0" || enabledRaw === ""
     ) {
-      return { enabledCol: 9, closedCol: 7, operatingDaysCol: 8 }
+      return { enabledCol: 9, closedCol: 7, operatingDaysCol: 8, updatedAtCol: null }
     }
   }
-  return { enabledCol: 8, closedCol: 7, operatingDaysCol: null }
+  return { enabledCol: 8, closedCol: 7, operatingDaysCol: null, updatedAtCol: null }
 }
 
 export function buildBudgetOperatingDaysSheetUpdates(

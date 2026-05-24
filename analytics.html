@@ -723,7 +723,7 @@
   <div class="budget-modal" role="dialog" aria-modal="true" aria-labelledby="budgetModalTitle">
     <h3 id="budgetModalTitle">月間予算・日別配分</h3>
     <p class="meta" style="margin:0 0 12px;font-size:0.82rem;line-height:1.45">
-      月間予算を <strong>平日</strong>・<strong>休日前日</strong>・<strong>休日（日曜・祝日）</strong>の比率で各日に分配します（例 1 : 1.5 : 2）。
+      月間予算を<strong>曜日別の重み</strong>で各日に分配します。
       <strong>店舗休日</strong>にチェックした日は按分から除外され、その分がほかの営業日に振り分けられます。
     </p>
     <label>
@@ -732,16 +732,40 @@
     </label>
     <div class="budget-ratio-grid">
       <label>
-        <span>平日の重み</span>
-        <input id="budgetModalWWeekday" class="input" type="number" min="0.1" step="0.1" value="1">
+        <span>月曜の重み</span>
+        <input id="budgetModalWMon" class="input" type="number" min="0.1" step="0.1" value="1">
       </label>
       <label>
-        <span>休日前日の重み</span>
-        <input id="budgetModalWPre" class="input" type="number" min="0.1" step="0.1" value="1.5">
+        <span>火曜の重み</span>
+        <input id="budgetModalWTue" class="input" type="number" min="0.1" step="0.1" value="1">
       </label>
       <label>
-        <span>休日の重み（日曜・祝）</span>
-        <input id="budgetModalWHoliday" class="input" type="number" min="0.1" step="0.1" value="2">
+        <span>水曜の重み</span>
+        <input id="budgetModalWWed" class="input" type="number" min="0.1" step="0.1" value="1">
+      </label>
+      <label>
+        <span>木曜の重み</span>
+        <input id="budgetModalWThu" class="input" type="number" min="0.1" step="0.1" value="1">
+      </label>
+      <label>
+        <span>金曜の重み</span>
+        <input id="budgetModalWFri" class="input" type="number" min="0.1" step="0.1" value="1">
+      </label>
+      <label>
+        <span>土曜の重み</span>
+        <input id="budgetModalWSat" class="input" type="number" min="0.1" step="0.1" value="1.5">
+      </label>
+      <label>
+        <span>日曜の重み</span>
+        <input id="budgetModalWSun" class="input" type="number" min="0.1" step="0.1" value="2">
+      </label>
+      <label>
+        <span>祭日の重み <small style="font-weight:normal;color:var(--sub)">(空欄＝曜日比率と同じ)</small></span>
+        <input id="budgetModalWHoliday" class="input" type="number" min="0.1" step="0.1" placeholder="例: 2">
+      </label>
+      <label>
+        <span>祭日前日の重み <small style="font-weight:normal;color:var(--sub)">(空欄＝曜日比率と同じ)</small></span>
+        <input id="budgetModalWPreHoliday" class="input" type="number" min="0.1" step="0.1" placeholder="例: 1.5">
       </label>
     </div>
     <p class="meta" style="margin:10px 0 4px;font-size:0.78rem">プレビュー（対象月の日別予算）</p>
@@ -1013,16 +1037,19 @@ function isHolidayLikeDayJs(isoDate) {
   return dt.getDay() === 0;
 }
 
+const DOW_TO_KIND_JS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
 function classifySalesBudgetDayJs(isoDate) {
-  if (isHolidayLikeDayJs(isoDate)) return 'holiday';
-  if (isHolidayLikeDayJs(addCalendarDaysIsoJs(isoDate, 1))) return 'pre_holiday';
-  return 'weekday';
+  const dt = new Date(`${isoDate}T12:00:00+09:00`);
+  if (Number.isNaN(dt.getTime())) return 'mon';
+  return DOW_TO_KIND_JS[dt.getDay()];
 }
 
 function kindLabelJa(kind) {
-  if (kind === 'holiday') return '休日';
-  if (kind === 'pre_holiday') return '休日前日';
-  return '平日';
+  if (kind === 'holiday') return '祭日';
+  if (kind === 'pre_holiday') return '祭日前日';
+  const MAP = { mon: '月', tue: '火', wed: '水', thu: '木', fri: '金', sat: '土', sun: '日' };
+  return (MAP[kind] ?? kind) + '曜日';
 }
 
 const BUDGET_WEEKDAY_JA = ['日', '月', '火', '水', '木', '金', '土'];
@@ -1052,16 +1079,31 @@ function enumerateMonthDatesJs(targetMonth) {
   return out;
 }
 
-function allocateDailyBudgetsClient(targetMonth, monthBudgetYen, ww, pw, hw, storeClosedSet) {
+function getEffectiveDayWeightJs(isoDate, W, holidaySet) {
+  const dowW = W[classifySalesBudgetDayJs(isoDate)] ?? 1;
+  if (!holidaySet) return dowW;
+  if (W.holiday != null && holidaySet.has(isoDate)) return W.holiday;
+  if (W.pre_holiday != null && !holidaySet.has(isoDate)) {
+    const dt = new Date(`${isoDate}T12:00:00+09:00`);
+    const nextDt = new Date(dt.getTime() + 86400000);
+    const nextIso = nextDt.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+    if (nextDt.getDay() === 0 || holidaySet.has(nextIso)) return W.pre_holiday;
+  }
+  return dowW;
+}
+
+function allocateDailyBudgetsClient(targetMonth, monthBudgetYen, wMon, wTue, wWed, wThu, wFri, wSat, wSun, storeClosedSet, wHoliday, wPreHoliday) {
   const closed = storeClosedSet instanceof Set ? storeClosedSet : new Set(storeClosedSet || []);
   const days = enumerateMonthDatesJs(targetMonth);
   if (!days.length || !Number.isFinite(monthBudgetYen) || monthBudgetYen <= 0) return new Map();
+  const needHolidays = (wHoliday != null && wHoliday > 0) || (wPreHoliday != null && wPreHoliday > 0);
+  const holidaySet = needHolidays ? new Set(JAPANESE_HOLIDAYS.keys()) : null;
+  const W = { mon: wMon, tue: wTue, wed: wWed, thu: wThu, fri: wFri, sat: wSat, sun: wSun,
+    holiday: (wHoliday != null && wHoliday > 0) ? wHoliday : null,
+    pre_holiday: (wPreHoliday != null && wPreHoliday > 0) ? wPreHoliday : null };
   const rawWeights = days.map((d) => {
     if (closed.has(d)) return 0;
-    const k = classifySalesBudgetDayJs(d);
-    if (k === 'holiday') return hw;
-    if (k === 'pre_holiday') return pw;
-    return ww;
+    return getEffectiveDayWeightJs(d, W, holidaySet);
   });
   const sumW = rawWeights.reduce((a, b) => a + b, 0);
   if (sumW <= 0) {
@@ -1101,9 +1143,15 @@ const state = {
   weekdayMetric: 'gross',
   lastGrossYen: null,
   lastMonthBudgetYen: null,
-  lastBudgetWeekdayWeight: null,
-  lastBudgetPreHolidayWeight: null,
+  lastBudgetMonWeight: null,
+  lastBudgetTueWeight: null,
+  lastBudgetWedWeight: null,
+  lastBudgetThuWeight: null,
+  lastBudgetFriWeight: null,
+  lastBudgetSatWeight: null,
+  lastBudgetSunWeight: null,
   lastBudgetHolidayWeight: null,
+  lastBudgetPreHolidayWeight: null,
   /** API の store_closed_dates（YYYY-MM-DD）。モーダルでは modalStoreClosedDates を編集 */
   lastStoreClosedDates: [],
   modalStoreClosedDates: null,
@@ -1144,9 +1192,15 @@ const dom = {
   priorYearModalHint: $('priorYearModalHint'),
   budgetModalBackdrop: $('budgetModalBackdrop'),
   budgetModalTotal: $('budgetModalTotal'),
-  budgetModalWWeekday: $('budgetModalWWeekday'),
-  budgetModalWPre: $('budgetModalWPre'),
+  budgetModalWMon: $('budgetModalWMon'),
+  budgetModalWTue: $('budgetModalWTue'),
+  budgetModalWWed: $('budgetModalWWed'),
+  budgetModalWThu: $('budgetModalWThu'),
+  budgetModalWFri: $('budgetModalWFri'),
+  budgetModalWSat: $('budgetModalWSat'),
+  budgetModalWSun: $('budgetModalWSun'),
   budgetModalWHoliday: $('budgetModalWHoliday'),
+  budgetModalWPreHoliday: $('budgetModalWPreHoliday'),
   budgetWeekdayBulkRow: $('budgetWeekdayBulkRow'),
   budgetPreviewBody: $('budgetPreviewBody'),
   budgetModalSave: $('budgetModalSave'),
@@ -1585,12 +1639,15 @@ function syncBudgetModalFromState() {
     const b = state.lastMonthBudgetYen;
     dom.budgetModalTotal.value = b != null ? String(b) : '';
   }
-  const ww = state.lastBudgetWeekdayWeight != null ? state.lastBudgetWeekdayWeight : 1;
-  const pw = state.lastBudgetPreHolidayWeight != null ? state.lastBudgetPreHolidayWeight : 1.5;
-  const hw = state.lastBudgetHolidayWeight != null ? state.lastBudgetHolidayWeight : 2;
-  if (dom.budgetModalWWeekday) dom.budgetModalWWeekday.value = String(ww);
-  if (dom.budgetModalWPre) dom.budgetModalWPre.value = String(pw);
-  if (dom.budgetModalWHoliday) dom.budgetModalWHoliday.value = String(hw);
+  if (dom.budgetModalWMon) dom.budgetModalWMon.value = String(state.lastBudgetMonWeight ?? 1);
+  if (dom.budgetModalWTue) dom.budgetModalWTue.value = String(state.lastBudgetTueWeight ?? 1);
+  if (dom.budgetModalWWed) dom.budgetModalWWed.value = String(state.lastBudgetWedWeight ?? 1);
+  if (dom.budgetModalWThu) dom.budgetModalWThu.value = String(state.lastBudgetThuWeight ?? 1);
+  if (dom.budgetModalWFri) dom.budgetModalWFri.value = String(state.lastBudgetFriWeight ?? 1);
+  if (dom.budgetModalWSat) dom.budgetModalWSat.value = String(state.lastBudgetSatWeight ?? 1.5);
+  if (dom.budgetModalWSun) dom.budgetModalWSun.value = String(state.lastBudgetSunWeight ?? 2);
+  if (dom.budgetModalWHoliday) dom.budgetModalWHoliday.value = state.lastBudgetHolidayWeight != null ? String(state.lastBudgetHolidayWeight) : '';
+  if (dom.budgetModalWPreHoliday) dom.budgetModalWPreHoliday.value = state.lastBudgetPreHolidayWeight != null ? String(state.lastBudgetPreHolidayWeight) : '';
 }
 
 function compareYearForApi(displayMonth) {
@@ -1745,12 +1802,7 @@ function renderBudgetPreview() {
   }
   const totalRaw = dom.budgetModalTotal?.value?.trim() ?? '';
   const total = totalRaw === '' ? 0 : Number(totalRaw.replace(/,/g, ''));
-  const ww = Number(dom.budgetModalWWeekday?.value);
-  const pw = Number(dom.budgetModalWPre?.value);
-  const hw = Number(dom.budgetModalWHoliday?.value);
-  const nww = Number.isFinite(ww) && ww > 0 ? ww : 1;
-  const npw = Number.isFinite(pw) && pw > 0 ? pw : 1.5;
-  const nhw = Number.isFinite(hw) && hw > 0 ? hw : 2;
+  const nw = (el, fb) => { const v = Number(el?.value); return Number.isFinite(v) && v > 0 ? v : fb; };
   const closed =
     state.modalStoreClosedDates instanceof Set
       ? state.modalStoreClosedDates
@@ -1761,11 +1813,27 @@ function renderBudgetPreview() {
     if (dom.budgetWeekdayBulkRow) dom.budgetWeekdayBulkRow.hidden = true;
     return;
   }
-  const map = allocateDailyBudgetsClient(dm, Math.round(total), nww, npw, nhw, closed);
+  const nwOpt = (el) => { const v = Number(el?.value); return (Number.isFinite(v) && v > 0) ? v : null; };
+  const wHoliday = nwOpt(dom.budgetModalWHoliday);
+  const wPreHoliday = nwOpt(dom.budgetModalWPreHoliday);
+  const needHolidaysPreview = wHoliday != null || wPreHoliday != null;
+  const holidaySetPreview = needHolidaysPreview ? new Set(JAPANESE_HOLIDAYS.keys()) : null;
+  const map = allocateDailyBudgetsClient(dm, Math.round(total),
+    nw(dom.budgetModalWMon, 1), nw(dom.budgetModalWTue, 1), nw(dom.budgetModalWWed, 1),
+    nw(dom.budgetModalWThu, 1), nw(dom.budgetModalWFri, 1), nw(dom.budgetModalWSat, 1.5),
+    nw(dom.budgetModalWSun, 2), closed, wHoliday, wPreHoliday);
   const days = enumerateMonthDatesJs(dm);
   const rows = days.map((d) => {
     const isClosed = closed.has(d);
-    const kind = classifySalesBudgetDayJs(d);
+    let kind = classifySalesBudgetDayJs(d);
+    if (!isClosed && holidaySetPreview) {
+      if (wHoliday != null && holidaySetPreview.has(d)) { kind = 'holiday'; }
+      else if (wPreHoliday != null && !holidaySetPreview.has(d)) {
+        const nextDt = new Date(new Date(`${d}T12:00:00+09:00`).getTime() + 86400000);
+        const nextIso = nextDt.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+        if (nextDt.getDay() === 0 || holidaySetPreview.has(nextIso)) kind = 'pre_holiday';
+      }
+    }
     const label = isClosed ? '店舗休日' : kindLabelJa(kind);
     const yen = map.get(d) ?? 0;
     const dateCell = formatBudgetPreviewDateCell(d);
@@ -1924,9 +1992,13 @@ function resetBudgetKpis(opts) {
   state.budgetKpiSingleMonth = false;
   state.lastYoyGrossYen = null;
   state.lastManualPriorYearGrossYen = null;
-  state.lastBudgetWeekdayWeight = null;
-  state.lastBudgetPreHolidayWeight = null;
-  state.lastBudgetHolidayWeight = null;
+  state.lastBudgetMonWeight = null;
+  state.lastBudgetTueWeight = null;
+  state.lastBudgetWedWeight = null;
+  state.lastBudgetThuWeight = null;
+  state.lastBudgetFriWeight = null;
+  state.lastBudgetSatWeight = null;
+  state.lastBudgetSunWeight = null;
   state.lastStoreClosedDates = [];
   state.modalStoreClosedDates = null;
   if (clearInput) syncBudgetModalFromState();
@@ -2096,7 +2168,7 @@ dom.clearToken.addEventListener('click', () => {
 if (dom.openBudgetModalBtn) {
   dom.openBudgetModalBtn.addEventListener('click', () => openBudgetModal());
 }
-['budgetModalTotal', 'budgetModalWWeekday', 'budgetModalWPre', 'budgetModalWHoliday'].forEach((id) => {
+['budgetModalTotal', 'budgetModalWMon', 'budgetModalWTue', 'budgetModalWWed', 'budgetModalWThu', 'budgetModalWFri', 'budgetModalWSat', 'budgetModalWSun', 'budgetModalWHoliday', 'budgetModalWPreHoliday'].forEach((id) => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('input', () => renderBudgetPreview());
 });
@@ -2155,11 +2227,20 @@ if (dom.budgetModalSave) {
       budget_yen = Math.round(n);
       if (budget_yen <= 0) budget_yen = null;
     }
-    const ww = Number(dom.budgetModalWWeekday?.value);
-    const pw = Number(dom.budgetModalWPre?.value);
-    const hw = Number(dom.budgetModalWHoliday?.value);
+    const nwv = (el, fb) => { const v = Number(el?.value); return Number.isFinite(v) && v > 0 ? v : fb; };
+    const nwvOpt = (el) => { const v = Number(el?.value); return (Number.isFinite(v) && v > 0) ? v : null; };
+    const wMon = nwv(dom.budgetModalWMon, 1);
+    const wTue = nwv(dom.budgetModalWTue, 1);
+    const wWed = nwv(dom.budgetModalWWed, 1);
+    const wThu = nwv(dom.budgetModalWThu, 1);
+    const wFri = nwv(dom.budgetModalWFri, 1);
+    const wSat = nwv(dom.budgetModalWSat, 1.5);
+    const wSun = nwv(dom.budgetModalWSun, 2);
+    const wHoliday = nwvOpt(dom.budgetModalWHoliday);
+    const wPreHoliday = nwvOpt(dom.budgetModalWPreHoliday);
     if (budget_yen != null) {
-      if (!Number.isFinite(ww) || ww <= 0 || !Number.isFinite(pw) || pw <= 0 || !Number.isFinite(hw) || hw <= 0) {
+      const allPositive = [wMon, wTue, wWed, wThu, wFri, wSat, wSun].every((w) => Number.isFinite(w) && w > 0);
+      if (!allPositive) {
         if (dom.budgetModalHint) dom.budgetModalHint.textContent = '各重みは正の数で入力してください';
         return;
       }
@@ -2181,24 +2262,41 @@ if (dom.budgetModalSave) {
           store_key: sk,
           month: dm,
           budget_yen,
-          weekday_weight: ww,
-          pre_holiday_weight: pw,
-          holiday_weight: hw,
+          mon_weight: wMon,
+          tue_weight: wTue,
+          wed_weight: wWed,
+          thu_weight: wThu,
+          fri_weight: wFri,
+          sat_weight: wSat,
+          sun_weight: wSun,
+          ...(wHoliday != null ? { holiday_weight: wHoliday } : {}),
+          ...(wPreHoliday != null ? { pre_holiday_weight: wPreHoliday } : {}),
           store_closed_dates: closedArr,
         };
       const result = await apiFetch('/receipts/sales-budget', { method: 'PUT', body });
       const mb = result?.month_budget_yen;
       state.lastMonthBudgetYen = mb != null && Number.isFinite(Number(mb)) ? Math.round(Number(mb)) : null;
       if (state.lastMonthBudgetYen != null) {
-        state.lastBudgetWeekdayWeight = result?.weekday_weight != null ? Number(result.weekday_weight) : ww;
-        state.lastBudgetPreHolidayWeight = result?.pre_holiday_weight != null ? Number(result.pre_holiday_weight) : pw;
-        state.lastBudgetHolidayWeight = result?.holiday_weight != null ? Number(result.holiday_weight) : hw;
+        const nrv = (k, fb) => result?.[k] != null && Number.isFinite(Number(result[k])) ? Number(result[k]) : fb;
+        state.lastBudgetMonWeight = nrv('mon_weight', wMon);
+        state.lastBudgetTueWeight = nrv('tue_weight', wTue);
+        state.lastBudgetWedWeight = nrv('wed_weight', wWed);
+        state.lastBudgetThuWeight = nrv('thu_weight', wThu);
+        state.lastBudgetFriWeight = nrv('fri_weight', wFri);
+        state.lastBudgetSatWeight = nrv('sat_weight', wSat);
+        state.lastBudgetSunWeight = nrv('sun_weight', wSun);
+        { const v = result?.holiday_weight; state.lastBudgetHolidayWeight = (v != null && Number.isFinite(Number(v)) && Number(v) > 0) ? Number(v) : null; }
+        { const v = result?.pre_holiday_weight; state.lastBudgetPreHolidayWeight = (v != null && Number.isFinite(Number(v)) && Number(v) > 0) ? Number(v) : null; }
         const sc = result?.store_closed_dates;
         state.lastStoreClosedDates = Array.isArray(sc) ? sc.map(String) : closedArr;
       } else {
-        state.lastBudgetWeekdayWeight = null;
-        state.lastBudgetPreHolidayWeight = null;
-        state.lastBudgetHolidayWeight = null;
+        state.lastBudgetMonWeight = null;
+        state.lastBudgetTueWeight = null;
+        state.lastBudgetWedWeight = null;
+        state.lastBudgetThuWeight = null;
+        state.lastBudgetFriWeight = null;
+        state.lastBudgetSatWeight = null;
+        state.lastBudgetSunWeight = null;
         state.lastStoreClosedDates = [];
       }
       syncBudgetModalFromState();
@@ -2231,9 +2329,15 @@ if (dom.budgetModalClear) {
         body: { store_key: sk, month: dm, budget_yen: null },
       });
       state.lastMonthBudgetYen = null;
-      state.lastBudgetWeekdayWeight = null;
-      state.lastBudgetPreHolidayWeight = null;
+      state.lastBudgetMonWeight = null;
+      state.lastBudgetTueWeight = null;
+      state.lastBudgetWedWeight = null;
+      state.lastBudgetThuWeight = null;
+      state.lastBudgetFriWeight = null;
+      state.lastBudgetSatWeight = null;
+      state.lastBudgetSunWeight = null;
       state.lastBudgetHolidayWeight = null;
+      state.lastBudgetPreHolidayWeight = null;
       state.lastStoreClosedDates = [];
       state.modalStoreClosedDates = new Set();
       syncBudgetModalFromState();
@@ -2880,12 +2984,16 @@ async function loadAll() {
     {
       const mb = salesData?.month_budget_yen;
       state.lastMonthBudgetYen = mb != null && Number.isFinite(Number(mb)) ? Math.round(Number(mb)) : null;
-      const bw = salesData?.budget_weekday_weight;
-      const bp = salesData?.budget_pre_holiday_weight;
-      const bh = salesData?.budget_holiday_weight;
-      state.lastBudgetWeekdayWeight = bw != null && Number.isFinite(Number(bw)) ? Number(bw) : null;
-      state.lastBudgetPreHolidayWeight = bp != null && Number.isFinite(Number(bp)) ? Number(bp) : null;
-      state.lastBudgetHolidayWeight = bh != null && Number.isFinite(Number(bh)) ? Number(bh) : null;
+      const nsd = (k) => { const v = salesData?.[k]; return v != null && Number.isFinite(Number(v)) ? Number(v) : null; };
+      state.lastBudgetMonWeight = nsd('budget_mon_weight');
+      state.lastBudgetTueWeight = nsd('budget_tue_weight');
+      state.lastBudgetWedWeight = nsd('budget_wed_weight');
+      state.lastBudgetThuWeight = nsd('budget_thu_weight');
+      state.lastBudgetFriWeight = nsd('budget_fri_weight');
+      state.lastBudgetSatWeight = nsd('budget_sat_weight');
+      state.lastBudgetSunWeight = nsd('budget_sun_weight');
+      state.lastBudgetHolidayWeight = nsd('budget_holiday_weight');
+      state.lastBudgetPreHolidayWeight = nsd('budget_pre_holiday_weight');
       const sclosed = salesData?.store_closed_dates;
       state.lastStoreClosedDates = Array.isArray(sclosed) ? sclosed.map(String) : [];
       const pm =

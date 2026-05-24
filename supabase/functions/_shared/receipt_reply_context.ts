@@ -7,7 +7,6 @@ import {
 import {
   allocateDailyBudgetsForMonth,
   enumerateMonthDates,
-  getDefaultJapaneseHolidaySet,
   getJstBusinessDateForReceiptBudget,
   mergeStoreClosedDateLists,
   shouldDeferDailyBudgetUntilJstOpen,
@@ -81,7 +80,7 @@ async function fetchBudgetForStoreMonth(
 ) {
   const { data, error } = await supabase
     .from('line_sales_month_budgets')
-    .select('budget_yen, weekday_weight, pre_holiday_weight, holiday_weight, store_closed_dates')
+    .select('budget_yen, mon_weight, tue_weight, wed_weight, thu_weight, fri_weight, sat_weight, sun_weight, holiday_weight, pre_holiday_weight, store_closed_dates')
     .eq('store_partition_key', storePartitionKey)
     .eq('target_month', month)
     .maybeSingle()
@@ -102,11 +101,24 @@ async function fetchBudgetForStoreMonth(
     (data as { store_closed_dates?: unknown }).store_closed_dates,
     month,
   )
+  const d2 = data as {
+    mon_weight?: unknown; tue_weight?: unknown; wed_weight?: unknown; thu_weight?: unknown
+    fri_weight?: unknown; sat_weight?: unknown; sun_weight?: unknown
+    holiday_weight?: unknown; pre_holiday_weight?: unknown
+  }
+  const hw = Number(d2.holiday_weight)
+  const phw = Number(d2.pre_holiday_weight)
   return {
     budget_yen: budgetYen,
-    weekday_weight: parsePositiveWeight((data as { weekday_weight?: unknown }).weekday_weight, 1),
-    pre_holiday_weight: parsePositiveWeight((data as { pre_holiday_weight?: unknown }).pre_holiday_weight, 1.5),
-    holiday_weight: parsePositiveWeight((data as { holiday_weight?: unknown }).holiday_weight, 2),
+    mon_weight: parsePositiveWeight(d2.mon_weight, 1),
+    tue_weight: parsePositiveWeight(d2.tue_weight, 1),
+    wed_weight: parsePositiveWeight(d2.wed_weight, 1),
+    thu_weight: parsePositiveWeight(d2.thu_weight, 1),
+    fri_weight: parsePositiveWeight(d2.fri_weight, 1),
+    sat_weight: parsePositiveWeight(d2.sat_weight, 1.5),
+    sun_weight: parsePositiveWeight(d2.sun_weight, 2),
+    holiday_weight: (Number.isFinite(hw) && hw > 0) ? hw : null,
+    pre_holiday_weight: (Number.isFinite(phw) && phw > 0) ? phw : null,
     store_closed_dates: storeClosedDates,
   }
 }
@@ -176,17 +188,21 @@ function computeBudgetDiffs(
   budgetRow: NonNullable<Awaited<ReturnType<typeof fetchBudgetForStoreMonth>>>,
 ) {
   const weights: SalesBudgetAllocationWeights = {
-    weekday: budgetRow.weekday_weight,
-    pre_holiday: budgetRow.pre_holiday_weight,
+    mon: budgetRow.mon_weight,
+    tue: budgetRow.tue_weight,
+    wed: budgetRow.wed_weight,
+    thu: budgetRow.thu_weight,
+    fri: budgetRow.fri_weight,
+    sat: budgetRow.sat_weight,
+    sun: budgetRow.sun_weight,
     holiday: budgetRow.holiday_weight,
+    pre_holiday: budgetRow.pre_holiday_weight,
   }
-  const holidaySet = getDefaultJapaneseHolidaySet()
   const storeClosedSet = new Set(budgetRow.store_closed_dates)
   const dailyBudgetMap = allocateDailyBudgetsForMonth(
     month,
     budgetRow.budget_yen,
     weights,
-    holidaySet,
     storeClosedSet,
   )
   const progressDay = getJstBusinessDateForReceiptBudget()

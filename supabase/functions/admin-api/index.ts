@@ -7,7 +7,6 @@ import {
 import {
   allocateDailyBudgetsForMonth,
   enumerateMonthDates,
-  getDefaultJapaneseHolidaySet,
   mergeStoreClosedDateLists,
   parseStoreClosedDatesForMonth,
   type SalesBudgetAllocationWeights,
@@ -2208,9 +2207,13 @@ function parsePositiveWeight(value: unknown, fallback: number): number {
 
 type SalesBudgetRow = {
   budget_yen: number
-  weekday_weight: number
-  pre_holiday_weight: number
-  holiday_weight: number
+  mon_weight: number
+  tue_weight: number
+  wed_weight: number
+  thu_weight: number
+  fri_weight: number
+  sat_weight: number
+  sun_weight: number
   store_closed_dates: string[]
 }
 
@@ -2274,7 +2277,7 @@ async function fetchSalesBudgetRow(
   const store_partition_key = normalizeBudgetStoreKey(storeKeyQueryParam)
   const { data, error } = await supabase
     .from("line_sales_month_budgets")
-    .select("budget_yen, weekday_weight, pre_holiday_weight, holiday_weight, store_closed_dates")
+    .select("budget_yen, mon_weight, tue_weight, wed_weight, thu_weight, fri_weight, sat_weight, sun_weight, store_closed_dates")
     .eq("store_partition_key", store_partition_key)
     .eq("target_month", month)
     .maybeSingle()
@@ -2285,9 +2288,13 @@ async function fetchSalesBudgetRow(
   if (!data) return null
   const row = data as {
     budget_yen?: unknown
-    weekday_weight?: unknown
-    pre_holiday_weight?: unknown
-    holiday_weight?: unknown
+    mon_weight?: unknown
+    tue_weight?: unknown
+    wed_weight?: unknown
+    thu_weight?: unknown
+    fri_weight?: unknown
+    sat_weight?: unknown
+    sun_weight?: unknown
     store_closed_dates?: unknown
   }
   const budgetYen = toNonNegativeInteger(row.budget_yen)
@@ -2296,9 +2303,13 @@ async function fetchSalesBudgetRow(
   const store_closed_dates = mergeStoreClosedDateLists(fromTable, row.store_closed_dates, month)
   return {
     budget_yen: budgetYen,
-    weekday_weight: parsePositiveWeight(row.weekday_weight, 1),
-    pre_holiday_weight: parsePositiveWeight(row.pre_holiday_weight, 1.5),
-    holiday_weight: parsePositiveWeight(row.holiday_weight, 2),
+    mon_weight: parsePositiveWeight(row.mon_weight, 1),
+    tue_weight: parsePositiveWeight(row.tue_weight, 1),
+    wed_weight: parsePositiveWeight(row.wed_weight, 1),
+    thu_weight: parsePositiveWeight(row.thu_weight, 1),
+    fri_weight: parsePositiveWeight(row.fri_weight, 1),
+    sat_weight: parsePositiveWeight(row.sat_weight, 1.5),
+    sun_weight: parsePositiveWeight(row.sun_weight, 2),
     store_closed_dates,
   }
 }
@@ -2330,9 +2341,13 @@ async function upsertReceiptSalesBudget(
     }
     return {
       month_budget_yen: null as number | null,
-      weekday_weight: null as number | null,
-      pre_holiday_weight: null as number | null,
-      holiday_weight: null as number | null,
+      mon_weight: null as number | null,
+      tue_weight: null as number | null,
+      wed_weight: null as number | null,
+      thu_weight: null as number | null,
+      fri_weight: null as number | null,
+      sat_weight: null as number | null,
+      sun_weight: null as number | null,
       store_closed_dates: null as string[] | null,
       store_partition_key,
       month,
@@ -2348,9 +2363,13 @@ async function upsertReceiptSalesBudget(
     return await clearAndReturn()
   }
 
-  const ww = parsePositiveWeight(body.weekday_weight, 1)
-  const pw = parsePositiveWeight(body.pre_holiday_weight, 1.5)
-  const hw = parsePositiveWeight(body.holiday_weight, 2)
+  const monW = parsePositiveWeight(body.mon_weight, 1)
+  const tueW = parsePositiveWeight(body.tue_weight, 1)
+  const wedW = parsePositiveWeight(body.wed_weight, 1)
+  const thuW = parsePositiveWeight(body.thu_weight, 1)
+  const friW = parsePositiveWeight(body.fri_weight, 1)
+  const satW = parsePositiveWeight(body.sat_weight, 1.5)
+  const sunW = parsePositiveWeight(body.sun_weight, 2)
   const closedDates = parseStoreClosedDatesForMonth(body.store_closed_dates, month)
 
   const updatedAt = new Date().toISOString()
@@ -2361,15 +2380,19 @@ async function upsertReceiptSalesBudget(
         store_partition_key,
         target_month: month,
         budget_yen: budgetYen,
-        weekday_weight: ww,
-        pre_holiday_weight: pw,
-        holiday_weight: hw,
+        mon_weight: monW,
+        tue_weight: tueW,
+        wed_weight: wedW,
+        thu_weight: thuW,
+        fri_weight: friW,
+        sat_weight: satW,
+        sun_weight: sunW,
         store_closed_dates: closedDates,
         updated_at: updatedAt,
       },
       { onConflict: "store_partition_key,target_month" },
     )
-    .select("budget_yen, weekday_weight, pre_holiday_weight, holiday_weight, store_closed_dates")
+    .select("budget_yen, mon_weight, tue_weight, wed_weight, thu_weight, fri_weight, sat_weight, sun_weight, store_closed_dates")
     .maybeSingle()
 
   if (error) {
@@ -2380,9 +2403,13 @@ async function upsertReceiptSalesBudget(
 
   let row = data as {
     budget_yen?: unknown
-    weekday_weight?: unknown
-    pre_holiday_weight?: unknown
-    holiday_weight?: unknown
+    mon_weight?: unknown
+    tue_weight?: unknown
+    wed_weight?: unknown
+    thu_weight?: unknown
+    fri_weight?: unknown
+    sat_weight?: unknown
+    sun_weight?: unknown
     store_closed_dates?: unknown
   } | null
   let parsedClosed = await fetchStoreClosedDatesFromTable(supabase, store_partition_key, month)
@@ -2395,9 +2422,13 @@ async function upsertReceiptSalesBudget(
   const out = row != null ? toNonNegativeInteger(row.budget_yen) : budgetYen
   return {
     month_budget_yen: out > 0 ? out : null,
-    weekday_weight: parsePositiveWeight(row?.weekday_weight, ww),
-    pre_holiday_weight: parsePositiveWeight(row?.pre_holiday_weight, pw),
-    holiday_weight: parsePositiveWeight(row?.holiday_weight, hw),
+    mon_weight: parsePositiveWeight(row?.mon_weight, monW),
+    tue_weight: parsePositiveWeight(row?.tue_weight, tueW),
+    wed_weight: parsePositiveWeight(row?.wed_weight, wedW),
+    thu_weight: parsePositiveWeight(row?.thu_weight, thuW),
+    fri_weight: parsePositiveWeight(row?.fri_weight, friW),
+    sat_weight: parsePositiveWeight(row?.sat_weight, satW),
+    sun_weight: parsePositiveWeight(row?.sun_weight, sunW),
     store_closed_dates: parsedClosed,
     store_partition_key,
     month,
@@ -2734,9 +2765,13 @@ async function fetchReceiptSalesState(
     month,
   )
   const month_budget_yen = budgetRow?.budget_yen ?? null
-  const budget_weekday_weight = budgetRow?.weekday_weight ?? null
-  const budget_pre_holiday_weight = budgetRow?.pre_holiday_weight ?? null
-  const budget_holiday_weight = budgetRow?.holiday_weight ?? null
+  const budget_mon_weight = budgetRow?.mon_weight ?? null
+  const budget_tue_weight = budgetRow?.tue_weight ?? null
+  const budget_wed_weight = budgetRow?.wed_weight ?? null
+  const budget_thu_weight = budgetRow?.thu_weight ?? null
+  const budget_fri_weight = budgetRow?.fri_weight ?? null
+  const budget_sat_weight = budgetRow?.sat_weight ?? null
+  const budget_sun_weight = budgetRow?.sun_weight ?? null
   const store_closed_dates = budgetRow?.store_closed_dates ?? []
 
   const compareYear = parseCompareYearQueryParam(url.searchParams.get("compare_year"), month)
@@ -2757,17 +2792,19 @@ async function fetchReceiptSalesState(
     month_budget_yen > 0
   ) {
     const weights: SalesBudgetAllocationWeights = {
-      weekday: budgetRow.weekday_weight,
-      pre_holiday: budgetRow.pre_holiday_weight,
-      holiday: budgetRow.holiday_weight,
+      mon: budgetRow.mon_weight,
+      tue: budgetRow.tue_weight,
+      wed: budgetRow.wed_weight,
+      thu: budgetRow.thu_weight,
+      fri: budgetRow.fri_weight,
+      sat: budgetRow.sat_weight,
+      sun: budgetRow.sun_weight,
     }
-    const holidaySet = getDefaultJapaneseHolidaySet()
     const storeClosedSet = new Set(store_closed_dates)
     const map = allocateDailyBudgetsForMonth(
       month,
       month_budget_yen,
       weights,
-      holidaySet,
       storeClosedSet,
     )
     daily_budget_yen_by_date = Object.fromEntries(map)
@@ -2776,9 +2813,13 @@ async function fetchReceiptSalesState(
   return {
     month,
     month_budget_yen,
-    budget_weekday_weight,
-    budget_pre_holiday_weight,
-    budget_holiday_weight,
+    budget_mon_weight,
+    budget_tue_weight,
+    budget_wed_weight,
+    budget_thu_weight,
+    budget_fri_weight,
+    budget_sat_weight,
+    budget_sun_weight,
     store_closed_dates,
     comparison_year: compareYear,
     comparison_sales_month,

@@ -1,12 +1,20 @@
 import { getJapaneseHolidayDateSet } from "./japanese_holidays.ts"
 
 export type SalesBudgetAllocationWeights = {
-  weekday: number
-  pre_holiday: number
-  holiday: number
+  mon: number
+  tue: number
+  wed: number
+  thu: number
+  fri: number
+  sat: number
+  sun: number
+  /** 国民の祝日の重み。null/undefined なら DOW 重みで代替。 */
+  holiday?: number | null
+  /** 祝日前日・日曜前日の重み。null/undefined なら DOW 重みで代替。 */
+  pre_holiday?: number | null
 }
 
-export type DayKind = "weekday" | "pre_holiday" | "holiday"
+export type DayKind = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
 
 /** 暦日を 1 日進める（YYYY-MM-DD、UTC 暦） */
 export function addCalendarDaysIso(isoDate: string, deltaDays: number): string {
@@ -110,6 +118,7 @@ export function shouldDeferDailyBudgetUntilJstOpen(params: {
   return true
 }
 
+/** @deprecated 祝日ベース分類は廃止。isHolidayLikeDay は後方互換のため残す */
 export function isHolidayLikeDay(isoDate: string, holidayDates: Set<string>): boolean {
   const dt = new Date(`${isoDate}T12:00:00+09:00`)
   if (Number.isNaN(dt.getTime())) return false
@@ -117,17 +126,43 @@ export function isHolidayLikeDay(isoDate: string, holidayDates: Set<string>): bo
   return holidayDates.has(isoDate)
 }
 
-export function classifySalesBudgetDay(isoDate: string, holidayDates: Set<string>): DayKind {
-  if (isHolidayLikeDay(isoDate, holidayDates)) return "holiday"
-  const next = addCalendarDaysIso(isoDate, 1)
-  if (isHolidayLikeDay(next, holidayDates)) return "pre_holiday"
-  return "weekday"
+/** YYYY-MM-DD の曜日（JST）を返す（0=日曜, 1=月曜, ..., 6=土曜） */
+function getDowJst(isoDate: string): number {
+  const dt = new Date(`${isoDate}T12:00:00+09:00`)
+  if (Number.isNaN(dt.getTime())) return 1 // fallback: 月曜
+  return dt.getDay()
+}
+
+const DOW_TO_KIND: DayKind[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+
+/** YYYY-MM-DD → 曜日 DayKind */
+export function classifySalesBudgetDay(isoDate: string): DayKind {
+  return DOW_TO_KIND[getDowJst(isoDate)]
 }
 
 function weightForDayKind(kind: DayKind, w: SalesBudgetAllocationWeights): number {
-  if (kind === "holiday") return w.holiday
-  if (kind === "pre_holiday") return w.pre_holiday
-  return w.weekday
+  return w[kind]
+}
+
+/**
+ * 祝日・前日重みを考慮した実効重みを返す。
+ * 優先順: 店休(0) > 国民の祝日→holiday > 前日→pre_holiday > DOW
+ * holidaySet が null なら DOW 重みのみ使用。
+ */
+export function getEffectiveDayWeight(
+  isoDate: string,
+  weights: SalesBudgetAllocationWeights,
+  holidaySet: Set<string> | null,
+): number {
+  const dowWeight = weightForDayKind(classifySalesBudgetDay(isoDate), weights)
+  if (!holidaySet) return dowWeight
+  if (weights.holiday != null && holidaySet.has(isoDate)) return weights.holiday
+  if (weights.pre_holiday != null && !holidaySet.has(isoDate)) {
+    const nextDay = addCalendarDaysIso(isoDate, 1)
+    const nextDow = new Date(`${nextDay}T12:00:00+09:00`).getDay()
+    if (nextDow === 0 || holidaySet.has(nextDay)) return weights.pre_holiday
+  }
+  return dowWeight
 }
 
 /** 暦月の日数 − 店休日数（1日1休業日としてカウント） */
@@ -218,21 +253,24 @@ export function mergeStoreClosedDateLists(
 }
 
 /**
- * 月間予算を「平日 / 休日前日 / 休日(日曜+祝)」の重みで日別に按分（端数は最大剰余法）
+ * 月間予算を曜日別重みで日別に按分（端数は最大剰余法）。
  * `storeClosedDates` に含まれる日は按分から除外（重み0）し、月間総額は残りの日へ再配分する。
+ * weights.holiday / weights.pre_holiday が設定されている場合、祝日・前日に適用される。
  */
 export function allocateDailyBudgetsForMonth(
   targetMonth: string,
   monthBudgetYen: number,
   weights: SalesBudgetAllocationWeights,
-  holidayDates: Set<string>,
   storeClosedDates?: Set<string> | null,
 ): Map<string, number> {
   const days = enumerateMonthDates(targetMonth)
   if (days.length === 0 || monthBudgetYen <= 0) return new Map()
 
-  const kinds = days.map((d) => classifySalesBudgetDay(d, holidayDates))
-  const rawWeights = kinds.map((k) => weightForDayKind(k, weights))
+  // 祝日セットは holiday/pre_holiday が両方 null の場合は読み込まない（不要な処理を省く）
+  const needHolidays = weights.holiday != null || weights.pre_holiday != null
+  const holidaySet: Set<string> | null = needHolidays ? getJapaneseHolidayDateSet() : null
+
+  const rawWeights = days.map((d) => getEffectiveDayWeight(d, weights, holidaySet))
   const effectiveWeights = days.map((d, i) =>
     storeClosedDates?.has(d) ? 0 : rawWeights[i],
   )
@@ -270,14 +308,12 @@ export function getDailyBudgetForDateFromAllocation(
   isoDate: string,
   monthBudgetYen: number,
   weights: SalesBudgetAllocationWeights,
-  holidayDates: Set<string>,
   storeClosedDates?: Set<string> | null,
 ): number | null {
   const map = allocateDailyBudgetsForMonth(
     targetMonth,
     monthBudgetYen,
     weights,
-    holidayDates,
     storeClosedDates,
   )
   const v = map.get(isoDate)
