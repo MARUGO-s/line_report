@@ -2504,7 +2504,13 @@ function isLineEntryAnalytics() {
 function applyLineEntryChrome() {
   if (!isLineEntryAnalytics()) return;
   document.body.setAttribute('data-entry', 'line');
-  ['adminLink', 'mediaLink', 'reservationLink', 'receiptSheetsPilotHeaderLink'].forEach(function (id) {
+  [
+    'adminLink',
+    'mediaLink',
+    'reservationLink',
+    'receiptSheetsPilotHeaderLink',
+    'receiptSheetsPilotLink',
+  ].forEach(function (id) {
     const el = document.getElementById(id);
     if (el) {
       el.style.display = 'none';
@@ -2512,6 +2518,11 @@ function applyLineEntryChrome() {
       el.setAttribute('aria-hidden', 'true');
     }
   });
+  if (dom.receiptSheetsPilotHint) {
+    dom.receiptSheetsPilotHint.style.display = 'none';
+    dom.receiptSheetsPilotHint.setAttribute('hidden', '');
+    dom.receiptSheetsPilotHint.setAttribute('aria-hidden', 'true');
+  }
 }
 
 applyLineEntryChrome();
@@ -2649,6 +2660,13 @@ async function refreshReceiptSheetsPilotLink() {
 
 function updateReceiptSheetsPilotUi() {
   const storeKey = (dom.storeSelect && dom.storeSelect.value) || state.storeKey || '';
+
+  if (isLineEntryAnalytics()) {
+    setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotLink, false);
+    setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotHeaderLink, false);
+    if (dom.receiptSheetsPilotHint) dom.receiptSheetsPilotHint.style.display = 'none';
+    return;
+  }
 
   if (!isReceiptSheetsPilotEnabled()) {
     setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotLink, false);
