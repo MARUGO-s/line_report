@@ -1,5 +1,9 @@
 import { normalizeInlineText, normalizeReceiptFieldText } from './receipt_parse.ts'
-import { resolveBestStoreName, resolveReceiptNamePartitionKey } from './receipt_store_name_resolve.ts'
+import {
+  resolveBestStoreName,
+  resolveReceiptNamePartitionKey,
+  sanitizeReceiptOcrStoreName,
+} from './receipt_store_name_resolve.ts'
 
 function normalizeStoreCompareKey(raw: string): string {
   return normalizeInlineText(String(raw ?? '').normalize('NFKC'))
@@ -15,7 +19,8 @@ export function receiptStoreNameMatchesRegistry(
   registryPartitionKey: string,
   receiptStoreName: string | null,
 ): boolean {
-  const parsed = normalizeReceiptFieldText(receiptStoreName, 80)
+  const parsedRaw = normalizeReceiptFieldText(receiptStoreName, 80)
+  const parsed = parsedRaw ? sanitizeReceiptOcrStoreName(parsedRaw) : null
   if (!parsed) return true
 
   const registered =

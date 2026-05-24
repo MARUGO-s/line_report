@@ -4,6 +4,7 @@
  */
 import { normalizeInlineText } from './receipt_parse.ts'
 import { MARUGO_GROUP_STORE_OPTIONS } from './marugo_group_stores.ts'
+import { RECEIPT_SHEETS_STORE_CATALOG } from './receipt_sheets_store_catalog.ts'
 
 export function normalizeStoreToken(value: string): string {
   return String(value || '')
@@ -42,6 +43,24 @@ const RECEIPT_BRAND_PARTITION_ALIASES: ReadonlyArray<{
       'ÇAVA ÇAVA',
     ],
   },
+  {
+    partitionKey: 'marugoyotsuya',
+    labels: [
+      'マルゴ 四谷',
+      'マルゴ四谷',
+      'マルコ四谷',
+      'マルコ 四谷',
+      'マルコ四谷名',
+    ],
+  },
+  {
+    partitionKey: 'marugoshinbashi',
+    labels: ['マルゴ 新橋', 'マルゴ新橋', 'マルコ新橋', 'マルコ 新橋'],
+  },
+  {
+    partitionKey: 'marugomarunouchi',
+    labels: ['マルゴ丸の内', 'マルゴ 丸の内', 'マルコ丸の内'],
+  },
 ]
 
 const STORE_ALIAS_MAP: Record<string, string> = {
@@ -63,6 +82,68 @@ const STORE_ALIAS_MAP: Record<string, string> = {
   マルゴセカンド: 'マルゴ セカンド',
   マルゴ四谷: 'マルゴ 四谷',
   マルゴ新橋: 'マルゴ 新橋',
+  マルコ四谷: 'マルゴ 四谷',
+  マルコ四谷名: 'マルゴ 四谷',
+  マルコ新橋: 'マルゴ 新橋',
+}
+
+/** レシート OCR で末尾に付きやすいノイズ（「四谷名」→「四谷」+「名」等） */
+const TRAILING_STORE_NAME_OCR_NOISE = /(?:店名|店舗|店|様|名)+$/u
+
+/** マルゴ系で OCR が「マルコ」と読む誤り＋店舗 suffix */
+const MARUGO_OCR_LOCATION_SUFFIX =
+  /(?:四谷|新橋|丸の内|セカンド|グランデ|オット|四ツ谷|四ッ谷)/
+
+/**
+ * レシート店名 OCR の前処理（Webhook 照合・正規化の前に適用）
+ */
+export function sanitizeReceiptOcrStoreName(raw: string): string {
+  let s = String(raw || '').trim().normalize('NFKC')
+  if (!s) return s
+  s = s.replace(TRAILING_STORE_NAME_OCR_NOISE, '').trim()
+  if (/^マルコ/u.test(s) && MARUGO_OCR_LOCATION_SUFFIX.test(s)) {
+    s = s.replace(/^マルコ/u, 'マルゴ')
+  }
+  return s.trim()
+}
+
+function tokenSimilarityScore(a: string, b: string): number {
+  if (!a || !b) return 0
+  if (a === b) return 1
+  const maxLen = Math.max(a.length, b.length)
+  if (maxLen < 4) return 0
+  const dist = levenshtein(a, b)
+  return 1 - dist / maxLen
+}
+
+/** 既知店舗一覧へのあいまい一致（1〜2文字の OCR 誤り） */
+function tryFuzzyMatchMarugoGroupStore(normalized: string): string | null {
+  if (normalized.length < 4) return null
+
+  type Hit = { store: string; score: number }
+  const hits: Hit[] = []
+
+  for (const store of MARUGO_GROUP_STORE_OPTIONS) {
+    const norm = normalizeStoreToken(store)
+    if (!norm) continue
+    const score = tokenSimilarityScore(normalized, norm)
+    if (score >= 0.78) hits.push({ store, score })
+  }
+
+  if (hits.length === 0) return null
+  hits.sort((a, b) => b.score - a.score)
+  const best = hits[0]!
+  const second = hits[1]
+  if (second && best.score - second.score < 0.06) return null
+  if (best.score < 0.8 && second) return null
+  return best.store
+}
+
+function catalogPartitionKeyForDisplayName(displayName: string): string | null {
+  for (const [key, label] of Object.entries(RECEIPT_SHEETS_STORE_CATALOG)) {
+    if (label === displayName) return key
+  }
+  return null
 }
 
 function extractLatinLettersLower(text: string): string {
@@ -132,7 +213,7 @@ function tryMatchReceiptLatinBrand(rawName: string): string | null {
 }
 
 export function resolveBestStoreName(rawName: string): string | null {
-  const trimmed = String(rawName || '').trim()
+  const trimmed = sanitizeReceiptOcrStoreName(String(rawName || '').trim())
   if (!trimmed) return null
 
   const normalized = normalizeStoreToken(trimmed)
@@ -140,6 +221,9 @@ export function resolveBestStoreName(rawName: string): string | null {
 
   const aliasHit = STORE_ALIAS_MAP[normalized]
   if (aliasHit) return aliasHit
+
+  const fuzzyHit = tryFuzzyMatchMarugoGroupStore(normalized)
+  if (fuzzyHit) return fuzzyHit
 
   const candidates = [...MARUGO_GROUP_STORE_OPTIONS]
     .map((store) => ({ store, norm: normalizeStoreToken(store) }))
@@ -180,7 +264,7 @@ export function findBestStoreNameInText(text: string): string | null {
 
 function collectNameMatchTokens(rawName: string): Set<string> {
   const tokens = new Set<string>()
-  const trimmed = String(rawName || '').trim()
+  const trimmed = sanitizeReceiptOcrStoreName(String(rawName || '').trim())
   if (!trimmed) return tokens
 
   const norm = normalizeStoreToken(trimmed)
@@ -231,6 +315,34 @@ export function resolveReceiptNamePartitionKey(rawName: string | null | undefine
   if (latinBrand) {
     for (const p of RECEIPT_LATIN_BRAND_PROFILES) {
       if (p.displayName === latinBrand) return p.partitionKey
+    }
+  }
+
+  const resolved = resolveBestStoreName(trimmed)
+  if (resolved) {
+    const pk = catalogPartitionKeyForDisplayName(resolved)
+    if (pk) return pk
+  }
+
+  const sanitizedNorm = normalizeStoreToken(trimmed)
+  if (sanitizedNorm.length >= 4) {
+    let bestKey: string | null = null
+    let bestScore = 0
+    let secondScore = 0
+    for (const [key, label] of Object.entries(RECEIPT_SHEETS_STORE_CATALOG)) {
+      const labelNorm = normalizeStoreToken(label)
+      if (!labelNorm) continue
+      const score = tokenSimilarityScore(sanitizedNorm, labelNorm)
+      if (score > bestScore) {
+        secondScore = bestScore
+        bestScore = score
+        bestKey = key
+      } else if (score > secondScore) {
+        secondScore = score
+      }
+    }
+    if (bestKey && bestScore >= 0.78 && bestScore - secondScore >= 0.06) {
+      return bestKey
     }
   }
 
