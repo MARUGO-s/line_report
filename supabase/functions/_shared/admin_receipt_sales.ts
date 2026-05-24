@@ -13,6 +13,7 @@ import {
   type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
 import { queryStoreReceiptRows, loadStoreRegistry } from './store_receipt_query.ts'
+import { parseReceiptPhonesInput } from './store_receipt_phones.ts'
 import {
   buildJstDateKeysForMonth,
   buildJstMonthRange,
@@ -851,14 +852,54 @@ export async function fetchAnalyticsMonthly(
   }
 }
 
+export type ReceiptStoreOptionRow = {
+  store_key: string
+  store_name: string
+  receipt_phones: string[]
+}
+
 export async function fetchReceiptStoreOptions(
   supabase: SupabaseClient,
-): Promise<Array<{ store_key: string; store_name: string }>> {
+): Promise<ReceiptStoreOptionRow[]> {
   const registry = await loadStoreRegistry(supabase)
   return registry.map((entry) => ({
     store_key: entry.store_partition_key,
     store_name: entry.display_name,
+    receipt_phones: Array.isArray(entry.receipt_phones)
+      ? entry.receipt_phones.filter((p) => String(p ?? '').trim())
+      : [],
   }))
+}
+
+export async function updateStoreReceiptPhones(
+  supabase: SupabaseClient,
+  body: Record<string, unknown>,
+): Promise<{ store_key: string; receipt_phones: string[] }> {
+  const storeKey = resolveStorePartitionKey(
+    body.store_partition_key ?? body.store_key ?? body.store_name,
+  )
+  if (!storeKey) {
+    throw { status: 400, message: 'store_key が必要です。' } satisfies AppError
+  }
+  const receipt_phones = parseReceiptPhonesInput(body.receipt_phones)
+  const { data, error } = await supabase
+    .from('store_webhook_tables')
+    .update({ receipt_phones })
+    .eq('store_partition_key', storeKey)
+    .select('store_partition_key, receipt_phones')
+    .maybeSingle()
+  if (error) {
+    console.error('updateStoreReceiptPhones failed:', error.message)
+    throw { status: 500, message: error.message } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: `店舗 ${storeKey} が store_webhook_tables にありません。` } satisfies AppError
+  }
+  const row = data as { store_partition_key?: string; receipt_phones?: string[] }
+  return {
+    store_key: String(row.store_partition_key ?? storeKey),
+    receipt_phones: Array.isArray(row.receipt_phones) ? row.receipt_phones : receipt_phones,
+  }
 }
 
 export type ReceiptWebhookStatusRow = {

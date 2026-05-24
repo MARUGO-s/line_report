@@ -2492,11 +2492,29 @@ function applyTheme(t) {
 
 dom.themeBtn.addEventListener('click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
 
-/* LINEブラウザからのアクセス時は管理画面リンクを非表示 */
-if (/Line\//i.test(navigator.userAgent)) {
-  const adminLink = document.getElementById('adminLink');
-  if (adminLink) adminLink.style.display = 'none';
+/** LINEの「売上推移を見る」や LINE アプリ内ブラウザ（?from=line） */
+function isLineEntryAnalytics() {
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('from') === 'line') return true;
+  } catch (_) { /* ignore */ }
+  return /Line\//i.test(navigator.userAgent);
 }
+
+function applyLineEntryChrome() {
+  if (!isLineEntryAnalytics()) return;
+  document.body.setAttribute('data-entry', 'line');
+  ['adminLink', 'mediaLink', 'reservationLink', 'receiptSheetsPilotHeaderLink'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = 'none';
+      el.setAttribute('hidden', '');
+      el.setAttribute('aria-hidden', 'true');
+    }
+  });
+}
+
+applyLineEntryChrome();
 
 /* ── period tabs ── */
 document.getElementById('periodTabs').addEventListener('click', (e) => {

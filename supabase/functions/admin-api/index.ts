@@ -28,6 +28,7 @@ import {
   fetchReceiptWebhookStatus,
   upsertManualMonthEntries as upsertStoreManualMonthEntries,
   upsertReceiptSalesBudget as upsertStoreReceiptSalesBudget,
+  updateStoreReceiptPhones,
 } from "../_shared/admin_receipt_sales.ts"
 import { fetchWeatherDailyState } from "../_shared/weather_daily.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
@@ -330,6 +331,15 @@ Deno.serve(async (req) => {
       const includeDetectedRooms = url.searchParams.get("include_detected_rooms") !== "0"
       const status = await fetchReceiptWebhookStatus(supabase, { includeDetectedRooms })
       return json({ webhook_status: status, generated_at: new Date().toISOString() }, 200)
+    }
+
+    if (req.method === "PUT" && path === "/receipts/store-receipt-phones") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await updateStoreReceiptPhones(supabase, body)
+      return json(result, 200)
     }
 
     if (req.method === "GET" && path === "/receipts/sales") {

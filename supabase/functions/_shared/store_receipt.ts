@@ -322,6 +322,8 @@ export type StoreRegistryRow = {
   display_name: string
   webhook_raw_table: string
   receipt_table: string
+  /** レシート照合用（数字のみ）。未設定時はコード内フォールバック */
+  receipt_phones?: string[] | null
 }
 
 export function createServiceClient(): SupabaseClient | null {

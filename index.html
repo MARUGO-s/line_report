@@ -712,6 +712,33 @@
       color: var(--muted);
     }
 
+    .webhook-receipt-phones-details {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(155, 220, 255, 0.12);
+    }
+
+    .webhook-receipt-phones-details summary {
+      cursor: pointer;
+      font-size: 0.74rem;
+      color: var(--muted);
+    }
+
+    .webhook-receipt-phones-hint {
+      margin: 8px 0 6px;
+    }
+
+    .webhook-receipt-phones-input {
+      width: 100%;
+      min-height: 4.2em;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .webhook-receipt-phones-save {
+      margin-top: 8px;
+    }
+
     .modal-card[data-webhook-mode="permission"] label.room-scope-option:not(.receipt-scope-option):not(.store-permission-option) {
       display: none;
     }
@@ -6747,6 +6774,60 @@
       );
     }
 
+    function formatReceiptPhonesForTextarea(phones) {
+      if (!Array.isArray(phones) || phones.length === 0) return '';
+      return phones.map(function(p) {
+        const d = String(p || '').replace(/\D/g, '');
+        if (d.length === 10) {
+          return d.slice(0, 2) + '-' + d.slice(2, 6) + '-' + d.slice(6);
+        }
+        if (d.length === 11) {
+          return d.slice(0, 3) + '-' + d.slice(3, 7) + '-' + d.slice(7);
+        }
+        return String(p);
+      }).join('\n');
+    }
+
+    function buildWebhookReceiptPhonesSectionHtml(store) {
+      const storeKey = String(store.store_key || '').trim();
+      if (!storeKey || storeKey === UNASSIGNED_WEBHOOK_KEY) return '';
+      const phones = Array.isArray(store.receipt_phones) ? store.receipt_phones : [];
+      const value = formatReceiptPhonesForTextarea(phones);
+      const badge = phones.length > 0
+        ? phones.length + ' 件登録'
+        : '未登録（店名のみ）';
+      return (
+        '<details class="webhook-receipt-phones-details">' +
+        '<summary>レシート照合電話（' + escapeHtml(badge) + '）</summary>' +
+        '<p class="meta webhook-receipt-phones-hint">レシートの店名 OCR がずれても、ここに登録した電話が一致すれば売上登録します。1行1件、またはカンマ区切り。</p>' +
+        '<textarea class="input webhook-receipt-phones-input" rows="3" data-store-key="' + escapeHtml(storeKey) + '" placeholder="03-5361-6205">' + escapeHtml(value) + '</textarea>' +
+        '<button type="button" class="button webhook-receipt-phones-save" data-store-key="' + escapeHtml(storeKey) + '">電話番号を保存</button>' +
+        '</details>'
+      );
+    }
+
+    function patchReceiptPhonesInLocalState(storeKey, phones) {
+      if (!currentState) return;
+      const key = String(storeKey || '').trim();
+      const list = Array.isArray(phones) ? phones : [];
+      if (!Array.isArray(currentState.receipt_store_options)) return;
+      currentState.receipt_store_options = currentState.receipt_store_options.map(function(opt) {
+        const canonical = LINE_REPORT_PAGES.resolveStoreKey(opt.store_key, opt.store_name);
+        if (canonical !== key && String(opt.store_key || '').trim() !== key) return opt;
+        return Object.assign({}, opt, { receipt_phones: list });
+      });
+    }
+
+    async function saveStoreReceiptPhones(storeKey, rawText) {
+      const key = String(storeKey || '').trim();
+      const body = await api('/receipts/store-receipt-phones', {
+        method: 'PUT',
+        body: JSON.stringify({ store_key: key, receipt_phones: rawText }),
+      });
+      patchReceiptPhonesInLocalState(key, body.receipt_phones || []);
+      return body;
+    }
+
     function buildStoreWebhookCardHtml(store, overview, stores, userPermissions) {
       const storeKey = String(store.store_key || '').trim();
       const linkedRows = findRoomRowsByStoreKey(storeKey);
@@ -6800,6 +6881,7 @@
           'レシート: <code>' + escapeHtml(store.receipt_table || '') + '</code>' +
           '</div>' +
           '</details>' +
+          buildWebhookReceiptPhonesSectionHtml(store) +
           buildWebhookLinkedRoomsSectionHtml(storeKey, roomCount, roomItems) +
           '</article>'
         );
@@ -6825,6 +6907,7 @@
         '<button type="button" class="button primary webhook-config-open" data-store-key="' + escapeHtml(storeKey) + '">Webhook設定</button>' +
         '<div class="room-config-badge ' + summary.tone + '">' + escapeHtml(summary.text) + '</div>' +
         '</div>' +
+        buildWebhookReceiptPhonesSectionHtml(store) +
         buildWebhookLinkedRoomsSectionHtml(storeKey, roomCount, roomItems) +
         '</article>'
       );
@@ -7677,6 +7760,25 @@
           }
           if (target.classList.contains('webhook-copy-url')) {
             await copyTextToClipboard(target.getAttribute('data-url') || '', 'Webhook URL をコピーしました。');
+            return;
+          }
+          if (target.classList.contains('webhook-receipt-phones-save')) {
+            const storeKey = String(target.getAttribute('data-store-key') || '').trim();
+            const card = target.closest('.webhook-card');
+            const input = card
+              ? card.querySelector('.webhook-receipt-phones-input[data-store-key="' + storeKey + '"]')
+              : null;
+            const raw = input instanceof HTMLTextAreaElement ? input.value : '';
+            const result = await saveStoreReceiptPhones(storeKey, raw);
+            const count = Array.isArray(result.receipt_phones) ? result.receipt_phones.length : 0;
+            alert('レシート照合電話を保存しました（' + count + ' 件）。次のレシート画像から反映されます。');
+            if (currentState) {
+              renderWebhookSettingsSection(
+                currentState.room_overview || [],
+                currentState.room_settings || [],
+                currentState.receipt_store_options || [],
+              );
+            }
             return;
           }
           if (target.classList.contains('webhook-link-detected-btn')) {

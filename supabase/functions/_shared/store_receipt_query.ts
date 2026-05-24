@@ -20,7 +20,7 @@ const RECEIPT_SELECT =
 export async function loadStoreRegistry(supabase: SupabaseClient): Promise<StoreRegistryRow[]> {
   const { data, error } = await supabase
     .from('store_webhook_tables')
-    .select('store_partition_key, display_name, webhook_raw_table, receipt_table')
+    .select('store_partition_key, display_name, webhook_raw_table, receipt_table, receipt_phones')
     .order('display_name', { ascending: true })
 
   if (error) {

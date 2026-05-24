@@ -37,6 +37,7 @@ export function buildReceiptAnalyticsDashboardUri(
   const params = new URLSearchParams({
     store_key: storePartitionKey,
     month: targetMonth,
+    from: 'line',
   })
   const token = String(Deno.env.get('ADMIN_DASHBOARD_TOKEN') ?? '').trim()
   if (token) params.set('t', token)

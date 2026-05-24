@@ -53,6 +53,8 @@ var STORE_BUDGET_EDITABLE_COLS = 16;
 var STORE_BUDGET_UPDATED_AT_COL = 17;
 var STORE_PAST_EDITABLE_COLS = 8;
 var STORE_PAST_UPDATED_AT_COL = 9;
+var STORE_DAILY_EDITABLE_COLS = 9;
+var STORE_DAILY_UPDATED_AT_COL = 10;
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -80,13 +82,15 @@ function touchStoreSyncRowUpdatedAt_(e) {
   if (startCol > target.updatedAtCol) return;
   if (startCol === target.updatedAtCol && endCol === target.updatedAtCol) return;
   if (startCol > target.editableMaxCol) return;
+  var stamp = new Date().toISOString();
+  var sheet = e.range.getSheet();
+  sheet.getRange(1, target.updatedAtCol).setValue(stamp);
   var startRow = Math.max(2, e.range.getRow());
   var endRow = e.range.getRow() + e.range.getNumRows() - 1;
   if (endRow < startRow) return;
   var values = [];
-  var stamp = new Date().toISOString();
   for (var row = startRow; row <= endRow; row++) values.push([stamp]);
-  e.range.getSheet().getRange(startRow, target.updatedAtCol, values.length, 1).setValues(values);
+  sheet.getRange(startRow, target.updatedAtCol, values.length, 1).setValues(values);
 }
 
 function resolveStoreSyncUpdatedAtTarget_(sheetName) {
@@ -98,6 +102,9 @@ function resolveStoreSyncUpdatedAtTarget_(sheetName) {
     }
     if (name === tabs.past[0] || name === tabs.past[1]) {
       return { updatedAtCol: STORE_PAST_UPDATED_AT_COL, editableMaxCol: STORE_PAST_EDITABLE_COLS };
+    }
+    if (name === tabs.daily[0] || name === tabs.daily[1]) {
+      return { updatedAtCol: STORE_DAILY_UPDATED_AT_COL, editableMaxCol: STORE_DAILY_EDITABLE_COLS };
     }
   }
   if (isLegacyBudgetSheetName_(name)) {

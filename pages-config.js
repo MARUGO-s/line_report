@@ -162,6 +162,7 @@
         webhook_url: lineWebhookUrl(storeKey),
         webhook_raw_table: webhookRawTableName(storeKey),
         receipt_table: receiptTableName(storeKey),
+        receipt_phones: [],
       });
     }
 
@@ -172,12 +173,17 @@
           opt?.store_name,
         );
         if (!canonicalKey) continue;
+        const prev = byKey.get(canonicalKey);
+        const phones = Array.isArray(opt.receipt_phones)
+          ? opt.receipt_phones
+          : (prev && Array.isArray(prev.receipt_phones) ? prev.receipt_phones : []);
         byKey.set(canonicalKey, {
           store_key: canonicalKey,
           store_name: resolveStoreName(canonicalKey, opt?.store_name),
           webhook_url: lineWebhookUrl(canonicalKey),
           webhook_raw_table: webhookRawTableName(canonicalKey),
           receipt_table: receiptTableName(canonicalKey),
+          receipt_phones: phones,
         });
       }
     }

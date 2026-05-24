@@ -246,6 +246,211 @@ function isDbNewerThanSheet(
   return dbMs > sheetMs
 }
 
+function sheetColumnLetter1Based(col: number): string {
+  let n = col
+  let s = ""
+  while (n > 0) {
+    const r = (n - 1) % 26
+    s = String.fromCharCode(65 + r) + s
+    n = Math.floor((n - 1) / 26)
+  }
+  return s
+}
+
+function latestSyncTimestamp(...values: Array<string | null | undefined>): string | null {
+  let bestMs: number | null = null
+  let best: string | null = null
+  for (const v of values) {
+    const normalized = normalizeSyncUpdatedAt(v)
+    const ms = updatedAtMillis(normalized)
+    if (ms == null) continue
+    if (bestMs == null || ms > bestMs) {
+      bestMs = ms
+      best = normalized
+    }
+  }
+  return best
+}
+
+/** シート側の削除を DB に反映するか（both: 更新日時比較 / pull: シート優先） */
+function shouldDeleteDbRowMissingFromSheet(
+  dbUpdatedAt: unknown,
+  sheetWatermark: string | null,
+  mode: "pull" | "both",
+): boolean {
+  if (mode === "pull") return true
+  if (sheetWatermark == null) return false
+  return !isDbNewerThanSheet(dbUpdatedAt, sheetWatermark)
+}
+
+/** push で DB→シート復元してよいか */
+function shouldPushDbMonthToSheet(
+  month: string,
+  dbUpdatedAt: unknown,
+  monthsOnSheet: Set<string>,
+  sheetWatermark: string | null,
+  mode: "pull" | "push" | "both",
+): boolean {
+  if (monthsOnSheet.has(month)) return true
+  if (mode === "pull") return false
+  if (mode === "push") return true
+  return isDbNewerThanSheet(dbUpdatedAt, sheetWatermark)
+}
+
+type SheetDeletionMergeContext = {
+  mode: "pull" | "both"
+  budgetWatermark: string | null
+  pastWatermark: string | null
+  dailyWatermark: string | null
+  budgetMonthsOnSheet: Set<string>
+  pastMonthsOnSheet: Set<string>
+  dailyDatesOnSheet: Set<string>
+}
+
+async function fetchSheetTabMetaWatermark(
+  spreadsheetId: string,
+  tabCandidates: string[],
+  updatedAtCol1Based: number,
+): Promise<string | null> {
+  const col = sheetColumnLetter1Based(updatedAtCol1Based)
+  try {
+    const { values } = await getSheetValuesForTab(
+      spreadsheetId,
+      tabCandidates,
+      `A1:${col}1`,
+    )
+    const row = values[0]
+    if (!row) return null
+    return normalizeSyncUpdatedAt(row[updatedAtCol1Based - 1])
+  } catch {
+    return null
+  }
+}
+
+function collectBudgetMonthsOnSheet(
+  budgetRows: SheetValues,
+  storePartitionKey: string,
+): Set<string> {
+  const months = new Set<string>()
+  for (const row of budgetRows) {
+    const month = normalizeMonthCell(row[0])
+    if (!month) continue
+    if (!pilotStorePartitionKeysMatch(storeKeyFromBudgetRow(row), storePartitionKey)) continue
+    months.add(month)
+  }
+  return months
+}
+
+function maxBudgetRowUpdatedAtOnSheet(
+  budgetRows: SheetValues,
+  storePartitionKey: string,
+): string | null {
+  const stamps: Array<string | null> = []
+  for (const row of budgetRows) {
+    if (!pilotStorePartitionKeysMatch(storeKeyFromBudgetRow(row), storePartitionKey)) continue
+    const cols = parseMonthlyBudgetSheetRow(row)
+    if (cols.updatedAtCol == null) continue
+    stamps.push(normalizeSyncUpdatedAt(row[cols.updatedAtCol]))
+  }
+  return latestSyncTimestamp(...stamps)
+}
+
+function collectPastMonthsOnSheet(
+  pastRows: SheetValues,
+  storePartitionKey: string,
+): Set<string> {
+  const months = new Set<string>()
+  for (const row of pastRows) {
+    const month = normalizeMonthCell(row[0])
+    if (!month) continue
+    if (!pilotStorePartitionKeysMatch(normalizePilotStoreKey(row[1]), storePartitionKey)) continue
+    months.add(month)
+  }
+  return months
+}
+
+function maxPastRowUpdatedAtOnSheet(
+  pastRows: SheetValues,
+  storePartitionKey: string,
+): string | null {
+  const stamps: Array<string | null> = []
+  for (const row of pastRows) {
+    if (!pilotStorePartitionKeysMatch(normalizePilotStoreKey(row[1]), storePartitionKey)) continue
+    const cols = parsePastSalesSheetRow(row)
+    if (cols.updatedAtCol == null) continue
+    stamps.push(normalizeSyncUpdatedAt(row[cols.updatedAtCol]))
+  }
+  return latestSyncTimestamp(...stamps)
+}
+
+function collectDailyDatesOnSheet(dailyRows: SheetValues, storePartitionKey: string): Set<string> {
+  const dates = new Set<string>()
+  for (const row of dailyRows) {
+    const dateKey = String(row[0] ?? "").trim().slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue
+    if (!pilotStorePartitionKeysMatch(normalizePilotStoreKey(row[1]), storePartitionKey)) continue
+    dates.add(dateKey)
+  }
+  return dates
+}
+
+function maxDailyRowUpdatedAtOnSheet(
+  dailyRows: SheetValues,
+  storePartitionKey: string,
+): string | null {
+  const stamps: Array<string | null> = []
+  for (const row of dailyRows) {
+    if (!pilotStorePartitionKeysMatch(normalizePilotStoreKey(row[1]), storePartitionKey)) continue
+    const at = normalizeSyncUpdatedAt(row[9])
+    stamps.push(at)
+  }
+  return latestSyncTimestamp(...stamps)
+}
+
+async function buildSheetDeletionMergeContext(
+  config: ReceiptSheetsPilotConfig,
+  budgetRows: SheetValues,
+  pastRows: SheetValues,
+  mode: "pull" | "both",
+): Promise<SheetDeletionMergeContext> {
+  const budgetTabs = [
+    ...receiptSheetsTabCandidates(config.storePartitionKey, "budgets"),
+    ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []),
+  ]
+  const pastTabs = [
+    ...receiptSheetsTabCandidates(config.storePartitionKey, "past"),
+    ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []),
+  ]
+  const dailyTabs = [
+    ...receiptSheetsTabCandidates(config.storePartitionKey, "daily"),
+    ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_DAILY : []),
+  ]
+
+  let dailyRows: SheetValues = []
+  try {
+    const daily = await getSheetValuesForTab(config.spreadsheetId, dailyTabs, "A2:J2000")
+    dailyRows = daily.values
+  } catch {
+    dailyRows = []
+  }
+
+  const [budgetMeta, pastMeta, dailyMeta] = await Promise.all([
+    fetchSheetTabMetaWatermark(config.spreadsheetId, budgetTabs, 17),
+    fetchSheetTabMetaWatermark(config.spreadsheetId, pastTabs, 9),
+    fetchSheetTabMetaWatermark(config.spreadsheetId, dailyTabs, 10),
+  ])
+
+  return {
+    mode,
+    budgetWatermark: latestSyncTimestamp(budgetMeta, maxBudgetRowUpdatedAtOnSheet(budgetRows, config.storePartitionKey)),
+    pastWatermark: latestSyncTimestamp(pastMeta, maxPastRowUpdatedAtOnSheet(pastRows, config.storePartitionKey)),
+    dailyWatermark: latestSyncTimestamp(dailyMeta, maxDailyRowUpdatedAtOnSheet(dailyRows, config.storePartitionKey)),
+    budgetMonthsOnSheet: collectBudgetMonthsOnSheet(budgetRows, config.storePartitionKey),
+    pastMonthsOnSheet: collectPastMonthsOnSheet(pastRows, config.storePartitionKey),
+    dailyDatesOnSheet: collectDailyDatesOnSheet(dailyRows, config.storePartitionKey),
+  }
+}
+
 function readReceiptSheetsPilotStoreConfig(
   override?: Partial<ReceiptSheetsPilotStoreConfig>,
 ): ReceiptSheetsPilotStoreConfig | null {
@@ -404,7 +609,21 @@ export async function runReceiptSheetsPilotSyncForStore(
     getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:I500"),
   ])
 
-  // both: 先にシート→DB、後に DB→シート（シートで直した値をサイトへ反映するため）
+  const sheetDeletionMode = direction === "both"
+    ? "both"
+    : direction === "pull"
+    ? "pull"
+    : null
+  const mergeCtxForPush = sheetDeletionMode
+    ? await buildSheetDeletionMergeContext(
+      config,
+      budgetTabData.values,
+      pastTabData.values,
+      sheetDeletionMode,
+    )
+    : null
+
+  // both: 先にシート→DB、後に DB→シート（更新日時の新しい側を優先）
   if (direction === "pull" || direction === "both") {
     result.pull = await processPullRowsToDb(
       supabase,
@@ -412,16 +631,35 @@ export async function runReceiptSheetsPilotSyncForStore(
       budgetTabData.values,
       pastTabData.values,
       logLines,
-      { bothMerge: direction === "both" },
+      {
+        bothMerge: direction === "both",
+        sheetDeletionMode: sheetDeletionMode ?? undefined,
+      },
     )
   }
   if (direction === "push" || direction === "both") {
-    result.push = await pushDailySalesToSheet(supabase, config, logLines)
+    result.push = await pushDailySalesToSheet(
+      supabase,
+      config,
+      logLines,
+      mergeCtxForPush,
+      direction,
+    )
     const pastExport = await exportPastSalesFromDbToPastSheet(
-      supabase, config, logLines, pastTabData,
+      supabase,
+      config,
+      logLines,
+      pastTabData,
+      mergeCtxForPush,
+      direction,
     )
     const budgetExport = await exportBudgetFromDbToBudgetSheet(
-      supabase, config, logLines, budgetTabData,
+      supabase,
+      config,
+      logLines,
+      budgetTabData,
+      mergeCtxForPush,
+      direction,
     )
     if (result.push) {
       result.push.past_sales_rows_written = pastExport.rows_written
@@ -430,7 +668,11 @@ export async function runReceiptSheetsPilotSyncForStore(
   }
   if (direction === "pull" || direction === "push" || direction === "both") {
     result.closed_dates_export = await exportClosedDatesFromDbToBudgetSheet(
-      supabase, config, budgetTabData,
+      supabase,
+      config,
+      budgetTabData,
+      mergeCtxForPush,
+      direction,
     )
     logLines.push(
       `closed_export rows=${result.closed_dates_export.rows_updated} months=${
@@ -492,13 +734,14 @@ export async function runReceiptSheetsPilotSyncViaGas(
         "via_gas pull requires monthly_budget_rows and past_sales_rows from the spreadsheet.",
       )
     }
+    const sheetDeletionMode = direction === "both" ? "both" : "pull"
     result.pull = await processPullRowsToDb(
       supabase,
       config,
       input.monthly_budget_rows,
       input.past_sales_rows,
       logLines,
-      { bothMerge: direction === "both" },
+      { bothMerge: direction === "both", sheetDeletionMode },
     )
     if (direction === "both") {
       logLines.push("both: pull(merge) then push")
@@ -506,23 +749,48 @@ export async function runReceiptSheetsPilotSyncViaGas(
   }
 
   if (direction === "push" || direction === "both") {
+    const sheetDeletionMode = direction === "both" ? "both" : direction === "pull" ? "pull" : null
+    const mergeCtxForPush = sheetDeletionMode && input.monthly_budget_rows && input.past_sales_rows
+      ? await buildSheetDeletionMergeContext(
+        config,
+        input.monthly_budget_rows,
+        input.past_sales_rows,
+        sheetDeletionMode,
+      )
+      : null
     const built = await buildDailySalesExportRows(supabase, config)
+    let dailyExportRows = built.rows
+    if (mergeCtxForPush && (direction === "both" || direction === "pull")) {
+      if (mergeCtxForPush.dailyDatesOnSheet.size === 0) {
+        if (shouldDeleteDbRowMissingFromSheet(null, mergeCtxForPush.dailyWatermark, mergeCtxForPush.mode)) {
+          dailyExportRows = []
+        }
+      } else {
+        dailyExportRows = dailyExportRows.filter((row) =>
+          mergeCtxForPush.dailyDatesOnSheet.has(String(row[0] ?? "").slice(0, 10))
+        )
+      }
+    }
     const pastUpdates = await buildPastSalesSheetUpdatesFromDb(
       supabase,
       config.storePartitionKey,
       input.past_sales_rows,
+      mergeCtxForPush,
+      direction,
     )
     result.push = {
       months_written: built.months_written,
-      rows_written: built.rows_written,
+      rows_written: dailyExportRows.length,
       closed_dates_rows_updated: 0,
       past_sales_rows_written: pastUpdates.length,
     }
-    sheetExport.daily_sales = { header: built.header, rows: built.rows }
+    sheetExport.daily_sales = { header: built.header, rows: dailyExportRows }
     const budgetUpdates = await buildBudgetSheetRowUpdatesFromDb(
       supabase,
       config,
       input.monthly_budget_rows,
+      mergeCtxForPush,
+      direction,
     )
     if (budgetUpdates.length > 0) {
       sheetExport.budget_row_updates = budgetUpdates
@@ -600,7 +868,10 @@ async function pullFromSheetsToDb(
     getSheetValuesForTab(config.spreadsheetId, [...budgetTabs, ...legacyBudgetTabs], "A2:Q500"),
     getSheetValuesForTab(config.spreadsheetId, [...pastTabs, ...legacyPastTabs], "A2:I500"),
   ])
-  return processPullRowsToDb(supabase, config, budgetRows, pastRows, logLines, { bothMerge })
+  return processPullRowsToDb(supabase, config, budgetRows, pastRows, logLines, {
+    bothMerge,
+    sheetDeletionMode: bothMerge ? "both" : "pull",
+  })
 }
 
 type PastSalesComparable = {
@@ -738,6 +1009,82 @@ async function fetchBudgetMapForStore(
   return out
 }
 
+async function fetchAllBudgetMapForStore(
+  supabase: ReturnType<typeof createClient>,
+  storePartitionKey: string,
+): Promise<Map<string, BudgetComparable>> {
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
+  const out = new Map<string, BudgetComparable>()
+  if (!key) return out
+
+  const { data, error } = await supabase
+    .from("line_sales_month_budgets")
+    .select("target_month, budget_yen, mon_weight, tue_weight, wed_weight, thu_weight, fri_weight, sat_weight, sun_weight, holiday_weight, pre_holiday_weight, store_closed_dates, updated_at")
+    .eq("store_partition_key", key)
+
+  if (error) {
+    console.error(`fetchAllBudgetMapForStore failed (store=${key}):`, error.message)
+    return out
+  }
+
+  for (const row of Array.isArray(data) ? data : []) {
+    const r = row as Record<string, unknown>
+    const month = normalizeMonthCell(r.target_month)
+    if (!month) continue
+    const parsed = budgetComparableFromRow(r)
+    if (parsed) out.set(month, parsed)
+  }
+  return out
+}
+
+async function fetchAllManualMonthSalesMapForStore(
+  supabase: ReturnType<typeof createClient>,
+  storePartitionKey: string,
+): Promise<Map<string, ManualMonthSalesRecord>> {
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
+  const out = new Map<string, ManualMonthSalesRecord>()
+  if (!key) return out
+
+  const { data, error } = await supabase
+    .from("line_sales_manual_month_gross")
+    .select("sales_month, gross_sales_yen, party_count, guest_count, operating_days_count, updated_at")
+    .eq("store_partition_key", key)
+
+  if (error) {
+    console.error(`fetchAllManualMonthSalesMapForStore failed (store=${key}):`, error.message)
+    return out
+  }
+
+  for (const row of Array.isArray(data) ? data : []) {
+    const r = row as Record<string, unknown>
+    const sm = String(r.sales_month ?? "").trim().slice(0, 7)
+    const parsed = manualMonthSalesFromRow(r)
+    if (parsed) out.set(sm, parsed)
+  }
+  return out
+}
+
+async function deleteBudgetMonthFromDb(
+  supabase: ReturnType<typeof createClient>,
+  storePartitionKey: string,
+  month: string,
+): Promise<void> {
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
+  const { error: delClosedErr } = await supabase
+    .from("line_sales_month_store_closed_days")
+    .delete()
+    .eq("store_partition_key", key)
+    .eq("target_month", month)
+  if (delClosedErr) throw new Error(delClosedErr.message)
+
+  const { error } = await supabase
+    .from("line_sales_month_budgets")
+    .delete()
+    .eq("store_partition_key", key)
+    .eq("target_month", month)
+  if (error) throw new Error(error.message)
+}
+
 async function fetchPastSalesSnapshotMap(
   supabase: ReturnType<typeof createClient>,
   storePartitionKey: string,
@@ -812,13 +1159,56 @@ async function deletePastSalesSnapshots(
   }
 }
 
+async function applySheetMissingMonthDeletions(
+  supabase: ReturnType<typeof createClient>,
+  config: ReceiptSheetsPilotConfig,
+  mergeCtx: SheetDeletionMergeContext,
+  logLines: string[],
+  pastEntries: ManualMonthSalesUpsertEntry[],
+  pastSnapshotDeletes: string[],
+  errors: string[],
+): Promise<{ budgetsDeleted: number; pastDeleted: number }> {
+  let budgetsDeleted = 0
+  let pastDeleted = 0
+
+  const allBudgetDb = await fetchAllBudgetMapForStore(supabase, config.storePartitionKey)
+  for (const [month, dbBudget] of allBudgetDb) {
+    if (mergeCtx.budgetMonthsOnSheet.has(month)) continue
+    if (!shouldDeleteDbRowMissingFromSheet(dbBudget.updated_at, mergeCtx.budgetWatermark, mergeCtx.mode)) {
+      continue
+    }
+    try {
+      await deleteBudgetMonthFromDb(supabase, config.storePartitionKey, month)
+      budgetsDeleted += 1
+    } catch (e) {
+      errors.push(`${SHEET_MONTHLY_BUDGETS} ${month} 削除: ${String(e)}`)
+    }
+  }
+
+  const allManualDb = await fetchAllManualMonthSalesMapForStore(supabase, config.storePartitionKey)
+  for (const [month, dbManual] of allManualDb) {
+    if (mergeCtx.pastMonthsOnSheet.has(month)) continue
+    if (!shouldDeleteDbRowMissingFromSheet(dbManual.updated_at, mergeCtx.pastWatermark, mergeCtx.mode)) {
+      continue
+    }
+    pastEntries.push({ sales_month: month, gross_sales_yen: null })
+    pastSnapshotDeletes.push(month)
+    pastDeleted += 1
+  }
+
+  logLines.push(
+    `sheet_missing_deletions mode=${mergeCtx.mode} budgets=${budgetsDeleted} past=${pastDeleted} budget_wm=${mergeCtx.budgetWatermark ?? "(none)"} past_wm=${mergeCtx.pastWatermark ?? "(none)"}`,
+  )
+  return { budgetsDeleted, pastDeleted }
+}
+
 async function processPullRowsToDb(
   supabase: ReturnType<typeof createClient>,
   config: ReceiptSheetsPilotConfig,
   budgetRows: SheetValues,
   pastRows: SheetValues,
   logLines: string[],
-  opts?: { bothMerge?: boolean },
+  opts?: { bothMerge?: boolean; sheetDeletionMode?: "pull" | "both" },
 ): Promise<NonNullable<ReceiptSheetsSyncResult["pull"]>> {
   const errors: string[] = []
   let budgetsApplied = 0
@@ -826,6 +1216,7 @@ async function processPullRowsToDb(
   let pastApplied = 0
   let pastSkipped = 0
   const bothMerge = opts?.bothMerge === true
+  const sheetDeletionMode = opts?.sheetDeletionMode
   const budgetMonthsForDb: string[] = []
   const pastMonthsForDb: string[] = []
   if (bothMerge) {
@@ -1023,6 +1414,26 @@ async function processPullRowsToDb(
     }
   }
 
+  if (sheetDeletionMode) {
+    const mergeCtx = await buildSheetDeletionMergeContext(
+      config,
+      budgetRows,
+      pastRows,
+      sheetDeletionMode,
+    )
+    const deleted = await applySheetMissingMonthDeletions(
+      supabase,
+      config,
+      mergeCtx,
+      logLines,
+      pastEntries,
+      pastSnapshotDeletes,
+      errors,
+    )
+    budgetsApplied += deleted.budgetsDeleted
+    pastApplied += deleted.pastDeleted
+  }
+
   if (pastEntries.length > 0) {
     try {
       await upsertManualMonthSalesEntries(supabase, config.storePartitionKey, pastEntries)
@@ -1137,9 +1548,24 @@ async function pushDailySalesToSheet(
   supabase: ReturnType<typeof createClient>,
   config: ReceiptSheetsPilotConfig,
   logLines: string[],
+  mergeCtx?: SheetDeletionMergeContext | null,
+  direction: ReceiptSheetsSyncDirection = "push",
 ): Promise<NonNullable<ReceiptSheetsSyncResult["push"]>> {
   const built = await buildDailySalesExportRows(supabase, config)
-  const allRows: string[][] = [built.header, ...built.rows]
+  let dataRows = built.rows
+  if (mergeCtx && (direction === "both" || direction === "pull")) {
+    const sheetDates = mergeCtx.dailyDatesOnSheet
+    if (sheetDates.size === 0) {
+      if (shouldDeleteDbRowMissingFromSheet(null, mergeCtx.dailyWatermark, mergeCtx.mode)) {
+        dataRows = []
+        logLines.push("daily_export=cleared_by_sheet")
+      }
+    } else {
+      dataRows = dataRows.filter((row) => sheetDates.has(String(row[0] ?? "").slice(0, 10)))
+      logLines.push(`daily_export=filtered dates_on_sheet=${sheetDates.size}`)
+    }
+  }
+  const allRows: string[][] = [built.header, ...dataRows]
   await updateSheetValuesForTab(
     config.spreadsheetId,
     [
@@ -1149,10 +1575,10 @@ async function pushDailySalesToSheet(
     "A1",
     allRows,
   )
-  logLines.push(`push rows=${built.rows_written}`)
+  logLines.push(`push rows=${dataRows.length}`)
   return {
     months_written: built.months_written,
-    rows_written: built.rows_written,
+    rows_written: dataRows.length,
     closed_dates_rows_updated: 0,
   }
 }
@@ -1285,6 +1711,8 @@ async function buildPastSalesSheetUpdatesFromDb(
   supabase: ReturnType<typeof createClient>,
   storePartitionKey: string,
   existingPastRows?: SheetValues,
+  mergeCtx?: SheetDeletionMergeContext | null,
+  direction: ReceiptSheetsSyncDirection = "push",
 ): Promise<ReceiptSheetsGasPastSalesUpdate[]> {
   const key = canonicalStorePartitionKeyForDb(storePartitionKey)
 
@@ -1324,6 +1752,7 @@ async function buildPastSalesSheetUpdatesFromDb(
   }
 
   const allMonths = [...new Set([...manualByMonth.keys(), ...receiptByMonth.keys()])].sort()
+  const monthsOnSheet = mergeCtx?.pastMonthsOnSheet
 
   const monthToRow = new Map<string, number>()
   if (existingPastRows) {
@@ -1335,6 +1764,16 @@ async function buildPastSalesSheetUpdatesFromDb(
 
   const updates: ReceiptSheetsGasPastSalesUpdate[] = []
   for (const month of allMonths) {
+    if (monthsOnSheet && !shouldPushDbMonthToSheet(
+      month,
+      manualByMonth.get(month)?.updated_at ?? null,
+      monthsOnSheet,
+      mergeCtx?.pastWatermark ?? null,
+      direction === "both" && mergeCtx ? "both" : direction,
+    )) {
+      continue
+    }
+
     const manual = manualByMonth.get(month)
     if (manual) {
       updates.push({
@@ -1391,6 +1830,8 @@ async function buildBudgetSheetRowUpdatesFromDb(
   supabase: ReturnType<typeof createClient>,
   config: ReceiptSheetsPilotConfig,
   existingBudgetRows?: SheetValues,
+  mergeCtx?: SheetDeletionMergeContext | null,
+  direction: ReceiptSheetsSyncDirection = "push",
 ): Promise<ReceiptSheetsGasBudgetRowUpdate[]> {
   const dbKey = canonicalStorePartitionKeyForDb(config.storePartitionKey)
   const { data, error } = await supabase
@@ -1426,12 +1867,22 @@ async function buildBudgetSheetRowUpdatesFromDb(
 
   const updates: ReceiptSheetsGasBudgetRowUpdate[] = []
   let nextAppendRow = sheetRows.length + 2
+  const monthsOnSheet = mergeCtx?.budgetMonthsOnSheet
   for (const raw of dbRows) {
     const row = raw as Record<string, unknown>
     const month = normalizeMonthCell(row.target_month)
     if (!month) continue
     const budgetYen = parseNonNegativeInt(row.budget_yen)
     if (budgetYen <= 0) continue
+    if (monthsOnSheet && !shouldPushDbMonthToSheet(
+      month,
+      normalizeSyncUpdatedAt(row.updated_at),
+      monthsOnSheet,
+      mergeCtx?.budgetWatermark ?? null,
+      direction === "both" && mergeCtx ? "both" : direction,
+    )) {
+      continue
+    }
     const closed = closedByMonth.get(month) ?? []
     const operatingDays = countOperatingDaysInCalendarMonth(month, closed)
     const hw = Number(row.holiday_weight)
@@ -1469,6 +1920,8 @@ async function exportBudgetFromDbToBudgetSheet(
   config: ReceiptSheetsPilotConfig,
   logLines: string[],
   preloadedBudgetTab?: { values: SheetValues; tabName: string },
+  mergeCtx?: SheetDeletionMergeContext | null,
+  direction: ReceiptSheetsSyncDirection = "push",
 ): Promise<{ rows_written: number }> {
   const { values: sheetRows, tabName } = preloadedBudgetTab ?? await (async () => {
     const budgetTabCandidates = [
@@ -1477,7 +1930,13 @@ async function exportBudgetFromDbToBudgetSheet(
     ]
     return getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500")
   })()
-  const updates = await buildBudgetSheetRowUpdatesFromDb(supabase, config, sheetRows)
+  const updates = await buildBudgetSheetRowUpdatesFromDb(
+    supabase,
+    config,
+    sheetRows,
+    mergeCtx,
+    direction,
+  )
   if (updates.length === 0) {
     logLines.push("budget_export=0")
     return { rows_written: 0 }
@@ -1496,16 +1955,9 @@ async function exportPastSalesFromDbToPastSheet(
   config: ReceiptSheetsPilotConfig,
   logLines: string[],
   preloadedPastTab?: { values: SheetValues; tabName: string },
+  mergeCtx?: SheetDeletionMergeContext | null,
+  direction: ReceiptSheetsSyncDirection = "push",
 ): Promise<{ rows_written: number }> {
-  const updates = await buildPastSalesSheetUpdatesFromDb(
-    supabase,
-    config.storePartitionKey,
-  )
-  if (updates.length === 0) {
-    logLines.push("past_sales_export=0")
-    return { rows_written: 0 }
-  }
-
   const { values: pastRows, tabName } = preloadedPastTab ?? await (async () => {
     const pastTabCandidates = [
       ...receiptSheetsTabCandidates(config.storePartitionKey, "past"),
@@ -1513,6 +1965,18 @@ async function exportPastSalesFromDbToPastSheet(
     ]
     return getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:I500")
   })()
+  const updates = await buildPastSalesSheetUpdatesFromDb(
+    supabase,
+    config.storePartitionKey,
+    pastRows,
+    mergeCtx,
+    direction,
+  )
+  if (updates.length === 0) {
+    logLines.push("past_sales_export=0")
+    return { rows_written: 0 }
+  }
+
   const monthToRowIndex = new Map<string, number>()
   for (let i = 0; i < pastRows.length; i += 1) {
     const month = normalizeMonthCell(pastRows[i][0])
@@ -1557,6 +2021,8 @@ async function exportClosedDatesFromDbToBudgetSheet(
   supabase: ReturnType<typeof createClient>,
   config: ReceiptSheetsPilotConfig,
   preloadedBudgetTab?: { values: SheetValues; tabName: string },
+  mergeCtx?: SheetDeletionMergeContext | null,
+  direction: ReceiptSheetsSyncDirection = "push",
 ): Promise<NonNullable<ReceiptSheetsSyncResult["closed_dates_export"]>> {
   const datesByMonth: Record<string, string[]> = {}
   const batch: Array<{ range: string; values: SheetValues }> = []

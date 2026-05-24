@@ -5,9 +5,12 @@ import {
   sanitizeReceiptOcrStoreName,
 } from './receipt_store_name_resolve.ts'
 import {
+  buildStoreReceiptPhoneIndex,
   receiptPhoneMatchesRegistry,
   resolveReceiptPhonePartitionKey,
+  type StoreReceiptPhoneIndex,
 } from './store_receipt_phones.ts'
+import type { StoreRegistryRow } from './store_receipt.ts'
 
 function normalizeStoreCompareKey(raw: string): string {
   return normalizeInlineText(String(raw ?? '').normalize('NFKC'))
@@ -26,15 +29,19 @@ export function receiptStoreNameMatchesRegistry(
   registryPartitionKey: string,
   receiptStoreName: string | null,
   receiptStorePhone?: string | null,
+  registryReceiptPhones?: readonly string[] | null,
+  phoneIndex?: StoreReceiptPhoneIndex,
 ): boolean {
   const registryPk = String(registryPartitionKey ?? '').trim().toLowerCase()
-  if (registryPk && receiptPhoneMatchesRegistry(registryPk, receiptStorePhone)) {
+  if (registryPk && receiptPhoneMatchesRegistry(registryPk, receiptStorePhone, registryReceiptPhones)) {
     return true
   }
 
   const parsedRaw = normalizeReceiptFieldText(receiptStoreName, 80)
   const parsed = parsedRaw ? sanitizeReceiptOcrStoreName(parsedRaw) : null
-  if (!parsed) return !!receiptPhoneMatchesRegistry(registryPk, receiptStorePhone)
+  if (!parsed) {
+    return !!receiptPhoneMatchesRegistry(registryPk, receiptStorePhone, registryReceiptPhones)
+  }
 
   const registered =
     normalizeReceiptFieldText(registryDisplayName, 80)
@@ -52,7 +59,7 @@ export function receiptStoreNameMatchesRegistry(
   }
 
   const parsedPk = resolveReceiptNamePartitionKey(parsed)
-  const phonePk = resolveReceiptPhonePartitionKey(receiptStorePhone)
+  const phonePk = resolveReceiptPhonePartitionKey(receiptStorePhone, phoneIndex)
   if (registryPk && parsedPk && registryPk === parsedPk) {
     return true
   }
@@ -84,6 +91,7 @@ export function resolveParsedStoreNameForDisplay(receiptStoreName: string | null
 type StoreRegistryMatchCandidate = {
   store_partition_key: string
   display_name: string
+  receipt_phones?: string[] | null
 }
 
 /** レシート解析店名に一致する登録店舗を探す（複数候補のうち先頭） */
@@ -93,7 +101,8 @@ export function findRegistryEntryForParsedStoreName<T extends StoreRegistryMatch
   excludePartitionKey?: string,
   receiptStorePhone?: string | null,
 ): T | null {
-  const phonePk = resolveReceiptPhonePartitionKey(receiptStorePhone)
+  const phoneIndex = buildStoreReceiptPhoneIndex(registry as StoreRegistryRow[])
+  const phonePk = resolveReceiptPhonePartitionKey(receiptStorePhone, phoneIndex)
   if (phonePk && phonePk !== excludePartitionKey) {
     for (const entry of registry) {
       if (entry.store_partition_key === phonePk) return entry
@@ -110,6 +119,8 @@ export function findRegistryEntryForParsedStoreName<T extends StoreRegistryMatch
       entry.store_partition_key,
       parsed,
       receiptStorePhone,
+      entry.receipt_phones,
+      phoneIndex,
     )) {
       return entry
     }

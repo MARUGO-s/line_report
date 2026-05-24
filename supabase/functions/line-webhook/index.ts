@@ -207,6 +207,7 @@ async function processReceiptImageEvent(
     registry.store_partition_key,
     receipt.storeName,
     receipt.storePhone,
+    registry.receipt_phones,
   )) {
     await clearPendingReceiptCorrection(supabase, roomId, userId)
     await clearPendingReceiptDuplicate(supabase, roomId, userId)

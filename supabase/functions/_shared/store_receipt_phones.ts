@@ -1,8 +1,10 @@
 /**
  * レシートに印字される店舗電話番号 → store_partition_key
- * （公式レシート・日計票の表記を確認して追加。未登録店舗は店名照合のみ）
+ * 主データ: store_webhook_tables.receipt_phones（管理画面）
+ * フォールバック: STORE_RECEIPT_PHONES（未移行店舗）
  */
 import { RECEIPT_SHEETS_STORE_CATALOG } from './receipt_sheets_store_catalog.ts'
+import type { StoreRegistryRow } from './store_receipt.ts'
 
 /** 数字のみ（先頭0あり10〜11桁） */
 export function normalizeReceiptPhoneDigits(raw: unknown): string | null {
@@ -48,34 +50,109 @@ export function extractJapanesePhoneFromText(
   return null
 }
 
-/**
- * 店舗別電話（ハイフンなし）。複数店舗で同一番号の場合は resolve で曖昧扱い。
- * レシートで確認できた番号から順次追加してください。
- */
+/** コード内フォールバック（DB 未設定店舗） */
 export const STORE_RECEIPT_PHONES: Readonly<Record<string, readonly string[]>> = {
   marugoyotsuya: ['0353616205'],
   bistrocavacava: ['0364574938'],
 }
 
-export function listStorePhonesForPartitionKey(storePartitionKey: string): readonly string[] {
+export type StoreReceiptPhoneIndex = Readonly<Record<string, readonly string[]>>
+
+function normalizePhonesList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of raw) {
+    const d = normalizeReceiptPhoneDigits(item)
+    if (!d || seen.has(d)) continue
+    seen.add(d)
+    out.push(d)
+  }
+  return out
+}
+
+/** 管理画面・API 入力（改行・カンマ区切り） */
+export function parseReceiptPhonesInput(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    const out: string[] = []
+    for (const item of raw) {
+      out.push(...parseReceiptPhonesInput(item))
+    }
+    return [...new Set(out)]
+  }
+  const text = String(raw ?? '').trim()
+  if (!text) return []
+  const parts = text.split(/[\n\r,、，;；]+/)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of parts) {
+    const d = normalizeReceiptPhoneDigits(part.trim())
+    if (!d || seen.has(d)) continue
+    seen.add(d)
+    out.push(d)
+  }
+  return out
+}
+
+export function listStorePhonesForPartitionKey(
+  storePartitionKey: string,
+  knownPhones?: readonly string[] | null,
+): readonly string[] {
+  const fromKnown = normalizePhonesList(knownPhones ?? [])
+  if (fromKnown.length > 0) return fromKnown
   const pk = String(storePartitionKey ?? '').trim().toLowerCase()
   return STORE_RECEIPT_PHONES[pk] ?? []
 }
 
-export function resolveReceiptPhonePartitionKeys(receiptPhone: unknown): string[] {
+export function buildStoreReceiptPhoneIndex(
+  registry: Pick<StoreRegistryRow, 'store_partition_key' | 'receipt_phones'>[],
+): StoreReceiptPhoneIndex {
+  const index: Record<string, string[]> = {}
+  for (const entry of registry) {
+    const pk = String(entry.store_partition_key ?? '').trim().toLowerCase()
+    if (!pk) continue
+    const merged = [
+      ...normalizePhonesList(entry.receipt_phones),
+      ...normalizePhonesList(STORE_RECEIPT_PHONES[pk]),
+    ]
+    const seen = new Set<string>()
+    const phones: string[] = []
+    for (const p of merged) {
+      if (seen.has(p)) continue
+      seen.add(p)
+      phones.push(p)
+    }
+    if (phones.length) index[pk] = phones
+  }
+  for (const pk of Object.keys(STORE_RECEIPT_PHONES)) {
+    if (index[pk]?.length) continue
+    const fallback = normalizePhonesList(STORE_RECEIPT_PHONES[pk])
+    if (fallback.length) index[pk] = fallback
+  }
+  return index
+}
+
+export function resolveReceiptPhonePartitionKeys(
+  receiptPhone: unknown,
+  phoneIndex?: StoreReceiptPhoneIndex,
+): string[] {
   const digits = normalizeReceiptPhoneDigits(receiptPhone)
   if (!digits) return []
+  const index = phoneIndex ?? STORE_RECEIPT_PHONES
   const hits: string[] = []
-  for (const pk of Object.keys(STORE_RECEIPT_PHONES)) {
-    const phones = STORE_RECEIPT_PHONES[pk] ?? []
+  for (const pk of Object.keys(index)) {
+    const phones = index[pk] ?? []
     if (phones.some((p) => phoneDigitsEqual(digits, p))) hits.push(pk)
   }
   return hits
 }
 
 /** 電話だけで一意に店舗が決まるときの partition key */
-export function resolveReceiptPhonePartitionKey(receiptPhone: unknown): string | null {
-  const keys = resolveReceiptPhonePartitionKeys(receiptPhone)
+export function resolveReceiptPhonePartitionKey(
+  receiptPhone: unknown,
+  phoneIndex?: StoreReceiptPhoneIndex,
+): string | null {
+  const keys = resolveReceiptPhonePartitionKeys(receiptPhone, phoneIndex)
   if (keys.length === 1) return keys[0]
   return null
 }
@@ -83,18 +160,22 @@ export function resolveReceiptPhonePartitionKey(receiptPhone: unknown): string |
 export function receiptPhoneMatchesRegistry(
   registryPartitionKey: string,
   receiptPhone: unknown,
+  knownPhones?: readonly string[] | null,
 ): boolean {
   const pk = String(registryPartitionKey ?? '').trim().toLowerCase()
   if (!pk) return false
   const digits = normalizeReceiptPhoneDigits(receiptPhone)
   if (!digits) return false
-  const known = listStorePhonesForPartitionKey(pk)
+  const known = listStorePhonesForPartitionKey(pk, knownPhones)
   return known.some((p) => phoneDigitsEqual(digits, p))
 }
 
 /** 管理画面表示用: 登録済み電話の有無 */
-export function storeHasReceiptPhoneOnFile(storePartitionKey: string): boolean {
-  return listStorePhonesForPartitionKey(storePartitionKey).length > 0
+export function storeHasReceiptPhoneOnFile(
+  storePartitionKey: string,
+  knownPhones?: readonly string[] | null,
+): boolean {
+  return listStorePhonesForPartitionKey(storePartitionKey, knownPhones).length > 0
 }
 
 /** catalog に存在するキーのみ（typo 防止） */
