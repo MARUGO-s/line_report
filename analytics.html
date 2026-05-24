@@ -168,6 +168,13 @@
       color: var(--txt); padding: 0 12px; font: inherit;
     }
     .btn { cursor: pointer; font-weight: 700; }
+    a.btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      box-sizing: border-box;
+    }
     .btn.primary {
       border-color: color-mix(in srgb,var(--accent) 60%,transparent);
       background: linear-gradient(180deg,rgba(87,216,255,0.32),rgba(10,116,158,0.32));
@@ -566,7 +573,7 @@
     <h2 class="card-title">絞り込み</h2>
     <div class="controls">
       <select id="storeSelect" class="select" aria-label="店舗選択">
-        <option value="">（店舗を選択）</option>
+        <option value="">店舗を選択してください</option>
       </select>
       <input id="monthPicker" class="input" type="month" aria-label="対象月">
       <div class="chart-tab-group" id="periodTabs">
@@ -585,7 +592,7 @@
     <div class="controls budget-row" style="margin-top:10px;flex-wrap:wrap;align-items:center;gap:8px">
       <button id="openBudgetModalBtn" type="button" class="btn primary">予算・日別配分を設定</button>
       <button id="openPriorYearModalBtn" type="button" class="btn primary">月別売上を入力（西暦）</button>
-      <a id="receiptSheetsPilotLink" href="#" class="btn" target="_blank" rel="noopener noreferrer" style="display:none" hidden aria-hidden="true">売上シート（スプレッドシート）</a>
+      <a id="receiptSheetsPilotLink" href="#" class="btn primary" target="_blank" rel="noopener noreferrer" style="display:none" hidden aria-hidden="true">売上シート（スプレッドシート）</a>
       <span class="meta" style="flex:1;min-width:12rem">表示月・店舗ごとに保存。予算は按分比率／比較売上は<strong>西暦×各月</strong>で登録（複数年可）</span>
       <span id="receiptSheetsPilotHint" class="meta" style="display:none"></span>
       <span id="budgetRowHint" class="meta"></span>
@@ -2527,7 +2534,11 @@ dom.reloadBtn.addEventListener('click', loadAll);
 
 /* ── store select ── */
 dom.storeSelect.addEventListener('change', () => {
-  state.storeKey = dom.storeSelect.value;
+  state.storeKey = String(dom.storeSelect.value || '').trim();
+  if (!state.storeKey) {
+    clearAnalyticsAwaitingStore();
+    return;
+  }
   updateReceiptSheetsPilotUi();
   loadAll();
 });
@@ -2557,6 +2568,47 @@ function setReceiptSheetsPilotLinkElement(el, visible, url, title) {
     el.hidden = true;
     el.setAttribute('aria-hidden', 'true');
   }
+}
+
+const STORE_SELECT_PLACEHOLDER = '店舗を選択してください';
+
+function appendStoreSelectPlaceholder() {
+  const el = document.createElement('option');
+  el.value = '';
+  el.textContent = STORE_SELECT_PLACEHOLDER;
+  dom.storeSelect.appendChild(el);
+}
+
+function clearAnalyticsAwaitingStore() {
+  state.storeKey = '';
+  if (dom.storeSelect) dom.storeSelect.value = '';
+  state.dailySeries = [];
+  state.monthlySeries = [];
+  state.weather = {};
+  lastReceiptDailyData = null;
+  resetBudgetKpis({ clearInput: true });
+  Object.keys(state.charts).forEach((k) => destroyChart(k));
+  dom.kpiPeriodLabel.textContent = '';
+  dom.kpiGross.textContent = '-';
+  dom.kpiParty.textContent = '-';
+  dom.kpiPartyAvg.textContent = '';
+  dom.kpiGuest.textContent = '-';
+  dom.kpiGuestAvg.textContent = '';
+  dom.kpiUnit.textContent = '-';
+  dom.kpiDays.textContent = '-';
+  dom.kpiReceipts.textContent = '';
+  dom.filterMeta.textContent = '店舗をリストから選ぶとデータを表示します。';
+  dom.weatherAddress.textContent = '';
+  dom.weatherStatus.textContent = '';
+  if (dom.receiptDailyMeta) dom.receiptDailyMeta.textContent = '店舗を選択してください。';
+  receiptDailySyncLayoutChrome();
+  if (dom.receiptDailyTableBody) {
+    dom.receiptDailyTableBody.innerHTML =
+      `<tr><td class="empty" colspan="${receiptDailyColspan()}">店舗を選択してください</td></tr>`;
+  }
+  dom.loadingDaily.classList.remove('show');
+  dom.loadingMonthly.classList.remove('show');
+  updateReceiptSheetsPilotUi();
 }
 
 let receiptSheetsPilotLinkCache = null;
@@ -2867,6 +2919,12 @@ async function loadAll() {
   }
 
   await refreshReceiptSheetsPilotLink();
+
+  state.storeKey = String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  if (!state.storeKey) {
+    clearAnalyticsAwaitingStore();
+    return;
+  }
   updateReceiptSheetsPilotUi();
 
   const months = periodToMonths(state.period);
@@ -2897,70 +2955,31 @@ async function loadAll() {
     /** 店舗プルダウンの「当該月: レシート0件」表示用（全店舗横断の store_options） */
     let storeOptionsForSelect = null;
 
-    if (state.storeKey) {
-      const sk = state.storeKey;
-      weatherPromise = fetchWeather(sk, from, to);
-      dom.weatherStatus.textContent = '天候取得中…';
-      const [salesResults, monthlyData, allStoresSales] = await Promise.all([
-        Promise.all(sortedMonths.map((m) => fetchSalesMonth(m, sk).catch(() => null))),
-        fetchMonthly(sk),
-        fetchSalesMonth(displayMonth, '').catch(() => null),
-      ]);
-      if (allStoresSales?.store_options?.length) {
-        storeOptionsForSelect = allStoresSales.store_options;
-      }
-      const byMonth = new Map(
-        (salesResults.filter(Boolean)).map((r) => [r.month, r]),
-      );
-      salesData = byMonth.get(displayMonth) ?? salesResults.filter(Boolean).slice(-1)[0];
-      if (!salesData) throw new Error('売上データを取得できませんでした。');
-      dailySeries = sortedMonths.flatMap((m) => byMonth.get(m)?.series ?? []);
-
-      state.monthlySeries = monthlyData?.series ?? [];
-    } else {
-      salesData = await fetchSalesMonth(displayMonth, '');
-      if (salesData.store_options?.length) {
-        storeOptionsForSelect = salesData.store_options;
-      }
-      if (!state.storeKey && salesData.selected_store_key) {
-        state.storeKey = salesData.selected_store_key;
-      }
-      const sk = state.storeKey || '';
-      // 初回は store_key 無しで呼ぶため予算が __all__ キーになる。既定店舗が決まったら同じ月を店舗指定で取り直し、予算・按分を一致させる
-      if (sk) {
-        const refined = await fetchSalesMonth(displayMonth, sk).catch(() => null);
-        if (refined) salesData = refined;
-      }
-      const otherMonths = sortedMonths.filter((m) => m !== displayMonth);
-
-      weatherPromise = fetchWeather(sk, from, to);
-      dom.weatherStatus.textContent = '天候取得中…';
-      const parallel = [fetchMonthly(sk)];
-      if (otherMonths.length > 0) {
-        parallel.push(
-          Promise.all(otherMonths.map((m) => fetchSalesMonth(m, sk).catch(() => null))),
-        );
-      }
-      const wave = await Promise.all(parallel);
-      const monthlyData = wave[0];
-      const extraResults = otherMonths.length > 0 ? wave[1] : [];
-
-      state.monthlySeries = monthlyData?.series ?? [];
-
-      const extraByMonth = new Map(
-        (Array.isArray(extraResults) ? extraResults : []).filter(Boolean).map((r) => [r.month, r]),
-      );
-      dailySeries = sortedMonths.flatMap((m) => {
-        if (m === displayMonth) return salesData.series ?? [];
-        return extraByMonth.get(m)?.series ?? [];
-      });
+    const sk = state.storeKey;
+    weatherPromise = fetchWeather(sk, from, to);
+    dom.weatherStatus.textContent = '天候取得中…';
+    const [salesResults, monthlyData, allStoresSales] = await Promise.all([
+      Promise.all(sortedMonths.map((m) => fetchSalesMonth(m, sk).catch(() => null))),
+      fetchMonthly(sk),
+      fetchSalesMonth(displayMonth, '').catch(() => null),
+    ]);
+    if (allStoresSales?.store_options?.length) {
+      storeOptionsForSelect = allStoresSales.store_options;
     }
+    const byMonth = new Map(
+      (salesResults.filter(Boolean)).map((r) => [r.month, r]),
+    );
+    salesData = byMonth.get(displayMonth) ?? salesResults.filter(Boolean).slice(-1)[0];
+    if (!salesData) throw new Error('売上データを取得できませんでした。');
+    dailySeries = sortedMonths.flatMap((m) => byMonth.get(m)?.series ?? []);
+
+    state.monthlySeries = monthlyData?.series ?? [];
 
     state.dailySeries = dailySeries;
 
     const selectOptions = storeOptionsForSelect ?? salesData.store_options;
     if (selectOptions?.length) {
-      updateStoreSelect(selectOptions, state.storeKey || salesData.selected_store_key);
+      updateStoreSelect(selectOptions, state.storeKey);
     }
 
     state.weather = {};
@@ -3076,6 +3095,7 @@ function initStoreSelectOptions() {
   const stores = LINE_REPORT_PAGES.listStores();
   const prev = dom.storeSelect.value || state.storeKey;
   dom.storeSelect.innerHTML = '';
+  appendStoreSelectPlaceholder();
   for (const s of stores) {
     const el = document.createElement('option');
     el.value = s.store_key;
@@ -3086,19 +3106,20 @@ function initStoreSelectOptions() {
   if (prev && keys.includes(prev)) {
     dom.storeSelect.value = prev;
     state.storeKey = prev;
-  } else if (stores.length) {
-    dom.storeSelect.value = stores[0].store_key;
-    state.storeKey = stores[0].store_key;
+  } else {
+    dom.storeSelect.value = '';
+    state.storeKey = '';
   }
 }
 
 function updateStoreSelect(options, selectedKey) {
-  const prev = dom.storeSelect.value || state.storeKey || selectedKey;
+  const prev = dom.storeSelect.value || state.storeKey || '';
   const stores = LINE_REPORT_PAGES.listStores();
   const apiKeys = new Set((options || []).map((o) => o.store_key));
   const nameByKey = new Map((options || []).map((o) => [o.store_key, o.store_name]));
 
   dom.storeSelect.innerHTML = '';
+  appendStoreSelectPlaceholder();
   for (const s of stores) {
     const el = document.createElement('option');
     el.value = s.store_key;
@@ -3110,9 +3131,14 @@ function updateStoreSelect(options, selectedKey) {
   }
 
   const allKeys = stores.map((s) => s.store_key);
-  if (prev && allKeys.includes(prev)) dom.storeSelect.value = prev;
-  else if (selectedKey && allKeys.includes(selectedKey)) dom.storeSelect.value = selectedKey;
-  state.storeKey = dom.storeSelect.value || state.storeKey;
+  const want = prev || selectedKey || '';
+  if (want && allKeys.includes(want)) {
+    dom.storeSelect.value = want;
+    state.storeKey = want;
+  } else {
+    dom.storeSelect.value = '';
+    state.storeKey = '';
+  }
   state.storeOptions = options || [];
 }
 
