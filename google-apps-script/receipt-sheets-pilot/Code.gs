@@ -473,7 +473,8 @@ function getSyncBgPollingContextFromSheetOnly_() {
 
 function showSyncProgressSidebar_() {
   var ctx = getSyncBgPollingContextFromSheetOnly_();
-  var html = HtmlService.createHtmlOutput(buildSyncProgressHtml_(ctx.startedAt, ctx.elapsed))
+  var creds = getSyncCredentials_();
+  var html = HtmlService.createHtmlOutput(buildSyncProgressHtml_(ctx.startedAt, ctx.elapsed, creds.url, creds.secret))
     .setTitle('同期中...')
     .setWidth(320);
   SpreadsheetApp.getUi().showSidebar(html);
@@ -609,10 +610,12 @@ function parseSyncProgressLabel_(errorMsg, fallbackTotal) {
   };
 }
 
-function buildSyncProgressHtml_(startedAtIso, elapsedSec) {
+function buildSyncProgressHtml_(startedAtIso, elapsedSec, syncUrl, syncSecret) {
   var startedAt = escapeJsString_(startedAtIso || '');
   var elapsed = parseInt(String(elapsedSec || '1'), 10);
   if (isNaN(elapsed) || elapsed < 1) elapsed = 1;
+  var url = escapeJsString_(syncUrl || SYNC.URL);
+  var secret = escapeJsString_(syncSecret || '');
   return '<!DOCTYPE html><html><head><meta charset="utf-8">' +
     '<style>body{font-family:sans-serif;padding:18px 16px 16px;margin:0;color:#202124;background:#fff}' +
     '.spinner{display:inline-block;width:18px;height:18px;border:3px solid #d2e3fc;' +
@@ -633,7 +636,7 @@ function buildSyncProgressHtml_(startedAtIso, elapsedSec) {
     '<div class="bar"><div class="fill" id="bar"></div></div>' +
     '<div class="meta"><span id="sub">初期化中...</span><span id="pulse">更新待機中</span></div>' +
     '<div class="label" id="detail">4店舗ずつ並列で同期します。通常は 1〜3 分で完了します。</div></div><script>' +
-    'var pollCount=0,MAX_POLLS=20,SYNC_STARTED_AT=\'' + startedAt + '\',SYNC_ELAPSED=' + elapsed + ';' +
+    'var pollCount=0,MAX_POLLS=20,SYNC_STARTED_AT=\'' + startedAt + '\',SYNC_ELAPSED=' + elapsed + ',SYNC_URL=\'' + url + '\',SYNC_SECRET=\'' + secret + '\',TOTAL_STORES=' + STORE_CATALOG.length + ';' +
     'function setProgress(count,total,pct,label){' +
     'var safeTotal=Math.max(total||0,1),safeCount=Math.max(0,Math.min(count||0,safeTotal)),safePct=Math.max(0,Math.min(pct||0,100));' +
     'document.getElementById("count").textContent=safeCount+" / "+safeTotal+" 店舗";' +
@@ -641,23 +644,30 @@ function buildSyncProgressHtml_(startedAtIso, elapsedSec) {
     'document.getElementById("bar").style.width=safePct+"%";' +
     'if(label) document.getElementById("msg").textContent=label;' +
     '}' +
+    'function normalizeIso(value){if(!value)return"";var ms=Date.parse(value);return isNaN(ms)?String(value||""):new Date(ms).toISOString();}' +
+    'function parseProgress(errorMsg,total){var label=String(errorMsg||"").trim();var safeTotal=Math.max(total||0,0);var m=label.match(/進行中\\s+(\\d+)\\s*\\/\\s*(\\d+)\\s*店舗完了/);' +
+    'if(m){var c=parseInt(m[1],10)||0;var t=parseInt(m[2],10)||safeTotal;if(c>t)c=t;return {completed:c,total:t,label:label};}' +
+    'return {completed:0,total:safeTotal,label:label||"同期を開始しています..."};}' +
+    'async function fetchStatus(){var res=await fetch(SYNC_URL,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+SYNC_SECRET,"x-receipt-sheets-sync-key":SYNC_SECRET},body:JSON.stringify({get_sync_status:true})});' +
+    'var text=await res.text();var body={};try{body=JSON.parse(text||"{}");}catch(_e){body={ok:false,error:text||"status parse failed"}}if(!res.ok){throw new Error((body&&body.error)||text||("HTTP "+res.status));}return body;}' +
     'function poll(){if(pollCount>=MAX_POLLS){showTimeout();return;}' +
-    'google.script.run.withSuccessHandler(onResult).withFailureHandler(onErr)' +
-    '.checkSyncCompleteForSidebar(SYNC_STARTED_AT,SYNC_ELAPSED);}' +
-    'function onResult(r){pollCount++;' +
-    'setProgress(r.completedCount,r.totalCount,r.progressPct,r.statusLabel);' +
+    'fetchStatus().then(onResult).catch(onErr);}' +
+    'function onResult(body){pollCount++;var errorMsg=body.error_message||"";var progress=parseProgress(errorMsg,TOTAL_STORES);var lastCompleted=normalizeIso(body.last_completed_at||"");var startedAt=normalizeIso(SYNC_STARTED_AT);var isInProgress=errorMsg.indexOf("進行中")===0;' +
+    'var done=!!(lastCompleted&&startedAt&&Date.parse(lastCompleted)>Date.parse(startedAt)&&!isInProgress);var completedCount=done?progress.total:progress.completed;var totalCount=progress.total||TOTAL_STORES;' +
+    'var progressPct=totalCount>0?Math.max(0,Math.min(100,Math.round((completedCount/totalCount)*100))):0;var statusLabel=done?("同期完了 "+completedCount+" / "+totalCount+" 店舗"):(isInProgress?progress.label:"同期を開始しています...");' +
+    'setProgress(completedCount,totalCount,progressPct,statusLabel);' +
     'document.getElementById("pulse").textContent="確認 "+pollCount+"/"+MAX_POLLS;' +
-    'if(r.done&&r.failed){document.getElementById("main").innerHTML=\'<span class="err">エラー</span>\';' +
+    'if(done&&body.failed){document.getElementById("main").innerHTML=\'<span class="err">エラー</span>\';' +
     'document.getElementById("sub").textContent="同期中にエラーが発生しました";' +
-    'document.getElementById("detail").textContent=r.errorMsg||"";}' +
-    'else if(r.done){document.getElementById("main").innerHTML=\'<span class="done">完了</span>\';' +
+    'document.getElementById("detail").textContent=errorMsg||"";}' +
+    'else if(done){document.getElementById("main").innerHTML=\'<span class="done">完了</span>\';' +
     'document.getElementById("sub").textContent="全店舗の同期が完了しました";' +
     'document.getElementById("detail").textContent="反映を確認するため、必要ならシートを再読み込みしてください。";' +
     'setTimeout(function(){google.script.run.closeSyncSidebar();},1800);}' +
     'else{document.getElementById("sub").textContent="同期を確認中";' +
-    'document.getElementById("detail").textContent=r.errorMsg||"サーバー側で順次処理しています。";' +
+    'document.getElementById("detail").textContent=errorMsg||"サーバー側で順次処理しています。";' +
     'setTimeout(poll,8000);}}' +
-    'function onErr(e){pollCount++;document.getElementById("pulse").textContent="再試行中";if(pollCount<MAX_POLLS)setTimeout(poll,12000);else showTimeout();}' +
+    'function onErr(e){pollCount++;document.getElementById("pulse").textContent="再試行中";document.getElementById("detail").textContent=(e&&e.message)?e.message:String(e||"進捗取得に失敗しました");if(pollCount<MAX_POLLS)setTimeout(poll,12000);else showTimeout();}' +
     'function showTimeout(){document.getElementById("main").innerHTML=\'<span class="err">確認タイムアウト</span>\';' +
     'document.getElementById("sub").textContent="同期自体は続いている可能性があります";' +
     'document.getElementById("detail").textContent="数十秒後に再読み込みしてください。";}' +

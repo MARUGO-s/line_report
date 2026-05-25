@@ -10,9 +10,18 @@ import {
   type ReceiptSheetsSyncDirection,
 } from "../_shared/receipt_sheets_pilot_sync.ts"
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-receipt-sheets-sync-key",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return json({}, 204)
+    return new Response(null, {
+      status: 204,
+      headers: CORS_HEADERS,
+    })
   }
 
   let body: Record<string, unknown> = {}
@@ -374,6 +383,9 @@ function isAuthorized(req: Request): boolean {
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...CORS_HEADERS,
+    },
   })
 }
