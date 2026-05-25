@@ -1,7 +1,7 @@
 /**
  * 管理トークンの保持
- * - 通常: lrst_ セッションは sessionStorage のみ
- * - LINE 経由: lrst_ を localStorage（line_summary_admin_session__line）にも保存（サーバー TTL 3 日）
+ * - 生の固定トークンは永続化しない
+ * - lrst_ セッションは sessionStorage + 同じアプリ配下だけ localStorage に保持
  * - 旧 localStorage の生トークンは初回読込時に削除
  * - 旧 `?t=` ログインは受け付けず、URL から除去のみ行う
  */
@@ -10,11 +10,36 @@
 
   var PERSIST_TOKEN_KEY = 'line_summary_admin_token';
   var SESSION_TOKEN_KEY = 'line_summary_admin_token__session';
-  /** LINE 経由で交換した session token（lrst_）のみ端末に保持 */
-  var LINE_SESSION_TOKEN_KEY = 'line_summary_admin_session__line';
+  var SCOPED_SESSION_PREFIX = 'line_summary_admin_session__scope__';
+  var LEGACY_LINE_SESSION_TOKEN_KEY = 'line_summary_admin_session__line';
   var REMEMBER_KEY = 'line_summary_remember_login';
   var SESSION_PREFIX = 'lrst_';
   var LEGACY_TOKEN_NOTICE_KEY = 'line_report_legacy_token_notice';
+
+  function hashString(input) {
+    var h = 2166136261;
+    var s = String(input || '');
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(36);
+  }
+
+  function currentAppScope() {
+    try {
+      var origin = String(global.location && global.location.origin || '');
+      var path = String(global.location && global.location.pathname || '/');
+      if (!/\/$/.test(path)) path = path.replace(/[^/]*$/, '');
+      return origin + path;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function scopedSessionTokenKey() {
+    return SCOPED_SESSION_PREFIX + hashString(currentAppScope());
+  }
 
   function isLineEntryUrl() {
     try {
@@ -36,26 +61,38 @@
   }
 
   function isRememberEnabled() {
-    return false;
+    return true;
   }
 
-  function shouldPersistLineSession(token, options) {
+  function shouldPersistScopedSession(token, options) {
     options = options || {};
-    if (options.persistLine === true) return true;
-    if (options.persistLine === false) return false;
-    return isLineEntryUrl() && isSessionToken(token);
+    if (options.persistCurrentScope === false) return false;
+    return isSessionToken(token);
   }
 
   function setRememberEnabled() {
+    return true;
+  }
+
+  function readScopedPersistentToken() {
     try {
-      localStorage.removeItem(REMEMBER_KEY);
+      var currentKey = scopedSessionTokenKey();
+      var scoped = localStorage.getItem(currentKey) || '';
+      if (scoped) return scoped;
+      var legacy = localStorage.getItem(LEGACY_LINE_SESSION_TOKEN_KEY) || '';
+      if (legacy && isSessionToken(legacy)) {
+        localStorage.setItem(currentKey, legacy);
+        localStorage.removeItem(LEGACY_LINE_SESSION_TOKEN_KEY);
+        return legacy;
+      }
     } catch (_) {}
+    return '';
   }
 
   function readTokenFromAnyStorage() {
     purgeLegacyPersistentToken();
     return sessionStorage.getItem(SESSION_TOKEN_KEY)
-      || localStorage.getItem(LINE_SESSION_TOKEN_KEY)
+      || readScopedPersistentToken()
       || '';
   }
 
@@ -63,7 +100,8 @@
     try {
       localStorage.removeItem(PERSIST_TOKEN_KEY);
       localStorage.removeItem(REMEMBER_KEY);
-      localStorage.removeItem(LINE_SESSION_TOKEN_KEY);
+      localStorage.removeItem(LEGACY_LINE_SESSION_TOKEN_KEY);
+      localStorage.removeItem(scopedSessionTokenKey());
       sessionStorage.removeItem(SESSION_TOKEN_KEY);
     } catch (_) {}
   }
@@ -73,15 +111,15 @@
     clearTokenStorage();
     if (!next) return;
     sessionStorage.setItem(SESSION_TOKEN_KEY, next);
-    if (shouldPersistLineSession(next, options)) {
-      localStorage.setItem(LINE_SESSION_TOKEN_KEY, next);
+    if (shouldPersistScopedSession(next, options)) {
+      localStorage.setItem(scopedSessionTokenKey(), next);
     }
   }
 
   function getToken() {
     purgeLegacyPersistentToken();
     return sessionStorage.getItem(SESSION_TOKEN_KEY)
-      || localStorage.getItem(LINE_SESSION_TOKEN_KEY)
+      || readScopedPersistentToken()
       || '';
   }
 
@@ -184,10 +222,54 @@
     if (!sessionToken) {
       throw new Error('自動ログインに失敗しました。session_token がありません。');
     }
-    var persistLine = isLineEntryUrl();
-    setToken(sessionToken, { persistLine: persistLine });
+    setToken(sessionToken, { persistCurrentScope: true });
     stripUrlParams(['lt']);
     return true;
+  }
+
+  async function exchangeAdminTokenForSession(adminToken, options) {
+    options = options || {};
+    var token = String(adminToken || '').trim();
+    if (!token) throw new Error('管理トークンを入力してください。');
+    var sessionUrl = String(options.sessionUrl || '').trim();
+    if (!sessionUrl) throw new Error('sessionUrl is required.');
+    var adminSurface = String(options.adminSurface || '').trim() || 'line_report';
+    var response = await fetch(sessionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'x-admin-surface': adminSurface,
+      },
+      body: JSON.stringify({
+        admin_token: token,
+        remember_login: true,
+      }),
+    });
+    if (!response.ok) {
+      var text = await response.text().catch(function () { return ''; });
+      throw new Error('ログインに失敗しました (' + response.status + '): ' + text.slice(0, 160));
+    }
+    var body = await response.json().catch(function () { return {}; });
+    var sessionToken = String(body && body.session_token || '').trim();
+    if (!sessionToken) {
+      throw new Error('ログインに失敗しました。session_token がありません。');
+    }
+    return sessionToken;
+  }
+
+  async function loginWithToken(adminToken, options) {
+    var token = String(adminToken || '').trim();
+    if (!token) {
+      clearTokenStorage();
+      return '';
+    }
+    if (isSessionToken(token)) {
+      setToken(token, { persistCurrentScope: true });
+      return token;
+    }
+    var sessionToken = await exchangeAdminTokenForSession(token, options || {});
+    setToken(sessionToken, { persistCurrentScope: true });
+    return sessionToken;
   }
 
   async function consumeUrlAuthParams(options) {
@@ -209,9 +291,14 @@
 
   function syncRememberCheckbox(checkbox) {
     if (!(checkbox instanceof HTMLInputElement)) return;
-    checkbox.checked = false;
+    checkbox.checked = true;
     checkbox.disabled = true;
     checkbox.setAttribute('aria-disabled', 'true');
+    try {
+      var label = checkbox.parentElement;
+      var text = label ? label.querySelector('span') : null;
+      if (text) text.textContent = '同じアドレスなら自動ログイン';
+    } catch (_) {}
   }
 
   function bindRememberCheckbox(checkbox, onChange) {
@@ -225,17 +312,19 @@
   global.LINE_REPORT_AUTH = {
     PERSIST_TOKEN_KEY: PERSIST_TOKEN_KEY,
     SESSION_TOKEN_KEY: SESSION_TOKEN_KEY,
-    LINE_SESSION_TOKEN_KEY: LINE_SESSION_TOKEN_KEY,
+    LINE_SESSION_TOKEN_KEY: LEGACY_LINE_SESSION_TOKEN_KEY,
     REMEMBER_KEY: REMEMBER_KEY,
     isLineEntryUrl: isLineEntryUrl,
     SESSION_PREFIX: SESSION_PREFIX,
-    supportsPersistentLogin: false,
+    supportsPersistentLogin: true,
     isRememberEnabled: isRememberEnabled,
     setRememberEnabled: setRememberEnabled,
     getToken: getToken,
     setToken: setToken,
     clearToken: clearToken,
     isSessionToken: isSessionToken,
+    exchangeAdminTokenForSession: exchangeAdminTokenForSession,
+    loginWithToken: loginWithToken,
     logout: logout,
     consumeLegacyTokenNotice: consumeLegacyTokenNotice,
     consumeUrlTokenParam: consumeUrlTokenParam,

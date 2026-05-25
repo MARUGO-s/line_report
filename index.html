@@ -2605,7 +2605,7 @@
               <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
               <label class="remember-login-label" for="rememberLoginCheck">
                 <input id="rememberLoginCheck" type="checkbox" disabled>
-                <span>セキュリティ上、このタブだけ有効</span>
+                <span>同じアドレスなら自動ログイン</span>
               </label>
               <button id="saveTokenBtn" class="button primary">保存して接続</button>
               <button id="clearTokenBtn" class="button">削除</button>
@@ -7768,7 +7768,15 @@
         method: 'PUT',
         body: JSON.stringify({ new_token: newToken }),
       });
-      setToken(newToken);
+      if (window.LINE_REPORT_AUTH) {
+        await LINE_REPORT_AUTH.loginWithToken(newToken, {
+          sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', FIXED_PROJECT_URL),
+          adminSurface: 'line_report',
+        });
+        updateAuthPill();
+      } else {
+        setToken(newToken);
+      }
       dom.newTokenInput.value = '';
       dom.newTokenConfirmInput.value = '';
       await safeLoadState();
@@ -7776,9 +7784,18 @@
     }
 
     dom.saveTokenBtn.addEventListener('click', async function() {
-      setToken(dom.tokenInput.value.trim());
+      const entered = dom.tokenInput.value.trim();
       dom.tokenInput.value = '';
       try {
+        if (window.LINE_REPORT_AUTH) {
+          await LINE_REPORT_AUTH.loginWithToken(entered, {
+            sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', FIXED_PROJECT_URL),
+            adminSurface: 'line_report',
+          });
+          updateAuthPill();
+        } else {
+          setToken(entered);
+        }
         await safeLoadState();
         await safeCheckGmailAccount({ silent: true });
         await safeRefreshReceiptSheetsPilotLink({ silent: true });

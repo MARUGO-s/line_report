@@ -570,7 +570,7 @@
       <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
       <label class="remember-login-label" for="rememberLoginCheck">
         <input id="rememberLoginCheck" type="checkbox" disabled>
-        <span>セキュリティ上、このタブだけ有効</span>
+        <span>同じアドレスなら自動ログイン</span>
       </label>
       <div class="controls btn-row">
         <button id="saveTokenBtn" class="btn primary">保存して接続</button>
@@ -2182,10 +2182,24 @@ function updateAuthBadge() {
 dom.saveToken.addEventListener('click', () => {
   const t = dom.tokenInput.value.trim();
   if (!t) return alert('トークンを入力してください。');
-  setToken(t);
   dom.tokenInput.value = '';
-  updateAuthBadge();
-  loadAll();
+  (async function () {
+    try {
+      if (window.LINE_REPORT_AUTH) {
+        await LINE_REPORT_AUTH.loginWithToken(t, {
+          sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', LINE_REPORT_PAGES.PROJECT_URL),
+          adminSurface: 'line_report',
+        });
+        updateAuthBadge();
+      } else {
+        setToken(t);
+        updateAuthBadge();
+      }
+      await loadAll();
+    } catch (error) {
+      alert(error && error.message ? error.message : String(error));
+    }
+  })();
 });
 
 dom.clearToken.addEventListener('click', async () => {

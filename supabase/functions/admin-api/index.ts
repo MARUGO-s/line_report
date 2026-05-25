@@ -33,6 +33,7 @@ import {
 import {
   authenticateAdminDashboardSessionToken,
   exchangeAdminDashboardLoginLinkToken,
+  issueAdminDashboardSessionToken,
   revokeAdminDashboardSessionToken,
   revokeAllAdminDashboardAuthTokens,
 } from "../_shared/admin_dashboard_link_auth.ts"
@@ -310,6 +311,41 @@ Deno.serve(async (req) => {
       if (e instanceof Error && /invalid|expired/i.test(e.message)) {
         return json({ error: e.message }, 401)
       }
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
+  }
+
+  if (req.method === "POST" && path === "/auth/session") {
+    try {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const provided = String(body.admin_token ?? "").trim()
+      if (!provided) {
+        throw { status: 400, message: "admin_token is required." } satisfies AppError
+      }
+      const rememberLogin = body.remember_login !== false
+      const fallbackAdminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
+      const authResult = await authenticateRawAdminToken(provided, supabase, fallbackAdminToken)
+      if (!authResult.ok) {
+        return json({ error: authResult.message }, authResult.status)
+      }
+      const adminSurface = resolveAdminSurface(req, url)
+      const session = await issueAdminDashboardSessionToken(supabase, {
+        rememberLogin,
+        metadata: {
+          admin_surface: adminSurface,
+          exchanged_via: "admin_api_manual_login",
+        },
+      })
+      return json({
+        ok: true,
+        session_token: session.token,
+        expires_at: session.expires_at,
+      }, 200)
+    } catch (e) {
       const err = asAppError(e)
       return json({ error: err.message }, err.status)
     }
@@ -862,13 +898,26 @@ async function authenticate(
     return { ok: true }
   }
 
+  return authenticateRawAdminToken(provided, supabase, fallbackToken)
+}
+
+async function authenticateRawAdminToken(
+  provided: string,
+  supabase: ReturnType<typeof createClient>,
+  fallbackToken: string,
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+  const token = String(provided ?? "")
+  if (!token) {
+    return { ok: false, status: 401, message: "Unauthorized." }
+  }
+
   const dbHashResult = await getStoredAdminTokenHash(supabase)
   if (!dbHashResult.ok) {
     return dbHashResult
   }
 
   if (dbHashResult.hash) {
-    const providedHash = await hashToken(provided)
+    const providedHash = await hashToken(token)
     if (secureEqual(providedHash, dbHashResult.hash)) {
       return { ok: true }
     }
@@ -879,7 +928,7 @@ async function authenticate(
     return { ok: false, status: 500, message: "ADMIN_DASHBOARD_TOKEN is not configured." }
   }
 
-  if (!secureEqual(provided, fallbackToken)) {
+  if (!secureEqual(token, fallbackToken)) {
     return { ok: false, status: 401, message: "Unauthorized." }
   }
 

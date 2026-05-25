@@ -621,7 +621,7 @@
         <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
         <label class="remember-login-label" for="rememberLoginCheck">
           <input id="rememberLoginCheck" type="checkbox" disabled>
-          <span>セキュリティ上、このタブだけ有効</span>
+          <span>同じアドレスなら自動ログイン</span>
         </label>
         <button id="saveTokenBtn" class="button primary">保存して接続</button>
         <button id="clearTokenBtn" class="button">削除</button>
@@ -1468,9 +1468,19 @@
     }
 
     dom.saveTokenBtn.addEventListener('click', async function() {
-      setToken(String(dom.tokenInput.value || '').trim());
+      const entered = String(dom.tokenInput.value || '').trim();
       dom.tokenInput.value = '';
       try {
+        if (window.LINE_REPORT_AUTH) {
+          await LINE_REPORT_AUTH.loginWithToken(entered, {
+            sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', FIXED_PROJECT_URL),
+            adminSurface: 'line_report',
+          });
+          updateAuthState();
+        } else {
+          setToken(entered);
+          updateAuthState();
+        }
         await loadCalendar();
       } catch (error) {
         alert(error.message || String(error));
