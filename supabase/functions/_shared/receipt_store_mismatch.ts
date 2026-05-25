@@ -14,6 +14,18 @@ export type StoreMismatchGuidance = {
   suggestedStore: StoreRegistryRow | null
 }
 
+function isUnreadableParsedStoreName(raw: string | null | undefined): boolean {
+  const s = String(raw ?? '').trim()
+  if (!s) return true
+  return s === '（読み取れませんでした）' || s.includes('読み取れませんでした')
+}
+
+function resolveDisplayedParsedStoreName(guidance: StoreMismatchGuidance): string {
+  if (!guidance.suggestedStore) return guidance.parsedStoreName
+  if (!isUnreadableParsedStoreName(guidance.parsedStoreName)) return guidance.parsedStoreName
+  return guidance.suggestedStore.display_name || guidance.suggestedStore.store_partition_key
+}
+
 function conversationKey(roomId: string, userId: string | null): string {
   return `${roomId || '__unknown_room__'}::${userId || '__anonymous__'}`
 }
@@ -59,13 +71,17 @@ function kvRow(label: string, value: string, valueColor = '#1F1F1F') {
 export function buildReceiptStoreMismatchFlexReply(
   guidance: StoreMismatchGuidance,
 ): Record<string, unknown> {
-  const { registeredStoreName, parsedStoreName, receipt, suggestedStore } = guidance
+  const { registeredStoreName, receipt, suggestedStore } = guidance
+  const parsedStoreName = resolveDisplayedParsedStoreName(guidance)
   const parsedDateIso = parseReceiptDateToIso(receipt.date)
   const displayDate = formatJapaneseReceiptDateFromIso(parsedDateIso) ?? capText(receipt.date, 80)
   const phoneLabel = receipt.storePhone ? capText(receipt.storePhone, 24) : '-'
+  const storeLabel = suggestedStore && isUnreadableParsedStoreName(guidance.parsedStoreName)
+    ? '推定店舗'
+    : '解析店名'
   const detailRows = [
     kvRow('このWebhook', registeredStoreName, '#B45309'),
-    kvRow('解析店名', parsedStoreName, '#B45309'),
+    kvRow(storeLabel, parsedStoreName, '#B45309'),
     kvRow('解析電話', phoneLabel),
     kvRow('日付', displayDate),
     kvRow('総売上', capText(receipt.grossSales, 40)),
@@ -78,6 +94,9 @@ export function buildReceiptStoreMismatchFlexReply(
   ]
   if (suggestedStore) {
     const targetName = suggestedStore.display_name || suggestedStore.store_partition_key
+    if (isUnreadableParsedStoreName(guidance.parsedStoreName) && receipt.storePhone) {
+      guidanceLines.push(`解析電話が一致したため、店舗は「${targetName}」と推定しました。`)
+    }
     guidanceLines.push(`解析結果の店舗「${parsedStoreName}」のWebhookに、同じ画像を送り直してください。`)
     guidanceLines.push(`送り先店舗: ${targetName}`)
   } else {
@@ -160,14 +179,18 @@ export async function buildStoreMismatchGuidance(
 }
 
 function buildStoreMismatchGuidanceText(guidance: StoreMismatchGuidance): string {
+  const parsedStoreName = resolveDisplayedParsedStoreName(guidance)
   const lines = [
     '登録店舗と解析結果の店名が異なります。',
     `このWebhook（${guidance.registeredStoreName}）では登録できません。`,
   ]
   if (guidance.suggestedStore) {
     const targetName = guidance.suggestedStore.display_name || guidance.suggestedStore.store_partition_key
+    if (isUnreadableParsedStoreName(guidance.parsedStoreName) && guidance.receipt.storePhone) {
+      lines.push(`解析電話が一致したため、店舗は「${targetName}」と推定しました。`)
+    }
     lines.push(
-      `解析結果の店舗「${guidance.parsedStoreName}」のWebhookに、同じ画像を送り直してください。`,
+      `解析結果の店舗「${parsedStoreName}」のWebhookに、同じ画像を送り直してください。`,
       `送り先店舗: ${targetName}`,
     )
   } else {
