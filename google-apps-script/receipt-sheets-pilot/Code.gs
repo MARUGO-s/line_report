@@ -483,6 +483,7 @@ function checkSyncCompleteForSidebar(startedAtIso, elapsedSec) {
   var startedAt = normalizeSyncIsoTimestamp_(startedAtIso);
   var elapsed = parseInt(String(elapsedSec || '1'), 10);
   if (isNaN(elapsed) || elapsed < 1) elapsed = 1;
+  var totalStores = STORE_CATALOG.length;
   var creds = getSyncCredentials_();
   if (!creds.secret) {
     return {
@@ -492,6 +493,10 @@ function checkSyncCompleteForSidebar(startedAtIso, elapsedSec) {
       error: '設定タブ B3 に Secret がありません',
       startedAt: startedAt,
       elapsed: elapsed,
+      completedCount: 0,
+      totalCount: totalStores,
+      progressPct: 0,
+      statusLabel: '接続設定を確認してください',
     };
   }
   try {
@@ -503,8 +508,15 @@ function checkSyncCompleteForSidebar(startedAtIso, elapsedSec) {
     var lastCompleted = body.last_completed_at || '';
     var errorMsg = body.error_message || '';
     var isInProgress = errorMsg.indexOf('進行中') === 0;
+    var progress = parseSyncProgressLabel_(errorMsg, totalStores);
     var done = timestampsOrderedAfter_(lastCompleted, startedAt) && !isInProgress;
     var failed = done && !!body.failed;
+    var completedCount = done ? progress.totalCount : progress.completedCount;
+    var totalCount = progress.totalCount;
+    var progressPct = totalCount > 0 ? Math.max(0, Math.min(100, Math.round((completedCount / totalCount) * 100))) : 0;
+    var statusLabel = done
+      ? ('同期完了 ' + completedCount + ' / ' + totalCount + ' 店舗')
+      : (isInProgress ? progress.statusLabel : '同期を開始しています...');
     return {
       done: !!done,
       failed: failed,
@@ -512,9 +524,24 @@ function checkSyncCompleteForSidebar(startedAtIso, elapsedSec) {
       lastCompleted: lastCompleted,
       startedAt: startedAt,
       elapsed: elapsed,
+      completedCount: completedCount,
+      totalCount: totalCount,
+      progressPct: progressPct,
+      statusLabel: statusLabel,
     };
   } catch (e) {
-    return { done: false, failed: false, errorMsg: '', error: String(e), startedAt: startedAt, elapsed: elapsed };
+    return {
+      done: false,
+      failed: false,
+      errorMsg: '',
+      error: String(e),
+      startedAt: startedAt,
+      elapsed: elapsed,
+      completedCount: 0,
+      totalCount: totalStores,
+      progressPct: 0,
+      statusLabel: '進捗を取得できません',
+    };
   }
 }
 
@@ -553,34 +580,82 @@ function timestampsOrderedAfter_(left, right) {
   return leftIso > rightIso;
 }
 
+function parseSyncProgressLabel_(errorMsg, fallbackTotal) {
+  var total = parseInt(String(fallbackTotal || '0'), 10);
+  if (isNaN(total) || total < 0) total = 0;
+  var label = String(errorMsg || '').trim();
+  var match = label.match(/進行中\s+(\d+)\s*\/\s*(\d+)\s*店舗完了/);
+  if (match) {
+    var completed = parseInt(match[1], 10);
+    var parsedTotal = parseInt(match[2], 10);
+    if (!isNaN(parsedTotal) && parsedTotal > 0) total = parsedTotal;
+    if (isNaN(completed) || completed < 0) completed = 0;
+    if (total > 0 && completed > total) completed = total;
+    return {
+      completedCount: completed,
+      totalCount: total,
+      statusLabel: label || ('進行中 ' + completed + ' / ' + total + ' 店舗'),
+    };
+  }
+  return {
+    completedCount: 0,
+    totalCount: total,
+    statusLabel: label || '同期を開始しています...',
+  };
+}
+
 function buildSyncProgressHtml_(startedAtIso, elapsedSec) {
   var startedAt = escapeJsString_(startedAtIso || '');
   var elapsed = parseInt(String(elapsedSec || '1'), 10);
   if (isNaN(elapsed) || elapsed < 1) elapsed = 1;
   return '<!DOCTYPE html><html><head><meta charset="utf-8">' +
-    '<style>body{font-family:sans-serif;padding:16px;margin:0}' +
-    '.spinner{display:inline-block;width:20px;height:20px;border:3px solid #ddd;' +
-    'border-top-color:#4285f4;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:8px}' +
+    '<style>body{font-family:sans-serif;padding:18px 16px 16px;margin:0;color:#202124;background:#fff}' +
+    '.spinner{display:inline-block;width:18px;height:18px;border:3px solid #d2e3fc;' +
+    'border-top-color:#1a73e8;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:8px}' +
     '@keyframes spin{to{transform:rotate(360deg)}}' +
-    '.done{color:#188038;font-weight:bold}.err{color:#c62828;font-size:13px}' +
-    '.small{font-size:12px;color:#888;margin-top:6px}' +
-    '.btn{margin-top:12px;padding:6px 14px;background:#4285f4;color:#fff;border:none;border-radius:4px;cursor:pointer}</style></head>' +
-    '<body><div id="main"><span class="spinner"></span><span id="msg">同期中...</span></div>' +
-    '<div class="small" id="sub">完了まで最大5分待機</div><script>' +
+    '.done{color:#188038;font-weight:bold}.err{color:#c62828;font-size:13px;font-weight:bold}' +
+    '.muted{font-size:12px;color:#5f6368;margin-top:6px;line-height:1.45}' +
+    '.hero{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}' +
+    '.title{font-size:20px;font-weight:700;letter-spacing:.01em}.pct{font-size:26px;font-weight:700;color:#1a73e8}' +
+    '.count{font-size:15px;font-weight:600;margin-top:2px}.card{border:1px solid #e8eaed;border-radius:14px;padding:14px 14px 12px;background:#f8fbff}' +
+    '.row{display:flex;align-items:center;justify-content:space-between;gap:12px}' +
+    '.bar{height:12px;background:#e8f0fe;border-radius:999px;overflow:hidden;margin-top:12px}' +
+    '.fill{height:100%;width:0;background:linear-gradient(90deg,#1a73e8,#4c8bf5);border-radius:999px;transition:width .4s ease}' +
+    '.meta{display:flex;justify-content:space-between;gap:12px;margin-top:10px;font-size:12px;color:#5f6368}' +
+    '.label{font-size:13px;color:#3c4043;margin-top:10px;line-height:1.5}</style></head>' +
+    '<body><div class="hero"><div><div class="title">全店舗同期</div><div class="count" id="count">0 / ' + STORE_CATALOG.length + ' 店舗</div></div><div class="pct" id="pct">0%</div></div>' +
+    '<div class="card"><div class="row"><div id="main"><span class="spinner"></span><span id="msg">同期を開始しています...</span></div></div>' +
+    '<div class="bar"><div class="fill" id="bar"></div></div>' +
+    '<div class="meta"><span id="sub">初期化中...</span><span id="pulse">更新待機中</span></div>' +
+    '<div class="label" id="detail">4店舗ずつ並列で同期します。通常は 1〜3 分で完了します。</div></div><script>' +
     'var pollCount=0,MAX_POLLS=20,SYNC_STARTED_AT=\'' + startedAt + '\',SYNC_ELAPSED=' + elapsed + ';' +
+    'function setProgress(count,total,pct,label){' +
+    'var safeTotal=Math.max(total||0,1),safeCount=Math.max(0,Math.min(count||0,safeTotal)),safePct=Math.max(0,Math.min(pct||0,100));' +
+    'document.getElementById("count").textContent=safeCount+" / "+safeTotal+" 店舗";' +
+    'document.getElementById("pct").textContent=safePct+"%";' +
+    'document.getElementById("bar").style.width=safePct+"%";' +
+    'if(label) document.getElementById("msg").textContent=label;' +
+    '}' +
     'function poll(){if(pollCount>=MAX_POLLS){showTimeout();return;}' +
     'google.script.run.withSuccessHandler(onResult).withFailureHandler(onErr)' +
     '.checkSyncCompleteForSidebar(SYNC_STARTED_AT,SYNC_ELAPSED);}' +
     'function onResult(r){pollCount++;' +
+    'setProgress(r.completedCount,r.totalCount,r.progressPct,r.statusLabel);' +
+    'document.getElementById("pulse").textContent="確認 "+pollCount+"/"+MAX_POLLS;' +
     'if(r.done&&r.failed){document.getElementById("main").innerHTML=\'<span class="err">エラー</span>\';' +
-    'document.getElementById("sub").textContent=r.errorMsg||"";}' +
+    'document.getElementById("sub").textContent="同期中にエラーが発生しました";' +
+    'document.getElementById("detail").textContent=r.errorMsg||"";}' +
     'else if(r.done){document.getElementById("main").innerHTML=\'<span class="done">完了</span>\';' +
-    'setTimeout(function(){google.script.run.closeSyncSidebar();},1500);}' +
-    'else{document.getElementById("sub").textContent="確認中... "+pollCount+"/"+MAX_POLLS;' +
-    'setTimeout(poll,15000);}}' +
-    'function onErr(e){pollCount++;if(pollCount<MAX_POLLS)setTimeout(poll,20000);else showTimeout();}' +
-    'function showTimeout(){document.getElementById("main").innerHTML=\'<span class="err">タイムアウト</span>\';' +
-    'document.getElementById("sub").textContent="再読み込みしてください";}' +
+    'document.getElementById("sub").textContent="全店舗の同期が完了しました";' +
+    'document.getElementById("detail").textContent="反映を確認するため、必要ならシートを再読み込みしてください。";' +
+    'setTimeout(function(){google.script.run.closeSyncSidebar();},1800);}' +
+    'else{document.getElementById("sub").textContent="同期を確認中";' +
+    'document.getElementById("detail").textContent=r.errorMsg||"サーバー側で順次処理しています。";' +
+    'setTimeout(poll,8000);}}' +
+    'function onErr(e){pollCount++;document.getElementById("pulse").textContent="再試行中";if(pollCount<MAX_POLLS)setTimeout(poll,12000);else showTimeout();}' +
+    'function showTimeout(){document.getElementById("main").innerHTML=\'<span class="err">確認タイムアウト</span>\';' +
+    'document.getElementById("sub").textContent="同期自体は続いている可能性があります";' +
+    'document.getElementById("detail").textContent="数十秒後に再読み込みしてください。";}' +
     'setTimeout(poll,8000);</script></body></html>';
 }
 

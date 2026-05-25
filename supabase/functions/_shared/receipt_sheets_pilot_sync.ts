@@ -540,6 +540,18 @@ export async function runReceiptSheetsPilotSync(
     throw new Error("No receipt sheets stores configured.")
   }
 
+  await supabase.from("receipt_sheets_sync_status").upsert(
+    {
+      id: 1,
+      last_completed_at: new Date().toISOString(),
+      direction,
+      failed: false,
+      error_message: `進行中 0/${stores.length} 店舗完了`,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "id" },
+  )
+
   // 22店舗を一度に並列処理すると Sheets API の rate limit（429）が発生するため
   // 4店舗ずつ処理する。1店舗がタイムアウト/エラーでも他は続行。
   const settled = await runWithConcurrencyLimit(
