@@ -182,6 +182,15 @@ function triggerServerBackgroundSync_(direction) {
   var elapsed = Math.max(1, Math.round((Date.now() - t0) / 1000));
   var code = response.getResponseCode();
   var text = response.getContentText();
+  if (code === 401 || code === 403) {
+    SpreadsheetApp.getUi().alert(
+      '同期の認証に失敗しました。\n\n' +
+      '設定タブ B3 の RECEIPT_SHEETS_SYNC_SECRET が hocbn の本番値と一致していない可能性があります。\n' +
+      'メニュー「接続設定」をやり直すか、ターミナルで ./scripts/setup-gas-sync-config.sh を実行してください。\n\n' +
+      text.slice(0, 600)
+    );
+    return;
+  }
   if (code !== 202 && code !== 200) {
     SpreadsheetApp.getUi().alert('開始できませんでした (' + code + ')\n\n' + text.slice(0, 600));
     return;
@@ -334,6 +343,16 @@ function setupConfigSheetWizard() {
     sh.getRange('B3').activate();
     return;
   }
+  var auth = probeSyncAuthorization_(SYNC.URL, secret);
+  if (!auth.ok) {
+    ui.alert(
+      'Secret を確認できませんでした。\n\n' +
+      auth.error +
+      (auth.body ? '\n\n' + auth.body.slice(0, 400) : '')
+    );
+    sh.getRange('B3').activate();
+    return;
+  }
   sh.getRange('B3').setValue(secret);
   sh.getRange('B4').setValue(new Date().toISOString());
   try {
@@ -381,6 +400,37 @@ function validateSyncConnection_(url, secret) {
     issues.push('RECEIPT_SHEETS_SYNC_SECRET が未設定です（メニュー「接続設定」）。');
   }
   return issues;
+}
+
+function probeSyncAuthorization_(url, secret) {
+  if (!url || !secret) {
+    return { ok: false, error: '同期 URL または Secret が空です。', body: '', code: 0 };
+  }
+  try {
+    var response = UrlFetchApp.fetch(
+      url,
+      makeSyncFetchRequest_(url, secret, { get_sync_status: true }),
+    );
+    var code = response.getResponseCode();
+    var text = response.getContentText() || '';
+    if (code === 200) return { ok: true, error: '', body: text, code: code };
+    if (code === 401 || code === 403) {
+      return {
+        ok: false,
+        error: 'hocbn 側で認証されませんでした。RECEIPT_SHEETS_SYNC_SECRET が違う可能性があります。',
+        body: text,
+        code: code,
+      };
+    }
+    return {
+      ok: false,
+      error: '認証確認で想定外の応答が返りました。',
+      body: text,
+      code: code,
+    };
+  } catch (e) {
+    return { ok: false, error: '認証確認に失敗しました: ' + e, body: '', code: 0 };
+  }
 }
 
 function setSyncBgPollingContext_(startedAt, elapsed) {
