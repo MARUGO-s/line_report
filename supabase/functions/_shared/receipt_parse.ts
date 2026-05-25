@@ -303,26 +303,65 @@ export function normalizeLineImageReceiptAnalysis(
 
 export function parseFirstJsonObject(raw: string): unknown | null {
   const trimmed = raw.replace(/^```json\s*/i, '').replace(/^```/, '').replace(/```$/, '').trim()
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    const start = trimmed.indexOf('{')
-    const end = trimmed.lastIndexOf('}')
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(trimmed.slice(start, end + 1))
-      } catch {
-        return null
+
+  function tryParse(candidate: string): unknown | null {
+    const text = String(candidate || '').trim()
+    if (!text) return null
+    try {
+      const parsed = JSON.parse(text)
+      if (typeof parsed === 'string' && parsed.trim()) {
+        try {
+          return JSON.parse(parsed)
+        } catch {
+          return parsed
+        }
       }
+      return parsed
+    } catch {
+      return null
     }
-    return null
   }
+
+  function repairCommonJson(candidate: string): string {
+    return String(candidate || '')
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/\\u00a(?![0-9a-fA-F])/g, '\\u00a0')
+      .replace(/,\s*([}\]])/g, '$1')
+      .trim()
+  }
+
+  const candidates: string[] = []
+  if (trimmed) candidates.push(trimmed)
+  const start = trimmed.indexOf('{')
+  const end = trimmed.lastIndexOf('}')
+  if (start >= 0 && end > start) {
+    candidates.push(trimmed.slice(start, end + 1))
+  }
+
+  for (const candidate of candidates) {
+    const parsed = tryParse(candidate)
+    if (parsed && typeof parsed === 'object') return parsed
+    const repaired = repairCommonJson(candidate)
+    if (repaired !== candidate) {
+      const repairedParsed = tryParse(repaired)
+      if (repairedParsed && typeof repairedParsed === 'object') return repairedParsed
+    }
+  }
+  return null
+}
+
+function coerceMaybeJsonObject(raw: unknown): Record<string, unknown> | null {
+  if (raw && typeof raw === 'object') return raw as Record<string, unknown>
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  const parsed = parseFirstJsonObject(raw)
+  return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
 }
 
 export function normalizeLineImageAnalysisResult(raw: Record<string, unknown>): import('./receipt_types.ts').LineImageAnalysisResult | null {
   const summary = normalizeInlineText(String(raw.summary ?? '')).slice(0, 240)
   const kind = String(raw.kind ?? '').trim().toLowerCase()
-  const receipt = normalizeLineImageReceiptAnalysis(raw.receipt, summary)
+  const receipt = normalizeLineImageReceiptAnalysis(coerceMaybeJsonObject(raw.receipt) ?? raw.receipt, summary)
   const receiptModelConfidence = parseModelReceiptConfidence(
     raw.receipt_confidence ?? raw.receiptConfidence ?? raw.confidence,
   )
