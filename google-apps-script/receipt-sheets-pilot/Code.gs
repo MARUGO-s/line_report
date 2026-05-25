@@ -480,26 +480,26 @@ function showSyncProgressSidebar_() {
 }
 
 function checkSyncCompleteForSidebar(startedAtIso, elapsedSec) {
-  var startedAt = normalizeSyncIsoTimestamp_(startedAtIso);
-  var elapsed = parseInt(String(elapsedSec || '1'), 10);
-  if (isNaN(elapsed) || elapsed < 1) elapsed = 1;
-  var totalStores = STORE_CATALOG.length;
-  var creds = getSyncCredentials_();
-  if (!creds.secret) {
-    return {
-      done: false,
-      failed: false,
-      errorMsg: '',
-      error: '設定タブ B3 に Secret がありません',
-      startedAt: startedAt,
-      elapsed: elapsed,
-      completedCount: 0,
-      totalCount: totalStores,
-      progressPct: 0,
-      statusLabel: '接続設定を確認してください',
-    };
-  }
   try {
+    var startedAt = normalizeSyncIsoTimestamp_(startedAtIso);
+    var elapsed = parseInt(String(elapsedSec || '1'), 10);
+    if (isNaN(elapsed) || elapsed < 1) elapsed = 1;
+    var totalStores = Array.isArray(STORE_CATALOG) ? STORE_CATALOG.length : 0;
+    var creds = getSyncCredentials_();
+    if (!creds.secret) {
+      return {
+        done: false,
+        failed: false,
+        errorMsg: '',
+        error: '設定タブ B3 に Secret がありません',
+        startedAt: startedAt,
+        elapsed: elapsed,
+        completedCount: 0,
+        totalCount: totalStores,
+        progressPct: 0,
+        statusLabel: '接続設定を確認してください',
+      };
+    }
     var response = UrlFetchApp.fetch(
       creds.url,
       makeSyncFetchRequest_(creds.url, creds.secret, { get_sync_status: true }),
@@ -530,15 +530,20 @@ function checkSyncCompleteForSidebar(startedAtIso, elapsedSec) {
       statusLabel: statusLabel,
     };
   } catch (e) {
+    Logger.log('checkSyncCompleteForSidebar failed: ' + e);
+    var safeElapsed = parseInt(String(elapsedSec || '1'), 10);
+    if (isNaN(safeElapsed) || safeElapsed < 1) safeElapsed = 1;
+    var safeStartedAt = normalizeSyncIsoTimestamp_(startedAtIso);
+    var safeTotalStores = Array.isArray(STORE_CATALOG) ? STORE_CATALOG.length : 0;
     return {
       done: false,
       failed: false,
       errorMsg: '',
       error: String(e),
-      startedAt: startedAt,
-      elapsed: elapsed,
+      startedAt: safeStartedAt,
+      elapsed: safeElapsed,
       completedCount: 0,
-      totalCount: totalStores,
+      totalCount: safeTotalStores,
       progressPct: 0,
       statusLabel: '進捗を取得できません',
     };
