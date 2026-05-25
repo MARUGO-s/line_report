@@ -523,6 +523,12 @@ async function runWithConcurrencyLimit<T>(
   return results
 }
 
+function summarizeStoreSyncError(store: ReceiptSheetsStoreEntry, reason: unknown): string {
+  const raw = String(reason ?? "unknown error").replace(/\s+/g, " ").trim()
+  const compact = raw.length > 120 ? `${raw.slice(0, 117)}...` : raw
+  return `${store.storePartitionKey}: ${compact}`
+}
+
 export async function runReceiptSheetsPilotSync(
   supabase: ReturnType<typeof createClient>,
   direction: ReceiptSheetsSyncDirection,
@@ -579,12 +585,32 @@ export async function runReceiptSheetsPilotSync(
 
   const errors = settled.filter((r) => r.status === "rejected")
   if (errors.length > 0) {
-    console.warn(`runReceiptSheetsPilotSync: ${errors.length}/${stores.length} stores failed`)
+    const failedStores = settled.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [summarizeStoreSyncError(stores[index], result.reason)]
+        : []
+    )
+    const summary = `失敗 ${errors.length}/${stores.length} 店舗: ${failedStores.slice(0, 3).join(" | ")}${
+      failedStores.length > 3 ? ` | 他${failedStores.length - 3}件` : ""
+    }`
+    console.warn(`runReceiptSheetsPilotSync: ${summary}`)
+    await supabase.from("receipt_sheets_sync_status").upsert(
+      {
+        id: 1,
+        last_completed_at: new Date().toISOString(),
+        direction,
+        failed: true,
+        error_message: summary.slice(0, 500),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" },
+    ).catch(() => {})
+    throw new Error(summary)
   }
 
-  const last = settled[settled.length - 1]
-  return last.status === "fulfilled"
-    ? last.value
+  const lastFulfilled = [...settled].reverse().find((result) => result.status === "fulfilled")
+  return lastFulfilled
+    ? lastFulfilled.value
     : { ok: false, store_partition_key: "", spreadsheet_id: spreadsheetId, direction, log_appended: false, generated_at: new Date().toISOString() }
 }
 
