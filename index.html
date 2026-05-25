@@ -741,6 +741,46 @@
       margin-top: 8px;
     }
 
+    .webhook-card-phone-preview {
+      border: 1px solid rgba(155, 220, 255, 0.16);
+      border-radius: 12px;
+      background: rgba(8, 21, 35, 0.42);
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .webhook-card-phone-preview-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .webhook-card-phone-preview-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #c8e8f8;
+    }
+
+    .webhook-card-phone-preview-value {
+      font-size: 0.84rem;
+      line-height: 1.45;
+      color: #f3d7a4;
+      word-break: break-word;
+    }
+
+    .webhook-card-phone-preview-value.is-empty {
+      color: var(--muted);
+    }
+
+    .webhook-card-phone-preview .button {
+      min-height: 30px;
+      padding: 0 10px;
+      font-size: 0.74rem;
+    }
+
     .modal-card[data-webhook-mode="permission"] label.room-scope-option:not(.receipt-scope-option):not(.store-permission-option) {
       display: none;
     }
@@ -2358,6 +2398,23 @@
     }
 
     body[data-theme='light'] .webhook-card-receipt-features {
+      color: #3d6278;
+    }
+
+    body[data-theme='light'] .webhook-card-phone-preview {
+      border-color: rgba(76, 128, 164, 0.2);
+      background: rgba(249, 253, 255, 0.96);
+    }
+
+    body[data-theme='light'] .webhook-card-phone-preview-title {
+      color: #17354c;
+    }
+
+    body[data-theme='light'] .webhook-card-phone-preview-value {
+      color: #7a430b;
+    }
+
+    body[data-theme='light'] .webhook-card-phone-preview-value.is-empty {
       color: #3d6278;
     }
 
@@ -5346,6 +5403,28 @@
       });
     }
 
+    function captureWebhookCardPhoneDrafts() {
+      const drafts = {};
+      if (!dom.webhookCardListBody) return drafts;
+      dom.webhookCardListBody.querySelectorAll('.webhook-receipt-phones-input[data-store-key]').forEach(function(input) {
+        if (!(input instanceof HTMLTextAreaElement)) return;
+        const storeKey = String(input.getAttribute('data-store-key') || '').trim();
+        if (!storeKey) return;
+        drafts[storeKey] = input.value;
+      });
+      return drafts;
+    }
+
+    function restoreWebhookCardPhoneDrafts(drafts) {
+      if (!drafts || !dom.webhookCardListBody) return;
+      Object.keys(drafts).forEach(function(storeKey) {
+        const input = dom.webhookCardListBody.querySelector(
+          '.webhook-receipt-phones-input[data-store-key="' + storeKey + '"]',
+        );
+        if (input instanceof HTMLTextAreaElement) input.value = drafts[storeKey];
+      });
+    }
+
     /** カード全体を再描画せず通信状況だけ更新（連携ルームを開いたままにする） */
     function patchWebhookCardLiveStatusFromMap() {
       if (!dom.webhookCardListBody) return;
@@ -5369,10 +5448,6 @@
 
     function refreshWebhookCardsFromCurrentState() {
       if (!currentState || !dom.webhookCardListBody) return;
-      if (isAnyWebhookCardDetailsOpen()) {
-        patchWebhookCardLiveStatusFromMap();
-        return;
-      }
       renderWebhookCards(
         currentState.room_overview || [],
         currentState.room_settings || [],
@@ -5388,11 +5463,7 @@
       fetchReceiptWebhookStatusMap({ includeDetectedRooms: true })
         .then(function(fullMap) {
           receiptWebhookStatusByStore = mergeWebhookStatusMaps(fullMap, receiptWebhookStatusByStore);
-          if (isAnyWebhookCardDetailsOpen()) {
-            patchWebhookCardLiveStatusFromMap();
-          } else {
-            refreshWebhookCardsFromCurrentState();
-          }
+          refreshWebhookCardsFromCurrentState();
           if (currentState) {
             persistAdminPayloadToCache(currentState, receiptWebhookStatusByStore);
           }
@@ -6816,6 +6887,28 @@
       );
     }
 
+    function buildWebhookReceiptPhonesPreviewHtml(store) {
+      const storeKey = String(store.store_key || '').trim();
+      if (!storeKey || storeKey === UNASSIGNED_WEBHOOK_KEY) return '';
+      const phones = Array.isArray(store.receipt_phones) ? store.receipt_phones : [];
+      const lines = formatReceiptPhonesForTextarea(phones)
+        .split('\n')
+        .map(function(v) { return String(v || '').trim(); })
+        .filter(Boolean);
+      const valueHtml = lines.length
+        ? escapeHtml(lines.join(' / '))
+        : '<span class="webhook-card-phone-preview-value is-empty">未登録（店名のみ）</span>';
+      return (
+        '<div class="webhook-card-phone-preview">' +
+        '<div class="webhook-card-phone-preview-head">' +
+        '<div class="webhook-card-phone-preview-title">レシート照合電話</div>' +
+        '<button type="button" class="button webhook-receipt-phones-edit" data-store-key="' + escapeHtml(storeKey) + '">編集</button>' +
+        '</div>' +
+        '<div class="webhook-card-phone-preview-value">' + valueHtml + '</div>' +
+        '</div>'
+      );
+    }
+
     function patchReceiptPhonesInLocalState(storeKey, phones) {
       if (!currentState) return;
       const key = String(storeKey || '').trim();
@@ -6875,6 +6968,7 @@
           '</div>' +
           unlinkedNote +
           '<div class="webhook-card-receipt-features">有効機能: ' + escapeHtml(featureSummary) + '</div>' +
+          buildWebhookReceiptPhonesPreviewHtml(store) +
           buildWebhookCardPermissionUsersHtml(store.store_name || storeKey, userPermissions) +
           '<div class="webhook-card-config">' +
           '<button type="button" class="button primary webhook-permission-open" data-store-key="' + escapeHtml(storeKey) + '">権限・機能設定</button>' +
@@ -6913,6 +7007,7 @@
         '受信: <code>' + escapeHtml(store.webhook_raw_table || '') + '</code><br>' +
         'レシート: <code>' + escapeHtml(store.receipt_table || '') + '</code>' +
         '</div>' +
+        buildWebhookReceiptPhonesPreviewHtml(store) +
         '<div class="webhook-card-config">' +
         '<button type="button" class="button primary webhook-config-open" data-store-key="' + escapeHtml(storeKey) + '">Webhook設定</button>' +
         '<div class="room-config-badge ' + summary.tone + '">' + escapeHtml(summary.text) + '</div>' +
@@ -6988,10 +7083,12 @@
         ));
       });
       const detailsState = captureWebhookCardDetailsState();
+      const phoneDrafts = captureWebhookCardPhoneDrafts();
       dom.webhookCardListBody.innerHTML = cards.length
         ? cards.join('')
         : '<div class="empty">表示対象の Webhook がありません。</div>';
       restoreWebhookCardDetailsState(detailsState);
+      restoreWebhookCardPhoneDrafts(phoneDrafts);
     }
 
     function renderWebhookSettingsSection(overview, settingsList, extraOptions) {
@@ -7771,6 +7868,21 @@
           }
           if (target.classList.contains('webhook-copy-url')) {
             await copyTextToClipboard(target.getAttribute('data-url') || '', 'Webhook URL をコピーしました。');
+            return;
+          }
+          if (target.classList.contains('webhook-receipt-phones-edit')) {
+            const storeKey = String(target.getAttribute('data-store-key') || '').trim();
+            const card = target.closest('.webhook-card');
+            const details = card ? card.querySelector('.webhook-receipt-phones-details') : null;
+            if (details instanceof HTMLDetailsElement) details.open = true;
+            const input = card
+              ? card.querySelector('.webhook-receipt-phones-input[data-store-key="' + storeKey + '"]')
+              : null;
+            if (input instanceof HTMLTextAreaElement) {
+              input.focus();
+              const pos = input.value.length;
+              input.setSelectionRange(pos, pos);
+            }
             return;
           }
           if (target.classList.contains('webhook-receipt-phones-save')) {

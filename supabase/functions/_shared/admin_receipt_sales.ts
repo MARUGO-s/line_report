@@ -875,8 +875,10 @@ export async function updateStoreReceiptPhones(
   supabase: SupabaseClient,
   body: Record<string, unknown>,
 ): Promise<{ store_key: string; receipt_phones: string[] }> {
+  const registry = await loadStoreRegistry(supabase)
   const storeKey = resolveStorePartitionKey(
     body.store_partition_key ?? body.store_key ?? body.store_name,
+    registry.map((entry) => String(entry.store_partition_key ?? '').trim()).filter(Boolean),
   )
   if (!storeKey) {
     throw { status: 400, message: 'store_key が必要です。' } satisfies AppError

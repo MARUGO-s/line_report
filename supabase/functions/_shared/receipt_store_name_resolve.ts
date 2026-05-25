@@ -21,7 +21,7 @@ const RECEIPT_LATIN_BRAND_PROFILES: ReadonlyArray<{
   partitionKey: string
 }> = [
   {
-    displayName: 'BISTRO CAVA CAVA',
+    displayName: 'Bistro CAVACAVA',
     latinCanonical: 'bistrocavacava',
     partitionKey: 'bistrocavacava',
   },
@@ -64,12 +64,12 @@ const RECEIPT_BRAND_PARTITION_ALIASES: ReadonlyArray<{
 ]
 
 const STORE_ALIAS_MAP: Record<string, string> = {
-  cavacava: 'BISTRO CAVA CAVA',
-  cava: 'BISTRO CAVA CAVA',
-  cavabistro: 'BISTRO CAVA CAVA',
-  cavacavabistro: 'BISTRO CAVA CAVA',
-  bistrocavacava: 'BISTRO CAVA CAVA',
-  bistrocava: 'BISTRO CAVA CAVA',
+  cavacava: 'Bistro CAVACAVA',
+  cava: 'Bistro CAVACAVA',
+  cavabistro: 'Bistro CAVACAVA',
+  cavacavabistro: 'Bistro CAVACAVA',
+  bistrocavacava: 'Bistro CAVACAVA',
+  bistrocava: 'Bistro CAVACAVA',
   marugod: 'マルゴ D',
   'marugo d': 'マルゴ D',
   sobaju: 'ソバージュ',

@@ -85,7 +85,9 @@ export function receiptStoreNameMatchesRegistry(
 }
 
 export function resolveParsedStoreNameForDisplay(receiptStoreName: string | null): string {
-  return normalizeReceiptFieldText(receiptStoreName, 80) ?? '（読み取れませんでした）'
+  const parsed = normalizeReceiptFieldText(receiptStoreName, 80)
+  if (!parsed) return '（読み取れませんでした）'
+  return resolveBestStoreName(parsed) ?? sanitizeReceiptOcrStoreName(parsed) ?? parsed
 }
 
 type StoreRegistryMatchCandidate = {
@@ -111,6 +113,13 @@ export function findRegistryEntryForParsedStoreName<T extends StoreRegistryMatch
 
   const parsed = normalizeReceiptFieldText(parsedStoreName, 80)
   if (!parsed) return null
+
+  const parsedPk = resolveReceiptNamePartitionKey(parsed)
+  if (parsedPk && parsedPk !== excludePartitionKey) {
+    for (const entry of registry) {
+      if (entry.store_partition_key === parsedPk) return entry
+    }
+  }
 
   for (const entry of registry) {
     if (excludePartitionKey && entry.store_partition_key === excludePartitionKey) continue

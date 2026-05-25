@@ -20,6 +20,7 @@ import {
   receiptStoreNameMatchesRegistry,
   resolveParsedStoreNameForDisplay,
 } from '../_shared/receipt_store_name_match.ts'
+import { persistLearnedReceiptPhone } from '../_shared/store_receipt_phones.ts'
 import type { LineReplyPayload } from '../_shared/receipt_types.ts'
 import { clearPendingReceiptCorrection, handleStoreReceiptTextMessage, lineReplyPayloadToMessages } from '../_shared/receipt_correction.ts'
 import {
@@ -202,24 +203,38 @@ async function processReceiptImageEvent(
     sender_display_name: null as string | null,
   }
 
-  if (!receiptStoreNameMatchesRegistry(
+  const currentStoreMatched = receiptStoreNameMatchesRegistry(
     storeDisplayName,
     registry.store_partition_key,
     receipt.storeName,
     receipt.storePhone,
     registry.receipt_phones,
-  )) {
+  )
+
+  if (!currentStoreMatched) {
     await clearPendingReceiptCorrection(supabase, roomId, userId)
     await clearPendingReceiptDuplicate(supabase, roomId, userId)
     await clearPendingStoreNameMismatch(supabase, roomId, userId)
+    const guidance = await buildStoreMismatchGuidance(
+      supabase,
+      registry,
+      storeDisplayName,
+      parsedStoreName,
+      receipt,
+    )
+    if (guidance.suggestedStore && receipt.storePhone) {
+      try {
+        await persistLearnedReceiptPhone(
+          supabase,
+          guidance.suggestedStore.store_partition_key,
+          receipt.storePhone,
+          guidance.suggestedStore.receipt_phones,
+        )
+      } catch (e) {
+        console.error('persist learned receipt phone (suggested store) failed:', String(e))
+      }
+    }
     if (replyToken) {
-      const guidance = await buildStoreMismatchGuidance(
-        supabase,
-        registry,
-        storeDisplayName,
-        parsedStoreName,
-        receipt,
-      )
       const flexMessage = buildReceiptStoreMismatchFlexReply(guidance)
       await replyLineFlex(replyToken, flexMessage, accessToken)
     }
@@ -232,6 +247,18 @@ async function processReceiptImageEvent(
 
   await clearPendingStoreNameMismatch(supabase, roomId, userId)
   await clearPendingReceiptDuplicate(supabase, roomId, userId)
+  if (receipt.storePhone) {
+    try {
+      await persistLearnedReceiptPhone(
+        supabase,
+        registry.store_partition_key,
+        receipt.storePhone,
+        registry.receipt_phones,
+      )
+    } catch (e) {
+      console.error('persist learned receipt phone (current store) failed:', String(e))
+    }
+  }
   const result = await attemptReceiptRegistration(supabase, registry, registrationPayload)
 
   if (replyToken) {

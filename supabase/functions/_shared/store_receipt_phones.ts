@@ -3,6 +3,7 @@
  * 主データ: store_webhook_tables.receipt_phones（管理画面）
  * フォールバック: STORE_RECEIPT_PHONES（未移行店舗）
  */
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import { RECEIPT_SHEETS_STORE_CATALOG } from './receipt_sheets_store_catalog.ts'
 import type { StoreRegistryRow } from './store_receipt.ts'
 
@@ -69,6 +70,35 @@ function normalizePhonesList(raw: unknown): string[] {
     out.push(d)
   }
   return out
+}
+
+/** 受信レシートの電話番号を主データへ学習保存（新規時のみ）。 */
+export async function persistLearnedReceiptPhone(
+  supabase: SupabaseClient,
+  storePartitionKey: string,
+  receiptPhone: unknown,
+  knownPhones?: readonly string[] | null,
+): Promise<string[]> {
+  const storeKey = String(storePartitionKey ?? '').trim()
+  const digits = normalizeReceiptPhoneDigits(receiptPhone)
+  const existing = normalizePhonesList(knownPhones ?? [])
+  if (!storeKey || !digits) return existing
+  if (existing.includes(digits)) return existing
+
+  const merged = [...existing, digits]
+  const { data, error } = await supabase
+    .from('store_webhook_tables')
+    .update({ receipt_phones: merged })
+    .eq('store_partition_key', storeKey)
+    .select('receipt_phones')
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(`persistLearnedReceiptPhone failed: ${error.message}`)
+  }
+
+  const saved = data as { receipt_phones?: unknown } | null
+  return normalizePhonesList(saved?.receipt_phones ?? merged)
 }
 
 /** 管理画面・API 入力（改行・カンマ区切り） */

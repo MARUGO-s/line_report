@@ -12,7 +12,6 @@ export type StoreMismatchGuidance = {
   parsedStoreName: string
   receipt: LineImageReceiptAnalysis
   suggestedStore: StoreRegistryRow | null
-  webhookUrl: string | null
 }
 
 function conversationKey(roomId: string, userId: string | null): string {
@@ -57,17 +56,10 @@ function kvRow(label: string, value: string, valueColor = '#1F1F1F') {
   }
 }
 
-export function resolveLineWebhookUrl(storePartitionKey: string): string | null {
-  const base = String(Deno.env.get('SUPABASE_URL') ?? '').trim().replace(/\/$/, '')
-  const key = String(storePartitionKey ?? '').trim()
-  if (!base || !key) return null
-  return `${base}/functions/v1/line-webhook/${encodeURIComponent(key)}`
-}
-
 export function buildReceiptStoreMismatchFlexReply(
   guidance: StoreMismatchGuidance,
 ): Record<string, unknown> {
-  const { registeredStoreName, parsedStoreName, receipt, suggestedStore, webhookUrl } = guidance
+  const { registeredStoreName, parsedStoreName, receipt, suggestedStore } = guidance
   const parsedDateIso = parseReceiptDateToIso(receipt.date)
   const displayDate = formatJapaneseReceiptDateFromIso(parsedDateIso) ?? capText(receipt.date, 80)
   const phoneLabel = receipt.storePhone ? capText(receipt.storePhone, 24) : '-'
@@ -88,9 +80,6 @@ export function buildReceiptStoreMismatchFlexReply(
     const targetName = suggestedStore.display_name || suggestedStore.store_partition_key
     guidanceLines.push(`解析結果の店舗「${parsedStoreName}」のWebhookに、同じ画像を送り直してください。`)
     guidanceLines.push(`送り先店舗: ${targetName}`)
-    if (webhookUrl) {
-      guidanceLines.push(`Webhook URL: ${webhookUrl}`)
-    }
   } else {
     guidanceLines.push(
       `解析結果の店舗「${parsedStoreName}」に対応するWebhookが見つかりませんでした。`,
@@ -162,15 +151,11 @@ export async function buildStoreMismatchGuidance(
     registry.store_partition_key,
     receipt.storePhone,
   )
-  const webhookUrl = suggestedStore
-    ? resolveLineWebhookUrl(suggestedStore.store_partition_key)
-    : null
   return {
     registeredStoreName,
     parsedStoreName,
     receipt,
     suggestedStore,
-    webhookUrl,
   }
 }
 
@@ -185,7 +170,6 @@ function buildStoreMismatchGuidanceText(guidance: StoreMismatchGuidance): string
       `解析結果の店舗「${guidance.parsedStoreName}」のWebhookに、同じ画像を送り直してください。`,
       `送り先店舗: ${targetName}`,
     )
-    if (guidance.webhookUrl) lines.push(`Webhook URL: ${guidance.webhookUrl}`)
   } else {
     lines.push(
       `解析結果の店舗「${guidance.parsedStoreName}」に対応するWebhookが見つかりませんでした。`,
