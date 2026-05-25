@@ -1,0 +1,35 @@
+{
+  "id": "/line_report/",
+  "name": "LINE 売上レポート",
+  "short_name": "LINE売上",
+  "description": "LINE運用向けの管理コンソール",
+  "start_url": "/line_report/index.html",
+  "scope": "/line_report/",
+  "display": "standalone",
+  "background_color": "#0b2035",
+  "theme_color": "#0b2035",
+  "icons": [
+    {
+      "src": "icons/line-report-android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/line-report-icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/line-report-android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/line-report-icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
