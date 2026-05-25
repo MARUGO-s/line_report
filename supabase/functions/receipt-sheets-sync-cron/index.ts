@@ -290,7 +290,7 @@ Deno.serve(async (req) => {
   if (body?.get_sync_status === true) {
     const { data } = await supabase
       .from("receipt_sheets_sync_status")
-      .select("last_completed_at, direction, updated_at")
+      .select("last_completed_at, direction, updated_at, failed, error_message")
       .eq("id", 1)
       .maybeSingle()
     return json({ ok: true, ...(data ?? {}) }, 200)

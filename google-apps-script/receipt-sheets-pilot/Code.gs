@@ -451,12 +451,21 @@ function setSyncBgPollingContext_(startedAt, elapsed) {
 function getSyncBgPollingContextFromSheetOnly_() {
   var startedAt = '';
   var elapsed = 1;
+  try {
+    var props = PropertiesService.getScriptProperties();
+    startedAt = normalizeSyncIsoTimestamp_(props.getProperty(SYNC_BG_STARTED_AT_KEY));
+    var propElapsed = parseInt(String(props.getProperty(SYNC_BG_ELAPSED_KEY) || '1'), 10);
+    if (!isNaN(propElapsed) && propElapsed >= 1) elapsed = propElapsed;
+  } catch (e) {
+    Logger.log('getSyncBgPollingContextFromSheetOnly_ properties: ' + e);
+  }
   var sh = getConfigSheet_();
-  if (sh) {
-    startedAt = String(sh.getRange(CONFIG_SYNC_STARTED_AT_CELL).getValue() || '').trim();
+  if (sh && !startedAt) {
+    startedAt = normalizeSyncIsoTimestamp_(sh.getRange(CONFIG_SYNC_STARTED_AT_CELL).getValue());
     var elRaw = sh.getRange(CONFIG_SYNC_ELAPSED_CELL).getValue();
     if (elRaw !== '' && elRaw != null) {
-      elapsed = parseInt(String(elRaw), 10) || 1;
+      var sheetElapsed = parseInt(String(elRaw), 10) || 1;
+      if (sheetElapsed >= 1) elapsed = sheetElapsed;
     }
   }
   return { startedAt: startedAt, elapsed: isNaN(elapsed) || elapsed < 1 ? 1 : elapsed };
@@ -471,10 +480,10 @@ function showSyncProgressSidebar_() {
 }
 
 function checkSyncCompleteForSidebar(startedAtIso, elapsedSec) {
-  var startedAt = String(startedAtIso || '').trim();
+  var startedAt = normalizeSyncIsoTimestamp_(startedAtIso);
   var elapsed = parseInt(String(elapsedSec || '1'), 10);
   if (isNaN(elapsed) || elapsed < 1) elapsed = 1;
-  var creds = getSyncCredentialsFromSheetOnly_();
+  var creds = getSyncCredentials_();
   if (!creds.secret) {
     return {
       done: false,
@@ -494,7 +503,7 @@ function checkSyncCompleteForSidebar(startedAtIso, elapsedSec) {
     var lastCompleted = body.last_completed_at || '';
     var errorMsg = body.error_message || '';
     var isInProgress = errorMsg.indexOf('進行中') === 0;
-    var done = lastCompleted && startedAt && lastCompleted > startedAt && !isInProgress;
+    var done = timestampsOrderedAfter_(lastCompleted, startedAt) && !isInProgress;
     var failed = done && !!body.failed;
     return {
       done: !!done,
@@ -516,6 +525,32 @@ function escapeJsString_(s) {
     .replace(/"/g, '\\"')
     .replace(/\r/g, '')
     .replace(/\n/g, '\\n');
+}
+
+function normalizeSyncIsoTimestamp_(value) {
+  if (!value) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    try {
+      return value.toISOString();
+    } catch (e) {
+      return '';
+    }
+  }
+  var s = String(value || '').trim();
+  if (!s) return '';
+  var ms = Date.parse(s);
+  if (!isNaN(ms)) return new Date(ms).toISOString();
+  return s;
+}
+
+function timestampsOrderedAfter_(left, right) {
+  var leftIso = normalizeSyncIsoTimestamp_(left);
+  var rightIso = normalizeSyncIsoTimestamp_(right);
+  if (!leftIso || !rightIso) return false;
+  var leftMs = Date.parse(leftIso);
+  var rightMs = Date.parse(rightIso);
+  if (!isNaN(leftMs) && !isNaN(rightMs)) return leftMs > rightMs;
+  return leftIso > rightIso;
 }
 
 function buildSyncProgressHtml_(startedAtIso, elapsedSec) {
