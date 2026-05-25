@@ -5,8 +5,8 @@
   "start_url": "/line_report/index.html",
   "scope": "/line_report/",
   "display": "standalone",
-  "background_color": "#006c3a",
-  "theme_color": "#006c3a",
+  "background_color": "#0b2035",
+  "theme_color": "#0b2035",
   "icons": [
     {
       "src": "icons/android-chrome-192x192.png",

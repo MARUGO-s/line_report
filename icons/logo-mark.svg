@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="LINE report icon">
+  <defs>
+    <linearGradient id="bg" x1="64" x2="448" y1="56" y2="456" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#143754"/>
+      <stop offset="1" stop-color="#091827"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="118" fill="url(#bg)"/>
+  <rect x="24" y="24" width="464" height="464" rx="118" fill="none" stroke="#57d8ff" stroke-opacity=".22" stroke-width="8"/>
+  <rect x="92" y="92" width="264" height="230" rx="70" fill="#f6fbff"/>
+  <path d="M146 283 L111 366 L204 304 Z" fill="#f6fbff"/>
+  <rect x="158" y="206" width="40" height="82" rx="16" fill="#57d8ff"/>
+  <rect x="210" y="172" width="40" height="116" rx="16" fill="#7de8d2"/>
+  <rect x="262" y="136" width="40" height="152" rx="16" fill="#f1b257"/>
+  <circle cx="357" cy="357" r="75" fill="#f1b257"/>
+  <path d="M325 357 L347 379 L390 333" fill="none" stroke="#0b2035" stroke-linecap="round" stroke-linejoin="round" stroke-width="30"/>
+</svg>
