@@ -161,17 +161,6 @@
     .card { background: var(--card); padding: 16px; }
     .card-title { font-size: 1.08rem; padding-bottom: 8px; border-bottom: 1px solid rgba(155,220,255,0.18); margin-bottom: 14px; }
     .controls { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
-    .remember-login-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      white-space: nowrap;
-      font-size: 0.86rem;
-      color: var(--muted);
-      cursor: pointer;
-      user-select: none;
-    }
-    .remember-login-label input { margin: 0; }
     .input, .select, .btn {
       min-height: 38px; border-radius: 11px;
       border: 1px solid var(--line);
@@ -568,10 +557,6 @@
     <div class="controls">
       <input id="projectUrlInput" class="input" type="text" readonly tabindex="-1">
       <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
-      <label class="remember-login-label" for="rememberLoginCheck">
-        <input id="rememberLoginCheck" type="checkbox" disabled>
-        <span>同じアドレスなら自動ログイン</span>
-      </label>
       <div class="controls btn-row">
         <button id="saveTokenBtn" class="btn primary">保存して接続</button>
         <button id="clearTokenBtn" class="btn">削除</button>
@@ -3878,8 +3863,6 @@ if (lineEntryFromUrl) applyLineEntryStoreLock(lineEntryFromUrl);
       console.error('consumeUrlAuthParams failed:', error);
       alert(error.message || String(error));
     }
-    const rememberEl = document.getElementById('rememberLoginCheck');
-    if (rememberEl) LINE_REPORT_AUTH.bindRememberCheckbox(rememberEl, updateAuthBadge);
     if (LINE_REPORT_AUTH.consumeLegacyTokenNotice && LINE_REPORT_AUTH.consumeLegacyTokenNotice()) {
       alert('以前保存されていた古いログイン情報は削除しました。LINEの新しいメッセージから開くか、管理トークンを再入力してください。');
     }

@@ -51,6 +51,20 @@
 
 従来 URL `LINE-management` も並行稼働（同一 API・同一データ）。新規リンク・UI 改修は **line_report** を正とします。
 
+## LINE 予約通知: 過去の予約日（最大5件）
+
+- 対象: `gmail-alert-cron`（Gmail → LINE Flex / テキスト）
+- テーブル: `reservation_customer_visit_history`（顧客×経路ごとの来店ログ）
+- RPC: `record_tabelog_reservation_visit` / `record_ikyu_reservation_visit` が `visit_count` と直近5件の `visit_at` を JSON で返す
+- 表示例:
+  ```
+  来店3回
+  過去の予約日:
+  ・2026/05/08(木) 19:00
+  ・2026/04/01(土) 18:30
+  ```
+- マイグレーション: `20260526220000_reservation_customer_visit_history.sql`
+
 ## 予約表: キャンセル時の来店履歴カウント
 
 - 対象 API: `/reservations/calendar`, `/reservations/search`

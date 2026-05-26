@@ -137,21 +137,6 @@
       align-items: center;
     }
 
-    .remember-login-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      white-space: nowrap;
-      font-size: 0.86rem;
-      color: #b8d9ec;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .remember-login-label input {
-      margin: 0;
-    }
-
     .input, .select, .button {
       min-height: 39px;
       border-radius: 11px;
@@ -888,10 +873,6 @@
       <div class="controls">
         <input id="projectUrlInput" class="input" style="min-width:320px" type="text" readonly tabindex="-1" aria-readonly="true">
         <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
-        <label class="remember-login-label" for="rememberLoginCheck">
-          <input id="rememberLoginCheck" type="checkbox" disabled>
-          <span>同じアドレスなら自動ログイン</span>
-        </label>
         <button id="saveTokenBtn" class="button primary">保存して接続</button>
         <button id="clearTokenBtn" class="button">削除</button>
         <a class="button link" href="./index.html">管理画面に戻る</a>
@@ -1063,7 +1044,6 @@
       lastRefresh: document.getElementById('lastRefresh'),
       projectUrlInput: document.getElementById('projectUrlInput'),
       tokenInput: document.getElementById('tokenInput'),
-      rememberLoginCheck: document.getElementById('rememberLoginCheck'),
       saveTokenBtn: document.getElementById('saveTokenBtn'),
       clearTokenBtn: document.getElementById('clearTokenBtn'),
       typeFilter: document.getElementById('typeFilter'),
@@ -2757,9 +2737,6 @@
         } catch (error) {
           console.error('consumeUrlAuthParams failed:', error);
           alert(error.message || String(error));
-        }
-        if (dom.rememberLoginCheck) {
-          LINE_REPORT_AUTH.bindRememberCheckbox(dom.rememberLoginCheck, updateAuthState);
         }
       }
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
