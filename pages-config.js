@@ -3,15 +3,15 @@
  *
  * API 方針:
  * - admin-api（管理・メディア・予約表・Webhook設定）… hocbn（新サイト専用 DB）
- * - admin-api（Gmail 予約登録の参照のみ）… jhpm（旧サイトと共通）
+ * - admin-api（Gmail 予約・連携確認・予約表）… hocbn（Gmail シークレットは jhpm から移行）
  * - line-webhook … 店舗ごとにパス分割（hocbn）
  */
 (function (global) {
   'use strict';
 
   const PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
-  /** Gmail 予約登録のみ旧本番（jhpm）と共通 */
-  const GMAIL_SHARED_PROJECT_URL = 'https://jhpmzqxqvapdkyvvhyra.supabase.co';
+  /** @deprecated Gmail も hocbn。互換のため jhpm URL を残す */
+  const GMAIL_SHARED_PROJECT_URL = PROJECT_URL;
   /** LINE Webhook 受信先（新 DB） */
   const WEBHOOK_PROJECT_URL = PROJECT_URL;
   /** 売上分析・予算 API（店舗別レシートテーブル） */
@@ -54,6 +54,11 @@
     erics: 'エリックスバイエリックトロション',
     mitan: 'ミタン',
     marugoD: 'マルゴ D',
+  };
+
+  /** 管理画面で店舗名として優先する表記（LINE グループ名と混同しやすい店舗） */
+  const STORE_PREFERRED_UI_LABELS = {
+    bistrocavacava: 'Bistro CAVACAVA',
   };
 
   function normalizeBaseUrl(base, fallback) {
@@ -115,6 +120,12 @@
     if (!key && !name) return '';
 
     if (key && STORE_NAMES[key]) return key;
+    if (key) {
+      const keyLower = key.toLowerCase();
+      for (const slug of Object.keys(STORE_NAMES)) {
+        if (slug.toLowerCase() === keyLower) return slug;
+      }
+    }
 
     const candidates = [key, name].filter(Boolean);
     for (const candidate of candidates) {
@@ -138,6 +149,12 @@
     const key = String(storeKey || '').trim();
     const name = String(rawName || '').trim();
     return name || STORE_NAMES[key] || key;
+  }
+
+  function getPreferredStoreDisplayLabel(storeKey) {
+    const key = resolveStoreKey(storeKey, '');
+    if (key && STORE_PREFERRED_UI_LABELS[key]) return STORE_PREFERRED_UI_LABELS[key];
+    return resolveStoreName(key, '');
   }
 
   function webhookRawTableName(storeKey) {
@@ -218,5 +235,8 @@
     webhookRawTableName: webhookRawTableName,
     receiptTableName: receiptTableName,
     listStores: listStores,
+    resolveStoreKey: resolveStoreKey,
+    resolveStoreName: resolveStoreName,
+    getPreferredStoreDisplayLabel: getPreferredStoreDisplayLabel,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -4,6 +4,7 @@ import {
   normalizeInlineText,
   normalizeLineImageAnalysisResult,
   parseFirstJsonObject,
+  salvageLineImageAnalysisResultFromText,
 } from './receipt_parse.ts'
 
 const VISION_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png'])
@@ -53,6 +54,7 @@ export async function analyzeLineImageWithGroqScout(
     },
     body: JSON.stringify({
       model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      response_format: { type: 'json_object' },
       temperature: 0.1,
       max_tokens: 380,
       messages: [
@@ -63,6 +65,7 @@ export async function analyzeLineImageWithGroqScout(
             '画像が横向き・逆向きの場合は、頭の中で正立に回転してから読むこと。',
             '画像がレシート/領収書なら kind を receipt にし、主要項目を抽出してください。',
             'レシートでない場合は kind を general にし、summary に1文（80文字以内）で内容を入れてください。',
+            'summary は必ず 1 行にし、改行を含めないこと。',
             'JSONスキーマ:',
             '{"kind":"receipt|general","summary":"string","receipt_confidence":0.0,"receipt":{"store_name":"string|null","store_phone":"string|null","date":"string|null","net_sales":"string|null","tax_amount":"string|null","gross_sales":"string|null","party_count":"string|null","guest_count":"string|null","unit_price":"string|null","items":["string"]}}',
             'store_phone はレシート上部の電話番号（例: 03-5361-6205）。読めない場合は null。',
@@ -105,6 +108,11 @@ export async function analyzeLineImageWithGroqScout(
   if (extracted && typeof extracted === 'object') {
     const normalized = normalizeLineImageAnalysisResult(extracted as Record<string, unknown>)
     if (normalized) return { analysis: normalized, failure: null }
+  }
+
+  const salvaged = salvageLineImageAnalysisResultFromText(content)
+  if (salvaged) {
+    return { analysis: salvaged, failure: null }
   }
 
   const fallbackSummary = normalizeInlineText(content).slice(0, 240)

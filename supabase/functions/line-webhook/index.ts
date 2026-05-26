@@ -31,6 +31,7 @@ import {
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
 import { analyzeLineImageWithGroqScout } from '../_shared/receipt_vision.ts'
+import { ensureRoomAutoLinkedToStore } from '../_shared/auto_link_room.ts'
 import {
   createServiceClient,
   type StoreRegistryRow,
@@ -359,11 +360,30 @@ Deno.serve(async (req) => {
   let receiptsSaved = 0
   let receiptReplies = 0
   let textHandled = 0
+  let roomsAutoLinked = 0
+  const autoLinkedRoomIds = new Set<string>()
   const errors: string[] = []
 
   for (const event of events) {
     const rawOk = await insertRawWebhookEvent(supabase, rawTable, event)
     if (rawOk) rawInserted += 1
+
+    const eventRoomId = resolveRoomId(event)
+    if (rawOk && eventRoomId && !autoLinkedRoomIds.has(eventRoomId)) {
+      autoLinkedRoomIds.add(eventRoomId)
+      try {
+        const linkResult = await ensureRoomAutoLinkedToStore(
+          supabase,
+          storeKey,
+          eventRoomId,
+          { undismissOnLink: true, restoreIfDismissed: true },
+        )
+        if (linkResult.linked) roomsAutoLinked += 1
+      } catch (linkErr) {
+        const msg = linkErr instanceof Error ? linkErr.message : String(linkErr)
+        console.error('ensureRoomAutoLinkedToStore failed:', msg)
+      }
+    }
 
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
@@ -419,6 +439,7 @@ Deno.serve(async (req) => {
     receipts_saved: receiptsSaved,
     text_handled: textHandled,
     receipt_replies: receiptReplies,
+    rooms_auto_linked: roomsAutoLinked,
     errors,
   }, errors.length > 0 && rawInserted === 0 && receiptsSaved === 0 && textHandled === 0 ? 500 : 200)
 })

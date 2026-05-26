@@ -304,17 +304,92 @@ export function normalizeLineImageReceiptAnalysis(
 export function parseFirstJsonObject(raw: string): unknown | null {
   const trimmed = raw.replace(/^```json\s*/i, '').replace(/^```/, '').replace(/```$/, '').trim()
 
-  function tryParse(candidate: string): unknown | null {
+  function extractBalancedJsonObject(text: string): string | null {
+    let start = -1
+    let depth = 0
+    let inString = false
+    let escaping = false
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i]
+      if (escaping) {
+        escaping = false
+        continue
+      }
+      if (ch === '\\') {
+        escaping = true
+        continue
+      }
+      if (ch === '"') {
+        inString = !inString
+        continue
+      }
+      if (inString) continue
+      if (ch === '{') {
+        if (depth === 0) start = i
+        depth += 1
+        continue
+      }
+      if (ch === '}') {
+        if (depth > 0) depth -= 1
+        if (depth === 0 && start >= 0) {
+          return text.slice(start, i + 1)
+        }
+      }
+    }
+    return null
+  }
+
+  function escapeControlCharsInsideStrings(candidate: string): string {
+    let out = ''
+    let inString = false
+    let escaping = false
+    for (let i = 0; i < candidate.length; i += 1) {
+      const ch = candidate[i]
+      if (escaping) {
+        out += ch
+        escaping = false
+        continue
+      }
+      if (ch === '\\') {
+        out += ch
+        escaping = true
+        continue
+      }
+      if (ch === '"') {
+        out += ch
+        inString = !inString
+        continue
+      }
+      if (inString) {
+        if (ch === '\n') {
+          out += '\\n'
+          continue
+        }
+        if (ch === '\r') {
+          out += '\\r'
+          continue
+        }
+        if (ch === '\t') {
+          out += '\\t'
+          continue
+        }
+      }
+      out += ch
+    }
+    return out
+  }
+
+  function tryParse(candidate: string, depth = 0): unknown | null {
     const text = String(candidate || '').trim()
     if (!text) return null
     try {
       const parsed = JSON.parse(text)
       if (typeof parsed === 'string' && parsed.trim()) {
-        try {
-          return JSON.parse(parsed)
-        } catch {
-          return parsed
+        if (depth < 2) {
+          const nested = tryParse(parsed, depth + 1)
+          if (nested != null) return nested
         }
+        return parsed
       }
       return parsed
     } catch {
@@ -323,7 +398,7 @@ export function parseFirstJsonObject(raw: string): unknown | null {
   }
 
   function repairCommonJson(candidate: string): string {
-    return String(candidate || '')
+    return escapeControlCharsInsideStrings(String(candidate || ''))
       .replace(/[“”]/g, '"')
       .replace(/[‘’]/g, "'")
       .replace(/\\u00a(?![0-9a-fA-F])/g, '\\u00a0')
@@ -333,10 +408,15 @@ export function parseFirstJsonObject(raw: string): unknown | null {
 
   const candidates: string[] = []
   if (trimmed) candidates.push(trimmed)
-  const start = trimmed.indexOf('{')
-  const end = trimmed.lastIndexOf('}')
-  if (start >= 0 && end > start) {
-    candidates.push(trimmed.slice(start, end + 1))
+  const balanced = extractBalancedJsonObject(trimmed)
+  if (balanced && balanced !== trimmed) {
+    candidates.push(balanced)
+  } else {
+    const start = trimmed.indexOf('{')
+    const end = trimmed.lastIndexOf('}')
+    if (start >= 0 && end > start) {
+      candidates.push(trimmed.slice(start, end + 1))
+    }
   }
 
   for (const candidate of candidates) {
@@ -346,6 +426,11 @@ export function parseFirstJsonObject(raw: string): unknown | null {
     if (repaired !== candidate) {
       const repairedParsed = tryParse(repaired)
       if (repairedParsed && typeof repairedParsed === 'object') return repairedParsed
+    }
+    if (typeof parsed === 'string') {
+      const nested = repairCommonJson(parsed)
+      const nestedParsed = tryParse(nested)
+      if (nestedParsed && typeof nestedParsed === 'object') return nestedParsed
     }
   }
   return null
@@ -382,6 +467,55 @@ export function normalizeLineImageAnalysisResult(raw: Record<string, unknown>): 
 
   if (kind === 'general') return { summary, receipt: null, receiptModelConfidence }
   return { summary, receipt, receiptModelConfidence }
+}
+
+export function salvageLineImageAnalysisResultFromText(rawText: string): import('./receipt_types.ts').LineImageAnalysisResult | null {
+  const source = String(rawText ?? '').trim()
+  if (!source) return null
+
+  const pickString = (name: string): string | null => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(`"${escaped}"\\s*:\\s*"([\\s\\S]*?)"`, 'i')
+    const match = source.match(re)
+    return match?.[1] ? match[1] : null
+  }
+
+  const pickNumber = (name: string): number | null => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(`"${escaped}"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)`, 'i')
+    const match = source.match(re)
+    if (!match?.[1]) return null
+    const n = Number(match[1])
+    return Number.isFinite(n) ? n : null
+  }
+
+  const kind = String(pickString('kind') || '').trim().toLowerCase()
+  if (kind !== 'receipt' && kind !== 'general') return null
+
+  const pseudo: Record<string, unknown> = {
+    kind,
+    summary: pickString('summary') || '',
+  }
+  const confidence = pickNumber('receipt_confidence') ?? pickNumber('receiptConfidence') ?? pickNumber('confidence')
+  if (confidence != null) pseudo.receipt_confidence = confidence
+
+  const receipt: Record<string, unknown> = {
+    store_name: pickString('store_name'),
+    store_phone: pickString('store_phone'),
+    date: pickString('date'),
+    net_sales: pickString('net_sales'),
+    tax_amount: pickString('tax_amount'),
+    gross_sales: pickString('gross_sales'),
+    party_count: pickString('party_count'),
+    guest_count: pickString('guest_count'),
+    unit_price: pickString('unit_price'),
+  }
+
+  if (Object.values(receipt).some((value) => value != null && String(value).trim() !== '')) {
+    pseudo.receipt = receipt
+  }
+
+  return normalizeLineImageAnalysisResult(pseudo)
 }
 
 export function buildReceiptSummaryText(receipt: LineImageReceiptAnalysis, storeDisplayName: string): string {

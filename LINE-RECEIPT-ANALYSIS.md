@@ -66,6 +66,18 @@ https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook/marugoyotsuya
 1. 店舗（または共通）の Messaging API チャネルを用意する
 2. Webhook URL に上記 `{store_partition_key}` 付き URL を登録する
 3. Webhook の利用を ON にする
+4. **Messaging API タブの `Allow bot to join group chats` を ON にする**
+
+### グループ招待で bot がすぐ退出して見える場合
+
+コード上は bot 自身が `leave` API を叩く処理を持っていません。  
+LINE Developers の仕様上、次のどちらかだと bot はグループに参加できません。
+
+- `Allow bot to join group chats` が OFF（初期値は OFF）
+- そのグループに **別の LINE Official Account がすでに参加している**  
+  LINE 公式アカウントは 1 グループにつき 1 つまでです
+
+この症状はアプリ側の Webhook 実装ではなく、**LINE チャネル設定または招待先グループの状態** が原因です。
 
 ### 2. Supabase Edge Secrets（hocbn）
 

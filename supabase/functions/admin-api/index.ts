@@ -30,6 +30,7 @@ import {
   upsertReceiptSalesBudget as upsertStoreReceiptSalesBudget,
   updateStoreReceiptPhones,
 } from "../_shared/admin_receipt_sales.ts"
+import { isReceiptRoomAutoLinkEnabled } from "../_shared/auto_link_room.ts"
 import {
   authenticateAdminDashboardSessionToken,
   exchangeAdminDashboardLoginLinkToken,
@@ -179,6 +180,8 @@ const USER_PERMISSION_SORT_FETCH_CAP = 10000
 const RESERVATION_SEARCH_DEFAULT_LIMIT = 100
 const RESERVATION_SEARCH_MAX_LIMIT = 200
 const RESERVATION_SEARCH_SOURCE_FETCH_CAP = 240
+const RESERVATION_CUSTOMER_HISTORY_FETCH_CAP = 10000
+const RESERVATION_CANCELLATION_RE = /(キャンセル|取消|取り消し|cancel(?:led|ed)?)/i
 
 type LineUserPermissionSortable = {
   display_name?: string | null
@@ -410,8 +413,17 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && path === "/receipts/webhook-status") {
       const includeDetectedRooms = url.searchParams.get("include_detected_rooms") !== "0"
-      const status = await fetchReceiptWebhookStatus(supabase, { includeDetectedRooms })
-      return json({ webhook_status: status, generated_at: new Date().toISOString() }, 200)
+      const autoLinkDetected = url.searchParams.get("auto_link") !== "0"
+      const { webhook_status, auto_link } = await fetchReceiptWebhookStatus(supabase, {
+        includeDetectedRooms,
+        autoLinkDetected,
+      })
+      return json({
+        webhook_status,
+        auto_link,
+        room_auto_link_enabled: isReceiptRoomAutoLinkEnabled(),
+        generated_at: new Date().toISOString(),
+      }, 200)
     }
 
     if (req.method === "PUT" && path === "/receipts/store-receipt-phones") {
@@ -2129,7 +2141,12 @@ async function fetchReservationCalendarState(
       throw { status: 500, message: `Failed to fetch ${source} reservation summaries: ${summariesRes.error.message}` } satisfies AppError
     }
 
-    const summaryByCustomer = buildReservationSummaryLookup(summariesRes.data)
+    const summaryByCustomer = await buildReservationEffectiveSummaryLookup(
+      supabase,
+      eventTable,
+      eventsRes.data,
+      summariesRes.data,
+    )
 
     for (const row of eventsRes.data ?? []) {
       const item = buildReservationCalendarItem(
@@ -2191,7 +2208,7 @@ async function fetchReservationSearchState(
   }
 
   for (const source of sources) {
-    const { eventTable } = getReservationSourceTables(source)
+    const { eventTable, summaryTable } = getReservationSourceTables(source)
 
     let eventsQuery = supabase
       .from(eventTable)
@@ -2217,13 +2234,28 @@ async function fetchReservationSearchState(
       eventsQuery = eventsQuery.or(filters.join(","))
     }
 
-    const { data, error } = await eventsQuery
+    const [{ data, error }, summariesRes] = await Promise.all([
+      eventsQuery,
+      supabase
+        .from(summaryTable)
+        .select("customer_name, customer_phone, visit_count, last_visit_at")
+        .limit(5000),
+    ])
 
     if (error) {
       throw { status: 500, message: `Failed to search ${source} reservations: ${error.message}` } satisfies AppError
     }
+    if (summariesRes.error) {
+      throw { status: 500, message: `Failed to fetch ${source} reservation summaries: ${summariesRes.error.message}` } satisfies AppError
+    }
 
     const eventRows = Array.isArray(data) ? data : []
+    const summaryByCustomer = await buildReservationEffectiveSummaryLookup(
+      supabase,
+      eventTable,
+      eventRows,
+      summariesRes.data,
+    )
     if (eventRows.length >= sourceFetchLimit) {
       sourceLimitReached[source] = true
     }
@@ -2232,7 +2264,7 @@ async function fetchReservationSearchState(
       const item = buildReservationCalendarItem(
         source,
         row as Record<string, unknown>,
-        null,
+        summaryByCustomer,
       )
       if (!item) continue
       if (!matchesReservationSearchItem(item, query)) continue
@@ -3144,6 +3176,111 @@ function buildReservationSummaryLookup(rows: unknown): Map<string, Record<string
     map.set(`${name}__${phone}`, row)
   }
   return map
+}
+
+async function buildReservationEffectiveSummaryLookup(
+  supabase: ReturnType<typeof createClient>,
+  eventTable: "tabelog_reservation_visit_events" | "ikyu_reservation_visit_events",
+  seedRows: unknown,
+  fallbackRows: unknown,
+): Promise<Map<string, Record<string, unknown>>> {
+  const fallbackMap = buildReservationSummaryLookup(fallbackRows)
+  const seedList = Array.isArray(seedRows) ? seedRows : []
+  const names = new Set<string>()
+  const phones = new Set<string>()
+
+  for (const row of seedList) {
+    if (!isRecord(row)) continue
+    const name = toSafeString(row.customer_name)
+    const phone = toSafeString(row.customer_phone)
+    if (!name || !phone) continue
+    names.add(name)
+    phones.add(phone)
+  }
+
+  if (names.size === 0 || phones.size === 0) {
+    return fallbackMap
+  }
+
+  const { data, error } = await supabase
+    .from(eventTable)
+    .select("customer_name, customer_phone, visit_at, created_at, reservation_type, reservation_detail")
+    .in("customer_name", [...names])
+    .in("customer_phone", [...phones])
+    .order("visit_at", { ascending: false })
+    .limit(RESERVATION_CUSTOMER_HISTORY_FETCH_CAP)
+
+  if (error) {
+    console.error(`Failed to fetch reservation customer history from ${eventTable}:`, error.message)
+    return fallbackMap
+  }
+
+  const map = new Map<string, Record<string, unknown>>()
+  const rows = Array.isArray(data) ? data : []
+  for (const row of rows) {
+    if (!isRecord(row)) continue
+    const name = toSafeString(row.customer_name)
+    const phone = toSafeString(row.customer_phone)
+    if (!name || !phone) continue
+    const key = `${name}__${phone}`
+    const prev = map.get(key)
+    const isCancellation = isReservationCancellationRow(row)
+    const delta = isCancellation ? -1 : 1
+    const nextCount = Math.max(0, toNonNegativeInteger(prev?.visit_count) + delta)
+    const candidateLastVisitAt = isCancellation
+      ? null
+      : (toSafeString(row.visit_at) || toSafeString(row.created_at) || null)
+    const prevLastVisitAt = toSafeString(prev?.last_visit_at) || null
+    const lastVisitAt = chooseLaterIso(prevLastVisitAt, candidateLastVisitAt)
+    map.set(key, {
+      customer_name: name,
+      customer_phone: phone,
+      visit_count: nextCount,
+      last_visit_at: lastVisitAt,
+    })
+  }
+
+  for (const [key, row] of fallbackMap.entries()) {
+    if (!map.has(key)) map.set(key, row)
+  }
+  return map
+}
+
+function isReservationCancellationRow(row: Record<string, unknown>): boolean {
+  const reservationType = toSafeString(row.reservation_type)
+  const reservationDetail = toSafeString(row.reservation_detail)
+  const parsedDetail = parseReservationCalendarDetail(reservationDetail)
+  if (RESERVATION_CANCELLATION_RE.test(reservationType)) return true
+  if (parsedDetail && reservationParsedDetailLooksCancelled(parsedDetail)) return true
+  return RESERVATION_CANCELLATION_RE.test(reservationDetail)
+}
+
+function reservationParsedDetailLooksCancelled(detail: Record<string, unknown>): boolean {
+  const candidateKeys = [
+    "status",
+    "reservationStatus",
+    "action",
+    "eventType",
+    "mailType",
+    "subject",
+    "title",
+    "summary",
+    "note",
+  ]
+  for (const key of candidateKeys) {
+    if (RESERVATION_CANCELLATION_RE.test(toSafeString(detail[key]))) return true
+  }
+  return false
+}
+
+function chooseLaterIso(a: string | null, b: string | null): string | null {
+  if (!a) return b
+  if (!b) return a
+  const aMs = Date.parse(a)
+  const bMs = Date.parse(b)
+  if (!Number.isFinite(aMs)) return b
+  if (!Number.isFinite(bMs)) return a
+  return bMs > aMs ? b : a
 }
 
 function buildReservationCalendarItem(

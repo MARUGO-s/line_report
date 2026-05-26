@@ -13,6 +13,7 @@ import {
   type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
 import { queryStoreReceiptRows, loadStoreRegistry } from './store_receipt_query.ts'
+import { autoLinkDetectedRoomsForStore } from './auto_link_room.ts'
 import { parseReceiptPhonesInput } from './store_receipt_phones.ts'
 import {
   buildJstDateKeysForMonth,
@@ -940,12 +941,17 @@ async function fetchDistinctRoomIdsFromRawTable(
 
 export async function fetchReceiptWebhookStatus(
   supabase: SupabaseClient,
-  options: { includeDetectedRooms?: boolean } = {},
-): Promise<ReceiptWebhookStatusRow[]> {
+  options: { includeDetectedRooms?: boolean; autoLinkDetected?: boolean } = {},
+): Promise<{
+  webhook_status: ReceiptWebhookStatusRow[]
+  auto_link: { linked: number; skipped: number; errors: number }
+}> {
   const includeDetectedRooms = options.includeDetectedRooms !== false
+  const autoLinkDetected = options.autoLinkDetected !== false
   const registry = await loadStoreRegistry(supabase)
+  const autoLinkTotal = { linked: 0, skipped: 0, errors: 0 }
 
-  return Promise.all(registry.map(async (entry) => {
+  const webhook_status = await Promise.all(registry.map(async (entry) => {
     let webhookEventCount = 0
     let lastWebhookReceivedAt: string | null = null
     let receiptCount = 0
@@ -987,6 +993,17 @@ export async function fetchReceiptWebhookStatus(
         ? await fetchDistinctRoomIdsFromRawTable(supabase, entry.webhook_raw_table)
         : []
 
+    if (autoLinkDetected && detectedRoomIds.length > 0) {
+      const batch = await autoLinkDetectedRoomsForStore(
+        supabase,
+        entry.store_partition_key,
+        detectedRoomIds,
+      )
+      autoLinkTotal.linked += batch.linked
+      autoLinkTotal.skipped += batch.skipped
+      autoLinkTotal.errors += batch.errors
+    }
+
     return {
       store_partition_key: entry.store_partition_key,
       display_name: entry.display_name,
@@ -998,4 +1015,6 @@ export async function fetchReceiptWebhookStatus(
       detected_room_ids: detectedRoomIds,
     }
   }))
+
+  return { webhook_status, auto_link: autoLinkTotal }
 }

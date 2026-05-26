@@ -227,6 +227,17 @@
     return true;
   }
 
+  function wrapNetworkFetchError(error, contextLabel) {
+    var msg = String(error && error.message || error || '');
+    if (error && error.name === 'TypeError' && /fetch|network|load failed|Failed to fetch/i.test(msg)) {
+      return new Error(
+        (contextLabel || 'API') + 'に接続できません。インターネット接続を確認し、'
+        + 'ローカルでは http://127.0.0.1:8765/line_report/ を開いてください。',
+      );
+    }
+    return error;
+  }
+
   async function exchangeAdminTokenForSession(adminToken, options) {
     options = options || {};
     var token = String(adminToken || '').trim();
@@ -234,17 +245,22 @@
     var sessionUrl = String(options.sessionUrl || '').trim();
     if (!sessionUrl) throw new Error('sessionUrl is required.');
     var adminSurface = String(options.adminSurface || '').trim() || 'line_report';
-    var response = await fetch(sessionUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'x-admin-surface': adminSurface,
-      },
-      body: JSON.stringify({
-        admin_token: token,
-        remember_login: true,
-      }),
-    });
+    var response;
+    try {
+      response = await fetch(sessionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'x-admin-surface': adminSurface,
+        },
+        body: JSON.stringify({
+          admin_token: token,
+          remember_login: true,
+        }),
+      });
+    } catch (error) {
+      throw wrapNetworkFetchError(error, '管理API');
+    }
     if (!response.ok) {
       var text = await response.text().catch(function () { return ''; });
       throw new Error('ログインに失敗しました (' + response.status + '): ' + text.slice(0, 160));
@@ -261,7 +277,7 @@
     var token = String(adminToken || '').trim();
     if (!token) {
       clearTokenStorage();
-      return '';
+      throw new Error('トークンを入力してください。');
     }
     if (isSessionToken(token)) {
       setToken(token, { persistCurrentScope: true });
