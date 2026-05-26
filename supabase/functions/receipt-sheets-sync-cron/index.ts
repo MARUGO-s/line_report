@@ -2,7 +2,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { writeGasSyncConfigToSpreadsheet } from "../_shared/receipt_sheets_gas_config.ts"
 import { clearBistrocavacavaSheetDataRowsAndPushFromDb } from "../_shared/bistrocavacava_sheet_push.ts"
-import { clearStoreSheetBudgetTabsAndPushFromDb } from "../_shared/clear_store_sheet_budget_tabs.ts"
+import {
+  clearSpreadsheetTabsExceptStores,
+  clearStoreSheetBudgetTabsAndPushFromDb,
+} from "../_shared/clear_store_sheet_budget_tabs.ts"
 import {
   runReceiptSheetsPilotSync,
   runReceiptSheetsPilotSyncViaGas,
@@ -81,6 +84,45 @@ Deno.serve(async (req) => {
       return json({ ok: true, ...result }, 200)
     } catch (e) {
       console.error("write_gas_config failed:", e)
+      return json({ ok: false, error: String(e) }, 500)
+    }
+  }
+
+  if (body?.clear_sheets_except_stores === true) {
+    const canRun = (await isServiceRoleAuthorized(req)) || isAuthorized(req)
+    if (!canRun) {
+      return json({ ok: false, error: "Forbidden." }, 403)
+    }
+    const spreadsheetId = String(Deno.env.get("RECEIPT_SHEETS_PILOT_SPREADSHEET_ID") ?? "").trim()
+    if (!spreadsheetId) {
+      return json({ ok: false, error: "RECEIPT_SHEETS_PILOT_SPREADSHEET_ID is not set." }, 500)
+    }
+    const keepRaw = body?.keep_store_partition_keys
+    const keepKeys = Array.isArray(keepRaw)
+      ? keepRaw.map((k) => String(k ?? "").trim()).filter(Boolean)
+      : []
+    if (keepKeys.length === 0) {
+      return json({ ok: false, error: "keep_store_partition_keys array is required." }, 400)
+    }
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
+      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      let registryKeys: string[] = []
+      if (supabaseUrl && serviceRoleKey) {
+        const sb = createClient(supabaseUrl, serviceRoleKey)
+        const { data } = await sb.from("store_webhook_tables").select("store_partition_key")
+        registryKeys = (data ?? [])
+          .map((row) => String((row as { store_partition_key?: unknown }).store_partition_key ?? "").trim())
+          .filter(Boolean)
+      }
+      const result = await clearSpreadsheetTabsExceptStores(
+        spreadsheetId,
+        keepKeys,
+        registryKeys,
+      )
+      return json(result, 200)
+    } catch (e) {
+      console.error("clear_sheets_except_stores failed:", e)
       return json({ ok: false, error: String(e) }, 500)
     }
   }

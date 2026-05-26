@@ -56,11 +56,14 @@ type ReservationMailDetails = {
   allergy: string | null
   requestNote: string | null
   reservationHistory: string | null
+  /** Flex 予約回数欄: 1要素＝1段落（見出しと日時を分離） */
+  reservationHistoryParagraphs?: string[] | null
 }
 
 type ReservationVisitRecordResult = {
   visit_count: number
-  recent_visits: Array<{ visit_at?: string | null }>
+  cancelled_count: number
+  recent_visits: Array<{ visit_at?: string | null; is_cancelled?: boolean }>
 }
 
 const DEFAULT_GMAIL_ALERT_QUERY = "is:inbox is:unread newer_than:7d (予約 OR reservation OR booking)"
@@ -89,7 +92,11 @@ const RESERVATION_DETAIL_KEYS: Array<keyof ReservationMailDetails> = [
   "reservationHistory",
 ]
 
-Deno.serve(async () => {
+const TEST_RESERVATION_GMAIL_PREFIX = "cursor-test-reservation-"
+const TEST_RESERVATION_CUSTOMER_NAME = "テスト太郎"
+const TEST_RESERVATION_CUSTOMER_PHONE = "09011112222"
+
+Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
   const lineAccessToken = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN") ?? ""
@@ -105,6 +112,31 @@ Deno.serve(async () => {
   const supabase = createClient(supabaseUrl, supabaseKey)
   const now = new Date()
   const jstHour = (now.getUTCHours() + 9) % 24
+
+  const url = new URL(req.url)
+  if (url.searchParams.get("test_reservation") === "1") {
+    if (!(await isGmailAlertTestAuthorized(req, supabaseKey))) {
+      return json({ ok: false, error: "unauthorized" }, 401)
+    }
+    try {
+      const roomOverride = String(url.searchParams.get("room_id") ?? "").trim()
+      const result = await sendTestReservationLineNotification({
+        supabase,
+        now,
+        jstHour,
+        lineAccessToken,
+        fallbackOverallRoomId,
+        roomOverride,
+      })
+      return json({ ok: true, mode: "test_reservation", ...result }, result.sent ? 200 : 400)
+    } catch (e) {
+      console.error("Failed to send test reservation notification:", e)
+      return json({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      }, 500)
+    }
+  }
 
   try {
     const result = await maybeSendGmailReservationAlerts({
@@ -128,6 +160,28 @@ Deno.serve(async () => {
   }
 })
 
+async function isGmailAlertTestAuthorized(req: Request, serviceRoleKey: string): Promise<boolean> {
+  const bearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
+  const sr = String(serviceRoleKey ?? "").trim()
+  if (bearer && sr && bearer === sr) return true
+
+  const testSecret = String(
+    Deno.env.get("GMAIL_ALERT_TEST_SECRET") ?? Deno.env.get("CRON_AUTH_TOKEN") ?? "",
+  ).trim()
+  const headerKey = String(req.headers.get("x-gmail-alert-test-key") ?? "").trim()
+  if (testSecret && headerKey && headerKey === testSecret) return true
+
+  if (!bearer) return false
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
+  if (!supabaseUrl) return false
+  const probe = createClient(supabaseUrl, bearer)
+  const { error } = await probe.from("room_summary_settings").select("room_id").limit(1)
+  if (!error) return true
+  const msg = String(error.message ?? "")
+  if (msg.includes("Invalid API key") || error.code === "PGRST301") return false
+  return true
+}
+
 function json(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -136,6 +190,189 @@ function json(payload: unknown, status = 200): Response {
       "Cache-Control": "no-store",
     },
   })
+}
+
+function testReservationVisitAtIso(year: number, month: number, day: number, hourJst: number, minuteJst: number): string {
+  return new Date(Date.UTC(year, month - 1, day, hourJst - 9, minuteJst)).toISOString()
+}
+
+async function sendTestReservationLineNotification(params: {
+  supabase: ReturnType<typeof createClient>
+  now: Date
+  jstHour: number
+  lineAccessToken: string
+  fallbackOverallRoomId: string
+  roomOverride: string
+}): Promise<Record<string, unknown>> {
+  const {
+    supabase,
+    jstHour,
+    lineAccessToken,
+    fallbackOverallRoomId,
+    roomOverride,
+  } = params
+
+  if (!lineAccessToken) {
+    return { sent: false, reason: "missing_line_channel_access_token" }
+  }
+
+  const fallbackTargetRoomId = String(Deno.env.get("LINE_GMAIL_ALERT_ROOM_ID") ?? "").trim() ||
+    String(fallbackOverallRoomId ?? "").trim()
+  let targetRoomIds = await resolveGmailAlertTargetRooms(supabase, fallbackTargetRoomId)
+  if (roomOverride) {
+    targetRoomIds = [roomOverride]
+  }
+  if (targetRoomIds.length === 0) {
+    return { sent: false, reason: "no_target_rooms" }
+  }
+
+  await cleanupTestReservationSeed(supabase)
+
+  const seedRows: Array<{
+    id: string
+    visitAt: string
+    reservationType: string
+    reservationDetail: string | null
+  }> = [
+    {
+      id: `${TEST_RESERVATION_GMAIL_PREFIX}past-1`,
+      visitAt: testReservationVisitAtIso(2026, 3, 15, 18, 0),
+      reservationType: "course",
+      reservationDetail: "【テスト】過去予約1",
+    },
+    {
+      id: `${TEST_RESERVATION_GMAIL_PREFIX}past-2`,
+      visitAt: testReservationVisitAtIso(2026, 4, 20, 19, 30),
+      reservationType: "course",
+      reservationDetail: "【テスト】過去予約2",
+    },
+    {
+      id: `${TEST_RESERVATION_GMAIL_PREFIX}past-cancel`,
+      visitAt: testReservationVisitAtIso(2026, 5, 10, 19, 0),
+      reservationType: "予約キャンセル",
+      reservationDetail: "【テスト】キャンセル履歴",
+    },
+  ]
+
+  for (const row of seedRows) {
+    const { error } = await supabase.rpc("record_tabelog_reservation_visit", {
+      p_gmail_message_id: row.id,
+      p_customer_name: TEST_RESERVATION_CUSTOMER_NAME,
+      p_customer_phone: TEST_RESERVATION_CUSTOMER_PHONE,
+      p_visit_at: row.visitAt,
+      p_reservation_type: row.reservationType,
+      p_reservation_detail: row.reservationDetail,
+    })
+    if (error) {
+      throw new Error(`seed failed (${row.id}): ${error.message}`)
+    }
+  }
+
+  const currentMessageId = `${TEST_RESERVATION_GMAIL_PREFIX}current-${Date.now()}`
+  const mockAlert: GmailMessageAlert = {
+    id: currentMessageId,
+    threadId: null,
+    subject: "【食べログ】ご予約のお知らせ（テスト送信）",
+    from: "reservation@tabelog.com",
+    snippet: "※これは履歴表示確認用のテスト通知です",
+    internalDateIso: new Date().toISOString(),
+    reservation: {
+      reservationSite: "食べログ",
+      storeName: "ビストロサヴァサヴァ（テスト）",
+      reservationNo: "TEST-0001",
+      notificationNo: null,
+      vPointUsage: "なし",
+      visitDateTime: "2026年05月30日(土) 19:00",
+      partySize: "2名",
+      plan: "【テスト】おまかせコース",
+      paymentMethod: "現地決済",
+      totalAmount: "¥8,800",
+      seatName: "カウンター",
+      representativeName: TEST_RESERVATION_CUSTOMER_NAME,
+      representativePhone: TEST_RESERVATION_CUSTOMER_PHONE,
+      allergy: "なし",
+      requestNote: "テスト送信のため実予約ではありません",
+      reservationHistory: null,
+    },
+    reservationExtractSource: "rule",
+  }
+
+  const enriched = await maybeAccumulatePartnerVisitHistory(supabase, mockAlert)
+  const linePayload = buildGmailReservationAlertLinePayload([enriched])
+  const successfulTargetRoomIds: string[] = []
+  const failedRooms: Array<{ room_id: string; error: string }> = []
+
+  for (const targetRoomId of targetRoomIds) {
+    const sendResult = await sendLineMessage(targetRoomId, linePayload, lineAccessToken)
+    if (!sendResult.ok) {
+      failedRooms.push({
+        room_id: targetRoomId,
+        error: sendResult.error ?? "send_failed",
+      })
+      continue
+    }
+    successfulTargetRoomIds.push(targetRoomId)
+    await writeDeliveryLog(supabase, {
+      jst_hour: jstHour,
+      status: "gmail_alert_sent",
+      reason: "Test reservation notification (cursor-test-reservation).",
+      should_send_overall: false,
+      rooms_targeted: 1,
+      messages_in_queue: 0,
+      messages_marked_processed: 0,
+      line_send_attempted: true,
+      line_send_success: true,
+      line_http_status: sendResult.status ?? null,
+      target_room_id: targetRoomId,
+      details: {
+        source: "gmail-alert-cron",
+        test_reservation: true,
+        customer_name: TEST_RESERVATION_CUSTOMER_NAME,
+        customer_phone: TEST_RESERVATION_CUSTOMER_PHONE,
+        gmail_message_id: currentMessageId,
+        reservation_history: enriched.reservation?.reservationHistory ?? null,
+      },
+    })
+  }
+
+  if (successfulTargetRoomIds.length === 0) {
+    return {
+      sent: false,
+      reason: "line_send_failed",
+      target_rooms: targetRoomIds,
+      failed_rooms: failedRooms,
+      reservation_history: enriched.reservation?.reservationHistory ?? null,
+    }
+  }
+
+  return {
+    sent: true,
+    target_rooms: targetRoomIds,
+    success_rooms: successfulTargetRoomIds,
+    failed_rooms: failedRooms,
+    customer_name: TEST_RESERVATION_CUSTOMER_NAME,
+    customer_phone: TEST_RESERVATION_CUSTOMER_PHONE,
+    gmail_message_id: currentMessageId,
+    reservation_history: enriched.reservation?.reservationHistory ?? null,
+  }
+}
+
+async function cleanupTestReservationSeed(supabase: ReturnType<typeof createClient>): Promise<void> {
+  const likePattern = `${TEST_RESERVATION_GMAIL_PREFIX}%`
+  await supabase
+    .from("reservation_customer_visit_history")
+    .delete()
+    .eq("partner", "tabelog")
+    .like("gmail_message_id", likePattern)
+  await supabase
+    .from("tabelog_reservation_visit_events")
+    .delete()
+    .like("gmail_message_id", likePattern)
+  await supabase
+    .from("tabelog_reservation_visit_summaries")
+    .delete()
+    .eq("customer_name", TEST_RESERVATION_CUSTOMER_NAME)
+    .eq("customer_phone", TEST_RESERVATION_CUSTOMER_PHONE)
 }
 
 async function maybeSendGmailReservationAlerts(params: {
@@ -379,8 +616,13 @@ async function maybeAccumulatePartnerVisitHistory(
     }
 
     const record = parseReservationVisitRecordResult(data)
-    if (!record || record.visit_count <= 0) return alert
-    const historyLabel = formatReservationHistoryForLine(record)
+    if (!record) return alert
+    const hasHistory = record.visit_count > 0
+      || record.cancelled_count > 0
+      || record.recent_visits.length > 0
+    if (!hasHistory) return alert
+    const historyParagraphs = buildReservationHistoryParagraphs(record)
+    const historyLabel = formatReservationHistoryForLine(record, historyParagraphs)
     return {
       ...alert,
       reservation: {
@@ -401,8 +643,10 @@ async function maybeAccumulatePartnerVisitHistory(
           allergy: null,
           requestNote: null,
           reservationHistory: null,
+          reservationHistoryParagraphs: null,
         }),
         reservationHistory: historyLabel,
+        reservationHistoryParagraphs: historyParagraphs,
       },
     }
   } catch (err) {
@@ -425,36 +669,76 @@ function parseReservationVisitRecordResult(data: unknown): ReservationVisitRecor
   if (data == null) return null
   if (typeof data === "number" && Number.isFinite(data)) {
     const visit_count = Math.max(0, Math.floor(data))
-    return visit_count > 0 ? { visit_count, recent_visits: [] } : null
+    return visit_count > 0 ? { visit_count, cancelled_count: 0, recent_visits: [] } : null
   }
   if (typeof data !== "object" || data === null) return null
   const row = data as Record<string, unknown>
   const visit_count = Math.max(0, Math.floor(Number(row.visit_count ?? 0)))
-  if (visit_count <= 0) return null
+  const cancelled_count = Math.max(0, Math.floor(Number(row.cancelled_count ?? 0)))
   const recentRaw = Array.isArray(row.recent_visits) ? row.recent_visits : []
   const recent_visits = recentRaw
     .map((item) => {
       if (!item || typeof item !== "object") return null
-      const visit_at = String((item as Record<string, unknown>).visit_at ?? "").trim()
-      return visit_at ? { visit_at } : null
+      const rec = item as Record<string, unknown>
+      const visit_at = String(rec.visit_at ?? "").trim()
+      if (!visit_at) return null
+      return {
+        visit_at,
+        is_cancelled: rec.is_cancelled === true,
+      }
     })
-    .filter((item): item is { visit_at: string } => item !== null)
+    .filter((item): item is { visit_at: string; is_cancelled: boolean } => item !== null)
     .slice(0, 5)
-  return { visit_count, recent_visits }
+  if (visit_count <= 0 && cancelled_count <= 0 && recent_visits.length === 0) return null
+  return { visit_count, cancelled_count, recent_visits }
 }
 
-function formatReservationHistoryForLine(record: ReservationVisitRecordResult): string {
-  const lines: string[] = [`来店${record.visit_count}回`]
+const RESERVATION_HISTORY_HEADING = "過去の予約"
+
+function parseJapaneseCount(raw: string): number {
+  const normalized = String(raw ?? "").replace(/[０-９]/g, (ch) =>
+    String.fromCharCode(ch.charCodeAt(0) - 0xff10 + 0x30))
+  const n = Number.parseInt(normalized, 10)
+  return Number.isFinite(n) ? Math.max(0, n) : 0
+}
+
+function formatReservationCountLine(label: string, count: number): string {
+  const digits = String(Math.max(0, Math.floor(count)))
+    .replace(/[0-9]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x30 + 0xff10))
+  return `${label}　${digits}回`
+}
+
+function isReservationHistorySectionHeading(line: string): boolean {
+  const trimmed = String(line ?? "").trim()
+  return trimmed === RESERVATION_HISTORY_HEADING
+}
+
+function buildReservationHistoryParagraphs(record: ReservationVisitRecordResult): string[] {
+  const paragraphs: string[] = [
+    formatReservationCountLine("来店回数", record.visit_count),
+    formatReservationCountLine("キャンセル回数", record.cancelled_count),
+  ]
   const dated = record.recent_visits
-    .map((item) => formatReservationVisitAtLabel(item.visit_at))
-    .filter((label) => label && label !== "不明")
+    .map((item) => {
+      const label = formatReservationVisitAtLabel(item.visit_at)
+      if (!label || label === "不明") return null
+      return item.is_cancelled ? `${label}（キャンセル）` : label
+    })
+    .filter((label): label is string => !!label)
   if (dated.length > 0) {
-    lines.push("過去の予約日:")
+    paragraphs.push(RESERVATION_HISTORY_HEADING)
     for (const label of dated.slice(0, 5)) {
-      lines.push(`・${label}`)
+      paragraphs.push(label)
     }
   }
-  return lines.join("\n")
+  return paragraphs
+}
+
+function formatReservationHistoryForLine(
+  record: ReservationVisitRecordResult,
+  paragraphs = buildReservationHistoryParagraphs(record),
+): string {
+  return paragraphs.join("\n")
 }
 
 function formatReservationVisitAtLabel(visitAtIso: string | null | undefined): string {
@@ -871,10 +1155,13 @@ function buildGmailReservationAlertMessage(alerts: GmailMessageAlert[]): string 
     }
     lines.push(`【${template.eventLabel}】`)
     for (const field of template.fields) {
+      const displayValue = field.valueParagraphs?.length
+        ? field.valueParagraphs.join("\n\n")
+        : field.value
       lines.push(
         formatAlignedReservationLine(
           field.label,
-          field.value,
+          displayValue,
           field.label === "コース" ? RESERVATION_TEMPLATE_COURSE_VALUE_WRAP_WIDTH : RESERVATION_TEMPLATE_DEFAULT_VALUE_WRAP_WIDTH,
         ),
       )
@@ -883,9 +1170,16 @@ function buildGmailReservationAlertMessage(alerts: GmailMessageAlert[]): string 
   return lines.join("\n").slice(0, 4900)
 }
 
+type ReservationTemplateField = {
+  label: string
+  value: string
+  /** Flex の予約回数・履歴欄: 1行＝1段落として縦に並べる */
+  valueParagraphs?: string[]
+}
+
 function buildReservationTemplateData(alert: GmailMessageAlert): {
   eventLabel: string
-  fields: Array<{ label: string; value: string }>
+  fields: ReservationTemplateField[]
 } {
   const reservation = alert.reservation
   const eventLabel = inferReservationEventLabel(alert.subject, alert.snippet)
@@ -905,8 +1199,12 @@ function buildReservationTemplateData(alert: GmailMessageAlert): {
   const reservationNoLabel = fallbackField(reservation?.reservationNo ?? reservation?.notificationNo, "不明")
   const historyLabel = fallbackField(reservation?.reservationHistory, "不明")
   const reservationCountLabel = formatReservationHistoryDisplay(historyLabel, isTabelogRoute)
+  const reservationHistoryParagraphs = Array.isArray(reservation?.reservationHistoryParagraphs)
+      && reservation.reservationHistoryParagraphs.length > 0
+    ? reservation.reservationHistoryParagraphs
+    : parseReservationHistoryParagraphs(reservationCountLabel)
 
-  const fields: Array<{ label: string; value: string }> = [
+  const fields: ReservationTemplateField[] = [
     { label: "経路", value: truncateForLine(routeLabel, 90) },
     { label: "店舗", value: truncateForLine(storeLabel, 90) },
     { label: "日時", value: truncateForLine(dateTimeLabel, 80) },
@@ -918,7 +1216,7 @@ function buildReservationTemplateData(alert: GmailMessageAlert): {
   ]
 
   if (vPointUsageLabel) {
-    fields.push({ label: "利用Vポイント", value: truncateForLine(vPointUsageLabel, 40) })
+    fields.push({ label: "Vポイント", value: truncateForLine(vPointUsageLabel, 40) })
   }
 
   fields.push(
@@ -928,11 +1226,19 @@ function buildReservationTemplateData(alert: GmailMessageAlert): {
   )
 
   if (isTabelogRoute) {
-    fields.push({ label: "予約回数", value: truncateForLinePreserveBreaks(reservationCountLabel, 320) })
+    fields.push({
+      label: "予約回数",
+      value: truncateForLinePreserveBreaks(reservationCountLabel, 320),
+      valueParagraphs: reservationHistoryParagraphs,
+    })
   } else {
     fields.push(
       { label: "予約番号", value: truncateForLine(reservationNoLabel, 60) },
-      { label: "履歴", value: truncateForLinePreserveBreaks(reservationCountLabel, 320) },
+      {
+        label: "履歴",
+        value: truncateForLinePreserveBreaks(reservationCountLabel, 320),
+        valueParagraphs: reservationHistoryParagraphs,
+      },
     )
   }
 
@@ -985,7 +1291,12 @@ function buildGmailReservationFlexBubble(
   total: number,
 ): Record<string, unknown> {
   const template = buildReservationTemplateData(alert)
-  const rows = template.fields.map((field) => buildGmailReservationFlexRow(field.label, field.value))
+  const rows = template.fields.map((field) => {
+    if (isReservationHistoryFlexField(field.label) && field.valueParagraphs && field.valueParagraphs.length > 0) {
+      return buildGmailReservationFlexParagraphRow(field.label, field.valueParagraphs)
+    }
+    return buildGmailReservationFlexRow(field.label, field.value)
+  })
 
   return {
     type: "bubble",
@@ -1019,6 +1330,116 @@ function buildGmailReservationFlexBubble(
       paddingAll: "14px",
       contents: rows,
     },
+  }
+}
+
+function isReservationHistoryFlexField(label: string): boolean {
+  const normalized = normalizeInlineText(label)
+  return normalized === "予約回数" || normalized === "履歴"
+}
+
+function parseReservationHistoryParagraphs(history: string): string[] {
+  const raw = String(history ?? "").trim()
+  if (!raw || raw === "不明") return []
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  if (lines.some((line) => line.startsWith("来店回数") || line.startsWith("キャンセル回数"))) {
+    return lines
+  }
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    const visitCombined = line.match(/^来店回数[　\s]*([0-9０-９]+)回$/)
+    if (visitCombined) {
+      out.push(formatReservationCountLine("来店回数", parseJapaneseCount(visitCombined[1])))
+      continue
+    }
+    const cancelCombined = line.match(/^キャンセル回数[　\s]*([0-9０-９]+)回$/)
+    if (cancelCombined) {
+      out.push(formatReservationCountLine("キャンセル回数", parseJapaneseCount(cancelCombined[1])))
+      continue
+    }
+    if (line === "来店回数" && i + 1 < lines.length) {
+      const next = lines[i + 1].match(/^([0-9０-９]+)回$/)
+      if (next) {
+        out.push(formatReservationCountLine("来店回数", parseJapaneseCount(next[1])))
+        i += 1
+        continue
+      }
+    }
+    if (line === "キャンセル回数" && i + 1 < lines.length) {
+      const next = lines[i + 1].match(/^([0-9０-９]+)回$/)
+      if (next) {
+        out.push(formatReservationCountLine("キャンセル回数", parseJapaneseCount(next[1])))
+        i += 1
+        continue
+      }
+    }
+    const visit = line.match(/^来店([0-9０-９]+)回$/)
+    if (visit) {
+      out.push(formatReservationCountLine("来店回数", parseJapaneseCount(visit[1])))
+      continue
+    }
+    const cancel = line.match(/^キャンセル([0-9０-９]+)回$/)
+    if (cancel) {
+      out.push(formatReservationCountLine("キャンセル回数", parseJapaneseCount(cancel[1])))
+      continue
+    }
+    if (/^過去の予約/.test(line)) {
+      if (!out.includes(RESERVATION_HISTORY_HEADING)) out.push(RESERVATION_HISTORY_HEADING)
+      continue
+    }
+    if (line.startsWith("・")) {
+      out.push(line.slice(1).trim())
+      continue
+    }
+    out.push(line)
+  }
+  return out
+}
+
+function buildGmailReservationFlexParagraphRow(
+  label: string,
+  paragraphs: string[],
+): Record<string, unknown> {
+  const safeLabel = normalizeInlineText(label) || "項目"
+  const lines = paragraphs
+    .map((line) => String(line ?? "").trim())
+    .filter((line) => line.length > 0)
+  if (lines.length === 0) {
+    return buildGmailReservationFlexRow(label, "不明")
+  }
+  return {
+    type: "box",
+    layout: "vertical",
+    spacing: "sm",
+    margin: "lg",
+    contents: [
+      {
+        type: "text",
+        text: `${safeLabel}：`,
+        size: "sm",
+        color: "#6b7280",
+        weight: "bold",
+        wrap: true,
+      },
+      {
+        type: "box",
+        layout: "vertical",
+        spacing: "md",
+        paddingStart: "4px",
+        contents: lines.map((line) => ({
+          type: "text",
+          text: line,
+          size: "sm",
+          color: isReservationHistorySectionHeading(line) ? "#6b7280" : "#111827",
+          weight: isReservationHistorySectionHeading(line) ? "bold" : "regular",
+          wrap: true,
+        })),
+      },
+    ],
   }
 }
 
@@ -1186,7 +1607,13 @@ function formatReservationHistoryDisplay(history: string, isTabelogRoute: boolea
   if (!raw || raw === "不明") {
     return isTabelogRoute ? "1回" : "不明"
   }
-  if (raw.includes("過去の予約日:") || raw.includes("来店")) {
+  if (
+    raw.includes("過去の予約") ||
+    raw.includes("来店回数") ||
+    raw.includes("キャンセル回数") ||
+    raw.includes("来店") ||
+    raw.includes("キャンセル")
+  ) {
     return raw
   }
   if (!isTabelogRoute) return raw

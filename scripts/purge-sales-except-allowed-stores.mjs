@@ -89,6 +89,51 @@ async function fetchAllKeys(table, column) {
   return keys
 }
 
+async function clearStoreSheetTabs(store) {
+  if (dryRun) return { store, sheets: '(dry-run)' }
+  const r = await fetch(`${HOCBN_URL}/functions/v1/receipt-sheets-sync-cron`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      clear_store_budget_tabs: true,
+      store_partition_key: store,
+      skip_push: true,
+    }),
+  })
+  const text = await r.text()
+  if (!r.ok) throw new Error(`clear sheets ${store} → ${r.status}: ${text}`)
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { raw: text }
+  }
+}
+
+async function deleteDummySeedData() {
+  if (dryRun) return { budgets: '(dry-run)', receipts: '(dry-run)' }
+  const rpc = async (fn) => {
+    const r = await fetch(`${HOCBN_URL}/rest/v1/rpc/${fn}`, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    })
+    const text = await r.text()
+    if (!r.ok) throw new Error(`rpc ${fn} → ${r.status}: ${text}`)
+    return JSON.parse(text)
+  }
+  return {
+    budgets: await rpc('delete_dummy_store_budgets'),
+    receipts: await rpc('delete_dummy_store_receipts'),
+  }
+}
+
 async function clearStoreSales(store) {
   const weatherKey = `weather:${store}`
   const receiptTable = `line_receipt__${store}`
@@ -140,14 +185,57 @@ async function clearStoreSales(store) {
   return summary
 }
 
+async function bulkDeleteNonKeepSalesRows() {
+  const keepIn = [...KEEP_STORES].map((k) => encodeURIComponent(canonicalKey(k) || k)).join(',')
+  const tables = [
+    'line_sales_month_budgets',
+    'line_sales_manual_month_gross',
+    'line_sales_month_store_closed_days',
+    'receipt_sheets_past_sales_export_snapshot',
+    'store_receipt_duplicate_pending',
+    'store_receipt_correction_pending',
+    'store_receipt_store_mismatch_pending',
+  ]
+  const out = {}
+  for (const table of tables) {
+    try {
+      out[table] = await del(`${table}?store_partition_key=not.in.(${keepIn})`)
+    } catch (e) {
+      out[table] = `err: ${e.message}`
+    }
+  }
+  // weather:{店舗} 行（保持店以外）
+  const budgets = await fetch(`${HOCBN_URL}/rest/v1/line_sales_month_budgets?select=store_partition_key`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  }).then((r) => r.json())
+  let weatherDeleted = 0
+  if (Array.isArray(budgets)) {
+    for (const row of budgets) {
+      const sk = String(row.store_partition_key ?? '')
+      if (!sk.startsWith('weather:')) continue
+      const store = sk.slice('weather:'.length)
+      if (shouldKeep(store)) continue
+      if (!dryRun) await del(`line_sales_month_budgets?store_partition_key=eq.${encodeURIComponent(sk)}`)
+      weatherDeleted += 1
+    }
+  }
+  out.weather_budget_rows = weatherDeleted
+  return out
+}
+
 async function main() {
   console.log('Keep stores:', [...KEEP_STORES])
   console.log('Mode:', dryRun ? 'DRY RUN' : 'DELETE')
 
+  if (!dryRun) {
+    console.log('\n--- bulk DELETE (any row whose store_partition_key is not in keep list) ---')
+    console.log(JSON.stringify(await bulkDeleteNonKeepSalesRows(), null, 2))
+  }
+
   const registryRows = []
   let offset = 0
   while (true) {
-    const path = `store_webhook_tables?select=store_partition_key,receipt_table,raw_table&limit=500&offset=${offset}`
+    const path = `store_webhook_tables?select=store_partition_key,receipt_table,webhook_raw_table&limit=500&offset=${offset}`
     const res = await fetch(`${HOCBN_URL}/rest/v1/${path}`, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     })
@@ -179,6 +267,46 @@ async function main() {
     const r = await clearStoreSales(store)
     console.log(JSON.stringify(r, null, 2))
     results.push(r)
+  }
+
+  console.log('\n--- delete_dummy_store_* (seed tag rows) ---')
+  try {
+    const dummy = await deleteDummySeedData()
+    console.log(JSON.stringify(dummy, null, 2))
+  } catch (e) {
+    console.warn('delete_dummy failed:', e.message)
+  }
+
+  console.log('\n--- clear Google Sheets (all tabs except kept stores) ---')
+  try {
+    const bulk = await fetch(`${HOCBN_URL}/functions/v1/receipt-sheets-sync-cron`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        clear_sheets_except_stores: true,
+        keep_store_partition_keys: [...KEEP_STORES],
+      }),
+    })
+    const bulkText = await bulk.text()
+    if (!bulk.ok) {
+      console.warn('clear_sheets_except_stores:', bulk.status, bulkText.slice(0, 500))
+      console.log('Falling back to per-store clear...')
+      for (const store of toPurge) {
+        try {
+          const sheets = await clearStoreSheetTabs(store)
+          console.log(`${store}:`, JSON.stringify(sheets))
+        } catch (e) {
+          console.warn(`${store} sheets:`, e.message)
+        }
+      }
+    } else {
+      console.log(JSON.stringify(JSON.parse(bulkText), null, 2))
+    }
+  } catch (e) {
+    console.warn('bulk sheet clear failed:', e.message)
   }
 
   // レガシー統合テーブル（店舗別テーブル移行前の行）

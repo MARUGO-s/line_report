@@ -8,6 +8,9 @@
 | ファイル | 内容 |
 |----------|------|
 | [README-PAGES.md](./README-PAGES.md) | GitHub Pages URL・Supabase 本番・デプロイ手順 |
+| [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md) | Gmail 予約 → LINE 通知・予約表・DB・障害対応 |
+| [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md) | ルーム自動連携・セキュリティ |
+| [ROOM-PERMISSION-DETAIL-GUIDE.md](./ROOM-PERMISSION-DETAIL-GUIDE.md) | ルーム権限・カレンダー／Gmail 設定 |
 | [LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md) | LINE レシート解析の全体像 |
 | [pages-config.js](./pages-config.js) | 店舗キー・Webhook URL・表示名の単一ソース |
 
@@ -19,10 +22,11 @@
 |------|------------|
 | LINE Webhook | 店名に加え **電話番号** でも同一店舗判定。OCR 店名の揺らぎ補正を強化 |
 | 管理画面 | Webhook 別設定の整理、**レシート照合電話**の編集 API・UI |
+| Gmail 予約 | **hocbn** に Gmail API 統一。LINE 通知に **過去の予約日最大5件** |
 | スプレッドシート | 双方向同期で **更新日時の新しい側を優先**。シート削除が DB に反映 |
 | 売上分析 | LINE 経由は **1 店舗固定表示**・メディア/予約表/売上シート非表示 |
 | セキュリティ | **`?t=` 廃止・`lt` ログイン・LINE セッション 3 日保持・`/auth/logout`・CSP** |
-| DB | `store_webhook_tables.receipt_phones` 列追加 |
+| DB | `store_webhook_tables.receipt_phones`、`reservation_customer_visit_history` など |
 | GAS | タブ先頭行に同期用ウォーターマーク、日次タブの更新日時 |
 
 **本番 Supabase プロジェクト:** `hocbnifuactbvmyjraxy`（hocbn）  
@@ -267,6 +271,25 @@ LINE アプリ内ブラウザは **`sessionStorage` が閉じるたびに消え�
 | Webhook別設定 | 店舗単位カード、連携ルーム `<details>` の開閉状態を自動更新で維持 |
 | 同期 | サーバー `background_sync` を優先（GAS 6 分制限回避） |
 | GAS メニュー | 「⚡ 全店舗を同期」「接続設定」のみに整理（不要メニュー削除） |
+| 接続 UI | 「同じアドレスなら自動ログイン」チェックを **非表示**（全画面） |
+| Gmail 確認 | `GET /gmail/account` を **hocbn** で呼ぶ（`pages-config.js`） |
+
+---
+
+## 6b. Gmail 予約 → LINE 通知（過去5件）
+
+**詳細: [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md)**
+
+| 項目 | 内容 |
+|------|------|
+| Edge Function | `gmail-alert-cron`（リポジトリに同梱、hocbn へデプロイ） |
+| 新テーブル | `reservation_customer_visit_history` |
+| RPC 戻り値 | `record_tabelog_reservation_visit` / `record_ikyu_reservation_visit` → `{ visit_count, recent_visits[] }` |
+| LINE 表示 | `来店N回` + `過去の予約日:` + 最大5行（今回メール分を除く） |
+| マイグレーション | `20260526220000_reservation_customer_visit_history.sql` |
+| シークレット移行 | `scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs`（jhpm → hocbn） |
+
+ルーム側: **カレンダー／予約** タブの「Gmail予約通知」が ON のルームのみ送信先。
 
 ---
 
@@ -294,7 +317,24 @@ HOCBN_SERVICE_ROLE_KEY=... node scripts/clear-store-budget-data.mjs marugoyotsuy
 node scripts/clear-store-budget-data.mjs marugoyotsuya --keep-receipts
 ```
 
-### 7.2 GAS のデプロイ
+### 7.2 Gmail シークレットを jhpm から hocbn へコピー
+
+```bash
+SECRET_BRIDGE_TOKEN=... node scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs
+```
+
+前提: jhpm に `secret-bridge` をデプロイし、`SECRET_BRIDGE_TOKEN` / `HOCBN_SERVICE_ROLE_KEY` を設定済みであること。
+
+### 7.3 指定店舗以外の売上データ削除（要注意）
+
+```bash
+HOCBN_SERVICE_ROLE_KEY=... node scripts/purge-sales-except-allowed-stores.mjs
+# 事前確認: --dry-run
+```
+
+保持店舗: `bistrocavacava`, `marugoS`, `marugoyotsuya`, `sushikoruri`
+
+### 7.4 GAS のデプロイ
 
 ```bash
 cd google-apps-script/receipt-sheets-pilot
@@ -323,7 +363,7 @@ git push origin main
 ```bash
 npx supabase link --project-ref hocbnifuactbvmyjraxy
 npx supabase db push   # 未適用マイグレーションがある場合
-npx supabase functions deploy admin-api line-webhook receipt-sheets-sync-cron \
+npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sheets-sync-cron \
   --project-ref hocbnifuactbvmyjraxy
 ```
 

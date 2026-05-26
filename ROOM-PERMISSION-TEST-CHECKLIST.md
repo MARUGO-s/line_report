@@ -10,7 +10,7 @@
 ---
 
 管理画面（`index.html`）の **ルーム単位機能設定** と **LINE ユーザー権限** の確認用です。  
-3 タブ化モーダル（レシート / カレンダー・予約 / その他）は **未コミットの `index.html` を Pages に反映したあと** に実施してください。
+3 タブ化モーダル（レシート / カレンダー・予約 / その他）は **GitHub Pages に最新 `index.html` が反映されたあと** に実施してください。
 
 **関連コード:** `index.html`（`roomConfigModal`, `userPermission*`, Webhook カード）  
 **API:** `admin-api` … `GET /state`, `PUT /settings/rooms`, `line_user_permissions` 系  
@@ -18,6 +18,7 @@
 
 - [`ROOM-LINKING-GUIDE.md`](./ROOM-LINKING-GUIDE.md) — 連携・自動連携・セキュリティ
 - [**`ROOM-PERMISSION-DETAIL-GUIDE.md`**](./ROOM-PERMISSION-DETAIL-GUIDE.md) — **細かい権限の意味**（優先順位、カレンダー一括/個別、連携ルーム数による画面、Bistro CAVACAVA 表示名 など）
+- [**`RESERVATION-GMAIL-GUIDE.md`**](./RESERVATION-GMAIL-GUIDE.md) — Gmail 予約 → LINE 通知、過去の予約日（最大5件）、hocbn デプロイ
 
 ---
 
@@ -329,7 +330,22 @@ Safari / Chrome が **ページ自体を取得できない** ときの表示で�
 
 ---
 
-## 10. 記録用テンプレート
+## 10. Gmail 予約 → LINE 通知（過去の予約日・最大5件）
+
+**仕様:** [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md)
+
+| # | 手順 | 期待結果 | ☐ |
+|---|------|----------|---|
+| 10.1 | 管理画面「Gmail連携先を確認」 | hocbn のメールアドレスが緑ピルで表示（取得失敗でない） | ☐ |
+| 10.2 | 対象ルームで **Gmail予約通知** を ON に保存 | `gmail-alert-cron` の送信先になる | ☐ |
+| 10.3 | 食べログ／一休の **新規予約メール** を Gmail に届ける（または cron 手動実行） | 対象ルームに LINE Flex／テキストが届く | ☐ |
+| 10.4 | 同一顧客で **2回目以降** の予約通知 | 「予約回数」または「履歴」に `来店N回` と `過去の予約日:` が **最大5行** ある | ☐ |
+| 10.5 | 日時表記 | `YYYY/MM/DD(曜) HH:mm` 形式（JST） | ☐ |
+| 10.6 | 接続画面 | 「同じアドレスなら自動ログイン」チェックが **表示されない** | ☐ |
+
+---
+
+## 11. 記録用テンプレート
 
 ```
 実施日:
@@ -360,4 +376,4 @@ permission / setup 各:
 
 ---
 
-*作成: ルーム権限 UI 改修用（`index.html` 3 タブ・permission モード）*
+*作成: ルーム権限 UI 改修用（`index.html` 3 タブ・permission モード）。Gmail 予約 LINE 通知は §10・[RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md)。*

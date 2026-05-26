@@ -30,6 +30,27 @@ export function formatSheetA1Range(sheetTabName: string, a1Suffix: string): stri
   return `'${escaped}'!${a1Suffix}`
 }
 
+export async function listSpreadsheetSheetTitles(spreadsheetId: string): Promise<string[]> {
+  const accessToken = await fetchGoogleServiceAccountAccessToken([SHEETS_SCOPE])
+  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties.title`
+  const response = await fetchWithTimeout(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Sheets metadata failed (${response.status}): ${text}`)
+  }
+  const json = await response.json()
+  const sheets = json?.sheets
+  if (!Array.isArray(sheets)) return []
+  const titles: string[] = []
+  for (const sheet of sheets) {
+    const title = String(sheet?.properties?.title ?? "").trim()
+    if (title) titles.push(title)
+  }
+  return titles
+}
+
 export async function getSpreadsheetValues(
   spreadsheetId: string,
   rangeA1: string,

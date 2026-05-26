@@ -1,6 +1,7 @@
 # ルーム権限・Webhook 設定 — 細かい仕様ガイド（運用・開発向け）
 
 > **先に読む:** [ルーム連携ガイド](./ROOM-LINKING-GUIDE.md)（自動連携・セキュリティ）  
+> **Gmail 予約通知:** [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md)（LINE への過去5件表示・DB）  
 > **動作確認:** [ROOM-PERMISSION-TEST-CHECKLIST.md](./ROOM-PERMISSION-TEST-CHECKLIST.md)
 
 管理画面 `index.html` の **権限の意味**・**画面の出し分け**・**保存の届き方**をまとめたドキュメントです。

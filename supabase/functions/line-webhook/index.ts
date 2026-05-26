@@ -32,6 +32,7 @@ import {
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
 import { analyzeLineImageWithGroqScout } from '../_shared/receipt_vision.ts'
 import { ensureRoomAutoLinkedToStore } from '../_shared/auto_link_room.ts'
+import { runWebhookDisplayNameSync } from '../_shared/line_display_names.ts'
 import {
   createServiceClient,
   type StoreRegistryRow,
@@ -362,6 +363,8 @@ Deno.serve(async (req) => {
   let textHandled = 0
   let roomsAutoLinked = 0
   const autoLinkedRoomIds = new Set<string>()
+  const displayNameUsers = new Map<string, { userId: string; roomId: string | null }>()
+  const displayNameRoomIds = new Set<string>()
   const errors: string[] = []
 
   for (const event of events) {
@@ -369,6 +372,17 @@ Deno.serve(async (req) => {
     if (rawOk) rawInserted += 1
 
     const eventRoomId = resolveRoomId(event)
+    const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
+    if (eventUserId.startsWith('U')) {
+      displayNameUsers.set(eventUserId, { userId: eventUserId, roomId: eventRoomId })
+    }
+    if (
+      eventRoomId
+      && (eventRoomId.startsWith('C') || eventRoomId.startsWith('R') || eventRoomId.startsWith('U'))
+    ) {
+      displayNameRoomIds.add(eventRoomId)
+    }
+
     if (rawOk && eventRoomId && !autoLinkedRoomIds.has(eventRoomId)) {
       autoLinkedRoomIds.add(eventRoomId)
       try {
@@ -427,6 +441,23 @@ Deno.serve(async (req) => {
         errors.push(msg.slice(0, 160))
       }
     }
+  }
+
+  const lineAccessToken = resolveChannelAccessToken(storeKey)
+  if (
+    lineAccessToken
+    && (displayNameUsers.size > 0 || displayNameRoomIds.size > 0)
+  ) {
+    const displayNamePromise = runWebhookDisplayNameSync(
+      supabase,
+      lineAccessToken,
+      displayNameUsers.values(),
+      displayNameRoomIds,
+    ).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('runWebhookDisplayNameSync failed:', msg)
+    })
+    EdgeRuntime.waitUntil(displayNamePromise)
   }
 
   return jsonResponse({

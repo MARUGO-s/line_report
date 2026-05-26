@@ -589,6 +589,41 @@
       gap: 14px;
     }
 
+    .webhook-view-tabs {
+      display: inline-flex;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .webhook-view-tabs .button.active {
+      border-color: rgba(143, 218, 255, 0.6);
+      background: rgba(70, 152, 196, 0.35);
+      color: #e6f7ff;
+    }
+
+    .webhook-store-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .webhook-store-list-item {
+      width: 100%;
+      text-align: left;
+      justify-content: flex-start;
+      border-radius: 12px;
+      min-height: 44px;
+      font-weight: 700;
+    }
+
+    .webhook-store-list-item .meta {
+      margin-left: 8px;
+      font-size: 0.72rem;
+      opacity: 0.9;
+    }
+
     .webhook-card {
       border: 1px solid rgba(155, 220, 255, 0.22);
       border-radius: 14px;
@@ -2978,6 +3013,12 @@
       box-shadow: 0 4px 16px rgba(22, 59, 92, 0.07);
     }
 
+    body[data-theme='light'] .webhook-view-tabs .button.active {
+      border-color: rgba(94, 157, 201, 0.45);
+      background: rgba(133, 197, 234, 0.28);
+      color: #153f5b;
+    }
+
     body[data-theme='light'] .webhook-card.unassigned {
       border-width: 1px;
       border-color: rgba(150, 160, 170, 0.4);
@@ -3290,7 +3331,12 @@
           移行期間の共通 URL（非推奨）: <code id="storeWebhookLegacyUrl">-</code>
           <button type="button" id="copyLegacyWebhookBtn" class="button" style="margin-left:8px;">コピー</button>
         </div>
+        <div class="webhook-view-tabs" role="tablist" aria-label="Webhookカード表示切替">
+          <button id="webhookViewTabCards" class="button active" type="button" role="tab" aria-selected="true">カード表示</button>
+          <button id="webhookViewTabNames" class="button" type="button" role="tab" aria-selected="false">店名一覧</button>
+        </div>
         <div id="webhookCardListBody" class="webhook-card-grid" style="margin-top:14px;"></div>
+        <div id="webhookStoreListBody" class="webhook-store-list" hidden></div>
         <div id="roomTablePane" class="room-table-hidden-wrap" aria-hidden="true">
           <table class="rooms-table">
             <tbody id="roomTableBody"></tbody>
@@ -3348,6 +3394,17 @@
       <div class="modal-actions">
         <button id="copyRoomIdBtn" class="button">コピー</button>
         <button id="closeRoomIdBtn" class="button primary">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="webhookStorePopupModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="webhookStorePopupTitle" style="max-width:min(980px,94vw);">
+      <h3 id="webhookStorePopupTitle" class="modal-title">Webhookカード詳細</h3>
+      <div id="webhookStorePopupMeta" class="modal-meta">店舗: -</div>
+      <div id="webhookStorePopupBody" class="webhook-card-grid" style="margin-top:10px;"></div>
+      <div class="modal-actions">
+        <button id="closeWebhookStorePopupBtn" class="button primary" type="button">閉じる</button>
       </div>
     </div>
   </div>
@@ -3750,6 +3807,14 @@
       roomTableBody: document.getElementById('roomTableBody'),
       webhookSettingsFilter: document.getElementById('webhookSettingsFilter'),
       webhookCardListBody: document.getElementById('webhookCardListBody'),
+      webhookStoreListBody: document.getElementById('webhookStoreListBody'),
+      webhookViewTabCards: document.getElementById('webhookViewTabCards'),
+      webhookViewTabNames: document.getElementById('webhookViewTabNames'),
+      webhookStorePopupModal: document.getElementById('webhookStorePopupModal'),
+      webhookStorePopupTitle: document.getElementById('webhookStorePopupTitle'),
+      webhookStorePopupMeta: document.getElementById('webhookStorePopupMeta'),
+      webhookStorePopupBody: document.getElementById('webhookStorePopupBody'),
+      closeWebhookStorePopupBtn: document.getElementById('closeWebhookStorePopupBtn'),
       deliveryLogTable: document.getElementById('deliveryLogTable'),
       logTableHead: document.getElementById('logTableHead'),
       logTableBody: document.getElementById('logTableBody'),
@@ -3926,6 +3991,8 @@
     let currentState = null;
     let receiptWebhookStatusByStore = {};
     let activeWebhookPermissionFilterStore = '';
+    let activeWebhookCardViewMode = 'cards';
+    let webhookCardEntryByStoreKey = new Map();
     /** @type {'webhook'} */
     let deliveryLogTab = 'webhook';
     let activeUserPermissionTab = 'names';
@@ -3937,6 +4004,7 @@
     let roomConfigPreviewSignature = '';
     const UNASSIGNED_WEBHOOK_KEY = '__unassigned__';
     const WEBHOOK_DEFAULT_CONFIG_KEY_PREFIX = 'line_webhook_default_config__';
+    const WEBHOOK_STORE_BULK_CALENDAR_GMAIL_KEY_PREFIX = 'line_webhook_bulk_calendar_gmail__';
     const GLOBAL_PERMISSION_CONFIG_KEY = 'line_global_permission_config';
     const GLOBAL_CONFIG_SCOPE_KEY = '__global__';
     const ROOM_CONFIG_PRIORITY_PREFIX = 'line_room_config_priority__';
@@ -4402,9 +4470,57 @@
         const rowId = String(row.line_user_id || '').trim();
         if (rowId !== targetId) continue;
         const displayName = String(row.display_name || '').trim();
-        if (displayName) return displayName;
+        if (displayName && displayName !== targetId) return displayName;
       }
       return '';
+    }
+
+    function getRoomSettingNameFromState(roomId) {
+      const rid = String(roomId || '').trim();
+      if (!rid || !currentState || !Array.isArray(currentState.room_settings)) return '';
+      const row = currentState.room_settings.find(function(setting) {
+        return String(setting && setting.room_id ? setting.room_id : '').trim() === rid;
+      });
+      return row ? String(row.room_name || '').trim() : '';
+    }
+
+    function buildWebhookRoomDisplayNameHint(roomId) {
+      const rid = String(roomId || '').trim();
+      if (rid.startsWith('U')) {
+        return '1:1トークです。ページ下部の「既存ユーザー取込」でユーザー名を取得できます（メンバー同期は使えません）。';
+      }
+      if (rid.startsWith('C') || rid.startsWith('R')) {
+        return '「ルーム名再取得」でグループ／トーク名を取得できます。メンバー同期は認証済み公式アカウントのみ（未認証では403になります）。';
+      }
+      return '「ルーム名再取得」で表示名を取得できる場合があります。';
+    }
+
+    function resolveWebhookRoomDisplayLabel(roomId, tr, overviewRow) {
+      const rid = String(roomId || '').trim();
+      if (!rid) return '(未設定)';
+
+      const fromInput = tr && tr.querySelector('.room-name')
+        ? String(tr.querySelector('.room-name').value || '').trim()
+        : '';
+      const fromOverview = overviewRow ? String(overviewRow.room_name || '').trim() : '';
+      const fromSettings = getRoomSettingNameFromState(rid);
+      const manualNames = [fromInput, fromSettings, fromOverview].filter(function(name) {
+        return !!name && name !== rid;
+      });
+      if (manualNames.length > 0) return manualNames[0];
+
+      if (rid.startsWith('U')) {
+        const userName = findUserPermissionDisplayNameByLineUserId(rid);
+        if (userName) return userName;
+        return '（ユーザー名未取得）';
+      }
+      if (rid.startsWith('C')) {
+        return '（グループ名未取得）';
+      }
+      if (rid.startsWith('R')) {
+        return '（トーク名未取得）';
+      }
+      return resolveRoomDisplayLabel(rid, fromOverview || fromSettings || fromInput);
     }
 
     function normalizeStoreLabelForMatch(value) {
@@ -4447,6 +4563,8 @@
         const userDisplayName = findUserPermissionDisplayNameByLineUserId(normalizedRoomId);
         if (userDisplayName) return userDisplayName;
       }
+      if (normalizedRoomId.startsWith('C') && normalizedRoomName) return normalizedRoomName;
+      if (normalizedRoomId.startsWith('R') && normalizedRoomName) return normalizedRoomName;
       return normalizedRoomName || normalizedRoomId || '(未設定)';
     }
 
@@ -4471,14 +4589,17 @@
 
     function getRoomLabelFromRow(tr, storeKey) {
       if (!tr) return '';
-      const nameInput = tr.querySelector('.room-name');
-      const roomName = nameInput ? String(nameInput.value || '').trim() : '';
       const roomId = String(tr.dataset.roomId || '').trim();
+      const overviewRow = getRoomOverviewById(roomId, currentState && currentState.room_overview);
+      const webhookLabel = resolveWebhookRoomDisplayLabel(roomId, tr, overviewRow);
       const key = storeKey || getStoreKeyFromRoomRow(tr) || activeWebhookConfigStoreKey;
       if (key && key !== GLOBAL_CONFIG_SCOPE_KEY && key !== UNASSIGNED_WEBHOOK_KEY) {
-        return resolveRoomDisplayLabelForWebhook(roomId, roomName, key);
+        if (webhookLabel && webhookLabel !== roomId && !/（.+未取得）$/.test(webhookLabel)) {
+          return webhookLabel;
+        }
+        return resolveRoomDisplayLabelForWebhook(roomId, webhookLabel, key);
       }
-      return resolveRoomDisplayLabel(roomId, roomName);
+      return webhookLabel || resolveRoomDisplayLabel(roomId, '');
     }
 
     function getActiveRoomConfigRoomId() {
@@ -5190,6 +5311,86 @@
       }, reminderSchedule);
     }
 
+    function webhookStoreBulkCalendarGmailStorageKey(storeKey) {
+      return WEBHOOK_STORE_BULK_CALENDAR_GMAIL_KEY_PREFIX + String(storeKey || '').trim();
+    }
+
+    function saveWebhookStoreBulkCalendarGmail(storeKey, fields) {
+      const key = String(storeKey || '').trim();
+      if (!key || key === UNASSIGNED_WEBHOOK_KEY || key === GLOBAL_CONFIG_SCOPE_KEY) return;
+      localStorage.setItem(
+        webhookStoreBulkCalendarGmailStorageKey(key),
+        JSON.stringify(pickCalendarGmailRawFields(fields || {})),
+      );
+    }
+
+    function loadWebhookStoreBulkCalendarGmail(storeKey) {
+      const key = String(storeKey || '').trim();
+      if (!key) return null;
+      try {
+        const raw = localStorage.getItem(webhookStoreBulkCalendarGmailStorageKey(key));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function calendarGmailFromRoomTableRow(tr) {
+      if (!tr || !tr.dataset) return {};
+      const gCal = parseDatasetBoolean(tr.dataset.roomCalendarAutoCreate, false);
+      return {
+        calendar_tomorrow_reminder_enabled: parseDatasetBoolean(tr.dataset.roomTomorrowReminder, false),
+        calendar_ai_auto_create_enabled: gCal,
+        calendar_silent_auto_register_enabled: gCal,
+        calendar_registration_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarRegistrationReply, false),
+        calendar_low_confidence_confirm_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarLowConfConfirm, false),
+        gmail_reservation_alert_enabled: parseDatasetBoolean(tr.dataset.roomGmailAlertEnabled, false),
+      };
+    }
+
+    function getBulkCalendarGmailSettingsForStore(storeKey) {
+      const key = String(storeKey || '').trim();
+      const globalBulk = getBulkCalendarGmailSettings();
+      if (!key || key === UNASSIGNED_WEBHOOK_KEY || key === GLOBAL_CONFIG_SCOPE_KEY) {
+        return globalBulk;
+      }
+      const saved = loadWebhookStoreBulkCalendarGmail(key);
+      if (saved) return Object.assign({}, globalBulk, saved);
+
+      const rows = findRoomRowsByStoreKey(key);
+      if (rows.length === 0) return globalBulk;
+
+      const bulkRows = rows.filter(function(tr) {
+        const raw = loadRoomCalendarGmailSettings(tr.dataset.roomId) || {};
+        return !raw.calendar_gmail_settings_override;
+      });
+      if (bulkRows.length === 0) return globalBulk;
+
+      const base = calendarGmailFromRoomTableRow(bulkRows[0]);
+      const signature = JSON.stringify(pickCalendarGmailRawFields(base));
+      const unanimous = bulkRows.every(function(tr) {
+        return JSON.stringify(pickCalendarGmailRawFields(calendarGmailFromRoomTableRow(tr))) === signature;
+      });
+      if (!unanimous) return globalBulk;
+      return Object.assign({}, globalBulk, base);
+    }
+
+    /** 店舗一括保存時にルームへ書き込むカレンダー／Gmail（DB 反映用） */
+    function resolveCalendarGmailForRoomSave(roomId, permissionMode) {
+      if (!permissionMode) return readCalendarGmailFromInlineModal();
+      const rid = String(roomId || '').trim();
+      const roomDraft = loadRoomCalendarGmailSettings(rid) || {};
+      if (roomDraft.calendar_gmail_settings_override) {
+        return resolveCalendarGmailSettingsForRoom(rid);
+      }
+      if (getLinkedRoomCountInModal() >= 2) {
+        return readCalendarGmailFromInlineModal();
+      }
+      return readCalendarGmailFromPermModal();
+    }
+
     function pickCalendarGmailRawFields(config) {
       if (!config || typeof config !== 'object') return {};
       const out = {};
@@ -5432,7 +5633,10 @@
     }
 
     function applyCalendarGmailToRoomConfigModal(roomId) {
-      const bulk = getBulkCalendarGmailSettings();
+      const storeKey = String(activeWebhookConfigStoreKey || '').trim();
+      const bulk = (storeKey && storeKey !== GLOBAL_CONFIG_SCOPE_KEY && storeKey !== UNASSIGNED_WEBHOOK_KEY)
+        ? getBulkCalendarGmailSettingsForStore(storeKey)
+        : getBulkCalendarGmailSettings();
       const raw = loadRoomCalendarGmailSettings(roomId) || {};
       const resolved = resolveCalendarGmailSettingsForRoom(roomId);
       if (dom.roomConfigCalendarGmailOverride) {
@@ -8259,13 +8463,7 @@
       const opts = options || {};
       const roomId = String(tr.dataset.roomId || '').trim();
       const overviewRow = getRoomOverviewById(roomId, overview);
-      const nameInput = tr.querySelector('.room-name');
-      const roomName = resolveRoomDisplayLabel(
-        roomId,
-        nameInput
-          ? String(nameInput.value || '').trim()
-          : String((overviewRow && overviewRow.room_name) || '').trim(),
-      );
+      const roomName = resolveWebhookRoomDisplayLabel(roomId, tr, overviewRow);
       const pending = overviewRow ? Number(overviewRow.pending_messages || 0) : 0;
       const lastPost = overviewRow ? formatDate(overviewRow.last_message_at) : '-';
       const hoursInput = tr.querySelector('.room-hours');
@@ -8288,7 +8486,10 @@
         '<div class="webhook-room-item-title">' +
         (isLinkedRoom ? buildWebhookRoomLinkBadge(true) : '') +
         '<span class="webhook-room-priority-badge" data-priority="' + priority + '">順位:' + escapeHtml(roomConfigPriorityLabel(priority)) + '</span>' +
-        escapeHtml(roomName || roomId || '(未設定)') + '</div>' +
+        escapeHtml(roomName || '(未設定)') + '</div>' +
+        (roomName && /（.+未取得）$/.test(roomName)
+          ? '<div class="webhook-room-item-meta webhook-room-item-hint">' + escapeHtml(buildWebhookRoomDisplayNameHint(roomId)) + '</div>'
+          : '') +
         '<div class="webhook-room-item-meta">最終投稿: ' + escapeHtml(lastPost) + ' ／ 未処理: ' + pending + '件</div>' +
         '<div class="webhook-room-item-meta">配信時刻: ' + escapeHtml(deliveryHours || '空欄=全体設定') +
         ' ／ 最終回集計: ' + escapeHtml(roomSummaryModeDisplayLabel(summaryMode)) + '</div>' +
@@ -8636,7 +8837,7 @@
       }
     }
 
-    function renderWebhookCards(overview, settingsList, extraOptions) {
+    function buildWebhookCardEntries(overview, settingsList, extraOptions) {
       const extra = extraOptions != null
         ? extraOptions
         : (currentState && currentState.receipt_store_options) || [];
@@ -8644,31 +8845,82 @@
       if (dom.storeWebhookLegacyUrl) {
         dom.storeWebhookLegacyUrl.textContent = LINE_REPORT_PAGES.lineWebhookLegacyUrl();
       }
-      if (!dom.webhookCardListBody) return;
       const filter = String(dom.webhookSettingsFilter && dom.webhookSettingsFilter.value || '').trim();
       const stores = LINE_REPORT_PAGES.listStores(extra);
-      const cards = [];
+      const entries = [];
       if (!filter) {
-        cards.push(buildGlobalPermissionCardHtml());
+        entries.push({
+          storeKey: GLOBAL_CONFIG_SCOPE_KEY,
+          label: '全体権限設定',
+          html: buildGlobalPermissionCardHtml(),
+          meta: '一括',
+        });
       }
       if (!filter || filter === UNASSIGNED_WEBHOOK_KEY) {
         const unassigned = buildUnassignedWebhookCardHtml(overview, stores);
-        if (unassigned) cards.push(unassigned);
+        if (unassigned) {
+          entries.push({
+            storeKey: UNASSIGNED_WEBHOOK_KEY,
+            label: '未割当ルーム',
+            html: unassigned,
+            meta: '要確認',
+          });
+        }
       }
       stores.forEach(function(store) {
         if (filter && filter !== store.store_key) return;
-        cards.push(buildStoreWebhookCardHtml(
-          store,
-          overview,
-          stores,
-          currentState && currentState.user_permissions ? currentState.user_permissions : [],
-        ));
+        const status = getStoreWebhookStatus(store.store_key);
+        const isActive = isStoreWebhookCommunicationActive(store.store_key);
+        entries.push({
+          storeKey: String(store.store_key || '').trim(),
+          label: store.store_name || store.store_key,
+          html: buildStoreWebhookCardHtml(
+            store,
+            overview,
+            stores,
+            currentState && currentState.user_permissions ? currentState.user_permissions : [],
+          ),
+          meta: isActive
+            ? ('通信中' + (status && status.last_webhook_received_at ? (' / 最終 ' + formatDate(status.last_webhook_received_at)) : ''))
+            : '未登録',
+        });
       });
+      return entries;
+    }
+
+    function renderWebhookStoreList(entries) {
+      if (!dom.webhookStoreListBody) return;
+      const list = Array.isArray(entries) ? entries : [];
+      if (list.length === 0) {
+        dom.webhookStoreListBody.innerHTML = '<div class="empty">表示対象の Webhook がありません。</div>';
+        return;
+      }
+      dom.webhookStoreListBody.innerHTML = list.map(function(entry) {
+        return (
+          '<button type="button" class="button webhook-store-list-item" data-store-key="' + escapeHtml(entry.storeKey || '') + '">' +
+          '<span>' + escapeHtml(entry.label || entry.storeKey || '-') + '</span>' +
+          (entry.meta ? '<span class="meta">' + escapeHtml(entry.meta) + '</span>' : '') +
+          '</button>'
+        );
+      }).join('');
+    }
+
+    function renderWebhookCards(overview, settingsList, extraOptions) {
+      if (!dom.webhookCardListBody) return;
+      const entries = buildWebhookCardEntries(overview, settingsList, extraOptions);
+      webhookCardEntryByStoreKey = new Map(
+        entries.map(function(entry) { return [String(entry.storeKey || ''), entry]; }),
+      );
       const detailsState = captureWebhookCardDetailsState();
       const phoneDrafts = captureWebhookCardPhoneDrafts();
-      dom.webhookCardListBody.innerHTML = cards.length
-        ? cards.join('')
-        : '<div class="empty">表示対象の Webhook がありません。</div>';
+      if (activeWebhookCardViewMode === 'cards') {
+        dom.webhookCardListBody.innerHTML = entries.length
+          ? entries.map(function(entry) { return entry.html; }).join('')
+          : '<div class="empty">表示対象の Webhook がありません。</div>';
+      } else {
+        dom.webhookCardListBody.innerHTML = '';
+      }
+      renderWebhookStoreList(entries);
       restoreWebhookCardDetailsState(detailsState);
       restoreWebhookCardPhoneDrafts(phoneDrafts);
     }
@@ -8676,6 +8928,53 @@
     function renderWebhookSettingsSection(overview, settingsList, extraOptions) {
       renderRoomTableRows(overview, settingsList);
       renderWebhookCards(overview, settingsList, extraOptions);
+    }
+
+    function closeWebhookStorePopup() {
+      if (dom.webhookStorePopupBody) dom.webhookStorePopupBody.innerHTML = '';
+      if (!dom.webhookStorePopupModal) return;
+      dom.webhookStorePopupModal.classList.remove('open');
+      dom.webhookStorePopupModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function openWebhookStorePopup(storeKey) {
+      const key = String(storeKey || '').trim();
+      if (!key || !dom.webhookStorePopupModal || !dom.webhookStorePopupBody) return;
+      const entry = webhookCardEntryByStoreKey.get(key);
+      if (!entry) return;
+      if (dom.webhookStorePopupTitle) {
+        dom.webhookStorePopupTitle.textContent = (entry.label || 'Webhookカード詳細') + '（詳細）';
+      }
+      if (dom.webhookStorePopupMeta) {
+        dom.webhookStorePopupMeta.textContent = '店舗: ' + (entry.label || key);
+      }
+      dom.webhookStorePopupBody.innerHTML = entry.html || '<div class="empty">表示できるカードがありません。</div>';
+      dom.webhookStorePopupModal.classList.add('open');
+      dom.webhookStorePopupModal.setAttribute('aria-hidden', 'false');
+    }
+
+    function setWebhookCardViewMode(nextMode) {
+      const mode = nextMode === 'names' ? 'names' : 'cards';
+      activeWebhookCardViewMode = mode;
+      if (dom.webhookViewTabCards) {
+        const isCards = mode === 'cards';
+        dom.webhookViewTabCards.classList.toggle('active', isCards);
+        dom.webhookViewTabCards.setAttribute('aria-selected', isCards ? 'true' : 'false');
+      }
+      if (dom.webhookViewTabNames) {
+        const isNames = mode === 'names';
+        dom.webhookViewTabNames.classList.toggle('active', isNames);
+        dom.webhookViewTabNames.setAttribute('aria-selected', isNames ? 'true' : 'false');
+      }
+      if (dom.webhookCardListBody) dom.webhookCardListBody.hidden = mode !== 'cards';
+      if (dom.webhookStoreListBody) dom.webhookStoreListBody.hidden = mode !== 'names';
+      if (mode !== 'names') closeWebhookStorePopup();
+      if (!currentState) return;
+      renderWebhookCards(
+        currentState.room_overview || [],
+        currentState.room_settings || [],
+        currentState.receipt_store_options || [],
+      );
     }
 
     function renderRoomTableRows(overview, settingsList) {
@@ -8957,8 +9256,7 @@
 
     function buildRoomConfigPayloadFromModal() {
       const permissionMode = !!(dom.roomConfigModalCard && dom.roomConfigModalCard.dataset.webhookMode === 'permission');
-      let nextConfig = stripCalendarGmailFields(stripReceiptScheduleFields(buildRoomConfigDraftFromModal()));
-      nextConfig = Object.assign(nextConfig, readCalendarGmailFromInlineModal());
+      const nextConfig = stripCalendarGmailFields(stripReceiptScheduleFields(buildRoomConfigDraftFromModal()));
       return { nextConfig: nextConfig, permissionMode: permissionMode };
     }
 
@@ -8997,7 +9295,9 @@
         const rowStoreKey = getStoreKeyFromRoomRow(tr);
         const roomConfig = Object.assign({}, nextConfig, {
           receipt_report_store_partition_key: rowStoreKey || '',
-        }, readCalendarGmailFromInlineModal());
+        }, built.permissionMode
+          ? resolveCalendarGmailForRoomSave(roomId, true)
+          : readCalendarGmailFromInlineModal());
         saveRoomReceiptSchedule(roomId, scheduleDraft);
         if (built.permissionMode) {
           localStorage.removeItem(roomCalendarGmailSettingsStorageKey(roomId));
@@ -9047,7 +9347,7 @@
       let nextConfig = built.nextConfig;
       nextConfig.receipt_report_store_partition_key = storeKey;
       const roomConfig = Object.assign({}, nextConfig, built.permissionMode
-        ? resolveCalendarGmailSettingsForRoom(roomId)
+        ? resolveCalendarGmailForRoomSave(roomId, true)
         : readCalendarGmailFromInlineModal());
       applyRoomConfigStateToRow(tr, roomConfig);
       await saveRoomRow(tr, { overrideConfig: roomConfig, reload: false });
@@ -9093,6 +9393,12 @@
       let nextConfig = built.nextConfig;
       nextConfig.receipt_report_store_partition_key = storeKey;
       saveWebhookDefaultConfig(storeKey, nextConfig);
+      if (built.permissionMode) {
+        saveWebhookStoreBulkCalendarGmail(
+          storeKey,
+          getLinkedRoomCountInModal() >= 2 ? readCalendarGmailFromInlineModal() : readCalendarGmailFromPermModal(),
+        );
+      }
       const linkedRows = findRoomRowsByStoreKey(storeKey);
       let skipped = 0;
       for (let i = 0; i < linkedRows.length; i++) {
@@ -9102,7 +9408,7 @@
           continue;
         }
         const roomConfig = Object.assign({}, nextConfig, built.permissionMode
-          ? resolveCalendarGmailSettingsForRoom(roomId)
+          ? resolveCalendarGmailForRoomSave(roomId, true)
           : readCalendarGmailFromInlineModal());
         applyRoomConfigStateToRow(linkedRows[i], roomConfig);
         await saveRoomRow(linkedRows[i], { overrideConfig: roomConfig, reload: false });
@@ -9665,170 +9971,210 @@
         );
       });
     }
+    if (dom.webhookViewTabCards) {
+      dom.webhookViewTabCards.addEventListener('click', function() {
+        setWebhookCardViewMode('cards');
+      });
+    }
+    if (dom.webhookViewTabNames) {
+      dom.webhookViewTabNames.addEventListener('click', function() {
+        setWebhookCardViewMode('names');
+      });
+    }
+    if (dom.closeWebhookStorePopupBtn) {
+      dom.closeWebhookStorePopupBtn.addEventListener('click', closeWebhookStorePopup);
+    }
+    if (dom.webhookStorePopupModal) {
+      dom.webhookStorePopupModal.addEventListener('click', function(event) {
+        if (event.target === dom.webhookStorePopupModal) closeWebhookStorePopup();
+      });
+    }
 
-    if (dom.webhookCardListBody) {
-      dom.webhookCardListBody.addEventListener('click', async function(event) {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) return;
-        try {
-          if (target.classList.contains('webhook-config-open')) {
-            openWebhookConfigModal(String(target.getAttribute('data-store-key') || '').trim(), { permissionMode: false });
-            return;
-          }
-          if (target.classList.contains('webhook-permission-open')) {
-            openWebhookConfigModal(String(target.getAttribute('data-store-key') || '').trim(), { permissionMode: true });
-            return;
-          }
-          if (target.classList.contains('global-permission-open')) {
-            openWebhookConfigModal(GLOBAL_CONFIG_SCOPE_KEY, { permissionMode: true });
-            return;
-          }
-          if (target.classList.contains('global-link-detected-btn')) {
-            await linkAllDetectedRoomsGlobal();
-            return;
-          }
-          if (target.classList.contains('webhook-room-individual-config')) {
-            const roomId = String(target.getAttribute('data-room-id') || '').trim();
-            const tr = findRoomTableRowById(roomId);
-            if (!tr) {
-              alert('対象ルームの行が見つかりません。再読込してください。');
-              return;
-            }
-            const storeKey = getStoreKeyFromRoomRow(tr);
-            if (!storeKey) {
-              alert('Webhook 未割当です。先に店舗を割り当ててください。');
-              return;
-            }
-            openWebhookConfigModal(storeKey, {
-              permissionMode: true,
-              roomRow: tr,
-              individualSave: true,
-            });
-            return;
-          }
-          if (target.classList.contains('webhook-perm-users-manage')) {
-            openUserPermissionsForStore(String(target.getAttribute('data-store-name') || '').trim());
-            return;
-          }
-          if (target.classList.contains('webhook-perm-filter-clear')) {
-            activeWebhookPermissionFilterStore = '';
-            renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
-            return;
-          }
-          if (target.classList.contains('webhook-copy-url')) {
-            await copyTextToClipboard(target.getAttribute('data-url') || '', 'Webhook URL をコピーしました。');
-            return;
-          }
-          if (target.classList.contains('webhook-receipt-phones-edit')) {
-            const storeKey = String(target.getAttribute('data-store-key') || '').trim();
-            const card = target.closest('.webhook-card');
-            const details = card ? card.querySelector('.webhook-receipt-phones-details') : null;
-            if (details instanceof HTMLDetailsElement) details.open = true;
-            const input = card
-              ? card.querySelector('.webhook-receipt-phones-input[data-store-key="' + storeKey + '"]')
-              : null;
-            if (input instanceof HTMLTextAreaElement) {
-              input.focus();
-              const pos = input.value.length;
-              input.setSelectionRange(pos, pos);
-            }
-            return;
-          }
-          if (target.classList.contains('webhook-receipt-phones-save')) {
-            const storeKey = String(target.getAttribute('data-store-key') || '').trim();
-            const card = target.closest('.webhook-card');
-            const input = card
-              ? card.querySelector('.webhook-receipt-phones-input[data-store-key="' + storeKey + '"]')
-              : null;
-            const raw = input instanceof HTMLTextAreaElement ? input.value : '';
-            const result = await saveStoreReceiptPhones(storeKey, raw);
-            const count = Array.isArray(result.receipt_phones) ? result.receipt_phones.length : 0;
-            alert('レシート照合電話を保存しました（' + count + ' 件）。次のレシート画像から反映されます。');
-            if (currentState) {
-              renderWebhookSettingsSection(
-                currentState.room_overview || [],
-                currentState.room_settings || [],
-                currentState.receipt_store_options || [],
-              );
-            }
-            return;
-          }
-          if (target.classList.contains('webhook-link-detected-btn')) {
-            const storeKey = String(target.getAttribute('data-store-key') || '').trim();
-            await linkDetectedRoomsForStore(storeKey);
-            return;
-          }
-          if (target.classList.contains('webhook-add-room-btn')) {
-            const storeKey = String(target.getAttribute('data-store-key') || '').trim();
-            const card = target.closest('.webhook-card');
-            const roomIdInput = card ? card.querySelector('.webhook-new-room-id[data-store-key="' + storeKey + '"]') : null;
-            const roomNameInput = card ? card.querySelector('.webhook-new-room-name[data-store-key="' + storeKey + '"]') : null;
-            const hoursInput = card ? card.querySelector('.webhook-new-room-hours[data-store-key="' + storeKey + '"]') : null;
-            await addRoomToWebhook(
-              storeKey,
-              roomIdInput ? roomIdInput.value : '',
-              roomNameInput ? roomNameInput.value : '',
-              hoursInput ? hoursInput.value : '',
-            );
-            if (roomIdInput) roomIdInput.value = '';
-            if (roomNameInput) roomNameInput.value = '';
-            if (hoursInput) hoursInput.value = '';
-            alert('ルームを Webhook に追加しました。');
-            return;
-          }
-          const roomId = String(
-            target.getAttribute('data-room-id')
-            || (target.closest('[data-room-id]') && target.closest('[data-room-id]').getAttribute('data-room-id'))
-            || '',
-          ).trim();
+    async function handleWebhookCardContainerClick(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      try {
+        if (target.classList.contains('webhook-config-open')) {
+          closeWebhookStorePopup();
+          openWebhookConfigModal(String(target.getAttribute('data-store-key') || '').trim(), { permissionMode: false });
+          return;
+        }
+        if (target.classList.contains('webhook-permission-open')) {
+          closeWebhookStorePopup();
+          openWebhookConfigModal(String(target.getAttribute('data-store-key') || '').trim(), { permissionMode: true });
+          return;
+        }
+        if (target.classList.contains('global-permission-open')) {
+          closeWebhookStorePopup();
+          openWebhookConfigModal(GLOBAL_CONFIG_SCOPE_KEY, { permissionMode: true });
+          return;
+        }
+        if (target.classList.contains('global-link-detected-btn')) {
+          await linkAllDetectedRoomsGlobal();
+          return;
+        }
+        if (target.classList.contains('webhook-room-individual-config')) {
+          closeWebhookStorePopup();
+          const roomId = String(target.getAttribute('data-room-id') || '').trim();
           const tr = findRoomTableRowById(roomId);
           if (!tr) {
-            if (roomId) alert('対象ルームの行が見つかりません。再読込してください。');
+            alert('対象ルームの行が見つかりません。再読込してください。');
             return;
           }
-          if (target.classList.contains('webhook-room-reset')) {
-            await resetRoomRow(tr);
-            alert('ルーム設定を削除し、店舗・全体の設定を継承するよう戻しました（順位: 店舗）。');
-          } else if (target.classList.contains('webhook-room-delete')) {
-            await deleteRoomRow(tr);
-            alert('ルームをこのサイトの一覧から外しました。（旧サイト・保存データはそのままです）');
-          } else if (target.classList.contains('webhook-room-show-id')) {
-            openRoomIdModal(tr);
-          } else if (target.classList.contains('webhook-room-sync')) {
-            if (!roomId.startsWith('C') && !roomId.startsWith('R')) {
-              alert('グループ（C…）または複数人トーク（R…）のルームのみ実行できます。');
-              return;
-            }
-            if (!window.confirm('LINE のメンバー一覧を取得し、ユーザー権限一覧に反映します。よろしいですか？')) {
-              return;
-            }
-            const stats = await syncChatMembersFromRoom(roomId);
-            await safeLoadState();
-            alert(
-              'メンバー同期が完了しました。'
-              + '\nメンバー数: ' + Number(stats && stats.member_ids || 0)
-              + '\n新規行: ' + Number(stats && stats.inserted || 0)
-              + '\n既存更新: ' + Number(stats && stats.updated || 0)
+          const storeKey = getStoreKeyFromRoomRow(tr);
+          if (!storeKey) {
+            alert('Webhook 未割当です。先に店舗を割り当ててください。');
+            return;
+          }
+          openWebhookConfigModal(storeKey, {
+            permissionMode: true,
+            roomRow: tr,
+            individualSave: true,
+          });
+          return;
+        }
+        if (target.classList.contains('webhook-perm-users-manage')) {
+          closeWebhookStorePopup();
+          openUserPermissionsForStore(String(target.getAttribute('data-store-name') || '').trim());
+          return;
+        }
+        if (target.classList.contains('webhook-perm-filter-clear')) {
+          closeWebhookStorePopup();
+          activeWebhookPermissionFilterStore = '';
+          renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
+          return;
+        }
+        if (target.classList.contains('webhook-copy-url')) {
+          await copyTextToClipboard(target.getAttribute('data-url') || '', 'Webhook URL をコピーしました。');
+          return;
+        }
+        if (target.classList.contains('webhook-receipt-phones-edit')) {
+          const storeKey = String(target.getAttribute('data-store-key') || '').trim();
+          const card = target.closest('.webhook-card');
+          const details = card ? card.querySelector('.webhook-receipt-phones-details') : null;
+          if (details instanceof HTMLDetailsElement) details.open = true;
+          const input = card
+            ? card.querySelector('.webhook-receipt-phones-input[data-store-key="' + storeKey + '"]')
+            : null;
+          if (input instanceof HTMLTextAreaElement) {
+            input.focus();
+            const pos = input.value.length;
+            input.setSelectionRange(pos, pos);
+          }
+          return;
+        }
+        if (target.classList.contains('webhook-receipt-phones-save')) {
+          const storeKey = String(target.getAttribute('data-store-key') || '').trim();
+          const card = target.closest('.webhook-card');
+          const input = card
+            ? card.querySelector('.webhook-receipt-phones-input[data-store-key="' + storeKey + '"]')
+            : null;
+          const raw = input instanceof HTMLTextAreaElement ? input.value : '';
+          const result = await saveStoreReceiptPhones(storeKey, raw);
+          const count = Array.isArray(result.receipt_phones) ? result.receipt_phones.length : 0;
+          alert('レシート照合電話を保存しました（' + count + ' 件）。次のレシート画像から反映されます。');
+          if (currentState) {
+            renderWebhookSettingsSection(
+              currentState.room_overview || [],
+              currentState.room_settings || [],
+              currentState.receipt_store_options || [],
             );
           }
-        } catch (e) {
-          alert(e.message || String(e));
+          return;
         }
-      });
+        if (target.classList.contains('webhook-link-detected-btn')) {
+          const storeKey = String(target.getAttribute('data-store-key') || '').trim();
+          await linkDetectedRoomsForStore(storeKey);
+          return;
+        }
+        if (target.classList.contains('webhook-add-room-btn')) {
+          const storeKey = String(target.getAttribute('data-store-key') || '').trim();
+          const card = target.closest('.webhook-card');
+          const roomIdInput = card ? card.querySelector('.webhook-new-room-id[data-store-key="' + storeKey + '"]') : null;
+          const roomNameInput = card ? card.querySelector('.webhook-new-room-name[data-store-key="' + storeKey + '"]') : null;
+          const hoursInput = card ? card.querySelector('.webhook-new-room-hours[data-store-key="' + storeKey + '"]') : null;
+          await addRoomToWebhook(
+            storeKey,
+            roomIdInput ? roomIdInput.value : '',
+            roomNameInput ? roomNameInput.value : '',
+            hoursInput ? hoursInput.value : '',
+          );
+          if (roomIdInput) roomIdInput.value = '';
+          if (roomNameInput) roomNameInput.value = '';
+          if (hoursInput) hoursInput.value = '';
+          alert('ルームを Webhook に追加しました。');
+          return;
+        }
+        const roomId = String(
+          target.getAttribute('data-room-id')
+          || (target.closest('[data-room-id]') && target.closest('[data-room-id]').getAttribute('data-room-id'))
+          || '',
+        ).trim();
+        const tr = findRoomTableRowById(roomId);
+        if (!tr) {
+          if (roomId) alert('対象ルームの行が見つかりません。再読込してください。');
+          return;
+        }
+        if (target.classList.contains('webhook-room-reset')) {
+          await resetRoomRow(tr);
+          alert('ルーム設定を削除し、店舗・全体の設定を継承するよう戻しました（順位: 店舗）。');
+        } else if (target.classList.contains('webhook-room-delete')) {
+          await deleteRoomRow(tr);
+          alert('ルームをこのサイトの一覧から外しました。（旧サイト・保存データはそのままです）');
+        } else if (target.classList.contains('webhook-room-show-id')) {
+          openRoomIdModal(tr);
+        } else if (target.classList.contains('webhook-room-sync')) {
+          if (!roomId.startsWith('C') && !roomId.startsWith('R')) {
+            alert('グループ（C…）または複数人トーク（R…）のルームのみ実行できます。');
+            return;
+          }
+          if (!window.confirm('LINE のメンバー一覧を取得し、ユーザー権限一覧に反映します。よろしいですか？')) {
+            return;
+          }
+          const stats = await syncChatMembersFromRoom(roomId);
+          await safeLoadState();
+          alert(
+            'メンバー同期が完了しました。'
+            + '\nメンバー数: ' + Number(stats && stats.member_ids || 0)
+            + '\n新規行: ' + Number(stats && stats.inserted || 0)
+            + '\n既存更新: ' + Number(stats && stats.updated || 0)
+          );
+        }
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    }
 
-      dom.webhookCardListBody.addEventListener('change', async function(event) {
+    async function handleWebhookCardContainerChange(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.classList.contains('webhook-room-assign')) return;
+      const roomId = String(target.getAttribute('data-room-id') || '').trim();
+      const storeKey = target instanceof HTMLSelectElement ? String(target.value || '').trim() : '';
+      if (!roomId) return;
+      try {
+        await assignRoomToWebhookStore(roomId, storeKey);
+        alert(storeKey ? 'Webhook を割り当てました。' : 'Webhook 割当を解除しました。');
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    }
+
+    if (dom.webhookCardListBody) {
+      dom.webhookCardListBody.addEventListener('click', handleWebhookCardContainerClick);
+      dom.webhookCardListBody.addEventListener('change', handleWebhookCardContainerChange);
+    }
+    if (dom.webhookStorePopupBody) {
+      dom.webhookStorePopupBody.addEventListener('click', handleWebhookCardContainerClick);
+      dom.webhookStorePopupBody.addEventListener('change', handleWebhookCardContainerChange);
+    }
+    if (dom.webhookStoreListBody) {
+      dom.webhookStoreListBody.addEventListener('click', function(event) {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
-        if (!target.classList.contains('webhook-room-assign')) return;
-        const roomId = String(target.getAttribute('data-room-id') || '').trim();
-        const storeKey = target instanceof HTMLSelectElement ? String(target.value || '').trim() : '';
-        if (!roomId) return;
-        try {
-          await assignRoomToWebhookStore(roomId, storeKey);
-          alert(storeKey ? 'Webhook を割り当てました。' : 'Webhook 割当を解除しました。');
-        } catch (e) {
-          alert(e.message || String(e));
-        }
+        const btn = target.closest('.webhook-store-list-item');
+        if (!(btn instanceof HTMLElement)) return;
+        openWebhookStorePopup(String(btn.getAttribute('data-store-key') || '').trim());
       });
     }
 
@@ -10374,10 +10720,28 @@
     });
 
     dom.saveRoomConfigBtn.addEventListener('click', async function() {
+      let overlayToken = 0;
+      const saveBtn = dom.saveRoomConfigBtn;
+      const prevLabel = saveBtn ? saveBtn.textContent : '';
       try {
+        overlayToken = showSyncOverlay({
+          title: '保存中',
+          message: '設定を保存しています…',
+          step: '',
+        });
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.textContent = '保存中…';
+        }
         await saveRoomConfigModal();
       } catch (e) {
+        if (overlayToken) hideSyncOverlay(overlayToken);
         alert(e.message || String(e));
+      } finally {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = prevLabel || '保存';
+        }
       }
     });
 
@@ -10499,6 +10863,9 @@
       if (dom.userPermissionEditModal && event.key === 'Escape' && dom.userPermissionEditModal.classList.contains('open')) {
         closeUserPermissionEditModal();
       }
+      if (dom.webhookStorePopupModal && event.key === 'Escape' && dom.webhookStorePopupModal.classList.contains('open')) {
+        closeWebhookStorePopup();
+      }
     });
 
     (async function init() {
@@ -10550,6 +10917,7 @@
       });
 
       setUserPermissionTab('names');
+      setWebhookCardViewMode('cards');
       window.setTimeout(function() {
         if (document.activeElement === dom.projectUrlInput) {
           dom.projectUrlInput.blur();

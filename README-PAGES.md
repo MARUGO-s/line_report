@@ -9,6 +9,9 @@
 >
 > ### [ルーム権限・画面の細かい仕様](./ROOM-PERMISSION-DETAIL-GUIDE.md)
 > 優先順位（全体／店舗／個別）、カレンダー一括とルーム個別（連携2件以上）、**Bistro CAVACAVA** 表示名 など。
+>
+> ### [Gmail 予約 → LINE 通知・予約表](./RESERVATION-GMAIL-GUIDE.md)
+> Gmail 連携（hocbn）、過去の予約日 **最大5件** の LINE 表示、DB テーブル、デプロイ・障害対応。
 
 | 画面 | URL |
 |------|-----|
@@ -28,9 +31,9 @@
   - 設定の単一ソース: `pages-config.js`
   - Google スプレッドシート（売上シート）: **BISTRO CAVA CAVA のみ**（`RECEIPT_SHEETS_PILOT_ENABLED = true`、hocbn）
   - GAS の `SUPABASE_RECEIPT_SHEETS_SYNC_URL` は hocbn の `receipt-sheets-sync-cron` を指す
-- **DB マイグレーション**: `supabase/migrations/20260523140000_store_partition_webhook_tables.sql`, `20260523150000_sales_budget_tables.sql`
-- **Edge Functions（hocbn）**: `line-webhook`, `admin-api`（売上・予算・月次集計）
-- **Edge Secrets（hocbn）**: `GROQ_API_KEY`, `LINE_CHANNEL_ACCESS_TOKEN`（または店舗別）, `LINE_CHANNEL_SECRET`（または店舗別）, `ADMIN_DASHBOARD_TOKEN`（analytics 認証）
+- **DB マイグレーション**: `20260523140000_store_partition_webhook_tables.sql`, `20260523150000_sales_budget_tables.sql`, `20260526220000_reservation_customer_visit_history.sql` など
+- **Edge Functions（hocbn）**: `line-webhook`, `admin-api`, **`gmail-alert-cron`**（予約メール → LINE）
+- **Edge Secrets（hocbn）**: `GROQ_API_KEY`, `LINE_CHANNEL_*`, `ADMIN_DASHBOARD_TOKEN`, **`GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` / `GMAIL_ALERT_ENABLED`**
 - **LINE Developers 側の必須設定**:
   - Messaging API の `Allow bot to join group chats` を ON にする
   - 1 つのグループ / 複数人トークには **1 つの LINE Official Account しか参加できない**
@@ -38,7 +41,7 @@
   ```bash
   npx supabase link --project-ref hocbnifuactbvmyjraxy
   npx supabase db push
-  npx supabase functions deploy line-webhook admin-api --project-ref hocbnifuactbvmyjraxy
+  npx supabase functions deploy line-webhook admin-api gmail-alert-cron --project-ref hocbnifuactbvmyjraxy
   ```
 - **ダミー売上・予算（テスト）**:
   - 投入: `./scripts/dummy-sales-seed.sh seed-all`（売上＋予算）
@@ -53,17 +56,12 @@
 
 ## LINE 予約通知: 過去の予約日（最大5件）
 
-- 対象: `gmail-alert-cron`（Gmail → LINE Flex / テキスト）
-- テーブル: `reservation_customer_visit_history`（顧客×経路ごとの来店ログ）
-- RPC: `record_tabelog_reservation_visit` / `record_ikyu_reservation_visit` が `visit_count` と直近5件の `visit_at` を JSON で返す
-- 表示例:
-  ```
-  来店3回
-  過去の予約日:
-  ・2026/05/08(木) 19:00
-  ・2026/04/01(土) 18:30
-  ```
-- マイグレーション: `20260526220000_reservation_customer_visit_history.sql`
+**詳細は [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md) を参照。**
+
+- `gmail-alert-cron` が Gmail 予約メールを取り込み、**Gmail予約通知 ON** のルームへ LINE 送信
+- テーブル `reservation_customer_visit_history` に来店ログを蓄積
+- LINE の「予約回数」（食べログ）／「履歴」（一休）に **来店 N 回** と **過去の予約日（最大5件・日時付き）** を表示
+- 管理画面の「Gmail連携先を確認」は **hocbn** の `GET /gmail/account`（管理トークンと同一プロジェクト）
 
 ## 予約表: キャンセル時の来店履歴カウント
 
