@@ -2618,7 +2618,7 @@
             <p class="setting-block-title">接続と実行</p>
             <div class="controls">
               <input id="projectUrlInput" class="input long" type="text" value="https://hocbnifuactbvmyjraxy.supabase.co" readonly tabindex="-1" aria-readonly="true" onfocus="this.blur()">
-              <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+              <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション">
               <label class="remember-login-label" for="rememberLoginCheck">
                 <input id="rememberLoginCheck" type="checkbox" disabled>
                 <span>同じアドレスなら自動ログイン</span>
@@ -4833,6 +4833,7 @@
 
     function updateAuthPill() {
       const hasToken = !!getToken();
+      const isLocalHost = /^(localhost|127\.0\.0\.1)$/.test(String(location.hostname || ''));
       if (!hasToken) {
         dom.authState.textContent = '未接続';
         dom.authState.className = 'pill';
@@ -4842,7 +4843,9 @@
       }
       if (dom.authPersistMeta) {
         if (!hasToken) {
-          dom.authPersistMeta.textContent = 'セキュリティ上、ログインはこのタブだけ有効です。';
+          dom.authPersistMeta.textContent = isLocalHost
+            ? 'ローカル表示は GitHub Pages のログイン状態を共有しません。ADMIN_DASHBOARD_TOKEN または lrst_ セッションを入力してください。'
+            : 'セキュリティ上、ログインはこのタブだけ有効です。';
         } else {
           dom.authPersistMeta.textContent = 'このタブを閉じるとログアウトします。';
         }
