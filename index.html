@@ -1321,6 +1321,16 @@
       padding: 10px;
       display: grid;
       gap: 8px;
+      cursor: pointer;
+      transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+    }
+
+    .user-permission-list-item:hover,
+    .user-permission-list-item:focus-visible {
+      background: rgba(18, 35, 52, 0.78);
+      border-color: rgba(255, 210, 133, 0.42);
+      transform: translateY(-1px);
+      outline: none;
     }
 
     .user-permission-list-name {
@@ -2105,6 +2115,12 @@
     body[data-theme='light'] .user-permission-list-item {
       border-color: rgba(78, 121, 157, 0.32);
       background: rgba(248, 252, 255, 0.98);
+    }
+
+    body[data-theme='light'] .user-permission-list-item:hover,
+    body[data-theme='light'] .user-permission-list-item:focus-visible {
+      background: rgba(240, 248, 255, 1);
+      border-color: rgba(71, 120, 154, 0.48);
     }
 
     body[data-theme='light'] .user-permission-store-title {
@@ -6090,10 +6106,13 @@
       const assignedJobTitle = normalizeAssignedJobTitleDisplayLabel(row.assigned_job_title);
       const item = document.createElement('div');
       item.className = 'user-permission-list-item';
+      item.setAttribute('role', 'button');
+      item.setAttribute('tabindex', '0');
+      item.setAttribute('data-line-user-id', lineUserId);
       item.innerHTML =
-        '<button class="user-permission-list-name user-permission-list-open" type="button" data-line-user-id="' + escapeHtml(lineUserId) + '">' +
+        '<div class="user-permission-list-name">' +
         escapeHtml(displayName) +
-        '</button>' +
+        '</div>' +
         '<div class="user-permission-list-meta">' +
         '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">有効権限:</span><span class="user-permission-list-kv-value">' + enabledCount + '/7</span></div>' +
         '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">所属店舗:</span><span class="user-permission-list-kv-value">' + escapeHtml(assignedStore) + '</span></div>' +
@@ -8052,9 +8071,18 @@
           renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
           return;
         }
-        const btn = target.closest('.user-permission-list-open');
-        if (!(btn instanceof HTMLElement)) return;
-        openUserPermissionEditModalByLineUserId(String(btn.getAttribute('data-line-user-id') || '').trim());
+        const item = target.closest('.user-permission-list-item');
+        if (!(item instanceof HTMLElement)) return;
+        openUserPermissionEditModalByLineUserId(String(item.getAttribute('data-line-user-id') || '').trim());
+      });
+      dom.userPermissionNameListBody.addEventListener('keydown', function(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const item = target.closest('.user-permission-list-item');
+        if (!(item instanceof HTMLElement)) return;
+        event.preventDefault();
+        openUserPermissionEditModalByLineUserId(String(item.getAttribute('data-line-user-id') || '').trim());
       });
     }
 
