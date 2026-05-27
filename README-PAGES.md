@@ -18,6 +18,7 @@
 | 管理画面 | https://marugo-s.github.io/line_report/index.html |
 | 売上分析 | https://marugo-s.github.io/line_report/analytics.html |
 | メディア | https://marugo-s.github.io/line_report/media.html |
+| 会話検索 | https://marugo-s.github.io/line_report/message-search.html |
 | 予約表 | https://marugo-s.github.io/line_report/reservation.html |
 
 - **Supabase（本番・管理/予約/Gmail）**: `https://hocbnifuactbvmyjraxy.supabase.co`

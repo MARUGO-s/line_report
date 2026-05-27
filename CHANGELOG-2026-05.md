@@ -27,6 +27,8 @@
 | 売上分析 | LINE 経由は **1 店舗固定表示**・メディア/予約表/売上シート非表示 |
 | セキュリティ | **`?t=` 廃止・`lt` ログイン・LINE セッション 3 日保持・`/auth/logout`・CSP** |
 | DB | `store_webhook_tables.receipt_phones`、`reservation_customer_visit_history` など |
+| 会話検索 | ルーム別テーブル＋横断インデックス（**1年保持**・pg_trgm）。`message-search.html`・`room-messages-retention-cron` |
+| LINE検索案内 | 「検索」等で Flex メニュー → 会話／予定／メディア／売上（`20260521`）の多段階検索（`line_search_bot.ts`） |
 | GAS | タブ先頭行に同期用ウォーターマーク、日次タブの更新日時 |
 
 **本番 Supabase プロジェクト:** `hocbnifuactbvmyjraxy`（hocbn）  

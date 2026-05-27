@@ -39,6 +39,10 @@ import {
   revokeAllAdminDashboardAuthTokens,
 } from "../_shared/admin_dashboard_link_auth.ts"
 import { fetchWeatherDailyState } from "../_shared/weather_daily.ts"
+import {
+  fetchLineRoomCalendarSearchState,
+  fetchLineRoomMessageSearchState,
+} from "../_shared/line_room_message_search.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
 
@@ -405,6 +409,16 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && path === "/reservations/search") {
       const reservationSearchState = await fetchReservationSearchState(supabase, url)
       return json(reservationSearchState, 200)
+    }
+
+    if (req.method === "GET" && path === "/messages/search") {
+      const messageSearchState = await fetchLineRoomMessageSearchState(supabase, url)
+      return json(messageSearchState, 200)
+    }
+
+    if (req.method === "GET" && path === "/calendar-events/search") {
+      const calendarSearchState = await fetchLineRoomCalendarSearchState(supabase, url)
+      return json(calendarSearchState, 200)
     }
     if (req.method === "GET" && path === "/receipts/store-options") {
       const options = await fetchStorePartitionReceiptOptions(supabase)

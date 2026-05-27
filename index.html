@@ -3248,6 +3248,7 @@
         <span id="authState" class="pill">未接続</span>
         <span id="lastRefresh" class="pill">最終更新: なし</span>
         <a href="./media.html" class="pill link">LINEメディアビューアー</a>
+        <a href="./message-search.html" class="pill link">会話検索</a>
         <a href="./reservation.html" class="pill link">予約表</a>
         <a href="./analytics.html" class="pill link">売上分析</a>
         <a id="receiptSheetsPilotHeaderLink" href="#" class="pill link" target="_blank" rel="noopener noreferrer" style="display:none" hidden aria-hidden="true">売上シート</a>
@@ -3270,6 +3271,7 @@
             <div class="controls" style="margin-top:8px;">
               <button id="reloadBtn" class="button">再読み込み</button>
               <a href="./media.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">メディア閲覧</a>
+              <a href="./message-search.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">会話検索</a>
               <a href="./reservation.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">予約表</a>
               <a href="./analytics.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">売上分析</a>
               <a id="receiptSheetsPilotActionLink" href="#" class="button media-highlight" target="_blank" rel="noopener noreferrer" style="display:none;align-items:center;text-decoration:none;" hidden aria-hidden="true">売上シート</a>
@@ -5048,7 +5050,10 @@
       }
 
       if (dom.roomConfigCalendarGmailBulkHint && permissionMode && multiRoom) {
-        const bulk = getBulkCalendarGmailSettings();
+        const storeKey = String(activeWebhookConfigStoreKey || '').trim();
+        const bulk = (storeKey && storeKey !== GLOBAL_CONFIG_SCOPE_KEY && storeKey !== UNASSIGNED_WEBHOOK_KEY)
+          ? getBulkCalendarGmailSettingsForStore(storeKey)
+          : getBulkCalendarGmailSettings();
         dom.roomConfigCalendarGmailBulkHint.textContent =
           '上の店舗一括の内容: ' + formatCalendarGmailBulkLabel(bulk);
       }
@@ -5339,7 +5344,8 @@
 
     function calendarGmailFromRoomTableRow(tr) {
       if (!tr || !tr.dataset) return {};
-      const gCal = parseDatasetBoolean(tr.dataset.roomCalendarAutoCreate, false);
+      const gCal = parseDatasetBoolean(tr.dataset.roomCalendarAutoCreate, false)
+        && parseDatasetBoolean(tr.dataset.roomSilentAutoRegister, false);
       return {
         calendar_tomorrow_reminder_enabled: parseDatasetBoolean(tr.dataset.roomTomorrowReminder, false),
         calendar_ai_auto_create_enabled: gCal,
@@ -5350,6 +5356,51 @@
       };
     }
 
+    function calendarGmailFromRoomSettingRow(setting) {
+      if (!setting || typeof setting !== 'object') return {};
+      const gCal = isRoomGoogleCalendarSilentAutoFromSetting(setting);
+      return {
+        calendar_tomorrow_reminder_enabled: !!setting.calendar_tomorrow_reminder_enabled,
+        calendar_ai_auto_create_enabled: gCal,
+        calendar_silent_auto_register_enabled: gCal,
+        calendar_registration_reply_enabled: !!setting.calendar_registration_reply_enabled,
+        calendar_low_confidence_confirm_reply_enabled: !!setting.calendar_low_confidence_confirm_reply_enabled,
+        gmail_reservation_alert_enabled: setting.gmail_reservation_alert_enabled === true,
+      };
+    }
+
+    function calendarGmailMajorityFromSettingsList(settings) {
+      const list = Array.isArray(settings) ? settings.filter(Boolean) : [];
+      if (!list.length) return null;
+      function majorityBool(getter) {
+        const vals = list.map(getter);
+        const trueCount = vals.filter(Boolean).length;
+        return trueCount * 2 >= vals.length;
+      }
+      const gCal = majorityBool(function(s) { return isRoomGoogleCalendarSilentAutoFromSetting(s); });
+      return {
+        calendar_tomorrow_reminder_enabled: majorityBool(function(s) { return !!s.calendar_tomorrow_reminder_enabled; }),
+        calendar_ai_auto_create_enabled: gCal,
+        calendar_silent_auto_register_enabled: gCal,
+        calendar_registration_reply_enabled: majorityBool(function(s) { return !!s.calendar_registration_reply_enabled; }),
+        calendar_low_confidence_confirm_reply_enabled: majorityBool(function(s) {
+          return !!s.calendar_low_confidence_confirm_reply_enabled;
+        }),
+        gmail_reservation_alert_enabled: majorityBool(function(s) { return s.gmail_reservation_alert_enabled === true; }),
+      };
+    }
+
+    function calendarGmailMajorityFromStoreKey(storeKey) {
+      const key = canonicalStorePartitionKey(storeKey);
+      if (!key || key === UNASSIGNED_WEBHOOK_KEY || key === GLOBAL_CONFIG_SCOPE_KEY) return null;
+      const settings = (currentState && Array.isArray(currentState.room_settings))
+        ? currentState.room_settings.filter(function(row) {
+          return storePartitionKeysEqual(row.receipt_report_store_partition_key, key);
+        })
+        : [];
+      return calendarGmailMajorityFromSettingsList(settings);
+    }
+
     function getBulkCalendarGmailSettingsForStore(storeKey) {
       const key = String(storeKey || '').trim();
       const globalBulk = getBulkCalendarGmailSettings();
@@ -5358,6 +5409,9 @@
       }
       const saved = loadWebhookStoreBulkCalendarGmail(key);
       if (saved) return Object.assign({}, globalBulk, saved);
+
+      const majorityFromDb = calendarGmailMajorityFromStoreKey(key);
+      if (majorityFromDb) return Object.assign({}, globalBulk, majorityFromDb);
 
       const rows = findRoomRowsByStoreKey(key);
       if (rows.length === 0) return globalBulk;
@@ -5373,8 +5427,29 @@
       const unanimous = bulkRows.every(function(tr) {
         return JSON.stringify(pickCalendarGmailRawFields(calendarGmailFromRoomTableRow(tr))) === signature;
       });
-      if (!unanimous) return globalBulk;
+      if (!unanimous) {
+        const majorityFromRows = calendarGmailMajorityFromSettingsList(
+          bulkRows.map(function(tr) {
+            const rid = String(tr.dataset.roomId || '').trim();
+            const hit = (currentState && Array.isArray(currentState.room_settings))
+              ? currentState.room_settings.find(function(row) { return String(row.room_id || '') === rid; })
+              : null;
+            return hit || calendarGmailFromRoomTableRow(tr);
+          }),
+        );
+        if (majorityFromRows) return Object.assign({}, globalBulk, majorityFromRows);
+        return globalBulk;
+      }
       return Object.assign({}, globalBulk, base);
+    }
+
+    /** 権限モードの店舗一括（画面上のチェック）— ルーム個別オーバーライド時のみ Perm 欄を読む */
+    function readCalendarGmailBulkForPermissionSave() {
+      const permissionMode = !!(dom.roomConfigModalCard && dom.roomConfigModalCard.dataset.webhookMode === 'permission');
+      if (!permissionMode) return readCalendarGmailFromInlineModal();
+      const override = !!(dom.roomConfigCalendarGmailOverride && dom.roomConfigCalendarGmailOverride.checked);
+      if (override) return readCalendarGmailFromPermModal();
+      return readCalendarGmailFromInlineModal();
     }
 
     /** 店舗一括保存時にルームへ書き込むカレンダー／Gmail（DB 反映用） */
@@ -5385,10 +5460,7 @@
       if (roomDraft.calendar_gmail_settings_override) {
         return resolveCalendarGmailSettingsForRoom(rid);
       }
-      if (getLinkedRoomCountInModal() >= 2) {
-        return readCalendarGmailFromInlineModal();
-      }
-      return readCalendarGmailFromPermModal();
+      return readCalendarGmailBulkForPermissionSave();
     }
 
     function pickCalendarGmailRawFields(config) {
@@ -5898,13 +5970,12 @@
 
     function buildRoomConfigDraftFromModal() {
       const permissionMode = !!(dom.roomConfigModalCard && dom.roomConfigModalCard.dataset.webhookMode === 'permission');
-      const inlineCalendarPart = readCalendarGmailFromInlineModal();
       const calendarOverrideOn = !!(dom.roomConfigCalendarGmailOverride && dom.roomConfigCalendarGmailOverride.checked);
       const calendarPart = permissionMode
         ? (calendarOverrideOn
           ? Object.assign({ calendar_gmail_settings_override: true }, readCalendarGmailFromPermModal())
-          : Object.assign({ calendar_gmail_settings_override: false }, inlineCalendarPart))
-        : inlineCalendarPart;
+          : Object.assign({ calendar_gmail_settings_override: false }, readCalendarGmailBulkForPermissionSave()))
+        : readCalendarGmailFromInlineModal();
       return Object.assign({
         bot_reply_enabled: !!dom.roomConfigBotReplyEnabled.checked,
         bot_reply_hard_mute_enabled: !!(dom.roomConfigBotReplyHardMute && dom.roomConfigBotReplyHardMute.checked),
@@ -9394,10 +9465,7 @@
       nextConfig.receipt_report_store_partition_key = storeKey;
       saveWebhookDefaultConfig(storeKey, nextConfig);
       if (built.permissionMode) {
-        saveWebhookStoreBulkCalendarGmail(
-          storeKey,
-          getLinkedRoomCountInModal() >= 2 ? readCalendarGmailFromInlineModal() : readCalendarGmailFromPermModal(),
-        );
+        saveWebhookStoreBulkCalendarGmail(storeKey, readCalendarGmailBulkForPermissionSave());
       }
       const linkedRows = findRoomRowsByStoreKey(storeKey);
       let skipped = 0;

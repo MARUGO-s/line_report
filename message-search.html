@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <base href="/line_report/">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+  <title>会話検索 | LINE Report</title>
+  <link rel="icon" type="image/svg+xml" href="icons/logo-mark.svg">
+  <style>
+    :root {
+      --bg0: #061320;
+      --bg1: #173247;
+      --card: rgba(8, 21, 35, 0.88);
+      --line: rgba(155, 220, 255, 0.25);
+      --txt: #e7f6ff;
+      --sub: #a6cadf;
+      --accent: #57d8ff;
+      --ok: #69edbf;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--txt);
+      font-family: "Zen Kaku Gothic New", system-ui, sans-serif;
+      background: linear-gradient(145deg, var(--bg0), var(--bg1));
+      padding: 20px;
+    }
+    .app { max-width: 960px; margin: 0 auto; display: grid; gap: 16px; }
+    .hero, .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--card);
+      padding: 18px 20px;
+    }
+    h1 { margin: 0 0 8px; font-size: 1.35rem; }
+    p { margin: 0; color: var(--sub); line-height: 1.5; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+    .input, select {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(0,0,0,0.25);
+      color: var(--txt);
+      padding: 10px 12px;
+      min-width: 0;
+    }
+    .input.grow { flex: 1 1 220px; }
+    .button {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(87, 216, 255, 0.12);
+      color: var(--txt);
+      padding: 10px 14px;
+      cursor: pointer;
+    }
+    .button.primary { background: rgba(87, 216, 255, 0.28); }
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.82rem;
+      color: var(--sub);
+    }
+    .pill.link { color: var(--accent); text-decoration: none; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tab {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 14px;
+      background: transparent;
+      color: var(--sub);
+      cursor: pointer;
+    }
+    .tab.active { background: rgba(87, 216, 255, 0.2); color: var(--txt); }
+    .results { display: grid; gap: 10px; margin-top: 12px; }
+    .hit {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: rgba(0,0,0,0.18);
+    }
+    .hit-meta { font-size: 0.82rem; color: var(--sub); margin-bottom: 6px; }
+    .hit-snippet { line-height: 1.55; word-break: break-word; }
+    mark { background: rgba(105, 237, 191, 0.35); color: inherit; padding: 0 2px; border-radius: 3px; }
+    .empty { color: var(--sub); padding: 12px 0; }
+    .error { color: #ff9f9f; }
+    .pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="hero">
+      <h1>会話・予定検索</h1>
+      <p>保存期間は直近1年です。ルーム単位の会話検索・全会話の横断検索・ルーム内の予定検索に対応しています。</p>
+      <div class="row">
+        <span id="authState" class="pill">未接続</span>
+        <a href="./index.html" class="pill link">管理画面へ</a>
+      </div>
+      <div class="row">
+        <input id="tokenInput" class="input grow" type="password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション">
+        <button id="saveTokenBtn" class="button primary" type="button">保存して接続</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-mode="room-messages">ルーム会話</button>
+        <button type="button" class="tab" data-mode="global-messages">全会話（横断）</button>
+        <button type="button" class="tab" data-mode="room-calendar">ルーム予定</button>
+      </div>
+
+      <div class="row">
+        <select id="roomSelect" class="input" aria-label="ルーム">
+          <option value="">ルームを選択</option>
+        </select>
+        <input id="queryInput" class="input grow" type="search" placeholder="キーワード（部分一致）" autocomplete="off">
+        <button id="searchBtn" class="button primary" type="button">検索</button>
+      </div>
+
+      <p id="modeHint" class="empty" style="margin-top:10px;font-size:0.9rem;"></p>
+      <p id="statusText" class="empty"></p>
+      <div id="results" class="results"></div>
+      <div class="pager" id="pager" hidden>
+        <button id="prevBtn" class="button" type="button">前へ</button>
+        <span id="pagerMeta" class="pill"></span>
+        <button id="nextBtn" class="button" type="button">次へ</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="pages-config.js"></script>
+  <script src="admin-auth.js"></script>
+  <script>
+    'use strict';
+
+    const STORE_TOKEN_KEY = 'line_summary_admin_token';
+    const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
+    const PAGE_LIMIT = 30;
+
+    const state = {
+      mode: 'room-messages',
+      offset: 0,
+      totalCount: 0,
+      lastQuery: '',
+      rooms: [],
+    };
+
+    const dom = {
+      authState: document.getElementById('authState'),
+      tokenInput: document.getElementById('tokenInput'),
+      saveTokenBtn: document.getElementById('saveTokenBtn'),
+      roomSelect: document.getElementById('roomSelect'),
+      queryInput: document.getElementById('queryInput'),
+      searchBtn: document.getElementById('searchBtn'),
+      modeHint: document.getElementById('modeHint'),
+      statusText: document.getElementById('statusText'),
+      results: document.getElementById('results'),
+      pager: document.getElementById('pager'),
+      prevBtn: document.getElementById('prevBtn'),
+      nextBtn: document.getElementById('nextBtn'),
+      pagerMeta: document.getElementById('pagerMeta'),
+      tabs: document.querySelectorAll('.tab'),
+    };
+
+    function getToken() {
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+    }
+
+    function setToken(token) {
+      const next = String(token || '').trim();
+      if (next) localStorage.setItem(STORE_TOKEN_KEY, next);
+      else localStorage.removeItem(STORE_TOKEN_KEY);
+      dom.tokenInput.value = next;
+      dom.authState.textContent = next ? '接続済み' : '未接続';
+    }
+
+    async function api(path) {
+      const token = getToken();
+      if (!token) throw new Error('先に管理トークンを保存してください。');
+      const url = LINE_REPORT_PAGES.adminApiUrl(path, FIXED_PROJECT_URL);
+      const res = await fetch(url, {
+        headers: { 'x-admin-token': token },
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+      });
+      const text = await res.text();
+      let body = {};
+      try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { raw: text }; }
+      if (!res.ok) throw new Error(body.error || ('API error: ' + res.status));
+      return body;
+    }
+
+    function updateModeUi() {
+      const global = state.mode === 'global-messages';
+      const calendar = state.mode === 'room-calendar';
+      dom.roomSelect.hidden = global;
+      dom.roomSelect.required = !global;
+
+      if (global) {
+        dom.modeHint.textContent = '全会話を横断して、直近1年分のメッセージから部分一致で検索します。';
+      } else if (calendar) {
+        dom.modeHint.textContent = '選択ルームの予定（タイトル・説明）を直近1年分から検索します。';
+      } else {
+        dom.modeHint.textContent = '選択ルームのトークを直近1年分から部分一致で検索します（ルーム設定で「会話検索」がONのルームのみ記録）。';
+      }
+
+      dom.tabs.forEach(function(tab) {
+        tab.classList.toggle('active', tab.dataset.mode === state.mode);
+      });
+    }
+
+    function fillRoomOptions(rooms) {
+      const prev = dom.roomSelect.value;
+      dom.roomSelect.innerHTML = '<option value="">ルームを選択</option>';
+      for (const row of rooms) {
+        const opt = document.createElement('option');
+        opt.value = row.room_id;
+        opt.textContent = row.label;
+        dom.roomSelect.appendChild(opt);
+      }
+      if (prev && rooms.some(function(r) { return r.room_id === prev; })) dom.roomSelect.value = prev;
+    }
+
+    async function loadRooms() {
+      const body = await api('/state?admin_surface=' + encodeURIComponent(LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report'));
+      const map = new Map();
+      function upsert(id, name) {
+        const roomId = String(id || '').trim();
+        if (!roomId) return;
+        const label = String(name || '').trim() || roomId;
+        map.set(roomId, label);
+      }
+      for (const row of (body.room_settings || [])) upsert(row.room_id, row.room_name);
+      for (const row of (body.room_overview || [])) upsert(row.room_id, row.room_name);
+      state.rooms = Array.from(map.entries()).map(function(entry) {
+        return { room_id: entry[0], label: entry[1] };
+      }).sort(function(a, b) { return a.label.localeCompare(b.label, 'ja'); });
+      fillRoomOptions(state.rooms);
+    }
+
+    function highlightSnippet(snippet, query) {
+      const safe = String(snippet || '');
+      const q = String(query || '').trim();
+      if (!q) return escapeHtml(safe);
+      const lower = safe.toLowerCase();
+      const needle = q.toLowerCase();
+      const idx = lower.indexOf(needle);
+      if (idx < 0) return escapeHtml(safe);
+      const before = escapeHtml(safe.slice(0, idx));
+      const match = escapeHtml(safe.slice(idx, idx + q.length));
+      const after = escapeHtml(safe.slice(idx + q.length));
+      return before + '<mark>' + match + '</mark>' + after;
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toLocaleString('ja-JP', { hour12: false });
+    }
+
+    function renderMessageHits(items, query) {
+      if (!items.length) {
+        dom.results.innerHTML = '<p class="empty">該当する会話はありません。</p>';
+        return;
+      }
+      dom.results.innerHTML = items.map(function(item) {
+        const roomLabel = item.room_name || item.room_id || '';
+        return '<article class="hit">' +
+          '<div class="hit-meta">' + escapeHtml(roomLabel) + ' · ' + escapeHtml(formatDate(item.created_at)) +
+          (item.user_id ? ' · ' + escapeHtml(item.user_id) : '') + '</div>' +
+          '<div class="hit-snippet">' + highlightSnippet(item.snippet || item.text_content, query) + '</div>' +
+          '</article>';
+      }).join('');
+    }
+
+    function renderCalendarHits(items) {
+      if (!items.length) {
+        dom.results.innerHTML = '<p class="empty">該当する予定はありません。</p>';
+        return;
+      }
+      dom.results.innerHTML = items.map(function(item) {
+        const when = item.starts_at ? formatDate(item.starts_at) : formatDate(item.created_at);
+        return '<article class="hit">' +
+          '<div class="hit-meta">' + escapeHtml(when) + ' · ' + escapeHtml(item.source || '') + '</div>' +
+          '<div class="hit-snippet"><strong>' + escapeHtml(item.event_title) + '</strong>' +
+          (item.event_description ? '<br>' + escapeHtml(item.event_description) : '') +
+          '</div></article>';
+      }).join('');
+    }
+
+    function updatePager() {
+      const hasMore = state.offset + PAGE_LIMIT < state.totalCount;
+      const show = state.totalCount > PAGE_LIMIT || state.offset > 0;
+      dom.pager.hidden = !show;
+      dom.pagerMeta.textContent = (state.offset + 1) + '〜' + Math.min(state.offset + PAGE_LIMIT, state.totalCount) + ' / ' + state.totalCount;
+      dom.prevBtn.disabled = state.offset <= 0;
+      dom.nextBtn.disabled = !hasMore;
+    }
+
+    async function runSearch() {
+      const query = String(dom.queryInput.value || '').trim();
+      if (!query) {
+        dom.statusText.textContent = 'キーワードを入力してください。';
+        dom.statusText.className = 'error';
+        return;
+      }
+
+      const roomId = String(dom.roomSelect.value || '').trim();
+      if (state.mode !== 'global-messages' && !roomId) {
+        dom.statusText.textContent = 'ルームを選択してください。';
+        dom.statusText.className = 'error';
+        return;
+      }
+
+      dom.statusText.textContent = '検索中…';
+      dom.statusText.className = 'empty';
+      dom.searchBtn.disabled = true;
+
+      try {
+        let path = '';
+        if (state.mode === 'room-calendar') {
+          path = '/calendar-events/search?q=' + encodeURIComponent(query) +
+            '&room_id=' + encodeURIComponent(roomId) +
+            '&limit=' + PAGE_LIMIT + '&offset=' + state.offset;
+          const body = await api(path);
+          state.totalCount = Number(body.total_count || 0);
+          state.lastQuery = query;
+          renderCalendarHits(body.items || []);
+        } else {
+          const scope = state.mode === 'global-messages' ? '&scope=global' : '&room_id=' + encodeURIComponent(roomId);
+          path = '/messages/search?q=' + encodeURIComponent(query) + scope +
+            '&limit=' + PAGE_LIMIT + '&offset=' + state.offset;
+          const body = await api(path);
+          state.totalCount = Number(body.total_count || 0);
+          state.lastQuery = query;
+          renderMessageHits(body.items || [], query);
+        }
+        dom.statusText.textContent = state.totalCount + ' 件ヒット（直近1年）';
+        dom.statusText.className = 'empty';
+        updatePager();
+      } catch (err) {
+        dom.statusText.textContent = err.message || String(err);
+        dom.statusText.className = 'error';
+        dom.results.innerHTML = '';
+        dom.pager.hidden = true;
+      } finally {
+        dom.searchBtn.disabled = false;
+      }
+    }
+
+    dom.tabs.forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        state.mode = tab.dataset.mode || 'room-messages';
+        state.offset = 0;
+        updateModeUi();
+      });
+    });
+
+    dom.saveTokenBtn.addEventListener('click', async function() {
+      setToken(dom.tokenInput.value);
+      try {
+        await loadRooms();
+        dom.statusText.textContent = 'ルーム一覧を読み込みました。';
+        dom.statusText.className = 'empty';
+      } catch (err) {
+        dom.statusText.textContent = err.message || String(err);
+        dom.statusText.className = 'error';
+      }
+    });
+
+    dom.searchBtn.addEventListener('click', function() {
+      state.offset = 0;
+      runSearch();
+    });
+
+    dom.queryInput.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        state.offset = 0;
+        runSearch();
+      }
+    });
+
+    dom.prevBtn.addEventListener('click', function() {
+      state.offset = Math.max(0, state.offset - PAGE_LIMIT);
+      runSearch();
+    });
+
+    dom.nextBtn.addEventListener('click', function() {
+      state.offset += PAGE_LIMIT;
+      runSearch();
+    });
+
+    updateModeUi();
+    setToken(getToken());
+    if (getToken()) {
+      loadRooms().catch(function(err) {
+        dom.statusText.textContent = err.message || String(err);
+        dom.statusText.className = 'error';
+      });
+    }
+  </script>
+</body>
+</html>

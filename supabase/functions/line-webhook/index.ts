@@ -34,6 +34,15 @@ import { analyzeLineImageWithGroqScout } from '../_shared/receipt_vision.ts'
 import { ensureRoomAutoLinkedToStore } from '../_shared/auto_link_room.ts'
 import { runWebhookDisplayNameSync } from '../_shared/line_display_names.ts'
 import {
+  isLineRoomMessageRecordingEnabled,
+  persistLineRoomMessageFromWebhook,
+} from '../_shared/line_room_messages.ts'
+import {
+  handleLineSearchPostback,
+  handleLineSearchTextMessage,
+  isLineSearchGuideEnabled,
+} from '../_shared/line_search_bot.ts'
+import {
   createServiceClient,
   type StoreRegistryRow,
 } from '../_shared/store_receipt.ts'
@@ -45,6 +54,7 @@ type LineEvent = {
   webhookEventId?: string
   timestamp?: number
   replyToken?: string
+  postback?: { data?: string }
   source?: { type?: string; userId?: string; groupId?: string; roomId?: string }
   message?: { id?: string; type?: string; text?: string }
 }
@@ -362,7 +372,10 @@ Deno.serve(async (req) => {
   let receiptReplies = 0
   let textHandled = 0
   let roomsAutoLinked = 0
+  let roomMessagesSaved = 0
+  let searchGuideHandled = 0
   const autoLinkedRoomIds = new Set<string>()
+  const roomMessagePersistTasks: Promise<void>[] = []
   const displayNameUsers = new Map<string, { userId: string; roomId: string | null }>()
   const displayNameRoomIds = new Set<string>()
   const errors: string[] = []
@@ -430,9 +443,25 @@ Deno.serve(async (req) => {
       }
     }
 
+    const lineAccessTokenForSearch = resolveChannelAccessToken(storeKey)
+
+    if (isLineSearchGuideEnabled() && event.type === 'postback' && lineAccessTokenForSearch) {
+      try {
+        const searchResult = await handleLineSearchPostback(supabase, event, lineAccessTokenForSearch)
+        if (searchResult.handled) searchGuideHandled += 1
+        if (searchResult.replied) receiptReplies += 1
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('handleLineSearchPostback failed:', msg)
+        errors.push(msg.slice(0, 160))
+      }
+    }
+
     if (event.type === 'message' && event.message?.type === 'text') {
+      let receiptHandled = false
       try {
         const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase)
+        receiptHandled = result.handled
         if (result.handled) textHandled += 1
         if (result.replied) receiptReplies += 1
       } catch (err) {
@@ -440,7 +469,50 @@ Deno.serve(async (req) => {
         console.error('processReceiptTextEvent failed:', msg)
         errors.push(msg.slice(0, 160))
       }
+
+      if (!receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
+        try {
+          const searchResult = await handleLineSearchTextMessage(
+            supabase,
+            registry as StoreRegistryRow,
+            event,
+            lineAccessTokenForSearch,
+          )
+          if (searchResult.handled) searchGuideHandled += 1
+          if (searchResult.replied) receiptReplies += 1
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('handleLineSearchTextMessage failed:', msg)
+          errors.push(msg.slice(0, 160))
+        }
+      }
     }
+
+    if (
+      isLineRoomMessageRecordingEnabled()
+      && event.type === 'message'
+      && event.message
+      && eventRoomId
+    ) {
+      roomMessagePersistTasks.push(
+        persistLineRoomMessageFromWebhook(supabase, event, eventRoomId)
+          .then((result) => {
+            if (result.saved) roomMessagesSaved += 1
+          })
+          .catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.error('persistLineRoomMessageFromWebhook failed:', msg)
+          }),
+      )
+    }
+  }
+
+  if (roomMessagePersistTasks.length > 0) {
+    const persistPromise = Promise.all(roomMessagePersistTasks).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('room message persist batch failed:', msg)
+    })
+    EdgeRuntime.waitUntil(persistPromise)
   }
 
   const lineAccessToken = resolveChannelAccessToken(storeKey)
@@ -471,6 +543,8 @@ Deno.serve(async (req) => {
     text_handled: textHandled,
     receipt_replies: receiptReplies,
     rooms_auto_linked: roomsAutoLinked,
+    room_messages_saved: roomMessagesSaved,
+    search_guide_handled: searchGuideHandled,
     errors,
   }, errors.length > 0 && rawInserted === 0 && receiptsSaved === 0 && textHandled === 0 ? 500 : 200)
 })
