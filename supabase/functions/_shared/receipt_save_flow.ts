@@ -72,6 +72,7 @@ export async function attemptReceiptRegistration(
     userId: payload.user_id,
     senderDisplayName: payload.sender_display_name,
     storeDisplayName: payload.store_display_name,
+    storePartitionKey: registry.store_partition_key,
     receipt: payload.receipt_payload,
     summary: payload.summary_text ?? '',
   })

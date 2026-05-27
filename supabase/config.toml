@@ -15,6 +15,9 @@ enabled = true
 [functions.line-webhook]
 verify_jwt = false
 
+[functions.line-admin-webhook]
+verify_jwt = false
+
 [functions.admin-api]
 verify_jwt = false
 

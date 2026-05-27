@@ -37,15 +37,30 @@ import {
   isLineRoomMessageRecordingEnabled,
   persistLineRoomMessageFromWebhook,
 } from '../_shared/line_room_messages.ts'
+import { persistLineRoomSearchArchivesFromWebhook } from '../_shared/line_room_search_archive.ts'
 import {
   handleLineSearchPostback,
   handleLineSearchTextMessage,
+  isLineDirectMessageChat,
+  isLineDirectMessageEvent,
   isLineSearchGuideEnabled,
+  loadRoomSearchFlags,
+  registerSearchExcludedMessage,
+  shouldSkipLineSearchMessageRecording,
+  shouldSkipPendingSearchKeywordRecording,
 } from '../_shared/line_search_bot.ts'
 import {
   createServiceClient,
   type StoreRegistryRow,
 } from '../_shared/store_receipt.ts'
+import { serveAdminApprovalWebhook } from '../_shared/line_admin_webhook.ts'
+import {
+  ADMIN_STORE_PARTITION_KEY,
+  handleStoreFollowForUserApproval,
+  loadLineUserPermissionGate,
+  replyLinePermissionBlocked,
+  shouldBlockUnapprovedDirectMessage,
+} from '../_shared/line_user_approval.ts'
 
 const STORE_KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]*$/
 
@@ -117,6 +132,8 @@ function resolveChannelSecret(storeKey: string): string {
   const envKey = `LINE_CHANNEL_SECRET__${storeKey.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase()}`
   const perStore = String(Deno.env.get(envKey) || '').trim()
   if (perStore) return perStore
+  // 管理Bot(admin)は店舗用 secret にフォールバックしない（署名不一致で 403 になるため）
+  if (storeKey === ADMIN_STORE_PARTITION_KEY) return ''
   return String(Deno.env.get('LINE_CHANNEL_SECRET') || '').trim()
 }
 
@@ -331,6 +348,11 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, error: 'store_partition_key required in URL path' }, 400)
   }
 
+  // 管理Bot: 承認専用（店舗Botの DB・レシート・会話記録には触れない）
+  if (storeKey === ADMIN_STORE_PARTITION_KEY) {
+    return serveAdminApprovalWebhook(req)
+  }
+
   const supabase = createServiceClient()
   if (!supabase) {
     return jsonResponse({ ok: false, error: 'Server misconfigured' }, 500)
@@ -355,6 +377,9 @@ Deno.serve(async (req) => {
   const signature = req.headers.get('x-line-signature')
   const valid = await verifyLineSignature(rawBody, signature, channelSecret)
   if (!valid) {
+    console.error(
+      `webhook signature invalid (store=${storeKey}, hasSecret=${!!channelSecret})`,
+    )
     return new Response('Forbidden', { status: 403 })
   }
 
@@ -367,6 +392,8 @@ Deno.serve(async (req) => {
 
   const events = Array.isArray(payload.events) ? payload.events : []
   const rawTable = String(registry.webhook_raw_table)
+  const storeDisplayName = String(registry.display_name || registry.store_partition_key || storeKey)
+
   let rawInserted = 0
   let receiptsSaved = 0
   let receiptReplies = 0
@@ -379,6 +406,8 @@ Deno.serve(async (req) => {
   const displayNameUsers = new Map<string, { userId: string; roomId: string | null }>()
   const displayNameRoomIds = new Set<string>()
   const errors: string[] = []
+  const userPermissionCache = new Map<string, Awaited<ReturnType<typeof loadLineUserPermissionGate>>>()
+  const storeAccessToken = resolveChannelAccessToken(storeKey)
 
   for (const event of events) {
     const rawOk = await insertRawWebhookEvent(supabase, rawTable, event)
@@ -386,6 +415,9 @@ Deno.serve(async (req) => {
 
     const eventRoomId = resolveRoomId(event)
     const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
+    const isDirectMessage = eventRoomId
+      ? isLineDirectMessageChat(event, eventRoomId)
+      : isLineDirectMessageEvent(event)
     if (eventUserId.startsWith('U')) {
       displayNameUsers.set(eventUserId, { userId: eventUserId, roomId: eventRoomId })
     }
@@ -409,6 +441,43 @@ Deno.serve(async (req) => {
       } catch (linkErr) {
         const msg = linkErr instanceof Error ? linkErr.message : String(linkErr)
         console.error('ensureRoomAutoLinkedToStore failed:', msg)
+      }
+    }
+
+    if (
+      isDirectMessage
+      && eventUserId.startsWith('U')
+      && event.type === 'follow'
+      && storeAccessToken
+    ) {
+      try {
+        await handleStoreFollowForUserApproval(
+          supabase,
+          eventUserId,
+          storeKey,
+          storeDisplayName,
+          storeAccessToken,
+        )
+      } catch (e) {
+        console.error('handleStoreFollowForUserApproval failed:', String(e))
+      }
+      continue
+    }
+
+    if (isDirectMessage && eventUserId.startsWith('U')) {
+      let gate = userPermissionCache.get(eventUserId)
+      if (!gate) {
+        gate = await loadLineUserPermissionGate(supabase, eventUserId)
+        userPermissionCache.set(eventUserId, gate)
+      }
+      if (shouldBlockUnapprovedDirectMessage(event, gate)) {
+        try {
+          const replied = await replyLinePermissionBlocked(event, registry.store_partition_key)
+          if (replied) receiptReplies += 1
+        } catch (e) {
+          console.error('replyLinePermissionBlocked failed:', String(e))
+        }
+        continue
       }
     }
 
@@ -457,7 +526,34 @@ Deno.serve(async (req) => {
       }
     }
 
+    let skipSearchMessageRecording = false
     if (event.type === 'message' && event.message?.type === 'text') {
+      const text = String(event.message?.text ?? '').trim()
+      const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
+      if (text && eventRoomId && eventUserId) {
+        if (isDirectMessage) {
+          // 1対1: 検索待ちのキーワード1通のみ記録しない（「検索」等の操作トークは記録する）
+          skipSearchMessageRecording = await shouldSkipPendingSearchKeywordRecording(
+            supabase,
+            eventRoomId,
+            eventUserId,
+          )
+        } else {
+          const roomFlags = await loadRoomSearchFlags(supabase, eventRoomId)
+          skipSearchMessageRecording = await shouldSkipLineSearchMessageRecording(
+            supabase,
+            eventRoomId,
+            eventUserId,
+            text,
+            {
+              salesSearchAllowed: !!(
+                roomFlags?.receipt_midreport_enabled || roomFlags?.receipt_monthend_report_enabled
+              ),
+            },
+          )
+        }
+      }
+
       let receiptHandled = false
       try {
         const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase)
@@ -478,12 +574,24 @@ Deno.serve(async (req) => {
             event,
             lineAccessTokenForSearch,
           )
-          if (searchResult.handled) searchGuideHandled += 1
+          if (searchResult.handled) {
+            searchGuideHandled += 1
+            if (!isDirectMessage) {
+              skipSearchMessageRecording = true
+            }
+          }
           if (searchResult.replied) receiptReplies += 1
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           console.error('handleLineSearchTextMessage failed:', msg)
           errors.push(msg.slice(0, 160))
+        }
+      }
+
+      if (skipSearchMessageRecording && eventRoomId) {
+        const lineMessageId = String(event.message?.id ?? '').trim()
+        if (lineMessageId) {
+          await registerSearchExcludedMessage(supabase, lineMessageId, eventRoomId, text)
         }
       }
     }
@@ -493,6 +601,7 @@ Deno.serve(async (req) => {
       && event.type === 'message'
       && event.message
       && eventRoomId
+      && !skipSearchMessageRecording
     ) {
       roomMessagePersistTasks.push(
         persistLineRoomMessageFromWebhook(supabase, event, eventRoomId)
@@ -502,6 +611,13 @@ Deno.serve(async (req) => {
           .catch((err) => {
             const msg = err instanceof Error ? err.message : String(err)
             console.error('persistLineRoomMessageFromWebhook failed:', msg)
+          }),
+      )
+      roomMessagePersistTasks.push(
+        persistLineRoomSearchArchivesFromWebhook(supabase, event, eventRoomId)
+          .catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.error('persistLineRoomSearchArchivesFromWebhook failed:', msg)
           }),
       )
     }

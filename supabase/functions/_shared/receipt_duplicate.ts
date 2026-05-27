@@ -262,6 +262,7 @@ async function completePendingDuplicateAndReply(
     userId: pending.user_id,
     senderDisplayName: pending.sender_display_name,
     storeDisplayName: pending.store_display_name,
+    storePartitionKey: pending.store_partition_key,
     receipt: pending.receipt_payload,
     summary: pending.summary_text ?? '',
   })

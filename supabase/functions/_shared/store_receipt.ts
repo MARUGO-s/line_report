@@ -6,6 +6,7 @@ import {
   parseIntegerCount,
   resolveReceiptDateIsoForPersist,
 } from './receipt_parse.ts'
+import { indexLineRoomReceiptSearch } from './line_room_search_archive.ts'
 
 export type StoreReceiptRow = {
   id: number
@@ -241,34 +242,65 @@ export async function saveStoreReceiptEntry(
     userId: string | null
     senderDisplayName: string | null
     storeDisplayName: string
+    storePartitionKey?: string | null
     receipt: LineImageReceiptAnalysis
     summary: string
   },
-): Promise<{ ok: boolean; duplicate?: boolean; error?: string }> {
+): Promise<{ ok: boolean; duplicate?: boolean; error?: string; receiptRowId?: number }> {
   const receiptDateIso = resolveReceiptDateIsoForPersist(params.receipt.date)
-  const { error } = await supabase.from(receiptTable).insert({
+  const receiptDateText = params.receipt.date
+  const summaryText = buildReceiptSummaryText(params.receipt, params.storeDisplayName).slice(0, 240) || null
+  const grossSalesYen = parseCurrencyAmount(params.receipt.grossSales)
+  const netSalesYen = parseCurrencyAmount(params.receipt.netSales)
+  const taxAmountYen = parseCurrencyAmount(params.receipt.taxAmount)
+  const partyCount = parseIntegerCount(params.receipt.partyCount)
+  const guestCount = parseIntegerCount(params.receipt.guestCount)
+  const unitPriceYen = parseCurrencyAmount(params.receipt.unitPrice)
+  const { data, error } = await supabase.from(receiptTable).insert({
     line_message_id: params.lineMessageId,
     room_id: params.roomId,
     user_id: params.userId,
     sender_display_name: params.senderDisplayName,
     store_name: params.storeDisplayName,
-    receipt_date_text: params.receipt.date,
+    receipt_date_text: receiptDateText,
     receipt_date: receiptDateIso,
-    net_sales_yen: parseCurrencyAmount(params.receipt.netSales),
-    tax_amount_yen: parseCurrencyAmount(params.receipt.taxAmount),
-    gross_sales_yen: parseCurrencyAmount(params.receipt.grossSales),
-    party_count: parseIntegerCount(params.receipt.partyCount),
-    guest_count: parseIntegerCount(params.receipt.guestCount),
-    unit_price_yen: parseCurrencyAmount(params.receipt.unitPrice),
-    summary_text: buildReceiptSummaryText(params.receipt, params.storeDisplayName).slice(0, 240) || null,
+    net_sales_yen: netSalesYen,
+    tax_amount_yen: taxAmountYen,
+    gross_sales_yen: grossSalesYen,
+    party_count: partyCount,
+    guest_count: guestCount,
+    unit_price_yen: unitPriceYen,
+    summary_text: summaryText,
     raw_payload: params.receipt,
-  })
+  }).select('id').single()
 
   if (error) {
     if (String(error.code) === '23505') return { ok: false, duplicate: true }
     return { ok: false, error: error.message }
   }
-  return { ok: true }
+
+  const receiptRowId = Number((data as { id?: unknown } | null)?.id)
+  if (Number.isFinite(receiptRowId) && receiptRowId > 0) {
+    await indexLineRoomReceiptSearch(supabase, {
+      roomId: params.roomId,
+      storePartitionKey: params.storePartitionKey ?? null,
+      lineMessageId: params.lineMessageId,
+      receiptDate: receiptDateIso,
+      receiptDateText,
+      storeName: params.storeDisplayName,
+      taxAmountYen,
+      partyCount,
+      guestCount,
+      unitPriceYen,
+      summaryText: summaryText || params.summary || '',
+      grossSalesYen,
+      netSalesYen,
+      receiptTable,
+      receiptRowId,
+    })
+  }
+
+  return { ok: true, receiptRowId }
 }
 
 export async function loadMonthCumulativeTotalsForStoreTable(

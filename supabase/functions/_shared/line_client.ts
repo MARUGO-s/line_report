@@ -76,6 +76,33 @@ export function resolveChannelAccessToken(storeKey: string): string {
   return String(Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || '').trim()
 }
 
+export async function pushLineText(
+  toUserId: string,
+  text: string,
+  channelAccessToken: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const userId = String(toUserId ?? '').trim()
+  if (!userId.startsWith('U')) {
+    return { ok: false, error: 'invalid user id' }
+  }
+  const response = await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${channelAccessToken}`,
+    },
+    body: JSON.stringify({
+      to: userId,
+      messages: [{ type: 'text', text: String(text ?? '').slice(0, 4900) }],
+    }),
+  })
+  if (!response.ok) {
+    const errText = await response.text()
+    return { ok: false, error: `LINE push API ${response.status}: ${errText}` }
+  }
+  return { ok: true }
+}
+
 export function resolveGroqApiKey(): string {
   return String(Deno.env.get('GROQ_API_KEY') || '').trim()
 }

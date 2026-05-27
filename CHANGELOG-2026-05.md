@@ -12,6 +12,7 @@
 | [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md) | ルーム自動連携・セキュリティ |
 | [ROOM-PERMISSION-DETAIL-GUIDE.md](./ROOM-PERMISSION-DETAIL-GUIDE.md) | ルーム権限・カレンダー／Gmail 設定 |
 | [LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md) | LINE レシート解析の全体像 |
+| [LINE-SEARCH-PRESENTATION.md](./LINE-SEARCH-PRESENTATION.md) | **LINE 検索機能（プレゼン・説明用まとめ）** |
 | [pages-config.js](./pages-config.js) | 店舗キー・Webhook URL・表示名の単一ソース |
 
 ---
@@ -28,7 +29,7 @@
 | セキュリティ | **`?t=` 廃止・`lt` ログイン・LINE セッション 3 日保持・`/auth/logout`・CSP** |
 | DB | `store_webhook_tables.receipt_phones`、`reservation_customer_visit_history` など |
 | 会話検索 | ルーム別テーブル＋横断インデックス（**1年保持**）。**常時記録**し、検索は `message_search_enabled` ON のルームのみ |
-| LINE検索案内 | 「検索」等で Flex メニュー → 会話／予定／メディア／売上（`20260521`）の多段階検索（`line_search_bot.ts`） |
+| LINE検索案内 | **1対1:** 4種Flexメニュー（会話・予定・メディア・売上）＋グループ記録の横断検索。**グループ:** 売上のみ（日付8桁・ボタンなし） |
 | GAS | タブ先頭行に同期用ウォーターマーク、日次タブの更新日時 |
 
 **本番 Supabase プロジェクト:** `hocbnifuactbvmyjraxy`（hocbn）  
@@ -384,7 +385,125 @@ npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sh
 
 ---
 
-## 9. よくある質問
+## 9. LINE ルーム検索（直近変更・2026-05-27）
+
+### 9.1 概要
+
+店舗 Bot が入っている **招待グループ／複数人トーク** では、会話・メディア・予定・レシートなどの **記録・解析は従来どおり** 動きます。  
+**検索**はチャットの種類で UI とできることを分けます。
+
+| 場所 | `room_id` の目安 | 記録・レシート・予定など | 検索 |
+|------|------------------|--------------------------|------|
+| 招待グループ | `C…` で始まる | 有効 | **売上検索のみ**（日付8桁。**4ボタンの Flex は出さない**） |
+| 複数人トーク | `R…` で始まる | 有効 | 同上 |
+| 1対1（友だち登録） | `U…` で始まる | 有効 | **会話・予定・メディア・売上**（4ボタン Flex。グループ記録も横断検索） |
+
+#### グループ／複数人トークで「検索」と送ったとき
+
+- 返信は **段落分けした売上案内 Flex** ＋ **「売上（レシート）を検索する」ボタン1つのみ**（4種メニューは出さない）。
+- ボタン押下 → 日付8桁入力の案内 → 送信で売上結果（`buildGroupSalesDatePromptFlex` → `line_room_search_pending`）。
+- 本文に **1対1なら会話・予定・メディアも検索可**（グループ記録の横断検索）を記載。
+- 日付8桁を直接送っても売上検索可能（例: `20260521`）。
+- **売上検索の対象:** 当該店舗 webhook の `receipt_table`（例: `line_receipt__bistrocavacava`）に蓄積された **全ルーム分**。グループから検索してもルーム ID では絞らない（インデックス未登録分はレシートテーブルへフォールバック）。
+- 「会話検索」「予定検索」「メディア検索」と送った場合は、**1対1で検索できる**旨と、当ルームでは売上のみ可能な旨を案内。
+- 売上検索結果の Flex には「売上推移を見る」のみ（「検索メニュー」ボタンなし）。
+
+#### 1対1で「検索」と送ったとき
+
+- **4ボタン**の Flex（会話・予定・メディア・売上）。
+- 本文に「**グループ等で記録した会話・予定・メディアも、1対1から横断して検索できる**」旨を表示。
+- 会話・予定・メディアの検索は、会話検索等が ON の **全ルーム**を対象（直近1年）。
+- 売上検索は店舗の `receipt_table` を横断。
+
+#### チャット種別の判定（重要）
+
+`source.type` だけではなく、**`room_id` のプレフィックスを優先**します（連携済みテストグループで誤って4ボタンが出る不具合の修正）。
+
+| 関数 | 役割 |
+|------|------|
+| `isLineInvitedChatRoomId(roomId)` | `C…` または `R…` → 招待ルーム |
+| `isLineInvitedChatRoom(event, roomId)` | 上記 + `source.type` が `group` / `room` |
+| `isLineDirectMessageChat(event, roomId)` | 招待ルームでなければ 1対1 |
+| `buildSearchEntryReply()` | 招待ルーム → 売上案内テキスト／1対1 → 4ボタン Flex |
+
+実装: `supabase/functions/_shared/line_search_bot.ts`
+
+### 9.2 1対1での会話記録と検索範囲
+
+| 項目 | 1対1トーク | グループ／複数人トーク |
+|------|------------|------------------------|
+| 会話の記録 | **検索待ちのキーワード1通のみ記録しない**（「検索」「会話検索」等の操作トークは記録する） | 記録する（検索操作トークは記録スキップ可） |
+| 会話検索の範囲 | **会話検索ONの全ルーム**を横断（グループで溜めた会話もヒット） | 売上のみ（店舗 `receipt_table` 横断） |
+| 検索メニュー | 4ボタン Flex（いずれかのルームで機能ONなら会話等も可） | テキスト案内のみ（ボタンなし） |
+
+**記録のスキップ**
+
+| 対象 | 1対1 | グループ／複数人トーク |
+|------|------|------------------------|
+| 検索待ちのキーワード1通 | 記録しない | 記録しない |
+| 「検索」「会話検索」等の操作トーク | **記録する** | 記録スキップ可（従来どおり） |
+
+1対1では `shouldSkipPendingSearchKeywordRecording()` のみスキップ。検索結果表示時は、操作定型文や検索語と完全一致した行を結果から除外します。
+
+### 9.3 検索の流れ
+
+**1対1（会話・予定・メディア・売上）**
+
+1. 「検索」または Flex で種別選択 → `line_room_search_pending` に保存（**15分**有効）
+2. 次の1通をキーワード／日付として検索（**キーワード1通は記録しない**）
+3. 「キャンセル」または15分経過で解除
+
+**グループ／複数人トーク（売上のみ）**
+
+1. 「検索」→ 売上案内 Flex ＋「売上（レシート）を検索する」ボタン
+2. ボタン → 日付8桁入力案内 → 送信で売上検索（日付8桁の直接送信も可）
+
+秒単位の返信間隔制限はなく、**種別選択から15分以内の次メッセージ1通** が検索入力です。
+
+### 9.4 記録と検索結果
+
+- **常時記録:** `line_room_messages` 系・検索用アーカイブ（会話／予定／メディア／売上インデックス）
+- **グループ:** 検索操作トークは `line_room_search_excluded_messages` で除外可
+- **1対1:** 検索待ちキーワードのみ除外（操作トーク「検索」等は記録）
+- **会話検索結果:** ルーム名表示・本文全文・検索語完全一致行は結果から除外
+- **売上検索:** グループ・1対1とも店舗 `receipt_table` **横断**（全ルームのレシート）。Flex はレシート返信同型（メモ・roomID・修正/削除なし）
+
+### 9.4.1 トラブルシュート
+
+- **グループなのに4ボタンが出る:** `line-webhook` が未デプロイ、またはトーク内の **古い Flex**（修正前の4ボタン）をタップしている可能性があります。新しく「検索」と送り直してください。
+- **連携済みルーム（例: ビストロサバサバ テストグループ）:** `room_id` が `C…` なら招待ルーム扱いで売上のみになります。
+
+### 9.5 主な DB マイグレーション（検索関連）
+
+| ファイル | 内容 |
+|----------|------|
+| `20260527120000_*` 〜 | ルーム別メッセージ・検索アーカイブ |
+| `20260527140000_line_room_search_pending.sql` | 検索待ち（種別→キーワード） |
+| `20260527200000_room_search_archive_media_calendar_sales.sql` | メディア・予定・売上アーカイブと RPC |
+| `20260527210000_receipt_store_scoped_search.sql` | 店舗スコープ売上検索 |
+| `20260527213000_line_room_receipt_search_fields_and_rpc.sql` | 売上検索フィールド・RPC |
+| `20260527220000_line_room_search_excluded_messages.sql` | 検索操作メッセージの除外 |
+
+### 9.6 主な実装ファイル
+
+| パス | 役割 |
+|------|------|
+| `supabase/functions/_shared/line_search_bot.ts` | 検索メニュー・待ち受け・各種検索・**C/R と U の分岐**・`buildSearchEntryReply` |
+| `supabase/functions/_shared/line_room_search_archive.ts` | Webhook からのアーカイブ記録 |
+| `supabase/functions/_shared/line_room_messages.ts` | 会話メッセージ記録 |
+| `supabase/functions/line-webhook/index.ts` | Webhook 統合（記録は全チャット、検索 UI は room_id で分岐） |
+
+### 9.7 デプロイ
+
+```bash
+npx supabase functions deploy line-webhook --project-ref hocbnifuactbvmyjraxy
+```
+
+（検索用マイグレーション未適用の場合は先に `npx supabase db push`）
+
+---
+
+## 10. よくある質問
 
 ### Q. スプレッドシートを空にして双方向同期したのに DB のデータが戻った
 
@@ -403,6 +522,10 @@ npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sh
 
 **A.** はい。次のレシート画像から `line-webhook` が DB の `receipt_phones` を読みます。コード内フォールバックは DB が空のときのみ使われます。
 
+### Q. グループで「検索」すると4ボタン（会話・予定・メディア・売上）が出る
+
+**A.** 2026-05-27 以降は **招待ルーム（`C…` / `R…`）では売上案内テキストのみ** です。`line-webhook` を再デプロイし、**新しく「検索」と送り直して**ください。以前の4ボタン Flex をタップすると古いメニューが開きます。会話・予定・メディアは **Bot を友だち追加した1対1** から検索してください。
+
 ### Q. LINE から開くたびに管理トークンを入れないといけない
 
 **A.** 2026-05-23 以降は、LINE 経由で一度 `lt` からログインできれば **`lrst_` を端末に最大 3 日保持**します。次を確認してください。
@@ -414,7 +537,7 @@ npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sh
 
 ---
 
-## 10. 変更ファイル一覧（主要）
+## 11. 変更ファイル一覧（主要）
 
 | パス | 役割 |
 |------|------|
@@ -429,7 +552,9 @@ npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sh
 | `supabase/functions/_shared/admin_dashboard_link_auth.ts` | `lt` / `lrst_` 発行・TTL（LINE セッション 3 日） |
 | `auth-session.js` | ログイン保持・LINE `localStorage`・`lt` 交換 |
 | `supabase/functions/admin-api/index.ts` | REST ルーティング |
-| `supabase/functions/line-webhook/index.ts` | レシート受信 |
+| `supabase/functions/line-webhook/index.ts` | レシート受信・記録・検索（1対1のみ） |
+| `supabase/functions/_shared/line_search_bot.ts` | LINE 検索案内・実行 |
+| `supabase/functions/_shared/line_room_search_archive.ts` | 検索用アーカイブ記録 |
 | `supabase/functions/receipt-sheets-sync-cron/index.ts` | 同期 cron |
 | `index.html` | 管理画面・Webhook・電話 UI |
 | `analytics.html` | 売上分析・LINE 専用 UI |
@@ -439,4 +564,4 @@ npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sh
 
 ---
 
-*最終更新: 2026-05-23（LINE セッション 3 日・ドキュメント追記）*
+*最終更新: 2026-05-27（§9: グループは売上のみ・4ボタン非表示、1対1は4種横断検索、`C/R/U` 判定）*

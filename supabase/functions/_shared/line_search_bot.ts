@@ -4,6 +4,9 @@ import { lineReplyPayloadToMessages } from './receipt_correction.ts'
 import type { LineReplyPayload } from './receipt_types.ts'
 import { replyLineMessages } from './line_client.ts'
 import { formatYenAmount } from './receipt_parse.ts'
+import {
+  buildReceiptAnalyticsDashboardUri,
+} from './receipt_line_actions.ts'
 
 export type SearchKind = 'message' | 'calendar' | 'media' | 'sales'
 
@@ -37,6 +40,11 @@ const POSTBACK_MENU = 'srch=menu'
 const POSTBACK_PREFIX = 'srch='
 const POSTBACK_CANCEL = 'srch=cancel'
 
+const GROUP_OTHER_SEARCH_TEXT =
+  '会話検索・予定検索・メディア検索は、Botを友だち追加した1対1トークでもできます。' +
+  'グループ等で記録したデータも、1対1から横断して検索できます。\n\n' +
+  'このルームでは売上検索のみ可能です。日付8桁（例: 20260521）または月6桁（例: 202605）を送ってください。'
+
 type RoomSearchFlags = {
   bot_reply_hard_mute_enabled: boolean
   message_search_enabled: boolean
@@ -53,8 +61,17 @@ type LineBotEvent = {
   replyToken?: string
   postback?: { data?: string }
   source?: { type?: string; userId?: string; groupId?: string; roomId?: string }
-  message?: { type?: string; text?: string }
+  message?: { type?: string; text?: string; id?: string }
 }
+
+const SEARCH_CONTROL_TEXTS = new Set([
+  '検索', '検索ヘルプ', '検索の仕方', '検索方法', 'ヘルプ', '使い方', 'search', 'help',
+  '会話検索', 'トーク検索', '会話を検索',
+  '予定検索', 'カレンダー検索', '予定を検索',
+  'メディア検索', '画像検索', 'ファイル検索',
+  '売上検索', '売り上げ検索', 'レシート検索',
+  'キャンセル', 'やめる', 'cancel',
+])
 
 function normalizeTriggerText(text: string): string {
   return String(text ?? '').trim().replace(/\s+/g, '')
@@ -74,6 +91,54 @@ function resolveRoomId(event: LineBotEvent): string | null {
 function resolveUserId(event: LineBotEvent): string | null {
   const userId = event.source?.userId ? String(event.source.userId).trim() : ''
   return userId || null
+}
+
+/** 公式アカウントとの1対1トーク（source.type === user） */
+export function isLineDirectMessageEvent(event: LineBotEvent): boolean {
+  return String(event.source?.type ?? '').trim() === 'user'
+}
+
+/** 招待グループ（C…）または複数人トーク（R…） */
+export function isLineInvitedChatRoomId(roomId: string): boolean {
+  const id = String(roomId ?? '').trim()
+  return id.startsWith('C') || id.startsWith('R')
+}
+
+/** 招待ルーム上のトークか（source.type / groupId を最優先。room_id の U 誤判定を防ぐ） */
+export function isLineInvitedChatRoom(event: LineBotEvent, roomId: string): boolean {
+  const source = event.source || {}
+  const sourceType = String(source.type ?? '').trim().toLowerCase()
+  if (sourceType === 'group' || sourceType === 'room') return true
+  if (String(source.groupId ?? '').trim()) return true
+  if (String(source.roomId ?? '').trim()) return true
+  return isLineInvitedChatRoomId(roomId)
+}
+
+/** 1対1トークか（招待ルームでなければ1対1扱い） */
+export function isLineDirectMessageChat(event: LineBotEvent, roomId: string): boolean {
+  return !isLineInvitedChatRoom(event, roomId)
+}
+
+/** 1対1の room_id（LINE ユーザーID = U…。C/R は常に false） */
+export function isDirectMessageRoomId(roomId: string): boolean {
+  if (isLineInvitedChatRoomId(roomId)) return false
+  return String(roomId ?? '').trim().startsWith('U')
+}
+
+/** 1対1からの検索は全会話検索ONルームを横断。グループ等は当該ルームのみ */
+function resolveSearchScopeRoomId(roomId: string): string | null {
+  return isDirectMessageRoomId(roomId) ? null : roomId
+}
+
+function isLineSearchPostbackAction(action: SearchKind | 'menu' | 'cancel' | null): boolean {
+  return action !== null
+}
+
+function isLineSearchIntentText(text: string, flags: RoomSearchFlags | null): boolean {
+  if (isMenuTrigger(text) || detectKindTrigger(text)) return true
+  if (!flags) return false
+  const salesInput = parseSalesDateInput(text)
+  return !!(salesInput && (flags.receipt_midreport_enabled || flags.receipt_monthend_report_enabled))
 }
 
 function parsePostbackKind(data: string): SearchKind | 'menu' | 'cancel' | null {
@@ -107,7 +172,128 @@ function isCancelText(text: string): boolean {
   return t === 'キャンセル' || t === 'cancel' || t === 'やめる'
 }
 
-async function loadRoomSearchFlags(
+function isLineSearchControlText(text: string): boolean {
+  const compact = normalizeTriggerText(text).toLowerCase()
+  if (SEARCH_CONTROL_TEXTS.has(compact) || SEARCH_CONTROL_TEXTS.has(normalizeTriggerText(text))) {
+    return true
+  }
+  // 8桁: YYYYMMDD, 6桁: YYYYMM
+  return /^20\d{6}$/.test(compact) || /^20\d{4}$/.test(compact)
+}
+
+export async function shouldSkipLineSearchMessageRecording(
+  supabase: SupabaseClient,
+  roomId: string,
+  userId: string | null,
+  text: string,
+  options: { salesSearchAllowed?: boolean } = {},
+): Promise<boolean> {
+  const trimmed = String(text ?? '').trim()
+  if (!trimmed) return false
+  if (isLineSearchControlText(trimmed)) return true
+  if (isMenuTrigger(trimmed) || isCancelText(trimmed)) return true
+  if (detectKindTrigger(trimmed)) return true
+  if (options.salesSearchAllowed && parseSalesDateInput(trimmed)) return true
+  if (userId) {
+    const pending = await loadSearchPending(supabase, roomId, userId)
+    if (pending) return true
+  }
+  return false
+}
+
+/** 検索待ち中に送ったキーワード1通のみ記録しない（1対1・グループ共通） */
+export async function shouldSkipPendingSearchKeywordRecording(
+  supabase: SupabaseClient,
+  roomId: string,
+  userId: string | null,
+): Promise<boolean> {
+  if (!userId) return false
+  const pending = await loadSearchPending(supabase, roomId, userId)
+  return pending !== null
+}
+
+export async function registerSearchExcludedMessage(
+  supabase: SupabaseClient,
+  lineMessageId: string,
+  roomId: string,
+  textContent: string,
+): Promise<void> {
+  const mid = String(lineMessageId ?? '').trim()
+  if (!mid || !roomId) return
+
+  const { error: markError } = await supabase.rpc('mark_line_room_search_excluded_message', {
+    p_line_message_id: mid,
+    p_room_id: roomId,
+    p_text_content: textContent,
+  })
+  if (markError) {
+    console.error('mark_line_room_search_excluded_message failed:', markError.message)
+  }
+
+  const { error: purgeError } = await supabase.rpc('purge_line_message_from_search_archives', {
+    p_line_message_id: mid,
+    p_room_id: roomId,
+  })
+  if (purgeError) {
+    console.error('purge_line_message_from_search_archives failed:', purgeError.message)
+  }
+}
+
+async function loadRoomNameMap(
+  supabase: SupabaseClient,
+  roomIds: string[],
+): Promise<Map<string, string>> {
+  const unique = [...new Set(roomIds.filter(Boolean))]
+  const map = new Map<string, string>()
+  if (!unique.length) return map
+
+  const [{ data: settings }, { data: names }] = await Promise.all([
+    supabase.from('room_summary_settings').select('room_id, room_name').in('room_id', unique),
+    supabase.from('line_room_names').select('room_id, room_name').in('room_id', unique),
+  ])
+
+  for (const row of names || []) {
+    const id = String((row as { room_id?: unknown }).room_id || '').trim()
+    const name = String((row as { room_name?: unknown }).room_name || '').trim()
+    if (id && name) map.set(id, name)
+  }
+  for (const row of settings || []) {
+    const id = String((row as { room_id?: unknown }).room_id || '').trim()
+    const name = String((row as { room_name?: unknown }).room_name || '').trim()
+    if (id && name && !map.has(id)) map.set(id, name)
+  }
+
+  return map
+}
+
+function formatRoomLabel(roomId: string, roomNames: Map<string, string>): string | null {
+  const id = String(roomId || '').trim()
+  if (!id) return null
+  const name = String(roomNames.get(id) || '').trim()
+  if (!name || name === id) return null
+  return name
+}
+
+function flexFullTextBlocks(text: string, size: 'sm' | 'xs' = 'sm'): Array<Record<string, unknown>> {
+  const raw = String(text ?? '')
+  if (!raw.trim()) {
+    return [{ type: 'text', text: '（本文なし）', size, wrap: true }]
+  }
+  const maxChunk = 900
+  const blocks: Array<Record<string, unknown>> = []
+  for (let i = 0; i < raw.length; i += maxChunk) {
+    blocks.push({
+      type: 'text',
+      text: raw.slice(i, i + maxChunk),
+      size,
+      wrap: true,
+      ...(i > 0 ? { margin: 'xs' } : {}),
+    })
+  }
+  return blocks
+}
+
+export async function loadRoomSearchFlags(
   supabase: SupabaseClient,
   roomId: string,
 ): Promise<RoomSearchFlags | null> {
@@ -146,6 +332,64 @@ async function loadRoomSearchFlags(
     calendar_silent_auto_register_enabled: row.calendar_silent_auto_register_enabled === true,
     receipt_midreport_enabled: row.receipt_midreport_enabled !== false,
     receipt_monthend_report_enabled: row.receipt_monthend_report_enabled !== false,
+  }
+}
+
+/** 1対1検索: いずれかのルームでONになっている機能を利用可能にする */
+async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<RoomSearchFlags> {
+  const { data, error } = await supabase
+    .from('room_summary_settings')
+    .select(
+      'message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled',
+    )
+
+  if (error) {
+    console.error('loadDirectMessageSearchFlags failed:', error.message)
+    return {
+      bot_reply_hard_mute_enabled: false,
+      message_search_enabled: false,
+      message_search_library_enabled: false,
+      media_file_access_enabled: false,
+      calendar_ai_auto_create_enabled: false,
+      calendar_silent_auto_register_enabled: false,
+      receipt_midreport_enabled: true,
+      receipt_monthend_report_enabled: true,
+    }
+  }
+
+  const rows = Array.isArray(data) ? data : []
+  const any = (col: string) =>
+    rows.some((row) => (row as Record<string, unknown>)[col] === true)
+  const anyReceiptOn = (col: string) =>
+    rows.length === 0 || rows.some((row) => (row as Record<string, unknown>)[col] !== false)
+
+  return {
+    bot_reply_hard_mute_enabled: false,
+    message_search_enabled: any('message_search_enabled'),
+    message_search_library_enabled: any('message_search_library_enabled'),
+    media_file_access_enabled: any('media_file_access_enabled'),
+    calendar_ai_auto_create_enabled: any('calendar_ai_auto_create_enabled'),
+    calendar_silent_auto_register_enabled: any('calendar_silent_auto_register_enabled'),
+    receipt_midreport_enabled: anyReceiptOn('receipt_midreport_enabled'),
+    receipt_monthend_report_enabled: anyReceiptOn('receipt_monthend_report_enabled'),
+  }
+}
+
+/** 1対1は店舗ルームの集約フラグ＋個人チャットのミュートのみ */
+export async function loadSearchFlagsForContext(
+  supabase: SupabaseClient,
+  roomId: string,
+): Promise<RoomSearchFlags | null> {
+  if (!isDirectMessageRoomId(roomId)) {
+    return loadRoomSearchFlags(supabase, roomId)
+  }
+  const [aggregate, personal] = await Promise.all([
+    loadDirectMessageSearchFlags(supabase),
+    loadRoomSearchFlags(supabase, roomId),
+  ])
+  return {
+    ...aggregate,
+    bot_reply_hard_mute_enabled: personal?.bot_reply_hard_mute_enabled === true,
   }
 }
 
@@ -220,30 +464,191 @@ function kindLabel(kind: SearchKind): string {
 function kindDescription(kind: SearchKind): string {
   if (kind === 'message') {
     return [
-      'このルームのトークをキーワードで探します（保存期間: 直近1年）。',
-      '※会話は常に記録されますが、検索できるのは「会話検索」がONのルームだけです。',
+      '招待されているグループ等も含め、会話検索がONのルームのトークを横断してキーワード検索します（直近1年）。',
+      '※会話は常に記録されますが、検索結果に含まれるのは「会話検索」がONのルームだけです。',
       '次のメッセージで、探したい語句をそのまま送ってください。',
       '例: 予約 変更 / 田中',
     ].join('\n')
   }
   if (kind === 'calendar') {
     return [
-      'このルームに登録された予定を、キーワードで探します（直近1年）。',
+      '招待されているグループ等も含め、予定機能がONのルームの予定・予定関連トークを横断してキーワード検索します（直近1年）。',
+      '※予定関連のトークは常に記録されますが、検索結果に含まれるのは予定機能がONのルームだけです。',
       '次のメッセージで、件名やメモに含まれそうな語句を送ってください。',
       '例: 面接 / 貸切',
     ].join('\n')
   }
   if (kind === 'media') {
     return [
-      '保存された画像・動画・ファイルを、キーワードで探します。',
+      '招待されているグループ等も含め、「メディア閲覧」がONのルームに保存された画像・動画・ファイルを横断してキーワード検索します（直近1年）。',
+      '※メディアは常に記録されますが、検索結果に含まれるのは「メディア閲覧」がONのルームだけです。',
       '次のメッセージで、ファイル名やメモに含まれる語句を送ってください。',
     ].join('\n')
   }
   return [
-    'このルームのレシート売上を、日付で探します。',
+    'このルームのレシート売上を、日付で探します（直近1年）。',
+    '※売上はレシート保存時に常に記録されますが、検索できるのはレシートレポート系がONのルームだけです。',
     '次のメッセージで日付を8桁で送ってください。',
     '例: 20260521（2026年5月21日）',
   ].join('\n')
+}
+
+function flexParagraph(
+  text: string,
+  opts: { size?: string; weight?: string; color?: string; margin?: string } = {},
+): Record<string, unknown> {
+  return {
+    type: 'text',
+    text,
+    size: opts.size ?? 'sm',
+    weight: opts.weight,
+    color: opts.color ?? '#666666',
+    wrap: true,
+    ...(opts.margin ? { margin: opts.margin } : {}),
+  }
+}
+
+function buildGroupSalesSearchGuideText(flags: RoomSearchFlags): string {
+  if (!kindAllowed(flags, 'sales')) {
+    return 'このルームでは売上検索がOFFです。管理画面のルーム設定でレシートレポートを有効にしてください。'
+  }
+  return [
+    'このルームでは売上（レシート）検索のみ利用できます。',
+    '下のボタンから日付を送って検索してください。',
+    '会話・予定・メディアは1対1トークでも検索できます。',
+  ].join('\n')
+}
+
+/** 招待ルーム：売上案内＋「売上を検索する」ボタン（4種メニューは出さない） */
+function buildGroupSalesSearchGuideFlex(flags: RoomSearchFlags): Record<string, unknown> {
+  const salesEnabled = kindAllowed(flags, 'sales')
+  const bodyContents: Array<Record<string, unknown>> = [
+    flexParagraph('このルームでできる検索', { size: 'md', weight: 'bold', color: '#111111' }),
+    flexParagraph('売上（レシート）のみ', { size: 'sm', color: '#111111', margin: 'xs' }),
+    { type: 'separator', margin: 'lg' },
+    flexParagraph('売上（レシート）を調べる', { weight: 'bold', color: '#111111' }),
+    flexParagraph(
+      'ボタンを押したあと、日付を8桁で送ると、この店舗に蓄積されたレシート売上を表示します（全ルーム合算）。',
+      { margin: 'sm' },
+    ),
+    flexParagraph('例：20260521（2026年5月21日）', { size: 'xs', color: '#888888', margin: 'sm' }),
+    { type: 'separator', margin: 'lg' },
+    flexParagraph('1対1トークでは', { weight: 'bold', color: '#111111' }),
+    flexParagraph('会話検索・予定検索・メディア検索も利用できます。', { margin: 'sm' }),
+    flexParagraph(
+      'グループ等で記録した過去データも、Botを友だち追加した1対1から横断して検索できます（直近1年）。',
+      { size: 'xs', color: '#888888', margin: 'sm' },
+    ),
+  ]
+
+  if (!salesEnabled) {
+    bodyContents.push(
+      flexParagraph(
+        '※このルームでは売上検索がOFFです。管理画面のルーム設定でレシートレポートを有効にしてください。',
+        { color: '#E53935', margin: 'md' },
+      ),
+    )
+  }
+
+  const bubble: Record<string, unknown> = {
+    type: 'bubble',
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      paddingAll: '16px',
+      contents: bodyContents,
+    },
+  }
+
+  if (salesEnabled) {
+    bubble.footer = {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      paddingAll: '12px',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          height: 'sm',
+          action: {
+            type: 'postback',
+            label: '売上（レシート）を検索する',
+            data: 'srch=sal',
+            displayText: '売上検索',
+          },
+        },
+      ],
+    }
+  }
+
+  return {
+    type: 'flex',
+    altText: 'このルームでは売上検索のみ。ボタンから日付を入力',
+    contents: bubble,
+  }
+}
+
+/** 招待ルーム：売上検索ボタン押下後の日付入力待ち */
+function buildGroupSalesDatePromptFlex(): Record<string, unknown> {
+  return {
+    type: 'flex',
+    altText: '売上検索 — 日付を8桁で送ってください',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: '16px',
+        contents: [
+          flexParagraph('売上（レシート）検索', { size: 'md', weight: 'bold', color: '#111111' }),
+          { type: 'separator', margin: 'md' },
+          flexParagraph('次のメッセージで、調べたい日付を送ってください。', { margin: 'sm' }),
+          flexParagraph('8桁の数字（西暦・月・日）', { weight: 'bold', color: '#111111', margin: 'md' }),
+          flexParagraph('例：20260521', { size: 'md', weight: 'bold', color: '#1DB446', margin: 'sm' }),
+          flexParagraph('→ 2026年5月21日の売上を表示します', { size: 'xs', color: '#888888', margin: 'xs' }),
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: '12px',
+        contents: [
+          {
+            type: 'button',
+            style: 'secondary',
+            height: 'sm',
+            action: {
+              type: 'postback',
+              label: 'キャンセル',
+              data: POSTBACK_CANCEL,
+              displayText: 'キャンセル',
+            },
+          },
+        ],
+      },
+    },
+  }
+}
+
+function buildSearchEntryReply(
+  flags: RoomSearchFlags,
+  event: LineBotEvent,
+  roomId: string,
+): LineReplyPayload {
+  const invited = isLineInvitedChatRoom(event, roomId)
+  if (invited) {
+    console.log('line_search: invited room → sales-only guide', {
+      roomId,
+      sourceType: event.source?.type,
+      groupId: event.source?.groupId,
+    })
+    return buildGroupSalesSearchGuideFlex(flags)
+  }
+  return buildSearchMenuFlex(flags)
 }
 
 function buildSearchMenuFlex(flags: RoomSearchFlags): Record<string, unknown> {
@@ -268,7 +673,7 @@ function buildSearchMenuFlex(flags: RoomSearchFlags): Record<string, unknown> {
 
   return {
     type: 'flex',
-    altText: '検索メニュー — 種類を選んでからキーワードや日付を送ると過去データを検索できます',
+    altText: '検索メニュー — 1対1で会話・予定・メディア・売上を検索',
     contents: {
       type: 'bubble',
       body: {
@@ -278,7 +683,7 @@ function buildSearchMenuFlex(flags: RoomSearchFlags): Record<string, unknown> {
         contents: [
           {
             type: 'text',
-            text: '過去データの検索',
+            text: '過去データの検索（1対1）',
             weight: 'bold',
             size: 'md',
             wrap: true,
@@ -293,7 +698,8 @@ function buildSearchMenuFlex(flags: RoomSearchFlags): Record<string, unknown> {
           },
           {
             type: 'text',
-            text: '会話・予定は直近1年分が対象です。',
+            text:
+              '会話・予定・メディアは、招待されているグループ等で記録した過去データも、ここ（1対1）から横断して検索できます（直近1年）。',
             size: 'xs',
             color: '#888888',
             wrap: true,
@@ -308,6 +714,23 @@ function buildSearchMenuFlex(flags: RoomSearchFlags): Record<string, unknown> {
         contents: buttons,
       },
     },
+  }
+}
+
+function buildSearchMenuFooter(roomId: string): Record<string, unknown> | undefined {
+  if (!isDirectMessageRoomId(roomId)) return undefined
+  return {
+    type: 'box',
+    layout: 'vertical',
+    spacing: 'sm',
+    contents: [
+      {
+        type: 'button',
+        style: 'secondary',
+        height: 'sm',
+        action: { type: 'postback', label: '検索メニュー', data: POSTBACK_MENU, displayText: '検索' },
+      },
+    ],
   }
 }
 
@@ -383,6 +806,30 @@ function parseSalesDateYyyymmdd(text: string): string | null {
   return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`
 }
 
+type SalesDateInput =
+  | { mode: 'day'; iso: string; compact: string }
+  | { mode: 'month'; year: number; month: number; yyyymm: string; fromIso: string; toIsoExclusive: string }
+
+function parseSalesDateInput(text: string): SalesDateInput | null {
+  const compact = normalizeTriggerText(text)
+  const dayIso = parseSalesDateYyyymmdd(compact)
+  if (dayIso) return { mode: 'day', iso: dayIso, compact }
+
+  const m = /^20(\d{2})(\d{2})$/.exec(compact)
+  if (!m) return null
+  const year = Number(compact.slice(0, 4))
+  const month = Number(compact.slice(4, 6))
+  if (!Number.isFinite(year) || year < 2000 || year > 2100) return null
+  if (!Number.isFinite(month) || month < 1 || month > 12) return null
+
+  const fromIso = `${compact.slice(0, 4)}-${compact.slice(4, 6)}-01`
+  const nextYear = month === 12 ? year + 1 : year
+  const nextMonth = month === 12 ? 1 : month + 1
+  const mm = String(nextMonth).padStart(2, '0')
+  const toIsoExclusive = `${String(nextYear)}-${mm}-01`
+  return { mode: 'month', year, month, yyyymm: compact, fromIso, toIsoExclusive }
+}
+
 function truncateLine(text: string, max = 120): string {
   const s = String(text ?? '').replace(/\s+/g, ' ').trim()
   if (s.length <= max) return s
@@ -391,151 +838,557 @@ function truncateLine(text: string, max = 120): string {
 
 async function executeMessageSearch(
   supabase: SupabaseClient,
-  roomId: string,
+  chatRoomId: string,
   query: string,
-): Promise<string> {
+): Promise<LineReplyPayload> {
+  const scopeRoomId = resolveSearchScopeRoomId(chatRoomId)
   const { data, error } = await supabase.rpc('search_line_room_messages', {
     p_query: query,
-    p_room_id: roomId,
+    p_room_id: scopeRoomId,
     p_limit: MAX_RESULT_LINES,
     p_offset: 0,
   })
   if (error) return `会話検索に失敗しました: ${error.message}`
-  const rows = Array.isArray(data) ? data : []
-  if (!rows.length) return `「${query}」に一致する会話は見つかりませんでした。`
+  const queryNorm = normalizeTriggerText(query).toLowerCase()
+  const rows = (Array.isArray(data) ? data : []).filter((row) => {
+    const r = row as Record<string, unknown>
+    const body = String(r.text_content || '').trim()
+    if (isLineSearchControlText(body)) return false
+    // 検索入力そのもの（例: キーワードのみ送った行）は結果から除外
+    if (queryNorm && normalizeTriggerText(body).toLowerCase() === queryNorm) return false
+    return true
+  })
+  if (!rows.length) {
+    return {
+      type: 'flex',
+      altText: `会話検索 「${query}」0件`,
+      contents: {
+        type: 'bubble',
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: `会話検索「${query}」`, weight: 'bold', size: 'md', wrap: true },
+            { type: 'text', text: '一致する会話は見つかりませんでした。', size: 'sm', color: '#666666', wrap: true },
+          ],
+        },
+      },
+    }
+  }
 
-  const total = Number((rows[0] as { total_count?: unknown }).total_count ?? rows.length)
-  const lines = [`【会話検索】「${query}」${total}件（上位${rows.length}件）`]
+  const total = rows.length
+  const roomIds = rows.map((row) => String((row as { room_id?: unknown }).room_id || '').trim()).filter(Boolean)
+  const roomNames = await loadRoomNameMap(supabase, roomIds)
+
+  const bodyContents: Array<Record<string, unknown>> = [
+    { type: 'text', text: `会話検索「${query}」`, weight: 'bold', size: 'md', wrap: true },
+    { type: 'text', text: `${total}件（上位${rows.length}件）`, size: 'sm', color: '#666666', margin: 'sm' },
+  ]
   for (const row of rows) {
     const r = row as Record<string, unknown>
+    const rid = String(r.room_id || '').trim()
     const at = String(r.created_at || '').slice(0, 16).replace('T', ' ')
-    const body = truncateLine(String(r.text_content || ''))
-    lines.push(`・${at}\n  ${body}`)
+    const body = String(r.text_content || '')
+    const roomLabel = formatRoomLabel(rid, roomNames)
+    const blockContents: Array<Record<string, unknown>> = []
+    if (roomLabel) {
+      blockContents.push({
+        type: 'text',
+        text: `ルーム: ${roomLabel}`,
+        size: 'xs',
+        color: '#666666',
+        weight: 'bold',
+        wrap: true,
+      })
+    }
+    blockContents.push({
+      type: 'text',
+      text: at || '-',
+      size: 'xs',
+      color: '#888888',
+      wrap: true,
+      margin: roomLabel ? 'xs' : undefined,
+    })
+    blockContents.push(...flexFullTextBlocks(body, 'sm'))
+    bodyContents.push({
+      type: 'box',
+      layout: 'vertical',
+      margin: 'md',
+      spacing: 'xs',
+      contents: blockContents,
+    })
   }
-  lines.push('\n別の語句で探す場合は「検索」と送るか、ボタンから選び直してください。')
-  return lines.join('\n')
+  const footer = buildSearchMenuFooter(chatRoomId)
+  return {
+    type: 'flex',
+    altText: `会話検索 ${query} ${total}件`,
+    contents: {
+      type: 'bubble',
+      body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: bodyContents },
+      ...(footer ? { footer } : {}),
+    },
+  }
 }
 
 async function executeCalendarSearch(
   supabase: SupabaseClient,
-  roomId: string,
+  chatRoomId: string,
   query: string,
-): Promise<string> {
+): Promise<LineReplyPayload> {
+  const scopeRoomId = resolveSearchScopeRoomId(chatRoomId)
   const { data, error } = await supabase.rpc('search_line_room_calendar_events', {
     p_query: query,
-    p_room_id: roomId,
+    p_room_id: scopeRoomId,
     p_limit: MAX_RESULT_LINES,
     p_offset: 0,
   })
   if (error) return `予定検索に失敗しました: ${error.message}`
   const rows = Array.isArray(data) ? data : []
-  if (!rows.length) return `「${query}」に一致する予定は見つかりませんでした。`
+  if (!rows.length) {
+    return {
+      type: 'flex',
+      altText: `予定検索 「${query}」0件`,
+      contents: {
+        type: 'bubble',
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: `予定検索「${query}」`, weight: 'bold', size: 'md', wrap: true },
+            { type: 'text', text: '一致する予定は見つかりませんでした。', size: 'sm', color: '#666666', wrap: true },
+          ],
+        },
+      },
+    }
+  }
 
   const total = Number((rows[0] as { total_count?: unknown }).total_count ?? rows.length)
-  const lines = [`【予定検索】「${query}」${total}件`]
+  const bodyContents: Array<Record<string, unknown>> = [
+    { type: 'text', text: `予定検索「${query}」`, weight: 'bold', size: 'md', wrap: true },
+    { type: 'text', text: `${total}件（上位${rows.length}件）`, size: 'sm', color: '#666666', margin: 'sm' },
+  ]
   for (const row of rows) {
     const r = row as Record<string, unknown>
     const when = String(r.starts_at || r.created_at || '').slice(0, 16).replace('T', ' ')
     const title = truncateLine(String(r.event_title || '（無題）'))
-    lines.push(`・${when} ${title}`)
+    const desc = truncateLine(String(r.event_description || ''), 80)
+    bodyContents.push({
+      type: 'box',
+      layout: 'vertical',
+      margin: 'md',
+      spacing: 'xs',
+      contents: [
+        { type: 'text', text: `${when || '-'} ${title}`, size: 'sm', weight: 'bold', wrap: true },
+        ...(desc ? [{ type: 'text', text: desc, size: 'xs', color: '#666666', wrap: true }] : []),
+      ],
+    })
   }
-  return lines.join('\n')
+  const calFooter = buildSearchMenuFooter(chatRoomId)
+  return {
+    type: 'flex',
+    altText: `予定検索 ${query} ${total}件`,
+    contents: {
+      type: 'bubble',
+      body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: bodyContents },
+      ...(calFooter ? { footer: calFooter } : {}),
+    },
+  }
 }
 
 async function executeMediaSearch(
   supabase: SupabaseClient,
-  roomId: string,
+  chatRoomId: string,
   query: string,
   includeLibrary: boolean,
-): Promise<string> {
-  const esc = query.replace(/,/g, ' ').replace(/[%_]/g, '').slice(0, 80)
-  const ilikeFilter = `original_file_name.ilike.%${esc}%,content_preview.ilike.%${esc}%`
-  const { data: mediaRows, error: mediaError } = await supabase
-    .from('line_message_media')
-    .select('media_type, original_file_name, content_preview, created_at')
-    .eq('room_id', roomId)
-    .or(ilikeFilter)
-    .order('created_at', { ascending: false })
-    .limit(MAX_RESULT_LINES)
+): Promise<LineReplyPayload> {
+  const scopeRoomId = resolveSearchScopeRoomId(chatRoomId)
+  const { data: mediaData, error: mediaError } = await supabase.rpc('search_line_room_media_search', {
+    p_query: query,
+    p_room_id: scopeRoomId,
+    p_limit: MAX_RESULT_LINES,
+    p_offset: 0,
+  })
 
   if (mediaError) return `メディア検索に失敗しました: ${mediaError.message}`
 
-  const lines: string[] = [`【メディア検索】「${query}」`]
-  const media = Array.isArray(mediaRows) ? mediaRows : []
+  const bodyContents: Array<Record<string, unknown>> = [
+    { type: 'text', text: `メディア検索「${query}」`, weight: 'bold', size: 'md', wrap: true },
+  ]
+  const media = Array.isArray(mediaData) ? mediaData : []
   if (media.length) {
-    lines.push(`メディア ${media.length}件:`)
+    const total = Number((media[0] as { total_count?: unknown }).total_count ?? media.length)
+    bodyContents.push({ type: 'text', text: `メディア ${total}件（上位${media.length}件）`, size: 'sm', color: '#666666', margin: 'sm' })
     for (const row of media) {
       const r = row as Record<string, unknown>
       const at = String(r.created_at || '').slice(0, 16).replace('T', ' ')
       const name = truncateLine(String(r.original_file_name || r.content_preview || r.media_type || 'file'))
-      lines.push(`・${at} [${r.media_type}] ${name}`)
+      bodyContents.push({
+        type: 'box',
+        layout: 'vertical',
+        margin: 'md',
+        spacing: 'xs',
+        contents: [
+          { type: 'text', text: `[${r.media_type}] ${name}`, size: 'sm', weight: 'bold', wrap: true },
+          { type: 'text', text: at || '-', size: 'xs', color: '#888888', wrap: true },
+        ],
+      })
     }
   }
 
   if (includeLibrary) {
-    const docFilter = `original_file_name.ilike.%${esc}%,extracted_text.ilike.%${esc}%`
-    const { data: docRows, error: docError } = await supabase
-      .from('line_documents')
-      .select('original_file_name, mime_type, created_at')
-      .eq('room_id', roomId)
-      .or(docFilter)
-      .order('created_at', { ascending: false })
-      .limit(MAX_RESULT_LINES)
+    const { data: docData, error: docError } = await supabase.rpc('search_line_room_document_search', {
+      p_query: query,
+      p_room_id: scopeRoomId,
+      p_limit: MAX_RESULT_LINES,
+      p_offset: 0,
+    })
 
-    if (!docError && Array.isArray(docRows) && docRows.length) {
-      lines.push(`資料 ${docRows.length}件:`)
-      for (const row of docRows) {
+    if (!docError && Array.isArray(docData) && docData.length) {
+      const docTotal = Number((docData[0] as { total_count?: unknown }).total_count ?? docData.length)
+      bodyContents.push({ type: 'separator', margin: 'md' })
+      bodyContents.push({ type: 'text', text: `資料 ${docTotal}件（上位${docData.length}件）`, size: 'sm', color: '#666666', margin: 'md' })
+      for (const row of docData) {
         const r = row as Record<string, unknown>
         const at = String(r.created_at || '').slice(0, 16).replace('T', ' ')
-        lines.push(`・${at} ${truncateLine(String(r.original_file_name || ''))}`)
+        bodyContents.push({
+          type: 'box',
+          layout: 'vertical',
+          margin: 'md',
+          spacing: 'xs',
+          contents: [
+            { type: 'text', text: truncateLine(String(r.original_file_name || '')), size: 'sm', weight: 'bold', wrap: true },
+            { type: 'text', text: at || '-', size: 'xs', color: '#888888', wrap: true },
+          ],
+        })
       }
     }
   }
 
-  if (lines.length === 1) {
-    return `「${query}」に一致するメディア・資料は見つかりませんでした。`
+  if (bodyContents.length === 1) {
+    return {
+      type: 'flex',
+      altText: `メディア検索 「${query}」0件`,
+      contents: {
+        type: 'bubble',
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: `メディア検索「${query}」`, weight: 'bold', size: 'md', wrap: true },
+            { type: 'text', text: '一致するメディア・資料は見つかりませんでした。', size: 'sm', color: '#666666', wrap: true },
+          ],
+        },
+      },
+    }
   }
-  return lines.join('\n')
+  const mediaFooter = buildSearchMenuFooter(chatRoomId)
+  return {
+    type: 'flex',
+    altText: `メディア検索 ${query}`,
+    contents: {
+      type: 'bubble',
+      body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: bodyContents },
+      ...(mediaFooter ? { footer: mediaFooter } : {}),
+    },
+  }
 }
 
 async function executeSalesSearch(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
   roomId: string,
-  yyyymmdd: string,
-): Promise<string> {
-  const iso = parseSalesDateYyyymmdd(yyyymmdd)
-  if (!iso) {
-    return '日付の形式が正しくありません。8桁で送ってください（例: 20260521）。'
+  yyyymmddOrYyyymm: string,
+): Promise<LineReplyPayload> {
+  const salesInput = parseSalesDateInput(yyyymmddOrYyyymm)
+  if (!salesInput) {
+    return '日付の形式が正しくありません。日付8桁（例: 20260521）または月6桁（例: 202605）で送ってください。'
   }
 
   const receiptTable = String(registry.receipt_table || '').trim()
-  if (!receiptTable) return 'この店舗の売上テーブルが見つかりません。'
+  if (!receiptTable) {
+    return 'この店舗の売上テーブルが見つかりません。'
+  }
 
-  const { data, error } = await supabase
-    .from(receiptTable)
-    .select('receipt_date, gross_sales_yen, net_sales_yen, party_count, guest_count, summary_text, created_at')
-    .eq('room_id', roomId)
-    .eq('receipt_date', iso)
-    .order('created_at', { ascending: false })
-    .limit(MAX_RESULT_LINES)
+  // 月次（YYYYMM）: 合計金額・人数・組数（会計組数）を返す
+  if (salesInput.mode === 'month') {
+    const { data, error } = await supabase.rpc('search_line_room_receipt_month_summary_by_receipt_table', {
+      p_receipt_table: receiptTable,
+      p_room_id: null,
+      p_from_date: salesInput.fromIso,
+      p_to_date_exclusive: salesInput.toIsoExclusive,
+    })
+    if (error) return `売上（月次）検索に失敗しました: ${error.message}`
+    const row = (Array.isArray(data) && data.length ? data[0] : null) as Record<string, unknown> | null
+    const totalGross = row?.total_gross_sales_yen
+    const totalParty = row?.total_party_count
+    const totalGuest = row?.total_guest_count
+    const receiptCount = row?.receipt_count
+
+    const toNumberOrNull = (v: unknown): number | null => {
+      const n = typeof v === 'number' ? v : Number(v)
+      return Number.isFinite(n) ? n : null
+    }
+    const yenOrDash = (v: unknown) => {
+      const n = toNumberOrNull(v)
+      return n == null ? '-' : formatYenAmount(n)
+    }
+    const countOrDash = (v: unknown, unit: string) => {
+      const n = toNumberOrNull(v)
+      return n == null ? '-' : `${Math.round(n)}${unit}`
+    }
+
+    const storeName = String(registry.store_partition_key ?? '').trim() || '店舗'
+    const monthJa = `${salesInput.year}年${salesInput.month}月`
+    const monthTarget = `${salesInput.yyyymm.slice(0, 4)}-${salesInput.yyyymm.slice(4, 6)}`
+    const trendUrl = buildReceiptAnalyticsDashboardUri(registry.store_partition_key, monthTarget)
+
+    return {
+      type: 'flex',
+      altText: `売上（月次） ${monthJa}`,
+      contents: {
+        type: 'bubble',
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: `【売上（月次）】${monthJa}`, weight: 'bold', size: 'md', wrap: true },
+            { type: 'text', text: storeName, size: 'xs', color: '#666666', wrap: true },
+            { type: 'separator', margin: 'md' },
+            {
+              type: 'box',
+              layout: 'vertical',
+              margin: 'md',
+              spacing: 'sm',
+              contents: [
+                { type: 'text', text: `合計（税込）: ${yenOrDash(totalGross)}`, size: 'sm', wrap: true },
+                { type: 'text', text: `合計組数: ${countOrDash(totalParty, ' 組')}`, size: 'sm', wrap: true },
+                { type: 'text', text: `合計人数: ${countOrDash(totalGuest, ' 人')}`, size: 'sm', wrap: true },
+                { type: 'text', text: `レシート件数: ${countOrDash(receiptCount, ' 件')}`, size: 'sm', color: '#666666', wrap: true },
+              ],
+            },
+          ],
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            ...(trendUrl
+              ? [{
+                type: 'button',
+                style: 'link',
+                height: 'sm',
+                action: { type: 'uri', label: 'ダッシュボードを見る', uri: trendUrl },
+              }]
+              : []),
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: { type: 'postback', label: '検索メニューに戻る', data: POSTBACK_MENU, displayText: '検索' },
+            },
+          ],
+        },
+      },
+    }
+  }
+
+  const iso = salesInput.iso
+
+  // 店舗 webhook の receipt_table で横断（グループ・1対1どちらもルーム ID では絞らない）
+  const { data, error } = await supabase.rpc('search_line_room_receipt_search_by_receipt_table', {
+    p_receipt_table: receiptTable,
+    p_room_id: null,
+    p_receipt_date: iso,
+    p_limit: MAX_RESULT_LINES,
+    p_offset: 0,
+  })
 
   if (error) return `売上検索に失敗しました: ${error.message}`
-  const rows = Array.isArray(data) ? data : []
-  if (!rows.length) {
-    return `【売上検索】${iso} のレシートはこのルームにありません。`
+  let rows = Array.isArray(data) ? data : []
+
+  // Historical rows: 0件だけでなく、過去インデックスが新カラム未埋めの場合も再取得する
+  const needsBackfillFields =
+    rows.length > 0
+    && ((rows[0] as Record<string, unknown>).tax_amount_yen == null
+      || (rows[0] as Record<string, unknown>).party_count == null
+      || (rows[0] as Record<string, unknown>).guest_count == null
+      || (rows[0] as Record<string, unknown>).unit_price_yen == null
+      || (rows[0] as Record<string, unknown>).store_name == null
+      || (rows[0] as Record<string, unknown>).receipt_date_text == null)
+
+  // Fallback: line_room_receipt_search 未登録・旧行は店舗レシートテーブルから日付一致で取得
+  if (!rows.length || needsBackfillFields) {
+    const y = Number(iso.slice(0, 4))
+    const mo = Number(iso.slice(5, 7))
+    const d = Number(iso.slice(8, 10))
+    const jaDateLabel = Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(d)
+      ? `${y}年${mo}月${d}日`
+      : ''
+    const legacySelect =
+      'id, room_id, line_message_id, receipt_date, receipt_date_text, store_name, tax_amount_yen, party_count, guest_count, unit_price_yen, gross_sales_yen, net_sales_yen, summary_text, created_at'
+
+    let legacyQuery = supabase
+      .from(receiptTable)
+      .select(legacySelect)
+      .order('created_at', { ascending: false })
+      .limit(MAX_RESULT_LINES)
+
+    if (jaDateLabel) {
+      legacyQuery = legacyQuery.or(`receipt_date.eq.${iso},receipt_date_text.ilike.%${jaDateLabel}%`)
+    } else {
+      legacyQuery = legacyQuery.eq('receipt_date', iso)
+    }
+
+    const { data: legacyRows, error: legacyError } = await legacyQuery
+
+    if (legacyError) return `売上検索に失敗しました: ${legacyError.message}`
+    rows = Array.isArray(legacyRows) ? legacyRows : []
+
+    // Best-effort reindex for next searches (room_id is preserved from legacy rows).
+    if (rows.length) {
+      for (const row of rows) {
+        const r = row as Record<string, unknown>
+        const rRoomId = String(r.room_id || '').trim() || roomId
+        const receiptRowId = Number(r.id)
+        if (!Number.isFinite(receiptRowId) || receiptRowId <= 0) continue
+        try {
+          await supabase.rpc('upsert_line_room_receipt_search', {
+            p_room_id: rRoomId,
+            p_store_partition_key: registry.store_partition_key || null,
+            p_line_message_id: r.line_message_id ? String(r.line_message_id) : null,
+            p_receipt_date: iso,
+              p_receipt_date_text: r.receipt_date_text ? String(r.receipt_date_text) : null,
+              p_store_name: r.store_name ? String(r.store_name) : null,
+            p_summary_text: String(r.summary_text || ''),
+            p_gross_sales_yen: r.gross_sales_yen == null ? null : Number(r.gross_sales_yen),
+            p_net_sales_yen: r.net_sales_yen == null ? null : Number(r.net_sales_yen),
+              p_tax_amount_yen: r.tax_amount_yen == null ? null : Number(r.tax_amount_yen),
+              p_party_count: r.party_count == null ? null : Number(r.party_count),
+              p_guest_count: r.guest_count == null ? null : Number(r.guest_count),
+              p_unit_price_yen: r.unit_price_yen == null ? null : Number(r.unit_price_yen),
+            p_receipt_table: receiptTable,
+            p_receipt_row_id: receiptRowId,
+          })
+        } catch (reindexErr) {
+          const msg = reindexErr instanceof Error ? reindexErr.message : String(reindexErr)
+          console.error('upsert_line_room_receipt_search fallback reindex failed:', msg)
+        }
+      }
+    }
   }
 
-  const lines = [`【売上検索】${iso} — ${rows.length}件`]
-  for (const row of rows) {
-    const r = row as Record<string, unknown>
-    const gross = r.gross_sales_yen != null ? formatYenAmount(Number(r.gross_sales_yen)) : '-'
-    const net = r.net_sales_yen != null ? formatYenAmount(Number(r.net_sales_yen)) : '-'
-    const party = r.party_count != null ? `${r.party_count}組` : ''
-    const summary = truncateLine(String(r.summary_text || ''))
-    lines.push(`・総売上 ${gross} / 純売上 ${net} ${party}\n  ${summary}`)
+  if (!rows.length) {
+    return `【売上検索】${iso} のレシートは店舗ボットのデータにもありません。`
   }
-  return lines.join('\n')
+
+  const NEGATIVE_COLOR = '#E53935'
+  const LABEL_COLOR = '#666666'
+  const VALUE_COLOR = '#111111'
+
+  const toNumberOrNull = (v: unknown): number | null => {
+    const n = typeof v === 'number' ? v : Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+
+  function formatReceiptDateJa(dateText: string | null | undefined, isoFallback: string): string {
+    const isoM = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoFallback).slice(0, 10))
+    if (isoM) return `${isoM[1]}年${Number(isoM[2])}月${Number(isoM[3])}日`
+    const ja = String(dateText ?? '').match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
+    if (ja) return `${ja[1]}年${Number(ja[2])}月${Number(ja[3])}日`
+    return String(dateText || isoFallback || '-')
+  }
+
+  function formatYenOrDash(value: unknown): string {
+    const n = toNumberOrNull(value)
+    if (n == null) return '-'
+    return formatYenAmount(n)
+  }
+
+  function formatCountOrDash(value: unknown, unit: string): string {
+    const n = toNumberOrNull(value)
+    if (n == null) return '-'
+    return `${Math.round(n)}${unit}`
+  }
+
+  function kvRow(label: string, value: string, valueColor = VALUE_COLOR) {
+    return {
+      type: 'box',
+      layout: 'horizontal',
+      spacing: 'md',
+      margin: 'xs',
+      contents: [
+        { type: 'text', text: label, size: 'sm', color: LABEL_COLOR, flex: 4, wrap: true },
+        { type: 'text', text: value, size: 'sm', color: valueColor, flex: 6, align: 'start', wrap: true },
+      ],
+    }
+  }
+
+  const first = rows[0] as Record<string, unknown>
+  const storeName = String(first.store_name ?? registry.store_partition_key ?? '').trim() || '-'
+  const receiptDateText = first.receipt_date_text ? String(first.receipt_date_text) : null
+  const dateTextJa = formatReceiptDateJa(receiptDateText, iso)
+
+  const monthTarget = iso.slice(0, 7)
+  const trendUrl = buildReceiptAnalyticsDashboardUri(registry.store_partition_key, monthTarget)
+
+  const bodyContents: Array<Record<string, unknown>> = []
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] as Record<string, unknown>
+    if (i > 0) bodyContents.push({ type: 'separator', margin: 'md' })
+
+    const localStoreName = String(r.store_name ?? storeName ?? '').trim() || storeName
+    const localDateText = r.receipt_date_text ? String(r.receipt_date_text) : receiptDateText
+    const localDateJa = formatReceiptDateJa(localDateText, iso)
+
+    bodyContents.push(
+      kvRow('店名', localStoreName),
+      kvRow('日付', localDateJa),
+      kvRow('消費税', formatYenOrDash(r.tax_amount_yen)),
+      kvRow('総売上（税込）', formatYenOrDash(r.gross_sales_yen)),
+      kvRow('会計組数', formatCountOrDash(r.party_count, ' 組')),
+      kvRow('客数', formatCountOrDash(r.guest_count, ' 人')),
+      kvRow('客単価', formatYenOrDash(r.unit_price_yen)),
+    )
+  }
+
+  return {
+    type: 'flex',
+    altText: `${storeName} ${dateTextJa} 売上レポート（検索）`,
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        contents: bodyContents,
+        paddingAll: '16px',
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'secondary',
+            height: 'sm',
+            action: {
+              type: 'uri',
+              label: '売上推移を見る',
+              uri: trendUrl,
+            },
+          },
+        ],
+        paddingAll: '12px',
+      },
+    },
+  }
 }
 
 async function startSearchKind(
@@ -545,7 +1398,15 @@ async function startSearchKind(
   kind: SearchKind,
   flags: RoomSearchFlags,
 ): Promise<LineReplyPayload> {
+  if (isLineInvitedChatRoomId(roomId) && kind !== 'sales') {
+    return GROUP_OTHER_SEARCH_TEXT
+  }
+
   if (!kindAllowed(flags, kind)) {
+    const offText = `${kindLabel(kind)}は、このルームでは有効になっていません。管理画面のルーム設定で機能をONにしてください。`
+    if (isLineInvitedChatRoomId(roomId)) {
+      return offText
+    }
     return {
       type: 'flex',
       altText: `${kindLabel(kind)}は利用できません`,
@@ -555,20 +1416,7 @@ async function startSearchKind(
           type: 'box',
           layout: 'vertical',
           contents: [
-            {
-              type: 'text',
-              text: `${kindLabel(kind)}は、このルームでは有効になっていません。`,
-              wrap: true,
-              size: 'sm',
-            },
-            {
-              type: 'text',
-              text: '管理画面のルーム設定で機能をONにしてください。',
-              wrap: true,
-              size: 'xs',
-              color: '#888888',
-              margin: 'md',
-            },
+            { type: 'text', text: offText, wrap: true, size: 'sm' },
           ],
         },
         footer: {
@@ -588,6 +1436,9 @@ async function startSearchKind(
   }
 
   await setSearchPending(supabase, roomId, userId, kind)
+  if (isLineInvitedChatRoomId(roomId) && kind === 'sales') {
+    return buildGroupSalesDatePromptFlex()
+  }
   return buildKindPromptFlex(kind)
 }
 
@@ -599,11 +1450,16 @@ async function runPendingSearch(
   kind: SearchKind,
   text: string,
   flags: RoomSearchFlags,
-): Promise<string> {
+): Promise<LineReplyPayload> {
+  if (isLineInvitedChatRoomId(roomId) && kind !== 'sales') {
+    await clearSearchPending(supabase, roomId, userId)
+    return GROUP_OTHER_SEARCH_TEXT
+  }
+
   if (kind === 'sales') {
-    const iso = parseSalesDateYyyymmdd(text)
-    if (!iso) {
-      return '売上検索は日付8桁で送ってください。\n例: 20260521'
+    const salesInput = parseSalesDateInput(text)
+    if (!salesInput) {
+      return '売上検索は日付8桁（例: 20260521）または月6桁（例: 202605）で送ってください。'
     }
     await clearSearchPending(supabase, roomId, userId)
     return executeSalesSearch(supabase, registry, roomId, normalizeTriggerText(text))
@@ -616,14 +1472,25 @@ async function runPendingSearch(
 
   await clearSearchPending(supabase, roomId, userId)
 
+  const inDm = isDirectMessageRoomId(roomId)
+  const offSuffix = inDm
+    ? 'いずれかのグループルームで該当機能をONにしてください。'
+    : '管理画面のルーム設定で有効にしてください。'
+
   if (kind === 'message') {
     if (!flags.message_search_enabled) {
-      return '会話検索はこのルームでOFFです。トークは記録されていますが、ONにするまで検索できません。管理画面の「会話検索（ルーム）」を有効にしてください。'
+      return `会話検索は利用できません。トークは記録されています。${offSuffix}`
     }
     return executeMessageSearch(supabase, roomId, query)
   }
   if (kind === 'calendar') {
+    if (!kindAllowed(flags, 'calendar')) {
+      return `予定検索は利用できません。${offSuffix}`
+    }
     return executeCalendarSearch(supabase, roomId, query)
+  }
+  if (!flags.media_file_access_enabled) {
+    return `メディア検索は利用できません。${offSuffix}`
   }
   return executeMediaSearch(
     supabase,
@@ -653,12 +1520,55 @@ export async function handleLineSearchPostback(
     return { handled: false, replied: false }
   }
 
-  const flags = await loadRoomSearchFlags(supabase, roomId)
+  const action = parsePostbackKind(String(event.postback?.data ?? ''))
+  const inDm = isLineDirectMessageChat(event, roomId)
+
+  if (!inDm) {
+    if (!isLineSearchPostbackAction(action)) return { handled: false, replied: false }
+    const flags = await loadRoomSearchFlags(supabase, roomId)
+    if (!flags || flags.bot_reply_hard_mute_enabled) {
+      return { handled: false, replied: false }
+    }
+    if (!action) return { handled: false, replied: false }
+    if (action === 'cancel') {
+      await clearSearchPending(supabase, roomId, userId)
+      const result = await replyLineMessages(
+        replyToken,
+        [{ type: 'text', text: '検索をキャンセルしました。' }],
+        accessToken,
+      )
+      return { handled: true, replied: result.ok }
+    }
+    if (action === 'menu') {
+      const payload = buildSearchEntryReply(flags, event, roomId)
+      const result = await replyLineMessages(
+        replyToken,
+        lineReplyPayloadToMessages(payload),
+        accessToken,
+      )
+      return { handled: true, replied: result.ok }
+    }
+    if (action === 'message' || action === 'calendar' || action === 'media') {
+      const result = await replyLineMessages(
+        replyToken,
+        [{ type: 'text', text: GROUP_OTHER_SEARCH_TEXT }],
+        accessToken,
+      )
+      return { handled: true, replied: result.ok }
+    }
+    if (action === 'sales') {
+      const payload = await startSearchKind(supabase, roomId, userId, 'sales', flags)
+      const result = await replyLineMessages(replyToken, lineReplyPayloadToMessages(payload), accessToken)
+      return { handled: true, replied: result.ok }
+    }
+    return { handled: false, replied: false }
+  }
+
+  const flags = await loadSearchFlagsForContext(supabase, roomId)
   if (!flags || flags.bot_reply_hard_mute_enabled) {
     return { handled: false, replied: false }
   }
 
-  const action = parsePostbackKind(String(event.postback?.data ?? ''))
   if (!action) return { handled: false, replied: false }
 
   if (action === 'cancel') {
@@ -672,8 +1582,12 @@ export async function handleLineSearchPostback(
   }
 
   if (action === 'menu') {
-    const flex = buildSearchMenuFlex(flags)
-    const result = await replyLineMessages(replyToken, [flex], accessToken)
+    const payload = buildSearchEntryReply(flags, event, roomId)
+    const result = await replyLineMessages(
+      replyToken,
+      lineReplyPayloadToMessages(payload),
+      accessToken,
+    )
     return { handled: true, replied: result.ok }
   }
 
@@ -701,7 +1615,10 @@ export async function handleLineSearchTextMessage(
     return { handled: false, replied: false }
   }
 
-  const flags = await loadRoomSearchFlags(supabase, roomId)
+  const inDm = isLineDirectMessageChat(event, roomId)
+  const flags = inDm
+    ? await loadSearchFlagsForContext(supabase, roomId)
+    : await loadRoomSearchFlags(supabase, roomId)
   if (!flags || flags.bot_reply_hard_mute_enabled) {
     return { handled: false, replied: false }
   }
@@ -720,7 +1637,16 @@ export async function handleLineSearchTextMessage(
 
   const pending = await loadSearchPending(supabase, roomId, userId)
   if (pending) {
-    const resultText = await runPendingSearch(
+    if (!inDm && pending !== 'sales') {
+      await clearSearchPending(supabase, roomId, userId)
+      const result = await replyLineMessages(
+        replyToken,
+        [{ type: 'text', text: GROUP_OTHER_SEARCH_TEXT }],
+        accessToken,
+      )
+      return { handled: true, replied: result.ok }
+    }
+    const payload = await runPendingSearch(
       supabase,
       registry,
       roomId,
@@ -729,16 +1655,20 @@ export async function handleLineSearchTextMessage(
       text,
       flags,
     )
-    const result = await replyLineMessages(
-      replyToken,
-      [{ type: 'text', text: resultText.slice(0, 4900) }],
-      accessToken,
-    )
+    const result = await replyLineMessages(replyToken, lineReplyPayloadToMessages(payload), accessToken)
     return { handled: true, replied: result.ok }
   }
 
   const directKind = detectKindTrigger(text)
   if (directKind) {
+    if (!inDm && directKind !== 'sales') {
+      const result = await replyLineMessages(
+        replyToken,
+        [{ type: 'text', text: GROUP_OTHER_SEARCH_TEXT }],
+        accessToken,
+      )
+      return { handled: true, replied: result.ok }
+    }
     const payload = await startSearchKind(supabase, roomId, userId, directKind, flags)
     const messages = lineReplyPayloadToMessages(payload)
     const result = await replyLineMessages(replyToken, messages, accessToken)
@@ -746,24 +1676,24 @@ export async function handleLineSearchTextMessage(
   }
 
   if (isMenuTrigger(text)) {
-    const flex = buildSearchMenuFlex(flags)
-    const result = await replyLineMessages(replyToken, [flex], accessToken)
+    const payload = buildSearchEntryReply(flags, event, roomId)
+    const result = await replyLineMessages(
+      replyToken,
+      lineReplyPayloadToMessages(payload),
+      accessToken,
+    )
     return { handled: true, replied: result.ok }
   }
 
-  const salesDate = parseSalesDateYyyymmdd(text)
-  if (salesDate && (flags.receipt_midreport_enabled || flags.receipt_monthend_report_enabled)) {
-    const resultText = await executeSalesSearch(
+  const salesInput = parseSalesDateInput(text)
+  if (salesInput && (flags.receipt_midreport_enabled || flags.receipt_monthend_report_enabled)) {
+    const payload = await executeSalesSearch(
       supabase,
       registry,
       roomId,
       normalizeTriggerText(text),
     )
-    const result = await replyLineMessages(
-      replyToken,
-      [{ type: 'text', text: resultText.slice(0, 4900) }],
-      accessToken,
-    )
+    const result = await replyLineMessages(replyToken, lineReplyPayloadToMessages(payload), accessToken)
     return { handled: true, replied: result.ok }
   }
 
