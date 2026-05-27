@@ -220,7 +220,8 @@ function kindLabel(kind: SearchKind): string {
 function kindDescription(kind: SearchKind): string {
   if (kind === 'message') {
     return [
-      '過去のトーク内容をキーワードで探します（保存期間: 直近1年）。',
+      'このルームのトークをキーワードで探します（保存期間: 直近1年）。',
+      '※会話は常に記録されますが、検索できるのは「会話検索」がONのルームだけです。',
       '次のメッセージで、探したい語句をそのまま送ってください。',
       '例: 予約 変更 / 田中',
     ].join('\n')
@@ -617,7 +618,7 @@ async function runPendingSearch(
 
   if (kind === 'message') {
     if (!flags.message_search_enabled) {
-      return '会話検索はこのルームでOFFです。'
+      return '会話検索はこのルームでOFFです。トークは記録されていますが、ONにするまで検索できません。管理画面の「会話検索（ルーム）」を有効にしてください。'
     }
     return executeMessageSearch(supabase, roomId, query)
   }

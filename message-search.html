@@ -202,11 +202,11 @@
       dom.roomSelect.required = !global;
 
       if (global) {
-        dom.modeHint.textContent = '全会話を横断して、直近1年分のメッセージから部分一致で検索します。';
+        dom.modeHint.textContent = '全会話を横断して検索します（「会話検索」がONのルームのみ・直近1年）。';
       } else if (calendar) {
         dom.modeHint.textContent = '選択ルームの予定（タイトル・説明）を直近1年分から検索します。';
       } else {
-        dom.modeHint.textContent = '選択ルームのトークを直近1年分から部分一致で検索します（ルーム設定で「会話検索」がONのルームのみ記録）。';
+        dom.modeHint.textContent = '選択ルームのトークを検索します（「会話検索」がONのルームのみ・直近1年。OFF中も記録は継続されます）。';
       }
 
       dom.tabs.forEach(function(tab) {

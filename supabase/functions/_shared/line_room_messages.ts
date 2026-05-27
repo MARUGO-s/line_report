@@ -64,25 +64,6 @@ export function resolveRoomIdFromEvent(event: LineMessageEvent): string | null {
   return null
 }
 
-async function isMessageSearchEnabledForRoom(
-  supabase: SupabaseClient,
-  roomId: string,
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('room_summary_settings')
-    .select('message_search_enabled')
-    .eq('room_id', roomId)
-    .maybeSingle()
-
-  if (error) {
-    console.error(`room message recording settings lookup failed (${roomId}):`, error.message)
-    return false
-  }
-
-  if (!data) return false
-  return (data as { message_search_enabled?: unknown }).message_search_enabled === true
-}
-
 export async function persistLineRoomMessageFromWebhook(
   supabase: SupabaseClient,
   event: LineMessageEvent,
@@ -94,11 +75,6 @@ export async function persistLineRoomMessageFromWebhook(
 
   if (event.type !== 'message' || !event.message) {
     return { saved: false, reason: 'not_message_event' }
-  }
-
-  const enabled = await isMessageSearchEnabledForRoom(supabase, roomId)
-  if (!enabled) {
-    return { saved: false, reason: 'message_search_disabled' }
   }
 
   const textContent = extractLineMessageTextContent(event)

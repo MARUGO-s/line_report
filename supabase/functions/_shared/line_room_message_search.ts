@@ -72,6 +72,23 @@ async function loadRoomNameMap(
   return map
 }
 
+async function isRoomMessageSearchEnabled(
+  supabase: SupabaseClient,
+  roomId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('room_summary_settings')
+    .select('message_search_enabled')
+    .eq('room_id', roomId)
+    .maybeSingle()
+
+  if (error) {
+    console.error(`message search settings lookup failed (${roomId}):`, error.message)
+    return false
+  }
+  return (data as { message_search_enabled?: unknown } | null)?.message_search_enabled === true
+}
+
 export async function fetchLineRoomMessageSearchState(
   supabase: SupabaseClient,
   url: URL,
@@ -84,6 +101,16 @@ export async function fetchLineRoomMessageSearchState(
   const roomId = normalizeQuery(url.searchParams.get('room_id')) || null
   const scope = normalizeQuery(url.searchParams.get('scope')).toLowerCase()
   const globalSearch = scope === 'global' || scope === 'all' || !roomId
+
+  if (!globalSearch && roomId) {
+    const searchable = await isRoomMessageSearchEnabled(supabase, roomId)
+    if (!searchable) {
+      throw {
+        status: 403,
+        message: 'Message search is disabled for this room. Enable 「会話検索（ルーム）」 in room settings.',
+      } satisfies AppError
+    }
+  }
 
   const limit = clampLimit(url.searchParams.get('limit'), MESSAGE_SEARCH_DEFAULT_LIMIT, MESSAGE_SEARCH_MAX_LIMIT)
   const offset = clampOffset(url.searchParams.get('offset'))
