@@ -10,6 +10,8 @@ Gmail で届く食べログ／一休の予約メールを取り込み、**LINE �
 | [CHANGELOG-2026-05.md](./CHANGELOG-2026-05.md) | 2026年5月の変更履歴一覧 |
 | [ROOM-PERMISSION-DETAIL-GUIDE.md](./ROOM-PERMISSION-DETAIL-GUIDE.md) | ルームの「Gmail予約通知」権限 |
 | [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md) | ルーム連携（通知先ルームの前提） |
+| [DOCS-INDEX.md](./DOCS-INDEX.md) | 全 MD 索引・用語集 |
+| [LINE-SEARCH-PRESENTATION.md](./LINE-SEARCH-PRESENTATION.md) | LINE 会話検索（**本ガイドの予約とは別系統**） |
 
 ---
 

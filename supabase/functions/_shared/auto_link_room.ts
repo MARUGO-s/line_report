@@ -48,6 +48,7 @@ export function buildAutoLinkRoomDefaults(storePartitionKey: string) {
     receipt_midreport_enabled: true,
     receipt_monthend_report_enabled: true,
     receipt_report_store_partition_key: key,
+    bot_access_approved: false,
   }
   const is_enabled = !!(
     feature.bot_reply_enabled ||

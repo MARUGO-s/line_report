@@ -1,11 +1,24 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { StoreRegistryRow } from './store_receipt.ts'
-import { lineReplyPayloadToMessages } from './receipt_correction.ts'
+import {
+  isReceiptCorrectionControlText,
+  lineReplyPayloadToMessages,
+} from './receipt_correction.ts'
 import type { LineReplyPayload } from './receipt_types.ts'
-import { replyLineMessages } from './line_client.ts'
-import { formatYenAmount } from './receipt_parse.ts'
+import { pushLineMessages, replyLineMessages, type LineWebhookDeliveryLogContext } from './line_client.ts'
+import {
+  formatYenAmount,
+  isPlausibleReceiptCount,
+  resolveCanonicalStoreDisplayName,
+} from './receipt_parse.ts'
+import { buildLineFlexBlueHeader } from './line_flex_messages.ts'
 import {
   buildReceiptAnalyticsDashboardUri,
+  buildReceiptAnalysisDeletionCommandTextForLineMessageId,
+  buildReceiptAnalysisDeletionCommandTextForReceiptRowId,
+  buildReceiptCorrectionCommandTextForLineMessageId,
+  buildReceiptCorrectionCommandTextForReceiptRowId,
+  clampLineMessageActionText,
 } from './receipt_line_actions.ts'
 
 export type SearchKind = 'message' | 'calendar' | 'media' | 'sales'
@@ -15,7 +28,11 @@ const SEARCH_GUIDE_ENABLED = (() => {
   return raw !== '0' && raw !== 'false' && raw !== 'off'
 })()
 
-const PENDING_TTL_MS = 15 * 60 * 1000
+const PENDING_TTL_MS = 2 * 60 * 1000
+const PENDING_TTL_MINUTES = 2
+/** Flex 等に表示する検索待ちの注意（待ち中キーワード1通のみ非記録） */
+const SEARCH_PENDING_RECORDING_NOTICE =
+  `※検索待ちは${PENDING_TTL_MINUTES}分です。待ち中に送ったキーワード1通だけ会話に記録しません（検索ノイズ防止）。それ以外のトークは通常どおり記録されます。`
 const MAX_RESULT_LINES = 5
 
 const MENU_TRIGGERS = new Set([
@@ -468,6 +485,7 @@ function kindDescription(kind: SearchKind): string {
       '※会話は常に記録されますが、検索結果に含まれるのは「会話検索」がONのルームだけです。',
       '次のメッセージで、探したい語句をそのまま送ってください。',
       '例: 予約 変更 / 田中',
+      SEARCH_PENDING_RECORDING_NOTICE,
     ].join('\n')
   }
   if (kind === 'calendar') {
@@ -476,6 +494,7 @@ function kindDescription(kind: SearchKind): string {
       '※予定関連のトークは常に記録されますが、検索結果に含まれるのは予定機能がONのルームだけです。',
       '次のメッセージで、件名やメモに含まれそうな語句を送ってください。',
       '例: 面接 / 貸切',
+      SEARCH_PENDING_RECORDING_NOTICE,
     ].join('\n')
   }
   if (kind === 'media') {
@@ -483,6 +502,7 @@ function kindDescription(kind: SearchKind): string {
       '招待されているグループ等も含め、「メディア閲覧」がONのルームに保存された画像・動画・ファイルを横断してキーワード検索します（直近1年）。',
       '※メディアは常に記録されますが、検索結果に含まれるのは「メディア閲覧」がONのルームだけです。',
       '次のメッセージで、ファイル名やメモに含まれる語句を送ってください。',
+      SEARCH_PENDING_RECORDING_NOTICE,
     ].join('\n')
   }
   return [
@@ -490,6 +510,7 @@ function kindDescription(kind: SearchKind): string {
     '※売上はレシート保存時に常に記録されますが、検索できるのはレシートレポート系がONのルームだけです。',
     '次のメッセージで日付を8桁で送ってください。',
     '例: 20260521（2026年5月21日）',
+    SEARCH_PENDING_RECORDING_NOTICE,
   ].join('\n')
 }
 
@@ -609,6 +630,7 @@ function buildGroupSalesDatePromptFlex(): Record<string, unknown> {
           flexParagraph('8桁の数字（西暦・月・日）', { weight: 'bold', color: '#111111', margin: 'md' }),
           flexParagraph('例：20260521', { size: 'md', weight: 'bold', color: '#1DB446', margin: 'sm' }),
           flexParagraph('→ 2026年5月21日の売上を表示します', { size: 'xs', color: '#888888', margin: 'xs' }),
+          flexParagraph(SEARCH_PENDING_RECORDING_NOTICE, { size: 'xs', color: '#888888', margin: 'md' }),
         ],
       },
       footer: {
@@ -700,6 +722,14 @@ function buildSearchMenuFlex(flags: RoomSearchFlags): Record<string, unknown> {
             type: 'text',
             text:
               '会話・予定・メディアは、招待されているグループ等で記録した過去データも、ここ（1対1）から横断して検索できます（直近1年）。',
+            size: 'xs',
+            color: '#888888',
+            wrap: true,
+            margin: 'md',
+          },
+          {
+            type: 'text',
+            text: SEARCH_PENDING_RECORDING_NOTICE,
             size: 'xs',
             color: '#888888',
             wrap: true,
@@ -1096,6 +1126,49 @@ async function executeMediaSearch(
   }
 }
 
+function storeReplyLog(
+  registry: StoreRegistryRow,
+  roomId: string | null,
+  context: string,
+): LineWebhookDeliveryLogContext {
+  return {
+    storePartitionKey: registry.store_partition_key,
+    roomId,
+    context,
+  }
+}
+
+function dedupeSalesSearchRows(
+  rows: Record<string, unknown>[],
+  fromLegacyReceiptTable: boolean,
+): Record<string, unknown>[] {
+  const seen = new Set<string>()
+  const out: Record<string, unknown>[] = []
+  for (const raw of rows) {
+    const r = { ...raw }
+    const receiptRowId = fromLegacyReceiptTable
+      ? (() => {
+        const n = typeof r.id === 'number' ? r.id : Number(r.id)
+        return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+      })()
+      : (() => {
+        const n = typeof r.receipt_row_id === 'number' ? r.receipt_row_id : Number(r.receipt_row_id)
+        return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+      })()
+    if (receiptRowId != null) r.receipt_row_id = receiptRowId
+    const lmid = String(r.line_message_id ?? '').trim()
+    const key = receiptRowId != null
+      ? `rid:${receiptRowId}`
+      : lmid
+      ? `lmid:${lmid}`
+      : `anon:${String(r.gross_sales_yen)}:${String(r.created_at)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(r)
+  }
+  return out
+}
+
 async function executeSalesSearch(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
@@ -1221,8 +1294,11 @@ async function executeSalesSearch(
       || (rows[0] as Record<string, unknown>).store_name == null
       || (rows[0] as Record<string, unknown>).receipt_date_text == null)
 
+  let fromLegacyReceiptTable = false
+
   // Fallback: line_room_receipt_search 未登録・旧行は店舗レシートテーブルから日付一致で取得
   if (!rows.length || needsBackfillFields) {
+    fromLegacyReceiptTable = true
     const y = Number(iso.slice(0, 4))
     const mo = Number(iso.slice(5, 7))
     const d = Number(iso.slice(8, 10))
@@ -1263,13 +1339,25 @@ async function executeSalesSearch(
             p_line_message_id: r.line_message_id ? String(r.line_message_id) : null,
             p_receipt_date: iso,
               p_receipt_date_text: r.receipt_date_text ? String(r.receipt_date_text) : null,
-              p_store_name: r.store_name ? String(r.store_name) : null,
+              p_store_name: resolveCanonicalStoreDisplayName(
+                registry.display_name,
+                r.store_name ? String(r.store_name) : null,
+                registry.store_partition_key,
+              ),
             p_summary_text: String(r.summary_text || ''),
             p_gross_sales_yen: r.gross_sales_yen == null ? null : Number(r.gross_sales_yen),
             p_net_sales_yen: r.net_sales_yen == null ? null : Number(r.net_sales_yen),
               p_tax_amount_yen: r.tax_amount_yen == null ? null : Number(r.tax_amount_yen),
-              p_party_count: r.party_count == null ? null : Number(r.party_count),
-              p_guest_count: r.guest_count == null ? null : Number(r.guest_count),
+              p_party_count: (() => {
+                if (r.party_count == null) return null
+                const n = Number(r.party_count)
+                return Number.isFinite(n) && isPlausibleReceiptCount(Math.round(n)) ? Math.round(n) : null
+              })(),
+              p_guest_count: (() => {
+                if (r.guest_count == null) return null
+                const n = Number(r.guest_count)
+                return Number.isFinite(n) && isPlausibleReceiptCount(Math.round(n), 99_999) ? Math.round(n) : null
+              })(),
               p_unit_price_yen: r.unit_price_yen == null ? null : Number(r.unit_price_yen),
             p_receipt_table: receiptTable,
             p_receipt_row_id: receiptRowId,
@@ -1281,6 +1369,8 @@ async function executeSalesSearch(
       }
     }
   }
+
+  rows = dedupeSalesSearchRows(rows as Record<string, unknown>[], fromLegacyReceiptTable)
 
   if (!rows.length) {
     return `【売上検索】${iso} のレシートは店舗ボットのデータにもありません。`
@@ -1309,10 +1399,12 @@ async function executeSalesSearch(
     return formatYenAmount(n)
   }
 
-  function formatCountOrDash(value: unknown, unit: string): string {
+  function formatCountOrDash(value: unknown, unit: string, max = 9999): string {
     const n = toNumberOrNull(value)
     if (n == null) return '-'
-    return `${Math.round(n)}${unit}`
+    const rounded = Math.max(0, Math.round(n))
+    if (!isPlausibleReceiptCount(rounded, max)) return '-'
+    return `${rounded}${unit}`
   }
 
   function kvRow(label: string, value: string, valueColor = VALUE_COLOR) {
@@ -1329,7 +1421,11 @@ async function executeSalesSearch(
   }
 
   const first = rows[0] as Record<string, unknown>
-  const storeName = String(first.store_name ?? registry.store_partition_key ?? '').trim() || '-'
+  const storeName = resolveCanonicalStoreDisplayName(
+    registry.display_name,
+    first.store_name,
+    registry.store_partition_key,
+  )
   const receiptDateText = first.receipt_date_text ? String(first.receipt_date_text) : null
   const dateTextJa = formatReceiptDateJa(receiptDateText, iso)
 
@@ -1337,12 +1433,19 @@ async function executeSalesSearch(
   const trendUrl = buildReceiptAnalyticsDashboardUri(registry.store_partition_key, monthTarget)
 
   const bodyContents: Array<Record<string, unknown>> = []
+  const footerButtons: Array<Record<string, unknown>> = []
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] as Record<string, unknown>
-    if (i > 0) bodyContents.push({ type: 'separator', margin: 'md' })
+    if (i > 0) {
+      bodyContents.push({ type: 'separator', margin: 'md' })
+    }
 
-    const localStoreName = String(r.store_name ?? storeName ?? '').trim() || storeName
+    const localStoreName = resolveCanonicalStoreDisplayName(
+      registry.display_name,
+      r.store_name ?? storeName,
+      registry.store_partition_key,
+    )
     const localDateText = r.receipt_date_text ? String(r.receipt_date_text) : receiptDateText
     const localDateJa = formatReceiptDateJa(localDateText, iso)
 
@@ -1351,18 +1454,77 @@ async function executeSalesSearch(
       kvRow('日付', localDateJa),
       kvRow('消費税', formatYenOrDash(r.tax_amount_yen)),
       kvRow('総売上（税込）', formatYenOrDash(r.gross_sales_yen)),
-      kvRow('会計組数', formatCountOrDash(r.party_count, ' 組')),
-      kvRow('客数', formatCountOrDash(r.guest_count, ' 人')),
+      kvRow('会計組数', formatCountOrDash(r.party_count, ' 組', 9999)),
+      kvRow('客数', formatCountOrDash(r.guest_count, ' 人', 99_999)),
       kvRow('客単価', formatYenOrDash(r.unit_price_yen)),
     )
+
+    const lineMessageId = String(r.line_message_id ?? '').trim()
+    const receiptRowId = toNumberOrNull(r.receipt_row_id)
+    const correctLabel = rows.length > 1 ? `この結果を修正（${i + 1}件目）` : 'この結果を修正'
+    const correctText = receiptRowId
+      ? clampLineMessageActionText(buildReceiptCorrectionCommandTextForReceiptRowId(receiptRowId))
+      : lineMessageId
+      ? clampLineMessageActionText(buildReceiptCorrectionCommandTextForLineMessageId(lineMessageId))
+      : ''
+    if (correctText) {
+      footerButtons.push({
+        type: 'button',
+        style: 'secondary',
+        height: 'sm',
+        action: { type: 'message', label: correctLabel, text: correctText },
+      })
+    }
+    const deleteText = receiptRowId
+      ? clampLineMessageActionText(buildReceiptAnalysisDeletionCommandTextForReceiptRowId(receiptRowId))
+      : lineMessageId
+      ? clampLineMessageActionText(buildReceiptAnalysisDeletionCommandTextForLineMessageId(lineMessageId))
+      : ''
+    if (deleteText) {
+      footerButtons.push({
+        type: 'button',
+        style: 'secondary',
+        height: 'sm',
+        action: {
+          type: 'message',
+          label: rows.length > 1 ? `削除（${i + 1}件目）` : 'この解析結果を削除',
+          text: deleteText,
+        },
+      })
+    }
+  }
+
+  footerButtons.push({
+    type: 'button',
+    style: 'secondary',
+    height: 'sm',
+    action: {
+      type: 'uri',
+      label: '売上推移を見る',
+      uri: trendUrl,
+    },
+  })
+  if (!isLineInvitedChatRoomId(roomId)) {
+    footerButtons.push({
+      type: 'button',
+      style: 'secondary',
+      height: 'sm',
+      action: { type: 'postback', label: '検索メニュー', data: POSTBACK_MENU, displayText: '検索' },
+    })
   }
 
   return {
     type: 'flex',
-    altText: `${storeName} ${dateTextJa} 売上レポート（検索）`,
+    altText: `${storeName} ${dateTextJa} 売上検索結果`,
     contents: {
       type: 'bubble',
       size: 'mega',
+      header: buildLineFlexBlueHeader(
+        '売上検索結果',
+        rows.length > 1
+          ? `${dateTextJa} — 同一日付のレシートが ${rows.length} 件あります`
+          : `${dateTextJa} — 修正・削除は下のボタンから`,
+      ),
       body: {
         type: 'box',
         layout: 'vertical',
@@ -1373,18 +1535,7 @@ async function executeSalesSearch(
         type: 'box',
         layout: 'vertical',
         spacing: 'sm',
-        contents: [
-          {
-            type: 'button',
-            style: 'secondary',
-            height: 'sm',
-            action: {
-              type: 'uri',
-              label: '売上推移を見る',
-              uri: trendUrl,
-            },
-          },
-        ],
+        contents: footerButtons,
         paddingAll: '12px',
       },
     },
@@ -1508,6 +1659,7 @@ export async function handleLineSearchPostback(
   supabase: SupabaseClient,
   event: LineBotEvent,
   accessToken: string,
+  storePartitionKey?: string,
 ): Promise<{ handled: boolean; replied: boolean }> {
   if (!SEARCH_GUIDE_ENABLED || event.type !== 'postback') {
     return { handled: false, replied: false }
@@ -1519,6 +1671,11 @@ export async function handleLineSearchPostback(
   if (!replyToken || !roomId || !userId) {
     return { handled: false, replied: false }
   }
+
+  const storeKey = String(storePartitionKey ?? '').trim()
+  const logCtx = storeKey
+    ? { storePartitionKey: storeKey, roomId, context: 'search_postback' }
+    : undefined
 
   const action = parsePostbackKind(String(event.postback?.data ?? ''))
   const inDm = isLineDirectMessageChat(event, roomId)
@@ -1536,6 +1693,7 @@ export async function handleLineSearchPostback(
         replyToken,
         [{ type: 'text', text: '検索をキャンセルしました。' }],
         accessToken,
+        logCtx,
       )
       return { handled: true, replied: result.ok }
     }
@@ -1545,6 +1703,7 @@ export async function handleLineSearchPostback(
         replyToken,
         lineReplyPayloadToMessages(payload),
         accessToken,
+        logCtx,
       )
       return { handled: true, replied: result.ok }
     }
@@ -1553,12 +1712,18 @@ export async function handleLineSearchPostback(
         replyToken,
         [{ type: 'text', text: GROUP_OTHER_SEARCH_TEXT }],
         accessToken,
+        logCtx,
       )
       return { handled: true, replied: result.ok }
     }
     if (action === 'sales') {
       const payload = await startSearchKind(supabase, roomId, userId, 'sales', flags)
-      const result = await replyLineMessages(replyToken, lineReplyPayloadToMessages(payload), accessToken)
+      const result = await replyLineMessages(
+        replyToken,
+        lineReplyPayloadToMessages(payload),
+        accessToken,
+        logCtx,
+      )
       return { handled: true, replied: result.ok }
     }
     return { handled: false, replied: false }
@@ -1577,6 +1742,7 @@ export async function handleLineSearchPostback(
       replyToken,
       [{ type: 'text', text: '検索をキャンセルしました。' }],
       accessToken,
+      logCtx,
     )
     return { handled: true, replied: result.ok }
   }
@@ -1587,13 +1753,14 @@ export async function handleLineSearchPostback(
       replyToken,
       lineReplyPayloadToMessages(payload),
       accessToken,
+      logCtx,
     )
     return { handled: true, replied: result.ok }
   }
 
   const payload = await startSearchKind(supabase, roomId, userId, action, flags)
   const messages = lineReplyPayloadToMessages(payload)
-  const result = await replyLineMessages(replyToken, messages, accessToken)
+  const result = await replyLineMessages(replyToken, messages, accessToken, logCtx)
   return { handled: true, replied: result.ok }
 }
 
@@ -1623,14 +1790,49 @@ export async function handleLineSearchTextMessage(
     return { handled: false, replied: false }
   }
 
+  const log = (context: string) => storeReplyLog(registry, roomId, context)
+  const isInvalidReplyTokenError = (errorText: string): boolean =>
+    /invalid reply token/i.test(String(errorText || ''))
+  const replyWithDmFallback = async (
+    messages: Record<string, unknown>[],
+    logCtx: LineWebhookDeliveryLogContext,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const replied = await replyLineMessages(replyToken, messages, accessToken, logCtx)
+    if (replied.ok || !inDm || !userId || !isInvalidReplyTokenError(String(replied.error ?? ''))) {
+      return replied
+    }
+    const pushed = await pushLineMessages(userId, messages, accessToken)
+    if (pushed.ok) return { ok: true }
+    return { ok: false, error: `${String(replied.error ?? '')} | push fallback failed: ${String(pushed.error ?? '')}` }
+  }
+
+  if (isReceiptCorrectionControlText(text)) {
+    const searchPending = await loadSearchPending(supabase, roomId, userId)
+    if (searchPending) {
+      await clearSearchPending(supabase, roomId, userId)
+      const result = await replyLineMessages(
+        replyToken,
+        [{
+          type: 'text',
+          text: 'レシート修正の操作です。修正中のカードの「確定」「キャンセル」ボタンを使うか、「この結果を修正」からやり直してください。',
+        }],
+        accessToken,
+        log('search_correction_hint'),
+      )
+      return { handled: true, replied: result.ok }
+    }
+    return { handled: false, replied: false }
+  }
+
   if (isCancelText(text)) {
     const pending = await loadSearchPending(supabase, roomId, userId)
     if (!pending) return { handled: false, replied: false }
     await clearSearchPending(supabase, roomId, userId)
-    const result = await replyLineMessages(
-      replyToken,
-      [{ type: 'text', text: '検索をキャンセルしました。' }],
-      accessToken,
+    const result = await replyWithDmFallback(
+      [
+        { type: 'text', text: '検索をキャンセルしました。' },
+      ],
+      log('search_cancel'),
     )
     return { handled: true, replied: result.ok }
   }
@@ -1639,10 +1841,9 @@ export async function handleLineSearchTextMessage(
   if (pending) {
     if (!inDm && pending !== 'sales') {
       await clearSearchPending(supabase, roomId, userId)
-      const result = await replyLineMessages(
-        replyToken,
+      const result = await replyWithDmFallback(
         [{ type: 'text', text: GROUP_OTHER_SEARCH_TEXT }],
-        accessToken,
+        log('search_group_only_sales'),
       )
       return { handled: true, replied: result.ok }
     }
@@ -1655,45 +1856,50 @@ export async function handleLineSearchTextMessage(
       text,
       flags,
     )
-    const result = await replyLineMessages(replyToken, lineReplyPayloadToMessages(payload), accessToken)
+    const result = await replyWithDmFallback(
+      lineReplyPayloadToMessages(payload),
+      log(`search_${pending}_result`),
+    )
     return { handled: true, replied: result.ok }
   }
 
   const directKind = detectKindTrigger(text)
   if (directKind) {
     if (!inDm && directKind !== 'sales') {
-      const result = await replyLineMessages(
-        replyToken,
+      const result = await replyWithDmFallback(
         [{ type: 'text', text: GROUP_OTHER_SEARCH_TEXT }],
-        accessToken,
+        log('search_group_only_sales'),
       )
       return { handled: true, replied: result.ok }
     }
     const payload = await startSearchKind(supabase, roomId, userId, directKind, flags)
     const messages = lineReplyPayloadToMessages(payload)
-    const result = await replyLineMessages(replyToken, messages, accessToken)
+    const result = await replyWithDmFallback(messages, log(`search_start_${directKind}`))
     return { handled: true, replied: result.ok }
   }
 
   if (isMenuTrigger(text)) {
     const payload = buildSearchEntryReply(flags, event, roomId)
-    const result = await replyLineMessages(
-      replyToken,
+    const result = await replyWithDmFallback(
       lineReplyPayloadToMessages(payload),
-      accessToken,
+      log('search_menu'),
     )
     return { handled: true, replied: result.ok }
   }
 
   const salesInput = parseSalesDateInput(text)
-  if (salesInput && (flags.receipt_midreport_enabled || flags.receipt_monthend_report_enabled)) {
+  const salesSearchAllowed = flags.receipt_midreport_enabled || flags.receipt_monthend_report_enabled || inDm
+  if (salesInput && salesSearchAllowed) {
     const payload = await executeSalesSearch(
       supabase,
       registry,
       roomId,
       normalizeTriggerText(text),
     )
-    const result = await replyLineMessages(replyToken, lineReplyPayloadToMessages(payload), accessToken)
+    const result = await replyWithDmFallback(
+      lineReplyPayloadToMessages(payload),
+      log('sales_search_result'),
+    )
     return { handled: true, replied: result.ok }
   }
 

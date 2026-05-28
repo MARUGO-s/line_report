@@ -13,6 +13,9 @@
 | [ROOM-PERMISSION-DETAIL-GUIDE.md](./ROOM-PERMISSION-DETAIL-GUIDE.md) | ルーム権限・カレンダー／Gmail 設定 |
 | [LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md) | LINE レシート解析の全体像 |
 | [LINE-SEARCH-PRESENTATION.md](./LINE-SEARCH-PRESENTATION.md) | **LINE 検索機能（プレゼン・説明用まとめ）** |
+| [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md) | **⚠️ グループは Bot 1体のみ（退出の誤解・必読）** |
+| [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | **利用許可・ユーザー管理（セキュリティ強化）** |
+| [DOCS-INDEX.md](./DOCS-INDEX.md) | **全 MD の索引・用語集・矛盾防止** |
 | [pages-config.js](./pages-config.js) | 店舗キー・Webhook URL・表示名の単一ソース |
 
 ---
@@ -27,9 +30,10 @@
 | スプレッドシート | 双方向同期で **更新日時の新しい側を優先**。シート削除が DB に反映 |
 | 売上分析 | LINE 経由は **1 店舗固定表示**・メディア/予約表/売上シート非表示 |
 | セキュリティ | **`?t=` 廃止・`lt` ログイン・LINE セッション 3 日保持・`/auth/logout`・CSP** |
+| 利用許可・ユーザー管理 | **新規友だち／新規ルームは承認待ち。管理 Bot 専用。許可時に表示名を管理画面へ**（[LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md)） |
 | DB | `store_webhook_tables.receipt_phones`、`reservation_customer_visit_history` など |
 | 会話検索 | ルーム別テーブル＋横断インデックス（**1年保持**）。**常時記録**し、検索は `message_search_enabled` ON のルームのみ |
-| LINE検索案内 | **1対1:** 4種Flexメニュー（会話・予定・メディア・売上）＋グループ記録の横断検索。**グループ:** 売上のみ（日付8桁・ボタンなし） |
+| LINE検索案内 | **1対1:** 4種Flexメニュー（会話・予定・メディア・売上）＋グループ記録の横断検索。**グループ:** 売上のみ（売上案内 Flex＋**売上ボタン1つ**、4種メニューなし） |
 | GAS | タブ先頭行に同期用ウォーターマーク、日次タブの更新日時 |
 
 **本番 Supabase プロジェクト:** `hocbnifuactbvmyjraxy`（hocbn）  
@@ -389,7 +393,7 @@ npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sh
 
 ### 9.1 概要
 
-店舗 Bot が入っている **招待グループ／複数人トーク** では、会話・メディア・予定・レシートなどの **記録・解析は従来どおり** 動きます。  
+店舗 Bot が入っている **招待グループ／複数人トーク** では、**ルーム承認済み**（`bot_access_approved`）かつ権限 ON のとき、会話・メディア・予定・レシートなどの **記録・解析** が動きます（新規ルームは承認待ちで停止）。  
 **検索**はチャットの種類で UI とできることを分けます。
 
 | 場所 | `room_id` の目安 | 記録・レシート・予定など | 検索 |
@@ -434,7 +438,7 @@ npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sh
 |------|------------|------------------------|
 | 会話の記録 | **検索待ちのキーワード1通のみ記録しない**（「検索」「会話検索」等の操作トークは記録する） | 記録する（検索操作トークは記録スキップ可） |
 | 会話検索の範囲 | **会話検索ONの全ルーム**を横断（グループで溜めた会話もヒット） | 売上のみ（店舗 `receipt_table` 横断） |
-| 検索メニュー | 4ボタン Flex（いずれかのルームで機能ONなら会話等も可） | テキスト案内のみ（ボタンなし） |
+| 検索メニュー | 4ボタン Flex（いずれかのルームで機能ONなら会話等も可） | 売上案内 Flex＋**売上ボタン1つ**（4種メニューなし） |
 
 **記録のスキップ**
 
@@ -449,16 +453,16 @@ npx supabase functions deploy admin-api line-webhook gmail-alert-cron receipt-sh
 
 **1対1（会話・予定・メディア・売上）**
 
-1. 「検索」または Flex で種別選択 → `line_room_search_pending` に保存（**15分**有効）
+1. 「検索」または Flex で種別選択 → `line_room_search_pending` に保存（**2分**有効）
 2. 次の1通をキーワード／日付として検索（**キーワード1通は記録しない**）
-3. 「キャンセル」または15分経過で解除
+3. 「キャンセル」または2分経過で解除
 
 **グループ／複数人トーク（売上のみ）**
 
 1. 「検索」→ 売上案内 Flex ＋「売上（レシート）を検索する」ボタン
 2. ボタン → 日付8桁入力案内 → 送信で売上検索（日付8桁の直接送信も可）
 
-秒単位の返信間隔制限はなく、**種別選択から15分以内の次メッセージ1通** が検索入力です。
+秒単位の返信間隔制限はなく、**種別選択から2分以内の次メッセージ1通** が検索入力です。待ち中のキーワード1通のみ会話に記録しません（それ以外は通常記録）。
 
 ### 9.4 記録と検索結果
 
@@ -500,6 +504,25 @@ npx supabase functions deploy line-webhook --project-ref hocbnifuactbvmyjraxy
 ```
 
 （検索用マイグレーション未適用の場合は先に `npx supabase db push`）
+
+---
+
+## 9b. 利用許可・ユーザー管理（2026-05-28）
+
+**説明・運用:** [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md)  
+**実装:** `supabase/functions/_shared/line_user_approval.ts`、`line-admin-webhook`
+
+| 機能 | 概要 |
+|------|------|
+| ユーザー承認 | 新規 1対1 友だちは `is_active=false` まで機能ブロック |
+| ルーム承認 | 新規 `C…`/`R…` は `bot_access_approved=false` まで当該ルームで機能停止 |
+| 管理 Bot | `LINE_CHANNEL_*__ADMIN`、`line-admin-webhook`、承認者 ID のみ操作可 |
+| UI | Flex カード＋許可／不許可 postback。店舗側は「登録確認」で表示名登録 |
+| 管理画面連携 | **許可時**に `display_name` を LINE 取得、`assigned_store` を未設定時自動付与 |
+
+```bash
+npx supabase functions deploy line-webhook line-admin-webhook --project-ref hocbnifuactbvmyjraxy
+```
 
 ---
 
@@ -564,4 +587,4 @@ npx supabase functions deploy line-webhook --project-ref hocbnifuactbvmyjraxy
 
 ---
 
-*最終更新: 2026-05-27（§9: グループは売上のみ・4ボタン非表示、1対1は4種横断検索、`C/R/U` 判定）*
+*最終更新: 2026-05-28（検索待ち TTL 2分、DOCS-INDEX 追加・全 MD 用語統一）*

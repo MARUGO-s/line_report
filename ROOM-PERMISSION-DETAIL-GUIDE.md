@@ -1,6 +1,6 @@
 # ルーム権限・Webhook 設定 — 細かい仕様ガイド（運用・開発向け）
 
-> **先に読む:** [ルーム連携ガイド](./ROOM-LINKING-GUIDE.md)（自動連携・セキュリティ）  
+> **先に読む:** [DOCS-INDEX.md](./DOCS-INDEX.md)（用語）／ [ルーム連携ガイド](./ROOM-LINKING-GUIDE.md)（自動連携）／ [利用許可](./LINE-USER-APPROVAL-SECURITY.md)（ルーム承認）  
 > **Gmail 予約通知:** [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md)（LINE への過去5件表示・DB）  
 > **動作確認:** [ROOM-PERMISSION-TEST-CHECKLIST.md](./ROOM-PERMISSION-TEST-CHECKLIST.md)
 
@@ -129,13 +129,18 @@ Webhook カード見出しは API / `STORE_NAMES` の **日本語店名**（例:
 
 ---
 
-## 7. 自動連携（権限の前提）
+## 7. 自動連携とルーム承認（権限の前提）
 
-詳細は [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md)。
+詳細は [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md)（連携）と [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md)（承認）。
 
-- **既定 ON** — Webhook 受信・管理画面同期で **承認なし** 連携
-- 連携時に店舗既定の権限（中間レポート ON など）が付く
-- 無効化: `RECEIPT_ROOM_AUTO_LINK=0`
+| レイヤ | 内容 |
+|--------|------|
+| **自動連携** | 既定 ON — Webhook 受信・管理画面同期で **連携のための管理者承認は不要** |
+| **ルーム承認** | 新規招待ルームは `bot_access_approved = false` まで **Bot 機能は停止**（連携済みでも同様） |
+| 連携時の権限 | 店舗既定（中間レポート ON など）が `room_summary_settings` に付く |
+| 無効化 | 自動連携のみ: `RECEIPT_ROOM_AUTO_LINK=0` |
+
+用語の整理: [DOCS-INDEX.md](./DOCS-INDEX.md)
 
 ---
 

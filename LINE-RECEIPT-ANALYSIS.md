@@ -18,6 +18,8 @@
 
 店舗ごとに **Webhook URL が分かれており**、どの URL に送ったかで保存先テーブルが決まります。レシートに印刷された店名から自動でテーブルを切り替えることはありません。
 
+**関連:** [DOCS-INDEX.md](./DOCS-INDEX.md)（用語）／ [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md)（新規ルーム承認）／ [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md)（自動連携）
+
 ---
 
 ## アーキテクチャ
@@ -68,16 +70,20 @@ https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook/marugoyotsuya
 3. Webhook の利用を ON にする
 4. **Messaging API タブの `Allow bot to join group chats` を ON にする**
 
-### グループ招待で bot がすぐ退出して見える場合
+### ⚠️ グループ招待で bot がすぐ退出して見える場合（必読）
+
+**詳細・チェックリスト・運用方針:** [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md)
 
 コード上は bot 自身が `leave` API を叩く処理を持っていません。  
-LINE Developers の仕様上、次のどちらかだと bot はグループに参加できません。
+次のどれかが原因です（**当方の「ルーム承認待ち」でグループから追い出すことはありません**）。
 
-- `Allow bot to join group chats` が OFF（初期値は OFF）
-- そのグループに **別の LINE Official Account がすでに参加している**  
-  LINE 公式アカウントは 1 グループにつき 1 つまでです
+| 原因 | 症状 |
+|------|------|
+| `Allow bot to join group chats` が **OFF**（招待 Bot のチャネルで要確認） | グループに参加できない |
+| そのグループに **別の LINE Official Account がすでに参加している** | **2体目は入れず、すぐ消えたように見える**（LINE 仕様: **1グループ＝1公式アカウント**） |
+| **ルーム承認待ち**（`bot_access_approved = false`） | **メンバーには残る**がレシート・検索等は動かない → 管理 Bot で **許可ルーム** |
 
-この症状はアプリ側の Webhook 実装ではなく、**LINE チャネル設定または招待先グループの状態** が原因です。
+**よくある誤解:** 管理 Bot（@392hdime）と店舗 Bot（バルペロタ等）を **同じグループに両方入れることはできません**。
 
 ### 2. Supabase Edge Secrets（hocbn）
 

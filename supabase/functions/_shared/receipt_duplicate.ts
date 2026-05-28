@@ -294,6 +294,10 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
 
   const choice = normalizeReceiptDuplicateDecision(text)
   if (choice == null) {
+    const compact = normalizeForRuleParsing(text).replace(/\s+/g, '')
+    if (/^[4-9４-９]$/.test(compact)) {
+      return null
+    }
     return '「加算」「中止」「置き換え」のいずれかで返信してください。番号（1／2／3）でも構いません。'
   }
   if (choice === 'cancel') {

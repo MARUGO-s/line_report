@@ -2,6 +2,9 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import type { LineImageReceiptAnalysis, MonthCumulativeTotals } from './receipt_types.ts'
 import {
   buildReceiptSummaryText,
+  formatYenAmount,
+  isPlausibleReceiptCount,
+  looksLikeOcrLatinStoreLabel,
   parseCurrencyAmount,
   parseIntegerCount,
   resolveReceiptDateIsoForPersist,
@@ -25,24 +28,25 @@ export type StoreReceiptRow = {
   raw_payload: unknown
 }
 
+function countFromRawOrDb(rawVal: unknown, dbVal: number | null, max: number): string | null {
+  const fromDb = formatCountField(dbVal)
+  if (rawVal == null || String(rawVal).trim() === '') return fromDb
+  const parsed = parseIntegerCount(String(rawVal))
+  if (parsed == null || !isPlausibleReceiptCount(parsed, max)) return fromDb
+  return String(parsed)
+}
+
+function currencyFromRawOrDb(rawVal: unknown, dbVal: number | null): string | null {
+  const fromDb = formatYenField(dbVal)
+  if (rawVal == null || String(rawVal).trim() === '') return fromDb
+  const parsed = parseCurrencyAmount(String(rawVal))
+  if (parsed == null) return fromDb
+  if (dbVal != null && dbVal >= 1000 && parsed <= 99) return fromDb
+  return formatYenAmount(parsed)
+}
+
 export function receiptRowToAnalysis(row: StoreReceiptRow): LineImageReceiptAnalysis {
-  const raw = row.raw_payload
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const source = raw as Record<string, unknown>
-    return {
-      storeName: source.storeName != null ? String(source.storeName) : row.store_name,
-      storePhone: source.storePhone != null ? String(source.storePhone) : null,
-      date: source.date != null ? String(source.date) : row.receipt_date_text,
-      netSales: source.netSales != null ? String(source.netSales) : formatYenField(row.net_sales_yen),
-      taxAmount: source.taxAmount != null ? String(source.taxAmount) : formatYenField(row.tax_amount_yen),
-      grossSales: source.grossSales != null ? String(source.grossSales) : formatYenField(row.gross_sales_yen),
-      partyCount: source.partyCount != null ? String(source.partyCount) : formatCountField(row.party_count),
-      guestCount: source.guestCount != null ? String(source.guestCount) : formatCountField(row.guest_count),
-      unitPrice: source.unitPrice != null ? String(source.unitPrice) : formatYenField(row.unit_price_yen),
-      items: Array.isArray(source.items) ? source.items.map(String) : [],
-    }
-  }
-  return {
+  const fromColumns: LineImageReceiptAnalysis = {
     storeName: row.store_name,
     storePhone: null,
     date: row.receipt_date_text,
@@ -54,6 +58,54 @@ export function receiptRowToAnalysis(row: StoreReceiptRow): LineImageReceiptAnal
     unitPrice: formatYenField(row.unit_price_yen),
     items: [],
   }
+
+  const raw = row.raw_payload
+  if (!(raw && typeof raw === 'object' && !Array.isArray(raw))) {
+    return repairReceiptAnalysisFromColumns(fromColumns, row)
+  }
+
+  const source = raw as Record<string, unknown>
+  const merged: LineImageReceiptAnalysis = {
+    // 店名は DB 列（登録店舗名）を優先。raw_payload はレシート OCR の略称になりがち
+    storeName: fromColumns.storeName?.trim()
+      ? fromColumns.storeName
+      : (source.storeName != null ? String(source.storeName) : null),
+    storePhone: source.storePhone != null ? String(source.storePhone) : null,
+    date: source.date != null ? String(source.date) : fromColumns.date,
+    netSales: currencyFromRawOrDb(source.netSales, row.net_sales_yen),
+    taxAmount: currencyFromRawOrDb(source.taxAmount, row.tax_amount_yen),
+    grossSales: currencyFromRawOrDb(source.grossSales, row.gross_sales_yen),
+    partyCount: countFromRawOrDb(source.partyCount, row.party_count, 9999),
+    guestCount: countFromRawOrDb(source.guestCount, row.guest_count, 99_999),
+    unitPrice: currencyFromRawOrDb(source.unitPrice, row.unit_price_yen),
+    items: Array.isArray(source.items) ? source.items.map(String) : [],
+  }
+  return repairReceiptAnalysisFromColumns(merged, row)
+}
+
+/** DB列の整合（純売上≪総売上、組数が日付化）を直してから修正UIに渡す */
+function repairReceiptAnalysisFromColumns(
+  draft: LineImageReceiptAnalysis,
+  row: StoreReceiptRow,
+): LineImageReceiptAnalysis {
+  const next = { ...draft }
+  const gross = row.gross_sales_yen
+  const net = row.net_sales_yen
+  const tax = row.tax_amount_yen
+  if (gross != null && gross >= 1000 && (net == null || net < 1000)) {
+    if (tax != null && gross > tax) {
+      next.netSales = formatYenAmount(gross - tax)
+    } else {
+      next.netSales = formatYenField(gross)
+    }
+  }
+  if (row.party_count != null && !isPlausibleReceiptCount(row.party_count)) {
+    next.partyCount = null
+  }
+  if (row.guest_count != null && !isPlausibleReceiptCount(row.guest_count, 99_999)) {
+    next.guestCount = null
+  }
+  return next
 }
 
 function formatYenField(value: number | null): string | null {
@@ -105,6 +157,41 @@ export async function loadStoreReceiptByLineMessageId(
   return mapStoreReceiptRow(data as Record<string, unknown>)
 }
 
+/** 売上検索など：同一店舗テーブル内で room を問わず line_message_id で取得 */
+export async function loadStoreReceiptByLineMessageIdInStore(
+  supabase: SupabaseClient,
+  receiptTable: string,
+  lineMessageId: string,
+): Promise<StoreReceiptRow | null> {
+  const lmid = String(lineMessageId ?? '').trim()
+  if (!lmid) return null
+  const { data, error } = await supabase
+    .from(receiptTable)
+    .select('*')
+    .eq('line_message_id', lmid)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  return mapStoreReceiptRow(data as Record<string, unknown>)
+}
+
+export async function loadStoreReceiptById(
+  supabase: SupabaseClient,
+  receiptTable: string,
+  receiptRowId: number,
+): Promise<StoreReceiptRow | null> {
+  const id = Number(receiptRowId)
+  if (!Number.isFinite(id) || id <= 0) return null
+  const { data, error } = await supabase
+    .from(receiptTable)
+    .select('*')
+    .eq('id', Math.round(id))
+    .maybeSingle()
+  if (error || !data) return null
+  return mapStoreReceiptRow(data as Record<string, unknown>)
+}
+
 export async function loadLatestStoreReceiptForRoom(
   supabase: SupabaseClient,
   receiptTable: string,
@@ -121,6 +208,30 @@ export async function loadLatestStoreReceiptForRoom(
   return mapStoreReceiptRow(data as Record<string, unknown>)
 }
 
+export async function deleteStoreReceiptById(
+  supabase: SupabaseClient,
+  receiptTable: string,
+  receiptRowId: number,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const id = Math.round(Number(receiptRowId))
+  if (!Number.isFinite(id) || id <= 0) {
+    return { ok: false, message: 'レシート行IDが不正です。' }
+  }
+  const existing = await loadStoreReceiptById(supabase, receiptTable, id)
+  if (!existing) {
+    return { ok: false, message: 'この店舗のデータで該当のレシート解析が見つかりませんでした。' }
+  }
+  const { error: deleteError } = await supabase
+    .from(receiptTable)
+    .delete()
+    .eq('id', id)
+  if (deleteError) {
+    console.error('deleteStoreReceiptById delete failed:', deleteError.message)
+    return { ok: false, message: '解析結果の削除に失敗しました。少し時間を置いてお試しください。' }
+  }
+  return { ok: true }
+}
+
 export async function deleteStoreReceiptByLineMessageId(
   supabase: SupabaseClient,
   receiptTable: string,
@@ -129,7 +240,8 @@ export async function deleteStoreReceiptByLineMessageId(
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const lmid = String(lineMessageId ?? '').trim()
   if (!lmid) return { ok: false, message: 'LINEメッセージIDが空です。' }
-  const { data, error: selectError } = await supabase
+  let rowId: number | null = null
+  const { data: roomScoped, error: selectError } = await supabase
     .from(receiptTable)
     .select('id')
     .eq('room_id', roomId)
@@ -139,19 +251,55 @@ export async function deleteStoreReceiptByLineMessageId(
     console.error('deleteStoreReceiptByLineMessageId select failed:', selectError.message)
     return { ok: false, message: '解析結果の照会に失敗しました。少し時間を置いてお試しください。' }
   }
-  if (!data) {
-    return { ok: false, message: 'このルームで該当のレシート解析が見つかりませんでした。' }
+  if (roomScoped) {
+    rowId = Number((roomScoped as { id: number }).id)
+  } else {
+    const storeWide = await loadStoreReceiptByLineMessageIdInStore(supabase, receiptTable, lmid)
+    rowId = storeWide?.id ?? null
+  }
+  if (!rowId || !Number.isFinite(rowId)) {
+    return { ok: false, message: 'この店舗のデータで該当のレシート解析が見つかりませんでした。' }
   }
   const { error: deleteError } = await supabase
     .from(receiptTable)
     .delete()
-    .eq('id', (data as { id: number }).id)
-    .eq('room_id', roomId)
+    .eq('id', Math.round(rowId))
   if (deleteError) {
     console.error('deleteStoreReceiptByLineMessageId delete failed:', deleteError.message)
     return { ok: false, message: '解析結果の削除に失敗しました。少し時間を置いてお試しください。' }
   }
   return { ok: true }
+}
+
+function sanitizeDraftForPersist(
+  draft: LineImageReceiptAnalysis,
+  storeDisplayName: string,
+): LineImageReceiptAnalysis {
+  const next = { ...draft, items: Array.isArray(draft.items) ? [...draft.items] : [] }
+  const gross = parseCurrencyAmount(next.grossSales)
+  let net = parseCurrencyAmount(next.netSales)
+  const tax = parseCurrencyAmount(next.taxAmount)
+  if (gross != null && gross >= 1000 && (net == null || net < 1000)) {
+    net = tax != null && gross > tax ? gross - tax : gross
+    next.netSales = formatYenAmount(net)
+  }
+  let party = parseIntegerCount(next.partyCount)
+  if (party != null && !isPlausibleReceiptCount(party)) party = null
+  else if (party != null) next.partyCount = String(party)
+
+  let guest = parseIntegerCount(next.guestCount)
+  if (guest != null && !isPlausibleReceiptCount(guest, 99_999)) guest = null
+  else if (guest != null) next.guestCount = String(guest)
+
+  const canonical = String(storeDisplayName ?? '').trim()
+  if (canonical) {
+    if (!next.storeName?.trim() || looksLikeOcrLatinStoreLabel(next.storeName)) {
+      next.storeName = canonical
+    }
+  } else if (!next.storeName?.trim()) {
+    next.storeName = storeDisplayName
+  }
+  return next
 }
 
 export async function updateStoreReceiptFromDraft(
@@ -161,27 +309,30 @@ export async function updateStoreReceiptFromDraft(
   roomId: string,
   storeDisplayName: string,
   draft: LineImageReceiptAnalysis,
+  options?: { storePartitionKey?: string | null },
 ): Promise<{ receipt: LineImageReceiptAnalysis; receiptDateIso: string } | null> {
   if (!Number.isFinite(receiptRowId) || receiptRowId <= 0) return null
-  const receiptDateIso = resolveReceiptDateIsoForPersist(draft.date)
+  const safeDraft = sanitizeDraftForPersist(draft, storeDisplayName)
+  const receiptDateIso = resolveReceiptDateIsoForPersist(safeDraft.date)
+  const partyCount = parseIntegerCount(safeDraft.partyCount)
+  const guestCount = parseIntegerCount(safeDraft.guestCount)
   const payload = {
-    store_name: draft.storeName ?? storeDisplayName,
-    receipt_date_text: draft.date,
+    store_name: storeDisplayName,
+    receipt_date_text: safeDraft.date,
     receipt_date: receiptDateIso,
-    net_sales_yen: parseCurrencyAmount(draft.netSales),
-    tax_amount_yen: parseCurrencyAmount(draft.taxAmount),
-    gross_sales_yen: parseCurrencyAmount(draft.grossSales),
-    party_count: parseIntegerCount(draft.partyCount),
-    guest_count: parseIntegerCount(draft.guestCount),
-    unit_price_yen: parseCurrencyAmount(draft.unitPrice),
-    summary_text: buildReceiptSummaryText(draft, storeDisplayName).slice(0, 240) || null,
-    raw_payload: draft,
+    net_sales_yen: parseCurrencyAmount(safeDraft.netSales),
+    tax_amount_yen: parseCurrencyAmount(safeDraft.taxAmount),
+    gross_sales_yen: parseCurrencyAmount(safeDraft.grossSales),
+    party_count: partyCount != null && isPlausibleReceiptCount(partyCount) ? partyCount : null,
+    guest_count: guestCount != null && isPlausibleReceiptCount(guestCount, 99_999) ? guestCount : null,
+    unit_price_yen: parseCurrencyAmount(safeDraft.unitPrice),
+    summary_text: buildReceiptSummaryText(safeDraft, storeDisplayName).slice(0, 240) || null,
+    raw_payload: safeDraft,
   }
   const { data, error } = await supabase
     .from(receiptTable)
     .update(payload)
     .eq('id', receiptRowId)
-    .eq('room_id', roomId)
     .select('*')
     .maybeSingle()
   if (error || !data) {
@@ -190,6 +341,27 @@ export async function updateStoreReceiptFromDraft(
   }
   const row = mapStoreReceiptRow(data as Record<string, unknown>)
   if (!row) return null
+
+  if (row.line_message_id) {
+    await indexLineRoomReceiptSearch(supabase, {
+      roomId: row.room_id || roomId,
+      storePartitionKey: options?.storePartitionKey ?? null,
+      lineMessageId: row.line_message_id,
+      receiptDate: receiptDateIso,
+      receiptDateText: safeDraft.date,
+      storeName: payload.store_name,
+      summaryText: payload.summary_text ?? '',
+      grossSalesYen: payload.gross_sales_yen,
+      netSalesYen: payload.net_sales_yen,
+      taxAmountYen: payload.tax_amount_yen,
+      partyCount: payload.party_count,
+      guestCount: payload.guest_count,
+      unitPriceYen: payload.unit_price_yen,
+      receiptTable,
+      receiptRowId,
+    }).catch((e) => console.error('indexLineRoomReceiptSearch after correction failed:', e))
+  }
+
   return { receipt: receiptRowToAnalysis(row), receiptDateIso }
 }
 

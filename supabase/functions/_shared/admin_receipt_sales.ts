@@ -12,6 +12,7 @@ import {
   upsertManualMonthSalesEntries,
   type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
+import { sanitizeReceiptCountFromDb } from './receipt_parse.ts'
 import { queryStoreReceiptRows, loadStoreRegistry } from './store_receipt_query.ts'
 import { autoLinkDetectedRoomsForStore } from './auto_link_room.ts'
 import { parseReceiptPhonesInput } from './store_receipt_phones.ts'
@@ -524,8 +525,8 @@ export async function fetchReceiptSalesState(
     const grossSalesYen = toNonNegativeInteger(row.gross_sales_yen)
     const netSalesYen = toNonNegativeInteger(row.net_sales_yen)
     const taxAmountYen = toNonNegativeInteger(row.tax_amount_yen)
-    const partyCount = toNonNegativeInteger(row.party_count)
-    const guestCount = toNonNegativeInteger(row.guest_count)
+    const partyCount = sanitizeReceiptCountFromDb(row.party_count)
+    const guestCount = sanitizeReceiptCountFromDb(row.guest_count, 99_999)
 
     const existingStore = storeTotals.get(storeKey)
     if (!existingStore) {
@@ -820,8 +821,8 @@ export async function fetchAnalyticsMonthly(
     if (!bucket) continue
     bucket.gross_sales_yen += toNonNegativeInteger(row.gross_sales_yen)
     bucket.net_sales_yen += toNonNegativeInteger(row.net_sales_yen)
-    bucket.party_count += toNonNegativeInteger(row.party_count)
-    bucket.guest_count += toNonNegativeInteger(row.guest_count)
+    bucket.party_count += sanitizeReceiptCountFromDb(row.party_count)
+    bucket.guest_count += sanitizeReceiptCountFromDb(row.guest_count, 99_999)
     bucket.receipt_count += 1
     const sk = toSafeString(row.store_partition_key)
     if (sk && !storeSet.has(sk)) storeSet.set(sk, toSafeString(row.store_name) || sk)

@@ -1,4 +1,9 @@
-# LINE-WINE Admin
+# LINE-WINE Admin（レガシー）
+
+> **本リポジトリの本番 LINE レポート（レシート・検索・管理画面）** は別系統です。  
+> → [**README-PAGES.md**](./README-PAGES.md) ／ [**DOCS-INDEX.md**](./DOCS-INDEX.md)
+
+---
 
 ワイン価格管理アプリ（Node.js + SQLite + LINE Webhook + OCR連携）の管理API/管理画面です。
 

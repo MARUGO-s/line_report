@@ -1085,6 +1085,136 @@
       color: #dce8f0;
     }
 
+    .webhook-card.is-approval-only {
+      border-color: rgba(167, 135, 255, 0.42) !important;
+      border-left: 4px solid rgba(175, 142, 255, 0.9) !important;
+      background: linear-gradient(165deg, rgba(36, 24, 66, 0.96), rgba(17, 26, 52, 0.94)) !important;
+      box-shadow: 0 8px 24px rgba(30, 18, 64, 0.35);
+    }
+
+    .webhook-card.is-approval-only .webhook-card-title {
+      color: #efe8ff;
+      letter-spacing: 0.01em;
+    }
+
+    .webhook-card.is-approval-only .webhook-card-status-badge {
+      border-color: rgba(193, 168, 255, 0.55);
+      background: rgba(167, 135, 255, 0.2);
+      color: #f2ebff;
+    }
+
+    .webhook-card-approval-note {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(182, 156, 245, 0.45);
+      background: rgba(133, 105, 207, 0.16);
+      color: #ece3ff;
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+
+    .webhook-admin-focus {
+      margin-top: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .webhook-admin-focus-row {
+      border-radius: 12px;
+      border: 1px solid rgba(186, 160, 245, 0.42);
+      background: rgba(120, 96, 190, 0.18);
+      padding: 10px 12px;
+    }
+
+    .webhook-admin-focus-label {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      border: 1px solid rgba(204, 182, 255, 0.5);
+      color: #f2eaff;
+      background: rgba(170, 145, 235, 0.25);
+      margin-bottom: 6px;
+    }
+
+    .webhook-admin-focus-row p {
+      margin: 0;
+      font-size: 0.88rem;
+      line-height: 1.45;
+      color: #efe7ff;
+    }
+
+    .webhook-admin-pending {
+      margin-top: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(188, 162, 246, 0.42);
+      background: rgba(114, 88, 184, 0.16);
+      padding: 10px 12px;
+    }
+
+    .webhook-admin-pending-title {
+      margin: 0;
+      font-size: 0.86rem;
+      letter-spacing: 0.03em;
+      color: #f0e8ff;
+      font-weight: 700;
+    }
+
+    .webhook-admin-pending-list {
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 8px;
+      max-height: 420px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .webhook-admin-pending-meta {
+      margin-top: 4px;
+      font-size: 0.74rem;
+      line-height: 1.35;
+      color: #d0c2ee;
+    }
+
+    .webhook-admin-pending-item {
+      border-radius: 10px;
+      border: 1px solid rgba(197, 173, 250, 0.35);
+      background: rgba(95, 74, 160, 0.22);
+      padding: 8px 10px;
+    }
+
+    .webhook-admin-pending-name {
+      font-size: 0.85rem;
+      color: #f3ecff;
+      font-weight: 700;
+    }
+
+    .webhook-admin-pending-id {
+      margin-top: 2px;
+      font-size: 0.75rem;
+      color: #d7c9f4;
+      word-break: break-all;
+    }
+
+    .webhook-admin-pending-actions {
+      margin-top: 8px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .webhook-admin-pending-actions .button {
+      min-height: 32px;
+      padding: 0 10px;
+      font-size: 0.8rem;
+    }
+
     .webhook-card.global-permission-card.has-unlinked-total {
       border-color: rgba(180, 150, 110, 0.38) !important;
       border-left: 3px solid rgba(210, 170, 110, 0.7) !important;
@@ -1233,6 +1363,70 @@
       border-color: rgba(120, 165, 140, 0.45) !important;
       border-left: 3px solid rgba(100, 155, 125, 0.7) !important;
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 252, 250, 0.98)) !important;
+    }
+
+    body[data-theme='light'] .webhook-card.is-approval-only {
+      border-color: rgba(160, 130, 220, 0.52) !important;
+      border-left: 4px solid rgba(145, 110, 216, 0.86) !important;
+      background: linear-gradient(180deg, rgba(252, 248, 255, 0.99), rgba(246, 241, 255, 0.99)) !important;
+      box-shadow: 0 6px 20px rgba(74, 58, 122, 0.12);
+    }
+
+    body[data-theme='light'] .webhook-card.is-approval-only .webhook-card-title {
+      color: #3e2d66;
+    }
+
+    body[data-theme='light'] .webhook-card.is-approval-only .webhook-card-status-badge {
+      border-color: rgba(156, 126, 218, 0.46);
+      background: rgba(153, 121, 216, 0.16);
+      color: #4b3778;
+    }
+
+    body[data-theme='light'] .webhook-card-approval-note {
+      border-color: rgba(171, 146, 220, 0.45);
+      background: rgba(238, 231, 255, 0.95);
+      color: #4a3a6f;
+    }
+
+    body[data-theme='light'] .webhook-admin-focus-row {
+      border-color: rgba(173, 147, 218, 0.45);
+      background: rgba(236, 228, 255, 0.95);
+    }
+
+    body[data-theme='light'] .webhook-admin-focus-label {
+      border-color: rgba(168, 140, 215, 0.46);
+      color: #513b7f;
+      background: rgba(207, 188, 242, 0.45);
+    }
+
+    body[data-theme='light'] .webhook-admin-focus-row p {
+      color: #47386f;
+    }
+
+    body[data-theme='light'] .webhook-admin-pending {
+      border-color: rgba(171, 145, 221, 0.44);
+      background: rgba(237, 230, 255, 0.98);
+    }
+
+    body[data-theme='light'] .webhook-admin-pending-title {
+      color: #433365;
+    }
+
+    body[data-theme='light'] .webhook-admin-pending-item {
+      border-color: rgba(176, 151, 226, 0.42);
+      background: rgba(246, 241, 255, 0.96);
+    }
+
+    body[data-theme='light'] .webhook-admin-pending-name {
+      color: #433265;
+    }
+
+    body[data-theme='light'] .webhook-admin-pending-id {
+      color: #6f5a9a;
+    }
+
+    body[data-theme='light'] .webhook-admin-pending-meta {
+      color: #6f5a9a;
     }
 
     body[data-theme='light'] .webhook-card.global-permission-card.has-unlinked-total {
@@ -3348,6 +3542,14 @@
 
       <section class="card logs">
         <h2>Webhookログ（最新）</h2>
+        <p class="muted" style="margin:0 0 8px 0;">店舗ごとの LINE Bot 返信（Webhook 経由）の記録です。Webhook を店舗別 URL に分けたあとは、下のプルダウンで店舗を選んでください。</p>
+        <div class="controls" style="margin:0 0 10px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <label for="webhookLogStoreFilter">店舗</label>
+          <select id="webhookLogStoreFilter" class="input-select" style="min-width:min(320px, 100%);">
+            <option value="">すべて（店舗未設定の古いログ含む）</option>
+          </select>
+          <span id="webhookLogStoreHint" class="muted" style="font-size:0.9em;"></span>
+        </div>
         <div id="webhookQuotaSummary" class="meta usage-summary"></div>
         <div class="table-wrap log-table-wrap">
           <table class="log-table log-table--webhook" id="deliveryLogTable">
@@ -3821,6 +4023,8 @@
       logTableHead: document.getElementById('logTableHead'),
       logTableBody: document.getElementById('logTableBody'),
       webhookQuotaSummary: document.getElementById('webhookQuotaSummary'),
+      webhookLogStoreFilter: document.getElementById('webhookLogStoreFilter'),
+      webhookLogStoreHint: document.getElementById('webhookLogStoreHint'),
       storeWebhookLegacyUrl: document.getElementById('storeWebhookLegacyUrl'),
       copyLegacyWebhookBtn: document.getElementById('copyLegacyWebhookBtn'),
       userPermissionTabCards: document.getElementById('userPermissionTabCards'),
@@ -3993,6 +4197,7 @@
     let currentState = null;
     let receiptWebhookStatusByStore = {};
     let activeWebhookPermissionFilterStore = '';
+    let activeUserPermissionPendingOnlyFilter = false;
     let activeWebhookCardViewMode = 'cards';
     let webhookCardEntryByStoreKey = new Map();
     /** @type {'webhook'} */
@@ -4005,6 +4210,8 @@
     let roomConfigReviewSignature = '';
     let roomConfigPreviewSignature = '';
     const UNASSIGNED_WEBHOOK_KEY = '__unassigned__';
+    const WEBHOOK_LOG_STORE_KEY = 'line_webhook_log_store_key';
+    let webhookLogStoreKey = String(localStorage.getItem(WEBHOOK_LOG_STORE_KEY) || '').trim();
     const WEBHOOK_DEFAULT_CONFIG_KEY_PREFIX = 'line_webhook_default_config__';
     const WEBHOOK_STORE_BULK_CALENDAR_GMAIL_KEY_PREFIX = 'line_webhook_bulk_calendar_gmail__';
     const GLOBAL_PERMISSION_CONFIG_KEY = 'line_global_permission_config';
@@ -7173,12 +7380,42 @@
       dom.syncOverlay.setAttribute('aria-hidden', 'true');
     }
 
+    function buildAdminStatePath() {
+      let path = '/state?logs_limit=30';
+      if (webhookLogStoreKey) {
+        path += '&webhook_store_key=' + encodeURIComponent(webhookLogStoreKey);
+      }
+      return path;
+    }
+
+    function populateWebhookLogStoreFilter(storeOptions) {
+      if (!dom.webhookLogStoreFilter) return;
+      const selected = webhookLogStoreKey;
+      dom.webhookLogStoreFilter.innerHTML = '<option value="">すべて（店舗未設定の古いログ含む）</option>';
+      const rows = Array.isArray(storeOptions) ? storeOptions : [];
+      for (const row of rows) {
+        const key = String(row.store_partition_key || row.store_key || '').trim();
+        const name = String(row.display_name || row.store_name || key).trim();
+        if (!key) continue;
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = name ? (name + ' (' + key + ')') : key;
+        dom.webhookLogStoreFilter.appendChild(opt);
+      }
+      dom.webhookLogStoreFilter.value = selected;
+      if (dom.webhookLogStoreHint) {
+        dom.webhookLogStoreHint.textContent = selected
+          ? '選択中の店舗 Bot からの返信ログのみ表示しています。'
+          : '店舗を選ぶと、その店舗の Webhook 返信だけを表示します。';
+      }
+    }
+
     function readCachedAdminPayload() {
       const SC = window.LINE_REPORT_SITE_CACHE;
       if (!SC) return null;
       const token = getToken();
       if (!token) return null;
-      const stateEntry = SC.get(token, getProjectUrl(), 'admin-api', 'GET', '/state?logs_limit=30');
+      const stateEntry = SC.get(token, getProjectUrl(), 'admin-api', 'GET', buildAdminStatePath());
       if (!stateEntry || !stateEntry.data) return null;
       const webhookEntry = SC.get(
         token,
@@ -7198,7 +7435,7 @@
       const SC = window.LINE_REPORT_SITE_CACHE;
       const token = getToken();
       if (!SC || !token || !state) return;
-      SC.set(token, getProjectUrl(), 'admin-api', 'GET', '/state?logs_limit=30', state);
+      SC.set(token, getProjectUrl(), 'admin-api', 'GET', buildAdminStatePath(), state);
       SC.set(
         token,
         LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL,
@@ -7335,6 +7572,84 @@
       );
     }
 
+    function resolveStoreDisplayNameFromKey(storeKey) {
+      const key = String(storeKey || '').trim();
+      if (!key) return '';
+      const opts = currentState && Array.isArray(currentState.receipt_store_options)
+        ? currentState.receipt_store_options
+        : [];
+      for (let i = 0; i < opts.length; i++) {
+        const opt = opts[i] || {};
+        const optKey = String(opt.store_key || '').trim();
+        if (optKey === key) return String(opt.store_name || optKey).trim() || optKey;
+      }
+      return key;
+    }
+
+    function sortPendingApprovalUsers(rows) {
+      return (Array.isArray(rows) ? rows : []).slice().sort(function(a, b) {
+        const at = new Date(a && a.updated_at ? a.updated_at : 0).getTime();
+        const bt = new Date(b && b.updated_at ? b.updated_at : 0).getTime();
+        if (bt !== at) return bt - at;
+        const nameA = String(a && a.display_name ? a.display_name : '').trim();
+        const nameB = String(b && b.display_name ? b.display_name : '').trim();
+        const nameCmp = nameA.localeCompare(nameB, 'ja');
+        if (nameCmp !== 0) return nameCmp;
+        const idA = String(a && a.line_user_id ? a.line_user_id : '').trim();
+        const idB = String(b && b.line_user_id ? b.line_user_id : '').trim();
+        return idA.localeCompare(idB, 'ja');
+      });
+    }
+
+    function collectPendingApprovalUsers(userPermissions) {
+      return (Array.isArray(userPermissions) ? userPermissions : []).filter(function(row) {
+        return row && String(row.line_user_id || '').trim().startsWith('U') && row.is_active !== true;
+      });
+    }
+
+    function buildWebhookAdminPendingApprovalsHtml(userPermissions) {
+      const rows = sortPendingApprovalUsers(collectPendingApprovalUsers(userPermissions));
+      if (rows.length === 0) {
+        return (
+          '<div class="webhook-admin-pending">' +
+          '<h4 class="webhook-admin-pending-title">承認待ち 0 件</h4>' +
+          '<div class="meta" style="margin-top:6px;">現在、未承認ユーザーはありません。</div>' +
+          '</div>'
+        );
+      }
+      const items = rows.map(function(row) {
+        const lineUserId = String(row.line_user_id || '').trim();
+        const name = String(row.display_name || '').trim() || '（表示名未取得）';
+        const assignedStore = String(row.assigned_store || '').trim() || '未設定';
+        const regKey = String(row.registration_source_store || '').trim();
+        const regLabel = regKey ? resolveStoreDisplayNameFromKey(regKey) : '';
+        const updatedLabel = formatDate(row.updated_at);
+        const metaParts = [];
+        if (updatedLabel && updatedLabel !== '-') metaParts.push('申請: ' + updatedLabel);
+        if (regLabel) metaParts.push('登録元: ' + regLabel);
+        const metaHtml = metaParts.length
+          ? '<div class="webhook-admin-pending-meta">' + escapeHtml(metaParts.join(' / ')) + '</div>'
+          : '';
+        return (
+          '<li class="webhook-admin-pending-item">' +
+          '<div class="webhook-admin-pending-name">' + escapeHtml(name) + '（所属: ' + escapeHtml(assignedStore) + '）</div>' +
+          '<div class="webhook-admin-pending-id">' + escapeHtml(lineUserId) + '</div>' +
+          metaHtml +
+          '<div class="webhook-admin-pending-actions">' +
+          '<button type="button" class="button primary webhook-admin-approve" data-line-user-id="' + escapeHtml(lineUserId) + '">許可</button>' +
+          '<button type="button" class="button warn webhook-admin-deny" data-line-user-id="' + escapeHtml(lineUserId) + '">不許可</button>' +
+          '</div>' +
+          '</li>'
+        );
+      }).join('');
+      return (
+        '<div class="webhook-admin-pending">' +
+        '<h4 class="webhook-admin-pending-title">承認待ち ' + rows.length + ' 件（新しい順）</h4>' +
+        '<ul class="webhook-admin-pending-list">' + items + '</ul>' +
+        '</div>'
+      );
+    }
+
     function setWebhookModalDisplayMode(mode) {
       const normalized = mode === 'permission' ? 'permission' : 'setup';
       if (dom.roomConfigModalCard) {
@@ -7387,6 +7702,7 @@
     }
 
     function openUserPermissionsForStore(storeName) {
+      activeUserPermissionPendingOnlyFilter = false;
       activeWebhookPermissionFilterStore = String(storeName || '').trim();
       const permissionsSection = document.querySelector('section.card.permissions');
       if (permissionsSection) {
@@ -7580,20 +7896,38 @@
       if (dom.deliveryLogTable) {
         dom.deliveryLogTable.className = 'log-table log-table--webhook';
       }
+      populateWebhookLogStoreFilter(st.receipt_store_options || []);
       if (dom.logTableHead) {
         dom.logTableHead.innerHTML =
           '<tr>' +
-          '<th>実行時刻</th><th>方式</th><th>コンテキスト</th><th>状態</th><th>理由</th><th>ルーム</th><th>送信</th>' +
+          '<th>実行時刻</th><th>店舗</th><th>方式</th><th>コンテキスト</th><th>状態</th><th>理由</th><th>ルーム</th><th>送信</th>' +
           '</tr>';
       }
       renderWebhookLogRows(webhookLogs);
+    }
+
+    function webhookContextJa(context) {
+      const key = String(context || '').trim();
+      const labels = {
+        sales_search_result: '売上検索',
+        receipt_image_registration: 'レシート登録',
+        receipt_text_reply: 'レシート操作',
+        receipt_correction_postback: 'レシート修正',
+        receipt_store_mismatch: '店名不一致',
+        search_menu: '検索メニュー',
+        search_postback: '検索操作',
+      };
+      return labels[key] || key || '-';
     }
 
     function renderWebhookLogRows(logs) {
       dom.logTableBody.innerHTML = '';
       const rows = Array.isArray(logs) ? logs.slice(0, 30) : [];
       if (rows.length === 0) {
-        dom.logTableBody.innerHTML = '<tr><td class="empty" colspan="7">ログはありません。</td></tr>';
+        const hint = webhookLogStoreKey
+          ? 'この店舗のログはまだありません。Bot にメッセージを送ると記録されます。'
+          : 'ログはありません。店舗を選ぶか、Bot 返信後に再読込してください。';
+        dom.logTableBody.innerHTML = '<tr><td class="empty" colspan="8">' + escapeHtml(hint) + '</td></tr>';
         return;
       }
       for (const row of rows) {
@@ -7601,8 +7935,9 @@
         const at = row.created_at || row.run_at;
         tr.innerHTML =
           '<td>' + formatDate(at) + '</td>' +
+          '<td><code style="font-size:0.82em;">' + escapeHtml(String(row.store_partition_key || '-')) + '</code></td>' +
           '<td>' + escapeHtml(webhookMethodJa(row.method)) + '</td>' +
-          '<td><code style="font-size:0.82em;">' + escapeHtml(String(row.context || '-')) + '</code></td>' +
+          '<td><code style="font-size:0.82em;">' + escapeHtml(webhookContextJa(row.context)) + '</code></td>' +
           '<td><span class="tag ' + tagClass(row.status) + '">' + escapeHtml(row.status || '-') + '</span></td>' +
           '<td>' + escapeHtml(logReasonJa(row)) + '</td>' +
           '<td>' + escapeHtml(String(row.target_room_id || '-')) + '</td>' +
@@ -7822,10 +8157,39 @@
       return ordered;
     }
 
+    function openUserPermissionsPendingOnly() {
+      activeUserPermissionPendingOnlyFilter = true;
+      activeWebhookPermissionFilterStore = '';
+      const permissionsSection = document.querySelector('section.card.permissions');
+      if (permissionsSection) {
+        permissionsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      setUserPermissionTab('names');
+      renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
+    }
+
     function renderUserPermissionNameList(items) {
       if (!dom.userPermissionNameListBody) return;
-      const rows = Array.isArray(items) ? items.slice() : [];
+      let rows = Array.isArray(items) ? items.slice() : [];
       dom.userPermissionNameListBody.innerHTML = '';
+
+      if (activeUserPermissionPendingOnlyFilter) {
+        rows = sortPendingApprovalUsers(collectPendingApprovalUsers(rows));
+        dom.userPermissionNameListBody.innerHTML =
+          '<div class="meta" style="margin-bottom:10px;">表示: <strong>承認待ちのみ</strong> ' +
+          '<button type="button" class="button webhook-perm-filter-clear">フィルタ解除</button></div>';
+        if (rows.length === 0) {
+          dom.userPermissionNameListBody.innerHTML +=
+            '<div class="empty">承認待ちユーザーはありません。</div>';
+          return;
+        }
+        appendUserPermissionGroup(
+          dom.userPermissionNameListBody,
+          '承認待ち（新しい順）',
+          rows,
+        );
+        return;
+      }
 
       if (activeWebhookPermissionFilterStore) {
         const storeRows = findUserPermissionsForStore(activeWebhookPermissionFilterStore, rows);
@@ -8777,6 +9141,7 @@
 
     function buildStoreWebhookCardHtml(store, overview, stores, userPermissions) {
       const storeKey = String(store.store_key || '').trim();
+      const isApprovalOnlyStore = storeKey === 'admin';
       const linkedRows = findRoomRowsByStoreKey(storeKey);
       const summary = buildWebhookConfigSummary(storeKey);
       const config = aggregateWebhookConfig(storeKey);
@@ -8788,7 +9153,45 @@
       const hasUnlinked = unlinkedDetected.length > 0;
       const cardClass = 'webhook-card' + (isActive ? ' is-active' : '')
         + (hasUnlinked ? ' has-unlinked-rooms' : '')
-        + (isActive && !hasUnlinked && roomCount > 0 ? ' is-all-linked' : '');
+        + (isActive && !hasUnlinked && roomCount > 0 ? ' is-all-linked' : '')
+        + (isApprovalOnlyStore ? ' is-approval-only' : '');
+
+      if (isApprovalOnlyStore) {
+        const approvalOnlyStatus = isActive ? '承認専用' : '承認専用（Webhook未接続）';
+        const pendingApprovalsHtml = buildWebhookAdminPendingApprovalsHtml(userPermissions);
+        return (
+          '<article class="' + cardClass + '" data-store-key="' + escapeHtml(storeKey) + '">' +
+          '<div class="webhook-card-header">' +
+          '<h3 class="webhook-card-title">' + escapeHtml(store.store_name || storeKey) + '</h3>' +
+          '<span class="webhook-card-status-badge">' + escapeHtml(approvalOnlyStatus) + '</span>' +
+          '</div>' +
+          '<div class="meta">このアカウントは LINE 利用許可の承認専用です。レシート解析・ルーム連携・売上機能は対象外です。</div>' +
+          '<div class="webhook-card-approval-note">承認専用ルームのため、通常の権限・ルーム・電話番号設定UIは非表示です。</div>' +
+          '<div class="webhook-admin-focus">' +
+          '<div class="webhook-admin-focus-row">' +
+          '<div class="webhook-admin-focus-label">役割</div>' +
+          '<p>新規ユーザーの利用許可 / 不許可の操作のみを担当します。</p>' +
+          '</div>' +
+          '<div class="webhook-admin-focus-row">' +
+          '<div class="webhook-admin-focus-label">操作場所</div>' +
+          '<p>このカード内で承認待ちを確認し、「許可」「不許可」を直接操作できます。</p>' +
+          '</div>' +
+          '</div>' +
+          pendingApprovalsHtml +
+          '<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">' +
+          '<button type="button" class="button primary webhook-admin-pending-reload">承認待ちを再読込</button>' +
+          '<button type="button" class="button webhook-admin-pending-list-open">承認待ち一覧を開く</button>' +
+          '</div>' +
+          '<details class="webhook-setup-details">' +
+          '<summary>Webhook URL（承認専用）</summary>' +
+          '<div class="webhook-card-url" style="margin-top:8px;">' +
+          '<code>' + escapeHtml(store.webhook_url || '') + '</code>' +
+          '<button type="button" class="button webhook-copy-url" data-url="' + escapeHtml(store.webhook_url || '') + '">Webhook URLをコピー</button>' +
+          '</div>' +
+          '</details>' +
+          '</article>'
+        );
+      }
 
       if (isActive) {
         const lastReceived = status && status.last_webhook_received_at
@@ -9629,7 +10032,7 @@
             return liteMap;
           });
 
-        const statePromise = api('/state?logs_limit=30');
+        const statePromise = api(buildAdminStatePath());
         const [state, liteMap] = await Promise.all([statePromise, liteWebhookPromise]);
 
         currentState = state;
@@ -9692,6 +10095,60 @@
           assignedJobTitleSelect ? assignedJobTitleSelect.value : null,
         ),
       };
+    }
+
+    function buildUserPermissionPayloadFromStateRow(row, overrides) {
+      const src = row || {};
+      const patch = overrides || {};
+      const lineUserId = String(src.line_user_id || '').trim();
+      if (!lineUserId) throw new Error('line_user_id が取得できません。');
+      const excludedIds = Array.isArray(src.excluded_message_search_room_ids)
+        ? src.excluded_message_search_room_ids.map(function(v) { return String(v || '').trim(); }).filter(Boolean)
+        : [];
+      return {
+        line_user_id: lineUserId,
+        display_name: String(src.display_name || '').trim() || null,
+        is_active: typeof patch.is_active === 'boolean' ? patch.is_active : (src.is_active !== false),
+        can_message_search: typeof patch.can_message_search === 'boolean' ? patch.can_message_search : (src.can_message_search !== false),
+        can_library_search: typeof patch.can_library_search === 'boolean' ? patch.can_library_search : (src.can_library_search !== false),
+        can_calendar_view: typeof patch.can_calendar_view === 'boolean' ? patch.can_calendar_view : !!src.can_calendar_view,
+        can_calendar_create: typeof patch.can_calendar_create === 'boolean' ? patch.can_calendar_create : !!src.can_calendar_create,
+        can_calendar_update: typeof patch.can_calendar_update === 'boolean' ? patch.can_calendar_update : !!src.can_calendar_update,
+        can_media_access: typeof patch.can_media_access === 'boolean' ? patch.can_media_access : !!src.can_media_access,
+        excluded_message_search_room_ids: excludedIds,
+        assigned_store: normalizeAssignedStorePayloadValue(
+          Object.prototype.hasOwnProperty.call(patch, 'assigned_store') ? patch.assigned_store : src.assigned_store,
+        ),
+        assigned_job_title: normalizeJobTitlePayloadValue(
+          Object.prototype.hasOwnProperty.call(patch, 'assigned_job_title') ? patch.assigned_job_title : src.assigned_job_title,
+        ),
+      };
+    }
+
+    async function updateAdminCardApproval(lineUserId, approved) {
+      const targetId = String(lineUserId || '').trim();
+      if (!targetId) throw new Error('対象ユーザーIDが空です。');
+      const rows = currentState && Array.isArray(currentState.user_permissions)
+        ? currentState.user_permissions
+        : [];
+      const row = rows.find(function(item) {
+        return String(item && item.line_user_id || '').trim() === targetId;
+      });
+      if (!row) {
+        throw new Error('対象ユーザーが見つかりません。再読込してください。');
+      }
+      const payload = buildUserPermissionPayloadFromStateRow(row, approved ? {
+        is_active: true,
+        can_message_search: true,
+      } : {
+        is_active: false,
+      });
+      const body = await api('/permissions/users', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      mergeUserPermissionResponseIntoState(body && body.user_permission);
+      await safeLoadState();
     }
 
     async function saveSingleUserPermissionRow(tr, options) {
@@ -9984,6 +10441,20 @@
       });
     }
 
+    if (dom.webhookLogStoreFilter) {
+      dom.webhookLogStoreFilter.addEventListener('change', function() {
+        webhookLogStoreKey = String(dom.webhookLogStoreFilter.value || '').trim();
+        if (webhookLogStoreKey) {
+          localStorage.setItem(WEBHOOK_LOG_STORE_KEY, webhookLogStoreKey);
+        } else {
+          localStorage.removeItem(WEBHOOK_LOG_STORE_KEY);
+        }
+        loadState({ silent: false, showSyncOverlay: true }).catch(function(error) {
+          alert(error && error.message ? error.message : String(error));
+        });
+      });
+    }
+
     dom.clearTokenBtn.addEventListener('click', async function() {
       clearSiteCacheForToken(getToken(), getProjectUrl());
       await logoutToken();
@@ -10109,7 +10580,24 @@
         if (target.classList.contains('webhook-perm-filter-clear')) {
           closeWebhookStorePopup();
           activeWebhookPermissionFilterStore = '';
+          activeUserPermissionPendingOnlyFilter = false;
           renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
+          return;
+        }
+        if (target.classList.contains('webhook-admin-pending-reload')) {
+          await safeLoadState();
+          return;
+        }
+        if (target.classList.contains('webhook-admin-pending-list-open')) {
+          closeWebhookStorePopup();
+          openUserPermissionsPendingOnly();
+          return;
+        }
+        if (target.classList.contains('webhook-admin-approve') || target.classList.contains('webhook-admin-deny')) {
+          const lineUserId = String(target.getAttribute('data-line-user-id') || '').trim();
+          const approved = target.classList.contains('webhook-admin-approve');
+          await updateAdminCardApproval(lineUserId, approved);
+          alert(approved ? 'ユーザーを許可しました。' : 'ユーザーを不許可にしました。');
           return;
         }
         if (target.classList.contains('webhook-copy-url')) {
@@ -10294,6 +10782,7 @@
         if (!(target instanceof HTMLElement)) return;
         if (target.classList.contains('webhook-perm-filter-clear')) {
           activeWebhookPermissionFilterStore = '';
+          activeUserPermissionPendingOnlyFilter = false;
           renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
           return;
         }

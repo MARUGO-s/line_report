@@ -17,12 +17,19 @@ import {
   clearPendingStoreNameMismatch,
 } from '../_shared/receipt_store_mismatch.ts'
 import {
+  alignReceiptStoreNameToRegistry,
   receiptStoreNameMatchesRegistry,
   resolveParsedStoreNameForDisplay,
 } from '../_shared/receipt_store_name_match.ts'
 import { persistLearnedReceiptPhone } from '../_shared/store_receipt_phones.ts'
 import type { LineReplyPayload } from '../_shared/receipt_types.ts'
-import { clearPendingReceiptCorrection, handleStoreReceiptTextMessage, lineReplyPayloadToMessages } from '../_shared/receipt_correction.ts'
+import {
+  clearPendingReceiptCorrection,
+  handleReceiptCorrectionPostback,
+  handleStoreReceiptTextMessage,
+  isReceiptCorrectionPostbackData,
+  lineReplyPayloadToMessages,
+} from '../_shared/receipt_correction.ts'
 import {
   computeReceiptHeuristicConfidence,
   mergeReceiptConfidence,
@@ -56,7 +63,10 @@ import {
 import { serveAdminApprovalWebhook } from '../_shared/line_admin_webhook.ts'
 import {
   ADMIN_STORE_PARTITION_KEY,
+  gateInvitedRoomBotAccess,
   handleStoreFollowForUserApproval,
+  tryHandleStoreRegistrationInteraction,
+  isInvitedChatRoomId,
   loadLineUserPermissionGate,
   replyLinePermissionBlocked,
   shouldBlockUnapprovedDirectMessage,
@@ -128,6 +138,18 @@ async function verifyLineSignature(
   return hashBase64 === signatureHeader
 }
 
+function webhookReplyLog(
+  registry: StoreRegistryRow,
+  roomId: string | null,
+  context: string,
+) {
+  return {
+    storePartitionKey: registry.store_partition_key,
+    roomId,
+    context,
+  }
+}
+
 function resolveChannelSecret(storeKey: string): string {
   const envKey = `LINE_CHANNEL_SECRET__${storeKey.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase()}`
   const perStore = String(Deno.env.get(envKey) || '').trim()
@@ -135,6 +157,33 @@ function resolveChannelSecret(storeKey: string): string {
   // 管理Bot(admin)は店舗用 secret にフォールバックしない（署名不一致で 403 になるため）
   if (storeKey === ADMIN_STORE_PARTITION_KEY) return ''
   return String(Deno.env.get('LINE_CHANNEL_SECRET') || '').trim()
+}
+
+async function inferStoreKeyFromSignature(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  rawBody: string,
+  signatureHeader: string | null,
+): Promise<string | null> {
+  if (!signatureHeader) return null
+  const { data, error } = await supabase
+    .from('store_webhook_tables')
+    .select('store_partition_key')
+
+  if (error) {
+    console.error('inferStoreKeyFromSignature: store list failed:', error.message)
+    return null
+  }
+
+  const rows = Array.isArray(data) ? data : []
+  for (const row of rows) {
+    const key = String((row as { store_partition_key?: unknown }).store_partition_key ?? '').trim()
+    if (!key || !STORE_KEY_PATTERN.test(key)) continue
+    const secret = resolveChannelSecret(key)
+    if (!secret) continue
+    const valid = await verifyLineSignature(rawBody, signatureHeader, secret)
+    if (valid) return key
+  }
+  return null
 }
 
 async function insertRawWebhookEvent(
@@ -179,7 +228,12 @@ async function processReceiptImageEvent(
   const contentFetch = await fetchLineMessageBinary(lineMessageId, accessToken)
   if (!contentFetch.ok) {
     if (replyToken) {
-      await replyLineText(replyToken, '画像の取得に失敗しました。時間をおいて再度お試しください。', accessToken)
+      await replyLineText(
+        replyToken,
+        '画像の取得に失敗しました。時間をおいて再度お試しください。',
+        accessToken,
+        webhookReplyLog(registry, roomId, 'receipt_image_fetch_failed'),
+      )
     }
     return { saved: false, replied: !!replyToken, reason: contentFetch.error }
   }
@@ -195,11 +249,17 @@ async function processReceiptImageEvent(
     const msg = analyzed.analysis?.summary
       ? `画像を確認しました。\n${analyzed.analysis.summary}`
       : 'レシートとして読み取れる項目がありませんでした。'
-    if (replyToken) await replyLineText(replyToken, msg, accessToken)
+    if (replyToken) {
+      await replyLineText(replyToken, msg, accessToken, webhookReplyLog(registry, roomId, 'receipt_image_no_receipt'))
+    }
     return { saved: false, replied: !!replyToken, reason: analyzed.failure?.stage ?? 'no_receipt' }
   }
 
-  const receipt = analyzed.analysis.receipt
+  const receiptRaw = analyzed.analysis.receipt
+  const alignedStoreName = alignReceiptStoreNameToRegistry(receiptRaw.storeName, registry)
+  const receipt = String(alignedStoreName ?? '') !== String(receiptRaw.storeName ?? '')
+    ? { ...receiptRaw, storeName: alignedStoreName }
+    : receiptRaw
   const confidence = mergeReceiptConfidence(
     computeReceiptHeuristicConfidence(receipt),
     analyzed.analysis.receiptModelConfidence ?? null,
@@ -209,7 +269,9 @@ async function processReceiptImageEvent(
       'レシートの自動解析の確信度が低いため、売上登録していません。',
       '影・反射を避け、金額・日付がはっきり読める距離でもう一度撮影してください。',
     ].join('\n')
-    if (replyToken) await replyLineText(replyToken, lowMsg, accessToken)
+    if (replyToken) {
+      await replyLineText(replyToken, lowMsg, accessToken, webhookReplyLog(registry, roomId, 'receipt_image_low_confidence'))
+    }
     return { saved: false, replied: !!replyToken, reason: 'low_confidence' }
   }
 
@@ -265,7 +327,12 @@ async function processReceiptImageEvent(
     }
     if (replyToken) {
       const flexMessage = buildReceiptStoreMismatchFlexReply(guidance)
-      await replyLineFlex(replyToken, flexMessage, accessToken)
+      await replyLineFlex(
+        replyToken,
+        flexMessage,
+        accessToken,
+        webhookReplyLog(registry, roomId, 'receipt_store_mismatch'),
+      )
     }
     return {
       saved: false,
@@ -292,7 +359,12 @@ async function processReceiptImageEvent(
 
   if (replyToken) {
     const messages = lineReplyPayloadToMessages(result.reply)
-    const replyResult = await replyLineMessages(replyToken, messages, accessToken)
+    const replyResult = await replyLineMessages(
+      replyToken,
+      messages,
+      accessToken,
+      webhookReplyLog(registry, roomId, 'receipt_image_registration'),
+    )
     if (!replyResult.ok) {
       console.error('LINE reply failed:', replyResult.error)
     }
@@ -333,7 +405,12 @@ async function processReceiptTextEvent(
 
   if (replyToken) {
     const messages = lineReplyPayloadToMessages(replyPayload)
-    await replyLineMessages(replyToken, messages, accessToken)
+    await replyLineMessages(
+      replyToken,
+      messages,
+      accessToken,
+      webhookReplyLog(registry, roomId, 'receipt_text_reply'),
+    )
   }
   return { handled: true, replied: !!replyToken }
 }
@@ -343,19 +420,31 @@ Deno.serve(async (req) => {
     return new Response('Method not allowed', { status: 405 })
   }
 
-  const storeKey = parseStoreKeyFromRequest(req)
-  if (!storeKey || !STORE_KEY_PATTERN.test(storeKey)) {
-    return jsonResponse({ ok: false, error: 'store_partition_key required in URL path' }, 400)
-  }
+  const requestedStoreKey = parseStoreKeyFromRequest(req)
 
   // 管理Bot: 承認専用（店舗Botの DB・レシート・会話記録には触れない）
-  if (storeKey === ADMIN_STORE_PARTITION_KEY) {
+  if (requestedStoreKey === ADMIN_STORE_PARTITION_KEY) {
     return serveAdminApprovalWebhook(req)
   }
 
   const supabase = createServiceClient()
   if (!supabase) {
     return jsonResponse({ ok: false, error: 'Server misconfigured' }, 500)
+  }
+
+  let rawBody = ''
+  let storeKey = requestedStoreKey && STORE_KEY_PATTERN.test(requestedStoreKey)
+    ? requestedStoreKey
+    : ''
+
+  if (!storeKey) {
+    rawBody = await req.text()
+    const signature = req.headers.get('x-line-signature')
+    const inferred = await inferStoreKeyFromSignature(supabase, rawBody, signature)
+    if (!inferred) {
+      return jsonResponse({ ok: false, error: 'store_partition_key required in URL path' }, 400)
+    }
+    storeKey = inferred
   }
 
   const { data: registry, error: registryError } = await supabase
@@ -372,7 +461,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, error: `unknown store: ${storeKey}` }, 404)
   }
 
-  const rawBody = await req.text()
+  if (!rawBody) rawBody = await req.text()
   const channelSecret = resolveChannelSecret(storeKey)
   const signature = req.headers.get('x-line-signature')
   const valid = await verifyLineSignature(rawBody, signature, channelSecret)
@@ -445,6 +534,29 @@ Deno.serve(async (req) => {
     }
 
     if (
+      eventRoomId
+      && isInvitedChatRoomId(eventRoomId)
+      && storeAccessToken
+    ) {
+      try {
+        const roomGate = await gateInvitedRoomBotAccess(
+          supabase,
+          eventRoomId,
+          storeKey,
+          storeDisplayName,
+          storeAccessToken,
+          event,
+        )
+        if (!roomGate.allowed) {
+          if (roomGate.replied) receiptReplies += 1
+          continue
+        }
+      } catch (e) {
+        console.error('gateInvitedRoomBotAccess failed:', String(e))
+      }
+    }
+
+    if (
       isDirectMessage
       && eventUserId.startsWith('U')
       && event.type === 'follow'
@@ -457,11 +569,35 @@ Deno.serve(async (req) => {
           storeKey,
           storeDisplayName,
           storeAccessToken,
+          event,
         )
       } catch (e) {
         console.error('handleStoreFollowForUserApproval failed:', String(e))
       }
       continue
+    }
+
+    if (
+      isDirectMessage
+      && eventUserId.startsWith('U')
+      && storeAccessToken
+      && (event.type === 'message' || event.type === 'postback')
+    ) {
+      try {
+        const reg = await tryHandleStoreRegistrationInteraction(
+          supabase,
+          event,
+          storeKey,
+          storeDisplayName,
+          storeAccessToken,
+        )
+        if (reg.handled) {
+          if (reg.replied) receiptReplies += 1
+          continue
+        }
+      } catch (e) {
+        console.error('tryHandleStoreRegistrationInteraction failed:', String(e))
+      }
     }
 
     if (isDirectMessage && eventUserId.startsWith('U')) {
@@ -514,15 +650,57 @@ Deno.serve(async (req) => {
 
     const lineAccessTokenForSearch = resolveChannelAccessToken(storeKey)
 
-    if (isLineSearchGuideEnabled() && event.type === 'postback' && lineAccessTokenForSearch) {
-      try {
-        const searchResult = await handleLineSearchPostback(supabase, event, lineAccessTokenForSearch)
-        if (searchResult.handled) searchGuideHandled += 1
-        if (searchResult.replied) receiptReplies += 1
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error('handleLineSearchPostback failed:', msg)
-        errors.push(msg.slice(0, 160))
+    if (event.type === 'postback' && lineAccessTokenForSearch) {
+      const postbackData = String(event.postback?.data ?? '').trim()
+      const eventRoomIdForPostback = resolveRoomId(event)
+      const postbackUserId = event.source?.userId ? String(event.source.userId) : null
+      const postbackReplyToken = String(event.replyToken ?? '').trim()
+
+      if (isReceiptCorrectionPostbackData(postbackData) && postbackReplyToken && eventRoomIdForPostback) {
+        try {
+          const correctionPayload = await handleReceiptCorrectionPostback(
+            supabase,
+            registry as StoreRegistryRow,
+            eventRoomIdForPostback,
+            postbackUserId,
+            postbackData,
+          )
+          if (correctionPayload) {
+            await replyLineMessages(
+              postbackReplyToken,
+              lineReplyPayloadToMessages(correctionPayload),
+              lineAccessTokenForSearch,
+              {
+                storePartitionKey: storeKey,
+                roomId: eventRoomIdForPostback,
+                context: 'receipt_correction_postback',
+              },
+            )
+            receiptReplies += 1
+            continue
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('handleReceiptCorrectionPostback failed:', msg)
+          errors.push(msg.slice(0, 160))
+        }
+      }
+
+      if (isLineSearchGuideEnabled()) {
+        try {
+          const searchResult = await handleLineSearchPostback(
+            supabase,
+            event,
+            lineAccessTokenForSearch,
+            storeKey,
+          )
+          if (searchResult.handled) searchGuideHandled += 1
+          if (searchResult.replied) receiptReplies += 1
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('handleLineSearchPostback failed:', msg)
+          errors.push(msg.slice(0, 160))
+        }
       }
     }
 

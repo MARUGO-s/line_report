@@ -38,6 +38,8 @@ const RECEIPT_BRAND_PARTITION_ALIASES: ReadonlyArray<{
       'BISTRO CAVA CAVA',
       'BISTROCAVACAVA',
       'CAVA CAVA',
+      'CAVA,CAVA',
+      'CAVA.CAVA',
       'ビストロ サヴァサヴァ',
       'ビストロサヴァサヴァ',
       'ÇAVA ÇAVA',
@@ -100,6 +102,7 @@ const MARUGO_OCR_LOCATION_SUFFIX =
 export function sanitizeReceiptOcrStoreName(raw: string): string {
   let s = String(raw || '').trim().normalize('NFKC')
   if (!s) return s
+  s = s.replace(/[,，、.．]/g, ' ').replace(/\s+/g, ' ').trim()
   s = s.replace(TRAILING_STORE_NAME_OCR_NOISE, '').trim()
   if (/^マルコ/u.test(s) && MARUGO_OCR_LOCATION_SUFFIX.test(s)) {
     s = s.replace(/^マルコ/u, 'マルゴ')

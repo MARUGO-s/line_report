@@ -24,6 +24,31 @@ async function fetchWithTimeout(
   }
 }
 
+const SHEETS_RETRY_MAX_ATTEMPTS = 6
+
+/** 429 / 5xx 時に指数バックオフで再試行 */
+async function sheetsApiFetch(
+  url: string,
+  options: RequestInit,
+  timeoutMs = SHEETS_FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  let last: Response | null = null
+  for (let attempt = 0; attempt < SHEETS_RETRY_MAX_ATTEMPTS; attempt++) {
+    last = await fetchWithTimeout(url, options, timeoutMs)
+    if (last.ok) return last
+    const retryable = last.status === 429 || last.status === 503 || last.status >= 500
+    if (!retryable || attempt === SHEETS_RETRY_MAX_ATTEMPTS - 1) return last
+    const retryAfter = last.headers.get("Retry-After")
+    let waitMs = 1500 * Math.pow(2, attempt)
+    if (retryAfter) {
+      const sec = parseInt(retryAfter, 10)
+      if (!isNaN(sec)) waitMs = Math.max(waitMs, sec * 1000)
+    }
+    await new Promise((r) => setTimeout(r, Math.min(waitMs, 45_000)))
+  }
+  return last!
+}
+
 /** 日本語タブ名などは 'シート名'!A1 形式が必須 */
 export function formatSheetA1Range(sheetTabName: string, a1Suffix: string): string {
   const escaped = sheetTabName.replace(/'/g, "''")
@@ -33,7 +58,7 @@ export function formatSheetA1Range(sheetTabName: string, a1Suffix: string): stri
 export async function listSpreadsheetSheetTitles(spreadsheetId: string): Promise<string[]> {
   const accessToken = await fetchGoogleServiceAccountAccessToken([SHEETS_SCOPE])
   const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties.title`
-  const response = await fetchWithTimeout(url, {
+  const response = await sheetsApiFetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (!response.ok) {
@@ -57,7 +82,7 @@ export async function getSpreadsheetValues(
 ): Promise<SheetValues> {
   const accessToken = await fetchGoogleServiceAccountAccessToken([SHEETS_SCOPE])
   const url = new URL(`${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`)
-  const response = await fetchWithTimeout(url.toString(), {
+  const response = await sheetsApiFetch(url.toString(), {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (!response.ok) {
@@ -78,7 +103,7 @@ export async function clearSpreadsheetRange(
 ): Promise<void> {
   const accessToken = await fetchGoogleServiceAccountAccessToken([SHEETS_SCOPE])
   const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}:clear`
-  const response = await fetchWithTimeout(url, {
+  const response = await sheetsApiFetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -102,7 +127,7 @@ export async function updateSpreadsheetValues(
     `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(rangeA1)}`,
   )
   url.searchParams.set("valueInputOption", "USER_ENTERED")
-  const response = await fetchWithTimeout(url.toString(), {
+  const response = await sheetsApiFetch(url.toString(), {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -127,7 +152,7 @@ export async function appendSpreadsheetValues(
   )
   url.searchParams.set("valueInputOption", "USER_ENTERED")
   url.searchParams.set("insertDataOption", "INSERT_ROWS")
-  const response = await fetchWithTimeout(url.toString(), {
+  const response = await sheetsApiFetch(url.toString(), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -141,6 +166,34 @@ export async function appendSpreadsheetValues(
   }
 }
 
+/** タブが無いときに新規シートを追加 */
+export async function addSpreadsheetSheet(
+  spreadsheetId: string,
+  title: string,
+): Promise<void> {
+  const sheetTitle = String(title ?? "").trim()
+  if (!sheetTitle) throw new Error("addSpreadsheetSheet: title is required")
+  const accessToken = await fetchGoogleServiceAccountAccessToken([SHEETS_SCOPE])
+  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}:batchUpdate`
+  const response = await sheetsApiFetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      requests: [{ addSheet: { properties: { title: sheetTitle } } }],
+    }),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    if (text.includes("already exists") || text.includes("duplicate")) {
+      return
+    }
+    throw new Error(`Sheets batchUpdate addSheet failed (${response.status}): ${text}`)
+  }
+}
+
 export async function batchUpdateSpreadsheetValues(
   spreadsheetId: string,
   data: Array<{ range: string; values: SheetValues }>,
@@ -148,7 +201,7 @@ export async function batchUpdateSpreadsheetValues(
   if (data.length === 0) return
   const accessToken = await fetchGoogleServiceAccountAccessToken([SHEETS_SCOPE])
   const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`
-  const response = await fetchWithTimeout(url, {
+  const response = await sheetsApiFetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,

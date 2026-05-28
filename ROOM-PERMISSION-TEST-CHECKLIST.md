@@ -4,8 +4,15 @@
 >
 > ### 🔓 自動連携は **管理者の承認なし** で行われます（セキュリティ注意）
 >
-> Webhook 受信・管理画面同期でルームが登録されます。**手動承認は不要**ですが、誤 URL・テストグループも登録され得ます。  
-> 詳細・無効化（`RECEIPT_ROOM_AUTO_LINK=0`）はガイド参照。残った未連携は「一括連携」で手動補完。
+> Webhook 受信・管理画面同期でルームが **連携** されます（**連携のための手動承認は不要**）。誤 URL・テストグループも登録され得ます。  
+> 詳細・無効化（`RECEIPT_ROOM_AUTO_LINK=0`）はガイド参照。残った未連携は「一括連携」で手動補完。  
+> **注意:** 連携されても **新規グループはルーム承認（`bot_access_approved`）** が別途必要 → [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md)
+
+> ### ⚠️ グループに Bot を2体入れられない（LINE 仕様）
+>
+> **1つの招待グループ／複数人トークに公式 Bot は1体まで**です。すでに別 Bot がいると2体目は参加できず「すぐ退出」したように見えます（当システムの `leave` ではありません）。  
+> Bot が **残って無反応** なら **ルーム承認待ち** → 管理 Bot で **許可ルーム**。  
+> → [**LINE-GROUP-BOT-IMPORTANT.md**](./LINE-GROUP-BOT-IMPORTANT.md)（必読）
 
 ---
 
@@ -16,7 +23,9 @@
 **API:** `admin-api` … `GET /state`, `PUT /settings/rooms`, `line_user_permissions` 系  
 **運用説明:**
 
+- [`DOCS-INDEX.md`](./DOCS-INDEX.md) — 全 MD 索引・用語集
 - [`ROOM-LINKING-GUIDE.md`](./ROOM-LINKING-GUIDE.md) — 連携・自動連携・セキュリティ
+- [**`LINE-USER-APPROVAL-SECURITY.md`**](./LINE-USER-APPROVAL-SECURITY.md) — **利用許可・ユーザー管理（セキュリティ強化）**
 - [**`ROOM-PERMISSION-DETAIL-GUIDE.md`**](./ROOM-PERMISSION-DETAIL-GUIDE.md) — **細かい権限の意味**（優先順位、カレンダー一括/個別、連携ルーム数による画面、Bistro CAVACAVA 表示名 など）
 - [**`RESERVATION-GMAIL-GUIDE.md`**](./RESERVATION-GMAIL-GUIDE.md) — Gmail 予約 → LINE 通知、過去の予約日（最大5件）、hocbn デプロイ
 

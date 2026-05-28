@@ -8,11 +8,14 @@ import {
 import { loadReceiptReplyContext } from './receipt_reply_context.ts'
 import {
   formatYenAmount,
+  isPlausibleReceiptCount,
+  looksLikeSalesDateDigits,
   normalizeInlineText,
   normalizeReceiptFieldText,
   parseCurrencyAmount,
   parseIntegerCount,
   parseReceiptDateToIso,
+  resolveCanonicalStoreDisplayName,
 } from './receipt_parse.ts'
 import {
   clearPendingReceiptDuplicate,
@@ -23,9 +26,12 @@ import {
   tryHandlePendingStoreNameMismatchConfirmation,
 } from './receipt_store_mismatch.ts'
 import {
+  deleteStoreReceiptById,
   deleteStoreReceiptByLineMessageId,
   loadLatestStoreReceiptForRoom,
+  loadStoreReceiptById,
   loadStoreReceiptByLineMessageId,
+  loadStoreReceiptByLineMessageIdInStore,
   receiptRowToAnalysis,
   type StoreRegistryRow,
   updateStoreReceiptFromDraft,
@@ -203,6 +209,13 @@ function normalizeReceiptCorrectionInputValue(
   if (count == null || !Number.isFinite(count) || count < 0) {
     return { ok: false, error: `${field.label}は0以上の整数で入力してください。` }
   }
+  const maxCount = field.key === 'guestCount' ? 99_999 : 9999
+  if (!isPlausibleReceiptCount(count, maxCount)) {
+    if (looksLikeSalesDateDigits(normalized)) {
+      return { ok: false, error: `${field.label}に日付（8桁）は入れられません。組数・客数の数字だけ送ってください。` }
+    }
+    return { ok: false, error: `${field.label}の値が大きすぎます。正しい数字を入力してください。` }
+  }
   return { ok: true, value: String(count) }
 }
 
@@ -274,6 +287,34 @@ async function loadPendingCorrection(
   }
 }
 
+const RECEIPT_CORRECTION_CONFIRM_TEXT = '確定'
+const RECEIPT_CORRECTION_CANCEL_TEXT = 'キャンセル'
+const RECEIPT_CORRECTION_BACK_TEXT = '戻る'
+
+export const RECEIPT_CORRECTION_POSTBACK_CONFIRM = 'rcpt_corr=confirm'
+export const RECEIPT_CORRECTION_POSTBACK_CANCEL = 'rcpt_corr=cancel'
+export const RECEIPT_CORRECTION_POSTBACK_BACK = 'rcpt_corr=back'
+
+export function isReceiptCorrectionPostbackData(data: string): boolean {
+  const d = String(data ?? '').trim()
+  return d === RECEIPT_CORRECTION_POSTBACK_CONFIRM
+    || d === RECEIPT_CORRECTION_POSTBACK_CANCEL
+    || d === RECEIPT_CORRECTION_POSTBACK_BACK
+}
+
+export function isReceiptCorrectionControlText(text: string): boolean {
+  return normalizeReceiptCorrectionControl(text) !== null
+}
+
+export async function hasPendingReceiptCorrection(
+  supabase: SupabaseClient,
+  roomId: string,
+  userId: string | null,
+): Promise<boolean> {
+  const pending = await loadPendingCorrection(supabase, roomId, userId)
+  return pending !== null
+}
+
 function buildCorrectionFlexHeader(title: string, subtitle: string) {
   return {
     type: 'box',
@@ -290,10 +331,67 @@ function buildCorrectionFlexHeader(title: string, subtitle: string) {
   }
 }
 
+function buildReceiptCorrectionConfirmCancelFooter(): Record<string, unknown> {
+  return {
+    type: 'box',
+    layout: 'vertical',
+    spacing: 'sm',
+    contents: [
+      {
+        type: 'button',
+        style: 'primary',
+        height: 'sm',
+        action: {
+          type: 'postback',
+          label: '確定',
+          data: RECEIPT_CORRECTION_POSTBACK_CONFIRM,
+          displayText: '確定',
+        },
+      },
+      {
+        type: 'button',
+        style: 'secondary',
+        height: 'sm',
+        action: {
+          type: 'postback',
+          label: 'キャンセル',
+          data: RECEIPT_CORRECTION_POSTBACK_CANCEL,
+          displayText: 'キャンセル',
+        },
+      },
+    ],
+    paddingAll: '12px',
+  }
+}
+
+function buildReceiptCorrectionCancelOnlyFooter(): Record<string, unknown> {
+  return {
+    type: 'box',
+    layout: 'vertical',
+    spacing: 'sm',
+    contents: [
+      {
+        type: 'button',
+        style: 'secondary',
+        height: 'sm',
+        action: {
+          type: 'postback',
+          label: 'キャンセル',
+          data: RECEIPT_CORRECTION_POSTBACK_CANCEL,
+          displayText: 'キャンセル',
+        },
+      },
+    ],
+    paddingAll: '12px',
+  }
+}
+
 function buildFieldSelectionPrompt(
   draft: LineImageReceiptAnalysis,
   note?: string,
+  options?: { showConfirm?: boolean },
 ): Record<string, unknown> {
+  const showConfirm = options?.showConfirm === true
   const fieldRows = RECEIPT_CORRECTION_FIELDS.map((field, idx) => ({
     type: 'box',
     layout: 'horizontal',
@@ -333,11 +431,9 @@ function buildFieldSelectionPrompt(
   bodyContents.push({ type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md', contents: fieldRows })
   bodyContents.push({
     type: 'text',
-    text: [
-      '・1〜8 の数字…その項目の修正へ進む',
-      '・「確定」「保存」「反映」「完了」「OK」など…変更を保存して終了',
-      '・「キャンセル」「中止」「終了」など…修正をやめる',
-    ].join('\n'),
+    text: showConfirm
+      ? '1〜8 の番号で項目を選び、値を入力したあと「確定」で保存できます。'
+      : '1〜8 の番号で項目を選び、表示された画面で新しい値を送ってください（例: 会計組数を3にする → 6 → 3）。',
     size: 'xxs',
     color: '#888888',
     wrap: true,
@@ -345,11 +441,14 @@ function buildFieldSelectionPrompt(
   })
   return {
     type: 'flex',
-    altText: 'レシート修正 番号で項目を選んでください',
+    altText: 'レシート修正 番号を選んでください',
     contents: {
       type: 'bubble',
       header: buildCorrectionFlexHeader('レシート修正', '番号を返信して項目を選んでください'),
       body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: bodyContents },
+      footer: showConfirm
+        ? buildReceiptCorrectionConfirmCancelFooter()
+        : buildReceiptCorrectionCancelOnlyFooter(),
     },
   }
 }
@@ -373,13 +472,21 @@ function buildValueInputPrompt(
     altText: `レシート修正 ${field.label}の値を入力`,
     contents: {
       type: 'bubble',
-      header: buildCorrectionFlexHeader(field.label, '新しい値をテキストで送ってください'),
+      header: buildCorrectionFlexHeader('レシート修正', `${field.label} — 新しい値をテキストで送ってください`),
       body: {
         type: 'box',
         layout: 'vertical',
         spacing: 'sm',
         contents: [
           { type: 'text', text: `${field.label}の新しい値を送ってください。`, size: 'sm', wrap: true },
+          {
+            type: 'text',
+            text: '※一覧の番号（1〜8）ではなく、この項目の値として送ってください。',
+            size: 'xxs',
+            color: '#888888',
+            wrap: true,
+            margin: 'sm',
+          },
           {
             type: 'box',
             layout: 'horizontal',
@@ -392,8 +499,37 @@ function buildValueInputPrompt(
           },
           { type: 'text', text: `入力のヒント: ${kindHint}`, size: 'xs', color: '#666666', wrap: true, margin: 'sm' },
           { type: 'text', text: '未設定にする場合は「-」または「なし」と入力してください。', size: 'xxs', color: '#888888', wrap: true },
-          { type: 'text', text: '「戻る」で一覧に戻れます。', size: 'xxs', color: '#888888', wrap: true, margin: 'xs' },
         ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'secondary',
+            height: 'sm',
+            action: {
+              type: 'postback',
+              label: '戻る',
+              data: RECEIPT_CORRECTION_POSTBACK_BACK,
+              displayText: '戻る',
+            },
+          },
+          {
+            type: 'button',
+            style: 'secondary',
+            height: 'sm',
+            action: {
+              type: 'postback',
+              label: 'キャンセル',
+              data: RECEIPT_CORRECTION_POSTBACK_CANCEL,
+              displayText: 'キャンセル',
+            },
+          },
+        ],
+        paddingAll: '12px',
       },
     },
   }
@@ -424,17 +560,40 @@ async function startCorrectionSession(
   roomId: string,
   userId: string | null,
   targetLineMessageId: string | null,
+  targetReceiptRowId: number | null = null,
 ): Promise<LineReplyPayload> {
-  const target = targetLineMessageId
-    ? await loadStoreReceiptByLineMessageId(supabase, registry.receipt_table, roomId, targetLineMessageId)
-    : await loadLatestStoreReceiptForRoom(supabase, registry.receipt_table, roomId)
+  let target: Awaited<ReturnType<typeof loadStoreReceiptById>> = null
+  if (targetReceiptRowId != null) {
+    target = await loadStoreReceiptById(supabase, registry.receipt_table, targetReceiptRowId)
+  } else if (targetLineMessageId) {
+    target = await loadStoreReceiptByLineMessageId(
+      supabase,
+      registry.receipt_table,
+      roomId,
+      targetLineMessageId,
+    ) ?? await loadStoreReceiptByLineMessageIdInStore(
+      supabase,
+      registry.receipt_table,
+      targetLineMessageId,
+    )
+  } else {
+    target = await loadLatestStoreReceiptForRoom(supabase, registry.receipt_table, roomId)
+  }
   if (!target) {
-    if (targetLineMessageId) {
-      return '指定されたレシートをこのルームで見つけられませんでした。もう一度解析結果カードの「この結果を修正」ボタンを押してください。'
+    if (targetReceiptRowId != null || targetLineMessageId) {
+      return '指定されたレシートをこの店舗のデータで見つけられませんでした。もう一度「この結果を修正」ボタンを押してください。'
     }
     return 'このルームには修正対象のレシートがまだありません。先にレシート画像を送信してください。'
   }
-  const draft = receiptRowToAnalysis(target)
+  let draft = receiptRowToAnalysis(target)
+  const canonicalStoreName = resolveCanonicalStoreDisplayName(
+    registry.display_name,
+    draft.storeName,
+    registry.store_partition_key,
+  )
+  if (canonicalStoreName && canonicalStoreName !== '-') {
+    draft = { ...draft, storeName: canonicalStoreName }
+  }
   await clearPendingReceiptDuplicate(supabase, roomId, userId)
   await clearPendingStoreNameMismatch(supabase, roomId, userId)
   await savePendingCorrection(supabase, roomId, userId, {
@@ -453,62 +612,76 @@ async function startCorrectionSession(
   return buildFieldSelectionPrompt(
     draft,
     targetLabel ? `対象: ${targetLabel}` : (targetLineMessageId ? '対象: 指定レシート' : '対象: 直近のレシート'),
+    { showConfirm: false },
   )
 }
 
-async function tryHandlePendingCorrection(
+async function finishCorrectionFromPending(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
   roomId: string,
   userId: string | null,
-  text: string,
-): Promise<LineReplyPayload | null> {
-  const pending = await loadPendingCorrection(supabase, roomId, userId)
-  if (!pending) return null
-  if (pending.store_partition_key !== registry.store_partition_key) return null
-
-  const control = normalizeReceiptCorrectionControl(text)
-  if (control === 'cancel') {
-    await clearPendingCorrection(supabase, roomId, userId)
-    return 'レシート修正をキャンセルしました。'
-  }
-
+  pending: PendingStoreReceiptCorrection,
+): Promise<LineReplyPayload> {
   const storeDisplayName = registry.display_name || registry.store_partition_key
-
-  if (pending.stage === 'select_field') {
-    if (control === 'confirm') {
-      const persisted = await updateStoreReceiptFromDraft(
-        supabase,
-        pending.receipt_table,
-        pending.receipt_row_id,
-        roomId,
-        storeDisplayName,
-        pending.draft,
-      )
-      if (!persisted) {
-        return 'レシート修正の保存に失敗しました。少し時間を置いて再度お試しください。'
-      }
-      await clearPendingCorrection(supabase, roomId, userId)
-      return buildUpdatedReceiptFlexReply(
-        supabase,
-        registry,
-        persisted.receipt,
-        persisted.receiptDateIso,
-        pending.line_message_id,
-      )
-    }
-    const field = parseReceiptCorrectionFieldChoice(text)
-    if (!field) {
-      return buildFieldSelectionPrompt(pending.draft, '修正する項目番号（1〜8）を返信してください。')
-    }
-    await savePendingCorrection(supabase, roomId, userId, {
-      ...pending,
-      stage: 'input_value',
-      current_field_key: field,
-    })
-    return buildValueInputPrompt(field, pending.draft)
+  const persisted = await updateStoreReceiptFromDraft(
+    supabase,
+    pending.receipt_table,
+    pending.receipt_row_id,
+    roomId,
+    storeDisplayName,
+    pending.draft,
+    { storePartitionKey: registry.store_partition_key },
+  )
+  if (!persisted) {
+    return 'レシート修正の保存に失敗しました。少し時間を置いて再度お試しください。'
   }
+  await clearPendingCorrection(supabase, roomId, userId)
+  return buildUpdatedReceiptFlexReply(
+    supabase,
+    registry,
+    persisted.receipt,
+    persisted.receiptDateIso,
+    pending.line_message_id,
+  )
+}
 
+function mapReceiptCorrectionPostbackToControl(
+  data: string,
+): 'confirm' | 'cancel' | 'back' | null {
+  const d = String(data ?? '').trim()
+  if (d === RECEIPT_CORRECTION_POSTBACK_CONFIRM) return 'confirm'
+  if (d === RECEIPT_CORRECTION_POSTBACK_CANCEL) return 'cancel'
+  if (d === RECEIPT_CORRECTION_POSTBACK_BACK) return 'back'
+  return null
+}
+
+export async function handleReceiptCorrectionPostback(
+  supabase: SupabaseClient,
+  registry: StoreRegistryRow,
+  roomId: string,
+  userId: string | null,
+  postbackData: string,
+): Promise<LineReplyPayload | null> {
+  const control = mapReceiptCorrectionPostbackToControl(postbackData)
+  if (!control) return null
+  const text = control === 'confirm'
+    ? RECEIPT_CORRECTION_CONFIRM_TEXT
+    : control === 'cancel'
+    ? RECEIPT_CORRECTION_CANCEL_TEXT
+    : RECEIPT_CORRECTION_BACK_TEXT
+  return tryHandlePendingCorrection(supabase, registry, roomId, userId, text)
+}
+
+async function handleCorrectionValueInput(
+  supabase: SupabaseClient,
+  registry: StoreRegistryRow,
+  roomId: string,
+  userId: string | null,
+  pending: PendingStoreReceiptCorrection,
+  text: string,
+  control: ReturnType<typeof normalizeReceiptCorrectionControl>,
+): Promise<LineReplyPayload> {
   const currentFieldKey = pending.current_field_key
   if (!currentFieldKey) {
     await savePendingCorrection(supabase, roomId, userId, {
@@ -528,26 +701,87 @@ async function tryHandlePendingCorrection(
     return buildFieldSelectionPrompt(pending.draft)
   }
 
-  const normalizedValue = normalizeReceiptCorrectionInputValue(currentFieldKey, text)
-  if (!normalizedValue.ok) {
-    return [
-      { type: 'text', text: normalizedValue.error },
-      buildValueInputPrompt(currentFieldKey, pending.draft),
-    ]
+  if (control) {
+    const errFlex = buildValueInputPrompt(currentFieldKey, pending.draft)
+    return typeof errFlex === 'string'
+      ? [{ type: 'text', text: '値を入力するか、下の「戻る」「キャンセル」を使ってください。' }]
+      : [
+        { type: 'text', text: '値を入力するか、下の「戻る」「キャンセル」を使ってください。' },
+        errFlex,
+      ]
   }
 
+  const normalizedValue = normalizeReceiptCorrectionInputValue(currentFieldKey, text)
+  if (!normalizedValue.ok) {
+    const errFlex = buildValueInputPrompt(currentFieldKey, pending.draft)
+    return typeof errFlex === 'string'
+      ? [{ type: 'text', text: `${normalizedValue.error}\n${errFlex}` }]
+      : [
+        { type: 'text', text: normalizedValue.error },
+        errFlex,
+      ]
+  }
+
+  const fieldLabel = getReceiptCorrectionFieldConfig(currentFieldKey)?.label ?? '項目'
+  const previousValue = getReceiptCorrectionFieldValue(pending.draft, currentFieldKey)
   const nextDraft = setReceiptCorrectionFieldValue(pending.draft, currentFieldKey, normalizedValue.value)
+  const displayValue = normalizedValue.value ?? '未設定'
+  const unchanged = String(previousValue ?? '').trim() === String(normalizedValue.value ?? '').trim()
   await savePendingCorrection(supabase, roomId, userId, {
     ...pending,
     stage: 'select_field',
     current_field_key: null,
     draft: nextDraft,
   })
-  const fieldLabel = getReceiptCorrectionFieldConfig(currentFieldKey)?.label ?? '項目'
-  return buildFieldSelectionPrompt(
-    nextDraft,
-    `${fieldLabel}を更新しました。続けて修正する場合は番号、完了する場合は「確定」を送ってください。`,
-  )
+  const note = unchanged
+    ? `${fieldLabel}は ${displayValue} のままです。別の値に変える場合は番号を選び直して新しい値を送ってください。`
+    : `${fieldLabel}を ${displayValue} に変更しました。続けて修正する場合は番号、完了する場合は下の「確定」を押してください。`
+  return buildFieldSelectionPrompt(nextDraft, note, { showConfirm: true })
+}
+
+async function tryHandlePendingCorrection(
+  supabase: SupabaseClient,
+  registry: StoreRegistryRow,
+  roomId: string,
+  userId: string | null,
+  text: string,
+): Promise<LineReplyPayload | null> {
+  const pending = await loadPendingCorrection(supabase, roomId, userId)
+  if (!pending) return null
+  if (pending.store_partition_key !== registry.store_partition_key) return null
+
+  const control = normalizeReceiptCorrectionControl(text)
+  if (control === 'cancel') {
+    await clearPendingCorrection(supabase, roomId, userId)
+    return 'レシート修正をキャンセルしました。'
+  }
+
+  if (control === 'confirm') {
+    return finishCorrectionFromPending(supabase, registry, roomId, userId, pending)
+  }
+
+  if (pending.stage === 'input_value' && pending.current_field_key) {
+    return handleCorrectionValueInput(supabase, registry, roomId, userId, pending, text, control)
+  }
+
+  if (pending.stage === 'select_field') {
+    const field = parseReceiptCorrectionFieldChoice(text)
+    if (!field) {
+      const compact = normalizeForRuleParsing(text).replace(/\s+/g, '')
+      const hint = /^\d+$/.test(compact) && !/^[1-8]$/.test(compact)
+        ? '番号は1〜8で送ってください。値だけ変えたい場合は、先に項目番号（例: 会計組数なら6）を送り、次のメッセージで新しい値を送ってください。'
+        : '修正する項目番号（1〜8）を返信してください。'
+      return buildFieldSelectionPrompt(pending.draft, hint)
+    }
+    await savePendingCorrection(supabase, roomId, userId, {
+      ...pending,
+      stage: 'input_value',
+      current_field_key: field,
+    })
+    return buildValueInputPrompt(field, pending.draft)
+  }
+
+  return buildFieldSelectionPrompt(pending.draft, '修正を続ける場合は番号（1〜8）を送ってください。')
 }
 
 export async function handleStoreReceiptTextMessage(
@@ -566,6 +800,10 @@ export async function handleStoreReceiptTextMessage(
   )
   if (storeMismatchReply) return storeMismatchReply
 
+  // 修正フローを重複確認より先に処理（「6」等が重複確認の 1/2/3 と誤判定されない）
+  const pendingReply = await tryHandlePendingCorrection(supabase, registry, roomId, userId, text)
+  if (pendingReply) return pendingReply
+
   const duplicateReply = await tryHandlePendingReceiptDuplicateConfirmation(
     supabase,
     registry,
@@ -575,24 +813,24 @@ export async function handleStoreReceiptTextMessage(
   )
   if (duplicateReply) return duplicateReply
 
-  const pendingReply = await tryHandlePendingCorrection(supabase, registry, roomId, userId, text)
-  if (pendingReply) return pendingReply
-
   const deleteDirective = parseReceiptAnalysisDeleteDirective(text)
   if (deleteDirective.matched) {
     const targetLmid = deleteDirective.targetLineMessageId
-    if (!targetLmid) {
-      return '解析結果カードの「この解析結果を削除」ボタンから送るか、「レシート解析削除 ID:（LINEのメッセージID）」の形式で送ってください。'
+    const targetRid = deleteDirective.targetReceiptRowId
+    if (!targetLmid && targetRid == null) {
+      return '解析結果カードの「削除」ボタンから送るか、「レシート解析削除 RID:（行ID）」の形式で送ってください。'
     }
     await clearPendingCorrection(supabase, roomId, userId)
     await clearPendingReceiptDuplicate(supabase, roomId, userId)
     await clearPendingStoreNameMismatch(supabase, roomId, userId)
-    const delResult = await deleteStoreReceiptByLineMessageId(
-      supabase,
-      registry.receipt_table,
-      roomId,
-      targetLmid,
-    )
+    const delResult = targetRid != null
+      ? await deleteStoreReceiptById(supabase, registry.receipt_table, targetRid)
+      : await deleteStoreReceiptByLineMessageId(
+        supabase,
+        registry.receipt_table,
+        roomId,
+        targetLmid!,
+      )
     if (!delResult.ok) return delResult.message
     return 'レシート解析データを削除しました（このルームの保存から取り除きました）。'
   }
@@ -605,6 +843,7 @@ export async function handleStoreReceiptTextMessage(
       roomId,
       userId,
       correctionStart.targetLineMessageId,
+      correctionStart.targetReceiptRowId,
     )
   }
 

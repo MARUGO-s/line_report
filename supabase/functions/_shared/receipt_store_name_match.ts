@@ -17,13 +17,34 @@ function normalizeStoreCompareKey(raw: string): string {
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/[　\t]/g, '')
-    .replace(/[・·\-ー—―_]/g, '')
+    .replace(/[,.，、.．・·\-ー—―_]/g, '')
 }
 
 /**
  * Webhook 登録店舗とレシートが同一か。
  * 店名（揺らぎ補正あり）または電話番号のどちらかが一致すれば true。
  */
+/**
+ * レシート解析結果を、この Webhook の店舗として保存できる形に揃える。
+ * 同一 partition（例: CAVA,CAVA → ビストロ サヴァサヴァ）なら店名を登録名に置き換える。
+ */
+export function alignReceiptStoreNameToRegistry(
+  receiptStoreName: string | null | undefined,
+  registry: { store_partition_key: string; display_name: string },
+): string | null {
+  const canonical = String(registry.display_name ?? '').trim() || registry.store_partition_key
+  const parsedRaw = normalizeReceiptFieldText(receiptStoreName, 80)
+  const parsed = parsedRaw ? sanitizeReceiptOcrStoreName(parsedRaw) : null
+  const registryPk = String(registry.store_partition_key ?? '').trim().toLowerCase()
+
+  if (!parsed) return canonical
+
+  const parsedPk = resolveReceiptNamePartitionKey(parsed)
+  if (registryPk && parsedPk === registryPk) return canonical
+
+  return parsed
+}
+
 export function receiptStoreNameMatchesRegistry(
   registryDisplayName: string,
   registryPartitionKey: string,
@@ -33,6 +54,11 @@ export function receiptStoreNameMatchesRegistry(
   phoneIndex?: StoreReceiptPhoneIndex,
 ): boolean {
   const registryPk = String(registryPartitionKey ?? '').trim().toLowerCase()
+  const strictPhonePk = resolveReceiptPhonePartitionKey(receiptStorePhone, phoneIndex)
+  // 既知電話番号で一意に別店舗が決まる場合は、学習済み電話の誤登録より固定マップを優先して不一致にする
+  if (registryPk && strictPhonePk && strictPhonePk !== registryPk) {
+    return false
+  }
   if (registryPk && receiptPhoneMatchesRegistry(registryPk, receiptStorePhone, registryReceiptPhones)) {
     return true
   }
@@ -40,7 +66,13 @@ export function receiptStoreNameMatchesRegistry(
   const parsedRaw = normalizeReceiptFieldText(receiptStoreName, 80)
   const parsed = parsedRaw ? sanitizeReceiptOcrStoreName(parsedRaw) : null
   if (!parsed) {
-    return !!receiptPhoneMatchesRegistry(registryPk, receiptStorePhone, registryReceiptPhones)
+    // 店名が読めなくても、店舗専用 Webhook への送信はその店のレシートとみなす
+    return true
+  }
+
+  const parsedPk = resolveReceiptNamePartitionKey(parsed)
+  if (registryPk && parsedPk) {
+    return parsedPk === registryPk
   }
 
   const registered =
@@ -58,7 +90,6 @@ export function receiptStoreNameMatchesRegistry(
     return true
   }
 
-  const parsedPk = resolveReceiptNamePartitionKey(parsed)
   const phonePk = resolveReceiptPhonePartitionKey(receiptStorePhone, phoneIndex)
   if (registryPk && parsedPk && registryPk === parsedPk) {
     return true

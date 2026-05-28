@@ -719,7 +719,7 @@ Deno.serve(async (req) => {
           assigned_job_title: payload.assigned_job_title,
           updated_at: new Date().toISOString(),
         }, { onConflict: "line_user_id" })
-        .select("line_user_id, display_name, is_active, can_message_search, can_library_search, can_calendar_create, can_calendar_update, can_calendar_view, can_media_access, excluded_message_search_room_ids, assigned_store, assigned_job_title, updated_at")
+        .select("line_user_id, display_name, is_active, can_message_search, can_library_search, can_calendar_create, can_calendar_update, can_calendar_view, can_media_access, excluded_message_search_room_ids, assigned_store, assigned_job_title, registration_source_store, updated_at")
         .single()
       if (error) {
         throw { status: 500, message: `Failed to upsert line user permission: ${error.message}` } satisfies AppError
@@ -995,8 +995,18 @@ async function fetchState(
 ) {
   const logsLimit = clampInt(url.searchParams.get("logs_limit"), 30, 10, 30)
   const logsFetchLimit = logsLimit * 8
+  const webhookStoreKeyRaw = String(url.searchParams.get("webhook_store_key") ?? "").trim().toLowerCase()
 
   const globalSettings = await fetchGlobalSettings(supabase)
+  let webhookLogsQuery = supabase
+    .from("line_webhook_delivery_logs")
+    .select("id, created_at, jst_hour, status, reason, method, context, line_send_attempted, line_send_success, line_http_status, target_room_id, store_partition_key, details")
+    .order("id", { ascending: false })
+    .limit(logsFetchLimit)
+  if (webhookStoreKeyRaw) {
+    webhookLogsQuery = webhookLogsQuery.eq("store_partition_key", webhookStoreKeyRaw)
+  }
+
   const [roomSettingsRes, roomOverviewRes, logsRes, webhookLogsRes, storageUsageState, userPermissionsRes, pushUsageSummary] =
     await Promise.all([
       supabase
@@ -1009,15 +1019,11 @@ async function fetchState(
         .select("id, run_at, jst_hour, status, reason, should_send_overall, rooms_targeted, messages_in_queue, messages_marked_processed, line_send_attempted, line_send_success, line_http_status, target_room_id, details")
         .order("id", { ascending: false })
         .limit(logsFetchLimit),
-      supabase
-        .from("line_webhook_delivery_logs")
-        .select("id, created_at, jst_hour, status, reason, method, context, line_send_attempted, line_send_success, line_http_status, target_room_id, details")
-        .order("id", { ascending: false })
-        .limit(logsFetchLimit),
+      webhookLogsQuery,
       fetchStorageUsageState(supabase),
       supabase
         .from("line_user_permissions")
-        .select("line_user_id, display_name, is_active, can_message_search, can_library_search, can_calendar_create, can_calendar_update, can_calendar_view, can_media_access, excluded_message_search_room_ids, assigned_store, assigned_job_title, updated_at")
+        .select("line_user_id, display_name, is_active, can_message_search, can_library_search, can_calendar_create, can_calendar_update, can_calendar_view, can_media_access, excluded_message_search_room_ids, assigned_store, assigned_job_title, registration_source_store, updated_at")
         .limit(USER_PERMISSION_SORT_FETCH_CAP),
       fetchMonthlyPushUsageSummary(supabase),
     ])
@@ -1174,7 +1180,7 @@ async function fetchLineUserPermissions(
 
   let query = supabase
     .from("line_user_permissions")
-    .select("line_user_id, display_name, is_active, can_message_search, can_library_search, can_calendar_create, can_calendar_update, can_calendar_view, can_media_access, excluded_message_search_room_ids, assigned_store, assigned_job_title, updated_at", { count: "exact" })
+    .select("line_user_id, display_name, is_active, can_message_search, can_library_search, can_calendar_create, can_calendar_update, can_calendar_view, can_media_access, excluded_message_search_room_ids, assigned_store, assigned_job_title, registration_source_store, updated_at", { count: "exact" })
     .limit(USER_PERMISSION_SORT_FETCH_CAP)
 
   if (q) {

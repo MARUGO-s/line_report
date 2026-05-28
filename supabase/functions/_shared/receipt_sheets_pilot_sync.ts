@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import {
   fetchManualMonthSalesMapForStore,
+  manualMonthSalesFromRow,
   upsertManualMonthSalesEntries,
   type ManualMonthSalesRecord,
   type ManualMonthSalesUpsertEntry,
@@ -25,13 +26,18 @@ import { queryStoreReceiptRows } from "./store_receipt_query.ts"
 import {
   isKnownReceiptSheetsStoreKey,
   listReceiptSheetsStores,
-  receiptSheetsTabCandidates,
   canonicalStorePartitionKeyForDb,
   resolveReceiptSheetsStoreDisplayName,
   resolveReceiptSheetsStoreKey,
   pilotStorePartitionKeysMatch,
   type ReceiptSheetsStoreEntry,
 } from "./receipt_sheets_store_catalog.ts"
+import {
+  getSpreadsheetTitleSet,
+  invalidateSpreadsheetTitleCache,
+  listKnownStoreReceiptSheetsTabCandidates,
+  resolveStoreReceiptSheetsTabs,
+} from "./receipt_sheets_tab_resolve.ts"
 
 /** Google スプレッドシートのタブ名（日本語・正） */
 export const SHEET_MONTHLY_BUDGETS = "月間予算"
@@ -40,9 +46,6 @@ export const SHEET_DAILY_SALES = "日次売上"
 export const SHEET_SYNC_LOG = "同期ログ"
 export const SHEET_README = "使い方"
 
-const TAB_ALIASES_BUDGETS = [SHEET_MONTHLY_BUDGETS, "monthly_budgets"]
-const TAB_ALIASES_PAST = [SHEET_PAST_SALES, "past_sales"]
-const TAB_ALIASES_DAILY = [SHEET_DAILY_SALES, "daily_sales"]
 const TAB_ALIASES_LOG = [SHEET_SYNC_LOG, "sync_log"]
 
 function isSheetNotFoundError(e: unknown): boolean {
@@ -114,6 +117,11 @@ export type ReceiptSheetsPilotConfig = {
   storeDisplayName: string
   /** サーバーサイド同期では同期ログタブへの書き込みをスキップする（API呼び出し数削減） */
   skipSyncLog?: boolean
+  /**
+   * メニューからの手動同期向け。セル内容が DB と違う行は更新日時が古くてもシートを DB に反映し、
+   * 同じ実行内の push ではその月を上書きしない。
+   */
+  preferSheetOnContentDiff?: boolean
 }
 
 export type ReceiptSheetsSyncResult = {
@@ -127,6 +135,9 @@ export type ReceiptSheetsSyncResult = {
     past_sales_applied: number
     past_sales_skipped: number
     errors: string[]
+    /** 今回の pull でシート→DB した月（both 時の push スキップ用） */
+    sheet_won_budget_months?: string[]
+    sheet_won_past_months?: string[]
   }
   push?: {
     months_written: string[]
@@ -219,12 +230,60 @@ type BudgetComparable = {
   updated_at?: string | null
 }
 
+const SYNC_SHEET_TIME_ZONE = "Asia/Tokyo"
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000
+/** タイムゾーン無しの yyyy-MM-dd HH:mm:ss は日本時間として解釈（サーバーは UTC 実行のため） */
+const JST_PLAIN_UPDATED_AT_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,3})?$/
+
+function parseSyncUpdatedAtToMs(value: string): number | null {
+  const s = value.trim()
+  if (!s) return null
+  if (/[Zz]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) {
+    const ms = Date.parse(s)
+    return Number.isFinite(ms) ? ms : null
+  }
+  const plain = JST_PLAIN_UPDATED_AT_RE.exec(s)
+  if (plain) {
+    const y = Number(plain[1])
+    const mo = Number(plain[2])
+    const d = Number(plain[3])
+    const h = Number(plain[4])
+    const mi = Number(plain[5])
+    const sec = Number(plain[6] ?? "0")
+    return Date.UTC(y, mo - 1, d, h, mi, sec) - JST_OFFSET_MS
+  }
+  const ms = Date.parse(s)
+  return Number.isFinite(ms) ? ms : null
+}
+
+/** シートの更新日時列用（日本時間・Z なし）。UTC の ISO をそのまま入れると東京設定でも 9 時間ずれて見える */
+function formatSyncUpdatedAtForSheet(value?: unknown): string {
+  let ms: number | null = null
+  if (value != null && String(value).trim() !== "") {
+    ms = parseSyncUpdatedAtToMs(String(value))
+  }
+  const date = new Date(ms ?? Date.now())
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: SYNC_SHEET_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00"
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}`
+}
+
 function normalizeSyncUpdatedAt(value: unknown): string | null {
   if (value == null) return null
   const s = String(value).trim()
   if (!s) return null
-  const ms = Date.parse(s)
-  if (!Number.isFinite(ms)) return null
+  const ms = parseSyncUpdatedAtToMs(s)
+  if (ms == null) return null
   return new Date(ms).toISOString()
 }
 
@@ -241,9 +300,50 @@ function isDbNewerThanSheet(
 ): boolean {
   const dbMs = updatedAtMillis(dbUpdatedAt)
   const sheetMs = updatedAtMillis(sheetUpdatedAt)
+  if (dbMs == null && sheetMs == null) return false
   if (dbMs == null) return false
-  if (sheetMs == null) return true
+  if (sheetMs == null) return false
   return dbMs > sheetMs
+}
+
+/** both の pull: シート行を DB に取り込むか（新しい方＋内容差分） */
+function shouldPreferSheetOnPull(
+  dbUpdatedAt: unknown,
+  sheetUpdatedAt: unknown,
+  valuesDiffer: boolean,
+  preferSheetOnContentDiff = false,
+): boolean {
+  if (preferSheetOnContentDiff && valuesDiffer) return true
+  const dbMs = updatedAtMillis(dbUpdatedAt)
+  const sheetMs = updatedAtMillis(sheetUpdatedAt)
+  if (sheetMs != null && dbMs != null) {
+    if (sheetMs > dbMs) return true
+    if (dbMs > sheetMs) return false
+    return valuesDiffer
+  }
+  if (sheetMs != null) return true
+  if (dbMs != null) return valuesDiffer
+  return valuesDiffer
+}
+
+function sheetPastRowUpdatedAt(row: SheetValues | undefined): string | null {
+  if (!row) return null
+  const pastCols = parsePastSalesSheetRow(row)
+  if (pastCols.updatedAtCol == null) return null
+  return normalizeSyncUpdatedAt(row[pastCols.updatedAtCol])
+}
+
+/** 過去売上シートの「手入力」列（TRUE） */
+function sheetPastRowIsManualEntry(row: SheetValues | undefined): boolean {
+  if (!row) return false
+  return String(row[7] ?? "").trim().toUpperCase() === "TRUE"
+}
+
+function sheetBudgetRowUpdatedAt(row: SheetValues | undefined): string | null {
+  if (!row) return null
+  const budgetCols = parseMonthlyBudgetSheetRow(row)
+  if (budgetCols.updatedAtCol == null) return null
+  return normalizeSyncUpdatedAt(row[budgetCols.updatedAtCol])
 }
 
 function sheetColumnLetter1Based(col: number): string {
@@ -283,17 +383,20 @@ function shouldDeleteDbRowMissingFromSheet(
   return !isDbNewerThanSheet(dbUpdatedAt, sheetWatermark)
 }
 
-/** push で DB→シート復元してよいか */
+/** push で DB→シート復元してよいか（both は行の更新日時で新しい方のみ書き戻す） */
 function shouldPushDbMonthToSheet(
   month: string,
   dbUpdatedAt: unknown,
   monthsOnSheet: Set<string>,
   sheetWatermark: string | null,
   mode: "pull" | "push" | "both",
+  sheetRowUpdatedAt?: string | null,
 ): boolean {
-  if (monthsOnSheet.has(month)) return true
   if (mode === "pull") return false
   if (mode === "push") return true
+  if (monthsOnSheet.has(month)) {
+    return isDbNewerThanSheet(dbUpdatedAt, sheetRowUpdatedAt ?? null)
+  }
   return isDbNewerThanSheet(dbUpdatedAt, sheetWatermark)
 }
 
@@ -407,24 +510,35 @@ function maxDailyRowUpdatedAtOnSheet(
   return latestSyncTimestamp(...stamps)
 }
 
+type ResolvedStoreSheetTabs = {
+  budget: string[]
+  past: string[]
+  daily: string[]
+}
+
 async function buildSheetDeletionMergeContext(
   config: ReceiptSheetsPilotConfig,
   budgetRows: SheetValues,
   pastRows: SheetValues,
   mode: "pull" | "both",
+  resolvedTabs?: ResolvedStoreSheetTabs,
 ): Promise<SheetDeletionMergeContext> {
-  const budgetTabs = [
-    ...receiptSheetsTabCandidates(config.storePartitionKey, "budgets"),
-    ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []),
-  ]
-  const pastTabs = [
-    ...receiptSheetsTabCandidates(config.storePartitionKey, "past"),
-    ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []),
-  ]
-  const dailyTabs = [
-    ...receiptSheetsTabCandidates(config.storePartitionKey, "daily"),
-    ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_DAILY : []),
-  ]
+  const titleSet = await getSpreadsheetTitleSet(config.spreadsheetId)
+  const budgetTabs = resolvedTabs?.budget ?? listKnownStoreReceiptSheetsTabCandidates(
+    config.storePartitionKey,
+    "budgets",
+    titleSet,
+  )
+  const pastTabs = resolvedTabs?.past ?? listKnownStoreReceiptSheetsTabCandidates(
+    config.storePartitionKey,
+    "past",
+    titleSet,
+  )
+  const dailyTabs = resolvedTabs?.daily ?? listKnownStoreReceiptSheetsTabCandidates(
+    config.storePartitionKey,
+    "daily",
+    titleSet,
+  )
 
   let dailyRows: SheetValues = []
   try {
@@ -546,6 +660,9 @@ export async function runReceiptSheetsPilotSync(
     throw new Error("No receipt sheets stores configured.")
   }
 
+  // isolate 再利用でキャッシュが残ると旧タブ名を誤候補にするため、同期前にクリアする
+  invalidateSpreadsheetTitleCache(spreadsheetId)
+
   await supabase.from("receipt_sheets_sync_status").upsert(
     {
       id: 1,
@@ -605,13 +722,220 @@ export async function runReceiptSheetsPilotSync(
       },
       { onConflict: "id" },
     ).catch(() => {})
+    try {
+      await appendReceiptSheetsBackgroundSyncSummaryLog(spreadsheetId, direction, {
+        failed: true,
+        errorMessage: summary,
+        storeCount: stores.length,
+      })
+    } catch (e) {
+      console.error("appendReceiptSheetsBackgroundSyncSummaryLog failed:", e)
+    }
     throw new Error(summary)
   }
 
   const lastFulfilled = [...settled].reverse().find((result) => result.status === "fulfilled")
-  return lastFulfilled
+  const result = lastFulfilled
     ? lastFulfilled.value
     : { ok: false, store_partition_key: "", spreadsheet_id: spreadsheetId, direction, log_appended: false, generated_at: new Date().toISOString() }
+
+  try {
+    await appendReceiptSheetsBackgroundSyncSummaryLog(spreadsheetId, direction, {
+      failed: false,
+      storeCount: stores.length,
+    })
+    result.log_appended = true
+  } catch (e) {
+    console.error("appendReceiptSheetsBackgroundSyncSummaryLog failed:", e)
+  }
+
+  return result
+}
+
+export type ReceiptSheetsChainedSyncContinuePayload = {
+  background_sync_continue: true
+  direction: ReceiptSheetsSyncDirection
+  offset: number
+  started_at: string
+  failed_stores?: string[]
+  prefer_sheet_on_content_diff?: boolean
+}
+
+/** チェーン同期: 1回の Edge 呼び出しあたり CHAINED_STORE_CONCURRENCY 店舗を並列処理 */
+const CHAINED_STORE_CONCURRENCY = 2
+
+/** 店舗を小さな並列バッチで処理し、完了後に次の Edge 呼び出しへチェーン（waitUntil タイムアウト回避） */
+export async function runReceiptSheetsPilotSyncChainedStep(
+  supabase: ReturnType<typeof createClient>,
+  direction: ReceiptSheetsSyncDirection,
+  offset: number,
+  startedAt: string,
+  failedStoreKeys: string[],
+  preferSheetOnContentDiff = false,
+): Promise<void> {
+  const spreadsheetId = (Deno.env.get("RECEIPT_SHEETS_PILOT_SPREADSHEET_ID") ?? "").trim()
+  if (!spreadsheetId) {
+    throw new Error("RECEIPT_SHEETS_PILOT_SPREADSHEET_ID is not set.")
+  }
+
+  const stores = listReceiptSheetsStores()
+  if (stores.length === 0) {
+    throw new Error("No receipt sheets stores configured.")
+  }
+
+  // isolate 再利用でキャッシュが残ると旧タブ名を誤候補にするため、毎ステップ先頭でクリアする
+  invalidateSpreadsheetTitleCache(spreadsheetId)
+
+  const safeOffset = Math.max(0, Math.min(offset, stores.length))
+  const failed = [...failedStoreKeys]
+
+  // 連続店舗処理で Sheets Read クォータ（429）に当たりにくくする
+  if (safeOffset > 0) {
+    await new Promise((r) => setTimeout(r, 4000))
+  }
+
+  if (safeOffset === 0) {
+    await supabase.from("receipt_sheets_sync_status").upsert(
+      {
+        id: 1,
+        last_completed_at: startedAt,
+        direction,
+        failed: false,
+        error_message: `進行中 0/${stores.length} 店舗完了`,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" },
+    )
+  }
+
+  if (safeOffset >= stores.length) {
+    return
+  }
+
+  const chunk = stores.slice(safeOffset, safeOffset + CHAINED_STORE_CONCURRENCY)
+  const settled = await Promise.allSettled(
+    chunk.map((store) =>
+      runReceiptSheetsPilotSyncForStore(
+        supabase,
+        { spreadsheetId, skipSyncLog: false, preferSheetOnContentDiff, ...store },
+        direction,
+      )
+    ),
+  )
+  for (let i = 0; i < settled.length; i++) {
+    if (settled[i].status === "rejected") {
+      console.error(`chained sync failed for ${chunk[i].storePartitionKey}:`, settled[i].reason)
+      failed.push(summarizeStoreSyncError(chunk[i], settled[i].reason))
+    }
+  }
+
+  const doneCount = safeOffset + chunk.length
+  const isFinal = doneCount >= stores.length
+
+  if (!isFinal) {
+    await supabase.from("receipt_sheets_sync_status").upsert(
+      {
+        id: 1,
+        last_completed_at: new Date().toISOString(),
+        direction,
+        failed: false,
+        error_message: `進行中 ${doneCount}/${stores.length} 店舗完了`,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" },
+    )
+    await scheduleReceiptSheetsSyncContinue({
+      direction,
+      offset: doneCount,
+      started_at: startedAt,
+      failed_stores: failed,
+      prefer_sheet_on_content_diff: preferSheetOnContentDiff || undefined,
+    })
+    return
+  }
+
+  if (failed.length > 0) {
+    const summary = `失敗 ${failed.length}/${stores.length} 店舗: ${failed.slice(0, 3).join(" | ")}${
+      failed.length > 3 ? ` | 他${failed.length - 3}件` : ""
+    }`
+    await supabase.from("receipt_sheets_sync_status").upsert(
+      {
+        id: 1,
+        last_completed_at: new Date().toISOString(),
+        direction,
+        failed: true,
+        error_message: summary.slice(0, 500),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" },
+    )
+    try {
+      await appendReceiptSheetsBackgroundSyncSummaryLog(spreadsheetId, direction, {
+        failed: true,
+        errorMessage: summary,
+        storeCount: stores.length,
+        pullSummary: "失敗",
+        memo: `background_sync 失敗（${stores.length}店舗）。${summary.slice(0, 180)}`,
+      })
+    } catch (e) {
+      console.error("chained sync failure log failed:", e)
+    }
+    throw new Error(summary)
+  }
+
+  await supabase.from("receipt_sheets_sync_status").upsert(
+    {
+      id: 1,
+      last_completed_at: new Date().toISOString(),
+      direction,
+      failed: false,
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "id" },
+  )
+  try {
+    await appendReceiptSheetsBackgroundSyncSummaryLog(spreadsheetId, direction, {
+      failed: false,
+      storeCount: stores.length,
+      pullSummary: "成功",
+      memo: `background_sync 完了（${stores.length}店舗・${CHAINED_STORE_CONCURRENCY}店舗ずつ並列）。日次タブのJ列が今のISO時刻なら反映済み。`,
+    })
+  } catch (e) {
+    console.error("chained sync success log failed:", e)
+  }
+}
+
+export async function scheduleReceiptSheetsSyncContinue(
+  payload: Omit<ReceiptSheetsChainedSyncContinuePayload, "background_sync_continue">,
+): Promise<void> {
+  const baseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim().replace(/\/$/, "")
+  const secret = (Deno.env.get("RECEIPT_SHEETS_SYNC_SECRET") ?? "").trim()
+  if (!baseUrl || !secret) {
+    throw new Error("SUPABASE_URL or RECEIPT_SHEETS_SYNC_SECRET is not set for sync continue.")
+  }
+  const url = `${baseUrl}/functions/v1/receipt-sheets-sync-cron`
+  const body: ReceiptSheetsChainedSyncContinuePayload = {
+    background_sync_continue: true,
+    direction: payload.direction,
+    offset: payload.offset,
+    started_at: payload.started_at,
+    failed_stores: payload.failed_stores ?? [],
+    prefer_sheet_on_content_diff: payload.prefer_sheet_on_content_diff || undefined,
+  }
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secret}`,
+      "x-receipt-sheets-sync-key": secret,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`sync continue HTTP ${res.status}: ${text.slice(0, 300)}`)
+  }
 }
 
 export async function runReceiptSheetsPilotSyncForStore(
@@ -633,18 +957,24 @@ export async function runReceiptSheetsPilotSyncForStore(
   // タブを1回だけ並列で読み込んで使い回す（同一タブへの重複読み込みを防ぐ）
   // budget tab: pull + exportBudget + exportClosedDates で3回読まれていた → 1回に削減
   // past tab:   pull + exportPastSales で2回読まれていた → 1回に削減
-  const budgetTabCandidates = [
-    ...receiptSheetsTabCandidates(config.storePartitionKey, "budgets"),
-    ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []),
-  ]
-  const pastTabCandidates = [
-    ...receiptSheetsTabCandidates(config.storePartitionKey, "past"),
-    ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []),
-  ]
+  // isolate 再利用や並列処理で別店舗が書き換えたキャッシュを使わないよう、店舗ごとにクリアして取得
+  invalidateSpreadsheetTitleCache(config.spreadsheetId)
+  const titleSet = await getSpreadsheetTitleSet(config.spreadsheetId)
+  const [budgetTabCandidates, pastTabCandidates, dailyTabCandidates] = await Promise.all([
+    resolveStoreReceiptSheetsTabs(config.spreadsheetId, config.storePartitionKey, "budgets", titleSet),
+    resolveStoreReceiptSheetsTabs(config.spreadsheetId, config.storePartitionKey, "past", titleSet),
+    resolveStoreReceiptSheetsTabs(config.spreadsheetId, config.storePartitionKey, "daily", titleSet),
+  ])
+  const resolvedTabs: ResolvedStoreSheetTabs = {
+    budget: budgetTabCandidates,
+    past: pastTabCandidates,
+    daily: dailyTabCandidates,
+  }
 
-  const [budgetTabData, pastTabData] = await Promise.all([
+  const [budgetTabData, pastTabData, dailyTabData] = await Promise.all([
     getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500"),
     getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:I500"),
+    getSheetValuesForTab(config.spreadsheetId, dailyTabCandidates, "A2:J2000"),
   ])
 
   const sheetDeletionMode = direction === "both"
@@ -658,8 +988,12 @@ export async function runReceiptSheetsPilotSyncForStore(
       budgetTabData.values,
       pastTabData.values,
       sheetDeletionMode,
+      resolvedTabs,
     )
     : null
+
+  let skipPushPastMonths = new Set<string>()
+  let skipPushBudgetMonths = new Set<string>()
 
   // both: 先にシート→DB、後に DB→シート（更新日時の新しい側を優先）
   if (direction === "pull" || direction === "both") {
@@ -674,7 +1008,36 @@ export async function runReceiptSheetsPilotSyncForStore(
         sheetDeletionMode: sheetDeletionMode ?? undefined,
       },
     )
+    skipPushPastMonths = new Set(result.pull.sheet_won_past_months ?? [])
+    skipPushBudgetMonths = new Set(result.pull.sheet_won_budget_months ?? [])
+    if (skipPushPastMonths.size > 0 || skipPushBudgetMonths.size > 0) {
+      logLines.push(
+        `sheet_won_skip_push past=${skipPushPastMonths.size} budget=${skipPushBudgetMonths.size}`,
+      )
+    }
   }
+
+  let dailyExportBuilt: Awaited<ReturnType<typeof buildDailySalesExportRows>> | null = null
+  if (direction === "push" || direction === "both") {
+    dailyExportBuilt = await buildDailySalesExportRows(supabase, config)
+  }
+  if (
+    config.preferSheetOnContentDiff === true
+    && dailyExportBuilt
+    && (direction === "pull" || direction === "both")
+  ) {
+    const dailyPulledMonths = await pullDailySheetEditsToManualMonthGross(
+      supabase,
+      config,
+      dailyExportBuilt.rows,
+      dailyTabData.values,
+      logLines,
+    )
+    for (const month of dailyPulledMonths) {
+      skipPushPastMonths.add(month)
+    }
+  }
+
   if (direction === "push" || direction === "both") {
     result.push = await pushDailySalesToSheet(
       supabase,
@@ -682,6 +1045,8 @@ export async function runReceiptSheetsPilotSyncForStore(
       logLines,
       mergeCtxForPush,
       direction,
+      dailyExportBuilt,
+      dailyTabData.values,
     )
     const pastExport = await exportPastSalesFromDbToPastSheet(
       supabase,
@@ -690,6 +1055,7 @@ export async function runReceiptSheetsPilotSyncForStore(
       pastTabData,
       mergeCtxForPush,
       direction,
+      skipPushPastMonths,
     )
     const budgetExport = await exportBudgetFromDbToBudgetSheet(
       supabase,
@@ -698,6 +1064,7 @@ export async function runReceiptSheetsPilotSyncForStore(
       budgetTabData,
       mergeCtxForPush,
       direction,
+      skipPushBudgetMonths,
     )
     if (result.push) {
       result.push.past_sales_rows_written = pastExport.rows_written
@@ -898,13 +1265,13 @@ async function pullFromSheetsToDb(
   logLines: string[],
   bothMerge = false,
 ): Promise<NonNullable<ReceiptSheetsSyncResult["pull"]>> {
-  const budgetTabs = receiptSheetsTabCandidates(config.storePartitionKey, "budgets")
-  const pastTabs = receiptSheetsTabCandidates(config.storePartitionKey, "past")
-  const legacyBudgetTabs = config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []
-  const legacyPastTabs = config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []
+  const [budgetTabCandidates, pastTabCandidates] = await Promise.all([
+    resolveStoreReceiptSheetsTabs(config.spreadsheetId, config.storePartitionKey, "budgets"),
+    resolveStoreReceiptSheetsTabs(config.spreadsheetId, config.storePartitionKey, "past"),
+  ])
   const [{ values: budgetRows }, { values: pastRows }] = await Promise.all([
-    getSheetValuesForTab(config.spreadsheetId, [...budgetTabs, ...legacyBudgetTabs], "A2:Q500"),
-    getSheetValuesForTab(config.spreadsheetId, [...pastTabs, ...legacyPastTabs], "A2:I500"),
+    getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500"),
+    getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:I500"),
   ])
   return processPullRowsToDb(supabase, config, budgetRows, pastRows, logLines, {
     bothMerge,
@@ -1267,19 +1634,20 @@ async function processPullRowsToDb(
       if (month) pastMonthsForDb.push(month)
     }
   }
-  const [budgetDbMap, dbMap, snapMap] = bothMerge
+  const [budgetDbMap, dbMap] = bothMerge
     ? await Promise.all([
       fetchBudgetMapForStore(supabase, config.storePartitionKey, budgetMonthsForDb),
       fetchManualMonthSalesMapForStore(supabase, config.storePartitionKey, pastMonthsForDb),
-      fetchPastSalesSnapshotMap(supabase, config.storePartitionKey),
     ])
     : [
       new Map<string, BudgetComparable>(),
       new Map<string, ManualMonthSalesRecord>(),
-      new Map<string, PastSalesComparable>(),
     ]
   let budgetDbWins = 0
   let pastDbWins = 0
+  const preferSheetOnContentDiff = config.preferSheetOnContentDiff === true
+  const sheetWonBudgetMonths = new Set<string>()
+  const sheetWonPastMonths = new Set<string>()
   const budgetOperatingDaysByMonth = new Map<string, number>()
 
   for (let i = 0; i < budgetRows.length; i += 1) {
@@ -1333,7 +1701,10 @@ async function processPullRowsToDb(
           budgetsSkipped += 1
           continue
         }
-        if (isDbNewerThanSheet(dbBudget.updated_at, sheetUpdatedAt)) {
+        if (
+          !preferSheetOnContentDiff
+          && !shouldPreferSheetOnPull(dbBudget.updated_at, sheetUpdatedAt, true, false)
+        ) {
           budgetsSkipped += 1
           budgetDbWins += 1
           continue
@@ -1369,9 +1740,10 @@ async function processPullRowsToDb(
         holiday_weight: (Number.isFinite(hwRaw) && hwRaw > 0) ? hwRaw : null,
         pre_holiday_weight: (Number.isFinite(phwRaw) && phwRaw > 0) ? phwRaw : null,
         store_closed_dates: effectiveClosedDates,
-        updated_at: sheetUpdatedAt ?? undefined,
+        updated_at: sheetUpdatedAt ?? new Date().toISOString(),
       })
       budgetsApplied += 1
+      sheetWonBudgetMonths.add(month)
     } catch (e) {
       errors.push(`${SHEET_MONTHLY_BUDGETS} 行${rowNum}: ${String(e)}`)
     }
@@ -1404,7 +1776,11 @@ async function processPullRowsToDb(
     const rawGross = String(row[pastCols.grossCol] ?? "").trim()
     if (rawGross === "") {
       const db = dbMap.get(salesMonth)
-      if (bothMerge && db && isDbNewerThanSheet(db.updated_at, sheetUpdatedAt)) {
+      if (
+        bothMerge && db
+        && !preferSheetOnContentDiff
+        && !shouldPreferSheetOnPull(db.updated_at, sheetUpdatedAt, true, false)
+      ) {
         pastSkipped += 1
         pastDbWins += 1
         continue
@@ -1412,6 +1788,7 @@ async function processPullRowsToDb(
       pastEntries.push({ sales_month: salesMonth, gross_sales_yen: null })
       pastSnapshotDeletes.push(salesMonth)
       pastApplied += 1
+      sheetWonPastMonths.add(salesMonth)
     } else {
       const gross = parseNonNegativeInt(rawGross)
       const opDaysFromBudget = budgetOperatingDaysByMonth.get(salesMonth) ?? null
@@ -1421,25 +1798,22 @@ async function processPullRowsToDb(
         party_count: pastCols.party_count,
         guest_count: pastCols.guest_count,
         operating_days_count: pastCols.operating_days_count ?? opDaysFromBudget,
-        updated_at: sheetUpdatedAt ?? undefined,
+        updated_at: sheetUpdatedAt ?? new Date().toISOString(),
       }
       const sheetComparable = pastSalesComparableFromEntry(
         entry as ManualMonthSalesUpsertEntry & { gross_sales_yen: number },
       )
       const db = dbMap.get(salesMonth)
-      const snap = snapMap.get(salesMonth)
       if (bothMerge && db) {
-        if (pastSalesComparableEqual(sheetComparable, pastSalesComparableFromManual(db))) {
+        const valuesDiffer = !pastSalesComparableEqual(sheetComparable, pastSalesComparableFromManual(db))
+        if (!valuesDiffer) {
           pastSkipped += 1
           continue
         }
-        let dbWins = false
-        if (isDbNewerThanSheet(db.updated_at, sheetUpdatedAt)) {
-          dbWins = true
-        } else if (!sheetUpdatedAt && snap && pastSalesComparableEqual(sheetComparable, snap)) {
-          dbWins = true
-        }
-        if (dbWins) {
+        if (
+          !preferSheetOnContentDiff
+          && !shouldPreferSheetOnPull(db.updated_at, sheetUpdatedAt, valuesDiffer, false)
+        ) {
           pastSkipped += 1
           pastDbWins += 1
           continue
@@ -1449,6 +1823,7 @@ async function processPullRowsToDb(
       pastSnapshotWrites.push(sheetComparable)
       pastSnapshotMonths.push(salesMonth)
       pastApplied += 1
+      sheetWonPastMonths.add(salesMonth)
     }
   }
 
@@ -1497,6 +1872,11 @@ async function processPullRowsToDb(
   if (bothMerge && pastDbWins > 0) {
     logLines.push(`both past_db_wins=${pastDbWins}`)
   }
+  if (preferSheetOnContentDiff && (sheetWonBudgetMonths.size > 0 || sheetWonPastMonths.size > 0)) {
+    logLines.push(
+      `prefer_sheet_content_diff budget=${sheetWonBudgetMonths.size} past=${sheetWonPastMonths.size}`,
+    )
+  }
   logLines.push(`pull budgets=${budgetsApplied} past=${pastApplied}`)
   return {
     budgets_applied: budgetsApplied,
@@ -1504,6 +1884,8 @@ async function processPullRowsToDb(
     past_sales_applied: pastApplied,
     past_sales_skipped: pastSkipped,
     errors,
+    sheet_won_budget_months: [...sheetWonBudgetMonths],
+    sheet_won_past_months: [...sheetWonPastMonths],
   }
 }
 
@@ -1530,7 +1912,7 @@ async function buildDailySalesExportRows(
     "更新日時",
   ]
   const rows: string[][] = []
-  const updatedAt = new Date().toISOString()
+  const updatedAt = formatSyncUpdatedAtForSheet()
 
   for (const month of months) {
     const series = await buildDailySeriesForStoreMonth(supabase, config.storePartitionKey, month)
@@ -1582,34 +1964,160 @@ async function buildDailySalesExportRows(
   }
 }
 
+type ParsedDailySheetRow = {
+  date: string
+  gross_sales_yen: number
+  party_count: number
+  guest_count: number
+  updated_at: string
+}
+
+function parseDailySheetDataRow(
+  row: unknown[],
+  storePartitionKey: string,
+): ParsedDailySheetRow | null {
+  const date = String(row[0] ?? "").trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+  if (!pilotStorePartitionKeysMatch(normalizePilotStoreKey(row[1]), storePartitionKey)) return null
+  const updatedRaw = normalizeSyncUpdatedAt(row[9])
+  return {
+    date,
+    gross_sales_yen: parseNonNegativeInt(row[3]),
+    party_count: parseNonNegativeInt(row[4]),
+    guest_count: parseNonNegativeInt(row[5]),
+    updated_at: updatedRaw ? formatSyncUpdatedAtForSheet(updatedRaw) : "",
+  }
+}
+
+function dailyExportRowDiffersFromSheet(
+  exportRow: string[],
+  sheetRow: ParsedDailySheetRow,
+): boolean {
+  return parseNonNegativeInt(exportRow[3]) !== sheetRow.gross_sales_yen
+    || parseNonNegativeInt(exportRow[4]) !== sheetRow.party_count
+    || parseNonNegativeInt(exportRow[5]) !== sheetRow.guest_count
+}
+
+function mergeDailyExportRowsPreservingSheetEdits(
+  exportRows: string[][],
+  dailySheetRows: SheetValues,
+  storePartitionKey: string,
+): { rows: string[][]; preservedDates: number } {
+  const sheetByDate = new Map<string, ParsedDailySheetRow>()
+  for (const row of dailySheetRows) {
+    const parsed = parseDailySheetDataRow(row, storePartitionKey)
+    if (parsed) sheetByDate.set(parsed.date, parsed)
+  }
+  let preservedDates = 0
+  const rows = exportRows.map((exportRow) => {
+    const date = String(exportRow[0] ?? "").trim().slice(0, 10)
+    const sheetRow = sheetByDate.get(date)
+    if (!sheetRow || !dailyExportRowDiffersFromSheet(exportRow, sheetRow)) return exportRow
+    preservedDates += 1
+    const budgetYen = parseNonNegativeInt(exportRow[6])
+    return [
+      exportRow[0],
+      exportRow[1],
+      exportRow[2],
+      String(sheetRow.gross_sales_yen),
+      String(sheetRow.party_count),
+      String(sheetRow.guest_count),
+      exportRow[6],
+      String(sheetRow.gross_sales_yen - budgetYen),
+      exportRow[8],
+      sheetRow.updated_at || exportRow[9],
+    ]
+  })
+  return { rows, preservedDates }
+}
+
+/** 日次タブで DB 集計と違う月は、シート上の日次合計を月次手入力 DB に反映する */
+async function pullDailySheetEditsToManualMonthGross(
+  supabase: ReturnType<typeof createClient>,
+  config: ReceiptSheetsPilotConfig,
+  exportRows: string[][],
+  dailySheetRows: SheetValues,
+  logLines: string[],
+): Promise<string[]> {
+  const sheetByDate = new Map<string, ParsedDailySheetRow>()
+  for (const row of dailySheetRows) {
+    const parsed = parseDailySheetDataRow(row, config.storePartitionKey)
+    if (parsed) sheetByDate.set(parsed.date, parsed)
+  }
+
+  const monthsTouched = new Set<string>()
+  for (const exportRow of exportRows) {
+    const date = String(exportRow[0] ?? "").trim().slice(0, 10)
+    const sheetRow = sheetByDate.get(date)
+    if (!sheetRow || !dailyExportRowDiffersFromSheet(exportRow, sheetRow)) continue
+    monthsTouched.add(date.slice(0, 7))
+  }
+  if (monthsTouched.size === 0) {
+    logLines.push("daily_sheet_pull=0")
+    return []
+  }
+
+  const entries: ManualMonthSalesUpsertEntry[] = []
+  for (const month of [...monthsTouched].sort()) {
+    let gross = 0
+    let party = 0
+    let guest = 0
+    let latestMs: number | null = null
+    for (const [date, sheetRow] of sheetByDate) {
+      if (!date.startsWith(month)) continue
+      gross += sheetRow.gross_sales_yen
+      party += sheetRow.party_count
+      guest += sheetRow.guest_count
+      const ms = parseSyncUpdatedAtToMs(sheetRow.updated_at)
+      if (ms != null && (latestMs == null || ms > latestMs)) latestMs = ms
+    }
+    entries.push({
+      sales_month: month,
+      gross_sales_yen: gross,
+      party_count: party > 0 ? party : null,
+      guest_count: guest > 0 ? guest : null,
+      updated_at: latestMs != null ? new Date(latestMs).toISOString() : new Date().toISOString(),
+    })
+  }
+
+  await upsertManualMonthSalesEntries(supabase, config.storePartitionKey, entries)
+  logLines.push(`daily_sheet_pull months=${entries.map((e) => e.sales_month).join(",")}`)
+  return entries.map((e) => e.sales_month)
+}
+
 async function pushDailySalesToSheet(
   supabase: ReturnType<typeof createClient>,
   config: ReceiptSheetsPilotConfig,
   logLines: string[],
   mergeCtx?: SheetDeletionMergeContext | null,
   direction: ReceiptSheetsSyncDirection = "push",
+  prebuilt?: Awaited<ReturnType<typeof buildDailySalesExportRows>> | null,
+  dailySheetRows?: SheetValues,
 ): Promise<NonNullable<ReceiptSheetsSyncResult["push"]>> {
-  const built = await buildDailySalesExportRows(supabase, config)
+  const built = prebuilt ?? await buildDailySalesExportRows(supabase, config)
+  // DB→シートの push では常に DB 集計の全日次を書き出す（both でもシート既存日付に絞らない）。
+  // 絞り込みはシート削除の取込側のみ。手動同期時はシートと違う日次行だけ上書きしない。
   let dataRows = built.rows
-  if (mergeCtx && (direction === "both" || direction === "pull")) {
-    const sheetDates = mergeCtx.dailyDatesOnSheet
-    if (sheetDates.size === 0) {
-      if (shouldDeleteDbRowMissingFromSheet(null, mergeCtx.dailyWatermark, mergeCtx.mode)) {
-        dataRows = []
-        logLines.push("daily_export=cleared_by_sheet")
-      }
-    } else {
-      dataRows = dataRows.filter((row) => sheetDates.has(String(row[0] ?? "").slice(0, 10)))
-      logLines.push(`daily_export=filtered dates_on_sheet=${sheetDates.size}`)
+  if (config.preferSheetOnContentDiff === true && dailySheetRows && dailySheetRows.length > 0) {
+    const merged = mergeDailyExportRowsPreservingSheetEdits(
+      dataRows,
+      dailySheetRows,
+      config.storePartitionKey,
+    )
+    dataRows = merged.rows
+    if (merged.preservedDates > 0) {
+      logLines.push(`daily_sheet_preserve=${merged.preservedDates}`)
     }
   }
   const allRows: string[][] = [built.header, ...dataRows]
+  const dailyTabCandidates = await resolveStoreReceiptSheetsTabs(
+    config.spreadsheetId,
+    config.storePartitionKey,
+    "daily",
+  )
   await updateSheetValuesForTab(
     config.spreadsheetId,
-    [
-      ...receiptSheetsTabCandidates(config.storePartitionKey, "daily"),
-      ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_DAILY : []),
-    ],
+    dailyTabCandidates,
     "A1",
     allRows,
   )
@@ -1751,6 +2259,7 @@ async function buildPastSalesSheetUpdatesFromDb(
   existingPastRows?: SheetValues,
   mergeCtx?: SheetDeletionMergeContext | null,
   direction: ReceiptSheetsSyncDirection = "push",
+  skipPushMonths?: Set<string>,
 ): Promise<ReceiptSheetsGasPastSalesUpdate[]> {
   const key = canonicalStorePartitionKeyForDb(storePartitionKey)
 
@@ -1793,26 +2302,54 @@ async function buildPastSalesSheetUpdatesFromDb(
   const monthsOnSheet = mergeCtx?.pastMonthsOnSheet
 
   const monthToRow = new Map<string, number>()
+  const pastMonthToRowIndex = new Map<string, number>()
   if (existingPastRows) {
     for (let i = 0; i < existingPastRows.length; i += 1) {
       const month = normalizeMonthCell(existingPastRows[i][0])
-      if (month) monthToRow.set(month, i + 2)
+      if (!month) continue
+      monthToRow.set(month, i + 2)
+      pastMonthToRowIndex.set(month, i)
     }
   }
 
+  const pushMode = direction === "both" && mergeCtx ? "both" : direction
   const updates: ReceiptSheetsGasPastSalesUpdate[] = []
   for (const month of allMonths) {
-    if (monthsOnSheet && !shouldPushDbMonthToSheet(
-      month,
-      manualByMonth.get(month)?.updated_at ?? null,
-      monthsOnSheet,
-      mergeCtx?.pastWatermark ?? null,
-      direction === "both" && mergeCtx ? "both" : direction,
-    )) {
-      continue
-    }
-
+    if (skipPushMonths?.has(month)) continue
+    const sheetRowIdx = pastMonthToRowIndex.get(month)
+    const pastSheetRow = sheetRowIdx != null && existingPastRows
+      ? existingPastRows[sheetRowIdx]
+      : undefined
+    const sheetRowUpdatedAt = sheetPastRowUpdatedAt(pastSheetRow)
     const manual = manualByMonth.get(month)
+
+    if (monthsOnSheet) {
+      if (monthsOnSheet.has(month)) {
+        if (manual) {
+          if (!shouldPushDbMonthToSheet(
+            month,
+            manual.updated_at ?? null,
+            monthsOnSheet,
+            mergeCtx?.pastWatermark ?? null,
+            pushMode,
+            sheetRowUpdatedAt,
+          )) {
+            continue
+          }
+        } else if (sheetPastRowIsManualEntry(pastSheetRow)) {
+          continue
+        }
+      } else if (!shouldPushDbMonthToSheet(
+        month,
+        manual?.updated_at ?? null,
+        monthsOnSheet,
+        mergeCtx?.pastWatermark ?? null,
+        pushMode,
+        sheetRowUpdatedAt,
+      )) {
+        continue
+      }
+    }
     if (manual) {
       updates.push({
         row: monthToRow.get(month),
@@ -1860,7 +2397,7 @@ function pastSalesSheetRowValues(
     update.guest_count ?? "",
     update.operating_days_count ?? "",
     update.from_receipt ? "FALSE" : "TRUE",
-    update.updated_at ?? "",
+    update.updated_at ? formatSyncUpdatedAtForSheet(update.updated_at) : "",
   ]]
 }
 
@@ -1870,6 +2407,7 @@ async function buildBudgetSheetRowUpdatesFromDb(
   existingBudgetRows?: SheetValues,
   mergeCtx?: SheetDeletionMergeContext | null,
   direction: ReceiptSheetsSyncDirection = "push",
+  skipPushMonths?: Set<string>,
 ): Promise<ReceiptSheetsGasBudgetRowUpdate[]> {
   const dbKey = canonicalStorePartitionKeyForDb(config.storePartitionKey)
   const { data, error } = await supabase
@@ -1910,14 +2448,20 @@ async function buildBudgetSheetRowUpdatesFromDb(
     const row = raw as Record<string, unknown>
     const month = normalizeMonthCell(row.target_month)
     if (!month) continue
+    if (skipPushMonths?.has(month)) continue
     const budgetYen = parseNonNegativeInt(row.budget_yen)
     if (budgetYen <= 0) continue
+    const sheetRowIdx = monthToRowIndex.get(month)
+    const sheetRowUpdatedAt = sheetBudgetRowUpdatedAt(
+      sheetRowIdx !== undefined ? sheetRows[sheetRowIdx] : undefined,
+    )
     if (monthsOnSheet && !shouldPushDbMonthToSheet(
       month,
       normalizeSyncUpdatedAt(row.updated_at),
       monthsOnSheet,
       mergeCtx?.budgetWatermark ?? null,
       direction === "both" && mergeCtx ? "both" : direction,
+      sheetRowUpdatedAt,
     )) {
       continue
     }
@@ -1942,7 +2486,7 @@ async function buildBudgetSheetRowUpdatesFromDb(
       formatClosedDatesForSheetCell(closed, month),
       operatingDays > 0 ? String(operatingDays) : "",
       "TRUE",
-      normalizeSyncUpdatedAt(row.updated_at) ?? "",
+      formatSyncUpdatedAtForSheet(row.updated_at),
     ]
     const idx = monthToRowIndex.get(month)
     const rowNum = idx !== undefined ? idx + 2 : nextAppendRow++
@@ -1960,12 +2504,14 @@ async function exportBudgetFromDbToBudgetSheet(
   preloadedBudgetTab?: { values: SheetValues; tabName: string },
   mergeCtx?: SheetDeletionMergeContext | null,
   direction: ReceiptSheetsSyncDirection = "push",
+  skipPushMonths?: Set<string>,
 ): Promise<{ rows_written: number }> {
   const { values: sheetRows, tabName } = preloadedBudgetTab ?? await (async () => {
-    const budgetTabCandidates = [
-      ...receiptSheetsTabCandidates(config.storePartitionKey, "budgets"),
-      ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []),
-    ]
+    const budgetTabCandidates = await resolveStoreReceiptSheetsTabs(
+      config.spreadsheetId,
+      config.storePartitionKey,
+      "budgets",
+    )
     return getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500")
   })()
   const updates = await buildBudgetSheetRowUpdatesFromDb(
@@ -1974,6 +2520,7 @@ async function exportBudgetFromDbToBudgetSheet(
     sheetRows,
     mergeCtx,
     direction,
+    skipPushMonths,
   )
   if (updates.length === 0) {
     logLines.push("budget_export=0")
@@ -1995,12 +2542,14 @@ async function exportPastSalesFromDbToPastSheet(
   preloadedPastTab?: { values: SheetValues; tabName: string },
   mergeCtx?: SheetDeletionMergeContext | null,
   direction: ReceiptSheetsSyncDirection = "push",
+  skipPushMonths?: Set<string>,
 ): Promise<{ rows_written: number }> {
   const { values: pastRows, tabName } = preloadedPastTab ?? await (async () => {
-    const pastTabCandidates = [
-      ...receiptSheetsTabCandidates(config.storePartitionKey, "past"),
-      ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_PAST : []),
-    ]
+    const pastTabCandidates = await resolveStoreReceiptSheetsTabs(
+      config.spreadsheetId,
+      config.storePartitionKey,
+      "past",
+    )
     return getSheetValuesForTab(config.spreadsheetId, pastTabCandidates, "A2:I500")
   })()
   const updates = await buildPastSalesSheetUpdatesFromDb(
@@ -2009,6 +2558,7 @@ async function exportPastSalesFromDbToPastSheet(
     pastRows,
     mergeCtx,
     direction,
+    skipPushMonths,
   )
   if (updates.length === 0) {
     logLines.push("past_sales_export=0")
@@ -2066,10 +2616,11 @@ async function exportClosedDatesFromDbToBudgetSheet(
   const batch: Array<{ range: string; values: SheetValues }> = []
 
   const { values: budgetRows, tabName } = preloadedBudgetTab ?? await (async () => {
-    const budgetTabCandidates = [
-      ...receiptSheetsTabCandidates(config.storePartitionKey, "budgets"),
-      ...(config.storePartitionKey === "bistrocavacava" ? TAB_ALIASES_BUDGETS : []),
-    ]
+    const budgetTabCandidates = await resolveStoreReceiptSheetsTabs(
+      config.spreadsheetId,
+      config.storePartitionKey,
+      "budgets",
+    )
     return getSheetValuesForTab(config.spreadsheetId, budgetTabCandidates, "A2:Q500")
   })()
 
@@ -2175,6 +2726,36 @@ function compressClosedDaysToSegments(days: number[], monthNum: number): string[
     }
   }
   return segments
+}
+
+/** 全店舗 background_sync の受付・完了時に同期ログへ1行追記（店舗別ログは skipSyncLog のため出ない） */
+export async function appendReceiptSheetsBackgroundSyncSummaryLog(
+  spreadsheetId: string,
+  direction: ReceiptSheetsSyncDirection,
+  opts: {
+    failed: boolean
+    errorMessage?: string
+    storeCount: number
+    /** 取込結果列（既定: 成功/失敗） */
+    pullSummary?: string
+    /** メモ列（未指定時は成功/失敗の定型文） */
+    memo?: string
+    storeKeyLabel?: string
+  },
+): Promise<void> {
+  const label = opts.storeKeyLabel ?? "(全店舗)"
+  const pullCol = opts.pullSummary ?? (opts.failed ? "失敗" : "成功")
+  const memo = opts.memo ?? (opts.failed
+    ? `background_sync 失敗（${opts.storeCount}店舗中）。${String(opts.errorMessage ?? "").slice(0, 200)}`
+    : `background_sync 成功（${opts.storeCount}店舗）。日次タブのJ列が今のISO時刻なら反映済み。`)
+  await appendSyncLog(spreadsheetId, [
+    new Date().toISOString(),
+    direction,
+    label,
+    pullCol,
+    "-",
+    memo,
+  ])
 }
 
 async function appendSyncLog(spreadsheetId: string, row: string[]): Promise<void> {

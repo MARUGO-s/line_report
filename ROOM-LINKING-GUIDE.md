@@ -33,14 +33,37 @@
 
 ---
 
+## ⚠️ グループに Bot を2体入れられない（LINE 仕様）
+
+**1つの招待グループ／複数人トークに公式 Bot は1体まで**です。すでに別 Bot がいると2体目は参加できず「すぐ退出」したように見えます（当システムの自動退出ではありません）。  
+Bot が **残って無反応** なら **ルーム承認待ち** の可能性 → 管理 Bot で **許可ルーム**。  
+→ [**LINE-GROUP-BOT-IMPORTANT.md**](./LINE-GROUP-BOT-IMPORTANT.md)
+
+---
+
 ## 📌 結論（30 秒）
 
 | 質問 | 答え |
 |------|------|
 | **連携しないとどうなる？** | 自動連携 **ON** 時は、受信後しばらくで連携されるのが通常。OFF 時はレポート送信先にならない |
-| **自動連携はある？** | **ある（既定 ON）** — 承認なし。上記セキュリティ注意を参照 |
+| **自動連携はある？** | **ある（既定 ON）** — **連携**に管理者承認は不要。上記セキュリティ注意を参照 |
 | **手動連携は？** | 残っている未連携用に **一括連携** ボタンも利用可（確認あり） |
+| **Bot が無反応なのは連携不足？** | **別問題**のことが多い → **ルーム承認待ち**（下記 §「連携と承認の違い」） |
 | **困ったら？** | 管理画面を再読込。それでもオレンジなら手動一括連携 |
+
+---
+
+## ⚠️ 「自動連携」と「ルーム承認」は別（混同注意）
+
+| | **ルーム連携（自動連携）** | **ルーム承認（Bot 利用許可）** |
+|--|---------------------------|--------------------------------|
+| **何か** | 店舗 Webhook の **管理対象ルーム** として DB に登録 | そのルームで **レシート・検索等を動かすか** |
+| **承認** | **不要**（既定で自動） | **必要**（新規 `C…`/`R…` は待ち） |
+| **フラグ** | `room_summary_settings` への登録・`receipt_report_store_partition_key` | `bot_access_approved` |
+| **操作** | Webhook 受信・管理画面同期 | 管理 Bot（@392hdime）で **許可ルーム** |
+
+**新規**に Bot が入ったグループは、自動連携で `room_summary_settings` に載っても **`bot_access_approved = false` のまま機能が止まります**（Bot はグループに残る）。  
+詳細: [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) ／ 用語: [DOCS-INDEX.md](./DOCS-INDEX.md)
 
 ---
 
@@ -119,6 +142,8 @@ LINE でメッセージ送信
 
 | 項目 | 場所 |
 |------|------|
+| **ドキュメント索引・用語集** | [**DOCS-INDEX.md**](./DOCS-INDEX.md) |
+| **ルーム承認・ユーザー許可** | [**LINE-USER-APPROVAL-SECURITY.md**](./LINE-USER-APPROVAL-SECURITY.md) |
 | **細かい権限・画面の意味（一括/個別・カレンダー・表示名）** | [**ROOM-PERMISSION-DETAIL-GUIDE.md**](./ROOM-PERMISSION-DETAIL-GUIDE.md) |
 | 動作確認 | [`ROOM-PERMISSION-TEST-CHECKLIST.md`](./ROOM-PERMISSION-TEST-CHECKLIST.md) |
 | 実装 | `supabase/functions/_shared/auto_link_room.ts` |
@@ -128,4 +153,4 @@ LINE でメッセージ送信
 
 ---
 
-*最終更新: 2026-05 — **自動連携（承認なし）を既定有効** に変更*
+*最終更新: 2026-05-28 — 自動連携とルーム承認の区別を追記（[DOCS-INDEX.md](./DOCS-INDEX.md) と用語統一）*

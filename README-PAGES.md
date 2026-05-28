@@ -2,7 +2,8 @@
 
 **編集・デプロイともにこのリポジトリ（`MARUGO-s/line_report`）が本体です。**
 
-**2026年5月の機能追加・仕様変更のまとめ:** [CHANGELOG-2026-05.md](./CHANGELOG-2026-05.md)（レシート電話照合・シート同期マージ・LINE 売上分析 UI など）
+**2026年5月の機能追加・仕様変更のまとめ:** [CHANGELOG-2026-05.md](./CHANGELOG-2026-05.md)（レシート電話照合・シート同期マージ・LINE 売上分析 UI など）  
+**全ドキュメント索引・用語集:** [DOCS-INDEX.md](./DOCS-INDEX.md)
 
 > ### 🔓 [ルーム「連携」ガイド（必読）](./ROOM-LINKING-GUIDE.md) — **自動連携は承認なし（セキュリティ注意）**
 > Webhook 受信でルームは **管理者確認なしで連携**されます。リスクと `RECEIPT_ROOM_AUTO_LINK=0` での無効化はガイド必読。
@@ -12,6 +13,9 @@
 >
 > ### [Gmail 予約 → LINE 通知・予約表](./RESERVATION-GMAIL-GUIDE.md)
 > Gmail 連携（hocbn）、過去の予約日 **最大5件** の LINE 表示、DB テーブル、デプロイ・障害対応。
+>
+> ### [利用許可・ユーザー管理（セキュリティ強化）](./LINE-USER-APPROVAL-SECURITY.md)
+> 新規友だち／新規ルームの **承認待ち**、管理 Bot（@392hdime）、許可時の **管理画面への表示名登録**。
 
 | 画面 | URL |
 |------|-----|
@@ -21,9 +25,8 @@
 | 会話検索 | https://marugo-s.github.io/line_report/message-search.html |
 | 予約表 | https://marugo-s.github.io/line_report/reservation.html |
 
-- **Supabase（本番・管理/予約/Gmail）**: `https://hocbnifuactbvmyjraxy.supabase.co`
-- **Supabase（旧・jhpm）**: `https://jhpmzqxqvapdkyvvhyra.supabase.co`（レガシー。Gmail シークレットは hocbn へ移行済み）
-- **Supabase（Webhook 受信・新 DB）**: `https://hocbnifuactbvmyjraxy.supabase.co`
+- **Supabase（本番・hocbn）**: `https://hocbnifuactbvmyjraxy.supabase.co` — 管理 API・Webhook・Gmail・DB は **すべてここ**
+- **Supabase（旧・jhpm）**: `https://jhpmzqxqvapdkyvvhyra.supabase.co`（レガシー参照用。運用は hocbn のみ）
 - **API 方針**:
   - 管理（index / media / reservation / Gmail 連携確認）: `/functions/v1/admin-api`（hocbn）
   - 売上分析（analytics）: `/functions/v1/admin-api`（hocbn・店舗別 `line_receipt__*` を集計）
@@ -33,7 +36,7 @@
   - Google スプレッドシート（売上シート）: **BISTRO CAVA CAVA のみ**（`RECEIPT_SHEETS_PILOT_ENABLED = true`、hocbn）
   - GAS の `SUPABASE_RECEIPT_SHEETS_SYNC_URL` は hocbn の `receipt-sheets-sync-cron` を指す
 - **DB マイグレーション**: `20260523140000_store_partition_webhook_tables.sql`, `20260523150000_sales_budget_tables.sql`, `20260526220000_reservation_customer_visit_history.sql` など
-- **Edge Functions（hocbn）**: `line-webhook`, `admin-api`, **`gmail-alert-cron`**（予約メール → LINE）
+- **Edge Functions（hocbn）**: `line-webhook`（店舗別）, **`line-admin-webhook`**（承認専用 @392hdime）, `admin-api`, **`gmail-alert-cron`**（予約メール → LINE）
 - **Edge Secrets（hocbn）**: `GROQ_API_KEY`, `LINE_CHANNEL_*`, `ADMIN_DASHBOARD_TOKEN`, **`GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` / `GMAIL_ALERT_ENABLED`**
 - **LINE Developers 側の必須設定**:
   - Messaging API の `Allow bot to join group chats` を ON にする
@@ -42,7 +45,7 @@
   ```bash
   npx supabase link --project-ref hocbnifuactbvmyjraxy
   npx supabase db push
-  npx supabase functions deploy line-webhook admin-api gmail-alert-cron --project-ref hocbnifuactbvmyjraxy
+  npx supabase functions deploy line-webhook line-admin-webhook admin-api gmail-alert-cron --project-ref hocbnifuactbvmyjraxy
   ```
 - **ダミー売上・予算（テスト）**:
   - 投入: `./scripts/dummy-sales-seed.sh seed-all`（売上＋予算）

@@ -72,6 +72,11 @@ function onEdit(e) {
   }
 }
 
+/** シート表示用の日本時間（UTC の Z 付き ISO は東京設定でも 9 時間ずれて見える） */
+function formatSyncUpdatedAtForSheet_(d) {
+  return Utilities.formatDate(d || new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+}
+
 /** 予算・過去売上タブを編集したら更新日時列を自動更新（双方向同期のマージ用） */
 function touchStoreSyncRowUpdatedAt_(e) {
   if (!e || !e.range) return;
@@ -82,7 +87,7 @@ function touchStoreSyncRowUpdatedAt_(e) {
   if (startCol > target.updatedAtCol) return;
   if (startCol === target.updatedAtCol && endCol === target.updatedAtCol) return;
   if (startCol > target.editableMaxCol) return;
-  var stamp = new Date().toISOString();
+  var stamp = formatSyncUpdatedAtForSheet_(new Date());
   var sheet = e.range.getSheet();
   sheet.getRange(1, target.updatedAtCol).setValue(stamp);
   var startRow = Math.max(2, e.range.getRow());
@@ -143,12 +148,56 @@ function syncBothServerFast() {
   triggerServerBackgroundSync_('both');
 }
 
+/** 毎朝6時（Asia/Tokyo）に全店舗 background_sync を開始する時間トリガー */
+var DAILY_AUTO_SYNC_HANDLER = 'dailyAutoSync';
+var DAILY_AUTO_SYNC_HOUR = 6;
+
 /**
- * タイムトリガー用（UI なし）
- * 時間主導型 → 日タイマー → 午前6時〜7時 など
+ * メニューから実行: 朝6時の日次トリガーを登録（既存の同名トリガーは置き換え）
+ */
+function installDailyAutoSyncTrigger() {
+  var issues = validateSyncConnection_(getSyncCredentials_().url, getSyncCredentials_().secret);
+  if (issues.length) {
+    SpreadsheetApp.getUi().alert(
+      '接続設定を先に完了してください。\n\n' + issues.join('\n\n'),
+    );
+    return;
+  }
+  removeDailyAutoSyncTriggers_();
+  ScriptApp.newTrigger(DAILY_AUTO_SYNC_HANDLER)
+    .timeBased()
+    .everyDays(1)
+    .atHour(DAILY_AUTO_SYNC_HOUR)
+    .nearMinute(0)
+    .inTimezone('Asia/Tokyo')
+    .create();
+  SpreadsheetApp.getUi().alert(
+    '朝6時（日本時間）の自動同期を設定しました。\n\n' +
+    '関数: ' + DAILY_AUTO_SYNC_HANDLER + '\n' +
+    '処理: 全店舗 both（サーバー側・2店舗ずつ並列）\n\n' +
+    'Supabase 側の毎時 cron は無効化済みです（GAS のみで定期実行）。',
+  );
+}
+
+/** dailyAutoSync 用トリガーのみ削除 */
+function removeDailyAutoSyncTriggers_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === DAILY_AUTO_SYNC_HANDLER) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+}
+
+/**
+ * タイムトリガー用（UI なし）— installDailyAutoSyncTrigger で登録
  */
 function dailyAutoSync() {
   var creds = getSyncCredentials_();
+  if (!creds.secret) {
+    console.error('dailyAutoSync: Secret が未設定です');
+    return;
+  }
   try {
     var response = UrlFetchApp.fetch(
       creds.url,
@@ -157,7 +206,11 @@ function dailyAutoSync() {
         background_sync: true,
       }),
     );
-    console.log('dailyAutoSync: HTTP ' + response.getResponseCode());
+    var code = response.getResponseCode();
+    console.log('dailyAutoSync: HTTP ' + code + ' ' + (response.getContentText() || '').slice(0, 200));
+    if (code !== 202 && code !== 200) {
+      console.error('dailyAutoSync: unexpected status ' + code);
+    }
   } catch (e) {
     console.error('dailyAutoSync failed: ' + e);
   }
@@ -170,6 +223,7 @@ function triggerServerBackgroundSync_(direction) {
     SpreadsheetApp.getUi().alert(issues.join('\n\n'));
     return;
   }
+  SpreadsheetApp.flush();
   var startedAt = new Date().toISOString();
   var t0 = Date.now();
   var response = UrlFetchApp.fetch(
@@ -177,6 +231,7 @@ function triggerServerBackgroundSync_(direction) {
     makeSyncFetchRequest_(creds.url, creds.secret, {
       direction: direction,
       background_sync: true,
+      prefer_sheet_on_content_diff: true,
     }),
   );
   var elapsed = Math.max(1, Math.round((Date.now() - t0) / 1000));
@@ -635,8 +690,8 @@ function buildSyncProgressHtml_(startedAtIso, elapsedSec, syncUrl, syncSecret) {
     '<div class="card"><div class="row"><div id="main"><span class="spinner"></span><span id="msg">同期を開始しています...</span></div></div>' +
     '<div class="bar"><div class="fill" id="bar"></div></div>' +
     '<div class="meta"><span id="sub">初期化中...</span><span id="pulse">更新待機中</span></div>' +
-    '<div class="label" id="detail">4店舗ずつ並列で同期します。通常は 1〜3 分で完了します。</div></div><script>' +
-    'var pollCount=0,MAX_POLLS=20,SYNC_STARTED_AT=\'' + startedAt + '\',SYNC_ELAPSED=' + elapsed + ',SYNC_URL=\'' + url + '\',SYNC_SECRET=\'' + secret + '\',TOTAL_STORES=' + STORE_CATALOG.length + ';' +
+    '<div class="label" id="detail">2店舗ずつ並列で同期します。通常は 5〜12 分で完了します。</div></div><script>' +
+    'var pollCount=0,MAX_POLLS=150,SYNC_STARTED_AT=\'' + startedAt + '\',SYNC_ELAPSED=' + elapsed + ',SYNC_URL=\'' + url + '\',SYNC_SECRET=\'' + secret + '\',TOTAL_STORES=' + STORE_CATALOG.length + ';' +
     'function setProgress(count,total,pct,label){' +
     'var safeTotal=Math.max(total||0,1),safeCount=Math.max(0,Math.min(count||0,safeTotal)),safePct=Math.max(0,Math.min(pct||0,100));' +
     'document.getElementById("count").textContent=safeCount+" / "+safeTotal+" 店舗";' +

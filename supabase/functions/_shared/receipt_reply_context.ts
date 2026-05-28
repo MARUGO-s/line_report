@@ -1,8 +1,10 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { LineImageReceiptAnalysis } from './receipt_types.ts'
 import {
+  isPlausibleReceiptCount,
   parseCurrencyAmount,
   parseIntegerCount,
+  sanitizeReceiptCountFromDb,
 } from './receipt_parse.ts'
 import {
   allocateDailyBudgetsForMonth,
@@ -254,11 +256,9 @@ async function loadMonthAggUpToDate(
     const dateKey = String((row as { receipt_date?: unknown }).receipt_date ?? '').trim().slice(0, 10)
     if (!dateKey.startsWith(month)) continue
     const g = Number((row as { gross_sales_yen?: unknown }).gross_sales_yen)
-    const p = Number((row as { party_count?: unknown }).party_count)
-    const gu = Number((row as { guest_count?: unknown }).guest_count)
     const gVal = Number.isFinite(g) ? g : 0
-    const pVal = Number.isFinite(p) ? p : 0
-    const guVal = Number.isFinite(gu) ? gu : 0
+    const pVal = sanitizeReceiptCountFromDb((row as { party_count?: unknown }).party_count)
+    const guVal = sanitizeReceiptCountFromDb((row as { guest_count?: unknown }).guest_count, 99_999)
     gross += gVal
     party += pVal
     guest += guVal
@@ -414,8 +414,14 @@ export async function loadReceiptReplyContext(
     receiptDateIso: params.receiptDateIso,
     taxAmountYen: parseCurrencyAmount(params.receipt.taxAmount),
     grossSalesYen: parseCurrencyAmount(params.receipt.grossSales),
-    partyCount: parseIntegerCount(params.receipt.partyCount),
-    guestCount: parseIntegerCount(params.receipt.guestCount),
+    partyCount: (() => {
+      const p = parseIntegerCount(params.receipt.partyCount)
+      return p != null && isPlausibleReceiptCount(p) ? p : null
+    })(),
+    guestCount: (() => {
+      const g = parseIntegerCount(params.receipt.guestCount)
+      return g != null && isPlausibleReceiptCount(g, 99_999) ? g : null
+    })(),
     unitPriceYen: parseCurrencyAmount(params.receipt.unitPrice),
     monthGrossSalesYen: monthAgg.gross,
     monthPartyCount: monthAgg.party,

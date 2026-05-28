@@ -16,12 +16,28 @@ export function buildReceiptCorrectionCommandTextForLineMessageId(
   return `レシート修正 ID:${normalized}`
 }
 
+export function buildReceiptCorrectionCommandTextForReceiptRowId(
+  receiptRowId: number | null | undefined,
+): string {
+  const id = typeof receiptRowId === 'number' ? receiptRowId : Number(receiptRowId)
+  if (!Number.isFinite(id) || id <= 0) return 'レシート修正'
+  return `レシート修正 RID:${Math.round(id)}`
+}
+
 export function buildReceiptAnalysisDeletionCommandTextForLineMessageId(
   lineMessageId: string | null | undefined,
 ): string {
   const normalized = String(lineMessageId ?? '').trim()
   if (!normalized) return 'レシート解析削除'
   return `レシート解析削除 ID:${normalized}`
+}
+
+export function buildReceiptAnalysisDeletionCommandTextForReceiptRowId(
+  receiptRowId: number | null | undefined,
+): string {
+  const id = typeof receiptRowId === 'number' ? receiptRowId : Number(receiptRowId)
+  if (!Number.isFinite(id) || id <= 0) return 'レシート解析削除'
+  return `レシート解析削除 RID:${Math.round(id)}`
 }
 
 export function clampLineMessageActionText(text: string): string {
@@ -54,46 +70,78 @@ export function buildReceiptAnalyticsDashboardUri(
   return `${ANALYTICS_BASE}?store_key=${encodeURIComponent(storePartitionKey)}`.slice(0, LINE_MESSAGING_URI_MAX_LEN)
 }
 
+export type ReceiptCorrectionStartDirective = {
+  matched: boolean
+  targetLineMessageId: string | null
+  targetReceiptRowId: number | null
+}
+
 export function parseReceiptCorrectionStartDirective(
   rawText: string,
-): { matched: boolean; targetLineMessageId: string | null } {
+): ReceiptCorrectionStartDirective {
   const normalized = normalizeForRuleParsing(rawText).trim()
-  if (!normalized) return { matched: false, targetLineMessageId: null }
+  if (!normalized) return { matched: false, targetLineMessageId: null, targetReceiptRowId: null }
+  const ridTagged = normalized.match(/^レシート(?:修正|訂正)\s*(?:rid[:：]|#)\s*(\d{1,12})$/iu)
+  if (ridTagged?.[1]) {
+    const rowId = Number(ridTagged[1])
+    if (Number.isFinite(rowId) && rowId > 0) {
+      return { matched: true, targetLineMessageId: null, targetReceiptRowId: Math.round(rowId) }
+    }
+  }
   const idTagged = normalized.match(/^レシート(?:修正|訂正)\s*(?:id[:：]|#)\s*([A-Za-z0-9_-]{8,128})$/iu)
-  if (idTagged?.[1]) return { matched: true, targetLineMessageId: String(idTagged[1]).trim() }
+  if (idTagged?.[1]) {
+    return { matched: true, targetLineMessageId: String(idTagged[1]).trim(), targetReceiptRowId: null }
+  }
   const idPlain = normalized.match(/^レシート(?:修正|訂正)\s+([A-Za-z0-9_-]{8,128})$/iu)
-  if (idPlain?.[1]) return { matched: true, targetLineMessageId: String(idPlain[1]).trim() }
+  if (idPlain?.[1]) {
+    return { matched: true, targetLineMessageId: String(idPlain[1]).trim(), targetReceiptRowId: null }
+  }
   const compact = normalized.replace(/\s+/g, '')
   if (compact === 'レシート修正' || compact === 'レシート訂正' || compact === '修正レシート') {
-    return { matched: true, targetLineMessageId: null }
+    return { matched: true, targetLineMessageId: null, targetReceiptRowId: null }
   }
   if (/^レシート(?:修正|訂正)(\s|$)/u.test(normalized)) {
-    return { matched: true, targetLineMessageId: null }
+    return { matched: true, targetLineMessageId: null, targetReceiptRowId: null }
   }
-  return { matched: false, targetLineMessageId: null }
+  return { matched: false, targetLineMessageId: null, targetReceiptRowId: null }
 }
 
 export function parseReceiptAnalysisDeleteDirective(
   rawText: string,
-): { matched: boolean; targetLineMessageId: string | null } {
+): { matched: boolean; targetLineMessageId: string | null; targetReceiptRowId: number | null } {
   const normalized = normalizeForRuleParsing(rawText).trim()
-  if (!normalized) return { matched: false, targetLineMessageId: null }
+  if (!normalized) return { matched: false, targetLineMessageId: null, targetReceiptRowId: null }
+  const ridTagged = normalized.match(/^レシート(?:画像)?解析削除\s*(?:rid[:：]|#)\s*(\d{1,12})$/iu)
+  if (ridTagged?.[1]) {
+    const rowId = Number(ridTagged[1])
+    if (Number.isFinite(rowId) && rowId > 0) {
+      return { matched: true, targetLineMessageId: null, targetReceiptRowId: Math.round(rowId) }
+    }
+  }
   const idTagged = normalized.match(
     /^レシート(?:画像)?解析削除\s*(?:id[:：]|#)\s*([A-Za-z0-9_-]{8,128})$/iu,
   )
-  if (idTagged?.[1]) return { matched: true, targetLineMessageId: String(idTagged[1]).trim() }
+  if (idTagged?.[1]) {
+    return { matched: true, targetLineMessageId: String(idTagged[1]).trim(), targetReceiptRowId: null }
+  }
   const idTagged2 = normalized.match(/^レシート削除\s*(?:id[:：]|#)\s*([A-Za-z0-9_-]{8,128})$/iu)
-  if (idTagged2?.[1]) return { matched: true, targetLineMessageId: String(idTagged2[1]).trim() }
+  if (idTagged2?.[1]) {
+    return { matched: true, targetLineMessageId: String(idTagged2[1]).trim(), targetReceiptRowId: null }
+  }
   const idPlain = normalized.match(/^レシート(?:画像)?解析削除\s+([A-Za-z0-9_-]{8,128})$/iu)
-  if (idPlain?.[1]) return { matched: true, targetLineMessageId: String(idPlain[1]).trim() }
+  if (idPlain?.[1]) {
+    return { matched: true, targetLineMessageId: String(idPlain[1]).trim(), targetReceiptRowId: null }
+  }
   const idPlain2 = normalized.match(/^レシート削除\s+([A-Za-z0-9_-]{8,128})$/iu)
-  if (idPlain2?.[1]) return { matched: true, targetLineMessageId: String(idPlain2[1]).trim() }
+  if (idPlain2?.[1]) {
+    return { matched: true, targetLineMessageId: String(idPlain2[1]).trim(), targetReceiptRowId: null }
+  }
   const compact = normalized.replace(/\s+/g, '')
   if (compact === 'レシート解析削除' || compact === 'レシート削除') {
-    return { matched: true, targetLineMessageId: null }
+    return { matched: true, targetLineMessageId: null, targetReceiptRowId: null }
   }
   if (/^レシート(?:画像)?解析削除(\s|$)/u.test(normalized) || /^レシート削除(\s|$)/u.test(normalized)) {
-    return { matched: true, targetLineMessageId: null }
+    return { matched: true, targetLineMessageId: null, targetReceiptRowId: null }
   }
-  return { matched: false, targetLineMessageId: null }
+  return { matched: false, targetLineMessageId: null, targetReceiptRowId: null }
 }

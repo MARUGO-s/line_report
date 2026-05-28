@@ -7,11 +7,19 @@ import {
   clearStoreSheetBudgetTabsAndPushFromDb,
 } from "../_shared/clear_store_sheet_budget_tabs.ts"
 import {
+  appendReceiptSheetsBackgroundSyncSummaryLog,
   runReceiptSheetsPilotSync,
+  runReceiptSheetsPilotSyncChainedStep,
+  runReceiptSheetsPilotSyncForStore,
   runReceiptSheetsPilotSyncViaGas,
   type ReceiptSheetsGasPullInput,
   type ReceiptSheetsSyncDirection,
 } from "../_shared/receipt_sheets_pilot_sync.ts"
+import {
+  listReceiptSheetsStores,
+  resolveReceiptSheetsStoreDisplayName,
+  resolveReceiptSheetsStoreKey,
+} from "../_shared/receipt_sheets_store_catalog.ts"
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -347,30 +355,111 @@ Deno.serve(async (req) => {
     return json({ ok: true, ...(data ?? {}) }, 200)
   }
 
+  if (body?.sync_one_store === true) {
+    const storeKeyRaw = String(body?.store_partition_key ?? "").trim()
+    const canonical = resolveReceiptSheetsStoreKey(storeKeyRaw)
+    if (!canonical) {
+      return json({ ok: false, error: "Unknown store_partition_key." }, 400)
+    }
+    const displayName = resolveReceiptSheetsStoreDisplayName(canonical)
+    if (!displayName) {
+      return json({ ok: false, error: "Unknown store display name." }, 400)
+    }
+    const oneDirection: ReceiptSheetsSyncDirection =
+      raw === "pull" || raw === "push" || raw === "both" ? direction : "push"
+    const preferSheetOnContentDiff = body?.prefer_sheet_on_content_diff === true
+    try {
+      const result = await runReceiptSheetsPilotSyncForStore(
+        supabase,
+        {
+          spreadsheetId,
+          storePartitionKey: canonical,
+          storeDisplayName: displayName,
+          skipSyncLog: false,
+          preferSheetOnContentDiff,
+        },
+        oneDirection,
+      )
+      return json({ ok: true, sync_one_store: true, ...result }, 200)
+    } catch (e) {
+      console.error("sync_one_store failed:", e)
+      return json({ ok: false, sync_one_store: true, error: String(e), store_partition_key: canonical }, 500)
+    }
+  }
+
+  const preferSheetOnContentDiff = body?.prefer_sheet_on_content_diff === true
+
+  if (body?.background_sync_continue === true) {
+    const offset = Math.max(0, parseInt(String(body?.offset ?? "0"), 10) || 0)
+    const startedAt = String(body?.started_at ?? new Date().toISOString()).trim()
+    const failedRaw = body?.failed_stores
+    const failedStores = Array.isArray(failedRaw)
+      ? failedRaw.map((k) => String(k ?? "").trim()).filter(Boolean)
+      : []
+    try {
+      await runReceiptSheetsPilotSyncChainedStep(
+        supabase,
+        direction,
+        offset,
+        startedAt,
+        failedStores,
+        preferSheetOnContentDiff,
+      )
+      return json({
+        ok: true,
+        background_continue: true,
+        offset,
+        store_count: listReceiptSheetsStores().length,
+      }, 200)
+    } catch (e) {
+      console.error("background_sync_continue failed:", e)
+      return json({
+        ok: false,
+        background_continue: true,
+        offset,
+        error: String(e),
+      }, 500)
+    }
+  }
+
   if (body?.background_sync === true) {
-    const syncPromise = runReceiptSheetsPilotSync(supabase, direction)
-      .then(async () => {
-        await supabase.from("receipt_sheets_sync_status").upsert(
-          { id: 1, last_completed_at: new Date().toISOString(), direction, failed: false, error_message: null, updated_at: new Date().toISOString() },
-          { onConflict: "id" },
-        )
+    const storeCount = listReceiptSheetsStores().length
+    try {
+      await appendReceiptSheetsBackgroundSyncSummaryLog(spreadsheetId, direction, {
+        failed: false,
+        storeCount,
+        pullSummary: "受付",
+        memo: "background_sync 受付（2店舗ずつ並列で順次処理を開始）。完了行が続けば成功。通常5〜12分。",
       })
-      .catch(async (e) => {
-        console.error("background receipt-sheets-sync failed:", e)
-        // エラー時もステータスを書くことでサイドバーが無限待機にならない
-        await supabase.from("receipt_sheets_sync_status").upsert(
-          { id: 1, last_completed_at: new Date().toISOString(), direction, failed: true, error_message: String(e).slice(0, 500), updated_at: new Date().toISOString() },
-          { onConflict: "id" },
-        ).catch(() => {})
-      })
+    } catch (e) {
+      console.error("background_sync accept log failed:", e)
+      return json({
+        ok: false,
+        error: `同期ログへの書き込みに失敗しました。サービスアカウントのシート共有を確認してください: ${String(e)}`,
+        spreadsheet_id: spreadsheetId,
+      }, 500)
+    }
+
+    const startedAt = new Date().toISOString()
+    const syncPromise = runReceiptSheetsPilotSyncChainedStep(
+      supabase,
+      direction,
+      0,
+      startedAt,
+      [],
+      preferSheetOnContentDiff,
+    ).catch((e) => {
+      console.error("background receipt-sheets-sync chained failed:", e)
+    })
     EdgeRuntime.waitUntil(syncPromise)
     return json({
       ok: true,
       background: true,
       direction,
       spreadsheet_id: spreadsheetId,
+      store_count: storeCount,
       message:
-        "全店舗同期をサーバーで開始しました。1〜3分後にスプレッドシートを再読み込みしてください。",
+        "全店舗同期を開始しました（2店舗ずつ並列）。同期ログに「受付」行が出ていれば接続OK。サイドバーで進捗を確認し、通常5〜12分で完了します。",
     }, 202)
   }
 

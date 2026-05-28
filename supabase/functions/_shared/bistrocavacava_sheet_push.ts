@@ -4,28 +4,22 @@ import {
   formatSheetA1Range,
 } from "./google_sheets_client.ts"
 import { runReceiptSheetsPilotSyncForStore } from "./receipt_sheets_pilot_sync.ts"
-import {
-  receiptSheetsTabCandidates,
-  resolveReceiptSheetsStoreDisplayName,
-} from "./receipt_sheets_store_catalog.ts"
+import { resolveReceiptSheetsStoreDisplayName } from "./receipt_sheets_store_catalog.ts"
+import { resolveStoreReceiptSheetsTabs } from "./receipt_sheets_tab_resolve.ts"
 
 const STORE = "bistrocavacava"
-const TAB_ALIASES_PAST = ["過去売上", "past_sales"]
-const TAB_ALIASES_BUDGETS = ["月間予算", "monthly_budgets"]
 
 /** 過去売上・月間予算タブのデータ行をクリアし、DB から push のみ反映 */
 export async function clearBistrocavacavaSheetDataRowsAndPushFromDb(
   supabase: ReturnType<typeof createClient>,
   spreadsheetId: string,
 ): Promise<Record<string, unknown>> {
-  const pastTabs = [
-    ...receiptSheetsTabCandidates(STORE, "past"),
-    ...TAB_ALIASES_PAST,
-  ]
-  const budgetTabs = [
-    ...receiptSheetsTabCandidates(STORE, "budgets"),
-    ...TAB_ALIASES_BUDGETS,
-  ]
+  const pastTabs = await resolveStoreReceiptSheetsTabs(spreadsheetId, STORE, "past", undefined, {
+    createIfMissing: false,
+  })
+  const budgetTabs = await resolveStoreReceiptSheetsTabs(spreadsheetId, STORE, "budgets", undefined, {
+    createIfMissing: false,
+  })
   const cleared: string[] = []
   for (const tab of pastTabs) {
     try {

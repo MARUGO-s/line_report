@@ -43,6 +43,53 @@ export function parseIntegerCount(raw: string | null): number | null {
   return Math.max(0, Math.round(value))
 }
 
+/** 8桁日付（YYYYMMDD）や異常に大きい数を組数・客数として拒否する */
+export function isPlausibleReceiptCount(value: number, max = 9999): boolean {
+  if (!Number.isFinite(value) || value < 0 || value > max) return false
+  if (value >= 20_000_101 && value <= 20_991_231 && String(Math.round(value)).length === 8) {
+    return false
+  }
+  return true
+}
+
+export function looksLikeSalesDateDigits(raw: string): boolean {
+  const digits = String(raw ?? '').replace(/\D/g, '')
+  return /^20\d{6}$/.test(digits)
+}
+
+/** レシート印字の英字略称（CAVA,CAVA 等）かどうか */
+export function looksLikeOcrLatinStoreLabel(name: string): boolean {
+  const t = String(name ?? '').trim()
+  if (!t) return false
+  if (/ビストロ|サヴァ|サバ|食堂|店舗|店$|レストラン|バー/.test(t)) return false
+  if (/^[\x00-\x7F\s,.・'’\-]+$/.test(t)) return true
+  return false
+}
+
+/** 店舗マスタ名を優先（検索・修正画面の表示用） */
+export function resolveCanonicalStoreDisplayName(
+  registryDisplayName: string | null | undefined,
+  rowStoreName: string | null | undefined,
+  partitionKey?: string | null,
+): string {
+  const canonical = String(registryDisplayName ?? '').trim()
+  const raw = String(rowStoreName ?? '').trim()
+  if (canonical) {
+    if (!raw || looksLikeOcrLatinStoreLabel(raw)) return canonical
+    return raw
+  }
+  return raw || String(partitionKey ?? '').trim() || '-'
+}
+
+/** DB列の組数・客数（日付8桁などを0扱い） */
+export function sanitizeReceiptCountFromDb(value: unknown, max = 9999): number {
+  if (value == null) return 0
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  const rounded = Math.max(0, Math.round(n))
+  return isPlausibleReceiptCount(rounded, max) ? rounded : 0
+}
+
 export function formatYenAmount(value: number): string {
   return `¥${Math.round(value).toLocaleString('ja-JP')}`
 }
