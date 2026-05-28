@@ -848,12 +848,70 @@ async function notifyUserApprovalResult(
   }
 }
 
+/**
+ * ID確認時に取得できた LINE 表示名を line_user_permissions に保存する。
+ * 表示名が空のときだけ埋める（手動命名済みの名前は尊重して上書きしない）。
+ * 未登録ユーザーは表示名付きの保留行（権限OFF）を作成する。
+ */
+async function persistDisplayNameFromIdCheck(
+  supabase: SupabaseClient,
+  lineUserId: string,
+  displayName: string | null,
+): Promise<void> {
+  const uid = String(lineUserId ?? '').trim()
+  const name = String(displayName ?? '').trim()
+  if (!uid.startsWith('U') || !name || name === '（名称なし）') return
+
+  const now = new Date().toISOString()
+  const { data: existing, error: selErr } = await supabase
+    .from('line_user_permissions')
+    .select('line_user_id, display_name')
+    .eq('line_user_id', uid)
+    .maybeSingle()
+  if (selErr) {
+    console.error(`persistDisplayNameFromIdCheck select failed (${uid}):`, selErr.message)
+    return
+  }
+
+  if (existing?.line_user_id) {
+    const current = String((existing as { display_name?: unknown }).display_name ?? '').trim()
+    if (current && current !== uid) return // 既に名前あり → 尊重して何もしない
+    const { error: upErr } = await supabase
+      .from('line_user_permissions')
+      .update({ display_name: name, updated_at: now })
+      .eq('line_user_id', uid)
+    if (upErr) console.error(`persistDisplayNameFromIdCheck update failed (${uid}):`, upErr.message)
+    return
+  }
+
+  const { error: insErr } = await supabase
+    .from('line_user_permissions')
+    .insert({
+      line_user_id: uid,
+      display_name: name,
+      is_active: false,
+      can_message_search: false,
+      can_library_search: false,
+      can_calendar_create: false,
+      can_calendar_update: false,
+      can_calendar_view: false,
+      can_media_access: false,
+      updated_at: now,
+    })
+  if (insErr && String(insErr.code) !== '23505') {
+    console.error(`persistDisplayNameFromIdCheck insert failed (${uid}):`, insErr.message)
+  }
+}
+
 async function replyAdminIdCheck(
+  supabase: SupabaseClient,
   replyToken: string,
   senderId: string,
   adminToken: string,
 ): Promise<boolean> {
   const profile = await fetchLineBotProfile(senderId, adminToken)
+  // ID確認で取得できた表示名をDBに保存（抜き取り）
+  await persistDisplayNameFromIdCheck(supabase, senderId, profile?.displayName ?? null)
   const flex = buildAdminIdCheckFlex(senderId, profile, isApprovalAdminUserId(senderId))
   const result = await replyLineFlex(replyToken, flex, adminToken)
   return result.ok
@@ -883,7 +941,7 @@ export async function handleAdminApprovalEvents(
       const postbackData = String(event.postback?.data ?? '').trim()
       const menu = parseAdminMenuPostback(postbackData)
       if (menu === 'idcheck') {
-        if (await replyAdminIdCheck(replyToken, senderId, adminToken)) replies += 1
+        if (await replyAdminIdCheck(supabase, replyToken, senderId, adminToken)) replies += 1
         continue
       }
       if (menu === 'help') {
@@ -934,7 +992,7 @@ export async function handleAdminApprovalEvents(
     if (event.message?.type === 'text') {
       const text = String(event.message?.text ?? '').trim()
       if (/^(管理者情報|ID確認|id確認)$/i.test(text)) {
-        if (await replyAdminIdCheck(replyToken, senderId, adminToken)) replies += 1
+        if (await replyAdminIdCheck(supabase, replyToken, senderId, adminToken)) replies += 1
         continue
       }
       if (/^(使い方|ヘルプ|help)$/i.test(text)) {

@@ -1599,12 +1599,38 @@ async function syncLineUserPermissionsFromChatMembers(
   }
 }
 
+/**
+ * 設定済みの LINE チャネルアクセストークンを全て収集する。
+ * ユーザー/グループは店舗Bot・承認Botなど別チャネルを友だち追加していることがあり、
+ * 単一トークンだと /profile・/summary が 404 になる。全トークンで順に試すために使う。
+ * env: LINE_CHANNEL_ACCESS_TOKEN（全体）＋ LINE_CHANNEL_ACCESS_TOKEN__{店舗キー}
+ */
+function collectAllLineChannelTokens(): string[] {
+  const env = Deno.env.toObject()
+  const tokens: string[] = []
+  const seen = new Set<string>()
+  const globalToken = String(env["LINE_CHANNEL_ACCESS_TOKEN"] ?? "").trim()
+  if (globalToken) {
+    seen.add(globalToken)
+    tokens.push(globalToken)
+  }
+  for (const [key, value] of Object.entries(env)) {
+    if (!/^LINE_CHANNEL_ACCESS_TOKEN__.+/.test(key)) continue
+    const token = String(value ?? "").trim()
+    if (token && !seen.has(token)) {
+      seen.add(token)
+      tokens.push(token)
+    }
+  }
+  return tokens
+}
+
 async function refreshRoomNamesFromLine(
   supabase: ReturnType<typeof createClient>,
   roomId: string | null,
 ) {
-  const lineAccessToken = String(Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN") ?? "").trim()
-  if (!lineAccessToken) {
+  const lineAccessTokens = collectAllLineChannelTokens()
+  if (lineAccessTokens.length === 0) {
     throw { status: 500, message: "LINE_CHANNEL_ACCESS_TOKEN is not set." } satisfies AppError
   }
 
@@ -1629,7 +1655,12 @@ async function refreshRoomNamesFromLine(
   const now = new Date().toISOString()
   for (const id of roomIds) {
     attempted += 1
-    const name = await fetchLineConversationNameByRoomId(id, lineAccessToken)
+    // 友だち追加先のチャネルが店舗ごとに異なるため、全トークンで順に試す
+    let name: string | null = null
+    for (const token of lineAccessTokens) {
+      name = await fetchLineConversationNameByRoomId(id, token)
+      if (name) break
+    }
     if (!name) {
       notFound += 1
       continue

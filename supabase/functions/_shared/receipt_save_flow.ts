@@ -3,6 +3,7 @@ import type { LineImageReceiptAnalysis, LineReplyPayload } from './receipt_types
 import { buildReceiptFlexMessage } from './receipt_flex_reply.ts'
 import {
   buildReceiptDuplicateConfirmationFlexReply,
+  clearPendingReceiptDuplicate,
   savePendingReceiptDuplicate,
 } from './receipt_duplicate.ts'
 import { loadReceiptReplyContext } from './receipt_reply_context.ts'
@@ -82,6 +83,9 @@ export async function attemptReceiptRegistration(
   if (!saveResult.ok) {
     return { saved: false, reply: 'レシートの保存に失敗しました。' }
   }
+
+  // 通常保存できたら、この会話に残っている重複確認の保留をクリア（残骸の持ち越し防止）
+  await clearPendingReceiptDuplicate(supabase, payload.room_id, payload.user_id)
 
   const replyContext = await loadReceiptReplyContext(supabase, {
     storePartitionKey: registry.store_partition_key,

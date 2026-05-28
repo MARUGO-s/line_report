@@ -14,7 +14,7 @@
           );
           return;
         }
-        if (isLocal && window.location.protocol === 'http:' && !/\/line_report\//.test(window.location.pathname)) {
+        if (isLocal && window.location.protocol === 'http:' && !/\/line_report[\-\/]/.test(window.location.pathname)) {
           var port = window.location.port || '8765';
           window.location.replace(
             'http://127.0.0.1:' + port + '/line_report/index.html'
@@ -3432,163 +3432,983 @@
       }
     }
   </style>
+
+  <style>
+  /* ============================================================
+     V2 LAYOUT OVERRIDES — タブ型管理画面
+     ============================================================ */
+
+  /* 基本リセット（ライトテーマ優先） */
+  body {
+    background: #f0f4f7 !important;
+    color: #1c2b38 !important;
+    font-family: "Helvetica Neue", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", Arial, sans-serif !important;
+    padding: 0 !important;
+    background-image: none !important;
+  }
+
+  /* ===== App-Level Header ===== */
+  .app-v2-header {
+    position: sticky;
+    top: 0;
+    z-index: 500;
+    background: #ffffff;
+    border-bottom: 1px solid #dce8f0;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  }
+
+  .app-v2-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #1a6fa8;
+    letter-spacing: 0.01em;
+  }
+
+  .app-v2-brand-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c77a;
+    flex-shrink: 0;
+  }
+
+  .app-v2-header-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: #8fa8bc;
+  }
+
+  /* ===== Tab Navigation ===== */
+  .app-v2-tabs-wrap {
+    background: #ffffff;
+    border-bottom: 1px solid #dce8f0;
+    padding: 0 28px;
+  }
+
+  .app-v2-tabs {
+    display: flex;
+    gap: 0;
+    max-width: 1240px;
+    margin: 0 auto;
+    overflow-x: auto;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .app-v2-tabs::-webkit-scrollbar { display: none; }
+
+  .app-v2-tab {
+    padding: 14px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #5a7285;
+    cursor: pointer;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    white-space: nowrap;
+    background: none;
+    font-family: inherit;
+    transition: color 0.15s, border-color 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+  }
+
+  .app-v2-tab:hover { color: #1a6fa8; }
+
+  .app-v2-tab.active {
+    color: #1a6fa8;
+    border-bottom-color: #1a6fa8;
+  }
+
+  .app-v2-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #e8f3fb;
+    color: #1a6fa8;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  /* ===== Main Container ===== */
+  .app-v2-main {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 24px 28px 60px;
+  }
+
+  /* ===== Tab Panels ===== */
+  .app-v2-panel { display: none; }
+  .app-v2-panel.active { display: block; }
+
+  /* ===== Card Override (existing .card gets new look) ===== */
+  .card {
+    background: #ffffff !important;
+    border: 1px solid #dce8f0 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06) !important;
+    padding: 20px 22px !important;
+    margin-bottom: 16px;
+  }
+
+  /* h2 override */
+  .card h2 {
+    font-size: 15px !important;
+    color: #1c2b38 !important;
+    font-weight: 700;
+    border-bottom-color: #dce8f0 !important;
+    margin-bottom: 16px !important;
+    padding-bottom: 10px !important;
+  }
+
+  /* ===== Status bar badges ===== */
+  #authState,
+  #lastRefresh,
+  .gmailAccountMeta {
+    background: #f0f7ff;
+    border-color: #c5ddf0;
+    color: #2d6e9e;
+  }
+
+  /* ===== Header status area ===== */
+  .app-v2-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid #a8e8cc;
+    background: #e8faf3;
+    color: #1a9e6f;
+  }
+
+  .app-v2-status-badge.warn {
+    border-color: #f5d08a;
+    background: #fef6e7;
+    color: #c47d0e;
+  }
+
+  /* ===== Page subtitle ===== */
+  .app-v2-panel-desc {
+    margin: 0 0 20px;
+    font-size: 13px;
+    color: #5a7285;
+    line-height: 1.5;
+    padding: 10px 14px;
+    background: #f7fafc;
+    border-left: 3px solid #1a6fa8;
+    border-radius: 0 6px 6px 0;
+  }
+
+  /* ===== Link buttons in nav area ===== */
+  .app-v2-nav-links {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 0;
+  }
+
+  .app-v2-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    color: #1a6fa8;
+    background: #e8f3fb;
+    border: 1px solid #c5ddf0;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s;
+  }
+
+  .app-v2-nav-link:hover { background: #d4ecf7; }
+
+  /* ===== Section titles within panels ===== */
+  .app-v2-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #5a7285;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0 0 10px;
+  }
+
+  /* Suppress the old gradient hero bg */
+  .app-v2-panel .hero,
+  .hero {
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    display: none !important;
+  }
+
+  /* Override muted color for readability */
+  .muted {
+    color: #6b8698 !important;
+  }
+
+  .meta {
+    color: #5a7285 !important;
+  }
+
+  .meta.usage-summary {
+    color: #1a6fa8 !important;
+    font-weight: 700 !important;
+  }
+
+  /* Lighten setting-block for light theme */
+  .setting-block {
+    background: #f7fafc !important;
+    border-color: #dce8f0 !important;
+  }
+
+  .setting-block-title {
+    color: #5a7285 !important;
+  }
+
+  /* Storage chart light mode */
+  .storage-chart {
+    background: #f7fafc !important;
+    border-color: #dce8f0 !important;
+  }
+
+  .storage-pie {
+    /* background は JS が実データの conic-gradient を inline で設定するため上書きしない */
+    border-color: #c5ddf0 !important;
+    box-shadow: none !important;
+  }
+
+  .storage-pie::after {
+    background: #f7fafc !important;
+    border-color: #dce8f0 !important;
+  }
+
+  .storage-pie-center-label { color: #5a7285 !important; }
+  .storage-pie-center-value { color: #1c2b38 !important; }
+  .storage-legend-item { color: #1c2b38 !important; }
+
+  /* Table light mode */
+  .table-wrap {
+    background: #ffffff !important;
+    border-color: #dce8f0 !important;
+  }
+
+  table th {
+    background: #f7fafc !important;
+    color: #5a7285 !important;
+    border-bottom-color: #dce8f0 !important;
+  }
+
+  table td {
+    color: #1c2b38 !important;
+    border-bottom-color: #eef3f7 !important;
+  }
+
+  /* input/select light mode */
+  .input, .select, .button {
+    background: #ffffff !important;
+    border-color: #dce8f0 !important;
+    color: #1c2b38 !important;
+  }
+
+  .input::placeholder { color: #8fa8bc !important; }
+
+  .button.primary {
+    background: linear-gradient(180deg, #2e8fcb, #1a6fa8) !important;
+    border-color: #1a6fa8 !important;
+    color: #ffffff !important;
+  }
+
+  .button.media-highlight {
+    background: #e8faf3 !important;
+    border-color: #a8e8cc !important;
+    color: #1a9e6f !important;
+    box-shadow: none !important;
+  }
+
+  .button.warn {
+    color: #c47d0e !important;
+    border-color: #f5d08a !important;
+    background: #fef6e7 !important;
+  }
+
+  /* Pill light mode */
+  .pill {
+    background: #f0f7ff !important;
+    border-color: #c5ddf0 !important;
+    color: #2d6e9e !important;
+  }
+
+  .pill.ok {
+    color: #1a9e6f !important;
+    border-color: #a8e8cc !important;
+    background: #e8faf3 !important;
+  }
+
+  .pill.link {
+    color: #1a6fa8 !important;
+    background: #e8f3fb !important;
+    border-color: #c5ddf0 !important;
+  }
+
+  /* Webhook card light mode */
+  .webhook-card {
+    background: #f7fafc !important;
+    border-color: #dce8f0 !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05) !important;
+  }
+
+  .webhook-card.is-active {
+    background: #f0f7ff !important;
+    border-color: #b3d6ef !important;
+  }
+
+  .webhook-card-title { color: #1c2b38 !important; }
+  .webhook-card-status { color: #5a7285 !important; }
+  .webhook-card-key code { color: #2d6e9e !important; }
+  .webhook-card-url code { color: #2d6e9e !important; }
+  .webhook-card-tables { color: #5a7285 !important; }
+  .webhook-card-receipt-features { color: #5a7285 !important; }
+  .webhook-card-status-badge { background: #e8f3fb !important; color: #2d6e9e !important; }
+
+  /* Room items light */
+  .webhook-room-item { background: #f7fafc !important; border-color: #dce8f0 !important; }
+  .webhook-room-item-title { color: #1c2b38 !important; }
+  .webhook-room-item-meta { color: #5a7285 !important; }
+
+  /* User permission cards light */
+  .user-permission-list-item { background: #f7fafc !important; border-color: #dce8f0 !important; }
+  .user-permission-list-name { color: #1a6fa8 !important; border-color: #c5ddf0 !important; background: #e8f3fb !important; }
+  .user-permission-list-meta { color: #5a7285 !important; }
+  .user-permission-list-kv-key { color: #1c2b38 !important; }
+
+  /* Modal light mode */
+  .modal-card {
+    background: #ffffff !important;
+    border-color: #dce8f0 !important;
+    color: #1c2b38 !important;
+  }
+  .modal-title { color: #1c2b38 !important; }
+  .modal-meta { color: #5a7285 !important; }
+
+  /* Switch light */
+  .switch input { accent-color: #1a6fa8; }
+
+  /* Grid – removed, sections are now per-panel */
+  .grid {
+    display: block !important;
+    gap: 0 !important;
+  }
+
+  /* Code inline */
+  code {
+    background: #f0f7ff;
+    color: #1a6fa8;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.9em;
+  }
+
+  /* Webhook notice */
+  .webhook-auto-link-security-notice {
+    background: #fef6e7 !important;
+    border-color: #f5d08a !important;
+    color: #7a5000 !important;
+  }
+
+  /* rooms-table sticky columns light */
+  .rooms-table td:nth-child(1),
+  .rooms-table td:nth-child(2),
+  .rooms-table th:nth-child(1),
+  .rooms-table th:nth-child(2) {
+    background: #f7fafc !important;
+  }
+
+  /* user-permission-name-text light */
+  .user-permission-name-text { color: #1a6fa8 !important; border-bottom-color: #1a6fa8 !important; text-shadow: none !important; }
+
+  /* user-permission-control */
+  .user-permission-control { background: #f0f7ff !important; border-color: #c5ddf0 !important; color: #1c2b38 !important; }
+
+  /* Small responsive fix */
+  @media (max-width: 600px) {
+    .app-v2-header { padding: 0 14px; }
+    .app-v2-tabs-wrap { padding: 0 14px; }
+    .app-v2-main { padding: 16px 14px 48px; }
+  }
+
+</style>
+
+<style>
+  /* ============================================================
+     V2 MOCKUP COMPONENTS — モックアップ部品（KPI/トグル/フォーム等）
+     ============================================================ */
+
+  /* V2 は白基調のクリーンデザイン固定。テーマトグルは隠す */
+  #themeToggleBtn { display: none !important; }
+
+  /* ===== Panel intro (見出し＋説明) ===== */
+  .v2-panel-head {
+    margin-bottom: 18px;
+  }
+  .v2-panel-head h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    color: #1c2b38;
+    letter-spacing: 0.01em;
+  }
+  .v2-panel-head p {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: #5a7285;
+    line-height: 1.5;
+  }
+
+  /* ===== Card header (タイトル＋バッジ) ===== */
+  .card h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card h2 .v2-card-badge {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: #e8f3fb;
+    color: #1a6fa8;
+    border: 1px solid #c5ddf0;
+    letter-spacing: 0;
+  }
+
+  /* ===== KPI cards ===== */
+  .v2-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  @media (max-width: 880px) { .v2-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 480px) { .v2-kpi-grid { grid-template-columns: 1fr; } }
+
+  .v2-kpi-card {
+    background: #ffffff;
+    border: 1px solid #dce8f0;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    padding: 16px 18px;
+    position: relative;
+    overflow: hidden;
+  }
+  .v2-kpi-card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: #1a6fa8;
+  }
+  .v2-kpi-card[data-accent="green"]::before  { background: #1a9e6f; }
+  .v2-kpi-card[data-accent="amber"]::before  { background: #c47d0e; }
+  .v2-kpi-card[data-accent="violet"]::before { background: #7c6bd8; }
+
+  .v2-kpi-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #5a7285;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .v2-kpi-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: #1c2b38;
+    line-height: 1.05;
+    word-break: break-word;
+  }
+  .v2-kpi-value .unit {
+    font-size: 13px;
+    font-weight: 400;
+    color: #5a7285;
+    margin-left: 3px;
+  }
+  .v2-kpi-sub {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #8fa8bc;
+    line-height: 1.4;
+  }
+
+  /* ===== Toggle switches (settings checkboxes → switch) ===== */
+  .room-scope-option input[type="checkbox"],
+  .user-permission-control input[type="checkbox"],
+  .switch input[type="checkbox"] {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 0 0 auto;
+    width: 38px !important;
+    height: 22px !important;
+    border-radius: 11px !important;
+    background: #c6d4df !important;
+    border: none !important;
+    position: relative;
+    cursor: pointer;
+    margin: 0;
+    transition: background 0.16s ease;
+    vertical-align: middle;
+  }
+  .room-scope-option input[type="checkbox"]::after,
+  .user-permission-control input[type="checkbox"]::after,
+  .switch input[type="checkbox"]::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    transition: left 0.16s ease;
+  }
+  .room-scope-option input[type="checkbox"]:checked,
+  .user-permission-control input[type="checkbox"]:checked,
+  .switch input[type="checkbox"]:checked {
+    background: #1a6fa8 !important;
+  }
+  .room-scope-option input[type="checkbox"]:checked::after,
+  .user-permission-control input[type="checkbox"]:checked::after,
+  .switch input[type="checkbox"]:checked::after {
+    left: 18px;
+  }
+
+  /* room-scope-option layout: ラベルを縦中央に、トグルを左 */
+  .room-scope-option {
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px !important;
+    border: 1px solid #e3ebf2 !important;
+    border-radius: 8px !important;
+    background: #ffffff !important;
+    font-size: 13px;
+    line-height: 1.45;
+    color: #1c2b38 !important;
+    cursor: pointer;
+  }
+  .room-scope-option:hover { border-color: #c5ddf0 !important; background: #f7fafc !important; }
+
+  /* ===== Form rows (auth) ===== */
+  .v2-form-row {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .v2-form-row:last-child { margin-bottom: 0; }
+  .v2-form-row > .v2-form-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #5a7285;
+  }
+  .v2-form-row > .v2-form-field { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 0; }
+  .v2-form-row .input { flex: 1 1 240px; min-width: 0; }
+  @media (max-width: 560px) {
+    .v2-form-row { grid-template-columns: 1fr; gap: 6px; }
+  }
+
+  /* ===== Toolbar (search + filter) ===== */
+  .v2-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .v2-toolbar .input,
+  .v2-toolbar .select,
+  .v2-toolbar select,
+  .v2-toolbar .input-select {
+    height: 36px;
+    min-height: 36px;
+  }
+  .v2-toolbar label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #5a7285;
+  }
+  .v2-toolbar-spacer { flex: 1; }
+
+  /* ===== Sub-card (setting-block refinement) ===== */
+  .setting-block {
+    border-radius: 10px !important;
+    padding: 16px !important;
+  }
+  .setting-block-title {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px !important;
+  }
+
+  /* ===== Storage card: 2-col layout (pie + legend already grid) ===== */
+  .storage-chart { border-radius: 10px !important; padding: 16px !important; }
+
+  /* ===== Webhook view tabs / user-permission tabs as pill group ===== */
+  .webhook-view-tabs .button,
+  .user-permission-tabs .button {
+    height: 32px;
+    min-height: 32px;
+    border-radius: 7px;
+    font-size: 12px;
+  }
+  .webhook-view-tabs .button.active,
+  .user-permission-tabs .button.active {
+    background: #1a6fa8 !important;
+    color: #ffffff !important;
+    border-color: #1a6fa8 !important;
+  }
+
+  /* ===== Service status mini-table inside KPI area ===== */
+  .v2-status-list {
+    display: grid;
+    gap: 0;
+  }
+  .v2-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 0;
+    border-bottom: 1px solid #eef3f7;
+    font-size: 13px;
+  }
+  .v2-status-row:last-child { border-bottom: none; }
+  .v2-status-pill {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: #e8faf3;
+    color: #1a9e6f;
+    border: 1px solid #a8e8cc;
+  }
+
+  /* Two-column card row */
+  .v2-cols-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 820px) { .v2-cols-2 { grid-template-columns: 1fr; } }
+  .v2-cols-2 > .card { margin-bottom: 0; }
+
+</style>
 </head>
 <body>
-  <div class="app">
-    <header class="hero">
-      <h1>Line Summary Console</h1>
-      <p>店舗別 Webhook 設定、レシート機能、配信ログを管理します。</p>
-      <div class="status">
-        <span id="authState" class="pill">未接続</span>
-        <span id="lastRefresh" class="pill">最終更新: なし</span>
-        <a href="./media.html" class="pill link">LINEメディアビューアー</a>
-        <a href="./message-search.html" class="pill link">会話検索</a>
-        <a href="./reservation.html" class="pill link">予約表</a>
-        <a href="./analytics.html" class="pill link">売上分析</a>
-        <a id="receiptSheetsPilotHeaderLink" href="#" class="pill link" target="_blank" rel="noopener noreferrer" style="display:none" hidden aria-hidden="true">売上シート</a>
-        <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
-      </div>
-    </header>
 
-    <main class="grid">
-      <section class="card auth">
-        <h2>接続設定</h2>
-        <div class="setting-stack">
-          <div class="setting-block">
-            <p class="setting-block-title">接続と実行</p>
+  <!-- ===== Application Header ===== -->
+  <header class="app-v2-header">
+    <div class="app-v2-brand">
+      <div class="app-v2-brand-dot"></div>
+      LINE Summary Admin
+    </div>
+    <div class="app-v2-header-meta">
+      <span id="authState" class="pill">未接続</span>
+      <span id="lastRefresh" class="pill" style="display:none">最終更新: なし</span>
+      <button id="themeToggleBtn" type="button" class="pill" aria-pressed="false" style="cursor:pointer">テーマ</button>
+    </div>
+  </header>
+
+  <!-- ===== Tab Navigation ===== -->
+  <div class="app-v2-tabs-wrap">
+    <nav class="app-v2-tabs" role="tablist" aria-label="管理画面ナビゲーション">
+      <button class="app-v2-tab active" type="button" role="tab" aria-selected="true"  onclick="switchAppTab('auth')">接続設定</button>
+      <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('global')">利用状況</button>
+      <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('webhook')">Webhook設定</button>
+      <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('logs')">ログ</button>
+      <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('permissions')">ユーザー権限</button>
+    </nav>
+  </div>
+
+  <!-- ===== Main Content ===== -->
+  <div class="app-v2-main">
+
+    <!-- ====================== TAB: 接続設定 ====================== -->
+    <div id="appPanel-auth" class="app-v2-panel active" role="tabpanel">
+      <div class="app">
+        <div class="v2-panel-head">
+          <h1>接続設定</h1>
+          <p>管理トークンで接続し、各ページや連携アカウントを管理します。</p>
+        </div>
+        <main class="grid">
+          <div class="v2-cols-2">
+            <section class="card auth">
+              <h2>接続と実行</h2>
+              <div class="v2-form-row">
+                <span class="v2-form-label">Project URL</span>
+                <div class="v2-form-field">
+                  <input id="projectUrlInput" class="input long" type="text" value="https://hocbnifuactbvmyjraxy.supabase.co" readonly tabindex="-1" aria-readonly="true" onfocus="this.blur()">
+                </div>
+              </div>
+              <div class="v2-form-row">
+                <span class="v2-form-label">管理トークン</span>
+                <div class="v2-form-field">
+                  <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション">
+                </div>
+              </div>
+              <div class="v2-form-row">
+                <span class="v2-form-label"></span>
+                <div class="v2-form-field">
+                  <button id="saveTokenBtn" class="button primary">保存して接続</button>
+                  <button id="clearTokenBtn" class="button">削除</button>
+                  <button id="reloadBtn" class="button">再読み込み</button>
+                </div>
+              </div>
+              <div class="meta" id="authPersistMeta" style="margin-top:14px;">セキュリティ上、ログインはこのタブだけ有効です。</div>
+            </section>
+
+            <section class="card">
+              <h2>連携アカウント</h2>
+              <div class="v2-form-row">
+                <span class="v2-form-label">Gmail連携先</span>
+                <div class="v2-form-field">
+                  <button id="checkGmailAccountBtn" class="button">連携先を確認</button>
+                  <span id="gmailAccountMeta" class="pill">未確認</span>
+                </div>
+              </div>
+              <div class="v2-form-row" style="margin-top:18px;">
+                <span class="v2-form-label">新しいトークン</span>
+                <div class="v2-form-field">
+                  <input id="newTokenInput" class="input" type="password" placeholder="新しい管理トークン">
+                </div>
+              </div>
+              <div class="v2-form-row">
+                <span class="v2-form-label">確認入力</span>
+                <div class="v2-form-field">
+                  <input id="newTokenConfirmInput" class="input" type="password" placeholder="新しい管理トークン（確認）">
+                </div>
+              </div>
+              <div class="v2-form-row">
+                <span class="v2-form-label"></span>
+                <div class="v2-form-field">
+                  <button id="changeTokenBtn" class="button warn">トークン変更</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section class="card" style="margin-top:16px;">
+            <h2>ページ一覧</h2>
             <div class="controls">
-              <input id="projectUrlInput" class="input long" type="text" value="https://hocbnifuactbvmyjraxy.supabase.co" readonly tabindex="-1" aria-readonly="true" onfocus="this.blur()">
-              <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション">
-              <button id="saveTokenBtn" class="button primary">保存して接続</button>
-              <button id="clearTokenBtn" class="button">削除</button>
-            </div>
-            <div class="controls" style="margin-top:8px;">
-              <button id="reloadBtn" class="button">再読み込み</button>
               <a href="./media.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">メディア閲覧</a>
               <a href="./message-search.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">会話検索</a>
               <a href="./reservation.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">予約表</a>
               <a href="./analytics.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">売上分析</a>
               <a id="receiptSheetsPilotActionLink" href="#" class="button media-highlight" target="_blank" rel="noopener noreferrer" style="display:none;align-items:center;text-decoration:none;" hidden aria-hidden="true">売上シート</a>
+              <a id="receiptSheetsPilotHeaderLink" href="#" class="button media-highlight" target="_blank" rel="noopener noreferrer" style="display:none;align-items:center;text-decoration:none;" hidden aria-hidden="true">売上シート(H)</a>
             </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <!-- ====================== TAB: 利用状況 ====================== -->
+    <div id="appPanel-global" class="app-v2-panel" role="tabpanel">
+      <div class="app">
+        <div class="v2-panel-head">
+          <h1>利用状況</h1>
+          <p>データベース容量と LINE push 送信量の概況です。</p>
+        </div>
+
+        <!-- KPI cards -->
+        <div class="v2-kpi-grid">
+          <div class="v2-kpi-card" data-accent="blue">
+            <div class="v2-kpi-label">DB使用容量（対象）</div>
+            <div class="v2-kpi-value" id="kpiDbManaged">-</div>
+            <div class="v2-kpi-sub" id="kpiDbManagedSub">対象テーブル合計</div>
           </div>
-          <div class="setting-block">
-            <p class="setting-block-title">連携アカウント</p>
+          <div class="v2-kpi-card" data-accent="violet">
+            <div class="v2-kpi-label">DB全体容量</div>
+            <div class="v2-kpi-value" id="kpiDbTotal">-</div>
+            <div class="v2-kpi-sub">データベース全体</div>
+          </div>
+          <div class="v2-kpi-card" data-accent="green">
+            <div class="v2-kpi-label">LINE push（当月）</div>
+            <div class="v2-kpi-value" id="kpiPushTotal">-<span class="unit">件</span></div>
+            <div class="v2-kpi-sub" id="kpiPushSub">Webhook / 定期配信の合計</div>
+          </div>
+          <div class="v2-kpi-card" data-accent="amber">
+            <div class="v2-kpi-label">Webhook push（当月）</div>
+            <div class="v2-kpi-value" id="kpiPushWebhook">-<span class="unit">件</span></div>
+            <div class="v2-kpi-sub">メッセージ受信による返信</div>
+          </div>
+        </div>
+
+        <main class="grid">
+          <section class="card global">
+            <h2>テーブル容量の内訳<span class="v2-card-badge" id="storageUsageBadge">DB</span></h2>
+            <div class="storage-chart">
+              <div id="storageUsagePie" class="storage-pie" aria-label="テーブル容量内訳円グラフ">
+                <div id="storageUsagePieCenter" class="storage-pie-center">
+                  <div class="storage-pie-center-label">対象容量</div>
+                  <div id="storageUsagePieCenterValue" class="storage-pie-center-value">-</div>
+                </div>
+              </div>
+              <div id="storageUsageLegend" class="storage-legend"></div>
+            </div>
+            <!-- 既存JSの出力先（テキスト詳細）。KPIカードへ集約するため控えめに表示 -->
+            <div id="storageUsageSummary" class="meta usage-summary" style="margin-top:14px;"></div>
+            <div id="storageUsageDetails" class="meta usage-details"></div>
+            <div id="pushUsageSummary" class="meta usage-summary" style="margin-top:10px;"></div>
+            <div id="pushUsageDetails" class="meta usage-details"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <!-- ====================== TAB: Webhook設定 ====================== -->
+    <div id="appPanel-webhook" class="app-v2-panel" role="tabpanel">
+      <div class="app">
+        <div class="v2-panel-head">
+          <h1>Webhook設定</h1>
+          <p>店舗ごとの LINE Webhook 単位でレシート解析・返信・売上レポートを設定します。</p>
+        </div>
+        <main class="grid">
+          <section class="card webhook-settings">
+            <h2>Webhook別設定</h2>
+            <p class="muted" style="margin:0 0 10px 0;">各店舗の LINE Webhook 単位でレシート解析・返信機能を設定します。<strong>全体権限設定</strong>で全ルーム一括変更でき、店舗カード・ルーム個別設定は優先順位（全体 &lt; 店舗 &lt; ルーム個別）で上書きされます。Webhook URL の登録前はセットアップ用カード、<code>hocbn</code> で初回受信が確認できた店舗は権限・機能設定カードに切り替わります。</p>
+            <div class="webhook-auto-link-security-notice" role="alert">
+              <strong>🔓 ルーム自動連携（管理者の承認なし）</strong>
+              この環境では、店舗 Webhook でメッセージを受信したルームは <em>確認ダイアログなしで自動的に連携承認</em> されます（初回受信時・管理画面の同期時）。
+              売上レポートの送信先としてすぐ使えますが、<em>誤った Webhook URL・テスト用グループも登録され得る</em>ため、セキュリティ・運用上のリスクは手動連携より高くなります。詳細は <a href="./ROOM-LINKING-GUIDE.md" target="_blank" rel="noopener">ROOM-LINKING-GUIDE.md</a> を参照。無効化: Edge secret <code>RECEIPT_ROOM_AUTO_LINK=0</code>。
+            </div>
             <div class="controls">
-              <button id="checkGmailAccountBtn" class="button">Gmail連携先を確認</button>
-              <span id="gmailAccountMeta" class="pill">Gmail連携先: 未確認</span>
+              <select id="webhookSettingsFilter" class="select" aria-label="Webhookで絞り込み">
+                <option value="">すべて表示</option>
+              </select>
+              <button id="refreshRoomNamesBtn" class="button" type="button">ルーム名再取得</button>
+              <button id="openNewRoomConfigBtn" class="button" type="button">新規ルームのデフォルト設定</button>
+              <span id="newRoomConfigSummary" class="new-room-config-summary">-</span>
             </div>
-          </div>
-          <div class="setting-block">
-            <p class="setting-block-title">管理トークン変更</p>
-            <div class="controls">
-              <input id="newTokenInput" class="input" type="password" placeholder="新しい管理トークン">
-              <input id="newTokenConfirmInput" class="input" type="password" placeholder="新しい管理トークン（確認）">
-              <button id="changeTokenBtn" class="button warn">トークン変更</button>
+            <div class="meta" style="margin-top:8px;">
+              移行期間の共通 URL（非推奨）: <code id="storeWebhookLegacyUrl">-</code>
+              <button type="button" id="copyLegacyWebhookBtn" class="button" style="margin-left:8px;">コピー</button>
             </div>
-          </div>
-        </div>
-        <div class="meta" id="authPersistMeta">セキュリティ上、ログインはこのタブだけ有効です。</div>
-      </section>
-
-      <section class="card global">
-        <h2>利用状況</h2>
-        <div id="storageUsageSummary" class="meta usage-summary"></div>
-        <div id="storageUsageDetails" class="meta usage-details"></div>
-        <div id="pushUsageSummary" class="meta usage-summary"></div>
-        <div id="pushUsageDetails" class="meta usage-details"></div>
-        <div class="storage-chart">
-          <div id="storageUsagePie" class="storage-pie" aria-label="テーブル容量内訳円グラフ">
-            <div id="storageUsagePieCenter" class="storage-pie-center">
-              <div class="storage-pie-center-label">対象容量</div>
-              <div id="storageUsagePieCenterValue" class="storage-pie-center-value">-</div>
+            <div class="webhook-view-tabs" role="tablist" aria-label="Webhookカード表示切替">
+              <button id="webhookViewTabCards" class="button active" type="button" role="tab" aria-selected="true">カード表示</button>
+              <button id="webhookViewTabNames" class="button" type="button" role="tab" aria-selected="false">店名一覧</button>
             </div>
-          </div>
-          <div id="storageUsageLegend" class="storage-legend"></div>
-        </div>
-      </section>
+            <div id="webhookCardListBody" class="webhook-card-grid" style="margin-top:14px;"></div>
+            <div id="webhookStoreListBody" class="webhook-store-list" hidden></div>
+            <div id="roomTablePane" class="room-table-hidden-wrap" aria-hidden="true">
+              <table class="rooms-table">
+                <tbody id="roomTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
 
-      <section class="card webhook-settings">
-        <h2>Webhook別設定</h2>
-        <p class="muted" style="margin:0 0 10px 0;">各店舗の LINE Webhook 単位でレシート解析・返信機能を設定します。<strong>全体権限設定</strong>で全ルーム一括変更でき、店舗カード・ルーム個別設定は優先順位（全体 &lt; 店舗 &lt; ルーム個別）で上書きされます。Webhook URL の登録前はセットアップ用カード、<code>hocbn</code> で初回受信が確認できた店舗は権限・機能設定カードに切り替わります。</p>
-        <div class="webhook-auto-link-security-notice" role="alert">
-          <strong>🔓 ルーム自動連携（管理者の承認なし）</strong>
-          この環境では、店舗 Webhook でメッセージを受信したルームは <em>確認ダイアログなしで自動的に連携承認</em> されます（初回受信時・管理画面の同期時）。
-          売上レポートの送信先としてすぐ使えますが、<em>誤った Webhook URL・テスト用グループも登録され得る</em>ため、セキュリティ・運用上のリスクは手動連携より高くなります。詳細は <a href="./ROOM-LINKING-GUIDE.md" target="_blank" rel="noopener">ROOM-LINKING-GUIDE.md</a> を参照。無効化: Edge secret <code>RECEIPT_ROOM_AUTO_LINK=0</code>。
+    <!-- ====================== TAB: ログ ====================== -->
+    <div id="appPanel-logs" class="app-v2-panel" role="tabpanel">
+      <div class="app">
+        <div class="v2-panel-head">
+          <h1>ログ</h1>
+          <p>店舗ごとの LINE Bot 返信（Webhook 経由）の記録です。</p>
         </div>
-        <div class="controls">
-          <select id="webhookSettingsFilter" class="select" aria-label="Webhookで絞り込み">
-            <option value="">すべて表示</option>
-          </select>
-          <button id="refreshRoomNamesBtn" class="button" type="button">ルーム名再取得</button>
-          <button id="openNewRoomConfigBtn" class="button" type="button">新規ルームのデフォルト設定</button>
-          <span id="newRoomConfigSummary" class="new-room-config-summary">-</span>
-        </div>
-        <div class="meta" style="margin-top:8px;">
-          移行期間の共通 URL（非推奨）: <code id="storeWebhookLegacyUrl">-</code>
-          <button type="button" id="copyLegacyWebhookBtn" class="button" style="margin-left:8px;">コピー</button>
-        </div>
-        <div class="webhook-view-tabs" role="tablist" aria-label="Webhookカード表示切替">
-          <button id="webhookViewTabCards" class="button active" type="button" role="tab" aria-selected="true">カード表示</button>
-          <button id="webhookViewTabNames" class="button" type="button" role="tab" aria-selected="false">店名一覧</button>
-        </div>
-        <div id="webhookCardListBody" class="webhook-card-grid" style="margin-top:14px;"></div>
-        <div id="webhookStoreListBody" class="webhook-store-list" hidden></div>
-        <div id="roomTablePane" class="room-table-hidden-wrap" aria-hidden="true">
-          <table class="rooms-table">
-            <tbody id="roomTableBody"></tbody>
-          </table>
-        </div>
-      </section>
+        <main class="grid">
+          <section class="card logs">
+            <h2>Webhookログ（最新）</h2>
+            <p class="muted" style="margin:0 0 8px 0;">Webhook を店舗別 URL に分けたあとは、下のプルダウンで店舗を選んでください。</p>
+            <div class="v2-toolbar">
+              <label for="webhookLogStoreFilter">店舗</label>
+              <select id="webhookLogStoreFilter" class="input-select" style="min-width:min(320px, 100%);">
+                <option value="">すべて（店舗未設定の古いログ含む）</option>
+              </select>
+              <span id="webhookLogStoreHint" class="muted" style="font-size:0.9em;"></span>
+            </div>
+            <div id="webhookQuotaSummary" class="meta usage-summary"></div>
+            <div class="table-wrap log-table-wrap">
+              <table class="log-table log-table--webhook" id="deliveryLogTable">
+                <thead id="logTableHead">
+                  <tr>
+                    <th>実行時刻</th>
+                    <th>方式</th>
+                    <th>種別</th>
+                    <th>状態</th>
+                    <th>理由</th>
+                    <th>対象</th>
+                    <th>送信</th>
+                  </tr>
+                </thead>
+                <tbody id="logTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
 
-      <section class="card logs">
-        <h2>Webhookログ（最新）</h2>
-        <p class="muted" style="margin:0 0 8px 0;">店舗ごとの LINE Bot 返信（Webhook 経由）の記録です。Webhook を店舗別 URL に分けたあとは、下のプルダウンで店舗を選んでください。</p>
-        <div class="controls" style="margin:0 0 10px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <label for="webhookLogStoreFilter">店舗</label>
-          <select id="webhookLogStoreFilter" class="input-select" style="min-width:min(320px, 100%);">
-            <option value="">すべて（店舗未設定の古いログ含む）</option>
-          </select>
-          <span id="webhookLogStoreHint" class="muted" style="font-size:0.9em;"></span>
+    <!-- ====================== TAB: ユーザー権限 ====================== -->
+    <div id="appPanel-permissions" class="app-v2-panel" role="tabpanel">
+      <div class="app">
+        <div class="v2-panel-head">
+          <h1>ユーザー権限</h1>
+          <p>Botに友だち追加・メッセージ送信した LINE ユーザーの権限を管理します。</p>
         </div>
-        <div id="webhookQuotaSummary" class="meta usage-summary"></div>
-        <div class="table-wrap log-table-wrap">
-          <table class="log-table log-table--webhook" id="deliveryLogTable">
-            <thead id="logTableHead">
-              <tr>
-                <th>実行時刻</th>
-                <th>方式</th>
-                <th>種別</th>
-                <th>状態</th>
-                <th>理由</th>
-                <th>対象</th>
-                <th>送信</th>
-              </tr>
-            </thead>
-            <tbody id="logTableBody"></tbody>
-          </table>
-        </div>
-      </section>
+        <main class="grid">
+          <section class="card permissions">
+            <h2>ユーザー権限（LINE user 単位）</h2>
+            <p class="muted" style="margin:0 0 8px 0;">Botに友だち追加・メッセージ送信したLINEユーザーが表示されます。チェック変更はその場で即時保存されます。</p>
+            <div class="user-permission-tabs" role="tablist" aria-label="ユーザー権限表示切替">
+              <button id="userPermissionTabCards" class="button user-permission-tab" type="button" data-view="cards" role="tab" aria-selected="false">カード表示</button>
+              <button id="userPermissionTabNames" class="button user-permission-tab active" type="button" data-view="names" role="tab" aria-selected="true">名前一覧</button>
+            </div>
+            <div id="userPermissionCardsPane" class="user-permission-pane" data-view="cards" hidden>
+              <div id="userPermissionTableBody" class="user-permission-grid"></div>
+            </div>
+            <div id="userPermissionNamesPane" class="user-permission-pane" data-view="names">
+              <div id="userPermissionNameListBody" class="user-permission-list"></div>
+            </div>
+            <div class="controls" style="margin-top:8px;">
+              <button id="reloadUserPermissionsBtn" class="button">再読込</button>
+              <button id="backfillUserPermissionsBtn" class="button">既存ユーザー取込</button>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
 
-      <section class="card permissions">
-        <h2>ユーザー権限（LINE user 単位）</h2>
-        <p class="muted" style="margin:0 0 8px 0;">Botに友だち追加・メッセージ送信したLINEユーザーが表示されます。チェック変更はその場で即時保存されます。</p>
-        <div class="user-permission-tabs" role="tablist" aria-label="ユーザー権限表示切替">
-          <button id="userPermissionTabCards" class="button user-permission-tab" type="button" data-view="cards" role="tab" aria-selected="false">カード表示</button>
-          <button id="userPermissionTabNames" class="button user-permission-tab active" type="button" data-view="names" role="tab" aria-selected="true">名前一覧</button>
-        </div>
-        <div id="userPermissionCardsPane" class="user-permission-pane" data-view="cards" hidden>
-          <div id="userPermissionTableBody" class="user-permission-grid"></div>
-        </div>
-        <div id="userPermissionNamesPane" class="user-permission-pane" data-view="names">
-          <div id="userPermissionNameListBody" class="user-permission-list"></div>
-        </div>
-        <div class="controls" style="margin-top:8px;">
-          <button id="reloadUserPermissionsBtn" class="button">再読込</button>
-          <button id="backfillUserPermissionsBtn" class="button">既存ユーザー取込</button>
-        </div>
-      </section>
-    </main>
-  </div>
+  </div><!-- /app-v2-main -->
 
   <div id="roomIdModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="roomIdModalTitle">
@@ -3919,6 +4739,37 @@
       <div id="syncOverlayStep" class="sync-overlay-step">接続中</div>
     </div>
   </div>
+
+  <!-- ===== Tab switcher ===== -->
+  <script>
+    (function() {
+      var TABS = ['auth', 'global', 'webhook', 'logs', 'permissions'];
+      var TAB_STORE_KEY = 'line_admin_v2_active_tab';
+
+      window.switchAppTab = function(name) {
+        if (TABS.indexOf(name) < 0) return;
+        var tabs = document.querySelectorAll('.app-v2-tab');
+        tabs.forEach(function(t, i) {
+          var active = TABS[i] === name;
+          t.classList.toggle('active', active);
+          t.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        TABS.forEach(function(id) {
+          var panel = document.getElementById('appPanel-' + id);
+          if (panel) panel.classList.toggle('active', id === name);
+        });
+        try { sessionStorage.setItem(TAB_STORE_KEY, name); } catch(_) {}
+      };
+
+      // Restore last active tab on page load
+      document.addEventListener('DOMContentLoaded', function() {
+        try {
+          var saved = sessionStorage.getItem(TAB_STORE_KEY);
+          if (saved && TABS.indexOf(saved) >= 0) switchAppTab(saved);
+        } catch(_) {}
+      });
+    })();
+  </script>
 
   <script src="pages-config.js"></script>
   <script src="auth-session.js"></script>
@@ -7946,10 +8797,23 @@
       }
     }
 
+    /** V2: KPIカードへ値を反映するヘルパー */
+    function setV2Kpi(id, value, unitHtml) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = escapeHtml(String(value)) + (unitHtml || '');
+    }
+    function setV2KpiSub(id, text) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
+
     function renderStorageUsage(storageUsage, storageUsageError, generatedAt) {
       if (storageUsageError) {
         dom.storageUsageSummary.textContent = 'DB使用容量: 取得失敗';
         dom.storageUsageDetails.textContent = storageUsageError;
+        setV2Kpi('kpiDbManaged', '取得失敗');
+        setV2Kpi('kpiDbTotal', '取得失敗');
         renderStorageUsageChart([], '-');
         return;
       }
@@ -7957,6 +8821,8 @@
       if (!storageUsage || typeof storageUsage !== 'object') {
         dom.storageUsageSummary.textContent = 'DB使用容量: 取得待ち';
         dom.storageUsageDetails.textContent = '';
+        setV2Kpi('kpiDbManaged', '取得待ち');
+        setV2Kpi('kpiDbTotal', '取得待ち');
         renderStorageUsageChart([], '-');
         return;
       }
@@ -7965,8 +8831,11 @@
       const dbPretty = storageUsage.database_size_pretty || formatBytes(storageUsage.database_size_bytes);
       dom.storageUsageSummary.textContent =
         'DB使用容量（対象テーブル合計）: ' + managedPretty + ' / DB全体: ' + dbPretty;
+      setV2Kpi('kpiDbManaged', managedPretty);
+      setV2Kpi('kpiDbTotal', dbPretty);
 
       const tableRows = Array.isArray(storageUsage.managed_tables) ? storageUsage.managed_tables : [];
+      setV2KpiSub('kpiDbManagedSub', '対象テーブル ' + tableRows.length + ' 件の合計');
       renderStorageUsageChart(tableRows, managedPretty);
       if (tableRows.length === 0) {
         dom.storageUsageDetails.textContent = '';
@@ -7981,6 +8850,8 @@
       if (!usage) {
         dom.pushUsageSummary.textContent = 'LINE push概算（当月）: 取得待ち';
         dom.pushUsageDetails.textContent = '';
+        setV2Kpi('kpiPushTotal', '取得待ち');
+        setV2Kpi('kpiPushWebhook', '取得待ち');
         return;
       }
       const month = String(usage.month_jst || '').trim() || '-';
@@ -7990,6 +8861,9 @@
       dom.pushUsageSummary.textContent =
         'LINE push概算（' + month + ' JST）: '
         + total + '件（Webhook: ' + webhookRows + ' / 定期・ジョブ: ' + summaryRows + '）';
+      setV2Kpi('kpiPushTotal', total.toLocaleString('ja-JP'), '<span class="unit">件</span>');
+      setV2Kpi('kpiPushWebhook', webhookRows.toLocaleString('ja-JP'), '<span class="unit">件</span>');
+      setV2KpiSub('kpiPushSub', month + ' JST ／ 定期・ジョブ: ' + summaryRows.toLocaleString('ja-JP') + ' 件');
       const topItems = Array.isArray(usage.by_source_context) ? usage.by_source_context.slice(0, 5) : [];
       if (topItems.length === 0) {
         dom.pushUsageDetails.textContent = '内訳: 送信ログなし';
@@ -11440,7 +12314,7 @@
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
       applyNewRoomDefaultCheckboxes();
       refreshNewRoomConfigSummary();
-      applyTheme(getTheme());
+      applyTheme('light'); // V2 はクリーンな白基調固定（テーマトグルは非表示）
       if (dom.appNoticeCloseBtn) {
         dom.appNoticeCloseBtn.addEventListener('click', closeAppNotice);
       }

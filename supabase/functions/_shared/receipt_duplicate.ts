@@ -294,11 +294,10 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
 
   const choice = normalizeReceiptDuplicateDecision(text)
   if (choice == null) {
-    const compact = normalizeForRuleParsing(text).replace(/\s+/g, '')
-    if (/^[4-9４-９]$/.test(compact)) {
-      return null
-    }
-    return '「加算」「中止」「置き換え」のいずれかで返信してください。番号（1／2／3）でも構いません。'
+    // 「加算／中止／置き換え（＋ボタン・1／2／3）」以外の通常メッセージは無視する（催促しない）。
+    // 重複確認はリッチカードのボタンで操作してもらう想定。保留中に無関係な会話（別ユーザーの
+    // トーク等）へ誤って再プロンプトを返さないよう、ここでは null を返して通常処理へ通す。
+    return null
   }
   if (choice === 'cancel') {
     await clearPendingReceiptDuplicate(supabase, roomId, userId)

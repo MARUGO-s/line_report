@@ -90,6 +90,37 @@
     .error { color: #ff9f9f; }
     .pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
     [hidden] { display: none !important; }
+
+    /* ルーム選択: アコーディオン式カスタムドロップダウン */
+    .room-chooser { position: relative; flex: 1 1 300px; min-width: 0; }
+    .room-chooser-trigger {
+      width: 100%;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      text-align: left; cursor: pointer;
+    }
+    .room-chooser-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .room-chooser-label.placeholder { color: var(--sub); }
+    .room-chooser-caret { color: var(--sub); flex: 0 0 auto; font-size: 0.8em; }
+    .room-chooser-panel {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
+      max-height: 380px; overflow-y: auto;
+      border: 1px solid var(--line); border-radius: 10px;
+      background: #0a1d30; box-shadow: 0 14px 36px rgba(0,0,0,0.5);
+      padding: 6px;
+    }
+    .rc-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 10px; border-radius: 8px; cursor: pointer;
+      color: var(--txt); line-height: 1.35; user-select: none;
+    }
+    .rc-item:hover { background: rgba(87,216,255,0.14); }
+    .rc-item.selected { background: rgba(87,216,255,0.24); }
+    .rc-caret { flex: 0 0 auto; color: var(--sub); font-size: 0.75em; transition: transform 0.15s; }
+    .rc-group.open > .rc-caret { transform: rotate(90deg); }
+    .rc-count { margin-left: auto; font-size: 0.78rem; color: var(--sub); }
+    .rc-sub { margin: 2px 0 4px 10px; padding-left: 8px; border-left: 2px solid var(--line); }
+    .rc-leaf { padding-left: 12px; font-size: 0.95rem; color: var(--sub); }
+    .rc-leaf:hover, .rc-leaf.selected { color: var(--txt); }
   </style>
 </head>
 <body>
@@ -115,9 +146,14 @@
       </div>
 
       <div class="row">
-        <select id="roomSelect" class="input" aria-label="ルーム">
-          <option value="">ルームを選択</option>
-        </select>
+        <div id="roomChooser" class="room-chooser">
+          <button type="button" id="roomChooserTrigger" class="input room-chooser-trigger" aria-haspopup="listbox" aria-expanded="false">
+            <span id="roomChooserLabel" class="room-chooser-label placeholder">ルームを選択</span>
+            <span class="room-chooser-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="roomChooserPanel" class="room-chooser-panel" role="listbox" hidden></div>
+        </div>
+        <select id="roomSelect" hidden aria-hidden="true" tabindex="-1"></select>
         <input id="queryInput" class="input grow" type="search" placeholder="キーワード（部分一致）" autocomplete="off">
         <button id="searchBtn" class="button primary" type="button">検索</button>
       </div>
@@ -148,12 +184,17 @@
       totalCount: 0,
       lastQuery: '',
       rooms: [],
+      roomGroups: [],
     };
 
     const dom = {
       authState: document.getElementById('authState'),
       tokenInput: document.getElementById('tokenInput'),
       saveTokenBtn: document.getElementById('saveTokenBtn'),
+      roomChooser: document.getElementById('roomChooser'),
+      roomChooserTrigger: document.getElementById('roomChooserTrigger'),
+      roomChooserLabel: document.getElementById('roomChooserLabel'),
+      roomChooserPanel: document.getElementById('roomChooserPanel'),
       roomSelect: document.getElementById('roomSelect'),
       queryInput: document.getElementById('queryInput'),
       searchBtn: document.getElementById('searchBtn'),
@@ -198,8 +239,8 @@
     function updateModeUi() {
       const global = state.mode === 'global-messages';
       const calendar = state.mode === 'room-calendar';
-      dom.roomSelect.hidden = global;
-      dom.roomSelect.required = !global;
+      dom.roomChooser.hidden = global; // 全会話モードではルーム選択を隠す
+      if (global) closeRoomChooser();
 
       if (global) {
         dom.modeHint.textContent = '全会話を横断して検索します（「会話検索」がONのルームのみ・直近1年）。';
@@ -214,33 +255,194 @@
       });
     }
 
-    function fillRoomOptions(rooms) {
-      const prev = dom.roomSelect.value;
-      dom.roomSelect.innerHTML = '<option value="">ルームを選択</option>';
-      for (const row of rooms) {
-        const opt = document.createElement('option');
-        opt.value = row.room_id;
-        opt.textContent = row.label;
-        dom.roomSelect.appendChild(opt);
+    function openRoomChooser() {
+      dom.roomChooserPanel.hidden = false;
+      dom.roomChooserTrigger.setAttribute('aria-expanded', 'true');
+    }
+    function closeRoomChooser() {
+      dom.roomChooserPanel.hidden = true;
+      dom.roomChooserTrigger.setAttribute('aria-expanded', 'false');
+    }
+    function setRoomChooserLabel(text) {
+      const has = !!text;
+      dom.roomChooserLabel.textContent = has ? text : 'ルームを選択';
+      dom.roomChooserLabel.classList.toggle('placeholder', !has);
+    }
+
+    // アコーディオン式の選択UIを構築。検索は dom.roomSelect.value（隠しselect）を読む。
+    function fillRoomChooser(groups) {
+      // 値保持用の隠しselectに全ルームを入れる
+      dom.roomSelect.innerHTML = '<option value=""></option>';
+      groups.forEach(function(g) {
+        g.rooms.forEach(function(r) {
+          const o = document.createElement('option');
+          o.value = r.room_id;
+          o.textContent = r.label;
+          dom.roomSelect.appendChild(o);
+        });
+      });
+      dom.roomSelect.value = '';
+
+      // パネル構築
+      const panel = dom.roomChooserPanel;
+      panel.innerHTML = '';
+      groups.forEach(function(g, gi) {
+        if (g.rooms.length === 1) {
+          const item = document.createElement('div');
+          item.className = 'rc-item';
+          item.setAttribute('data-room-id', g.rooms[0].room_id);
+          item.setAttribute('data-label', g.name);
+          item.textContent = g.name;
+          panel.appendChild(item);
+        } else {
+          const header = document.createElement('div');
+          header.className = 'rc-item rc-group';
+          header.setAttribute('data-group', String(gi));
+          const caret = document.createElement('span');
+          caret.className = 'rc-caret';
+          caret.textContent = '▶';
+          const nm = document.createElement('span');
+          nm.textContent = g.name;
+          const cnt = document.createElement('span');
+          cnt.className = 'rc-count';
+          cnt.textContent = g.rooms.length + '件';
+          header.appendChild(caret);
+          header.appendChild(nm);
+          header.appendChild(cnt);
+          panel.appendChild(header);
+
+          const sub = document.createElement('div');
+          sub.className = 'rc-sub';
+          sub.setAttribute('data-group-sub', String(gi));
+          sub.hidden = true;
+          g.rooms.forEach(function(r) {
+            const leaf = document.createElement('div');
+            leaf.className = 'rc-item rc-leaf';
+            leaf.setAttribute('data-room-id', r.room_id);
+            leaf.setAttribute('data-label', r.label);
+            // 店名部分だけ表示（"pingus（店名）" → "店名"）。取れなければそのまま
+            const m = /（(.+)）$/.exec(r.label);
+            leaf.textContent = m ? m[1] : r.label;
+            sub.appendChild(leaf);
+          });
+          panel.appendChild(sub);
+        }
+      });
+
+      dom.roomSelect.value = '';
+      setRoomChooserLabel('');
+      closeRoomChooser();
+    }
+
+    function handleRoomChooserPanelClick(ev) {
+      const header = ev.target.closest('.rc-group');
+      if (header && dom.roomChooserPanel.contains(header)) {
+        const gi = header.getAttribute('data-group');
+        const sub = dom.roomChooserPanel.querySelector('.rc-sub[data-group-sub="' + gi + '"]');
+        const open = !header.classList.contains('open');
+        header.classList.toggle('open', open);
+        if (sub) sub.hidden = !open;
+        return;
       }
-      if (prev && rooms.some(function(r) { return r.room_id === prev; })) dom.roomSelect.value = prev;
+      const leaf = ev.target.closest('[data-room-id]');
+      if (leaf && dom.roomChooserPanel.contains(leaf)) {
+        const rid = leaf.getAttribute('data-room-id');
+        const label = leaf.getAttribute('data-label') || rid;
+        dom.roomSelect.value = rid;
+        setRoomChooserLabel(label);
+        dom.roomChooserPanel.querySelectorAll('.rc-item.selected').forEach(function(el) { el.classList.remove('selected'); });
+        leaf.classList.add('selected');
+        closeRoomChooser();
+      }
     }
 
     async function loadRooms() {
       const body = await api('/state?admin_surface=' + encodeURIComponent(LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report'));
+
+      // U... の1:1トークは room_name が無いことが多いので、
+      // user_permissions（line_user_id → display_name）から表示名を解決する
+      const userNameById = new Map();
+      for (const row of (body.user_permissions || [])) {
+        const uid = String(row && row.line_user_id ? row.line_user_id : '').trim();
+        const dn = String(row && row.display_name ? row.display_name : '').trim();
+        if (uid && dn && dn !== uid) userNameById.set(uid, dn);
+      }
+
+      // 店舗キー → 店名（重複名を店名で区別するため）
+      const storeNameByKey = new Map();
+      for (const row of (body.receipt_store_options || [])) {
+        const k = String(row && (row.store_key || row.store_partition_key) || '').trim().toLowerCase();
+        const n = String(row && row.store_name || '').trim();
+        if (k && n) storeNameByKey.set(k, n);
+      }
+      // room_id → 店名（room_settings.receipt_report_store_partition_key 経由）
+      const storeNameByRoom = new Map();
+      for (const row of (body.room_settings || [])) {
+        const rid = String(row && row.room_id || '').trim();
+        const sk = String(row && row.receipt_report_store_partition_key || '').trim().toLowerCase();
+        if (rid && sk && storeNameByKey.has(sk)) storeNameByRoom.set(rid, storeNameByKey.get(sk));
+      }
+
+      function resolveLabel(id, name) {
+        const roomId = String(id || '').trim();
+        const explicit = String(name || '').trim();
+        if (explicit && explicit !== roomId) return explicit;
+        // 1:1トーク（U...）は友だちの表示名で代替
+        if (roomId.startsWith('U') && userNameById.has(roomId)) return userNameById.get(roomId);
+        return roomId;
+      }
+
       const map = new Map();
       function upsert(id, name) {
         const roomId = String(id || '').trim();
         if (!roomId) return;
-        const label = String(name || '').trim() || roomId;
+        const label = resolveLabel(roomId, name);
+        // 既に表示名で登録済みの行を、ID だけの後勝ちで上書きしない
+        const prev = map.get(roomId);
+        if (prev && prev !== roomId && label === roomId) return;
         map.set(roomId, label);
       }
       for (const row of (body.room_settings || [])) upsert(row.room_id, row.room_name);
       for (const row of (body.room_overview || [])) upsert(row.room_id, row.room_name);
-      state.rooms = Array.from(map.entries()).map(function(entry) {
-        return { room_id: entry[0], label: entry[1] };
-      }).sort(function(a, b) { return a.label.localeCompare(b.label, 'ja'); });
-      fillRoomOptions(state.rooms);
+
+      // 名前ごとにグルーピング（同名が複数 = 2段目で店舗別に選ぶ）。
+      // 例: pingus が複数店舗Botにいる → 1段目「pingus（22件）」→2段目で店舗別。
+      const groupMap = new Map(); // baseLabel -> [room_id...]
+      for (const entry of map.entries()) {
+        const roomId = entry[0];
+        const baseLabel = entry[1];
+        const arr = groupMap.get(baseLabel) || [];
+        arr.push(roomId);
+        groupMap.set(baseLabel, arr);
+      }
+      const groups = [];
+      for (const kv of groupMap.entries()) {
+        const name = kv[0];
+        const roomIds = kv[1];
+        const rooms = roomIds.map(function(rid) {
+          const store = storeNameByRoom.get(rid);
+          const detail = store || ('…' + rid.slice(-6));
+          return { room_id: rid, detail: detail, label: name + '（' + detail + '）' };
+        });
+        // 同一店名が重複する場合は ID 末尾も付けて一意化（保険）
+        const dCounts = {};
+        rooms.forEach(function(r) { dCounts[r.label] = (dCounts[r.label] || 0) + 1; });
+        rooms.forEach(function(r) {
+          if (dCounts[r.label] > 1) r.label = name + '（' + r.detail + '・…' + r.room_id.slice(-6) + '）';
+        });
+        rooms.sort(function(a, b) { return String(a.label).localeCompare(String(b.label), 'ja'); });
+        groups.push({ name: name, rooms: rooms });
+      }
+      groups.sort(function(a, b) { return a.name.localeCompare(b.name, 'ja'); });
+      state.roomGroups = groups;
+      // 互換用フラット一覧
+      state.rooms = groups.reduce(function(acc, g) {
+        g.rooms.forEach(function(r) {
+          acc.push({ room_id: r.room_id, label: g.rooms.length > 1 ? r.label : g.name });
+        });
+        return acc;
+      }, []);
+      fillRoomChooser(groups);
     }
 
     function highlightSnippet(snippet, query) {
@@ -368,6 +570,16 @@
         state.offset = 0;
         updateModeUi();
       });
+    });
+
+    dom.roomChooserTrigger.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      if (dom.roomChooserPanel.hidden) openRoomChooser();
+      else closeRoomChooser();
+    });
+    dom.roomChooserPanel.addEventListener('click', handleRoomChooserPanelClick);
+    document.addEventListener('click', function(ev) {
+      if (!dom.roomChooser.contains(ev.target)) closeRoomChooser();
     });
 
     dom.saveTokenBtn.addEventListener('click', async function() {
