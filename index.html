@@ -3868,8 +3868,8 @@
      V2 MOCKUP COMPONENTS — モックアップ部品（KPI/トグル/フォーム等）
      ============================================================ */
 
-  /* V2 は白基調のクリーンデザイン固定。テーマトグルは隠す */
-  #themeToggleBtn { display: none !important; }
+  /* テーマトグル: ヘッダーのピルとして表示（ライト/ダーク切替） */
+  #themeToggleBtn { cursor: pointer; }
 
   /* ===== Panel intro (見出し＋説明) ===== */
   .v2-panel-head {
@@ -4130,6 +4130,134 @@
   @media (max-width: 820px) { .v2-cols-2 { grid-template-columns: 1fr; } }
   .v2-cols-2 > .card { margin-bottom: 0; }
 
+</style>
+
+<style>
+  /* ============================================================
+     V2 DARK THEME — ダークモード（ライト/ダーク切替対応）
+     body[data-theme='dark'] で、上のライト!important上書きを更に上書きする
+     ============================================================ */
+  body[data-theme='dark'] {
+    background:
+      radial-gradient(900px 500px at -20% -10%, #215f84 0%, transparent 60%),
+      radial-gradient(900px 500px at 120% 0%, #185273 0%, transparent 55%),
+      linear-gradient(145deg, #061320, #173247) !important;
+    color: #e7f6ff !important;
+  }
+
+  /* ヘッダー / タブ */
+  body[data-theme='dark'] .app-v2-header { background: rgba(8,21,35,0.92) !important; border-bottom-color: rgba(155,220,255,0.18) !important; box-shadow: 0 1px 8px rgba(0,0,0,0.35); }
+  body[data-theme='dark'] .app-v2-brand { color: #7fdcff !important; }
+  body[data-theme='dark'] .app-v2-header-meta { color: #a6cadf !important; }
+  body[data-theme='dark'] .app-v2-tabs-wrap { background: rgba(8,21,35,0.85) !important; border-bottom-color: rgba(155,220,255,0.18) !important; }
+  body[data-theme='dark'] .app-v2-tab { color: #a6cadf !important; }
+  body[data-theme='dark'] .app-v2-tab:hover { color: #7fdcff !important; }
+  body[data-theme='dark'] .app-v2-tab.active { color: #7fdcff !important; border-bottom-color: #57d8ff !important; }
+  body[data-theme='dark'] .app-v2-tab-count { background: rgba(87,216,255,0.16) !important; color: #7fdcff !important; }
+
+  /* カード */
+  body[data-theme='dark'] .card { background: rgba(10,24,38,0.86) !important; border-color: rgba(155,220,255,0.22) !important; box-shadow: 0 10px 28px rgba(0,0,0,0.35) !important; }
+  body[data-theme='dark'] .card h2 { color: #e7f6ff !important; border-bottom-color: rgba(155,220,255,0.18) !important; }
+  body[data-theme='dark'] .card h2 .v2-card-badge { background: rgba(87,216,255,0.14) !important; color: #7fdcff !important; border-color: rgba(120,200,255,0.35) !important; }
+
+  /* パネル見出し */
+  body[data-theme='dark'] .v2-panel-head h1 { color: #eef8ff !important; }
+  body[data-theme='dark'] .v2-panel-head p { color: #a6cadf !important; }
+  body[data-theme='dark'] .app-v2-panel-desc { background: rgba(8,21,35,0.5) !important; color: #a6cadf !important; border-left-color: #57d8ff !important; }
+  body[data-theme='dark'] .app-v2-section-title { color: #a6cadf !important; }
+
+  /* KPIカード */
+  body[data-theme='dark'] .v2-kpi-card { background: rgba(10,24,38,0.86) !important; border-color: rgba(155,220,255,0.22) !important; box-shadow: 0 8px 24px rgba(0,0,0,0.3) !important; }
+  body[data-theme='dark'] .v2-kpi-label { color: #a6cadf !important; }
+  body[data-theme='dark'] .v2-kpi-value { color: #eef8ff !important; }
+  body[data-theme='dark'] .v2-kpi-value .unit { color: #a6cadf !important; }
+  body[data-theme='dark'] .v2-kpi-sub { color: #88accb !important; }
+
+  /* フォーム / ツールバー / サブブロック */
+  body[data-theme='dark'] .v2-form-row > .v2-form-label,
+  body[data-theme='dark'] .v2-toolbar label,
+  body[data-theme='dark'] .setting-block-title { color: #a6cadf !important; }
+  body[data-theme='dark'] .setting-block { background: rgba(8,21,35,0.45) !important; border-color: rgba(155,220,255,0.16) !important; }
+
+  /* 入力 / ボタン */
+  body[data-theme='dark'] .input, body[data-theme='dark'] .select, body[data-theme='dark'] .button {
+    background: rgba(8,21,35,0.6) !important; border-color: rgba(155,220,255,0.25) !important; color: #e7f6ff !important;
+  }
+  body[data-theme='dark'] .input::placeholder { color: #83abc2 !important; }
+  body[data-theme='dark'] .button.primary { background: linear-gradient(180deg, rgba(87,216,255,0.32), rgba(10,116,158,0.32)) !important; border-color: rgba(87,216,255,0.6) !important; color: #eaffff !important; }
+  body[data-theme='dark'] .button.media-highlight { background: linear-gradient(180deg, rgba(73,224,146,0.28), rgba(24,135,85,0.28)) !important; border-color: rgba(133,255,192,0.55) !important; color: #dbffe8 !important; }
+  body[data-theme='dark'] .button.warn { background: rgba(141,80,24,0.28) !important; border-color: rgba(255,209,126,0.5) !important; color: #ffdba0 !important; }
+
+  /* ピル */
+  body[data-theme='dark'] .pill, body[data-theme='dark'] #authState, body[data-theme='dark'] #lastRefresh { background: rgba(8,21,35,0.6) !important; border-color: rgba(155,220,255,0.25) !important; color: #a6cadf !important; }
+  body[data-theme='dark'] .pill.ok { background: rgba(73,224,146,0.16) !important; border-color: rgba(105,237,191,0.45) !important; color: #69edbf !important; }
+  body[data-theme='dark'] .pill.link { background: rgba(87,216,255,0.14) !important; border-color: rgba(120,200,255,0.35) !important; color: #7fdcff !important; }
+
+  /* テーブル */
+  body[data-theme='dark'] .table-wrap { background: rgba(8,21,35,0.48) !important; border-color: rgba(155,220,255,0.18) !important; }
+  body[data-theme='dark'] table th { background: rgba(8,21,35,0.7) !important; color: #a6cadf !important; border-bottom-color: rgba(155,220,255,0.18) !important; }
+  body[data-theme='dark'] table td { color: #e7f6ff !important; border-bottom-color: rgba(155,220,255,0.1) !important; }
+
+  /* Webhookカード */
+  body[data-theme='dark'] .webhook-card { background: rgba(10,24,38,0.72) !important; border-color: rgba(155,220,255,0.22) !important; box-shadow: 0 4px 18px rgba(0,0,0,0.25) !important; }
+  body[data-theme='dark'] .webhook-card.is-active { background: rgba(12,28,42,0.82) !important; border-color: rgba(155,200,230,0.32) !important; }
+  body[data-theme='dark'] .webhook-card-title { color: #d8edfb !important; }
+  body[data-theme='dark'] .webhook-card-status, body[data-theme='dark'] .webhook-card-tables, body[data-theme='dark'] .webhook-card-receipt-features { color: #a6cadf !important; }
+  body[data-theme='dark'] .webhook-card-key code, body[data-theme='dark'] .webhook-card-url code { color: #9cc9df !important; }
+  body[data-theme='dark'] .webhook-card-status-badge { background: rgba(90,140,170,0.2) !important; color: #c8dce8 !important; }
+
+  /* ルーム項目 / ユーザー権限 */
+  body[data-theme='dark'] .webhook-room-item { background: rgba(8,21,35,0.5) !important; border-color: rgba(155,220,255,0.18) !important; }
+  body[data-theme='dark'] .webhook-room-item-title { color: #d8edfb !important; }
+  body[data-theme='dark'] .webhook-room-item-meta { color: #a6cadf !important; }
+  body[data-theme='dark'] .user-permission-list-item { background: rgba(8,21,35,0.54) !important; border-color: rgba(155,220,255,0.2) !important; }
+  body[data-theme='dark'] .user-permission-list-name { background: rgba(255,255,255,0.05) !important; border-color: rgba(180,208,228,0.28) !important; color: #f3d7a4 !important; }
+  body[data-theme='dark'] .user-permission-list-meta { color: #a5c6db !important; }
+  body[data-theme='dark'] .user-permission-list-kv-key { color: #cfe6f5 !important; }
+  body[data-theme='dark'] .user-permission-name-text { color: #ffd27d !important; border-bottom-color: rgba(255,210,125,0.88) !important; }
+  body[data-theme='dark'] .user-permission-control { background: rgba(44,30,74,0.64) !important; border-color: rgba(192,171,255,0.44) !important; color: #b8dbef !important; }
+
+  /* モーダル */
+  body[data-theme='dark'] .modal-card { background: linear-gradient(165deg, rgba(12,32,52,0.98), rgba(8,20,34,0.98)) !important; border-color: rgba(155,220,255,0.28) !important; color: #e7f6ff !important; }
+  body[data-theme='dark'] .modal-title { color: #e8f6ff !important; }
+  body[data-theme='dark'] .modal-meta { color: #a6cadf !important; }
+
+  /* その他 */
+  body[data-theme='dark'] .muted { color: #8fb6cf !important; }
+  body[data-theme='dark'] .meta { color: #a6cadf !important; }
+  body[data-theme='dark'] .meta.usage-summary { color: #9be8ff !important; }
+  body[data-theme='dark'] code { background: rgba(87,216,255,0.12) !important; color: #9be8ff !important; }
+  body[data-theme='dark'] .webhook-auto-link-security-notice { background: rgba(141,80,24,0.22) !important; border-color: rgba(255,188,92,0.42) !important; color: #ffe8c2 !important; }
+  body[data-theme='dark'] .rooms-table td:nth-child(1), body[data-theme='dark'] .rooms-table td:nth-child(2),
+  body[data-theme='dark'] .rooms-table th:nth-child(1), body[data-theme='dark'] .rooms-table th:nth-child(2) { background: rgba(8,21,35,0.98) !important; }
+
+  /* ストレージ円グラフ */
+  body[data-theme='dark'] .storage-chart { background: rgba(8,21,35,0.4) !important; border-color: rgba(155,220,255,0.18) !important; }
+  body[data-theme='dark'] .storage-pie::after { background: rgba(8,21,35,0.95) !important; border-color: rgba(155,220,255,0.18) !important; }
+  body[data-theme='dark'] .storage-pie-center-label { color: #93bfd8 !important; }
+  body[data-theme='dark'] .storage-pie-center-value { color: #d7f0ff !important; }
+  body[data-theme='dark'] .storage-legend-item { color: #d6ecfa !important; }
+
+  /* トグルスイッチ & room-scope-option */
+  body[data-theme='dark'] .room-scope-option { background: rgba(8,21,35,0.42) !important; border-color: rgba(155,220,255,0.16) !important; color: #e7f6ff !important; }
+  body[data-theme='dark'] .room-scope-option:hover { background: rgba(18,35,52,0.6) !important; border-color: rgba(155,220,255,0.3) !important; }
+  body[data-theme='dark'] .room-scope-option input[type="checkbox"],
+  body[data-theme='dark'] .user-permission-control input[type="checkbox"],
+  body[data-theme='dark'] .switch input[type="checkbox"] { background: #2e4f66 !important; }
+  body[data-theme='dark'] .room-scope-option input[type="checkbox"]:checked,
+  body[data-theme='dark'] .user-permission-control input[type="checkbox"]:checked,
+  body[data-theme='dark'] .switch input[type="checkbox"]:checked { background: #57d8ff !important; }
+
+  /* 表示切替タブ (active) */
+  body[data-theme='dark'] .webhook-view-tabs .button.active,
+  body[data-theme='dark'] .user-permission-tabs .button.active { background: rgba(70,152,196,0.5) !important; border-color: rgba(143,218,255,0.6) !important; color: #eaffff !important; }
+
+  /* 稼働状態の行/ピル */
+  body[data-theme='dark'] .v2-status-row { border-bottom-color: rgba(155,220,255,0.12) !important; }
+  body[data-theme='dark'] .v2-status-pill { background: rgba(73,224,146,0.16) !important; color: #69edbf !important; border-color: rgba(105,237,191,0.4) !important; }
+
+  /* ナビリンク */
+  body[data-theme='dark'] .app-v2-nav-link { background: rgba(87,216,255,0.14) !important; border-color: rgba(120,200,255,0.35) !important; color: #7fdcff !important; }
 </style>
 </head>
 <body>
@@ -12314,7 +12442,8 @@
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
       applyNewRoomDefaultCheckboxes();
       refreshNewRoomConfigSummary();
-      applyTheme('light'); // V2 はクリーンな白基調固定（テーマトグルは非表示）
+      // 保存されたテーマがあれば尊重し、無ければライトを既定にする（トグルで切替可能）
+      applyTheme(localStorage.getItem(STORE_THEME_KEY) ? getTheme() : 'light');
       if (dom.appNoticeCloseBtn) {
         dom.appNoticeCloseBtn.addEventListener('click', closeAppNotice);
       }
