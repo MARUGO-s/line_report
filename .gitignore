@@ -11,3 +11,4 @@ backups/
 supabase/.temp/
 
 ocr-bridge/__pycache__/
+line_report

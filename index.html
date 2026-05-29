@@ -46,19 +46,34 @@
   <title>LINE Summary Admin Dashboard</title>
   <style>
     :root {
-      --bg0: #061320;
-      --bg1: #173247;
-      --card: rgba(8, 21, 35, 0.84);
-      --line: rgba(155, 220, 255, 0.25);
-      --txt: #e7f6ff;
-      --sub: #a6cadf;
-      --muted: #a6cadf;
-      --ok: #69edbf;
-      --warn: #ffd17e;
-      --bad: #ff7c9f;
-      --accent: #57d8ff;
-      --radius: 16px;
-      --shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+      /* ===== 新デザイン トークン（design_handoff/admin.css 準拠・ライト基準・compact） ===== */
+      --accent: #2563d4;
+      --accent-press: #1f54b3;
+      --accent-soft: rgba(37,99,212,.10);
+      --surface: #ffffff;
+      --surface-2: #f5f7fa;
+      --sidebar: #0f1722;
+      --sidebar-2: rgba(255,255,255,.06);
+      --side-text: #aeb9c7;
+      --side-text-strong: #ffffff;
+      --border: #e8ecf2;
+      --border-strong: #dbe1e9;
+      --text: #15202e;
+      --text-2: #5a6675;
+      --text-3: #8995a4;
+      --ok: #1f9d57;  --ok-soft: rgba(31,157,87,.12);
+      --warn: #c77d12; --warn-soft: rgba(199,125,18,.14);
+      --err: #d23b3b;  --err-soft: rgba(210,59,59,.12);
+      --radius: 16px; --radius-sm: 9px;
+      --shadow-sm: 0 1px 2px rgba(20,34,58,.04), 0 4px 14px -8px rgba(20,34,58,.10);
+      --shadow: 0 2px 8px rgba(20,34,58,.06), 0 22px 48px -22px rgba(20,34,58,.24);
+      --pad: 18px; --gap: 16px; --row-h: 38px; --fs: 14px;
+      --app-bg: #edf0f5;
+      /* ===== 旧トークン名 → 新トークンへブリッジ（既存CSS互換） ===== */
+      --bg0: var(--app-bg); --bg1: var(--app-bg);
+      --card: var(--surface); --line: var(--border);
+      --txt: var(--text); --sub: var(--text-2); --muted: var(--text-3);
+      --bad: var(--err);
     }
 
     * { box-sizing: border-box; }
@@ -66,33 +81,35 @@
     body {
       margin: 0;
       min-height: 100vh;
-      color: var(--txt);
-      font-family: "Zen Kaku Gothic New", sans-serif;
-      background:
-        radial-gradient(900px 500px at -20% -10%, #215f84 0%, transparent 60%),
-        radial-gradient(900px 500px at 120% 0%, #185273 0%, transparent 55%),
-        linear-gradient(145deg, var(--bg0), var(--bg1));
+      color: var(--text);
+      /* CSP(font-src 'self') のため CDN 不可。IBM Plex があれば使い、無ければヒラギノ/system へフォールバック */
+      font-family: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Zen Kaku Gothic New", system-ui, sans-serif;
+      background: var(--app-bg);
+      font-size: var(--fs);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
       padding: 20px;
       transition: background 0.25s ease, color 0.2s ease;
     }
 
     body[data-theme='light'] {
-      --bg0: #f5fbff;
-      --bg1: #deedf8;
-      --card: rgba(255, 255, 255, 0.9);
-      --line: rgba(45, 106, 151, 0.24);
-      --txt: #132a3b;
-      --sub: #4f7187;
-      --muted: #4f7187;
-      --ok: #0f8d5f;
-      --warn: #b67a1e;
-      --bad: #d54c74;
-      --accent: #157fba;
-      --shadow: 0 14px 34px rgba(20, 59, 89, 0.16);
-      background:
-        radial-gradient(900px 500px at -20% -10%, #d0ebfb 0%, transparent 60%),
-        radial-gradient(900px 500px at 120% 0%, #c6e0f3 0%, transparent 55%),
-        linear-gradient(145deg, var(--bg0), var(--bg1));
+      --card: var(--surface); --line: var(--border);
+      --txt: var(--text); --sub: var(--text-2); --muted: var(--text-3); --bad: var(--err);
+      background: var(--app-bg);
+    }
+
+    body[data-theme='dark'] {
+      --app-bg: #0c1117;
+      --surface: #151c25; --surface-2: #1b232e;
+      --sidebar: #0a0f16; --sidebar-2: rgba(255,255,255,.05); --side-text: #99a6b6;
+      --border: #26313d; --border-strong: #33414f;
+      --text: #e7ecf2; --text-2: #9fadbd; --text-3: #6f7d8d;
+      --accent-soft: rgba(56,125,234,.16);
+      --ok-soft: rgba(31,157,87,.16); --warn-soft: rgba(199,125,18,.18); --err-soft: rgba(210,59,59,.16);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.3); --shadow: 0 1px 3px rgba(0,0,0,.4), 0 10px 30px -18px rgba(0,0,0,.6);
+      --card: var(--surface); --line: var(--border);
+      --txt: var(--text); --sub: var(--text-2); --muted: var(--text-3); --bad: var(--err);
+      background: var(--app-bg);
     }
 
     .app {
