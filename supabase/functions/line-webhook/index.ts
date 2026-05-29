@@ -211,9 +211,16 @@ async function insertRawWebhookEvent(
 async function processReceiptImageEvent(
   registry: StoreRegistryRow,
   event: LineEvent,
+  suppressAll = false,          // bot_reply_hard_mute_enabled: 一切返信しない
+  suppressReceiptReply = false, // !image_analysis_reply_enabled: レシート結果のみ返信しない
 ): Promise<{ saved: boolean; replied: boolean; reason?: string }> {
   const lineMessageId = String(event.message?.id ?? '').trim()
-  const replyToken = String(event.replyToken ?? '').trim()
+  const rawReplyToken = String(event.replyToken ?? '').trim()
+  // 非レシート画像（「画像を確認しました」等）の返信: AI返信完全無しのみで抑止
+  const nonReceiptReplyToken = suppressAll ? '' : rawReplyToken
+  // レシート関連の返信（解析カード・確信度警告・店舗不一致・取得失敗）:
+  // 「レシートの解析結果を送信」OFF のときのみ抑止。AI返信完全無しより優先される。
+  const receiptReplyToken = suppressReceiptReply ? '' : rawReplyToken
   const roomId = resolveRoomId(event)
   if (!lineMessageId || !roomId) {
     return { saved: false, replied: false, reason: 'missing_line_message_or_room' }
@@ -227,15 +234,15 @@ async function processReceiptImageEvent(
   const groqApiKey = resolveGroqApiKey()
   const contentFetch = await fetchLineMessageBinary(lineMessageId, accessToken)
   if (!contentFetch.ok) {
-    if (replyToken) {
+    if (receiptReplyToken) {
       await replyLineText(
-        replyToken,
+        receiptReplyToken,
         '画像の取得に失敗しました。時間をおいて再度お試しください。',
         accessToken,
         webhookReplyLog(registry, roomId, 'receipt_image_fetch_failed'),
       )
     }
-    return { saved: false, replied: !!replyToken, reason: contentFetch.error }
+    return { saved: false, replied: !!receiptReplyToken, reason: contentFetch.error }
   }
 
   const analyzed = await analyzeLineImageWithGroqScout(
@@ -249,10 +256,11 @@ async function processReceiptImageEvent(
     const msg = analyzed.analysis?.summary
       ? `画像を確認しました。\n${analyzed.analysis.summary}`
       : 'レシートとして読み取れる項目がありませんでした。'
-    if (replyToken) {
-      await replyLineText(replyToken, msg, accessToken, webhookReplyLog(registry, roomId, 'receipt_image_no_receipt'))
+    // 非レシート画像の返信: AI返信完全無しのみで抑止（レシート解析返信フラグは関係しない）
+    if (nonReceiptReplyToken) {
+      await replyLineText(nonReceiptReplyToken, msg, accessToken, webhookReplyLog(registry, roomId, 'receipt_image_no_receipt'))
     }
-    return { saved: false, replied: !!replyToken, reason: analyzed.failure?.stage ?? 'no_receipt' }
+    return { saved: false, replied: !!nonReceiptReplyToken, reason: analyzed.failure?.stage ?? 'no_receipt' }
   }
 
   const receiptRaw = analyzed.analysis.receipt
@@ -269,10 +277,10 @@ async function processReceiptImageEvent(
       'レシートの自動解析の確信度が低いため、売上登録していません。',
       '影・反射を避け、金額・日付がはっきり読める距離でもう一度撮影してください。',
     ].join('\n')
-    if (replyToken) {
-      await replyLineText(replyToken, lowMsg, accessToken, webhookReplyLog(registry, roomId, 'receipt_image_low_confidence'))
+    if (receiptReplyToken) {
+      await replyLineText(receiptReplyToken, lowMsg, accessToken, webhookReplyLog(registry, roomId, 'receipt_image_low_confidence'))
     }
-    return { saved: false, replied: !!replyToken, reason: 'low_confidence' }
+    return { saved: false, replied: !!receiptReplyToken, reason: 'low_confidence' }
   }
 
   const supabase = createServiceClient()
@@ -325,10 +333,10 @@ async function processReceiptImageEvent(
         console.error('persist learned receipt phone (suggested store) failed:', String(e))
       }
     }
-    if (replyToken) {
+    if (receiptReplyToken) {
       const flexMessage = buildReceiptStoreMismatchFlexReply(guidance)
       await replyLineFlex(
-        replyToken,
+        receiptReplyToken,
         flexMessage,
         accessToken,
         webhookReplyLog(registry, roomId, 'receipt_store_mismatch'),
@@ -336,7 +344,7 @@ async function processReceiptImageEvent(
     }
     return {
       saved: false,
-      replied: !!replyToken,
+      replied: !!receiptReplyToken,
       reason: 'store_name_mismatch_resend_required',
     }
   }
@@ -357,10 +365,10 @@ async function processReceiptImageEvent(
   }
   const result = await attemptReceiptRegistration(supabase, registry, registrationPayload)
 
-  if (replyToken) {
+  if (receiptReplyToken) {
     const messages = lineReplyPayloadToMessages(result.reply)
     const replyResult = await replyLineMessages(
-      replyToken,
+      receiptReplyToken,
       messages,
       accessToken,
       webhookReplyLog(registry, roomId, 'receipt_image_registration'),
@@ -371,7 +379,7 @@ async function processReceiptImageEvent(
   }
   return {
     saved: result.saved,
-    replied: !!replyToken,
+    replied: !!receiptReplyToken,
     reason: result.saved ? undefined : 'registration_pending_or_failed',
   }
 }
@@ -380,9 +388,12 @@ async function processReceiptTextEvent(
   registry: StoreRegistryRow,
   event: LineEvent,
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  suppressReply = false,
 ): Promise<{ handled: boolean; replied: boolean; reason?: string }> {
   const text = String(event.message?.text ?? '').trim()
-  const replyToken = String(event.replyToken ?? '').trim()
+  // AI返信完全無し（bot_reply_hard_mute_enabled）が ON のルームでは返信トークンを空にして
+  // 一切返信しない。修正・重複確認・削除などの処理はそのまま継続する。
+  const replyToken = suppressReply ? '' : String(event.replyToken ?? '').trim()
   const roomId = resolveRoomId(event)
   if (!text || !roomId) {
     return { handled: false, replied: false, reason: 'missing_text_or_room' }
@@ -496,6 +507,15 @@ Deno.serve(async (req) => {
   const displayNameRoomIds = new Set<string>()
   const errors: string[] = []
   const userPermissionCache = new Map<string, Awaited<ReturnType<typeof loadLineUserPermissionGate>>>()
+  const roomSearchFlagsCache = new Map<string, Awaited<ReturnType<typeof loadRoomSearchFlags>>>()
+  const loadRoomSearchFlagsCached = async (
+    roomId: string,
+  ): Promise<Awaited<ReturnType<typeof loadRoomSearchFlags>>> => {
+    if (roomSearchFlagsCache.has(roomId)) return roomSearchFlagsCache.get(roomId)!
+    const flags = await loadRoomSearchFlags(supabase, roomId)
+    roomSearchFlagsCache.set(roomId, flags)
+    return flags
+  }
   const storeAccessToken = resolveChannelAccessToken(storeKey)
 
   for (const event of events) {
@@ -617,9 +637,21 @@ Deno.serve(async (req) => {
       }
     }
 
+    // AI返信完全無し（bot_reply_hard_mute_enabled）: このルームでは一切返信しない。
+    // レシートの解析結果を送信（image_analysis_reply_enabled）: OFF なら解析カード等を返信しない。
+    // 生ログ・レシート保存・会話記録などの処理はそのまま継続する。
+    let roomHardMuted = false
+    let suppressReceiptReply = false
+    if (eventRoomId) {
+      const muteFlags = await loadRoomSearchFlagsCached(eventRoomId)
+      roomHardMuted = !!muteFlags?.bot_reply_hard_mute_enabled
+      // flags が null（DB エラー）のときはデフォルト送信（suppressReceipt = false）
+      suppressReceiptReply = muteFlags !== null ? !muteFlags.image_analysis_reply_enabled : false
+    }
+
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
-        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event)
+        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply)
         if (result.saved) receiptsSaved += 1
         if (result.replied) receiptReplies += 1
         if (result.reason && !result.saved) {
@@ -629,7 +661,7 @@ Deno.serve(async (req) => {
         const msg = err instanceof Error ? err.message : String(err)
         console.error('processReceiptImageEvent failed:', msg)
         errors.push(msg.slice(0, 160))
-        const replyToken = String(event.replyToken ?? '').trim()
+        const replyToken = roomHardMuted ? '' : String(event.replyToken ?? '').trim()
         if (replyToken) {
           try {
             const accessToken = resolveChannelAccessToken(registry.store_partition_key)
@@ -666,17 +698,20 @@ Deno.serve(async (req) => {
             postbackData,
           )
           if (correctionPayload) {
-            await replyLineMessages(
-              postbackReplyToken,
-              lineReplyPayloadToMessages(correctionPayload),
-              lineAccessTokenForSearch,
-              {
-                storePartitionKey: storeKey,
-                roomId: eventRoomIdForPostback,
-                context: 'receipt_correction_postback',
-              },
-            )
-            receiptReplies += 1
+            // 修正は適用済み。AI返信完全無しのルームでは返信のみ抑止する。
+            if (!roomHardMuted) {
+              await replyLineMessages(
+                postbackReplyToken,
+                lineReplyPayloadToMessages(correctionPayload),
+                lineAccessTokenForSearch,
+                {
+                  storePartitionKey: storeKey,
+                  roomId: eventRoomIdForPostback,
+                  context: 'receipt_correction_postback',
+                },
+              )
+              receiptReplies += 1
+            }
             continue
           }
         } catch (err) {
@@ -717,7 +752,7 @@ Deno.serve(async (req) => {
             eventUserId,
           )
         } else {
-          const roomFlags = await loadRoomSearchFlags(supabase, eventRoomId)
+          const roomFlags = await loadRoomSearchFlagsCached(eventRoomId)
           skipSearchMessageRecording = await shouldSkipLineSearchMessageRecording(
             supabase,
             eventRoomId,
@@ -734,7 +769,7 @@ Deno.serve(async (req) => {
 
       let receiptHandled = false
       try {
-        const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase)
+        const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, roomHardMuted)
         receiptHandled = result.handled
         if (result.handled) textHandled += 1
         if (result.replied) receiptReplies += 1

@@ -64,6 +64,7 @@ const GROUP_OTHER_SEARCH_TEXT =
 
 type RoomSearchFlags = {
   bot_reply_hard_mute_enabled: boolean
+  image_analysis_reply_enabled: boolean
   message_search_enabled: boolean
   message_search_library_enabled: boolean
   media_file_access_enabled: boolean
@@ -317,7 +318,7 @@ export async function loadRoomSearchFlags(
   const { data, error } = await supabase
     .from('room_summary_settings')
     .select(
-      'bot_reply_hard_mute_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled',
+      'bot_reply_hard_mute_enabled, image_analysis_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled',
     )
     .eq('room_id', roomId)
     .maybeSingle()
@@ -329,6 +330,7 @@ export async function loadRoomSearchFlags(
   if (!data) {
     return {
       bot_reply_hard_mute_enabled: false,
+      image_analysis_reply_enabled: true,
       message_search_enabled: false,
       message_search_library_enabled: false,
       media_file_access_enabled: false,
@@ -342,6 +344,7 @@ export async function loadRoomSearchFlags(
   const row = data as Record<string, unknown>
   return {
     bot_reply_hard_mute_enabled: row.bot_reply_hard_mute_enabled === true,
+    image_analysis_reply_enabled: row.image_analysis_reply_enabled !== false,
     message_search_enabled: row.message_search_enabled === true,
     message_search_library_enabled: row.message_search_library_enabled === true,
     media_file_access_enabled: row.media_file_access_enabled === true,
@@ -357,13 +360,14 @@ async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<R
   const { data, error } = await supabase
     .from('room_summary_settings')
     .select(
-      'message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled',
+      'image_analysis_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled',
     )
 
   if (error) {
     console.error('loadDirectMessageSearchFlags failed:', error.message)
     return {
       bot_reply_hard_mute_enabled: false,
+      image_analysis_reply_enabled: true,
       message_search_enabled: false,
       message_search_library_enabled: false,
       media_file_access_enabled: false,
@@ -382,6 +386,7 @@ async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<R
 
   return {
     bot_reply_hard_mute_enabled: false,
+    image_analysis_reply_enabled: anyReceiptOn('image_analysis_reply_enabled'),
     message_search_enabled: any('message_search_enabled'),
     message_search_library_enabled: any('message_search_library_enabled'),
     media_file_access_enabled: any('media_file_access_enabled'),
@@ -407,6 +412,7 @@ export async function loadSearchFlagsForContext(
   return {
     ...aggregate,
     bot_reply_hard_mute_enabled: personal?.bot_reply_hard_mute_enabled === true,
+    image_analysis_reply_enabled: aggregate.image_analysis_reply_enabled,
   }
 }
 

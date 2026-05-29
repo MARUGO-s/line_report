@@ -4626,7 +4626,7 @@
       <div id="roomConfigPaneReceipt" class="room-config-pane">
         <div class="room-scope-modal-list" style="margin-top:12px;">
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigMediaAccess" type="checkbox">LINE添付保存（ルーム）</label>
-          <label class="room-scope-option receipt-scope-option"><input id="roomConfigImageAnalysisReplyEnabled" type="checkbox">画像解析結果をLINE返信</label>
+          <label class="room-scope-option receipt-scope-option"><input id="roomConfigImageAnalysisReplyEnabled" type="checkbox">レシートの解析結果を送信</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMidreportEnabled" type="checkbox"><span id="roomConfigReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMonthendReportEnabled" type="checkbox"><span id="roomConfigReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
         </div>
@@ -4764,12 +4764,12 @@
   <div id="newRoomConfigModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="newRoomConfigModalTitle">
       <h3 id="newRoomConfigModalTitle" class="modal-title">新規ルーム追加時の設定（一括）</h3>
-      <div class="modal-meta">レシート解析・売上レポート用の基本設定です。<strong>AI会話返信は通常OFF</strong>（質問には沈黙）。画像解析結果の返信と売上レポートが主な用途です。</div>
+      <div class="modal-meta">レシート解析・売上レポート用の基本設定です。<strong>AI会話返信は通常OFF</strong>（質問には沈黙）。レシートの解析結果送信と売上レポートが主な用途です。</div>
       <div class="new-room-receipt-panel">
         <div class="modal-meta" style="margin-bottom:2px;">レシート関連（基本）</div>
         <div class="room-scope-modal-list">
           <label class="room-scope-option"><input id="newRoomMediaFileAccessEnabled" type="checkbox">LINE添付保存（ルーム）</label>
-          <label class="room-scope-option"><input id="newRoomImageAnalysisReplyEnabled" type="checkbox">画像解析結果をLINE返信</label>
+          <label class="room-scope-option"><input id="newRoomImageAnalysisReplyEnabled" type="checkbox">レシートの解析結果を送信</label>
           <label class="room-scope-option"><input id="newRoomReceiptMidreportEnabled" type="checkbox"><span id="newRoomReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
           <label class="room-scope-option"><input id="newRoomReceiptMonthendReportEnabled" type="checkbox"><span id="newRoomReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
         </div>
@@ -7259,7 +7259,7 @@
       if (config.receive_overall_summary_enabled) enabledFeatures.push('全体要約レポートをこのルームに配信');
       if (config.calendar_tomorrow_reminder_enabled) enabledFeatures.push('明日予定配信');
       if (media) enabledFeatures.push('LINE添付保存（ルーム）');
-      if (media && imgReply) enabledFeatures.push('画像解析結果をLINE返信');
+      if (media && imgReply) enabledFeatures.push('レシートの解析結果を送信');
       if (cal) {
         enabledFeatures.push('会話から予定検知 → Googleカレンダーへ無返信で自動登録');
         if (calRegReply) enabledFeatures.push('予定の登録内容をLINEで返信する（高確度でも）');
@@ -7294,7 +7294,7 @@
         } else if (imgReply) {
           webhookReplies.push('メディア保存後、解析結果（レシート集計など）をこのルームのLINEに返信します。');
         } else {
-          webhookReplies.push('メディアは保存しますが、「画像解析結果をLINE返信」がOFFのため、解析内容をLINEには返しません。');
+          webhookReplies.push('メディアは保存しますが、「レシートの解析結果を送信」がOFFのため、解析内容をLINEには返しません。');
         }
       }
 
