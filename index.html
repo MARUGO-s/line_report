@@ -4162,15 +4162,46 @@
     color: #e7f6ff !important;
   }
 
-  /* ヘッダー / タブ */
-  body[data-theme='dark'] .app-v2-header { background: rgba(8,21,35,0.92) !important; border-bottom-color: rgba(155,220,255,0.18) !important; box-shadow: 0 1px 8px rgba(0,0,0,0.35); }
-  body[data-theme='dark'] .app-v2-brand { color: #7fdcff !important; }
-  body[data-theme='dark'] .app-v2-header-meta { color: #a6cadf !important; }
-  body[data-theme='dark'] .app-v2-tabs-wrap { background: rgba(8,21,35,0.85) !important; border-bottom-color: rgba(155,220,255,0.18) !important; }
-  body[data-theme='dark'] .app-v2-tab { color: #a6cadf !important; }
-  body[data-theme='dark'] .app-v2-tab:hover { color: #7fdcff !important; }
-  body[data-theme='dark'] .app-v2-tab.active { color: #7fdcff !important; border-bottom-color: #57d8ff !important; }
-  body[data-theme='dark'] .app-v2-tab-count { background: rgba(87,216,255,0.16) !important; color: #7fdcff !important; }
+  /* ===== リスキン②: シェルをサイドバー＋トップバーへ（旧ヘッダー/タブのダーク上書きは撤去し新トークンが両テーマを担う） ===== */
+  body { padding: 0; }
+  .app-v2-tabs-wrap {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 220px; z-index: 600;
+    background: var(--sidebar); border: 0; padding: 14px 12px;
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .app-v2-sidebrand { display:flex; align-items:center; gap:10px; padding:6px 8px 16px; color:var(--side-text-strong); font-weight:600; font-size:14px; line-height:1.25; }
+  .app-v2-sidebrand .mk { width:30px; height:30px; border-radius:8px; background:var(--accent); color:#fff; display:grid; place-items:center; font-weight:700; font-size:12px; letter-spacing:.04em; flex:none; }
+  .app-v2-sidebrand small { display:block; color:var(--side-text); font-weight:400; font-size:10.5px; }
+  .app-v2-tabs { display:flex; flex-direction:column; gap:3px; max-width:none; margin:6px 0 0; overflow:visible; }
+  .app-v2-tab {
+    padding: 9px 11px; font-size: 13.5px; font-weight: 500; color: var(--side-text);
+    border: 0; border-radius: 9px; margin: 0; white-space: nowrap; background: none;
+    display: flex; align-items: center; gap: 10px; text-align: left;
+  }
+  .app-v2-tab:hover { background: var(--sidebar-2); color: var(--side-text-strong); }
+  .app-v2-tab.active { background: var(--accent); color: #fff; border-bottom-color: transparent; box-shadow: 0 6px 16px -8px var(--accent); }
+  .app-v2-tab-count { background: rgba(255,255,255,.16); color: #fff; }
+  .app-v2-sidefoot { margin-top:auto; padding-top:14px; }
+  .app-v2-sidefoot .conn { display:flex; align-items:center; gap:9px; padding:10px; border-radius:10px; background:var(--sidebar-2); color:var(--side-text); font-size:11px; font-family:"IBM Plex Mono",ui-monospace,monospace; }
+  .app-v2-sidefoot .conn b { display:block; color:var(--side-text-strong); font-size:12.5px; font-weight:600; font-family:"IBM Plex Sans JP",sans-serif; }
+  .app-v2-sidefoot .conn .dt { width:8px; height:8px; border-radius:50%; background:var(--ok); flex:none; box-shadow:0 0 0 3px var(--ok-soft); }
+  .app-v2-header {
+    margin-left: 220px; min-height: 56px; height: auto;
+    background: color-mix(in srgb, var(--app-bg) 82%, transparent);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border); box-shadow: none;
+    justify-content: flex-end; padding: 10px 24px; gap: 12px;
+  }
+  .app-v2-brand { display: none; }
+  .app-v2-header-meta { color: var(--text-3); }
+  .app-v2-main { margin-left: 220px; max-width: 1180px; padding: 24px; }
+  @media (max-width: 920px){
+    .app-v2-tabs-wrap { position: static; width: auto; flex-direction: row; align-items: center; gap: 8px; padding: 10px; overflow-x: auto; }
+    .app-v2-sidebrand { padding: 0 8px 0 4px; }
+    .app-v2-tabs { flex-direction: row; margin: 0; }
+    .app-v2-sidefoot { display: none; }
+    .app-v2-header, .app-v2-main { margin-left: 0; }
+  }
 
   /* カード */
   body[data-theme='dark'] .card { background: rgba(10,24,38,0.86) !important; border-color: rgba(155,220,255,0.22) !important; box-shadow: 0 10px 28px rgba(0,0,0,0.35) !important; }
@@ -4294,6 +4325,7 @@
 
   <!-- ===== Tab Navigation ===== -->
   <div class="app-v2-tabs-wrap">
+    <div class="app-v2-sidebrand"><span class="mk">LS</span><span>LINE Summary<small>Admin Console</small></span></div>
     <nav class="app-v2-tabs" role="tablist" aria-label="管理画面ナビゲーション">
       <button class="app-v2-tab active" type="button" role="tab" aria-selected="true"  onclick="switchAppTab('auth')">接続設定</button>
       <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('global')">利用状況</button>
@@ -4301,6 +4333,7 @@
       <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('logs')">ログ</button>
       <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('permissions')">ユーザー権限</button>
     </nav>
+    <div class="app-v2-sidefoot"><div class="conn"><span class="dt"></span><span><b>接続済み</b>hocbnifuactbvmyjraxy</span></div></div>
   </div>
 
   <!-- ===== Main Content ===== -->
