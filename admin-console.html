@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light" data-density="regular">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache" />
+<title>LINE Summary Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   LINE Summary Admin — design system（design_handoff/admin.css 準拠）
+   ============================================================ */
+:root{
+  --accent: #2563d4;
+  --accent-press: #1f54b3;
+  --accent-soft: rgba(37,99,212,.10);
+
+  --bg:        #edf0f5;
+  --surface:   #ffffff;
+  --surface-2: #f5f7fa;
+  --sidebar:   #0f1722;
+  --sidebar-2: rgba(255,255,255,.06);
+  --side-text: #aeb9c7;
+  --side-text-strong:#ffffff;
+  --border:    #e8ecf2;
+  --border-strong:#dbe1e9;
+
+  --text:      #15202e;
+  --text-2:    #5a6675;
+  --text-3:    #8995a4;
+
+  --ok:        #1f9d57;
+  --ok-soft:   rgba(31,157,87,.12);
+  --warn:      #c77d12;
+  --warn-soft: rgba(199,125,18,.14);
+  --err:       #d23b3b;
+  --err-soft:  rgba(210,59,59,.12);
+
+  --radius: 16px;
+  --radius-sm: 9px;
+  --shadow-sm: 0 1px 2px rgba(20,34,58,.04), 0 4px 14px -8px rgba(20,34,58,.10);
+  --shadow:    0 2px 8px rgba(20,34,58,.06), 0 22px 48px -22px rgba(20,34,58,.24);
+
+  --pad: 28px;
+  --gap: 24px;
+  --row-h: 44px;
+  --fs: 15px;
+}
+[data-density="compact"]{ --pad:18px; --gap:16px; --row-h:38px; --fs:14px; }
+[data-density="comfy"]{ --pad:34px; --gap:30px; --row-h:48px; --fs:15px; }
+
+[data-theme="dark"]{
+  --bg:        #0c1117;
+  --surface:   #151c25;
+  --surface-2: #1b232e;
+  --sidebar:   #0a0f16;
+  --sidebar-2: rgba(255,255,255,.05);
+  --side-text: #99a6b6;
+  --border:    #26313d;
+  --border-strong:#33414f;
+  --text:      #e7ecf2;
+  --text-2:    #9fadbd;
+  --text-3:    #6f7d8d;
+  --accent-soft: rgba(56,125,234,.16);
+  --ok-soft:   rgba(31,157,87,.16);
+  --warn-soft: rgba(199,125,18,.18);
+  --err-soft:  rgba(210,59,59,.16);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+  --shadow:    0 1px 3px rgba(0,0,0,.4), 0 10px 30px -18px rgba(0,0,0,.6);
+}
+
+*{ box-sizing:border-box; }
+html,body{ height:100%; margin:0; }
+body{
+  font-family:"IBM Plex Sans JP","Hiragino Kaku Gothic ProN",system-ui,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  font-size:var(--fs);
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{ font-family:"IBM Plex Mono",ui-monospace,monospace; }
+.ta-r{ text-align:right; }
+.select{
+  height:var(--row-h); padding:0 30px 0 12px; border-radius:var(--radius-sm);
+  border:1px solid var(--border-strong); background:var(--surface-2);
+  color:var(--text); font:inherit; font-size:13.5px; cursor:pointer;
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238995a4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 9px center; background-size:15px;
+}
+.select:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+
+/* ============ APP SHELL ============ */
+.app{ display:grid; grid-template-columns:248px 1fr; min-height:100vh; }
+[data-density="compact"] .app{ grid-template-columns:220px 1fr; }
+
+/* ============ SIDEBAR ============ */
+.sidebar{
+  background:var(--sidebar);
+  color:var(--side-text);
+  display:flex; flex-direction:column;
+  position:sticky; top:0; height:100vh;
+  padding:18px 14px;
+}
+.brand{ display:flex; align-items:center; gap:11px; padding:6px 8px 18px; }
+.brand__mark{
+  width:34px; height:34px; border-radius:9px; flex:none;
+  background:var(--accent); color:#fff;
+  display:grid; place-items:center; font-weight:700; font-size:13px; letter-spacing:.04em;
+}
+.brand__name{ display:flex; flex-direction:column; color:var(--side-text-strong); font-weight:600; font-size:14.5px; line-height:1.25; }
+.brand__name small{ color:var(--side-text); font-weight:400; font-size:11px; letter-spacing:.02em; }
+
+.nav{ display:flex; flex-direction:column; gap:3px; margin-top:6px; }
+.nav__label{ font-size:11px; letter-spacing:.08em; color:var(--text-3); margin:16px 10px 6px; font-weight:600; }
+.nav__item{
+  display:flex; align-items:center; gap:11px;
+  width:100%; border:0; cursor:pointer; text-align:left; text-decoration:none;
+  padding:9px 11px; border-radius:9px;
+  background:transparent; color:var(--side-text);
+  font:inherit; font-weight:500; font-size:14px;
+  transition:background .14s,color .14s;
+}
+.nav__item:hover{ background:var(--sidebar-2); color:var(--side-text-strong); }
+.nav__item.is-active{ background:var(--accent); color:#fff; box-shadow:0 6px 16px -8px var(--accent); }
+.nav__item .ico{ width:18px; height:18px; }
+
+.sidebar__foot{ margin-top:auto; padding-top:14px; }
+.conn{ display:flex; align-items:center; gap:10px; padding:11px; border-radius:10px; background:var(--sidebar-2); }
+.conn strong{ display:block; color:var(--side-text-strong); font-size:13px; }
+.conn span{ font-size:11px; color:var(--side-text); font-family:"IBM Plex Mono",monospace; }
+
+/* ============ TOPBAR ============ */
+.main{ display:flex; flex-direction:column; min-width:0; }
+.topbar{
+  position:sticky; top:0; z-index:5;
+  display:flex; align-items:center; justify-content:space-between; gap:20px;
+  padding:18px var(--pad);
+  background:color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border);
+}
+.topbar__title h1{ margin:0; font-size:22px; font-weight:700; letter-spacing:-.015em; }
+.topbar__title p{ margin:3px 0 0; color:var(--text-2); font-size:13px; }
+.topbar__actions{ display:flex; align-items:center; gap:12px; flex:none; }
+
+.iconbtn{
+  width:38px; height:38px; border-radius:9px; flex:none;
+  border:1px solid var(--border-strong); background:var(--surface);
+  display:grid; place-items:center; cursor:pointer; color:var(--text-2);
+  transition:background .14s,color .14s;
+}
+.iconbtn:hover{ color:var(--text); background:var(--surface-2); }
+.iconbtn .ico{ width:18px; height:18px; }
+.ico--moon{ display:none; }
+[data-theme="dark"] .ico--sun{ display:none; }
+[data-theme="dark"] .ico--moon{ display:block; }
+
+/* ============ CONTENT ============ */
+.content{ padding:var(--pad); max-width:1180px; width:100%; }
+.panel{ display:none; flex-direction:column; gap:var(--gap); animation:fade .22s ease; }
+.panel.is-active{ display:flex; }
+@keyframes fade{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
+
+.grid{ display:grid; gap:var(--gap); }
+.grid--2{ grid-template-columns:1fr 1fr; align-items:start; }
+
+/* ============ CARD ============ */
+.card{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); box-shadow:var(--shadow-sm); overflow:hidden;
+}
+.card__head{ padding:var(--pad) var(--pad) 0; }
+.card__head--row{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.card__head h2{ margin:0; font-size:16.5px; font-weight:600; letter-spacing:-.01em; }
+.card__head p{ margin:4px 0 0; color:var(--text-2); font-size:13px; }
+.card__body{ padding:var(--pad); display:flex; flex-direction:column; gap:16px; }
+.card__head + .card__body{ padding-top:18px; }
+
+/* ============ FORM ============ */
+.field{ display:flex; flex-direction:column; gap:7px; }
+.field > label{ font-size:12.5px; font-weight:600; color:var(--text-2); }
+.input{
+  height:var(--row-h); padding:0 13px; border-radius:var(--radius-sm);
+  border:1px solid var(--border-strong); background:var(--surface-2);
+  color:var(--text); font:inherit; font-size:14px; width:100%;
+  transition:border-color .14s, box-shadow .14s, background .14s;
+}
+.input:focus{ outline:none; border-color:var(--accent); background:var(--surface); box-shadow:0 0 0 3px var(--accent-soft); }
+.input::placeholder{ color:var(--text-3); }
+.hint{ font-size:12px; color:var(--text-3); }
+
+.panel[data-panel="connect"]{ max-width:880px; }
+.formcol{ display:flex; flex-direction:column; gap:var(--gap); }
+.card--form .card__body{ gap:14px; }
+.card--form .field{ display:grid; grid-template-columns:140px minmax(0,1fr); align-items:center; column-gap:18px; row-gap:6px; }
+.card--form .field > label{ font-size:13px; }
+.card--form .input{ max-width:460px; }
+.card--form .hint{ grid-column:2; }
+.card--form .btn-row,
+.card--form .note{ padding-left:158px; }
+@media (max-width:640px){
+  .card--form .field{ grid-template-columns:1fr; }
+  .card--form .btn-row, .card--form .note{ padding-left:0; }
+}
+
+.btn-row{ display:flex; flex-wrap:wrap; gap:10px; }
+.btn{
+  height:var(--row-h); padding:0 16px; border-radius:var(--radius-sm);
+  border:1px solid transparent; font:inherit; font-weight:600; font-size:14px;
+  cursor:pointer; display:inline-flex; align-items:center; gap:7px;
+  transition:background .14s,border-color .14s,color .14s,transform .05s;
+}
+.btn:active{ transform:translateY(1px); }
+.btn--sm{ height:34px; padding:0 12px; font-size:13px; }
+.btn--primary{ background:var(--accent); color:#fff; }
+.btn--primary:hover{ background:var(--accent-press); }
+.btn--ghost{ background:var(--surface); border-color:var(--border-strong); color:var(--text); }
+.btn--ghost:hover{ background:var(--surface-2); }
+.btn--warn{ background:var(--warn-soft); color:var(--warn); border-color:transparent; }
+.btn--warn:hover{ background:color-mix(in srgb,var(--warn) 22%, transparent); }
+
+.note{ display:flex; align-items:center; gap:9px; font-size:13px; color:var(--text-2); }
+.note .ico{ width:17px; height:17px; flex:none; color:var(--text-3); }
+
+.linked{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  padding:10px 12px; border-radius:var(--radius-sm); background:var(--ok-soft); border:1px solid color-mix(in srgb,var(--ok) 24%,transparent); }
+.linked__mail{ display:flex; align-items:center; gap:9px; color:var(--ok); font-weight:600; font-size:13.5px; font-family:"IBM Plex Mono",monospace; }
+
+.copyrow{ display:flex; gap:8px; align-items:center; }
+.copyrow .input{ flex:1; }
+
+/* ============ PAGES GRID ============ */
+.pages{ display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
+.page{
+  display:flex; align-items:center; gap:11px; text-decoration:none;
+  padding:14px; border-radius:var(--radius-sm); border:1px solid var(--border);
+  background:var(--surface-2); color:var(--text); font-weight:600; font-size:14px;
+  transition:border-color .14s, background .14s, transform .08s;
+}
+.page:hover{ border-color:var(--accent); background:var(--accent-soft); transform:translateY(-1px); }
+.page .ico{ width:20px; height:20px; color:var(--accent); flex:none; }
+
+/* ============ SVG ICON DEFAULTS ============ */
+.ico{ fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+
+/* ============ CHIPS / BADGES ============ */
+.chip{ display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12.5px; font-weight:600; white-space:nowrap; }
+.chip--ok{ background:var(--ok-soft); color:var(--ok); }
+.chip--warn{ background:var(--warn-soft); color:var(--warn); }
+.chip--err{ background:var(--err-soft); color:var(--err); }
+.badge{ padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; color:var(--text-2); background:var(--surface-2); border:1px solid var(--border); white-space:nowrap; }
+.dot{ width:8px; height:8px; border-radius:50%; flex:none; }
+.dot--ok{ background:var(--ok); box-shadow:0 0 0 3px var(--ok-soft); }
+
+/* ============ STATS ============ */
+.stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:var(--gap); }
+.stat{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:var(--pad); display:flex; flex-direction:column; gap:6px; box-shadow:var(--shadow-sm); }
+.stat__label{ font-size:13px; color:var(--text-2); }
+.stat__value{ font-size:28px; font-weight:700; letter-spacing:.01em; font-family:"IBM Plex Mono",monospace; }
+.stat__delta{ font-size:12px; color:var(--text-3); font-weight:500; }
+.stat__delta--up{ color:var(--ok); }
+.stat__delta--down{ color:var(--err); }
+
+/* ============ TABLE ============ */
+.table{ width:100%; border-collapse:collapse; font-size:14px; }
+.table th{ text-align:left; font-size:11.5px; letter-spacing:.06em; color:var(--text-3); font-weight:600; padding:0 14px 10px; border-bottom:1px solid var(--border); text-transform:uppercase; }
+.table td{ padding:13px 14px; border-bottom:1px solid var(--border); color:var(--text); vertical-align:middle; }
+.table tbody tr:last-child td{ border-bottom:0; }
+.table tbody tr{ transition:background .12s; }
+.table tbody tr:hover{ background:var(--surface-2); }
+
+.bar{ display:block; height:7px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border); overflow:hidden; min-width:120px; max-width:220px; }
+.bar i{ display:block; height:100%; background:var(--accent); border-radius:999px; }
+
+.who{ display:flex; align-items:center; gap:10px; font-weight:600; }
+.ava{ width:28px; height:28px; border-radius:50%; flex:none; display:grid; place-items:center; font-size:12px; font-weight:700; color:#fff; background:var(--accent); }
+
+.role{ padding:3px 9px; border-radius:6px; font-size:12px; font-weight:600; }
+.role--admin{ background:var(--accent-soft); color:var(--accent); }
+.role--editor{ background:var(--ok-soft); color:var(--ok); }
+.role--viewer{ background:var(--surface-2); color:var(--text-2); border:1px solid var(--border); }
+
+.lvl{ padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700; letter-spacing:.04em; font-family:"IBM Plex Mono",monospace; }
+.lvl--info{ background:var(--accent-soft); color:var(--accent); }
+.lvl--warn{ background:var(--warn-soft); color:var(--warn); }
+.lvl--err{ background:var(--err-soft); color:var(--err); }
+
+/* ============ SWITCH ============ */
+.switch{ display:flex; align-items:center; justify-content:space-between; gap:14px; padding:11px 0; border-bottom:1px solid var(--border); cursor:pointer; font-size:14px; font-weight:500; }
+.card__body .switch:last-child{ border-bottom:0; padding-bottom:0; }
+.card__body .switch:first-child{ padding-top:0; }
+.switch input{ position:absolute; opacity:0; }
+.switch i{ width:42px; height:24px; border-radius:999px; background:var(--border-strong); position:relative; flex:none; transition:background .16s; }
+.switch i::after{ content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .16s; }
+.switch input:checked + i{ background:var(--accent); }
+.switch input:checked + i::after{ transform:translateX(18px); }
+
+/* ============ SEGMENTED FILTER ============ */
+.filters{ display:inline-flex; gap:4px; background:var(--surface-2); border:1px solid var(--border); padding:4px; border-radius:10px; flex:none; }
+.seg{ border:0; background:transparent; color:var(--text-2); font:inherit; font-size:13px; font-weight:600; padding:6px 12px; border-radius:7px; cursor:pointer; transition:background .14s,color .14s; white-space:nowrap; }
+.seg:hover{ color:var(--text); }
+.seg.is-active{ background:var(--surface); color:var(--text); box-shadow:var(--shadow-sm); }
+
+/* ============ RESPONSIVE ============ */
+@media (max-width:1080px){ .stats{ grid-template-columns:repeat(2,1fr); } }
+@media (max-width:920px){
+  .app{ grid-template-columns:1fr; }
+  .sidebar{ position:static; height:auto; flex-direction:row; align-items:center; gap:8px; padding:10px; overflow-x:auto; }
+  .brand{ padding:0 10px 0 4px; }
+  .nav{ flex-direction:row; margin:0; gap:4px; }
+  .nav__label, .sidebar__foot{ display:none; }
+  .grid--2{ grid-template-columns:1fr; }
+}
+@media (max-width:560px){ .stats{ grid-template-columns:1fr; } .topbar__title p{ display:none; } }
+
+/* ============================================================
+   WEBHOOK設定 — per-store cards
+   ============================================================ */
+.wh-head-desc{ max-width:70ch; }
+.wh-toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.wh-info{ margin-left:auto; font-size:12.5px; color:var(--text-3); }
+.wh-commonurl{ display:flex; align-items:center; gap:10px; font-size:12.5px; color:var(--text-3); flex-wrap:wrap; }
+.wh-commonurl code{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; background:var(--surface-2);
+  border:1px solid var(--border); border-radius:6px; padding:4px 9px; color:var(--text-2);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:340px; }
+.wh-view{ align-self:flex-start; }
+
+.wh-notice{ border:1px solid color-mix(in srgb,var(--warn) 26%,transparent); background:var(--warn-soft);
+  border-radius:11px; padding:0 15px; }
+.wh-notice summary{ cursor:pointer; list-style:none; font-size:13px; font-weight:600; color:var(--warn);
+  padding:12px 0; display:flex; align-items:center; gap:8px; }
+.wh-notice summary::-webkit-details-marker{ display:none; }
+.wh-notice summary::after{ content:"▸"; margin-left:auto; font-size:10px; color:var(--warn); transition:transform .14s; }
+.wh-notice[open] summary::after{ transform:rotate(90deg); }
+.wh-notice__body{ font-size:12.5px; line-height:1.75; color:var(--text-2); padding:0 0 14px; }
+.wh-notice__body b{ color:var(--text); }
+.wh-notice__body code{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; background:rgba(0,0,0,.05);
+  border-radius:5px; padding:1px 6px; }
+[data-theme="dark"] .wh-notice__body code{ background:rgba(255,255,255,.08); }
+
+.wh-global{ background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 22%,transparent); }
+.wh-badge-accent{ color:var(--accent); background:color-mix(in srgb,var(--accent) 14%,transparent); border-color:transparent; }
+.wh-global__row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.wh-global__row .wh-prio{ margin-left:auto; font-size:12px; color:var(--text-3); }
+.wh-muted{ font-size:13px; color:var(--text-2); margin:0; line-height:1.7; }
+.wh-muted b{ color:var(--text); }
+
+.wh-grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; align-items:start; }
+.wh-card{ background:var(--surface); border:1px solid var(--border); border-radius:13px; min-width:0;
+  box-shadow:var(--shadow-sm); padding:15px 16px 13px; display:flex; flex-direction:column; gap:9px;
+  transition:box-shadow .16s, transform .16s; }
+.wh-card:hover{ box-shadow:var(--shadow); transform:translateY(-2px); }
+.wh-card--approval{ background:color-mix(in srgb,#6d4ad6 5%,var(--surface)); }
+
+.wh-card__top{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.wh-card__title{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.wh-card__title h3{ margin:0; font-size:14.5px; font-weight:700; letter-spacing:-.01em; }
+.wh-sub{ font-size:11px; color:var(--text-3); font-family:"IBM Plex Mono",monospace; }
+.wh-status{ flex:none; font-size:10.5px; font-weight:600; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+.wh-status--live{ color:var(--ok); background:var(--ok-soft); }
+.wh-status--setup{ color:var(--text-2); background:var(--surface-2); border:1px solid var(--border); }
+.wh-status--appr{ color:#6d4ad6; background:color-mix(in srgb,#6d4ad6 13%,transparent); }
+
+.wh-hint{ font-size:11.5px; color:var(--text-3); margin:0; line-height:1.55; }
+
+.wh-url-row{ display:flex; gap:7px; align-items:center; }
+.wh-url{ flex:1; min-width:0; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--text-2);
+  background:var(--surface-2); border:1px solid var(--border); border-radius:7px; padding:7px 10px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.wh-rows{ display:flex; flex-direction:column; }
+.wh-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0;
+  border-top:1px solid var(--border); font-size:12.5px; }
+.wh-row:first-child{ border-top:0; }
+.wh-row__k{ color:var(--text-2); white-space:nowrap; }
+.wh-row__v{ font-weight:600; color:var(--text); display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.wh-phone{ color:var(--warn); font-family:"IBM Plex Mono",monospace; font-weight:600; }
+.wh-linkbtn{ font-size:11.5px; color:var(--accent); font-weight:600; cursor:pointer; background:none; border:0; padding:0; font-family:inherit; }
+.wh-linkbtn:hover{ text-decoration:underline; }
+
+.wh-card__foot{ display:flex; align-items:center; justify-content:space-between; gap:10px;
+  margin-top:1px; padding-top:10px; border-top:1px solid var(--border); }
+.wh-card__foot .btn-row-l{ display:flex; gap:8px; }
+.wh-card .btn--sm{ height:32px; padding:0 13px; font-size:12.5px; }
+
+@media (max-width:1100px){ .wh-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:720px){ .wh-grid{ grid-template-columns:1fr; } .wh-info{ margin-left:0; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand__mark">LS</span>
+      <span class="brand__name">LINE Summary<small>Admin Console</small></span>
+    </div>
+
+    <nav class="nav" id="nav">
+      <p class="nav__label">運用</p>
+      <button class="nav__item is-active" data-tab="connect">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M9 7H6a3 3 0 0 0 0 6h3M15 7h3a3 3 0 0 1 0 6h-3M8 10h8"/></svg>
+        接続設定
+      </button>
+      <button class="nav__item" data-tab="usage">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M4 19V5M4 19h16M8 16V9M12 16v-4M16 16v-8"/></svg>
+        利用状況
+      </button>
+      <button class="nav__item" data-tab="webhook">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 3v6m0 0a3 3 0 1 0 2.6 1.5M6.5 18a3 3 0 1 1 2.6-4.5M17.5 18a3 3 0 1 0-2.6-4.5M9 18h6"/></svg>
+        Webhook設定
+      </button>
+      <p class="nav__label">監査</p>
+      <button class="nav__item" data-tab="logs">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M6 4h9l3 3v13H6zM9 9h6M9 13h6M9 17h4"/></svg>
+        ログ
+      </button>
+      <button class="nav__item" data-tab="users">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20a5 5 0 0 1 10 0M16 11a3 3 0 1 0 0-6M15 20a5 5 0 0 1 6-1.5"/></svg>
+        ユーザー権限
+      </button>
+    </nav>
+
+    <div class="sidebar__foot">
+      <div class="conn">
+        <span class="dot dot--ok"></span>
+        <div>
+          <strong>接続済み</strong>
+          <span>hocbnifuactbvmyjraxy</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar__title">
+        <h1 id="pageTitle">接続設定</h1>
+        <p id="pageDesc">管理トークンで接続し、各ページや連携アカウントを管理します。</p>
+      </div>
+      <div class="topbar__actions">
+        <span class="chip chip--ok"><span class="dot dot--ok"></span>ログイン済み</span>
+        <button class="iconbtn" id="themeToggle" title="テーマ切り替え" aria-label="テーマ切り替え">
+          <svg class="ico ico--sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>
+          <svg class="ico ico--moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="content" id="content">
+
+      <!-- ===== 接続設定 ===== -->
+      <section class="panel is-active" data-panel="connect">
+        <div class="formcol">
+          <div class="card card--form">
+            <div class="card__head">
+              <h2>接続と実行</h2>
+              <p>Supabase プロジェクトと管理トークンを設定します。</p>
+            </div>
+            <div class="card__body">
+              <div class="field">
+                <label for="projectUrl">Project URL</label>
+                <input id="projectUrl" type="text" class="input mono" value="https://hocbnifuactbvmyjraxy.supabase.co" />
+              </div>
+              <div class="field">
+                <label for="token">管理トークン</label>
+                <input id="token" type="password" class="input mono" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション" />
+                <span class="hint">トークンはこのブラウザにのみ保存されます。</span>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn--primary">保存して接続</button>
+                <button class="btn btn--ghost">削除</button>
+                <button class="btn btn--ghost">再読み込み</button>
+              </div>
+              <div class="note">
+                <svg viewBox="0 0 24 24" class="ico"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+                このタブを閉じるとログアウトします。
+              </div>
+            </div>
+          </div>
+
+          <div class="card card--form">
+            <div class="card__head">
+              <h2>連携アカウント</h2>
+              <p>Gmail 連携先とトークンを管理します。</p>
+            </div>
+            <div class="card__body">
+              <div class="field">
+                <label>Gmail 連携先</label>
+                <div class="linked">
+                  <span class="linked__mail"><span class="dot dot--ok"></span>cava4938yoyaku@gmail.com</span>
+                  <button class="btn btn--ghost btn--sm">連携先を確認</button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="newToken">新しいトークン</label>
+                <input id="newToken" type="password" class="input mono" placeholder="新しい管理トークン" />
+              </div>
+              <div class="field">
+                <label for="confirmToken">確認入力</label>
+                <input id="confirmToken" type="password" class="input mono" placeholder="新しい管理トークン（確認）" />
+              </div>
+              <div class="btn-row">
+                <button class="btn btn--warn">トークン変更</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card__head card__head--row">
+            <div>
+              <h2>ページ一覧</h2>
+              <p>連携中の業務ページを開きます。</p>
+            </div>
+            <span class="badge">6 ページ</span>
+          </div>
+          <div class="card__body">
+            <div class="pages">
+              <a class="page" href="#"><svg viewBox="0 0 24 24" class="ico"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 9h16M8 13h2"/></svg><span>メディア閲覧</span></a>
+              <a class="page" href="message-search.html"><svg viewBox="0 0 24 24" class="ico"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg><span>会話検索</span></a>
+              <a class="page" href="#"><svg viewBox="0 0 24 24" class="ico"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>予約表</span></a>
+              <a class="page" href="analytics.html"><svg viewBox="0 0 24 24" class="ico"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6"/></svg><span>売上分析</span></a>
+              <a class="page" href="#"><svg viewBox="0 0 24 24" class="ico"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg><span>売上シート</span></a>
+              <a class="page" href="#"><svg viewBox="0 0 24 24" class="ico"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg><span>売上シート (H)</span></a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 利用状況 ===== -->
+      <section class="panel" data-panel="usage">
+        <div class="stats">
+          <div class="stat">
+            <span class="stat__label">本日のサマリー生成</span>
+            <span class="stat__value">1,284</span>
+            <span class="stat__delta stat__delta--up">+12.4% 前日比</span>
+          </div>
+          <div class="stat">
+            <span class="stat__label">連携ページ数</span>
+            <span class="stat__value">6</span>
+            <span class="stat__delta">稼働中 6 / 6</span>
+          </div>
+          <div class="stat">
+            <span class="stat__label">API 呼び出し（24h）</span>
+            <span class="stat__value">38,902</span>
+            <span class="stat__delta stat__delta--up">+4.1%</span>
+          </div>
+          <div class="stat">
+            <span class="stat__label">エラー率</span>
+            <span class="stat__value">0.18%</span>
+            <span class="stat__delta stat__delta--down">-0.05pt</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card__head card__head--row">
+            <div><h2>ページ別 利用状況</h2><p>過去 7 日間の処理件数。</p></div>
+            <span class="badge">7 日間</span>
+          </div>
+          <div class="card__body">
+            <table class="table">
+              <thead><tr><th>ページ</th><th>処理件数</th><th>シェア</th><th class="ta-r">状態</th></tr></thead>
+              <tbody>
+                <tr><td>売上分析</td><td class="mono">9,420</td><td><span class="bar"><i style="width:88%"></i></span></td><td class="ta-r"><span class="chip chip--ok">正常</span></td></tr>
+                <tr><td>会話検索</td><td class="mono">7,113</td><td><span class="bar"><i style="width:66%"></i></span></td><td class="ta-r"><span class="chip chip--ok">正常</span></td></tr>
+                <tr><td>予約表</td><td class="mono">5,560</td><td><span class="bar"><i style="width:52%"></i></span></td><td class="ta-r"><span class="chip chip--ok">正常</span></td></tr>
+                <tr><td>メディア閲覧</td><td class="mono">3,840</td><td><span class="bar"><i style="width:36%"></i></span></td><td class="ta-r"><span class="chip chip--warn">遅延</span></td></tr>
+                <tr><td>売上シート</td><td class="mono">2,201</td><td><span class="bar"><i style="width:21%"></i></span></td><td class="ta-r"><span class="chip chip--ok">正常</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Webhook設定 ===== -->
+      <section class="panel" data-panel="webhook">
+        <div class="card">
+          <div class="card__head"><h2>Webhook別設定</h2><p class="wh-head-desc">店舗ごとの LINE Webhook 単位でレシート解析・返信を設定します。優先順位は 全体 ＜ 店舗 ＜ ルーム個別。</p></div>
+          <div class="card__body">
+            <div class="wh-toolbar">
+              <select class="select"><option>すべて表示</option><option>通信中のみ</option><option>未接続のみ</option></select>
+              <button class="btn btn--ghost btn--sm">ルーム名再取得</button>
+              <button class="btn btn--ghost btn--sm">新規ルームのデフォルト</button>
+              <span class="wh-info">レシート 4/4 有効 ・ その他 3 件</span>
+            </div>
+            <div class="wh-commonurl">
+              <span>共通 URL（非推奨）</span>
+              <code>https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook</code>
+              <button class="btn btn--ghost btn--sm" data-copy-text>コピー</button>
+            </div>
+            <details class="wh-notice">
+              <summary>🔒 ルーム自動連携について（管理者の承認なし）</summary>
+              <div class="wh-notice__body">店舗 Webhook でメッセージを受信したルームは<b>確認ダイアログなしで自動的に連携承認</b>されます。すぐ売上レポート送信先に使える一方、誤った URL・テスト用グループも登録され得るため運用リスクは手動連携より高くなります。無効化: <code>RECEIPT_ROOM_AUTO_LINK=0</code>。</div>
+            </details>
+            <div class="filters wh-view">
+              <button class="seg is-active">カード表示</button>
+              <button class="seg">店名一覧</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card wh-global">
+          <div class="card__head card__head--row"><div><h2>全体権限設定</h2></div><span class="badge wh-badge-accent">一括</span></div>
+          <div class="card__body">
+            <p class="wh-muted">全店舗・全ルーム（47 件）への権限一括変更と受信済みルーム連携。「ルーム個別」のルームは上書きしません。</p>
+            <div class="wh-global__row">
+              <button class="btn btn--primary">全体権限を編集</button>
+              <span class="chip chip--ok">機能 7/14</span>
+              <span class="wh-prio">優先順位: 全体 ＜ 店舗 ＜ ルーム個別 ／ 個別 2 件</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="wh-grid" id="whGrid"></div>
+      </section>
+
+      <!-- ===== ログ ===== -->
+      <section class="panel" data-panel="logs">
+        <div class="card">
+          <div class="card__head card__head--row">
+            <div><h2>システムログ</h2><p>処理・エラーイベントを時系列で表示します。</p></div>
+            <div class="filters">
+              <button class="seg is-active" data-filter="all">すべて</button>
+              <button class="seg" data-filter="info">INFO</button>
+              <button class="seg" data-filter="warn">WARN</button>
+              <button class="seg" data-filter="error">ERROR</button>
+            </div>
+          </div>
+          <div class="card__body">
+            <table class="table">
+              <thead><tr><th>時刻</th><th>レベル</th><th>種別</th><th>メッセージ</th></tr></thead>
+              <tbody id="logBody">
+                <tr data-level="info"><td class="mono">14:32:08</td><td><span class="lvl lvl--info">INFO</span></td><td>summary</td><td>売上分析サマリーを生成しました (1,284 件)</td></tr>
+                <tr data-level="info"><td class="mono">14:31:44</td><td><span class="lvl lvl--info">INFO</span></td><td>webhook</td><td>reservation.updated を受信</td></tr>
+                <tr data-level="warn"><td class="mono">14:30:55</td><td><span class="lvl lvl--warn">WARN</span></td><td>media</td><td>メディア閲覧の応答が遅延しています (1.8s)</td></tr>
+                <tr data-level="error"><td class="mono">14:28:55</td><td><span class="lvl lvl--err">ERROR</span></td><td>webhook</td><td>media.uploaded の配信に失敗 (503)</td></tr>
+                <tr data-level="info"><td class="mono">14:27:30</td><td><span class="lvl lvl--info">INFO</span></td><td>auth</td><td>管理トークンで接続しました</td></tr>
+                <tr data-level="info"><td class="mono">14:20:11</td><td><span class="lvl lvl--info">INFO</span></td><td>gmail</td><td>cava4938yoyaku@gmail.com を再連携</td></tr>
+                <tr data-level="warn"><td class="mono">13:58:02</td><td><span class="lvl lvl--warn">WARN</span></td><td>rate</td><td>API レート上限の 80% に到達</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== ユーザー権限 ===== -->
+      <section class="panel" data-panel="users">
+        <div class="card">
+          <div class="card__head card__head--row">
+            <div><h2>メンバー</h2><p>このワークスペースのアクセス権限を管理します。</p></div>
+            <button class="btn btn--primary btn--sm">＋ メンバーを招待</button>
+          </div>
+          <div class="card__body">
+            <table class="table">
+              <thead><tr><th>名前</th><th>メール</th><th>役割</th><th>最終ログイン</th><th class="ta-r">操作</th></tr></thead>
+              <tbody>
+                <tr><td class="who"><span class="ava">佐</span>佐藤 健一</td><td class="mono">sato@cava.jp</td><td><span class="role role--admin">管理者</span></td><td>3 分前</td><td class="ta-r"><button class="btn btn--ghost btn--sm">編集</button></td></tr>
+                <tr><td class="who"><span class="ava">田</span>田中 美咲</td><td class="mono">tanaka@cava.jp</td><td><span class="role role--editor">編集者</span></td><td>1 時間前</td><td class="ta-r"><button class="btn btn--ghost btn--sm">編集</button></td></tr>
+                <tr><td class="who"><span class="ava">鈴</span>鈴木 大輔</td><td class="mono">suzuki@cava.jp</td><td><span class="role role--viewer">閲覧のみ</span></td><td>昨日</td><td class="ta-r"><button class="btn btn--ghost btn--sm">編集</button></td></tr>
+                <tr><td class="who"><span class="ava">山</span>山本 由香</td><td class="mono">yamamoto@cava.jp</td><td><span class="role role--editor">編集者</span></td><td>3 日前</td><td class="ta-r"><button class="btn btn--ghost btn--sm">編集</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+/* ============ LINE Summary Admin — interactions（vanilla / design_handoff admin.js 準拠） ============ */
+(function(){
+  var root = document.documentElement;
+  var TITLES = {
+    connect: ["接続設定", "管理トークンで接続し、各ページや連携アカウントを管理します。"],
+    usage:   ["利用状況", "サマリー生成・API 利用の状況を確認します。"],
+    webhook: ["Webhook設定", "店舗ごとの LINE Webhook 単位でレシート解析・返信・売上レポートを設定します。"],
+    logs:    ["ログ", "処理・エラーイベントを時系列で確認します。"],
+    users:   ["ユーザー権限", "ワークスペースのアクセス権限を管理します。"]
+  };
+
+  /* ---- tab routing ---- */
+  var navItems = document.querySelectorAll('.nav__item');
+  var panels = document.querySelectorAll('.panel');
+  function show(tab){
+    navItems.forEach(function(n){ n.classList.toggle('is-active', n.dataset.tab === tab); });
+    panels.forEach(function(p){ p.classList.toggle('is-active', p.dataset.panel === tab); });
+    var meta = TITLES[tab] || TITLES.connect;
+    document.getElementById('pageTitle').textContent = meta[0];
+    document.getElementById('pageDesc').textContent = meta[1];
+    try{ localStorage.setItem('lsa-tab', tab); }catch(e){}
+    var c = document.querySelector('.content'); if(c && c.scrollTo){ c.scrollTo({top:0}); }
+  }
+  navItems.forEach(function(n){ n.addEventListener('click', function(){ show(n.dataset.tab); }); });
+  var savedTab = (function(){ try{ return localStorage.getItem('lsa-tab'); }catch(e){ return null; } })();
+  if(savedTab && TITLES[savedTab]) show(savedTab);
+
+  /* ---- theme ---- */
+  var savedTheme = (function(){ try{ return localStorage.getItem('lsa-theme'); }catch(e){ return null; } })();
+  if(savedTheme) root.setAttribute('data-theme', savedTheme);
+  document.getElementById('themeToggle').addEventListener('click', function(){
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try{ localStorage.setItem('lsa-theme', next); }catch(e){}
+  });
+
+  /* ---- log filter ---- */
+  var segs = document.querySelectorAll('.seg[data-filter]');
+  segs.forEach(function(s){ s.addEventListener('click', function(){
+    segs.forEach(function(x){ x.classList.toggle('is-active', x === s); });
+    var f = s.dataset.filter;
+    document.querySelectorAll('#logBody tr').forEach(function(tr){
+      tr.style.display = (f === 'all' || tr.dataset.level === f) ? '' : 'none';
+    });
+  }); });
+
+  /* ---- segmented toggles (non-filter): visual active only ---- */
+  document.querySelectorAll('.filters').forEach(function(group){
+    if(group.querySelector('.seg[data-filter]')) return;
+    var items = group.querySelectorAll('.seg');
+    items.forEach(function(s){ s.addEventListener('click', function(){
+      items.forEach(function(x){ x.classList.toggle('is-active', x === s); });
+    }); });
+  });
+
+  /* ============ Webhook設定 — per-store card rendering ============ */
+  var BASE = 'https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook';
+  var STORES = [
+    { state:'approval', name:'LINE利用許可（承認専用）' },
+    { state:'setup', name:'ヴィオレット', slug:'violette', phone:'03-3354-6639', enabled:5 },
+    { state:'setup', name:'エリックスバイエリックトロション', slug:'erics', phone:'03-3212-9305', enabled:5 },
+    { state:'live', name:'ビストロ サヴァサヴァ', last:'2026/5/29 22:59:17', recv:226, rcpt:30, phone:'03-6457-4938',
+      users:[['岩澤 綾香','利用可'],['pingus','利用可'],['yoshito','利用可']], rooms:4, enabled:11 },
+    { state:'live', name:'マルゴ 四谷', last:'2026/5/30 0:25:21', recv:79, rcpt:7, phone:'03-5361-6205',
+      users:[['Kazuma','利用可'],['野際 洋平','利用可']], rooms:7, enabled:5 },
+    { state:'live', name:'マルゴ', last:'2026/5/30 0:52:26', recv:12, rcpt:1, phone:'03-3350-4605',
+      users:[['小林 道明','利用可']], rooms:3, enabled:7 },
+    { state:'live', name:'マルゴ 新橋', last:'2026/5/29 21:10:44', recv:31, rcpt:4, phone:'03-5843-7405',
+      users:[['pingus','利用可']], rooms:2, enabled:7 },
+    { state:'setup', name:'マルゴ D', slug:'marugoD', phone:'0566-70-8305', enabled:7 },
+    { state:'live', name:'マルゴ セカンド', last:'2026/5/28 15:30:08', recv:9, rcpt:0, phone:'03-3356-1052',
+      users:[], rooms:1, enabled:7 }
+  ];
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+  function badge(n){ return '<span class="chip ' + (n>=7?'chip--ok':'chip--warn') + '">機能 ' + n + '/14</span>'; }
+  function row(k, v){ return '<div class="wh-row"><span class="wh-row__k">' + k + '</span><span class="wh-row__v">' + v + '</span></div>'; }
+
+  function approval(s){
+    return '<div class="wh-card wh-card--approval">' +
+      '<div class="wh-card__top">' +
+        '<div class="wh-card__title"><h3>' + esc(s.name) + '</h3><span class="wh-sub">承認専用</span></div>' +
+        '<span class="wh-status wh-status--appr">Webhook未接続</span>' +
+      '</div>' +
+      '<p class="wh-hint">LINE 利用許可の承認専用アカウント。レシート解析・ルーム連携・売上機能は対象外です。</p>' +
+      '<div class="wh-rows">' + row('役割', '利用許可 / 不許可') + row('承認待ち', '0 件') + '</div>' +
+      '<div class="wh-card__foot"><div class="btn-row-l">' +
+        '<button class="btn btn--primary btn--sm">承認待ち一覧</button>' +
+        '<button class="btn btn--ghost btn--sm">再読込</button></div></div>' +
+    '</div>';
+  }
+  function setup(s){
+    return '<div class="wh-card">' +
+      '<div class="wh-card__top">' +
+        '<div class="wh-card__title"><h3>' + esc(s.name) + '</h3><span class="wh-sub">' + esc(s.slug) + '</span></div>' +
+        '<span class="wh-status wh-status--setup">未接続</span>' +
+      '</div>' +
+      '<p class="wh-hint">Webhook URL を LINE Developers に登録すると、検証後に自動で有効化されます。</p>' +
+      '<div class="wh-url-row"><span class="wh-url">' + BASE + '/' + esc(s.slug) + '</span>' +
+        '<button class="btn btn--ghost btn--sm" data-copy-text>コピー</button></div>' +
+      '<div class="wh-rows">' + row('照合電話', '<span class="wh-phone">' + esc(s.phone) + '</span><button class="wh-linkbtn">編集</button>') + '</div>' +
+      '<div class="wh-card__foot"><button class="btn btn--primary btn--sm">Webhook設定</button>' + badge(s.enabled) + '</div>' +
+    '</div>';
+  }
+  function live(s){
+    var users = s.users.length ? (s.users.length + ' 名') : '未登録';
+    return '<div class="wh-card wh-card--live">' +
+      '<div class="wh-card__top">' +
+        '<div class="wh-card__title"><h3>' + esc(s.name) + '</h3><span class="wh-sub">最終受信 ' + esc(s.last) + '</span></div>' +
+        '<span class="wh-status wh-status--live">通信中</span>' +
+      '</div>' +
+      '<div class="wh-rows">' +
+        row('受信 / レシート', '<span class="mono">' + s.recv + '</span> / <span class="mono">' + s.rcpt + '</span> 件') +
+        row('照合電話', '<span class="wh-phone">' + esc(s.phone) + '</span><button class="wh-linkbtn">編集</button>') +
+        row('ユーザー権限', users + '<button class="wh-linkbtn">' + (s.users.length?'編集':'開く') + '</button>') +
+        row('連携ルーム', s.rooms + ' 件') +
+      '</div>' +
+      '<div class="wh-card__foot"><button class="btn btn--primary btn--sm">権限・機能設定</button>' + badge(s.enabled) + '</div>' +
+    '</div>';
+  }
+
+  var grid = document.getElementById('whGrid');
+  if(grid){
+    grid.innerHTML = STORES.map(function(s){
+      return s.state==='approval' ? approval(s) : s.state==='setup' ? setup(s) : live(s);
+    }).join('');
+  }
+
+  /* ---- copy buttons (copies preceding code/.wh-url, or sibling .input) ---- */
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('[data-copy-text]'); if(!b) return;
+    var src = b.previousElementSibling;
+    var txt = src ? ((src.querySelector('code') ? src.querySelector('code').textContent : src.textContent) || '').trim() : '';
+    if(txt && navigator.clipboard){ navigator.clipboard.writeText(txt).catch(function(){}); }
+    var o = b.textContent; b.textContent = 'コピー済'; setTimeout(function(){ b.textContent = o; }, 1200);
+  });
+})();
+</script>
+</body>
+</html>
