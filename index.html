@@ -4203,6 +4203,27 @@
     .app-v2-header, .app-v2-main { margin-left: 0; }
   }
 
+  /* ===== リスキン③: 共通コンポーネント（新デザイン・両テーマ／CSSのみ・機能不変） ===== */
+  .card { padding: 18px; }
+  .card > h2, .card h2 { border-bottom-color: var(--border); color: var(--text); }
+  .input, .select, .button {
+    min-height: 38px; border-radius: 9px; border: 1px solid var(--border-strong);
+    background: var(--surface-2); color: var(--text); padding: 0 12px;
+  }
+  .input:focus, .select:focus, textarea:focus {
+    outline: none; border-color: var(--accent); background: var(--surface);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .input::placeholder { color: var(--text-3); }
+  .button { font-weight: 600; letter-spacing: 0; cursor: pointer; }
+  .button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .button.primary:hover { background: var(--accent-press); }
+  .button.warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+  .button.media-highlight { background: var(--ok-soft); border-color: transparent; color: var(--ok); box-shadow: none; }
+  .pill { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 5px 11px; }
+  .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); background: var(--ok-soft); }
+  button.pill { cursor: pointer; }
+
   /* カード */
   body[data-theme='dark'] .card { background: rgba(10,24,38,0.86) !important; border-color: rgba(155,220,255,0.22) !important; box-shadow: 0 10px 28px rgba(0,0,0,0.35) !important; }
   body[data-theme='dark'] .card h2 { color: #e7f6ff !important; border-bottom-color: rgba(155,220,255,0.18) !important; }
