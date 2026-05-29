@@ -657,6 +657,7 @@ Deno.serve(async (req) => {
           message_search_library_enabled: payload.message_search_library_enabled,
           media_file_access_enabled: payload.media_file_access_enabled,
           image_analysis_reply_enabled: payload.image_analysis_reply_enabled,
+          receipt_correction_reply_enabled: payload.receipt_correction_reply_enabled,
           gmail_reservation_alert_enabled: payload.gmail_reservation_alert_enabled,
           receipt_midreport_enabled: payload.receipt_midreport_enabled,
           receipt_monthend_report_enabled: payload.receipt_monthend_report_enabled,
@@ -5535,6 +5536,7 @@ function buildRoomSettingsPayload(body: unknown): {
   message_search_library_enabled: boolean
   media_file_access_enabled: boolean
   image_analysis_reply_enabled: boolean
+  receipt_correction_reply_enabled: boolean
   gmail_reservation_alert_enabled: boolean
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
@@ -5642,6 +5644,12 @@ function buildRoomSettingsPayload(body: unknown): {
   }
   const imageAnalysisReplyEnabled = imageAnalysisReplyEnabledRaw !== false
 
+  const receiptCorrectionReplyEnabledRaw = body.receipt_correction_reply_enabled
+  if (receiptCorrectionReplyEnabledRaw != null && typeof receiptCorrectionReplyEnabledRaw !== "boolean") {
+    throw { status: 400, message: "receipt_correction_reply_enabled must be boolean when provided." } satisfies AppError
+  }
+  const receiptCorrectionReplyEnabled = receiptCorrectionReplyEnabledRaw === true
+
   const gmailReservationAlertEnabledRaw = body.gmail_reservation_alert_enabled
   if (gmailReservationAlertEnabledRaw != null && typeof gmailReservationAlertEnabledRaw !== "boolean") {
     throw { status: 400, message: "gmail_reservation_alert_enabled must be boolean when provided." } satisfies AppError
@@ -5717,6 +5725,7 @@ function buildRoomSettingsPayload(body: unknown): {
     message_search_library_enabled: messageSearchLibraryEnabled,
     media_file_access_enabled: mediaFileAccessEnabled,
     image_analysis_reply_enabled: imageAnalysisReplyEnabled,
+    receipt_correction_reply_enabled: receiptCorrectionReplyEnabled,
     gmail_reservation_alert_enabled: gmailReservationAlertEnabled,
     receipt_midreport_enabled: receiptMidreportEnabled,
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,

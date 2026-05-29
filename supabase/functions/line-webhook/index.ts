@@ -639,14 +639,18 @@ Deno.serve(async (req) => {
 
     // AI返信完全無し（bot_reply_hard_mute_enabled）: このルームでは一切返信しない。
     // レシートの解析結果を送信（image_analysis_reply_enabled）: OFF なら解析カード等を返信しない。
+    // レシート修正の返信を許可（receipt_correction_reply_enabled）: ON なら AI返信完全無しでも
+    //   修正系の返信（修正ボタン・加算/中止/置換・削除確認）を送る（解析返信と同じ優先ロジック）。
     // 生ログ・レシート保存・会話記録などの処理はそのまま継続する。
     let roomHardMuted = false
     let suppressReceiptReply = false
+    let allowCorrectionReply = false
     if (eventRoomId) {
       const muteFlags = await loadRoomSearchFlagsCached(eventRoomId)
       roomHardMuted = !!muteFlags?.bot_reply_hard_mute_enabled
       // flags が null（DB エラー）のときはデフォルト送信（suppressReceipt = false）
       suppressReceiptReply = muteFlags !== null ? !muteFlags.image_analysis_reply_enabled : false
+      allowCorrectionReply = muteFlags !== null ? !!muteFlags.receipt_correction_reply_enabled : false
     }
 
     if (event.type === 'message' && event.message?.type === 'image') {
@@ -698,8 +702,8 @@ Deno.serve(async (req) => {
             postbackData,
           )
           if (correctionPayload) {
-            // 修正は適用済み。AI返信完全無しのルームでは返信のみ抑止する。
-            if (!roomHardMuted) {
+            // 修正は適用済み。AI返信完全無しでも「レシート修正の返信を許可」がONなら返信する。
+            if (!roomHardMuted || allowCorrectionReply) {
               await replyLineMessages(
                 postbackReplyToken,
                 lineReplyPayloadToMessages(correctionPayload),
@@ -769,7 +773,7 @@ Deno.serve(async (req) => {
 
       let receiptHandled = false
       try {
-        const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, roomHardMuted)
+        const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, roomHardMuted && !allowCorrectionReply)
         receiptHandled = result.handled
         if (result.handled) textHandled += 1
         if (result.replied) receiptReplies += 1

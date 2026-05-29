@@ -4699,6 +4699,7 @@
         <div class="room-scope-modal-list" style="margin-top:12px;">
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigMediaAccess" type="checkbox">LINE添付保存（ルーム）</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigImageAnalysisReplyEnabled" type="checkbox">レシートの解析結果を送信</label>
+          <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptCorrectionReplyEnabled" type="checkbox">レシート修正の返信を許可（AI返信完全無しでも修正は返信）</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMidreportEnabled" type="checkbox"><span id="roomConfigReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMonthendReportEnabled" type="checkbox"><span id="roomConfigReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
         </div>
@@ -5168,6 +5169,7 @@
       roomConfigTomorrowReminder: document.getElementById('roomConfigTomorrowReminder'),
       roomConfigMediaAccess: document.getElementById('roomConfigMediaAccess'),
       roomConfigImageAnalysisReplyEnabled: document.getElementById('roomConfigImageAnalysisReplyEnabled'),
+      roomConfigReceiptCorrectionReplyEnabled: document.getElementById('roomConfigReceiptCorrectionReplyEnabled'),
       roomConfigGoogleCalendarAutoRegister: document.getElementById('roomConfigGoogleCalendarAutoRegister'),
       roomConfigCalendarRegistrationReply: document.getElementById('roomConfigCalendarRegistrationReply'),
       roomConfigCalendarLowConfidenceConfirmReply: document.getElementById('roomConfigCalendarLowConfidenceConfirmReply'),
@@ -7243,6 +7245,7 @@
         receive_overall_summary_enabled: !!(dom.roomConfigReceiveOverallSummary && dom.roomConfigReceiveOverallSummary.checked),
         media_file_access_enabled: !!dom.roomConfigMediaAccess.checked,
         image_analysis_reply_enabled: !!(dom.roomConfigImageAnalysisReplyEnabled && dom.roomConfigImageAnalysisReplyEnabled.checked),
+        receipt_correction_reply_enabled: !!(dom.roomConfigReceiptCorrectionReplyEnabled && dom.roomConfigReceiptCorrectionReplyEnabled.checked),
         receipt_midreport_enabled: !!(dom.roomConfigReceiptMidreportEnabled && dom.roomConfigReceiptMidreportEnabled.checked),
         receipt_monthend_report_enabled: !!(dom.roomConfigReceiptMonthendReportEnabled && dom.roomConfigReceiptMonthendReportEnabled.checked),
         receipt_report_store_partition_key: (activeWebhookConfigStoreKey && activeWebhookConfigStoreKey !== GLOBAL_CONFIG_SCOPE_KEY)
@@ -10563,6 +10566,7 @@
           calendar_tomorrow_reminder_enabled: setting && setting.calendar_tomorrow_reminder_enabled === true,
           media_file_access_enabled: (setting && setting.media_file_access_enabled) !== false,
           image_analysis_reply_enabled: (setting && setting.image_analysis_reply_enabled) !== false,
+          receipt_correction_reply_enabled: !!(setting && setting.receipt_correction_reply_enabled),
           calendar_ai_auto_create_enabled: gCalMerged,
           calendar_silent_auto_register_enabled: gCalMerged,
           calendar_low_confidence_confirm_reply_enabled: !!(setting && setting.calendar_low_confidence_confirm_reply_enabled),
@@ -10629,6 +10633,9 @@
       dom.roomConfigMediaAccess.checked = !!config.media_file_access_enabled;
       if (dom.roomConfigImageAnalysisReplyEnabled) {
         dom.roomConfigImageAnalysisReplyEnabled.checked = !!config.image_analysis_reply_enabled;
+      }
+      if (dom.roomConfigReceiptCorrectionReplyEnabled) {
+        dom.roomConfigReceiptCorrectionReplyEnabled.checked = !!config.receipt_correction_reply_enabled;
       }
       if (dom.roomConfigReceiptMidreportEnabled) {
         dom.roomConfigReceiptMidreportEnabled.checked = config.receipt_midreport_enabled !== false;
