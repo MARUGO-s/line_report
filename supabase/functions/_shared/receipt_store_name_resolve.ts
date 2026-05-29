@@ -27,41 +27,123 @@ const RECEIPT_LATIN_BRAND_PROFILES: ReadonlyArray<{
   },
 ]
 
-/** Webhook 登録名（カタカナ等）とレシート OCR 名（英字等）を同一店舗として扱う */
+/**
+ * Webhook 登録名（カタカナ等）とレシート OCR 名（英字等）を同一店舗として扱う。
+ * 公式サイト（05-marugo-group.com）の各店ページから抽出したアルファベット表記を網羅。
+ * partitionKey は store_webhook_tables の store_partition_key を小文字化したもの
+ * （照合時 registryPk も小文字化されるため）。
+ */
 const RECEIPT_BRAND_PARTITION_ALIASES: ReadonlyArray<{
   partitionKey: string
   labels: string[]
 }> = [
+  // 単独「マルゴ」: 四谷/新橋/丸の内 等の部分一致で誤爆しないよう完全一致のみで運用する
+  {
+    partitionKey: 'marugo',
+    labels: ['マルゴ', 'MARUGO'],
+  },
+  {
+    partitionKey: 'marugosecond',
+    labels: ['マルゴ セカンド', 'マルゴセカンド', 'マルゴ2', 'MARUGO II', 'MARUGOII', 'MARUGO2', 'MARUGO SECOND'],
+  },
+  {
+    partitionKey: 'marugogrande',
+    labels: ['マルゴ グランデ', 'マルゴグランデ', 'MARUGO GRANDE', 'MARUGOGRANDE'],
+  },
+  {
+    partitionKey: 'sannanaichi',
+    labels: ['サンナナイチ バル', 'サンナナイチバル', '371BAR', '371 BAR', 'SAN NANA ICHI BAR', 'SANNANAICHI'],
+  },
+  {
+    partitionKey: 'shenlong',
+    labels: ['シェンロン&クラウディア', 'シェンロンクラウディア', 'シェンロン', 'X&C', 'XENLON TOKYO', 'XENLON', 'XENLON&CLAUDIA'],
+  },
+  {
+    partitionKey: 'claudia2',
+    labels: ['クラウディア2', 'クラウディアツー', 'Pizzeria Claudia2', 'PIZZERIA CLAUDIA2', 'CLAUDIA2'],
+  },
+  {
+    partitionKey: 'sauvage',
+    labels: ['ソバージュ', 'SOBA-JU', 'SOBAJU', 'SOBA JU'],
+  },
+  {
+    partitionKey: 'barpelota',
+    labels: ['バルぺロタ', 'バルペロタ', 'BAR PELOTA', 'BARPELOTA', 'PELOTA'],
+  },
+  {
+    partitionKey: 'briccola',
+    labels: ['トラットリア ブリッコラ', 'トラットリアブリッコラ', 'TRATTORIA Briccola', 'TRATTORIA BRICCOLA', 'BRICCOLA'],
+  },
+  {
+    partitionKey: 'violette',
+    labels: ['ヴィオレット', 'バイオレット', 'Bar Violet', 'BAR VIOLET', 'BARVIOLET', 'VIOLET', 'VIOLETTE'],
+  },
+  {
+    partitionKey: 'marugootto',
+    labels: ['マルゴ オット', 'マルゴオット', 'MARUGO-OTTO', 'MARUGO OTTO', 'MARUGOOTTO'],
+  },
+  {
+    partitionKey: 'donaiya',
+    labels: ['元祖どないや 新宿三丁目店', '元祖どないや', 'どないや', 'どないや 新宿三丁目店', 'どないや新宿三丁目店', 'DONAIYA'],
+  },
+  {
+    partitionKey: 'marugoyotsuya',
+    labels: ['マルゴ 四谷', 'マルゴ四谷', 'マルコ四谷', 'マルコ 四谷', 'マルコ四谷名', 'MARUGO YOTSUYA', 'MARUGOYOTSUYA'],
+  },
+  {
+    partitionKey: 'sushikoruri',
+    labels: ['鮨こるり', 'すしこるり', 'SUSHI KORURI', 'SUSHIKORURI', 'KORURI'],
+  },
   {
     partitionKey: 'bistrocavacava',
     labels: [
       'BISTRO CAVA CAVA',
+      'BISTRO CAVA,CAVA',
       'BISTROCAVACAVA',
       'CAVA CAVA',
       'CAVA,CAVA',
       'CAVA.CAVA',
       'ビストロ サヴァサヴァ',
       'ビストロサヴァサヴァ',
+      'サヴァサヴァ',
       'ÇAVA ÇAVA',
     ],
   },
   {
-    partitionKey: 'marugoyotsuya',
-    labels: [
-      'マルゴ 四谷',
-      'マルゴ四谷',
-      'マルコ四谷',
-      'マルコ 四谷',
-      'マルコ四谷名',
-    ],
+    partitionKey: 'marugos', // DB: marugoS（照合は小文字化されるため小文字キー）
+    labels: ['マルゴエス', 'マルゴ エス', 'マルゴ S', 'MARUGO S', 'MARUGOS'],
   },
   {
     partitionKey: 'marugoshinbashi',
-    labels: ['マルゴ 新橋', 'マルゴ新橋', 'マルコ新橋', 'マルコ 新橋'],
+    labels: ['マルゴ 新橋', 'マルゴ新橋', 'マルコ新橋', 'マルコ 新橋', 'MARUGO SHINBASHI', 'MARUGOSHINBASHI'],
   },
   {
     partitionKey: 'marugomarunouchi',
-    labels: ['マルゴ丸の内', 'マルゴ 丸の内', 'マルコ丸の内'],
+    labels: ['マルゴ丸の内', 'マルゴ 丸の内', 'マルコ丸の内', 'MARUGO MARUNOUCHI', 'MARUGOMARUNOUCHI'],
+  },
+  {
+    partitionKey: 'yakinikumarugo',
+    labels: ['焼肉マルゴ', '焼肉 マルゴ', 'Yakiniku MARUGO', 'YAKINIKU MARUGO', 'YAKINIKUMARUGO', '焼肉MARUGO'],
+  },
+  {
+    partitionKey: 'erics',
+    labels: [
+      'エリックスバイエリックトロション',
+      'エリックス',
+      'エリックトロション',
+      "eric'S by Eric Trochon",
+      'ERICS',
+      "ERIC'S",
+      'ERIC TROCHON',
+    ],
+  },
+  {
+    partitionKey: 'mitan',
+    labels: ['ミタン', 'MITAN'],
+  },
+  {
+    partitionKey: 'marugod', // DB: marugoD（照合は小文字化されるため小文字キー）
+    labels: ['マルゴ D', 'マルゴD', 'マルゴ ディー', 'MARUGO-D', 'MARUGO D', 'MARUGOD'],
   },
 ]
 
@@ -265,7 +347,12 @@ export function findBestStoreNameInText(text: string): string | null {
   return tryMatchReceiptLatinBrand(String(text || '').trim())
 }
 
-function collectNameMatchTokens(rawName: string): Set<string> {
+/**
+ * @param expand true のとき resolveBestStoreName による正規名展開も含める（入力＝OCR名向け）。
+ *   ラベル（既に正規名）側で展開すると "マルゴ"→"マルゴ セカンド" のような貪欲一致で
+ *   別店トークンが混入し誤マッチするため、ラベル側は expand=false で呼ぶこと。
+ */
+function collectNameMatchTokens(rawName: string, expand = true): Set<string> {
   const tokens = new Set<string>()
   const trimmed = sanitizeReceiptOcrStoreName(String(rawName || '').trim())
   if (!trimmed) return tokens
@@ -273,10 +360,12 @@ function collectNameMatchTokens(rawName: string): Set<string> {
   const norm = normalizeStoreToken(trimmed)
   if (norm) tokens.add(norm)
 
-  const resolved = resolveBestStoreName(trimmed)
-  if (resolved) {
-    const resolvedNorm = normalizeStoreToken(resolved)
-    if (resolvedNorm) tokens.add(resolvedNorm)
+  if (expand) {
+    const resolved = resolveBestStoreName(trimmed)
+    if (resolved) {
+      const resolvedNorm = normalizeStoreToken(resolved)
+      if (resolvedNorm) tokens.add(resolvedNorm)
+    }
   }
 
   const latin = extractLatinLettersLower(trimmed)
@@ -291,6 +380,11 @@ function collectNameMatchTokens(rawName: string): Set<string> {
   return tokens
 }
 
+/** ラベル（正規名）用: 貪欲展開なしのトークン化 */
+function collectLabelMatchTokens(label: string): Set<string> {
+  return collectNameMatchTokens(label, false)
+}
+
 /** レシート OCR 店名がどの store_partition_key に属するか（揺らぎ・英字/カタカナ混在） */
 export function resolveReceiptNamePartitionKey(rawName: string | null | undefined): string | null {
   const trimmed = String(rawName ?? '').trim()
@@ -298,20 +392,44 @@ export function resolveReceiptNamePartitionKey(rawName: string | null | undefine
 
   const tokens = collectNameMatchTokens(trimmed)
 
+  // Pass 1: 完全一致を最優先（「マルゴ」=marugo が四谷/新橋/丸の内に化けるのを防ぐ）。
+  // 例: "MARUGO GRANDE" は marugogrande の完全一致が先に決まり、bare marugo の部分一致では奪われない。
   for (const brand of RECEIPT_BRAND_PARTITION_ALIASES) {
     for (const label of brand.labels) {
-      const labelTokens = collectNameMatchTokens(label)
+      const labelTokens = collectLabelMatchTokens(label)
       for (const t of tokens) {
+        if (!t) continue
         for (const lt of labelTokens) {
-          if (!t || !lt) continue
-          if (t === lt) return brand.partitionKey
-          const minLen = Math.min(t.length, lt.length)
-          if (minLen >= 4 && (t.includes(lt) || lt.includes(t))) {
-            return brand.partitionKey
+          if (lt && t === lt) return brand.partitionKey
+        }
+      }
+    }
+  }
+
+  // Pass 2: 部分一致は「最も長いラベルトークン（=より具体的）」を優先採用する。
+  // 完全一致が無かった場合のみ到達するため、bare marugo(6) より marugoshinbashi(15) 等が勝つ。
+  {
+    let bestPk: string | null = null
+    let bestMatchLen = 0
+    for (const brand of RECEIPT_BRAND_PARTITION_ALIASES) {
+      for (const label of brand.labels) {
+        const labelTokens = collectLabelMatchTokens(label)
+        for (const t of tokens) {
+          if (!t) continue
+          for (const lt of labelTokens) {
+            if (!lt) continue
+            const minLen = Math.min(t.length, lt.length)
+            if (minLen >= 4 && (t.includes(lt) || lt.includes(t))) {
+              if (lt.length > bestMatchLen) {
+                bestMatchLen = lt.length
+                bestPk = brand.partitionKey
+              }
+            }
           }
         }
       }
     }
+    if (bestPk) return bestPk
   }
 
   const latinBrand = tryMatchReceiptLatinBrand(trimmed)

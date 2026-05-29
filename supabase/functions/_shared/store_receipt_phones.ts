@@ -7,9 +7,9 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0
 import { RECEIPT_SHEETS_STORE_CATALOG } from './receipt_sheets_store_catalog.ts'
 import type { StoreRegistryRow } from './store_receipt.ts'
 
-/** 数字のみ（先頭0あり10〜11桁） */
+/** 数字のみ（先頭0あり10〜11桁）。全角数字・全角ハイフンも NFKC で吸収する。 */
 export function normalizeReceiptPhoneDigits(raw: unknown): string | null {
-  const s = String(raw ?? '').trim()
+  const s = String(raw ?? '').trim().normalize('NFKC')
   if (!s) return null
   const digits = s.replace(/\D/g, '')
   if (digits.length < 10 || digits.length > 11) return null
@@ -51,10 +51,35 @@ export function extractJapanesePhoneFromText(
   return null
 }
 
-/** コード内フォールバック（DB 未設定店舗） */
+/**
+ * コード内フォールバック（DB 未設定店舗）。
+ * 公式サイト（05-marugo-group.com）の各店ページ INFORMATION 欄から抽出した代表電話。
+ * キーは小文字（参照時に store_partition_key を小文字化して引くため。marugoS→marugos / marugoD→marugod）。
+ * レシート印字の電話が店名の揺らぎ／OCR 誤りを補う補助マッチとして機能する。
+ */
 export const STORE_RECEIPT_PHONES: Readonly<Record<string, readonly string[]>> = {
+  marugo: ['0333504605'],
+  marugosecond: ['0333561052'],
+  marugogrande: ['0364577305'],
+  sannanaichi: ['0333530371'],
+  shenlong: ['0333538636'],
+  claudia2: ['0362731083'],
+  sauvage: ['0363801705'],
+  barpelota: ['0359258605'],
+  briccola: ['0353693530'],
+  violette: ['0333546639'],
+  marugootto: ['0353154800'],
+  donaiya: ['0353127405'],
   marugoyotsuya: ['0353616205'],
+  sushikoruri: ['07054506056'],
   bistrocavacava: ['0364574938'],
+  marugos: ['0368018705'], // DB: marugoS
+  marugoshinbashi: ['0358437405'],
+  marugomarunouchi: ['0362699105'],
+  yakinikumarugo: ['0362591729'],
+  erics: ['0333129305'],
+  mitan: ['0332127305'],
+  marugod: ['0566708305'], // DB: marugoD
 }
 
 export type StoreReceiptPhoneIndex = Readonly<Record<string, readonly string[]>>
