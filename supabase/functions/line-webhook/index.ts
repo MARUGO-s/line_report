@@ -213,11 +213,13 @@ async function processReceiptImageEvent(
   event: LineEvent,
   suppressAll = false,          // bot_reply_hard_mute_enabled: 一切返信しない
   suppressReceiptReply = false, // !image_analysis_reply_enabled: レシート結果のみ返信しない
+  suppressNonReceiptReply = false, // !non_receipt_image_reply_enabled: 非レシート画像の返信のみ抑止
 ): Promise<{ saved: boolean; replied: boolean; reason?: string }> {
   const lineMessageId = String(event.message?.id ?? '').trim()
   const rawReplyToken = String(event.replyToken ?? '').trim()
-  // 非レシート画像（「画像を確認しました」等）の返信: AI返信完全無しのみで抑止
-  const nonReceiptReplyToken = suppressAll ? '' : rawReplyToken
+  // 非レシート画像（「画像を確認しました」等）の返信: AI返信完全無し、または
+  // 「画像解析結果を送信（その他権限）」OFF で抑止。レシート画像の返信とは独立。
+  const nonReceiptReplyToken = (suppressAll || suppressNonReceiptReply) ? '' : rawReplyToken
   // レシート関連の返信（解析カード・確信度警告・店舗不一致・取得失敗）:
   // 「レシートの解析結果を送信」OFF のときのみ抑止。AI返信完全無しより優先される。
   const receiptReplyToken = suppressReceiptReply ? '' : rawReplyToken
@@ -644,18 +646,20 @@ Deno.serve(async (req) => {
     // 生ログ・レシート保存・会話記録などの処理はそのまま継続する。
     let roomHardMuted = false
     let suppressReceiptReply = false
+    let suppressNonReceiptReply = false
     let allowCorrectionReply = false
     if (eventRoomId) {
       const muteFlags = await loadRoomSearchFlagsCached(eventRoomId)
       roomHardMuted = !!muteFlags?.bot_reply_hard_mute_enabled
-      // flags が null（DB エラー）のときはデフォルト送信（suppressReceipt = false）
+      // flags が null（DB エラー）のときはデフォルト送信（suppress = false）
       suppressReceiptReply = muteFlags !== null ? !muteFlags.image_analysis_reply_enabled : false
+      suppressNonReceiptReply = muteFlags !== null ? !muteFlags.non_receipt_image_reply_enabled : false
       allowCorrectionReply = muteFlags !== null ? !!muteFlags.receipt_correction_reply_enabled : false
     }
 
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
-        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply)
+        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply, suppressNonReceiptReply)
         if (result.saved) receiptsSaved += 1
         if (result.replied) receiptReplies += 1
         if (result.reason && !result.saved) {
