@@ -484,11 +484,24 @@ export async function fetchReceiptSalesState(
     ? resolveStorePartitionKey(selectedStoreKeyRaw, registryKeys)
     : ''
 
+  // 売上は「レシート日付（営業日）」基準で集計する。
+  // created_at（アップロード/取込時刻）で絞ると、過去日を後から取り込んだ／別経路で
+  // 同期したレシートが当月の取得窓から外れ、receipt_date が当月でも表示されない不具合になる。
+  // そのため receipt_date の範囲で取得する（レシート返信カードの月間集計と同じ基準）。
+  const receiptFrom = dayKeys.length > 0 ? dayKeys[0] : `${month}-01`
+  let receiptToExclusive: string | undefined
+  const monthMatch = /^(\d{4})-(\d{2})$/.exec(month)
+  if (monthMatch) {
+    const y = Number(monthMatch[1])
+    const mo = Number(monthMatch[2])
+    const ny = mo === 12 ? y + 1 : y
+    const nmo = mo === 12 ? 1 : mo + 1
+    receiptToExclusive = `${String(ny).padStart(4, '0')}-${String(nmo).padStart(2, '0')}-01`
+  }
   const rows = await queryStoreReceiptRows(supabase, {
     storeKey: resolvedStoreKey || undefined,
-    createdFrom: range.startIso,
-    createdTo: range.endIso,
-    orderByCreatedAt: true,
+    receiptFrom,
+    receiptTo: receiptToExclusive,
     limit: 20000,
   })
 
