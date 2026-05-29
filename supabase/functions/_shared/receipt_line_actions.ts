@@ -3,6 +3,11 @@ import { normalizeInlineText } from './receipt_parse.ts'
 const LINE_MESSAGING_URI_MAX_LEN = 1000
 const LINE_MESSAGE_ACTION_TEXT_MAX_LEN = 300
 const ANALYTICS_BASE = 'https://marugo-s.github.io/line_report/analytics.html'
+/**
+ * 売上ページ(analytics.html)のデプロイ版数。URL に ?v= で付与してブラウザ／LINEアプリ内
+ * ブラウザのキャッシュを無効化する。analytics.html の UI を更新したらこの値を更新する。
+ */
+const ANALYTICS_APP_VERSION = '20260530'
 
 function normalizeForRuleParsing(raw: string): string {
   return normalizeInlineText(String(raw ?? '').normalize('NFKC'))
@@ -55,6 +60,7 @@ export function buildReceiptAnalyticsDashboardUri(
     store_key: storePartitionKey,
     month: targetMonth,
     from: 'line',
+    v: ANALYTICS_APP_VERSION,
   })
   const loginToken = String(options?.loginToken ?? '').trim()
   if (loginToken) params.set('lt', loginToken)
@@ -64,10 +70,11 @@ export function buildReceiptAnalyticsDashboardUri(
     const withoutToken = `${ANALYTICS_BASE}?${new URLSearchParams({
       store_key: storePartitionKey,
       month: targetMonth,
+      v: ANALYTICS_APP_VERSION,
     }).toString()}`
     if (withoutToken.length <= LINE_MESSAGING_URI_MAX_LEN) return withoutToken
   }
-  return `${ANALYTICS_BASE}?store_key=${encodeURIComponent(storePartitionKey)}`.slice(0, LINE_MESSAGING_URI_MAX_LEN)
+  return `${ANALYTICS_BASE}?store_key=${encodeURIComponent(storePartitionKey)}&v=${ANALYTICS_APP_VERSION}`.slice(0, LINE_MESSAGING_URI_MAX_LEN)
 }
 
 export type ReceiptCorrectionStartDirective = {
