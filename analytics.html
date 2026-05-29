@@ -84,6 +84,28 @@
       -webkit-font-smoothing: antialiased;
       padding: 20px;
     }
+    /* ===== リスキン④: 左サイドバー（管理コンソールと統一） ===== */
+    body { padding-left: 240px; }
+    .lsa-side { position: fixed; left: 0; top: 0; bottom: 0; width: 220px; z-index: 600; background: var(--sidebar); padding: 14px 12px; display: flex; flex-direction: column; overflow-y: auto; }
+    .lsa-side-brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 16px; color: var(--side-text-strong); font-weight: 600; font-size: 14px; line-height: 1.25; }
+    .lsa-side-brand .mk { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 12px; letter-spacing: .04em; flex: none; }
+    .lsa-side-brand small { display: block; color: var(--side-text); font-weight: 400; font-size: 10.5px; }
+    .lsa-nav { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+    .lsa-navlabel { font-size: 11px; letter-spacing: .08em; color: var(--text-3); margin: 14px 10px 6px; font-weight: 600; }
+    .lsa-navitem { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px; color: var(--side-text); text-decoration: none; font-weight: 500; font-size: 13.5px; transition: background .14s, color .14s; }
+    .lsa-navitem:hover { background: var(--sidebar-2); color: var(--side-text-strong); }
+    .lsa-navitem.is-active { background: var(--accent); color: #fff; box-shadow: 0 6px 16px -8px var(--accent); }
+    .lsa-side-foot { margin-top: auto; padding-top: 14px; }
+    .lsa-side-foot .conn { display: flex; align-items: center; gap: 9px; padding: 10px; border-radius: 10px; background: var(--sidebar-2); color: var(--side-text); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+    .lsa-side-foot .conn b { display: block; color: var(--side-text-strong); font-size: 12.5px; font-weight: 600; font-family: "IBM Plex Sans JP", sans-serif; }
+    .lsa-side-foot .conn .dt { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
+    @media (max-width: 920px) {
+      body { padding-left: 20px; }
+      .lsa-side { position: static; width: auto; flex-direction: row; align-items: center; gap: 8px; padding: 10px; overflow-x: auto; margin: -20px -20px 16px; }
+      .lsa-side-brand { padding: 0 8px 0 4px; }
+      .lsa-nav { flex-direction: row; margin: 0; }
+      .lsa-navlabel, .lsa-side-foot { display: none; }
+    }
     .app { max-width: 1360px; margin: 0 auto; display: grid; gap: 16px; }
     .hero, .card {
       border-radius: var(--radius);
@@ -500,6 +522,23 @@
   </style>
 </head>
 <body>
+
+  <aside class="lsa-side">
+    <div class="lsa-side-brand"><span class="mk">LS</span><span>LINE Summary<small>Admin Console</small></span></div>
+    <nav class="lsa-nav">
+      <p class="lsa-navlabel">運用</p>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','auth')}catch(e){}">接続設定</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','global')}catch(e){}">利用状況</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','webhook')}catch(e){}">Webhook設定</a>
+      <p class="lsa-navlabel">ページ</p>
+      <a class="lsa-navitem is-active" href="analytics.html" aria-current="page">売上分析</a>
+      <p class="lsa-navlabel">監査</p>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','logs')}catch(e){}">ログ</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','permissions')}catch(e){}">ユーザー権限</a>
+    </nav>
+    <div class="lsa-side-foot"><div class="conn"><span class="dt"></span><span><b>接続済み</b>hocbnifuactbvmyjraxy</span></div></div>
+  </aside>
+
 <div class="app">
 
   <!-- Header -->
