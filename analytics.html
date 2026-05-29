@@ -22,100 +22,66 @@
   <script src="vendor/chart.umd.min.js"></script>
   <style>
     :root {
-      --bg0: #061320;
-      --bg1: #173247;
-      --card: rgba(8,21,35,0.84);
-      --line: rgba(155,220,255,0.25);
-      --txt: #e7f6ff;
-      --sub: #a6cadf;
-      --ok: #69edbf;
-      --accent: #57d8ff;
-      --warn: #ffd17e;
-      --bad: #ff7c9f;
-      --radius: 16px;
-      --shadow: 0 20px 45px rgba(0,0,0,0.35);
-      --c-gross: #59dcff;
-      --c-net: #6cf0be;
-      --c-tax: #ffd07d;
-      --c-party: #9de6b6;
-      --c-guest: #ff9fbf;
-      --c-rain: #7ab4ff;
-      --c-temp: #ffb347;
+      /* ===== 新デザイン トークン（admin.css 準拠・ライト基準・compact） ===== */
+      --accent: #2563d4; --accent-press: #1f54b3; --accent-soft: rgba(37,99,212,.10);
+      --surface: #ffffff; --surface-2: #f5f7fa;
+      --sidebar: #0f1722; --sidebar-2: rgba(255,255,255,.06); --side-text: #aeb9c7; --side-text-strong: #fff;
+      --border: #e8ecf2; --border-strong: #dbe1e9;
+      --text: #15202e; --text-2: #5a6675; --text-3: #8995a4;
+      --ok: #1f9d57; --ok-soft: rgba(31,157,87,.12);
+      --warn: #c77d12; --warn-soft: rgba(199,125,18,.14);
+      --err: #d23b3b; --err-soft: rgba(210,59,59,.12);
+      --radius: 16px; --radius-sm: 9px;
+      --shadow-sm: 0 1px 2px rgba(20,34,58,.04), 0 4px 14px -8px rgba(20,34,58,.10);
+      --shadow: 0 2px 8px rgba(20,34,58,.06), 0 22px 48px -22px rgba(20,34,58,.24);
+      --pad: 18px; --gap: 16px; --row-h: 38px; --fs: 14px;
+      --app-bg: #edf0f5;
+      /* 旧トークン名 → 新トークンへブリッジ */
+      --bg0: var(--app-bg); --bg1: var(--app-bg);
+      --card: var(--surface); --line: var(--border);
+      --txt: var(--text); --sub: var(--text-2); --bad: var(--err);
+      /* 売上グラフ系列色（新パレット・sales.js準拠） */
+      --c-gross: #2f6bd6; --c-net: #2f9e63; --c-tax: #e0922a; --c-party: #5bbf86;
+      --c-guest: #e0598b; --c-rain: #7fb3e8; --c-temp: #e0922a;
     }
     body[data-theme='light'] {
-      --bg0: #f0f8ff; --bg1: #d8ecf8;
-      --card: rgba(255,255,255,0.95); --line: rgba(45,106,151,0.22);
-      --txt: #0f2436; --sub: #4a6d85; --ok: #0b7d52;
-      --accent: #0f73b0; --warn: #a06b10; --bad: #c0405f;
-      --shadow: 0 8px 28px rgba(15,50,80,0.12);
-      background:
-        radial-gradient(900px 500px at -20% -10%,#c8e8f8 0%,transparent 60%),
-        radial-gradient(900px 500px at 120% 0%,#bcd8f0 0%,transparent 55%),
-        linear-gradient(145deg,var(--bg0),var(--bg1)) !important;
+      --card: var(--surface); --line: var(--border); --txt: var(--text); --sub: var(--text-2); --bad: var(--err);
+      background: var(--app-bg) !important;
     }
-    body[data-theme='light'] .hero {
-      background: linear-gradient(160deg,rgba(15,115,176,0.10),rgba(180,218,240,0.55));
-      border-color: rgba(45,106,151,0.20);
+    body[data-theme='dark'] {
+      --app-bg: #0c1117; --surface: #151c25; --surface-2: #1b232e;
+      --sidebar: #0a0f16; --sidebar-2: rgba(255,255,255,.05); --side-text: #99a6b6;
+      --border: #26313d; --border-strong: #33414f;
+      --text: #e7ecf2; --text-2: #9fadbd; --text-3: #6f7d8d;
+      --accent-soft: rgba(56,125,234,.16); --ok-soft: rgba(31,157,87,.16); --warn-soft: rgba(199,125,18,.18); --err-soft: rgba(210,59,59,.16);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.3); --shadow: 0 1px 3px rgba(0,0,0,.4), 0 10px 30px -18px rgba(0,0,0,.6);
+      --card: var(--surface); --line: var(--border); --txt: var(--text); --sub: var(--text-2); --bad: var(--err);
+      background: var(--app-bg) !important;
     }
-    body[data-theme='light'] .pill {
-      background: rgba(255,255,255,0.80);
-      border-color: rgba(45,106,151,0.28);
-      color: var(--txt);
-    }
-    body[data-theme='light'] .pill.ok {
-      background: rgba(11,125,82,0.08);
-      color: var(--ok);
-    }
-    body[data-theme='light'] .pill.link {
-      color: var(--accent);
-      background: rgba(15,115,176,0.08);
-      border-color: rgba(15,115,176,0.30);
-    }
-    body[data-theme='light'] button.pill[style*="border-color: var(--warn)"],
-    body[data-theme='light'] button.pill.warn { border-color: var(--warn); color: var(--warn); }
-    body[data-theme='light'] .input,
-    body[data-theme='light'] .select {
-      background: rgba(255,255,255,0.90);
-      border-color: rgba(45,106,151,0.28);
-      color: var(--txt);
-    }
-    body[data-theme='light'] .btn {
-      background: rgba(240,248,255,0.90);
-      border-color: rgba(45,106,151,0.28);
-      color: var(--txt);
-    }
-    body[data-theme='light'] .btn.primary {
-      background: linear-gradient(180deg,rgba(15,115,176,0.18),rgba(15,115,176,0.10));
-      border-color: rgba(15,115,176,0.40);
-      color: var(--accent);
-    }
-    body[data-theme='light'] .btn.active {
-      background: rgba(15,115,176,0.16);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-    body[data-theme='light'] .chart-tab {
-      background: rgba(255,255,255,0.75);
-      border-color: rgba(45,106,151,0.24);
-      color: var(--sub);
-    }
-    body[data-theme='light'] .chart-tab.active {
-      background: rgba(15,115,176,0.14);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-    body[data-theme='light'] .loading-overlay {
-      background: rgba(230,243,253,0.88);
-    }
+    /* ===== コンポーネント（新デザイン・両テーマ／トークンベース） ===== */
+    .hero { background: var(--surface) !important; border-color: var(--border) !important; box-shadow: var(--shadow-sm) !important; }
+    .hero h1 { font-family: "IBM Plex Sans JP","Hiragino Kaku Gothic ProN",sans-serif !important; text-transform: none !important; font-size: 22px !important; letter-spacing: -.015em !important; }
+    .pill { background: var(--surface) !important; border-color: var(--border) !important; color: var(--text-2) !important; }
+    .pill.ok { background: var(--ok-soft) !important; border-color: color-mix(in srgb,var(--ok) 30%,transparent) !important; color: var(--ok) !important; }
+    .pill.link { color: var(--accent) !important; background: var(--accent-soft) !important; border-color: transparent !important; }
+    button.pill[style*="border-color: var(--warn)"], button.pill.warn { border-color: transparent !important; background: var(--warn-soft) !important; color: var(--warn) !important; }
+    .input, .select { background: var(--surface-2) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
+    .input:focus, .select:focus { outline: none !important; border-color: var(--accent) !important; background: var(--surface) !important; box-shadow: 0 0 0 3px var(--accent-soft) !important; }
+    .btn { background: var(--surface) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
+    .btn.primary { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
+    .btn.active { background: var(--accent-soft) !important; border-color: var(--accent) !important; color: var(--accent) !important; }
+    .chart-tab { background: var(--surface-2) !important; border-color: var(--border) !important; color: var(--text-2) !important; }
+    .chart-tab.active { background: var(--accent-soft) !important; border-color: var(--accent) !important; color: var(--accent) !important; }
+    .loading-overlay { background: color-mix(in srgb, var(--app-bg) 88%, transparent) !important; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       min-height: 100vh;
-      color: var(--txt);
-      font-family: "Zen Kaku Gothic New", sans-serif;
-      background:
-        radial-gradient(900px 500px at -20% -10%,#215f84 0%,transparent 60%),
-        radial-gradient(900px 500px at 120% 0%,#185273 0%,transparent 55%),
-        linear-gradient(145deg,var(--bg0),var(--bg1));
+      color: var(--text);
+      font-family: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Zen Kaku Gothic New", system-ui, sans-serif;
+      background: var(--app-bg);
+      font-size: var(--fs);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
       padding: 20px;
     }
     .app { max-width: 1360px; margin: 0 auto; display: grid; gap: 16px; }
@@ -3312,9 +3278,9 @@ function updateStoreSelect(options, selectedKey) {
 function chartDefaults() {
   const isDark = state.theme === 'dark';
   return {
-    gridColor: isDark ? 'rgba(155,220,255,0.12)' : 'rgba(45,106,151,0.15)',
-    tickColor: isDark ? '#a6cadf' : '#4f7187',
-    legendColor: isDark ? '#e7f6ff' : '#132a3b',
+    gridColor: isDark ? '#26313d' : '#e8ecf2',
+    tickColor: isDark ? '#9fadbd' : '#5a6675',
+    legendColor: isDark ? '#e7ecf2' : '#15202e',
   };
 }
 
