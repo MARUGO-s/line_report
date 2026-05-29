@@ -4224,109 +4224,110 @@
   .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); background: var(--ok-soft); }
   button.pill { cursor: pointer; }
 
+  /* ===== リスキン③: ダークテーマを新トークンへ（旧グラス値を置換・同セレクタ/CSSのみ） ===== */
   /* カード */
-  body[data-theme='dark'] .card { background: rgba(10,24,38,0.86) !important; border-color: rgba(155,220,255,0.22) !important; box-shadow: 0 10px 28px rgba(0,0,0,0.35) !important; }
-  body[data-theme='dark'] .card h2 { color: #e7f6ff !important; border-bottom-color: rgba(155,220,255,0.18) !important; }
-  body[data-theme='dark'] .card h2 .v2-card-badge { background: rgba(87,216,255,0.14) !important; color: #7fdcff !important; border-color: rgba(120,200,255,0.35) !important; }
+  body[data-theme='dark'] .card { background: var(--surface) !important; border-color: var(--border) !important; box-shadow: var(--shadow) !important; }
+  body[data-theme='dark'] .card h2 { color: var(--text) !important; border-bottom-color: var(--border) !important; }
+  body[data-theme='dark'] .card h2 .v2-card-badge { background: var(--accent-soft) !important; color: var(--accent) !important; border-color: transparent !important; }
 
   /* パネル見出し */
-  body[data-theme='dark'] .v2-panel-head h1 { color: #eef8ff !important; }
-  body[data-theme='dark'] .v2-panel-head p { color: #a6cadf !important; }
-  body[data-theme='dark'] .app-v2-panel-desc { background: rgba(8,21,35,0.5) !important; color: #a6cadf !important; border-left-color: #57d8ff !important; }
-  body[data-theme='dark'] .app-v2-section-title { color: #a6cadf !important; }
+  body[data-theme='dark'] .v2-panel-head h1 { color: var(--text) !important; }
+  body[data-theme='dark'] .v2-panel-head p { color: var(--text-2) !important; }
+  body[data-theme='dark'] .app-v2-panel-desc { background: var(--surface-2) !important; color: var(--text-2) !important; border-left-color: var(--accent) !important; }
+  body[data-theme='dark'] .app-v2-section-title { color: var(--text-2) !important; }
 
   /* KPIカード */
-  body[data-theme='dark'] .v2-kpi-card { background: rgba(10,24,38,0.86) !important; border-color: rgba(155,220,255,0.22) !important; box-shadow: 0 8px 24px rgba(0,0,0,0.3) !important; }
-  body[data-theme='dark'] .v2-kpi-label { color: #a6cadf !important; }
-  body[data-theme='dark'] .v2-kpi-value { color: #eef8ff !important; }
-  body[data-theme='dark'] .v2-kpi-value .unit { color: #a6cadf !important; }
-  body[data-theme='dark'] .v2-kpi-sub { color: #88accb !important; }
+  body[data-theme='dark'] .v2-kpi-card { background: var(--surface) !important; border-color: var(--border) !important; box-shadow: var(--shadow) !important; }
+  body[data-theme='dark'] .v2-kpi-label { color: var(--text-2) !important; }
+  body[data-theme='dark'] .v2-kpi-value { color: var(--text) !important; }
+  body[data-theme='dark'] .v2-kpi-value .unit { color: var(--text-2) !important; }
+  body[data-theme='dark'] .v2-kpi-sub { color: var(--text-3) !important; }
 
   /* フォーム / ツールバー / サブブロック */
   body[data-theme='dark'] .v2-form-row > .v2-form-label,
   body[data-theme='dark'] .v2-toolbar label,
-  body[data-theme='dark'] .setting-block-title { color: #a6cadf !important; }
-  body[data-theme='dark'] .setting-block { background: rgba(8,21,35,0.45) !important; border-color: rgba(155,220,255,0.16) !important; }
+  body[data-theme='dark'] .setting-block-title { color: var(--text-2) !important; }
+  body[data-theme='dark'] .setting-block { background: var(--surface-2) !important; border-color: var(--border) !important; }
 
   /* 入力 / ボタン */
   body[data-theme='dark'] .input, body[data-theme='dark'] .select, body[data-theme='dark'] .button {
-    background: rgba(8,21,35,0.6) !important; border-color: rgba(155,220,255,0.25) !important; color: #e7f6ff !important;
+    background: var(--surface-2) !important; border-color: var(--border-strong) !important; color: var(--text) !important;
   }
-  body[data-theme='dark'] .input::placeholder { color: #83abc2 !important; }
-  body[data-theme='dark'] .button.primary { background: linear-gradient(180deg, rgba(87,216,255,0.32), rgba(10,116,158,0.32)) !important; border-color: rgba(87,216,255,0.6) !important; color: #eaffff !important; }
-  body[data-theme='dark'] .button.media-highlight { background: linear-gradient(180deg, rgba(73,224,146,0.28), rgba(24,135,85,0.28)) !important; border-color: rgba(133,255,192,0.55) !important; color: #dbffe8 !important; }
-  body[data-theme='dark'] .button.warn { background: rgba(141,80,24,0.28) !important; border-color: rgba(255,209,126,0.5) !important; color: #ffdba0 !important; }
+  body[data-theme='dark'] .input::placeholder { color: var(--text-3) !important; }
+  body[data-theme='dark'] .button.primary { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
+  body[data-theme='dark'] .button.media-highlight { background: var(--ok-soft) !important; border-color: transparent !important; color: var(--ok) !important; }
+  body[data-theme='dark'] .button.warn { background: var(--warn-soft) !important; border-color: transparent !important; color: var(--warn) !important; }
 
   /* ピル */
-  body[data-theme='dark'] .pill, body[data-theme='dark'] #authState, body[data-theme='dark'] #lastRefresh { background: rgba(8,21,35,0.6) !important; border-color: rgba(155,220,255,0.25) !important; color: #a6cadf !important; }
-  body[data-theme='dark'] .pill.ok { background: rgba(73,224,146,0.16) !important; border-color: rgba(105,237,191,0.45) !important; color: #69edbf !important; }
-  body[data-theme='dark'] .pill.link { background: rgba(87,216,255,0.14) !important; border-color: rgba(120,200,255,0.35) !important; color: #7fdcff !important; }
+  body[data-theme='dark'] .pill, body[data-theme='dark'] #authState, body[data-theme='dark'] #lastRefresh { background: var(--surface) !important; border-color: var(--border) !important; color: var(--text-2) !important; }
+  body[data-theme='dark'] .pill.ok { background: var(--ok-soft) !important; border-color: color-mix(in srgb,var(--ok) 30%,transparent) !important; color: var(--ok) !important; }
+  body[data-theme='dark'] .pill.link { background: var(--accent-soft) !important; border-color: transparent !important; color: var(--accent) !important; }
 
   /* テーブル */
-  body[data-theme='dark'] .table-wrap { background: rgba(8,21,35,0.48) !important; border-color: rgba(155,220,255,0.18) !important; }
-  body[data-theme='dark'] table th { background: rgba(8,21,35,0.7) !important; color: #a6cadf !important; border-bottom-color: rgba(155,220,255,0.18) !important; }
-  body[data-theme='dark'] table td { color: #e7f6ff !important; border-bottom-color: rgba(155,220,255,0.1) !important; }
+  body[data-theme='dark'] .table-wrap { background: var(--surface) !important; border-color: var(--border) !important; }
+  body[data-theme='dark'] table th { background: var(--surface-2) !important; color: var(--text-3) !important; border-bottom-color: var(--border) !important; }
+  body[data-theme='dark'] table td { color: var(--text) !important; border-bottom-color: var(--border) !important; }
 
   /* Webhookカード */
-  body[data-theme='dark'] .webhook-card { background: rgba(10,24,38,0.72) !important; border-color: rgba(155,220,255,0.22) !important; box-shadow: 0 4px 18px rgba(0,0,0,0.25) !important; }
-  body[data-theme='dark'] .webhook-card.is-active { background: rgba(12,28,42,0.82) !important; border-color: rgba(155,200,230,0.32) !important; }
-  body[data-theme='dark'] .webhook-card-title { color: #d8edfb !important; }
-  body[data-theme='dark'] .webhook-card-status, body[data-theme='dark'] .webhook-card-tables, body[data-theme='dark'] .webhook-card-receipt-features { color: #a6cadf !important; }
-  body[data-theme='dark'] .webhook-card-key code, body[data-theme='dark'] .webhook-card-url code { color: #9cc9df !important; }
-  body[data-theme='dark'] .webhook-card-status-badge { background: rgba(90,140,170,0.2) !important; color: #c8dce8 !important; }
+  body[data-theme='dark'] .webhook-card { background: var(--surface) !important; border-color: var(--border) !important; box-shadow: var(--shadow-sm) !important; }
+  body[data-theme='dark'] .webhook-card.is-active { background: var(--surface) !important; border-color: var(--border-strong) !important; }
+  body[data-theme='dark'] .webhook-card-title { color: var(--text) !important; }
+  body[data-theme='dark'] .webhook-card-status, body[data-theme='dark'] .webhook-card-tables, body[data-theme='dark'] .webhook-card-receipt-features { color: var(--text-2) !important; }
+  body[data-theme='dark'] .webhook-card-key code, body[data-theme='dark'] .webhook-card-url code { color: var(--text-2) !important; }
+  body[data-theme='dark'] .webhook-card-status-badge { background: var(--surface-2) !important; color: var(--text-2) !important; }
 
   /* ルーム項目 / ユーザー権限 */
-  body[data-theme='dark'] .webhook-room-item { background: rgba(8,21,35,0.5) !important; border-color: rgba(155,220,255,0.18) !important; }
-  body[data-theme='dark'] .webhook-room-item-title { color: #d8edfb !important; }
-  body[data-theme='dark'] .webhook-room-item-meta { color: #a6cadf !important; }
-  body[data-theme='dark'] .user-permission-list-item { background: rgba(8,21,35,0.54) !important; border-color: rgba(155,220,255,0.2) !important; }
-  body[data-theme='dark'] .user-permission-list-name { background: rgba(255,255,255,0.05) !important; border-color: rgba(180,208,228,0.28) !important; color: #f3d7a4 !important; }
-  body[data-theme='dark'] .user-permission-list-meta { color: #a5c6db !important; }
-  body[data-theme='dark'] .user-permission-list-kv-key { color: #cfe6f5 !important; }
-  body[data-theme='dark'] .user-permission-name-text { color: #ffd27d !important; border-bottom-color: rgba(255,210,125,0.88) !important; }
-  body[data-theme='dark'] .user-permission-control { background: rgba(44,30,74,0.64) !important; border-color: rgba(192,171,255,0.44) !important; color: #b8dbef !important; }
+  body[data-theme='dark'] .webhook-room-item { background: var(--surface-2) !important; border-color: var(--border) !important; }
+  body[data-theme='dark'] .webhook-room-item-title { color: var(--text) !important; }
+  body[data-theme='dark'] .webhook-room-item-meta { color: var(--text-2) !important; }
+  body[data-theme='dark'] .user-permission-list-item { background: var(--surface-2) !important; border-color: var(--border) !important; }
+  body[data-theme='dark'] .user-permission-list-name { background: var(--accent-soft) !important; border-color: transparent !important; color: var(--accent) !important; }
+  body[data-theme='dark'] .user-permission-list-meta { color: var(--text-2) !important; }
+  body[data-theme='dark'] .user-permission-list-kv-key { color: var(--text-2) !important; }
+  body[data-theme='dark'] .user-permission-name-text { color: var(--accent) !important; border-bottom-color: var(--accent) !important; }
+  body[data-theme='dark'] .user-permission-control { background: var(--surface-2) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
 
   /* モーダル */
-  body[data-theme='dark'] .modal-card { background: linear-gradient(165deg, rgba(12,32,52,0.98), rgba(8,20,34,0.98)) !important; border-color: rgba(155,220,255,0.28) !important; color: #e7f6ff !important; }
-  body[data-theme='dark'] .modal-title { color: #e8f6ff !important; }
-  body[data-theme='dark'] .modal-meta { color: #a6cadf !important; }
+  body[data-theme='dark'] .modal-card { background: var(--surface) !important; border-color: var(--border) !important; color: var(--text) !important; }
+  body[data-theme='dark'] .modal-title { color: var(--text) !important; }
+  body[data-theme='dark'] .modal-meta { color: var(--text-2) !important; }
 
   /* その他 */
-  body[data-theme='dark'] .muted { color: #8fb6cf !important; }
-  body[data-theme='dark'] .meta { color: #a6cadf !important; }
-  body[data-theme='dark'] .meta.usage-summary { color: #9be8ff !important; }
-  body[data-theme='dark'] code { background: rgba(87,216,255,0.12) !important; color: #9be8ff !important; }
-  body[data-theme='dark'] .webhook-auto-link-security-notice { background: rgba(141,80,24,0.22) !important; border-color: rgba(255,188,92,0.42) !important; color: #ffe8c2 !important; }
+  body[data-theme='dark'] .muted { color: var(--text-3) !important; }
+  body[data-theme='dark'] .meta { color: var(--text-2) !important; }
+  body[data-theme='dark'] .meta.usage-summary { color: var(--accent) !important; }
+  body[data-theme='dark'] code { background: var(--surface-2) !important; color: var(--accent) !important; }
+  body[data-theme='dark'] .webhook-auto-link-security-notice { background: var(--warn-soft) !important; border-color: color-mix(in srgb,var(--warn) 30%,transparent) !important; color: var(--warn) !important; }
   body[data-theme='dark'] .rooms-table td:nth-child(1), body[data-theme='dark'] .rooms-table td:nth-child(2),
-  body[data-theme='dark'] .rooms-table th:nth-child(1), body[data-theme='dark'] .rooms-table th:nth-child(2) { background: rgba(8,21,35,0.98) !important; }
+  body[data-theme='dark'] .rooms-table th:nth-child(1), body[data-theme='dark'] .rooms-table th:nth-child(2) { background: var(--surface) !important; }
 
   /* ストレージ円グラフ */
-  body[data-theme='dark'] .storage-chart { background: rgba(8,21,35,0.4) !important; border-color: rgba(155,220,255,0.18) !important; }
-  body[data-theme='dark'] .storage-pie::after { background: rgba(8,21,35,0.95) !important; border-color: rgba(155,220,255,0.18) !important; }
-  body[data-theme='dark'] .storage-pie-center-label { color: #93bfd8 !important; }
-  body[data-theme='dark'] .storage-pie-center-value { color: #d7f0ff !important; }
-  body[data-theme='dark'] .storage-legend-item { color: #d6ecfa !important; }
+  body[data-theme='dark'] .storage-chart { background: var(--surface-2) !important; border-color: var(--border) !important; }
+  body[data-theme='dark'] .storage-pie::after { background: var(--surface) !important; border-color: var(--border) !important; }
+  body[data-theme='dark'] .storage-pie-center-label { color: var(--text-2) !important; }
+  body[data-theme='dark'] .storage-pie-center-value { color: var(--text) !important; }
+  body[data-theme='dark'] .storage-legend-item { color: var(--text-2) !important; }
 
   /* トグルスイッチ & room-scope-option */
-  body[data-theme='dark'] .room-scope-option { background: rgba(8,21,35,0.42) !important; border-color: rgba(155,220,255,0.16) !important; color: #e7f6ff !important; }
-  body[data-theme='dark'] .room-scope-option:hover { background: rgba(18,35,52,0.6) !important; border-color: rgba(155,220,255,0.3) !important; }
+  body[data-theme='dark'] .room-scope-option { background: var(--surface-2) !important; border-color: var(--border) !important; color: var(--text) !important; }
+  body[data-theme='dark'] .room-scope-option:hover { background: var(--surface) !important; border-color: var(--border-strong) !important; }
   body[data-theme='dark'] .room-scope-option input[type="checkbox"],
   body[data-theme='dark'] .user-permission-control input[type="checkbox"],
-  body[data-theme='dark'] .switch input[type="checkbox"] { background: #2e4f66 !important; }
+  body[data-theme='dark'] .switch input[type="checkbox"] { background: var(--surface) !important; }
   body[data-theme='dark'] .room-scope-option input[type="checkbox"]:checked,
   body[data-theme='dark'] .user-permission-control input[type="checkbox"]:checked,
-  body[data-theme='dark'] .switch input[type="checkbox"]:checked { background: #57d8ff !important; }
+  body[data-theme='dark'] .switch input[type="checkbox"]:checked { background: var(--accent) !important; }
 
   /* 表示切替タブ (active) */
   body[data-theme='dark'] .webhook-view-tabs .button.active,
-  body[data-theme='dark'] .user-permission-tabs .button.active { background: rgba(70,152,196,0.5) !important; border-color: rgba(143,218,255,0.6) !important; color: #eaffff !important; }
+  body[data-theme='dark'] .user-permission-tabs .button.active { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
 
   /* 稼働状態の行/ピル */
-  body[data-theme='dark'] .v2-status-row { border-bottom-color: rgba(155,220,255,0.12) !important; }
-  body[data-theme='dark'] .v2-status-pill { background: rgba(73,224,146,0.16) !important; color: #69edbf !important; border-color: rgba(105,237,191,0.4) !important; }
+  body[data-theme='dark'] .v2-status-row { border-bottom-color: var(--border) !important; }
+  body[data-theme='dark'] .v2-status-pill { background: var(--ok-soft) !important; color: var(--ok) !important; border-color: color-mix(in srgb,var(--ok) 30%,transparent) !important; }
 
   /* ナビリンク */
-  body[data-theme='dark'] .app-v2-nav-link { background: rgba(87,216,255,0.14) !important; border-color: rgba(120,200,255,0.35) !important; color: #7fdcff !important; }
+  body[data-theme='dark'] .app-v2-nav-link { background: var(--accent-soft) !important; border-color: transparent !important; color: var(--accent) !important; }
 </style>
 </head>
 <body>
