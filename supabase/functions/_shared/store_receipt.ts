@@ -208,6 +208,54 @@ export async function loadLatestStoreReceiptForRoom(
   return mapStoreReceiptRow(data as Record<string, unknown>)
 }
 
+/**
+ * 検索インデックス line_room_receipt_search の該当行を本体削除と同期して削除する。
+ * 本体テーブル名(receipt_table)＋ receipt_row_id / line_message_id で対象を特定。
+ * 失敗してもログのみ（本体削除は維持する）。
+ */
+async function deleteReceiptSearchIndexEntries(
+  supabase: SupabaseClient,
+  receiptTable: string,
+  opts: { receiptRowId?: number | null; lineMessageId?: string | null },
+): Promise<void> {
+  const rowId = opts.receiptRowId == null ? null : Math.round(Number(opts.receiptRowId))
+  if (rowId != null && Number.isFinite(rowId) && rowId > 0) {
+    const { error } = await supabase
+      .from('line_room_receipt_search')
+      .delete()
+      .eq('receipt_table', receiptTable)
+      .eq('receipt_row_id', rowId)
+    if (error) console.error('line_room_receipt_search delete by row id failed:', error.message)
+  }
+  const lmid = String(opts.lineMessageId ?? '').trim()
+  if (lmid) {
+    const { error } = await supabase
+      .from('line_room_receipt_search')
+      .delete()
+      .eq('receipt_table', receiptTable)
+      .eq('line_message_id', lmid)
+    if (error) console.error('line_room_receipt_search delete by lmid failed:', error.message)
+  }
+}
+
+/** 「置き換え」用：同日の検索インデックス行を（指定 line_message_id を除いて）削除する。 */
+async function deleteReceiptSearchIndexForDate(
+  supabase: SupabaseClient,
+  receiptTable: string,
+  receiptDateIso: string,
+  excludeLineMessageId: string,
+): Promise<void> {
+  let query = supabase
+    .from('line_room_receipt_search')
+    .delete()
+    .eq('receipt_table', receiptTable)
+    .eq('receipt_date', receiptDateIso)
+  const exclude = String(excludeLineMessageId ?? '').trim()
+  if (exclude) query = query.neq('line_message_id', exclude)
+  const { error } = await query
+  if (error) console.error('line_room_receipt_search delete for date failed:', error.message)
+}
+
 export async function deleteStoreReceiptById(
   supabase: SupabaseClient,
   receiptTable: string,
@@ -219,7 +267,9 @@ export async function deleteStoreReceiptById(
   }
   const existing = await loadStoreReceiptById(supabase, receiptTable, id)
   if (!existing) {
-    return { ok: false, message: 'この店舗のデータで該当のレシート解析が見つかりませんでした。' }
+    // 本体に無い＝検索インデックスの幽霊。インデックス側を消して検索から除去し、成功扱いにする。
+    await deleteReceiptSearchIndexEntries(supabase, receiptTable, { receiptRowId: id })
+    return { ok: true }
   }
   const { error: deleteError } = await supabase
     .from(receiptTable)
@@ -229,6 +279,10 @@ export async function deleteStoreReceiptById(
     console.error('deleteStoreReceiptById delete failed:', deleteError.message)
     return { ok: false, message: '解析結果の削除に失敗しました。少し時間を置いてお試しください。' }
   }
+  await deleteReceiptSearchIndexEntries(supabase, receiptTable, {
+    receiptRowId: id,
+    lineMessageId: existing.line_message_id ?? null,
+  })
   return { ok: true }
 }
 
@@ -258,7 +312,9 @@ export async function deleteStoreReceiptByLineMessageId(
     rowId = storeWide?.id ?? null
   }
   if (!rowId || !Number.isFinite(rowId)) {
-    return { ok: false, message: 'この店舗のデータで該当のレシート解析が見つかりませんでした。' }
+    // 本体に無い＝検索インデックスの幽霊。インデックス側を lmid で消して検索から除去し、成功扱いにする。
+    await deleteReceiptSearchIndexEntries(supabase, receiptTable, { lineMessageId: lmid })
+    return { ok: true }
   }
   const { error: deleteError } = await supabase
     .from(receiptTable)
@@ -268,6 +324,10 @@ export async function deleteStoreReceiptByLineMessageId(
     console.error('deleteStoreReceiptByLineMessageId delete failed:', deleteError.message)
     return { ok: false, message: '解析結果の削除に失敗しました。少し時間を置いてお試しください。' }
   }
+  await deleteReceiptSearchIndexEntries(supabase, receiptTable, {
+    receiptRowId: Math.round(rowId),
+    lineMessageId: lmid,
+  })
   return { ok: true }
 }
 
@@ -403,6 +463,8 @@ export async function deleteReceiptsForDateExcludingLineMessageId(
   if (error) {
     console.error('deleteReceiptsForDateExcludingLineMessageId failed:', error.message)
   }
+  // 検索インデックスも同日分を同期削除（置き換えで幽霊が残らないように）
+  await deleteReceiptSearchIndexForDate(supabase, receiptTable, receiptDateIso.trim(), exclude)
 }
 
 export async function saveStoreReceiptEntry(
