@@ -262,13 +262,17 @@ export function allocateDailyBudgetsForMonth(
   monthBudgetYen: number,
   weights: SalesBudgetAllocationWeights,
   storeClosedDates?: Set<string> | null,
+  holidayDatesOverride?: Set<string> | null,
 ): Map<string, number> {
   const days = enumerateMonthDates(targetMonth)
   if (days.length === 0 || monthBudgetYen <= 0) return new Map()
 
   // 祝日セットは holiday/pre_holiday が両方 null の場合は読み込まない（不要な処理を省く）
+  // override（内閣府CSVから取得した祝日集合）があれば優先。無ければハードコード表。
   const needHolidays = weights.holiday != null || weights.pre_holiday != null
-  const holidaySet: Set<string> | null = needHolidays ? getJapaneseHolidayDateSet() : null
+  const holidaySet: Set<string> | null = needHolidays
+    ? (holidayDatesOverride ?? getJapaneseHolidayDateSet())
+    : null
 
   const rawWeights = days.map((d) => getEffectiveDayWeight(d, weights, holidaySet))
   const effectiveWeights = days.map((d, i) =>
@@ -309,12 +313,14 @@ export function getDailyBudgetForDateFromAllocation(
   monthBudgetYen: number,
   weights: SalesBudgetAllocationWeights,
   storeClosedDates?: Set<string> | null,
+  holidayDatesOverride?: Set<string> | null,
 ): number | null {
   const map = allocateDailyBudgetsForMonth(
     targetMonth,
     monthBudgetYen,
     weights,
     storeClosedDates,
+    holidayDatesOverride,
   )
   const v = map.get(isoDate)
   return v == null ? null : v

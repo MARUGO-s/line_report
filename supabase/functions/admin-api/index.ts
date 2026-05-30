@@ -11,6 +11,7 @@ import {
   parseStoreClosedDatesForMonth,
   type SalesBudgetAllocationWeights,
 } from "../_shared/sales_budget_allocation.ts"
+import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
 import {
   fetchManualMonthSales,
   fetchManualMonthSalesMapForStore,
@@ -480,6 +481,14 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && path === "/analytics/monthly") {
       const result = await fetchStoreAnalyticsMonthly(supabase, url)
       return json(result, 200)
+    }
+
+    if (req.method === "GET" && path === "/analytics/holidays") {
+      // 内閣府CSV（正本）から国民の祝日を取得。失敗時はハードコード表へフォールバック。
+      const { map, source } = await fetchJapaneseHolidayMap()
+      const dates: Record<string, string> = {}
+      for (const [iso, name] of map) dates[iso] = name
+      return json({ ok: true, source, count: map.size, dates }, 200)
     }
 
     if (req.method === "GET" && path === "/weather/daily") {

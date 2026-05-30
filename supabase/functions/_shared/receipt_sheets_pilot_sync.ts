@@ -14,6 +14,7 @@ import {
   parseStoreClosedDatesForMonth,
   type SalesBudgetAllocationWeights,
 } from "./sales_budget_allocation.ts"
+import { fetchJapaneseHolidaySet } from "./japanese_holidays.ts"
 import {
   appendSpreadsheetValues,
   batchUpdateSpreadsheetValues,
@@ -1930,11 +1931,13 @@ async function buildDailySalesExportRows(
         holiday: budgetRow.holiday_weight,
         pre_holiday: budgetRow.pre_holiday_weight,
       }
+      const holidaySet = await fetchJapaneseHolidaySet()
       dailyBudgetMap = allocateDailyBudgetsForMonth(
         month,
         budgetRow.budget_yen,
         weights,
         new Set(budgetRow.store_closed_dates),
+        holidaySet,
       )
     }
 

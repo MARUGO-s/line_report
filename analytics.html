@@ -911,8 +911,8 @@ const STORE_ADDRESS = {
 
 const STORE_NAMES = LINE_REPORT_PAGES.STORE_NAMES;
 
-/* ── 日本の祝日 2022-2028 ── */
-const JAPANESE_HOLIDAYS = new Map([
+/* ── 日本の祝日 2022-2028（フォールバック表。読込時に内閣府CSV由来データで上書き） ── */
+let JAPANESE_HOLIDAYS = new Map([
   // 2022
   ['2022-01-01','元日'],['2022-01-10','成人の日'],
   ['2022-02-11','建国記念の日'],['2022-02-23','天皇誕生日'],
@@ -3053,6 +3053,31 @@ async function fetchWeather(storeKey, fromDate, toDate) {
 }
 
 /* ── main load ── */
+let holidaysSyncedFromApi = false;
+/** 国民の祝日を内閣府CSV（admin-api 経由でサーバ取得）で上書き。失敗時はハードコード表を維持。 */
+async function syncHolidaysFromApi() {
+  if (holidaysSyncedFromApi) return;
+  try {
+    if (!getToken()) return;
+    const res = await apiFetch('/analytics/holidays');
+    if (!res || res.source !== 'cao_csv' || !res.dates || typeof res.dates !== 'object') return;
+    const prev = JAPANESE_HOLIDAYS;
+    const next = new Map();
+    for (const iso of Object.keys(res.dates)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
+      const apiName = String(res.dates[iso] || '').trim();
+      next.set(iso, apiName || prev.get(iso) || '祝日');
+    }
+    if (next.size === 0) return;
+    JAPANESE_HOLIDAYS = next; // 内閣府CSVを正本として置き換え（名称は空ならハードコード名で補完）
+    holidaysSyncedFromApi = true;
+    // 祝日に依存する表示（日次チャート・日次テーブル）を再描画
+    try { refreshAllCharts(); } catch (_) {}
+  } catch (_) {
+    /* 認可/ネットワークエラー時はハードコード表のまま */
+  }
+}
+
 async function loadAll() {
   const token = getToken();
   if (!token) {
@@ -3061,6 +3086,8 @@ async function loadAll() {
     updateReceiptSheetsPilotUi();
     return;
   }
+
+  syncHolidaysFromApi(); // 非ブロッキング：祝日を内閣府CSVへ更新（完了後に再描画）
 
   await refreshReceiptSheetsPilotLink();
 

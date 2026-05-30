@@ -14,6 +14,7 @@ import {
   shouldDeferDailyBudgetUntilJstOpen,
   type SalesBudgetAllocationWeights,
 } from './sales_budget_allocation.ts'
+import { fetchJapaneseHolidaySet } from './japanese_holidays.ts'
 import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import {
   fetchManualMonthSales,
@@ -283,6 +284,7 @@ function computeBudgetDiffs(
   receiptDateIso: string,
   monthAgg: MonthAgg,
   budgetRow: NonNullable<Awaited<ReturnType<typeof fetchBudgetForStoreMonth>>>,
+  holidaySet: Set<string> | null,
 ) {
   const weights: SalesBudgetAllocationWeights = {
     mon: budgetRow.mon_weight,
@@ -301,6 +303,7 @@ function computeBudgetDiffs(
     budgetRow.budget_yen,
     weights,
     storeClosedSet,
+    holidaySet,
   )
   const progressDay = getJstBusinessDateForReceiptBudget()
   const monthDays = enumerateMonthDates(month)
@@ -365,8 +368,9 @@ export async function loadReceiptReplyContext(
   )
 
   const budgetRow = await fetchBudgetForStoreMonth(supabase, params.storePartitionKey, month)
+  const holidaySet = budgetRow ? await fetchJapaneseHolidaySet() : null
   const budget = budgetRow
-    ? computeBudgetDiffs(month, params.receiptDateIso, monthAgg, budgetRow)
+    ? computeBudgetDiffs(month, params.receiptDateIso, monthAgg, budgetRow, holidaySet)
     : {
       monthBudgetYen: null,
       monthBudgetAchievementPct: null,

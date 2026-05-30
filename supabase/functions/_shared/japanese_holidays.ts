@@ -22,9 +22,118 @@ export const JAPANESE_HOLIDAY_ISO_DATES: readonly string[] = [
 
 let cachedHolidaySet: Set<string> | null = null
 
+/** ハードコード表（2022-2028）。取得失敗時のフォールバック・将来年の補完に使う。 */
 export function getJapaneseHolidayDateSet(): Set<string> {
   if (!cachedHolidaySet) {
     cachedHolidaySet = new Set(JAPANESE_HOLIDAY_ISO_DATES)
   }
   return cachedHolidaySet
+}
+
+/* ───────────────────────────────────────────────────────────
+ * 内閣府「国民の祝日」CSV（公式・正本）をサーバ取得
+ *   https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv
+ *   - Shift_JIS エンコード
+ *   - 形式: 国民の祝日・休日月日,国民の祝日・休日名称 / YYYY/M/D,名称
+ *   - モジュール内キャッシュ（TTL）＋短いタイムアウト＋失敗時はハードコード表へフォールバック
+ *   - CSV が網羅する年は CSV を正本とし、CSV に無い「将来年」のみハードコード表で補完
+ * ─────────────────────────────────────────────────────────── */
+const CAO_HOLIDAY_CSV_URL = "https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv"
+const HOLIDAY_LIVE_TTL_MS = 12 * 60 * 60 * 1000
+const HOLIDAY_FETCH_TIMEOUT_MS = 4000
+
+export type JapaneseHolidaySource = "cao_csv" | "fallback_hardcoded"
+
+interface HolidayLiveCache {
+  map: Map<string, string>
+  fetchedAt: number
+  source: JapaneseHolidaySource
+}
+
+let holidayLiveCache: HolidayLiveCache | null = null
+let holidayInFlight: Promise<HolidayLiveCache> | null = null
+
+function buildHardcodedHolidayMap(): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const d of JAPANESE_HOLIDAY_ISO_DATES) map.set(d, "")
+  return map
+}
+
+function parseCaoHolidayCsv(text: string): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const commaIdx = line.indexOf(",")
+    if (commaIdx < 0) continue
+    const rawDate = line.slice(0, commaIdx).trim()
+    const name = line.slice(commaIdx + 1).trim()
+    const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(rawDate)
+    if (!m) continue // ヘッダ行・空行などはスキップ
+    const iso = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`
+    map.set(iso, name)
+  }
+  return map
+}
+
+async function fetchCaoHolidayMap(): Promise<Map<string, string>> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), HOLIDAY_FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(CAO_HOLIDAY_CSV_URL, { signal: controller.signal })
+    if (!res.ok) throw new Error(`CAO holiday CSV HTTP ${res.status}`)
+    const buf = await res.arrayBuffer()
+    const text = new TextDecoder("shift_jis").decode(buf)
+    const parsed = parseCaoHolidayCsv(text)
+    if (parsed.size === 0) throw new Error("CAO holiday CSV parsed empty")
+    return parsed
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** CSV が網羅する最大年より後の「将来年」だけハードコード表で補完する（CSV を正本にする） */
+function mergeWithFutureFallback(caoMap: Map<string, string>): Map<string, string> {
+  const merged = new Map(caoMap)
+  let maxCaoYear = 0
+  for (const iso of caoMap.keys()) {
+    const y = Number(iso.slice(0, 4))
+    if (Number.isFinite(y) && y > maxCaoYear) maxCaoYear = y
+  }
+  for (const iso of JAPANESE_HOLIDAY_ISO_DATES) {
+    const y = Number(iso.slice(0, 4))
+    if (y > maxCaoYear && !merged.has(iso)) merged.set(iso, "")
+  }
+  return merged
+}
+
+/** 祝日 Map（ISO→名称）を取得。CAO 正本→失敗時ハードコード。結果は TTL でキャッシュ。 */
+export async function fetchJapaneseHolidayMap(): Promise<{ map: Map<string, string>; source: JapaneseHolidaySource }> {
+  const now = Date.now()
+  if (holidayLiveCache && now - holidayLiveCache.fetchedAt < HOLIDAY_LIVE_TTL_MS) {
+    return { map: holidayLiveCache.map, source: holidayLiveCache.source }
+  }
+  if (!holidayInFlight) {
+    holidayInFlight = (async (): Promise<HolidayLiveCache> => {
+      try {
+        const caoMap = await fetchCaoHolidayMap()
+        const merged = mergeWithFutureFallback(caoMap)
+        return { map: merged, fetchedAt: Date.now(), source: "cao_csv" }
+      } catch (_e) {
+        // 取得失敗：ハードコード表へフォールバック（短時間キャッシュして連打を防ぐ）
+        return { map: buildHardcodedHolidayMap(), fetchedAt: Date.now(), source: "fallback_hardcoded" }
+      } finally {
+        holidayInFlight = null
+      }
+    })()
+  }
+  const result = await holidayInFlight
+  holidayLiveCache = result
+  return { map: result.map, source: result.source }
+}
+
+/** 祝日 Set（ISO）を取得。CAO 正本→失敗時ハードコード。配分計算へ注入する用途。 */
+export async function fetchJapaneseHolidaySet(): Promise<Set<string>> {
+  const { map } = await fetchJapaneseHolidayMap()
+  return new Set(map.keys())
 }
