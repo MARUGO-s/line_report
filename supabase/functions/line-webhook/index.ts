@@ -706,8 +706,9 @@ Deno.serve(async (req) => {
             postbackData,
           )
           if (correctionPayload) {
-            // 修正は適用済み。AI返信完全無しでも「レシート修正の返信を許可」がONなら返信する。
-            if (!roomHardMuted || allowCorrectionReply) {
+            // 修正は適用済み。レシート操作の返信は AI返信完全無しの対象外。
+            // 「レシートの解析結果を送信」または「レシート修正の返信を許可」がONなら返信する。
+            if (!suppressReceiptReply || allowCorrectionReply) {
               await replyLineMessages(
                 postbackReplyToken,
                 lineReplyPayloadToMessages(correctionPayload),
@@ -777,7 +778,9 @@ Deno.serve(async (req) => {
 
       let receiptHandled = false
       try {
-        const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, roomHardMuted && !allowCorrectionReply)
+        // レシート操作の返信（重複確認 加算/中止/置き換え・修正・削除の結果）は AI返信完全無しの対象外。
+        // 「レシートの解析結果を送信」または「レシート修正の返信を許可」の両方OFFのときだけ抑止する。
+        const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, suppressReceiptReply && !allowCorrectionReply)
         receiptHandled = result.handled
         if (result.handled) textHandled += 1
         if (result.replied) receiptReplies += 1
