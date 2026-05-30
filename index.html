@@ -4745,6 +4745,23 @@
             </select>
           </label>
         </div>
+        <div id="roomConfigReceiptPromptWrap" class="modal-meta" style="margin-top:14px; display:none;" hidden aria-hidden="true">
+          <div style="font-weight:600;">レシート解析プロンプト（この店舗のみ・任意）</div>
+          <div class="muted" style="font-size:0.82rem;margin-top:4px;">特殊なレシート形式の店舗向け。下の「店舗別の補足」に項目の対応などを書くと、その店舗のレシート解析だけに反映されます（他店舗は影響しません）。空欄なら既定のまま。</div>
+          <label class="room-scope-option" style="margin-top:8px;"><input id="roomConfigReceiptPromptEnabled" type="checkbox" checked>この店舗の補足プロンプトを有効にする</label>
+          <details style="margin-top:8px;">
+            <summary style="cursor:pointer;">既定プロンプト（読み取り専用・参考）</summary>
+            <textarea id="roomConfigReceiptPromptDefault" class="input" readonly rows="8" style="width:100%;margin-top:6px;font-size:0.78rem;"></textarea>
+          </details>
+          <label class="modal-meta" style="display:block;margin-top:8px;">
+            <span>店舗別の補足（最優先で適用。例: このレシートは精算/レジ締め。合計=総売上、総取引数=会計組数、客数=客数、純売上=純売上、消費税=内税+外税。販売点数は使わない）</span>
+            <textarea id="roomConfigReceiptPromptCustom" class="input" rows="6" maxlength="2000" style="width:100%;margin-top:6px;" placeholder="この店舗のレシート固有の読み方・項目対応を書く（空欄＝既定のまま）"></textarea>
+          </label>
+          <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button id="roomConfigReceiptPromptSaveBtn" class="button" type="button">この店舗のプロンプトを保存</button>
+            <span id="roomConfigReceiptPromptStatus" class="muted" style="font-size:0.82rem;"></span>
+          </div>
+        </div>
       </div>
       <div id="roomConfigPaneCalendar" class="room-config-pane" hidden>
         <div id="roomConfigCalendarNoRoomHint" class="room-config-calendar-mode-hint" hidden>
@@ -5211,6 +5228,12 @@
       roomConfigReceiptMonthendTime: document.getElementById('roomConfigReceiptMonthendTime'),
       roomConfigStoreSelectWrap: document.getElementById('roomConfigStoreSelectWrap'),
       roomConfigReceiptReportStoreKey: document.getElementById('roomConfigReceiptReportStoreKey'),
+      roomConfigReceiptPromptWrap: document.getElementById('roomConfigReceiptPromptWrap'),
+      roomConfigReceiptPromptEnabled: document.getElementById('roomConfigReceiptPromptEnabled'),
+      roomConfigReceiptPromptDefault: document.getElementById('roomConfigReceiptPromptDefault'),
+      roomConfigReceiptPromptCustom: document.getElementById('roomConfigReceiptPromptCustom'),
+      roomConfigReceiptPromptSaveBtn: document.getElementById('roomConfigReceiptPromptSaveBtn'),
+      roomConfigReceiptPromptStatus: document.getElementById('roomConfigReceiptPromptStatus'),
       cancelRoomConfigBtn: document.getElementById('cancelRoomConfigBtn'),
       reviewRoomConfigBtn: document.getElementById('reviewRoomConfigBtn'),
       saveRoomConfigBtn: document.getElementById('saveRoomConfigBtn'),
@@ -10686,6 +10709,66 @@
       } else {
         dom.roomConfigModalMeta.textContent = '対象Webhook: ' + (storeName || storeKey || '(未設定)');
       }
+      loadRoomConfigReceiptPrompt(storeKey);
+    }
+
+    function isRealStoreKeyForPrompt(storeKey) {
+      const k = String(storeKey || '').trim();
+      return !!k && k !== GLOBAL_CONFIG_SCOPE_KEY && k !== UNASSIGNED_WEBHOOK_KEY;
+    }
+
+    async function loadRoomConfigReceiptPrompt(storeKey) {
+      const wrap = dom.roomConfigReceiptPromptWrap;
+      if (!wrap) return;
+      const key = String(storeKey || '').trim();
+      if (!isRealStoreKeyForPrompt(key)) {
+        wrap.hidden = true; wrap.style.display = 'none'; wrap.setAttribute('aria-hidden', 'true');
+        return;
+      }
+      wrap.hidden = false; wrap.style.display = ''; wrap.setAttribute('aria-hidden', 'false');
+      wrap.dataset.storeKey = key;
+      if (dom.roomConfigReceiptPromptCustom) dom.roomConfigReceiptPromptCustom.value = '';
+      if (dom.roomConfigReceiptPromptDefault) dom.roomConfigReceiptPromptDefault.value = '';
+      if (dom.roomConfigReceiptPromptEnabled) dom.roomConfigReceiptPromptEnabled.checked = true;
+      if (dom.roomConfigReceiptPromptStatus) dom.roomConfigReceiptPromptStatus.textContent = '読み込み中…';
+      try {
+        const res = await api('/receipts/analysis-prompt?store_key=' + encodeURIComponent(key));
+        if (dom.roomConfigReceiptPromptDefault) dom.roomConfigReceiptPromptDefault.value = String((res && res.default_prompt) || '');
+        if (dom.roomConfigReceiptPromptCustom) dom.roomConfigReceiptPromptCustom.value = String((res && res.custom_prompt) || '');
+        if (dom.roomConfigReceiptPromptEnabled) dom.roomConfigReceiptPromptEnabled.checked = !(res && res.enabled === false);
+        if (dom.roomConfigReceiptPromptStatus) {
+          dom.roomConfigReceiptPromptStatus.textContent = (res && res.custom_prompt)
+            ? '保存済みの補足を読み込みました。'
+            : '未設定（既定プロンプトのまま）。';
+        }
+      } catch (e) {
+        if (dom.roomConfigReceiptPromptStatus) {
+          dom.roomConfigReceiptPromptStatus.textContent = '読み込みに失敗しました: ' + (e && e.message ? e.message : String(e));
+        }
+      }
+    }
+
+    async function saveRoomConfigReceiptPrompt() {
+      const wrap = dom.roomConfigReceiptPromptWrap;
+      if (!wrap) return;
+      const key = String((wrap.dataset && wrap.dataset.storeKey) || activeWebhookConfigStoreKey || '').trim();
+      if (!isRealStoreKeyForPrompt(key)) { alert('店舗が特定できません。'); return; }
+      const prompt = dom.roomConfigReceiptPromptCustom ? String(dom.roomConfigReceiptPromptCustom.value || '') : '';
+      const enabled = dom.roomConfigReceiptPromptEnabled ? !!dom.roomConfigReceiptPromptEnabled.checked : true;
+      if (dom.roomConfigReceiptPromptStatus) dom.roomConfigReceiptPromptStatus.textContent = '保存中…';
+      try {
+        await api('/receipts/analysis-prompt', {
+          method: 'PUT',
+          body: JSON.stringify({ store_key: key, prompt: prompt, enabled: enabled }),
+        });
+        if (dom.roomConfigReceiptPromptStatus) {
+          dom.roomConfigReceiptPromptStatus.textContent = '保存しました。次に届くレシートから反映されます。';
+        }
+      } catch (e) {
+        if (dom.roomConfigReceiptPromptStatus) {
+          dom.roomConfigReceiptPromptStatus.textContent = '保存に失敗しました: ' + (e && e.message ? e.message : String(e));
+        }
+      }
     }
 
     function openWebhookConfigModal(storeKey, options) {
@@ -12403,6 +12486,19 @@
         }
       }
     });
+
+    if (dom.roomConfigReceiptPromptSaveBtn) {
+      dom.roomConfigReceiptPromptSaveBtn.addEventListener('click', async function() {
+        const btn = dom.roomConfigReceiptPromptSaveBtn;
+        const prev = btn.textContent;
+        btn.disabled = true; btn.textContent = '保存中…';
+        try {
+          await saveRoomConfigReceiptPrompt();
+        } finally {
+          btn.disabled = false; btn.textContent = prev || 'この店舗のプロンプトを保存';
+        }
+      });
+    }
 
     if (dom.cancelRoomConfigEffectBtn) {
       dom.cancelRoomConfigEffectBtn.addEventListener('click', function() {

@@ -38,6 +38,7 @@ import {
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
 import { analyzeLineImageWithGroqScout } from '../_shared/receipt_vision.ts'
+import { fetchStoreReceiptAnalysisPromptAddition } from '../_shared/receipt_prompt.ts'
 import { ensureRoomAutoLinkedToStore } from '../_shared/auto_link_room.ts'
 import { runWebhookDisplayNameSync } from '../_shared/line_display_names.ts'
 import {
@@ -248,11 +249,20 @@ async function processReceiptImageEvent(
     return { saved: false, replied: !!receiptReplyToken, reason: contentFetch.error }
   }
 
+  const supabase = createServiceClient()
+  if (!supabase) return { saved: false, replied: false, reason: 'server_misconfigured' }
+  // 店舗別レシート解析プロンプト（任意・追記）。未設定店は空＝既定プロンプトのまま。
+  const receiptPromptAddition = await fetchStoreReceiptAnalysisPromptAddition(
+    supabase,
+    registry.store_partition_key,
+  )
+
   const analyzed = await analyzeLineImageWithGroqScout(
     contentFetch.bytes,
     contentFetch.contentType,
     lineMessageId,
     groqApiKey,
+    receiptPromptAddition,
   )
 
   if (!analyzed.analysis?.receipt) {
@@ -285,9 +295,6 @@ async function processReceiptImageEvent(
     }
     return { saved: false, replied: !!receiptReplyToken, reason: 'low_confidence' }
   }
-
-  const supabase = createServiceClient()
-  if (!supabase) return { saved: false, replied: false, reason: 'server_misconfigured' }
 
   const storeDisplayName = registry.display_name || registry.store_partition_key
   const receiptDateIso = resolveReceiptDateIsoForPersist(receipt.date)

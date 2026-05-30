@@ -6,6 +6,7 @@ import {
   parseFirstJsonObject,
   salvageLineImageAnalysisResultFromText,
 } from './receipt_parse.ts'
+import { buildReceiptVisionSystemPrompt } from './receipt_prompt.ts'
 
 const VISION_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png'])
 
@@ -27,6 +28,7 @@ export async function analyzeLineImageWithGroqScout(
   contentType: string | null,
   fileName: string,
   groqApiKey: string,
+  systemPromptAddition = '',
 ): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null }> {
   if (!groqApiKey) {
     return { analysis: null, failure: { stage: 'missing_api_key', message: 'GROQ_API_KEY is missing.' } }
@@ -60,19 +62,7 @@ export async function analyzeLineImageWithGroqScout(
       messages: [
         {
           role: 'system',
-          content: [
-            'あなたは画像解析アシスタントです。必ず JSON のみを返してください（説明文・コードブロック禁止）。',
-            '画像が横向き・逆向きの場合は、頭の中で正立に回転してから読むこと。',
-            '画像がレシート/領収書なら kind を receipt にし、主要項目を抽出してください。',
-            'レシートでない場合は kind を general にし、summary に1文（80文字以内）で内容を入れてください。',
-            'summary は必ず 1 行にし、改行を含めないこと。',
-            'JSONスキーマ:',
-            '{"kind":"receipt|general","summary":"string","receipt_confidence":0.0,"receipt":{"store_name":"string|null","store_phone":"string|null","date":"string|null","net_sales":"string|null","tax_amount":"string|null","gross_sales":"string|null","party_count":"string|null","guest_count":"string|null","unit_price":"string|null","items":["string"]}}',
-            'store_phone はレシート上部の電話番号（例: 03-5361-6205）。読めない場合は null。',
-            'receipt は kind=general の時は null でも可。items は最大5件まで。読めない項目は null。',
-            'kind=receipt のときは receipt_confidence に 0.0〜1.0 の数値を必ず入れる。',
-            '金額は可能なら「¥7,700」の形式。会計組数・客数は数値として抽出。summary は必須。',
-          ].join('\n'),
+          content: buildReceiptVisionSystemPrompt(systemPromptAddition),
         },
         {
           role: 'user',

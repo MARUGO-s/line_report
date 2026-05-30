@@ -12,6 +12,7 @@ import {
   type SalesBudgetAllocationWeights,
 } from "../_shared/sales_budget_allocation.ts"
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
+import { RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
 import {
   fetchManualMonthSales,
   fetchManualMonthSalesMapForStore,
@@ -448,6 +449,58 @@ Deno.serve(async (req) => {
       }
       const result = await updateStoreReceiptPhones(supabase, body)
       return json(result, 200)
+    }
+
+    if (req.method === "GET" && path === "/receipts/analysis-prompt") {
+      const storeKey = toSafeString(url.searchParams.get("store_key")).trim()
+      if (!storeKey || !/^[A-Za-z0-9_]{1,120}$/.test(storeKey)) {
+        throw { status: 400, message: "store_key is required." } satisfies AppError
+      }
+      const { data, error } = await supabase
+        .from("store_receipt_analysis_prompts")
+        .select("prompt, enabled, updated_at")
+        .eq("store_partition_key", storeKey)
+        .maybeSingle()
+      if (error) {
+        throw { status: 500, message: `Failed to load analysis prompt: ${error.message}` } satisfies AppError
+      }
+      const row = data as { prompt?: string; enabled?: boolean; updated_at?: string } | null
+      return json({
+        store_key: storeKey,
+        default_prompt: RECEIPT_VISION_SYSTEM_PROMPT_BASE,
+        custom_prompt: row ? String(row.prompt ?? "") : "",
+        enabled: row ? row.enabled !== false : true,
+        max_chars: STORE_RECEIPT_PROMPT_MAX_CHARS,
+        updated_at: row ? row.updated_at ?? null : null,
+      }, 200)
+    }
+
+    if (req.method === "PUT" && path === "/receipts/analysis-prompt") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const storeKey = toSafeString(body.store_key).trim()
+      if (!storeKey || !/^[A-Za-z0-9_]{1,120}$/.test(storeKey)) {
+        throw { status: 400, message: "store_key is required." } satisfies AppError
+      }
+      const promptRaw = typeof body.prompt === "string" ? body.prompt : ""
+      if (promptRaw.length > STORE_RECEIPT_PROMPT_MAX_CHARS) {
+        throw { status: 400, message: `prompt must be <= ${STORE_RECEIPT_PROMPT_MAX_CHARS} chars.` } satisfies AppError
+      }
+      const enabled = body.enabled === undefined ? true : body.enabled === true
+      const { error } = await supabase
+        .from("store_receipt_analysis_prompts")
+        .upsert({
+          store_partition_key: storeKey,
+          prompt: promptRaw,
+          enabled,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "store_partition_key" })
+      if (error) {
+        throw { status: 500, message: `Failed to save analysis prompt: ${error.message}` } satisfies AppError
+      }
+      return json({ ok: true, store_key: storeKey, enabled }, 200)
     }
 
     if (req.method === "GET" && path === "/receipts/sales") {
