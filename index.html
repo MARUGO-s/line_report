@@ -9677,6 +9677,8 @@
         calendar_tomorrow_reminder_enabled: tomorrowReminderInput ? !!tomorrowReminderInput.checked : parseDatasetBoolean(tr.dataset.roomTomorrowReminder, false),
         media_file_access_enabled: mediaFileAccessEnabledInput ? !!mediaFileAccessEnabledInput.checked : parseDatasetBoolean(tr.dataset.roomMediaAccess, true),
         image_analysis_reply_enabled: imageAnalysisReplyEnabledInput ? !!imageAnalysisReplyEnabledInput.checked : parseDatasetBoolean(tr.dataset.roomImageAnalysisReply, true),
+        receipt_correction_reply_enabled: parseDatasetBoolean(tr.dataset.roomReceiptCorrectionReply, false),
+        non_receipt_image_reply_enabled: parseDatasetBoolean(tr.dataset.roomNonReceiptImageReply, true),
         calendar_ai_auto_create_enabled: gCalRow,
         calendar_silent_auto_register_enabled: gCalRow,
         calendar_low_confidence_confirm_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarLowConfConfirm, false),
@@ -9707,6 +9709,8 @@
       tr.dataset.roomTomorrowReminder = String(!!config.calendar_tomorrow_reminder_enabled);
       tr.dataset.roomMediaAccess = String(!!config.media_file_access_enabled);
       tr.dataset.roomImageAnalysisReply = String(!!config.image_analysis_reply_enabled);
+      tr.dataset.roomReceiptCorrectionReply = String(!!config.receipt_correction_reply_enabled);
+      tr.dataset.roomNonReceiptImageReply = String(config.non_receipt_image_reply_enabled !== false);
       tr.dataset.roomCalendarAutoCreate = String(!!config.calendar_ai_auto_create_enabled);
       tr.dataset.roomSilentAutoRegister = String(!!config.calendar_silent_auto_register_enabled);
       tr.dataset.roomCalendarLowConfConfirm = String(!!config.calendar_low_confidence_confirm_reply_enabled);
@@ -9872,6 +9876,8 @@
         calendar_tomorrow_reminder_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY, false),
         media_file_access_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.media_access),
         image_analysis_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.image_analysis_reply),
+        receipt_correction_reply_enabled: false,
+        non_receipt_image_reply_enabled: true,
         calendar_ai_auto_create_enabled: gCal,
         calendar_silent_auto_register_enabled: gCal,
         calendar_low_confidence_confirm_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, false),
@@ -10597,6 +10603,8 @@
         tr.dataset.roomTomorrowReminder = String(roomFeatureConfig.calendar_tomorrow_reminder_enabled);
         tr.dataset.roomMediaAccess = String(roomFeatureConfig.media_file_access_enabled);
         tr.dataset.roomImageAnalysisReply = String(roomFeatureConfig.image_analysis_reply_enabled);
+        tr.dataset.roomReceiptCorrectionReply = String(roomFeatureConfig.receipt_correction_reply_enabled);
+        tr.dataset.roomNonReceiptImageReply = String(roomFeatureConfig.non_receipt_image_reply_enabled);
         tr.dataset.roomCalendarAutoCreate = String(gCalMerged);
         tr.dataset.roomSilentAutoRegister = String(gCalMerged);
         tr.dataset.roomCalendarLowConfConfirm = String(!!(setting && setting.calendar_low_confidence_confirm_reply_enabled));
@@ -11055,6 +11063,8 @@
           message_search_library_enabled: webhookConfig.message_search_library_enabled !== false,
           media_file_access_enabled: webhookConfig.media_file_access_enabled !== false,
           image_analysis_reply_enabled: webhookConfig.image_analysis_reply_enabled !== false,
+          receipt_correction_reply_enabled: !!webhookConfig.receipt_correction_reply_enabled,
+          non_receipt_image_reply_enabled: webhookConfig.non_receipt_image_reply_enabled !== false,
           bot_reply_enabled: !!webhookConfig.bot_reply_enabled,
           calendar_ai_auto_create_enabled: !!webhookConfig.calendar_ai_auto_create_enabled,
           calendar_silent_auto_register_enabled: !!webhookConfig.calendar_silent_auto_register_enabled,
@@ -11312,6 +11322,8 @@
         message_search_library_enabled: messageSearchLibraryEnabled,
         media_file_access_enabled: roomConfig.media_file_access_enabled,
         image_analysis_reply_enabled: roomConfig.image_analysis_reply_enabled,
+        receipt_correction_reply_enabled: !!roomConfig.receipt_correction_reply_enabled,
+        non_receipt_image_reply_enabled: roomConfig.non_receipt_image_reply_enabled !== false,
         bot_reply_enabled: roomConfig.bot_reply_enabled,
         calendar_ai_auto_create_enabled: roomConfig.calendar_ai_auto_create_enabled,
         calendar_silent_auto_register_enabled: roomConfig.calendar_silent_auto_register_enabled,
@@ -11372,6 +11384,8 @@
         payload.calendar_tomorrow_reminder_enabled = !!opts.overrideConfig.calendar_tomorrow_reminder_enabled;
         payload.media_file_access_enabled = !!opts.overrideConfig.media_file_access_enabled;
         payload.image_analysis_reply_enabled = !!opts.overrideConfig.image_analysis_reply_enabled;
+        payload.receipt_correction_reply_enabled = !!opts.overrideConfig.receipt_correction_reply_enabled;
+        payload.non_receipt_image_reply_enabled = opts.overrideConfig.non_receipt_image_reply_enabled !== false;
         payload.calendar_ai_auto_create_enabled = !!opts.overrideConfig.calendar_ai_auto_create_enabled;
         payload.calendar_silent_auto_register_enabled = !!opts.overrideConfig.calendar_silent_auto_register_enabled;
         payload.calendar_low_confidence_confirm_reply_enabled = !!opts.overrideConfig.calendar_low_confidence_confirm_reply_enabled;
