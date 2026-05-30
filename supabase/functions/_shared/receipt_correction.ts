@@ -739,6 +739,25 @@ async function handleCorrectionValueInput(
   return buildFieldSelectionPrompt(nextDraft, note, { showConfirm: true })
 }
 
+/**
+ * 売上検索の日付入力（YYYYMMDD / YYYYMM）に見えるか。
+ * line_search_bot.ts の parseSalesDateInput が受理する形式（8桁の日付・先頭20の6桁の年月）と整合する最小判定。
+ * 循環 import を避けるためここで簡易判定する。
+ */
+function looksLikeSalesDateSearchInput(compact: string): boolean {
+  if (/^\d{8}$/.test(compact)) {
+    const y = Number(compact.slice(0, 4))
+    const m = Number(compact.slice(4, 6))
+    const d = Number(compact.slice(6, 8))
+    return y >= 2000 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31
+  }
+  if (/^20\d{4}$/.test(compact)) {
+    const m = Number(compact.slice(4, 6))
+    return m >= 1 && m <= 12
+  }
+  return false
+}
+
 async function tryHandlePendingCorrection(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
@@ -768,6 +787,12 @@ async function tryHandlePendingCorrection(
     const field = parseReceiptCorrectionFieldChoice(text)
     if (!field) {
       const compact = normalizeForRuleParsing(text).replace(/\s+/g, '')
+      // 「この結果を修正」後（項目番号待ち）に新しい日付検索（YYYYMMDD / YYYYMM）が来たら、
+      // 修正を終了して検索（売上検索結果カード）へ委ねる。修正メニューに吸われないようにする。
+      if (looksLikeSalesDateSearchInput(compact)) {
+        await clearPendingCorrection(supabase, roomId, userId)
+        return null
+      }
       const hint = /^\d+$/.test(compact) && !/^[1-8]$/.test(compact)
         ? '番号は1〜8で送ってください。値だけ変えたい場合は、先に項目番号（例: 会計組数なら6）を送り、次のメッセージで新しい値を送ってください。'
         : '修正する項目番号（1〜8）を返信してください。'
