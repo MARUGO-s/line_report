@@ -769,11 +769,11 @@
         <input id="budgetModalWSun" class="input" type="number" min="0.1" step="0.1" value="2">
       </label>
       <label>
-        <span>祭日の重み <small style="font-weight:normal;color:var(--sub)">(空欄＝曜日比率と同じ)</small></span>
+        <span>国民の祝日の重み <small style="font-weight:normal;color:var(--sub)">(空欄＝曜日比率と同じ)</small></span>
         <input id="budgetModalWHoliday" class="input" type="number" min="0.1" step="0.1" placeholder="例: 2">
       </label>
       <label>
-        <span>祭日前日の重み <small style="font-weight:normal;color:var(--sub)">(空欄＝曜日比率と同じ)</small></span>
+        <span>国民の祝日前日の重み <small style="font-weight:normal;color:var(--sub)">(空欄＝曜日比率と同じ)</small></span>
         <input id="budgetModalWPreHoliday" class="input" type="number" min="0.1" step="0.1" placeholder="例: 1.5">
       </label>
     </div>
@@ -1055,8 +1055,8 @@ function classifySalesBudgetDayJs(isoDate) {
 }
 
 function kindLabelJa(kind) {
-  if (kind === 'holiday') return '祭日';
-  if (kind === 'pre_holiday') return '祭日前日';
+  if (kind === 'holiday') return '国民の祝日';
+  if (kind === 'pre_holiday') return '国民の祝日前日';
   const MAP = { mon: '月', tue: '火', wed: '水', thu: '木', fri: '金', sat: '土', sun: '日' };
   return (MAP[kind] ?? kind) + '曜日';
 }
