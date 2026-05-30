@@ -299,68 +299,21 @@ async function fetchOpenMeteoExternal(
   return { map: result, usedArchive, usedForecast }
 }
 
-const WEATHER_CACHE_STORE_PREFIX = 'weather:'
-
-function monthKeysBetween(from: string, to: string): string[] {
-  const start = parseDateParts(from)
-  const end = parseDateParts(to)
-  if (!start || !end || from > to) return []
-  const keys: string[] = []
-  let y = start.y
-  let mo = start.m
-  while (y < end.y || (y === end.y && mo <= end.m)) {
-    keys.push(`${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}`)
-    mo += 1
-    if (mo > 12) {
-      mo = 1
-      y += 1
-    }
-  }
-  return keys
-}
-
-function groupEntriesByMonth(entries: Record<string, WeatherDay>): Map<string, Record<string, WeatherDay>> {
-  const grouped = new Map<string, Record<string, WeatherDay>>()
-  for (const [dateKey, value] of Object.entries(entries)) {
-    const ym = dateKey.slice(0, 7)
-    if (!grouped.has(ym)) grouped.set(ym, {})
-    grouped.get(ym)![dateKey] = value
-  }
-  return grouped
-}
-
-function weatherCacheStoreKey(cacheKey: string): string {
-  return `${WEATHER_CACHE_STORE_PREFIX}${cacheKey}`
-}
-
-function parseWeatherMonthPayload(raw: unknown): Record<string, WeatherDay> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
-  const out: Record<string, WeatherDay> = {}
-  for (const [dateKey, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !value || typeof value !== 'object') continue
-    const row = value as Record<string, unknown>
-    out[dateKey] = {
-      temp: row.temp == null ? null : Number(row.temp),
-      rain: row.rain == null ? null : Number(row.rain),
-    }
-  }
-  return out
-}
-
+/**
+ * 専用テーブル line_weather_daily から天候キャッシュを読み込む（cache_key × 日付）。
+ */
 async function loadCachedWeather(
   supabase: SupabaseClient,
   cacheKey: string,
   from: string,
   to: string,
 ): Promise<Record<string, WeatherDay>> {
-  const months = monthKeysBetween(from, to)
-  if (months.length === 0) return {}
-
   const { data, error } = await supabase
-    .from('line_sales_month_budgets')
-    .select('target_month, store_closed_dates')
-    .eq('store_partition_key', weatherCacheStoreKey(cacheKey))
-    .in('target_month', months)
+    .from('line_weather_daily')
+    .select('weather_date, temp_max_c, precipitation_mm')
+    .eq('cache_key', cacheKey)
+    .gte('weather_date', from)
+    .lte('weather_date', to)
 
   if (error) {
     console.error('weather cache load failed:', error.message)
@@ -369,47 +322,44 @@ async function loadCachedWeather(
 
   const map: Record<string, WeatherDay> = {}
   for (const row of data ?? []) {
-    const monthMap = parseWeatherMonthPayload(row.store_closed_dates)
-    for (const [dateKey, value] of Object.entries(monthMap)) {
-      if (dateKey >= from && dateKey <= to) map[dateKey] = value
+    const r = row as Record<string, unknown>
+    const dateKey = String(r.weather_date ?? '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue
+    map[dateKey] = {
+      temp: r.temp_max_c == null ? null : Number(r.temp_max_c),
+      rain: r.precipitation_mm == null ? null : Number(r.precipitation_mm),
     }
   }
   return map
 }
 
+/**
+ * 取得した天候を line_weather_daily へ恒久保存（cache_key × 日付で upsert）。
+ * 一度保存した過去天気は消えない。
+ */
 async function saveCachedWeather(
   supabase: SupabaseClient,
   cacheKey: string,
   entries: Record<string, WeatherDay>,
 ): Promise<void> {
-  const grouped = groupEntriesByMonth(entries)
-  for (const [ym, days] of grouped.entries()) {
-    const existingRows = await supabase
-      .from('line_sales_month_budgets')
-      .select('store_closed_dates')
-      .eq('store_partition_key', weatherCacheStoreKey(cacheKey))
-      .eq('target_month', ym)
-      .maybeSingle()
+  const nowIso = new Date().toISOString()
+  const rows = Object.entries(entries)
+    .filter(([dateKey]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
+    .map(([dateKey, value]) => ({
+      cache_key: cacheKey,
+      weather_date: dateKey,
+      temp_max_c: value.temp == null ? null : value.temp,
+      precipitation_mm: value.rain == null ? null : value.rain,
+      updated_at: nowIso,
+    }))
+  if (rows.length === 0) return
 
-    const existing = parseWeatherMonthPayload(existingRows.data?.store_closed_dates)
-    const merged = { ...existing, ...days }
+  const { error } = await supabase
+    .from('line_weather_daily')
+    .upsert(rows, { onConflict: 'cache_key,weather_date' })
 
-    const { error } = await supabase
-      .from('line_sales_month_budgets')
-      .upsert({
-        store_partition_key: weatherCacheStoreKey(cacheKey),
-        target_month: ym,
-        budget_yen: 1,
-        weekday_weight: 1,
-        pre_holiday_weight: 1,
-        holiday_weight: 1,
-        store_closed_dates: merged,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'store_partition_key,target_month' })
-
-    if (error) {
-      console.error(`weather cache upsert failed (${cacheKey}/${ym}):`, error.message)
-    }
+  if (error) {
+    console.error(`weather cache upsert failed (${cacheKey}):`, error.message)
   }
 }
 
