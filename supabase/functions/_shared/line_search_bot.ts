@@ -1522,14 +1522,12 @@ async function executeSalesSearch(
       uri: trendUrl,
     },
   })
-  if (!isLineInvitedChatRoomId(roomId)) {
-    footerButtons.push({
-      type: 'button',
-      style: 'secondary',
-      height: 'sm',
-      action: { type: 'postback', label: '検索メニュー', data: POSTBACK_MENU, displayText: '検索' },
-    })
-  }
+  footerButtons.push({
+    type: 'button',
+    style: 'secondary',
+    height: 'sm',
+    action: { type: 'postback', label: 'キャンセル', data: POSTBACK_CANCEL, displayText: 'キャンセル' },
+  })
 
   return {
     type: 'flex',
