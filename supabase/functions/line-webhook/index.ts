@@ -190,7 +190,7 @@ async function insertRawWebhookEvent(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
   rawTable: string,
   event: LineEvent,
-): Promise<boolean> {
+): Promise<'inserted' | 'duplicate' | 'error'> {
   const webhookEventId = String(
     event.webhookEventId || `${event.timestamp || Date.now()}-${Math.random()}`,
   ).trim()
@@ -201,11 +201,12 @@ async function insertRawWebhookEvent(
     user_id: event.source?.userId ? String(event.source.userId) : null,
     payload: event,
   })
-  if (error && String(error.code) !== '23505') {
-    console.error(`insert ${rawTable} failed:`, error.message)
-    return false
-  }
-  return true
+  if (!error) return 'inserted'
+  // 23505 = unique_violation。同一 webhook_event_id の再送＝既に処理済み。
+  // 返信・処理の重複を防ぐため、呼び出し側でこのイベントをスキップする。
+  if (String(error.code) === '23505') return 'duplicate'
+  console.error(`insert ${rawTable} failed:`, error.message)
+  return 'error'
 }
 
 async function processReceiptImageEvent(
@@ -503,6 +504,7 @@ Deno.serve(async (req) => {
   let roomsAutoLinked = 0
   let roomMessagesSaved = 0
   let searchGuideHandled = 0
+  let duplicateSkipped = 0
   const autoLinkedRoomIds = new Set<string>()
   const roomMessagePersistTasks: Promise<void>[] = []
   const displayNameUsers = new Map<string, { userId: string; roomId: string | null }>()
@@ -521,7 +523,14 @@ Deno.serve(async (req) => {
   const storeAccessToken = resolveChannelAccessToken(storeKey)
 
   for (const event of events) {
-    const rawOk = await insertRawWebhookEvent(supabase, rawTable, event)
+    const rawStatus = await insertRawWebhookEvent(supabase, rawTable, event)
+    if (rawStatus === 'duplicate') {
+      // 同一 webhook_event_id を既に処理済み（LINE の再送）。
+      // 返信・記録・自動連携などの重複を防ぐため、このイベントは丸ごとスキップする。
+      duplicateSkipped += 1
+      continue
+    }
+    const rawOk = rawStatus === 'inserted'
     if (rawOk) rawInserted += 1
 
     const eventRoomId = resolveRoomId(event)
@@ -873,7 +882,7 @@ Deno.serve(async (req) => {
   }
 
   return jsonResponse({
-    ok: errors.length === 0 || rawInserted > 0 || receiptsSaved > 0 || textHandled > 0,
+    ok: errors.length === 0 || rawInserted > 0 || receiptsSaved > 0 || textHandled > 0 || searchGuideHandled > 0,
     store_partition_key: storeKey,
     webhook_raw_table: rawTable,
     receipt_table: registry.receipt_table,
@@ -885,6 +894,8 @@ Deno.serve(async (req) => {
     rooms_auto_linked: roomsAutoLinked,
     room_messages_saved: roomMessagesSaved,
     search_guide_handled: searchGuideHandled,
+    duplicate_skipped: duplicateSkipped,
     errors,
-  }, errors.length > 0 && rawInserted === 0 && receiptsSaved === 0 && textHandled === 0 ? 500 : 200)
+    // 成功した検索（searchGuideHandled）も「処理済み」とみなし、500→LINE再送→重複返信を防ぐ。
+  }, errors.length > 0 && rawInserted === 0 && receiptsSaved === 0 && textHandled === 0 && searchGuideHandled === 0 ? 500 : 200)
 })
