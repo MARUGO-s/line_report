@@ -266,6 +266,14 @@ async function processReceiptImageEvent(
     receiptPromptAddition,
   )
 
+  // 期間集計／グループ期間（GP）レポートは「売上レシート」ではないため、売上に加算せず返信もしない。
+  // 店舗プロンプト（例: マルゴオット）が、期間/日付範囲を含む集計レポートの summary に
+  // 「期間集計レポート」等のマーカーを入れることで判定する。
+  const analyzedSummaryText = String(analyzed.analysis?.summary ?? '')
+  if (/期間集計|日付範囲|GP（グループ）/.test(analyzedSummaryText)) {
+    return { saved: false, replied: false, reason: 'period_summary_skip' }
+  }
+
   if (!analyzed.analysis?.receipt) {
     const msg = analyzed.analysis?.summary
       ? `画像を確認しました。\n${analyzed.analysis.summary}`
