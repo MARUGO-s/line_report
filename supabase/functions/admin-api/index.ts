@@ -2143,6 +2143,11 @@ async function fetchMediaState(
   const rows = Array.isArray(data) ? data.map((item) => normalizeMediaListRow(item)).filter((item): item is MediaListRow => item !== null) : []
   const roomNameMap = await fetchRoomNameMapForIds(supabase, rows.map((row) => row.room_id))
   const mediaContextMap = await fetchMediaContextMap(supabase, rows)
+  // 既存行（保存時に名前未取得）向け: sender_display_name が空のものだけ user_id から補完。
+  const senderNameMap = await fetchSenderNameMapForUserIds(
+    supabase,
+    rows.filter((row) => !row.sender_display_name && row.user_id).map((row) => String(row.user_id)),
+  )
   const items = await Promise.all(rows.map(async (row) => {
     const signedUrl = await createSignedMediaUrl(supabase, row.storage_bucket, row.storage_path)
     const downloadUrl = await createSignedMediaDownloadUrl(
@@ -2154,6 +2159,8 @@ async function fetchMediaState(
     const context = mediaContextMap.get(row.id) ?? null
     return {
       ...row,
+      sender_display_name: row.sender_display_name
+        ?? (row.user_id ? senderNameMap.get(String(row.user_id)) ?? null : null),
       room_name: roomNameMap.get(row.room_id) ?? row.room_name ?? null,
       context_before_text: context?.before_text ?? null,
       context_before_at: context?.before_at ?? null,
@@ -4939,6 +4946,41 @@ async function fetchRoomNameMapForIds(
   for (const row of Array.isArray(data) ? data : []) {
     const id = toSafeString((row as any)?.room_id)
     const name = toSafeString((row as any)?.room_name)
+    if (!id || !name) continue
+    map.set(id, name)
+  }
+  return map
+}
+
+// 投稿者名の補完: 保存時に sender_display_name が未取得（null）でも、user_id が
+// line_user_permissions に登録済みなら、その display_name を表示用に補う。
+async function fetchSenderNameMapForUserIds(
+  supabase: ReturnType<typeof createClient>,
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const normalizedIds = Array.from(
+    new Set(
+      userIds
+        .map((value) => String(value ?? "").trim())
+        .filter((value) => value.length > 0),
+    ),
+  )
+  if (normalizedIds.length === 0) return new Map<string, string>()
+
+  const { data, error } = await supabase
+    .from("line_user_permissions")
+    .select("line_user_id, display_name")
+    .in("line_user_id", normalizedIds)
+
+  if (error) {
+    console.error("Failed to fetch sender names for media list:", error.message)
+    return new Map<string, string>()
+  }
+
+  const map = new Map<string, string>()
+  for (const row of Array.isArray(data) ? data : []) {
+    const id = toSafeString((row as any)?.line_user_id)
+    const name = toSafeString((row as any)?.display_name)
     if (!id || !name) continue
     map.set(id, name)
   }

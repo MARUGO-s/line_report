@@ -1,6 +1,7 @@
 // ルームから届いたメディア（画像/動画/音声/ファイル）を「メディア閲覧」用に保存する。
 // 仕様: 1ルームあたり合計 20MB まで保存。超過したら古いものから自動削除（FIFO）。
 import { fetchLineMessageBinary } from './line_client.ts'
+import { fetchLineDisplayNameByUserId } from './line_display_names.ts'
 
 /** 保存先ストレージバケット（private） */
 const MEDIA_LIBRARY_BUCKET = 'line-media'
@@ -95,12 +96,24 @@ export async function saveRoomMediaToLibrary(
     return { saved: false, reason: `upload_failed: ${uploaded.error.message}` }
   }
 
+  // 投稿者名を解決（LINE API: グループ/ルームのメンバー名→プロフィール名）。
+  // 取得できない場合は null のまま（メディア一覧は user_id から補完表示する）。
+  const senderUserId = params.userId ? String(params.userId).trim() : ''
+  let senderDisplayName: string | null = null
+  if (senderUserId) {
+    try {
+      senderDisplayName = await fetchLineDisplayNameByUserId(senderUserId, roomId, accessToken)
+    } catch (_) {
+      senderDisplayName = null
+    }
+  }
+
   const inserted = await supabase.from('line_message_media').insert({
     message_id: null,
     line_message_id: lineMessageId,
     room_id: roomId,
-    user_id: params.userId ? String(params.userId) : null,
-    sender_display_name: null,
+    user_id: senderUserId || null,
+    sender_display_name: senderDisplayName,
     media_type: mediaType,
     store_partition_key: params.storeKey ? String(params.storeKey).trim() : null,
     storage_bucket: MEDIA_LIBRARY_BUCKET,
