@@ -601,6 +601,41 @@ Deno.serve(async (req) => {
       }, 200)
     }
 
+    if (req.method === "PUT" && path === "/settings/console") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const settings = isRecord(body.settings) ? body.settings : null
+      if (!settings) {
+        throw { status: 400, message: "settings object is required." } satisfies AppError
+      }
+      const keys = Object.keys(settings)
+      if (keys.length > 1000) {
+        throw { status: 400, message: "Too many settings (max 1000)." } satisfies AppError
+      }
+      const now = new Date().toISOString()
+      const rows: { setting_key: string; setting_value: string; updated_at: string }[] = []
+      for (const rawKey of keys) {
+        const key = String(rawKey).trim()
+        if (!key || key.length > 200) continue
+        const raw = settings[rawKey]
+        const value = raw == null ? "" : (typeof raw === "string" ? raw : String(raw))
+        if (value.length > 20000) continue
+        rows.push({ setting_key: key, setting_value: value, updated_at: now })
+      }
+      if (rows.length === 0) {
+        return json({ ok: true, saved: 0 }, 200)
+      }
+      const { error } = await supabase
+        .from("line_admin_console_settings")
+        .upsert(rows, { onConflict: "setting_key" })
+      if (error) {
+        throw { status: 500, message: `Failed to save console settings: ${error.message}` } satisfies AppError
+      }
+      return json({ ok: true, saved: rows.length }, 200)
+    }
+
     if (req.method === "DELETE" && path.startsWith("/media/")) {
       const mediaIdRaw = path.replace("/media/", "")
       const mediaId = Number(mediaIdRaw)
@@ -1120,8 +1155,18 @@ async function fetchState(
     .filter((row) => isActionableDeliveryLogStatus(row.status, row.details))
     .slice(0, logsLimit)
 
+  const { data: consoleSettingsRows } = await supabase
+    .from("line_admin_console_settings")
+    .select("setting_key, setting_value")
+  const consoleSettings: Record<string, string> = {}
+  for (const row of (Array.isArray(consoleSettingsRows) ? consoleSettingsRows : [])) {
+    const k = String((row as { setting_key?: unknown })?.setting_key ?? "").trim()
+    if (k) consoleSettings[k] = String((row as { setting_value?: unknown })?.setting_value ?? "")
+  }
+
   return {
     global_settings: globalSettings,
+    console_settings: consoleSettings,
     room_settings: roomSettingsRes.data ?? [],
     user_permissions: sortLineUserPermissionsForAdminDisplay(userPermissionsRes.data ?? []).slice(
       0,

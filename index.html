@@ -5984,6 +5984,114 @@
     const CONFIG_PRIORITY = { GLOBAL: 0, STORE: 1, ROOM: 2 };
     const ROOM_RECEIPT_SCHEDULE_KEY_PREFIX = 'line_room_receipt_schedule__';
     const ROOM_CALENDAR_GMAIL_SETTINGS_KEY_PREFIX = 'line_room_calendar_gmail_settings__';
+
+    // ===== 設定の共有ストア（DBバック・端末間共有） =====
+    // 機能/権限の設定（全体・店舗の既定値、ルーム優先順位、ルーム個別の下書き等）は localStorage では
+    // なく DB(line_admin_console_settings) に保存し、/state で配布・PUT /settings/console で更新する。
+    // ログイントークン・テーマ・一部の一時UI状態だけは端末ローカルのまま（CONSOLE_SETTINGS_LOCAL_ONLY）。
+    const CONSOLE_SETTINGS_LOCAL_ONLY = new Set([
+      STORE_TOKEN_KEY,
+      STORE_THEME_KEY,
+      WEBHOOK_LOG_STORE_KEY,
+      NEW_ROOM_DEFAULT_EXTRA_SETTINGS_OPEN_KEY,
+    ]);
+    const CONSOLE_SETTINGS_MIGRATE_PREFIXES = [
+      'line_summary_new_room_default_',
+      WEBHOOK_DEFAULT_CONFIG_KEY_PREFIX,
+      WEBHOOK_STORE_BULK_CALENDAR_GMAIL_KEY_PREFIX,
+      ROOM_CONFIG_PRIORITY_PREFIX,
+      ROOM_CALENDAR_GMAIL_SETTINGS_KEY_PREFIX,
+      ROOM_RECEIPT_SCHEDULE_KEY_PREFIX,
+    ];
+    let consoleSettings = {};            // key -> 文字列（DBバックのメモリキャッシュ）
+    let consoleSettingsReady = false;    // /state で seed 済みか
+    let consoleSettingsDirty = {};       // 未保存（DBへ送るべき）キー
+    let consoleSettingsPersistTimer = null;
+    let consoleSettingsMigrated = false;
+
+    function isConsoleSettingKey(key) {
+      const k = String(key || '');
+      if (CONSOLE_SETTINGS_LOCAL_ONLY.has(k)) return false;
+      if (k === GLOBAL_PERMISSION_CONFIG_KEY) return true;
+      return CONSOLE_SETTINGS_MIGRATE_PREFIXES.some(function(p) { return p && k.indexOf(p) === 0; });
+    }
+
+    function csGet(key) {
+      if (!isConsoleSettingKey(key)) {
+        try { return localStorage.getItem(key); } catch (_) { return null; }
+      }
+      return Object.prototype.hasOwnProperty.call(consoleSettings, key) ? consoleSettings[key] : null;
+    }
+
+    function csSet(key, value) {
+      const v = value == null ? '' : String(value);
+      if (!isConsoleSettingKey(key)) {
+        try { localStorage.setItem(key, v); } catch (_) {}
+        return;
+      }
+      consoleSettings[key] = v;
+      consoleSettingsDirty[key] = v;
+      scheduleConsoleSettingsPersist();
+    }
+
+    function csRemove(key) {
+      if (!isConsoleSettingKey(key)) {
+        try { localStorage.removeItem(key); } catch (_) {}
+        return;
+      }
+      // 共有設定は「空文字＝未設定（既定にフォールバック）」として保存する
+      consoleSettings[key] = '';
+      consoleSettingsDirty[key] = '';
+      scheduleConsoleSettingsPersist();
+    }
+
+    function scheduleConsoleSettingsPersist() {
+      if (consoleSettingsPersistTimer) clearTimeout(consoleSettingsPersistTimer);
+      consoleSettingsPersistTimer = setTimeout(function() { flushConsoleSettings(); }, 700);
+    }
+
+    async function flushConsoleSettings() {
+      consoleSettingsPersistTimer = null;
+      const payload = consoleSettingsDirty;
+      if (!payload || Object.keys(payload).length === 0) return;
+      consoleSettingsDirty = {};
+      if (!getToken()) return;
+      try {
+        await api('/settings/console', { method: 'PUT', body: JSON.stringify({ settings: payload }) });
+      } catch (e) {
+        Object.assign(consoleSettingsDirty, payload); // 失敗分は次回へ持ち越し
+        console.error('flushConsoleSettings failed:', e);
+      }
+    }
+
+    // 既存の端末ローカル設定を一度だけ DB へ移行（DBに無いキーのみ）。既存運用の設定を失わないため。
+    function migrateLocalSettingsToConsoleOnce() {
+      if (consoleSettingsMigrated) return;
+      consoleSettingsMigrated = true;
+      let migrated = 0;
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k || !isConsoleSettingKey(k)) continue;
+          if (Object.prototype.hasOwnProperty.call(consoleSettings, k)) continue; // DBに既にある
+          const val = localStorage.getItem(k);
+          if (val == null) continue;
+          consoleSettings[k] = val;
+          consoleSettingsDirty[k] = val;
+          migrated++;
+        }
+      } catch (_) {}
+      if (migrated > 0) scheduleConsoleSettingsPersist();
+    }
+
+    function seedConsoleSettings(map) {
+      const base = (map && typeof map === 'object') ? map : {};
+      // DB値をベースに、未保存（送信待ち）の変更を上書きで温存（保存直後の再読込で消えないように）。
+      consoleSettings = Object.assign({}, base, consoleSettingsDirty);
+      consoleSettingsReady = true;
+      migrateLocalSettingsToConsoleOnce();
+    }
+
     let activeReceiptScheduleRoomId = '';
     let activeCalendarGmailRoomId = '';
     let activeRoomIndividualSave = false;
@@ -6063,7 +6171,7 @@
     }
 
     function loadBooleanSetting(key, fallback) {
-      const raw = localStorage.getItem(key);
+      const raw = csGet(key);
       if (raw == null) return fallback;
       const normalized = String(raw).trim().toLowerCase();
       if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
@@ -6072,7 +6180,7 @@
     }
 
     function saveBooleanSetting(key, value) {
-      localStorage.setItem(key, value ? '1' : '0');
+      csSet(key, value ? '1' : '0');
     }
 
     function clampScheduleInteger(value, fallback, min, max) {
@@ -6084,13 +6192,13 @@
     }
 
     function loadIntegerSetting(key, fallback, min, max) {
-      const raw = localStorage.getItem(key);
+      const raw = csGet(key);
       if (raw == null || String(raw).trim() === '') return fallback;
       return clampScheduleInteger(raw, fallback, min, max);
     }
 
     function saveIntegerSetting(key, value, fallback, min, max) {
-      localStorage.setItem(key, String(clampScheduleInteger(value, fallback, min, max)));
+      csSet(key, String(clampScheduleInteger(value, fallback, min, max)));
     }
 
     function pad2(n) {
@@ -6188,7 +6296,7 @@
 
     function loadTomorrowReminderHoursDefault() {
       try {
-        const raw = localStorage.getItem(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_HOURS_KEY);
+        const raw = csGet(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_HOURS_KEY);
         if (raw == null || String(raw).trim() === '') {
           return CALENDAR_REMINDER_SCHEDULE_DEFAULTS.hours.slice();
         }
@@ -6200,7 +6308,7 @@
 
     function saveTomorrowReminderHoursDefault(hours) {
       const normalized = normalizeTomorrowReminderHours(hours, CALENDAR_REMINDER_SCHEDULE_DEFAULTS.hours);
-      localStorage.setItem(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_HOURS_KEY, normalized.join(','));
+      csSet(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_HOURS_KEY, normalized.join(','));
     }
 
     function getBulkTomorrowReminderSchedule() {
@@ -7323,7 +7431,7 @@
     function saveWebhookStoreBulkCalendarGmail(storeKey, fields) {
       const key = String(storeKey || '').trim();
       if (!key || key === UNASSIGNED_WEBHOOK_KEY || key === GLOBAL_CONFIG_SCOPE_KEY) return;
-      localStorage.setItem(
+      csSet(
         webhookStoreBulkCalendarGmailStorageKey(key),
         JSON.stringify(pickCalendarGmailRawFields(fields || {})),
       );
@@ -7333,7 +7441,7 @@
       const key = String(storeKey || '').trim();
       if (!key) return null;
       try {
-        const raw = localStorage.getItem(webhookStoreBulkCalendarGmailStorageKey(key));
+        const raw = csGet(webhookStoreBulkCalendarGmailStorageKey(key));
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === 'object' ? parsed : null;
@@ -7517,7 +7625,7 @@
       const key = String(roomId || '').trim();
       if (!key) return null;
       try {
-        const raw = localStorage.getItem(roomCalendarGmailSettingsStorageKey(key));
+        const raw = csGet(roomCalendarGmailSettingsStorageKey(key));
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === 'object' ? parsed : null;
@@ -7529,7 +7637,7 @@
     function saveRoomCalendarGmailSettings(roomId, fields) {
       const key = String(roomId || '').trim();
       if (!key) return;
-      localStorage.setItem(roomCalendarGmailSettingsStorageKey(key), JSON.stringify(fields || {}));
+      csSet(roomCalendarGmailSettingsStorageKey(key), JSON.stringify(fields || {}));
     }
 
     function resolveCalendarGmailSettingsForRoom(roomId) {
@@ -7896,10 +8004,10 @@
     }
 
     function loadMergedGoogleCalendarAutoRegisterDefault() {
-      var v = localStorage.getItem(NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY);
+      var v = csGet(NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY);
       if (v != null) return loadBooleanSetting(NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.calendar_auto);
-      if (localStorage.getItem(NEW_ROOM_DEFAULT_CALENDAR_AUTO_CREATE_KEY) != null
-        || localStorage.getItem(NEW_ROOM_DEFAULT_SILENT_AUTO_REGISTER_KEY) != null) {
+      if (csGet(NEW_ROOM_DEFAULT_CALENDAR_AUTO_CREATE_KEY) != null
+        || csGet(NEW_ROOM_DEFAULT_SILENT_AUTO_REGISTER_KEY) != null) {
         return loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_AUTO_CREATE_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.calendar_auto)
           && loadBooleanSetting(NEW_ROOM_DEFAULT_SILENT_AUTO_REGISTER_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.calendar_auto);
       }
@@ -10653,7 +10761,7 @@
       const key = String(roomId || '').trim();
       if (!key) return CONFIG_PRIORITY.STORE;
       try {
-        const raw = localStorage.getItem(roomConfigPriorityStorageKey(key));
+        const raw = csGet(roomConfigPriorityStorageKey(key));
         const parsed = parseInt(raw, 10);
         if (parsed === CONFIG_PRIORITY.GLOBAL || parsed === CONFIG_PRIORITY.STORE || parsed === CONFIG_PRIORITY.ROOM) {
           return parsed;
@@ -10668,7 +10776,7 @@
       const normalized = priority === CONFIG_PRIORITY.ROOM
         ? CONFIG_PRIORITY.ROOM
         : (priority === CONFIG_PRIORITY.GLOBAL ? CONFIG_PRIORITY.GLOBAL : CONFIG_PRIORITY.STORE);
-      localStorage.setItem(roomConfigPriorityStorageKey(key), String(normalized));
+      csSet(roomConfigPriorityStorageKey(key), String(normalized));
     }
 
     function roomConfigPriorityLabel(priority) {
@@ -10681,15 +10789,15 @@
       const key = String(roomId || '').trim();
       if (!key) return;
       try {
-        localStorage.removeItem(roomReceiptScheduleStorageKey(key));
-        localStorage.removeItem(roomCalendarGmailSettingsStorageKey(key));
-        localStorage.removeItem(roomConfigPriorityStorageKey(key));
+        csRemove(roomReceiptScheduleStorageKey(key));
+        csRemove(roomCalendarGmailSettingsStorageKey(key));
+        csRemove(roomConfigPriorityStorageKey(key));
       } catch (_) {}
     }
 
     function loadGlobalPermissionConfig() {
       try {
-        const raw = localStorage.getItem(GLOBAL_PERMISSION_CONFIG_KEY);
+        const raw = csGet(GLOBAL_PERMISSION_CONFIG_KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === 'object' ? parsed : null;
@@ -10699,7 +10807,7 @@
     }
 
     function saveGlobalPermissionConfig(config) {
-      localStorage.setItem(GLOBAL_PERMISSION_CONFIG_KEY, JSON.stringify(config || {}));
+      csSet(GLOBAL_PERMISSION_CONFIG_KEY, JSON.stringify(config || {}));
     }
 
     function mergeGlobalIntoConfig(config) {
@@ -10726,7 +10834,7 @@
 
     function loadWebhookDefaultConfig(storeKey) {
       try {
-        const raw = localStorage.getItem(webhookDefaultConfigStorageKey(storeKey));
+        const raw = csGet(webhookDefaultConfigStorageKey(storeKey));
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === 'object' ? parsed : null;
@@ -10736,7 +10844,7 @@
     }
 
     function saveWebhookDefaultConfig(storeKey, config) {
-      localStorage.setItem(webhookDefaultConfigStorageKey(storeKey), JSON.stringify(config));
+      csSet(webhookDefaultConfigStorageKey(storeKey), JSON.stringify(config));
     }
 
     function buildNewRoomDefaultFeatureConfig() {
@@ -11924,7 +12032,7 @@
           : readCalendarGmailFromInlineModal());
         saveRoomReceiptSchedule(roomId, scheduleDraft);
         if (built.permissionMode) {
-          localStorage.removeItem(roomCalendarGmailSettingsStorageKey(roomId));
+          csRemove(roomCalendarGmailSettingsStorageKey(roomId));
         }
         applyRoomConfigStateToRow(tr, roomConfig);
         await saveRoomRow(tr, { overrideConfig: roomConfig, reload: false });
@@ -12189,6 +12297,8 @@
         const [state, liteMap] = await Promise.all([statePromise, liteWebhookPromise]);
 
         currentState = state;
+        // 機能/権限の設定（既定値・店舗テンプレ・優先順位等）をDB由来でメモリへ反映（端末間共有）。
+        seedConsoleSettings(state.console_settings);
         receiptWebhookStatusByStore = mergeWebhookStatusMaps(liteMap, receiptWebhookStatusByStore);
         renderDeliverySection(state);
         renderWebhookSettingsSection(
