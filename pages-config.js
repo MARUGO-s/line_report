@@ -110,7 +110,12 @@
   };
 
   function normalizeStoreLabel(label) {
-    return String(label || '').replace(/\s+/g, '');
+    // 空白除去・末尾の敬称（様/御中/行/宛）除去・小文字化で表記ゆれを吸収。
+    // 例: "BISTRO CAVA CAVA 様" / "ビストロ サヴァサヴァ 御中" → どちらも bistrocavacava に解決。
+    return String(label || '')
+      .replace(/\s+/g, '')
+      .replace(/(?:様|御中|行|宛)+$/u, '')
+      .toLowerCase();
   }
 
   /** store_key / store_name を canonical な slug（store_partition_key）に寄せる */
