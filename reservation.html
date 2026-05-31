@@ -1270,6 +1270,8 @@
         { label: 'アレルギー', value: allergy },
         { label: 'TEL', value: phone },
         { label: '来店履歴', value: visitCountLabel },
+        // 予約が入った（システムに記録された）日時。通常は予約メール受信時刻＝予約された日。
+        { label: '予約受付日', value: formatDateTimeDetailJst(item.created_at) },
       ];
     }
 
