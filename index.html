@@ -7406,6 +7406,13 @@
       const roomId = getActiveRoomConfigRoomId();
       const tr = findRoomTableRowById(roomId);
       if (tr) activeRoomConfigRow = tr;
+      // ルーム個別モードでは対象ルームを切替えると編集対象そのものが変わるため、
+      // 権限トグルも"そのルーム自身"の値に読み込み直す（古い値を別ルームに保存する事故を防ぐ）。
+      if (activeRoomIndividualSave && tr) {
+        applyRoomConfigPermissionToggles(mergeGlobalIntoConfig(getRoomConfigStateFromRow(tr)));
+        dom.roomConfigModalMeta.textContent =
+          '対象ルーム（個別保存・順位:ルーム）: ' + getRoomLabelFromRow(tr);
+      }
       applyReceiptScheduleToRoomConfigModal(roomId);
       applyCalendarGmailToRoomConfigModal(roomId);
       invalidateRoomConfigReview();
@@ -11726,7 +11733,9 @@
       });
     }
 
-    function applyConfigToWebhookModal(config, storeKey, storeName, preferredRoomId) {
+    // 権限・機能トグル（レシート関連＋その他権限）をモーダルへ反映。店舗一括/ルーム個別の
+    // どちらの config でも使える。対象ルーム切替（個別モード）でも再利用する。
+    function applyRoomConfigPermissionToggles(config) {
       dom.roomConfigBotReplyEnabled.checked = !!config.bot_reply_enabled;
       if (dom.roomConfigBotReplyHardMute) {
         dom.roomConfigBotReplyHardMute.checked = !!config.bot_reply_hard_mute_enabled;
@@ -11757,6 +11766,12 @@
       if (dom.roomConfigReceiptMonthendReportEnabled) {
         dom.roomConfigReceiptMonthendReportEnabled.checked = config.receipt_monthend_report_enabled !== false;
       }
+      syncRoomConfigCalendarSubOptions();
+      syncRoomConfigMediaSubOptions();
+    }
+
+    function applyConfigToWebhookModal(config, storeKey, storeName, preferredRoomId) {
+      applyRoomConfigPermissionToggles(config);
       if (dom.roomConfigStoreSelectWrap) {
         dom.roomConfigStoreSelectWrap.hidden = true;
         dom.roomConfigStoreSelectWrap.setAttribute('aria-hidden', 'true');
@@ -11764,8 +11779,6 @@
       if (dom.roomConfigReceiptReportStoreKey && storeKey && storeKey !== UNASSIGNED_WEBHOOK_KEY) {
         dom.roomConfigReceiptReportStoreKey.value = storeKey;
       }
-      syncRoomConfigCalendarSubOptions();
-      syncRoomConfigMediaSubOptions();
       populateRoomConfigReceiptScheduleRoomSelect(
         findRoomRowsByStoreKey(storeKey),
         preferredRoomId || (activeRoomConfigRow && activeRoomConfigRow.dataset ? activeRoomConfigRow.dataset.roomId : ''),
@@ -11893,8 +11906,12 @@
       const initialTab = String(opts.activeTab || '').trim()
         || ((permissionMode && linkedRows.length > 0) ? 'calendar' : 'receipt');
       setRoomConfigActiveTab(initialTab);
+      // ルーム個別モードでは、店舗一括（先頭ルーム）ではなく"そのルーム自身"の保存値を表示する。
+      const configForModal = (activeRoomIndividualSave && activeRoomConfigRow)
+        ? mergeGlobalIntoConfig(getRoomConfigStateFromRow(activeRoomConfigRow))
+        : aggregateWebhookConfig(key);
       applyConfigToWebhookModal(
-        aggregateWebhookConfig(key),
+        configForModal,
         key,
         storeName,
         preferredRoomId || (activeRoomConfigRow && activeRoomConfigRow.dataset ? activeRoomConfigRow.dataset.roomId : ''),
