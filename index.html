@@ -7597,6 +7597,39 @@
       };
     }
 
+    // 全体モードのカレンダー/予約バルク（インライン入力）を、既定キー（getBulkCalendarGmailSettings が参照）へ保存。
+    // 全体モーダルの再表示・新規ルーム既定がこの値を読むため、保存しないと表示が元に戻る。
+    function persistGlobalBulkCalendarGmailFromInline() {
+      const v = readCalendarGmailFromInlineModal();
+      const autoOn = !!v.calendar_ai_auto_create_enabled;
+      saveBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY, !!v.calendar_tomorrow_reminder_enabled);
+      saveBooleanSetting(NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY, autoOn);
+      saveBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_AUTO_CREATE_KEY, autoOn);
+      saveBooleanSetting(NEW_ROOM_DEFAULT_SILENT_AUTO_REGISTER_KEY, autoOn);
+      saveBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_REGISTRATION_REPLY_KEY, !!v.calendar_registration_reply_enabled);
+      saveBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, !!v.calendar_low_confidence_confirm_reply_enabled);
+      saveBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, !!v.gmail_reservation_alert_enabled);
+      try {
+        const schedule = readTomorrowReminderScheduleFromInputs(
+          dom.roomConfigTomorrowReminderHours,
+          dom.roomConfigTomorrowReminderOnlyIfEvents,
+          dom.roomConfigTomorrowReminderMaxItems,
+        );
+        saveTomorrowReminderHoursDefault(schedule.calendar_tomorrow_reminder_hours);
+        saveBooleanSetting(
+          NEW_ROOM_DEFAULT_TOMORROW_REMINDER_ONLY_IF_EVENTS_KEY,
+          schedule.calendar_tomorrow_reminder_only_if_events,
+        );
+        saveIntegerSetting(
+          NEW_ROOM_DEFAULT_TOMORROW_REMINDER_MAX_ITEMS_KEY,
+          schedule.calendar_tomorrow_reminder_max_items,
+          CALENDAR_REMINDER_SCHEDULE_DEFAULTS.max_items,
+          1,
+          50,
+        );
+      } catch (_e) {}
+    }
+
     function readCalendarGmailFromPermModal() {
       const gCal = !!(dom.roomConfigGoogleCalendarAutoRegisterPerm && dom.roomConfigGoogleCalendarAutoRegisterPerm.checked);
       const schedule = readTomorrowReminderScheduleFromInputs(
@@ -11858,6 +11891,9 @@
       let nextConfig = built.nextConfig;
       nextConfig.receipt_report_store_partition_key = '';
       saveGlobalPermissionConfig(nextConfig);
+      // カレンダー/予約のバルク値は既定キー（getBulkCalendarGmailSettings が読む所）にも保存。
+      // これをしないと全体モーダルの再表示でカレンダー設定が元に戻る（DBには各ルームへ反映済みでも表示が戻る）。
+      persistGlobalBulkCalendarGmailFromInline();
       const scheduleDraft = buildReceiptScheduleDraftFromRoomModal();
       const allRows = Array.from(dom.roomTableBody.querySelectorAll('tr'));
       let updated = 0;
