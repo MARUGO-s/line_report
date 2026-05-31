@@ -2545,16 +2545,33 @@ function isLineEntryAnalytics() {
   return /Line\//i.test(navigator.userAgent);
 }
 
+/** LINEロック店舗を保持/復元（他ページからの強制リダイレクト時に store_key を引き継ぐため） */
+function readPersistedLineLockedStore() {
+  try {
+    return String(sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || '').trim();
+  } catch (_) { return ''; }
+}
+function persistLineLockedStore(storeKey) {
+  const key = String(storeKey || '').trim();
+  if (!key) return;
+  try { sessionStorage.setItem('line_locked_store', key); } catch (_) {}
+  try { localStorage.setItem('line_locked_store', key); } catch (_) {}
+}
+
 function captureLineEntryUrlParams() {
   if (!isLineEntryAnalytics()) return null;
   try {
     const params = new URLSearchParams(location.search);
     const rawKey = String(params.get('store_key') || params.get('store') || '').trim();
-    if (!rawKey) return null;
-    const storeKey = typeof LINE_REPORT_PAGES.resolveStoreKey === 'function'
-      ? LINE_REPORT_PAGES.resolveStoreKey(rawKey, '')
-      : rawKey.toLowerCase();
+    let storeKey = rawKey
+      ? (typeof LINE_REPORT_PAGES.resolveStoreKey === 'function'
+          ? LINE_REPORT_PAGES.resolveStoreKey(rawKey, '')
+          : rawKey.toLowerCase())
+      : '';
+    // URLに store_key が無い（他ページからのリダイレクト直後など）場合は保持済みから復元
+    if (!storeKey) storeKey = readPersistedLineLockedStore();
     if (!storeKey) return null;
+    persistLineLockedStore(storeKey);
     const monthRaw = String(params.get('month') || '').trim().slice(0, 7);
     const month = isValidMonthString(monthRaw) ? monthRaw : null;
     return { storeKey, month };

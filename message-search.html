@@ -3,6 +3,19 @@
 <head>
   <meta charset="utf-8">
   <base href="/line_report/">
+  <script>
+    /* LINE経由（店舗）アクセスは売上分析ページのみ許可。このページは売上分析へ強制リダイレクト。 */
+    (function(){
+      try {
+        var p = new URLSearchParams(location.search);
+        var isLine = (p.get('from') === 'line') || /Line\//i.test(String(navigator.userAgent || ''));
+        if (!isLine) return;
+        var sk = '';
+        try { sk = sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch (_) {}
+        location.replace('/line_report/analytics.html?from=line' + (sk ? ('&store_key=' + encodeURIComponent(sk)) : ''));
+      } catch (_) {}
+    })();
+  </script>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
