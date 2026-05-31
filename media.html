@@ -1947,11 +1947,21 @@
       return '/media?' + params.toString();
     }
 
-    /** メディア一覧の絞り込みは「店舗単位（22店舗）」。pages-config の STORE_NAMES から構築する。 */
+    // 店舗ごとの保存メディア件数（メディア一覧APIの store_media_counts）。null=未取得。
+    let mediaStoreCountsByKey = null;
+    let mediaStoreCountTotal = 0;
+
+    /** メディア一覧の絞り込みは「店舗単位（22店舗）」。pages-config の STORE_NAMES から構築する。
+     *  店名の横に保存件数（例:「マルゴ オット（3件）」）を表示する（件数取得後）。 */
     function setMediaStoreFilterOptions() {
       if (!dom.roomFilter) return;
       const cfg = window.LINE_REPORT_PAGES;
       const names = (cfg && cfg.STORE_NAMES) ? cfg.STORE_NAMES : {};
+      const counts = mediaStoreCountsByKey;
+      const withCount = function(key, label) {
+        if (!counts) return label;
+        return label + '（' + Number(counts[key] || 0) + '件）';
+      };
       const stores = Object.keys(names)
         .map(function(k) { return { key: k, name: String(names[k] || k) }; })
         .sort(function(a, b) { return a.name.localeCompare(b.name, 'ja'); });
@@ -1959,12 +1969,12 @@
       dom.roomFilter.innerHTML = '';
       const allOpt = document.createElement('option');
       allOpt.value = '';
-      allOpt.textContent = '全店舗';
+      allOpt.textContent = counts ? ('全店舗（' + mediaStoreCountTotal + '件）') : '全店舗';
       dom.roomFilter.appendChild(allOpt);
       for (const s of stores) {
         const el = document.createElement('option');
         el.value = s.key;
-        el.textContent = s.name;
+        el.textContent = withCount(s.key, s.name);
         dom.roomFilter.appendChild(el);
       }
       dom.roomFilter.value = Array.from(dom.roomFilter.options).some(function(opt) { return opt.value === prev; })
@@ -2306,6 +2316,12 @@
       const filteredTotalCount = Number(result.total_file_count || state.total || 0);
       const allTotalBytes = Number(result.all_file_bytes || filteredTotalBytes || 0);
       const allTotalCount = Number(result.all_file_count || filteredTotalCount || 0);
+      // 店舗セレクタに保存件数を表示（全店舗＝全体総数、各店＝store_media_counts）。
+      mediaStoreCountsByKey = (result.store_media_counts && typeof result.store_media_counts === 'object')
+        ? result.store_media_counts
+        : {};
+      mediaStoreCountTotal = allTotalCount;
+      setMediaStoreFilterOptions();
       const capBytes = Number(result.media_storage_cap_bytes || MEDIA_CAP_DEFAULT_BYTES);
       const uploadLimitMb = Number(result.media_upload_max_mb || 10);
       const uploadLimitMbSafe = Number.isInteger(uploadLimitMb) ? uploadLimitMb : 10;

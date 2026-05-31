@@ -2120,13 +2120,14 @@ async function fetchMediaState(
     query = query.eq("media_type", mediaType)
   }
 
-  const [listRes, filteredUsageRes, allUsageRes, mediaUploadMaxMb] = await Promise.all([
+  const [listRes, filteredUsageRes, allUsageRes, mediaUploadMaxMb, storeMediaCounts] = await Promise.all([
     query,
     storePartitionKey
       ? fetchStoreMediaUsage(supabase, storePartitionKey, mediaType)
       : fetchLineMediaUsageStats(supabase, roomId || null, mediaType),
     fetchLineMediaUsageStats(supabase, null, null),
     fetchMediaUploadMaxMb(supabase),
+    fetchMediaCountByStore(supabase),
   ])
 
   const { data, error, count } = listRes
@@ -2176,6 +2177,7 @@ async function fetchMediaState(
   return {
     items,
     total: safeTotal,
+    store_media_counts: storeMediaCounts,
     total_file_bytes: filteredUsageRes.stats.total_bytes,
     total_file_count: filteredUsageRes.stats.total_files,
     all_file_bytes: allUsageRes.stats.total_bytes,
@@ -4954,6 +4956,28 @@ async function fetchRoomNameMapForIds(
 
 // 投稿者名の補完: 保存時に sender_display_name が未取得（null）でも、user_id が
 // line_user_permissions に登録済みなら、その display_name を表示用に補う。
+// 店舗ごとの保存メディア件数（全種別・絞り込みに依存しない総数）。
+// メディア閲覧の店舗セレクタに「店名 (件数)」を表示するために使う。
+async function fetchMediaCountByStore(
+  supabase: ReturnType<typeof createClient>,
+): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from("line_message_media")
+    .select("store_partition_key")
+    .limit(100000)
+  if (error) {
+    console.error("Failed to fetch media counts by store:", error.message)
+    return {}
+  }
+  const counts: Record<string, number> = {}
+  for (const row of Array.isArray(data) ? data : []) {
+    const key = String((row as { store_partition_key?: unknown })?.store_partition_key ?? "").trim()
+    if (!key) continue
+    counts[key] = (counts[key] ?? 0) + 1
+  }
+  return counts
+}
+
 async function fetchSenderNameMapForUserIds(
   supabase: ReturnType<typeof createClient>,
   userIds: string[],
