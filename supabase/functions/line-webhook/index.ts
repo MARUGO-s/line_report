@@ -11,6 +11,7 @@ import {
   clearPendingReceiptDuplicate,
 } from '../_shared/receipt_duplicate.ts'
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
+import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   buildReceiptStoreMismatchFlexReply,
   buildStoreMismatchGuidance,
@@ -512,6 +513,7 @@ Deno.serve(async (req) => {
   let roomMessagesSaved = 0
   let searchGuideHandled = 0
   let duplicateSkipped = 0
+  let mediaSaved = 0
   const autoLinkedRoomIds = new Set<string>()
   const roomMessagePersistTasks: Promise<void>[] = []
   const displayNameUsers = new Map<string, { userId: string; roomId: string | null }>()
@@ -671,6 +673,30 @@ Deno.serve(async (req) => {
       suppressReceiptReply = muteFlags !== null ? !muteFlags.image_analysis_reply_enabled : false
       suppressNonReceiptReply = muteFlags !== null ? !muteFlags.non_receipt_image_reply_enabled : false
       allowCorrectionReply = muteFlags !== null ? !!muteFlags.receipt_correction_reply_enabled : false
+    }
+
+    // メディア閲覧用の保存（画像/動画/音声/ファイル）。1ルーム合計20MBまで、超過分は古い順に自動削除。
+    if (
+      event.type === 'message'
+      && eventRoomId
+      && storeAccessToken
+      && ['image', 'video', 'audio', 'file'].includes(String(event.message?.type || ''))
+    ) {
+      try {
+        const mediaResult = await saveRoomMediaToLibrary(supabase, {
+          roomId: eventRoomId,
+          userId: eventUserId || null,
+          lineMessageId: String(event.message?.id || ''),
+          mediaType: String(event.message?.type || ''),
+          fileName: String(event.message?.type) === 'file'
+            ? String((event.message as { fileName?: string } | undefined)?.fileName || '')
+            : '',
+          accessToken: storeAccessToken,
+        })
+        if (mediaResult.saved) mediaSaved += 1
+      } catch (mediaErr) {
+        console.error('saveRoomMediaToLibrary failed:', mediaErr instanceof Error ? mediaErr.message : String(mediaErr))
+      }
     }
 
     if (event.type === 'message' && event.message?.type === 'image') {
@@ -902,6 +928,7 @@ Deno.serve(async (req) => {
     room_messages_saved: roomMessagesSaved,
     search_guide_handled: searchGuideHandled,
     duplicate_skipped: duplicateSkipped,
+    media_saved: mediaSaved,
     errors,
     // 成功した検索（searchGuideHandled）も「処理済み」とみなし、500→LINE再送→重複返信を防ぐ。
   }, errors.length > 0 && rawInserted === 0 && receiptsSaved === 0 && textHandled === 0 && searchGuideHandled === 0 ? 500 : 200)
