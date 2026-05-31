@@ -10,6 +10,15 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="LINE売上">
   <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
+  <script>
+    /* LINE経由（?from=line / LINEアプリ内ブラウザ）は売上分析のみ表示。
+       描画前に data-entry を立て、サイドナビ等が一瞬見える事故を防ぐ。 */
+    (function(){try{
+      var p=new URLSearchParams(location.search);
+      var line=(p.get('from')==='line')||/Line\//i.test(String(navigator.userAgent||''));
+      if(line)document.documentElement.setAttribute('data-entry','line');
+    }catch(_){}})();
+  </script>
   <link rel="icon" type="image/svg+xml" href="icons/logo-mark.svg">
   <link rel="icon" href="icons/line-report-favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/line-report-favicon-32x32.png">
@@ -99,6 +108,14 @@
     .lsa-side-foot .conn { display: flex; align-items: center; gap: 9px; padding: 10px; border-radius: 10px; background: var(--sidebar-2); color: var(--side-text); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
     .lsa-side-foot .conn b { display: block; color: var(--side-text-strong); font-size: 12.5px; font-weight: 600; font-family: "IBM Plex Sans JP", sans-serif; }
     .lsa-side-foot .conn .dt { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
+    /* LINE経由は売上分析以外へ遷移させない：サイドナビ（売上分析以外）・グループ見出し・ヘッダーの外部リンクを非表示 */
+    html[data-entry="line"] .lsa-navitem:not(.is-active),
+    html[data-entry="line"] .lsa-navlabel,
+    html[data-entry="line"] #adminLink,
+    html[data-entry="line"] #mediaLink,
+    html[data-entry="line"] #reservationLink,
+    html[data-entry="line"] #receiptSheetsPilotHeaderLink,
+    html[data-entry="line"] #receiptSheetsPilotLink { display: none !important; }
     @media (max-width: 920px) {
       body { padding-left: 20px; }
       .lsa-side { position: static; width: auto; flex-direction: row; align-items: center; gap: 8px; padding: 10px; overflow-x: auto; margin: -20px -20px 16px; }
