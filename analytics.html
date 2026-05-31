@@ -119,12 +119,27 @@
     html[data-entry="line"] #reservationLink,
     html[data-entry="line"] #receiptSheetsPilotHeaderLink,
     html[data-entry="line"] #receiptSheetsPilotLink { display: none !important; }
+    .lsa-navtoggle {
+      display: none; position: fixed; top: 10px; left: 10px; z-index: 680;
+      width: 42px; height: 42px; padding: 0; border-radius: 10px;
+      border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 88%, transparent);
+      color: var(--text); cursor: pointer; align-items: center; justify-content: center;
+      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    }
+    .lsa-navtoggle:hover { background: var(--surface-2); }
+    .lsa-nav-backdrop { display: none; position: fixed; inset: 0; z-index: 690; background: rgba(0,0,0,.45); }
+
     @media (max-width: 920px) {
-      body { padding-left: 20px; }
-      .lsa-side { position: static; width: auto; flex-direction: row; align-items: center; gap: 8px; padding: 10px; overflow-x: auto; margin: -20px -20px 16px; }
-      .lsa-side-brand { padding: 0 8px 0 4px; }
-      .lsa-nav { flex-direction: row; margin: 0; }
-      .lsa-navlabel, .lsa-side-foot { display: none; }
+      /* スマホ: サイドバーをハンバーガー開閉のドロワーに（縦レイアウトのまま左から出し入れ） */
+      body { padding-left: 20px; padding-top: 64px; }
+      .lsa-navtoggle { display: inline-flex; }
+      .lsa-side {
+        width: 270px; max-width: 84vw; z-index: 700;
+        transform: translateX(-100%); transition: transform .26s ease;
+        box-shadow: 20px 0 60px -12px rgba(0,0,0,.55);
+      }
+      .lsa-side.open { transform: translateX(0); }
+      .lsa-nav-backdrop.open { display: block; }
     }
     .app { max-width: 1360px; margin: 0 auto; display: grid; gap: 16px; }
     .hero, .card {
@@ -543,6 +558,10 @@
 </head>
 <body>
 
+  <button id="lsaNavToggle" class="lsa-navtoggle" type="button" aria-label="メニューを開閉" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div id="lsaNavBackdrop" class="lsa-nav-backdrop" aria-hidden="true"></div>
   <aside class="lsa-side">
     <div class="lsa-side-brand"><span class="mk">LS</span><span>LINE Summary<small>Admin Console</small></span></div>
     <nav class="lsa-nav">
@@ -3977,5 +3996,22 @@ if (lineEntryFromUrl) applyLineEntryStoreLock(lineEntryFromUrl);
   if (getToken()) await loadAll();
 })();
 </script>
+  <script>
+    /* スマホ用ハンバーガーメニューの開閉（PCでは未使用） */
+    (function(){
+      var toggle = document.getElementById('lsaNavToggle');
+      var drawer = document.querySelector('.lsa-side');
+      var backdrop = document.getElementById('lsaNavBackdrop');
+      function setOpen(open){
+        if (drawer) drawer.classList.toggle('open', open);
+        if (backdrop) backdrop.classList.toggle('open', open);
+        if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      if (toggle) toggle.addEventListener('click', function(){ setOpen(!(drawer && drawer.classList.contains('open'))); });
+      if (backdrop) backdrop.addEventListener('click', function(){ setOpen(false); });
+      if (drawer) drawer.addEventListener('click', function(e){ if (e.target.closest && e.target.closest('.lsa-navitem')) setOpen(false); });
+      document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setOpen(false); });
+    })();
+  </script>
 </body>
 </html>

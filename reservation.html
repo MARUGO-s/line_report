@@ -814,15 +814,36 @@
     }
     .stat-chip-store { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 
+    .ms-navtoggle {
+      display: none; position: fixed; top: 10px; left: 10px; z-index: 30;
+      width: 42px; height: 42px; padding: 0; border-radius: 10px;
+      border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 88%, transparent);
+      color: var(--text); cursor: pointer; align-items: center; justify-content: center;
+      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    }
+    .ms-navtoggle:hover { background: var(--surface-2); }
+    .ms-nav-backdrop { display: none; position: fixed; inset: 0; z-index: 31; background: rgba(0,0,0,.45); }
+
     @media (max-width: 880px) {
       .ms-shell { grid-template-columns: 1fr; }
-      .ms-side { position: static; height: auto; }
+      .ms-navtoggle { display: inline-flex; }
+      .ms-side {
+        position: fixed; left: 0; top: 0; bottom: 0; height: 100vh; width: 270px; max-width: 84vw;
+        z-index: 32; transform: translateX(-100%); transition: transform .26s ease;
+        box-shadow: 20px 0 60px -12px rgba(0,0,0,.55);
+      }
+      .ms-side.open { transform: translateX(0); }
+      .ms-nav-backdrop.open { display: block; }
       .ms-content { padding: 22px 16px 60px; }
-      .ms-topbar { padding: 12px 16px; }
+      .ms-topbar { padding: 12px 16px 12px 64px; }
     }
   </style>
 </head>
 <body>
+  <button id="msNavToggle" class="ms-navtoggle" type="button" aria-label="メニューを開閉" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div id="msNavBackdrop" class="ms-nav-backdrop" aria-hidden="true"></div>
   <div class="ms-shell">
     <aside class="ms-side">
       <div class="ms-brand">
@@ -2003,6 +2024,23 @@
           }
         });
       }
+    })();
+  </script>
+  <script>
+    /* スマホ用ハンバーガーメニューの開閉（PCでは未使用） */
+    (function(){
+      var toggle = document.getElementById('msNavToggle');
+      var drawer = document.querySelector('.ms-side');
+      var backdrop = document.getElementById('msNavBackdrop');
+      function setOpen(open){
+        if (drawer) drawer.classList.toggle('open', open);
+        if (backdrop) backdrop.classList.toggle('open', open);
+        if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      if (toggle) toggle.addEventListener('click', function(){ setOpen(!(drawer && drawer.classList.contains('open'))); });
+      if (backdrop) backdrop.addEventListener('click', function(){ setOpen(false); });
+      if (drawer) drawer.addEventListener('click', function(e){ if (e.target.closest && e.target.closest('.ms-navlink')) setOpen(false); });
+      document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setOpen(false); });
     })();
   </script>
 </body>
