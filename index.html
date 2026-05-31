@@ -6993,12 +6993,14 @@
 
     function syncRoomConfigCalendarTabLayout() {
       const permissionMode = !!(dom.roomConfigModalCard && dom.roomConfigModalCard.dataset.webhookMode === 'permission');
+      // 全体（全店舗・全ルーム）モードは特定店舗の連携ルーム数に依存せず、一括で全ルームへ適用する。
+      const isGlobal = String(activeWebhookConfigStoreKey || '').trim() === GLOBAL_CONFIG_SCOPE_KEY;
       const linkedCount = getLinkedRoomCountInModal();
       const override = !!(dom.roomConfigCalendarGmailOverride && dom.roomConfigCalendarGmailOverride.checked);
       const multiRoom = linkedCount >= 2;
 
       if (dom.roomConfigCalendarNoRoomHint) {
-        dom.roomConfigCalendarNoRoomHint.hidden = !permissionMode || linkedCount > 0;
+        dom.roomConfigCalendarNoRoomHint.hidden = !permissionMode || linkedCount > 0 || isGlobal;
       }
       if (dom.roomConfigCalendarSingleRoomHint) {
         dom.roomConfigCalendarSingleRoomHint.hidden = !permissionMode || linkedCount !== 1;
@@ -7008,6 +7010,8 @@
         if (!permissionMode) {
           dom.roomConfigCalendarBulkTitle.textContent =
             '店舗一括（この Webhook の全連携ルームへ保存時に反映）';
+        } else if (isGlobal) {
+          dom.roomConfigCalendarBulkTitle.textContent = '全体一括（全店舗・全ルームへ保存時に反映）';
         } else if (linkedCount === 0) {
           dom.roomConfigCalendarBulkTitle.textContent = '店舗一括（連携ルームなし）';
         } else if (linkedCount === 1) {
@@ -7025,6 +7029,8 @@
 
       if (dom.roomConfigCalendarInlineBulk) {
         if (!permissionMode) {
+          dom.roomConfigCalendarInlineBulk.hidden = false;
+        } else if (isGlobal) {
           dom.roomConfigCalendarInlineBulk.hidden = false;
         } else if (linkedCount === 0) {
           dom.roomConfigCalendarInlineBulk.hidden = true;
@@ -7052,7 +7058,7 @@
           '上の店舗一括の内容: ' + formatCalendarGmailBulkLabel(bulk);
       }
 
-      const disableBulkInputs = permissionMode && linkedCount === 0;
+      const disableBulkInputs = permissionMode && linkedCount === 0 && !isGlobal;
       [
         dom.roomConfigTomorrowReminder,
         dom.roomConfigGoogleCalendarAutoRegister,
@@ -7672,9 +7678,12 @@
       const linkedCount = getLinkedRoomCountInModal();
       const multiRoom = linkedCount >= 2;
       const hasLinkedRooms = linkedCount > 0;
+      const isGlobal = String(activeWebhookConfigStoreKey || '').trim() === GLOBAL_CONFIG_SCOPE_KEY;
       if (dom.roomConfigCalendarGmailFields) dom.roomConfigCalendarGmailFields.hidden = !override;
       if (dom.roomConfigCalendarInlineBulk) {
         if (!permissionMode) {
+          dom.roomConfigCalendarInlineBulk.hidden = false;
+        } else if (isGlobal) {
           dom.roomConfigCalendarInlineBulk.hidden = false;
         } else if (linkedCount === 0) {
           dom.roomConfigCalendarInlineBulk.hidden = true;
