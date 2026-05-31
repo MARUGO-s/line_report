@@ -4838,20 +4838,29 @@
   .app-v2-brand { display: none; }
   .app-v2-header-meta { color: var(--text-3); }
   .app-v2-main { margin-left: 220px; max-width: 1180px; padding: 24px; }
+  /* モバイル用ハンバーガーボタン＆ドロワー背景（PCでは非表示） */
+  .app-v2-navtoggle {
+    display: none; position: fixed; top: 10px; left: 10px; z-index: 680;
+    width: 42px; height: 42px; padding: 0; border-radius: 10px;
+    border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 88%, transparent);
+    color: var(--text); cursor: pointer; align-items: center; justify-content: center;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .app-v2-navtoggle:hover { background: var(--surface-2); }
+  .app-v2-nav-backdrop { display: none; position: fixed; inset: 0; z-index: 690; background: rgba(0,0,0,.45); }
+
   @media (max-width: 920px){
-    /* スマホ/タブレット: サイドバーを上部の横スクロールナビへ。
-       各要素は flex:none で縮めず（=文字が縦に割れない）、はみ出しは横スクロールで見せる。 */
-    .app-v2-tabs-wrap { position: static; width: auto; flex-direction: row; align-items: center; gap: 8px; padding: 10px 12px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
-    .app-v2-tabs-wrap > * { flex: none; }
-    .app-v2-sidebrand { padding: 0 8px 0 4px; }
-    .app-v2-sidebrand small { display: none; }
-    .app-v2-tabs { flex-direction: row; margin: 0; gap: 4px; }
-    .app-v2-pages { flex-direction: row; margin-top: 0; gap: 4px; align-items: center; }
-    .app-v2-pages-label { display: none; }
-    .app-v2-tab, .app-v2-pagelink { white-space: nowrap; flex: none; }
-    .app-v2-pagelink .ext { display: none; }
-    .app-v2-sidefoot { display: none; }
-    .app-v2-header, .app-v2-main { margin-left: 0; }
+    /* スマホ: サイドバーをハンバーガーで開閉するドロワーに（縦レイアウトのまま左から出し入れ） */
+    .app-v2-navtoggle { display: inline-flex; }
+    .app-v2-tabs-wrap {
+      transform: translateX(-100%); transition: transform .26s ease;
+      width: 270px; max-width: 84vw; z-index: 700;
+      box-shadow: 20px 0 60px -12px rgba(0,0,0,.55);
+    }
+    .app-v2-tabs-wrap.open { transform: translateX(0); }
+    .app-v2-nav-backdrop.open { display: block; }
+    .app-v2-header { margin-left: 0; padding-left: 62px; }
+    .app-v2-main { margin-left: 0; }
   }
 
   /* ===== リスキン③: 共通コンポーネント（新デザイン・両テーマ／CSSのみ・機能不変） ===== */
@@ -4992,6 +5001,12 @@
 </style>
 </head>
 <body>
+
+  <!-- ===== モバイル用ハンバーガー＋ドロワー背景 ===== -->
+  <button id="navToggle" class="app-v2-navtoggle" type="button" aria-label="メニューを開閉" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div id="navBackdrop" class="app-v2-nav-backdrop" aria-hidden="true"></div>
 
   <!-- ===== Application Header ===== -->
   <header class="app-v2-header">
@@ -13845,6 +13860,27 @@
           }
         });
       }
+    })();
+  </script>
+  <script>
+    /* スマホ用ハンバーガーメニューの開閉（PCでは未使用） */
+    (function(){
+      var toggle = document.getElementById('navToggle');
+      var drawer = document.querySelector('.app-v2-tabs-wrap');
+      var backdrop = document.getElementById('navBackdrop');
+      function setOpen(open){
+        if (drawer) drawer.classList.toggle('open', open);
+        if (backdrop) backdrop.classList.toggle('open', open);
+        if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      if (toggle) toggle.addEventListener('click', function(){
+        setOpen(!(drawer && drawer.classList.contains('open')));
+      });
+      if (backdrop) backdrop.addEventListener('click', function(){ setOpen(false); });
+      if (drawer) drawer.addEventListener('click', function(e){
+        if (e.target.closest && e.target.closest('.app-v2-tab, .app-v2-pagelink')) setOpen(false);
+      });
+      document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setOpen(false); });
     })();
   </script>
 </body>
