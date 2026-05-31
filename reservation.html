@@ -1722,12 +1722,15 @@
           const popupId = 'popup-' + String(popupSeq);
           popupItems[popupId] = item;
           const summary = buildReservationSummary(item);
+          const metaParts = [];
+          if (summary.partySize && summary.partySize !== '不明') metaParts.push(summary.partySize);
+          if (summary.visitTime && summary.visitTime !== '不明') metaParts.push(summary.visitTime);
+          const metaLine = metaParts.join(' ・ ');
           return [
             '<div class="resv source-' + escapeHtml(source) + ' js-resv-card" role="button" tabindex="0" data-popup-id="' + escapeHtml(popupId) + '">',
             '<div class="resv-summary">',
             '<div class="resv-summary-name" title="' + escapeHtml(summary.customerName) + '">' + escapeHtml(summary.customerName) + '</div>',
-            '<div class="resv-summary-sub">人数: ' + escapeHtml(summary.partySize) + '</div>',
-            '<div class="resv-summary-sub">時間: ' + escapeHtml(summary.visitTime) + '</div>',
+            (metaLine ? '<div class="resv-summary-sub">' + escapeHtml(metaLine) + '</div>' : ''),
             (state.activeStore === 'all'
               ? '<div class="resv-store-tag">' + escapeHtml(storeLabelForKey(getReservationStoreKey(item))) + '</div>'
               : ''),

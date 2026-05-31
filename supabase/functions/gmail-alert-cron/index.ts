@@ -816,6 +816,7 @@ function buildReservationCalendarDetailPayload(alert: GmailMessageAlert, routeLa
   const plan = normalizeCalendarDetailText(reservation?.plan, 180)
   const partySize = normalizeCalendarPartySize(reservation?.partySize)
   const allergy = normalizeCalendarAllergy(reservation?.allergy)
+  const storeName = normalizeCalendarDetailText(reservation?.storeName, 90)
 
   const payload = {
     v: 1,
@@ -827,6 +828,7 @@ function buildReservationCalendarDetailPayload(alert: GmailMessageAlert, routeLa
     plan,
     partySize,
     allergy,
+    storeName,
   }
   const hasAnyField = Object.values(payload).some((value) => typeof value === "string" && value.length > 0)
   if (!hasAnyField) return fallbackDetail
