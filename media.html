@@ -1107,7 +1107,7 @@
           <option value="file">ファイル</option>
         </select>
         <select id="roomFilter" class="select" aria-label="店舗で絞り込み" style="min-width:240px">
-          <option value="">全ルーム</option>
+          <option value="">全店舗</option>
         </select>
         <select id="limitSelect" class="select" aria-label="表示件数">
           <option value="12">12件</option>
@@ -1131,16 +1131,10 @@
       <div id="summary" class="meta">未取得</div>
       <div id="usageWrap" class="usage-wrap">
         <div class="usage-head">
-          <span>メディア容量使用率</span>
-          <span id="usageText">0 MB / 2 GB (0%)</span>
+          <span>保存ルール</span>
+          <span>1ルームあたり 最大 20MB</span>
         </div>
-        <div class="usage-track">
-          <div id="usageFill" class="usage-fill"></div>
-        </div>
-        <div class="usage-scale">
-          <span>0 MB</span>
-          <span id="usageCapLabel">2 GB</span>
-        </div>
+        <div class="meta" style="margin:0;">各ルームの保存容量は合計20MBまで。超過すると古いメディアから自動的に削除されます（上の一覧は店舗単位で表示）。</div>
       </div>
       <div id="mediaList" class="list"></div>
       <div class="pager">
@@ -2260,6 +2254,9 @@
     }
 
     function renderUsageBar(totalBytes, capBytes) {
+      // 旧「合計/2GB」ゲージは廃止（実際の上限は1ルーム20MB・古い順自動削除）。
+      // 表示要素が無い場合は何もしない。
+      if (!dom.usageText || !dom.usageFill || !dom.usageCapLabel) return;
       const cap = Number.isFinite(Number(capBytes)) && Number(capBytes) > 0
         ? Number(capBytes)
         : MEDIA_CAP_DEFAULT_BYTES;
