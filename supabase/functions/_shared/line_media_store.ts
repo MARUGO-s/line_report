@@ -51,6 +51,7 @@ export async function saveRoomMediaToLibrary(
     mediaType: string
     fileName?: string | null
     accessToken: string
+    storeKey?: string | null
   },
 ): Promise<{ saved: boolean; reason?: string }> {
   const roomId = String(params.roomId || '').trim()
@@ -101,6 +102,7 @@ export async function saveRoomMediaToLibrary(
     user_id: params.userId ? String(params.userId) : null,
     sender_display_name: null,
     media_type: mediaType,
+    store_partition_key: params.storeKey ? String(params.storeKey).trim() : null,
     storage_bucket: MEDIA_LIBRARY_BUCKET,
     storage_path: storagePath,
     original_file_name: params.fileName ? String(params.fileName).slice(0, 255) : null,

@@ -690,6 +690,7 @@ Deno.serve(async (req) => {
       try {
         const mediaResult = await saveRoomMediaToLibrary(supabase, {
           roomId: eventRoomId,
+          storeKey: registry.store_partition_key || storeKey || null,
           userId: eventUserId || null,
           lineMessageId: String(event.message?.id || ''),
           mediaType: String(event.message?.type || ''),

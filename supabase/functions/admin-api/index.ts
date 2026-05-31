@@ -2046,6 +2046,8 @@ async function fetchMediaState(
   const offset = clampInt(url.searchParams.get("offset"), 0, 0, 1000000)
   const roomId = String(url.searchParams.get("room_id") ?? "").trim()
   const mediaType = normalizeMediaType(url.searchParams.get("media_type"))
+  const storePartitionKeyRaw = String(url.searchParams.get("store_partition_key") ?? "").trim()
+  const storePartitionKey = /^[A-Za-z0-9_]{1,120}$/.test(storePartitionKeyRaw) ? storePartitionKeyRaw : ""
 
   let query = supabase
     .from("line_message_media")
@@ -2056,6 +2058,9 @@ async function fetchMediaState(
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1)
 
+  if (storePartitionKey) {
+    query = query.eq("store_partition_key", storePartitionKey)
+  }
   if (roomId) {
     query = query.eq("room_id", roomId)
   }
@@ -2065,7 +2070,9 @@ async function fetchMediaState(
 
   const [listRes, filteredUsageRes, allUsageRes, mediaUploadMaxMb] = await Promise.all([
     query,
-    fetchLineMediaUsageStats(supabase, roomId || null, mediaType),
+    storePartitionKey
+      ? fetchStoreMediaUsage(supabase, storePartitionKey, mediaType)
+      : fetchLineMediaUsageStats(supabase, roomId || null, mediaType),
     fetchLineMediaUsageStats(supabase, null, null),
     fetchMediaUploadMaxMb(supabase),
   ])
@@ -4755,6 +4762,30 @@ async function fetchMediaUploadMaxMb(
     console.error("Unexpected error while fetching media_upload_max_mb:", error)
     return DEFAULT_MEDIA_UPLOAD_MAX_MB
   }
+}
+
+/** 店舗単位のメディア使用量（store_partition_key で集計）。RPCは room/type のみ対応のため直接集計する。 */
+async function fetchStoreMediaUsage(
+  supabase: ReturnType<typeof createClient>,
+  storePartitionKey: string,
+  mediaType: MediaType | null,
+): Promise<{ ok: true; stats: MediaUsageStats } | { ok: false; message: string }> {
+  let query = supabase
+    .from("line_message_media")
+    .select("file_size_bytes")
+    .eq("store_partition_key", storePartitionKey)
+    .limit(10000)
+  if (mediaType) {
+    query = query.eq("media_type", mediaType)
+  }
+  const { data, error } = await query
+  if (error) {
+    return { ok: false, message: `Failed to fetch store media usage: ${error.message}` }
+  }
+  const rows = Array.isArray(data) ? data : []
+  let totalBytes = 0
+  for (const r of rows) totalBytes += toNonNegativeInteger((r as { file_size_bytes?: unknown }).file_size_bytes)
+  return { ok: true, stats: { total_files: rows.length, total_bytes: totalBytes } }
 }
 
 async function fetchLineMediaUsageStats(

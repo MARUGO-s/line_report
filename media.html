@@ -1106,7 +1106,7 @@
           <option value="audio">音声</option>
           <option value="file">ファイル</option>
         </select>
-        <select id="roomFilter" class="select" aria-label="ルームで絞り込み" style="min-width:240px">
+        <select id="roomFilter" class="select" aria-label="店舗で絞り込み" style="min-width:240px">
           <option value="">全ルーム</option>
         </select>
         <select id="limitSelect" class="select" aria-label="表示件数">
@@ -1944,15 +1944,39 @@
       params.set('limit', String(state.limit));
       params.set('offset', String(state.offset));
       const type = String(dom.typeFilter.value || '').trim();
-      const roomId = String(dom.roomFilter.value || '').trim();
+      const storeKey = String(dom.roomFilter.value || '').trim();
       if (type) params.set('media_type', type);
-      if (roomId) params.set('room_id', roomId);
+      if (storeKey) params.set('store_partition_key', storeKey);
       params.set('_ts', String(Date.now()));
       return '/media?' + params.toString();
     }
 
+    /** メディア一覧の絞り込みは「店舗単位（22店舗）」。pages-config の STORE_NAMES から構築する。 */
+    function setMediaStoreFilterOptions() {
+      if (!dom.roomFilter) return;
+      const cfg = window.LINE_REPORT_PAGES;
+      const names = (cfg && cfg.STORE_NAMES) ? cfg.STORE_NAMES : {};
+      const stores = Object.keys(names)
+        .map(function(k) { return { key: k, name: String(names[k] || k) }; })
+        .sort(function(a, b) { return a.name.localeCompare(b.name, 'ja'); });
+      const prev = String(dom.roomFilter.value || '');
+      dom.roomFilter.innerHTML = '';
+      const allOpt = document.createElement('option');
+      allOpt.value = '';
+      allOpt.textContent = '全店舗';
+      dom.roomFilter.appendChild(allOpt);
+      for (const s of stores) {
+        const el = document.createElement('option');
+        el.value = s.key;
+        el.textContent = s.name;
+        dom.roomFilter.appendChild(el);
+      }
+      dom.roomFilter.value = Array.from(dom.roomFilter.options).some(function(opt) { return opt.value === prev; })
+        ? prev
+        : '';
+    }
+
     function setRoomFilterOptions(options) {
-      const prevMediaValue = String(dom.roomFilter.value || '');
       const prevDocFilterValue = String(dom.documentRoomFilter.value || '');
       const prevDocUploadValue = String(dom.documentUploadRoomSelect.value || '');
 
@@ -1973,13 +1997,11 @@
         }
       }
 
-      refillSelect(dom.roomFilter, '全ルーム');
+      // メディア一覧の絞り込み（dom.roomFilter）は店舗単位（setMediaStoreFilterOptions）で別途構築する。
+      // ここでは資料の絞り込み／アップロード先（ルーム単位）のみを構築する。
       refillSelect(dom.documentRoomFilter, '全ルーム');
       refillSelect(dom.documentUploadRoomSelect, '共通資料（ルーム未指定）');
 
-      dom.roomFilter.value = Array.from(dom.roomFilter.options).some(function(opt) { return opt.value === prevMediaValue; })
-        ? prevMediaValue
-        : '';
       dom.documentRoomFilter.value = Array.from(dom.documentRoomFilter.options).some(function(opt) { return opt.value === prevDocFilterValue; })
         ? prevDocFilterValue
         : '';
@@ -2046,6 +2068,8 @@
     }
 
     async function loadRoomFilterOptions() {
+      // メディア一覧の絞り込みは店舗単位（静的な店舗マスター）。state取得に依存せず先に構築。
+      setMediaStoreFilterOptions();
       const SC = window.LINE_REPORT_SITE_CACHE;
       const token = getToken();
       const statePath = '/state?logs_limit=10';
