@@ -6357,23 +6357,46 @@
       return ROOM_RECEIPT_SCHEDULE_KEY_PREFIX + String(roomId || '').trim();
     }
 
+    function parseDatasetScheduleInt(value) {
+      if (value == null || value === '') return null;
+      const n = parseInt(value, 10);
+      return Number.isFinite(n) ? n : null;
+    }
+
     function loadRoomReceiptSchedule(roomId) {
+      // 送信時刻はDB（room_summary_settings）由来の行 dataset を参照する（localStorage は廃止）。
       const key = String(roomId || '').trim();
       if (!key) return null;
-      try {
-        const raw = localStorage.getItem(roomReceiptScheduleStorageKey(key));
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed : null;
-      } catch (_) {
-        return null;
-      }
+      const tr = findRoomTableRowById(key);
+      if (!tr) return null;
+      const ds = tr.dataset;
+      return {
+        receipt_schedule_override: parseDatasetBoolean(ds.receiptScheduleOverride, false),
+        receipt_midreport_day: parseDatasetScheduleInt(ds.receiptMidreportDay),
+        receipt_midreport_hour: parseDatasetScheduleInt(ds.receiptMidreportHour),
+        receipt_midreport_minute: parseDatasetScheduleInt(ds.receiptMidreportMinute),
+        receipt_monthend_day: parseDatasetScheduleInt(ds.receiptMonthendDay),
+        receipt_monthend_hour: parseDatasetScheduleInt(ds.receiptMonthendHour),
+        receipt_monthend_minute: parseDatasetScheduleInt(ds.receiptMonthendMinute),
+      };
     }
 
     function saveRoomReceiptSchedule(roomId, scheduleFields) {
+      // モーダル編集中の送信時刻を行 dataset に反映（保存時に DB へ PUT される）。localStorage は使わない。
       const key = String(roomId || '').trim();
       if (!key) return;
-      localStorage.setItem(roomReceiptScheduleStorageKey(key), JSON.stringify(scheduleFields || {}));
+      const tr = findRoomTableRowById(key);
+      if (!tr) return;
+      const f = scheduleFields || {};
+      const override = !!f.receipt_schedule_override;
+      tr.dataset.receiptScheduleOverride = String(override);
+      const setSched = function(name, v) { tr.dataset[name] = (override && v != null && v !== '') ? String(v) : ''; };
+      setSched('receiptMidreportDay', f.receipt_midreport_day);
+      setSched('receiptMidreportHour', f.receipt_midreport_hour);
+      setSched('receiptMidreportMinute', f.receipt_midreport_minute);
+      setSched('receiptMonthendDay', f.receipt_monthend_day);
+      setSched('receiptMonthendHour', f.receipt_monthend_hour);
+      setSched('receiptMonthendMinute', f.receipt_monthend_minute);
     }
 
     function resolveReceiptScheduleFromConfig(config) {
@@ -10476,6 +10499,13 @@
         gmail_reservation_alert_enabled: gmailAlertEnabledInput ? !!gmailAlertEnabledInput.checked : parseDatasetBoolean(tr.dataset.roomGmailAlertEnabled, false),
         receipt_midreport_enabled: parseDatasetBoolean(tr.dataset.roomReceiptMidreportEnabled, true),
         receipt_monthend_report_enabled: parseDatasetBoolean(tr.dataset.roomReceiptMonthendReportEnabled, true),
+        receipt_schedule_override: parseDatasetBoolean(tr.dataset.receiptScheduleOverride, false),
+        receipt_midreport_day: parseDatasetScheduleInt(tr.dataset.receiptMidreportDay),
+        receipt_midreport_hour: parseDatasetScheduleInt(tr.dataset.receiptMidreportHour),
+        receipt_midreport_minute: parseDatasetScheduleInt(tr.dataset.receiptMidreportMinute),
+        receipt_monthend_day: parseDatasetScheduleInt(tr.dataset.receiptMonthendDay),
+        receipt_monthend_hour: parseDatasetScheduleInt(tr.dataset.receiptMonthendHour),
+        receipt_monthend_minute: parseDatasetScheduleInt(tr.dataset.receiptMonthendMinute),
         receipt_report_store_partition_key: String(tr.dataset.roomReceiptReportStoreKey || '').trim(),
       };
       return {
@@ -10510,6 +10540,18 @@
       tr.dataset.roomReceiptMidreportEnabled = String(config.receipt_midreport_enabled !== false);
       tr.dataset.roomReceiptMonthendReportEnabled = String(config.receipt_monthend_report_enabled !== false);
       tr.dataset.roomReceiptReportStoreKey = String(config.receipt_report_store_partition_key || '');
+      // 送信時刻（スケジュール）は config に含まれるときだけ更新（一括フラグ適用で他ルームの時刻を消さない）
+      if ('receipt_schedule_override' in config) {
+        const schedOverride = !!config.receipt_schedule_override;
+        tr.dataset.receiptScheduleOverride = String(schedOverride);
+        const setSched = function(name, v) { tr.dataset[name] = (schedOverride && v != null && v !== '') ? String(v) : ''; };
+        setSched('receiptMidreportDay', config.receipt_midreport_day);
+        setSched('receiptMidreportHour', config.receipt_midreport_hour);
+        setSched('receiptMidreportMinute', config.receipt_midreport_minute);
+        setSched('receiptMonthendDay', config.receipt_monthend_day);
+        setSched('receiptMonthendHour', config.receipt_monthend_hour);
+        setSched('receiptMonthendMinute', config.receipt_monthend_minute);
+      }
       const badge = tr.querySelector('.room-config-badge');
       if (badge) {
         const tone = roomConfigToneClass(getRoomConfigEnabledCount(normalizedConfig));
@@ -11473,6 +11515,13 @@
           gmail_reservation_alert_enabled: setting && setting.gmail_reservation_alert_enabled === true,
           receipt_midreport_enabled: setting ? setting.receipt_midreport_enabled !== false : true,
           receipt_monthend_report_enabled: setting ? setting.receipt_monthend_report_enabled !== false : true,
+          receipt_schedule_override: !!(setting && setting.receipt_schedule_override),
+          receipt_midreport_day: setting && setting.receipt_midreport_day != null ? setting.receipt_midreport_day : null,
+          receipt_midreport_hour: setting && setting.receipt_midreport_hour != null ? setting.receipt_midreport_hour : null,
+          receipt_midreport_minute: setting && setting.receipt_midreport_minute != null ? setting.receipt_midreport_minute : null,
+          receipt_monthend_day: setting && setting.receipt_monthend_day != null ? setting.receipt_monthend_day : null,
+          receipt_monthend_hour: setting && setting.receipt_monthend_hour != null ? setting.receipt_monthend_hour : null,
+          receipt_monthend_minute: setting && setting.receipt_monthend_minute != null ? setting.receipt_monthend_minute : null,
           receipt_report_store_partition_key: setting
             ? String(setting.receipt_report_store_partition_key || '').trim()
             : '',
@@ -11502,6 +11551,13 @@
         tr.dataset.roomGmailAlertEnabled = String(roomFeatureConfig.gmail_reservation_alert_enabled);
         tr.dataset.roomReceiptMidreportEnabled = String(roomFeatureConfig.receipt_midreport_enabled);
         tr.dataset.roomReceiptMonthendReportEnabled = String(roomFeatureConfig.receipt_monthend_report_enabled);
+        tr.dataset.receiptScheduleOverride = String(roomFeatureConfig.receipt_schedule_override);
+        tr.dataset.receiptMidreportDay = roomFeatureConfig.receipt_midreport_day != null ? String(roomFeatureConfig.receipt_midreport_day) : '';
+        tr.dataset.receiptMidreportHour = roomFeatureConfig.receipt_midreport_hour != null ? String(roomFeatureConfig.receipt_midreport_hour) : '';
+        tr.dataset.receiptMidreportMinute = roomFeatureConfig.receipt_midreport_minute != null ? String(roomFeatureConfig.receipt_midreport_minute) : '';
+        tr.dataset.receiptMonthendDay = roomFeatureConfig.receipt_monthend_day != null ? String(roomFeatureConfig.receipt_monthend_day) : '';
+        tr.dataset.receiptMonthendHour = roomFeatureConfig.receipt_monthend_hour != null ? String(roomFeatureConfig.receipt_monthend_hour) : '';
+        tr.dataset.receiptMonthendMinute = roomFeatureConfig.receipt_monthend_minute != null ? String(roomFeatureConfig.receipt_monthend_minute) : '';
         tr.dataset.roomReceiptReportStoreKey = String(roomFeatureConfig.receipt_report_store_partition_key || '');
         tr.dataset.messageCleanupTiming = String((setting && setting.message_cleanup_timing) || '');
         tr.innerHTML =
@@ -12287,6 +12343,13 @@
         gmail_reservation_alert_enabled: roomConfig.gmail_reservation_alert_enabled,
         receipt_midreport_enabled: roomConfig.receipt_midreport_enabled !== false,
         receipt_monthend_report_enabled: roomConfig.receipt_monthend_report_enabled !== false,
+        receipt_schedule_override: !!roomConfig.receipt_schedule_override,
+        receipt_midreport_day: roomConfig.receipt_schedule_override ? (roomConfig.receipt_midreport_day ?? null) : null,
+        receipt_midreport_hour: roomConfig.receipt_schedule_override ? (roomConfig.receipt_midreport_hour ?? null) : null,
+        receipt_midreport_minute: roomConfig.receipt_schedule_override ? (roomConfig.receipt_midreport_minute ?? null) : null,
+        receipt_monthend_day: roomConfig.receipt_schedule_override ? (roomConfig.receipt_monthend_day ?? null) : null,
+        receipt_monthend_hour: roomConfig.receipt_schedule_override ? (roomConfig.receipt_monthend_hour ?? null) : null,
+        receipt_monthend_minute: roomConfig.receipt_schedule_override ? (roomConfig.receipt_monthend_minute ?? null) : null,
         receipt_report_store_partition_key: roomConfig.receipt_report_store_partition_key || null,
         delivery_hours: parseHours(hoursInput ? hoursInput.value : '', true),
         message_cleanup_timing: roomCleanupTiming,

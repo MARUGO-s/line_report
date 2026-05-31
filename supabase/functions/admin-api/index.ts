@@ -725,6 +725,13 @@ Deno.serve(async (req) => {
           gmail_reservation_alert_enabled: payload.gmail_reservation_alert_enabled,
           receipt_midreport_enabled: payload.receipt_midreport_enabled,
           receipt_monthend_report_enabled: payload.receipt_monthend_report_enabled,
+          receipt_schedule_override: payload.receipt_schedule_override,
+          receipt_midreport_day: payload.receipt_midreport_day,
+          receipt_midreport_hour: payload.receipt_midreport_hour,
+          receipt_midreport_minute: payload.receipt_midreport_minute,
+          receipt_monthend_day: payload.receipt_monthend_day,
+          receipt_monthend_hour: payload.receipt_monthend_hour,
+          receipt_monthend_minute: payload.receipt_monthend_minute,
           receipt_report_store_partition_key: payload.receipt_report_store_partition_key,
           room_sort_order: payload.room_sort_order,
           delivery_hours: payload.delivery_hours,
@@ -5641,6 +5648,13 @@ function buildRoomSettingsPayload(body: unknown): {
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
   media_save_enabled: boolean
+  receipt_schedule_override: boolean
+  receipt_midreport_day: number | null
+  receipt_midreport_hour: number | null
+  receipt_midreport_minute: number | null
+  receipt_monthend_day: number | null
+  receipt_monthend_hour: number | null
+  receipt_monthend_minute: number | null
   receipt_report_store_partition_key: string | null
   room_sort_order: number | null
   delivery_hours: number[] | null
@@ -5781,6 +5795,27 @@ function buildRoomSettingsPayload(body: unknown): {
   }
   const mediaSaveEnabled = mediaSaveEnabledRaw !== false
 
+  const receiptScheduleOverrideRaw = body.receipt_schedule_override
+  if (receiptScheduleOverrideRaw != null && typeof receiptScheduleOverrideRaw !== "boolean") {
+    throw { status: 400, message: "receipt_schedule_override must be boolean when provided." } satisfies AppError
+  }
+  const receiptScheduleOverride = receiptScheduleOverrideRaw === true
+
+  const parseScheduleInt = (value: unknown, label: string, min: number, max: number): number | null => {
+    if (value == null || value === "") return null
+    const n = Number(value)
+    if (!Number.isInteger(n) || n < min || n > max) {
+      throw { status: 400, message: `${label} must be an integer between ${min} and ${max} or null.` } satisfies AppError
+    }
+    return n
+  }
+  const receiptMidreportDay = parseScheduleInt(body.receipt_midreport_day, "receipt_midreport_day", 1, 28)
+  const receiptMidreportHour = parseScheduleInt(body.receipt_midreport_hour, "receipt_midreport_hour", 0, 23)
+  const receiptMidreportMinute = parseScheduleInt(body.receipt_midreport_minute, "receipt_midreport_minute", 0, 59)
+  const receiptMonthendDay = parseScheduleInt(body.receipt_monthend_day, "receipt_monthend_day", 1, 28)
+  const receiptMonthendHour = parseScheduleInt(body.receipt_monthend_hour, "receipt_monthend_hour", 0, 23)
+  const receiptMonthendMinute = parseScheduleInt(body.receipt_monthend_minute, "receipt_monthend_minute", 0, 59)
+
   let receiptReportStorePartitionKey: string | null = null
   if (body.receipt_report_store_partition_key != null) {
     const rawKey = typeof body.receipt_report_store_partition_key === "string"
@@ -5844,6 +5879,13 @@ function buildRoomSettingsPayload(body: unknown): {
     receipt_midreport_enabled: receiptMidreportEnabled,
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,
     media_save_enabled: mediaSaveEnabled,
+    receipt_schedule_override: receiptScheduleOverride,
+    receipt_midreport_day: receiptMidreportDay,
+    receipt_midreport_hour: receiptMidreportHour,
+    receipt_midreport_minute: receiptMidreportMinute,
+    receipt_monthend_day: receiptMonthendDay,
+    receipt_monthend_hour: receiptMonthendHour,
+    receipt_monthend_minute: receiptMonthendMinute,
     receipt_report_store_partition_key: receiptReportStorePartitionKey,
     room_sort_order: roomSortOrder,
     delivery_hours: deliveryHours,
