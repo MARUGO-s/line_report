@@ -3427,6 +3427,7 @@ function buildReservationCalendarItem(
   const allergyLabel = normalizeCalendarAllergy(parsedDetail?.allergy)
   const visitTimeLabel = buildCalendarVisitTimeLabel(parsedDetail?.visitDateTime, visitAtValue)
   const visitMonth = buildCalendarVisitMonthLabel(visitAtValue)
+  const storeNameLabel = normalizeCalendarText(parsedDetail?.storeName, 90)
   const summary = summaryByCustomer?.get(`${name}__${phone}`)
   const visitCount = Number(summary?.visit_count ?? 0)
 
@@ -3449,6 +3450,7 @@ function buildReservationCalendarItem(
     plan_label: planLabel,
     party_size_label: partySizeLabel,
     allergy_label: allergyLabel,
+    store_name: storeNameLabel,
   }
 }
 

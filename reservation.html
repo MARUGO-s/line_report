@@ -582,54 +582,321 @@
         grid-template-columns: 6.4em 1fr;
       }
     }
+    /* =====================================================================
+       コンソールシェル移行リスキン（design_handoff_reservation_calendar）
+       既存CSSは活かしつつ、トークンをコンソール配色へ再マップ＋背景フラット化
+       ＋サイドバー/トップバーを追加。カレンダーはソース2色で意味付け。
+       ===================================================================== */
+    :root {
+      --app-bg: #0c1117;
+      --surface: #151c25;
+      --surface-2: #1b232e;
+      --sidebar: #0a0f16;
+      --sidebar-2: rgba(255, 255, 255, 0.05);
+      --side-text: #99a6b6;
+      --border: #26313d;
+      --border-strong: #33414f;
+      --text: #e7ecf2;
+      --text-2: #9fadbd;
+      --text-3: #6f7d8d;
+      --accent: #3f7bea;
+      --accent-soft: rgba(56, 125, 234, 0.16);
+      --ok: #36b37e;
+      --ok-soft: rgba(54, 179, 126, 0.18);
+      --warn: #d8961f;
+      --warn-soft: rgba(216, 150, 31, 0.2);
+      --err: #e05656;
+      --err-soft: rgba(224, 86, 86, 0.18);
+      --sun: #e06a6a;
+      --sat: #5b9be0;
+      /* 予約ソース色（唯一のデータ色）: 食べログ=アンバー / 一休=緑 */
+      --cal-tabe: #d99a2b;
+      --cal-ik: #37b27e;
+      /* 旧トークンを remap */
+      --bg0: #0c1117; --bg1: #0c1117;
+      --card: #151c25; --line: #26313d; --txt: #e7ecf2; --sub: #9fadbd;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 12px 32px -20px rgba(0, 0, 0, 0.7);
+      --radius: 14px;
+    }
+    body[data-theme='light'] {
+      --app-bg: #eef1f5;
+      --surface: #ffffff;
+      --surface-2: #f5f7fa;
+      --sidebar: #0f1620;
+      --sidebar-2: rgba(255, 255, 255, 0.06);
+      --side-text: #aab6c5;
+      --border: #e3e8ef;
+      --border-strong: #d3dae3;
+      --text: #1e2632;
+      --text-2: #5a6675;
+      --text-3: #8b97a6;
+      --accent: #2563d4;
+      --accent-soft: rgba(37, 99, 212, 0.1);
+      --ok: #1f9d57;
+      --ok-soft: rgba(31, 157, 87, 0.12);
+      --warn: #c77d12;
+      --warn-soft: rgba(199, 125, 18, 0.14);
+      --err: #d23b3b;
+      --err-soft: rgba(210, 59, 59, 0.12);
+      --sun: #c2453f;
+      --sat: #2f66b8;
+      --cal-tabe: #b9791a;
+      --cal-ik: #1f9d63;
+      --bg0: #eef1f5; --bg1: #eef1f5;
+      --card: #ffffff; --line: #e3e8ef; --txt: #1e2632; --sub: #5a6675;
+      --shadow: 0 1px 2px rgba(20, 40, 80, 0.06), 0 10px 28px -18px rgba(20, 40, 80, 0.2);
+    }
+    body, body[data-theme='light'] {
+      background: var(--app-bg) !important;
+      font-family: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Zen Kaku Gothic New", system-ui, sans-serif;
+      padding: 0;
+    }
+
+    /* ---------- シェル（サイドバー＋トップバー） ---------- */
+    .ms-shell { display: grid; grid-template-columns: 264px 1fr; min-height: 100vh; }
+    .ms-side {
+      background: var(--sidebar); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+    }
+    .ms-brand { display: flex; align-items: center; gap: 11px; padding: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+    .ms-logo {
+      width: 38px; height: 38px; border-radius: 10px; background: var(--accent);
+      display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; color: #fff; flex: none;
+    }
+    .ms-bt { font-size: 15px; font-weight: 700; line-height: 1.2; color: #eef2f7; }
+    .ms-bs { font-size: 11.5px; color: var(--side-text); margin-top: 2px; }
+    .ms-nav { flex: 1; overflow-y: auto; padding: 16px 12px; }
+    .ms-navlabel {
+      font-size: 11px; font-weight: 600; color: var(--side-text); letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 0 10px; margin: 18px 0 8px;
+    }
+    .ms-navlabel:first-child { margin-top: 0; }
+    .ms-navlink {
+      display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px;
+      font-size: 13.5px; font-weight: 500; color: var(--side-text); text-decoration: none; cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .ms-navlink:hover { background: var(--sidebar-2); color: #eef2f7; }
+    .ms-navlink.active { background: var(--accent); color: #fff; }
+    .ms-navlink .ni { flex: none; display: flex; color: currentColor; opacity: 0.85; }
+    .ms-navlink .ext { margin-left: auto; display: flex; opacity: 0; transition: opacity 0.12s; }
+    .ms-navlink:hover .ext { opacity: 0.7; }
+    .ms-side-foot { border-top: 1px solid rgba(255, 255, 255, 0.06); padding: 14px 18px; }
+    .ms-conn { display: flex; align-items: center; gap: 10px; }
+    .ms-cd { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none; }
+    .ms-ct { font-size: 12.5px; font-weight: 700; color: #eef2f7; }
+    .ms-cs { font-size: 11.5px; color: var(--side-text); margin-top: 1px; }
+    .ms-main { display: flex; flex-direction: column; min-width: 0; }
+    .ms-topbar {
+      display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 32px;
+      border-bottom: 1px solid var(--border); position: sticky; top: 0;
+      background: color-mix(in srgb, var(--app-bg) 86%, transparent); backdrop-filter: blur(8px); z-index: 5;
+    }
+    .ms-content { padding: 34px 32px 80px; }
+    .ms-inner { max-width: 1180px; margin: 0 auto; }
+    .ms-h1 { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: 0.01em; color: var(--text); }
+    .ms-sub { font-size: 14px; color: var(--text-3); margin: 8px 0 0; }
+    .ms-hidden-conn { display: none !important; }
+
+    /* ---------- コンポーネントをコンソール配色へ ---------- */
+    .ms-inner > .card { margin-top: 22px; padding: 24px 26px; }
+    .card { background: var(--surface); border: 1px solid var(--border); box-shadow: none; }
+    .meta { color: var(--text-3); }
+    .pill { background: var(--surface); border: 1px solid var(--border); color: var(--text-2); }
+    .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+    .input, .select, .button { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+    .input::placeholder { color: var(--text-3); }
+    .button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+
+    /* カレンダーヘッダ：左(月＋ナビ) / 右(絞り込み) */
+    .month-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+    .cal-head-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .cal-tools { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+    .cal-tools .input { min-width: 0; }
+    .month-title { font-size: 20px; font-weight: 700; color: var(--text); margin: 0; }
+
+    /* 統計をチップ化（凡例兼用） */
+    #summary.cal-stats {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin: 16px 0 14px; font-size: 0; color: var(--text-2);
+    }
+    .stat-chip {
+      display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600;
+      color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 999px; padding: 6px 13px; font-variant-numeric: tabular-nums;
+    }
+    .stat-chip b { color: var(--text); font-weight: 700; }
+    .stat-chip .lg { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .stat-chip .lg.tabe { background: var(--cal-tabe); }
+    .stat-chip .lg.ik { background: var(--cal-ik); }
+
+    /* カレンダー本体 */
+    .weekday {
+      color: var(--text-2); border: 1px solid var(--border); background: var(--surface-2);
+      border-radius: 10px; font-weight: 600;
+    }
+    .calendar > .weekday:nth-child(1) { color: var(--sun); }
+    .calendar > .weekday:nth-child(7) { color: var(--sat); }
+    .day-cell { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; }
+    .day-number { color: var(--text); }
+    .count-chip { color: var(--text-3); border: 1px solid var(--border); background: var(--surface); }
+    .day-cell.today .day-number {
+      background: var(--accent); color: #fff; width: 22px; height: 22px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem;
+    }
+    .resv {
+      background: var(--surface); border: 1px solid var(--border);
+      border-left: 3px solid var(--border); border-radius: 7px;
+    }
+    .resv:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .resv.source-tabelog {
+      border-color: color-mix(in srgb, var(--cal-tabe) 40%, var(--border));
+      border-left-color: var(--cal-tabe);
+      background: color-mix(in srgb, var(--cal-tabe) 14%, var(--surface));
+    }
+    .resv.source-ikyu {
+      border-color: color-mix(in srgb, var(--cal-ik) 40%, var(--border));
+      border-left-color: var(--cal-ik);
+      background: color-mix(in srgb, var(--cal-ik) 14%, var(--surface));
+    }
+    .resv-summary-name { color: var(--text); }
+    .resv-summary-sub { color: var(--text-3); }
+
+    /* モーダルをコンソール配色へ */
+    .resv-modal-overlay { background: rgba(2, 6, 12, 0.62); }
+    .resv-modal { background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); }
+    .resv-modal-row { border-color: var(--border); }
+    .search-hit-item { background: var(--surface-2); border: 1px solid var(--border); }
+    .search-hit-item:hover { border-color: var(--accent); }
+
+    /* 店舗選択ドロップダウン */
+    .storesel { position: relative; }
+    .storesel-btn { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; }
+    .storesel-btn .storesel-chev { color: var(--text-3); }
+    .storesel-pop {
+      position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+      min-width: 230px; max-height: 360px; overflow-y: auto;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 6px; box-shadow: var(--shadow);
+    }
+    .storesel-opt {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 8px 10px; border: 0; border-radius: 8px; background: transparent;
+      color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+    }
+    .storesel-opt:hover { background: var(--surface-2); }
+    .storesel-opt.active { color: var(--accent); font-weight: 700; }
+    .storesel-opt-sep { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 10px; }
+    .storesel-check { width: 14px; flex: none; color: var(--accent); font-weight: 700; }
+    .storesel-opt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* 全店舗表示時の店舗タグ */
+    .resv-store-tag {
+      display: inline-block; margin-top: 4px; font-size: 0.66rem; font-weight: 600;
+      color: var(--accent); background: var(--accent-soft);
+      border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+      border-radius: 6px; padding: 1px 7px; max-width: 100%;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .stat-chip-store { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+
+    @media (max-width: 880px) {
+      .ms-shell { grid-template-columns: 1fr; }
+      .ms-side { position: static; height: auto; }
+      .ms-content { padding: 22px 16px 60px; }
+      .ms-topbar { padding: 12px 16px; }
+    }
   </style>
 </head>
 <body>
-  <div class="app">
-    <header class="hero">
-      <h1>LINE Reservation Calendar</h1>
-      <p>食べログ / 一休の予約履歴を月間カレンダーで確認します（閲覧専用）。</p>
-      <div class="status">
+  <div class="ms-shell">
+    <aside class="ms-side">
+      <div class="ms-brand">
+        <span class="ms-logo">LS</span>
+        <div>
+          <div class="ms-bt">LINE Summary</div>
+          <div class="ms-bs">Admin Console</div>
+        </div>
+      </div>
+      <nav class="ms-nav">
+        <div class="ms-navlabel">メニュー</div>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span>接続設定</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>利用状況</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></span>Webhook設定</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg></span>ログ</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg></span>ユーザー権限</a>
+
+        <div class="ms-navlabel">ページ</div>
+        <a class="ms-navlink" href="./media.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>メディア閲覧<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./message-search.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>会話検索<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink active" aria-current="page"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>予約表</a>
+        <a class="ms-navlink" href="./analytics.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg></span>売上分析<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      </nav>
+      <div class="ms-side-foot">
+        <div class="ms-conn">
+          <span class="ms-cd"></span>
+          <div>
+            <div class="ms-ct">接続済み</div>
+            <div class="ms-cs mono">hocbnifuactbvmyjraxy</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="ms-main">
+      <div class="ms-topbar">
         <span id="authState" class="pill">未接続</span>
         <span id="lastRefresh" class="pill">最終更新: なし</span>
-        <a href="./index.html" class="pill link">管理画面</a>
-        <a href="./media.html" class="pill link">メディア閲覧</a>
-        <a href="./analytics.html" class="pill link">売上グラフ</a>
         <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
       </div>
-    </header>
 
-    <section class="card">
-      <h2>接続</h2>
-      <div class="controls">
-        <input id="projectUrlInput" class="input" style="min-width:320px" type="text" readonly tabindex="-1" aria-readonly="true">
-        <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
-        <button id="saveTokenBtn" class="button primary">保存して接続</button>
-        <button id="clearTokenBtn" class="button">削除</button>
-      </div>
-    </section>
+      <div class="ms-content">
+        <div class="ms-inner">
+          <h1 class="ms-h1">予約表</h1>
+          <p class="ms-sub">食べログ / 一休の予約履歴を月間カレンダーで確認します（閲覧専用）。予約は1つのGmailに届き、AIが店舗ごとに振り分けます。</p>
+
+          <!-- 接続要素は接続設定ページへ集約。JS互換のため非表示で保持（同じフォルダの共有セッションを利用） -->
+          <div class="ms-hidden-conn" hidden aria-hidden="true">
+            <input id="projectUrlInput" type="text" readonly tabindex="-1" aria-readonly="true">
+            <input id="tokenInput" type="password">
+            <button id="saveTokenBtn" type="button">保存して接続</button>
+            <button id="clearTokenBtn" type="button">削除</button>
+          </div>
 
     <section class="card">
       <div class="month-head">
-        <h2 class="month-title" id="monthTitle">予約表</h2>
-        <div class="controls">
+        <div class="cal-head-left">
+          <div class="storesel">
+            <button id="storeSelectBtn" class="button storesel-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="表示する店舗を選択">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>
+              <span id="storeSelectLabel">全店舗</span>
+              <svg class="storesel-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div id="storeSelectPop" class="storesel-pop" role="listbox" aria-label="店舗選択" hidden></div>
+          </div>
+          <h2 class="month-title" id="monthTitle">予約表</h2>
           <button id="prevMonthBtn" class="button">前月</button>
           <button id="thisMonthBtn" class="button">今月</button>
           <button id="nextMonthBtn" class="button">翌月</button>
+        </div>
+        <div class="cal-tools">
           <select id="sourceFilter" class="select" aria-label="予約ソース絞り込み">
             <option value="all">全て</option>
             <option value="tabelog">食べログ</option>
             <option value="ikyu">一休</option>
           </select>
-          <input id="nameFilterInput" class="input" type="text" placeholder="名前検索（例: 石田）" aria-label="予約者名検索">
+          <input id="nameFilterInput" class="input" type="text" placeholder="名前で検索（例: 石田）" aria-label="予約者名検索">
           <button id="openSearchHitsBtn" class="button">候補一覧</button>
           <button id="reloadBtn" class="button primary">再読み込み</button>
         </div>
       </div>
-      <div id="summary" class="meta">未取得</div>
+      <div id="summary" class="meta cal-stats">未取得</div>
       <div id="calendar" class="calendar"></div>
     </section>
-  </div>
+        </div><!-- /ms-inner -->
+      </div><!-- /ms-content -->
+    </div><!-- /ms-main -->
+  </div><!-- /ms-shell -->
   <div id="resvModalOverlay" class="resv-modal-overlay" aria-hidden="true">
     <div class="resv-modal" role="dialog" aria-modal="true" aria-labelledby="resvModalTitle">
       <div class="resv-modal-head">
@@ -676,7 +943,9 @@
       popupItems: {},
       searchHits: [],
       nameQuery: '',
+      activeStore: 'all',
       visibleCount: 0,
+      visibleSourceCounts: { tabelog: 0, ikyu: 0 },
       apiTotal: 0,
       apiSourceCounts: { tabelog: 0, ikyu: 0 },
       jumpTimerId: null,
@@ -691,6 +960,9 @@
       saveTokenBtn: document.getElementById('saveTokenBtn'),
       clearTokenBtn: document.getElementById('clearTokenBtn'),
       monthTitle: document.getElementById('monthTitle'),
+      storeSelectBtn: document.getElementById('storeSelectBtn'),
+      storeSelectLabel: document.getElementById('storeSelectLabel'),
+      storeSelectPop: document.getElementById('storeSelectPop'),
       prevMonthBtn: document.getElementById('prevMonthBtn'),
       thisMonthBtn: document.getElementById('thisMonthBtn'),
       nextMonthBtn: document.getElementById('nextMonthBtn'),
@@ -1300,18 +1572,83 @@
       return body;
     }
 
-    function updateSummaryText() {
-      const total = Number(state.apiTotal || state.items.length || 0);
-      const tabelogCount = Number(state.apiSourceCounts && state.apiSourceCounts.tabelog || 0);
-      const ikyuCount = Number(state.apiSourceCounts && state.apiSourceCounts.ikyu || 0);
-      let text =
-        '総件数: ' + total + '件'
-        + ' | 食べログ: ' + tabelogCount + '件'
-        + ' | 一休: ' + ikyuCount + '件';
-      if (state.nameQuery && state.nameQuery.trim()) {
-        text += ' | 名前検索表示: ' + Number(state.visibleCount || 0) + '件';
+    /** 22店舗マスター（pages-config の STORE_NAMES）を [{key,name}] で取得（表示名順） */
+    function getStoreMaster() {
+      const cfg = window.LINE_REPORT_PAGES;
+      const names = (cfg && cfg.STORE_NAMES) ? cfg.STORE_NAMES : {};
+      return Object.keys(names)
+        .map(function(k) { return { key: k, name: String(names[k] || k) }; })
+        .sort(function(a, b) { return a.name.localeCompare(b.name, 'ja'); });
+    }
+
+    /** 予約の店舗名（自由文字列）を22店舗マスターの canonical key に寄せる。一致しなければ未分類 */
+    function getReservationStoreKey(item) {
+      const raw = String(item && item.store_name || '').trim();
+      const cfg = window.LINE_REPORT_PAGES;
+      if (raw && cfg && typeof cfg.resolveStoreKey === 'function') {
+        const key = cfg.resolveStoreKey('', raw);
+        if (key && cfg.STORE_NAMES && cfg.STORE_NAMES[key]) return key;
       }
-      dom.summary.textContent = text;
+      return '__unmatched__';
+    }
+
+    function storeLabelForKey(key) {
+      if (key === 'all') return '全店舗';
+      if (key === '__unmatched__') return '未分類';
+      const cfg = window.LINE_REPORT_PAGES;
+      if (cfg && cfg.STORE_NAMES && cfg.STORE_NAMES[key]) return cfg.STORE_NAMES[key];
+      return key;
+    }
+
+    function closeStoreSelectPop() {
+      if (!dom.storeSelectPop) return;
+      dom.storeSelectPop.hidden = true;
+      if (dom.storeSelectBtn) dom.storeSelectBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    function renderStoreSelectOptions() {
+      if (!dom.storeSelectPop) return;
+      const rows = [{ key: 'all', name: '全店舗' }]
+        .concat(getStoreMaster())
+        .concat([{ key: '__unmatched__', name: '未分類' }]);
+      dom.storeSelectPop.innerHTML = rows.map(function(r) {
+        const active = state.activeStore === r.key;
+        const sep = (r.key === '__unmatched__') ? ' storesel-opt-sep' : '';
+        return '<button type="button" role="option" class="storesel-opt' + (active ? ' active' : '') + sep + '"'
+          + ' data-store-key="' + escapeHtml(r.key) + '" aria-selected="' + (active ? 'true' : 'false') + '">'
+          + '<span class="storesel-check">' + (active ? '✓' : '') + '</span>'
+          + '<span class="storesel-opt-name">' + escapeHtml(r.name) + '</span></button>';
+      }).join('');
+    }
+
+    function openStoreSelectPop() {
+      renderStoreSelectOptions();
+      dom.storeSelectPop.hidden = false;
+      if (dom.storeSelectBtn) dom.storeSelectBtn.setAttribute('aria-expanded', 'true');
+    }
+
+    function setActiveStore(key) {
+      state.activeStore = key || 'all';
+      if (dom.storeSelectLabel) dom.storeSelectLabel.textContent = storeLabelForKey(state.activeStore);
+      closeStoreSelectPop();
+      state.visibleCount = renderCalendar(state.items);
+      updateSummaryText();
+    }
+
+    function updateSummaryText() {
+      const counts = state.visibleSourceCounts || { tabelog: 0, ikyu: 0 };
+      const tabelogCount = Number(counts.tabelog || 0);
+      const ikyuCount = Number(counts.ikyu || 0);
+      const total = Number(state.visibleCount || (tabelogCount + ikyuCount) || 0);
+      const chips = [
+        '<span class="stat-chip">総件数 <b>' + total + '</b></span>',
+        '<span class="stat-chip"><span class="lg tabe"></span>食べログ <b>' + tabelogCount + '</b></span>',
+        '<span class="stat-chip"><span class="lg ik"></span>一休 <b>' + ikyuCount + '</b></span>',
+      ];
+      if (state.activeStore && state.activeStore !== 'all') {
+        chips.push('<span class="stat-chip stat-chip-store">店舗: <b>' + escapeHtml(storeLabelForKey(state.activeStore)) + '</b></span>');
+      }
+      dom.summary.innerHTML = chips.join('');
     }
 
     function renderCalendar(items) {
@@ -1331,9 +1668,18 @@
       const firstWeekday = (first.getUTCDay() + 0) % 7;
       const daysInMonth = new Date(Date.UTC(parsed.year, parsed.month, 0)).getUTCDate();
       const daysPrevMonth = new Date(Date.UTC(parsed.year, parsed.month - 1, 0)).getUTCDate();
-      const filteredItems = Array.isArray(items)
+      const nameFilteredItems = Array.isArray(items)
         ? items.filter((item) => matchesNameFilter(item, state.nameQuery))
         : [];
+      const filteredItems = state.activeStore === 'all'
+        ? nameFilteredItems
+        : nameFilteredItems.filter((item) => getReservationStoreKey(item) === state.activeStore);
+      state.visibleSourceCounts = { tabelog: 0, ikyu: 0 };
+      for (const it of filteredItems) {
+        const s = String(it.source || '');
+        if (s === 'tabelog') state.visibleSourceCounts.tabelog += 1;
+        else if (s === 'ikyu') state.visibleSourceCounts.ikyu += 1;
+      }
 
       const byDay = new Map();
       for (const item of filteredItems) {
@@ -1346,6 +1692,7 @@
       const html = [];
       const popupItems = {};
       let popupSeq = 0;
+      const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tokyo' });
       for (const weekday of WEEKDAYS) {
         html.push('<div class="weekday">' + escapeHtml(weekday) + '</div>');
       }
@@ -1381,12 +1728,15 @@
             '<div class="resv-summary-name" title="' + escapeHtml(summary.customerName) + '">' + escapeHtml(summary.customerName) + '</div>',
             '<div class="resv-summary-sub">人数: ' + escapeHtml(summary.partySize) + '</div>',
             '<div class="resv-summary-sub">時間: ' + escapeHtml(summary.visitTime) + '</div>',
+            (state.activeStore === 'all'
+              ? '<div class="resv-store-tag">' + escapeHtml(storeLabelForKey(getReservationStoreKey(item))) + '</div>'
+              : ''),
             '</div>',
             '</div>',
           ].join('');
         }).join('');
         html.push([
-          '<div class="day-cell' + (outside ? ' outside' : '') + '">',
+          '<div class="day-cell' + (outside ? ' outside' : '') + (!outside && key === todayKey ? ' today' : '') + '">',
           '<div class="day-head"><span class="day-number">' + escapeHtml(String(d)) + '</span><span class="count-chip">' + dayItems.length + '件</span></div>',
           '<div></div>',
           '<div class="day-items">' + itemHtml + '</div>',
@@ -1408,7 +1758,7 @@
         tabelog: Number(data.source_counts && data.source_counts.tabelog || 0),
         ikyu: Number(data.source_counts && data.source_counts.ikyu || 0),
       };
-      dom.monthTitle.textContent = '予約表 ' + formatMonthLabel(state.currentMonth);
+      dom.monthTitle.textContent = formatMonthLabel(state.currentMonth);
       dom.lastRefresh.textContent = fromCache
         ? ('最終更新: ' + formatDateJst(data.generated_at || new Date().toISOString()) + '（キャッシュ表示・更新中…）')
         : ('最終更新: ' + formatDateJst(data.generated_at || new Date().toISOString()));
@@ -1527,6 +1877,25 @@
       try { await loadCalendar(); } catch (error) { alert(error.message || String(error)); }
     });
 
+    if (dom.storeSelectBtn) {
+      dom.storeSelectBtn.addEventListener('click', function(event) {
+        event.stopPropagation();
+        if (dom.storeSelectPop.hidden) openStoreSelectPop(); else closeStoreSelectPop();
+      });
+    }
+    if (dom.storeSelectPop) {
+      dom.storeSelectPop.addEventListener('click', function(event) {
+        const opt = event.target.closest('.storesel-opt');
+        if (!opt) return;
+        setActiveStore(String(opt.getAttribute('data-store-key') || 'all'));
+      });
+    }
+    document.addEventListener('click', function(event) {
+      if (!dom.storeSelectPop || dom.storeSelectPop.hidden) return;
+      if (event.target.closest('.storesel')) return;
+      closeStoreSelectPop();
+    });
+
     dom.themeToggleBtn.addEventListener('click', function() {
       toggleTheme();
     });
@@ -1593,7 +1962,7 @@
       dom.nameFilterInput.value = state.nameQuery;
       applyTheme(getTheme());
       updateAuthState();
-      dom.monthTitle.textContent = '予約表 ' + formatMonthLabel(state.currentMonth);
+      dom.monthTitle.textContent = formatMonthLabel(state.currentMonth);
       if (getToken()) {
         hydrateCalendarFromCache();
         loadCalendar().catch(function(error) {
