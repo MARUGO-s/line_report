@@ -368,9 +368,122 @@
     }
 
     .storage-legend {
-      display: grid;
-      gap: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
       min-width: 0;
+    }
+
+    /* ランク表示（色チップ＋テーブル名＋容量＋%＋比率バー） */
+    .storage-rank {
+      display: grid;
+      grid-template-columns: 12px minmax(0, 1fr) auto auto;
+      align-items: center;
+      column-gap: 10px;
+      row-gap: 6px;
+    }
+
+    .storage-rank-sw {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      align-self: center;
+    }
+
+    .storage-rank-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.82rem;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .storage-rank-size {
+      font-size: 0.8rem;
+      color: var(--text-2);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .storage-rank-pct {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      min-width: 44px;
+      text-align: right;
+    }
+
+    .storage-rank-bar {
+      grid-column: 2 / -1;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      overflow: hidden;
+    }
+
+    .storage-rank-bar > i {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.4s ease;
+    }
+
+    /* LINE push 内訳（上位） */
+    .push-breakdown {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .push-bd-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 13px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+
+    .push-bd-src {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.74rem;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+      padding: 3px 9px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .push-bd-desc {
+      font-size: 0.84rem;
+      color: var(--text-2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .push-bd-count {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .push-bd-count small {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text-3);
+      margin-left: 1px;
     }
 
     .storage-legend-item {
@@ -606,6 +719,65 @@
       gap: 14px;
     }
 
+    .webhook-card-section-head {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 8px 2px 0;
+      font-size: 0.95rem;
+      font-weight: 800;
+      color: var(--text-2);
+      letter-spacing: .02em;
+    }
+    .webhook-card-section-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none;
+    }
+    .webhook-card-section-count {
+      font-size: 0.76rem; font-weight: 700; color: var(--text-3);
+      background: var(--surface-2); border: 1px solid var(--border);
+      padding: 1px 9px; border-radius: 999px;
+    }
+
+    /* ===== Webhook設定ページ 上部リデザイン（design_handoff_webhook_settings） ===== */
+    #appPanel-webhook .wh-card-head { display:flex; align-items:center; gap:12px; }
+    #appPanel-webhook .wh-card-title { font-size:1.12rem; font-weight:800; color:var(--text); }
+    #appPanel-webhook .wh-card-desc { font-size:.84rem; color:var(--text-3); line-height:1.7; margin:6px 0 0; }
+    #appPanel-webhook .wh-card-desc b { color:var(--text-2); font-weight:700; }
+    #appPanel-webhook .wh-banner { background:var(--surface-2); border:1px solid var(--border); border-radius:14px; padding:16px 18px; margin-top:18px; }
+    #appPanel-webhook .wh-banner-top { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    #appPanel-webhook .wh-banner-ico { width:34px; height:34px; border-radius:10px; background:var(--surface); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--text-2); flex:none; }
+    #appPanel-webhook .wh-banner-name { font-size:.95rem; font-weight:800; color:var(--text); }
+    #appPanel-webhook .wh-states { display:flex; gap:8px; margin-left:auto; flex-wrap:wrap; }
+    #appPanel-webhook .wh-state { display:inline-flex; align-items:center; gap:7px; font-size:.76rem; font-weight:600; padding:5px 11px; border-radius:999px; border:1px solid var(--border); color:var(--text-2); white-space:nowrap; }
+    #appPanel-webhook .wh-state .d { width:7px; height:7px; border-radius:50%; flex:none; }
+    #appPanel-webhook .wh-state.on .d { background:var(--ok); box-shadow:0 0 0 3px var(--ok-soft); }
+    #appPanel-webhook .wh-state.off .d { background:var(--text-3); }
+    #appPanel-webhook .wh-disc { margin-top:12px; }
+    #appPanel-webhook .wh-disc > summary { list-style:none; cursor:pointer; display:inline-flex; align-items:center; gap:7px; font-size:.78rem; color:var(--accent); font-weight:600; }
+    #appPanel-webhook .wh-disc > summary::-webkit-details-marker { display:none; }
+    #appPanel-webhook .wh-disc > summary .chev { transition:transform .18s ease; display:inline-block; }
+    #appPanel-webhook .wh-disc[open] > summary .chev { transform:rotate(90deg); }
+    #appPanel-webhook .wh-disc-body { margin-top:12px; font-size:.82rem; color:var(--text-2); line-height:1.85; border-top:1px solid var(--border); padding-top:12px; }
+    #appPanel-webhook .wh-disc-body b { color:var(--text); }
+    #appPanel-webhook .wh-disc-body code { font-size:.76rem; color:var(--accent); background:var(--surface); border:1px solid var(--border); padding:1px 6px; border-radius:5px; }
+    #appPanel-webhook .wh-disc-body a { color:var(--accent); }
+    #appPanel-webhook .wh-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:20px; }
+    #appPanel-webhook .wh-grow { flex:1; }
+    #appPanel-webhook .wh-select { appearance:none; -webkit-appearance:none; font-family:inherit; font-size:.84rem; color:var(--text); background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:9px 30px 9px 13px; cursor:pointer; }
+    #appPanel-webhook .wh-btn { font-family:inherit; font-size:.84rem; font-weight:600; cursor:pointer; padding:9px 15px; border-radius:10px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); }
+    #appPanel-webhook .wh-btn:hover { background:var(--surface); }
+    #appPanel-webhook .wh-seg { display:inline-flex; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:3px; gap:3px; }
+    #appPanel-webhook .wh-seg button { font-family:inherit; font-size:.8rem; font-weight:600; cursor:pointer; border:0; background:transparent; color:var(--text-2); padding:6px 14px; border-radius:7px; }
+    #appPanel-webhook .wh-seg button.active { background:var(--accent); color:#fff; font-weight:700; }
+    #appPanel-webhook .wh-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:18px; }
+    #appPanel-webhook .wh-stat { background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:13px 15px; }
+    #appPanel-webhook .wh-stat .k { font-size:.72rem; color:var(--text-3); letter-spacing:.02em; }
+    #appPanel-webhook .wh-stat .v { font-size:1.05rem; font-weight:800; color:var(--text); margin-top:3px; display:flex; align-items:baseline; gap:6px; font-variant-numeric:tabular-nums; }
+    #appPanel-webhook .wh-stat .v small { font-size:.74rem; font-weight:400; color:var(--text-3); }
+    #appPanel-webhook .wh-stat .v .ok { color:var(--ok); font-size:.78rem; font-weight:600; }
+
     .webhook-view-tabs {
       display: inline-flex;
       gap: 8px;
@@ -624,6 +796,13 @@
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 10px;
       margin-top: 14px;
+    }
+
+    /* display:grid がクラス指定のため hidden 属性が効かない問題への対処。
+       カード表示時は店名一覧を、店名一覧表示時はカードグリッドを確実に隠す。 */
+    .webhook-card-grid[hidden],
+    .webhook-store-list[hidden] {
+      display: none !important;
     }
 
     .webhook-store-list-item {
@@ -702,6 +881,64 @@
       gap: 8px;
       flex-wrap: wrap;
     }
+
+    /* ===== Webhook カード — A案（サマリー重視）リデザイン ===== */
+    .webhook-card.is-active.pcw-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 22px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: var(--shadow-sm);
+      color: var(--text);
+    }
+    .pcw-card .pcw-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .pcw-card .pcw-title { margin:0; font-size:1.32rem; font-weight:800; line-height:1.2; letter-spacing:.01em; color:var(--text); }
+    .pcw-card .pcw-status { display:inline-flex; align-items:center; gap:7px; font-size:.8rem; font-weight:600; color:var(--text-2); padding:5px 11px 5px 9px; border:1px solid var(--border); border-radius:999px; white-space:nowrap; }
+    .pcw-card .pcw-dot { width:8px; height:8px; border-radius:50%; background:var(--ok); box-shadow:0 0 0 3px var(--ok-soft); flex:none; }
+    .pcw-card .pcw-meta { margin:0; font-size:.78rem; color:var(--text-3); line-height:1.7; }
+    .pcw-card .pcw-meta b { color:var(--text-2); font-weight:600; }
+    .pcw-card .pcw-block { background:var(--surface-2); border:1px solid var(--border); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:14px; }
+    .pcw-card .pcw-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .pcw-card .pcw-stack { display:flex; flex-direction:column; gap:3px; min-width:0; }
+    .pcw-card .pcw-label { font-size:.75rem; font-weight:600; color:var(--text-3); letter-spacing:.02em; }
+    .pcw-card .pcw-userrow { display:flex; align-items:center; gap:12px; }
+    .pcw-card .pcw-ava { width:38px; height:38px; border-radius:50%; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:.95rem; font-weight:800; flex:none; }
+    .pcw-card .pcw-uname { font-size:1.05rem; font-weight:800; color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pcw-card .pcw-badge { margin-left:auto; font-size:.76rem; font-weight:600; color:var(--ok); background:var(--ok-soft); padding:4px 10px; border-radius:999px; white-space:nowrap; flex:none; }
+    .pcw-card .pcw-badge.is-off { color:var(--text-3); background:var(--surface); border:1px solid var(--border); }
+    .pcw-card .pcw-progtop { display:flex; align-items:baseline; justify-content:space-between; }
+    .pcw-card .pcw-prognum { font-size:.95rem; font-weight:800; color:var(--text); font-variant-numeric:tabular-nums; }
+    .pcw-card .pcw-prognum span { font-size:.75rem; color:var(--text-3); font-weight:500; margin-left:4px; }
+    .pcw-card .pcw-bar { height:6px; border-radius:999px; background:var(--border); margin-top:9px; overflow:hidden; }
+    .pcw-card .pcw-bar > i { display:block; height:100%; border-radius:999px; background:var(--accent); }
+    .pcw-card .pcw-btn { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; font-family:inherit; font-size:.95rem; font-weight:700; cursor:pointer; padding:13px; border-radius:11px; border:1px solid transparent; }
+    .pcw-card .pcw-btn-primary { background:var(--accent); color:#fff; }
+    .pcw-card .pcw-btn-primary:hover { filter:brightness(1.08); }
+    .pcw-card .pcw-btn-ghost { background:transparent; color:var(--text); border-color:var(--border); }
+    .pcw-card .pcw-btn-ghost:hover { background:var(--surface); }
+    .pcw-card .pcw-btn-sm { font-size:.8rem; font-weight:600; padding:7px 14px; border-radius:9px; width:auto; background:transparent; color:var(--text-2); border:1px solid var(--border); cursor:pointer; font-family:inherit; flex:none; }
+    .pcw-card .pcw-btn-sm:hover { background:var(--surface); color:var(--text); }
+    .pcw-card .pcw-phone { font-size:1.05rem; font-weight:800; letter-spacing:.02em; font-variant-numeric:tabular-nums; color:var(--text); word-break:break-all; }
+    .pcw-card .pcw-phone.is-empty { font-size:.85rem; font-weight:600; color:var(--text-3); }
+    .pcw-card .pcw-muted { font-size:.82rem; color:var(--text-3); }
+    .pcw-card .pcw-note { display:flex; align-items:center; gap:9px; font-size:.78rem; color:var(--text-2); background:var(--surface-2); border:1px solid var(--border); border-radius:11px; padding:12px 14px; line-height:1.5; }
+    .pcw-card .pcw-note b { color:var(--text); font-weight:700; }
+    .pcw-card .webhook-setup-details { border-top:1px solid var(--border); padding-top:4px; }
+    /* C案（リスト整理）行 */
+    .pcw-card .pcw-list { display:flex; flex-direction:column; }
+    .pcw-card .pcw-li { display:flex; align-items:center; gap:14px; padding:15px 2px; border-top:1px solid var(--border); }
+    .pcw-card .pcw-li:first-child { border-top:none; }
+    .pcw-card .pcw-li-ico { width:34px; height:34px; border-radius:9px; background:var(--surface-2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--text-2); flex:none; }
+    .pcw-card .pcw-li-ico svg { width:18px; height:18px; }
+    .pcw-card .pcw-li-main { min-width:0; flex:1; }
+    .pcw-card .pcw-li-k { font-size:.75rem; color:var(--text-3); }
+    .pcw-card .pcw-li-v { font-size:.95rem; font-weight:600; color:var(--text); margin-top:1px; font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pcw-card .pcw-li-end { margin-left:auto; display:flex; align-items:center; gap:8px; color:var(--text-3); flex:none; }
+    .pcw-card .pcw-rtag { font-size:.72rem; color:var(--text-3); font-weight:500; }
+    .pcw-card .pcw-bar-inline { max-width:140px; margin-top:7px; }
 
     .webhook-card.is-active {
       border-color: rgba(155, 200, 230, 0.32);
@@ -1851,8 +2088,8 @@
 
     .user-permission-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
     }
 
     .user-permission-tabs {
@@ -2026,12 +2263,12 @@
     }
 
     .user-permission-card {
-      border: 1px solid rgba(155, 220, 255, 0.18);
-      border-radius: 12px;
-      background: rgba(7, 20, 34, 0.72);
-      padding: 12px;
-      display: grid;
-      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface-2);
+      padding: 18px;
+      display: block;
+      transition: opacity 0.2s ease;
     }
 
     .user-permission-header {
@@ -2148,11 +2385,358 @@
       padding: 0 12px;
     }
 
+    /* ===== ユーザー権限カード（刷新 / upx-*） ===== */
+    .user-permission-card.is-off .upx-perms,
+    .user-permission-card.is-off .upx-foot {
+      opacity: 0.42;
+      pointer-events: none;
+    }
+
+    .upx-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .upx-ava {
+      width: 40px;
+      height: 40px;
+      border-radius: 11px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      font-weight: 700;
+      flex: none;
+    }
+
+    .upx-id { min-width: 0; }
+
+    .upx-name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .upx-meta {
+      font-size: 0.75rem;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+
+    .upx-headend {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .upx-master {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-2);
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .upx-master.on { color: var(--ok); }
+
+    .upx-idbtn {
+      font: inherit;
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--text-2);
+      cursor: pointer;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 5px 10px;
+      white-space: nowrap;
+    }
+
+    .upx-idbtn:hover {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    /* スイッチ */
+    .upx-sw {
+      position: relative;
+      width: 38px;
+      height: 22px;
+      flex: none;
+      display: inline-block;
+    }
+
+    .upx-sw input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      opacity: 0;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .upx-sw .upx-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      transition: background 0.15s ease, border-color 0.15s ease;
+      pointer-events: none;
+    }
+
+    .upx-sw .upx-knob {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--text-3);
+      transition: transform 0.16s ease, background 0.15s ease;
+      pointer-events: none;
+    }
+
+    .upx-sw input:checked ~ .upx-track {
+      background: var(--accent);
+      border-color: transparent;
+    }
+
+    .upx-sw input:checked ~ .upx-knob {
+      transform: translateX(16px);
+      background: #fff;
+    }
+
+    .upx-perms {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .upx-perms-h {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .upx-perms-h .upx-pl {
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--text-3);
+      letter-spacing: 0.03em;
+    }
+
+    .upx-perms-h .upx-pc {
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .upx-permgrid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    .upx-perm {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 9px 11px;
+      cursor: pointer;
+    }
+
+    .upx-perm > span {
+      font-size: 0.78rem;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .upx-foot {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    .upx-roombtn {
+      align-self: end;
+      height: 40px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+
+    /* ===== ユーザー権限 名前一覧（刷新 / upx-l*） ===== */
+    .upx-lgroup-h {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .upx-lbar {
+      width: 3px;
+      height: 15px;
+      border-radius: 2px;
+      background: var(--accent);
+      flex: none;
+    }
+
+    .upx-gt {
+      font-size: 0.86rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .upx-gn {
+      font-size: 0.75rem;
+      color: var(--text-3);
+    }
+
+    .upx-lrows {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .upx-lrow {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 16px;
+      background: var(--surface-2);
+      border-top: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.14s ease;
+    }
+
+    .upx-lrow:first-child { border-top: none; }
+
+    .upx-lrow:hover,
+    .upx-lrow:focus-visible {
+      background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+      outline: none;
+    }
+
+    .upx-lava {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .upx-lid { min-width: 0; }
+
+    .upx-lname {
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .upx-lsub {
+      font-size: 0.72rem;
+      color: var(--text-3);
+      margin-top: 1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .upx-lrole {
+      font-size: 0.74rem;
+      color: var(--text-2);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 4px 11px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .upx-lperm {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--ok);
+      white-space: nowrap;
+      min-width: 60px;
+      justify-content: flex-end;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .upx-lperm .upx-ldot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 0 3px var(--ok-soft);
+      flex: none;
+    }
+
+    .upx-lperm.partial { color: var(--warn); }
+
+    .upx-lperm.partial .upx-ldot {
+      background: var(--warn);
+      box-shadow: 0 0 0 3px var(--warn-soft);
+    }
+
+    @media (max-width: 1080px) {
+      .user-permission-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
     @media (max-width: 960px) {
       .user-permission-controls {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
       .user-permission-edit-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .upx-permgrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .upx-foot {
         grid-template-columns: 1fr;
       }
     }
@@ -2594,11 +3178,9 @@
 
     body:not([data-theme='light']) .card.rooms,
     body:not([data-theme='light']) .user-permission-card {
-      background: linear-gradient(180deg, rgba(12, 26, 40, 0.96), rgba(8, 20, 32, 0.92));
-      border-color: rgba(114, 170, 203, 0.36);
-      box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.06) inset,
-        0 14px 28px rgba(0, 0, 0, 0.32);
+      background: var(--surface-2);
+      border-color: var(--border);
+      box-shadow: none;
     }
 
     body:not([data-theme='light']) .card.rooms h2 {
@@ -2809,11 +3391,9 @@
     }
 
     body[data-theme='light'] .user-permission-card {
-      background: linear-gradient(180deg, rgba(238, 247, 255, 0.98), rgba(226, 240, 252, 0.98));
-      border-color: rgba(63, 104, 139, 0.48);
-      box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.88) inset,
-        0 10px 22px rgba(22, 59, 92, 0.14);
+      background: var(--surface-2);
+      border-color: var(--border);
+      box-shadow: none;
     }
 
     body[data-theme='light'] .input,
@@ -4172,6 +4752,55 @@
   .app-v2-sidebrand { display:flex; align-items:center; gap:10px; padding:6px 8px 16px; color:var(--side-text-strong); font-weight:600; font-size:14px; line-height:1.25; }
   .app-v2-sidebrand .mk { width:30px; height:30px; border-radius:8px; background:var(--accent); color:#fff; display:grid; place-items:center; font-weight:700; font-size:12px; letter-spacing:.04em; flex:none; }
   .app-v2-sidebrand small { display:block; color:var(--side-text); font-weight:400; font-size:10.5px; }
+
+  /* ===== サイドバー「ページ」グループ（接続設定ハンドオフ） ===== */
+  .app-v2-pages { display:flex; flex-direction:column; gap:3px; margin-top:16px; }
+  .app-v2-pages-label { font-size:10.5px; font-weight:600; color:var(--side-text); letter-spacing:.08em; text-transform:uppercase; padding:0 10px; margin:0 0 6px; opacity:.85; }
+  .app-v2-pagelink { display:flex; align-items:center; gap:11px; padding:9px 10px; border-radius:9px; font-size:13px; font-weight:500; color:var(--side-text); text-decoration:none; cursor:pointer; transition:background .12s,color .12s; }
+  .app-v2-pagelink:hover { background:var(--sidebar-2); color:var(--side-text-strong); }
+  .app-v2-pagelink .ni { color:var(--side-text); opacity:.8; flex:none; display:flex; }
+  .app-v2-pagelink:hover .ni { opacity:1; }
+  .app-v2-pagelink .ext { margin-left:auto; color:var(--side-text); opacity:0; transition:opacity .12s; display:flex; }
+  .app-v2-pagelink:hover .ext { opacity:.9; }
+  .app-v2-pagelink[hidden] { display:none !important; }
+
+  /* ===== 接続設定ページ 本体（接続設定ハンドオフ） ===== */
+  #appPanel-auth .auth-inner { max-width:860px; margin:0 auto; }
+  #appPanel-auth .auth-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:24px 26px; margin-top:22px; }
+  #appPanel-auth .auth-card.first { margin-top:0; }
+  #appPanel-auth .auth-card-h { display:flex; align-items:center; gap:10px; padding-bottom:16px; margin-bottom:20px; border-bottom:1px solid var(--border); }
+  #appPanel-auth .auth-card-h .ico { width:30px; height:30px; border-radius:8px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; color:var(--accent); flex:none; }
+  #appPanel-auth .auth-card-h .t { font-size:1rem; font-weight:800; color:var(--text); }
+  #appPanel-auth .auth-frow { display:grid; grid-template-columns:140px 1fr; gap:16px; align-items:center; margin-bottom:16px; }
+  #appPanel-auth .auth-frow:last-child { margin-bottom:0; }
+  #appPanel-auth .auth-frow > .lbl { font-size:.82rem; font-weight:600; color:var(--text-2); }
+  #appPanel-auth .auth-frow.top { align-items:start; }
+  #appPanel-auth .auth-urltext { font-size:.82rem; color:var(--text-2); padding:11px 0; word-break:break-all; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  #appPanel-auth .auth-input { width:100%; font-family:inherit; font-size:.85rem; color:var(--text); background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:11px 14px; }
+  #appPanel-auth .auth-input::placeholder { color:var(--text-3); }
+  #appPanel-auth .auth-input:focus { outline:none; border-color:var(--accent); }
+  #appPanel-auth .auth-hint { font-size:.76rem; color:var(--text-3); margin:14px 0 0; display:flex; align-items:center; gap:7px; }
+  #appPanel-auth .auth-btns { display:flex; gap:10px; flex-wrap:wrap; }
+  #appPanel-auth .auth-btn { font-family:inherit; font-size:.85rem; font-weight:600; cursor:pointer; padding:10px 17px; border-radius:10px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); display:inline-flex; align-items:center; gap:8px; }
+  #appPanel-auth .auth-btn:hover { background:var(--surface); }
+  #appPanel-auth .auth-btn.primary { background:var(--accent); border-color:transparent; color:#fff; font-weight:700; }
+  #appPanel-auth .auth-btn.primary:hover { filter:brightness(1.08); }
+  #appPanel-auth .auth-btn.danger { color:var(--err); border-color:color-mix(in srgb,var(--err) 45%,transparent); background:transparent; }
+  #appPanel-auth .auth-btn.danger:hover { background:var(--err-soft); }
+  #appPanel-auth .auth-btn.warn { color:var(--warn); border-color:color-mix(in srgb,var(--warn) 45%,transparent); background:transparent; font-weight:700; }
+  #appPanel-auth .auth-btn.warn:hover { background:var(--warn-soft); }
+  #appPanel-auth .auth-gline { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  #appPanel-auth .auth-tokchange { margin-top:22px; padding-top:20px; border-top:1px solid var(--border); }
+  #appPanel-auth .auth-toktoggle .tchev { margin-left:2px; transition:transform .25s ease; color:var(--text-3); }
+  #appPanel-auth .auth-toktoggle[aria-expanded="true"] { background:var(--surface); }
+  #appPanel-auth .auth-toktoggle[aria-expanded="true"] .tchev { transform:rotate(180deg); }
+  #appPanel-auth .auth-tokpanel { display:grid; grid-template-rows:0fr; overflow:hidden; transition:grid-template-rows .28s ease; }
+  #appPanel-auth .auth-tokpanel.open { grid-template-rows:1fr; }
+  #appPanel-auth .auth-tokpanel-in { min-height:0; opacity:0; transform:translateY(-4px); transition:opacity .22s ease .04s, transform .22s ease .04s; }
+  #appPanel-auth .auth-tokpanel.open .auth-tokpanel-in { opacity:1; transform:none; padding-top:18px; }
+  @media (max-width:680px) {
+    #appPanel-auth .auth-frow { grid-template-columns:1fr; gap:7px; align-items:start; }
+  }
   .app-v2-tabs { display:flex; flex-direction:column; gap:3px; max-width:none; margin:6px 0 0; overflow:visible; }
   .app-v2-tab {
     padding: 9px 11px; font-size: 13.5px; font-weight: 500; color: var(--side-text);
@@ -4298,6 +4927,16 @@
   body[data-theme='dark'] .meta.usage-summary { color: var(--accent) !important; }
   body[data-theme='dark'] code { background: var(--surface-2) !important; color: var(--accent) !important; }
   body[data-theme='dark'] .webhook-auto-link-security-notice { background: var(--warn-soft) !important; border-color: color-mix(in srgb,var(--warn) 30%,transparent) !important; color: var(--warn) !important; }
+  /* 承認制（自動連携オフ）は安全な状態なので、警告色ではなく落ち着いた情報トーンにする */
+  .webhook-auto-link-security-notice--approval,
+  body[data-theme='light'] .webhook-auto-link-security-notice--approval,
+  body[data-theme='dark'] .webhook-auto-link-security-notice--approval {
+    background: var(--surface-2) !important;
+    border-color: var(--border) !important;
+    color: var(--text-2) !important;
+  }
+  .webhook-auto-link-security-notice--approval strong { color: var(--text) !important; }
+  .webhook-auto-link-security-notice--approval em { color: var(--text) !important; font-style: normal; font-weight: 700; }
   body[data-theme='dark'] .rooms-table td:nth-child(1), body[data-theme='dark'] .rooms-table td:nth-child(2),
   body[data-theme='dark'] .rooms-table th:nth-child(1), body[data-theme='dark'] .rooms-table th:nth-child(2) { background: var(--surface) !important; }
 
@@ -4355,6 +4994,15 @@
       <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('logs')">ログ</button>
       <button class="app-v2-tab"        type="button" role="tab" aria-selected="false" onclick="switchAppTab('permissions')">ユーザー権限</button>
     </nav>
+    <nav class="app-v2-pages" aria-label="ページ">
+      <div class="app-v2-pages-label">ページ</div>
+      <a href="./media.html" class="app-v2-pagelink"><span class="ni"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>メディア閲覧<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      <a href="./message-search.html" class="app-v2-pagelink"><span class="ni"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>会話検索<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      <a href="./reservation.html" class="app-v2-pagelink"><span class="ni"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>予約表<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      <a href="./analytics.html" class="app-v2-pagelink"><span class="ni"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg></span>売上分析<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      <a id="receiptSheetsPilotActionLink" href="#" class="app-v2-pagelink" target="_blank" rel="noopener noreferrer" hidden aria-hidden="true"><span class="ni"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg></span>売上シート<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      <a id="receiptSheetsPilotHeaderLink" href="#" class="app-v2-pagelink" target="_blank" rel="noopener noreferrer" hidden aria-hidden="true"><span class="ni"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg></span>売上シート(H)<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+    </nav>
     <div class="app-v2-sidefoot"><div class="conn"><span class="dt"></span><span><b>接続済み</b>hocbnifuactbvmyjraxy</span></div></div>
   </div>
 
@@ -4369,73 +5017,73 @@
           <p>管理トークンで接続し、各ページや連携アカウントを管理します。</p>
         </div>
         <main class="grid">
-          <div class="v2-cols-2">
-            <section class="card auth">
-              <h2>接続と実行</h2>
-              <div class="v2-form-row">
-                <span class="v2-form-label">Project URL</span>
-                <div class="v2-form-field">
-                  <input id="projectUrlInput" class="input long" type="text" value="https://hocbnifuactbvmyjraxy.supabase.co" readonly tabindex="-1" aria-readonly="true" onfocus="this.blur()">
+          <div class="auth-inner">
+            <section class="auth-card first">
+              <div class="auth-card-h">
+                <span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span>
+                <span class="t">接続と実行</span>
+              </div>
+              <div class="auth-frow">
+                <span class="lbl">Project URL</span>
+                <div class="auth-urltext">https://hocbnifuactbvmyjraxy.supabase.co</div>
+              </div>
+              <input id="projectUrlInput" type="hidden" value="https://hocbnifuactbvmyjraxy.supabase.co">
+              <div class="auth-frow">
+                <label class="lbl" for="tokenInput">管理トークン</label>
+                <input id="tokenInput" class="auth-input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション">
+              </div>
+              <div class="auth-frow">
+                <span class="lbl"></span>
+                <div class="auth-btns">
+                  <button id="saveTokenBtn" class="auth-btn primary"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>保存して接続</button>
+                  <button id="clearTokenBtn" class="auth-btn danger">削除</button>
+                  <button id="reloadBtn" class="auth-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>再読み込み</button>
                 </div>
               </div>
-              <div class="v2-form-row">
-                <span class="v2-form-label">管理トークン</span>
-                <div class="v2-form-field">
-                  <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション">
+              <p class="auth-hint" id="authPersistMeta"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>このタブを閉じるとログアウトします。</p>
+
+              <div class="auth-tokchange">
+                <button type="button" class="auth-btn auth-toktoggle" id="authTokToggle" aria-expanded="false" aria-controls="authTokPanel">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                  管理トークン変更
+                  <svg class="tchev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                <div class="auth-tokpanel" id="authTokPanel" role="region" aria-label="管理トークンの変更">
+                  <div class="auth-tokpanel-in">
+                    <div class="auth-frow">
+                      <label class="lbl" for="newTokenInput">新しいトークン</label>
+                      <input id="newTokenInput" class="auth-input" type="password" placeholder="新しい管理トークン">
+                    </div>
+                    <div class="auth-frow">
+                      <label class="lbl" for="newTokenConfirmInput">確認入力</label>
+                      <input id="newTokenConfirmInput" class="auth-input" type="password" placeholder="新しい管理トークン（確認）">
+                    </div>
+                    <div class="auth-frow">
+                      <span class="lbl"></span>
+                      <div class="auth-btns">
+                        <button id="changeTokenBtn" class="auth-btn warn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>変更を確定</button>
+                        <button type="button" id="authTokCancel" class="auth-btn">キャンセル</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div class="v2-form-row">
-                <span class="v2-form-label"></span>
-                <div class="v2-form-field">
-                  <button id="saveTokenBtn" class="button primary">保存して接続</button>
-                  <button id="clearTokenBtn" class="button">削除</button>
-                  <button id="reloadBtn" class="button">再読み込み</button>
-                </div>
-              </div>
-              <div class="meta" id="authPersistMeta" style="margin-top:14px;">セキュリティ上、ログインはこのタブだけ有効です。</div>
             </section>
 
-            <section class="card">
-              <h2>連携アカウント</h2>
-              <div class="v2-form-row">
-                <span class="v2-form-label">Gmail連携先</span>
-                <div class="v2-form-field">
-                  <button id="checkGmailAccountBtn" class="button">連携先を確認</button>
+            <section class="auth-card">
+              <div class="auth-card-h">
+                <span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
+                <span class="t">連携アカウント</span>
+              </div>
+              <div class="auth-frow top">
+                <span class="lbl">Gmail連携先</span>
+                <div class="auth-gline">
                   <span id="gmailAccountMeta" class="pill">未確認</span>
-                </div>
-              </div>
-              <div class="v2-form-row" style="margin-top:18px;">
-                <span class="v2-form-label">新しいトークン</span>
-                <div class="v2-form-field">
-                  <input id="newTokenInput" class="input" type="password" placeholder="新しい管理トークン">
-                </div>
-              </div>
-              <div class="v2-form-row">
-                <span class="v2-form-label">確認入力</span>
-                <div class="v2-form-field">
-                  <input id="newTokenConfirmInput" class="input" type="password" placeholder="新しい管理トークン（確認）">
-                </div>
-              </div>
-              <div class="v2-form-row">
-                <span class="v2-form-label"></span>
-                <div class="v2-form-field">
-                  <button id="changeTokenBtn" class="button warn">トークン変更</button>
+                  <button id="checkGmailAccountBtn" class="auth-btn">連携先を確認</button>
                 </div>
               </div>
             </section>
           </div>
-
-          <section class="card" style="margin-top:16px;">
-            <h2>ページ一覧</h2>
-            <div class="controls">
-              <a href="./media.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">メディア閲覧</a>
-              <a href="./message-search.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">会話検索</a>
-              <a href="./reservation.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">予約表</a>
-              <a href="./analytics.html" class="button media-highlight" style="display:inline-flex;align-items:center;text-decoration:none;">売上分析</a>
-              <a id="receiptSheetsPilotActionLink" href="#" class="button media-highlight" target="_blank" rel="noopener noreferrer" style="display:none;align-items:center;text-decoration:none;" hidden aria-hidden="true">売上シート</a>
-              <a id="receiptSheetsPilotHeaderLink" href="#" class="button media-highlight" target="_blank" rel="noopener noreferrer" style="display:none;align-items:center;text-decoration:none;" hidden aria-hidden="true">売上シート(H)</a>
-            </div>
-          </section>
         </main>
       </div>
     </div>
@@ -4484,11 +5132,16 @@
               </div>
               <div id="storageUsageLegend" class="storage-legend"></div>
             </div>
-            <!-- 既存JSの出力先（テキスト詳細）。KPIカードへ集約するため控えめに表示 -->
-            <div id="storageUsageSummary" class="meta usage-summary" style="margin-top:14px;"></div>
-            <div id="storageUsageDetails" class="meta usage-details"></div>
-            <div id="pushUsageSummary" class="meta usage-summary" style="margin-top:10px;"></div>
-            <div id="pushUsageDetails" class="meta usage-details"></div>
+            <!-- 既存JSの出力先（KPIと重複するため非表示。JSの textContent 代入は維持） -->
+            <div id="storageUsageSummary" class="meta usage-summary" hidden></div>
+            <div id="storageUsageDetails" class="meta usage-details" hidden></div>
+          </section>
+
+          <section class="card global">
+            <h2>LINE push 内訳（上位）<span class="v2-card-badge" id="pushUsageBadge">PUSH</span></h2>
+            <div id="pushBreakdownList" class="push-breakdown"><div class="meta">取得待ち…</div></div>
+            <div id="pushUsageSummary" class="meta usage-summary" hidden></div>
+            <div id="pushUsageDetails" class="meta usage-details" hidden></div>
           </section>
         </main>
       </div>
@@ -4503,29 +5156,49 @@
         </div>
         <main class="grid">
           <section class="card webhook-settings">
-            <h2>Webhook別設定</h2>
-            <p class="muted" style="margin:0 0 10px 0;">各店舗の LINE Webhook 単位でレシート解析・返信機能を設定します。<strong>全体権限設定</strong>で全ルーム一括変更でき、店舗カード・ルーム個別設定は優先順位（全体 &lt; 店舗 &lt; ルーム個別）で上書きされます。Webhook URL の登録前はセットアップ用カード、<code>hocbn</code> で初回受信が確認できた店舗は権限・機能設定カードに切り替わります。</p>
-            <div class="webhook-auto-link-security-notice" role="alert">
-              <strong>🔓 ルーム自動連携（管理者の承認なし）</strong>
-              この環境では、店舗 Webhook でメッセージを受信したルームは <em>確認ダイアログなしで自動的に連携承認</em> されます（初回受信時・管理画面の同期時）。
-              売上レポートの送信先としてすぐ使えますが、<em>誤った Webhook URL・テスト用グループも登録され得る</em>ため、セキュリティ・運用上のリスクは手動連携より高くなります。詳細は <a href="./ROOM-LINKING-GUIDE.md" target="_blank" rel="noopener">ROOM-LINKING-GUIDE.md</a> を参照。無効化: Edge secret <code>RECEIPT_ROOM_AUTO_LINK=0</code>。
+            <div class="wh-card-head">
+              <span class="wh-card-title">Webhook別設定</span>
             </div>
-            <div class="controls">
-              <select id="webhookSettingsFilter" class="select" aria-label="Webhookで絞り込み">
+            <p class="wh-card-desc">店舗 Webhook 単位でレシート解析・返信を設定します。設定は <b>全体 &lt; 店舗 &lt; ルーム個別</b> の順で上書きされます。</p>
+
+            <div class="wh-banner">
+              <div class="wh-banner-top">
+                <span class="wh-banner-ico" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>
+                <span class="wh-banner-name">承認制で運用中</span>
+                <span class="wh-states">
+                  <span class="wh-state on"><span class="d"></span>新規ユーザー承認制</span>
+                  <span class="wh-state off"><span class="d"></span>ルーム自動連携 オフ</span>
+                </span>
+              </div>
+              <details class="wh-disc">
+                <summary><span class="chev">▸</span>この設定の意味を表示</summary>
+                <div class="wh-disc-body">
+                  受信したルームは自動連携されず、管理画面で<b>手動連携</b>するまで売上レポート送信先になりません。未承認の新規ユーザーは利用がブロックされ、「LINE利用許可（承認専用）」アカウントのカードで承認するまで使えません。誤った Webhook URL・テスト用グループの混入を防ぎます。<br>
+                  自動連携を有効化する場合は <code>RECEIPT_ROOM_AUTO_LINK</code> を <code>1</code> に設定。詳細は <a href="./ROOM-LINKING-GUIDE.md" target="_blank" rel="noopener">ROOM-LINKING-GUIDE.md</a> を参照。
+                </div>
+              </details>
+            </div>
+
+            <div class="wh-toolbar">
+              <select id="webhookSettingsFilter" class="wh-select" aria-label="Webhookで絞り込み">
                 <option value="">すべて表示</option>
               </select>
-              <button id="refreshRoomNamesBtn" class="button" type="button">ルーム名再取得</button>
-              <button id="openNewRoomConfigBtn" class="button" type="button">新規ルームのデフォルト設定</button>
-              <span id="newRoomConfigSummary" class="new-room-config-summary">-</span>
+              <button id="refreshRoomNamesBtn" class="wh-btn" type="button">ルーム名を再取得</button>
+              <button id="openNewRoomConfigBtn" class="wh-btn" type="button">新規ルームの既定値</button>
+              <span class="wh-grow"></span>
+              <div class="wh-seg" role="group" aria-label="Webhookカード表示切替">
+                <button id="webhookViewTabCards" class="active" type="button" aria-pressed="true">カード表示</button>
+                <button id="webhookViewTabNames" type="button" aria-pressed="false">店名一覧</button>
+              </div>
             </div>
-            <div class="meta" style="margin-top:8px;">
-              移行期間の共通 URL（非推奨）: <code id="storeWebhookLegacyUrl">-</code>
-              <button type="button" id="copyLegacyWebhookBtn" class="button" style="margin-left:8px;">コピー</button>
+
+            <div class="wh-stats">
+              <div class="wh-stat"><div class="k">レシート機能（新規既定）</div><div class="v"><span id="whStatReceipt">-</span><small>/ 4</small><span id="whStatReceiptOk" class="ok">有効</span></div></div>
+              <div class="wh-stat"><div class="k">その他機能（新規既定）</div><div class="v"><span id="whStatExtra">-</span></div></div>
+              <div class="wh-stat"><div class="k">中間レポート</div><div class="v" id="whStatMid">-</div></div>
+              <div class="wh-stat"><div class="k">月末レポート</div><div class="v" id="whStatMonth">-</div></div>
             </div>
-            <div class="webhook-view-tabs" role="tablist" aria-label="Webhookカード表示切替">
-              <button id="webhookViewTabCards" class="button active" type="button" role="tab" aria-selected="true">カード表示</button>
-              <button id="webhookViewTabNames" class="button" type="button" role="tab" aria-selected="false">店名一覧</button>
-            </div>
+            <span id="newRoomConfigSummary" class="new-room-config-summary" hidden>-</span>
             <div id="webhookCardListBody" class="webhook-card-grid" style="margin-top:14px;"></div>
             <div id="webhookStoreListBody" class="webhook-store-list" hidden></div>
             <div id="roomTablePane" class="room-table-hidden-wrap" aria-hidden="true">
@@ -5095,8 +5768,6 @@
       webhookQuotaSummary: document.getElementById('webhookQuotaSummary'),
       webhookLogStoreFilter: document.getElementById('webhookLogStoreFilter'),
       webhookLogStoreHint: document.getElementById('webhookLogStoreHint'),
-      storeWebhookLegacyUrl: document.getElementById('storeWebhookLegacyUrl'),
-      copyLegacyWebhookBtn: document.getElementById('copyLegacyWebhookBtn'),
       userPermissionTabCards: document.getElementById('userPermissionTabCards'),
       userPermissionTabNames: document.getElementById('userPermissionTabNames'),
       userPermissionCardsPane: document.getElementById('userPermissionCardsPane'),
@@ -7226,7 +7897,7 @@
       refreshNewRoomConfigSummary();
     }
 
-    function buildNewRoomConfigSummary() {
+    function computeNewRoomConfigStats() {
       const receiptCount =
         (dom.newRoomMediaFileAccessEnabled.checked ? 1 : 0) +
         (dom.newRoomMediaFileAccessEnabled.checked && dom.newRoomImageAnalysisReplyEnabled && dom.newRoomImageAnalysisReplyEnabled.checked ? 1 : 0) +
@@ -7244,13 +7915,31 @@
         (dom.newRoomGoogleCalendarAutoRegister.checked && dom.newRoomCalendarLowConfidenceConfirmReply.checked ? 1 : 0) +
         (dom.newRoomGmailAlertEnabled.checked ? 1 : 0);
       const bulk = getBulkReceiptSchedule();
-      const scheduleText = formatReceiptMidreportScheduleLabel(bulk) + ' / ' + formatReceiptMonthendScheduleLabel(bulk);
-      return 'レシート ' + receiptCount + '/4 有効 ・ その他 ' + extraCount + ' ・ 時刻:' + scheduleText;
+      return {
+        receiptCount: receiptCount,
+        extraCount: extraCount,
+        midLabel: formatReceiptMidreportScheduleLabel(bulk),
+        monthLabel: formatReceiptMonthendScheduleLabel(bulk),
+      };
+    }
+
+    function buildNewRoomConfigSummary() {
+      const s = computeNewRoomConfigStats();
+      return 'レシート ' + s.receiptCount + '/4 有効 ・ その他 ' + s.extraCount + ' ・ 時刻:' + s.midLabel + ' / ' + s.monthLabel;
     }
 
     function refreshNewRoomConfigSummary() {
-      if (!dom.newRoomConfigSummary) return;
-      dom.newRoomConfigSummary.textContent = buildNewRoomConfigSummary();
+      const s = computeNewRoomConfigStats();
+      if (dom.newRoomConfigSummary) {
+        dom.newRoomConfigSummary.textContent =
+          'レシート ' + s.receiptCount + '/4 有効 ・ その他 ' + s.extraCount + ' ・ 時刻:' + s.midLabel + ' / ' + s.monthLabel;
+      }
+      const setTxt = function(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+      setTxt('whStatReceipt', String(s.receiptCount));
+      setTxt('whStatReceiptOk', s.receiptCount > 0 ? '有効' : '');
+      setTxt('whStatExtra', String(s.extraCount));
+      setTxt('whStatMid', s.midLabel);
+      setTxt('whStatMonth', s.monthLabel);
     }
 
     function buildRoomConfigDraftFromModal() {
@@ -7581,7 +8270,7 @@
         dom.storageUsageLegend.innerHTML = '<div class="storage-legend-item"><span class="storage-legend-label">内訳データなし</span></div>';
         return;
       }
-      const colors = ['#45c2ff', '#66e0a8', '#ffd27d', '#bba4ff', '#ff9fb1', '#7de2e2', '#9bc6ff', '#d4f08a']
+      const colors = ['oklch(0.66 0.15 250)', 'oklch(0.74 0.15 155)', 'oklch(0.80 0.13 75)', 'oklch(0.72 0.13 305)', 'oklch(0.72 0.15 12)', 'oklch(0.74 0.10 195)', 'oklch(0.66 0.13 275)', 'oklch(0.84 0.16 120)']
       const sorted = rows
         .map(function(row) {
           return {
@@ -7609,6 +8298,7 @@
         });
       }
       const total = topRows.reduce(function(sum, row) { return sum + row.size_bytes; }, 0);
+      const maxBytes = topRows[0].size_bytes || total || 1;
       let current = 0;
       const segments = [];
       const legends = [];
@@ -7620,10 +8310,14 @@
         segments.push(color + ' ' + current.toFixed(2) + 'deg ' + end.toFixed(2) + 'deg');
         const label = row.table_name === 'others' ? 'その他' : row.table_name;
         const percentage = (ratio * 100).toFixed(1);
+        const barW = Math.max(2, Math.round(row.size_bytes / maxBytes * 100));
         legends.push(
-          '<div class="storage-legend-item">' +
-          '<span class="storage-legend-color" style="background:' + color + ';"></span>' +
-          '<span class="storage-legend-label">' + escapeHtml(label + ' (' + percentage + '% / ' + row.size_pretty + ')') + '</span>' +
+          '<div class="storage-rank">' +
+          '<span class="storage-rank-sw" style="background:' + color + ';"></span>' +
+          '<span class="storage-rank-name mono">' + escapeHtml(label) + '</span>' +
+          '<span class="storage-rank-size">' + escapeHtml(row.size_pretty) + '</span>' +
+          '<span class="storage-rank-pct">' + percentage + '%</span>' +
+          '<div class="storage-rank-bar"><i style="width:' + barW + '%;background:' + color + ';"></i></div>' +
           '</div>'
         );
         current = end;
@@ -8043,9 +8737,13 @@
         if (visible && url) {
           el.href = url;
           el.title = title || '';
-          el.style.display = el.classList.contains('pill') ? '' : 'inline-flex';
+          el.hidden = false;
+          el.removeAttribute('aria-hidden');
+          el.style.display = '';
         } else {
           el.removeAttribute('href');
+          el.hidden = true;
+          el.setAttribute('aria-hidden', 'true');
           el.style.display = 'none';
         }
       });
@@ -9094,6 +9792,21 @@
       setV2Kpi('kpiPushWebhook', webhookRows.toLocaleString('ja-JP'), '<span class="unit">件</span>');
       setV2KpiSub('kpiPushSub', month + ' JST ／ 定期・ジョブ: ' + summaryRows.toLocaleString('ja-JP') + ' 件');
       const topItems = Array.isArray(usage.by_source_context) ? usage.by_source_context.slice(0, 5) : [];
+      const breakdownEl = document.getElementById('pushBreakdownList');
+      if (breakdownEl) {
+        breakdownEl.innerHTML = topItems.length === 0
+          ? '<div class="meta">当月の送信ログはありません。</div>'
+          : topItems.map(function(row) {
+              const src = String(row && row.source || 'unknown');
+              const ctx = String(row && row.context || '');
+              const cnt = Number(row && row.count || 0);
+              return '<div class="push-bd-row">' +
+                '<span class="push-bd-src mono">' + escapeHtml(src) + '</span>' +
+                '<span class="push-bd-desc">' + escapeHtml(ctx || '-') + '</span>' +
+                '<span class="push-bd-count">' + cnt.toLocaleString('ja-JP') + '<small> 件</small></span>' +
+                '</div>';
+            }).join('');
+      }
       if (topItems.length === 0) {
         dom.pushUsageDetails.textContent = '内訳: 送信ログなし';
         return;
@@ -9145,6 +9858,18 @@
       if (row.can_calendar_update !== false) count += 1;
       if (row.can_media_access !== false) count += 1;
       return count;
+    }
+
+    /** カード内の機能スイッチ（利用可マスターを除く6項目）の有効数を数えて「n/6 有効」チップを更新 */
+    function updateUserPermissionCardFeatureCount(card) {
+      if (!card) return;
+      const chip = card.querySelector('.upx-pc');
+      if (!chip) return;
+      const inputs = Array.from(card.querySelectorAll('.upx-permgrid .user-permission-check'));
+      const count = inputs.reduce(function(n, el) {
+        return n + (el instanceof HTMLInputElement && el.checked ? 1 : 0);
+      }, 0);
+      chip.textContent = count + '/6 有効';
     }
 
     function sortUserPermissionsByDisplayName(rows) {
@@ -9203,31 +9928,34 @@
       const enabledCount = getUserPermissionEnabledCount(row);
       const assignedStore = normalizeAssignedStoreDisplayLabel(row.assigned_store);
       const assignedJobTitle = normalizeAssignedJobTitleDisplayLabel(row.assigned_job_title);
+      const avatarInitial = (displayName.trim()[0] || '?');
+      const partial = enabledCount < 7;
       const item = document.createElement('div');
-      item.className = 'user-permission-list-item';
+      item.className = 'upx-lrow';
       item.setAttribute('role', 'button');
       item.setAttribute('tabindex', '0');
       item.setAttribute('data-line-user-id', lineUserId);
       item.innerHTML =
-        '<div class="user-permission-list-name">' +
-        escapeHtml(displayName) +
+        '<span class="upx-lava">' + escapeHtml(avatarInitial) + '</span>' +
+        '<div class="upx-lid">' +
+        '<div class="upx-lname">' + escapeHtml(displayName) + '</div>' +
+        '<div class="upx-lsub">' + escapeHtml(assignedStore) + '</div>' +
         '</div>' +
-        '<div class="user-permission-list-meta">' +
-        '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">有効権限:</span><span class="user-permission-list-kv-value">' + enabledCount + '/7</span></div>' +
-        '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">所属店舗:</span><span class="user-permission-list-kv-value">' + escapeHtml(assignedStore) + '</span></div>' +
-        '<div class="user-permission-list-kv"><span class="user-permission-list-kv-key">役職:</span><span class="user-permission-list-kv-value">' + escapeHtml(assignedJobTitle) + '</span></div>' +
-        '</div>';
+        '<span class="upx-lrole">' + escapeHtml(assignedJobTitle) + '</span>' +
+        '<span class="upx-lperm' + (partial ? ' partial' : '') + '"><span class="upx-ldot"></span>' + enabledCount + '/7</span>';
       return item;
     }
 
     function appendUserPermissionGroup(container, title, rows) {
       if (!container || !rows || !rows.length) return;
       const group = document.createElement('section');
-      group.className = 'user-permission-store-group';
+      group.className = 'upx-lgroup';
       group.innerHTML =
-        '<h3 class="user-permission-store-title">' + escapeHtml(title) + '（' + rows.length + '）</h3>' +
-        '<div class="user-permission-store-list"></div>';
-      const groupList = group.querySelector('.user-permission-store-list');
+        '<div class="upx-lgroup-h"><span class="upx-lbar"></span>' +
+        '<span class="upx-gt">' + escapeHtml(title) + '</span>' +
+        '<span class="upx-gn">（' + rows.length + '）</span></div>' +
+        '<div class="upx-lrows"></div>';
+      const groupList = group.querySelector('.upx-lrows');
       for (let i = 0; i < rows.length; i++) {
         if (groupList) groupList.appendChild(buildUserPermissionNameListItem(rows[i]));
       }
@@ -9540,26 +10268,49 @@
         const excludedRoomIds = filterExcludedMessageSearchRoomIdsToKnownRooms(rawExcluded);
         row.excluded_message_search_room_ids = excludedRoomIds;
         card.dataset.excludedMessageSearchRoomIds = JSON.stringify(excludedRoomIds);
+        const isActive = row.is_active !== false;
+        if (!isActive) card.classList.add('is-off');
+        const featDefs = [
+          ['会話検索', 'user-can-message-search', row.can_message_search !== false],
+          ['資料検索', 'user-can-library-search', row.can_library_search !== false],
+          ['予定閲覧', 'user-can-calendar-view', row.can_calendar_view !== false],
+          ['予定作成', 'user-can-calendar-create', row.can_calendar_create !== false],
+          ['予定更新', 'user-can-calendar-update', row.can_calendar_update !== false],
+          ['メディア', 'user-can-media-access', row.can_media_access !== false],
+        ];
+        const featCount = featDefs.reduce(function(n, d) { return n + (d[2] ? 1 : 0); }, 0);
+        const permGridHtml = featDefs.map(function(d) {
+          return '<label class="upx-perm"><span>' + d[0] + '</span>' +
+            '<span class="upx-sw"><input class="user-permission-check ' + d[1] + '" type="checkbox" ' + (d[2] ? 'checked' : '') + '>' +
+            '<span class="upx-track"></span><span class="upx-knob"></span></span></label>';
+        }).join('');
+        const avatarInitial = (String(row.display_name || '').trim()[0] || '?');
+        const metaStore = normalizeAssignedStoreDisplayLabel(row.assigned_store);
+        const metaRole = normalizeAssignedJobTitleDisplayLabel(row.assigned_job_title);
         card.innerHTML =
-          '<div class="user-permission-header">' +
-          '<div class="user-permission-name"><span class="user-permission-name-text">' + escapeHtml(row.display_name || '-') + '</span></div>' +
-          '<div><button class="button user-show-id" type="button">ID表示</button></div>' +
+          '<div class="upx-head">' +
+          '<span class="upx-ava">' + escapeHtml(avatarInitial) + '</span>' +
+          '<div class="upx-id">' +
+          '<div class="upx-name">' + escapeHtml(row.display_name || '-') + '</div>' +
+          '<div class="upx-meta">' + escapeHtml(metaStore) + ' ・ ' + escapeHtml(metaRole) + '</div>' +
           '</div>' +
-          '<div class="user-permission-controls">' +
-          '<label class="user-permission-control"><span>利用可</span><input class="user-permission-check user-is-active" type="checkbox" ' + (row.is_active !== false ? 'checked' : '') + '></label>' +
-          '<label class="user-permission-control"><span>会話検索</span><input class="user-permission-check user-can-message-search" type="checkbox" ' + (row.can_message_search !== false ? 'checked' : '') + '></label>' +
-          '<label class="user-permission-control"><span>資料検索</span><input class="user-permission-check user-can-library-search" type="checkbox" ' + (row.can_library_search !== false ? 'checked' : '') + '></label>' +
-          '<label class="user-permission-control"><span>予定閲覧</span><input class="user-permission-check user-can-calendar-view" type="checkbox" ' + (row.can_calendar_view !== false ? 'checked' : '') + '></label>' +
-          '<label class="user-permission-control"><span>予定作成</span><input class="user-permission-check user-can-calendar-create" type="checkbox" ' + (row.can_calendar_create !== false ? 'checked' : '') + '></label>' +
-          '<label class="user-permission-control"><span>予定更新</span><input class="user-permission-check user-can-calendar-update" type="checkbox" ' + (row.can_calendar_update !== false ? 'checked' : '') + '></label>' +
-          '<label class="user-permission-control"><span>メディア</span><input class="user-permission-check user-can-media-access" type="checkbox" ' + (row.can_media_access !== false ? 'checked' : '') + '></label>' +
+          '<div class="upx-headend">' +
+          '<label class="upx-master' + (isActive ? ' on' : '') + '"><span>利用可</span>' +
+          '<span class="upx-sw"><input class="user-permission-check user-is-active" type="checkbox" ' + (isActive ? 'checked' : '') + '>' +
+          '<span class="upx-track"></span><span class="upx-knob"></span></span></label>' +
+          '<button class="upx-idbtn user-show-id" type="button">ID表示</button>' +
           '</div>' +
-          '<div class="user-permission-foot">' +
-          '<div class="user-room-scope-cell"><button class="button user-room-scope" type="button">ルーム選択</button></div>' +
-          '<div class="user-perm-meta-row">' +
+          '</div>' +
+          '<div class="upx-perms">' +
+          '<div class="upx-perms-h"><span class="upx-pl">機能権限</span>' +
+          '<span class="upx-pc">' + featCount + '/6 有効</span></div>' +
+          '<div class="upx-permgrid">' + permGridHtml + '</div>' +
+          '</div>' +
+          '<div class="upx-foot">' +
           buildAssignedStoreSelectHtml(row.assigned_store) +
           buildJobTitleSelectHtml(row.assigned_job_title) +
-          '</div>' +
+          '<button class="button user-room-scope upx-roombtn" type="button">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>ルーム選択</button>' +
           '</div>';
         dom.userPermissionTableBody.appendChild(card);
       }
@@ -10308,34 +11059,73 @@
           : '-';
         const eventCount = status ? Number(status.webhook_event_count || 0) : 0;
         const receiptCount = status ? Number(status.receipt_count || 0) : 0;
-        const featureSummary = buildReceiptFeatureSummaryText(config, storeKey);
         const unlinkedBadge = hasUnlinked
           ? '<span class="webhook-card-unlinked-count-badge">未連携 ' + unlinkedDetected.length + '</span>'
           : '';
         const unlinkedBanner = buildWebhookUnlinkedBannerHtml(unlinkedDetected.length, storeLabel);
-        const linkedFooter = hasUnlinked
-          ? ''
-          : (roomCount > 0
-            ? '<div class="webhook-card-footer-status is-ok">連携済み ' + roomCount + ' 件 — 売上レポート送信先として登録済み</div>'
-            : '');
+
+        // ===== C案（リスト整理）用データ =====
+        const permStoreName = store.store_name || storeKey;
+        const permUsers = findUserPermissionsForStore(permStoreName, userPermissions);
+        const userCount = permUsers.length;
+        let userNameVal = '未登録';
+        let userBadgeHtml = '';
+        if (userCount > 0) {
+          const u0 = permUsers[0] || {};
+          const nm0 = String(u0.display_name || '').trim() || '(未設定)';
+          userNameVal = escapeHtml(nm0)
+            + (userCount > 1 ? ' <span class="pcw-rtag">他 ' + (userCount - 1) + ' 名</span>' : '');
+          const on0 = u0.is_active !== false;
+          userBadgeHtml = '<span class="pcw-badge' + (on0 ? '' : ' is-off') + '">' + (on0 ? '利用可' : '停止中') + '</span>';
+        }
+        const phones = Array.isArray(store.receipt_phones) ? store.receipt_phones : [];
+        const phoneLines = formatReceiptPhonesForTextarea(phones)
+          .split('\n').map(function(v) { return String(v || '').trim(); }).filter(Boolean);
+        const phoneVal = phoneLines.length
+          ? escapeHtml(phoneLines.join(' / '))
+          : '<span class="pcw-rtag">未登録（店名のみ）</span>';
+        const enabledCount = Number(summary.enabledCount || 0);
+        const totalFeatures = 14;
+        const progPct = Math.max(0, Math.min(100, Math.round(enabledCount / totalFeatures * 100)));
+        const svgOpen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">';
+        const icoUsers = svgOpen + '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg>';
+        const icoSettings = svgOpen + '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.5M12 19v2.5M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2.5 12h2.5M19 12h2.5M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg>';
+        const icoPhone = svgOpen + '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg>';
+        const icoRooms = svgOpen + '<path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>';
+
         return (
-          '<article class="' + cardClass + '" data-store-key="' + escapeHtml(storeKey) + '">' +
+          '<article class="' + cardClass + ' pcw-card pcw-card-c" data-store-key="' + escapeHtml(storeKey) + '">' +
           unlinkedBanner +
-          '<div class="webhook-card-header">' +
-          '<h3 class="webhook-card-title">' + escapeHtml(storeLabel) + '</h3>' +
-          '<span class="webhook-card-status-badge">通信中</span>' + unlinkedBadge +
+          '<div class="pcw-head">' +
+          '<h3 class="pcw-title">' + escapeHtml(storeLabel) + '</h3>' +
+          '<span class="pcw-status"><span class="pcw-dot"></span>通信中</span>' + unlinkedBadge +
           '</div>' +
-          '<div class="webhook-card-status">' +
-          '最終受信: ' + escapeHtml(lastReceived) +
-          ' ／ 受信 ' + eventCount + ' 件 ／ レシート ' + receiptCount + ' 件' +
+          '<div class="pcw-meta">最終受信 <b>' + escapeHtml(lastReceived) + '</b> ・ 受信 <b>' + eventCount + '</b> ・ レシート <b>' + receiptCount + '</b></div>' +
+          '<div class="pcw-list">' +
+          '<div class="pcw-li">' +
+          '<span class="pcw-li-ico">' + icoUsers + '</span>' +
+          '<div class="pcw-li-main"><div class="pcw-li-k">ユーザー権限</div><div class="pcw-li-v">' + userNameVal + '</div></div>' +
+          '<div class="pcw-li-end">' + userBadgeHtml +
+          '<button type="button" class="webhook-perm-users-manage pcw-btn-sm" data-store-name="' + escapeHtml(permStoreName) + '">編集</button>' +
           '</div>' +
-          '<div class="webhook-card-receipt-features">有効機能: ' + escapeHtml(featureSummary) + '</div>' +
-          buildWebhookReceiptPhonesPreviewHtml(store) +
-          buildWebhookCardPermissionUsersHtml(store.store_name || storeKey, userPermissions) +
-          '<div class="webhook-card-config">' +
-          '<button type="button" class="button primary webhook-permission-open" data-store-key="' + escapeHtml(storeKey) + '">権限・機能設定</button>' +
-          '<div class="room-config-badge ' + summary.tone + '">' + escapeHtml(summary.text) + '</div>' +
           '</div>' +
+          '<div class="pcw-li">' +
+          '<span class="pcw-li-ico">' + icoSettings + '</span>' +
+          '<div class="pcw-li-main"><div class="pcw-li-k">有効な機能</div><div class="pcw-bar pcw-bar-inline"><i style="width:' + progPct + '%"></i></div></div>' +
+          '<div class="pcw-li-end"><span class="pcw-prognum">' + enabledCount + '<span>/ ' + totalFeatures + '</span></span></div>' +
+          '</div>' +
+          '<div class="pcw-li">' +
+          '<span class="pcw-li-ico">' + icoPhone + '</span>' +
+          '<div class="pcw-li-main"><div class="pcw-li-k">レシート照合電話</div><div class="pcw-li-v">' + phoneVal + '</div></div>' +
+          '<div class="pcw-li-end"><button type="button" class="webhook-receipt-phones-edit pcw-btn-sm" data-store-key="' + escapeHtml(storeKey) + '">編集</button></div>' +
+          '</div>' +
+          '<div class="pcw-li">' +
+          '<span class="pcw-li-ico">' + icoRooms + '</span>' +
+          '<div class="pcw-li-main"><div class="pcw-li-k">連携ルーム</div><div class="pcw-li-v">' + roomCount + ' ルーム</div></div>' +
+          '<div class="pcw-li-end"><span class="pcw-rtag">売上レポート送信先</span></div>' +
+          '</div>' +
+          '</div>' +
+          '<button type="button" class="webhook-permission-open pcw-btn pcw-btn-primary" data-store-key="' + escapeHtml(storeKey) + '">権限・機能設定</button>' +
           '<details class="webhook-setup-details">' +
           '<summary>Webhook URL（参考）</summary>' +
           '<div class="webhook-card-url" style="margin-top:8px;">' +
@@ -10349,7 +11139,6 @@
           '</details>' +
           buildWebhookReceiptPhonesSectionHtml(store) +
           buildWebhookLinkedRoomsSectionHtml(storeKey, overview, stores) +
-          linkedFooter +
           '</article>'
         );
       }
@@ -10425,9 +11214,6 @@
         ? extraOptions
         : (currentState && currentState.receipt_store_options) || [];
       initWebhookSettingsFilter(extra);
-      if (dom.storeWebhookLegacyUrl) {
-        dom.storeWebhookLegacyUrl.textContent = LINE_REPORT_PAGES.lineWebhookLegacyUrl();
-      }
       const filter = String(dom.webhookSettingsFilter && dom.webhookSettingsFilter.value || '').trim();
       const stores = LINE_REPORT_PAGES.listStores(extra);
       const entries = [];
@@ -10457,6 +11243,7 @@
         entries.push({
           storeKey: String(store.store_key || '').trim(),
           label: store.store_name || store.store_key,
+          isActive: isActive,
           html: buildStoreWebhookCardHtml(
             store,
             overview,
@@ -10478,14 +11265,74 @@
         dom.webhookStoreListBody.innerHTML = '<div class="empty">表示対象の Webhook がありません。</div>';
         return;
       }
-      dom.webhookStoreListBody.innerHTML = list.map(function(entry) {
+      const itemHtml = function(entry, metaText) {
         return (
           '<button type="button" class="button webhook-store-list-item" data-store-key="' + escapeHtml(entry.storeKey || '') + '">' +
           '<span>' + escapeHtml(entry.label || entry.storeKey || '-') + '</span>' +
-          (entry.meta ? '<span class="meta">' + escapeHtml(entry.meta) + '</span>' : '') +
+          (metaText ? '<span class="meta">' + escapeHtml(metaText) + '</span>' : '') +
           '</button>'
         );
-      }).join('');
+      };
+      const topItems = [];
+      const activeItems = [];
+      const inactiveItems = [];
+      list.forEach(function(entry) {
+        const key = String(entry.storeKey || '');
+        if (key === GLOBAL_CONFIG_SCOPE_KEY || key === UNASSIGNED_WEBHOOK_KEY) {
+          topItems.push(itemHtml(entry, entry.meta || ''));
+        } else if (entry.isActive) {
+          // 見出しが「通信中」なので、各項目からは冗長な「通信中 /」を省く
+          const m = String(entry.meta || '').replace(/^通信中\s*\/?\s*/, '');
+          activeItems.push(itemHtml(entry, m));
+        } else {
+          // 見出しが「未接続・セットアップ」なので、「未登録」だけのmetaは省く
+          const m = String(entry.meta || '') === '未登録' ? '' : String(entry.meta || '');
+          inactiveItems.push(itemHtml(entry, m));
+        }
+      });
+      let html = topItems.join('');
+      if (activeItems.length) {
+        html += '<div class="webhook-card-section-head webhook-card-section-head--live">'
+          + '<span class="webhook-card-section-dot"></span>通信中'
+          + '<span class="webhook-card-section-count">' + activeItems.length + '</span></div>'
+          + activeItems.join('');
+      }
+      if (inactiveItems.length) {
+        html += '<div class="webhook-card-section-head">未接続・セットアップ'
+          + '<span class="webhook-card-section-count">' + inactiveItems.length + '</span></div>'
+          + inactiveItems.join('');
+      }
+      dom.webhookStoreListBody.innerHTML = html;
+    }
+
+    function buildGroupedWebhookCardsHtml(entries) {
+      const list = Array.isArray(entries) ? entries : [];
+      const topCards = [];      // 全体権限・未割当（特殊カード）
+      const activeCards = [];   // 通信中
+      const inactiveCards = []; // 未接続・セットアップ
+      list.forEach(function(entry) {
+        const key = String(entry.storeKey || '');
+        if (key === GLOBAL_CONFIG_SCOPE_KEY || key === UNASSIGNED_WEBHOOK_KEY) {
+          topCards.push(entry.html);
+        } else if (entry.isActive) {
+          activeCards.push(entry.html);
+        } else {
+          inactiveCards.push(entry.html);
+        }
+      });
+      let html = topCards.join('');
+      if (activeCards.length) {
+        html += '<div class="webhook-card-section-head webhook-card-section-head--live">'
+          + '<span class="webhook-card-section-dot"></span>通信中'
+          + '<span class="webhook-card-section-count">' + activeCards.length + '</span></div>'
+          + activeCards.join('');
+      }
+      if (inactiveCards.length) {
+        html += '<div class="webhook-card-section-head">未接続・セットアップ'
+          + '<span class="webhook-card-section-count">' + inactiveCards.length + '</span></div>'
+          + inactiveCards.join('');
+      }
+      return html;
     }
 
     function renderWebhookCards(overview, settingsList, extraOptions) {
@@ -10498,7 +11345,7 @@
       const phoneDrafts = captureWebhookCardPhoneDrafts();
       if (activeWebhookCardViewMode === 'cards') {
         dom.webhookCardListBody.innerHTML = entries.length
-          ? entries.map(function(entry) { return entry.html; }).join('')
+          ? buildGroupedWebhookCardsHtml(entries)
           : '<div class="empty">表示対象の Webhook がありません。</div>';
       } else {
         dom.webhookCardListBody.innerHTML = '';
@@ -11971,7 +12818,7 @@
           renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
           return;
         }
-        const item = target.closest('.user-permission-list-item');
+        const item = target.closest('.upx-lrow');
         if (!(item instanceof HTMLElement)) return;
         openUserPermissionEditModalByLineUserId(String(item.getAttribute('data-line-user-id') || '').trim());
       });
@@ -11979,7 +12826,7 @@
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
-        const item = target.closest('.user-permission-list-item');
+        const item = target.closest('.upx-lrow');
         if (!(item instanceof HTMLElement)) return;
         event.preventDefault();
         openUserPermissionEditModalByLineUserId(String(item.getAttribute('data-line-user-id') || '').trim());
@@ -12041,6 +12888,12 @@
           if (createEl instanceof HTMLInputElement) createEl.checked = false;
           if (updateEl instanceof HTMLInputElement) updateEl.checked = false;
         }
+        if (target.classList.contains('user-is-active') && target instanceof HTMLInputElement) {
+          card.classList.toggle('is-off', !target.checked);
+          const masterLabel = card.querySelector('.upx-master');
+          if (masterLabel) masterLabel.classList.toggle('on', target.checked);
+        }
+        updateUserPermissionCardFeatureCount(card);
         markUserPermissionDirty();
         saveSingleUserPermissionRow(card, { reload: false }).catch(function(e) {
           alert(e.message || String(e));
@@ -12063,6 +12916,30 @@
     dom.changeTokenBtn.addEventListener('click', async function() {
       try { await changeAdminToken(); } catch (e) { alert(e.message || String(e)); }
     });
+
+    // 管理トークン変更の折りたたみ（スライド）トグル
+    (function() {
+      const tokToggle = document.getElementById('authTokToggle');
+      const tokPanel = document.getElementById('authTokPanel');
+      const tokCancel = document.getElementById('authTokCancel');
+      if (!tokToggle || !tokPanel) return;
+      const setOpen = function(open) {
+        tokPanel.classList.toggle('open', open);
+        tokToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+      tokToggle.addEventListener('click', function() {
+        setOpen(!tokPanel.classList.contains('open'));
+      });
+      if (tokCancel) {
+        tokCancel.addEventListener('click', function() {
+          setOpen(false);
+          const a = document.getElementById('newTokenInput');
+          const b = document.getElementById('newTokenConfirmInput');
+          if (a) a.value = '';
+          if (b) b.value = '';
+        });
+      }
+    })();
 
     dom.roomTableBody.addEventListener('input', function(event) {
       const target = event.target;
@@ -12523,12 +13400,6 @@
         alert(e.message || String(e));
       }
     });
-
-    if (dom.copyLegacyWebhookBtn) {
-      dom.copyLegacyWebhookBtn.addEventListener('click', async function() {
-        await copyTextToClipboard(LINE_REPORT_PAGES.lineWebhookLegacyUrl(), '共通 Webhook URL をコピーしました。');
-      });
-    }
 
     dom.copyRoomIdBtn.addEventListener('click', async function() {
       await copyRoomIdToClipboard();

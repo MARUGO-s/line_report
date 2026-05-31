@@ -854,33 +854,234 @@
         max-height: 58vh;
       }
     }
+    /* =====================================================================
+       コンソールシェル移行リスキン（design_handoff_media_library）
+       既存コンポーネントCSSはそのまま活かし、トークンをコンソール配色へ
+       再マップ＋背景フラット化＋サイドバー/トップバーを追加する。
+       ===================================================================== */
+    :root {
+      --app-bg: #0c1117;
+      --surface: #151c25;
+      --surface-2: #1b232e;
+      --sidebar: #0a0f16;
+      --sidebar-2: rgba(255, 255, 255, 0.05);
+      --side-text: #99a6b6;
+      --border: #26313d;
+      --border-strong: #33414f;
+      --text: #e7ecf2;
+      --text-2: #9fadbd;
+      --text-3: #6f7d8d;
+      --accent: #3f7bea;
+      --accent-soft: rgba(56, 125, 234, 0.16);
+      --ok: #36b37e;
+      --ok-soft: rgba(54, 179, 126, 0.18);
+      --warn: #d8961f;
+      --warn-soft: rgba(216, 150, 31, 0.2);
+      --err: #e05656;
+      --err-soft: rgba(224, 86, 86, 0.18);
+      /* 旧メディアページのトークンをコンソール配色へ remap */
+      --bg0: #0c1117;
+      --bg1: #0c1117;
+      --card: #151c25;
+      --line: #26313d;
+      --txt: #e7ecf2;
+      --sub: #9fadbd;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 12px 32px -20px rgba(0, 0, 0, 0.7);
+      --radius: 14px;
+    }
+    body[data-theme='light'] {
+      --app-bg: #eef1f5;
+      --surface: #ffffff;
+      --surface-2: #f5f7fa;
+      --sidebar: #0f1620;
+      --sidebar-2: rgba(255, 255, 255, 0.06);
+      --side-text: #aab6c5;
+      --border: #e3e8ef;
+      --border-strong: #d3dae3;
+      --text: #1e2632;
+      --text-2: #5a6675;
+      --text-3: #8b97a6;
+      --accent: #2563d4;
+      --accent-soft: rgba(37, 99, 212, 0.1);
+      --ok: #1f9d57;
+      --ok-soft: rgba(31, 157, 87, 0.12);
+      --warn: #c77d12;
+      --warn-soft: rgba(199, 125, 18, 0.14);
+      --err: #d23b3b;
+      --err-soft: rgba(210, 59, 59, 0.12);
+      --bg0: #eef1f5;
+      --bg1: #eef1f5;
+      --card: #ffffff;
+      --line: #e3e8ef;
+      --txt: #1e2632;
+      --sub: #5a6675;
+      --shadow: 0 1px 2px rgba(20, 40, 80, 0.06), 0 10px 28px -18px rgba(20, 40, 80, 0.2);
+    }
+    /* 背景のグラデーションを撤去してフラットなコンソール背景へ */
+    body, body[data-theme='light'] {
+      background: var(--app-bg) !important;
+      font-family: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Zen Kaku Gothic New", system-ui, sans-serif;
+      padding: 0;
+    }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    /* ---------- シェル（サイドバー＋トップバー） ---------- */
+    .ms-shell { display: grid; grid-template-columns: 264px 1fr; min-height: 100vh; }
+    .ms-side {
+      background: var(--sidebar); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+    }
+    .ms-brand { display: flex; align-items: center; gap: 11px; padding: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+    .ms-logo {
+      width: 38px; height: 38px; border-radius: 10px; background: var(--accent);
+      display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; color: #fff; flex: none;
+    }
+    .ms-bt { font-size: 15px; font-weight: 700; line-height: 1.2; color: #eef2f7; }
+    .ms-bs { font-size: 11.5px; color: var(--side-text); margin-top: 2px; }
+    .ms-nav { flex: 1; overflow-y: auto; padding: 16px 12px; }
+    .ms-navlabel {
+      font-size: 11px; font-weight: 600; color: var(--side-text); letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 0 10px; margin: 18px 0 8px;
+    }
+    .ms-navlabel:first-child { margin-top: 0; }
+    .ms-navlink {
+      display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px;
+      font-size: 13.5px; font-weight: 500; color: var(--side-text); text-decoration: none; cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .ms-navlink:hover { background: var(--sidebar-2); color: #eef2f7; }
+    .ms-navlink.active { background: var(--accent); color: #fff; }
+    .ms-navlink .ni { flex: none; display: flex; color: currentColor; opacity: 0.85; }
+    .ms-navlink .ext { margin-left: auto; display: flex; opacity: 0; transition: opacity 0.12s; }
+    .ms-navlink:hover .ext { opacity: 0.7; }
+    .ms-side-foot { border-top: 1px solid rgba(255, 255, 255, 0.06); padding: 14px 18px; }
+    .ms-conn { display: flex; align-items: center; gap: 10px; }
+    .ms-cd { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none; }
+    .ms-ct { font-size: 12.5px; font-weight: 700; color: #eef2f7; }
+    .ms-cs { font-size: 11.5px; color: var(--side-text); margin-top: 1px; }
+    .ms-main { display: flex; flex-direction: column; min-width: 0; }
+    .ms-topbar {
+      display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 32px;
+      border-bottom: 1px solid var(--border); position: sticky; top: 0;
+      background: color-mix(in srgb, var(--app-bg) 86%, transparent); backdrop-filter: blur(8px); z-index: 5;
+    }
+    .ms-content { padding: 34px 32px 80px; }
+    .ms-inner { max-width: 1180px; margin: 0 auto; }
+    .ms-h1 { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: 0.01em; color: var(--text); }
+    .ms-sub { font-size: 14px; color: var(--text-3); margin: 8px 0 0; }
+    .ms-hidden-conn { display: none !important; }
+
+    /* ---------- コンポーネントをコンソール配色へ寄せる ---------- */
+    .ms-inner > .card { margin-top: 22px; padding: 24px 26px; }
+    .card { background: var(--surface); border: 1px solid var(--border); box-shadow: none; }
+    .card h2 {
+      font-size: 16px; font-weight: 700; color: var(--text); margin: 0 0 18px;
+      padding-bottom: 14px; border-bottom: 1px solid var(--border); letter-spacing: 0.01em;
+    }
+    .meta { color: var(--text-3); }
+    .pill { background: var(--surface); border: 1px solid var(--border); color: var(--text-2); }
+    .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+    .input, .select, .button { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+    .input::placeholder { color: var(--text-3); }
+    .button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+    .button.danger { background: transparent; border-color: color-mix(in srgb, var(--err) 48%, transparent); color: var(--err); }
+    .button.danger:hover { background: var(--err-soft); }
+    .item { background: var(--surface-2); border: 1px solid var(--border); }
+    .preview { background: rgba(0, 0, 0, 0.18); border-bottom: 1px solid var(--border); }
+    body[data-theme='light'] .preview { background: rgba(20, 40, 80, 0.04); }
+    .media-name-row { background: var(--surface-2); border: 1px solid var(--border); }
+    .tag {
+      background: var(--accent-soft); color: var(--accent);
+      border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+    }
+    .view-switch { background: var(--surface-2); border: 1px solid var(--border); }
+    .view-tab { color: var(--text-2); }
+    .view-tab.active { border-color: transparent; background: var(--accent); color: #fff; }
+    .usage-wrap { background: var(--surface-2); border: 1px solid var(--border); }
+    .usage-track { background: var(--surface); }
+    .usage-fill { background: var(--accent); }
+    .usage-fill.warn { background: var(--warn); }
+    .usage-fill.full { background: var(--err); }
+    .document-drop-zone { border: 1.5px dashed var(--border); background: var(--surface-2); }
+    .document-drop-zone:hover, .document-drop-zone.dragover { border-color: var(--accent); background: var(--accent-soft); }
+    .extract-block { background: var(--surface); border: 1px solid var(--border); }
+    .context-list { background: var(--surface); border: 1px solid var(--border); }
+    .modal-backdrop { background: rgba(2, 6, 12, 0.62); }
+    .modal-card { background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); }
+    .permission-user-option { background: var(--surface-2); border: 1px solid var(--border); }
+
+    /* 空状態（メディア／資料） */
+    .empty-state {
+      grid-column: 1 / -1; border: 1px dashed var(--border); border-radius: 14px;
+      padding: 46px 20px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+      text-align: center; color: var(--text-3); margin-top: 4px;
+    }
+    .empty-state svg { color: var(--text-3); opacity: 0.7; margin-bottom: 4px; }
+    .empty-state-t { font-size: 14px; font-weight: 600; color: var(--text-2); }
+    .empty-state-s { font-size: 12.5px; color: var(--text-3); }
+
+    @media (max-width: 880px) {
+      .ms-shell { grid-template-columns: 1fr; }
+      .ms-side { position: static; height: auto; }
+      .ms-content { padding: 22px 16px 60px; }
+      .ms-topbar { padding: 12px 16px; }
+    }
   </style>
 </head>
 <body>
-  <div class="app">
-    <header class="hero">
-      <h1>LINE Media Viewer</h1>
-      <p>LINEの添付ファイル（画像/動画/音声/ファイル）を表示します。</p>
-      <div class="status">
+  <div class="ms-shell">
+    <aside class="ms-side">
+      <div class="ms-brand">
+        <span class="ms-logo">LS</span>
+        <div>
+          <div class="ms-bt">LINE Summary</div>
+          <div class="ms-bs">Admin Console</div>
+        </div>
+      </div>
+      <nav class="ms-nav">
+        <div class="ms-navlabel">メニュー</div>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span>接続設定</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>利用状況</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></span>Webhook設定</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg></span>ログ</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg></span>ユーザー権限</a>
+
+        <div class="ms-navlabel">ページ</div>
+        <a class="ms-navlink active" aria-current="page"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>メディア閲覧</a>
+        <a class="ms-navlink" href="./message-search.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>会話検索<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./reservation.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>予約表<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./analytics.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg></span>売上分析<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      </nav>
+      <div class="ms-side-foot">
+        <div class="ms-conn">
+          <span class="ms-cd"></span>
+          <div>
+            <div class="ms-ct">接続済み</div>
+            <div class="ms-cs mono">hocbnifuactbvmyjraxy</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="ms-main">
+      <div class="ms-topbar">
         <span id="authState" class="pill">未接続</span>
         <span id="lastRefresh" class="pill">最終更新: なし</span>
         <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
       </div>
-    </header>
 
-    <section class="card">
-      <h2>接続</h2>
-      <div class="controls">
-        <input id="projectUrlInput" class="input" style="min-width:320px" type="text" readonly tabindex="-1" aria-readonly="true">
-        <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
-        <button id="saveTokenBtn" class="button primary">保存して接続</button>
-        <button id="clearTokenBtn" class="button">削除</button>
-        <a class="button link" href="./index.html">管理画面に戻る</a>
-        <a class="button link" href="./reservation.html">予約表を開く</a>
-        <a class="button link" href="./analytics.html">売上グラフを開く</a>
-      </div>
-      <div class="meta">署名付きURLは一定時間で期限切れになります。見えなくなった場合は再読み込みしてください。</div>
-    </section>
+      <div class="ms-content">
+        <div class="ms-inner">
+          <h1 class="ms-h1">メディア閲覧</h1>
+          <p class="ms-sub">LINE の添付ファイル（画像・動画・音声・ファイル）と、抽出済みの資料を閲覧します。</p>
+
+          <!-- 接続要素は接続設定ページへ集約。JS互換のため非表示で保持（同じフォルダの共有セッションを利用） -->
+          <div class="ms-hidden-conn" hidden aria-hidden="true">
+            <input id="projectUrlInput" type="text" readonly tabindex="-1" aria-readonly="true">
+            <input id="tokenInput" type="password">
+            <button id="saveTokenBtn" type="button">保存して接続</button>
+            <button id="clearTokenBtn" type="button">削除</button>
+          </div>
 
     <section class="card">
       <h2>メディア一覧</h2>
@@ -969,7 +1170,10 @@
         <button id="documentNextBtn" class="button">次へ</button>
       </div>
     </section>
-  </div>
+        </div><!-- /ms-inner -->
+      </div><!-- /ms-content -->
+    </div><!-- /ms-main -->
+  </div><!-- /ms-shell -->
 
   <div id="documentPermissionModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="documentPermissionModalTitle">
@@ -1989,7 +2193,7 @@
     function renderMediaList(items) {
       if (!Array.isArray(items) || items.length === 0) {
         dom.mediaList.className = 'list';
-        dom.mediaList.innerHTML = '<div class="item"><div class="preview"><div class="empty">該当データなし</div></div></div>';
+        dom.mediaList.innerHTML = '<div class="empty-state"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg><div class="empty-state-t">該当するメディアがありません</div><div class="empty-state-s">種別・ルームの条件を変えるか、再読み込みしてください。</div></div>';
         return;
       }
       if (state.mediaView === 'names') {
@@ -2139,7 +2343,7 @@
       state.docsHasMore = !!result.has_more;
 
       if (items.length === 0) {
-        dom.documentList.innerHTML = '<div class="item"><div class="preview"><div class="empty">該当データなし</div></div></div>';
+        dom.documentList.innerHTML = '<div class="empty-state"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg><div class="empty-state-t">該当する資料がありません</div><div class="empty-state-s">ルームの条件を変えるか、再読み込みしてください。</div></div>';
       } else {
         dom.documentList.innerHTML = items.map(renderDocumentItem).join('');
       }
