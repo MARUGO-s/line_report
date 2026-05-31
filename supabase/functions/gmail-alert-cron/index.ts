@@ -66,8 +66,10 @@ type ReservationVisitRecordResult = {
   recent_visits: Array<{ visit_at?: string | null; is_cancelled?: boolean }>
 }
 
-const DEFAULT_GMAIL_ALERT_QUERY = "is:inbox is:unread newer_than:7d (予約 OR reservation OR booking)"
-const DEFAULT_GMAIL_ALERT_MAX_MESSAGES = 5
+// is:unread を付けない: 店舗が予約メールを開封(既読)していても取りこぼさないため。
+// 二重通知は gmail_reservation_alert_logs（通知済みID）で防止するので、未読縛りは不要。
+const DEFAULT_GMAIL_ALERT_QUERY = "is:inbox newer_than:7d (予約 OR reservation OR booking)"
+const DEFAULT_GMAIL_ALERT_MAX_MESSAGES = 20
 const MAX_GMAIL_ALERT_MAX_MESSAGES = 20
 const DEFAULT_GMAIL_ALERT_AI_MAX_BODY_CHARS = 6000
 const MIN_GMAIL_ALERT_AI_MAX_BODY_CHARS = 1500
@@ -892,7 +894,13 @@ function loadGmailAlertEnv(fallbackOverallRoomId: string): GmailAlertEnvState {
   const clientId = String(Deno.env.get("GMAIL_CLIENT_ID") ?? "").trim()
   const clientSecret = String(Deno.env.get("GMAIL_CLIENT_SECRET") ?? "").trim()
   const refreshToken = String(Deno.env.get("GMAIL_REFRESH_TOKEN") ?? "").trim()
-  const query = String(Deno.env.get("GMAIL_ALERT_QUERY") ?? "").trim() || DEFAULT_GMAIL_ALERT_QUERY
+  // 環境変数で query が設定されていても is:unread を強制的に外す（既読の予約も拾う）。
+  const rawQuery = String(Deno.env.get("GMAIL_ALERT_QUERY") ?? "").trim() || DEFAULT_GMAIL_ALERT_QUERY
+  const query = rawQuery
+    .replace(/(^|\s)is:unread(?=\s|$)/gi, " ")
+    .replace(/(^|\s)label:unread(?=\s|$)/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim() || DEFAULT_GMAIL_ALERT_QUERY
   const fallbackTargetRoomId = String(Deno.env.get("LINE_GMAIL_ALERT_ROOM_ID") ?? "").trim() ||
     String(fallbackOverallRoomId ?? "").trim()
   const aiApiKey = String(Deno.env.get("GROQ_API_KEY") ?? "").trim()
