@@ -4839,9 +4839,17 @@
   .app-v2-header-meta { color: var(--text-3); }
   .app-v2-main { margin-left: 220px; max-width: 1180px; padding: 24px; }
   @media (max-width: 920px){
-    .app-v2-tabs-wrap { position: static; width: auto; flex-direction: row; align-items: center; gap: 8px; padding: 10px; overflow-x: auto; }
+    /* スマホ/タブレット: サイドバーを上部の横スクロールナビへ。
+       各要素は flex:none で縮めず（=文字が縦に割れない）、はみ出しは横スクロールで見せる。 */
+    .app-v2-tabs-wrap { position: static; width: auto; flex-direction: row; align-items: center; gap: 8px; padding: 10px 12px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+    .app-v2-tabs-wrap > * { flex: none; }
     .app-v2-sidebrand { padding: 0 8px 0 4px; }
-    .app-v2-tabs { flex-direction: row; margin: 0; }
+    .app-v2-sidebrand small { display: none; }
+    .app-v2-tabs { flex-direction: row; margin: 0; gap: 4px; }
+    .app-v2-pages { flex-direction: row; margin-top: 0; gap: 4px; align-items: center; }
+    .app-v2-pages-label { display: none; }
+    .app-v2-tab, .app-v2-pagelink { white-space: nowrap; flex: none; }
+    .app-v2-pagelink .ext { display: none; }
     .app-v2-sidefoot { display: none; }
     .app-v2-header, .app-v2-main { margin-left: 0; }
   }
