@@ -80,7 +80,7 @@ type StorageUsageStats = {
 type MediaType = "image" | "video" | "audio" | "file"
 type MediaListRow = {
   id: number
-  message_id: string
+  message_id: string | null
   line_message_id: string
   room_id: string
   room_name: string | null
@@ -4833,11 +4833,13 @@ function normalizeMediaListRow(value: unknown): MediaListRow | null {
   const roomId = toSafeString(value.room_id)
   const storageBucket = toSafeString(value.storage_bucket)
   const storagePath = toSafeString(value.storage_path)
-  if (!messageId || !lineMessageId || !roomId || !storageBucket || !storagePath) return null
+  // message_id は Webhook 保存メディア（メッセージ行と紐付かない）では null。
+  // line_message_id とストレージ情報が揃っていれば表示対象とする。
+  if (!lineMessageId || !roomId || !storageBucket || !storagePath) return null
 
   return {
     id: Math.floor(idNum),
-    message_id: messageId,
+    message_id: messageId || null,
     line_message_id: lineMessageId,
     room_id: roomId,
     room_name: value.room_name == null ? null : String(value.room_name),
@@ -4899,7 +4901,7 @@ async function fetchMediaContextMap(
   if (rows.length === 0) return contextMap
 
   const anchorMessageIds = Array.from(
-    new Set(rows.map((row) => row.message_id).filter((id) => id.length > 0)),
+    new Set(rows.map((row) => row.message_id).filter((id): id is string => typeof id === "string" && id.length > 0)),
   )
   const anchorMap = new Map<string, { room_id: string; created_at: string }>()
   if (anchorMessageIds.length > 0) {
@@ -4921,7 +4923,7 @@ async function fetchMediaContextMap(
   }
 
   const contextEntries = await Promise.all(rows.map(async (row) => {
-    const anchor = anchorMap.get(row.message_id)
+    const anchor = row.message_id ? anchorMap.get(row.message_id) : undefined
     const roomId = anchor?.room_id || row.room_id
     const createdAt = anchor?.created_at || row.created_at
     if (!roomId || !createdAt) {
