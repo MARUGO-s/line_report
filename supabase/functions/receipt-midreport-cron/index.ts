@@ -1,0 +1,412 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
+import { loadReceiptReportAggregateForRoom } from "./functions/_shared/receipt_report_aggregate.ts";
+import { buildReceiptReportFlexMessages } from "./functions/_shared/receipt_report_flex.ts";
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const RECEIPT_MID_REPORT_TITLE = "中間報告";
+const RECEIPT_MONTH_END_REPORT_TITLE = "月間報告";
+/** 集計締めは営業日5時切替後（16日／翌月1日）だが、LINE送信は店舗向けに10時 */ const REPORT_RUN_HOUR_JST = 10;
+const REPORT_RUN_MINUTE_JST = 0;
+Deno.serve(async (req)=>{
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const lineAccessToken = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN") ?? "";
+  if (!supabaseUrl || !serviceRoleKey) {
+    return json({
+      ok: false,
+      error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing."
+    }, 500);
+  }
+  const testEarly = parseReceiptReportTestRequest(req);
+  if (testEarly) {
+    return await handleReceiptReportTestSend(testEarly, {
+      supabaseUrl,
+      serviceRoleKey,
+      lineAccessToken
+    });
+  }
+  if (!lineAccessToken) {
+    return json({
+      ok: true,
+      skipped: true,
+      reason: "missing_line_channel_access_token"
+    }, 200);
+  }
+  const now = new Date();
+  const jst = toJstDateParts(now);
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  // 全ルームのレポート設定（ON/OFF＋送信時刻の個別オーバーライド）を取得。
+  const { data: roomSettings, error: settingsError } = await supabase
+    .from("room_summary_settings")
+    .select("room_id, receipt_midreport_enabled, receipt_monthend_report_enabled, receipt_schedule_override, receipt_midreport_day, receipt_midreport_hour, receipt_midreport_minute, receipt_monthend_day, receipt_monthend_hour, receipt_monthend_minute");
+  if (settingsError) {
+    return json({
+      ok: false,
+      error: `Failed to load room_summary_settings: ${settingsError.message}`
+    }, 500);
+  }
+
+  // いまこの瞬間(JST)に送るべきルームを種別ごとに判定する。
+  // ルーム個別設定(override)があればその「日・時・分」、無ければ既定（中間16日 / 月末翌月1日, 10:00）。
+  const midRoomIds = [];
+  const monthendRoomIds = [];
+  for (const row of (Array.isArray(roomSettings) ? roomSettings : [])){
+    const roomId = String(row.room_id ?? "").trim();
+    if (!roomId) continue;
+    const override = row.receipt_schedule_override === true;
+    if (row.receipt_midreport_enabled !== false) {
+      const d = override && row.receipt_midreport_day != null ? Number(row.receipt_midreport_day) : 16;
+      const h = override && row.receipt_midreport_hour != null ? Number(row.receipt_midreport_hour) : REPORT_RUN_HOUR_JST;
+      const m = override && row.receipt_midreport_minute != null ? Number(row.receipt_midreport_minute) : REPORT_RUN_MINUTE_JST;
+      if (jst.day === d && jst.hour === h && jst.minute === m) midRoomIds.push(roomId);
+    }
+    if (row.receipt_monthend_report_enabled !== false) {
+      const d = override && row.receipt_monthend_day != null ? Number(row.receipt_monthend_day) : 1;
+      const h = override && row.receipt_monthend_hour != null ? Number(row.receipt_monthend_hour) : REPORT_RUN_HOUR_JST;
+      const m = override && row.receipt_monthend_minute != null ? Number(row.receipt_monthend_minute) : REPORT_RUN_MINUTE_JST;
+      if (jst.day === d && jst.hour === h && jst.minute === m) monthendRoomIds.push(roomId);
+    }
+  }
+
+  if (midRoomIds.length === 0 && monthendRoomIds.length === 0) {
+    return json({
+      ok: true,
+      skipped: true,
+      reason: "no_rooms_scheduled_now",
+      now_jst: `${toJstDateString(jst.year, jst.month, jst.day)} ${String(jst.hour).padStart(2, "0")}:${String(jst.minute).padStart(2, "0")}`
+    }, 200);
+  }
+
+  const dispatched = [];
+  if (midRoomIds.length > 0) {
+    dispatched.push(await dispatchReceiptReport(supabase, lineAccessToken, buildScheduleSliceForKind("mid_month", jst), midRoomIds, now));
+  }
+  if (monthendRoomIds.length > 0) {
+    dispatched.push(await dispatchReceiptReport(supabase, lineAccessToken, buildScheduleSliceForKind("month_end", jst), monthendRoomIds, now));
+  }
+  return json({
+    ok: true,
+    now_jst: `${toJstDateString(jst.year, jst.month, jst.day)} ${String(jst.hour).padStart(2, "0")}:${String(jst.minute).padStart(2, "0")}`,
+    dispatched
+  }, 200);
+});
+
+/** 指定種別・対象ルーム群へレポートを送信（重複防止＋ログ記録）。スケジュール判定とは分離。 */
+async function dispatchReceiptReport(supabase, lineAccessToken, schedule, targetRoomIds, now) {
+  const { data: existingRows, error: existingError } = await supabase.from("line_receipt_mid_reports").select("room_id").eq("report_month", schedule.reportMonth).eq("report_kind", schedule.reportKind).in("room_id", targetRoomIds);
+  if (existingError) {
+    return {
+      report_kind: schedule.reportKind,
+      report_month: schedule.reportMonth,
+      error: `Failed to load existing line_receipt_mid_reports: ${existingError.message}`
+    };
+  }
+  const existingSet = new Set((Array.isArray(existingRows) ? existingRows : []).map((row)=>String(row?.room_id ?? "").trim()).filter((roomId)=>roomId.length > 0));
+  const sentRoomIds = [];
+  const skippedRoomIds = [];
+  const errors = [];
+  for (const roomId of targetRoomIds){
+    if (existingSet.has(roomId)) {
+      skippedRoomIds.push(roomId);
+      continue;
+    }
+    const { aggregate, storePartitionKey } = await loadReceiptReportAggregateForRoom(supabase, roomId, schedule.periodStartDate, schedule.periodEndDate);
+    if (!aggregate || aggregate.receiptCount === 0) {
+      skippedRoomIds.push(roomId);
+      continue;
+    }
+    // 同時実行（複数スケジューラ）での二重送信を防ぐため、先に重複防止行を確保してから送信する
+    const { error: insertError } = await supabase.from("line_receipt_mid_reports").insert({
+      report_month: schedule.reportMonth,
+      report_kind: schedule.reportKind,
+      room_id: roomId,
+      period_start_jst: schedule.periodStartDate,
+      period_end_jst: schedule.periodEndDate,
+      trigger_type: schedule.triggerType,
+      trigger_line_message_id: null,
+      receipt_count: aggregate.receiptCount,
+      total_gross_sales_yen: aggregate.totalGrossSalesYen,
+      total_party_count: aggregate.totalPartyCount,
+      total_guest_count: aggregate.totalGuestCount,
+      avg_gross_sales_yen: aggregate.avgDailyGrossSalesYen == null ? aggregate.avgGrossSalesYen == null ? null : Math.round(aggregate.avgGrossSalesYen) : aggregate.avgDailyGrossSalesYen,
+      avg_party_count: aggregate.avgPartyCount,
+      avg_guest_count: aggregate.avgGuestCount,
+      sent_at: now.toISOString()
+    });
+    if (insertError) {
+      const code = String(insertError?.code ?? "");
+      if (code === "23505") {
+        skippedRoomIds.push(roomId);
+      } else {
+        errors.push(`${roomId}: failed to reserve report log (${insertError.message})`);
+      }
+      continue;
+    }
+    const reportMessages = await buildReceiptReportFlexMessages(supabase, aggregate, {
+      reportTitle: schedule.reportTitle,
+      periodStartDate: schedule.periodStartDate,
+      periodEndDate: schedule.periodEndDate,
+      storePartitionKey,
+      reportKind: schedule.reportKind
+    });
+    const sendResult = await sendLinePushMessages(roomId, reportMessages, lineAccessToken);
+    if (!sendResult.ok) {
+      // 送信失敗時は予約行を取り消し、次回起動で再送できるようにする
+      try {
+        await supabase.from("line_receipt_mid_reports").delete().eq("report_month", schedule.reportMonth).eq("report_kind", schedule.reportKind).eq("room_id", roomId);
+      } catch (_e) {}
+      errors.push(`${roomId}: ${sendResult.error}`);
+      continue;
+    }
+    sentRoomIds.push(roomId);
+  }
+  return {
+    report_kind: schedule.reportKind,
+    report_title: schedule.reportTitle,
+    report_month: schedule.reportMonth,
+    period: {
+      start: schedule.periodStartDate,
+      end: schedule.periodEndDate
+    },
+    source_room_count: targetRoomIds.length,
+    sent_room_count: sentRoomIds.length,
+    skipped_room_count: skippedRoomIds.length,
+    error_count: errors.length,
+    sent_room_ids: sentRoomIds,
+    skipped_room_ids: skippedRoomIds,
+    errors
+  };
+}
+/** One-off test push (no DB log). Guard: Edge secret RECEIPT_MIDREPORT_CRON_TEST_KEY via query `key` or header `X-Receipt-Midreport-Test-Key`. */ function parseReceiptReportTestRequest(req) {
+  const url = new URL(req.url);
+  const flag = (url.searchParams.get("test_receipt_report") ?? url.searchParams.get("test_receipt_midreport") ?? "").trim().toLowerCase();
+  if (flag !== "1" && flag !== "true" && flag !== "yes" && flag !== "on") {
+    return null;
+  }
+  const roomId = (url.searchParams.get("room_id") ?? "").trim();
+  if (!roomId) return null;
+  const kindRaw = (url.searchParams.get("report_kind") ?? "mid_month").trim().toLowerCase();
+  const reportKind = kindRaw === "month_end" ? "month_end" : "mid_month";
+  const now = new Date();
+  const jst = toJstDateParts(now);
+  let year = Number(url.searchParams.get("year"));
+  let month = Number(url.searchParams.get("month"));
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) year = jst.year;
+  if (!Number.isInteger(month) || month < 1 || month > 12) month = jst.month;
+  const keyFromQuery = (url.searchParams.get("key") ?? "").trim();
+  const keyFromHeader = (req.headers.get("x-receipt-midreport-test-key") ?? "").trim();
+  const storeKeyRaw = (url.searchParams.get("store_partition_key") ?? "").trim().toLowerCase();
+  const storePartitionKey = /^[a-z0-9]{2,120}$/.test(storeKeyRaw) ? storeKeyRaw : null;
+  return {
+    roomId,
+    reportKind,
+    year,
+    month,
+    storePartitionKey,
+    keyFromQuery,
+    keyFromHeader
+  };
+}
+async function handleReceiptReportTestSend(spec, deps) {
+  const testKey = (Deno.env.get("RECEIPT_MIDREPORT_CRON_TEST_KEY") ?? "").trim();
+  if (!testKey) {
+    return json({
+      ok: false,
+      error: "Test send is disabled. Set Edge secret RECEIPT_MIDREPORT_CRON_TEST_KEY."
+    }, 503);
+  }
+  const provided = spec.keyFromHeader || spec.keyFromQuery;
+  if (!provided || provided !== testKey) {
+    return json({
+      ok: false,
+      error: "Forbidden"
+    }, 403);
+  }
+  if (!deps.lineAccessToken) {
+    return json({
+      ok: false,
+      error: "LINE_CHANNEL_ACCESS_TOKEN is missing."
+    }, 500);
+  }
+  const slice = buildReceiptReportTestSchedule(spec.reportKind, spec.year, spec.month);
+  const supabase = createClient(deps.supabaseUrl, deps.serviceRoleKey);
+  const { aggregate, storePartitionKey } = await loadReceiptReportAggregateForRoom(supabase, spec.roomId, slice.periodStartDate, slice.periodEndDate, spec.storePartitionKey);
+  if (!storePartitionKey) {
+    return json({
+      ok: true,
+      skipped: true,
+      mode: "test_receipt_report",
+      reason: "store_not_resolved_for_room",
+      report_kind: slice.reportKind,
+      period: {
+        start: slice.periodStartDate,
+        end: slice.periodEndDate
+      },
+      room_id: spec.roomId
+    }, 200);
+  }
+  if (!aggregate || aggregate.receiptCount === 0) {
+    return json({
+      ok: true,
+      skipped: true,
+      mode: "test_receipt_report",
+      reason: "no_receipt_entries_in_period_for_store",
+      report_kind: slice.reportKind,
+      report_month: slice.reportMonth,
+      store_partition_key: storePartitionKey,
+      period: {
+        start: slice.periodStartDate,
+        end: slice.periodEndDate
+      },
+      room_id: spec.roomId
+    }, 200);
+  }
+  const reportMessages = await buildReceiptReportFlexMessages(supabase, aggregate, {
+    reportTitle: slice.reportTitle,
+    periodStartDate: slice.periodStartDate,
+    periodEndDate: slice.periodEndDate,
+    storePartitionKey,
+    reportKind: slice.reportKind
+  });
+  const sendResult = await sendLinePushMessages(spec.roomId, reportMessages, deps.lineAccessToken);
+  if (!sendResult.ok) {
+    return json({
+      ok: false,
+      error: sendResult.error,
+      mode: "test_receipt_report"
+    }, 502);
+  }
+  return json({
+    ok: true,
+    mode: "test_receipt_report",
+    note: "Preview send only. line_receipt_mid_reports was NOT updated.",
+    report_kind: slice.reportKind,
+    report_title: slice.reportTitle,
+    report_month: slice.reportMonth,
+    store_partition_key: storePartitionKey,
+    period: {
+      start: slice.periodStartDate,
+      end: slice.periodEndDate
+    },
+    room_id: spec.roomId,
+    receipt_count: aggregate.receiptCount,
+    total_gross_sales_yen: aggregate.totalGrossSalesYen
+  }, 200);
+}
+function buildReceiptReportTestSchedule(reportKind, year, month) {
+  const reportMonth = toJstDateString(year, month, 1);
+  const rangeStartIso = buildJstDateStartUtcIso(year, month, 1);
+  if (reportKind === "mid_month") {
+    return {
+      reportKind: "mid_month",
+      reportTitle: RECEIPT_MID_REPORT_TITLE,
+      reportMonth,
+      periodStartDate: reportMonth,
+      periodEndDate: toJstDateString(year, month, 15),
+      rangeStartIso,
+      rangeEndIso: buildJstDateStartUtcIso(year, month, 16)
+    };
+  }
+  const monthLastDay = getJstMonthLastDay(year, month);
+  const nextMonth = shiftJstYearMonth(year, month, 1);
+  return {
+    reportKind: "month_end",
+    reportTitle: RECEIPT_MONTH_END_REPORT_TITLE,
+    reportMonth,
+    periodStartDate: reportMonth,
+    periodEndDate: toJstDateString(year, month, monthLastDay),
+    rangeStartIso,
+    rangeEndIso: buildJstDateStartUtcIso(nextMonth.year, nextMonth.month, 1)
+  };
+}
+function json(payload, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+function toJstDateParts(base = new Date()) {
+  const jst = new Date(base.getTime() + JST_OFFSET_MS);
+  return {
+    year: jst.getUTCFullYear(),
+    month: jst.getUTCMonth() + 1,
+    day: jst.getUTCDate(),
+    hour: jst.getUTCHours(),
+    minute: jst.getUTCMinutes()
+  };
+}
+function toJstDateString(year, month, day) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function buildJstDateStartUtcIso(year, month, day) {
+  return new Date(Date.UTC(year, month - 1, day, -9, 0, 0, 0)).toISOString();
+}
+function shiftJstYearMonth(year, month, deltaMonths) {
+  const shifted = new Date(Date.UTC(year, month - 1 + deltaMonths, 1));
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1
+  };
+}
+function getJstMonthLastDay(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+/** 種別と現在JSTから、レポートの対象月・期間を決める（送信時刻の判定とは分離。期間は従来同等）。 */
+function buildScheduleSliceForKind(kind, jst) {
+  if (kind === "mid_month") {
+    // 中間: 当月1〜15日（送信日時はルームごとに可変。既定は16日10:00）
+    const reportMonth = toJstDateString(jst.year, jst.month, 1);
+    return {
+      reportKind: "mid_month",
+      reportTitle: RECEIPT_MID_REPORT_TITLE,
+      triggerType: "per_room_schedule",
+      reportMonth,
+      periodStartDate: reportMonth,
+      periodEndDate: toJstDateString(jst.year, jst.month, 15),
+      rangeStartIso: buildJstDateStartUtcIso(jst.year, jst.month, 1),
+      rangeEndIso: buildJstDateStartUtcIso(jst.year, jst.month, 16)
+    };
+  }
+  // 月末: 前月まるごと（送信日時はルームごとに可変。既定は翌月1日10:00）
+  const prev = shiftJstYearMonth(jst.year, jst.month, -1);
+  const reportMonth = toJstDateString(prev.year, prev.month, 1);
+  const monthLastDay = getJstMonthLastDay(prev.year, prev.month);
+  const nextMonth = shiftJstYearMonth(prev.year, prev.month, 1);
+  return {
+    reportKind: "month_end",
+    reportTitle: RECEIPT_MONTH_END_REPORT_TITLE,
+    triggerType: "per_room_schedule",
+    reportMonth,
+    periodStartDate: reportMonth,
+    periodEndDate: toJstDateString(prev.year, prev.month, monthLastDay),
+    rangeStartIso: buildJstDateStartUtcIso(prev.year, prev.month, 1),
+    rangeEndIso: buildJstDateStartUtcIso(nextMonth.year, nextMonth.month, 1)
+  };
+}
+async function sendLinePushMessages(to, messages, token) {
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      to,
+      messages: messages.slice(0, 5)
+    })
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    return {
+      ok: false,
+      error: `LINE push API error (${response.status}): ${err}`
+    };
+  }
+  return {
+    ok: true
+  };
+}
