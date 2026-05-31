@@ -211,6 +211,34 @@ async function insertRawWebhookEvent(
   return 'error'
 }
 
+/** 期間集計（GP/期間）レポート用の「売上登録しません」通知（リッチテキスト=Flex）を組み立てる。 */
+function buildReceiptNonSalesNoticeFlex(summaryText: string): Record<string, unknown> {
+  const detail = String(summaryText || '').trim()
+  const bodyContents: Record<string, unknown>[] = [
+    { type: 'text', text: '期間集計レポート', weight: 'bold', size: 'md', color: '#1a6fa8' },
+    { type: 'separator', margin: 'md' },
+    {
+      type: 'text',
+      text: 'このレシートは日々の売上レシートではないため、売上には登録していません。',
+      wrap: true,
+      size: 'sm',
+      color: '#333333',
+      margin: 'md',
+    },
+  ]
+  if (detail) {
+    bodyContents.push({ type: 'text', text: detail, wrap: true, size: 'xs', color: '#8a96a3', margin: 'sm' })
+  }
+  return {
+    type: 'flex',
+    altText: 'このレシートは日々の売上ではないため登録していません（期間集計レポート）',
+    contents: {
+      type: 'bubble',
+      body: { type: 'box', layout: 'vertical', spacing: 'none', contents: bodyContents },
+    },
+  }
+}
+
 async function processReceiptImageEvent(
   registry: StoreRegistryRow,
   event: LineEvent,
@@ -271,7 +299,18 @@ async function processReceiptImageEvent(
   // 「期間集計レポート」等のマーカーを入れることで判定する。
   const analyzedSummaryText = String(analyzed.analysis?.summary ?? '')
   if (/期間集計|日付範囲|GP（グループ）/.test(analyzedSummaryText)) {
-    return { saved: false, replied: false, reason: 'period_summary_skip' }
+    // 売上には登録しないが、「レシート関連」の通知として返信する。
+    // receiptReplyToken はレシート解析返信の経路＝AI返信完全無し(hard mute)でも送る
+    // （「レシートの解析結果を送信」がONのとき）。
+    if (receiptReplyToken) {
+      await replyLineFlex(
+        receiptReplyToken,
+        buildReceiptNonSalesNoticeFlex(analyzedSummaryText),
+        accessToken,
+        webhookReplyLog(registry, roomId, 'receipt_period_summary_notice'),
+      )
+    }
+    return { saved: false, replied: !!receiptReplyToken, reason: 'period_summary_skip' }
   }
 
   if (!analyzed.analysis?.receipt) {
