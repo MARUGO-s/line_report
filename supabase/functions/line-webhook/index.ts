@@ -299,18 +299,19 @@ async function processReceiptImageEvent(
   // 「期間集計レポート」等のマーカーを入れることで判定する。
   const analyzedSummaryText = String(analyzed.analysis?.summary ?? '')
   if (/期間集計|日付範囲|GP（グループ）|ＧＰ（グループ）|［期間］|\[期間\]/.test(analyzedSummaryText)) {
-    // 売上には登録しないが、「これは日々の売上ではないので登録していません」の通知は必ず返信する。
-    // 重要: この通知は rawReplyToken を使い、AI返信完全無し(hard mute)・「レシートの解析結果を送信」OFF
-    //       のいずれであっても無条件で送る（売上登録はしない）。
-    if (rawReplyToken) {
+    // 売上には登録しないが、「これは日々の売上ではないので登録していません」の通知を返信する。
+    // 重要: この通知は receiptReplyToken を使う。
+    //   - AI返信完全無し(hard mute)であっても送る（レシート解析返信はhard muteをバイパスする）。
+    //   - ただし「レシートの解析結果を送信」(image_analysis_reply_enabled) が OFF のときは送らない。
+    if (receiptReplyToken) {
       await replyLineFlex(
-        rawReplyToken,
+        receiptReplyToken,
         buildReceiptNonSalesNoticeFlex(analyzedSummaryText),
         accessToken,
         webhookReplyLog(registry, roomId, 'receipt_period_summary_notice'),
       )
     }
-    return { saved: false, replied: !!rawReplyToken, reason: 'period_summary_skip' }
+    return { saved: false, replied: !!receiptReplyToken, reason: 'period_summary_skip' }
   }
 
   if (!analyzed.analysis?.receipt) {
