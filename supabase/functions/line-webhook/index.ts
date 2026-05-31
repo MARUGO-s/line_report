@@ -666,6 +666,7 @@ Deno.serve(async (req) => {
     let suppressReceiptReply = false
     let suppressNonReceiptReply = false
     let allowCorrectionReply = false
+    let allowMediaSave = true
     if (eventRoomId) {
       const muteFlags = await loadRoomSearchFlagsCached(eventRoomId)
       roomHardMuted = !!muteFlags?.bot_reply_hard_mute_enabled
@@ -673,13 +674,17 @@ Deno.serve(async (req) => {
       suppressReceiptReply = muteFlags !== null ? !muteFlags.image_analysis_reply_enabled : false
       suppressNonReceiptReply = muteFlags !== null ? !muteFlags.non_receipt_image_reply_enabled : false
       allowCorrectionReply = muteFlags !== null ? !!muteFlags.receipt_correction_reply_enabled : false
+      // メディア保存（メディア閲覧）: OFF のルームは保存しない。null（DBエラー）時は既定で保存。
+      allowMediaSave = muteFlags !== null ? muteFlags.media_save_enabled !== false : true
     }
 
     // メディア閲覧用の保存（画像/動画/音声/ファイル）。1ルーム合計20MBまで、超過分は古い順に自動削除。
+    // ルームの「メディア保存」権限が OFF のときは保存しない。
     if (
       event.type === 'message'
       && eventRoomId
       && storeAccessToken
+      && allowMediaSave
       && ['image', 'video', 'audio', 'file'].includes(String(event.message?.type || ''))
     ) {
       try {

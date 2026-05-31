@@ -721,6 +721,7 @@ Deno.serve(async (req) => {
           image_analysis_reply_enabled: payload.image_analysis_reply_enabled,
           receipt_correction_reply_enabled: payload.receipt_correction_reply_enabled,
           non_receipt_image_reply_enabled: payload.non_receipt_image_reply_enabled,
+          media_save_enabled: payload.media_save_enabled,
           gmail_reservation_alert_enabled: payload.gmail_reservation_alert_enabled,
           receipt_midreport_enabled: payload.receipt_midreport_enabled,
           receipt_monthend_report_enabled: payload.receipt_monthend_report_enabled,
@@ -5606,6 +5607,7 @@ function buildRoomSettingsPayload(body: unknown): {
   gmail_reservation_alert_enabled: boolean
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
+  media_save_enabled: boolean
   receipt_report_store_partition_key: string | null
   room_sort_order: number | null
   delivery_hours: number[] | null
@@ -5740,6 +5742,12 @@ function buildRoomSettingsPayload(body: unknown): {
   }
   const receiptMonthendReportEnabled = receiptMonthendReportEnabledRaw !== false
 
+  const mediaSaveEnabledRaw = body.media_save_enabled
+  if (mediaSaveEnabledRaw != null && typeof mediaSaveEnabledRaw !== "boolean") {
+    throw { status: 400, message: "media_save_enabled must be boolean when provided." } satisfies AppError
+  }
+  const mediaSaveEnabled = mediaSaveEnabledRaw !== false
+
   let receiptReportStorePartitionKey: string | null = null
   if (body.receipt_report_store_partition_key != null) {
     const rawKey = typeof body.receipt_report_store_partition_key === "string"
@@ -5802,6 +5810,7 @@ function buildRoomSettingsPayload(body: unknown): {
     gmail_reservation_alert_enabled: gmailReservationAlertEnabled,
     receipt_midreport_enabled: receiptMidreportEnabled,
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,
+    media_save_enabled: mediaSaveEnabled,
     receipt_report_store_partition_key: receiptReportStorePartitionKey,
     room_sort_order: roomSortOrder,
     delivery_hours: deliveryHours,

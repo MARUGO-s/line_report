@@ -74,6 +74,7 @@ type RoomSearchFlags = {
   calendar_silent_auto_register_enabled: boolean
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
+  media_save_enabled: boolean
 }
 
 type LineBotEvent = {
@@ -320,7 +321,7 @@ export async function loadRoomSearchFlags(
   const { data, error } = await supabase
     .from('room_summary_settings')
     .select(
-      'bot_reply_hard_mute_enabled, image_analysis_reply_enabled, receipt_correction_reply_enabled, non_receipt_image_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled',
+      'bot_reply_hard_mute_enabled, image_analysis_reply_enabled, receipt_correction_reply_enabled, non_receipt_image_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled, media_save_enabled',
     )
     .eq('room_id', roomId)
     .maybeSingle()
@@ -342,6 +343,7 @@ export async function loadRoomSearchFlags(
       calendar_silent_auto_register_enabled: false,
       receipt_midreport_enabled: true,
       receipt_monthend_report_enabled: true,
+      media_save_enabled: true,
     }
   }
 
@@ -358,6 +360,7 @@ export async function loadRoomSearchFlags(
     calendar_silent_auto_register_enabled: row.calendar_silent_auto_register_enabled === true,
     receipt_midreport_enabled: row.receipt_midreport_enabled !== false,
     receipt_monthend_report_enabled: row.receipt_monthend_report_enabled !== false,
+    media_save_enabled: row.media_save_enabled !== false,
   }
 }
 
@@ -366,7 +369,7 @@ async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<R
   const { data, error } = await supabase
     .from('room_summary_settings')
     .select(
-      'image_analysis_reply_enabled, receipt_correction_reply_enabled, non_receipt_image_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled',
+      'image_analysis_reply_enabled, receipt_correction_reply_enabled, non_receipt_image_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled, media_save_enabled',
     )
 
   if (error) {
@@ -383,6 +386,7 @@ async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<R
       calendar_silent_auto_register_enabled: false,
       receipt_midreport_enabled: true,
       receipt_monthend_report_enabled: true,
+      media_save_enabled: true,
     }
   }
 
@@ -404,6 +408,7 @@ async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<R
     calendar_silent_auto_register_enabled: any('calendar_silent_auto_register_enabled'),
     receipt_midreport_enabled: anyReceiptOn('receipt_midreport_enabled'),
     receipt_monthend_report_enabled: anyReceiptOn('receipt_monthend_report_enabled'),
+    media_save_enabled: anyReceiptOn('media_save_enabled'),
   }
 }
 

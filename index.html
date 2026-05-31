@@ -5509,6 +5509,7 @@
           <label class="room-scope-option"><input id="roomConfigSendSummary" type="checkbox">ルーム要約配信（このルーム単体）</label>
           <label class="room-scope-option" title="全体の定期要約レポートをこのトークにも送ります。LINE_OVERALL_ROOM_ID のルームと同じ内容です。ルーム単体の要約とは同時にONにできません。"><input id="roomConfigReceiveOverallSummary" type="checkbox">全体要約レポートをこのルームに配信</label>
           <label class="room-scope-option" title="レシートではない普通の画像が送られたとき、「画像を確認しました…」等の解析結果を返信します。レシートの解析結果は「レシート関連」側で制御します。"><input id="roomConfigNonReceiptImageReplyEnabled" type="checkbox">画像解析結果を送信（レシート以外の画像に返信）</label>
+          <label class="room-scope-option" title="このルームから届いた画像・動画・音声・ファイルを「メディア閲覧」に保存します。OFFにすると保存しません。保存は1ルーム合計20MBまでで、超過すると古いものから自動削除されます。"><input id="roomConfigMediaSaveEnabled" type="checkbox">メディアを保存（画像/動画/ファイルをメディア閲覧へ）</label>
         </div>
       </div>
       <div class="modal-meta receipt-permission-only-hidden" style="margin-top:8px;">保存すると、この Webhook に連携済みの全ルームへ同じ設定が反映されます。未連携の場合は追加時のデフォルトとして記録されます。</div>
@@ -5874,6 +5875,7 @@
       roomConfigImageAnalysisReplyEnabled: document.getElementById('roomConfigImageAnalysisReplyEnabled'),
       roomConfigReceiptCorrectionReplyEnabled: document.getElementById('roomConfigReceiptCorrectionReplyEnabled'),
       roomConfigNonReceiptImageReplyEnabled: document.getElementById('roomConfigNonReceiptImageReplyEnabled'),
+      roomConfigMediaSaveEnabled: document.getElementById('roomConfigMediaSaveEnabled'),
       roomConfigGoogleCalendarAutoRegister: document.getElementById('roomConfigGoogleCalendarAutoRegister'),
       roomConfigCalendarRegistrationReply: document.getElementById('roomConfigCalendarRegistrationReply'),
       roomConfigCalendarLowConfidenceConfirmReply: document.getElementById('roomConfigCalendarLowConfidenceConfirmReply'),
@@ -7975,6 +7977,7 @@
         image_analysis_reply_enabled: !!(dom.roomConfigImageAnalysisReplyEnabled && dom.roomConfigImageAnalysisReplyEnabled.checked),
         receipt_correction_reply_enabled: !!(dom.roomConfigReceiptCorrectionReplyEnabled && dom.roomConfigReceiptCorrectionReplyEnabled.checked),
         non_receipt_image_reply_enabled: !!(dom.roomConfigNonReceiptImageReplyEnabled && dom.roomConfigNonReceiptImageReplyEnabled.checked),
+        media_save_enabled: !!(dom.roomConfigMediaSaveEnabled && dom.roomConfigMediaSaveEnabled.checked),
         receipt_midreport_enabled: !!(dom.roomConfigReceiptMidreportEnabled && dom.roomConfigReceiptMidreportEnabled.checked),
         receipt_monthend_report_enabled: !!(dom.roomConfigReceiptMonthendReportEnabled && dom.roomConfigReceiptMonthendReportEnabled.checked),
         receipt_report_store_partition_key: (activeWebhookConfigStoreKey && activeWebhookConfigStoreKey !== GLOBAL_CONFIG_SCOPE_KEY)
@@ -10467,6 +10470,7 @@
         image_analysis_reply_enabled: imageAnalysisReplyEnabledInput ? !!imageAnalysisReplyEnabledInput.checked : parseDatasetBoolean(tr.dataset.roomImageAnalysisReply, true),
         receipt_correction_reply_enabled: parseDatasetBoolean(tr.dataset.roomReceiptCorrectionReply, false),
         non_receipt_image_reply_enabled: parseDatasetBoolean(tr.dataset.roomNonReceiptImageReply, true),
+        media_save_enabled: parseDatasetBoolean(tr.dataset.roomMediaSave, true),
         calendar_ai_auto_create_enabled: gCalRow,
         calendar_silent_auto_register_enabled: gCalRow,
         calendar_low_confidence_confirm_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarLowConfConfirm, false),
@@ -10499,6 +10503,7 @@
       tr.dataset.roomImageAnalysisReply = String(!!config.image_analysis_reply_enabled);
       tr.dataset.roomReceiptCorrectionReply = String(!!config.receipt_correction_reply_enabled);
       tr.dataset.roomNonReceiptImageReply = String(config.non_receipt_image_reply_enabled !== false);
+      tr.dataset.roomMediaSave = String(config.media_save_enabled !== false);
       tr.dataset.roomCalendarAutoCreate = String(!!config.calendar_ai_auto_create_enabled);
       tr.dataset.roomSilentAutoRegister = String(!!config.calendar_silent_auto_register_enabled);
       tr.dataset.roomCalendarLowConfConfirm = String(!!config.calendar_low_confidence_confirm_reply_enabled);
@@ -10666,6 +10671,7 @@
         image_analysis_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.image_analysis_reply),
         receipt_correction_reply_enabled: false,
         non_receipt_image_reply_enabled: true,
+        media_save_enabled: true,
         calendar_ai_auto_create_enabled: gCal,
         calendar_silent_auto_register_enabled: gCal,
         calendar_low_confidence_confirm_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, false),
@@ -11461,6 +11467,7 @@
           image_analysis_reply_enabled: (setting && setting.image_analysis_reply_enabled) !== false,
           receipt_correction_reply_enabled: !!(setting && setting.receipt_correction_reply_enabled),
           non_receipt_image_reply_enabled: (setting && setting.non_receipt_image_reply_enabled) !== false,
+          media_save_enabled: (setting && setting.media_save_enabled) !== false,
           calendar_ai_auto_create_enabled: gCalMerged,
           calendar_silent_auto_register_enabled: gCalMerged,
           calendar_low_confidence_confirm_reply_enabled: !!(setting && setting.calendar_low_confidence_confirm_reply_enabled),
@@ -11489,6 +11496,7 @@
         tr.dataset.roomImageAnalysisReply = String(roomFeatureConfig.image_analysis_reply_enabled);
         tr.dataset.roomReceiptCorrectionReply = String(roomFeatureConfig.receipt_correction_reply_enabled);
         tr.dataset.roomNonReceiptImageReply = String(roomFeatureConfig.non_receipt_image_reply_enabled);
+        tr.dataset.roomMediaSave = String(roomFeatureConfig.media_save_enabled);
         tr.dataset.roomCalendarAutoCreate = String(gCalMerged);
         tr.dataset.roomSilentAutoRegister = String(gCalMerged);
         tr.dataset.roomCalendarLowConfConfirm = String(!!(setting && setting.calendar_low_confidence_confirm_reply_enabled));
@@ -11535,6 +11543,9 @@
       }
       if (dom.roomConfigNonReceiptImageReplyEnabled) {
         dom.roomConfigNonReceiptImageReplyEnabled.checked = config.non_receipt_image_reply_enabled !== false;
+      }
+      if (dom.roomConfigMediaSaveEnabled) {
+        dom.roomConfigMediaSaveEnabled.checked = config.media_save_enabled !== false;
       }
       if (dom.roomConfigReceiptMidreportEnabled) {
         dom.roomConfigReceiptMidreportEnabled.checked = config.receipt_midreport_enabled !== false;
@@ -12009,6 +12020,7 @@
           image_analysis_reply_enabled: webhookConfig.image_analysis_reply_enabled !== false,
           receipt_correction_reply_enabled: !!webhookConfig.receipt_correction_reply_enabled,
           non_receipt_image_reply_enabled: webhookConfig.non_receipt_image_reply_enabled !== false,
+          media_save_enabled: webhookConfig.media_save_enabled !== false,
           bot_reply_enabled: !!webhookConfig.bot_reply_enabled,
           calendar_ai_auto_create_enabled: !!webhookConfig.calendar_ai_auto_create_enabled,
           calendar_silent_auto_register_enabled: !!webhookConfig.calendar_silent_auto_register_enabled,
@@ -12268,6 +12280,7 @@
         image_analysis_reply_enabled: roomConfig.image_analysis_reply_enabled,
         receipt_correction_reply_enabled: !!roomConfig.receipt_correction_reply_enabled,
         non_receipt_image_reply_enabled: roomConfig.non_receipt_image_reply_enabled !== false,
+        media_save_enabled: roomConfig.media_save_enabled !== false,
         bot_reply_enabled: roomConfig.bot_reply_enabled,
         calendar_ai_auto_create_enabled: roomConfig.calendar_ai_auto_create_enabled,
         calendar_silent_auto_register_enabled: roomConfig.calendar_silent_auto_register_enabled,
@@ -12330,6 +12343,7 @@
         payload.image_analysis_reply_enabled = !!opts.overrideConfig.image_analysis_reply_enabled;
         payload.receipt_correction_reply_enabled = !!opts.overrideConfig.receipt_correction_reply_enabled;
         payload.non_receipt_image_reply_enabled = opts.overrideConfig.non_receipt_image_reply_enabled !== false;
+        payload.media_save_enabled = opts.overrideConfig.media_save_enabled !== false;
         payload.calendar_ai_auto_create_enabled = !!opts.overrideConfig.calendar_ai_auto_create_enabled;
         payload.calendar_silent_auto_register_enabled = !!opts.overrideConfig.calendar_silent_auto_register_enabled;
         payload.calendar_low_confidence_confirm_reply_enabled = !!opts.overrideConfig.calendar_low_confidence_confirm_reply_enabled;
