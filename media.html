@@ -983,6 +983,7 @@
     .ms-h1 { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: 0.01em; color: var(--text); }
     .ms-sub { font-size: 14px; color: var(--text-3); margin: 8px 0 0; }
     .ms-hidden-conn { display: none !important; }
+    .ms-navlink[hidden] { display: none !important; }
 
     /* ---------- コンポーネントをコンソール配色へ寄せる ---------- */
     .ms-inner > .card { margin-top: 22px; padding: 24px 26px; }
@@ -1064,6 +1065,7 @@
         <a class="ms-navlink" href="./message-search.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>会話検索<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
         <a class="ms-navlink" href="./reservation.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>予約表<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
         <a class="ms-navlink" href="./analytics.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg></span>売上分析<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" id="salesSheetNavLink" href="#" target="_blank" rel="noopener noreferrer" hidden aria-hidden="true"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg></span>売上シート<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
       </nav>
       <div class="ms-side-foot">
         <div class="ms-conn">
@@ -2972,6 +2974,19 @@
       });
     }
 
+    async function refreshSalesSheetNavLink() {
+      var el = document.getElementById('salesSheetNavLink');
+      if (!el) return;
+      var enabled = !!(window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.RECEIPT_SHEETS_PILOT_ENABLED === true);
+      if (!enabled || !getToken()) { el.hidden = true; el.setAttribute('aria-hidden', 'true'); return; }
+      try {
+        var r = await api('/receipts/sheets-pilot-link');
+        var url = r && r.configured && r.spreadsheet_url ? String(r.spreadsheet_url) : '';
+        if (url) { el.href = url; el.hidden = false; el.removeAttribute('aria-hidden'); }
+        else { el.hidden = true; el.setAttribute('aria-hidden', 'true'); }
+      } catch (_) { el.hidden = true; el.setAttribute('aria-hidden', 'true'); }
+    }
+
     (async function init() {
       if (window.LINE_REPORT_AUTH) {
         try {
@@ -2987,6 +3002,7 @@
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
       applyTheme(getTheme());
       updateAuthState();
+      refreshSalesSheetNavLink();
       updateMediaBulkDeleteButtonLabel();
       updateMediaViewTabs();
       updatePager();
