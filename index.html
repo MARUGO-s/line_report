@@ -7583,7 +7583,15 @@
       if (roomDraft.calendar_gmail_settings_override) {
         return resolveCalendarGmailSettingsForRoom(rid);
       }
-      return readCalendarGmailBulkForPermissionSave();
+      // 一括のカレンダー設定はルームへ反映するが、Gmail予約通知だけは保存で勝手にOFFにしない。
+      // 既にONのルームは維持する（予約通知の取りこぼし防止）。OFFにしたい場合は
+      // 「このルームだけ一括と違う設定にする」をONにして明示的に切る。
+      const bulk = Object.assign({}, readCalendarGmailBulkForPermissionSave());
+      const tr = findRoomTableRowById(rid);
+      if (tr && parseDatasetBoolean(tr.dataset.roomGmailAlertEnabled, false)) {
+        bulk.gmail_reservation_alert_enabled = true;
+      }
+      return bulk;
     }
 
     function pickCalendarGmailRawFields(config) {
@@ -13623,9 +13631,10 @@
         }
         await saveRoomConfigModal();
       } catch (e) {
-        if (overlayToken) hideSyncOverlay(overlayToken);
         alert(e.message || String(e));
       } finally {
+        // 成功/失敗どちらでも「保存中」オーバーレイを必ず閉じる（成功時に閉じず固まる不具合を修正）。
+        if (overlayToken) hideSyncOverlay(overlayToken);
         if (saveBtn) {
           saveBtn.disabled = false;
           saveBtn.textContent = prevLabel || '保存';
