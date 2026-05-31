@@ -2015,9 +2015,16 @@
         upsertRoom(row && row.room_id, row && row.room_name);
       }
 
-      const baseList = Array.from(nameByRoomId.entries()).map(function(entry) {
-        return { room_id: entry[0], room_name: entry[1] };
-      });
+      const baseList = Array.from(nameByRoomId.entries())
+        .filter(function(entry) {
+          // 店舗ルーム（グループ/複数人トーク = C.../R...）のみを対象にする。
+          // 1対1トーク（個人ユーザー = U...）はルームではないため選択肢から除外する。
+          const id = String(entry[0] || '').trim();
+          return id.startsWith('C') || id.startsWith('R');
+        })
+        .map(function(entry) {
+          return { room_id: entry[0], room_name: entry[1] };
+        });
       baseList.sort(function(a, b) {
         return String(a.room_name || '').localeCompare(String(b.room_name || ''), 'ja');
       });
