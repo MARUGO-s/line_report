@@ -2,6 +2,7 @@
 // 仕様: 1ルームあたり合計 20MB まで保存。超過したら古いものから自動削除（FIFO）。
 import { fetchLineMessageBinary } from './line_client.ts'
 import { fetchLineDisplayNameByUserId } from './line_display_names.ts'
+import * as jpeg from 'https://esm.sh/jpeg-js@0.4.4'
 
 /** 保存先ストレージバケット（private） */
 const MEDIA_LIBRARY_BUCKET = 'line-media'
@@ -9,6 +10,15 @@ const MEDIA_LIBRARY_BUCKET = 'line-media'
 export const ROOM_MEDIA_CAP_BYTES = 20 * 1024 * 1024
 /** 単体メディアの取得上限（= ルーム上限。これを超えると保存しない） */
 const MAX_SINGLE_MEDIA_BYTES = ROOM_MEDIA_CAP_BYTES
+
+/** メディア閲覧用の画像圧縮（バランス重視: 長辺1280px・JPEG画質75）。
+ *  ※ OCR/レシート解析には影響しない（解析は別ルートで元画像を取得しているため）。 */
+const COMPRESS_LONG_EDGE = 1280
+const COMPRESS_JPEG_QUALITY = 75
+/** これ未満は元々小さいので圧縮しない（誤差・劣化を避ける） */
+const COMPRESS_MIN_INPUT_BYTES = 80 * 1024
+/** これ超は安全のため圧縮しない（巨大画像のメモリ/CPU対策） */
+const COMPRESS_MAX_INPUT_BYTES = 8 * 1024 * 1024
 
 type SupabaseClientLike = {
   from: (table: string) => any
@@ -37,6 +47,52 @@ function extensionForContentType(contentType: string, mediaType: string): string
 
 function sanitizePathSegment(value: string): string {
   return String(value || '').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 120)
+}
+
+function isJpegContentType(contentType: string): boolean {
+  const c = String(contentType || '').toLowerCase()
+  return c.includes('jpeg') || c.includes('jpg')
+}
+
+/** RGBA をバイリニア補間で縮小する。 */
+function downscaleRgba(src: Uint8Array, sw: number, sh: number, dw: number, dh: number): Uint8Array {
+  const dst = new Uint8Array(dw * dh * 4)
+  for (let y = 0; y < dh; y++) {
+    const sy = (y + 0.5) * sh / dh - 0.5
+    const y0 = Math.max(0, Math.floor(sy)); const y1 = Math.min(sh - 1, y0 + 1); const fy = sy - y0
+    for (let x = 0; x < dw; x++) {
+      const sx = (x + 0.5) * sw / dw - 0.5
+      const x0 = Math.max(0, Math.floor(sx)); const x1 = Math.min(sw - 1, x0 + 1); const fx = sx - x0
+      const i00 = (y0 * sw + x0) * 4, i01 = (y0 * sw + x1) * 4, i10 = (y1 * sw + x0) * 4, i11 = (y1 * sw + x1) * 4
+      const di = (y * dw + x) * 4
+      for (let c = 0; c < 4; c++) {
+        const top = src[i00 + c] * (1 - fx) + src[i01 + c] * fx
+        const bot = src[i10 + c] * (1 - fx) + src[i11 + c] * fx
+        dst[di + c] = (top * (1 - fy) + bot * fy) | 0
+      }
+    }
+  }
+  return dst
+}
+
+/** 画像(JPEG)を「メディア閲覧」用に縮小＋再圧縮。失敗時は null（呼び出し側で元データを保存）。
+ *  純JS実装(jpeg-js)のためWASM不要でEdgeバンドルに安全。OCRは別取得の元画像を使うため無関係。 */
+function recompressJpegForLibrary(input: Uint8Array): Uint8Array | null {
+  try {
+    const dec = jpeg.decode(input, { useTArray: true, formatAsRGBA: true })
+    if (!dec || !dec.width || !dec.height || !dec.data) return null
+    const longEdge = Math.max(dec.width, dec.height)
+    const scale = longEdge > COMPRESS_LONG_EDGE ? COMPRESS_LONG_EDGE / longEdge : 1
+    const dw = Math.max(1, Math.round(dec.width * scale))
+    const dh = Math.max(1, Math.round(dec.height * scale))
+    const data = scale < 1
+      ? downscaleRgba(dec.data as Uint8Array, dec.width, dec.height, dw, dh)
+      : (dec.data as Uint8Array)
+    const enc = jpeg.encode({ data, width: dw, height: dh }, COMPRESS_JPEG_QUALITY)
+    return enc && enc.data ? new Uint8Array(enc.data) : null
+  } catch (_e) {
+    return null
+  }
 }
 
 /**
@@ -78,15 +134,30 @@ export async function saveRoomMediaToLibrary(
   // LINE から本体を取得（20MB上限）
   const content = await fetchLineMessageBinary(lineMessageId, accessToken, MAX_SINGLE_MEDIA_BYTES)
   if (!content.ok) return { saved: false, reason: content.error }
-  const bytes = content.bytes
-  const size = bytes.byteLength
+  let bytes = content.bytes
+  let size = bytes.byteLength
   if (size <= 0) return { saved: false, reason: 'empty_content' }
   if (size > ROOM_MEDIA_CAP_BYTES) return { saved: false, reason: 'exceeds_room_cap' }
 
-  const ext = extensionForContentType(content.contentType, mediaType)
+  // 画像は「メディア閲覧」用に縮小＋再圧縮して保存容量を抑える（バランス重視: 長辺1280px・JPEG画質75）。
+  // ・OCR/レシート解析には影響しない（解析は別ルートで元画像を取得しているため）。
+  // ・JPEG のみ対象。再圧縮で逆に大きくなる/失敗した場合は元データのまま保存する（安全側）。
+  let contentType = String(content.contentType || '').trim()
+  if (
+    mediaType === 'image' && isJpegContentType(contentType) &&
+    size >= COMPRESS_MIN_INPUT_BYTES && size <= COMPRESS_MAX_INPUT_BYTES
+  ) {
+    const recompressed = recompressJpegForLibrary(bytes)
+    if (recompressed && recompressed.byteLength > 0 && recompressed.byteLength < size) {
+      bytes = recompressed
+      size = recompressed.byteLength
+      contentType = 'image/jpeg'
+    }
+  }
+
+  const ext = extensionForContentType(contentType, mediaType)
   const storagePath = `${sanitizePathSegment(roomId)}/${sanitizePathSegment(lineMessageId)}.${ext}`
-  const mime = String(content.contentType || '').trim()
-    || (mediaType === 'image' ? 'image/jpeg' : 'application/octet-stream')
+  const mime = contentType || (mediaType === 'image' ? 'image/jpeg' : 'application/octet-stream')
 
   const uploaded = await supabase.storage.from(MEDIA_LIBRARY_BUCKET).upload(storagePath, bytes, {
     contentType: mime,
