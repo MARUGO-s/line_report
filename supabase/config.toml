@@ -23,3 +23,9 @@ verify_jwt = false
 
 [functions.receipt-sheets-sync-cron]
 verify_jwt = false
+
+# receipt-midreport-cron は pg_cron（毎分）と admin-api（テスト送信）から呼ばれる内部関数。
+# 新形式キー（sb_secret_…）は JWT ではないためゲートウェイの verify_jwt が 401 を返す。
+# 認可は関数側で実施（テスト送信は X-Receipt-Midreport-Test-Key、定期実行は重複防止で冪等）するため false にする。
+[functions.receipt-midreport-cron]
+verify_jwt = false
