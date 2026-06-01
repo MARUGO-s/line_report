@@ -8590,6 +8590,18 @@
       return label;
     }
 
+    function appendSkippedRoomsNoticeLines(lines, skippedLabels) {
+      if (!Array.isArray(skippedLabels) || skippedLabels.length === 0) return;
+      lines.push('ルーム個別設定のためスキップ: ' + skippedLabels.length + ' 件');
+      const MAX_LISTED = 20;
+      skippedLabels.slice(0, MAX_LISTED).forEach(function(label) {
+        lines.push('・' + (String(label || '').trim() || '(名称未取得)'));
+      });
+      if (skippedLabels.length > MAX_LISTED) {
+        lines.push('（ほか ' + (skippedLabels.length - MAX_LISTED) + ' 件）');
+      }
+    }
+
     function buildScheduleSavedNoticeLine(scheduleRoomId) {
       if (!scheduleRoomId) return '';
       return 'レシート送信時刻は「' + getRoomDisplayNameForNotice(scheduleRoomId) + '」に保存しました。';
@@ -12081,6 +12093,7 @@
       const allRows = Array.from(dom.roomTableBody.querySelectorAll('tr'));
       let updated = 0;
       let skipped = 0;
+      const skippedRoomLabels = [];
       const stores = LINE_REPORT_PAGES.listStores(
         (currentState && currentState.receipt_store_options) || [],
       );
@@ -12097,6 +12110,7 @@
         if (!roomId) continue;
         if (getRoomConfigPriority(roomId) >= CONFIG_PRIORITY.ROOM) {
           skipped += 1;
+          skippedRoomLabels.push(getRoomLabelFromRow(tr) || roomId);
           continue;
         }
         const rowStoreKey = getStoreKeyFromRoomRow(tr);
@@ -12124,9 +12138,7 @@
         const scheduleLine = buildScheduleSavedNoticeLine(scheduleRoomId);
         if (scheduleLine) globalLines.push(scheduleLine);
       }
-      if (skipped > 0) {
-        globalLines.push('ルーム個別のためスキップ: ' + skipped + ' 件');
-      }
+      appendSkippedRoomsNoticeLines(globalLines, skippedRoomLabels);
       closeRoomConfigModal();
       showAppNotice({
         title: '全体権限を保存しました',
@@ -12205,10 +12217,12 @@
       }
       const linkedRows = findRoomRowsByStoreKey(storeKey);
       let skipped = 0;
+      const skippedRoomLabels = [];
       for (let i = 0; i < linkedRows.length; i++) {
         const roomId = String(linkedRows[i].dataset.roomId || '').trim();
         if (getRoomConfigPriority(roomId) >= CONFIG_PRIORITY.ROOM) {
           skipped += 1;
+          skippedRoomLabels.push(getRoomLabelFromRow(linkedRows[i]) || roomId);
           continue;
         }
         const roomConfig = Object.assign({}, nextConfig, built.permissionMode
@@ -12230,7 +12244,7 @@
       }
       const scheduleLine = buildScheduleSavedNoticeLine(scheduleRoomId);
       if (scheduleLine) noticeLines.push(scheduleLine);
-      if (skipped > 0) noticeLines.push('ルーム個別のためスキップ: ' + skipped + ' 件');
+      appendSkippedRoomsNoticeLines(noticeLines, skippedRoomLabels);
       closeRoomConfigModal();
       showAppNotice({
         title: 'Webhook設定を保存しました',
