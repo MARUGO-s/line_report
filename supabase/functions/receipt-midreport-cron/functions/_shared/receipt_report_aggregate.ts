@@ -203,54 +203,45 @@ function normalizeConfiguredStorePartitionKey(value) {
   }
   return bestKey;
 }
-function buildJstMonthCreatedAtRange(month) {
-  const matched = month.match(/^(\d{4})-(\d{2})$/);
-  if (!matched) return null;
-  const year = Number(matched[1]);
-  const monthNumber = Number(matched[2]);
-  if (!Number.isInteger(year) || !Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12) {
+/** store_webhook_tables（正本レジストリ）から store_partition_key → receipt_table を取得。
+ *  キーは小文字化して引けるようにする（line_receipt__marugoD のような大文字混じりも、レジストリ側の正確なテーブル名で解決する）。 */ async function loadStoreReceiptTableMap(supabase) {
+  const { data, error } = await supabase.from("store_webhook_tables").select("store_partition_key, receipt_table");
+  if (error) {
+    console.error("loadStoreReceiptTableMap failed:", error.message);
     return null;
   }
-  const startUtc = Date.UTC(year, monthNumber - 1, 1, -9, 0, 0);
-  const endUtc = Date.UTC(year, monthNumber, 1, -9, 0, 0);
-  return {
-    startIso: new Date(startUtc).toISOString(),
-    endIso: new Date(endUtc).toISOString()
-  };
-}
-function rowReceiptDateInPeriod(row, periodStartDate, periodEndDate) {
-  const receiptDate = receiptDateIsoFromValue(row.receipt_date);
-  if (!receiptDate) return false;
-  return receiptDate >= periodStartDate && receiptDate <= periodEndDate;
-}
-/** 売上分析 `/receipts/sales` と同系統の取り込み窓（created_at）＋レシート日付で期間内を数える */ async function loadReceiptRowsAnalyticsAligned(supabase, storePartitionKey, periodStartDate, periodEndDate) {
-  const key = String(storePartitionKey ?? "").trim().toLowerCase();
-  const month = periodStartDate.slice(0, 7);
-  const createdRange = buildJstMonthCreatedAtRange(month);
-  if (!createdRange) return [];
-  const { data, error } = await supabase.from("line_receipt_entries").select("gross_sales_yen, party_count, guest_count, receipt_date, created_at").eq("store_partition_key", key).gte("created_at", createdRange.startIso).lt("created_at", createdRange.endIso).limit(20000);
-  if (error) {
-    console.error(`loadReceiptRowsAnalyticsAligned failed (store=${key}, month=${month}):`, error.message);
-    return [];
+  const map = new Map();
+  for (const row of (Array.isArray(data) ? data : [])){
+    const key = String(row.store_partition_key ?? "").trim();
+    const table = String(row.receipt_table ?? "").trim();
+    if (key && table) map.set(key.toLowerCase(), table);
   }
-  const rows = Array.isArray(data) ? data : [];
-  return rows.filter((row)=>rowReceiptDateInPeriod(row, periodStartDate, periodEndDate));
+  return map;
 }
-/** 店舗 × レシート日付（inclusive）で集計。売上分析と揃えるため analytics 互換取得を優先する。 */ export async function loadReceiptReportAggregateForStoreByReceiptDate(supabase, storePartitionKey, periodStartDate, periodEndDate) {
+/** 正本の店舗別テーブル（line_receipt__<店舗>）をレシート日付(inclusive)で取得。エラー時は null（呼び出し側でフォールバック）。 */ async function loadReceiptRowsFromStoreTable(supabase, receiptTable, periodStartDate, periodEndDate) {
+  const { data, error } = await supabase.from(receiptTable).select("gross_sales_yen, party_count, guest_count, receipt_date").gte("receipt_date", periodStartDate).lte("receipt_date", periodEndDate).limit(20000);
+  if (error) {
+    console.error(`loadReceiptRowsFromStoreTable failed (${receiptTable}, ${periodStartDate}..${periodEndDate}):`, error.message);
+    return null;
+  }
+  return Array.isArray(data) ? data : [];
+}
+/** 店舗 × レシート日付（inclusive）で集計。
+ *  集計ソースは正本＝店舗別テーブル（store_webhook_tables.receipt_table = line_receipt__<店舗>）のみ。売上分析と完全に同一ソース。
+ *  レジストリ／店舗／テーブルが解決できない場合は null を返し、呼び出し側で「スキップ（理由表示）」させる。
+ *  ※ 陳腐化し得る集約表 line_receipt_entries は参照しない（古い数値での誤集計を構造的に防ぐ。間違うより出さない）。 */ export async function loadReceiptReportAggregateForStoreByReceiptDate(supabase, storePartitionKey, periodStartDate, periodEndDate) {
   const key = String(storePartitionKey ?? "").trim().toLowerCase();
   if (!key || key === RECEIPT_STORE_PARTITION_UNKNOWN) return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStartDate) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEndDate)) {
     return null;
   }
-  let rows = await loadReceiptRowsAnalyticsAligned(supabase, key, periodStartDate, periodEndDate);
-  if (rows.length === 0) {
-    const { data, error } = await supabase.from("line_receipt_entries").select("gross_sales_yen, party_count, guest_count, receipt_date").eq("store_partition_key", key).gte("receipt_date", periodStartDate).lte("receipt_date", periodEndDate).limit(20000);
-    if (error) {
-      console.error(`loadReceiptReportAggregateForStoreByReceiptDate failed (store=${key}, ${periodStartDate}..${periodEndDate}):`, error.message);
-      return null;
-    }
-    rows = Array.isArray(data) ? data : [];
-  }
+  // 正本（店舗別テーブル）のみを参照する。レジストリ/テーブルが引けなければ null（=スキップ）にして、古い表は一切読まない。
+  const tableMap = await loadStoreReceiptTableMap(supabase);
+  if (!tableMap) return null;
+  const receiptTable = tableMap.get(key);
+  if (!receiptTable) return null;
+  const rows = await loadReceiptRowsFromStoreTable(supabase, receiptTable, periodStartDate, periodEndDate);
+  if (rows === null) return null;
   return await buildReceiptReportAggregateWithDailyOverrides(supabase, key, periodStartDate, periodEndDate, rows);
 }
 export async function loadReceiptReportAggregateForRoom(supabase, roomId, periodStartDate, periodEndDate, storePartitionKeyOverride) {
