@@ -48,6 +48,7 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co https://jhpmzqxqvapdkyvvhyra.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
   <meta name="theme-color" content="#0b2035">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="LINE売上">
   <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
@@ -5537,6 +5538,11 @@
       <div class="modal-meta receipt-permission-only-hidden" style="margin-top:8px;">保存すると、この Webhook に連携済みの全ルームへ同じ設定が反映されます。未連携の場合は追加時のデフォルトとして記録されます。</div>
       <div class="modal-meta receipt-permission-only-hidden" style="margin-top:8px;">※資料ライブラリの閲覧権限は資料ごとに「メディア閲覧」画面で設定します。</div>
       <div class="modal-meta" style="margin-top:10px;">売上レポートの<strong>テスト送信</strong>（LINEに1通・送信ログは残しません）: Supabase の <code>admin-api</code> と <code>receipt-midreport-cron</code> に同じシークレット <code>RECEIPT_MIDREPORT_CRON_TEST_KEY</code> を設定してください。</div>
+      <div class="modal-actions" style="margin-top:8px; flex-wrap:wrap; gap:8px; align-items:center;">
+        <label for="testReceiptReportMonth" class="modal-meta" style="margin:0;">対象月</label>
+        <input id="testReceiptReportMonth" type="month" class="input" style="width:auto; min-width:150px;" aria-label="テスト送信の対象月">
+        <span class="modal-meta" style="margin:0;">過去の月を選ぶとその月で集計します（中間=1〜15日 / 月末=1日〜最終日）。空欄なら当月。</span>
+      </div>
       <div class="modal-actions" style="margin-top:8px; flex-wrap:wrap; gap:8px;">
         <button id="testReceiptMidreportBtn" type="button" class="button ghost">中間レポートをテスト送信（LINE）</button>
         <button id="testReceiptMonthendBtn" type="button" class="button ghost">月末レポートをテスト送信（LINE）</button>
@@ -5948,6 +5954,7 @@
       saveRoomConfigBtn: document.getElementById('saveRoomConfigBtn'),
       testReceiptMidreportBtn: document.getElementById('testReceiptMidreportBtn'),
       testReceiptMonthendBtn: document.getElementById('testReceiptMonthendBtn'),
+      testReceiptReportMonth: document.getElementById('testReceiptReportMonth'),
       roomConfigEffectModal: document.getElementById('roomConfigEffectModal'),
       roomConfigEffectModalMeta: document.getElementById('roomConfigEffectModalMeta'),
       roomConfigEffectPreview: document.getElementById('roomConfigEffectPreview'),
@@ -11991,9 +11998,27 @@
         alert('ルームIDが取得できません。');
         return;
       }
-      const label = reportKind === 'month_end' ? '月末レポート（当月1日〜最終日）' : '中間レポート（当月1〜15日）';
+      let targetYear;
+      let targetMonth;
+      const monthInputRaw = dom.testReceiptReportMonth
+        ? String(dom.testReceiptReportMonth.value || '').trim()
+        : '';
+      const monthMatch = /^(\d{4})-(\d{2})$/.exec(monthInputRaw);
+      if (monthMatch) {
+        const y = Number(monthMatch[1]);
+        const m = Number(monthMatch[2]);
+        if (y >= 2000 && y <= 2100 && m >= 1 && m <= 12) {
+          targetYear = y;
+          targetMonth = m;
+        }
+      }
+      const monthLabel = (targetYear && targetMonth) ? (targetYear + '年' + targetMonth + '月') : '当月';
+      const periodHint = reportKind === 'month_end'
+        ? (monthLabel + '1日〜最終日')
+        : (monthLabel + '1〜15日');
+      const label = reportKind === 'month_end' ? '月末レポート' : '中間レポート';
       if (!window.confirm(
-        label + 'をこのルームにテスト送信します。\n\n' +
+        label + '（' + periodHint + '）をこのルームにテスト送信します。\n\n' +
           '・LINE に Flex メッセージが1通届きます\n' +
           '・line_receipt_mid_reports には記録されません（本番の重複判定に影響しません）\n' +
           '・Supabase に RECEIPT_MIDREPORT_CRON_TEST_KEY が必要です\n\n' +
@@ -12012,6 +12037,8 @@
             room_id: roomId,
             report_kind: reportKind,
             store_partition_key: storeKey || undefined,
+            year: targetYear,
+            month: targetMonth,
           }),
         });
         if (res && res.ok === true && res.skipped) {
@@ -13615,6 +13642,14 @@
       });
     }
 
+    if (dom.testReceiptReportMonth && !dom.testReceiptReportMonth.value) {
+      // 既定値は「直近の完了月（前月）」。当月はまだデータが少ないことが多いため、
+      // テストでデータが出やすい前月を初期表示する（必要なら任意の月へ変更可）。
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - 1);
+      dom.testReceiptReportMonth.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
     if (dom.testReceiptMidreportBtn) {
       dom.testReceiptMidreportBtn.addEventListener('click', function() {
         testSendReceiptReportToLine('mid_month');
