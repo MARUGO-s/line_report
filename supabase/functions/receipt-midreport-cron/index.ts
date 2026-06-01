@@ -93,6 +93,17 @@ Deno.serve(async (req)=>{
 });
 
 /** 指定種別・対象ルーム群へレポートを送信（重複防止＋ログ記録）。スケジュール判定とは分離。 */
+/** 店舗別のLINEチャネルトークンを解決（無ければ全体トークンへフォールバック）。
+ *  _shared/line_client.ts の resolveChannelAccessToken と同じ env 命名規則（LINE_CHANNEL_ACCESS_TOKEN__<店舗キー大文字>）。
+ *  ※ 店舗ごとにLINE公式アカウント（チャネル）が異なるため、全体トークン固定だと既定トークンの店舗以外は push が失敗する。 */ function resolveStoreLineToken(storeKey, fallbackToken) {
+  const key = String(storeKey ?? "").trim();
+  if (key) {
+    const envKey = `LINE_CHANNEL_ACCESS_TOKEN__${key.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`;
+    const perStore = String(Deno.env.get(envKey) ?? "").trim();
+    if (perStore) return perStore;
+  }
+  return fallbackToken;
+}
 async function dispatchReceiptReport(supabase, lineAccessToken, schedule, targetRoomIds, now) {
   const { data: existingRows, error: existingError } = await supabase.from("line_receipt_mid_reports").select("room_id").eq("report_month", schedule.reportMonth).eq("report_kind", schedule.reportKind).in("room_id", targetRoomIds);
   if (existingError) {
@@ -150,7 +161,7 @@ async function dispatchReceiptReport(supabase, lineAccessToken, schedule, target
       storePartitionKey,
       reportKind: schedule.reportKind
     });
-    const sendResult = await sendLinePushMessages(roomId, reportMessages, lineAccessToken);
+    const sendResult = await sendLinePushMessages(roomId, reportMessages, resolveStoreLineToken(storePartitionKey, lineAccessToken));
     if (!sendResult.ok) {
       // 送信失敗時は予約行を取り消し、次回起動で再送できるようにする
       try {
@@ -269,7 +280,7 @@ async function handleReceiptReportTestSend(spec, deps) {
     storePartitionKey,
     reportKind: slice.reportKind
   });
-  const sendResult = await sendLinePushMessages(spec.roomId, reportMessages, deps.lineAccessToken);
+  const sendResult = await sendLinePushMessages(spec.roomId, reportMessages, resolveStoreLineToken(storePartitionKey, deps.lineAccessToken));
   if (!sendResult.ok) {
     return json({
       ok: false,
