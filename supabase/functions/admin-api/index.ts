@@ -758,6 +758,9 @@ Deno.serve(async (req) => {
           non_receipt_image_reply_enabled: payload.non_receipt_image_reply_enabled,
           media_save_enabled: payload.media_save_enabled,
           gmail_reservation_alert_enabled: payload.gmail_reservation_alert_enabled,
+          tomorrow_reservation_alert_enabled: payload.tomorrow_reservation_alert_enabled,
+          tomorrow_reservation_alert_hour: payload.tomorrow_reservation_alert_hour,
+          tomorrow_reservation_alert_minute: payload.tomorrow_reservation_alert_minute,
           receipt_midreport_enabled: payload.receipt_midreport_enabled,
           receipt_monthend_report_enabled: payload.receipt_monthend_report_enabled,
           receipt_schedule_override: payload.receipt_schedule_override,
@@ -5348,6 +5351,9 @@ function buildRoomSettingsPayload(body: unknown): {
   receipt_correction_reply_enabled: boolean
   non_receipt_image_reply_enabled: boolean
   gmail_reservation_alert_enabled: boolean
+  tomorrow_reservation_alert_enabled: boolean
+  tomorrow_reservation_alert_hour: number | null
+  tomorrow_reservation_alert_minute: number | null
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
   media_save_enabled: boolean
@@ -5480,6 +5486,12 @@ function buildRoomSettingsPayload(body: unknown): {
   }
   const gmailReservationAlertEnabled = gmailReservationAlertEnabledRaw === true
 
+  const tomorrowReservationAlertEnabledRaw = body.tomorrow_reservation_alert_enabled
+  if (tomorrowReservationAlertEnabledRaw != null && typeof tomorrowReservationAlertEnabledRaw !== "boolean") {
+    throw { status: 400, message: "tomorrow_reservation_alert_enabled must be boolean when provided." } satisfies AppError
+  }
+  const tomorrowReservationAlertEnabled = tomorrowReservationAlertEnabledRaw === true
+
   const receiptMidreportEnabledRaw = body.receipt_midreport_enabled
   if (receiptMidreportEnabledRaw != null && typeof receiptMidreportEnabledRaw !== "boolean") {
     throw { status: 400, message: "receipt_midreport_enabled must be boolean when provided." } satisfies AppError
@@ -5518,6 +5530,8 @@ function buildRoomSettingsPayload(body: unknown): {
   const receiptMonthendDay = parseScheduleInt(body.receipt_monthend_day, "receipt_monthend_day", 1, 28)
   const receiptMonthendHour = parseScheduleInt(body.receipt_monthend_hour, "receipt_monthend_hour", 0, 23)
   const receiptMonthendMinute = parseScheduleInt(body.receipt_monthend_minute, "receipt_monthend_minute", 0, 59)
+  const tomorrowReservationAlertHour = parseScheduleInt(body.tomorrow_reservation_alert_hour, "tomorrow_reservation_alert_hour", 0, 23)
+  const tomorrowReservationAlertMinute = parseScheduleInt(body.tomorrow_reservation_alert_minute, "tomorrow_reservation_alert_minute", 0, 59)
 
   let receiptReportStorePartitionKey: string | null = null
   if (body.receipt_report_store_partition_key != null) {
@@ -5579,6 +5593,9 @@ function buildRoomSettingsPayload(body: unknown): {
     receipt_correction_reply_enabled: receiptCorrectionReplyEnabled,
     non_receipt_image_reply_enabled: nonReceiptImageReplyEnabled,
     gmail_reservation_alert_enabled: gmailReservationAlertEnabled,
+    tomorrow_reservation_alert_enabled: tomorrowReservationAlertEnabled,
+    tomorrow_reservation_alert_hour: tomorrowReservationAlertHour,
+    tomorrow_reservation_alert_minute: tomorrowReservationAlertMinute,
     receipt_midreport_enabled: receiptMidreportEnabled,
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,
     media_save_enabled: mediaSaveEnabled,

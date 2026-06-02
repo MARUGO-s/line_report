@@ -5488,6 +5488,14 @@
             <label class="room-scope-option" title="無返信自動登録がONで、AIが高確度と判断してカレンダーに書き込んだあと、登録内容（日時・件名など）をこのトークに返信します。AI会話返信もONが必要です。低確度の確認返信とは別に設定できます。"><input id="roomConfigCalendarRegistrationReply" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
             <label class="room-scope-option" title="無返信自動登録がONのときのみ有効です。AIの信頼度が「要確認」レンジのとき、LINEで「登録しますか？」と返信し、はい／いいえで確定します。OFFのときは無言のまま件名に（仮）を付けて登録します（AI会話返信もONが必要）。"><input id="roomConfigCalendarLowConfidenceConfirmReply" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
             <label class="room-scope-option"><input id="roomConfigGmailAlert" type="checkbox">Gmail予約通知</label>
+            <label class="room-scope-option" title="毎日決まった時刻に「明日の予約状況」を1通のリッチメッセージでこのトークへ送ります。Gmail予約通知（予約が入るたび通知）とは別の権限です。対象店舗の予約のみまとめて送信し、予約が無い日は「明日のご予約はありません」を送ります。"><input id="roomConfigTomorrowReservationAlert" type="checkbox">明日の予約状況配信</label>
+            <div id="roomConfigTomorrowReservationAlertScheduleBulk" class="receipt-schedule-fields" hidden>
+              <div class="receipt-schedule-row">
+                <span>配信時刻</span>
+                <input id="roomConfigTomorrowReservationAlertTime" class="input schedule-time" type="time" aria-label="明日の予約状況配信の時刻">
+                <span class="modal-meta">毎日この時刻に送信</span>
+              </div>
+            </div>
           </div>
         </div>
         <div id="roomConfigCalendarGmailWrap" class="receipt-schedule-panel store-permission-panel store-permission-option room-config-calendar-per-room-panel">
@@ -5520,6 +5528,14 @@
           <label class="room-scope-option store-permission-option" title="無返信自動登録がONのあと、登録内容をLINEで返信します。"><input id="roomConfigCalendarRegistrationReplyPerm" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
           <label class="room-scope-option store-permission-option" title="低確度のときは確認の返信（はい／いいえ）を送ります。"><input id="roomConfigCalendarLowConfidenceConfirmReplyPerm" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
           <label class="room-scope-option store-permission-option"><input id="roomConfigGmailAlertPerm" type="checkbox">Gmail予約通知</label>
+          <label class="room-scope-option store-permission-option" title="毎日決まった時刻に「明日の予約状況」を1通のリッチメッセージでこのトークへ送ります。対象店舗の予約のみまとめて送信し、予約が無い日は「明日のご予約はありません」を送ります。"><input id="roomConfigTomorrowReservationAlertPerm" type="checkbox">明日の予約状況配信</label>
+          <div id="roomConfigTomorrowReservationAlertScheduleFields" class="receipt-schedule-fields" hidden>
+            <div class="receipt-schedule-row">
+              <span>配信時刻</span>
+              <input id="roomConfigTomorrowReservationAlertTimePerm" class="input schedule-time" type="time" aria-label="明日の予約状況配信の時刻（ルーム個別）">
+              <span class="modal-meta">毎日この時刻に送信</span>
+            </div>
+          </div>
         </div>
       </div>
       </div>
@@ -5632,6 +5648,7 @@
         <label class="room-scope-option" title="無返信自動登録がONで高確度登録のあと、登録内容をLINEで返信します。AI会話返信もONが必要です。"><input id="newRoomCalendarRegistrationReply" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
         <label class="room-scope-option" title="無返信自動登録がONのときのみ有効です。"><input id="newRoomCalendarLowConfidenceConfirmReply" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
         <label class="room-scope-option"><input id="newRoomGmailAlertEnabled" type="checkbox">Gmail予約通知</label>
+        <label class="room-scope-option" title="毎日決まった時刻に「明日の予約状況」を1通のリッチメッセージで送ります（時刻は一括設定を使用）。Gmail予約通知とは別の権限です。"><input id="newRoomTomorrowReservationAlertEnabled" type="checkbox">明日の予約状況配信</label>
         <div class="controls" style="margin-top:6px;">
           <select id="newRoomSummaryMode" class="select" aria-label="ルーム最終配信の集計方式">
             <option value="">最終回: 全体設定を継承</option>
@@ -5748,6 +5765,10 @@
     const NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_DAY_KEY = 'line_summary_new_room_default_receipt_monthend_day';
     const NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_HOUR_KEY = 'line_summary_new_room_default_receipt_monthend_hour';
     const NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_MINUTE_KEY = 'line_summary_new_room_default_receipt_monthend_minute';
+    const NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_KEY = 'line_summary_new_room_default_tomorrow_reservation_alert';
+    const NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_HOUR_KEY = 'line_summary_new_room_default_tomorrow_reservation_alert_hour';
+    const NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_MINUTE_KEY = 'line_summary_new_room_default_tomorrow_reservation_alert_minute';
+    const TOMORROW_RESERVATION_ALERT_DEFAULTS = { hour: 18, minute: 0 };
     const RECEIPT_SCHEDULE_DEFAULTS = {
       midreport_day: 16,
       midreport_hour: 10,
@@ -5835,6 +5856,7 @@
       newRoomCalendarRegistrationReply: document.getElementById('newRoomCalendarRegistrationReply'),
       newRoomCalendarLowConfidenceConfirmReply: document.getElementById('newRoomCalendarLowConfidenceConfirmReply'),
       newRoomGmailAlertEnabled: document.getElementById('newRoomGmailAlertEnabled'),
+      newRoomTomorrowReservationAlertEnabled: document.getElementById('newRoomTomorrowReservationAlertEnabled'),
       newRoomReceiptMidreportEnabled: document.getElementById('newRoomReceiptMidreportEnabled'),
       newRoomReceiptMonthendReportEnabled: document.getElementById('newRoomReceiptMonthendReportEnabled'),
       newRoomReceiptMidreportLabel: document.getElementById('newRoomReceiptMidreportLabel'),
@@ -5908,6 +5930,9 @@
       roomConfigCalendarRegistrationReply: document.getElementById('roomConfigCalendarRegistrationReply'),
       roomConfigCalendarLowConfidenceConfirmReply: document.getElementById('roomConfigCalendarLowConfidenceConfirmReply'),
       roomConfigGmailAlert: document.getElementById('roomConfigGmailAlert'),
+      roomConfigTomorrowReservationAlert: document.getElementById('roomConfigTomorrowReservationAlert'),
+      roomConfigTomorrowReservationAlertScheduleBulk: document.getElementById('roomConfigTomorrowReservationAlertScheduleBulk'),
+      roomConfigTomorrowReservationAlertTime: document.getElementById('roomConfigTomorrowReservationAlertTime'),
       roomConfigReceiptMidreportEnabled: document.getElementById('roomConfigReceiptMidreportEnabled'),
       roomConfigReceiptMonthendReportEnabled: document.getElementById('roomConfigReceiptMonthendReportEnabled'),
       roomConfigReceiptMidreportLabel: document.getElementById('roomConfigReceiptMidreportLabel'),
@@ -5934,6 +5959,9 @@
       roomConfigCalendarRegistrationReplyPerm: document.getElementById('roomConfigCalendarRegistrationReplyPerm'),
       roomConfigCalendarLowConfidenceConfirmReplyPerm: document.getElementById('roomConfigCalendarLowConfidenceConfirmReplyPerm'),
       roomConfigGmailAlertPerm: document.getElementById('roomConfigGmailAlertPerm'),
+      roomConfigTomorrowReservationAlertPerm: document.getElementById('roomConfigTomorrowReservationAlertPerm'),
+      roomConfigTomorrowReservationAlertScheduleFields: document.getElementById('roomConfigTomorrowReservationAlertScheduleFields'),
+      roomConfigTomorrowReservationAlertTimePerm: document.getElementById('roomConfigTomorrowReservationAlertTimePerm'),
       roomConfigReceiptScheduleBulkHint: document.getElementById('roomConfigReceiptScheduleBulkHint'),
       roomConfigReceiptScheduleOverride: document.getElementById('roomConfigReceiptScheduleOverride'),
       roomConfigReceiptScheduleFields: document.getElementById('roomConfigReceiptScheduleFields'),
@@ -6258,6 +6286,29 @@
       return formatReceiptScheduleClock(
         clampScheduleInteger(hour, RECEIPT_SCHEDULE_DEFAULTS.midreport_hour, 0, 23),
         clampScheduleInteger(minute, RECEIPT_SCHEDULE_DEFAULTS.midreport_minute, 0, 59),
+      );
+    }
+
+    // 明日の予約状況配信の時刻入力（HH:MM）を時・分へ。未入力/不正は既定（18:00）。
+    function parseTomorrowReservationAlertTime(raw) {
+      const text = String(raw || '').trim();
+      const match = text.match(/^(\d{1,2}):(\d{2})$/);
+      if (!match) {
+        return {
+          hour: TOMORROW_RESERVATION_ALERT_DEFAULTS.hour,
+          minute: TOMORROW_RESERVATION_ALERT_DEFAULTS.minute,
+        };
+      }
+      return {
+        hour: clampScheduleInteger(match[1], TOMORROW_RESERVATION_ALERT_DEFAULTS.hour, 0, 23),
+        minute: clampScheduleInteger(match[2], TOMORROW_RESERVATION_ALERT_DEFAULTS.minute, 0, 59),
+      };
+    }
+
+    function composeTomorrowReservationAlertTimeValue(hour, minute) {
+      return formatReceiptScheduleClock(
+        clampScheduleInteger(hour, TOMORROW_RESERVATION_ALERT_DEFAULTS.hour, 0, 23),
+        clampScheduleInteger(minute, TOMORROW_RESERVATION_ALERT_DEFAULTS.minute, 0, 59),
       );
     }
 
@@ -7458,6 +7509,9 @@
         calendar_registration_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_REGISTRATION_REPLY_KEY, false),
         calendar_low_confidence_confirm_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, false),
         gmail_reservation_alert_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, false),
+        tomorrow_reservation_alert_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_KEY, false),
+        tomorrow_reservation_alert_hour: loadIntegerSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_HOUR_KEY, TOMORROW_RESERVATION_ALERT_DEFAULTS.hour, 0, 23),
+        tomorrow_reservation_alert_minute: loadIntegerSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_MINUTE_KEY, TOMORROW_RESERVATION_ALERT_DEFAULTS.minute, 0, 59),
       }, reminderSchedule);
     }
 
@@ -7498,6 +7552,9 @@
         calendar_registration_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarRegistrationReply, false),
         calendar_low_confidence_confirm_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarLowConfConfirm, false),
         gmail_reservation_alert_enabled: parseDatasetBoolean(tr.dataset.roomGmailAlertEnabled, false),
+        tomorrow_reservation_alert_enabled: parseDatasetBoolean(tr.dataset.roomTomorrowReservationAlertEnabled, false),
+        tomorrow_reservation_alert_hour: parseDatasetScheduleInt(tr.dataset.roomTomorrowReservationAlertHour),
+        tomorrow_reservation_alert_minute: parseDatasetScheduleInt(tr.dataset.roomTomorrowReservationAlertMinute),
       };
     }
 
@@ -7511,6 +7568,9 @@
         calendar_registration_reply_enabled: !!setting.calendar_registration_reply_enabled,
         calendar_low_confidence_confirm_reply_enabled: !!setting.calendar_low_confidence_confirm_reply_enabled,
         gmail_reservation_alert_enabled: setting.gmail_reservation_alert_enabled === true,
+        tomorrow_reservation_alert_enabled: setting.tomorrow_reservation_alert_enabled === true,
+        tomorrow_reservation_alert_hour: setting.tomorrow_reservation_alert_hour != null ? setting.tomorrow_reservation_alert_hour : null,
+        tomorrow_reservation_alert_minute: setting.tomorrow_reservation_alert_minute != null ? setting.tomorrow_reservation_alert_minute : null,
       };
     }
 
@@ -7532,6 +7592,15 @@
           return !!s.calendar_low_confidence_confirm_reply_enabled;
         }),
         gmail_reservation_alert_enabled: majorityBool(function(s) { return s.gmail_reservation_alert_enabled === true; }),
+        tomorrow_reservation_alert_enabled: majorityBool(function(s) { return s.tomorrow_reservation_alert_enabled === true; }),
+        tomorrow_reservation_alert_hour: (function() {
+          const hit = list.find(function(s) { return s.tomorrow_reservation_alert_hour != null; });
+          return hit ? hit.tomorrow_reservation_alert_hour : null;
+        })(),
+        tomorrow_reservation_alert_minute: (function() {
+          const hit = list.find(function(s) { return s.tomorrow_reservation_alert_minute != null; });
+          return hit ? hit.tomorrow_reservation_alert_minute : null;
+        })(),
       };
     }
 
@@ -7613,6 +7682,11 @@
       if (tr && parseDatasetBoolean(tr.dataset.roomGmailAlertEnabled, false)) {
         bulk.gmail_reservation_alert_enabled = true;
       }
+      // 明日の予約状況配信も、既にONのルームは一括保存で勝手にOFFにしない（取りこぼし防止）。
+      // OFFにしたい場合は「このルームだけ一括と違う設定にする」で明示的に切る。
+      if (tr && parseDatasetBoolean(tr.dataset.roomTomorrowReservationAlertEnabled, false)) {
+        bulk.tomorrow_reservation_alert_enabled = true;
+      }
       return bulk;
     }
 
@@ -7629,6 +7703,7 @@
         'calendar_registration_reply_enabled',
         'calendar_low_confidence_confirm_reply_enabled',
         'gmail_reservation_alert_enabled',
+        'tomorrow_reservation_alert_enabled',
         'calendar_tomorrow_reminder_only_if_events',
       ].forEach(function(key) {
         if (config[key] != null) out[key] = !!config[key];
@@ -7644,6 +7719,22 @@
           50,
         );
       }
+      if (config.tomorrow_reservation_alert_hour != null) {
+        out.tomorrow_reservation_alert_hour = clampScheduleInteger(
+          config.tomorrow_reservation_alert_hour,
+          TOMORROW_RESERVATION_ALERT_DEFAULTS.hour,
+          0,
+          23,
+        );
+      }
+      if (config.tomorrow_reservation_alert_minute != null) {
+        out.tomorrow_reservation_alert_minute = clampScheduleInteger(
+          config.tomorrow_reservation_alert_minute,
+          TOMORROW_RESERVATION_ALERT_DEFAULTS.minute,
+          0,
+          59,
+        );
+      }
       return out;
     }
 
@@ -7656,6 +7747,9 @@
       delete next.calendar_registration_reply_enabled;
       delete next.calendar_low_confidence_confirm_reply_enabled;
       delete next.gmail_reservation_alert_enabled;
+      delete next.tomorrow_reservation_alert_enabled;
+      delete next.tomorrow_reservation_alert_hour;
+      delete next.tomorrow_reservation_alert_minute;
       delete next.calendar_tomorrow_reminder_hours;
       delete next.calendar_tomorrow_reminder_only_if_events;
       delete next.calendar_tomorrow_reminder_max_items;
@@ -7716,6 +7810,13 @@
         calendar_registration_reply_enabled: gCal && !!roomCfg.calendar_registration_reply_enabled,
         calendar_low_confidence_confirm_reply_enabled: gCal && !!roomCfg.calendar_low_confidence_confirm_reply_enabled,
         gmail_reservation_alert_enabled: !!roomCfg.gmail_reservation_alert_enabled,
+        tomorrow_reservation_alert_enabled: !!roomCfg.tomorrow_reservation_alert_enabled,
+        tomorrow_reservation_alert_hour: roomCfg.tomorrow_reservation_alert_hour != null
+          ? clampScheduleInteger(roomCfg.tomorrow_reservation_alert_hour, bulk.tomorrow_reservation_alert_hour ?? TOMORROW_RESERVATION_ALERT_DEFAULTS.hour, 0, 23)
+          : (bulk.tomorrow_reservation_alert_hour ?? null),
+        tomorrow_reservation_alert_minute: roomCfg.tomorrow_reservation_alert_minute != null
+          ? clampScheduleInteger(roomCfg.tomorrow_reservation_alert_minute, bulk.tomorrow_reservation_alert_minute ?? TOMORROW_RESERVATION_ALERT_DEFAULTS.minute, 0, 59)
+          : (bulk.tomorrow_reservation_alert_minute ?? null),
       };
     }
 
@@ -7740,6 +7841,9 @@
 
     function readCalendarGmailFromInlineModal() {
       const gCal = !!(dom.roomConfigGoogleCalendarAutoRegister && dom.roomConfigGoogleCalendarAutoRegister.checked);
+      const reservationAlertTime = parseTomorrowReservationAlertTime(
+        dom.roomConfigTomorrowReservationAlertTime && dom.roomConfigTomorrowReservationAlertTime.value,
+      );
       return {
         calendar_tomorrow_reminder_enabled: !!(dom.roomConfigTomorrowReminder && dom.roomConfigTomorrowReminder.checked),
         calendar_ai_auto_create_enabled: gCal,
@@ -7747,6 +7851,9 @@
         calendar_registration_reply_enabled: gCal && !!(dom.roomConfigCalendarRegistrationReply && dom.roomConfigCalendarRegistrationReply.checked),
         calendar_low_confidence_confirm_reply_enabled: gCal && !!(dom.roomConfigCalendarLowConfidenceConfirmReply && dom.roomConfigCalendarLowConfidenceConfirmReply.checked),
         gmail_reservation_alert_enabled: !!(dom.roomConfigGmailAlert && dom.roomConfigGmailAlert.checked),
+        tomorrow_reservation_alert_enabled: !!(dom.roomConfigTomorrowReservationAlert && dom.roomConfigTomorrowReservationAlert.checked),
+        tomorrow_reservation_alert_hour: reservationAlertTime.hour,
+        tomorrow_reservation_alert_minute: reservationAlertTime.minute,
       };
     }
 
@@ -7762,6 +7869,21 @@
       saveBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_REGISTRATION_REPLY_KEY, !!v.calendar_registration_reply_enabled);
       saveBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, !!v.calendar_low_confidence_confirm_reply_enabled);
       saveBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, !!v.gmail_reservation_alert_enabled);
+      saveBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_KEY, !!v.tomorrow_reservation_alert_enabled);
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_HOUR_KEY,
+        v.tomorrow_reservation_alert_hour,
+        TOMORROW_RESERVATION_ALERT_DEFAULTS.hour,
+        0,
+        23,
+      );
+      saveIntegerSetting(
+        NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_MINUTE_KEY,
+        v.tomorrow_reservation_alert_minute,
+        TOMORROW_RESERVATION_ALERT_DEFAULTS.minute,
+        0,
+        59,
+      );
       try {
         const schedule = readTomorrowReminderScheduleFromInputs(
           dom.roomConfigTomorrowReminderHours,
@@ -7790,6 +7912,9 @@
         dom.roomConfigTomorrowReminderOnlyIfEvents,
         dom.roomConfigTomorrowReminderMaxItems,
       );
+      const reservationAlertTime = parseTomorrowReservationAlertTime(
+        dom.roomConfigTomorrowReservationAlertTimePerm && dom.roomConfigTomorrowReservationAlertTimePerm.value,
+      );
       return Object.assign({
         calendar_tomorrow_reminder_enabled: !!(dom.roomConfigTomorrowReminderPerm && dom.roomConfigTomorrowReminderPerm.checked),
         calendar_ai_auto_create_enabled: gCal,
@@ -7797,6 +7922,9 @@
         calendar_registration_reply_enabled: gCal && !!(dom.roomConfigCalendarRegistrationReplyPerm && dom.roomConfigCalendarRegistrationReplyPerm.checked),
         calendar_low_confidence_confirm_reply_enabled: gCal && !!(dom.roomConfigCalendarLowConfidenceConfirmReplyPerm && dom.roomConfigCalendarLowConfidenceConfirmReplyPerm.checked),
         gmail_reservation_alert_enabled: !!(dom.roomConfigGmailAlertPerm && dom.roomConfigGmailAlertPerm.checked),
+        tomorrow_reservation_alert_enabled: !!(dom.roomConfigTomorrowReservationAlertPerm && dom.roomConfigTomorrowReservationAlertPerm.checked),
+        tomorrow_reservation_alert_hour: reservationAlertTime.hour,
+        tomorrow_reservation_alert_minute: reservationAlertTime.minute,
       }, schedule);
     }
 
@@ -7810,7 +7938,15 @@
         dom.roomConfigCalendarLowConfidenceConfirmReply.checked = gCal && !!v.calendar_low_confidence_confirm_reply_enabled;
       }
       if (dom.roomConfigGmailAlert) dom.roomConfigGmailAlert.checked = !!v.gmail_reservation_alert_enabled;
+      if (dom.roomConfigTomorrowReservationAlert) dom.roomConfigTomorrowReservationAlert.checked = !!v.tomorrow_reservation_alert_enabled;
+      if (dom.roomConfigTomorrowReservationAlertTime) {
+        dom.roomConfigTomorrowReservationAlertTime.value = composeTomorrowReservationAlertTimeValue(
+          v.tomorrow_reservation_alert_hour,
+          v.tomorrow_reservation_alert_minute,
+        );
+      }
       syncRoomConfigCalendarSubOptions();
+      syncRoomConfigTomorrowReservationAlertFields();
     }
 
     function applyCalendarGmailValuesToPermFields(values) {
@@ -7831,7 +7967,15 @@
         dom.roomConfigCalendarLowConfidenceConfirmReplyPerm.checked = gCal && !!v.calendar_low_confidence_confirm_reply_enabled;
       }
       if (dom.roomConfigGmailAlertPerm) dom.roomConfigGmailAlertPerm.checked = !!v.gmail_reservation_alert_enabled;
+      if (dom.roomConfigTomorrowReservationAlertPerm) dom.roomConfigTomorrowReservationAlertPerm.checked = !!v.tomorrow_reservation_alert_enabled;
+      if (dom.roomConfigTomorrowReservationAlertTimePerm) {
+        dom.roomConfigTomorrowReservationAlertTimePerm.value = composeTomorrowReservationAlertTimeValue(
+          v.tomorrow_reservation_alert_hour,
+          v.tomorrow_reservation_alert_minute,
+        );
+      }
       syncRoomConfigCalendarGmailPermSubOptions();
+      syncRoomConfigTomorrowReservationAlertFields();
     }
 
     function syncRoomConfigCalendarGmailPermSubOptions() {
@@ -7856,6 +8000,26 @@
       ].forEach(function(el) {
         if (el) el.disabled = !override || !enabled || !multiRoom;
       });
+    }
+
+    // 明日の予約状況配信の時刻欄: 一括（インライン）はトグルON時、ルーム個別はオーバーライド＋トグルON時に表示。
+    function syncRoomConfigTomorrowReservationAlertFields() {
+      const bulkEnabled = !!(dom.roomConfigTomorrowReservationAlert && dom.roomConfigTomorrowReservationAlert.checked);
+      if (dom.roomConfigTomorrowReservationAlertScheduleBulk) {
+        dom.roomConfigTomorrowReservationAlertScheduleBulk.hidden = !bulkEnabled;
+      }
+      if (dom.roomConfigTomorrowReservationAlertTime) {
+        dom.roomConfigTomorrowReservationAlertTime.disabled = !bulkEnabled;
+      }
+      const permEnabled = !!(dom.roomConfigTomorrowReservationAlertPerm && dom.roomConfigTomorrowReservationAlertPerm.checked);
+      const override = !!(dom.roomConfigCalendarGmailOverride && dom.roomConfigCalendarGmailOverride.checked);
+      const multiRoom = getLinkedRoomCountInModal() >= 2;
+      if (dom.roomConfigTomorrowReservationAlertScheduleFields) {
+        dom.roomConfigTomorrowReservationAlertScheduleFields.hidden = !override || !permEnabled;
+      }
+      if (dom.roomConfigTomorrowReservationAlertTimePerm) {
+        dom.roomConfigTomorrowReservationAlertTimePerm.disabled = !override || !permEnabled || !multiRoom;
+      }
     }
 
     function syncRoomConfigCalendarGmailPermFields() {
@@ -7886,11 +8050,13 @@
         dom.roomConfigCalendarRegistrationReplyPerm,
         dom.roomConfigCalendarLowConfidenceConfirmReplyPerm,
         dom.roomConfigGmailAlertPerm,
+        dom.roomConfigTomorrowReservationAlertPerm,
       ].forEach(function(el) {
         if (el) el.disabled = !override || !multiRoom;
       });
       syncRoomConfigCalendarGmailPermSubOptions();
       syncRoomConfigTomorrowReminderScheduleFields();
+      syncRoomConfigTomorrowReservationAlertFields();
     }
 
     function applyCalendarGmailToRoomConfigModal(roomId) {
@@ -7942,6 +8108,9 @@
           s.calendar_registration_reply_enabled ? '1' : '0',
           s.calendar_low_confidence_confirm_reply_enabled ? '1' : '0',
           s.gmail_reservation_alert_enabled ? '1' : '0',
+          s.tomorrow_reservation_alert_enabled ? '1' : '0',
+          String(s.tomorrow_reservation_alert_hour),
+          String(s.tomorrow_reservation_alert_minute),
           s.calendar_gmail_settings_override ? '1' : '0',
         ].join(':');
       });
@@ -8096,6 +8265,9 @@
       }
       dom.newRoomCalendarLowConfidenceConfirmReply.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, false);
       dom.newRoomGmailAlertEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, false);
+      if (dom.newRoomTomorrowReservationAlertEnabled) {
+        dom.newRoomTomorrowReservationAlertEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_KEY, false);
+      }
       if (dom.newRoomReceiptMidreportEnabled) {
         dom.newRoomReceiptMidreportEnabled.checked = loadBooleanSetting(
           NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY,
@@ -8118,7 +8290,8 @@
           (dom.newRoomReceiveOverallSummary && dom.newRoomReceiveOverallSummary.checked) ||
           dom.newRoomTomorrowReminder.checked ||
           dom.newRoomGoogleCalendarAutoRegister.checked ||
-          dom.newRoomGmailAlertEnabled.checked;
+          dom.newRoomGmailAlertEnabled.checked ||
+          (dom.newRoomTomorrowReservationAlertEnabled && dom.newRoomTomorrowReservationAlertEnabled.checked);
         dom.newRoomExtraSettingsToggle.checked =
           loadBooleanSetting(NEW_ROOM_DEFAULT_EXTRA_SETTINGS_OPEN_KEY, false) || anyExtraEnabled;
       }
@@ -8146,7 +8319,8 @@
         (dom.newRoomGoogleCalendarAutoRegister.checked ? 1 : 0) +
         (dom.newRoomGoogleCalendarAutoRegister.checked && dom.newRoomCalendarRegistrationReply && dom.newRoomCalendarRegistrationReply.checked ? 1 : 0) +
         (dom.newRoomGoogleCalendarAutoRegister.checked && dom.newRoomCalendarLowConfidenceConfirmReply.checked ? 1 : 0) +
-        (dom.newRoomGmailAlertEnabled.checked ? 1 : 0);
+        (dom.newRoomGmailAlertEnabled.checked ? 1 : 0) +
+        (dom.newRoomTomorrowReservationAlertEnabled && dom.newRoomTomorrowReservationAlertEnabled.checked ? 1 : 0);
       const bulk = getBulkReceiptSchedule();
       return {
         receiptCount: receiptCount,
@@ -8290,6 +8464,13 @@
         if (calLowConf) enabledFeatures.push('低確度のとき確認返信（はい／いいえ）');
       }
       if (config.gmail_reservation_alert_enabled) enabledFeatures.push('Gmail予約通知');
+      if (config.tomorrow_reservation_alert_enabled) {
+        const trAlertClock = formatReceiptScheduleClock(
+          config.tomorrow_reservation_alert_hour != null ? config.tomorrow_reservation_alert_hour : TOMORROW_RESERVATION_ALERT_DEFAULTS.hour,
+          config.tomorrow_reservation_alert_minute != null ? config.tomorrow_reservation_alert_minute : TOMORROW_RESERVATION_ALERT_DEFAULTS.minute,
+        );
+        enabledFeatures.push('明日の予約状況配信（毎日 ' + trAlertClock + '）');
+      }
       const receiptSchedule = resolveReceiptScheduleFromConfig(config);
       if (config.receipt_midreport_enabled) {
         enabledFeatures.push(formatReceiptMidreportCheckboxLabel(receiptSchedule));
@@ -8348,6 +8529,14 @@
         scheduledAndAlerts.push('Gmail の予約っぽいメールを検知したとき、このルームへ通知する設定です（システムの Gmail 連携・ジョブが有効な場合）。');
       } else {
         scheduledAndAlerts.push('Gmail予約通知はこのルーム向けに送らない設定です。');
+      }
+
+      if (config.tomorrow_reservation_alert_enabled) {
+        const trAlertClock = formatReceiptScheduleClock(
+          config.tomorrow_reservation_alert_hour != null ? config.tomorrow_reservation_alert_hour : TOMORROW_RESERVATION_ALERT_DEFAULTS.hour,
+          config.tomorrow_reservation_alert_minute != null ? config.tomorrow_reservation_alert_minute : TOMORROW_RESERVATION_ALERT_DEFAULTS.minute,
+        );
+        scheduledAndAlerts.push('毎日 ' + trAlertClock + ' に「明日の予約状況」を1通のリッチメッセージでこのトークへ配信します（対象店舗の予約のみ。予約が無い日は「明日のご予約はありません」を送信）。');
       }
 
       if (config.send_room_summary) {
@@ -9543,6 +9732,7 @@
           parts.push('カレンダー自動');
         }
         if (calendarSummary.gmail_reservation_alert_enabled) parts.push('Gmail予約');
+        if (calendarSummary.tomorrow_reservation_alert_enabled) parts.push('明日予約配信');
       }
       if (config.receipt_midreport_enabled !== false) {
         parts.push(scheduleSummary.mixed ? '中間（ルームごと）' : ('中間 ' + formatReceiptMidreportScheduleLabel(scheduleSummary)));
@@ -10657,7 +10847,8 @@
         config.media_file_access_enabled ||
         config.calendar_ai_auto_create_enabled ||
         config.calendar_registration_reply_enabled ||
-        config.gmail_reservation_alert_enabled
+        config.gmail_reservation_alert_enabled ||
+        config.tomorrow_reservation_alert_enabled
       );
     }
 
@@ -10704,6 +10895,9 @@
         calendar_low_confidence_confirm_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarLowConfConfirm, false),
         calendar_registration_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarRegistrationReply, false),
         gmail_reservation_alert_enabled: gmailAlertEnabledInput ? !!gmailAlertEnabledInput.checked : parseDatasetBoolean(tr.dataset.roomGmailAlertEnabled, false),
+        tomorrow_reservation_alert_enabled: parseDatasetBoolean(tr.dataset.roomTomorrowReservationAlertEnabled, false),
+        tomorrow_reservation_alert_hour: parseDatasetScheduleInt(tr.dataset.roomTomorrowReservationAlertHour),
+        tomorrow_reservation_alert_minute: parseDatasetScheduleInt(tr.dataset.roomTomorrowReservationAlertMinute),
         receipt_midreport_enabled: parseDatasetBoolean(tr.dataset.roomReceiptMidreportEnabled, true),
         receipt_monthend_report_enabled: parseDatasetBoolean(tr.dataset.roomReceiptMonthendReportEnabled, true),
         receipt_schedule_override: parseDatasetBoolean(tr.dataset.receiptScheduleOverride, false),
@@ -10744,6 +10938,13 @@
       tr.dataset.roomCalendarLowConfConfirm = String(!!config.calendar_low_confidence_confirm_reply_enabled);
       tr.dataset.roomCalendarRegistrationReply = String(!!config.calendar_registration_reply_enabled);
       tr.dataset.roomGmailAlertEnabled = String(!!config.gmail_reservation_alert_enabled);
+      tr.dataset.roomTomorrowReservationAlertEnabled = String(!!config.tomorrow_reservation_alert_enabled);
+      if ('tomorrow_reservation_alert_hour' in config) {
+        tr.dataset.roomTomorrowReservationAlertHour = (config.tomorrow_reservation_alert_hour != null && config.tomorrow_reservation_alert_hour !== '') ? String(config.tomorrow_reservation_alert_hour) : '';
+      }
+      if ('tomorrow_reservation_alert_minute' in config) {
+        tr.dataset.roomTomorrowReservationAlertMinute = (config.tomorrow_reservation_alert_minute != null && config.tomorrow_reservation_alert_minute !== '') ? String(config.tomorrow_reservation_alert_minute) : '';
+      }
       tr.dataset.roomReceiptMidreportEnabled = String(config.receipt_midreport_enabled !== false);
       tr.dataset.roomReceiptMonthendReportEnabled = String(config.receipt_monthend_report_enabled !== false);
       tr.dataset.roomReceiptReportStoreKey = String(config.receipt_report_store_partition_key || '');
@@ -10781,6 +10982,7 @@
       if (config.calendar_low_confidence_confirm_reply_enabled && config.calendar_ai_auto_create_enabled && config.calendar_silent_auto_register_enabled) enabledCount += 1;
       if (config.calendar_registration_reply_enabled && config.calendar_ai_auto_create_enabled && config.calendar_silent_auto_register_enabled) enabledCount += 1;
       if (config.gmail_reservation_alert_enabled) enabledCount += 1;
+      if (config.tomorrow_reservation_alert_enabled) enabledCount += 1;
       if (config.receipt_midreport_enabled) enabledCount += 1;
       if (config.receipt_monthend_report_enabled) enabledCount += 1;
       return enabledCount;
@@ -10794,7 +10996,7 @@
 
     function buildRoomConfigSummary(config) {
       const enabledCount = getRoomConfigEnabledCount(config);
-      return enabledCount + '/14 有効';
+      return enabledCount + '/15 有効';
     }
 
     function buildRoomConfigSavedMessage(storeKey, roomCount) {
@@ -10924,6 +11126,9 @@
         calendar_low_confidence_confirm_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_LOW_CONF_CONFIRM_KEY, false),
         calendar_registration_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_REGISTRATION_REPLY_KEY, false),
         gmail_reservation_alert_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, false),
+        tomorrow_reservation_alert_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_KEY, false),
+        tomorrow_reservation_alert_hour: loadIntegerSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_HOUR_KEY, TOMORROW_RESERVATION_ALERT_DEFAULTS.hour, 0, 23),
+        tomorrow_reservation_alert_minute: loadIntegerSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_MINUTE_KEY, TOMORROW_RESERVATION_ALERT_DEFAULTS.minute, 0, 59),
         receipt_midreport_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.receipt_midreport),
         receipt_monthend_report_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_REPORT_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.receipt_monthend),
         receipt_report_store_partition_key: '',
@@ -11720,6 +11925,9 @@
           calendar_low_confidence_confirm_reply_enabled: !!(setting && setting.calendar_low_confidence_confirm_reply_enabled),
           calendar_registration_reply_enabled: !!(setting && setting.calendar_registration_reply_enabled),
           gmail_reservation_alert_enabled: setting && setting.gmail_reservation_alert_enabled === true,
+          tomorrow_reservation_alert_enabled: setting && setting.tomorrow_reservation_alert_enabled === true,
+          tomorrow_reservation_alert_hour: setting && setting.tomorrow_reservation_alert_hour != null ? setting.tomorrow_reservation_alert_hour : null,
+          tomorrow_reservation_alert_minute: setting && setting.tomorrow_reservation_alert_minute != null ? setting.tomorrow_reservation_alert_minute : null,
           receipt_midreport_enabled: setting ? setting.receipt_midreport_enabled !== false : true,
           receipt_monthend_report_enabled: setting ? setting.receipt_monthend_report_enabled !== false : true,
           receipt_schedule_override: !!(setting && setting.receipt_schedule_override),
@@ -11756,6 +11964,9 @@
         tr.dataset.roomCalendarLowConfConfirm = String(!!(setting && setting.calendar_low_confidence_confirm_reply_enabled));
         tr.dataset.roomCalendarRegistrationReply = String(!!(setting && setting.calendar_registration_reply_enabled));
         tr.dataset.roomGmailAlertEnabled = String(roomFeatureConfig.gmail_reservation_alert_enabled);
+        tr.dataset.roomTomorrowReservationAlertEnabled = String(roomFeatureConfig.tomorrow_reservation_alert_enabled);
+        tr.dataset.roomTomorrowReservationAlertHour = roomFeatureConfig.tomorrow_reservation_alert_hour != null ? String(roomFeatureConfig.tomorrow_reservation_alert_hour) : '';
+        tr.dataset.roomTomorrowReservationAlertMinute = roomFeatureConfig.tomorrow_reservation_alert_minute != null ? String(roomFeatureConfig.tomorrow_reservation_alert_minute) : '';
         tr.dataset.roomReceiptMidreportEnabled = String(roomFeatureConfig.receipt_midreport_enabled);
         tr.dataset.roomReceiptMonthendReportEnabled = String(roomFeatureConfig.receipt_monthend_report_enabled);
         tr.dataset.receiptScheduleOverride = String(roomFeatureConfig.receipt_schedule_override);
@@ -12323,6 +12534,9 @@
           calendar_low_confidence_confirm_reply_enabled: !!webhookConfig.calendar_low_confidence_confirm_reply_enabled,
           calendar_registration_reply_enabled: !!webhookConfig.calendar_registration_reply_enabled,
           gmail_reservation_alert_enabled: !!webhookConfig.gmail_reservation_alert_enabled,
+          tomorrow_reservation_alert_enabled: !!webhookConfig.tomorrow_reservation_alert_enabled,
+          tomorrow_reservation_alert_hour: webhookConfig.tomorrow_reservation_alert_hour != null ? webhookConfig.tomorrow_reservation_alert_hour : null,
+          tomorrow_reservation_alert_minute: webhookConfig.tomorrow_reservation_alert_minute != null ? webhookConfig.tomorrow_reservation_alert_minute : null,
           receipt_midreport_enabled: webhookConfig.receipt_midreport_enabled !== false,
           receipt_monthend_report_enabled: webhookConfig.receipt_monthend_report_enabled !== false,
           receipt_report_store_partition_key: key,
@@ -12585,6 +12799,9 @@
         calendar_low_confidence_confirm_reply_enabled: roomConfig.calendar_low_confidence_confirm_reply_enabled,
         calendar_registration_reply_enabled: roomConfig.calendar_registration_reply_enabled,
         gmail_reservation_alert_enabled: roomConfig.gmail_reservation_alert_enabled,
+        tomorrow_reservation_alert_enabled: !!roomConfig.tomorrow_reservation_alert_enabled,
+        tomorrow_reservation_alert_hour: roomConfig.tomorrow_reservation_alert_hour ?? null,
+        tomorrow_reservation_alert_minute: roomConfig.tomorrow_reservation_alert_minute ?? null,
         receipt_midreport_enabled: roomConfig.receipt_midreport_enabled !== false,
         receipt_monthend_report_enabled: roomConfig.receipt_monthend_report_enabled !== false,
         receipt_schedule_override: !!roomConfig.receipt_schedule_override,
@@ -12654,6 +12871,9 @@
         payload.calendar_low_confidence_confirm_reply_enabled = !!opts.overrideConfig.calendar_low_confidence_confirm_reply_enabled;
         payload.calendar_registration_reply_enabled = !!opts.overrideConfig.calendar_registration_reply_enabled;
         payload.gmail_reservation_alert_enabled = !!opts.overrideConfig.gmail_reservation_alert_enabled;
+        payload.tomorrow_reservation_alert_enabled = !!opts.overrideConfig.tomorrow_reservation_alert_enabled;
+        payload.tomorrow_reservation_alert_hour = opts.overrideConfig.tomorrow_reservation_alert_hour ?? null;
+        payload.tomorrow_reservation_alert_minute = opts.overrideConfig.tomorrow_reservation_alert_minute ?? null;
         payload.receipt_midreport_enabled = opts.overrideConfig.receipt_midreport_enabled !== false;
         payload.receipt_monthend_report_enabled = opts.overrideConfig.receipt_monthend_report_enabled !== false;
         payload.receipt_report_store_partition_key = opts.overrideConfig.receipt_report_store_partition_key || null;
@@ -13370,6 +13590,7 @@
       dom.newRoomCalendarRegistrationReply,
       dom.newRoomCalendarLowConfidenceConfirmReply,
       dom.newRoomGmailAlertEnabled,
+      dom.newRoomTomorrowReservationAlertEnabled,
       dom.newRoomReceiptMidreportEnabled,
       dom.newRoomReceiptMonthendReportEnabled,
       dom.newRoomReceiptMidreportDay,
@@ -13447,6 +13668,11 @@
     dom.newRoomGmailAlertEnabled.addEventListener('change', function() {
       saveBooleanSetting(NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY, !!dom.newRoomGmailAlertEnabled.checked);
     });
+    if (dom.newRoomTomorrowReservationAlertEnabled) {
+      dom.newRoomTomorrowReservationAlertEnabled.addEventListener('change', function() {
+        saveBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_RESERVATION_ALERT_KEY, !!dom.newRoomTomorrowReservationAlertEnabled.checked);
+      });
+    }
     if (dom.newRoomReceiptMidreportEnabled) {
       dom.newRoomReceiptMidreportEnabled.addEventListener('change', function() {
         saveBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY, !!dom.newRoomReceiptMidreportEnabled.checked);
@@ -13493,6 +13719,7 @@
       dom.newRoomCalendarRegistrationReply,
       dom.newRoomCalendarLowConfidenceConfirmReply,
       dom.newRoomGmailAlertEnabled,
+      dom.newRoomTomorrowReservationAlertEnabled,
       dom.newRoomReceiptMidreportEnabled,
       dom.newRoomReceiptMonthendReportEnabled,
       dom.newRoomReceiptMidreportDay,
@@ -13649,6 +13876,27 @@
       el.addEventListener('change', onRoomConfigTomorrowReminderScheduleInputChange);
       el.addEventListener('input', onRoomConfigTomorrowReminderScheduleInputChange);
     });
+
+    if (dom.roomConfigTomorrowReservationAlert) {
+      dom.roomConfigTomorrowReservationAlert.addEventListener('change', function() {
+        syncRoomConfigTomorrowReservationAlertFields();
+        invalidateRoomConfigReview();
+      });
+    }
+    if (dom.roomConfigTomorrowReservationAlertTime) {
+      dom.roomConfigTomorrowReservationAlertTime.addEventListener('change', invalidateRoomConfigReview);
+      dom.roomConfigTomorrowReservationAlertTime.addEventListener('input', invalidateRoomConfigReview);
+    }
+    if (dom.roomConfigTomorrowReservationAlertPerm) {
+      dom.roomConfigTomorrowReservationAlertPerm.addEventListener('change', function() {
+        syncRoomConfigTomorrowReservationAlertFields();
+        onRoomConfigCalendarGmailInputChange();
+      });
+    }
+    if (dom.roomConfigTomorrowReservationAlertTimePerm) {
+      dom.roomConfigTomorrowReservationAlertTimePerm.addEventListener('change', onRoomConfigCalendarGmailInputChange);
+      dom.roomConfigTomorrowReservationAlertTimePerm.addEventListener('input', onRoomConfigCalendarGmailInputChange);
+    }
 
     if (dom.reviewRoomConfigBtn) {
       dom.reviewRoomConfigBtn.addEventListener('click', function() {

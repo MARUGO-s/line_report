@@ -29,3 +29,8 @@ verify_jwt = false
 # 認可は関数側で実施（テスト送信は X-Receipt-Midreport-Test-Key、定期実行は重複防止で冪等）するため false にする。
 [functions.receipt-midreport-cron]
 verify_jwt = false
+
+# reservation-tomorrow-cron は pg_cron（毎分）から呼ばれる内部関数。
+# 認可は冪等性（room_id×target_dateの重複防止）で担保し、テスト送信は X-Reservation-Tomorrow-Test-Key で保護する。
+[functions.reservation-tomorrow-cron]
+verify_jwt = false
