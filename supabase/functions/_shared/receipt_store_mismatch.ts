@@ -241,8 +241,10 @@ export async function tryHandlePendingStoreNameMismatchConfirmation(
   const isLegacyRegisterAttempt = /^(このまま登録|このままで登録|登録|登録して|このまま|はい|ok|okay|yes|y|1|１)$/.test(compact)
   const isDismiss = /^(了解|削除|登録しない|中止|キャンセル|やめる|不要|いいえ|no|n|2|２)$/.test(compact)
 
-  if (!pending && !isLegacyRegisterAttempt) return null
-  if (pending && !isLegacyRegisterAttempt && !isDismiss) return null
+  // 実際の保留（店名不一致 pending）が無ければ、確認語（はい/OK/登録 等）だけでは反応しない。
+  // ※この判定が無いと、通常会話の「はい」等だけで「（解析店名）」入りの不一致案内が誤送信される。
+  if (!pending) return null
+  if (!isLegacyRegisterAttempt && !isDismiss) return null
 
   if (pending) {
     await clearPendingStoreNameMismatch(supabase, roomId, userId)
