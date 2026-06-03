@@ -10,6 +10,7 @@ import {
   resolveReceiptDateIsoForPersist,
 } from './receipt_parse.ts'
 import { indexLineRoomReceiptSearch } from './line_room_search_archive.ts'
+import { upsertManualDaySalesEntries } from './manual_day_sales.ts'
 
 export type StoreReceiptRow = {
   id: number
@@ -532,6 +533,25 @@ export async function saveStoreReceiptEntry(
       receiptTable,
       receiptRowId,
     })
+  }
+
+  // レシートを登録できた日は、日次の手入力（直接編集）の上書きをレシートで上書きし直す。
+  // レシートが読み取れたフィールド（非null）のみ手入力を解除し、読めなかったフィールドの手入力は保持する。
+  // これにより「再アップロードしたのに古い手入力が残る」を防ぐ（レシートを正本へ戻す）。
+  if (
+    params.storePartitionKey &&
+    (grossSalesYen != null || partyCount != null || guestCount != null)
+  ) {
+    try {
+      await upsertManualDaySalesEntries(supabase, params.storePartitionKey, [{
+        sales_date: receiptDateIso,
+        gross_sales_yen: grossSalesYen != null ? null : undefined,
+        party_count: partyCount != null ? null : undefined,
+        guest_count: guestCount != null ? null : undefined,
+      }])
+    } catch (e) {
+      console.error('clear manual day after receipt save failed:', String(e))
+    }
   }
 
   return { ok: true, receiptRowId }

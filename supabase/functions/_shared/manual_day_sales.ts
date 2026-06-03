@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { canonicalStorePartitionKeyForDb } from "./receipt_sheets_store_catalog.ts"
 
 /** 日次売上の手入力上書き（売上分析画面の日次表から直接編集）。null 列はレシート集計へフォールバック。 */
@@ -55,7 +55,7 @@ export function manualDaySalesFromRow(
 
 /** [fromInclusive, toExclusive) の日付範囲で店舗の日次手入力を取得（date文字列キー） */
 export async function fetchManualDaySalesMapForStore(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   storePartitionKey: string,
   fromDateInclusive: string,
   toDateExclusive: string,
@@ -92,7 +92,7 @@ export async function fetchManualDaySalesMapForStore(
  *（単一セル編集でも他列を保持）。マージ後に3列すべて null なら行ごと削除し、その日をレシート集計へ戻す。
  */
 export async function upsertManualDaySalesEntries(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   storePartitionKey: string,
   entries: ManualDaySalesUpsertEntry[],
 ): Promise<number> {

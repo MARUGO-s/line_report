@@ -348,6 +348,21 @@ export function normalizeLineImageReceiptAnalysis(
   return { storeName, storePhone, date, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items }
 }
 
+// ソバージュ専用: レシートの「総売上」には出前（デリバリー）の預かり金が含まれ当店の売上ではないため、
+// 当店の実売上は「純売上」（返金差引後）。AIは総売上→gross_sales / 純売上→net_sales とフィールド名
+// どおりに入れる傾向があり、プロンプトで gross_sales を純売上へ上書きさせるのは安定しない。よって解析後に
+// 純売上が取れていれば gross_sales を純売上で上書きし、カード表示・日次集計の売上を純売上に揃える。
+export function applySauvageNetSalesAsGrossSales(
+  receipt: LineImageReceiptAnalysis,
+  storePartitionKey: string | null | undefined,
+): LineImageReceiptAnalysis {
+  if (storePartitionKey !== 'sauvage') return receipt
+  const net = parseCurrencyAmount(receipt.netSales)
+  if (net == null || net <= 0) return receipt
+  if (receipt.grossSales === receipt.netSales) return receipt
+  return { ...receipt, grossSales: receipt.netSales }
+}
+
 export function parseFirstJsonObject(raw: string): unknown | null {
   const trimmed = raw.replace(/^```json\s*/i, '').replace(/^```/, '').replace(/```$/, '').trim()
 

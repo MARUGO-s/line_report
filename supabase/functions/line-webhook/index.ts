@@ -32,6 +32,7 @@ import {
   lineReplyPayloadToMessages,
 } from '../_shared/receipt_correction.ts'
 import {
+  applySauvageNetSalesAsGrossSales,
   computeReceiptHeuristicConfidence,
   mergeReceiptConfidence,
   normalizeInlineText,
@@ -327,9 +328,11 @@ async function processReceiptImageEvent(
 
   const receiptRaw = analyzed.analysis.receipt
   const alignedStoreName = alignReceiptStoreNameToRegistry(receiptRaw.storeName, registry)
-  const receipt = String(alignedStoreName ?? '') !== String(receiptRaw.storeName ?? '')
+  const receiptAligned = String(alignedStoreName ?? '') !== String(receiptRaw.storeName ?? '')
     ? { ...receiptRaw, storeName: alignedStoreName }
     : receiptRaw
+  // ソバージュは「総売上」に出前の預かり金が含まれるため、売上は「純売上」を採用する。
+  const receipt = applySauvageNetSalesAsGrossSales(receiptAligned, registry.store_partition_key)
   const confidence = mergeReceiptConfidence(
     computeReceiptHeuristicConfidence(receipt),
     analyzed.analysis.receiptModelConfidence ?? null,
