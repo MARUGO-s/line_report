@@ -19,6 +19,9 @@ import {
   upsertManualMonthSalesEntries,
 } from "../_shared/manual_month_sales.ts"
 import {
+  upsertManualDaySalesEntries,
+} from "../_shared/manual_day_sales.ts"
+import {
   RECEIPT_STORE_PARTITION_UNKNOWN,
   toReceiptStorePartitionKey,
 } from "../_shared/receipt_report_aggregate.ts"
@@ -528,6 +531,15 @@ Deno.serve(async (req) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       const result = await upsertStoreManualMonthEntries(supabase, body)
+      return json(result, 200)
+    }
+
+    if (req.method === "PUT" && path === "/receipts/sales-manual-days") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await upsertManualDayEntries(supabase, body)
       return json(result, 200)
     }
 
@@ -2867,6 +2879,63 @@ async function upsertManualMonthEntries(
     throw {
       status: 500,
       message: `Failed to save manual month sales: ${String(e)}`,
+    } satisfies AppError
+  }
+
+  return {
+    ok: true as const,
+    store_partition_key,
+    applied,
+    generated_at: new Date().toISOString(),
+  }
+}
+
+/** 日次売上の手入力上書き（売上分析の日次表からのインライン編集）。各フィールドは
+ *  - キー無し: 変更しない / null|"": その列の上書き解除 / 数値: 上書き。3列とも空になればその日の手入力を削除。 */
+async function upsertManualDayEntries(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const store_partition_key = normalizeBudgetStoreKey(toSafeString(body.store_key))
+  const entriesRaw = body.entries
+  if (!Array.isArray(entriesRaw)) {
+    throw { status: 400, message: "entries must be an array." } satisfies AppError
+  }
+
+  const resolveField = (entry: Record<string, unknown>, prop: string):
+    number | null | undefined => {
+    if (!(prop in entry)) return undefined
+    const raw = entry[prop]
+    if (raw === null || raw === undefined || raw === "") return null
+    return toNonNegativeInteger(raw)
+  }
+
+  const upsertPayload: Array<{
+    sales_date: string
+    gross_sales_yen?: number | null
+    party_count?: number | null
+    guest_count?: number | null
+  }> = []
+
+  for (const entry of entriesRaw) {
+    if (!isRecord(entry)) continue
+    const sales_date = toSafeString(entry.sales_date).trim().slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sales_date)) continue
+    upsertPayload.push({
+      sales_date,
+      gross_sales_yen: resolveField(entry, "gross_sales_yen"),
+      party_count: resolveField(entry, "party_count"),
+      guest_count: resolveField(entry, "guest_count"),
+    })
+  }
+
+  let applied = 0
+  try {
+    applied = await upsertManualDaySalesEntries(supabase, store_partition_key, upsertPayload)
+  } catch (e) {
+    throw {
+      status: 500,
+      message: `Failed to save manual day sales: ${String(e)}`,
     } satisfies AppError
   }
 

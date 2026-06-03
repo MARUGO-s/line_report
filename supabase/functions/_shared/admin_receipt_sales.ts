@@ -13,6 +13,10 @@ import {
   upsertManualMonthSalesEntries,
   type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
+import {
+  fetchManualDaySalesMapForStore,
+  type ManualDaySalesRecord,
+} from './manual_day_sales.ts'
 import { sanitizeReceiptCountFromDb } from './receipt_parse.ts'
 import { queryStoreReceiptRows, loadStoreRegistry } from './store_receipt_query.ts'
 import { autoLinkDetectedRoomsForStore } from './auto_link_room.ts'
@@ -617,14 +621,29 @@ export async function fetchReceiptSalesState(
     ? (byStoreByDate.get(selectedStoreKey) ?? new Map<string, DailyTotal>())
     : new Map<string, DailyTotal>()
 
+  // 日次手入力（売上分析の日次表からの直接編集）。値のある列はその日のレシート集計より優先。
+  const storeKeyForManual = normalizeBudgetStoreKey(selectedStoreKeyRaw || selectedStoreKey || '')
+  const [manualMonthYear, manualMonthNum] = month.split('-').map(Number)
+  const monthFirstDay = `${month}-01`
+  const monthEndExclusive = `${manualMonthNum === 12 ? manualMonthYear + 1 : manualMonthYear}-${
+    String(manualMonthNum === 12 ? 1 : manualMonthNum + 1).padStart(2, '0')
+  }-01`
+  const manualDayMap = selectedStoreKey
+    ? await fetchManualDaySalesMapForStore(supabase, storeKeyForManual, monthFirstDay, monthEndExclusive)
+    : new Map<string, ManualDaySalesRecord>()
+
   const series = dayKeys.map((dateKey) => {
     const daily = selectedDailyMap.get(dateKey)
     const receiptCount = daily?.receipt_count ?? 0
-    const grossSalesYen = daily?.gross_sales_yen ?? 0
     const netSalesYen = daily?.net_sales_yen ?? 0
     const taxAmountYen = daily?.tax_amount_yen ?? 0
-    const partyCount = daily?.party_count ?? 0
-    const guestCount = daily?.guest_count ?? 0
+    const receiptGross = daily?.gross_sales_yen ?? 0
+    const receiptParty = daily?.party_count ?? 0
+    const receiptGuest = daily?.guest_count ?? 0
+    const md = manualDayMap.get(dateKey) ?? null
+    const grossSalesYen = md?.gross_sales_yen != null ? md.gross_sales_yen : receiptGross
+    const partyCount = md?.party_count != null ? md.party_count : receiptParty
+    const guestCount = md?.guest_count != null ? md.guest_count : receiptGuest
     return {
       date: dateKey,
       receipt_count: receiptCount,
@@ -637,6 +656,9 @@ export async function fetchReceiptSalesState(
       avg_party_count: receiptCount > 0 ? roundToScale(partyCount / receiptCount, 2) : null,
       avg_guest_count: receiptCount > 0 ? roundToScale(guestCount / receiptCount, 2) : null,
       avg_unit_price_yen: guestCount > 0 ? Math.round(grossSalesYen / guestCount) : null,
+      manual_gross: md?.gross_sales_yen != null,
+      manual_party: md?.party_count != null,
+      manual_guest: md?.guest_count != null,
     }
   })
 
@@ -662,7 +684,6 @@ export async function fetchReceiptSalesState(
 
   const compareYear = parseCompareYearQueryParam(url.searchParams.get('compare_year'), month)
   const comparison_sales_month = comparisonSalesMonth(month, compareYear)
-  const storeKeyForManual = normalizeBudgetStoreKey(selectedStoreKeyRaw || selectedStoreKey || '')
   const manualThisMonth = selectedStoreKey
     ? await fetchManualMonthSales(supabase, storeKeyForManual, month)
     : null
@@ -704,6 +725,43 @@ export async function fetchReceiptSalesState(
     daily_budget_yen_by_date = Object.fromEntries(map)
   }
 
+  // 月間合計の算出: レシートまたは日次手入力がある月は「日別合計（レシート＋日次手入力）」を正本にする。
+  // どちらも無い月だけ従来の月次手入力(whole-month)を適用（レシート優先＝[[option-a]]と整合）。
+  const hasDayManual = manualDayMap.size > 0
+  const receiptCountTotal = selectedStore?.receipt_count ?? 0
+  const seriesGrossTotal = series.reduce((a, r) => a + r.gross_sales_yen, 0)
+  const seriesPartyTotal = series.reduce((a, r) => a + r.party_count, 0)
+  const seriesGuestTotal = series.reduce((a, r) => a + r.guest_count, 0)
+  const monthOverrideApplies = receiptCountTotal === 0 && !hasDayManual && manualThisMonth != null
+  const totals: ReceiptSalesTotals = (receiptCountTotal > 0 || hasDayManual)
+    ? {
+      receipt_count: receiptCountTotal,
+      total_gross_sales_yen: seriesGrossTotal,
+      total_net_sales_yen: selectedStore?.total_net_sales_yen ?? 0,
+      total_tax_amount_yen: selectedStore?.total_tax_amount_yen ?? 0,
+      total_party_count: seriesPartyTotal,
+      total_guest_count: seriesGuestTotal,
+      avg_gross_sales_yen: receiptCountTotal > 0 ? Math.round(seriesGrossTotal / receiptCountTotal) : null,
+      avg_party_count: receiptCountTotal > 0 ? roundToScale(seriesPartyTotal / receiptCountTotal, 2) : null,
+      avg_guest_count: receiptCountTotal > 0 ? roundToScale(seriesGuestTotal / receiptCountTotal, 2) : null,
+      avg_unit_price_yen: seriesGuestTotal > 0 ? Math.round(seriesGrossTotal / seriesGuestTotal) : null,
+    }
+    : mergeSalesTotalsWithManualMonth(
+      {
+        receipt_count: 0,
+        total_gross_sales_yen: 0,
+        total_net_sales_yen: 0,
+        total_tax_amount_yen: 0,
+        total_party_count: 0,
+        total_guest_count: 0,
+        avg_gross_sales_yen: null,
+        avg_party_count: null,
+        avg_guest_count: null,
+        avg_unit_price_yen: null,
+      },
+      manualThisMonth,
+    )
+
   return {
     month,
     month_budget_yen,
@@ -726,9 +784,9 @@ export async function fetchReceiptSalesState(
     manual_month_party_count,
     manual_month_guest_count,
     manual_month_operating_days_count,
-    // 「月計は手入力」表示は手入力が実際に合計へ反映されている時のみ。
-    // レシート優先のため、レシートがある月は手入力レコードがあっても反映されない＝false。
-    manual_month_has_entry: manualThisMonth != null && (selectedStore?.receipt_count ?? 0) === 0,
+    // 「月計は手入力」表示は月次手入力(whole-month)が実際に合計へ反映されている時のみ。
+    // レシートまたは日次手入力がある月はそちらが正本＝月次手入力は不適用＝false。
+    manual_month_has_entry: monthOverrideApplies,
     daily_budget_yen_by_date,
     month_start_iso: range.startIso,
     month_end_iso: range.endIso,
@@ -737,29 +795,7 @@ export async function fetchReceiptSalesState(
     selected_store_key: selectedStoreKey || null,
     selected_store_name: selectedStore?.store_name ?? null,
     store_options: storeOptions,
-    totals: mergeSalesTotalsWithManualMonth(
-      {
-        receipt_count: selectedStore?.receipt_count ?? 0,
-        total_gross_sales_yen: selectedStore?.total_gross_sales_yen ?? 0,
-        total_net_sales_yen: selectedStore?.total_net_sales_yen ?? 0,
-        total_tax_amount_yen: selectedStore?.total_tax_amount_yen ?? 0,
-        total_party_count: selectedStore?.total_party_count ?? 0,
-        total_guest_count: selectedStore?.total_guest_count ?? 0,
-        avg_gross_sales_yen: selectedStore && selectedStore.receipt_count > 0
-          ? Math.round(selectedStore.total_gross_sales_yen / selectedStore.receipt_count)
-          : null,
-        avg_party_count: selectedStore && selectedStore.receipt_count > 0
-          ? roundToScale(selectedStore.total_party_count / selectedStore.receipt_count, 2)
-          : null,
-        avg_guest_count: selectedStore && selectedStore.receipt_count > 0
-          ? roundToScale(selectedStore.total_guest_count / selectedStore.receipt_count, 2)
-          : null,
-        avg_unit_price_yen: selectedStore && selectedStore.total_guest_count > 0
-          ? Math.round(selectedStore.total_gross_sales_yen / selectedStore.total_guest_count)
-          : null,
-      },
-      manualThisMonth,
-    ),
+    totals,
     series,
     available_store_count: storeOptions.length,
     source_row_count: rows.length,
@@ -838,6 +874,8 @@ export async function fetchAnalyticsMonthly(
   }
 
   const storeSet = new Map<string, string>()
+  // 日次手入力の差分計算用に日別レシート集計を保持（store絞り込み時のみ使用）
+  const perDayReceipt = new Map<string, { gross: number; party: number; guest: number }>()
 
   for (const row of rows) {
     const dateStr = toSafeString(row.receipt_date)
@@ -845,22 +883,49 @@ export async function fetchAnalyticsMonthly(
     const monthKey = dateStr.slice(0, 7)
     const bucket = monthMap.get(monthKey)
     if (!bucket) continue
-    bucket.gross_sales_yen += toNonNegativeInteger(row.gross_sales_yen)
+    const rowGross = toNonNegativeInteger(row.gross_sales_yen)
+    const rowParty = sanitizeReceiptCountFromDb(row.party_count)
+    const rowGuest = sanitizeReceiptCountFromDb(row.guest_count, 99_999)
+    bucket.gross_sales_yen += rowGross
     bucket.net_sales_yen += toNonNegativeInteger(row.net_sales_yen)
-    bucket.party_count += sanitizeReceiptCountFromDb(row.party_count)
-    bucket.guest_count += sanitizeReceiptCountFromDb(row.guest_count, 99_999)
+    bucket.party_count += rowParty
+    bucket.guest_count += rowGuest
     bucket.receipt_count += 1
+    const pd = perDayReceipt.get(dateStr) ?? { gross: 0, party: 0, guest: 0 }
+    pd.gross += rowGross
+    pd.party += rowParty
+    pd.guest += rowGuest
+    perDayReceipt.set(dateStr, pd)
     const sk = toSafeString(row.store_partition_key)
     if (sk && !storeSet.has(sk)) storeSet.set(sk, toSafeString(row.store_name) || sk)
   }
 
   if (resolvedStoreKey) {
+    // 日次手入力: その日のレシート集計を手入力で置換（差分を月バケットへ反映）
+    const manualDayMap = await fetchManualDaySalesMapForStore(
+      supabase,
+      resolvedStoreKey,
+      startDateStr,
+      endDateStr,
+    )
+    const monthsWithDayManual = new Set<string>()
+    for (const [date, md] of manualDayMap.entries()) {
+      const monthKey = date.slice(0, 7)
+      const bucket = monthMap.get(monthKey)
+      if (!bucket) continue
+      const rd = perDayReceipt.get(date)
+      if (md.gross_sales_yen != null) bucket.gross_sales_yen += md.gross_sales_yen - (rd?.gross ?? 0)
+      if (md.party_count != null) bucket.party_count += md.party_count - (rd?.party ?? 0)
+      if (md.guest_count != null) bucket.guest_count += md.guest_count - (rd?.guest ?? 0)
+      monthsWithDayManual.add(monthKey)
+    }
+    // 月次手入力(whole-month): レシートも日次手入力も無い月だけ適用（[[option-a]]と整合）
     const manualByMonth = await fetchManualMonthSalesMapForStore(supabase, resolvedStoreKey, monthKeys)
     for (const [monthKey, manual] of manualByMonth.entries()) {
       const bucket = monthMap.get(monthKey)
       if (!bucket) continue
-      // レシート優先: レシートがある月はレシート集計を正とし手入力上書きを無視（KPIと整合）
       if (bucket.receipt_count > 0) continue
+      if (monthsWithDayManual.has(monthKey)) continue
       bucket.gross_sales_yen = manual.gross_sales_yen
       if (manual.party_count != null) bucket.party_count = manual.party_count
       if (manual.guest_count != null) bucket.guest_count = manual.guest_count

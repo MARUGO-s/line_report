@@ -373,6 +373,40 @@
     }
     .receipt-daily-diff-pos { color: var(--ok); font-weight: 600; }
     .receipt-daily-diff-neg { color: var(--bad); font-weight: 600; }
+    .receipt-daily #receiptDailyTable td.rd-editable { cursor: pointer; }
+    .receipt-daily #receiptDailyTable td.rd-editable:hover {
+      background: var(--accent-soft);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+    }
+    .receipt-daily #receiptDailyTable td.rd-manual {
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .receipt-daily #receiptDailyTable td.rd-manual::after {
+      content: '✎';
+      font-size: 9px;
+      margin-left: 3px;
+      opacity: 0.65;
+      vertical-align: super;
+    }
+    .receipt-daily #receiptDailyTable td.rd-editing { padding: 1px 2px !important; }
+    .receipt-daily #receiptDailyTable td.rd-editing input {
+      width: 100%;
+      box-sizing: border-box;
+      text-align: right;
+      font: inherit;
+      font-variant-numeric: tabular-nums;
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      padding: 2px 4px;
+      background: var(--surface);
+      color: var(--txt);
+      -moz-appearance: textfield;
+    }
+    .receipt-daily #receiptDailyTable td.rd-editing input::-webkit-outer-spin-button,
+    .receipt-daily #receiptDailyTable td.rd-editing input::-webkit-inner-spin-button {
+      -webkit-appearance: none; margin: 0;
+    }
     .receipt-daily #receiptDailyTable td.empty {
       text-align: center;
       color: var(--sub);
@@ -1289,6 +1323,8 @@ if (dom.compareYearSelect) {
 
 /** 日次売上数値表：ビューポート変更時の再描画用 */
 let lastReceiptDailyData = null;
+/** インライン編集の入力欄が開いている間は再描画を抑止（編集内容の消失防止） */
+let receiptDailyEditActive = false;
 
 /* ── helpers ── */
 function getToken() {
@@ -1399,6 +1435,20 @@ function receiptDailyBudgetLookup(budgetByDate, r) {
   return null;
 }
 
+/** 編集可能セル（総売上・組数・客数）。手入力上書き中の列には rd-manual で印を付ける。 */
+function rdEditableCell(dateKey, field, rawVal, display, isManual) {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    return `<td style="text-align:right">${display}</td>`;
+  }
+  const n = Number(rawVal);
+  const raw = Number.isFinite(n) ? String(Math.round(n)) : '';
+  const cls = 'rd-editable' + (isManual ? ' rd-manual' : '');
+  return (
+    `<td class="${cls}" style="text-align:right" data-date="${escapeHtml(dateKey)}"` +
+    ` data-field="${field}" data-rawval="${escapeHtml(raw)}" title="クリックで編集（空欄で解除）">${display}</td>`
+  );
+}
+
 function receiptDailyCellsForDay(r, budgetByDate, storeClosedSet, asOfJst, nowRef) {
   const empty6 = '<td></td><td></td><td></td><td></td><td></td><td></td>';
   if (!r) return empty6;
@@ -1441,9 +1491,9 @@ function receiptDailyCellsForDay(r, budgetByDate, storeClosedSet, asOfJst, nowRe
   const diffAttr = diffClass ? ` class="${diffClass}"` : '';
   return (
     `<td>${receiptDailyDateCellInnerHtml(r.date)}</td>` +
-    `<td style="text-align:right">${formatYenReceiptInt(r.gross_sales_yen)}</td>` +
-    `<td style="text-align:right">${Number(r.party_count || 0)}</td>` +
-    `<td style="text-align:right">${Number(r.guest_count || 0)}</td>` +
+    rdEditableCell(dateKey, 'gross', r.gross_sales_yen, formatYenReceiptInt(r.gross_sales_yen), r.manual_gross === true) +
+    rdEditableCell(dateKey, 'party', r.party_count, String(Number(r.party_count || 0)), r.manual_party === true) +
+    rdEditableCell(dateKey, 'guest', r.guest_count, String(Number(r.guest_count || 0)), r.manual_guest === true) +
     `<td style="text-align:right">${budgetCell}</td>` +
     `<td style="text-align:right"${diffAttr}>${diffCell}</td>`
   );
@@ -1554,6 +1604,7 @@ function splitReceiptDailySeries(series, numBlocks) {
 }
 
 function receiptDailyOnViewportChange() {
+  if (receiptDailyEditActive) return;
   if (lastReceiptDailyData) {
     renderReceiptDailyTable(lastReceiptDailyData);
     return;
@@ -1565,6 +1616,7 @@ function receiptDailyOnViewportChange() {
 
 function renderReceiptDailyTable(data) {
   if (!dom.receiptDailyTableBody || !dom.receiptDailyMeta) return;
+  if (receiptDailyEditActive) return;
   const numBlocks = receiptDailyBlockCount();
   receiptDailySyncLayoutChrome(numBlocks);
   const colspan = numBlocks * RECEIPT_DAILY_COLS;
@@ -1680,6 +1732,105 @@ function buildReceiptDailyTablePayload(salesData, displayMonth, isSingleMonth) {
       ? [...state.lastStoreClosedDates]
       : [],
   };
+}
+
+const RD_FIELD_TO_API = { gross: 'gross_sales_yen', party: 'party_count', guest: 'guest_count' };
+
+function rdResolveStoreKey() {
+  return String(lastReceiptDailyData?.selected_store_key || state.storeKey || '').trim();
+}
+
+/** セルをクリック→input に置換して編集開始（Enter/フォーカス外で確定・Escapeで取消） */
+function beginReceiptDailyCellEdit(td) {
+  if (!td || receiptDailyEditActive || !td.classList.contains('rd-editable')) return;
+  const dateKey = td.getAttribute('data-date') || '';
+  const field = td.getAttribute('data-field') || '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !RD_FIELD_TO_API[field]) return;
+  const storeKey = rdResolveStoreKey();
+  if (!storeKey) return;
+
+  receiptDailyEditActive = true;
+  const prevHtml = td.innerHTML;
+  const origRaw = td.getAttribute('data-rawval') || '';
+  td.classList.add('rd-editing');
+  td.innerHTML = '';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.step = field === 'gross' ? '1000' : '1';
+  input.setAttribute('inputmode', 'numeric');
+  input.value = origRaw;
+  td.appendChild(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = (commit) => {
+    if (done) return;
+    done = true;
+    input.removeEventListener('keydown', onKey);
+    input.removeEventListener('blur', onBlur);
+    if (commit) {
+      commitReceiptDailyCellEdit(storeKey, dateKey, field, input.value, origRaw);
+    } else {
+      td.classList.remove('rd-editing');
+      td.innerHTML = prevHtml;
+      receiptDailyEditActive = false;
+    }
+  };
+  const onKey = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  };
+  const onBlur = () => finish(true);
+  input.addEventListener('keydown', onKey);
+  input.addEventListener('blur', onBlur);
+}
+
+/** 入力確定→/receipts/sales-manual-days に PUT して再読込（空欄は上書き解除=null・変更なしは無送信） */
+async function commitReceiptDailyCellEdit(storeKey, dateKey, field, rawInput, origRaw) {
+  const apiField = RD_FIELD_TO_API[field];
+  const cleaned = String(rawInput ?? '').trim().replace(/,/g, '');
+  if (cleaned === String(origRaw ?? '')) {
+    receiptDailyEditActive = false;
+    renderReceiptDailyTable(lastReceiptDailyData);
+    return;
+  }
+  let value;
+  if (cleaned === '') {
+    value = null;
+  } else {
+    const n = Number(cleaned);
+    if (!Number.isFinite(n) || n < 0) {
+      receiptDailyEditActive = false;
+      renderReceiptDailyTable(lastReceiptDailyData);
+      return;
+    }
+    value = Math.round(n);
+  }
+  if (dom.receiptDailyMeta) dom.receiptDailyMeta.textContent = '保存中…';
+  try {
+    await apiFetch('/receipts/sales-manual-days', {
+      method: 'PUT',
+      body: { store_key: storeKey, entries: [{ sales_date: dateKey, [apiField]: value }] },
+    });
+    receiptDailyEditActive = false;
+    await loadAll();
+  } catch (e) {
+    receiptDailyEditActive = false;
+    renderReceiptDailyTable(lastReceiptDailyData);
+    if (dom.receiptDailyMeta) {
+      dom.receiptDailyMeta.textContent = '保存に失敗: ' + (e && e.message ? e.message : String(e));
+    }
+  }
+}
+
+if (dom.receiptDailyTableBody) {
+  dom.receiptDailyTableBody.addEventListener('click', (e) => {
+    if (receiptDailyEditActive) return;
+    const td = e.target && e.target.closest ? e.target.closest('td.rd-editable') : null;
+    if (td && dom.receiptDailyTableBody.contains(td)) beginReceiptDailyCellEdit(td);
+  });
 }
 
 function resetReceiptDailyDisconnected() {
