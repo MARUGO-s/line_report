@@ -10,7 +10,7 @@ import {
 type DbClient = ReturnType<typeof createClient>
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000
-// 送信時刻が未設定(NULL)のルームは前日18:00を既定とする。
+// 送信時刻が未設定(NULL)のルームは当日18:00を既定とする。
 const DEFAULT_ALERT_HOUR_JST = 18
 const DEFAULT_ALERT_MINUTE_JST = 0
 const CANCELLATION_RE = /(キャンセル|取消|取り消し|cancel|cancelled|canceled)/i
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
 
   const { data: roomSettings, error: settingsError } = await supabase
     .from("room_summary_settings")
-    .select("room_id, is_enabled, tomorrow_reservation_alert_enabled, tomorrow_reservation_alert_hour, tomorrow_reservation_alert_minute, receipt_report_store_partition_key")
+    .select("room_id, is_enabled, today_reservation_alert_enabled, today_reservation_alert_hour, today_reservation_alert_minute, receipt_report_store_partition_key")
   if (settingsError) {
     return json({ ok: false, error: `Failed to load room_summary_settings: ${settingsError.message}` }, 500)
   }
@@ -64,10 +64,10 @@ Deno.serve(async (req) => {
   for (const row of (Array.isArray(roomSettings) ? roomSettings : [])) {
     const roomId = String(row.room_id ?? "").trim()
     if (!roomId) continue
-    if (row.tomorrow_reservation_alert_enabled !== true) continue
+    if (row.today_reservation_alert_enabled !== true) continue
     if (row.is_enabled === false) continue
-    const h = row.tomorrow_reservation_alert_hour != null ? Number(row.tomorrow_reservation_alert_hour) : DEFAULT_ALERT_HOUR_JST
-    const m = row.tomorrow_reservation_alert_minute != null ? Number(row.tomorrow_reservation_alert_minute) : DEFAULT_ALERT_MINUTE_JST
+    const h = row.today_reservation_alert_hour != null ? Number(row.today_reservation_alert_hour) : DEFAULT_ALERT_HOUR_JST
+    const m = row.today_reservation_alert_minute != null ? Number(row.today_reservation_alert_minute) : DEFAULT_ALERT_MINUTE_JST
     if (jst.hour !== h || jst.minute !== m) continue
     targetRooms.push({ roomId, storeKey: String(row.receipt_report_store_partition_key ?? "").trim() })
   }
@@ -77,10 +77,10 @@ Deno.serve(async (req) => {
     return json({ ok: true, skipped: true, reason: "no_rooms_scheduled_now", now_jst: nowJst }, 200)
   }
 
-  // 明日(JST)の予約を1度だけ取得し、各ルームの店舗で絞り込む。
-  const tomorrow = jstTomorrowParts(now)
-  const range = jstDayUtcRange(tomorrow.year, tomorrow.month, tomorrow.day)
-  const targetDate = toJstDateString(tomorrow.year, tomorrow.month, tomorrow.day)
+  // 当日(JST)の予約を1度だけ取得し、各ルームの店舗で絞り込む。
+  const today = { year: jst.year, month: jst.month, day: jst.day }
+  const range = jstDayUtcRange(today.year, today.month, today.day)
+  const targetDate = toJstDateString(today.year, today.month, today.day)
   const reservations = await loadReservationsInRange(supabase, range.startIso, range.endIso)
 
   const sent: string[] = []
@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
 
     // 同時実行での二重送信を防ぐため、先に重複防止行を確保してから送信する。
     const { error: insertError } = await supabase
-      .from("reservation_tomorrow_alert_logs")
+      .from("reservation_today_alert_logs")
       .insert({
         room_id: target.roomId,
         target_date: targetDate,
@@ -123,13 +123,13 @@ Deno.serve(async (req) => {
     const storeDisplayName = resolveReceiptSheetsStoreDisplayName(storeKey)
       ?? matched.find((r) => r.storeName)?.storeName
       ?? null
-    const flex = buildTomorrowReservationFlex(storeDisplayName, tomorrow, matched)
+    const flex = buildTodayReservationFlex(storeDisplayName, today, matched)
     const sendResult = await sendLinePushMessages(target.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken))
     if (!sendResult.ok) {
       // 送信失敗時は予約行を取り消し、次回起動で再送できるようにする。
       try {
         await supabase
-          .from("reservation_tomorrow_alert_logs")
+          .from("reservation_today_alert_logs")
           .delete()
           .eq("room_id", target.roomId)
           .eq("target_date", targetDate)
@@ -235,16 +235,16 @@ function looksCancelled(
   return CANCELLATION_RE.test(rawDetail)
 }
 
-function buildTomorrowReservationFlex(
+function buildTodayReservationFlex(
   storeDisplayName: string | null,
-  tomorrow: { year: number; month: number; day: number },
+  today: { year: number; month: number; day: number },
   reservations: NormalizedReservation[],
 ) {
-  const dateLabel = jstDateLabel(tomorrow.year, tomorrow.month, tomorrow.day)
+  const dateLabel = jstDateLabel(today.year, today.month, today.day)
   const count = reservations.length
 
   const headerContents: Array<Record<string, unknown>> = [
-    { type: "text", text: "明日のご予約", color: "#FFFFFFCC", size: "sm", weight: "bold" },
+    { type: "text", text: "本日のご予約", color: "#FFFFFFCC", size: "sm", weight: "bold" },
   ]
   if (storeDisplayName) {
     headerContents.push({ type: "text", text: storeDisplayName, color: "#FFFFFF", size: "lg", weight: "bold", wrap: true })
@@ -260,7 +260,7 @@ function buildTomorrowReservationFlex(
   let bodyContents: Array<Record<string, unknown>>
   if (count === 0) {
     bodyContents = [
-      { type: "text", text: "明日のご予約はありません。", size: "sm", color: "#8A94A6", wrap: true, align: "center" },
+      { type: "text", text: "本日のご予約はありません。", size: "sm", color: "#8A94A6", wrap: true, align: "center" },
     ]
   } else {
     const shown = reservations.slice(0, MAX_FLEX_ITEMS)
@@ -302,7 +302,7 @@ function buildTomorrowReservationFlex(
     },
   }
 
-  const altParts = [storeDisplayName, `明日のご予約 ${count}件`].filter(Boolean)
+  const altParts = [storeDisplayName, `本日のご予約 ${count}件`].filter(Boolean)
   return {
     type: "flex",
     altText: truncate(altParts.join(" / "), 380),
@@ -403,12 +403,6 @@ function toJstDateParts(base = new Date()) {
   }
 }
 
-function jstTomorrowParts(base = new Date()) {
-  const jst = new Date(base.getTime() + JST_OFFSET_MS)
-  const next = new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() + 1))
-  return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() }
-}
-
 function jstDayUtcRange(year: number, month: number, day: number) {
   return {
     startIso: new Date(Date.UTC(year, month - 1, day, -9, 0, 0, 0)).toISOString(),
@@ -466,7 +460,7 @@ type TestSpec = { roomId: string; storePartitionKey: string | null; targetDate: 
 
 function parseTestRequest(req: Request): TestSpec | null {
   const url = new URL(req.url)
-  const flag = (url.searchParams.get("test_tomorrow_reservation") ?? "").trim().toLowerCase()
+  const flag = (url.searchParams.get("test_today_reservation") ?? "").trim().toLowerCase()
   if (flag !== "1" && flag !== "true" && flag !== "yes" && flag !== "on") return null
   const roomId = (url.searchParams.get("room_id") ?? "").trim()
   if (!roomId) return null
@@ -478,7 +472,7 @@ function parseTestRequest(req: Request): TestSpec | null {
     storePartitionKey: storeKeyRaw || null,
     targetDate,
     keyFromQuery: (url.searchParams.get("key") ?? "").trim(),
-    keyFromHeader: (req.headers.get("x-reservation-tomorrow-test-key") ?? "").trim(),
+    keyFromHeader: (req.headers.get("x-reservation-today-test-key") ?? "").trim(),
   }
 }
 
@@ -486,9 +480,9 @@ async function handleTestSend(
   spec: TestSpec,
   deps: { supabaseUrl: string; serviceRoleKey: string; lineAccessToken: string },
 ): Promise<Response> {
-  const testKey = (Deno.env.get("RESERVATION_TOMORROW_CRON_TEST_KEY") ?? "").trim()
+  const testKey = (Deno.env.get("RESERVATION_TODAY_CRON_TEST_KEY") ?? "").trim()
   if (!testKey) {
-    return json({ ok: false, error: "Test send is disabled. Set Edge secret RESERVATION_TOMORROW_CRON_TEST_KEY." }, 503)
+    return json({ ok: false, error: "Test send is disabled. Set Edge secret RESERVATION_TODAY_CRON_TEST_KEY." }, 503)
   }
   const provided = spec.keyFromHeader || spec.keyFromQuery
   if (!provided || provided !== testKey) {
@@ -504,18 +498,19 @@ async function handleTestSend(
     storeKey = String((await resolveStorePartitionKeyForRoom(supabase, spec.roomId)) ?? "").trim()
   }
   if (!storeKey) {
-    return json({ ok: true, skipped: true, mode: "test_tomorrow_reservation", reason: "store_not_resolved_for_room", room_id: spec.roomId }, 200)
+    return json({ ok: true, skipped: true, mode: "test_today_reservation", reason: "store_not_resolved_for_room", room_id: spec.roomId }, 200)
   }
 
   const now = new Date()
-  let tomorrow: { year: number; month: number; day: number }
+  let today: { year: number; month: number; day: number }
   if (spec.targetDate) {
     const [y, m, d] = spec.targetDate.split("-").map((n) => Number(n))
-    tomorrow = { year: y, month: m, day: d }
+    today = { year: y, month: m, day: d }
   } else {
-    tomorrow = jstTomorrowParts(now)
+    const jstNow = toJstDateParts(now)
+    today = { year: jstNow.year, month: jstNow.month, day: jstNow.day }
   }
-  const range = jstDayUtcRange(tomorrow.year, tomorrow.month, tomorrow.day)
+  const range = jstDayUtcRange(today.year, today.month, today.day)
   const reservations = (await loadReservationsInRange(supabase, range.startIso, range.endIso))
     .filter((r) => r.storeKey && pilotStorePartitionKeysMatch(r.storeKey, storeKey))
     .sort((a, b) => a.visitAtIso.localeCompare(b.visitAtIso))
@@ -523,18 +518,18 @@ async function handleTestSend(
   const storeDisplayName = resolveReceiptSheetsStoreDisplayName(storeKey)
     ?? reservations.find((r) => r.storeName)?.storeName
     ?? null
-  const flex = buildTomorrowReservationFlex(storeDisplayName, tomorrow, reservations)
+  const flex = buildTodayReservationFlex(storeDisplayName, today, reservations)
   const sendResult = await sendLinePushMessages(spec.roomId, [flex], resolveStoreLineToken(storeKey, deps.lineAccessToken))
   if (!sendResult.ok) {
-    return json({ ok: false, error: sendResult.error, mode: "test_tomorrow_reservation" }, 502)
+    return json({ ok: false, error: sendResult.error, mode: "test_today_reservation" }, 502)
   }
   return json({
     ok: true,
-    mode: "test_tomorrow_reservation",
-    note: "Preview send only. reservation_tomorrow_alert_logs was NOT updated.",
+    mode: "test_today_reservation",
+    note: "Preview send only. reservation_today_alert_logs was NOT updated.",
     room_id: spec.roomId,
     store_partition_key: storeKey,
-    target_date: toJstDateString(tomorrow.year, tomorrow.month, tomorrow.day),
+    target_date: toJstDateString(today.year, today.month, today.day),
     reservation_count: reservations.length,
   }, 200)
 }
