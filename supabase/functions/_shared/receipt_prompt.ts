@@ -37,26 +37,38 @@ export function buildReceiptVisionSystemPrompt(customAddition?: string | null): 
   ].join('\n')
 }
 
+/** 鮨こるりの固有ルール。手書き数字の誤読補正のため、解析時点の本日(JST)を埋め込む。 */
+function buildSushikoruriBuiltinPrompt(): string {
+  const jstNow = new Date(Date.now() + 9 * 3600 * 1000)
+  const y = jstNow.getUTCFullYear()
+  const m = jstNow.getUTCMonth() + 1
+  const d = jstNow.getUTCDate()
+  return [
+    '【鮨こるり 固有ルール（最優先）】',
+    '・手書き/印字を問わず「売上日報」「日報」など“その日の売上を集計したメモ”は、レシート/領収書と同等とみなし必ず kind=receipt とする（kind=general にしない）。',
+    '・「店舗名」→ store_name（例: 鮨こるり）。',
+    '・「カード売上」＋「現金売上」の合計金額を gross_sales に入れる（¥表記）。片方が0でも合計する。',
+    '・「◯組◯名」表記があれば ◯組→party_count、◯名→guest_count（数値）。「1組1名」なら party_count=1, guest_count=1。',
+    '・上記の主要項目が読めれば receipt_confidence は 0.6 以上とする。',
+    '・【日付の読み取り注意】この用紙の手書き数字は「1」と「6」が酷似していて誤読しやすい。年・月・日のいずれでも 1↔6 を取り違えないよう特に注意する（例: 6 を 1 と誤読すると「2026」が「2021」に、「16日」が「11日」になりやすい）。読めた数字が 1 のときは、本当は 6 ではないか必ず見直す。',
+    `・本日(JST)は ${y}年${m}月${d}日。読み取った西暦(date の年)が本日の年(${y})から大きく外れる（おおむね2年以上のズレ）場合は、ほぼ確実に 1↔6 等の誤読なので、西暦は本日の年(${y})に自動補正して date に入れる。`,
+    '・date は西暦で「YYYY年M月D日」の形にする。月・日は通常は当月〜直近数日のはずで、極端に離れた値は 1↔6 の誤読を疑う（ただし日は当日へ強制せず、用紙の数字を尊重しつつ明らかな誤読のみ補正する）。',
+  ].join('\n')
+}
+
 /**
  * コード側に常駐する店舗固有のレシート解析ルール（恒久・UIで消えない）。
  * DB追記より優先で先頭に置く。例: 鮨こるりは手書きの「売上日報」をレシート扱いにする必要がある。
  */
-const STORE_BUILTIN_RECEIPT_PROMPT: Record<string, string> = {
-  sushikoruri: [
-    '【鮨こるり 固有ルール（最優先）】',
-    '・手書き/印字を問わず「売上日報」「日報」など“その日の売上を集計したメモ”は、レシート/領収書と同等とみなし必ず kind=receipt とする（kind=general にしない）。',
-    '・「店舗名」→ store_name（例: 鮨こるり）。',
-    '・「日付」→ date（西暦。"2026年6月2日"のような手書き数字は桁を一字ずつ丁寧に読み、年の誤読に注意）。',
-    '・「カード売上」＋「現金売上」の合計金額を gross_sales に入れる（¥表記）。片方が0でも合計する。',
-    '・「◯組◯名」表記があれば ◯組→party_count、◯名→guest_count（数値）。「1組1名」なら party_count=1, guest_count=1。',
-    '・上記の主要項目が読めれば receipt_confidence は 0.6 以上とする。',
-  ].join('\n'),
+const STORE_BUILTIN_RECEIPT_PROMPT_BUILDERS: Record<string, () => string> = {
+  sushikoruri: buildSushikoruriBuiltinPrompt,
 }
 
 /** 指定店舗のコード常駐ルール（無ければ空文字）。 */
 export function resolveBuiltinStoreReceiptPrompt(storePartitionKey: string | null | undefined): string {
   const key = String(storePartitionKey ?? '').trim().toLowerCase()
-  return STORE_BUILTIN_RECEIPT_PROMPT[key] ?? ''
+  const builder = STORE_BUILTIN_RECEIPT_PROMPT_BUILDERS[key]
+  return builder ? builder() : ''
 }
 
 /** コード常駐ルール（先頭＝優先）とDB追記を結合し、全体を上限内に収める。 */
