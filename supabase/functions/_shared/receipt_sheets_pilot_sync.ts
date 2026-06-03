@@ -2016,6 +2016,10 @@ function mergeDailyExportRowsPreservingSheetEdits(
     const date = String(exportRow[0] ?? "").trim().slice(0, 10)
     const sheetRow = sheetByDate.get(date)
     if (!sheetRow || !dailyExportRowDiffersFromSheet(exportRow, sheetRow)) return exportRow
+    // シートがオールゼロ = 前回の自動ゼロ埋め。手動編集ではないのでDBの新データを優先する
+    if (sheetRow.gross_sales_yen === 0 && sheetRow.party_count === 0 && sheetRow.guest_count === 0) {
+      return exportRow
+    }
     preservedDates += 1
     const budgetYen = parseNonNegativeInt(exportRow[6])
     return [
@@ -2053,6 +2057,8 @@ async function pullDailySheetEditsToManualMonthGross(
     const date = String(exportRow[0] ?? "").trim().slice(0, 10)
     const sheetRow = sheetByDate.get(date)
     if (!sheetRow || !dailyExportRowDiffersFromSheet(exportRow, sheetRow)) continue
+    // シートがオールゼロ = 前回の自動ゼロ埋め。月次手入力 DB を上書きしない
+    if (sheetRow.gross_sales_yen === 0 && sheetRow.party_count === 0 && sheetRow.guest_count === 0) continue
     monthsTouched.add(date.slice(0, 7))
   }
   if (monthsTouched.size === 0) {
@@ -2076,7 +2082,9 @@ async function pullDailySheetEditsToManualMonthGross(
     }
     entries.push({
       sales_month: month,
-      gross_sales_yen: gross,
+      // 集計売上=0 は「当月の売上なし／ゼロ埋めのみ」。null を渡して手入力行を削除し合計をレシートへ
+      // フォールバックさせる（0 を書くと総売上が 0 で上書きされ「日別は出るのに月間合計だけ ¥0」になるため）。
+      gross_sales_yen: gross > 0 ? gross : null,
       party_count: party > 0 ? party : null,
       guest_count: guest > 0 ? guest : null,
       updated_at: latestMs != null ? new Date(latestMs).toISOString() : new Date().toISOString(),
