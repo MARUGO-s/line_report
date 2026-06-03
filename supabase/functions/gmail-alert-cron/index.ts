@@ -819,6 +819,10 @@ function buildReservationCalendarDetailPayload(alert: GmailMessageAlert, routeLa
   const partySize = normalizeCalendarPartySize(reservation?.partySize)
   const allergy = normalizeCalendarAllergy(reservation?.allergy)
   const storeName = normalizeCalendarDetailText(reservation?.storeName, 90)
+  // キャンセル/変更の種別を detail JSON に載せる。これにより DB 側 reservation_visit_looks_cancelled が
+  // キャンセルを検知して visit_count を -1 できる（種別が無いと +1 のまま減算されない）。
+  const eventLabel = inferReservationEventLabel(alert.subject, alert.snippet)
+  const eventType = eventLabel && eventLabel !== "新規予約" ? eventLabel : null
 
   const payload = {
     v: 1,
@@ -831,6 +835,7 @@ function buildReservationCalendarDetailPayload(alert: GmailMessageAlert, routeLa
     partySize,
     allergy,
     storeName,
+    eventType,
   }
   const hasAnyField = Object.values(payload).some((value) => typeof value === "string" && value.length > 0)
   if (!hasAnyField) return fallbackDetail
