@@ -389,7 +389,8 @@
       opacity: 0.65;
       vertical-align: super;
     }
-    .receipt-daily #receiptDailyTable td.rd-editing { padding: 1px 2px !important; }
+    .receipt-daily #receiptDailyTable td.rd-editing { padding: 2px !important; }
+    .rd-edit-wrap { display: flex; flex-direction: column; gap: 3px; }
     .receipt-daily #receiptDailyTable td.rd-editing input {
       width: 100%;
       box-sizing: border-box;
@@ -407,6 +408,24 @@
     .receipt-daily #receiptDailyTable td.rd-editing input::-webkit-inner-spin-button {
       -webkit-appearance: none; margin: 0;
     }
+    .rd-edit-btns { display: flex; gap: 3px; }
+    .rd-edit-btns button {
+      flex: 1 1 0;
+      min-width: 0;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.5;
+      padding: 2px 2px;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      color: var(--txt);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .rd-edit-btns .rd-edit-ok { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .rd-edit-btns .rd-edit-cancel { background: var(--surface-2); color: var(--sub); }
+    .rd-edit-btns button:hover { filter: brightness(1.08); }
     .receipt-daily #receiptDailyTable td.empty {
       text-align: center;
       color: var(--sub);
@@ -1445,7 +1464,7 @@ function rdEditableCell(dateKey, field, rawVal, display, isManual) {
   const cls = 'rd-editable' + (isManual ? ' rd-manual' : '');
   return (
     `<td class="${cls}" style="text-align:right" data-date="${escapeHtml(dateKey)}"` +
-    ` data-field="${field}" data-rawval="${escapeHtml(raw)}" title="クリックで編集（空欄で解除）">${display}</td>`
+    ` data-field="${field}" data-rawval="${escapeHtml(raw)}" title="クリックで編集→「実行」で保存（空欄で解除）">${display}</td>`
   );
 }
 
@@ -1740,7 +1759,11 @@ function rdResolveStoreKey() {
   return String(lastReceiptDailyData?.selected_store_key || state.storeKey || '').trim();
 }
 
-/** セルをクリック→input に置換して編集開始（Enter/フォーカス外で確定・Escapeで取消） */
+/**
+ * セルをクリック→input ＋【実行】【取消】ボタンに置換して編集開始。
+ * 保存は「実行」ボタンまたは Enter を押した時だけ実行（誤書込み防止）。
+ * 値入力欄からフォーカスを外しても自動保存はせず取消（元の値へ戻す）。Escape / 取消ボタンでも取消。
+ */
 function beginReceiptDailyCellEdit(td) {
   if (!td || receiptDailyEditActive || !td.classList.contains('rd-editable')) return;
   const dateKey = td.getAttribute('data-date') || '';
@@ -1754,13 +1777,32 @@ function beginReceiptDailyCellEdit(td) {
   const origRaw = td.getAttribute('data-rawval') || '';
   td.classList.add('rd-editing');
   td.innerHTML = '';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'rd-edit-wrap';
   const input = document.createElement('input');
   input.type = 'number';
   input.min = '0';
   input.step = field === 'gross' ? '1000' : '1';
   input.setAttribute('inputmode', 'numeric');
   input.value = origRaw;
-  td.appendChild(input);
+  const btns = document.createElement('div');
+  btns.className = 'rd-edit-btns';
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button';
+  okBtn.className = 'rd-edit-ok';
+  okBtn.textContent = '実行';
+  okBtn.title = '変更を実行（保存）';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'rd-edit-cancel';
+  cancelBtn.textContent = '取消';
+  cancelBtn.title = '取消（元に戻す）';
+  btns.appendChild(okBtn);
+  btns.appendChild(cancelBtn);
+  wrap.appendChild(input);
+  wrap.appendChild(btns);
+  td.appendChild(wrap);
   input.focus();
   input.select();
 
@@ -1768,8 +1810,6 @@ function beginReceiptDailyCellEdit(td) {
   const finish = (commit) => {
     if (done) return;
     done = true;
-    input.removeEventListener('keydown', onKey);
-    input.removeEventListener('blur', onBlur);
     if (commit) {
       commitReceiptDailyCellEdit(storeKey, dateKey, field, input.value, origRaw);
     } else {
@@ -1778,13 +1818,22 @@ function beginReceiptDailyCellEdit(td) {
       receiptDailyEditActive = false;
     }
   };
-  const onKey = (e) => {
+  // mousedown で preventDefault し、ボタンへフォーカスを移さない＝入力欄の blur を発火させない。
+  // これで「ボタンクリック時に blur→取消 が先に走って保存されない」競合を防ぐ。
+  okBtn.addEventListener('mousedown', (e) => { e.preventDefault(); });
+  cancelBtn.addEventListener('mousedown', (e) => { e.preventDefault(); });
+  okBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); finish(true); });
+  cancelBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); finish(false); });
+  input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); finish(true); }
     else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
-  };
-  const onBlur = () => finish(true);
-  input.addEventListener('keydown', onKey);
-  input.addEventListener('blur', onBlur);
+  });
+  // 【実行】【取消】以外（表の別セル等）へフォーカスが移った時だけ取消（クリックずれによる誤保存を防ぐ）
+  input.addEventListener('blur', (e) => {
+    const rt = e.relatedTarget;
+    if (rt === okBtn || rt === cancelBtn) return;
+    finish(false);
+  });
 }
 
 /** 入力確定→/receipts/sales-manual-days に PUT して再読込（空欄は上書き解除=null・変更なしは無送信） */

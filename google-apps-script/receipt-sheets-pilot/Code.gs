@@ -231,7 +231,6 @@ function triggerServerBackgroundSync_(direction) {
     makeSyncFetchRequest_(creds.url, creds.secret, {
       direction: direction,
       background_sync: true,
-      prefer_sheet_on_content_diff: true,
     }),
   );
   var elapsed = Math.max(1, Math.round((Date.now() - t0) / 1000));
