@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <base href="/line_report/">
+  <script>
+    /* LINE経由（店舗）アクセスは売上分析ページのみ許可。このページは売上分析へ強制リダイレクト。 */
+    (function(){
+      try {
+        var p = new URLSearchParams(location.search);
+        var isLine = (p.get('from') === 'line') || /Line\//i.test(String(navigator.userAgent || ''));
+        if (!isLine) return;
+        var sk = '';
+        try { sk = sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch (_) {}
+        location.replace('/line_report/analytics.html?from=line' + (sk ? ('&store_key=' + encodeURIComponent(sk)) : ''));
+      } catch (_) {}
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+  <title>AI使用料（概算） | LINE Report</title>
+  <link rel="icon" type="image/svg+xml" href="icons/logo-mark.svg">
+  <style>
+    :root {
+      --app-bg: #0c1117;
+      --surface: #151c25;
+      --surface-2: #1b232e;
+      --sidebar: #0a0f16;
+      --sidebar-2: rgba(255, 255, 255, 0.05);
+      --side-text: #99a6b6;
+      --border: #26313d;
+      --border-strong: #33414f;
+      --text: #e7ecf2;
+      --text-2: #9fadbd;
+      --text-3: #6f7d8d;
+      --accent: #3f7bea;
+      --accent-soft: rgba(56, 125, 234, 0.16);
+      --ok: #36b37e;
+      --ok-soft: rgba(54, 179, 126, 0.18);
+      --warn: #d8961f;
+      --warn-soft: rgba(216, 150, 31, 0.2);
+      --err: #e05656;
+      --err-soft: rgba(224, 86, 86, 0.18);
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 12px 32px -20px rgba(0, 0, 0, 0.7);
+      --radius: 14px;
+    }
+    body[data-theme='light'] {
+      --app-bg: #eef1f5;
+      --surface: #ffffff;
+      --surface-2: #f5f7fa;
+      --sidebar: #0f1620;
+      --sidebar-2: rgba(255, 255, 255, 0.06);
+      --side-text: #aab6c5;
+      --border: #e3e8ef;
+      --border-strong: #d3dae3;
+      --text: #1e2632;
+      --text-2: #5a6675;
+      --text-3: #8b97a6;
+      --accent: #2563d4;
+      --accent-soft: rgba(37, 99, 212, 0.1);
+      --ok: #1f9d57;
+      --ok-soft: rgba(31, 157, 87, 0.12);
+      --warn: #c77d12;
+      --warn-soft: rgba(199, 125, 18, 0.14);
+      --err: #d23b3b;
+      --err-soft: rgba(210, 59, 59, 0.12);
+      --shadow: 0 1px 2px rgba(20, 40, 80, 0.06), 0 10px 28px -18px rgba(20, 40, 80, 0.2);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      color: var(--text);
+      background: var(--app-bg);
+      font-family: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Zen Kaku Gothic New", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+    [hidden] { display: none !important; }
+
+    /* ---------- シェル（サイドバー＋トップバー） ---------- */
+    .ms-shell { display: grid; grid-template-columns: 264px 1fr; min-height: 100vh; }
+    .ms-side {
+      background: var(--sidebar); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+    }
+    .ms-brand { display: flex; align-items: center; gap: 11px; padding: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+    .ms-logo {
+      width: 38px; height: 38px; border-radius: 10px; background: var(--accent);
+      display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; color: #fff; flex: none;
+    }
+    .ms-bt { font-size: 15px; font-weight: 700; line-height: 1.2; color: #eef2f7; }
+    .ms-bs { font-size: 11.5px; color: var(--side-text); margin-top: 2px; }
+    .ms-nav { flex: 1; overflow-y: auto; padding: 16px 12px; }
+    .ms-navlabel {
+      font-size: 11px; font-weight: 600; color: var(--side-text); letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 0 10px; margin: 18px 0 8px;
+    }
+    .ms-navlabel:first-child { margin-top: 0; }
+    .ms-navlink {
+      display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px;
+      font-size: 13.5px; font-weight: 500; color: var(--side-text); text-decoration: none; cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .ms-navlink:hover { background: var(--sidebar-2); color: #eef2f7; }
+    .ms-navlink.active { background: var(--accent); color: #fff; }
+    .ms-navlink .ni { flex: none; display: flex; color: currentColor; opacity: 0.85; }
+    .ms-navlink .ext { margin-left: auto; display: flex; opacity: 0; transition: opacity 0.12s; }
+    .ms-navlink:hover .ext { opacity: 0.7; }
+    .ms-side-foot { border-top: 1px solid rgba(255, 255, 255, 0.06); padding: 14px 18px; }
+    .ms-conn { display: flex; align-items: center; gap: 10px; }
+    .ms-cd { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none; }
+    .ms-ct { font-size: 12.5px; font-weight: 700; color: #eef2f7; }
+    .ms-cs { font-size: 11.5px; color: var(--side-text); margin-top: 1px; }
+    .ms-main { display: flex; flex-direction: column; min-width: 0; }
+    .ms-topbar {
+      display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 32px;
+      border-bottom: 1px solid var(--border); position: sticky; top: 0;
+      background: color-mix(in srgb, var(--app-bg) 86%, transparent); backdrop-filter: blur(8px); z-index: 5;
+    }
+    .ms-content { padding: 34px 32px 80px; }
+    .ms-inner { max-width: 1180px; margin: 0 auto; }
+    .ms-h1 { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: 0.01em; color: var(--text); }
+    .ms-sub { font-size: 14px; color: var(--text-3); margin: 8px 0 0; line-height: 1.5; }
+
+    /* ---------- トップバーのピル ---------- */
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500;
+      color: var(--text-2); background: var(--surface); border: 1px solid var(--border);
+      border-radius: 999px; padding: 6px 13px;
+    }
+    .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+    button.pill { font: inherit; cursor: pointer; }
+    .pill.theme-toggle:hover { background: var(--surface-2); color: var(--text); }
+
+    /* ---------- カード ---------- */
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 24px 26px; margin-top: 22px;
+    }
+    .card-h {
+      display: flex; align-items: center; gap: 10px; padding-bottom: 16px; margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-h .ch-ico {
+      width: 30px; height: 30px; border-radius: 8px; background: var(--surface-2);
+      display: flex; align-items: center; justify-content: center; color: var(--accent); flex: none;
+    }
+    .card-h .ch-t { font-size: 16px; font-weight: 700; color: var(--text); }
+    .card-h .ch-tag { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--text-3); }
+    .card-h .ch-tag.gemini { color: var(--warn); }
+    .card-h .ch-ico.gemini { color: var(--warn); }
+
+    /* ---------- 期間セグメント ---------- */
+    .tabs {
+      display: inline-flex; flex-wrap: wrap; background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 3px; gap: 3px;
+    }
+    .tab {
+      font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; border: 0; background: transparent;
+      color: var(--text-2); padding: 8px 16px; border-radius: 7px; transition: background 0.12s, color 0.12s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { background: var(--accent); color: #fff; font-weight: 700; }
+
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    .toolbar .spacer { flex: 1 1 auto; }
+    .periodlabel { font-size: 12.5px; color: var(--text-3); }
+
+    .button {
+      font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; padding: 11px 17px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; transition: background 0.12s, filter 0.12s;
+    }
+    .button:hover { background: var(--surface); }
+    .button.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 700; }
+    .button.primary:hover { filter: brightness(1.08); }
+    .button:disabled { opacity: 0.55; cursor: default; }
+
+    /* ---------- 注意バナー ---------- */
+    .notice {
+      margin-top: 18px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+      background: var(--warn-soft); border-radius: 12px; padding: 13px 16px;
+      display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--text); line-height: 1.55;
+    }
+    .notice svg { flex: none; margin-top: 2px; color: var(--warn); }
+
+    /* ---------- 合計サマリー ---------- */
+    .totalrow { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+    .total-card {
+      border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; background: var(--surface);
+      position: relative; overflow: hidden;
+    }
+    .total-card::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent);
+    }
+    .total-card.gemini::before { background: var(--warn); }
+    .tc-prov { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+    .total-card.gemini .tc-prov { color: var(--warn); }
+    .tc-model { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+    .tc-jpy { font-size: 30px; font-weight: 800; color: var(--text); margin-top: 12px; font-variant-numeric: tabular-nums; }
+    .tc-usd { font-size: 13px; color: var(--text-2); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+    /* ---------- KPI グリッド ---------- */
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .kpi {
+      border: 1px solid var(--border); border-radius: 12px; padding: 14px 15px; background: var(--surface-2);
+    }
+    .kpi .k-l { font-size: 11.5px; color: var(--text-3); }
+    .kpi .k-v { font-size: 20px; font-weight: 700; color: var(--text); margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .kpi .k-s { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+    .kpi.accent .k-v { color: var(--accent); }
+    .kpi.gemini.accent .k-v { color: var(--warn); }
+
+    /* ---------- 前提条件エディタ ---------- */
+    details.assump { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+    details.assump > summary {
+      cursor: pointer; list-style: none; padding: 12px 16px; font-size: 13px; font-weight: 600; color: var(--text-2);
+      display: flex; align-items: center; gap: 8px;
+    }
+    details.assump > summary::-webkit-details-marker { display: none; }
+    details.assump > summary .chev { transition: transform 0.15s; display: inline-flex; }
+    details.assump[open] > summary .chev { transform: rotate(90deg); }
+    .assump-body { padding: 4px 16px 18px; }
+    .rate-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 11.5px; color: var(--text-3); }
+    .field input {
+      font: inherit; font-size: 13.5px; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+      border-radius: 9px; padding: 9px 11px; outline: none; transition: border-color 0.15s; font-variant-numeric: tabular-nums;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .assump-foot { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+    .assump-foot .note { font-size: 11.5px; color: var(--text-3); }
+
+    /* ---------- 店舗内訳 ---------- */
+    details.brk { margin-top: 16px; }
+    details.brk > summary {
+      cursor: pointer; list-style: none; font-size: 12.5px; font-weight: 600; color: var(--text-2);
+      display: inline-flex; align-items: center; gap: 7px; padding: 4px 0;
+    }
+    details.brk > summary::-webkit-details-marker { display: none; }
+    details.brk > summary .chev { transition: transform 0.15s; display: inline-flex; }
+    details.brk[open] > summary .chev { transform: rotate(90deg); }
+    table.brk-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+    table.brk-table th, table.brk-table td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    table.brk-table th:first-child, table.brk-table td:first-child { text-align: left; }
+    table.brk-table th { color: var(--text-3); font-weight: 600; }
+    table.brk-table td { color: var(--text); font-variant-numeric: tabular-nums; }
+    table.brk-table tr:last-child td { border-bottom: 0; }
+
+    .statusline { font-size: 12.5px; color: var(--text-3); margin-top: 14px; }
+    .statusline.error { color: var(--err); }
+
+    .ms-navtoggle {
+      display: none; position: fixed; top: 10px; left: 10px; z-index: 30;
+      width: 42px; height: 42px; padding: 0; border-radius: 10px;
+      border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 88%, transparent);
+      color: var(--text); cursor: pointer; align-items: center; justify-content: center;
+      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    }
+    .ms-navtoggle:hover { background: var(--surface-2); }
+    .ms-nav-backdrop { display: none; position: fixed; inset: 0; z-index: 31; background: rgba(0,0,0,.45); }
+
+    @media (max-width: 980px) {
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 880px) {
+      .ms-shell { grid-template-columns: 1fr; }
+      .ms-navtoggle { display: inline-flex; }
+      .ms-side {
+        position: fixed; left: 0; top: 0; bottom: 0; height: 100vh; width: 270px; max-width: 84vw;
+        z-index: 32; transform: translateX(-100%); transition: transform .26s ease;
+        box-shadow: 20px 0 60px -12px rgba(0,0,0,.55);
+      }
+      .ms-side.open { transform: translateX(0); }
+      .ms-nav-backdrop.open { display: block; }
+      .ms-content { padding: 22px 16px 60px; }
+      .ms-topbar { padding: 12px 16px 12px 64px; }
+      .totalrow { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .rate-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <button id="msNavToggle" class="ms-navtoggle" type="button" aria-label="メニューを開閉" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div id="msNavBackdrop" class="ms-nav-backdrop" aria-hidden="true"></div>
+  <div class="ms-shell">
+    <aside class="ms-side">
+      <div class="ms-brand">
+        <span class="ms-logo">LS</span>
+        <div>
+          <div class="ms-bt">LINE Summary</div>
+          <div class="ms-bs">Admin Console</div>
+        </div>
+      </div>
+      <nav class="ms-nav">
+        <div class="ms-navlabel">メニュー</div>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span>接続設定</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>利用状況</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></span>Webhook設定</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg></span>ログ</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg></span>ユーザー権限</a>
+
+        <div class="ms-navlabel">ページ</div>
+        <a class="ms-navlink" href="./media.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>メディア閲覧<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./message-search.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>会話検索<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./reservation.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>予約表<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./analytics.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg></span>売上分析<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink active" aria-current="page"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-1 5 3 3 0 0 1-4 2 3 3 0 0 1-4-2 3 3 0 0 1-1-5 3 3 0 0 1 2-5 3 3 0 0 1 3-3Z"/><path d="M12 8v8M9 12h6"/></svg></span>AI使用料</a>
+        <a class="ms-navlink" id="salesSheetNavLink" href="#" target="_blank" rel="noopener noreferrer" hidden aria-hidden="true"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg></span>売上シート<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      </nav>
+      <div class="ms-side-foot">
+        <div class="ms-conn">
+          <span class="ms-cd"></span>
+          <div>
+            <div class="ms-ct">接続済み</div>
+            <div class="ms-cs mono">hocbnifuactbvmyjraxy</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="ms-main">
+      <div class="ms-topbar">
+        <span id="authState" class="pill">未接続</span>
+        <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
+      </div>
+
+      <div class="ms-content">
+        <div class="ms-inner">
+          <h1 class="ms-h1">AI使用料（概算）</h1>
+          <p class="ms-sub">レシート画像のAI解析回数（＝受信画像数）に、1回あたりの想定トークン数と単価を掛けた<strong>概算</strong>です。Groq は2店舗（ソバージュ・鮨こるり）以外の全店合計、Gemini はその2店舗の合計を表示します。</p>
+
+          <div class="notice">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.5 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.5a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+            <span><strong>概算・要確認:</strong> 実際のトークン消費量は保存していないため、画像1枚あたりの入力/出力トークン数と単価は想定値です。下の「料金の前提条件」で各値を編集すると即時に再計算されます。正確な請求額は各社の管理画面でご確認ください。</span>
+          </div>
+
+          <section class="card">
+            <div class="card-h">
+              <span class="ch-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4M8 4h8M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M6 20h12"/></svg></span>
+              <span class="ch-t">集計期間</span>
+              <span class="ch-tag" id="periodTag">—</span>
+            </div>
+            <div class="toolbar">
+              <div class="tabs" role="tablist" id="periodTabs">
+                <button type="button" class="tab active" data-period="this-month">当月</button>
+                <button type="button" class="tab" data-period="last-month">先月</button>
+                <button type="button" class="tab" data-period="all">全期間</button>
+              </div>
+              <span class="spacer"></span>
+              <button id="reloadBtn" class="button" type="button">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+                再読み込み
+              </button>
+            </div>
+            <div id="statusLine" class="statusline">トークンを確認しています…</div>
+          </section>
+
+          <!-- 合計サマリー（Groq / Gemini） -->
+          <div class="totalrow">
+            <div class="total-card" id="groqTotalCard">
+              <div class="tc-prov">Groq（その他全店 合計）</div>
+              <div class="tc-model mono" id="groqModel">—</div>
+              <div class="tc-jpy" id="groqJpy">¥—</div>
+              <div class="tc-usd" id="groqUsd">$—</div>
+            </div>
+            <div class="total-card gemini" id="geminiTotalCard">
+              <div class="tc-prov">Gemini（2店舗 合計）</div>
+              <div class="tc-model mono" id="geminiModel">—</div>
+              <div class="tc-jpy" id="geminiJpy">¥—</div>
+              <div class="tc-usd" id="geminiUsd">$—</div>
+            </div>
+          </div>
+
+          <!-- Groq ブロック -->
+          <section class="card">
+            <div class="card-h">
+              <span class="ch-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg></span>
+              <span class="ch-t">Groq（その他全店をまとめて集計）</span>
+              <span class="ch-tag" id="groqStoreCount">— 店舗</span>
+            </div>
+            <div class="kpis">
+              <div class="kpi accent">
+                <div class="k-l">AI解析回数（画像数）</div>
+                <div class="k-v" id="groqImages">—</div>
+                <div class="k-s">画像1枚＝解析1回の概算</div>
+              </div>
+              <div class="kpi">
+                <div class="k-l">登録レシート件数</div>
+                <div class="k-v" id="groqReceipts">—</div>
+                <div class="k-s">参考（売上登録された件数）</div>
+              </div>
+              <div class="kpi">
+                <div class="k-l">概算コスト（USD）</div>
+                <div class="k-v" id="groqUsd2">$—</div>
+                <div class="k-s">回数 × 想定トークン × 単価</div>
+              </div>
+              <div class="kpi accent">
+                <div class="k-l">概算コスト（円）</div>
+                <div class="k-v" id="groqJpy2">¥—</div>
+                <div class="k-s" id="groqPerImage">1回あたり —</div>
+              </div>
+            </div>
+            <details class="brk" id="groqBrk">
+              <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
+              <div id="groqBrkBody"></div>
+            </details>
+          </section>
+
+          <!-- Gemini ブロック -->
+          <section class="card">
+            <div class="card-h">
+              <span class="ch-ico gemini"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 6.1L21 11l-6.6 1.9L12 19l-2.4-6.1L3 11l6.6-1.9z"/></svg></span>
+              <span class="ch-t">Gemini（2店舗をまとめて集計）</span>
+              <span class="ch-tag gemini" id="geminiStoreCount">— 店舗</span>
+            </div>
+            <div class="kpis">
+              <div class="kpi gemini accent">
+                <div class="k-l">AI解析回数（画像数）</div>
+                <div class="k-v" id="geminiImages">—</div>
+                <div class="k-s">画像1枚＝解析1回の概算</div>
+              </div>
+              <div class="kpi">
+                <div class="k-l">登録レシート件数</div>
+                <div class="k-v" id="geminiReceipts">—</div>
+                <div class="k-s">参考（売上登録された件数）</div>
+              </div>
+              <div class="kpi">
+                <div class="k-l">概算コスト（USD）</div>
+                <div class="k-v" id="geminiUsd2">$—</div>
+                <div class="k-s">回数 × 想定トークン × 単価</div>
+              </div>
+              <div class="kpi gemini accent">
+                <div class="k-l">概算コスト（円）</div>
+                <div class="k-v" id="geminiJpy2">¥—</div>
+                <div class="k-s" id="geminiPerImage">1回あたり —</div>
+              </div>
+            </div>
+            <details class="brk" id="geminiBrk">
+              <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
+              <div id="geminiBrkBody"></div>
+            </details>
+          </section>
+
+          <!-- 料金の前提条件（編集可） -->
+          <details class="assump" id="assumpBox">
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              料金の前提条件（編集可・概算）
+            </summary>
+            <div class="assump-body">
+              <p class="ms-sub" style="margin-top:4px">画像1枚（＝AI解析1回）あたりの想定トークン数と、100万トークンあたりの単価（USD）を入力してください。値はこのブラウザに保存され、次回も使われます。</p>
+
+              <div class="card-h" style="margin-top:18px"><span class="ch-t" style="font-size:14px">Groq（その他全店）</span><span class="ch-tag mono" id="groqModelLabel"></span></div>
+              <div class="rate-grid">
+                <div class="field"><label>1回あたり 入力トークン（画像含む概算）</label><input id="groq_inTok" type="number" min="0" step="1" inputmode="numeric"></div>
+                <div class="field"><label>1回あたり 出力トークン</label><input id="groq_outTok" type="number" min="0" step="1" inputmode="numeric"></div>
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="groq_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="groq_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              </div>
+
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini（ソバージュ・鮨こるり）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
+              <div class="rate-grid">
+                <div class="field"><label>1回あたり 入力トークン（画像含む概算）</label><input id="gemini_inTok" type="number" min="0" step="1" inputmode="numeric"></div>
+                <div class="field"><label>1回あたり 出力トークン</label><input id="gemini_outTok" type="number" min="0" step="1" inputmode="numeric"></div>
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="gemini_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="gemini_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              </div>
+
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">共通</span></div>
+              <div class="rate-grid">
+                <div class="field"><label>為替レート（円 / USD）</label><input id="jpyPerUsd" type="number" min="0" step="0.1" inputmode="decimal"></div>
+              </div>
+
+              <div class="assump-foot">
+                <button id="applyRatesBtn" class="button primary" type="button">この前提で再計算</button>
+                <button id="resetRatesBtn" class="button" type="button">初期値に戻す</button>
+                <span class="note">※ 単価の初期値は公開情報をもとにした目安です。変更があれば上書きしてください。</span>
+              </div>
+            </div>
+          </details>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="pages-config.js"></script>
+  <script src="auth-session.js"></script>
+  <script src="site-cache.js"></script>
+  <script>
+    'use strict';
+
+    const STORE_TOKEN_KEY = 'line_summary_admin_token';
+    const STORE_THEME_KEY = 'line_reservation_calendar_theme';
+    const RATES_KEY = 'line_report_ai_usage_rates_v1';
+    const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
+
+    const DEFAULT_RATES = {
+      groq:   { inTok: 1200, outTok: 300,  inUsd: 0.11, outUsd: 0.34 },
+      gemini: { inTok: 1500, outTok: 2000, inUsd: 2.00, outUsd: 12.00 },
+      jpyPerUsd: 155,
+    };
+
+    const state = {
+      period: 'this-month',
+      theme: 'dark',
+      data: null,   // 直近の /usage/ai-cost レスポンス
+      rates: loadRates(),
+    };
+
+    const dom = {
+      authState: document.getElementById('authState'),
+      themeToggleBtn: document.getElementById('themeToggleBtn'),
+      periodTabs: document.getElementById('periodTabs'),
+      periodTag: document.getElementById('periodTag'),
+      reloadBtn: document.getElementById('reloadBtn'),
+      statusLine: document.getElementById('statusLine'),
+      applyRatesBtn: document.getElementById('applyRatesBtn'),
+      resetRatesBtn: document.getElementById('resetRatesBtn'),
+    };
+
+    /* ---------- 認証トークン（共有セッション） ---------- */
+    function getToken() {
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+    }
+    function updateAuthState() {
+      const has = !!getToken();
+      dom.authState.textContent = has ? 'ログイン済み' : '未接続';
+      dom.authState.className = has ? 'pill ok' : 'pill';
+    }
+
+    /* ---------- テーマ切替（共有シェルと同じキー） ---------- */
+    function normalizeTheme(value) {
+      const theme = String(value || '').trim().toLowerCase();
+      return theme === 'light' ? 'light' : 'dark';
+    }
+    function getTheme() {
+      try { return normalizeTheme(localStorage.getItem(STORE_THEME_KEY)); } catch (_) { return 'dark'; }
+    }
+    function updateThemeToggleButton() {
+      const isLight = state.theme === 'light';
+      dom.themeToggleBtn.textContent = isLight ? 'ダークモード' : 'ライトモード';
+      dom.themeToggleBtn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+      dom.themeToggleBtn.title = isLight ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
+    }
+    function applyTheme(theme) {
+      state.theme = normalizeTheme(theme);
+      document.body.setAttribute('data-theme', state.theme);
+      updateThemeToggleButton();
+    }
+    function setTheme(theme) {
+      const normalized = normalizeTheme(theme);
+      try { localStorage.setItem(STORE_THEME_KEY, normalized); } catch (_) {}
+      applyTheme(normalized);
+    }
+    function toggleTheme() { setTheme(state.theme === 'light' ? 'dark' : 'light'); }
+
+    /* ---------- 料金前提（localStorage 永続化） ---------- */
+    function loadRates() {
+      try {
+        const raw = localStorage.getItem(RATES_KEY);
+        if (!raw) return cloneRates(DEFAULT_RATES);
+        const parsed = JSON.parse(raw);
+        const out = cloneRates(DEFAULT_RATES);
+        ['groq', 'gemini'].forEach(function (p) {
+          if (parsed && parsed[p]) {
+            ['inTok', 'outTok', 'inUsd', 'outUsd'].forEach(function (k) {
+              const v = Number(parsed[p][k]);
+              if (Number.isFinite(v) && v >= 0) out[p][k] = v;
+            });
+          }
+        });
+        const j = Number(parsed && parsed.jpyPerUsd);
+        if (Number.isFinite(j) && j > 0) out.jpyPerUsd = j;
+        return out;
+      } catch (_) { return cloneRates(DEFAULT_RATES); }
+    }
+    function cloneRates(r) {
+      return {
+        groq: Object.assign({}, r.groq),
+        gemini: Object.assign({}, r.gemini),
+        jpyPerUsd: r.jpyPerUsd,
+      };
+    }
+    function saveRates(r) {
+      try { localStorage.setItem(RATES_KEY, JSON.stringify(r)); } catch (_) {}
+    }
+    function fillRateInputs() {
+      const r = state.rates;
+      document.getElementById('groq_inTok').value = r.groq.inTok;
+      document.getElementById('groq_outTok').value = r.groq.outTok;
+      document.getElementById('groq_inUsd').value = r.groq.inUsd;
+      document.getElementById('groq_outUsd').value = r.groq.outUsd;
+      document.getElementById('gemini_inTok').value = r.gemini.inTok;
+      document.getElementById('gemini_outTok').value = r.gemini.outTok;
+      document.getElementById('gemini_inUsd').value = r.gemini.inUsd;
+      document.getElementById('gemini_outUsd').value = r.gemini.outUsd;
+      document.getElementById('jpyPerUsd').value = r.jpyPerUsd;
+    }
+    function readRateInputs() {
+      function num(id, fallback) {
+        const v = Number(document.getElementById(id).value);
+        return Number.isFinite(v) && v >= 0 ? v : fallback;
+      }
+      const d = DEFAULT_RATES;
+      return {
+        groq: {
+          inTok: num('groq_inTok', d.groq.inTok),
+          outTok: num('groq_outTok', d.groq.outTok),
+          inUsd: num('groq_inUsd', d.groq.inUsd),
+          outUsd: num('groq_outUsd', d.groq.outUsd),
+        },
+        gemini: {
+          inTok: num('gemini_inTok', d.gemini.inTok),
+          outTok: num('gemini_outTok', d.gemini.outTok),
+          inUsd: num('gemini_inUsd', d.gemini.inUsd),
+          outUsd: num('gemini_outUsd', d.gemini.outUsd),
+        },
+        jpyPerUsd: (function () { const v = Number(document.getElementById('jpyPerUsd').value); return Number.isFinite(v) && v > 0 ? v : d.jpyPerUsd; })(),
+      };
+    }
+
+    /* ---------- API ---------- */
+    async function api(path) {
+      const token = getToken();
+      if (!token) throw new Error('先に管理画面でログインしてください。');
+      const url = LINE_REPORT_PAGES.adminApiUrl(path, FIXED_PROJECT_URL);
+      const res = await fetch(url, {
+        headers: { 'x-admin-token': token },
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+      });
+      const text = await res.text();
+      let body = {};
+      try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { raw: text }; }
+      if (!res.ok) throw new Error(body.error || ('API error: ' + res.status));
+      return body;
+    }
+
+    /* ---------- 期間（JST 月境界 → UTC ISO） ---------- */
+    function jstMonthBoundaryIso(monthOffset) {
+      // monthOffset: 0=当月初日, +1=翌月初日 など。JST(UTC+9) の月初 00:00 を UTC ISO で返す。
+      const now = new Date();
+      const jst = new Date(now.getTime() + 9 * 3600 * 1000);
+      const y = jst.getUTCFullYear();
+      const m = jst.getUTCMonth();
+      const utcMs = Date.UTC(y, m + monthOffset, 1, 0, 0, 0) - 9 * 3600 * 1000;
+      return new Date(utcMs).toISOString();
+    }
+    function periodRange(period) {
+      if (period === 'all') return { from: null, to: null, label: '全期間' };
+      if (period === 'last-month') {
+        return { from: jstMonthBoundaryIso(-1), to: jstMonthBoundaryIso(0), label: '先月（JST）' };
+      }
+      // this-month
+      return { from: jstMonthBoundaryIso(0), to: null, label: '当月（JST・現在まで）' };
+    }
+    function fmtDateJst(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      const jst = new Date(d.getTime() + 9 * 3600 * 1000);
+      return jst.getUTCFullYear() + '/' + String(jst.getUTCMonth() + 1).padStart(2, '0') + '/' + String(jst.getUTCDate()).padStart(2, '0');
+    }
+
+    /* ---------- 数値整形 ---------- */
+    function fmtInt(n) { return Number(n || 0).toLocaleString('ja-JP'); }
+    function fmtUsd(n) {
+      const v = Number(n || 0);
+      return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function fmtJpy(n) { return '¥' + Math.round(Number(n || 0)).toLocaleString('ja-JP'); }
+
+    /* ---------- コスト計算 ---------- */
+    function providerUsd(imageCount, rate) {
+      const perCall = (rate.inTok * rate.inUsd + rate.outTok * rate.outUsd) / 1e6;
+      return imageCount * perCall;
+    }
+
+    /* ---------- 描画 ---------- */
+    function renderBreakdown(containerId, bucket, rate, jpyPerUsd) {
+      const el = document.getElementById(containerId);
+      const stores = (bucket && bucket.stores) || [];
+      if (!stores.length) {
+        el.innerHTML = '<p class="statusline">対象店舗の解析データがありません。</p>';
+        return;
+      }
+      const rows = stores.map(function (s) {
+        const usd = providerUsd(s.image_count, rate);
+        return '<tr>' +
+          '<td>' + escapeHtml(s.display_name || s.store_partition_key) + '</td>' +
+          '<td>' + fmtInt(s.image_count) + '</td>' +
+          '<td>' + fmtInt(s.receipt_count) + '</td>' +
+          '<td>' + fmtUsd(usd) + '</td>' +
+          '<td>' + fmtJpy(usd * jpyPerUsd) + '</td>' +
+          '</tr>';
+      }).join('');
+      el.innerHTML = '<table class="brk-table">' +
+        '<thead><tr><th>店舗</th><th>解析回数</th><th>レシート</th><th>USD</th><th>円</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table>';
+    }
+
+    function renderAll() {
+      const data = state.data;
+      if (!data) return;
+      const r = state.rates;
+      const jpy = r.jpyPerUsd;
+
+      // モデル名
+      document.getElementById('groqModel').textContent = (data.groq && data.groq.model) || '—';
+      document.getElementById('geminiModel').textContent = (data.gemini && data.gemini.model) || '—';
+      document.getElementById('groqModelLabel').textContent = (data.groq && data.groq.model) || '';
+      document.getElementById('geminiModelLabel').textContent = (data.gemini && data.gemini.model) || '';
+
+      // Groq
+      const g = data.groq || { store_count: 0, image_count: 0, receipt_count: 0, stores: [] };
+      const gUsd = providerUsd(g.image_count, r.groq);
+      document.getElementById('groqStoreCount').textContent = fmtInt(g.store_count) + ' 店舗';
+      document.getElementById('groqImages').textContent = fmtInt(g.image_count);
+      document.getElementById('groqReceipts').textContent = fmtInt(g.receipt_count);
+      document.getElementById('groqUsd2').textContent = fmtUsd(gUsd);
+      document.getElementById('groqJpy2').textContent = fmtJpy(gUsd * jpy);
+      document.getElementById('groqUsd').textContent = fmtUsd(gUsd);
+      document.getElementById('groqJpy').textContent = fmtJpy(gUsd * jpy);
+      document.getElementById('groqPerImage').textContent = '1回あたり ' + fmtJpy(g.image_count ? (gUsd * jpy) / g.image_count : 0);
+      renderBreakdown('groqBrkBody', g, r.groq, jpy);
+
+      // Gemini
+      const m = data.gemini || { store_count: 0, image_count: 0, receipt_count: 0, stores: [] };
+      const mUsd = providerUsd(m.image_count, r.gemini);
+      document.getElementById('geminiStoreCount').textContent = fmtInt(m.store_count) + ' 店舗';
+      document.getElementById('geminiImages').textContent = fmtInt(m.image_count);
+      document.getElementById('geminiReceipts').textContent = fmtInt(m.receipt_count);
+      document.getElementById('geminiUsd2').textContent = fmtUsd(mUsd);
+      document.getElementById('geminiJpy2').textContent = fmtJpy(mUsd * jpy);
+      document.getElementById('geminiUsd').textContent = fmtUsd(mUsd);
+      document.getElementById('geminiJpy').textContent = fmtJpy(mUsd * jpy);
+      document.getElementById('geminiPerImage').textContent = '1回あたり ' + fmtJpy(m.image_count ? (mUsd * jpy) / m.image_count : 0);
+      renderBreakdown('geminiBrkBody', m, r.gemini, jpy);
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function setStatus(text, isError) {
+      dom.statusLine.textContent = text;
+      dom.statusLine.className = isError ? 'statusline error' : 'statusline';
+    }
+
+    async function load() {
+      if (!getToken()) {
+        setStatus('先に管理画面（接続設定）でログインしてください。', true);
+        return;
+      }
+      const range = periodRange(state.period);
+      dom.periodTag.textContent = range.label;
+      setStatus('集計中…', false);
+      dom.reloadBtn.disabled = true;
+      try {
+        let path = '/usage/ai-cost';
+        const qs = [];
+        if (range.from) qs.push('from=' + encodeURIComponent(range.from));
+        if (range.to) qs.push('to=' + encodeURIComponent(range.to));
+        if (qs.length) path += '?' + qs.join('&');
+        const body = await api(path);
+        state.data = body;
+        renderAll();
+        const fromTxt = body.period && body.period.from ? fmtDateJst(body.period.from) : '最初';
+        const toTxt = body.period && body.period.to ? fmtDateJst(body.period.to) : '現在';
+        setStatus('集計対象: ' + fromTxt + ' 〜 ' + toTxt + '（為替 ' + state.rates.jpyPerUsd + ' 円/USD で換算・概算）', false);
+      } catch (err) {
+        setStatus(err.message || String(err), true);
+      } finally {
+        dom.reloadBtn.disabled = false;
+      }
+    }
+
+    /* ---------- イベント ---------- */
+    dom.periodTabs.addEventListener('click', function (ev) {
+      const btn = ev.target.closest('.tab');
+      if (!btn) return;
+      const period = btn.dataset.period || 'this-month';
+      if (period === state.period) return;
+      state.period = period;
+      Array.prototype.forEach.call(dom.periodTabs.querySelectorAll('.tab'), function (t) {
+        t.classList.toggle('active', t === btn);
+      });
+      load();
+    });
+
+    dom.reloadBtn.addEventListener('click', load);
+    dom.themeToggleBtn.addEventListener('click', toggleTheme);
+
+    dom.applyRatesBtn.addEventListener('click', function () {
+      state.rates = readRateInputs();
+      saveRates(state.rates);
+      fillRateInputs();
+      renderAll();
+      // ステータス行の為替表記も更新
+      if (state.data) {
+        const range = periodRange(state.period);
+        const fromTxt = state.data.period && state.data.period.from ? fmtDateJst(state.data.period.from) : '最初';
+        const toTxt = state.data.period && state.data.period.to ? fmtDateJst(state.data.period.to) : '現在';
+        setStatus('集計対象: ' + fromTxt + ' 〜 ' + toTxt + '（為替 ' + state.rates.jpyPerUsd + ' 円/USD で換算・概算）', false);
+      }
+    });
+    dom.resetRatesBtn.addEventListener('click', function () {
+      state.rates = cloneRates(DEFAULT_RATES);
+      saveRates(state.rates);
+      fillRateInputs();
+      renderAll();
+    });
+
+    async function refreshSalesSheetNavLink() {
+      var el = document.getElementById('salesSheetNavLink');
+      if (!el) return;
+      var enabled = !!(window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.RECEIPT_SHEETS_PILOT_ENABLED === true);
+      if (!enabled || !getToken()) { el.hidden = true; el.setAttribute('aria-hidden', 'true'); return; }
+      try {
+        var rr = await api('/receipts/sheets-pilot-link');
+        var url = rr && rr.configured && rr.spreadsheet_url ? String(rr.spreadsheet_url) : '';
+        if (url) { el.href = url; el.hidden = false; el.removeAttribute('aria-hidden'); }
+        else { el.hidden = true; el.setAttribute('aria-hidden', 'true'); }
+      } catch (_) { el.hidden = true; el.setAttribute('aria-hidden', 'true'); }
+    }
+
+    (async function init() {
+      if (window.LINE_REPORT_AUTH) {
+        try {
+          await LINE_REPORT_AUTH.consumeUrlAuthParams({
+            exchangeUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/link-login', FIXED_PROJECT_URL),
+            adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report',
+          });
+        } catch (error) {
+          console.error('consumeUrlAuthParams failed:', error);
+        }
+      }
+      applyTheme(getTheme());
+      updateAuthState();
+      fillRateInputs();
+      refreshSalesSheetNavLink();
+      if (getToken()) {
+        load();
+      } else {
+        setStatus('先に管理画面（接続設定）でログインしてください。', true);
+      }
+    })();
+  </script>
+  <script>
+    /* スマホ用ハンバーガーメニューの開閉（PCでは未使用） */
+    (function(){
+      var toggle = document.getElementById('msNavToggle');
+      var drawer = document.querySelector('.ms-side');
+      var backdrop = document.getElementById('msNavBackdrop');
+      function setOpen(open){
+        if (drawer) drawer.classList.toggle('open', open);
+        if (backdrop) backdrop.classList.toggle('open', open);
+        if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      if (toggle) toggle.addEventListener('click', function(){ setOpen(!(drawer && drawer.classList.contains('open'))); });
+      if (backdrop) backdrop.addEventListener('click', function(){ setOpen(false); });
+      if (drawer) drawer.addEventListener('click', function(e){ if (e.target.closest && e.target.closest('.ms-navlink')) setOpen(false); });
+      document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setOpen(false); });
+    })();
+  </script>
+</body>
+</html>

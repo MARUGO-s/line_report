@@ -382,6 +382,11 @@ Deno.serve(async (req) => {
       return json(state, 200)
     }
 
+    if (req.method === "GET" && path === "/usage/ai-cost") {
+      const result = await fetchAiUsageCostState(supabase, url)
+      return json(result, 200)
+    }
+
     if (req.method === "GET" && path === "/permissions/users") {
       const users = await fetchLineUserPermissions(supabase, url)
       return json(users, 200)
@@ -5884,6 +5889,87 @@ function normalizePath(pathname: string): string {
     .replace(/^\/functions\/v1\/admin-api/, "")
     .replace(/^\/admin-api/, "")
   return stripped || "/"
+}
+
+// レシート画像解析に Gemini を使う店舗（line-webhook と同一）。他店は Groq。
+const AI_USAGE_GEMINI_STORE_KEYS = new Set<string>(["sauvage", "sushikoruri"])
+const AI_USAGE_GEMINI_MODEL = "gemini-3.1-pro-preview"
+const AI_USAGE_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+
+type AiUsageStoreRow = {
+  store_partition_key: string
+  display_name: string
+  image_count: number
+  receipt_count: number
+}
+
+type AiUsageProviderBucket = {
+  provider: "gemini" | "groq"
+  model: string
+  store_count: number
+  image_count: number
+  receipt_count: number
+  stores: AiUsageStoreRow[]
+}
+
+// AI使用料（概算）: 店舗別の画像解析回数を Groq / Gemini に振り分けて合計を返す（ルーム単位ではなく合計）。
+async function fetchAiUsageCostState(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+): Promise<Record<string, unknown>> {
+  const fromParam = String(url.searchParams.get("from") ?? "").trim()
+  const toParam = String(url.searchParams.get("to") ?? "").trim()
+  const p_from = fromParam || null
+  const p_to = toParam || null
+
+  const { data, error } = await supabase.rpc("ai_usage_image_counts", { p_from, p_to })
+  if (error) {
+    throw { status: 500, message: `ai_usage_image_counts failed: ${error.message}` } satisfies AppError
+  }
+  const rows = Array.isArray(data) ? data : []
+
+  const gemini: AiUsageProviderBucket = {
+    provider: "gemini",
+    model: AI_USAGE_GEMINI_MODEL,
+    store_count: 0,
+    image_count: 0,
+    receipt_count: 0,
+    stores: [],
+  }
+  const groq: AiUsageProviderBucket = {
+    provider: "groq",
+    model: AI_USAGE_GROQ_MODEL,
+    store_count: 0,
+    image_count: 0,
+    receipt_count: 0,
+    stores: [],
+  }
+
+  for (const raw of rows) {
+    const r = raw as Record<string, unknown>
+    const key = String(r.store_partition_key ?? "").trim()
+    if (!key) continue
+    const row: AiUsageStoreRow = {
+      store_partition_key: key,
+      display_name: String(r.display_name ?? key),
+      image_count: Number(r.image_count ?? 0) || 0,
+      receipt_count: Number(r.receipt_count ?? 0) || 0,
+    }
+    const bucket = AI_USAGE_GEMINI_STORE_KEYS.has(key) ? gemini : groq
+    bucket.stores.push(row)
+    bucket.store_count += 1
+    bucket.image_count += row.image_count
+    bucket.receipt_count += row.receipt_count
+  }
+  gemini.stores.sort((a, b) => b.image_count - a.image_count)
+  groq.stores.sort((a, b) => b.image_count - a.image_count)
+
+  return {
+    period: { from: p_from, to: p_to },
+    gemini,
+    groq,
+    generated_at: new Date().toISOString(),
+  }
 }
 
 function asAppError(error: unknown): AppError {
