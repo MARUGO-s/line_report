@@ -318,6 +318,10 @@ async function processReceiptImageEvent(
     )
   }
 
+  const GROQ_RECEIPT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  // 実測トークン記録用に「実際に応答したプロバイダ／モデル」を追跡する（フォールバック時は groq に更新）。
+  let analyzedProvider: 'gemini' | 'groq' = useGeminiForReceipt ? 'gemini' : 'groq'
+  let analyzedModel = useGeminiForReceipt ? receiptGeminiModel : GROQ_RECEIPT_MODEL
   let analyzed = useGeminiForReceipt
     ? await analyzeLineImageWithGemini(
       contentFetch.bytes,
@@ -349,6 +353,28 @@ async function processReceiptImageEvent(
       groqApiKey,
       receiptPromptAddition,
     )
+    analyzedProvider = 'groq'
+    analyzedModel = GROQ_RECEIPT_MODEL
+  }
+
+  // AI使用料ページの「実測」表示用に、APIが返した実測トークンを1行記録する。
+  // best-effort: 失敗してもレシート処理は止めない（売上登録・返信が最優先）。
+  if (analyzed.usage) {
+    try {
+      const { error: usageErr } = await supabase.from('ai_usage_events').insert({
+        store_partition_key: registry.store_partition_key,
+        provider: analyzedProvider,
+        model: analyzedModel,
+        input_tokens: analyzed.usage.inputTokens,
+        output_tokens: analyzed.usage.outputTokens,
+        thinking_tokens: analyzed.usage.thinkingTokens,
+        total_tokens: analyzed.usage.totalTokens,
+        line_message_id: lineMessageId,
+      })
+      if (usageErr) console.error('ai_usage_events insert failed:', usageErr.message)
+    } catch (e) {
+      console.error('ai_usage_events insert threw:', (e instanceof Error ? e.message : String(e)).slice(0, 200))
+    }
   }
 
   // 期間集計／グループ期間（GP）レポートは「売上レシート」ではないため、売上に加算せず返信もしない。

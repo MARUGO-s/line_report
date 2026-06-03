@@ -23,13 +23,51 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+/** AI解析1回の実測トークン使用量（課金推定用）。output は思考トークン込みの課金対象出力。 */
+export type LineImageVisionUsage = {
+  inputTokens: number
+  outputTokens: number
+  thinkingTokens: number | null
+  totalTokens: number
+}
+
+function toTokenCount(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
+}
+
+/** Gemini レスポンスの usageMetadata から実測トークンを取り出す。 */
+function extractGeminiUsage(payload: unknown): LineImageVisionUsage | null {
+  const u = (payload as { usageMetadata?: Record<string, unknown> })?.usageMetadata
+  if (!u || typeof u !== 'object') return null
+  const input = toTokenCount(u.promptTokenCount)
+  const total = toTokenCount(u.totalTokenCount)
+  const thinking = u.thoughtsTokenCount == null ? null : toTokenCount(u.thoughtsTokenCount)
+  // 課金対象の出力は「思考込み」。candidatesTokenCount が思考を含む版/含まない版があるため、
+  // total - prompt で堅牢に算出する（APIの版差を吸収）。
+  const output = Math.max(0, total - input)
+  if (input <= 0 && total <= 0) return null
+  return { inputTokens: input, outputTokens: output, thinkingTokens: thinking, totalTokens: total }
+}
+
+/** Groq（OpenAI互換）レスポンスの usage から実測トークンを取り出す。 */
+function extractGroqUsage(payload: unknown): LineImageVisionUsage | null {
+  const u = (payload as { usage?: Record<string, unknown> })?.usage
+  if (!u || typeof u !== 'object') return null
+  const input = toTokenCount(u.prompt_tokens)
+  const output = toTokenCount(u.completion_tokens)
+  const total = toTokenCount(u.total_tokens) || (input + output)
+  if (input <= 0 && output <= 0 && total <= 0) return null
+  return { inputTokens: input, outputTokens: output, thinkingTokens: null, totalTokens: total }
+}
+
 export async function analyzeLineImageWithGroqScout(
   bytes: Uint8Array,
   contentType: string | null,
   fileName: string,
   groqApiKey: string,
   systemPromptAddition = '',
-): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null }> {
+): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
   if (!groqApiKey) {
     return { analysis: null, failure: { stage: 'missing_api_key', message: 'GROQ_API_KEY is missing.' } }
   }
@@ -89,20 +127,21 @@ export async function analyzeLineImageWithGroqScout(
   }
 
   const json = await response.json()
+  const usage = extractGroqUsage(json)
   const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
   if (!content) {
-    return { analysis: null, failure: { stage: 'empty_model_content', message: 'Groq response content is empty.' } }
+    return { analysis: null, failure: { stage: 'empty_model_content', message: 'Groq response content is empty.' }, usage }
   }
 
   const extracted = parseFirstJsonObject(content)
   if (extracted && typeof extracted === 'object') {
     const normalized = normalizeLineImageAnalysisResult(extracted as Record<string, unknown>)
-    if (normalized) return { analysis: normalized, failure: null }
+    if (normalized) return { analysis: normalized, failure: null, usage }
   }
 
   const salvaged = salvageLineImageAnalysisResultFromText(content)
   if (salvaged) {
-    return { analysis: salvaged, failure: null }
+    return { analysis: salvaged, failure: null, usage }
   }
 
   const fallbackSummary = normalizeInlineText(content).slice(0, 240)
@@ -110,9 +149,10 @@ export async function analyzeLineImageWithGroqScout(
     return {
       analysis: null,
       failure: { stage: 'unparsable_model_output', message: 'Groq response could not be parsed.' },
+      usage,
     }
   }
-  return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null }
+  return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null, usage }
 }
 
 function extractTextFromGeminiResponse(payload: unknown): string {
@@ -143,7 +183,7 @@ export async function analyzeLineImageWithGemini(
   systemPromptAddition = '',
   model = 'gemini-3.1-pro-preview',
   timeoutMs = 30000,
-): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null }> {
+): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
   if (!geminiApiKey) {
     return { analysis: null, failure: { stage: 'missing_api_key', message: 'GEMINI_API_KEY is missing.' } }
   }
@@ -223,30 +263,32 @@ export async function analyzeLineImageWithGemini(
   }
 
   const json = await response.json().catch(() => null)
+  const usage = extractGeminiUsage(json)
   const content = extractTextFromGeminiResponse(json)
   if (!content) {
     const finishReason = String(
       (json as { candidates?: Array<{ finishReason?: unknown }> })?.candidates?.[0]?.finishReason ?? '',
     )
     console.error('Gemini image vision empty content:', model, 'finishReason=', finishReason)
-    return { analysis: null, failure: { stage: 'gemini_empty_content', message: `Gemini response content is empty (finishReason=${finishReason}).` } }
+    return { analysis: null, failure: { stage: 'gemini_empty_content', message: `Gemini response content is empty (finishReason=${finishReason}).` }, usage }
   }
 
   const extracted = parseFirstJsonObject(content)
   if (extracted && typeof extracted === 'object') {
     const normalized = normalizeLineImageAnalysisResult(extracted as Record<string, unknown>)
-    if (normalized) return { analysis: normalized, failure: null }
+    if (normalized) return { analysis: normalized, failure: null, usage }
   }
 
   const salvaged = salvageLineImageAnalysisResultFromText(content)
-  if (salvaged) return { analysis: salvaged, failure: null }
+  if (salvaged) return { analysis: salvaged, failure: null, usage }
 
   const fallbackSummary = normalizeInlineText(content).slice(0, 240)
   if (!fallbackSummary) {
     return {
       analysis: null,
       failure: { stage: 'unparsable_model_output', message: 'Gemini response could not be parsed.' },
+      usage,
     }
   }
-  return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null }
+  return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null, usage }
 }

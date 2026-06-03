@@ -5909,6 +5909,12 @@ type AiUsageProviderBucket = {
   store_count: number
   image_count: number
   receipt_count: number
+  // 実測トークン（ai_usage_events 由来。記録開始以降のみ）。
+  event_count: number
+  input_tokens: number
+  output_tokens: number
+  thinking_tokens: number
+  total_tokens: number
   stores: AiUsageStoreRow[]
 }
 
@@ -5934,6 +5940,11 @@ async function fetchAiUsageCostState(
     store_count: 0,
     image_count: 0,
     receipt_count: 0,
+    event_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    total_tokens: 0,
     stores: [],
   }
   const groq: AiUsageProviderBucket = {
@@ -5942,6 +5953,11 @@ async function fetchAiUsageCostState(
     store_count: 0,
     image_count: 0,
     receipt_count: 0,
+    event_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    total_tokens: 0,
     stores: [],
   }
 
@@ -5963,6 +5979,24 @@ async function fetchAiUsageCostState(
   }
   gemini.stores.sort((a, b) => b.image_count - a.image_count)
   groq.stores.sort((a, b) => b.image_count - a.image_count)
+
+  // 実測トークン（ai_usage_events）をプロバイダ別に合算してバケットに足し込む。
+  // provider は「実際に応答したプロバイダ」なので、Gemini採用店の Groq フォールバック分は groq 側に入る。
+  const { data: tokenData, error: tokenError } = await supabase.rpc("ai_usage_token_totals", { p_from, p_to })
+  if (tokenError) {
+    throw { status: 500, message: `ai_usage_token_totals failed: ${tokenError.message}` } satisfies AppError
+  }
+  for (const raw of (Array.isArray(tokenData) ? tokenData : [])) {
+    const r = raw as Record<string, unknown>
+    const provider = String(r.provider ?? "").trim()
+    const bucket = provider === "gemini" ? gemini : provider === "groq" ? groq : null
+    if (!bucket) continue
+    bucket.event_count += Number(r.event_count ?? 0) || 0
+    bucket.input_tokens += Number(r.input_tokens ?? 0) || 0
+    bucket.output_tokens += Number(r.output_tokens ?? 0) || 0
+    bucket.thinking_tokens += Number(r.thinking_tokens ?? 0) || 0
+    bucket.total_tokens += Number(r.total_tokens ?? 0) || 0
+  }
 
   return {
     period: { from: p_from, to: p_to },
