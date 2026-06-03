@@ -52,12 +52,20 @@ type ReceiptSalesTotals = {
   avg_unit_price_yen: number | null
 }
 
-/** 月別手入力がある場合は売上分析の説明どおりレシートより優先（組数・客数は未入力ならレシート） */
+/**
+ * 月間合計の算出ポリシー（レシート優先）:
+ * レシートが1件でもある月は、合計（総売上・組数・客数）を必ずレシート集計＝日別の合計にする。
+ * 手入力の月次上書き(line_sales_manual_month_gross)は「レシートが1件も無い月」だけ有効。
+ * 旧仕様は手入力を無条件で優先していたが、シート連携が古い/部分的な月次値を自動生成すると
+ * 実売上を上書きして「日別は出るのに月間合計だけ食い違う」不具合になっていたため反転した。
+ */
 function mergeSalesTotalsWithManualMonth(
   receiptTotals: ReceiptSalesTotals,
   manual: ManualMonthSalesRecord | null,
 ): ReceiptSalesTotals {
   if (!manual) return receiptTotals
+  // レシートがある月はレシート集計（日別合計）を正とし、手入力上書きは無視する
+  if (receiptTotals.receipt_count > 0) return receiptTotals
 
   const gross = manual.gross_sales_yen
   const party = manual.party_count != null
@@ -718,7 +726,9 @@ export async function fetchReceiptSalesState(
     manual_month_party_count,
     manual_month_guest_count,
     manual_month_operating_days_count,
-    manual_month_has_entry: manualThisMonth != null,
+    // 「月計は手入力」表示は手入力が実際に合計へ反映されている時のみ。
+    // レシート優先のため、レシートがある月は手入力レコードがあっても反映されない＝false。
+    manual_month_has_entry: manualThisMonth != null && (selectedStore?.receipt_count ?? 0) === 0,
     daily_budget_yen_by_date,
     month_start_iso: range.startIso,
     month_end_iso: range.endIso,
@@ -849,6 +859,8 @@ export async function fetchAnalyticsMonthly(
     for (const [monthKey, manual] of manualByMonth.entries()) {
       const bucket = monthMap.get(monthKey)
       if (!bucket) continue
+      // レシート優先: レシートがある月はレシート集計を正とし手入力上書きを無視（KPIと整合）
+      if (bucket.receipt_count > 0) continue
       bucket.gross_sales_yen = manual.gross_sales_yen
       if (manual.party_count != null) bucket.party_count = manual.party_count
       if (manual.guest_count != null) bucket.guest_count = manual.guest_count
