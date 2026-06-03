@@ -38,6 +38,37 @@ export function buildReceiptVisionSystemPrompt(customAddition?: string | null): 
 }
 
 /**
+ * コード側に常駐する店舗固有のレシート解析ルール（恒久・UIで消えない）。
+ * DB追記より優先で先頭に置く。例: 鮨こるりは手書きの「売上日報」をレシート扱いにする必要がある。
+ */
+const STORE_BUILTIN_RECEIPT_PROMPT: Record<string, string> = {
+  sushikoruri: [
+    '【鮨こるり 固有ルール（最優先）】',
+    '・手書き/印字を問わず「売上日報」「日報」など“その日の売上を集計したメモ”は、レシート/領収書と同等とみなし必ず kind=receipt とする（kind=general にしない）。',
+    '・「店舗名」→ store_name（例: 鮨こるり）。',
+    '・「日付」→ date（西暦。"2026年6月2日"のような手書き数字は桁を一字ずつ丁寧に読み、年の誤読に注意）。',
+    '・「カード売上」＋「現金売上」の合計金額を gross_sales に入れる（¥表記）。片方が0でも合計する。',
+    '・「◯組◯名」表記があれば ◯組→party_count、◯名→guest_count（数値）。「1組1名」なら party_count=1, guest_count=1。',
+    '・上記の主要項目が読めれば receipt_confidence は 0.6 以上とする。',
+  ].join('\n'),
+}
+
+/** 指定店舗のコード常駐ルール（無ければ空文字）。 */
+export function resolveBuiltinStoreReceiptPrompt(storePartitionKey: string | null | undefined): string {
+  const key = String(storePartitionKey ?? '').trim().toLowerCase()
+  return STORE_BUILTIN_RECEIPT_PROMPT[key] ?? ''
+}
+
+/** コード常駐ルール（先頭＝優先）とDB追記を結合し、全体を上限内に収める。 */
+export function combineStoreReceiptPromptAdditions(
+  builtin: string | null | undefined,
+  dbAddition: string | null | undefined,
+): string {
+  const parts = [String(builtin ?? '').trim(), String(dbAddition ?? '').trim()].filter(Boolean)
+  return parts.join('\n\n').slice(0, STORE_RECEIPT_PROMPT_MAX_CHARS)
+}
+
+/**
  * 店舗別レシート解析プロンプトの追記を取得（enabled かつ非空のときのみ）。
  * 未設定・無効・エラー時は空文字（＝既定プロンプトのまま）。
  */

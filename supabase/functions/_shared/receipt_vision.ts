@@ -114,3 +114,139 @@ export async function analyzeLineImageWithGroqScout(
   }
   return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null }
 }
+
+function extractTextFromGeminiResponse(payload: unknown): string {
+  const candidates = (payload as { candidates?: unknown })?.candidates
+  const list = Array.isArray(candidates) ? candidates : []
+  const parts: string[] = []
+  for (const candidate of list) {
+    const contentParts = (candidate as { content?: { parts?: unknown } })?.content?.parts
+    const partList = Array.isArray(contentParts) ? contentParts : []
+    for (const part of partList) {
+      const text = (part as { text?: unknown })?.text
+      if (typeof text === 'string' && text.trim()) parts.push(text)
+    }
+  }
+  return parts.join('\n').trim()
+}
+
+/**
+ * Gemini（Google Generative Language API）でレシート画像を解析する。
+ * 戻り値は analyzeLineImageWithGroqScout と同型なので、呼び出し側は差し替えるだけでよい。
+ * 失敗（キー無し/HTTP/空/解析不能/タイムアウト）時は failure を返し、呼び出し側で Groq へフォールバックできる。
+ */
+export async function analyzeLineImageWithGemini(
+  bytes: Uint8Array,
+  contentType: string | null,
+  fileName: string,
+  geminiApiKey: string,
+  systemPromptAddition = '',
+  model = 'gemini-3.1-pro-preview',
+  timeoutMs = 30000,
+): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null }> {
+  if (!geminiApiKey) {
+    return { analysis: null, failure: { stage: 'missing_api_key', message: 'GEMINI_API_KEY is missing.' } }
+  }
+  if (bytes.byteLength <= 0 || bytes.byteLength > GROQ_VISION_BASE64_MAX_BYTES) {
+    return {
+      analysis: null,
+      failure: { stage: 'invalid_image_size', message: `Image bytes out of range: ${bytes.byteLength}` },
+    }
+  }
+  const mime = String(contentType ?? '').trim().toLowerCase()
+  if (!isVisionAnalyzableImageMime(mime)) {
+    return {
+      analysis: null,
+      failure: { stage: 'unsupported_mime', message: `Unsupported image mime: ${mime || '(empty)'}` },
+    }
+  }
+
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
+  const body = {
+    system_instruction: { parts: [{ text: buildReceiptVisionSystemPrompt(systemPromptAddition) }] },
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: `この画像を解析してください。ファイル名: ${fileName || '(unknown)'}` },
+          { inline_data: { mime_type: mime, data: toBase64(bytes) } },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      // Gemini 3.x Pro は思考型のため、思考トークンで本出力が枯渇しないよう余裕を持たせる
+      // （枯渇すると空応答→Groqへ無言フォールバックになり精度が落ちる）。
+      maxOutputTokens: 16384,
+      responseMimeType: 'application/json',
+    },
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let response: Response
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': geminiApiKey,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === 'AbortError'
+    return {
+      analysis: null,
+      failure: {
+        stage: aborted ? 'gemini_timeout' : 'gemini_network_error',
+        message: (err instanceof Error ? err.message : String(err)).slice(0, 300),
+      },
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+
+  if (!response.ok) {
+    const err = await response.text().catch(() => '')
+    console.error('Gemini image vision failed:', model, response.status, err.slice(0, 500))
+    return {
+      analysis: null,
+      failure: {
+        stage: 'gemini_http_error',
+        httpStatus: response.status,
+        message: normalizeInlineText(err).slice(0, 500) || 'Gemini API request failed.',
+      },
+    }
+  }
+
+  const json = await response.json().catch(() => null)
+  const content = extractTextFromGeminiResponse(json)
+  if (!content) {
+    const finishReason = String(
+      (json as { candidates?: Array<{ finishReason?: unknown }> })?.candidates?.[0]?.finishReason ?? '',
+    )
+    console.error('Gemini image vision empty content:', model, 'finishReason=', finishReason)
+    return { analysis: null, failure: { stage: 'gemini_empty_content', message: `Gemini response content is empty (finishReason=${finishReason}).` } }
+  }
+
+  const extracted = parseFirstJsonObject(content)
+  if (extracted && typeof extracted === 'object') {
+    const normalized = normalizeLineImageAnalysisResult(extracted as Record<string, unknown>)
+    if (normalized) return { analysis: normalized, failure: null }
+  }
+
+  const salvaged = salvageLineImageAnalysisResultFromText(content)
+  if (salvaged) return { analysis: salvaged, failure: null }
+
+  const fallbackSummary = normalizeInlineText(content).slice(0, 240)
+  if (!fallbackSummary) {
+    return {
+      analysis: null,
+      failure: { stage: 'unparsable_model_output', message: 'Gemini response could not be parsed.' },
+    }
+  }
+  return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null }
+}

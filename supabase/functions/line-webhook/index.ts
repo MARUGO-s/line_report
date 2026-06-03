@@ -5,7 +5,9 @@ import {
   replyLineMessages,
   replyLineText,
   resolveChannelAccessToken,
+  resolveGeminiApiKey,
   resolveGroqApiKey,
+  resolveReceiptGeminiModel,
 } from '../_shared/line_client.ts'
 import {
   clearPendingReceiptDuplicate,
@@ -39,8 +41,12 @@ import {
   resolveReceiptDateIsoForPersist,
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
-import { analyzeLineImageWithGroqScout } from '../_shared/receipt_vision.ts'
-import { fetchStoreReceiptAnalysisPromptAddition } from '../_shared/receipt_prompt.ts'
+import { analyzeLineImageWithGemini, analyzeLineImageWithGroqScout } from '../_shared/receipt_vision.ts'
+import {
+  combineStoreReceiptPromptAdditions,
+  fetchStoreReceiptAnalysisPromptAddition,
+  resolveBuiltinStoreReceiptPrompt,
+} from '../_shared/receipt_prompt.ts'
 import { ensureRoomAutoLinkedToStore } from '../_shared/auto_link_room.ts'
 import { runWebhookDisplayNameSync } from '../_shared/line_display_names.ts'
 import {
@@ -240,6 +246,9 @@ function buildReceiptNonSalesNoticeFlex(summaryText: string): Record<string, unk
   }
 }
 
+// レシート画像解析に Gemini を使う店舗（手書き数字などの読み取り精度向上が目的）。他店は Groq のまま。
+const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage', 'sushikoruri'])
+
 async function processReceiptImageEvent(
   registry: StoreRegistryRow,
   event: LineEvent,
@@ -281,19 +290,53 @@ async function processReceiptImageEvent(
 
   const supabase = createServiceClient()
   if (!supabase) return { saved: false, replied: false, reason: 'server_misconfigured' }
-  // 店舗別レシート解析プロンプト（任意・追記）。未設定店は空＝既定プロンプトのまま。
-  const receiptPromptAddition = await fetchStoreReceiptAnalysisPromptAddition(
+  // 店舗別レシート解析プロンプト = コード常駐ルール（恒久）＋ DB追記（任意）。
+  // 例: 鮨こるりは手書きの「売上日報」を必ずレシート扱いにするルールをコード側で保証する。
+  const dbReceiptPromptAddition = await fetchStoreReceiptAnalysisPromptAddition(
     supabase,
     registry.store_partition_key,
   )
-
-  const analyzed = await analyzeLineImageWithGroqScout(
-    contentFetch.bytes,
-    contentFetch.contentType,
-    lineMessageId,
-    groqApiKey,
-    receiptPromptAddition,
+  const receiptPromptAddition = combineStoreReceiptPromptAdditions(
+    resolveBuiltinStoreReceiptPrompt(registry.store_partition_key),
+    dbReceiptPromptAddition,
   )
+
+  // 一部店舗（ソバージュ・鮨こるり）は Gemini で解析する（手書き数字などの読み取り精度向上が目的）。
+  // Gemini が失敗したら Groq へ自動フォールバックし、当店の解析が止まらないようにする。
+  const useGeminiForReceipt = GEMINI_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
+  const receiptGeminiModel = resolveReceiptGeminiModel()
+  let analyzed = useGeminiForReceipt
+    ? await analyzeLineImageWithGemini(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      lineMessageId,
+      resolveGeminiApiKey(),
+      receiptPromptAddition,
+      receiptGeminiModel,
+    )
+    : await analyzeLineImageWithGroqScout(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      lineMessageId,
+      groqApiKey,
+      receiptPromptAddition,
+    )
+  // Gemini採用店で Gemini が解析に失敗したら Groq へ自動フォールバック（当店の解析を止めない）。
+  if (useGeminiForReceipt && !analyzed.analysis) {
+    const gf = analyzed.failure
+    console.error(
+      `Gemini receipt analysis failed (store=${registry.store_partition_key}); falling back to Groq:`,
+      gf?.stage,
+      gf?.message,
+    )
+    analyzed = await analyzeLineImageWithGroqScout(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      lineMessageId,
+      groqApiKey,
+      receiptPromptAddition,
+    )
+  }
 
   // 期間集計／グループ期間（GP）レポートは「売上レシート」ではないため、売上に加算せず返信もしない。
   // 店舗プロンプト（例: マルゴオット）が、期間/日付範囲を含む集計レポートの summary に

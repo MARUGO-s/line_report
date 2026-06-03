@@ -148,3 +148,15 @@ export async function pushLineText(
 export function resolveGroqApiKey(): string {
   return String(Deno.env.get('GROQ_API_KEY') || '').trim()
 }
+
+export function resolveGeminiApiKey(): string {
+  return String(Deno.env.get('GEMINI_API_KEY') || '').trim()
+}
+
+/**
+ * レシート画像解析で Gemini を使う店舗のモデル。RECEIPT_GEMINI_MODEL で差し替え可。
+ * 既定は gemini-3.1-pro-preview（旧 gemini-3-pro-preview は提供終了=404 のため後継へ更新）。
+ */
+export function resolveReceiptGeminiModel(): string {
+  return String(Deno.env.get('RECEIPT_GEMINI_MODEL') || '').trim() || 'gemini-3.1-pro-preview'
+}
