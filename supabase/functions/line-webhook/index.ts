@@ -1,6 +1,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import {
   fetchLineMessageBinary,
+  pushLineTextToTarget,
   replyLineFlex,
   replyLineMessages,
   replyLineText,
@@ -305,6 +306,18 @@ async function processReceiptImageEvent(
   // Gemini が失敗したら Groq へ自動フォールバックし、当店の解析が止まらないようにする。
   const useGeminiForReceipt = GEMINI_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
   const receiptGeminiModel = resolveReceiptGeminiModel()
+
+  // Gemini採用2店のみ、解析に時間がかかるため「受け付けました／解析中」の一次応答を先に push しておく。
+  // レシート結果は従来どおり reply で返すため、これは1通の push（ルーム/グループ宛て）。
+  // receiptReplyToken が空（レシート返信OFF）の部屋には送らない＝結果返信と歩調を合わせる。
+  if (useGeminiForReceipt && receiptReplyToken) {
+    await pushLineTextToTarget(
+      roomId,
+      '📸 画像を受け付けました。\nAI（Gemini）で内容を解析しています。高精度な解析のため、結果のご案内まで少しお時間（最大1分ほど）をいただく場合があります。少々お待ちください。',
+      accessToken,
+    )
+  }
+
   let analyzed = useGeminiForReceipt
     ? await analyzeLineImageWithGemini(
       contentFetch.bytes,

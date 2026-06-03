@@ -145,6 +145,37 @@ export async function pushLineText(
   )
 }
 
+/**
+ * グループ(C…)/ルーム(R…)/1:1(U…) のいずれの宛先にも push できる版。
+ * pushLineMessages は U 宛てのみ許可するため、ルーム/グループへ送る用途で使う。
+ */
+export async function pushLineTextToTarget(
+  to: string,
+  text: string,
+  channelAccessToken: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const target = String(to ?? '').trim()
+  if (!/^[UCR]/.test(target)) {
+    return { ok: false, error: 'invalid push target' }
+  }
+  const response = await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${channelAccessToken}`,
+    },
+    body: JSON.stringify({
+      to: target,
+      messages: [{ type: 'text', text: String(text ?? '').slice(0, 4900) }],
+    }),
+  })
+  if (!response.ok) {
+    const errText = await response.text()
+    return { ok: false, error: `LINE push API ${response.status}: ${errText}` }
+  }
+  return { ok: true }
+}
+
 export function resolveGroqApiKey(): string {
   return String(Deno.env.get('GROQ_API_KEY') || '').trim()
 }
