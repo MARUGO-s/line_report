@@ -251,19 +251,28 @@ function buildReceiptNonSalesNoticeFlex(summaryText: string): Record<string, unk
 const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage', 'sushikoruri'])
 
 // Gemini 採用店で「レシートらしさ」を示すテキストの手掛かり（Groq 事前判定の summary を見る）。
+// 注意: お品書き/メニューにも出る価格系トークン（円・¥・金額・税込・税抜・総額・売価）は誤昇格を招くため含めない。
+// ここに残すのは「売上集計書類」に固有で、料理メニューには通常出ない語のみ。
 const RECEIPT_LIKELIHOOD_TEXT =
-  /売上|日報|領収|レシート|レポート|精算|合計|小計|税込|税抜|消費税|客数|組数|来客|金額|総額|純売|売価|¥|円/
+  /売上|日報|領収|レシート|レポート|精算|合計|小計|消費税|客数|組数|来客|純売/
 
-// Gemini 採用店向けの事前判定: まず安価な Groq で解析し、レシートの可能性が少しでもあれば
-// 高価な Gemini へ「昇格」させる。判定に迷ったら必ず Gemini を呼ぶ（手書きの売上日報などを取りこぼさない）。
-// 明確に「売上の手掛かりが皆無（お品書き・献立・メニュー等）」のときだけ false を返し、解析も反応もしない。
+// Gemini 採用店向けの事前判定: まず安価な Groq で解析し、レシートの可能性があれば高価な Gemini へ「昇格」させる。
+// 【重要な学び】お品書き（寿司ネタ/料理名の一覧）は「店名＋日付＋items」を持つため、Groq が kind=receipt と
+// 誤判定すると normalizeLineImageReceiptAnalysis が非null の receipt を返す。旧実装は「receipt が非null」
+// だけで昇格していたため、金額が皆無のお品書きでも Gemini へ昇格していた（2026-06-04 実機で確認）。
+// そこで昇格条件を「売上の集計が実際に読めているか（金額または組数/客数/単価）」に厳格化する。
+// 手書き売上日報の取りこぼし対策として、Groq失敗時・summary に売上系の強い語句がある時も昇格させる（安全側）。
 function shouldEscalateToGeminiReceipt(analysis: LineImageAnalysisResult | null): boolean {
   if (!analysis) return true // Groq が解析できなかった → 安全側で Gemini を呼ぶ
-  if (analysis.receipt) return true // レシート項目を抽出できている（kind=receipt 相当）
-  const conf = Number(analysis.receiptModelConfidence ?? 0)
-  if (Number.isFinite(conf) && conf > 0) return true
+  const r = analysis.receipt
+  // 「売上の集計」が実際に読めている＝金額(総/純/税)または 組数/客数/単価 → レシート/売上日報の可能性大。
+  // 店名・日付・品目（ネタ一覧）だけでは昇格しない（＝お品書きを弾く核心）。
+  if (r && (r.grossSales || r.netSales || r.taxAmount || r.partyCount || r.guestCount || r.unitPrice)) {
+    return true
+  }
+  // Groq が kind=general にした取りこぼし対策: summary に売上系の強い語句があれば昇格。
   if (RECEIPT_LIKELIHOOD_TEXT.test(String(analysis.summary ?? ''))) return true
-  return false // メニュー・献立など、売上の手掛かりが皆無 → 無解析・無反応
+  return false // 売上の手掛かりが皆無（お品書き・献立・メニュー等）→ 無解析・無反応
 }
 
 async function processReceiptImageEvent(

@@ -46,6 +46,7 @@ function buildSushikoruriBuiltinPrompt(): string {
   return [
     '【鮨こるり 固有ルール（最優先）】',
     '・手書き/印字を問わず「売上日報」「日報」など“その日の売上を集計したメモ”は、レシート/領収書と同等とみなし必ず kind=receipt とする（kind=general にしない）。',
+    '・ただし「お品書き・メニュー・献立・本日のネタ」など“寿司ネタ/料理名/産地の一覧”で、売上金額（カード/現金/合計）・組数・客数の集計が無いものは、手書きでも必ず kind=general とし receipt には入れない（売上日報ではない）。日付・店名・ネタ名の羅列だけで金額や組数/客数が無ければ general。',
     '・「店舗名」→ store_name（例: 鮨こるり）。',
     '・「カード売上」＋「現金売上」の合計金額を gross_sales に入れる（¥表記）。片方が0でも合計する。',
     '・「◯組◯名」表記があれば ◯組→party_count、◯名→guest_count（数値）。「1組1名」なら party_count=1, guest_count=1。',
