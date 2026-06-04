@@ -19,7 +19,7 @@ const MAX_FLEX_ITEMS = 40
 type ReservationSource = "tabelog" | "ikyu"
 
 type NormalizedReservation = {
-  source: ReservationSource
+  source: ReservationSource | "manual"
   storeKey: string | null
   storeName: string | null
   visitAtIso: string
@@ -187,6 +187,26 @@ async function loadReservationsInRange(
       if (normalized) out.push(normalized)
     }
   }
+
+  // 手入力（管理画面で追加した）予約も本日分に含める。非表示(manual_hidden=ソフト削除)は除外。
+  const manualRes = await supabase
+    .from("manual_reservation_visit_events")
+    .select("customer_name, visit_at, created_at, reservation_type, reservation_detail, manual_store_key, manual_hidden")
+    .gte("visit_at", startIso)
+    .lt("visit_at", endIso)
+    .order("visit_at", { ascending: true })
+    .limit(2000)
+  if (manualRes.error) {
+    console.error("Failed to load manual reservations:", manualRes.error.message)
+  } else {
+    for (const row of (Array.isArray(manualRes.data) ? manualRes.data : [])) {
+      const record = row as Record<string, unknown>
+      if (record.manual_hidden === true) continue
+      const normalized = normalizeManualReservationRow(record)
+      if (normalized) out.push(normalized)
+    }
+  }
+
   return out
 }
 
@@ -209,6 +229,37 @@ function normalizeReservationRow(
 
   return {
     source,
+    storeKey: storeKey ? String(storeKey).trim() : null,
+    storeName,
+    visitAtIso,
+    timeLabel: reservationTimeLabel(detail?.visitDateTime, visitAtIso),
+    customerName: normalizeText(detail?.customerName, 80) ?? (String(row.customer_name ?? "").trim() || null),
+    partySizeLabel: partySizeLabel(detail?.partySize),
+    routeLabel,
+    planLabel: normalizeText(detail?.plan, 200),
+    allergyLabel: allergyLabel(detail?.allergy),
+  }
+}
+
+// 手入力予約の正規化。店舗振り分けは manual_store_key を最優先（無ければ詳細の店名から解決）。
+function normalizeManualReservationRow(
+  row: Record<string, unknown>,
+): NormalizedReservation | null {
+  const visitAtIso = String(row.visit_at ?? row.created_at ?? "").trim()
+  if (!visitAtIso) return null
+  const reservationType = String(row.reservation_type ?? "")
+  const rawDetail = String(row.reservation_detail ?? "")
+  const detail = parseDetail(rawDetail)
+
+  if (looksCancelled(reservationType, rawDetail, detail)) return null
+
+  const manualStoreKey = String(row.manual_store_key ?? "").trim()
+  const storeName = normalizeText(detail?.storeName, 90)
+  const storeKey = manualStoreKey || (storeName ? resolveReceiptNamePartitionKey(storeName) : null)
+  const routeLabel = normalizeText(detail?.route ?? detail?.reservationSite, 80) ?? "手入力"
+
+  return {
+    source: "manual",
     storeKey: storeKey ? String(storeKey).trim() : null,
     storeName,
     visitAtIso,
