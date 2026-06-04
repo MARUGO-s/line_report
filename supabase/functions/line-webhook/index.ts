@@ -26,7 +26,7 @@ import {
   resolveParsedStoreNameForDisplay,
 } from '../_shared/receipt_store_name_match.ts'
 import { persistLearnedReceiptPhone } from '../_shared/store_receipt_phones.ts'
-import type { LineReplyPayload } from '../_shared/receipt_types.ts'
+import type { LineImageAnalysisResult, LineReplyPayload } from '../_shared/receipt_types.ts'
 import {
   clearPendingReceiptCorrection,
   handleReceiptCorrectionPostback,
@@ -42,7 +42,7 @@ import {
   resolveReceiptDateIsoForPersist,
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
-import { analyzeLineImageWithGemini, analyzeLineImageWithGroqScout } from '../_shared/receipt_vision.ts'
+import { analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
 import {
   combineStoreReceiptPromptAdditions,
   fetchStoreReceiptAnalysisPromptAddition,
@@ -250,6 +250,22 @@ function buildReceiptNonSalesNoticeFlex(summaryText: string): Record<string, unk
 // レシート画像解析に Gemini を使う店舗（手書き数字などの読み取り精度向上が目的）。他店は Groq のまま。
 const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage', 'sushikoruri'])
 
+// Gemini 採用店で「レシートらしさ」を示すテキストの手掛かり（Groq 事前判定の summary を見る）。
+const RECEIPT_LIKELIHOOD_TEXT =
+  /売上|日報|領収|レシート|レポート|精算|合計|小計|税込|税抜|消費税|客数|組数|来客|金額|総額|純売|売価|¥|円/
+
+// Gemini 採用店向けの事前判定: まず安価な Groq で解析し、レシートの可能性が少しでもあれば
+// 高価な Gemini へ「昇格」させる。判定に迷ったら必ず Gemini を呼ぶ（手書きの売上日報などを取りこぼさない）。
+// 明確に「売上の手掛かりが皆無（お品書き・献立・メニュー等）」のときだけ false を返し、解析も反応もしない。
+function shouldEscalateToGeminiReceipt(analysis: LineImageAnalysisResult | null): boolean {
+  if (!analysis) return true // Groq が解析できなかった → 安全側で Gemini を呼ぶ
+  if (analysis.receipt) return true // レシート項目を抽出できている（kind=receipt 相当）
+  const conf = Number(analysis.receiptModelConfidence ?? 0)
+  if (Number.isFinite(conf) && conf > 0) return true
+  if (RECEIPT_LIKELIHOOD_TEXT.test(String(analysis.summary ?? ''))) return true
+  return false // メニュー・献立など、売上の手掛かりが皆無 → 無解析・無反応
+}
+
 async function processReceiptImageEvent(
   registry: StoreRegistryRow,
   event: LineEvent,
@@ -303,27 +319,67 @@ async function processReceiptImageEvent(
   )
 
   // 一部店舗（ソバージュ・鮨こるり）は Gemini で解析する（手書き数字などの読み取り精度向上が目的）。
-  // Gemini が失敗したら Groq へ自動フォールバックし、当店の解析が止まらないようにする。
   const useGeminiForReceipt = GEMINI_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
   const receiptGeminiModel = resolveReceiptGeminiModel()
+  const GROQ_RECEIPT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 
-  // Gemini採用2店のみ、解析に時間がかかるため「受け付けました／解析中」の一次応答を先に push しておく。
-  // レシート結果は従来どおり reply で返すため、これは1通の push（ルーム/グループ宛て）。
-  // receiptReplyToken が空（レシート返信OFF）の部屋には送らない＝結果返信と歩調を合わせる。
-  if (useGeminiForReceipt && receiptReplyToken) {
-    await pushLineTextToTarget(
-      roomId,
-      '📸 画像を受け付けました。\nAI（Gemini）で内容を解析しています。高精度な解析のため、結果のご案内まで少しお時間（最大1分ほど）をいただく場合があります。少々お待ちください。',
-      accessToken,
-    )
+  // AI使用料ページの「実測」表示用に、APIが返した実測トークンを1行記録する。
+  // best-effort: 失敗してもレシート処理は止めない（売上登録・返信が最優先）。
+  const recordAiUsage = async (
+    provider: 'gemini' | 'groq',
+    model: string,
+    usage: LineImageVisionUsage | null | undefined,
+  ): Promise<void> => {
+    if (!usage) return
+    try {
+      const { error: usageErr } = await supabase.from('ai_usage_events').insert({
+        store_partition_key: registry.store_partition_key,
+        provider,
+        model,
+        input_tokens: usage.inputTokens,
+        output_tokens: usage.outputTokens,
+        thinking_tokens: usage.thinkingTokens,
+        total_tokens: usage.totalTokens,
+        line_message_id: lineMessageId,
+      })
+      if (usageErr) console.error('ai_usage_events insert failed:', usageErr.message)
+    } catch (e) {
+      console.error('ai_usage_events insert threw:', (e instanceof Error ? e.message : String(e)).slice(0, 200))
+    }
   }
 
-  const GROQ_RECEIPT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
-  // 実測トークン記録用に「実際に応答したプロバイダ／モデル」を追跡する（フォールバック時は groq に更新）。
-  let analyzedProvider: 'gemini' | 'groq' = useGeminiForReceipt ? 'gemini' : 'groq'
-  let analyzedModel = useGeminiForReceipt ? receiptGeminiModel : GROQ_RECEIPT_MODEL
-  let analyzed = useGeminiForReceipt
-    ? await analyzeLineImageWithGemini(
+  let analyzed: Awaited<ReturnType<typeof analyzeLineImageWithGroqScout>>
+
+  if (useGeminiForReceipt) {
+    // 手順1: まず安価な Groq で「レシートか否か」だけ事前判定する（お品書き等の非レシート画像を弾く）。
+    const pre = await analyzeLineImageWithGroqScout(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      lineMessageId,
+      groqApiKey,
+      receiptPromptAddition,
+    )
+    await recordAiUsage('groq', GROQ_RECEIPT_MODEL, pre.usage)
+
+    if (!shouldEscalateToGeminiReceipt(pre.analysis)) {
+      // 売上の手掛かりが皆無（メニュー・献立・お品書き等）→ Gemini を呼ばず、解析中push も結果返信もしない。
+      console.log(
+        `[receipt_pre_filter] skip non-receipt image (store=${registry.store_partition_key}, msg=${lineMessageId})`,
+      )
+      return { saved: false, replied: false, reason: 'pre_filter_non_receipt' }
+    }
+
+    // 手順2: レシートの可能性あり → ここで初めて「解析中」push を送り、Gemini で高精度解析へ昇格する。
+    // receiptReplyToken が空（レシート返信OFF）の部屋には送らない＝結果返信と歩調を合わせる。
+    if (receiptReplyToken) {
+      await pushLineTextToTarget(
+        roomId,
+        '📸 画像を受け付けました。\nAI（Gemini）で内容を解析しています。高精度な解析のため、結果のご案内まで少しお時間（最大1分ほど）をいただく場合があります。少々お待ちください。',
+        accessToken,
+      )
+    }
+
+    const gem = await analyzeLineImageWithGemini(
       contentFetch.bytes,
       contentFetch.contentType,
       lineMessageId,
@@ -331,21 +387,20 @@ async function processReceiptImageEvent(
       receiptPromptAddition,
       receiptGeminiModel,
     )
-    : await analyzeLineImageWithGroqScout(
-      contentFetch.bytes,
-      contentFetch.contentType,
-      lineMessageId,
-      groqApiKey,
-      receiptPromptAddition,
-    )
-  // Gemini採用店で Gemini が解析に失敗したら Groq へ自動フォールバック（当店の解析を止めない）。
-  if (useGeminiForReceipt && !analyzed.analysis) {
-    const gf = analyzed.failure
-    console.error(
-      `Gemini receipt analysis failed (store=${registry.store_partition_key}); falling back to Groq:`,
-      gf?.stage,
-      gf?.message,
-    )
+    if (gem.analysis) {
+      analyzed = gem
+      await recordAiUsage('gemini', receiptGeminiModel, gem.usage)
+    } else {
+      // Gemini が失敗したら、手順1で得た Groq の事前判定結果をそのまま使う（当店の解析を止めない）。
+      console.error(
+        `Gemini receipt analysis failed (store=${registry.store_partition_key}); using Groq pre-classification:`,
+        gem.failure?.stage,
+        gem.failure?.message,
+      )
+      analyzed = pre
+    }
+  } else {
+    // Gemini 非採用店（大多数）は従来どおり Groq のみで解析する。
     analyzed = await analyzeLineImageWithGroqScout(
       contentFetch.bytes,
       contentFetch.contentType,
@@ -353,28 +408,7 @@ async function processReceiptImageEvent(
       groqApiKey,
       receiptPromptAddition,
     )
-    analyzedProvider = 'groq'
-    analyzedModel = GROQ_RECEIPT_MODEL
-  }
-
-  // AI使用料ページの「実測」表示用に、APIが返した実測トークンを1行記録する。
-  // best-effort: 失敗してもレシート処理は止めない（売上登録・返信が最優先）。
-  if (analyzed.usage) {
-    try {
-      const { error: usageErr } = await supabase.from('ai_usage_events').insert({
-        store_partition_key: registry.store_partition_key,
-        provider: analyzedProvider,
-        model: analyzedModel,
-        input_tokens: analyzed.usage.inputTokens,
-        output_tokens: analyzed.usage.outputTokens,
-        thinking_tokens: analyzed.usage.thinkingTokens,
-        total_tokens: analyzed.usage.totalTokens,
-        line_message_id: lineMessageId,
-      })
-      if (usageErr) console.error('ai_usage_events insert failed:', usageErr.message)
-    } catch (e) {
-      console.error('ai_usage_events insert threw:', (e instanceof Error ? e.message : String(e)).slice(0, 200))
-    }
+    await recordAiUsage('groq', GROQ_RECEIPT_MODEL, analyzed.usage)
   }
 
   // 期間集計／グループ期間（GP）レポートは「売上レシート」ではないため、売上に加算せず返信もしない。
