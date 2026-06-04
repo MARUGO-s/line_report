@@ -57,7 +57,7 @@ const ADMIN_SURFACE_LINE_REPORT = "line_report"
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-token, x-admin-surface",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 }
 
 type AppError = {
@@ -419,6 +419,37 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && path === "/reservations/search") {
       const reservationSearchState = await fetchReservationSearchState(supabase, url)
       return json(reservationSearchState, 200)
+    }
+    // 予約表の手動編集: 新規作成（手入力）/ 編集・非表示(ソフト削除)・復元 / 氏名・電話サジェスト。
+    if (req.method === "POST" && path === "/reservations/event") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await createManualReservationEvent(supabase, body)
+      return json(result, 200)
+    }
+    if (req.method === "PATCH" && path === "/reservations/event") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await updateReservationEvent(supabase, body)
+      return json(result, 200)
+    }
+    if (req.method === "POST" && path === "/reservations/customer-suggest") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await suggestReservationCustomers(supabase, body)
+      return json(result, 200)
+    }
+    // 完全削除（ハードデリート）: キャンセル(非表示)と異なり行を物理削除し履歴も残さない。
+    // source/id は URL クエリで受ける（PII を含まない）。
+    if (req.method === "DELETE" && path === "/reservations/event") {
+      const result = await deleteReservationEvent(supabase, url)
+      return json(result, 200)
     }
 
     if (req.method === "GET" && path === "/messages/search") {
@@ -2313,21 +2344,27 @@ async function fetchReservationCalendarState(
 ) {
   const targetMonth = normalizeCalendarMonthParam(url.searchParams.get("month"))
   const sourceFilter = normalizeReservationSourceFilter(url.searchParams.get("source"))
+  // 非表示（ソフト削除）の行は既定で除外。include_hidden=1 のときだけ含める（確認・復元用）。
+  const includeHidden = url.searchParams.get("include_hidden") === "1"
   const range = buildJstMonthRange(targetMonth)
-  const sources = sourceFilter === "all" ? ["tabelog", "ikyu"] as const : [sourceFilter] as const
+  const baseSources: Array<"tabelog" | "ikyu"> = sourceFilter === "all"
+    ? ["tabelog", "ikyu"]
+    : (sourceFilter === "tabelog" || sourceFilter === "ikyu" ? [sourceFilter] : [])
+  const includeManual = sourceFilter === "all" || sourceFilter === "manual"
   const items: Array<Record<string, unknown>> = []
   const sourceCounts: Record<string, number> = {
     tabelog: 0,
     ikyu: 0,
+    manual: 0,
   }
 
-  for (const source of sources) {
+  for (const source of baseSources) {
     const { eventTable, summaryTable } = getReservationSourceTables(source)
 
     const [eventsRes, summariesRes] = await Promise.all([
       supabase
         .from(eventTable)
-        .select("id, gmail_message_id, customer_name, customer_phone, visit_at, created_at, reservation_type, reservation_detail")
+        .select(RESERVATION_EVENT_SELECT_COLUMNS)
         .gte("visit_at", range.startIso)
         .lt("visit_at", range.endIso)
         .order("visit_at", { ascending: true })
@@ -2353,14 +2390,34 @@ async function fetchReservationCalendarState(
     )
 
     for (const row of eventsRes.data ?? []) {
-      const item = buildReservationCalendarItem(
-        source,
-        row as Record<string, unknown>,
-        summaryByCustomer,
-      )
+      const record = row as Record<string, unknown>
+      if (!includeHidden && record.manual_hidden === true) continue
+      const item = buildReservationCalendarItem(source, record, summaryByCustomer)
       if (!item) continue
       items.push(item)
       sourceCounts[source] += 1
+    }
+  }
+
+  // 手入力（新規）予約: gmail_message_id もサマリも持たないため別途読み込む。
+  if (includeManual) {
+    const { data: manualRows, error: manualErr } = await supabase
+      .from("manual_reservation_visit_events")
+      .select(MANUAL_RESERVATION_SELECT_COLUMNS)
+      .gte("visit_at", range.startIso)
+      .lt("visit_at", range.endIso)
+      .order("visit_at", { ascending: true })
+      .limit(2000)
+    if (manualErr) {
+      throw { status: 500, message: `Failed to fetch manual reservation events: ${manualErr.message}` } satisfies AppError
+    }
+    for (const row of manualRows ?? []) {
+      const record = row as Record<string, unknown>
+      if (!includeHidden && record.manual_hidden === true) continue
+      const item = buildReservationCalendarItem("manual", record, null)
+      if (!item) continue
+      items.push(item)
+      sourceCounts.manual += 1
     }
   }
 
@@ -2371,6 +2428,7 @@ async function fetchReservationCalendarState(
     month_start_iso: range.startIso,
     month_end_iso: range.endIso,
     source_filter: sourceFilter,
+    include_hidden: includeHidden,
     total: items.length,
     source_counts: sourceCounts,
     items,
@@ -2394,49 +2452,51 @@ async function fetchReservationSearchState(
     1,
     RESERVATION_SEARCH_MAX_LIMIT,
   )
-  const sources = sourceFilter === "all" ? ["tabelog", "ikyu"] as const : [sourceFilter] as const
+  const includeHidden = url.searchParams.get("include_hidden") === "1"
+  const baseSources: Array<"tabelog" | "ikyu"> = sourceFilter === "all"
+    ? ["tabelog", "ikyu"]
+    : (sourceFilter === "tabelog" || sourceFilter === "ikyu" ? [sourceFilter] : [])
+  const includeManual = sourceFilter === "all" || sourceFilter === "manual"
   const sourceFetchLimit = Math.min(
     RESERVATION_SEARCH_SOURCE_FETCH_CAP,
     Math.max(limit, Math.ceil(limit * 2)),
   )
   const searchPatterns = buildReservationNameSearchPatterns(query)
+  const escapedPatterns = searchPatterns
+    .map((pattern) => escapeLikePattern(pattern))
+    .filter((pattern) => pattern.length > 0)
+  // 氏名 or 詳細(JSON文字列)に対する ilike OR フィルタ（tabelog/ikyu/手入力で共通利用）。
+  const orFilter = (() => {
+    if (escapedPatterns.length === 0) return ""
+    const filters: string[] = []
+    for (const pattern of escapedPatterns) {
+      filters.push(`customer_name.ilike.%${pattern}%`)
+      filters.push(`reservation_detail.ilike.%${pattern}%`)
+    }
+    return filters.join(",")
+  })()
 
   const items: Array<Record<string, unknown>> = []
   const sourceCounts: Record<string, number> = {
     tabelog: 0,
     ikyu: 0,
+    manual: 0,
   }
   const sourceLimitReached: Record<string, boolean> = {
     tabelog: false,
     ikyu: false,
+    manual: false,
   }
 
-  for (const source of sources) {
+  for (const source of baseSources) {
     const { eventTable, summaryTable } = getReservationSourceTables(source)
 
     let eventsQuery = supabase
       .from(eventTable)
-      .select("id, gmail_message_id, customer_name, customer_phone, visit_at, created_at, reservation_type, reservation_detail")
+      .select(RESERVATION_EVENT_SELECT_COLUMNS)
       .order("visit_at", { ascending: false })
       .limit(sourceFetchLimit)
-
-    const escapedPatterns = searchPatterns
-      .map((pattern) => escapeLikePattern(pattern))
-      .filter((pattern) => pattern.length > 0)
-
-    if (escapedPatterns.length === 1) {
-      const pattern = escapedPatterns[0]
-      eventsQuery = eventsQuery.or(
-        `customer_name.ilike.%${pattern}%,reservation_detail.ilike.%${pattern}%`,
-      )
-    } else if (escapedPatterns.length > 1) {
-      const filters: string[] = []
-      for (const pattern of escapedPatterns) {
-        filters.push(`customer_name.ilike.%${pattern}%`)
-        filters.push(`reservation_detail.ilike.%${pattern}%`)
-      }
-      eventsQuery = eventsQuery.or(filters.join(","))
-    }
+    if (orFilter) eventsQuery = eventsQuery.or(orFilter)
 
     const [{ data, error }, summariesRes] = await Promise.all([
       eventsQuery,
@@ -2465,11 +2525,9 @@ async function fetchReservationSearchState(
     }
 
     for (const row of eventRows) {
-      const item = buildReservationCalendarItem(
-        source,
-        row as Record<string, unknown>,
-        summaryByCustomer,
-      )
+      const record = row as Record<string, unknown>
+      if (!includeHidden && record.manual_hidden === true) continue
+      const item = buildReservationCalendarItem(source, record, summaryByCustomer)
       if (!item) continue
       if (!matchesReservationSearchItem(item, query)) continue
       items.push(item)
@@ -2477,12 +2535,38 @@ async function fetchReservationSearchState(
     }
   }
 
+  if (includeManual) {
+    let manualQuery = supabase
+      .from("manual_reservation_visit_events")
+      .select(MANUAL_RESERVATION_SELECT_COLUMNS)
+      .order("visit_at", { ascending: false })
+      .limit(sourceFetchLimit)
+    if (orFilter) manualQuery = manualQuery.or(orFilter)
+    const { data: manualRows, error: manualErr } = await manualQuery
+    if (manualErr) {
+      throw { status: 500, message: `Failed to search manual reservations: ${manualErr.message}` } satisfies AppError
+    }
+    const manualList = Array.isArray(manualRows) ? manualRows : []
+    if (manualList.length >= sourceFetchLimit) sourceLimitReached.manual = true
+    for (const row of manualList) {
+      const record = row as Record<string, unknown>
+      if (!includeHidden && record.manual_hidden === true) continue
+      const item = buildReservationCalendarItem("manual", record, null)
+      if (!item) continue
+      if (!matchesReservationSearchItem(item, query)) continue
+      items.push(item)
+      sourceCounts.manual += 1
+    }
+  }
+
   items.sort((a, b) => String(b.visit_at ?? "").localeCompare(String(a.visit_at ?? "")))
-  const truncated = items.length > limit || sourceLimitReached.tabelog || sourceLimitReached.ikyu
+  const truncated = items.length > limit ||
+    sourceLimitReached.tabelog || sourceLimitReached.ikyu || sourceLimitReached.manual
 
   return {
     query,
     source_filter: sourceFilter,
+    include_hidden: includeHidden,
     limit,
     total: items.length,
     truncated,
@@ -2490,6 +2574,185 @@ async function fetchReservationSearchState(
     items: items.slice(0, limit),
     generated_at: new Date().toISOString(),
   }
+}
+
+// 手入力（新規）予約を作成。reservation_detail はフロントが組み立てたJSON文字列をそのまま保存する。
+async function createManualReservationEvent(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const visitAtIso = normalizeReservationVisitAtIso(body.visit_at)
+  if (!visitAtIso) {
+    throw { status: 400, message: "visit_at is required (ISO datetime)." } satisfies AppError
+  }
+  const insertRow = {
+    customer_name: toSafeString(body.customer_name) || null,
+    customer_phone: toSafeString(body.customer_phone) || null,
+    visit_at: visitAtIso,
+    reservation_type: toSafeString(body.reservation_type) || null,
+    reservation_detail: toSafeString(body.reservation_detail) || null,
+    manual_store_key: toSafeString(body.manual_store_key) || null,
+  }
+  const { data, error } = await supabase
+    .from("manual_reservation_visit_events")
+    .insert(insertRow)
+    .select("id")
+    .single()
+  if (error) {
+    throw { status: 500, message: `Failed to create reservation: ${error.message}` } satisfies AppError
+  }
+  return { ok: true, source: "manual", id: (data as { id?: number } | null)?.id ?? null }
+}
+
+// 既存/手入力の予約を編集・非表示(ソフト削除)・復元。body に含まれたフィールドだけを更新する。
+async function updateReservationEvent(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const source = toSafeString(body.source)
+  const table = reservationEventTableForSource(source)
+  if (!table) {
+    throw { status: 400, message: "source must be one of tabelog|ikyu|manual." } satisfies AppError
+  }
+  const id = Number(body.id)
+  if (!Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const isManualTable = table === "manual_reservation_visit_events"
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k)
+
+  const patch: Record<string, unknown> = {}
+  if (has("customer_name")) patch.customer_name = toSafeString(body.customer_name) || null
+  if (has("customer_phone")) patch.customer_phone = toSafeString(body.customer_phone) || null
+  if (has("visit_at")) {
+    const iso = normalizeReservationVisitAtIso(body.visit_at)
+    if (!iso) throw { status: 400, message: "visit_at is invalid." } satisfies AppError
+    patch.visit_at = iso
+  }
+  if (has("reservation_type")) patch.reservation_type = toSafeString(body.reservation_type) || null
+  if (has("reservation_detail")) patch.reservation_detail = toSafeString(body.reservation_detail) || null
+  if (has("manual_store_key")) patch.manual_store_key = toSafeString(body.manual_store_key) || null
+  if (has("manual_hidden")) {
+    const hidden = body.manual_hidden === true || body.manual_hidden === "true"
+    patch.manual_hidden = hidden
+    if (hidden) {
+      const reason = toSafeString(body.manual_hidden_reason).toLowerCase()
+      patch.manual_hidden_reason = RESERVATION_MANUAL_HIDDEN_REASONS.has(reason) ? reason : "cancel"
+    } else {
+      patch.manual_hidden_reason = null
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw { status: 400, message: "No fields to update." } satisfies AppError
+  }
+  // 監査用タイムスタンプ。手入力表は updated_at、既存表は manual_edited_at に記録する。
+  if (isManualTable) patch.updated_at = new Date().toISOString()
+  else patch.manual_edited_at = new Date().toISOString()
+
+  const { error } = await supabase.from(table).update(patch).eq("id", id)
+  if (error) {
+    throw { status: 500, message: `Failed to update reservation: ${error.message}` } satisfies AppError
+  }
+  return { ok: true, source, id }
+}
+
+// 氏名/電話のサジェスト: 入力語で3つの予約表を横断検索し、顧客（氏名+電話）単位に集約して返す。
+// 検索語は URL ではなく POST ボディで受け取り、ログ/URL に PII を残さない。
+async function suggestReservationCustomers(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const q = toSafeString(body.q).trim()
+  const field = toSafeString(body.field).toLowerCase() === "phone" ? "phone" : "name"
+  const limit = clampInt(String(body.limit ?? ""), 8, 1, 20)
+  if (q.length < 1) return { ok: true, field, suggestions: [] as Array<Record<string, unknown>> }
+
+  const col = field === "phone" ? "customer_phone" : "customer_name"
+  const pat = escapeLikePattern(q)
+  const tables: Array<{ t: string; source: string }> = [
+    { t: "tabelog_reservation_visit_events", source: "tabelog" },
+    { t: "ikyu_reservation_visit_events", source: "ikyu" },
+    { t: "manual_reservation_visit_events", source: "manual" },
+  ]
+  const byKey = new Map<string, Record<string, unknown>>()
+  for (const { t, source } of tables) {
+    const { data, error } = await supabase
+      .from(t)
+      .select("customer_name, customer_phone, visit_at, manual_store_key, reservation_detail")
+      .ilike(col, `%${pat}%`)
+      .order("visit_at", { ascending: false })
+      .limit(60)
+    if (error) {
+      console.error(`customer-suggest query failed (${t}):`, error.message)
+      continue
+    }
+    for (const row of (Array.isArray(data) ? data : [])) {
+      if (!isRecord(row)) continue
+      const name = toSafeString(row.customer_name)
+      const phone = toSafeString(row.customer_phone)
+      if (!name && !phone) continue
+      const key = `${name}__${phone}`
+      const visitAt = toSafeString(row.visit_at)
+      const existing = byKey.get(key)
+      if (existing) {
+        existing.count = Number(existing.count ?? 0) + 1
+        if (visitAt && visitAt > toSafeString(existing.last_visit_at)) existing.last_visit_at = visitAt
+        continue
+      }
+      const parsed = parseReservationCalendarDetail(toSafeString(row.reservation_detail))
+      byKey.set(key, {
+        customer_name: name,
+        customer_phone: phone,
+        last_visit_at: visitAt || null,
+        manual_store_key: toSafeString(row.manual_store_key) || null,
+        store_name: normalizeCalendarText(parsed?.storeName, 90),
+        source,
+        count: 1,
+      })
+    }
+  }
+  const suggestions = [...byKey.values()]
+    .sort((a, b) => String(b.last_visit_at ?? "").localeCompare(String(a.last_visit_at ?? "")))
+    .slice(0, limit)
+  return { ok: true, field, suggestions }
+}
+
+// 予約の完全削除（ハードデリート）。非表示(ソフト削除)と違い行を物理削除する。
+// 取込予約(tabelog/ikyu)は reservation_customer_visit_history にも複製があるため、
+// 「履歴も残さない」ため gmail_message_id を辿って履歴行も併せて削除する。
+async function deleteReservationEvent(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const source = toSafeString(url.searchParams.get("source"))
+  const table = reservationEventTableForSource(source)
+  if (!table) {
+    throw { status: 400, message: "source must be one of tabelog|ikyu|manual." } satisfies AppError
+  }
+  const id = Number(url.searchParams.get("id"))
+  if (!Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+
+  if (table !== "manual_reservation_visit_events") {
+    const { data: row } = await supabase.from(table).select("gmail_message_id").eq("id", id).maybeSingle()
+    const gmid = toSafeString((row as { gmail_message_id?: string } | null)?.gmail_message_id)
+    if (gmid) {
+      const { error: histErr } = await supabase
+        .from("reservation_customer_visit_history")
+        .delete()
+        .eq("partner", source)
+        .eq("gmail_message_id", gmid)
+      if (histErr) console.error("Failed to delete reservation visit history:", histErr.message)
+    }
+  }
+
+  const { error } = await supabase.from(table).delete().eq("id", id)
+  if (error) {
+    throw { status: 500, message: `Failed to delete reservation: ${error.message}` } satisfies AppError
+  }
+  return { ok: true, source, id, deleted: true }
 }
 
 function normalizeBudgetStoreKey(raw: string): string {
@@ -3137,7 +3400,7 @@ function chooseLaterIso(a: string | null, b: string | null): string | null {
 }
 
 function buildReservationCalendarItem(
-  source: "tabelog" | "ikyu",
+  source: "tabelog" | "ikyu" | "manual",
   event: Record<string, unknown>,
   summaryByCustomer: Map<string, Record<string, unknown>> | null,
 ): Record<string, unknown> | null {
@@ -3147,6 +3410,11 @@ function buildReservationCalendarItem(
   const createdAt = toSafeString(event.created_at)
   if (!visitAt && !createdAt) return null
 
+  const defaultSourceLabel = source === "tabelog"
+    ? "食べログ"
+    : source === "ikyu"
+    ? "一休.comレストラン"
+    : "手入力"
   const visitAtValue = visitAt || createdAt
   const createdAtValue = createdAt || visitAt
   const reservationType = toSafeString(event.reservation_type) || "unknown"
@@ -3155,9 +3423,9 @@ function buildReservationCalendarItem(
   const routeLabel = normalizeCalendarText(
     parsedDetail?.route ??
       parsedDetail?.reservationSite ??
-      (source === "tabelog" ? "食べログ" : "一休.comレストラン"),
+      defaultSourceLabel,
     80,
-  ) ?? (source === "tabelog" ? "食べログ" : "一休.comレストラン")
+  ) ?? defaultSourceLabel
   const customerNameLabel = normalizeCalendarText(parsedDetail?.customerName, 80) ?? (name || null)
   const planLabel = normalizeCalendarText(parsedDetail?.plan, 220) ??
     (parsedDetail ? null : normalizeCalendarText(reservationDetail, 220))
@@ -3189,6 +3457,11 @@ function buildReservationCalendarItem(
     party_size_label: partySizeLabel,
     allergy_label: allergyLabel,
     store_name: storeNameLabel,
+    is_manual: source === "manual",
+    manual_hidden: event.manual_hidden === true,
+    manual_hidden_reason: toSafeString(event.manual_hidden_reason) || null,
+    manual_store_key: toSafeString(event.manual_store_key) || null,
+    manual_edited_at: toSafeString(event.manual_edited_at) || toSafeString(event.updated_at) || null,
   }
 }
 
@@ -3339,11 +3612,39 @@ function normalizeCalendarMonthParam(value: string | null): string {
   return `${year}-${month}`
 }
 
-function normalizeReservationSourceFilter(value: string | null): "all" | "tabelog" | "ikyu" {
+function normalizeReservationSourceFilter(value: string | null): "all" | "tabelog" | "ikyu" | "manual" {
   const normalized = String(value ?? "").trim().toLowerCase()
   if (normalized === "tabelog") return "tabelog"
   if (normalized === "ikyu") return "ikyu"
+  if (normalized === "manual") return "manual"
   return "all"
+}
+
+// 予約イベントのソース → 物理テーブル名（手入力含む）。
+function reservationEventTableForSource(source: string): string | null {
+  if (source === "tabelog") return "tabelog_reservation_visit_events"
+  if (source === "ikyu") return "ikyu_reservation_visit_events"
+  if (source === "manual") return "manual_reservation_visit_events"
+  return null
+}
+
+// 既存イベント表（tabelog/ikyu）が手動編集用に追加した列を含めた SELECT 列。
+const RESERVATION_EVENT_SELECT_COLUMNS =
+  "id, gmail_message_id, customer_name, customer_phone, visit_at, created_at, reservation_type, reservation_detail, manual_hidden, manual_hidden_reason, manual_store_key, manual_edited_at"
+
+// 手入力予約表の SELECT 列（gmail_message_id を持たない）。
+const MANUAL_RESERVATION_SELECT_COLUMNS =
+  "id, customer_name, customer_phone, visit_at, created_at, reservation_type, reservation_detail, manual_hidden, manual_hidden_reason, manual_store_key, updated_at"
+
+const RESERVATION_MANUAL_HIDDEN_REASONS = new Set(["cancel", "mistake", "other"])
+
+// 来店日時の入力（"2026-06-04T18:30" 等）を ISO 文字列へ正規化。妥当でなければ null。
+function normalizeReservationVisitAtIso(value: unknown): string | null {
+  const raw = String(value ?? "").trim()
+  if (!raw) return null
+  const ms = Date.parse(raw)
+  if (!Number.isFinite(ms)) return null
+  return new Date(ms).toISOString()
 }
 
 function buildJstMonthRange(month: string): { startIso: string; endIso: string } {

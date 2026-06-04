@@ -922,9 +922,12 @@
             <option value="all">全て</option>
             <option value="tabelog">食べログ</option>
             <option value="ikyu">一休</option>
+            <option value="manual">手入力</option>
           </select>
           <input id="nameFilterInput" class="input" type="text" placeholder="名前で検索（例: 石田）" aria-label="予約者名検索">
           <button id="openSearchHitsBtn" class="button">候補一覧</button>
+          <label class="resv-hidden-toggle" title="非表示（キャンセル）にした予約も一覧に表示します"><input type="checkbox" id="showHiddenToggle"> 非表示も表示</label>
+          <button id="newReservationBtn" class="button primary">＋新規予約</button>
           <button id="reloadBtn" class="button primary">再読み込み</button>
         </div>
       </div>
@@ -942,7 +945,10 @@
           <h3 id="resvModalTitle" class="resv-modal-title">予約詳細</h3>
           <div id="resvModalSub" class="resv-modal-sub"></div>
         </div>
-        <button id="resvModalClose" type="button" class="resv-modal-close">閉じる</button>
+        <div class="resv-modal-head-actions">
+          <button id="resvEditBtn" type="button" class="button primary">編集</button>
+          <button id="resvModalClose" type="button" class="resv-modal-close">閉じる</button>
+        </div>
       </div>
       <div id="resvModalRows" class="resv-modal-rows"></div>
     </div>
@@ -957,6 +963,88 @@
         <button id="searchHitsClose" type="button" class="resv-modal-close">閉じる</button>
       </div>
       <div id="searchHitsList" class="search-hit-list"></div>
+    </div>
+  </div>
+
+  <style>
+    .resv-modal-head-actions { display:flex; gap:8px; align-items:center; }
+    .resv-edit-form { display:flex; flex-direction:column; gap:12px; padding:4px 2px 2px; }
+    .resv-edit-field { display:flex; flex-direction:column; gap:4px; position:relative; }
+    .resv-edit-field > label { font-size:12px; opacity:.8; }
+    .resv-edit-field .input, .resv-edit-field .select { width:100%; box-sizing:border-box; }
+    .resv-edit-row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .resv-suggest-pop { position:absolute; left:0; right:0; top:100%; z-index:60; background:#13202e; border:1px solid #2a3a4d; border-radius:10px; margin-top:4px; max-height:220px; overflow:auto; box-shadow:0 10px 30px rgba(0,0,0,.4); }
+    .resv-suggest-opt { display:block; width:100%; text-align:left; padding:8px 12px; background:none; border:0; color:inherit; cursor:pointer; font-size:13px; }
+    .resv-suggest-opt:hover, .resv-suggest-opt.active { background:rgba(120,160,220,.2); }
+    .resv-suggest-opt .s-sub { display:block; font-size:11px; opacity:.65; margin-top:2px; }
+    .resv-edit-actions { display:flex; justify-content:space-between; gap:8px; margin-top:6px; flex-wrap:wrap; }
+    .resv-edit-actions .right { display:flex; gap:8px; margin-left:auto; }
+    .resv-edit-error { color:#ff8a8a; font-size:12px; min-height:14px; }
+    .button.danger { background:#b3382e; border-color:#b3382e; color:#fff; }
+    .button.danger:hover { background:#9c2f26; border-color:#9c2f26; }
+    .resv-badge-manual { display:inline-block; font-size:10px; line-height:1.4; padding:0 6px; border-radius:8px; background:#7a5bd0; color:#fff; margin-top:3px; }
+    .resv.is-hidden { opacity:.42; }
+    .resv.is-hidden .resv-summary-name::after { content:'（非表示）'; font-size:10px; opacity:.8; }
+    .resv-hidden-toggle { font-size:12px; display:inline-flex; align-items:center; gap:4px; cursor:pointer; opacity:.85; white-space:nowrap; }
+    body[data-theme='light'] .resv-suggest-pop { background:#fff; border-color:#d8dee6; }
+  </style>
+  <div id="resvEditOverlay" class="resv-modal-overlay" aria-hidden="true">
+    <div class="resv-modal" role="dialog" aria-modal="true" aria-labelledby="resvEditTitle">
+      <div class="resv-modal-head">
+        <div>
+          <h3 id="resvEditTitle" class="resv-modal-title">新規予約</h3>
+          <div id="resvEditSub" class="resv-modal-sub"></div>
+        </div>
+        <button id="resvEditClose" type="button" class="resv-modal-close">閉じる</button>
+      </div>
+      <div class="resv-edit-form">
+        <div class="resv-edit-field">
+          <label for="ef_visit_at">来店日時 <span style="color:#ff8a8a">*</span></label>
+          <input id="ef_visit_at" class="input" type="datetime-local">
+        </div>
+        <div class="resv-edit-field">
+          <label for="ef_name">予約者名</label>
+          <input id="ef_name" class="input" type="text" autocomplete="off" placeholder="入力すると候補を表示">
+          <div id="ef_name_pop" class="resv-suggest-pop" hidden></div>
+        </div>
+        <div class="resv-edit-field">
+          <label for="ef_phone">電話番号</label>
+          <input id="ef_phone" class="input" type="text" autocomplete="off" inputmode="tel" placeholder="入力すると候補を表示">
+          <div id="ef_phone_pop" class="resv-suggest-pop" hidden></div>
+        </div>
+        <div class="resv-edit-field">
+          <label for="ef_store">店舗の振り分け</label>
+          <select id="ef_store" class="select"></select>
+        </div>
+        <div class="resv-edit-row2">
+          <div class="resv-edit-field">
+            <label for="ef_party">人数</label>
+            <input id="ef_party" class="input" type="text" inputmode="numeric" placeholder="例: 4">
+          </div>
+          <div class="resv-edit-field">
+            <label for="ef_type">予約種別</label>
+            <input id="ef_type" class="input" type="text" placeholder="例: 予約 / コース">
+          </div>
+        </div>
+        <div class="resv-edit-field">
+          <label for="ef_plan">コース・メモ</label>
+          <input id="ef_plan" class="input" type="text" placeholder="任意">
+        </div>
+        <div class="resv-edit-field">
+          <label for="ef_allergy">アレルギー</label>
+          <input id="ef_allergy" class="input" type="text" placeholder="任意（なければ空欄）">
+        </div>
+        <div id="resvEditError" class="resv-edit-error"></div>
+        <div class="resv-edit-actions">
+          <button id="resvHideBtn" type="button" class="button" hidden>非表示にする（キャンセル）</button>
+          <button id="resvRestoreBtn" type="button" class="button" hidden>表示に戻す</button>
+          <button id="resvDeleteBtn" type="button" class="button danger" hidden>完全削除</button>
+          <div class="right">
+            <button id="resvEditCancel" type="button" class="button">キャンセル</button>
+            <button id="resvEditSave" type="button" class="button primary">保存</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -983,11 +1071,16 @@
       nameQuery: '',
       activeStore: 'all',
       visibleCount: 0,
-      visibleSourceCounts: { tabelog: 0, ikyu: 0 },
+      visibleSourceCounts: { tabelog: 0, ikyu: 0, manual: 0 },
       apiTotal: 0,
-      apiSourceCounts: { tabelog: 0, ikyu: 0 },
+      apiSourceCounts: { tabelog: 0, ikyu: 0, manual: 0 },
       jumpTimerId: null,
       theme: 'dark',
+      showHidden: false,
+      activePopupItem: null,
+      editing: null,          // 編集中の予約 item（新規は null）
+      suggestTimer: null,
+      suggestSeq: 0,
     };
 
     const dom = {
@@ -1015,6 +1108,29 @@
       resvModalSub: document.getElementById('resvModalSub'),
       resvModalRows: document.getElementById('resvModalRows'),
       resvModalClose: document.getElementById('resvModalClose'),
+      resvEditBtn: document.getElementById('resvEditBtn'),
+      newReservationBtn: document.getElementById('newReservationBtn'),
+      showHiddenToggle: document.getElementById('showHiddenToggle'),
+      resvEditOverlay: document.getElementById('resvEditOverlay'),
+      resvEditTitle: document.getElementById('resvEditTitle'),
+      resvEditSub: document.getElementById('resvEditSub'),
+      resvEditClose: document.getElementById('resvEditClose'),
+      resvEditCancel: document.getElementById('resvEditCancel'),
+      resvEditSave: document.getElementById('resvEditSave'),
+      resvHideBtn: document.getElementById('resvHideBtn'),
+      resvRestoreBtn: document.getElementById('resvRestoreBtn'),
+      resvDeleteBtn: document.getElementById('resvDeleteBtn'),
+      resvEditError: document.getElementById('resvEditError'),
+      ef_visit_at: document.getElementById('ef_visit_at'),
+      ef_name: document.getElementById('ef_name'),
+      ef_name_pop: document.getElementById('ef_name_pop'),
+      ef_phone: document.getElementById('ef_phone'),
+      ef_phone_pop: document.getElementById('ef_phone_pop'),
+      ef_store: document.getElementById('ef_store'),
+      ef_party: document.getElementById('ef_party'),
+      ef_type: document.getElementById('ef_type'),
+      ef_plan: document.getElementById('ef_plan'),
+      ef_allergy: document.getElementById('ef_allergy'),
       searchHitsOverlay: document.getElementById('searchHitsOverlay'),
       searchHitsTitle: document.getElementById('searchHitsTitle'),
       searchHitsSummary: document.getElementById('searchHitsSummary'),
@@ -1555,6 +1671,7 @@
     function openReservationModalById(popupId) {
       const item = state.popupItems[popupId];
       if (!item) return;
+      state.activePopupItem = item;
       const sourceLabel = sourceLabelFromItem(item);
       const summary = buildReservationSummary(item);
       dom.resvModalTitle.textContent = '予約詳細';
@@ -1563,6 +1680,229 @@
       dom.resvModalRows.innerHTML = rows.map((row) => buildReservationDetailRowHtml(row)).join('');
       dom.resvModalOverlay.classList.add('open');
       dom.resvModalOverlay.setAttribute('aria-hidden', 'false');
+    }
+
+    // ───────── 予約の編集・新規追加・サジェスト ─────────
+    async function apiSend(path, method, body) {
+      const token = getToken();
+      if (!token) throw new Error('先に管理トークンを保存してください。');
+      const url = LINE_REPORT_PAGES.adminApiUrl(path);
+      const res = await fetch(url, {
+        method: method,
+        headers: { 'x-admin-token': token, 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+      });
+      const text = await res.text();
+      let payload = {};
+      try { payload = text ? JSON.parse(text) : {}; } catch (_) { payload = { raw: text }; }
+      if (!res.ok) throw new Error(payload.error || ('API error: ' + res.status));
+      return payload;
+    }
+
+    // UTC ISO ↔ datetime-local（ブラウザのローカル＝JST前提で相互変換）
+    function isoToLocalInput(iso) {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      const p = (n) => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+    function localInputToIso(value) {
+      const v = String(value || '').trim();
+      if (!v) return '';
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+    }
+    function parseMaybeJson(text) {
+      const s = String(text || '').trim();
+      if (!s || s.charAt(0) !== '{') return null;
+      try { return JSON.parse(s); } catch (_) { return null; }
+    }
+
+    function populateEditStoreOptions(selectedKey) {
+      if (!dom.ef_store) return;
+      const rows = [{ key: '', name: '（未設定 / 未分類）' }].concat(getStoreMaster());
+      dom.ef_store.innerHTML = rows.map(function(r) {
+        const sel = (String(selectedKey || '') === r.key) ? ' selected' : '';
+        return '<option value="' + escapeHtml(r.key) + '"' + sel + '>' + escapeHtml(r.name) + '</option>';
+      }).join('');
+    }
+
+    function hideSuggestPops() {
+      if (dom.ef_name_pop) { dom.ef_name_pop.hidden = true; dom.ef_name_pop.innerHTML = ''; }
+      if (dom.ef_phone_pop) { dom.ef_phone_pop.hidden = true; dom.ef_phone_pop.innerHTML = ''; }
+    }
+
+    function closeEditModal() {
+      dom.resvEditOverlay.classList.remove('open');
+      dom.resvEditOverlay.setAttribute('aria-hidden', 'true');
+      state.editing = null;
+      hideSuggestPops();
+      if (state.suggestTimer) { clearTimeout(state.suggestTimer); state.suggestTimer = null; }
+    }
+
+    function openEditModal(item) {
+      state.editing = item || null;
+      hideSuggestPops();
+      if (dom.resvEditError) dom.resvEditError.textContent = '';
+      const isEdit = !!item;
+      dom.resvEditTitle.textContent = isEdit ? '予約を編集' : '新規予約';
+      dom.resvEditSub.textContent = isEdit
+        ? (sourceLabelFromItem(item) + (item.is_manual ? '（手入力）' : '（取込予約の手動編集）'))
+        : '手入力で新しい予約を追加します';
+      dom.ef_visit_at.value = isEdit ? isoToLocalInput(item.visit_at) : '';
+      dom.ef_name.value = isEdit ? String(item.customer_name_label || item.customer_name || '') : '';
+      dom.ef_phone.value = isEdit ? String(item.customer_phone || '') : '';
+      const storeKey = isEdit ? getReservationStoreKey(item) : '';
+      populateEditStoreOptions(storeKey === '__unmatched__' ? '' : storeKey);
+      const party = isEdit ? String(item.party_size_label || '') : '';
+      dom.ef_party.value = (party && party !== '不明') ? party : '';
+      const rtype = isEdit ? String(item.reservation_type || '') : '';
+      dom.ef_type.value = (rtype && rtype !== 'unknown') ? rtype : '';
+      dom.ef_plan.value = isEdit ? String(item.plan_label || '') : '';
+      const allergy = isEdit ? String(item.allergy_label || '') : '';
+      dom.ef_allergy.value = (allergy && allergy !== 'なし') ? allergy : '';
+      const hidden = isEdit && item.manual_hidden === true;
+      dom.resvHideBtn.hidden = !isEdit || hidden;
+      dom.resvRestoreBtn.hidden = !isEdit || !hidden;
+      dom.resvDeleteBtn.hidden = !isEdit;
+      dom.resvEditOverlay.classList.add('open');
+      dom.resvEditOverlay.setAttribute('aria-hidden', 'false');
+      setTimeout(function() { try { dom.ef_visit_at.focus(); } catch (_) {} }, 30);
+    }
+
+    // 入力欄から reservation_detail(JSON文字列)を組み立てる。既存取込予約は元detailをマージのベースに。
+    function buildEditDetailJson() {
+      const detail = {};
+      if (state.editing && !state.editing.is_manual) {
+        const base = parseMaybeJson(state.editing.reservation_detail);
+        if (base && typeof base === 'object') Object.assign(detail, base);
+      }
+      const storeKey = String(dom.ef_store.value || '').trim();
+      const storeName = storeKey ? storeLabelForKey(storeKey) : '';
+      const name = String(dom.ef_name.value || '').trim();
+      const party = String(dom.ef_party.value || '').trim();
+      const plan = String(dom.ef_plan.value || '').trim();
+      const allergy = String(dom.ef_allergy.value || '').trim();
+      if (name) detail.customerName = name; else delete detail.customerName;
+      if (storeName) detail.storeName = storeName; else delete detail.storeName;
+      if (party) detail.partySize = party; else delete detail.partySize;
+      if (plan) detail.plan = plan; else delete detail.plan;
+      if (allergy) detail.allergy = allergy; else delete detail.allergy;
+      const visitIso = localInputToIso(dom.ef_visit_at.value);
+      if (visitIso) detail.visitDateTime = isoToLocalInput(visitIso).replace('T', ' ');
+      return JSON.stringify(detail);
+    }
+
+    async function saveReservation() {
+      const visitIso = localInputToIso(dom.ef_visit_at.value);
+      if (!visitIso) { dom.resvEditError.textContent = '来店日時を入力してください。'; return; }
+      const storeKey = String(dom.ef_store.value || '').trim();
+      const payload = {
+        customer_name: String(dom.ef_name.value || '').trim(),
+        customer_phone: String(dom.ef_phone.value || '').trim(),
+        visit_at: visitIso,
+        reservation_type: String(dom.ef_type.value || '').trim(),
+        reservation_detail: buildEditDetailJson(),
+        manual_store_key: storeKey,
+      };
+      dom.resvEditSave.disabled = true;
+      dom.resvEditError.textContent = '';
+      try {
+        if (state.editing) {
+          payload.source = state.editing.source;
+          payload.id = state.editing.id;
+          await apiSend('/reservations/event', 'PATCH', payload);
+        } else {
+          await apiSend('/reservations/event', 'POST', payload);
+        }
+        closeEditModal();
+        closeReservationModal();
+        await loadCalendar();
+      } catch (error) {
+        dom.resvEditError.textContent = (error && error.message) ? error.message : String(error);
+      } finally {
+        dom.resvEditSave.disabled = false;
+      }
+    }
+
+    async function setReservationHidden(hidden) {
+      if (!state.editing) return;
+      if (hidden && !confirm('この予約を非表示（キャンセル扱い）にします。\n記録は残るので、後で「非表示も表示」から復元できます。よろしいですか？')) return;
+      dom.resvEditError.textContent = '';
+      try {
+        await apiSend('/reservations/event', 'PATCH', {
+          source: state.editing.source,
+          id: state.editing.id,
+          manual_hidden: hidden,
+          manual_hidden_reason: hidden ? 'cancel' : null,
+        });
+        closeEditModal();
+        closeReservationModal();
+        await loadCalendar();
+      } catch (error) {
+        dom.resvEditError.textContent = (error && error.message) ? error.message : String(error);
+      }
+    }
+
+    async function deleteReservation() {
+      if (!state.editing) return;
+      const it = state.editing;
+      const label = String(it.customer_name_label || it.customer_name || '') || '(名前なし)';
+      const when = formatDateTimeDetailJst(it.visit_at);
+      if (!confirm('【完全削除】この予約を完全に削除します。\n' + label + ' / ' + when
+        + '\n\nキャンセル（非表示）と違い、記録も来店履歴も残らず、元に戻せません。\n本当に削除しますか？')) return;
+      dom.resvEditError.textContent = '';
+      try {
+        await apiSend('/reservations/event?source=' + encodeURIComponent(it.source) + '&id=' + encodeURIComponent(String(it.id)), 'DELETE');
+        closeEditModal();
+        closeReservationModal();
+        await loadCalendar();
+      } catch (error) {
+        dom.resvEditError.textContent = (error && error.message) ? error.message : String(error);
+      }
+    }
+
+    function runSuggest(field) {
+      const input = field === 'phone' ? dom.ef_phone : dom.ef_name;
+      const pop = field === 'phone' ? dom.ef_phone_pop : dom.ef_name_pop;
+      const q = String(input.value || '').trim();
+      if (q.length < 1) { pop.hidden = true; pop.innerHTML = ''; return; }
+      const seq = ++state.suggestSeq;
+      apiSend('/reservations/customer-suggest', 'POST', { q: q, field: field, limit: 8 })
+        .then(function(res) {
+          if (seq !== state.suggestSeq) return;
+          const list = (res && Array.isArray(res.suggestions)) ? res.suggestions : [];
+          if (!list.length) { pop.hidden = true; pop.innerHTML = ''; return; }
+          pop._items = list;
+          pop.innerHTML = list.map(function(s, i) {
+            const nm = escapeHtml(String(s.customer_name || '（名前なし）'));
+            const ph = String(s.customer_phone || '');
+            const last = s.last_visit_at ? formatDateJst(s.last_visit_at) : '';
+            const store = s.store_name ? String(s.store_name) : (s.manual_store_key ? storeLabelForKey(s.manual_store_key) : '');
+            const sub = [ph, store, (last ? '最終 ' + last : '')].filter(Boolean).join(' ・ ');
+            return '<button type="button" class="resv-suggest-opt" data-sg="' + escapeHtml(String(i)) + '">'
+              + nm + '<span class="s-sub">' + escapeHtml(sub) + '</span></button>';
+          }).join('');
+          pop.hidden = false;
+        })
+        .catch(function() { pop.hidden = true; });
+    }
+
+    function applySuggestion(s) {
+      if (!s) return;
+      if (s.customer_name != null) dom.ef_name.value = String(s.customer_name || '');
+      if (s.customer_phone != null) dom.ef_phone.value = String(s.customer_phone || '');
+      const cfg = window.LINE_REPORT_PAGES;
+      const key = String(s.manual_store_key || '').trim();
+      if (key && cfg && cfg.STORE_NAMES && cfg.STORE_NAMES[key]) {
+        populateEditStoreOptions(key);
+      } else if (s.store_name && cfg && typeof cfg.resolveStoreKey === 'function') {
+        const rk = cfg.resolveStoreKey('', String(s.store_name));
+        if (rk && cfg.STORE_NAMES && cfg.STORE_NAMES[rk]) populateEditStoreOptions(rk);
+      }
+      hideSuggestPops();
     }
 
     function bindReservationCardPopupEvents() {
@@ -1621,10 +1961,13 @@
         .sort(function(a, b) { return a.name.localeCompare(b.name, 'ja'); });
     }
 
-    /** 予約の店舗名（自由文字列）を22店舗マスターの canonical key に寄せる。一致しなければ未分類 */
+    /** 予約の店舗名（自由文字列）を22店舗マスターの canonical key に寄せる。一致しなければ未分類。
+     *  手動振り分け（manual_store_key）があれば最優先で採用する。 */
     function getReservationStoreKey(item) {
-      const raw = String(item && item.store_name || '').trim();
       const cfg = window.LINE_REPORT_PAGES;
+      const manualKey = String(item && item.manual_store_key || '').trim();
+      if (manualKey && cfg && cfg.STORE_NAMES && cfg.STORE_NAMES[manualKey]) return manualKey;
+      const raw = String(item && item.store_name || '').trim();
       if (raw && cfg && typeof cfg.resolveStoreKey === 'function') {
         const key = cfg.resolveStoreKey('', raw);
         if (key && cfg.STORE_NAMES && cfg.STORE_NAMES[key]) return key;
@@ -1676,15 +2019,19 @@
     }
 
     function updateSummaryText() {
-      const counts = state.visibleSourceCounts || { tabelog: 0, ikyu: 0 };
+      const counts = state.visibleSourceCounts || { tabelog: 0, ikyu: 0, manual: 0 };
       const tabelogCount = Number(counts.tabelog || 0);
       const ikyuCount = Number(counts.ikyu || 0);
-      const total = Number(state.visibleCount || (tabelogCount + ikyuCount) || 0);
+      const manualCount = Number(counts.manual || 0);
+      const total = Number(state.visibleCount || (tabelogCount + ikyuCount + manualCount) || 0);
       const chips = [
         '<span class="stat-chip">総件数 <b>' + total + '</b></span>',
         '<span class="stat-chip"><span class="lg tabe"></span>食べログ <b>' + tabelogCount + '</b></span>',
         '<span class="stat-chip"><span class="lg ik"></span>一休 <b>' + ikyuCount + '</b></span>',
       ];
+      if (manualCount > 0 || state.source === 'manual') {
+        chips.push('<span class="stat-chip">手入力 <b>' + manualCount + '</b></span>');
+      }
       if (state.activeStore && state.activeStore !== 'all') {
         chips.push('<span class="stat-chip stat-chip-store">店舗: <b>' + escapeHtml(storeLabelForKey(state.activeStore)) + '</b></span>');
       }
@@ -1714,11 +2061,12 @@
       const filteredItems = state.activeStore === 'all'
         ? nameFilteredItems
         : nameFilteredItems.filter((item) => getReservationStoreKey(item) === state.activeStore);
-      state.visibleSourceCounts = { tabelog: 0, ikyu: 0 };
+      state.visibleSourceCounts = { tabelog: 0, ikyu: 0, manual: 0 };
       for (const it of filteredItems) {
         const s = String(it.source || '');
         if (s === 'tabelog') state.visibleSourceCounts.tabelog += 1;
         else if (s === 'ikyu') state.visibleSourceCounts.ikyu += 1;
+        else if (s === 'manual') state.visibleSourceCounts.manual += 1;
       }
 
       const byDay = new Map();
@@ -1766,14 +2114,17 @@
           if (summary.partySize && summary.partySize !== '不明') metaParts.push(summary.partySize);
           if (summary.visitTime && summary.visitTime !== '不明') metaParts.push(summary.visitTime);
           const metaLine = metaParts.join(' ・ ');
+          const hiddenCls = (item.manual_hidden === true) ? ' is-hidden' : '';
+          const manualBadge = (source === 'manual') ? '<div class="resv-badge-manual">手入力</div>' : '';
           return [
-            '<div class="resv source-' + escapeHtml(source) + ' js-resv-card" role="button" tabindex="0" data-popup-id="' + escapeHtml(popupId) + '">',
+            '<div class="resv source-' + escapeHtml(source) + ' js-resv-card' + hiddenCls + '" role="button" tabindex="0" data-popup-id="' + escapeHtml(popupId) + '">',
             '<div class="resv-summary">',
             '<div class="resv-summary-name" title="' + escapeHtml(summary.customerName) + '">' + escapeHtml(summary.customerName) + '</div>',
             (metaLine ? '<div class="resv-summary-sub">' + escapeHtml(metaLine) + '</div>' : ''),
             (state.activeStore === 'all'
               ? '<div class="resv-store-tag">' + escapeHtml(storeLabelForKey(getReservationStoreKey(item))) + '</div>'
               : ''),
+            manualBadge,
             '</div>',
             '</div>',
           ].join('');
@@ -1800,6 +2151,7 @@
       state.apiSourceCounts = {
         tabelog: Number(data.source_counts && data.source_counts.tabelog || 0),
         ikyu: Number(data.source_counts && data.source_counts.ikyu || 0),
+        manual: Number(data.source_counts && data.source_counts.manual || 0),
       };
       dom.monthTitle.textContent = formatMonthLabel(state.currentMonth);
       dom.lastRefresh.textContent = fromCache
@@ -1816,6 +2168,7 @@
       const params = new URLSearchParams();
       params.set('month', state.currentMonth);
       params.set('source', state.source);
+      if (state.showHidden) params.set('include_hidden', '1');
       const cachePath = '/reservations/calendar?' + params.toString();
       const cached = SC.get(token, FIXED_PROJECT_URL, 'admin-api', 'GET', cachePath);
       if (!cached || !cached.data) return false;
@@ -1827,6 +2180,7 @@
       const params = new URLSearchParams();
       params.set('month', state.currentMonth);
       params.set('source', state.source);
+      if (state.showHidden) params.set('include_hidden', '1');
       params.set('_ts', String(Date.now()));
       const data = await api('/reservations/calendar?' + params.toString());
       const SC = window.LINE_REPORT_SITE_CACHE;
@@ -1835,6 +2189,7 @@
         const saveParams = new URLSearchParams();
         saveParams.set('month', state.currentMonth);
         saveParams.set('source', state.source);
+        if (state.showHidden) saveParams.set('include_hidden', '1');
         SC.set(token, FIXED_PROJECT_URL, 'admin-api', 'GET', '/reservations/calendar?' + saveParams.toString(), data);
       }
       applyCalendarPayload(data, false);
@@ -1918,6 +2273,66 @@
 
     dom.reloadBtn.addEventListener('click', async function() {
       try { await loadCalendar(); } catch (error) { alert(error.message || String(error)); }
+    });
+
+    // ── 予約の編集・新規・非表示 関連の配線 ──
+    if (dom.newReservationBtn) {
+      dom.newReservationBtn.addEventListener('click', function() { openEditModal(null); });
+    }
+    if (dom.showHiddenToggle) {
+      dom.showHiddenToggle.addEventListener('change', async function() {
+        state.showHidden = !!dom.showHiddenToggle.checked;
+        try { await loadCalendar(); } catch (error) { alert(error.message || String(error)); }
+      });
+    }
+    if (dom.resvEditBtn) {
+      dom.resvEditBtn.addEventListener('click', function() {
+        if (state.activePopupItem) openEditModal(state.activePopupItem);
+      });
+    }
+    if (dom.resvEditClose) dom.resvEditClose.addEventListener('click', closeEditModal);
+    if (dom.resvEditCancel) dom.resvEditCancel.addEventListener('click', closeEditModal);
+    if (dom.resvEditOverlay) {
+      dom.resvEditOverlay.addEventListener('click', function(event) {
+        if (event.target === dom.resvEditOverlay) closeEditModal();
+      });
+    }
+    if (dom.resvEditSave) {
+      dom.resvEditSave.addEventListener('click', function() {
+        saveReservation().catch(function(error) {
+          dom.resvEditError.textContent = (error && error.message) ? error.message : String(error);
+        });
+      });
+    }
+    if (dom.resvHideBtn) dom.resvHideBtn.addEventListener('click', function() { setReservationHidden(true); });
+    if (dom.resvRestoreBtn) dom.resvRestoreBtn.addEventListener('click', function() { setReservationHidden(false); });
+    if (dom.resvDeleteBtn) dom.resvDeleteBtn.addEventListener('click', function() { deleteReservation(); });
+    if (dom.ef_name) {
+      dom.ef_name.addEventListener('input', function() {
+        if (state.suggestTimer) clearTimeout(state.suggestTimer);
+        state.suggestTimer = setTimeout(function() { runSuggest('name'); }, 250);
+      });
+    }
+    if (dom.ef_phone) {
+      dom.ef_phone.addEventListener('input', function() {
+        if (state.suggestTimer) clearTimeout(state.suggestTimer);
+        state.suggestTimer = setTimeout(function() { runSuggest('phone'); }, 250);
+      });
+    }
+    if (dom.ef_name_pop) {
+      dom.ef_name_pop.addEventListener('click', function(event) {
+        const btn = event.target.closest('.resv-suggest-opt'); if (!btn) return;
+        applySuggestion((dom.ef_name_pop._items || [])[Number(btn.getAttribute('data-sg'))]);
+      });
+    }
+    if (dom.ef_phone_pop) {
+      dom.ef_phone_pop.addEventListener('click', function(event) {
+        const btn = event.target.closest('.resv-suggest-opt'); if (!btn) return;
+        applySuggestion((dom.ef_phone_pop._items || [])[Number(btn.getAttribute('data-sg'))]);
+      });
+    }
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape' && dom.resvEditOverlay && dom.resvEditOverlay.classList.contains('open')) closeEditModal();
     });
 
     if (dom.storeSelectBtn) {
