@@ -26,7 +26,7 @@ import {
   resolveParsedStoreNameForDisplay,
 } from '../_shared/receipt_store_name_match.ts'
 import { persistLearnedReceiptPhone } from '../_shared/store_receipt_phones.ts'
-import type { LineImageAnalysisResult, LineReplyPayload } from '../_shared/receipt_types.ts'
+import type { LineImageAnalysisResult, LineImageReservationAnalysis, LineReplyPayload } from '../_shared/receipt_types.ts'
 import {
   clearPendingReceiptCorrection,
   handleReceiptCorrectionPostback,
@@ -247,6 +247,278 @@ function buildReceiptNonSalesNoticeFlex(summaryText: string): Record<string, unk
   }
 }
 
+// ───────── 予約スクショ取込（予約確認画面 → 確認カード → 登録） ─────────
+
+// "YYYY-MM-DD" + "HH:MM"（JST）を UTC ISO に変換。Edge は UTC 実行のため JST→UTC は -9h で構成する。
+function combineReservationVisitAtIso(date: string | null, time: string | null): string | null {
+  const dm = String(date ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!dm) return null
+  const y = Number(dm[1]), mo = Number(dm[2]), d = Number(dm[3])
+  let h = 0, mi = 0
+  const tm = String(time ?? '').match(/^(\d{1,2}):(\d{2})$/)
+  if (tm) { h = Number(tm[1]); mi = Number(tm[2]) }
+  const ms = Date.UTC(y, mo - 1, d, h - 9, mi, 0)
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null
+}
+
+// 抽出した予約から、予約表が解釈する reservation_detail(JSON文字列)を組み立てる。
+function buildReservationImportDetailJson(r: LineImageReservationAnalysis): string {
+  const detail: Record<string, unknown> = { route: '予約スクショ', reservationSite: '予約スクショ' }
+  if (r.storeName) detail.storeName = r.storeName
+  if (r.customerName) detail.customerName = r.customerName
+  if (r.partySize) detail.partySize = r.partySize
+  if (r.course) detail.plan = r.course
+  if (r.tableNo) detail.table = r.tableNo
+  if (r.date) detail.visitDateTime = `${r.date}${r.time ? ' ' + r.time : ''}`
+  return JSON.stringify(detail)
+}
+
+function reservationFieldRowsForFlex(
+  r: LineImageReservationAnalysis,
+  visitAtIso: string | null,
+): Record<string, unknown>[] {
+  const rows: Array<[string, string | null]> = [
+    ['店舗', r.storeName],
+    ['来店日時', visitAtIso ? `${r.date ?? ''}${r.time ? ' ' + r.time : ''}`.trim() : (r.date || null)],
+    ['予約者', r.customerName],
+    ['電話', r.customerPhone],
+    ['人数', r.partySize],
+    ['コース', r.course],
+    ['卓', r.tableNo],
+  ]
+  return rows
+    .filter(([, v]) => v && String(v).trim())
+    .map(([label, v]) => ({
+      type: 'box',
+      layout: 'baseline',
+      spacing: 'sm',
+      contents: [
+        { type: 'text', text: label, size: 'sm', color: '#8a96a3', flex: 2 },
+        { type: 'text', text: String(v), size: 'sm', color: '#333333', flex: 5, wrap: true },
+      ],
+    }))
+}
+
+// 解析した予約内容の確認カード（「この内容で登録」/「破棄」postback付き）。
+function buildReservationConfirmFlex(
+  pendingId: number,
+  r: LineImageReservationAnalysis,
+  visitAtIso: string | null,
+): Record<string, unknown> {
+  const altParts = [r.storeName, r.date, r.time, r.customerName].filter(Boolean).join(' ')
+  return {
+    type: 'flex',
+    altText: `予約の登録確認: ${altParts}`.slice(0, 380),
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          { type: 'text', text: '予約を登録しますか？', weight: 'bold', size: 'md', color: '#1a6fa8' },
+          { type: 'text', text: '予約確認画面を読み取りました。内容を確認して登録してください。', wrap: true, size: 'xs', color: '#8a96a3' },
+          { type: 'separator', margin: 'md' },
+          ...reservationFieldRowsForFlex(r, visitAtIso),
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            color: '#1a6fa8',
+            action: { type: 'postback', label: 'この内容で登録', data: `resv_imp=${pendingId}`, displayText: '予約を登録します' },
+          },
+          {
+            type: 'button',
+            style: 'secondary',
+            action: { type: 'postback', label: '破棄（登録しない）', data: `resv_imp_skip=${pendingId}`, displayText: '予約登録を取りやめます' },
+          },
+        ],
+      },
+    },
+  }
+}
+
+// 予約確認画面を検知 → pending に保存して確認カードを返信（本登録は postback で）。
+async function handleReservationImageDetected(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  registry: StoreRegistryRow,
+  roomId: string,
+  replyToken: string,
+  accessToken: string,
+  lineMessageId: string,
+  reservation: LineImageReservationAnalysis,
+  _summary: string,
+): Promise<{ saved: boolean; replied: boolean; reason?: string }> {
+  const storeKey = String(registry.store_partition_key ?? '').trim()
+  const visitAtIso = combineReservationVisitAtIso(reservation.date, reservation.time)
+
+  // べき等化: 同一 line_message_id で pending 済みなら再利用（Webhook 再送で二重カードを出さない）。
+  let pendingId: number | null = null
+  try {
+    const { data: existing } = await supabase
+      .from('pending_reservation_imports')
+      .select('id')
+      .eq('line_message_id', lineMessageId)
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (existing && (existing as { id?: number }).id) pendingId = Number((existing as { id?: number }).id)
+  } catch (_e) { /* noop */ }
+
+  if (pendingId == null) {
+    const payload = {
+      visit_at: visitAtIso,
+      customer_name: reservation.customerName,
+      customer_phone: reservation.customerPhone,
+      party_size: reservation.partySize,
+      plan: reservation.course,
+      store_name: reservation.storeName,
+      table: reservation.tableNo,
+      status: reservation.status,
+      reservation_type: reservation.status || '予約',
+      reservation_detail: buildReservationImportDetailJson(reservation),
+      manual_store_key: storeKey || null,
+    }
+    const { data: ins, error } = await supabase
+      .from('pending_reservation_imports')
+      .insert({ room_id: roomId, store_partition_key: storeKey || null, line_message_id: lineMessageId, payload, status: 'pending' })
+      .select('id')
+      .single()
+    if (error) {
+      console.error('pending_reservation_imports insert failed:', error.message)
+      return { saved: false, replied: false, reason: 'reservation_pending_insert_failed' }
+    }
+    pendingId = Number((ins as { id?: number } | null)?.id ?? 0)
+  }
+
+  if (!replyToken || !pendingId) {
+    return { saved: false, replied: false, reason: 'reservation_detected_no_reply' }
+  }
+  await replyLineFlex(
+    replyToken,
+    buildReservationConfirmFlex(pendingId, reservation, visitAtIso),
+    accessToken,
+    webhookReplyLog(registry, roomId, 'reservation_image_confirm'),
+  )
+  return { saved: false, replied: true, reason: 'reservation_confirm_card' }
+}
+
+function buildSimpleNoticeFlex(text: string): Record<string, unknown> {
+  return {
+    type: 'flex',
+    altText: text.slice(0, 380),
+    contents: {
+      type: 'bubble',
+      body: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text, wrap: true, size: 'sm', color: '#333333' }] },
+    },
+  }
+}
+
+// UTC ISO → JST "M月D日(曜) HH:MM" 表示。
+function formatReservationVisitLabelJst(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const j = new Date(d.getTime() + 9 * 3600 * 1000)
+  const wd = ['日', '月', '火', '水', '木', '金', '土'][j.getUTCDay()]
+  return `${j.getUTCMonth() + 1}月${j.getUTCDate()}日(${wd}) ${String(j.getUTCHours()).padStart(2, '0')}:${String(j.getUTCMinutes()).padStart(2, '0')}`
+}
+
+function buildReservationRegisteredFlex(payload: Record<string, unknown>, visitAtIso: string): Record<string, unknown> {
+  const str = (v: unknown) => { const s = String(v ?? '').trim(); return s || null }
+  const rows: Array<[string, string | null]> = [
+    ['店舗', str(payload.store_name)],
+    ['来店日時', visitAtIso ? formatReservationVisitLabelJst(visitAtIso) : null],
+    ['予約者', str(payload.customer_name)],
+    ['電話', str(payload.customer_phone)],
+    ['人数', str(payload.party_size)],
+    ['コース', str(payload.plan)],
+  ]
+  const fieldBoxes = rows.filter(([, v]) => v).map(([label, v]) => ({
+    type: 'box',
+    layout: 'baseline',
+    spacing: 'sm',
+    contents: [
+      { type: 'text', text: label, size: 'sm', color: '#8a96a3', flex: 2 },
+      { type: 'text', text: String(v), size: 'sm', color: '#333333', flex: 5, wrap: true },
+    ],
+  }))
+  return {
+    type: 'flex',
+    altText: '予約を登録しました',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          { type: 'text', text: '✅ 予約を登録しました', weight: 'bold', size: 'md', color: '#1a7f37' },
+          { type: 'separator', margin: 'md' },
+          ...fieldBoxes,
+          { type: 'text', text: '予約表・本日のご予約に反映されます。', size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
+        ],
+      },
+    },
+  }
+}
+
+// 確認カードの postback（resv_imp=<id> 登録 / resv_imp_skip=<id> 破棄）。
+async function handleReservationImportPostback(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  postbackData: string,
+): Promise<Record<string, unknown> | null> {
+  const isRegister = postbackData.startsWith('resv_imp=')
+  const pendingId = Number(postbackData.split('=')[1] ?? '')
+  if (!Number.isInteger(pendingId) || pendingId <= 0) return null
+
+  const { data: pending, error } = await supabase
+    .from('pending_reservation_imports')
+    .select('id, status, payload, store_partition_key')
+    .eq('id', pendingId)
+    .maybeSingle()
+  if (error || !pending) return buildSimpleNoticeFlex('対象の予約が見つかりませんでした。')
+  const p = pending as { id: number; status: string; payload: Record<string, unknown>; store_partition_key: string | null }
+
+  if (p.status === 'registered') return buildSimpleNoticeFlex('この予約はすでに登録済みです。')
+
+  if (!isRegister) {
+    await supabase.from('pending_reservation_imports')
+      .update({ status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', pendingId)
+    return buildSimpleNoticeFlex('予約の登録を取りやめました。')
+  }
+
+  const payload = p.payload ?? {}
+  const visitAt = String(payload.visit_at ?? '').trim()
+  if (!visitAt) {
+    return buildSimpleNoticeFlex('来店日時が読み取れなかったため自動登録できませんでした。お手数ですが予約表から手動で追加してください。')
+  }
+  const insertRow = {
+    customer_name: (payload.customer_name as string | null) ?? null,
+    customer_phone: (payload.customer_phone as string | null) ?? null,
+    visit_at: visitAt,
+    reservation_type: (payload.reservation_type as string | null) ?? '予約',
+    reservation_detail: (payload.reservation_detail as string | null) ?? null,
+    manual_store_key: (payload.manual_store_key as string | null) ?? p.store_partition_key ?? null,
+  }
+  const { data: created, error: insErr } = await supabase
+    .from('manual_reservation_visit_events').insert(insertRow).select('id').single()
+  if (insErr) {
+    console.error('manual reservation insert (from import) failed:', insErr.message)
+    return buildSimpleNoticeFlex('登録に失敗しました。時間をおいて再度お試しください。')
+  }
+  const newId = Number((created as { id?: number } | null)?.id ?? 0)
+  await supabase.from('pending_reservation_imports')
+    .update({ status: 'registered', manual_reservation_id: newId, updated_at: new Date().toISOString() })
+    .eq('id', pendingId)
+  return buildReservationRegisteredFlex(payload, visitAt)
+}
+
 // レシート画像解析に Gemini を使う店舗（手書き数字などの読み取り精度向上が目的）。他店は Groq のまま。
 const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage', 'sushikoruri'])
 
@@ -370,43 +642,47 @@ async function processReceiptImageEvent(
     )
     await recordAiUsage('groq', GROQ_RECEIPT_MODEL, pre.usage)
 
-    if (!shouldEscalateToGeminiReceipt(pre.analysis)) {
+    if (pre.analysis?.reservation) {
+      // 予約管理アプリの「予約確認画面」は Groq の事前判定で確定。Gemini昇格も非レシート早期returnもせず、
+      // 後段の予約分岐（確認カード）で処理する。
+      analyzed = pre
+    } else if (!shouldEscalateToGeminiReceipt(pre.analysis)) {
       // 売上の手掛かりが皆無（メニュー・献立・お品書き等）→ Gemini を呼ばず、解析中push も結果返信もしない。
       console.log(
         `[receipt_pre_filter] skip non-receipt image (store=${registry.store_partition_key}, msg=${lineMessageId})`,
       )
       return { saved: false, replied: false, reason: 'pre_filter_non_receipt' }
-    }
-
-    // 手順2: レシートの可能性あり → ここで初めて「解析中」push を送り、Gemini で高精度解析へ昇格する。
-    // receiptReplyToken が空（レシート返信OFF）の部屋には送らない＝結果返信と歩調を合わせる。
-    if (receiptReplyToken) {
-      await pushLineTextToTarget(
-        roomId,
-        '📸 画像を受け付けました。\nAI（Gemini）で内容を解析しています。高精度な解析のため、結果のご案内まで少しお時間（最大1分ほど）をいただく場合があります。少々お待ちください。',
-        accessToken,
-      )
-    }
-
-    const gem = await analyzeLineImageWithGemini(
-      contentFetch.bytes,
-      contentFetch.contentType,
-      lineMessageId,
-      resolveGeminiApiKey(),
-      receiptPromptAddition,
-      receiptGeminiModel,
-    )
-    if (gem.analysis) {
-      analyzed = gem
-      await recordAiUsage('gemini', receiptGeminiModel, gem.usage)
     } else {
-      // Gemini が失敗したら、手順1で得た Groq の事前判定結果をそのまま使う（当店の解析を止めない）。
-      console.error(
-        `Gemini receipt analysis failed (store=${registry.store_partition_key}); using Groq pre-classification:`,
-        gem.failure?.stage,
-        gem.failure?.message,
+      // 手順2: レシートの可能性あり → ここで初めて「解析中」push を送り、Gemini で高精度解析へ昇格する。
+      // receiptReplyToken が空（レシート返信OFF）の部屋には送らない＝結果返信と歩調を合わせる。
+      if (receiptReplyToken) {
+        await pushLineTextToTarget(
+          roomId,
+          '📸 画像を受け付けました。\nAI（Gemini）で内容を解析しています。高精度な解析のため、結果のご案内まで少しお時間（最大1分ほど）をいただく場合があります。少々お待ちください。',
+          accessToken,
+        )
+      }
+
+      const gem = await analyzeLineImageWithGemini(
+        contentFetch.bytes,
+        contentFetch.contentType,
+        lineMessageId,
+        resolveGeminiApiKey(),
+        receiptPromptAddition,
+        receiptGeminiModel,
       )
-      analyzed = pre
+      if (gem.analysis) {
+        analyzed = gem
+        await recordAiUsage('gemini', receiptGeminiModel, gem.usage)
+      } else {
+        // Gemini が失敗したら、手順1で得た Groq の事前判定結果をそのまま使う（当店の解析を止めない）。
+        console.error(
+          `Gemini receipt analysis failed (store=${registry.store_partition_key}); using Groq pre-classification:`,
+          gem.failure?.stage,
+          gem.failure?.message,
+        )
+        analyzed = pre
+      }
     }
   } else {
     // Gemini 非採用店（大多数）は従来どおり Groq のみで解析する。
@@ -438,6 +714,22 @@ async function processReceiptImageEvent(
       )
     }
     return { saved: false, replied: !!receiptReplyToken, reason: 'period_summary_skip' }
+  }
+
+  // 予約管理アプリの「予約確認画面」スクショ（kind=reservation）。売上ではないので登録せず、
+  // 解析内容を pending に保存し、確認カード（登録/破棄ボタン）を返信する。「登録」postback で本登録。
+  const detectedReservation = analyzed.analysis?.reservation
+  if (detectedReservation) {
+    return await handleReservationImageDetected(
+      supabase,
+      registry,
+      roomId,
+      suppressAll ? '' : rawReplyToken,
+      accessToken,
+      lineMessageId,
+      detectedReservation,
+      analyzedSummaryText,
+    )
   }
 
   if (!analyzed.analysis?.receipt) {
@@ -950,6 +1242,27 @@ Deno.serve(async (req) => {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           console.error('handleReceiptCorrectionPostback failed:', msg)
+          errors.push(msg.slice(0, 160))
+        }
+      }
+
+      // 予約スクショ確認カードの postback（resv_imp=登録 / resv_imp_skip=破棄）
+      if ((postbackData.startsWith('resv_imp=') || postbackData.startsWith('resv_imp_skip=')) && postbackReplyToken) {
+        try {
+          const reservationReply = await handleReservationImportPostback(supabase, postbackData)
+          if (reservationReply) {
+            await replyLineFlex(
+              postbackReplyToken,
+              reservationReply,
+              lineAccessTokenForSearch,
+              webhookReplyLog(registry as StoreRegistryRow, eventRoomIdForPostback ?? '', 'reservation_import_result'),
+            )
+            receiptReplies += 1
+          }
+          continue
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('handleReservationImportPostback failed:', msg)
           errors.push(msg.slice(0, 160))
         }
       }

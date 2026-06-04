@@ -12,10 +12,24 @@ export type LineImageReceiptAnalysis = {
   items: string[]
 }
 
+/** 予約管理アプリ等の「予約確認画面」スクショから抽出する予約情報 */
+export type LineImageReservationAnalysis = {
+  date: string | null        // 来店日 "YYYY-MM-DD"（解析後に正規化）
+  time: string | null        // 来店開始時刻 "HH:MM"
+  partySize: string | null   // 人数
+  customerName: string | null
+  customerPhone: string | null
+  course: string | null      // コース/プラン
+  storeName: string | null
+  tableNo: string | null     // 卓番
+  status: string | null      // 新規/変更/キャンセル 等
+}
+
 export type LineImageAnalysisResult = {
   summary: string
   receipt: LineImageReceiptAnalysis | null
   receiptModelConfidence?: number | null
+  reservation?: LineImageReservationAnalysis | null
 }
 
 export type LineImageVisionFailure = {

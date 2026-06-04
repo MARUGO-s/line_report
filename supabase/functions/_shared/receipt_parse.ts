@@ -512,8 +512,16 @@ export function normalizeLineImageAnalysisResult(raw: Record<string, unknown>): 
   const receiptModelConfidence = parseModelReceiptConfidence(
     raw.receipt_confidence ?? raw.receiptConfidence ?? raw.confidence,
   )
+  const reservation = kind === 'reservation'
+    ? normalizeLineImageReservationAnalysis(coerceMaybeJsonObject(raw.reservation) ?? raw.reservation)
+    : null
 
   if (!summary) {
+    // 予約: summary が無くても予約項目から合成する。
+    if (reservation && (reservation.customerName || reservation.date)) {
+      const syn = [reservation.date, reservation.time, reservation.customerName].filter(Boolean).join(' ')
+      return { summary: (syn || '予約').slice(0, 240), receipt: null, receiptModelConfidence, reservation }
+    }
     if (!receipt) return null
     const syntheticSummary = [
       receipt.storeName ? `店舗:${receipt.storeName}` : '',
@@ -527,8 +535,48 @@ export function normalizeLineImageAnalysisResult(raw: Record<string, unknown>): 
     }
   }
 
+  if (kind === 'reservation') return { summary, receipt: null, receiptModelConfidence, reservation }
   if (kind === 'general') return { summary, receipt: null, receiptModelConfidence }
   return { summary, receipt, receiptModelConfidence }
+}
+
+function normalizeReservationDateText(value: string | null): string | null {
+  if (!value) return null
+  const m = value.match(/(\d{4})\D{1,2}(\d{1,2})\D{1,2}(\d{1,2})/)
+  if (m) {
+    return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`
+  }
+  return value
+}
+
+function normalizeReservationTimeText(value: string | null): string | null {
+  if (!value) return null
+  const m = value.match(/(\d{1,2}):(\d{2})/)
+  if (m) return `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`
+  return value
+}
+
+export function normalizeLineImageReservationAnalysis(
+  raw: unknown,
+): import('./receipt_types.ts').LineImageReservationAnalysis | null {
+  if (!raw || typeof raw !== "object") return null
+  const d = raw as Record<string, unknown>
+  const text = (v: unknown, max: number): string | null => {
+    const s = normalizeReceiptFieldText(v, max)
+    return s && s !== "不明" && s !== "なし" ? s : null
+  }
+  const date = normalizeReservationDateText(text(d.date ?? d.visit_date ?? d.reservation_date, 40))
+  const time = normalizeReservationTimeText(text(d.time ?? d.visit_time ?? d.start_time, 40))
+  const partySize = text(d.party_size ?? d.party ?? d.guest_count ?? d.people ?? d.persons, 20)
+  const customerName = text(d.customer_name ?? d.name ?? d.customer, 80)
+  const customerPhone = text(d.customer_phone ?? d.phone ?? d.tel ?? d.telephone, 40)
+  const course = text(d.course ?? d.plan ?? d.menu, 200)
+  const storeName = text(d.store_name ?? d.shop_name ?? d.store, 90)
+  const tableNo = text(d.table ?? d.table_no ?? d.seat ?? d.table_number, 40)
+  const status = text(d.status ?? d.reservation_status ?? d.type, 40)
+  const hasAny = !!(date || time || partySize || customerName || customerPhone || course || storeName || tableNo)
+  if (!hasAny) return null
+  return { date, time, partySize, customerName, customerPhone, course, storeName, tableNo, status }
 }
 
 export function salvageLineImageAnalysisResultFromText(rawText: string): import('./receipt_types.ts').LineImageAnalysisResult | null {
