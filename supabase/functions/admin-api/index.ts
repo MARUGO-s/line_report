@@ -20,6 +20,7 @@ import {
   upsertManualMonthSalesEntries,
 } from "../_shared/manual_month_sales.ts"
 import {
+  upsertManualDayBudgetEntries,
   upsertManualDaySalesEntries,
 } from "../_shared/manual_day_sales.ts"
 import {
@@ -577,6 +578,15 @@ Deno.serve(async (req) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       const result = await upsertManualDayEntries(supabase, body)
+      return json(result, 200)
+    }
+    // 日別予算の直接入力（手動上書き）の保存。budget_yen が null/空の日は上書き解除（自動按分へ戻る）。
+    if (req.method === "PUT" && path === "/receipts/sales-daily-budget") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await upsertDailyBudgetEntries(supabase, body)
       return json(result, 200)
     }
     // 月次日別売上管理表（Excel/CSV）を解析し、日次の entries を返す（解析のみ・DB書込なし）。
@@ -3395,6 +3405,35 @@ async function importDailyReceiptsCommit(
   } catch (_e) { /* best-effort */ }
 
   return { ok: true, applied: rows.length, store_partition_key: key, receipt_table: receiptTable, cleared_manual_day: clearedManualDay }
+}
+
+// 日別予算の直接入力（手動上書き）を保存。body: { store_key, entries:[{sales_date, budget_yen|null}] }
+// budget_yen が null/空 の日は上書き解除（その日は自動按分へ戻る）。
+async function upsertDailyBudgetEntries(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const store_partition_key = normalizeBudgetStoreKey(toSafeString(body.store_key))
+  const entriesRaw = body.entries
+  if (!Array.isArray(entriesRaw)) {
+    throw { status: 400, message: "entries must be an array." } satisfies AppError
+  }
+  const payload: Array<{ sales_date: string; budget_yen: number | null }> = []
+  for (const entry of entriesRaw) {
+    if (!isRecord(entry)) continue
+    const sales_date = toSafeString(entry.sales_date).trim().slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sales_date)) continue
+    const raw = entry.budget_yen
+    const budget_yen = (raw === null || raw === undefined || raw === "") ? null : toNonNegativeInteger(raw)
+    payload.push({ sales_date, budget_yen })
+  }
+  let applied = 0
+  try {
+    applied = await upsertManualDayBudgetEntries(supabase, store_partition_key, payload)
+  } catch (e) {
+    throw { status: 500, message: e instanceof Error ? e.message : String(e) } satisfies AppError
+  }
+  return { ok: true, applied, store_key: store_partition_key }
 }
 
 async function upsertManualDayEntries(

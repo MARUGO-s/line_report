@@ -158,3 +158,71 @@ export async function upsertManualDaySalesEntries(
 
   return applied
 }
+
+/** 日別予算の直接入力（手動上書き）を [日付→円] で取得。 */
+export async function fetchManualDayBudgetMapForStore(
+  supabase: SupabaseClient,
+  storePartitionKey: string,
+  fromDateInclusive: string,
+  toDateExclusive: string,
+): Promise<Map<string, number>> {
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
+  const from = normalizeDateInput(fromDateInclusive)
+  const to = normalizeDateInput(toDateExclusive)
+  const out = new Map<string, number>()
+  if (!key || !from || !to) return out
+
+  const { data, error } = await supabase
+    .from("line_sales_manual_day_budget")
+    .select("sales_date, budget_yen")
+    .eq("store_partition_key", key)
+    .gte("sales_date", from)
+    .lt("sales_date", to)
+
+  if (error) {
+    console.error(`fetchManualDayBudgetMapForStore failed (store=${key}):`, error.message)
+    return out
+  }
+  for (const row of Array.isArray(data) ? data : []) {
+    const r = row as Record<string, unknown>
+    const date = normalizeDateInput(r.sales_date)
+    const yen = parseOptionalNonNegativeInt(r.budget_yen)
+    if (date && yen != null) out.set(date, yen)
+  }
+  return out
+}
+
+/** 日別予算の直接入力を upsert。budget_yen が null/空/負 の日は行ごと削除（その日は自動按分へ戻す）。 */
+export async function upsertManualDayBudgetEntries(
+  supabase: SupabaseClient,
+  storePartitionKey: string,
+  entries: Array<{ sales_date: string; budget_yen?: number | null }>,
+): Promise<number> {
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
+  if (!key) return 0
+  let applied = 0
+  for (const entry of entries) {
+    const salesDate = normalizeDateInput(entry.sales_date)
+    if (!salesDate) continue
+    const yen = parseOptionalNonNegativeInt(entry.budget_yen)
+    if (yen == null) {
+      const { error } = await supabase
+        .from("line_sales_manual_day_budget")
+        .delete()
+        .eq("store_partition_key", key)
+        .eq("sales_date", salesDate)
+      if (error) throw new Error(error.message)
+      applied += 1
+      continue
+    }
+    const { error } = await supabase
+      .from("line_sales_manual_day_budget")
+      .upsert(
+        { store_partition_key: key, sales_date: salesDate, budget_yen: yen, updated_at: new Date().toISOString() },
+        { onConflict: "store_partition_key,sales_date" },
+      )
+    if (error) throw new Error(error.message)
+    applied += 1
+  }
+  return applied
+}

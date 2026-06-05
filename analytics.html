@@ -840,6 +840,7 @@
     <p class="meta" style="margin:0 0 12px;font-size:0.82rem;line-height:1.45">
       月間予算を<strong>曜日別の重み</strong>で各日に分配します。
       <strong>店舗休日</strong>にチェックした日は按分から除外され、その分がほかの営業日に振り分けられます。
+      下の<strong>「日別予算」欄に直接入力</strong>すると、その日は按分でなく入力値を採用します（空欄の日は自動按分のまま）。月間予算を未設定でも日別の直接入力だけ使えます。
     </p>
     <label>
       <span>月間予算（円）</span>
@@ -898,7 +899,7 @@
     </div>
     <div class="budget-preview-wrap">
       <table class="budget-preview-table" id="budgetPreviewTable">
-        <thead><tr><th>日付</th><th>区分</th><th class="budget-store-closed-cell">店舗休日</th><th>日別予算</th></tr></thead>
+        <thead><tr><th>日付</th><th>区分</th><th class="budget-store-closed-cell">店舗休日</th><th>日別予算（直接入力可）</th></tr></thead>
         <tbody id="budgetPreviewBody"></tbody>
       </table>
     </div>
@@ -2258,18 +2259,14 @@ function renderBudgetPreview() {
     state.modalStoreClosedDates instanceof Set
       ? state.modalStoreClosedDates
       : new Set(state.lastStoreClosedDates || []);
-  if (!Number.isFinite(total) || total <= 0) {
-    dom.budgetPreviewBody.innerHTML =
-      '<tr><td colspan="4" style="text-align:center;color:var(--sub);padding:12px">月間予算を入力するとプレビュー表示されます</td></tr>';
-    if (dom.budgetWeekdayBulkRow) dom.budgetWeekdayBulkRow.hidden = true;
-    return;
-  }
+  // 月間予算が未設定(0)でも、日別予算の直接入力ができるようプレビュー（自動按分=0）を表示する。
+  const safeTotal = (Number.isFinite(total) && total > 0) ? total : 0;
   const nwOpt = (el) => { const v = Number(el?.value); return (Number.isFinite(v) && v > 0) ? v : null; };
   const wHoliday = nwOpt(dom.budgetModalWHoliday);
   const wPreHoliday = nwOpt(dom.budgetModalWPreHoliday);
   const needHolidaysPreview = wHoliday != null || wPreHoliday != null;
   const holidaySetPreview = needHolidaysPreview ? new Set(JAPANESE_HOLIDAYS.keys()) : null;
-  const map = allocateDailyBudgetsClient(dm, Math.round(total),
+  const map = allocateDailyBudgetsClient(dm, Math.round(safeTotal),
     nw(dom.budgetModalWMon, 1), nw(dom.budgetModalWTue, 1), nw(dom.budgetModalWWed, 1),
     nw(dom.budgetModalWThu, 1), nw(dom.budgetModalWFri, 1), nw(dom.budgetModalWSat, 1.5),
     nw(dom.budgetModalWSun, 2), closed, wHoliday, wPreHoliday);
@@ -2289,10 +2286,14 @@ function renderBudgetPreview() {
     const yen = map.get(d) ?? 0;
     const dateCell = formatBudgetPreviewDateCell(d);
     const chk = isClosed ? ' checked' : '';
+    const ovMap = state.lastDailyBudgetOverrides || {};
+    const ovRaw = ovMap[d];
+    const ovVal = (ovRaw != null && Number.isFinite(Number(ovRaw))) ? String(Math.round(Number(ovRaw))) : '';
+    const phStr = (safeTotal > 0 && yen > 0) ? yen.toLocaleString('ja-JP') : '自動';
     return (
       `<tr><td>${escapeHtml(dateCell)}</td><td>${escapeHtml(label)}</td>` +
       `<td class="budget-store-closed-cell"><input type="checkbox" class="budget-store-closed-cb" data-closed-date="${d}"${chk} aria-label="店舗休日 ${escapeHtml(dateCell)}" /></td>` +
-      `<td style="text-align:right">${yen.toLocaleString('ja-JP')}円</td></tr>`
+      `<td style="text-align:right"><input type="number" min="0" step="100" inputmode="numeric" class="budget-day-input" data-budget-date="${d}" value="${ovVal}" placeholder="${phStr}" style="width:7.5rem;text-align:right;padding:2px 6px" aria-label="日別予算 ${escapeHtml(dateCell)}" /></td></tr>`
     );
   });
   dom.budgetPreviewBody.innerHTML = rows.join('');
@@ -2762,6 +2763,29 @@ if (dom.budgetModalSave) {
         state.lastBudgetSatWeight = null;
         state.lastBudgetSunWeight = null;
         state.lastStoreClosedDates = [];
+      }
+      // 日別予算の直接入力(override)を保存。入力済み=その値、空=上書き解除(null)。
+      try {
+        const ovBefore = state.lastDailyBudgetOverrides || {};
+        const dayInputs = dom.budgetPreviewBody
+          ? dom.budgetPreviewBody.querySelectorAll('input.budget-day-input') : [];
+        const budgetEntries = [];
+        dayInputs.forEach((inp) => {
+          const d = inp.getAttribute('data-budget-date');
+          if (!d) return;
+          const v = String(inp.value || '').trim();
+          if (v === '') {
+            if (ovBefore[d] != null) budgetEntries.push({ sales_date: d, budget_yen: null });
+          } else {
+            const n = Number(v.replace(/,/g, ''));
+            if (Number.isFinite(n) && n >= 0) budgetEntries.push({ sales_date: d, budget_yen: Math.round(n) });
+          }
+        });
+        if (budgetEntries.length) {
+          await apiFetch('/receipts/sales-daily-budget', { method: 'PUT', body: { store_key: sk, entries: budgetEntries } });
+        }
+      } catch (be) {
+        if (dom.budgetModalHint) dom.budgetModalHint.textContent = '日別予算の保存に失敗: ' + (be && be.message ? be.message : String(be));
       }
       syncBudgetModalFromState();
       updateBudgetKpis(state.lastGrossYen, dm);
@@ -3669,6 +3693,9 @@ async function loadAll() {
       state.lastBudgetPreHolidayWeight = nsd('budget_pre_holiday_weight');
       const sclosed = salesData?.store_closed_dates;
       state.lastStoreClosedDates = Array.isArray(sclosed) ? sclosed.map(String) : [];
+      state.lastDailyBudgetOverrides =
+        (salesData?.daily_budget_overrides && typeof salesData.daily_budget_overrides === 'object')
+          ? salesData.daily_budget_overrides : {};
       const pm =
         salesData?.manual_comparison_gross_yen ?? salesData?.prior_year_gross_yen_manual;
       state.lastManualPriorYearGrossYen =

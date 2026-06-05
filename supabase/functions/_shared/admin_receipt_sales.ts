@@ -14,6 +14,7 @@ import {
   type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
 import {
+  fetchManualDayBudgetMapForStore,
   fetchManualDaySalesMapForStore,
   type ManualDaySalesRecord,
 } from './manual_day_sales.ts'
@@ -700,7 +701,16 @@ export async function fetchReceiptSalesState(
   const manual_month_guest_count = manualThisMonth?.guest_count ?? null
   const manual_month_operating_days_count = manualThisMonth?.operating_days_count ?? null
 
+  // 日別予算 = 自動按分（月間予算×曜日重み）。ただし「日別予算の直接入力(override)」がある日はそれを優先する。
+  // 月間予算が未設定でも、直接入力された日があればその値を表示する。
+  const dailyBudgetOverrides = await fetchManualDayBudgetMapForStore(
+    supabase,
+    storeKeyForManual,
+    monthFirstDay,
+    monthEndExclusive,
+  )
   let daily_budget_yen_by_date: Record<string, number> | null = null
+  const dailyBudgetMap = new Map<string, number>()
   if (budgetRow && month_budget_yen != null && month_budget_yen > 0) {
     const weights: SalesBudgetAllocationWeights = {
       mon: budgetRow.mon_weight,
@@ -722,8 +732,13 @@ export async function fetchReceiptSalesState(
       storeClosedSet,
       holidaySet,
     )
-    daily_budget_yen_by_date = Object.fromEntries(map)
+    for (const [d, v] of map) dailyBudgetMap.set(d, v)
   }
+  for (const [d, v] of dailyBudgetOverrides) dailyBudgetMap.set(d, v) // 直接入力を最優先
+  if (dailyBudgetMap.size > 0) {
+    daily_budget_yen_by_date = Object.fromEntries(dailyBudgetMap)
+  }
+  const daily_budget_overrides = Object.fromEntries(dailyBudgetOverrides)
 
   // 月間合計の算出: レシートまたは日次手入力がある月は「日別合計（レシート＋日次手入力）」を正本にする。
   // どちらも無い月だけ従来の月次手入力(whole-month)を適用（レシート優先＝[[option-a]]と整合）。
@@ -788,6 +803,7 @@ export async function fetchReceiptSalesState(
     // レシートまたは日次手入力がある月はそちらが正本＝月次手入力は不適用＝false。
     manual_month_has_entry: monthOverrideApplies,
     daily_budget_yen_by_date,
+    daily_budget_overrides,
     month_start_iso: range.startIso,
     month_end_iso: range.endIso,
     month_start_date: monthStartDate,
