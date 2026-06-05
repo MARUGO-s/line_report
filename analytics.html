@@ -722,6 +722,15 @@
     <h2 class="card-title" id="receiptDailyHeading">日次売上（数値）</h2>
     <p class="meta" style="margin-top:0">絞り込みの店舗・対象期間に連動します（複数月のときは<span style="white-space:nowrap">最終月</span>の日別）。</p>
     <div id="receiptDailyMeta" class="meta"></div>
+    <div class="manual-import" id="manualImportZone">
+      <div class="manual-import-drop" id="manualImportDrop">
+        <div class="mi-main">📄 <b>過去の日次売上を一括取込</b>（月次日別売上管理表 Excel / CSV）</div>
+        <div class="mi-sub">ここにファイルをドラッグ＆ドロップ、または <label class="button mi-pick" for="manualImportFile">ファイルを選択</label></div>
+        <input type="file" id="manualImportFile" accept=".xlsx,.xls,.csv" hidden>
+        <div class="mi-note">採用は<b>総売上</b>。アップロード後、確認画面で内容をチェックしてから反映します。</div>
+      </div>
+      <div id="manualImportStatus" class="meta"></div>
+    </div>
     <div class="receipt-daily-table-wrap">
       <table id="receiptDailyTable" aria-describedby="receiptDailyHeading">
         <thead>
@@ -926,6 +935,43 @@
     <div id="priorYearModalHint" class="meta" style="margin-top:8px"></div>
   </div>
 </div>
+
+<div id="importPreviewBackdrop" class="budget-modal-backdrop" aria-hidden="true">
+  <div class="budget-modal" role="dialog" aria-modal="true" aria-labelledby="importPreviewTitle" style="max-width:min(44rem,96vw)">
+    <h3 id="importPreviewTitle">日次売上の一括取込（確認）</h3>
+    <div id="importPreviewSummary" class="meta" style="margin:0 0 10px"></div>
+    <label style="display:block;margin-bottom:10px">
+      <span style="display:block;font-size:0.78rem;color:var(--sub);margin-bottom:4px">投入先の店舗</span>
+      <select id="importStoreSelect" class="select" aria-label="投入先店舗"></select>
+    </label>
+    <div class="import-preview-wrap">
+      <table class="import-preview-table">
+        <thead><tr><th>日付</th><th>総売上</th><th>組数</th><th>客数</th></tr></thead>
+        <tbody id="importPreviewBody"></tbody>
+      </table>
+    </div>
+    <div id="importPreviewError" class="meta" style="color:#d9534f;margin-top:8px"></div>
+    <div class="budget-modal-actions">
+      <button id="importConfirmBtn" type="button" class="btn primary">この内容で取込（上書き）</button>
+      <button id="importCancelBtn" type="button" class="btn">キャンセル</button>
+    </div>
+    <div class="meta" style="margin-top:8px;font-size:0.78rem">※ 既存の手入力がある日は上書きされます。総売上が0の日（休業）は取込みません。</div>
+  </div>
+</div>
+<style>
+  .manual-import { margin: 8px 0 12px; }
+  .manual-import-drop { border: 1.5px dashed var(--border, #2a3a4d); border-radius: 12px; padding: 14px 16px; text-align: center; transition: background .15s, border-color .15s; }
+  .manual-import-drop.dragover { border-color: #1a6fa8; background: color-mix(in srgb, #1a6fa8 14%, transparent); }
+  .manual-import-drop .mi-main { font-size: 0.95rem; }
+  .manual-import-drop .mi-sub { font-size: 0.85rem; margin-top: 6px; }
+  .manual-import-drop .mi-note { font-size: 0.75rem; color: var(--sub, #8a96a3); margin-top: 6px; }
+  .manual-import .mi-pick { display: inline-block; padding: 4px 12px; cursor: pointer; }
+  .import-preview-wrap { max-height: 46vh; overflow: auto; border: 1px solid var(--border, #2a3a4d); border-radius: 8px; }
+  .import-preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .import-preview-table th, .import-preview-table td { padding: 5px 10px; border-bottom: 1px solid var(--border, #2a3a4d); text-align: right; white-space: nowrap; }
+  .import-preview-table th:first-child, .import-preview-table td:first-child { text-align: left; }
+  .import-preview-table thead th { position: sticky; top: 0; background: var(--surface, #13202e); z-index: 1; }
+</style>
 
 <script src="pages-config.js?v=20260524"></script>
 <script src="auth-session.js"></script>
@@ -1882,6 +1928,145 @@ if (dom.receiptDailyTableBody) {
     if (td && dom.receiptDailyTableBody.contains(td)) beginReceiptDailyCellEdit(td);
   });
 }
+
+/* ───────── 日次売上の一括取込（Excel/CSV ドラッグ＆ドロップ） ───────── */
+let importPreviewState = null;
+
+function importEscapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function importYen(n) { return '¥' + Number(n || 0).toLocaleString('ja-JP'); }
+
+function buildImportStoreOptions(selectedKey) {
+  const names = STORE_NAMES || {};
+  const opts = ['<option value="">（店舗を選択してください）</option>'];
+  Object.keys(names).sort((a, b) => String(names[a]).localeCompare(String(names[b]), 'ja')).forEach((k) => {
+    const sel = k === selectedKey ? ' selected' : '';
+    opts.push(`<option value="${importEscapeHtml(k)}"${sel}>${importEscapeHtml(names[k])}</option>`);
+  });
+  return opts.join('');
+}
+
+async function uploadManualImport(file) {
+  const token = getToken();
+  if (!token) throw new Error('トークンが未設定です。');
+  const url = LINE_REPORT_PAGES.receiptAdminApiUrl('/receipts/sales-manual-days/import');
+  const headers = { 'x-admin-token': token };
+  const anonKey = LINE_REPORT_PAGES.RECEIPT_ADMIN_ANON_KEY || '';
+  if (anonKey) { headers.apikey = anonKey; headers.Authorization = 'Bearer ' + anonKey; }
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  const res = await fetch(url, { method: 'POST', headers, body: fd });
+  const text = await res.text();
+  let body = {};
+  try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
+  if (!res.ok) throw new Error(body.error || ('取込エラー ' + res.status));
+  return body;
+}
+
+function renderImportPreview(data) {
+  importPreviewState = data;
+  const resolvedKey = data.store_name ? LINE_REPORT_PAGES.resolveStoreKey('', data.store_name) : '';
+  const preset = (resolvedKey && STORE_NAMES[resolvedKey]) ? resolvedKey : (state.storeKey || '');
+  document.getElementById('importStoreSelect').innerHTML = buildImportStoreOptions(preset);
+  const parts = [];
+  parts.push(`ファイル: <b>${importEscapeHtml(data.file_name || '')}</b>`);
+  if (data.store_name) parts.push(`対象店舗(ファイル記載): <b>${importEscapeHtml(data.store_name)}</b>`);
+  if (data.period) parts.push(`期間: ${importEscapeHtml(data.period)}`);
+  parts.push(`取込対象: <b>${data.day_count}日</b> / 合計総売上 <b>${importYen(data.total_gross_yen)}</b>`);
+  if (data.skipped_zero_count) parts.push(`（総売上0の休業日 ${data.skipped_zero_count}日はスキップ）`);
+  document.getElementById('importPreviewSummary').innerHTML = parts.join('　/　');
+  const rows = (data.entries || []).map((e) =>
+    `<tr><td>${importEscapeHtml(e.sales_date)}</td><td>${importYen(e.gross_sales_yen)}</td>` +
+    `<td>${e.party_count == null ? '—' : e.party_count}</td><td>${e.guest_count == null ? '—' : e.guest_count}</td></tr>`
+  ).join('');
+  document.getElementById('importPreviewBody').innerHTML = rows ||
+    '<tr><td colspan="4" style="text-align:center;color:var(--sub)">取込対象がありません</td></tr>';
+  document.getElementById('importPreviewError').textContent = (data.warnings || []).join(' ');
+  const b = document.getElementById('importPreviewBackdrop');
+  b.classList.add('show');
+  b.setAttribute('aria-hidden', 'false');
+}
+
+function closeImportPreview() {
+  const b = document.getElementById('importPreviewBackdrop');
+  b.classList.remove('show');
+  b.setAttribute('aria-hidden', 'true');
+  importPreviewState = null;
+}
+
+async function handleManualImportFile(file) {
+  const statusEl = document.getElementById('manualImportStatus');
+  if (!file) return;
+  if (!/\.(xlsx|xls|csv)$/i.test(String(file.name || ''))) {
+    statusEl.textContent = 'Excel（.xlsx）または CSV ファイルを選んでください。';
+    return;
+  }
+  statusEl.textContent = '解析中… ' + file.name;
+  try {
+    const data = await uploadManualImport(file);
+    statusEl.textContent = '';
+    renderImportPreview(data);
+  } catch (e) {
+    statusEl.textContent = '取込エラー: ' + (e && e.message ? e.message : String(e));
+  }
+}
+
+async function confirmManualImport() {
+  if (!importPreviewState) return;
+  const storeKey = document.getElementById('importStoreSelect').value;
+  const errEl = document.getElementById('importPreviewError');
+  if (!storeKey) { errEl.textContent = '投入先の店舗を選択してください。'; return; }
+  const entries = (importPreviewState.entries || []).map((e) => ({
+    sales_date: e.sales_date,
+    gross_sales_yen: e.gross_sales_yen,
+    party_count: e.party_count,
+    guest_count: e.guest_count,
+  }));
+  if (!entries.length) { errEl.textContent = '取込対象がありません。'; return; }
+  const btn = document.getElementById('importConfirmBtn');
+  btn.disabled = true;
+  errEl.textContent = '';
+  try {
+    await apiFetch('/receipts/sales-manual-days', { method: 'PUT', body: { store_key: storeKey, entries } });
+    const n = entries.length;
+    closeImportPreview();
+    document.getElementById('manualImportStatus').textContent = `取込完了: ${n}日分を反映しました（総売上を上書き）。`;
+    if (typeof loadAll === 'function') await loadAll();
+  } catch (e) {
+    errEl.textContent = '反映に失敗: ' + (e && e.message ? e.message : String(e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+(function initManualImport() {
+  const drop = document.getElementById('manualImportDrop');
+  const fileInput = document.getElementById('manualImportFile');
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files && fileInput.files[0];
+      handleManualImportFile(f);
+      fileInput.value = '';
+    });
+  }
+  if (drop) {
+    ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.add('dragover'); }));
+    ['dragleave', 'dragend'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('dragover'); }));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      drop.classList.remove('dragover');
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      handleManualImportFile(f);
+    });
+  }
+  const cancelBtn = document.getElementById('importCancelBtn');
+  const confirmBtn = document.getElementById('importConfirmBtn');
+  const backdrop = document.getElementById('importPreviewBackdrop');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeImportPreview);
+  if (confirmBtn) confirmBtn.addEventListener('click', () => { confirmManualImport(); });
+  if (backdrop) backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeImportPreview(); });
+})();
 
 function resetReceiptDailyDisconnected() {
   lastReceiptDailyData = null;

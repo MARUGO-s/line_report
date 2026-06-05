@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import * as XLSX from "https://esm.sh/xlsx@0.18.5"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
 import {
   isMarugoGroupStoreLabel,
@@ -576,6 +577,12 @@ Deno.serve(async (req) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       const result = await upsertManualDayEntries(supabase, body)
+      return json(result, 200)
+    }
+    // 月次日別売上管理表（Excel/CSV）を解析し、日次手入力用の entries を返す（解析のみ・DB書込なし）。
+    // フロントがプレビュー→店舗解決→既存 PUT /receipts/sales-manual-days で確定投入する。
+    if (req.method === "POST" && path === "/receipts/sales-manual-days/import") {
+      const result = await parseManualDaySalesImport(req)
       return json(result, 200)
     }
 
@@ -3160,6 +3167,150 @@ async function upsertManualMonthEntries(
 
 /** 日次売上の手入力上書き（売上分析の日次表からのインライン編集）。各フィールドは
  *  - キー無し: 変更しない / null|"": その列の上書き解除 / 数値: 上書き。3列とも空になればその日の手入力を削除。 */
+// 先頭が ZIP シグネチャ(PK\x03\x04)なら xlsx、それ以外は CSV とみなす。
+function importLooksLikeCsv(buf: Uint8Array): boolean {
+  return !(buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4b)
+}
+
+// 引用符対応の最小 CSV パーサ（"171,200" のようなカンマ入り数値も扱える）。
+function parseImportCsvCells(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ""
+  let inQuotes = false
+  const s = String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (inQuotes) {
+      if (ch === '"') {
+        if (s[i + 1] === '"') { cell += '"'; i++ } else inQuotes = false
+      } else cell += ch
+    } else if (ch === '"') {
+      inQuotes = true
+    } else if (ch === ",") {
+      row.push(cell); cell = ""
+    } else if (ch === "\n") {
+      row.push(cell); rows.push(row); row = []; cell = ""
+    } else {
+      cell += ch
+    }
+  }
+  if (cell.length > 0 || row.length > 0) { row.push(cell); rows.push(row) }
+  return rows
+}
+
+// 日付セル（Date / "YYYY/MM/DD" / "YYYY-MM-DD" 等）→ "YYYY-MM-DD"。解釈不可なら null。
+function parseImportDateCell(value: unknown): string | null {
+  if (value == null) return null
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getUTCFullYear(), m = value.getUTCMonth() + 1, d = value.getUTCDate()
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+  }
+  const m = String(value).trim().match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/)
+  if (!m) return null
+  return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`
+}
+
+// 数値セル（数値 / "171,200" / "¥171,200" 等）→ 整数。解釈不可なら null。
+function parseImportNumber(value: unknown): number | null {
+  if (value == null || value === "") return null
+  if (typeof value === "number") return Number.isFinite(value) ? Math.round(value) : null
+  const s = String(value).replace(/[,，¥￥\s]/g, "").trim()
+  if (!s) return null
+  const n = Number(s)
+  return Number.isFinite(n) ? Math.round(n) : null
+}
+
+// 月次日別売上管理表（Excel .xlsx / CSV）を解析し、日次手入力 entries を返す（解析のみ・DB書込なし）。
+// 形式: 「対象店舗：…」「対象期間：…」, ヘッダに 日付/総売上/客数/組数。採用は総売上(D)。総売上が0以下の日（休業）はスキップ。
+async function parseManualDaySalesImport(req: Request) {
+  let formData: FormData
+  try {
+    formData = await req.formData()
+  } catch (_e) {
+    throw { status: 400, message: "multipart/form-data でファイルを送信してください。" } satisfies AppError
+  }
+  const fileValue = formData.get("file")
+  if (!(fileValue instanceof File)) {
+    throw { status: 400, message: "file フィールドにファイルがありません。" } satisfies AppError
+  }
+  const name = String(fileValue.name ?? "").toLowerCase()
+  const buf = new Uint8Array(await fileValue.arrayBuffer())
+  if (buf.length === 0) throw { status: 400, message: "空のファイルです。" } satisfies AppError
+  if (buf.length > 5 * 1024 * 1024) throw { status: 400, message: "ファイルが大きすぎます（5MBまで）。" } satisfies AppError
+
+  let rows: unknown[][]
+  const isCsv = name.endsWith(".csv") || (!name.endsWith(".xlsx") && !name.endsWith(".xls") && importLooksLikeCsv(buf))
+  if (isCsv) {
+    rows = parseImportCsvCells(new TextDecoder("utf-8").decode(buf)) as unknown[][]
+  } else {
+    const wb = XLSX.read(buf, { type: "array", cellDates: true })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    if (!ws) throw { status: 400, message: "シートが見つかりません。" } satisfies AppError
+    rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null }) as unknown[][]
+  }
+
+  let storeName: string | null = null
+  let period: string | null = null
+  let headerRowIdx = -1
+  let dateCol = 0, grossCol = -1, guestCol = -1, partyCol = -1
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    for (let c = 0; c < row.length; c++) {
+      const v = String(row[c] ?? "").trim()
+      if (!v) continue
+      if (v.includes("対象店舗")) storeName = (v.split(/[：:]/)[1] ?? "").trim() || storeName
+      else if (v.includes("対象期間")) period = (v.split(/[：:]/)[1] ?? "").trim() || period
+      if (v === "総売上") { grossCol = c; headerRowIdx = r }
+      else if (v === "客数") guestCol = c
+      else if (v === "組数") partyCol = c
+      else if (v === "日付") dateCol = c
+    }
+  }
+  if (grossCol < 0) {
+    throw { status: 400, message: "「総売上」列が見つかりません。月次日別売上管理表の形式（添付ファイル）でアップロードしてください。" } satisfies AppError
+  }
+
+  const collected: Array<{ sales_date: string; gross_sales_yen: number; party_count: number | null; guest_count: number | null }> = []
+  let skippedZero = 0
+  const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0
+  for (let r = startIdx; r < rows.length; r++) {
+    const row = rows[r] ?? []
+    const iso = parseImportDateCell(row[dateCol])
+    if (!iso) continue // 合計行・空行などはスキップ
+    const gross = parseImportNumber(row[grossCol])
+    if (gross == null || gross <= 0) { skippedZero++; continue } // 休業日(総売上0)はスキップ
+    collected.push({
+      sales_date: iso,
+      gross_sales_yen: gross,
+      guest_count: guestCol >= 0 ? parseImportNumber(row[guestCol]) : null,
+      party_count: partyCol >= 0 ? parseImportNumber(row[partyCol]) : null,
+    })
+  }
+
+  // 同一日付は最後を採用してから日付順にソート。
+  const byDate = new Map<string, { sales_date: string; gross_sales_yen: number; party_count: number | null; guest_count: number | null }>()
+  for (const e of collected) byDate.set(e.sales_date, e)
+  const entries = [...byDate.values()].sort((a, b) => a.sales_date.localeCompare(b.sales_date))
+  const totalGross = entries.reduce((s, e) => s + e.gross_sales_yen, 0)
+
+  const warnings: string[] = []
+  if (!storeName) warnings.push("対象店舗が読み取れませんでした。投入先の店舗を手動で選択してください。")
+  if (entries.length === 0) warnings.push("総売上が1円以上の日が見つかりませんでした。形式をご確認ください。")
+
+  return {
+    ok: true,
+    file_name: fileValue.name,
+    store_name: storeName,
+    period,
+    entries,
+    day_count: entries.length,
+    total_gross_yen: totalGross,
+    skipped_zero_count: skippedZero,
+    warnings,
+  }
+}
+
 async function upsertManualDayEntries(
   supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
