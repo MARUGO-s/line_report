@@ -143,6 +143,10 @@ function mergePriorAggWithManualMonth(
   priorEndDate: string,
 ): MonthAgg {
   if (!manualMonth) return priorAgg
+  // 前年同期間に実レシートデータ（Excel一括取込で登録した合成レシートを含む）があれば、
+  // それを最優先で前年値に使う。手入力の月次合計の日割りは、前年にレシートが1円も無い場合の
+  // フォールバックに限定する（レシートがある時はレシートから前年比を計算する）。
+  if ((priorAgg.gross ?? 0) > 0) return priorAgg
   const ratio = computeComparableMonthProgressRatio(priorMonth, priorEndDate)
   return {
     gross: prorateManualWholeMonthValue(manualMonth.gross_sales_yen, ratio) ?? priorAgg.gross,

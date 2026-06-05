@@ -952,10 +952,10 @@
     </div>
     <div id="importPreviewError" class="meta" style="color:#d9534f;margin-top:8px"></div>
     <div class="budget-modal-actions">
-      <button id="importConfirmBtn" type="button" class="btn primary">この内容で取込（上書き）</button>
+      <button id="importConfirmBtn" type="button" class="btn primary">この内容で取込（レシート登録）</button>
       <button id="importCancelBtn" type="button" class="btn">キャンセル</button>
     </div>
-    <div class="meta" style="margin-top:8px;font-size:0.78rem">※ 既存の手入力がある日は上書きされます。総売上が0の日（休業）は取込みません。</div>
+    <div class="meta" style="margin-top:8px;font-size:0.78rem">※ 各日を<strong>レシート売上として登録</strong>します（集計・分析で画像解析レシートと同等扱い）。<strong>同じ日に既存レシートがあっても合算せず上書き（置換）</strong>します。総売上0の日（休業）は取込みません。</div>
   </div>
 </div>
 <style>
@@ -2028,10 +2028,10 @@ async function confirmManualImport() {
   btn.disabled = true;
   errEl.textContent = '';
   try {
-    await apiFetch('/receipts/sales-manual-days', { method: 'PUT', body: { store_key: storeKey, entries } });
-    const n = entries.length;
+    const res = await apiFetch('/receipts/daily-receipts-import', { method: 'POST', body: { store_key: storeKey, entries } });
+    const n = (res && typeof res.applied === 'number') ? res.applied : entries.length;
     closeImportPreview();
-    document.getElementById('manualImportStatus').textContent = `取込完了: ${n}日分を反映しました（総売上を上書き）。`;
+    document.getElementById('manualImportStatus').textContent = `取込完了: ${n}日分をレシート売上として登録しました（集計・分析でレシートと同等扱い）。`;
     if (typeof loadAll === 'function') await loadAll();
   } catch (e) {
     errEl.textContent = '反映に失敗: ' + (e && e.message ? e.message : String(e));

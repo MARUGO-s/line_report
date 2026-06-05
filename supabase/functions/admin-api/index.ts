@@ -579,10 +579,19 @@ Deno.serve(async (req) => {
       const result = await upsertManualDayEntries(supabase, body)
       return json(result, 200)
     }
-    // 月次日別売上管理表（Excel/CSV）を解析し、日次手入力用の entries を返す（解析のみ・DB書込なし）。
-    // フロントがプレビュー→店舗解決→既存 PUT /receipts/sales-manual-days で確定投入する。
+    // 月次日別売上管理表（Excel/CSV）を解析し、日次の entries を返す（解析のみ・DB書込なし）。
+    // フロントがプレビュー→店舗解決→下の import-commit で確定投入する。
     if (req.method === "POST" && path === "/receipts/sales-manual-days/import") {
       const result = await parseManualDaySalesImport(req)
+      return json(result, 200)
+    }
+    // 解析した日次売上を「画像解析レシートと同等」に登録: 各日1件の合成レシートを line_receipt__店舗 へ upsert。
+    if (req.method === "POST" && path === "/receipts/daily-receipts-import") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await importDailyReceiptsCommit(supabase, body)
       return json(result, 200)
     }
 
@@ -3309,6 +3318,83 @@ async function parseManualDaySalesImport(req: Request) {
     skipped_zero_count: skippedZero,
     warnings,
   }
+}
+
+// 解析した日次売上を「画像解析レシートと同等」に登録する。各日1件の合成レシートを line_receipt__店舗 へ upsert。
+// 集計RPCは gross_sales_yen を receipt_date で合算するため、日次・月次・分析でレシートと同一に計上される。
+// 重複防止は合成 line_message_id（xlsx-import:店舗:日付）＝再取込は上書き。同じ日の手入力上書き(manual_day)は削除して値を一本化。
+async function importDailyReceiptsCommit(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const key = toSafeString(body.store_key).trim().toLowerCase()
+  if (!key || key === "__all__") {
+    throw { status: 400, message: "store_key（店舗）を指定してください。" } satisfies AppError
+  }
+  const entriesRaw = body.entries
+  if (!Array.isArray(entriesRaw)) {
+    throw { status: 400, message: "entries must be an array." } satisfies AppError
+  }
+
+  // レシートテーブル名を store_webhook_tables から取得（店舗の存在確認も兼ねる）。
+  const { data: reg, error: regErr } = await supabase
+    .from("store_webhook_tables")
+    .select("receipt_table, display_name")
+    .eq("store_partition_key", key)
+    .maybeSingle()
+  if (regErr) throw { status: 500, message: `store lookup failed: ${regErr.message}` } satisfies AppError
+  const receiptTable = toSafeString((reg as { receipt_table?: string } | null)?.receipt_table) || `line_receipt__${key}`
+  const storeDisplay = toSafeString((reg as { display_name?: string } | null)?.display_name) || key
+
+  const rows: Array<Record<string, unknown>> = []
+  const dates: string[] = []
+  for (const e of entriesRaw) {
+    if (!isRecord(e)) continue
+    const salesDate = toSafeString(e.sales_date).trim().slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(salesDate)) continue
+    const gross = toNonNegativeInteger(e.gross_sales_yen)
+    if (gross == null || gross <= 0) continue
+    const party = (e.party_count == null || e.party_count === "") ? null : toNonNegativeInteger(e.party_count)
+    const guest = (e.guest_count == null || e.guest_count === "") ? null : toNonNegativeInteger(e.guest_count)
+    rows.push({
+      line_message_id: `xlsx-import:${key}:${salesDate}`,
+      room_id: "xlsx-import",
+      store_name: storeDisplay,
+      receipt_date_text: salesDate,
+      receipt_date: salesDate,
+      gross_sales_yen: gross,
+      party_count: party,
+      guest_count: guest,
+      summary_text: "Excel一括取込（総売上）",
+      raw_payload: { source: "xlsx-import", sales_date: salesDate, gross_sales_yen: gross, party_count: party, guest_count: guest },
+    })
+    dates.push(salesDate)
+  }
+  if (rows.length === 0) return { ok: true, applied: 0, store_partition_key: key }
+
+  // 上書き方式（二重計上しない）: 取込対象日の既存レシート行（実レシート・前回取込分を含む）を
+  // 先に削除してから合成レシートを入れる。これにより同じ日に実レシートがあっても合算ではなく置換になる。
+  const { error: delRcpErr } = await supabase.from(receiptTable).delete().in("receipt_date", dates)
+  if (delRcpErr) {
+    throw { status: 500, message: `既存レシートのクリアに失敗しました: ${delRcpErr.message}` } satisfies AppError
+  }
+  const { error: insErr } = await supabase.from(receiptTable).insert(rows)
+  if (insErr) {
+    throw { status: 500, message: `レシート登録に失敗しました: ${insErr.message}` } satisfies AppError
+  }
+
+  // 同じ日の手入力上書き(manual_day)が残っていると合成レシートを隠すため削除（レシート値を正にする）。
+  let clearedManualDay = 0
+  try {
+    const { error: delErr, count } = await supabase
+      .from("line_sales_manual_day")
+      .delete({ count: "exact" })
+      .eq("store_partition_key", key)
+      .in("sales_date", dates)
+    if (!delErr && typeof count === "number") clearedManualDay = count
+  } catch (_e) { /* best-effort */ }
+
+  return { ok: true, applied: rows.length, store_partition_key: key, receipt_table: receiptTable, cleared_manual_day: clearedManualDay }
 }
 
 async function upsertManualDayEntries(

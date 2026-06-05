@@ -54,7 +54,11 @@ function calendarDaysInMonth(yyyyMm) {
   let priorOperatingDayCount = priorAggregate?.operatingDayCount ?? null;
   const priorYearMonth = `${Number(periodStartDate.slice(0, 4)) - 1}-${periodStartDate.slice(5, 7)}`;
   const manual = await fetchManualMonthSales(supabase, key, priorYearMonth);
-  if (manual) {
+  // 【方針】前年同期間に実レシートデータ（Excel一括取込で登録した合成レシートを含む）があれば、
+  // それを最優先で前年比に使う。手入力の月次合計（途中期間は日割り）は、前年にレシートが
+  // 1円も無い期間のフォールバックに限定する。
+  const priorHasReceiptData = (priorAggregate?.totalGrossSalesYen ?? 0) > 0;
+  if (manual && !priorHasReceiptData) {
     // 過去売上が登録されている月は、手入力に無い組数・客数へレシート集計を混ぜない
     // （総売上のみ登録時に昨年レシートや誤日付行で組数・客数の前年比が出るのを防ぐ）
     if (isFullCalendarMonthPeriod(periodStartDate, periodEndDate)) {
