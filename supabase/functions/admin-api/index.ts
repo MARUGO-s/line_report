@@ -1,5 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import * as XLSX from "https://esm.sh/xlsx@0.18.5"
+import {
+  importDailyReceiptsOverwrite,
+  parseMonthlyDailySalesWorkbook,
+  type DailySalesImportEntry,
+} from "../_shared/daily_sales_import.ts"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
 import {
   isMarugoGroupStoreLabel,
@@ -3187,61 +3191,7 @@ async function upsertManualMonthEntries(
 /** 日次売上の手入力上書き（売上分析の日次表からのインライン編集）。各フィールドは
  *  - キー無し: 変更しない / null|"": その列の上書き解除 / 数値: 上書き。3列とも空になればその日の手入力を削除。 */
 // 先頭が ZIP シグネチャ(PK\x03\x04)なら xlsx、それ以外は CSV とみなす。
-function importLooksLikeCsv(buf: Uint8Array): boolean {
-  return !(buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4b)
-}
-
-// 引用符対応の最小 CSV パーサ（"171,200" のようなカンマ入り数値も扱える）。
-function parseImportCsvCells(text: string): string[][] {
-  const rows: string[][] = []
-  let row: string[] = []
-  let cell = ""
-  let inQuotes = false
-  const s = String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i]
-    if (inQuotes) {
-      if (ch === '"') {
-        if (s[i + 1] === '"') { cell += '"'; i++ } else inQuotes = false
-      } else cell += ch
-    } else if (ch === '"') {
-      inQuotes = true
-    } else if (ch === ",") {
-      row.push(cell); cell = ""
-    } else if (ch === "\n") {
-      row.push(cell); rows.push(row); row = []; cell = ""
-    } else {
-      cell += ch
-    }
-  }
-  if (cell.length > 0 || row.length > 0) { row.push(cell); rows.push(row) }
-  return rows
-}
-
-// 日付セル（Date / "YYYY/MM/DD" / "YYYY-MM-DD" 等）→ "YYYY-MM-DD"。解釈不可なら null。
-function parseImportDateCell(value: unknown): string | null {
-  if (value == null) return null
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const y = value.getUTCFullYear(), m = value.getUTCMonth() + 1, d = value.getUTCDate()
-    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`
-  }
-  const m = String(value).trim().match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/)
-  if (!m) return null
-  return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`
-}
-
-// 数値セル（数値 / "171,200" / "¥171,200" 等）→ 整数。解釈不可なら null。
-function parseImportNumber(value: unknown): number | null {
-  if (value == null || value === "") return null
-  if (typeof value === "number") return Number.isFinite(value) ? Math.round(value) : null
-  const s = String(value).replace(/[,，¥￥\s]/g, "").trim()
-  if (!s) return null
-  const n = Number(s)
-  return Number.isFinite(n) ? Math.round(n) : null
-}
-
-// 月次日別売上管理表（Excel .xlsx / CSV）を解析し、日次手入力 entries を返す（解析のみ・DB書込なし）。
-// 形式: 「対象店舗：…」「対象期間：…」, ヘッダに 日付/総売上/客数/組数。採用は総売上(D)。総売上が0以下の日（休業）はスキップ。
+// 月次日別売上管理表（Excel/CSV）を解析して entries を返す（解析のみ）。実処理は _shared/daily_sales_import.ts。
 async function parseManualDaySalesImport(req: Request) {
   let formData: FormData
   try {
@@ -3253,86 +3203,25 @@ async function parseManualDaySalesImport(req: Request) {
   if (!(fileValue instanceof File)) {
     throw { status: 400, message: "file フィールドにファイルがありません。" } satisfies AppError
   }
-  const name = String(fileValue.name ?? "").toLowerCase()
-  const buf = new Uint8Array(await fileValue.arrayBuffer())
-  if (buf.length === 0) throw { status: 400, message: "空のファイルです。" } satisfies AppError
-  if (buf.length > 5 * 1024 * 1024) throw { status: 400, message: "ファイルが大きすぎます（5MBまで）。" } satisfies AppError
-
-  let rows: unknown[][]
-  const isCsv = name.endsWith(".csv") || (!name.endsWith(".xlsx") && !name.endsWith(".xls") && importLooksLikeCsv(buf))
-  if (isCsv) {
-    rows = parseImportCsvCells(new TextDecoder("utf-8").decode(buf)) as unknown[][]
-  } else {
-    const wb = XLSX.read(buf, { type: "array", cellDates: true })
-    const ws = wb.Sheets[wb.SheetNames[0]]
-    if (!ws) throw { status: 400, message: "シートが見つかりません。" } satisfies AppError
-    rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null }) as unknown[][]
+  const bytes = new Uint8Array(await fileValue.arrayBuffer())
+  const parsed = parseMonthlyDailySalesWorkbook(bytes, fileValue.name)
+  if (!parsed.recognized) {
+    throw { status: 400, message: parsed.error || "月次日別売上管理表として読み取れませんでした。" } satisfies AppError
   }
-
-  let storeName: string | null = null
-  let period: string | null = null
-  let headerRowIdx = -1
-  let dateCol = 0, grossCol = -1, guestCol = -1, partyCol = -1
-  for (let r = 0; r < rows.length; r++) {
-    const row = rows[r] ?? []
-    for (let c = 0; c < row.length; c++) {
-      const v = String(row[c] ?? "").trim()
-      if (!v) continue
-      if (v.includes("対象店舗")) storeName = (v.split(/[：:]/)[1] ?? "").trim() || storeName
-      else if (v.includes("対象期間")) period = (v.split(/[：:]/)[1] ?? "").trim() || period
-      if (v === "総売上") { grossCol = c; headerRowIdx = r }
-      else if (v === "客数") guestCol = c
-      else if (v === "組数") partyCol = c
-      else if (v === "日付") dateCol = c
-    }
-  }
-  if (grossCol < 0) {
-    throw { status: 400, message: "「総売上」列が見つかりません。月次日別売上管理表の形式（添付ファイル）でアップロードしてください。" } satisfies AppError
-  }
-
-  const collected: Array<{ sales_date: string; gross_sales_yen: number; party_count: number | null; guest_count: number | null }> = []
-  let skippedZero = 0
-  const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0
-  for (let r = startIdx; r < rows.length; r++) {
-    const row = rows[r] ?? []
-    const iso = parseImportDateCell(row[dateCol])
-    if (!iso) continue // 合計行・空行などはスキップ
-    const gross = parseImportNumber(row[grossCol])
-    if (gross == null || gross <= 0) { skippedZero++; continue } // 休業日(総売上0)はスキップ
-    collected.push({
-      sales_date: iso,
-      gross_sales_yen: gross,
-      guest_count: guestCol >= 0 ? parseImportNumber(row[guestCol]) : null,
-      party_count: partyCol >= 0 ? parseImportNumber(row[partyCol]) : null,
-    })
-  }
-
-  // 同一日付は最後を採用してから日付順にソート。
-  const byDate = new Map<string, { sales_date: string; gross_sales_yen: number; party_count: number | null; guest_count: number | null }>()
-  for (const e of collected) byDate.set(e.sales_date, e)
-  const entries = [...byDate.values()].sort((a, b) => a.sales_date.localeCompare(b.sales_date))
-  const totalGross = entries.reduce((s, e) => s + e.gross_sales_yen, 0)
-
-  const warnings: string[] = []
-  if (!storeName) warnings.push("対象店舗が読み取れませんでした。投入先の店舗を手動で選択してください。")
-  if (entries.length === 0) warnings.push("総売上が1円以上の日が見つかりませんでした。形式をご確認ください。")
-
   return {
     ok: true,
     file_name: fileValue.name,
-    store_name: storeName,
-    period,
-    entries,
-    day_count: entries.length,
-    total_gross_yen: totalGross,
-    skipped_zero_count: skippedZero,
-    warnings,
+    store_name: parsed.store_name,
+    period: parsed.period,
+    entries: parsed.entries,
+    day_count: parsed.day_count,
+    total_gross_yen: parsed.total_gross_yen,
+    skipped_zero_count: parsed.skipped_zero_count,
+    warnings: parsed.warnings,
   }
 }
 
-// 解析した日次売上を「画像解析レシートと同等」に登録する。各日1件の合成レシートを line_receipt__店舗 へ upsert。
-// 集計RPCは gross_sales_yen を receipt_date で合算するため、日次・月次・分析でレシートと同一に計上される。
-// 重複防止は合成 line_message_id（xlsx-import:店舗:日付）＝再取込は上書き。同じ日の手入力上書き(manual_day)は削除して値を一本化。
+// 解析した日次売上を「画像解析レシートと同等」に登録（上書き）。実処理は _shared/daily_sales_import.ts。
 async function importDailyReceiptsCommit(
   supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
@@ -3345,66 +3234,21 @@ async function importDailyReceiptsCommit(
   if (!Array.isArray(entriesRaw)) {
     throw { status: 400, message: "entries must be an array." } satisfies AppError
   }
-
-  // レシートテーブル名を store_webhook_tables から取得（店舗の存在確認も兼ねる）。
-  const { data: reg, error: regErr } = await supabase
-    .from("store_webhook_tables")
-    .select("receipt_table, display_name")
-    .eq("store_partition_key", key)
-    .maybeSingle()
-  if (regErr) throw { status: 500, message: `store lookup failed: ${regErr.message}` } satisfies AppError
-  const receiptTable = toSafeString((reg as { receipt_table?: string } | null)?.receipt_table) || `line_receipt__${key}`
-  const storeDisplay = toSafeString((reg as { display_name?: string } | null)?.display_name) || key
-
-  const rows: Array<Record<string, unknown>> = []
-  const dates: string[] = []
+  const entries: DailySalesImportEntry[] = []
   for (const e of entriesRaw) {
     if (!isRecord(e)) continue
-    const salesDate = toSafeString(e.sales_date).trim().slice(0, 10)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(salesDate)) continue
+    const sales_date = toSafeString(e.sales_date).trim().slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sales_date)) continue
     const gross = toNonNegativeInteger(e.gross_sales_yen)
     if (gross == null || gross <= 0) continue
-    const party = (e.party_count == null || e.party_count === "") ? null : toNonNegativeInteger(e.party_count)
-    const guest = (e.guest_count == null || e.guest_count === "") ? null : toNonNegativeInteger(e.guest_count)
-    rows.push({
-      line_message_id: `xlsx-import:${key}:${salesDate}`,
-      room_id: "xlsx-import",
-      store_name: storeDisplay,
-      receipt_date_text: salesDate,
-      receipt_date: salesDate,
+    entries.push({
+      sales_date,
       gross_sales_yen: gross,
-      party_count: party,
-      guest_count: guest,
-      summary_text: "Excel一括取込（総売上）",
-      raw_payload: { source: "xlsx-import", sales_date: salesDate, gross_sales_yen: gross, party_count: party, guest_count: guest },
+      party_count: (e.party_count == null || e.party_count === "") ? null : toNonNegativeInteger(e.party_count),
+      guest_count: (e.guest_count == null || e.guest_count === "") ? null : toNonNegativeInteger(e.guest_count),
     })
-    dates.push(salesDate)
   }
-  if (rows.length === 0) return { ok: true, applied: 0, store_partition_key: key }
-
-  // 上書き方式（二重計上しない）: 取込対象日の既存レシート行（実レシート・前回取込分を含む）を
-  // 先に削除してから合成レシートを入れる。これにより同じ日に実レシートがあっても合算ではなく置換になる。
-  const { error: delRcpErr } = await supabase.from(receiptTable).delete().in("receipt_date", dates)
-  if (delRcpErr) {
-    throw { status: 500, message: `既存レシートのクリアに失敗しました: ${delRcpErr.message}` } satisfies AppError
-  }
-  const { error: insErr } = await supabase.from(receiptTable).insert(rows)
-  if (insErr) {
-    throw { status: 500, message: `レシート登録に失敗しました: ${insErr.message}` } satisfies AppError
-  }
-
-  // 同じ日の手入力上書き(manual_day)が残っていると合成レシートを隠すため削除（レシート値を正にする）。
-  let clearedManualDay = 0
-  try {
-    const { error: delErr, count } = await supabase
-      .from("line_sales_manual_day")
-      .delete({ count: "exact" })
-      .eq("store_partition_key", key)
-      .in("sales_date", dates)
-    if (!delErr && typeof count === "number") clearedManualDay = count
-  } catch (_e) { /* best-effort */ }
-
-  return { ok: true, applied: rows.length, store_partition_key: key, receipt_table: receiptTable, cleared_manual_day: clearedManualDay }
+  return await importDailyReceiptsOverwrite(supabase, key, entries)
 }
 
 // 日別予算の直接入力（手動上書き）を保存。body: { store_key, entries:[{sales_date, budget_yen|null}] }

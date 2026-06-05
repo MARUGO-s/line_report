@@ -16,6 +16,13 @@ import {
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
+  countExistingReceiptsForDates,
+  importDailyReceiptsOverwrite,
+  parseMonthlyDailySalesWorkbook,
+  resolveReceiptTableForStore,
+} from '../_shared/daily_sales_import.ts'
+import { resolveReceiptNamePartitionKey } from '../_shared/receipt_store_name_resolve.ts'
+import {
   buildReceiptStoreMismatchFlexReply,
   buildStoreMismatchGuidance,
   clearPendingStoreNameMismatch,
@@ -517,6 +524,225 @@ async function handleReservationImportPostback(
     .update({ status: 'registered', manual_reservation_id: newId, updated_at: new Date().toISOString() })
     .eq('id', pendingId)
   return buildReservationRegisteredFlex(payload, visitAt)
+}
+
+// ───────── 月次日別売上管理表（Excel/CSV）の LINE 取込 ─────────
+function formatDailySalesPeriodLabel(parsed: { period: string | null; entries: Array<{ sales_date: string }> }): string {
+  if (parsed.period) return parsed.period
+  const ds = parsed.entries.map((e) => e.sales_date).sort()
+  return ds.length ? `${ds[0]}〜${ds[ds.length - 1]}` : ''
+}
+
+function buildDailySalesSummaryRows(
+  parsed: { period: string | null; entries: Array<{ sales_date: string }>; day_count: number; total_gross_yen: number },
+  storeDisplay: string,
+  fileStoreName: string | null,
+  storeMatched: boolean,
+  existingCount: number,
+): Record<string, unknown>[] {
+  const yen = (n: number) => '¥' + Number(n || 0).toLocaleString('ja-JP')
+  const rows: Array<[string, string]> = [
+    ['投入先店舗', storeDisplay],
+    ['期間', formatDailySalesPeriodLabel(parsed)],
+    ['対象日数', `${parsed.day_count}日`],
+    ['合計総売上', yen(parsed.total_gross_yen)],
+  ]
+  if (fileStoreName) rows.push(['ファイル店舗', `${fileStoreName}${storeMatched ? '（一致）' : '（不一致）'}`])
+  if (existingCount > 0) rows.push(['既存データ', `${existingCount}件あり`])
+  return rows.filter(([, v]) => v && String(v).trim()).map(([label, v]) => ({
+    type: 'box', layout: 'baseline', spacing: 'sm',
+    contents: [
+      { type: 'text', text: label, size: 'sm', color: '#8a96a3', flex: 3 },
+      { type: 'text', text: String(v), size: 'sm', color: '#333333', flex: 5, wrap: true },
+    ],
+  }))
+}
+
+function buildDailySalesConfirmFlex(
+  pendingId: number,
+  parsed: { period: string | null; entries: Array<{ sales_date: string }>; day_count: number; total_gross_yen: number },
+  storeDisplay: string,
+  fileStoreName: string | null,
+  storeMatched: boolean,
+  existingCount: number,
+): Record<string, unknown> {
+  const warn: Record<string, unknown>[] = []
+  if (!storeMatched) warn.push({ type: 'text', text: `⚠️ このルームの店舗とファイルの店舗名が一致しません。投入先は【${storeDisplay}】です。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
+  if (existingCount > 0) warn.push({ type: 'text', text: `⚠️ 取込対象日に既に ${existingCount}件 のデータがあります（置き換えになります）。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
+  return {
+    type: 'flex',
+    altText: '日次売上の取込確認',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'text', text: '日次売上を登録しますか？', weight: 'bold', size: 'md', color: '#1a6fa8' },
+          { type: 'text', text: '月次日別売上管理表を読み取りました。総売上をレシートとして登録します。', wrap: true, size: 'xs', color: '#8a96a3' },
+          { type: 'separator', margin: 'md' },
+          ...buildDailySalesSummaryRows(parsed, storeDisplay, fileStoreName, storeMatched, existingCount),
+          ...warn,
+        ],
+      },
+      footer: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'button', style: 'primary', color: '#1a6fa8', action: { type: 'postback', label: existingCount > 0 ? '置き換えて登録' : 'この内容で登録', data: `dsimp=${pendingId}`, displayText: '日次売上を登録します' } },
+          { type: 'button', style: 'secondary', action: { type: 'postback', label: '中止', data: `dsimp_skip=${pendingId}`, displayText: '取込を中止します' } },
+        ],
+      },
+    },
+  }
+}
+
+function buildDailySalesImportedFlex(
+  parsed: { period: string | null; entries: Array<{ sales_date: string }>; day_count: number; total_gross_yen: number },
+  storeDisplay: string,
+  applied: number,
+): Record<string, unknown> {
+  return {
+    type: 'flex',
+    altText: '日次売上を登録しました',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'text', text: '✅ 日次売上を登録しました', weight: 'bold', size: 'md', color: '#1a7f37' },
+          { type: 'separator', margin: 'md' },
+          ...buildDailySalesSummaryRows(parsed, storeDisplay, null, true, 0),
+          { type: 'text', text: `${applied}日分をレシートとして登録（売上分析・前年比に反映）。`, size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
+        ],
+      },
+    },
+  }
+}
+
+// ファイル受信 → 月次日別売上管理表なら、ルーム店舗へ「レシート同等」で登録。新規＆店舗一致は即登録、
+// 重複 or 店舗不一致は確認カード（置き換え/中止）。
+async function processDailySalesFileEvent(
+  registry: StoreRegistryRow,
+  event: LineEvent,
+  suppressAll: boolean,
+): Promise<{ replied: boolean; reason?: string }> {
+  const lineMessageId = String(event.message?.id ?? '').trim()
+  const roomId = resolveRoomId(event)
+  const fileName = String((event.message as { fileName?: string } | undefined)?.fileName ?? '')
+  if (!lineMessageId || !roomId) return { replied: false }
+  if (!/\.(xlsx|xls|csv)$/i.test(fileName)) return { replied: false }
+  const accessToken = resolveChannelAccessToken(registry.store_partition_key)
+  if (!accessToken) return { replied: false, reason: 'missing_line_access_token' }
+  const fetched = await fetchLineMessageBinary(lineMessageId, accessToken)
+  if (!fetched.ok) return { replied: false, reason: fetched.error }
+  const parsed = parseMonthlyDailySalesWorkbook(fetched.bytes, fileName)
+  if (!parsed.recognized) return { replied: false, reason: 'not_daily_sales_file' } // 日次売上ファイルでない→無反応（メディア保存のみ）
+
+  const supabase = createServiceClient()
+  if (!supabase) return { replied: false, reason: 'server_misconfigured' }
+  const roomStoreKey = String(registry.store_partition_key ?? '').trim().toLowerCase()
+  const fileStoreKey = parsed.store_name ? resolveReceiptNamePartitionKey(parsed.store_name) : null
+  const storeMatched = !!fileStoreKey && String(fileStoreKey).toLowerCase() === roomStoreKey
+  const resolved = await resolveReceiptTableForStore(supabase, roomStoreKey)
+  const storeDisplay = resolved?.storeDisplay ?? (registry.display_name || roomStoreKey)
+  const receiptTable = resolved?.receiptTable ?? `line_receipt__${roomStoreKey}`
+  const existingCount = await countExistingReceiptsForDates(supabase, receiptTable, parsed.entries.map((e) => e.sales_date))
+  const replyToken = suppressAll ? '' : String(event.replyToken ?? '').trim()
+
+  // 新規かつ店舗一致 → 即登録（ご要望どおり自動）。
+  if (existingCount === 0 && storeMatched) {
+    try {
+      const res = await importDailyReceiptsOverwrite(supabase, roomStoreKey, parsed.entries)
+      if (replyToken) {
+        await replyLineFlex(replyToken, buildDailySalesImportedFlex(parsed, storeDisplay, res.applied), accessToken, webhookReplyLog(registry, roomId, 'daily_sales_imported'))
+      }
+      return { replied: !!replyToken, reason: 'daily_sales_auto_imported' }
+    } catch (e) {
+      const msg = (e as { message?: string })?.message || String(e)
+      if (replyToken) await replyLineFlex(replyToken, buildSimpleNoticeFlex(`日次売上の登録に失敗しました: ${msg}`.slice(0, 300)), accessToken, webhookReplyLog(registry, roomId, 'daily_sales_import_failed'))
+      return { replied: !!replyToken, reason: 'daily_sales_import_failed' }
+    }
+  }
+
+  // 重複 or 店舗不一致 → 確認カード（pending保存）。
+  let pendingId: number | null = null
+  try {
+    const { data: existing } = await supabase
+      .from('pending_daily_sales_imports')
+      .select('id')
+      .eq('line_message_id', lineMessageId)
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (existing && (existing as { id?: number }).id) pendingId = Number((existing as { id?: number }).id)
+  } catch (_e) { /* noop */ }
+  if (pendingId == null) {
+    const { data: ins, error } = await supabase
+      .from('pending_daily_sales_imports')
+      .insert({
+        room_id: roomId,
+        store_partition_key: roomStoreKey,
+        file_store_name: parsed.store_name,
+        file_name: fileName,
+        line_message_id: lineMessageId,
+        period: parsed.period,
+        entries: parsed.entries,
+        day_count: parsed.day_count,
+        total_gross_yen: parsed.total_gross_yen,
+        existing_count: existingCount,
+        store_matched: storeMatched,
+        status: 'pending',
+      })
+      .select('id')
+      .single()
+    if (error) {
+      console.error('pending_daily_sales_imports insert failed:', error.message)
+      return { replied: false, reason: 'daily_sales_pending_insert_failed' }
+    }
+    pendingId = Number((ins as { id?: number } | null)?.id ?? 0)
+  }
+  if (!replyToken || !pendingId) return { replied: false, reason: 'daily_sales_confirm_no_reply' }
+  await replyLineFlex(
+    replyToken,
+    buildDailySalesConfirmFlex(pendingId, parsed, storeDisplay, parsed.store_name, storeMatched, existingCount),
+    accessToken,
+    webhookReplyLog(registry, roomId, 'daily_sales_confirm'),
+  )
+  return { replied: true, reason: 'daily_sales_confirm_card' }
+}
+
+// 確認カードの postback（dsimp=登録/置き換え, dsimp_skip=中止）。
+async function handleDailySalesImportPostback(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  postbackData: string,
+): Promise<Record<string, unknown> | null> {
+  const isImport = postbackData.startsWith('dsimp=')
+  const pendingId = Number(postbackData.split('=')[1] ?? '')
+  if (!Number.isInteger(pendingId) || pendingId <= 0) return null
+  const { data: pending, error } = await supabase
+    .from('pending_daily_sales_imports')
+    .select('id, status, store_partition_key, entries')
+    .eq('id', pendingId)
+    .maybeSingle()
+  if (error || !pending) return buildSimpleNoticeFlex('対象の取込が見つかりませんでした。')
+  const p = pending as { id: number; status: string; store_partition_key: string | null; entries: unknown }
+  if (p.status === 'imported') return buildSimpleNoticeFlex('この取込はすでに登録済みです。')
+  if (!isImport) {
+    await supabase.from('pending_daily_sales_imports').update({ status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', pendingId)
+    return buildSimpleNoticeFlex('日次売上の取込を中止しました。')
+  }
+  const entries = Array.isArray(p.entries)
+    ? p.entries as Array<{ sales_date: string; gross_sales_yen: number; party_count: number | null; guest_count: number | null }>
+    : []
+  const storeKey = String(p.store_partition_key ?? '').trim().toLowerCase()
+  if (!storeKey || entries.length === 0) return buildSimpleNoticeFlex('登録できる内容がありませんでした。')
+  try {
+    const res = await importDailyReceiptsOverwrite(supabase, storeKey, entries)
+    await supabase.from('pending_daily_sales_imports').update({ status: 'imported', updated_at: new Date().toISOString() }).eq('id', pendingId)
+    return buildSimpleNoticeFlex(`✅ ${res.applied}日分を登録しました（置き換え）。売上分析・前年比に反映されます。`)
+  } catch (e) {
+    const msg = (e as { message?: string })?.message || String(e)
+    return buildSimpleNoticeFlex(`登録に失敗しました: ${msg}`.slice(0, 300))
+  }
 }
 
 // レシート画像解析に Gemini を使う店舗（手書き数字などの読み取り精度向上が目的）。他店は Groq のまま。
@@ -1173,6 +1399,19 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ファイル（Excel/CSV）受信 → 月次日別売上管理表なら日次売上をレシート同等で登録。
+    if (event.type === 'message' && event.message?.type === 'file') {
+      try {
+        const r = await processDailySalesFileEvent(registry as StoreRegistryRow, event, roomHardMuted)
+        if (r.replied) receiptReplies += 1
+        if (r.reason) errors.push(normalizeInlineText(r.reason).slice(0, 160))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('processDailySalesFileEvent failed:', msg)
+        errors.push(msg.slice(0, 160))
+      }
+    }
+
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
         const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply, suppressNonReceiptReply)
@@ -1263,6 +1502,27 @@ Deno.serve(async (req) => {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           console.error('handleReservationImportPostback failed:', msg)
+          errors.push(msg.slice(0, 160))
+        }
+      }
+
+      // 日次売上Excel取込の確認カード postback（dsimp=登録/置き換え, dsimp_skip=中止）
+      if ((postbackData.startsWith('dsimp=') || postbackData.startsWith('dsimp_skip=')) && postbackReplyToken) {
+        try {
+          const dsReply = await handleDailySalesImportPostback(supabase, postbackData)
+          if (dsReply) {
+            await replyLineFlex(
+              postbackReplyToken,
+              dsReply,
+              lineAccessTokenForSearch,
+              webhookReplyLog(registry as StoreRegistryRow, eventRoomIdForPostback ?? '', 'daily_sales_import_result'),
+            )
+            receiptReplies += 1
+          }
+          continue
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('handleDailySalesImportPostback failed:', msg)
           errors.push(msg.slice(0, 160))
         }
       }
