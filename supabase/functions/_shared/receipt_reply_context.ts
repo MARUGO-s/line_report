@@ -20,6 +20,7 @@ import {
   fetchManualMonthSales,
   type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
+import { fetchManualDayBudgetMapForStore } from './manual_day_sales.ts'
 import { buildReceiptAnalyticsDashboardUri } from './receipt_line_actions.ts'
 
 export type ReceiptReplyContext = {
@@ -289,6 +290,7 @@ function computeBudgetDiffs(
   monthAgg: MonthAgg,
   budgetRow: NonNullable<Awaited<ReturnType<typeof fetchBudgetForStoreMonth>>>,
   holidaySet: Set<string> | null,
+  dailyBudgetOverrides: Map<string, number>,
 ) {
   const weights: SalesBudgetAllocationWeights = {
     mon: budgetRow.mon_weight,
@@ -309,6 +311,8 @@ function computeBudgetDiffs(
     storeClosedSet,
     holidaySet,
   )
+  // 日別予算の直接入力(override)がある日は、自動按分より優先する（売上分析の日次予算と整合）。
+  for (const [d, v] of dailyBudgetOverrides) dailyBudgetMap.set(d, v)
   const progressDay = getJstBusinessDateForReceiptBudget()
   const monthDays = enumerateMonthDates(month)
   const endDay = receiptDateIso < progressDay ? receiptDateIso : progressDay
@@ -373,8 +377,20 @@ export async function loadReceiptReplyContext(
 
   const budgetRow = await fetchBudgetForStoreMonth(supabase, params.storePartitionKey, month)
   const holidaySet = budgetRow ? await fetchJapaneseHolidaySet() : null
+  // 日別予算の直接入力(override)を取得し、当日目標・日次予算差・累計に反映する。
+  let dailyBudgetOverrides = new Map<string, number>()
+  if (budgetRow) {
+    const [oy, om] = month.split('-').map(Number)
+    const nextMonth = om >= 12 ? `${oy + 1}-01` : `${oy}-${String(om + 1).padStart(2, '0')}`
+    dailyBudgetOverrides = await fetchManualDayBudgetMapForStore(
+      supabase,
+      params.storePartitionKey,
+      `${month}-01`,
+      `${nextMonth}-01`,
+    )
+  }
   const budget = budgetRow
-    ? computeBudgetDiffs(month, params.receiptDateIso, monthAgg, budgetRow, holidaySet)
+    ? computeBudgetDiffs(month, params.receiptDateIso, monthAgg, budgetRow, holidaySet, dailyBudgetOverrides)
     : {
       monthBudgetYen: null,
       monthBudgetAchievementPct: null,
