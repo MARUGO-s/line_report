@@ -623,7 +623,7 @@ function buildDailySalesImportedFlex(
 async function processDailySalesFileEvent(
   registry: StoreRegistryRow,
   event: LineEvent,
-  suppressAll: boolean,
+  _suppressAll: boolean, // ハードミュート状態。日次売上登録はレシート同等＝ミュートをバイパスするため未使用。
 ): Promise<{ replied: boolean; reason?: string }> {
   const lineMessageId = String(event.message?.id ?? '').trim()
   const roomId = resolveRoomId(event)
@@ -646,7 +646,10 @@ async function processDailySalesFileEvent(
   const storeDisplay = resolved?.storeDisplay ?? (registry.display_name || roomStoreKey)
   const receiptTable = resolved?.receiptTable ?? `line_receipt__${roomStoreKey}`
   const existingCount = await countExistingReceiptsForDates(supabase, receiptTable, parsed.entries.map((e) => e.sales_date))
-  const replyToken = suppressAll ? '' : String(event.replyToken ?? '').trim()
+  // 日次売上の登録はレシートと同等の「売上登録」操作なので、AI返信完全なし(ハードミュート)でも
+  // 返信（自動登録の完了通知・重複/不一致の確認カード）を出す＝ミュートをバイパスする。
+  // これがないと、確認カードが出ず置き換え/中止を押せないため、ミュート部屋では登録できなくなる。
+  const replyToken = String(event.replyToken ?? '').trim()
 
   // 新規かつ店舗一致 → 即登録（ご要望どおり自動）。
   if (existingCount === 0 && storeMatched) {
