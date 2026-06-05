@@ -1371,7 +1371,11 @@
       const dateTime = formatDateTimeDetailJst(item.visit_at);
       const visitTime = normalizeCardField(item.visit_time_label || formatTimeJst(item.visit_at), '不明');
       const partySize = normalizeCardField(item.party_size_label, '不明');
-      const plan = normalizeCardField(item.plan_label || item.reservation_detail, '不明');
+      // コース: plan_label を優先。フォールバックの reservation_detail は、手入力/取込予約だと JSON 文字列なので、
+      // '{' で始まる（=JSON）の場合は表示に使わない（生JSONがそのまま出る不具合の修正）。
+      const rawDetailText = String(item.reservation_detail || '').trim();
+      const planFallback = rawDetailText.startsWith('{') ? '' : rawDetailText;
+      const plan = normalizeCardField(item.plan_label || planFallback, '不明');
       const phone = normalizeCardField(item.customer_phone, '不明');
       const allergyRaw = String(item.allergy_label || '').trim();
       const allergy = allergyRaw ? allergyRaw : 'なし';
