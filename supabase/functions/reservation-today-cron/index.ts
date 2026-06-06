@@ -361,6 +361,13 @@ function buildTodayReservationFlex(
   }
 }
 
+// お客様名に敬称「様」を付与する。空・不明は「（お名前なし）」。既存の「様」は重複させない。
+function formatReservationCustomerName(name: string | null): string {
+  const base = String(name ?? "").replace(/\s*様\s*$/, "").trim()
+  if (!base || base === "不明" || base === "なし") return "（お名前なし）"
+  return `${base} 様`
+}
+
 function buildReservationRow(r: NormalizedReservation): Record<string, unknown> {
   const contents: Array<Record<string, unknown>> = [
     {
@@ -368,7 +375,7 @@ function buildReservationRow(r: NormalizedReservation): Record<string, unknown> 
       layout: "horizontal",
       contents: [
         { type: "text", text: r.timeLabel ?? "--:--", size: "sm", weight: "bold", color: "#1F2D3D", flex: 2 },
-        { type: "text", text: r.customerName ?? "（お名前なし）", size: "sm", color: "#333333", flex: 5, wrap: true },
+        { type: "text", text: formatReservationCustomerName(r.customerName), size: "sm", color: "#333333", flex: 5, wrap: true },
         { type: "text", text: r.partySizeLabel ?? "", size: "sm", color: "#5B6B7B", align: "end", flex: 3 },
       ],
     },
