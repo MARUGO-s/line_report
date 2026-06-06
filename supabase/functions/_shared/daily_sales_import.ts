@@ -13,6 +13,7 @@ export type DailySalesImportEntry = {
 export type DailySalesParseResult = {
   recognized: boolean // 「総売上」列＋日付が取れ、日次売上ファイルと判定できたか
   store_name: string | null
+  store_key: string | null // 新テンプレ C3 の店舗キー（あれば登録時の照合に最優先で使う）
   period: string | null
   entries: DailySalesImportEntry[]
   covered_dates: string[] // ファイルに日付行として載っている全日付（総売上0=休業の日も含む）。期間まるごと置換に使う。
@@ -59,8 +60,18 @@ function parseImportCsvCells(text: string): string[][] {
 function parseImportDateCell(value: unknown): string | null {
   if (value == null) return null
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const y = value.getUTCFullYear(), m = value.getUTCMonth() + 1, d = value.getUTCDate()
-    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+    // Excelの日付は「JSTの日付」として入る（テンプレ）。SheetJSはUTC基準のDateを返すため、
+    // UTC抽出だと1日ズレる（例: JST 2025-06-01 → Date は 2025-05-31T15:00Z）。Asia/Tokyo で日付を取る。
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(value)
+    const pick = (t: string) => parts.find((x) => x.type === t)?.value ?? ""
+    const y = pick("year"), m = pick("month"), d = pick("day")
+    if (y && m && d) return `${y}-${m}-${d}`
+    return null
   }
   const m = String(value).trim().match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/)
   if (!m) return null
@@ -83,6 +94,7 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
   const fail = (error: string, extra: Partial<DailySalesParseResult> = {}): DailySalesParseResult => ({
     recognized: false,
     store_name: null,
+    store_key: null,
     period: null,
     entries: [],
     covered_dates: [],
@@ -110,24 +122,40 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
     }
 
     let storeName: string | null = null
+    let storeKey: string | null = null
     let period: string | null = null
     let headerRowIdx = -1
     let dateCol = 0, grossCol = -1, guestCol = -1, partyCol = -1
+    const looksLikeStoreKey = (s: string) => /^[a-z][a-z0-9_]{1,40}$/.test(s)
     for (let r = 0; r < rows.length; r++) {
       const row = rows[r] ?? []
       for (let c = 0; c < row.length; c++) {
         const v = String(row[c] ?? "").trim()
         if (!v) continue
-        if (v.includes("対象店舗")) storeName = (v.split(/[：:]/)[1] ?? "").trim() || storeName
-        else if (v.includes("対象期間")) period = (v.split(/[：:]/)[1] ?? "").trim() || period
-        if (v === "総売上") { grossCol = c; headerRowIdx = r }
-        else if (v === "客数") guestCol = c
-        else if (v === "組数") partyCol = c
-        else if (v === "日付") dateCol = c
+        if (v.includes("対象店舗")) {
+          // 店名: 同セルのコロン後ろ（旧形式）or 右隣セル（新テンプレ B3）
+          const afterColon = (v.split(/[：:]/)[1] ?? "").trim()
+          storeName = afterColon || String(row[c + 1] ?? "").trim() || storeName
+          // 店舗キー: 右側の「英小文字始まりの英数字」セル（新テンプレ C3 = 例 marugosecond）
+          for (let k = c + 1; k < row.length; k++) {
+            const cand = String(row[k] ?? "").trim()
+            if (looksLikeStoreKey(cand)) { storeKey = cand; break }
+          }
+        } else if (v.includes("対象期間")) {
+          // 期間: コロン後ろ（旧）or 右隣セル（新 B2 = 例 202506）。YYYYMM6桁は YYYY-MM に整形。
+          const afterColon = (v.split(/[：:]/)[1] ?? "").trim()
+          const raw = afterColon || String(row[c + 1] ?? "").trim()
+          period = /^\d{6}$/.test(raw) ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}` : (raw || period)
+        }
+        // ヘッダ: 「総売上(税込）」など接尾辞付きにも対応するため部分一致。
+        if (v.includes("総売上")) { grossCol = c; headerRowIdx = r }
+        else if (v.includes("客数")) guestCol = c
+        else if (v.includes("組数")) partyCol = c
+        else if (v.includes("日付")) dateCol = c
       }
     }
     if (grossCol < 0) {
-      return fail("「総売上」列が見つかりませんでした（月次日別売上管理表ではないようです）。", { store_name: storeName, period })
+      return fail("「総売上」列が見つかりませんでした（月次日別売上管理表ではないようです）。", { store_name: storeName, store_key: storeKey, period })
     }
 
     const collected: DailySalesImportEntry[] = []
@@ -162,6 +190,7 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
     return {
       recognized: entries.length > 0,
       store_name: storeName,
+      store_key: storeKey,
       period,
       entries,
       covered_dates: coveredDates,

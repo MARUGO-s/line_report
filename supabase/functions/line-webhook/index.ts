@@ -640,7 +640,10 @@ async function processDailySalesFileEvent(
   const supabase = createServiceClient()
   if (!supabase) return { replied: false, reason: 'server_misconfigured' }
   const roomStoreKey = String(registry.store_partition_key ?? '').trim().toLowerCase()
-  const fileStoreKey = parsed.store_name ? resolveReceiptNamePartitionKey(parsed.store_name) : null
+  // 新テンプレは C3 に店舗キーを持つ。あればそれを最優先で使い、無ければ従来の店名ゆらぎ照合にフォールバック。
+  const fileStoreKey = (parsed.store_key && parsed.store_key.trim())
+    ? parsed.store_key.trim().toLowerCase()
+    : (parsed.store_name ? resolveReceiptNamePartitionKey(parsed.store_name) : null)
   const storeMatched = !!fileStoreKey && String(fileStoreKey).toLowerCase() === roomStoreKey
   const resolved = await resolveReceiptTableForStore(supabase, roomStoreKey)
   const storeDisplay = resolved?.storeDisplay ?? (registry.display_name || roomStoreKey)

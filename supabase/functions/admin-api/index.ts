@@ -3212,6 +3212,7 @@ async function parseManualDaySalesImport(req: Request) {
     ok: true,
     file_name: fileValue.name,
     store_name: parsed.store_name,
+    store_key: parsed.store_key,
     period: parsed.period,
     entries: parsed.entries,
     covered_dates: parsed.covered_dates,

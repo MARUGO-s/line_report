@@ -1967,12 +1967,14 @@ async function uploadManualImport(file) {
 
 function renderImportPreview(data) {
   importPreviewState = data;
-  const resolvedKey = data.store_name ? LINE_REPORT_PAGES.resolveStoreKey('', data.store_name) : '';
+  // 新テンプレは store_key(C3) を直接持つ。妥当ならそれを最優先で店舗プリセットに使う（店名ゆらぎ照合より確実）。
+  const directKey = (data.store_key && STORE_NAMES[data.store_key]) ? data.store_key : '';
+  const resolvedKey = directKey || (data.store_name ? LINE_REPORT_PAGES.resolveStoreKey('', data.store_name) : '');
   const preset = (resolvedKey && STORE_NAMES[resolvedKey]) ? resolvedKey : (state.storeKey || '');
   document.getElementById('importStoreSelect').innerHTML = buildImportStoreOptions(preset);
   const parts = [];
   parts.push(`ファイル: <b>${importEscapeHtml(data.file_name || '')}</b>`);
-  if (data.store_name) parts.push(`対象店舗(ファイル記載): <b>${importEscapeHtml(data.store_name)}</b>`);
+  if (data.store_name) parts.push(`対象店舗(ファイル記載): <b>${importEscapeHtml(data.store_name)}</b>${data.store_key ? `（${importEscapeHtml(data.store_key)}）` : ''}`);
   if (data.period) parts.push(`期間: ${importEscapeHtml(data.period)}`);
   parts.push(`取込対象: <b>${data.day_count}日</b> / 合計総売上 <b>${importYen(data.total_gross_yen)}</b>`);
   if (data.skipped_zero_count) parts.push(`（総売上0の休業日 ${data.skipped_zero_count}日はスキップ）`);
