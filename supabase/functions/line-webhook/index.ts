@@ -568,7 +568,7 @@ function buildDailySalesConfirmFlex(
 ): Record<string, unknown> {
   const warn: Record<string, unknown>[] = []
   if (!storeMatched) warn.push({ type: 'text', text: `⚠️ このルームの店舗とファイルの店舗名が一致しません。投入先は【${storeDisplay}】です。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
-  if (existingCount > 0) warn.push({ type: 'text', text: `⚠️ 取込対象日に既に ${existingCount}件 のデータがあります（置き換えになります）。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
+  if (existingCount > 0) warn.push({ type: 'text', text: `⚠️ 取込対象期間に既に ${existingCount}件 のデータがあります。「置き換えて登録」で期間を丸ごと置換します（0=休業の日は売上なしにクリア／以前のデータは残りません）。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
   return {
     type: 'flex',
     altText: '日次売上の取込確認',
@@ -645,7 +645,12 @@ async function processDailySalesFileEvent(
   const resolved = await resolveReceiptTableForStore(supabase, roomStoreKey)
   const storeDisplay = resolved?.storeDisplay ?? (registry.display_name || roomStoreKey)
   const receiptTable = resolved?.receiptTable ?? `line_receipt__${roomStoreKey}`
-  const existingCount = await countExistingReceiptsForDates(supabase, receiptTable, parsed.entries.map((e) => e.sales_date))
+  // 「既存データあり」の判定は、ファイルに載っている全日付(0=休業含む)で行う。
+  // 値のある日に既存が無くても、0にする日に既存があれば確認カードを出す（＝期間まるごと置換の確認）。
+  const coveredDates = (parsed.covered_dates && parsed.covered_dates.length)
+    ? parsed.covered_dates
+    : parsed.entries.map((e) => e.sales_date)
+  const existingCount = await countExistingReceiptsForDates(supabase, receiptTable, coveredDates)
   // 日次売上の登録はレシートと同等の「売上登録」操作なので、AI返信完全なし(ハードミュート)でも
   // 返信（自動登録の完了通知・重複/不一致の確認カード）を出す＝ミュートをバイパスする。
   // これがないと、確認カードが出ず置き換え/中止を押せないため、ミュート部屋では登録できなくなる。
@@ -654,7 +659,7 @@ async function processDailySalesFileEvent(
   // 新規かつ店舗一致 → 即登録（ご要望どおり自動）。
   if (existingCount === 0 && storeMatched) {
     try {
-      const res = await importDailyReceiptsOverwrite(supabase, roomStoreKey, parsed.entries)
+      const res = await importDailyReceiptsOverwrite(supabase, roomStoreKey, parsed.entries, coveredDates)
       if (replyToken) {
         await replyLineFlex(replyToken, buildDailySalesImportedFlex(parsed, storeDisplay, res.applied), accessToken, webhookReplyLog(registry, roomId, 'daily_sales_imported'))
       }
@@ -689,6 +694,7 @@ async function processDailySalesFileEvent(
         line_message_id: lineMessageId,
         period: parsed.period,
         entries: parsed.entries,
+        covered_dates: coveredDates,
         day_count: parsed.day_count,
         total_gross_yen: parsed.total_gross_yen,
         existing_count: existingCount,
@@ -723,11 +729,11 @@ async function handleDailySalesImportPostback(
   if (!Number.isInteger(pendingId) || pendingId <= 0) return null
   const { data: pending, error } = await supabase
     .from('pending_daily_sales_imports')
-    .select('id, status, store_partition_key, entries')
+    .select('id, status, store_partition_key, entries, covered_dates')
     .eq('id', pendingId)
     .maybeSingle()
   if (error || !pending) return buildSimpleNoticeFlex('対象の取込が見つかりませんでした。')
-  const p = pending as { id: number; status: string; store_partition_key: string | null; entries: unknown }
+  const p = pending as { id: number; status: string; store_partition_key: string | null; entries: unknown; covered_dates: unknown }
   if (p.status === 'imported') return buildSimpleNoticeFlex('この取込はすでに登録済みです。')
   if (!isImport) {
     await supabase.from('pending_daily_sales_imports').update({ status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', pendingId)
@@ -737,11 +743,14 @@ async function handleDailySalesImportPostback(
     ? p.entries as Array<{ sales_date: string; gross_sales_yen: number; party_count: number | null; guest_count: number | null }>
     : []
   const storeKey = String(p.store_partition_key ?? '').trim().toLowerCase()
-  if (!storeKey || entries.length === 0) return buildSimpleNoticeFlex('登録できる内容がありませんでした。')
+  const coveredDates = Array.isArray(p.covered_dates)
+    ? (p.covered_dates as unknown[]).map((d) => String(d ?? '').trim().slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    : []
+  if (!storeKey || (entries.length === 0 && coveredDates.length === 0)) return buildSimpleNoticeFlex('登録できる内容がありませんでした。')
   try {
-    const res = await importDailyReceiptsOverwrite(supabase, storeKey, entries)
+    const res = await importDailyReceiptsOverwrite(supabase, storeKey, entries, coveredDates)
     await supabase.from('pending_daily_sales_imports').update({ status: 'imported', updated_at: new Date().toISOString() }).eq('id', pendingId)
-    return buildSimpleNoticeFlex(`✅ ${res.applied}日分を登録しました（置き換え）。売上分析・前年比に反映されます。`)
+    return buildSimpleNoticeFlex(`✅ ${res.applied}日分を登録しました（対象期間 ${res.cleared_dates}日分をクリアして置き換え／0の日は売上なし）。売上分析・前年比に反映されます。`)
   } catch (e) {
     const msg = (e as { message?: string })?.message || String(e)
     return buildSimpleNoticeFlex(`登録に失敗しました: ${msg}`.slice(0, 300))

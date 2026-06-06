@@ -3214,6 +3214,7 @@ async function parseManualDaySalesImport(req: Request) {
     store_name: parsed.store_name,
     period: parsed.period,
     entries: parsed.entries,
+    covered_dates: parsed.covered_dates,
     day_count: parsed.day_count,
     total_gross_yen: parsed.total_gross_yen,
     skipped_zero_count: parsed.skipped_zero_count,
@@ -3248,7 +3249,11 @@ async function importDailyReceiptsCommit(
       guest_count: (e.guest_count == null || e.guest_count === "") ? null : toNonNegativeInteger(e.guest_count),
     })
   }
-  return await importDailyReceiptsOverwrite(supabase, key, entries)
+  // ファイルに載っていた全日付（0=休業の日も含む）。期間まるごと置換のため、この全日付の既存をクリアする。
+  const coveredDates = (Array.isArray(body.covered_dates) ? body.covered_dates : [])
+    .map((d) => toSafeString(d).trim().slice(0, 10))
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+  return await importDailyReceiptsOverwrite(supabase, key, entries, coveredDates)
 }
 
 // 日別予算の直接入力（手動上書き）を保存。body: { store_key, entries:[{sales_date, budget_yen|null}] }

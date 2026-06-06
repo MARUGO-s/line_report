@@ -15,6 +15,7 @@ export type DailySalesParseResult = {
   store_name: string | null
   period: string | null
   entries: DailySalesImportEntry[]
+  covered_dates: string[] // ファイルに日付行として載っている全日付（総売上0=休業の日も含む）。期間まるごと置換に使う。
   day_count: number
   total_gross_yen: number
   skipped_zero_count: number
@@ -84,6 +85,7 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
     store_name: null,
     period: null,
     entries: [],
+    covered_dates: [],
     day_count: 0,
     total_gross_yen: 0,
     skipped_zero_count: 0,
@@ -129,12 +131,14 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
     }
 
     const collected: DailySalesImportEntry[] = []
+    const coveredDateSet = new Set<string>() // 総売上0(休業)の日も含め、日付行として認識できた全日付
     let skippedZero = 0
     const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0
     for (let r = startIdx; r < rows.length; r++) {
       const row = rows[r] ?? []
       const iso = parseImportDateCell(row[dateCol])
       if (!iso) continue // 合計行・空行などはスキップ
+      coveredDateSet.add(iso) // 0の日も「対象日」に含める（期間まるごと置換のため）
       const gross = parseImportNumber(row[grossCol])
       if (gross == null || gross <= 0) { skippedZero++; continue } // 休業日(総売上0)はスキップ
       collected.push({
@@ -149,6 +153,7 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
     for (const e of collected) byDate.set(e.sales_date, e)
     const entries = [...byDate.values()].sort((a, b) => a.sales_date.localeCompare(b.sales_date))
     const totalGross = entries.reduce((s, e) => s + e.gross_sales_yen, 0)
+    const coveredDates = [...coveredDateSet].sort((a, b) => a.localeCompare(b))
 
     const warnings: string[] = []
     if (!storeName) warnings.push("対象店舗が読み取れませんでした。")
@@ -159,6 +164,7 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
       store_name: storeName,
       period,
       entries,
+      covered_dates: coveredDates,
       day_count: entries.length,
       total_gross_yen: totalGross,
       skipped_zero_count: skippedZero,
@@ -204,26 +210,29 @@ export async function countExistingReceiptsForDates(
   return typeof count === "number" ? count : 0
 }
 
-// 解析した日次売上を「画像解析レシートと同等」に登録（上書き方式）。
-// 取込対象日の既存レシートを delete → 合成レシートを insert（合算でなく置換＝二重計上しない）。
-// 同じ日の手入力上書き(manual_day)も削除して値を一本化。
+// 解析した日次売上を「画像解析レシートと同等」に登録（期間まるごと置換方式）。
+// coveredDates（ファイルに載っていた全日付＝総売上0の休業日も含む）の既存レシートを delete してから、
+// 売上のある日（entries）だけ合成レシートを insert する。これにより「0にした日＝売上なし」も正しく反映され、
+// 以前のデータが残らない。ファイルに載っていない日は触らない。同じ日の手入力上書き(manual_day)も削除。
 export async function importDailyReceiptsOverwrite(
   supabase: SupabaseClient,
   storeKey: string,
   entries: DailySalesImportEntry[],
-): Promise<{ ok: boolean; applied: number; receipt_table: string; cleared_manual_day: number; store_partition_key: string }> {
+  coveredDates: string[] = [],
+): Promise<{ ok: boolean; applied: number; cleared_dates: number; receipt_table: string; cleared_manual_day: number; store_partition_key: string }> {
   const resolved = await resolveReceiptTableForStore(supabase, storeKey)
   if (!resolved) {
     throw { status: 400, message: "店舗が見つかりません（store_key）。" }
   }
   const key = String(storeKey ?? "").trim().toLowerCase()
   const { receiptTable, storeDisplay } = resolved
+  const isIsoDate = (d: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(d ?? "").trim().slice(0, 10))
 
   const rows: Array<Record<string, unknown>> = []
   const dates: string[] = []
   for (const e of entries) {
     const salesDate = String(e?.sales_date ?? "").trim().slice(0, 10)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(salesDate)) continue
+    if (!isIsoDate(salesDate)) continue
     const gross = parseImportNumber(e?.gross_sales_yen)
     if (gross == null || gross <= 0) continue
     const party = parseImportNumber(e?.party_count)
@@ -242,28 +251,39 @@ export async function importDailyReceiptsOverwrite(
     })
     dates.push(salesDate)
   }
-  if (rows.length === 0) {
-    return { ok: true, applied: 0, receipt_table: receiptTable, cleared_manual_day: 0, store_partition_key: key }
+
+  // クリア対象 = ファイルに載っていた全日付(0含む) ∪ 登録する日。coveredDates 未指定なら entries の日のみ（後方互換）。
+  const clearDates = [...new Set([
+    ...coveredDates.map((d) => String(d ?? "").trim().slice(0, 10)).filter(isIsoDate),
+    ...dates,
+  ])]
+  if (clearDates.length === 0) {
+    return { ok: true, applied: 0, cleared_dates: 0, receipt_table: receiptTable, cleared_manual_day: 0, store_partition_key: key }
   }
 
-  const { error: delRcpErr } = await supabase.from(receiptTable).delete().in("receipt_date", dates)
+  // 1) 対象日（0の日も含む）の既存レシートを全消し
+  const { error: delRcpErr } = await supabase.from(receiptTable).delete().in("receipt_date", clearDates)
   if (delRcpErr) {
     throw { status: 500, message: `既存レシートのクリアに失敗しました: ${delRcpErr.message}` }
   }
-  const { error: insErr } = await supabase.from(receiptTable).insert(rows)
-  if (insErr) {
-    throw { status: 500, message: `レシート登録に失敗しました: ${insErr.message}` }
+  // 2) 売上のある日だけ登録（0の日は登録しない＝売上なし）
+  if (rows.length > 0) {
+    const { error: insErr } = await supabase.from(receiptTable).insert(rows)
+    if (insErr) {
+      throw { status: 500, message: `レシート登録に失敗しました: ${insErr.message}` }
+    }
   }
 
+  // 3) 同じ日の手入力上書き(manual_day)も対象日ぶんクリア
   let clearedManualDay = 0
   try {
     const { error: delErr, count } = await supabase
       .from("line_sales_manual_day")
       .delete({ count: "exact" })
       .eq("store_partition_key", key)
-      .in("sales_date", dates)
+      .in("sales_date", clearDates)
     if (!delErr && typeof count === "number") clearedManualDay = count
   } catch (_e) { /* best-effort */ }
 
-  return { ok: true, applied: rows.length, receipt_table: receiptTable, cleared_manual_day: clearedManualDay, store_partition_key: key }
+  return { ok: true, applied: rows.length, cleared_dates: clearDates.length, receipt_table: receiptTable, cleared_manual_day: clearedManualDay, store_partition_key: key }
 }

@@ -956,7 +956,7 @@
       <button id="importConfirmBtn" type="button" class="btn primary">この内容で取込（レシート登録）</button>
       <button id="importCancelBtn" type="button" class="btn">キャンセル</button>
     </div>
-    <div class="meta" style="margin-top:8px;font-size:0.78rem">※ 各日を<strong>レシート売上として登録</strong>します（集計・分析で画像解析レシートと同等扱い）。<strong>同じ日に既存レシートがあっても合算せず上書き（置換）</strong>します。総売上0の日（休業）は取込みません。</div>
+    <div class="meta" style="margin-top:8px;font-size:0.78rem">※ 各日を<strong>レシート売上として登録</strong>します（集計・分析で画像解析レシートと同等扱い）。<strong>ファイルに載っている日は期間まるごと置換</strong>します（既存があっても合算せず上書き）。<strong>総売上0の日は「売上なし」としてクリア</strong>（以前のデータは残りません）。ファイルに無い日は変更しません。</div>
   </div>
 </div>
 <style>
@@ -2024,12 +2024,14 @@ async function confirmManualImport() {
     party_count: e.party_count,
     guest_count: e.guest_count,
   }));
-  if (!entries.length) { errEl.textContent = '取込対象がありません。'; return; }
+  // ファイルに載っていた全日付(0=休業含む)。期間まるごと置換のため、この全日付の既存をクリアする。
+  const coveredDates = Array.isArray(importPreviewState.covered_dates) ? importPreviewState.covered_dates : [];
+  if (!entries.length && !coveredDates.length) { errEl.textContent = '取込対象がありません。'; return; }
   const btn = document.getElementById('importConfirmBtn');
   btn.disabled = true;
   errEl.textContent = '';
   try {
-    const res = await apiFetch('/receipts/daily-receipts-import', { method: 'POST', body: { store_key: storeKey, entries } });
+    const res = await apiFetch('/receipts/daily-receipts-import', { method: 'POST', body: { store_key: storeKey, entries, covered_dates: coveredDates } });
     const n = (res && typeof res.applied === 'number') ? res.applied : entries.length;
     closeImportPreview();
     document.getElementById('manualImportStatus').textContent = `取込完了: ${n}日分をレシート売上として登録しました（集計・分析でレシートと同等扱い）。`;
