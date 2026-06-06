@@ -1658,6 +1658,36 @@ function formatReservationDateTimeLabel(raw: string | null | undefined, received
   return `${String(parsed.year).padStart(4, "0")}/${String(parsed.month).padStart(2, "0")}/${String(parsed.day).padStart(2, "0")}(${weekday}) ${hh}:${mm}`
 }
 
+// 予約日の西暦を「メール受信日」基準で妥当化する。
+// 明示年が妥当（受信年-1〜+2）ならそれを採用。不正（例: 金額¥2000由来の2000年）や年無しのときは、
+// 受信日以降に最初に来る (月/日) の年を採用する（その月日が受信日より過去なら翌年）。
+function resolveReservationYear(
+  rawYear: number | null,
+  month: number,
+  day: number,
+  receivedIso: string | null,
+): number {
+  const base = receivedIso ? new Date(receivedIso) : new Date()
+  const safeBase = Number.isNaN(base.getTime()) ? new Date() : base
+  const parts = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(safeBase)
+  const pick = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "")
+  const baseYear = pick("year")
+  const baseMd = pick("month") * 100 + pick("day")
+  if (
+    rawYear != null && Number.isInteger(rawYear) &&
+    rawYear >= baseYear - 1 && rawYear <= baseYear + 2
+  ) {
+    return rawYear
+  }
+  const md = month * 100 + day
+  return md >= baseMd ? baseYear : baseYear + 1
+}
+
 function parseReservationDateTime(
   source: string,
   receivedIso: string | null,
@@ -1669,10 +1699,12 @@ function parseReservationDateTime(
     /(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?(?:\s*[（(][^）)]*[）)])?\s*([0-2]?\d):([0-5]\d)/,
   )
   if (full) {
+    const month = Number(full[2])
+    const day = Number(full[3])
     return {
-      year: Number(full[1]),
-      month: Number(full[2]),
-      day: Number(full[3]),
+      year: resolveReservationYear(Number(full[1]), month, day, receivedIso),
+      month,
+      day,
       hour: Number(full[4]),
       minute: Number(full[5]),
     }
@@ -1680,11 +1712,12 @@ function parseReservationDateTime(
 
   const monthDay = text.match(/(\d{1,2})[\/\-月](\d{1,2})日?(?:\s*[（(][^）)]*[）)])?\s*([0-2]?\d):([0-5]\d)/)
   if (monthDay) {
-    const year = inferReservationYear(text, receivedIso)
+    const month = Number(monthDay[1])
+    const day = Number(monthDay[2])
     return {
-      year,
-      month: Number(monthDay[1]),
-      day: Number(monthDay[2]),
+      year: resolveReservationYear(null, month, day, receivedIso),
+      month,
+      day,
       hour: Number(monthDay[3]),
       minute: Number(monthDay[4]),
     }
