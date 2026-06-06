@@ -34,3 +34,10 @@ verify_jwt = false
 # 認可は冪等性（room_id×target_dateの重複防止）で担保し、テスト送信は X-Reservation-Today-Test-Key で保護する。
 [functions.reservation-today-cron]
 verify_jwt = false
+
+# gmail-alert-cron は pg_cron（毎分）から呼ばれる内部関数＋admin-api/手動のテスト送信。
+# 新形式キー（sb_secret_…）は JWT ではないためゲートウェイの verify_jwt が 401 を返す
+# （この設定漏れで 2026-05-31 以降、毎分401になり予約メールの取得・通知・カレンダー登録が全停止していた）。
+# 認可は関数側で実施（テスト送信は X-Gmail-Alert-Test-Key、定期実行は gmail_reservation_alert_logs の重複防止で冪等）するため false にする。
+[functions.gmail-alert-cron]
+verify_jwt = false
