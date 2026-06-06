@@ -59,12 +59,25 @@ function buildSushikoruriBuiltinPrompt(): string {
   ].join('\n')
 }
 
+/** バルペロタ（BAR PELOTA）固有ルール。組数を「総取引数」と取り違える誤りを必ず無くす。 */
+function buildBarpelotaBuiltinPrompt(): string {
+  return [
+    '【バルペロタ（BAR PELOTA）固有ルール（最優先・必ず従う）】',
+    '・このレシート（精算）は毎回同じテンプレートで、「総取引数」と「通常取引数」が別々の行に並ぶ。両者を絶対に混同しないこと。',
+    '・会計組数（party_count）には必ず「通常取引数」の数値だけを採用する。「総取引数」を party_count にしては絶対にいけない。',
+    '  例: 「総取引数 … 35」「通常取引数 … 34」と並ぶレシートなら party_count="34"（＝通常取引数）。',
+    '・客数（guest_count）は「客数」行の数値（例: 75）。「総取引数」「販売点数」と取り違えない。',
+    '・売上・税額など他の項目は通常どおり（純売上=net_sales、税込合計=gross_sales）。',
+  ].join('\n')
+}
+
 /**
  * コード側に常駐する店舗固有のレシート解析ルール（恒久・UIで消えない）。
  * DB追記より優先で先頭に置く。例: 鮨こるりは手書きの「売上日報」をレシート扱いにする必要がある。
  */
 const STORE_BUILTIN_RECEIPT_PROMPT_BUILDERS: Record<string, () => string> = {
   sushikoruri: buildSushikoruriBuiltinPrompt,
+  barpelota: buildBarpelotaBuiltinPrompt,
 }
 
 /** 指定店舗のコード常駐ルール（無ければ空文字）。 */
