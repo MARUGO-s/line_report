@@ -835,6 +835,7 @@ Deno.serve(async (req) => {
           receipt_correction_reply_enabled: payload.receipt_correction_reply_enabled,
           non_receipt_image_reply_enabled: payload.non_receipt_image_reply_enabled,
           media_save_enabled: payload.media_save_enabled,
+          budget_entry_enabled: payload.budget_entry_enabled,
           gmail_reservation_alert_enabled: payload.gmail_reservation_alert_enabled,
           today_reservation_alert_enabled: payload.today_reservation_alert_enabled,
           today_reservation_alert_hour: payload.today_reservation_alert_hour,
@@ -5858,6 +5859,7 @@ function buildRoomSettingsPayload(body: unknown): {
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
   media_save_enabled: boolean
+  budget_entry_enabled?: boolean
   receipt_schedule_override: boolean
   receipt_midreport_day: number | null
   receipt_midreport_hour: number | null
@@ -6011,6 +6013,13 @@ function buildRoomSettingsPayload(body: unknown): {
   }
   const mediaSaveEnabled = mediaSaveEnabledRaw !== false
 
+  const budgetEntryEnabledRaw = body.budget_entry_enabled
+  if (budgetEntryEnabledRaw != null && typeof budgetEntryEnabledRaw !== "boolean") {
+    throw { status: 400, message: "budget_entry_enabled must be boolean when provided." } satisfies AppError
+  }
+  // 未指定なら undefined＝upsertに含めず既存値を保持（予算を送らない保存経路でfalseに戻さない）。
+  const budgetEntryEnabled = budgetEntryEnabledRaw != null ? budgetEntryEnabledRaw === true : undefined
+
   const receiptScheduleOverrideRaw = body.receipt_schedule_override
   if (receiptScheduleOverrideRaw != null && typeof receiptScheduleOverrideRaw !== "boolean") {
     throw { status: 400, message: "receipt_schedule_override must be boolean when provided." } satisfies AppError
@@ -6100,6 +6109,7 @@ function buildRoomSettingsPayload(body: unknown): {
     receipt_midreport_enabled: receiptMidreportEnabled,
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,
     media_save_enabled: mediaSaveEnabled,
+    budget_entry_enabled: budgetEntryEnabled,
     receipt_schedule_override: receiptScheduleOverride,
     receipt_midreport_day: receiptMidreportDay,
     receipt_midreport_hour: receiptMidreportHour,

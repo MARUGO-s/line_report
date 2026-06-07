@@ -5413,6 +5413,7 @@
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptCorrectionReplyEnabled" type="checkbox">レシート修正の返信を許可（AI返信完全無しでも修正は返信）</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMidreportEnabled" type="checkbox"><span id="roomConfigReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMonthendReportEnabled" type="checkbox"><span id="roomConfigReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
+          <label class="room-scope-option receipt-scope-option"><input id="roomConfigBudgetEntryEnabled" type="checkbox">予算登録を許可（このルームから月次予算を入力）</label>
         </div>
         <div id="roomConfigReceiptScheduleWrap" class="receipt-schedule-panel receipt-scope-option">
         <div id="roomConfigReceiptScheduleRoomWrap" class="receipt-schedule-row">
@@ -5924,6 +5925,7 @@
       roomConfigTomorrowReminder: document.getElementById('roomConfigTomorrowReminder'),
       roomConfigMediaAccess: document.getElementById('roomConfigMediaAccess'),
       roomConfigImageAnalysisReplyEnabled: document.getElementById('roomConfigImageAnalysisReplyEnabled'),
+      roomConfigBudgetEntryEnabled: document.getElementById('roomConfigBudgetEntryEnabled'),
       roomConfigReceiptCorrectionReplyEnabled: document.getElementById('roomConfigReceiptCorrectionReplyEnabled'),
       roomConfigNonReceiptImageReplyEnabled: document.getElementById('roomConfigNonReceiptImageReplyEnabled'),
       roomConfigMediaSaveEnabled: document.getElementById('roomConfigMediaSaveEnabled'),
@@ -8367,6 +8369,7 @@
         receive_overall_summary_enabled: !!(dom.roomConfigReceiveOverallSummary && dom.roomConfigReceiveOverallSummary.checked),
         media_file_access_enabled: !!dom.roomConfigMediaAccess.checked,
         image_analysis_reply_enabled: !!(dom.roomConfigImageAnalysisReplyEnabled && dom.roomConfigImageAnalysisReplyEnabled.checked),
+        budget_entry_enabled: !!(dom.roomConfigBudgetEntryEnabled && dom.roomConfigBudgetEntryEnabled.checked),
         receipt_correction_reply_enabled: !!(dom.roomConfigReceiptCorrectionReplyEnabled && dom.roomConfigReceiptCorrectionReplyEnabled.checked),
         non_receipt_image_reply_enabled: !!(dom.roomConfigNonReceiptImageReplyEnabled && dom.roomConfigNonReceiptImageReplyEnabled.checked),
         media_save_enabled: !!(dom.roomConfigMediaSaveEnabled && dom.roomConfigMediaSaveEnabled.checked),
@@ -12012,6 +12015,9 @@
       dom.roomConfigMediaAccess.checked = !!config.media_file_access_enabled;
       if (dom.roomConfigImageAnalysisReplyEnabled) {
         dom.roomConfigImageAnalysisReplyEnabled.checked = !!config.image_analysis_reply_enabled;
+      }
+      if (dom.roomConfigBudgetEntryEnabled) {
+        dom.roomConfigBudgetEntryEnabled.checked = !!config.budget_entry_enabled;
       }
       if (dom.roomConfigReceiptCorrectionReplyEnabled) {
         dom.roomConfigReceiptCorrectionReplyEnabled.checked = !!config.receipt_correction_reply_enabled;

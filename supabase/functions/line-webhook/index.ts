@@ -14,6 +14,7 @@ import {
   clearPendingReceiptDuplicate,
 } from '../_shared/receipt_duplicate.ts'
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
+import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   countExistingReceiptsForDates,
@@ -1404,6 +1405,7 @@ Deno.serve(async (req) => {
     let suppressNonReceiptReply = false
     let allowCorrectionReply = false
     let allowMediaSave = true
+    let budgetEntryAllowed = false
     if (eventRoomId) {
       const muteFlags = await loadRoomSearchFlagsCached(eventRoomId)
       roomHardMuted = !!muteFlags?.bot_reply_hard_mute_enabled
@@ -1413,6 +1415,8 @@ Deno.serve(async (req) => {
       allowCorrectionReply = muteFlags !== null ? !!muteFlags.receipt_correction_reply_enabled : false
       // メディア保存（メディア閲覧）: OFF のルームは保存しない。null（DBエラー）時は既定で保存。
       allowMediaSave = muteFlags !== null ? muteFlags.media_save_enabled !== false : true
+      // 予算登録フローの権限ゲート（既定OFF＝「許可」した部屋だけ作動）。
+      budgetEntryAllowed = muteFlags !== null ? !!muteFlags.budget_entry_enabled : false
     }
 
     // メディア閲覧用の保存（画像/動画/音声/ファイル）。1ルーム合計20MBまで、超過分は古い順に自動削除。
@@ -1592,6 +1596,28 @@ Deno.serve(async (req) => {
     if (event.type === 'message' && event.message?.type === 'text') {
       const text = String(event.message?.text ?? '').trim()
       const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
+
+      // 予算登録フロー（独立・他に干渉しない）。トリガー「予算登録」or 予算pending中のみ作動し、
+      // 処理した時だけ後続のレシート/検索処理をスキップする（部屋メッセージ記録は通常どおり）。
+      let budgetEntryHandled = false
+      if (budgetEntryAllowed && text && eventRoomId && eventUserId) {
+        try {
+          const budgetResult = await handleBudgetEntryTextMessage(supabase, registry as StoreRegistryRow, {
+            roomId: eventRoomId,
+            userId: eventUserId,
+            replyToken: String(event.replyToken ?? ''),
+            text,
+          })
+          if (budgetResult.handled) {
+            budgetEntryHandled = true
+            textHandled += 1
+            if (budgetResult.replied) receiptReplies += 1
+          }
+        } catch (err) {
+          console.error('budget_entry_flow failed:', err instanceof Error ? err.message : String(err))
+        }
+      }
+
       if (text && eventRoomId && eventUserId) {
         if (isDirectMessage) {
           // 1対1: 検索待ちのキーワード1通のみ記録しない（「検索」等の操作トークは記録する）
@@ -1617,7 +1643,7 @@ Deno.serve(async (req) => {
       }
 
       let receiptHandled = false
-      try {
+      if (!budgetEntryHandled) try {
         // レシート操作の返信（重複確認 加算/中止/置き換え・修正・削除の結果）は AI返信完全無しの対象外。
         // 「レシートの解析結果を送信」または「レシート修正の返信を許可」の両方OFFのときだけ抑止する。
         const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, suppressReceiptReply && !allowCorrectionReply)
@@ -1630,7 +1656,7 @@ Deno.serve(async (req) => {
         errors.push(msg.slice(0, 160))
       }
 
-      if (!receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
+      if (!budgetEntryHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
         try {
           const searchResult = await handleLineSearchTextMessage(
             supabase,
