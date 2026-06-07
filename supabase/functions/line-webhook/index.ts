@@ -452,7 +452,11 @@ function formatReservationVisitLabelJst(iso: string): string {
   return `${j.getUTCMonth() + 1}月${j.getUTCDate()}日(${wd}) ${String(j.getUTCHours()).padStart(2, '0')}:${String(j.getUTCMinutes()).padStart(2, '0')}`
 }
 
-function buildReservationRegisteredFlex(payload: Record<string, unknown>, visitAtIso: string): Record<string, unknown> {
+function buildReservationRegisteredFlex(
+  payload: Record<string, unknown>,
+  visitAtIso: string,
+  visitStats: { visit_count: number; recent_visits: Array<{ visit_at?: string | null }> } | null = null,
+): Record<string, unknown> {
   const str = (v: unknown) => { const s = String(v ?? '').trim(); return s || null }
   const rows: Array<[string, string | null]> = [
     ['店舗', str(payload.store_name)],
@@ -476,6 +480,28 @@ function buildReservationRegisteredFlex(payload: Record<string, unknown>, visitA
       { type: 'text', text: String(v), size: 'sm', color: '#333333', flex: 5, wrap: true },
     ],
   }))
+  // メール予約と同じく「予約回数」「過去の予約」を表示（partner='manual' の履歴/サマリ集計）。
+  const historyContents: Record<string, unknown>[] = []
+  if (visitStats) {
+    const recentLabels = (visitStats.recent_visits ?? [])
+      .map((it) => { const iso = String(it?.visit_at ?? '').trim(); return iso ? formatReservationVisitLabelJst(iso) : null })
+      .filter((v): v is string => !!v)
+      .slice(0, 5)
+    historyContents.push({ type: 'separator', margin: 'md' })
+    historyContents.push({
+      type: 'box', layout: 'baseline', spacing: 'sm',
+      contents: [
+        { type: 'text', text: '予約回数', size: 'sm', color: '#8a96a3', flex: 2 },
+        { type: 'text', text: `${visitStats.visit_count}回`, size: 'sm', color: '#333333', flex: 5, wrap: true },
+      ],
+    })
+    if (recentLabels.length > 0) {
+      historyContents.push({ type: 'text', text: '過去の予約', size: 'xs', color: '#8a96a3', margin: 'sm' })
+      for (const label of recentLabels) {
+        historyContents.push({ type: 'text', text: `・${label}`, size: 'xs', color: '#333333', wrap: true })
+      }
+    }
+  }
   return {
     type: 'flex',
     altText: '予約を登録しました',
@@ -489,7 +515,8 @@ function buildReservationRegisteredFlex(payload: Record<string, unknown>, visitA
           { type: 'text', text: '✅ 予約を登録しました', weight: 'bold', size: 'md', color: '#1a7f37' },
           { type: 'separator', margin: 'md' },
           ...fieldBoxes,
-          { type: 'text', text: '予約表・本日のご予約に反映されます。', size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
+          ...historyContents,
+          { type: 'text', text: '予約表・本日のご予約に反映され、予約回数・過去の予約にも算入されます。', size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
         ],
       },
     },
@@ -541,10 +568,36 @@ async function handleReservationImportPostback(
     return buildSimpleNoticeFlex('登録に失敗しました。時間をおいて再度お試しください。')
   }
   const newId = Number((created as { id?: number } | null)?.id ?? 0)
+
+  // メール予約と同じく「予約回数」「過去の予約」に算入（partner='manual' で履歴＋サマリへ）。
+  // 表示用イベント行(manual_reservation_visit_events)とは別に、回数サマリと履歴へ登録する。
+  let visitStats: { visit_count: number; recent_visits: Array<{ visit_at?: string | null }> } | null = null
+  try {
+    const { data: stat, error: rpcErr } = await supabase.rpc('record_manual_reservation_visit', {
+      p_dedup_key: `manual:${newId}`,
+      p_customer_name: (payload.customer_name as string | null) ?? null,
+      p_customer_phone: (payload.customer_phone as string | null) ?? null,
+      p_visit_at: visitAt,
+      p_reservation_type: (payload.reservation_type as string | null) ?? '予約',
+      p_reservation_detail: (payload.reservation_detail as string | null) ?? null,
+    })
+    if (rpcErr) {
+      console.error('record_manual_reservation_visit failed:', rpcErr.message)
+    } else if (stat && typeof stat === 'object') {
+      const s = stat as { visit_count?: unknown; recent_visits?: unknown }
+      visitStats = {
+        visit_count: Math.max(0, Math.floor(Number(s.visit_count ?? 0))),
+        recent_visits: Array.isArray(s.recent_visits) ? (s.recent_visits as Array<{ visit_at?: string | null }>) : [],
+      }
+    }
+  } catch (e) {
+    console.error('record_manual_reservation_visit threw:', (e as Error)?.message)
+  }
+
   await supabase.from('pending_reservation_imports')
     .update({ status: 'registered', manual_reservation_id: newId, updated_at: new Date().toISOString() })
     .eq('id', pendingId)
-  return buildReservationRegisteredFlex(payload, visitAt)
+  return buildReservationRegisteredFlex(payload, visitAt, visitStats)
 }
 
 // ───────── 月次日別売上管理表（Excel/CSV）の LINE 取込 ─────────
