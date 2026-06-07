@@ -1989,9 +1989,11 @@ function isLikelyReservationNotificationMail(subject: string, snippet: string, b
   const compact = normalizeInlineText(`${subject} ${snippet} ${bodyText}`).toLowerCase()
   if (!compact) return false
 
-  // 予約成立通知ではなく、当日一覧/時点一覧のリマインド配信は除外する。
+  // 予約成立通知（新規/変更/キャンセル）ではなく、当日一覧/時点一覧/Vポイント利用まとめ等の
+  // 「お知らせ・リマインド配信」は除外する（題名に新規予約/変更/キャンセルが無く、本日の予約状況を
+  // まとめて知らせるだけのメール。例:【Vポイント利用予約まとめ情報】本日Vポイントのご利用が…）。
   const hasReminderDigestCue =
-    /(本日のご来店一覧|ネット予約一覧|時点の予約一覧|ご来店予定の|食べログネット予約一覧)/i.test(compact)
+    /(本日のご来店一覧|ネット予約一覧|時点の予約一覧|ご来店予定の|食べログネット予約一覧|まとめ情報|Vポイント利用予約まとめ|本日のVポイント利用|お値引きをお願い)/i.test(compact)
   if (hasReminderDigestCue) return false
 
   const hasReservationCue = /(予約|来店|人数|コース|予約番号|ご予約|reservation|booking)/i.test(compact)
