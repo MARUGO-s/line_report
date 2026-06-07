@@ -762,6 +762,9 @@ async function handleDailySalesImportPostback(
 
 // レシート画像解析に Gemini を使う店舗（手書き数字などの読み取り精度向上が目的）。他店は Groq のまま。
 const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage', 'sushikoruri'])
+// 受信専用店（レシートしか送られない店）: Groqが反射・光で kind を外して general 誤判定したとき、
+// 「この店舗のレシートで確定」と宣言して1回だけ強制再解析する対象。Gemini は使わない（セキュリティ順守）。
+const FORCE_RECEIPT_RETRY_STORE_KEYS = new Set<string>(['barpelota'])
 
 // Gemini 採用店で「レシートらしさ」を示すテキストの手掛かり（Groq 事前判定の summary を見る）。
 // 注意: お品書き/メニューにも出る価格系トークン（円・¥・金額・税込・税抜・総額・売価）は誤昇格を招くため含めない。
@@ -935,6 +938,31 @@ async function processReceiptImageEvent(
       receiptPromptAddition,
     )
     await recordAiUsage('groq', GROQ_RECEIPT_MODEL, analyzed.usage)
+  }
+
+  // 受信専用店（例: バルペロタ）で反射・光により kind を general と誤判定して receipt を外した場合、
+  // 「この店舗のレシートで確定。general/reservation判定は適用しない」と宣言して1回だけ強制再解析する。
+  if (
+    !analyzed.analysis?.receipt &&
+    FORCE_RECEIPT_RETRY_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
+  ) {
+    const forcedReceiptPrompt = [
+      receiptPromptAddition,
+      '',
+      '【強制再解析・絶対遵守】上の画像はこの店舗のレシート（精算）で確定しています。',
+      '前述の「general / reservation にする」判断基準は、この店舗には一切適用しないでください。',
+      '必ず kind="receipt" を出力し、receipt に読み取れる主要項目（store_name, date, net_sales=純売上, gross_sales=合計/税込, party_count=通常取引数, guest_count=客数 など）を入れること。',
+      '反射・光・かすれがあっても、読める数値だけでも receipt に入れて kind=receipt を維持し、receipt_confidence は 0.6 以上にする。',
+    ].join('\n')
+    const forcedRetry = await analyzeLineImageWithGroqScout(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      lineMessageId,
+      groqApiKey,
+      forcedReceiptPrompt,
+    )
+    await recordAiUsage('groq', GROQ_RECEIPT_MODEL, forcedRetry.usage)
+    if (forcedRetry.analysis?.receipt) analyzed = forcedRetry
   }
 
   // 期間集計／グループ期間（GP）レポートは「売上レシート」ではないため、売上に加算せず返信もしない。

@@ -63,6 +63,8 @@ function buildSushikoruriBuiltinPrompt(): string {
 function buildBarpelotaBuiltinPrompt(): string {
   return [
     '【バルペロタ（BAR PELOTA）固有ルール（最優先・必ず従う）】',
+    '・【最重要・kind判定】店名「BAR PELOTA」で、合計・純売上・客数・総取引数・通常取引数 などの精算項目が並ぶ画像は、反射・光・かすれ・一部不鮮明・斜め撮影があっても必ず kind="receipt" とする。kind を "general" や "reservation" にしては絶対にいけない（要約に「レシート」と書けるなら必ず receipt として扱う）。',
+    '・読めない項目が一部あっても、読める主要項目（純売上・合計・客数・通常取引数 など）だけでも receipt に入れて kind=receipt を維持し、receipt_confidence は 0.6 以上にする。',
     '・このレシート（精算）は毎回同じテンプレートで、「総取引数」と「通常取引数」が別々の行に並ぶ。両者を絶対に混同しないこと。',
     '・会計組数（party_count）には必ず「通常取引数」の数値だけを採用する。「総取引数」を party_count にしては絶対にいけない。',
     '  例: 「総取引数 … 35」「通常取引数 … 34」と並ぶレシートなら party_count="34"（＝通常取引数）。',
