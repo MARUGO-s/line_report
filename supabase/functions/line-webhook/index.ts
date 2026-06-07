@@ -990,11 +990,13 @@ async function processReceiptImageEvent(
   // 解析内容を pending に保存し、確認カード（登録/破棄ボタン）を返信する。「登録」postback で本登録。
   const detectedReservation = analyzed.analysis?.reservation
   if (detectedReservation) {
+    // 予約スクショの登録は「明示的な登録操作」なので、レシート登録・予算登録と同様に
+    // 「AI返信完全無し」(ハードミュート)でも確認カードを返す（送らないと登録に進めないため）。
     return await handleReservationImageDetected(
       supabase,
       registry,
       roomId,
-      suppressAll ? '' : rawReplyToken,
+      rawReplyToken,
       accessToken,
       lineMessageId,
       detectedReservation,
