@@ -717,7 +717,7 @@ function isReservationHistorySectionHeading(line: string): boolean {
 
 function buildReservationHistoryParagraphs(record: ReservationVisitRecordResult): string[] {
   const paragraphs: string[] = [
-    formatReservationCountLine("来店回数", record.visit_count),
+    formatReservationCountLine("予約回数", record.visit_count),
     formatReservationCountLine("キャンセル回数", record.cancelled_count),
   ]
   const dated = record.recent_visits
@@ -1364,15 +1364,15 @@ function parseReservationHistoryParagraphs(history: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-  if (lines.some((line) => line.startsWith("来店回数") || line.startsWith("キャンセル回数"))) {
+  if (lines.some((line) => line.startsWith("来店回数") || line.startsWith("予約回数") || line.startsWith("キャンセル回数"))) {
     return lines
   }
   const out: string[] = []
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]
-    const visitCombined = line.match(/^来店回数[　\s]*([0-9０-９]+)回$/)
+    const visitCombined = line.match(/^(?:来店|予約)回数[　\s]*([0-9０-９]+)回$/)
     if (visitCombined) {
-      out.push(formatReservationCountLine("来店回数", parseJapaneseCount(visitCombined[1])))
+      out.push(formatReservationCountLine("予約回数", parseJapaneseCount(visitCombined[1])))
       continue
     }
     const cancelCombined = line.match(/^キャンセル回数[　\s]*([0-9０-９]+)回$/)
@@ -1380,10 +1380,10 @@ function parseReservationHistoryParagraphs(history: string): string[] {
       out.push(formatReservationCountLine("キャンセル回数", parseJapaneseCount(cancelCombined[1])))
       continue
     }
-    if (line === "来店回数" && i + 1 < lines.length) {
+    if ((line === "来店回数" || line === "予約回数") && i + 1 < lines.length) {
       const next = lines[i + 1].match(/^([0-9０-９]+)回$/)
       if (next) {
-        out.push(formatReservationCountLine("来店回数", parseJapaneseCount(next[1])))
+        out.push(formatReservationCountLine("予約回数", parseJapaneseCount(next[1])))
         i += 1
         continue
       }
@@ -1396,9 +1396,9 @@ function parseReservationHistoryParagraphs(history: string): string[] {
         continue
       }
     }
-    const visit = line.match(/^来店([0-9０-９]+)回$/)
+    const visit = line.match(/^(?:来店|予約)([0-9０-９]+)回$/)
     if (visit) {
-      out.push(formatReservationCountLine("来店回数", parseJapaneseCount(visit[1])))
+      out.push(formatReservationCountLine("予約回数", parseJapaneseCount(visit[1])))
       continue
     }
     const cancel = line.match(/^キャンセル([0-9０-９]+)回$/)
@@ -1629,6 +1629,7 @@ function formatReservationHistoryDisplay(history: string, isTabelogRoute: boolea
   if (
     raw.includes("過去の予約") ||
     raw.includes("来店回数") ||
+    raw.includes("予約回数") ||
     raw.includes("キャンセル回数") ||
     raw.includes("来店") ||
     raw.includes("キャンセル")

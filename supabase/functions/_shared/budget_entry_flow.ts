@@ -15,8 +15,16 @@ const PENDING_TTL_MIN = 30
 const TRIGGER_WORDS = new Set(['予算登録', '予算入力', '予算設定'])
 const CANCEL_WORDS = new Set(['キャンセル', '中止', 'やめる', 'やめ', 'cancel', 'Cancel'])
 const MAX_BUDGET_YEN = 100_000_000_000 // 1000億上限（誤入力ガード）
+const OVERWRITE_WORDS = new Set(['上書き保存', '上書き', '上書きする', 'はい', 'OK', 'ok'])
 
-type Step = 'await_month' | 'await_amount'
+// 完了カードの注意喚起（月間総額のみ／次に管理画面で曜日重み・休日を登録／その意味）。
+const BUDGET_NOTICE_LINES = [
+  'いまLINEで登録したのは「月間の総予算額」だけです。',
+  '続けて管理画面（売上分析ページ）で、この月の【曜日ごとの重み付け】と【店休日・休前日／休日（天休日）】も登録してください。',
+  '〔なぜ必要か〕曜日の重みと休日を入れると、月間総額が日割りに正しく配分されます（例：金土・休前日は高め、定休日は0）。これで毎日の売上進捗・着地予測・中間／月末レポートが実態に合った数字になります。未設定だと毎日が均等割りのままで、目標がズレます。',
+]
+
+type Step = 'await_month' | 'await_amount' | 'await_overwrite_confirm'
 
 function conversationKey(roomId: string, userId: string | null): string {
   return `${roomId || '__unknown_room__'}::${userId || '__anonymous__'}`
@@ -115,6 +123,100 @@ async function clearPending(supabase: SupabaseClient, key: string): Promise<void
   } catch (_e) { /* noop */ }
 }
 
+// 既存予算/過去売上があるときの確認カード（「上書き保存」「キャンセル」の2ボタン）。
+function budgetConfirmFlex(title: string, lines: string[]): Record<string, unknown> {
+  return {
+    type: 'flex',
+    altText: title,
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'md',
+        contents: [
+          { type: 'text', text: title, weight: 'bold', size: 'lg', wrap: true, color: '#C2410C' },
+          ...lines.map((t) => ({ type: 'text', text: t, wrap: true, size: 'sm', color: '#444444' })),
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            height: 'sm',
+            color: '#1F8A4C',
+            action: { type: 'message', label: '上書き保存', text: '上書き保存' },
+          },
+          {
+            type: 'button',
+            style: 'secondary',
+            height: 'sm',
+            action: { type: 'message', label: 'キャンセル', text: 'キャンセル' },
+          },
+        ],
+      },
+    },
+  }
+}
+
+// 予算を line_sales_month_budgets に upsert し、pendingを消して完了カード（注意喚起＋OTP分析ボタン）を返す。
+async function commitBudgetAndReply(
+  supabase: SupabaseClient,
+  key: string,
+  budgetStoreKey: string,
+  urlStoreKey: string,
+  storeName: string,
+  targetMonth: string,
+  amount: number,
+  existed: boolean,
+  reply: (flex: Record<string, unknown>) => Promise<boolean>,
+): Promise<boolean> {
+  const nowIso = new Date().toISOString()
+  const { error } = await supabase.from(BUDGET_TABLE).upsert({
+    store_partition_key: budgetStoreKey,
+    target_month: targetMonth,
+    budget_yen: amount,
+    updated_at: nowIso,
+  }, { onConflict: 'store_partition_key,target_month' })
+  await clearPending(supabase, key)
+  if (error) {
+    return reply(budgetFlex('登録に失敗しました', [
+      '少し時間を置いて、もう一度「予算登録」からお願いします。',
+      `(${error.message.slice(0, 80)})`,
+    ], '#D14343'))
+  }
+  let dashboardUri = ''
+  try {
+    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+      source: 'line_budget_entry',
+      store_partition_key: budgetStoreKey,
+      target_month: targetMonth,
+    })
+    dashboardUri = buildReceiptAnalyticsDashboardUri(urlStoreKey, targetMonth, { loginToken: issued.token })
+  } catch (_e) {
+    try {
+      dashboardUri = buildReceiptAnalyticsDashboardUri(urlStoreKey, targetMonth)
+    } catch (_e2) {
+      dashboardUri = ''
+    }
+  }
+  const [yy, mo] = targetMonth.split('-')
+  return reply(budgetDoneFlex(
+    existed ? '✅ 予算を更新しました' : '✅ 予算を登録しました',
+    [
+      `店舗：${storeName}`,
+      `対象月：${Number(yy)}年${Number(mo)}月`,
+      `月間総予算：${formatYen(amount)}`,
+    ],
+    BUDGET_NOTICE_LINES,
+    dashboardUri,
+  ))
+}
+
 /**
  * テキストメッセージを予算登録フローとして処理する。
  * - 「予算登録」等のトリガー、または当人(room+user)に予算pendingがある時だけ作動。
@@ -140,11 +242,11 @@ export async function handleBudgetEntryTextMessage(
   const isTrigger = TRIGGER_WORDS.has(text)
 
   // 既存のpendingを読む（期限切れは破棄）。
-  let pending: { step: Step; target_month: string | null } | null = null
+  let pending: { step: Step; target_month: string | null; budget_yen: number | null } | null = null
   {
     const { data } = await supabase
       .from(PENDING_TABLE)
-      .select('step, target_month, expires_at')
+      .select('step, target_month, budget_yen, expires_at')
       .eq('conversation_key', key)
       .maybeSingle()
     if (data) {
@@ -152,11 +254,13 @@ export async function handleBudgetEntryTextMessage(
       if (exp && Date.parse(exp) <= Date.now()) {
         await clearPending(supabase, key)
       } else {
+        const rawBudget = (data as { budget_yen?: unknown }).budget_yen
         pending = {
           step: String((data as { step?: unknown }).step ?? '') as Step,
           target_month: (data as { target_month?: unknown }).target_month != null
             ? String((data as { target_month?: unknown }).target_month)
             : null,
+          budget_yen: rawBudget != null && Number.isFinite(Number(rawBudget)) ? Number(rawBudget) : null,
         }
       }
     }
@@ -276,69 +380,94 @@ export async function handleBudgetEntryTextMessage(
       return { handled: true, replied }
     }
 
-    // 既存有無（新規/更新の表示用）。
-    let existed = false
+    // 既存の予算 / 過去売上があるか確認（あれば「上書き保存／キャンセル」の確認を挟む）。
+    let existingBudget: number | null = null
     {
       const { data } = await supabase
         .from(BUDGET_TABLE)
-        .select('id')
+        .select('budget_yen')
         .eq('store_partition_key', budgetStoreKey)
         .eq('target_month', targetMonth)
         .maybeSingle()
-      existed = !!data
+      if (data && (data as { budget_yen?: unknown }).budget_yen != null) {
+        existingBudget = Number((data as { budget_yen?: unknown }).budget_yen)
+      }
     }
-
-    const nowIso = new Date().toISOString()
-    const { error } = await supabase.from(BUDGET_TABLE).upsert({
-      store_partition_key: budgetStoreKey,
-      target_month: targetMonth,
-      budget_yen: amount,
-      updated_at: nowIso,
-    }, { onConflict: 'store_partition_key,target_month' })
-
-    await clearPending(supabase, key)
-
-    if (error) {
-      const replied = await reply(budgetFlex('登録に失敗しました', [
-        '少し時間を置いて、もう一度「予算登録」からお願いします。',
-        `(${error.message.slice(0, 80)})`,
-      ], '#D14343'))
-      return { handled: true, replied }
+    let salesCount = 0
+    try {
+      const yNum = Number(targetMonth.slice(0, 4))
+      const mNum = Number(targetMonth.slice(5, 7))
+      const nextStart = mNum >= 12 ? `${yNum + 1}-01-01` : `${yNum}-${String(mNum + 1).padStart(2, '0')}-01`
+      const receiptTable = String(registry?.receipt_table ?? '').trim()
+      if (receiptTable) {
+        const { count } = await supabase
+          .from(receiptTable)
+          .select('id', { count: 'exact', head: true })
+          .gte('receipt_date', `${targetMonth}-01`)
+          .lt('receipt_date', nextStart)
+        salesCount = Number(count ?? 0)
+      }
+    } catch (_e) {
+      salesCount = 0
     }
 
     const [yy, mo] = targetMonth.split('-')
-
-    // その店舗の売上分析ページへのワンタイムログイン付きURL（失敗してもカードは返す）。
-    let dashboardUri = ''
-    try {
-      const issued = await issueAdminDashboardLoginLinkToken(supabase, {
-        source: 'line_budget_entry',
+    if (existingBudget != null || salesCount > 0) {
+      // 上書き確認を挟む（入力済みの金額を pending に保持）。
+      const nowIso = new Date().toISOString()
+      const expiresAt = new Date(Date.now() + PENDING_TTL_MIN * 60 * 1000).toISOString()
+      await supabase.from(PENDING_TABLE).upsert({
+        conversation_key: key,
+        room_id: roomId,
+        user_id: userId || null,
         store_partition_key: storeKey,
+        step: 'await_overwrite_confirm',
         target_month: targetMonth,
-      })
-      dashboardUri = buildReceiptAnalyticsDashboardUri(storeKey, targetMonth, { loginToken: issued.token })
-    } catch (_e) {
-      try {
-        dashboardUri = buildReceiptAnalyticsDashboardUri(storeKey, targetMonth)
-      } catch (_e2) {
-        dashboardUri = ''
-      }
+        budget_yen: amount,
+        expires_at: expiresAt,
+        updated_at: nowIso,
+      }, { onConflict: 'conversation_key' })
+      const lines: string[] = [`対象：${Number(yy)}年${Number(mo)}月（${storeName}）`]
+      if (existingBudget != null) lines.push(`・登録済みの予算：${formatYen(existingBudget)}`)
+      if (salesCount > 0) lines.push(`・この月の売上データ：${salesCount}件あり`)
+      lines.push(`・新しい予算：${formatYen(amount)}`)
+      lines.push('この内容で上書き保存しますか？（やめる場合は「キャンセル」）')
+      const replied = await reply(budgetConfirmFlex(
+        `⚠️ ${Number(yy)}年${Number(mo)}月 は既にデータがあります`,
+        lines,
+      ))
+      return { handled: true, replied }
     }
 
-    const noticeLines = [
-      'いまLINEで登録したのは「月間の総予算額」だけです。',
-      '続けて管理画面（売上分析ページ）で、この月の【曜日ごとの重み付け】と【店休日・休前日／休日（天休日）】も登録してください。',
-      '〔なぜ必要か〕曜日の重みと休日を入れると、月間総額が日割りに正しく配分されます（例：金土・休前日は高め、定休日は0）。これで毎日の売上進捗・着地予測・中間／月末レポートが実態に合った数字になります。未設定だと毎日が均等割りのままで、目標がズレます。',
-    ]
-    const replied = await reply(budgetDoneFlex(
-      existed ? '✅ 予算を更新しました' : '✅ 予算を登録しました',
-      [
-        `店舗：${storeName}`,
-        `対象月：${Number(yy)}年${Number(mo)}月`,
-        `月間総予算：${formatYen(amount)}`,
-      ],
-      noticeLines,
-      dashboardUri,
+    // 既存なし → そのまま確定。
+    const replied = await commitBudgetAndReply(
+      supabase, key, budgetStoreKey, storeKey, storeName, targetMonth, amount, false, reply,
+    )
+    return { handled: true, replied }
+  }
+
+  // 上書き確認待ち。
+  if (pending.step === 'await_overwrite_confirm') {
+    const targetMonth = String(pending.target_month ?? '')
+    const amount = Number(pending.budget_yen)
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth) || !Number.isFinite(amount) || amount <= 0) {
+      await clearPending(supabase, key)
+      const replied = await reply(budgetFlex('やり直してください', [
+        '「予算登録」と送ってもう一度お願いします。',
+      ], '#D14343'))
+      return { handled: true, replied }
+    }
+    if (OVERWRITE_WORDS.has(text)) {
+      const replied = await commitBudgetAndReply(
+        supabase, key, budgetStoreKey, storeKey, storeName, targetMonth, amount, true, reply,
+      )
+      return { handled: true, replied }
+    }
+    // 「キャンセル」は先頭の中止処理で拾う。それ以外（曖昧な入力）は再確認。
+    const [yy, mo] = targetMonth.split('-')
+    const replied = await reply(budgetConfirmFlex(
+      `⚠️ ${Number(yy)}年${Number(mo)}月 は既にデータがあります`,
+      [`新しい予算：${formatYen(amount)}`, '「上書き保存」か「キャンセル」を選んでください。'],
     ))
     return { handled: true, replied }
   }
