@@ -50,7 +50,7 @@ flowchart LR
 | Gmail 連携先の確認 | **hocbn**（jhpm ではない） | `GET /gmail/account` |
 | 売上分析 | hocbn | `/receipts/sales` など |
 
-設定の単一ソース: [`pages-config.js`](./pages-config.js) の `PROJECT_URL` / `GMAIL_SHARED_PROJECT_URL`（いずれも hocbn）。
+設定の単一ソース: [`pages-config.js`](../pages-config.js) の `PROJECT_URL` / `GMAIL_SHARED_PROJECT_URL`（いずれも hocbn）。
 
 ### 2.2 「Gmail連携先を確認」
 
@@ -169,7 +169,7 @@ cron が `no_target_rooms` でスキップされる場合は、**1件以上** �
 SECRET_BRIDGE_TOKEN=... node scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs
 ```
 
-スクリプト: [`scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs`](./scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs)
+スクリプト: [`scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs`](../scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs)
 
 ---
 

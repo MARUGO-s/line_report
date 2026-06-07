@@ -1,7 +1,7 @@
 # LINE-WINE Admin（レガシー）
 
 > **本リポジトリの本番 LINE レポート（レシート・検索・管理画面）** は別系統です。  
-> → [**README-PAGES.md**](./README-PAGES.md) ／ [**DOCS-INDEX.md**](./DOCS-INDEX.md)
+> → [**README-PAGES.md**](./docs/README-PAGES.md) ／ [**DOCS-INDEX.md**](./docs/DOCS-INDEX.md)
 
 ---
 

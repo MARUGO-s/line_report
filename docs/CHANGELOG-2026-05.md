@@ -16,7 +16,7 @@
 | [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md) | **⚠️ グループは Bot 1体のみ（退出の誤解・必読）** |
 | [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | **利用許可・ユーザー管理（セキュリティ強化）** |
 | [DOCS-INDEX.md](./DOCS-INDEX.md) | **全 MD の索引・用語集・矛盾防止** |
-| [pages-config.js](./pages-config.js) | 店舗キー・Webhook URL・表示名の単一ソース |
+| [pages-config.js](../pages-config.js) | 店舗キー・Webhook URL・表示名の単一ソース |
 
 ---
 
