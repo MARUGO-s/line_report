@@ -567,6 +567,7 @@ export function normalizeLineImageReservationAnalysis(
   }
   const date = normalizeReservationDateText(text(d.date ?? d.visit_date ?? d.reservation_date, 40))
   const time = normalizeReservationTimeText(text(d.time ?? d.visit_time ?? d.start_time, 40))
+  const bookingDate = normalizeReservationDateText(text(d.booking_date ?? d.registered_date ?? d.reservation_registered_date ?? d.created_date ?? d.order_date ?? d.reception_date ?? d.booked_at, 40))
   const partySize = text(d.party_size ?? d.party ?? d.guest_count ?? d.people ?? d.persons, 20)
   const customerName = text(d.customer_name ?? d.name ?? d.customer, 80)
   const customerPhone = text(d.customer_phone ?? d.phone ?? d.tel ?? d.telephone, 40)
@@ -574,9 +575,13 @@ export function normalizeLineImageReservationAnalysis(
   const storeName = text(d.store_name ?? d.shop_name ?? d.store, 90)
   const tableNo = text(d.table ?? d.table_no ?? d.seat ?? d.table_number, 40)
   const status = text(d.status ?? d.reservation_status ?? d.type, 40)
+  const allergy = text(d.allergy ?? d.allergies ?? d.allergy_info, 200)
+  const dislikes = text(d.dislikes ?? d.dislike ?? d.disliked_foods ?? d.hate ?? d.avoid, 200)
+  const anniversary = text(d.anniversary ?? d.birthday ?? d.celebration ?? d.occasion, 120)
+  const notes = text(d.notes ?? d.note ?? d.memo ?? d.remarks ?? d.request ?? d.requests ?? d.comment ?? d.special_request, 400)
   const hasAny = !!(date || time || partySize || customerName || customerPhone || course || storeName || tableNo)
   if (!hasAny) return null
-  return { date, time, partySize, customerName, customerPhone, course, storeName, tableNo, status }
+  return { date, time, bookingDate, partySize, customerName, customerPhone, course, storeName, tableNo, status, allergy, dislikes, anniversary, notes }
 }
 
 export function salvageLineImageAnalysisResultFromText(rawText: string): import('./receipt_types.ts').LineImageAnalysisResult | null {

@@ -16,6 +16,7 @@ export type LineImageReceiptAnalysis = {
 export type LineImageReservationAnalysis = {
   date: string | null        // 来店日 "YYYY-MM-DD"（解析後に正規化）
   time: string | null        // 来店開始時刻 "HH:MM"
+  bookingDate: string | null // 予約登録日（画面左上の日付＝予約を登録した日。来店日とは別）
   partySize: string | null   // 人数
   customerName: string | null
   customerPhone: string | null
@@ -23,6 +24,10 @@ export type LineImageReservationAnalysis = {
   storeName: string | null
   tableNo: string | null     // 卓番
   status: string | null      // 新規/変更/キャンセル 等
+  allergy: string | null     // アレルギー
+  dislikes: string | null    // 苦手/嫌いな食材
+  anniversary: string | null // 記念日/誕生日/バースデー/お祝い
+  notes: string | null       // その他メモ/備考/要望/特記事項
 }
 
 export type LineImageAnalysisResult = {

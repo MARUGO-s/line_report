@@ -277,6 +277,11 @@ function buildReservationImportDetailJson(r: LineImageReservationAnalysis): stri
   if (r.partySize) detail.partySize = r.partySize
   if (r.course) detail.plan = r.course
   if (r.tableNo) detail.table = r.tableNo
+  if (r.allergy) detail.allergy = r.allergy
+  if (r.dislikes) detail.dislikes = r.dislikes
+  if (r.anniversary) detail.anniversary = r.anniversary
+  if (r.notes) detail.notes = r.notes
+  if (r.bookingDate) detail.bookingDate = r.bookingDate
   if (r.date) detail.visitDateTime = `${r.date}${r.time ? ' ' + r.time : ''}`
   return JSON.stringify(detail)
 }
@@ -288,11 +293,16 @@ function reservationFieldRowsForFlex(
   const rows: Array<[string, string | null]> = [
     ['店舗', r.storeName],
     ['来店日時', visitAtIso ? `${r.date ?? ''}${r.time ? ' ' + r.time : ''}`.trim() : (r.date || null)],
+    ['予約登録日', r.bookingDate],
     ['予約者', r.customerName],
     ['電話', r.customerPhone],
     ['人数', r.partySize],
     ['コース', r.course],
     ['卓', r.tableNo],
+    ['アレルギー', r.allergy],
+    ['苦手・嫌い', r.dislikes],
+    ['記念日', r.anniversary],
+    ['メモ', r.notes],
   ]
   return rows
     .filter(([, v]) => v && String(v).trim())
@@ -388,7 +398,12 @@ async function handleReservationImageDetected(
       plan: reservation.course,
       store_name: reservation.storeName,
       table: reservation.tableNo,
+      booking_date: reservation.bookingDate,
       status: reservation.status,
+      allergy: reservation.allergy,
+      dislikes: reservation.dislikes,
+      anniversary: reservation.anniversary,
+      notes: reservation.notes,
       reservation_type: reservation.status || '予約',
       reservation_detail: buildReservationImportDetailJson(reservation),
       manual_store_key: storeKey || null,
@@ -442,10 +457,15 @@ function buildReservationRegisteredFlex(payload: Record<string, unknown>, visitA
   const rows: Array<[string, string | null]> = [
     ['店舗', str(payload.store_name)],
     ['来店日時', visitAtIso ? formatReservationVisitLabelJst(visitAtIso) : null],
+    ['予約登録日', str(payload.booking_date)],
     ['予約者', str(payload.customer_name)],
     ['電話', str(payload.customer_phone)],
     ['人数', str(payload.party_size)],
     ['コース', str(payload.plan)],
+    ['アレルギー', str(payload.allergy)],
+    ['苦手・嫌い', str(payload.dislikes)],
+    ['記念日', str(payload.anniversary)],
+    ['メモ', str(payload.notes)],
   ]
   const fieldBoxes = rows.filter(([, v]) => v).map(([label, v]) => ({
     type: 'box',
