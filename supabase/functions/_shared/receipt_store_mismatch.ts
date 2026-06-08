@@ -65,6 +65,7 @@ function kvRow(label: string, value: string, valueColor = '#1F1F1F') {
 
 export function buildReceiptStoreMismatchFlexReply(
   guidance: StoreMismatchGuidance,
+  pettyCashPendingId?: number | null,
 ): Record<string, unknown> {
   const { registeredStoreName, receipt, suggestedStore } = guidance
   const parsedStoreName = resolveDisplayedParsedStoreName(guidance)
@@ -97,6 +98,10 @@ export function buildReceiptStoreMismatchFlexReply(
       `解析結果の店舗「${parsedStoreName}」に対応するWebhookが見つかりませんでした。`,
     )
     guidanceLines.push('管理画面でWebhook設定を確認するか、正しい店舗のトークに送り直してください。')
+  }
+
+  if (pettyCashPendingId) {
+    guidanceLines.push('▼ この店舗の経費（仕入・備品など）の場合は、下の「経費（小口）として記録」で小口現金に記録できます。')
   }
 
   const altText = [
@@ -136,14 +141,23 @@ export function buildReceiptStoreMismatchFlexReply(
         type: 'box',
         layout: 'vertical',
         spacing: 'sm',
-        contents: [
-          {
+        contents: ([] as Record<string, unknown>[]).concat(
+          pettyCashPendingId
+            ? [{
+              type: 'button',
+              style: 'primary',
+              color: '#1a6fa8',
+              height: 'sm',
+              action: { type: 'postback', label: '経費（小口）として記録', data: `pcimp=${pettyCashPendingId}`, displayText: '経費（小口）として記録します' },
+            }]
+            : [],
+          [{
             type: 'button',
             style: 'secondary',
             height: 'sm',
             action: { type: 'message', label: '了解', text: '了解' },
-          },
-        ],
+          }],
+        ),
       },
     },
   }

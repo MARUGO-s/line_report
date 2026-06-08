@@ -15,7 +15,7 @@ import {
 } from '../_shared/receipt_duplicate.ts'
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
-import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback } from '../_shared/petty_cash_flow.ts'
+import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt } from '../_shared/petty_cash_flow.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   countExistingReceiptsForDates,
@@ -1177,7 +1177,17 @@ async function processReceiptImageEvent(
       }
     }
     if (receiptReplyToken) {
-      const flexMessage = buildReceiptStoreMismatchFlexReply(guidance)
+      // 店名不一致＝別店舗のレシート＝経費の可能性が高い。経費候補として pending を作り、
+      // 不一致カードに「経費（小口）として記録」ボタンを足す（「経費」と先打ちしなくてもOK）。
+      let pettyPendingId: number | null = null
+      try {
+        pettyPendingId = await savePettyCashPendingFromReceipt(supabase, registry, {
+          roomId, userId, lineMessageId, receipt,
+        })
+      } catch (e) {
+        console.error('savePettyCashPendingFromReceipt threw:', String(e))
+      }
+      const flexMessage = buildReceiptStoreMismatchFlexReply(guidance, pettyPendingId)
       await replyLineFlex(
         receiptReplyToken,
         flexMessage,

@@ -50,6 +50,24 @@ function todayYmdJst(): string {
   return `${j.getUTCFullYear()}-${String(j.getUTCMonth() + 1).padStart(2, '0')}-${String(j.getUTCDate()).padStart(2, '0')}`
 }
 
+// レシート解析結果 → 経費フィールド（出金額/税/日付/品目/仕入先）。金額不読は null。
+// 出金額=税込合計(grossSales)／無ければ 税抜(netSales)+税。税=taxAmount。
+function extractExpenseFromReceipt(
+  receipt: LineImageReceiptAnalysis | null,
+): { amount: number; tax: number; spentOn: string; item: string; supplier: string | null } | null {
+  const tax = parseYenToInt(receipt?.taxAmount) ?? 0
+  const gross = parseYenToInt(receipt?.grossSales)
+  const net = parseYenToInt(receipt?.netSales)
+  const amount = gross != null ? gross : (net != null ? net + tax : null)
+  if (amount == null || amount <= 0) return null
+  const safeTax = Math.min(tax, amount)
+  const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
+  const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
+  const items = Array.isArray(receipt?.items) ? receipt!.items.filter((s) => s && String(s).trim()) : []
+  const item = items.length ? items.slice(0, 3).join('・').slice(0, 200) : (supplier || '経費')
+  return { amount, tax: safeTax, spentOn, item, supplier }
+}
+
 function textMessage(text: string): Record<string, unknown> {
   return { type: 'text', text }
 }
@@ -282,38 +300,67 @@ export async function handlePettyCashImageIfPending(
   }
   const pendingId = Number((data as { id?: unknown }).id ?? 0)
 
-  // 抽出: 出金額=税込合計(grossSales)。無ければ 税抜(netSales)+税。税=taxAmount。
-  const tax = parseYenToInt(receipt?.taxAmount) ?? 0
-  const gross = parseYenToInt(receipt?.grossSales)
-  const net = parseYenToInt(receipt?.netSales)
-  const amount = gross != null ? gross : (net != null ? net + tax : null)
-  const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
-  const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
-  const items = Array.isArray(receipt?.items) ? receipt!.items.filter((s) => s && String(s).trim()) : []
-  const item = items.length ? items.slice(0, 3).join('・').slice(0, 200) : (supplier || '経費')
-
-  if (amount == null || amount <= 0) {
+  const ex = extractExpenseFromReceipt(receipt)
+  if (!ex) {
     await clearPending(supabase, key)
     const replied = await sendReply(replyToken, [simpleNoticeFlex('レシートの金額を読み取れませんでした。お手数ですが小口現金ページから手入力してください。')], storeKey, roomId)
     return { handled: true, replied, saved: false, reason: 'petty_cash_amount_unreadable' }
   }
-  const safeTax = Math.min(tax, amount)
 
   await supabase.from(PENDING_TABLE).update({
     status: 'await_confirm',
     line_message_id: lineMessageId,
-    spent_on: spentOn,
-    item,
-    amount_yen: amount,
-    tax_yen: safeTax,
-    store_name: supplier,
+    spent_on: ex.spentOn,
+    item: ex.item,
+    amount_yen: ex.amount,
+    tax_yen: ex.tax,
+    store_name: ex.supplier,
     updated_at: new Date().toISOString(),
   }).eq('id', pendingId)
 
   const replied = await sendReply(replyToken, [confirmFlex(pendingId, {
-    storeDisplayName: storeName, spentOn, item, amount, tax: safeTax, supplier,
+    storeDisplayName: storeName, spentOn: ex.spentOn, item: ex.item, amount: ex.amount, tax: ex.tax, supplier: ex.supplier,
   })], storeKey, roomId)
   return { handled: true, replied, saved: false, reason: 'petty_cash_confirm_card' }
+}
+
+// 店名不一致などで売上登録されなかったレシートを「経費候補」として pending(await_confirm) に保存し、
+// 確認ボタン用の pendingId を返す（金額不読なら null＝ボタンを出さない）。
+// これで「経費」と先に打たなくても、画像→不一致カードの「経費として記録」ボタンで小口記録できる。
+export async function savePettyCashPendingFromReceipt(
+  supabase: SupabaseClient,
+  registry: StoreRegistryRow,
+  args: { roomId: string; userId: string | null; lineMessageId: string; receipt: LineImageReceiptAnalysis | null },
+): Promise<number | null> {
+  const { roomId, userId, lineMessageId, receipt } = args
+  const ex = extractExpenseFromReceipt(receipt)
+  if (!ex) return null
+  const storeKey = String(registry.store_partition_key ?? '').trim()
+  const key = conversationKey(roomId, userId)
+  const nowIso = new Date().toISOString()
+  const expiresAt = new Date(Date.now() + PENDING_TTL_MIN * 60 * 1000).toISOString()
+  const { data, error } = await supabase.from(PENDING_TABLE).upsert({
+    conversation_key: key,
+    room_id: roomId,
+    user_id: userId || null,
+    store_partition_key: storeKey || null,
+    status: 'await_confirm',
+    line_message_id: lineMessageId,
+    spent_on: ex.spentOn,
+    item: ex.item,
+    amount_yen: ex.amount,
+    tax_yen: ex.tax,
+    handler: null,
+    store_name: ex.supplier,
+    category: null,
+    expires_at: expiresAt,
+    updated_at: nowIso,
+  }, { onConflict: 'conversation_key' }).select('id').single()
+  if (error) {
+    console.error('savePettyCashPendingFromReceipt failed:', error.message)
+    return null
+  }
+  return Number((data as { id?: number } | null)?.id ?? 0) || null
 }
 
 // 確認カードの postback（pcimp=<id> 記録 / pcimp_skip=<id> 破棄）。返信用 Flex を返す。
