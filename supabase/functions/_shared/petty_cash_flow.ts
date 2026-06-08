@@ -63,8 +63,9 @@ function extractExpenseFromReceipt(
   const safeTax = Math.min(tax, amount)
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
   const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
-  const items = Array.isArray(receipt?.items) ? receipt!.items.filter((s) => s && String(s).trim()) : []
-  const item = items.length ? items.slice(0, 3).join('・').slice(0, 200) : (supplier || '経費')
+  const items = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
+  // 複数項目は「1行1項目（・付き）」で見やすく。LINEカードは \n を改行表示、Web表は white-space:pre-line で対応。
+  const item = items.length > 1 ? items.map((s) => '・' + s).join('\n') : (items[0] || supplier || '経費')
   return { amount, tax: safeTax, spentOn, item, supplier }
 }
 
@@ -363,12 +364,19 @@ export async function savePettyCashPendingFromReceipt(
   return Number((data as { id?: number } | null)?.id ?? 0) || null
 }
 
-// 確認カードの postback（pcimp=<id> 記録 / pcimp_skip=<id> 破棄）。返信用 Flex を返す。
+// 確認カードの postback。
+//   pcreview=<id>   … 解析結果の確認カードを表示（記録しない）。不一致カードの「経費として記録」から来る。
+//   pcimp=<id>      … この内容で記録（petty_cash_entries へ）
+//   pcimp_skip=<id> … 破棄
 export async function handlePettyCashPostback(
   supabase: SupabaseClient,
+  registry: StoreRegistryRow,
   postbackData: string,
 ): Promise<Record<string, unknown> | null> {
+  const isReview = postbackData.startsWith('pcreview=')
   const isRecord = postbackData.startsWith('pcimp=')
+  const isSkip = postbackData.startsWith('pcimp_skip=')
+  if (!isReview && !isRecord && !isSkip) return null
   const id = Number(postbackData.split('=')[1] ?? '')
   if (!Number.isInteger(id) || id <= 0) return null
 
@@ -381,13 +389,28 @@ export async function handlePettyCashPostback(
   const p = pending as PendingRow
 
   if (p.status === 'recorded') return simpleNoticeFlex('この経費はすでに記録済みです。')
-  if (p.status !== 'await_confirm') return simpleNoticeFlex('この経費は無効です。「経費」と送ってやり直してください。')
+  if (p.status !== 'await_confirm') return simpleNoticeFlex('この経費は無効です。レシートを送り直すか「経費」と送ってやり直してください。')
 
-  if (!isRecord) {
+  // 解析結果の確認カードを表示（記録はしない）。
+  if (isReview) {
+    const storeName = String(registry.display_name ?? '').trim() || String(p.store_partition_key ?? '')
+    return confirmFlex(p.id, {
+      storeDisplayName: storeName,
+      spentOn: p.spent_on ?? '',
+      item: p.item,
+      amount: Math.max(0, Math.floor(Number(p.amount_yen ?? 0))),
+      tax: Math.max(0, Math.floor(Number(p.tax_yen ?? 0))),
+      supplier: p.store_name,
+    })
+  }
+
+  // 破棄
+  if (isSkip) {
     await supabase.from(PENDING_TABLE).update({ status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', id)
     return simpleNoticeFlex('経費の記録を取りやめました。')
   }
 
+  // 記録（pcimp）
   const amount = Math.max(0, Math.floor(Number(p.amount_yen ?? 0)))
   const tax = Math.min(amount, Math.max(0, Math.floor(Number(p.tax_yen ?? 0))))
   if (!p.store_partition_key || !p.spent_on || amount <= 0) {

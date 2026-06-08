@@ -1658,9 +1658,9 @@ Deno.serve(async (req) => {
       }
 
       // 小口現金（経費）確認カードの postback（pcimp=記録 / pcimp_skip=破棄）
-      if ((postbackData.startsWith('pcimp=') || postbackData.startsWith('pcimp_skip=')) && postbackReplyToken) {
+      if ((postbackData.startsWith('pcimp=') || postbackData.startsWith('pcimp_skip=') || postbackData.startsWith('pcreview=')) && postbackReplyToken) {
         try {
-          const pettyReply = await handlePettyCashPostback(supabase, postbackData)
+          const pettyReply = await handlePettyCashPostback(supabase, registry as StoreRegistryRow, postbackData)
           if (pettyReply) {
             await replyLineFlex(
               postbackReplyToken,

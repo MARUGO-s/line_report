@@ -148,7 +148,7 @@ export function buildReceiptStoreMismatchFlexReply(
               style: 'primary',
               color: '#1a6fa8',
               height: 'sm',
-              action: { type: 'postback', label: '経費（小口）として記録', data: `pcimp=${pettyCashPendingId}`, displayText: '経費（小口）として記録します' },
+              action: { type: 'postback', label: '経費（小口）として記録', data: `pcreview=${pettyCashPendingId}`, displayText: '経費（小口）として記録します' },
             }]
             : [],
           [{
