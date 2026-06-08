@@ -15,6 +15,7 @@ import {
 } from '../_shared/receipt_duplicate.ts'
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
+import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback } from '../_shared/petty_cash_flow.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   countExistingReceiptsForDates,
@@ -1043,6 +1044,24 @@ async function processReceiptImageEvent(
   // 店舗プロンプト（例: マルゴオット）が、期間/日付範囲を含む集計レポートの summary に
   // 「期間集計レポート」等のマーカーを入れることで判定する。
   const analyzedSummaryText = String(analyzed.analysis?.summary ?? '')
+
+  // 小口現金（経費）取込: 直前に「経費」と送られ画像待ちなら、この画像を経費として記録する（売上に登録しない）。
+  // 明示トリガー時のみ作動。pending が無ければフォールスルーして従来のレシート/予約処理へ。
+  {
+    const pettyUserId = event.source?.userId ? String(event.source.userId) : null
+    const pettyResult = await handlePettyCashImageIfPending(supabase, registry, {
+      roomId,
+      userId: pettyUserId,
+      replyToken: rawReplyToken,
+      lineMessageId,
+      receipt: analyzed.analysis?.receipt ?? null,
+      summary: analyzedSummaryText,
+    })
+    if (pettyResult.handled) {
+      return { saved: !!pettyResult.saved, replied: !!pettyResult.replied, reason: pettyResult.reason ?? 'petty_cash_image' }
+    }
+  }
+
   if (/期間集計|日付範囲|GP（グループ）|ＧＰ（グループ）|［期間］|\[期間\]/.test(analyzedSummaryText)) {
     // 売上には登録しないが、「これは日々の売上ではないので登録していません」の通知を返信する。
     // 重要: この通知は receiptReplyToken を使う。
@@ -1628,6 +1647,27 @@ Deno.serve(async (req) => {
         }
       }
 
+      // 小口現金（経費）確認カードの postback（pcimp=記録 / pcimp_skip=破棄）
+      if ((postbackData.startsWith('pcimp=') || postbackData.startsWith('pcimp_skip=')) && postbackReplyToken) {
+        try {
+          const pettyReply = await handlePettyCashPostback(supabase, postbackData)
+          if (pettyReply) {
+            await replyLineFlex(
+              postbackReplyToken,
+              pettyReply,
+              lineAccessTokenForSearch,
+              webhookReplyLog(registry as StoreRegistryRow, eventRoomIdForPostback ?? '', 'petty_cash_import_result'),
+            )
+            receiptReplies += 1
+          }
+          continue
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('handlePettyCashPostback failed:', msg)
+          errors.push(msg.slice(0, 160))
+        }
+      }
+
       // 日次売上Excel取込の確認カード postback（dsimp=登録/置き換え, dsimp_skip=中止）
       if ((postbackData.startsWith('dsimp=') || postbackData.startsWith('dsimp_skip=')) && postbackReplyToken) {
         try {
@@ -1693,6 +1733,26 @@ Deno.serve(async (req) => {
         }
       }
 
+      // 小口現金（経費）取込フロー（独立・他に干渉しない）。「経費」or 経費pending中の「キャンセル」のみ作動。
+      let pettyCashHandled = false
+      if (!budgetEntryHandled && text && eventRoomId && eventUserId) {
+        try {
+          const pettyResult = await handlePettyCashTextMessage(supabase, registry as StoreRegistryRow, {
+            roomId: eventRoomId,
+            userId: eventUserId,
+            replyToken: String(event.replyToken ?? ''),
+            text,
+          })
+          if (pettyResult.handled) {
+            pettyCashHandled = true
+            textHandled += 1
+            if (pettyResult.replied) receiptReplies += 1
+          }
+        } catch (err) {
+          console.error('petty_cash_flow text failed:', err instanceof Error ? err.message : String(err))
+        }
+      }
+
       if (text && eventRoomId && eventUserId) {
         if (isDirectMessage) {
           // 1対1: 検索待ちのキーワード1通のみ記録しない（「検索」等の操作トークは記録する）
@@ -1718,7 +1778,7 @@ Deno.serve(async (req) => {
       }
 
       let receiptHandled = false
-      if (!budgetEntryHandled) try {
+      if (!budgetEntryHandled && !pettyCashHandled) try {
         // レシート操作の返信（重複確認 加算/中止/置き換え・修正・削除の結果）は AI返信完全無しの対象外。
         // 「レシートの解析結果を送信」または「レシート修正の返信を許可」の両方OFFのときだけ抑止する。
         const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, suppressReceiptReply && !allowCorrectionReply)
@@ -1731,7 +1791,7 @@ Deno.serve(async (req) => {
         errors.push(msg.slice(0, 160))
       }
 
-      if (!budgetEntryHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
+      if (!budgetEntryHandled && !pettyCashHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
         try {
           const searchResult = await handleLineSearchTextMessage(
             supabase,
