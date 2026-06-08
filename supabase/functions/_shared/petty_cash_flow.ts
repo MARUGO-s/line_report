@@ -58,7 +58,13 @@ function extractExpenseFromReceipt(
   const tax = parseYenToInt(receipt?.taxAmount) ?? 0
   const gross = parseYenToInt(receipt?.grossSales)
   const net = parseYenToInt(receipt?.netSales)
-  const amount = gross != null ? gross : (net != null ? net + tax : null)
+  // 出金額の決定（誤読対策）:
+  //  外税レシートでは「合計」が「お預り（現金）」と混同され過大に読まれることがある
+  //  （例: 合計¥591 / お預り¥1,000 → 誤って¥1,080）。商品ごとに明細がある
+  //  「小計(net)＋外税(tax)」が最も信頼できるため最優先。次に合計、最後に小計。
+  let amount: number | null = null
+  if (net != null && net > 0) amount = net + tax
+  else if (gross != null && gross > 0) amount = gross
   if (amount == null || amount <= 0) return null
   const safeTax = Math.min(tax, amount)
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
