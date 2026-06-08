@@ -458,6 +458,24 @@ Deno.serve(async (req) => {
       return json(result, 200)
     }
 
+    // ── 小口現金（出金/経費）台帳: 一覧+月集計 / 追加(手入力) / 論理削除 ──
+    if (req.method === "GET" && path === "/petty-cash") {
+      const state = await fetchPettyCashState(supabase, url)
+      return json(state, 200)
+    }
+    if (req.method === "POST" && path === "/petty-cash") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await createPettyCashEntry(supabase, body)
+      return json(result, 200)
+    }
+    if (req.method === "DELETE" && path === "/petty-cash") {
+      const result = await deletePettyCashEntry(supabase, url)
+      return json(result, 200)
+    }
+
     if (req.method === "GET" && path === "/messages/search") {
       const messageSearchState = await fetchLineRoomMessageSearchState(supabase, url)
       return json(messageSearchState, 200)
@@ -2784,6 +2802,121 @@ async function deleteReservationEvent(
     throw { status: 500, message: `Failed to delete reservation: ${error.message}` } satisfies AppError
   }
   return { ok: true, source, id, deleted: true }
+}
+
+// ── 小口現金（出金/経費）台帳 ──
+const PETTY_CASH_CATEGORIES = ["消耗品費", "食材・仕入", "雑費", "衛生用品", "修繕費", "その他"] as const
+
+// 一覧（店舗・月で絞り込み）＋ 月合計・勘定科目別合計を返す。
+async function fetchPettyCashState(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = toSafeString(url.searchParams.get("store")).trim()
+  const month = toSafeString(url.searchParams.get("month")).trim() // "YYYY-MM"（任意）
+  const monthValid = /^\d{4}-\d{2}$/.test(month)
+
+  let query = supabase
+    .from("petty_cash_entries")
+    .select("id, store_partition_key, spent_on, item, category, amount_yen, handler, source, note, created_at")
+    .eq("hidden", false)
+    .order("spent_on", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(3000)
+  if (storeKey) query = query.eq("store_partition_key", storeKey)
+  if (monthValid) {
+    const [y, m] = month.split("-").map((n) => Number(n))
+    const start = `${month}-01`
+    const endY = m === 12 ? y + 1 : y
+    const endM = m === 12 ? 1 : m + 1
+    const end = `${endY}-${String(endM).padStart(2, "0")}-01`
+    query = query.gte("spent_on", start).lt("spent_on", end)
+  }
+
+  const { data, error } = await query
+  if (error) {
+    throw { status: 500, message: `Failed to load petty cash: ${error.message}` } satisfies AppError
+  }
+  const rows = Array.isArray(data) ? data : []
+
+  let total = 0
+  const byCategory = new Map<string, number>()
+  for (const r of rows) {
+    const amt = Math.max(0, Math.floor(Number((r as { amount_yen?: unknown }).amount_yen ?? 0)))
+    total += amt
+    const cat = toSafeString((r as { category?: unknown }).category) || "未分類"
+    byCategory.set(cat, (byCategory.get(cat) ?? 0) + amt)
+  }
+
+  return {
+    ok: true,
+    store_key: storeKey || null,
+    month: monthValid ? month : null,
+    categories: PETTY_CASH_CATEGORIES,
+    entries: rows,
+    total_yen: total,
+    by_category: [...byCategory.entries()]
+      .map(([category, amount_yen]) => ({ category, amount_yen }))
+      .sort((a, b) => b.amount_yen - a.amount_yen),
+    count: rows.length,
+  }
+}
+
+// 追加（手入力）。
+async function createPettyCashEntry(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const storeKey = toSafeString(body.store_partition_key).trim()
+  if (!storeKey) {
+    throw { status: 400, message: "store_partition_key is required." } satisfies AppError
+  }
+  const spentOn = toSafeString(body.spent_on).trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(spentOn)) {
+    throw { status: 400, message: "spent_on must be YYYY-MM-DD." } satisfies AppError
+  }
+  const amount = Math.floor(Number(body.amount_yen))
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw { status: 400, message: "amount_yen must be a non-negative number." } satisfies AppError
+  }
+  const insertRow = {
+    store_partition_key: storeKey,
+    spent_on: spentOn,
+    item: toSafeString(body.item) || null,
+    category: toSafeString(body.category) || null,
+    amount_yen: amount,
+    handler: toSafeString(body.handler) || null,
+    note: toSafeString(body.note) || null,
+    source: "manual",
+  }
+  const { data, error } = await supabase
+    .from("petty_cash_entries")
+    .insert(insertRow)
+    .select("id")
+    .single()
+  if (error) {
+    throw { status: 500, message: `Failed to create petty cash entry: ${error.message}` } satisfies AppError
+  }
+  return { ok: true, id: (data as { id?: number } | null)?.id ?? null }
+}
+
+// 論理削除（hidden=true）。
+async function deletePettyCashEntry(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const id = Number(url.searchParams.get("id"))
+  if (!Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const { error } = await supabase
+    .from("petty_cash_entries")
+    .update({ hidden: true, updated_at: new Date().toISOString() })
+    .eq("id", id)
+  if (error) {
+    throw { status: 500, message: `Failed to delete petty cash entry: ${error.message}` } satisfies AppError
+  }
+  return { ok: true, id, deleted: true }
 }
 
 function normalizeBudgetStoreKey(raw: string): string {

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'" />
+  <title>小口現金（出金・経費）</title>
+  <style>
+    :root {
+      --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --border: #e2e6ea;
+      --text: #1d2733; --text-2: #5b6573; --text-3: #8a96a3;
+      --accent: #1a6fa8; --accent-soft: #e7f1f8; --danger: #c0392b; --ok: #1a7f37;
+      --shadow: 0 1px 3px rgba(20,30,45,.07), 0 6px 18px rgba(20,30,45,.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+      font-size: 14px; line-height: 1.5; -webkit-text-size-adjust: 100%;
+    }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 18px 14px 60px; }
+    header.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+    header.top h1 { font-size: 20px; margin: 0; font-weight: 800; letter-spacing: .02em; }
+    header.top .sub { color: var(--text-3); font-size: 12px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 16px; margin-top: 14px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 11px; color: var(--text-3); font-weight: 700; }
+    input, select, button { font: inherit; }
+    input, select {
+      border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; background: var(--surface);
+      color: var(--text); min-width: 0;
+    }
+    input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+    .btn { border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 9px; padding: 9px 16px; font-weight: 700; cursor: pointer; }
+    .btn:hover { filter: brightness(1.05); }
+    .btn.ghost { background: var(--surface); color: var(--accent); }
+    .btn.sm { padding: 5px 10px; font-size: 12px; }
+    .btn.danger { border-color: var(--danger); background: var(--surface); color: var(--danger); }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .toolbar .grow { flex: 1; }
+    .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; font-weight: 700; }
+    .badge.ok { background: #e6f4ea; color: var(--ok); }
+    .badge.ng { background: #fdecea; color: var(--danger); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { font-size: 11px; color: var(--text-3); font-weight: 700; background: var(--surface-2); position: sticky; top: 0; }
+    td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
+    td.item { white-space: normal; min-width: 160px; }
+    .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); }
+    .tag.store { background: var(--accent-soft); color: var(--accent); }
+    .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-height: 62vh; overflow-y: auto; border-radius: 10px; border: 1px solid var(--border); }
+    .summary { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .total { font-size: 22px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+    .catchip { font-size: 12px; padding: 5px 11px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); }
+    .catchip b { color: var(--text); margin-left: 5px; font-variant-numeric: tabular-nums; }
+    .muted { color: var(--text-3); }
+    .empty { text-align: center; padding: 30px 10px; color: var(--text-3); }
+    .msg { font-size: 12px; min-height: 16px; }
+    .msg.err { color: var(--danger); }
+    .msg.ok { color: var(--ok); }
+    #authCard input { width: 260px; max-width: 60vw; }
+    @media (max-width: 640px) {
+      .field.grow-m { flex: 1 1 100%; }
+      header.top h1 { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <h1>小口現金 <span class="muted" style="font-weight:700;font-size:14px;">出金・経費</span></h1>
+      <span class="sub">レジ出金・経費の記録と月集計（売上・予約とは別管理）</span>
+    </header>
+
+    <!-- 認証カード（未ログイン時のみ表示） -->
+    <div class="card" id="authCard" style="display:none;">
+      <div class="field" style="max-width:520px;">
+        <label>管理トークン（本部）／またはLINEの最新リンクから開いてください</label>
+        <div class="toolbar">
+          <input id="tokenInput" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" />
+          <button class="btn" id="saveTokenBtn" type="button">接続</button>
+        </div>
+        <div class="msg err" id="authMsg"></div>
+      </div>
+    </div>
+
+    <!-- 操作バー -->
+    <div class="card">
+      <div class="toolbar">
+        <div class="field">
+          <label>店舗</label>
+          <select id="storeSel"></select>
+        </div>
+        <div class="field">
+          <label>対象月</label>
+          <input id="monthInput" type="month" />
+        </div>
+        <button class="btn ghost sm" id="reloadBtn" type="button">再読込</button>
+        <div class="grow"></div>
+        <span class="badge ng" id="authBadge">未接続</span>
+      </div>
+    </div>
+
+    <!-- 入力フォーム -->
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label>出金日</label>
+          <input id="fDate" type="date" />
+        </div>
+        <div class="field grow-m" style="flex:1;min-width:160px;">
+          <label>品目 / 摘要</label>
+          <input id="fItem" type="text" placeholder="例: おろし生姜・トマトソース 等" />
+        </div>
+        <div class="field">
+          <label>勘定科目</label>
+          <input id="fCategory" type="text" list="catList" placeholder="消耗品費 等" />
+          <datalist id="catList"></datalist>
+        </div>
+        <div class="field">
+          <label>出金額（円）</label>
+          <input id="fAmount" type="number" min="0" step="1" inputmode="numeric" placeholder="591" style="width:120px;" />
+        </div>
+        <div class="field">
+          <label>取扱者</label>
+          <input id="fHandler" type="text" placeholder="例: Y.MIYANO" style="width:130px;" />
+        </div>
+        <button class="btn" id="addBtn" type="button">追加</button>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <div class="field" style="flex:1;">
+          <label>メモ（任意）</label>
+          <input id="fNote" type="text" placeholder="補足があれば" />
+        </div>
+      </div>
+      <div class="msg ok" id="addMsg" style="margin-top:8px;"></div>
+    </div>
+
+    <!-- 月集計 -->
+    <div class="card">
+      <div class="summary">
+        <div>
+          <div class="muted" style="font-size:11px;font-weight:700;">月合計（出金）</div>
+          <div class="total" id="totalYen">¥0</div>
+        </div>
+        <div style="flex:1;"></div>
+        <div class="summary" id="byCategory"></div>
+      </div>
+    </div>
+
+    <!-- 小口表 -->
+    <div class="card">
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr id="theadRow">
+              <th>日付</th>
+              <th>品目 / 摘要</th>
+              <th>勘定科目</th>
+              <th class="amt">出金額</th>
+              <th>取扱者</th>
+              <th class="colStore">店舗</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="emptyState" style="display:none;">この月の記録はありません。上のフォームから追加できます。</div>
+    </div>
+  </div>
+
+  <script src="pages-config.js?v=20260608"></script>
+  <script src="auth-session.js"></script>
+  <script>
+  'use strict';
+  (function () {
+    const PAGES = window.LINE_REPORT_PAGES;
+    const AUTH = window.LINE_REPORT_AUTH;
+    const STORE_NAMES = (PAGES && PAGES.STORE_NAMES) || {};
+    const DEFAULT_CATEGORIES = ['消耗品費', '食材・仕入', '雑費', '衛生用品', '修繕費', 'その他'];
+    const LS_STORE = 'petty_cash_last_store';
+    const LS_MONTH = 'petty_cash_last_month';
+
+    const $ = (id) => document.getElementById(id);
+    const dom = {
+      authCard: $('authCard'), tokenInput: $('tokenInput'), saveTokenBtn: $('saveTokenBtn'), authMsg: $('authMsg'),
+      storeSel: $('storeSel'), monthInput: $('monthInput'), reloadBtn: $('reloadBtn'), authBadge: $('authBadge'),
+      fDate: $('fDate'), fItem: $('fItem'), fCategory: $('fCategory'), fAmount: $('fAmount'),
+      fHandler: $('fHandler'), fNote: $('fNote'), addBtn: $('addBtn'), addMsg: $('addMsg'), catList: $('catList'),
+      totalYen: $('totalYen'), byCategory: $('byCategory'), tbody: $('tbody'),
+      emptyState: $('emptyState'), colStoreHead: document.querySelector('#theadRow .colStore'),
+    };
+
+    const yen = (n) => '¥' + Number(n || 0).toLocaleString('ja-JP');
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const storeName = (key) => STORE_NAMES[key] || (PAGES && PAGES.resolveStoreName ? PAGES.resolveStoreName(key, '') : '') || key || '';
+
+    function getToken() { return AUTH ? AUTH.getToken() : (localStorage.getItem('line_summary_admin_token') || ''); }
+    function lockedStore() {
+      try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch (_) { return ''; }
+    }
+    function isLineEntry() {
+      try { return new URLSearchParams(location.search).get('from') === 'line' || !!lockedStore(); } catch (_) { return false; }
+    }
+
+    function setAuthBadge(ok) {
+      dom.authBadge.textContent = ok ? '接続済み' : '未接続';
+      dom.authBadge.className = 'badge ' + (ok ? 'ok' : 'ng');
+      dom.authCard.style.display = ok ? 'none' : '';
+    }
+
+    async function apiFetch(path, opts) {
+      const url = PAGES.receiptAdminApiUrl(path);
+      const headers = Object.assign({ 'x-admin-token': getToken() }, (opts && opts.headers) || {});
+      let res;
+      try {
+        res = await fetch(url, Object.assign({}, opts, { headers }));
+      } catch (e) {
+        throw new Error('通信に失敗しました（ネットワーク/接続先）。');
+      }
+      if (res.status === 401 || res.status === 403) { setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
+      return body;
+    }
+
+    function populateStores() {
+      const locked = lockedStore();
+      const keys = Object.keys(STORE_NAMES).sort((a, b) => storeName(a).localeCompare(storeName(b), 'ja'));
+      const opts = [];
+      if (!locked) opts.push('<option value="">全店舗</option>');
+      for (const k of keys) {
+        if (locked && k !== locked) continue;
+        opts.push('<option value="' + esc(k) + '">' + esc(storeName(k)) + '</option>');
+      }
+      dom.storeSel.innerHTML = opts.join('');
+      const saved = (() => { try { return localStorage.getItem(LS_STORE) || ''; } catch (_) { return ''; } })();
+      dom.storeSel.value = locked || saved || '';
+      if (locked) dom.storeSel.disabled = true;
+    }
+
+    function populateCategories(cats) {
+      const list = (Array.isArray(cats) && cats.length) ? cats : DEFAULT_CATEGORIES;
+      dom.catList.innerHTML = list.map((c) => '<option value="' + esc(c) + '"></option>').join('');
+    }
+
+    function currentMonth() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+    function todayStr() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    function renderSummary(data) {
+      dom.totalYen.textContent = yen(data.total_yen);
+      const by = Array.isArray(data.by_category) ? data.by_category : [];
+      dom.byCategory.innerHTML = by.length
+        ? by.map((c) => '<span class="catchip">' + esc(c.category) + '<b>' + yen(c.amount_yen) + '</b></span>').join('')
+        : '<span class="muted" style="font-size:12px;">—</span>';
+    }
+
+    function renderTable(data) {
+      const showStore = !dom.storeSel.value; // 全店舗のとき店舗列を表示
+      dom.colStoreHead.style.display = showStore ? '' : 'none';
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      if (!entries.length) {
+        dom.tbody.innerHTML = '';
+        dom.emptyState.style.display = '';
+        return;
+      }
+      dom.emptyState.style.display = 'none';
+      dom.tbody.innerHTML = entries.map((e) => {
+        const src = e.source === 'line_image' ? ' <span class="tag">LINE</span>' : '';
+        const storeCell = showStore ? '<td><span class="tag store">' + esc(storeName(e.store_partition_key)) + '</span></td>' : '';
+        return '<tr>'
+          + '<td>' + esc(e.spent_on || '') + '</td>'
+          + '<td class="item">' + esc(e.item || '') + (e.note ? ' <span class="muted">（' + esc(e.note) + '）</span>' : '') + src + '</td>'
+          + '<td>' + (e.category ? '<span class="tag">' + esc(e.category) + '</span>' : '<span class="muted">未分類</span>') + '</td>'
+          + '<td class="amt">' + yen(e.amount_yen) + '</td>'
+          + '<td>' + esc(e.handler || '') + '</td>'
+          + storeCell
+          + '<td><button class="btn danger sm" data-del="' + esc(e.id) + '" type="button">削除</button></td>'
+          + '</tr>';
+      }).join('');
+    }
+
+    async function loadEntries() {
+      if (!getToken()) { setAuthBadge(false); return; }
+      const store = dom.storeSel.value;
+      const month = dom.monthInput.value;
+      try { localStorage.setItem(LS_STORE, store); localStorage.setItem(LS_MONTH, month); } catch (_) {}
+      const qs = new URLSearchParams();
+      if (store) qs.set('store', store);
+      if (month) qs.set('month', month);
+      try {
+        const data = await apiFetch('/petty-cash?' + qs.toString());
+        setAuthBadge(true);
+        populateCategories(data.categories);
+        renderSummary(data);
+        renderTable(data);
+      } catch (e) {
+        dom.addMsg.className = 'msg err';
+        dom.addMsg.textContent = e.message || String(e);
+      }
+    }
+
+    async function addEntry() {
+      const store = dom.storeSel.value || lockedStore();
+      if (!store) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '店舗を選択してください（全店舗のままでは追加できません）。'; return; }
+      const spent_on = dom.fDate.value;
+      const amount = Number(dom.fAmount.value);
+      if (!spent_on) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '出金日を入力してください。'; return; }
+      if (!Number.isFinite(amount) || amount < 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '出金額を正しく入力してください。'; return; }
+      dom.addBtn.disabled = true;
+      try {
+        await apiFetch('/petty-cash', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            store_partition_key: store,
+            spent_on: spent_on,
+            item: dom.fItem.value.trim(),
+            category: dom.fCategory.value.trim(),
+            amount_yen: Math.floor(amount),
+            handler: dom.fHandler.value.trim(),
+            note: dom.fNote.value.trim(),
+          }),
+        });
+        dom.addMsg.className = 'msg ok';
+        dom.addMsg.textContent = '追加しました（' + yen(Math.floor(amount)) + '）。';
+        dom.fItem.value = ''; dom.fAmount.value = ''; dom.fNote.value = '';
+        // 月入力が出金日と別月なら、出金日の月に合わせて表示
+        const m = spent_on.slice(0, 7);
+        if (m && dom.monthInput.value !== m) dom.monthInput.value = m;
+        await loadEntries();
+      } catch (e) {
+        dom.addMsg.className = 'msg err';
+        dom.addMsg.textContent = e.message || String(e);
+      } finally {
+        dom.addBtn.disabled = false;
+      }
+    }
+
+    async function deleteEntry(id) {
+      if (!id) return;
+      if (!confirm('この出金記録を削除しますか？')) return;
+      try {
+        await apiFetch('/petty-cash?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        await loadEntries();
+      } catch (e) {
+        dom.addMsg.className = 'msg err';
+        dom.addMsg.textContent = e.message || String(e);
+      }
+    }
+
+    // ── events ──
+    dom.reloadBtn.addEventListener('click', loadEntries);
+    dom.storeSel.addEventListener('change', loadEntries);
+    dom.monthInput.addEventListener('change', loadEntries);
+    dom.addBtn.addEventListener('click', addEntry);
+    dom.tbody.addEventListener('click', (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest('[data-del]') : null;
+      if (btn) deleteEntry(btn.getAttribute('data-del'));
+    });
+    dom.saveTokenBtn.addEventListener('click', async () => {
+      const t = dom.tokenInput.value.trim();
+      if (!t) { dom.authMsg.textContent = 'トークンを入力してください。'; return; }
+      dom.tokenInput.value = '';
+      try {
+        if (AUTH) {
+          await AUTH.loginWithToken(t, {
+            sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL),
+            adminSurface: PAGES.ADMIN_SURFACE || 'line_report',
+          });
+        } else {
+          localStorage.setItem('line_summary_admin_token', t);
+        }
+        dom.authMsg.textContent = '';
+        setAuthBadge(true);
+        await loadEntries();
+      } catch (e) {
+        dom.authMsg.textContent = (e && e.message) ? e.message : String(e);
+      }
+    });
+
+    // ── init ──
+    (async function init() {
+      populateStores();
+      populateCategories(DEFAULT_CATEGORIES);
+      dom.fDate.value = todayStr();
+      const savedMonth = (() => { try { return localStorage.getItem(LS_MONTH) || ''; } catch (_) { return ''; } })();
+      dom.monthInput.value = savedMonth || currentMonth();
+
+      if (AUTH && AUTH.consumeUrlAuthParams) {
+        try {
+          await AUTH.consumeUrlAuthParams({
+            exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL),
+            adminSurface: PAGES.ADMIN_SURFACE || 'line_report',
+          });
+        } catch (e) { /* トークン入力にフォールバック */ }
+      }
+      setAuthBadge(!!getToken());
+      if (getToken()) await loadEntries();
+    })();
+  })();
+  </script>
+</body>
+</html>
