@@ -15,7 +15,7 @@ import {
 } from '../_shared/receipt_duplicate.ts'
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
-import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt } from '../_shared/petty_cash_flow.ts'
+import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   countExistingReceiptsForDates,
@@ -1114,6 +1114,24 @@ async function processReceiptImageEvent(
     : receiptRaw
   // ソバージュは「総売上」に出前の預かり金が含まれるため、売上は「純売上」を採用する。
   const receipt = applySauvageNetSalesAsGrossSales(receiptAligned, registry.store_partition_key)
+
+  // レジ出金（経費）伝票は「売上」ではない → 売上登録せず、小口現金（経費）として記録を案内。
+  // 自店名と一致しても出金伝票は売上に入れない（売上の水増し防止）。検知しなければ従来処理へ。
+  {
+    const cashOutUserId = event.source?.userId ? String(event.source.userId) : null
+    const cashOut = await handlePettyCashCashOutSlip(supabase, registry, {
+      roomId,
+      userId: cashOutUserId,
+      replyToken: receiptReplyToken ? rawReplyToken : '',
+      lineMessageId,
+      receipt,
+      summary: analyzed.analysis?.summary ?? '',
+    })
+    if (cashOut.handled) {
+      return { saved: false, replied: !!cashOut.replied, reason: cashOut.reason ?? 'petty_cash_cashout' }
+    }
+  }
+
   const confidence = mergeReceiptConfidence(
     computeReceiptHeuristicConfidence(receipt),
     analyzed.analysis.receiptModelConfidence ?? null,

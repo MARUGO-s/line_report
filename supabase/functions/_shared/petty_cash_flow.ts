@@ -13,6 +13,8 @@ const PENDING_TTL_MIN = 30
 // 起動トリガー（完全一致のみ。部分一致で誤爆させない）。
 const TRIGGER_WORDS = new Set(['経費', '経費登録', '出金', '出金登録', '小口', '小口登録', '小口現金'])
 const CANCEL_WORDS = new Set(['キャンセル', '中止', 'やめる', 'やめ', 'cancel', 'Cancel'])
+// レジ出金（＝経費の支払い）伝票のマーカー。これらを含む受領レシートは「売上」ではない。
+const CASH_OUT_MARKERS = /レジ出金|出金伝票|今回出金額|出金額|現金出金|小口出金|出金処理/
 
 export type PettyCashTextResult = { handled: boolean; replied: boolean }
 export type PettyCashImageResult = { handled: boolean; replied: boolean; saved?: boolean; reason?: string }
@@ -165,6 +167,32 @@ function simpleNoticeFlex(text: string): Record<string, unknown> {
     contents: {
       type: 'bubble',
       body: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text, wrap: true, size: 'sm', color: '#333333' }] },
+    },
+  }
+}
+
+// レジ出金（経費）伝票を検知したときの案内カード（売上に登録せず、経費記録へ誘導）。
+function cashOutOfferFlex(pendingId: number, amount: number): Record<string, unknown> {
+  return {
+    type: 'flex',
+    altText: 'レジ出金（経費）の伝票',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'text', text: 'レジ出金（経費）の伝票のようです', weight: 'bold', size: 'md', color: '#1a6fa8', wrap: true },
+          { type: 'text', text: `これは「売上」ではないため、売上には登録していません。出金額 ${formatYen(amount)} を小口現金（経費）として記録できます。`, size: 'sm', color: '#444444', wrap: true },
+          { type: 'text', text: '※「記録」を押すと内容確認カードが出ます。', size: 'xs', color: '#8a96a3', wrap: true },
+        ],
+      },
+      footer: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'button', style: 'primary', color: '#1a6fa8', height: 'sm', action: { type: 'postback', label: '経費（小口）として記録', data: `pcreview=${pendingId}`, displayText: '経費（小口）として記録します' } },
+          { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '了解（記録しない）', text: '了解' } },
+        ],
+      },
     },
   }
 }
@@ -368,6 +396,29 @@ export async function savePettyCashPendingFromReceipt(
     return null
   }
   return Number((data as { id?: number } | null)?.id ?? 0) || null
+}
+
+// レジ出金（経費）伝票の検知。売上ではないので売上登録せず、経費記録を案内する。
+// 検知しなければ {handled:false}（従来の売上処理へフォールスルー）。
+export async function handlePettyCashCashOutSlip(
+  supabase: SupabaseClient,
+  registry: StoreRegistryRow,
+  args: { roomId: string; userId: string | null; replyToken: string; lineMessageId: string; receipt: LineImageReceiptAnalysis | null; summary: string },
+): Promise<PettyCashImageResult> {
+  const { roomId, userId, replyToken, lineMessageId, receipt, summary } = args
+  const haystack = `${summary ?? ''} ${(Array.isArray(receipt?.items) ? receipt!.items.join(' ') : '')}`
+  if (!CASH_OUT_MARKERS.test(haystack)) return { handled: false, replied: false }
+
+  // 出金伝票＝売上ではない。以降は売上登録しない（handled:true で確定）。
+  const storeKey = String(registry.store_partition_key ?? '').trim()
+  const pendingId = await savePettyCashPendingFromReceipt(supabase, registry, { roomId, userId, lineMessageId, receipt })
+  if (!pendingId) {
+    const replied = await sendReply(replyToken, [simpleNoticeFlex('レジ出金（経費）の伝票のようです。売上には登録していません。金額が読み取れなかったため、小口現金ページから手入力してください。')], storeKey, roomId)
+    return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_unreadable' }
+  }
+  const ex = extractExpenseFromReceipt(receipt)
+  const replied = await sendReply(replyToken, [cashOutOfferFlex(pendingId, ex?.amount ?? 0)], storeKey, roomId)
+  return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_offer' }
 }
 
 // 確認カードの postback。
