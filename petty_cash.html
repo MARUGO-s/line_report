@@ -37,6 +37,10 @@
     .btn.ghost { background: var(--surface); color: var(--accent); }
     .btn.sm { padding: 5px 10px; font-size: 12px; }
     .btn.danger { border-color: var(--danger); background: var(--surface); color: var(--danger); }
+    .taxq { display: flex; gap: 4px; margin-top: 4px; }
+    .taxbtn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); border-radius: 7px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+    .taxbtn:hover { border-color: var(--accent); color: var(--accent); }
+    .totalbox { border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; background: var(--surface-2); font-weight: 800; font-variant-numeric: tabular-nums; min-width: 96px; text-align: right; color: var(--accent); }
     .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .toolbar .grow { flex: 1; }
     .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; font-weight: 700; }
@@ -119,12 +123,24 @@
           <datalist id="catList"></datalist>
         </div>
         <div class="field">
-          <label>出金額（円）</label>
-          <input id="fAmount" type="number" min="0" step="1" inputmode="numeric" placeholder="591" style="width:120px;" />
+          <label>本体価格（円）</label>
+          <input id="fBase" type="number" min="0" step="1" inputmode="numeric" placeholder="548" style="width:108px;" />
+        </div>
+        <div class="field">
+          <label>税額（円）</label>
+          <input id="fTax" type="number" min="0" step="1" inputmode="numeric" placeholder="43" style="width:92px;" />
+          <div class="taxq">
+            <button type="button" class="taxbtn" data-rate="8">税8%</button>
+            <button type="button" class="taxbtn" data-rate="10">税10%</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>出金額（合計）</label>
+          <div class="totalbox" id="fTotal">¥0</div>
         </div>
         <div class="field">
           <label>取扱者</label>
-          <input id="fHandler" type="text" placeholder="例: Y.MIYANO" style="width:130px;" />
+          <input id="fHandler" type="text" placeholder="例: Y.MIYANO" style="width:118px;" />
         </div>
         <button class="btn" id="addBtn" type="button">追加</button>
       </div>
@@ -143,6 +159,7 @@
         <div>
           <div class="muted" style="font-size:11px;font-weight:700;">月合計（出金）</div>
           <div class="total" id="totalYen">¥0</div>
+          <div class="muted" id="totalBreak" style="font-size:11px;margin-top:2px;">本体 ¥0 ／ 税 ¥0</div>
         </div>
         <div style="flex:1;"></div>
         <div class="summary" id="byCategory"></div>
@@ -158,6 +175,8 @@
               <th>日付</th>
               <th>品目 / 摘要</th>
               <th>勘定科目</th>
+              <th class="amt">本体</th>
+              <th class="amt">税額</th>
               <th class="amt">出金額</th>
               <th>取扱者</th>
               <th class="colStore">店舗</th>
@@ -187,9 +206,10 @@
     const dom = {
       authCard: $('authCard'), tokenInput: $('tokenInput'), saveTokenBtn: $('saveTokenBtn'), authMsg: $('authMsg'),
       storeSel: $('storeSel'), monthInput: $('monthInput'), reloadBtn: $('reloadBtn'), authBadge: $('authBadge'),
-      fDate: $('fDate'), fItem: $('fItem'), fCategory: $('fCategory'), fAmount: $('fAmount'),
+      fDate: $('fDate'), fItem: $('fItem'), fCategory: $('fCategory'),
+      fBase: $('fBase'), fTax: $('fTax'), fTotal: $('fTotal'),
       fHandler: $('fHandler'), fNote: $('fNote'), addBtn: $('addBtn'), addMsg: $('addMsg'), catList: $('catList'),
-      totalYen: $('totalYen'), byCategory: $('byCategory'), tbody: $('tbody'),
+      totalYen: $('totalYen'), totalBreak: $('totalBreak'), byCategory: $('byCategory'), tbody: $('tbody'),
       emptyState: $('emptyState'), colStoreHead: document.querySelector('#theadRow .colStore'),
     };
 
@@ -257,6 +277,9 @@
 
     function renderSummary(data) {
       dom.totalYen.textContent = yen(data.total_yen);
+      const tax = Number(data.tax_total_yen || 0);
+      const base = Number(data.base_total_yen != null ? data.base_total_yen : (Number(data.total_yen || 0) - tax));
+      dom.totalBreak.textContent = '本体 ' + yen(base) + ' ／ 税 ' + yen(tax);
       const by = Array.isArray(data.by_category) ? data.by_category : [];
       dom.byCategory.innerHTML = by.length
         ? by.map((c) => '<span class="catchip">' + esc(c.category) + '<b>' + yen(c.amount_yen) + '</b></span>').join('')
@@ -276,11 +299,16 @@
       dom.tbody.innerHTML = entries.map((e) => {
         const src = e.source === 'line_image' ? ' <span class="tag">LINE</span>' : '';
         const storeCell = showStore ? '<td><span class="tag store">' + esc(storeName(e.store_partition_key)) + '</span></td>' : '';
+        const amt = Math.max(0, Math.floor(Number(e.amount_yen || 0)));
+        const tax = Math.max(0, Math.floor(Number(e.tax_yen || 0)));
+        const base = Math.max(0, amt - tax);
         return '<tr>'
           + '<td>' + esc(e.spent_on || '') + '</td>'
           + '<td class="item">' + esc(e.item || '') + (e.note ? ' <span class="muted">（' + esc(e.note) + '）</span>' : '') + src + '</td>'
           + '<td>' + (e.category ? '<span class="tag">' + esc(e.category) + '</span>' : '<span class="muted">未分類</span>') + '</td>'
-          + '<td class="amt">' + yen(e.amount_yen) + '</td>'
+          + '<td class="amt">' + yen(base) + '</td>'
+          + '<td class="amt">' + (tax > 0 ? yen(tax) : '<span class="muted">—</span>') + '</td>'
+          + '<td class="amt">' + yen(amt) + '</td>'
           + '<td>' + esc(e.handler || '') + '</td>'
           + storeCell
           + '<td><button class="btn danger sm" data-del="' + esc(e.id) + '" type="button">削除</button></td>'
@@ -308,13 +336,22 @@
       }
     }
 
+    function computeTotal() {
+      const base = Math.max(0, Math.floor(Number(dom.fBase.value || 0)) || 0);
+      const tax = Math.max(0, Math.floor(Number(dom.fTax.value || 0)) || 0);
+      dom.fTotal.textContent = yen(base + tax);
+    }
+
     async function addEntry() {
       const store = dom.storeSel.value || lockedStore();
       if (!store) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '店舗を選択してください（全店舗のままでは追加できません）。'; return; }
       const spent_on = dom.fDate.value;
-      const amount = Number(dom.fAmount.value);
+      const base = Math.floor(Number(dom.fBase.value || 0));
+      const tax = Math.floor(Number(dom.fTax.value || 0));
       if (!spent_on) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '出金日を入力してください。'; return; }
-      if (!Number.isFinite(amount) || amount < 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '出金額を正しく入力してください。'; return; }
+      if (!Number.isFinite(base) || base < 0 || !Number.isFinite(tax) || tax < 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '本体価格・税額を正しく入力してください。'; return; }
+      const amount = base + tax;
+      if (amount <= 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '本体価格（と税額）を入力してください。'; return; }
       dom.addBtn.disabled = true;
       try {
         await apiFetch('/petty-cash', {
@@ -325,14 +362,15 @@
             spent_on: spent_on,
             item: dom.fItem.value.trim(),
             category: dom.fCategory.value.trim(),
-            amount_yen: Math.floor(amount),
+            amount_yen: amount,
+            tax_yen: tax,
             handler: dom.fHandler.value.trim(),
             note: dom.fNote.value.trim(),
           }),
         });
         dom.addMsg.className = 'msg ok';
-        dom.addMsg.textContent = '追加しました（' + yen(Math.floor(amount)) + '）。';
-        dom.fItem.value = ''; dom.fAmount.value = ''; dom.fNote.value = '';
+        dom.addMsg.textContent = '追加しました（出金 ' + yen(amount) + '／本体 ' + yen(base) + '・税 ' + yen(tax) + '）。';
+        dom.fItem.value = ''; dom.fBase.value = ''; dom.fTax.value = ''; dom.fNote.value = ''; computeTotal();
         // 月入力が出金日と別月なら、出金日の月に合わせて表示
         const m = spent_on.slice(0, 7);
         if (m && dom.monthInput.value !== m) dom.monthInput.value = m;
@@ -362,6 +400,14 @@
     dom.storeSel.addEventListener('change', loadEntries);
     dom.monthInput.addEventListener('change', loadEntries);
     dom.addBtn.addEventListener('click', addEntry);
+    dom.fBase.addEventListener('input', computeTotal);
+    dom.fTax.addEventListener('input', computeTotal);
+    document.querySelectorAll('.taxbtn').forEach((b) => b.addEventListener('click', () => {
+      const rate = Number(b.getAttribute('data-rate')) || 0;
+      const base = Math.max(0, Math.floor(Number(dom.fBase.value || 0)) || 0);
+      dom.fTax.value = String(Math.floor(base * rate / 100));
+      computeTotal();
+    }));
     dom.tbody.addEventListener('click', (ev) => {
       const btn = ev.target && ev.target.closest ? ev.target.closest('[data-del]') : null;
       if (btn) deleteEntry(btn.getAttribute('data-del'));
@@ -392,6 +438,7 @@
       populateStores();
       populateCategories(DEFAULT_CATEGORIES);
       dom.fDate.value = todayStr();
+      computeTotal();
       const savedMonth = (() => { try { return localStorage.getItem(LS_MONTH) || ''; } catch (_) { return ''; } })();
       dom.monthInput.value = savedMonth || currentMonth();
 

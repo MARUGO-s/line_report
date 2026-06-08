@@ -2818,7 +2818,7 @@ async function fetchPettyCashState(
 
   let query = supabase
     .from("petty_cash_entries")
-    .select("id, store_partition_key, spent_on, item, category, amount_yen, handler, source, note, created_at")
+    .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, handler, source, note, created_at")
     .eq("hidden", false)
     .order("spent_on", { ascending: false })
     .order("id", { ascending: false })
@@ -2840,10 +2840,13 @@ async function fetchPettyCashState(
   const rows = Array.isArray(data) ? data : []
 
   let total = 0
+  let taxTotal = 0
   const byCategory = new Map<string, number>()
   for (const r of rows) {
     const amt = Math.max(0, Math.floor(Number((r as { amount_yen?: unknown }).amount_yen ?? 0)))
+    const tax = Math.max(0, Math.floor(Number((r as { tax_yen?: unknown }).tax_yen ?? 0)))
     total += amt
+    taxTotal += tax
     const cat = toSafeString((r as { category?: unknown }).category) || "未分類"
     byCategory.set(cat, (byCategory.get(cat) ?? 0) + amt)
   }
@@ -2855,6 +2858,8 @@ async function fetchPettyCashState(
     categories: PETTY_CASH_CATEGORIES,
     entries: rows,
     total_yen: total,
+    tax_total_yen: taxTotal,
+    base_total_yen: Math.max(0, total - taxTotal),
     by_category: [...byCategory.entries()]
       .map(([category, amount_yen]) => ({ category, amount_yen }))
       .sort((a, b) => b.amount_yen - a.amount_yen),
@@ -2879,12 +2884,18 @@ async function createPettyCashEntry(
   if (!Number.isFinite(amount) || amount < 0) {
     throw { status: 400, message: "amount_yen must be a non-negative number." } satisfies AppError
   }
+  const taxParsed = (body.tax_yen == null || body.tax_yen === "") ? 0 : Math.floor(Number(body.tax_yen))
+  const tax = Number.isFinite(taxParsed) ? Math.max(0, taxParsed) : 0
+  if (tax > amount) {
+    throw { status: 400, message: "tax_yen must not exceed amount_yen (out-of-pocket total)." } satisfies AppError
+  }
   const insertRow = {
     store_partition_key: storeKey,
     spent_on: spentOn,
     item: toSafeString(body.item) || null,
     category: toSafeString(body.category) || null,
     amount_yen: amount,
+    tax_yen: tax,
     handler: toSafeString(body.handler) || null,
     note: toSafeString(body.note) || null,
     source: "manual",
