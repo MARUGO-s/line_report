@@ -60,20 +60,35 @@ function extractExpenseFromReceipt(
   const tax = parseYenToInt(receipt?.taxAmount) ?? 0
   const gross = parseYenToInt(receipt?.grossSales)
   const net = parseYenToInt(receipt?.netSales)
-  // 出金額の決定（誤読対策）:
-  //  外税レシートでは「合計」が「お預り（現金）」と混同され過大に読まれることがある
-  //  （例: 合計¥591 / お預り¥1,000 → 誤って¥1,080）。商品ごとに明細がある
-  //  「小計(net)＋外税(tax)」が最も信頼できるため最優先。次に合計、最後に小計。
+  // 商品明細（品名＋価格）。価格は数値化。
+  const lineItems = Array.isArray(receipt?.lineItems) ? receipt!.lineItems! : []
+  const itemRows = lineItems
+    .map((li) => ({ name: li?.name ? String(li.name).trim() : '', amount: parseYenToInt(li?.price) }))
+    .filter((x) => x.name || x.amount != null)
+    .slice(0, 10)
+  const itemsSum = itemRows.reduce((s, i) => s + (i.amount != null && i.amount > 0 ? i.amount : 0), 0)
+
+  // 本体(税抜)・出金額(税込)の決定（誤読対策）:
+  //  小計(net)+税(tax) が最優先（外税/内税どちらも税込合計に一致、お預りと混同しない）。
+  //  次に 明細合計(itemsSum, 外税前提で +tax)＝合計が「お預り」と誤読されるのを避ける。最後に 合計(gross)。
+  let base: number | null = null
   let amount: number | null = null
-  if (net != null && net > 0) amount = net + tax
-  else if (gross != null && gross > 0) amount = gross
-  if (amount == null || amount <= 0) return null
+  if (net != null && net > 0) { base = net; amount = net + tax }
+  else if (itemsSum > 0) { base = itemsSum; amount = itemsSum + tax }
+  else if (gross != null && gross > 0) { amount = gross; base = Math.max(0, gross - tax) }
+  if (base == null || amount == null || amount <= 0) return null
   const safeTax = Math.min(tax, amount)
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
   const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
-  const items = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
-  // 複数項目は「1行1項目（・付き）」で見やすく。LINEカードは \n を改行表示、Web表は white-space:pre-line で対応。
-  const item = items.length > 1 ? items.map((s) => '・' + s).join('\n') : (items[0] || supplier || '経費')
+
+  // 品目テキスト: 明細があれば「・品名 ¥価格」を1行ずつ。無ければ items(品名のみ)。
+  let item: string
+  if (itemRows.length) {
+    item = itemRows.map((i) => `・${i.name}${i.amount != null ? ' ' + formatYen(i.amount) : ''}`.trim()).join('\n')
+  } else {
+    const nameItems = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
+    item = nameItems.length > 1 ? nameItems.map((s) => '・' + s).join('\n') : (nameItems[0] || supplier || '経費')
+  }
   return { amount, tax: safeTax, spentOn, item, supplier }
 }
 

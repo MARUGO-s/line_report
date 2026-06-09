@@ -317,6 +317,20 @@ export function normalizeLineImageReceiptAnalysis(
     .filter((value) => value.length > 0)
     .slice(0, 5)
 
+  const lineItems = (Array.isArray(data.line_items) ? data.line_items : [])
+    .map((v) => {
+      if (v && typeof v === 'object') {
+        const o = v as Record<string, unknown>
+        return {
+          name: normalizeReceiptFieldText(o.name ?? o.item ?? o.title, 80) || null,
+          price: normalizeReceiptFieldText(o.price ?? o.amount ?? o.value, 40) || null,
+        }
+      }
+      return { name: normalizeReceiptFieldText(v, 80) || null, price: null }
+    })
+    .filter((x) => x.name || x.price)
+    .slice(0, 10)
+
   const dateIso = parseReceiptDateToIso(date)
   if (dateIso) date = formatJapaneseReceiptDateFromIso(dateIso)
 
@@ -345,7 +359,7 @@ export function normalizeLineImageReceiptAnalysis(
   )
   if (!hasAnyField) return null
 
-  return { storeName, storePhone, date, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items }
+  return { storeName, storePhone, date, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items, lineItems }
 }
 
 // ソバージュ専用: レシートの「総売上」には出前（デリバリー）の預かり金が含まれ当店の売上ではないため、

@@ -26,12 +26,13 @@
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
     .field { display: flex; flex-direction: column; gap: 4px; }
     .field label { font-size: 11px; color: var(--text-3); font-weight: 700; }
-    input, select, button { font: inherit; }
-    input, select {
+    input, select, button, textarea { font: inherit; }
+    input, select, textarea {
       border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; background: var(--surface);
       color: var(--text); min-width: 0;
     }
-    input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+    textarea { resize: vertical; line-height: 1.4; width: 100%; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
     .btn { border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 9px; padding: 9px 16px; font-weight: 700; cursor: pointer; }
     .btn:hover { filter: brightness(1.05); }
     .btn.ghost { background: var(--surface); color: var(--accent); }
@@ -114,8 +115,8 @@
           <input id="fDate" type="date" />
         </div>
         <div class="field grow-m" style="flex:1;min-width:160px;">
-          <label>品目 / 摘要</label>
-          <input id="fItem" type="text" placeholder="例: おろし生姜・トマトソース 等" />
+          <label>品目 / 摘要（明細は1行に1品）</label>
+          <textarea id="fItem" rows="2" placeholder="例:&#10;・お徳用おろし生姜 ¥299&#10;・トマトペースト ¥249"></textarea>
         </div>
         <div class="field">
           <label>勘定科目</label>
@@ -369,7 +370,7 @@
       const amt = Math.max(0, Math.floor(Number(e.amount_yen || 0)));
       const tax = Math.max(0, Math.floor(Number(e.tax_yen || 0)));
       dom.fDate.value = e.spent_on || todayStr();
-      dom.fItem.value = String(e.item || '').replace(/\n/g, ' ');
+      dom.fItem.value = String(e.item || '');
       dom.fCategory.value = e.category || '';
       dom.fBase.value = String(Math.max(0, amt - tax));
       dom.fTax.value = String(tax);
