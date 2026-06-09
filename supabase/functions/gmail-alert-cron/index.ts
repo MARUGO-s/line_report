@@ -877,14 +877,35 @@ type GmailAlertTarget = { roomId: string; storeKey: string }
 // 店舗別チャネルトークン解決（_shared/line_client.ts の resolveChannelAccessToken と同一ロジック）。
 // 店舗別 LINE_CHANNEL_ACCESS_TOKEN__<STORE> があればそれを、無ければ呼び出し元のフォールバック（=グローバル）を使う。
 // これにより予約通知が各店舗の公式アカウント（＝月200通枠が店舗ごとに独立）から送られ、共有アカウントへの集中を防ぐ。
+// LINEアクセストークンをHTTPヘッダに安全な形へ正規化する。
+// 印字可能ASCII(0x21-0x7e、空白を除く)以外（改行・空白・タブ・全角・制御文字など）を除去。
+// シークレット設定時にトークンへ紛れ込んだ不正文字で
+// "Failed to construct 'Request': ... is not a valid ByteString" になるのを防ぐ。
+function sanitizeLineToken(raw: unknown): string {
+  return String(raw ?? "").replace(/[^\x21-\x7e]/g, "")
+}
+
 function resolveRoomLineToken(storeKey: string, fallbackToken: string): string {
   const key = String(storeKey ?? "").trim()
   if (key) {
-    const envKey = `LINE_CHANNEL_ACCESS_TOKEN__${key.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`
-    const perStore = String(Deno.env.get(envKey) ?? "").trim()
+    const suffix = key.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()
+    // 予約通知の一時流用（別アカウント）。月200通上限の一時回避用。レシート等(resolveChannelAccessToken)には影響しない。
+    // 来月にこれらのシークレットを削除すれば自動で店舗本来のアカウントへ戻る。
+    //  (1) 生トークン指定: LINE_RESERVATION_ALERT_TOKEN__<STORE> に別アカウントのアクセストークン。
+    const override = sanitizeLineToken(Deno.env.get(`LINE_RESERVATION_ALERT_TOKEN__${suffix}`))
+    if (override) return override
+    //  (2) 借りる店舗キー指定: LINE_RESERVATION_ALERT_BORROW__<STORE> = 別店舗キー（例: claudia2）。
+    //      → その店舗の既存 LINE_CHANNEL_ACCESS_TOKEN__<別店舗> を使う（トークンのコピー不要）。
+    const borrow = String(Deno.env.get(`LINE_RESERVATION_ALERT_BORROW__${suffix}`) ?? "").trim()
+    if (borrow) {
+      const bSuffix = borrow.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()
+      const borrowed = sanitizeLineToken(Deno.env.get(`LINE_CHANNEL_ACCESS_TOKEN__${bSuffix}`))
+      if (borrowed) return borrowed
+    }
+    const perStore = sanitizeLineToken(Deno.env.get(`LINE_CHANNEL_ACCESS_TOKEN__${suffix}`))
     if (perStore) return perStore
   }
-  return fallbackToken
+  return sanitizeLineToken(fallbackToken)
 }
 
 async function resolveGmailAlertTargetRooms(

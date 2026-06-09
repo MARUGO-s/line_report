@@ -482,14 +482,31 @@ function truncate(value: string, max: number): string {
 
 // --- LINE token / send ---
 
+// LINEアクセストークンをHTTPヘッダに安全な形へ正規化（印字可能ASCII以外を除去）。
+// シークレットへ紛れ込んだ改行・空白・全角等で "not a valid ByteString" になるのを防ぐ。
+function sanitizeLineToken(raw: unknown): string {
+  return String(raw ?? "").replace(/[^\x21-\x7e]/g, "")
+}
+
 function resolveStoreLineToken(storeKey: string, fallbackToken: string): string {
   const key = String(storeKey ?? "").trim()
   if (key) {
-    const envKey = `LINE_CHANNEL_ACCESS_TOKEN__${key.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`
-    const perStore = String(Deno.env.get(envKey) ?? "").trim()
+    const suffix = key.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()
+    // 予約通知の一時流用（別アカウント）。gmail-alert-cron と同一仕様。月200通上限の一時回避用。
+    //  (1) 生トークン指定: LINE_RESERVATION_ALERT_TOKEN__<STORE>
+    const override = sanitizeLineToken(Deno.env.get(`LINE_RESERVATION_ALERT_TOKEN__${suffix}`))
+    if (override) return override
+    //  (2) 借りる店舗キー指定: LINE_RESERVATION_ALERT_BORROW__<STORE> = 別店舗キー
+    const borrow = String(Deno.env.get(`LINE_RESERVATION_ALERT_BORROW__${suffix}`) ?? "").trim()
+    if (borrow) {
+      const bSuffix = borrow.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()
+      const borrowed = sanitizeLineToken(Deno.env.get(`LINE_CHANNEL_ACCESS_TOKEN__${bSuffix}`))
+      if (borrowed) return borrowed
+    }
+    const perStore = sanitizeLineToken(Deno.env.get(`LINE_CHANNEL_ACCESS_TOKEN__${suffix}`))
     if (perStore) return perStore
   }
-  return fallbackToken
+  return sanitizeLineToken(fallbackToken)
 }
 
 async function sendLinePushMessages(to: string, messages: unknown[], token: string): Promise<{ ok: true } | { ok: false; error: string }> {
