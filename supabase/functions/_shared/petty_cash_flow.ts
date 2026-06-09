@@ -328,7 +328,7 @@ export async function handlePettyCashTextMessage(
 export async function handlePettyCashImageIfPending(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
-  args: { roomId: string; userId: string | null; replyToken: string; lineMessageId: string; receipt: LineImageReceiptAnalysis | null; summary: string },
+  args: { roomId: string; userId: string | null; replyToken: string; lineMessageId: string; receipt: LineImageReceiptAnalysis | null; summary: string; reanalyze?: () => Promise<LineImageReceiptAnalysis | null> },
 ): Promise<PettyCashImageResult> {
   const { roomId, userId, replyToken, lineMessageId, receipt } = args
   const key = conversationKey(roomId, userId)
@@ -350,7 +350,9 @@ export async function handlePettyCashImageIfPending(
   }
   const pendingId = Number((data as { id?: unknown }).id ?? 0)
 
-  const ex = extractExpenseFromReceipt(receipt)
+  // 経費専用に再解析（明細・小計/外税を取得）。失敗時のみ売上解析をフォールバック。売上(精算)解析には非依存。
+  const receiptForExpense = (args.reanalyze ? await args.reanalyze() : null) ?? receipt
+  const ex = extractExpenseFromReceipt(receiptForExpense)
   if (!ex) {
     await clearPending(supabase, key)
     const replied = await sendReply(replyToken, [simpleNoticeFlex('レシートの金額を読み取れませんでした。お手数ですが小口現金ページから手入力してください。')], storeKey, roomId)
@@ -380,10 +382,12 @@ export async function handlePettyCashImageIfPending(
 export async function savePettyCashPendingFromReceipt(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
-  args: { roomId: string; userId: string | null; lineMessageId: string; receipt: LineImageReceiptAnalysis | null },
+  args: { roomId: string; userId: string | null; lineMessageId: string; receipt: LineImageReceiptAnalysis | null; reanalyze?: () => Promise<LineImageReceiptAnalysis | null> },
 ): Promise<number | null> {
   const { roomId, userId, lineMessageId, receipt } = args
-  const ex = extractExpenseFromReceipt(receipt)
+  // 経費専用に再解析（明細・小計/外税）。失敗時のみ売上解析をフォールバック。
+  const receiptForExpense = (args.reanalyze ? await args.reanalyze() : null) ?? receipt
+  const ex = extractExpenseFromReceipt(receiptForExpense)
   if (!ex) return null
   const storeKey = String(registry.store_partition_key ?? '').trim()
   const key = conversationKey(roomId, userId)
@@ -418,20 +422,23 @@ export async function savePettyCashPendingFromReceipt(
 export async function handlePettyCashCashOutSlip(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
-  args: { roomId: string; userId: string | null; replyToken: string; lineMessageId: string; receipt: LineImageReceiptAnalysis | null; summary: string },
+  args: { roomId: string; userId: string | null; replyToken: string; lineMessageId: string; receipt: LineImageReceiptAnalysis | null; summary: string; reanalyze?: () => Promise<LineImageReceiptAnalysis | null> },
 ): Promise<PettyCashImageResult> {
-  const { roomId, userId, replyToken, lineMessageId, receipt, summary } = args
+  const { roomId, userId, replyToken, lineMessageId, receipt, summary, reanalyze } = args
+  // 検知は売上解析の summary/items（レジ出金マーカー）で行う。
   const haystack = `${summary ?? ''} ${(Array.isArray(receipt?.items) ? receipt!.items.join(' ') : '')}`
   if (!CASH_OUT_MARKERS.test(haystack)) return { handled: false, replied: false }
 
   // 出金伝票＝売上ではない。以降は売上登録しない（handled:true で確定）。
+  // 金額・明細は経費専用に再解析（売上解析プロンプトには非依存）。失敗時のみ売上解析をフォールバック。
   const storeKey = String(registry.store_partition_key ?? '').trim()
-  const pendingId = await savePettyCashPendingFromReceipt(supabase, registry, { roomId, userId, lineMessageId, receipt })
+  const exReceipt = (reanalyze ? await reanalyze() : null) ?? receipt
+  const pendingId = await savePettyCashPendingFromReceipt(supabase, registry, { roomId, userId, lineMessageId, receipt: exReceipt })
   if (!pendingId) {
     const replied = await sendReply(replyToken, [simpleNoticeFlex('レジ出金（経費）の伝票のようです。売上には登録していません。金額が読み取れなかったため、小口現金ページから手入力してください。')], storeKey, roomId)
     return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_unreadable' }
   }
-  const ex = extractExpenseFromReceipt(receipt)
+  const ex = extractExpenseFromReceipt(exReceipt)
   const replied = await sendReply(replyToken, [cashOutOfferFlex(pendingId, ex?.amount ?? 0)], storeKey, roomId)
   return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_offer' }
 }

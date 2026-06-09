@@ -16,15 +16,23 @@ export const RECEIPT_VISION_SYSTEM_PROMPT_BASE: string = [
   'レシートでも予約確認画面でもない場合は kind を general にし、summary に1文（80文字以内）で内容を入れてください。',
   'summary は必ず 1 行にし、改行を含めないこと。',
   'JSONスキーマ:',
-  '{"kind":"receipt|reservation|general","summary":"string","receipt_confidence":0.0,"receipt":{"store_name":"string|null","store_phone":"string|null","date":"string|null","net_sales":"string|null","tax_amount":"string|null","gross_sales":"string|null","party_count":"string|null","guest_count":"string|null","unit_price":"string|null","items":["string"],"line_items":[{"name":"string|null","price":"string|null"}]},"reservation":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","booking_date":"YYYY-MM-DD|null","party_size":"string|null","customer_name":"string|null","customer_phone":"string|null","course":"string|null","store_name":"string|null","table":"string|null","status":"string|null","allergy":"string|null","dislikes":"string|null","anniversary":"string|null","notes":"string|null"}}',
+  '{"kind":"receipt|reservation|general","summary":"string","receipt_confidence":0.0,"receipt":{"store_name":"string|null","store_phone":"string|null","date":"string|null","net_sales":"string|null","tax_amount":"string|null","gross_sales":"string|null","party_count":"string|null","guest_count":"string|null","unit_price":"string|null","items":["string"]},"reservation":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","booking_date":"YYYY-MM-DD|null","party_size":"string|null","customer_name":"string|null","customer_phone":"string|null","course":"string|null","store_name":"string|null","table":"string|null","status":"string|null","allergy":"string|null","dislikes":"string|null","anniversary":"string|null","notes":"string|null"}}',
   'store_phone はレシート上部の電話番号（例: 03-5361-6205）。読めない場合は null。',
   'receipt は kind!=receipt の時は null でも可。reservation は kind!=reservation の時は null でも可。items は最大5件まで。読めない項目は null。',
-  'レシートに商品明細があれば line_items に1件ずつ入れる: {"name":"品名","price":"¥価格"}（例: {"name":"お徳用おろし生姜","price":"¥299"}）。最大10件。小計(税抜)=net_sales、税額(外税/内税)=tax_amount、合計(税込)=gross_sales を必ず読み分ける。「お預り」「お釣り」は支払総額ではないので gross_sales に入れない。',
   'kind=receipt のときは receipt_confidence に 0.0〜1.0 の数値を必ず入れる。',
   'reservation.date は必ず西暦の "YYYY-MM-DD" 形式に正規化（例: 2026年6月12日(金) → "2026-06-12"）。reservation.time は来店開始時刻を "HH:MM"（例: 18:00〜20:30 → "18:00"）。',
   '画面の左上などに表示される日付は「予約を登録した日＝予約登録日（予約受付日）」であり、来店日とは別物。これは booking_date に入れて "YYYY-MM-DD" に正規化する。来店日（実際に来店する日）は date に入れ、両者を絶対に混同しない。',
   '予約確認画面に「メモ/備考/特記事項/リクエスト/コメント」欄があれば必ず読み取る: アレルギー(例: 甲殻類NG)→allergy、苦手・嫌いな食材→dislikes、記念日・誕生日・バースデー・お祝い→anniversary、席や接客などその他の要望・注記→notes。複数該当は「、」で連結。手書きの書き込みも対象。該当が無い項目は null。',
   '金額は可能なら「¥7,700」の形式。会計組数・客数は数値として抽出。summary は必須。',
+].join('\n')
+
+// 小口現金（経費）レシート専用の追記。売上(精算)レシートには一切使わない＝独立。
+// 共通プロンプト本体(RECEIPT_VISION_SYSTEM_PROMPT_BASE)は変更せず、経費の再解析時のみ
+// systemPromptAddition として連結して line_items 等を取得する。
+export const EXPENSE_RECEIPT_PROMPT_ADDITION = [
+  '【経費（小口現金）レシート専用】この画像は店舗の「売上」ではなく、店舗が支払った経費（仕入・備品など）の購入レシート（または出金伝票）です。kind は receipt のままでよい。',
+  'JSONの receipt に追加で line_items（商品明細）を必ず含めること: "line_items":[{"name":"品名","price":"¥価格"}]（例: [{"name":"お徳用おろし生姜","price":"¥299"},{"name":"トマトペースト","price":"¥249"}]）。明細は最大10件。読めない価格は null。',
+  '金額は厳密に読み分ける: 小計(税抜)=net_sales、消費税額(外税/内税)=tax_amount、合計(税込・支払総額)=gross_sales。「お預り(預り金)」「お釣り」は支払総額ではないので gross_sales に絶対に入れない。',
 ].join('\n')
 
 /**

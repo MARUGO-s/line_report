@@ -16,6 +16,7 @@ import {
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
+import { analyzeExpenseReceipt } from '../_shared/petty_cash_vision.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   countExistingReceiptsForDates,
@@ -54,6 +55,7 @@ import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
 import { analyzeLineImageWithClaude, analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
 import {
   combineStoreReceiptPromptAdditions,
+  EXPENSE_RECEIPT_PROMPT_ADDITION,
   fetchStoreReceiptAnalysisPromptAddition,
   resolveBuiltinStoreReceiptPrompt,
 } from '../_shared/receipt_prompt.ts'
@@ -1096,6 +1098,21 @@ async function processReceiptImageEvent(
   // 「期間集計レポート」等のマーカーを入れることで判定する。
   const analyzedSummaryText = String(analyzed.analysis?.summary ?? '')
 
+  // 経費(小口)専用の再解析（独立経路）: 売上(精算)解析プロンプトには一切手を入れず、
+  // 経費専用の追記(EXPENSE_RECEIPT_PROMPT_ADDITION)で line_items・小計/外税 を取得する。
+  // Claude(キーあり)優先、無ければ Groq。経費フローの各ハンドラから「必要時のみ」呼ばれる。
+  const reanalyzeAsExpense = async () => {
+    const claudeKey = resolveClaudeApiKey()
+    if (claudeKey) {
+      const r = await analyzeLineImageWithClaude(contentFetch.bytes, contentFetch.contentType, lineMessageId, claudeKey, EXPENSE_RECEIPT_PROMPT_ADDITION, CLAUDE_RECEIPT_MODEL)
+      await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, r.usage)
+      if (r.analysis?.receipt) return r.analysis.receipt
+    }
+    const g = await analyzeLineImageWithGroqScout(contentFetch.bytes, contentFetch.contentType, lineMessageId, groqApiKey, EXPENSE_RECEIPT_PROMPT_ADDITION)
+    await recordAiUsage('groq', GROQ_RECEIPT_MODEL, g.usage)
+    return g.analysis?.receipt ?? null
+  }
+
   // 小口現金（経費）取込: 直前に「経費」と送られ画像待ちなら、この画像を経費として記録する（売上に登録しない）。
   // 明示トリガー時のみ作動。pending が無ければフォールスルーして従来のレシート/予約処理へ。
   {
@@ -1107,6 +1124,7 @@ async function processReceiptImageEvent(
       lineMessageId,
       receipt: analyzed.analysis?.receipt ?? null,
       summary: analyzedSummaryText,
+      reanalyze: reanalyzeAsExpense,
     })
     if (pettyResult.handled) {
       return { saved: !!pettyResult.saved, replied: !!pettyResult.replied, reason: pettyResult.reason ?? 'petty_cash_image' }
@@ -1177,6 +1195,7 @@ async function processReceiptImageEvent(
       lineMessageId,
       receipt,
       summary: analyzed.analysis?.summary ?? '',
+      reanalyze: reanalyzeAsExpense,
     })
     if (cashOut.handled) {
       return { saved: false, replied: !!cashOut.replied, reason: cashOut.reason ?? 'petty_cash_cashout' }
@@ -1251,7 +1270,7 @@ async function processReceiptImageEvent(
       let pettyPendingId: number | null = null
       try {
         pettyPendingId = await savePettyCashPendingFromReceipt(supabase, registry, {
-          roomId, userId, lineMessageId, receipt,
+          roomId, userId, lineMessageId, receipt, reanalyze: reanalyzeAsExpense,
         })
       } catch (e) {
         console.error('savePettyCashPendingFromReceipt threw:', String(e))
