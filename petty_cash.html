@@ -457,6 +457,7 @@
                 <input id="ledSearch" type="text" placeholder="品目・メモで検索" />
               </div>
               <span class="led-count mono" id="ledCount"></span>
+              <button class="btn sm" id="csvBtn" type="button" title="表示中の店舗・対象月を「品目ごと1行」のCSVでダウンロード（Excel対応）"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>CSV</button>
             </div>
             <div class="table-wrap">
               <table class="ltable">
@@ -534,7 +535,7 @@
       cbBase: $('cbBase'), cbTax8: $('cbTax8'), cbTax10: $('cbTax10'), cbTax: $('cbTax'), cbTotal: $('cbTotal'),
       submitBtn: $('submitBtn'), clearBtn: $('clearBtn'), addMsg: $('addMsg'),
       sumTotal: $('sumTotal'), sumSplit: $('sumSplit'), sumCount: $('sumCount'), catBreak: $('catBreak'),
-      acctFilter: $('acctFilter'), ledSearch: $('ledSearch'), ledCount: $('ledCount'),
+      acctFilter: $('acctFilter'), ledSearch: $('ledSearch'), ledCount: $('ledCount'), csvBtn: $('csvBtn'),
       ledBody: $('ledBody'), ledEmpty: $('ledEmpty'), tfBase: $('tfBase'), tfTax: $('tfTax'), tfTotal: $('tfTotal'),
     };
 
@@ -834,6 +835,7 @@
       let html = order.map((k) => chipHTML(k, byCat[k], total)).join('');
       if (byCat['__unknown__'] > 0) html += chipHTML('__unknown__', byCat['__unknown__'], total);
       dom.catBreak.innerHTML = html || '<div class="led-empty" style="grid-column:1/-1">この月の出金記録はありません。</div>';
+      if (dom.csvBtn) dom.csvBtn.disabled = !records.length;
     }
 
     /* ===== 台帳 ===== */
@@ -889,6 +891,49 @@
       dom.tfBase.textContent = yen(tb); dom.tfTax.textContent = yen(tt); dom.tfTotal.textContent = yen(tg);
       dom.ledCount.textContent = rs.length + ' 件表示';
     }
+    /* ===== CSV（品目別）エクスポート ===== */
+    function csvEscape(v) {
+      const s = String(v == null ? '' : v);
+      return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+    // 現在の店舗×対象月の records を「品目ごと1行」に展開。旧データ(items無し)はレコード単位で1行。
+    function buildPettyCsv() {
+      const headers = ['日付', '店舗', '品目', '勘定科目', '税率(%)', '本体(税抜)', '税額', '出金額(税込)', '取扱者', 'メモ', '取込元', '記録ID'];
+      const rows = [headers];
+      const sorted = records.slice().sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0) || (a.id - b.id));
+      sorted.forEach((r) => {
+        const store = storeName(r.store);
+        const src = r.source === 'line_image' ? 'LINE' : '手入力';
+        if (r.items.length) {
+          r.items.forEach((it) => {
+            const rate = (Number(it.rate) === 10) ? 10 : 8;
+            const tax = Math.round(it.p * rate / 100);
+            const acct = ACCT_KEYS.has(it.acct) ? acctName(it.acct) : '未分類';
+            rows.push([r.date, store, it.n, acct, rate, it.p, tax, it.p + tax, r.handler, r.memo, src, r.id]);
+          });
+        } else {
+          const ak = legacyAcct(r.category);
+          const acct = ak ? acctName(ak) : (r.category || '未分類');
+          const itemText = String(r.item || '').replace(/\r?\n/g, ' / ');
+          rows.push([r.date, store, itemText, acct, '', r.base, r.tax, r.total, r.handler, r.memo, src, r.id]);
+        }
+      });
+      return rows.map((cols) => cols.map(csvEscape).join(',')).join('\r\n');
+    }
+    function downloadPettyCsv() {
+      if (!records.length) return;
+      const csv = '﻿' + buildPettyCsv(); // 先頭BOM＝Excelで日本語が文字化けしない
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const store = dom.storeF.value ? storeName(dom.storeF.value) : '全店舗';
+      const month = dom.monthF.value || '';
+      a.href = url;
+      a.download = ('小口現金_' + store + '_' + month + '.csv').replace(/[\\/:*?"<>|]/g, '_');
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 1500);
+    }
+
     function renderAll() { renderSummary(); renderLedger(); }
 
     /* ===== 読み込み・保存 ===== */
@@ -943,6 +988,7 @@
     dom.monthF.addEventListener('change', () => { if (editingId) resetForm(); loadEntries(); });
     dom.acctFilter.addEventListener('change', renderLedger);
     dom.ledSearch.addEventListener('input', renderLedger);
+    dom.csvBtn.addEventListener('click', downloadPettyCsv);
     dom.ledBody.addEventListener('click', (ev) => {
       const t = ev.target;
       const editBtn = t && t.closest ? t.closest('[data-edit]') : null;
