@@ -6,10 +6,21 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'" />
   <title>小口現金（出金・経費）</title>
   <style>
+    /* 既定はダーク（他ページと統一）。data-theme='light' でライトに切替。テーマキーは全ページ共有。 */
     :root {
+      color-scheme: dark;
+      --bg: #0f1620; --surface: #18212c; --surface-2: #1e2935; --border: #2a3744;
+      --text: #e7ecf2; --text-2: #9fadbd; --text-3: #6f7d8d;
+      --accent: #4a9fde; --accent-soft: rgba(74,159,222,.16); --danger: #e05656; --ok: #36b37e;
+      --ok-soft: rgba(54,179,126,.18); --danger-soft: rgba(224,86,86,.18);
+      --shadow: 0 1px 3px rgba(0,0,0,.4), 0 12px 32px -20px rgba(0,0,0,.7);
+    }
+    body[data-theme='light'] {
+      color-scheme: light;
       --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --border: #e2e6ea;
       --text: #1d2733; --text-2: #5b6573; --text-3: #8a96a3;
       --accent: #1a6fa8; --accent-soft: #e7f1f8; --danger: #c0392b; --ok: #1a7f37;
+      --ok-soft: #e6f4ea; --danger-soft: #fdecea;
       --shadow: 0 1px 3px rgba(20,30,45,.07), 0 6px 18px rgba(20,30,45,.06);
     }
     * { box-sizing: border-box; }
@@ -22,6 +33,12 @@
     header.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
     header.top h1 { font-size: 20px; margin: 0; font-weight: 800; letter-spacing: .02em; }
     header.top .sub { color: var(--text-3); font-size: 12px; }
+    .theme-toggle {
+      margin-left: auto; align-self: center; border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-2); border-radius: 999px; padding: 6px 13px; font-size: 12px; font-weight: 700; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px; transition: border-color .12s, color .12s;
+    }
+    .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 16px; margin-top: 14px; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
     .field { display: flex; flex-direction: column; gap: 4px; }
@@ -42,11 +59,23 @@
     .taxbtn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); border-radius: 7px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
     .taxbtn:hover { border-color: var(--accent); color: var(--accent); }
     .totalbox { border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; background: var(--surface-2); font-weight: 800; font-variant-numeric: tabular-nums; min-width: 96px; text-align: right; color: var(--accent); }
+    /* 品目（明細）: 1商品ごとの入力行 */
+    .itemrows { display: flex; flex-direction: column; gap: 6px; }
+    .itemrow { display: flex; gap: 6px; align-items: center; }
+    .itemrow .iname { flex: 1 1 auto; min-width: 0; }
+    .itemrow .iprice { display: flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 9px; padding: 0 9px; background: var(--surface); flex: none; }
+    .itemrow .iprice span { color: var(--text-3); font-size: 12px; }
+    .itemrow .iprice input { border: 0; background: transparent; padding: 8px 2px; width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+    .itemrow .iprice input:focus { outline: none; }
+    .itemrow .iprice:focus-within { border-color: var(--accent); }
+    .itemrow .irm { flex: none; width: 32px; height: 34px; border: 1px solid var(--border); background: var(--surface); color: var(--text-3); border-radius: 8px; font-size: 17px; line-height: 1; cursor: pointer; }
+    .itemrow .irm:hover { border-color: var(--danger); color: var(--danger); }
+    .additem { align-self: flex-start; margin-top: 2px; }
     .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .toolbar .grow { flex: 1; }
     .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; font-weight: 700; }
-    .badge.ok { background: #e6f4ea; color: var(--ok); }
-    .badge.ng { background: #fdecea; color: var(--danger); }
+    .badge.ok { background: var(--ok-soft); color: var(--ok); }
+    .badge.ng { background: var(--danger-soft); color: var(--danger); }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
     th { font-size: 11px; color: var(--text-3); font-weight: 700; background: var(--surface-2); position: sticky; top: 0; }
@@ -72,10 +101,13 @@
   </style>
 </head>
 <body>
+  <!-- 描画前に保存済みテーマを適用（ちらつき防止）。テーマキーは全ページ共有。 -->
+  <script>try{document.body.setAttribute('data-theme',(localStorage.getItem('line_reservation_calendar_theme')==='light')?'light':'dark');}catch(e){}</script>
   <div class="wrap">
     <header class="top">
       <h1>小口現金 <span class="muted" style="font-weight:700;font-size:14px;">出金・経費</span></h1>
       <span class="sub">レジ出金・経費の記録と月集計（売上・予約とは別管理）</span>
+      <button id="themeToggleBtn" type="button" class="theme-toggle" aria-pressed="false" title="ライトモードに切り替え">ライトモード</button>
     </header>
 
     <!-- 認証カード（未ログイン時のみ表示） -->
@@ -114,9 +146,10 @@
           <label>出金日</label>
           <input id="fDate" type="date" />
         </div>
-        <div class="field grow-m" style="flex:1;min-width:160px;">
-          <label>品目 / 摘要（明細は1行に1品）</label>
-          <textarea id="fItem" rows="2" placeholder="例:&#10;・お徳用おろし生姜 ¥299&#10;・トマトペースト ¥249"></textarea>
+        <div class="field grow-m" style="flex:1;min-width:240px;">
+          <label>品目（明細・1商品ずつ）</label>
+          <div class="itemrows" id="itemRows"></div>
+          <button type="button" class="btn ghost sm additem" id="addItemBtn">＋ 品目を追加</button>
         </div>
         <div class="field">
           <label>勘定科目</label>
@@ -209,8 +242,8 @@
     const $ = (id) => document.getElementById(id);
     const dom = {
       authCard: $('authCard'), tokenInput: $('tokenInput'), saveTokenBtn: $('saveTokenBtn'), authMsg: $('authMsg'),
-      storeSel: $('storeSel'), monthInput: $('monthInput'), reloadBtn: $('reloadBtn'), authBadge: $('authBadge'),
-      fDate: $('fDate'), fItem: $('fItem'), fCategory: $('fCategory'),
+      storeSel: $('storeSel'), monthInput: $('monthInput'), reloadBtn: $('reloadBtn'), authBadge: $('authBadge'), themeToggleBtn: $('themeToggleBtn'),
+      fDate: $('fDate'), itemRows: $('itemRows'), addItemBtn: $('addItemBtn'), fCategory: $('fCategory'),
       fBase: $('fBase'), fTax: $('fTax'), fTotal: $('fTotal'),
       fHandler: $('fHandler'), fNote: $('fNote'), addBtn: $('addBtn'), cancelEditBtn: $('cancelEditBtn'), addMsg: $('addMsg'), catList: $('catList'),
       totalYen: $('totalYen'), totalBreak: $('totalBreak'), byCategory: $('byCategory'), tbody: $('tbody'),
@@ -220,6 +253,24 @@
     const yen = (n) => '¥' + Number(n || 0).toLocaleString('ja-JP');
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const storeName = (key) => STORE_NAMES[key] || (PAGES && PAGES.resolveStoreName ? PAGES.resolveStoreName(key, '') : '') || key || '';
+
+    /* ===== テーマ（ダーク/ライト切替・全ページ共有キー line_reservation_calendar_theme） ===== */
+    const STORE_THEME_KEY = 'line_reservation_calendar_theme';
+    function normalizeTheme(t) { return t === 'light' ? 'light' : 'dark'; }
+    function getTheme() { try { return normalizeTheme(localStorage.getItem(STORE_THEME_KEY)); } catch (_) { return 'dark'; } }
+    function applyTheme(theme) {
+      const t = normalizeTheme(theme);
+      document.body.setAttribute('data-theme', t);
+      const btn = dom.themeToggleBtn;
+      if (btn) {
+        const isLight = t === 'light';
+        btn.textContent = isLight ? 'ダークモード' : 'ライトモード';
+        btn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+        btn.title = isLight ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
+      }
+    }
+    function setTheme(theme) { const t = normalizeTheme(theme); try { localStorage.setItem(STORE_THEME_KEY, t); } catch (_) {} applyTheme(t); }
+    function toggleTheme() { setTheme(document.body.getAttribute('data-theme') === 'light' ? 'dark' : 'light'); }
 
     function getToken() { return AUTH ? AUTH.getToken() : (localStorage.getItem('line_summary_admin_token') || ''); }
     function lockedStore() {
@@ -362,13 +413,67 @@
       dom.fTotal.textContent = yen(base + tax);
     }
 
+    /* ===== 品目（明細）: 1商品ごとの入力行 ===== */
+    function parsePrice(s) { const d = String(s == null ? '' : s).replace(/[^\d]/g, ''); return d ? String(parseInt(d, 10)) : ''; }
+    function makeItemRow(name, price) {
+      const row = document.createElement('div');
+      row.className = 'itemrow';
+      const ni = document.createElement('input');
+      ni.type = 'text'; ni.className = 'iname'; ni.placeholder = '品名（例: お徳用おろし生姜）'; ni.value = name || '';
+      const pw = document.createElement('div'); pw.className = 'iprice';
+      const ps = document.createElement('span'); ps.textContent = '¥';
+      const pi = document.createElement('input');
+      pi.type = 'number'; pi.min = '0'; pi.step = '1'; pi.inputMode = 'numeric'; pi.className = 'ipval'; pi.placeholder = '299'; pi.value = price || '';
+      pi.addEventListener('input', syncBaseFromItems);
+      pw.appendChild(ps); pw.appendChild(pi);
+      const rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'irm'; rm.title = 'この品目を削除'; rm.textContent = '×';
+      rm.addEventListener('click', () => { row.remove(); if (!dom.itemRows.children.length) addItemRow(); syncBaseFromItems(); });
+      row.appendChild(ni); row.appendChild(pw); row.appendChild(rm);
+      return row;
+    }
+    function addItemRow(name, price) { dom.itemRows.appendChild(makeItemRow(name, price)); }
+    function renderItemRows(items) {
+      dom.itemRows.innerHTML = '';
+      const list = (Array.isArray(items) && items.length) ? items : [{ name: '', price: '' }];
+      list.forEach((it) => addItemRow(it.name, it.price));
+    }
+    function collectItemsArray() {
+      return Array.prototype.map.call(dom.itemRows.children, (row) => {
+        const ni = row.querySelector('.iname'); const pi = row.querySelector('.ipval');
+        return { name: ni ? ni.value.trim() : '', price: parsePrice(pi ? pi.value : '') };
+      }).filter((it) => it.name || it.price);
+    }
+    // 保存用テキスト（従来形式と互換: 複数は「・品名 ¥価格」改行区切り、1件はそのまま）
+    function collectItemsText() {
+      const items = collectItemsArray();
+      if (!items.length) return '';
+      const lines = items.map((it) => [it.name, it.price ? '¥' + Number(it.price).toLocaleString('ja-JP') : ''].filter(Boolean).join(' '));
+      return lines.length > 1 ? lines.map((s) => '・' + s).join('\n') : lines[0];
+    }
+    function itemsSum() { return collectItemsArray().reduce((a, it) => a + (Number(it.price) || 0), 0); }
+    // 明細の価格合計を本体価格に反映（価格が1つでも入っていれば上書き）。
+    function syncBaseFromItems() { const sum = itemsSum(); if (sum > 0) dom.fBase.value = String(sum); computeTotal(); }
+    // 保存済みテキスト（「・品名 ¥価格」等）を入力行に逆パース。
+    function parseItemsText(str) {
+      const t = String(str == null ? '' : str);
+      if (!t.trim()) return [];
+      return t.split(/\r?\n/).map((raw) => {
+        const line = raw.replace(/^[・･\-\s　]+/, '').trim();
+        if (!line) return null;
+        const m = line.match(/^(.*?)[\s　]*[¥\\]\s*([\d,]+)\s*$/) || line.match(/^(.*?)[\s　]*([\d,]+)\s*円\s*$/);
+        if (m) return { name: m[1].trim(), price: parsePrice(m[2]) };
+        return { name: line, price: '' };
+      }).filter(Boolean);
+    }
+
     function exitEditMode() {
       editingId = null;
       dom.addBtn.textContent = '追加';
       dom.cancelEditBtn.style.display = 'none';
     }
     function clearForm() {
-      dom.fItem.value = ''; dom.fBase.value = ''; dom.fTax.value = '';
+      renderItemRows([]); dom.fBase.value = ''; dom.fTax.value = '';
       dom.fNote.value = ''; dom.fCategory.value = ''; dom.fHandler.value = '';
       dom.fDate.value = todayStr();
       computeTotal();
@@ -385,9 +490,9 @@
       const amt = Math.max(0, Math.floor(Number(e.amount_yen || 0)));
       const tax = Math.max(0, Math.floor(Number(e.tax_yen || 0)));
       dom.fDate.value = e.spent_on || todayStr();
-      dom.fItem.value = String(e.item || '');
+      renderItemRows(parseItemsText(e.item)); // 既存の品目テキストを明細行に展開
       dom.fCategory.value = e.category || '';
-      dom.fBase.value = String(Math.max(0, amt - tax));
+      dom.fBase.value = String(Math.max(0, amt - tax)); // 保存済み本体価格を優先（明細合計で上書きしない）
       dom.fTax.value = String(tax);
       dom.fHandler.value = e.handler || '';
       dom.fNote.value = e.note || '';
@@ -410,7 +515,7 @@
       if (amount <= 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '本体価格（と税額）を入力してください。'; return; }
       const fields = {
         spent_on: spent_on,
-        item: dom.fItem.value.trim(),
+        item: collectItemsText(),
         category: dom.fCategory.value.trim(),
         amount_yen: amount,
         tax_yen: tax,
@@ -433,7 +538,7 @@
           await apiFetch('/petty-cash', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ store_partition_key: store }, fields)) });
           dom.addMsg.className = 'msg ok';
           dom.addMsg.textContent = '追加しました（出金 ' + yen(amount) + '／本体 ' + yen(base) + '・税 ' + yen(tax) + '）。';
-          dom.fItem.value = ''; dom.fBase.value = ''; dom.fTax.value = ''; dom.fNote.value = ''; computeTotal();
+          renderItemRows([]); dom.fBase.value = ''; dom.fTax.value = ''; dom.fNote.value = ''; computeTotal();
           if (m && dom.monthInput.value !== m) dom.monthInput.value = m;
           await loadEntries();
         }
@@ -459,6 +564,8 @@
 
     // ── events ──
     dom.reloadBtn.addEventListener('click', loadEntries);
+    dom.themeToggleBtn.addEventListener('click', toggleTheme);
+    dom.addItemBtn.addEventListener('click', () => addItemRow());
     dom.storeSel.addEventListener('change', () => { if (editingId) cancelEdit(); loadEntries(); });
     dom.monthInput.addEventListener('change', () => { if (editingId) cancelEdit(); loadEntries(); });
     dom.addBtn.addEventListener('click', saveEntry);
@@ -501,6 +608,8 @@
 
     // ── init ──
     (async function init() {
+      applyTheme(getTheme()); // 保存済みテーマを適用＋ボタン文言を同期
+      renderItemRows([]); // 品目の入力行を1行用意
       captureLockedStoreFromUrl(); // populateStores より前（ロック判定に反映するため）
       populateStores();
       populateCategories(DEFAULT_CATEGORIES);
