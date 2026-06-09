@@ -222,7 +222,7 @@ async function sendTestReservationLineNotification(params: {
     String(fallbackOverallRoomId ?? "").trim()
   let targetRoomIds = await resolveGmailAlertTargetRooms(supabase, fallbackTargetRoomId)
   if (roomOverride) {
-    targetRoomIds = [roomOverride]
+    targetRoomIds = [{ roomId: roomOverride, storeKey: "" }]
   }
   if (targetRoomIds.length === 0) {
     return { sent: false, reason: "no_target_rooms" }
@@ -304,8 +304,10 @@ async function sendTestReservationLineNotification(params: {
   const successfulTargetRoomIds: string[] = []
   const failedRooms: Array<{ room_id: string; error: string }> = []
 
-  for (const targetRoomId of targetRoomIds) {
-    const sendResult = await sendLineMessage(targetRoomId, linePayload, lineAccessToken)
+  for (const target of targetRoomIds) {
+    const targetRoomId = target.roomId
+    const roomToken = resolveRoomLineToken(target.storeKey, lineAccessToken)
+    const sendResult = await sendLineMessage(targetRoomId, linePayload, roomToken)
     if (!sendResult.ok) {
       failedRooms.push({
         room_id: targetRoomId,
@@ -341,7 +343,7 @@ async function sendTestReservationLineNotification(params: {
     return {
       sent: false,
       reason: "line_send_failed",
-      target_rooms: targetRoomIds,
+      target_rooms: targetRoomIds.map((t) => t.roomId),
       failed_rooms: failedRooms,
       reservation_history: enriched.reservation?.reservationHistory ?? null,
     }
@@ -476,8 +478,10 @@ async function maybeSendGmailReservationAlerts(params: {
   const linePayload = buildGmailReservationAlertLinePayload(alerts)
   const successfulTargetRoomIds: string[] = []
 
-  for (const targetRoomId of targetRoomIds) {
-    const sendResult = await sendLineMessage(targetRoomId, linePayload, lineAccessToken)
+  for (const target of targetRoomIds) {
+    const targetRoomId = target.roomId
+    const roomToken = resolveRoomLineToken(target.storeKey, lineAccessToken)
+    const sendResult = await sendLineMessage(targetRoomId, linePayload, roomToken)
     if (!sendResult.ok) {
       await writeDeliveryLog(supabase, {
         jst_hour: jstHour,
@@ -867,36 +871,53 @@ function normalizeCalendarAllergy(raw: string | null | undefined): string | null
   return normalizeAllergyAnswer(raw == null ? null : String(raw))
 }
 
+// 予約通知の送信先（ルームIDと、その店舗キー）。店舗キーから店舗別LINEトークンを解決する。
+type GmailAlertTarget = { roomId: string; storeKey: string }
+
+// 店舗別チャネルトークン解決（_shared/line_client.ts の resolveChannelAccessToken と同一ロジック）。
+// 店舗別 LINE_CHANNEL_ACCESS_TOKEN__<STORE> があればそれを、無ければ呼び出し元のフォールバック（=グローバル）を使う。
+// これにより予約通知が各店舗の公式アカウント（＝月200通枠が店舗ごとに独立）から送られ、共有アカウントへの集中を防ぐ。
+function resolveRoomLineToken(storeKey: string, fallbackToken: string): string {
+  const key = String(storeKey ?? "").trim()
+  if (key) {
+    const envKey = `LINE_CHANNEL_ACCESS_TOKEN__${key.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`
+    const perStore = String(Deno.env.get(envKey) ?? "").trim()
+    if (perStore) return perStore
+  }
+  return fallbackToken
+}
+
 async function resolveGmailAlertTargetRooms(
   supabase: ReturnType<typeof createClient>,
   fallbackTargetRoomId: string,
-): Promise<string[]> {
+): Promise<GmailAlertTarget[]> {
   const { data, error } = await supabase
     .from("room_summary_settings")
-    .select("room_id, is_enabled, gmail_reservation_alert_enabled")
+    .select("room_id, is_enabled, gmail_reservation_alert_enabled, receipt_report_store_partition_key")
 
   if (error) {
     console.error("Failed to fetch room settings for Gmail alert targets:", error.message)
     const fallback = String(fallbackTargetRoomId ?? "").trim()
-    return fallback ? [fallback] : []
+    return fallback ? [{ roomId: fallback, storeKey: "" }] : []
   }
 
   const rows = Array.isArray(data) ? data : []
-  const enabledRoomIds = rows
-    .filter((row: any) => row?.is_enabled !== false && row?.gmail_reservation_alert_enabled === true)
-    .map((row: any) => String(row?.room_id ?? "").trim())
-    .filter((roomId: string) => roomId.length > 0)
-
-  if (enabledRoomIds.length > 0) {
-    return Array.from(new Set(enabledRoomIds))
+  const seen = new Set<string>()
+  const targets: GmailAlertTarget[] = []
+  for (const row of rows) {
+    const r = row as any
+    if (r?.is_enabled === false || r?.gmail_reservation_alert_enabled !== true) continue
+    const roomId = String(r?.room_id ?? "").trim()
+    if (!roomId || seen.has(roomId)) continue
+    seen.add(roomId)
+    targets.push({ roomId, storeKey: String(r?.receipt_report_store_partition_key ?? "").trim() })
   }
 
-  if (rows.length > 0) {
-    return []
-  }
+  if (targets.length > 0) return targets
+  if (rows.length > 0) return []
 
   const fallback = String(fallbackTargetRoomId ?? "").trim()
-  return fallback ? [fallback] : []
+  return fallback ? [{ roomId: fallback, storeKey: "" }] : []
 }
 
 function loadGmailAlertEnv(fallbackOverallRoomId: string): GmailAlertEnvState {
