@@ -9922,11 +9922,19 @@
     function openUserPermissionsForStore(storeName) {
       activeUserPermissionPendingOnlyFilter = false;
       activeWebhookPermissionFilterStore = String(storeName || '').trim();
-      const permissionsSection = document.querySelector('section.card.permissions');
-      if (permissionsSection) {
-        permissionsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // 権限セクションは「ユーザー権限」タブ(#appPanel-permissions)内にあり、非表示タブのままだと
+      // スクロールしても画面上は無反応に見える（エラーも出ない）。先にタブを切り替えて表示する。
+      if (typeof window.switchAppTab === 'function') {
+        try { window.switchAppTab('permissions'); } catch (_) {}
       }
       renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
+      const permissionsSection = document.querySelector('section.card.permissions');
+      if (permissionsSection) {
+        // タブ表示(display切替)が反映されてからスクロールする。
+        requestAnimationFrame(function () {
+          try { permissionsSection.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+        });
+      }
     }
 
     async function api(path, options) {
@@ -10431,12 +10439,18 @@
     function openUserPermissionsPendingOnly() {
       activeUserPermissionPendingOnlyFilter = true;
       activeWebhookPermissionFilterStore = '';
-      const permissionsSection = document.querySelector('section.card.permissions');
-      if (permissionsSection) {
-        permissionsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // 権限タブを表示してからスクロール（非表示タブのままだと無反応に見える）。
+      if (typeof window.switchAppTab === 'function') {
+        try { window.switchAppTab('permissions'); } catch (_) {}
       }
       setUserPermissionTab('names');
       renderUserPermissions(currentState && currentState.user_permissions ? currentState.user_permissions : []);
+      const permissionsSection = document.querySelector('section.card.permissions');
+      if (permissionsSection) {
+        requestAnimationFrame(function () {
+          try { permissionsSection.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+        });
+      }
     }
 
     function renderUserPermissionNameList(items) {
