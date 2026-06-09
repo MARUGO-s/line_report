@@ -225,6 +225,21 @@
     function lockedStore() {
       try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch (_) { return ''; }
     }
+    // LINE経由（?from=line&store_key=...）で開いた時、その店舗を line_locked_store に保存して
+    // 店舗をロックする（＝その店舗のみ閲覧）。売上分析ページと同じ仕組み。
+    function captureLockedStoreFromUrl() {
+      try {
+        const params = new URLSearchParams(location.search);
+        if (params.get('from') !== 'line') return;
+        const raw = String(params.get('store_key') || params.get('store') || '').trim();
+        if (!raw) return;
+        let key = (PAGES && typeof PAGES.resolveStoreKey === 'function') ? PAGES.resolveStoreKey(raw, '') : raw.toLowerCase();
+        key = String(key || '').trim();
+        if (!key || !STORE_NAMES[key]) return; // 既知店舗のみロック
+        try { sessionStorage.setItem('line_locked_store', key); } catch (_) {}
+        try { localStorage.setItem('line_locked_store', key); } catch (_) {}
+      } catch (_) {}
+    }
     function isLineEntry() {
       try { return new URLSearchParams(location.search).get('from') === 'line' || !!lockedStore(); } catch (_) { return false; }
     }
@@ -486,6 +501,7 @@
 
     // ── init ──
     (async function init() {
+      captureLockedStoreFromUrl(); // populateStores より前（ロック判定に反映するため）
       populateStores();
       populateCategories(DEFAULT_CATEGORIES);
       dom.fDate.value = todayStr();

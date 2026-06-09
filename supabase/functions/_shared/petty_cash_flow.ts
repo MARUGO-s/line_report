@@ -6,6 +6,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0
 import type { StoreRegistryRow } from './store_receipt.ts'
 import type { LineImageReceiptAnalysis } from './receipt_types.ts'
 import { replyLineMessages, resolveChannelAccessToken } from './line_client.ts'
+import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 
 const PENDING_TABLE = 'petty_cash_pending'
 const ENTRIES_TABLE = 'petty_cash_entries'
@@ -15,6 +16,10 @@ const TRIGGER_WORDS = new Set(['経費', '経費登録', '出金', '出金登録
 const CANCEL_WORDS = new Set(['キャンセル', '中止', 'やめる', 'やめ', 'cancel', 'Cancel'])
 // レジ出金（＝経費の支払い）伝票のマーカー。これらを含む受領レシートは「売上」ではない。
 const CASH_OUT_MARKERS = /レジ出金|出金伝票|今回出金額|出金額|現金出金|小口出金|出金処理/
+// LINE完了カードから開く小口現金ページ。売上分析と同じ仕組み（from=line＋store_key＋ワンタイム lt）で
+// 自動ログインし、その店舗のみ閲覧できるようにする。
+const PETTY_CASH_PAGE_BASE = 'https://marugo-s.github.io/line_report/petty_cash.html'
+const LINE_PETTY_URI_MAX_LEN = 1000
 
 export type PettyCashTextResult = { handled: boolean; replied: boolean }
 export type PettyCashImageResult = { handled: boolean; replied: boolean; saved?: boolean; reason?: string }
@@ -212,32 +217,69 @@ function cashOutOfferFlex(pendingId: number, amount: number): Record<string, unk
   }
 }
 
-function doneFlex(p: PendingRow): Record<string, unknown> {
+// 小口現金ページのURLを組み立てる（store_key で店舗指定、from=line でロック、lt はワンタイムログイン）。
+function buildPettyCashPageUrl(storeKey: string, loginToken?: string | null): string {
+  const key = String(storeKey || '').trim()
+  const lt = String(loginToken ?? '').trim()
+  if (lt) {
+    const withToken = `${PETTY_CASH_PAGE_BASE}?${new URLSearchParams({ store_key: key, from: 'line', lt }).toString()}`
+    if (withToken.length <= LINE_PETTY_URI_MAX_LEN) return withToken
+  }
+  return `${PETTY_CASH_PAGE_BASE}?${new URLSearchParams({ store_key: key, from: 'line' }).toString()}`
+}
+
+// 売上分析（レシート）と同じ仕組み: ワンタイムのログインリンク(lt)を発行し、
+// 店舗を限定（その店舗のみ閲覧）した小口現金ページのURLを返す。発行失敗時はトークン無しURL。
+async function buildPettyCashDashboardLink(supabase: SupabaseClient, storeKey: string): Promise<string> {
+  const key = String(storeKey || '').trim()
+  if (!key) return ''
+  try {
+    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+      source: 'line_petty_cash',
+      store_partition_key: key,
+    })
+    return buildPettyCashPageUrl(key, issued.token)
+  } catch (e) {
+    console.error('buildPettyCashDashboardLink failed:', e instanceof Error ? e.message : String(e))
+    return buildPettyCashPageUrl(key, null)
+  }
+}
+
+function doneFlex(p: PendingRow, pageUrl?: string | null): Record<string, unknown> {
   const amount = Math.max(0, Math.floor(Number(p.amount_yen ?? 0)))
   const tax = Math.max(0, Math.floor(Number(p.tax_yen ?? 0)))
   const base = Math.max(0, amount - tax)
-  return {
-    type: 'flex',
-    altText: '小口現金に記録しました',
-    contents: {
-      type: 'bubble',
-      body: {
-        type: 'box', layout: 'vertical', spacing: 'sm',
-        contents: [
-          { type: 'text', text: '✅ 小口現金に記録しました', weight: 'bold', size: 'md', color: '#1a7f37' },
-          { type: 'separator', margin: 'md' },
-          ...fieldRows([
-            ['日付', p.spent_on],
-            ['品目', p.item],
-            ['本体', formatYen(base)],
-            ['税額', tax > 0 ? formatYen(tax) : '—'],
-            ['出金額', formatYen(amount)],
-          ]),
-          { type: 'text', text: '小口現金ページ（出金・経費）に反映されます。', size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
-        ],
-      },
+  const bubble: Record<string, unknown> = {
+    type: 'bubble',
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'text', text: '✅ 小口現金に記録しました', weight: 'bold', size: 'md', color: '#1a7f37' },
+        { type: 'separator', margin: 'md' },
+        ...fieldRows([
+          ['日付', p.spent_on],
+          ['品目', p.item],
+          ['本体', formatYen(base)],
+          ['税額', tax > 0 ? formatYen(tax) : '—'],
+          ['出金額', formatYen(amount)],
+        ]),
+        { type: 'text', text: '下のボタンから小口現金ページ（出金・経費）を開いて確認・編集できます。', size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
+      ],
     },
   }
+  const url = String(pageUrl ?? '').trim()
+  if (url) {
+    bubble.footer = {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        {
+          type: 'button', style: 'primary', color: '#1a7f37', height: 'sm',
+          action: { type: 'uri', label: '小口現金ページを開く', uri: url },
+        },
+      ],
+    }
+  }
+  return { type: 'flex', altText: '小口現金に記録しました', contents: bubble }
 }
 
 type PendingRow = {
@@ -515,5 +557,7 @@ export async function handlePettyCashPostback(
     return simpleNoticeFlex('この経費はすでに記録済みのようです。小口現金ページをご確認ください。')
   }
   await supabase.from(PENDING_TABLE).update({ status: 'recorded', updated_at: new Date().toISOString() }).eq('id', id)
-  return doneFlex(p)
+  // 売上分析と同じ仕組みで、その店舗のみ閲覧できる小口現金ページへのワンタイムログインリンクを付ける。
+  const pageUrl = await buildPettyCashDashboardLink(supabase, String(p.store_partition_key ?? ''))
+  return doneFlex(p, pageUrl)
 }
