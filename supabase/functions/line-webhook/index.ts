@@ -956,6 +956,41 @@ async function processReceiptImageEvent(
     }
   }
 
+  // 経費(小口)専用の再解析（独立経路）: 売上(精算)解析プロンプトには一切手を入れず、
+  // 経費専用の追記(EXPENSE_RECEIPT_PROMPT_ADDITION)で line_items・小計/外税 を取得する。
+  // Claude(キーあり)優先、無ければ Groq。経費フローの各ハンドラから「必要時のみ」呼ばれる。
+  const reanalyzeAsExpense = async () => {
+    const claudeKey = resolveClaudeApiKey()
+    if (claudeKey) {
+      const r = await analyzeLineImageWithClaude(contentFetch.bytes, contentFetch.contentType, lineMessageId, claudeKey, EXPENSE_RECEIPT_PROMPT_ADDITION, CLAUDE_RECEIPT_MODEL)
+      await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, r.usage)
+      if (r.analysis?.receipt) return r.analysis.receipt
+    }
+    const g = await analyzeLineImageWithGroqScout(contentFetch.bytes, contentFetch.contentType, lineMessageId, groqApiKey, EXPENSE_RECEIPT_PROMPT_ADDITION)
+    await recordAiUsage('groq', GROQ_RECEIPT_MODEL, g.usage)
+    return g.analysis?.receipt ?? null
+  }
+
+  // 小口現金（経費）の「先打ち」最適化: 直前に「経費」と送られ画像待ち(await_image)なら、
+  // 売上(精算)解析（Groq判定＋Claude/Gemini）をスキップして、経費専用解析だけ実行する。
+  // ＝先打ち時は AI 呼び出しを1回（経費解析のみ）に削減。pending が無ければ {handled:false} で
+  // 通常の精算解析へフォールスルー（普通に画像だけ送る従来フローは一切変わらない）。
+  {
+    const pettyUserId = event.source?.userId ? String(event.source.userId) : null
+    const pettyEarly = await handlePettyCashImageIfPending(supabase, registry, {
+      roomId,
+      userId: pettyUserId,
+      replyToken: rawReplyToken,
+      lineMessageId,
+      receipt: null,
+      summary: '',
+      reanalyze: reanalyzeAsExpense,
+    })
+    if (pettyEarly.handled) {
+      return { saved: !!pettyEarly.saved, replied: !!pettyEarly.replied, reason: pettyEarly.reason ?? 'petty_cash_image' }
+    }
+  }
+
   let analyzed: Awaited<ReturnType<typeof analyzeLineImageWithGroqScout>>
 
   if (useGeminiForReceipt) {
@@ -1097,38 +1132,8 @@ async function processReceiptImageEvent(
   // 「期間集計レポート」等のマーカーを入れることで判定する。
   const analyzedSummaryText = String(analyzed.analysis?.summary ?? '')
 
-  // 経費(小口)専用の再解析（独立経路）: 売上(精算)解析プロンプトには一切手を入れず、
-  // 経費専用の追記(EXPENSE_RECEIPT_PROMPT_ADDITION)で line_items・小計/外税 を取得する。
-  // Claude(キーあり)優先、無ければ Groq。経費フローの各ハンドラから「必要時のみ」呼ばれる。
-  const reanalyzeAsExpense = async () => {
-    const claudeKey = resolveClaudeApiKey()
-    if (claudeKey) {
-      const r = await analyzeLineImageWithClaude(contentFetch.bytes, contentFetch.contentType, lineMessageId, claudeKey, EXPENSE_RECEIPT_PROMPT_ADDITION, CLAUDE_RECEIPT_MODEL)
-      await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, r.usage)
-      if (r.analysis?.receipt) return r.analysis.receipt
-    }
-    const g = await analyzeLineImageWithGroqScout(contentFetch.bytes, contentFetch.contentType, lineMessageId, groqApiKey, EXPENSE_RECEIPT_PROMPT_ADDITION)
-    await recordAiUsage('groq', GROQ_RECEIPT_MODEL, g.usage)
-    return g.analysis?.receipt ?? null
-  }
-
-  // 小口現金（経費）取込: 直前に「経費」と送られ画像待ちなら、この画像を経費として記録する（売上に登録しない）。
-  // 明示トリガー時のみ作動。pending が無ければフォールスルーして従来のレシート/予約処理へ。
-  {
-    const pettyUserId = event.source?.userId ? String(event.source.userId) : null
-    const pettyResult = await handlePettyCashImageIfPending(supabase, registry, {
-      roomId,
-      userId: pettyUserId,
-      replyToken: rawReplyToken,
-      lineMessageId,
-      receipt: analyzed.analysis?.receipt ?? null,
-      summary: analyzedSummaryText,
-      reanalyze: reanalyzeAsExpense,
-    })
-    if (pettyResult.handled) {
-      return { saved: !!pettyResult.saved, replied: !!pettyResult.replied, reason: pettyResult.reason ?? 'petty_cash_image' }
-    }
-  }
+  // （経費の先打ち await_image 取込と reanalyzeAsExpense の定義は、精算解析を省くため上方へ移動済み。
+  //   ここまで来た時点で await_image の経費 pending は無い＝以降は通常の精算レシートとして処理する。）
 
   if (/期間集計|日付範囲|GP（グループ）|ＧＰ（グループ）|［期間］|\[期間\]/.test(analyzedSummaryText)) {
     // 売上には登録しないが、「これは日々の売上ではないので登録していません」の通知を返信する。
