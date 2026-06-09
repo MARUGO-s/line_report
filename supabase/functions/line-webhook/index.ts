@@ -51,7 +51,7 @@ import {
   resolveReceiptDateIsoForPersist,
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
-import { analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
+import { analyzeLineImageWithClaude, analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
 import {
   combineStoreReceiptPromptAdditions,
   fetchStoreReceiptAnalysisPromptAddition,
@@ -837,6 +837,11 @@ async function handleDailySalesImportPostback(
 
 // レシート画像解析に Gemini を使う店舗（手書き数字などの読み取り精度向上が目的）。他店は Groq のまま。
 const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage', 'sushikoruri'])
+// Claude(Haiku) で解析する店舗（精度検証用）。シークレット名 claude_haiku（互換: ANTHROPIC_API_KEY）。
+const CLAUDE_RECEIPT_STORE_KEYS = new Set<string>(['claudia2'])
+function resolveClaudeApiKey(): string {
+  return (Deno.env.get('claude_haiku') ?? Deno.env.get('CLAUDE_HAIKU') ?? Deno.env.get('ANTHROPIC_API_KEY') ?? '').trim()
+}
 // 受信専用店（レシートしか送られない店）: Groqが反射・光で kind を外して general 誤判定したとき、
 // 「この店舗のレシートで確定」と宣言して1回だけ強制再解析する対象。Gemini は使わない（セキュリティ順守）。
 const FORCE_RECEIPT_RETRY_STORE_KEYS = new Set<string>(['barpelota'])
@@ -920,13 +925,15 @@ async function processReceiptImageEvent(
 
   // 一部店舗（ソバージュ・鮨こるり）は Gemini で解析する（手書き数字などの読み取り精度向上が目的）。
   const useGeminiForReceipt = GEMINI_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
+  const useClaudeForReceipt = !useGeminiForReceipt && CLAUDE_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
   const receiptGeminiModel = resolveReceiptGeminiModel()
   const GROQ_RECEIPT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  const CLAUDE_RECEIPT_MODEL = 'claude-haiku-4-5'
 
   // AI使用料ページの「実測」表示用に、APIが返した実測トークンを1行記録する。
   // best-effort: 失敗してもレシート処理は止めない（売上登録・返信が最優先）。
   const recordAiUsage = async (
-    provider: 'gemini' | 'groq',
+    provider: 'gemini' | 'groq' | 'claude',
     model: string,
     usage: LineImageVisionUsage | null | undefined,
   ): Promise<void> => {
@@ -999,6 +1006,50 @@ async function processReceiptImageEvent(
           `Gemini receipt analysis failed (store=${registry.store_partition_key}); using Groq pre-classification:`,
           gem.failure?.stage,
           gem.failure?.message,
+        )
+        analyzed = pre
+      }
+    }
+  } else if (useClaudeForReceipt) {
+    // Claude(Haiku) で高精度解析。まず安価な Groq で「レシートか否か」を事前判定し、非レシートは弾く。
+    const pre = await analyzeLineImageWithGroqScout(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      lineMessageId,
+      groqApiKey,
+      receiptPromptAddition,
+    )
+    await recordAiUsage('groq', GROQ_RECEIPT_MODEL, pre.usage)
+
+    if (pre.analysis?.reservation) {
+      analyzed = pre
+    } else if (!shouldEscalateToGeminiReceipt(pre.analysis)) {
+      console.log(`[receipt_pre_filter] skip non-receipt image (store=${registry.store_partition_key}, msg=${lineMessageId})`)
+      return { saved: false, replied: false, reason: 'pre_filter_non_receipt' }
+    } else {
+      if (receiptReplyToken) {
+        await pushLineTextToTarget(
+          roomId,
+          '📸 画像を受け付けました。\nAI（Claude）で内容を解析しています。少々お待ちください。',
+          accessToken,
+        )
+      }
+      const cla = await analyzeLineImageWithClaude(
+        contentFetch.bytes,
+        contentFetch.contentType,
+        lineMessageId,
+        resolveClaudeApiKey(),
+        receiptPromptAddition,
+        CLAUDE_RECEIPT_MODEL,
+      )
+      if (cla.analysis) {
+        analyzed = cla
+        await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, cla.usage)
+      } else {
+        console.error(
+          `Claude receipt analysis failed (store=${registry.store_partition_key}); using Groq pre-classification:`,
+          cla.failure?.stage,
+          cla.failure?.message,
         )
         analyzed = pre
       }

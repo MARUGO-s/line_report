@@ -292,3 +292,122 @@ export async function analyzeLineImageWithGemini(
   }
   return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null, usage }
 }
+
+function extractTextFromClaudeResponse(payload: unknown): string {
+  const content = (payload as { content?: unknown })?.content
+  const list = Array.isArray(content) ? content : []
+  const parts: string[] = []
+  for (const block of list) {
+    const b = block as { type?: unknown; text?: unknown }
+    if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) parts.push(b.text)
+  }
+  return parts.join('\n').trim()
+}
+
+function extractClaudeUsage(payload: unknown): LineImageVisionUsage | null {
+  const u = (payload as { usage?: unknown })?.usage as { input_tokens?: unknown; output_tokens?: unknown } | undefined
+  if (!u) return null
+  const input = Number(u.input_tokens ?? 0) || 0
+  const output = Number(u.output_tokens ?? 0) || 0
+  return { inputTokens: input, outputTokens: output, thinkingTokens: null, totalTokens: input + output }
+}
+
+/**
+ * Anthropic Claude（vision）でレシート画像を解析する。
+ * 戻り値は analyzeLineImageWithGroqScout / analyzeLineImageWithGemini と同型なので、呼び出し側は差し替えるだけでよい。
+ * 失敗（キー無し/HTTP/空/解析不能/タイムアウト）時は failure を返し、呼び出し側で Groq へフォールバックできる。
+ */
+export async function analyzeLineImageWithClaude(
+  bytes: Uint8Array,
+  contentType: string | null,
+  fileName: string,
+  anthropicApiKey: string,
+  systemPromptAddition = '',
+  model = 'claude-haiku-4-5',
+  timeoutMs = 30000,
+): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
+  if (!anthropicApiKey) {
+    return { analysis: null, failure: { stage: 'missing_api_key', message: 'Anthropic API key (claude_haiku) is missing.' } }
+  }
+  if (bytes.byteLength <= 0 || bytes.byteLength > GROQ_VISION_BASE64_MAX_BYTES) {
+    return { analysis: null, failure: { stage: 'invalid_image_size', message: `Image bytes out of range: ${bytes.byteLength}` } }
+  }
+  const mime = String(contentType ?? '').trim().toLowerCase()
+  if (!isVisionAnalyzableImageMime(mime)) {
+    return { analysis: null, failure: { stage: 'unsupported_mime', message: `Unsupported image mime: ${mime || '(empty)'}` } }
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let response: Response
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': anthropicApiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        max_tokens: 1024,
+        system: buildReceiptVisionSystemPrompt(systemPromptAddition),
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: mime, data: toBase64(bytes) } },
+              { type: 'text', text: `この画像を解析し、指定のJSONだけを返してください（前後に文章やコードブロックを付けない）。ファイル名: ${fileName || '(unknown)'}` },
+            ],
+          },
+        ],
+      }),
+    })
+  } catch (e) {
+    clearTimeout(timer)
+    const aborted = (e as { name?: string })?.name === 'AbortError'
+    return {
+      analysis: null,
+      failure: {
+        stage: aborted ? 'claude_timeout' : 'claude_fetch_error',
+        message: aborted ? `Claude request timed out after ${timeoutMs}ms` : String(e).slice(0, 300),
+      },
+    }
+  }
+  clearTimeout(timer)
+
+  if (!response.ok) {
+    const err = await response.text()
+    console.error('Claude image vision failed:', response.status, err.slice(0, 500))
+    return {
+      analysis: null,
+      failure: {
+        stage: 'claude_http_error',
+        httpStatus: response.status,
+        message: normalizeInlineText(err).slice(0, 500) || 'Anthropic API request failed.',
+      },
+    }
+  }
+
+  const json = await response.json()
+  const usage = extractClaudeUsage(json)
+  const content = extractTextFromClaudeResponse(json)
+  if (!content) {
+    return { analysis: null, failure: { stage: 'claude_empty_content', message: 'Claude response content is empty.' }, usage }
+  }
+
+  const extracted = parseFirstJsonObject(content)
+  if (extracted && typeof extracted === 'object') {
+    const normalized = normalizeLineImageAnalysisResult(extracted as Record<string, unknown>)
+    if (normalized) return { analysis: normalized, failure: null, usage }
+  }
+  const salvaged = salvageLineImageAnalysisResultFromText(content)
+  if (salvaged) return { analysis: salvaged, failure: null, usage }
+
+  const fallbackSummary = normalizeInlineText(content).slice(0, 240)
+  if (!fallbackSummary) {
+    return { analysis: null, failure: { stage: 'unparsable_model_output', message: 'Claude response could not be parsed.' }, usage }
+  }
+  return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null, usage }
+}
