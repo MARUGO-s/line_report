@@ -143,6 +143,7 @@
           <input id="fHandler" type="text" placeholder="例: Y.MIYANO" style="width:118px;" />
         </div>
         <button class="btn" id="addBtn" type="button">追加</button>
+        <button class="btn ghost" id="cancelEditBtn" type="button" style="display:none;">編集をやめる</button>
       </div>
       <div class="row" style="margin-top:8px;">
         <div class="field" style="flex:1;">
@@ -201,6 +202,8 @@
     const DEFAULT_CATEGORIES = ['消耗品費', '食材・仕入', '雑費', '衛生用品', '修繕費', 'その他'];
     const LS_STORE = 'petty_cash_last_store';
     const LS_MONTH = 'petty_cash_last_month';
+    let editingId = null;      // 編集中の行ID（null=新規追加モード）
+    let lastEntries = [];      // 直近に表示した行（編集時のフォーム流し込み用）
 
     const $ = (id) => document.getElementById(id);
     const dom = {
@@ -208,7 +211,7 @@
       storeSel: $('storeSel'), monthInput: $('monthInput'), reloadBtn: $('reloadBtn'), authBadge: $('authBadge'),
       fDate: $('fDate'), fItem: $('fItem'), fCategory: $('fCategory'),
       fBase: $('fBase'), fTax: $('fTax'), fTotal: $('fTotal'),
-      fHandler: $('fHandler'), fNote: $('fNote'), addBtn: $('addBtn'), addMsg: $('addMsg'), catList: $('catList'),
+      fHandler: $('fHandler'), fNote: $('fNote'), addBtn: $('addBtn'), cancelEditBtn: $('cancelEditBtn'), addMsg: $('addMsg'), catList: $('catList'),
       totalYen: $('totalYen'), totalBreak: $('totalBreak'), byCategory: $('byCategory'), tbody: $('tbody'),
       emptyState: $('emptyState'), colStoreHead: document.querySelector('#theadRow .colStore'),
     };
@@ -311,7 +314,7 @@
           + '<td class="amt">' + yen(amt) + '</td>'
           + '<td>' + esc(e.handler || '') + '</td>'
           + storeCell
-          + '<td><button class="btn danger sm" data-del="' + esc(e.id) + '" type="button">削除</button></td>'
+          + '<td style="white-space:nowrap;"><button class="btn ghost sm" data-edit="' + esc(e.id) + '" type="button">編集</button> <button class="btn danger sm" data-del="' + esc(e.id) + '" type="button">削除</button></td>'
           + '</tr>';
       }).join('');
     }
@@ -328,6 +331,7 @@
         const data = await apiFetch('/petty-cash?' + qs.toString());
         setAuthBadge(true);
         populateCategories(data.categories);
+        lastEntries = Array.isArray(data.entries) ? data.entries : [];
         renderSummary(data);
         renderTable(data);
       } catch (e) {
@@ -342,9 +346,45 @@
       dom.fTotal.textContent = yen(base + tax);
     }
 
-    async function addEntry() {
-      const store = dom.storeSel.value || lockedStore();
-      if (!store) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '店舗を選択してください（全店舗のままでは追加できません）。'; return; }
+    function exitEditMode() {
+      editingId = null;
+      dom.addBtn.textContent = '追加';
+      dom.cancelEditBtn.style.display = 'none';
+    }
+    function clearForm() {
+      dom.fItem.value = ''; dom.fBase.value = ''; dom.fTax.value = '';
+      dom.fNote.value = ''; dom.fCategory.value = ''; dom.fHandler.value = '';
+      dom.fDate.value = todayStr();
+      computeTotal();
+    }
+    function cancelEdit() {
+      exitEditMode(); clearForm();
+      dom.addMsg.className = 'msg'; dom.addMsg.textContent = '';
+    }
+    // 行の「編集」: 値を上のフォームに読み込み、更新モードに切替。
+    function startEdit(id) {
+      const e = lastEntries.find((x) => String(x.id) === String(id));
+      if (!e) return;
+      editingId = e.id;
+      const amt = Math.max(0, Math.floor(Number(e.amount_yen || 0)));
+      const tax = Math.max(0, Math.floor(Number(e.tax_yen || 0)));
+      dom.fDate.value = e.spent_on || todayStr();
+      dom.fItem.value = String(e.item || '').replace(/\n/g, ' ');
+      dom.fCategory.value = e.category || '';
+      dom.fBase.value = String(Math.max(0, amt - tax));
+      dom.fTax.value = String(tax);
+      dom.fHandler.value = e.handler || '';
+      dom.fNote.value = e.note || '';
+      computeTotal();
+      dom.addBtn.textContent = '更新';
+      dom.cancelEditBtn.style.display = '';
+      dom.addMsg.className = 'msg';
+      dom.addMsg.textContent = '編集中：' + (e.spent_on || '') + ' / ' + yen(amt) + '（内容を直して「更新」）';
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
+    }
+
+    // 追加（新規）／更新（編集中）を分岐して保存。
+    async function saveEntry() {
       const spent_on = dom.fDate.value;
       const base = Math.floor(Number(dom.fBase.value || 0));
       const tax = Math.floor(Number(dom.fTax.value || 0));
@@ -352,29 +392,35 @@
       if (!Number.isFinite(base) || base < 0 || !Number.isFinite(tax) || tax < 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '本体価格・税額を正しく入力してください。'; return; }
       const amount = base + tax;
       if (amount <= 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '本体価格（と税額）を入力してください。'; return; }
+      const fields = {
+        spent_on: spent_on,
+        item: dom.fItem.value.trim(),
+        category: dom.fCategory.value.trim(),
+        amount_yen: amount,
+        tax_yen: tax,
+        handler: dom.fHandler.value.trim(),
+        note: dom.fNote.value.trim(),
+      };
+      const m = spent_on.slice(0, 7);
       dom.addBtn.disabled = true;
       try {
-        await apiFetch('/petty-cash', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            store_partition_key: store,
-            spent_on: spent_on,
-            item: dom.fItem.value.trim(),
-            category: dom.fCategory.value.trim(),
-            amount_yen: amount,
-            tax_yen: tax,
-            handler: dom.fHandler.value.trim(),
-            note: dom.fNote.value.trim(),
-          }),
-        });
-        dom.addMsg.className = 'msg ok';
-        dom.addMsg.textContent = '追加しました（出金 ' + yen(amount) + '／本体 ' + yen(base) + '・税 ' + yen(tax) + '）。';
-        dom.fItem.value = ''; dom.fBase.value = ''; dom.fTax.value = ''; dom.fNote.value = ''; computeTotal();
-        // 月入力が出金日と別月なら、出金日の月に合わせて表示
-        const m = spent_on.slice(0, 7);
-        if (m && dom.monthInput.value !== m) dom.monthInput.value = m;
-        await loadEntries();
+        if (editingId) {
+          await apiFetch('/petty-cash', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ id: editingId }, fields)) });
+          exitEditMode(); clearForm();
+          dom.addMsg.className = 'msg ok';
+          dom.addMsg.textContent = '更新しました（出金 ' + yen(amount) + '／本体 ' + yen(base) + '・税 ' + yen(tax) + '）。';
+          if (m && dom.monthInput.value !== m) dom.monthInput.value = m;
+          await loadEntries();
+        } else {
+          const store = dom.storeSel.value || lockedStore();
+          if (!store) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '店舗を選択してください（全店舗のままでは追加できません）。'; return; }
+          await apiFetch('/petty-cash', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ store_partition_key: store }, fields)) });
+          dom.addMsg.className = 'msg ok';
+          dom.addMsg.textContent = '追加しました（出金 ' + yen(amount) + '／本体 ' + yen(base) + '・税 ' + yen(tax) + '）。';
+          dom.fItem.value = ''; dom.fBase.value = ''; dom.fTax.value = ''; dom.fNote.value = ''; computeTotal();
+          if (m && dom.monthInput.value !== m) dom.monthInput.value = m;
+          await loadEntries();
+        }
       } catch (e) {
         dom.addMsg.className = 'msg err';
         dom.addMsg.textContent = e.message || String(e);
@@ -397,9 +443,10 @@
 
     // ── events ──
     dom.reloadBtn.addEventListener('click', loadEntries);
-    dom.storeSel.addEventListener('change', loadEntries);
-    dom.monthInput.addEventListener('change', loadEntries);
-    dom.addBtn.addEventListener('click', addEntry);
+    dom.storeSel.addEventListener('change', () => { if (editingId) cancelEdit(); loadEntries(); });
+    dom.monthInput.addEventListener('change', () => { if (editingId) cancelEdit(); loadEntries(); });
+    dom.addBtn.addEventListener('click', saveEntry);
+    dom.cancelEditBtn.addEventListener('click', cancelEdit);
     dom.fBase.addEventListener('input', computeTotal);
     dom.fTax.addEventListener('input', computeTotal);
     document.querySelectorAll('.taxbtn').forEach((b) => b.addEventListener('click', () => {
@@ -409,8 +456,11 @@
       computeTotal();
     }));
     dom.tbody.addEventListener('click', (ev) => {
-      const btn = ev.target && ev.target.closest ? ev.target.closest('[data-del]') : null;
-      if (btn) deleteEntry(btn.getAttribute('data-del'));
+      const t = ev.target;
+      const editBtn = t && t.closest ? t.closest('[data-edit]') : null;
+      if (editBtn) { startEdit(editBtn.getAttribute('data-edit')); return; }
+      const delBtn = t && t.closest ? t.closest('[data-del]') : null;
+      if (delBtn) deleteEntry(delBtn.getAttribute('data-del'));
     });
     dom.saveTokenBtn.addEventListener('click', async () => {
       const t = dom.tokenInput.value.trim();

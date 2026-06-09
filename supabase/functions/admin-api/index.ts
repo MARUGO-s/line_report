@@ -471,6 +471,14 @@ Deno.serve(async (req) => {
       const result = await createPettyCashEntry(supabase, body)
       return json(result, 200)
     }
+    if (req.method === "PATCH" && path === "/petty-cash") {
+      const body = await parseJson(req)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await updatePettyCashEntry(supabase, body)
+      return json(result, 200)
+    }
     if (req.method === "DELETE" && path === "/petty-cash") {
       const result = await deletePettyCashEntry(supabase, url)
       return json(result, 200)
@@ -2909,6 +2917,60 @@ async function createPettyCashEntry(
     throw { status: 500, message: `Failed to create petty cash entry: ${error.message}` } satisfies AppError
   }
   return { ok: true, id: (data as { id?: number } | null)?.id ?? null }
+}
+
+// 既存の小口現金行を編集（body に含めたフィールドだけ更新）。
+async function updatePettyCashEntry(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const id = Number(body.id)
+  if (!Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k)
+  const patch: Record<string, unknown> = {}
+  if (has("spent_on")) {
+    const s = toSafeString(body.spent_on).trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      throw { status: 400, message: "spent_on must be YYYY-MM-DD." } satisfies AppError
+    }
+    patch.spent_on = s
+  }
+  if (has("item")) patch.item = toSafeString(body.item) || null
+  if (has("category")) patch.category = toSafeString(body.category) || null
+  if (has("handler")) patch.handler = toSafeString(body.handler) || null
+  if (has("note")) patch.note = toSafeString(body.note) || null
+  let nextAmount: number | null = null
+  let nextTax: number | null = null
+  if (has("amount_yen")) {
+    const a = Math.floor(Number(body.amount_yen))
+    if (!Number.isFinite(a) || a < 0) {
+      throw { status: 400, message: "amount_yen must be a non-negative number." } satisfies AppError
+    }
+    patch.amount_yen = a
+    nextAmount = a
+  }
+  if (has("tax_yen")) {
+    const t = Math.floor(Number(body.tax_yen))
+    if (!Number.isFinite(t) || t < 0) {
+      throw { status: 400, message: "tax_yen must be a non-negative number." } satisfies AppError
+    }
+    patch.tax_yen = t
+    nextTax = t
+  }
+  if (nextAmount != null && nextTax != null && nextTax > nextAmount) {
+    throw { status: 400, message: "tax_yen must not exceed amount_yen." } satisfies AppError
+  }
+  if (Object.keys(patch).length === 0) {
+    throw { status: 400, message: "No fields to update." } satisfies AppError
+  }
+  patch.updated_at = new Date().toISOString()
+  const { error } = await supabase.from("petty_cash_entries").update(patch).eq("id", id)
+  if (error) {
+    throw { status: 500, message: `Failed to update petty cash entry: ${error.message}` } satisfies AppError
+  }
+  return { ok: true, id }
 }
 
 // 論理削除（hidden=true）。
