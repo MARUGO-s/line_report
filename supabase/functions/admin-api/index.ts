@@ -6537,6 +6537,10 @@ function normalizePath(pathname: string): string {
 // レシート画像解析に Gemini を使う店舗（line-webhook と同一）。他店は Groq。
 const AI_USAGE_GEMINI_STORE_KEYS = new Set<string>(["sauvage", "sushikoruri"])
 const AI_USAGE_GEMINI_MODEL = "gemini-3.1-pro-preview"
+// レシート画像解析に Claude(Haiku) を使う店舗（line-webhook の CLAUDE_RECEIPT_STORE_KEYS と同一）。
+// ＋経費（小口）の再解析も Claude を使うため、claude バケットには「claudia2の売上解析」と「全店の経費解析」のトークンが入る。
+const AI_USAGE_CLAUDE_STORE_KEYS = new Set<string>(["claudia2"])
+const AI_USAGE_CLAUDE_MODEL = "claude-haiku-4-5"
 const AI_USAGE_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 type AiUsageStoreRow = {
@@ -6547,7 +6551,7 @@ type AiUsageStoreRow = {
 }
 
 type AiUsageProviderBucket = {
-  provider: "gemini" | "groq"
+  provider: "gemini" | "groq" | "claude"
   model: string
   store_count: number
   image_count: number
@@ -6603,6 +6607,19 @@ async function fetchAiUsageCostState(
     total_tokens: 0,
     stores: [],
   }
+  const claude: AiUsageProviderBucket = {
+    provider: "claude",
+    model: AI_USAGE_CLAUDE_MODEL,
+    store_count: 0,
+    image_count: 0,
+    receipt_count: 0,
+    event_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    total_tokens: 0,
+    stores: [],
+  }
 
   for (const raw of rows) {
     const r = raw as Record<string, unknown>
@@ -6614,7 +6631,11 @@ async function fetchAiUsageCostState(
       image_count: Number(r.image_count ?? 0) || 0,
       receipt_count: Number(r.receipt_count ?? 0) || 0,
     }
-    const bucket = AI_USAGE_GEMINI_STORE_KEYS.has(key) ? gemini : groq
+    const bucket = AI_USAGE_GEMINI_STORE_KEYS.has(key)
+      ? gemini
+      : AI_USAGE_CLAUDE_STORE_KEYS.has(key)
+      ? claude
+      : groq
     bucket.stores.push(row)
     bucket.store_count += 1
     bucket.image_count += row.image_count
@@ -6622,6 +6643,7 @@ async function fetchAiUsageCostState(
   }
   gemini.stores.sort((a, b) => b.image_count - a.image_count)
   groq.stores.sort((a, b) => b.image_count - a.image_count)
+  claude.stores.sort((a, b) => b.image_count - a.image_count)
 
   // 実測トークン（ai_usage_events）をプロバイダ別に合算してバケットに足し込む。
   // provider は「実際に応答したプロバイダ」なので、Gemini採用店の Groq フォールバック分は groq 側に入る。
@@ -6632,7 +6654,13 @@ async function fetchAiUsageCostState(
   for (const raw of (Array.isArray(tokenData) ? tokenData : [])) {
     const r = raw as Record<string, unknown>
     const provider = String(r.provider ?? "").trim()
-    const bucket = provider === "gemini" ? gemini : provider === "groq" ? groq : null
+    const bucket = provider === "gemini"
+      ? gemini
+      : provider === "groq"
+      ? groq
+      : provider === "claude"
+      ? claude
+      : null
     if (!bucket) continue
     bucket.event_count += Number(r.event_count ?? 0) || 0
     bucket.input_tokens += Number(r.input_tokens ?? 0) || 0
@@ -6645,6 +6673,7 @@ async function fetchAiUsageCostState(
     period: { from: p_from, to: p_to },
     gemini,
     groq,
+    claude,
     generated_at: new Date().toISOString(),
   }
 }

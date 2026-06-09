@@ -40,6 +40,8 @@
       --ok-soft: rgba(54, 179, 126, 0.18);
       --warn: #d8961f;
       --warn-soft: rgba(216, 150, 31, 0.2);
+      --claude: #d2795b;
+      --claude-soft: rgba(210, 121, 91, 0.18);
       --err: #e05656;
       --err-soft: rgba(224, 86, 86, 0.18);
       --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 12px 32px -20px rgba(0, 0, 0, 0.7);
@@ -63,6 +65,8 @@
       --ok-soft: rgba(31, 157, 87, 0.12);
       --warn: #c77d12;
       --warn-soft: rgba(199, 125, 18, 0.14);
+      --claude: #bd5f3a;
+      --claude-soft: rgba(189, 95, 58, 0.12);
       --err: #d23b3b;
       --err-soft: rgba(210, 59, 59, 0.12);
       --shadow: 0 1px 2px rgba(20, 40, 80, 0.06), 0 10px 28px -18px rgba(20, 40, 80, 0.2);
@@ -151,6 +155,8 @@
     .card-h .ch-tag { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--text-3); }
     .card-h .ch-tag.gemini { color: var(--warn); }
     .card-h .ch-ico.gemini { color: var(--warn); }
+    .card-h .ch-tag.claude { color: var(--claude); }
+    .card-h .ch-ico.claude { color: var(--claude); }
 
     /* ---------- 期間セグメント ---------- */
     .tabs {
@@ -187,7 +193,8 @@
     .notice svg { flex: none; margin-top: 2px; color: var(--warn); }
 
     /* ---------- 合計サマリー ---------- */
-    .totalrow { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+    .totalrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 22px; }
+    @media (max-width: 720px) { .totalrow { grid-template-columns: 1fr; } }
     .total-card {
       border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; background: var(--surface);
       position: relative; overflow: hidden;
@@ -196,8 +203,10 @@
       content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent);
     }
     .total-card.gemini::before { background: var(--warn); }
+    .total-card.claude::before { background: var(--claude); }
     .tc-prov { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
     .total-card.gemini .tc-prov { color: var(--warn); }
+    .total-card.claude .tc-prov { color: var(--claude); }
     .tc-model { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
     .tc-jpy { font-size: 30px; font-weight: 800; color: var(--text); margin-top: 12px; font-variant-numeric: tabular-nums; }
     .tc-usd { font-size: 13px; color: var(--text-2); margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -212,6 +221,7 @@
     .kpi .k-s { font-size: 11px; color: var(--text-3); margin-top: 2px; }
     .kpi.accent .k-v { color: var(--accent); }
     .kpi.gemini.accent .k-v { color: var(--warn); }
+    .kpi.claude.accent .k-v { color: var(--claude); }
 
     /* ---------- 前提条件エディタ ---------- */
     details.assump { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
@@ -335,7 +345,7 @@
       <div class="ms-content">
         <div class="ms-inner">
           <h1 class="ms-h1">AI使用料（実測トークン）</h1>
-          <p class="ms-sub">レシート画像のAI解析でAPIが返した<strong>実測トークン数</strong>に、各社の<strong>公式単価</strong>を掛けて算出します。Groq は2店舗（ソバージュ・鮨こるり）以外の全店合計、Gemini はその2店舗の合計を表示します。</p>
+          <p class="ms-sub">レシート画像のAI解析でAPIが返した<strong>実測トークン数</strong>に、各社の<strong>公式単価</strong>を掛けて算出します。<strong>Groq</strong> はその他全店、<strong>Gemini</strong> はソバージュ・鮨こるりの2店舗、<strong>Claude(Haiku)</strong> はクラウディア2の売上解析と<strong>全店の経費（小口）解析</strong>の合計を表示します。</p>
 
           <section class="card">
             <div class="card-h">
@@ -371,6 +381,12 @@
               <div class="tc-model mono" id="geminiModel">—</div>
               <div class="tc-jpy" id="geminiJpy">¥—</div>
               <div class="tc-usd" id="geminiUsd">$—</div>
+            </div>
+            <div class="total-card claude" id="claudeTotalCard">
+              <div class="tc-prov">Claude（クラウディア2＋経費 合計）</div>
+              <div class="tc-model mono" id="claudeModel">—</div>
+              <div class="tc-jpy" id="claudeJpy">¥—</div>
+              <div class="tc-usd" id="claudeUsd">$—</div>
             </div>
           </div>
 
@@ -446,6 +462,43 @@
             </details>
           </section>
 
+          <!-- Claude ブロック -->
+          <section class="card">
+            <div class="card-h">
+              <span class="ch-ico claude"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M5 5l14 14M19 5L5 19"/></svg></span>
+              <span class="ch-t">Claude / Haiku（クラウディア2の売上＋全店の経費）</span>
+              <span class="ch-tag claude" id="claudeStoreCount">— 店舗</span>
+            </div>
+            <div class="kpis">
+              <div class="kpi claude accent">
+                <div class="k-l">実測コスト（円）</div>
+                <div class="k-v" id="claudeJpy2">¥—</div>
+                <div class="k-s" id="claudePerImage">1解析あたり —</div>
+              </div>
+              <div class="kpi">
+                <div class="k-l">実測コスト（USD）</div>
+                <div class="k-v" id="claudeUsd2">$—</div>
+                <div class="k-s">実測トークン × 公式単価</div>
+              </div>
+              <div class="kpi">
+                <div class="k-l">入力トークン（実測）</div>
+                <div class="k-v" id="claudeInTok">—</div>
+                <div class="k-s" id="claudeEvents">実測ログ — 件</div>
+              </div>
+              <div class="kpi claude accent">
+                <div class="k-l">出力トークン（実測）</div>
+                <div class="k-v" id="claudeOutTok">—</div>
+                <div class="k-s">課金対象の出力合計</div>
+              </div>
+            </div>
+            <p class="ms-sub" id="claudeRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
+            <p class="ms-sub" style="margin:6px 2px 0;font-size:11.5px">※ 内訳の店舗一覧はクラウディア2のみですが、トークン・コストには<strong>全店の経費（小口）解析</strong>も合算されています。</p>
+            <details class="brk" id="claudeBrk">
+              <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
+              <div id="claudeBrkBody"></div>
+            </details>
+          </section>
+
           <!-- 料金の前提条件（編集可） -->
           <details class="assump" id="assumpBox">
             <summary>
@@ -465,6 +518,12 @@
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="gemini_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="gemini_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              </div>
+
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Claude / Haiku（クラウディア2・経費）</span><span class="ch-tag mono" id="claudeModelLabel"></span></div>
+              <div class="rate-grid">
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="claude_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="claude_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
               <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">共通</span></div>
@@ -497,10 +556,12 @@
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
     // 単価は各社の公式単価（USD / 100万トークン）。Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
-    // Groq llama-4-scout の目安は $0.11/$0.34。トークン数は実測値を使うため、ここには持たない。
+    // Groq llama-4-scout の目安は $0.11/$0.34。Claude Haiku 4.5 は $1/$5（公式）。
+    // トークン数は実測値を使うため、ここには持たない。
     const DEFAULT_RATES = {
       groq:   { inUsd: 0.11, outUsd: 0.34 },
       gemini: { inUsd: 2.00, outUsd: 12.00 },
+      claude: { inUsd: 1.00, outUsd: 5.00 },
       jpyPerUsd: 155,
     };
 
@@ -565,7 +626,7 @@
         if (!raw) return cloneRates(DEFAULT_RATES);
         const parsed = JSON.parse(raw);
         const out = cloneRates(DEFAULT_RATES);
-        ['groq', 'gemini'].forEach(function (p) {
+        ['groq', 'gemini', 'claude'].forEach(function (p) {
           if (parsed && parsed[p]) {
             ['inUsd', 'outUsd'].forEach(function (k) {
               const v = Number(parsed[p][k]);
@@ -582,6 +643,7 @@
       return {
         groq: Object.assign({}, r.groq),
         gemini: Object.assign({}, r.gemini),
+        claude: Object.assign({}, r.claude),
         jpyPerUsd: r.jpyPerUsd,
       };
     }
@@ -594,6 +656,8 @@
       document.getElementById('groq_outUsd').value = r.groq.outUsd;
       document.getElementById('gemini_inUsd').value = r.gemini.inUsd;
       document.getElementById('gemini_outUsd').value = r.gemini.outUsd;
+      document.getElementById('claude_inUsd').value = r.claude.inUsd;
+      document.getElementById('claude_outUsd').value = r.claude.outUsd;
       document.getElementById('jpyPerUsd').value = r.jpyPerUsd;
     }
     function readRateInputs() {
@@ -610,6 +674,10 @@
         gemini: {
           inUsd: num('gemini_inUsd', d.gemini.inUsd),
           outUsd: num('gemini_outUsd', d.gemini.outUsd),
+        },
+        claude: {
+          inUsd: num('claude_inUsd', d.claude.inUsd),
+          outUsd: num('claude_outUsd', d.claude.outUsd),
         },
         jpyPerUsd: (function () { const v = Number(document.getElementById('jpyPerUsd').value); return Number.isFinite(v) && v > 0 ? v : d.jpyPerUsd; })(),
       };
@@ -735,6 +803,7 @@
 
       renderProvider('groq', data.groq, r.groq, jpy, data.groq && data.groq.model);
       renderProvider('gemini', data.gemini, r.gemini, jpy, data.gemini && data.gemini.model);
+      renderProvider('claude', data.claude, r.claude, jpy, data.claude && data.claude.model);
 
       // Gemini 固有: 思考トークンの内訳サブ
       const m = data.gemini || EMPTY_BUCKET;
