@@ -2815,6 +2815,57 @@ async function deleteReservationEvent(
 // ── 小口現金（出金/経費）台帳 ──
 const PETTY_CASH_CATEGORIES = ["消耗品費", "食材・仕入", "雑費", "衛生用品", "修繕費", "その他"] as const
 
+// 勘定科目（品目ごと）。3科目固定。未知キーは「未分類」フォールバック（通常は出ない）。
+const PETTY_ACCT_KEYS = new Set(["shokuzai", "shomohin", "alcohol"])
+const PETTY_ACCT_NAMES: Record<string, string> = { shokuzai: "食材", shomohin: "消耗品", alcohol: "アルコール" }
+type PettyItem = { n: string; p: number; acct: string; rate: number }
+
+// items 配列を正規化（[{n,p,acct,rate}]）。各品目: 税抜価格 p(int≥0)、acct∈3科目、rate∈{8,10}。
+// 空行（名前も価格も無い）は除去。1件も無ければ null（＝従来の単一フィールド経路にフォールバック）。
+function normalizePettyItems(raw: unknown): PettyItem[] | null {
+  if (!Array.isArray(raw)) return null
+  const items: PettyItem[] = []
+  for (const el of raw) {
+    if (!el || typeof el !== "object") continue
+    const o = el as Record<string, unknown>
+    const n = toSafeString(o.n ?? (o as { name?: unknown }).name).trim()
+    const pNum = Math.floor(Number(o.p ?? (o as { price?: unknown }).price))
+    const p = Number.isFinite(pNum) && pNum > 0 ? pNum : 0
+    let acct = toSafeString(o.acct).trim().toLowerCase()
+    if (!PETTY_ACCT_KEYS.has(acct)) acct = "shokuzai"
+    let rate = Math.floor(Number(o.rate))
+    if (rate !== 8 && rate !== 10) rate = acct === "shokuzai" ? 8 : 10
+    if (!n && p <= 0) continue
+    items.push({ n: n || "(品目)", p, acct, rate })
+    if (items.length >= 60) break
+  }
+  return items.length ? items : null
+}
+
+// items から 本体(Σp)・税(Σ round(p×rate/100)・品目ごとに丸め)・出金額(本体+税) を導出。
+function pettyTotalsFromItems(items: PettyItem[]): { base: number; tax: number; amount: number } {
+  let base = 0
+  let tax = 0
+  for (const it of items) {
+    base += it.p
+    tax += Math.round((it.p * it.rate) / 100)
+  }
+  return { base, tax, amount: base + tax }
+}
+
+// 検索/旧表示用の品目テキスト（複数は「・名 ¥価格」改行、1件はそのまま）。
+function pettyItemText(items: PettyItem[]): string {
+  const lines = items.map((it) => `${it.n}${it.p > 0 ? " ¥" + it.p.toLocaleString("ja-JP") : ""}`.trim()).filter(Boolean)
+  if (!lines.length) return ""
+  return lines.length > 1 ? lines.map((s) => "・" + s).join("\n") : lines[0]
+}
+
+// 旧 category 列向け（科目名の重複排除を「・」連結。例: 食材・消耗品）。
+function pettyCategoryLabel(items: PettyItem[]): string {
+  const names = [...new Set(items.map((it) => PETTY_ACCT_NAMES[it.acct] ?? "未分類"))]
+  return names.join("・")
+}
+
 // 一覧（店舗・月で絞り込み）＋ 月合計・勘定科目別合計を返す。
 async function fetchPettyCashState(
   supabase: ReturnType<typeof createClient>,
@@ -2826,7 +2877,7 @@ async function fetchPettyCashState(
 
   let query = supabase
     .from("petty_cash_entries")
-    .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, handler, source, note, created_at")
+    .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, items, handler, source, note, created_at")
     .eq("hidden", false)
     .order("spent_on", { ascending: false })
     .order("id", { ascending: false })
@@ -2888,25 +2939,48 @@ async function createPettyCashEntry(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(spentOn)) {
     throw { status: 400, message: "spent_on must be YYYY-MM-DD." } satisfies AppError
   }
-  const amount = Math.floor(Number(body.amount_yen))
-  if (!Number.isFinite(amount) || amount < 0) {
-    throw { status: 400, message: "amount_yen must be a non-negative number." } satisfies AppError
-  }
-  const taxParsed = (body.tax_yen == null || body.tax_yen === "") ? 0 : Math.floor(Number(body.tax_yen))
-  const tax = Number.isFinite(taxParsed) ? Math.max(0, taxParsed) : 0
-  if (tax > amount) {
-    throw { status: 400, message: "tax_yen must not exceed amount_yen (out-of-pocket total)." } satisfies AppError
-  }
-  const insertRow = {
-    store_partition_key: storeKey,
-    spent_on: spentOn,
-    item: toSafeString(body.item) || null,
-    category: toSafeString(body.category) || null,
-    amount_yen: amount,
-    tax_yen: tax,
-    handler: toSafeString(body.handler) || null,
-    note: toSafeString(body.note) || null,
-    source: "manual",
+  // 新方式: items（品目ごとの勘定科目・税率）があれば、本体/税/出金額はサーバ側で導出して保存（パリティ保証）。
+  const items = normalizePettyItems(body.items)
+  let insertRow: Record<string, unknown>
+  if (items) {
+    const t = pettyTotalsFromItems(items)
+    if (t.amount <= 0) {
+      throw { status: 400, message: "items must total a positive amount." } satisfies AppError
+    }
+    insertRow = {
+      store_partition_key: storeKey,
+      spent_on: spentOn,
+      item: pettyItemText(items),
+      category: pettyCategoryLabel(items),
+      amount_yen: t.amount,
+      tax_yen: t.tax,
+      items,
+      handler: toSafeString(body.handler) || null,
+      note: toSafeString(body.note) || null,
+      source: "manual",
+    }
+  } else {
+    // 旧方式（単一フィールド）。LINE取込や後方互換のためフォールバックとして残す。
+    const amount = Math.floor(Number(body.amount_yen))
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw { status: 400, message: "amount_yen must be a non-negative number." } satisfies AppError
+    }
+    const taxParsed = (body.tax_yen == null || body.tax_yen === "") ? 0 : Math.floor(Number(body.tax_yen))
+    const tax = Number.isFinite(taxParsed) ? Math.max(0, taxParsed) : 0
+    if (tax > amount) {
+      throw { status: 400, message: "tax_yen must not exceed amount_yen (out-of-pocket total)." } satisfies AppError
+    }
+    insertRow = {
+      store_partition_key: storeKey,
+      spent_on: spentOn,
+      item: toSafeString(body.item) || null,
+      category: toSafeString(body.category) || null,
+      amount_yen: amount,
+      tax_yen: tax,
+      handler: toSafeString(body.handler) || null,
+      note: toSafeString(body.note) || null,
+      source: "manual",
+    }
   }
   const { data, error } = await supabase
     .from("petty_cash_entries")
@@ -2937,30 +3011,48 @@ async function updatePettyCashEntry(
     }
     patch.spent_on = s
   }
-  if (has("item")) patch.item = toSafeString(body.item) || null
-  if (has("category")) patch.category = toSafeString(body.category) || null
   if (has("handler")) patch.handler = toSafeString(body.handler) || null
   if (has("note")) patch.note = toSafeString(body.note) || null
-  let nextAmount: number | null = null
-  let nextTax: number | null = null
-  if (has("amount_yen")) {
-    const a = Math.floor(Number(body.amount_yen))
-    if (!Number.isFinite(a) || a < 0) {
-      throw { status: 400, message: "amount_yen must be a non-negative number." } satisfies AppError
+  // 新方式: items を指定したら 本体/税/品目テキスト/科目ラベル をサーバ側で再導出（item/category/amount/tax は items が優先）。
+  if (has("items")) {
+    const items = normalizePettyItems(body.items)
+    if (!items) {
+      throw { status: 400, message: "items must contain at least one valid line item." } satisfies AppError
     }
-    patch.amount_yen = a
-    nextAmount = a
-  }
-  if (has("tax_yen")) {
-    const t = Math.floor(Number(body.tax_yen))
-    if (!Number.isFinite(t) || t < 0) {
-      throw { status: 400, message: "tax_yen must be a non-negative number." } satisfies AppError
+    const t = pettyTotalsFromItems(items)
+    if (t.amount <= 0) {
+      throw { status: 400, message: "items must total a positive amount." } satisfies AppError
     }
-    patch.tax_yen = t
-    nextTax = t
-  }
-  if (nextAmount != null && nextTax != null && nextTax > nextAmount) {
-    throw { status: 400, message: "tax_yen must not exceed amount_yen." } satisfies AppError
+    patch.items = items
+    patch.amount_yen = t.amount
+    patch.tax_yen = t.tax
+    patch.item = pettyItemText(items)
+    patch.category = pettyCategoryLabel(items)
+  } else {
+    // 旧方式（単一フィールド）。
+    if (has("item")) patch.item = toSafeString(body.item) || null
+    if (has("category")) patch.category = toSafeString(body.category) || null
+    let nextAmount: number | null = null
+    let nextTax: number | null = null
+    if (has("amount_yen")) {
+      const a = Math.floor(Number(body.amount_yen))
+      if (!Number.isFinite(a) || a < 0) {
+        throw { status: 400, message: "amount_yen must be a non-negative number." } satisfies AppError
+      }
+      patch.amount_yen = a
+      nextAmount = a
+    }
+    if (has("tax_yen")) {
+      const t = Math.floor(Number(body.tax_yen))
+      if (!Number.isFinite(t) || t < 0) {
+        throw { status: 400, message: "tax_yen must be a non-negative number." } satisfies AppError
+      }
+      patch.tax_yen = t
+      nextTax = t
+    }
+    if (nextAmount != null && nextTax != null && nextTax > nextAmount) {
+      throw { status: 400, message: "tax_yen must not exceed amount_yen." } satisfies AppError
+    }
   }
   if (Object.keys(patch).length === 0) {
     throw { status: 400, message: "No fields to update." } satisfies AppError

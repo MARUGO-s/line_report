@@ -57,11 +57,35 @@ function todayYmdJst(): string {
   return `${j.getUTCFullYear()}-${String(j.getUTCMonth() + 1).padStart(2, '0')}-${String(j.getUTCDate()).padStart(2, '0')}`
 }
 
+// 品目ごとの内訳（小口現金ページと同じモデル）。n:品目 p:税抜価格 acct:勘定科目 rate:税率(8|10)。
+type PettyCashItem = { n: string; p: number; acct: 'shokuzai' | 'shomohin' | 'alcohol'; rate: 8 | 10 }
+// 品名から勘定科目を推定（既定。記録後に小口現金ページで修正可）。
+//   アルコール飲料 → alcohol、消耗品/衛生用品 → shomohin、それ以外 → shokuzai(食材)。
+//   ※「消毒用アルコール」等は飲料ではないので shomohin 側で先に拾う。
+const ALCOHOL_DRINK_RE = /(ビール|発泡酒|ワイン|シャンパン|スパークリング|日本酒|清酒|焼酎|ウイスキー|ウィスキー|ハイボール|サワー|酎ハイ|チューハイ|ジン|ウォッカ|ラム|テキーラ|リキュール|梅酒|ハウスワイン|生樽|樽生|地酒|スピリッツ|sake|beer|wine|whisky|whiskey|vodka|tequila)/i
+const SHOMOHIN_RE = /(洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/
+function classifyPettyAcct(name: string): 'shokuzai' | 'shomohin' | 'alcohol' {
+  const s = String(name ?? '')
+  if (SHOMOHIN_RE.test(s)) return 'shomohin'
+  if (ALCOHOL_DRINK_RE.test(s)) return 'alcohol'
+  return 'shokuzai'
+}
+function defaultPettyRate(acct: 'shokuzai' | 'shomohin' | 'alcohol'): 8 | 10 {
+  return acct === 'shokuzai' ? 8 : 10
+}
+const PETTY_ACCT_JP: Record<string, string> = { shokuzai: '食材', shomohin: '消耗品', alcohol: 'アルコール' }
+// 旧 category 列向けの科目ラベル（重複排除して「・」連結。例: 食材・消耗品）。
+function pettyItemsLabel(items: PettyCashItem[] | null): string {
+  if (!Array.isArray(items) || !items.length) return ''
+  const names = [...new Set(items.map((it) => PETTY_ACCT_JP[it.acct] ?? '未分類'))]
+  return names.join('・')
+}
+
 // レシート解析結果 → 経費フィールド（出金額/税/日付/品目/仕入先）。金額不読は null。
 // 出金額=税込合計(grossSales)／無ければ 税抜(netSales)+税。税=taxAmount。
 function extractExpenseFromReceipt(
   receipt: LineImageReceiptAnalysis | null,
-): { amount: number; tax: number; spentOn: string; item: string; supplier: string | null } | null {
+): { amount: number; tax: number; spentOn: string; item: string; supplier: string | null; items: PettyCashItem[] } | null {
   const tax = parseYenToInt(receipt?.taxAmount) ?? 0
   const gross = parseYenToInt(receipt?.grossSales)
   const net = parseYenToInt(receipt?.netSales)
@@ -86,15 +110,24 @@ function extractExpenseFromReceipt(
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
   const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
 
-  // 品目テキスト: 明細があれば「・品名 ¥価格」を1行ずつ。無ければ items(品名のみ)。
+  // 品目テキスト＋品目内訳。勘定科目・税率は品名から推定（既定。記録後に小口現金ページで修正可）。
   let item: string
+  let items: PettyCashItem[]
   if (itemRows.length) {
     item = itemRows.map((i) => `・${i.name}${i.amount != null ? ' ' + formatYen(i.amount) : ''}`.trim()).join('\n')
+    items = itemRows.map((i) => {
+      const acct = classifyPettyAcct(i.name)
+      return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct, rate: defaultPettyRate(acct) }
+    })
   } else {
     const nameItems = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
     item = nameItems.length > 1 ? nameItems.map((s) => '・' + s).join('\n') : (nameItems[0] || supplier || '経費')
+    const nm = nameItems[0] || supplier || '経費'
+    const acct = classifyPettyAcct(`${nameItems.join(' ')} ${supplier ?? ''}`)
+    // 明細価格が取れない時は本体価格を1品目に集約（科目別集計の取りこぼしを防ぐ）。
+    items = [{ n: nm, p: base, acct, rate: defaultPettyRate(acct) }]
   }
-  return { amount, tax: safeTax, spentOn, item, supplier }
+  return { amount, tax: safeTax, spentOn, item, supplier, items }
 }
 
 function textMessage(text: string): Record<string, unknown> {
@@ -294,6 +327,7 @@ type PendingRow = {
   handler: string | null
   store_name: string | null
   category: string | null
+  items: PettyCashItem[] | null
 }
 
 async function clearPending(supabase: SupabaseClient, key: string): Promise<void> {
@@ -409,6 +443,7 @@ export async function handlePettyCashImageIfPending(
     amount_yen: ex.amount,
     tax_yen: ex.tax,
     store_name: ex.supplier,
+    items: ex.items,
     updated_at: new Date().toISOString(),
   }).eq('id', pendingId)
 
@@ -449,6 +484,7 @@ export async function savePettyCashPendingFromReceipt(
     handler: null,
     store_name: ex.supplier,
     category: null,
+    items: ex.items,
     expires_at: expiresAt,
     updated_at: nowIso,
   }, { onConflict: 'conversation_key' }).select('id').single()
@@ -503,7 +539,7 @@ export async function handlePettyCashPostback(
 
   const { data: pending, error } = await supabase
     .from(PENDING_TABLE)
-    .select('id, status, store_partition_key, line_message_id, spent_on, item, amount_yen, tax_yen, handler, store_name, category')
+    .select('id, status, store_partition_key, line_message_id, spent_on, item, amount_yen, tax_yen, handler, store_name, category, items')
     .eq('id', id)
     .maybeSingle()
   if (error || !pending) return simpleNoticeFlex('対象の経費が見つかりませんでした。')
@@ -538,13 +574,15 @@ export async function handlePettyCashPostback(
     return simpleNoticeFlex('記録に必要な情報が不足しています。小口現金ページから手入力してください。')
   }
 
+  const itemsLabel = pettyItemsLabel(p.items)
   const { error: insErr } = await supabase.from(ENTRIES_TABLE).insert({
     store_partition_key: p.store_partition_key,
     spent_on: p.spent_on,
     item: p.item,
-    category: p.category,
+    category: itemsLabel || p.category,
     amount_yen: amount,
     tax_yen: tax,
+    items: p.items,
     handler: p.handler,
     note: p.store_name ? ('仕入先: ' + p.store_name) : null,
     source: 'line_image',
