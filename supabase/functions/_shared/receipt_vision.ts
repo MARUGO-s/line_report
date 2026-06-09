@@ -325,9 +325,6 @@ export async function analyzeLineImageWithClaude(
   systemPromptAddition = '',
   model = 'claude-haiku-4-5',
   timeoutMs = 30000,
-  // 指定時は売上共通プロンプト(buildReceiptVisionSystemPrompt)を使わず、この文面をそのままシステムプロンプトにする。
-  // ＝経費（小口）専用の独立解析で使用し、売上レシート解析には一切影響しない。
-  overrideSystemPrompt?: string,
 ): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
   if (!anthropicApiKey) {
     return { analysis: null, failure: { stage: 'missing_api_key', message: 'Anthropic API key (claude_haiku) is missing.' } }
@@ -355,7 +352,7 @@ export async function analyzeLineImageWithClaude(
       body: JSON.stringify({
         model,
         max_tokens: 1024,
-        system: overrideSystemPrompt ? overrideSystemPrompt : buildReceiptVisionSystemPrompt(systemPromptAddition),
+        system: buildReceiptVisionSystemPrompt(systemPromptAddition),
         messages: [
           {
             role: 'user',

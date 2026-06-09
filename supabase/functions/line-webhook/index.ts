@@ -16,7 +16,6 @@ import {
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
-import { analyzeExpenseReceipt } from '../_shared/petty_cash_vision.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   countExistingReceiptsForDates,
