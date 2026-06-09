@@ -101,6 +101,14 @@
     .ms-h1 { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: 0.01em; color: var(--text); }
     .ms-sub { font-size: 14px; color: var(--text-3); margin: 8px 0 0; line-height: 1.5; }
 
+    /* LINE店舗ロック時（from=line / line_locked_store）はサイドバー等を隠し、小口現金のみのキオスク表示にする。
+       他ページ（管理画面・他店データ）へ遷移させないためのセキュリティ措置。 */
+    body.line-locked .ms-side { display: none !important; }
+    body.line-locked .ms-navtoggle, body.line-locked .ms-nav-backdrop { display: none !important; }
+    body.line-locked .ms-shell { grid-template-columns: 1fr; }
+    body.line-locked .ms-topbar { padding-left: 32px; }
+    @media (max-width: 880px) { body.line-locked .ms-topbar { padding-left: 16px; } }
+
     /* ---------- ピル ---------- */
     .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--text-2); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px; }
     .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
@@ -271,8 +279,12 @@
   </style>
 </head>
 <body>
-  <!-- 描画前に保存済みテーマを適用（ちらつき防止）。テーマキーは全ページ共有。 -->
-  <script>try{document.body.setAttribute('data-theme',(localStorage.getItem('line_reservation_calendar_theme')==='light')?'light':'dark');}catch(e){}</script>
+  <!-- 描画前に保存済みテーマ＋LINE店舗ロックを適用（ちらつき防止）。テーマキーは全ページ共有。 -->
+  <script>try{
+    document.body.setAttribute('data-theme',(localStorage.getItem('line_reservation_calendar_theme')==='light')?'light':'dark');
+    var _q=new URLSearchParams(location.search);
+    if(_q.get('from')==='line' || localStorage.getItem('line_locked_store')) document.body.classList.add('line-locked');
+  }catch(e){}</script>
 
   <button id="msNavToggle" class="ms-navtoggle" type="button" aria-label="メニューを開閉" aria-expanded="false">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
@@ -569,6 +581,12 @@
         try { localStorage.setItem('line_locked_store', key); } catch (_) {}
       } catch (_) {}
     }
+    // LINE店舗ロック表示か（from=line で来た or 店舗ロックが保存済み）。true の時はサイドバー等を隠す。
+    function isLineLockedView() {
+      try { if (new URLSearchParams(location.search).get('from') === 'line') return true; } catch (_) {}
+      return !!lockedStore();
+    }
+    function applyLockedChrome() { document.body.classList.toggle('line-locked', isLineLockedView()); }
     function setAuthBadge(ok) {
       if (dom.authState) { dom.authState.textContent = ok ? 'ログイン済み' : '未接続'; dom.authState.className = ok ? 'pill ok' : 'pill'; }
       if (dom.authBadge) { dom.authBadge.textContent = ok ? '接続済み' : '未接続'; dom.authBadge.className = 'pill' + (ok ? ' ok' : ''); }
@@ -940,6 +958,7 @@
       resetForm();                 // 明細1行 + 当日
       captureLockedStoreFromUrl(); // populateStores より前
       populateStores();
+      applyLockedChrome();         // LINEロック時はサイドバー等を非表示（小口現金のみ表示）
       let savedMonth = ''; try { savedMonth = localStorage.getItem(LS_MONTH) || ''; } catch (_) {}
       dom.monthF.value = savedMonth || currentMonth();
       if (AUTH && AUTH.consumeUrlAuthParams) {
