@@ -109,6 +109,17 @@
     body.line-locked .ms-topbar { padding-left: 32px; }
     @media (max-width: 880px) { body.line-locked .ms-topbar { padding-left: 16px; } }
 
+    /* 管理者ログイン（キオスク解除）ボタン＋モーダル */
+    .pill.adm-unlock { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); cursor: pointer; }
+    .pill.adm-unlock:hover { background: var(--accent-soft); color: var(--accent); }
+    .adm-modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); padding: 20px; }
+    .adm-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 22px; width: 400px; max-width: 92vw; box-shadow: var(--shadow); }
+    .adm-title { font-size: 16px; font-weight: 700; }
+    .adm-desc { font-size: 12.5px; color: var(--text-3); margin: 8px 0 14px; line-height: 1.6; }
+    .adm-box .input { width: 100%; }
+    .adm-msg { font-size: 12px; min-height: 15px; margin-top: 8px; color: var(--err); }
+    .adm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+
     /* ---------- ピル ---------- */
     .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--text-2); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px; }
     .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
@@ -329,6 +340,7 @@
 
     <div class="ms-main">
       <div class="ms-topbar">
+        <button id="admUnlockBtn" type="button" class="pill adm-unlock" hidden>管理者ログイン</button>
         <span id="authState" class="pill">未接続</span>
         <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
       </div>
@@ -491,6 +503,20 @@
     </div>
   </div>
 
+  <!-- 管理者ログイン（キオスク解除）モーダル: 正しい管理トークンで認証すると店舗ロックを解除する -->
+  <div class="adm-modal" id="admModal" hidden>
+    <div class="adm-box">
+      <div class="adm-title">管理者としてログイン</div>
+      <p class="adm-desc">本部の管理トークンを入力すると、店舗ロックを解除して全メニュー・全店舗を表示します（店舗スタッフはそのままご利用ください）。</p>
+      <input class="input" id="admToken" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" />
+      <div class="adm-msg" id="admMsg"></div>
+      <div class="adm-actions">
+        <button class="btn" id="admCancel" type="button">キャンセル</button>
+        <button class="btn btn-primary" id="admSubmit" type="button">ログインして解除</button>
+      </div>
+    </div>
+  </div>
+
   <script src="pages-config.js?v=20260610"></script>
   <script src="auth-session.js"></script>
   <script>
@@ -527,6 +553,7 @@
     const $ = (id) => document.getElementById(id);
     const dom = {
       authState: $('authState'), themeToggleBtn: $('themeToggleBtn'),
+      admUnlockBtn: $('admUnlockBtn'), admModal: $('admModal'), admToken: $('admToken'), admMsg: $('admMsg'), admCancel: $('admCancel'), admSubmit: $('admSubmit'),
       authCard: $('authCard'), tokenInput: $('tokenInput'), saveTokenBtn: $('saveTokenBtn'), authMsg: $('authMsg'),
       storeF: $('storeF'), monthF: $('monthF'), reloadBtn: $('reloadBtn'), authBadge: $('authBadge'),
       entryToggle: $('entryToggle'), entryPanel: $('entryPanel'), entryTitle: $('entryTitle'), editFlag: $('editFlag'),
@@ -587,7 +614,32 @@
       try { if (new URLSearchParams(location.search).get('from') === 'line') return true; } catch (_) {}
       return !!lockedStore();
     }
-    function applyLockedChrome() { document.body.classList.toggle('line-locked', isLineLockedView()); }
+    function applyLockedChrome() {
+      const locked = isLineLockedView();
+      document.body.classList.toggle('line-locked', locked);
+      if (dom.admUnlockBtn) dom.admUnlockBtn.hidden = !locked; // ロック時のみ「管理者ログイン」を表示
+    }
+    // 管理者ログイン（キオスク解除）: 正しい管理トークンで認証 → 店舗ロック解除 → 通常モードで再読込。
+    function openAdmModal() { dom.admModal.hidden = false; dom.admMsg.textContent = ''; dom.admToken.value = ''; setTimeout(function () { try { dom.admToken.focus(); } catch (_) {} }, 50); }
+    function closeAdmModal() { dom.admModal.hidden = true; }
+    async function adminUnlock() {
+      const t = dom.admToken.value.trim();
+      if (!t) { dom.admMsg.textContent = 'トークンを入力してください。'; return; }
+      dom.admSubmit.disabled = true;
+      try {
+        if (AUTH) {
+          await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
+        } else {
+          localStorage.setItem(TOKEN_KEY, t);
+        }
+        // 認証成功 → 店舗ロック解除＋URLの from=line/store_key/lt を除去して通常モードで再読込。
+        try { localStorage.removeItem('line_locked_store'); sessionStorage.removeItem('line_locked_store'); } catch (_) {}
+        location.replace(location.pathname);
+      } catch (e) {
+        dom.admMsg.textContent = (e && e.message) ? e.message : '認証に失敗しました。トークンをご確認ください。';
+        dom.admSubmit.disabled = false;
+      }
+    }
     function setAuthBadge(ok) {
       if (dom.authState) { dom.authState.textContent = ok ? 'ログイン済み' : '未接続'; dom.authState.className = ok ? 'pill ok' : 'pill'; }
       if (dom.authBadge) { dom.authBadge.textContent = ok ? '接続済み' : '未接続'; dom.authBadge.className = 'pill' + (ok ? ' ok' : ''); }
@@ -997,6 +1049,11 @@
       if (delBtn) deleteEntry(delBtn.getAttribute('data-del'));
     });
     dom.saveTokenBtn.addEventListener('click', saveToken);
+    dom.admUnlockBtn.addEventListener('click', openAdmModal);
+    dom.admCancel.addEventListener('click', closeAdmModal);
+    dom.admSubmit.addEventListener('click', adminUnlock);
+    dom.admToken.addEventListener('keydown', function (e) { if (e.key === 'Enter') adminUnlock(); });
+    dom.admModal.addEventListener('click', function (e) { if (e.target === dom.admModal) closeAdmModal(); });
 
     /* ===== init ===== */
     (async function init() {

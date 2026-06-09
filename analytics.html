@@ -15,8 +15,9 @@
     /* LINE経由（?from=line / LINEアプリ内ブラウザ）は売上分析のみ表示。
        描画前に data-entry を立て、サイドナビ等が一瞬見える事故を防ぐ。 */
     (function(){try{
+      var unlocked=false; try{ unlocked = sessionStorage.getItem('line_report_admin_unlock')==='1'; }catch(_){}
       var p=new URLSearchParams(location.search);
-      var line=(p.get('from')==='line')||/Line\//i.test(String(navigator.userAgent||''));
+      var line=!unlocked && ((p.get('from')==='line')||/Line\//i.test(String(navigator.userAgent||'')));
       if(line)document.documentElement.setAttribute('data-entry','line');
     }catch(_){}})();
   </script>
@@ -179,6 +180,15 @@
       color: var(--accent);
       min-width: 8rem;
     }
+    /* 管理者ログイン（キオスク解除）ボタン＋モーダル */
+    .adm-unlock-btn { color: var(--accent); cursor: pointer; font-weight: 600; }
+    .adm-modal { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); padding: 20px; }
+    .adm-box { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; width: 400px; max-width: 92vw; box-shadow: 0 20px 60px -20px rgba(0,0,0,.7); }
+    .adm-box .adm-title { font-size: 16px; font-weight: 700; }
+    .adm-box .adm-desc { font-size: 12.5px; opacity: .7; margin: 8px 0 14px; line-height: 1.6; }
+    .adm-box .input { width: 100%; }
+    .adm-box .adm-msg { font-size: 12px; min-height: 15px; margin-top: 8px; color: #ff6b6b; }
+    .adm-box .adm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
     body[data-entry="line"] #storeSelect {
       display: none !important;
     }
@@ -672,6 +682,19 @@
     <h2 class="card-title">絞り込み</h2>
     <div class="controls">
       <span id="lineLockedStoreLabel" class="pill line-locked-store-label" style="display:none" hidden aria-hidden="true"></span>
+      <button id="admUnlockBtn" type="button" class="pill adm-unlock-btn" style="display:none" hidden>管理者ログイン</button>
+      <div class="adm-modal" id="admModal" hidden>
+        <div class="adm-box">
+          <div class="adm-title">管理者としてログイン</div>
+          <p class="adm-desc">本部の管理トークンを入力すると、店舗ロックを解除して全メニュー・全店舗を表示します（店舗スタッフはそのままご利用ください）。</p>
+          <input class="input" id="admToken" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" />
+          <div class="adm-msg" id="admMsg"></div>
+          <div class="adm-actions">
+            <button class="btn" id="admCancel" type="button">キャンセル</button>
+            <button class="btn primary" id="admSubmit" type="button">ログインして解除</button>
+          </div>
+        </div>
+      </div>
       <select id="storeSelect" class="select" aria-label="店舗選択">
         <option value="">店舗を選択してください</option>
       </select>
@@ -2980,6 +3003,8 @@ dom.themeBtn.addEventListener('click', () => applyTheme(state.theme === 'dark' ?
 
 /** LINEの「売上推移を見る」や LINE アプリ内ブラウザ（?from=line） */
 function isLineEntryAnalytics() {
+  // 管理者ログインでロック解除済み（当セッション）なら、LINE経由でも通常表示に戻す。
+  try { if (sessionStorage.getItem('line_report_admin_unlock') === '1') return false; } catch (_) { /* ignore */ }
   try {
     const params = new URLSearchParams(location.search);
     if (params.get('from') === 'line') return true;
@@ -3101,6 +3126,43 @@ function applyLineEntryChrome() {
 }
 
 applyLineEntryChrome();
+
+/* ── 管理者ログイン（キオスク解除）: 正しい管理トークンで認証 → 解除フラグを立て、URLを除去して通常モードで再読込 ── */
+(function () {
+  var btn = document.getElementById('admUnlockBtn');
+  var modal = document.getElementById('admModal');
+  var tokenI = document.getElementById('admToken');
+  var msg = document.getElementById('admMsg');
+  var cancel = document.getElementById('admCancel');
+  var submit = document.getElementById('admSubmit');
+  if (!btn || !modal) return;
+  if (isLineEntryAnalytics()) { btn.style.display = 'inline-flex'; btn.removeAttribute('hidden'); } // ロック時のみ表示
+  function open() { modal.hidden = false; msg.textContent = ''; tokenI.value = ''; setTimeout(function () { try { tokenI.focus(); } catch (_) {} }, 50); }
+  function close() { modal.hidden = true; }
+  async function unlock() {
+    var t = tokenI.value.trim();
+    if (!t) { msg.textContent = 'トークンを入力してください。'; return; }
+    submit.disabled = true;
+    try {
+      if (window.LINE_REPORT_AUTH) {
+        await LINE_REPORT_AUTH.loginWithToken(t, { sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', LINE_REPORT_PAGES.PROJECT_URL), adminSurface: 'line_report' });
+      } else {
+        try { localStorage.setItem('line_summary_admin_token', t); } catch (_) {}
+      }
+      try { sessionStorage.setItem('line_report_admin_unlock', '1'); } catch (_) {}
+      try { localStorage.removeItem('line_locked_store'); sessionStorage.removeItem('line_locked_store'); } catch (_) {}
+      location.replace(location.pathname); // from=line/store_key/lt を除去して再読込（解除フラグで通常モード）
+    } catch (e) {
+      msg.textContent = (e && e.message) ? e.message : '認証に失敗しました。トークンをご確認ください。';
+      submit.disabled = false;
+    }
+  }
+  btn.addEventListener('click', open);
+  cancel.addEventListener('click', close);
+  submit.addEventListener('click', unlock);
+  tokenI.addEventListener('keydown', function (e) { if (e.key === 'Enter') unlock(); });
+  modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+})();
 
 /* ── period tabs ── */
 document.getElementById('periodTabs').addEventListener('click', (e) => {
