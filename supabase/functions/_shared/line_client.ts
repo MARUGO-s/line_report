@@ -41,17 +41,39 @@ export async function replyLineMessages(
   channelAccessToken: string,
   logCtx?: LineWebhookDeliveryLogContext,
 ): Promise<{ ok: boolean; error?: string }> {
-  const response = await fetch('https://api.line.me/v2/bot/message/reply', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${channelAccessToken}`,
-    },
-    body: JSON.stringify({
-      replyToken,
-      messages: messages.slice(0, 5),
-    }),
-  })
+  // fetch は Authorization ヘッダに不可視文字が混入していると例外を投げる（"is not a valid ByteString"）。
+  // 例外で沈黙せず、必ず delivery log に残して {ok:false} を返す（呼び出し側の処理を壊さない）。
+  let response: Response
+  try {
+    response = await fetch('https://api.line.me/v2/bot/message/reply', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${channelAccessToken}`,
+      },
+      body: JSON.stringify({
+        replyToken,
+        messages: messages.slice(0, 5),
+      }),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('replyLineMessages fetch threw:', msg)
+    if (logCtx?.storePartitionKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: logCtx.storePartitionKey,
+        method: 'reply',
+        context: logCtx.context,
+        targetRoomId: logCtx.roomId ?? null,
+        attempted: true,
+        success: false,
+        httpStatus: 0,
+        reason: `LINE返信が例外で失敗: ${msg.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      })
+    }
+    return { ok: false, error: `LINE reply threw: ${msg}` }
+  }
   const httpStatus = response.status
   const ok = response.ok
   const errText = ok ? '' : await response.text()
@@ -99,11 +121,18 @@ export async function replyLineFlex(
   return replyLineMessages(replyToken, [flexMessage], channelAccessToken, logCtx)
 }
 
+// コピー&ペースト由来の不可視文字（全角空白・ゼロ幅文字・改行等）を除去する。
+// LINEトークンはASCIIのみ。混入すると fetch が "is not a valid ByteString" 例外で
+// 全返信・画像取得が沈黙する（2026-06 bistrocavacava 移管時の実障害。gmail-alert-cron と同じ対策）。
+function sanitizeLineToken(raw: unknown): string {
+  return String(raw ?? '').replace(/[^\x21-\x7e]/g, '')
+}
+
 export function resolveChannelAccessToken(storeKey: string): string {
   const envKey = `LINE_CHANNEL_ACCESS_TOKEN__${storeKey.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase()}`
-  const perStore = String(Deno.env.get(envKey) || '').trim()
+  const perStore = sanitizeLineToken(Deno.env.get(envKey))
   if (perStore) return perStore
-  return String(Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || '').trim()
+  return sanitizeLineToken(Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN'))
 }
 
 export async function pushLineMessages(
@@ -115,17 +144,24 @@ export async function pushLineMessages(
   if (!userId.startsWith('U')) {
     return { ok: false, error: 'invalid user id' }
   }
-  const response = await fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${channelAccessToken}`,
-    },
-    body: JSON.stringify({
-      to: userId,
-      messages: messages.slice(0, 5),
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${channelAccessToken}`,
+      },
+      body: JSON.stringify({
+        to: userId,
+        messages: messages.slice(0, 5),
+      }),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('pushLineMessages fetch threw:', msg)
+    return { ok: false, error: `LINE push threw: ${msg}` }
+  }
   if (!response.ok) {
     const errText = await response.text()
     return { ok: false, error: `LINE push API ${response.status}: ${errText}` }
@@ -158,17 +194,24 @@ export async function pushLineTextToTarget(
   if (!/^[UCR]/.test(target)) {
     return { ok: false, error: 'invalid push target' }
   }
-  const response = await fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${channelAccessToken}`,
-    },
-    body: JSON.stringify({
-      to: target,
-      messages: [{ type: 'text', text: String(text ?? '').slice(0, 4900) }],
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${channelAccessToken}`,
+      },
+      body: JSON.stringify({
+        to: target,
+        messages: [{ type: 'text', text: String(text ?? '').slice(0, 4900) }],
+      }),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('pushLineTextToTarget fetch threw:', msg)
+    return { ok: false, error: `LINE push threw: ${msg}` }
+  }
   if (!response.ok) {
     const errText = await response.text()
     return { ok: false, error: `LINE push API ${response.status}: ${errText}` }
