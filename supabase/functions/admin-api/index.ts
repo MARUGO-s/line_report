@@ -862,6 +862,7 @@ Deno.serve(async (req) => {
           non_receipt_image_reply_enabled: payload.non_receipt_image_reply_enabled,
           media_save_enabled: payload.media_save_enabled,
           budget_entry_enabled: payload.budget_entry_enabled,
+          petty_receipt_analysis_enabled: payload.petty_receipt_analysis_enabled,
           gmail_reservation_alert_enabled: payload.gmail_reservation_alert_enabled,
           today_reservation_alert_enabled: payload.today_reservation_alert_enabled,
           today_reservation_alert_hour: payload.today_reservation_alert_hour,
@@ -6158,6 +6159,7 @@ function buildRoomSettingsPayload(body: unknown): {
   receipt_monthend_report_enabled: boolean
   media_save_enabled: boolean
   budget_entry_enabled?: boolean
+  petty_receipt_analysis_enabled?: boolean
   receipt_schedule_override: boolean
   receipt_midreport_day: number | null
   receipt_midreport_hour: number | null
@@ -6318,6 +6320,13 @@ function buildRoomSettingsPayload(body: unknown): {
   // 未指定なら undefined＝upsertに含めず既存値を保持（予算を送らない保存経路でfalseに戻さない）。
   const budgetEntryEnabled = budgetEntryEnabledRaw != null ? budgetEntryEnabledRaw === true : undefined
 
+  // 小口（経費）レシート解析の許可（既定ON）。未指定なら undefined＝既存値を保持。
+  const pettyReceiptAnalysisEnabledRaw = body.petty_receipt_analysis_enabled
+  if (pettyReceiptAnalysisEnabledRaw != null && typeof pettyReceiptAnalysisEnabledRaw !== "boolean") {
+    throw { status: 400, message: "petty_receipt_analysis_enabled must be boolean when provided." } satisfies AppError
+  }
+  const pettyReceiptAnalysisEnabled = pettyReceiptAnalysisEnabledRaw != null ? pettyReceiptAnalysisEnabledRaw === true : undefined
+
   const receiptScheduleOverrideRaw = body.receipt_schedule_override
   if (receiptScheduleOverrideRaw != null && typeof receiptScheduleOverrideRaw !== "boolean") {
     throw { status: 400, message: "receipt_schedule_override must be boolean when provided." } satisfies AppError
@@ -6408,6 +6417,7 @@ function buildRoomSettingsPayload(body: unknown): {
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,
     media_save_enabled: mediaSaveEnabled,
     budget_entry_enabled: budgetEntryEnabled,
+    petty_receipt_analysis_enabled: pettyReceiptAnalysisEnabled,
     receipt_schedule_override: receiptScheduleOverride,
     receipt_midreport_day: receiptMidreportDay,
     receipt_midreport_hour: receiptMidreportHour,

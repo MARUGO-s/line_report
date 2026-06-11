@@ -878,6 +878,7 @@ async function processReceiptImageEvent(
   suppressAll = false,          // bot_reply_hard_mute_enabled: 一切返信しない
   suppressReceiptReply = false, // !image_analysis_reply_enabled: レシート結果のみ返信しない
   suppressNonReceiptReply = false, // !non_receipt_image_reply_enabled: 非レシート画像の返信のみ抑止
+  allowPettyCash = true,        // petty_receipt_analysis_enabled: 経費(小口)フローの許可（ONなら hard mute でも優先返信）
 ): Promise<{ saved: boolean; replied: boolean; reason?: string }> {
   const lineMessageId = String(event.message?.id ?? '').trim()
   const rawReplyToken = String(event.replyToken ?? '').trim()
@@ -975,7 +976,8 @@ async function processReceiptImageEvent(
   // 売上(精算)解析（Groq判定＋Claude/Gemini）をスキップして、経費専用解析だけ実行する。
   // ＝先打ち時は AI 呼び出しを1回（経費解析のみ）に削減。pending が無ければ {handled:false} で
   // 通常の精算解析へフォールスルー（普通に画像だけ送る従来フローは一切変わらない）。
-  {
+  // 権限「小口レシートの解析をする」OFF のルームでは作動しない（ONなら hard mute でも優先返信）。
+  if (allowPettyCash) {
     const pettyUserId = event.source?.userId ? String(event.source.userId) : null
     const pettyEarly = await handlePettyCashImageIfPending(supabase, registry, {
       roomId,
@@ -1192,10 +1194,11 @@ async function processReceiptImageEvent(
   // 自店名と一致しても出金伝票は売上に入れない（売上の水増し防止）。検知しなければ従来処理へ。
   {
     const cashOutUserId = event.source?.userId ? String(event.source.userId) : null
+    // 権限OFFでも検知自体は行い「売上への誤登録」は防ぐ（カード返信だけ出さない）。
     const cashOut = await handlePettyCashCashOutSlip(supabase, registry, {
       roomId,
       userId: cashOutUserId,
-      replyToken: receiptReplyToken ? rawReplyToken : '',
+      replyToken: (allowPettyCash && receiptReplyToken) ? rawReplyToken : '',
       lineMessageId,
       receipt,
       summary: analyzed.analysis?.summary ?? '',
@@ -1271,13 +1274,16 @@ async function processReceiptImageEvent(
     if (receiptReplyToken) {
       // 店名不一致＝別店舗のレシート＝経費の可能性が高い。経費候補として pending を作り、
       // 不一致カードに「経費（小口）として記録」ボタンを足す（「経費」と先打ちしなくてもOK）。
+      // 権限「小口レシートの解析をする」OFF のルームではボタンを付けない（pendingも作らない）。
       let pettyPendingId: number | null = null
-      try {
-        pettyPendingId = await savePettyCashPendingFromReceipt(supabase, registry, {
-          roomId, userId, lineMessageId, receipt, reanalyze: reanalyzeAsExpense,
-        })
-      } catch (e) {
-        console.error('savePettyCashPendingFromReceipt threw:', String(e))
+      if (allowPettyCash) {
+        try {
+          pettyPendingId = await savePettyCashPendingFromReceipt(supabase, registry, {
+            roomId, userId, lineMessageId, receipt, reanalyze: reanalyzeAsExpense,
+          })
+        } catch (e) {
+          console.error('savePettyCashPendingFromReceipt threw:', String(e))
+        }
       }
       const flexMessage = buildReceiptStoreMismatchFlexReply(guidance, pettyPendingId)
       await replyLineFlex(
@@ -1602,6 +1608,8 @@ Deno.serve(async (req) => {
     let allowCorrectionReply = false
     let allowMediaSave = true
     let budgetEntryAllowed = false
+    // 小口（経費）レシート解析の許可（既定ON）。ONなら「AI返信完全無し」でも経費フローは優先して解析・返信する。
+    let pettyAnalysisAllowed = true
     if (eventRoomId) {
       const muteFlags = await loadRoomSearchFlagsCached(eventRoomId)
       roomHardMuted = !!muteFlags?.bot_reply_hard_mute_enabled
@@ -1613,6 +1621,7 @@ Deno.serve(async (req) => {
       allowMediaSave = muteFlags !== null ? muteFlags.media_save_enabled !== false : true
       // 予算登録フローの権限ゲート（既定OFF＝「許可」した部屋だけ作動）。
       budgetEntryAllowed = muteFlags !== null ? !!muteFlags.budget_entry_enabled : false
+      pettyAnalysisAllowed = muteFlags !== null ? muteFlags.petty_receipt_analysis_enabled !== false : true
     }
 
     // メディア閲覧用の保存（画像/動画/音声/ファイル）。1ルーム合計20MBまで、超過分は古い順に自動削除。
@@ -1657,7 +1666,7 @@ Deno.serve(async (req) => {
 
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
-        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply, suppressNonReceiptReply)
+        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply, suppressNonReceiptReply, pettyAnalysisAllowed)
         if (result.saved) receiptsSaved += 1
         if (result.replied) receiptReplies += 1
         if (result.reason && !result.saved) {
@@ -1750,7 +1759,8 @@ Deno.serve(async (req) => {
       }
 
       // 小口現金（経費）確認カードの postback（pcimp=記録 / pcimp_skip=破棄）
-      if ((postbackData.startsWith('pcimp=') || postbackData.startsWith('pcimp_skip=') || postbackData.startsWith('pcreview=')) && postbackReplyToken) {
+      // 権限「小口レシートの解析をする」OFF のルームでは反応しない（ONなら hard mute でも優先返信）。
+      if ((postbackData.startsWith('pcimp=') || postbackData.startsWith('pcimp_skip=') || postbackData.startsWith('pcreview=')) && postbackReplyToken && pettyAnalysisAllowed) {
         try {
           const pettyReply = await handlePettyCashPostback(supabase, registry as StoreRegistryRow, postbackData)
           if (pettyReply) {
@@ -1836,8 +1846,9 @@ Deno.serve(async (req) => {
       }
 
       // 小口現金（経費）取込フロー（独立・他に干渉しない）。「経費」or 経費pending中の「キャンセル」のみ作動。
+      // 権限「小口レシートの解析をする」(petty_receipt_analysis_enabled) OFF のルームでは作動しない。
       let pettyCashHandled = false
-      if (!budgetEntryHandled && text && eventRoomId && eventUserId) {
+      if (!budgetEntryHandled && pettyAnalysisAllowed && text && eventRoomId && eventUserId) {
         try {
           const pettyResult = await handlePettyCashTextMessage(supabase, registry as StoreRegistryRow, {
             roomId: eventRoomId,

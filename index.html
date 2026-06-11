@@ -5415,6 +5415,7 @@
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMidreportEnabled" type="checkbox"><span id="roomConfigReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMonthendReportEnabled" type="checkbox"><span id="roomConfigReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigBudgetEntryEnabled" type="checkbox">予算登録を許可（このルームから月次予算を入力）</label>
+          <label class="room-scope-option receipt-scope-option"><input id="roomConfigPettyReceiptAnalysisEnabled" type="checkbox">小口レシートの解析をする（AI返信完全無しでも経費の解析・返信を優先）</label>
         </div>
         <div id="roomConfigReceiptScheduleWrap" class="receipt-schedule-panel receipt-scope-option">
         <div id="roomConfigReceiptScheduleRoomWrap" class="receipt-schedule-row">
@@ -5927,6 +5928,7 @@
       roomConfigMediaAccess: document.getElementById('roomConfigMediaAccess'),
       roomConfigImageAnalysisReplyEnabled: document.getElementById('roomConfigImageAnalysisReplyEnabled'),
       roomConfigBudgetEntryEnabled: document.getElementById('roomConfigBudgetEntryEnabled'),
+      roomConfigPettyReceiptAnalysisEnabled: document.getElementById('roomConfigPettyReceiptAnalysisEnabled'),
       roomConfigReceiptCorrectionReplyEnabled: document.getElementById('roomConfigReceiptCorrectionReplyEnabled'),
       roomConfigNonReceiptImageReplyEnabled: document.getElementById('roomConfigNonReceiptImageReplyEnabled'),
       roomConfigMediaSaveEnabled: document.getElementById('roomConfigMediaSaveEnabled'),
@@ -8371,6 +8373,7 @@
         media_file_access_enabled: !!dom.roomConfigMediaAccess.checked,
         image_analysis_reply_enabled: !!(dom.roomConfigImageAnalysisReplyEnabled && dom.roomConfigImageAnalysisReplyEnabled.checked),
         budget_entry_enabled: !!(dom.roomConfigBudgetEntryEnabled && dom.roomConfigBudgetEntryEnabled.checked),
+        petty_receipt_analysis_enabled: dom.roomConfigPettyReceiptAnalysisEnabled ? !!dom.roomConfigPettyReceiptAnalysisEnabled.checked : undefined,
         receipt_correction_reply_enabled: !!(dom.roomConfigReceiptCorrectionReplyEnabled && dom.roomConfigReceiptCorrectionReplyEnabled.checked),
         non_receipt_image_reply_enabled: !!(dom.roomConfigNonReceiptImageReplyEnabled && dom.roomConfigNonReceiptImageReplyEnabled.checked),
         media_save_enabled: !!(dom.roomConfigMediaSaveEnabled && dom.roomConfigMediaSaveEnabled.checked),
@@ -12034,6 +12037,10 @@
       if (dom.roomConfigBudgetEntryEnabled) {
         dom.roomConfigBudgetEntryEnabled.checked = !!config.budget_entry_enabled;
       }
+      if (dom.roomConfigPettyReceiptAnalysisEnabled) {
+        // 既定ON（未設定・旧データは true 扱い）
+        dom.roomConfigPettyReceiptAnalysisEnabled.checked = config.petty_receipt_analysis_enabled !== false;
+      }
       if (dom.roomConfigReceiptCorrectionReplyEnabled) {
         dom.roomConfigReceiptCorrectionReplyEnabled.checked = !!config.receipt_correction_reply_enabled;
       }
@@ -12886,6 +12893,7 @@
         payload.media_file_access_enabled = !!opts.overrideConfig.media_file_access_enabled;
         payload.image_analysis_reply_enabled = !!opts.overrideConfig.image_analysis_reply_enabled;
         payload.budget_entry_enabled = !!opts.overrideConfig.budget_entry_enabled;
+        payload.petty_receipt_analysis_enabled = opts.overrideConfig.petty_receipt_analysis_enabled !== false;
         payload.receipt_correction_reply_enabled = !!opts.overrideConfig.receipt_correction_reply_enabled;
         payload.non_receipt_image_reply_enabled = opts.overrideConfig.non_receipt_image_reply_enabled !== false;
         payload.media_save_enabled = opts.overrideConfig.media_save_enabled !== false;
