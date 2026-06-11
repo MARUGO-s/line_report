@@ -923,6 +923,14 @@
           ? r.items.map((it) => '<div class="ld-item"><span class="ld-dot" style="background:' + acctColor(it.acct) + '"></span><span class="ld-name">' + esc(it.n || '(品目)') + '</span><span class="ld-rate">' + (Number(it.rate) === 10 ? 10 : 8) + '%</span><span class="ld-yen">' + yen(it.p) + '</span></div>').join('')
           : legacyLines(r);
         const memo = r.memo ? '<div class="ld-memo">' + esc(r.memo) + '</div>' : '';
+        // 検証: 明細(全品目に価格あり)の税込合計が保存済みの出金額と±3円超でズレていたら警告（読み取りミスの目印）。
+        let mismatchWarn = '';
+        if (r.items.length && r.items.every((it) => Number(it.p) > 0)) {
+          const itemsTotal = r.items.reduce((s, it) => s + it.p + Math.round(it.p * (Number(it.rate) === 10 ? 10 : 8) / 100), 0);
+          if (Math.abs(itemsTotal - r.total) > 3) {
+            mismatchWarn = '<div class="ld-memo" style="color:var(--warn);font-weight:600">⚠ 明細合計（税込 ' + yen(itemsTotal) + '）が出金額と不一致 — 「編集」で価格を修正してください</div>';
+          }
+        }
         const storeTag = showStore ? '<span class="ld-store">' + esc(storeName(r.store)) + '</span>' : '';
         const lineTag = r.source === 'line_image' ? '<span class="ld-rate" style="margin-left:7px;color:var(--ok)">LINE</span>' : '';
         const accts = r.items.length
@@ -931,7 +939,7 @@
         const tags = accts.map((k) => '<span class="acct-tag"><span class="at-dot" style="background:' + (k === '__unknown__' ? 'var(--acct-unknown)' : acctColor(k)) + '"></span>' + esc(k === '__unknown__' ? (r.items.length ? '未分類' : (r.category || '未分類')) : acctName(k)) + '</span>').join('');
         return '<tr>' +
           '<td class="c-date">' + esc(r.date) + '</td>' +
-          '<td class="c-desc">' + storeTag + '<div class="ld-items">' + lines + '</div>' + memo + (lineTag ? '<div style="margin-top:5px">' + lineTag + '</div>' : '') + '</td>' +
+          '<td class="c-desc">' + storeTag + '<div class="ld-items">' + lines + '</div>' + memo + mismatchWarn + (lineTag ? '<div style="margin-top:5px">' + lineTag + '</div>' : '') + '</td>' +
           '<td class="c-acct"><div class="acct-tags">' + tags + '</div></td>' +
           '<td class="c-num">' + yen(r.base) + '</td>' +
           '<td class="c-num">' + (r.tax > 0 ? yen(r.tax) : '—') + '</td>' +

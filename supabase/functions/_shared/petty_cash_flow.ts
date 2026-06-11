@@ -115,16 +115,31 @@ export function extractExpenseFromReceipt(
   const itemsTax = itemEntries.reduce((s, it) => s + Math.round((it.p * it.rate) / 100), 0)
   const allPriced = itemRows.length > 0 && itemRows.every((i) => i.amount != null && i.amount > 0)
 
-  // 本体(税抜)・出金額(税込)の決定（誤読対策）:
-  //  0) 【明細照合・最優先】全品目に価格があり「明細合計＋品目別税 ≒ 合計(gross)」(±3円)なら
-  //     明細を正とする: 本体=明細合計、税=gross−明細合計、出金=gross。
-  //     → 内税レシートで net/tax を誤読（例: 「10%税込¥5」を税額と誤読）しても金額が壊れない。
-  //  1) 小計(net)+税(tax)（外税/内税どちらも税込合計に一致、お預りと混同しない）。
-  //  2) 明細合計(itemsSum, 外税前提で +tax)。 3) 合計(gross)。
+  // 税率別集計（「◯%税込/うち税額」型の印字がある場合のみ AI が返す）。
+  //   total=その税率の税込小計、tax=その中に含まれる税額（うち税額）。
+  //   例: 10%税込¥5/うち税額¥0 ＋ 軽8%税込¥4,998/うち税額¥370 → 支払合計5,003・税370・税抜4,633。
+  //   ※全店舗の経費レシートがこの型とは限らない（無いレシートでは breakdown は空）。
+  const breakdown = (Array.isArray(receipt?.taxBreakdown) ? receipt!.taxBreakdown! : [])
+    .map((b) => ({ rate: b?.rate, total: parseYenToInt(b?.total), tax: parseYenToInt(b?.tax) ?? 0 }))
+    .filter((b) => (b.rate === 8 || b.rate === 10) && b.total != null && b.total > 0 && b.tax >= 0 && b.tax <= (b.total ?? 0))
+  const bdGross = breakdown.reduce((s, b) => s + (b.total ?? 0), 0)
+  const bdTax = breakdown.reduce((s, b) => s + b.tax, 0)
+  // 印字の「合計」と±2円以内で一致するときだけ信用（合計が読めない場合は集計行の和を採用）。
+  const bdValid = breakdown.length > 0 && bdGross > 0 && (gross == null || Math.abs(bdGross - gross) <= 2)
+
+  // 本体(税抜)・出金額(税込)の決定（誤読対策・上から優先）:
+  //  0a) 【税率別集計】「◯%税込/うち税額」の印字から確定: 出金=Σ税込小計、税=Σうち税額、本体=出金−税。
+  //      → 明細の1品を誤読しても、印字された集計行から金額が正しく決まる。
+  //  0b) 【明細照合】全品目に価格があり「明細合計＋品目別税 ≒ 合計(gross)」(±3円)なら明細を正とする。
+  //  1) 小計(net)+税(tax)。 2) 明細合計(itemsSum)+税。 3) 合計(gross)−税。
   let base: number | null = null
   let amount: number | null = null
   let taxResolved = tax
-  if (gross != null && gross > 0 && allPriced && Math.abs(itemsSum + itemsTax - gross) <= 3) {
+  if (bdValid) {
+    amount = gross ?? bdGross
+    taxResolved = Math.min(bdTax, amount)
+    base = amount - taxResolved
+  } else if (gross != null && gross > 0 && allPriced && Math.abs(itemsSum + itemsTax - gross) <= 3) {
     base = itemsSum
     amount = gross
     taxResolved = Math.max(0, gross - itemsSum)
@@ -199,10 +214,30 @@ type ExtractedExpense = {
   amount: number
   tax: number
   supplier: string | null
+  items?: PettyCashItem[] | null
+}
+
+// 明細（全品目に価格あり）の税込合計。価格欠けがあれば null（照合不能）。
+function itemsTotalWithTax(items?: PettyCashItem[] | null): number | null {
+  if (!Array.isArray(items) || !items.length) return null
+  if (!items.every((it) => Number(it?.p) > 0)) return null
+  const base = items.reduce((s, it) => s + it.p, 0)
+  const tax = items.reduce((s, it) => s + Math.round((it.p * it.rate) / 100), 0)
+  return base + tax
 }
 
 function confirmFlex(pendingId: number, x: ExtractedExpense): Record<string, unknown> {
   const base = Math.max(0, x.amount - x.tax)
+  // 検証: 明細の税込合計と支払合計のズレ(±3円超)は黙って通さず、警告＋「不一致を確認して記録」にする。
+  const itemsTotal = itemsTotalWithTax(x.items)
+  const mismatch = itemsTotal != null && Math.abs(itemsTotal - x.amount) > 3
+  const warnRows: Record<string, unknown>[] = mismatch
+    ? [{
+        type: 'text',
+        text: `⚠️ 明細の合計（税込 ${formatYen(itemsTotal!)}）と支払合計（${formatYen(x.amount)}）が一致しません。品目の価格に読み取りミスがある可能性があります。記録する場合は、小口現金ページの「編集」で明細を修正してください。`,
+        wrap: true, size: 'xs', color: '#c0392b', margin: 'md',
+      }]
+    : []
   return {
     type: 'flex',
     altText: `経費の記録確認: ${x.item ?? ''} ${formatYen(x.amount)}`.slice(0, 380),
@@ -223,12 +258,13 @@ function confirmFlex(pendingId: number, x: ExtractedExpense): Record<string, unk
             ['税額', x.tax > 0 ? formatYen(x.tax) : '—'],
             ['出金額', formatYen(x.amount)],
           ]),
+          ...warnRows,
         ],
       },
       footer: {
         type: 'box', layout: 'vertical', spacing: 'sm',
         contents: [
-          { type: 'button', style: 'primary', color: '#1a6fa8', action: { type: 'postback', label: 'この内容で記録', data: `pcimp=${pendingId}`, displayText: '小口現金に記録します' } },
+          { type: 'button', style: 'primary', color: mismatch ? '#c0392b' : '#1a6fa8', action: { type: 'postback', label: mismatch ? '不一致を確認して記録' : 'この内容で記録', data: `pcimp=${pendingId}`, displayText: '小口現金に記録します' } },
           { type: 'button', style: 'secondary', action: { type: 'postback', label: '破棄（記録しない）', data: `pcimp_skip=${pendingId}`, displayText: '経費の記録を取りやめます' } },
         ],
       },
@@ -471,7 +507,7 @@ export async function handlePettyCashImageIfPending(
   }).eq('id', pendingId)
 
   const replied = await sendReply(replyToken, [confirmFlex(pendingId, {
-    storeDisplayName: storeName, spentOn: ex.spentOn, item: ex.item, amount: ex.amount, tax: ex.tax, supplier: ex.supplier,
+    storeDisplayName: storeName, spentOn: ex.spentOn, item: ex.item, amount: ex.amount, tax: ex.tax, supplier: ex.supplier, items: ex.items,
   })], storeKey, roomId)
   return { handled: true, replied, saved: false, reason: 'petty_cash_confirm_card' }
 }
@@ -581,6 +617,7 @@ export async function handlePettyCashPostback(
       amount: Math.max(0, Math.floor(Number(p.amount_yen ?? 0))),
       tax: Math.max(0, Math.floor(Number(p.tax_yen ?? 0))),
       supplier: p.store_name,
+      items: p.items,
     })
   }
 

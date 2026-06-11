@@ -334,6 +334,22 @@ export function normalizeLineImageReceiptAnalysis(
     .filter((x) => x.name || x.price)
     .slice(0, 30)
 
+  // 税率別集計（「◯%税込/うち税額」等）。経費の金額確定に使用。rate は 8/10 のみ採用。
+  const taxBreakdown = (Array.isArray((data as Record<string, unknown>).tax_breakdown) ? (data as Record<string, unknown>).tax_breakdown as unknown[] : [])
+    .map((v) => {
+      if (!v || typeof v !== 'object') return null
+      const o = v as Record<string, unknown>
+      const rateNum = Number(o.rate)
+      if (rateNum !== 8 && rateNum !== 10) return null
+      return {
+        rate: rateNum,
+        total: normalizeReceiptFieldText(o.total ?? (o as { gross?: unknown }).gross, 40) || null,
+        tax: normalizeReceiptFieldText(o.tax, 40) || null,
+      }
+    })
+    .filter((x): x is { rate: number; total: string | null; tax: string | null } => x != null && (x.total != null || x.tax != null))
+    .slice(0, 4)
+
   const dateIso = parseReceiptDateToIso(date)
   if (dateIso) date = formatJapaneseReceiptDateFromIso(dateIso)
 
@@ -362,7 +378,7 @@ export function normalizeLineImageReceiptAnalysis(
   )
   if (!hasAnyField) return null
 
-  return { storeName, storePhone, date, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items, lineItems }
+  return { storeName, storePhone, date, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items, lineItems, taxBreakdown }
 }
 
 // ソバージュ専用: レシートの「総売上」には出前（デリバリー）の預かり金が含まれ当店の売上ではないため、

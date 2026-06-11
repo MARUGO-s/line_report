@@ -12,6 +12,8 @@ export type LineImageReceiptAnalysis = {
   items: string[]
   /** 商品明細（品名＋価格＋税率）。経費（小口現金）の明細表示・品目別税率に使用。任意（解析時のみ設定）。 */
   lineItems?: Array<{ name: string | null; price: string | null; rate?: number | null }>
+  /** 税率別集計（「◯%税込/うち税額」等の印字がある場合のみ）。total=税込小計、tax=うち税額。経費の金額確定に使用。 */
+  taxBreakdown?: Array<{ rate: number; total: string | null; tax: string | null }>
 }
 
 /** 予約管理アプリ等の「予約確認画面」スクショから抽出する予約情報 */
