@@ -1,3 +1,4 @@
+// deploy-marker: Edge シークレット再読込トリガー（claude_haiku キー差し替えのため強制再デプロイ）2026-06-12
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import {
   fetchLineMessageBinary,
