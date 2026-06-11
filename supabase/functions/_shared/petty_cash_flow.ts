@@ -103,13 +103,18 @@ export function extractExpenseFromReceipt(
   const itemsSum = itemRows.reduce((s, i) => s + (i.amount != null && i.amount > 0 ? i.amount : 0), 0)
 
   // 品目内訳（勘定科目・税率）を先に確定する。
-  // 税率は会計ルールで決める（軽減税率8%の対象は「酒類を除く飲食料品」のみ）:
-  //   食材(shokuzai)=8% ／ 消耗品・アルコール=10%。AIのrate出力は信用せず、
-  //   rate=8（※印=飲食料品の証拠）のときだけ消耗品誤分類を食材へ補正する材料に使う。
+  // 【税率は「軽減税率印（※/* 等 → rate=8）」を最優先】品名に依存しない物理的な目印なので、
+  //   品名を誤読しても税率は正しく決まる（例: TOBUは脚注に「※は軽減税率対象」と明記）:
+  //     rate=8（印あり）   → 8%・食材で確定（印=酒類を除く飲食料品の証拠）。
+  //     rate=10（印なし）  → 10%。科目は品名から推定（消耗品/アルコール/食材）。食材推定でも
+  //                          印が無ければ10%のまま（店内飲食・酒類など飲食物でも10%があるため印を正とする）。
+  //     rate不明（AIが付けず）→ 品名から推定（食材=8/他=10）にフォールバック。
   const itemEntries = itemRows.map((i) => {
-    let acct = classifyPettyAcct(i.name)
-    if (i.rate === 8 && acct === 'shomohin') acct = 'shokuzai' // ※印=飲食料品 → 消耗品の誤分類を補正
-    const rate: 8 | 10 = acct === 'shokuzai' ? 8 : 10
+    if (i.rate === 8) {
+      return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct: 'shokuzai' as const, rate: 8 as const }
+    }
+    const acct = classifyPettyAcct(i.name)
+    const rate: 8 | 10 = i.rate === 10 ? 10 : defaultPettyRate(acct)
     return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct, rate }
   })
   const itemsTax = itemEntries.reduce((s, it) => s + Math.round((it.p * it.rate) / 100), 0)
