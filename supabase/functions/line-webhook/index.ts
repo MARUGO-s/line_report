@@ -963,14 +963,9 @@ async function processReceiptImageEvent(
 
   // 経費(小口)専用の再解析（独立経路）: 売上(精算)解析プロンプトには一切手を入れず、
   // 経費専用の追記(EXPENSE_RECEIPT_PROMPT_ADDITION)で line_items・小計/外税 を取得する。
-  // Claude(キーあり)優先、無ければ Groq。経費フローの各ハンドラから「必要時のみ」呼ばれる。
+  // 解析は Groq を採用（2026-06-12: Claude(Haiku)はTOBU等でJANコード行の混入・品名誤読・品目欠落が多く不正確、
+  // かつ高コストのため。実測で Groq の方が同じTOBUレシートを正確に読めた）。経費フローの各ハンドラから「必要時のみ」呼ばれる。
   const reanalyzeAsExpense = async () => {
-    const claudeKey = resolveClaudeApiKey()
-    if (claudeKey) {
-      const r = await analyzeLineImageWithClaude(contentFetch.bytes, contentFetch.contentType, lineMessageId, claudeKey, EXPENSE_RECEIPT_PROMPT_ADDITION, CLAUDE_RECEIPT_MODEL)
-      await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, r.usage)
-      if (r.analysis?.receipt) return r.analysis.receipt
-    }
     const g = await analyzeLineImageWithGroqScout(contentFetch.bytes, contentFetch.contentType, lineMessageId, groqApiKey, EXPENSE_RECEIPT_PROMPT_ADDITION)
     await recordAiUsage('groq', GROQ_RECEIPT_MODEL, g.usage)
     return g.analysis?.receipt ?? null
