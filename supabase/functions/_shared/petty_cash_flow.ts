@@ -202,18 +202,31 @@ export function extractExpenseFromReceipt(
     }
   }
 
-  // 【税率別集計の未カバー分を補完】tax_breakdown が示す各税率の「税抜小計」を、その税率の品目合計が満たして
-  //   いない場合（AIが少額品＝外10のレジ袋等を明細から落とした等）、不足分を1品目として補う。これで明細合計が
-  //   支払額と一致し、科目別集計の取りこぼし（レジ袋が消える等）も防ぐ。受領額(amount/tax)自体は集計行が正本。
-  //   ※税込印字の品目は covered≥groupNet となり missing≤0 で補完されない＝過補完を自動回避。
-  if (bdValid && itemEntries.length && allPriced) {
-    for (const b of breakdown) {
-      const groupNet = Math.max(0, (b.total ?? 0) - b.tax) // その税率の税抜小計
-      const covered = itemEntries.reduce((s, it) => s + (it.rate === b.rate ? it.p : 0), 0)
-      const missing = groupNet - covered
-      if (missing >= 2) {
-        itemEntries.push({ n: `(明細補完 ${b.rate}%対象)`, p: missing, acct: b.rate === 8 ? 'shokuzai' : 'shomohin', rate: b.rate })
+  // 【未取得品目の補完（支払総額を正本に）】AIは少額の税率グループ（外10のレジ袋等＝¥5/税0）を、品目だけで
+  //   なく税率別集計の行ごと落とすことがある（折り目・微小値・行頭外10が1行だけ 等が原因）。確実に読める
+  //   「支払総額(amount)」を正本に、明細＋税で満たない差額を補完する。受領額(amount/tax)自体は集計行/合計が正本。
+  //   ※税込印字の品目は itemsGross≥amount で gap≤0 となり発動しない＝過補完を自動回避。
+  if (amount != null && amount > 0 && itemEntries.length && allPriced) {
+    // (a) tax_breakdown が読めている税率は、その税抜小計を品目が満たすよう不足分を補完（税率は確定）。
+    if (bdValid) {
+      for (const b of breakdown) {
+        const groupNet = Math.max(0, (b.total ?? 0) - b.tax)
+        const covered = itemEntries.reduce((s, it) => s + (it.rate === b.rate ? it.p : 0), 0)
+        const missing = groupNet - covered
+        if (missing >= 2) itemEntries.push({ n: `(明細補完 ${b.rate}%対象)`, p: missing, acct: b.rate === 8 ? 'shokuzai' : 'shomohin', rate: b.rate })
       }
+    }
+    // (b) それでも明細(税込)が支払総額に届かない＝AIが税率別集計の行ごと落とした税率がある。残差を補完。
+    //     税率は tax_breakdown に無い方（多くは10%＝レジ袋等）を推定。
+    let g8 = 0, g10 = 0
+    for (const it of itemEntries) { if (it.rate === 10) g10 += it.p; else g8 += it.p }
+    const itemsGross = (g8 + g10) + Math.floor((g8 * 8) / 100) + Math.floor((g10 * 10) / 100)
+    const gap = amount - itemsGross
+    if (gap >= 2) {
+      const rates = new Set(breakdown.map((b) => b.rate))
+      const rate: 8 | 10 = (rates.has(8) && !rates.has(10)) ? 10 : (rates.has(10) && !rates.has(8)) ? 8 : 10
+      const p = Math.max(1, Math.round(gap / (1 + rate / 100)))
+      itemEntries.push({ n: `(明細補完 ${rate}%対象)`, p, acct: rate === 8 ? 'shokuzai' : 'shomohin', rate })
     }
   }
 
