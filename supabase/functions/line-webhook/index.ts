@@ -838,8 +838,12 @@ async function handleDailySalesImportPostback(
 
 // レシート画像解析に Gemini を使う店舗（手書き数字などの読み取り精度向上が目的）。他店は Groq のまま。
 const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage', 'sushikoruri'])
-// Claude(Haiku) で解析する店舗（精度検証用）。シークレット名 claude_haiku（互換: ANTHROPIC_API_KEY）。
-const CLAUDE_RECEIPT_STORE_KEYS = new Set<string>(['claudia2'])
+// Claude(Haiku) で「売上(精算)」を解析する店舗。現在は空＝全店 Groq/Gemini で売上解析する
+// （claudia2 は 2026-06-12 にコスト優先で Claude→Groq へ変更）。売上解析にClaudeを使いたい店があれば
+// その store_partition_key をこの Set に追加するだけ（下方の useClaudeForReceipt 経路が有効化される）。
+// ※経費(小口)の明細再解析 reanalyzeAsExpense は店舗に関係なく Claude を使う（こことは別系統・継続）。
+// シークレット名 claude_haiku（互換: CLAUDE_HAIKU / ANTHROPIC_API_KEY）。
+const CLAUDE_RECEIPT_STORE_KEYS = new Set<string>([])
 function resolveClaudeApiKey(): string {
   return (Deno.env.get('claude_haiku') ?? Deno.env.get('CLAUDE_HAIKU') ?? Deno.env.get('ANTHROPIC_API_KEY') ?? '').trim()
 }
