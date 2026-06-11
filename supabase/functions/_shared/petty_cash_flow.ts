@@ -202,6 +202,21 @@ export function extractExpenseFromReceipt(
     }
   }
 
+  // 【税率別集計の未カバー分を補完】tax_breakdown が示す各税率の「税抜小計」を、その税率の品目合計が満たして
+  //   いない場合（AIが少額品＝外10のレジ袋等を明細から落とした等）、不足分を1品目として補う。これで明細合計が
+  //   支払額と一致し、科目別集計の取りこぼし（レジ袋が消える等）も防ぐ。受領額(amount/tax)自体は集計行が正本。
+  //   ※税込印字の品目は covered≥groupNet となり missing≤0 で補完されない＝過補完を自動回避。
+  if (bdValid && itemEntries.length && allPriced) {
+    for (const b of breakdown) {
+      const groupNet = Math.max(0, (b.total ?? 0) - b.tax) // その税率の税抜小計
+      const covered = itemEntries.reduce((s, it) => s + (it.rate === b.rate ? it.p : 0), 0)
+      const missing = groupNet - covered
+      if (missing >= 2) {
+        itemEntries.push({ n: `(明細補完 ${b.rate}%対象)`, p: missing, acct: b.rate === 8 ? 'shokuzai' : 'shomohin', rate: b.rate })
+      }
+    }
+  }
+
   // 品目テキスト＋品目内訳（記録後に小口現金ページで修正可）。テキストは正規化後の税抜価格で表示。
   let item: string
   let items: PettyCashItem[]
