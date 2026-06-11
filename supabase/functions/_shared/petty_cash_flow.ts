@@ -63,7 +63,7 @@ type PettyCashItem = { n: string; p: number; acct: 'shokuzai' | 'shomohin' | 'al
 //   アルコール飲料 → alcohol、消耗品/衛生用品 → shomohin、それ以外 → shokuzai(食材)。
 //   ※「消毒用アルコール」等は飲料ではないので shomohin 側で先に拾う。
 const ALCOHOL_DRINK_RE = /(ビール|発泡酒|ワイン|シャンパン|スパークリング|日本酒|清酒|焼酎|ウイスキー|ウィスキー|ハイボール|サワー|酎ハイ|チューハイ|ジン|ウォッカ|ラム|テキーラ|リキュール|梅酒|ハウスワイン|生樽|樽生|地酒|スピリッツ|sake|beer|wine|whisky|whiskey|vodka|tequila)/i
-const SHOMOHIN_RE = /(洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/
+const SHOMOHIN_RE = /(洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|レジ袋|レジブクロ|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/
 function classifyPettyAcct(name: string): 'shokuzai' | 'shomohin' | 'alcohol' {
   const s = String(name ?? '')
   if (SHOMOHIN_RE.test(s)) return 'shomohin'
@@ -89,10 +89,14 @@ function extractExpenseFromReceipt(
   const tax = parseYenToInt(receipt?.taxAmount) ?? 0
   const gross = parseYenToInt(receipt?.grossSales)
   const net = parseYenToInt(receipt?.netSales)
-  // 商品明細（品名＋価格）。価格は数値化。
+  // 商品明細（品名＋価格＋税率）。価格は数値化。税率はレシートの軽減税率印（※等）由来の 8/10 のみ採用。
   const lineItems = Array.isArray(receipt?.lineItems) ? receipt!.lineItems! : []
   const itemRows = lineItems
-    .map((li) => ({ name: li?.name ? String(li.name).trim() : '', amount: parseYenToInt(li?.price) }))
+    .map((li) => ({
+      name: li?.name ? String(li.name).trim() : '',
+      amount: parseYenToInt(li?.price),
+      rate: (li?.rate === 8 || li?.rate === 10) ? li.rate : null,
+    }))
     .filter((x) => x.name || x.amount != null)
     .slice(0, 10)
   const itemsSum = itemRows.reduce((s, i) => s + (i.amount != null && i.amount > 0 ? i.amount : 0), 0)
@@ -117,7 +121,9 @@ function extractExpenseFromReceipt(
     item = itemRows.map((i) => `・${i.name}${i.amount != null ? ' ' + formatYen(i.amount) : ''}`.trim()).join('\n')
     items = itemRows.map((i) => {
       const acct = classifyPettyAcct(i.name)
-      return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct, rate: defaultPettyRate(acct) }
+      // 税率はレシートの軽減税率印（※等）から取れた値を最優先。無ければ科目の既定（食材8%/他10%）。
+      const rate = (i.rate === 8 || i.rate === 10) ? i.rate : defaultPettyRate(acct)
+      return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct, rate }
     })
   } else {
     const nameItems = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []

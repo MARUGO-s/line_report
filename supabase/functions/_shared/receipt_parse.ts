@@ -321,12 +321,15 @@ export function normalizeLineImageReceiptAnalysis(
     .map((v) => {
       if (v && typeof v === 'object') {
         const o = v as Record<string, unknown>
+        // 税率（軽減8% / 標準10%）。8/10 以外は null（後段で品目から既定推定）。
+        const rateNum = Number(o.rate ?? (o as { tax_rate?: unknown }).tax_rate)
         return {
           name: normalizeReceiptFieldText(o.name ?? o.item ?? o.title, 80) || null,
           price: normalizeReceiptFieldText(o.price ?? o.amount ?? o.value, 40) || null,
+          rate: rateNum === 8 || rateNum === 10 ? rateNum : null,
         }
       }
-      return { name: normalizeReceiptFieldText(v, 80) || null, price: null }
+      return { name: normalizeReceiptFieldText(v, 80) || null, price: null, rate: null }
     })
     .filter((x) => x.name || x.price)
     .slice(0, 10)

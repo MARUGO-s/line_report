@@ -10,8 +10,8 @@ export type LineImageReceiptAnalysis = {
   guestCount: string | null
   unitPrice: string | null
   items: string[]
-  /** 商品明細（品名＋価格）。経費（小口現金）の明細表示に使用。任意（解析時のみ設定）。 */
-  lineItems?: Array<{ name: string | null; price: string | null }>
+  /** 商品明細（品名＋価格＋税率）。経費（小口現金）の明細表示・品目別税率に使用。任意（解析時のみ設定）。 */
+  lineItems?: Array<{ name: string | null; price: string | null; rate?: number | null }>
 }
 
 /** 予約管理アプリ等の「予約確認画面」スクショから抽出する予約情報 */
