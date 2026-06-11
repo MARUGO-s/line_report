@@ -101,23 +101,6 @@ export function extractExpenseFromReceipt(
     .filter((x) => x.name || x.amount != null)
     .slice(0, 30)
   const itemsSum = itemRows.reduce((s, i) => s + (i.amount != null && i.amount > 0 ? i.amount : 0), 0)
-
-  // 品目内訳（勘定科目・税率）を先に確定する。
-  // 【税率は「軽減税率印（※/* 等 → rate=8）」を最優先】品名に依存しない物理的な目印なので、
-  //   品名を誤読しても税率は正しく決まる（例: TOBUは脚注に「※は軽減税率対象」と明記）:
-  //     rate=8（印あり）   → 8%・食材で確定（印=酒類を除く飲食料品の証拠）。
-  //     rate=10（印なし）  → 10%。科目は品名から推定（消耗品/アルコール/食材）。食材推定でも
-  //                          印が無ければ10%のまま（店内飲食・酒類など飲食物でも10%があるため印を正とする）。
-  //     rate不明（AIが付けず）→ 品名から推定（食材=8/他=10）にフォールバック。
-  const itemEntries = itemRows.map((i) => {
-    if (i.rate === 8) {
-      return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct: 'shokuzai' as const, rate: 8 as const }
-    }
-    const acct = classifyPettyAcct(i.name)
-    const rate: 8 | 10 = i.rate === 10 ? 10 : defaultPettyRate(acct)
-    return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct, rate }
-  })
-  const itemsTax = itemEntries.reduce((s, it) => s + Math.round((it.p * it.rate) / 100), 0)
   const allPriced = itemRows.length > 0 && itemRows.every((i) => i.amount != null && i.amount > 0)
 
   // 税率別集計（「◯%税込/うち税額」型の印字がある場合のみ AI が返す）。
@@ -125,12 +108,53 @@ export function extractExpenseFromReceipt(
   //   例: 10%税込¥5/うち税額¥0 ＋ 軽8%税込¥4,998/うち税額¥370 → 支払合計5,003・税370・税抜4,633。
   //   ※全店舗の経費レシートがこの型とは限らない（無いレシートでは breakdown は空）。
   const breakdown = (Array.isArray(receipt?.taxBreakdown) ? receipt!.taxBreakdown! : [])
-    .map((b) => ({ rate: b?.rate, total: parseYenToInt(b?.total), tax: parseYenToInt(b?.tax) ?? 0 }))
+    .map((b) => ({ rate: (b?.rate === 8 ? 8 : 10) as 8 | 10, total: parseYenToInt(b?.total), tax: parseYenToInt(b?.tax) ?? 0 }))
     .filter((b) => (b.rate === 8 || b.rate === 10) && b.total != null && b.total > 0 && b.tax >= 0 && b.tax <= (b.total ?? 0))
   const bdGross = breakdown.reduce((s, b) => s + (b.total ?? 0), 0)
   const bdTax = breakdown.reduce((s, b) => s + b.tax, 0)
   // 印字の「合計」と±2円以内で一致するときだけ信用（合計が読めない場合は集計行の和を採用）。
   const bdValid = breakdown.length > 0 && bdGross > 0 && (gross == null || Math.abs(bdGross - gross) <= 2)
+
+  // 【税率の割当・最優先＝税率別集計から逆算】※印は小さくOCRが不安定なので、税率別小計が2種以上ある
+  //   レシートでは、それを正として税率を決める: 税込小計が最大の税率を「多数派」とし、少数派(残りの税率)の
+  //   小計に一致する品目を greedy に抜き出してその税率に割当、残りは多数派にする。
+  //   例: 8%税込4,998 / 10%税込5 → ¥5の品目(レジ袋)だけ10%、残り全部8%（※を1つも読めなくても正しくなる）。
+  const bdRateByIndex = new Map<number, 8 | 10>()
+  if (allPriced && breakdown.length >= 2) {
+    const sorted = [...breakdown].sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
+    const major = sorted[0].rate
+    const used = new Set<number>()
+    for (const m of sorted.slice(1)) {
+      const target = m.total ?? 0
+      const single = itemRows.findIndex((it, i) => !used.has(i) && it.amount != null && Math.abs(it.amount - target) <= 2)
+      if (single >= 0) { bdRateByIndex.set(single, m.rate); used.add(single); continue }
+      // 少数派が複数品のとき: 2品の合計一致まで試す。
+      let paired = false
+      for (let a = 0; a < itemRows.length && !paired; a++) {
+        for (let b = a + 1; b < itemRows.length; b++) {
+          if (used.has(a) || used.has(b)) continue
+          const va = itemRows[a].amount, vb = itemRows[b].amount
+          if (va != null && vb != null && Math.abs(va + vb - target) <= 2) {
+            bdRateByIndex.set(a, m.rate); bdRateByIndex.set(b, m.rate); used.add(a); used.add(b); paired = true; break
+          }
+        }
+      }
+    }
+    itemRows.forEach((_, i) => { if (!bdRateByIndex.has(i)) bdRateByIndex.set(i, major) })
+  }
+
+  // 品目内訳（勘定科目・税率）。優先: ①税率別集計の逆算 → ②軽減税率印(rate=8) → ③品名推定(食材8/他10)。
+  //   税率=8 は「酒類を除く飲食料品」の証拠なので科目=食材で確定。10% は科目を品名から推定。
+  const itemEntries = itemRows.map((i, idx) => {
+    const p = i.amount != null && i.amount > 0 ? i.amount : 0
+    let rate: 8 | 10
+    if (bdRateByIndex.has(idx)) rate = bdRateByIndex.get(idx)!
+    else if (i.rate === 8 || i.rate === 10) rate = i.rate
+    else rate = defaultPettyRate(classifyPettyAcct(i.name))
+    const acct: 'shokuzai' | 'shomohin' | 'alcohol' = rate === 8 ? 'shokuzai' : classifyPettyAcct(i.name)
+    return { n: i.name || '(品目)', p, acct, rate }
+  })
+  const itemsTax = itemEntries.reduce((s, it) => s + Math.round((it.p * it.rate) / 100), 0)
 
   // 本体(税抜)・出金額(税込)の決定（誤読対策・上から優先）:
   //  0a) 【税率別集計】「◯%税込/うち税額」の印字から確定: 出金=Σ税込小計、税=Σうち税額、本体=出金−税。
