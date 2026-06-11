@@ -2,6 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import {
   importDailyReceiptsOverwrite,
   parseMonthlyDailySalesWorkbook,
+  resolveReceiptTableForStore,
+  countExistingReceiptsForDates,
   type DailySalesImportEntry,
 } from "../_shared/daily_sales_import.ts"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
@@ -3554,6 +3556,25 @@ async function importDailyReceiptsCommit(
   const coveredDates = (Array.isArray(body.covered_dates) ? body.covered_dates : [])
     .map((d) => toSafeString(d).trim().slice(0, 10))
     .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+  // 上書き確認ゲート: 対象日に既存データがあり、confirm_overwrite 未指定なら削除せず確認を求める（誤上書き防止）。
+  // フロントは needs_confirm を受けてユーザーに確認し、confirm_overwrite:true で再送する。
+  if (body.confirm_overwrite !== true) {
+    const resolved = await resolveReceiptTableForStore(supabase, key)
+    if (resolved) {
+      const clearDates = [...new Set([...coveredDates, ...entries.map((e) => e.sales_date)])]
+      const existing = await countExistingReceiptsForDates(supabase, resolved.receiptTable, clearDates)
+      if (existing > 0) {
+        return {
+          ok: false,
+          needs_confirm: true,
+          existing_count: existing,
+          store_key: key,
+          day_count: entries.length,
+          message: `対象期間には既に ${existing} 件のデータがあります。取込むと削除され、今回の内容で上書きされます。`,
+        }
+      }
+    }
+  }
   return await importDailyReceiptsOverwrite(supabase, key, entries, coveredDates)
 }
 

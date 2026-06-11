@@ -22,7 +22,6 @@ export type DailySalesParseResult = {
   skipped_zero_count: number
   warnings: string[]
   error: string | null
-  period_too_new?: boolean // 対象期間が現在JST月以降（進行中の月）で取込対象外のとき true
 }
 
 // 先頭が ZIP シグネチャ(PK\x03\x04)なら xlsx、それ以外は CSV とみなす。
@@ -87,36 +86,6 @@ function parseImportNumber(value: unknown): number | null {
   if (!s) return null
   const n = Number(s)
   return Number.isFinite(n) ? Math.round(n) : null
-}
-
-// 現在のJST年月（YYYY-MM）。Edge Function は UTC 実行のため明示的に Asia/Tokyo で算出。
-function currentJstYearMonth(): string {
-  return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 7)
-}
-
-// 取込対象の年月（YYYY-MM）。period 優先、無ければ対象日付の最大月。判定不能なら null。
-// period と日付がズレている場合は「新しい方」を採用（取り違えによる進行中月の混入を防ぐ安全側）。
-function resolveImportTargetMonth(period: string | null, coveredDates: string[]): string | null {
-  const fromPeriod = (period && /^\d{4}-\d{2}$/.test(period)) ? period : null
-  let fromDates: string | null = null
-  for (const d of coveredDates) {
-    const ym = String(d ?? "").slice(0, 7)
-    if (/^\d{4}-\d{2}$/.test(ym) && (fromDates == null || ym > fromDates)) fromDates = ym
-  }
-  if (fromPeriod && fromDates) return fromPeriod > fromDates ? fromPeriod : fromDates
-  return fromPeriod ?? fromDates
-}
-
-// 一括取込は「確定した過去の月」専用。進行中の月（現在JST月）以降は実売上の上書きを避けるため受け付けない。
-// 拒否理由の文言を返す（許可なら null）。動的判定＝現在月が変われば受付範囲も自動で前進する。
-export function importPeriodRejectionReason(period: string | null, coveredDates: string[]): string | null {
-  const target = resolveImportTargetMonth(period, coveredDates)
-  if (!target) return null // 月が判定できない場合はここでは塞がない（他の検証に委ねる）
-  const cur = currentJstYearMonth()
-  if (target >= cur) {
-    return `対象期間（${target}）は一括取込の対象外です。一括取込は「確定した過去の月」専用で、進行中の月（${cur}）以降は登録できません。前月以前のファイルをご利用ください。`
-  }
-  return null
 }
 
 // バイト列（xlsx/csv）を解析して日次売上 entries を返す。「総売上」列が取れなければ recognized=false（throw しない）。
@@ -218,12 +187,6 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
     if (!storeName) warnings.push("対象店舗が読み取れませんでした。")
     if (entries.length === 0) warnings.push("総売上が1円以上の日が見つかりませんでした。")
 
-    // 進行中の月（現在JST月）以降のファイルは取込対象外。recognized=false + 理由でプレビュー/LINEに伝える。
-    const periodReject = importPeriodRejectionReason(period, coveredDates)
-    if (periodReject) {
-      return fail(periodReject, { store_name: storeName, store_key: storeKey, period, period_too_new: true })
-    }
-
     return {
       recognized: entries.length > 0,
       store_name: storeName,
@@ -323,11 +286,6 @@ export async function importDailyReceiptsOverwrite(
     ...coveredDates.map((d) => String(d ?? "").trim().slice(0, 10)).filter(isIsoDate),
     ...dates,
   ])]
-  // 進行中の月（現在JST月）以降は登録不可。プレビューのガードをすり抜けた直接呼び出しに対する最終防衛線。
-  const periodReject = importPeriodRejectionReason(null, clearDates)
-  if (periodReject) {
-    throw { status: 400, message: periodReject }
-  }
   if (clearDates.length === 0) {
     return { ok: true, applied: 0, cleared_dates: 0, receipt_table: receiptTable, cleared_manual_day: 0, store_partition_key: key }
   }

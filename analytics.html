@@ -983,7 +983,7 @@
       <button id="importConfirmBtn" type="button" class="btn primary">この内容で取込（レシート登録）</button>
       <button id="importCancelBtn" type="button" class="btn">キャンセル</button>
     </div>
-    <div class="meta" style="margin-top:8px;font-size:0.78rem">※ <strong>対象は前月以前（確定した過去の月）のみ</strong>。進行中の月のファイルは受け付けません（実売上の上書き防止）。各日を<strong>レシート売上として登録</strong>します（集計・分析で画像解析レシートと同等扱い）。<strong>ファイルに載っている日は期間まるごと置換</strong>します（既存があっても合算せず上書き）。<strong>総売上0の日は「売上なし」としてクリア</strong>（以前のデータは残りません）。ファイルに無い日は変更しません。</div>
+    <div class="meta" style="margin-top:8px;font-size:0.78rem">※ 各日を<strong>レシート売上として登録</strong>します（集計・分析で画像解析レシートと同等扱い）。<strong>既存データがある日は取込前に上書き確認</strong>が出ます（誤上書き防止）。<strong>ファイルに載っている日は期間まるごと置換</strong>します（既存があっても合算せず上書き）。<strong>総売上0の日は「売上なし」としてクリア</strong>（以前のデータは残りません）。ファイルに無い日は変更しません。</div>
   </div>
 </div>
 <style>
@@ -2060,7 +2060,20 @@ async function confirmManualImport() {
   btn.disabled = true;
   errEl.textContent = '';
   try {
-    const res = await apiFetch('/receipts/daily-receipts-import', { method: 'POST', body: { store_key: storeKey, entries, covered_dates: coveredDates } });
+    const send = (confirmOverwrite) => apiFetch('/receipts/daily-receipts-import', {
+      method: 'POST',
+      body: { store_key: storeKey, entries, covered_dates: coveredDates, ...(confirmOverwrite ? { confirm_overwrite: true } : {}) },
+    });
+    let res = await send(false);
+    // 既存データがある場合はサーバが needs_confirm を返す。上書き確認を取ってから再送する（誤上書き防止）。
+    if (res && res.needs_confirm) {
+      const ok = window.confirm(
+        `${storeKey} の対象期間には既に ${res.existing_count} 件のデータがあります。\n` +
+        `取込むと、これらは削除され、今回の ${res.day_count ?? entries.length} 日分で上書きされます。\n\n上書きして取込みますか？`
+      );
+      if (!ok) { errEl.textContent = '取込を中止しました（既存データは保持）。'; return; }
+      res = await send(true);
+    }
     const n = (res && typeof res.applied === 'number') ? res.applied : entries.length;
     closeImportPreview();
     document.getElementById('manualImportStatus').textContent = `取込完了: ${n}日分をレシート売上として登録しました（集計・分析でレシートと同等扱い）。`;
