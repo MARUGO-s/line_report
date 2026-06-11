@@ -711,6 +711,12 @@ async function processDailySalesFileEvent(
   const fetched = await fetchLineMessageBinary(lineMessageId, accessToken)
   if (!fetched.ok) return { replied: false, reason: fetched.error }
   const parsed = parseMonthlyDailySalesWorkbook(fetched.bytes, fileName)
+  if (parsed.period_too_new) {
+    // 進行中の月（現在JST月）以降のファイルは取込対象外。無反応だと理由が伝わらないので理由を返信する。
+    const rtTooNew = String(event.replyToken ?? '').trim()
+    if (rtTooNew) await replyLineFlex(rtTooNew, buildSimpleNoticeFlex((parsed.error || '進行中の月は一括取込の対象外です。前月以前のファイルをご利用ください。').slice(0, 300)), accessToken, webhookReplyLog(registry, roomId, 'daily_sales_period_too_new'))
+    return { replied: !!rtTooNew, reason: 'daily_sales_period_too_new' }
+  }
   if (!parsed.recognized) return { replied: false, reason: 'not_daily_sales_file' } // 日次売上ファイルでない→無反応（メディア保存のみ）
 
   const supabase = createServiceClient()
