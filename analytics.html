@@ -183,6 +183,9 @@
     /* 管理者ログイン（キオスク解除）ボタン＋モーダル */
     .adm-unlock-btn { color: var(--accent); cursor: pointer; font-weight: 600; }
     .adm-modal { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); padding: 20px; }
+    /* hidden 属性で確実に隠す（analytics には共通の [hidden]{display:none} が無く、display:flex が hidden を上書きして
+       「管理者ログイン」モーダルが常時表示になる不具合の修正。2026-06-11） */
+    .adm-modal[hidden] { display: none !important; }
     .adm-box { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; width: 400px; max-width: 92vw; box-shadow: 0 20px 60px -20px rgba(0,0,0,.7); }
     .adm-box .adm-title { font-size: 16px; font-weight: 700; }
     .adm-box .adm-desc { font-size: 12.5px; opacity: .7; margin: 8px 0 14px; line-height: 1.6; }
