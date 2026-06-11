@@ -1065,31 +1065,56 @@ async function processReceiptImageEvent(
       console.log(`[receipt_pre_filter] skip non-receipt image (store=${registry.store_partition_key}, msg=${lineMessageId})`)
       return { saved: false, replied: false, reason: 'pre_filter_non_receipt' }
     } else {
-      if (receiptReplyToken) {
-        await pushLineTextToTarget(
-          roomId,
-          '📸 画像を受け付けました。\nAI（Claude）で内容を解析しています。少々お待ちください。',
-          accessToken,
+      // コスト最適化: 別店舗のレシート（＝経費）を Groq の事前判定で先に確定できたら、Claude精算解析(②)を省き、
+      // 経費解析(③ reanalyzeAsExpense=Claude)1回だけにする（店名不一致レシートは②③でClaude2回走るため）。
+      // 判定は本処理と同じ receiptStoreNameMatchesRegistry（電話番号照合つき）を Groq 結果へ適用。
+      // **店名がはっきり読めて(非空)・確信度が基準以上・自店と明確に不一致のときだけ**スキップ。
+      // 読めない／一致／低確信度のときは従来どおり Claude で精算解析する（自店の売上精度は落とさない）。経費許可OFFの部屋はスキップしない。
+      const preReceipt = pre.analysis?.receipt ?? null
+      const preStoreName = String(preReceipt?.storeName ?? '').trim()
+      const preConfidence = preReceipt
+        ? mergeReceiptConfidence(computeReceiptHeuristicConfidence(preReceipt), pre.analysis?.receiptModelConfidence ?? null)
+        : 0
+      const preLooksExpense = allowPettyCash && !!preStoreName &&
+        preConfidence >= RECEIPT_ANALYSIS_CONFIDENCE_MIN &&
+        !receiptStoreNameMatchesRegistry(
+          registry.display_name || registry.store_partition_key,
+          registry.store_partition_key,
+          preStoreName,
+          preReceipt?.storePhone ?? null,
+          registry.receipt_phones,
         )
-      }
-      const cla = await analyzeLineImageWithClaude(
-        contentFetch.bytes,
-        contentFetch.contentType,
-        lineMessageId,
-        resolveClaudeApiKey(),
-        receiptPromptAddition,
-        CLAUDE_RECEIPT_MODEL,
-      )
-      if (cla.analysis) {
-        analyzed = cla
-        await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, cla.usage)
-      } else {
-        console.error(
-          `Claude receipt analysis failed (store=${registry.store_partition_key}); using Groq pre-classification:`,
-          cla.failure?.stage,
-          cla.failure?.message,
-        )
+      if (preLooksExpense) {
+        // 別店舗(経費)と確定 → Claude精算解析を省略。pre をそのまま流し、後段の店名不一致→経費候補(Claude経費)で処理する。
+        console.log(`[receipt_pre_filter] expense-routed via Groq, skip Claude sales pass (store=${registry.store_partition_key}, parsed="${preStoreName}", msg=${lineMessageId})`)
         analyzed = pre
+      } else {
+        if (receiptReplyToken) {
+          await pushLineTextToTarget(
+            roomId,
+            '📸 画像を受け付けました。\nAI（Claude）で内容を解析しています。少々お待ちください。',
+            accessToken,
+          )
+        }
+        const cla = await analyzeLineImageWithClaude(
+          contentFetch.bytes,
+          contentFetch.contentType,
+          lineMessageId,
+          resolveClaudeApiKey(),
+          receiptPromptAddition,
+          CLAUDE_RECEIPT_MODEL,
+        )
+        if (cla.analysis) {
+          analyzed = cla
+          await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, cla.usage)
+        } else {
+          console.error(
+            `Claude receipt analysis failed (store=${registry.store_partition_key}); using Groq pre-classification:`,
+            cla.failure?.stage,
+            cla.failure?.message,
+          )
+          analyzed = pre
+        }
       }
     }
   } else {
