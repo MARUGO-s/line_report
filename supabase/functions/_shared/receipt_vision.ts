@@ -96,7 +96,9 @@ export async function analyzeLineImageWithGroqScout(
       model: 'meta-llama/llama-4-scout-17b-16e-instruct',
       response_format: { type: 'json_object' },
       temperature: 0.1,
-      max_tokens: 380,
+      // 経費(line_items)など明細つきJSONが途中切断されないよう余裕を持たせる
+      // （max_tokensは上限であり実出力分しか課金されない。380では明細つきで切れる）。
+      max_tokens: 1500,
       messages: [
         {
           role: 'system',
@@ -351,7 +353,9 @@ export async function analyzeLineImageWithClaude(
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        max_tokens: 1024,
+        // 経費(line_items)の明細つきJSONは1024だと途中切断され、品目が毎回5〜6個で
+        // 打ち切られる実害が出た（2026-06-11 TOBU 8品）。上限であり実出力分のみ課金。
+        max_tokens: 4096,
         system: buildReceiptVisionSystemPrompt(systemPromptAddition),
         messages: [
           {

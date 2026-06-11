@@ -83,13 +83,14 @@ function pettyItemsLabel(items: PettyCashItem[] | null): string {
 
 // レシート解析結果 → 経費フィールド（出金額/税/日付/品目/仕入先）。金額不読は null。
 // 出金額=税込合計(grossSales)／無ければ 税抜(netSales)+税。税=taxAmount。
-function extractExpenseFromReceipt(
+// export はテスト用（運用上の呼び出しはこのモジュール内のみ）。
+export function extractExpenseFromReceipt(
   receipt: LineImageReceiptAnalysis | null,
 ): { amount: number; tax: number; spentOn: string; item: string; supplier: string | null; items: PettyCashItem[] } | null {
   const tax = parseYenToInt(receipt?.taxAmount) ?? 0
   const gross = parseYenToInt(receipt?.grossSales)
   const net = parseYenToInt(receipt?.netSales)
-  // 商品明細（品名＋価格＋税率）。価格は数値化。税率はレシートの軽減税率印（※等）由来の 8/10 のみ採用。
+  // 商品明細（品名＋価格＋税率）。価格は数値化。
   const lineItems = Array.isArray(receipt?.lineItems) ? receipt!.lineItems! : []
   const itemRows = lineItems
     .map((li) => ({
@@ -98,33 +99,49 @@ function extractExpenseFromReceipt(
       rate: (li?.rate === 8 || li?.rate === 10) ? li.rate : null,
     }))
     .filter((x) => x.name || x.amount != null)
-    .slice(0, 10)
+    .slice(0, 30)
   const itemsSum = itemRows.reduce((s, i) => s + (i.amount != null && i.amount > 0 ? i.amount : 0), 0)
 
+  // 品目内訳（勘定科目・税率）を先に確定する。
+  // 税率は会計ルールで決める（軽減税率8%の対象は「酒類を除く飲食料品」のみ）:
+  //   食材(shokuzai)=8% ／ 消耗品・アルコール=10%。AIのrate出力は信用せず、
+  //   rate=8（※印=飲食料品の証拠）のときだけ消耗品誤分類を食材へ補正する材料に使う。
+  const itemEntries = itemRows.map((i) => {
+    let acct = classifyPettyAcct(i.name)
+    if (i.rate === 8 && acct === 'shomohin') acct = 'shokuzai' // ※印=飲食料品 → 消耗品の誤分類を補正
+    const rate: 8 | 10 = acct === 'shokuzai' ? 8 : 10
+    return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct, rate }
+  })
+  const itemsTax = itemEntries.reduce((s, it) => s + Math.round((it.p * it.rate) / 100), 0)
+  const allPriced = itemRows.length > 0 && itemRows.every((i) => i.amount != null && i.amount > 0)
+
   // 本体(税抜)・出金額(税込)の決定（誤読対策）:
-  //  小計(net)+税(tax) が最優先（外税/内税どちらも税込合計に一致、お預りと混同しない）。
-  //  次に 明細合計(itemsSum, 外税前提で +tax)＝合計が「お預り」と誤読されるのを避ける。最後に 合計(gross)。
+  //  0) 【明細照合・最優先】全品目に価格があり「明細合計＋品目別税 ≒ 合計(gross)」(±3円)なら
+  //     明細を正とする: 本体=明細合計、税=gross−明細合計、出金=gross。
+  //     → 内税レシートで net/tax を誤読（例: 「10%税込¥5」を税額と誤読）しても金額が壊れない。
+  //  1) 小計(net)+税(tax)（外税/内税どちらも税込合計に一致、お預りと混同しない）。
+  //  2) 明細合計(itemsSum, 外税前提で +tax)。 3) 合計(gross)。
   let base: number | null = null
   let amount: number | null = null
-  if (net != null && net > 0) { base = net; amount = net + tax }
+  let taxResolved = tax
+  if (gross != null && gross > 0 && allPriced && Math.abs(itemsSum + itemsTax - gross) <= 3) {
+    base = itemsSum
+    amount = gross
+    taxResolved = Math.max(0, gross - itemsSum)
+  } else if (net != null && net > 0) { base = net; amount = net + tax }
   else if (itemsSum > 0) { base = itemsSum; amount = itemsSum + tax }
   else if (gross != null && gross > 0) { amount = gross; base = Math.max(0, gross - tax) }
   if (base == null || amount == null || amount <= 0) return null
-  const safeTax = Math.min(tax, amount)
+  const safeTax = Math.min(taxResolved, amount)
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
   const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
 
-  // 品目テキスト＋品目内訳。勘定科目・税率は品名から推定（既定。記録後に小口現金ページで修正可）。
+  // 品目テキスト＋品目内訳（記録後に小口現金ページで修正可）。
   let item: string
   let items: PettyCashItem[]
-  if (itemRows.length) {
+  if (itemEntries.length) {
     item = itemRows.map((i) => `・${i.name}${i.amount != null ? ' ' + formatYen(i.amount) : ''}`.trim()).join('\n')
-    items = itemRows.map((i) => {
-      const acct = classifyPettyAcct(i.name)
-      // 税率はレシートの軽減税率印（※等）から取れた値を最優先。無ければ科目の既定（食材8%/他10%）。
-      const rate = (i.rate === 8 || i.rate === 10) ? i.rate : defaultPettyRate(acct)
-      return { n: i.name || '(品目)', p: i.amount != null && i.amount > 0 ? i.amount : 0, acct, rate }
-    })
+    items = itemEntries
   } else {
     const nameItems = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
     item = nameItems.length > 1 ? nameItems.map((s) => '・' + s).join('\n') : (nameItems[0] || supplier || '経費')

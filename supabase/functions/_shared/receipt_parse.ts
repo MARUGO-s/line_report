@@ -332,7 +332,7 @@ export function normalizeLineImageReceiptAnalysis(
       return { name: normalizeReceiptFieldText(v, 80) || null, price: null, rate: null }
     })
     .filter((x) => x.name || x.price)
-    .slice(0, 10)
+    .slice(0, 30)
 
   const dateIso = parseReceiptDateToIso(date)
   if (dateIso) date = formatJapaneseReceiptDateFromIso(dateIso)
