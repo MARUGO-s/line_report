@@ -418,6 +418,7 @@
                       <div class="cb-line sub"><span>税 10% 対象</span><b class="mono" id="cbTax10">¥0</b></div>
                       <div class="cb-line"><span>税額 合計</span><b class="mono" id="cbTax">¥0</b></div>
                       <div class="cb-line total"><span>出金額 合計</span><b class="mono" id="cbTotal">¥0</b></div>
+                      <div id="cbMismatch" hidden style="margin-top:4px;color:var(--warn);font-weight:600;font-size:0.8rem;line-height:1.4"></div>
                     </div>
                     <div class="mrow">
                       <label>取扱者</label>
@@ -559,7 +560,7 @@
       entryToggle: $('entryToggle'), entryPanel: $('entryPanel'), entryTitle: $('entryTitle'), editFlag: $('editFlag'),
       itemList: $('itemList'), addItem: $('addItem'),
       dateF: $('dateF'), handlerF: $('handlerF'), memoF: $('memoF'),
-      cbBase: $('cbBase'), cbTax8: $('cbTax8'), cbTax10: $('cbTax10'), cbTax: $('cbTax'), cbTotal: $('cbTotal'),
+      cbBase: $('cbBase'), cbTax8: $('cbTax8'), cbTax10: $('cbTax10'), cbTax: $('cbTax'), cbTotal: $('cbTotal'), cbMismatch: $('cbMismatch'),
       submitBtn: $('submitBtn'), clearBtn: $('clearBtn'), addMsg: $('addMsg'),
       sumTotal: $('sumTotal'), sumSplit: $('sumSplit'), sumCount: $('sumCount'), catBreak: $('catBreak'),
       acctFilter: $('acctFilter'), ledSearch: $('ledSearch'), ledCount: $('ledCount'), csvBtn: $('csvBtn'),
@@ -571,6 +572,7 @@
     const storeName = (key) => STORE_NAMES[key] || (PAGES && PAGES.resolveStoreName ? PAGES.resolveStoreName(key, '') : '') || key || '';
 
     let editingId = null;   // 編集中の行ID（null=新規）
+    let editingAmountYen = null;  // 編集中エントリの保存済み受領額(amount_yen)。明細合計との不一致検出に使う。
     let records = [];        // 直近に取得した正規化済みレコード（現在の店舗・月）
 
     /* ===== テーマ（共有キー line_reservation_calendar_theme） ===== */
@@ -776,16 +778,37 @@
         return { n: n, p: p, acct: acct, rate: rate };
       });
     }
+    // 消費税は「税率ごとにまとめて1円未満切り捨て(floor)」で算出（税率別に1回・端数は切り捨て）。
     function recalc() {
       const items = readItems();
-      let base = 0, tax8 = 0, tax10 = 0;
-      items.forEach((it) => { base += it.p; const t = Math.round(it.p * it.rate / 100); if (it.rate === 8) tax8 += t; else tax10 += t; });
+      let base = 0, base8 = 0, base10 = 0;
+      items.forEach((it) => { base += it.p; if (it.rate === 8) base8 += it.p; else base10 += it.p; });
+      const tax8 = Math.floor(base8 * 8 / 100);
+      const tax10 = Math.floor(base10 * 10 / 100);
       const tax = tax8 + tax10;
+      const total = base + tax;
       dom.cbBase.textContent = yen(base);
       dom.cbTax8.textContent = yen(tax8);
       dom.cbTax10.textContent = yen(tax10);
       dom.cbTax.textContent = yen(tax);
-      dom.cbTotal.textContent = yen(base + tax);
+      dom.cbTotal.textContent = yen(total);
+      updateMismatch(total);
+    }
+    // 編集中、明細＋税の合計が保存済み受領額(amount_yen)と食い違うとき⚠を出し、保存ボタンを「不一致を確認して記録」に切替える。
+    function updateMismatch(total) {
+      const editing = editingId != null;
+      const diff = (editing && editingAmountYen != null) ? (total - editingAmountYen) : 0;
+      const mism = editing && editingAmountYen != null && Math.abs(diff) > 1;
+      if (dom.cbMismatch) {
+        dom.cbMismatch.hidden = !mism;
+        if (mism) dom.cbMismatch.textContent = '⚠ 明細＋税＝' + yen(total) + ' が、保存済みの受領額 ' + yen(editingAmountYen) + ' と不一致（差 ' + (diff > 0 ? '+' : '−') + yen(Math.abs(diff)) + '）。価格を見直すか、このまま「不一致を確認して記録」で上書きします。';
+      }
+      if (dom.submitBtn) {
+        dom.submitBtn.innerHTML = mism ? '⚠ 不一致を確認して記録' : (CHK_SVG + (editing ? '更新' : '登録'));
+        dom.submitBtn.style.background = mism ? 'var(--warn)' : '';
+        dom.submitBtn.style.borderColor = mism ? 'var(--warn)' : '';
+        dom.submitBtn.style.color = mism ? '#1a1205' : '';
+      }
     }
     function setItems(items) {
       dom.itemList.innerHTML = '';
@@ -795,9 +818,10 @@
     }
     function exitEditMode() {
       editingId = null;
+      editingAmountYen = null;
       dom.entryTitle.textContent = '出金を記録';
-      dom.submitBtn.innerHTML = CHK_SVG + '登録';
       dom.editFlag.hidden = true;
+      recalc();  // ボタン表示・不一致表示をリセット（編集→登録 / ⚠解除）
     }
     function resetForm() {
       setItems([]);
@@ -823,15 +847,15 @@
     }
     function loadForEdit(r) {
       const items = r.items.length ? r.items : rowsFromLegacy(r);
-      setItems(items);
+      editingId = r.id;
+      editingAmountYen = (r.total != null && Number.isFinite(Number(r.total))) ? Math.floor(Number(r.total)) : null;
       dom.dateF.value = r.date || todayStr();
       dom.handlerF.value = r.handler || '';
       dom.memoF.value = r.memo || '';
-      editingId = r.id;
       dom.entryTitle.textContent = '出金を編集';
-      dom.submitBtn.innerHTML = CHK_SVG + '更新';
       dom.editFlag.hidden = false; dom.editFlag.textContent = '編集中 ID:' + r.id;
       dom.addMsg.className = 'msg'; dom.addMsg.textContent = '';
+      setItems(items);  // editingId/editingAmountYen 設定後に呼ぶ（recalc→updateMismatch がボタン表示を確定）
       setEntryOpen(true);
       try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
     }
@@ -840,8 +864,9 @@
       if (!items.length) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '品目を1つ以上入力してください。'; return; }
       const spent_on = dom.dateF.value;
       if (!spent_on) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '出金日を入力してください。'; return; }
-      let base = 0, tax = 0;
-      items.forEach((it) => { base += it.p; tax += Math.round(it.p * it.rate / 100); });
+      let base = 0, base8 = 0, base10 = 0;
+      items.forEach((it) => { base += it.p; if (it.rate === 8) base8 += it.p; else base10 += it.p; });
+      const tax = Math.floor(base8 * 8 / 100) + Math.floor(base10 * 10 / 100);  // 1円未満切り捨て（税率別）
       if (base + tax <= 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '税抜価格を入力してください。'; return; }
       const fields = { spent_on: spent_on, items: items, handler: dom.handlerF.value.trim(), note: dom.memoF.value.trim() };
       dom.submitBtn.disabled = true;
@@ -923,11 +948,13 @@
           ? r.items.map((it) => '<div class="ld-item"><span class="ld-dot" style="background:' + acctColor(it.acct) + '"></span><span class="ld-name">' + esc(it.n || '(品目)') + '</span><span class="ld-rate">' + (Number(it.rate) === 10 ? 10 : 8) + '%</span><span class="ld-yen">' + yen(it.p) + '</span></div>').join('')
           : legacyLines(r);
         const memo = r.memo ? '<div class="ld-memo">' + esc(r.memo) + '</div>' : '';
-        // 検証: 明細(全品目に価格あり)の税込合計が保存済みの出金額と±3円超でズレていたら警告（読み取りミスの目印）。
+        // 検証: 明細(全品目に価格あり)の税込合計(税率別まとめ＋切り捨て)が保存済みの出金額と食い違えば警告（読み取りミスの目印）。
         let mismatchWarn = '';
         if (r.items.length && r.items.every((it) => Number(it.p) > 0)) {
-          const itemsTotal = r.items.reduce((s, it) => s + it.p + Math.round(it.p * (Number(it.rate) === 10 ? 10 : 8) / 100), 0);
-          if (Math.abs(itemsTotal - r.total) > 3) {
+          let lb8 = 0, lb10 = 0;
+          r.items.forEach((it) => { if (Number(it.rate) === 10) lb10 += it.p; else lb8 += it.p; });
+          const itemsTotal = (lb8 + lb10) + Math.floor(lb8 * 8 / 100) + Math.floor(lb10 * 10 / 100);
+          if (Math.abs(itemsTotal - r.total) > 1) {
             mismatchWarn = '<div class="ld-memo" style="color:var(--warn);font-weight:600">⚠ 明細合計（税込 ' + yen(itemsTotal) + '）が出金額と不一致 — 「編集」で価格を修正してください</div>';
           }
         }

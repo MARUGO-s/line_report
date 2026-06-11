@@ -154,7 +154,10 @@ export function extractExpenseFromReceipt(
     const acct: 'shokuzai' | 'shomohin' | 'alcohol' = rate === 8 ? 'shokuzai' : classifyPettyAcct(i.name)
     return { n: i.name || '(品目)', p, acct, rate }
   })
-  const itemsTax = itemEntries.reduce((s, it) => s + Math.round((it.p * it.rate) / 100), 0)
+  // 税は税率ごとにまとめて1円未満切り捨て（レシートの「うち税額」と同じ方式）。
+  let itB8 = 0, itB10 = 0
+  for (const it of itemEntries) { if (it.rate === 10) itB10 += it.p; else itB8 += it.p }
+  const itemsTax = Math.floor((itB8 * 8) / 100) + Math.floor((itB10 * 10) / 100)
 
   // 本体(税抜)・出金額(税込)の決定（誤読対策・上から優先）:
   //  0a) 【税率別集計】「◯%税込/うち税額」の印字から確定: 出金=Σ税込小計、税=Σうち税額、本体=出金−税。
@@ -269,16 +272,19 @@ type ExtractedExpense = {
 function itemsTotalWithTax(items?: PettyCashItem[] | null): number | null {
   if (!Array.isArray(items) || !items.length) return null
   if (!items.every((it) => Number(it?.p) > 0)) return null
-  const base = items.reduce((s, it) => s + it.p, 0)
-  const tax = items.reduce((s, it) => s + Math.round((it.p * it.rate) / 100), 0)
+  // 税は税率ごとにまとめて1円未満切り捨て。
+  let b8 = 0, b10 = 0
+  for (const it of items) { if (it.rate === 10) b10 += it.p; else b8 += it.p }
+  const base = b8 + b10
+  const tax = Math.floor((b8 * 8) / 100) + Math.floor((b10 * 10) / 100)
   return base + tax
 }
 
 function confirmFlex(pendingId: number, x: ExtractedExpense): Record<string, unknown> {
   const base = Math.max(0, x.amount - x.tax)
-  // 検証: 明細の税込合計と支払合計のズレ(±3円超)は黙って通さず、警告＋「不一致を確認して記録」にする。
+  // 検証: 明細の税込合計(税率別＋切り捨て)と支払合計のズレ(±1円超)は黙って通さず、警告＋「不一致を確認して記録」にする。
   const itemsTotal = itemsTotalWithTax(x.items)
-  const mismatch = itemsTotal != null && Math.abs(itemsTotal - x.amount) > 3
+  const mismatch = itemsTotal != null && Math.abs(itemsTotal - x.amount) > 1
   const warnRows: Record<string, unknown>[] = mismatch
     ? [{
         type: 'text',

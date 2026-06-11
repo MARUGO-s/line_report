@@ -2845,14 +2845,18 @@ function normalizePettyItems(raw: unknown): PettyItem[] | null {
   return items.length ? items : null
 }
 
-// items から 本体(Σp)・税(Σ round(p×rate/100)・品目ごとに丸め)・出金額(本体+税) を導出。
+// items から 本体(Σp)・税・出金額(本体+税) を導出。
+// 消費税は「税率ごとに税抜小計をまとめてから 1円未満切り捨て(floor)」で算出（税率別に1回・端数切り捨て）。
 function pettyTotalsFromItems(items: PettyItem[]): { base: number; tax: number; amount: number } {
   let base = 0
-  let tax = 0
+  let base8 = 0
+  let base10 = 0
   for (const it of items) {
     base += it.p
-    tax += Math.round((it.p * it.rate) / 100)
+    if (it.rate === 8) base8 += it.p
+    else base10 += it.p
   }
+  const tax = Math.floor((base8 * 8) / 100) + Math.floor((base10 * 10) / 100)
   return { base, tax, amount: base + tax }
 }
 
