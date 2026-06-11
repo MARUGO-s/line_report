@@ -151,11 +151,30 @@ export function extractExpenseFromReceipt(
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
   const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
 
-  // 品目テキスト＋品目内訳（記録後に小口現金ページで修正可）。
+  // 【明細価格の 税込/税抜 自動判定（レシートごと）】店によって品目の印字が税込/税抜どちらもある。
+  //   システムの品目価格(p)は「税抜」で統一しているため、レシートの数字から判定して正規化する:
+  //     Σ印字価格 ≒ 本体(税抜合計) → 印字は税抜（そのまま。例: TOBU百貨店）
+  //     Σ印字価格 ≒ 出金額(税込合計) → 印字は税込 → 各品目 p = round(p ÷ (1+税率)) で税抜へ変換
+  //   どちらにも一致しない（±3円超）= 価格の誤読が混ざっている → 変換せず、確認カード/台帳の⚠検証に委ねる。
+  if (allPriced && itemEntries.length) {
+    if (Math.abs(itemsSum - base) <= 3) {
+      // 税抜印字（そのまま）
+    } else if (Math.abs(itemsSum - amount) <= 3) {
+      for (const it of itemEntries) it.p = Math.round(it.p / (1 + it.rate / 100))
+      // 丸め誤差で Σp が本体とズレた分は最大価格の品目で吸収（±品数程度まで）
+      const diff = base - itemEntries.reduce((s, it) => s + it.p, 0)
+      if (diff !== 0 && Math.abs(diff) <= itemEntries.length + 2) {
+        const maxIt = itemEntries.reduce((a, b) => (b.p > a.p ? b : a))
+        maxIt.p += diff
+      }
+    }
+  }
+
+  // 品目テキスト＋品目内訳（記録後に小口現金ページで修正可）。テキストは正規化後の税抜価格で表示。
   let item: string
   let items: PettyCashItem[]
   if (itemEntries.length) {
-    item = itemRows.map((i) => `・${i.name}${i.amount != null ? ' ' + formatYen(i.amount) : ''}`.trim()).join('\n')
+    item = itemEntries.map((i) => `・${i.n}${i.p > 0 ? ' ' + formatYen(i.p) : ''}`.trim()).join('\n')
     items = itemEntries
   } else {
     const nameItems = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
