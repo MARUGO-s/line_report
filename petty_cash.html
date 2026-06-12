@@ -699,6 +699,7 @@
         handler: e.handler || '', memo: e.note || '', source: e.source || 'manual',
         item: e.item || '', category: e.category || '', items: items,
         base: Math.max(0, amt - tax), tax: tax, total: amt,
+        lineMessageId: e.line_message_id || '',
       };
     }
     // 旧テキスト品目（「・名 ¥価格」改行 等）を {name, price} に逆パース。
@@ -971,7 +972,11 @@
           '<td class="c-num">' + yen(r.base) + '</td>' +
           '<td class="c-num">' + (r.tax > 0 ? yen(r.tax) : '—') + '</td>' +
           '<td class="c-num total">' + yen(r.total) + '</td>' +
-          '<td class="c-act"><div class="row-acts"><button class="mini" data-edit="' + esc(r.id) + '" type="button">編集</button><button class="mini del" data-del="' + esc(r.id) + '" type="button">削除</button></div></td>' +
+          '<td class="c-act"><div class="row-acts">' +
+            ((r.source === 'line_image' && r.lineMessageId) ? '<button class="mini" data-receipt="' + esc(r.id) + '" type="button" title="読み込んだレシート画像を別ページで開く">🧾 レシート</button>' : '') +
+            '<button class="mini" data-edit="' + esc(r.id) + '" type="button">編集</button>' +
+            '<button class="mini del" data-del="' + esc(r.id) + '" type="button">削除</button>' +
+          '</div></td>' +
           '</tr>';
       }).join('');
       dom.ledEmpty.hidden = rs.length > 0;
@@ -1050,6 +1055,24 @@
         dom.addMsg.className = 'msg err'; dom.addMsg.textContent = e.message || String(e);
       }
     }
+    // 読み込んだレシート画像（メディア保存分）を別タブで開く。
+    // ポップアップブロック回避のため、先に空タブを開いてから署名URLへ差し替える。
+    async function openReceiptImage(id) {
+      if (!id) return;
+      let w = null;
+      try { w = window.open('', '_blank', 'noopener'); } catch (_) { w = null; }
+      try {
+        const data = await apiFetch('/petty-cash/receipt-media?id=' + encodeURIComponent(id));
+        const u = data && data.signed_url;
+        if (!u) throw new Error('レシート画像のURLを取得できませんでした。');
+        if (w) { try { w.location.replace(u); } catch (_) { window.open(u, '_blank', 'noopener'); } }
+        else { window.open(u, '_blank', 'noopener'); }
+      } catch (e) {
+        if (w) { try { w.close(); } catch (_) {} }
+        dom.addMsg.className = 'msg err';
+        dom.addMsg.textContent = 'レシート画像を開けませんでした: ' + (e && e.message ? e.message : String(e));
+      }
+    }
     async function saveToken() {
       const t = dom.tokenInput.value.trim();
       if (!t) { dom.authMsg.textContent = 'トークンを入力してください。'; return; }
@@ -1078,6 +1101,8 @@
     dom.csvBtn.addEventListener('click', downloadPettyCsv);
     dom.ledBody.addEventListener('click', (ev) => {
       const t = ev.target;
+      const rcptBtn = t && t.closest ? t.closest('[data-receipt]') : null;
+      if (rcptBtn) { openReceiptImage(rcptBtn.getAttribute('data-receipt')); return; }
       const editBtn = t && t.closest ? t.closest('[data-edit]') : null;
       if (editBtn) { const r = records.find((x) => String(x.id) === String(editBtn.getAttribute('data-edit'))); if (r) loadForEdit(r); return; }
       const delBtn = t && t.closest ? t.closest('[data-del]') : null;

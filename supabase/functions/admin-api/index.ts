@@ -387,6 +387,7 @@ Deno.serve(async (req) => {
     const STORE_SCOPED_ALLOWED_PATHS = new Set<string>([
       "/auth/logout",
       "/petty-cash",
+      "/petty-cash/receipt-media",
       "/analytics/holidays",
       "/analytics/monthly",
       "/weather/daily",
@@ -528,6 +529,11 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && path === "/petty-cash") {
       const state = await fetchPettyCashState(supabase, url)
       return json(state, 200)
+    }
+    // 出金(レシート画像由来)の元レシート画像の署名URLを返す（別ページで開く用）。
+    if (req.method === "GET" && path === "/petty-cash/receipt-media") {
+      const result = await fetchPettyCashReceiptMedia(supabase, url, storeScope)
+      return json(result, 200)
     }
     if (req.method === "POST" && path === "/petty-cash") {
       const body = await parseJson(workReq)
@@ -2954,7 +2960,7 @@ async function fetchPettyCashState(
 
   let query = supabase
     .from("petty_cash_entries")
-    .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, items, handler, source, note, created_at")
+    .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, items, handler, source, note, line_message_id, created_at")
     .eq("hidden", false)
     .order("spent_on", { ascending: false })
     .order("id", { ascending: false })
@@ -3000,6 +3006,67 @@ async function fetchPettyCashState(
       .map(([category, amount_yen]) => ({ category, amount_yen }))
       .sort((a, b) => b.amount_yen - a.amount_yen),
     count: rows.length,
+  }
+}
+
+// 出金(レシート画像由来)に紐づく元レシート画像の署名URLを返す。
+// line_message_id でメディア(line_message_media)を引く。店舗スコープ付きセッションは
+// 対象 entry が自店舗のものでなければ 404（他店のレシートを開けない）。
+async function fetchPettyCashReceiptMedia(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+  enforcedStoreKey?: string | null,
+) {
+  const id = Number(url.searchParams.get("id"))
+  if (!Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  let entryQuery = supabase
+    .from("petty_cash_entries")
+    .select("id, store_partition_key, line_message_id, source")
+    .eq("id", id)
+  if (enforcedStoreKey) entryQuery = entryQuery.eq("store_partition_key", enforcedStoreKey)
+  const { data: entry, error: entryErr } = await entryQuery.maybeSingle()
+  if (entryErr) {
+    throw { status: 500, message: `Failed to load entry: ${entryErr.message}` } satisfies AppError
+  }
+  if (!entry) {
+    throw { status: 404, message: "対象の出金が見つかりません。" } satisfies AppError
+  }
+  const lineMessageId = toSafeString((entry as { line_message_id?: unknown }).line_message_id)
+  if (!lineMessageId) {
+    throw { status: 404, message: "この出金にはレシート画像が紐づいていません（手入力など）。" } satisfies AppError
+  }
+  // line_message_id は LINE メッセージ単位で一意。entry は上で店舗確認済みなので店舗安全。
+  const { data: media, error: mediaErr } = await supabase
+    .from("line_message_media")
+    .select("media_type, storage_bucket, storage_path, original_file_name, created_at")
+    .eq("line_message_id", lineMessageId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (mediaErr) {
+    throw { status: 500, message: `Failed to load receipt media: ${mediaErr.message}` } satisfies AppError
+  }
+  if (!media) {
+    throw { status: 404, message: "レシート画像が保存されていません（保存前/削除済みの可能性）。" } satisfies AppError
+  }
+  const signedUrl = await createSignedMediaUrl(
+    supabase,
+    toSafeString((media as { storage_bucket?: unknown }).storage_bucket) || "line-media",
+    toSafeString((media as { storage_path?: unknown }).storage_path),
+  )
+  if (!signedUrl) {
+    throw { status: 502, message: "レシート画像のURL生成に失敗しました。" } satisfies AppError
+  }
+  return {
+    ok: true,
+    id,
+    line_message_id: lineMessageId,
+    media_type: toSafeString((media as { media_type?: unknown }).media_type) || "image",
+    original_file_name: toSafeString((media as { original_file_name?: unknown }).original_file_name) || null,
+    created_at: (media as { created_at?: unknown }).created_at ?? null,
+    signed_url: signedUrl,
   }
 }
 
