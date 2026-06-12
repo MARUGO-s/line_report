@@ -280,6 +280,8 @@ Deno.serve(async (req) => {
   const url = new URL(req.url)
   const path = normalizePath(url.pathname)
   const clientIp = extractClientIp(req.headers)
+  // 店舗スコープ強制で body を差し替えたいときに使う実効リクエスト（既定は元のreq）。
+  let workReq = req
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
@@ -305,7 +307,7 @@ Deno.serve(async (req) => {
 
   if (req.method === "POST" && path === "/auth/link-login") {
     try {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -338,7 +340,7 @@ Deno.serve(async (req) => {
 
   if (req.method === "POST" && path === "/auth/session") {
     try {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -375,6 +377,68 @@ Deno.serve(async (req) => {
   const authResult = await authenticate(req, supabase, fallbackAdminToken)
   if (!authResult.ok) {
     return json({ error: authResult.message }, authResult.status)
+  }
+
+  // 店舗スコープ強制(IDOR対策): 店舗別ログインリンク由来のセッションは、その店舗のページ
+  // (petty_cash.html / analytics.html)が使うパスだけに限定し、店舗キーをスコープへ固定する。
+  // 生adminトークン由来(storeScope=null)は全店アクセスのまま(従来どおり)。
+  const storeScope = authResult.storeScope
+  if (storeScope) {
+    const STORE_SCOPED_ALLOWED_PATHS = new Set<string>([
+      "/auth/logout",
+      "/petty-cash",
+      "/analytics/holidays",
+      "/analytics/monthly",
+      "/weather/daily",
+      "/receipts/sales",
+      "/receipts/sheets-pilot-link",
+      "/receipts/sales-budget",
+      "/receipts/sales-daily-budget",
+      "/receipts/sales-manual-days",
+      "/receipts/sales-manual-days/import",
+      "/receipts/sales-manual-months",
+      "/receipts/daily-receipts-import",
+    ])
+    if (!STORE_SCOPED_ALLOWED_PATHS.has(path)) {
+      return json({ error: "この店舗用ログインからはこの操作はできません。" }, 403)
+    }
+    // URLクエリの店舗キーをスコープへ強制(他店舗を明示要求していたら拒否)。
+    for (const p of ["store", "store_key"]) {
+      const requested = String(url.searchParams.get(p) ?? "").trim().toLowerCase()
+      if (requested && requested !== storeScope) {
+        return json({ error: "他店舗のデータにはアクセスできません。" }, 403)
+      }
+      url.searchParams.set(p, storeScope)
+    }
+    // 書込系(POST/PUT/PATCH)の JSON ボディは店舗フィールドをスコープへ強制し、差し替えたRequestを使う。
+    // ※ multipart(ファイルアップロード=sales-manual-days/import の解析専用・店舗無し)は body を消費せず素通し。
+    const contentType = String(req.headers.get("content-type") ?? "").toLowerCase()
+    if (
+      (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") &&
+      contentType.includes("application/json")
+    ) {
+      let raw = ""
+      try { raw = await req.text() } catch { raw = "" }
+      if (raw) {
+        let bodyObj: unknown = null
+        try { bodyObj = JSON.parse(raw) } catch { bodyObj = null }
+        if (isRecord(bodyObj)) {
+          for (const p of ["store", "store_key", "store_partition_key"]) {
+            if (p in bodyObj) {
+              const v = String(bodyObj[p] ?? "").trim().toLowerCase()
+              if (v && v !== storeScope) {
+                return json({ error: "他店舗のデータにはアクセスできません。" }, 403)
+              }
+              bodyObj[p] = storeScope
+            }
+          }
+          raw = JSON.stringify(bodyObj)
+        }
+      }
+      const fwdHeaders = new Headers(req.headers)
+      fwdHeaders.delete("content-length")
+      workReq = new Request(req.url, { method: req.method, headers: fwdHeaders, body: raw })
+    }
   }
 
   try {
@@ -430,7 +494,7 @@ Deno.serve(async (req) => {
     }
     // 予約表の手動編集: 新規作成（手入力）/ 編集・非表示(ソフト削除)・復元 / 氏名・電話サジェスト。
     if (req.method === "POST" && path === "/reservations/event") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -438,7 +502,7 @@ Deno.serve(async (req) => {
       return json(result, 200)
     }
     if (req.method === "PATCH" && path === "/reservations/event") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -446,7 +510,7 @@ Deno.serve(async (req) => {
       return json(result, 200)
     }
     if (req.method === "POST" && path === "/reservations/customer-suggest") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -466,7 +530,7 @@ Deno.serve(async (req) => {
       return json(state, 200)
     }
     if (req.method === "POST" && path === "/petty-cash") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -474,15 +538,15 @@ Deno.serve(async (req) => {
       return json(result, 200)
     }
     if (req.method === "PATCH" && path === "/petty-cash") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
-      const result = await updatePettyCashEntry(supabase, body)
+      const result = await updatePettyCashEntry(supabase, body, storeScope)
       return json(result, 200)
     }
     if (req.method === "DELETE" && path === "/petty-cash") {
-      const result = await deletePettyCashEntry(supabase, url)
+      const result = await deletePettyCashEntry(supabase, url, storeScope)
       return json(result, 200)
     }
 
@@ -516,7 +580,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/receipts/store-receipt-phones") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -549,7 +613,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/receipts/analysis-prompt") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -582,7 +646,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/receipts/sales-budget") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -596,7 +660,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/receipts/sales-manual-months") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -605,7 +669,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/receipts/sales-manual-days") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -614,7 +678,7 @@ Deno.serve(async (req) => {
     }
     // 日別予算の直接入力（手動上書き）の保存。budget_yen が null/空の日は上書き解除（自動按分へ戻る）。
     if (req.method === "PUT" && path === "/receipts/sales-daily-budget") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -629,7 +693,7 @@ Deno.serve(async (req) => {
     }
     // 解析した日次売上を「画像解析レシートと同等」に登録: 各日1件の合成レシートを line_receipt__店舗 へ upsert。
     if (req.method === "POST" && path === "/receipts/daily-receipts-import") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -671,7 +735,7 @@ Deno.serve(async (req) => {
         return json({ success: true, permissions: permissionState }, 200)
       }
       if (req.method === "PUT") {
-        const body = await parseJson(req)
+        const body = await parseJson(workReq)
         if (!isRecord(body)) {
           throw { status: 400, message: "Invalid JSON body." } satisfies AppError
         }
@@ -681,7 +745,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/settings/media-upload-limit") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -708,7 +772,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/settings/console") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -763,7 +827,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/auth/token") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -798,7 +862,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/settings/global") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       const payload = buildGlobalSettingsPayload(body)
       const { data, error } = await supabase
         .from("summary_settings")
@@ -826,7 +890,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/settings/rooms") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       const payload = buildRoomSettingsPayload(body)
       console.log(
         "[admin-api] room settings upsert request:",
@@ -918,7 +982,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "PUT" && path === "/permissions/users") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       const payload = buildLineUserPermissionPayload(body)
       const { data, error } = await supabase
         .from("line_user_permissions")
@@ -951,14 +1015,14 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "POST" && path === "/rooms/refresh-names") {
-      const body = await parseJson(req).catch(() => ({}))
+      const body = await parseJson(workReq).catch(() => ({}))
       const roomId = isRecord(body) ? String(body.room_id ?? "").trim() : ""
       const result = await refreshRoomNamesFromLine(supabase, roomId || null)
       return json({ success: true, refresh: result }, 200)
     }
 
     if (req.method === "POST" && path === "/rooms/sync-chat-members") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -1023,7 +1087,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "POST" && path === "/actions/run-summary") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -1072,7 +1136,7 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === "POST" && path === "/actions/test-receipt-report") {
-      const body = await parseJson(req)
+      const body = await parseJson(workReq)
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
@@ -1132,17 +1196,23 @@ async function authenticate(
   req: Request,
   supabase: ReturnType<typeof createClient>,
   fallbackToken: string,
-): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+): Promise<{ ok: true; storeScope: string | null } | { ok: false; status: number; message: string }> {
   const provided = req.headers.get("x-admin-token") ?? ""
   if (!provided) {
     return { ok: false, status: 401, message: "Unauthorized." }
   }
 
-  if (await authenticateAdminDashboardSessionToken(supabase, provided)) {
-    return { ok: true }
+  const session = await authenticateAdminDashboardSessionToken(supabase, provided)
+  if (session.ok) {
+    // 店舗別ログインリンク由来のセッションは storeScope を持つ＝その店舗だけに制限。
+    return { ok: true, storeScope: session.storeScope }
   }
 
-  return authenticateRawAdminToken(provided, supabase, fallbackToken)
+  const raw = await authenticateRawAdminToken(provided, supabase, fallbackToken)
+  if (raw.ok) {
+    return { ok: true, storeScope: null } // 生adminトークン＝全店アクセス
+  }
+  return raw
 }
 
 async function authenticateRawAdminToken(
@@ -3004,6 +3074,7 @@ async function createPettyCashEntry(
 async function updatePettyCashEntry(
   supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
+  enforcedStoreKey?: string | null,
 ) {
   const id = Number(body.id)
   if (!Number.isInteger(id) || id <= 0) {
@@ -3065,9 +3136,15 @@ async function updatePettyCashEntry(
     throw { status: 400, message: "No fields to update." } satisfies AppError
   }
   patch.updated_at = new Date().toISOString()
-  const { error } = await supabase.from("petty_cash_entries").update(patch).eq("id", id)
+  let upd = supabase.from("petty_cash_entries").update(patch).eq("id", id)
+  // 店舗スコープ付きセッションは自店舗の行だけ編集可（他店舗idを指定しても0件更新→403）。
+  if (enforcedStoreKey) upd = upd.eq("store_partition_key", enforcedStoreKey)
+  const { data: updated, error } = await upd.select("id")
   if (error) {
     throw { status: 500, message: `Failed to update petty cash entry: ${error.message}` } satisfies AppError
+  }
+  if (enforcedStoreKey && (!Array.isArray(updated) || updated.length === 0)) {
+    throw { status: 403, message: "他店舗のデータは編集できません。" } satisfies AppError
   }
   return { ok: true, id }
 }
@@ -3076,17 +3153,24 @@ async function updatePettyCashEntry(
 async function deletePettyCashEntry(
   supabase: ReturnType<typeof createClient>,
   url: URL,
+  enforcedStoreKey?: string | null,
 ) {
   const id = Number(url.searchParams.get("id"))
   if (!Number.isInteger(id) || id <= 0) {
     throw { status: 400, message: "id is required." } satisfies AppError
   }
-  const { error } = await supabase
+  let del = supabase
     .from("petty_cash_entries")
     .update({ hidden: true, updated_at: new Date().toISOString() })
     .eq("id", id)
+  // 店舗スコープ付きセッションは自店舗の行だけ削除可（他店舗idを指定しても0件→403）。
+  if (enforcedStoreKey) del = del.eq("store_partition_key", enforcedStoreKey)
+  const { data: deleted, error } = await del.select("id")
   if (error) {
     throw { status: 500, message: `Failed to delete petty cash entry: ${error.message}` } satisfies AppError
+  }
+  if (enforcedStoreKey && (!Array.isArray(deleted) || deleted.length === 0)) {
+    throw { status: 403, message: "他店舗のデータは削除できません。" } satisfies AppError
   }
   return { ok: true, id, deleted: true }
 }

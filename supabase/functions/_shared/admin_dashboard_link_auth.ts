@@ -3,7 +3,8 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.44.0
 const TOKEN_TABLE = "admin_dashboard_auth_tokens"
 const LOGIN_LINK_PREFIX = "lrlt_"
 const SESSION_PREFIX = "lrst_"
-const LOGIN_LINK_TTL_SEC = 30 * 24 * 60 * 60
+// ログインリンク(lt)はLINEに平文配信されるため漏えい窓を短く。単一使用(used_at)と併用。
+const LOGIN_LINK_TTL_SEC = 24 * 60 * 60
 const SESSION_TTL_REMEMBER_SEC = 3 * 24 * 60 * 60
 const SESSION_TTL_EPHEMERAL_SEC = 12 * 60 * 60
 
@@ -101,20 +102,29 @@ export async function exchangeAdminDashboardLoginLinkToken(
     .select("id, metadata")
     .eq("token_kind", "login_link")
     .eq("token_hash", tokenHash)
+    .is("used_at", null)
     .gt("expires_at", nowIso)
     .maybeSingle()
   if (error) {
     throw new Error(`Failed to exchange login link token: ${error.message}`)
   }
   if (!data) {
-    throw new Error("Login link is invalid or expired.")
+    throw new Error("Login link is invalid, already used, or expired.")
   }
-  const { error: markUsedError } = await supabase
+  // 単一使用を原子的に保証: used_at が未設定の行だけを更新し、1行更新できたときのみ続行する
+  // （並行交換・再利用での二重発行を防ぐ）。
+  const { data: claimed, error: markUsedError } = await supabase
     .from(TOKEN_TABLE)
     .update({ used_at: nowIso })
     .eq("id", data.id)
+    .is("used_at", null)
+    .select("id")
+    .maybeSingle()
   if (markUsedError) {
-    console.error("Failed to update login link used_at:", markUsedError.message)
+    throw new Error(`Failed to consume login link token: ${markUsedError.message}`)
+  }
+  if (!claimed) {
+    throw new Error("Login link has already been used.")
   }
   const mergedMetadata = {
     ...normalizeMetadata(data.metadata),
@@ -130,23 +140,28 @@ export async function exchangeAdminDashboardLoginLinkToken(
 export async function authenticateAdminDashboardSessionToken(
   supabase: SupabaseClient,
   rawToken: string,
-): Promise<boolean> {
+): Promise<{ ok: boolean; storeScope: string | null }> {
   const token = String(rawToken ?? "").trim()
-  if (!token.startsWith(SESSION_PREFIX)) return false
+  if (!token.startsWith(SESSION_PREFIX)) return { ok: false, storeScope: null }
   const tokenHash = await hashToken(token)
   const nowIso = new Date().toISOString()
   const { data, error } = await supabase
     .from(TOKEN_TABLE)
-    .select("id")
+    .select("id, metadata")
     .eq("token_kind", "session")
     .eq("token_hash", tokenHash)
     .gt("expires_at", nowIso)
     .maybeSingle()
   if (error) {
     console.error("authenticateAdminDashboardSessionToken failed:", error.message)
-    return false
+    return { ok: false, storeScope: null }
   }
-  return !!data
+  if (!data) return { ok: false, storeScope: null }
+  // セッションのmetadataに store_partition_key があれば「その店舗だけ」のスコープ。
+  // /auth/session(生adminトークン)由来は store_partition_key を持たない＝全店アクセス(null)。
+  const meta = normalizeMetadata((data as { metadata?: unknown }).metadata)
+  const scopeRaw = typeof meta.store_partition_key === "string" ? meta.store_partition_key.trim() : ""
+  return { ok: true, storeScope: scopeRaw ? scopeRaw.toLowerCase() : null }
 }
 
 export async function revokeAdminDashboardSessionToken(

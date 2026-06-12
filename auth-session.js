@@ -214,6 +214,12 @@
       }),
     });
     if (!response.ok) {
+      // ログインリンクは使い捨て(単一使用)。既に使用済み/期限切れ/無効(4xx)なら静かに失敗させ、
+      // URLから lt を除去して通常のログイン画面へフォールバックする(別端末での再タップ対策)。
+      stripUrlParams(['lt']);
+      if (response.status >= 400 && response.status < 500) {
+        return false;
+      }
       var text = await response.text().catch(function () { return ''; });
       throw new Error('自動ログインに失敗しました (' + response.status + '): ' + text.slice(0, 160));
     }
