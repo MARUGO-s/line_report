@@ -175,6 +175,14 @@ export function extractExpenseFromReceipt(
     base = itemsSum
     amount = gross
     taxResolved = Math.max(0, gross - itemsSum)
+  } else if (gross != null && gross > 0 && allPriced && Math.abs(itemsSum - gross) <= 3) {
+    // 【税込印字・税率別集計なし】明細価格(税込)の合計が支払総額(gross＝代金引換額/合計/今回出金額)に一致。
+    //   宅急便コレクト/領収証など外税集計の無い税込レシートで起きる。amount=gross(税込)とし、税は
+    //   税込から税率別に逆算(floor)。下の正規化で各品目pを税抜へ変換する（→台帳の「明細＋税＝出金額」検証が一致）。
+    //   ※税を上乗せして二重課税にしない（出金額は実際に支払った税込額のまま）。
+    amount = gross
+    taxResolved = Math.floor((itB8 * 8) / 108) + Math.floor((itB10 * 10) / 110)
+    base = amount - taxResolved
   } else if (net != null && net > 0) { base = net; amount = net + tax }
   else if (itemsSum > 0) { base = itemsSum; amount = itemsSum + tax }
   else if (gross != null && gross > 0) { amount = gross; base = Math.max(0, gross - tax) }
