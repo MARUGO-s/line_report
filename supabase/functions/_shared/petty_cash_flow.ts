@@ -644,8 +644,13 @@ export async function handlePettyCashCashOutSlip(
   args: { roomId: string; userId: string | null; replyToken: string; lineMessageId: string; receipt: LineImageReceiptAnalysis | null; summary: string; reanalyze?: () => Promise<LineImageReceiptAnalysis | null> },
 ): Promise<PettyCashImageResult> {
   const { roomId, userId, replyToken, lineMessageId, receipt, summary, reanalyze } = args
-  // 検知は売上解析の summary/items（レジ出金マーカー）で行う。
-  const haystack = `${summary ?? ''} ${(Array.isArray(receipt?.items) ? receipt!.items.join(' ') : '')}`
+  // 検知は売上解析の summary / store_name / items（レジ出金マーカー）で行う。
+  // ベンダー領収書と一緒に写っていてもAIがどこかに「レジ出金」を出せば拾えるよう対象を広めに取る。
+  const haystack = [
+    summary ?? '',
+    receipt?.storeName ?? '',
+    Array.isArray(receipt?.items) ? receipt!.items.join(' ') : '',
+  ].join(' ')
   if (!CASH_OUT_MARKERS.test(haystack)) return { handled: false, replied: false }
 
   // 出金伝票＝売上ではない。以降は売上登録しない（handled:true で確定）。
