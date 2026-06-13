@@ -1056,21 +1056,29 @@
       }
     }
     // 読み込んだレシート画像（メディア保存分）を別タブで開く。
-    // ポップアップブロック回避のため、先に空タブを開いてから署名URLへ差し替える。
+    // ポップアップブロック回避のため、クリック同期で空タブを開いてから署名URLへ差し替える。
+    // ※ noopener を付けると window.open の戻り値が null になり差し替えできないので付けない。
     async function openReceiptImage(id) {
       if (!id) return;
       let w = null;
-      try { w = window.open('', '_blank', 'noopener'); } catch (_) { w = null; }
+      try { w = window.open('about:blank', '_blank'); } catch (_) { w = null; }
+      if (w) {
+        try { w.opener = null; } catch (_) {}
+        try { w.document.write('<!doctype html><meta charset="utf-8"><title>レシート</title><body style="margin:0;padding:24px;font-family:system-ui,sans-serif;color:#444">レシート画像を読み込み中…</body>'); w.document.close(); } catch (_) {}
+      }
       try {
         const data = await apiFetch('/petty-cash/receipt-media?id=' + encodeURIComponent(id));
         const u = data && data.signed_url;
         if (!u) throw new Error('レシート画像のURLを取得できませんでした。');
-        if (w) { try { w.location.replace(u); } catch (_) { window.open(u, '_blank', 'noopener'); } }
-        else { window.open(u, '_blank', 'noopener'); }
+        if (w) { w.location.replace(u); }
+        else {
+          const win = window.open(u, '_blank');
+          if (!win) throw new Error('ポップアップがブロックされました。ブラウザのポップアップ許可を確認してください。');
+        }
       } catch (e) {
-        if (w) { try { w.close(); } catch (_) {} }
-        dom.addMsg.className = 'msg err';
-        dom.addMsg.textContent = 'レシート画像を開けませんでした: ' + (e && e.message ? e.message : String(e));
+        const msg = 'レシート画像を開けませんでした: ' + (e && e.message ? e.message : String(e));
+        if (w) { try { w.document.body.textContent = msg; } catch (_) { try { w.close(); } catch (_) {} } }
+        dom.addMsg.className = 'msg err'; dom.addMsg.textContent = msg;
       }
     }
     async function saveToken() {
