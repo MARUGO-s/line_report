@@ -185,6 +185,21 @@
     .entry-grid { display: grid; grid-template-columns: 1fr 300px; gap: 22px; margin-top: 12px; }
     @media (max-width: 1080px) { .entry-grid { grid-template-columns: 1fr; } }
 
+    .receipt-upload { border: 1px solid var(--border); border-radius: 14px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 64%, transparent), var(--surface-2)); padding: 14px; margin-top: 12px; display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; }
+    .receipt-drop { min-height: 104px; border: 1px dashed color-mix(in srgb, var(--accent) 54%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--surface) 76%, transparent); display: flex; align-items: center; gap: 14px; padding: 16px; cursor: pointer; transition: border-color .15s, background .15s, transform .15s; }
+    .receipt-drop:hover, .receipt-drop.dragover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
+    .ru-ico { width: 44px; height: 44px; border-radius: 12px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; }
+    .ru-title { font-size: 14px; font-weight: 800; color: var(--text); }
+    .ru-sub { font-size: 12px; color: var(--text-3); margin-top: 3px; }
+    .ru-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+    .ru-note { font-size: 11px; color: var(--text-3); text-align: right; max-width: 220px; }
+    .receipt-upload.busy .receipt-drop { opacity: .62; pointer-events: none; }
+    @media (max-width: 760px) {
+      .receipt-upload { grid-template-columns: 1fr; }
+      .ru-actions { align-items: stretch; }
+      .ru-note { text-align: left; max-width: none; }
+    }
+
     .ei-head { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 10px; }
     .ei-head label { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
     .ei-hint { font-size: 11px; color: var(--text-3); }
@@ -388,6 +403,22 @@
             </button>
             <div class="entry-panel" id="entryPanel">
               <div class="entry-panel-in">
+                <div class="receipt-upload" id="receiptUploadBox">
+                  <div class="receipt-drop" id="receiptDrop" role="button" tabindex="0" aria-label="レシート画像を選択またはドロップ">
+                    <div class="ru-ico">
+                      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><rect x="4" y="14" width="16" height="6" rx="2"/></svg>
+                    </div>
+                    <div>
+                      <div class="ru-title">レシート画像から自動登録</div>
+                      <div class="ru-sub">JPEG/PNG をここにドラッグ&ドロップ、またはクリックして選択。LINEで送った時と同じ小口現金解析で登録します。</div>
+                    </div>
+                  </div>
+                  <div class="ru-actions">
+                    <button class="btn btn-primary" id="receiptPickBtn" type="button">画像を選択</button>
+                    <div class="ru-note">店舗を選択してからアップロードしてください。大きい写真は自動で縮小します。</div>
+                    <input id="receiptFile" type="file" accept="image/jpeg,image/png" hidden />
+                  </div>
+                </div>
                 <div class="entry-grid">
                   <!-- 明細 -->
                   <div class="entry-items">
@@ -558,6 +589,7 @@
       authCard: $('authCard'), tokenInput: $('tokenInput'), saveTokenBtn: $('saveTokenBtn'), authMsg: $('authMsg'),
       storeF: $('storeF'), monthF: $('monthF'), reloadBtn: $('reloadBtn'), authBadge: $('authBadge'),
       entryToggle: $('entryToggle'), entryPanel: $('entryPanel'), entryTitle: $('entryTitle'), editFlag: $('editFlag'),
+      receiptUploadBox: $('receiptUploadBox'), receiptDrop: $('receiptDrop'), receiptPickBtn: $('receiptPickBtn'), receiptFile: $('receiptFile'),
       itemList: $('itemList'), addItem: $('addItem'),
       dateF: $('dateF'), handlerF: $('handlerF'), memoF: $('memoF'),
       cbBase: $('cbBase'), cbTax8: $('cbTax8'), cbTax10: $('cbTax10'), cbTax: $('cbTax'), cbTotal: $('cbTotal'), cbMismatch: $('cbMismatch'),
@@ -574,6 +606,7 @@
     let editingId = null;   // 編集中の行ID（null=新規）
     let editingAmountYen = null;  // 編集中エントリの保存済み受領額(amount_yen)。明細合計との不一致検出に使う。
     let records = [];        // 直近に取得した正規化済みレコード（現在の店舗・月）
+    let receiptUploading = false;
 
     /* ===== テーマ（共有キー line_reservation_calendar_theme） ===== */
     function normalizeTheme(t) { return t === 'light' ? 'light' : 'dark'; }
@@ -688,6 +721,11 @@
         out.push({ n: n, p: p, acct: acct, rate: rate });
       });
       return out;
+    }
+    function sourceLabel(source) {
+      if (source === 'line_image') return 'LINE';
+      if (source === 'web_image') return 'Web画像';
+      return '手入力';
     }
     // サーバ行 → 表示用レコード。本体/税/出金額は保存値（amount_yen/tax_yen）を権威として使う。
     function normalizeRecord(e) {
@@ -893,6 +931,94 @@
       }
     }
 
+    const RECEIPT_UPLOAD_TARGET_BYTES = 2800 * 1024;
+    const RECEIPT_UPLOAD_MAX_EDGE = 1900;
+    function isSupportedReceiptImage(file) {
+      if (!file) return false;
+      const type = String(file.type || '').toLowerCase();
+      const name = String(file.name || '').toLowerCase();
+      return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' || /\.(jpe?g|png)$/.test(name);
+    }
+    function setReceiptUploadBusy(busy, message, ok) {
+      receiptUploading = !!busy;
+      if (dom.receiptUploadBox) dom.receiptUploadBox.classList.toggle('busy', !!busy);
+      if (dom.receiptPickBtn) dom.receiptPickBtn.disabled = !!busy;
+      if (dom.receiptDrop) dom.receiptDrop.setAttribute('aria-busy', busy ? 'true' : 'false');
+      if (message) {
+        dom.addMsg.className = 'msg ' + (ok ? 'ok' : (busy ? '' : 'err'));
+        dom.addMsg.textContent = message;
+      }
+    }
+    function imageFromFile(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('画像を読み込めませんでした。JPEG/PNG画像を選択してください。')); };
+        img.src = url;
+      });
+    }
+    function canvasToBlob(canvas, type, quality) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('画像の縮小に失敗しました。')), type, quality);
+      });
+    }
+    async function prepareReceiptUploadFile(file) {
+      if (!isSupportedReceiptImage(file)) throw new Error('JPEGまたはPNG画像を選択してください。');
+      if (file.size <= RECEIPT_UPLOAD_TARGET_BYTES) {
+        return { blob: file, fileName: file.name || 'receipt.jpg', originalFileName: file.name || 'receipt.jpg' };
+      }
+      const img = await imageFromFile(file);
+      const scale = Math.min(1, RECEIPT_UPLOAD_MAX_EDGE / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+      const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+      const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      if (!ctx) throw new Error('画像処理を開始できませんでした。');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      let best = null;
+      for (const q of [0.86, 0.78, 0.7, 0.62]) {
+        const blob = await canvasToBlob(canvas, 'image/jpeg', q);
+        best = blob;
+        if (blob.size <= RECEIPT_UPLOAD_TARGET_BYTES) break;
+      }
+      if (!best || best.size <= 0) throw new Error('画像の縮小に失敗しました。');
+      if (best.size > 3 * 1024 * 1024) throw new Error('画像が大きすぎます。少しトリミングするか、低解像度で撮り直してください。');
+      const base = String(file.name || 'receipt').replace(/\.[^.]+$/, '').slice(0, 90) || 'receipt';
+      return { blob: best, fileName: base + '_web.jpg', originalFileName: file.name || 'receipt.jpg' };
+    }
+    async function uploadReceiptImage(file) {
+      if (receiptUploading) return;
+      const store = dom.storeF.value || lockedStore();
+      if (!store) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '店舗を選択してください（全店舗のままでは画像登録できません）。'; return; }
+      if (!getToken()) { setAuthBadge(false); dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '先に接続してください。'; return; }
+      setEntryOpen(true);
+      setReceiptUploadBusy(true, '画像を準備しています…', false);
+      try {
+        const prepared = await prepareReceiptUploadFile(file);
+        setReceiptUploadBusy(true, 'レシート画像を解析して登録しています…', false);
+        const fd = new FormData();
+        fd.append('store_partition_key', store);
+        fd.append('original_file_name', prepared.originalFileName);
+        fd.append('image', prepared.blob, prepared.fileName);
+        const data = await apiFetch('/petty-cash/receipt-image', { method: 'POST', body: fd });
+        const entry = data && data.entry ? data.entry : null;
+        const spent = entry && entry.spent_on ? String(entry.spent_on) : '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(spent)) dom.monthF.value = spent.slice(0, 7);
+        setReceiptUploadBusy(false, '画像から小口現金に登録しました。必要なら台帳の「編集」で品目・税率を確認してください。', true);
+        await loadEntries();
+      } catch (e) {
+        setReceiptUploadBusy(false, (e && e.message) ? e.message : String(e), false);
+      } finally {
+        if (dom.receiptFile) dom.receiptFile.value = '';
+        receiptUploading = false;
+        if (dom.receiptUploadBox) dom.receiptUploadBox.classList.remove('busy');
+        if (dom.receiptPickBtn) dom.receiptPickBtn.disabled = false;
+      }
+    }
+
     /* ===== 月集計 ===== */
     function chipHTML(k, v, total) {
       const pct = total ? Math.round(v / total * 100) : 0;
@@ -960,20 +1086,22 @@
           }
         }
         const storeTag = showStore ? '<span class="ld-store">' + esc(storeName(r.store)) + '</span>' : '';
-        const lineTag = r.source === 'line_image' ? '<span class="ld-rate" style="margin-left:7px;color:var(--ok)">LINE</span>' : '';
+        const sourceTag = r.source === 'line_image' || r.source === 'web_image'
+          ? '<span class="ld-rate" style="margin-left:7px;color:var(--ok)">' + esc(sourceLabel(r.source)) + '</span>'
+          : '';
         const accts = r.items.length
           ? Array.from(new Set(r.items.map((it) => ACCT_KEYS.has(it.acct) ? it.acct : '__unknown__')))
           : [legacyAcct(r.category) || '__unknown__'];
         const tags = accts.map((k) => '<span class="acct-tag"><span class="at-dot" style="background:' + (k === '__unknown__' ? 'var(--acct-unknown)' : acctColor(k)) + '"></span>' + esc(k === '__unknown__' ? (r.items.length ? '未分類' : (r.category || '未分類')) : acctName(k)) + '</span>').join('');
         return '<tr>' +
           '<td class="c-date">' + esc(r.date) + '</td>' +
-          '<td class="c-desc">' + storeTag + '<div class="ld-items">' + lines + '</div>' + memo + mismatchWarn + (lineTag ? '<div style="margin-top:5px">' + lineTag + '</div>' : '') + '</td>' +
+          '<td class="c-desc">' + storeTag + '<div class="ld-items">' + lines + '</div>' + memo + mismatchWarn + (sourceTag ? '<div style="margin-top:5px">' + sourceTag + '</div>' : '') + '</td>' +
           '<td class="c-acct"><div class="acct-tags">' + tags + '</div></td>' +
           '<td class="c-num">' + yen(r.base) + '</td>' +
           '<td class="c-num">' + (r.tax > 0 ? yen(r.tax) : '—') + '</td>' +
           '<td class="c-num total">' + yen(r.total) + '</td>' +
           '<td class="c-act"><div class="row-acts">' +
-            ((r.source === 'line_image' && r.lineMessageId) ? '<button class="mini" data-receipt="' + esc(r.id) + '" type="button" title="読み込んだレシート画像を別ページで開く">🧾 レシート</button>' : '') +
+            (((r.source === 'line_image' || r.source === 'web_image') && r.lineMessageId) ? '<button class="mini" data-receipt="' + esc(r.id) + '" type="button" title="読み込んだレシート画像を別ページで開く">🧾 レシート</button>' : '') +
             '<button class="mini" data-edit="' + esc(r.id) + '" type="button">編集</button>' +
             '<button class="mini del" data-del="' + esc(r.id) + '" type="button">削除</button>' +
           '</div></td>' +
@@ -995,7 +1123,7 @@
       const sorted = records.slice().sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0) || (a.id - b.id));
       sorted.forEach((r) => {
         const store = storeName(r.store);
-        const src = r.source === 'line_image' ? 'LINE' : '手入力';
+        const src = sourceLabel(r.source);
         if (r.items.length) {
           r.items.forEach((it) => {
             const rate = (Number(it.rate) === 10) ? 10 : 8;
@@ -1112,6 +1240,16 @@
     dom.clearBtn.addEventListener('click', resetForm);
     dom.entryToggle.addEventListener('click', () => setEntryOpen(!dom.entryPanel.classList.contains('open')));
     dom.submitBtn.addEventListener('click', submitEntry);
+    dom.receiptPickBtn.addEventListener('click', () => dom.receiptFile.click());
+    dom.receiptDrop.addEventListener('click', () => dom.receiptFile.click());
+    dom.receiptDrop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dom.receiptFile.click(); } });
+    dom.receiptFile.addEventListener('change', () => { const f = dom.receiptFile.files && dom.receiptFile.files[0]; if (f) uploadReceiptImage(f); });
+    ['dragenter', 'dragover'].forEach((name) => dom.receiptDrop.addEventListener(name, (e) => { e.preventDefault(); e.stopPropagation(); dom.receiptDrop.classList.add('dragover'); }));
+    ['dragleave', 'drop'].forEach((name) => dom.receiptDrop.addEventListener(name, (e) => { e.preventDefault(); e.stopPropagation(); dom.receiptDrop.classList.remove('dragover'); }));
+    dom.receiptDrop.addEventListener('drop', (e) => {
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) uploadReceiptImage(f);
+    });
     dom.storeF.addEventListener('change', () => { if (editingId) resetForm(); loadEntries(); });
     dom.monthF.addEventListener('change', () => { if (editingId) resetForm(); loadEntries(); });
     dom.acctFilter.addEventListener('change', renderLedger);

@@ -64,7 +64,7 @@ type PettyCashItem = { n: string; p: number; acct: 'shokuzai' | 'shomohin' | 'al
 //   アルコール飲料 → alcohol、消耗品/衛生用品 → shomohin、それ以外 → shokuzai(食材)。
 //   ※「消毒用アルコール」等は飲料ではないので shomohin 側で先に拾う。
 const ALCOHOL_DRINK_RE = /(ビール|発泡酒|ワイン|シャンパン|スパークリング|日本酒|清酒|焼酎|ウイスキー|ウィスキー|ハイボール|サワー|酎ハイ|チューハイ|ジン|ウォッカ|ラム|テキーラ|リキュール|梅酒|ハウスワイン|生樽|樽生|地酒|スピリッツ|sake|beer|wine|whisky|whiskey|vodka|tequila)/i
-const SHOMOHIN_RE = /(洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|レジ袋|レジブクロ|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/
+const SHOMOHIN_RE = /(洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|レジ袋|レジブクロ|買物袋|買い物袋|マイバッグ|ショッピングバッグ|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/
 function classifyPettyAcct(name: string): 'shokuzai' | 'shomohin' | 'alcohol' {
   const s = String(name ?? '')
   if (SHOMOHIN_RE.test(s)) return 'shomohin'
@@ -122,6 +122,8 @@ export function extractExpenseFromReceipt(
   //   例: 8%税込4,998 / 10%税込5 → ¥5の品目(レジ袋)だけ10%、残り全部8%（※を1つも読めなくても正しくなる）。
   //   ※価格未取得の品目(例: 買物袋¥5が読めない)があっても集計から税率を決められるよう allPriced を要件にしない。
   //   価格のある品目だけ greedy 照合し、価格が無い/一致しない品目は多数派の税率にする（高島屋で全品10%化を防ぐ）。
+  //   ※これは「候補のひとつ」。AIが内訳を誤読する(例: 高島屋で8%対象を¥890と誤読→bdValid=true でも内訳だけ誤り)
+  //     ことがあるため、下の【税率配分の整合チェック】で消費税合計と突き合わせて最終採用を決める。
   const bdRateByIndex = new Map<number, 8 | 10>()
   if (breakdown.length >= 2) {
     const sorted = [...breakdown].sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
@@ -146,12 +148,67 @@ export function extractExpenseFromReceipt(
     itemRows.forEach((_, i) => { if (!bdRateByIndex.has(i)) bdRateByIndex.set(i, major) })
   }
 
-  // 品目内訳（勘定科目・税率）。優先: ①税率別集計の逆算 → ②軽減税率印(rate=8) → ③品名推定(食材8/他10)。
+  // 【税率配分の整合チェック・最優先＝消費税合計に一致する配分を選ぶ・最重要】
+  //   税率別集計(breakdown)の「内訳」はAIが誤読しやすい（高島屋で8%対象を¥890と読む等）。一方
+  //   「消費税合計(taxAmount)」は印字を素直に読めて信頼できる（合計や品目価格からも裏取りできる）。
+  //   そこで税率の決め方を「集計を盲信」から「複数の候補配分のうち、合計税額が信頼アンカーに最も一致する
+  //   ものを採用」へ変える。候補=①集計の逆算 ②品目ごとのrate(外h=8/内#=10等) ③品名推定(食材8/他10)。
+  //   どれかが消費税合計に±2円で一致すればそれを全品に採用（集計の内訳誤読・rate誤読のどちらでも自己修復）。
+  //   アンカー（信頼できる「合計税額」）は複数集めて、どれかに一致すれば採用する（マルチアンカー）。
+  //   ①消費税合計(印字) ②合計−税抜小計(net) ③合計−明細合計(税抜印字とみなせる時のみ)。
+  //   ※③合計と明細価格は大きく確実に読めるので、誤読しやすい税率別内訳由来の①が数円ズレても③が救う。
+  const taxAnchors: number[] = []
+  if (tax > 0) taxAnchors.push(tax)
+  if (gross != null && net != null && gross > net) taxAnchors.push(gross - net)
+  if (gross != null && allPriced && gross > itemsSum
+      && (gross - itemsSum) >= itemsSum * 0.04 && (gross - itemsSum) <= itemsSum * 0.11) {
+    taxAnchors.push(gross - itemsSum)
+  }
+  let chosenRateOf: ((idx: number) => 8 | 10) | null = null
+  // 集計の「内訳」が信頼アンカーと整合するか。false なら下流の明細補完(a)でも集計の内訳を使わない。
+  //   アンカーが無い（判定不能）ときは従来どおり bdValid を信じる＝true 既定。
+  let bdSplitTrusted = true
+  if (taxAnchors.length > 0 && itemRows.length > 0) {
+    // 配分の合計税額（税抜式・税込式の近い方）と、各アンカーの差の最小値。全品にrateが付かない候補は null。
+    const taxDist = (rateOf: (i: number) => 8 | 10 | null): number | null => {
+      let g8 = 0, g10 = 0
+      for (let i = 0; i < itemRows.length; i++) {
+        const r = rateOf(i)
+        if (r == null) return null
+        const a = itemRows[i].amount
+        const p = a != null && a > 0 ? a : 0
+        if (r === 10) g10 += p; else g8 += p
+      }
+      const ex = Math.floor((g8 * 8) / 100) + Math.floor((g10 * 10) / 100)
+      const inc = Math.floor((g8 * 8) / 108) + Math.floor((g10 * 10) / 110)
+      let d = Infinity
+      for (const an of taxAnchors) d = Math.min(d, Math.abs(ex - an), Math.abs(inc - an))
+      return d
+    }
+    const food = (i: number): 8 | 10 => defaultPettyRate(classifyPettyAcct(itemRows[i].name))
+    const bdCand = (i: number): 8 | 10 | null => bdRateByIndex.get(i) ?? null
+    const cands: Array<(i: number) => 8 | 10 | null> = []
+    if (bdRateByIndex.size) cands.push(bdCand)
+    cands.push((i) => (itemRows[i].rate === 8 || itemRows[i].rate === 10) ? itemRows[i].rate as 8 | 10 : null)
+    cands.push(food)
+    let best: ((i: number) => 8 | 10 | null) | null = null, bestDist = Infinity
+    for (const c of cands) {
+      const d = taxDist(c)
+      if (d != null && d < bestDist) { bestDist = d; best = c }
+    }
+    // 十分一致(±2円)した候補だけ全品に採用。穴(null)は品名推定で埋める。一致しなければ従来優先へフォールバック。
+    if (best && bestDist <= 2) { const b = best; chosenRateOf = (idx) => (b(idx) ?? food(idx)) }
+    // 集計の内訳がアンカーに一致しないなら、補完(a)でも集計を信用しない（高島屋の誤読集計でニセ補完を防ぐ）。
+    if (bdRateByIndex.size) { const dBd = taxDist(bdCand); bdSplitTrusted = dBd != null && dBd <= 2 }
+  }
+
+  // 品目内訳（勘定科目・税率）。優先: ⓪整合チェックの採用配分 → ①税率別集計 → ②軽減税率印(rate=8) → ③品名推定。
   //   税率=8 は「酒類を除く飲食料品」の証拠なので科目=食材で確定。10% は科目を品名から推定。
   const itemEntries = itemRows.map((i, idx) => {
     const p = i.amount != null && i.amount > 0 ? i.amount : 0
     let rate: 8 | 10
-    if (bdRateByIndex.has(idx)) rate = bdRateByIndex.get(idx)!
+    if (chosenRateOf) rate = chosenRateOf(idx)
+    else if (bdRateByIndex.has(idx)) rate = bdRateByIndex.get(idx)!
     else if (i.rate === 8 || i.rate === 10) rate = i.rate
     else rate = defaultPettyRate(classifyPettyAcct(i.name))
     const acct: 'shokuzai' | 'shomohin' | 'alcohol' = rate === 8 ? 'shokuzai' : classifyPettyAcct(i.name)
@@ -170,7 +227,9 @@ export function extractExpenseFromReceipt(
   let base: number | null = null
   let amount: number | null = null
   let taxResolved = tax
-  if (bdValid) {
+  // bdValid でも【内訳が信頼アンカーと不整合(bdSplitTrusted=false)】なら集計のbdTaxを税額に使わない。
+  //   下の明細照合(itemsSum+itemsTax≒gross)へ落として、整合チェックで直した税率配分どおりの税額にする。
+  if (bdValid && bdSplitTrusted) {
     amount = gross ?? bdGross
     taxResolved = Math.min(bdTax, amount)
     base = amount - taxResolved
@@ -220,7 +279,8 @@ export function extractExpenseFromReceipt(
   if (amount != null && amount > 0 && itemEntries.length) {
     // (a) tax_breakdown が読めている税率は、その税抜小計を品目が満たすよう不足分を補完（税率は確定）。
     //     ※集計ベースなので価格未取得の品目があっても安全（高島屋で買物袋¥5が読めなくても10%¥5を補える）。
-    if (bdValid) {
+    //     ただし集計の内訳が信頼アンカーと不整合(bdSplitTrusted=false)なら使わない（誤読集計でのニセ補完を防ぐ）。
+    if (bdValid && bdSplitTrusted) {
       for (const b of breakdown) {
         const groupNet = Math.max(0, (b.total ?? 0) - b.tax)
         const covered = itemEntries.reduce((s, it) => s + (it.rate === b.rate ? it.p : 0), 0)

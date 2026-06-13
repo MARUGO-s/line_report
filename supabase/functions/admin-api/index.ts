@@ -19,7 +19,10 @@ import {
   type SalesBudgetAllocationWeights,
 } from "../_shared/sales_budget_allocation.ts"
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
-import { RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
+import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
+import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
+import { analyzeLineImageWithGroqScout, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
+import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
 import {
   fetchManualMonthSales,
   fetchManualMonthSalesMapForStore,
@@ -166,6 +169,9 @@ const DOCUMENT_EXTRACT_MAX_CHARS = 250000
 const DOCUMENT_PREVIEW_MAX_CHARS = 240
 const DOCUMENT_PDF_EXTRACT_MAX_PAGES = 120
 const DOCUMENT_TEXT_BINARY_RATIO_MAX = 0.08
+const PETTY_CASH_RECEIPT_IMAGE_BUCKET = "line-media"
+const PETTY_CASH_RECEIPT_IMAGE_MAX_BYTES = GROQ_VISION_BASE64_MAX_BYTES
+const GROQ_RECEIPT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 const PDFJS_MODULE_URL = "https://esm.sh/pdfjs-dist@4.10.38/build/pdf.mjs"
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -387,6 +393,7 @@ Deno.serve(async (req) => {
     const STORE_SCOPED_ALLOWED_PATHS = new Set<string>([
       "/auth/logout",
       "/petty-cash",
+      "/petty-cash/receipt-image",
       "/petty-cash/receipt-media",
       "/analytics/holidays",
       "/analytics/monthly",
@@ -533,6 +540,10 @@ Deno.serve(async (req) => {
     // 出金(レシート画像由来)の元レシート画像の署名URLを返す（別ページで開く用）。
     if (req.method === "GET" && path === "/petty-cash/receipt-media") {
       const result = await fetchPettyCashReceiptMedia(supabase, url, storeScope)
+      return json(result, 200)
+    }
+    if (req.method === "POST" && path === "/petty-cash/receipt-image") {
+      const result = await createPettyCashEntryFromReceiptImage(supabase, workReq, storeScope)
       return json(result, 200)
     }
     if (req.method === "POST" && path === "/petty-cash") {
@@ -3137,6 +3148,209 @@ async function createPettyCashEntry(
   return { ok: true, id: (data as { id?: number } | null)?.id ?? null }
 }
 
+function normalizePettyCashReceiptImageMime(fileType: string, fileName: string): string | null {
+  const type = String(fileType || "").split(";")[0].trim().toLowerCase()
+  if (type === "image/jpeg" || type === "image/jpg") return "image/jpeg"
+  if (type === "image/png") return "image/png"
+  const ext = extractFileExt(fileName).toLowerCase()
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg"
+  if (ext === "png") return "image/png"
+  return null
+}
+
+function receiptImageStorageExt(mimeType: string): string {
+  return mimeType === "image/png" ? "png" : "jpg"
+}
+
+async function recordPettyCashWebAiUsage(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  lineMessageId: string,
+  usage: LineImageVisionUsage | null | undefined,
+): Promise<void> {
+  if (!usage) return
+  try {
+    const { error } = await supabase.from("ai_usage_events").insert({
+      store_partition_key: storeKey,
+      provider: "groq",
+      model: GROQ_RECEIPT_MODEL,
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      thinking_tokens: usage.thinkingTokens,
+      total_tokens: usage.totalTokens,
+      line_message_id: lineMessageId,
+    })
+    if (error) console.error("petty cash web ai_usage_events insert failed:", error.message)
+  } catch (e) {
+    console.error("petty cash web ai_usage_events insert threw:", e instanceof Error ? e.message : String(e))
+  }
+}
+
+async function uploadPettyCashWebReceiptImage(
+  supabase: ReturnType<typeof createClient>,
+  params: {
+    storeKey: string
+    lineMessageId: string
+    fileName: string
+    mimeType: string
+    bytes: Uint8Array
+  },
+): Promise<{ storagePath: string }> {
+  const storePath = sanitizeStoragePathSegment(params.storeKey)
+  const idPath = sanitizeStoragePathSegment(params.lineMessageId)
+  const storagePath = `web-petty-cash/${storePath}/${idPath}.${receiptImageStorageExt(params.mimeType)}`
+  const uploaded = await supabase.storage.from(PETTY_CASH_RECEIPT_IMAGE_BUCKET).upload(storagePath, params.bytes, {
+    contentType: params.mimeType,
+    upsert: true,
+  })
+  if (uploaded?.error) {
+    throw { status: 500, message: `レシート画像の保存に失敗しました: ${uploaded.error.message}` } satisfies AppError
+  }
+  const inserted = await supabase.from("line_message_media").insert({
+    message_id: null,
+    line_message_id: params.lineMessageId,
+    room_id: `web_upload:${params.storeKey}`,
+    user_id: null,
+    sender_display_name: "Webアップロード",
+    media_type: "image",
+    store_partition_key: params.storeKey,
+    storage_bucket: PETTY_CASH_RECEIPT_IMAGE_BUCKET,
+    storage_path: storagePath,
+    original_file_name: params.fileName,
+    mime_type: params.mimeType,
+    file_size_bytes: params.bytes.byteLength,
+    content_preview: null,
+    created_at: new Date().toISOString(),
+  })
+  if (inserted?.error) {
+    try { await supabase.storage.from(PETTY_CASH_RECEIPT_IMAGE_BUCKET).remove([storagePath]) } catch (_) { /* ignore */ }
+    throw { status: 500, message: `レシート画像情報の保存に失敗しました: ${inserted.error.message}` } satisfies AppError
+  }
+  return { storagePath }
+}
+
+// Web画面からアップロードされたレシート画像を、LINEの小口現金解析と同じロジックで解析して登録する。
+async function createPettyCashEntryFromReceiptImage(
+  supabase: ReturnType<typeof createClient>,
+  req: Request,
+  enforcedStoreKey?: string | null,
+) {
+  const contentLength = Number(req.headers.get("content-length") ?? "")
+  if (Number.isFinite(contentLength) && contentLength > PETTY_CASH_RECEIPT_IMAGE_MAX_BYTES + 1024 * 1024) {
+    throw { status: 400, message: "画像が大きすぎます。3MB以下のJPEG/PNGにしてアップロードしてください。" } satisfies AppError
+  }
+
+  let formData: FormData
+  try {
+    formData = await req.formData()
+  } catch {
+    throw { status: 400, message: "Upload request must be multipart/form-data." } satisfies AppError
+  }
+
+  const rawStoreKey = toSafeString(formData.get("store_partition_key") ?? formData.get("store") ?? formData.get("store_key"))
+  if (enforcedStoreKey && rawStoreKey && rawStoreKey.toLowerCase() !== enforcedStoreKey.toLowerCase()) {
+    throw { status: 403, message: "他店舗のデータには登録できません。" } satisfies AppError
+  }
+  const storeKey = (enforcedStoreKey || rawStoreKey).trim()
+  if (!storeKey) {
+    throw { status: 400, message: "store_partition_key is required." } satisfies AppError
+  }
+
+  const fileValue = formData.get("image") ?? formData.get("file")
+  if (!(fileValue instanceof File)) {
+    throw { status: 400, message: "image file is required." } satisfies AppError
+  }
+  if (!Number.isFinite(fileValue.size) || fileValue.size <= 0) {
+    throw { status: 400, message: "image file must not be empty." } satisfies AppError
+  }
+  if (fileValue.size > PETTY_CASH_RECEIPT_IMAGE_MAX_BYTES) {
+    throw { status: 400, message: "画像が大きすぎます。3MB以下のJPEG/PNGにしてアップロードしてください。" } satisfies AppError
+  }
+
+  const originalFileName = sanitizeUploadFileName(
+    toSafeString(formData.get("original_file_name")) || fileValue.name || "receipt.jpg",
+  )
+  const mimeType = normalizePettyCashReceiptImageMime(fileValue.type || "", originalFileName)
+  if (!mimeType) {
+    throw { status: 400, message: "JPEGまたはPNG画像だけアップロードできます。" } satisfies AppError
+  }
+
+  const groqApiKey = String(Deno.env.get("GROQ_API_KEY") ?? "").trim()
+  if (!groqApiKey) {
+    throw { status: 500, message: "GROQ_API_KEY is missing." } satisfies AppError
+  }
+
+  const bytes = new Uint8Array(await fileValue.arrayBuffer())
+  const webMessageId = `web-petty-cash:${crypto.randomUUID()}`
+  const analyzed = await analyzeLineImageWithGroqScout(
+    bytes,
+    mimeType,
+    originalFileName,
+    groqApiKey,
+    EXPENSE_RECEIPT_PROMPT_ADDITION,
+  )
+  await recordPettyCashWebAiUsage(supabase, storeKey, webMessageId, analyzed.usage)
+  if (analyzed.failure) {
+    throw { status: 422, message: `レシート画像を解析できませんでした: ${analyzed.failure.message}` } satisfies AppError
+  }
+  const expense = extractExpenseFromReceipt(analyzed.analysis?.receipt ?? null)
+  if (!expense) {
+    throw { status: 422, message: "レシートの金額を読み取れませんでした。画像を撮り直すか手入力してください。" } satisfies AppError
+  }
+
+  let storagePath: string | null = null
+  try {
+    const media = await uploadPettyCashWebReceiptImage(supabase, {
+      storeKey,
+      lineMessageId: webMessageId,
+      fileName: originalFileName,
+      mimeType,
+      bytes,
+    })
+    storagePath = media.storagePath
+
+    const items = normalizePettyItems(expense.items) ?? null
+    const { data, error } = await supabase
+      .from("petty_cash_entries")
+      .insert({
+        store_partition_key: storeKey,
+        spent_on: expense.spentOn,
+        item: items ? pettyItemText(items) : expense.item,
+        category: items ? pettyCategoryLabel(items) : null,
+        amount_yen: expense.amount,
+        tax_yen: Math.min(expense.amount, Math.max(0, expense.tax)),
+        items,
+        handler: toSafeString(formData.get("handler")) || null,
+        note: expense.supplier ? `仕入先: ${expense.supplier}` : null,
+        source: "web_image",
+        line_message_id: webMessageId,
+      })
+      .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, items, handler, source, note, line_message_id, created_at")
+      .single()
+    if (error) {
+      throw { status: 500, message: `Failed to create petty cash entry: ${error.message}` } satisfies AppError
+    }
+    return {
+      ok: true,
+      id: (data as { id?: number } | null)?.id ?? null,
+      entry: data,
+      receipt: {
+        summary: analyzed.analysis?.summary ?? "",
+        supplier: expense.supplier,
+        spent_on: expense.spentOn,
+        amount_yen: expense.amount,
+        tax_yen: expense.tax,
+      },
+    }
+  } catch (e) {
+    if (storagePath) {
+      try { await supabase.storage.from(PETTY_CASH_RECEIPT_IMAGE_BUCKET).remove([storagePath]) } catch (_) { /* ignore */ }
+      try { await supabase.from("line_message_media").delete().eq("line_message_id", webMessageId) } catch (_) { /* ignore */ }
+    }
+    throw e
+  }
+}
+
 // 既存の小口現金行を編集（body に含めたフィールドだけ更新）。
 async function updatePettyCashEntry(
   supabase: ReturnType<typeof createClient>,
@@ -4889,7 +5103,7 @@ function resolveAdminRateLimit(method: string, path: string): { maxRequests: num
       windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,
     }
   }
-  if (method === "POST" && path === "/documents") {
+  if (method === "POST" && (path === "/documents" || path === "/petty-cash/receipt-image")) {
     return {
       maxRequests: ADMIN_RATE_LIMIT_UPLOAD_MAX_REQUESTS,
       windowMs: ADMIN_RATE_LIMIT_UPLOAD_WINDOW_MS,
