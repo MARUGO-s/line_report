@@ -16,6 +16,22 @@ const TRIGGER_WORDS = new Set(['経費', '経費登録', '出金', '出金登録
 const CANCEL_WORDS = new Set(['キャンセル', '中止', 'やめる', 'やめ', 'cancel', 'Cancel'])
 // レジ出金（＝経費の支払い）伝票のマーカー。これらを含む受領レシートは「売上」ではない。
 const CASH_OUT_MARKERS = /レジ出金|出金伝票|今回出金額|出金額|現金出金|小口出金|出金処理/
+
+// レジ出金レシートをまとめて1返信にするバッファ（複数を一気に送ると別々のwebhookで届くため）。
+const REPLY_BATCH_TABLE = 'petty_cash_reply_batch'
+// 最後の画像が届いてから、まとめて返信するまでの待ち時間。連続送信の間隔(実測~1.6s)より十分長く取る。
+const CASHOUT_BATCH_DEBOUNCE_MS = 4000
+
+// Supabase Edge ランタイムのバックグラウンドタスク（応答を返した後も処理を継続する）。
+// ローカル/単体テスト環境では存在しない＝即時返信にフォールバックする。
+function edgeScheduleBackground(p: Promise<unknown>): boolean {
+  const er = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime
+  if (er && typeof er.waitUntil === 'function') {
+    er.waitUntil(p.catch((e) => console.error('edgeScheduleBackground task failed:', e instanceof Error ? e.message : String(e))))
+    return true
+  }
+  return false
+}
 // LINE完了カードから開く小口現金ページ。売上分析と同じ仕組み（from=line＋store_key＋ワンタイム lt）で
 // 自動ログインし、その店舗のみ閲覧できるようにする。
 const PETTY_CASH_PAGE_BASE = 'https://marugo-s.github.io/line_report/petty_cash.html'
@@ -399,6 +415,76 @@ function cashOutOfferFlex(pendingId: number, amount: number): Record<string, unk
   }
 }
 
+// まとめ返信用：レシート1件分のコンパクトなレジ出金カード（カルーセルの1バブル）。
+function cashOutCardBubble(supplier: string | null, amount: number, pendingId: number): Record<string, unknown> {
+  const title = String(supplier ?? '').trim() || 'レジ出金（経費）'
+  return {
+    type: 'bubble',
+    size: 'kilo',
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'text', text: title, weight: 'bold', size: 'sm', color: '#1a6fa8', wrap: true },
+        { type: 'text', text: `出金額 ${formatYen(amount)}`, size: 'sm', color: '#444444', wrap: true },
+      ],
+    },
+    footer: {
+      type: 'box', layout: 'vertical',
+      contents: [
+        { type: 'button', style: 'primary', color: '#1a6fa8', height: 'sm', action: { type: 'postback', label: '経費（小口）として記録', data: `pcreview=${pendingId}`, displayText: '経費（小口）として記録します' } },
+      ],
+    },
+  }
+}
+
+// まとめ返信本体。1件なら従来の単一カード、複数ならカルーセル（最大12件）。
+function cashOutBatchFlex(rows: { pending_id: number; supplier: string | null; amount_yen: number }[]): Record<string, unknown> {
+  if (rows.length === 1) return cashOutOfferFlex(rows[0].pending_id, rows[0].amount_yen)
+  const bubbles = rows.slice(0, 12).map((r) => cashOutCardBubble(r.supplier, r.amount_yen, r.pending_id))
+  return {
+    type: 'flex',
+    altText: `レジ出金（経費）の伝票 ${rows.length}件`,
+    contents: { type: 'carousel', contents: bubbles },
+  }
+}
+
+// レジ出金レシートを連続送信したときのまとめ返信。各画像が自分の行を入れてこれを予約し、
+// デバウンス後「自分がそのルームの最新の未送信」だった画像だけが、未送信を全部 claim して1返信する。
+async function flushCashOutBatchAfterDebounce(
+  supabase: SupabaseClient,
+  args: { rowId: number; roomId: string; replyToken: string; storeKey: string },
+): Promise<void> {
+  const { rowId, roomId, replyToken, storeKey } = args
+  await new Promise((resolve) => setTimeout(resolve, CASHOUT_BATCH_DEBOUNCE_MS))
+  // 自分がこのルームの最新の未送信か？（後から画像が届いていれば、その画像がまとめる）
+  const { data: newest } = await supabase
+    .from(REPLY_BATCH_TABLE)
+    .select('id')
+    .eq('room_id', roomId)
+    .eq('sent', false)
+    .order('id', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!newest || Number((newest as { id?: unknown }).id) !== Number(rowId)) return
+  // 未送信を一括 claim（sent=true）。同時実行でも sent=false 条件で二重送信を防ぐ。
+  const { data: claimed, error } = await supabase
+    .from(REPLY_BATCH_TABLE)
+    .update({ sent: true, sent_at: new Date().toISOString() })
+    .eq('room_id', roomId)
+    .eq('sent', false)
+    .select('pending_id, supplier, amount_yen')
+  if (error) { console.error('cashout batch claim failed:', error.message); return }
+  const rows = (Array.isArray(claimed) ? claimed : [])
+    .map((r) => ({ pending_id: Number((r as { pending_id?: unknown }).pending_id), supplier: ((r as { supplier?: unknown }).supplier ?? null) as string | null, amount_yen: Math.max(0, Math.floor(Number((r as { amount_yen?: unknown }).amount_yen ?? 0))) }))
+    .filter((r) => Number.isInteger(r.pending_id) && r.pending_id > 0)
+    .sort((a, b) => a.pending_id - b.pending_id)
+  if (!rows.length) return
+  const messages: Record<string, unknown>[] = rows.length > 1
+    ? [textMessage(`レジ出金（経費）の伝票が ${rows.length}件 届きました。それぞれ「経費（小口）として記録」を押してください。`), cashOutBatchFlex(rows)]
+    : [cashOutBatchFlex(rows)]
+  await sendReply(replyToken, messages, storeKey, roomId)
+}
+
 // 小口現金ページのURLを組み立てる（store_key で店舗指定、from=line でロック、lt はワンタイムログイン）。
 function buildPettyCashPageUrl(storeKey: string, loginToken?: string | null): string {
   const key = String(storeKey || '').trim()
@@ -671,7 +757,24 @@ export async function handlePettyCashCashOutSlip(
     return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_unreadable' }
   }
   const ex = extractExpenseFromReceipt(exReceipt)
-  const replied = await sendReply(replyToken, [cashOutOfferFlex(pendingId, ex?.amount ?? 0)], storeKey, roomId)
+  const amount = ex?.amount ?? 0
+  const supplier = exReceipt?.storeName ? String(exReceipt.storeName).trim() : null
+  // 連続送信を1返信にまとめる: まずバッファに入れ、まとめ返信をバックグラウンドで予約する。
+  // （複数レシートを一気に送ると別々のwebhookで届くため、数秒待って最後の1枚がまとめて返信する。）
+  const { data: batchRow, error: batchErr } = await supabase
+    .from(REPLY_BATCH_TABLE)
+    .insert({ store_partition_key: storeKey, room_id: roomId, user_id: userId, pending_id: pendingId, supplier, amount_yen: amount, line_message_id: lineMessageId, reply_token: replyToken })
+    .select('id')
+    .single()
+  if (batchErr) console.error('petty_cash_reply_batch insert failed:', batchErr.message)
+  const rowId = Number((batchRow as { id?: unknown } | null)?.id ?? 0)
+  if (rowId > 0 && replyToken) {
+    const scheduled = edgeScheduleBackground(flushCashOutBatchAfterDebounce(supabase, { rowId, roomId, replyToken, storeKey }))
+    // 返信はバックグラウンドのまとめ処理に委ねる（即時返信しない＝チャットが1つにまとまる）。
+    if (scheduled) return { handled: true, replied: false, saved: false, reason: 'petty_cash_cashout_batched' }
+  }
+  // フォールバック（バックグラウンド不可 or バッファ失敗）: 従来どおり即時に単一カードを返す。
+  const replied = await sendReply(replyToken, [cashOutOfferFlex(pendingId, amount)], storeKey, roomId)
   return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_offer' }
 }
 
