@@ -205,14 +205,15 @@
     .ei-head { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 10px; }
     .ei-head label { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
     .ei-hint { font-size: 11px; color: var(--text-3); }
-    .item-head, .item-row { display: grid; grid-template-columns: 1fr 132px 156px 116px 34px; gap: 8px; align-items: center; }
+    .item-head, .item-row { display: grid; grid-template-columns: 1fr 128px 52px 116px 34px; gap: 8px; align-items: center; }
     .item-head { font-size: 11px; color: var(--text-3); font-weight: 600; padding: 0 2px 6px; }
     .item-head .ih-num { text-align: right; }
     .items { display: flex; flex-direction: column; gap: 8px; }
     .iseg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-2); width: 100%; }
     .iseg button { font: inherit; font-size: 12px; font-weight: 600; border: 0; background: transparent; color: var(--text-3); padding: 8px 0; flex: 1; cursor: pointer; min-width: 0; }
     .iseg button.active { background: var(--accent); color: #fff; }
-    .iseg-sep { width: 1px; background: var(--border); flex-shrink: 0; align-self: stretch; }
+    .irate { display: flex; align-items: center; justify-content: center; height: 38px; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); }
+    .irate.r8 { color: var(--acct-shokuzai); background: var(--ok-soft); border-color: color-mix(in srgb, var(--acct-shokuzai) 40%, transparent); }
     .iyen { display: flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 9px; padding: 0 9px; background: var(--surface); }
     .iyen::before { content: '¥'; color: var(--text-3); font-size: 12px; }
     .iyen input { border: 0; background: transparent; padding: 9px 2px; width: 100%; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font: inherit; }
@@ -224,11 +225,14 @@
     .add-item:hover { border-color: var(--accent); background: var(--accent-soft); }
     @media (max-width: 680px) {
       .item-head { display: none; }
-      .item-row { grid-template-columns: 1fr 1fr; grid-template-areas: "name name" "acct acct" "rate rate" "yen del"; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
-      .item-row .iname { grid-area: name; } .item-row .iacct { grid-area: acct; } .item-row .iseg { grid-area: rate; }
+      .item-row { grid-template-columns: 1fr 1fr; grid-template-areas: "name name" "acct rate" "yen del"; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+      .item-row .iname { grid-area: name; } .item-row .iacct { grid-area: acct; } .item-row .irate { grid-area: rate; }
       .item-row .iyen { grid-area: yen; } .item-row .irm { grid-area: del; justify-self: end; width: 44px; }
     }
 
+    .meta-top { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .meta-top .mrow { grid-template-columns: 1fr; gap: 6px; }
+    .meta-top .mrow label { font-size: 11.5px; color: var(--text-3); padding-top: 0; }
     .entry-meta { display: flex; flex-direction: column; gap: 12px; }
     .mrow { display: flex; flex-direction: column; gap: 5px; }
     .mrow label { font-size: 11.5px; color: var(--text-3); font-weight: 600; }
@@ -432,8 +436,8 @@
                     <div class="item-head">
                       <span>品目</span>
                       <span>勘定科目</span>
-                      <span>税率 外/内</span>
-                      <span class="ih-num">価格</span>
+                      <span class="ih-rate" style="text-align:center">税率</span>
+                      <span class="ih-num" id="priceHead">税抜価格</span>
                       <span></span>
                     </div>
                     <div class="items" id="itemList"></div>
@@ -442,12 +446,21 @@
 
                   <!-- 計算 + メタ -->
                   <div class="entry-meta">
-                    <div class="mrow">
-                      <label>出金日</label>
-                      <input class="input mono" id="dateF" type="date" />
+                    <div class="meta-top">
+                      <div class="mrow">
+                        <label>出金日</label>
+                        <input class="input mono" id="dateF" type="date" />
+                      </div>
+                      <div class="mrow">
+                        <label>税区分</label>
+                        <div class="iseg taxmode" id="taxModeSeg" role="group" aria-label="外税/内税">
+                          <button type="button" data-mode="ex" class="active">外税</button>
+                          <button type="button" data-mode="in">内税</button>
+                        </div>
+                      </div>
                     </div>
                     <div class="calcbox">
-                      <div class="cb-line"><span>本体（税抜小計）</span><b class="mono" id="cbBase">¥0</b></div>
+                      <div class="cb-line"><span id="cbBaseK">本体（税抜）</span><b class="mono" id="cbBase">¥0</b></div>
                       <div class="cb-line sub"><span>税 8% 対象</span><b class="mono" id="cbTax8">¥0</b></div>
                       <div class="cb-line sub"><span>税 10% 対象</span><b class="mono" id="cbTax10">¥0</b></div>
                       <div class="cb-line"><span>税額 合計</span><b class="mono" id="cbTax">¥0</b></div>
@@ -576,6 +589,17 @@
     const ACCT_KEYS = new Set(ACCTS.map((a) => a.k));
     const acctName = (k) => { const a = ACCTS.find((x) => x.k === k); return a ? a.n : '未分類'; };
     const acctColor = (k) => { const a = ACCTS.find((x) => x.k === k); return a ? a.c : 'var(--acct-unknown)'; };
+    const ACCT_RATE = { shokuzai: 8, shomohin: 10, alcohol: 10 };
+    const rateOf = (acct) => ACCT_RATE[acct] || 10;
+    function itemSplit(it, mode) {
+      const p = Number(it.p) || 0;
+      const rate = rateOf(it.acct);
+      if (mode === 'in') {
+        const net = Math.floor(p * 100 / (100 + rate));
+        return { net: net, tax: p - net, rate: rate, gross: p };
+      }
+      return { net: p, tax: Math.floor(p * rate / 100), rate: rate, gross: p + Math.floor(p * rate / 100) };
+    }
     // 旧データの category 文字列 → 3科目への寄せ（台帳/集計の見栄え用）。未知は '' = 未分類。
     const LEGACY_ACCT = { '食材・仕入': 'shokuzai', '食材': 'shokuzai', '仕入': 'shokuzai', '消耗品費': 'shomohin', '消耗品': 'shomohin', '衛生用品': 'shomohin', '雑貨': 'shomohin', 'アルコール': 'alcohol', '酒': 'alcohol', '酒類': 'alcohol' };
     function legacyAcct(cat) {
@@ -595,6 +619,7 @@
       entryToggle: $('entryToggle'), entryPanel: $('entryPanel'), entryTitle: $('entryTitle'), editFlag: $('editFlag'),
       receiptUploadBox: $('receiptUploadBox'), receiptDrop: $('receiptDrop'), receiptPickBtn: $('receiptPickBtn'), receiptFile: $('receiptFile'),
       itemList: $('itemList'), addItem: $('addItem'),
+      taxModeSeg: $('taxModeSeg'), cbBaseK: $('cbBaseK'), priceHead: $('priceHead'),
       dateF: $('dateF'), handlerF: $('handlerF'), memoF: $('memoF'),
       cbBase: $('cbBase'), cbTax8: $('cbTax8'), cbTax10: $('cbTax10'), cbTax: $('cbTax'), cbTotal: $('cbTotal'), cbMismatch: $('cbMismatch'),
       submitBtn: $('submitBtn'), editDeleteBtn: $('editDeleteBtn'), clearBtn: $('clearBtn'), addMsg: $('addMsg'),
@@ -741,6 +766,7 @@
         handler: e.handler || '', memo: e.note || '', source: e.source || 'manual',
         item: e.item || '', category: e.category || '', items: items,
         base: Math.max(0, amt - tax), tax: tax, total: amt,
+        taxMode: e.tax_mode || 'ex',
         lineMessageId: e.line_message_id || '',
       };
     }
@@ -778,41 +804,26 @@
 
     /* ===== 入力フォーム（明細行） ===== */
     function acctOptionsHTML(sel) { return ACCTS.map((a) => '<option value="' + a.k + '"' + (a.k === sel ? ' selected' : '') + '>' + esc(a.n) + '</option>').join(''); }
-    function makeItemRow(name, price, acct, rate) {
+    function makeItemRow(name, price, acct) {
       const a = ACCT_KEYS.has(acct) ? acct : 'shokuzai';
-      const r = (Number(rate) === 10) ? 10 : 8;
+      const rate = rateOf(a);
       const row = document.createElement('div');
       row.className = 'item-row';
       row.innerHTML =
         '<input class="input iname" type="text" placeholder="品目名（例: お徳用おろし生姜）" />' +
         '<select class="usel iacct">' + acctOptionsHTML(a) + '</select>' +
-        '<div class="iseg" role="group" aria-label="税率と課税区分">' +
-          '<button type="button" data-rate="8"' + (r === 8 ? ' class="active"' : '') + '>8%</button>' +
-          '<button type="button" data-rate="10"' + (r === 10 ? ' class="active"' : '') + '>10%</button>' +
-          '<span class="iseg-sep"></span>' +
-          '<button type="button" data-mode="ex" class="active">外</button>' +
-          '<button type="button" data-mode="inc">内</button>' +
-        '</div>' +
+        '<span class="irate' + (rate === 8 ? ' r8' : '') + '">' + rate + '%</span>' +
         '<div class="iyen"><input class="iprice" type="number" min="0" step="1" inputmode="numeric" placeholder="0" /></div>' +
         '<button class="irm" type="button" aria-label="この品目を削除"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>';
       row.querySelector('.iname').value = name || '';
       const pv = (price === 0 || price) ? Math.floor(Number(price) || 0) : '';
       row.querySelector('.iprice').value = (pv && pv > 0) ? String(pv) : '';
-      const seg = row.querySelector('.iseg');
-      seg.addEventListener('click', (e) => {
-        const b = e.target.closest('button');
-        if (!b) return;
-        if (b.dataset.rate) {
-          seg.querySelectorAll('[data-rate]').forEach((x) => x.classList.toggle('active', x === b));
-        } else if (b.dataset.mode) {
-          seg.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('active', x === b));
-        }
-        recalc();
-      });
       const iacct = row.querySelector('.iacct');
       iacct.addEventListener('change', () => {
-        const def = iacct.value === 'shokuzai' ? 8 : 10; // 科目変更時に既定税率を提示（食材=8% / 他=10%）
-        seg.querySelectorAll('[data-rate]').forEach((x) => x.classList.toggle('active', Number(x.dataset.rate) === def));
+        const rt = rateOf(iacct.value);
+        const badge = row.querySelector('.irate');
+        badge.textContent = rt + '%';
+        badge.classList.toggle('r8', rt === 8);
         recalc();
       });
       row.querySelectorAll('.iname,.iprice').forEach((inp) => inp.addEventListener('input', recalc));
@@ -826,31 +837,38 @@
     function readItems() {
       return Array.prototype.map.call(dom.itemList.querySelectorAll('.item-row'), (row) => {
         const n = row.querySelector('.iname').value.trim();
-        const pEntered = Math.max(0, Math.floor(Number(row.querySelector('.iprice').value) || 0));
+        const p = Math.max(0, Math.floor(Number(row.querySelector('.iprice').value) || 0));
         const acct = row.querySelector('.iacct').value;
-        const actRate = row.querySelector('.iseg [data-rate].active');
-        const rate = actRate && Number(actRate.dataset.rate) === 10 ? 10 : 8;
-        const actMode = row.querySelector('.iseg [data-mode].active');
-        const mode = actMode ? actMode.dataset.mode : 'ex';
-        // 内税（税込）入力の場合は税抜に変換してから保持
-        const p = mode === 'inc' ? Math.floor(pEntered * 100 / (100 + rate)) : pEntered;
+        const rate = rateOf(acct);
         return { n: n, p: p, acct: acct, rate: rate };
       });
     }
+    function curTaxMode() {
+      if (!dom.taxModeSeg) return 'ex';
+      const a = dom.taxModeSeg.querySelector('button.active');
+      return a ? (a.dataset.mode || 'ex') : 'ex';
+    }
     // 消費税は「税率ごとにまとめて1円未満切り捨て(floor)」で算出（税率別に1回・端数は切り捨て）。
     function recalc() {
+      const mode = curTaxMode();
       const items = readItems();
-      let base = 0, base8 = 0, base10 = 0;
-      items.forEach((it) => { base += it.p; if (it.rate === 8) base8 += it.p; else base10 += it.p; });
+      let base8 = 0, base10 = 0;
+      items.forEach((it) => {
+        const s = itemSplit(it, mode);
+        if (s.rate === 8) base8 += s.net; else base10 += s.net;
+      });
       const tax8 = Math.floor(base8 * 8 / 100);
       const tax10 = Math.floor(base10 * 10 / 100);
       const tax = tax8 + tax10;
+      const base = base8 + base10;
       const total = base + tax;
       dom.cbBase.textContent = yen(base);
       dom.cbTax8.textContent = yen(tax8);
       dom.cbTax10.textContent = yen(tax10);
       dom.cbTax.textContent = yen(tax);
       dom.cbTotal.textContent = yen(total);
+      if (dom.cbBaseK) dom.cbBaseK.textContent = mode === 'in' ? '本体（税抜換算）' : '本体（税抜）';
+      if (dom.priceHead) dom.priceHead.textContent = mode === 'in' ? '税込価格' : '税抜価格';
       updateMismatch(total);
     }
     // 編集中、明細＋税の合計が保存済み受領額(amount_yen)と食い違うとき⚠を出し、保存ボタンを「不一致を確認して記録」に切替える。
@@ -869,10 +887,14 @@
         dom.submitBtn.style.color = mism ? '#1a1205' : '';
       }
     }
+    function setTaxMode(m) {
+      if (!dom.taxModeSeg) return;
+      dom.taxModeSeg.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x.dataset.mode === m));
+    }
     function setItems(items) {
       dom.itemList.innerHTML = '';
-      const list = (Array.isArray(items) && items.length) ? items : [{ n: '', p: '', acct: 'shokuzai', rate: 8 }];
-      list.forEach((it) => dom.itemList.appendChild(makeItemRow(it.n, it.p, it.acct, it.rate || 8)));
+      const list = (Array.isArray(items) && items.length) ? items : [{ n: '', p: '', acct: 'shokuzai' }];
+      list.forEach((it) => dom.itemList.appendChild(makeItemRow(it.n, it.p, it.acct)));
       recalc();
     }
     function exitEditMode() {
@@ -880,6 +902,7 @@
       editingAmountYen = null;
       dom.entryTitle.textContent = '出金を記録';
       dom.editFlag.hidden = true;
+      setTaxMode('ex');
       if (dom.editDeleteBtn) dom.editDeleteBtn.hidden = true;
       recalc();  // ボタン表示・不一致表示をリセット（編集→登録 / ⚠解除）
     }
@@ -916,6 +939,7 @@
       dom.editFlag.hidden = false; dom.editFlag.textContent = '編集中 ID:' + r.id;
       if (dom.editDeleteBtn) dom.editDeleteBtn.hidden = false;
       dom.addMsg.className = message ? 'msg ok' : 'msg'; dom.addMsg.textContent = message || '';
+      setTaxMode(r.taxMode || 'ex');
       setItems(items);  // editingId/editingAmountYen 設定後に呼ぶ（recalc→updateMismatch がボタン表示を確定）
       setEntryOpen(true);
       try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
@@ -929,7 +953,7 @@
       items.forEach((it) => { base += it.p; if (it.rate === 8) base8 += it.p; else base10 += it.p; });
       const tax = Math.floor(base8 * 8 / 100) + Math.floor(base10 * 10 / 100);  // 1円未満切り捨て（税率別）
       if (base + tax <= 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '価格を入力してください。'; return; }
-      const fields = { spent_on: spent_on, items: items, handler: dom.handlerF.value.trim(), note: dom.memoF.value.trim() };
+      const fields = { spent_on: spent_on, items: items, tax_mode: curTaxMode(), handler: dom.handlerF.value.trim(), note: dom.memoF.value.trim() };
       dom.submitBtn.disabled = true;
       try {
         if (editingId) {
@@ -1285,7 +1309,15 @@
     /* ===== events ===== */
     dom.reloadBtn.addEventListener('click', loadEntries);
     dom.themeToggleBtn.addEventListener('click', toggleTheme);
-    dom.addItem.addEventListener('click', () => { dom.itemList.appendChild(makeItemRow('', '', 'shokuzai', 8)); });
+    dom.addItem.addEventListener('click', () => { dom.itemList.appendChild(makeItemRow('', '', 'shokuzai')); });
+    if (dom.taxModeSeg) {
+      dom.taxModeSeg.addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        dom.taxModeSeg.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+        recalc();
+      });
+    }
     dom.clearBtn.addEventListener('click', resetForm);
     dom.entryToggle.addEventListener('click', () => setEntryOpen(!dom.entryPanel.classList.contains('open')));
     dom.submitBtn.addEventListener('click', submitEntry);
