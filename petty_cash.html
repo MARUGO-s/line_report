@@ -148,6 +148,8 @@
     .btn:hover { background: var(--surface); }
     .btn.btn-primary { background: var(--accent); border-color: transparent; color: #fff; }
     .btn.btn-primary:hover { filter: brightness(1.08); }
+    .btn.btn-danger { background: var(--err); border-color: transparent; color: #fff; }
+    .btn.btn-danger:hover { filter: brightness(1.08); }
     .btn:disabled { opacity: 0.55; cursor: default; }
     .btn.sm { padding: 7px 11px; font-size: 12.5px; }
 
@@ -461,6 +463,7 @@
                     </div>
                     <div class="entry-actions">
                       <button class="btn btn-primary" id="submitBtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>登録</button>
+                      <button class="btn btn-danger" id="editDeleteBtn" type="button" hidden>削除</button>
                       <button class="btn" id="clearBtn" type="button">クリア</button>
                     </div>
                   </div>
@@ -593,7 +596,7 @@
       itemList: $('itemList'), addItem: $('addItem'),
       dateF: $('dateF'), handlerF: $('handlerF'), memoF: $('memoF'),
       cbBase: $('cbBase'), cbTax8: $('cbTax8'), cbTax10: $('cbTax10'), cbTax: $('cbTax'), cbTotal: $('cbTotal'), cbMismatch: $('cbMismatch'),
-      submitBtn: $('submitBtn'), clearBtn: $('clearBtn'), addMsg: $('addMsg'),
+      submitBtn: $('submitBtn'), editDeleteBtn: $('editDeleteBtn'), clearBtn: $('clearBtn'), addMsg: $('addMsg'),
       sumTotal: $('sumTotal'), sumSplit: $('sumSplit'), sumCount: $('sumCount'), catBreak: $('catBreak'),
       acctFilter: $('acctFilter'), ledSearch: $('ledSearch'), ledCount: $('ledCount'), csvBtn: $('csvBtn'),
       ledBody: $('ledBody'), ledEmpty: $('ledEmpty'), tfBase: $('tfBase'), tfTax: $('tfTax'), tfTotal: $('tfTotal'),
@@ -843,7 +846,7 @@
         if (mism) dom.cbMismatch.textContent = '⚠ 明細＋税＝' + yen(total) + ' が、保存済みの受領額 ' + yen(editingAmountYen) + ' と不一致（差 ' + (diff > 0 ? '+' : '−') + yen(Math.abs(diff)) + '）。価格を見直すか、このまま「不一致を確認して記録」で上書きします。';
       }
       if (dom.submitBtn) {
-        dom.submitBtn.innerHTML = mism ? '⚠ 不一致を確認して記録' : (CHK_SVG + (editing ? '更新' : '登録'));
+        dom.submitBtn.innerHTML = mism ? '⚠ 不一致を確認して記録' : (CHK_SVG + (editing ? '登録（更新）' : '登録'));
         dom.submitBtn.style.background = mism ? 'var(--warn)' : '';
         dom.submitBtn.style.borderColor = mism ? 'var(--warn)' : '';
         dom.submitBtn.style.color = mism ? '#1a1205' : '';
@@ -860,6 +863,7 @@
       editingAmountYen = null;
       dom.entryTitle.textContent = '出金を記録';
       dom.editFlag.hidden = true;
+      if (dom.editDeleteBtn) dom.editDeleteBtn.hidden = true;
       recalc();  // ボタン表示・不一致表示をリセット（編集→登録 / ⚠解除）
     }
     function resetForm() {
@@ -884,7 +888,7 @@
       const rr = (r.base > 0 && Math.round(r.base * 8 / 100) === r.tax) ? 8 : ((r.base > 0 && Math.round(r.base * 10 / 100) === r.tax) ? 10 : rate);
       return [{ n: name, p: r.base, acct: acct, rate: rr }];
     }
-    function loadForEdit(r) {
+    function loadForEdit(r, message) {
       const items = r.items.length ? r.items : rowsFromLegacy(r);
       editingId = r.id;
       editingAmountYen = (r.total != null && Number.isFinite(Number(r.total))) ? Math.floor(Number(r.total)) : null;
@@ -893,7 +897,8 @@
       dom.memoF.value = r.memo || '';
       dom.entryTitle.textContent = '出金を編集';
       dom.editFlag.hidden = false; dom.editFlag.textContent = '編集中 ID:' + r.id;
-      dom.addMsg.className = 'msg'; dom.addMsg.textContent = '';
+      if (dom.editDeleteBtn) dom.editDeleteBtn.hidden = false;
+      dom.addMsg.className = message ? 'msg ok' : 'msg'; dom.addMsg.textContent = message || '';
       setItems(items);  // editingId/editingAmountYen 設定後に呼ぶ（recalc→updateMismatch がボタン表示を確定）
       setEntryOpen(true);
       try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
@@ -1007,8 +1012,15 @@
         const entry = data && data.entry ? data.entry : null;
         const spent = entry && entry.spent_on ? String(entry.spent_on) : '';
         if (/^\d{4}-\d{2}-\d{2}$/.test(spent)) dom.monthF.value = spent.slice(0, 7);
-        setReceiptUploadBusy(false, '画像から小口現金に登録しました。必要なら台帳の「編集」で品目・税率を確認してください。', true);
         await loadEntries();
+        setReceiptUploadBusy(false, '', true);
+        const createdId = entry && entry.id != null ? String(entry.id) : '';
+        const created = createdId ? records.find((r) => String(r.id) === createdId) : null;
+        if (created) {
+          loadForEdit(created, '画像から登録しました。内容を確認し、必要なら修正して「更新」、不要なら「削除」を押してください。');
+        } else {
+          setReceiptUploadBusy(false, '画像から小口現金に登録しました。台帳に反映済みです。', true);
+        }
       } catch (e) {
         setReceiptUploadBusy(false, (e && e.message) ? e.message : String(e), false);
       } finally {
@@ -1183,6 +1195,10 @@
         dom.addMsg.className = 'msg err'; dom.addMsg.textContent = e.message || String(e);
       }
     }
+    async function deleteEditingEntry() {
+      if (!editingId) return;
+      await deleteEntry(editingId);
+    }
     // 読み込んだレシート画像（メディア保存分）を「新規ウインドウ」で開く。
     // ポップアップブロック回避のため、クリック同期で空ウインドウを開いてから署名URLへ差し替える。
     // ※ window.open に width/height 等の機能を指定するとタブではなく独立ウインドウになる。
@@ -1240,6 +1256,7 @@
     dom.clearBtn.addEventListener('click', resetForm);
     dom.entryToggle.addEventListener('click', () => setEntryOpen(!dom.entryPanel.classList.contains('open')));
     dom.submitBtn.addEventListener('click', submitEntry);
+    dom.editDeleteBtn.addEventListener('click', deleteEditingEntry);
     dom.receiptPickBtn.addEventListener('click', () => dom.receiptFile.click());
     dom.receiptDrop.addEventListener('click', () => dom.receiptFile.click());
     dom.receiptDrop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dom.receiptFile.click(); } });
