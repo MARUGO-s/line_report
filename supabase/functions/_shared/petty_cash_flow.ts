@@ -158,11 +158,19 @@ export function extractExpenseFromReceipt(
   //   ①消費税合計(印字) ②合計−税抜小計(net) ③合計−明細合計(税抜印字とみなせる時のみ)。
   //   ※③合計と明細価格は大きく確実に読めるので、誤読しやすい税率別内訳由来の①が数円ズレても③が救う。
   const taxAnchors: number[] = []
+  // tax_amount はAIが「全品10%」で誤読することがあるため、検算で得られる税額を強アンカーとして優先する。
+  const strongTaxAnchors: number[] = []
   if (tax > 0) taxAnchors.push(tax)
-  if (gross != null && net != null && gross > net) taxAnchors.push(gross - net)
+  if (gross != null && net != null && gross > net) {
+    const grossMinusNet = gross - net
+    taxAnchors.push(grossMinusNet)
+    strongTaxAnchors.push(grossMinusNet)
+  }
   if (gross != null && allPriced && gross > itemsSum
       && (gross - itemsSum) >= itemsSum * 0.04 && (gross - itemsSum) <= itemsSum * 0.11) {
-    taxAnchors.push(gross - itemsSum)
+    const grossMinusItems = gross - itemsSum
+    taxAnchors.push(grossMinusItems)
+    strongTaxAnchors.push(grossMinusItems)
   }
   let chosenRateOf: ((idx: number) => 8 | 10) | null = null
   // 集計の「内訳」が信頼アンカーと整合するか。false なら下流の明細補完(a)でも集計の内訳を使わない。
@@ -170,7 +178,7 @@ export function extractExpenseFromReceipt(
   let bdSplitTrusted = true
   if (taxAnchors.length > 0 && itemRows.length > 0) {
     // 配分の合計税額（税抜式・税込式の近い方）と、各アンカーの差の最小値。全品にrateが付かない候補は null。
-    const taxDist = (rateOf: (i: number) => 8 | 10 | null): number | null => {
+    const taxDistForAnchors = (rateOf: (i: number) => 8 | 10 | null, anchors: number[]): number | null => {
       let g8 = 0, g10 = 0
       for (let i = 0; i < itemRows.length; i++) {
         const r = rateOf(i)
@@ -182,9 +190,11 @@ export function extractExpenseFromReceipt(
       const ex = Math.floor((g8 * 8) / 100) + Math.floor((g10 * 10) / 100)
       const inc = Math.floor((g8 * 8) / 108) + Math.floor((g10 * 10) / 110)
       let d = Infinity
-      for (const an of taxAnchors) d = Math.min(d, Math.abs(ex - an), Math.abs(inc - an))
+      for (const an of anchors) d = Math.min(d, Math.abs(ex - an), Math.abs(inc - an))
       return d
     }
+    const primaryTaxAnchors = strongTaxAnchors.length > 0 ? strongTaxAnchors : taxAnchors
+    const taxDist = (rateOf: (i: number) => 8 | 10 | null): number | null => taxDistForAnchors(rateOf, primaryTaxAnchors)
     const food = (i: number): 8 | 10 => defaultPettyRate(classifyPettyAcct(itemRows[i].name))
     const bdCand = (i: number): 8 | 10 | null => bdRateByIndex.get(i) ?? null
     const cands: Array<(i: number) => 8 | 10 | null> = []
