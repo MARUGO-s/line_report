@@ -120,8 +120,10 @@ export function extractExpenseFromReceipt(
   //   レシートでは、それを正として税率を決める: 税込小計が最大の税率を「多数派」とし、少数派(残りの税率)の
   //   小計に一致する品目を greedy に抜き出してその税率に割当、残りは多数派にする。
   //   例: 8%税込4,998 / 10%税込5 → ¥5の品目(レジ袋)だけ10%、残り全部8%（※を1つも読めなくても正しくなる）。
+  //   ※価格未取得の品目(例: 買物袋¥5が読めない)があっても集計から税率を決められるよう allPriced を要件にしない。
+  //   価格のある品目だけ greedy 照合し、価格が無い/一致しない品目は多数派の税率にする（高島屋で全品10%化を防ぐ）。
   const bdRateByIndex = new Map<number, 8 | 10>()
-  if (allPriced && breakdown.length >= 2) {
+  if (breakdown.length >= 2) {
     const sorted = [...breakdown].sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
     const major = sorted[0].rate
     const used = new Set<number>()
@@ -215,8 +217,9 @@ export function extractExpenseFromReceipt(
   //   なく税率別集計の行ごと落とすことがある（折り目・微小値・行頭外10が1行だけ 等が原因）。確実に読める
   //   「支払総額(amount)」を正本に、明細＋税で満たない差額を補完する。受領額(amount/tax)自体は集計行/合計が正本。
   //   ※税込印字の品目は itemsGross≥amount で gap≤0 となり発動しない＝過補完を自動回避。
-  if (amount != null && amount > 0 && itemEntries.length && allPriced) {
+  if (amount != null && amount > 0 && itemEntries.length) {
     // (a) tax_breakdown が読めている税率は、その税抜小計を品目が満たすよう不足分を補完（税率は確定）。
+    //     ※集計ベースなので価格未取得の品目があっても安全（高島屋で買物袋¥5が読めなくても10%¥5を補える）。
     if (bdValid) {
       for (const b of breakdown) {
         const groupNet = Math.max(0, (b.total ?? 0) - b.tax)
@@ -226,16 +229,18 @@ export function extractExpenseFromReceipt(
       }
     }
     // (b) それでも明細(税込)が支払総額に届かない＝AIが税率別集計の行ごと落とした税率がある。残差を補完。
-    //     税率は tax_breakdown に無い方（多くは10%＝レジ袋等）を推定。
-    let g8 = 0, g10 = 0
-    for (const it of itemEntries) { if (it.rate === 10) g10 += it.p; else g8 += it.p }
-    const itemsGross = (g8 + g10) + Math.floor((g8 * 8) / 100) + Math.floor((g10 * 10) / 100)
-    const gap = amount - itemsGross
-    if (gap >= 2) {
-      const rates = new Set(breakdown.map((b) => b.rate))
-      const rate: 8 | 10 = (rates.has(8) && !rates.has(10)) ? 10 : (rates.has(10) && !rates.has(8)) ? 8 : 10
-      const p = Math.max(1, Math.round(gap / (1 + rate / 100)))
-      itemEntries.push({ n: `(明細補完 ${rate}%対象)`, p, acct: rate === 8 ? 'shokuzai' : 'shomohin', rate })
+    //     税率は tax_breakdown に無い方（多くは10%＝レジ袋等）を推定。税込/税抜の正規化が効く全品価格ありの時だけ。
+    if (allPriced) {
+      let g8 = 0, g10 = 0
+      for (const it of itemEntries) { if (it.rate === 10) g10 += it.p; else g8 += it.p }
+      const itemsGross = (g8 + g10) + Math.floor((g8 * 8) / 100) + Math.floor((g10 * 10) / 100)
+      const gap = amount - itemsGross
+      if (gap >= 2) {
+        const rates = new Set(breakdown.map((b) => b.rate))
+        const rate: 8 | 10 = (rates.has(8) && !rates.has(10)) ? 10 : (rates.has(10) && !rates.has(8)) ? 8 : 10
+        const p = Math.max(1, Math.round(gap / (1 + rate / 100)))
+        itemEntries.push({ n: `(明細補完 ${rate}%対象)`, p, acct: rate === 8 ? 'shokuzai' : 'shomohin', rate })
+      }
     }
   }
 
