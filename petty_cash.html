@@ -412,13 +412,13 @@
                     </div>
                     <div>
                       <div class="ru-title">レシート画像から自動登録</div>
-                      <div class="ru-sub">JPEG/PNG をここにドラッグ&ドロップ、またはクリックして選択。LINEで送った時と同じ小口現金解析で登録します。</div>
+                      <div class="ru-sub">JPEG/PNG/HEIC をここにドラッグ&ドロップ、またはクリックして選択。LINEで送った時と同じ小口現金解析で登録します。</div>
                     </div>
                   </div>
                   <div class="ru-actions">
                     <button class="btn btn-primary" id="receiptPickBtn" type="button">画像を選択</button>
-                    <div class="ru-note">店舗を選択してからアップロードしてください。大きい写真は自動で縮小します。</div>
-                    <input id="receiptFile" type="file" accept="image/jpeg,image/png" hidden />
+                    <div class="ru-note">店舗を選択してからアップロードしてください。大きい写真やHEICは自動でJPEGに変換・縮小します。</div>
+                    <input id="receiptFile" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif" hidden />
                   </div>
                 </div>
                 <div class="entry-grid">
@@ -942,7 +942,14 @@
       if (!file) return false;
       const type = String(file.type || '').toLowerCase();
       const name = String(file.name || '').toLowerCase();
-      return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' || /\.(jpe?g|png)$/.test(name);
+      return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' ||
+        type === 'image/heic' || type === 'image/heif' || /\.(jpe?g|png|heic|heif)$/.test(name);
+    }
+    function isHeicReceiptImage(file) {
+      if (!file) return false;
+      const type = String(file.type || '').toLowerCase();
+      const name = String(file.name || '').toLowerCase();
+      return type === 'image/heic' || type === 'image/heif' || /\.(heic|heif)$/.test(name);
     }
     function setReceiptUploadBusy(busy, message, ok) {
       receiptUploading = !!busy;
@@ -959,7 +966,7 @@
         const url = URL.createObjectURL(file);
         const img = new Image();
         img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('画像を読み込めませんでした。JPEG/PNG画像を選択してください。')); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('画像を読み込めませんでした。JPEG/PNG/HEIC画像を選択してください。')); };
         img.src = url;
       });
     }
@@ -969,11 +976,20 @@
       });
     }
     async function prepareReceiptUploadFile(file) {
-      if (!isSupportedReceiptImage(file)) throw new Error('JPEGまたはPNG画像を選択してください。');
-      if (file.size <= RECEIPT_UPLOAD_TARGET_BYTES) {
+      if (!isSupportedReceiptImage(file)) throw new Error('JPEG、PNG、またはHEIC画像を選択してください。');
+      const isHeic = isHeicReceiptImage(file);
+      if (!isHeic && file.size <= RECEIPT_UPLOAD_TARGET_BYTES) {
         return { blob: file, fileName: file.name || 'receipt.jpg', originalFileName: file.name || 'receipt.jpg' };
       }
-      const img = await imageFromFile(file);
+      let img;
+      try {
+        img = await imageFromFile(file);
+      } catch (e) {
+        if (isHeic) {
+          throw new Error('このブラウザではHEIC画像を直接読み込めませんでした。iPhoneの写真設定を「互換性優先」にするか、写真アプリでJPEGとして共有してからアップロードしてください。');
+        }
+        throw e;
+      }
       const scale = Math.min(1, RECEIPT_UPLOAD_MAX_EDGE / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
       const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
       const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
