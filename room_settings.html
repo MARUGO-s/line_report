@@ -158,9 +158,9 @@
       <div style="flex:1;min-width:0;">
         <div class="tb-title">ルーム設定</div>
         <div class="tb-sub">
-          <span class="roomchip" id="roomChip" title="ルームIDをコピー">
+          <span class="roomchip" id="roomChip" title="コピー">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
-            <span class="rc-id mono" id="roomChipId"></span>
+            <span class="rc-id" id="roomChipId"></span>
           </span>
         </div>
       </div>
@@ -285,7 +285,7 @@
   }
   el('loginBtn').addEventListener('click', login);
   el('pw').addEventListener('keydown', function(e){ if (e.key==='Enter') login(); });
-  if (roomId) el('loginRoom').textContent = 'ルーム: ' + roomId;
+  // ログイン画面ではまだルーム名を取得できない（認証後の GET /room-config で取得）ため ID は出さない。
 
   function relogin(){
     sessionToken = '';
@@ -302,8 +302,9 @@
       .then(function(b){
         var cfg = (b && b.room_config) || {};
         SECTIONS.forEach(function(s){ s.items.forEach(function(it){ it.on = cfg[it.key] === true; }); });
+        var roomName = (cfg.room_name && String(cfg.room_name).trim()) || roomId || 'このルーム';
         el('loginScreen').hidden = true; el('appScreen').hidden = false;
-        if (roomId) el('roomChipId').textContent = roomId;
+        el('roomChipId').textContent = roomName;
         render(); openFirst();
       })
       .catch(function(e){ if (String(e&&e.message)!=='auth') showToast('設定の読み込みに失敗しました', true); });
@@ -412,9 +413,10 @@
   search.addEventListener('input', onSearch);
 
   el('roomChip').addEventListener('click', function(){
-    if(!roomId) return;
-    if(navigator.clipboard) navigator.clipboard.writeText(roomId).then(function(){ showToast('ルームIDをコピーしました'); }).catch(function(){ showToast('ルームIDをコピーしました'); });
-    else showToast('ルームIDをコピーしました');
+    var txt = (el('roomChipId').textContent || roomId || '').trim();
+    if(!txt) return;
+    if(navigator.clipboard) navigator.clipboard.writeText(txt).then(function(){ showToast('コピーしました'); }).catch(function(){ showToast('コピーしました'); });
+    else showToast('コピーしました');
   });
 
   function openFirst(){
