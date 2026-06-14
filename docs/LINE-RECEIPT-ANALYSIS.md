@@ -96,7 +96,7 @@ https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook/marugoyotsuya
 | `LINE_CHANNEL_SECRET__{STORE_KEY}` | 店舗別シークレット（任意・優先） |
 | `ADMIN_DASHBOARD_TOKEN` | 管理画面の固定トークン認証。LINE の「売上推移を見る」は URL の `lt` を `/auth/link-login` で `lrst_` セッションに交換して利用（LINE 経由は端末に **最大 3 日** 保持） |
 
-`{STORE_KEY}` は `store_partition_key` を大文字化したもの（例: `marugoyotsuya` → `MARUGOYOTSUya` ではなく `MARUGOYOTSUya` — 実装では `[^a-zA-Z0-9_]` を `_` に置換して大文字化）。
+`{STORE_KEY}` は `store_partition_key` を大文字化したもの（例: `marugoyotsuya` → `MARUGOYOTSUYA`。実装では `[^a-zA-Z0-9_]` を `_` に置換して大文字化）。
 
 ### 3. DB マイグレーション
 

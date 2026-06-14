@@ -162,14 +162,12 @@ cron が `no_target_rooms` でスキップされる場合は、**1件以上** �
 | `LINE_CHANNEL_ACCESS_TOKEN` | ○ | LINE 送信 |
 | `GROQ_API_KEY` | 任意 | 予約メール本文の AI 抽出 |
 
-### jhpm から hocbn へシークレットコピー
+### jhpm → hocbn のシークレット移行（完了済み・歴史的経緯）
 
-```bash
-# jhpm に secret-bridge をデプロイし SECRET_BRIDGE_TOKEN 等を設定したうえで
-SECRET_BRIDGE_TOKEN=... node scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs
-```
-
-スクリプト: [`scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs`](../scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs)
+Gmail シークレットの jhpm → hocbn 移行は完了済み。移行に使っていた `secret-bridge` Edge Function と
+`scripts/sync-gmail-secrets-jhpm-to-hocbn.mjs` は **2026-06-14 にセキュリティ上の理由で撤去済み**（任意の
+環境変数を平文 DB へ吸い出す経路だったため）。現在 Gmail 連携は hocbn のみで、シークレットは hocbn の
+Edge Secrets に直接設定する（`GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` 等）。
 
 ---
 
