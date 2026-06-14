@@ -5421,7 +5421,10 @@
           <div style="font-size:12px;opacity:.7;font-weight:700;margin-bottom:6px;">セルフ設定（LINEワンパス＋パスワード）— このルーム専用</div>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigSelfEnabled" type="checkbox">このルームのセルフ設定を有効化（ルームで「設定」と送ると設定リンクを返す）</label>
           <label style="display:block;font-size:12px;opacity:.8;margin:8px 0 4px;">アクセスパスワード <span id="roomConfigSelfPwStatus" style="opacity:.6;"></span></label>
-          <input id="roomConfigSelfPassword" type="password" autocomplete="new-password" placeholder="変更する場合のみ入力（空欄＝変更なし）" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-radius:8px;color:inherit;padding:9px;font-size:14px;" />
+          <div style="position:relative;">
+            <input id="roomConfigSelfPassword" type="password" autocomplete="new-password" placeholder="変更する場合のみ入力（空欄＝変更なし）" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-radius:8px;color:inherit;padding:9px 58px 9px 9px;font-size:14px;" />
+            <button type="button" id="roomConfigSelfPwToggle" aria-label="パスワードの表示を切り替え" onclick="var i=document.getElementById('roomConfigSelfPassword');if(i){var s=i.type==='password';i.type=s?'text':'password';this.textContent=s?'隠す':'表示';}" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:inherit;opacity:.65;font-size:12px;cursor:pointer;padding:4px 6px;">表示</button>
+          </div>
         </div>
         <div id="roomConfigReceiptScheduleWrap" class="receipt-schedule-panel receipt-scope-option">
         <div id="roomConfigReceiptScheduleRoomWrap" class="receipt-schedule-row">
@@ -12052,7 +12055,12 @@
       if (dom.roomConfigSelfEnabled) {
         dom.roomConfigSelfEnabled.checked = !!config.room_config_access_enabled;
       }
-      if (dom.roomConfigSelfPassword) { dom.roomConfigSelfPassword.value = ''; }
+      if (dom.roomConfigSelfPassword) {
+        dom.roomConfigSelfPassword.value = '';
+        dom.roomConfigSelfPassword.type = 'password';
+        var _pwToggle = document.getElementById('roomConfigSelfPwToggle');
+        if (_pwToggle) _pwToggle.textContent = '表示';
+      }
       if (dom.roomConfigSelfPwStatus) {
         dom.roomConfigSelfPwStatus.textContent = config.room_config_password_set ? '（設定済み）' : '（未設定）';
       }
