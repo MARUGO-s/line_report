@@ -278,14 +278,14 @@ type OfficeZipEntry = {
 
 let cachedPdfJsModulePromise: Promise<PdfJsModule | null> | null = null
 
-Deno.serve(async (req) => {
+Deno.serve(async (req, info) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
   }
 
   const url = new URL(req.url)
   const path = normalizePath(url.pathname)
-  const clientIp = extractClientIp(req.headers)
+  const clientIp = extractClientIp(req.headers, info)
   // 店舗スコープ強制で body を差し替えたいときに使う実効リクエスト（既定は元のreq）。
   let workReq = req
 
@@ -5081,23 +5081,40 @@ async function inspectOfficeArchiveSafety(
   return { ok: true }
 }
 
-function extractClientIp(headers: Headers): string {
-  const candidates = [
-    headers.get("cf-connecting-ip"),
-    headers.get("x-real-ip"),
-    headers.get("x-forwarded-for"),
-  ]
-  for (const raw of candidates) {
-    const value = String(raw ?? "").trim()
-    if (!value) continue
-    const first = value.split(",")[0]?.trim()
-    if (first) return first
+// プライベート/ループバック/リンクローカルでない（＝意味のある公開）IPか。
+function isPublicIp(ip: string): boolean {
+  if (!ip || ip === "unknown") return false
+  if (/^127\./.test(ip) || /^10\./.test(ip) || /^192\.168\./.test(ip)) return false
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip) || /^169\.254\./.test(ip) || /^0\./.test(ip)) return false
+  if (ip === "::1" || /^fe80:/i.test(ip) || /^f[cd][0-9a-f]{2}:/i.test(ip)) return false
+  return true
+}
+
+// レート制限のキーに使うクライアントIP。攻撃者が自由に詐称してキーを変えられないよう、
+// 「詐称できない情報源」を優先する。
+function extractClientIp(headers: Headers, info?: { remoteAddr?: { hostname?: string } }): string {
+  // 1) プラットフォームが付与する実接続元（クライアントが詐称不可）。公開IPのときのみ採用。
+  const remote = String(info?.remoteAddr?.hostname ?? "").trim()
+  if (isPublicIp(remote)) return remote
+  // 2) Cloudflare が付与する真のクライアントIP（クライアント送信の同名ヘッダは上書き＝詐称不可）。
+  const cf = String(headers.get("cf-connecting-ip") ?? "").trim()
+  if (cf) return cf
+  // 3) プラットフォーム設定の x-real-ip。
+  const xreal = String(headers.get("x-real-ip") ?? "").trim()
+  if (xreal) return xreal
+  // 4) x-forwarded-for は「クライアント, …, 直前プロキシ」の順で、先頭はクライアントが詐称可能。
+  //    プラットフォームが最後に付与する「末尾」を使う（旧実装は先頭を採用＝回数制限を回避できた）。
+  const xff = String(headers.get("x-forwarded-for") ?? "").trim()
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean)
+    if (parts.length) return parts[parts.length - 1]
   }
   return "unknown"
 }
 
 function resolveAdminRateLimit(method: string, path: string): { maxRequests: number; windowMs: number } {
-  if (method === "POST" && path === "/auth/link-login") {
+  // 資格情報を提示する認証エンドポイントは総当たりの標的。既定(180/分)より厳しくする。
+  if (method === "POST" && (path === "/auth/link-login" || path === "/auth/session")) {
     return {
       maxRequests: 20,
       windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,
