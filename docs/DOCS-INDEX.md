@@ -30,6 +30,7 @@
 | [店舗運用修正記録.md](./店舗運用修正記録.md) | 開発・運用 | 不具合の原因→対策→反映→検証の運用ログ（newest-first・現役で随時追記） |
 | [CHANGELOG-2026-05.md](./CHANGELOG-2026-05.md) | 開発 | 2026年5月の変更履歴（技術詳細・マイグレーション） |
 | [LINE-SEARCH-PRESENTATION.md](./LINE-SEARCH-PRESENTATION.md) | 説明・プレゼン | LINE 検索（記録と検索、グループ／1対1、売上と会話の違い） |
+| [SECURITY.md](./SECURITY.md) | 運用・開発 | **セキュリティ中核** — 不変条件・DB層防御・認証認可・Webhook/cron・監査結果・新規追加チェックリスト・検証クエリ |
 | [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | 運用・説明 | 利用許可・ルーム承認・管理 Bot・管理画面連携 |
 | [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md) | **必読** | グループは Bot **1体のみ**（LINE 仕様）／退出の誤解 |
 | [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md) | **必読** | ルーム **自動連携**（承認なし）のリスクと無効化 |
@@ -80,4 +81,4 @@
 
 ---
 
-*最終更新: 2026-06-14（操作マニュアル・店舗運用修正記録を索引に追加。ソバージュ解析まとめは店舗運用修正記録へ統合済みのため削除。小口現金 petty_cash / 月次予算登録 / 予約スクショ取込 などの 2026-06 機能は各ガイド本文で参照）*
+*最終更新: 2026-06-14（SECURITY.md を新規追加＝セキュリティ中核ドキュメント。操作マニュアル・店舗運用修正記録を索引に追加。ソバージュ解析まとめは店舗運用修正記録へ統合済みのため削除。小口現金 petty_cash / 月次予算登録 / 予約スクショ取込 などの 2026-06 機能は各ガイド本文で参照）*
