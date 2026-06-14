@@ -140,7 +140,9 @@ async function verifyLineSignature(
   signatureHeader: string | null,
   channelSecret: string,
 ): Promise<boolean> {
-  if (!channelSecret) return true
+  // フェイルクローズ: secret 未設定なら署名を検証できない＝拒否する
+  // （旧実装は return true で署名検証を素通ししていた＝偽造 webhook 注入の余地があった）
+  if (!channelSecret) return false
   if (!signatureHeader) return false
 
   const encoder = new TextEncoder()

@@ -11,10 +11,10 @@ import { buildFlexInfoCard, type FlexButtonSpec } from './line_flex_messages.ts'
 
 export const ADMIN_STORE_PARTITION_KEY = 'admin'
 
-const DEFAULT_APPROVAL_ADMIN_USER_IDS = [
-  'U7db37af7c0baa85efd545419dcb2c08f',
-  'U58f77497071ad47faedd0375615300f4',
-]
+// 承認管理者IDは必ず Edge シークレット LINE_USER_APPROVAL_ADMIN_USER_IDS から解決する。
+// 以前はここに実IDをハードコードしていたが、公開リポジトリでの露出＝偽造承認の足がかりになるため撤去。
+// env 未設定時は空配列＝誰も承認できないフェイルセーフ（権限を勝手に付与しない）。
+const DEFAULT_APPROVAL_ADMIN_USER_IDS: string[] = []
 
 type LineEvent = {
   type?: string

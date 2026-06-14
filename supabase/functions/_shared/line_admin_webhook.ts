@@ -24,7 +24,9 @@ async function verifyLineSignature(
   signatureHeader: string | null,
   channelSecret: string,
 ): Promise<boolean> {
-  if (!channelSecret) return true
+  // フェイルクローズ: ADMIN secret 未設定なら署名検証不能＝拒否する。
+  // （旧実装は return true で素通し→承認管理者IDを詰めた偽造ペイロードで自己承認できる穴があった）
+  if (!channelSecret) return false
   if (!signatureHeader) return false
 
   const encoder = new TextEncoder()
