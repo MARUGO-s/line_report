@@ -248,7 +248,7 @@ async function handleReceiptReportTestSend(spec, deps) {
     }, 503);
   }
   const provided = spec.keyFromHeader || spec.keyFromQuery;
-  if (!provided || provided !== testKey) {
+  if (!provided || !constantTimeEqual(provided, testKey)) {
     return json({
       ok: false,
       error: "Forbidden"

@@ -176,13 +176,13 @@ Deno.serve(async (req) => {
 async function isGmailAlertTestAuthorized(req: Request, serviceRoleKey: string): Promise<boolean> {
   const bearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
   const sr = String(serviceRoleKey ?? "").trim()
-  if (bearer && sr && bearer === sr) return true
+  if (bearer && sr && constantTimeEqual(bearer, sr)) return true
 
   const testSecret = String(
     Deno.env.get("GMAIL_ALERT_TEST_SECRET") ?? Deno.env.get("CRON_AUTH_TOKEN") ?? "",
   ).trim()
   const headerKey = String(req.headers.get("x-gmail-alert-test-key") ?? "").trim()
-  if (testSecret && headerKey && headerKey === testSecret) return true
+  if (testSecret && headerKey && constantTimeEqual(headerKey, testSecret)) return true
 
   if (!bearer) return false
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""

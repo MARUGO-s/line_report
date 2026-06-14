@@ -501,13 +501,24 @@ async function isServiceRoleAuthorized(req: Request): Promise<boolean> {
   return true
 }
 
+// 定数時間比較（秘密トークン照合用・タイミング差で内容を漏らさない）
+function constantTimeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder()
+  const ba = enc.encode(a)
+  const bb = enc.encode(b)
+  if (ba.length !== bb.length) return false
+  let diff = 0
+  for (let i = 0; i < ba.length; i++) diff |= ba[i] ^ bb[i]
+  return diff === 0
+}
+
 function isAuthorized(req: Request): boolean {
   const syncSecret = (Deno.env.get("RECEIPT_SHEETS_SYNC_SECRET") ?? "").trim()
   const cronToken = (Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim()
   const bearer = bearerToken(req)
   const headerKey = (req.headers.get("x-receipt-sheets-sync-key") ?? "").trim()
-  if (syncSecret && (bearer === syncSecret || headerKey === syncSecret)) return true
-  if (cronToken && bearer === cronToken) return true
+  if (syncSecret && (constantTimeEqual(bearer, syncSecret) || constantTimeEqual(headerKey, syncSecret))) return true
+  if (cronToken && constantTimeEqual(bearer, cronToken)) return true
   return false
 }
 
