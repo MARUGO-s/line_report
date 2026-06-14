@@ -213,7 +213,7 @@ async function upsertPendingLineUser(
   const uid = String(lineUserId ?? '').trim()
   const { data: existing, error: selErr } = await supabase
     .from('line_user_permissions')
-    .select('line_user_id, is_active')
+    .select('line_user_id, is_active, assigned_store')
     .eq('line_user_id', uid)
     .maybeSingle()
   if (selErr) {
@@ -223,6 +223,19 @@ async function upsertPendingLineUser(
 
   if (existing?.line_user_id && (existing as { is_active?: boolean }).is_active === true) {
     return { created: false, alreadyActive: true }
+  }
+
+  // 所属店舗(assigned_store)を発言店舗(sourceStoreKey)から自動設定する。
+  // admin（承認専用チャネル）は所属店舗にしない。表示名は store_webhook_tables から解決（UIの選択肢と一致）。
+  let assignedStoreName: string | null = null
+  if (sourceStoreKey && sourceStoreKey !== ADMIN_STORE_PARTITION_KEY) {
+    const { data: storeRow } = await supabase
+      .from('store_webhook_tables')
+      .select('display_name')
+      .eq('store_partition_key', sourceStoreKey)
+      .maybeSingle()
+    const dn = String((storeRow as { display_name?: unknown } | null)?.display_name ?? '').trim()
+    if (dn) assignedStoreName = dn
   }
 
   const now = new Date().toISOString()
@@ -237,17 +250,24 @@ async function upsertPendingLineUser(
     can_calendar_view: false,
     can_media_access: false,
     registration_source_store: sourceStoreKey,
+    assigned_store: assignedStoreName,
     updated_at: now,
   }
 
   if (existing?.line_user_id) {
+    const updatePayload: Record<string, unknown> = {
+      display_name: displayName,
+      registration_source_store: sourceStoreKey,
+      updated_at: now,
+    }
+    // 所属店舗は空欄のときだけ自動設定（既存の手動値は尊重）。
+    const existingAssigned = String((existing as { assigned_store?: unknown }).assigned_store ?? '').trim()
+    if (!existingAssigned && assignedStoreName) {
+      updatePayload.assigned_store = assignedStoreName
+    }
     const { error: upErr } = await supabase
       .from('line_user_permissions')
-      .update({
-        display_name: displayName,
-        registration_source_store: sourceStoreKey,
-        updated_at: now,
-      })
+      .update(updatePayload)
       .eq('line_user_id', uid)
     if (upErr) console.error(`upsertPendingLineUser update failed (${uid}):`, upErr.message)
     return { created: false, alreadyActive: false }
