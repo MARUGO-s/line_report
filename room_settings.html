@@ -6,70 +6,185 @@
 <meta name="robots" content="noindex,nofollow" />
 <title>ルーム設定</title>
 <link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
 <style>
   :root{
-    --bg:#0b0f17; --surface:#121826; --surface2:#1a2233; --border:#26314a;
-    --text:#e8edf6; --text2:#aab4c7; --text3:#7b87a0; --accent:#3b82f6; --ok:#22c55e; --danger:#ef4444;
+    --bg:        oklch(0.15 0.012 256);
+    --surface:   oklch(0.205 0.016 258);
+    --surface2:  oklch(0.245 0.018 258);
+    --press:     oklch(0.275 0.02 258);
+    --line:      oklch(1 0 0 / 0.07);
+    --line-soft: oklch(1 0 0 / 0.045);
+    --tx-1:      oklch(0.97 0 0);
+    --tx-2:      oklch(0.74 0.012 258);
+    --tx-3:      oklch(0.56 0.014 258);
+    --accent:    oklch(0.62 0.17 256);
+    --accent-tx: oklch(0.74 0.13 256);
+    --accent-ghost: oklch(0.62 0.17 256 / 0.14);
+    --on:        oklch(0.60 0.17 256);
+    --off:       oklch(0.34 0.012 258);
+    --live:      oklch(0.72 0.15 158);
+    --live-soft: oklch(0.72 0.15 158 / 0.16);
+    --warn-tx:   oklch(0.80 0.13 70);
+    --warn-soft: oklch(0.74 0.13 70 / 0.15);
+    --danger:    oklch(0.64 0.2 25);
+    --r-card: 18px;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Noto Sans JP",sans-serif;
-    -webkit-font-smoothing:antialiased;padding:16px;display:flex;justify-content:center}
-  .wrap{width:100%;max-width:560px}
-  h1{font-size:20px;font-weight:700;margin:8px 0 4px}
-  .sub{color:var(--text3);font-size:12.5px;margin-bottom:16px}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:14px}
-  label.fld{display:block;font-size:12.5px;color:var(--text2);margin-bottom:6px}
-  input[type=password],input[type=time]{width:100%;background:var(--surface2);border:1px solid var(--border);
-    border-radius:10px;color:var(--text);padding:12px;font-size:15px}
-  button{font-family:inherit;border:none;border-radius:10px;padding:12px 16px;font-size:15px;font-weight:700;cursor:pointer}
-  .btn-primary{background:var(--accent);color:#fff;width:100%}
-  .btn-primary:disabled{opacity:.5;cursor:default}
-  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 2px;border-bottom:1px solid var(--border)}
-  .row:last-child{border-bottom:none}
-  .row .name{font-size:14px}
-  .row .desc{font-size:11.5px;color:var(--text3);margin-top:2px}
-  .grp-title{font-size:12px;color:var(--text3);font-weight:700;margin:6px 0 2px;letter-spacing:.04em}
-  /* toggle */
-  .sw{position:relative;width:46px;height:28px;flex:0 0 auto}
-  .sw input{opacity:0;width:0;height:0}
-  .sw .track{position:absolute;inset:0;background:var(--surface2);border:1px solid var(--border);border-radius:999px;transition:.15s}
-  .sw .knob{position:absolute;top:3px;left:3px;width:20px;height:20px;background:#fff;border-radius:50%;transition:.15s}
-  .sw input:checked + .track{background:var(--accent);border-color:var(--accent)}
-  .sw input:checked + .track + .knob{transform:translateX(18px)}
-  .msg{font-size:13px;padding:10px 12px;border-radius:10px;margin-top:10px;display:none}
-  .msg.err{display:block;background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
-  .msg.ok{display:block;background:rgba(34,197,94,.12);color:#86efac;border:1px solid rgba(34,197,94,.3)}
-  .hidden{display:none !important}
-  .timewrap{display:flex;align-items:center;gap:8px;margin:8px 0 2px;padding-left:2px}
-  .timewrap label{font-size:12.5px;color:var(--text2)}
-  .saving{opacity:.6;pointer-events:none}
-  .foot{margin-top:14px}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);color:var(--tx-1);
+    font-family:"Noto Sans JP",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.5;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .mono{font-family:"JetBrains Mono",monospace;}
+  [hidden]{display:none !important;}
+
+  .phone{max-width:480px;margin:0 auto;min-height:100vh;background:var(--bg);position:relative;}
+  @media (min-width:520px){
+    body{background:oklch(0.11 0.01 256);padding:26px 0 40px;}
+    .phone{min-height:auto;border:1px solid var(--line);border-radius:30px;overflow:hidden;box-shadow:0 30px 80px -30px #000;}
+  }
+
+  /* ── login screen ── */
+  .login{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;justify-content:center;
+    padding:24px 20px calc(env(safe-area-inset-bottom) + 24px);}
+  @media (min-width:520px){ .login{min-height:auto;padding-top:60px;padding-bottom:60px;} }
+  .login h1{font-size:21px;font-weight:700;margin:0 0 4px;}
+  .login .lsub{color:var(--tx-3);font-size:12.5px;margin-bottom:22px;}
+  .login .card{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card);padding:18px;}
+  .login label{display:block;font-size:12.5px;color:var(--tx-2);margin-bottom:8px;}
+  .pwwrap{position:relative;}
+  .login input[type=password],.login input[type=text]{width:100%;background:var(--surface2);border:1px solid var(--line);
+    border-radius:12px;color:var(--tx-1);padding:13px 64px 13px 13px;font-size:16px;font-family:inherit;outline:none;}
+  .pwtoggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:0;color:var(--tx-3);
+    font-size:12.5px;cursor:pointer;padding:6px 8px;font-family:inherit;}
+  .btn{width:100%;font-family:inherit;border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;
+    background:var(--accent);color:#fff;margin-top:14px;}
+  .btn:disabled{opacity:.5;}
+  .lmsg{font-size:13px;margin-top:12px;display:none;}
+  .lmsg.err{display:block;color:oklch(0.72 0.16 25);}
+
+  /* ── sticky header ── */
+  .topbar{position:sticky;top:0;z-index:20;background:color-mix(in oklch, var(--bg) 82%, transparent);
+    backdrop-filter:saturate(160%) blur(16px);-webkit-backdrop-filter:saturate(160%) blur(16px);
+    border-bottom:1px solid var(--line-soft);padding:calc(env(safe-area-inset-top) + 12px) 16px 12px;}
+  .tb-row{display:flex;align-items:center;gap:12px;}
+  .tb-title{font-size:19px;font-weight:700;letter-spacing:.01em;}
+  .tb-sub{display:flex;align-items:center;gap:7px;margin-top:3px;}
+  .roomchip{display:inline-flex;align-items:center;gap:7px;max-width:100%;background:var(--surface);
+    border:1px solid var(--line-soft);border-radius:999px;padding:4px 10px;font-size:11.5px;color:var(--tx-3);cursor:pointer;}
+  .roomchip .rc-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;}
+  .roomchip:active{background:var(--press);}
+  .roomchip svg{flex:none;color:var(--tx-3);}
+  .search{display:flex;align-items:center;gap:9px;margin-top:13px;background:var(--surface);
+    border:1px solid var(--line-soft);border-radius:12px;padding:0 12px;}
+  .search svg{color:var(--tx-3);flex:none;}
+  .search input{flex:1;min-width:0;background:transparent;border:0;outline:none;font-family:inherit;font-size:15px;color:var(--tx-1);padding:11px 0;}
+  .search input::placeholder{color:var(--tx-3);}
+  .search .clr{display:none;border:0;background:transparent;color:var(--tx-3);cursor:pointer;padding:4px;}
+  .search.has .clr{display:flex;}
+
+  .summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px 4px;}
+  .sum-v{font-size:13px;color:var(--tx-2);}
+  .sum-v b{color:var(--tx-1);font-weight:700;}
+  .expand-all{font-family:inherit;font-size:12.5px;font-weight:600;color:var(--accent-tx);background:transparent;border:0;cursor:pointer;padding:6px 4px;}
+
+  .list{padding:8px 16px 30px;display:flex;flex-direction:column;gap:14px;}
+  .sec{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card);overflow:hidden;}
+  .sec-head{display:flex;align-items:center;gap:13px;width:100%;padding:15px 16px;background:transparent;border:0;cursor:pointer;text-align:left;font-family:inherit;}
+  .sec-head:active{background:var(--surface2);}
+  .sec-ic{width:38px;height:38px;flex:none;border-radius:11px;display:flex;align-items:center;justify-content:center;background:var(--accent-ghost);color:var(--accent-tx);}
+  .sec-meta{flex:1;min-width:0;}
+  .sec-t{display:block;font-size:15.5px;font-weight:700;color:var(--tx-1);}
+  .sec-c{display:block;font-size:12px;color:var(--tx-3);margin-top:1px;}
+  .sec-count{font-size:12px;font-weight:700;color:var(--tx-2);font-variant-numeric:tabular-nums;background:var(--surface2);border-radius:999px;padding:3px 10px;flex:none;}
+  .sec-count.on{color:var(--live);background:var(--live-soft);}
+  .sec-chev{flex:none;color:var(--tx-3);transition:transform .26s ease;margin-left:2px;}
+  .sec.open .sec-chev{transform:rotate(180deg);}
+  .sec-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s ease;}
+  .sec.open .sec-body{grid-template-rows:1fr;}
+  .sec-body > .sec-inner{min-height:0;overflow:hidden;}
+  .sec-inner{border-top:1px solid var(--line-soft);}
+  .row{display:flex;align-items:center;gap:14px;padding:13px 16px;min-height:58px;border-bottom:1px solid var(--line-soft);}
+  .row:last-child{border-bottom:0;}
+  .row-meta{flex:1;min-width:0;}
+  .row-t{font-size:15px;color:var(--tx-1);font-weight:500;}
+  .row-d{font-size:12px;color:var(--tx-3);margin-top:2px;line-height:1.45;}
+  .sw{position:relative;flex:none;width:52px;height:32px;cursor:pointer;}
+  .sw input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;}
+  .sw .track{position:absolute;inset:0;border-radius:999px;background:var(--off);transition:background .22s ease;}
+  .sw .knob{position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.35);transition:transform .22s cubic-bezier(.3,1.3,.5,1);}
+  .sw input:checked + .track{background:var(--on);}
+  .sw input:checked + .track + .knob{transform:translateX(20px);}
+  .row.kill{background:var(--warn-soft);}
+  .row.kill .row-t{color:var(--warn-tx);font-weight:700;}
+  .sw.warn input:checked + .track{background:oklch(0.66 0.14 70);}
+  .sec-inner.muted .row:not(.kill){opacity:.4;pointer-events:none;}
+  .footer{text-align:center;color:var(--tx-3);font-size:11.5px;padding:4px 20px 30px;}
+  .no-result{display:none;text-align:center;color:var(--tx-3);font-size:13.5px;padding:40px 20px;}
+  .no-result.show{display:block;}
+  .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 22px);transform:translateX(-50%) translateY(16px);
+    background:var(--tx-1);color:var(--bg);font-size:13px;font-weight:600;padding:9px 16px;border-radius:999px;
+    opacity:0;pointer-events:none;transition:opacity .2s, transform .2s;z-index:40;max-width:88%;text-align:center;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  .toast.bad{background:var(--danger);color:#fff;}
 </style>
 </head>
 <body>
-<div class="wrap">
+
+<!-- ── ① パスワード認証 ── -->
+<div class="login" id="loginScreen">
   <h1>ルーム設定</h1>
-  <div class="sub" id="roomLabel">このルームの Bot 機能を設定します</div>
-
-  <!-- パスワード入力 -->
-  <div class="card" id="loginCard">
-    <label class="fld" for="pw">アクセスパスワード（管理者から伝えられたもの）</label>
-    <input type="password" id="pw" autocomplete="off" inputmode="text" placeholder="パスワードを入力" />
-    <div class="foot"><button class="btn-primary" id="loginBtn">開く</button></div>
-    <div class="msg" id="loginMsg"></div>
-  </div>
-
-  <!-- 設定（ログイン後） -->
-  <div class="card hidden" id="configCard">
-    <div id="toggles"></div>
-    <div class="timewrap hidden" id="todayTimeWrap">
-      <label for="todayTime">本日の予約状況配信の時刻</label>
-      <input type="time" id="todayTime" />
+  <div class="lsub" id="loginRoom">このルームの Bot 機能を設定します</div>
+  <div class="card">
+    <label for="pw">アクセスパスワード（管理者から伝えられたもの）</label>
+    <div class="pwwrap">
+      <input id="pw" type="password" autocomplete="off" inputmode="text" placeholder="パスワードを入力" />
+      <button type="button" class="pwtoggle" id="pwToggle" aria-label="表示切替">表示</button>
     </div>
-    <div class="foot"><button class="btn-primary" id="saveBtn">保存する</button></div>
-    <div class="msg" id="saveMsg"></div>
+    <button class="btn" id="loginBtn">開く</button>
+    <div class="lmsg" id="loginMsg"></div>
   </div>
 </div>
+
+<!-- ── ② 設定（認証後）── -->
+<div class="phone" id="appScreen" hidden>
+  <header class="topbar">
+    <div class="tb-row">
+      <div style="flex:1;min-width:0;">
+        <div class="tb-title">ルーム設定</div>
+        <div class="tb-sub">
+          <span class="roomchip" id="roomChip" title="ルームIDをコピー">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+            <span class="rc-id mono" id="roomChipId"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+    <div class="search" id="searchWrap">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="search" type="text" placeholder="設定を検索" autocomplete="off" />
+      <button class="clr" id="clearSearch" aria-label="クリア">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="summary">
+    <span class="sum-v" id="sumText">有効 <b>0</b> / 0 項目</span>
+    <button class="expand-all" id="expandAll">すべて展開</button>
+  </div>
+
+  <div class="list" id="list"></div>
+  <div class="no-result" id="noResult">一致する設定がありません</div>
+  <div class="footer">変更はその場で自動保存されます</div>
+</div>
+
+<div class="toast" id="toast"></div>
 
 <script src="./pages-config.js"></script>
 <script>
@@ -78,7 +193,7 @@
   var CFG = window.LINE_REPORT_PAGES || {};
   var ANON = CFG.RECEIPT_ADMIN_ANON_KEY || '';
   var SURFACE = CFG.ADMIN_SURFACE || 'line_report';
-  function apiUrl(path){ return CFG.receiptAdminApiUrl ? CFG.receiptAdminApiUrl(path) : (CFG.PROJECT_URL + '/functions/v1/admin-api' + path); }
+  function apiUrl(p){ return CFG.receiptAdminApiUrl ? CFG.receiptAdminApiUrl(p) : ((CFG.PROJECT_URL||'') + '/functions/v1/admin-api' + p); }
 
   var params = new URLSearchParams(location.search);
   var lt = String(params.get('lt') || '').trim();
@@ -87,41 +202,54 @@
   var sessionToken = '';
   try { sessionToken = sessionStorage.getItem(SESSION_KEY) || ''; } catch(_e){}
 
-  // 編集可能な安全サブセット（admin-api の whitelist と一致）。
-  var GROUPS = [
-    { title:'AI会話・検索', items:[
-      ['bot_reply_enabled','AI会話返信'],
-      ['bot_reply_hard_mute_enabled','AI返信を完全に無しにする'],
-      ['message_search_enabled','会話検索'],
-      ['message_search_library_enabled','資料検索'],
-      ['send_room_summary','ルーム要約の配信'],
-      ['receive_overall_summary_enabled','全体要約レポートを受信'],
+  var IC = {
+    ai:'<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/>',
+    report:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+    receipt:'<path d="M5 3v18l2.5-1.5L10 21l2-1.5L14 21l2.5-1.5L19 21V3l-2.5 1.5L14 3l-2 1.5L10 3 7.5 4.5z"/><path d="M9 8h6M9 12h6"/>',
+    calendar:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>'
+  };
+
+  // 設定キーは admin-api の安全サブセット(whitelist)と一致。on は読み込み時にDB値で埋める。
+  var SECTIONS = [
+    { id:'ai', title:'AI返信・検索', icon:'ai', caption:'自動返信と検索の挙動', items:[
+      {key:'bot_reply_enabled', t:'AI会話返信', d:'お客様のメッセージにAIが自動で返信します'},
+      {key:'bot_reply_hard_mute_enabled', t:'AI返信を完全に無しにする', d:'このルームではAIを一切返信させません（上の設定より優先）', kill:true},
+      {key:'message_search_enabled', t:'会話検索', d:'過去のトーク履歴を検索できるようにします'},
+      {key:'message_search_library_enabled', t:'資料検索', d:'保存した資料からAIが回答します'},
     ]},
-    { title:'レシート・メディア', items:[
-      ['media_file_access_enabled','LINE添付ファイルの保存'],
-      ['media_save_enabled','メディアを保存'],
-      ['image_analysis_reply_enabled','レシート解析結果を送信'],
-      ['receipt_correction_reply_enabled','レシート修正の返信'],
-      ['non_receipt_image_reply_enabled','レシート以外の画像解析結果を送信'],
-      ['budget_entry_enabled','予算登録を許可'],
-      ['petty_receipt_analysis_enabled','小口レシートの解析'],
-      ['receipt_midreport_enabled','売上の中間報告'],
-      ['receipt_monthend_report_enabled','売上の月末レポート'],
+    { id:'report', title:'要約・レポート', icon:'report', caption:'要約と売上レポートの配信', items:[
+      {key:'send_room_summary', t:'ルーム要約の配信', d:'このルームの会話要約を定期配信します'},
+      {key:'receive_overall_summary_enabled', t:'全体要約レポートを受信', d:'全ルームの要約をまとめて受信します'},
+      {key:'receipt_midreport_enabled', t:'売上の中間報告', d:'期中の売上速報を配信します'},
+      {key:'receipt_monthend_report_enabled', t:'売上の月末レポート', d:'月末に売上サマリーを配信します'},
     ]},
-    { title:'予約・カレンダー', items:[
-      ['gmail_reservation_alert_enabled','Gmail予約通知'],
-      ['today_reservation_alert_enabled','本日の予約状況を配信'],
-      ['calendar_tomorrow_reminder_enabled','明日の予定を配信'],
-      ['calendar_ai_auto_create_enabled','予定の自動登録'],
-      ['calendar_silent_auto_register_enabled','無返信で自動登録'],
-      ['calendar_low_confidence_confirm_reply_enabled','低確度のときに確認返信'],
-      ['calendar_registration_reply_enabled','登録内容をLINEで返信'],
+    { id:'receipt', title:'レシート・メディア', icon:'receipt', caption:'画像保存とレシート解析', items:[
+      {key:'media_file_access_enabled', t:'LINE添付ファイルの保存', d:'受信した添付ファイルを自動保存します'},
+      {key:'media_save_enabled', t:'メディアを保存', d:'画像・動画を保存します'},
+      {key:'image_analysis_reply_enabled', t:'レシート解析結果を送信', d:'解析した内容をトークに返信します'},
+      {key:'receipt_correction_reply_enabled', t:'レシート修正の返信', d:'修正後の内容を返信します'},
+      {key:'non_receipt_image_reply_enabled', t:'レシート以外の画像解析結果を送信', d:'レシート以外の画像も解析して返信します'},
+      {key:'budget_entry_enabled', t:'予算登録を許可', d:'トークから予算を登録できるようにします'},
+      {key:'petty_receipt_analysis_enabled', t:'小口レシートの解析', d:'小口現金のレシートを自動解析します'},
+    ]},
+    { id:'calendar', title:'予約・カレンダー', icon:'calendar', caption:'予約通知・カレンダー連携', items:[
+      {key:'gmail_reservation_alert_enabled', t:'Gmail予約通知', d:'Gmailで受信した予約をLINEに通知します'},
+      {key:'today_reservation_alert_enabled', t:'本日の予約状況を配信', d:'当日の予約一覧を毎朝配信します'},
+      {key:'calendar_tomorrow_reminder_enabled', t:'明日の予定を配信', d:'翌日の予定を配信します'},
+      {key:'calendar_ai_auto_create_enabled', t:'予定の自動登録', d:'予定をカレンダーに自動登録します'},
+      {key:'calendar_silent_auto_register_enabled', t:'無返信で自動登録', d:'返信せずに自動登録します'},
+      {key:'calendar_low_confidence_confirm_reply_enabled', t:'低確度のときに確認返信', d:'自信が低いときは確認の返信をします'},
+      {key:'calendar_registration_reply_enabled', t:'登録内容をLINEで返信', d:'登録した内容をLINEに返信します'},
     ]},
   ];
-  var BOOL_KEYS = GROUPS.reduce(function(a,g){ return a.concat(g.items.map(function(i){return i[0];})); }, []);
 
   var el = function(id){ return document.getElementById(id); };
-  function showMsg(node, text, kind){ node.textContent = text; node.className = 'msg ' + (kind||''); }
+  var toast = el('toast'), toastTimer;
+  function showToast(msg, bad){
+    toast.textContent = msg; toast.classList.toggle('bad', !!bad); toast.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function(){ toast.classList.remove('show'); }, 1500);
+  }
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
 
   function authHeaders(withSession){
     var h = { 'Content-Type':'application/json', 'apikey':ANON, 'Authorization':'Bearer '+ANON, 'x-admin-surface':SURFACE };
@@ -129,99 +257,173 @@
     return h;
   }
 
-  // ① パスワード＋lt でログイン
+  /* ── 認証 ── */
+  el('pwToggle').addEventListener('click', function(){
+    var i = el('pw'); var s = i.type === 'password';
+    i.type = s ? 'text' : 'password'; this.textContent = s ? '隠す' : '表示';
+  });
   function login(){
     var pw = el('pw').value;
-    if (!pw){ showMsg(el('loginMsg'),'パスワードを入力してください。','err'); return; }
-    if (!lt){ showMsg(el('loginMsg'),'リンクが無効です。LINEからもう一度「設定」を送ってください。','err'); return; }
+    if (!pw){ el('loginMsg').textContent='パスワードを入力してください。'; el('loginMsg').className='lmsg err'; return; }
+    if (!lt){ el('loginMsg').textContent='リンクが無効です。LINEからもう一度「設定」を送ってください。'; el('loginMsg').className='lmsg err'; return; }
     el('loginBtn').disabled = true;
-    fetch(apiUrl('/auth/room-config-login'), {
-      method:'POST', headers:authHeaders(false),
-      body: JSON.stringify({ login_token: lt, password: pw, room_id: roomId, remember_login:false }),
-    }).then(function(r){ return r.json().then(function(b){ return {ok:r.ok,b:b}; }); })
+    fetch(apiUrl('/auth/room-config-login'), { method:'POST', headers:authHeaders(false),
+      body: JSON.stringify({ login_token: lt, password: pw, room_id: roomId, remember_login:false }) })
+      .then(function(r){ return r.json().then(function(b){ return {ok:r.ok,b:b}; }); })
       .then(function(res){
         el('loginBtn').disabled = false;
         if (!res.ok || !res.b || !res.b.session_token){
-          showMsg(el('loginMsg'), (res.b && res.b.error) || 'リンクまたはパスワードが正しくありません。', 'err');
-          return;
+          el('loginMsg').textContent = (res.b && res.b.error) || 'リンクまたはパスワードが正しくありません。';
+          el('loginMsg').className = 'lmsg err'; return;
         }
         sessionToken = res.b.session_token;
         try { sessionStorage.setItem(SESSION_KEY, sessionToken); } catch(_e){}
-        // URL から lt を消す（履歴・再読込での誤再送防止）。
         try { history.replaceState(null,'', location.pathname + '?room_id=' + encodeURIComponent(roomId)); } catch(_e){}
-        openConfig();
+        loadConfig();
       })
-      .catch(function(){ el('loginBtn').disabled = false; showMsg(el('loginMsg'),'通信に失敗しました。','err'); });
+      .catch(function(){ el('loginBtn').disabled=false; el('loginMsg').textContent='通信に失敗しました。'; el('loginMsg').className='lmsg err'; });
   }
-
-  // ② 設定を読み込んで表示
-  function openConfig(){
-    el('loginCard').classList.add('hidden');
-    el('configCard').classList.remove('hidden');
-    fetch(apiUrl('/room-config?room_id=' + encodeURIComponent(roomId)), { headers: authHeaders(true) })
-      .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } return r.json(); })
-      .then(function(b){ renderToggles((b && b.room_config) || {}); })
-      .catch(function(e){ if (String(e && e.message)!=='auth') showMsg(el('saveMsg'),'設定の読み込みに失敗しました。','err'); });
-  }
-
-  function renderToggles(cfg){
-    var html = '';
-    GROUPS.forEach(function(g){
-      html += '<div class="grp-title">'+g.title+'</div>';
-      g.items.forEach(function(it){
-        var key = it[0], label = it[1];
-        var on = cfg[key] === true;
-        html += '<div class="row"><div class="name">'+label+'</div>'+
-          '<span class="sw"><input type="checkbox" data-key="'+key+'"'+(on?' checked':'')+' />'+
-          '<span class="track"></span><span class="knob"></span></span></div>';
-      });
-    });
-    el('toggles').innerHTML = html;
-    // 本日予約の時刻
-    var hour = cfg.today_reservation_alert_hour, min = cfg.today_reservation_alert_minute;
-    if (hour != null && min != null){
-      el('todayTime').value = ('0'+hour).slice(-2)+':'+('0'+min).slice(-2);
-    }
-    el('todayTimeWrap').classList.remove('hidden');
-  }
-
-  // ③ 保存
-  function save(){
-    var body = { room_id: roomId };
-    Array.prototype.forEach.call(document.querySelectorAll('#toggles input[type=checkbox]'), function(c){
-      body[c.getAttribute('data-key')] = c.checked;
-    });
-    var t = String(el('todayTime').value || '').trim();
-    if (t && /^\d{2}:\d{2}$/.test(t)){
-      body.today_reservation_alert_hour = parseInt(t.slice(0,2),10);
-      body.today_reservation_alert_minute = parseInt(t.slice(3,5),10);
-    }
-    el('configCard').classList.add('saving');
-    fetch(apiUrl('/room-config'), { method:'PUT', headers:authHeaders(true), body: JSON.stringify(body) })
-      .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } return r.json().then(function(b){return {ok:r.ok,b:b};}); })
-      .then(function(res){
-        el('configCard').classList.remove('saving');
-        if (!res.ok){ showMsg(el('saveMsg'), (res.b && res.b.error) || '保存に失敗しました。','err'); return; }
-        showMsg(el('saveMsg'),'✅ 保存しました。','ok');
-      })
-      .catch(function(e){ el('configCard').classList.remove('saving'); if (String(e&&e.message)!=='auth') showMsg(el('saveMsg'),'保存に失敗しました。','err'); });
-  }
+  el('loginBtn').addEventListener('click', login);
+  el('pw').addEventListener('keydown', function(e){ if (e.key==='Enter') login(); });
+  if (roomId) el('loginRoom').textContent = 'ルーム: ' + roomId;
 
   function relogin(){
     sessionToken = '';
     try { sessionStorage.removeItem(SESSION_KEY); } catch(_e){}
-    el('configCard').classList.add('hidden');
-    el('loginCard').classList.remove('hidden');
-    showMsg(el('loginMsg'),'セッションが切れました。もう一度パスワードを入力してください。リンクが使用済みの場合はLINEから再度「設定」を送ってください。','err');
+    el('appScreen').hidden = true; el('loginScreen').hidden = false;
+    el('loginMsg').textContent = 'セッションが切れました。もう一度パスワードを入力してください（リンク使用済みのときはLINEから再度「設定」を送ってください）。';
+    el('loginMsg').className = 'lmsg err';
   }
 
-  // 初期化
-  if (roomId) el('roomLabel').textContent = 'ルーム: ' + roomId;
-  el('loginBtn').addEventListener('click', login);
-  el('pw').addEventListener('keydown', function(e){ if (e.key==='Enter') login(); });
-  el('saveBtn').addEventListener('click', save);
+  /* ── 設定の読み込み → 画面表示 ── */
+  function loadConfig(){
+    fetch(apiUrl('/room-config?room_id=' + encodeURIComponent(roomId)), { headers: authHeaders(true) })
+      .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } return r.json(); })
+      .then(function(b){
+        var cfg = (b && b.room_config) || {};
+        SECTIONS.forEach(function(s){ s.items.forEach(function(it){ it.on = cfg[it.key] === true; }); });
+        el('loginScreen').hidden = true; el('appScreen').hidden = false;
+        if (roomId) el('roomChipId').textContent = roomId;
+        render(); openFirst();
+      })
+      .catch(function(e){ if (String(e&&e.message)!=='auth') showToast('設定の読み込みに失敗しました', true); });
+  }
+
+  function render(){
+    el('list').innerHTML = SECTIONS.map(function(sec){
+      var total = sec.items.length, on = sec.items.filter(function(i){return i.on;}).length;
+      var killOn = sec.items.some(function(i){ return i.kill && i.on; });
+      var muted = (sec.id==='ai' && killOn) ? 'muted' : '';
+      var rows = sec.items.map(function(it, idx){
+        return '<div class="row'+(it.kill?' kill':'')+'" data-text="'+esc(it.t+' '+it.d)+'">'+
+          '<div class="row-meta"><div class="row-t">'+esc(it.t)+'</div><div class="row-d">'+esc(it.d)+'</div></div>'+
+          '<label class="sw'+(it.kill?' warn':'')+'"><input type="checkbox"'+(it.on?' checked':'')+' data-sec="'+sec.id+'" data-i="'+idx+'" />'+
+          '<span class="track"></span><span class="knob"></span></label></div>';
+      }).join('');
+      return '<section class="sec" data-sec="'+sec.id+'">'+
+        '<button class="sec-head" data-toggle="'+sec.id+'" aria-expanded="false">'+
+        '<span class="sec-ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+IC[sec.icon]+'</svg></span>'+
+        '<span class="sec-meta"><span class="sec-t">'+esc(sec.title)+'</span><span class="sec-c">'+esc(sec.caption)+'</span></span>'+
+        '<span class="sec-count'+(on>0?' on':'')+'" data-count="'+sec.id+'">'+on+'/'+total+'</span>'+
+        '<svg class="sec-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'+
+        '</button><div class="sec-body"><div class="sec-inner '+muted+'" data-inner="'+sec.id+'">'+rows+'</div></div></section>';
+    }).join('');
+    updateSummary();
+  }
+
+  function updateSummary(){
+    var on=0,total=0;
+    SECTIONS.forEach(function(s){ s.items.forEach(function(i){ total++; if(i.on)on++; }); });
+    el('sumText').innerHTML = '有効 <b>'+on+'</b> / '+total+' 項目';
+    SECTIONS.forEach(function(s){
+      var c = document.querySelector('[data-count="'+s.id+'"]');
+      var onN = s.items.filter(function(i){return i.on;}).length;
+      if(c){ c.textContent = onN+'/'+s.items.length; c.classList.toggle('on', onN>0); }
+      if(s.id==='ai'){
+        var inner = document.querySelector('[data-inner="ai"]');
+        if(inner) inner.classList.toggle('muted', s.items.some(function(i){ return i.kill && i.on; }));
+      }
+    });
+  }
+
+  /* ── トグル → その場で自動保存（楽観更新＋失敗時ロールバック）── */
+  function saveField(key, value, inp, item){
+    var body = { room_id: roomId }; body[key] = value;
+    fetch(apiUrl('/room-config'), { method:'PUT', headers:authHeaders(true), body:JSON.stringify(body) })
+      .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } if(!r.ok) throw new Error('save'); return r.json(); })
+      .then(function(){ showToast('保存しました'); })
+      .catch(function(e){
+        if (String(e&&e.message)==='auth') return;
+        item.on = !value; if(inp) inp.checked = !value; updateSummary();
+        showToast('保存に失敗しました', true);
+      });
+  }
+
+  el('list').addEventListener('click', function(e){
+    var head = e.target.closest('[data-toggle]');
+    if(head){
+      var sec = head.closest('.sec');
+      var open = sec.classList.toggle('open');
+      head.setAttribute('aria-expanded', open?'true':'false');
+      syncExpandAll();
+    }
+  });
+  el('list').addEventListener('change', function(e){
+    var inp = e.target.closest('input[type=checkbox]');
+    if(!inp) return;
+    var sec = SECTIONS.find(function(s){ return s.id===inp.dataset.sec; });
+    var item = sec.items[+inp.dataset.i];
+    item.on = inp.checked;
+    updateSummary();
+    saveField(item.key, inp.checked, inp, item);
+  });
+
+  var expandBtn = el('expandAll');
+  function syncExpandAll(){
+    var secs = [].slice.call(document.querySelectorAll('.sec'));
+    var allOpen = secs.length>0 && secs.every(function(s){ return s.classList.contains('open'); });
+    expandBtn.textContent = allOpen ? 'すべて折りたたむ' : 'すべて展開';
+  }
+  expandBtn.addEventListener('click', function(){
+    var secs = [].slice.call(document.querySelectorAll('.sec'));
+    var allOpen = secs.every(function(s){ return s.classList.contains('open'); });
+    secs.forEach(function(s){ s.classList.toggle('open', !allOpen); s.querySelector('.sec-head').setAttribute('aria-expanded', (!allOpen)+''); });
+    syncExpandAll();
+  });
+
+  var search = el('search'), searchWrap = el('searchWrap'), noResult = el('noResult');
+  el('clearSearch').addEventListener('click', function(){ search.value=''; onSearch(); search.focus(); });
+  function onSearch(){
+    var q = search.value.trim().toLowerCase();
+    searchWrap.classList.toggle('has', !!q);
+    var anyVisible=false;
+    document.querySelectorAll('.sec').forEach(function(sec){
+      var secMatch=0;
+      sec.querySelectorAll('.row').forEach(function(r){
+        var hit = !q || r.dataset.text.toLowerCase().indexOf(q)>=0;
+        r.style.display = hit?'':'none'; if(hit) secMatch++;
+      });
+      sec.style.display = secMatch? '' : 'none';
+      if(secMatch){ anyVisible=true; if(q){ sec.classList.add('open'); sec.querySelector('.sec-head').setAttribute('aria-expanded','true'); } }
+    });
+    noResult.classList.toggle('show', !anyVisible);
+    if(!q) syncExpandAll();
+  }
+  search.addEventListener('input', onSearch);
+
+  el('roomChip').addEventListener('click', function(){
+    if(!roomId) return;
+    if(navigator.clipboard) navigator.clipboard.writeText(roomId).then(function(){ showToast('ルームIDをコピーしました'); }).catch(function(){ showToast('ルームIDをコピーしました'); });
+    else showToast('ルームIDをコピーしました');
+  });
+
+  function openFirst(){
+    var first = document.querySelector('.sec');
+    if(first){ first.classList.add('open'); first.querySelector('.sec-head').setAttribute('aria-expanded','true'); syncExpandAll(); }
+  }
+
   // 既存セッションがあればパスワード入力を飛ばす（同タブ内の再表示）。
-  if (sessionToken){ openConfig(); }
+  if (sessionToken){ loadConfig(); }
 })();
 </script>
 </body>
