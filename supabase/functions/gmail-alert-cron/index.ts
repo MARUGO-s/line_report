@@ -140,6 +140,17 @@ Deno.serve(async (req) => {
     }
   }
 
+  // 定期実行(本処理)の認可: CRON_AUTH_TOKEN が設定されている場合のみ Bearer 一致を必須化する（フェイルクローズ）。
+  // 未設定の間は従来どおり通す＝pg_cron(resolve_edge_cron_auth_token の Bearer)を壊さない。
+  // 有効化手順: CRON_AUTH_TOKEN を vault（pg_cron 送信用）と Edge secret（この検証用）の両方に同値で設定する。
+  const mainCronAuthToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim()
+  if (mainCronAuthToken) {
+    const mainBearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
+    if (!constantTimeEqual(mainBearer, mainCronAuthToken)) {
+      return json({ ok: false, error: "unauthorized" }, 401)
+    }
+  }
+
   try {
     const result = await maybeSendGmailReservationAlerts({
       supabase,
@@ -182,6 +193,17 @@ async function isGmailAlertTestAuthorized(req: Request, serviceRoleKey: string):
   const msg = String(error.message ?? "")
   if (msg.includes("Invalid API key") || error.code === "PGRST301") return false
   return true
+}
+
+// 定数時間比較（秘密トークンの照合用・タイミング差で長さ/内容を漏らさない）
+function constantTimeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder()
+  const ba = enc.encode(a)
+  const bb = enc.encode(b)
+  if (ba.length !== bb.length) return false
+  let diff = 0
+  for (let i = 0; i < ba.length; i++) diff |= ba[i] ^ bb[i]
+  return diff === 0
 }
 
 function json(payload: unknown, status = 200): Response {

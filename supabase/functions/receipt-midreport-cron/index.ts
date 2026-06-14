@@ -7,6 +7,17 @@ const RECEIPT_MID_REPORT_TITLE = "中間報告";
 const RECEIPT_MONTH_END_REPORT_TITLE = "月間報告";
 /** 集計締めは営業日5時切替後（16日／翌月1日）だが、LINE送信は店舗向けに10時 */ const REPORT_RUN_HOUR_JST = 10;
 const REPORT_RUN_MINUTE_JST = 0;
+// 定数時間比較（秘密トークン照合用）
+function constantTimeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ba = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ba.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ba.length; i++) diff |= ba[i] ^ bb[i];
+  return diff === 0;
+}
+
 Deno.serve(async (req)=>{
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -24,6 +35,15 @@ Deno.serve(async (req)=>{
       serviceRoleKey,
       lineAccessToken
     });
+  }
+  // 定期実行(本処理)の認可: CRON_AUTH_TOKEN 設定時のみ Bearer 一致を必須化（フェイルクローズ）。
+  // 未設定の間は従来どおり通す＝pg_cron を壊さない。有効化は CRON_AUTH_TOKEN を vault と Edge secret の両方に同値設定。
+  const mainCronAuthToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim();
+  if (mainCronAuthToken) {
+    const mainBearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+    if (!constantTimeEqual(mainBearer, mainCronAuthToken)) {
+      return json({ ok: false, error: "unauthorized" }, 401);
+    }
   }
   if (!lineAccessToken) {
     return json({
