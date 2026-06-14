@@ -35,10 +35,10 @@ jobs:
       PROJECT_REF: hocbnifuactbvmyjraxy   # 公開情報（URL に出る）。秘密ではない
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6   # Node24 ランタイム（旧 v4 は Node20 deprecation 対象）
 
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2   # composite 方式・Node ランタイム非依存
         with:
           version: 2.106.0   # ローカル CLI と同一。必要なら更新可
 
