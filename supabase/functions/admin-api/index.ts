@@ -50,9 +50,12 @@ import { isReceiptRoomAutoLinkEnabled } from "../_shared/auto_link_room.ts"
 import {
   authenticateAdminDashboardSessionToken,
   exchangeAdminDashboardLoginLinkToken,
+  exchangeRoomConfigLoginLink,
+  hashRoomConfigPassword,
   issueAdminDashboardSessionToken,
   revokeAdminDashboardSessionToken,
   revokeAllAdminDashboardAuthTokens,
+  ROOM_CONFIG_SCOPE,
 } from "../_shared/admin_dashboard_link_auth.ts"
 import { fetchWeatherDailyState } from "../_shared/weather_daily.ts"
 import {
@@ -278,6 +281,53 @@ type OfficeZipEntry = {
 
 let cachedPdfJsModulePromise: Promise<PdfJsModule | null> | null = null
 
+// ルーム・セルフ設定で「ルームのユーザーが編集してよい安全なサブセット」(機能ON/OFF＋予約通知時刻)。
+// bot_access_approved(承認) / receipt_report_store_partition_key(集計店舗) / is_enabled / room_name /
+// パスワード列 などの機微フィールドはここに含めない＝room スコープからは絶対に変更させない。
+const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
+  "bot_reply_enabled", "bot_reply_hard_mute_enabled",
+  "message_search_enabled", "message_search_library_enabled",
+  "send_room_summary", "receive_overall_summary_enabled",
+  "media_file_access_enabled", "image_analysis_reply_enabled",
+  "receipt_correction_reply_enabled", "non_receipt_image_reply_enabled",
+  "media_save_enabled", "budget_entry_enabled", "petty_receipt_analysis_enabled",
+  "receipt_midreport_enabled", "receipt_monthend_report_enabled",
+  "gmail_reservation_alert_enabled", "today_reservation_alert_enabled",
+  "calendar_tomorrow_reminder_enabled", "calendar_ai_auto_create_enabled",
+  "calendar_silent_auto_register_enabled", "calendar_low_confidence_confirm_reply_enabled",
+  "calendar_registration_reply_enabled",
+]
+const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," +
+  ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
+  ",today_reservation_alert_hour,today_reservation_alert_minute"
+
+function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const f of ROOM_CONFIG_SAFE_BOOL_FIELDS) {
+    if (f in body) out[f] = body[f] === true || body[f] === "true" || body[f] === 1
+  }
+  if ("today_reservation_alert_hour" in body) {
+    const h = Number(body.today_reservation_alert_hour)
+    out.today_reservation_alert_hour = (Number.isInteger(h) && h >= 0 && h <= 23) ? h : null
+  }
+  if ("today_reservation_alert_minute" in body) {
+    const m = Number(body.today_reservation_alert_minute)
+    out.today_reservation_alert_minute = (Number.isInteger(m) && m >= 0 && m <= 59) ? m : null
+  }
+  return out
+}
+
+// room_summary_settings の行から password ハッシュを除き、設定済みかの boolean(room_config_password_set)
+// に置き換える（ハッシュをフロントへ出さない）。
+function stripRoomConfigSecret<T extends Record<string, unknown>>(row: T | null): T | null {
+  if (!row || typeof row !== "object") return row
+  const rest = { ...(row as Record<string, unknown>) }
+  const hash = rest.room_config_password_hash
+  delete rest.room_config_password_hash
+  rest.room_config_password_set = !!String(hash ?? "")
+  return rest as unknown as T
+}
+
 Deno.serve(async (req, info) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -338,6 +388,37 @@ Deno.serve(async (req, info) => {
     } catch (e) {
       if (e instanceof Error && /invalid|expired/i.test(e.message)) {
         return json({ error: e.message }, 401)
+      }
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
+  }
+
+  if (req.method === "POST" && path === "/auth/room-config-login") {
+    try {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const loginToken = String(body.login_token ?? "").trim()
+      const password = String(body.password ?? "")
+      if (!loginToken) {
+        throw { status: 400, message: "login_token is required." } satisfies AppError
+      }
+      if (!password) {
+        throw { status: 400, message: "password is required." } satisfies AppError
+      }
+      const rememberLogin = body.remember_login !== false
+      const adminSurface = resolveAdminSurface(req, url)
+      const session = await exchangeRoomConfigLoginLink(supabase, loginToken, password, {
+        rememberLogin,
+        metadata: { admin_surface: adminSurface, exchanged_via: "admin_api" },
+      })
+      return json({ ok: true, session_token: session.token, expires_at: session.expires_at }, 200)
+    } catch (e) {
+      // パスワード誤り/無効リンク/未有効化はすべて 401 で曖昧に返す（攻撃者に情報を与えない）。
+      if (e instanceof Error) {
+        return json({ error: "リンクまたはパスワードが正しくありません。" }, 401)
       }
       const err = asAppError(e)
       return json({ error: err.message }, err.status)
@@ -449,11 +530,81 @@ Deno.serve(async (req, info) => {
     }
   }
 
+  // ルームスコープ強制(IDOR対策): room_config セッション(LINEワンパス＋パスワード由来)は
+  // /room-config(GET/PUT) のみに限定し、room_id をスコープへ固定。他ルーム・他admin操作は一切不可。
+  const roomScope = authResult.scopeKind === ROOM_CONFIG_SCOPE ? authResult.roomScope : null
+  if (roomScope) {
+    const ROOM_SCOPED_ALLOWED_PATHS = new Set<string>(["/room-config", "/auth/logout"])
+    if (!ROOM_SCOPED_ALLOWED_PATHS.has(path)) {
+      return json({ error: "このルーム用ログインからはこの操作はできません。" }, 403)
+    }
+    const requestedRoom = String(url.searchParams.get("room_id") ?? "").trim()
+    if (requestedRoom && requestedRoom !== roomScope) {
+      return json({ error: "他のルームのデータにはアクセスできません。" }, 403)
+    }
+    url.searchParams.set("room_id", roomScope)
+    const contentType = String(req.headers.get("content-type") ?? "").toLowerCase()
+    if (
+      (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") &&
+      contentType.includes("application/json")
+    ) {
+      let raw = ""
+      try { raw = await req.text() } catch { raw = "" }
+      if (raw) {
+        let bodyObj: unknown = null
+        try { bodyObj = JSON.parse(raw) } catch { bodyObj = null }
+        if (isRecord(bodyObj)) {
+          const bodyRoom = String(bodyObj.room_id ?? "").trim()
+          if (bodyRoom && bodyRoom !== roomScope) {
+            return json({ error: "他のルームのデータにはアクセスできません。" }, 403)
+          }
+          bodyObj.room_id = roomScope
+          raw = JSON.stringify(bodyObj)
+        }
+      }
+      const fwdHeaders = new Headers(req.headers)
+      fwdHeaders.delete("content-length")
+      workReq = new Request(req.url, { method: req.method, headers: fwdHeaders, body: raw })
+    }
+  }
+
   try {
     if (req.method === "POST" && path === "/auth/logout") {
       const provided = req.headers.get("x-admin-token") ?? ""
       const revoked = await revokeAdminDashboardSessionToken(supabase, provided)
       return json({ success: true, revoked }, 200)
+    }
+
+    // ── ルーム・セルフ設定（room_config スコープ専用。room_id は上のブロックでスコープへ強制済み）──
+    if (req.method === "GET" && path === "/room-config") {
+      const roomId = String(url.searchParams.get("room_id") ?? "").trim()
+      if (!roomId) throw { status: 400, message: "room_id is required." } satisfies AppError
+      const { data, error } = await supabase
+        .from("room_summary_settings")
+        .select(ROOM_CONFIG_SAFE_SELECT)
+        .eq("room_id", roomId)
+        .maybeSingle()
+      if (error) throw { status: 500, message: `Failed to load room config: ${error.message}` } satisfies AppError
+      return json({ room_config: data ?? null }, 200)
+    }
+
+    if (req.method === "PUT" && path === "/room-config") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      const roomId = String(body.room_id ?? url.searchParams.get("room_id") ?? "").trim()
+      if (!roomId) throw { status: 400, message: "room_id is required." } satisfies AppError
+      // 安全サブセットのみ採用（bot_access_approved / receipt_report_store_partition_key 等の機微フィールドは
+      // クライアントが送っても無視＝サーバ側 whitelist で守る）。
+      const safe = buildRoomConfigSafePayload(body)
+      const { data, error } = await supabase
+        .from("room_summary_settings")
+        .update({ ...safe, updated_at: new Date().toISOString() })
+        .eq("room_id", roomId)
+        .select(ROOM_CONFIG_SAFE_SELECT)
+        .maybeSingle()
+      if (error) throw { status: 500, message: `Failed to save room config: ${error.message}` } satisfies AppError
+      if (!data) throw { status: 404, message: "Room not found." } satisfies AppError
+      return json({ room_config: data }, 200)
     }
 
     if (req.method === "GET" && path === "/state") {
@@ -909,6 +1060,19 @@ Deno.serve(async (req, info) => {
     if (req.method === "PUT" && path === "/settings/rooms") {
       const body = await parseJson(workReq)
       const payload = buildRoomSettingsPayload(body)
+      // 管理者専用: ルーム・セルフ設定の有効化＋アクセスパスワード（平文受領→ハッシュ化保存・空でクリア）。
+      // ここはフル管理者セッションのみ到達する（room スコープは /settings/rooms に来られない）。
+      const roomConfigExtra: Record<string, unknown> = {}
+      if (isRecord(body)) {
+        if ("room_config_access_enabled" in body) {
+          roomConfigExtra.room_config_access_enabled =
+            body.room_config_access_enabled === true || body.room_config_access_enabled === "true"
+        }
+        if ("room_config_password" in body) {
+          const pw = String(body.room_config_password ?? "")
+          roomConfigExtra.room_config_password_hash = pw ? await hashRoomConfigPassword(pw) : null
+        }
+      }
       console.log(
         "[admin-api] room settings upsert request:",
         JSON.stringify({
@@ -964,6 +1128,7 @@ Deno.serve(async (req, info) => {
           delivery_hours: payload.delivery_hours,
           message_cleanup_timing: payload.message_cleanup_timing,
           last_delivery_summary_mode: payload.last_delivery_summary_mode,
+          ...roomConfigExtra,
           updated_at: new Date().toISOString(),
         }, { onConflict: "room_id" })
         .select("*")
@@ -995,7 +1160,7 @@ Deno.serve(async (req, info) => {
           updated_at: data.updated_at,
         }),
       )
-      return json({ room_settings: data }, 200)
+      return json({ room_settings: stripRoomConfigSecret(data) }, 200)
     }
 
     if (req.method === "PUT" && path === "/permissions/users") {
@@ -1213,7 +1378,10 @@ async function authenticate(
   req: Request,
   supabase: ReturnType<typeof createClient>,
   fallbackToken: string,
-): Promise<{ ok: true; storeScope: string | null } | { ok: false; status: number; message: string }> {
+): Promise<
+  | { ok: true; storeScope: string | null; roomScope: string | null; scopeKind: string | null }
+  | { ok: false; status: number; message: string }
+> {
   const provided = req.headers.get("x-admin-token") ?? ""
   if (!provided) {
     return { ok: false, status: 401, message: "Unauthorized." }
@@ -1221,13 +1389,18 @@ async function authenticate(
 
   const session = await authenticateAdminDashboardSessionToken(supabase, provided)
   if (session.ok) {
-    // 店舗別ログインリンク由来のセッションは storeScope を持つ＝その店舗だけに制限。
-    return { ok: true, storeScope: session.storeScope }
+    // ログインリンク由来のセッションは storeScope か roomScope を持つ＝その店舗/ルームだけに制限。
+    return {
+      ok: true,
+      storeScope: session.storeScope,
+      roomScope: session.roomScope,
+      scopeKind: session.scopeKind,
+    }
   }
 
   const raw = await authenticateRawAdminToken(provided, supabase, fallbackToken)
   if (raw.ok) {
-    return { ok: true, storeScope: null } // 生adminトークン＝全店アクセス
+    return { ok: true, storeScope: null, roomScope: null, scopeKind: null } // 生adminトークン＝全店アクセス
   }
   return raw
 }
@@ -1365,7 +1538,7 @@ async function fetchState(
   return {
     global_settings: globalSettings,
     console_settings: consoleSettings,
-    room_settings: roomSettingsRes.data ?? [],
+    room_settings: (roomSettingsRes.data ?? []).map((r) => stripRoomConfigSecret(r as Record<string, unknown>)),
     user_permissions: sortLineUserPermissionsForAdminDisplay(userPermissionsRes.data ?? []).slice(
       0,
       USER_PERMISSION_LIST_MAX_LIMIT,
@@ -5114,7 +5287,7 @@ function extractClientIp(headers: Headers, info?: { remoteAddr?: { hostname?: st
 
 function resolveAdminRateLimit(method: string, path: string): { maxRequests: number; windowMs: number } {
   // 資格情報を提示する認証エンドポイントは総当たりの標的。既定(180/分)より厳しくする。
-  if (method === "POST" && (path === "/auth/link-login" || path === "/auth/session")) {
+  if (method === "POST" && (path === "/auth/link-login" || path === "/auth/session" || path === "/auth/room-config-login")) {
     return {
       maxRequests: 20,
       windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,

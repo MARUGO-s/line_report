@@ -16,6 +16,7 @@ import {
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
+import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   countExistingReceiptsForDates,
@@ -1850,10 +1851,31 @@ Deno.serve(async (req) => {
       const text = String(event.message?.text ?? '').trim()
       const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
 
+      // ルーム・セルフ設定コマンド「設定」（独立）。他フローの許可状態に依存しない
+      // （権限はハンドラ内で room_config_access_enabled＋パスワード設定済みを確認）。
+      // トリガー完全一致でなければ {handled:false} で即フォールスルー＝既存処理に干渉しない。
+      let roomConfigHandled = false
+      if (text && eventRoomId) {
+        try {
+          const rcResult = await handleRoomConfigTextMessage(supabase, registry as StoreRegistryRow, {
+            roomId: eventRoomId,
+            replyToken: String(event.replyToken ?? ''),
+            text,
+          })
+          if (rcResult.handled) {
+            roomConfigHandled = true
+            textHandled += 1
+            if (rcResult.replied) receiptReplies += 1
+          }
+        } catch (err) {
+          console.error('room_config_flow failed:', err instanceof Error ? err.message : String(err))
+        }
+      }
+
       // 予算登録フロー（独立・他に干渉しない）。トリガー「予算登録」or 予算pending中のみ作動し、
       // 処理した時だけ後続のレシート/検索処理をスキップする（部屋メッセージ記録は通常どおり）。
       let budgetEntryHandled = false
-      if (budgetEntryAllowed && text && eventRoomId && eventUserId) {
+      if (!roomConfigHandled && budgetEntryAllowed && text && eventRoomId && eventUserId) {
         try {
           const budgetResult = await handleBudgetEntryTextMessage(supabase, registry as StoreRegistryRow, {
             roomId: eventRoomId,
@@ -1874,7 +1896,7 @@ Deno.serve(async (req) => {
       // 小口現金（経費）取込フロー（独立・他に干渉しない）。「経費」or 経費pending中の「キャンセル」のみ作動。
       // 権限「小口レシートの解析をする」(petty_receipt_analysis_enabled) OFF のルームでは作動しない。
       let pettyCashHandled = false
-      if (!budgetEntryHandled && pettyAnalysisAllowed && text && eventRoomId && eventUserId) {
+      if (!roomConfigHandled && !budgetEntryHandled && pettyAnalysisAllowed && text && eventRoomId && eventUserId) {
         try {
           const pettyResult = await handlePettyCashTextMessage(supabase, registry as StoreRegistryRow, {
             roomId: eventRoomId,
@@ -1917,7 +1939,7 @@ Deno.serve(async (req) => {
       }
 
       let receiptHandled = false
-      if (!budgetEntryHandled && !pettyCashHandled) try {
+      if (!roomConfigHandled && !budgetEntryHandled && !pettyCashHandled) try {
         // レシート操作の返信（重複確認 加算/中止/置き換え・修正・削除の結果）は AI返信完全無しの対象外。
         // 「レシートの解析結果を送信」または「レシート修正の返信を許可」の両方OFFのときだけ抑止する。
         const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, suppressReceiptReply && !allowCorrectionReply)
@@ -1930,7 +1952,7 @@ Deno.serve(async (req) => {
         errors.push(msg.slice(0, 160))
       }
 
-      if (!budgetEntryHandled && !pettyCashHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
+      if (!roomConfigHandled && !budgetEntryHandled && !pettyCashHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
         try {
           const searchResult = await handleLineSearchTextMessage(
             supabase,

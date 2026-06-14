@@ -5417,6 +5417,12 @@
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigBudgetEntryEnabled" type="checkbox">予算登録を許可（このルームから月次予算を入力）</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigPettyReceiptAnalysisEnabled" type="checkbox">小口レシートの解析をする（AI返信完全無しでも経費の解析・返信を優先）</label>
         </div>
+        <div class="room-scope-modal-list" style="margin-top:14px;border-top:1px solid rgba(255,255,255,.12);padding-top:12px;">
+          <div style="font-size:12px;opacity:.7;font-weight:700;margin-bottom:6px;">セルフ設定（LINEワンパス＋パスワード）</div>
+          <label class="room-scope-option receipt-scope-option"><input id="roomConfigSelfEnabled" type="checkbox">このルームのセルフ設定を有効化（ルームで「設定」と送ると設定リンクを返す）</label>
+          <label style="display:block;font-size:12px;opacity:.8;margin:8px 0 4px;">アクセスパスワード <span id="roomConfigSelfPwStatus" style="opacity:.6;"></span></label>
+          <input id="roomConfigSelfPassword" type="password" autocomplete="new-password" placeholder="変更する場合のみ入力（空欄＝変更なし）" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-radius:8px;color:inherit;padding:9px;font-size:14px;" />
+        </div>
         <div id="roomConfigReceiptScheduleWrap" class="receipt-schedule-panel receipt-scope-option">
         <div id="roomConfigReceiptScheduleRoomWrap" class="receipt-schedule-row">
           <span>対象ルーム</span>
@@ -5929,6 +5935,9 @@
       roomConfigImageAnalysisReplyEnabled: document.getElementById('roomConfigImageAnalysisReplyEnabled'),
       roomConfigBudgetEntryEnabled: document.getElementById('roomConfigBudgetEntryEnabled'),
       roomConfigPettyReceiptAnalysisEnabled: document.getElementById('roomConfigPettyReceiptAnalysisEnabled'),
+      roomConfigSelfEnabled: document.getElementById('roomConfigSelfEnabled'),
+      roomConfigSelfPassword: document.getElementById('roomConfigSelfPassword'),
+      roomConfigSelfPwStatus: document.getElementById('roomConfigSelfPwStatus'),
       roomConfigReceiptCorrectionReplyEnabled: document.getElementById('roomConfigReceiptCorrectionReplyEnabled'),
       roomConfigNonReceiptImageReplyEnabled: document.getElementById('roomConfigNonReceiptImageReplyEnabled'),
       roomConfigMediaSaveEnabled: document.getElementById('roomConfigMediaSaveEnabled'),
@@ -8373,6 +8382,9 @@
         media_file_access_enabled: !!dom.roomConfigMediaAccess.checked,
         image_analysis_reply_enabled: !!(dom.roomConfigImageAnalysisReplyEnabled && dom.roomConfigImageAnalysisReplyEnabled.checked),
         budget_entry_enabled: !!(dom.roomConfigBudgetEntryEnabled && dom.roomConfigBudgetEntryEnabled.checked),
+        room_config_access_enabled: !!(dom.roomConfigSelfEnabled && dom.roomConfigSelfEnabled.checked),
+        room_config_password: (dom.roomConfigSelfPassword && dom.roomConfigSelfPassword.value)
+          ? String(dom.roomConfigSelfPassword.value) : undefined,
         petty_receipt_analysis_enabled: dom.roomConfigPettyReceiptAnalysisEnabled ? !!dom.roomConfigPettyReceiptAnalysisEnabled.checked : undefined,
         receipt_correction_reply_enabled: !!(dom.roomConfigReceiptCorrectionReplyEnabled && dom.roomConfigReceiptCorrectionReplyEnabled.checked),
         non_receipt_image_reply_enabled: !!(dom.roomConfigNonReceiptImageReplyEnabled && dom.roomConfigNonReceiptImageReplyEnabled.checked),
@@ -12037,6 +12049,13 @@
       if (dom.roomConfigBudgetEntryEnabled) {
         dom.roomConfigBudgetEntryEnabled.checked = !!config.budget_entry_enabled;
       }
+      if (dom.roomConfigSelfEnabled) {
+        dom.roomConfigSelfEnabled.checked = !!config.room_config_access_enabled;
+      }
+      if (dom.roomConfigSelfPassword) { dom.roomConfigSelfPassword.value = ''; }
+      if (dom.roomConfigSelfPwStatus) {
+        dom.roomConfigSelfPwStatus.textContent = config.room_config_password_set ? '（設定済み）' : '（未設定）';
+      }
       if (dom.roomConfigPettyReceiptAnalysisEnabled) {
         // 既定ON（未設定・旧データは true 扱い）
         dom.roomConfigPettyReceiptAnalysisEnabled.checked = config.petty_receipt_analysis_enabled !== false;
@@ -12893,6 +12912,10 @@
         payload.media_file_access_enabled = !!opts.overrideConfig.media_file_access_enabled;
         payload.image_analysis_reply_enabled = !!opts.overrideConfig.image_analysis_reply_enabled;
         payload.budget_entry_enabled = !!opts.overrideConfig.budget_entry_enabled;
+        payload.room_config_access_enabled = !!opts.overrideConfig.room_config_access_enabled;
+        if (opts.overrideConfig.room_config_password !== undefined) {
+          payload.room_config_password = opts.overrideConfig.room_config_password;
+        }
         payload.petty_receipt_analysis_enabled = opts.overrideConfig.petty_receipt_analysis_enabled !== false;
         payload.receipt_correction_reply_enabled = !!opts.overrideConfig.receipt_correction_reply_enabled;
         payload.non_receipt_image_reply_enabled = opts.overrideConfig.non_receipt_image_reply_enabled !== false;

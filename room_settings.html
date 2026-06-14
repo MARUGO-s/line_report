@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex,nofollow" />
+<title>ルーム設定</title>
+<link rel="icon" href="data:," />
+<style>
+  :root{
+    --bg:#0b0f17; --surface:#121826; --surface2:#1a2233; --border:#26314a;
+    --text:#e8edf6; --text2:#aab4c7; --text3:#7b87a0; --accent:#3b82f6; --ok:#22c55e; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Noto Sans JP",sans-serif;
+    -webkit-font-smoothing:antialiased;padding:16px;display:flex;justify-content:center}
+  .wrap{width:100%;max-width:560px}
+  h1{font-size:20px;font-weight:700;margin:8px 0 4px}
+  .sub{color:var(--text3);font-size:12.5px;margin-bottom:16px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:14px}
+  label.fld{display:block;font-size:12.5px;color:var(--text2);margin-bottom:6px}
+  input[type=password],input[type=time]{width:100%;background:var(--surface2);border:1px solid var(--border);
+    border-radius:10px;color:var(--text);padding:12px;font-size:15px}
+  button{font-family:inherit;border:none;border-radius:10px;padding:12px 16px;font-size:15px;font-weight:700;cursor:pointer}
+  .btn-primary{background:var(--accent);color:#fff;width:100%}
+  .btn-primary:disabled{opacity:.5;cursor:default}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 2px;border-bottom:1px solid var(--border)}
+  .row:last-child{border-bottom:none}
+  .row .name{font-size:14px}
+  .row .desc{font-size:11.5px;color:var(--text3);margin-top:2px}
+  .grp-title{font-size:12px;color:var(--text3);font-weight:700;margin:6px 0 2px;letter-spacing:.04em}
+  /* toggle */
+  .sw{position:relative;width:46px;height:28px;flex:0 0 auto}
+  .sw input{opacity:0;width:0;height:0}
+  .sw .track{position:absolute;inset:0;background:var(--surface2);border:1px solid var(--border);border-radius:999px;transition:.15s}
+  .sw .knob{position:absolute;top:3px;left:3px;width:20px;height:20px;background:#fff;border-radius:50%;transition:.15s}
+  .sw input:checked + .track{background:var(--accent);border-color:var(--accent)}
+  .sw input:checked + .track + .knob{transform:translateX(18px)}
+  .msg{font-size:13px;padding:10px 12px;border-radius:10px;margin-top:10px;display:none}
+  .msg.err{display:block;background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+  .msg.ok{display:block;background:rgba(34,197,94,.12);color:#86efac;border:1px solid rgba(34,197,94,.3)}
+  .hidden{display:none !important}
+  .timewrap{display:flex;align-items:center;gap:8px;margin:8px 0 2px;padding-left:2px}
+  .timewrap label{font-size:12.5px;color:var(--text2)}
+  .saving{opacity:.6;pointer-events:none}
+  .foot{margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ルーム設定</h1>
+  <div class="sub" id="roomLabel">このルームの Bot 機能を設定します</div>
+
+  <!-- パスワード入力 -->
+  <div class="card" id="loginCard">
+    <label class="fld" for="pw">アクセスパスワード（管理者から伝えられたもの）</label>
+    <input type="password" id="pw" autocomplete="off" inputmode="text" placeholder="パスワードを入力" />
+    <div class="foot"><button class="btn-primary" id="loginBtn">開く</button></div>
+    <div class="msg" id="loginMsg"></div>
+  </div>
+
+  <!-- 設定（ログイン後） -->
+  <div class="card hidden" id="configCard">
+    <div id="toggles"></div>
+    <div class="timewrap hidden" id="todayTimeWrap">
+      <label for="todayTime">本日の予約状況配信の時刻</label>
+      <input type="time" id="todayTime" />
+    </div>
+    <div class="foot"><button class="btn-primary" id="saveBtn">保存する</button></div>
+    <div class="msg" id="saveMsg"></div>
+  </div>
+</div>
+
+<script src="./pages-config.js"></script>
+<script>
+(function(){
+  'use strict';
+  var CFG = window.LINE_REPORT_PAGES || {};
+  var ANON = CFG.RECEIPT_ADMIN_ANON_KEY || '';
+  var SURFACE = CFG.ADMIN_SURFACE || 'line_report';
+  function apiUrl(path){ return CFG.receiptAdminApiUrl ? CFG.receiptAdminApiUrl(path) : (CFG.PROJECT_URL + '/functions/v1/admin-api' + path); }
+
+  var params = new URLSearchParams(location.search);
+  var lt = String(params.get('lt') || '').trim();
+  var roomId = String(params.get('room_id') || '').trim();
+  var SESSION_KEY = 'lr_roomcfg_session::' + roomId;
+  var sessionToken = '';
+  try { sessionToken = sessionStorage.getItem(SESSION_KEY) || ''; } catch(_e){}
+
+  // 編集可能な安全サブセット（admin-api の whitelist と一致）。
+  var GROUPS = [
+    { title:'AI会話・検索', items:[
+      ['bot_reply_enabled','AI会話返信'],
+      ['bot_reply_hard_mute_enabled','AI返信を完全に無しにする'],
+      ['message_search_enabled','会話検索'],
+      ['message_search_library_enabled','資料検索'],
+      ['send_room_summary','ルーム要約の配信'],
+      ['receive_overall_summary_enabled','全体要約レポートを受信'],
+    ]},
+    { title:'レシート・メディア', items:[
+      ['media_file_access_enabled','LINE添付ファイルの保存'],
+      ['media_save_enabled','メディアを保存'],
+      ['image_analysis_reply_enabled','レシート解析結果を送信'],
+      ['receipt_correction_reply_enabled','レシート修正の返信'],
+      ['non_receipt_image_reply_enabled','レシート以外の画像解析結果を送信'],
+      ['budget_entry_enabled','予算登録を許可'],
+      ['petty_receipt_analysis_enabled','小口レシートの解析'],
+      ['receipt_midreport_enabled','売上の中間報告'],
+      ['receipt_monthend_report_enabled','売上の月末レポート'],
+    ]},
+    { title:'予約・カレンダー', items:[
+      ['gmail_reservation_alert_enabled','Gmail予約通知'],
+      ['today_reservation_alert_enabled','本日の予約状況を配信'],
+      ['calendar_tomorrow_reminder_enabled','明日の予定を配信'],
+      ['calendar_ai_auto_create_enabled','予定の自動登録'],
+      ['calendar_silent_auto_register_enabled','無返信で自動登録'],
+      ['calendar_low_confidence_confirm_reply_enabled','低確度のときに確認返信'],
+      ['calendar_registration_reply_enabled','登録内容をLINEで返信'],
+    ]},
+  ];
+  var BOOL_KEYS = GROUPS.reduce(function(a,g){ return a.concat(g.items.map(function(i){return i[0];})); }, []);
+
+  var el = function(id){ return document.getElementById(id); };
+  function showMsg(node, text, kind){ node.textContent = text; node.className = 'msg ' + (kind||''); }
+
+  function authHeaders(withSession){
+    var h = { 'Content-Type':'application/json', 'apikey':ANON, 'Authorization':'Bearer '+ANON, 'x-admin-surface':SURFACE };
+    if (withSession && sessionToken) h['x-admin-token'] = sessionToken;
+    return h;
+  }
+
+  // ① パスワード＋lt でログイン
+  function login(){
+    var pw = el('pw').value;
+    if (!pw){ showMsg(el('loginMsg'),'パスワードを入力してください。','err'); return; }
+    if (!lt){ showMsg(el('loginMsg'),'リンクが無効です。LINEからもう一度「設定」を送ってください。','err'); return; }
+    el('loginBtn').disabled = true;
+    fetch(apiUrl('/auth/room-config-login'), {
+      method:'POST', headers:authHeaders(false),
+      body: JSON.stringify({ login_token: lt, password: pw, room_id: roomId, remember_login:false }),
+    }).then(function(r){ return r.json().then(function(b){ return {ok:r.ok,b:b}; }); })
+      .then(function(res){
+        el('loginBtn').disabled = false;
+        if (!res.ok || !res.b || !res.b.session_token){
+          showMsg(el('loginMsg'), (res.b && res.b.error) || 'リンクまたはパスワードが正しくありません。', 'err');
+          return;
+        }
+        sessionToken = res.b.session_token;
+        try { sessionStorage.setItem(SESSION_KEY, sessionToken); } catch(_e){}
+        // URL から lt を消す（履歴・再読込での誤再送防止）。
+        try { history.replaceState(null,'', location.pathname + '?room_id=' + encodeURIComponent(roomId)); } catch(_e){}
+        openConfig();
+      })
+      .catch(function(){ el('loginBtn').disabled = false; showMsg(el('loginMsg'),'通信に失敗しました。','err'); });
+  }
+
+  // ② 設定を読み込んで表示
+  function openConfig(){
+    el('loginCard').classList.add('hidden');
+    el('configCard').classList.remove('hidden');
+    fetch(apiUrl('/room-config?room_id=' + encodeURIComponent(roomId)), { headers: authHeaders(true) })
+      .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } return r.json(); })
+      .then(function(b){ renderToggles((b && b.room_config) || {}); })
+      .catch(function(e){ if (String(e && e.message)!=='auth') showMsg(el('saveMsg'),'設定の読み込みに失敗しました。','err'); });
+  }
+
+  function renderToggles(cfg){
+    var html = '';
+    GROUPS.forEach(function(g){
+      html += '<div class="grp-title">'+g.title+'</div>';
+      g.items.forEach(function(it){
+        var key = it[0], label = it[1];
+        var on = cfg[key] === true;
+        html += '<div class="row"><div class="name">'+label+'</div>'+
+          '<span class="sw"><input type="checkbox" data-key="'+key+'"'+(on?' checked':'')+' />'+
+          '<span class="track"></span><span class="knob"></span></span></div>';
+      });
+    });
+    el('toggles').innerHTML = html;
+    // 本日予約の時刻
+    var hour = cfg.today_reservation_alert_hour, min = cfg.today_reservation_alert_minute;
+    if (hour != null && min != null){
+      el('todayTime').value = ('0'+hour).slice(-2)+':'+('0'+min).slice(-2);
+    }
+    el('todayTimeWrap').classList.remove('hidden');
+  }
+
+  // ③ 保存
+  function save(){
+    var body = { room_id: roomId };
+    Array.prototype.forEach.call(document.querySelectorAll('#toggles input[type=checkbox]'), function(c){
+      body[c.getAttribute('data-key')] = c.checked;
+    });
+    var t = String(el('todayTime').value || '').trim();
+    if (t && /^\d{2}:\d{2}$/.test(t)){
+      body.today_reservation_alert_hour = parseInt(t.slice(0,2),10);
+      body.today_reservation_alert_minute = parseInt(t.slice(3,5),10);
+    }
+    el('configCard').classList.add('saving');
+    fetch(apiUrl('/room-config'), { method:'PUT', headers:authHeaders(true), body: JSON.stringify(body) })
+      .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } return r.json().then(function(b){return {ok:r.ok,b:b};}); })
+      .then(function(res){
+        el('configCard').classList.remove('saving');
+        if (!res.ok){ showMsg(el('saveMsg'), (res.b && res.b.error) || '保存に失敗しました。','err'); return; }
+        showMsg(el('saveMsg'),'✅ 保存しました。','ok');
+      })
+      .catch(function(e){ el('configCard').classList.remove('saving'); if (String(e&&e.message)!=='auth') showMsg(el('saveMsg'),'保存に失敗しました。','err'); });
+  }
+
+  function relogin(){
+    sessionToken = '';
+    try { sessionStorage.removeItem(SESSION_KEY); } catch(_e){}
+    el('configCard').classList.add('hidden');
+    el('loginCard').classList.remove('hidden');
+    showMsg(el('loginMsg'),'セッションが切れました。もう一度パスワードを入力してください。リンクが使用済みの場合はLINEから再度「設定」を送ってください。','err');
+  }
+
+  // 初期化
+  if (roomId) el('roomLabel').textContent = 'ルーム: ' + roomId;
+  el('loginBtn').addEventListener('click', login);
+  el('pw').addEventListener('keydown', function(e){ if (e.key==='Enter') login(); });
+  el('saveBtn').addEventListener('click', save);
+  // 既存セッションがあればパスワード入力を飛ばす（同タブ内の再表示）。
+  if (sessionToken){ openConfig(); }
+})();
+</script>
+</body>
+</html>
