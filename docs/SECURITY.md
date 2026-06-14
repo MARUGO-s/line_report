@@ -55,6 +55,15 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 
 > 新しく `verify_jwt=false` の関数を足すときは、関数側で必ず認可を実装すること。`config.toml` への `verify_jwt=false` 追記を忘れると新形式キーで毎分401になり**サイレント停止**する（過去に gmail-alert-cron で発生）。
 
+### 3.3 ルーム・セルフ設定（room_config スコープ・2026-06-15）
+店舗スタッフが**そのルーム1つだけ**の Bot 機能 ON/OFF を、フル管理者を介さず設定できる仕組み。店舗スコープ機構の「ルーム版」。
+- **二段ゲート**: LINEで「設定」送信→使い捨てリンク `lrlt_`(24h・単一使用・room_id 埋め込み) ＋ **ルーム個別パスワード**(`room_summary_settings.room_config_password_hash`・SHA-256)。`/auth/room-config-login` がパスワードを**定数時間照合**してから room スコープ session を発行。**誤パスワードでは lt を消費しない**（リトライ可・`/auth/room-config-login` は20回/分）。
+- **スコープ強制**: room スコープ session が触れるのは `/room-config`(GET/PUT) のみ（allowlist）。`/state`・`/settings/rooms`・他ルームは 403。`room_id` はサーバ側で session の scope に強制。
+- **安全サブセット whitelist**: 保存は機能トグルのみ反映。`bot_access_approved`(承認)・`receipt_report_store_partition_key`(集計店舗)・`is_enabled` 等の機微フィールドはクライアントが送っても**サーバ側で無視**（`ROOM_CONFIG_SAFE_BOOL_FIELDS`）。
+- **ハッシュ非露出**: `/state`・PUT応答から `room_config_password_hash` を除去し `room_config_password_set`(boolean) に置換（`stripRoomConfigSecret`）。
+- **有効化は管理者のみ**: `room_config_access_enabled` とパスワード設定はフル管理者の `PUT /settings/rooms` 経由（room スコープからは到達不可）。
+- 検証済み(2026-06-15): 誤パス401・正パス200・lt未消費・`/state`403・他ルーム403・機微フィールド無視 をデプロイ環境で実証。実装: `_shared/admin_dashboard_link_auth.ts`(exchangeRoomConfigLoginLink)・`admin-api/index.ts`・`_shared/room_config_link.ts`・`room_settings.html`。
+
 ---
 
 ## 4. LINE Webhook セキュリティ
