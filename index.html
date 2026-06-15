@@ -12386,6 +12386,8 @@
         }, built.permissionMode
           ? resolveCalendarGmailForRoomSave(roomId, true)
           : readCalendarGmailFromInlineModal());
+        // AIキルスイッチ(hard_mute)は全体デフォルトとしても一括伝播しない。各ルームの既存値を保持。
+        roomConfig.bot_reply_hard_mute_enabled = parseDatasetBoolean(tr.dataset.botReplyHardMuteEnabled, false);
         saveRoomReceiptSchedule(roomId, scheduleDraft);
         if (built.permissionMode) {
           csRemove(roomCalendarGmailSettingsStorageKey(roomId));
@@ -12436,7 +12438,8 @@
         ? resolveCalendarGmailForRoomSave(roomId, true)
         : readCalendarGmailFromInlineModal());
       applyRoomConfigStateToRow(tr, roomConfig);
-      await saveRoomRow(tr, { overrideConfig: roomConfig, reload: false });
+      // 単一ルーム保存だけが AIキルスイッチ(hard_mute)を実際に変更できる（per-roomの緊急ミュート/解除）。
+      await saveRoomRow(tr, { overrideConfig: roomConfig, reload: false, applyHardMute: true });
       setRoomConfigPriority(roomId, CONFIG_PRIORITY.ROOM);
       isRoomDirty = false;
       await safeLoadState();
@@ -12495,6 +12498,9 @@
         const roomConfig = Object.assign({}, nextConfig, built.permissionMode
           ? resolveCalendarGmailForRoomSave(roomId, true)
           : readCalendarGmailFromInlineModal());
+        // AIキルスイッチ(hard_mute)は店舗デフォルトとして一括伝播しない（2026-06-14の59ルーム一括ミュート障害の再発防止）。
+        // 各ルームの既存値を保持する（緊急ミュートの変更は per-room のモーダル保存だけ）。
+        roomConfig.bot_reply_hard_mute_enabled = parseDatasetBoolean(linkedRows[i].dataset.botReplyHardMuteEnabled, false);
         applyRoomConfigStateToRow(linkedRows[i], roomConfig);
         await saveRoomRow(linkedRows[i], { overrideConfig: roomConfig, reload: false });
         setRoomConfigPriority(roomId, CONFIG_PRIORITY.STORE);
@@ -12543,11 +12549,15 @@
       if (!tr) throw new Error('対象ルームが見つかりません。');
       const nextStoreKey = String(storeKey || '').trim();
       const config = getRoomConfigStateFromRow(tr);
+      // AIキルスイッチ(hard_mute)は店舗の集約デフォルトから引き継がない（他ルームのミュートが移らないように）。
+      // 割り当て対象ルーム自身の既存値を保持する。
+      const existingHardMute = !!config.bot_reply_hard_mute_enabled;
       config.receipt_report_store_partition_key = nextStoreKey;
       if (nextStoreKey) {
         const webhookDefaults = aggregateWebhookConfig(nextStoreKey);
         Object.assign(config, webhookDefaults, { receipt_report_store_partition_key: nextStoreKey });
       }
+      config.bot_reply_hard_mute_enabled = existingHardMute;
       applyRoomConfigStateToRow(tr, config);
       await saveRoomRow(tr, { overrideConfig: config });
       isRoomDirty = false;
@@ -12911,7 +12921,14 @@
       const payload = buildRoomSettingsPayloadFromRow(tr, visualIndex >= 0 ? visualIndex : 0);
       if (opts.overrideConfig && typeof opts.overrideConfig === 'object') {
         payload.bot_reply_enabled = !!opts.overrideConfig.bot_reply_enabled;
-        payload.bot_reply_hard_mute_enabled = !!opts.overrideConfig.bot_reply_hard_mute_enabled;
+        // AIキルスイッチ(bot_reply_hard_mute_enabled)は per-room の緊急ミュート専用。
+        // 店舗/全体デフォルトの一括伝播では絶対に配らない（2026-06-14: 店舗デフォルト保存が
+        // 連携59ルームを一括ミュートし「検索」含む全AI返信を停止させた本番障害の再発防止）。
+        // applyHardMute:true を明示した単一ルーム保存のときだけ override 値を適用し、
+        // それ以外は payload（=行/DBの既存値）をそのまま保持する。
+        if (opts.applyHardMute === true) {
+          payload.bot_reply_hard_mute_enabled = !!opts.overrideConfig.bot_reply_hard_mute_enabled;
+        }
         payload.message_search_enabled = !!opts.overrideConfig.message_search_enabled;
         payload.message_search_library_enabled = !!opts.overrideConfig.message_search_library_enabled;
         payload.send_room_summary = !!opts.overrideConfig.send_room_summary;
