@@ -64,7 +64,7 @@ type PettyCashItem = { n: string; p: number; acct: 'shokuzai' | 'shomohin' | 'al
 //   アルコール飲料 → alcohol、消耗品/衛生用品 → shomohin、それ以外 → shokuzai(食材)。
 //   ※「消毒用アルコール」等は飲料ではないので shomohin 側で先に拾う。
 const ALCOHOL_DRINK_RE = /(ビール|発泡酒|ワイン|シャンパン|スパークリング|日本酒|清酒|焼酎|ウイスキー|ウィスキー|ハイボール|サワー|酎ハイ|チューハイ|ジン|ウォッカ|ラム|テキーラ|リキュール|梅酒|ハウスワイン|生樽|樽生|地酒|スピリッツ|sake|beer|wine|whisky|whiskey|vodka|tequila)/i
-const SHOMOHIN_RE = /(洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|レジ袋|レジブクロ|買物袋|買い物袋|マイバッグ|ショッピングバッグ|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/
+const SHOMOHIN_RE = /(消耗品|日用品|雑貨|備品|事務用品|洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|レジ袋|レジブクロ|買物袋|買い物袋|マイバッグ|ショッピングバッグ|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/
 function classifyPettyAcct(name: string): 'shokuzai' | 'shomohin' | 'alcohol' {
   const s = String(name ?? '')
   if (SHOMOHIN_RE.test(s)) return 'shomohin'
@@ -214,10 +214,16 @@ export function extractExpenseFromReceipt(
 
   // 品目内訳（勘定科目・税率）。優先: ⓪整合チェックの採用配分 → ①税率別集計 → ②軽減税率印(rate=8) → ③品名推定。
   //   税率=8 は「酒類を除く飲食料品」の証拠なので科目=食材で確定。10% は科目を品名から推定。
+  // 【Seria（100円ショップ）確定補正】Web版OCR(Groq)は store_name=Seria の識別はできても税率を
+  //   rate=8 と取りこぼすことがある（小型モデルの追従限界）。Seria の商品は軽減税率の対象外＝全品10%で
+  //   確定なので、store_name で検知したら rate を 10 に上書きする（rate=8 強制による科目「食材」化と
+  //   外税8%上乗せの不一致を根本回避）。プロンプト側のSeriaブロックと二重の安全網。
+  const isSeriaVendor = /(seria|セリア)/i.test(String(receipt?.storeName ?? ''))
   const itemEntries = itemRows.map((i, idx) => {
     const p = i.amount != null && i.amount > 0 ? i.amount : 0
     let rate: 8 | 10
-    if (chosenRateOf) rate = chosenRateOf(idx)
+    if (isSeriaVendor) rate = 10
+    else if (chosenRateOf) rate = chosenRateOf(idx)
     else if (bdRateByIndex.has(idx)) rate = bdRateByIndex.get(idx)!
     else if (i.rate === 8 || i.rate === 10) rate = i.rate
     else rate = defaultPettyRate(classifyPettyAcct(i.name))
@@ -259,6 +265,11 @@ export function extractExpenseFromReceipt(
   else if (itemsSum > 0) { base = itemsSum; amount = itemsSum + tax }
   else if (gross != null && gross > 0) { amount = gross; base = Math.max(0, gross - tax) }
   if (base == null || amount == null || amount <= 0) return null
+  if (isSeriaVendor && amount > 0) {
+    // Seria は全品10%・税込。受領額(amount=税込総額)から本体/税を10%で確定し、明細＋税＝受領額 を保証（不一致警告を出さない）。
+    taxResolved = amount - Math.round(amount / 1.1)
+    base = amount - taxResolved
+  }
   const safeTax = Math.min(taxResolved, amount)
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
   const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
