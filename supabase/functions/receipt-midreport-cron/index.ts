@@ -17,6 +17,13 @@ function constantTimeEqual(a: string, b: string): boolean {
   for (let i = 0; i < ba.length; i++) diff |= ba[i] ^ bb[i];
   return diff === 0;
 }
+// コピー&ペースト由来の不可視文字（全角空白・ゼロ幅文字・改行等）を除去する。
+// LINEトークンはASCIIのみ。混入すると fetch が "is not a valid ByteString" 例外で
+// push が沈黙する（2026-06 bistrocavacava 移管時の実障害。_shared/line_client.ts・
+// gmail-alert-cron・reservation-today-cron と同じ対策。この関数だけ未適用だった）。
+function sanitizeLineToken(raw) {
+  return String(raw ?? "").replace(/[^\x21-\x7e]/g, "");
+}
 
 Deno.serve(async (req)=>{
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -68,8 +75,8 @@ Deno.serve(async (req)=>{
       const results = [];
       for (const k of Array.from(storeKeys).sort()){
         const envKey = `LINE_CHANNEL_ACCESS_TOKEN__${String(k).replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`;
-        const perStore = String(Deno.env.get(envKey) ?? "").trim();
-        const token = perStore || lineAccessToken;
+        const perStore = sanitizeLineToken(Deno.env.get(envKey));
+        const token = perStore || sanitizeLineToken(lineAccessToken);
         const tokenSource = perStore ? "per_store" : "fallback";
         let status = 0;
         let ok = false;
@@ -189,10 +196,10 @@ Deno.serve(async (req)=>{
   const key = String(storeKey ?? "").trim();
   if (key) {
     const envKey = `LINE_CHANNEL_ACCESS_TOKEN__${key.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`;
-    const perStore = String(Deno.env.get(envKey) ?? "").trim();
+    const perStore = sanitizeLineToken(Deno.env.get(envKey));
     if (perStore) return perStore;
   }
-  return fallbackToken;
+  return sanitizeLineToken(fallbackToken);
 }
 async function dispatchReceiptReport(supabase, lineAccessToken, schedule, targetRoomIds, now) {
   const { data: existingRows, error: existingError } = await supabase.from("line_receipt_mid_reports").select("room_id").eq("report_month", schedule.reportMonth).eq("report_kind", schedule.reportKind).in("room_id", targetRoomIds);
