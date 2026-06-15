@@ -39,6 +39,7 @@
 | [ROOM-PERMISSION-TEST-CHECKLIST.md](./ROOM-PERMISSION-TEST-CHECKLIST.md) | QA | 権限・Webhook 設定の動作確認 |
 | [LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md) | 運用・開発 | レシート OCR・店舗 Webhook・保存フロー |
 | [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md) | 運用・開発 | Gmail 予約 → LINE（**会話検索とは別**） |
+| [スプレッドシート売上バックアップ-GAS.md](./スプレッドシート売上バックアップ-GAS.md) | 運用・開発 | 全店舗売上スプレッドシートの毎日バックアップ（GAS・6時同期後に日付名コピー）。コード＋トリガー手順＋確定構成 |
 | [README.md](../README.md) | — | **レガシー**（旧 LINE-WINE ローカルアプリ）。本番 LINE レポートは README-PAGES を参照 |
 | [ocr-bridge/README.md](../ocr-bridge/README.md) | 開発 | OCR ブリッジ |
 | [cloudflare-worker/README.md](../cloudflare-worker/README.md) | 開発 | Cloudflare Worker（Webhook 入口の代替） |
