@@ -36,6 +36,76 @@ Deno.serve(async (req)=>{
       lineAccessToken
     });
   }
+  // 非侵襲トークン点検（preflight）: LINE メッセージは一切送らない。
+  // 各店舗の解決済みチャネルアクセストークンを /v2/bot/info（読み取り専用）で検証し、
+  // 中間/月末レポートの push が成功し得るかを事前確認する。通常cron経路には影響しない。
+  // 認可は本処理と同じ CRON_AUTH_TOKEN ゲート（設定時のみ必須・フェイルクローズ）。
+  {
+    const preflightUrl = new URL(req.url);
+    const preflightFlag = String(preflightUrl.searchParams.get("preflight") ?? "").trim().toLowerCase();
+    if (preflightFlag === "1" || preflightFlag === "true" || preflightFlag === "yes" || preflightFlag === "on") {
+      const pfToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim();
+      if (pfToken) {
+        const pfBearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+        if (!constantTimeEqual(pfBearer, pfToken)) {
+          return json({ ok: false, error: "unauthorized" }, 401);
+        }
+      }
+      const pfSupabase = createClient(supabaseUrl, serviceRoleKey);
+      const { data: pfRooms, error: pfErr } = await pfSupabase
+        .from("room_summary_settings")
+        .select("receipt_report_store_partition_key, receipt_midreport_enabled, receipt_monthend_report_enabled");
+      if (pfErr) {
+        return json({ ok: false, mode: "preflight_token_check", error: `Failed to load room_summary_settings: ${pfErr.message}` }, 500);
+      }
+      const storeKeys = new Set();
+      for (const r of (Array.isArray(pfRooms) ? pfRooms : [])) {
+        const enabled = r?.receipt_midreport_enabled !== false || r?.receipt_monthend_report_enabled !== false;
+        if (!enabled) continue;
+        const k = String(r?.receipt_report_store_partition_key ?? "").trim();
+        if (k) storeKeys.add(k);
+      }
+      const results = [];
+      for (const k of Array.from(storeKeys).sort()){
+        const envKey = `LINE_CHANNEL_ACCESS_TOKEN__${String(k).replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`;
+        const perStore = String(Deno.env.get(envKey) ?? "").trim();
+        const token = perStore || lineAccessToken;
+        const tokenSource = perStore ? "per_store" : "fallback";
+        let status = 0;
+        let ok = false;
+        let basicId = null;
+        let displayName = null;
+        if (!token) {
+          status = 0;
+          ok = false;
+        } else {
+          try {
+            const resp = await fetch("https://api.line.me/v2/bot/info", { headers: { Authorization: `Bearer ${token}` } });
+            status = resp.status;
+            ok = resp.ok;
+            const j = await resp.json().catch(()=>null);
+            if (j && typeof j === "object") {
+              basicId = j.basicId ?? null;
+              displayName = j.displayName ?? null;
+            }
+          } catch (_e) {
+            status = -1;
+            ok = false;
+          }
+        }
+        results.push({ store_key: k, token_source: tokenSource, bot_info_status: status, ok, basic_id: basicId, display_name: displayName });
+      }
+      return json({
+        mode: "preflight_token_check",
+        note: "No LINE messages were sent. Validated channel access tokens via GET /v2/bot/info.",
+        checked: results.length,
+        ok_count: results.filter((r)=>r.ok).length,
+        ng_count: results.filter((r)=>!r.ok).length,
+        fallback_count: results.filter((r)=>r.token_source === "fallback").length,
+        stores: results
+      }, 200);
+    }
+  }
   // 定期実行(本処理)の認可: CRON_AUTH_TOKEN 設定時のみ Bearer 一致を必須化（フェイルクローズ）。
   // 未設定の間は従来どおり通す＝pg_cron を壊さない。有効化は CRON_AUTH_TOKEN を vault と Edge secret の両方に同値設定。
   const mainCronAuthToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim();
