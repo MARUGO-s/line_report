@@ -113,6 +113,43 @@ Deno.serve(async (req)=>{
       }, 200);
     }
   }
+  // 管理者へのLINE通知（notify）: スケジュールタスク等から検証レポートを管理者LINEへ送るための内部用。
+  // body: { message: string, dry?: boolean }。dry=true なら送信せず宛先(マスク)のみ返す。
+  // 宛先=LINE_USER_APPROVAL_ADMIN_USER_IDS、送信元=管理Botトークン(LINE_CHANNEL_ACCESS_TOKEN__ADMIN・サニタイズ)。
+  // 認可は本処理と同じ CRON_AUTH_TOKEN ゲート。通常cron経路には影響しない（追加early-returnブランチ）。
+  {
+    const notifyUrl = new URL(req.url);
+    const notifyFlag = String(notifyUrl.searchParams.get("notify") ?? "").trim().toLowerCase();
+    if (notifyFlag === "1" || notifyFlag === "true" || notifyFlag === "yes" || notifyFlag === "on") {
+      const nfToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim();
+      if (nfToken) {
+        const nfBearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+        if (!constantTimeEqual(nfBearer, nfToken)) {
+          return json({ ok: false, error: "unauthorized" }, 401);
+        }
+      }
+      let parsed: any = {};
+      try { parsed = await req.json(); } catch (_e) { parsed = {}; }
+      const message = String(parsed?.message ?? "").trim();
+      const dry = parsed?.dry === true || parsed?.dry === "1" || parsed?.dry === 1;
+      const adminToken = sanitizeLineToken(Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN__ADMIN"));
+      const adminIdsRaw = String(Deno.env.get("LINE_USER_APPROVAL_ADMIN_USER_IDS") ?? "").trim();
+      const adminIds = Array.from(new Set(adminIdsRaw.split(/[,\s]+/).map((s)=>s.trim()).filter((s)=>s.startsWith("U"))));
+      const maskId = (id)=> String(id).length > 12 ? `${String(id).slice(0, 7)}…${String(id).slice(-4)}` : String(id);
+      if (dry) {
+        return json({ mode: "notify_admin_dry", recipients: adminIds.length, masked_ids: adminIds.map(maskId), has_admin_token: !!adminToken }, 200);
+      }
+      if (!message) return json({ ok: false, mode: "notify_admin", error: "message is empty" }, 400);
+      if (!adminToken) return json({ ok: false, mode: "notify_admin", error: "missing LINE_CHANNEL_ACCESS_TOKEN__ADMIN" }, 200);
+      if (!adminIds.length) return json({ ok: false, mode: "notify_admin", error: "no admin user ids configured" }, 200);
+      const sendResults = [];
+      for (const uid of adminIds){
+        const r = await sendLinePushMessages(uid, [{ type: "text", text: message.slice(0, 4900) }], adminToken);
+        sendResults.push({ to: maskId(uid), ok: r.ok, error: r.ok ? undefined : r.error });
+      }
+      return json({ mode: "notify_admin", recipients: adminIds.length, sent: sendResults.filter((r)=>r.ok).length, failed: sendResults.filter((r)=>!r.ok).length, results: sendResults }, 200);
+    }
+  }
   // 定期実行(本処理)の認可: CRON_AUTH_TOKEN 設定時のみ Bearer 一致を必須化（フェイルクローズ）。
   // 未設定の間は従来どおり通す＝pg_cron を壊さない。有効化は CRON_AUTH_TOKEN を vault と Edge secret の両方に同値設定。
   const mainCronAuthToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim();
