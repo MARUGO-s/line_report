@@ -132,7 +132,11 @@ Deno.serve(async (req)=>{
       try { parsed = await req.json(); } catch (_e) { parsed = {}; }
       const message = String(parsed?.message ?? "").trim();
       const dry = parsed?.dry === true || parsed?.dry === "1" || parsed?.dry === 1;
-      const adminToken = sanitizeLineToken(Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN__ADMIN"));
+      // 送信元チャネル: body.via で店舗キー指定（既定 admin）。LINE user_id はチャネル単位＝
+      // 相手が友だち追加しているBotからしか届かないため、宛先が友だちのチャネルを選べるようにする。
+      const viaStore = String(parsed?.via ?? "admin").trim().toLowerCase();
+      const viaEnvKey = `LINE_CHANNEL_ACCESS_TOKEN__${viaStore.replace(/[^a-zA-Z0-9_]/g, "_").toUpperCase()}`;
+      const adminToken = sanitizeLineToken(Deno.env.get(viaEnvKey));
       const adminIdsRaw = String(Deno.env.get("LINE_USER_APPROVAL_ADMIN_USER_IDS") ?? "").trim();
       const adminIds = Array.from(new Set(adminIdsRaw.split(/[,\s]+/).map((s)=>s.trim()).filter((s)=>s.startsWith("U"))));
       // 宛先絞り込み: body.to が指定されたら、許可リスト(adminIds)内で前方一致するIDのみに限定。
@@ -141,10 +145,10 @@ Deno.serve(async (req)=>{
       const targetIds = toFilter ? adminIds.filter((id)=> id === toFilter || id.startsWith(toFilter)) : adminIds;
       const maskId = (id)=> String(id).length > 12 ? `${String(id).slice(0, 7)}…${String(id).slice(-4)}` : String(id);
       if (dry) {
-        return json({ mode: "notify_admin_dry", to_filter: toFilter || null, recipients: targetIds.length, masked_ids: targetIds.map(maskId), all_admin_count: adminIds.length, has_admin_token: !!adminToken }, 200);
+        return json({ mode: "notify_admin_dry", via: viaStore, to_filter: toFilter || null, recipients: targetIds.length, masked_ids: targetIds.map(maskId), all_admin_count: adminIds.length, has_from_token: !!adminToken }, 200);
       }
       if (!message) return json({ ok: false, mode: "notify_admin", error: "message is empty" }, 400);
-      if (!adminToken) return json({ ok: false, mode: "notify_admin", error: "missing LINE_CHANNEL_ACCESS_TOKEN__ADMIN" }, 200);
+      if (!adminToken) return json({ ok: false, mode: "notify_admin", error: `missing ${viaEnvKey}` }, 200);
       if (!adminIds.length) return json({ ok: false, mode: "notify_admin", error: "no admin user ids configured" }, 200);
       if (!targetIds.length) return json({ ok: false, mode: "notify_admin", error: `to filter '${toFilter}' matched no configured admin id` }, 200);
       const sendResults = [];
