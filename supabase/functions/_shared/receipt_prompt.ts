@@ -229,6 +229,16 @@ function buildClaudia2BuiltinPrompt(): string {
   ].join('\n')
 }
 
+/** マルゴ系 共通。POSの「売上点検[期間]」等＝複数日にまたがる期間集計レポートを「1日の売上」として登録させない。 */
+function buildMarugoGroupBuiltinPrompt(): string {
+  return [
+    '【マルゴ系 共通・「売上点検[期間]」等の期間集計レポートは“1日の売上”ではない（最優先）】',
+    '・POSの点検/精算レポートのうち「日付範囲 開始:◯ 終了:◯」と複数日にまたがる期間集計（タイトルに「売上点検[期間]」「[期間]」「取引別点検」、本文に「収集ターミナルID」「分析レベル:合計値」「会計組数・客数」等が並ぶ）は、その期間ぶんの合計であって**1日の売上レシートではない**。',
+    '・この期間集計レポートだと判断したら、**summary に必ず「期間集計レポート」という語をそのまま含める**こと（例: "期間集計レポート 売上点検[期間] 2026/06/01〜06/15 総売上¥4,924,090"）。kind は receipt のままでよいが、純売上/総売上/組数/客数を「1日の売上」として絶対に登録に使わない（期間合計を1日に積むと売上が大幅に水増しになる）。',
+    '・判定の決め手は「日付範囲（開始◯〜終了◯）が複数日」または「タイトルの[期間]」。**単一日付の日計（[日計]や1日ぶんの精算レシート）は従来どおり通常の売上として扱う**（[期間]や開始〜終了の範囲が無ければ期間集計ではない＝マーカーを付けない）。',
+  ].join('\n')
+}
+
 /**
  * コード側に常駐する店舗固有のレシート解析ルール（恒久・UIで消えない）。
  * DB追記より優先で先頭に置く。例: 鮨こるりは手書きの「売上日報」をレシート扱いにする必要がある。
@@ -237,6 +247,17 @@ const STORE_BUILTIN_RECEIPT_PROMPT_BUILDERS: Record<string, () => string> = {
   sushikoruri: buildSushikoruriBuiltinPrompt,
   barpelota: buildBarpelotaBuiltinPrompt,
   claudia2: buildClaudia2BuiltinPrompt,
+  // マルゴ系（同一POS）: 期間集計レポートの誤登録防止。単一日の日計はそのまま売上として扱う。
+  marugo: buildMarugoGroupBuiltinPrompt,
+  marugod: buildMarugoGroupBuiltinPrompt,
+  marugos: buildMarugoGroupBuiltinPrompt,
+  marugogrande: buildMarugoGroupBuiltinPrompt,
+  marugomarunouchi: buildMarugoGroupBuiltinPrompt,
+  marugootto: buildMarugoGroupBuiltinPrompt,
+  marugosecond: buildMarugoGroupBuiltinPrompt,
+  marugoshinbashi: buildMarugoGroupBuiltinPrompt,
+  marugoyotsuya: buildMarugoGroupBuiltinPrompt,
+  yakinikumarugo: buildMarugoGroupBuiltinPrompt,
 }
 
 /** 指定店舗のコード常駐ルール（無ければ空文字）。 */
