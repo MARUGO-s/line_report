@@ -56,6 +56,7 @@ const KIND_TRIGGERS: Record<SearchKind, string[]> = {
 const POSTBACK_MENU = 'srch=menu'
 const POSTBACK_PREFIX = 'srch='
 const POSTBACK_CANCEL = 'srch=cancel'
+const POSTBACK_HELP = 'srch=help'
 
 const GROUP_OTHER_SEARCH_TEXT =
   '会話検索・予定検索・メディア検索は、Botを友だち追加した1対1トークでもできます。' +
@@ -153,7 +154,7 @@ function resolveSearchScopeRoomId(roomId: string): string | null {
   return isDirectMessageRoomId(roomId) ? null : roomId
 }
 
-function isLineSearchPostbackAction(action: SearchKind | 'menu' | 'cancel' | null): boolean {
+function isLineSearchPostbackAction(action: SearchKind | 'menu' | 'cancel' | 'help' | null): boolean {
   return action !== null
 }
 
@@ -164,10 +165,11 @@ function isLineSearchIntentText(text: string, flags: RoomSearchFlags | null): bo
   return !!(salesInput && (flags.receipt_midreport_enabled || flags.receipt_monthend_report_enabled))
 }
 
-function parsePostbackKind(data: string): SearchKind | 'menu' | 'cancel' | null {
+function parsePostbackKind(data: string): SearchKind | 'menu' | 'cancel' | 'help' | null {
   const raw = String(data ?? '').trim()
   if (raw === POSTBACK_MENU) return 'menu'
   if (raw === POSTBACK_CANCEL) return 'cancel'
+  if (raw === POSTBACK_HELP) return 'help'
   if (!raw.startsWith(POSTBACK_PREFIX)) return null
   const kind = raw.slice(POSTBACK_PREFIX.length)
   if (kind === 'msg' || kind === 'message') return 'message'
@@ -615,26 +617,32 @@ function buildGroupSalesSearchGuideFlex(flags: RoomSearchFlags): Record<string, 
     },
   }
 
+  const footerButtons: Array<Record<string, unknown>> = []
   if (salesEnabled) {
-    bubble.footer = {
-      type: 'box',
-      layout: 'vertical',
-      spacing: 'sm',
-      paddingAll: '12px',
-      contents: [
-        {
-          type: 'button',
-          style: 'primary',
-          height: 'sm',
-          action: {
-            type: 'postback',
-            label: '売上（レシート）を検索する',
-            data: 'srch=sal',
-            displayText: '売上検索',
-          },
-        },
-      ],
-    }
+    footerButtons.push({
+      type: 'button',
+      style: 'primary',
+      height: 'sm',
+      action: {
+        type: 'postback',
+        label: '売上（レシート）を検索する',
+        data: 'srch=sal',
+        displayText: '売上検索',
+      },
+    })
+  }
+  footerButtons.push({
+    type: 'button',
+    style: 'secondary',
+    height: 'sm',
+    action: { type: 'postback', label: '📖 使い方（全機能）', data: POSTBACK_HELP, displayText: '使い方' },
+  })
+  bubble.footer = {
+    type: 'box',
+    layout: 'vertical',
+    spacing: 'sm',
+    paddingAll: '12px',
+    contents: footerButtons,
   }
 
   return {
@@ -706,6 +714,43 @@ function buildSearchEntryReply(
   return buildSearchMenuFlex(flags)
 }
 
+/** 全機能の使い方を1枚にまとめた案内（「使い方」ボタン／help postback で返す）。文脈に依らず安全な情報表示のみ。 */
+function buildAllFeaturesGuideFlex(): Record<string, unknown> {
+  const h = (text: string): Record<string, unknown> => ({ type: 'text', text, weight: 'bold', size: 'sm', wrap: true, margin: 'md' })
+  const d = (text: string): Record<string, unknown> => ({ type: 'text', text, size: 'xs', color: '#666666', wrap: true, margin: 'xs' })
+  return {
+    type: 'flex',
+    altText: '使い方ガイド（できること一覧）',
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '16px',
+        contents: [
+          { type: 'text', text: '📖 使い方ガイド', weight: 'bold', size: 'lg', wrap: true },
+          { type: 'text', text: 'このBotでできること一覧です。', size: 'xs', color: '#888888', wrap: true, margin: 'sm' },
+          h('🔍 検索（1対1トーク）'),
+          d('「検索」と送ると 会話／予定／メディア／売上 のボタンが出ます。種類を選んでキーワードを送ると結果が返ります。売上は日付8桁(例 20260521)・月6桁(例 202605)。'),
+          h('🧾 レシート → 売上（店舗トーク）'),
+          d('レシート画像を送ると自動で売上登録。「この結果を修正」で修正、削除も可能です。'),
+          h('💰 予算登録（店舗トーク）'),
+          d('「予算登録」と送ると会話形式で月予算を登録できます（有効なルームのみ）。'),
+          h('⚙️ 設定（店舗トーク）'),
+          d('「設定」と送るとそのルームの権限設定ページのリンクが届きます（有効なルームのみ）。'),
+          h('📊 自動レポート'),
+          d('中間（毎月16日10時）・月末（翌月1日10時）に売上集計を自動でお届けします。'),
+          h('📅 予約通知'),
+          d('Gmail予約・当日予約を自動でLINE通知します。'),
+          h('🆔 自分のID'),
+          d('「ID確認」と送ると自分のユーザーIDを表示します（管理Bot）。'),
+        ],
+      },
+    },
+  }
+}
+
 function buildSearchMenuFlex(flags: RoomSearchFlags): Record<string, unknown> {
   const buttons: Array<Record<string, unknown>> = []
 
@@ -725,6 +770,12 @@ function buildSearchMenuFlex(flags: RoomSearchFlags): Record<string, unknown> {
   addBtn('予定検索', 'srch=cal', kindAllowed(flags, 'calendar'))
   addBtn('メディア検索', 'srch=med', kindAllowed(flags, 'media'))
   addBtn('売上検索', 'srch=sal', kindAllowed(flags, 'sales'))
+  buttons.push({
+    type: 'button',
+    style: 'secondary',
+    height: 'sm',
+    action: { type: 'postback', label: '📖 使い方（全機能）', data: POSTBACK_HELP, displayText: '使い方' },
+  })
 
   return {
     type: 'flex',
@@ -1728,6 +1779,15 @@ export async function handleLineSearchPostback(
       )
       return { handled: true, replied: result.ok }
     }
+    if (action === 'help') {
+      const result = await replyLineMessages(
+        replyToken,
+        [buildAllFeaturesGuideFlex()],
+        accessToken,
+        logCtx,
+      )
+      return { handled: true, replied: result.ok }
+    }
     if (action === 'menu') {
       const payload = buildSearchEntryReply(flags, event, roomId)
       const result = await replyLineMessages(
@@ -1772,6 +1832,16 @@ export async function handleLineSearchPostback(
     const result = await replyLineMessages(
       replyToken,
       [{ type: 'text', text: '検索をキャンセルしました。' }],
+      accessToken,
+      logCtx,
+    )
+    return { handled: true, replied: result.ok }
+  }
+
+  if (action === 'help') {
+    const result = await replyLineMessages(
+      replyToken,
+      [buildAllFeaturesGuideFlex()],
       accessToken,
       logCtx,
     )
