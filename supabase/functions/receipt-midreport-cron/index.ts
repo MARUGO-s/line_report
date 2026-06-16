@@ -202,13 +202,17 @@ Deno.serve(async (req)=>{
       const d = override && row.receipt_midreport_day != null ? Number(row.receipt_midreport_day) : 16;
       const h = override && row.receipt_midreport_hour != null ? Number(row.receipt_midreport_hour) : REPORT_RUN_HOUR_JST;
       const m = override && row.receipt_midreport_minute != null ? Number(row.receipt_midreport_minute) : REPORT_RUN_MINUTE_JST;
-      if (jst.day === d && jst.hour === h && jst.minute === m) midRoomIds.push(roomId);
+      // 「分ピッタリ一致(=== m)」だと、pg_netの配送遅延や関数のcold startで 10:00:00〜10:00:59 の枠に
+      //   処理が入らないと取りこぼし、以降は分が進んで二度と発火しなかった（2026-06-16 16日10:00で実際に未送信）。
+      //   そこで「指定時刻〜その時間の終わりまで(>= m, 同一時)」の窓に広げる。重複送信は冪等キー
+      //   (report_month, report_kind, room_id) が防ぎ、送信失敗時は予約行を消すので次tickで自動リトライ。
+      if (jst.day === d && jst.hour === h && jst.minute >= m) midRoomIds.push(roomId);
     }
     if (row.receipt_monthend_report_enabled !== false) {
       const d = override && row.receipt_monthend_day != null ? Number(row.receipt_monthend_day) : 1;
       const h = override && row.receipt_monthend_hour != null ? Number(row.receipt_monthend_hour) : REPORT_RUN_HOUR_JST;
       const m = override && row.receipt_monthend_minute != null ? Number(row.receipt_monthend_minute) : REPORT_RUN_MINUTE_JST;
-      if (jst.day === d && jst.hour === h && jst.minute === m) monthendRoomIds.push(roomId);
+      if (jst.day === d && jst.hour === h && jst.minute >= m) monthendRoomIds.push(roomId);
     }
   }
 
