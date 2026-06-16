@@ -521,7 +521,9 @@ function buildScheduleSliceForKind(kind, jst) {
     return {
       reportKind: "mid_month",
       reportTitle: RECEIPT_MID_REPORT_TITLE,
-      triggerType: "per_room_schedule",
+      // trigger_type は line_receipt_mid_reports の CHECK 制約の許可値に合わせる
+      //   （per-roomスケジュール化で "per_room_schedule" を入れていたが未許可値でINSERT失敗＝送信ゼロの真因）。
+      triggerType: "day15_post",
       reportMonth,
       periodStartDate: reportMonth,
       periodEndDate: toJstDateString(jst.year, jst.month, 15),
@@ -537,7 +539,7 @@ function buildScheduleSliceForKind(kind, jst) {
   return {
     reportKind: "month_end",
     reportTitle: RECEIPT_MONTH_END_REPORT_TITLE,
-    triggerType: "per_room_schedule",
+    triggerType: "month_end_post", // CHECK制約の許可値（per_room_schedule は未許可）
     reportMonth,
     periodStartDate: reportMonth,
     periodEndDate: toJstDateString(prev.year, prev.month, monthLastDay),
