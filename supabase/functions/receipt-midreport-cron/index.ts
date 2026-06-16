@@ -310,10 +310,18 @@ async function dispatchReceiptReport(supabase, lineAccessToken, schedule, target
     });
     const sendResult = await sendLinePushMessages(roomId, reportMessages, resolveStoreLineToken(storePartitionKey, lineAccessToken));
     if (!sendResult.ok) {
-      // 送信失敗時は予約行を取り消し、次回起動で再送できるようにする
-      try {
-        await supabase.from("line_receipt_mid_reports").delete().eq("report_month", schedule.reportMonth).eq("report_kind", schedule.reportKind).eq("room_id", roomId);
-      } catch (_e) {}
+      // 恒久エラー(LINE 400系=友だち解除/Bot退出/無効ルーム等の宛先不達)は再送しても直らないので予約行を残す
+      //   ＝同じ部屋を毎分リトライしない（minute>=m の窓中ずっと無駄打ちするのを防ぐ）。
+      //   一時エラー(429レート制限/5xx/タイムアウト)だけ予約行を消して次tickで自動再送。
+      const errStr = String(sendResult.error ?? "");
+      const codeMatch = errStr.match(/\((\d{3})\)/);
+      const code = codeMatch ? Number(codeMatch[1]) : 0;
+      const permanent = code >= 400 && code < 500 && code !== 429;
+      if (!permanent) {
+        try {
+          await supabase.from("line_receipt_mid_reports").delete().eq("report_month", schedule.reportMonth).eq("report_kind", schedule.reportKind).eq("room_id", roomId);
+        } catch (_e) {}
+      }
       errors.push(`${roomId}: ${sendResult.error}`);
       continue;
     }
