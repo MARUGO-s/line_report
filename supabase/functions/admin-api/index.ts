@@ -7386,16 +7386,22 @@ async function invokeReceiptMidreportCronTestSend(opts: {
   if (opts.month != null) url.searchParams.set("month", String(opts.month))
   if (opts.storePartitionKey) url.searchParams.set("store_partition_key", opts.storePartitionKey)
 
-  /** Edge の JWT 検証: `apikey` は anon、`Authorization` は service_role が推奨（両方 service で 401 になる環境がある） */
+  // Edge ゲートウェイは verify_jwt=false でも「Authorization に無効なJWTを載せた」リクエストを関数到達前に 401 で弾く。
+  // service_role を Bearer に載せると環境（新APIキー方式への移行後など service_role/anon が非JWTになると）に
+  // よっては無効JWT扱いで 401(deployment_id=null) になり、テスト経路に到達しない。本番ログ＋pg_net 再現で、
+  // (a) 無認証 (b) apikey のみ のいずれも関数に到達（403=鍵未指定）することを確認済み。
+  // テスト経路の認可は X-Receipt-Midreport-Test-Key（admin-api と cron で同一シークレット）で行うため、
+  // Authorization は付けない。apikey は anon があれば付与（無くても匿名通過するので必須ではない）。
   const anonKey = (Deno.env.get("SUPABASE_ANON_KEY") ?? "").trim()
+
+  const headers: Record<string, string> = {
+    "X-Receipt-Midreport-Test-Key": opts.testKey,
+  }
+  if (anonKey) headers["apikey"] = anonKey
 
   const res = await fetch(url.toString(), {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${opts.serviceRoleKey}`,
-      apikey: anonKey || opts.serviceRoleKey,
-      "X-Receipt-Midreport-Test-Key": opts.testKey,
-    },
+    headers,
   })
   const text = await res.text()
   let payload: unknown
