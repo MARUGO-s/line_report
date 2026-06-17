@@ -16,16 +16,22 @@ function receiptDateIsAfterProgressDate(dateKey, progressThroughDate) {
   if (!progressThroughDate || !/^\d{4}-\d{2}-\d{2}$/.test(progressThroughDate)) return false;
   return dateKey > progressThroughDate;
 }
+/** 正の重みを取り出す（未設定/0以下は既定値）。曜日別モデルは _shared/receipt_reply_context.ts と同一既定。 */
+function parsePositiveBudgetWeight(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 async function fetchSalesBudgetRow(supabase, storePartitionKey, targetMonth) {
   if (!storePartitionKey || storePartitionKey === RECEIPT_BUDGET_STORE_UNKNOWN) return null;
-  const { data, error } = await supabase.from("line_sales_month_budgets").select("budget_yen, weekday_weight, pre_holiday_weight, holiday_weight, store_closed_dates").eq("store_partition_key", storePartitionKey).eq("target_month", targetMonth).maybeSingle();
+  // 曜日別ウェイト（mon..sun）＋祝日/前日。旧 weekday_weight 列は廃止済み（存在しない列をSELECTすると
+  // PostgREST がエラー→予算行 null→予算セクションが静かに消える）。売上分析/レシート返信と同じ列・既定に揃える。
+  const { data, error } = await supabase.from("line_sales_month_budgets").select("budget_yen, mon_weight, tue_weight, wed_weight, thu_weight, fri_weight, sat_weight, sun_weight, holiday_weight, pre_holiday_weight, store_closed_dates").eq("store_partition_key", storePartitionKey).eq("target_month", targetMonth).maybeSingle();
   if (error || !data) return null;
   const row = data;
   const budgetYen = Number(row.budget_yen);
   if (!Number.isFinite(budgetYen) || budgetYen <= 0) return null;
-  const ww = Number(row.weekday_weight);
-  const pw = Number(row.pre_holiday_weight);
   const hw = Number(row.holiday_weight);
+  const phw = Number(row.pre_holiday_weight);
   let fromTable = [];
   const { data: closedRows, error: closedErr } = await supabase.from("line_sales_month_store_closed_days").select("closed_on").eq("store_partition_key", storePartitionKey).eq("target_month", targetMonth);
   if (!closedErr && Array.isArray(closedRows)) {
@@ -43,9 +49,15 @@ async function fetchSalesBudgetRow(supabase, storePartitionKey, targetMonth) {
   const closedArr = mergeStoreClosedDateLists(fromTable, row.store_closed_dates, targetMonth);
   return {
     budget_yen: Math.round(budgetYen),
-    weekday_weight: Number.isFinite(ww) && ww > 0 ? ww : 1,
-    pre_holiday_weight: Number.isFinite(pw) && pw > 0 ? pw : 1.5,
-    holiday_weight: Number.isFinite(hw) && hw > 0 ? hw : 2,
+    mon_weight: parsePositiveBudgetWeight(row.mon_weight, 1),
+    tue_weight: parsePositiveBudgetWeight(row.tue_weight, 1),
+    wed_weight: parsePositiveBudgetWeight(row.wed_weight, 1),
+    thu_weight: parsePositiveBudgetWeight(row.thu_weight, 1),
+    fri_weight: parsePositiveBudgetWeight(row.fri_weight, 1),
+    sat_weight: parsePositiveBudgetWeight(row.sat_weight, 1.5),
+    sun_weight: parsePositiveBudgetWeight(row.sun_weight, 2),
+    holiday_weight: Number.isFinite(hw) && hw > 0 ? hw : null,
+    pre_holiday_weight: Number.isFinite(phw) && phw > 0 ? phw : null,
     store_closed_dates: closedArr
   };
 }
@@ -130,13 +142,20 @@ function computeReceiptDailyDiffTotalLikeAnalyticsFooter(dailyMap, storeClosed, 
   const row = await fetchSalesBudgetRow(supabase, storePartitionKey, receiptMonthYyyyMm);
   if (!row) return null;
   const weights = {
-    weekday: row.weekday_weight,
-    pre_holiday: row.pre_holiday_weight,
-    holiday: row.holiday_weight
+    mon: row.mon_weight,
+    tue: row.tue_weight,
+    wed: row.wed_weight,
+    thu: row.thu_weight,
+    fri: row.fri_weight,
+    sat: row.sat_weight,
+    sun: row.sun_weight,
+    holiday: row.holiday_weight,
+    pre_holiday: row.pre_holiday_weight
   };
   const holidaySet = getDefaultJapaneseHolidaySet();
   const storeClosed = new Set(row.store_closed_dates ?? []);
-  const dailyMap = allocateDailyBudgetsForMonth(receiptMonthYyyyMm, row.budget_yen, weights, holidaySet, storeClosed);
+  // 正本 allocateDailyBudgetsForMonth の引数順: (month, budget, weights, storeClosed, holidayOverride)
+  const dailyMap = allocateDailyBudgetsForMonth(receiptMonthYyyyMm, row.budget_yen, weights, storeClosed, holidaySet);
   const omitDaily = !!opts.omitDailyBudgetLines;
   const dailyTarget = dailyMap.get(asOfDateIso);
   if (!omitDaily && dailyTarget == null) return null;
