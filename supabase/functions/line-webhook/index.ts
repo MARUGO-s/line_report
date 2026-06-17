@@ -840,7 +840,8 @@ async function handleDailySalesImportPostback(
 }
 
 // レシート画像解析に Gemini を使う店舗（手書き数字などの読み取り精度向上が目的）。他店は Groq のまま。
-const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage', 'sushikoruri'])
+// （sushikoruri は 2026-06-17 にユーザー要望で Gemini→Groq へ戻した。下方の else 経路＝Groqのみ解析になる）
+const GEMINI_RECEIPT_STORE_KEYS = new Set<string>(['sauvage'])
 // Claude(Haiku) で「売上(精算)」を解析する店舗。現在は空＝全店 Groq/Gemini で売上解析する
 // （claudia2 は 2026-06-12 にコスト優先で Claude→Groq へ変更）。売上解析にClaudeを使いたい店があれば
 // その store_partition_key をこの Set に追加するだけ（下方の useClaudeForReceipt 経路が有効化される）。
@@ -932,7 +933,7 @@ async function processReceiptImageEvent(
     dbReceiptPromptAddition,
   )
 
-  // 一部店舗（ソバージュ・鮨こるり）は Gemini で解析する（手書き数字などの読み取り精度向上が目的）。
+  // 一部店舗（ソバージュ）は Gemini で解析する（手書き数字などの読み取り精度向上が目的）。
   const useGeminiForReceipt = GEMINI_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
   const useClaudeForReceipt = !useGeminiForReceipt && CLAUDE_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
   const receiptGeminiModel = resolveReceiptGeminiModel()
