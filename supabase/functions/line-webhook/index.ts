@@ -855,6 +855,13 @@ function resolveClaudeApiKey(): string {
 // 「この店舗のレシートで確定」と宣言して1回だけ強制再解析する対象。Gemini は使わない（セキュリティ順守）。
 const FORCE_RECEIPT_RETRY_STORE_KEYS = new Set<string>(['barpelota'])
 
+// 非レシート判定でも「経費の領収書／明細書／レジ出金伝票」を強く示す語。summary にこれが出ていれば
+// 経費プロンプト(Amazonブロック等を含む)で1回だけ強制再解析し、小口(経費)フローへ回す。
+// Amazonの「支払い明細書」等のフォーマットが kind=receipt にならず無反応で落ちるのを救済する目的。
+// 食品の写真等を誤検知しないよう、経費書類に固有の語だけに限定（「レシート」「円」等の汎用語は入れない）。
+const EXPENSE_DOC_RESCUE_MARKERS =
+  /支払明細|支払い明細|明細書|領収書|領収証|請求書|注文番号|レジ出金|出金伝票|今回出金額|出金額|Amazon|アマゾン/i
+
 // Gemini 採用店で「レシートらしさ」を示すテキストの手掛かり（Groq 事前判定の summary を見る）。
 // 注意: お品書き/メニューにも出る価格系トークン（円・¥・金額・税込・税抜・総額・売価）は誤昇格を招くため含めない。
 // ここに残すのは「売上集計書類」に固有で、料理メニューには通常出ない語のみ。
@@ -1199,6 +1206,34 @@ async function processReceiptImageEvent(
       detectedReservation,
       analyzedSummaryText,
     )
+  }
+
+  // 【経費書類の救済】Groqが「非レシート」（receipt無し）にしても、summary が経費の領収書/明細書/
+  //   レジ出金伝票を示すなら、経費プロンプト(Amazonブロック等)で1回だけ強制再解析する。receipt が取れれば
+  //   下の通常フロー（レジ出金検知→小口オファー／店名不一致→経費オファー）に乗る。小口許可ルームのみ。
+  //   Amazonの「支払い明細書」が kind=receipt にならず無反応で落ちる問題への対策（2026-06-18）。
+  if (
+    !analyzed.analysis?.receipt &&
+    allowPettyCash &&
+    EXPENSE_DOC_RESCUE_MARKERS.test(String(analyzed.analysis?.summary ?? ''))
+  ) {
+    const forcedExpensePrompt = [
+      EXPENSE_RECEIPT_PROMPT_ADDITION,
+      '',
+      '【強制再解析・絶対遵守】上の画像は店舗が支払った経費の領収書／明細書、または店舗のレジ出金伝票で確定しています。',
+      '「general / 非レシートにする」判断は一切適用せず、必ず kind="receipt" を出力すること。',
+      'receipt に store_name（仕入先。Amazonの「支払い明細書」なら "Amazon"）・gross_sales（税込合計）・line_items を入れる。',
+      'レジ出金伝票が写っていればその「今回出金額 ¥◯」も金額の手掛かりにする。反射・かすれは読める数値だけで receipt を作り kind=receipt を維持する。',
+    ].join('\n')
+    const forcedExpense = await analyzeLineImageWithGroqScout(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      lineMessageId,
+      groqApiKey,
+      forcedExpensePrompt,
+    )
+    await recordAiUsage('groq', GROQ_RECEIPT_MODEL, forcedExpense.usage)
+    if (forcedExpense.analysis?.receipt) analyzed = forcedExpense
   }
 
   if (!analyzed.analysis?.receipt) {
