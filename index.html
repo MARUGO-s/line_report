@@ -12583,7 +12583,8 @@
           room_id: normalizedRoomId,
           room_name: String(roomName || '').trim(),
           is_enabled: computeRoomEnabledFromFeatureConfig(webhookConfig),
-          bot_reply_hard_mute_enabled: !!webhookConfig.bot_reply_hard_mute_enabled,
+          // 新規ルームは店舗集約の hard_mute を引き継がない（緊急ミュートは per-room 専用・既定OFF）。
+          bot_reply_hard_mute_enabled: false,
           send_room_summary: !!webhookConfig.send_room_summary,
           receive_overall_summary_enabled: !!webhookConfig.receive_overall_summary_enabled,
           calendar_tomorrow_reminder_enabled: !!webhookConfig.calendar_tomorrow_reminder_enabled,
