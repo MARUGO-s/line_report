@@ -187,8 +187,17 @@
 
       <div class="card">
         <div style="font-weight:600;margin-bottom:8px;">基準店の日次推移（蓄積データ）</div>
-        <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th>売上</th><th>客数</th><th>客単価</th><th>FC順位</th><th>シェア</th></tr></thead><tbody id="trendTbody"></tbody></table></div>
+        <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th>売上</th><th>客数</th><th>客単価</th><th>FC順位</th><th>シェア</th><th class="name">東京ドーム</th></tr></thead><tbody id="trendTbody"></tbody></table></div>
         <div class="note" id="trendNote"></div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:8px;">東京ドーム イベント相関（客数）</div>
+        <div class="tbl-wrap"><table><thead><tr><th class="name">区分</th><th>日数</th><th>平均客数</th><th>平均売上</th><th>対 非イベント</th></tr></thead><tbody id="evtCorrTbody"></tbody></table></div>
+        <div class="note" id="evtCorrNote"></div>
+        <div style="font-weight:600;margin:14px 0 8px;">今後の東京ドーム予定</div>
+        <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th class="name">ジャンル</th><th class="name">イベント</th></tr></thead><tbody id="evtUpcomingTbody"></tbody></table></div>
+        <div class="note" id="evtUpcomingNote"></div>
       </div>
     </div>
   </div>
@@ -212,9 +221,12 @@
       qaCard:$('qaCard'), qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'),
       shareTbody:$('shareTbody'), shareNote:$('shareNote'), ktTbody:$('ktTbody'), posTbody:$('posTbody'),
       distTbody:$('distTbody'), trendTbody:$('trendTbody'), trendNote:$('trendNote'),
+      evtCorrTbody:$('evtCorrTbody'), evtCorrNote:$('evtCorrNote'), evtUpcomingTbody:$('evtUpcomingTbody'), evtUpcomingNote:$('evtUpcomingNote'),
     };
-    const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','フードコート内での強み・弱みは？','売上を伸ばすための提案を3つ'];
+    const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ'];
     let reports = [];
+    let events = [];                 // 東京ドームのイベント [{event_date,title,category}]
+    let eventsByDate = new Map();    // 'YYYY-MM-DD' -> [event,...]
 
     const nf = new Intl.NumberFormat('ja-JP');
     const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
@@ -553,14 +565,54 @@
         const cell=rr=>rr?(fmt(rr)+'（'+escapeHtml(rr.name)+'）'):'—';
         return '<tr><td class="name">'+label+'</td><td>'+fnum(a)+'</td><td>'+fnum(m)+'</td><td class="name">'+cell(hi)+'</td><td class="name">'+cell(lo)+'</td></tr>'; }).join('');
 
-      // 5) 基準店の日次推移（蓄積データ／期間指定時はその範囲）
+      // 5) 基準店の日次推移（蓄積データ／期間指定時はその範囲）。東京ドームのイベント列を併記。
       const series = baseSeriesFromReports(seriesReports || reports, c.baseName);
       if (!series.length){ dom.trendTbody.innerHTML=''; dom.trendNote.textContent='履歴なし。'; }
       else {
-        dom.trendTbody.innerHTML = series.map(p=>'<tr><td class="name">'+fmtDay(p.when)+'</td><td>'+yen(p.sales)+'</td><td>'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td>'+(p.kt!=null?yen(p.kt):'—')+'</td><td>'+p.salesRank+'位</td><td>'+pct(p.share)+'</td></tr>').join('');
-        dom.trendNote.textContent = '蓄積 '+series.length+'日分。毎日の画像送信で増えます。';
+        dom.trendTbody.innerHTML = series.map(p=>{ const lab=eventCell(ymdJst(p.when));
+          return '<tr><td class="name">'+fmtDay(p.when)+'</td><td>'+yen(p.sales)+'</td><td>'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td>'+(p.kt!=null?yen(p.kt):'—')+'</td><td>'+p.salesRank+'位</td><td>'+pct(p.share)+'</td><td class="name">'+lab+'</td></tr>'; }).join('');
+        dom.trendNote.textContent = '蓄積 '+series.length+'日分。毎日の画像送信で増えます。東京ドーム列＝開催イベント。';
       }
+      // 6) 東京ドーム イベント相関＋今後の予定
+      renderEventTables(series);
     }
+
+    // --- 東京ドーム イベント連携 ---
+    const EVT_ICON = { 'プロ野球':'⚾', 'アマ野球':'🥎', 'ライブ':'🎤', 'その他':'🎫' };
+    function ymdJst(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(String(when))) return String(when).slice(0,10); const j=new Date(d.getTime()+9*3600*1000); return j.getUTCFullYear()+'-'+String(j.getUTCMonth()+1).padStart(2,'0')+'-'+String(j.getUTCDate()).padStart(2,'0'); }
+    function eventCell(ymd){ const hits=eventsByDate.get(ymd)||[]; if(!hits.length) return '—';
+      return hits.map(function(h){ const ic=EVT_ICON[h.category]||'🎫'; return '<span title="'+escapeHtml(h.title)+'">'+ic+escapeHtml(h.category||'')+'</span>'; }).join('<br>'); }
+
+    function renderEventTables(series){
+      if (!dom.evtCorrTbody) return;
+      // 相関: series（日付・客数・売上）×イベント有無で集計。
+      const withGuests = (series||[]).filter(function(p){ return p.guests!=null; });
+      const ev=[], non=[], evS=[], nonS=[], byCat={};
+      withGuests.forEach(function(p){ const ymd=ymdJst(p.when); const hits=eventsByDate.get(ymd)||[];
+        if(hits.length){ ev.push(p.guests); evS.push(p.sales); hits.forEach(function(h){ const c=h.category||'その他'; (byCat[c]=byCat[c]||[]).push(p.guests); }); }
+        else { non.push(p.guests); nonS.push(p.sales); } });
+      const evAvg=avg(ev), nonAvg=avg(non), evSa=avg(evS), nonSa=avg(nonS);
+      const rows=[];
+      const ratio=function(a){ return (nonAvg&&nonAvg>0&&a!=null)? (Math.round(a/nonAvg*100)/100).toFixed(2)+'倍' : '—'; };
+      rows.push('<tr class="base"><td class="name">イベント日</td><td>'+ev.length+'</td><td>'+(evAvg!=null?nf.format(Math.round(evAvg))+'人':'—')+'</td><td>'+(evSa!=null?yen(evSa):'—')+'</td><td>'+ratio(evAvg)+'</td></tr>');
+      rows.push('<tr><td class="name">非イベント日</td><td>'+non.length+'</td><td>'+(nonAvg!=null?nf.format(Math.round(nonAvg))+'人':'—')+'</td><td>'+(nonSa!=null?yen(nonSa):'—')+'</td><td>—</td></tr>');
+      Object.keys(byCat).sort(function(a,b){ return (avg(byCat[b])||0)-(avg(byCat[a])||0); }).forEach(function(c){ const a=avg(byCat[c]);
+        rows.push('<tr><td class="name">└ '+escapeHtml(c)+'</td><td>'+byCat[c].length+'</td><td>'+(a!=null?nf.format(Math.round(a))+'人':'—')+'</td><td>—</td><td>'+ratio(a)+'</td></tr>'); });
+      dom.evtCorrTbody.innerHTML = rows.join('');
+      if (evAvg!=null && nonAvg!=null && nonAvg>0){ const r=evAvg/nonAvg;
+        dom.evtCorrNote.textContent = 'イベント日はおおむね客数 '+(Math.round(r*100)/100).toFixed(2)+'倍（'+nf.format(Math.round(evAvg))+'人 vs '+nf.format(Math.round(nonAvg))+'人）。'+(r>=1.2?'仕込み・人員を厚めに。':(r<=0.9?'イベント日でも伸びていない点に注意。':'')); }
+      else dom.evtCorrNote.textContent = (events&&events.length)? 'イベント日の客数データが不足しています（蓄積が進むと精度が上がります）。' : '東京ドームのイベントデータがありません。';
+
+      // 今後の予定: 直近の日付以降を10件。
+      const todayJ = ymdJst(new Date().toISOString());
+      const up=(events||[]).filter(function(e){ const d=String((e&&e.event_date)||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && d>=todayJ; })
+        .sort(function(a,b){ return String(a.event_date).localeCompare(String(b.event_date)); }).slice(0,10);
+      if(!up.length){ dom.evtUpcomingTbody.innerHTML=''; dom.evtUpcomingNote.textContent=(events&&events.length)?'今後の予定はデータにありません。':'—'; }
+      else { dom.evtUpcomingTbody.innerHTML = up.map(function(e){ const d=String(e.event_date).slice(0,10); const ic=EVT_ICON[e.category]||'🎫';
+          return '<tr><td class="name">'+escapeHtml(fmtDay(d))+'('+wdayJp(d)+')</td><td class="name">'+ic+escapeHtml(e.category||'')+'</td><td class="name">'+escapeHtml(e.title||'')+'</td></tr>'; }).join('');
+        dom.evtUpcomingNote.textContent = '東京ドーム公式より自動取得（1日1回更新）。'; }
+    }
+    function wdayJp(ymd){ const d=new Date(ymd); if(isNaN(d.getTime()))return '?'; const j=new Date(d.getTime()+9*3600*1000); return ['日','月','火','水','木','金','土'][j.getUTCDay()]; }
 
     // スマホのカード型表示用: 各表の thead 見出しを、対応する各 td に data-label として付与。
     function labelizeTables(){
@@ -648,6 +700,10 @@
       try {
         const body = await apiFetch('/foodcourt/reports?store_key='+encodeURIComponent(store)+'&limit=60');
         reports = Array.isArray(body.reports) ? body.reports : [];
+        // 東京ドームのイベント（マルゴSのみ返る）。日付索引も作る。
+        events = Array.isArray(body.events) ? body.events : [];
+        eventsByDate = new Map();
+        events.forEach(function(e){ const d=String((e&&e.event_date)||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; if(!eventsByDate.has(d)) eventsByDate.set(d,[]); eventsByDate.get(d).push(e); });
         // report_date（手動投入）優先＝対象日で新しい順に並べる（created_atは取込時刻のため）。
         reports.sort((a,b)=> String((b&&(b.report_date||b.created_at))||'').localeCompare(String((a&&(a.report_date||a.created_at))||'')));
         setAuthBadge(true);

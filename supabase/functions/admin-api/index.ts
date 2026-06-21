@@ -329,6 +329,49 @@ function stripRoomConfigSecret<T extends Record<string, unknown>>(row: T | null)
   return rest as unknown as T
 }
 
+// 会場（東京ドーム）のイベントを、レポートの期間に合わせて取得する。
+// マルゴSは東京ドーム内フードコートのため、客数増減と会場イベントが相関する。
+// 対象はマルゴS（store_key が marugoS）のみ。期間はレポート最古〜最新＋45日先（予定先取り）。
+async function loadVenueEventsForReports(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  reports: Array<Record<string, unknown>>,
+): Promise<Array<{ event_date: string; title: string; category: string }>> {
+  if (String(storeKey ?? "").trim().toLowerCase() !== "marugos") return []
+  const dates: string[] = []
+  for (const r of (Array.isArray(reports) ? reports : [])) {
+    const rd = String((r as { report_date?: unknown }).report_date ?? "").slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rd)) dates.push(rd)
+  }
+  dates.sort()
+  // レポートが無い場合でも、当月前後の予定を返せるよう today を基準にフォールバック。
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const minDate = dates[0] ?? todayIso
+  const maxBase = dates[dates.length - 1] ?? todayIso
+  const lo = addDaysIso(minDate, -7)
+  const hi = addDaysIso(maxBase > todayIso ? maxBase : todayIso, 45)
+  const { data, error } = await supabase
+    .from("tokyo_dome_events")
+    .select("event_date, title, category")
+    .gte("event_date", lo)
+    .lte("event_date", hi)
+    .order("event_date", { ascending: true })
+    .limit(400)
+  if (error || !Array.isArray(data)) return []
+  return data.map((e) => ({
+    event_date: String((e as { event_date?: unknown }).event_date ?? "").slice(0, 10),
+    title: String((e as { title?: unknown }).title ?? ""),
+    category: String((e as { category?: unknown }).category ?? ""),
+  })).filter((e) => e.event_date && e.title)
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
 Deno.serve(async (req, info) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -710,7 +753,10 @@ Deno.serve(async (req, info) => {
         .order("created_at", { ascending: false })
         .limit(limit)
       if (error) return json({ error: error.message }, 500)
-      return json({ store_key: storeKey, reports: Array.isArray(data) ? data : [] }, 200)
+      const reports = Array.isArray(data) ? data : []
+      // 会場イベント（東京ドーム）を併せて返す。マルゴSは東京ドーム内のため客数増減と相関する。
+      const events = await loadVenueEventsForReports(supabase, storeKey, reports)
+      return json({ store_key: storeKey, reports, events }, 200)
     }
     // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
     if (req.method === "POST" && path === "/foodcourt/ask") {
@@ -733,7 +779,9 @@ Deno.serve(async (req, info) => {
         return json({ answer: "まだデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。", reportCount: 0 }, 200)
       }
       const baseName = String((reports[0] as { base_tenant_name?: unknown }).base_tenant_name ?? "MARUGO S")
-      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey)
+      // 会場イベント（東京ドーム）も根拠に渡す。客数増減との相関を踏まえて回答させる。
+      const events = await loadVenueEventsForReports(supabase, storeKey, reports)
+      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
     }
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {

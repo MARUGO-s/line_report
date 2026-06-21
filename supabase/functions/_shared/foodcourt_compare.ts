@@ -413,12 +413,87 @@ function buildBaseInsights(reports: Array<Record<string, unknown>>, baseName: st
   return L.join('\n')
 }
 
+// 基準店の日次（日付・客数・売上）を抽出する。イベント相関の計算に使う。
+function fcBaseDaily(reports: Array<Record<string, unknown>>, baseName: string): Array<{ date: string; guests: number | null; sales: number }> {
+  const out: Array<{ date: string; guests: number | null; sales: number }> = []
+  for (const r of reports || []) {
+    const raw = Array.isArray((r as { tenants?: unknown }).tenants) ? (r as { tenants?: unknown[] }).tenants as unknown[] : []
+    let base: { sales: number; guests: number | null } | null = null
+    for (const t of raw) {
+      const o = (t && typeof t === 'object') ? t as Record<string, unknown> : {}
+      const name = String(o.name ?? '').trim()
+      if (name && normalizeName(name) === normalizeName(baseName)) {
+        const sales = numOrNull(o.sales)
+        if (sales != null) base = { sales, guests: numOrNull(o.guests) }
+      }
+    }
+    if (!base) continue
+    const rd = String((r as { report_date?: unknown }).report_date ?? '').trim()
+    const date = /^\d{4}-\d{2}-\d{2}/.test(rd) ? rd.slice(0, 10) : fcDayLabel(r)
+    out.push({ date, guests: base.guests, sales: base.sales })
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date))
+  return out
+}
+
+// 東京ドームのイベントと基準店客数の相関を事前計算（イベント日 vs 非イベント日、ジャンル別）。
+function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName: string, events: VenueEvent[]): string {
+  if (!Array.isArray(events) || !events.length) return ''
+  const byDate = new Map<string, VenueEvent[]>()
+  for (const e of events) {
+    const d = String(e.event_date ?? '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue
+    if (!byDate.has(d)) byDate.set(d, [])
+    byDate.get(d)!.push(e)
+  }
+  const daily = fcBaseDaily(reports, baseName).filter((r) => r.guests != null)
+  if (!daily.length) return ''
+  const ev: number[] = []; const nonEv: number[] = []
+  const evS: number[] = []; const nonEvS: number[] = []
+  const byCat = new Map<string, number[]>()
+  for (const r of daily) {
+    const hits = byDate.get(r.date) || []
+    if (hits.length) {
+      ev.push(r.guests as number); evS.push(r.sales)
+      for (const h of hits) { const c = h.category || 'その他'; if (!byCat.has(c)) byCat.set(c, []); byCat.get(c)!.push(r.guests as number) }
+    } else { nonEv.push(r.guests as number); nonEvS.push(r.sales) }
+  }
+  const L: string[] = []
+  const evAvg = fcAvg(ev); const nonAvg = fcAvg(nonEv)
+  if (evAvg != null && nonAvg != null) {
+    const ratio = nonAvg > 0 ? evAvg / nonAvg : null
+    L.push(`イベント日(${ev.length}日)の平均客数 ${Math.round(evAvg)}人 / 非イベント日(${nonEv.length}日)の平均客数 ${Math.round(nonAvg)}人${ratio ? `（${ratio.toFixed(2)}倍）` : ''}`)
+  } else if (evAvg != null) {
+    L.push(`イベント日(${ev.length}日)の平均客数 ${Math.round(evAvg)}人（非イベント日のデータが不足）`)
+  }
+  const evSa = fcAvg(evS); const nonSa = fcAvg(nonEvS)
+  if (evSa != null && nonSa != null) L.push(`イベント日の平均売上 ${fcYen(evSa)} / 非イベント日 ${fcYen(nonSa)}`)
+  const cats = Array.from(byCat.entries()).filter(([, a]) => a.length).sort((a, b) => (fcAvg(b[1]) ?? 0) - (fcAvg(a[1]) ?? 0))
+  for (const [c, a] of cats) L.push(`・${c}: ${a.length}日 / 平均客数 ${Math.round(fcAvg(a) ?? 0)}人`)
+  // データのある日付ごとのイベント有無も少しだけ提示（モデルが個別日を語れるように）
+  const sample = daily.slice(-10).map((r) => { const hits = byDate.get(r.date) || []; const lab = hits.length ? hits.map((h) => `${h.category}:${h.title}`).join('｜') : '—'; const dw = fcDow(r.date); return `${r.date}(${dw != null ? FC_DOW[dw] : '?'}) 客数${r.guests} ${lab}` })
+  if (sample.length) L.push('—\n直近の日別イベント:\n' + sample.join('\n'))
+  return L.join('\n')
+}
+
+// 今後の会場イベント予定をテキスト化（最大25件）。
+function buildEventListText(events: VenueEvent[]): string {
+  if (!Array.isArray(events) || !events.length) return ''
+  const sorted = events.slice().filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date ?? '').slice(0, 10)))
+    .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date))).slice(0, 25)
+  return sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}] ${e.title}` }).join('\n')
+}
+
+export type VenueEvent = { event_date: string; title: string; category: string }
+
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
+// events（東京ドームのイベント日程）を渡すと、客数増減との相関も踏まえて回答する。
 export async function answerFoodCourtQuestion(
   reports: Array<Record<string, unknown>>,
   baseName: string,
   question: string,
   groqApiKey: string,
+  events: VenueEvent[] = [],
 ): Promise<string | null> {
   if (!groqApiKey) return null
   const q = String(question ?? '').trim().slice(0, 500)
@@ -442,14 +517,16 @@ export async function answerFoodCourtQuestion(
   if (!blocks.length) return 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。'
   const data = blocks.reverse().join('\n\n')
   const insights = buildBaseInsights(reports, baseName)
+  const eventCorr = buildEventCorrelation(reports, baseName, events)
+  const eventList = buildEventListText(events)
   const system = [
-    `あなたは「${baseName}」（フードコート内の1店舗）の優秀な経営アナリストです。`,
-    `与えられた「事前計算サマリー」と「日次生データ」（★が基準店=${baseName}、金額は円、客単価=売上÷客数）だけを根拠に、ユーザーの質問へ日本語で答えます。`,
+    `あなたは「${baseName}」（東京ドーム内フードコートの1店舗）の優秀な経営アナリストです。`,
+    `与えられた「事前計算サマリー」「会場イベント相関」「日次生データ」（★が基準店=${baseName}、金額は円、客単価=売上÷客数）だけを根拠に、ユーザーの質問へ日本語で答えます。`,
     `【最重要・禁止事項】単に「最高は◯日、最低は◯日」と最大値・最小値を列挙するだけの回答は禁止。必ず“分析”にすること。`,
-    `回答には次を、具体的な数字を根拠に盛り込む: ①全体の傾向（上昇/下降/横ばいと、その程度＝前半→後半や前日比）②曜日・週の差（土日と平日など）③変化の要因は「客数」か「客単価」か（どちらが効いているか）④フードコート内での基準店の立ち位置と推移（順位・シェア）⑤次に取るべき打ち手を1〜3個。`,
+    `回答には次を、具体的な数字を根拠に盛り込む: ①全体の傾向（上昇/下降/横ばいと、その程度＝前半→後半や前日比）②曜日・週の差（土日と平日など）③変化の要因は「客数」か「客単価」か（どちらが効いているか）④フードコート内での基準店の立ち位置と推移（順位・シェア）⑤東京ドームのイベント（野球・ライブ）と客数の関係（イベント日と非イベント日の差、ジャンル別の効き方）⑥次に取るべき打ち手を1〜3個（イベント日程を踏まえた仕込み・人員も）。`,
     `わかりやすい短い見出し＋箇条書きで、結論を先に。データに無いことは「データにありません」と述べ、憶測しない。新規オープンのため前年比は無いので、自店の日々の推移を基準に語る。`,
   ].join('\n')
-  const userMsg = `# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
+  const userMsg = `# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
   let ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary, 1300)
   if (!ans) ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1300)
