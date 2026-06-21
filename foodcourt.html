@@ -121,8 +121,8 @@
       <div class="controls" style="margin-top:10px;">
         <div class="fld"><label>期間（開始）</label><input type="date" id="startD"></div>
         <div class="fld"><label>期間（終了）</label><input type="date" id="endD"></div>
-        <button id="rangeBtn">期間で見る</button>
-        <button id="dayBtn" class="ghost">単日に戻す</button>
+        <button id="rangeBtn" class="ghost">期間で見る</button>
+        <button id="dayBtn">単日に戻す</button>
       </div>
       <div id="loadMsg" class="msg"></div>
     </div>
@@ -576,6 +576,8 @@
       opts = opts || {};
       const seriesReports = opts.seriesReports || reports;
       const periodLabel = opts.periodLabel || null;
+      // 表示中モードのボタンを青(=ghost解除)、もう一方をghostに（フォーカス側が色付く）。
+      if (dom.rangeBtn && dom.dayBtn){ dom.rangeBtn.classList.toggle('ghost', !periodLabel); dom.dayBtn.classList.toggle('ghost', !!periodLabel); }
       const c = computeComparison(report);
       if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポート/期間は比較できませんでした（基準店が見つからない/データ不足）。'; return; }
       if (!periodLabel) dom.loadMsg.textContent='';
