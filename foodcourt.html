@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <script>
+    (function () {
+      try {
+        var host = String(window.location.hostname || '');
+        var isLocal = host === '127.0.0.1' || host === 'localhost';
+        if (isLocal && window.location.protocol === 'https:') {
+          window.location.replace('http://' + window.location.host + window.location.pathname + window.location.search + window.location.hash);
+          return;
+        }
+        if (isLocal && window.location.protocol === 'http:' && !/\/line_report[\-\/]/.test(window.location.pathname)) {
+          var port = window.location.port || '8765';
+          window.location.replace('http://127.0.0.1:' + port + '/line_report/foodcourt.html' + window.location.search + window.location.hash);
+          return;
+        }
+        if (window.location.protocol !== 'file:') return;
+        var next = 'http://127.0.0.1:8765/line_report/foodcourt.html' + (window.location.search || '') + (window.location.hash || '');
+        window.location.replace(next);
+      } catch (_) {}
+    })();
+  </script>
+  <base href="/line_report/">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+  <meta name="theme-color" content="#0b2035">
+  <title>フードコート内 売上比較</title>
+  <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
+  <style>
+    :root{
+      --bg:#0b2035; --panel:#0f2942; --panel2:#13314e; --line:rgba(255,255,255,.12);
+      --text:#eaf1f8; --muted:#9fb3c8; --accent:#3aa0ff; --base:#ffcf5c; --ok:#2bd07a; --warn:#ffb020;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;line-height:1.5}
+    .wrap{max-width:980px;margin:0 auto;padding:18px 16px 60px}
+    .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+    .head h1{font-size:20px;font-weight:600;margin:0}
+    .badge{font-size:12px;padding:2px 8px;border-radius:8px}
+    .badge.test{background:rgba(255,176,32,.16);color:var(--warn)}
+    .pill{font-size:12px;padding:2px 10px;border-radius:999px;background:rgba(255,255,255,.08);color:var(--muted)}
+    .pill.ok{background:rgba(43,208,122,.16);color:var(--ok)}
+    .sub{color:var(--muted);font-size:13px;margin:2px 0 16px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+    .fld{display:flex;flex-direction:column;gap:4px}
+    .fld label{font-size:12px;color:var(--muted)}
+    select,input,button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-height:38px}
+    button{cursor:pointer;background:var(--accent);border-color:transparent;color:#04243f;font-weight:600}
+    button.ghost{background:var(--panel2);color:var(--text);font-weight:500}
+    .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+    .metric{background:var(--panel2);border-radius:10px;padding:10px 12px}
+    .metric .l{font-size:12px;color:var(--muted)}
+    .metric .v{font-size:20px;font-weight:600;margin-top:2px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:7px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+    th{color:var(--muted);font-weight:500;position:sticky;top:0}
+    td.name,th.name{text-align:left;white-space:normal}
+    tr.base td{background:rgba(255,207,92,.12);font-weight:600}
+    .bar-row{display:flex;align-items:center;gap:8px;margin:6px 0}
+    .bar-name{flex:0 0 150px;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .bar-track{flex:1;background:rgba(255,255,255,.06);border-radius:6px;height:18px;position:relative;overflow:hidden}
+    .bar-fill{height:100%;border-radius:6px;background:var(--muted)}
+    .bar-fill.base{background:var(--base)}
+    .bar-val{flex:0 0 64px;text-align:right;font-size:12px;color:var(--muted)}
+    .msg{font-size:13px;margin-top:8px}
+    .msg.err{color:#ff8a8a}
+    .note{color:var(--muted);font-size:12px;margin-top:10px}
+    .tbl-wrap{overflow-x:auto}
+    @media(max-width:560px){ .bar-name{flex-basis:96px} th,td{padding:6px 4px} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <h1>🍴 フードコート内 売上比較</h1>
+      <span class="badge test">試験版</span>
+      <span id="authBadge" class="pill">未接続</span>
+    </div>
+    <div class="sub">基準店＝100 として、同じフードコート内の各店を相対比較します（分析専用・売上には登録しません）。</div>
+
+    <div id="authCard" class="card" hidden>
+      <div style="font-size:14px;margin-bottom:8px;">閲覧には管理トークンが必要です（またはLINEの最新リンクから開いてください）。</div>
+      <div class="controls">
+        <div class="fld" style="flex:1;min-width:200px"><label>管理トークン</label><input id="tokenInput" type="password" placeholder="x-admin-token" autocomplete="off"></div>
+        <button id="tokenBtn">接続</button>
+      </div>
+      <div id="authMsg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <div class="controls">
+        <div class="fld"><label>店舗</label><select id="storeSel"></select></div>
+        <div class="fld" style="flex:1;min-width:200px"><label>レポート（受信日時）</label><select id="reportSel"></select></div>
+        <button id="reloadBtn" class="ghost">更新</button>
+      </div>
+      <div id="loadMsg" class="msg"></div>
+    </div>
+
+    <div id="resultArea" hidden>
+      <div class="card">
+        <div class="summary" id="summary"></div>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th>順位</th><th class="name">店名</th><th>対象売上</th><th>売上比</th>
+              <th>客数</th><th>客数比</th><th>客単価</th><th>単価比</th>
+            </tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="note">売上比・客数比・単価比はいずれも「基準店=100%」。単価比＝各店の客単価÷基準店の客単価。</div>
+      </div>
+      <div class="card">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">売上比（基準店=100）</div>
+        <div id="bars"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="pages-config.js?v=20260622"></script>
+  <script src="auth-session.js"></script>
+  <script>
+  'use strict';
+  (function(){
+    const PAGES = window.LINE_REPORT_PAGES;
+    const AUTH = window.LINE_REPORT_AUTH;
+    const STORE_NAMES = (PAGES && PAGES.STORE_NAMES) || {};
+    const TOKEN_KEY = 'line_summary_admin_token';
+    const DEFAULT_STORE = 'marugoS';
+    const $ = (id) => document.getElementById(id);
+    const dom = {
+      authBadge:$('authBadge'), authCard:$('authCard'), authMsg:$('authMsg'), tokenInput:$('tokenInput'), tokenBtn:$('tokenBtn'),
+      storeSel:$('storeSel'), reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
+      resultArea:$('resultArea'), summary:$('summary'), tbody:$('tbody'), bars:$('bars'),
+    };
+    let reports = [];
+
+    const nf = new Intl.NumberFormat('ja-JP');
+    const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
+    const pct = (v) => v==null ? '—' : (Math.round(Number(v)*10)/10).toFixed(1) + '%';
+    const norm = (s) => String(s||'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
+
+    function getToken(){ try { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY)||''); } catch(_){ return ''; } }
+    function lockedStore(){ try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch(_){ return ''; } }
+    function captureLockedStoreFromUrl(){
+      try {
+        const p = new URLSearchParams(location.search);
+        if (p.get('from') !== 'line') return;
+        const raw = String(p.get('store_key') || p.get('store') || '').trim();
+        if (!raw) return;
+        let key = (PAGES && PAGES.resolveStoreKey) ? PAGES.resolveStoreKey(raw,'') : raw.toLowerCase();
+        key = String(key||'').trim();
+        if (key) { try { sessionStorage.setItem('line_locked_store', key); localStorage.setItem('line_locked_store', key); } catch(_){} }
+      } catch(_){}
+    }
+    function setAuthBadge(ok){
+      dom.authBadge.textContent = ok ? '接続済み' : '未接続';
+      dom.authBadge.className = 'pill' + (ok ? ' ok' : '');
+      dom.authCard.hidden = !!ok;
+    }
+
+    async function apiFetch(path){
+      const url = PAGES.receiptAdminApiUrl(path);
+      let res;
+      try { res = await fetch(url, { headers: { 'x-admin-token': getToken() } }); }
+      catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
+      if (res.status === 401 || res.status === 403){ setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
+      const body = await res.json().catch(()=>({}));
+      if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
+      return body;
+    }
+
+    function populateStores(){
+      const locked = lockedStore();
+      const keys = Object.keys(STORE_NAMES);
+      dom.storeSel.innerHTML = '';
+      const add = (k,label) => { const o=document.createElement('option'); o.value=k; o.textContent=label; dom.storeSel.appendChild(o); };
+      if (locked){ add(locked, STORE_NAMES[locked] || locked); dom.storeSel.value = locked; dom.storeSel.disabled = true; return; }
+      if (!keys.length) add(DEFAULT_STORE, STORE_NAMES[DEFAULT_STORE] || 'マルゴエス');
+      keys.forEach(k => add(k, STORE_NAMES[k] || k));
+      dom.storeSel.value = (STORE_NAMES[DEFAULT_STORE] ? DEFAULT_STORE : (keys[0]||DEFAULT_STORE));
+    }
+
+    function fmtWhen(r){
+      const iso = r.created_at || '';
+      const d = iso ? new Date(iso) : null;
+      let label = '';
+      if (d && !isNaN(d.getTime())){
+        const j = new Date(d.getTime() + 9*3600*1000); // JST表示
+        label = j.getUTCFullYear()+'/'+(j.getUTCMonth()+1)+'/'+j.getUTCDate()+' '+String(j.getUTCHours()).padStart(2,'0')+':'+String(j.getUTCMinutes()).padStart(2,'0');
+      } else { label = '#' + r.id; }
+      if (r.report_date) label = r.report_date + '（受信 ' + label + '）';
+      return label;
+    }
+
+    function computeComparison(report){
+      const list = (report.tenants||[]).map(t=>({ name:String((t&&t.name)||''), sales:(t&&t.sales!=null)?Number(t.sales):null, guests:(t&&t.guests!=null)?Number(t.guests):null }))
+        .filter(t => t.sales!=null && isFinite(t.sales) && t.sales>=0 && t.name);
+      if (list.length < 2) return null;
+      const baseName = report.base_tenant_name || 'MARUGO S';
+      const base = list.find(t => norm(t.name)===norm(baseName));
+      if (!base) return null;
+      const unitOf = (t)=> (t.guests && t.guests>0) ? t.sales/t.guests : null;
+      const baseUnit = unitOf(base);
+      const total = list.reduce((a,b)=>a+b.sales,0);
+      const rows = list.map(t=>{
+        const u = unitOf(t);
+        return { name:t.name, sales:t.sales, salesRatio: base.sales>0? t.sales/base.sales*100 : null,
+          guests:t.guests, guestRatio:(base.guests>0 && t.guests!=null)? t.guests/base.guests*100 : null,
+          unit:u, unitRatio:(u!=null && baseUnit)? u/baseUnit*100 : null, isBase:(t===base) };
+      }).sort((a,b)=> b.sales - a.sales);
+      const salesRank = 1 + list.filter(t=>t.sales>base.sales).length;
+      const guestRank = 1 + list.filter(t=>(t.guests||0)>(base.guests||0)).length;
+      const unitRank = baseUnit==null?0: 1 + list.filter(t=>{const u=unitOf(t); return u!=null && u>baseUnit;}).length;
+      return { baseName:base.name, baseSales:base.sales, baseGuests:base.guests, baseUnit, total,
+        share: total>0? base.sales/total*100 : null, salesRank, guestRank, unitRank, count:list.length, rows };
+    }
+
+    function render(report){
+      const c = computeComparison(report);
+      if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポートは比較できませんでした（基準店が見つからない/データ不足）。'; return; }
+      dom.loadMsg.textContent='';
+      dom.resultArea.hidden = false;
+      const cards = [
+        ['基準店', c.baseName],
+        ['合計売上（FC全体）', yen(c.total)],
+        ['基準店シェア', pct(c.share)],
+        ['基準店の順位', '売上 '+c.salesRank+'位 / 客数 '+c.guestRank+'位 / 単価 '+(c.unitRank||'—')+'位（'+c.count+'店）'],
+      ];
+      dom.summary.innerHTML = cards.map(x=>'<div class="metric"><div class="l">'+x[0]+'</div><div class="v">'+x[1]+'</div></div>').join('');
+
+      let rank=0;
+      dom.tbody.innerHTML = c.rows.map(r=>{ rank++; return '<tr'+(r.isBase?' class="base"':'')+'>'
+        + '<td>'+rank+'</td>'
+        + '<td class="name">'+escapeHtml(r.name)+(r.isBase?'（基準）':'')+'</td>'
+        + '<td>'+yen(r.sales)+'</td>'
+        + '<td>'+pct(r.salesRatio)+'</td>'
+        + '<td>'+(r.guests!=null?nf.format(r.guests):'—')+'</td>'
+        + '<td>'+pct(r.guestRatio)+'</td>'
+        + '<td>'+(r.unit!=null?yen(r.unit):'—')+'</td>'
+        + '<td>'+pct(r.unitRatio)+'</td>'
+        + '</tr>'; }).join('');
+
+      const maxRatio = Math.max.apply(null, c.rows.map(r=>r.salesRatio||0).concat([100]));
+      dom.bars.innerHTML = c.rows.map(r=>{
+        const w = maxRatio>0 ? Math.max(2, (r.salesRatio||0)/maxRatio*100) : 0;
+        return '<div class="bar-row"><div class="bar-name" title="'+escapeHtml(r.name)+'">'+escapeHtml(r.name)+'</div>'
+          + '<div class="bar-track"><div class="bar-fill'+(r.isBase?' base':'')+'" style="width:'+w.toFixed(1)+'%"></div></div>'
+          + '<div class="bar-val">'+pct(r.salesRatio)+'</div></div>';
+      }).join('');
+    }
+
+    function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+
+    function populateReports(){
+      dom.reportSel.innerHTML = '';
+      if (!reports.length){ const o=document.createElement('option'); o.textContent='（データなし）'; o.value=''; dom.reportSel.appendChild(o); dom.resultArea.hidden=true; dom.loadMsg.textContent='このフードコート画像のレポートはまだありません。LINEで「テナント一覧」画像を送ると貯まります。'; return; }
+      reports.forEach((r,i)=>{ const o=document.createElement('option'); o.value=String(i); o.textContent=fmtWhen(r); dom.reportSel.appendChild(o); });
+      dom.reportSel.value='0';
+      render(reports[0]);
+    }
+
+    async function loadReports(){
+      if (!getToken()){ setAuthBadge(false); return; }
+      const store = dom.storeSel.value || DEFAULT_STORE;
+      dom.loadMsg.className='msg'; dom.loadMsg.textContent='読み込み中…';
+      try {
+        const body = await apiFetch('/foodcourt/reports?store_key='+encodeURIComponent(store)+'&limit=60');
+        reports = Array.isArray(body.reports) ? body.reports : [];
+        setAuthBadge(true);
+        dom.loadMsg.textContent='';
+        populateReports();
+      } catch(e){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent=(e&&e.message)||'読み込みに失敗しました。'; }
+    }
+
+    async function connectWithToken(){
+      const t = dom.tokenInput.value.trim();
+      if (!t){ dom.authMsg.className='msg err'; dom.authMsg.textContent='トークンを入力してください。'; return; }
+      dom.tokenBtn.disabled = true;
+      try {
+        if (AUTH && AUTH.loginWithToken){
+          await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
+        } else { localStorage.setItem(TOKEN_KEY, t); }
+        setAuthBadge(true);
+        await loadReports();
+      } catch(e){ dom.authMsg.className='msg err'; dom.authMsg.textContent=(e&&e.message)||'認証に失敗しました。'; }
+      finally { dom.tokenBtn.disabled = false; }
+    }
+
+    dom.tokenBtn.addEventListener('click', connectWithToken);
+    dom.tokenInput.addEventListener('keydown', e=>{ if(e.key==='Enter') connectWithToken(); });
+    dom.reloadBtn.addEventListener('click', loadReports);
+    dom.storeSel.addEventListener('change', loadReports);
+    dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]) render(reports[i]); });
+
+    (async function init(){
+      captureLockedStoreFromUrl();
+      populateStores();
+      if (AUTH && AUTH.consumeUrlAuthParams){
+        try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' }); } catch(_){}
+      }
+      setAuthBadge(!!getToken());
+      if (getToken()) await loadReports();
+    })();
+  })();
+  </script>
+</body>
+</html>
