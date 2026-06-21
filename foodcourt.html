@@ -742,6 +742,32 @@
         if (pastRankAvg!=null) L.push('FC内 売上順位は '+salesRank+'位、過去平均 '+(Math.round(pastRankAvg*10)/10).toFixed(1)+'位（'+(salesRank<=pastRankAvg?'改善/同等':'やや後退')+'）。');
       }
     }
+    // 外部要因（天気・東京ドーム）と自店客数の相関。自動分析にも加味する。
+    const extDaily = series.filter(p=>p.guests!=null);
+    (function(){
+      L.push('【天気】');
+      const wd = extDaily.map(p=>({g:p.guests, w:weatherByDate.get(ymdJst(p.when))})).filter(x=>x.w);
+      if (wd.length<2){ L.push('天気と客数の比較に十分なデータがまだありません（蓄積が増えると精度が上がります）。'); return; }
+      const rain = wd.filter(x=>(Number(x.w.precipitation_mm)||0)>=1).map(x=>x.g);
+      const dry  = wd.filter(x=>(Number(x.w.precipitation_mm)||0)<1).map(x=>x.g);
+      const rA=avg(rain), dA=avg(dry);
+      if (rA!=null && dA!=null){ const ratio=dA>0?rA/dA:null;
+        L.push('雨の日('+rain.length+'日)の平均客数 '+Math.round(rA)+'人 / 雨でない日('+dry.length+'日) '+Math.round(dA)+'人'+(ratio?'（'+ratio.toFixed(2)+'倍）':'')+'。');
+        if (ratio!=null) L.push(ratio<=0.9?'雨は客足が鈍る傾向。雨予報の日は仕込み・人員を控えめに。':(ratio>=1.1?'雨でも客数は落ちていない傾向。':'雨の影響は限定的。'));
+      } else if (rA!=null) { L.push('雨の日('+rain.length+'日)の平均客数 '+Math.round(rA)+'人（雨でない日のデータが不足）。'); }
+      else if (dA!=null) { L.push('雨でない日('+dry.length+'日)の平均客数 '+Math.round(dA)+'人（雨の日のデータがまだ無い）。'); }
+    })();
+    (function(){
+      L.push('【東京ドーム】');
+      if (!events.length){ L.push('東京ドームのイベントデータがありません。'); return; }
+      const evG = extDaily.filter(p=>(eventsByDate.get(ymdJst(p.when))||[])[0]).map(p=>p.guests);
+      const nonG = extDaily.filter(p=>!(eventsByDate.get(ymdJst(p.when))||[])[0]).map(p=>p.guests);
+      const eA=avg(evG), nA=avg(nonG);
+      if (eA!=null && nA!=null){ const ratio=nA>0?eA/nA:null;
+        L.push('イベント日('+evG.length+'日)の平均客数 '+Math.round(eA)+'人 / 非イベント日('+nonG.length+'日) '+Math.round(nA)+'人'+(ratio?'（'+ratio.toFixed(2)+'倍）':'')+'。');
+        if (ratio!=null && ratio>=1.2) L.push('イベント日は客数が伸びやすい。日程に合わせて仕込み・人員を厚めに。');
+      } else { L.push('イベント日／非イベント日のどちらかのデータが不足しています。'); }
+    })();
     L.push('【強み・弱み】');
     const strengths=[], weaks=[];
     if (guestRank<=Math.ceil(n/2)) strengths.push('集客力（客数 '+guestRank+'位）'); else weaks.push('集客（客数 '+guestRank+'位）');
