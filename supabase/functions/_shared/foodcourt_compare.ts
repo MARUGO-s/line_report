@@ -3,6 +3,33 @@
 // 安全策: ①対象店舗を限定（FOODCOURT_STORE_KEYS）②マーカー判定 ③抽出が表として成立しなければ未処理を返し
 //   通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
+import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+
+// LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
+const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
+const FOODCOURT_URI_MAX_LEN = 1000
+
+function buildFoodCourtPageUrl(storeKey: string, loginToken?: string | null): string {
+  const key = String(storeKey || '').trim()
+  const lt = String(loginToken ?? '').trim()
+  if (lt) {
+    const withToken = `${FOODCOURT_PAGE_BASE}?${new URLSearchParams({ store_key: key, from: 'line', lt }).toString()}`
+    if (withToken.length <= FOODCOURT_URI_MAX_LEN) return withToken
+  }
+  return `${FOODCOURT_PAGE_BASE}?${new URLSearchParams({ store_key: key, from: 'line' }).toString()}`
+}
+
+async function buildFoodCourtDashboardLink(supabase: SupabaseClient, storeKey: string): Promise<string> {
+  const key = String(storeKey || '').trim()
+  if (!key) return ''
+  try {
+    const issued = await issueAdminDashboardLoginLinkToken(supabase, { source: 'line_foodcourt', store_partition_key: key })
+    return buildFoodCourtPageUrl(key, issued.token)
+  } catch (e) {
+    console.error('buildFoodCourtDashboardLink failed:', e instanceof Error ? e.message : String(e))
+    return buildFoodCourtPageUrl(key, null)
+  }
+}
 
 // フードコートレポートを送ってくる店舗（基準店）。baseTenantName=比較の基準、expectedTenants=想定テナント数(Groq抽出の十分性判定用)。
 export const FOODCOURT_STORE_KEYS: Record<string, { baseTenantName: string; expectedTenants?: number }> = {
@@ -272,23 +299,29 @@ export function buildFoodCourtCompareFlex(cmp: FoodCourtComparison): Record<stri
   }
 }
 
-// 短い記録通知（毎回の分析結果は出さず「記録した・サイトで質問してね」だけ返す）。
-export function buildFoodCourtAckFlex(n: number): Record<string, unknown> {
-  return {
-    type: 'flex',
-    altText: 'フードコート集計を記録しました',
-    contents: {
-      type: 'bubble',
-      body: {
-        type: 'box', layout: 'vertical', spacing: 'sm',
-        contents: [
-          { type: 'text', text: '📊 フードコート集計を記録しました', weight: 'bold', size: 'md', color: '#1a6fa8' },
-          { type: 'text', text: `${n}テナント分を保存（売上には登録していません）。`, size: 'sm', color: '#444444', wrap: true },
-          { type: 'text', text: '分析は専用サイトで「質問」してください。蓄積データから回答します。', size: 'xs', color: '#8a96a3', wrap: true },
-        ],
-      },
+// 短い記録通知（毎回の分析結果は出さず「記録した・サイトで質問してね」＋分析ページボタン）。
+export function buildFoodCourtAckFlex(n: number, pageUrl?: string | null): Record<string, unknown> {
+  const bubble: Record<string, unknown> = {
+    type: 'bubble',
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'text', text: '📊 フードコート集計を記録しました', weight: 'bold', size: 'md', color: '#1a6fa8' },
+        { type: 'text', text: `${n}テナント分を保存（売上には登録していません）。`, size: 'sm', color: '#444444', wrap: true },
+        { type: 'text', text: '下のボタンから分析ページを開き、データに質問できます。', size: 'xs', color: '#8a96a3', wrap: true },
+      ],
     },
   }
+  const url = String(pageUrl ?? '').trim()
+  if (url) {
+    bubble.footer = {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'button', style: 'primary', color: '#1a6fa8', height: 'sm', action: { type: 'uri', label: 'フードコート分析を開く', uri: url } },
+      ],
+    }
+  }
+  return { type: 'flex', altText: 'フードコート集計を記録しました', contents: bubble }
 }
 
 async function groqChat(
@@ -483,6 +516,7 @@ export async function maybeHandleFoodCourtReport(
     storeKey: params.storeKey, roomId: params.roomId, lineMessageId: params.lineMessageId,
     baseName: cfg.baseTenantName, tenants,
   })
-  // 毎回の分析結果は出さず、短い記録通知だけ返す（分析はサイトで質問する運用）。
-  return { handled: true, reply: buildFoodCourtAckFlex(tenants.length) }
+  // 毎回の分析結果は出さず、短い記録通知＋店舗限定の分析ページリンクを返す（分析はサイトで質問）。
+  const pageUrl = await buildFoodCourtDashboardLink(supabase, params.storeKey)
+  return { handled: true, reply: buildFoodCourtAckFlex(tenants.length, pageUrl) }
 }
