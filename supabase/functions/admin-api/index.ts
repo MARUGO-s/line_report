@@ -345,11 +345,14 @@ async function loadVenueEventsForReports(
   }
   dates.sort()
   // レポートが無い場合でも、当月前後の予定を返せるよう today を基準にフォールバック。
+  // イベント一覧（ページ側）として過去〜先まで広めに返す（過去90日〜先400日 と レポート期間の和集合）。
   const todayIso = new Date().toISOString().slice(0, 10)
   const minDate = dates[0] ?? todayIso
   const maxBase = dates[dates.length - 1] ?? todayIso
-  const lo = addDaysIso(minDate, -7)
-  const hi = addDaysIso(maxBase > todayIso ? maxBase : todayIso, 45)
+  const loCand = [addDaysIso(minDate, -7), addDaysIso(todayIso, -90)].sort()
+  const hiCand = [addDaysIso(maxBase > todayIso ? maxBase : todayIso, 45), addDaysIso(todayIso, 400)].sort()
+  const lo = loCand[0]
+  const hi = hiCand[hiCand.length - 1]
   const { data, error } = await supabase
     .from("tokyo_dome_events")
     .select("event_date, title, category")

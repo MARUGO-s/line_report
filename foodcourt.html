@@ -60,6 +60,7 @@
     th{color:var(--muted);font-weight:500;position:sticky;top:0}
     td.name,th.name{text-align:left;white-space:normal}
     tr.base td{background:rgba(255,207,92,.12);font-weight:600}
+    tr.evt-past td{opacity:.5}
     .bar-row{display:flex;align-items:center;gap:8px;margin:6px 0}
     .bar-name{flex:0 0 150px;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .bar-track{flex:1;background:rgba(255,255,255,.06);border-radius:6px;height:18px;position:relative;overflow:hidden}
@@ -199,6 +200,13 @@
         <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th class="name">ジャンル</th><th class="name">イベント</th></tr></thead><tbody id="evtUpcomingTbody"></tbody></table></div>
         <div class="note" id="evtUpcomingNote"></div>
       </div>
+
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:8px;">東京ドーム イベント一覧（全期間）</div>
+        <div id="evtFilter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
+        <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th class="name">曜日</th><th class="name">ジャンル</th><th class="name">イベント</th><th>客数</th></tr></thead><tbody id="evtListTbody"></tbody></table></div>
+        <div class="note" id="evtListNote"></div>
+      </div>
     </div>
   </div>
 
@@ -222,11 +230,14 @@
       shareTbody:$('shareTbody'), shareNote:$('shareNote'), ktTbody:$('ktTbody'), posTbody:$('posTbody'),
       distTbody:$('distTbody'), trendTbody:$('trendTbody'), trendNote:$('trendNote'),
       evtCorrTbody:$('evtCorrTbody'), evtCorrNote:$('evtCorrNote'), evtUpcomingTbody:$('evtUpcomingTbody'), evtUpcomingNote:$('evtUpcomingNote'),
+      evtFilter:$('evtFilter'), evtListTbody:$('evtListTbody'), evtListNote:$('evtListNote'),
     };
     const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ'];
     let reports = [];
     let events = [];                 // 東京ドームのイベント [{event_date,title,category}]
     let eventsByDate = new Map();    // 'YYYY-MM-DD' -> [event,...]
+    let evtFilterVal = 'all';        // イベント一覧のジャンル絞り込み
+    let lastSeries = [];             // 直近描画の基準店日次系列（客数併記用）
 
     const nf = new Intl.NumberFormat('ja-JP');
     const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
@@ -611,8 +622,45 @@
       else { dom.evtUpcomingTbody.innerHTML = up.map(function(e){ const d=String(e.event_date).slice(0,10); const ic=EVT_ICON[e.category]||'🎫';
           return '<tr><td class="name">'+escapeHtml(fmtDay(d))+'('+wdayJp(d)+')</td><td class="name">'+ic+escapeHtml(e.category||'')+'</td><td class="name">'+escapeHtml(e.title||'')+'</td></tr>'; }).join('');
         dom.evtUpcomingNote.textContent = '東京ドーム公式より自動取得（1日1回更新）。'; }
+
+      // 7) 東京ドーム イベント一覧（全期間・ジャンル絞り込み・客数併記）
+      lastSeries = series || [];
+      renderEventFilter();
+      renderEventList();
     }
     function wdayJp(ymd){ const d=new Date(ymd); if(isNaN(d.getTime()))return '?'; const j=new Date(d.getTime()+9*3600*1000); return ['日','月','火','水','木','金','土'][j.getUTCDay()]; }
+
+    const EVT_FILTERS = [['all','すべて'],['プロ野球','⚾プロ野球'],['アマ野球','🥎アマ野球'],['ライブ','🎤ライブ'],['その他','🎫その他']];
+    function renderEventFilter(){
+      if(!dom.evtFilter) return;
+      dom.evtFilter.innerHTML='';
+      // データに存在するジャンルだけ（+すべて）を出す。
+      const present = new Set((events||[]).map(function(e){ return e.category||'その他'; }));
+      EVT_FILTERS.filter(function(f){ return f[0]==='all' || present.has(f[0]); }).forEach(function(f){
+        const b=document.createElement('button'); b.textContent=f[1];
+        b.className=(evtFilterVal===f[0]?'':'ghost'); b.style.cssText='padding:4px 10px;font-size:12px;min-height:32px;';
+        b.addEventListener('click', function(){ evtFilterVal=f[0]; renderEventFilter(); renderEventList(); });
+        dom.evtFilter.appendChild(b);
+      });
+    }
+    function renderEventList(){
+      if(!dom.evtListTbody) return;
+      const guestsByDate=new Map();
+      (lastSeries||[]).forEach(function(p){ const d=ymdJst(p.when); if(d && p.guests!=null) guestsByDate.set(d,p.guests); });
+      const todayJ=ymdJst(new Date().toISOString());
+      let list=(events||[]).filter(function(e){ return /^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date||'').slice(0,10)); });
+      if(evtFilterVal!=='all') list=list.filter(function(e){ return (e.category||'その他')===evtFilterVal; });
+      list=list.slice().sort(function(a,b){ return String(a.event_date).localeCompare(String(b.event_date)); });
+      if(!list.length){ dom.evtListTbody.innerHTML=''; dom.evtListNote.textContent=(events&&events.length)?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
+      dom.evtListTbody.innerHTML=list.map(function(e){ const d=String(e.event_date).slice(0,10); const ic=EVT_ICON[e.category]||'🎫';
+        const g=guestsByDate.has(d)?nf.format(guestsByDate.get(d)):'—';
+        const cls = d<todayJ ? ' class="evt-past"' : (d===todayJ ? ' class="base"' : '');
+        return '<tr'+cls+'><td class="name">'+escapeHtml(fmtDay(d))+'</td><td class="name">'+wdayJp(d)+'</td><td class="name">'+ic+escapeHtml(e.category||'')+'</td><td class="name">'+escapeHtml(e.title||'')+'</td><td>'+g+'</td></tr>';
+      }).join('');
+      const future=list.filter(function(e){ return String(e.event_date).slice(0,10)>=todayJ; }).length;
+      dom.evtListNote.textContent='全'+list.length+'件（今後'+future+'件）。薄字＝過去。客数はマルゴSの記録がある日のみ。';
+      try{ labelizeTables(); }catch(_){ }
+    }
 
     // スマホのカード型表示用: 各表の thead 見出しを、対応する各 td に data-label として付与。
     function labelizeTables(){
