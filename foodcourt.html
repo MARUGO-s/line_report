@@ -61,6 +61,21 @@
     td.name,th.name{text-align:left;white-space:normal}
     tr.base td{background:rgba(255,207,92,.12);font-weight:600}
     tr.evt-past td{opacity:.5}
+    .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+    .cal-h{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
+    .cal-h.sun{color:#e06b6b}.cal-h.sat{color:#6ba8e0}
+    .cal-cell{min-height:76px;border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--panel2);overflow:hidden}
+    .cal-cell.empty{background:transparent;border-color:transparent}
+    .cal-cell.today{outline:2px solid var(--accent);outline-offset:-2px}
+    .cal-cell.ev-pro{background:rgba(91,160,224,.16)}
+    .cal-cell.ev-ama{background:rgba(112,200,140,.16)}
+    .cal-cell.ev-live{background:rgba(224,120,180,.16)}
+    .cal-cell.ev-other{background:rgba(170,170,170,.16)}
+    .cal-d{font-size:11px;color:var(--muted)}
+    .cal-d.sun{color:#e06b6b}.cal-d.sat{color:#6ba8e0}
+    .cal-ev{font-size:10px;line-height:1.3;margin-top:2px;word-break:break-word}
+    .cal-g{font-size:10px;color:var(--base);margin-top:2px}
+    @media(max-width:640px){ .cal-cell{min-height:56px;padding:2px} .cal-ev{font-size:9px} .cal-g{font-size:9px} }
     .bar-row{display:flex;align-items:center;gap:8px;margin:6px 0}
     .bar-name{flex:0 0 150px;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .bar-track{flex:1;background:rgba(255,255,255,.06);border-radius:6px;height:18px;position:relative;overflow:hidden}
@@ -202,6 +217,19 @@
       </div>
 
       <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <div style="font-weight:600;">東京ドーム カレンダー（月表示）</div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button id="calPrev" class="ghost" style="min-height:32px;padding:4px 12px;">◀</button>
+            <span id="calLabel" style="min-width:96px;text-align:center;font-weight:600;">—</span>
+            <button id="calNext" class="ghost" style="min-height:32px;padding:4px 12px;">▶</button>
+          </div>
+        </div>
+        <div id="calGrid" class="cal-grid"></div>
+        <div class="note" id="calNote"></div>
+      </div>
+
+      <div class="card">
         <div style="font-weight:600;margin-bottom:8px;">東京ドーム イベント一覧（全期間）</div>
         <div id="evtFilter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
         <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th class="name">曜日</th><th class="name">ジャンル</th><th class="name">イベント</th><th>客数</th></tr></thead><tbody id="evtListTbody"></tbody></table></div>
@@ -231,6 +259,7 @@
       distTbody:$('distTbody'), trendTbody:$('trendTbody'), trendNote:$('trendNote'),
       evtCorrTbody:$('evtCorrTbody'), evtCorrNote:$('evtCorrNote'), evtUpcomingTbody:$('evtUpcomingTbody'), evtUpcomingNote:$('evtUpcomingNote'),
       evtFilter:$('evtFilter'), evtListTbody:$('evtListTbody'), evtListNote:$('evtListNote'),
+      calPrev:$('calPrev'), calNext:$('calNext'), calLabel:$('calLabel'), calGrid:$('calGrid'), calNote:$('calNote'),
     };
     const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ'];
     let reports = [];
@@ -238,6 +267,7 @@
     let eventsByDate = new Map();    // 'YYYY-MM-DD' -> [event,...]
     let evtFilterVal = 'all';        // イベント一覧のジャンル絞り込み
     let lastSeries = [];             // 直近描画の基準店日次系列（客数併記用）
+    let calY = 0, calM = 0;          // カレンダー表示中の年・月（0=未初期化）
 
     const nf = new Intl.NumberFormat('ja-JP');
     const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
@@ -627,6 +657,49 @@
       lastSeries = series || [];
       renderEventFilter();
       renderEventList();
+      // 8) 東京ドーム カレンダー（月表示）
+      renderCalendar();
+    }
+
+    // --- 東京ドーム カレンダー（月表示）---
+    function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':'other'; }
+    function shorten(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
+    function eventMonthBounds(){
+      const ks=(events||[]).map(function(e){ const m=String(e.event_date||'').match(/^(\d{4})-(\d{2})/); return m?(+m[1])*12+(+m[2]-1):null; }).filter(function(x){ return x!=null; });
+      if(!ks.length) return null;
+      return { min:Math.min.apply(null,ks), max:Math.max.apply(null,ks) };
+    }
+    function calStep(delta){
+      if(!calY) return;
+      let k=calY*12+(calM-1)+delta;
+      const b=eventMonthBounds(); if(b){ k=Math.max(b.min,Math.min(b.max,k)); }
+      calY=Math.floor(k/12); calM=(k%12)+1; renderCalendar();
+    }
+    function renderCalendar(){
+      if(!dom.calGrid) return;
+      if(!events || !events.length){ dom.calGrid.innerHTML=''; dom.calLabel.textContent='—'; dom.calNote.textContent='東京ドームのイベントデータがありません。'; if(dom.calPrev)dom.calPrev.disabled=true; if(dom.calNext)dom.calNext.disabled=true; return; }
+      const b=eventMonthBounds();
+      if(!calY){ const tj=new Date(Date.now()+9*3600*1000); let k=tj.getUTCFullYear()*12+tj.getUTCMonth(); if(b){ k=Math.max(b.min,Math.min(b.max,k)); } calY=Math.floor(k/12); calM=(k%12)+1; }
+      const guestsByDate=new Map(); (lastSeries||[]).forEach(function(p){ const d=ymdJst(p.when); if(d && p.guests!=null) guestsByDate.set(d,p.guests); });
+      const todayJ=ymdJst(new Date().toISOString());
+      dom.calLabel.textContent=calY+'年'+calM+'月';
+      const first=new Date(Date.UTC(calY,calM-1,1)).getUTCDay();
+      const days=new Date(Date.UTC(calY,calM,0)).getUTCDate();
+      const WH=['日','月','火','水','木','金','土'];
+      let html=WH.map(function(w,i){ return '<div class="cal-h '+(i===0?'sun':i===6?'sat':'')+'">'+w+'</div>'; }).join('');
+      for(let i=0;i<first;i++) html+='<div class="cal-cell empty"></div>';
+      for(let d=1;d<=days;d++){
+        const ds=calY+'-'+String(calM).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+        const dow=new Date(Date.UTC(calY,calM-1,d)).getUTCDay();
+        const hits=eventsByDate.get(ds)||[];
+        const evHtml=hits.map(function(h){ const ic=EVT_ICON[h.category]||'🎫'; return '<div class="cal-ev" title="'+escapeHtml(h.title||'')+'">'+ic+escapeHtml(shorten(h.title,14))+'</div>'; }).join('');
+        const g=guestsByDate.has(ds)?'<div class="cal-g">👥'+nf.format(guestsByDate.get(ds))+'</div>':'';
+        let cls='cal-cell'; if(hits.length) cls+=' ev-'+catSlug(hits[0].category); if(ds===todayJ) cls+=' today';
+        html+='<div class="'+cls+'"><div class="cal-d '+(dow===0?'sun':dow===6?'sat':'')+'">'+d+'</div>'+evHtml+g+'</div>';
+      }
+      dom.calGrid.innerHTML=html;
+      if(b){ const k=calY*12+(calM-1); if(dom.calPrev)dom.calPrev.disabled=(k<=b.min); if(dom.calNext)dom.calNext.disabled=(k>=b.max); }
+      dom.calNote.textContent='色＝開催ジャンル（⚾青/🥎緑/🎤桃/🎫灰）。👥はマルゴS客数（記録のある日のみ）。◀▶で月移動。';
     }
     function wdayJp(ymd){ const d=new Date(ymd); if(isNaN(d.getTime()))return '?'; const j=new Date(d.getTime()+9*3600*1000); return ['日','月','火','水','木','金','土'][j.getUTCDay()]; }
 
@@ -752,6 +825,7 @@
         events = Array.isArray(body.events) ? body.events : [];
         eventsByDate = new Map();
         events.forEach(function(e){ const d=String((e&&e.event_date)||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; if(!eventsByDate.has(d)) eventsByDate.set(d,[]); eventsByDate.get(d).push(e); });
+        calY = 0; calM = 0;  // 店舗/データ切替時はカレンダー月を再初期化（当月またはデータ範囲にクランプ）。
         // report_date（手動投入）優先＝対象日で新しい順に並べる（created_atは取込時刻のため）。
         reports.sort((a,b)=> String((b&&(b.report_date||b.created_at))||'').localeCompare(String((a&&(a.report_date||a.created_at))||'')));
         setAuthBadge(true);
@@ -784,6 +858,8 @@
     dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]) render(reports[i]); });
     dom.rangeBtn.addEventListener('click', renderRange);
     dom.dayBtn.addEventListener('click', ()=>{ const i=Number(dom.reportSel.value)||0; if(reports[i]) render(reports[i]); });
+    if(dom.calPrev) dom.calPrev.addEventListener('click', ()=>calStep(-1));
+    if(dom.calNext) dom.calNext.addEventListener('click', ()=>calStep(1));
 
     (async function init(){
       captureLockedStoreFromUrl();
