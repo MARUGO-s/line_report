@@ -244,11 +244,13 @@ export async function maybeHandleFoodCourtReport(
     detectText: string
     geminiApiKey: string
     geminiModel: string
+    /** 自店レシートとして確信できない画像のとき true＝マーカー不一致でも抽出を試す（検知の取りこぼし防止）。 */
+    forceAttempt?: boolean
   },
 ): Promise<{ handled: boolean; reply?: Record<string, unknown> }> {
   const cfg = FOODCOURT_STORE_KEYS[String(params.storeKey ?? '')]
   if (!cfg) return { handled: false }
-  if (!looksLikeFoodCourtReport(params.detectText)) return { handled: false }
+  if (!looksLikeFoodCourtReport(params.detectText) && !params.forceAttempt) return { handled: false }
   if (!params.geminiApiKey) return { handled: false }
 
   const tenants = await extractFoodCourtTenants(params.bytes, params.contentType, params.geminiApiKey, params.geminiModel)

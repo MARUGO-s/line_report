@@ -1216,11 +1216,23 @@ async function processReceiptImageEvent(
   //   対象店舗（marugoS 等）＋マーカー一致のときだけ Gemini で全テナントを抽出し、基準店=100の比較カードを返す。
   //   表として成立しなければ handled=false で通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
   {
+    const fcReceipt = analyzed.analysis?.receipt ?? null
     const fcDetectText = [
       analyzedSummaryText,
-      analyzed.analysis?.receipt?.storeName ?? '',
-      Array.isArray(analyzed.analysis?.receipt?.items) ? analyzed.analysis.receipt.items.join(' ') : '',
+      fcReceipt?.storeName ?? '',
+      Array.isArray(fcReceipt?.items) ? fcReceipt.items.join(' ') : '',
     ].join(' ')
+    // 自店(マルゴエス等)レシートとして確信できない画像は、マーカー不一致でも抽出を試す（Groq要約に依存しない）。
+    //   通常レシートは「確信あり＋店名一致」で素通り＝余計なGemini呼び出し・遅延を出さない。
+    const fcOwnReceiptConfident = !!fcReceipt &&
+      mergeReceiptConfidence(computeReceiptHeuristicConfidence(fcReceipt), analyzed.analysis?.receiptModelConfidence ?? null) >= RECEIPT_ANALYSIS_CONFIDENCE_MIN &&
+      receiptStoreNameMatchesRegistry(
+        registry.display_name || registry.store_partition_key,
+        registry.store_partition_key,
+        fcReceipt.storeName,
+        fcReceipt.storePhone,
+        registry.receipt_phones,
+      )
     const fc = await maybeHandleFoodCourtReport(supabase, {
       storeKey: String(registry.store_partition_key ?? ''),
       roomId,
@@ -1230,6 +1242,7 @@ async function processReceiptImageEvent(
       detectText: fcDetectText,
       geminiApiKey: resolveGeminiApiKey(),
       geminiModel: receiptGeminiModel,
+      forceAttempt: !fcOwnReceiptConfident,
     })
     if (fc.handled) {
       if (receiptReplyToken && fc.reply) {
