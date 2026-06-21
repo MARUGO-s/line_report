@@ -207,6 +207,20 @@ export function parseReceiptDateToIso(raw: string | null): string | null {
     }
   }
 
+  // 安全網（プロンプト任せにしない）: 「開始日〜終了日」など2つの日付が来た場合、営業日＝開始日（早い方）を採用する。
+  //   レジ精算レポートが日付をまたいで翌日締めになっても、終了日／最下部の印字日（翌日）に引っ張られない。
+  //   単一日付（通常のレシート）には影響しない＝マッチが2件未満なら下の従来処理に落ちる。
+  const looksLikeDateRange = /[〜～~]|から|\bto\b|開始|終了/.test(normalized)
+  if (looksLikeDateRange) {
+    const isoCandidates = [...normalized.matchAll(/(\d{4})\D{0,6}(\d{1,2})\D{0,6}(\d{1,2})/g)]
+      .map((mm) => toIsoDateStringSafe(Number(mm[1]), Number(mm[2]), Number(mm[3])))
+      .filter((iso): iso is string => !!iso)
+    if (isoCandidates.length >= 2) {
+      isoCandidates.sort() // ISO文字列の昇順＝日付の昇順
+      return isoCandidates[0] // 早い方＝開始日（営業日）
+    }
+  }
+
   const m = normalized.match(/(\d{4})\D{0,6}(\d{1,2})\D{0,6}(\d{1,2})/)
   if (!m) return null
   return toIsoDateStringSafe(Number(m[1]), Number(m[2]), Number(m[3]))

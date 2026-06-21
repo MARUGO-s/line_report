@@ -703,6 +703,7 @@ async function processDailySalesFileEvent(
   registry: StoreRegistryRow,
   event: LineEvent,
   _suppressAll: boolean, // ハードミュート状態。日次売上登録はレシート同等＝ミュートをバイパスするため未使用。
+  salesRegistrationAllowed = true, // receipt_sales_registration_enabled: 試運転ルームは本番DBへ登録しない
 ): Promise<{ replied: boolean; reason?: string }> {
   const lineMessageId = String(event.message?.id ?? '').trim()
   const roomId = resolveRoomId(event)
@@ -715,6 +716,20 @@ async function processDailySalesFileEvent(
   if (!fetched.ok) return { replied: false, reason: fetched.error }
   const parsed = parseMonthlyDailySalesWorkbook(fetched.bytes, fileName)
   if (!parsed.recognized) return { replied: false, reason: 'not_daily_sales_file' } // 日次売上ファイルでない→無反応（メディア保存のみ）
+
+  // 売上のDB登録ゲート（試運転ルームは本番テーブルへ保存しない）。日次ファイルもレシートと同じ正本に書くため対象。
+  if (!salesRegistrationAllowed) {
+    const replyTokenForNotice = String(event.replyToken ?? '').trim()
+    if (replyTokenForNotice) {
+      await replyLineText(
+        replyTokenForNotice,
+        '🧪 このルームは「売上をDB登録しない」設定（試運転）のため、日次売上ファイルはDB登録していません。',
+        accessToken,
+        webhookReplyLog(registry, roomId, 'daily_sales_file_registration_disabled'),
+      )
+    }
+    return { replied: !!replyTokenForNotice, reason: 'sales_registration_disabled' }
+  }
 
   const supabase = createServiceClient()
   if (!supabase) return { replied: false, reason: 'server_misconfigured' }
@@ -894,6 +909,7 @@ async function processReceiptImageEvent(
   suppressReceiptReply = false, // !image_analysis_reply_enabled: レシート結果のみ返信しない
   suppressNonReceiptReply = false, // !non_receipt_image_reply_enabled: 非レシート画像の返信のみ抑止
   allowPettyCash = true,        // petty_receipt_analysis_enabled: 経費(小口)フローの許可（ONなら hard mute でも優先返信）
+  salesRegistrationAllowed = true, // receipt_sales_registration_enabled: 売上(精算)をこのルームから本番DBへ登録するか（試運転ルームはOFF）
 ): Promise<{ saved: boolean; replied: boolean; reason?: string }> {
   const lineMessageId = String(event.message?.id ?? '').trim()
   const rawReplyToken = String(event.replyToken ?? '').trim()
@@ -1379,6 +1395,27 @@ async function processReceiptImageEvent(
       console.error('persist learned receipt phone (current store) failed:', String(e))
     }
   }
+  // 売上のDB登録ゲート（試運転ルームは本番テーブルへ保存しない）。
+  // 1チャネルに本番＋試運転トークが同居する店舗で、試運転側が同じ営業日を先に登録 → 本番が毎回
+  //   「既に登録」になる／集計に試運転が混入する、を根本回避する。解析結果は返すが保存・重複カードはしない。
+  if (!salesRegistrationAllowed) {
+    if (receiptReplyToken) {
+      const noticeLines = [
+        '🧪 このルームは「売上をDB登録しない」設定（試運転）のため、今回の内容はDB登録していません。',
+        `日付: ${receiptDateIso}`,
+        `総売上: ${receipt.grossSales ?? '-'}`,
+        `組数: ${receipt.partyCount ?? '-'}／客数: ${receipt.guestCount ?? '-'}`,
+      ]
+      await replyLineText(
+        receiptReplyToken,
+        noticeLines.join('\n'),
+        accessToken,
+        webhookReplyLog(registry, roomId, 'receipt_sales_registration_disabled'),
+      )
+    }
+    return { saved: false, replied: !!receiptReplyToken, reason: 'sales_registration_disabled' }
+  }
+
   const result = await attemptReceiptRegistration(supabase, registry, registrationPayload)
 
   if (receiptReplyToken) {
@@ -1675,6 +1712,8 @@ Deno.serve(async (req) => {
     let budgetEntryAllowed = false
     // 小口（経費）レシート解析の許可（既定ON）。ONなら「AI返信完全無し」でも経費フローは優先して解析・返信する。
     let pettyAnalysisAllowed = true
+    // 売上(精算)レシートをこのルームから本番DBへ登録するか（既定ON）。試運転ルームは OFF にして本番テーブルを汚さない。
+    let salesRegistrationAllowed = true
     if (eventRoomId) {
       const muteFlags = await loadRoomSearchFlagsCached(eventRoomId)
       roomHardMuted = !!muteFlags?.bot_reply_hard_mute_enabled
@@ -1687,6 +1726,7 @@ Deno.serve(async (req) => {
       // 予算登録フローの権限ゲート（既定OFF＝「許可」した部屋だけ作動）。
       budgetEntryAllowed = muteFlags !== null ? !!muteFlags.budget_entry_enabled : false
       pettyAnalysisAllowed = muteFlags !== null ? muteFlags.petty_receipt_analysis_enabled !== false : true
+      salesRegistrationAllowed = muteFlags !== null ? muteFlags.receipt_sales_registration_enabled !== false : true
     }
 
     // メディア閲覧用の保存（画像/動画/音声/ファイル）。1ルーム合計20MBまで、超過分は古い順に自動削除。
@@ -1719,7 +1759,7 @@ Deno.serve(async (req) => {
     // ファイル（Excel/CSV）受信 → 月次日別売上管理表なら日次売上をレシート同等で登録。
     if (event.type === 'message' && event.message?.type === 'file') {
       try {
-        const r = await processDailySalesFileEvent(registry as StoreRegistryRow, event, roomHardMuted)
+        const r = await processDailySalesFileEvent(registry as StoreRegistryRow, event, roomHardMuted, salesRegistrationAllowed)
         if (r.replied) receiptReplies += 1
         if (r.reason) errors.push(normalizeInlineText(r.reason).slice(0, 160))
       } catch (err) {
@@ -1731,7 +1771,7 @@ Deno.serve(async (req) => {
 
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
-        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply, suppressNonReceiptReply, pettyAnalysisAllowed)
+        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply, suppressNonReceiptReply, pettyAnalysisAllowed, salesRegistrationAllowed)
         if (result.saved) receiptsSaved += 1
         if (result.replied) receiptReplies += 1
         if (result.reason && !result.saved) {

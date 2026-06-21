@@ -5416,6 +5416,7 @@
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMonthendReportEnabled" type="checkbox"><span id="roomConfigReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigBudgetEntryEnabled" type="checkbox">予算登録を許可（このルームから月次予算を入力）</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigPettyReceiptAnalysisEnabled" type="checkbox">小口レシートの解析をする（AI返信完全無しでも経費の解析・返信を優先）</label>
+          <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptSalesRegistrationEnabled" type="checkbox">売上をDB登録する（OFF＝試運転ルーム：解析はするが本番テーブルに保存しない）</label>
         </div>
         <div class="room-scope-modal-list store-permission-panel" style="margin-top:14px;border-top:1px solid rgba(255,255,255,.12);padding-top:12px;">
           <div style="font-size:12px;opacity:.7;font-weight:700;margin-bottom:6px;">セルフ設定（LINEワンパス＋パスワード）— このルーム専用</div>
@@ -5938,6 +5939,7 @@
       roomConfigImageAnalysisReplyEnabled: document.getElementById('roomConfigImageAnalysisReplyEnabled'),
       roomConfigBudgetEntryEnabled: document.getElementById('roomConfigBudgetEntryEnabled'),
       roomConfigPettyReceiptAnalysisEnabled: document.getElementById('roomConfigPettyReceiptAnalysisEnabled'),
+      roomConfigReceiptSalesRegistrationEnabled: document.getElementById('roomConfigReceiptSalesRegistrationEnabled'),
       roomConfigSelfEnabled: document.getElementById('roomConfigSelfEnabled'),
       roomConfigSelfPassword: document.getElementById('roomConfigSelfPassword'),
       roomConfigSelfPwStatus: document.getElementById('roomConfigSelfPwStatus'),
@@ -8389,6 +8391,7 @@
         room_config_password: (dom.roomConfigSelfPassword && dom.roomConfigSelfPassword.value)
           ? String(dom.roomConfigSelfPassword.value) : undefined,
         petty_receipt_analysis_enabled: dom.roomConfigPettyReceiptAnalysisEnabled ? !!dom.roomConfigPettyReceiptAnalysisEnabled.checked : undefined,
+        receipt_sales_registration_enabled: dom.roomConfigReceiptSalesRegistrationEnabled ? !!dom.roomConfigReceiptSalesRegistrationEnabled.checked : undefined,
         receipt_correction_reply_enabled: !!(dom.roomConfigReceiptCorrectionReplyEnabled && dom.roomConfigReceiptCorrectionReplyEnabled.checked),
         non_receipt_image_reply_enabled: !!(dom.roomConfigNonReceiptImageReplyEnabled && dom.roomConfigNonReceiptImageReplyEnabled.checked),
         media_save_enabled: !!(dom.roomConfigMediaSaveEnabled && dom.roomConfigMediaSaveEnabled.checked),
@@ -12068,6 +12071,10 @@
         // 既定ON（未設定・旧データは true 扱い）
         dom.roomConfigPettyReceiptAnalysisEnabled.checked = config.petty_receipt_analysis_enabled !== false;
       }
+      if (dom.roomConfigReceiptSalesRegistrationEnabled) {
+        // 既定ON（未設定・旧データは true 扱い）。OFF＝試運転ルーム＝本番テーブルに保存しない。
+        dom.roomConfigReceiptSalesRegistrationEnabled.checked = config.receipt_sales_registration_enabled !== false;
+      }
       if (dom.roomConfigReceiptCorrectionReplyEnabled) {
         dom.roomConfigReceiptCorrectionReplyEnabled.checked = !!config.receipt_correction_reply_enabled;
       }
@@ -12943,6 +12950,7 @@
           payload.room_config_password = opts.overrideConfig.room_config_password;
         }
         payload.petty_receipt_analysis_enabled = opts.overrideConfig.petty_receipt_analysis_enabled !== false;
+        payload.receipt_sales_registration_enabled = opts.overrideConfig.receipt_sales_registration_enabled !== false;
         payload.receipt_correction_reply_enabled = !!opts.overrideConfig.receipt_correction_reply_enabled;
         payload.non_receipt_image_reply_enabled = opts.overrideConfig.non_receipt_image_reply_enabled !== false;
         payload.media_save_enabled = opts.overrideConfig.media_save_enabled !== false;
