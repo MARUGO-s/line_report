@@ -11,7 +11,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 type DbClient = ReturnType<typeof createClient>
 
 const DEFAULT_SCHEDULE_URL = "https://www.tokyo-dome.co.jp/dome/event/schedule.html"
-const MAX_TEXT_CHARS = 14000
+const MAX_TEXT_CHARS = 40000
 const VALID_CATEGORIES = new Set(["プロ野球", "アマ野球", "ライブ", "その他"])
 
 type ExtractedEvent = { event_date: string; title: string; category: string }
@@ -102,12 +102,86 @@ function htmlToText(html: string): string {
   t = t.replace(/<br\s*\/?>(?=)/gi, "\n")
   t = t.replace(/<[^>]+>/g, " ")
   t = t.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+  // スマートクォート等（タイトルに含まれる）。シードと表記を揃えるため直線引用符へ寄せる。
+  t = t.replace(/&lsquo;|&rsquo;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&hellip;/g, "…").replace(/&middot;/g, "・").replace(/&#8217;/g, "'").replace(/&#8216;/g, "'")
   t = t.replace(/[ \t　]+/g, " ")
   t = t.replace(/\n{2,}/g, "\n").replace(/[ ]*\n[ ]*/g, "\n")
   return t.trim()
 }
 
+// 公式カレンダーを「日付ごと」に確定パースする（LLMの日付ズレを避ける主経路）。
+// 構造: 「YYYY年MM月」見出し → 「DD」+「(曜)」のセル → セル内に「野球/コンサート等」の直後行がイベント名。
+function parseScheduleDeterministic(text: string): ExtractedEvent[] {
+  const lines = String(text ?? "").split("\n").map((s) => s.trim())
+  const MONTH = /^(\d{4})年(\d{1,2})月$/
+  const WD = /^[（(][日月火水木金土][）)]$/
+  const isDay = (s: string) => /^\d{1,2}$/.test(s)
+  const out: ExtractedEvent[] = []
+  const seen = new Set<string>()
+  let curY = 0, curM = 0
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i]
+    const mm = ln.match(MONTH)
+    if (mm) { curY = Number(mm[1]); curM = Number(mm[2]); continue }
+    if (curY && curM && isDay(ln) && i + 1 < lines.length && WD.test(lines[i + 1])) {
+      const day = Number(ln)
+      if (day < 1 || day > 31) continue
+      // この日のセル内容を、次の日セル/月見出しまで収集
+      const content: string[] = []
+      let j = i + 2
+      for (; j < lines.length; j++) {
+        const c = lines[j]
+        if (MONTH.test(c)) break
+        if (isDay(c) && j + 1 < lines.length && WD.test(lines[j + 1])) break
+        if (c) content.push(c)
+      }
+      const date = `${curY}-${String(curM).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+      for (let k = 0; k < content.length; k++) {
+        const cat = markerCategory(content[k])
+        if (!cat) continue
+        // マーカー直後で、時刻/連絡先/別マーカーでない最初の行をタイトルとみなす
+        let title = ""
+        for (let t = k + 1; t < content.length; t++) {
+          const cc = content[t]
+          if (markerCategory(cc)) break
+          if (/^(開場|開始|開演|開門|終演|開催)/.test(cc)) continue
+          if (cc.startsWith("【") || /TEL|電話|お?問い合わせ|チケット|発売/.test(cc)) continue
+          title = cc; break
+        }
+        if (!title) continue
+        if (/TOKYO\s*DOME\s*TOUR/i.test(title)) continue   // 毎日の館内ツアー（イベントではない）
+        const category = cat === "野球"
+          ? (/(大学|高校|社会人|選手権|リトル|シニア|ボーイズ|女子|クラブ選手権|アマチュア)/.test(title) ? "アマ野球" : "プロ野球")
+          : cat === "コンサート" ? "ライブ" : "その他"
+        const cleanTitle = title.replace(/\s+/g, " ").slice(0, 200)
+        const key = `${date}__${cleanTitle}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push({ event_date: date, title: cleanTitle, category })
+      }
+      i = j - 1
+    }
+  }
+  out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
+  return out
+}
+
+// セル内の「カテゴリ見出し」行を判定（タイトル行と区別）。該当しなければ null。
+function markerCategory(s: string): "野球" | "コンサート" | "その他" | null {
+  const t = String(s ?? "").trim()
+  if (t === "野球") return "野球"
+  if (t === "コンサート") return "コンサート"
+  if (t === "イベント" || t === "その他" || t === "展示会" || t === "展示" || t === "格闘技" || t === "プロレス" || t === "式典") return "その他"
+  return null
+}
+
 async function extractEvents(scheduleText: string, apiKey: string): Promise<{ events: ExtractedEvent[] | null; raw: string | null }> {
+  // 主経路: コードで日付ごとに確定パース（LLMの日付ズレを排除）。十分な件数が取れたらこれを採用。
+  const deterministic = parseScheduleDeterministic(scheduleText)
+  if (deterministic.length >= 3) {
+    return { events: deterministic, raw: `deterministic:${deterministic.length}` }
+  }
+  // フォールバック: レイアウト変更等で確定パースが取れない場合のみ LLM 抽出。
   const system = [
     "あなたは東京ドームのイベント日程表から、日付ごとのイベントを構造化抽出するアシスタントです。",
     "出力は JSON 配列のみ。前後に説明文やコードフェンスを付けないこと。",
