@@ -564,6 +564,9 @@
   function median(arr){ const a=arr.filter(x=>x!=null && isFinite(x)).slice().sort((x,y)=>x-y); if(!a.length) return null; const m=Math.floor(a.length/2); return a.length%2? a[m] : (a[m-1]+a[m])/2; }
   function avg(arr){ const a=arr.filter(x=>x!=null && isFinite(x)); return a.length? a.reduce((s,x)=>s+x,0)/a.length : null; }
   function relPct(v, base){ return (base&&base>0&&v!=null)? Math.round(v/base*1000)/10 : null; }
+  function stdev(arr){ const x=arr.filter(v=>v!=null&&isFinite(v)); if(x.length<2)return null; const m=x.reduce((s,v)=>s+v,0)/x.length; return Math.sqrt(x.reduce((s,v)=>s+(v-m)*(v-m),0)/x.length); }
+  function pearson(xs,ys){ const px=[],py=[]; const n=Math.min(xs.length,ys.length); for(let i=0;i<n;i++){ if(xs[i]!=null&&ys[i]!=null&&isFinite(xs[i])&&isFinite(ys[i])){px.push(xs[i]);py.push(ys[i]);} } const m=px.length; if(m<3)return null; const mx=px.reduce((s,v)=>s+v,0)/m,my=py.reduce((s,v)=>s+v,0)/m; let sxy=0,sxx=0,syy=0; for(let i=0;i<m;i++){const dx=px[i]-mx,dy=py[i]-my;sxy+=dx*dy;sxx+=dx*dx;syy+=dy*dy;} return (sxx>0&&syy>0)? sxy/Math.sqrt(sxx*syy) : null; }
+  function dowNum(ymd){ const d=new Date(ymd); if(isNaN(d.getTime()))return null; return new Date(d.getTime()+9*3600*1000).getUTCDay(); }
   function ymdJst(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(String(when))) return String(when).slice(0,10); const j=new Date(d.getTime()+9*3600*1000); return j.getUTCFullYear()+'-'+String(j.getUTCMonth()+1).padStart(2,'0')+'-'+String(j.getUTCDate()).padStart(2,'0'); }
   function fmtDay(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; const j=new Date(d.getTime()+9*3600*1000); return (j.getUTCMonth()+1)+'/'+j.getUTCDate(); }
   function wdayJp(ymd){ const d=new Date(ymd); if(isNaN(d.getTime()))return '?'; const j=new Date(d.getTime()+9*3600*1000); return ['日','月','火','水','木','金','土'][j.getUTCDay()]; }
@@ -746,41 +749,91 @@
     L.push((baseKt!=null?yK(baseKt):'—')+'（FC平均 '+(avgKt!=null?yK(avgKt):'—')+' の '+p1(relPct(baseKt,avgKt))+'、中央値 '+(medKt!=null?yK(medKt):'—')+' の '+p1(relPct(baseKt,medKt))+'、'+(ktRank==null?'—':ktRank+'位')+'）。');
     if (byKt.length) L.push('FC内 最高 '+byKt[0].name+' '+yK(byKt[0].kt)+'／最低 '+byKt[byKt.length-1].name+' '+yK(byKt[byKt.length-1].kt)+'。');
     const series = baseSeriesFromReports(allReports, baseName);
+    const WD = ['日','月','火','水','木','金','土'];
+    // 各日にイベント・天気の文脈を付与（深掘り分析用）。
+    const S = series.map(p=>{ const y=ymdJst(p.when); const hit=(eventsByDate.get(y)||[])[0]; const w=weatherByDate.get(y);
+      return { when:p.when, y, dow:dowNum(y), sales:p.sales, guests:p.guests, kt:p.kt, rank:p.salesRank,
+               isEvent:!!hit, eventCat:hit?hit.category:null,
+               rainy: w?((Number(w.precipitation_mm)||0)>=1):null, tmax: w?Number(w.temp_max):null, summary: w?w.summary:null }; });
+    const ctxOf = (d)=>{ if(!d) return ''; const t=[]; if(d.isEvent&&d.eventCat) t.push(d.eventCat); if(d.rainy===true) t.push('雨'); return t.length?'（'+t.join('・')+'）':''; };
     if (periodLabel){
-      L.push('【期間内の推移】');
-      if (series.length<2){ L.push('期間内の日数が少なく、推移は出せません。'); }
+      // ===== 期間モード：期間内をディープに分析 =====
+      L.push('【期間サマリー】');
+      if (!S.length){ L.push('期間内に分析できる日次データがありません。'); }
       else {
-        const half=Math.floor(series.length/2);
-        const early=avg(series.slice(0,half).map(p=>p.sales)), late=avg(series.slice(series.length-half).map(p=>p.sales));
-        const best=series.reduce((m,p)=>p.sales>m.sales?p:m, series[0]), worst=series.reduce((m,p)=>p.sales<m.sales?p:m, series[0]);
-        L.push('対象 '+series.length+'日。日平均売上 '+yK(avg(series.map(p=>p.sales)))+'。');
-        if (early&&late) L.push('前半平均 '+yK(early)+' → 後半平均 '+yK(late)+'（'+p1(relPct(late,early))+'＝'+(late>=early?'上昇':'下降')+'基調）。');
-        L.push('期間内 最高 '+fmtDay(best.when)+' '+yK(best.sales)+'／最低 '+fmtDay(worst.when)+' '+yK(worst.sales)+'。');
-        const avgRank=avg(series.map(p=>p.salesRank));
-        if (avgRank!=null) L.push('FC内売上順位は期間中 平均 '+(Math.round(avgRank*10)/10).toFixed(1)+'位。');
+        const sales=S.map(d=>d.sales), guests=S.map(d=>d.guests).filter(x=>x!=null);
+        const tot=sales.reduce((a,b)=>a+b,0), dAvg=avg(sales), dMed=median(sales);
+        const best=S.reduce((m,d)=>d.sales>m.sales?d:m,S[0]), worst=S.reduce((m,d)=>d.sales<m.sales?d:m,S[0]);
+        const sd=stdev(sales), cv=(sd!=null&&dAvg)?sd/dAvg*100:null;
+        L.push('対象 '+S.length+'日。合計売上 '+yK(tot)+'（日平均 '+yK(dAvg)+'／中央値 '+yK(dMed)+'）。');
+        if (guests.length) L.push('合計客数 '+nf.format(guests.reduce((a,b)=>a+b,0))+'人（日平均 '+nf.format(Math.round(avg(guests)))+'人）。');
+        L.push('最高 '+fmtDay(best.when)+'('+(best.dow!=null?WD[best.dow]:'?')+') '+yK(best.sales)+ctxOf(best)+'／最低 '+fmtDay(worst.when)+'('+(worst.dow!=null?WD[worst.dow]:'?')+') '+yK(worst.sales)+ctxOf(worst)+'。');
+        if (cv!=null) L.push('ばらつき：変動係数 '+cv.toFixed(0)+'%（最高は最低の '+(worst.sales>0?(best.sales/worst.sales).toFixed(1):'—')+'倍）。'+(cv>=50?'日による波が大きい。':'比較的安定。'));
       }
+      L.push('【曜日パターン】');
+      if (S.length<3){ L.push('日数が少なく曜日傾向はまだ出せません。'); }
+      else {
+        const byDow=[]; for(let k=0;k<7;k++){ const ds=S.filter(d=>d.dow===k).map(d=>d.sales); if(ds.length) byDow.push({k,a:avg(ds),n:ds.length}); }
+        byDow.sort((a,b)=>b.a-a.a);
+        if (byDow.length){ const hi=byDow[0], lo=byDow[byDow.length-1];
+          L.push('曜日別の日平均（高い順）：'+byDow.slice(0,3).map(x=>WD[x.k]+' '+yK(x.a)).join('／')+'。');
+          L.push('最も高い曜日は '+WD[hi.k]+'（'+yK(hi.a)+'）、低いのは '+WD[lo.k]+'（'+yK(lo.a)+'）。'); }
+        const we=avg(S.filter(d=>d.dow===0||d.dow===6).map(d=>d.sales)), wd2=avg(S.filter(d=>d.dow!=null&&d.dow!==0&&d.dow!==6).map(d=>d.sales));
+        if (we!=null&&wd2!=null) L.push('土日平均 '+yK(we)+' / 平日平均 '+yK(wd2)+'（土日は平日の '+(wd2>0?(we/wd2).toFixed(2):'—')+'倍）。');
+      }
+      L.push('【期間内トレンド】');
+      if (S.length<4){ L.push('日数が少なく傾向は出せません。'); }
+      else {
+        const k=Math.max(1,Math.floor(S.length/3));
+        const early=avg(S.slice(0,k).map(d=>d.sales)), late=avg(S.slice(S.length-k).map(d=>d.sales));
+        if (early&&late){ const ch=(late/early-1)*100; L.push('前期'+k+'日平均 '+yK(early)+' → 後期'+k+'日平均 '+yK(late)+'（'+p1(ch)+'＝'+(ch>=5?'上昇基調':(ch<=-5?'下降基調':'横ばい'))+'）。'); }
+        const ranks=S.map(d=>d.rank).filter(x=>x!=null); if (ranks.length) L.push('FC内売上順位は期間平均 '+avg(ranks).toFixed(1)+'位（最高'+Math.min.apply(null,ranks)+'位・最低'+Math.max.apply(null,ranks)+'位）。');
+      }
+      L.push('【変動の主因】');
+      const rg=pearson(S.map(d=>d.sales),S.map(d=>d.guests)), rk=pearson(S.map(d=>d.sales),S.map(d=>d.kt));
+      if (rg!=null||rk!=null){
+        const parts=[]; if(rg!=null)parts.push('客数との連動 r='+rg.toFixed(2)); if(rk!=null)parts.push('客単価との連動 r='+rk.toFixed(2));
+        L.push(parts.join('／')+'。');
+        if (rg!=null&&rk!=null){ const driver=Math.abs(rg)>=Math.abs(rk)?'客数':'客単価';
+          L.push('期間内の売上の上下は主に「'+driver+'」で説明できる。'+(driver==='客数'?'集客の波が売上に直結。':'単価（メニュー構成・セット）の差が効く。')); }
+      } else L.push('相関を出すにはデータが不足しています。');
     } else {
-      L.push('【履歴・推移（自店が基準）】');
-      L.push('※新規オープンのため前年対比はありません。毎日の蓄積（自店の履歴）を基準に評価します。');
+      // ===== 単日モード：この日を「同じ条件の日」と比べてディープ評価 =====
       const selWhen = String(report.report_date||report.created_at||'');
-      let selIdx = series.findIndex(p=>p.when===selWhen);
-      if (selIdx<0) selIdx = series.length-1;
-      const past = series.slice(0, Math.max(0, selIdx));
-      if (!series.length){ L.push('履歴がまだありません。'); }
-      else if (!past.length){ L.push('蓄積 '+series.length+'日目（この日が最古のデータ）。履歴比較は日数が増えるほど精度が上がります。'); }
+      const selY = ymdJst(selWhen), selDow = dowNum(selY);
+      const today = S.find(d=>d.when===selWhen) || S.find(d=>d.y===selY) || null;
+      const others = S.filter(d=>d!==today);
+      L.push('【この日の評価（条件別）】');
+      L.push('※新規オープンのため前年対比はありません。蓄積した自店の履歴と「同じ条件の日」を基準に評価します。');
+      if (!S.length){ L.push('履歴がまだありません。'); }
       else {
-        const pastSalesAvg = avg(past.map(p=>p.sales));
-        const pastKtAvg = avg(past.map(p=>p.kt));
-        const pastRankAvg = avg(past.map(p=>p.salesRank));
-        const prev = past[past.length-1];
-        const allSales = series.map(p=>p.sales);
-        const best = Math.max.apply(null, allSales), worst = Math.min.apply(null, allSales);
-        L.push('蓄積 '+series.length+'日分。この日の売上 '+yK(base.sales)+' は、自店の過去平均 '+yK(pastSalesAvg)+' の '+p1(relPct(base.sales,pastSalesAvg))+'（'+(base.sales>=pastSalesAvg?'平均以上':'平均以下')+'）。');
-        L.push('前回('+fmtDay(prev.when)+') '+yK(prev.sales)+' との差 '+yK(base.sales-prev.sales)+'（'+p1(prev.sales>0?(base.sales/prev.sales-1)*100:null)+'）＝'+(base.sales>=prev.sales?'増':'減')+'。');
-        L.push('期間中の最高 '+yK(best)+'／最低 '+yK(worst)+'。');
-        if (baseKt!=null && pastKtAvg!=null) L.push('客単価 '+yK(baseKt)+' は過去平均 '+yK(pastKtAvg)+' の '+p1(relPct(baseKt,pastKtAvg))+'。');
-        if (pastRankAvg!=null) L.push('FC内 売上順位は '+salesRank+'位、過去平均 '+(Math.round(pastRankAvg*10)/10).toFixed(1)+'位（'+(salesRank<=pastRankAvg?'改善/同等':'やや後退')+'）。');
+        const pastAvg=avg(others.map(d=>d.sales));
+        const dayRank = 1 + S.filter(d=>d.sales>base.sales).length;
+        L.push('この日の売上 '+yK(base.sales)+' は履歴 '+S.length+'日中 '+dayRank+'番目'+(S.length>1?'（上位 '+Math.round(dayRank/S.length*100)+'%）':'')+'。'+(pastAvg!=null?'過去平均 '+yK(pastAvg)+' の '+p1(relPct(base.sales,pastAvg))+'（'+(base.sales>=pastAvg?'平均以上':'平均以下')+'）。':''));
+        const sameDow=others.filter(d=>d.dow===selDow).map(d=>d.sales);
+        if (sameDow.length){ const a=avg(sameDow); L.push('同じ'+(selDow!=null?WD[selDow]:'')+'曜の平均 '+yK(a)+' の '+p1(relPct(base.sales,a))+'（曜日内では'+(base.sales>=a?'高め':'低め')+'）。'); }
+        if (today){
+          if (today.isEvent){ const evAvg=avg(others.filter(d=>d.isEvent).map(d=>d.sales)); L.push('この日はイベント日（'+(today.eventCat||'')+'）。'+(evAvg!=null?'イベント日平均 '+yK(evAvg)+' の '+p1(relPct(base.sales,evAvg))+'。':'')); }
+          else { const nonAvg=avg(others.filter(d=>!d.isEvent).map(d=>d.sales)); L.push('この日は東京ドーム開催なし。'+(nonAvg!=null?'非イベント日平均 '+yK(nonAvg)+' の '+p1(relPct(base.sales,nonAvg))+'。':'')); }
+          if (today.rainy===true){ const rAvg=avg(others.filter(d=>d.rainy===true).map(d=>d.sales)); L.push('天気は雨'+(today.summary?'（'+today.summary+'）':'')+'。'+(rAvg!=null?'雨の日平均 '+yK(rAvg)+' の '+p1(relPct(base.sales,rAvg))+'。':'')); }
+          else if (today.rainy===false){ const dAvg=avg(others.filter(d=>d.rainy===false).map(d=>d.sales)); L.push('天気は'+(today.summary||'雨なし')+'。'+(dAvg!=null?'雨でない日平均 '+yK(dAvg)+' の '+p1(relPct(base.sales,dAvg))+'。':'')); }
+        }
+        const pastG=avg(others.map(d=>d.guests)), pastK=avg(others.map(d=>d.kt));
+        if (pastAvg!=null && pastG!=null && pastK!=null && base.guests!=null && baseKt!=null){
+          const dFromG=(base.guests-pastG)*pastK, dFromK=(baseKt-pastK)*base.guests;
+          const driver=Math.abs(dFromG)>=Math.abs(dFromK)?'客数':'客単価';
+          L.push('過去平均との差 '+yK(base.sales-pastAvg)+' の主因は「'+driver+'」（客数の寄与 '+yK(dFromG)+'／客単価の寄与 '+yK(dFromK)+'）。');
+        }
       }
+      L.push('【直近の勢い】');
+      const idx2 = S.findIndex(d=>d.when===selWhen);
+      const upto = idx2>=0 ? S.slice(0, idx2+1) : S;
+      if (upto.length>=2){
+        const prev=upto[upto.length-2];
+        L.push('前回('+fmtDay(prev.when)+') '+yK(prev.sales)+' との差 '+yK(base.sales-prev.sales)+'（'+p1(prev.sales>0?(base.sales/prev.sales-1)*100:null)+'）＝'+(base.sales>=prev.sales?'増':'減')+'。');
+        const last3=upto.slice(-3); if (last3.length===3){ const inc=last3[2].sales>last3[1].sales&&last3[1].sales>last3[0].sales, dec=last3[2].sales<last3[1].sales&&last3[1].sales<last3[0].sales;
+          L.push('直近3日：'+last3.map(d=>fmtDay(d.when)+' '+yK(d.sales)).join(' → ')+(inc?'（連騰）':(dec?'（連落）':''))+'。'); }
+      } else L.push('比較できる前日データがまだありません。');
     }
     // 外部要因（天気・東京ドーム）と自店客数の相関。自動分析にも加味する。
     const extDaily = series.filter(p=>p.guests!=null);
