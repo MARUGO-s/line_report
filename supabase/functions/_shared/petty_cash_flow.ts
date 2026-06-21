@@ -7,6 +7,7 @@ import type { StoreRegistryRow } from './store_receipt.ts'
 import type { LineImageReceiptAnalysis } from './receipt_types.ts'
 import { replyLineMessages, resolveChannelAccessToken } from './line_client.ts'
 import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import { fetchLineDisplayNameByUserId } from './line_display_names.ts'
 
 const PENDING_TABLE = 'petty_cash_pending'
 const ENTRIES_TABLE = 'petty_cash_entries'
@@ -388,6 +389,8 @@ type ExtractedExpense = {
   amount: number
   tax: number
   supplier: string | null
+  /** 取扱者（画像を投稿したユーザーの表示名）。確認カード表示用。 */
+  handler?: string | null
   items?: PettyCashItem[] | null
 }
 
@@ -434,6 +437,7 @@ function confirmFlex(pendingId: number, x: ExtractedExpense): Record<string, unk
             ['本体', formatYen(base)],
             ['税額', x.tax > 0 ? formatYen(x.tax) : '—'],
             ['出金額', formatYen(x.amount)],
+            ['取扱者', x.handler && String(x.handler).trim() ? String(x.handler).trim() : '—'],
           ]),
           ...warnRows,
         ],
@@ -531,6 +535,7 @@ function doneFlex(p: PendingRow, pageUrl?: string | null): Record<string, unknow
           ['本体', formatYen(base)],
           ['税額', tax > 0 ? formatYen(tax) : '—'],
           ['出金額', formatYen(amount)],
+          ['取扱者', p.handler && String(p.handler).trim() ? String(p.handler).trim() : '—'],
         ]),
         { type: 'text', text: '下のボタンから小口現金ページ（出金・経費）を開いて確認・編集できます。', size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
       ],
@@ -635,6 +640,36 @@ export async function handlePettyCashTextMessage(
   return { handled: true, replied }
 }
 
+// 取扱者＝レシート画像をトークルームに投稿したLINEユーザーの表示名。
+// 1) line_user_permissions のキャッシュ（webhook で同期済みのことが多い）→ 2) 無ければ LINE API で取得。
+// 取得できなければ null（取扱者は空欄のまま記録）。
+async function resolveHandlerDisplayName(
+  supabase: SupabaseClient,
+  storeKey: string,
+  roomId: string,
+  userId: string | null,
+): Promise<string | null> {
+  const uid = String(userId ?? '').trim()
+  if (!uid) return null
+  try {
+    const { data } = await supabase
+      .from('line_user_permissions')
+      .select('display_name')
+      .eq('line_user_id', uid)
+      .maybeSingle()
+    const cached = String((data as { display_name?: unknown } | null)?.display_name ?? '').trim()
+    if (cached) return cached
+  } catch (_e) { /* キャッシュ不可なら API へフォールバック */ }
+  try {
+    const token = resolveChannelAccessToken(storeKey)
+    if (!token) return null
+    const live = await fetchLineDisplayNameByUserId(uid, String(roomId ?? '').trim(), token)
+    return live || null
+  } catch (_e) {
+    return null
+  }
+}
+
 // 画像処理: 経費pending(await_image)があれば、この画像を経費として扱う（売上に登録しない）。
 // pending が無ければ {handled:false} を返し、従来のレシート処理へフォールスルー。
 export async function handlePettyCashImageIfPending(
@@ -671,6 +706,8 @@ export async function handlePettyCashImageIfPending(
     return { handled: true, replied, saved: false, reason: 'petty_cash_amount_unreadable' }
   }
 
+  // 取扱者＝画像を投稿したユーザーの表示名（記録まで持ち越す）。
+  const handlerName = await resolveHandlerDisplayName(supabase, storeKey, roomId, userId)
   await supabase.from(PENDING_TABLE).update({
     status: 'await_confirm',
     line_message_id: lineMessageId,
@@ -678,13 +715,14 @@ export async function handlePettyCashImageIfPending(
     item: ex.item,
     amount_yen: ex.amount,
     tax_yen: ex.tax,
+    handler: handlerName,
     store_name: ex.supplier,
     items: ex.items,
     updated_at: new Date().toISOString(),
   }).eq('id', pendingId)
 
   const replied = await sendReply(replyToken, [confirmFlex(pendingId, {
-    storeDisplayName: storeName, spentOn: ex.spentOn, item: ex.item, amount: ex.amount, tax: ex.tax, supplier: ex.supplier, items: ex.items,
+    storeDisplayName: storeName, spentOn: ex.spentOn, item: ex.item, amount: ex.amount, tax: ex.tax, supplier: ex.supplier, items: ex.items, handler: handlerName,
   })], storeKey, roomId)
   return { handled: true, replied, saved: false, reason: 'petty_cash_confirm_card' }
 }
@@ -706,6 +744,8 @@ export async function savePettyCashPendingFromReceipt(
   const key = conversationKey(roomId, userId)
   const nowIso = new Date().toISOString()
   const expiresAt = new Date(Date.now() + PENDING_TTL_MIN * 60 * 1000).toISOString()
+  // 取扱者＝画像を投稿したユーザーの表示名。
+  const handlerName = await resolveHandlerDisplayName(supabase, storeKey, roomId, userId)
   const { data, error } = await supabase.from(PENDING_TABLE).upsert({
     conversation_key: key,
     room_id: roomId,
@@ -717,7 +757,7 @@ export async function savePettyCashPendingFromReceipt(
     item: ex.item,
     amount_yen: ex.amount,
     tax_yen: ex.tax,
-    handler: null,
+    handler: handlerName,
     store_name: ex.supplier,
     category: null,
     items: ex.items,
@@ -799,6 +839,7 @@ export async function handlePettyCashPostback(
       amount: Math.max(0, Math.floor(Number(p.amount_yen ?? 0))),
       tax: Math.max(0, Math.floor(Number(p.tax_yen ?? 0))),
       supplier: p.store_name,
+      handler: p.handler,
       items: p.items,
     })
   }
