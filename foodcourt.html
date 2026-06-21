@@ -135,6 +135,34 @@
         <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">売上比（基準店=100）</div>
         <div id="bars"></div>
       </div>
+
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:8px;">売上構成比（シェア）</div>
+        <div class="tbl-wrap"><table><thead><tr><th>順位</th><th class="name">店名</th><th>対象売上</th><th>シェア</th><th>累計</th></tr></thead><tbody id="shareTbody"></tbody></table></div>
+        <div class="note" id="shareNote"></div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:8px;">客単価ランキング</div>
+        <div class="tbl-wrap"><table><thead><tr><th>順位</th><th class="name">店名</th><th>客単価</th><th>対FC平均</th><th>対基準店</th></tr></thead><tbody id="ktTbody"></tbody></table></div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:8px;">ポジショニング（客数 × 客単価｜FC中央値が基準）</div>
+        <div class="tbl-wrap"><table><thead><tr><th class="name">店名</th><th>客数</th><th>客単価</th><th class="name">タイプ</th></tr></thead><tbody id="posTbody"></tbody></table></div>
+        <div class="note">客数・客単価がFC中央値より上を「○」。総合上位／集客型／単価型／要改善に分類。</div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:8px;">分布サマリー（FC全店）</div>
+        <div class="tbl-wrap"><table><thead><tr><th class="name">指標</th><th>平均</th><th>中央値</th><th class="name">最高(店)</th><th class="name">最低(店)</th></tr></thead><tbody id="distTbody"></tbody></table></div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:8px;">基準店の日次推移（蓄積データ）</div>
+        <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th>売上</th><th>客数</th><th>客単価</th><th>FC順位</th><th>シェア</th></tr></thead><tbody id="trendTbody"></tbody></table></div>
+        <div class="note" id="trendNote"></div>
+      </div>
     </div>
   </div>
 
@@ -154,6 +182,8 @@
       storeSel:$('storeSel'), reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
       resultArea:$('resultArea'), summary:$('summary'), tbody:$('tbody'), bars:$('bars'), analysis:$('analysis'),
       qaCard:$('qaCard'), qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'),
+      shareTbody:$('shareTbody'), shareNote:$('shareNote'), ktTbody:$('ktTbody'), posTbody:$('posTbody'),
+      distTbody:$('distTbody'), trendTbody:$('trendTbody'), trendNote:$('trendNote'),
     };
     const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','フードコート内での強み・弱みは？','売上を伸ばすための提案を3つ'];
     let reports = [];
@@ -425,6 +455,54 @@
       return L.join('\n');
     }
 
+    function renderExtraTables(c, report){
+      const units=c.rows.map(r=>r.unit).filter(x=>x!=null), guestsArr=c.rows.map(r=>r.guests).filter(x=>x!=null), salesArr=c.rows.map(r=>r.sales);
+      const avgKt=avg(units), medKt=median(units), avgGuests=avg(guestsArr), medGuests=median(guestsArr), avgSales=avg(salesArr), medSales=median(salesArr);
+
+      // 1) 売上構成比（シェア・累計）
+      let cum=0, rank=0;
+      dom.shareTbody.innerHTML = c.rows.map(r=>{ rank++; const sh=c.total>0?r.sales/c.total*100:0; cum+=sh;
+        return '<tr'+(r.isBase?' class="base"':'')+'><td>'+rank+'</td><td class="name">'+escapeHtml(r.name)+'</td><td>'+yen(r.sales)+'</td><td>'+pct(sh)+'</td><td>'+pct(cum)+'</td></tr>'; }).join('');
+      const top3 = c.rows.slice(0,3).reduce((s,r)=>s+(c.total>0?r.sales/c.total*100:0),0);
+      dom.shareNote.textContent = '上位3店で全体の '+pct(top3)+'／基準店シェア '+pct(c.share)+'。';
+
+      // 2) 客単価ランキング
+      const ktRows = c.rows.filter(r=>r.unit!=null).slice().sort((a,b)=>b.unit-a.unit);
+      let kr=0;
+      dom.ktTbody.innerHTML = ktRows.map(r=>{ kr++; return '<tr'+(r.isBase?' class="base"':'')+'><td>'+kr+'</td><td class="name">'+escapeHtml(r.name)+'</td><td>'+yen(r.unit)+'</td><td>'+pct(relPct(r.unit,avgKt))+'</td><td>'+pct(r.unitRatio)+'</td></tr>'; }).join('');
+
+      // 3) ポジショニング（客数×客単価｜FC中央値）
+      const mk = b=> b==null?'—':(b?'○':'×');
+      dom.posTbody.innerHTML = c.rows.map(r=>{
+        const gH=(r.guests!=null&&medGuests!=null)?r.guests>=medGuests:null;
+        const kH=(r.unit!=null&&medKt!=null)?r.unit>=medKt:null;
+        let typ='—'; if(gH!=null&&kH!=null) typ = gH&&kH?'総合上位':(gH&&!kH?'集客型':(!gH&&kH?'単価型':'要改善'));
+        return '<tr'+(r.isBase?' class="base"':'')+'><td class="name">'+escapeHtml(r.name)+'</td><td>'+mk(gH)+'</td><td>'+mk(kH)+'</td><td class="name">'+typ+'</td></tr>';
+      }).join('');
+
+      // 4) 分布サマリー
+      const maxBy=(arr,key)=>arr.reduce((m,x)=>(key(x)!=null&&(m==null||key(x)>key(m)))?x:m,null);
+      const minBy=(arr,key)=>arr.reduce((m,x)=>(key(x)!=null&&(m==null||key(x)<key(m)))?x:m,null);
+      const wu = c.rows.filter(r=>r.unit!=null);
+      const dist = [
+        ['対象売上', avgSales, medSales, maxBy(c.rows,r=>r.sales), minBy(c.rows,r=>r.sales), r=>yen(r.sales), false],
+        ['対象客数', avgGuests, medGuests, maxBy(c.rows,r=>r.guests), minBy(c.rows,r=>r.guests), r=>(r.guests!=null?nf.format(r.guests):'—'), true],
+        ['客単価', avgKt, medKt, maxBy(wu,r=>r.unit), minBy(wu,r=>r.unit), r=>yen(r.unit), false],
+      ];
+      dom.distTbody.innerHTML = dist.map(d=>{ const label=d[0],a=d[1],m=d[2],hi=d[3],lo=d[4],fmt=d[5],isG=d[6];
+        const fnum=v=>v==null?'—':(isG?nf.format(Math.round(v)):yen(v));
+        const cell=rr=>rr?(fmt(rr)+'（'+escapeHtml(rr.name)+'）'):'—';
+        return '<tr><td class="name">'+label+'</td><td>'+fnum(a)+'</td><td>'+fnum(m)+'</td><td class="name">'+cell(hi)+'</td><td class="name">'+cell(lo)+'</td></tr>'; }).join('');
+
+      // 5) 基準店の日次推移（蓄積データ）
+      const series = baseSeriesFromReports(reports, c.baseName);
+      if (!series.length){ dom.trendTbody.innerHTML=''; dom.trendNote.textContent='履歴なし。'; }
+      else {
+        dom.trendTbody.innerHTML = series.map(p=>'<tr><td class="name">'+fmtDay(p.when)+'</td><td>'+yen(p.sales)+'</td><td>'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td>'+(p.kt!=null?yen(p.kt):'—')+'</td><td>'+p.salesRank+'位</td><td>'+pct(p.share)+'</td></tr>').join('');
+        dom.trendNote.textContent = '蓄積 '+series.length+'日分。毎日の画像送信で増えます。';
+      }
+    }
+
     function render(report){
       const c = computeComparison(report);
       if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポートは比較できませんでした（基準店が見つからない/データ不足）。'; return; }
@@ -458,6 +536,8 @@
           + '<div class="bar-track"><div class="bar-fill'+(r.isBase?' base':'')+'" style="width:'+w.toFixed(1)+'%"></div></div>'
           + '<div class="bar-val">'+pct(r.salesRatio)+'</div></div>';
       }).join('');
+
+      try { renderExtraTables(c, report); } catch(e){ /* 追加表の失敗は本体表示を妨げない */ }
     }
 
     function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
