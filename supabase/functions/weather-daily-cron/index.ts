@@ -84,6 +84,8 @@ function numOrNull(v: unknown): number | null {
 }
 
 function clampInt(raw: string | null, def: number, lo: number, hi: number): number {
+  // 未指定(null)・空文字は既定値。Number(null)=0 が finite で既定を素通りするのを防ぐ。
+  if (raw == null || raw.trim() === "") return def
   const n = Number(raw)
   if (!Number.isFinite(n)) return def
   return Math.max(lo, Math.min(hi, Math.trunc(n)))
