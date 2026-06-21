@@ -23,6 +23,7 @@ import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STO
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
 import { analyzeLineImageWithGroqScout, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
+import { answerFoodCourtQuestion } from "../_shared/foodcourt_compare.ts"
 import {
   fetchManualMonthSales,
   fetchManualMonthSalesMapForStore,
@@ -477,6 +478,7 @@ Deno.serve(async (req, info) => {
       "/petty-cash/receipt-image",
       "/petty-cash/receipt-media",
       "/foodcourt/reports",
+      "/foodcourt/ask",
       "/analytics/holidays",
       "/analytics/monthly",
       "/weather/daily",
@@ -709,6 +711,30 @@ Deno.serve(async (req, info) => {
         .limit(limit)
       if (error) return json({ error: error.message }, 500)
       return json({ store_key: storeKey, reports: Array.isArray(data) ? data : [] }, 200)
+    }
+    // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
+    if (req.method === "POST" && path === "/foodcourt/ask") {
+      const body = await workReq.json().catch(() => ({})) as Record<string, unknown>
+      const storeKey = String(body.store_key ?? body.store ?? url.searchParams.get("store_key") ?? "").trim()
+      const question = String(body.question ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      if (!question) return json({ error: "question is required." }, 400)
+      const groqApiKey = Deno.env.get("GROQ_API_KEY") ?? ""
+      if (!groqApiKey) return json({ error: "GROQ_API_KEY is missing." }, 500)
+      const { data, error } = await supabase
+        .from("foodcourt_tenant_reports")
+        .select("report_date, tenants, created_at, base_tenant_name")
+        .ilike("store_partition_key", storeKey)
+        .order("created_at", { ascending: false })
+        .limit(90)
+      if (error) return json({ error: error.message }, 500)
+      const reports = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
+      if (!reports.length) {
+        return json({ answer: "まだデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。", reportCount: 0 }, 200)
+      }
+      const baseName = String((reports[0] as { base_tenant_name?: unknown }).base_tenant_name ?? "MARUGO S")
+      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey)
+      return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
     }
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {
       const result = await createPettyCashEntryFromReceiptImage(supabase, workReq, storeScope)

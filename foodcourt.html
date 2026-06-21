@@ -100,6 +100,17 @@
       <div id="loadMsg" class="msg"></div>
     </div>
 
+    <div class="card" id="qaCard" hidden>
+      <div style="font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px;">💬 データに質問<span class="badge test">試験版</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">蓄積されたフードコートの日次データを根拠に、AIが質問へ回答します（毎回の自動出力はしません）。</div>
+      <div id="qSuggest" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
+      <div class="controls">
+        <div class="fld" style="flex:1;min-width:240px"><label>質問</label><input id="qInput" type="text" placeholder="例: 直近でマルゴSが一番売れた日は？ / 客単価を上げるには？"></div>
+        <button id="qBtn">質問する</button>
+      </div>
+      <div id="qAnswer" style="white-space:pre-wrap;font-size:14px;line-height:1.85;margin-top:12px;background:var(--panel2);border-radius:10px;padding:12px 14px;min-height:20px;color:var(--text);"></div>
+    </div>
+
     <div id="resultArea" hidden>
       <div class="card">
         <div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px;">📊 分析結果（自動）<span class="badge test">試験版</span></div>
@@ -142,7 +153,9 @@
       authBadge:$('authBadge'), authCard:$('authCard'), authMsg:$('authMsg'), tokenInput:$('tokenInput'), tokenBtn:$('tokenBtn'),
       storeSel:$('storeSel'), reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
       resultArea:$('resultArea'), summary:$('summary'), tbody:$('tbody'), bars:$('bars'), analysis:$('analysis'),
+      qaCard:$('qaCard'), qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'),
     };
+    const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','フードコート内での強み・弱みは？','売上を伸ばすための提案を3つ'];
     let reports = [];
 
     const nf = new Intl.NumberFormat('ja-JP');
@@ -167,6 +180,7 @@
       dom.authBadge.textContent = ok ? '接続済み' : '未接続';
       dom.authBadge.className = 'pill' + (ok ? ' ok' : '');
       dom.authCard.hidden = !!ok;
+      if (dom.qaCard) dom.qaCard.hidden = !ok;
     }
 
     async function apiFetch(path){
@@ -178,6 +192,35 @@
       const body = await res.json().catch(()=>({}));
       if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
       return body;
+    }
+    async function apiPost(path, payload){
+      const url = PAGES.receiptAdminApiUrl(path);
+      let res;
+      try { res = await fetch(url, { method:'POST', headers:{ 'x-admin-token':getToken(), 'Content-Type':'application/json' }, body: JSON.stringify(payload||{}) }); }
+      catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
+      if (res.status===401 || res.status===403){ setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
+      const body = await res.json().catch(()=>({}));
+      if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
+      return body;
+    }
+    async function askQuestion(q){
+      const question = String(q!=null?q:(dom.qInput.value||'')).trim();
+      if (!question){ dom.qInput.focus(); return; }
+      dom.qInput.value = question;
+      dom.qBtn.disabled = true; dom.qAnswer.textContent = '考え中…（蓄積データを参照しています）';
+      try {
+        const b = await apiPost('/foodcourt/ask', { store_key: dom.storeSel.value || DEFAULT_STORE, question: question });
+        dom.qAnswer.textContent = b.answer || '(回答が空でした)';
+      } catch(e){ dom.qAnswer.textContent = (e&&e.message) || '質問に失敗しました。'; }
+      finally { dom.qBtn.disabled = false; }
+    }
+    function renderSuggestions(){
+      dom.qSuggest.innerHTML = '';
+      SUGGESTED_Q.forEach(function(s){
+        const b = document.createElement('button'); b.className='ghost'; b.style.fontSize='12px'; b.style.minHeight='30px'; b.style.padding='4px 10px';
+        b.textContent = s; b.addEventListener('click', function(){ askQuestion(s); });
+        dom.qSuggest.appendChild(b);
+      });
     }
 
     function populateStores(){
@@ -456,6 +499,9 @@
 
     dom.tokenBtn.addEventListener('click', connectWithToken);
     dom.tokenInput.addEventListener('keydown', e=>{ if(e.key==='Enter') connectWithToken(); });
+    dom.qBtn.addEventListener('click', ()=>askQuestion());
+    dom.qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') askQuestion(); });
+    renderSuggestions();
     dom.reloadBtn.addEventListener('click', loadReports);
     dom.storeSel.addEventListener('change', loadReports);
     dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]) render(reports[i]); });

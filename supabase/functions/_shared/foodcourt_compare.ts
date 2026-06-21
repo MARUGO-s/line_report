@@ -272,6 +272,92 @@ export function buildFoodCourtCompareFlex(cmp: FoodCourtComparison): Record<stri
   }
 }
 
+// 短い記録通知（毎回の分析結果は出さず「記録した・サイトで質問してね」だけ返す）。
+export function buildFoodCourtAckFlex(n: number): Record<string, unknown> {
+  return {
+    type: 'flex',
+    altText: 'フードコート集計を記録しました',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'text', text: '📊 フードコート集計を記録しました', weight: 'bold', size: 'md', color: '#1a6fa8' },
+          { type: 'text', text: `${n}テナント分を保存（売上には登録していません）。`, size: 'sm', color: '#444444', wrap: true },
+          { type: 'text', text: '分析は専用サイトで「質問」してください。蓄積データから回答します。', size: 'xs', color: '#8a96a3', wrap: true },
+        ],
+      },
+    },
+  }
+}
+
+async function groqChat(
+  messages: Array<{ role: string; content: string }>,
+  apiKey: string,
+  model: string,
+  maxTokens = 800,
+): Promise<string | null> {
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, temperature: 0.2, max_tokens: maxTokens, messages }),
+    })
+    if (!res.ok) { console.error('groqChat http error:', model, res.status); return null }
+    const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }> } | null
+    const c = String(json?.choices?.[0]?.message?.content ?? '').trim()
+    return c || null
+  } catch (e) { console.error('groqChat failed:', e instanceof Error ? e.message : String(e)); return null }
+}
+
+function fcDayLabel(r: Record<string, unknown>): string {
+  const rd = String(r.report_date ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.slice(0, 10)
+  const iso = String(r.created_at ?? '')
+  const d = iso ? new Date(iso) : null
+  if (d && !isNaN(d.getTime())) {
+    const j = new Date(d.getTime() + 9 * 3600 * 1000)
+    return `${j.getUTCFullYear()}-${String(j.getUTCMonth() + 1).padStart(2, '0')}-${String(j.getUTCDate()).padStart(2, '0')}`
+  }
+  return ''
+}
+
+// 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
+export async function answerFoodCourtQuestion(
+  reports: Array<Record<string, unknown>>,
+  baseName: string,
+  question: string,
+  groqApiKey: string,
+): Promise<string | null> {
+  if (!groqApiKey) return null
+  const q = String(question ?? '').trim().slice(0, 500)
+  if (!q) return null
+  const blocks: string[] = []
+  for (const r of (reports || []).slice(0, 45)) {
+    const rawTenants = Array.isArray((r as { tenants?: unknown }).tenants) ? (r as { tenants?: unknown[] }).tenants as unknown[] : []
+    const rows: string[] = []
+    for (const t of rawTenants) {
+      const o = (t && typeof t === 'object') ? t as Record<string, unknown> : {}
+      const name = String(o.name ?? '').trim()
+      const sales = numOrNull(o.sales)
+      if (!name || sales == null) continue
+      const guests = numOrNull(o.guests)
+      const kt = (guests && guests > 0) ? Math.round(sales / guests) : null
+      const mark = normalizeName(name) === normalizeName(baseName) ? '★基準' : ''
+      rows.push(`${name}${mark}\t売上${sales}\t客数${guests ?? '-'}\t客単価${kt ?? '-'}`)
+    }
+    if (rows.length) blocks.push(`■${fcDayLabel(r)}\n${rows.join('\n')}`)
+  }
+  if (!blocks.length) return 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。'
+  const data = blocks.reverse().join('\n\n')
+  const system = `あなたは「${baseName}」（フードコート内の1店舗）の経営アナリストです。次の表は同じフードコート全テナントの日次売上データ（★が基準店=${baseName}、金額は円、客単価=売上÷客数）。ユーザーの質問に、このデータだけを根拠に、日本語で簡潔に、必要な数字を添えて答えてください。データに無いことは「データにありません」と述べ、推測しない。新規オープンのため前年比は無い点に注意し、必要なら蓄積された日々の推移で答える。`
+  const userMsg = `# データ\n${data}\n\n# 質問\n${q}`
+  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
+  let ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary)
+  if (!ans) ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct')
+  return ans
+}
+
 export async function saveFoodCourtReport(
   supabase: SupabaseClient,
   params: { storeKey: string; roomId: string; lineMessageId: string; baseName: string; tenants: FoodCourtTenant[] },
@@ -332,5 +418,6 @@ export async function maybeHandleFoodCourtReport(
     storeKey: params.storeKey, roomId: params.roomId, lineMessageId: params.lineMessageId,
     baseName: cfg.baseTenantName, tenants,
   })
-  return { handled: true, reply: buildFoodCourtCompareFlex(cmp) }
+  // 毎回の分析結果は出さず、短い記録通知だけ返す（分析はサイトで質問する運用）。
+  return { handled: true, reply: buildFoodCourtAckFlex(tenants.length) }
 }
