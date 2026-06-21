@@ -230,8 +230,26 @@
     function avg(arr){ const a=arr.filter(x=>x!=null && isFinite(x)); return a.length? a.reduce((s,x)=>s+x,0)/a.length : null; }
     function relPct(v, base){ return (base&&base>0&&v!=null)? Math.round(v/base*1000)/10 : null; }
 
-    // これらの数字を多角的に分析し、まとめテキストを生成（ルールベース＝確定的・無料）。
-    function buildAnalysisText(report){
+    // 全レポート（履歴）から基準店の日次系列を作る（created_at 昇順）。前年対比が無い新規店のため、自店の履歴が基準。
+    function baseSeriesFromReports(allReports, baseName){
+      const out=[];
+      (allReports||[]).forEach(r=>{
+        const li=(r.tenants||[]).map(t=>({name:String((t&&t.name)||''),sales:(t&&t.sales!=null)?Number(t.sales):null,guests:(t&&t.guests!=null)?Number(t.guests):null}))
+          .filter(t=>t.name && t.sales!=null && isFinite(t.sales) && t.sales>=0);
+        if(li.length<2) return;
+        const b=li.find(t=>norm(t.name)===norm(baseName)); if(!b) return;
+        const tot=li.reduce((s,t)=>s+t.sales,0);
+        const k=(b.guests&&b.guests>0)?b.sales/b.guests:null;
+        out.push({ when:String(r.created_at||''), sales:b.sales, guests:b.guests, kt:k,
+          salesRank:1+li.filter(t=>t.sales>b.sales).length, share: tot>0?b.sales/tot*100:null });
+      });
+      out.sort((a,b)=>a.when.localeCompare(b.when));
+      return out;
+    }
+    function fmtDay(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; const j=new Date(d.getTime()+9*3600*1000); return (j.getUTCMonth()+1)+'/'+j.getUTCDate(); }
+
+    // これらの数字を多角的に分析し、まとめテキストを生成（ルールベース＝確定的・無料）。本日の売上は“自店の履歴”を参照して考察する。
+    function buildAnalysisText(report, allReports){
       const list = (report.tenants||[]).map(t=>({
         name:String((t&&t.name)||''),
         sales:(t&&t.sales!=null)?Number(t.sales):null,
@@ -300,20 +318,36 @@
       if (byKt.length) L.push(`FC内 最高 ${byKt[0].name} ${yK(byKt[0].kt)}／最低 ${byKt[byKt.length-1].name} ${yK(byKt[byKt.length-1].kt)}。`);
       L.push('');
 
-      // 前年比（比較データがある場合のみ）
-      const withComp = list.filter(t=>t.cs!=null && t.cs>0);
-      L.push('【前年比（比較売上）】');
-      if (withComp.length){
-        const tSales = withComp.reduce((s,t)=>s+t.sales,0), tComp = withComp.reduce((s,t)=>s+t.cs,0);
-        L.push(`FC全体（比較データ ${withComp.length}店）の前年比 ${p1(tComp>0?tSales/tComp*100:null)}（対象計 ${yK(tSales)} / 比較計 ${yK(tComp)}）。`);
-        const grown = withComp.map(t=>({name:t.name,r:t.sales/t.cs*100})).sort((a,b)=>b.r-a.r);
-        if (grown.length){ const g=grown[0], d=grown[grown.length-1];
-          L.push(`最も伸びた店：${g.name} ${p1(g.r)}／最も落ちた店：${d.name} ${p1(d.r)}。`);
-        }
-        if (base.cs!=null && base.cs>0) L.push(`${base.name} の前年比 ${p1(base.sales/base.cs*100)}。`);
-        else L.push(`${base.name} は比較売上が0（新規店のため前年比なし）。`);
+      // 履歴・推移（自店）。新規オープンで前年対比が無いため、これが本日の売上を見る基準。
+      L.push('【履歴・推移（自店が基準）】');
+      L.push('※新規オープンのため前年対比はありません。毎日の蓄積（自店の履歴）を基準に本日を評価します。');
+      const series = baseSeriesFromReports(allReports, baseName);
+      const selWhen = String(report.created_at||'');
+      let selIdx = series.findIndex(p=>p.when===selWhen);
+      if (selIdx<0) selIdx = series.length-1; // 一致しなければ最新を本日扱い
+      const past = series.slice(0, Math.max(0, selIdx)); // 本日より前
+      if (!series.length){
+        L.push('履歴がまだありません。');
+      } else if (!past.length){
+        L.push(`蓄積 ${series.length}日目（本日が最古のデータ）。履歴比較は明日以降、日数が増えるほど精度が上がります。`);
       } else {
-        L.push('このレポートには比較列の抽出がありません（新しい画像を送ると次回から前年比も分析します）。');
+        const pastSalesAvg = avg(past.map(p=>p.sales));
+        const pastKtAvg = avg(past.map(p=>p.kt));
+        const pastRankAvg = avg(past.map(p=>p.salesRank));
+        const prev = past[past.length-1];
+        const allSales = series.map(p=>p.sales);
+        const best = Math.max.apply(null, allSales), worst = Math.min.apply(null, allSales);
+        L.push(`蓄積 ${series.length}日分。本日の売上 ${yK(base.sales)} は、自店の過去平均 ${yK(pastSalesAvg)} の ${p1(relPct(base.sales,pastSalesAvg))}（${base.sales>=pastSalesAvg?'平均以上':'平均以下'}）。`);
+        L.push(`前回(${fmtDay(prev.when)}) ${yK(prev.sales)} との差 ${yK(base.sales-prev.sales)}（${p1(prev.sales>0?(base.sales/prev.sales-1)*100:null)}）＝${base.sales>=prev.sales?'増':'減'}。`);
+        L.push(`期間中の最高 ${yK(best)}／最低 ${yK(worst)}（本日は${base.sales>=best?'最高':base.sales<=worst?'最低':'中間'}）。`);
+        if (baseKt!=null && pastKtAvg!=null) L.push(`客単価 ${yK(baseKt)} は過去平均 ${yK(pastKtAvg)} の ${p1(relPct(baseKt,pastKtAvg))}。`);
+        if (pastRankAvg!=null) L.push(`FC内 売上順位は本日 ${salesRank}位、過去平均 ${(Math.round(pastRankAvg*10)/10).toFixed(1)}位（${salesRank<=pastRankAvg?'改善/同等':'やや後退'}）。`);
+        // 直近トレンド（後半3日 vs 前半）
+        if (series.length>=4){
+          const half=Math.floor(series.length/2);
+          const early=avg(series.slice(0,half).map(p=>p.sales)), late=avg(series.slice(series.length-half).map(p=>p.sales));
+          if (early && late) L.push(`全体トレンド：直近平均 ${yK(late)} は前半平均 ${yK(early)} の ${p1(relPct(late,early))}（${late>=early?'上向き':'下向き'}）。`);
+        }
       }
       L.push('');
 
@@ -344,7 +378,7 @@
       }
       L.push('');
 
-      L.push('【注意】業態（寿司／フレンチ／ラーメン／ビア等）で単価帯が異なるため、客単価の順位は参考程度。最も確実な指標は基準店自身の前年比です（店が育つと比較売上が入り精度が上がります）。');
+      L.push('【注意】業態（寿司／フレンチ／ラーメン／ビア等）で単価帯が異なるため、客単価の順位は参考程度。新規オープンで前年対比は無いため、最も確実な基準は自店の日々の履歴（推移）です。日数が増えるほど傾向の精度が上がります。');
       return L.join('\n');
     }
 
@@ -353,7 +387,7 @@
       if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポートは比較できませんでした（基準店が見つからない/データ不足）。'; return; }
       dom.loadMsg.textContent='';
       dom.resultArea.hidden = false;
-      try { dom.analysis.textContent = buildAnalysisText(report); } catch(e){ dom.analysis.textContent = '分析テキストの生成に失敗しました。'; }
+      try { dom.analysis.textContent = buildAnalysisText(report, reports); } catch(e){ dom.analysis.textContent = '分析テキストの生成に失敗しました。'; }
       const cards = [
         ['基準店', c.baseName],
         ['合計売上（FC全体）', yen(c.total)],
