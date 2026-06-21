@@ -902,6 +902,32 @@ function shouldEscalateToGeminiReceipt(analysis: LineImageAnalysisResult | null)
   return false // 売上の手掛かりが皆無（お品書き・献立・メニュー等）→ 無解析・無反応
 }
 
+// 「解析中」案内（プッシュ）は、連投・再送のたびに送るとプッシュ枠（月◯通の無料枠）を浪費する。
+// 同じルームで直近(既定3分)に画像が来ていれば「最初の1枚だけ送る／2枚目以降は送らない」で間引く。
+// ※受信(webhook)と結果カード(返信=無料)は従来どおり。案内プッシュだけを節約する。
+async function shouldSendAnalyzingNotice(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  registry: StoreRegistryRow,
+  roomId: string,
+  windowSeconds = 180,
+): Promise<boolean> {
+  const rawTable = String(registry.webhook_raw_table ?? '').trim()
+  if (!rawTable || !roomId) return true
+  try {
+    const sinceIso = new Date(Date.now() - windowSeconds * 1000).toISOString()
+    const { count, error } = await supabase
+      .from(rawTable)
+      .select('*', { count: 'exact', head: true })
+      .eq('room_id', roomId)
+      .eq('payload->message->>type', 'image')
+      .gte('received_at', sinceIso)
+    if (error) return true // 取得失敗時は従来どおり送る（案内が消えるより安全側）
+    return (count ?? 0) <= 1 // この画像のみ＝最初の1枚→送る。直近に他の画像あり（再送/連投）→送らない。
+  } catch {
+    return true
+  }
+}
+
 async function processReceiptImageEvent(
   registry: StoreRegistryRow,
   event: LineEvent,
@@ -1045,7 +1071,7 @@ async function processReceiptImageEvent(
     } else {
       // 手順2: レシートの可能性あり → ここで初めて「解析中」push を送り、Gemini で高精度解析へ昇格する。
       // receiptReplyToken が空（レシート返信OFF）の部屋には送らない＝結果返信と歩調を合わせる。
-      if (receiptReplyToken) {
+      if (receiptReplyToken && await shouldSendAnalyzingNotice(supabase, registry, roomId)) {
         await pushLineTextToTarget(
           roomId,
           '📸 画像を受け付けました。\nAI（Gemini）で内容を解析しています。高精度な解析のため、結果のご案内まで少しお時間（最大1分ほど）をいただく場合があります。少々お待ちください。',
@@ -1115,7 +1141,7 @@ async function processReceiptImageEvent(
         console.log(`[receipt_pre_filter] expense-routed via Groq, skip Claude sales pass (store=${registry.store_partition_key}, parsed="${preStoreName}", msg=${lineMessageId})`)
         analyzed = pre
       } else {
-        if (receiptReplyToken) {
+        if (receiptReplyToken && await shouldSendAnalyzingNotice(supabase, registry, roomId)) {
           await pushLineTextToTarget(
             roomId,
             '📸 画像を受け付けました。\nAI（Claude）で内容を解析しています。少々お待ちください。',
