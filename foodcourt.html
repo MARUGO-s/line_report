@@ -313,7 +313,7 @@
         const b=li.find(t=>norm(t.name)===norm(baseName)); if(!b) return;
         const tot=li.reduce((s,t)=>s+t.sales,0);
         const k=(b.guests&&b.guests>0)?b.sales/b.guests:null;
-        out.push({ when:String(r.created_at||''), sales:b.sales, guests:b.guests, kt:k,
+        out.push({ when:String(r.report_date||r.created_at||''), sales:b.sales, guests:b.guests, kt:k,
           salesRank:1+li.filter(t=>t.sales>b.sales).length, share: tot>0?b.sales/tot*100:null });
       });
       out.sort((a,b)=>a.when.localeCompare(b.when));
@@ -557,6 +557,8 @@
       try {
         const body = await apiFetch('/foodcourt/reports?store_key='+encodeURIComponent(store)+'&limit=60');
         reports = Array.isArray(body.reports) ? body.reports : [];
+        // report_date（手動投入）優先＝対象日で新しい順に並べる（created_atは取込時刻のため）。
+        reports.sort((a,b)=> String((b&&(b.report_date||b.created_at))||'').localeCompare(String((a&&(a.report_date||a.created_at))||'')));
         setAuthBadge(true);
         dom.loadMsg.textContent='';
         populateReports();
