@@ -696,14 +696,15 @@ Deno.serve(async (req, info) => {
     }
     // フードコート「テナント一覧」レポートの抽出結果（分析専用・店舗スコープ）。専用ページ foodcourt.html 用。
     if (req.method === "GET" && path === "/foodcourt/reports") {
-      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim().toLowerCase()
+      // 店舗キーは大文字小文字ゆらぎ（例: marugoS）があるため ilike で照合（スコープ強制側は小文字化される）。
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
       if (!storeKey) return json({ error: "store_key is required." }, 400)
       const limitRaw = Number(url.searchParams.get("limit") ?? "60")
       const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 200) : 60
       const { data, error } = await supabase
         .from("foodcourt_tenant_reports")
         .select("id, report_date, base_tenant_name, tenants, created_at, line_message_id")
-        .eq("store_partition_key", storeKey)
+        .ilike("store_partition_key", storeKey)
         .order("created_at", { ascending: false })
         .limit(limit)
       if (error) return json({ error: error.message }, 500)
