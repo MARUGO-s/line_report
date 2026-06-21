@@ -13,7 +13,16 @@ export const FOODCOURT_STORE_KEYS: Record<string, { baseTenantName: string }> = 
 const FOODCOURT_MARKERS =
   /テナント|対象売上|比較売上|売上比率|客数比率|対象客数|比較客数|mallpro|5092\d{3}/i
 
-export type FoodCourtTenant = { name: string; code: string | null; sales: number | null; guests: number | null }
+export type FoodCourtTenant = {
+  name: string
+  code: string | null
+  sales: number | null
+  guests: number | null
+  /** 比較売上（前年/前期）。比較分析用。読めなければ null。 */
+  compSales?: number | null
+  /** 比較客数（前年/前期）。 */
+  compGuests?: number | null
+}
 
 export function looksLikeFoodCourtReport(text: string): boolean {
   return FOODCOURT_MARKERS.test(String(text ?? ''))
@@ -49,9 +58,9 @@ function numOrNull(v: unknown): number | null {
 const EXTRACT_PROMPT = [
   'この画像はフードコートの「テナント一覧」売上レポート（各テナントの対象売上・比較売上・対象客数などが行で並ぶ表）です。',
   '表の**全テナント行**を抜き出して、JSONだけを返してください（前後に文章を付けない）。',
-  '各行: name=テナント名（印字どおり）, code=テナントコード（数字。無ければnull）, sales=「対象売上」の数値, guests=「対象客数」の数値。',
-  '数値はカンマ・¥・%・空白を除いた整数にする。「比較売上」「売上比率」「比較客数」「客数比率」の列は使わない（対象列だけ）。読めない数値はnull。',
-  '出力形式: {"tenants":[{"name":"店名","code":"5092133","sales":496838,"guests":265}, ...]}',
+  '各行: name=テナント名（印字どおり）, code=テナントコード（数字。無ければnull）, sales=「対象売上」, guests=「対象客数」, comp_sales=「比較売上」, comp_guests=「比較客数」。',
+  '数値はカンマ・¥・%・空白を除いた整数にする。「売上比率」「客数比率」の%列は出さなくてよい（システムが計算する）。読めない数値はnull。比較売上が0や空欄なら comp_sales=0 とする。',
+  '出力形式: {"tenants":[{"name":"店名","code":"5092133","sales":496838,"guests":265,"comp_sales":620196,"comp_guests":318}, ...]}',
 ].join('\n')
 
 // 自己完結の Gemini Vision 呼び出し（テナント表を JSON 抽出）。レシート用スキーマには依存しない。
@@ -111,6 +120,8 @@ export async function extractFoodCourtTenants(
       code: o.code != null ? String(o.code).replace(/[^\d]/g, '').slice(0, 12) || null : null,
       sales: numOrNull(o.sales),
       guests: numOrNull(o.guests),
+      compSales: numOrNull(o.comp_sales),
+      compGuests: numOrNull(o.comp_guests),
     })
   }
   return tenants.length ? tenants : null

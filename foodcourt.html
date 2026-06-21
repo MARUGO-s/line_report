@@ -102,6 +102,10 @@
 
     <div id="resultArea" hidden>
       <div class="card">
+        <div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px;">📊 分析結果（自動）<span class="badge test">試験版</span></div>
+        <div id="analysis" style="white-space:pre-wrap;font-size:13px;line-height:1.75;color:var(--text)"></div>
+      </div>
+      <div class="card">
         <div class="summary" id="summary"></div>
       </div>
       <div class="card">
@@ -137,7 +141,7 @@
     const dom = {
       authBadge:$('authBadge'), authCard:$('authCard'), authMsg:$('authMsg'), tokenInput:$('tokenInput'), tokenBtn:$('tokenBtn'),
       storeSel:$('storeSel'), reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
-      resultArea:$('resultArea'), summary:$('summary'), tbody:$('tbody'), bars:$('bars'),
+      resultArea:$('resultArea'), summary:$('summary'), tbody:$('tbody'), bars:$('bars'), analysis:$('analysis'),
     };
     let reports = [];
 
@@ -222,11 +226,134 @@
         share: total>0? base.sales/total*100 : null, salesRank, guestRank, unitRank, count:list.length, rows };
     }
 
+    function median(arr){ const a=arr.filter(x=>x!=null && isFinite(x)).slice().sort((x,y)=>x-y); if(!a.length) return null; const m=Math.floor(a.length/2); return a.length%2? a[m] : (a[m-1]+a[m])/2; }
+    function avg(arr){ const a=arr.filter(x=>x!=null && isFinite(x)); return a.length? a.reduce((s,x)=>s+x,0)/a.length : null; }
+    function relPct(v, base){ return (base&&base>0&&v!=null)? Math.round(v/base*1000)/10 : null; }
+
+    // これらの数字を多角的に分析し、まとめテキストを生成（ルールベース＝確定的・無料）。
+    function buildAnalysisText(report){
+      const list = (report.tenants||[]).map(t=>({
+        name:String((t&&t.name)||''),
+        sales:(t&&t.sales!=null)?Number(t.sales):null,
+        guests:(t&&t.guests!=null)?Number(t.guests):null,
+        cs:(t&&t.compSales!=null)?Number(t.compSales):null,
+        cg:(t&&t.compGuests!=null)?Number(t.compGuests):null,
+      })).filter(t=>t.name && t.sales!=null && isFinite(t.sales) && t.sales>=0);
+      if (list.length<2) return '分析に必要なデータが不足しています。';
+      const baseName = report.base_tenant_name || 'MARUGO S';
+      const base = list.find(t=>norm(t.name)===norm(baseName));
+      if (!base) return '基準店（'+baseName+'）が見つかりませんでした。';
+      const ktOf = t=> (t.guests&&t.guests>0)? t.sales/t.guests : null;
+      const n = list.length;
+      const totalSales = list.reduce((s,t)=>s+t.sales,0);
+      const totalGuests = list.reduce((s,t)=>s+(t.guests||0),0);
+      const courtKt = totalGuests>0? totalSales/totalGuests : null;
+      const avgSales = avg(list.map(t=>t.sales)), medSales = median(list.map(t=>t.sales));
+      const avgGuests = avg(list.map(t=>t.guests)), avgKt = avg(list.map(ktOf));
+      const medKt = median(list.map(ktOf));
+      const baseKt = ktOf(base);
+      const rank = (v,key)=>1+list.filter(t=>(key==='kt'?(ktOf(t)||0):(t[key]||0))>v).length;
+      const salesRank = rank(base.sales,'sales'), guestRank = rank(base.guests||0,'guests');
+      const ktRank = baseKt==null?null:(1+list.filter(t=>{const u=ktOf(t);return u!=null&&u>baseKt;}).length);
+      const bySales = list.slice().sort((a,b)=>b.sales-a.sales);
+      const leader = bySales[0];
+      const idx = bySales.findIndex(t=>t===base);
+      const above = idx>0? bySales[idx-1] : null, below = idx<bySales.length-1? bySales[idx+1] : null;
+      const share = totalSales>0? base.sales/totalSales*100 : null;
+
+      const L = [];
+      const yK = v=>'¥'+nf.format(Math.round(v));
+      const p1 = v=>v==null?'—':(Math.round(v*10)/10).toFixed(1)+'%';
+
+      // 総評
+      const volWord = (salesRank<=Math.ceil(n/3))?'上位':(salesRank<=Math.ceil(n*2/3)?'中位':'下位');
+      const ktWord = ktRank==null?'—':((ktRank<=Math.ceil(n/3))?'上位':(ktRank<=Math.ceil(n*2/3)?'中位':'下位'));
+      let typ = '';
+      if (ktRank!=null){
+        if (guestRank<=Math.ceil(n/2) && ktRank>Math.ceil(n/2)) typ='＝客数で稼ぐ「客数型（単価が弱み）」';
+        else if (ktRank<=Math.ceil(n/2) && guestRank>Math.ceil(n/2)) typ='＝単価で稼ぐ「単価型（集客が弱み）」';
+        else if (guestRank<=Math.ceil(n/2) && ktRank<=Math.ceil(n/2)) typ='＝客数・単価とも上位の「総合上位」';
+        else typ='＝客数・単価とも下位で「全体的に弱い」';
+      }
+      L.push('【総評】');
+      L.push(`${base.name} はフードコート ${n}店中、売上 ${salesRank}位・客数 ${guestRank}位・客単価 ${ktRank==null?'—':ktRank+'位'}。売上シェア ${p1(share)}。`);
+      L.push(`売上は${volWord}、客単価は${ktWord}${typ}。`);
+      L.push('');
+
+      // 売上
+      L.push('【売上】');
+      L.push(`対象売上 ${yK(base.sales)}（FC平均 ${yK(avgSales)} の ${p1(relPct(base.sales,avgSales))}、中央値 ${yK(medSales)} の ${p1(relPct(base.sales,medSales))}）。`);
+      if (leader && leader!==base) L.push(`首位 ${leader.name} ${yK(leader.sales)} とは ${yK(leader.sales-base.sales)}（${(leader.sales/base.sales).toFixed(2)}倍）差。`);
+      if (above) L.push(`すぐ上：${above.name} ${yK(above.sales)}（+${yK(above.sales-base.sales)}）。`);
+      if (below) L.push(`すぐ下：${below.name} ${yK(below.sales)}（${yK(below.sales-base.sales)}）。`);
+      L.push('');
+
+      // 客数
+      L.push('【客数】');
+      L.push(`対象客数 ${base.guests!=null?nf.format(base.guests)+'人':'—'}（FC平均 ${avgGuests!=null?nf.format(Math.round(avgGuests))+'人':'—'} の ${p1(relPct(base.guests,avgGuests))}、${guestRank}位）。`);
+      L.push('');
+
+      // 客単価
+      const byKt = list.map(t=>({name:t.name,kt:ktOf(t)})).filter(x=>x.kt!=null).sort((a,b)=>b.kt-a.kt);
+      L.push('【客単価（1人あたり）】');
+      L.push(`${baseKt!=null?yK(baseKt):'—'}（FC平均 ${avgKt!=null?yK(avgKt):'—'} の ${p1(relPct(baseKt,avgKt))}、中央値 ${medKt!=null?yK(medKt):'—'} の ${p1(relPct(baseKt,medKt))}、${ktRank==null?'—':ktRank+'位'}）。`);
+      if (byKt.length) L.push(`FC内 最高 ${byKt[0].name} ${yK(byKt[0].kt)}／最低 ${byKt[byKt.length-1].name} ${yK(byKt[byKt.length-1].kt)}。`);
+      L.push('');
+
+      // 前年比（比較データがある場合のみ）
+      const withComp = list.filter(t=>t.cs!=null && t.cs>0);
+      L.push('【前年比（比較売上）】');
+      if (withComp.length){
+        const tSales = withComp.reduce((s,t)=>s+t.sales,0), tComp = withComp.reduce((s,t)=>s+t.cs,0);
+        L.push(`FC全体（比較データ ${withComp.length}店）の前年比 ${p1(tComp>0?tSales/tComp*100:null)}（対象計 ${yK(tSales)} / 比較計 ${yK(tComp)}）。`);
+        const grown = withComp.map(t=>({name:t.name,r:t.sales/t.cs*100})).sort((a,b)=>b.r-a.r);
+        if (grown.length){ const g=grown[0], d=grown[grown.length-1];
+          L.push(`最も伸びた店：${g.name} ${p1(g.r)}／最も落ちた店：${d.name} ${p1(d.r)}。`);
+        }
+        if (base.cs!=null && base.cs>0) L.push(`${base.name} の前年比 ${p1(base.sales/base.cs*100)}。`);
+        else L.push(`${base.name} は比較売上が0（新規店のため前年比なし）。`);
+      } else {
+        L.push('このレポートには比較列の抽出がありません（新しい画像を送ると次回から前年比も分析します）。');
+      }
+      L.push('');
+
+      // 強み・弱み
+      L.push('【強み・弱み】');
+      const strengths=[], weaks=[];
+      if (guestRank<=Math.ceil(n/2)) strengths.push(`集客力（客数 ${guestRank}位）`); else weaks.push(`集客（客数 ${guestRank}位）`);
+      if (ktRank!=null){ if (ktRank<=Math.ceil(n/2)) strengths.push(`客単価（${ktRank}位）`); else weaks.push(`客単価（${ktRank}位・FC平均比 ${p1(relPct(baseKt,avgKt))}）`); }
+      if (share!=null && share>=100/n) strengths.push(`売上シェア ${p1(share)}（平均以上）`);
+      L.push('強み：'+(strengths.length?strengths.join('、'):'特になし'));
+      L.push('弱み：'+(weaks.length?weaks.join('、'):'特になし'));
+      L.push('');
+
+      // 打ち手（シミュレーション）
+      L.push('【打ち手（試算）】');
+      if (baseKt!=null && medKt!=null && base.guests){
+        if (medKt>baseKt){
+          const proj = Math.round(base.guests*medKt);
+          const newRank = 1+list.filter(t=>t.sales>proj).length;
+          L.push(`・客単価をFC中央値 ${yK(medKt)} に上げると（客数 ${nf.format(base.guests)}人 維持）売上は ${yK(base.sales)}→${yK(proj)}（${p1((proj/base.sales-1)*100)}増）＝売上 ${newRank}位相当。`);
+        } else {
+          L.push(`・客単価は既にFC中央値以上。強みを維持しつつ客数増が伸びしろ。`);
+        }
+      }
+      if (avgGuests!=null && base.guests!=null && avgGuests>base.guests && baseKt!=null){
+        const proj2 = Math.round(avgGuests*baseKt);
+        L.push(`・客数をFC平均 ${nf.format(Math.round(avgGuests))}人 に増やすと（単価維持）売上は ${yK(proj2)}（${p1((proj2/base.sales-1)*100)}増）。`);
+      }
+      L.push('');
+
+      L.push('【注意】業態（寿司／フレンチ／ラーメン／ビア等）で単価帯が異なるため、客単価の順位は参考程度。最も確実な指標は基準店自身の前年比です（店が育つと比較売上が入り精度が上がります）。');
+      return L.join('\n');
+    }
+
     function render(report){
       const c = computeComparison(report);
       if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポートは比較できませんでした（基準店が見つからない/データ不足）。'; return; }
       dom.loadMsg.textContent='';
       dom.resultArea.hidden = false;
+      try { dom.analysis.textContent = buildAnalysisText(report); } catch(e){ dom.analysis.textContent = '分析テキストの生成に失敗しました。'; }
       const cards = [
         ['基準店', c.baseName],
         ['合計売上（FC全体）', yen(c.total)],
