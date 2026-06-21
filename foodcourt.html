@@ -69,8 +69,29 @@
     .msg{font-size:13px;margin-top:8px}
     .msg.err{color:#ff8a8a}
     .note{color:var(--muted);font-size:12px;margin-top:10px}
-    .tbl-wrap{overflow-x:auto}
-    @media(max-width:560px){ .bar-name{flex-basis:96px} th,td{padding:6px 4px} }
+    .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* スマホ: 表を横スクロールではなくカード型（縦積み・項目名つき）にして全項目を読めるようにする */
+    @media(max-width:640px){
+      .wrap{padding:12px 10px 56px}
+      .head h1{font-size:18px}
+      .controls{gap:8px}
+      .fld{flex:1 1 100%;min-width:0}
+      .fld select,.fld input{width:100%}
+      #rangeBtn,#dayBtn,#reloadBtn{flex:1 1 auto}
+      .summary{grid-template-columns:1fr 1fr}
+      .tbl-wrap{overflow-x:visible}
+      .tbl-wrap table{display:block;width:100%;min-width:0!important;font-size:13px}
+      .tbl-wrap thead{position:absolute;left:-9999px;height:0;overflow:hidden}
+      .tbl-wrap tbody{display:block}
+      .tbl-wrap tbody tr{display:block;border:0.5px solid var(--line);border-radius:10px;margin:0 0 10px;padding:6px 12px;background:var(--panel2)}
+      .tbl-wrap tbody tr.base{background:rgba(255,207,92,.14)}
+      .tbl-wrap tbody td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;text-align:right;border:0;border-bottom:0.5px solid rgba(255,255,255,.06);padding:6px 0;white-space:normal;word-break:break-word}
+      .tbl-wrap tbody tr td:last-child{border-bottom:0}
+      .tbl-wrap tbody td::before{content:attr(data-label);color:var(--muted);font-weight:500;text-align:left;flex:0 0 40%}
+      .tbl-wrap tbody td.name{font-weight:600}
+      .bar-name{flex-basis:84px;font-size:11px}
+      .bar-val{flex-basis:54px}
+    }
   </style>
 </head>
 <body>
@@ -541,6 +562,16 @@
       }
     }
 
+    // スマホのカード型表示用: 各表の thead 見出しを、対応する各 td に data-label として付与。
+    function labelizeTables(){
+      document.querySelectorAll('#resultArea .tbl-wrap table').forEach(function(tbl){
+        const ths = Array.prototype.map.call(tbl.querySelectorAll('thead th'), function(th){ return th.textContent.trim(); });
+        tbl.querySelectorAll('tbody tr').forEach(function(tr){
+          Array.prototype.forEach.call(tr.children, function(td, i){ if (ths[i]) td.setAttribute('data-label', ths[i]); });
+        });
+      });
+    }
+
     function render(report, opts){
       opts = opts || {};
       const seriesReports = opts.seriesReports || reports;
@@ -579,6 +610,7 @@
       }).join('');
 
       try { renderExtraTables(c, report, seriesReports); } catch(e){ /* 追加表の失敗は本体表示を妨げない */ }
+      try { labelizeTables(); } catch(e){ /* ラベル付与失敗は無視（PCはthead表示） */ }
     }
 
     function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
