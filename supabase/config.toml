@@ -47,3 +47,8 @@ verify_jwt = false
 # 送信は無く、書き込みは upsert（主キー event_date+title）で冪等のため、認可は冪等性で担保する。
 [functions.tokyo-dome-events-cron]
 verify_jwt = false
+
+# weather-daily-cron は pg_cron（1日1回）から呼ばれる内部関数。Open-Meteoの日次天気を取得して保存する分析専用。
+# verify_jwt は他cronと同様 false（sb_secret_… は JWT でないため）。upsert（主キー weather_date+location）で冪等。
+[functions.weather-daily-cron]
+verify_jwt = false

@@ -375,6 +375,49 @@ function addDaysIso(iso: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+// 東京ドーム周辺の日次天気を、レポート期間に合わせて取得する（マルゴSのみ）。
+// マルゴSは東京ドーム内フードコートのため、天気（雨/気温）と客数・売上が相関する。
+async function loadWeatherForReports(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  reports: Array<Record<string, unknown>>,
+): Promise<Array<{ weather_date: string; weather_code: number | null; temp_max: number | null; temp_min: number | null; precipitation_mm: number | null; precip_prob: number | null; summary: string }>> {
+  if (String(storeKey ?? "").trim().toLowerCase() !== "marugos") return []
+  const dates: string[] = []
+  for (const r of (Array.isArray(reports) ? reports : [])) {
+    const rd = String((r as { report_date?: unknown }).report_date ?? "").slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rd)) dates.push(rd)
+  }
+  dates.sort()
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const minDate = dates[0] ?? todayIso
+  const maxBase = dates[dates.length - 1] ?? todayIso
+  // 過去90日〜先16日（天気予報の上限）とレポート期間の和集合。
+  const loCand = [addDaysIso(minDate, -7), addDaysIso(todayIso, -90)].sort()
+  const hiCand = [addDaysIso(maxBase > todayIso ? maxBase : todayIso, 16), addDaysIso(todayIso, 16)].sort()
+  const lo = loCand[0]
+  const hi = hiCand[hiCand.length - 1]
+  const { data, error } = await supabase
+    .from("weather_daily")
+    .select("weather_date, weather_code, temp_max, temp_min, precipitation_mm, precip_prob, summary")
+    .eq("location", "tokyo_dome")
+    .gte("weather_date", lo)
+    .lte("weather_date", hi)
+    .order("weather_date", { ascending: true })
+    .limit(400)
+  if (error || !Array.isArray(data)) return []
+  const num = (v: unknown) => { const n = Number(v); return v == null || !Number.isFinite(n) ? null : n }
+  return data.map((w) => ({
+    weather_date: String((w as { weather_date?: unknown }).weather_date ?? "").slice(0, 10),
+    weather_code: num((w as { weather_code?: unknown }).weather_code),
+    temp_max: num((w as { temp_max?: unknown }).temp_max),
+    temp_min: num((w as { temp_min?: unknown }).temp_min),
+    precipitation_mm: num((w as { precipitation_mm?: unknown }).precipitation_mm),
+    precip_prob: num((w as { precip_prob?: unknown }).precip_prob),
+    summary: String((w as { summary?: unknown }).summary ?? ""),
+  })).filter((w) => w.weather_date)
+}
+
 Deno.serve(async (req, info) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -757,9 +800,10 @@ Deno.serve(async (req, info) => {
         .limit(limit)
       if (error) return json({ error: error.message }, 500)
       const reports = Array.isArray(data) ? data : []
-      // 会場イベント（東京ドーム）を併せて返す。マルゴSは東京ドーム内のため客数増減と相関する。
+      // 会場イベント（東京ドーム）・天気を併せて返す。マルゴSは東京ドーム内のため客数増減と相関する。
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
-      return json({ store_key: storeKey, reports, events }, 200)
+      const weather = await loadWeatherForReports(supabase, storeKey, reports)
+      return json({ store_key: storeKey, reports, events, weather }, 200)
     }
     // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
     if (req.method === "POST" && path === "/foodcourt/ask") {
@@ -782,9 +826,10 @@ Deno.serve(async (req, info) => {
         return json({ answer: "まだデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。", reportCount: 0 }, 200)
       }
       const baseName = String((reports[0] as { base_tenant_name?: unknown }).base_tenant_name ?? "MARUGO S")
-      // 会場イベント（東京ドーム）も根拠に渡す。客数増減との相関を踏まえて回答させる。
+      // 会場イベント（東京ドーム）・天気も根拠に渡す。客数増減との相関を踏まえて回答させる。
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
-      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events)
+      const weather = await loadWeatherForReports(supabase, storeKey, reports)
+      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
     }
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {

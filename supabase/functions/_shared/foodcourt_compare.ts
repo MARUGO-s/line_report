@@ -485,15 +485,54 @@ function buildEventListText(events: VenueEvent[]): string {
 }
 
 export type VenueEvent = { event_date: string; title: string; category: string }
+export type WeatherDay = { weather_date: string; weather_code: number | null; temp_max: number | null; temp_min: number | null; precipitation_mm: number | null; precip_prob: number | null; summary: string }
+
+// 天気と基準店客数の相関を事前計算（雨の日 vs 雨でない日、天気区分別、気温）。
+function buildWeatherCorrelation(reports: Array<Record<string, unknown>>, baseName: string, weather: WeatherDay[]): string {
+  if (!Array.isArray(weather) || !weather.length) return ''
+  const byDate = new Map<string, WeatherDay>()
+  for (const w of weather) { const d = String(w.weather_date ?? '').slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) byDate.set(d, w) }
+  const daily = fcBaseDaily(reports, baseName).filter((r) => r.guests != null)
+  if (!daily.length) return ''
+  const rainG: number[] = [], dryG: number[] = [], rainS: number[] = [], dryS: number[] = []
+  const hotG: number[] = [], coolG: number[] = []
+  const byCat = new Map<string, number[]>()
+  for (const r of daily) {
+    const w = byDate.get(r.date); if (!w) continue
+    const g = r.guests as number
+    const rainy = (w.precipitation_mm ?? 0) >= 1
+    if (rainy) { rainG.push(g); rainS.push(r.sales) } else { dryG.push(g); dryS.push(r.sales) }
+    const cat = w.summary || '—'; if (!byCat.has(cat)) byCat.set(cat, []); byCat.get(cat)!.push(g)
+    if (w.temp_max != null) { if (w.temp_max >= 30) hotG.push(g); else coolG.push(g) }
+  }
+  const L: string[] = []
+  const rA = fcAvg(rainG), dA = fcAvg(dryG)
+  if (rA != null && dA != null) {
+    const ratio = dA > 0 ? rA / dA : null
+    L.push(`雨の日(${rainG.length}日)の平均客数 ${Math.round(rA)}人 / 雨でない日(${dryG.length}日)の平均客数 ${Math.round(dA)}人${ratio ? `（${ratio.toFixed(2)}倍）` : ''}`)
+    const rsa = fcAvg(rainS), dsa = fcAvg(dryS)
+    if (rsa != null && dsa != null) L.push(`雨の日の平均売上 ${fcYen(rsa)} / 雨でない日 ${fcYen(dsa)}`)
+  } else if (rA != null) {
+    L.push(`雨の日(${rainG.length}日)の平均客数 ${Math.round(rA)}人（雨でない日のデータが不足）`)
+  } else if (dA != null) {
+    L.push(`雨でない日(${dryG.length}日)の平均客数 ${Math.round(dA)}人（雨の日のデータがまだ無い）`)
+  }
+  const hA = fcAvg(hotG), cA = fcAvg(coolG)
+  if (hA != null && cA != null) L.push(`真夏日(最高30℃以上 ${hotG.length}日)の平均客数 ${Math.round(hA)}人 / それ未満(${coolG.length}日) ${Math.round(cA)}人`)
+  const cats = Array.from(byCat.entries()).filter(([, a]) => a.length).sort((a, b) => (fcAvg(b[1]) ?? 0) - (fcAvg(a[1]) ?? 0))
+  for (const [c, a] of cats) L.push(`・${c}: ${a.length}日 / 平均客数 ${Math.round(fcAvg(a) ?? 0)}人`)
+  return L.join('\n')
+}
 
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
-// events（東京ドームのイベント日程）を渡すと、客数増減との相関も踏まえて回答する。
+// events（東京ドームのイベント日程）・weather（日次天気）を渡すと、客数増減との相関も踏まえて回答する。
 export async function answerFoodCourtQuestion(
   reports: Array<Record<string, unknown>>,
   baseName: string,
   question: string,
   groqApiKey: string,
   events: VenueEvent[] = [],
+  weather: WeatherDay[] = [],
 ): Promise<string | null> {
   if (!groqApiKey) return null
   const q = String(question ?? '').trim().slice(0, 500)
@@ -519,14 +558,15 @@ export async function answerFoodCourtQuestion(
   const insights = buildBaseInsights(reports, baseName)
   const eventCorr = buildEventCorrelation(reports, baseName, events)
   const eventList = buildEventListText(events)
+  const weatherCorr = buildWeatherCorrelation(reports, baseName, weather)
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードコートの1店舗）の優秀な経営アナリストです。`,
-    `与えられた「事前計算サマリー」「会場イベント相関」「日次生データ」（★が基準店=${baseName}、金額は円、客単価=売上÷客数）だけを根拠に、ユーザーの質問へ日本語で答えます。`,
+    `与えられた「事前計算サマリー」「会場イベント相関」「天気相関」「日次生データ」（★が基準店=${baseName}、金額は円、客単価=売上÷客数）だけを根拠に、ユーザーの質問へ日本語で答えます。`,
     `【最重要・禁止事項】単に「最高は◯日、最低は◯日」と最大値・最小値を列挙するだけの回答は禁止。必ず“分析”にすること。`,
-    `回答には次を、具体的な数字を根拠に盛り込む: ①全体の傾向（上昇/下降/横ばいと、その程度＝前半→後半や前日比）②曜日・週の差（土日と平日など）③変化の要因は「客数」か「客単価」か（どちらが効いているか）④フードコート内での基準店の立ち位置と推移（順位・シェア）⑤東京ドームのイベント（野球・ライブ）と客数の関係（イベント日と非イベント日の差、ジャンル別の効き方）⑥次に取るべき打ち手を1〜3個（イベント日程を踏まえた仕込み・人員も）。`,
+    `回答には次を、具体的な数字を根拠に盛り込む: ①全体の傾向（上昇/下降/横ばいと、その程度＝前半→後半や前日比）②曜日・週の差（土日と平日など）③変化の要因は「客数」か「客単価」か（どちらが効いているか）④フードコート内での基準店の立ち位置と推移（順位・シェア）⑤東京ドームのイベント（野球・ライブ）と客数の関係（イベント日と非イベント日の差、ジャンル別の効き方）⑥天気と客数の関係（雨/晴れ・気温の効き方）⑦次に取るべき打ち手を1〜3個（イベント日程・天気予報を踏まえた仕込み・人員も）。`,
     `わかりやすい短い見出し＋箇条書きで、結論を先に。データに無いことは「データにありません」と述べ、憶測しない。新規オープンのため前年比は無いので、自店の日々の推移を基準に語る。`,
   ].join('\n')
-  const userMsg = `# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
+  const userMsg = `# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
   let ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary, 1300)
   if (!ans) ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1300)

@@ -348,6 +348,7 @@
         <button class="tab" data-tab="ranking"><span class="em">🏆</span>店舗ランキング</button>
         <button class="tab" data-tab="trend"><span class="em">📈</span>売上推移</button>
         <button class="tab" data-tab="dome"><span class="em">🏟️</span>東京ドーム連動</button>
+        <button class="tab" data-tab="weather"><span class="em">🌦️</span>天気連動</button>
       </div>
     </div>
 
@@ -417,7 +418,7 @@
           </div>
         </div>
         <div style="overflow-x:auto">
-        <table class="tbl"><thead><tr><th class="l">日付</th><th>売上</th><th>客数</th><th>客単価</th><th>FC順位</th><th>シェア</th><th class="l" style="padding-left:18px">東京ドーム</th></tr></thead><tbody id="dailyTbody"></tbody></table>
+        <table class="tbl"><thead><tr><th class="l">日付</th><th>売上</th><th>客数</th><th>客単価</th><th>FC順位</th><th>シェア</th><th class="l" style="padding-left:18px">東京ドーム</th><th class="l" style="padding-left:14px">天気</th></tr></thead><tbody id="dailyTbody"></tbody></table>
         </div>
         <div class="footnote" id="trendNote"></div>
       </div>
@@ -453,6 +454,21 @@
       </div>
     </section>
 
+    <!-- WEATHER -->
+    <section class="panel" data-panel="weather">
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">🌦️</span>天気 相関（客数）</div></div>
+        <div class="corr" id="wxCorrWrap"></div>
+        <div class="corr-breakdown" id="wxBreakdown"></div>
+        <div class="card-note" id="wxNote"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">📅</span>日別 天気と客数</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th class="l">日付</th><th class="l">天気</th><th>最高℃</th><th>最低℃</th><th>降水mm</th><th>客数</th><th>売上</th></tr></thead><tbody id="wxDaily"></tbody></table></div>
+        <div class="footnote" id="wxDailyNote"></div>
+      </div>
+    </section>
+
   </div>
 </div>
 
@@ -481,12 +497,15 @@
     corrWrap:$('corrWrap'), corrBreakdown:$('corrBreakdown'), corrNote:$('corrNote'),
     calPrev:$('calPrev'), calNext:$('calNext'), calMonth:$('calMonth'), calGrid:$('calGrid'), calNote:$('calNote'),
     domeFilt:$('domeFilt'), domeList:$('domeList'), domeMore:$('domeMore'), domeNote:$('domeNote'),
+    wxCorrWrap:$('wxCorrWrap'), wxBreakdown:$('wxBreakdown'), wxNote:$('wxNote'), wxDaily:$('wxDaily'), wxDailyNote:$('wxDailyNote'),
   };
   const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ'];
 
   let reports = [];
   let events = [];                 // 東京ドームのイベント [{event_date,title,category}]
   let eventsByDate = new Map();    // 'YYYY-MM-DD' -> [event,...]
+  let weather = [];                // 日次天気 [{weather_date,weather_code,temp_max,...}]
+  let weatherByDate = new Map();   // 'YYYY-MM-DD' -> weather
   let lastSeries = [];             // 直近描画の基準店日次系列
   let calY = 0, calM = 0;          // カレンダー表示中の年・月（0=未初期化）
   let mode = 'single';             // 'single' | 'range'
@@ -883,8 +902,9 @@
   // ===== render: trend (SVG + table) =====
   function renderTrend(series){
     dom.trendCount.textContent = '蓄積 '+series.length+'日';
-    dom.dailyTbody.innerHTML = series.map(p=>{ const hit=(eventsByDate.get(ymdJst(p.when))||[])[0];
-      return '<tr><td class="l mono" style="font-weight:600">'+fmtDay(p.when)+'</td><td class="mono">'+yen(p.sales)+'</td><td class="mono">'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td class="mono">'+(p.kt!=null?yen(p.kt):'—')+'</td><td class="mono">'+p.salesRank+'位</td><td class="mono neg">'+pct(p.share)+'</td><td class="l" style="padding-left:18px">'+(hit?genreTag(hit.category):'<span class="neg">—</span>')+'</td></tr>';
+    dom.dailyTbody.innerHTML = series.map(p=>{ const ymd=ymdJst(p.when); const hit=(eventsByDate.get(ymd)||[])[0]; const w=weatherByDate.get(ymd);
+      const wx = w ? (wxIcon(w.weather_code)+' '+escapeHtml(w.summary||'')) : '<span class="neg">—</span>';
+      return '<tr><td class="l mono" style="font-weight:600">'+fmtDay(p.when)+'</td><td class="mono">'+yen(p.sales)+'</td><td class="mono">'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td class="mono">'+(p.kt!=null?yen(p.kt):'—')+'</td><td class="mono">'+p.salesRank+'位</td><td class="mono neg">'+pct(p.share)+'</td><td class="l" style="padding-left:18px">'+(hit?genreTag(hit.category):'<span class="neg">—</span>')+'</td><td class="l" style="padding-left:14px">'+wx+'</td></tr>';
     }).join('');
     dom.trendNote.textContent = '蓄積'+series.length+'日分。毎日の画像送信で増えます。東京ドーム列＝開催イベント。';
     drawTrend(series);
@@ -1017,6 +1037,40 @@
     renderCalendar();
     renderDomeFilter();
     renderDomeList();
+    renderWeather(series);
+  }
+
+  // ===== render: weather =====
+  function wxIcon(code){ if(code==null)return '·'; if(code===0)return '☀️'; if(code===1)return '🌤️'; if(code===2)return '⛅'; if(code===3)return '☁️'; if(code===45||code===48)return '🌫️'; if(code>=51&&code<=57)return '🌦️'; if(code>=61&&code<=67)return '🌧️'; if(code>=71&&code<=77)return '❄️'; if(code>=80&&code<=82)return '🌦️'; if(code===85||code===86)return '🌨️'; if(code>=95)return '⛈️'; return '·'; }
+  function wxBucket(code){ if(code==null)return 'その他'; if(code<=1)return '晴れ'; if(code===2)return '晴れ時々曇り'; if(code===3||code===45||code===48)return '曇り'; if((code>=71&&code<=77)||code===85||code===86)return '雪'; if(code>=95)return '雷雨'; return '雨'; }
+  function wxBucketIcon(b){ return ({'晴れ':'☀️','晴れ時々曇り':'⛅','曇り':'☁️','雨':'🌧️','雪':'❄️','雷雨':'⛈️'})[b]||'🌡️'; }
+  function renderWeather(series){
+    if(!dom.wxCorrWrap) return;
+    const daily=(series||[]).filter(p=>p.guests!=null);
+    const rainG=[],dryG=[],rainS=[],dryS=[],byBucket={};
+    daily.forEach(p=>{ const w=weatherByDate.get(ymdJst(p.when)); if(!w) return; const rainy=(Number(w.precipitation_mm)||0)>=1;
+      if(rainy){ rainG.push(p.guests); rainS.push(p.sales); } else { dryG.push(p.guests); dryS.push(p.sales); }
+      const b=wxBucket(w.weather_code); (byBucket[b]=byBucket[b]||[]).push(p.guests); });
+    const rA=avg(rainG), dA=avg(dryG), rSa=avg(rainS), dSa=avg(dryS);
+    const ratio=(rA!=null&&dA)?rA/dA:null;
+    dom.wxCorrWrap.innerHTML =
+      '<div class="corr-card hl"><div class="corr-k">雨の日（'+rainG.length+'日）</div><div class="corr-v mono">'+(rA!=null?Math.round(rA):'—')+'<small>人</small>'+(ratio?' <span style="font-size:14px;color:var(--base-tx)">×'+ratio.toFixed(2)+'</span>':'')+'</div><div class="corr-x">平均売上 <b>'+(rSa!=null?yen(rSa):'—')+'</b>'+(ratio?' ・ 雨でない日の <b>'+ratio.toFixed(2)+'倍</b>':'')+'</div></div>'
+      + '<div class="corr-card"><div class="corr-k">雨でない日（'+dryG.length+'日）</div><div class="corr-v mono">'+(dA!=null?Math.round(dA):'—')+'<small>人</small></div><div class="corr-x">平均売上 '+(dSa!=null?yen(dSa):'—')+'（基準）</div></div>';
+    const bks=Object.keys(byBucket).sort((a,b)=>(avg(byBucket[b])||0)-(avg(byBucket[a])||0));
+    const maxB=Math.max.apply(null, bks.map(b=>avg(byBucket[b])||0).concat([1]));
+    dom.wxBreakdown.innerHTML=bks.map(b=>{ const a=avg(byBucket[b]); const r=(dA&&a!=null)?a/dA:null;
+      return '<div class="cb-row"><span class="cbn">'+wxBucketIcon(b)+' '+escapeHtml(b)+'（'+byBucket[b].length+'日）</span><span class="cbt"><i style="width:'+(a/maxB*100).toFixed(0)+'%"></i></span><span class="cbv">'+Math.round(a)+'人'+(r?' ×'+r.toFixed(2):'')+'</span></div>';
+    }).join('');
+    if(rA!=null&&dA!=null&&dA>0){ dom.wxNote.innerHTML='雨の日は客数 '+ratio.toFixed(2)+'倍（'+Math.round(rA)+'人 vs '+Math.round(dA)+'人）。'+(ratio<=0.9?'<b>雨は客足が鈍る</b>傾向。雨予報の日は仕込みを控えめに。':(ratio>=1.1?'雨でも落ちていない傾向。':'雨の影響は限定的。')); }
+    else dom.wxNote.textContent = weather.length ? '雨/晴れのどちらかの客数データが不足しています（蓄積が進むと精度が上がります）。' : '天気データがありません。';
+    // 日別 天気と客数
+    if(!daily.length){ dom.wxDaily.innerHTML=''; dom.wxDailyNote.textContent='客数データがありません。'; return; }
+    dom.wxDaily.innerHTML=daily.slice().reverse().map(p=>{ const w=weatherByDate.get(ymdJst(p.when));
+      const wx=w?(wxIcon(w.weather_code)+' '+escapeHtml(w.summary||'')):'<span class="neg">—</span>';
+      const t=(v)=> (w&&v!=null&&isFinite(Number(v)))?Number(v).toFixed(1):'—';
+      return '<tr><td class="l mono" style="font-weight:600">'+fmtDay(p.when)+'</td><td class="l">'+wx+'</td><td class="mono">'+(w?t(w.temp_max):'—')+'</td><td class="mono">'+(w?t(w.temp_min):'—')+'</td><td class="mono">'+(w&&w.precipitation_mm!=null?Number(w.precipitation_mm).toFixed(1):'—')+'</td><td class="mono">'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td class="mono">'+yen(p.sales)+'</td></tr>';
+    }).join('');
+    dom.wxDailyNote.textContent='東京ドーム周辺の日次天気（Open-Meteo・1日1回更新）。降水1mm以上を「雨の日」と判定。';
   }
 
   // ===== list / range / load =====
@@ -1053,6 +1107,9 @@
       events = Array.isArray(body.events) ? body.events : [];
       eventsByDate = new Map();
       events.forEach(e=>{ const d=String((e&&e.event_date)||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; if(!eventsByDate.has(d)) eventsByDate.set(d,[]); eventsByDate.get(d).push(e); });
+      weather = Array.isArray(body.weather) ? body.weather : [];
+      weatherByDate = new Map();
+      weather.forEach(w=>{ const d=String((w&&w.weather_date)||'').slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(d)) weatherByDate.set(d,w); });
       calY = 0; calM = 0; domeFilter='all'; domeLimit=14;
       reports.sort((a,b)=> String((b&&(b.report_date||b.created_at))||'').localeCompare(String((a&&(a.report_date||a.created_at))||'')));
       setAuthBadge(true);
