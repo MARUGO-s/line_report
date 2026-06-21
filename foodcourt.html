@@ -58,11 +58,49 @@
       --warn-soft: oklch(0.78 0.13 75 / 0.15);
       color-scheme: dark;
     }
+    /* ライトモード（他ページと同じ data-theme 方式・既定はダーク）。 */
+    body[data-theme='light']{
+      color-scheme: light;
+      --bg:        oklch(0.95 0.005 256);
+      --bg2:       oklch(0.98 0.004 256);
+      --surface:   oklch(1 0 0);
+      --surface2:  oklch(0.965 0.004 256);
+      --hover:     oklch(0.93 0.006 256);
+      --line:      oklch(0 0 0 / 0.12);
+      --line-soft: oklch(0 0 0 / 0.07);
+      --tx-1:      oklch(0.25 0.02 258);
+      --tx-2:      oklch(0.42 0.02 258);
+      --tx-3:      oklch(0.54 0.02 258);
+      --accent:    oklch(0.55 0.18 256);
+      --accent-tx: oklch(0.50 0.16 256);
+      --accent-soft: oklch(0.62 0.17 256 / 0.14);
+      --base:      oklch(0.72 0.13 84);
+      --base-tx:   oklch(0.52 0.12 78);
+      --base-soft: oklch(0.80 0.14 85 / 0.20);
+      --base-line: oklch(0.70 0.13 84 / 0.55);
+      --bar:       oklch(0.58 0.14 256);
+      --bar-track: oklch(0 0 0 / 0.08);
+      --good:      oklch(0.52 0.14 158);
+      --good-soft: oklch(0.74 0.15 158 / 0.18);
+      --bad:       oklch(0.55 0.18 25);
+      --bad-soft:  oklch(0.68 0.16 25 / 0.16);
+      --warn-tx:   oklch(0.52 0.12 70);
+      --warn-soft: oklch(0.80 0.13 75 / 0.22);
+    }
+    /* ライト時のみの個別調整（固定色のコントラスト確保）。 */
+    body[data-theme='light'] .hero{ background:linear-gradient(180deg, var(--surface), oklch(0.965 0.006 256)); }
+    body[data-theme='light'] .ev-pill.pro, body[data-theme='light'] .ld-g.pro{ color:oklch(0.45 0.15 256); }
+    body[data-theme='light'] .ev-pill.ama, body[data-theme='light'] .ld-g.ama{ color:oklch(0.42 0.13 150); }
+    body[data-theme='light'] .ev-pill.live, body[data-theme='light'] .ld-g.live{ color:oklch(0.46 0.17 330); }
+    body[data-theme='light'] .ev-pill.other, body[data-theme='light'] .ld-g.other{ color:oklch(0.42 0.02 258); }
+    body[data-theme='light'] .cal-dow .sun{ color:oklch(0.55 0.18 25); }
+    body[data-theme='light'] .cal-dow .sat{ color:oklch(0.50 0.13 250); }
+    .pill.theme-toggle{ cursor:pointer; }
     *{box-sizing:border-box;}
     html,body{margin:0;padding:0;}
     body{background:var(--bg2);color:var(--tx-1);
       font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
-      -webkit-font-smoothing:antialiased;line-height:1.55;}
+      -webkit-font-smoothing:antialiased;line-height:1.55;transition:background .25s ease,color .2s ease;}
     .mono{font-family:ui-monospace,"JetBrains Mono","SFMono-Regular",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
     .num{font-variant-numeric:tabular-nums;}
     button{font-family:inherit;cursor:pointer;}
@@ -294,6 +332,7 @@
         <span class="pill" id="authBadge">未接続</span>
       </div>
     </div>
+    <button id="themeBtn" type="button" class="pill theme-toggle" style="background:var(--surface2);border-color:var(--line);color:var(--tx-2);align-self:flex-start;">ライトモード</button>
   </div>
 
   <!-- auth card -->
@@ -484,6 +523,7 @@
   const DEFAULT_STORE = 'marugoS';
   const $ = (id) => document.getElementById(id);
   const dom = {
+    themeBtn:$('themeBtn'),
     authBadge:$('authBadge'), authCard:$('authCard'), authMsg:$('authMsg'), tokenInput:$('tokenInput'), tokenBtn:$('tokenBtn'),
     reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
     startD:$('startD'), endD:$('endD'), rangeBtn:$('rangeBtn'), dayBtn:$('dayBtn'),
@@ -1183,6 +1223,17 @@
   dom.domeMore.addEventListener('click', ()=>{ domeLimit += 20; renderDomeList(); });
 
   renderSuggestions();
+
+  // ===== テーマ（ライト/ダーク切替・他ページと共通キーで同期） =====
+  const THEME_KEY = 'line_reservation_calendar_theme';
+  function applyTheme(t){
+    const v = (t === 'light') ? 'light' : 'dark';
+    document.body.setAttribute('data-theme', v);
+    if (dom.themeBtn) dom.themeBtn.textContent = (v === 'dark') ? 'ライトモード' : 'ダークモード';
+    try { localStorage.setItem(THEME_KEY, v); } catch(_){}
+  }
+  if (dom.themeBtn) dom.themeBtn.addEventListener('click', ()=> applyTheme(document.body.getAttribute('data-theme')==='light' ? 'dark' : 'light'));
+  applyTheme((function(){ try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch(_){ return 'dark'; } })());
 
   (async function init(){
     captureLockedStoreFromUrl();
