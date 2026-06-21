@@ -322,6 +322,64 @@ function fcDayLabel(r: Record<string, unknown>): string {
   return ''
 }
 
+function fcAvg(a: number[]): number | null { const x = a.filter((v) => v != null && isFinite(v)); return x.length ? x.reduce((s, v) => s + v, 0) / x.length : null }
+function fcMedian(a: number[]): number | null { const x = a.filter((v) => v != null && isFinite(v)).slice().sort((p, q) => p - q); if (!x.length) return null; const m = Math.floor(x.length / 2); return x.length % 2 ? x[m] : (x[m - 1] + x[m]) / 2 }
+function fcDow(dateStr: string): number | null { const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/); if (!m) return null; return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay() }
+const FC_DOW = ['日', '月', '火', '水', '木', '金', '土']
+const fcYen = (v: number) => '¥' + Math.round(v).toLocaleString('ja-JP')
+const fcPct = (v: number) => (v >= 0 ? '+' : '') + (Math.round(v * 10) / 10).toFixed(1) + '%'
+
+// 基準店の日次系列から、傾向・曜日・前日比・順位などを事前計算した分析メモを作る（モデルに渡して“列挙”を防ぐ）。
+function buildBaseInsights(reports: Array<Record<string, unknown>>, baseName: string): string {
+  const rows: Array<{ date: string; dow: number | null; sales: number; guests: number | null; kt: number | null; rank: number; share: number | null }> = []
+  for (const r of reports || []) {
+    const raw = Array.isArray((r as { tenants?: unknown }).tenants) ? (r as { tenants?: unknown[] }).tenants as unknown[] : []
+    const list: Array<{ name: string; sales: number; guests: number | null }> = []
+    for (const t of raw) {
+      const o = (t && typeof t === 'object') ? t as Record<string, unknown> : {}
+      const name = String(o.name ?? '').trim(); const sales = numOrNull(o.sales)
+      if (name && sales != null && sales >= 0) list.push({ name, sales, guests: numOrNull(o.guests) })
+    }
+    if (list.length < 2) continue
+    const base = list.find((t) => normalizeName(t.name) === normalizeName(baseName))
+    if (!base) continue
+    const total = list.reduce((s, t) => s + t.sales, 0)
+    const date = (() => { const rd = String((r as { report_date?: unknown }).report_date ?? '').trim(); if (/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.slice(0, 10); return fcDayLabel(r) })()
+    rows.push({ date, dow: fcDow(date), sales: base.sales, guests: base.guests, kt: (base.guests && base.guests > 0) ? base.sales / base.guests : null, rank: 1 + list.filter((t) => t.sales > base.sales).length, share: total > 0 ? base.sales / total * 100 : null })
+  }
+  rows.sort((a, b) => a.date.localeCompare(b.date))
+  if (!rows.length) return ''
+  const sales = rows.map((r) => r.sales)
+  const guests = rows.map((r) => r.guests).filter((x): x is number => x != null)
+  const kts = rows.map((r) => r.kt).filter((x): x is number => x != null)
+  const ranks = rows.map((r) => r.rank)
+  const maxR = rows.reduce((m, r) => r.sales > m.sales ? r : m, rows[0])
+  const minR = rows.reduce((m, r) => r.sales < m.sales ? r : m, rows[0])
+  const half = Math.floor(rows.length / 2)
+  const firstAvg = half ? fcAvg(rows.slice(0, half).map((r) => r.sales)) : null
+  const lateAvg = half ? fcAvg(rows.slice(rows.length - half).map((r) => r.sales)) : null
+  const ktFirst = half ? fcAvg(rows.slice(0, half).map((r) => r.kt ?? NaN)) : null
+  const ktLate = half ? fcAvg(rows.slice(rows.length - half).map((r) => r.kt ?? NaN)) : null
+  const we = fcAvg(rows.filter((r) => r.dow === 0 || r.dow === 6).map((r) => r.sales))
+  const wd = fcAvg(rows.filter((r) => r.dow != null && r.dow !== 0 && r.dow !== 6).map((r) => r.sales))
+  let up: { d: number; to: typeof rows[0] } | null = null, dn: { d: number; to: typeof rows[0] } | null = null
+  for (let i = 1; i < rows.length; i++) { const d = rows[i].sales - rows[i - 1].sales; if (!up || d > up.d) up = { d, to: rows[i] }; if (!dn || d < dn.d) dn = { d, to: rows[i] } }
+  const dd = (r: { date: string; dow: number | null }) => `${r.date}(${r.dow != null ? FC_DOW[r.dow] : '?'})`
+  const L: string[] = []
+  L.push(`期間: ${rows[0].date}〜${rows[rows.length - 1].date}（${rows.length}日分）`)
+  L.push(`売上: 合計${fcYen(sales.reduce((s, v) => s + v, 0))} / 日平均${fcYen(fcAvg(sales) ?? 0)} / 中央値${fcYen(fcMedian(sales) ?? 0)}`)
+  L.push(`最高売上日: ${dd(maxR)} ${fcYen(maxR.sales)} / 最低売上日: ${dd(minR)} ${fcYen(minR.sales)}`)
+  if (firstAvg && lateAvg) L.push(`傾向(前半→後半の日平均): ${fcYen(firstAvg)}→${fcYen(lateAvg)}（${fcPct((lateAvg / firstAvg - 1) * 100)}＝${lateAvg >= firstAvg ? '上昇' : '下降'}基調）`)
+  if (we && wd) L.push(`曜日差: 土日平均${fcYen(we)} / 平日平均${fcYen(wd)}（土日は平日の${(we / wd).toFixed(2)}倍）`)
+  if (up) L.push(`最大の増加: ${dd(up.to)} ${fcYen(up.to.sales)}（前日比 +${fcYen(up.d)}）`)
+  if (dn) L.push(`最大の減少: ${dd(dn.to)} ${fcYen(dn.to.sales)}（前日比 ${fcYen(dn.d)}）`)
+  if (ranks.length) L.push(`FC内売上順位: 平均${(fcAvg(ranks) ?? 0).toFixed(1)}位 / 最高${Math.min(...ranks)}位・最低${Math.max(...ranks)}位（全${(rows[0] && 11) || 11}店規模）`)
+  if (ktFirst && ktLate) L.push(`客単価(前半→後半の平均): ${fcYen(ktFirst)}→${fcYen(ktLate)}`)
+  if (kts.length) L.push(`客単価レンジ: 平均${fcYen(fcAvg(kts) ?? 0)} / ${fcYen(Math.min(...kts))}〜${fcYen(Math.max(...kts))}`)
+  if (guests.length) L.push(`客数: 日平均${Math.round(fcAvg(guests) ?? 0)}人 / ${Math.min(...guests)}〜${Math.max(...guests)}人`)
+  return L.join('\n')
+}
+
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
 export async function answerFoodCourtQuestion(
   reports: Array<Record<string, unknown>>,
@@ -350,11 +408,18 @@ export async function answerFoodCourtQuestion(
   }
   if (!blocks.length) return 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。'
   const data = blocks.reverse().join('\n\n')
-  const system = `あなたは「${baseName}」（フードコート内の1店舗）の経営アナリストです。次の表は同じフードコート全テナントの日次売上データ（★が基準店=${baseName}、金額は円、客単価=売上÷客数）。ユーザーの質問に、このデータだけを根拠に、日本語で簡潔に、必要な数字を添えて答えてください。データに無いことは「データにありません」と述べ、推測しない。新規オープンのため前年比は無い点に注意し、必要なら蓄積された日々の推移で答える。`
-  const userMsg = `# データ\n${data}\n\n# 質問\n${q}`
+  const insights = buildBaseInsights(reports, baseName)
+  const system = [
+    `あなたは「${baseName}」（フードコート内の1店舗）の優秀な経営アナリストです。`,
+    `与えられた「事前計算サマリー」と「日次生データ」（★が基準店=${baseName}、金額は円、客単価=売上÷客数）だけを根拠に、ユーザーの質問へ日本語で答えます。`,
+    `【最重要・禁止事項】単に「最高は◯日、最低は◯日」と最大値・最小値を列挙するだけの回答は禁止。必ず“分析”にすること。`,
+    `回答には次を、具体的な数字を根拠に盛り込む: ①全体の傾向（上昇/下降/横ばいと、その程度＝前半→後半や前日比）②曜日・週の差（土日と平日など）③変化の要因は「客数」か「客単価」か（どちらが効いているか）④フードコート内での基準店の立ち位置と推移（順位・シェア）⑤次に取るべき打ち手を1〜3個。`,
+    `わかりやすい短い見出し＋箇条書きで、結論を先に。データに無いことは「データにありません」と述べ、憶測しない。新規オープンのため前年比は無いので、自店の日々の推移を基準に語る。`,
+  ].join('\n')
+  const userMsg = `# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  let ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary)
-  if (!ans) ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct')
+  let ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary, 1300)
+  if (!ans) ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1300)
   return ans
 }
 
