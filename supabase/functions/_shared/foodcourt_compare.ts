@@ -4,9 +4,9 @@
 //   通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 
-// フードコートレポートを送ってくる店舗（基準店）。値は基準テナント名。
-export const FOODCOURT_STORE_KEYS: Record<string, { baseTenantName: string }> = {
-  marugoS: { baseTenantName: 'MARUGO S' },
+// フードコートレポートを送ってくる店舗（基準店）。baseTenantName=比較の基準、expectedTenants=想定テナント数(Groq抽出の十分性判定用)。
+export const FOODCOURT_STORE_KEYS: Record<string, { baseTenantName: string; expectedTenants?: number }> = {
+  marugoS: { baseTenantName: 'MARUGO S', expectedTenants: 11 },
 }
 
 // フードコート一覧らしさのマーカー（テナント表＝全テナントの対象/比較 売上・客数が並ぶ）。
@@ -53,6 +53,26 @@ function numOrNull(v: unknown): number | null {
   if (v == null) return null
   const n = Number(String(v).replace(/[^\d.-]/g, ''))
   return Number.isFinite(n) ? Math.round(n) : null
+}
+
+function tenantsFromParsed(parsed: Record<string, unknown> | null): FoodCourtTenant[] | null {
+  const rawList = parsed && Array.isArray(parsed.tenants) ? parsed.tenants : null
+  if (!rawList) return null
+  const tenants: FoodCourtTenant[] = []
+  for (const r of rawList) {
+    const o = (r && typeof r === 'object') ? r as Record<string, unknown> : {}
+    const name = String(o.name ?? '').trim()
+    if (!name) continue
+    tenants.push({
+      name: name.slice(0, 60),
+      code: o.code != null ? String(o.code).replace(/[^\d]/g, '').slice(0, 12) || null : null,
+      sales: numOrNull(o.sales),
+      guests: numOrNull(o.guests),
+      compSales: numOrNull(o.comp_sales),
+      compGuests: numOrNull(o.comp_guests),
+    })
+  }
+  return tenants.length ? tenants : null
 }
 
 const EXTRACT_PROMPT = [
@@ -107,24 +127,51 @@ export async function extractFoodCourtTenants(
     | { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
     | null
   const text = json?.candidates?.[0]?.content?.parts?.map((p) => p?.text ?? '').join('') ?? ''
-  const parsed = parseFirstJson(text)
-  const rawList = parsed && Array.isArray(parsed.tenants) ? parsed.tenants : null
-  if (!rawList) return null
-  const tenants: FoodCourtTenant[] = []
-  for (const r of rawList) {
-    const o = (r && typeof r === 'object') ? r as Record<string, unknown> : {}
-    const name = String(o.name ?? '').trim()
-    if (!name) continue
-    tenants.push({
-      name: name.slice(0, 60),
-      code: o.code != null ? String(o.code).replace(/[^\d]/g, '').slice(0, 12) || null : null,
-      sales: numOrNull(o.sales),
-      guests: numOrNull(o.guests),
-      compSales: numOrNull(o.comp_sales),
-      compGuests: numOrNull(o.comp_guests),
+  return tenantsFromParsed(parseFirstJson(text))
+}
+
+// 安価な Groq(llama-4-scout) で抽出（印字されたクリーンな表向け）。失敗時は呼び出し側で Gemini にフォールバック。
+export async function extractFoodCourtTenantsGroq(
+  bytes: Uint8Array,
+  contentType: string | null,
+  groqApiKey: string,
+  timeoutMs = 25000,
+): Promise<FoodCourtTenant[] | null> {
+  if (!groqApiKey || !bytes || bytes.byteLength <= 0) return null
+  const mime = String(contentType ?? '').trim().toLowerCase()
+  if (!/^image\/(png|jpe?g|webp|gif)$/.test(mime)) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let res: Response
+  try {
+    res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${groqApiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+        max_tokens: 2000,
+        messages: [
+          { role: 'system', content: EXTRACT_PROMPT },
+          { role: 'user', content: [
+            { type: 'text', text: 'このフードコートのテナント一覧表を全行JSONで抽出してください。' },
+            { type: 'image_url', image_url: { url: `data:${mime};base64,${toBase64(bytes)}` } },
+          ] },
+        ],
+      }),
+      signal: controller.signal,
     })
+  } catch (e) {
+    console.error('extractFoodCourtTenantsGroq fetch failed:', e instanceof Error ? e.message : String(e))
+    return null
+  } finally {
+    clearTimeout(timer)
   }
-  return tenants.length ? tenants : null
+  if (!res.ok) { console.error('extractFoodCourtTenantsGroq http error:', res.status); return null }
+  const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }> } | null
+  const content = String(json?.choices?.[0]?.message?.content ?? '')
+  return tenantsFromParsed(parseFirstJson(content))
 }
 
 export type FoodCourtComparison = {
@@ -255,6 +302,7 @@ export async function maybeHandleFoodCourtReport(
     detectText: string
     geminiApiKey: string
     geminiModel: string
+    groqApiKey?: string
     /** 自店レシートとして確信できない画像のとき true＝マーカー不一致でも抽出を試す（検知の取りこぼし防止）。 */
     forceAttempt?: boolean
   },
@@ -262,13 +310,23 @@ export async function maybeHandleFoodCourtReport(
   const cfg = FOODCOURT_STORE_KEYS[String(params.storeKey ?? '')]
   if (!cfg) return { handled: false }
   if (!looksLikeFoodCourtReport(params.detectText) && !params.forceAttempt) return { handled: false }
-  if (!params.geminiApiKey) return { handled: false }
 
-  const tenants = await extractFoodCourtTenants(params.bytes, params.contentType, params.geminiApiKey, params.geminiModel)
-  if (!tenants || tenants.length < 3) return { handled: false } // 表として成立しない → 通常処理へ
+  // Groqで十分とみなす最小テナント数（想定数-1。安価なGroqを優先しつつ取りこぼし時だけGeminiへ）。
+  const minOk = cfg.expectedTenants ? Math.max(5, cfg.expectedTenants - 1) : 5
+  const valid = (ts: FoodCourtTenant[] | null) =>
+    (ts && ts.length >= 3 && computeFoodCourtComparison(ts, cfg.baseTenantName)) ? ts : null
+
+  // 1) まず安価な Groq(llama-4-scout) で抽出（印字されたクリーンな表は読める想定）。
+  let tenants = valid(await extractFoodCourtTenantsGroq(params.bytes, params.contentType, params.groqApiKey ?? ''))
+  // 2) Groqが表として成立しない or テナント数が想定より少ない（読み落とし疑い）→ 高精度な Gemini にフォールバック。
+  if ((!tenants || tenants.length < minOk) && params.geminiApiKey) {
+    const g = valid(await extractFoodCourtTenants(params.bytes, params.contentType, params.geminiApiKey, params.geminiModel))
+    if (g) tenants = g
+  }
+  if (!tenants) return { handled: false } // どちらも成立しない → 通常のレシート処理へ
 
   const cmp = computeFoodCourtComparison(tenants, cfg.baseTenantName)
-  if (!cmp) return { handled: false } // 基準店が見つからない等 → 通常処理へ
+  if (!cmp) return { handled: false }
 
   await saveFoodCourtReport(supabase, {
     storeKey: params.storeKey, roomId: params.roomId, lineMessageId: params.lineMessageId,

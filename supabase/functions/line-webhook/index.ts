@@ -1242,6 +1242,7 @@ async function processReceiptImageEvent(
       detectText: fcDetectText,
       geminiApiKey: resolveGeminiApiKey(),
       geminiModel: receiptGeminiModel,
+      groqApiKey: groqApiKey,
       forceAttempt: !fcOwnReceiptConfident,
     })
     if (fc.handled) {
