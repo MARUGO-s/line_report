@@ -308,7 +308,6 @@
 
   <!-- control bar -->
   <div class="controls" style="margin-top:6px">
-    <div class="ctl"><span class="ctl-k">店舗</span><select class="usel store" id="storeSel"></select></div>
     <div class="ctl"><span class="ctl-k">単日レポート</span><select class="usel report" id="reportSel"></select></div>
     <div class="ctl"><span class="ctl-k">期間（開始）</span><input class="idate" type="date" id="startD"></div>
     <div class="ctl"><span class="ctl-k">期間（終了）</span><input class="idate" type="date" id="endD"></div>
@@ -470,7 +469,7 @@
   const $ = (id) => document.getElementById(id);
   const dom = {
     authBadge:$('authBadge'), authCard:$('authCard'), authMsg:$('authMsg'), tokenInput:$('tokenInput'), tokenBtn:$('tokenBtn'),
-    storeSel:$('storeSel'), reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
+    reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
     startD:$('startD'), endD:$('endD'), rangeBtn:$('rangeBtn'), dayBtn:$('dayBtn'),
     resultArea:$('resultArea'),
     heroLogo:$('heroLogo'), heroName:$('heroName'), heroMeta:$('heroMeta'), heroRanks:$('heroRanks'), heroTotals:$('heroTotals'), kpis:$('kpis'),
@@ -513,6 +512,8 @@
   // ===== auth / API (データ層・据え置き) =====
   function getToken(){ try { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY)||''); } catch(_){ return ''; } }
   function lockedStore(){ try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch(_){ return ''; } }
+  // 店舗はマルゴエス固定（選択UIは廃止）。LINEリンクのロックがあればそれ、無ければ既定。
+  function currentStore(){ return lockedStore() || DEFAULT_STORE; }
   function captureLockedStoreFromUrl(){
     try {
       const p = new URLSearchParams(location.search);
@@ -556,7 +557,7 @@
     dom.qInput.value = question;
     dom.qBtn.disabled = true; dom.qAnswer.style.display='block'; dom.qAnswer.textContent = '考え中…（蓄積データを参照しています）';
     try {
-      const b = await apiPost('/foodcourt/ask', { store_key: dom.storeSel.value || DEFAULT_STORE, question: question });
+      const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question });
       dom.qAnswer.textContent = b.answer || '(回答が空でした)';
     } catch(e){ dom.qAnswer.textContent = (e&&e.message) || '質問に失敗しました。'; }
     finally { dom.qBtn.disabled = false; }
@@ -564,16 +565,6 @@
   function renderSuggestions(){
     dom.qSuggest.innerHTML = SUGGESTED_Q.map(s=>'<button class="qchip">'+escapeHtml(s)+'</button>').join('');
     dom.qSuggest.querySelectorAll('.qchip').forEach(b=>b.addEventListener('click', ()=>{ dom.qInput.value=b.textContent; dom.qInput.focus(); }));
-  }
-  function populateStores(){
-    const locked = lockedStore();
-    const keys = Object.keys(STORE_NAMES);
-    dom.storeSel.innerHTML = '';
-    const add = (k,label) => { const o=document.createElement('option'); o.value=k; o.textContent=label; dom.storeSel.appendChild(o); };
-    if (locked){ add(locked, STORE_NAMES[locked] || locked); dom.storeSel.value = locked; dom.storeSel.disabled = true; return; }
-    if (!keys.length) add(DEFAULT_STORE, STORE_NAMES[DEFAULT_STORE] || 'マルゴエス');
-    keys.forEach(k => add(k, STORE_NAMES[k] || k));
-    dom.storeSel.value = (STORE_NAMES[DEFAULT_STORE] ? DEFAULT_STORE : (keys[0]||DEFAULT_STORE));
   }
   function fmtWhen(r){
     const iso = r.created_at || '';
@@ -1054,7 +1045,7 @@
   }
   async function loadReports(){
     if (!getToken()){ setAuthBadge(false); return; }
-    const store = dom.storeSel.value || DEFAULT_STORE;
+    const store = currentStore();
     dom.loadMsg.className='msg'; dom.loadMsg.textContent='読み込み中…';
     try {
       const body = await apiFetch('/foodcourt/reports?store_key='+encodeURIComponent(store)+'&limit=60');
@@ -1089,7 +1080,6 @@
   dom.qBtn.addEventListener('click', ()=>askQuestion());
   dom.qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') askQuestion(); });
   dom.reloadBtn.addEventListener('click', loadReports);
-  dom.storeSel.addEventListener('change', loadReports);
   dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]){ mode='single'; setModeButtons(); render(reports[i]); } });
   dom.rangeBtn.addEventListener('click', renderRange);
   dom.dayBtn.addEventListener('click', ()=>{ const i=Number(dom.reportSel.value)||0; if(reports[i]){ mode='single'; setModeButtons(); render(reports[i]); } });
@@ -1113,7 +1103,6 @@
 
   (async function init(){
     captureLockedStoreFromUrl();
-    populateStores();
     setModeButtons();
     if (AUTH && AUTH.consumeUrlAuthParams){
       try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' }); } catch(_){}
