@@ -374,7 +374,7 @@
     <div class="ctl"><span class="ctl-k">期間（終了）</span><input class="idate" type="date" id="endD"></div>
     <div class="seg-period">
       <button class="btn ghost" id="rangeBtn">期間で見る</button>
-      <button class="btn primary" id="dayBtn">単日に戻す</button>
+      <button class="btn primary" id="dayBtn">単日</button>
     </div>
     <div class="ctl-grow"></div>
     <button class="btn" id="reloadBtn">更新</button>
@@ -1290,7 +1290,7 @@
     t.classList.add('active');
     document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('show', p.dataset.panel===t.dataset.tab));
     if(t.dataset.tab==='trend') drawTrend(lastSeries);
-    window.scrollTo({top:0, behavior:'smooth'});
+    // タブ切替時の自動スクロールはしない（その場に留まる）。
   });
   dom.domeFilt.addEventListener('click', e=>{
     const b = e.target.closest('.fbtn'); if(!b) return;
