@@ -45,19 +45,26 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `fetch error: ${e instanceof Error ? e.message : String(e)}`, url: scheduleUrl }, 502)
   }
 
+  const debug = ["1", "true", "yes", "on"].includes((url.searchParams.get("debug") ?? "").toLowerCase())
   const text = htmlToText(html).slice(0, MAX_TEXT_CHARS)
   if (text.length < 40) {
     return json({ ok: false, error: "schedule text too short after strip", text_len: text.length }, 502)
   }
 
   // 2) Groq でイベント抽出
-  const events = await extractEvents(text, groqApiKey)
+  const ex = await extractEvents(text, groqApiKey)
+  const events = ex.events
   if (!events || events.length === 0) {
-    return json({ ok: false, error: "no events extracted", text_len: text.length }, 200)
+    return json({
+      ok: false,
+      error: "no events extracted",
+      text_len: text.length,
+      ...(debug || dryRun ? { groq_raw: (ex.raw ?? "").slice(0, 1500), text_sample: text.slice(1900, 3400) } : {}),
+    }, 200)
   }
 
-  if (dryRun) {
-    return json({ ok: true, dry_run: true, extracted: events.length, events }, 200)
+  if (dryRun || debug) {
+    return json({ ok: true, dry_run: true, extracted: events.length, events, ...(debug ? { groq_raw: (ex.raw ?? "").slice(0, 1000) } : {}) }, 200)
   }
 
   // 3) upsert（冪等。主キー event_date+title）
@@ -100,7 +107,7 @@ function htmlToText(html: string): string {
   return t.trim()
 }
 
-async function extractEvents(scheduleText: string, apiKey: string): Promise<ExtractedEvent[] | null> {
+async function extractEvents(scheduleText: string, apiKey: string): Promise<{ events: ExtractedEvent[] | null; raw: string | null }> {
   const system = [
     "あなたは東京ドームのイベント日程表から、日付ごとのイベントを構造化抽出するアシスタントです。",
     "出力は JSON 配列のみ。前後に説明文やコードフェンスを付けないこと。",
@@ -118,10 +125,10 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<Extr
   const primary = (Deno.env.get("GROQ_CHAT_MODEL") || "").trim() || "llama-3.3-70b-versatile"
   let raw = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, primary, 4000)
   if (!raw) raw = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, "meta-llama/llama-4-scout-17b-16e-instruct", 4000)
-  if (!raw) return null
+  if (!raw) return { events: null, raw: null }
 
   const parsed = parseJsonArray(raw)
-  if (!parsed) return null
+  if (!parsed) return { events: null, raw }
 
   const seen = new Set<string>()
   const out: ExtractedEvent[] = []
@@ -139,7 +146,7 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<Extr
     out.push({ event_date: date, title, category })
   }
   out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
-  return out
+  return { events: out, raw }
 }
 
 function normalizeIsoDate(value: unknown): string | null {
