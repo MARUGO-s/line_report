@@ -94,8 +94,14 @@
     <div class="card">
       <div class="controls">
         <div class="fld"><label>店舗</label><select id="storeSel"></select></div>
-        <div class="fld" style="flex:1;min-width:200px"><label>レポート（受信日時）</label><select id="reportSel"></select></div>
+        <div class="fld" style="flex:1;min-width:200px"><label>単日レポート</label><select id="reportSel"></select></div>
         <button id="reloadBtn" class="ghost">更新</button>
+      </div>
+      <div class="controls" style="margin-top:10px;">
+        <div class="fld"><label>期間（開始）</label><input type="date" id="startD"></div>
+        <div class="fld"><label>期間（終了）</label><input type="date" id="endD"></div>
+        <button id="rangeBtn">期間で見る</button>
+        <button id="dayBtn" class="ghost">単日に戻す</button>
       </div>
       <div id="loadMsg" class="msg"></div>
     </div>
@@ -180,6 +186,7 @@
     const dom = {
       authBadge:$('authBadge'), authCard:$('authCard'), authMsg:$('authMsg'), tokenInput:$('tokenInput'), tokenBtn:$('tokenBtn'),
       storeSel:$('storeSel'), reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
+      startD:$('startD'), endD:$('endD'), rangeBtn:$('rangeBtn'), dayBtn:$('dayBtn'),
       resultArea:$('resultArea'), summary:$('summary'), tbody:$('tbody'), bars:$('bars'), analysis:$('analysis'),
       qaCard:$('qaCard'), qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'),
       shareTbody:$('shareTbody'), shareNote:$('shareNote'), ktTbody:$('ktTbody'), posTbody:$('posTbody'),
@@ -192,6 +199,27 @@
     const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
     const pct = (v) => v==null ? '—' : (Math.round(Number(v)*10)/10).toFixed(1) + '%';
     const norm = (s) => String(s||'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
+    const effDate = (r) => { const rd=String((r&&r.report_date)||'').trim(); if(/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.slice(0,10); const m=String((r&&r.created_at)||'').match(/^(\d{4}-\d{2}-\d{2})/); return m?m[1]:''; };
+
+    // 期間内の日次レポートをテナント別に合算し、1つの集計レポートにする（基準店=100比較・各表をこの合計で出す）。
+    function aggregateRange(repList, start, end){
+      const inRange = (repList||[]).filter(r=>{ const d=effDate(r); return d && d>=start && d<=end; });
+      if (!inRange.length) return null;
+      const map = new Map(); // name -> {name, code, sales, guests, compSales, compGuests}
+      inRange.forEach(r=>{
+        (Array.isArray(r.tenants)?r.tenants:[]).forEach(t=>{
+          if (!t || !t.name) return;
+          const k = norm(t.name);
+          const cur = map.get(k) || { name:String(t.name), code:t.code||null, sales:0, guests:0, compSales:0, compGuests:0 };
+          if (t.sales!=null && isFinite(Number(t.sales))) cur.sales += Number(t.sales);
+          if (t.guests!=null && isFinite(Number(t.guests))) cur.guests += Number(t.guests);
+          if (t.compSales!=null && isFinite(Number(t.compSales))) cur.compSales += Number(t.compSales);
+          if (t.compGuests!=null && isFinite(Number(t.compGuests))) cur.compGuests += Number(t.compGuests);
+          map.set(k, cur);
+        });
+      });
+      return { report_date:null, base_tenant_name:(inRange[0].base_tenant_name||'MARUGO S'), tenants:Array.from(map.values()), _days:inRange.length, _rangeReports:inRange };
+    }
 
     function getToken(){ try { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY)||''); } catch(_){ return ''; } }
     function lockedStore(){ try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch(_){ return ''; } }
@@ -322,7 +350,7 @@
     function fmtDay(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; const j=new Date(d.getTime()+9*3600*1000); return (j.getUTCMonth()+1)+'/'+j.getUTCDate(); }
 
     // これらの数字を多角的に分析し、まとめテキストを生成（ルールベース＝確定的・無料）。本日の売上は“自店の履歴”を参照して考察する。
-    function buildAnalysisText(report, allReports){
+    function buildAnalysisText(report, allReports, periodLabel){
       const list = (report.tenants||[]).map(t=>({
         name:String((t&&t.name)||''),
         sales:(t&&t.sales!=null)?Number(t.sales):null,
@@ -355,6 +383,7 @@
       const L = [];
       const yK = v=>'¥'+nf.format(Math.round(v));
       const p1 = v=>v==null?'—':(Math.round(v*10)/10).toFixed(1)+'%';
+      if (periodLabel){ L.push('【期間】'+periodLabel+'　※この期間の合計で分析'); L.push(''); }
 
       // 総評
       const volWord = (salesRank<=Math.ceil(n/3))?'上位':(salesRank<=Math.ceil(n*2/3)?'中位':'下位');
@@ -391,35 +420,44 @@
       if (byKt.length) L.push(`FC内 最高 ${byKt[0].name} ${yK(byKt[0].kt)}／最低 ${byKt[byKt.length-1].name} ${yK(byKt[byKt.length-1].kt)}。`);
       L.push('');
 
-      // 履歴・推移（自店）。新規オープンで前年対比が無いため、これが本日の売上を見る基準。
-      L.push('【履歴・推移（自店が基準）】');
-      L.push('※新規オープンのため前年対比はありません。毎日の蓄積（自店の履歴）を基準に本日を評価します。');
+      // 推移（単日=この日 vs 履歴／期間=期間内の推移）。新規オープンで前年対比は無い。
       const series = baseSeriesFromReports(allReports, baseName);
-      const selWhen = String(report.created_at||'');
-      let selIdx = series.findIndex(p=>p.when===selWhen);
-      if (selIdx<0) selIdx = series.length-1; // 一致しなければ最新を本日扱い
-      const past = series.slice(0, Math.max(0, selIdx)); // 本日より前
-      if (!series.length){
-        L.push('履歴がまだありません。');
-      } else if (!past.length){
-        L.push(`蓄積 ${series.length}日目（本日が最古のデータ）。履歴比較は明日以降、日数が増えるほど精度が上がります。`);
-      } else {
-        const pastSalesAvg = avg(past.map(p=>p.sales));
-        const pastKtAvg = avg(past.map(p=>p.kt));
-        const pastRankAvg = avg(past.map(p=>p.salesRank));
-        const prev = past[past.length-1];
-        const allSales = series.map(p=>p.sales);
-        const best = Math.max.apply(null, allSales), worst = Math.min.apply(null, allSales);
-        L.push(`蓄積 ${series.length}日分。本日の売上 ${yK(base.sales)} は、自店の過去平均 ${yK(pastSalesAvg)} の ${p1(relPct(base.sales,pastSalesAvg))}（${base.sales>=pastSalesAvg?'平均以上':'平均以下'}）。`);
-        L.push(`前回(${fmtDay(prev.when)}) ${yK(prev.sales)} との差 ${yK(base.sales-prev.sales)}（${p1(prev.sales>0?(base.sales/prev.sales-1)*100:null)}）＝${base.sales>=prev.sales?'増':'減'}。`);
-        L.push(`期間中の最高 ${yK(best)}／最低 ${yK(worst)}（本日は${base.sales>=best?'最高':base.sales<=worst?'最低':'中間'}）。`);
-        if (baseKt!=null && pastKtAvg!=null) L.push(`客単価 ${yK(baseKt)} は過去平均 ${yK(pastKtAvg)} の ${p1(relPct(baseKt,pastKtAvg))}。`);
-        if (pastRankAvg!=null) L.push(`FC内 売上順位は本日 ${salesRank}位、過去平均 ${(Math.round(pastRankAvg*10)/10).toFixed(1)}位（${salesRank<=pastRankAvg?'改善/同等':'やや後退'}）。`);
-        // 直近トレンド（後半3日 vs 前半）
-        if (series.length>=4){
+      if (periodLabel){
+        L.push('【期間内の推移】');
+        if (series.length<2){ L.push('期間内の日数が少なく、推移は出せません。'); }
+        else {
           const half=Math.floor(series.length/2);
           const early=avg(series.slice(0,half).map(p=>p.sales)), late=avg(series.slice(series.length-half).map(p=>p.sales));
-          if (early && late) L.push(`全体トレンド：直近平均 ${yK(late)} は前半平均 ${yK(early)} の ${p1(relPct(late,early))}（${late>=early?'上向き':'下向き'}）。`);
+          const best=series.reduce((m,p)=>p.sales>m.sales?p:m, series[0]), worst=series.reduce((m,p)=>p.sales<m.sales?p:m, series[0]);
+          L.push(`対象 ${series.length}日。日平均売上 ${yK(avg(series.map(p=>p.sales)))}。`);
+          if (early&&late) L.push(`前半平均 ${yK(early)} → 後半平均 ${yK(late)}（${p1(relPct(late,early))}＝${late>=early?'上昇':'下降'}基調）。`);
+          L.push(`期間内 最高 ${fmtDay(best.when)} ${yK(best.sales)}／最低 ${fmtDay(worst.when)} ${yK(worst.sales)}。`);
+          const avgRank=avg(series.map(p=>p.salesRank));
+          if (avgRank!=null) L.push(`FC内売上順位は期間中 平均 ${(Math.round(avgRank*10)/10).toFixed(1)}位。`);
+        }
+      } else {
+        L.push('【履歴・推移（自店が基準）】');
+        L.push('※新規オープンのため前年対比はありません。毎日の蓄積（自店の履歴）を基準に評価します。');
+        const selWhen = String(report.report_date||report.created_at||'');
+        let selIdx = series.findIndex(p=>p.when===selWhen);
+        if (selIdx<0) selIdx = series.length-1;
+        const past = series.slice(0, Math.max(0, selIdx));
+        if (!series.length){
+          L.push('履歴がまだありません。');
+        } else if (!past.length){
+          L.push(`蓄積 ${series.length}日目（この日が最古のデータ）。履歴比較は日数が増えるほど精度が上がります。`);
+        } else {
+          const pastSalesAvg = avg(past.map(p=>p.sales));
+          const pastKtAvg = avg(past.map(p=>p.kt));
+          const pastRankAvg = avg(past.map(p=>p.salesRank));
+          const prev = past[past.length-1];
+          const allSales = series.map(p=>p.sales);
+          const best = Math.max.apply(null, allSales), worst = Math.min.apply(null, allSales);
+          L.push(`蓄積 ${series.length}日分。この日の売上 ${yK(base.sales)} は、自店の過去平均 ${yK(pastSalesAvg)} の ${p1(relPct(base.sales,pastSalesAvg))}（${base.sales>=pastSalesAvg?'平均以上':'平均以下'}）。`);
+          L.push(`前回(${fmtDay(prev.when)}) ${yK(prev.sales)} との差 ${yK(base.sales-prev.sales)}（${p1(prev.sales>0?(base.sales/prev.sales-1)*100:null)}）＝${base.sales>=prev.sales?'増':'減'}。`);
+          L.push(`期間中の最高 ${yK(best)}／最低 ${yK(worst)}。`);
+          if (baseKt!=null && pastKtAvg!=null) L.push(`客単価 ${yK(baseKt)} は過去平均 ${yK(pastKtAvg)} の ${p1(relPct(baseKt,pastKtAvg))}。`);
+          if (pastRankAvg!=null) L.push(`FC内 売上順位は ${salesRank}位、過去平均 ${(Math.round(pastRankAvg*10)/10).toFixed(1)}位（${salesRank<=pastRankAvg?'改善/同等':'やや後退'}）。`);
         }
       }
       L.push('');
@@ -455,7 +493,7 @@
       return L.join('\n');
     }
 
-    function renderExtraTables(c, report){
+    function renderExtraTables(c, report, seriesReports){
       const units=c.rows.map(r=>r.unit).filter(x=>x!=null), guestsArr=c.rows.map(r=>r.guests).filter(x=>x!=null), salesArr=c.rows.map(r=>r.sales);
       const avgKt=avg(units), medKt=median(units), avgGuests=avg(guestsArr), medGuests=median(guestsArr), avgSales=avg(salesArr), medSales=median(salesArr);
 
@@ -494,8 +532,8 @@
         const cell=rr=>rr?(fmt(rr)+'（'+escapeHtml(rr.name)+'）'):'—';
         return '<tr><td class="name">'+label+'</td><td>'+fnum(a)+'</td><td>'+fnum(m)+'</td><td class="name">'+cell(hi)+'</td><td class="name">'+cell(lo)+'</td></tr>'; }).join('');
 
-      // 5) 基準店の日次推移（蓄積データ）
-      const series = baseSeriesFromReports(reports, c.baseName);
+      // 5) 基準店の日次推移（蓄積データ／期間指定時はその範囲）
+      const series = baseSeriesFromReports(seriesReports || reports, c.baseName);
       if (!series.length){ dom.trendTbody.innerHTML=''; dom.trendNote.textContent='履歴なし。'; }
       else {
         dom.trendTbody.innerHTML = series.map(p=>'<tr><td class="name">'+fmtDay(p.when)+'</td><td>'+yen(p.sales)+'</td><td>'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td>'+(p.kt!=null?yen(p.kt):'—')+'</td><td>'+p.salesRank+'位</td><td>'+pct(p.share)+'</td></tr>').join('');
@@ -503,12 +541,15 @@
       }
     }
 
-    function render(report){
+    function render(report, opts){
+      opts = opts || {};
+      const seriesReports = opts.seriesReports || reports;
+      const periodLabel = opts.periodLabel || null;
       const c = computeComparison(report);
-      if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポートは比較できませんでした（基準店が見つからない/データ不足）。'; return; }
-      dom.loadMsg.textContent='';
+      if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポート/期間は比較できませんでした（基準店が見つからない/データ不足）。'; return; }
+      if (!periodLabel) dom.loadMsg.textContent='';
       dom.resultArea.hidden = false;
-      try { dom.analysis.textContent = buildAnalysisText(report, reports); } catch(e){ dom.analysis.textContent = '分析テキストの生成に失敗しました。'; }
+      try { dom.analysis.textContent = buildAnalysisText(report, seriesReports, periodLabel); } catch(e){ dom.analysis.textContent = '分析テキストの生成に失敗しました。'; }
       const cards = [
         ['基準店', c.baseName],
         ['合計売上（FC全体）', yen(c.total)],
@@ -537,7 +578,7 @@
           + '<div class="bar-val">'+pct(r.salesRatio)+'</div></div>';
       }).join('');
 
-      try { renderExtraTables(c, report); } catch(e){ /* 追加表の失敗は本体表示を妨げない */ }
+      try { renderExtraTables(c, report, seriesReports); } catch(e){ /* 追加表の失敗は本体表示を妨げない */ }
     }
 
     function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
@@ -547,7 +588,23 @@
       if (!reports.length){ const o=document.createElement('option'); o.textContent='（データなし）'; o.value=''; dom.reportSel.appendChild(o); dom.resultArea.hidden=true; dom.loadMsg.textContent='このフードコート画像のレポートはまだありません。LINEで「テナント一覧」画像を送ると貯まります。'; return; }
       reports.forEach((r,i)=>{ const o=document.createElement('option'); o.value=String(i); o.textContent=fmtWhen(r); dom.reportSel.appendChild(o); });
       dom.reportSel.value='0';
+      // 期間入力の範囲・既定を蓄積データの最小〜最大日に設定。
+      const ds = reports.map(effDate).filter(Boolean).sort();
+      if (ds.length){ const lo=ds[0], hi=ds[ds.length-1];
+        dom.startD.min=lo; dom.startD.max=hi; dom.endD.min=lo; dom.endD.max=hi;
+        if(!dom.startD.value) dom.startD.value=lo; if(!dom.endD.value) dom.endD.value=hi;
+      }
       render(reports[0]);
+    }
+
+    function renderRange(){
+      const s=String(dom.startD.value||'').trim(), e=String(dom.endD.value||'').trim();
+      if(!s||!e){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent='開始日と終了日を指定してください。'; return; }
+      const start = s<=e?s:e, end = s<=e?e:s;
+      const agg = aggregateRange(reports, start, end);
+      if(!agg || !agg.tenants.length){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent='指定期間にデータがありません。'; return; }
+      dom.loadMsg.className='msg'; dom.loadMsg.textContent='期間 '+start+'〜'+end+'（'+agg._days+'日）の合計で表示中。';
+      render(agg, { seriesReports: agg._rangeReports, periodLabel: start+'〜'+end });
     }
 
     async function loadReports(){
@@ -587,6 +644,8 @@
     dom.reloadBtn.addEventListener('click', loadReports);
     dom.storeSel.addEventListener('change', loadReports);
     dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]) render(reports[i]); });
+    dom.rangeBtn.addEventListener('click', renderRange);
+    dom.dayBtn.addEventListener('click', ()=>{ const i=Number(dom.reportSel.value)||0; if(reports[i]) render(reports[i]); });
 
     (async function init(){
       captureLockedStoreFromUrl();
