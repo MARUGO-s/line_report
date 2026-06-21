@@ -271,19 +271,25 @@
     .cal-dow span{font-size:11.5px;font-weight:600;color:var(--tx-2);text-align:center;padding:7px 0;}
     .cal-dow .sun{color:oklch(0.72 0.13 25);}
     .cal-dow .sat{color:oklch(0.72 0.11 250);}
-    .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
-    .cell{min-height:74px;border-radius:9px;border:1px solid var(--line-soft);background:var(--bg);padding:6px 7px;display:flex;flex-direction:column;gap:3px;}
+    .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;}
+    .cell{min-width:0;min-height:74px;border-radius:9px;border:1px solid var(--line-soft);background:var(--bg);padding:6px 7px;display:flex;flex-direction:column;gap:3px;overflow:hidden;}
     .cell.empty{background:transparent;border-color:transparent;}
     .cell .cd{font-size:11.5px;font-weight:700;color:var(--tx-2);}
     .cell.today{border-color:var(--base-line);box-shadow:0 0 0 1px var(--base-line);}
     .cell.today .cd{color:var(--base-tx);}
-    .ev-pill{font-size:10px;line-height:1.3;padding:2px 5px;border-radius:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:2px solid;}
+    .ev-pill{display:block;max-width:100%;box-sizing:border-box;font-size:10px;line-height:1.3;padding:2px 5px;border-radius:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:2px solid;}
     .ev-pill.pro{background:oklch(0.62 0.13 256 / .16);border-color:oklch(0.66 0.13 256);color:oklch(0.82 0.09 256);}
     .ev-pill.ama{background:oklch(0.72 0.13 140 / .16);border-color:oklch(0.7 0.13 140);color:oklch(0.84 0.1 140);}
     .ev-pill.live{background:oklch(0.66 0.16 330 / .16);border-color:oklch(0.68 0.15 330);color:oklch(0.84 0.11 330);}
     .ev-pill.other{background:oklch(0.6 0.02 258 / .25);border-color:oklch(0.6 0.02 258);color:var(--tx-2);}
-    .cell .gc{font-size:10.5px;color:var(--tx-3);margin-top:auto;}
+    .cell .gc{font-size:10.5px;color:var(--tx-3);margin-top:auto;white-space:nowrap;}
     .cell .gc b{color:var(--base-tx);}
+    /* 狭幅カレンダー: 長いタイトルの代わりにジャンル色バーを表示 */
+    .ev-bar{display:none;height:5px;border-radius:3px;}
+    .ev-bar.pro{background:oklch(0.66 0.13 256);}
+    .ev-bar.ama{background:oklch(0.70 0.13 140);}
+    .ev-bar.live{background:oklch(0.68 0.15 330);}
+    .ev-bar.other{background:oklch(0.60 0.02 258);}
 
     .filt{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px;}
     .fbtn{font-size:12.5px;font-weight:600;color:var(--tx-2);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:7px 14px;display:inline-flex;align-items:center;gap:6px;}
@@ -316,6 +322,22 @@
       .hero{padding:18px;}
       .controls .ctl{flex:1 1 100%;}
       .controls .usel,.controls .idate{width:100%;}
+    }
+    /* カレンダーの狭幅対応 */
+    @media (max-width:720px){
+      .cal-grid{gap:4px;}
+      .cal-dow span{font-size:10px;padding:5px 0;}
+      .cell{min-height:58px;padding:5px 4px;gap:3px;}
+      .cell .cd{font-size:11px;}
+      .ev-pill{display:none;}        /* 長いタイトルは隠す */
+      .ev-bar{display:block;}        /* 代わりにジャンル色バー */
+      .cell .gc{font-size:10px;}
+    }
+    @media (max-width:430px){
+      .cell{min-height:50px;padding:4px 3px;}
+      .cell .cd{font-size:10px;}
+      .cell .gc{font-size:9px;}
+      .cal-dow span{font-size:9px;}
     }
   </style>
 </head>
@@ -1098,7 +1120,8 @@
     for(let d=1;d<=days;d++){
       const ds=calY+'-'+String(calM).padStart(2,'0')+'-'+String(d).padStart(2,'0');
       const hit=(eventsByDate.get(ds)||[])[0]; const today=ds===todayJ;
-      const pill=hit?'<span class="ev-pill '+catSlug(hit.category)+'" title="'+escapeHtml(hit.title||'')+'">'+escapeHtml(shorten(hit.title,16))+'</span>':'';
+      const gcls=hit?catSlug(hit.category):'';
+      const pill=hit?'<span class="ev-pill '+gcls+'" title="'+escapeHtml(hit.title||'')+'">'+escapeHtml(shorten(hit.title,16))+'</span><span class="ev-bar '+gcls+'"></span>':'';
       const g=guestsByDate.has(ds)?'<span class="gc">👥 <b>'+nf.format(guestsByDate.get(ds))+'</b></span>':'';
       html+='<div class="cell'+(today?' today':'')+'"><span class="cd">'+d+'</span>'+pill+g+'</div>';
     }
