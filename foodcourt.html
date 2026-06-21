@@ -26,851 +26,1102 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
-  <meta name="theme-color" content="#0b2035">
+  <meta name="theme-color" content="#15171d">
   <title>フードコート内 売上比較</title>
   <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
   <style>
     :root{
-      --bg:#0b2035; --panel:#0f2942; --panel2:#13314e; --line:rgba(255,255,255,.12);
-      --text:#eaf1f8; --muted:#9fb3c8; --accent:#3aa0ff; --base:#ffcf5c; --ok:#2bd07a; --warn:#ffb020;
+      --bg:        oklch(0.16 0.014 256);
+      --bg2:       oklch(0.135 0.012 256);
+      --surface:   oklch(0.215 0.017 258);
+      --surface2:  oklch(0.255 0.019 258);
+      --hover:     oklch(0.29 0.021 258);
+      --line:      oklch(1 0 0 / 0.08);
+      --line-soft: oklch(1 0 0 / 0.05);
+      --tx-1:      oklch(0.97 0 0);
+      --tx-2:      oklch(0.75 0.012 258);
+      --tx-3:      oklch(0.57 0.014 258);
+      --accent:    oklch(0.62 0.17 256);
+      --accent-tx: oklch(0.76 0.13 256);
+      --accent-soft: oklch(0.62 0.17 256 / 0.16);
+      --base:      oklch(0.80 0.14 85);
+      --base-tx:   oklch(0.84 0.13 85);
+      --base-soft: oklch(0.80 0.14 85 / 0.16);
+      --base-line: oklch(0.80 0.14 85 / 0.5);
+      --bar:       oklch(0.66 0.11 256);
+      --bar-track: oklch(1 0 0 / 0.06);
+      --good:      oklch(0.74 0.15 158);
+      --good-soft: oklch(0.74 0.15 158 / 0.16);
+      --bad:       oklch(0.68 0.16 25);
+      --bad-soft:  oklch(0.68 0.16 25 / 0.15);
+      --warn-tx:   oklch(0.82 0.13 75);
+      --warn-soft: oklch(0.78 0.13 75 / 0.15);
+      color-scheme: dark;
     }
-    *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;line-height:1.5}
-    .wrap{max-width:980px;margin:0 auto;padding:18px 16px 60px}
-    .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
-    .head h1{font-size:20px;font-weight:600;margin:0}
-    .badge{font-size:12px;padding:2px 8px;border-radius:8px}
-    .badge.test{background:rgba(255,176,32,.16);color:var(--warn)}
-    .pill{font-size:12px;padding:2px 10px;border-radius:999px;background:rgba(255,255,255,.08);color:var(--muted)}
-    .pill.ok{background:rgba(43,208,122,.16);color:var(--ok)}
-    .sub{color:var(--muted);font-size:13px;margin:2px 0 16px}
-    .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
-    .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-    .fld{display:flex;flex-direction:column;gap:4px}
-    .fld label{font-size:12px;color:var(--muted)}
-    select,input,button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-height:38px}
-    button{cursor:pointer;background:var(--accent);border-color:transparent;color:#04243f;font-weight:600}
-    button.ghost{background:var(--panel2);color:var(--text);font-weight:500}
-    .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-    .metric{background:var(--panel2);border-radius:10px;padding:10px 12px}
-    .metric .l{font-size:12px;color:var(--muted)}
-    .metric .v{font-size:20px;font-weight:600;margin-top:2px}
-    table{width:100%;border-collapse:collapse;font-size:13px}
-    th,td{padding:7px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
-    th{color:var(--muted);font-weight:500;position:sticky;top:0}
-    td.name,th.name{text-align:left;white-space:normal}
-    tr.base td{background:rgba(255,207,92,.12);font-weight:600}
-    tr.evt-past td{opacity:.5}
-    .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
-    .cal-h{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
-    .cal-h.sun{color:#e06b6b}.cal-h.sat{color:#6ba8e0}
-    .cal-cell{min-height:76px;border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--panel2);overflow:hidden}
-    .cal-cell.empty{background:transparent;border-color:transparent}
-    .cal-cell.today{outline:2px solid var(--accent);outline-offset:-2px}
-    .cal-cell.ev-pro{background:rgba(91,160,224,.16)}
-    .cal-cell.ev-ama{background:rgba(112,200,140,.16)}
-    .cal-cell.ev-live{background:rgba(224,120,180,.16)}
-    .cal-cell.ev-other{background:rgba(170,170,170,.16)}
-    .cal-d{font-size:11px;color:var(--muted)}
-    .cal-d.sun{color:#e06b6b}.cal-d.sat{color:#6ba8e0}
-    .cal-ev{font-size:10px;line-height:1.3;margin-top:2px;word-break:break-word}
-    .cal-g{font-size:10px;color:var(--base);margin-top:2px}
-    @media(max-width:640px){ .cal-cell{min-height:56px;padding:2px} .cal-ev{font-size:9px} .cal-g{font-size:9px} }
-    .bar-row{display:flex;align-items:center;gap:8px;margin:6px 0}
-    .bar-name{flex:0 0 150px;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .bar-track{flex:1;background:rgba(255,255,255,.06);border-radius:6px;height:18px;position:relative;overflow:hidden}
-    .bar-fill{height:100%;border-radius:6px;background:var(--muted)}
-    .bar-fill.base{background:var(--base)}
-    .bar-val{flex:0 0 64px;text-align:right;font-size:12px;color:var(--muted)}
-    .msg{font-size:13px;margin-top:8px}
-    .msg.err{color:#ff8a8a}
-    .note{color:var(--muted);font-size:12px;margin-top:10px}
-    .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-    /* スマホ: 表を横スクロールではなくカード型（縦積み・項目名つき）にして全項目を読めるようにする */
-    @media(max-width:640px){
-      .wrap{padding:12px 10px 56px}
-      .head h1{font-size:18px}
-      .controls{gap:8px}
-      .fld{flex:1 1 100%;min-width:0}
-      .fld select,.fld input{width:100%}
-      #rangeBtn,#dayBtn,#reloadBtn{flex:1 1 auto}
-      .summary{grid-template-columns:1fr 1fr}
-      .tbl-wrap{overflow-x:visible}
-      .tbl-wrap table{display:block;width:100%;min-width:0!important;font-size:13px}
-      .tbl-wrap thead{position:absolute;left:-9999px;height:0;overflow:hidden}
-      .tbl-wrap tbody{display:block}
-      .tbl-wrap tbody tr{display:block;border:0.5px solid var(--line);border-radius:10px;margin:0 0 10px;padding:6px 12px;background:var(--panel2)}
-      .tbl-wrap tbody tr.base{background:rgba(255,207,92,.14)}
-      .tbl-wrap tbody td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;text-align:right;border:0;border-bottom:0.5px solid rgba(255,255,255,.06);padding:6px 0;white-space:normal;word-break:break-word}
-      .tbl-wrap tbody tr td:last-child{border-bottom:0}
-      .tbl-wrap tbody td::before{content:attr(data-label);color:var(--muted);font-weight:500;text-align:left;flex:0 0 40%}
-      .tbl-wrap tbody td.name{font-weight:600}
-      .bar-name{flex-basis:84px;font-size:11px}
-      .bar-val{flex-basis:54px}
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;}
+    body{background:var(--bg2);color:var(--tx-1);
+      font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+      -webkit-font-smoothing:antialiased;line-height:1.55;}
+    .mono{font-family:ui-monospace,"JetBrains Mono","SFMono-Regular",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
+    .num{font-variant-numeric:tabular-nums;}
+    button{font-family:inherit;cursor:pointer;}
+    .wrap{max-width:1160px;margin:0 auto;padding:0 22px 80px;}
+
+    .phead{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:30px 0 18px;}
+    .phead-l{min-width:0;}
+    .ptitle{display:flex;align-items:center;gap:11px;font-size:23px;font-weight:700;letter-spacing:.01em;}
+    .ptitle .em{font-size:24px;}
+    .psub{font-size:13px;color:var(--tx-3);margin-top:6px;}
+    .badges{display:flex;gap:8px;align-items:center;margin-top:11px;flex-wrap:wrap;}
+    .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;border-radius:999px;padding:4px 11px;border:1px solid var(--line);color:var(--tx-2);}
+    .pill.beta{color:var(--warn-tx);background:var(--warn-soft);border-color:transparent;}
+    .pill.live{color:var(--good);background:var(--good-soft);border-color:transparent;}
+    .pill.live .dot{width:7px;height:7px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 var(--good);animation:pulse 2.4s infinite;}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 oklch(0.74 0.15 158 / .5);}70%{box-shadow:0 0 0 6px transparent;}100%{box-shadow:0 0 0 0 transparent;}}
+
+    .controls{background:var(--surface);border:1px solid var(--line-soft);border-radius:15px;padding:15px 16px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;}
+    .ctl{display:flex;flex-direction:column;gap:6px;}
+    .ctl-k{font-size:11px;font-weight:600;color:var(--tx-3);letter-spacing:.03em;}
+    .usel,.idate{appearance:none;font-family:inherit;font-size:13.5px;color:var(--tx-1);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 12px;}
+    .usel{padding-right:32px;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23889' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;}
+    .usel.store{min-width:180px;font-weight:600;}
+    .usel.report{min-width:230px;}
+    .usel:focus,.idate:focus{outline:none;border-color:var(--accent);}
+    .ctl-grow{flex:1;min-width:80px;}
+    .btn{font-size:13px;font-weight:600;border-radius:10px;padding:9px 16px;border:1px solid var(--line);background:var(--surface2);color:var(--tx-1);transition:background .14s;}
+    .btn:hover{background:var(--hover);}
+    .btn.primary{background:var(--accent);border-color:transparent;color:#fff;}
+    .btn.primary:hover{filter:brightness(1.08);}
+    .btn.ghost{background:transparent;}
+    .btn:disabled{opacity:.5;cursor:default;}
+    .seg-period{display:inline-flex;gap:6px;}
+    .msg{font-size:13px;margin-top:10px;color:var(--tx-2);}
+    .msg.err{color:var(--bad);}
+
+    .hero{margin-top:18px;background:linear-gradient(180deg, var(--surface), oklch(0.19 0.016 258));border:1px solid var(--line-soft);border-radius:18px;padding:22px 24px;}
+    .hero-top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
+    .hero-store{display:flex;align-items:center;gap:13px;}
+    .hero-logo{width:46px;height:46px;border-radius:12px;background:var(--base-soft);color:var(--base-tx);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;border:1px solid var(--base-line);}
+    .hero-name{font-size:19px;font-weight:700;}
+    .hero-name .tag{font-size:11px;font-weight:600;color:var(--base-tx);background:var(--base-soft);border-radius:6px;padding:2px 8px;margin-left:9px;vertical-align:middle;}
+    .hero-meta{font-size:12.5px;color:var(--tx-3);margin-top:2px;}
+    .hero-rank{text-align:right;}
+    .hero-rank .rk{font-size:13px;color:var(--tx-2);}
+    .hero-rank .rk b{font-size:15px;color:var(--tx-1);font-weight:700;}
+    .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;}
+    .kpi{background:var(--bg);border:1px solid var(--line-soft);border-radius:13px;padding:15px 16px;}
+    .kpi-k{font-size:12px;color:var(--tx-3);font-weight:500;display:flex;align-items:center;gap:6px;}
+    .kpi-v{font-size:25px;font-weight:700;margin-top:6px;letter-spacing:-.01em;}
+    .kpi-v small{font-size:14px;font-weight:600;color:var(--tx-2);margin-left:1px;}
+    .kpi-sub{font-size:11.5px;color:var(--tx-3);margin-top:6px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+    .vsbar{height:5px;border-radius:3px;background:var(--bar-track);overflow:hidden;margin-top:9px;position:relative;}
+    .vsbar > i{position:absolute;inset:0 auto 0 0;border-radius:3px;background:var(--bar);}
+    .vsbar .mid{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--tx-3);opacity:.55;}
+    .rk-chip{font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;}
+    .rk-chip.mid{color:var(--tx-2);background:var(--surface2);}
+    .rk-chip.up{color:var(--good);background:var(--good-soft);}
+    .rk-chip.down{color:var(--bad);background:var(--bad-soft);}
+
+    .tabs{position:sticky;top:0;z-index:20;margin:22px 0 0;padding:10px 0 0;background:linear-gradient(180deg, var(--bg2) 72%, transparent);}
+    .tabrow{display:flex;gap:5px;background:var(--surface);border:1px solid var(--line-soft);border-radius:13px;padding:5px;overflow-x:auto;}
+    .tab{flex:1;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--tx-2);background:transparent;border:0;border-radius:9px;padding:10px 14px;display:flex;align-items:center;justify-content:center;gap:7px;}
+    .tab:hover{color:var(--tx-1);background:var(--surface2);}
+    .tab.active{color:#fff;background:var(--accent);}
+    .tab .em{font-size:14px;}
+    .panel{display:none;animation:fade .25s ease;}
+    .panel.show{display:block;}
+    @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+
+    .card{background:var(--surface);border:1px solid var(--line-soft);border-radius:16px;padding:20px 22px;margin-top:18px;}
+    .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap;}
+    .card-t{font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:9px;}
+    .card-t .em{font-size:16px;}
+    .card-note{font-size:12px;color:var(--tx-3);margin-top:10px;}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px;}
+
+    .tbl{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;}
+    .tbl th{font-size:11.5px;font-weight:600;color:var(--tx-3);text-align:right;padding:0 10px 9px;border-bottom:1px solid var(--line);white-space:nowrap;}
+    .tbl th:first-child,.tbl th.l{text-align:left;}
+    .tbl td{padding:11px 10px;border-bottom:1px solid var(--line-soft);text-align:right;white-space:nowrap;}
+    .tbl td:first-child,.tbl td.l{text-align:left;}
+    .tbl tr:last-child td{border-bottom:0;}
+    .tbl tr.base td{background:var(--base-soft);}
+    .tbl tr.base td:first-child{border-radius:9px 0 0 9px;}
+    .tbl tr.base td:last-child{border-radius:0 9px 9px 0;}
+    .tbl tr.base .nm{color:var(--base-tx);font-weight:700;}
+    .rkno{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;font-size:11.5px;font-weight:700;color:var(--tx-2);background:var(--surface2);margin-right:9px;}
+    .tbl tr.base .rkno{color:var(--base);background:var(--base-soft);}
+    .top3 .rkno{color:var(--accent-tx);background:var(--accent-soft);}
+    .nm{font-weight:500;}
+    .pos{color:var(--good);}
+    .neg{color:var(--tx-3);}
+
+    .cellbar{display:flex;align-items:center;gap:10px;justify-content:flex-end;}
+    .cellbar .track{flex:1;max-width:160px;height:7px;border-radius:4px;background:var(--bar-track);overflow:hidden;}
+    .cellbar .track > i{display:block;height:100%;border-radius:4px;background:var(--bar);}
+    .cellbar.base-bar .track > i{background:var(--base);}
+    .cellbar .pc{min-width:54px;text-align:right;font-weight:600;}
+
+    .dist{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-top:14px;}
+    .dcard{background:var(--bg);border:1px solid var(--line-soft);border-radius:12px;padding:14px 15px;}
+    .dcard-k{font-size:12px;color:var(--tx-3);font-weight:600;}
+    .dcard-row{display:flex;justify-content:space-between;font-size:12.5px;margin-top:9px;}
+    .dcard-row .lab{color:var(--tx-3);}
+    .dcard-row .val{font-weight:600;}
+    .dcard-row.base-row .val{color:var(--base-tx);}
+
+    .clsrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--line-soft);}
+    .clsrow:last-child{border-bottom:0;}
+    .cls-name{font-size:13.5px;font-weight:500;}
+    .cls-flags{display:flex;align-items:center;gap:8px;}
+    .flag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--tx-3);}
+    .flag .mk{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;}
+    .flag .mk.y{background:var(--good-soft);color:var(--good);}
+    .flag .mk.n{background:var(--bad-soft);color:var(--bad);}
+    .cls-tag{font-size:11.5px;font-weight:700;border-radius:999px;padding:3px 11px;}
+    .cls-tag.top{color:var(--accent-tx);background:var(--accent-soft);}
+    .cls-tag.guest{color:var(--good);background:var(--good-soft);}
+    .cls-tag.price{color:var(--warn-tx);background:var(--warn-soft);}
+    .cls-tag.improve{color:var(--bad);background:var(--bad-soft);}
+
+    .ai-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:13px;margin-top:6px;}
+    .ai-block{background:var(--bg);border:1px solid var(--line-soft);border-radius:12px;padding:14px 16px;}
+    .ai-block.full{grid-column:1/-1;}
+    .ai-h{font-size:12px;font-weight:700;color:var(--accent-tx);letter-spacing:.02em;margin-bottom:8px;display:flex;align-items:center;gap:7px;}
+    .ai-block p{margin:0;font-size:13px;color:var(--tx-2);line-height:1.65;}
+    .ai-block p + p{margin-top:6px;}
+    .ai-block b{color:var(--tx-1);}
+    .move{display:flex;gap:10px;font-size:13px;color:var(--tx-2);padding:6px 0;}
+    .move .mi{color:var(--accent-tx);flex:none;}
+
+    .q-chips{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 12px;}
+    .qchip{font-size:12.5px;color:var(--tx-2);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:7px 13px;transition:.14s;}
+    .qchip:hover{border-color:var(--accent);color:var(--tx-1);}
+    .qbar{display:flex;gap:10px;}
+    .qbar input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 15px;font-family:inherit;font-size:14px;color:var(--tx-1);}
+    .qbar input:focus{outline:none;border-color:var(--accent);}
+    .qbar input::placeholder{color:var(--tx-3);}
+
+    .chart-wrap{margin-top:16px;}
+    .chartbox{position:relative;height:200px;margin:6px 0 4px;}
+    .legend{display:flex;gap:16px;font-size:12px;color:var(--tx-3);margin-top:10px;flex-wrap:wrap;}
+    .legend span{display:inline-flex;align-items:center;gap:6px;}
+    .legend i{width:11px;height:11px;border-radius:3px;}
+
+    .corr{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:14px;}
+    .corr-card{background:var(--bg);border:1px solid var(--line-soft);border-radius:13px;padding:16px 17px;}
+    .corr-card.hl{border-color:var(--base-line);background:var(--base-soft);}
+    .corr-k{font-size:12.5px;color:var(--tx-3);font-weight:600;}
+    .corr-v{font-size:27px;font-weight:700;margin-top:7px;}
+    .corr-v small{font-size:13px;color:var(--tx-2);font-weight:600;}
+    .corr-x{font-size:12.5px;color:var(--tx-2);margin-top:5px;}
+    .corr-x b{color:var(--base-tx);}
+    .corr-breakdown{margin-top:13px;display:flex;flex-direction:column;gap:9px;}
+    .cb-row{display:flex;align-items:center;gap:11px;font-size:12.5px;}
+    .cb-row .cbn{flex:1;color:var(--tx-2);display:flex;align-items:center;gap:7px;}
+    .cb-row .cbt{flex:2;height:8px;border-radius:4px;background:var(--bar-track);overflow:hidden;}
+    .cb-row .cbt > i{display:block;height:100%;background:var(--bar);border-radius:4px;}
+    .cb-row .cbv{min-width:62px;text-align:right;font-weight:700;color:var(--tx-1);}
+
+    .cal-nav{display:inline-flex;align-items:center;gap:10px;}
+    .cal-nav .cm{font-size:15px;font-weight:700;min-width:110px;text-align:center;}
+    .iconbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--surface2);color:var(--tx-1);display:flex;align-items:center;justify-content:center;}
+    .iconbtn:hover{background:var(--hover);}
+    .iconbtn:disabled{opacity:.4;cursor:default;}
+    .cal-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-top:14px;}
+    .cal-dow span{font-size:11.5px;font-weight:600;color:var(--tx-2);text-align:center;padding:7px 0;}
+    .cal-dow .sun{color:oklch(0.72 0.13 25);}
+    .cal-dow .sat{color:oklch(0.72 0.11 250);}
+    .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+    .cell{min-height:74px;border-radius:9px;border:1px solid var(--line-soft);background:var(--bg);padding:6px 7px;display:flex;flex-direction:column;gap:3px;}
+    .cell.empty{background:transparent;border-color:transparent;}
+    .cell .cd{font-size:11.5px;font-weight:700;color:var(--tx-2);}
+    .cell.today{border-color:var(--base-line);box-shadow:0 0 0 1px var(--base-line);}
+    .cell.today .cd{color:var(--base-tx);}
+    .ev-pill{font-size:10px;line-height:1.3;padding:2px 5px;border-radius:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:2px solid;}
+    .ev-pill.pro{background:oklch(0.62 0.13 256 / .16);border-color:oklch(0.66 0.13 256);color:oklch(0.82 0.09 256);}
+    .ev-pill.ama{background:oklch(0.72 0.13 140 / .16);border-color:oklch(0.7 0.13 140);color:oklch(0.84 0.1 140);}
+    .ev-pill.live{background:oklch(0.66 0.16 330 / .16);border-color:oklch(0.68 0.15 330);color:oklch(0.84 0.11 330);}
+    .ev-pill.other{background:oklch(0.6 0.02 258 / .25);border-color:oklch(0.6 0.02 258);color:var(--tx-2);}
+    .cell .gc{font-size:10.5px;color:var(--tx-3);margin-top:auto;}
+    .cell .gc b{color:var(--base-tx);}
+
+    .filt{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px;}
+    .fbtn{font-size:12.5px;font-weight:600;color:var(--tx-2);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:7px 14px;display:inline-flex;align-items:center;gap:6px;}
+    .fbtn:hover{border-color:var(--accent);}
+    .fbtn.active{color:#fff;background:var(--accent);border-color:transparent;}
+    .ld-list{margin-top:8px;}
+    .ld-row{display:grid;grid-template-columns:62px 34px 1fr auto;gap:12px;align-items:center;padding:11px 4px;border-bottom:1px solid var(--line-soft);font-size:13px;}
+    .ld-row.past{opacity:.5;}
+    .ld-row .ld-d{color:var(--tx-2);font-weight:600;}
+    .ld-row .ld-w{color:var(--tx-3);text-align:center;}
+    .ld-row .ld-ev{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .ld-g{font-size:11px;font-weight:600;border-radius:5px;padding:2px 7px;margin-right:8px;}
+    .ld-g.pro{background:oklch(0.62 0.13 256 / .18);color:oklch(0.82 0.09 256);}
+    .ld-g.ama{background:oklch(0.72 0.13 140 / .18);color:oklch(0.84 0.1 140);}
+    .ld-g.live{background:oklch(0.66 0.16 330 / .18);color:oklch(0.84 0.11 330);}
+    .ld-g.other{background:oklch(0.6 0.02 258 / .28);color:var(--tx-2);}
+    .ld-row .ld-cnt{font-weight:700;color:var(--tx-1);}
+    .ld-row .ld-cnt.none{color:var(--tx-3);font-weight:400;}
+    .ld-more{text-align:center;margin-top:14px;}
+    .footnote{font-size:11.5px;color:var(--tx-3);margin-top:14px;}
+
+    @media (max-width:820px){
+      .kpis{grid-template-columns:1fr 1fr;}
+      .grid2,.ai-grid,.corr{grid-template-columns:1fr;}
+      .dist{grid-template-columns:1fr;}
+      .hero-rank{text-align:left;}
+    }
+    @media (max-width:560px){
+      .wrap{padding:0 14px 60px;}
+      .hero{padding:18px;}
+      .controls .ctl{flex:1 1 100%;}
+      .controls .usel,.controls .idate{width:100%;}
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="head">
-      <h1>🍴 フードコート内 売上比較</h1>
-      <span class="badge test">試験版</span>
-      <span id="authBadge" class="pill">未接続</span>
-    </div>
-    <div class="sub">基準店＝100 として、同じフードコート内の各店を相対比較します（分析専用・売上には登録しません）。</div>
+<div class="wrap">
 
-    <div id="authCard" class="card" hidden>
-      <div style="font-size:14px;margin-bottom:8px;">閲覧には管理トークンが必要です（またはLINEの最新リンクから開いてください）。</div>
-      <div class="controls">
-        <div class="fld" style="flex:1;min-width:200px"><label>管理トークン</label><input id="tokenInput" type="password" placeholder="x-admin-token" autocomplete="off"></div>
-        <button id="tokenBtn">接続</button>
-      </div>
-      <div id="authMsg" class="msg"></div>
-    </div>
-
-    <div class="card">
-      <div class="controls">
-        <div class="fld"><label>店舗</label><select id="storeSel"></select></div>
-        <div class="fld" style="flex:1;min-width:200px"><label>単日レポート</label><select id="reportSel"></select></div>
-        <button id="reloadBtn" class="ghost">更新</button>
-      </div>
-      <div class="controls" style="margin-top:10px;">
-        <div class="fld"><label>期間（開始）</label><input type="date" id="startD"></div>
-        <div class="fld"><label>期間（終了）</label><input type="date" id="endD"></div>
-        <button id="rangeBtn" class="ghost">期間で見る</button>
-        <button id="dayBtn">単日に戻す</button>
-      </div>
-      <div id="loadMsg" class="msg"></div>
-    </div>
-
-    <div class="card" id="qaCard" hidden>
-      <div style="font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px;">💬 データに質問<span class="badge test">試験版</span></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">蓄積されたフードコートの日次データを根拠に、AIが質問へ回答します（毎回の自動出力はしません）。</div>
-      <div id="qSuggest" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
-      <div class="controls">
-        <div class="fld" style="flex:1;min-width:240px"><label>質問</label><input id="qInput" type="text" placeholder="例: 直近でマルゴSが一番売れた日は？ / 客単価を上げるには？"></div>
-        <button id="qBtn">質問する</button>
-      </div>
-      <div id="qAnswer" style="white-space:pre-wrap;font-size:14px;line-height:1.85;margin-top:12px;background:var(--panel2);border-radius:10px;padding:12px 14px;min-height:20px;color:var(--text);"></div>
-    </div>
-
-    <div id="resultArea" hidden>
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px;">📊 分析結果（自動）<span class="badge test">試験版</span></div>
-        <div id="analysis" style="white-space:pre-wrap;font-size:13px;line-height:1.75;color:var(--text)"></div>
-      </div>
-      <div class="card">
-        <div class="summary" id="summary"></div>
-      </div>
-      <div class="card">
-        <div class="tbl-wrap">
-          <table>
-            <thead><tr>
-              <th>順位</th><th class="name">店名</th><th>対象売上</th><th>売上比</th>
-              <th>客数</th><th>客数比</th><th>客単価</th><th>単価比</th>
-            </tr></thead>
-            <tbody id="tbody"></tbody>
-          </table>
-        </div>
-        <div class="note">売上比・客数比・単価比はいずれも「基準店=100%」。単価比＝各店の客単価÷基準店の客単価。</div>
-      </div>
-      <div class="card">
-        <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">売上比（基準店=100）</div>
-        <div id="bars"></div>
-      </div>
-
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:8px;">売上構成比（シェア）</div>
-        <div class="tbl-wrap"><table><thead><tr><th>順位</th><th class="name">店名</th><th>対象売上</th><th>シェア</th><th>累計</th></tr></thead><tbody id="shareTbody"></tbody></table></div>
-        <div class="note" id="shareNote"></div>
-      </div>
-
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:8px;">客単価ランキング</div>
-        <div class="tbl-wrap"><table><thead><tr><th>順位</th><th class="name">店名</th><th>客単価</th><th>対FC平均</th><th>対基準店</th></tr></thead><tbody id="ktTbody"></tbody></table></div>
-      </div>
-
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:8px;">ポジショニング（客数 × 客単価｜FC中央値が基準）</div>
-        <div class="tbl-wrap"><table><thead><tr><th class="name">店名</th><th>客数</th><th>客単価</th><th class="name">タイプ</th></tr></thead><tbody id="posTbody"></tbody></table></div>
-        <div class="note">客数・客単価がFC中央値より上を「○」。総合上位／集客型／単価型／要改善に分類。</div>
-      </div>
-
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:8px;">分布サマリー（FC全店）</div>
-        <div class="tbl-wrap"><table><thead><tr><th class="name">指標</th><th>平均</th><th>中央値</th><th class="name">最高(店)</th><th class="name">最低(店)</th></tr></thead><tbody id="distTbody"></tbody></table></div>
-      </div>
-
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:8px;">基準店の日次推移（蓄積データ）</div>
-        <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th>売上</th><th>客数</th><th>客単価</th><th>FC順位</th><th>シェア</th><th class="name">東京ドーム</th></tr></thead><tbody id="trendTbody"></tbody></table></div>
-        <div class="note" id="trendNote"></div>
-      </div>
-
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:8px;">東京ドーム イベント相関（客数）</div>
-        <div class="tbl-wrap"><table><thead><tr><th class="name">区分</th><th>日数</th><th>平均客数</th><th>平均売上</th><th>対 非イベント</th></tr></thead><tbody id="evtCorrTbody"></tbody></table></div>
-        <div class="note" id="evtCorrNote"></div>
-        <div style="font-weight:600;margin:14px 0 8px;">今後の東京ドーム予定</div>
-        <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th class="name">ジャンル</th><th class="name">イベント</th></tr></thead><tbody id="evtUpcomingTbody"></tbody></table></div>
-        <div class="note" id="evtUpcomingNote"></div>
-      </div>
-
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <div style="font-weight:600;">東京ドーム カレンダー（月表示）</div>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <button id="calPrev" class="ghost" style="min-height:32px;padding:4px 12px;">◀</button>
-            <span id="calLabel" style="min-width:96px;text-align:center;font-weight:600;">—</span>
-            <button id="calNext" class="ghost" style="min-height:32px;padding:4px 12px;">▶</button>
-          </div>
-        </div>
-        <div id="calGrid" class="cal-grid"></div>
-        <div class="note" id="calNote"></div>
-      </div>
-
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:8px;">東京ドーム イベント一覧（全期間）</div>
-        <div id="evtFilter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
-        <div class="tbl-wrap"><table><thead><tr><th class="name">日付</th><th class="name">曜日</th><th class="name">ジャンル</th><th class="name">イベント</th><th>客数</th></tr></thead><tbody id="evtListTbody"></tbody></table></div>
-        <div class="note" id="evtListNote"></div>
+  <!-- page head -->
+  <div class="phead">
+    <div class="phead-l">
+      <div class="ptitle"><span class="em">🍽️</span>フードコート内 売上比較</div>
+      <div class="psub">基準店＝100 として、同じフードコート内の各店を相対比較します（分析専用・売上には登録しません）。</div>
+      <div class="badges">
+        <span class="pill beta">試験版</span>
+        <span class="pill" id="authBadge">未接続</span>
       </div>
     </div>
   </div>
 
-  <script src="pages-config.js?v=20260622"></script>
-  <script src="auth-session.js"></script>
-  <script>
-  'use strict';
-  (function(){
-    const PAGES = window.LINE_REPORT_PAGES;
-    const AUTH = window.LINE_REPORT_AUTH;
-    const STORE_NAMES = (PAGES && PAGES.STORE_NAMES) || {};
-    const TOKEN_KEY = 'line_summary_admin_token';
-    const DEFAULT_STORE = 'marugoS';
-    const $ = (id) => document.getElementById(id);
-    const dom = {
-      authBadge:$('authBadge'), authCard:$('authCard'), authMsg:$('authMsg'), tokenInput:$('tokenInput'), tokenBtn:$('tokenBtn'),
-      storeSel:$('storeSel'), reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
-      startD:$('startD'), endD:$('endD'), rangeBtn:$('rangeBtn'), dayBtn:$('dayBtn'),
-      resultArea:$('resultArea'), summary:$('summary'), tbody:$('tbody'), bars:$('bars'), analysis:$('analysis'),
-      qaCard:$('qaCard'), qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'),
-      shareTbody:$('shareTbody'), shareNote:$('shareNote'), ktTbody:$('ktTbody'), posTbody:$('posTbody'),
-      distTbody:$('distTbody'), trendTbody:$('trendTbody'), trendNote:$('trendNote'),
-      evtCorrTbody:$('evtCorrTbody'), evtCorrNote:$('evtCorrNote'), evtUpcomingTbody:$('evtUpcomingTbody'), evtUpcomingNote:$('evtUpcomingNote'),
-      evtFilter:$('evtFilter'), evtListTbody:$('evtListTbody'), evtListNote:$('evtListNote'),
-      calPrev:$('calPrev'), calNext:$('calNext'), calLabel:$('calLabel'), calGrid:$('calGrid'), calNote:$('calNote'),
-    };
-    const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ'];
-    let reports = [];
-    let events = [];                 // 東京ドームのイベント [{event_date,title,category}]
-    let eventsByDate = new Map();    // 'YYYY-MM-DD' -> [event,...]
-    let evtFilterVal = 'all';        // イベント一覧のジャンル絞り込み
-    let lastSeries = [];             // 直近描画の基準店日次系列（客数併記用）
-    let calY = 0, calM = 0;          // カレンダー表示中の年・月（0=未初期化）
+  <!-- auth card -->
+  <div class="card" id="authCard" hidden style="margin-top:6px">
+    <div style="font-size:13.5px;margin-bottom:10px;color:var(--tx-2)">閲覧には管理トークンが必要です（またはLINEの最新リンクから開いてください）。</div>
+    <div class="qbar">
+      <input id="tokenInput" type="password" placeholder="x-admin-token" autocomplete="off">
+      <button class="btn primary" id="tokenBtn">接続</button>
+    </div>
+    <div id="authMsg" class="msg"></div>
+  </div>
 
-    const nf = new Intl.NumberFormat('ja-JP');
-    const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
-    const pct = (v) => v==null ? '—' : (Math.round(Number(v)*10)/10).toFixed(1) + '%';
-    const norm = (s) => String(s||'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
-    const effDate = (r) => { const rd=String((r&&r.report_date)||'').trim(); if(/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.slice(0,10); const m=String((r&&r.created_at)||'').match(/^(\d{4}-\d{2}-\d{2})/); return m?m[1]:''; };
+  <!-- control bar -->
+  <div class="controls" style="margin-top:6px">
+    <div class="ctl"><span class="ctl-k">店舗</span><select class="usel store" id="storeSel"></select></div>
+    <div class="ctl"><span class="ctl-k">単日レポート</span><select class="usel report" id="reportSel"></select></div>
+    <div class="ctl"><span class="ctl-k">期間（開始）</span><input class="idate" type="date" id="startD"></div>
+    <div class="ctl"><span class="ctl-k">期間（終了）</span><input class="idate" type="date" id="endD"></div>
+    <div class="seg-period">
+      <button class="btn ghost" id="rangeBtn">期間で見る</button>
+      <button class="btn primary" id="dayBtn">単日に戻す</button>
+    </div>
+    <div class="ctl-grow"></div>
+    <button class="btn" id="reloadBtn">更新</button>
+  </div>
+  <div id="loadMsg" class="msg"></div>
 
-    // 期間内の日次レポートをテナント別に合算し、1つの集計レポートにする（基準店=100比較・各表をこの合計で出す）。
-    function aggregateRange(repList, start, end){
-      const inRange = (repList||[]).filter(r=>{ const d=effDate(r); return d && d>=start && d<=end; });
-      if (!inRange.length) return null;
-      const map = new Map(); // name -> {name, code, sales, guests, compSales, compGuests}
-      inRange.forEach(r=>{
-        (Array.isArray(r.tenants)?r.tenants:[]).forEach(t=>{
-          if (!t || !t.name) return;
-          const k = norm(t.name);
-          const cur = map.get(k) || { name:String(t.name), code:t.code||null, sales:0, guests:0, compSales:0, compGuests:0 };
-          if (t.sales!=null && isFinite(Number(t.sales))) cur.sales += Number(t.sales);
-          if (t.guests!=null && isFinite(Number(t.guests))) cur.guests += Number(t.guests);
-          if (t.compSales!=null && isFinite(Number(t.compSales))) cur.compSales += Number(t.compSales);
-          if (t.compGuests!=null && isFinite(Number(t.compGuests))) cur.compGuests += Number(t.compGuests);
-          map.set(k, cur);
-        });
+  <!-- result area: hero + tabs + panels -->
+  <div id="resultArea" hidden>
+
+    <!-- hero KPI -->
+    <div class="hero">
+      <div class="hero-top">
+        <div class="hero-store">
+          <div class="hero-logo" id="heroLogo">MS</div>
+          <div>
+            <div class="hero-name"><span id="heroName">—</span><span class="tag">基準店</span></div>
+            <div class="hero-meta" id="heroMeta"></div>
+          </div>
+        </div>
+        <div class="hero-rank">
+          <div class="rk" id="heroRanks"></div>
+          <div class="hero-meta" id="heroTotals"></div>
+        </div>
+      </div>
+      <div class="kpis" id="kpis"></div>
+    </div>
+
+    <!-- tabs -->
+    <div class="tabs">
+      <div class="tabrow" id="tabrow">
+        <button class="tab active" data-tab="overview"><span class="em">📊</span>概要・AI分析</button>
+        <button class="tab" data-tab="ranking"><span class="em">🏆</span>店舗ランキング</button>
+        <button class="tab" data-tab="trend"><span class="em">📈</span>売上推移</button>
+        <button class="tab" data-tab="dome"><span class="em">🏟️</span>東京ドーム連動</button>
+      </div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <section class="panel show" data-panel="overview">
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">📋</span>分析サマリー（自動）</div><span class="pill beta">試験版</span></div>
+        <div class="ai-grid" id="aiGrid"></div>
+        <div class="card-note" id="aiNote"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">💬</span>データに質問</div><span class="pill beta">試験版</span></div>
+        <div class="card-note" style="margin-top:4px">蓄積されたフードコートの日次データを根拠に、AIが質問へ回答します（毎回の自動出力はしません）。</div>
+        <div class="q-chips" id="qSuggest"></div>
+        <div class="qbar">
+          <input id="qInput" type="text" placeholder="例: 直近でマルゴSが一番売れた日は？ / 客単価を上げるには？">
+          <button class="btn primary" id="qBtn">質問する</button>
+        </div>
+        <div id="qAnswer" style="white-space:pre-wrap;font-size:14px;line-height:1.85;margin-top:14px;background:var(--bg);border:1px solid var(--line-soft);border-radius:12px;padding:14px 16px;color:var(--tx-1);display:none;"></div>
+      </div>
+    </section>
+
+    <!-- RANKING -->
+    <section class="panel" data-panel="ranking">
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">🏆</span>店舗ランキング（基準店＝100%）</div></div>
+        <div style="overflow-x:auto">
+        <table class="tbl"><thead><tr>
+          <th class="l">順位・店名</th><th>対象売上</th><th style="width:240px">売上比（基準店=100）</th>
+          <th>客数</th><th>客数比</th><th>客単価</th><th>単価比</th>
+        </tr></thead><tbody id="rankTbody"></tbody></table>
+        </div>
+        <div class="card-note">売上比・客数比・単価比はいずれも「基準店＝100%」。単価比＝各店の客単価÷基準店の客単価。</div>
+      </div>
+      <div class="grid2">
+        <div class="card" style="margin-top:0">
+          <div class="card-h"><div class="card-t"><span class="em">🥧</span>売上構成比（シェア）</div></div>
+          <div style="overflow-x:auto"><table class="tbl"><thead><tr><th class="l">店名</th><th>対象売上</th><th>シェア</th><th>累計</th></tr></thead><tbody id="shareTbody"></tbody></table></div>
+          <div class="card-note" id="shareNote"></div>
+        </div>
+        <div class="card" style="margin-top:0">
+          <div class="card-h"><div class="card-t"><span class="em">💴</span>客単価ランキング</div></div>
+          <div style="overflow-x:auto"><table class="tbl"><thead><tr><th class="l">店名</th><th>客単価</th><th>対FC平均</th><th>対基準店</th></tr></thead><tbody id="priceTbody"></tbody></table></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">📐</span>分布サマリー（FC全店）</div></div>
+        <div class="dist" id="distWrap"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">🎯</span>各店タイプ分類</div></div>
+        <div id="clsList"></div>
+        <div class="card-note">客数・客単価がFC中央値より上を「○」。総合上位／集客型／単価型／要改善に分類。</div>
+      </div>
+    </section>
+
+    <!-- TREND -->
+    <section class="panel" data-panel="trend">
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">📈</span>基準店の日次推移（蓄積データ）</div><span class="pill" id="trendCount" style="color:var(--tx-2)"></span></div>
+        <div class="chart-wrap">
+          <div class="chartbox"><svg id="trendSvg" width="100%" height="200" viewBox="0 0 900 200" preserveAspectRatio="none"></svg></div>
+          <div class="legend">
+            <span><i style="background:var(--bar)"></i>売上（イベント日）</span>
+            <span><i style="background:oklch(0.5 0.04 258)"></i>売上（非開催日）</span>
+            <span><i style="background:var(--base)"></i>客数</span>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+        <table class="tbl"><thead><tr><th class="l">日付</th><th>売上</th><th>客数</th><th>客単価</th><th>FC順位</th><th>シェア</th><th class="l" style="padding-left:18px">東京ドーム</th></tr></thead><tbody id="dailyTbody"></tbody></table>
+        </div>
+        <div class="footnote" id="trendNote"></div>
+      </div>
+    </section>
+
+    <!-- DOME -->
+    <section class="panel" data-panel="dome">
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">⚡</span>東京ドーム イベント相関（客数）</div></div>
+        <div class="corr" id="corrWrap"></div>
+        <div class="corr-breakdown" id="corrBreakdown"></div>
+        <div class="card-note" id="corrNote"></div>
+      </div>
+      <div class="card">
+        <div class="card-h">
+          <div class="card-t"><span class="em">🗓️</span>東京ドーム カレンダー</div>
+          <div class="cal-nav">
+            <button class="iconbtn" id="calPrev" aria-label="前月"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <span class="cm" id="calMonth">—</span>
+            <button class="iconbtn" id="calNext" aria-label="翌月"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+          </div>
+        </div>
+        <div class="cal-dow"><span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span></div>
+        <div class="cal-grid" id="calGrid"></div>
+        <div class="card-note" id="calNote"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">📃</span>東京ドーム イベント一覧</div></div>
+        <div class="filt" id="domeFilt"></div>
+        <div class="ld-list" id="domeList"></div>
+        <div class="ld-more"><button class="btn ghost" id="domeMore">さらに表示</button></div>
+        <div class="footnote" id="domeNote"></div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script src="pages-config.js?v=20260622"></script>
+<script src="auth-session.js"></script>
+<script>
+'use strict';
+(function(){
+  const PAGES = window.LINE_REPORT_PAGES;
+  const AUTH = window.LINE_REPORT_AUTH;
+  const STORE_NAMES = (PAGES && PAGES.STORE_NAMES) || {};
+  const TOKEN_KEY = 'line_summary_admin_token';
+  const DEFAULT_STORE = 'marugoS';
+  const $ = (id) => document.getElementById(id);
+  const dom = {
+    authBadge:$('authBadge'), authCard:$('authCard'), authMsg:$('authMsg'), tokenInput:$('tokenInput'), tokenBtn:$('tokenBtn'),
+    storeSel:$('storeSel'), reportSel:$('reportSel'), reloadBtn:$('reloadBtn'), loadMsg:$('loadMsg'),
+    startD:$('startD'), endD:$('endD'), rangeBtn:$('rangeBtn'), dayBtn:$('dayBtn'),
+    resultArea:$('resultArea'),
+    heroLogo:$('heroLogo'), heroName:$('heroName'), heroMeta:$('heroMeta'), heroRanks:$('heroRanks'), heroTotals:$('heroTotals'), kpis:$('kpis'),
+    tabrow:$('tabrow'),
+    aiGrid:$('aiGrid'), aiNote:$('aiNote'),
+    qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'),
+    rankTbody:$('rankTbody'), shareTbody:$('shareTbody'), shareNote:$('shareNote'), priceTbody:$('priceTbody'), distWrap:$('distWrap'), clsList:$('clsList'),
+    trendCount:$('trendCount'), dailyTbody:$('dailyTbody'), trendNote:$('trendNote'),
+    corrWrap:$('corrWrap'), corrBreakdown:$('corrBreakdown'), corrNote:$('corrNote'),
+    calPrev:$('calPrev'), calNext:$('calNext'), calMonth:$('calMonth'), calGrid:$('calGrid'), calNote:$('calNote'),
+    domeFilt:$('domeFilt'), domeList:$('domeList'), domeMore:$('domeMore'), domeNote:$('domeNote'),
+  };
+  const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ'];
+
+  let reports = [];
+  let events = [];                 // 東京ドームのイベント [{event_date,title,category}]
+  let eventsByDate = new Map();    // 'YYYY-MM-DD' -> [event,...]
+  let lastSeries = [];             // 直近描画の基準店日次系列
+  let calY = 0, calM = 0;          // カレンダー表示中の年・月（0=未初期化）
+  let mode = 'single';             // 'single' | 'range'
+  let domeFilter = 'all', domeLimit = 14;
+
+  const nf = new Intl.NumberFormat('ja-JP');
+  const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
+  const pct = (v) => v==null ? '—' : (Math.round(Number(v)*10)/10).toFixed(1) + '%';
+  const norm = (s) => String(s||'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
+  const effDate = (r) => { const rd=String((r&&r.report_date)||'').trim(); if(/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.slice(0,10); const m=String((r&&r.created_at)||'').match(/^(\d{4}-\d{2}-\d{2})/); return m?m[1]:''; };
+  const EVT_ICON = { 'プロ野球':'⚾', 'アマ野球':'🥎', 'ライブ':'🎤', 'その他':'🎫' };
+  const escapeHtml = (s)=> String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':'other'; }
+  function shorten(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
+  function genreTag(category){ if(!category) return '<span class="neg">—</span>'; return '<span class="ld-g '+catSlug(category)+'">'+(EVT_ICON[category]||'🎫')+' '+escapeHtml(category)+'</span>'; }
+  function median(arr){ const a=arr.filter(x=>x!=null && isFinite(x)).slice().sort((x,y)=>x-y); if(!a.length) return null; const m=Math.floor(a.length/2); return a.length%2? a[m] : (a[m-1]+a[m])/2; }
+  function avg(arr){ const a=arr.filter(x=>x!=null && isFinite(x)); return a.length? a.reduce((s,x)=>s+x,0)/a.length : null; }
+  function relPct(v, base){ return (base&&base>0&&v!=null)? Math.round(v/base*1000)/10 : null; }
+  function ymdJst(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(String(when))) return String(when).slice(0,10); const j=new Date(d.getTime()+9*3600*1000); return j.getUTCFullYear()+'-'+String(j.getUTCMonth()+1).padStart(2,'0')+'-'+String(j.getUTCDate()).padStart(2,'0'); }
+  function fmtDay(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; const j=new Date(d.getTime()+9*3600*1000); return (j.getUTCMonth()+1)+'/'+j.getUTCDate(); }
+  function wdayJp(ymd){ const d=new Date(ymd); if(isNaN(d.getTime()))return '?'; const j=new Date(d.getTime()+9*3600*1000); return ['日','月','火','水','木','金','土'][j.getUTCDay()]; }
+
+  // ===== auth / API (データ層・据え置き) =====
+  function getToken(){ try { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY)||''); } catch(_){ return ''; } }
+  function lockedStore(){ try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch(_){ return ''; } }
+  function captureLockedStoreFromUrl(){
+    try {
+      const p = new URLSearchParams(location.search);
+      if (p.get('from') !== 'line') return;
+      const raw = String(p.get('store_key') || p.get('store') || '').trim();
+      if (!raw) return;
+      let key = (PAGES && PAGES.resolveStoreKey) ? PAGES.resolveStoreKey(raw,'') : raw.toLowerCase();
+      key = String(key||'').trim();
+      if (key) { try { sessionStorage.setItem('line_locked_store', key); localStorage.setItem('line_locked_store', key); } catch(_){} }
+    } catch(_){}
+  }
+  function setAuthBadge(ok){
+    dom.authBadge.innerHTML = ok ? '<span class="dot"></span>接続済み' : '未接続';
+    dom.authBadge.className = 'pill' + (ok ? ' live' : '');
+    dom.authCard.hidden = !!ok;
+    if (!ok) dom.resultArea.hidden = true;
+  }
+  async function apiFetch(path){
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try { res = await fetch(url, { headers: { 'x-admin-token': getToken() } }); }
+    catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
+    if (res.status === 401 || res.status === 403){ setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
+    const body = await res.json().catch(()=>({}));
+    if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
+    return body;
+  }
+  async function apiPost(path, payload){
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try { res = await fetch(url, { method:'POST', headers:{ 'x-admin-token':getToken(), 'Content-Type':'application/json' }, body: JSON.stringify(payload||{}) }); }
+    catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
+    if (res.status===401 || res.status===403){ setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
+    const body = await res.json().catch(()=>({}));
+    if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
+    return body;
+  }
+  async function askQuestion(q){
+    const question = String(q!=null?q:(dom.qInput.value||'')).trim();
+    if (!question){ dom.qInput.focus(); return; }
+    dom.qInput.value = question;
+    dom.qBtn.disabled = true; dom.qAnswer.style.display='block'; dom.qAnswer.textContent = '考え中…（蓄積データを参照しています）';
+    try {
+      const b = await apiPost('/foodcourt/ask', { store_key: dom.storeSel.value || DEFAULT_STORE, question: question });
+      dom.qAnswer.textContent = b.answer || '(回答が空でした)';
+    } catch(e){ dom.qAnswer.textContent = (e&&e.message) || '質問に失敗しました。'; }
+    finally { dom.qBtn.disabled = false; }
+  }
+  function renderSuggestions(){
+    dom.qSuggest.innerHTML = SUGGESTED_Q.map(s=>'<button class="qchip">'+escapeHtml(s)+'</button>').join('');
+    dom.qSuggest.querySelectorAll('.qchip').forEach(b=>b.addEventListener('click', ()=>{ dom.qInput.value=b.textContent; dom.qInput.focus(); }));
+  }
+  function populateStores(){
+    const locked = lockedStore();
+    const keys = Object.keys(STORE_NAMES);
+    dom.storeSel.innerHTML = '';
+    const add = (k,label) => { const o=document.createElement('option'); o.value=k; o.textContent=label; dom.storeSel.appendChild(o); };
+    if (locked){ add(locked, STORE_NAMES[locked] || locked); dom.storeSel.value = locked; dom.storeSel.disabled = true; return; }
+    if (!keys.length) add(DEFAULT_STORE, STORE_NAMES[DEFAULT_STORE] || 'マルゴエス');
+    keys.forEach(k => add(k, STORE_NAMES[k] || k));
+    dom.storeSel.value = (STORE_NAMES[DEFAULT_STORE] ? DEFAULT_STORE : (keys[0]||DEFAULT_STORE));
+  }
+  function fmtWhen(r){
+    const iso = r.created_at || '';
+    const d = iso ? new Date(iso) : null;
+    let label = '';
+    if (d && !isNaN(d.getTime())){
+      const j = new Date(d.getTime() + 9*3600*1000);
+      label = j.getUTCFullYear()+'/'+(j.getUTCMonth()+1)+'/'+j.getUTCDate()+' '+String(j.getUTCHours()).padStart(2,'0')+':'+String(j.getUTCMinutes()).padStart(2,'0');
+    } else { label = '#' + r.id; }
+    if (r.report_date) label = r.report_date + '（受信 ' + label + '）';
+    return label;
+  }
+
+  // ===== comparison / series / analysis (データ層・据え置き) =====
+  function aggregateRange(repList, start, end){
+    const inRange = (repList||[]).filter(r=>{ const d=effDate(r); return d && d>=start && d<=end; });
+    if (!inRange.length) return null;
+    const map = new Map();
+    inRange.forEach(r=>{
+      (Array.isArray(r.tenants)?r.tenants:[]).forEach(t=>{
+        if (!t || !t.name) return;
+        const k = norm(t.name);
+        const cur = map.get(k) || { name:String(t.name), code:t.code||null, sales:0, guests:0, compSales:0, compGuests:0 };
+        if (t.sales!=null && isFinite(Number(t.sales))) cur.sales += Number(t.sales);
+        if (t.guests!=null && isFinite(Number(t.guests))) cur.guests += Number(t.guests);
+        if (t.compSales!=null && isFinite(Number(t.compSales))) cur.compSales += Number(t.compSales);
+        if (t.compGuests!=null && isFinite(Number(t.compGuests))) cur.compGuests += Number(t.compGuests);
+        map.set(k, cur);
       });
-      return { report_date:null, base_tenant_name:(inRange[0].base_tenant_name||'MARUGO S'), tenants:Array.from(map.values()), _days:inRange.length, _rangeReports:inRange };
+    });
+    return { report_date:null, base_tenant_name:(inRange[0].base_tenant_name||'MARUGO S'), tenants:Array.from(map.values()), _days:inRange.length, _rangeReports:inRange };
+  }
+  function computeComparison(report){
+    const list = (report.tenants||[]).map(t=>({ name:String((t&&t.name)||''), sales:(t&&t.sales!=null)?Number(t.sales):null, guests:(t&&t.guests!=null)?Number(t.guests):null }))
+      .filter(t => t.sales!=null && isFinite(t.sales) && t.sales>=0 && t.name);
+    if (list.length < 2) return null;
+    const baseName = report.base_tenant_name || 'MARUGO S';
+    const base = list.find(t => norm(t.name)===norm(baseName));
+    if (!base) return null;
+    const unitOf = (t)=> (t.guests && t.guests>0) ? t.sales/t.guests : null;
+    const baseUnit = unitOf(base);
+    const total = list.reduce((a,b)=>a+b.sales,0);
+    const rows = list.map(t=>{
+      const u = unitOf(t);
+      return { name:t.name, sales:t.sales, salesRatio: base.sales>0? t.sales/base.sales*100 : null,
+        guests:t.guests, guestRatio:(base.guests>0 && t.guests!=null)? t.guests/base.guests*100 : null,
+        unit:u, unitRatio:(u!=null && baseUnit)? u/baseUnit*100 : null, isBase:(t===base) };
+    }).sort((a,b)=> b.sales - a.sales);
+    const salesRank = 1 + list.filter(t=>t.sales>base.sales).length;
+    const guestRank = 1 + list.filter(t=>(t.guests||0)>(base.guests||0)).length;
+    const unitRank = baseUnit==null?0: 1 + list.filter(t=>{const u=unitOf(t); return u!=null && u>baseUnit;}).length;
+    return { baseName:base.name, baseSales:base.sales, baseGuests:base.guests, baseUnit, total,
+      share: total>0? base.sales/total*100 : null, salesRank, guestRank, unitRank, count:list.length, rows };
+  }
+  function baseSeriesFromReports(allReports, baseName){
+    const out=[];
+    (allReports||[]).forEach(r=>{
+      const li=(r.tenants||[]).map(t=>({name:String((t&&t.name)||''),sales:(t&&t.sales!=null)?Number(t.sales):null,guests:(t&&t.guests!=null)?Number(t.guests):null}))
+        .filter(t=>t.name && t.sales!=null && isFinite(t.sales) && t.sales>=0);
+      if(li.length<2) return;
+      const b=li.find(t=>norm(t.name)===norm(baseName)); if(!b) return;
+      const tot=li.reduce((s,t)=>s+t.sales,0);
+      const k=(b.guests&&b.guests>0)?b.sales/b.guests:null;
+      out.push({ when:String(r.report_date||r.created_at||''), sales:b.sales, guests:b.guests, kt:k,
+        salesRank:1+li.filter(t=>t.sales>b.sales).length, share: tot>0?b.sales/tot*100:null });
+    });
+    out.sort((a,b)=>a.when.localeCompare(b.when));
+    return out;
+  }
+  function buildAnalysisText(report, allReports, periodLabel){
+    const list = (report.tenants||[]).map(t=>({
+      name:String((t&&t.name)||''),
+      sales:(t&&t.sales!=null)?Number(t.sales):null,
+      guests:(t&&t.guests!=null)?Number(t.guests):null,
+    })).filter(t=>t.name && t.sales!=null && isFinite(t.sales) && t.sales>=0);
+    if (list.length<2) return '【総評】\n分析に必要なデータが不足しています。';
+    const baseName = report.base_tenant_name || 'MARUGO S';
+    const base = list.find(t=>norm(t.name)===norm(baseName));
+    if (!base) return '【総評】\n基準店（'+baseName+'）が見つかりませんでした。';
+    const ktOf = t=> (t.guests&&t.guests>0)? t.sales/t.guests : null;
+    const n = list.length;
+    const totalSales = list.reduce((s,t)=>s+t.sales,0);
+    const avgSales = avg(list.map(t=>t.sales)), medSales = median(list.map(t=>t.sales));
+    const avgGuests = avg(list.map(t=>t.guests)), avgKt = avg(list.map(ktOf));
+    const medKt = median(list.map(ktOf));
+    const baseKt = ktOf(base);
+    const rank = (v,key)=>1+list.filter(t=>(key==='kt'?(ktOf(t)||0):(t[key]||0))>v).length;
+    const salesRank = rank(base.sales,'sales'), guestRank = rank(base.guests||0,'guests');
+    const ktRank = baseKt==null?null:(1+list.filter(t=>{const u=ktOf(t);return u!=null&&u>baseKt;}).length);
+    const bySales = list.slice().sort((a,b)=>b.sales-a.sales);
+    const leader = bySales[0];
+    const idx = bySales.findIndex(t=>t===base);
+    const above = idx>0? bySales[idx-1] : null, below = idx<bySales.length-1? bySales[idx+1] : null;
+    const share = totalSales>0? base.sales/totalSales*100 : null;
+    const L = [];
+    const yK = v=>'¥'+nf.format(Math.round(v));
+    const p1 = v=>v==null?'—':(Math.round(v*10)/10).toFixed(1)+'%';
+    if (periodLabel){ L.push('【期間】'+periodLabel+'　※この期間の合計で分析'); }
+    const volWord = (salesRank<=Math.ceil(n/3))?'上位':(salesRank<=Math.ceil(n*2/3)?'中位':'下位');
+    const ktWord = ktRank==null?'—':((ktRank<=Math.ceil(n/3))?'上位':(ktRank<=Math.ceil(n*2/3)?'中位':'下位'));
+    let typ = '';
+    if (ktRank!=null){
+      if (guestRank<=Math.ceil(n/2) && ktRank>Math.ceil(n/2)) typ='＝客数で稼ぐ「客数型（単価が弱み）」';
+      else if (ktRank<=Math.ceil(n/2) && guestRank>Math.ceil(n/2)) typ='＝単価で稼ぐ「単価型（集客が弱み）」';
+      else if (guestRank<=Math.ceil(n/2) && ktRank<=Math.ceil(n/2)) typ='＝客数・単価とも上位の「総合上位」';
+      else typ='＝客数・単価とも下位で「全体的に弱い」';
     }
-
-    function getToken(){ try { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY)||''); } catch(_){ return ''; } }
-    function lockedStore(){ try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch(_){ return ''; } }
-    function captureLockedStoreFromUrl(){
-      try {
-        const p = new URLSearchParams(location.search);
-        if (p.get('from') !== 'line') return;
-        const raw = String(p.get('store_key') || p.get('store') || '').trim();
-        if (!raw) return;
-        let key = (PAGES && PAGES.resolveStoreKey) ? PAGES.resolveStoreKey(raw,'') : raw.toLowerCase();
-        key = String(key||'').trim();
-        if (key) { try { sessionStorage.setItem('line_locked_store', key); localStorage.setItem('line_locked_store', key); } catch(_){} }
-      } catch(_){}
-    }
-    function setAuthBadge(ok){
-      dom.authBadge.textContent = ok ? '接続済み' : '未接続';
-      dom.authBadge.className = 'pill' + (ok ? ' ok' : '');
-      dom.authCard.hidden = !!ok;
-      if (dom.qaCard) dom.qaCard.hidden = !ok;
-    }
-
-    async function apiFetch(path){
-      const url = PAGES.receiptAdminApiUrl(path);
-      let res;
-      try { res = await fetch(url, { headers: { 'x-admin-token': getToken() } }); }
-      catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
-      if (res.status === 401 || res.status === 403){ setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
-      const body = await res.json().catch(()=>({}));
-      if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
-      return body;
-    }
-    async function apiPost(path, payload){
-      const url = PAGES.receiptAdminApiUrl(path);
-      let res;
-      try { res = await fetch(url, { method:'POST', headers:{ 'x-admin-token':getToken(), 'Content-Type':'application/json' }, body: JSON.stringify(payload||{}) }); }
-      catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
-      if (res.status===401 || res.status===403){ setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
-      const body = await res.json().catch(()=>({}));
-      if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
-      return body;
-    }
-    async function askQuestion(q){
-      const question = String(q!=null?q:(dom.qInput.value||'')).trim();
-      if (!question){ dom.qInput.focus(); return; }
-      dom.qInput.value = question;
-      dom.qBtn.disabled = true; dom.qAnswer.textContent = '考え中…（蓄積データを参照しています）';
-      try {
-        const b = await apiPost('/foodcourt/ask', { store_key: dom.storeSel.value || DEFAULT_STORE, question: question });
-        dom.qAnswer.textContent = b.answer || '(回答が空でした)';
-      } catch(e){ dom.qAnswer.textContent = (e&&e.message) || '質問に失敗しました。'; }
-      finally { dom.qBtn.disabled = false; }
-    }
-    function renderSuggestions(){
-      dom.qSuggest.innerHTML = '';
-      SUGGESTED_Q.forEach(function(s){
-        const b = document.createElement('button'); b.className='ghost'; b.style.fontSize='12px'; b.style.minHeight='30px'; b.style.padding='4px 10px';
-        b.textContent = s; b.addEventListener('click', function(){ askQuestion(s); });
-        dom.qSuggest.appendChild(b);
-      });
-    }
-
-    function populateStores(){
-      const locked = lockedStore();
-      const keys = Object.keys(STORE_NAMES);
-      dom.storeSel.innerHTML = '';
-      const add = (k,label) => { const o=document.createElement('option'); o.value=k; o.textContent=label; dom.storeSel.appendChild(o); };
-      if (locked){ add(locked, STORE_NAMES[locked] || locked); dom.storeSel.value = locked; dom.storeSel.disabled = true; return; }
-      if (!keys.length) add(DEFAULT_STORE, STORE_NAMES[DEFAULT_STORE] || 'マルゴエス');
-      keys.forEach(k => add(k, STORE_NAMES[k] || k));
-      dom.storeSel.value = (STORE_NAMES[DEFAULT_STORE] ? DEFAULT_STORE : (keys[0]||DEFAULT_STORE));
-    }
-
-    function fmtWhen(r){
-      const iso = r.created_at || '';
-      const d = iso ? new Date(iso) : null;
-      let label = '';
-      if (d && !isNaN(d.getTime())){
-        const j = new Date(d.getTime() + 9*3600*1000); // JST表示
-        label = j.getUTCFullYear()+'/'+(j.getUTCMonth()+1)+'/'+j.getUTCDate()+' '+String(j.getUTCHours()).padStart(2,'0')+':'+String(j.getUTCMinutes()).padStart(2,'0');
-      } else { label = '#' + r.id; }
-      if (r.report_date) label = r.report_date + '（受信 ' + label + '）';
-      return label;
-    }
-
-    function computeComparison(report){
-      const list = (report.tenants||[]).map(t=>({ name:String((t&&t.name)||''), sales:(t&&t.sales!=null)?Number(t.sales):null, guests:(t&&t.guests!=null)?Number(t.guests):null }))
-        .filter(t => t.sales!=null && isFinite(t.sales) && t.sales>=0 && t.name);
-      if (list.length < 2) return null;
-      const baseName = report.base_tenant_name || 'MARUGO S';
-      const base = list.find(t => norm(t.name)===norm(baseName));
-      if (!base) return null;
-      const unitOf = (t)=> (t.guests && t.guests>0) ? t.sales/t.guests : null;
-      const baseUnit = unitOf(base);
-      const total = list.reduce((a,b)=>a+b.sales,0);
-      const rows = list.map(t=>{
-        const u = unitOf(t);
-        return { name:t.name, sales:t.sales, salesRatio: base.sales>0? t.sales/base.sales*100 : null,
-          guests:t.guests, guestRatio:(base.guests>0 && t.guests!=null)? t.guests/base.guests*100 : null,
-          unit:u, unitRatio:(u!=null && baseUnit)? u/baseUnit*100 : null, isBase:(t===base) };
-      }).sort((a,b)=> b.sales - a.sales);
-      const salesRank = 1 + list.filter(t=>t.sales>base.sales).length;
-      const guestRank = 1 + list.filter(t=>(t.guests||0)>(base.guests||0)).length;
-      const unitRank = baseUnit==null?0: 1 + list.filter(t=>{const u=unitOf(t); return u!=null && u>baseUnit;}).length;
-      return { baseName:base.name, baseSales:base.sales, baseGuests:base.guests, baseUnit, total,
-        share: total>0? base.sales/total*100 : null, salesRank, guestRank, unitRank, count:list.length, rows };
-    }
-
-    function median(arr){ const a=arr.filter(x=>x!=null && isFinite(x)).slice().sort((x,y)=>x-y); if(!a.length) return null; const m=Math.floor(a.length/2); return a.length%2? a[m] : (a[m-1]+a[m])/2; }
-    function avg(arr){ const a=arr.filter(x=>x!=null && isFinite(x)); return a.length? a.reduce((s,x)=>s+x,0)/a.length : null; }
-    function relPct(v, base){ return (base&&base>0&&v!=null)? Math.round(v/base*1000)/10 : null; }
-
-    // 全レポート（履歴）から基準店の日次系列を作る（created_at 昇順）。前年対比が無い新規店のため、自店の履歴が基準。
-    function baseSeriesFromReports(allReports, baseName){
-      const out=[];
-      (allReports||[]).forEach(r=>{
-        const li=(r.tenants||[]).map(t=>({name:String((t&&t.name)||''),sales:(t&&t.sales!=null)?Number(t.sales):null,guests:(t&&t.guests!=null)?Number(t.guests):null}))
-          .filter(t=>t.name && t.sales!=null && isFinite(t.sales) && t.sales>=0);
-        if(li.length<2) return;
-        const b=li.find(t=>norm(t.name)===norm(baseName)); if(!b) return;
-        const tot=li.reduce((s,t)=>s+t.sales,0);
-        const k=(b.guests&&b.guests>0)?b.sales/b.guests:null;
-        out.push({ when:String(r.report_date||r.created_at||''), sales:b.sales, guests:b.guests, kt:k,
-          salesRank:1+li.filter(t=>t.sales>b.sales).length, share: tot>0?b.sales/tot*100:null });
-      });
-      out.sort((a,b)=>a.when.localeCompare(b.when));
-      return out;
-    }
-    function fmtDay(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; const j=new Date(d.getTime()+9*3600*1000); return (j.getUTCMonth()+1)+'/'+j.getUTCDate(); }
-
-    // これらの数字を多角的に分析し、まとめテキストを生成（ルールベース＝確定的・無料）。本日の売上は“自店の履歴”を参照して考察する。
-    function buildAnalysisText(report, allReports, periodLabel){
-      const list = (report.tenants||[]).map(t=>({
-        name:String((t&&t.name)||''),
-        sales:(t&&t.sales!=null)?Number(t.sales):null,
-        guests:(t&&t.guests!=null)?Number(t.guests):null,
-        cs:(t&&t.compSales!=null)?Number(t.compSales):null,
-        cg:(t&&t.compGuests!=null)?Number(t.compGuests):null,
-      })).filter(t=>t.name && t.sales!=null && isFinite(t.sales) && t.sales>=0);
-      if (list.length<2) return '分析に必要なデータが不足しています。';
-      const baseName = report.base_tenant_name || 'MARUGO S';
-      const base = list.find(t=>norm(t.name)===norm(baseName));
-      if (!base) return '基準店（'+baseName+'）が見つかりませんでした。';
-      const ktOf = t=> (t.guests&&t.guests>0)? t.sales/t.guests : null;
-      const n = list.length;
-      const totalSales = list.reduce((s,t)=>s+t.sales,0);
-      const totalGuests = list.reduce((s,t)=>s+(t.guests||0),0);
-      const courtKt = totalGuests>0? totalSales/totalGuests : null;
-      const avgSales = avg(list.map(t=>t.sales)), medSales = median(list.map(t=>t.sales));
-      const avgGuests = avg(list.map(t=>t.guests)), avgKt = avg(list.map(ktOf));
-      const medKt = median(list.map(ktOf));
-      const baseKt = ktOf(base);
-      const rank = (v,key)=>1+list.filter(t=>(key==='kt'?(ktOf(t)||0):(t[key]||0))>v).length;
-      const salesRank = rank(base.sales,'sales'), guestRank = rank(base.guests||0,'guests');
-      const ktRank = baseKt==null?null:(1+list.filter(t=>{const u=ktOf(t);return u!=null&&u>baseKt;}).length);
-      const bySales = list.slice().sort((a,b)=>b.sales-a.sales);
-      const leader = bySales[0];
-      const idx = bySales.findIndex(t=>t===base);
-      const above = idx>0? bySales[idx-1] : null, below = idx<bySales.length-1? bySales[idx+1] : null;
-      const share = totalSales>0? base.sales/totalSales*100 : null;
-
-      const L = [];
-      const yK = v=>'¥'+nf.format(Math.round(v));
-      const p1 = v=>v==null?'—':(Math.round(v*10)/10).toFixed(1)+'%';
-      if (periodLabel){ L.push('【期間】'+periodLabel+'　※この期間の合計で分析'); L.push(''); }
-
-      // 総評
-      const volWord = (salesRank<=Math.ceil(n/3))?'上位':(salesRank<=Math.ceil(n*2/3)?'中位':'下位');
-      const ktWord = ktRank==null?'—':((ktRank<=Math.ceil(n/3))?'上位':(ktRank<=Math.ceil(n*2/3)?'中位':'下位'));
-      let typ = '';
-      if (ktRank!=null){
-        if (guestRank<=Math.ceil(n/2) && ktRank>Math.ceil(n/2)) typ='＝客数で稼ぐ「客数型（単価が弱み）」';
-        else if (ktRank<=Math.ceil(n/2) && guestRank>Math.ceil(n/2)) typ='＝単価で稼ぐ「単価型（集客が弱み）」';
-        else if (guestRank<=Math.ceil(n/2) && ktRank<=Math.ceil(n/2)) typ='＝客数・単価とも上位の「総合上位」';
-        else typ='＝客数・単価とも下位で「全体的に弱い」';
-      }
-      L.push('【総評】');
-      L.push(`${base.name} はフードコート ${n}店中、売上 ${salesRank}位・客数 ${guestRank}位・客単価 ${ktRank==null?'—':ktRank+'位'}。売上シェア ${p1(share)}。`);
-      L.push(`売上は${volWord}、客単価は${ktWord}${typ}。`);
-      L.push('');
-
-      // 売上
-      L.push('【売上】');
-      L.push(`対象売上 ${yK(base.sales)}（FC平均 ${yK(avgSales)} の ${p1(relPct(base.sales,avgSales))}、中央値 ${yK(medSales)} の ${p1(relPct(base.sales,medSales))}）。`);
-      if (leader && leader!==base) L.push(`首位 ${leader.name} ${yK(leader.sales)} とは ${yK(leader.sales-base.sales)}（${(leader.sales/base.sales).toFixed(2)}倍）差。`);
-      if (above) L.push(`すぐ上：${above.name} ${yK(above.sales)}（+${yK(above.sales-base.sales)}）。`);
-      if (below) L.push(`すぐ下：${below.name} ${yK(below.sales)}（${yK(below.sales-base.sales)}）。`);
-      L.push('');
-
-      // 客数
-      L.push('【客数】');
-      L.push(`対象客数 ${base.guests!=null?nf.format(base.guests)+'人':'—'}（FC平均 ${avgGuests!=null?nf.format(Math.round(avgGuests))+'人':'—'} の ${p1(relPct(base.guests,avgGuests))}、${guestRank}位）。`);
-      L.push('');
-
-      // 客単価
-      const byKt = list.map(t=>({name:t.name,kt:ktOf(t)})).filter(x=>x.kt!=null).sort((a,b)=>b.kt-a.kt);
-      L.push('【客単価（1人あたり）】');
-      L.push(`${baseKt!=null?yK(baseKt):'—'}（FC平均 ${avgKt!=null?yK(avgKt):'—'} の ${p1(relPct(baseKt,avgKt))}、中央値 ${medKt!=null?yK(medKt):'—'} の ${p1(relPct(baseKt,medKt))}、${ktRank==null?'—':ktRank+'位'}）。`);
-      if (byKt.length) L.push(`FC内 最高 ${byKt[0].name} ${yK(byKt[0].kt)}／最低 ${byKt[byKt.length-1].name} ${yK(byKt[byKt.length-1].kt)}。`);
-      L.push('');
-
-      // 推移（単日=この日 vs 履歴／期間=期間内の推移）。新規オープンで前年対比は無い。
-      const series = baseSeriesFromReports(allReports, baseName);
-      if (periodLabel){
-        L.push('【期間内の推移】');
-        if (series.length<2){ L.push('期間内の日数が少なく、推移は出せません。'); }
-        else {
-          const half=Math.floor(series.length/2);
-          const early=avg(series.slice(0,half).map(p=>p.sales)), late=avg(series.slice(series.length-half).map(p=>p.sales));
-          const best=series.reduce((m,p)=>p.sales>m.sales?p:m, series[0]), worst=series.reduce((m,p)=>p.sales<m.sales?p:m, series[0]);
-          L.push(`対象 ${series.length}日。日平均売上 ${yK(avg(series.map(p=>p.sales)))}。`);
-          if (early&&late) L.push(`前半平均 ${yK(early)} → 後半平均 ${yK(late)}（${p1(relPct(late,early))}＝${late>=early?'上昇':'下降'}基調）。`);
-          L.push(`期間内 最高 ${fmtDay(best.when)} ${yK(best.sales)}／最低 ${fmtDay(worst.when)} ${yK(worst.sales)}。`);
-          const avgRank=avg(series.map(p=>p.salesRank));
-          if (avgRank!=null) L.push(`FC内売上順位は期間中 平均 ${(Math.round(avgRank*10)/10).toFixed(1)}位。`);
-        }
-      } else {
-        L.push('【履歴・推移（自店が基準）】');
-        L.push('※新規オープンのため前年対比はありません。毎日の蓄積（自店の履歴）を基準に評価します。');
-        const selWhen = String(report.report_date||report.created_at||'');
-        let selIdx = series.findIndex(p=>p.when===selWhen);
-        if (selIdx<0) selIdx = series.length-1;
-        const past = series.slice(0, Math.max(0, selIdx));
-        if (!series.length){
-          L.push('履歴がまだありません。');
-        } else if (!past.length){
-          L.push(`蓄積 ${series.length}日目（この日が最古のデータ）。履歴比較は日数が増えるほど精度が上がります。`);
-        } else {
-          const pastSalesAvg = avg(past.map(p=>p.sales));
-          const pastKtAvg = avg(past.map(p=>p.kt));
-          const pastRankAvg = avg(past.map(p=>p.salesRank));
-          const prev = past[past.length-1];
-          const allSales = series.map(p=>p.sales);
-          const best = Math.max.apply(null, allSales), worst = Math.min.apply(null, allSales);
-          L.push(`蓄積 ${series.length}日分。この日の売上 ${yK(base.sales)} は、自店の過去平均 ${yK(pastSalesAvg)} の ${p1(relPct(base.sales,pastSalesAvg))}（${base.sales>=pastSalesAvg?'平均以上':'平均以下'}）。`);
-          L.push(`前回(${fmtDay(prev.when)}) ${yK(prev.sales)} との差 ${yK(base.sales-prev.sales)}（${p1(prev.sales>0?(base.sales/prev.sales-1)*100:null)}）＝${base.sales>=prev.sales?'増':'減'}。`);
-          L.push(`期間中の最高 ${yK(best)}／最低 ${yK(worst)}。`);
-          if (baseKt!=null && pastKtAvg!=null) L.push(`客単価 ${yK(baseKt)} は過去平均 ${yK(pastKtAvg)} の ${p1(relPct(baseKt,pastKtAvg))}。`);
-          if (pastRankAvg!=null) L.push(`FC内 売上順位は ${salesRank}位、過去平均 ${(Math.round(pastRankAvg*10)/10).toFixed(1)}位（${salesRank<=pastRankAvg?'改善/同等':'やや後退'}）。`);
-        }
-      }
-      L.push('');
-
-      // 強み・弱み
-      L.push('【強み・弱み】');
-      const strengths=[], weaks=[];
-      if (guestRank<=Math.ceil(n/2)) strengths.push(`集客力（客数 ${guestRank}位）`); else weaks.push(`集客（客数 ${guestRank}位）`);
-      if (ktRank!=null){ if (ktRank<=Math.ceil(n/2)) strengths.push(`客単価（${ktRank}位）`); else weaks.push(`客単価（${ktRank}位・FC平均比 ${p1(relPct(baseKt,avgKt))}）`); }
-      if (share!=null && share>=100/n) strengths.push(`売上シェア ${p1(share)}（平均以上）`);
-      L.push('強み：'+(strengths.length?strengths.join('、'):'特になし'));
-      L.push('弱み：'+(weaks.length?weaks.join('、'):'特になし'));
-      L.push('');
-
-      // 打ち手（シミュレーション）
-      L.push('【打ち手（試算）】');
-      if (baseKt!=null && medKt!=null && base.guests){
-        if (medKt>baseKt){
-          const proj = Math.round(base.guests*medKt);
-          const newRank = 1+list.filter(t=>t.sales>proj).length;
-          L.push(`・客単価をFC中央値 ${yK(medKt)} に上げると（客数 ${nf.format(base.guests)}人 維持）売上は ${yK(base.sales)}→${yK(proj)}（${p1((proj/base.sales-1)*100)}増）＝売上 ${newRank}位相当。`);
-        } else {
-          L.push(`・客単価は既にFC中央値以上。強みを維持しつつ客数増が伸びしろ。`);
-        }
-      }
-      if (avgGuests!=null && base.guests!=null && avgGuests>base.guests && baseKt!=null){
-        const proj2 = Math.round(avgGuests*baseKt);
-        L.push(`・客数をFC平均 ${nf.format(Math.round(avgGuests))}人 に増やすと（単価維持）売上は ${yK(proj2)}（${p1((proj2/base.sales-1)*100)}増）。`);
-      }
-      L.push('');
-
-      L.push('【注意】業態（寿司／フレンチ／ラーメン／ビア等）で単価帯が異なるため、客単価の順位は参考程度。新規オープンで前年対比は無いため、最も確実な基準は自店の日々の履歴（推移）です。日数が増えるほど傾向の精度が上がります。');
-      return L.join('\n');
-    }
-
-    function renderExtraTables(c, report, seriesReports){
-      const units=c.rows.map(r=>r.unit).filter(x=>x!=null), guestsArr=c.rows.map(r=>r.guests).filter(x=>x!=null), salesArr=c.rows.map(r=>r.sales);
-      const avgKt=avg(units), medKt=median(units), avgGuests=avg(guestsArr), medGuests=median(guestsArr), avgSales=avg(salesArr), medSales=median(salesArr);
-
-      // 1) 売上構成比（シェア・累計）
-      let cum=0, rank=0;
-      dom.shareTbody.innerHTML = c.rows.map(r=>{ rank++; const sh=c.total>0?r.sales/c.total*100:0; cum+=sh;
-        return '<tr'+(r.isBase?' class="base"':'')+'><td>'+rank+'</td><td class="name">'+escapeHtml(r.name)+'</td><td>'+yen(r.sales)+'</td><td>'+pct(sh)+'</td><td>'+pct(cum)+'</td></tr>'; }).join('');
-      const top3 = c.rows.slice(0,3).reduce((s,r)=>s+(c.total>0?r.sales/c.total*100:0),0);
-      dom.shareNote.textContent = '上位3店で全体の '+pct(top3)+'／基準店シェア '+pct(c.share)+'。';
-
-      // 2) 客単価ランキング
-      const ktRows = c.rows.filter(r=>r.unit!=null).slice().sort((a,b)=>b.unit-a.unit);
-      let kr=0;
-      dom.ktTbody.innerHTML = ktRows.map(r=>{ kr++; return '<tr'+(r.isBase?' class="base"':'')+'><td>'+kr+'</td><td class="name">'+escapeHtml(r.name)+'</td><td>'+yen(r.unit)+'</td><td>'+pct(relPct(r.unit,avgKt))+'</td><td>'+pct(r.unitRatio)+'</td></tr>'; }).join('');
-
-      // 3) ポジショニング（客数×客単価｜FC中央値）
-      const mk = b=> b==null?'—':(b?'○':'×');
-      dom.posTbody.innerHTML = c.rows.map(r=>{
-        const gH=(r.guests!=null&&medGuests!=null)?r.guests>=medGuests:null;
-        const kH=(r.unit!=null&&medKt!=null)?r.unit>=medKt:null;
-        let typ='—'; if(gH!=null&&kH!=null) typ = gH&&kH?'総合上位':(gH&&!kH?'集客型':(!gH&&kH?'単価型':'要改善'));
-        return '<tr'+(r.isBase?' class="base"':'')+'><td class="name">'+escapeHtml(r.name)+'</td><td>'+mk(gH)+'</td><td>'+mk(kH)+'</td><td class="name">'+typ+'</td></tr>';
-      }).join('');
-
-      // 4) 分布サマリー
-      const maxBy=(arr,key)=>arr.reduce((m,x)=>(key(x)!=null&&(m==null||key(x)>key(m)))?x:m,null);
-      const minBy=(arr,key)=>arr.reduce((m,x)=>(key(x)!=null&&(m==null||key(x)<key(m)))?x:m,null);
-      const wu = c.rows.filter(r=>r.unit!=null);
-      const dist = [
-        ['対象売上', avgSales, medSales, maxBy(c.rows,r=>r.sales), minBy(c.rows,r=>r.sales), r=>yen(r.sales), false],
-        ['対象客数', avgGuests, medGuests, maxBy(c.rows,r=>r.guests), minBy(c.rows,r=>r.guests), r=>(r.guests!=null?nf.format(r.guests):'—'), true],
-        ['客単価', avgKt, medKt, maxBy(wu,r=>r.unit), minBy(wu,r=>r.unit), r=>yen(r.unit), false],
-      ];
-      dom.distTbody.innerHTML = dist.map(d=>{ const label=d[0],a=d[1],m=d[2],hi=d[3],lo=d[4],fmt=d[5],isG=d[6];
-        const fnum=v=>v==null?'—':(isG?nf.format(Math.round(v)):yen(v));
-        const cell=rr=>rr?(fmt(rr)+'（'+escapeHtml(rr.name)+'）'):'—';
-        return '<tr><td class="name">'+label+'</td><td>'+fnum(a)+'</td><td>'+fnum(m)+'</td><td class="name">'+cell(hi)+'</td><td class="name">'+cell(lo)+'</td></tr>'; }).join('');
-
-      // 5) 基準店の日次推移（蓄積データ／期間指定時はその範囲）。東京ドームのイベント列を併記。
-      const series = baseSeriesFromReports(seriesReports || reports, c.baseName);
-      if (!series.length){ dom.trendTbody.innerHTML=''; dom.trendNote.textContent='履歴なし。'; }
+    L.push('【総評】');
+    L.push(base.name+' はフードコート '+n+'店中、売上 '+salesRank+'位・客数 '+guestRank+'位・客単価 '+(ktRank==null?'—':ktRank+'位')+'。売上シェア '+p1(share)+'。');
+    L.push('売上は'+volWord+'、客単価は'+ktWord+typ+'。');
+    L.push('【売上】');
+    L.push('対象売上 '+yK(base.sales)+'（FC平均 '+yK(avgSales)+' の '+p1(relPct(base.sales,avgSales))+'、中央値 '+yK(medSales)+' の '+p1(relPct(base.sales,medSales))+'）。');
+    if (leader && leader!==base) L.push('首位 '+leader.name+' '+yK(leader.sales)+' とは '+yK(leader.sales-base.sales)+'（'+(leader.sales/base.sales).toFixed(2)+'倍）差。');
+    if (above) L.push('すぐ上：'+above.name+' '+yK(above.sales)+'（+'+yK(above.sales-base.sales)+'）。');
+    if (below) L.push('すぐ下：'+below.name+' '+yK(below.sales)+'（'+yK(below.sales-base.sales)+'）。');
+    L.push('【客数】');
+    L.push('対象客数 '+(base.guests!=null?nf.format(base.guests)+'人':'—')+'（FC平均 '+(avgGuests!=null?nf.format(Math.round(avgGuests))+'人':'—')+' の '+p1(relPct(base.guests,avgGuests))+'、'+guestRank+'位）。');
+    const byKt = list.map(t=>({name:t.name,kt:ktOf(t)})).filter(x=>x.kt!=null).sort((a,b)=>b.kt-a.kt);
+    L.push('【客単価】');
+    L.push((baseKt!=null?yK(baseKt):'—')+'（FC平均 '+(avgKt!=null?yK(avgKt):'—')+' の '+p1(relPct(baseKt,avgKt))+'、中央値 '+(medKt!=null?yK(medKt):'—')+' の '+p1(relPct(baseKt,medKt))+'、'+(ktRank==null?'—':ktRank+'位')+'）。');
+    if (byKt.length) L.push('FC内 最高 '+byKt[0].name+' '+yK(byKt[0].kt)+'／最低 '+byKt[byKt.length-1].name+' '+yK(byKt[byKt.length-1].kt)+'。');
+    const series = baseSeriesFromReports(allReports, baseName);
+    if (periodLabel){
+      L.push('【期間内の推移】');
+      if (series.length<2){ L.push('期間内の日数が少なく、推移は出せません。'); }
       else {
-        dom.trendTbody.innerHTML = series.map(p=>{ const lab=eventCell(ymdJst(p.when));
-          return '<tr><td class="name">'+fmtDay(p.when)+'</td><td>'+yen(p.sales)+'</td><td>'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td>'+(p.kt!=null?yen(p.kt):'—')+'</td><td>'+p.salesRank+'位</td><td>'+pct(p.share)+'</td><td class="name">'+lab+'</td></tr>'; }).join('');
-        dom.trendNote.textContent = '蓄積 '+series.length+'日分。毎日の画像送信で増えます。東京ドーム列＝開催イベント。';
+        const half=Math.floor(series.length/2);
+        const early=avg(series.slice(0,half).map(p=>p.sales)), late=avg(series.slice(series.length-half).map(p=>p.sales));
+        const best=series.reduce((m,p)=>p.sales>m.sales?p:m, series[0]), worst=series.reduce((m,p)=>p.sales<m.sales?p:m, series[0]);
+        L.push('対象 '+series.length+'日。日平均売上 '+yK(avg(series.map(p=>p.sales)))+'。');
+        if (early&&late) L.push('前半平均 '+yK(early)+' → 後半平均 '+yK(late)+'（'+p1(relPct(late,early))+'＝'+(late>=early?'上昇':'下降')+'基調）。');
+        L.push('期間内 最高 '+fmtDay(best.when)+' '+yK(best.sales)+'／最低 '+fmtDay(worst.when)+' '+yK(worst.sales)+'。');
+        const avgRank=avg(series.map(p=>p.salesRank));
+        if (avgRank!=null) L.push('FC内売上順位は期間中 平均 '+(Math.round(avgRank*10)/10).toFixed(1)+'位。');
       }
-      // 6) 東京ドーム イベント相関＋今後の予定
-      renderEventTables(series);
-    }
-
-    // --- 東京ドーム イベント連携 ---
-    const EVT_ICON = { 'プロ野球':'⚾', 'アマ野球':'🥎', 'ライブ':'🎤', 'その他':'🎫' };
-    function ymdJst(when){ const d=when?new Date(when):null; if(!d||isNaN(d.getTime()))return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(String(when))) return String(when).slice(0,10); const j=new Date(d.getTime()+9*3600*1000); return j.getUTCFullYear()+'-'+String(j.getUTCMonth()+1).padStart(2,'0')+'-'+String(j.getUTCDate()).padStart(2,'0'); }
-    function eventCell(ymd){ const hits=eventsByDate.get(ymd)||[]; if(!hits.length) return '—';
-      return hits.map(function(h){ const ic=EVT_ICON[h.category]||'🎫'; return '<span title="'+escapeHtml(h.title)+'">'+ic+escapeHtml(h.category||'')+'</span>'; }).join('<br>'); }
-
-    function renderEventTables(series){
-      if (!dom.evtCorrTbody) return;
-      // 相関: series（日付・客数・売上）×イベント有無で集計。
-      const withGuests = (series||[]).filter(function(p){ return p.guests!=null; });
-      const ev=[], non=[], evS=[], nonS=[], byCat={};
-      withGuests.forEach(function(p){ const ymd=ymdJst(p.when); const hits=eventsByDate.get(ymd)||[];
-        if(hits.length){ ev.push(p.guests); evS.push(p.sales); hits.forEach(function(h){ const c=h.category||'その他'; (byCat[c]=byCat[c]||[]).push(p.guests); }); }
-        else { non.push(p.guests); nonS.push(p.sales); } });
-      const evAvg=avg(ev), nonAvg=avg(non), evSa=avg(evS), nonSa=avg(nonS);
-      const rows=[];
-      const ratio=function(a){ return (nonAvg&&nonAvg>0&&a!=null)? (Math.round(a/nonAvg*100)/100).toFixed(2)+'倍' : '—'; };
-      rows.push('<tr class="base"><td class="name">イベント日</td><td>'+ev.length+'</td><td>'+(evAvg!=null?nf.format(Math.round(evAvg))+'人':'—')+'</td><td>'+(evSa!=null?yen(evSa):'—')+'</td><td>'+ratio(evAvg)+'</td></tr>');
-      rows.push('<tr><td class="name">非イベント日</td><td>'+non.length+'</td><td>'+(nonAvg!=null?nf.format(Math.round(nonAvg))+'人':'—')+'</td><td>'+(nonSa!=null?yen(nonSa):'—')+'</td><td>—</td></tr>');
-      Object.keys(byCat).sort(function(a,b){ return (avg(byCat[b])||0)-(avg(byCat[a])||0); }).forEach(function(c){ const a=avg(byCat[c]);
-        rows.push('<tr><td class="name">└ '+escapeHtml(c)+'</td><td>'+byCat[c].length+'</td><td>'+(a!=null?nf.format(Math.round(a))+'人':'—')+'</td><td>—</td><td>'+ratio(a)+'</td></tr>'); });
-      dom.evtCorrTbody.innerHTML = rows.join('');
-      if (evAvg!=null && nonAvg!=null && nonAvg>0){ const r=evAvg/nonAvg;
-        dom.evtCorrNote.textContent = 'イベント日はおおむね客数 '+(Math.round(r*100)/100).toFixed(2)+'倍（'+nf.format(Math.round(evAvg))+'人 vs '+nf.format(Math.round(nonAvg))+'人）。'+(r>=1.2?'仕込み・人員を厚めに。':(r<=0.9?'イベント日でも伸びていない点に注意。':'')); }
-      else dom.evtCorrNote.textContent = (events&&events.length)? 'イベント日の客数データが不足しています（蓄積が進むと精度が上がります）。' : '東京ドームのイベントデータがありません。';
-
-      // 今後の予定: 直近の日付以降を10件。
-      const todayJ = ymdJst(new Date().toISOString());
-      const up=(events||[]).filter(function(e){ const d=String((e&&e.event_date)||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && d>=todayJ; })
-        .sort(function(a,b){ return String(a.event_date).localeCompare(String(b.event_date)); }).slice(0,10);
-      if(!up.length){ dom.evtUpcomingTbody.innerHTML=''; dom.evtUpcomingNote.textContent=(events&&events.length)?'今後の予定はデータにありません。':'—'; }
-      else { dom.evtUpcomingTbody.innerHTML = up.map(function(e){ const d=String(e.event_date).slice(0,10); const ic=EVT_ICON[e.category]||'🎫';
-          return '<tr><td class="name">'+escapeHtml(fmtDay(d))+'('+wdayJp(d)+')</td><td class="name">'+ic+escapeHtml(e.category||'')+'</td><td class="name">'+escapeHtml(e.title||'')+'</td></tr>'; }).join('');
-        dom.evtUpcomingNote.textContent = '東京ドーム公式より自動取得（1日1回更新）。'; }
-
-      // 7) 東京ドーム イベント一覧（全期間・ジャンル絞り込み・客数併記）
-      lastSeries = series || [];
-      renderEventFilter();
-      renderEventList();
-      // 8) 東京ドーム カレンダー（月表示）
-      renderCalendar();
-    }
-
-    // --- 東京ドーム カレンダー（月表示）---
-    function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':'other'; }
-    function shorten(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
-    function eventMonthBounds(){
-      const ks=(events||[]).map(function(e){ const m=String(e.event_date||'').match(/^(\d{4})-(\d{2})/); return m?(+m[1])*12+(+m[2]-1):null; }).filter(function(x){ return x!=null; });
-      if(!ks.length) return null;
-      return { min:Math.min.apply(null,ks), max:Math.max.apply(null,ks) };
-    }
-    function calStep(delta){
-      if(!calY) return;
-      let k=calY*12+(calM-1)+delta;
-      const b=eventMonthBounds(); if(b){ k=Math.max(b.min,Math.min(b.max,k)); }
-      calY=Math.floor(k/12); calM=(k%12)+1; renderCalendar();
-    }
-    function renderCalendar(){
-      if(!dom.calGrid) return;
-      if(!events || !events.length){ dom.calGrid.innerHTML=''; dom.calLabel.textContent='—'; dom.calNote.textContent='東京ドームのイベントデータがありません。'; if(dom.calPrev)dom.calPrev.disabled=true; if(dom.calNext)dom.calNext.disabled=true; return; }
-      const b=eventMonthBounds();
-      if(!calY){ const tj=new Date(Date.now()+9*3600*1000); let k=tj.getUTCFullYear()*12+tj.getUTCMonth(); if(b){ k=Math.max(b.min,Math.min(b.max,k)); } calY=Math.floor(k/12); calM=(k%12)+1; }
-      const guestsByDate=new Map(); (lastSeries||[]).forEach(function(p){ const d=ymdJst(p.when); if(d && p.guests!=null) guestsByDate.set(d,p.guests); });
-      const todayJ=ymdJst(new Date().toISOString());
-      dom.calLabel.textContent=calY+'年'+calM+'月';
-      const first=new Date(Date.UTC(calY,calM-1,1)).getUTCDay();
-      const days=new Date(Date.UTC(calY,calM,0)).getUTCDate();
-      const WH=['日','月','火','水','木','金','土'];
-      let html=WH.map(function(w,i){ return '<div class="cal-h '+(i===0?'sun':i===6?'sat':'')+'">'+w+'</div>'; }).join('');
-      for(let i=0;i<first;i++) html+='<div class="cal-cell empty"></div>';
-      for(let d=1;d<=days;d++){
-        const ds=calY+'-'+String(calM).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-        const dow=new Date(Date.UTC(calY,calM-1,d)).getUTCDay();
-        const hits=eventsByDate.get(ds)||[];
-        const evHtml=hits.map(function(h){ const ic=EVT_ICON[h.category]||'🎫'; return '<div class="cal-ev" title="'+escapeHtml(h.title||'')+'">'+ic+escapeHtml(shorten(h.title,14))+'</div>'; }).join('');
-        const g=guestsByDate.has(ds)?'<div class="cal-g">👥'+nf.format(guestsByDate.get(ds))+'</div>':'';
-        let cls='cal-cell'; if(hits.length) cls+=' ev-'+catSlug(hits[0].category); if(ds===todayJ) cls+=' today';
-        html+='<div class="'+cls+'"><div class="cal-d '+(dow===0?'sun':dow===6?'sat':'')+'">'+d+'</div>'+evHtml+g+'</div>';
+    } else {
+      L.push('【履歴・推移（自店が基準）】');
+      L.push('※新規オープンのため前年対比はありません。毎日の蓄積（自店の履歴）を基準に評価します。');
+      const selWhen = String(report.report_date||report.created_at||'');
+      let selIdx = series.findIndex(p=>p.when===selWhen);
+      if (selIdx<0) selIdx = series.length-1;
+      const past = series.slice(0, Math.max(0, selIdx));
+      if (!series.length){ L.push('履歴がまだありません。'); }
+      else if (!past.length){ L.push('蓄積 '+series.length+'日目（この日が最古のデータ）。履歴比較は日数が増えるほど精度が上がります。'); }
+      else {
+        const pastSalesAvg = avg(past.map(p=>p.sales));
+        const pastKtAvg = avg(past.map(p=>p.kt));
+        const pastRankAvg = avg(past.map(p=>p.salesRank));
+        const prev = past[past.length-1];
+        const allSales = series.map(p=>p.sales);
+        const best = Math.max.apply(null, allSales), worst = Math.min.apply(null, allSales);
+        L.push('蓄積 '+series.length+'日分。この日の売上 '+yK(base.sales)+' は、自店の過去平均 '+yK(pastSalesAvg)+' の '+p1(relPct(base.sales,pastSalesAvg))+'（'+(base.sales>=pastSalesAvg?'平均以上':'平均以下')+'）。');
+        L.push('前回('+fmtDay(prev.when)+') '+yK(prev.sales)+' との差 '+yK(base.sales-prev.sales)+'（'+p1(prev.sales>0?(base.sales/prev.sales-1)*100:null)+'）＝'+(base.sales>=prev.sales?'増':'減')+'。');
+        L.push('期間中の最高 '+yK(best)+'／最低 '+yK(worst)+'。');
+        if (baseKt!=null && pastKtAvg!=null) L.push('客単価 '+yK(baseKt)+' は過去平均 '+yK(pastKtAvg)+' の '+p1(relPct(baseKt,pastKtAvg))+'。');
+        if (pastRankAvg!=null) L.push('FC内 売上順位は '+salesRank+'位、過去平均 '+(Math.round(pastRankAvg*10)/10).toFixed(1)+'位（'+(salesRank<=pastRankAvg?'改善/同等':'やや後退')+'）。');
       }
-      dom.calGrid.innerHTML=html;
-      if(b){ const k=calY*12+(calM-1); if(dom.calPrev)dom.calPrev.disabled=(k<=b.min); if(dom.calNext)dom.calNext.disabled=(k>=b.max); }
-      dom.calNote.textContent='色＝開催ジャンル（⚾青/🥎緑/🎤桃/🎫灰）。👥はマルゴS客数（記録のある日のみ）。◀▶で月移動。';
     }
-    function wdayJp(ymd){ const d=new Date(ymd); if(isNaN(d.getTime()))return '?'; const j=new Date(d.getTime()+9*3600*1000); return ['日','月','火','水','木','金','土'][j.getUTCDay()]; }
-
-    const EVT_FILTERS = [['all','すべて'],['プロ野球','⚾プロ野球'],['アマ野球','🥎アマ野球'],['ライブ','🎤ライブ'],['その他','🎫その他']];
-    function renderEventFilter(){
-      if(!dom.evtFilter) return;
-      dom.evtFilter.innerHTML='';
-      // データに存在するジャンルだけ（+すべて）を出す。
-      const present = new Set((events||[]).map(function(e){ return e.category||'その他'; }));
-      EVT_FILTERS.filter(function(f){ return f[0]==='all' || present.has(f[0]); }).forEach(function(f){
-        const b=document.createElement('button'); b.textContent=f[1];
-        b.className=(evtFilterVal===f[0]?'':'ghost'); b.style.cssText='padding:4px 10px;font-size:12px;min-height:32px;';
-        b.addEventListener('click', function(){ evtFilterVal=f[0]; renderEventFilter(); renderEventList(); });
-        dom.evtFilter.appendChild(b);
-      });
-    }
-    function renderEventList(){
-      if(!dom.evtListTbody) return;
-      const guestsByDate=new Map();
-      (lastSeries||[]).forEach(function(p){ const d=ymdJst(p.when); if(d && p.guests!=null) guestsByDate.set(d,p.guests); });
-      const todayJ=ymdJst(new Date().toISOString());
-      let list=(events||[]).filter(function(e){ return /^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date||'').slice(0,10)); });
-      if(evtFilterVal!=='all') list=list.filter(function(e){ return (e.category||'その他')===evtFilterVal; });
-      list=list.slice().sort(function(a,b){ return String(a.event_date).localeCompare(String(b.event_date)); });
-      if(!list.length){ dom.evtListTbody.innerHTML=''; dom.evtListNote.textContent=(events&&events.length)?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
-      dom.evtListTbody.innerHTML=list.map(function(e){ const d=String(e.event_date).slice(0,10); const ic=EVT_ICON[e.category]||'🎫';
-        const g=guestsByDate.has(d)?nf.format(guestsByDate.get(d)):'—';
-        const cls = d<todayJ ? ' class="evt-past"' : (d===todayJ ? ' class="base"' : '');
-        return '<tr'+cls+'><td class="name">'+escapeHtml(fmtDay(d))+'</td><td class="name">'+wdayJp(d)+'</td><td class="name">'+ic+escapeHtml(e.category||'')+'</td><td class="name">'+escapeHtml(e.title||'')+'</td><td>'+g+'</td></tr>';
-      }).join('');
-      const future=list.filter(function(e){ return String(e.event_date).slice(0,10)>=todayJ; }).length;
-      dom.evtListNote.textContent='全'+list.length+'件（今後'+future+'件）。薄字＝過去。客数はマルゴSの記録がある日のみ。';
-      try{ labelizeTables(); }catch(_){ }
-    }
-
-    // スマホのカード型表示用: 各表の thead 見出しを、対応する各 td に data-label として付与。
-    function labelizeTables(){
-      document.querySelectorAll('#resultArea .tbl-wrap table').forEach(function(tbl){
-        const ths = Array.prototype.map.call(tbl.querySelectorAll('thead th'), function(th){ return th.textContent.trim(); });
-        tbl.querySelectorAll('tbody tr').forEach(function(tr){
-          Array.prototype.forEach.call(tr.children, function(td, i){ if (ths[i]) td.setAttribute('data-label', ths[i]); });
-        });
-      });
-    }
-
-    function render(report, opts){
-      opts = opts || {};
-      const seriesReports = opts.seriesReports || reports;
-      const periodLabel = opts.periodLabel || null;
-      // 表示中モードのボタンを青(=ghost解除)、もう一方をghostに（フォーカス側が色付く）。
-      if (dom.rangeBtn && dom.dayBtn){ dom.rangeBtn.classList.toggle('ghost', !periodLabel); dom.dayBtn.classList.toggle('ghost', !!periodLabel); }
-      const c = computeComparison(report);
-      if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポート/期間は比較できませんでした（基準店が見つからない/データ不足）。'; return; }
-      if (!periodLabel) dom.loadMsg.textContent='';
-      dom.resultArea.hidden = false;
-      try { dom.analysis.textContent = buildAnalysisText(report, seriesReports, periodLabel); } catch(e){ dom.analysis.textContent = '分析テキストの生成に失敗しました。'; }
-      const cards = [
-        ['基準店', c.baseName],
-        ['合計売上（FC全体）', yen(c.total)],
-        ['基準店シェア', pct(c.share)],
-        ['基準店の順位', '売上 '+c.salesRank+'位 / 客数 '+c.guestRank+'位 / 単価 '+(c.unitRank||'—')+'位（'+c.count+'店）'],
-      ];
-      dom.summary.innerHTML = cards.map(x=>'<div class="metric"><div class="l">'+x[0]+'</div><div class="v">'+x[1]+'</div></div>').join('');
-
-      let rank=0;
-      dom.tbody.innerHTML = c.rows.map(r=>{ rank++; return '<tr'+(r.isBase?' class="base"':'')+'>'
-        + '<td>'+rank+'</td>'
-        + '<td class="name">'+escapeHtml(r.name)+(r.isBase?'（基準）':'')+'</td>'
-        + '<td>'+yen(r.sales)+'</td>'
-        + '<td>'+pct(r.salesRatio)+'</td>'
-        + '<td>'+(r.guests!=null?nf.format(r.guests):'—')+'</td>'
-        + '<td>'+pct(r.guestRatio)+'</td>'
-        + '<td>'+(r.unit!=null?yen(r.unit):'—')+'</td>'
-        + '<td>'+pct(r.unitRatio)+'</td>'
-        + '</tr>'; }).join('');
-
-      const maxRatio = Math.max.apply(null, c.rows.map(r=>r.salesRatio||0).concat([100]));
-      dom.bars.innerHTML = c.rows.map(r=>{
-        const w = maxRatio>0 ? Math.max(2, (r.salesRatio||0)/maxRatio*100) : 0;
-        return '<div class="bar-row"><div class="bar-name" title="'+escapeHtml(r.name)+'">'+escapeHtml(r.name)+'</div>'
-          + '<div class="bar-track"><div class="bar-fill'+(r.isBase?' base':'')+'" style="width:'+w.toFixed(1)+'%"></div></div>'
-          + '<div class="bar-val">'+pct(r.salesRatio)+'</div></div>';
-      }).join('');
-
-      try { renderExtraTables(c, report, seriesReports); } catch(e){ /* 追加表の失敗は本体表示を妨げない */ }
-      try { labelizeTables(); } catch(e){ /* ラベル付与失敗は無視（PCはthead表示） */ }
-    }
-
-    function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-
-    function populateReports(){
-      dom.reportSel.innerHTML = '';
-      if (!reports.length){ const o=document.createElement('option'); o.textContent='（データなし）'; o.value=''; dom.reportSel.appendChild(o); dom.resultArea.hidden=true; dom.loadMsg.textContent='このフードコート画像のレポートはまだありません。LINEで「テナント一覧」画像を送ると貯まります。'; return; }
-      reports.forEach((r,i)=>{ const o=document.createElement('option'); o.value=String(i); o.textContent=fmtWhen(r); dom.reportSel.appendChild(o); });
-      dom.reportSel.value='0';
-      // 期間入力の範囲・既定を蓄積データの最小〜最大日に設定。
-      const ds = reports.map(effDate).filter(Boolean).sort();
-      if (ds.length){ const lo=ds[0], hi=ds[ds.length-1];
-        dom.startD.min=lo; dom.startD.max=hi; dom.endD.min=lo; dom.endD.max=hi;
-        if(!dom.startD.value) dom.startD.value=lo; if(!dom.endD.value) dom.endD.value=hi;
+    L.push('【強み・弱み】');
+    const strengths=[], weaks=[];
+    if (guestRank<=Math.ceil(n/2)) strengths.push('集客力（客数 '+guestRank+'位）'); else weaks.push('集客（客数 '+guestRank+'位）');
+    if (ktRank!=null){ if (ktRank<=Math.ceil(n/2)) strengths.push('客単価（'+ktRank+'位）'); else weaks.push('客単価（'+ktRank+'位・FC平均比 '+p1(relPct(baseKt,avgKt))+'）'); }
+    if (share!=null && share>=100/n) strengths.push('売上シェア '+p1(share)+'（平均以上）');
+    L.push('強み：'+(strengths.length?strengths.join('、'):'特になし'));
+    L.push('弱み：'+(weaks.length?weaks.join('、'):'特になし'));
+    L.push('【打ち手（試算）】');
+    if (baseKt!=null && medKt!=null && base.guests){
+      if (medKt>baseKt){
+        const proj = Math.round(base.guests*medKt);
+        const newRank = 1+list.filter(t=>t.sales>proj).length;
+        L.push('・客単価をFC中央値 '+yK(medKt)+' に上げると（客数 '+nf.format(base.guests)+'人 維持）売上は '+yK(base.sales)+'→'+yK(proj)+'（'+p1((proj/base.sales-1)*100)+'増）＝売上 '+newRank+'位相当。');
+      } else {
+        L.push('・客単価は既にFC中央値以上。強みを維持しつつ客数増が伸びしろ。');
       }
-      render(reports[0]);
     }
-
-    function renderRange(){
-      const s=String(dom.startD.value||'').trim(), e=String(dom.endD.value||'').trim();
-      if(!s||!e){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent='開始日と終了日を指定してください。'; return; }
-      const start = s<=e?s:e, end = s<=e?e:s;
-      const agg = aggregateRange(reports, start, end);
-      if(!agg || !agg.tenants.length){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent='指定期間にデータがありません。'; return; }
-      dom.loadMsg.className='msg'; dom.loadMsg.textContent='期間 '+start+'〜'+end+'（'+agg._days+'日）の合計で表示中。';
-      render(agg, { seriesReports: agg._rangeReports, periodLabel: start+'〜'+end });
+    if (avgGuests!=null && base.guests!=null && avgGuests>base.guests && baseKt!=null){
+      const proj2 = Math.round(avgGuests*baseKt);
+      L.push('・客数をFC平均 '+nf.format(Math.round(avgGuests))+'人 に増やすと（単価維持）売上は '+yK(proj2)+'（'+p1((proj2/base.sales-1)*100)+'増）。');
     }
+    L.push('【注意】業態（寿司／フレンチ／ラーメン／ビア等）で単価帯が異なるため、客単価の順位は参考程度。新規オープンで前年対比は無いため、最も確実な基準は自店の日々の履歴（推移）です。日数が増えるほど傾向の精度が上がります。');
+    return L.join('\n');
+  }
 
-    async function loadReports(){
-      if (!getToken()){ setAuthBadge(false); return; }
-      const store = dom.storeSel.value || DEFAULT_STORE;
-      dom.loadMsg.className='msg'; dom.loadMsg.textContent='読み込み中…';
-      try {
-        const body = await apiFetch('/foodcourt/reports?store_key='+encodeURIComponent(store)+'&limit=60');
-        reports = Array.isArray(body.reports) ? body.reports : [];
-        // 東京ドームのイベント（マルゴSのみ返る）。日付索引も作る。
-        events = Array.isArray(body.events) ? body.events : [];
-        eventsByDate = new Map();
-        events.forEach(function(e){ const d=String((e&&e.event_date)||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; if(!eventsByDate.has(d)) eventsByDate.set(d,[]); eventsByDate.get(d).push(e); });
-        calY = 0; calM = 0;  // 店舗/データ切替時はカレンダー月を再初期化（当月またはデータ範囲にクランプ）。
-        // report_date（手動投入）優先＝対象日で新しい順に並べる（created_atは取込時刻のため）。
-        reports.sort((a,b)=> String((b&&(b.report_date||b.created_at))||'').localeCompare(String((a&&(a.report_date||a.created_at))||'')));
-        setAuthBadge(true);
-        dom.loadMsg.textContent='';
-        populateReports();
-      } catch(e){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent=(e&&e.message)||'読み込みに失敗しました。'; }
-    }
+  // ===== render: hero =====
+  const VS_MAX = 160;
+  function vsbar(valuePct, color){
+    const w = Math.max(0, Math.min(valuePct||0, VS_MAX)) / VS_MAX * 100;
+    const tick = 100 / VS_MAX * 100;
+    return '<div class="vsbar"><i style="width:'+w.toFixed(1)+'%'+(color?';background:'+color:'')+'"></i><span class="mid" style="left:'+tick.toFixed(1)+'%"></span></div>';
+  }
+  function rankChipCls(rank,count){ const c=count||11; if(!rank) return 'mid'; if(rank<=Math.ceil(c/3))return 'up'; if(rank>Math.ceil(c*2/3))return 'down'; return 'mid'; }
+  function initials(name){ const s=String(name||'').trim(); if(/MARUGO/i.test(s)) return 'MS'; const cl=s.replace(/[^A-Za-z0-9ぁ-んァ-ヶ一-龠]/g,''); return (cl.slice(0,2)||'FC').toUpperCase(); }
+  function kpi(label, valueHtml, rank, count, pctOfAvg){
+    const chip = rank?'<span class="rk-chip '+rankChipCls(rank,count)+'">'+rank+'位</span>':'';
+    const sub = pctOfAvg!=null ? 'FC平均の '+pctOfAvg.toFixed(1)+'%' : '';
+    return '<div class="kpi"><div class="kpi-k">'+label+'</div><div class="kpi-v">'+valueHtml+'</div><div class="kpi-sub">'+chip+sub+'</div>'+vsbar(pctOfAvg)+'</div>';
+  }
+  function renderHero(c, report, periodLabel){
+    dom.heroName.textContent = c.baseName;
+    dom.heroLogo.textContent = initials(c.baseName);
+    const whenLabel = periodLabel ? ('期間 '+periodLabel) : ('単日レポート '+(report.report_date || effDate(report) || ''));
+    dom.heroMeta.textContent = whenLabel + ' ・ フードコート ' + c.count + '店中';
+    dom.heroRanks.innerHTML = '総合 <b>売上 '+c.salesRank+'位</b> ・ <b>客数 '+c.guestRank+'位</b> ・ <b>客単価 '+(c.unitRank||'—')+'位</b>';
+    dom.heroTotals.textContent = '合計売上（FC全体）'+yen(c.total)+' ／ 自店シェア '+pct(c.share);
+    const base = c.rows.find(r=>r.isBase) || {};
+    const avgSales = avg(c.rows.map(r=>r.sales)), avgGuests = avg(c.rows.map(r=>r.guests)), avgUnit = avg(c.rows.map(r=>r.unit));
+    const medG = median(c.rows.map(r=>r.guests)), medU = median(c.rows.map(r=>r.unit));
+    const gOk = (c.baseGuests!=null&&medG!=null)?c.baseGuests>=medG:false;
+    const pOk = (c.baseUnit!=null&&medU!=null)?c.baseUnit>=medU:false;
+    const ty = gOk&&pOk?{t:'総合上位',c:'var(--good)',s:'客数・単価とも中央値以上'}
+      : gOk?{t:'集客型',c:'var(--good)',s:'集客は強い・単価が弱み'}
+      : pOk?{t:'単価型',c:'var(--warn-tx)',s:'単価は中位・集客が弱み'}
+      : {t:'要改善',c:'var(--bad)',s:'客数・単価とも中央値未満'};
+    dom.kpis.innerHTML = [
+      kpi('対象売上', '<span class="mono">'+yen(c.baseSales)+'</span>', c.salesRank, c.count, relPct(c.baseSales,avgSales)),
+      kpi('対象客数', '<span class="mono">'+(c.baseGuests!=null?nf.format(c.baseGuests):'—')+'</span><small>人</small>', c.guestRank, c.count, relPct(c.baseGuests,avgGuests)),
+      kpi('客単価', '<span class="mono">'+(c.baseUnit!=null?yen(c.baseUnit):'—')+'</span>', c.unitRank, c.count, relPct(c.baseUnit,avgUnit)),
+      '<div class="kpi"><div class="kpi-k">タイプ判定</div><div class="kpi-v" style="font-size:21px;color:'+ty.c+'">'+ty.t+'</div><div class="kpi-sub">'+ty.s+'</div><div class="vsbar"><i style="width:50%;background:'+ty.c+'"></i></div></div>',
+    ].join('');
+  }
 
-    async function connectWithToken(){
-      const t = dom.tokenInput.value.trim();
-      if (!t){ dom.authMsg.className='msg err'; dom.authMsg.textContent='トークンを入力してください。'; return; }
-      dom.tokenBtn.disabled = true;
-      try {
-        if (AUTH && AUTH.loginWithToken){
-          await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
-        } else { localStorage.setItem(TOKEN_KEY, t); }
-        setAuthBadge(true);
-        await loadReports();
-      } catch(e){ dom.authMsg.className='msg err'; dom.authMsg.textContent=(e&&e.message)||'認証に失敗しました。'; }
-      finally { dom.tokenBtn.disabled = false; }
-    }
-
-    dom.tokenBtn.addEventListener('click', connectWithToken);
-    dom.tokenInput.addEventListener('keydown', e=>{ if(e.key==='Enter') connectWithToken(); });
-    dom.qBtn.addEventListener('click', ()=>askQuestion());
-    dom.qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') askQuestion(); });
-    renderSuggestions();
-    dom.reloadBtn.addEventListener('click', loadReports);
-    dom.storeSel.addEventListener('change', loadReports);
-    dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]) render(reports[i]); });
-    dom.rangeBtn.addEventListener('click', renderRange);
-    dom.dayBtn.addEventListener('click', ()=>{ const i=Number(dom.reportSel.value)||0; if(reports[i]) render(reports[i]); });
-    if(dom.calPrev) dom.calPrev.addEventListener('click', ()=>calStep(-1));
-    if(dom.calNext) dom.calNext.addEventListener('click', ()=>calStep(1));
-
-    (async function init(){
-      captureLockedStoreFromUrl();
-      populateStores();
-      if (AUTH && AUTH.consumeUrlAuthParams){
-        try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' }); } catch(_){}
+  // ===== render: AI analysis blocks =====
+  function parseAnalysis(text){
+    const lines=String(text||'').split('\n'); const secs=[]; let cur=null;
+    lines.forEach(ln=>{ const m=ln.match(/^【([^】]+)】(.*)$/);
+      if(m){ cur={title:m[1], body:[]}; if(m[2].trim()) cur.body.push(m[2].trim()); secs.push(cur); }
+      else if(cur && ln.trim()!=='') cur.body.push(ln.trim());
+    });
+    return secs;
+  }
+  function renderAnalysisBlocks(report, seriesReports, periodLabel){
+    const text = buildAnalysisText(report, seriesReports, periodLabel);
+    const secs = parseAnalysis(text);
+    const note = secs.find(s=>s.title==='注意');
+    const FULL = { '総評':1, '打ち手（試算）':1 };
+    dom.aiGrid.innerHTML = secs.filter(s=>s.title!=='注意' && s.title!=='期間').map(s=>{
+      const full = FULL[s.title] ? ' full' : '';
+      let body;
+      if (s.title.indexOf('打ち手')>=0){
+        body = s.body.map(b=>'<div class="move"><span class="mi">→</span><span>'+escapeHtml(b.replace(/^・/,''))+'</span></div>').join('');
+      } else {
+        body = s.body.map(b=>'<p>'+escapeHtml(b)+'</p>').join('');
       }
-      setAuthBadge(!!getToken());
-      if (getToken()) await loadReports();
-    })();
+      return '<div class="ai-block'+full+'"><div class="ai-h">▍'+escapeHtml(s.title)+'</div>'+body+'</div>';
+    }).join('');
+    dom.aiNote.textContent = note ? note.body.join(' ') : '';
+  }
+
+  // ===== render: ranking / share / price / dist / classification =====
+  function renderRanking(c){
+    const maxRatio = Math.max.apply(null, c.rows.map(r=>r.salesRatio||0).concat([100]));
+    dom.rankTbody.innerHTML = c.rows.map((r,i)=>{
+      const rank=i+1; const cls=(r.isBase?'base':'')+(rank<=3?' top3':'');
+      const w = maxRatio>0 ? Math.max(2,(r.salesRatio||0)/maxRatio*100) : 0;
+      return '<tr class="'+cls.trim()+'">'
+        + '<td class="l"><span class="rkno">'+rank+'</span><span class="nm">'+escapeHtml(r.name)+'</span>'+(r.isBase?'<span style="font-size:10px;color:var(--base-tx);margin-left:7px">基準</span>':'')+'</td>'
+        + '<td class="mono">'+yen(r.sales)+'</td>'
+        + '<td><div class="cellbar'+(r.isBase?' base-bar':'')+'"><div class="track"><i style="width:'+w.toFixed(1)+'%"></i></div><span class="pc mono">'+pct(r.salesRatio)+'</span></div></td>'
+        + '<td class="mono">'+(r.guests!=null?nf.format(r.guests):'—')+'</td>'
+        + '<td class="mono '+(r.guestRatio>=100?'pos':'neg')+'">'+pct(r.guestRatio)+'</td>'
+        + '<td class="mono">'+(r.unit!=null?yen(r.unit):'—')+'</td>'
+        + '<td class="mono '+(r.unitRatio>=100?'pos':'neg')+'">'+pct(r.unitRatio)+'</td>'
+        + '</tr>';
+    }).join('');
+  }
+  function renderShare(c){
+    let cum=0;
+    dom.shareTbody.innerHTML = c.rows.map((r,i)=>{ const sh=c.total>0?r.sales/c.total*100:0; cum+=sh;
+      return '<tr class="'+(r.isBase?'base':'')+'"><td class="l"><span class="rkno">'+(i+1)+'</span><span class="nm">'+escapeHtml(r.name)+'</span></td><td class="mono">'+yen(r.sales)+'</td><td class="mono">'+pct(sh)+'</td><td class="mono neg">'+pct(cum)+'</td></tr>';
+    }).join('');
+    const top3 = c.rows.slice(0,3).reduce((s,r)=>s+(c.total>0?r.sales/c.total*100:0),0);
+    dom.shareNote.textContent = '上位3店で全体の '+pct(top3)+'／基準店シェア '+pct(c.share)+'。';
+  }
+  function renderPrice(c){
+    const avgUnit = avg(c.rows.map(r=>r.unit));
+    const byPrice = c.rows.filter(r=>r.unit!=null).slice().sort((a,b)=>b.unit-a.unit);
+    dom.priceTbody.innerHTML = byPrice.map((r,i)=>{
+      const fcp = relPct(r.unit, avgUnit);
+      return '<tr class="'+(r.isBase?'base':'')+'"><td class="l"><span class="rkno">'+(i+1)+'</span><span class="nm">'+escapeHtml(r.name)+'</span></td><td class="mono">'+yen(r.unit)+'</td><td class="mono '+(fcp>=100?'pos':'neg')+'">'+pct(fcp)+'</td><td class="mono '+(r.unitRatio>=100?'pos':'neg')+'">'+pct(r.unitRatio)+'</td></tr>';
+    }).join('');
+  }
+  function renderDist(c){
+    const metrics=[
+      {k:'対象売上', get:r=>r.sales, fmt:yen},
+      {k:'対象客数', get:r=>r.guests, fmt:v=>nf.format(Math.round(v))},
+      {k:'客単価', get:r=>r.unit, fmt:yen},
+    ];
+    const base = c.rows.find(r=>r.isBase);
+    dom.distWrap.innerHTML = metrics.map(m=>{
+      const vals=c.rows.map(m.get).filter(x=>x!=null);
+      const a=avg(vals), md=median(vals);
+      const hi=c.rows.reduce((p,x)=>(m.get(x)!=null&&(p==null||m.get(x)>m.get(p)))?x:p,null);
+      const lo=c.rows.reduce((p,x)=>(m.get(x)!=null&&(p==null||m.get(x)<m.get(p)))?x:p,null);
+      const f=v=>v==null?'—':m.fmt(v);
+      return '<div class="dcard"><div class="dcard-k">'+m.k+'</div>'
+        + '<div class="dcard-row"><span class="lab">平均</span><span class="val mono">'+f(a)+'</span></div>'
+        + '<div class="dcard-row"><span class="lab">中央値</span><span class="val mono">'+f(md)+'</span></div>'
+        + '<div class="dcard-row"><span class="lab">最高</span><span class="val mono">'+(hi?f(m.get(hi)):'—')+'</span></div>'
+        + '<div class="dcard-row"><span class="lab" style="font-size:11px">'+(hi?escapeHtml(hi.name):'')+'</span><span class="val"></span></div>'
+        + '<div class="dcard-row"><span class="lab">最低</span><span class="val mono">'+(lo?f(m.get(lo)):'—')+'</span></div>'
+        + '<div class="dcard-row base-row"><span class="lab">自店</span><span class="val mono">'+(base?f(m.get(base)):'—')+'</span></div>'
+        + '</div>';
+    }).join('');
+  }
+  function renderClassification(c){
+    const medG = median(c.rows.map(r=>r.guests)), medU = median(c.rows.map(r=>r.unit));
+    dom.clsList.innerHTML = c.rows.map(r=>{
+      const gOk=(r.guests!=null&&medG!=null)?r.guests>=medG:false;
+      const pOk=(r.unit!=null&&medU!=null)?r.unit>=medU:false;
+      const t = gOk&&pOk?{tag:'総合上位',cls:'top'}:gOk?{tag:'集客型',cls:'guest'}:pOk?{tag:'単価型',cls:'price'}:{tag:'要改善',cls:'improve'};
+      return '<div class="clsrow"><span class="cls-name" style="'+(r.isBase?'color:var(--base-tx);font-weight:700':'')+'">'+escapeHtml(r.name)+'</span>'
+        + '<span class="cls-flags"><span class="flag">客数 <span class="mk '+(gOk?'y':'n')+'">'+(gOk?'○':'×')+'</span></span><span class="flag">単価 <span class="mk '+(pOk?'y':'n')+'">'+(pOk?'○':'×')+'</span></span><span class="cls-tag '+t.cls+'">'+t.tag+'</span></span></div>';
+    }).join('');
+  }
+
+  // ===== render: trend (SVG + table) =====
+  function renderTrend(series){
+    dom.trendCount.textContent = '蓄積 '+series.length+'日';
+    dom.dailyTbody.innerHTML = series.map(p=>{ const hit=(eventsByDate.get(ymdJst(p.when))||[])[0];
+      return '<tr><td class="l mono" style="font-weight:600">'+fmtDay(p.when)+'</td><td class="mono">'+yen(p.sales)+'</td><td class="mono">'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td class="mono">'+(p.kt!=null?yen(p.kt):'—')+'</td><td class="mono">'+p.salesRank+'位</td><td class="mono neg">'+pct(p.share)+'</td><td class="l" style="padding-left:18px">'+(hit?genreTag(hit.category):'<span class="neg">—</span>')+'</td></tr>';
+    }).join('');
+    dom.trendNote.textContent = '蓄積'+series.length+'日分。毎日の画像送信で増えます。東京ドーム列＝開催イベント。';
+    drawTrend(series);
+  }
+  function drawTrend(series){
+    const svg = document.getElementById('trendSvg'); if(!svg) return;
+    if(!series.length){ svg.innerHTML=''; return; }
+    const W=900, H=200, padB=26, padT=12, n=series.length;
+    const maxS = Math.max.apply(null, series.map(d=>d.sales)) || 1;
+    const maxG = Math.max.apply(null, series.map(d=>d.guests||0)) || 1;
+    const bw = W/n, innerH = H - padB - padT; let html='';
+    series.forEach((d,i)=>{ const h=d.sales/maxS*innerH, x=i*bw+bw*0.2, w=bw*0.6, y=padT+innerH-h;
+      const hit=(eventsByDate.get(ymdJst(d.when))||[])[0]; const col=hit?'var(--bar)':'oklch(0.5 0.04 258)';
+      html += '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+Math.max(0,h).toFixed(1)+'" rx="3" fill="'+col+'" opacity="0.92"/>';
+    });
+    const pts = series.map((d,i)=>[i*bw+bw/2, padT+innerH-((d.guests||0)/maxG*innerH)]);
+    html += '<path d="'+pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')+'" fill="none" stroke="var(--base)" stroke-width="2.5" stroke-linejoin="round"/>';
+    pts.forEach(p=>{ html += '<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3" fill="var(--base)"/>'; });
+    series.forEach((d,i)=>{ const x=i*bw+bw/2; html += '<text x="'+x.toFixed(1)+'" y="'+(H-8)+'" fill="var(--tx-3)" font-size="10" text-anchor="middle" font-family="monospace">'+fmtDay(d.when)+'</text>'; });
+    svg.innerHTML = html;
+  }
+
+  // ===== render: dome correlation =====
+  function renderCorrelation(series){
+    const withG = series.filter(p=>p.guests!=null);
+    const ev=[], non=[], evS=[], nonS=[], byCat={};
+    withG.forEach(p=>{ const hit=(eventsByDate.get(ymdJst(p.when))||[])[0];
+      if(hit){ ev.push(p.guests); evS.push(p.sales); const c=hit.category||'その他'; (byCat[c]=byCat[c]||[]).push(p.guests); }
+      else { non.push(p.guests); nonS.push(p.sales); } });
+    const evAvg=avg(ev), nonAvg=avg(non), evSa=avg(evS), nonSa=avg(nonS);
+    const ratio = (evAvg!=null&&nonAvg)? evAvg/nonAvg : null;
+    dom.corrWrap.innerHTML =
+      '<div class="corr-card hl"><div class="corr-k">イベント日（'+ev.length+'日）</div><div class="corr-v mono">'+(evAvg!=null?Math.round(evAvg):'—')+'<small>人</small>'+(ratio?' <span style="font-size:14px;color:var(--base-tx)">×'+ratio.toFixed(2)+'</span>':'')+'</div><div class="corr-x">平均売上 <b>'+(evSa!=null?yen(evSa):'—')+'</b>'+(ratio?' ・ 非イベント日の <b>'+ratio.toFixed(2)+'倍</b>':'')+'</div></div>'
+      + '<div class="corr-card"><div class="corr-k">非イベント日（'+non.length+'日）</div><div class="corr-v mono">'+(nonAvg!=null?Math.round(nonAvg):'—')+'<small>人</small></div><div class="corr-x">平均売上 '+(nonSa!=null?yen(nonSa):'—')+'（基準）</div></div>';
+    const cats = Object.keys(byCat).sort((a,b)=>(avg(byCat[b])||0)-(avg(byCat[a])||0));
+    const maxCat = Math.max.apply(null, cats.map(c=>avg(byCat[c])||0).concat([1]));
+    dom.corrBreakdown.innerHTML = cats.map(c=>{ const a=avg(byCat[c]); const r=(nonAvg&&a!=null)?a/nonAvg:null;
+      return '<div class="cb-row"><span class="cbn">'+(EVT_ICON[c]||'🎫')+' '+escapeHtml(c)+'（'+byCat[c].length+'日）</span><span class="cbt"><i style="width:'+(a/maxCat*100).toFixed(0)+'%"></i></span><span class="cbv">'+Math.round(a)+'人'+(r?' ×'+r.toFixed(2):'')+'</span></div>';
+    }).join('');
+    if (evAvg!=null && nonAvg!=null && nonAvg>0){
+      const top = cats.length?cats[0]:null; const topR = top? (avg(byCat[top])/nonAvg) : null;
+      dom.corrNote.innerHTML = 'イベント日はおおむね客数 '+ratio.toFixed(2)+'倍（'+Math.round(evAvg)+'人 vs '+Math.round(nonAvg)+'人）。'+(top&&topR?'とくに<b>'+escapeHtml(top)+'は'+topR.toFixed(2)+'倍</b>。':'')+(ratio>=1.2?'仕込み・人員を厚めに。':'');
+    } else {
+      dom.corrNote.textContent = events.length ? 'イベント日の客数データが不足しています（蓄積が進むと精度が上がります）。' : '東京ドームのイベントデータがありません。';
+    }
+  }
+
+  // ===== render: dome calendar =====
+  function eventMonthBounds(){
+    const ks=(events||[]).map(e=>{ const m=String(e.event_date||'').match(/^(\d{4})-(\d{2})/); return m?(+m[1])*12+(+m[2]-1):null; }).filter(x=>x!=null);
+    if(!ks.length) return null;
+    return { min:Math.min.apply(null,ks), max:Math.max.apply(null,ks) };
+  }
+  function calStep(delta){
+    if(!calY) return;
+    let k=calY*12+(calM-1)+delta;
+    const b=eventMonthBounds(); if(b){ k=Math.max(b.min,Math.min(b.max,k)); }
+    calY=Math.floor(k/12); calM=(k%12)+1; renderCalendar();
+  }
+  function renderCalendar(){
+    if(!dom.calGrid) return;
+    if(!events.length){ dom.calGrid.innerHTML=''; dom.calMonth.textContent='—'; dom.calNote.textContent='東京ドームのイベントデータがありません。'; dom.calPrev.disabled=true; dom.calNext.disabled=true; return; }
+    const b=eventMonthBounds();
+    if(!calY){ const tj=new Date(Date.now()+9*3600*1000); let k=tj.getUTCFullYear()*12+tj.getUTCMonth(); if(b)k=Math.max(b.min,Math.min(b.max,k)); calY=Math.floor(k/12); calM=(k%12)+1; }
+    const guestsByDate=new Map(); (lastSeries||[]).forEach(p=>{ const d=ymdJst(p.when); if(d&&p.guests!=null) guestsByDate.set(d,p.guests); });
+    const todayJ=ymdJst(new Date().toISOString());
+    dom.calMonth.textContent=calY+'年'+calM+'月';
+    const first=new Date(Date.UTC(calY,calM-1,1)).getUTCDay();
+    const days=new Date(Date.UTC(calY,calM,0)).getUTCDate();
+    let html='';
+    for(let i=0;i<first;i++) html+='<div class="cell empty"></div>';
+    for(let d=1;d<=days;d++){
+      const ds=calY+'-'+String(calM).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+      const hit=(eventsByDate.get(ds)||[])[0]; const today=ds===todayJ;
+      const pill=hit?'<span class="ev-pill '+catSlug(hit.category)+'" title="'+escapeHtml(hit.title||'')+'">'+escapeHtml(shorten(hit.title,16))+'</span>':'';
+      const g=guestsByDate.has(ds)?'<span class="gc">👥 <b>'+nf.format(guestsByDate.get(ds))+'</b></span>':'';
+      html+='<div class="cell'+(today?' today':'')+'"><span class="cd">'+d+'</span>'+pill+g+'</div>';
+    }
+    dom.calGrid.innerHTML=html;
+    if(b){ const k=calY*12+(calM-1); dom.calPrev.disabled=(k<=b.min); dom.calNext.disabled=(k>=b.max); }
+    dom.calNote.textContent='色＝開催ジャンル（⚾青／🥎緑／🎤桃／🎫灰）。👥はマルゴS客数（記録のある日のみ）。';
+  }
+
+  // ===== render: dome event list =====
+  const FILTERS=[['all','すべて'],['pro','⚾ プロ野球'],['ama','🥎 アマ野球'],['live','🎤 ライブ'],['other','🎫 その他']];
+  function renderDomeFilter(){
+    const present = new Set((events||[]).map(e=>catSlug(e.category)));
+    dom.domeFilt.innerHTML = FILTERS.filter(f=>f[0]==='all'||present.has(f[0])).map(f=>'<button class="fbtn'+(domeFilter===f[0]?' active':'')+'" data-g="'+f[0]+'">'+f[1]+'</button>').join('');
+  }
+  function renderDomeList(){
+    const guestsByDate=new Map(); (lastSeries||[]).forEach(p=>{ const d=ymdJst(p.when); if(d&&p.guests!=null) guestsByDate.set(d,p.guests); });
+    const todayJ=ymdJst(new Date().toISOString());
+    let list=(events||[]).filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date||'').slice(0,10)));
+    if(domeFilter!=='all') list=list.filter(e=>catSlug(e.category)===domeFilter);
+    list=list.slice().sort((a,b)=>String(a.event_date).localeCompare(String(b.event_date)));
+    if(!list.length){ dom.domeList.innerHTML=''; dom.domeMore.style.display='none'; dom.domeNote.textContent=events.length?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
+    const shown=list.slice(0,domeLimit);
+    dom.domeList.innerHTML=shown.map(e=>{ const d=String(e.event_date).slice(0,10); const past=d<todayJ; const has=guestsByDate.has(d);
+      return '<div class="ld-row'+(past?' past':'')+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+escapeHtml(e.title||'')+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>';
+    }).join('');
+    dom.domeMore.style.display = domeLimit>=list.length ? 'none':'';
+    const future=list.filter(e=>String(e.event_date).slice(0,10)>=todayJ).length;
+    dom.domeNote.textContent='全'+list.length+'件（今後'+future+'件・表示 '+shown.length+'件）。薄字＝過去。客数はマルゴSの記録がある日のみ。';
+  }
+
+  // ===== master render =====
+  function setModeButtons(){
+    dom.rangeBtn.className = 'btn ' + (mode==='range'?'primary':'ghost');
+    dom.dayBtn.className   = 'btn ' + (mode==='single'?'primary':'ghost');
+  }
+  function render(report, opts){
+    opts = opts || {};
+    const seriesReports = opts.seriesReports || reports;
+    const periodLabel = opts.periodLabel || null;
+    const c = computeComparison(report);
+    if (!c){ dom.resultArea.hidden = true; dom.loadMsg.className='msg err'; dom.loadMsg.textContent='このレポート/期間は比較できませんでした（基準店が見つからない/データ不足）。'; return; }
+    if (!periodLabel) dom.loadMsg.textContent='';
+    dom.resultArea.hidden = false;
+    const series = baseSeriesFromReports(seriesReports, c.baseName);
+    lastSeries = series;
+    renderHero(c, report, periodLabel);
+    try { renderAnalysisBlocks(report, seriesReports, periodLabel); } catch(e){ dom.aiGrid.innerHTML='<div class="ai-block full"><p>分析テキストの生成に失敗しました。</p></div>'; }
+    renderRanking(c);
+    renderShare(c);
+    renderPrice(c);
+    renderDist(c);
+    renderClassification(c);
+    renderTrend(series);
+    renderCorrelation(series);
+    renderCalendar();
+    renderDomeFilter();
+    renderDomeList();
+  }
+
+  // ===== list / range / load =====
+  function populateReports(){
+    dom.reportSel.innerHTML = '';
+    if (!reports.length){ const o=document.createElement('option'); o.textContent='（データなし）'; o.value=''; dom.reportSel.appendChild(o); dom.resultArea.hidden=true; dom.loadMsg.textContent='このフードコート画像のレポートはまだありません。LINEで「テナント一覧」画像を送ると貯まります。'; return; }
+    reports.forEach((r,i)=>{ const o=document.createElement('option'); o.value=String(i); o.textContent=fmtWhen(r); dom.reportSel.appendChild(o); });
+    dom.reportSel.value='0';
+    const ds = reports.map(effDate).filter(Boolean).sort();
+    if (ds.length){ const lo=ds[0], hi=ds[ds.length-1];
+      dom.startD.min=lo; dom.startD.max=hi; dom.endD.min=lo; dom.endD.max=hi;
+      if(!dom.startD.value) dom.startD.value=lo; if(!dom.endD.value) dom.endD.value=hi;
+    }
+    mode='single'; setModeButtons();
+    render(reports[0]);
+  }
+  function renderRange(){
+    const s=String(dom.startD.value||'').trim(), e=String(dom.endD.value||'').trim();
+    if(!s||!e){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent='開始日と終了日を指定してください。'; return; }
+    const start = s<=e?s:e, end = s<=e?e:s;
+    const agg = aggregateRange(reports, start, end);
+    if(!agg || !agg.tenants.length){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent='指定期間にデータがありません。'; return; }
+    dom.loadMsg.className='msg'; dom.loadMsg.textContent='期間 '+start+'〜'+end+'（'+agg._days+'日）の合計で表示中。';
+    mode='range'; setModeButtons();
+    render(agg, { seriesReports: agg._rangeReports, periodLabel: start+'〜'+end });
+  }
+  async function loadReports(){
+    if (!getToken()){ setAuthBadge(false); return; }
+    const store = dom.storeSel.value || DEFAULT_STORE;
+    dom.loadMsg.className='msg'; dom.loadMsg.textContent='読み込み中…';
+    try {
+      const body = await apiFetch('/foodcourt/reports?store_key='+encodeURIComponent(store)+'&limit=60');
+      reports = Array.isArray(body.reports) ? body.reports : [];
+      events = Array.isArray(body.events) ? body.events : [];
+      eventsByDate = new Map();
+      events.forEach(e=>{ const d=String((e&&e.event_date)||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; if(!eventsByDate.has(d)) eventsByDate.set(d,[]); eventsByDate.get(d).push(e); });
+      calY = 0; calM = 0; domeFilter='all'; domeLimit=14;
+      reports.sort((a,b)=> String((b&&(b.report_date||b.created_at))||'').localeCompare(String((a&&(a.report_date||a.created_at))||'')));
+      setAuthBadge(true);
+      dom.loadMsg.textContent='';
+      populateReports();
+    } catch(e){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent=(e&&e.message)||'読み込みに失敗しました。'; }
+  }
+  async function connectWithToken(){
+    const t = dom.tokenInput.value.trim();
+    if (!t){ dom.authMsg.className='msg err'; dom.authMsg.textContent='トークンを入力してください。'; return; }
+    dom.tokenBtn.disabled = true;
+    try {
+      if (AUTH && AUTH.loginWithToken){
+        await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
+      } else { localStorage.setItem(TOKEN_KEY, t); }
+      setAuthBadge(true);
+      await loadReports();
+    } catch(e){ dom.authMsg.className='msg err'; dom.authMsg.textContent=(e&&e.message)||'認証に失敗しました。'; }
+    finally { dom.tokenBtn.disabled = false; }
+  }
+
+  // ===== events =====
+  dom.tokenBtn.addEventListener('click', connectWithToken);
+  dom.tokenInput.addEventListener('keydown', e=>{ if(e.key==='Enter') connectWithToken(); });
+  dom.qBtn.addEventListener('click', ()=>askQuestion());
+  dom.qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') askQuestion(); });
+  dom.reloadBtn.addEventListener('click', loadReports);
+  dom.storeSel.addEventListener('change', loadReports);
+  dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]){ mode='single'; setModeButtons(); render(reports[i]); } });
+  dom.rangeBtn.addEventListener('click', renderRange);
+  dom.dayBtn.addEventListener('click', ()=>{ const i=Number(dom.reportSel.value)||0; if(reports[i]){ mode='single'; setModeButtons(); render(reports[i]); } });
+  dom.calPrev.addEventListener('click', ()=>calStep(-1));
+  dom.calNext.addEventListener('click', ()=>calStep(1));
+  dom.tabrow.addEventListener('click', e=>{
+    const t = e.target.closest('.tab'); if(!t) return;
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('show', p.dataset.panel===t.dataset.tab));
+    if(t.dataset.tab==='trend') drawTrend(lastSeries);
+    window.scrollTo({top:0, behavior:'smooth'});
+  });
+  dom.domeFilt.addEventListener('click', e=>{
+    const b = e.target.closest('.fbtn'); if(!b) return;
+    domeFilter = b.dataset.g; domeLimit = 14; renderDomeFilter(); renderDomeList();
+  });
+  dom.domeMore.addEventListener('click', ()=>{ domeLimit += 20; renderDomeList(); });
+
+  renderSuggestions();
+
+  (async function init(){
+    captureLockedStoreFromUrl();
+    populateStores();
+    setModeButtons();
+    if (AUTH && AUTH.consumeUrlAuthParams){
+      try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' }); } catch(_){}
+    }
+    setAuthBadge(!!getToken());
+    if (getToken()) await loadReports();
   })();
-  </script>
+})();
+</script>
 </body>
 </html>
