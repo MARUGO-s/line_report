@@ -14,6 +14,7 @@ import {
   clearPendingReceiptDuplicate,
 } from '../_shared/receipt_duplicate.ts'
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
+import { maybeHandleFoodCourtReport } from '../_shared/foodcourt_compare.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
@@ -1210,6 +1211,33 @@ async function processReceiptImageEvent(
   // 店舗プロンプト（例: マルゴオット）が、期間/日付範囲を含む集計レポートの summary に
   // 「期間集計レポート」等のマーカーを入れることで判定する。
   const analyzedSummaryText = String(analyzed.analysis?.summary ?? '')
+
+  // フードコート「テナント一覧」レポート（v2.mallpro.jp）の自動解析（分析専用・売上には登録しない）。
+  //   対象店舗（marugoS 等）＋マーカー一致のときだけ Gemini で全テナントを抽出し、基準店=100の比較カードを返す。
+  //   表として成立しなければ handled=false で通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
+  {
+    const fcDetectText = [
+      analyzedSummaryText,
+      analyzed.analysis?.receipt?.storeName ?? '',
+      Array.isArray(analyzed.analysis?.receipt?.items) ? analyzed.analysis.receipt.items.join(' ') : '',
+    ].join(' ')
+    const fc = await maybeHandleFoodCourtReport(supabase, {
+      storeKey: String(registry.store_partition_key ?? ''),
+      roomId,
+      lineMessageId,
+      bytes: contentFetch.bytes,
+      contentType: contentFetch.contentType,
+      detectText: fcDetectText,
+      geminiApiKey: resolveGeminiApiKey(),
+      geminiModel: receiptGeminiModel,
+    })
+    if (fc.handled) {
+      if (receiptReplyToken && fc.reply) {
+        await replyLineFlex(receiptReplyToken, fc.reply, accessToken, webhookReplyLog(registry, roomId, 'foodcourt_compare'))
+      }
+      return { saved: false, replied: !!(receiptReplyToken && fc.reply), reason: 'foodcourt_compare' }
+    }
+  }
 
   // （経費の先打ち await_image 取込と reanalyzeAsExpense の定義は、精算解析を省くため上方へ移動済み。
   //   ここまで来た時点で await_image の経費 pending は無い＝以降は通常の精算レシートとして処理する。）
