@@ -803,9 +803,32 @@
       else if (guestRank<=Math.ceil(n/2) && ktRank<=Math.ceil(n/2)) typ='＝客数・単価とも上位の「総合上位」';
       else typ='＝客数・単価とも下位で「全体的に弱い」';
     }
+    // イベント・天気の文脈を各日に付与し、総評〜各章で一貫して使う（具体イベント名で考察するため前倒しで計算）。
+    const series = baseSeriesFromReports(allReports, baseName);
+    const WD = ['日','月','火','水','木','金','土'];
+    const S = series.map(p=>{ const y=ymdJst(p.when); const hit=(eventsByDate.get(y)||[])[0]; const w=weatherByDate.get(y);
+      return { when:p.when, y, dow:dowNum(y), sales:p.sales, guests:p.guests, kt:p.kt, rank:p.salesRank,
+               isEvent:!!hit, eventCat:hit?hit.category:null, eventTitle:hit?String(hit.title||''):null,
+               rainy: w?((Number(w.precipitation_mm)||0)>=1):null, tmax: w?Number(w.temp_max):null, summary: w?w.summary:null }; });
+    const evTag = (d)=>{ if(!d||!d.isEvent) return ''; const t=d.eventTitle?(d.eventTitle.length>22?d.eventTitle.slice(0,22)+'…':d.eventTitle):''; return '〔'+(d.eventCat||'')+(t?' '+t:'')+'〕'; };
+    const ctxOf = (d)=>{ if(!d) return ''; const t=[]; if(d.isEvent&&d.eventCat) t.push(d.eventCat); if(d.rainy===true) t.push('雨'); return t.length?'（'+t.join('・')+'）':''; };
+    // 東京ドームのイベント集客サマリー（総評で具体イベントに触れるための事前計算）。
+    const evDays = S.filter(d=>d.guests!=null && d.isEvent), nonDays = S.filter(d=>d.guests!=null && !d.isEvent);
+    const evGuestAvg = avg(evDays.map(d=>d.guests)), nonGuestAvg = avg(nonDays.map(d=>d.guests));
+    const evRatio = (evGuestAvg!=null && nonGuestAvg) ? evGuestAvg/nonGuestAvg : null;
+    const evCatMap = {}; evDays.forEach(d=>{ const c=d.eventCat||'その他'; (evCatMap[c]=evCatMap[c]||[]).push(d.guests); });
+    const topEvCat = Object.keys(evCatMap).map(c=>({c,a:avg(evCatMap[c])})).sort((a,b)=>b.a-a.a)[0] || null;
+    const selDayEv = (function(){ const sw=String(report.report_date||report.created_at||''); const sy=ymdJst(sw); return S.find(d=>d.when===sw)||S.find(d=>d.y===sy)||null; })();
     L.push('【総評】');
     L.push(base.name+' はフードコート '+n+'店中、売上 '+salesRank+'位・客数 '+guestRank+'位・客単価 '+(ktRank==null?'—':ktRank+'位')+'。売上シェア '+p1(share)+'。');
     L.push('売上は'+volWord+'、客単価は'+ktWord+typ+'。');
+    if (events && events.length){
+      if (periodLabel && evRatio!=null){
+        L.push('集客は東京ドームのイベントに'+(evRatio>=1.2?'強く連動':(evRatio<=1.05?'あまり連動せず':'やや連動'))+'：イベント日 平均'+Math.round(evGuestAvg)+'人／非イベント日 '+Math.round(nonGuestAvg)+'人（'+evRatio.toFixed(2)+'倍）'+(topEvCat?'。特に「'+topEvCat.c+'」開催日に伸びる':'')+'。どのイベントがどう効いたかは【東京ドーム】で具体的に考察。');
+      } else if (!periodLabel && selDayEv){
+        L.push(selDayEv.isEvent ? ('この日は東京ドームのイベント開催日'+evTag(selDayEv)+'＝集客の追い風。客数への寄与は【東京ドーム】で考察。') : 'この日は東京ドーム開催なし。集客は曜日・天候が主因（【東京ドーム】参照）。');
+      }
+    }
     if (meProf){
       L.push('ただし当施設は業態が分散し客単価帯が大きく異なるため、順位の数字だけでは評価できない。自店は'+meProf.genre+'＝'+(meProf.drink==='wine'?'施設で唯一の本格ワイン業態':'独自業態')+'。見るべきは「単価が何位か」ではなく「どんな来店動機（誰の・どの利用シーン）を・どれだけ取り込めているか」。詳細は競合環境・客単価の項で読み解く。');
     }
@@ -851,15 +874,6 @@
     if (meProf && meProf.tier==='high' && baseKt!=null && hiKt!=null && baseKt < hiKt){
       L.push('注目すべき点：自店は業態的に高単価帯（夜は¥3,000台想定）だが、実測客単価 '+yK(baseKt)+' は高単価業態の平均 '+yK(hiKt)+' を下回る。ランチ・カレー単品など軽い利用が平均を押し下げているとみられ、裏を返せば「夜のワイン×ペアリング（本来の高単価シーン）の取り込み」に最大の伸びしろがある＝単価は弱みではなく未回収。');
     }
-    const series = baseSeriesFromReports(allReports, baseName);
-    const WD = ['日','月','火','水','木','金','土'];
-    // 各日にイベント・天気の文脈を付与（深掘り分析用）。
-    const S = series.map(p=>{ const y=ymdJst(p.when); const hit=(eventsByDate.get(y)||[])[0]; const w=weatherByDate.get(y);
-      return { when:p.when, y, dow:dowNum(y), sales:p.sales, guests:p.guests, kt:p.kt, rank:p.salesRank,
-               isEvent:!!hit, eventCat:hit?hit.category:null, eventTitle:hit?String(hit.title||''):null,
-               rainy: w?((Number(w.precipitation_mm)||0)>=1):null, tmax: w?Number(w.temp_max):null, summary: w?w.summary:null }; });
-    const evTag = (d)=>{ if(!d||!d.isEvent) return ''; const t=d.eventTitle?(d.eventTitle.length>22?d.eventTitle.slice(0,22)+'…':d.eventTitle):''; return '〔'+(d.eventCat||'')+(t?' '+t:'')+'〕'; };
-    const ctxOf = (d)=>{ if(!d) return ''; const t=[]; if(d.isEvent&&d.eventCat) t.push(d.eventCat); if(d.rainy===true) t.push('雨'); return t.length?'（'+t.join('・')+'）':''; };
     if (periodLabel){
       // ===== 期間モード：期間内をディープに分析 =====
       L.push('【期間サマリー】');
@@ -871,8 +885,9 @@
         const sd=stdev(sales), cv=(sd!=null&&dAvg)?sd/dAvg*100:null;
         L.push('対象 '+S.length+'日。合計売上 '+yK(tot)+'（日平均 '+yK(dAvg)+'／中央値 '+yK(dMed)+'）。');
         if (guests.length) L.push('合計客数 '+nf.format(guests.reduce((a,b)=>a+b,0))+'人（日平均 '+nf.format(Math.round(avg(guests)))+'人）。');
-        L.push('最高 '+fmtDay(best.when)+'('+(best.dow!=null?WD[best.dow]:'?')+') '+yK(best.sales)+ctxOf(best)+'／最低 '+fmtDay(worst.when)+'('+(worst.dow!=null?WD[worst.dow]:'?')+') '+yK(worst.sales)+ctxOf(worst)+'。');
-        if (cv!=null) L.push('ばらつき：変動係数 '+cv.toFixed(0)+'%（最高は最低の '+(worst.sales>0?(best.sales/worst.sales).toFixed(1):'—')+'倍）。'+(cv>=50?'日による波が大きい。':'比較的安定。'));
+        L.push('最高 '+fmtDay(best.when)+'('+(best.dow!=null?WD[best.dow]:'?')+') '+yK(best.sales)+(best.isEvent?evTag(best):'〔ドーム開催なし〕')+'／最低 '+fmtDay(worst.when)+'('+(worst.dow!=null?WD[worst.dow]:'?')+') '+yK(worst.sales)+(worst.isEvent?evTag(worst):'〔ドーム開催なし〕')+'。');
+        if (best.isEvent) L.push('最高売上日は東京ドームの'+(best.eventCat||'イベント')+'開催'+evTag(best)+'と重なり、イベント来場客の取り込みが売上を押し上げたとみられる。'+(!worst.isEvent?'最低日はドーム開催がなく、イベントの有無が売上の振れ幅を生んでいる。':''));
+        if (cv!=null) L.push('ばらつき：変動係数 '+cv.toFixed(0)+'%（最高は最低の '+(worst.sales>0?(best.sales/worst.sales).toFixed(1):'—')+'倍）。'+(cv>=50?'日による波が大きい＝イベント日と非イベント日の差が主因。':'比較的安定。'));
       }
       L.push('【曜日パターン】');
       if (S.length<3){ L.push('日数が少なく曜日傾向はまだ出せません。'); }
