@@ -432,16 +432,28 @@ async function groqChat(
   } catch (e) { console.error('groqChat failed:', e instanceof Error ? e.message : String(e)); return { content: null, usage: null } }
 }
 
-function fcDayLabel(r: Record<string, unknown>): string {
-  const rd = String(r.report_date ?? '').trim()
-  if (/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.slice(0, 10)
-  const iso = String(r.created_at ?? '')
+function fcAddDays(ymd: string, n: number): string {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return ''
+  const dt = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + n))
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+}
+// テナント一覧は「翌朝に出る“前日”の売上比較表」。report_date はレポート発行日なので、
+// 実際の売上が発生した日は前日(-1)。AIに渡す日付・相関はすべてこの“売上日”に揃える。
+function fcSalesDate(r: Record<string, unknown>): string {
+  const rd = String((r as { report_date?: unknown }).report_date ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}/.test(rd)) return fcAddDays(rd.slice(0, 10), -1)
+  const iso = String((r as { created_at?: unknown }).created_at ?? '')
   const d = iso ? new Date(iso) : null
   if (d && !isNaN(d.getTime())) {
     const j = new Date(d.getTime() + 9 * 3600 * 1000)
-    return `${j.getUTCFullYear()}-${String(j.getUTCMonth() + 1).padStart(2, '0')}-${String(j.getUTCDate()).padStart(2, '0')}`
+    return fcAddDays(`${j.getUTCFullYear()}-${String(j.getUTCMonth() + 1).padStart(2, '0')}-${String(j.getUTCDate()).padStart(2, '0')}`, -1)
   }
   return ''
+}
+// 日次表示・相関のキーは「売上日」（report_date の前日）に統一する。
+function fcDayLabel(r: Record<string, unknown>): string {
+  return fcSalesDate(r)
 }
 
 function fcAvg(a: number[]): number | null { const x = a.filter((v) => v != null && isFinite(v)); return x.length ? x.reduce((s, v) => s + v, 0) / x.length : null }
@@ -466,7 +478,7 @@ function buildBaseInsights(reports: Array<Record<string, unknown>>, baseName: st
     const base = list.find((t) => normalizeName(t.name) === normalizeName(baseName))
     if (!base) continue
     const total = list.reduce((s, t) => s + t.sales, 0)
-    const date = (() => { const rd = String((r as { report_date?: unknown }).report_date ?? '').trim(); if (/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.slice(0, 10); return fcDayLabel(r) })()
+    const date = fcSalesDate(r) // 売上日（report_date の前日）に統一
     rows.push({ date, dow: fcDow(date), sales: base.sales, guests: base.guests, kt: (base.guests && base.guests > 0) ? base.sales / base.guests : null, rank: 1 + list.filter((t) => t.sales > base.sales).length, share: total > 0 ? base.sales / total * 100 : null })
   }
   rows.sort((a, b) => a.date.localeCompare(b.date))
@@ -517,8 +529,7 @@ function fcBaseDaily(reports: Array<Record<string, unknown>>, baseName: string):
       }
     }
     if (!base) continue
-    const rd = String((r as { report_date?: unknown }).report_date ?? '').trim()
-    const date = /^\d{4}-\d{2}-\d{2}/.test(rd) ? rd.slice(0, 10) : fcDayLabel(r)
+    const date = fcSalesDate(r) // 売上日（report_date の前日）に統一
     out.push({ date, guests: base.guests, sales: base.sales })
   }
   out.sort((a, b) => a.date.localeCompare(b.date))
@@ -691,7 +702,7 @@ export async function answerFoodCourtQuestion(
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリスト兼経営コンサルタントです。`,
     `目的は「表を見れば分かる事実の再掲」ではなく、数字の“奥”を読み解いた洞察（市場調査レベルの考察）を提供することです。`,
-    `【データの大前提・最重要】各レポートの売上・客数は「テナント一覧＝“前日の売上比較表”」から取得した数値で、実体は各レポート日付の“前日”の実績です。したがって売上に言及するときは必ず「前日（◯/◯）の売上」であることを明示し、当日・本日の売上と決して混同しないこと。イベント・天気・曜日との連動も、その売上が実際に発生した『前日』の条件で解釈する（例: レポート日付が日曜でも、その売上は土曜の実績なので“土曜の集客・土曜の東京ドームイベント”として読む）。`,
+    `【データの大前提・最重要】売上・客数は「テナント一覧＝翌朝に出る“前日”の売上比較表」由来です。ただし提供データの日付は既に『実際に売上が発生した日（売上日）』へ補正済みなので、表示された日付＝その売上が発生した実日付として扱い、それ以上ずらさないこと（重ねて前日に戻さない）。イベント・天気・曜日との連動も、その売上日の条件でそのまま解釈してよい。`,
     `【厳守・禁止】「売上は¥◯、客単価は¥◯、◯位です」のように表の値をそのまま言い換えるだけ／最大・最小をただ列挙するだけの回答は禁止。数字は根拠として最小限だけ引用し、必ず「だから何を意味するか（原因・メカニズム・顧客行動・示唆）」をセットで述べること。`,
     `【必ず市場調査として読み解く・以下を踏まえる】`,
     `(1) 競合プロファイル（各店の業態・提供する料理/飲み物・飲み中心か食事中心か）を必ず使い、“なぜその数字になるのか”を業態のメカニズムで説明する。例: 客単価の高低は業態（ワイン×スパイス＝高単価／ラーメン・ベトナム・もつ鍋＝低単価）の必然か想定外か。客数が伸びにくいのは「高単価で意思決定コストが高い業態だから」か。`,
@@ -702,7 +713,7 @@ export async function answerFoodCourtQuestion(
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
     `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
   ].join('\n')
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝前日の売上比較表」由来です。各レポートの数値は、その“前日”に発生した実績です。日付や曜日・イベント・天気と紐づけるときは必ず前日として扱い、回答では「前日（◯/◯）の売上」と明示してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}`
+  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {

@@ -707,7 +707,11 @@
   const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
   const pct = (v) => v==null ? '—' : (Math.round(Number(v)*10)/10).toFixed(1) + '%';
   const norm = (s) => String(s||'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
-  const effDate = (r) => { const rd=String((r&&r.report_date)||'').trim(); if(/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.slice(0,10); const m=String((r&&r.created_at)||'').match(/^(\d{4}-\d{2}-\d{2})/); return m?m[1]:''; };
+  const addDaysYmd = (ymd, n) => { const m=String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m) return ''; const dt=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]+n)); return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0'); };
+  // テナント一覧は「翌朝に出る“前日”の売上比較表」。report_date はレポート発行日なので、
+  // 実際の売上が発生した日は前日(-1)。表示・カレンダー・相関・予測すべてこの“売上日”で統一する。
+  const salesDateOf = (r) => { const rd=String((r&&r.report_date)||'').trim(); if(/^\d{4}-\d{2}-\d{2}/.test(rd)) return addDaysYmd(rd.slice(0,10), -1); const m=String((r&&r.created_at)||'').match(/^(\d{4}-\d{2}-\d{2})/); return m?addDaysYmd(m[1],-1):''; };
+  const effDate = (r) => salesDateOf(r);
   const EVT_ICON = { 'プロ野球':'⚾', 'アマ野球':'🥎', 'ライブ':'🎤', 'その他':'🎫' };
   const escapeHtml = (s)=> String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
   function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':'other'; }
@@ -806,7 +810,9 @@
       const j = new Date(d.getTime() + 9*3600*1000);
       label = j.getUTCFullYear()+'/'+(j.getUTCMonth()+1)+'/'+j.getUTCDate()+' '+String(j.getUTCHours()).padStart(2,'0')+':'+String(j.getUTCMinutes()).padStart(2,'0');
     } else { label = '#' + r.id; }
-    if (r.report_date) label = r.report_date + '（受信 ' + label + '）';
+    const sd = salesDateOf(r);
+    if (sd) label = sd + '（売上日／受信 ' + label + '）';
+    else if (r.report_date) label = r.report_date + '（受信 ' + label + '）';
     return label;
   }
 
@@ -860,7 +866,7 @@
       const b=li.find(t=>norm(t.name)===norm(baseName)); if(!b) return;
       const tot=li.reduce((s,t)=>s+t.sales,0);
       const k=(b.guests&&b.guests>0)?b.sales/b.guests:null;
-      out.push({ when:String(r.report_date||r.created_at||''), sales:b.sales, guests:b.guests, kt:k,
+      out.push({ when:salesDateOf(r), sales:b.sales, guests:b.guests, kt:k,
         salesRank:1+li.filter(t=>t.sales>b.sales).length, share: tot>0?b.sales/tot*100:null });
     });
     out.sort((a,b)=>a.when.localeCompare(b.when));
@@ -966,7 +972,7 @@
     const evRatio = (evGuestAvg!=null && nonGuestAvg) ? evGuestAvg/nonGuestAvg : null;
     const evCatMap = {}; evDays.forEach(d=>{ const c=d.eventCat||'その他'; (evCatMap[c]=evCatMap[c]||[]).push(d.guests); });
     const topEvCat = Object.keys(evCatMap).map(c=>({c,a:avg(evCatMap[c])})).sort((a,b)=>b.a-a.a)[0] || null;
-    const selDayEv = (function(){ const sw=String(report.report_date||report.created_at||''); const sy=ymdJst(sw); return S.find(d=>d.when===sw)||S.find(d=>d.y===sy)||null; })();
+    const selDayEv = (function(){ const sw=salesDateOf(report); const sy=ymdJst(sw); return S.find(d=>d.when===sw)||S.find(d=>d.y===sy)||null; })();
     L.push('【総評】');
     L.push(base.name+' はフードコート '+n+'店中、売上 '+salesRank+'位・客数 '+guestRank+'位・客単価 '+(ktRank==null?'—':ktRank+'位')+'。売上シェア '+p1(share)+'。');
     L.push('売上は'+volWord+'、客単価は'+ktWord+typ+'。');
@@ -1066,7 +1072,7 @@
       } else L.push('相関を出すにはデータが不足しています。');
     } else {
       // ===== 単日モード：この日を「同じ条件の日」と比べてディープ評価 =====
-      const selWhen = String(report.report_date||report.created_at||'');
+      const selWhen = salesDateOf(report);
       const selY = ymdJst(selWhen), selDow = dowNum(selY);
       const today = S.find(d=>d.when===selWhen) || S.find(d=>d.y===selY) || null;
       const others = S.filter(d=>d!==today);
@@ -1213,7 +1219,7 @@
   function renderHero(c, report, periodLabel){
     dom.heroName.textContent = c.baseName;
     dom.heroLogo.textContent = initials(c.baseName);
-    const whenLabel = periodLabel ? ('期間 '+periodLabel) : ('単日レポート '+(report.report_date || effDate(report) || ''));
+    const whenLabel = periodLabel ? ('期間 '+periodLabel) : ('売上日 '+(effDate(report) || report.report_date || ''));
     dom.heroMeta.textContent = whenLabel + ' ・ フードコート ' + c.count + '店中';
     dom.heroRanks.innerHTML = '総合 <b>売上 '+c.salesRank+'位</b> ・ <b>客数 '+c.guestRank+'位</b> ・ <b>客単価 '+(c.unitRank||'—')+'位</b>';
     dom.heroTotals.textContent = '合計売上（FC全体）'+yen(c.total)+' ／ 自店シェア '+pct(c.share);
