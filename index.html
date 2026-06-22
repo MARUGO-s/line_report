@@ -5515,7 +5515,7 @@
         </div>
         <div id="roomConfigDomeWeeklyPanel" class="room-config-calendar-inline-bulk receipt-schedule-panel" style="margin-top:12px;">
           <div class="room-config-calendar-section-title">東京ドーム 週次イベント配信</div>
-          <div class="receipt-schedule-bulk-hint">ONにすると、設定した曜日・時刻に「翌週(日〜土)」の東京ドームのイベントをまとめてLINE配信します（保存はこの Webhook の全連携ルームへ）。</div>
+          <div class="receipt-schedule-bulk-hint">ONにすると、設定した曜日・時刻に「翌週(日〜土)」の東京ドームのイベントをまとめてLINE配信します（保存は「対象ルーム」で選択中のルームのみ。ルームごとに個別でON/OFFできます）。</div>
           <div class="room-scope-modal-list" style="margin-top:0;">
             <label class="room-scope-option"><input id="roomConfigDomeWeekly" type="checkbox">東京ドームの週次イベント配信</label>
             <div class="receipt-schedule-fields">
@@ -7316,14 +7316,6 @@
     function domeWeeklyTimeToHM(v){ const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/); let h=10,mi=0; if(m){ h=Math.max(0,Math.min(23,+m[1])); mi=Math.max(0,Math.min(59,+m[2])); } return { hour:h, minute:mi }; }
     function domeWeeklyHMToTime(h,mi){ h=(h==null?10:h); mi=(mi==null?0:mi); return (h<10?'0'+h:''+h)+':'+(mi<10?'0'+mi:''+mi); }
     function setDomeWeeklyMsg(t, bad){ if(dom.roomConfigDomeWeeklyMsg){ dom.roomConfigDomeWeeklyMsg.textContent=t||''; dom.roomConfigDomeWeeklyMsg.style.color = bad ? '#e05656' : ''; } }
-    function domeWeeklyLinkedRoomIds(){
-      let ids = [];
-      if (dom.roomConfigReceiptScheduleRoomSelect && dom.roomConfigReceiptScheduleRoomSelect.options.length) {
-        ids = Array.from(dom.roomConfigReceiptScheduleRoomSelect.options).map(function(o){ return String(o.value||'').trim(); }).filter(Boolean);
-      }
-      if (!ids.length) { const r = (typeof getActiveRoomConfigRoomId==='function') ? getActiveRoomConfigRoomId() : ''; if (r) ids = [String(r).trim()]; }
-      return ids;
-    }
     let domeWeeklyLoadedRoom = null;
     async function loadDomeWeeklyPanel(){
       if (!dom.roomConfigDomeWeekly) return;
@@ -7346,18 +7338,19 @@
     }
     async function saveDomeWeeklyPanel(){
       if (!dom.roomConfigDomeWeekly) return;
-      const ids = domeWeeklyLinkedRoomIds();
-      if (!ids.length) { setDomeWeeklyMsg('連携ルームがありません。', true); return; }
+      // 週次ドーム配信は「ルームごと」の設定。全体や他ルームには波及させず、
+      // いま選択中のルームだけを更新する（個別のON/OFFを優先して効かせる）。
+      const roomId = (typeof getActiveRoomConfigRoomId==='function') ? String(getActiveRoomConfigRoomId()||'').trim() : '';
+      if (!roomId) { setDomeWeeklyMsg('対象ルームが選択されていません。', true); return; }
       const enabled = !!dom.roomConfigDomeWeekly.checked;
       const dow = parseInt(dom.roomConfigDomeWeeklyDow && dom.roomConfigDomeWeeklyDow.value, 10);
       const hm = domeWeeklyTimeToHM(dom.roomConfigDomeWeeklyTime && dom.roomConfigDomeWeeklyTime.value);
       setDomeWeeklyMsg('保存中…', false);
       if (dom.roomConfigDomeWeeklySave) dom.roomConfigDomeWeeklySave.disabled = true;
       try {
-        for (const rid of ids) {
-          await api('/foodcourt/dome-weekly', { method:'PUT', body: JSON.stringify({ room_id: rid, dome_weekly_enabled: enabled, dome_weekly_dow: isNaN(dow)?6:dow, dome_weekly_hour: hm.hour, dome_weekly_minute: hm.minute }) });
-        }
-        setDomeWeeklyMsg('保存しました（' + ids.length + 'ルーム）。', false);
+        await api('/foodcourt/dome-weekly', { method:'PUT', body: JSON.stringify({ room_id: roomId, dome_weekly_enabled: enabled, dome_weekly_dow: isNaN(dow)?6:dow, dome_weekly_hour: hm.hour, dome_weekly_minute: hm.minute }) });
+        domeWeeklyLoadedRoom = roomId; // 保存済みの値を反映済みとして扱う
+        setDomeWeeklyMsg('このルームに保存しました。', false);
       } catch(e){ setDomeWeeklyMsg((e&&e.message) || '保存に失敗しました。', true); }
       finally { if (dom.roomConfigDomeWeeklySave) dom.roomConfigDomeWeeklySave.disabled = false; }
     }
@@ -7597,6 +7590,10 @@
       }
       applyReceiptScheduleToRoomConfigModal(roomId);
       applyCalendarGmailToRoomConfigModal(roomId);
+      // 週次ドーム配信は「ルームごと」の設定なので、対象ルームを切り替えたら
+      // そのルーム自身の保存値に読み込み直す（前のルームの表示が残らないように）。
+      domeWeeklyLoadedRoom = null;
+      loadDomeWeeklyPanel();
       invalidateRoomConfigReview();
     }
 
