@@ -29,6 +29,17 @@
   <meta name="theme-color" content="#15171d">
   <title>フードコート内 売上比較</title>
   <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
+  <script>
+    /* LINE経由（?from=line / LINEアプリ内ブラウザ）は他ページへ遷移させない：
+       描画前に data-entry を立て、サイドナビのリンクが一瞬見える事故を防ぐ。
+       管理者は他ページと同じフルメニューを表示する。 */
+    (function(){try{
+      var unlocked=false; try{ unlocked = sessionStorage.getItem('line_report_admin_unlock')==='1'; }catch(_){}
+      var p=new URLSearchParams(location.search);
+      var line=!unlocked && ((p.get('from')==='line')||/Line\//i.test(String(navigator.userAgent||'')));
+      if(line)document.documentElement.setAttribute('data-entry','line');
+    }catch(_){}})();
+  </script>
   <style>
     :root{
       --bg:        oklch(0.16 0.014 256);
@@ -365,9 +376,89 @@
       .cell .gc{font-size:9px;}
       .cal-dow span{font-size:9px;}
     }
+
+    /* ===== 共通サイドナビ（他ページと同じメニュー配置）===== */
+    .ms-shell{display:grid;grid-template-columns:264px 1fr;min-height:100vh;}
+    .ms-side{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;}
+    .ms-brand{display:flex;align-items:center;gap:11px;padding:20px;border-bottom:1px solid var(--line);}
+    .ms-logo{width:38px;height:38px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;color:#fff;flex:none;}
+    .ms-bt{font-size:15px;font-weight:700;line-height:1.2;color:var(--tx-1);}
+    .ms-bs{font-size:11.5px;color:var(--tx-3);margin-top:2px;}
+    .ms-nav{flex:1;overflow-y:auto;padding:16px 12px;}
+    .ms-navlabel{font-size:11px;font-weight:600;color:var(--tx-3);letter-spacing:.08em;text-transform:uppercase;padding:0 10px;margin:18px 0 8px;}
+    .ms-navlabel:first-child{margin-top:0;}
+    .ms-navlink{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;font-size:13.5px;font-weight:500;color:var(--tx-2);text-decoration:none;cursor:pointer;transition:background .12s,color .12s;}
+    .ms-navlink:hover{background:var(--hover);color:var(--tx-1);}
+    .ms-navlink.active{background:var(--accent);color:#fff;}
+    .ms-navlink .ni{flex:none;display:flex;color:currentColor;opacity:.85;}
+    .ms-navlink .ext{margin-left:auto;display:flex;opacity:0;transition:opacity .12s;}
+    .ms-navlink:hover .ext{opacity:.7;}
+    .ms-navlink[hidden]{display:none !important;}
+    .ms-side-foot{border-top:1px solid var(--line);padding:14px 18px;}
+    .ms-conn{display:flex;align-items:center;gap:10px;}
+    .ms-cd{width:9px;height:9px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-soft);flex:none;}
+    .ms-ct{font-size:12.5px;font-weight:700;color:var(--tx-1);}
+    .ms-cs{font-size:11.5px;color:var(--tx-3);margin-top:1px;}
+    .ms-main{display:flex;flex-direction:column;min-width:0;}
+    /* LINE経由は他ページへ遷移させない：サイドナビのリンク（現在ページ以外）とラベルを隠す */
+    html[data-entry="line"] .ms-navlink:not(.active),
+    html[data-entry="line"] .ms-navlabel{display:none !important;}
+    .ms-navtoggle{display:none;position:fixed;top:10px;left:10px;z-index:70;width:42px;height:42px;padding:0;border-radius:10px;border:1px solid var(--line);background:color-mix(in srgb, var(--surface) 88%, transparent);color:var(--tx-1);cursor:pointer;align-items:center;justify-content:center;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);}
+    .ms-navtoggle:hover{background:var(--hover);}
+    .ms-nav-backdrop{display:none;position:fixed;inset:0;z-index:71;background:rgba(0,0,0,.45);}
+    @media (max-width:880px){
+      .ms-shell{grid-template-columns:1fr;}
+      .ms-navtoggle{display:inline-flex;}
+      .ms-side{position:fixed;left:0;top:0;bottom:0;height:100vh;width:270px;max-width:84vw;z-index:72;transform:translateX(-100%);transition:transform .26s ease;box-shadow:20px 0 60px -12px rgba(0,0,0,.55);}
+      .ms-side.open{transform:translateX(0);}
+      .ms-nav-backdrop.open{display:block;}
+      .phead{padding-top:58px;}      /* 固定ハンバーガーと見出しの重なりを避ける */
+    }
   </style>
 </head>
 <body>
+  <button id="msNavToggle" class="ms-navtoggle" type="button" aria-label="メニューを開閉" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div id="msNavBackdrop" class="ms-nav-backdrop" aria-hidden="true"></div>
+  <div class="ms-shell">
+    <aside class="ms-side">
+      <div class="ms-brand">
+        <span class="ms-logo">LS</span>
+        <div>
+          <div class="ms-bt">LINE Summary</div>
+          <div class="ms-bs">Admin Console</div>
+        </div>
+      </div>
+      <nav class="ms-nav">
+        <div class="ms-navlabel">メニュー</div>
+        <a class="ms-navlink" href="index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span>接続設定</a>
+        <a class="ms-navlink" href="index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>利用状況</a>
+        <a class="ms-navlink" href="index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></span>Webhook設定</a>
+        <a class="ms-navlink" href="index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg></span>ログ</a>
+        <a class="ms-navlink" href="index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg></span>ユーザー権限</a>
+
+        <div class="ms-navlabel">ページ</div>
+        <a class="ms-navlink" href="media.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>メディア閲覧<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="message-search.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>会話検索<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="reservation.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>予約表<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="analytics.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg></span>売上分析<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink active" aria-current="page"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v7a2 2 0 0 0 2 2 2 2 0 0 0 2-2V3"/><path d="M6 12v9"/><path d="M16 3c-1.6 0-3 1.8-3 4s1.4 4 3 4v10"/></svg></span>フードコート分析</a>
+        <a class="ms-navlink" href="ai-usage.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-1 5 3 3 0 0 1-4 2 3 3 0 0 1-4-2 3 3 0 0 1-1-5 3 3 0 0 1 2-5 3 3 0 0 1 3-3Z"/><path d="M12 8v8M9 12h6"/></svg></span>AI使用料<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="petty_cash.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M21 9h-6a3 3 0 0 0 0 6h6a1 1 0 0 0 1-1V10a1 1 0 0 0-1-1z"/></svg></span>小口現金<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+      </nav>
+      <div class="ms-side-foot">
+        <div class="ms-conn">
+          <span class="ms-cd"></span>
+          <div>
+            <div class="ms-ct">接続済み</div>
+            <div class="ms-cs mono">hocbnifuactbvmyjraxy</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="ms-main">
 <div class="wrap">
 
   <!-- page head -->
@@ -559,6 +650,8 @@
 
   </div>
 </div>
+    </div><!-- /.ms-main -->
+  </div><!-- /.ms-shell -->
 
 <!-- 日別ポップアップ（カレンダー／一覧クリックで売上・客数・イベントを表示） -->
 <div class="dp-modal" id="dpModal" aria-hidden="true">
@@ -1572,6 +1665,23 @@
     if (getToken()) await loadReports();
   })();
 })();
+</script>
+<script>
+  /* スマホ用ハンバーガーメニューの開閉（PCでは未使用・他ページと共通） */
+  (function(){
+    var toggle = document.getElementById('msNavToggle');
+    var drawer = document.querySelector('.ms-side');
+    var backdrop = document.getElementById('msNavBackdrop');
+    function setOpen(open){
+      if (drawer) drawer.classList.toggle('open', open);
+      if (backdrop) backdrop.classList.toggle('open', open);
+      if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    if (toggle) toggle.addEventListener('click', function(){ setOpen(!(drawer && drawer.classList.contains('open'))); });
+    if (backdrop) backdrop.addEventListener('click', function(){ setOpen(false); });
+    if (drawer) drawer.addEventListener('click', function(e){ if (e.target.closest && e.target.closest('.ms-navlink')) setOpen(false); });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setOpen(false); });
+  })();
 </script>
 </body>
 </html>
