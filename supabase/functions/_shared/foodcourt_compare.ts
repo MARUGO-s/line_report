@@ -90,9 +90,12 @@ function tenantsFromParsed(parsed: Record<string, unknown> | null): FoodCourtTen
     const o = (r && typeof r === 'object') ? r as Record<string, unknown> : {}
     const name = String(o.name ?? '').trim()
     if (!name) continue
+    const code = o.code != null ? String(o.code).replace(/[^\d]/g, '').slice(0, 12) || null : null
+    // OCR誤読対策: 安定codeがあれば正規店名へ寄せ、無ければ既知エイリアスを補正してから保存する。
+    const canonName = (code && FC_CODE_TO_NAME[code]) ? FC_CODE_TO_NAME[code] : (FC_NAME_ALIASES[name] || name)
     tenants.push({
-      name: name.slice(0, 60),
-      code: o.code != null ? String(o.code).replace(/[^\d]/g, '').slice(0, 12) || null : null,
+      name: canonName.slice(0, 60),
+      code,
       sales: numOrNull(o.sales),
       guests: numOrNull(o.guests),
       compSales: numOrNull(o.comp_sales),
@@ -258,6 +261,31 @@ export function computeFoodCourtComparison(tenants: FoodCourtTenant[], baseName:
 
 function normalizeName(s: string): string {
   return String(s ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '')
+}
+
+// FOOD STADIUM TOKYO の安定POSコード→正規店名。OCRで name が誤読（獺月/蟬月/パインセオ/ビアー等）でも
+// code で同定して正しい11店に寄せる。店舗数が11を超えて分析がブレるのを防ぐ。code未知は名前を尊重。
+const FC_CODE_TO_NAME: Record<string, string> = {
+  '5092133': 'クラフトビアマーケット', '5092134': 'ベトナム屋台バインセオサイゴン', '5092135': '新御茶ノ水 萬龍',
+  '5092136': 'ニュー大金星', '5092137': 'A destra Salvatore', '5092138': '蟻月', '5092139': 'チャルモゴッソヨ',
+  '5092140': 'ラーメン＆酒バル 麺屋一燈', '5092141': '台湾点心とビール 恒久飯店', '5092143': '水道橋 すしわさび', '5092162': 'MARUGO S',
+}
+const FC_NAME_ALIASES: Record<string, string> = {
+  'クラフトビアーマーケット': 'クラフトビアマーケット', 'チャルモゴッツォヨ': 'チャルモゴッソヨ',
+  'ベトナム屋台パインセオサイゴン': 'ベトナム屋台バインセオサイゴン', '獺月': '蟻月', '蟬月': '蟻月',
+}
+function canonFoodcourtReports(reports: Array<Record<string, unknown>>): void {
+  for (const r of reports || []) {
+    const raw = Array.isArray((r as { tenants?: unknown }).tenants) ? (r as { tenants?: unknown[] }).tenants as unknown[] : []
+    for (const t of raw) {
+      if (!t || typeof t !== 'object') continue
+      const o = t as Record<string, unknown>
+      const code = o.code != null ? String(o.code).replace(/[^\d]/g, '') : ''
+      if (code && FC_CODE_TO_NAME[code]) { o.name = FC_CODE_TO_NAME[code]; continue }
+      const nm = String(o.name ?? '').trim()
+      if (FC_NAME_ALIASES[nm]) o.name = FC_NAME_ALIASES[nm]
+    }
+  }
 }
 
 function fieldRow(label: string, value: string): Record<string, unknown> {
@@ -572,6 +600,7 @@ export async function answerFoodCourtQuestion(
   if (!groqApiKey) return null
   const q = String(question ?? '').trim().slice(0, 500)
   if (!q) return null
+  canonFoodcourtReports(reports) // OCR誤読の店名を安定codeで正規化し、11店として一貫分析する
   const blocks: string[] = []
   for (const r of (reports || []).slice(0, 45)) {
     const rawTenants = Array.isArray((r as { tenants?: unknown }).tenants) ? (r as { tenants?: unknown[] }).tenants as unknown[] : []

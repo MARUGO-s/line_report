@@ -737,6 +737,33 @@
   ];
   const profileOf = (name)=> STORE_PROFILES.find(p=>norm(p.n)===norm(name)) || null;
 
+  // FOOD STADIUM TOKYO の安定POSコード→正規店名。OCRで name が誤読（獺月/蟬月/パインセオ/ビアー等）でも
+  // code で同定して正しい11店に寄せる（取込側の表記ゆれ対策。集計の店舗数が11を超えるのを防ぐ）。
+  // code が未知（新規テナント等）なら名前を尊重して勝手に統合しない。
+  const CODE_TO_NAME = {
+    '5092133':'クラフトビアマーケット','5092134':'ベトナム屋台バインセオサイゴン','5092135':'新御茶ノ水 萬龍',
+    '5092136':'ニュー大金星','5092137':'A destra Salvatore','5092138':'蟻月','5092139':'チャルモゴッソヨ',
+    '5092140':'ラーメン＆酒バル 麺屋一燈','5092141':'台湾点心とビール 恒久飯店','5092143':'水道橋 すしわさび','5092162':'MARUGO S'
+  };
+  // code が無い古いデータ向けの名称エイリアス（既知の誤読のみ・保険）。
+  const NAME_ALIASES = {
+    'クラフトビアーマーケット':'クラフトビアマーケット','チャルモゴッツォヨ':'チャルモゴッソヨ',
+    'ベトナム屋台パインセオサイゴン':'ベトナム屋台バインセオサイゴン','獺月':'蟻月','蟬月':'蟻月'
+  };
+  function canonicalizeReports(reps){
+    (Array.isArray(reps)?reps:[]).forEach(r=>{
+      if (!r || !Array.isArray(r.tenants)) return;
+      r.tenants.forEach(t=>{
+        if (!t) return;
+        const code = (t.code!=null) ? String(t.code) : '';
+        if (code && CODE_TO_NAME[code]) { t.name = CODE_TO_NAME[code]; return; }
+        const nm = String(t.name||'').trim();
+        if (NAME_ALIASES[nm]) t.name = NAME_ALIASES[nm];
+      });
+    });
+    return reps;
+  }
+
   function buildAnalysisText(report, allReports, periodLabel){
     const list = (report.tenants||[]).map(t=>({
       name:String((t&&t.name)||''),
@@ -1315,7 +1342,7 @@
     dom.loadMsg.className='msg'; dom.loadMsg.textContent='読み込み中…';
     try {
       const body = await apiFetch('/foodcourt/reports?store_key='+encodeURIComponent(store)+'&limit=60');
-      reports = Array.isArray(body.reports) ? body.reports : [];
+      reports = canonicalizeReports(Array.isArray(body.reports) ? body.reports : []);
       events = Array.isArray(body.events) ? body.events : [];
       eventsByDate = new Map();
       events.forEach(e=>{ const d=String((e&&e.event_date)||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; if(!eventsByDate.has(d)) eventsByDate.set(d,[]); eventsByDate.get(d).push(e); });
