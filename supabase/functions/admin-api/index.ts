@@ -7501,11 +7501,30 @@ async function fetchAiUsageCostState(
     bucket.total_tokens += Number(r.total_tokens ?? 0) || 0
   }
 
+  // モデル別の実測トークン（provider×model 粒度）。AI使用料をモデル別の公式単価で正確に計算するため。
+  const { data: modelData, error: modelError } = await supabase.rpc("ai_usage_model_totals", { p_from, p_to })
+  if (modelError) {
+    throw { status: 500, message: `ai_usage_model_totals failed: ${modelError.message}` } satisfies AppError
+  }
+  const models = (Array.isArray(modelData) ? modelData : []).map((raw) => {
+    const r = raw as Record<string, unknown>
+    return {
+      provider: String(r.provider ?? ""),
+      model: String(r.model ?? "(unknown)"),
+      event_count: Number(r.event_count ?? 0) || 0,
+      input_tokens: Number(r.input_tokens ?? 0) || 0,
+      output_tokens: Number(r.output_tokens ?? 0) || 0,
+      thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
+      total_tokens: Number(r.total_tokens ?? 0) || 0,
+    }
+  })
+
   return {
     period: { from: p_from, to: p_to },
     gemini,
     groq,
     claude,
+    models,
     generated_at: new Date().toISOString(),
   }
 }

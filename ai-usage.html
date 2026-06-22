@@ -500,6 +500,18 @@
             </details>
           </section>
 
+          <!-- モデル別コスト内訳（最も正確・実測トークン×モデル別単価） -->
+          <details class="assump" id="modelBox" open>
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              モデル別コスト内訳（最も正確）
+            </summary>
+            <div class="assump-body">
+              <p class="ms-sub" style="margin-top:4px">同じプロバイダでもモデルごとに単価が違うため（例: Groq の Vision=llama-4-scout と チャット=llama-3.3-70b）、実測トークンをモデル別の公式単価で合算した内訳です。上の各カードの金額もこの方式で計算しています。</p>
+              <div id="modelBrkBody"></div>
+            </div>
+          </details>
+
           <!-- 料金の前提条件（編集可） -->
           <details class="assump" id="assumpBox">
             <summary>
@@ -509,10 +521,16 @@
             <div class="assump-body">
               <p class="ms-sub" style="margin-top:4px">トークン数はAPIの実測値を使うため入力不要です。ここでは100万トークンあたりの<strong>公式単価（USD）</strong>と為替レートのみ設定します。値はこのブラウザに保存され、次回も使われます。</p>
 
-              <div class="card-h" style="margin-top:18px"><span class="ch-t" style="font-size:14px">Groq（その他全店）</span><span class="ch-tag mono" id="groqModelLabel"></span></div>
+              <div class="card-h" style="margin-top:18px"><span class="ch-t" style="font-size:14px">Groq Vision（レシート/画像抽出・llama-4-scout）</span><span class="ch-tag mono" id="groqModelLabel"></span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="groq_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="groq_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              </div>
+
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Groq Chat（フードコートQ&amp;A・ドーム抽出・llama-3.3-70b）</span></div>
+              <div class="rate-grid">
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="groqChat_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="groqChat_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
               <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini（ソバージュ・鮨こるり）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
@@ -557,14 +575,24 @@
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
     // 単価は各社の公式単価（USD / 100万トークン）。Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
-    // Groq llama-4-scout の目安は $0.11/$0.34。Claude Haiku 4.5 は $1/$5（公式）。
-    // トークン数は実測値を使うため、ここには持たない。
+    // Groq llama-4-scout（レシート/画像抽出）の目安は $0.11/$0.34。Claude Haiku 4.5 は $1/$5（公式）。
+    // フードコートQ&A・ドーム抽出は Groq llama-3.3-70b（目安 $0.59/$0.79）で別単価。
+    // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
     const DEFAULT_RATES = {
-      groq:   { inUsd: 0.11, outUsd: 0.34 },
-      gemini: { inUsd: 2.00, outUsd: 12.00 },
-      claude: { inUsd: 1.00, outUsd: 5.00 },
+      groq:     { inUsd: 0.11, outUsd: 0.34 },   // llama-4-scout（Vision/レシート・画像抽出）
+      groqChat: { inUsd: 0.59, outUsd: 0.79 },   // llama-3.3-70b-versatile（フードコートQ&A・ドームLLM）
+      gemini:   { inUsd: 2.00, outUsd: 12.00 },
+      claude:   { inUsd: 1.00, outUsd: 5.00 },
       jpyPerUsd: 155,
     };
+    // 実測ログの model 名 → 単価キーの対応。未知の groq モデルはチャット扱い（scout以外）。
+    function rateKeyForModel(provider, model) {
+      const m = String(model || '').toLowerCase();
+      if (provider === 'groq') return (m.indexOf('scout') >= 0 || m.indexOf('vision') >= 0) ? 'groq' : 'groqChat';
+      if (provider === 'gemini') return 'gemini';
+      if (provider === 'claude') return 'claude';
+      return 'groq';
+    }
 
     const state = {
       period: 'this-month',
@@ -627,7 +655,7 @@
         if (!raw) return cloneRates(DEFAULT_RATES);
         const parsed = JSON.parse(raw);
         const out = cloneRates(DEFAULT_RATES);
-        ['groq', 'gemini', 'claude'].forEach(function (p) {
+        ['groq', 'groqChat', 'gemini', 'claude'].forEach(function (p) {
           if (parsed && parsed[p]) {
             ['inUsd', 'outUsd'].forEach(function (k) {
               const v = Number(parsed[p][k]);
@@ -643,6 +671,7 @@
     function cloneRates(r) {
       return {
         groq: Object.assign({}, r.groq),
+        groqChat: Object.assign({}, r.groqChat),
         gemini: Object.assign({}, r.gemini),
         claude: Object.assign({}, r.claude),
         jpyPerUsd: r.jpyPerUsd,
@@ -655,6 +684,8 @@
       const r = state.rates;
       document.getElementById('groq_inUsd').value = r.groq.inUsd;
       document.getElementById('groq_outUsd').value = r.groq.outUsd;
+      document.getElementById('groqChat_inUsd').value = r.groqChat.inUsd;
+      document.getElementById('groqChat_outUsd').value = r.groqChat.outUsd;
       document.getElementById('gemini_inUsd').value = r.gemini.inUsd;
       document.getElementById('gemini_outUsd').value = r.gemini.outUsd;
       document.getElementById('claude_inUsd').value = r.claude.inUsd;
@@ -671,6 +702,10 @@
         groq: {
           inUsd: num('groq_inUsd', d.groq.inUsd),
           outUsd: num('groq_outUsd', d.groq.outUsd),
+        },
+        groqChat: {
+          inUsd: num('groqChat_inUsd', d.groqChat.inUsd),
+          outUsd: num('groqChat_outUsd', d.groqChat.outUsd),
         },
         gemini: {
           inUsd: num('gemini_inUsd', d.gemini.inUsd),
@@ -735,9 +770,28 @@
     }
     function fmtJpy(n) { return '¥' + Math.round(Number(n || 0)).toLocaleString('ja-JP'); }
 
-    /* ---------- コスト計算（実測トークン × 公式単価） ---------- */
+    /* ---------- コスト計算（実測トークン × モデル別 公式単価） ---------- */
     function providerUsd(inputTokens, outputTokens, rate) {
       return (Number(inputTokens || 0) * rate.inUsd + Number(outputTokens || 0) * rate.outUsd) / 1e6;
+    }
+    // 思考トークンは出力として課金されるため出力側に含める（無ければ0）。
+    function modelUsd(m) {
+      const rate = state.rates[rateKeyForModel(m.provider, m.model)] || DEFAULT_RATES.groq;
+      const inTok = Number(m.input_tokens || 0);
+      const outTok = Number(m.output_tokens || 0) + Number(m.thinking_tokens || 0);
+      return (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
+    }
+    // provider の合計USD＝そのproviderの各モデルをモデル別単価で合算（最も正確）。
+    // models が無い旧レスポンスのときだけ従来のprovider一括計算にフォールバック。
+    function providerUsdAccurate(provider, fallbackBucket) {
+      const models = (state.data && Array.isArray(state.data.models))
+        ? state.data.models.filter(function (m) { return m.provider === provider; })
+        : null;
+      if (models && models.length) {
+        return models.reduce(function (s, m) { return s + modelUsd(m); }, 0);
+      }
+      const b = fallbackBucket || EMPTY_BUCKET;
+      return providerUsd(b.input_tokens, b.output_tokens, state.rates[provider] || DEFAULT_RATES[provider]);
     }
 
     /* ---------- 描画 ---------- */
@@ -769,7 +823,7 @@
 
     function renderProvider(prefix, bucket, rate, jpyPerUsd, modelText) {
       const b = bucket || EMPTY_BUCKET;
-      const usd = providerUsd(b.input_tokens, b.output_tokens, rate);
+      const usd = providerUsdAccurate(prefix, b);
       const jpy = usd * jpyPerUsd;
       const perCall = b.event_count ? jpy / b.event_count : 0;
 
@@ -809,6 +863,49 @@
       // Gemini 固有: 思考トークンの内訳サブ
       const m = data.gemini || EMPTY_BUCKET;
       document.getElementById('geminiThinking').textContent = 'うち思考 ' + fmtInt(m.thinking_tokens) + ' トークン';
+
+      renderModelBreakdown();
+    }
+
+    // モデル別の正確な内訳（実測トークン × モデル別単価）。groqのscout/70bなど同一プロバイダ複数モデルを分けて表示。
+    const MODEL_LABELS = {
+      'meta-llama/llama-4-scout-17b-16e-instruct': 'レシート/画像抽出（Vision）',
+      'llama-3.3-70b-versatile': 'フードコートQ&A・ドーム抽出',
+      'gemini-3.1-pro-preview': 'レシート解析（Gemini）',
+      'claude-haiku-4-5': '経費レシート解析',
+    };
+    function renderModelBreakdown() {
+      const el = document.getElementById('modelBrkBody');
+      if (!el) return;
+      const models = (state.data && Array.isArray(state.data.models)) ? state.data.models.slice() : [];
+      if (!models.length) {
+        el.innerHTML = '<p class="statusline">モデル別の実測ログがまだありません。</p>';
+        return;
+      }
+      const jpyPerUsd = state.rates.jpyPerUsd;
+      models.sort(function (a, b) { return modelUsd(b) - modelUsd(a); });
+      let totalJpy = 0;
+      const rows = models.map(function (mm) {
+        const rate = state.rates[rateKeyForModel(mm.provider, mm.model)] || DEFAULT_RATES.groq;
+        const jpy = modelUsd(mm) * jpyPerUsd;
+        totalJpy += jpy;
+        const use = MODEL_LABELS[mm.model] || '';
+        return '<tr>' +
+          '<td style="text-align:left"><span class="mono">' + escapeHtml(mm.model) + '</span>' +
+          (use ? '<br><span class="ms-sub" style="font-size:11px">' + escapeHtml(use) + '</span>' : '') + '</td>' +
+          '<td>' + escapeHtml(mm.provider) + '</td>' +
+          '<td>' + fmtInt(mm.input_tokens) + '</td>' +
+          '<td>' + fmtInt(Number(mm.output_tokens || 0) + Number(mm.thinking_tokens || 0)) + '</td>' +
+          '<td class="mono">$' + rate.inUsd + ' / $' + rate.outUsd + '</td>' +
+          '<td>' + fmtJpy(jpy) + '</td>' +
+          '</tr>';
+      }).join('');
+      el.innerHTML = '<table class="brk-table">' +
+        '<thead><tr><th style="text-align:left">モデル（用途）</th><th>提供</th><th>入力Tok</th><th>出力Tok</th><th>単価(in/out USD/1M)</th><th>概算</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '<tfoot><tr><td colspan="5" style="text-align:right;font-weight:700">合計</td><td style="font-weight:700">' + fmtJpy(totalJpy) + '</td></tr></tfoot>' +
+        '</table>' +
+        '<p class="ms-sub" style="margin:8px 2px 0;font-size:12px">※ 出力Tokは課金対象の思考トークンを含む。モデルごとに公式単価を当てて合算（プロバイダ一括より正確）。</p>';
     }
 
     function escapeHtml(value) {
