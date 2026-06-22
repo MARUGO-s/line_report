@@ -295,9 +295,11 @@
     .fbtn{font-size:12.5px;font-weight:600;color:var(--tx-2);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:7px 14px;display:inline-flex;align-items:center;gap:6px;}
     .fbtn:hover{border-color:var(--accent);}
     .fbtn.active{color:#fff;background:var(--accent);border-color:transparent;}
-    .ld-list{margin-top:8px;}
+    .ld-list{margin-top:8px;position:relative;max-height:560px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
     .ld-row{display:grid;grid-template-columns:62px 34px 1fr auto;gap:12px;align-items:center;padding:11px 4px;border-bottom:1px solid var(--line-soft);font-size:13px;}
     .ld-row.past{opacity:.5;}
+    .ld-row.today{box-shadow:inset 3px 0 0 var(--accent);}
+    .ld-today-sep{position:sticky;top:0;z-index:2;margin:6px 0;padding:7px 10px;font-size:11.5px;font-weight:700;color:#fff;background:var(--accent);border-radius:999px;text-align:center;}
     .ld-row .ld-d{color:var(--tx-2);font-weight:600;}
     .ld-row .ld-w{color:var(--tx-3);text-align:center;}
     .ld-row .ld-ev{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -1276,24 +1278,33 @@
     const present = new Set((events||[]).map(e=>catSlug(e.category)));
     dom.domeFilt.innerHTML = FILTERS.filter(f=>f[0]==='all'||present.has(f[0])).map(f=>'<button class="fbtn'+(domeFilter===f[0]?' active':'')+'" data-g="'+f[0]+'">'+f[1]+'</button>').join('');
   }
+  function scrollDomeToToday(){
+    const a=document.getElementById('domeTodayAnchor');
+    if(a && dom.domeList) dom.domeList.scrollTop=Math.max(0, a.offsetTop-4);
+  }
   function renderDomeList(){
     const guestsByDate=new Map(); (lastSeries||[]).forEach(p=>{ const d=ymdJst(p.when); if(d&&p.guests!=null) guestsByDate.set(d,p.guests); });
     const todayJ=ymdJst(new Date().toISOString());
     let list=(events||[]).filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date||'').slice(0,10)));
     if(domeFilter!=='all') list=list.filter(e=>catSlug(e.category)===domeFilter);
-    // 今日を先頭に：今日以降を昇順で上に、過去は新しい順で下に。
     const dOf=e=>String(e.event_date).slice(0,10);
-    const fut=list.filter(e=>dOf(e)>=todayJ).sort((a,b)=>dOf(a).localeCompare(dOf(b)));
-    const pst=list.filter(e=>dOf(e)<todayJ).sort((a,b)=>dOf(b).localeCompare(dOf(a)));
-    list=fut.concat(pst);
+    // 時系列（過去→未来）に並べ、スクロール領域で表示。初期位置は「今日」アンカーに合わせ、
+    // 上にスクロール＝過去のイベント、下＝今後の予定。
+    list=list.slice().sort((a,b)=>dOf(a).localeCompare(dOf(b)));
     if(!list.length){ dom.domeList.innerHTML=''; dom.domeMore.style.display='none'; dom.domeNote.textContent=events.length?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
-    const shown=list.slice(0,domeLimit);
-    dom.domeList.innerHTML=shown.map(e=>{ const d=String(e.event_date).slice(0,10); const past=d<todayJ; const has=guestsByDate.has(d);
-      return '<div class="ld-row'+(past?' past':'')+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+escapeHtml(e.title||'')+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>';
-    }).join('');
-    dom.domeMore.style.display = domeLimit>=list.length ? 'none':'';
-    const future=list.filter(e=>String(e.event_date).slice(0,10)>=todayJ).length;
-    dom.domeNote.textContent='全'+list.length+'件（今後'+future+'件・表示 '+shown.length+'件）。今日以降を上に・過去は下（薄字）。客数はマルゴSの記録がある日のみ。';
+    const rowHtml=e=>{ const d=dOf(e); const past=d<todayJ; const has=guestsByDate.has(d);
+      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+escapeHtml(e.title||'')+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>'; };
+    const sepHtml=label=>'<div class="ld-today-sep" id="domeTodayAnchor">'+label+'</div>';
+    const todayLbl='今日 '+fmtDay(todayJ)+'（'+wdayJp(todayJ)+'）';
+    const futIdx=list.findIndex(e=>dOf(e)>=todayJ);
+    let html='';
+    if(futIdx<0){ html=list.map(rowHtml).join('')+sepHtml(todayLbl+'　▲ 上に過去のイベント（今後の予定は未取得）'); }
+    else { list.forEach((e,i)=>{ if(i===futIdx) html+=sepHtml(todayLbl+'　▲ 過去 ／ ▼ これから'); html+=rowHtml(e); }); }
+    dom.domeList.innerHTML=html;
+    scrollDomeToToday();
+    dom.domeMore.style.display='none';
+    const future=list.filter(e=>dOf(e)>=todayJ).length, pastN=list.length-future;
+    dom.domeNote.textContent='全'+list.length+'件（過去 '+pastN+'件・今後 '+future+'件）。リストを上にスクロールすると過去のイベント、下で今後の予定。客数はマルゴSの記録がある日のみ。';
   }
 
   // ===== master render =====
@@ -1434,7 +1445,9 @@
     t.classList.add('active');
     document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('show', p.dataset.panel===t.dataset.tab));
     if(t.dataset.tab==='trend') drawTrend(lastSeries);
-    // タブ切替時の自動スクロールはしない（その場に留まる）。
+    // 東京ドーム一覧は表示された時点で初期スクロールを「今日」に合わせる（過去は上にスクロールで表示）。
+    if(t.dataset.tab==='dome') requestAnimationFrame(scrollDomeToToday);
+    // タブ切替時のページ全体の自動スクロールはしない（その場に留まる）。
   });
   dom.domeFilt.addEventListener('click', e=>{
     const b = e.target.closest('.fbtn'); if(!b) return;
