@@ -465,7 +465,7 @@
   <div class="phead">
     <div class="phead-l">
       <div class="ptitle"><span class="em">🍽️</span>フードコート内 売上比較</div>
-      <div class="psub">基準店＝100 として、同じフードコート内の各店を相対比較します（分析専用・売上には登録しません）。</div>
+      <div class="psub">基準店＝100 として、同じフードコート内の各店を相対比較します（分析専用・売上には登録しません）。金額はフードコート掲示（税抜）を税込（10%）換算で表示しています。</div>
       <div class="badges">
         <span class="pill beta">試験版</span>
         <span class="pill" id="authBadge">未接続</span>
@@ -672,6 +672,10 @@
   const STORE_NAMES = (PAGES && PAGES.STORE_NAMES) || {};
   const TOKEN_KEY = 'line_summary_admin_token';
   const DEFAULT_STORE = 'marugoS';
+  // フードコートの掲示売上（OCR取込の「対象売上」「比較売上」）は税抜。
+  // 当ページの表示は税込に合わせる（イートイン標準 10%）。比率・順位・シェアは不変。
+  const SALES_TAX_RATE = 0.10;
+  const SALES_TAX_FACTOR = 1 + SALES_TAX_RATE;
   const $ = (id) => document.getElementById(id);
   const dom = {
     themeBtn:$('themeBtn'),
@@ -903,6 +907,10 @@
       if (!r || !Array.isArray(r.tenants)) return;
       r.tenants.forEach(t=>{
         if (!t) return;
+        // 掲示は税抜。表示は税込(10%)に揃える（売上・比較売上・客単価などの金額がすべて税込になる）。
+        if (t.sales!=null && isFinite(Number(t.sales))) t.sales = Math.round(Number(t.sales) * SALES_TAX_FACTOR);
+        if (t.compSales!=null && isFinite(Number(t.compSales))) t.compSales = Math.round(Number(t.compSales) * SALES_TAX_FACTOR);
+        if (t.comp_sales!=null && isFinite(Number(t.comp_sales))) t.comp_sales = Math.round(Number(t.comp_sales) * SALES_TAX_FACTOR);
         const code = (t.code!=null) ? String(t.code) : '';
         if (code && CODE_TO_NAME[code]) { t.name = CODE_TO_NAME[code]; return; }
         const nm = String(t.name||'').trim();
