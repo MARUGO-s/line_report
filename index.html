@@ -5513,6 +5513,30 @@
             </div>
           </div>
         </div>
+        <div id="roomConfigDomeWeeklyPanel" class="room-config-calendar-inline-bulk receipt-schedule-panel" style="margin-top:12px;">
+          <div class="room-config-calendar-section-title">東京ドーム 週次イベント配信</div>
+          <div class="receipt-schedule-bulk-hint">ONにすると、設定した曜日・時刻に「翌週(日〜土)」の東京ドームのイベントをまとめてLINE配信します（保存はこの Webhook の全連携ルームへ）。</div>
+          <div class="room-scope-modal-list" style="margin-top:0;">
+            <label class="room-scope-option"><input id="roomConfigDomeWeekly" type="checkbox">東京ドームの週次イベント配信</label>
+            <div class="receipt-schedule-fields">
+              <div class="receipt-schedule-row">
+                <span>配信曜日</span>
+                <select id="roomConfigDomeWeeklyDow" class="select" aria-label="東京ドーム週次配信の曜日">
+                  <option value="0">日曜</option><option value="1">月曜</option><option value="2">火曜</option><option value="3">水曜</option><option value="4">木曜</option><option value="5">金曜</option><option value="6">土曜</option>
+                </select>
+              </div>
+              <div class="receipt-schedule-row">
+                <span>配信時刻</span>
+                <input id="roomConfigDomeWeeklyTime" class="input schedule-time" type="time" aria-label="東京ドーム週次配信の時刻">
+                <span class="modal-meta">この曜日・時刻に「翌週(日〜土)」を送信</span>
+              </div>
+              <div class="receipt-schedule-row" style="margin-top:8px;gap:10px;">
+                <button id="roomConfigDomeWeeklySave" type="button" style="padding:8px 14px;border-radius:8px;border:1px solid var(--accent,#2f6fed);background:var(--accent,#2f6fed);color:#fff;font-weight:700;cursor:pointer;">この設定を保存</button>
+                <span id="roomConfigDomeWeeklyMsg" class="modal-meta"></span>
+              </div>
+            </div>
+          </div>
+        </div>
         <div id="roomConfigCalendarGmailWrap" class="receipt-schedule-panel store-permission-panel store-permission-option room-config-calendar-per-room-panel">
         <div id="roomConfigCalendarPerRoomTitle" class="room-config-calendar-section-title">ルームごとの設定（連携が2件以上のとき）</div>
         <div class="receipt-schedule-bulk-hint">「レシート関連」タブの<strong>対象ルーム</strong>で選んだトークだけ、一括と違う設定にできます。</div>
@@ -5961,6 +5985,11 @@
       roomConfigReceiptScheduleWrap: document.getElementById('roomConfigReceiptScheduleWrap'),
       roomConfigReceiptScheduleRoomWrap: document.getElementById('roomConfigReceiptScheduleRoomWrap'),
       roomConfigReceiptScheduleRoomSelect: document.getElementById('roomConfigReceiptScheduleRoomSelect'),
+      roomConfigDomeWeekly: document.getElementById('roomConfigDomeWeekly'),
+      roomConfigDomeWeeklyDow: document.getElementById('roomConfigDomeWeeklyDow'),
+      roomConfigDomeWeeklyTime: document.getElementById('roomConfigDomeWeeklyTime'),
+      roomConfigDomeWeeklySave: document.getElementById('roomConfigDomeWeeklySave'),
+      roomConfigDomeWeeklyMsg: document.getElementById('roomConfigDomeWeeklyMsg'),
       roomConfigReceiptLinkedStatus: document.getElementById('roomConfigReceiptLinkedStatus'),
       roomConfigReceiptScheduleNoRoomHint: document.getElementById('roomConfigReceiptScheduleNoRoomHint'),
       roomConfigReceiptDetectedRoomsWrap: document.getElementById('roomConfigReceiptDetectedRoomsWrap'),
@@ -7280,6 +7309,57 @@
       });
 
       syncRoomConfigCalendarGmailPermFields();
+      loadDomeWeeklyPanel();
+    }
+
+    // ===== 東京ドーム 週次イベント配信（カレンダー/予約タブ・自己完結。/foodcourt/dome-weekly を直接読み書き）=====
+    function domeWeeklyTimeToHM(v){ const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/); let h=10,mi=0; if(m){ h=Math.max(0,Math.min(23,+m[1])); mi=Math.max(0,Math.min(59,+m[2])); } return { hour:h, minute:mi }; }
+    function domeWeeklyHMToTime(h,mi){ h=(h==null?10:h); mi=(mi==null?0:mi); return (h<10?'0'+h:''+h)+':'+(mi<10?'0'+mi:''+mi); }
+    function setDomeWeeklyMsg(t, bad){ if(dom.roomConfigDomeWeeklyMsg){ dom.roomConfigDomeWeeklyMsg.textContent=t||''; dom.roomConfigDomeWeeklyMsg.style.color = bad ? '#e05656' : ''; } }
+    function domeWeeklyLinkedRoomIds(){
+      let ids = [];
+      if (dom.roomConfigReceiptScheduleRoomSelect && dom.roomConfigReceiptScheduleRoomSelect.options.length) {
+        ids = Array.from(dom.roomConfigReceiptScheduleRoomSelect.options).map(function(o){ return String(o.value||'').trim(); }).filter(Boolean);
+      }
+      if (!ids.length) { const r = (typeof getActiveRoomConfigRoomId==='function') ? getActiveRoomConfigRoomId() : ''; if (r) ids = [String(r).trim()]; }
+      return ids;
+    }
+    let domeWeeklyLoadedRoom = null;
+    async function loadDomeWeeklyPanel(){
+      if (!dom.roomConfigDomeWeekly) return;
+      if (dom.roomConfigDomeWeeklySave && !dom.roomConfigDomeWeeklySave._bound) {
+        dom.roomConfigDomeWeeklySave._bound = true;
+        dom.roomConfigDomeWeeklySave.addEventListener('click', saveDomeWeeklyPanel);
+      }
+      const roomId = (typeof getActiveRoomConfigRoomId==='function') ? String(getActiveRoomConfigRoomId()||'').trim() : '';
+      if (!roomId) { domeWeeklyLoadedRoom = null; return; }
+      if (domeWeeklyLoadedRoom === roomId) return; // 同じルームの重複取得を避ける
+      domeWeeklyLoadedRoom = roomId;
+      try {
+        const b = await api('/foodcourt/dome-weekly?room_id=' + encodeURIComponent(roomId));
+        const c = (b && b.config) || {};
+        dom.roomConfigDomeWeekly.checked = c.dome_weekly_enabled === true;
+        if (dom.roomConfigDomeWeeklyDow) dom.roomConfigDomeWeeklyDow.value = String(c.dome_weekly_dow != null ? c.dome_weekly_dow : 6);
+        if (dom.roomConfigDomeWeeklyTime) dom.roomConfigDomeWeeklyTime.value = domeWeeklyHMToTime(c.dome_weekly_hour != null ? c.dome_weekly_hour : 10, c.dome_weekly_minute != null ? c.dome_weekly_minute : 0);
+        setDomeWeeklyMsg('');
+      } catch(_e){ domeWeeklyLoadedRoom = null; }
+    }
+    async function saveDomeWeeklyPanel(){
+      if (!dom.roomConfigDomeWeekly) return;
+      const ids = domeWeeklyLinkedRoomIds();
+      if (!ids.length) { setDomeWeeklyMsg('連携ルームがありません。', true); return; }
+      const enabled = !!dom.roomConfigDomeWeekly.checked;
+      const dow = parseInt(dom.roomConfigDomeWeeklyDow && dom.roomConfigDomeWeeklyDow.value, 10);
+      const hm = domeWeeklyTimeToHM(dom.roomConfigDomeWeeklyTime && dom.roomConfigDomeWeeklyTime.value);
+      setDomeWeeklyMsg('保存中…', false);
+      if (dom.roomConfigDomeWeeklySave) dom.roomConfigDomeWeeklySave.disabled = true;
+      try {
+        for (const rid of ids) {
+          await api('/foodcourt/dome-weekly', { method:'PUT', body: JSON.stringify({ room_id: rid, dome_weekly_enabled: enabled, dome_weekly_dow: isNaN(dow)?6:dow, dome_weekly_hour: hm.hour, dome_weekly_minute: hm.minute }) });
+        }
+        setDomeWeeklyMsg('保存しました（' + ids.length + 'ルーム）。', false);
+      } catch(e){ setDomeWeeklyMsg((e&&e.message) || '保存に失敗しました。', true); }
+      finally { if (dom.roomConfigDomeWeeklySave) dom.roomConfigDomeWeeklySave.disabled = false; }
     }
 
     function formatReceiptMidreportScheduleLabel(schedule) {

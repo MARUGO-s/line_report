@@ -582,6 +582,7 @@ Deno.serve(async (req, info) => {
       "/petty-cash/receipt-media",
       "/foodcourt/reports",
       "/foodcourt/ask",
+      "/foodcourt/dome-weekly",
       "/analytics/holidays",
       "/analytics/monthly",
       "/weather/daily",
@@ -854,6 +855,41 @@ Deno.serve(async (req, info) => {
       // supabase + storeKey を渡すと、Q&Aの実測トークンを ai_usage_events に記録しAI使用料に合算する。
       const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
+    }
+    // 東京ドーム週次イベント配信（per-room）の設定を取得/保存（管理画面のカレンダー/予約タブから利用）。
+    if (req.method === "GET" && path === "/foodcourt/dome-weekly") {
+      const roomId = String(url.searchParams.get("room_id") ?? "").trim()
+      if (!roomId) return json({ error: "room_id is required." }, 400)
+      const { data, error } = await supabase
+        .from("room_summary_settings")
+        .select("room_id, room_name, dome_weekly_enabled, dome_weekly_dow, dome_weekly_hour, dome_weekly_minute")
+        .eq("room_id", roomId)
+        .maybeSingle()
+      if (error) return json({ error: error.message }, 500)
+      return json({ config: data ?? null }, 200)
+    }
+    if (req.method === "PUT" && path === "/foodcourt/dome-weekly") {
+      const body = await workReq.json().catch(() => ({})) as Record<string, unknown>
+      const roomId = String(body.room_id ?? "").trim()
+      if (!roomId) return json({ error: "room_id is required." }, 400)
+      const dowN = Number(body.dome_weekly_dow)
+      const hourN = Number(body.dome_weekly_hour)
+      const minN = Number(body.dome_weekly_minute)
+      const upd: Record<string, unknown> = {
+        dome_weekly_enabled: body.dome_weekly_enabled === true,
+        dome_weekly_dow: (Number.isInteger(dowN) && dowN >= 0 && dowN <= 6) ? dowN : null,
+        dome_weekly_hour: (Number.isInteger(hourN) && hourN >= 0 && hourN <= 23) ? hourN : null,
+        dome_weekly_minute: (Number.isInteger(minN) && minN >= 0 && minN <= 59) ? minN : null,
+        updated_at: new Date().toISOString(),
+      }
+      const { data, error } = await supabase
+        .from("room_summary_settings")
+        .update(upd)
+        .eq("room_id", roomId)
+        .select("room_id, dome_weekly_enabled, dome_weekly_dow, dome_weekly_hour, dome_weekly_minute")
+        .maybeSingle()
+      if (error) return json({ error: error.message }, 500)
+      return json({ ok: true, config: data ?? null }, 200)
     }
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {
       const result = await createPettyCashEntryFromReceiptImage(supabase, workReq, storeScope)
