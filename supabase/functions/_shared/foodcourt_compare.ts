@@ -131,6 +131,7 @@ async function recordFoodCourtAiUsage(
       thinking_tokens: usage.thinkingTokens,
       total_tokens: usage.totalTokens || 0,
       line_message_id: lineMessageId,
+      surface: 'foodcourt', // 用途タグ: フードコート分析(Q&A・テナント表画像抽出)。レシート解析と区別する。
     })
     if (error) console.error('foodcourt ai_usage_events insert failed:', error.message)
   } catch (e) {

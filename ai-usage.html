@@ -500,6 +500,18 @@
             </details>
           </section>
 
+          <!-- MARUGO S フードコート分析のAI使用量（用途別に別表示） -->
+          <details class="assump" id="foodcourtBox" open>
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              MARUGO S フードコート分析の使用量（<span id="foodcourtTotal" class="mono">¥0</span>）
+            </summary>
+            <div class="assump-body">
+              <p class="ms-sub" style="margin-top:4px">東京ドーム内 MARUGO S の<strong>フードコート分析</strong>（データへの質問Q&amp;A・テナント表の画像抽出・東京ドームのイベント抽出）に使ったAIの実測トークンのみ。<strong>レシート解析は含みません</strong>。上の各プロバイダ合計にも含まれますが、ここでは用途別に切り出しています。</p>
+              <div id="foodcourtBrkBody"></div>
+            </div>
+          </details>
+
           <!-- モデル別コスト内訳（最も正確・実測トークン×モデル別単価） -->
           <details class="assump" id="modelBox" open>
             <summary>
@@ -865,6 +877,43 @@
       document.getElementById('geminiThinking').textContent = 'うち思考 ' + fmtInt(m.thinking_tokens) + ' トークン';
 
       renderModelBreakdown();
+      renderFoodcourtCard();
+    }
+
+    // MARUGO S のフードコート分析(Q&A・テナント表画像抽出・ドーム抽出)だけのAI使用量を別表示。
+    function renderFoodcourtCard() {
+      const el = document.getElementById('foodcourtBrkBody');
+      const totalEl = document.getElementById('foodcourtTotal');
+      if (!el) return;
+      const fc = (state.data && state.data.foodcourt) || null;
+      const models = (fc && Array.isArray(fc.models)) ? fc.models.slice() : [];
+      const jpyPerUsd = state.rates.jpyPerUsd;
+      if (!models.length) {
+        if (totalEl) totalEl.textContent = '¥0';
+        el.innerHTML = '<p class="statusline">フードコート分析のAI使用記録がまだありません（質問・テナント表アップロード・ドーム抽出が動くと記録されます）。</p>';
+        return;
+      }
+      models.sort(function (a, b) { return modelUsd(b) - modelUsd(a); });
+      let totalJpy = 0;
+      const rows = models.map(function (mm) {
+        const jpy = modelUsd(mm) * jpyPerUsd;
+        totalJpy += jpy;
+        const use = MODEL_LABELS[mm.model] || '';
+        return '<tr>' +
+          '<td style="text-align:left"><span class="mono">' + escapeHtml(mm.model) + '</span>' +
+          (use ? '<br><span class="ms-sub" style="font-size:11px">' + escapeHtml(use) + '</span>' : '') + '</td>' +
+          '<td>' + fmtInt(mm.event_count) + '</td>' +
+          '<td>' + fmtInt(mm.input_tokens) + '</td>' +
+          '<td>' + fmtInt(Number(mm.output_tokens || 0) + Number(mm.thinking_tokens || 0)) + '</td>' +
+          '<td>' + fmtJpy(jpy) + '</td>' +
+          '</tr>';
+      }).join('');
+      if (totalEl) totalEl.textContent = fmtJpy(totalJpy);
+      el.innerHTML = '<table class="brk-table">' +
+        '<thead><tr><th style="text-align:left">モデル（用途）</th><th>ログ件数</th><th>入力Tok</th><th>出力Tok</th><th>概算</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '<tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">合計</td><td style="font-weight:700">' + fmtJpy(totalJpy) + '</td></tr></tfoot>' +
+        '</table>';
     }
 
     // モデル別の正確な内訳（実測トークン × モデル別単価）。groqのscout/70bなど同一プロバイダ複数モデルを分けて表示。

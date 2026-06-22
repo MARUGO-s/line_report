@@ -7519,12 +7519,37 @@ async function fetchAiUsageCostState(
     }
   })
 
+  // MARUGO S のフードコート分析(Q&A・テナント表画像抽出・東京ドーム抽出)だけを surface='foodcourt' で抽出。
+  // 同じ marugoS でもレシート解析(surface=null)とは混ぜず、別表示できるようにする。
+  const FOODCOURT_STORE_KEY = "marugoS"
+  let foodcourtModels: Array<Record<string, unknown>> = []
+  const { data: fcData, error: fcError } = await supabase.rpc("ai_usage_surface_model_totals", {
+    p_from, p_to, p_store: FOODCOURT_STORE_KEY, p_surface: "foodcourt",
+  })
+  if (fcError) {
+    console.error("ai_usage_surface_model_totals failed:", fcError.message)
+  } else {
+    foodcourtModels = (Array.isArray(fcData) ? fcData : []).map((raw) => {
+      const r = raw as Record<string, unknown>
+      return {
+        provider: String(r.provider ?? ""),
+        model: String(r.model ?? "(unknown)"),
+        event_count: Number(r.event_count ?? 0) || 0,
+        input_tokens: Number(r.input_tokens ?? 0) || 0,
+        output_tokens: Number(r.output_tokens ?? 0) || 0,
+        thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
+        total_tokens: Number(r.total_tokens ?? 0) || 0,
+      }
+    })
+  }
+
   return {
     period: { from: p_from, to: p_to },
     gemini,
     groq,
     claude,
     models,
+    foodcourt: { store: FOODCOURT_STORE_KEY, models: foodcourtModels },
     generated_at: new Date().toISOString(),
   }
 }

@@ -81,6 +81,7 @@ Deno.serve(async (req) => {
         thinking_tokens: null,
         total_tokens: ex.usage.totalTokens,
         line_message_id: null,
+        surface: "foodcourt", // 用途タグ: フードコート分析(東京ドームイベント抽出)
       })
     } catch (e) {
       console.error("tokyo-dome ai_usage_events insert threw:", e instanceof Error ? e.message : String(e))
