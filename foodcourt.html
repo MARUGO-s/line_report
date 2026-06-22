@@ -718,6 +718,24 @@
     out.sort((a,b)=>a.when.localeCompare(b.when));
     return out;
   }
+
+  // FOOD STADIUM TOKYO 競合店プロファイル（要点）。正本は docs/フードコート競合店プロファイル.md。
+  // 客単価は業態差が大きいため、分析サマリーが業態文脈を踏まえられるよう参照する。
+  const STORE_PROFILES = [
+    { n:'MARUGO S', genre:'ワインバル＋スパイスカレー', tier:'high', drink:'wine', note:'唯一の本格ワイン×スパイス。高単価・大人路線。ワイン需要をほぼ独占＝強み' },
+    { n:'クラフトビアマーケット', genre:'クラフトビール×バーガー', tier:'mid', drink:'drink', note:'ビール中心' },
+    { n:'ニュー大金星', genre:'大衆居酒屋', tier:'low', drink:'both', note:'鉄板焼きそば・汎用性高' },
+    { n:'新御茶ノ水 萬龍', genre:'中華(町中華)', tier:'low', drink:'food', note:'肉玉炒飯' },
+    { n:'ベトナム屋台バインセオサイゴン', genre:'ベトナム料理', tier:'low', drink:'food', note:'バインセオ/フーティウ' },
+    { n:'A destra Salvatore', genre:'イタリアン', tier:'high', drink:'food', note:'夜は最高単価ゾーン' },
+    { n:'水道橋 すしわさび', genre:'寿司酒場', tier:'mid', drink:'drink', note:'寿司飲み・地酒' },
+    { n:'蟻月', genre:'博多もつ鍋', tier:'low', drink:'food', note:'白/赤もつ鍋' },
+    { n:'ラーメン＆酒バル 麺屋一燈', genre:'ラーメン＆酒バル', tier:'low', drink:'food', note:'濃厚魚介つけ麺・高評価' },
+    { n:'チャルモゴッソヨ', genre:'韓国料理/韓国酒場', tier:'mid', drink:'both', note:'映え×健康志向' },
+    { n:'台湾点心とビール 恒久飯店', genre:'台湾点心×クラフトビール', tier:'mid', drink:'drink', note:'点心×ビール' },
+  ];
+  const profileOf = (name)=> STORE_PROFILES.find(p=>norm(p.n)===norm(name)) || null;
+
   function buildAnalysisText(report, allReports, periodLabel){
     const list = (report.tenants||[]).map(t=>({
       name:String((t&&t.name)||''),
@@ -770,6 +788,17 @@
     L.push('【客単価】');
     L.push((baseKt!=null?yK(baseKt):'—')+'（FC平均 '+(avgKt!=null?yK(avgKt):'—')+' の '+p1(relPct(baseKt,avgKt))+'、中央値 '+(medKt!=null?yK(medKt):'—')+' の '+p1(relPct(baseKt,medKt))+'、'+(ktRank==null?'—':ktRank+'位')+'）。');
     if (byKt.length) L.push('FC内 最高 '+byKt[0].name+' '+yK(byKt[0].kt)+'／最低 '+byKt[byKt.length-1].name+' '+yK(byKt[byKt.length-1].kt)+'。');
+    // 競合環境（FOOD STADIUM TOKYO の業態プロファイルを参照して文脈を補う）
+    L.push('【競合環境】');
+    const meProf = profileOf(baseName);
+    L.push('FOOD STADIUM TOKYO（東京ドーム内・共有席のフードホール／全店アルコール提供／イベント前後の来場客が回遊）。業態が分散し客単価帯の差が大きい。');
+    if (meProf) L.push('自店＝'+meProf.genre+'。'+meProf.note+'。');
+    const present = list.map(t=>profileOf(t.name)).filter(Boolean);
+    const highs = present.filter(p=>p.tier==='high').map(p=>p.n);
+    const drinkers = present.filter(p=>p.drink==='drink'||p.drink==='wine').map(p=>p.n);
+    if (highs.length) L.push('高単価ゾーン（業態的に客単価が高い）：'+highs.join('・')+'。客単価の順位は業態差が主因なので、単価の高低より「客数(集客)で勝てているか」で評価。');
+    if (drinkers.length) L.push('飲み(アルコール)中心の競合：'+drinkers.filter(n=>norm(n)!==norm(baseName)).join('・')+'。'+(meProf&&meProf.drink==='wine'?'ワイン需要は自店がほぼ独占＝強み。客単価を支える柱。':''));
+    L.push('要点：高単価は業態上の強み。伸びしろは客数（集客）。イベント日・週末の取り込みとワイン×スパイスの体験価値訴求が打ち手。');
     const series = baseSeriesFromReports(allReports, baseName);
     const WD = ['日','月','火','水','木','金','土'];
     // 各日にイベント・天気の文脈を付与（深掘り分析用）。

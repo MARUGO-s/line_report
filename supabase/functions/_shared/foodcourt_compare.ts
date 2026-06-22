@@ -524,8 +524,43 @@ function buildWeatherCorrelation(reports: Array<Record<string, unknown>>, baseNa
   return L.join('\n')
 }
 
+// FOOD STADIUM TOKYO（東京ドームシティのフードホール）の競合店プロファイル。
+// 詳細は docs/フードコート競合店プロファイル.md（こちらが正本／改装時は両方更新）。
+// 客単価は業態差が大きいため、AIが「単価順位」を業態文脈で正しく解釈できるよう注入する。
+const FOODCOURT_STORE_PROFILES: Array<{ name: string; genre: string; price: string; drink: string; note: string }> = [
+  { name: 'MARUGO S', genre: 'ワインバル＋スパイスカレー', price: '昼¥1,000-1,999/夜¥3,000-3,999(FC最高単価ゾーン)', drink: 'やや飲み(ワイン)寄り', note: '施設で唯一の本格ワイン×スパイス。高単価・大人路線。ワイン需要をほぼ独占＝強み' },
+  { name: 'クラフトビアマーケット', genre: 'クラフトビール×バーガー', price: '¥2,000-2,999', drink: '飲み(ビール)中心', note: 'ビール20〜30種＋スマッシュバーガー' },
+  { name: 'ニュー大金星', genre: '大衆居酒屋(鉄板/揚物)', price: '¥1,000-1,999', drink: '両立(食事寄り)', note: '鉄板焼きそば。汎用性高' },
+  { name: '新御茶ノ水 萬龍', genre: '中華(ネオ町中華)', price: '昼¥1,000-1,999/夜〜¥2,999', drink: '食事中心', note: '肉玉炒飯。行列町中華2号店' },
+  { name: 'ベトナム屋台バインセオサイゴン', genre: 'ベトナム料理(屋台)', price: '約¥1,000-1,500', drink: '食事中心', note: 'バインセオ/フーティウ。本場志向' },
+  { name: 'A destra Salvatore', genre: 'イタリアン(ピザ/パスタ)', price: '昼¥1,000-1,999/夜¥3,000-3,999', drink: '食事中心＋ワイン', note: 'サルヴァトーレ系。MARUGO Sと並ぶ夜の最高単価' },
+  { name: '水道橋 すしわさび', genre: '寿司酒場', price: '昼¥1,000-1,999/夜は3-5千の可能性', drink: '飲み寄り(寿司飲み)', note: 'わさびバラちらし。地酒充実' },
+  { name: '蟻月', genre: '博多もつ鍋', price: '¥1,000-1,999', drink: '食事中心(当店)', note: '白/赤もつ鍋＋カップもつ鍋。フード寄り最適化' },
+  { name: 'ラーメン＆酒バル 麺屋一燈', genre: 'ラーメン＆酒バル', price: '¥1,000-1,999', drink: '食事(ラーメン)主軸＋飲み', note: '濃厚魚介つけ麺。施設内で高評価' },
+  { name: 'チャルモゴッソヨ', genre: '韓国料理/韓国酒場', price: '昼約¥1,300-1,800/夜約¥2,000-3,000', drink: '両立(酒場＋定食)', note: '映え×健康志向。若年・女性層に強い' },
+  { name: '台湾点心とビール 恒久飯店', genre: '台湾点心×クラフトビール', price: '推定¥1,500-2,500', drink: '飲み(ビール)寄り', note: 'ブルワリー運営。点心×ビール' },
+]
+
+// 競合プロファイルを、実データに登場する店だけに絞ってテキスト化（基準店に★）。
+function buildCompetitorContext(reports: Array<Record<string, unknown>>, baseName: string): string {
+  const present = new Set<string>()
+  for (const r of (reports || [])) {
+    const raw = Array.isArray((r as { tenants?: unknown }).tenants) ? (r as { tenants?: unknown[] }).tenants as unknown[] : []
+    for (const t of raw) { const nm = String(((t && typeof t === 'object') ? (t as Record<string, unknown>).name : '') ?? '').trim(); if (nm) present.add(normalizeName(nm)) }
+  }
+  const lines: string[] = ['施設: FOOD STADIUM TOKYO（東京ドーム内・共有席のフードホール／全店アルコール提供／イベント前後の来場客が回遊）。']
+  lines.push('注意: 客単価は業態差が大きい（ワイン/イタリアン＝高単価、ラーメン/ベトナム/もつ鍋＝低単価）。単価の順位は業態由来なので「単価順位の上下」より「業態として妥当か」「客数(集客)で勝てているか」で評価すること。')
+  for (const p of FOODCOURT_STORE_PROFILES) {
+    if (present.size && !present.has(normalizeName(p.name))) continue
+    const mark = normalizeName(p.name) === normalizeName(baseName) ? '★基準 ' : ''
+    lines.push(`・${mark}${p.name}｜${p.genre}｜単価${p.price}｜${p.drink}｜${p.note}`)
+  }
+  return lines.join('\n')
+}
+
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
 // events（東京ドームのイベント日程）・weather（日次天気）を渡すと、客数増減との相関も踏まえて回答する。
+// 競合店プロファイル（業態・価格帯・飲み/食事傾向）も注入し、業態文脈を踏まえた分析にする。
 export async function answerFoodCourtQuestion(
   reports: Array<Record<string, unknown>>,
   baseName: string,
@@ -559,14 +594,16 @@ export async function answerFoodCourtQuestion(
   const eventCorr = buildEventCorrelation(reports, baseName, events)
   const eventList = buildEventListText(events)
   const weatherCorr = buildWeatherCorrelation(reports, baseName, weather)
+  const competitors = buildCompetitorContext(reports, baseName)
   const system = [
-    `あなたは「${baseName}」（東京ドーム内フードコートの1店舗）の優秀な経営アナリストです。`,
-    `与えられた「事前計算サマリー」「会場イベント相関」「天気相関」「日次生データ」（★が基準店=${baseName}、金額は円、客単価=売上÷客数）だけを根拠に、ユーザーの質問へ日本語で答えます。`,
+    `あなたは「${baseName}」（東京ドーム内フードコート「FOOD STADIUM TOKYO」の1店舗）の優秀な経営アナリストです。`,
+    `与えられた「競合プロファイル」「事前計算サマリー」「会場イベント相関」「天気相関」「日次生データ」（★が基準店=${baseName}、金額は円、客単価=売上÷客数）だけを根拠に、ユーザーの質問へ日本語で答えます。`,
     `【最重要・禁止事項】単に「最高は◯日、最低は◯日」と最大値・最小値を列挙するだけの回答は禁止。必ず“分析”にすること。`,
-    `回答には次を、具体的な数字を根拠に盛り込む: ①全体の傾向（上昇/下降/横ばいと、その程度＝前半→後半や前日比）②曜日・週の差（土日と平日など）③変化の要因は「客数」か「客単価」か（どちらが効いているか）④フードコート内での基準店の立ち位置と推移（順位・シェア）⑤東京ドームのイベント（野球・ライブ）と客数の関係（イベント日と非イベント日の差、ジャンル別の効き方）⑥天気と客数の関係（雨/晴れ・気温の効き方）⑦次に取るべき打ち手を1〜3個（イベント日程・天気予報を踏まえた仕込み・人員も）。`,
+    `【競合プロファイルの使い方】各店は業態が異なり客単価帯も大きく違う。客単価の順位は業態由来（ワイン/イタリアン＝高単価、ラーメン/ベトナム/もつ鍋＝低単価）なので、単価の高低そのものを優劣にしない。基準店の強み/弱みや打ち手は業態（ワインバル＋スパイスカレーの高単価・大人路線、ワイン需要をほぼ独占）を踏まえて述べる。`,
+    `回答には次を、具体的な数字を根拠に盛り込む: ①全体の傾向（上昇/下降/横ばいと、その程度＝前半→後半や前日比）②曜日・週の差（土日と平日など）③変化の要因は「客数」か「客単価」か（どちらが効いているか）④フードコート内での基準店の立ち位置と推移（順位・シェア・業態文脈）⑤東京ドームのイベント（野球・ライブ）と客数の関係（イベント日と非イベント日の差、ジャンル別の効き方）⑥天気と客数の関係（雨/晴れ・気温の効き方）⑦次に取るべき打ち手を1〜3個（業態・競合・イベント日程・天気予報を踏まえた仕込み・人員も）。`,
     `わかりやすい短い見出し＋箇条書きで、結論を先に。データに無いことは「データにありません」と述べ、憶測しない。新規オープンのため前年比は無いので、自店の日々の推移を基準に語る。`,
   ].join('\n')
-  const userMsg = `# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
+  const userMsg = `# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
   let ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary, 1300)
   if (!ans) ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1300)
