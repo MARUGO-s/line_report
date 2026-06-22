@@ -659,6 +659,7 @@ export async function answerFoodCourtQuestion(
   weather: WeatherDay[] = [],
   supabase?: SupabaseClient | null,
   storeKey?: string,
+  history: Array<{ role: string; content: string }> = [],
 ): Promise<string | null> {
   if (!groqApiKey) return null
   const q = String(question ?? '').trim().slice(0, 500)
@@ -698,14 +699,24 @@ export async function answerFoodCourtQuestion(
     `(4) 需要ドライバーの中でも【東京ドームのイベント】を最重要視し、具体的に深掘りする。提供データの「会場イベント相関」「直近の日別イベント（日付・客数・売上・イベント名つき）」を必ず使い、客数・売上に動きがある日は次を必ず述べる: (a) その日に**どんなイベントが・いつ（昼興行か夜公演か）あったかをイベント名・種別・規模・客層まで特定**する（例: NiziUライブ＝若年女性中心で物販・グッズ後の軽い飲食、巨人戦などプロ野球＝幅広い年齢の野球ファンで試合前後に長め滞在、大学野球＝昼開催で飲酒需要が薄い、コンサート＝開演前後に集中、等）。(b) そのイベントが${baseName}の客数・売上に**どれだけ・なぜ**効いた/効かなかったかを実数を引用してメカニズムで説明する（観客の客層・財布・滞在時間・開演時間帯と、ワイン×スパイスという高単価・大人向け業態の相性）。(c) 取り込めたイベント／取りこぼしたイベントを切り分け、次に同種のイベントが来たときの打ち手につなげる。「イベント日は客数が多い」で終わらせない。天気・曜日は補助要因として絡める。`,
     `(5) 自店の構造的な強み・弱みと打開仮説。打ち手は「誰の・どの来店動機を・どう取るか」まで具体化し、検証方法（次に何の数字を見れば効果が分かるか）も添える。`,
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
+    `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
   ].join('\n')
-  const userMsg = `# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
+  const contextBlock = `# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}`
+  // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
+  const convo: Array<{ role: string; content: string }> = []
+  for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
+    const role = (h && h.role === 'assistant') ? 'assistant' : ((h && h.role === 'user') ? 'user' : '')
+    const content = String((h && h.content) ?? '').trim().slice(0, 4000)
+    if (role && content) convo.push({ role, content })
+  }
+  const systemFull = system + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
+  const messages = [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const r1 = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary, 1800)
+  const r1 = await groqChat(messages, groqApiKey, primary, 1800)
   let ans = r1.content
   let usage = r1.usage
   if (!ans) {
-    const r2 = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1800)
+    const r2 = await groqChat(messages, groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1800)
     ans = r2.content
     if (r2.usage) usage = r2.usage
   }

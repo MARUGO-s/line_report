@@ -826,6 +826,14 @@ Deno.serve(async (req, info) => {
       const question = String(body.question ?? "").trim()
       if (!storeKey) return json({ error: "store_key is required." }, 400)
       if (!question) return json({ error: "question is required." }, 400)
+      // 会話継続: 直前までのQ&A履歴を受け取り、文脈として渡す（指示語が効くように）。最新8件・各4000字まで。
+      const historyRaw = Array.isArray((body as { history?: unknown }).history) ? (body.history as unknown[]) : []
+      const history = historyRaw.map((h) => {
+        const o = (h && typeof h === "object") ? h as Record<string, unknown> : {}
+        const role = String(o.role ?? "")
+        const content = String(o.content ?? "").slice(0, 4000)
+        return (role === "user" || role === "assistant") && content ? { role, content } : null
+      }).filter((x): x is { role: string; content: string } => x != null).slice(-8)
       const groqApiKey = Deno.env.get("GROQ_API_KEY") ?? ""
       if (!groqApiKey) return json({ error: "GROQ_API_KEY is missing." }, 500)
       const { data, error } = await supabase
@@ -844,7 +852,7 @@ Deno.serve(async (req, info) => {
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       // supabase + storeKey を渡すと、Q&Aの実測トークンを ai_usage_events に記録しAI使用料に合算する。
-      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey)
+      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
     }
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {

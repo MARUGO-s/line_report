@@ -330,6 +330,11 @@
     .dp-kv span{color:var(--tx-2);}
     .dp-kv b{color:var(--tx-1);font-variant-numeric:tabular-nums;}
     .dp-muted{color:var(--tx-3);font-size:12.5px;}
+    /* データに質問：会話スレッド */
+    .qa-q{background:var(--accent-soft);color:var(--tx-1);border-radius:12px;padding:9px 13px;margin:12px 0 6px;font-weight:600;font-size:13.5px;white-space:pre-wrap;}
+    .qa-q::before{content:'Q ';color:var(--accent-tx);font-weight:800;}
+    .qa-a{background:var(--bg);border:1px solid var(--line-soft);border-radius:12px;padding:13px 15px;color:var(--tx-1);white-space:pre-wrap;}
+    .qa-a.qa-thinking{color:var(--tx-3);}
     .footnote{font-size:11.5px;color:var(--tx-3);margin-top:14px;}
 
     @media (max-width:820px){
@@ -443,13 +448,14 @@
       </div>
       <div class="card">
         <div class="card-h"><div class="card-t"><span class="em">💬</span>データに質問</div><span class="pill beta">試験版</span></div>
-        <div class="card-note" style="margin-top:4px">蓄積されたフードコートの日次データを根拠に、AIが質問へ回答します（毎回の自動出力はしません）。</div>
+        <div class="card-note" style="margin-top:4px">蓄積されたフードコートの日次データを根拠に、AIが回答します。<b>前の会話を踏まえて続けて質問できます</b>（例「その日は何があった？」「もっと詳しく」）。</div>
         <div class="q-chips" id="qSuggest"></div>
         <div class="qbar">
-          <input id="qInput" type="text" placeholder="例: 直近でマルゴSが一番売れた日は？ / 客単価を上げるには？">
+          <input id="qInput" type="text" placeholder="例: 直近でマルゴSが一番売れた日は？ / その日は何があった？">
           <button class="btn primary" id="qBtn">質問する</button>
+          <button class="btn ghost" id="qClear" type="button" style="display:none">会話をクリア</button>
         </div>
-        <div id="qAnswer" style="white-space:pre-wrap;font-size:14px;line-height:1.85;margin-top:14px;background:var(--bg);border:1px solid var(--line-soft);border-radius:12px;padding:14px 16px;color:var(--tx-1);display:none;"></div>
+        <div id="qAnswer" style="font-size:14px;line-height:1.85;margin-top:14px;max-height:540px;overflow-y:auto;display:none;"></div>
       </div>
     </section>
 
@@ -583,7 +589,7 @@
     heroLogo:$('heroLogo'), heroName:$('heroName'), heroMeta:$('heroMeta'), heroRanks:$('heroRanks'), heroTotals:$('heroTotals'), kpis:$('kpis'),
     tabrow:$('tabrow'),
     aiGrid:$('aiGrid'), aiNote:$('aiNote'),
-    qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'),
+    qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'), qClear:$('qClear'),
     rankTbody:$('rankTbody'), shareTbody:$('shareTbody'), shareNote:$('shareNote'), priceTbody:$('priceTbody'), distWrap:$('distWrap'), clsList:$('clsList'),
     trendCount:$('trendCount'), dailyTbody:$('dailyTbody'), trendNote:$('trendNote'),
     corrWrap:$('corrWrap'), corrBreakdown:$('corrBreakdown'), corrNote:$('corrNote'),
@@ -666,16 +672,34 @@
     if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
     return body;
   }
+  // データに質問：会話履歴を保持し、前のやり取りを踏まえて返信させる。
+  let qaHistory = [];
+  function renderQaThread(thinking){
+    const parts = qaHistory.map(m => '<div class="'+(m.role==='user'?'qa-q':'qa-a')+'">'+escapeHtml(m.content)+'</div>');
+    if (thinking) parts.push('<div class="qa-a qa-thinking">考え中…（蓄積データと直前の会話を参照しています）</div>');
+    dom.qAnswer.innerHTML = parts.join('');
+    dom.qAnswer.style.display = parts.length ? 'block' : 'none';
+    if (dom.qClear) dom.qClear.style.display = qaHistory.length ? '' : 'none';
+    dom.qAnswer.scrollTop = dom.qAnswer.scrollHeight;
+  }
+  function clearQa(){ qaHistory = []; renderQaThread(false); dom.qInput.focus(); }
   async function askQuestion(q){
     const question = String(q!=null?q:(dom.qInput.value||'')).trim();
     if (!question){ dom.qInput.focus(); return; }
-    dom.qInput.value = question;
-    dom.qBtn.disabled = true; dom.qAnswer.style.display='block'; dom.qAnswer.textContent = '考え中…（蓄積データを参照しています）';
+    dom.qInput.value = '';
+    qaHistory.push({ role:'user', content:question });
+    renderQaThread(true);
+    dom.qBtn.disabled = true;
     try {
-      const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question });
-      dom.qAnswer.textContent = b.answer || '(回答が空でした)';
-    } catch(e){ dom.qAnswer.textContent = (e&&e.message) || '質問に失敗しました。'; }
-    finally { dom.qBtn.disabled = false; }
+      const hist = qaHistory.slice(0, -1).slice(-8); // 直前までの会話（今回の質問は除く）最大8件
+      const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist });
+      qaHistory.push({ role:'assistant', content: b.answer || '(回答が空でした)' });
+    } catch(e){
+      qaHistory.push({ role:'assistant', content: (e&&e.message) || '質問に失敗しました。' });
+    } finally {
+      dom.qBtn.disabled = false;
+      renderQaThread(false);
+    }
   }
   function renderSuggestions(){
     dom.qSuggest.innerHTML = SUGGESTED_Q.map(s=>'<button class="qchip">'+escapeHtml(s)+'</button>').join('');
@@ -1463,6 +1487,7 @@
   dom.tokenInput.addEventListener('keydown', e=>{ if(e.key==='Enter') connectWithToken(); });
   dom.qBtn.addEventListener('click', ()=>askQuestion());
   dom.qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') askQuestion(); });
+  if (dom.qClear) dom.qClear.addEventListener('click', clearQa);
   dom.reloadBtn.addEventListener('click', loadReports);
   dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]){ mode='single'; setModeButtons(); render(reports[i]); } });
   dom.rangeBtn.addEventListener('click', renderRange);
