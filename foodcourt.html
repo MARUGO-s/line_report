@@ -1498,7 +1498,7 @@
     if(evs.length){
       html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドーム イベント</div>'
         + evs.map(e=>'<div class="dp-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b>　'+escapeHtml(e.title||'')+'</div>').join('')
-        + '<div class="dp-muted" style="margin-top:6px">※ 予想動員は公式に公開がなく未取得（データがあり次第ここに表示）。</div></div>';
+        + '</div>';
     } else {
       html += '<div class="dp-sec"><div class="dp-muted">東京ドーム開催なし</div></div>';
     }
