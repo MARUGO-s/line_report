@@ -311,6 +311,25 @@
     .ld-row .ld-cnt{font-weight:700;color:var(--tx-1);}
     .ld-row .ld-cnt.none{color:var(--tx-3);font-weight:400;}
     .ld-more{text-align:center;margin-top:14px;}
+    /* 日別ポップアップ（カレンダー／一覧クリック） */
+    .cell.clk{cursor:pointer;}
+    .cell.clk:hover{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px;}
+    .ld-row{cursor:pointer;}
+    .ld-row:hover{background:var(--surface2);}
+    .dp-modal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:18px;}
+    .dp-modal.show{display:flex;}
+    .dp-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.5);}
+    .dp-card{position:relative;z-index:1;width:min(440px,94vw);max-height:86vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.4);}
+    .dp-close{position:absolute;top:8px;right:10px;width:32px;height:32px;border:0;border-radius:8px;background:transparent;color:var(--tx-2);font-size:22px;line-height:1;cursor:pointer;}
+    .dp-close:hover{background:var(--surface2);color:var(--tx-1);}
+    .dp-date{font-size:17px;font-weight:800;color:var(--tx-1);margin:0 30px 8px 0;}
+    .dp-sec{margin-top:14px;}
+    .dp-h{font-size:12px;font-weight:700;color:var(--accent-tx);margin-bottom:6px;}
+    .dp-ev{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--tx-1);padding:4px 0;}
+    .dp-kv{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:7px 0;border-bottom:1px solid var(--line-soft);}
+    .dp-kv span{color:var(--tx-2);}
+    .dp-kv b{color:var(--tx-1);font-variant-numeric:tabular-nums;}
+    .dp-muted{color:var(--tx-3);font-size:12.5px;}
     .footnote{font-size:11.5px;color:var(--tx-3);margin-top:14px;}
 
     @media (max-width:820px){
@@ -535,6 +554,15 @@
   </div>
 </div>
 
+<!-- 日別ポップアップ（カレンダー／一覧クリックで売上・客数・イベントを表示） -->
+<div class="dp-modal" id="dpModal" aria-hidden="true">
+  <div class="dp-backdrop" id="dpBackdrop"></div>
+  <div class="dp-card" role="dialog" aria-modal="true">
+    <button class="dp-close" id="dpClose" aria-label="閉じる" type="button">×</button>
+    <div class="dp-body" id="dpBody"></div>
+  </div>
+</div>
+
 <script src="pages-config.js?v=20260622"></script>
 <script src="auth-session.js"></script>
 <script>
@@ -561,6 +589,7 @@
     corrWrap:$('corrWrap'), corrBreakdown:$('corrBreakdown'), corrNote:$('corrNote'),
     calPrev:$('calPrev'), calNext:$('calNext'), calMonth:$('calMonth'), calGrid:$('calGrid'), calNote:$('calNote'),
     domeFilt:$('domeFilt'), domeList:$('domeList'), domeMore:$('domeMore'), domeNote:$('domeNote'),
+    dpModal:$('dpModal'), dpBody:$('dpBody'), dpClose:$('dpClose'), dpBackdrop:$('dpBackdrop'),
     wxCorrWrap:$('wxCorrWrap'), wxBreakdown:$('wxBreakdown'), wxNote:$('wxNote'), wxDaily:$('wxDaily'), wxDailyNote:$('wxDailyNote'),
   };
   const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ'];
@@ -1265,7 +1294,8 @@
       const gcls=hit?catSlug(hit.category):'';
       const pill=hit?'<span class="ev-pill '+gcls+'" title="'+escapeHtml(hit.title||'')+'">'+escapeHtml(shorten(hit.title,16))+'</span><span class="ev-bar '+gcls+'"></span>':'';
       const g=guestsByDate.has(ds)?'<span class="gc">👥 <b>'+nf.format(guestsByDate.get(ds))+'</b></span>':'';
-      html+='<div class="cell'+(today?' today':'')+'"><span class="cd">'+d+'</span>'+pill+g+'</div>';
+      const clk=!!hit||guestsByDate.has(ds);
+      html+='<div class="cell'+(today?' today':'')+(clk?' clk':'')+'"'+(clk?' data-date="'+ds+'"':'')+'><span class="cd">'+d+'</span>'+pill+g+'</div>';
     }
     dom.calGrid.innerHTML=html;
     if(b){ const k=calY*12+(calM-1); dom.calPrev.disabled=(k<=b.min); dom.calNext.disabled=(k>=b.max); }
@@ -1293,7 +1323,7 @@
     list=list.slice().sort((a,b)=>dOf(a).localeCompare(dOf(b)));
     if(!list.length){ dom.domeList.innerHTML=''; dom.domeMore.style.display='none'; dom.domeNote.textContent=events.length?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
     const rowHtml=e=>{ const d=dOf(e); const past=d<todayJ; const has=guestsByDate.has(d);
-      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+escapeHtml(e.title||'')+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>'; };
+      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+escapeHtml(e.title||'')+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>'; };
     const sepHtml=label=>'<div class="ld-today-sep" id="domeTodayAnchor">'+label+'</div>';
     const todayLbl='今日 '+fmtDay(todayJ)+'（'+wdayJp(todayJ)+'）';
     const futIdx=list.findIndex(e=>dOf(e)>=todayJ);
@@ -1454,6 +1484,45 @@
     domeFilter = b.dataset.g; domeLimit = 14; renderDomeFilter(); renderDomeList();
   });
   dom.domeMore.addEventListener('click', ()=>{ domeLimit += 20; renderDomeList(); });
+
+  // ===== 日別ポップアップ（カレンダー／イベント一覧クリック） =====
+  function fmtFullDay(ymd){ const m=String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m?((+m[1])+'年'+(+m[2])+'月'+(+m[3])+'日（'+wdayJp(ymd)+'）'):String(ymd||''); }
+  const yenF = v=>'¥'+nf.format(Math.round(v));
+  function openDayPopup(ymd){
+    if(!dom.dpModal || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return;
+    const evs = eventsByDate.get(ymd) || [];
+    const sd = (lastSeries||[]).find(p=>ymdJst(p.when)===ymd) || null;
+    const todayJ = ymdJst(new Date().toISOString());
+    const isFuture = ymd>todayJ;
+    let html = '<div class="dp-date">'+fmtFullDay(ymd)+'</div>';
+    if(evs.length){
+      html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドーム イベント</div>'
+        + evs.map(e=>'<div class="dp-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b>　'+escapeHtml(e.title||'')+'</div>').join('')
+        + '<div class="dp-muted" style="margin-top:6px">※ 予想動員は公式に公開がなく未取得（データがあり次第ここに表示）。</div></div>';
+    } else {
+      html += '<div class="dp-sec"><div class="dp-muted">東京ドーム開催なし</div></div>';
+    }
+    if(sd){
+      html += '<div class="dp-sec"><div class="dp-h">🍷 MARUGO S 実績</div>'
+        + '<div class="dp-kv"><span>売上</span><b>'+yenF(sd.sales)+'</b></div>'
+        + '<div class="dp-kv"><span>来客数（人数）</span><b>'+(sd.guests!=null?nf.format(sd.guests)+' 人':'—')+'</b></div>'
+        + '<div class="dp-kv"><span>客単価</span><b>'+(sd.kt!=null?yenF(sd.kt):'—')+'</b></div>'
+        + (sd.salesRank?'<div class="dp-kv"><span>FC内 売上順位</span><b>'+sd.salesRank+' 位</b></div>':'')
+        + (sd.share!=null?'<div class="dp-kv"><span>売上シェア</span><b>'+sd.share.toFixed(1)+' %</b></div>':'')
+        + '</div>';
+    } else {
+      html += '<div class="dp-sec"><div class="dp-muted">'+(isFuture?'今後の予定です（売上の記録はまだありません）。':'この日のMARUGO S売上記録はありません。')+'</div></div>';
+    }
+    dom.dpBody.innerHTML = html;
+    dom.dpModal.classList.add('show');
+    dom.dpModal.setAttribute('aria-hidden','false');
+  }
+  function closeDayPopup(){ if(!dom.dpModal) return; dom.dpModal.classList.remove('show'); dom.dpModal.setAttribute('aria-hidden','true'); }
+  dom.calGrid.addEventListener('click', e=>{ const c=e.target.closest('.cell'); if(c && c.dataset.date) openDayPopup(c.dataset.date); });
+  dom.domeList.addEventListener('click', e=>{ const r=e.target.closest('.ld-row'); if(r && r.dataset.d) openDayPopup(r.dataset.d); });
+  dom.dpClose.addEventListener('click', closeDayPopup);
+  dom.dpBackdrop.addEventListener('click', closeDayPopup);
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDayPopup(); });
 
   renderSuggestions();
 
