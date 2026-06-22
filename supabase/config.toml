@@ -52,3 +52,8 @@ verify_jwt = false
 # verify_jwt は他cronと同様 false（sb_secret_… は JWT でないため）。upsert（主キー weather_date+location）で冪等。
 [functions.weather-daily-cron]
 verify_jwt = false
+
+# tokyo-dome-weekly-cron は pg_cron（毎分）から呼ばれる。設定曜日・時刻に一致したルームへ翌週のドーム
+# イベントをLINE配信する。verify_jwt は他cronと同様 false。二重送信は tokyo_dome_weekly_logs で防止。
+[functions.tokyo-dome-weekly-cron]
+verify_jwt = false

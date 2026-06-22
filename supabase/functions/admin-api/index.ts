@@ -296,11 +296,12 @@ const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
   "gmail_reservation_alert_enabled", "today_reservation_alert_enabled",
   "calendar_tomorrow_reminder_enabled", "calendar_ai_auto_create_enabled",
   "calendar_silent_auto_register_enabled", "calendar_low_confidence_confirm_reply_enabled",
-  "calendar_registration_reply_enabled",
+  "calendar_registration_reply_enabled", "dome_weekly_enabled",
 ]
 const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," +
   ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
-  ",today_reservation_alert_hour,today_reservation_alert_minute"
+  ",today_reservation_alert_hour,today_reservation_alert_minute" +
+  ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute"
 
 function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -314,6 +315,19 @@ function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<strin
   if ("today_reservation_alert_minute" in body) {
     const m = Number(body.today_reservation_alert_minute)
     out.today_reservation_alert_minute = (Number.isInteger(m) && m >= 0 && m <= 59) ? m : null
+  }
+  // 東京ドーム週次配信の曜日・時刻（NULL許容＝既定 土6/10時/0分）
+  if ("dome_weekly_dow" in body) {
+    const v = Number(body.dome_weekly_dow)
+    out.dome_weekly_dow = (Number.isInteger(v) && v >= 0 && v <= 6) ? v : null
+  }
+  if ("dome_weekly_hour" in body) {
+    const v = Number(body.dome_weekly_hour)
+    out.dome_weekly_hour = (Number.isInteger(v) && v >= 0 && v <= 23) ? v : null
+  }
+  if ("dome_weekly_minute" in body) {
+    const v = Number(body.dome_weekly_minute)
+    out.dome_weekly_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
   }
   return out
 }
