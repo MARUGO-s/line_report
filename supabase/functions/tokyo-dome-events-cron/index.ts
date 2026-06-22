@@ -69,6 +69,23 @@ Deno.serve(async (req) => {
 
   // 3) upsert（冪等。主キー event_date+title）
   const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
+  // LLMフォールバックを使った場合のみ、実測トークンをAI使用料に記録（確定パース時は usage=null）。
+  if (ex.usage) {
+    try {
+      await supabase.from("ai_usage_events").insert({
+        store_partition_key: "marugoS",
+        provider: "groq",
+        model: ex.usage.model,
+        input_tokens: ex.usage.inputTokens,
+        output_tokens: ex.usage.outputTokens,
+        thinking_tokens: null,
+        total_tokens: ex.usage.totalTokens,
+        line_message_id: null,
+      })
+    } catch (e) {
+      console.error("tokyo-dome ai_usage_events insert threw:", e instanceof Error ? e.message : String(e))
+    }
+  }
   const rows = events.map((e) => ({
     event_date: e.event_date,
     title: e.title,
@@ -175,11 +192,11 @@ function markerCategory(s: string): "野球" | "コンサート" | "その他" |
   return null
 }
 
-async function extractEvents(scheduleText: string, apiKey: string): Promise<{ events: ExtractedEvent[] | null; raw: string | null }> {
-  // 主経路: コードで日付ごとに確定パース（LLMの日付ズレを排除）。十分な件数が取れたらこれを採用。
+async function extractEvents(scheduleText: string, apiKey: string): Promise<{ events: ExtractedEvent[] | null; raw: string | null; usage: DomeAiUsage | null }> {
+  // 主経路: コードで日付ごとに確定パース（LLMの日付ズレを排除）。十分な件数が取れたらこれを採用（＝AIトークン消費なし）。
   const deterministic = parseScheduleDeterministic(scheduleText)
   if (deterministic.length >= 3) {
-    return { events: deterministic, raw: `deterministic:${deterministic.length}` }
+    return { events: deterministic, raw: `deterministic:${deterministic.length}`, usage: null }
   }
   // フォールバック: レイアウト変更等で確定パースが取れない場合のみ LLM 抽出。
   const system = [
@@ -197,12 +214,18 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<{ ev
   const user = `次のテキストは東京ドーム公式のイベント日程表です。イベントを抽出してください。\n\n----\n${scheduleText}\n----`
 
   const primary = (Deno.env.get("GROQ_CHAT_MODEL") || "").trim() || "llama-3.3-70b-versatile"
-  let raw = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, primary, 4000)
-  if (!raw) raw = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, "meta-llama/llama-4-scout-17b-16e-instruct", 4000)
-  if (!raw) return { events: null, raw: null }
+  const r1 = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, primary, 4000)
+  let raw = r1.content
+  let usage = r1.usage
+  if (!raw) {
+    const r2 = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, "meta-llama/llama-4-scout-17b-16e-instruct", 4000)
+    raw = r2.content
+    if (r2.usage) usage = r2.usage
+  }
+  if (!raw) return { events: null, raw: null, usage }
 
   const parsed = parseJsonArray(raw)
-  if (!parsed) return { events: null, raw }
+  if (!parsed) return { events: null, raw, usage }
 
   const seen = new Set<string>()
   const out: ExtractedEvent[] = []
@@ -220,7 +243,7 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<{ ev
     out.push({ event_date: date, title, category })
   }
   out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
-  return { events: out, raw }
+  return { events: out, raw, usage }
 }
 
 function normalizeIsoDate(value: unknown): string | null {
@@ -248,23 +271,35 @@ function parseJsonArray(raw: string): unknown[] | null {
   }
 }
 
+interface DomeAiUsage { model: string; inputTokens: number; outputTokens: number; totalTokens: number }
+function domeUsageFrom(json: unknown, model: string): DomeAiUsage | null {
+  const u = (json && typeof json === "object") ? (json as { usage?: unknown }).usage : null
+  if (!u || typeof u !== "object") return null
+  const m = u as Record<string, unknown>
+  const inp = Number(m.prompt_tokens ?? 0) || 0
+  const out = Number(m.completion_tokens ?? 0) || 0
+  const tot = Number(m.total_tokens ?? 0) || (inp + out)
+  if (!inp && !out && !tot) return null
+  return { model, inputTokens: inp, outputTokens: out, totalTokens: tot }
+}
+
 async function groqChat(
   messages: Array<{ role: string; content: string }>,
   apiKey: string,
   model: string,
   maxTokens = 800,
-): Promise<string | null> {
+): Promise<{ content: string | null; usage: DomeAiUsage | null }> {
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model, temperature: 0, max_tokens: maxTokens, messages }),
     })
-    if (!res.ok) { console.error("groqChat http error:", model, res.status); return null }
-    const data = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }> } | null
+    if (!res.ok) { console.error("groqChat http error:", model, res.status); return { content: null, usage: null } }
+    const data = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown } | null
     const c = String(data?.choices?.[0]?.message?.content ?? "").trim()
-    return c || null
-  } catch (e) { console.error("groqChat failed:", e instanceof Error ? e.message : String(e)); return null }
+    return { content: c || null, usage: domeUsageFrom(data, model) }
+  } catch (e) { console.error("groqChat failed:", e instanceof Error ? e.message : String(e)); return { content: null, usage: null } }
 }
 
 function json(payload: unknown, status = 200): Response {

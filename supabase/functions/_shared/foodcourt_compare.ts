@@ -82,6 +82,62 @@ function numOrNull(v: unknown): number | null {
   return Number.isFinite(n) ? Math.round(n) : null
 }
 
+// ===== AI使用量の記録 =====
+// フードコートのAI（Q&A=Groqチャット／テナント表の画像抽出=Groq/Gemini Vision）の実測トークンを
+// ai_usage_events に1行記録し、AI使用料ページ（/usage/ai-cost＝実測トークン×公式単価）に反映させる。
+export interface FoodCourtAiUsage {
+  provider: 'groq' | 'gemini' | 'claude'
+  model: string
+  inputTokens: number
+  outputTokens: number
+  thinkingTokens: number | null
+  totalTokens: number
+}
+function groqUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
+  const u = (json && typeof json === 'object') ? (json as { usage?: unknown }).usage : null
+  if (!u || typeof u !== 'object') return null
+  const m = u as Record<string, unknown>
+  const inp = Number(m.prompt_tokens ?? 0) || 0
+  const out = Number(m.completion_tokens ?? 0) || 0
+  const tot = Number(m.total_tokens ?? 0) || (inp + out)
+  if (!inp && !out && !tot) return null
+  return { provider: 'groq', model, inputTokens: inp, outputTokens: out, thinkingTokens: null, totalTokens: tot }
+}
+function geminiUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
+  const u = (json && typeof json === 'object') ? (json as { usageMetadata?: unknown }).usageMetadata : null
+  if (!u || typeof u !== 'object') return null
+  const m = u as Record<string, unknown>
+  const inp = Number(m.promptTokenCount ?? 0) || 0
+  const out = Number(m.candidatesTokenCount ?? 0) || 0
+  const th = m.thoughtsTokenCount != null ? (Number(m.thoughtsTokenCount) || 0) : null
+  const tot = Number(m.totalTokenCount ?? 0) || (inp + out + (th ?? 0))
+  if (!inp && !out && !tot) return null
+  return { provider: 'gemini', model, inputTokens: inp, outputTokens: out, thinkingTokens: th, totalTokens: tot }
+}
+async function recordFoodCourtAiUsage(
+  supabase: SupabaseClient | null | undefined,
+  storeKey: string,
+  lineMessageId: string | null,
+  usage: FoodCourtAiUsage | null,
+): Promise<void> {
+  if (!supabase || !storeKey || !usage) return
+  try {
+    const { error } = await supabase.from('ai_usage_events').insert({
+      store_partition_key: storeKey,
+      provider: usage.provider,
+      model: usage.model,
+      input_tokens: usage.inputTokens || 0,
+      output_tokens: usage.outputTokens || 0,
+      thinking_tokens: usage.thinkingTokens,
+      total_tokens: usage.totalTokens || 0,
+      line_message_id: lineMessageId,
+    })
+    if (error) console.error('foodcourt ai_usage_events insert failed:', error.message)
+  } catch (e) {
+    console.error('foodcourt ai_usage_events insert threw:', (e instanceof Error ? e.message : String(e)).slice(0, 200))
+  }
+}
+
 function tenantsFromParsed(parsed: Record<string, unknown> | null): FoodCourtTenant[] | null {
   const rawList = parsed && Array.isArray(parsed.tenants) ? parsed.tenants : null
   if (!rawList) return null
@@ -120,6 +176,7 @@ export async function extractFoodCourtTenants(
   geminiApiKey: string,
   model: string,
   timeoutMs = 30000,
+  onUsage?: (u: FoodCourtAiUsage) => void,
 ): Promise<FoodCourtTenant[] | null> {
   if (!geminiApiKey || !bytes || bytes.byteLength <= 0) return null
   const mime = String(contentType ?? '').trim().toLowerCase()
@@ -156,6 +213,7 @@ export async function extractFoodCourtTenants(
   const json = await res.json().catch(() => null) as
     | { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
     | null
+  if (onUsage) { const u = geminiUsageFrom(json, model); if (u) onUsage(u) }
   const text = json?.candidates?.[0]?.content?.parts?.map((p) => p?.text ?? '').join('') ?? ''
   return tenantsFromParsed(parseFirstJson(text))
 }
@@ -166,6 +224,7 @@ export async function extractFoodCourtTenantsGroq(
   contentType: string | null,
   groqApiKey: string,
   timeoutMs = 25000,
+  onUsage?: (u: FoodCourtAiUsage) => void,
 ): Promise<FoodCourtTenant[] | null> {
   if (!groqApiKey || !bytes || bytes.byteLength <= 0) return null
   const mime = String(contentType ?? '').trim().toLowerCase()
@@ -199,7 +258,8 @@ export async function extractFoodCourtTenantsGroq(
     clearTimeout(timer)
   }
   if (!res.ok) { console.error('extractFoodCourtTenantsGroq http error:', res.status); return null }
-  const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }> } | null
+  const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown } | null
+  if (onUsage) { const u = groqUsageFrom(json, 'meta-llama/llama-4-scout-17b-16e-instruct'); if (u) onUsage(u) }
   const content = String(json?.choices?.[0]?.message?.content ?? '')
   return tenantsFromParsed(parseFirstJson(content))
 }
@@ -357,18 +417,18 @@ async function groqChat(
   apiKey: string,
   model: string,
   maxTokens = 800,
-): Promise<string | null> {
+): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, temperature: 0.2, max_tokens: maxTokens, messages }),
     })
-    if (!res.ok) { console.error('groqChat http error:', model, res.status); return null }
-    const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }> } | null
+    if (!res.ok) { console.error('groqChat http error:', model, res.status); return { content: null, usage: null } }
+    const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown } | null
     const c = String(json?.choices?.[0]?.message?.content ?? '').trim()
-    return c || null
-  } catch (e) { console.error('groqChat failed:', e instanceof Error ? e.message : String(e)); return null }
+    return { content: c || null, usage: groqUsageFrom(json, model) }
+  } catch (e) { console.error('groqChat failed:', e instanceof Error ? e.message : String(e)); return { content: null, usage: null } }
 }
 
 function fcDayLabel(r: Record<string, unknown>): string {
@@ -596,6 +656,8 @@ export async function answerFoodCourtQuestion(
   groqApiKey: string,
   events: VenueEvent[] = [],
   weather: WeatherDay[] = [],
+  supabase?: SupabaseClient | null,
+  storeKey?: string,
 ): Promise<string | null> {
   if (!groqApiKey) return null
   const q = String(question ?? '').trim().slice(0, 500)
@@ -638,8 +700,16 @@ export async function answerFoodCourtQuestion(
   ].join('\n')
   const userMsg = `# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}\n\n# 質問\n${q}`
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  let ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary, 1800)
-  if (!ans) ans = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1800)
+  const r1 = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, primary, 1800)
+  let ans = r1.content
+  let usage = r1.usage
+  if (!ans) {
+    const r2 = await groqChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }], groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1800)
+    ans = r2.content
+    if (r2.usage) usage = r2.usage
+  }
+  // Q&Aの実測トークンをAI使用料に合算（best-effort・store_partition_keyで集計に乗る）。
+  await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, usage)
   return ans
 }
 
@@ -687,13 +757,17 @@ export async function maybeHandleFoodCourtReport(
   const valid = (ts: FoodCourtTenant[] | null) =>
     (ts && ts.length >= 3 && computeFoodCourtComparison(ts, cfg.baseTenantName)) ? ts : null
 
+  // 画像抽出で消費したトークンを記録（成立有無に関わらず・AI使用料に反映）。
+  const aiUsages: FoodCourtAiUsage[] = []
+  const onUsage = (u: FoodCourtAiUsage) => { aiUsages.push(u) }
   // 1) まず安価な Groq(llama-4-scout) で抽出（印字されたクリーンな表は読める想定）。
-  let tenants = valid(await extractFoodCourtTenantsGroq(params.bytes, params.contentType, params.groqApiKey ?? ''))
+  let tenants = valid(await extractFoodCourtTenantsGroq(params.bytes, params.contentType, params.groqApiKey ?? '', 25000, onUsage))
   // 2) Groqが表として成立しない or テナント数が想定より少ない（読み落とし疑い）→ 高精度な Gemini にフォールバック。
   if ((!tenants || tenants.length < minOk) && params.geminiApiKey) {
-    const g = valid(await extractFoodCourtTenants(params.bytes, params.contentType, params.geminiApiKey, params.geminiModel))
+    const g = valid(await extractFoodCourtTenants(params.bytes, params.contentType, params.geminiApiKey, params.geminiModel, 30000, onUsage))
     if (g) tenants = g
   }
+  for (const u of aiUsages) await recordFoodCourtAiUsage(supabase, params.storeKey, params.lineMessageId, u)
   if (!tenants) return { handled: false } // どちらも成立しない → 通常のレシート処理へ
 
   const cmp = computeFoodCourtComparison(tenants, cfg.baseTenantName)

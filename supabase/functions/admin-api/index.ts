@@ -829,7 +829,8 @@ Deno.serve(async (req, info) => {
       // 会場イベント（東京ドーム）・天気も根拠に渡す。客数増減との相関を踏まえて回答させる。
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
-      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather)
+      // supabase + storeKey を渡すと、Q&Aの実測トークンを ai_usage_events に記録しAI使用料に合算する。
+      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
     }
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {
