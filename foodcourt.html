@@ -856,8 +856,9 @@
     // 各日にイベント・天気の文脈を付与（深掘り分析用）。
     const S = series.map(p=>{ const y=ymdJst(p.when); const hit=(eventsByDate.get(y)||[])[0]; const w=weatherByDate.get(y);
       return { when:p.when, y, dow:dowNum(y), sales:p.sales, guests:p.guests, kt:p.kt, rank:p.salesRank,
-               isEvent:!!hit, eventCat:hit?hit.category:null,
+               isEvent:!!hit, eventCat:hit?hit.category:null, eventTitle:hit?String(hit.title||''):null,
                rainy: w?((Number(w.precipitation_mm)||0)>=1):null, tmax: w?Number(w.temp_max):null, summary: w?w.summary:null }; });
+    const evTag = (d)=>{ if(!d||!d.isEvent) return ''; const t=d.eventTitle?(d.eventTitle.length>22?d.eventTitle.slice(0,22)+'…':d.eventTitle):''; return '〔'+(d.eventCat||'')+(t?' '+t:'')+'〕'; };
     const ctxOf = (d)=>{ if(!d) return ''; const t=[]; if(d.isEvent&&d.eventCat) t.push(d.eventCat); if(d.rainy===true) t.push('雨'); return t.length?'（'+t.join('・')+'）':''; };
     if (periodLabel){
       // ===== 期間モード：期間内をディープに分析 =====
@@ -898,7 +899,7 @@
         const parts=[]; if(rg!=null)parts.push('客数との連動 r='+rg.toFixed(2)); if(rk!=null)parts.push('客単価との連動 r='+rk.toFixed(2));
         L.push(parts.join('／')+'。');
         if (rg!=null&&rk!=null){ const driver=Math.abs(rg)>=Math.abs(rk)?'客数':'客単価';
-          L.push('期間内の売上の上下は主に「'+driver+'」で説明できる。'+(driver==='客数'?'集客の波が売上に直結。':'単価（メニュー構成・セット）の差が効く。')); }
+          L.push('期間内の売上の上下は主に「'+driver+'」で説明できる。'+(driver==='客数'?'集客の波が売上に直結（その客数の波の主因は東京ドームのイベント＝下記【東京ドーム】参照）。':'単価（メニュー構成・セット）の差が効く。')); }
       } else L.push('相関を出すにはデータが不足しています。');
     } else {
       // ===== 単日モード：この日を「同じ条件の日」と比べてディープ評価 =====
@@ -916,7 +917,14 @@
         const sameDow=others.filter(d=>d.dow===selDow).map(d=>d.sales);
         if (sameDow.length){ const a=avg(sameDow); L.push('同じ'+(selDow!=null?WD[selDow]:'')+'曜の平均 '+yK(a)+' の '+p1(relPct(base.sales,a))+'（曜日内では'+(base.sales>=a?'高め':'低め')+'）。'); }
         if (today){
-          if (today.isEvent){ const evAvg=avg(others.filter(d=>d.isEvent).map(d=>d.sales)); L.push('この日はイベント日（'+(today.eventCat||'')+'）。'+(evAvg!=null?'イベント日平均 '+yK(evAvg)+' の '+p1(relPct(base.sales,evAvg))+'。':'')); }
+          if (today.isEvent){
+            const evAvg=avg(others.filter(d=>d.isEvent).map(d=>d.sales));
+            L.push('この日は東京ドームのイベント日'+evTag(today)+'。'+(evAvg!=null?'イベント日平均 '+yK(evAvg)+' の '+p1(relPct(base.sales,evAvg))+'。':''));
+            const nonGAvg=avg(others.filter(d=>!d.isEvent && d.guests!=null).map(d=>d.guests));
+            if (today.guests!=null && nonGAvg!=null){
+              L.push('客数 '+today.guests+'人は非イベント日平均 '+Math.round(nonGAvg)+'人の '+p1(relPct(today.guests,nonGAvg))+'。'+(today.guests>=nonGAvg*1.15?'客数増はこの'+(today.eventCat||'イベント')+'の集客効果が大きいとみられる（イベント連動）。':(today.guests<=nonGAvg*0.9?'イベント日だが客数は伸びておらず、開演時間帯や客層が自店と合っていない可能性。':'')));
+            }
+          }
           else { const nonAvg=avg(others.filter(d=>!d.isEvent).map(d=>d.sales)); L.push('この日は東京ドーム開催なし。'+(nonAvg!=null?'非イベント日平均 '+yK(nonAvg)+' の '+p1(relPct(base.sales,nonAvg))+'。':'')); }
           if (today.rainy===true){ const rAvg=avg(others.filter(d=>d.rainy===true).map(d=>d.sales)); L.push('天気は雨'+(today.summary?'（'+today.summary+'）':'')+'。'+(rAvg!=null?'雨の日平均 '+yK(rAvg)+' の '+p1(relPct(base.sales,rAvg))+'。':'')); }
           else if (today.rainy===false){ const dAvg=avg(others.filter(d=>d.rainy===false).map(d=>d.sales)); L.push('天気は'+(today.summary||'雨なし')+'。'+(dAvg!=null?'雨でない日平均 '+yK(dAvg)+' の '+p1(relPct(base.sales,dAvg))+'。':'')); }
@@ -956,13 +964,37 @@
     (function(){
       L.push('【東京ドーム】');
       if (!events.length){ L.push('東京ドームのイベントデータがありません。'); return; }
-      const evG = extDaily.filter(p=>(eventsByDate.get(ymdJst(p.when))||[])[0]).map(p=>p.guests);
-      const nonG = extDaily.filter(p=>!(eventsByDate.get(ymdJst(p.when))||[])[0]).map(p=>p.guests);
-      const eA=avg(evG), nA=avg(nonG);
+      const g = S.filter(d=>d.guests!=null);
+      if (g.length<2){ L.push('客数とイベントの比較に十分なデータがまだありません（蓄積が増えると精度が上がります）。'); return; }
+      const ev = g.filter(d=>d.isEvent), non = g.filter(d=>!d.isEvent);
+      const eA=avg(ev.map(d=>d.guests)), nA=avg(non.map(d=>d.guests));
       if (eA!=null && nA!=null){ const ratio=nA>0?eA/nA:null;
-        L.push('イベント日('+evG.length+'日)の平均客数 '+Math.round(eA)+'人 / 非イベント日('+nonG.length+'日) '+Math.round(nA)+'人'+(ratio?'（'+ratio.toFixed(2)+'倍）':'')+'。');
-        if (ratio!=null && ratio>=1.2) L.push('イベント日は客数が伸びやすい。日程に合わせて仕込み・人員を厚めに。');
-      } else { L.push('イベント日／非イベント日のどちらかのデータが不足しています。'); }
+        L.push('イベント日('+ev.length+'日)の平均客数 '+Math.round(eA)+'人 / 非イベント日('+non.length+'日) '+Math.round(nA)+'人'+(ratio?'（'+ratio.toFixed(2)+'倍）':'')+'。'+(ratio!=null&&ratio>=1.2?'集客は東京ドームのイベントに強く連動。':(ratio!=null&&ratio<=1.05?'イベントの集客効果は限定的。':'')));
+      } else if (eA!=null){ L.push('イベント日('+ev.length+'日)の平均客数 '+Math.round(eA)+'人（非イベント日のデータ不足）。'); }
+      else { L.push('イベント日のデータがまだありません。'); }
+      // 種別ごとの集客力（どのイベント種別が効くか）
+      const cats={}; ev.forEach(d=>{ const c=d.eventCat||'その他'; (cats[c]=cats[c]||[]).push(d.guests); });
+      const catRows=Object.keys(cats).map(c=>({c,a:avg(cats[c]),n:cats[c].length})).sort((x,y)=>y.a-x.a);
+      if (catRows.length && nA!=null){
+        L.push('種別別の平均客数：'+catRows.map(x=>x.c+' '+Math.round(x.a)+'人('+x.n+'日)').join('／')+'（非イベント '+Math.round(nA)+'人）。最も集客が伸びるのは「'+catRows[0].c+'」。');
+      }
+      // 客数が多い日とイベントの一致を名指しで（集客の山＝イベントか）
+      const top = g.slice().sort((a,b)=>b.guests-a.guests).slice(0, Math.min(3,g.length));
+      if (top.length){
+        L.push('客数が多い日：'+top.map(d=>fmtDay(d.when)+'('+(d.dow!=null?WD[d.dow]:'?')+') '+d.guests+'人'+(d.isEvent?evTag(d):'〔ドーム開催なし〕')).join('／')+'。');
+        const hitTop = top.filter(d=>d.isEvent).length;
+        L.push(hitTop>=Math.ceil(top.length/2)
+          ? '→ 集客の山はおおむね東京ドームのイベント日と一致。客数が伸びる日はドーム日程で先読みでき、仕込み・人員・ワイン在庫を厚くするのが有効（特にライブ・プロ野球の週末夜）。'
+          : '→ 集客の山はイベント日とは限らず、曜日・天候など他要因も大きい。ドーム日程＋曜日で読む。');
+      }
+      // 期間モード：期間内で客数が最も動いた日をイベントで説明
+      if (periodLabel && g.length>=2){
+        let mx=null; for(let i=1;i<g.length;i++){ const diff=(g[i].guests||0)-(g[i-1].guests||0); if(mx==null||Math.abs(diff)>Math.abs(mx.diff)) mx={diff,to:g[i]}; }
+        if (mx && mx.diff!==0){ const dir=mx.diff>0?'増':'減';
+          const cause = mx.to.isEvent ? ('東京ドームの'+(mx.to.eventCat||'イベント')+'開催'+evTag(mx.to)) : 'ドーム開催なし（曜日・天候など他要因）';
+          L.push('期間内で客数が最も動いたのは '+fmtDay(mx.to.when)+'('+(mx.to.dow!=null?WD[mx.to.dow]:'?')+')：前日比 '+(mx.diff>0?'+':'')+mx.diff+'人の'+dir+'。要因は'+cause+'とみられる。');
+        }
+      }
     })();
     L.push('【強み・弱み】');
     const strengths=[], weaks=[];
