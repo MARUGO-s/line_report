@@ -721,18 +721,19 @@
 
   // FOOD STADIUM TOKYO 競合店プロファイル（要点）。正本は docs/フードコート競合店プロファイル.md。
   // 客単価は業態差が大きいため、分析サマリーが業態文脈を踏まえられるよう参照する。
+  // tier=価格帯, drink=飲料の主役, occ=利用シーン（来店動機クラスタ：wine/beer/sake/izakaya/meal）。
   const STORE_PROFILES = [
-    { n:'MARUGO S', genre:'ワインバル＋スパイスカレー', tier:'high', drink:'wine', note:'唯一の本格ワイン×スパイス。高単価・大人路線。ワイン需要をほぼ独占＝強み' },
-    { n:'クラフトビアマーケット', genre:'クラフトビール×バーガー', tier:'mid', drink:'drink', note:'ビール中心' },
-    { n:'ニュー大金星', genre:'大衆居酒屋', tier:'low', drink:'both', note:'鉄板焼きそば・汎用性高' },
-    { n:'新御茶ノ水 萬龍', genre:'中華(町中華)', tier:'low', drink:'food', note:'肉玉炒飯' },
-    { n:'ベトナム屋台バインセオサイゴン', genre:'ベトナム料理', tier:'low', drink:'food', note:'バインセオ/フーティウ' },
-    { n:'A destra Salvatore', genre:'イタリアン', tier:'high', drink:'food', note:'夜は最高単価ゾーン' },
-    { n:'水道橋 すしわさび', genre:'寿司酒場', tier:'mid', drink:'drink', note:'寿司飲み・地酒' },
-    { n:'蟻月', genre:'博多もつ鍋', tier:'low', drink:'food', note:'白/赤もつ鍋' },
-    { n:'ラーメン＆酒バル 麺屋一燈', genre:'ラーメン＆酒バル', tier:'low', drink:'food', note:'濃厚魚介つけ麺・高評価' },
-    { n:'チャルモゴッソヨ', genre:'韓国料理/韓国酒場', tier:'mid', drink:'both', note:'映え×健康志向' },
-    { n:'台湾点心とビール 恒久飯店', genre:'台湾点心×クラフトビール', tier:'mid', drink:'drink', note:'点心×ビール' },
+    { n:'MARUGO S', genre:'ワインバル＋スパイスカレー', tier:'high', drink:'wine', occ:'wine', note:'唯一の本格ワイン×スパイス。高単価・大人路線。ワイン需要をほぼ独占＝強み' },
+    { n:'クラフトビアマーケット', genre:'クラフトビール×バーガー', tier:'mid', drink:'drink', occ:'beer', note:'ビール20〜30種。複数杯×滞在で単価が積み上がる飲み主体' },
+    { n:'ニュー大金星', genre:'大衆居酒屋', tier:'low', drink:'both', occ:'izakaya', note:'鉄板焼きそば・汎用性高。一人〜少人数で食事も一杯も' },
+    { n:'新御茶ノ水 萬龍', genre:'中華(町中華)', tier:'low', drink:'food', occ:'meal', note:'肉玉炒飯。主食でさっと食べる速い食事需要' },
+    { n:'ベトナム屋台バインセオサイゴン', genre:'ベトナム料理', tier:'low', drink:'food', occ:'meal', note:'バインセオ/フーティウ。エスニックの食事需要・インバウンド' },
+    { n:'A destra Salvatore', genre:'イタリアン', tier:'high', drink:'food', occ:'wine', note:'ピッツァ＋ナチュラルワイン。夜は最高単価。自店と最も近い着席×ワインの競合' },
+    { n:'水道橋 すしわさび', genre:'寿司酒場', tier:'mid', drink:'drink', occ:'sake', note:'寿司＋地酒。和酒で飲む着席需要' },
+    { n:'蟻月', genre:'博多もつ鍋', tier:'low', drink:'food', occ:'meal', note:'白/赤もつ鍋。鍋・定食の食事需要' },
+    { n:'ラーメン＆酒バル 麺屋一燈', genre:'ラーメン＆酒バル', tier:'low', drink:'food', occ:'meal', note:'濃厚魚介つけ麺。ラーメン主軸の速い食事需要・高評価' },
+    { n:'チャルモゴッソヨ', genre:'韓国料理/韓国酒場', tier:'mid', drink:'both', occ:'izakaya', note:'映え×健康志向。若年・女性の食事＋軽い飲み' },
+    { n:'台湾点心とビール 恒久飯店', genre:'台湾点心×クラフトビール', tier:'mid', drink:'drink', occ:'beer', note:'点心×クラフトビール。飲み主体' },
   ];
   const profileOf = (name)=> STORE_PROFILES.find(p=>norm(p.n)===norm(name)) || null;
 
@@ -746,6 +747,7 @@
     const baseName = report.base_tenant_name || 'MARUGO S';
     const base = list.find(t=>norm(t.name)===norm(baseName));
     if (!base) return '【総評】\n基準店（'+baseName+'）が見つかりませんでした。';
+    const meProf = profileOf(baseName);
     const ktOf = t=> (t.guests&&t.guests>0)? t.sales/t.guests : null;
     const n = list.length;
     const totalSales = list.reduce((s,t)=>s+t.sales,0);
@@ -777,28 +779,51 @@
     L.push('【総評】');
     L.push(base.name+' はフードコート '+n+'店中、売上 '+salesRank+'位・客数 '+guestRank+'位・客単価 '+(ktRank==null?'—':ktRank+'位')+'。売上シェア '+p1(share)+'。');
     L.push('売上は'+volWord+'、客単価は'+ktWord+typ+'。');
+    if (meProf){
+      L.push('ただし当施設は業態が分散し客単価帯が大きく異なるため、順位の数字だけでは評価できない。自店は'+meProf.genre+'＝'+(meProf.drink==='wine'?'施設で唯一の本格ワイン業態':'独自業態')+'。見るべきは「単価が何位か」ではなく「どんな来店動機（誰の・どの利用シーン）を・どれだけ取り込めているか」。詳細は競合環境・客単価の項で読み解く。');
+    }
     L.push('【売上】');
     L.push('対象売上 '+yK(base.sales)+'（FC平均 '+yK(avgSales)+' の '+p1(relPct(base.sales,avgSales))+'、中央値 '+yK(medSales)+' の '+p1(relPct(base.sales,medSales))+'）。');
-    if (leader && leader!==base) L.push('首位 '+leader.name+' '+yK(leader.sales)+' とは '+yK(leader.sales-base.sales)+'（'+(leader.sales/base.sales).toFixed(2)+'倍）差。');
-    if (above) L.push('すぐ上：'+above.name+' '+yK(above.sales)+'（+'+yK(above.sales-base.sales)+'）。');
-    if (below) L.push('すぐ下：'+below.name+' '+yK(below.sales)+'（'+yK(below.sales-base.sales)+'）。');
+    if (leader && leader!==base){
+      const lp = profileOf(leader.name);
+      L.push('首位は '+leader.name+(lp?'（'+lp.genre+'）':'')+' '+yK(leader.sales)+'（自店比 '+(leader.sales/base.sales).toFixed(2)+'倍）。'+((lp&&lp.tier==='low')?'低単価業態が売上トップ＝この施設の売上は客単価ではなく「客数(集客)」で決まることの裏付け。単価で追うより同じ来場客をどれだけ取り込めるかが勝負。':''));
+    }
+    if (above||below) L.push('順位の前後：'+(above?'上位 '+above.name+' '+yK(above.sales)+'（+'+yK(above.sales-base.sales)+'）':'')+(above&&below?' / ':'')+(below?'下位 '+below.name+' '+yK(below.sales)+'（'+yK(below.sales-base.sales)+'）':'')+'。僅差の団子状態なら、1〜2日の集客差で順位は容易に入れ替わる。');
     L.push('【客数】');
     L.push('対象客数 '+(base.guests!=null?nf.format(base.guests)+'人':'—')+'（FC平均 '+(avgGuests!=null?nf.format(Math.round(avgGuests))+'人':'—')+' の '+p1(relPct(base.guests,avgGuests))+'、'+guestRank+'位）。');
     const byKt = list.map(t=>({name:t.name,kt:ktOf(t)})).filter(x=>x.kt!=null).sort((a,b)=>b.kt-a.kt);
     L.push('【客単価】');
     L.push((baseKt!=null?yK(baseKt):'—')+'（FC平均 '+(avgKt!=null?yK(avgKt):'—')+' の '+p1(relPct(baseKt,avgKt))+'、中央値 '+(medKt!=null?yK(medKt):'—')+' の '+p1(relPct(baseKt,medKt))+'、'+(ktRank==null?'—':ktRank+'位')+'）。');
-    if (byKt.length) L.push('FC内 最高 '+byKt[0].name+' '+yK(byKt[0].kt)+'／最低 '+byKt[byKt.length-1].name+' '+yK(byKt[byKt.length-1].kt)+'。');
-    // 競合環境（FOOD STADIUM TOKYO の業態プロファイルを参照して文脈を補う）
+    if (byKt.length>=2){
+      const top=byKt[0], bot=byKt[byKt.length-1], tp=profileOf(top.name), bp=profileOf(bot.name);
+      L.push('実測の客単価が最も高いのは '+top.name+(tp?'（'+tp.genre+'）':'')+' '+yK(top.kt)+'、最も低いのは '+bot.name+(bp?'（'+bp.genre+'）':'')+' '+yK(bot.kt)+'。価格表ではなく業態ごとの「飲み方・食べ方」（飲み主体は複数杯×滞在で単価が積み上がり、ラーメン等の主食業態は回転重視で単価が下がる）が客単価を決めており、順位の上下は店の優劣ではない。');
+    }
+    // ===== 競合環境：FOOD STADIUM TOKYO の各業態を踏まえ「数字の奥」を読み解く =====
     L.push('【競合環境】');
-    const meProf = profileOf(baseName);
-    L.push('FOOD STADIUM TOKYO（東京ドーム内・共有席のフードホール／全店アルコール提供／イベント前後の来場客が回遊）。業態が分散し客単価帯の差が大きい。');
-    if (meProf) L.push('自店＝'+meProf.genre+'。'+meProf.note+'。');
-    const present = list.map(t=>profileOf(t.name)).filter(Boolean);
-    const highs = present.filter(p=>p.tier==='high').map(p=>p.n);
-    const drinkers = present.filter(p=>p.drink==='drink'||p.drink==='wine').map(p=>p.n);
-    if (highs.length) L.push('高単価ゾーン（業態的に客単価が高い）：'+highs.join('・')+'。客単価の順位は業態差が主因なので、単価の高低より「客数(集客)で勝てているか」で評価。');
-    if (drinkers.length) L.push('飲み(アルコール)中心の競合：'+drinkers.filter(n=>norm(n)!==norm(baseName)).join('・')+'。'+(meProf&&meProf.drink==='wine'?'ワイン需要は自店がほぼ独占＝強み。客単価を支える柱。':''));
-    L.push('要点：高単価は業態上の強み。伸びしろは客数（集客）。イベント日・週末の取り込みとワイン×スパイスの体験価値訴求が打ち手。');
+    L.push('FOOD STADIUM TOKYO（東京ドーム内・共有席・全店アルコール提供／イベント前後の来場客が回遊）。席は共有なので競争は「席の奪い合い」ではなく、同じ来場客の財布と滞在時間をどの業態が取るかの勝負。だから単純な順位比較より、自店と「同じ来店動機を狙う店」を見極めることが重要。');
+    if (meProf) L.push('自店＝'+meProf.genre+'（'+meProf.note+'）。');
+    const present = list.map(t=>({t, p:profileOf(t.name)})).filter(x=>x.p);
+    const ktByName = new Map(list.map(t=>[norm(t.name), ktOf(t)]));
+    const tierKt = tier=>{ const xs=present.filter(x=>x.p.tier===tier).map(x=>ktByName.get(norm(x.p.n))).filter(v=>v!=null); return xs.length?avg(xs):null; };
+    const hiKt=tierKt('high'), loKt=tierKt('low');
+    // 利用シーンで「真の競合（代替関係）」と「非競合（共存）」を切り分ける
+    const meOcc = meProf?meProf.occ:null;
+    const occJa = {wine:'ワインで着席して長く過ごす', beer:'ビールで滞在する', sake:'和酒で着席する', izakaya:'カジュアルに食事＋一杯', meal:'主食でさっと食事する'};
+    if (meOcc){
+      const sameOcc = present.filter(x=>x.p.occ===meOcc && norm(x.p.n)!==norm(baseName)).map(x=>x.p.n);
+      const meals = present.filter(x=>x.p.occ==='meal').map(x=>x.p.n);
+      L.push('利用動機で見ると自店は「'+(occJa[meOcc]||'')+'」シーン。'+(sameOcc.length?'これを直接奪い合う＝真の競合は '+sameOcc.join('・')+'（同じ価格帯・同じ着席飲食客を取り合う）。それ以外の順位差はシーンが違うので気にしすぎない。':'同じシーンを取る競合は施設内に存在せず、独自ポジション。'));
+      if (meals.length) L.push('一方 '+meals.join('・')+' は「主食でさっと食べる」需要で来店動機・滞在時間が異なり、直接競合というより共存（取り込む客層・時間帯がずれる）。ここと売上順位を競っても本質ではない。');
+    }
+    // ワイン需要の独占＝高単価を支える構造
+    if (meProf && meProf.drink==='wine'){
+      const beer = present.filter(x=>x.p.occ==='beer').map(x=>x.p.n);
+      L.push('飲料の住み分け：ビール＝'+(beer.join('・')||'—')+'／和酒＝水道橋 すしわさび／ワインを主役にできるのは自店のみ。来場客の「ワインで一杯」需要をほぼ独占でき、これが高単価を支える構造的な強み。');
+    }
+    // 業態の想定高単価と、実測客単価のギャップ＝最大の伸びしろ
+    if (meProf && meProf.tier==='high' && baseKt!=null && hiKt!=null && baseKt < hiKt){
+      L.push('注目すべき点：自店は業態的に高単価帯（夜は¥3,000台想定）だが、実測客単価 '+yK(baseKt)+' は高単価業態の平均 '+yK(hiKt)+' を下回る。ランチ・カレー単品など軽い利用が平均を押し下げているとみられ、裏を返せば「夜のワイン×ペアリング（本来の高単価シーン）の取り込み」に最大の伸びしろがある＝単価は弱みではなく未回収。');
+    }
     const series = baseSeriesFromReports(allReports, baseName);
     const WD = ['日','月','火','水','木','金','土'];
     // 各日にイベント・天気の文脈を付与（深掘り分析用）。
@@ -914,24 +939,36 @@
     })();
     L.push('【強み・弱み】');
     const strengths=[], weaks=[];
-    if (guestRank<=Math.ceil(n/2)) strengths.push('集客力（客数 '+guestRank+'位）'); else weaks.push('集客（客数 '+guestRank+'位）');
-    if (ktRank!=null){ if (ktRank<=Math.ceil(n/2)) strengths.push('客単価（'+ktRank+'位）'); else weaks.push('客単価（'+ktRank+'位・FC平均比 '+p1(relPct(baseKt,avgKt))+'）'); }
+    if (guestRank<=Math.ceil(n/2)) strengths.push('集客力（客数 '+guestRank+'位）＝この施設で売上を決める最重要因子で上位にいる');
+    else weaks.push('集客（客数 '+guestRank+'位）＝売上を決める最重要因子で、ここが最大の課題');
+    if (meProf && meProf.drink==='wine') strengths.push('ワイン需要の独占（施設で唯一の本格ワイン業態。高単価を支える柱）');
+    // 高単価業態なのに実測単価が低い → 単価順位ではなく「取りこぼし＝伸びしろ」として扱う
+    if (meProf && meProf.tier==='high' && baseKt!=null && hiKt!=null && baseKt<hiKt){
+      weaks.push('単価の未回収（業態は高単価帯なのに実測 '+yK(baseKt)+' < 高単価業態平均 '+yK(hiKt)+'。夜・ワインの取り込み不足＝弱みというより伸びしろ）');
+    } else if (ktRank!=null && ktRank<=Math.ceil(n/2)) {
+      strengths.push('客単価（'+ktRank+'位）');
+    }
     if (share!=null && share>=100/n) strengths.push('売上シェア '+p1(share)+'（平均以上）');
     L.push('強み：'+(strengths.length?strengths.join('、'):'特になし'));
     L.push('弱み：'+(weaks.length?weaks.join('、'):'特になし'));
+    L.push('※客単価の順位そのものは業態差が主因なので弱みに数えない。評価軸は「集客（客数）」と「業態として取れるはずの単価を取れているか」。');
     L.push('【打ち手（試算）】');
-    if (baseKt!=null && medKt!=null && base.guests){
-      if (medKt>baseKt){
-        const proj = Math.round(base.guests*medKt);
-        const newRank = 1+list.filter(t=>t.sales>proj).length;
-        L.push('・客単価をFC中央値 '+yK(medKt)+' に上げると（客数 '+nf.format(base.guests)+'人 維持）売上は '+yK(base.sales)+'→'+yK(proj)+'（'+p1((proj/base.sales-1)*100)+'増）＝売上 '+newRank+'位相当。');
-      } else {
-        L.push('・客単価は既にFC中央値以上。強みを維持しつつ客数増が伸びしろ。');
-      }
+    // 業態を踏まえた定性の打ち手
+    if (meProf && meProf.drink==='wine'){
+      L.push('・本筋は「夜・ワインの取り込み」。グラスワイン付帯率の引き上げ／スパイスカレー×ワインのペアリングセット／観戦・宴会後の二次利用訴求で、独占しているワイン需要を実際の単価に変える（軽い利用を高単価シーンに引き上げる）。');
+    }
+    if (baseKt!=null && hiKt!=null && base.guests && baseKt<hiKt){
+      const proj = Math.round(base.guests*hiKt);
+      const newRank = 1+list.filter(t=>t.sales>proj).length;
+      L.push('・客単価を高単価業態の平均 '+yK(hiKt)+' まで引き上げられれば（客数 '+nf.format(base.guests)+'人 維持）売上は '+yK(base.sales)+'→'+yK(proj)+'（'+p1((proj/base.sales-1)*100)+'増）＝売上 '+newRank+'位相当。業態的に到達可能な水準。');
+    } else if (baseKt!=null && medKt!=null && base.guests && medKt>baseKt){
+      const proj = Math.round(base.guests*medKt);
+      const newRank = 1+list.filter(t=>t.sales>proj).length;
+      L.push('・客単価をFC中央値 '+yK(medKt)+' に上げると（客数 '+nf.format(base.guests)+'人 維持）売上は '+yK(base.sales)+'→'+yK(proj)+'（'+p1((proj/base.sales-1)*100)+'増）＝売上 '+newRank+'位相当。');
     }
     if (avgGuests!=null && base.guests!=null && avgGuests>base.guests && baseKt!=null){
       const proj2 = Math.round(avgGuests*baseKt);
-      L.push('・客数をFC平均 '+nf.format(Math.round(avgGuests))+'人 に増やすと（単価維持）売上は '+yK(proj2)+'（'+p1((proj2/base.sales-1)*100)+'増）。');
+      L.push('・客数をFC平均 '+nf.format(Math.round(avgGuests))+'人 に増やすと（単価維持）売上は '+yK(proj2)+'（'+p1((proj2/base.sales-1)*100)+'増）。集客はこの施設の売上を決める因子なので、イベント日・週末夜の取り込みが最短ルート。');
     }
     L.push('【注意】業態（寿司／フレンチ／ラーメン／ビア等）で単価帯が異なるため、客単価の順位は参考程度。新規オープンで前年対比は無いため、最も確実な基準は自店の日々の履歴（推移）です。日数が増えるほど傾向の精度が上がります。');
     return L.join('\n');
