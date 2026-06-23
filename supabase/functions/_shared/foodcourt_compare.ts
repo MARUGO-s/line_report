@@ -742,10 +742,17 @@ export async function saveFoodCourtReport(
   params: { storeKey: string; roomId: string; lineMessageId: string; baseName: string; tenants: FoodCourtTenant[] },
 ): Promise<void> {
   try {
+    // report_date＝レポート発行日（＝送信日）。テナント一覧は「前日の売上比較表」なので
+    // 売上日は report_date の前日(-1)。この日付が無いと一覧フィルタ(hasReportDate)で
+    // 除外され表示されないため、受信日(JST)を発行日として必ずセットする。
+    // ※深夜0時またぎで送信した場合のみ1日ズレうる→分析ページから手修正できる。
+    const nowJst = new Date(Date.now() + 9 * 3600 * 1000)
+    const reportDate = `${nowJst.getUTCFullYear()}-${String(nowJst.getUTCMonth() + 1).padStart(2, '0')}-${String(nowJst.getUTCDate()).padStart(2, '0')}`
     await supabase.from('foodcourt_tenant_reports').upsert({
       store_partition_key: params.storeKey,
       room_id: params.roomId,
       line_message_id: params.lineMessageId,
+      report_date: reportDate,
       base_tenant_name: params.baseName,
       tenants: params.tenants,
     }, { onConflict: 'line_message_id' })
