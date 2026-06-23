@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 
 // 東京ドーム「週次イベント配信」cron。
 // 毎分起動し、ルームごとの設定（dome_weekly_enabled / 曜日 / 時刻）が「今この瞬間(JST)」に一致する
-// ルームへ、翌週(日〜土)の東京ドームのイベントをまとめてLINE配信する。
+// ルームへ、翌週日曜から2週間分(日〜翌々週の土)の東京ドームのイベントをまとめてLINE配信する。
 // 二重送信は tokyo_dome_weekly_logs（room_id, week_start_date 一意）で防止。
 
 type DbClient = ReturnType<typeof createClient>
@@ -130,12 +130,12 @@ async function loadEvents(supabase: DbClient, startStr: string, endStr: string):
 function buildWeeklyFlex(win: WeekWindow, events: Array<{ event_date: string; title: string; category: string }>) {
   const rangeLabel = `${win.start.month}/${win.start.day}(${WDAY_JP[win.start.dow]})〜${win.end.month}/${win.end.day}(${WDAY_JP[win.end.dow]})`
   const headerContents: Array<Record<string, unknown>> = [
-    { type: "text", text: "🏟️ 来週の東京ドーム", color: "#FFFFFF", size: "lg", weight: "bold" },
+    { type: "text", text: "🏟️ 今後2週間の東京ドーム", color: "#FFFFFF", size: "lg", weight: "bold" },
     { type: "text", text: `${rangeLabel} ・ ${events.length}件`, color: "#FFFFFFCC", size: "sm", margin: "sm" },
   ]
   let body: Array<Record<string, unknown>>
   if (events.length === 0) {
-    body = [{ type: "text", text: "来週(日〜土)は東京ドーム開催の予定はありません。", size: "sm", color: "#8A94A6", wrap: true, align: "center" }]
+    body = [{ type: "text", text: "今後2週間(日〜土)は東京ドーム開催の予定はありません。", size: "sm", color: "#8A94A6", wrap: true, align: "center" }]
   } else {
     body = []
     events.slice(0, MAX_FLEX_ITEMS).forEach((e, idx) => {
@@ -157,7 +157,7 @@ function buildWeeklyFlex(win: WeekWindow, events: Array<{ event_date: string; ti
   }
   return {
     type: "flex",
-    altText: truncate(`来週の東京ドーム ${rangeLabel} ${events.length}件`, 380),
+    altText: truncate(`今後2週間の東京ドーム ${rangeLabel} ${events.length}件`, 380),
     contents: {
       type: "bubble", size: "mega",
       header: { type: "box", layout: "vertical", backgroundColor: "#1F2D3D", paddingAll: "16px", spacing: "xs", contents: headerContents },
@@ -172,7 +172,7 @@ type WeekWindow = { start: { year: number; month: number; day: number; dow: numb
 function nextWeekWindow(jst: { year: number; month: number; day: number; dow: number }): WeekWindow {
   const daysToNextSunday = jst.dow === 0 ? 7 : (7 - jst.dow) // 翌週の日曜まで
   const s = addDaysUtc(jst.year, jst.month, jst.day, daysToNextSunday)
-  const e = addDaysUtc(s.year, s.month, s.day, 6)
+  const e = addDaysUtc(s.year, s.month, s.day, 13) // 翌週日曜から2週間(14日間)分: 日〜翌々週の土
   return { start: s, end: e, startStr: ymd(s), endStr: ymd(e) }
 }
 
