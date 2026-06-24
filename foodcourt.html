@@ -718,6 +718,10 @@
   const venueOf = e => String((e&&e.venue)||'tokyo-dome');
   const venueLabelOf = e => { const v=venueOf(e); return (v && v!=='tokyo-dome') ? (VENUE_LABEL[v]||v) : ''; };
   const venueTag = e => { const l=venueLabelOf(e); return l ? '<span style="display:inline-block;font-size:10px;font-weight:700;color:var(--accent,#b07);background:rgba(176,0,119,.10);border-radius:4px;padding:0 5px;margin-right:5px;vertical-align:middle">🏛'+escapeHtml(l)+'</span>' : ''; };
+  // 開催場所のフルネーム（東京ドーム本体も含め全会場）。ポップアップで開催場所を必ず明記するのに使う。
+  const VENUE_FULL = { 'tokyo-dome':'東京ドーム', 'kanadevia':'カナデビアホール', 'korakuen':'後楽園ホール', 'prism':'プリズムホール', 'laqua':'ラクーア' };
+  const venueFullName = e => { const v=venueOf(e); return VENUE_FULL[v] || v; };
+  const venueBadge = e => '<span style="display:inline-block;font-size:11px;font-weight:700;color:var(--accent,#b07);background:rgba(176,0,119,.12);border-radius:5px;padding:1px 7px;margin-right:6px;vertical-align:middle">📍'+escapeHtml(venueFullName(e))+'</span>';
   const escapeHtml = (s)=> String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
   function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':'other'; }
   function shorten(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
@@ -1686,7 +1690,7 @@
     let html = '<div class="dp-date">'+fmtFullDay(ymd)+'</div>';
     if(evs.length){
       html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドームシティ イベント</div>'
-        + evs.map(e=>'<div class="dp-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b>　'+venueTag(e)+escapeHtml(e.title||'')+'</div>').join('')
+        + evs.map(e=>'<div class="dp-ev"><div style="margin-bottom:3px">'+venueBadge(e)+'<span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b></div><div>'+escapeHtml(e.title||'')+'</div></div>').join('')
         + '</div>';
     } else {
       html += '<div class="dp-sec"><div class="dp-muted">東京ドームシティ開催なし</div></div>';
