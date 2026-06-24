@@ -613,13 +613,14 @@
       </div>
       <div class="card">
         <div class="card-h">
-          <div class="card-t"><span class="em">🗓️</span>東京ドーム カレンダー</div>
+          <div class="card-t"><span class="em">🗓️</span>東京ドームシティ カレンダー</div>
           <div class="cal-nav">
             <button class="iconbtn" id="calPrev" aria-label="前月"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
             <span class="cm" id="calMonth">—</span>
             <button class="iconbtn" id="calNext" aria-label="翌月"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
           </div>
         </div>
+        <div class="filt" id="calVenueTabs" style="margin-bottom:10px"></div>
         <div class="cal-dow"><span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span></div>
         <div class="cal-grid" id="calGrid"></div>
         <div class="card-note" id="calNote"></div>
@@ -686,7 +687,7 @@
     rankTbody:$('rankTbody'), shareTbody:$('shareTbody'), shareNote:$('shareNote'), priceTbody:$('priceTbody'), distWrap:$('distWrap'), clsList:$('clsList'),
     trendCount:$('trendCount'), dailyTbody:$('dailyTbody'), trendNote:$('trendNote'),
     corrWrap:$('corrWrap'), corrBreakdown:$('corrBreakdown'), corrNote:$('corrNote'),
-    calPrev:$('calPrev'), calNext:$('calNext'), calMonth:$('calMonth'), calGrid:$('calGrid'), calNote:$('calNote'),
+    calPrev:$('calPrev'), calNext:$('calNext'), calMonth:$('calMonth'), calGrid:$('calGrid'), calNote:$('calNote'), calVenueTabs:$('calVenueTabs'),
     domeFilt:$('domeFilt'), domeList:$('domeList'), domeMore:$('domeMore'), domeNote:$('domeNote'),
     dpModal:$('dpModal'), dpBody:$('dpBody'), dpClose:$('dpClose'), dpBackdrop:$('dpBackdrop'),
     wxCorrWrap:$('wxCorrWrap'), wxBreakdown:$('wxBreakdown'), wxNote:$('wxNote'), wxDaily:$('wxDaily'), wxDailyNote:$('wxDailyNote'),
@@ -702,6 +703,7 @@
   let calY = 0, calM = 0;          // カレンダー表示中の年・月（0=未初期化）
   let mode = 'single';             // 'single' | 'range'
   let domeFilter = 'all', domeLimit = 14;
+  let calVenue = 'all'; // カレンダーの会場タブ（all/tokyo-dome/kanadevia/korakuen）
 
   const nf = new Intl.NumberFormat('ja-JP');
   const yen = (v) => '¥' + nf.format(Math.round(Number(v)||0));
@@ -1459,9 +1461,18 @@
     const b=eventMonthBounds(); if(b){ k=Math.max(b.min,Math.min(b.max,k)); }
     calY=Math.floor(k/12); calM=(k%12)+1; renderCalendar();
   }
+  const CAL_VENUE_ORDER = ['tokyo-dome','kanadevia','korakuen','prism','laqua'];
+  function renderCalVenueTabs(){
+    if(!dom.calVenueTabs) return;
+    const present = new Set((events||[]).map(e=>venueOf(e)));
+    if(!present.has(calVenue)) calVenue='all'; // 選択中の会場が無くなったら全てに戻す
+    const tabs = [['all','全て']].concat(CAL_VENUE_ORDER.filter(v=>present.has(v)).map(v=>[v, VENUE_FULL[v]||v]));
+    dom.calVenueTabs.innerHTML = tabs.map(t=>'<button class="fbtn'+(calVenue===t[0]?' active':'')+'" data-v="'+t[0]+'">'+escapeHtml(t[1])+'</button>').join('');
+  }
   function renderCalendar(){
     if(!dom.calGrid) return;
-    if(!events.length){ dom.calGrid.innerHTML=''; dom.calMonth.textContent='—'; dom.calNote.textContent='東京ドームのイベントデータがありません。'; dom.calPrev.disabled=true; dom.calNext.disabled=true; return; }
+    if(!events.length){ dom.calGrid.innerHTML=''; if(dom.calVenueTabs)dom.calVenueTabs.innerHTML=''; dom.calMonth.textContent='—'; dom.calNote.textContent='東京ドームシティのイベントデータがありません。'; dom.calPrev.disabled=true; dom.calNext.disabled=true; return; }
+    renderCalVenueTabs();
     const b=eventMonthBounds();
     if(!calY){ const tj=new Date(Date.now()+9*3600*1000); let k=tj.getUTCFullYear()*12+tj.getUTCMonth(); if(b)k=Math.max(b.min,Math.min(b.max,k)); calY=Math.floor(k/12); calM=(k%12)+1; }
     const guestsByDate=new Map(); (lastSeries||[]).forEach(p=>{ const d=ymdJst(p.when); if(d&&p.guests!=null) guestsByDate.set(d,p.guests); });
@@ -1473,7 +1484,8 @@
     for(let i=0;i<first;i++) html+='<div class="cell empty"></div>';
     for(let d=1;d<=days;d++){
       const ds=calY+'-'+String(calM).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-      const hit=(eventsByDate.get(ds)||[])[0]; const today=ds===todayJ;
+      const dayEvs=(eventsByDate.get(ds)||[]).filter(e=> calVenue==='all' || venueOf(e)===calVenue);
+      const hit=dayEvs[0]; const today=ds===todayJ;
       const gcls=hit?catSlug(hit.category):'';
       const vlab=hit?venueLabelOf(hit):'';
       const pill=hit?'<span class="ev-pill '+gcls+'" title="'+escapeHtml((vlab?vlab+'：':'')+(hit.title||''))+'">'+escapeHtml(shorten((vlab?vlab+'/':'')+hit.title,16))+'</span><span class="ev-bar '+gcls+'"></span>':'';
@@ -1628,7 +1640,7 @@
       weather = Array.isArray(body.weather) ? body.weather : [];
       weatherByDate = new Map();
       weather.forEach(w=>{ const d=String((w&&w.weather_date)||'').slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(d)) weatherByDate.set(d,w); });
-      calY = 0; calM = 0; domeFilter='all'; domeLimit=14;
+      calY = 0; calM = 0; domeFilter='all'; domeLimit=14; calVenue='all';
       reports.sort((a,b)=> String((b&&(b.report_date||b.created_at))||'').localeCompare(String((a&&(a.report_date||a.created_at))||'')));
       setAuthBadge(true);
       dom.loadMsg.className='msg';
@@ -1677,6 +1689,10 @@
     domeFilter = b.dataset.g; domeLimit = 14; renderDomeFilter(); renderDomeList();
   });
   dom.domeMore.addEventListener('click', ()=>{ domeLimit += 20; renderDomeList(); });
+  if(dom.calVenueTabs) dom.calVenueTabs.addEventListener('click', e=>{
+    const b = e.target.closest('.fbtn'); if(!b) return;
+    calVenue = b.dataset.v || 'all'; renderCalendar();
+  });
 
   // ===== 日別ポップアップ（カレンダー／イベント一覧クリック） =====
   function fmtFullDay(ymd){ const m=String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m?((+m[1])+'年'+(+m[2])+'月'+(+m[3])+'日（'+wdayJp(ymd)+'）'):String(ymd||''); }
