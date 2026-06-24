@@ -57,3 +57,8 @@ verify_jwt = false
 # イベントをLINE配信する。verify_jwt は他cronと同様 false。二重送信は tokyo_dome_weekly_logs で防止。
 [functions.tokyo-dome-weekly-cron]
 verify_jwt = false
+
+# foodcourt-forecast-cron は pg_cron（JST05:00）から呼ばれる自己再学習型の来客予測。verify_jwt は他cronと同様 false。
+# forecast_predictions の (target_date,tenant_name,metric) 一意 upsert で冪等。
+[functions.foodcourt-forecast-cron]
+verify_jwt = false
