@@ -12871,6 +12871,13 @@
         currentState = state;
         // 機能/権限の設定（既定値・店舗テンプレ・優先順位等）をDB由来でメモリへ反映（端末間共有）。
         seedConsoleSettings(state.console_settings);
+        // DB由来の新規ルーム既定が届いた後にKPI/サマリーを実値で再同期する。
+        // （init時点では console_settings 未取得＝既定値で固定され、Webhook設定の
+        //  「その他機能（新規既定）」等が実際の保存値とズレて表示されるため。単一ソース化の一環）
+        if (!(dom.newRoomConfigModal && dom.newRoomConfigModal.classList.contains('open'))) {
+          applyNewRoomDefaultCheckboxes();
+        }
+        refreshNewRoomConfigSummary();
         receiptWebhookStatusByStore = mergeWebhookStatusMaps(liteMap, receiptWebhookStatusByStore);
         renderDeliverySection(state);
         renderWebhookSettingsSection(
