@@ -6,13 +6,20 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 //
 // 仕組み:
 //  - 東京ドーム本体: 公式スケジュールHTML → タグ除去でテキスト化 → 確定パース(主)／Groq抽出(従)。venue='tokyo-dome'。
-//  - カナデビアホール(旧 TOKYO DOME CITY HALL): 公式カレンダーHTMLを構造から確定パース。venue='kanadevia'。
+//  - ドームシティ各ホール(カナデビアホール=旧TOKYO DOME CITY HALL／後楽園ホール): 公式カレンダーHTML
+//    （c-mod-calender 構造）を共通の確定パーサで解析。venue='kanadevia'/'korakuen'。
 // 冪等(主キー event_date+venue+title の upsert)。verify_jwt=false で pg_cron から起動。
 
 type DbClient = ReturnType<typeof createClient>
 
 const DEFAULT_SCHEDULE_URL = "https://www.tokyo-dome.co.jp/dome/event/schedule.html"
 const DEFAULT_KANADEVIA_URL = "https://www.tokyo-dome.co.jp/tdc-hall/event/"
+const DEFAULT_KORAKUEN_URL = "https://www.tokyo-dome.co.jp/hall/event/"
+// ドームシティ各ホール（同じカレンダーHTML構造）。source はデータ出所の記録用。
+const DOME_CITY_HALLS: Array<{ venue: string; envKey: string; url: string; source: string }> = [
+  { venue: "kanadevia", envKey: "KANADEVIA_SCHEDULE_URL", url: DEFAULT_KANADEVIA_URL, source: "tokyo-dome.co.jp/tdc-hall" },
+  { venue: "korakuen", envKey: "KORAKUEN_SCHEDULE_URL", url: DEFAULT_KORAKUEN_URL, source: "tokyo-dome.co.jp/hall" },
+]
 const MAX_TEXT_CHARS = 40000
 const VALID_CATEGORIES = new Set(["プロ野球", "アマ野球", "ライブ", "その他"])
 
@@ -33,9 +40,8 @@ Deno.serve(async (req) => {
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())
   const debug = ["1", "true", "yes", "on"].includes((url.searchParams.get("debug") ?? "").toLowerCase())
   const scheduleUrl = (Deno.env.get("TOKYO_DOME_SCHEDULE_URL") ?? "").trim() || DEFAULT_SCHEDULE_URL
-  const kanadeviaUrl = (Deno.env.get("KANADEVIA_SCHEDULE_URL") ?? "").trim() || DEFAULT_KANADEVIA_URL
 
-  // 1) 東京ドーム本体: 公式スケジュール取得→テキスト化→抽出（確定パース主経路）。失敗してもカナデビアは続行。
+  // 1) 東京ドーム本体: 公式スケジュール取得→テキスト化→抽出（確定パース主経路）。失敗しても各ホールは続行。
   let domeEvents: ExtractedEvent[] = []
   let domeUsage: DomeAiUsage | null = null
   let domeRaw: string | null = null
@@ -50,24 +56,30 @@ Deno.serve(async (req) => {
     }
   } catch (e) { domeError = e instanceof Error ? e.message : String(e) }
 
-  // 2) カナデビアホール（旧 TOKYO DOME CITY HALL）: 公式カレンダーHTMLを構造から確定パース。
-  let hallEvents: ExtractedEvent[] = []
-  let hallError: string | null = null
-  try {
-    const hres = await fetch(kanadeviaUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" } })
-    if (!hres.ok) { hallError = `fetch ${hres.status}` }
-    else { hallEvents = parseKanadeviaHtml(await hres.text()) }
-  } catch (e) { hallError = e instanceof Error ? e.message : String(e) }
+  // 2) ドームシティ各ホール（カナデビア／後楽園）: 共通カレンダーHTMLを確定パース。会場ごとに独立して取得。
+  const hallResults: Array<{ venue: string; source: string; events: ExtractedEvent[]; error: string | null }> = []
+  for (const h of DOME_CITY_HALLS) {
+    const hallUrl = (Deno.env.get(h.envKey) ?? "").trim() || h.url
+    let events: ExtractedEvent[] = []
+    let err: string | null = null
+    try {
+      const hres = await fetch(hallUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" } })
+      if (!hres.ok) { err = `fetch ${hres.status}` }
+      else { events = parseDomeCityHallCalendar(await hres.text()) }
+    } catch (e) { err = e instanceof Error ? e.message : String(e) }
+    hallResults.push({ venue: h.venue, source: h.source, events, error: err })
+  }
+  const totalHall = hallResults.reduce((s, r) => s + r.events.length, 0)
 
-  if (domeEvents.length === 0 && hallEvents.length === 0) {
-    return json({ ok: false, error: "no events extracted (dome+kanadevia)", dome_error: domeError, hall_error: hallError }, 200)
+  if (domeEvents.length === 0 && totalHall === 0) {
+    return json({ ok: false, error: "no events extracted (dome+halls)", dome_error: domeError, halls: hallResults.map((r) => ({ venue: r.venue, error: r.error })) }, 200)
   }
 
   if (dryRun || debug) {
     return json({
       ok: true, dry_run: true,
       dome: { count: domeEvents.length, error: domeError, events: domeEvents },
-      kanadevia: { count: hallEvents.length, error: hallError, events: hallEvents },
+      halls: hallResults.map((r) => ({ venue: r.venue, count: r.events.length, error: r.error, events: r.events })),
       ...(debug ? { groq_raw: (domeRaw ?? "").slice(0, 1000) } : {}),
     }, 200)
   }
@@ -95,7 +107,7 @@ Deno.serve(async (req) => {
   const now = new Date().toISOString()
   const rows = [
     ...domeEvents.map((e) => ({ event_date: e.event_date, venue: "tokyo-dome", title: e.title, category: e.category, source: "tokyo-dome.co.jp", updated_at: now })),
-    ...hallEvents.map((e) => ({ event_date: e.event_date, venue: "kanadevia", title: e.title, category: e.category, source: "tokyo-dome.co.jp/tdc-hall", updated_at: now })),
+    ...hallResults.flatMap((r) => r.events.map((e) => ({ event_date: e.event_date, venue: r.venue, title: e.title, category: e.category, source: r.source, updated_at: now }))),
   ]
   const { error } = await supabase
     .from("tokyo_dome_events")
@@ -108,10 +120,10 @@ Deno.serve(async (req) => {
   return json({
     ok: true,
     dome_upserted: domeEvents.length,
-    kanadevia_upserted: hallEvents.length,
+    halls_upserted: Object.fromEntries(hallResults.map((r) => [r.venue, r.events.length])),
     upserted: rows.length,
     dome_error: domeError,
-    hall_error: hallError,
+    hall_errors: Object.fromEntries(hallResults.map((r) => [r.venue, r.error])),
     date_range: { min: allDates[0] ?? null, max: allDates[allDates.length - 1] ?? null },
   }, 200)
 })
@@ -200,11 +212,12 @@ function markerCategory(s: string): "野球" | "コンサート" | "その他" |
   return null
 }
 
-// カナデビアホール（旧 TOKYO DOME CITY HALL）公式カレンダーHTMLを会場構造から確定パースする。
+// ドームシティ各ホール（カナデビア／後楽園）の公式カレンダーHTMLを会場構造から確定パースする（共通構造）。
 // 構造: 月見出し <p class="c-ttl-set-calender">YYYY年MM月</p> → <table> 内に
 //   <tr class="c-mod-calender__item"> （<span class="c-mod-calender__day">DD</span> ＋ <td class="c-mod-calender__detail">…）。
 //   detail 内の各 <div class="c-mod-calender__detail-in"> が1イベント（カテゴリ c-txt-tag__item ／ 公演名 c-mod-calender__links a）。
-function parseKanadeviaHtml(html: string): ExtractedEvent[] {
+//   カテゴリはコンサート系のみ「ライブ」、格闘技/プロレス/ボクシング/展示等は「その他」（会場名＋公演名で種別は判別可能）。
+function parseDomeCityHallCalendar(html: string): ExtractedEvent[] {
   const stripTags = (s: string) => String(s ?? "")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
