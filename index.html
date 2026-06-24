@@ -8160,7 +8160,9 @@
       }
       const editSource = raw.calendar_gmail_settings_override ? resolved : bulk;
       applyCalendarGmailValuesToPermFields(editSource);
-      applyCalendarGmailValuesToInlineFields(bulk);
+      // 個別モードでは、インライン欄も「そのルームの実効値」を表示する（店舗一括値ではなく）。
+      // ＝個別設定でOFFにして保存したら、再表示でもそのルームのOFFが見える（店舗一括ONに戻って見えない）。
+      applyCalendarGmailValuesToInlineFields(activeRoomIndividualSave ? resolved : bulk);
       activeCalendarGmailRoomId = String(roomId || '').trim();
       syncRoomConfigCalendarTabLayout();
     }
