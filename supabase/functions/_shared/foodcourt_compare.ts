@@ -570,6 +570,16 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
   if (evSa != null && nonSa != null) L.push(`イベント日の平均売上 ${fcYen(evSa)} / 非イベント日 ${fcYen(nonSa)}`)
   const cats = Array.from(byCat.entries()).filter(([, a]) => a.length).sort((a, b) => (fcAvg(b[1]) ?? 0) - (fcAvg(a[1]) ?? 0))
   for (const [c, a] of cats) L.push(`・${c}: ${a.length}日 / 平均客数 ${Math.round(fcAvg(a) ?? 0)}人`)
+  // 会場別（東京ドーム本体／カナデビアホール／後楽園ホール等）の平均客数。会場で客層が異なるため取り込み方を読む。
+  const byVenue = new Map<string, number[]>()
+  for (const r of daily) {
+    const hits = byDate.get(r.date) || []
+    const vs = new Set(hits.map((h) => String(h.venue ?? 'tokyo-dome')))
+    for (const v of vs) { if (!byVenue.has(v)) byVenue.set(v, []); byVenue.get(v)!.push(r.guests as number) }
+  }
+  const venName = (v: string) => fcVenueLabel(v) || (v === 'tokyo-dome' ? '東京ドーム' : v)
+  const venRows = Array.from(byVenue.entries()).filter(([, a]) => a.length).sort((a, b) => (fcAvg(b[1]) ?? 0) - (fcAvg(a[1]) ?? 0))
+  if (venRows.length >= 2) { L.push('会場別の平均客数（会場で客層が違う＝取り込み方を変える）:'); for (const [v, a] of venRows) L.push(`・${venName(v)}: ${a.length}日 / 平均客数 ${Math.round(fcAvg(a) ?? 0)}人`) }
   // データのある日付ごとのイベント有無を提示（モデルが個別イベントを名指しで語れるように・売上も添える）
   const sample = daily.slice(-14).map((r) => { const hits = byDate.get(r.date) || []; const lab = hits.length ? hits.map((h) => { const vl = fcVenueLabel(h.venue); return `${h.category}${vl ? `@${vl}` : ''}:${h.title}` }).join('｜') : 'イベントなし'; const dw = fcDow(r.date); return `${r.date}(${dw != null ? FC_DOW[dw] : '?'}) 客数${r.guests}人 売上${fcYen(r.sales)} ${lab}` })
   if (sample.length) L.push('—\n直近の日別イベント（この具体的な対応を使って“どのイベントがどう効いたか”を述べること）:\n' + sample.join('\n'))

@@ -1193,8 +1193,8 @@
       else if (dA!=null) { L.push('雨でない日('+dry.length+'日)の平均客数 '+Math.round(dA)+'人（雨の日のデータがまだ無い）。'); }
     })();
     (function(){
-      L.push('【東京ドーム】');
-      if (!events.length){ L.push('東京ドームのイベントデータがありません。'); return; }
+      L.push('【東京ドームシティ】');
+      if (!events.length){ L.push('東京ドームシティのイベントデータがありません。'); return; }
       const g = S.filter(d=>d.guests!=null);
       if (g.length<2){ L.push('客数とイベントの比較に十分なデータがまだありません（蓄積が増えると精度が上がります）。'); return; }
       const ev = g.filter(d=>d.isEvent), non = g.filter(d=>!d.isEvent);
@@ -1208,6 +1208,12 @@
       const catRows=Object.keys(cats).map(c=>({c,a:avg(cats[c]),n:cats[c].length})).sort((x,y)=>y.a-x.a);
       if (catRows.length && nA!=null){
         L.push('種別別の平均客数：'+catRows.map(x=>x.c+' '+Math.round(x.a)+'人('+x.n+'日)').join('／')+'（非イベント '+Math.round(nA)+'人）。最も集客が伸びるのは「'+catRows[0].c+'」。');
+      }
+      // 会場別の集客（東京ドーム本体／カナデビアホール／後楽園ホール のイベント日ごとの平均客数）
+      const venAgg={}; g.forEach(d=>{ const vs=new Set((eventsByDate.get(d.y)||[]).map(e=>venueOf(e))); vs.forEach(v=>{ (venAgg[v]=venAgg[v]||[]).push(d.guests); }); });
+      const venRows=Object.keys(venAgg).map(v=>({v,name:VENUE_FULL[v]||v,a:avg(venAgg[v]),n:venAgg[v].length})).filter(x=>x.a!=null).sort((x,y)=>y.a-x.a);
+      if (venRows.length>=2 && nA!=null){
+        L.push('会場別の平均客数：'+venRows.map(x=>x.name+' '+Math.round(x.a)+'人('+x.n+'日)').join('／')+'（非イベント '+Math.round(nA)+'人）。'+(venRows[0].a>nA*1.1?'最も客数が伸びるのは「'+venRows[0].name+'」開催日。会場で客層が異なる（東京ドーム＝野球/大型ライブで幅広い層、カナデビアホール＝ライブ中心で若年層、後楽園ホール＝格闘技で中年男性中心）ため、会場ごとに仕込み・客層・客単価の取り込み方を読む。':'会場による客数差は現時点では小さい（蓄積で精度が上がる）。'));
       }
       // 客数が多い日とイベントの一致を名指しで（集客の山＝イベントか）
       const top = g.slice().sort((a,b)=>b.guests-a.guests).slice(0, Math.min(3,g.length));
