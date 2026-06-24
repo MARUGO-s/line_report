@@ -197,8 +197,12 @@
     var params = new URLSearchParams(global.location.search);
     var loginToken = String(params.get('lt') || '').trim();
     if (!loginToken) return false;
+    // LINEリンク(from=line)に新しい lt が載っている場合は、端末に残った既存セッションがあっても
+    // 必ず交換する。期限切れ/別店舗スコープの古いセッションが新しい lt をスキップさせ、その lt を
+    // 未使用のまま失効させて「LINEからクリックしてもトークン入力を求められる」不具合の原因だったため。
+    // 通常ページ(from=line以外)では従来どおり既存セッションを尊重し、使い捨て lt を無駄にしない。
     var existing = getToken();
-    if (existing && isSessionToken(existing)) {
+    if (existing && isSessionToken(existing) && !isLineEntryUrl()) {
       stripUrlParams(['lt']);
       return true;
     }
