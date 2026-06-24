@@ -7237,6 +7237,7 @@
       const linkedCount = getLinkedRoomCountInModal();
       const override = !!(dom.roomConfigCalendarGmailOverride && dom.roomConfigCalendarGmailOverride.checked);
       const multiRoom = linkedCount >= 2;
+      const individual = !!activeRoomIndividualSave; // ルーム個別保存モード（このルームだけに保存）
 
       if (dom.roomConfigCalendarNoRoomHint) {
         dom.roomConfigCalendarNoRoomHint.hidden = !permissionMode || linkedCount > 0 || isGlobal;
@@ -7246,7 +7247,10 @@
       }
 
       if (dom.roomConfigCalendarBulkTitle) {
-        if (!permissionMode) {
+        if (individual) {
+          dom.roomConfigCalendarBulkTitle.textContent =
+            'このルームの設定（個別保存）: ' + getActiveScheduleRoomLabel();
+        } else if (!permissionMode) {
           dom.roomConfigCalendarBulkTitle.textContent =
             '店舗一括（この Webhook の全連携ルームへ保存時に反映）';
         } else if (isGlobal) {
@@ -7263,11 +7267,14 @@
       }
 
       if (dom.roomConfigCalendarGmailWrap) {
-        dom.roomConfigCalendarGmailWrap.hidden = !permissionMode || !multiRoom;
+        // 個別保存モードでは「このルームだけ一括と違う設定にする」オーバーライド欄は不要（個別＝常にそのルーム）。
+        dom.roomConfigCalendarGmailWrap.hidden = individual || !permissionMode || !multiRoom;
       }
 
       if (dom.roomConfigCalendarInlineBulk) {
-        if (!permissionMode) {
+        if (individual) {
+          dom.roomConfigCalendarInlineBulk.hidden = false; // 個別モードはこの欄でそのルームの値を編集
+        } else if (!permissionMode) {
           dom.roomConfigCalendarInlineBulk.hidden = false;
         } else if (isGlobal) {
           dom.roomConfigCalendarInlineBulk.hidden = false;
@@ -8158,11 +8165,15 @@
       if (dom.roomConfigCalendarGmailOverride) {
         dom.roomConfigCalendarGmailOverride.checked = !!raw.calendar_gmail_settings_override;
       }
-      const editSource = raw.calendar_gmail_settings_override ? resolved : bulk;
+      // 個別モードは「そのルームの実値（DB由来のテーブル行）」を表示・編集する。
+      // ＝個別設定でOFFにして保存したら、再表示でもそのルームのOFFが見える（店舗一括値ON に戻って見えない）。
+      // 店舗一括/全体モードは従来どおり bulk / override を表示。
+      const roomActual = (activeRoomIndividualSave && activeRoomConfigRow)
+        ? calendarGmailFromRoomTableRow(activeRoomConfigRow)
+        : null;
+      const editSource = roomActual || (raw.calendar_gmail_settings_override ? resolved : bulk);
       applyCalendarGmailValuesToPermFields(editSource);
-      // 個別モードでは、インライン欄も「そのルームの実効値」を表示する（店舗一括値ではなく）。
-      // ＝個別設定でOFFにして保存したら、再表示でもそのルームのOFFが見える（店舗一括ONに戻って見えない）。
-      applyCalendarGmailValuesToInlineFields(activeRoomIndividualSave ? resolved : bulk);
+      applyCalendarGmailValuesToInlineFields(roomActual || bulk);
       activeCalendarGmailRoomId = String(roomId || '').trim();
       syncRoomConfigCalendarTabLayout();
     }
@@ -12511,9 +12522,10 @@
       // 「個別設定」での保存は、そのルーム専用（override=ON）として確定する。
       // ＝「このルームだけ一括と違う設定にする」を手動でONにしなくても、編集した値がそのルームに保持され、
       //   以後の全体/店舗一括では上書きされない（順位はROOMに設定済み）。再表示でも全体に戻らない。
+      // 個別モードは常にインライン欄（このルームの設定）を編集するため、保存もインライン欄を読む。
       saveRoomCalendarGmailSettings(
         roomId,
-        Object.assign({ calendar_gmail_settings_override: true }, readCalendarGmailBulkForPermissionSave()),
+        Object.assign({ calendar_gmail_settings_override: true }, readCalendarGmailFromInlineModal()),
       );
       const built = buildRoomConfigPayloadFromModal();
       let nextConfig = built.nextConfig;
