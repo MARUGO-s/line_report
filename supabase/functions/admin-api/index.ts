@@ -1804,7 +1804,14 @@ function getCurrentJstMonthUtcBounds(): { monthLabel: string; startUtcIso: strin
 }
 
 type PushUsageItem = { source: string; context: string; count: number }
+type PushByStore = { store_key: string; push: number; reply: number; total: number }
+type PushByRoom = { room_id: string; room_name: string; store_key: string; push: number; reply: number; total: number }
 
+// 当月(JST)の LINE 送信量を「実際の全送信元テーブル」から集計する。
+//  - LINE PUSH（定期・ジョブ・枠を消費）: gmail予約通知 / 本日の予約配信 / 東京ドーム週次 / レシート報告 /
+//    line_webhook(method='push') / summary_delivery_logs(成功)。各テーブルに分散記録されているため全部見る。
+//  - WEBHOOK PUSH（メッセージ受信による返信）: line_webhook_delivery_logs(method='reply', 成功)。返信は枠を消費しない。
+//  - ルーム別・店舗別にもカウント（room_id→店舗は room_summary_settings で対応付け）。
 async function fetchMonthlyPushUsageSummary(
   supabase: ReturnType<typeof createClient>,
 ): Promise<{
@@ -1817,76 +1824,112 @@ async function fetchMonthlyPushUsageSummary(
   free_quota_limit: number
   free_quota_remaining: number
   by_source_context: PushUsageItem[]
+  by_store: PushByStore[]
+  by_room: PushByRoom[]
 }> {
   const bounds = getCurrentJstMonthUtcBounds()
-  const [webhookPushRes, summaryRes, webhookSuccessRes] = await Promise.all([
-    supabase
-      .from("line_webhook_delivery_logs")
-      .select("context")
-      .eq("method", "push")
-      .eq("line_send_success", true)
-      .gte("created_at", bounds.startUtcIso)
-      .lt("created_at", bounds.endUtcIso),
-    supabase
-      .from("summary_delivery_logs")
-      .select("reason, details")
-      .eq("line_send_attempted", true)
-      .eq("line_send_success", true)
-      .gte("run_at", bounds.startUtcIso)
-      .lt("run_at", bounds.endUtcIso),
-    supabase
-      .from("line_webhook_delivery_logs")
-      .select("method")
-      .eq("line_send_success", true)
-      .gte("created_at", bounds.startUtcIso)
-      .lt("created_at", bounds.endUtcIso),
+  const lo = bounds.startUtcIso, hi = bounds.endUtcIso
+  const [webhookRes, summaryRes, gmailRes, resvTodayRes, domeRes, receiptRes, roomMapRes] = await Promise.all([
+    supabase.from("line_webhook_delivery_logs").select("method, target_room_id, store_partition_key, context")
+      .eq("line_send_success", true).gte("created_at", lo).lt("created_at", hi),
+    supabase.from("summary_delivery_logs").select("target_room_id, reason, details")
+      .eq("line_send_attempted", true).eq("line_send_success", true).gte("run_at", lo).lt("run_at", hi),
+    supabase.from("gmail_reservation_alert_logs").select("line_target_room_id")
+      .not("line_message_sent_at", "is", null).gte("line_message_sent_at", lo).lt("line_message_sent_at", hi),
+    supabase.from("reservation_today_alert_logs").select("room_id, store_partition_key").gte("sent_at", lo).lt("sent_at", hi),
+    supabase.from("tokyo_dome_weekly_logs").select("room_id, store_partition_key").gte("sent_at", lo).lt("sent_at", hi),
+    supabase.from("line_receipt_mid_reports").select("room_id, report_kind").gte("sent_at", lo).lt("sent_at", hi),
+    supabase.from("room_summary_settings").select("room_id, room_name, receipt_report_store_partition_key"),
   ])
-  if (webhookPushRes.error) {
-    throw { status: 500, message: `Failed to fetch webhook push usage: ${webhookPushRes.error.message}` } satisfies AppError
+  const dataOf = (res: { data?: unknown }) => (Array.isArray(res?.data) ? res.data as Array<Record<string, unknown>> : [])
+
+  const roomToStore = new Map<string, string>()
+  const roomToName = new Map<string, string>()
+  for (const r of dataOf(roomMapRes)) {
+    const rid = String(r.room_id ?? "").trim()
+    const sk = String(r.receipt_report_store_partition_key ?? "").trim().toLowerCase()
+    const nm = String(r.room_name ?? "").trim()
+    if (rid && sk) roomToStore.set(rid, sk)
+    if (rid && nm) roomToName.set(rid, nm)
   }
-  if (summaryRes.error) {
-    throw { status: 500, message: `Failed to fetch summary push usage: ${summaryRes.error.message}` } satisfies AppError
+  const storeOf = (roomId: unknown, storeKey: unknown): string => {
+    const sk = String(storeKey ?? "").trim().toLowerCase()
+    if (sk) return sk
+    const rid = String(roomId ?? "").trim()
+    return rid ? (roomToStore.get(rid) ?? "") : ""
   }
-  if (webhookSuccessRes.error) {
-    throw { status: 500, message: `Failed to fetch webhook usage: ${webhookSuccessRes.error.message}` } satisfies AppError
+
+  const srcCounter = new Map<string, number>()
+  const byRoom = new Map<string, { store: string; push: number; reply: number }>()
+  const byStore = new Map<string, { push: number; reply: number }>()
+  const addSrc = (source: string, context: string) => {
+    const k = `${source}\t${context || "unknown"}`
+    srcCounter.set(k, (srcCounter.get(k) ?? 0) + 1)
   }
-  const counter = new Map<string, number>()
-  const webhookRows = Array.isArray(webhookPushRes.data) ? webhookPushRes.data : []
-  const webhookSuccessRows = Array.isArray(webhookSuccessRes.data) ? webhookSuccessRes.data : []
-  const summaryRows = Array.isArray(summaryRes.data) ? summaryRes.data : []
-  for (const row of webhookRows) {
-    const context = String((row as any)?.context ?? "").trim() || "unknown"
-    const key = `line-webhook\t${context}`
-    counter.set(key, (counter.get(key) ?? 0) + 1)
+  const add = (roomId: unknown, store: string, kind: "push" | "reply", source?: string, context?: string) => {
+    const rid = String(roomId ?? "").trim()
+    if (rid) {
+      const e = byRoom.get(rid) ?? { store: store || "", push: 0, reply: 0 }
+      e[kind] += 1
+      if (store && !e.store) e.store = store
+      byRoom.set(rid, e)
+    }
+    if (store) {
+      const s = byStore.get(store) ?? { push: 0, reply: 0 }
+      s[kind] += 1
+      byStore.set(store, s)
+    }
+    if (kind === "push" && source) addSrc(source, context ?? "")
   }
-  for (const row of summaryRows) {
-    const details = ((row as any)?.details && typeof (row as any).details === "object") ? (row as any).details as Record<string, unknown> : {}
-    const source = String(details.source ?? "summary_delivery_logs").trim() || "summary_delivery_logs"
-    const contextRaw = String(details.context ?? "").trim() || String((row as any)?.reason ?? "").trim()
-    const context = contextRaw || "unknown"
-    const key = `${source}\t${context}`
-    counter.set(key, (counter.get(key) ?? 0) + 1)
+
+  let pushTotal = 0, replyTotal = 0
+  for (const r of dataOf(webhookRes)) {
+    const method = String(r.method ?? "").trim()
+    const store = storeOf(r.target_room_id, r.store_partition_key)
+    if (method === "reply") { replyTotal += 1; add(r.target_room_id, store, "reply") }
+    else { pushTotal += 1; add(r.target_room_id, store, "push", "LINE webhook", String(r.context ?? "").trim() || "push") }
   }
-  const bySourceContext: PushUsageItem[] = Array.from(counter.entries())
-    .map(([k, count]) => {
-      const [source, context] = k.split("\t")
-      return { source: source || "unknown", context: context || "unknown", count }
-    })
-    .sort((a, b) => (b.count - a.count) || a.source.localeCompare(b.source) || a.context.localeCompare(b.context))
+  for (const r of dataOf(summaryRes)) {
+    const details = (r.details && typeof r.details === "object") ? r.details as Record<string, unknown> : {}
+    const source = String(details.source ?? "summary").trim() || "summary"
+    const context = String(details.context ?? "").trim() || String(r.reason ?? "").trim() || "summary"
+    pushTotal += 1; add(r.target_room_id, storeOf(r.target_room_id, ""), "push", source, context)
+  }
+  for (const r of dataOf(gmailRes)) {
+    pushTotal += 1; add(r.line_target_room_id, storeOf(r.line_target_room_id, ""), "push", "Gmail予約通知", "予約メール")
+  }
+  for (const r of dataOf(resvTodayRes)) {
+    pushTotal += 1; add(r.room_id, storeOf(r.room_id, r.store_partition_key), "push", "本日の予約配信", "daily")
+  }
+  for (const r of dataOf(domeRes)) {
+    pushTotal += 1; add(r.room_id, storeOf(r.room_id, r.store_partition_key), "push", "東京ドーム週次配信", "weekly")
+  }
+  for (const r of dataOf(receiptRes)) {
+    pushTotal += 1; add(r.room_id, storeOf(r.room_id, ""), "push", "レシートレポート", String(r.report_kind ?? "").trim() || "report")
+  }
+
+  const bySourceContext: PushUsageItem[] = Array.from(srcCounter.entries())
+    .map(([k, count]) => { const [source, context] = k.split("\t"); return { source: source || "unknown", context: context || "unknown", count } })
+    .sort((a, b) => (b.count - a.count) || a.source.localeCompare(b.source))
+  const byStoreArr: PushByStore[] = Array.from(byStore.entries())
+    .map(([store_key, v]) => ({ store_key, push: v.push, reply: v.reply, total: v.push + v.reply }))
+    .sort((a, b) => b.total - a.total)
+  const byRoomArr: PushByRoom[] = Array.from(byRoom.entries())
+    .map(([room_id, v]) => ({ room_id, room_name: roomToName.get(room_id) ?? "", store_key: v.store, push: v.push, reply: v.reply, total: v.push + v.reply }))
+    .sort((a, b) => b.total - a.total)
 
   return {
     month_jst: bounds.monthLabel,
-    total_push_rows: webhookRows.length + summaryRows.length,
-    webhook_push_rows: webhookRows.length,
-    summary_push_rows: summaryRows.length,
-    webhook_reply_rows: webhookSuccessRows.filter((row) => String((row as any)?.method ?? "").trim() === "reply").length,
-    webhook_success_rows: webhookSuccessRows.length,
+    total_push_rows: pushTotal,       // LINE PUSH（定期・ジョブ＝枠を消費）
+    webhook_push_rows: replyTotal,    // WEBHOOK PUSH（メッセージ受信による返信）
+    summary_push_rows: pushTotal,     // 後方互換（合計push）
+    webhook_reply_rows: replyTotal,
+    webhook_success_rows: pushTotal + replyTotal,
     free_quota_limit: 200,
-    free_quota_remaining: Math.max(
-      0,
-      200 - webhookSuccessRows.filter((row) => String((row as any)?.method ?? "").trim() === "reply").length,
-    ),
+    free_quota_remaining: Math.max(0, 200 - pushTotal),
     by_source_context: bySourceContext,
+    by_store: byStoreArr,
+    by_room: byRoomArr,
   }
 }
 

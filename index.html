@@ -5149,14 +5149,14 @@
             <div class="v2-kpi-sub">データベース全体</div>
           </div>
           <div class="v2-kpi-card" data-accent="green">
-            <div class="v2-kpi-label">LINE push（当月）</div>
+            <div class="v2-kpi-label">LINE PUSH（当月・枠消費）</div>
             <div class="v2-kpi-value" id="kpiPushTotal">-<span class="unit">件</span></div>
-            <div class="v2-kpi-sub" id="kpiPushSub">Webhook / 定期配信の合計</div>
+            <div class="v2-kpi-sub" id="kpiPushSub">定期・予約・レシート等の送信合計</div>
           </div>
           <div class="v2-kpi-card" data-accent="amber">
-            <div class="v2-kpi-label">Webhook push（当月）</div>
+            <div class="v2-kpi-label">返信（当月・枠を消費しない）</div>
             <div class="v2-kpi-value" id="kpiPushWebhook">-<span class="unit">件</span></div>
-            <div class="v2-kpi-sub">メッセージ受信による返信</div>
+            <div class="v2-kpi-sub">メッセージ受信による自動返信</div>
           </div>
         </div>
 
@@ -5178,10 +5178,21 @@
           </section>
 
           <section class="card global">
-            <h2>LINE push 内訳（上位）<span class="v2-card-badge" id="pushUsageBadge">PUSH</span></h2>
+            <h2>LINE push 内訳（種類別・上位）<span class="v2-card-badge" id="pushUsageBadge">PUSH</span></h2>
             <div id="pushBreakdownList" class="push-breakdown"><div class="meta">取得待ち…</div></div>
             <div id="pushUsageSummary" class="meta usage-summary" hidden></div>
             <div id="pushUsageDetails" class="meta usage-details" hidden></div>
+          </section>
+
+          <section class="card global">
+            <h2>店舗別 送信量（当月）<span class="v2-card-badge">STORE</span></h2>
+            <p class="meta" style="margin:0 0 8px">LINE の送信枠は店舗（チャネル）ごとです。PUSH が枠を消費します。</p>
+            <div id="pushByStoreList" class="push-breakdown"><div class="meta">取得待ち…</div></div>
+          </section>
+
+          <section class="card global">
+            <h2>ルーム別 送信量（当月・上位）<span class="v2-card-badge">ROOM</span></h2>
+            <div id="pushByRoomList" class="push-breakdown"><div class="meta">取得待ち…</div></div>
           </section>
         </main>
       </div>
@@ -10333,16 +10344,16 @@
         return;
       }
       const month = String(usage.month_jst || '').trim() || '-';
-      const total = Number(usage.total_push_rows || 0);
-      const webhookRows = Number(usage.webhook_push_rows || 0);
-      const summaryRows = Number(usage.summary_push_rows || 0);
+      const total = Number(usage.total_push_rows || 0);   // LINE PUSH（枠を消費）
+      const replyRows = Number(usage.webhook_push_rows || 0); // 返信（枠を消費しない）
       dom.pushUsageSummary.textContent =
-        'LINE push概算（' + month + ' JST）: '
-        + total + '件（Webhook: ' + webhookRows + ' / 定期・ジョブ: ' + summaryRows + '）';
+        'LINE push（' + month + ' JST）: ' + total + '件（枠消費）／ 返信: ' + replyRows + '件';
       setV2Kpi('kpiPushTotal', total.toLocaleString('ja-JP'), '<span class="unit">件</span>');
-      setV2Kpi('kpiPushWebhook', webhookRows.toLocaleString('ja-JP'), '<span class="unit">件</span>');
-      setV2KpiSub('kpiPushSub', month + ' JST ／ 定期・ジョブ: ' + summaryRows.toLocaleString('ja-JP') + ' 件');
-      const topItems = Array.isArray(usage.by_source_context) ? usage.by_source_context.slice(0, 5) : [];
+      setV2Kpi('kpiPushWebhook', replyRows.toLocaleString('ja-JP'), '<span class="unit">件</span>');
+      setV2KpiSub('kpiPushSub', month + ' JST ／ 定期・予約・レシート等の送信合計');
+
+      // 種類別（上位）
+      const topItems = Array.isArray(usage.by_source_context) ? usage.by_source_context.slice(0, 8) : [];
       const breakdownEl = document.getElementById('pushBreakdownList');
       if (breakdownEl) {
         breakdownEl.innerHTML = topItems.length === 0
@@ -10352,12 +10363,51 @@
               const ctx = String(row && row.context || '');
               const cnt = Number(row && row.count || 0);
               return '<div class="push-bd-row">' +
-                '<span class="push-bd-src mono">' + escapeHtml(src) + '</span>' +
+                '<span class="push-bd-src">' + escapeHtml(src) + '</span>' +
                 '<span class="push-bd-desc">' + escapeHtml(ctx || '-') + '</span>' +
                 '<span class="push-bd-count">' + cnt.toLocaleString('ja-JP') + '<small> 件</small></span>' +
                 '</div>';
             }).join('');
       }
+
+      // 店舗別
+      const byStore = Array.isArray(usage.by_store) ? usage.by_store : [];
+      const storeEl = document.getElementById('pushByStoreList');
+      if (storeEl) {
+        storeEl.innerHTML = byStore.length === 0
+          ? '<div class="meta">当月の送信ログはありません。</div>'
+          : byStore.map(function(row) {
+              const sk = String(row && row.store_key || '') || '（店舗未割当）';
+              const push = Number(row && row.push || 0);
+              const reply = Number(row && row.reply || 0);
+              return '<div class="push-bd-row">' +
+                '<span class="push-bd-src">' + escapeHtml(sk) + '</span>' +
+                '<span class="push-bd-desc">PUSH ' + push.toLocaleString('ja-JP') + ' ／ 返信 ' + reply.toLocaleString('ja-JP') + '</span>' +
+                '<span class="push-bd-count">' + push.toLocaleString('ja-JP') + '<small> 件</small></span>' +
+                '</div>';
+            }).join('');
+      }
+
+      // ルーム別（上位12）
+      const byRoom = Array.isArray(usage.by_room) ? usage.by_room.slice(0, 12) : [];
+      const roomEl = document.getElementById('pushByRoomList');
+      if (roomEl) {
+        roomEl.innerHTML = byRoom.length === 0
+          ? '<div class="meta">当月の送信ログはありません。</div>'
+          : byRoom.map(function(row) {
+              const nm = String(row && row.room_name || '') || String(row && row.room_id || '').slice(0, 12) || '（不明）';
+              const sk = String(row && row.store_key || '');
+              const push = Number(row && row.push || 0);
+              const reply = Number(row && row.reply || 0);
+              const desc = (sk ? sk + ' ／ ' : '') + 'PUSH ' + push.toLocaleString('ja-JP') + ' ／ 返信 ' + reply.toLocaleString('ja-JP');
+              return '<div class="push-bd-row">' +
+                '<span class="push-bd-src">' + escapeHtml(nm) + '</span>' +
+                '<span class="push-bd-desc">' + escapeHtml(desc) + '</span>' +
+                '<span class="push-bd-count">' + push.toLocaleString('ja-JP') + '<small> 件</small></span>' +
+                '</div>';
+            }).join('');
+      }
+
       if (topItems.length === 0) {
         dom.pushUsageDetails.textContent = '内訳: 送信ログなし';
         return;
