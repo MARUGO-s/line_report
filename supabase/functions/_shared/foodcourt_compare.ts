@@ -658,6 +658,116 @@ function buildCompetitorContext(reports: Array<Record<string, unknown>>, baseNam
   return lines.join('\n')
 }
 
+// --- 設計書フレームワーク用の統計ヘルパー（docs/フードコート売上分析_設計書.md）---
+function fcStdev(a: number[]): number | null {
+  const x = a.filter((v) => v != null && isFinite(v))
+  if (x.length < 2) return null
+  const m = x.reduce((s, v) => s + v, 0) / x.length
+  return Math.sqrt(x.reduce((s, v) => s + (v - m) * (v - m), 0) / x.length)
+}
+function fcPearson(xs: number[], ys: number[]): number | null {
+  const n = Math.min(xs.length, ys.length)
+  const px: number[] = [], py: number[] = []
+  for (let i = 0; i < n; i++) { if (xs[i] != null && ys[i] != null && isFinite(xs[i]) && isFinite(ys[i])) { px.push(xs[i]); py.push(ys[i]) } }
+  const m = px.length
+  if (m < 4) return null
+  const mx = px.reduce((s, v) => s + v, 0) / m, my = py.reduce((s, v) => s + v, 0) / m
+  let sxy = 0, sxx = 0, syy = 0
+  for (let i = 0; i < m; i++) { const dx = px[i] - mx, dy = py[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy }
+  return (sxx > 0 && syy > 0) ? sxy / Math.sqrt(sxx * syy) : null
+}
+
+// 売上=客数×客単価 の要因分解（前半→後半の日平均で、増減を客数要因/単価要因/交互に切り分ける）。設計書 §2。
+function buildContributionDecomposition(reports: Array<Record<string, unknown>>, baseName: string): string {
+  const daily = fcBaseDaily(reports, baseName).filter((r) => r.guests != null && (r.guests as number) > 0)
+  if (daily.length < 6) return ''
+  const half = Math.floor(daily.length / 2)
+  const first = daily.slice(0, half)
+  const late = daily.slice(daily.length - half)
+  const Sf = fcAvg(first.map((r) => r.sales)) ?? 0
+  const Sl = fcAvg(late.map((r) => r.sales)) ?? 0
+  const Gf = fcAvg(first.map((r) => r.guests as number)) ?? 0
+  const Gl = fcAvg(late.map((r) => r.guests as number)) ?? 0
+  if (Gf <= 0 || Gl <= 0 || Sf <= 0) return ''
+  const Kf = Sf / Gf, Kl = Sl / Gl
+  const dS = Sl - Sf
+  const cG = (Gl - Gf) * Kf       // 客数要因
+  const cK = (Kl - Kf) * Gf       // 客単価要因
+  const cX = (Gl - Gf) * (Kl - Kf) // 交互
+  const pct = (v: number) => dS !== 0 ? `${Math.round(v / Math.abs(dS) * 100)}%` : '—'
+  const driver = Math.abs(cG) >= Math.abs(cK) ? '客数要因' : '客単価要因'
+  return [
+    `前半${first.length}日→後半${late.length}日の日平均: 売上 ${fcYen(Sf)}→${fcYen(Sl)}（${fcPct((Sl / Sf - 1) * 100)}）/ 客数 ${Math.round(Gf)}→${Math.round(Gl)}人 / 客単価 ${fcYen(Kf)}→${fcYen(Kl)}`,
+    `増減${fcYen(dS)}の内訳 ≒ 客数要因${fcYen(cG)}(${pct(cG)}) ＋ 客単価要因${fcYen(cK)}(${pct(cK)}) ＋ 交互${fcYen(cX)}(${pct(cX)}) → 主因は【${driver}】`,
+  ].join('\n')
+}
+
+// 店舗間の日次売上ピアソン相関（基準店 vs 各店）。負=カニバリ(食い合い)候補、正=連動/アンカー候補。設計書 §6・§8。
+function buildStoreCorrelation(reports: Array<Record<string, unknown>>, baseName: string): string {
+  const byDate = new Map<string, Map<string, number>>()
+  const nameDisplay = new Map<string, string>()
+  for (const r of (reports || [])) {
+    const date = fcSalesDate(r)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+    const raw = Array.isArray((r as { tenants?: unknown }).tenants) ? (r as { tenants?: unknown[] }).tenants as unknown[] : []
+    let m = byDate.get(date); if (!m) { m = new Map(); byDate.set(date, m) }
+    for (const t of raw) {
+      const o = (t && typeof t === 'object') ? t as Record<string, unknown> : {}
+      const nm = String(o.name ?? '').trim(); const s = numOrNull(o.sales)
+      if (!nm || s == null) continue
+      const key = normalizeName(nm)
+      m.set(key, s); if (!nameDisplay.has(key)) nameDisplay.set(key, nm)
+    }
+  }
+  const dates = Array.from(byDate.keys()).sort()
+  if (dates.length < 5) return ''
+  const baseKey = normalizeName(baseName)
+  const others = new Set<string>()
+  for (const m of byDate.values()) for (const k of m.keys()) if (k !== baseKey) others.add(k)
+  const results: Array<{ name: string; r: number; n: number }> = []
+  for (const ok of others) {
+    const bx: number[] = [], ox: number[] = []
+    for (const d of dates) { const m = byDate.get(d)!; const b = m.get(baseKey); const o = m.get(ok); if (b != null && o != null) { bx.push(b); ox.push(o) } }
+    const r = fcPearson(bx, ox)
+    if (r != null) results.push({ name: nameDisplay.get(ok) || ok, r, n: bx.length })
+  }
+  if (!results.length) return ''
+  results.sort((a, b) => a.r - b.r)
+  const neg = results.filter((x) => x.r <= -0.3).slice(0, 3)
+  const pos = results.filter((x) => x.r >= 0.5).sort((a, b) => b.r - a.r).slice(0, 3)
+  const L: string[] = ['※相関は因果ではない（曜日・イベント等の共通要因で連動しうる）。']
+  if (neg.length) L.push('カニバリ候補(負相関): ' + neg.map((x) => `${x.name} r=${x.r.toFixed(2)}(${x.n}日)`).join(' / '))
+  else L.push('明確なカニバリ(強い負相関)は未検出。')
+  if (pos.length) L.push('連動候補(正相関・アンカー/共通需要): ' + pos.map((x) => `${x.name} r=${x.r.toFixed(2)}(${x.n}日)`).join(' / '))
+  return L.join('\n')
+}
+
+// 異常値（基準店の日次売上のZスコア |Z|≧2）。記録的な日/落ち込み日を平常から切り分ける。設計書 §6。
+function buildAnomalyDays(reports: Array<Record<string, unknown>>, baseName: string, events: VenueEvent[], weather: WeatherDay[]): string {
+  const daily = fcBaseDaily(reports, baseName)
+  if (daily.length < 7) return ''
+  const sales = daily.map((r) => r.sales)
+  const mean = fcAvg(sales) ?? 0
+  const sd = fcStdev(sales)
+  if (!sd || sd <= 0) return ''
+  const evByDate = new Map<string, VenueEvent[]>()
+  for (const e of (events || [])) { const d = String(e.event_date ?? '').slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { if (!evByDate.has(d)) evByDate.set(d, []); evByDate.get(d)!.push(e) } }
+  const wByDate = new Map<string, WeatherDay>()
+  for (const w of (weather || [])) { const d = String(w.weather_date ?? '').slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) wByDate.set(d, w) }
+  const out: string[] = []
+  for (const r of daily) {
+    const z = (r.sales - mean) / sd
+    if (Math.abs(z) < 2) continue
+    const dw = fcDow(r.date); const ev = evByDate.get(r.date) || []; const w = wByDate.get(r.date)
+    const ctx: string[] = [ev.length ? ev.map((e) => `${e.category}:${e.title}`).join('｜') : 'イベントなし']
+    if (w && (w.precipitation_mm ?? 0) >= 1) ctx.push('雨')
+    if (w && w.temp_max != null) ctx.push(`最高${w.temp_max}℃`)
+    out.push(`${r.date}(${dw != null ? FC_DOW[dw] : '?'}) 売上${fcYen(r.sales)} Z=${z.toFixed(1)}（${z > 0 ? '突出' : '落込'}）｜${ctx.join('・')}`)
+  }
+  if (!out.length) return ''
+  return `平均${fcYen(mean)}・SD${fcYen(sd)}。|Z|≧2の日（平常分析から切り分けて要因を見る）:\n` + out.slice(0, 8).join('\n')
+}
+
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
 // events（東京ドームのイベント日程）・weather（日次天気）を渡すと、客数増減との相関も踏まえて回答する。
 // 競合店プロファイル（業態・価格帯・飲み/食事傾向）も注入し、業態文脈を踏まえた分析にする。
@@ -699,6 +809,9 @@ export async function answerFoodCourtQuestion(
   const eventList = buildEventListText(events)
   const weatherCorr = buildWeatherCorrelation(reports, baseName, weather)
   const competitors = buildCompetitorContext(reports, baseName)
+  const decomposition = buildContributionDecomposition(reports, baseName) // 売上=客数×客単価 の要因分解
+  const storeCorr = buildStoreCorrelation(reports, baseName)               // 店舗間相関（カニバリ/アンカー）
+  const anomalies = buildAnomalyDays(reports, baseName, events, weather)   // 異常値Zスコア
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリスト兼経営コンサルタントです。`,
     `目的は「表を見れば分かる事実の再掲」ではなく、数字の“奥”を読み解いた洞察（市場調査レベルの考察）を提供することです。`,
@@ -710,10 +823,16 @@ export async function answerFoodCourtQuestion(
     `(3) 真の競合（代替関係）を特定する。席は共有なので“客の財布と滞在時間”の奪い合い。同じ来店動機・時間帯・価格帯で客を奪い合う相手はどの店か。同ジャンル競合の有無（ワインは自店がほぼ独占）も強み/弱みとして語る。`,
     `(4) 需要ドライバーの中でも【東京ドームのイベント】を最重要視し、具体的に深掘りする。提供データの「会場イベント相関」「直近の日別イベント（日付・客数・売上・イベント名つき）」を必ず使い、客数・売上に動きがある日は次を必ず述べる: (a) その日に**どんなイベントが・いつ（昼興行か夜公演か）あったかをイベント名・種別・規模・客層まで特定**する（例: NiziUライブ＝若年女性中心で物販・グッズ後の軽い飲食、巨人戦などプロ野球＝幅広い年齢の野球ファンで試合前後に長め滞在、大学野球＝昼開催で飲酒需要が薄い、コンサート＝開演前後に集中、等）。(b) そのイベントが${baseName}の客数・売上に**どれだけ・なぜ**効いた/効かなかったかを実数を引用してメカニズムで説明する（観客の客層・財布・滞在時間・開演時間帯と、ワイン×スパイスという高単価・大人向け業態の相性）。(c) 取り込めたイベント／取りこぼしたイベントを切り分け、次に同種のイベントが来たときの打ち手につなげる。「イベント日は客数が多い」で終わらせない。天気・曜日は補助要因として絡める。`,
     `(5) 自店の構造的な強み・弱みと打開仮説。打ち手は「誰の・どの来店動機を・どう取るか」まで具体化し、検証方法（次に何の数字を見れば効果が分かるか）も添える。`,
+    `【分析フレームワーク（設計書準拠・必ず踏まえる）】`,
+    `(6) 要因分解を最初に：売上＝客数×客単価。売上が動いたら必ず「客数要因」か「客単価要因」かを切り分ける（提供の「要因分解」ブロックの数値を使う）。集客が課題なら集客策、単価が課題なら単価策、と打ち手を取り違えない。`,
+    `(7) 店舗間のカニバリ/アンカー：提供の「店舗間相関」を使い、負相関＝同じ来店動機の食い合い(カニバリ)候補、正相関＝連動/アンカー（人気店の集客が周辺も底上げ）候補として業態文脈で解釈する。ただし相関は因果ではない（曜日・イベント等の共通要因で連動しうる）ことを明示する。`,
+    `(8) 異常値の切り分け：提供の「異常値（Zスコア）」の突出日/落込日は平常の傾向から切り離し、その日のイベント・天気で要因を注記する（外れ値で平常分析を歪めない）。`,
+    `(9) イベント深掘りと交互作用：野球は対戦相手・デー/ナイター、ライブはアーティスト・客層（若年女性公演はデザート/カフェ/ドリンクの単価感度が高い等）で効き方が変わる。東京ドーム本体が無イベントでも、ドームシティの各会場（後楽園ホール＝格闘技で中年男性、プリズムホール＝展示/即売、カナデビアホール＝ライブ/舞台、ラクーア＝アイドル）が独立した来館動機になりうる点も考慮。交互作用（雨×イベント有無、猛暑×デザート/ドリンク等）も組み合わせて見る。`,
+    `(10) 仮説は「支持／不支持／条件付き」で判定し、効果量（リフト率や差・倍率）を数値で添える。相関と因果は区別し、因果を主張する前に他要因（曜日・天気・イベント）を考慮する。データに無い指標（販売点数・推定来館者数による捕捉率・前年同曜日比など）は「データにありません／取得すれば精度が上がる」と明示し捏造しない。`,
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
     `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
   ].join('\n')
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ（全テナント）\n${data}`
+  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 日次生データ（全テナント）\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {

@@ -1070,6 +1070,57 @@
         if (rg!=null&&rk!=null){ const driver=Math.abs(rg)>=Math.abs(rk)?'客数':'客単価';
           L.push('期間内の売上の上下は主に「'+driver+'」で説明できる。'+(driver==='客数'?'集客の波が売上に直結（その客数の波の主因は東京ドームのイベント＝下記【東京ドーム】参照）。':'単価（メニュー構成・セット）の差が効く。')); }
       } else L.push('相関を出すにはデータが不足しています。');
+      // 【要因分解】売上=客数×客単価：前半→後半で増減を客数要因/単価要因に分ける（設計書§2）
+      (function(){
+        const d = S.filter(x=>x.guests!=null && x.guests>0 && x.sales!=null);
+        if (d.length<6) return;
+        const h=Math.floor(d.length/2), f=d.slice(0,h), l=d.slice(d.length-h);
+        const Sf=avg(f.map(x=>x.sales)), Sl=avg(l.map(x=>x.sales));
+        const Gf=avg(f.map(x=>x.guests)), Gl=avg(l.map(x=>x.guests));
+        if(!Sf||!Sl||!Gf||!Gl) return;
+        const Kf=Sf/Gf, Kl=Sl/Gl, dS=Sl-Sf;
+        const cG=(Gl-Gf)*Kf, cK=(Kl-Kf)*Gf, cX=(Gl-Gf)*(Kl-Kf);
+        const pc=v=>dS!==0?Math.round(v/Math.abs(dS)*100)+'%':'—';
+        const driver=Math.abs(cG)>=Math.abs(cK)?'客数要因':'客単価要因';
+        L.push('【要因分解（客数×客単価）】');
+        L.push('前半'+f.length+'日→後半'+l.length+'日：売上 '+yK(Sf)+'→'+yK(Sl)+'（'+p1((Sl/Sf-1)*100)+'）／客数 '+Math.round(Gf)+'→'+Math.round(Gl)+'人／客単価 '+yK(Kf)+'→'+yK(Kl)+'。');
+        L.push('増減 '+yK(dS)+' の内訳 ≒ 客数要因 '+yK(cG)+'（'+pc(cG)+'）＋ 客単価要因 '+yK(cK)+'（'+pc(cK)+'）＋ 交互 '+yK(cX)+'（'+pc(cX)+'）→ 主因は「'+driver+'」。'+(driver==='客数要因'?'集客策（イベント日・週末夜の取り込み）が効く局面。':'単価策（ペアリング・セット・夜の取り込み）が効く局面。'));
+      })();
+      // 【店舗間（カニバリ/連動）】基準店 vs 各店の日次売上ピアソン相関（負=食い合い／正=連動）
+      (function(){
+        const byDate={}, disp={};
+        (allReports||[]).forEach(r=>{ const dt=salesDateOf(r); if(!/^\d{4}-\d{2}-\d{2}/.test(dt))return;
+          (Array.isArray(r.tenants)?r.tenants:[]).forEach(t=>{ const nm=String((t&&t.name)||'').trim(); const s=(t&&t.sales!=null)?Number(t.sales):null;
+            if(!nm||s==null||!isFinite(s))return; const k=norm(nm); (byDate[dt]=byDate[dt]||{})[k]=s; if(!disp[k])disp[k]=nm; }); });
+        const dates=Object.keys(byDate).sort(); if(dates.length<5)return;
+        const bk=norm(baseName), others={};
+        dates.forEach(dd=>Object.keys(byDate[dd]).forEach(k=>{ if(k!==bk)others[k]=1; }));
+        const res=[];
+        Object.keys(others).forEach(ok=>{ const bx=[],ox=[];
+          dates.forEach(dd=>{ const mm=byDate[dd]; if(mm[bk]!=null&&mm[ok]!=null){bx.push(mm[bk]);ox.push(mm[ok]);} });
+          const r=pearson(bx,ox); if(r!=null)res.push({name:disp[ok]||ok,r:r,n:bx.length}); });
+        if(!res.length)return;
+        res.sort((a,b)=>a.r-b.r);
+        const neg=res.filter(x=>x.r<=-0.3).slice(0,3);
+        const pos=res.filter(x=>x.r>=0.5).sort((a,b)=>b.r-a.r).slice(0,3);
+        L.push('【店舗間（カニバリ/連動）】');
+        L.push(neg.length?'食い合い（カニバリ）候補：'+neg.map(x=>x.name+' r='+x.r.toFixed(2)+'('+x.n+'日)').join('／')+'＝同じ来店動機・時間帯の客を奪い合っている可能性。':'強い負相関（明確なカニバリ）は検出されず。');
+        if(pos.length) L.push('連動（アンカー/共通需要）候補：'+pos.map(x=>x.name+' r='+x.r.toFixed(2)+'('+x.n+'日)').join('／')+'＝同じ集客の波（イベント等）で一緒に伸びる関係。人気店の山に自店が乗れているか確認。');
+        L.push('※相関は因果ではない（曜日・イベント等の共通要因で連動しうる）。');
+      })();
+      // 【異常値】基準店 日次売上のZスコア（|Z|≧2を平常から切り分け）
+      (function(){
+        if(S.length<7)return; const sl=S.map(d=>d.sales), m=avg(sl), sd=stdev(sl);
+        if(sd==null||sd<=0)return; const out=[];
+        S.forEach(d=>{ const z=(d.sales-m)/sd; if(Math.abs(z)<2)return;
+          const ctx=[d.isEvent?((d.eventCat||'イベント')+(d.eventTitle?(' '+(d.eventTitle.length>16?d.eventTitle.slice(0,16)+'…':d.eventTitle)):'')):'ドーム開催なし'];
+          if(d.rainy===true)ctx.push('雨'); if(d.tmax!=null&&isFinite(d.tmax))ctx.push('最高'+d.tmax+'℃');
+          out.push(fmtDay(d.when)+'('+(d.dow!=null?WD[d.dow]:'?')+') '+yK(d.sales)+' Z='+z.toFixed(1)+'（'+(z>0?'突出':'落込')+'）｜'+ctx.join('・')); });
+        if(!out.length)return;
+        L.push('【異常値】');
+        L.push('平均 '+yK(m)+'・SD '+yK(sd)+' から外れた日（|Z|≧2）。平常の傾向から切り分けて要因を見る：');
+        out.slice(0,6).forEach(x=>L.push(x));
+      })();
     } else {
       // ===== 単日モード：この日を「同じ条件の日」と比べてディープ評価 =====
       const selWhen = salesDateOf(report);
