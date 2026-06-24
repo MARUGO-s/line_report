@@ -7772,20 +7772,11 @@
       if (roomDraft.calendar_gmail_settings_override) {
         return resolveCalendarGmailSettingsForRoom(rid);
       }
-      // 一括のカレンダー設定はルームへ反映するが、Gmail予約通知だけは保存で勝手にOFFにしない。
-      // 既にONのルームは維持する（予約通知の取りこぼし防止）。OFFにしたい場合は
-      // 「このルームだけ一括と違う設定にする」をONにして明示的に切る。
-      const bulk = Object.assign({}, readCalendarGmailBulkForPermissionSave());
-      const tr = findRoomTableRowById(rid);
-      if (tr && parseDatasetBoolean(tr.dataset.roomGmailAlertEnabled, false)) {
-        bulk.gmail_reservation_alert_enabled = true;
-      }
-      // 本日の予約状況配信も、既にONのルームは一括保存で勝手にOFFにしない（取りこぼし防止）。
-      // OFFにしたい場合は「このルームだけ一括と違う設定にする」で明示的に切る。
-      if (tr && parseDatasetBoolean(tr.dataset.roomTodayReservationAlertEnabled, false)) {
-        bulk.today_reservation_alert_enabled = true;
-      }
-      return bulk;
+      // 店舗一括の値（Gmail予約通知・本日の予約状況配信を含む）をそのまま全ルームへ反映する。
+      // ＝ 一括でOFFにしたらOFFが保存される（以前は取りこぼし防止で既存ONを強制維持していたが、
+      //    「OFFにしても勝手にONに戻る」混乱の原因になっていたため撤去。個別に残したい場合は
+      //    「このルームだけ一括と違う設定にする」で各ルームを上書きする）。
+      return readCalendarGmailBulkForPermissionSave();
     }
 
     function pickCalendarGmailRawFields(config) {
