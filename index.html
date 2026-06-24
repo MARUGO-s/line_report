@@ -2032,35 +2032,51 @@
       white-space: nowrap;
     }
 
+    /* 8列: 実行時刻 / 店舗 / 方式 / コンテキスト / 状態 / 理由 / ルーム / 送信
+       （ヘッダ・行ともJSで8列描画。table-layout:fixed なので列ごとに幅指定し、
+        長い店舗キー・ルームIDは break-all で折り返してはみ出し＝重なりを防ぐ） */
     .log-table--webhook th:nth-child(1),
-    .log-table--webhook td:nth-child(1) { width: 148px; }
+    .log-table--webhook td:nth-child(1) { width: 138px; }
     .log-table--webhook th:nth-child(2),
-    .log-table--webhook td:nth-child(2) { width: 72px; white-space: nowrap; }
+    .log-table--webhook td:nth-child(2) {
+      width: 104px;
+      font-size: 0.78rem;
+      word-break: break-all;
+      overflow-wrap: anywhere;
+    }
     .log-table--webhook th:nth-child(3),
-    .log-table--webhook td:nth-child(3) {
-      width: 160px;
+    .log-table--webhook td:nth-child(3) { width: 60px; white-space: nowrap; }
+    .log-table--webhook th:nth-child(4),
+    .log-table--webhook td:nth-child(4) {
+      width: 148px;
       white-space: normal;
       word-break: break-word;
       overflow-wrap: anywhere;
       font-size: 0.85rem;
     }
-    .log-table--webhook th:nth-child(4),
-    .log-table--webhook td:nth-child(4) { width: 180px; }
     .log-table--webhook th:nth-child(5),
     .log-table--webhook td:nth-child(5) {
-      min-width: 120px;
+      width: 150px;
       white-space: normal;
       word-break: break-word;
       overflow-wrap: anywhere;
     }
     .log-table--webhook th:nth-child(6),
     .log-table--webhook td:nth-child(6) {
-      width: 110px;
-      font-size: 0.78rem;
-      word-break: break-all;
+      min-width: 120px;
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
     }
     .log-table--webhook th:nth-child(7),
-    .log-table--webhook td:nth-child(7) { width: 56px; white-space: nowrap; }
+    .log-table--webhook td:nth-child(7) {
+      width: 150px;
+      font-size: 0.78rem;
+      word-break: break-all;
+      overflow-wrap: anywhere;
+    }
+    .log-table--webhook th:nth-child(8),
+    .log-table--webhook td:nth-child(8) { width: 56px; white-space: nowrap; }
 
     .store-webhook-table {
       width: 100%;
@@ -10337,11 +10353,13 @@
         } else {
           const month = String(usage.month_jst || '').trim() || '-';
           const limit = Number(usage.free_quota_limit || 200);
-          const used = Number(usage.webhook_reply_rows || 0);
+          // 無料枠を消費するのは PUSH（返信は消費しない）。使用=PUSH数に揃え、残り(200-PUSH)と整合させる。
+          const used = Number(usage.total_push_rows || 0);
           const remaining = Math.max(0, Number(usage.free_quota_remaining != null ? usage.free_quota_remaining : (limit - used)));
+          const replies = Number(usage.webhook_reply_rows || 0);
           dom.webhookQuotaSummary.textContent =
-            'Webhook無料枠（' + month + ' JST / 上限' + limit + '） 残り: '
-            + remaining + '回（使用: ' + used + '回）';
+            'LINE PUSH無料枠（' + month + ' JST / 上限' + limit + '） 残り: '
+            + remaining + '回（PUSH使用: ' + used + '回 ／ 返信: ' + replies + '回＝枠外）';
         }
       }
       if (dom.deliveryLogTable) {
