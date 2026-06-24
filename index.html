@@ -12506,7 +12506,13 @@
         return;
       }
       persistReceiptScheduleDraftForRoom(roomId);
-      persistCalendarGmailDraftForRoom(roomId);
+      // 「個別設定」での保存は、そのルーム専用（override=ON）として確定する。
+      // ＝「このルームだけ一括と違う設定にする」を手動でONにしなくても、編集した値がそのルームに保持され、
+      //   以後の全体/店舗一括では上書きされない（順位はROOMに設定済み）。再表示でも全体に戻らない。
+      saveRoomCalendarGmailSettings(
+        roomId,
+        Object.assign({ calendar_gmail_settings_override: true }, readCalendarGmailBulkForPermissionSave()),
+      );
       const built = buildRoomConfigPayloadFromModal();
       let nextConfig = built.nextConfig;
       nextConfig.receipt_report_store_partition_key = storeKey;
