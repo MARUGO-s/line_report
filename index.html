@@ -7726,27 +7726,21 @@
       if (!key || key === UNASSIGNED_WEBHOOK_KEY || key === GLOBAL_CONFIG_SCOPE_KEY) {
         return globalBulk;
       }
-      const saved = loadWebhookStoreBulkCalendarGmail(key);
-      if (saved) return Object.assign({}, globalBulk, saved);
-
-      const majorityFromDb = calendarGmailMajorityFromStoreKey(key);
-      if (majorityFromDb) return Object.assign({}, globalBulk, majorityFromDb);
-
+      // 単一ソース化: 店舗一括の表示は「実DB（このWebhookの非オーバーライドのルームの現在値）」を最優先する。
+      // 古いクライアント下書き(saved)を優先すると、実際は全ルームOFFでも一括欄がONに見え、うっかり保存で
+      // 全ルーム再ONになる落とし穴があった。下書きはルームから決められない時だけのフォールバックにする。
       const rows = findRoomRowsByStoreKey(key);
-      if (rows.length === 0) return globalBulk;
-
       const bulkRows = rows.filter(function(tr) {
         const raw = loadRoomCalendarGmailSettings(tr.dataset.roomId) || {};
         return !raw.calendar_gmail_settings_override;
       });
-      if (bulkRows.length === 0) return globalBulk;
-
-      const base = calendarGmailFromRoomTableRow(bulkRows[0]);
-      const signature = JSON.stringify(pickCalendarGmailRawFields(base));
-      const unanimous = bulkRows.every(function(tr) {
-        return JSON.stringify(pickCalendarGmailRawFields(calendarGmailFromRoomTableRow(tr))) === signature;
-      });
-      if (!unanimous) {
+      if (bulkRows.length > 0) {
+        const base = calendarGmailFromRoomTableRow(bulkRows[0]);
+        const signature = JSON.stringify(pickCalendarGmailRawFields(base));
+        const unanimous = bulkRows.every(function(tr) {
+          return JSON.stringify(pickCalendarGmailRawFields(calendarGmailFromRoomTableRow(tr))) === signature;
+        });
+        if (unanimous) return Object.assign({}, globalBulk, base);
         const majorityFromRows = calendarGmailMajorityFromSettingsList(
           bulkRows.map(function(tr) {
             const rid = String(tr.dataset.roomId || '').trim();
@@ -7757,9 +7751,13 @@
           }),
         );
         if (majorityFromRows) return Object.assign({}, globalBulk, majorityFromRows);
-        return globalBulk;
       }
-      return Object.assign({}, globalBulk, base);
+      // ルームから決められない場合のみ: 保存済み下書き → DB多数決 → 全体既定 の順でフォールバック。
+      const saved = loadWebhookStoreBulkCalendarGmail(key);
+      if (saved) return Object.assign({}, globalBulk, saved);
+      const majorityFromDb = calendarGmailMajorityFromStoreKey(key);
+      if (majorityFromDb) return Object.assign({}, globalBulk, majorityFromDb);
+      return globalBulk;
     }
 
     /** 権限モードの店舗一括（画面上のチェック）— ルーム個別オーバーライド時のみ Perm 欄を読む */
