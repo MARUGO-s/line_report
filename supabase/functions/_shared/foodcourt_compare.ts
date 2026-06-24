@@ -571,7 +571,7 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
   const cats = Array.from(byCat.entries()).filter(([, a]) => a.length).sort((a, b) => (fcAvg(b[1]) ?? 0) - (fcAvg(a[1]) ?? 0))
   for (const [c, a] of cats) L.push(`・${c}: ${a.length}日 / 平均客数 ${Math.round(fcAvg(a) ?? 0)}人`)
   // データのある日付ごとのイベント有無を提示（モデルが個別イベントを名指しで語れるように・売上も添える）
-  const sample = daily.slice(-14).map((r) => { const hits = byDate.get(r.date) || []; const lab = hits.length ? hits.map((h) => `${h.category}:${h.title}`).join('｜') : 'イベントなし'; const dw = fcDow(r.date); return `${r.date}(${dw != null ? FC_DOW[dw] : '?'}) 客数${r.guests}人 売上${fcYen(r.sales)} ${lab}` })
+  const sample = daily.slice(-14).map((r) => { const hits = byDate.get(r.date) || []; const lab = hits.length ? hits.map((h) => { const vl = fcVenueLabel(h.venue); return `${h.category}${vl ? `@${vl}` : ''}:${h.title}` }).join('｜') : 'イベントなし'; const dw = fcDow(r.date); return `${r.date}(${dw != null ? FC_DOW[dw] : '?'}) 客数${r.guests}人 売上${fcYen(r.sales)} ${lab}` })
   if (sample.length) L.push('—\n直近の日別イベント（この具体的な対応を使って“どのイベントがどう効いたか”を述べること）:\n' + sample.join('\n'))
   return L.join('\n')
 }
@@ -581,10 +581,19 @@ function buildEventListText(events: VenueEvent[]): string {
   if (!Array.isArray(events) || !events.length) return ''
   const sorted = events.slice().filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date ?? '').slice(0, 10)))
     .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date))).slice(0, 25)
-  return sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}] ${e.title}` }).join('\n')
+  return sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); const vl = fcVenueLabel(e.venue); return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}${vl ? `/${vl}` : ''}] ${e.title}` }).join('\n')
 }
 
-export type VenueEvent = { event_date: string; title: string; category: string }
+export type VenueEvent = { event_date: string; title: string; category: string; venue?: string }
+// 会場ラベル（東京ドーム本体は無印で簡潔に、各ホールは会場名を明示してAIが客層差を読めるように）。
+function fcVenueLabel(venue?: string): string {
+  const v = String(venue ?? "").trim().toLowerCase()
+  if (v === "kanadevia") return "カナデビアホール"
+  if (v === "korakuen") return "後楽園ホール"
+  if (v === "prism") return "プリズムホール"
+  if (v === "laqua") return "ラクーア"
+  return "" // tokyo-dome / 不明は無印
+}
 export type WeatherDay = { weather_date: string; weather_code: number | null; temp_max: number | null; temp_min: number | null; precipitation_mm: number | null; precip_prob: number | null; summary: string }
 
 // 天気と基準店客数の相関を事前計算（雨の日 vs 雨でない日、天気区分別、気温）。

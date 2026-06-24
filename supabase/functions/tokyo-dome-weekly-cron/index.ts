@@ -115,6 +115,7 @@ async function loadEvents(supabase: DbClient, startStr: string, endStr: string):
   const { data, error } = await supabase
     .from("tokyo_dome_events")
     .select("event_date, title, category")
+    .eq("venue", "tokyo-dome") // 週次「来週の東京ドーム」配信は本体イベントのみ（カナデビア等は分析ページ専用）
     .gte("event_date", startStr)
     .lte("event_date", endStr)
     .order("event_date", { ascending: true })

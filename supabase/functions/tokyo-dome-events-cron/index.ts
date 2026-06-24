@@ -1,16 +1,18 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 
-// 東京ドームの公式イベント予定を取得し、tokyo_dome_events へ upsert する cron。
+// 東京ドーム＋ドームシティ各会場の公式イベント予定を取得し、tokyo_dome_events へ upsert する cron。
 // マルゴS（東京ドーム内フードコート）の客数・売上との相関分析に使う。分析専用・送信なし。
 //
-// 仕組み: 公式スケジュールHTMLを取得 → タグ除去でテキスト化 → Groq でイベント抽出(JSON) → upsert。
-// HTMLレイアウト変更で壊れにくいよう、構造解析ではなくLLMにテキストから抽出させる。
-// 冪等(主キー event_date+title の upsert)。verify_jwt=false で pg_cron から起動。
+// 仕組み:
+//  - 東京ドーム本体: 公式スケジュールHTML → タグ除去でテキスト化 → 確定パース(主)／Groq抽出(従)。venue='tokyo-dome'。
+//  - カナデビアホール(旧 TOKYO DOME CITY HALL): 公式カレンダーHTMLを構造から確定パース。venue='kanadevia'。
+// 冪等(主キー event_date+venue+title の upsert)。verify_jwt=false で pg_cron から起動。
 
 type DbClient = ReturnType<typeof createClient>
 
 const DEFAULT_SCHEDULE_URL = "https://www.tokyo-dome.co.jp/dome/event/schedule.html"
+const DEFAULT_KANADEVIA_URL = "https://www.tokyo-dome.co.jp/tdc-hall/event/"
 const MAX_TEXT_CHARS = 40000
 const VALID_CATEGORIES = new Set(["プロ野球", "アマ野球", "ライブ", "その他"])
 
@@ -29,57 +31,60 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url)
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())
-  const scheduleUrl = (Deno.env.get("TOKYO_DOME_SCHEDULE_URL") ?? "").trim() || DEFAULT_SCHEDULE_URL
-
-  // 1) 公式スケジュールページを取得
-  let html = ""
-  try {
-    const res = await fetch(scheduleUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" },
-    })
-    if (!res.ok) {
-      return json({ ok: false, error: `fetch schedule failed (${res.status})`, url: scheduleUrl }, 502)
-    }
-    html = await res.text()
-  } catch (e) {
-    return json({ ok: false, error: `fetch error: ${e instanceof Error ? e.message : String(e)}`, url: scheduleUrl }, 502)
-  }
-
   const debug = ["1", "true", "yes", "on"].includes((url.searchParams.get("debug") ?? "").toLowerCase())
-  const text = htmlToText(html).slice(0, MAX_TEXT_CHARS)
-  if (text.length < 40) {
-    return json({ ok: false, error: "schedule text too short after strip", text_len: text.length }, 502)
-  }
+  const scheduleUrl = (Deno.env.get("TOKYO_DOME_SCHEDULE_URL") ?? "").trim() || DEFAULT_SCHEDULE_URL
+  const kanadeviaUrl = (Deno.env.get("KANADEVIA_SCHEDULE_URL") ?? "").trim() || DEFAULT_KANADEVIA_URL
 
-  // 2) Groq でイベント抽出
-  const ex = await extractEvents(text, groqApiKey)
-  const events = ex.events
-  if (!events || events.length === 0) {
-    return json({
-      ok: false,
-      error: "no events extracted",
-      text_len: text.length,
-      ...(debug || dryRun ? { groq_raw: (ex.raw ?? "").slice(0, 1500), text_sample: text.slice(1900, 3400) } : {}),
-    }, 200)
+  // 1) 東京ドーム本体: 公式スケジュール取得→テキスト化→抽出（確定パース主経路）。失敗してもカナデビアは続行。
+  let domeEvents: ExtractedEvent[] = []
+  let domeUsage: DomeAiUsage | null = null
+  let domeRaw: string | null = null
+  let domeError: string | null = null
+  try {
+    const res = await fetch(scheduleUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" } })
+    if (!res.ok) { domeError = `fetch ${res.status}` }
+    else {
+      const text = htmlToText(await res.text()).slice(0, MAX_TEXT_CHARS)
+      if (text.length < 40) { domeError = `text too short (${text.length})` }
+      else { const ex = await extractEvents(text, groqApiKey); domeEvents = ex.events ?? []; domeUsage = ex.usage; domeRaw = ex.raw }
+    }
+  } catch (e) { domeError = e instanceof Error ? e.message : String(e) }
+
+  // 2) カナデビアホール（旧 TOKYO DOME CITY HALL）: 公式カレンダーHTMLを構造から確定パース。
+  let hallEvents: ExtractedEvent[] = []
+  let hallError: string | null = null
+  try {
+    const hres = await fetch(kanadeviaUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" } })
+    if (!hres.ok) { hallError = `fetch ${hres.status}` }
+    else { hallEvents = parseKanadeviaHtml(await hres.text()) }
+  } catch (e) { hallError = e instanceof Error ? e.message : String(e) }
+
+  if (domeEvents.length === 0 && hallEvents.length === 0) {
+    return json({ ok: false, error: "no events extracted (dome+kanadevia)", dome_error: domeError, hall_error: hallError }, 200)
   }
 
   if (dryRun || debug) {
-    return json({ ok: true, dry_run: true, extracted: events.length, events, ...(debug ? { groq_raw: (ex.raw ?? "").slice(0, 1000) } : {}) }, 200)
+    return json({
+      ok: true, dry_run: true,
+      dome: { count: domeEvents.length, error: domeError, events: domeEvents },
+      kanadevia: { count: hallEvents.length, error: hallError, events: hallEvents },
+      ...(debug ? { groq_raw: (domeRaw ?? "").slice(0, 1000) } : {}),
+    }, 200)
   }
 
-  // 3) upsert（冪等。主キー event_date+title）
+  // 3) upsert（冪等。主キー event_date+venue+title）。会場ごとに venue を付与。
   const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
-  // LLMフォールバックを使った場合のみ、実測トークンをAI使用料に記録（確定パース時は usage=null）。
-  if (ex.usage) {
+  // 東京ドーム抽出でLLMフォールバックを使った場合のみ、実測トークンをAI使用料に記録（確定パース時は usage=null）。
+  if (domeUsage) {
     try {
       await supabase.from("ai_usage_events").insert({
         store_partition_key: "marugoS",
         provider: "groq",
-        model: ex.usage.model,
-        input_tokens: ex.usage.inputTokens,
-        output_tokens: ex.usage.outputTokens,
+        model: domeUsage.model,
+        input_tokens: domeUsage.inputTokens,
+        output_tokens: domeUsage.outputTokens,
         thinking_tokens: null,
-        total_tokens: ex.usage.totalTokens,
+        total_tokens: domeUsage.totalTokens,
         line_message_id: null,
         surface: "foodcourt", // 用途タグ: フードコート分析(東京ドームイベント抽出)
       })
@@ -87,25 +92,27 @@ Deno.serve(async (req) => {
       console.error("tokyo-dome ai_usage_events insert threw:", e instanceof Error ? e.message : String(e))
     }
   }
-  const rows = events.map((e) => ({
-    event_date: e.event_date,
-    title: e.title,
-    category: e.category,
-    source: "tokyo-dome.co.jp",
-    updated_at: new Date().toISOString(),
-  }))
+  const now = new Date().toISOString()
+  const rows = [
+    ...domeEvents.map((e) => ({ event_date: e.event_date, venue: "tokyo-dome", title: e.title, category: e.category, source: "tokyo-dome.co.jp", updated_at: now })),
+    ...hallEvents.map((e) => ({ event_date: e.event_date, venue: "kanadevia", title: e.title, category: e.category, source: "tokyo-dome.co.jp/tdc-hall", updated_at: now })),
+  ]
   const { error } = await supabase
     .from("tokyo_dome_events")
-    .upsert(rows, { onConflict: "event_date,title" })
+    .upsert(rows, { onConflict: "event_date,venue,title" })
   if (error) {
-    return json({ ok: false, error: `upsert failed: ${error.message}`, extracted: events.length }, 500)
+    return json({ ok: false, error: `upsert failed: ${error.message}`, extracted: rows.length }, 500)
   }
 
+  const allDates = rows.map((r) => r.event_date).sort()
   return json({
     ok: true,
-    extracted: events.length,
+    dome_upserted: domeEvents.length,
+    kanadevia_upserted: hallEvents.length,
     upserted: rows.length,
-    date_range: { min: rows[0]?.event_date ?? null, max: rows[rows.length - 1]?.event_date ?? null },
+    dome_error: domeError,
+    hall_error: hallError,
+    date_range: { min: allDates[0] ?? null, max: allDates[allDates.length - 1] ?? null },
   }, 200)
 })
 
@@ -191,6 +198,55 @@ function markerCategory(s: string): "野球" | "コンサート" | "その他" |
   if (t === "コンサート") return "コンサート"
   if (t === "イベント" || t === "その他" || t === "展示会" || t === "展示" || t === "格闘技" || t === "プロレス" || t === "式典") return "その他"
   return null
+}
+
+// カナデビアホール（旧 TOKYO DOME CITY HALL）公式カレンダーHTMLを会場構造から確定パースする。
+// 構造: 月見出し <p class="c-ttl-set-calender">YYYY年MM月</p> → <table> 内に
+//   <tr class="c-mod-calender__item"> （<span class="c-mod-calender__day">DD</span> ＋ <td class="c-mod-calender__detail">…）。
+//   detail 内の各 <div class="c-mod-calender__detail-in"> が1イベント（カテゴリ c-txt-tag__item ／ 公演名 c-mod-calender__links a）。
+function parseKanadeviaHtml(html: string): ExtractedEvent[] {
+  const stripTags = (s: string) => String(s ?? "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&#8217;|&#8216;|&lsquo;|&rsquo;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&hellip;/g, "…").replace(/&middot;/g, "・")
+    .replace(/\s+/g, " ").trim()
+  const mapCat = (tag: string): string => /コンサート|ライブ|LIVE|公演|音楽/i.test(String(tag ?? "")) ? "ライブ" : "その他"
+  const out: ExtractedEvent[] = []
+  const seen = new Set<string>()
+  const monthRe = /c-ttl-set-calender">\s*(\d{4})年(\d{1,2})月\s*<\/p>\s*<table[^>]*>([\s\S]*?)<\/table>/g
+  let mm: RegExpExecArray | null
+  while ((mm = monthRe.exec(html))) {
+    const y = Number(mm[1]); const mo = Number(mm[2]); const tbl = mm[3]
+    const rowRe = /<tr class="c-mod-calender__item">([\s\S]*?)<\/tr>/g
+    let rm: RegExpExecArray | null
+    while ((rm = rowRe.exec(tbl))) {
+      const row = rm[1]
+      const dayM = row.match(/c-mod-calender__day">\s*(\d{1,2})\s*</)
+      if (!dayM) continue
+      const day = Number(dayM[1])
+      if (day < 1 || day > 31) continue
+      const detail = (row.match(/c-mod-calender__detail">([\s\S]*?)<\/td>/) || [])[1] || ""
+      if (!/c-mod-calender__detail-in/.test(detail)) continue
+      const inRe = /c-mod-calender__detail-in">([\s\S]*?)(?=<div class="c-mod-calender__detail-in">|$)/g
+      let im: RegExpExecArray | null
+      while ((im = inRe.exec(detail))) {
+        const blk = im[1]
+        const tag = stripTags((blk.match(/c-txt-tag__item[^>]*>([\s\S]*?)<\/span>/) || [])[1] || "")
+        let title = stripTags((blk.match(/c-mod-calender__links">\s*<a[^>]*>([\s\S]*?)<\/a>/) || [])[1] || "")
+        if (!title) title = stripTags((blk.match(/c-mod-calender__links">([\s\S]*?)<\/p>/) || [])[1] || "")
+        if (!title) continue
+        if (/^(reserved|貸切|非公開|未定|準備中|tba)$/i.test(title)) continue // 会場押さえ・非公開は除外
+        const date = `${y}-${String(mo).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+        const cleanTitle = title.slice(0, 200)
+        const key = `${date}__${cleanTitle}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push({ event_date: date, title: cleanTitle, category: mapCat(tag) })
+      }
+    }
+  }
+  out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
+  return out
 }
 
 async function extractEvents(scheduleText: string, apiKey: string): Promise<{ events: ExtractedEvent[] | null; raw: string | null; usage: DomeAiUsage | null }> {

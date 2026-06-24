@@ -713,6 +713,11 @@
   const salesDateOf = (r) => { const rd=String((r&&r.report_date)||'').trim(); if(/^\d{4}-\d{2}-\d{2}/.test(rd)) return addDaysYmd(rd.slice(0,10), -1); const m=String((r&&r.created_at)||'').match(/^(\d{4}-\d{2}-\d{2})/); return m?addDaysYmd(m[1],-1):''; };
   const effDate = (r) => salesDateOf(r);
   const EVT_ICON = { 'プロ野球':'⚾', 'アマ野球':'🥎', 'ライブ':'🎤', 'その他':'🎫' };
+  // 会場ラベル（東京ドーム本体は無印・各ホールは会場名を表示。カナデビア等は来館動機が独立するため区別する）。
+  const VENUE_LABEL = { 'kanadevia':'カナデビア', 'korakuen':'後楽園H', 'prism':'プリズムH', 'laqua':'ラクーア' };
+  const venueOf = e => String((e&&e.venue)||'tokyo-dome');
+  const venueLabelOf = e => { const v=venueOf(e); return (v && v!=='tokyo-dome') ? (VENUE_LABEL[v]||v) : ''; };
+  const venueTag = e => { const l=venueLabelOf(e); return l ? '<span style="display:inline-block;font-size:10px;font-weight:700;color:var(--accent,#b07);background:rgba(176,0,119,.10);border-radius:4px;padding:0 5px;margin-right:5px;vertical-align:middle">🏛'+escapeHtml(l)+'</span>' : ''; };
   const escapeHtml = (s)=> String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
   function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':'other'; }
   function shorten(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
@@ -1466,7 +1471,8 @@
       const ds=calY+'-'+String(calM).padStart(2,'0')+'-'+String(d).padStart(2,'0');
       const hit=(eventsByDate.get(ds)||[])[0]; const today=ds===todayJ;
       const gcls=hit?catSlug(hit.category):'';
-      const pill=hit?'<span class="ev-pill '+gcls+'" title="'+escapeHtml(hit.title||'')+'">'+escapeHtml(shorten(hit.title,16))+'</span><span class="ev-bar '+gcls+'"></span>':'';
+      const vlab=hit?venueLabelOf(hit):'';
+      const pill=hit?'<span class="ev-pill '+gcls+'" title="'+escapeHtml((vlab?vlab+'：':'')+(hit.title||''))+'">'+escapeHtml(shorten((vlab?vlab+'/':'')+hit.title,16))+'</span><span class="ev-bar '+gcls+'"></span>':'';
       const g=guestsByDate.has(ds)?'<span class="gc">👥 <b>'+nf.format(guestsByDate.get(ds))+'</b></span>':'';
       const clk=!!hit||guestsByDate.has(ds);
       html+='<div class="cell'+(today?' today':'')+(clk?' clk':'')+'"'+(clk?' data-date="'+ds+'"':'')+'><span class="cd">'+d+'</span>'+pill+g+'</div>';
@@ -1497,7 +1503,7 @@
     list=list.slice().sort((a,b)=>dOf(a).localeCompare(dOf(b)));
     if(!list.length){ dom.domeList.innerHTML=''; dom.domeMore.style.display='none'; dom.domeNote.textContent=events.length?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
     const rowHtml=e=>{ const d=dOf(e); const past=d<todayJ; const has=guestsByDate.has(d);
-      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+escapeHtml(e.title||'')+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>'; };
+      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+venueTag(e)+escapeHtml(e.title||'')+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>'; };
     const sepHtml=label=>'<div class="ld-today-sep" id="domeTodayAnchor">'+label+'</div>';
     const todayLbl='今日 '+fmtDay(todayJ)+'（'+wdayJp(todayJ)+'）';
     const futIdx=list.findIndex(e=>dOf(e)>=todayJ);
@@ -1679,11 +1685,11 @@
     const isFuture = ymd>todayJ;
     let html = '<div class="dp-date">'+fmtFullDay(ymd)+'</div>';
     if(evs.length){
-      html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドーム イベント</div>'
-        + evs.map(e=>'<div class="dp-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b>　'+escapeHtml(e.title||'')+'</div>').join('')
+      html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドームシティ イベント</div>'
+        + evs.map(e=>'<div class="dp-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b>　'+venueTag(e)+escapeHtml(e.title||'')+'</div>').join('')
         + '</div>';
     } else {
-      html += '<div class="dp-sec"><div class="dp-muted">東京ドーム開催なし</div></div>';
+      html += '<div class="dp-sec"><div class="dp-muted">東京ドームシティ開催なし</div></div>';
     }
     if(sd){
       html += '<div class="dp-sec"><div class="dp-h">🍷 MARUGO S 実績</div>'
