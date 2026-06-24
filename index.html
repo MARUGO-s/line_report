@@ -5244,7 +5244,7 @@
             </div>
 
             <div class="wh-stats">
-              <div class="wh-stat"><div class="k">レシート機能（新規既定）</div><div class="v"><span id="whStatReceipt">-</span><small>/ 4</small><span id="whStatReceiptOk" class="ok">有効</span></div></div>
+              <div class="wh-stat"><div class="k">レシート機能（新規既定）</div><div class="v"><span id="whStatReceipt">-</span><small>/ 7</small><span id="whStatReceiptOk" class="ok">有効</span></div></div>
               <div class="wh-stat"><div class="k">その他機能（新規既定）</div><div class="v"><span id="whStatExtra">-</span><small>/ 11</small><span id="whStatExtraOk" class="ok">有効</span></div></div>
               <div class="wh-stat"><div class="k">中間レポート</div><div class="v" id="whStatMid">-</div></div>
               <div class="wh-stat"><div class="k">月末レポート</div><div class="v" id="whStatMonth">-</div></div>
@@ -5643,6 +5643,9 @@
         <div class="room-scope-modal-list">
           <label class="room-scope-option"><input id="newRoomMediaFileAccessEnabled" type="checkbox">LINE添付保存（ルーム）</label>
           <label class="room-scope-option"><input id="newRoomImageAnalysisReplyEnabled" type="checkbox">レシートの解析結果を送信</label>
+          <label class="room-scope-option"><input id="newRoomReceiptCorrectionReplyEnabled" type="checkbox">レシート修正の返信を許可（AI返信完全無しでも修正は返信）</label>
+          <label class="room-scope-option"><input id="newRoomPettyReceiptAnalysisEnabled" type="checkbox">小口レシートの解析をする（AI返信完全無しでも経費の解析・返信を優先）</label>
+          <label class="room-scope-option"><input id="newRoomBudgetEntryEnabled" type="checkbox">予算登録を許可（このルームから月次予算を入力）</label>
           <label class="room-scope-option"><input id="newRoomReceiptMidreportEnabled" type="checkbox"><span id="newRoomReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
           <label class="room-scope-option"><input id="newRoomReceiptMonthendReportEnabled" type="checkbox"><span id="newRoomReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
         </div>
@@ -5809,6 +5812,9 @@
     const NEW_ROOM_DEFAULT_GMAIL_ALERT_KEY = 'line_summary_new_room_default_gmail_alert';
     const NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_KEY = 'line_summary_new_room_default_receipt_midreport';
     const NEW_ROOM_DEFAULT_RECEIPT_MONTHEND_REPORT_KEY = 'line_summary_new_room_default_receipt_monthend_report';
+    const NEW_ROOM_DEFAULT_RECEIPT_CORRECTION_REPLY_KEY = 'line_summary_new_room_default_receipt_correction_reply';
+    const NEW_ROOM_DEFAULT_BUDGET_ENTRY_KEY = 'line_summary_new_room_default_budget_entry';
+    const NEW_ROOM_DEFAULT_PETTY_RECEIPT_ANALYSIS_KEY = 'line_summary_new_room_default_petty_receipt_analysis';
     const NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_DAY_KEY = 'line_summary_new_room_default_receipt_midreport_day';
     const NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_HOUR_KEY = 'line_summary_new_room_default_receipt_midreport_hour';
     const NEW_ROOM_DEFAULT_RECEIPT_MIDREPORT_MINUTE_KEY = 'line_summary_new_room_default_receipt_midreport_minute';
@@ -5902,6 +5908,9 @@
       newRoomTomorrowReminderMaxItems: document.getElementById('newRoomTomorrowReminderMaxItems'),
       newRoomMediaFileAccessEnabled: document.getElementById('newRoomMediaFileAccessEnabled'),
       newRoomImageAnalysisReplyEnabled: document.getElementById('newRoomImageAnalysisReplyEnabled'),
+      newRoomReceiptCorrectionReplyEnabled: document.getElementById('newRoomReceiptCorrectionReplyEnabled'),
+      newRoomBudgetEntryEnabled: document.getElementById('newRoomBudgetEntryEnabled'),
+      newRoomPettyReceiptAnalysisEnabled: document.getElementById('newRoomPettyReceiptAnalysisEnabled'),
       newRoomGoogleCalendarAutoRegister: document.getElementById('newRoomGoogleCalendarAutoRegister'),
       newRoomCalendarRegistrationReply: document.getElementById('newRoomCalendarRegistrationReply'),
       newRoomCalendarLowConfidenceConfirmReply: document.getElementById('newRoomCalendarLowConfidenceConfirmReply'),
@@ -8372,6 +8381,16 @@
           NEW_ROOM_RECEIPT_SITE_DEFAULTS.image_analysis_reply,
         );
       }
+      if (dom.newRoomReceiptCorrectionReplyEnabled) {
+        dom.newRoomReceiptCorrectionReplyEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_CORRECTION_REPLY_KEY, false);
+      }
+      if (dom.newRoomBudgetEntryEnabled) {
+        dom.newRoomBudgetEntryEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_BUDGET_ENTRY_KEY, false);
+      }
+      if (dom.newRoomPettyReceiptAnalysisEnabled) {
+        // 小口解析は新規ルームの実適用が従来ON（!== false）だったため既定true
+        dom.newRoomPettyReceiptAnalysisEnabled.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_PETTY_RECEIPT_ANALYSIS_KEY, true);
+      }
       dom.newRoomGoogleCalendarAutoRegister.checked = loadMergedGoogleCalendarAutoRegisterDefault();
       if (dom.newRoomCalendarRegistrationReply) {
         dom.newRoomCalendarRegistrationReply.checked = loadBooleanSetting(NEW_ROOM_DEFAULT_CALENDAR_REGISTRATION_REPLY_KEY, false);
@@ -8420,6 +8439,9 @@
       const receiptCount =
         (dom.newRoomMediaFileAccessEnabled.checked ? 1 : 0) +
         (dom.newRoomMediaFileAccessEnabled.checked && dom.newRoomImageAnalysisReplyEnabled && dom.newRoomImageAnalysisReplyEnabled.checked ? 1 : 0) +
+        (dom.newRoomReceiptCorrectionReplyEnabled && dom.newRoomReceiptCorrectionReplyEnabled.checked ? 1 : 0) +
+        (dom.newRoomPettyReceiptAnalysisEnabled && dom.newRoomPettyReceiptAnalysisEnabled.checked ? 1 : 0) +
+        (dom.newRoomBudgetEntryEnabled && dom.newRoomBudgetEntryEnabled.checked ? 1 : 0) +
         (dom.newRoomReceiptMidreportEnabled && dom.newRoomReceiptMidreportEnabled.checked ? 1 : 0) +
         (dom.newRoomReceiptMonthendReportEnabled && dom.newRoomReceiptMonthendReportEnabled.checked ? 1 : 0);
       const extraCount =
@@ -8437,7 +8459,7 @@
       const bulk = getBulkReceiptSchedule();
       return {
         receiptCount: receiptCount,
-        receiptTotal: 4,
+        receiptTotal: 7,
         extraCount: extraCount,
         extraTotal: 11, // computeNewRoomConfigStats の extraCount 加算項の数（全ON時の最大値）。項を増減したらここも合わせる
         midLabel: formatReceiptMidreportScheduleLabel(bulk),
@@ -11293,7 +11315,9 @@
         calendar_tomorrow_reminder_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY, false),
         media_file_access_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.media_access),
         image_analysis_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.image_analysis_reply),
-        receipt_correction_reply_enabled: false,
+        receipt_correction_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_CORRECTION_REPLY_KEY, false),
+        budget_entry_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_BUDGET_ENTRY_KEY, false),
+        petty_receipt_analysis_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_PETTY_RECEIPT_ANALYSIS_KEY, true),
         non_receipt_image_reply_enabled: true,
         media_save_enabled: true,
         calendar_ai_auto_create_enabled: gCal,
@@ -13879,6 +13903,9 @@
       dom.newRoomTomorrowReminderMaxItems,
       dom.newRoomMediaFileAccessEnabled,
       dom.newRoomImageAnalysisReplyEnabled,
+      dom.newRoomReceiptCorrectionReplyEnabled,
+      dom.newRoomBudgetEntryEnabled,
+      dom.newRoomPettyReceiptAnalysisEnabled,
       dom.newRoomGoogleCalendarAutoRegister,
       dom.newRoomCalendarRegistrationReply,
       dom.newRoomCalendarLowConfidenceConfirmReply,
@@ -13941,6 +13968,21 @@
     if (dom.newRoomImageAnalysisReplyEnabled) {
       dom.newRoomImageAnalysisReplyEnabled.addEventListener('change', function() {
         saveBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, !!dom.newRoomImageAnalysisReplyEnabled.checked);
+      });
+    }
+    if (dom.newRoomReceiptCorrectionReplyEnabled) {
+      dom.newRoomReceiptCorrectionReplyEnabled.addEventListener('change', function() {
+        saveBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_CORRECTION_REPLY_KEY, !!dom.newRoomReceiptCorrectionReplyEnabled.checked);
+      });
+    }
+    if (dom.newRoomBudgetEntryEnabled) {
+      dom.newRoomBudgetEntryEnabled.addEventListener('change', function() {
+        saveBooleanSetting(NEW_ROOM_DEFAULT_BUDGET_ENTRY_KEY, !!dom.newRoomBudgetEntryEnabled.checked);
+      });
+    }
+    if (dom.newRoomPettyReceiptAnalysisEnabled) {
+      dom.newRoomPettyReceiptAnalysisEnabled.addEventListener('change', function() {
+        saveBooleanSetting(NEW_ROOM_DEFAULT_PETTY_RECEIPT_ANALYSIS_KEY, !!dom.newRoomPettyReceiptAnalysisEnabled.checked);
       });
     }
     dom.newRoomGoogleCalendarAutoRegister.addEventListener('change', function() {
@@ -14008,6 +14050,9 @@
       dom.newRoomTomorrowReminderMaxItems,
       dom.newRoomMediaFileAccessEnabled,
       dom.newRoomImageAnalysisReplyEnabled,
+      dom.newRoomReceiptCorrectionReplyEnabled,
+      dom.newRoomBudgetEntryEnabled,
+      dom.newRoomPettyReceiptAnalysisEnabled,
       dom.newRoomGoogleCalendarAutoRegister,
       dom.newRoomCalendarRegistrationReply,
       dom.newRoomCalendarLowConfidenceConfirmReply,
