@@ -5245,7 +5245,7 @@
 
             <div class="wh-stats">
               <div class="wh-stat"><div class="k">レシート機能（新規既定）</div><div class="v"><span id="whStatReceipt">-</span><small>/ 4</small><span id="whStatReceiptOk" class="ok">有効</span></div></div>
-              <div class="wh-stat"><div class="k">その他機能（新規既定）</div><div class="v"><span id="whStatExtra">-</span></div></div>
+              <div class="wh-stat"><div class="k">その他機能（新規既定）</div><div class="v"><span id="whStatExtra">-</span><small>/ 11</small><span id="whStatExtraOk" class="ok">有効</span></div></div>
               <div class="wh-stat"><div class="k">中間レポート</div><div class="v" id="whStatMid">-</div></div>
               <div class="wh-stat"><div class="k">月末レポート</div><div class="v" id="whStatMonth">-</div></div>
             </div>
@@ -8437,7 +8437,9 @@
       const bulk = getBulkReceiptSchedule();
       return {
         receiptCount: receiptCount,
+        receiptTotal: 4,
         extraCount: extraCount,
+        extraTotal: 11, // computeNewRoomConfigStats の extraCount 加算項の数（全ON時の最大値）。項を増減したらここも合わせる
         midLabel: formatReceiptMidreportScheduleLabel(bulk),
         monthLabel: formatReceiptMonthendScheduleLabel(bulk),
       };
@@ -8445,19 +8447,20 @@
 
     function buildNewRoomConfigSummary() {
       const s = computeNewRoomConfigStats();
-      return 'レシート ' + s.receiptCount + '/4 有効 ・ その他 ' + s.extraCount + ' ・ 時刻:' + s.midLabel + ' / ' + s.monthLabel;
+      return 'レシート ' + s.receiptCount + '/' + s.receiptTotal + ' 有効 ・ その他 ' + s.extraCount + '/' + s.extraTotal + ' 有効 ・ 時刻:' + s.midLabel + ' / ' + s.monthLabel;
     }
 
     function refreshNewRoomConfigSummary() {
       const s = computeNewRoomConfigStats();
       if (dom.newRoomConfigSummary) {
         dom.newRoomConfigSummary.textContent =
-          'レシート ' + s.receiptCount + '/4 有効 ・ その他 ' + s.extraCount + ' ・ 時刻:' + s.midLabel + ' / ' + s.monthLabel;
+          'レシート ' + s.receiptCount + '/' + s.receiptTotal + ' 有効 ・ その他 ' + s.extraCount + '/' + s.extraTotal + ' 有効 ・ 時刻:' + s.midLabel + ' / ' + s.monthLabel;
       }
       const setTxt = function(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
       setTxt('whStatReceipt', String(s.receiptCount));
       setTxt('whStatReceiptOk', s.receiptCount > 0 ? '有効' : '');
       setTxt('whStatExtra', String(s.extraCount));
+      setTxt('whStatExtraOk', s.extraCount > 0 ? '有効' : '');
       setTxt('whStatMid', s.midLabel);
       setTxt('whStatMonth', s.monthLabel);
     }
