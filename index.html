@@ -7786,22 +7786,33 @@
       return readCalendarGmailBulkForPermissionSave();
     }
 
+    // カレンダー/予約 設定の全フィールドを「単一定義」に集約（単一ソース化A）。
+    // 読み書き・保存・除去はこのリストを通すこと。新トグルはここに1行足すだけで pick/strip 両方へ反映され、
+    // 「保存ペイロードに含め忘れ→OFFが保持されず戻る」系の配線漏れバグを構造的に防ぐ。
+    const CALENDAR_GMAIL_BOOL_FIELDS = [
+      'calendar_tomorrow_reminder_enabled',
+      'calendar_ai_auto_create_enabled',
+      'calendar_silent_auto_register_enabled',
+      'calendar_registration_reply_enabled',
+      'calendar_low_confidence_confirm_reply_enabled',
+      'gmail_reservation_alert_enabled',
+      'today_reservation_alert_enabled',
+      'calendar_tomorrow_reminder_only_if_events',
+    ];
+    const CALENDAR_GMAIL_EXTRA_FIELDS = [
+      'today_reservation_alert_hour',
+      'today_reservation_alert_minute',
+      'calendar_tomorrow_reminder_hours',
+      'calendar_tomorrow_reminder_max_items',
+    ];
+
     function pickCalendarGmailRawFields(config) {
       if (!config || typeof config !== 'object') return {};
       const out = {};
       if (config.calendar_gmail_settings_override != null) {
         out.calendar_gmail_settings_override = !!config.calendar_gmail_settings_override;
       }
-      [
-        'calendar_tomorrow_reminder_enabled',
-        'calendar_ai_auto_create_enabled',
-        'calendar_silent_auto_register_enabled',
-        'calendar_registration_reply_enabled',
-        'calendar_low_confidence_confirm_reply_enabled',
-        'gmail_reservation_alert_enabled',
-        'today_reservation_alert_enabled',
-        'calendar_tomorrow_reminder_only_if_events',
-      ].forEach(function(key) {
+      CALENDAR_GMAIL_BOOL_FIELDS.forEach(function(key) {
         if (config[key] != null) out[key] = !!config[key];
       });
       if (Array.isArray(config.calendar_tomorrow_reminder_hours)) {
@@ -7836,19 +7847,10 @@
 
     function stripCalendarGmailFields(config) {
       const next = Object.assign({}, config || {});
-      delete next.calendar_gmail_settings_override;
-      delete next.calendar_tomorrow_reminder_enabled;
-      delete next.calendar_ai_auto_create_enabled;
-      delete next.calendar_silent_auto_register_enabled;
-      delete next.calendar_registration_reply_enabled;
-      delete next.calendar_low_confidence_confirm_reply_enabled;
-      delete next.gmail_reservation_alert_enabled;
-      delete next.today_reservation_alert_enabled;
-      delete next.today_reservation_alert_hour;
-      delete next.today_reservation_alert_minute;
-      delete next.calendar_tomorrow_reminder_hours;
-      delete next.calendar_tomorrow_reminder_only_if_events;
-      delete next.calendar_tomorrow_reminder_max_items;
+      ['calendar_gmail_settings_override']
+        .concat(CALENDAR_GMAIL_BOOL_FIELDS)
+        .concat(CALENDAR_GMAIL_EXTRA_FIELDS)
+        .forEach(function(key) { delete next[key]; });
       return next;
     }
 
