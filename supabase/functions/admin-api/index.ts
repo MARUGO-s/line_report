@@ -383,6 +383,36 @@ async function loadVenueEventsForReports(
   })).filter((e) => e.event_date && e.title)
 }
 
+// 自己再学習型の来客予測（forecast_predictions）を返す。基準店（マルゴS）のみ。当日前後の窓で guests/sales。
+async function loadForecastForStore(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+): Promise<Array<{ target_date: string; metric: string; predicted: number; predicted_low: number | null; predicted_high: number | null; actual: number | null; model_version: string; features: unknown }>> {
+  if (String(storeKey ?? "").trim().toLowerCase() !== "marugos") return []
+  const todayIso = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)
+  const lo = addDaysIso(todayIso, -14)
+  const hi = addDaysIso(todayIso, 21)
+  const { data, error } = await supabase
+    .from("forecast_predictions")
+    .select("target_date, metric, predicted, predicted_low, predicted_high, actual, model_version, features")
+    .eq("tenant_name", "MARUGO S")
+    .gte("target_date", lo)
+    .lte("target_date", hi)
+    .order("target_date", { ascending: true })
+    .limit(200)
+  if (error || !Array.isArray(data)) return []
+  return data.map((r) => ({
+    target_date: String((r as { target_date?: unknown }).target_date ?? "").slice(0, 10),
+    metric: String((r as { metric?: unknown }).metric ?? ""),
+    predicted: Number((r as { predicted?: unknown }).predicted ?? 0),
+    predicted_low: (r as { predicted_low?: unknown }).predicted_low == null ? null : Number((r as { predicted_low?: unknown }).predicted_low),
+    predicted_high: (r as { predicted_high?: unknown }).predicted_high == null ? null : Number((r as { predicted_high?: unknown }).predicted_high),
+    actual: (r as { actual?: unknown }).actual == null ? null : Number((r as { actual?: unknown }).actual),
+    model_version: String((r as { model_version?: unknown }).model_version ?? ""),
+    features: (r as { features?: unknown }).features ?? null,
+  })).filter((r) => r.target_date && r.metric)
+}
+
 function addDaysIso(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`)
   if (Number.isNaN(d.getTime())) return iso
@@ -819,7 +849,8 @@ Deno.serve(async (req, info) => {
       // 会場イベント（東京ドーム）・天気を併せて返す。マルゴSは東京ドーム内のため客数増減と相関する。
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
-      return json({ store_key: storeKey, reports, events, weather }, 200)
+      const forecast = await loadForecastForStore(supabase, storeKey)
+      return json({ store_key: storeKey, reports, events, weather, forecast }, 200)
     }
     // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
     if (req.method === "POST" && path === "/foodcourt/ask") {
@@ -853,8 +884,9 @@ Deno.serve(async (req, info) => {
       // 会場イベント（東京ドーム）・天気も根拠に渡す。客数増減との相関を踏まえて回答させる。
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
+      const forecast = await loadForecastForStore(supabase, storeKey)
       // supabase + storeKey を渡すと、Q&Aの実測トークンを ai_usage_events に記録しAI使用料に合算する。
-      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history)
+      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
     }
     // 東京ドーム週次イベント配信（per-room）の設定を取得/保存（管理画面のカレンダー/予約タブから利用）。

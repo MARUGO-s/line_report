@@ -595,6 +595,39 @@ function buildEventListText(events: VenueEvent[]): string {
 }
 
 export type VenueEvent = { event_date: string; title: string; category: string; venue?: string }
+export type ForecastRow = { target_date: string; metric: string; predicted: number; predicted_low?: number | null; predicted_high?: number | null; actual?: number | null; model_version?: string }
+
+// 学習型モデルの予測（forecast_predictions）を、精度（過去の予測vs実績MAPE）＋今後の予測としてテキスト化。
+function buildForecastContext(forecast: ForecastRow[]): string {
+  if (!Array.isArray(forecast) || !forecast.length) return ''
+  const byDate = new Map<string, { guests?: ForecastRow; sales?: ForecastRow }>()
+  for (const r of forecast) {
+    const d = String(r.target_date ?? '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue
+    const o = byDate.get(d) ?? {}
+    if (r.metric === 'guests') o.guests = r; else if (r.metric === 'sales') o.sales = r
+    byDate.set(d, o)
+  }
+  const days = Array.from(byDate.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+  const ape = (m: 'guests' | 'sales') => {
+    const xs = days.map(([, o]) => o[m]).filter((r): r is ForecastRow => !!r && r.actual != null && (r.actual as number) > 0).map((r) => Math.abs(r.predicted - (r.actual as number)) / (r.actual as number))
+    return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null
+  }
+  const mg = ape('guests'); const ms = ape('sales')
+  const nEval = days.filter(([, o]) => o.guests && o.guests.actual != null).length
+  const L: string[] = []
+  L.push(`学習型モデル(${forecast[0].model_version ?? 'v1'})の自己採点: 直近${nEval}日の誤差 客数±${mg != null ? Math.round(mg * 100) : '—'}% / 売上±${ms != null ? Math.round(ms * 100) : '—'}%（データ蓄積で改善）。`)
+  const today = jstTodayForFc()
+  const fut = days.filter(([d]) => d >= today).slice(0, 10)
+  for (const [d, o] of fut) {
+    const dw = fcDow(d)
+    const g = o.guests ? `客数${Math.round(o.guests.predicted)}人` : ''
+    const s = o.sales ? `売上${fcYen(o.sales.predicted)}` : ''
+    L.push(`${d}(${dw != null ? FC_DOW[dw] : '?'}) 予測 ${[g, s].filter(Boolean).join(' / ')}`)
+  }
+  return L.join('\n')
+}
+function jstTodayForFc(): string { const j = new Date(Date.now() + 9 * 3600 * 1000); return `${j.getUTCFullYear()}-${String(j.getUTCMonth() + 1).padStart(2, '0')}-${String(j.getUTCDate()).padStart(2, '0')}` }
 // 会場ラベル（東京ドーム本体は無印で簡潔に、各ホールは会場名を明示してAIが客層差を読めるように）。
 function fcVenueLabel(venue?: string): string {
   const v = String(venue ?? "").trim().toLowerCase()
@@ -800,6 +833,7 @@ export async function answerFoodCourtQuestion(
   supabase?: SupabaseClient | null,
   storeKey?: string,
   history: Array<{ role: string; content: string }> = [],
+  forecast: ForecastRow[] = [],
 ): Promise<string | null> {
   if (!groqApiKey) return null
   const q = String(question ?? '').trim().slice(0, 500)
@@ -831,6 +865,7 @@ export async function answerFoodCourtQuestion(
   const decomposition = buildContributionDecomposition(reports, baseName) // 売上=客数×客単価 の要因分解
   const storeCorr = buildStoreCorrelation(reports, baseName)               // 店舗間相関（カニバリ/アンカー）
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)   // 異常値Zスコア
+  const forecastCtx = buildForecastContext(forecast)                      // 学習型モデルの予測＋自己採点
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリスト兼経営コンサルタントです。`,
     `目的は「表を見れば分かる事実の再掲」ではなく、数字の“奥”を読み解いた洞察（市場調査レベルの考察）を提供することです。`,
@@ -848,10 +883,11 @@ export async function answerFoodCourtQuestion(
     `(8) 異常値の切り分け：提供の「異常値（Zスコア）」の突出日/落込日は平常の傾向から切り離し、その日のイベント・天気で要因を注記する（外れ値で平常分析を歪めない）。`,
     `(9) イベント深掘りと交互作用：野球は対戦相手・デー/ナイター、ライブはアーティスト・客層（若年女性公演はデザート/カフェ/ドリンクの単価感度が高い等）で効き方が変わる。東京ドーム本体が無イベントでも、ドームシティの各会場（後楽園ホール＝格闘技で中年男性、プリズムホール＝展示/即売、カナデビアホール＝ライブ/舞台、ラクーア＝アイドル）が独立した来館動機になりうる点も考慮。交互作用（雨×イベント有無、猛暑×デザート/ドリンク等）も組み合わせて見る。`,
     `(10) 仮説は「支持／不支持／条件付き」で判定し、効果量（リフト率や差・倍率）を数値で添える。相関と因果は区別し、因果を主張する前に他要因（曜日・天気・イベント）を考慮する。データに無い指標（販売点数・推定来館者数による捕捉率・前年同曜日比など）は「データにありません／取得すれば精度が上がる」と明示し捏造しない。`,
+    `(11) 「来客予測（学習型モデル）」がある場合は、今後の予測客数・売上を仕入・人員の助言に使う。ただしモデルの自己採点（誤差%）も併記されているので、誤差が大きい時は「精度は発展途上（データ蓄積で改善）」と断った上で参考値として扱う。`,
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
     `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
   ].join('\n')
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 日次生データ（全テナント）\n${data}`
+  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}\n\n# 日次生データ（全テナント）\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {

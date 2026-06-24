@@ -626,6 +626,10 @@
         <div class="card-note" id="calNote"></div>
       </div>
       <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">🔮</span>来客予測（学習型）</div><span class="pill beta">試験版</span></div>
+        <div id="fcForecast"></div>
+      </div>
+      <div class="card">
         <div class="card-h"><div class="card-t"><span class="em">📃</span>東京ドーム イベント一覧</div></div>
         <div class="filt" id="domeFilt"></div>
         <div class="ld-list" id="domeList"></div>
@@ -687,7 +691,7 @@
     rankTbody:$('rankTbody'), shareTbody:$('shareTbody'), shareNote:$('shareNote'), priceTbody:$('priceTbody'), distWrap:$('distWrap'), clsList:$('clsList'),
     trendCount:$('trendCount'), dailyTbody:$('dailyTbody'), trendNote:$('trendNote'),
     corrWrap:$('corrWrap'), corrBreakdown:$('corrBreakdown'), corrNote:$('corrNote'),
-    calPrev:$('calPrev'), calNext:$('calNext'), calMonth:$('calMonth'), calGrid:$('calGrid'), calNote:$('calNote'), calVenueTabs:$('calVenueTabs'),
+    calPrev:$('calPrev'), calNext:$('calNext'), calMonth:$('calMonth'), calGrid:$('calGrid'), calNote:$('calNote'), calVenueTabs:$('calVenueTabs'), fcForecast:$('fcForecast'),
     domeFilt:$('domeFilt'), domeList:$('domeList'), domeMore:$('domeMore'), domeNote:$('domeNote'),
     dpModal:$('dpModal'), dpBody:$('dpBody'), dpClose:$('dpClose'), dpBackdrop:$('dpBackdrop'),
     wxCorrWrap:$('wxCorrWrap'), wxBreakdown:$('wxBreakdown'), wxNote:$('wxNote'), wxDaily:$('wxDaily'), wxDailyNote:$('wxDailyNote'),
@@ -700,6 +704,7 @@
   let weather = [];                // 日次天気 [{weather_date,weather_code,temp_max,...}]
   let weatherByDate = new Map();   // 'YYYY-MM-DD' -> weather
   let lastSeries = [];             // 直近描画の基準店日次系列
+  let forecast = [];               // 来客予測 [{target_date,metric,predicted,predicted_low,predicted_high,actual,...}]
   let calY = 0, calM = 0;          // カレンダー表示中の年・月（0=未初期化）
   let mode = 'single';             // 'single' | 'range'
   let domeFilter = 'all', domeLimit = 14;
@@ -1626,6 +1631,33 @@
     mode='range'; setModeButtons();
     render(agg, { seriesReports: agg._rangeReports, periodLabel: start+'〜'+end });
   }
+  // 来客予測（学習型）の描画：精度（過去の予測vs実績）＋今後14日の予測客数・売上
+  function renderForecast(){
+    if(!dom.fcForecast) return;
+    const rows = Array.isArray(forecast)?forecast:[];
+    if(!rows.length){ dom.fcForecast.innerHTML='<div class="card-note">予測データはまだありません（毎日5:00に蓄積実績から学習・生成します。データが増えるほど精度が上がります）。</div>'; return; }
+    const byD={}; rows.forEach(r=>{ const o=byD[r.target_date]||(byD[r.target_date]={date:r.target_date}); o[r.metric]=r; });
+    const days=Object.values(byD).sort((a,b)=>a.date.localeCompare(b.date));
+    const todayJ=ymdJst(new Date().toISOString());
+    const ape=m=>{ const xs=days.map(d=>d[m]).filter(x=>x&&x.actual!=null&&x.actual>0).map(x=>Math.abs(x.predicted-x.actual)/x.actual); return xs.length?xs.reduce((s,v)=>s+v,0)/xs.length:null; };
+    const mg=ape('guests'), ms=ape('sales');
+    const nEval=days.filter(d=>d.guests&&d.guests.actual!=null).length;
+    const mv=(rows[0]&&rows[0].model_version)||'v1';
+    let html='<div class="card-note" style="margin-bottom:10px">毎日5:00に蓄積実績から係数を学習し直す<b>自己再学習モデル</b>（'+escapeHtml(mv)+'）。'
+      +(mg!=null?('直近'+nEval+'日の精度＝<b>客数 誤差±'+Math.round(mg*100)+'%</b>／売上 ±'+(ms!=null?Math.round(ms*100):'—')+'%。データが増えるほど精度が上がります。'):'実績との比較はデータ蓄積後に表示されます。')+'</div>';
+    const fut=days.filter(d=>d.date>=todayJ).slice(0,14);
+    if(fut.length){
+      html+='<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+        +'<tr style="color:var(--tx-2);text-align:left"><th style="padding:5px 6px">日付</th><th style="padding:5px 6px">予定</th><th style="padding:5px 6px;text-align:right">予測客数</th><th style="padding:5px 6px;text-align:right">予測売上</th></tr>';
+      fut.forEach(d=>{ const g=d.guests,s=d.sales; const ev=(eventsByDate.get(d.date)||[]);
+        const evlab=ev.length?((EVT_ICON[ev[0].category]||'🎫')+' '+(venueLabelOf(ev[0])||'東京ドーム')):'<span class="neg">開催なし</span>';
+        const band=(g&&g.predicted_low!=null)?'<span style="color:var(--tx-2);font-size:11px"> ('+nf.format(Math.round(g.predicted_low))+'〜'+nf.format(Math.round(g.predicted_high))+')</span>':'';
+        html+='<tr style="border-top:1px solid var(--line)"'+(d.date===todayJ?' style="background:var(--base-soft)"':'')+'><td style="padding:6px">'+fmtDay(d.date)+'('+wdayJp(d.date)+')</td><td style="padding:6px">'+evlab+'</td><td class="mono" style="padding:6px;text-align:right">'+(g?nf.format(Math.round(g.predicted))+'人':'—')+band+'</td><td class="mono" style="padding:6px;text-align:right">'+(s?yen(Math.round(s.predicted)):'—')+'</td></tr>';
+      });
+      html+='</table></div>';
+    } else html+='<div class="card-note">今後の予測対象日がありません。</div>';
+    dom.fcForecast.innerHTML=html;
+  }
   async function loadReports(){
     if (!getToken()){ setAuthBadge(false); return; }
     const store = currentStore();
@@ -1646,6 +1678,8 @@
       weather = Array.isArray(body.weather) ? body.weather : [];
       weatherByDate = new Map();
       weather.forEach(w=>{ const d=String((w&&w.weather_date)||'').slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(d)) weatherByDate.set(d,w); });
+      forecast = Array.isArray(body.forecast) ? body.forecast : [];
+      renderForecast();
       calY = 0; calM = 0; domeFilter='all'; domeLimit=14; calVenue='all';
       reports.sort((a,b)=> String((b&&(b.report_date||b.created_at))||'').localeCompare(String((a&&(a.report_date||a.created_at))||'')));
       setAuthBadge(true);
