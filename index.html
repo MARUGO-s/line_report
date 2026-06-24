@@ -12432,6 +12432,54 @@
       return { nextConfig: nextConfig, permissionMode: permissionMode };
     }
 
+    // 保存→再読込の往復セルフチェック（再発する「保存しても戻る」系の自動検知・挙動は変えない）。
+    // 保存しようとした値(intended)と、再読込後の実値(getRoomConfigStateFromRow)を突き合わせ、
+    // 食い違う項目を返す。getRoomConfigStateFromRow が返す＝既定値が一致する真偽トグルだけを対象にし誤検知を避ける。
+    const ROOM_CONFIG_ROUNDTRIP_FIELDS = {
+      bot_reply_enabled: 'AI会話返信',
+      message_search_enabled: '会話検索',
+      message_search_library_enabled: '資料検索',
+      send_room_summary: 'ルーム要約配信',
+      receive_overall_summary_enabled: '全体要約の受信',
+      media_file_access_enabled: 'LINE添付アクセス',
+      image_analysis_reply_enabled: '画像解析の返信',
+      receipt_correction_reply_enabled: 'レシート訂正の返信',
+      non_receipt_image_reply_enabled: 'レシート以外画像の返信',
+      media_save_enabled: 'メディア保存',
+      receipt_midreport_enabled: '中間レポート',
+      receipt_monthend_report_enabled: '月末レポート',
+      calendar_tomorrow_reminder_enabled: '明日予定配信',
+      calendar_registration_reply_enabled: '予定登録のLINE返信',
+      calendar_low_confidence_confirm_reply_enabled: '低確度の確認返信',
+      gmail_reservation_alert_enabled: 'Gmail予約通知',
+      today_reservation_alert_enabled: '本日の予約状況配信',
+    };
+    function checkRoomConfigRoundTrip(savedList) {
+      const mismatched = [];
+      (Array.isArray(savedList) ? savedList : []).forEach(function(item) {
+        if (!item || !item.intended) return;
+        const tr = findRoomTableRowById(item.roomId);
+        if (!tr) return;
+        const actual = getRoomConfigStateFromRow(tr) || {};
+        const fields = Object.keys(ROOM_CONFIG_ROUNDTRIP_FIELDS).filter(function(f) {
+          return item.intended[f] != null && (!!item.intended[f] !== !!actual[f]);
+        });
+        if (fields.length) mismatched.push({ roomId: item.roomId, fields: fields });
+      });
+      if (mismatched.length) {
+        try { console.warn('[設定 往復チェック] 保存が反映されていない項目:', mismatched); } catch (_) {}
+      }
+      return mismatched;
+    }
+    function roundTripNoticeLines(mismatched) {
+      if (!mismatched || !mismatched.length) return [];
+      const names = {};
+      mismatched.forEach(function(m) {
+        (m.fields || []).forEach(function(f) { names[ROOM_CONFIG_ROUNDTRIP_FIELDS[f] || f] = 1; });
+      });
+      return ['⚠ 一部の設定が保存に反映されていない可能性があります: ' + Object.keys(names).join('、') + '（ページ再読込で確認してください。続く場合はお知らせください）'];
+    }
+
     async function saveGlobalPermissionFromModal() {
       const scheduleRoomId = getActiveRoomConfigRoomId();
       if (scheduleRoomId) {
@@ -12450,6 +12498,7 @@
       let updated = 0;
       let skipped = 0;
       const skippedRoomLabels = [];
+      const savedList = [];
       const stores = LINE_REPORT_PAGES.listStores(
         (currentState && currentState.receipt_store_options) || [],
       );
@@ -12484,6 +12533,7 @@
         applyRoomConfigStateToRow(tr, roomConfig);
         await saveRoomRow(tr, { overrideConfig: roomConfig, reload: false });
         setRoomConfigPriority(roomId, CONFIG_PRIORITY.GLOBAL);
+        savedList.push({ roomId: roomId, intended: roomConfig });
         updated += 1;
       }
       isRoomDirty = false;
@@ -12497,6 +12547,7 @@
         if (scheduleLine) globalLines.push(scheduleLine);
       }
       appendSkippedRoomsNoticeLines(globalLines, skippedRoomLabels);
+      roundTripNoticeLines(checkRoomConfigRoundTrip(savedList)).forEach(function(l) { globalLines.push(l); });
       closeRoomConfigModal();
       showAppNotice({
         title: '全体権限を保存しました',
@@ -12546,6 +12597,8 @@
       ];
       const scheduleLine = buildScheduleSavedNoticeLine(roomId);
       if (scheduleLine) individualLines.push(scheduleLine);
+      roundTripNoticeLines(checkRoomConfigRoundTrip([{ roomId: roomId, intended: roomConfig }]))
+        .forEach(function(l) { individualLines.push(l); });
       closeRoomConfigModal();
       showAppNotice({
         title: 'ルーム個別を保存しました',
@@ -12584,6 +12637,7 @@
       const linkedRows = findRoomRowsByStoreKey(storeKey);
       let skipped = 0;
       const skippedRoomLabels = [];
+      const savedList = [];
       for (let i = 0; i < linkedRows.length; i++) {
         const roomId = String(linkedRows[i].dataset.roomId || '').trim();
         if (getRoomConfigPriority(roomId) >= CONFIG_PRIORITY.ROOM) {
@@ -12600,6 +12654,7 @@
         applyRoomConfigStateToRow(linkedRows[i], roomConfig);
         await saveRoomRow(linkedRows[i], { overrideConfig: roomConfig, reload: false });
         setRoomConfigPriority(roomId, CONFIG_PRIORITY.STORE);
+        savedList.push({ roomId: roomId, intended: roomConfig });
       }
       isRoomDirty = false;
       await safeLoadState();
@@ -12614,6 +12669,7 @@
       const scheduleLine = buildScheduleSavedNoticeLine(scheduleRoomId);
       if (scheduleLine) noticeLines.push(scheduleLine);
       appendSkippedRoomsNoticeLines(noticeLines, skippedRoomLabels);
+      roundTripNoticeLines(checkRoomConfigRoundTrip(savedList)).forEach(function(l) { noticeLines.push(l); });
       closeRoomConfigModal();
       showAppNotice({
         title: 'Webhook設定を保存しました',
