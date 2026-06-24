@@ -501,6 +501,82 @@
       margin-left: 1px;
     }
 
+    /* ===== 利用状況リデザイン: 種類別pushリスト（type badge + key + 比率バー + count） ===== */
+    .pushlist { display: flex; flex-direction: column; }
+    .prow {
+      display: grid;
+      grid-template-columns: 160px auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+      padding: 13px 4px;
+      border-top: 1px solid var(--border);
+    }
+    .prow:first-child { border-top: none; }
+    .ptype {
+      font-size: 0.78rem; font-weight: 600; color: var(--accent);
+      background: var(--accent-soft);
+      border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+      padding: 5px 11px; border-radius: 8px; white-space: nowrap; text-align: center;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .pkey {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem; color: var(--text-3); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    .pbar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; min-width: 40px; }
+    .pbar > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.4s ease; }
+    .pn {
+      font-size: 1.05rem; font-weight: 700; color: var(--text);
+      font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; min-width: 60px;
+    }
+    .pn small { font-size: 0.72rem; font-weight: 400; color: var(--text-3); margin-left: 3px; }
+
+    /* ===== 利用状況リデザイン: 店舗別/ルーム別 2カラム・ランクバーテーブル ===== */
+    .util-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+    /* 全体の12カラムグリッド（.global=grid-column:span 12）を打ち消し、util-grid内では各カードを1カラムに */
+    .util-grid > .card { margin-top: 0; grid-column: auto; }
+    .legend-note {
+      display: flex; align-items: center; gap: 16px; font-size: 0.72rem; color: var(--text-3);
+      margin: -4px 0 12px; flex-wrap: wrap;
+    }
+    .legend-note .lk { display: inline-flex; align-items: center; gap: 6px; }
+    .legend-note .lk i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+    .legend-note .lk.push i { background: var(--accent); }
+    .legend-note .lk.reply i { background: var(--text-3); }
+    .utable { display: flex; flex-direction: column; }
+    .srow {
+      display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center;
+      gap: 6px 12px; padding: 11px 2px; border-top: 1px solid var(--border);
+    }
+    .srow:first-child { border-top: none; }
+    .srank { grid-row: 1; grid-column: 1; font-size: 0.72rem; color: var(--text-3); text-align: center; font-variant-numeric: tabular-nums; }
+    .sbadge {
+      grid-row: 1; grid-column: 2; min-width: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem; color: var(--text); background: var(--surface-2);
+      border: 1px solid var(--border-strong); border-radius: 7px; padding: 4px 9px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; justify-self: start; max-width: 100%;
+    }
+    .mp {
+      grid-row: 1; grid-column: 3; justify-self: end; font-size: 1.05rem; font-weight: 700; color: var(--text);
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .mp small { font-size: 0.66rem; font-weight: 500; color: var(--text-3); margin-left: 3px; }
+    .mp.dim { color: var(--text-3); font-weight: 600; }
+    .sbar { grid-row: 2; grid-column: 2; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; align-self: center; }
+    .sbar > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.4s ease; }
+    .sbar.zero > i { background: var(--border-strong); opacity: .6; }
+    .mr { grid-row: 2; grid-column: 3; justify-self: end; font-size: 0.72rem; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    @media (max-width: 920px) {
+      .util-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .prow { grid-template-columns: auto minmax(0, 1fr) auto; }
+      .prow .pbar { display: none; }
+    }
+
     .storage-legend-item {
       display: flex;
       align-items: center;
@@ -4548,6 +4624,7 @@
   .v2-kpi-card[data-accent="green"]::before  { background: #1a9e6f; }
   .v2-kpi-card[data-accent="amber"]::before  { background: #c47d0e; }
   .v2-kpi-card[data-accent="violet"]::before { background: #7c6bd8; }
+  .v2-kpi-card[data-accent="neutral"]::before { background: var(--border-strong); }
 
   .v2-kpi-label {
     font-size: 11px;
@@ -5143,7 +5220,7 @@
             <div class="v2-kpi-value" id="kpiDbManaged">-</div>
             <div class="v2-kpi-sub" id="kpiDbManagedSub">対象テーブル合計</div>
           </div>
-          <div class="v2-kpi-card" data-accent="violet">
+          <div class="v2-kpi-card" data-accent="neutral">
             <div class="v2-kpi-label">DB全体容量</div>
             <div class="v2-kpi-value" id="kpiDbTotal">-</div>
             <div class="v2-kpi-sub">データベース全体</div>
@@ -5179,21 +5256,30 @@
 
           <section class="card global">
             <h2>LINE push 内訳（種類別・上位）<span class="v2-card-badge" id="pushUsageBadge">PUSH</span></h2>
-            <div id="pushBreakdownList" class="push-breakdown"><div class="meta">取得待ち…</div></div>
+            <div id="pushBreakdownList" class="pushlist"><div class="meta">取得待ち…</div></div>
             <div id="pushUsageSummary" class="meta usage-summary" hidden></div>
             <div id="pushUsageDetails" class="meta usage-details" hidden></div>
           </section>
 
-          <section class="card global">
-            <h2>店舗別 送信量（当月）<span class="v2-card-badge">STORE</span></h2>
-            <p class="meta" style="margin:0 0 8px">LINE の送信枠は店舗（チャネル）ごとです。PUSH が枠を消費します。</p>
-            <div id="pushByStoreList" class="push-breakdown"><div class="meta">取得待ち…</div></div>
-          </section>
+          <div class="util-grid">
+            <section class="card global">
+              <h2>店舗別 送信量（当月）<span class="v2-card-badge">STORE</span></h2>
+              <div class="legend-note">
+                <span class="lk push"><i></i>PUSH（送信枠を消費）</span>
+                <span class="lk reply"><i></i>返信（消費しない）</span>
+              </div>
+              <div id="pushByStoreList" class="utable"><div class="meta">取得待ち…</div></div>
+            </section>
 
-          <section class="card global">
-            <h2>ルーム別 送信量（当月・上位）<span class="v2-card-badge">ROOM</span></h2>
-            <div id="pushByRoomList" class="push-breakdown"><div class="meta">取得待ち…</div></div>
-          </section>
+            <section class="card global">
+              <h2>ルーム別 送信量（当月・上位）<span class="v2-card-badge">ROOM</span></h2>
+              <div class="legend-note">
+                <span class="lk reply"><i></i>返信（会話量）</span>
+                <span class="lk push"><i></i>PUSH</span>
+              </div>
+              <div id="pushByRoomList" class="utable"><div class="meta">取得待ち…</div></div>
+            </section>
+          </div>
         </main>
       </div>
     </div>
@@ -10377,61 +10463,44 @@
       setV2Kpi('kpiPushWebhook', replyRows.toLocaleString('ja-JP'), '<span class="unit">件</span>');
       setV2KpiSub('kpiPushSub', month + ' JST ／ 定期・予約・レシート等の送信合計');
 
-      // 種類別（上位）
+      // 種類別（上位）= type badge + monoキー + 比率バー + 件数
       const topItems = Array.isArray(usage.by_source_context) ? usage.by_source_context.slice(0, 8) : [];
       const breakdownEl = document.getElementById('pushBreakdownList');
       if (breakdownEl) {
+        const maxN = topItems.reduce(function(m, r) { return Math.max(m, Number(r && r.count || 0)); }, 0) || 1;
         breakdownEl.innerHTML = topItems.length === 0
           ? '<div class="meta">当月の送信ログはありません。</div>'
           : topItems.map(function(row) {
               const src = String(row && row.source || 'unknown');
               const ctx = String(row && row.context || '');
               const cnt = Number(row && row.count || 0);
-              return '<div class="push-bd-row">' +
-                '<span class="push-bd-src">' + escapeHtml(src) + '</span>' +
-                '<span class="push-bd-desc">' + escapeHtml(ctx || '-') + '</span>' +
-                '<span class="push-bd-count">' + cnt.toLocaleString('ja-JP') + '<small> 件</small></span>' +
+              const w = Math.max(2, Math.round(cnt / maxN * 100));
+              return '<div class="prow">' +
+                '<span class="ptype" title="' + escapeHtml(src) + '">' + escapeHtml(src) + '</span>' +
+                '<span class="pkey" title="' + escapeHtml(ctx || '-') + '">' + escapeHtml(ctx || '-') + '</span>' +
+                '<span class="pbar"><i style="width:' + w + '%"></i></span>' +
+                '<span class="pn">' + cnt.toLocaleString('ja-JP') + '<small>件</small></span>' +
                 '</div>';
             }).join('');
       }
 
-      // 店舗別
-      const byStore = Array.isArray(usage.by_store) ? usage.by_store : [];
-      const storeEl = document.getElementById('pushByStoreList');
-      if (storeEl) {
-        storeEl.innerHTML = byStore.length === 0
-          ? '<div class="meta">当月の送信ログはありません。</div>'
-          : byStore.map(function(row) {
-              const sk = String(row && row.store_key || '') || '（店舗未割当）';
-              const push = Number(row && row.push || 0);
-              const reply = Number(row && row.reply || 0);
-              return '<div class="push-bd-row">' +
-                '<span class="push-bd-src">' + escapeHtml(sk) + '</span>' +
-                '<span class="push-bd-desc">PUSH ' + push.toLocaleString('ja-JP') + ' ／ 返信 ' + reply.toLocaleString('ja-JP') + '</span>' +
-                '<span class="push-bd-count">' + push.toLocaleString('ja-JP') + '<small> 件</small></span>' +
-                '</div>';
-            }).join('');
-      }
+      // 店舗別: PUSH順（枠消費）でランク。ルーム別: 返信順（会話量）でランク。1コンポーネント renderUtablePush を共用。
+      const byStore = (Array.isArray(usage.by_store) ? usage.by_store : []).slice()
+        .map(function(r) { return { name: String(r && r.store_key || '') || '（店舗未割当）', push: Number(r && r.push || 0), reply: Number(r && r.reply || 0) }; })
+        .sort(function(a, b) { return (b.push - a.push) || (b.reply - a.reply); });
+      renderUtablePush('pushByStoreList', byStore, 'push');
 
-      // ルーム別（上位12）
-      const byRoom = Array.isArray(usage.by_room) ? usage.by_room.slice(0, 12) : [];
-      const roomEl = document.getElementById('pushByRoomList');
-      if (roomEl) {
-        roomEl.innerHTML = byRoom.length === 0
-          ? '<div class="meta">当月の送信ログはありません。</div>'
-          : byRoom.map(function(row) {
-              const nm = String(row && row.room_name || '') || String(row && row.room_id || '').slice(0, 12) || '（不明）';
-              const sk = String(row && row.store_key || '');
-              const push = Number(row && row.push || 0);
-              const reply = Number(row && row.reply || 0);
-              const desc = (sk ? sk + ' ／ ' : '') + 'PUSH ' + push.toLocaleString('ja-JP') + ' ／ 返信 ' + reply.toLocaleString('ja-JP');
-              return '<div class="push-bd-row">' +
-                '<span class="push-bd-src">' + escapeHtml(nm) + '</span>' +
-                '<span class="push-bd-desc">' + escapeHtml(desc) + '</span>' +
-                '<span class="push-bd-count">' + push.toLocaleString('ja-JP') + '<small> 件</small></span>' +
-                '</div>';
-            }).join('');
-      }
+      const byRoom = (Array.isArray(usage.by_room) ? usage.by_room : []).slice()
+        .map(function(r) {
+          const nm = String(r && r.room_name || '').trim();
+          const sk = String(r && r.store_key || '').trim();
+          const rid = String(r && r.room_id || '').trim();
+          const label = (sk && nm) ? (sk + ' / ' + nm) : (nm || sk || rid.slice(0, 12) || '（不明）');
+          return { name: label, push: Number(r && r.push || 0), reply: Number(r && r.reply || 0) };
+        })
+        .sort(function(a, b) { return (b.reply - a.reply) || (b.push - a.push); })
+        .slice(0, 12);
+      renderUtablePush('pushByRoomList', byRoom, 'reply');
 
       if (topItems.length === 0) {
         dom.pushUsageDetails.textContent = '内訳: 送信ログなし';
@@ -10443,6 +10512,43 @@
         const count = Number(row && row.count || 0);
         return source + ' / ' + context + ' (' + count + ')';
       }).join(' | ');
+    }
+
+    /**
+     * 店舗別/ルーム別 送信量のランクバーテーブルを描画（1コンポーネントを両方で共用）。
+     * primary='push' なら PUSH を主指標（大きく＋バー）・返信を従、'reply' ならその逆。
+     * rows: { name, push, reply }[]（呼び出し側でソート済み）。値0は dim/zero 表示。
+     */
+    function renderUtablePush(elId, rows, primary) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const list = Array.isArray(rows) ? rows : [];
+      if (list.length === 0) {
+        el.innerHTML = '<div class="meta">当月の送信ログはありません。</div>';
+        return;
+      }
+      const isPush = primary === 'push';
+      const max = list.reduce(function(m, r) { return Math.max(m, Number(r[primary] || 0)); }, 0) || 1;
+      el.innerHTML = list.map(function(r, i) {
+        const push = Number(r.push || 0);
+        const reply = Number(r.reply || 0);
+        const pv = isPush ? push : reply;
+        const w = pv === 0 ? 100 : Math.max(2, Math.round(pv / max * 100));
+        const name = String(r.name || '（不明）');
+        const mp = isPush
+          ? '<span class="mp' + (push === 0 ? ' dim' : '') + '">' + push.toLocaleString('ja-JP') + '<small>PUSH</small></span>'
+          : '<span class="mp' + (reply === 0 ? ' dim' : '') + '">' + reply.toLocaleString('ja-JP') + '<small>返信</small></span>';
+        const mr = isPush
+          ? '<span class="mr">返信 ' + reply.toLocaleString('ja-JP') + '</span>'
+          : '<span class="mr">PUSH ' + push.toLocaleString('ja-JP') + '</span>';
+        return '<div class="srow">' +
+          '<span class="srank">' + (i + 1) + '</span>' +
+          '<span class="sbadge" title="' + escapeHtml(name) + '">' + escapeHtml(name) + '</span>' +
+          mp +
+          '<span class="sbar' + (pv === 0 ? ' zero' : '') + '"><i style="width:' + w + '%"></i></span>' +
+          mr +
+          '</div>';
+      }).join('');
     }
 
     /** 会話検索除外ルームIDのうち、現在のルーム一覧に存在するものだけを残す（削除済みルームIDは件数に含めない） */
