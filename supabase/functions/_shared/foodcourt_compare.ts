@@ -570,7 +570,7 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
   if (evSa != null && nonSa != null) L.push(`イベント日の平均売上 ${fcYen(evSa)} / 非イベント日 ${fcYen(nonSa)}`)
   const cats = Array.from(byCat.entries()).filter(([, a]) => a.length).sort((a, b) => (fcAvg(b[1]) ?? 0) - (fcAvg(a[1]) ?? 0))
   for (const [c, a] of cats) L.push(`・${c}: ${a.length}日 / 平均客数 ${Math.round(fcAvg(a) ?? 0)}人`)
-  if (byCat.has('スポーツ中継')) L.push('注: スポーツ中継(PV観戦)は全体の集客は大きいが、特にサッカーは客がバーガー/ビールへ流れ、当店(ワイン/カレー)への売上寄与は間接的（来店の波及は一部にとどまる）＝客数の割に売上は伸びにくい。野球(ドーム開催)の方が当店売上は伸びやすい。')
+  if (byCat.has('スポーツ中継')) L.push('注: スポーツ中継(PV観戦)は全体の集客が大きい日。当店への売上寄与は固定視せず、上の「客数」と「客単価/売上」の実績数値で都度判断すること（断定しない・蓄積で更新）。現場の仮説として『サッカー放映は客がバーガー/ビールに流れやすく、野球の方が当店売上は伸びやすい』があるが、あくまで仮説で、競技・放映時間帯ごとの実際の数値で検証する。')
   // 会場別（東京ドーム本体／カナデビアホール／後楽園ホール等）の平均客数。会場で客層が異なるため取り込み方を読む。
   const byVenue = new Map<string, number[]>()
   for (const r of daily) {
@@ -595,7 +595,7 @@ function buildEventListText(events: VenueEvent[]): string {
   const lines = sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); const vl = fcVenueLabel(e.venue); const jp = e.is_japan ? '🇯🇵日本戦(集客大・深夜営業あり) ' : ''; const nt = e.note ? ` ※${e.note}` : ''; return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}${vl ? `/${vl}` : ''}] ${jp}${e.title}${nt}` })
   // PV(スポーツ中継)の運用知見をAIが必ず踏まえるよう注記。
   if (sorted.some((e) => e.category === 'スポーツ中継')) {
-    lines.push('※PV観戦(スポーツ中継)の見方: フードコート全体は大集客になるが、特にサッカーは客がバーガー/ビールに流れ、marugoS(ワイン/カレー)への売上寄与は大集客に伴う波及（間接的）が中心＝客数ほどには売上が伸びにくい。仕込みは過剰にせず、日本戦は深夜営業の可能性に備える。野球(ドーム開催)の方が当店売上は伸びやすい。')
+    lines.push('※PV観戦(スポーツ中継)の見方: フードコート全体は集客増が見込める日。当店の売上寄与は断定せず、実績の客数/客単価/売上で判断する（蓄積で随時更新・固定の結論にしない）。現場の仮説として『サッカー放映は客がバーガー/ビールに流れやすく、野球の方が当店売上は伸びやすい』があるが要検証。日本戦は深夜営業の可能性に備える。')
   }
   return lines.join('\n')
 }

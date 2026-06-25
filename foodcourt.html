@@ -1787,8 +1787,28 @@
     const isFuture = ymd>todayJ;
     let html = '<div class="dp-date">'+fmtFullDay(ymd)+'</div>';
     if(evs.length){
+      // PV観戦日の注記は固定文にせず、蓄積実績から都度計算して傾向を述べる（断定しない・データが増えると更新）。
       const hasPV = evs.some(e=>e.category==='スポーツ中継');
-      const pvNote = hasPV ? '<div style="margin-top:6px;padding:7px 9px;border-radius:6px;background:oklch(0.65 0.18 40 / .14);border-left:3px solid oklch(0.68 0.18 40);font-size:11.5px;line-height:1.5">📺 <b>PV観戦日</b>：フードコート全体は大集客。ただし<b>サッカーは客がバーガー/ビールに流れがち</b>で、当店(ワイン/カレー)への売上寄与は<b>大集客に伴う波及（間接的）</b>が中心＝<b>客数ほどには売上が伸びにくい</b>。仕込みは過剰にせず、日本戦は深夜営業の可能性に備える。野球(ドーム開催)の方が当店売上は伸びやすい。</div>' : '';
+      const pvNote = hasPV ? (function(){
+        const wrap=s=>'<div style="margin-top:6px;padding:7px 9px;border-radius:6px;background:oklch(0.65 0.18 40 / .14);border-left:3px solid oklch(0.68 0.18 40);font-size:11.5px;line-height:1.55">📺 <b>PV観戦日</b>：'+s+'</div>';
+        const hasEvD=d=>(eventsByDate.get(d)||[]).length>0;
+        const hasPVd=d=>(eventsByDate.get(d)||[]).some(e=>e.category==='スポーツ中継');
+        const withG=(lastSeries||[]).filter(p=>p.guests!=null&&p.guests>0);
+        const pvD=withG.filter(p=>{const d=ymdJst(p.when);return hasPVd(d)&&d<todayJ;});
+        const baseD=withG.filter(p=>!hasEvD(ymdJst(p.when)));
+        const aGp=avg(pvD.map(p=>p.guests)), aKp=avg(pvD.map(p=>p.kt).filter(x=>x!=null));
+        const aGb=avg(baseD.map(p=>p.guests)), aKb=avg(baseD.map(p=>p.kt).filter(x=>x!=null));
+        if(!pvD.length) return wrap('フードコート全体は集客増が見込めます。当店売上にどれだけ波及するかは<b>実績を蓄積して判断</b>します（現時点で断定はしません）。日本戦は深夜営業の可能性に注意。');
+        const gTxt='客数 平均'+nf.format(Math.round(aGp))+'人'+(aGb!=null?'（通常日 '+nf.format(Math.round(aGb))+'人・'+(aGp/aGb).toFixed(2)+'倍）':'');
+        const kTxt=(aKp!=null)?('客単価 平均'+yenF(aKp)+(aKb!=null?'（通常日 '+yenF(aKb)+'）':'')):'';
+        let interp='';
+        if(aKp!=null&&aKb!=null){ const kr=aKp/aKb;
+          interp = kr<0.95 ? '今のところ客数は増えても<b>客単価は通常より低め</b>で、売上は客数ほどには伸びていない傾向。'
+                : kr>1.05 ? '今のところ客単価も通常以上で、売上も客数に応じて伸びている傾向。'
+                : '今のところ客単価は通常並みで、売上はおおむね客数に連動。'; }
+        const hedge=(pvD.length<3?'ただし実績'+pvD.length+'日と少なく、<b>傾向は今後の実績で変わり得ます</b>（要観察）。':'実績が増えるごとに傾向は更新されます。');
+        return wrap('これまでのPV放映 '+pvD.length+'日の実績：'+gTxt+(kTxt?'／'+kTxt:'')+'。'+interp+'競技・放映時間帯でも変わります。'+hedge+' 日本戦は深夜営業の可能性に注意。');
+      })() : '';
       html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドームシティ イベント</div>'
         + evs.map(e=>'<div class="dp-ev"><div style="margin-bottom:3px">'+venueBadge(e)+jpTag(e)+'<span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b></div><div>'+escapeHtml(e.title||'')+'</div>'+(e.note?'<div style="color:var(--tx-2);font-size:12px;margin-top:3px">📌 '+escapeHtml(e.note)+'</div>':'')+'</div>').join('')
         + pvNote
