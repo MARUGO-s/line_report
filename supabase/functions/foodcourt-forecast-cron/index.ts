@@ -182,9 +182,9 @@ function shrink(rawFactor: number, n: number, k = SHRINK_K): number {
 }
 function pickEvType(r: Record<string, unknown>): EvType {
   // 当店(marugoS)の売上ドライバー順で種別を決める。ドーム野球は当店の最強ドライバー＝PVより優先。
-  // サッカーPVは「全体は大集客だが客はバーガー/ビールへ→当店はおこぼれ寄与」なので独立の控えめ係数として学習させる。
+  // サッカーPVは「全体は大集客だが客はバーガー/ビールへ→当店への売上寄与は間接的・波及的」なので独立の控えめ係数として学習させる。
   if (r.has_pro_baseball === true) return "pro"            // ドーム野球＝当店の最強ドライバー（同日にPVが重なってもこちらを優先）
-  if (r.has_soccer_pv === true) return "soccer_pv"          // サッカーPV＝高集客でも当店はおこぼれ（過大評価を避け別係数で学習）
+  if (r.has_soccer_pv === true) return "soccer_pv"          // サッカーPV＝高集客でも当店売上は間接的・波及的（過大評価を避け別係数で学習）
   if (r.has_japan_match === true) return "japan"            // サッカー以外の日本戦PV（WBC/世界ボクシング/五輪 等）
   if (r.has_live === true) return "live"
   if (r.has_sports_broadcast === true) return "sports"     // 日本以外の世界スポーツ放映

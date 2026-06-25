@@ -1539,20 +1539,27 @@
     // 上にスクロール＝過去のイベント、下＝今後の予定。
     list=list.slice().sort((a,b)=>dOf(a).localeCompare(dOf(b)));
     if(!list.length){ dom.domeList.innerHTML=''; dom.domeMore.style.display='none'; dom.domeNote.textContent=events.length?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
-    const rowHtml=e=>{ const d=dOf(e); const past=d<todayJ; const has=guestsByDate.has(d);
+    // 客数は「その日のマルゴS全体の値」。同じ日に複数イベントがあると各行に同じ数が並び“各イベントの客数”に
+    // 誤読されるため、同一日の先頭行にだけ表示し、2件目以降は空欄にする（＝1日1回＝日合計だと分かる）。
+    const rowHtml=(e,showCnt)=>{ const d=dOf(e); const past=d<todayJ; const has=guestsByDate.has(d);
       const noteHtml=e.note?'<span style="color:var(--tx-2);font-size:11px;margin-left:6px">'+escapeHtml(e.note)+'</span>':'';
-      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+venueTag(e)+jpTag(e)+escapeHtml(e.title||'')+noteHtml+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>'; };
+      const cntTxt = !has ? '—' : (showCnt ? nf.format(guestsByDate.get(d)) : '');
+      const cntCls = (has&&showCnt) ? '' : 'none';
+      const cntTtl = (has&&showCnt) ? ' title="その日のマルゴS全体の客数（イベント単位ではありません）"' : '';
+      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+venueTag(e)+jpTag(e)+escapeHtml(e.title||'')+noteHtml+'</span><span class="ld-cnt '+cntCls+' mono"'+cntTtl+'>'+cntTxt+'</span></div>'; };
+    // 並び順(日付昇順)で各日の先頭行だけ客数を出すための判定。
+    const showCntAt=i=>i===0 || dOf(list[i-1])!==dOf(list[i]);
     const sepHtml=label=>'<div class="ld-today-sep" id="domeTodayAnchor">'+label+'</div>';
     const todayLbl='今日 '+fmtDay(todayJ)+'（'+wdayJp(todayJ)+'）';
     const futIdx=list.findIndex(e=>dOf(e)>=todayJ);
     let html='';
-    if(futIdx<0){ html=list.map(rowHtml).join('')+sepHtml(todayLbl+'　▲ 上に過去のイベント（今後の予定は未取得）'); }
-    else { list.forEach((e,i)=>{ if(i===futIdx) html+=sepHtml(todayLbl+'　▲ 過去 ／ ▼ これから'); html+=rowHtml(e); }); }
+    if(futIdx<0){ html=list.map((e,i)=>rowHtml(e,showCntAt(i))).join('')+sepHtml(todayLbl+'　▲ 上に過去のイベント（今後の予定は未取得）'); }
+    else { list.forEach((e,i)=>{ if(i===futIdx) html+=sepHtml(todayLbl+'　▲ 過去 ／ ▼ これから'); html+=rowHtml(e,showCntAt(i)); }); }
     dom.domeList.innerHTML=html;
     scrollDomeToToday();
     dom.domeMore.style.display='none';
     const future=list.filter(e=>dOf(e)>=todayJ).length, pastN=list.length-future;
-    dom.domeNote.textContent='全'+list.length+'件（過去 '+pastN+'件・今後 '+future+'件）。リストを上にスクロールすると過去のイベント、下で今後の予定。客数はマルゴSの記録がある日のみ。';
+    dom.domeNote.textContent='全'+list.length+'件（過去 '+pastN+'件・今後 '+future+'件）。リストを上にスクロールすると過去のイベント、下で今後の予定。客数はその日のマルゴS全体（同じ日は先頭行に1回だけ表示。各イベント単位の客数ではありません）。記録のある日のみ。';
   }
 
   // ===== master render =====
@@ -1757,7 +1764,7 @@
     let html = '<div class="dp-date">'+fmtFullDay(ymd)+'</div>';
     if(evs.length){
       const hasPV = evs.some(e=>e.category==='スポーツ中継');
-      const pvNote = hasPV ? '<div style="margin-top:6px;padding:7px 9px;border-radius:6px;background:oklch(0.65 0.18 40 / .14);border-left:3px solid oklch(0.68 0.18 40);font-size:11.5px;line-height:1.5">📺 <b>PV観戦日</b>：フードコート全体は大集客。ただし<b>サッカーは客がバーガー/ビールに流れがち</b>で、当店(ワイン/カレー)は<b>大集客の中のおこぼれ寄与</b>が中心＝<b>客数ほど売上は伸びにくい</b>。仕込みは過剰にせず、日本戦は深夜営業の可能性に備える。野球(ドーム開催)の方が当店売上は伸びやすい。</div>' : '';
+      const pvNote = hasPV ? '<div style="margin-top:6px;padding:7px 9px;border-radius:6px;background:oklch(0.65 0.18 40 / .14);border-left:3px solid oklch(0.68 0.18 40);font-size:11.5px;line-height:1.5">📺 <b>PV観戦日</b>：フードコート全体は大集客。ただし<b>サッカーは客がバーガー/ビールに流れがち</b>で、当店(ワイン/カレー)への売上寄与は<b>大集客に伴う波及（間接的）</b>が中心＝<b>客数ほどには売上が伸びにくい</b>。仕込みは過剰にせず、日本戦は深夜営業の可能性に備える。野球(ドーム開催)の方が当店売上は伸びやすい。</div>' : '';
       html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドームシティ イベント</div>'
         + evs.map(e=>'<div class="dp-ev"><div style="margin-bottom:3px">'+venueBadge(e)+jpTag(e)+'<span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b></div><div>'+escapeHtml(e.title||'')+'</div>'+(e.note?'<div style="color:var(--tx-2);font-size:12px;margin-top:3px">📌 '+escapeHtml(e.note)+'</div>':'')+'</div>').join('')
         + pvNote

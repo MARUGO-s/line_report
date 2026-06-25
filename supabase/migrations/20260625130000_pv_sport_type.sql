@@ -2,7 +2,7 @@
 -- PV(パブリックビューイング)の競技種別を構造化し、サッカーPVを別係数として扱えるようにする。
 --
 -- 運用知見: PV放映日はフードコート全体の集客は大きいが、特にサッカーは客がバーガー/ビールに流れ、
---   marugoS(ワイン/カレー)の売上寄与は「大集客の中のおこぼれ」が中心＝客数ほど売上は伸びない。
+--   marugoS(ワイン/カレー)への売上寄与は大集客に伴う波及（間接的）が中心＝客数ほどには売上が伸びない。
 --   実測: 06-15 サッカー単独(5:00JST)=当店47人(平常以下)。06-21=244人だが同日ドーム野球が重なり野球＋日曜が主因。
 --   → サッカーPVを野球より下位の独立係数で学習させ、過大評価を避ける（来客予測 foodcourt-forecast-cron）。
 --
@@ -31,7 +31,7 @@ select
   (coalesce(w.precipitation_mm, 0) >= 1) as is_rainy,
   coalesce(ev.has_sports_broadcast, false) as has_sports_broadcast,
   coalesce(ev.has_japan_match, false)      as has_japan_match,
-  coalesce(ev.has_soccer_pv, false)        as has_soccer_pv   -- PV: サッカー放映があるか（当店はおこぼれ寄与）
+  coalesce(ev.has_soccer_pv, false)        as has_soccer_pv   -- PV: サッカー放映があるか（当店への売上寄与は間接的・波及的）
 from (
   select business_date from public.foodcourt_daily_facts
   union
