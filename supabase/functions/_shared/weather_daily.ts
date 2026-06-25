@@ -4,6 +4,7 @@ import { toSafeString, type AppError } from './admin_utils.ts'
 export type WeatherDay = {
   temp: number | null
   rain: number | null
+  code: number | null   // WMO weather_code（晴れ/曇り/雨/雪/雷の正確な判定用。無ければ rain/temp で代替）
 }
 
 export type WeatherDailyResult = {
@@ -101,11 +102,13 @@ function mergeDailyMaps(
   dates: string[],
   temps: Array<number | null>,
   rains: Array<number | null>,
+  codes: Array<number | null> = [],
 ) {
   dates.forEach((dateKey, i) => {
     target[dateKey] = {
       temp: temps[i] ?? null,
       rain: rains[i] ?? null,
+      code: codes[i] ?? null,
     }
   })
 }
@@ -129,7 +132,7 @@ async function fetchOpenMeteoDaily(
     longitude: String(lon),
     start_date: from,
     end_date: to,
-    daily: 'temperature_2m_max,precipitation_sum',
+    daily: 'temperature_2m_max,precipitation_sum,weather_code',
     timezone: 'Asia/Tokyo',
   })
 
@@ -145,6 +148,7 @@ async function fetchOpenMeteoDaily(
       Array.isArray(data?.daily?.time) ? data.daily.time : [],
       Array.isArray(data?.daily?.temperature_2m_max) ? data.daily.temperature_2m_max : [],
       Array.isArray(data?.daily?.precipitation_sum) ? data.daily.precipitation_sum : [],
+      Array.isArray(data?.daily?.weather_code) ? data.daily.weather_code : [],
     )
     return out
   } catch {
@@ -182,7 +186,7 @@ async function fetchForecastPastDaysWindow(
   const params = new URLSearchParams({
     latitude: String(lat),
     longitude: String(lon),
-    daily: 'temperature_2m_max,precipitation_sum',
+    daily: 'temperature_2m_max,precipitation_sum,weather_code',
     timezone: 'Asia/Tokyo',
     past_days: '92',
     forecast_days: includeForecast ? '10' : '0',
@@ -195,6 +199,7 @@ async function fetchForecastPastDaysWindow(
     Array.isArray(data?.daily?.time) ? data.daily.time as string[] : [],
     Array.isArray(data?.daily?.temperature_2m_max) ? data.daily.temperature_2m_max as Array<number | null> : [],
     Array.isArray(data?.daily?.precipitation_sum) ? data.daily.precipitation_sum as Array<number | null> : [],
+    Array.isArray(data?.daily?.weather_code) ? data.daily.weather_code as Array<number | null> : [],
   )
   const filtered: Record<string, WeatherDay> = {}
   for (const [dateKey, value] of Object.entries(out)) {
@@ -310,7 +315,7 @@ async function loadCachedWeather(
 ): Promise<Record<string, WeatherDay>> {
   const { data, error } = await supabase
     .from('line_weather_daily')
-    .select('weather_date, temp_max_c, precipitation_mm')
+    .select('weather_date, temp_max_c, precipitation_mm, weather_code')
     .eq('cache_key', cacheKey)
     .gte('weather_date', from)
     .lte('weather_date', to)
@@ -328,6 +333,7 @@ async function loadCachedWeather(
     map[dateKey] = {
       temp: r.temp_max_c == null ? null : Number(r.temp_max_c),
       rain: r.precipitation_mm == null ? null : Number(r.precipitation_mm),
+      code: r.weather_code == null ? null : Number(r.weather_code),
     }
   }
   return map
@@ -350,6 +356,7 @@ async function saveCachedWeather(
       weather_date: dateKey,
       temp_max_c: value.temp == null ? null : value.temp,
       precipitation_mm: value.rain == null ? null : value.rain,
+      weather_code: value.code == null ? null : value.code,
       updated_at: nowIso,
     }))
   if (rows.length === 0) return
