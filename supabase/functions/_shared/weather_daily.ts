@@ -416,6 +416,11 @@ export async function fetchWeatherDailyState(
   const cachedMap = await loadCachedWeather(supabase, cacheKey, from, to)
   const result: Record<string, WeatherDay> = { ...cachedMap }
 
+  // 予報は毎日更新される。キャッシュは「確定済みの過去日（archiveCap=今日-3 以前）」だけ信用し、
+  // 直近（今日-2）〜未来は必ず再取得して上書きする。これをしないと、未来日を一度キャッシュした時点の
+  // 古い予報が固定表示され続ける（例: 台風接近で当日は雨なのに、数日前の“晴れ”予報のまま表示される）。
+  for (const d of Object.keys(result)) { if (d > archiveCap) delete result[d] }
+
   const missingDates = requestedDates.filter((d) => !result[d])
   const cacheHits = requestedDates.length - missingDates.length
 
