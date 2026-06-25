@@ -591,10 +591,10 @@ function buildEventListText(events: VenueEvent[]): string {
   if (!Array.isArray(events) || !events.length) return ''
   const sorted = events.slice().filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date ?? '').slice(0, 10)))
     .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date))).slice(0, 25)
-  return sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); const vl = fcVenueLabel(e.venue); return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}${vl ? `/${vl}` : ''}] ${e.title}` }).join('\n')
+  return sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); const vl = fcVenueLabel(e.venue); const jp = e.is_japan ? '🇯🇵日本戦(集客大・深夜営業あり) ' : ''; const nt = e.note ? ` ※${e.note}` : ''; return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}${vl ? `/${vl}` : ''}] ${jp}${e.title}${nt}` }).join('\n')
 }
 
-export type VenueEvent = { event_date: string; title: string; category: string; venue?: string }
+export type VenueEvent = { event_date: string; title: string; category: string; venue?: string; is_japan?: boolean; note?: string }
 export type ForecastRow = { target_date: string; metric: string; predicted: number; predicted_low?: number | null; predicted_high?: number | null; actual?: number | null; model_version?: string }
 
 // 学習型モデルの予測（forecast_predictions）を、精度（過去の予測vs実績MAPE）＋今後の予測としてテキスト化。
@@ -635,6 +635,7 @@ function fcVenueLabel(venue?: string): string {
   if (v === "korakuen") return "後楽園ホール"
   if (v === "prism") return "プリズムホール"
   if (v === "laqua") return "ラクーア"
+  if (v === "public-viewing") return "PV観戦(世界スポーツ放映)"
   return "" // tokyo-dome / 不明は無印
 }
 export type WeatherDay = { weather_date: string; weather_code: number | null; temp_max: number | null; temp_min: number | null; precipitation_mm: number | null; precip_prob: number | null; summary: string }

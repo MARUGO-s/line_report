@@ -350,7 +350,7 @@ async function loadVenueEventsForReports(
   supabase: ReturnType<typeof createClient>,
   storeKey: string,
   reports: Array<Record<string, unknown>>,
-): Promise<Array<{ event_date: string; title: string; category: string; venue: string }>> {
+): Promise<Array<{ event_date: string; title: string; category: string; venue: string; is_japan: boolean; note: string }>> {
   if (String(storeKey ?? "").trim().toLowerCase() !== "marugos") return []
   const dates: string[] = []
   for (const r of (Array.isArray(reports) ? reports : [])) {
@@ -369,7 +369,7 @@ async function loadVenueEventsForReports(
   const hi = hiCand[hiCand.length - 1]
   const { data, error } = await supabase
     .from("tokyo_dome_events")
-    .select("event_date, title, category, venue")
+    .select("event_date, title, category, venue, is_japan, note")
     .gte("event_date", lo)
     .lte("event_date", hi)
     .order("event_date", { ascending: true })
@@ -380,6 +380,8 @@ async function loadVenueEventsForReports(
     title: String((e as { title?: unknown }).title ?? ""),
     category: String((e as { category?: unknown }).category ?? ""),
     venue: String((e as { venue?: unknown }).venue ?? "tokyo-dome"),
+    is_japan: (e as { is_japan?: unknown }).is_japan === true,
+    note: String((e as { note?: unknown }).note ?? ""),
   })).filter((e) => e.event_date && e.title)
 }
 

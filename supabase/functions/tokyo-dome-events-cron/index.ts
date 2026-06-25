@@ -21,7 +21,9 @@ const DOME_CITY_HALLS: Array<{ venue: string; envKey: string; url: string; sourc
   { venue: "korakuen", envKey: "KORAKUEN_SCHEDULE_URL", url: DEFAULT_KORAKUEN_URL, source: "tokyo-dome.co.jp/hall" },
 ]
 const MAX_TEXT_CHARS = 40000
-const VALID_CATEGORIES = new Set(["プロ野球", "アマ野球", "ライブ", "その他"])
+// スポーツ中継=パブリックビューイング(PV)放映（W杯/WBC/世界ボクシング/五輪等）。この cron は東京ドーム本体/各ホールの
+// 開催イベントのみ書き込み、PV放映は別経路（定期Web検索ルーティン）が venue='public-viewing' で投入する。
+const VALID_CATEGORIES = new Set(["プロ野球", "アマ野球", "ライブ", "スポーツ中継", "その他"])
 
 type ExtractedEvent = { event_date: string; title: string; category: string }
 

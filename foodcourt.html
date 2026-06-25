@@ -104,6 +104,7 @@
     body[data-theme='light'] .ev-pill.ama, body[data-theme='light'] .ld-g.ama{ color:oklch(0.42 0.13 150); }
     body[data-theme='light'] .ev-pill.live, body[data-theme='light'] .ld-g.live{ color:oklch(0.46 0.17 330); }
     body[data-theme='light'] .ev-pill.other, body[data-theme='light'] .ld-g.other{ color:oklch(0.42 0.02 258); }
+    body[data-theme='light'] .ev-pill.sports, body[data-theme='light'] .ld-g.sports{ color:oklch(0.52 0.18 40); }
     body[data-theme='light'] .cal-dow .sun{ color:oklch(0.55 0.18 25); }
     body[data-theme='light'] .cal-dow .sat{ color:oklch(0.50 0.13 250); }
     .pill.theme-toggle{ cursor:pointer; }
@@ -293,6 +294,7 @@
     .ev-pill.ama{background:oklch(0.72 0.13 140 / .16);border-color:oklch(0.7 0.13 140);color:oklch(0.84 0.1 140);}
     .ev-pill.live{background:oklch(0.66 0.16 330 / .16);border-color:oklch(0.68 0.15 330);color:oklch(0.84 0.11 330);}
     .ev-pill.other{background:oklch(0.6 0.02 258 / .25);border-color:oklch(0.6 0.02 258);color:var(--tx-2);}
+    .ev-pill.sports{background:oklch(0.65 0.18 40 / .18);border-color:oklch(0.68 0.18 40);color:oklch(0.85 0.13 40);}
     .cell .gc{font-size:10.5px;color:var(--tx-3);margin-top:auto;white-space:nowrap;}
     .cell .gc b{color:var(--base-tx);}
     /* 狭幅カレンダー: 長いタイトルの代わりにジャンル色バーを表示 */
@@ -301,6 +303,7 @@
     .ev-bar.ama{background:oklch(0.70 0.13 140);}
     .ev-bar.live{background:oklch(0.68 0.15 330);}
     .ev-bar.other{background:oklch(0.60 0.02 258);}
+    .ev-bar.sports{background:oklch(0.68 0.18 40);}
 
     .filt{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px;}
     .fbtn{font-size:12.5px;font-weight:600;color:var(--tx-2);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:7px 14px;display:inline-flex;align-items:center;gap:6px;}
@@ -319,6 +322,7 @@
     .ld-g.ama{background:oklch(0.72 0.13 140 / .18);color:oklch(0.84 0.1 140);}
     .ld-g.live{background:oklch(0.66 0.16 330 / .18);color:oklch(0.84 0.11 330);}
     .ld-g.other{background:oklch(0.6 0.02 258 / .28);color:var(--tx-2);}
+    .ld-g.sports{background:oklch(0.65 0.18 40 / .2);color:oklch(0.85 0.13 40);}
     .ld-row .ld-cnt{font-weight:700;color:var(--tx-1);}
     .ld-row .ld-cnt.none{color:var(--tx-3);font-weight:400;}
     .ld-more{text-align:center;margin-top:14px;}
@@ -719,18 +723,22 @@
   // 実際の売上が発生した日は前日(-1)。表示・カレンダー・相関・予測すべてこの“売上日”で統一する。
   const salesDateOf = (r) => { const rd=String((r&&r.report_date)||'').trim(); if(/^\d{4}-\d{2}-\d{2}/.test(rd)) return addDaysYmd(rd.slice(0,10), -1); const m=String((r&&r.created_at)||'').match(/^(\d{4}-\d{2}-\d{2})/); return m?addDaysYmd(m[1],-1):''; };
   const effDate = (r) => salesDateOf(r);
-  const EVT_ICON = { 'プロ野球':'⚾', 'アマ野球':'🥎', 'ライブ':'🎤', 'その他':'🎫' };
+  const EVT_ICON = { 'プロ野球':'⚾', 'アマ野球':'🥎', 'ライブ':'🎤', 'スポーツ中継':'📺', 'その他':'🎫' };
   // 会場ラベル（東京ドーム本体は無印・各ホールは会場名を表示。カナデビア等は来館動機が独立するため区別する）。
-  const VENUE_LABEL = { 'kanadevia':'カナデビア', 'korakuen':'後楽園H', 'prism':'プリズムH', 'laqua':'ラクーア' };
+  // public-viewing＝フードコートの大型モニターでの世界スポーツ放映（W杯/WBC/世界ボクシング/五輪等）。
+  const VENUE_LABEL = { 'kanadevia':'カナデビア', 'korakuen':'後楽園H', 'prism':'プリズムH', 'laqua':'ラクーア', 'public-viewing':'PV観戦' };
   const venueOf = e => String((e&&e.venue)||'tokyo-dome');
   const venueLabelOf = e => { const v=venueOf(e); return (v && v!=='tokyo-dome') ? (VENUE_LABEL[v]||v) : ''; };
   const venueTag = e => { const l=venueLabelOf(e); return l ? '<span style="display:inline-block;font-size:10px;font-weight:700;color:var(--accent,#b07);background:rgba(176,0,119,.10);border-radius:4px;padding:0 5px;margin-right:5px;vertical-align:middle">🏛'+escapeHtml(l)+'</span>' : ''; };
   // 開催場所のフルネーム（東京ドーム本体も含め全会場）。ポップアップで開催場所を必ず明記するのに使う。
-  const VENUE_FULL = { 'tokyo-dome':'東京ドーム', 'kanadevia':'カナデビアホール', 'korakuen':'後楽園ホール', 'prism':'プリズムホール', 'laqua':'ラクーア' };
+  const VENUE_FULL = { 'tokyo-dome':'東京ドーム', 'kanadevia':'カナデビアホール', 'korakuen':'後楽園ホール', 'prism':'プリズムホール', 'laqua':'ラクーア', 'public-viewing':'パブリックビューイング' };
   const venueFullName = e => { const v=venueOf(e); return VENUE_FULL[v] || v; };
   const venueBadge = e => '<span style="display:inline-block;font-size:11px;font-weight:700;color:var(--accent,#b07);background:rgba(176,0,119,.12);border-radius:5px;padding:1px 7px;margin-right:6px;vertical-align:middle">📍'+escapeHtml(venueFullName(e))+'</span>';
+  // 日本人/日本代表が出る放映＝集客大・深夜営業の要注意日。一目で分かるよう赤い🇯🇵バッジを付ける。
+  const isJp = e => !!(e && e.is_japan);
+  const jpTag = e => isJp(e) ? '<span style="display:inline-block;font-size:10px;font-weight:800;color:#fff;background:#C0392B;border-radius:4px;padding:0 5px;margin-right:5px;vertical-align:middle">🇯🇵日本戦</span>' : '';
   const escapeHtml = (s)=> String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
-  function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':'other'; }
+  function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':c==='スポーツ中継'?'sports':'other'; }
   function shorten(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
   function genreTag(category){ if(!category) return '<span class="neg">—</span>'; return '<span class="ld-g '+catSlug(category)+'">'+(EVT_ICON[category]||'🎫')+' '+escapeHtml(category)+'</span>'; }
   function median(arr){ const a=arr.filter(x=>x!=null && isFinite(x)).slice().sort((x,y)=>x-y); if(!a.length) return null; const m=Math.floor(a.length/2); return a.length%2? a[m] : (a[m-1]+a[m])/2; }
@@ -1472,12 +1480,14 @@
     const b=eventMonthBounds(); if(b){ k=Math.max(b.min,Math.min(b.max,k)); }
     calY=Math.floor(k/12); calM=(k%12)+1; renderCalendar();
   }
-  const CAL_VENUE_ORDER = ['tokyo-dome','kanadevia','korakuen','prism','laqua'];
+  const CAL_VENUE_ORDER = ['tokyo-dome','kanadevia','korakuen','prism','laqua','public-viewing'];
+  // タブ用の短い表示名（無ければ VENUE_FULL）。PV観戦は世界スポーツ放映の専用タブ。
+  const CAL_TAB_LABEL = { 'public-viewing':'📺 PV観戦' };
   function renderCalVenueTabs(){
     if(!dom.calVenueTabs) return;
     const present = new Set((events||[]).map(e=>venueOf(e)));
     if(!present.has(calVenue)) calVenue='all'; // 選択中の会場が無くなったら全てに戻す
-    const tabs = [['all','全て']].concat(CAL_VENUE_ORDER.filter(v=>present.has(v)).map(v=>[v, VENUE_FULL[v]||v]));
+    const tabs = [['all','全て']].concat(CAL_VENUE_ORDER.filter(v=>present.has(v)).map(v=>[v, CAL_TAB_LABEL[v]||VENUE_FULL[v]||v]));
     dom.calVenueTabs.innerHTML = tabs.map(t=>'<button class="fbtn'+(calVenue===t[0]?' active':'')+'" data-v="'+t[0]+'">'+escapeHtml(t[1])+'</button>').join('');
   }
   function renderCalendar(){
@@ -1499,18 +1509,18 @@
       const hit=dayEvs[0]; const today=ds===todayJ;
       const gcls=hit?catSlug(hit.category):'';
       const vlab=hit?venueLabelOf(hit):'';
-      const pill=hit?'<span class="ev-pill '+gcls+'" title="'+escapeHtml((vlab?vlab+'：':'')+(hit.title||''))+'">'+escapeHtml(shorten((vlab?vlab+'/':'')+hit.title,16))+'</span><span class="ev-bar '+gcls+'"></span>':'';
+      const pill=hit?'<span class="ev-pill '+gcls+'" title="'+escapeHtml((vlab?vlab+'：':'')+(hit.title||'')+(hit.note?(' ／ '+hit.note):''))+'">'+(isJp(hit)?'🇯🇵':'')+escapeHtml(shorten((vlab?vlab+'/':'')+hit.title,16))+'</span><span class="ev-bar '+gcls+'"></span>':'';
       const g=guestsByDate.has(ds)?'<span class="gc">👥 <b>'+nf.format(guestsByDate.get(ds))+'</b></span>':'';
       const clk=!!hit||guestsByDate.has(ds);
       html+='<div class="cell'+(today?' today':'')+(clk?' clk':'')+'"'+(clk?' data-date="'+ds+'"':'')+'><span class="cd">'+d+'</span>'+pill+g+'</div>';
     }
     dom.calGrid.innerHTML=html;
     if(b){ const k=calY*12+(calM-1); dom.calPrev.disabled=(k<=b.min); dom.calNext.disabled=(k>=b.max); }
-    dom.calNote.textContent='色＝開催ジャンル（⚾青／🥎緑／🎤桃／🎫灰）。👥はマルゴS客数（記録のある日のみ）。';
+    dom.calNote.textContent='色＝開催ジャンル（⚾青／🥎緑／🎤桃／📺橙=スポーツ中継/🎫灰）。🇯🇵=日本戦PV（集客大・深夜営業の要注意日）。👥はマルゴS客数（記録のある日のみ）。';
   }
 
   // ===== render: dome event list =====
-  const FILTERS=[['all','すべて'],['pro','⚾ プロ野球'],['ama','🥎 アマ野球'],['live','🎤 ライブ'],['other','🎫 その他']];
+  const FILTERS=[['all','すべて'],['pro','⚾ プロ野球'],['ama','🥎 アマ野球'],['live','🎤 ライブ'],['sports','📺 スポーツ中継'],['other','🎫 その他']];
   function renderDomeFilter(){
     const present = new Set((events||[]).map(e=>catSlug(e.category)));
     dom.domeFilt.innerHTML = FILTERS.filter(f=>f[0]==='all'||present.has(f[0])).map(f=>'<button class="fbtn'+(domeFilter===f[0]?' active':'')+'" data-g="'+f[0]+'">'+f[1]+'</button>').join('');
@@ -1530,7 +1540,8 @@
     list=list.slice().sort((a,b)=>dOf(a).localeCompare(dOf(b)));
     if(!list.length){ dom.domeList.innerHTML=''; dom.domeMore.style.display='none'; dom.domeNote.textContent=events.length?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
     const rowHtml=e=>{ const d=dOf(e); const past=d<todayJ; const has=guestsByDate.has(d);
-      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+venueTag(e)+escapeHtml(e.title||'')+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>'; };
+      const noteHtml=e.note?'<span style="color:var(--tx-2);font-size:11px;margin-left:6px">'+escapeHtml(e.note)+'</span>':'';
+      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+venueTag(e)+jpTag(e)+escapeHtml(e.title||'')+noteHtml+'</span><span class="ld-cnt '+(has?'':'none')+' mono">'+(has?nf.format(guestsByDate.get(d)):'—')+'</span></div>'; };
     const sepHtml=label=>'<div class="ld-today-sep" id="domeTodayAnchor">'+label+'</div>';
     const todayLbl='今日 '+fmtDay(todayJ)+'（'+wdayJp(todayJ)+'）';
     const futIdx=list.findIndex(e=>dOf(e)>=todayJ);
@@ -1649,8 +1660,8 @@
     if(fut.length){
       html+='<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
         +'<tr style="color:var(--tx-2);text-align:left"><th style="padding:5px 6px">日付</th><th style="padding:5px 6px">予定</th><th style="padding:5px 6px;text-align:right">予測客数</th><th style="padding:5px 6px;text-align:right">予測売上</th></tr>';
-      fut.forEach(d=>{ const g=d.guests,s=d.sales; const ev=(eventsByDate.get(d.date)||[]);
-        const evlab=ev.length?((EVT_ICON[ev[0].category]||'🎫')+' '+(venueLabelOf(ev[0])||'東京ドーム')):'<span class="neg">開催なし</span>';
+      fut.forEach(d=>{ const g=d.guests,s=d.sales; const ev=(eventsByDate.get(d.date)||[]); const jpev=ev.find(isJp);
+        const evlab=ev.length?((jpev?'🇯🇵 ':'')+(EVT_ICON[(jpev||ev[0]).category]||'🎫')+' '+(venueLabelOf(jpev||ev[0])||'東京ドーム')):'<span class="neg">開催なし</span>';
         const band=(g&&g.predicted_low!=null)?'<span style="color:var(--tx-2);font-size:11px"> ('+nf.format(Math.round(g.predicted_low))+'〜'+nf.format(Math.round(g.predicted_high))+')</span>':'';
         html+='<tr style="border-top:1px solid var(--line)"'+(d.date===todayJ?' style="background:var(--base-soft)"':'')+'><td style="padding:6px">'+fmtDay(d.date)+'('+wdayJp(d.date)+')</td><td style="padding:6px">'+evlab+'</td><td class="mono" style="padding:6px;text-align:right">'+(g?nf.format(Math.round(g.predicted))+'人':'—')+band+'</td><td class="mono" style="padding:6px;text-align:right">'+(s?yen(Math.round(s.predicted)):'—')+'</td></tr>';
       });
@@ -1746,7 +1757,7 @@
     let html = '<div class="dp-date">'+fmtFullDay(ymd)+'</div>';
     if(evs.length){
       html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドームシティ イベント</div>'
-        + evs.map(e=>'<div class="dp-ev"><div style="margin-bottom:3px">'+venueBadge(e)+'<span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b></div><div>'+escapeHtml(e.title||'')+'</div></div>').join('')
+        + evs.map(e=>'<div class="dp-ev"><div style="margin-bottom:3px">'+venueBadge(e)+jpTag(e)+'<span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b></div><div>'+escapeHtml(e.title||'')+'</div>'+(e.note?'<div style="color:var(--tx-2);font-size:12px;margin-top:3px">📌 '+escapeHtml(e.note)+'</div>':'')+'</div>').join('')
         + '</div>';
     } else {
       html += '<div class="dp-sec"><div class="dp-muted">東京ドームシティ開催なし</div></div>';

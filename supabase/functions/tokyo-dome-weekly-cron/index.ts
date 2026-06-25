@@ -12,13 +12,15 @@ const DEFAULT_DOW = 6     // 土
 const DEFAULT_HOUR = 10   // 10時
 const DEFAULT_MINUTE = 0
 const WDAY_JP = ["日", "月", "火", "水", "木", "金", "土"]
-const EVT_ICON: Record<string, string> = { "プロ野球": "⚾", "アマ野球": "🥎", "ライブ": "🎤", "その他": "🎫" }
+const EVT_ICON: Record<string, string> = { "プロ野球": "⚾", "アマ野球": "🥎", "ライブ": "🎤", "スポーツ中継": "📺", "その他": "🎫" }
 const MAX_FLEX_ITEMS = 40
 // 配信に載せる会場（表示順）。会場ごとにセクション分けして見やすく並べる。
-const WEEKLY_VENUES: Array<{ venue: string; label: string; icon: string; accent: string }> = [
+// public-viewing（PV観戦＝世界スポーツ放映）は予定がある週だけ表示する（emptyOnlyIfPresent）。
+const WEEKLY_VENUES: Array<{ venue: string; label: string; icon: string; accent: string; onlyIfPresent?: boolean }> = [
   { venue: "tokyo-dome", label: "東京ドーム", icon: "🏟️", accent: "#1F2D3D" },
   { venue: "kanadevia", label: "カナデビアホール", icon: "🎤", accent: "#B0007A" },
   { venue: "korakuen", label: "後楽園ホール", icon: "🥊", accent: "#1F6FB0" },
+  { venue: "public-viewing", label: "PV観戦（世界スポーツ放映）", icon: "📺", accent: "#C0392B", onlyIfPresent: true },
 ]
 const WEEKLY_PER_VENUE_MAX = 14 // 1会場あたりの最大表示件数（超過は「ほかN件」）
 
@@ -118,13 +120,13 @@ Deno.serve(async (req) => {
   return json({ ok: true, now_jst: nowJst, week: `${win.startStr}〜${win.endStr}`, target_room_count: targets.length, sent_room_count: sent.length, skipped, errors }, 200)
 })
 
-type WeeklyEvent = { event_date: string; title: string; category: string; venue: string }
+type WeeklyEvent = { event_date: string; title: string; category: string; venue: string; is_japan: boolean }
 
 async function loadEvents(supabase: DbClient, startStr: string, endStr: string): Promise<WeeklyEvent[]> {
-  // 3会場（東京ドーム/カナデビア/後楽園）すべてを取得し、会場ごとに分けて配信する。
+  // 4会場（東京ドーム/カナデビア/後楽園/PV観戦）を取得し、会場ごとに分けて配信する。
   const { data, error } = await supabase
     .from("tokyo_dome_events")
-    .select("event_date, title, category, venue")
+    .select("event_date, title, category, venue, is_japan")
     .gte("event_date", startStr)
     .lte("event_date", endStr)
     .order("event_date", { ascending: true })
@@ -135,6 +137,7 @@ async function loadEvents(supabase: DbClient, startStr: string, endStr: string):
     title: String((e as { title?: unknown }).title ?? ""),
     category: String((e as { category?: unknown }).category ?? "その他"),
     venue: String((e as { venue?: unknown }).venue ?? "tokyo-dome"),
+    is_japan: (e as { is_japan?: unknown }).is_japan === true,
   })).filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(e.event_date) && e.title)
 }
 
@@ -152,7 +155,7 @@ function buildWeeklyFlex(win: WeekWindow, events: WeeklyEvent[]) {
       type: "box", layout: "horizontal", margin: "sm", spacing: "sm",
       contents: [
         { type: "text", text: dateLabel, size: "sm", weight: "bold", color: "#1F2D3D", flex: 3 },
-        { type: "text", text: `${EVT_ICON[e.category] || "🎫"} ${e.title}`, size: "sm", color: "#333333", flex: 8, wrap: true },
+        { type: "text", text: `${EVT_ICON[e.category] || "🎫"} ${e.is_japan ? "🇯🇵 " : ""}${e.title}`, size: "sm", color: "#333333", flex: 8, wrap: true },
       ],
     }
   }
@@ -163,6 +166,7 @@ function buildWeeklyFlex(win: WeekWindow, events: WeeklyEvent[]) {
     // 会場ごとにセクション分け（東京ドーム→カナデビア→後楽園）。3会場とも見出しを出す。
     for (const v of WEEKLY_VENUES) {
       const evs = events.filter((e) => (e.venue || "tokyo-dome") === v.venue)
+      if (v.onlyIfPresent && !evs.length) continue // PV観戦は予定がある週だけ表示（通常週はノイズにしない）
       body.push({
         type: "box", layout: "vertical", backgroundColor: "#F2F4F7", cornerRadius: "md", paddingAll: "8px", margin: body.length ? "lg" : "none",
         contents: [{ type: "text", text: `${v.icon} ${v.label}（${evs.length}件）`, weight: "bold", size: "sm", color: v.accent }],
@@ -172,7 +176,10 @@ function buildWeeklyFlex(win: WeekWindow, events: WeeklyEvent[]) {
       if (evs.length > WEEKLY_PER_VENUE_MAX) body.push({ type: "text", text: `ほか ${evs.length - WEEKLY_PER_VENUE_MAX} 件`, size: "xs", color: "#8A94A6", margin: "sm" })
     }
   }
-  const countLabel = WEEKLY_VENUES.map((v) => `${v.label.replace("ホール", "")}${events.filter((e) => (e.venue || "tokyo-dome") === v.venue).length}`).join("/")
+  const countLabel = WEEKLY_VENUES
+    .map((v) => ({ v, n: events.filter((e) => (e.venue || "tokyo-dome") === v.venue).length }))
+    .filter((x) => !x.v.onlyIfPresent || x.n > 0)
+    .map((x) => `${x.v.label.replace("ホール", "").replace("（世界スポーツ放映）", "")}${x.n}`).join("/")
   return {
     type: "flex",
     altText: truncate(`今後2週間のドームシティ ${rangeLabel}（${countLabel}）`, 380),
