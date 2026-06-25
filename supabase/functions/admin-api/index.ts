@@ -385,6 +385,35 @@ async function loadVenueEventsForReports(
   })).filter((e) => e.event_date && e.title)
 }
 
+// 基準店(marugoS)の日次「正本」客数/売上/組数。月次日別売上管理表と同じ
+// 「レシート集計(line_receipt__marugoS)＋手入力上書き(line_sales_manual_day)」= foodcourt_base_daily ビュー。
+// 日報(foodcourt_tenant_reports)が投稿されない日（例 6/14 等）も含めて全日返す＝取りこぼし解消。
+async function loadBaseDailyForReports(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+): Promise<Array<{ date: string; guests: number | null; sales: number | null; party: number | null; has_manual: boolean }>> {
+  if (String(storeKey ?? "").trim().toLowerCase() !== "marugos") return []
+  const bdNum = (v: unknown): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null }
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const lo = addDaysIso(todayIso, -400)
+  const hi = addDaysIso(todayIso, 1)
+  const { data, error } = await supabase
+    .from("foodcourt_base_daily")
+    .select("business_date, guests, sales, party, has_manual")
+    .gte("business_date", lo)
+    .lte("business_date", hi)
+    .order("business_date", { ascending: true })
+    .limit(500)
+  if (error || !Array.isArray(data)) return []
+  return data.map((r) => ({
+    date: String((r as { business_date?: unknown }).business_date ?? "").slice(0, 10),
+    guests: bdNum((r as { guests?: unknown }).guests),
+    sales: bdNum((r as { sales?: unknown }).sales),
+    party: bdNum((r as { party?: unknown }).party),
+    has_manual: (r as { has_manual?: unknown }).has_manual === true,
+  })).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
+}
+
 // 自己再学習型の来客予測（forecast_predictions）を返す。基準店（マルゴS）のみ。当日前後の窓で guests/sales。
 async function loadForecastForStore(
   supabase: ReturnType<typeof createClient>,
@@ -852,7 +881,9 @@ Deno.serve(async (req, info) => {
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
-      return json({ store_key: storeKey, reports, events, weather, forecast }, 200)
+      // 客数/売上/組数の正本（管理表＝レシート集計＋手入力）。日報が無い日も含む。画面はこれを優先採用。
+      const baseDaily = await loadBaseDailyForReports(supabase, storeKey)
+      return json({ store_key: storeKey, reports, events, weather, forecast, baseDaily }, 200)
     }
     // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
     if (req.method === "POST" && path === "/foodcourt/ask") {

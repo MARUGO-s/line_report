@@ -708,6 +708,9 @@
   let weather = [];                // 日次天気 [{weather_date,weather_code,temp_max,...}]
   let weatherByDate = new Map();   // 'YYYY-MM-DD' -> weather
   let lastSeries = [];             // 直近描画の基準店日次系列
+  // 基準店(marugoS)日次の正本。管理表＝レシート集計(売上は税抜net・日報と一致)＋手入力客数。
+  // 日報が無い日も含む。客数/売上/客単価はこれを採用し、欠落日も補完する。
+  let baseDailyByDate = new Map(); // 'YYYY-MM-DD' -> {date,guests,sales,sales_gross,party,has_manual}
   let forecast = [];               // 来客予測 [{target_date,metric,predicted,predicted_low,predicted_high,actual,...}]
   let calY = 0, calM = 0;          // カレンダー表示中の年・月（0=未初期化）
   let mode = 'single';             // 'single' | 'range'
@@ -882,17 +885,35 @@
       share: total>0? base.sales/total*100 : null, salesRank, guestRank, unitRank, count:list.length, rows };
   }
   function baseSeriesFromReports(allReports, baseName){
-    const out=[];
+    const out=[]; const seen=new Set();
     (allReports||[]).forEach(r=>{
       const li=(r.tenants||[]).map(t=>({name:String((t&&t.name)||''),sales:(t&&t.sales!=null)?Number(t.sales):null,guests:(t&&t.guests!=null)?Number(t.guests):null}))
         .filter(t=>t.name && t.sales!=null && isFinite(t.sales) && t.sales>=0);
       if(li.length<2) return;
       const b=li.find(t=>norm(t.name)===norm(baseName)); if(!b) return;
       const tot=li.reduce((s,t)=>s+t.sales,0);
+      const w=salesDateOf(r);
       const k=(b.guests&&b.guests>0)?b.sales/b.guests:null;
-      out.push({ when:salesDateOf(r), sales:b.sales, guests:b.guests, kt:k,
+      out.push({ when:w, sales:b.sales, guests:b.guests, kt:k,
         salesRank:1+li.filter(t=>t.sales>b.sales).length, share: tot>0?b.sales/tot*100:null });
+      seen.add(w);
     });
+    // 正本(管理表＝レシート集計＋手入力客数。売上は税抜net＝日報と一致)を採用：
+    //  ① 既存日は客数/売上/客単価を上書き（基本一致。今後の手入力修正もここで反映）
+    //  ② 日報が無い日（例 6/14・月初など）は補完して系列に追加（FC内順位は日報が無いので無し）
+    const bd = (k)=> baseDailyByDate.get(k);
+    out.forEach(p=>{ const b=bd(p.when); if(b){ if(b.guests!=null)p.guests=Number(b.guests); if(b.sales!=null)p.sales=Number(b.sales); p.kt=(p.guests>0&&p.sales!=null)?p.sales/p.guests:null; } });
+    if(out.length && baseDailyByDate.size){
+      const today=ymdJst(new Date().toISOString());
+      let minW=out[0].when; out.forEach(p=>{ if(p.when<minW) minW=p.when; });
+      baseDailyByDate.forEach((b,d)=>{
+        if(seen.has(d) || d<minW || d>today) return;
+        const g=(b.guests!=null)?Number(b.guests):null, s=(b.sales!=null)?Number(b.sales):null;
+        if(g==null && s==null) return;
+        out.push({ when:d, sales:s, guests:g, kt:(g>0&&s!=null)?s/g:null, salesRank:null, share:null });
+        seen.add(d);
+      });
+    }
     out.sort((a,b)=>a.when.localeCompare(b.when));
     return out;
   }
@@ -1420,7 +1441,7 @@
     dom.trendCount.textContent = '蓄積 '+series.length+'日';
     dom.dailyTbody.innerHTML = series.map(p=>{ const ymd=ymdJst(p.when); const hit=(eventsByDate.get(ymd)||[])[0]; const w=weatherByDate.get(ymd);
       const wx = w ? (wxIcon(w.weather_code)+' '+escapeHtml(w.summary||'')) : '<span class="neg">—</span>';
-      return '<tr><td class="l mono" style="font-weight:600">'+fmtDay(p.when)+'</td><td class="mono">'+yen(p.sales)+'</td><td class="mono">'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td class="mono">'+(p.kt!=null?yen(p.kt):'—')+'</td><td class="mono">'+p.salesRank+'位</td><td class="mono neg">'+pct(p.share)+'</td><td class="l" style="padding-left:18px">'+(hit?genreTag(hit.category):'<span class="neg">—</span>')+'</td><td class="l" style="padding-left:14px">'+wx+'</td></tr>';
+      return '<tr><td class="l mono" style="font-weight:600">'+fmtDay(p.when)+'</td><td class="mono">'+yen(p.sales)+'</td><td class="mono">'+(p.guests!=null?nf.format(p.guests):'—')+'</td><td class="mono">'+(p.kt!=null?yen(p.kt):'—')+'</td><td class="mono">'+(p.salesRank!=null?p.salesRank+'位':'—')+'</td><td class="mono neg">'+(p.share!=null?pct(p.share):'—')+'</td><td class="l" style="padding-left:18px">'+(hit?genreTag(hit.category):'<span class="neg">—</span>')+'</td><td class="l" style="padding-left:14px">'+wx+'</td></tr>';
     }).join('');
     dom.trendNote.textContent = '蓄積'+series.length+'日分。毎日の画像送信で増えます。東京ドーム列＝開催イベント。';
     drawTrend(series);
@@ -1696,6 +1717,9 @@
       weather = Array.isArray(body.weather) ? body.weather : [];
       weatherByDate = new Map();
       weather.forEach(w=>{ const d=String((w&&w.weather_date)||'').slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(d)) weatherByDate.set(d,w); });
+      // 客数/売上の正本（管理表＝レシート集計＋手入力客数。売上は税抜net）。日報が無い日も含む。
+      baseDailyByDate = new Map();
+      (Array.isArray(body.baseDaily)?body.baseDaily:[]).forEach(d=>{ const k=String((d&&d.date)||'').slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(k)) baseDailyByDate.set(k, d); });
       forecast = Array.isArray(body.forecast) ? body.forecast : [];
       renderForecast();
       calY = 0; calM = 0; domeFilter='all'; domeLimit=14; calVenue='all';

@@ -11,7 +11,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 // 冪等: forecast_predictions の (target_date, tenant_name, metric) 一意で upsert。verify_jwt=false で pg_cron から起動。
 
 type DbClient = ReturnType<typeof createClient>
-const BASE_STORE = "marugoS"
 const BASE_TENANT = "MARUGO S"
 const MODEL_VERSION = "mult-factor-v1"
 const SHRINK_K = 4        // 係数のサンプルが少ないとき 1（影響なし）へ収縮する強さ
@@ -64,12 +63,12 @@ Deno.serve(async (req) => {
     })
   }
 
-  // 2) 実績（基準店 MARUGO S の日次 客数・売上・客単価）を取得
+  // 2) 実績（基準店 marugoS の日次 客数・売上）を「正本」ビューから取得。
+  //    foodcourt_base_daily＝レシート集計(売上は税抜net・日報と一致)＋手入力客数。日報が無い日も含むため、
+  //    日報未投稿で欠落していた日（例 6/14 等）も学習に入る。客単価は sales/guests で算出。
   const { data: factRows, error: factErr } = await supabase
-    .from("foodcourt_daily_facts")
-    .select("business_date, guests, sales, avg_spend, is_base, source_store_key")
-    .eq("is_base", true)
-    .ilike("source_store_key", BASE_STORE)
+    .from("foodcourt_base_daily")
+    .select("business_date, guests, sales")
     .order("business_date", { ascending: true })
   if (factErr) return json({ ok: false, error: `facts load failed: ${factErr.message}` }, 500)
 
