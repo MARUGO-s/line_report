@@ -19,7 +19,7 @@ const MIN_TRAIN = 4       // バックテストで予測を始める最小学習
 const HORIZON_DAYS = 14   // 何日先まで予測するか
 const PAST_WINDOW = 28    // 何日前までの「予測 vs 実績」を保存するか
 
-type EvType = "japan" | "pro" | "live" | "sports" | "other" | "none"
+type EvType = "soccer_pv" | "japan" | "pro" | "live" | "sports" | "other" | "none"
 type Feat = { date: string; dow: number; evType: EvType; rainy: boolean }
 type Hist = Feat & { guests: number; sales: number; spend: number }
 type Factors = {
@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
   // 1) 特徴量（イベント＋天気＋曜日）を取得（過去〜未来）
   const { data: featRows, error: featErr } = await supabase
     .from("foodcourt_daily_features")
-    .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, is_rainy")
+    .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, has_soccer_pv, is_rainy")
     .gte("business_date", loDate)
     .lte("business_date", hiDate)
     .order("business_date", { ascending: true })
@@ -158,7 +158,7 @@ function fit(h: Hist[]): Factors {
     wday[d] = shrink(meanG > 0 && xs.length ? (avg(xs)! / meanG) : 1, xs.length)
   }
   const evt: Record<string, number> = {}
-  for (const t of ["japan", "pro", "live", "sports", "other", "none"]) {
+  for (const t of ["soccer_pv", "japan", "pro", "live", "sports", "other", "none"]) {
     const xs = h.filter((x) => x.evType === t).map((x) => x.guests)
     evt[t] = shrink(meanG > 0 && xs.length ? (avg(xs)! / meanG) : 1, xs.length)
   }
@@ -181,10 +181,13 @@ function shrink(rawFactor: number, n: number, k = SHRINK_K): number {
   return (n * rawFactor + k * 1) / (n + k)
 }
 function pickEvType(r: Record<string, unknown>): EvType {
-  if (r.has_japan_match === true) return "japan"          // 日本人/日本代表のPV放映＝深夜営業の大集客（最優先）
-  if (r.has_pro_baseball === true) return "pro"
+  // 当店(marugoS)の売上ドライバー順で種別を決める。ドーム野球は当店の最強ドライバー＝PVより優先。
+  // サッカーPVは「全体は大集客だが客はバーガー/ビールへ→当店はおこぼれ寄与」なので独立の控えめ係数として学習させる。
+  if (r.has_pro_baseball === true) return "pro"            // ドーム野球＝当店の最強ドライバー（同日にPVが重なってもこちらを優先）
+  if (r.has_soccer_pv === true) return "soccer_pv"          // サッカーPV＝高集客でも当店はおこぼれ（過大評価を避け別係数で学習）
+  if (r.has_japan_match === true) return "japan"            // サッカー以外の日本戦PV（WBC/世界ボクシング/五輪 等）
   if (r.has_live === true) return "live"
-  if (r.has_sports_broadcast === true) return "sports"    // 日本戦以外の世界スポーツ放映
+  if (r.has_sports_broadcast === true) return "sports"     // 日本以外の世界スポーツ放映
   if (r.has_event === true) return "other"
   return "none"
 }

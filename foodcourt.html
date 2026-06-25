@@ -1756,8 +1756,11 @@
     const isFuture = ymd>todayJ;
     let html = '<div class="dp-date">'+fmtFullDay(ymd)+'</div>';
     if(evs.length){
+      const hasPV = evs.some(e=>e.category==='スポーツ中継');
+      const pvNote = hasPV ? '<div style="margin-top:6px;padding:7px 9px;border-radius:6px;background:oklch(0.65 0.18 40 / .14);border-left:3px solid oklch(0.68 0.18 40);font-size:11.5px;line-height:1.5">📺 <b>PV観戦日</b>：フードコート全体は大集客。ただし<b>サッカーは客がバーガー/ビールに流れがち</b>で、当店(ワイン/カレー)は<b>大集客の中のおこぼれ寄与</b>が中心＝<b>客数ほど売上は伸びにくい</b>。仕込みは過剰にせず、日本戦は深夜営業の可能性に備える。野球(ドーム開催)の方が当店売上は伸びやすい。</div>' : '';
       html += '<div class="dp-sec"><div class="dp-h">🏟️ 東京ドームシティ イベント</div>'
         + evs.map(e=>'<div class="dp-ev"><div style="margin-bottom:3px">'+venueBadge(e)+jpTag(e)+'<span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span><b>'+escapeHtml(e.category||'')+'</b></div><div>'+escapeHtml(e.title||'')+'</div>'+(e.note?'<div style="color:var(--tx-2);font-size:12px;margin-top:3px">📌 '+escapeHtml(e.note)+'</div>':'')+'</div>').join('')
+        + pvNote
         + '</div>';
     } else {
       html += '<div class="dp-sec"><div class="dp-muted">東京ドームシティ開催なし</div></div>';

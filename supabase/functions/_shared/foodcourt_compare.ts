@@ -570,6 +570,7 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
   if (evSa != null && nonSa != null) L.push(`イベント日の平均売上 ${fcYen(evSa)} / 非イベント日 ${fcYen(nonSa)}`)
   const cats = Array.from(byCat.entries()).filter(([, a]) => a.length).sort((a, b) => (fcAvg(b[1]) ?? 0) - (fcAvg(a[1]) ?? 0))
   for (const [c, a] of cats) L.push(`・${c}: ${a.length}日 / 平均客数 ${Math.round(fcAvg(a) ?? 0)}人`)
+  if (byCat.has('スポーツ中継')) L.push('注: スポーツ中継(PV観戦)は全体の集客は大きいが、特にサッカーは客がバーガー/ビールへ流れ当店(ワイン/カレー)はおこぼれ寄与＝客数の割に売上は伸びにくい。野球(ドーム開催)の方が当店売上は伸びやすい。')
   // 会場別（東京ドーム本体／カナデビアホール／後楽園ホール等）の平均客数。会場で客層が異なるため取り込み方を読む。
   const byVenue = new Map<string, number[]>()
   for (const r of daily) {
@@ -591,7 +592,12 @@ function buildEventListText(events: VenueEvent[]): string {
   if (!Array.isArray(events) || !events.length) return ''
   const sorted = events.slice().filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date ?? '').slice(0, 10)))
     .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date))).slice(0, 25)
-  return sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); const vl = fcVenueLabel(e.venue); const jp = e.is_japan ? '🇯🇵日本戦(集客大・深夜営業あり) ' : ''; const nt = e.note ? ` ※${e.note}` : ''; return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}${vl ? `/${vl}` : ''}] ${jp}${e.title}${nt}` }).join('\n')
+  const lines = sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); const vl = fcVenueLabel(e.venue); const jp = e.is_japan ? '🇯🇵日本戦(集客大・深夜営業あり) ' : ''; const nt = e.note ? ` ※${e.note}` : ''; return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}${vl ? `/${vl}` : ''}] ${jp}${e.title}${nt}` })
+  // PV(スポーツ中継)の運用知見をAIが必ず踏まえるよう注記。
+  if (sorted.some((e) => e.category === 'スポーツ中継')) {
+    lines.push('※PV観戦(スポーツ中継)の見方: フードコート全体は大集客になるが、特にサッカーは客がバーガー/ビールに流れ、marugoS(ワイン/カレー)の売上寄与は「大集客の中のおこぼれ」が中心＝客数ほど売上は伸びにくい。仕込みは過剰にせず、日本戦は深夜営業の可能性に備える。野球(ドーム開催)の方が当店売上は伸びやすい。')
+  }
+  return lines.join('\n')
 }
 
 export type VenueEvent = { event_date: string; title: string; category: string; venue?: string; is_japan?: boolean; note?: string }
