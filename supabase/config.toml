@@ -62,3 +62,8 @@ verify_jwt = false
 # forecast_predictions の (target_date,tenant_name,metric) 一意 upsert で冪等。
 [functions.foodcourt-forecast-cron]
 verify_jwt = false
+
+# pv-japan-alert-cron は pg_cron（10分毎）から呼ばれ、新たに確定した「PVの日本戦」を単独で即LINE配信する。
+# verify_jwt は他cronと同様 false。二重送信は pv_japan_alert_logs (room_id+event_date+title) で防止。
+[functions.pv-japan-alert-cron]
+verify_jwt = false
