@@ -14,7 +14,7 @@ const JST_OFFSET_MS = 9 * 60 * 60 * 1000
 const WDAY_JP = ["日", "月", "火", "水", "木", "金", "土"]
 const SPORT_ICON: Record<string, string> = { soccer: "⚽", baseball: "⚾", boxing: "🥊", olympic: "🏅", other: "📺" }
 
-type PvEvent = { event_date: string; title: string; note: string; pv_sport: string }
+type PvEvent = { event_date: string; title: string; note: string; pv_sport: string; source: string }
 
 Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
   // 1) 未来(本日以降)の「日本戦」PVを取得
   const { data: evRows, error: evErr } = await supabase
     .from("tokyo_dome_events")
-    .select("event_date, title, note, pv_sport")
+    .select("event_date, title, note, pv_sport, source")
     .eq("venue", "public-viewing")
     .eq("is_japan", true)
     .gte("event_date", todayJst)
@@ -43,6 +43,7 @@ Deno.serve(async (req) => {
     title: String((e as { title?: unknown }).title ?? ""),
     note: String((e as { note?: unknown }).note ?? ""),
     pv_sport: String((e as { pv_sport?: unknown }).pv_sport ?? "other"),
+    source: String((e as { source?: unknown }).source ?? ""),
   })).filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(e.event_date) && e.title)
 
   // 2) 配信対象ルーム（週次ドーム配信ONと同じ層）
@@ -55,8 +56,14 @@ Deno.serve(async (req) => {
     .map((r) => ({ roomId: String(r.room_id ?? "").trim(), storeKey: String(r.receipt_report_store_partition_key ?? "").trim() }))
     .filter((r) => r.roomId)
 
-  if (!events.length || !rooms.length) {
-    return json({ ok: true, no_target: true, event_count: events.length, room_count: rooms.length }, 200)
+  // フードコート放映の「確証がある」PV(=manual-seed＝W杯/WBC/五輪等の手動シード)だけ単独配信する。
+  // auto-websearch で拾っただけの日本戦(両国開催・配信のみのボクシング等)はフードコート放映の告知が無く、
+  // 「放映が見込まれる」等の断定もしない方針のため、単独プッシュはしない（カレンダー/週次ダイジェストには載る）。
+  const alertEvents = events.filter((e) => isConfirmedFoodcourtPv(e.source))
+  const unconfirmedCount = events.length - alertEvents.length
+
+  if (!alertEvents.length || !rooms.length) {
+    return json({ ok: true, no_target: true, event_count: alertEvents.length, unconfirmed_count: unconfirmedCount, room_count: rooms.length }, 200)
   }
 
   // 3) 既通知ログ
@@ -68,10 +75,10 @@ Deno.serve(async (req) => {
 
   if (dryRun) {
     const pending: Array<{ room_id: string; event_date: string; title: string }> = []
-    for (const ev of events) for (const r of rooms) {
+    for (const ev of alertEvents) for (const r of rooms) {
       if (!alerted.has(`${r.roomId}__${ev.event_date}__${ev.title}`)) pending.push({ room_id: r.roomId, event_date: ev.event_date, title: ev.title })
     }
-    return json({ ok: true, mode: "dry_run", today_jst: todayJst, event_count: events.length, room_count: rooms.length, pending }, 200)
+    return json({ ok: true, mode: "dry_run", today_jst: todayJst, event_count: alertEvents.length, unconfirmed_count: unconfirmedCount, room_count: rooms.length, pending }, 200)
   }
   if (!lineAccessToken) return json({ ok: true, skipped: true, reason: "missing_line_channel_access_token" }, 200)
 
@@ -80,7 +87,7 @@ Deno.serve(async (req) => {
   const sent: string[] = []
   const skipped: string[] = []
   const errors: string[] = []
-  for (const ev of events) {
+  for (const ev of alertEvents) {
     for (const r of rooms) {
       const key = `${r.roomId}__${ev.event_date}__${ev.title}`
       if (alerted.has(key)) continue
@@ -98,10 +105,18 @@ Deno.serve(async (req) => {
       sent.push(key)
     }
   }
-  return json({ ok: true, today_jst: todayJst, sent_count: sent.length, skipped_count: skipped.length, errors }, 200)
+  return json({ ok: true, today_jst: todayJst, sent_count: sent.length, skipped_count: skipped.length, unconfirmed_count: unconfirmedCount, errors }, 200)
 })
 
-// 単独配信メッセージ（テキスト）。日本戦＝集客大・深夜帯は深夜営業の要注意日であることを伝える。
+// フードコートでのPV放映が「確証」と言える情報源か。W杯/WBC/五輪等の手動シード(manual-seed)のみ確定扱い。
+// 自動Web検索(auto-websearch:boxing 等)は「日本戦を拾った」だけで、フードコート放映の告知ソースが無い。
+// 確証が無い日本戦は「放映が見込まれる」等の記載もせず、単独配信自体を行わない（ゲートで除外）。
+function isConfirmedFoodcourtPv(source: string): boolean {
+  return /^manual-seed/i.test(String(source ?? "").trim())
+}
+
+// 単独配信メッセージ（テキスト）。確証あり(manual-seed)のPVのみここに到達する＝放映を断定してよい。
+// 日本戦＝集客大・深夜帯は深夜営業の要注意日であることを伝える。
 function buildAlertMessage(ev: PvEvent): Record<string, unknown> {
   const dow = dowOf(ev.event_date)
   const dateLabel = `${Number(ev.event_date.slice(5, 7))}/${Number(ev.event_date.slice(8, 10))}(${dow})`
