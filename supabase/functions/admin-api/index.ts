@@ -40,6 +40,7 @@ import {
 import {
   fetchAnalyticsMonthly as fetchStoreAnalyticsMonthly,
   fetchManualMonthsForYearState as fetchStoreManualMonthsForYearState,
+  fetchReceiptDailyAggForRange,
   fetchReceiptSalesState as fetchStoreReceiptSalesState,
   fetchReceiptStoreOptions as fetchStorePartitionReceiptOptions,
   fetchReceiptWebhookStatus,
@@ -385,33 +386,30 @@ async function loadVenueEventsForReports(
   })).filter((e) => e.event_date && e.title)
 }
 
-// 基準店(marugoS)の日次「正本」客数/売上/組数。月次日別売上管理表と同じ
-// 「レシート集計(line_receipt__marugoS)＋手入力上書き(line_sales_manual_day)」= foodcourt_base_daily ビュー。
+// 基準店(marugoS)の日次「正本」客数/売上/組数。
+// 取得元は売上分析(/receipts/sales = fetchReceiptSalesState)と同一の日次集計
+// 「受領レシート集計(line_receipt__marugoS)＋日次手入力上書き(line_sales_manual_day)」で一本化（唯一の正本）。
+// 以前は foodcourt_base_daily ビューを読んでいたが、ビューは手入力の売上を反映せず・客数サニタイズも無いため
+// 売上分析とズレる余地があった。共有関数 fetchReceiptDailyAggForRange に載せ替えて差異を解消。
 // 日報(foodcourt_tenant_reports)が投稿されない日（例 6/14 等）も含めて全日返す＝取りこぼし解消。
 async function loadBaseDailyForReports(
   supabase: ReturnType<typeof createClient>,
   storeKey: string,
 ): Promise<Array<{ date: string; guests: number | null; sales: number | null; party: number | null; has_manual: boolean }>> {
   if (String(storeKey ?? "").trim().toLowerCase() !== "marugos") return []
-  const bdNum = (v: unknown): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null }
   const todayIso = new Date().toISOString().slice(0, 10)
   const lo = addDaysIso(todayIso, -400)
   const hi = addDaysIso(todayIso, 1)
-  const { data, error } = await supabase
-    .from("foodcourt_base_daily")
-    .select("business_date, guests, sales, party, has_manual")
-    .gte("business_date", lo)
-    .lte("business_date", hi)
-    .order("business_date", { ascending: true })
-    .limit(500)
-  if (error || !Array.isArray(data)) return []
-  return data.map((r) => ({
-    date: String((r as { business_date?: unknown }).business_date ?? "").slice(0, 10),
-    guests: bdNum((r as { guests?: unknown }).guests),
-    sales: bdNum((r as { sales?: unknown }).sales),
-    party: bdNum((r as { party?: unknown }).party),
-    has_manual: (r as { has_manual?: unknown }).has_manual === true,
-  })).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
+  const rows = await fetchReceiptDailyAggForRange(supabase, storeKey, lo, hi)
+  // 売上(sales)は税抜net＝日報と一致させる正本。手入力上書きは売上分析と同じく総売上(gross)側にのみ効くため、
+  // net はレシート集計のまま（受領レシートが無い手入力のみの日は net=null＝当店売上未確定として扱う）。
+  return rows.map((r) => ({
+    date: r.date,
+    guests: (r.manual_guest || r.receipt_count > 0) ? r.guest_count : null,
+    sales: r.receipt_count > 0 ? r.net_sales_yen : null,
+    party: (r.manual_party || r.receipt_count > 0) ? r.party_count : null,
+    has_manual: r.manual_guest || r.manual_party || r.manual_gross,
+  }))
 }
 
 // 自己再学習型の来客予測（forecast_predictions）を返す。基準店（マルゴS）のみ。当日前後の窓で guests/sales。

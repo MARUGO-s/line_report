@@ -819,6 +819,110 @@ export async function fetchReceiptSalesState(
   }
 }
 
+export type ReceiptDailyAggRow = {
+  date: string
+  receipt_count: number
+  gross_sales_yen: number
+  net_sales_yen: number
+  tax_amount_yen: number
+  party_count: number
+  guest_count: number
+  manual_gross: boolean
+  manual_party: boolean
+  manual_guest: boolean
+}
+
+function addDaysIsoUtc(iso: string, days: number): string {
+  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * 店舗の日次集計（受領レシート集計＋日次手入力上書き）を [fromInclusive, toInclusive] で返す。
+ * 売上分析(/receipts/sales = fetchReceiptSalesState)の日次系列と同一ロジックを使う唯一の正本：
+ *  - 受領レシートは receipt_date 基準で集計し、count は sanitizeReceiptCountFromDb、売上は toNonNegativeInteger。
+ *  - 日次手入力(line_sales_manual_day)は値のある列（売上/組数/客数）をその日のレシート集計より優先。
+ * 受領レシートも手入力も無い日（休業等）は行を出さない＝呼び出し側で「データ無し」と扱える。
+ */
+export async function fetchReceiptDailyAggForRange(
+  supabase: SupabaseClient,
+  storeKey: string,
+  fromInclusive: string,
+  toInclusive: string,
+): Promise<ReceiptDailyAggRow[]> {
+  const from = String(fromInclusive).slice(0, 10)
+  const toIncl = String(toInclusive).slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(toIncl)) return []
+
+  const registry = await loadStoreRegistry(supabase)
+  const registryKeys = registry.map((entry) => entry.store_partition_key)
+  const resolvedStoreKey = storeKey ? resolveStorePartitionKey(storeKey, registryKeys) : ''
+  if (!resolvedStoreKey) return []
+
+  // receipt_date 基準で集計（売上分析と同じ。created_at で絞ると後追い取込が窓から外れる）。
+  const rows = await queryStoreReceiptRows(supabase, {
+    storeKey: resolvedStoreKey,
+    receiptFrom: from,
+    receiptTo: addDaysIsoUtc(toIncl, 1), // receiptTo は排他なので終端の翌日まで
+    limit: 50000,
+  })
+
+  type Agg = { receipt_count: number; gross: number; net: number; tax: number; party: number; guest: number }
+  const dailyMap = new Map<string, Agg>()
+  for (const row of rows) {
+    const d = toSafeString(row.receipt_date).slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d < from || d > toIncl) continue
+    const gross = toNonNegativeInteger(row.gross_sales_yen)
+    const net = toNonNegativeInteger(row.net_sales_yen)
+    const tax = toNonNegativeInteger(row.tax_amount_yen)
+    const party = sanitizeReceiptCountFromDb(row.party_count)
+    const guest = sanitizeReceiptCountFromDb(row.guest_count, 99_999)
+    const cur = dailyMap.get(d)
+    if (!cur) {
+      dailyMap.set(d, { receipt_count: 1, gross, net, tax, party, guest })
+    } else {
+      cur.receipt_count += 1
+      cur.gross += gross
+      cur.net += net
+      cur.tax += tax
+      cur.party += party
+      cur.guest += guest
+    }
+  }
+
+  // 日次手入力（売上分析の日次表からの直接編集）。値のある列はその日のレシート集計より優先（売上分析と同一規則）。
+  const manualMap = await fetchManualDaySalesMapForStore(
+    supabase,
+    normalizeBudgetStoreKey(storeKey),
+    from,
+    addDaysIsoUtc(toIncl, 1),
+  )
+
+  const allDates = new Set<string>([...dailyMap.keys(), ...manualMap.keys()])
+  const out: ReceiptDailyAggRow[] = []
+  for (const d of allDates) {
+    if (d < from || d > toIncl) continue
+    const agg = dailyMap.get(d) ?? null
+    const md = manualMap.get(d) ?? null
+    const receiptCount = agg?.receipt_count ?? 0
+    out.push({
+      date: d,
+      receipt_count: receiptCount,
+      gross_sales_yen: md?.gross_sales_yen != null ? md.gross_sales_yen : (agg?.gross ?? 0),
+      net_sales_yen: agg?.net ?? 0,
+      tax_amount_yen: agg?.tax ?? 0,
+      party_count: md?.party_count != null ? md.party_count : (agg?.party ?? 0),
+      guest_count: md?.guest_count != null ? md.guest_count : (agg?.guest ?? 0),
+      manual_gross: md?.gross_sales_yen != null,
+      manual_party: md?.party_count != null,
+      manual_guest: md?.guest_count != null,
+    })
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date))
+  return out
+}
+
 export async function fetchAnalyticsMonthly(
   supabase: SupabaseClient,
   url: URL,
