@@ -331,6 +331,21 @@
     .cell.clk:hover{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px;}
     .ld-row{cursor:pointer;}
     .ld-row:hover{background:var(--surface2);}
+    /* 日付グループ表示（日ヘッダー＋その日のイベント） */
+    .ld-day{display:grid;grid-template-columns:62px 34px 1fr auto;gap:12px;align-items:center;padding:10px 4px 7px;border-top:2px solid var(--line);margin-top:7px;cursor:pointer;}
+    .ld-day:first-child{border-top:none;margin-top:0;}
+    .ld-day.past{opacity:.5;}
+    .ld-day.today{box-shadow:inset 3px 0 0 var(--accent);background:var(--surface2);border-radius:8px;}
+    .ld-day .ld-d{color:var(--tx-1);font-weight:800;}
+    .ld-day .ld-w{color:var(--tx-3);text-align:center;font-weight:700;}
+    .ld-day .ld-nev{justify-self:start;font-size:11px;font-weight:700;color:var(--tx-2);background:var(--surface2);border:1px solid var(--line-soft);border-radius:999px;padding:2px 9px;}
+    .ld-day.today .ld-nev{background:var(--surface);}
+    .ld-day .ld-cntb{font-size:12.5px;font-weight:700;color:var(--tx-1);white-space:nowrap;}
+    .ld-day .ld-cntb.none{color:var(--tx-3);font-weight:400;}
+    .ld-ev-row{display:flex;align-items:center;gap:0;padding:7px 6px 7px 74px;border-bottom:1px solid var(--line-soft);font-size:13px;cursor:pointer;min-width:0;}
+    .ld-ev-row.past{opacity:.5;}
+    .ld-ev-row:hover{background:var(--surface2);}
+    .ld-ev-row .ld-ev-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .dp-modal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:18px;}
     .dp-modal.show{display:flex;}
     .dp-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.5);}
@@ -1560,27 +1575,32 @@
     // 上にスクロール＝過去のイベント、下＝今後の予定。
     list=list.slice().sort((a,b)=>dOf(a).localeCompare(dOf(b)));
     if(!list.length){ dom.domeList.innerHTML=''; dom.domeMore.style.display='none'; dom.domeNote.textContent=events.length?'該当ジャンルのイベントはありません。':'東京ドームのイベントデータがありません。'; return; }
-    // 客数は「その日のマルゴS全体の値」。同じ日に複数イベントがあると各行に同じ数が並び“各イベントの客数”に
-    // 誤読されるため、同一日の先頭行にだけ表示し、2件目以降は空欄にする（＝1日1回＝日合計だと分かる）。
-    const rowHtml=(e,showCnt)=>{ const d=dOf(e); const past=d<todayJ; const has=guestsByDate.has(d);
-      const noteHtml=e.note?'<span style="color:var(--tx-2);font-size:11px;margin-left:6px">'+escapeHtml(e.note)+'</span>':'';
-      const cntTxt = !has ? '—' : (showCnt ? nf.format(guestsByDate.get(d)) : '');
-      const cntCls = (has&&showCnt) ? '' : 'none';
-      const cntTtl = (has&&showCnt) ? ' title="その日のマルゴS全体の客数（イベント単位ではありません）"' : '';
-      return '<div class="ld-row'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span><span class="ld-ev"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+venueTag(e)+jpTag(e)+escapeHtml(e.title||'')+noteHtml+'</span><span class="ld-cnt '+cntCls+' mono"'+cntTtl+'>'+cntTxt+'</span></div>'; };
-    // 並び順(日付昇順)で各日の先頭行だけ客数を出すための判定。
-    const showCntAt=i=>i===0 || dOf(list[i-1])!==dOf(list[i]);
+    // 「同じ日に何件あるか」を見やすくするため、日付ごとにグループ化して表示する。
+    // 日ヘッダー（日付＋曜日＋件数バッジ＋👥マルゴS客数）の下に、その日のイベントをぶら下げる。
+    // 客数は「その日のマルゴS全体の値」＝日ヘッダーに1回だけ出す（各イベントの客数ではない）。
+    const groups=[]; const gIdx=new Map();
+    list.forEach(e=>{ const d=dOf(e); if(!gIdx.has(d)){ gIdx.set(d, groups.length); groups.push({ d, evs:[] }); } groups[gIdx.get(d)].evs.push(e); });
+    const evRowHtml=(e,past)=>{ const noteHtml=e.note?'<span style="color:var(--tx-2);font-size:11px;margin-left:6px">'+escapeHtml(e.note)+'</span>':'';
+      return '<div class="ld-ev-row'+(past?' past':'')+'" data-d="'+dOf(e)+'"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+venueTag(e)+jpTag(e)+'<span class="ld-ev-t">'+escapeHtml(e.title||'')+'</span>'+noteHtml+'</div>'; };
+    const dayHtml=(g)=>{ const d=g.d; const past=d<todayJ; const has=guestsByDate.has(d); const n=g.evs.length;
+      const cnt = has
+        ? '<span class="ld-cntb" title="その日のマルゴS全体の客数（イベント単位ではありません）">👥 '+nf.format(guestsByDate.get(d))+'</span>'
+        : '<span class="ld-cntb none">—</span>';
+      const nev='<span class="ld-nev">'+n+'件</span>';
+      return '<div class="ld-day'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span>'+nev+cnt+'</div>'
+        + g.evs.map(e=>evRowHtml(e,past)).join('');
+    };
     const sepHtml=label=>'<div class="ld-today-sep" id="domeTodayAnchor">'+label+'</div>';
     const todayLbl='今日 '+fmtDay(todayJ)+'（'+wdayJp(todayJ)+'）';
-    const futIdx=list.findIndex(e=>dOf(e)>=todayJ);
+    const futIdx=groups.findIndex(g=>g.d>=todayJ);
     let html='';
-    if(futIdx<0){ html=list.map((e,i)=>rowHtml(e,showCntAt(i))).join('')+sepHtml(todayLbl+'　▲ 上に過去のイベント（今後の予定は未取得）'); }
-    else { list.forEach((e,i)=>{ if(i===futIdx) html+=sepHtml(todayLbl+'　▲ 過去 ／ ▼ これから'); html+=rowHtml(e,showCntAt(i)); }); }
+    if(futIdx<0){ html=groups.map(dayHtml).join('')+sepHtml(todayLbl+'　▲ 上に過去のイベント（今後の予定は未取得）'); }
+    else { groups.forEach((g,i)=>{ if(i===futIdx) html+=sepHtml(todayLbl+'　▲ 過去 ／ ▼ これから'); html+=dayHtml(g); }); }
     dom.domeList.innerHTML=html;
     scrollDomeToToday();
     dom.domeMore.style.display='none';
     const future=list.filter(e=>dOf(e)>=todayJ).length, pastN=list.length-future;
-    dom.domeNote.textContent='全'+list.length+'件（過去 '+pastN+'件・今後 '+future+'件）。リストを上にスクロールすると過去のイベント、下で今後の予定。客数はその日のマルゴS全体（同じ日は先頭行に1回だけ表示。各イベント単位の客数ではありません）。記録のある日のみ。';
+    dom.domeNote.textContent='全'+list.length+'件／'+groups.length+'日分（過去 '+pastN+'件・今後 '+future+'件）。日付ごとにまとめ、各日の先頭に「件数」と👥マルゴS客数（その日全体・イベント単位ではない）を表示。上にスクロールで過去、下で今後の予定。客数は記録のある日のみ。';
   }
 
   // ===== master render =====
@@ -1833,7 +1853,7 @@
   }
   function closeDayPopup(){ if(!dom.dpModal) return; dom.dpModal.classList.remove('show'); dom.dpModal.setAttribute('aria-hidden','true'); }
   dom.calGrid.addEventListener('click', e=>{ const c=e.target.closest('.cell'); if(c && c.dataset.date) openDayPopup(c.dataset.date); });
-  dom.domeList.addEventListener('click', e=>{ const r=e.target.closest('.ld-row'); if(r && r.dataset.d) openDayPopup(r.dataset.d); });
+  dom.domeList.addEventListener('click', e=>{ const r=e.target.closest('.ld-day,.ld-ev-row,.ld-row'); if(r && r.dataset.d) openDayPopup(r.dataset.d); });
   dom.dpClose.addEventListener('click', closeDayPopup);
   dom.dpBackdrop.addEventListener('click', closeDayPopup);
   document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDayPopup(); });
