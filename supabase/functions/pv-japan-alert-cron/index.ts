@@ -76,17 +76,22 @@ Deno.serve(async (req) => {
     return json({ ok: true, no_target: true, event_count: alertEvents.length, unconfirmed_count: unconfirmedCount, room_count: rooms.length }, 200)
   }
 
-  // 3) 既通知ログ
+  // 3) 既通知ログ。キーに pv_confirmed を含める＝「要確認(false)」と「PV決定(true)」を別フェーズとして扱い、
+  //    未確証で事前通知済みの試合が後で確証化したら「PV決定」を1回だけ昇格通知できる。
+  const alertKey = (roomId: string, date: string, title: string, confirmed: boolean) =>
+    `${roomId}__${date}__${title}__${confirmed ? "1" : "0"}`
   const { data: logRows, error: logErr } = await supabase
-    .from("pv_japan_alert_logs").select("room_id, event_date, title")
+    .from("pv_japan_alert_logs").select("room_id, event_date, title, pv_confirmed")
   if (logErr) return json({ ok: false, error: `logs load failed: ${logErr.message}` }, 500)
   const alerted = new Set((Array.isArray(logRows) ? logRows : [])
-    .map((l) => `${l.room_id}__${String(l.event_date).slice(0, 10)}__${l.title}`))
+    .map((l) => alertKey(String(l.room_id), String(l.event_date).slice(0, 10), String(l.title), l.pv_confirmed === true)))
 
   if (dryRun) {
-    const pending: Array<{ room_id: string; event_date: string; title: string }> = []
+    const pending: Array<{ room_id: string; event_date: string; title: string; phase: string }> = []
     for (const ev of alertEvents) for (const r of rooms) {
-      if (!alerted.has(`${r.roomId}__${ev.event_date}__${ev.title}`)) pending.push({ room_id: r.roomId, event_date: ev.event_date, title: ev.title })
+      if (!alerted.has(alertKey(r.roomId, ev.event_date, ev.title, ev.pv_confirmed))) {
+        pending.push({ room_id: r.roomId, event_date: ev.event_date, title: ev.title, phase: ev.pv_confirmed ? "決定" : "要確認" })
+      }
     }
     return json({ ok: true, mode: "dry_run", today_jst: todayJst, event_count: alertEvents.length, unconfirmed_count: unconfirmedCount, room_count: rooms.length, pending }, 200)
   }
@@ -99,17 +104,17 @@ Deno.serve(async (req) => {
   const errors: string[] = []
   for (const ev of alertEvents) {
     for (const r of rooms) {
-      const key = `${r.roomId}__${ev.event_date}__${ev.title}`
+      const key = alertKey(r.roomId, ev.event_date, ev.title, ev.pv_confirmed)
       if (alerted.has(key)) continue
       const { error: insErr } = await supabase.from("pv_japan_alert_logs")
-        .insert({ room_id: r.roomId, event_date: ev.event_date, title: ev.title, store_partition_key: r.storeKey || null, sent_at: now })
+        .insert({ room_id: r.roomId, event_date: ev.event_date, title: ev.title, pv_confirmed: ev.pv_confirmed, store_partition_key: r.storeKey || null, sent_at: now })
       if (insErr) {
         if (String(insErr.code ?? "") === "23505") { skipped.push(key); continue }
         errors.push(`${key}: reserve failed (${insErr.message})`); continue
       }
       const r2 = await sendLinePush(r.roomId, [buildAlertMessage(ev)], resolveStoreLineToken(r.storeKey || "marugos", lineAccessToken))
       if (!r2.ok) {
-        try { await supabase.from("pv_japan_alert_logs").delete().eq("room_id", r.roomId).eq("event_date", ev.event_date).eq("title", ev.title) } catch (_e) { /* noop */ }
+        try { await supabase.from("pv_japan_alert_logs").delete().eq("room_id", r.roomId).eq("event_date", ev.event_date).eq("title", ev.title).eq("pv_confirmed", ev.pv_confirmed) } catch (_e) { /* noop */ }
         errors.push(`${key}: ${r2.error}`); continue
       }
       sent.push(key)
