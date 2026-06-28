@@ -1716,8 +1716,12 @@
     if(fut.length){
       html+='<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
         +'<tr style="color:var(--tx-2);text-align:left"><th style="padding:5px 6px">日付</th><th style="padding:5px 6px">予定</th><th style="padding:5px 6px;text-align:right">予測客数</th><th style="padding:5px 6px;text-align:right">予測売上</th></tr>';
-      fut.forEach(d=>{ const g=d.guests,s=d.sales; const ev=(eventsByDate.get(d.date)||[]); const jpev=ev.find(isJp);
-        const evlab=ev.length?((jpev?'🇯🇵 ':'')+(EVT_ICON[(jpev||ev[0]).category]||'🎫')+' '+(venueLabelOf(jpev||ev[0])||'東京ドーム')):'<span class="neg">開催なし</span>';
+      fut.forEach(d=>{ const g=d.guests,s=d.sales; const ev=(eventsByDate.get(d.date)||[]);
+        // 代表イベントは「集客の主因」を選ぶ：日本戦PV ＞ 東京ドーム本体（最大集客）＞ その他。
+        // 先頭固定だとドーム公演がある日でもカナデビア等の小ホールが表示され、予測客数と理由が食い違って見える。
+        const jpev=ev.find(isJp); const domeev=ev.find(e=>venueOf(e)==='tokyo-dome'); const rep=jpev||domeev||ev[0];
+        const more=ev.length>1?'<span style="color:var(--tx-3);font-size:11px"> 他'+(ev.length-1)+'件</span>':'';
+        const evlab=ev.length?((jpev?'🇯🇵 ':'')+(EVT_ICON[rep.category]||'🎫')+' '+(venueLabelOf(rep)||'東京ドーム')+more):'<span class="neg">開催なし</span>';
         const band=(g&&g.predicted_low!=null)?'<span style="color:var(--tx-2);font-size:11px"> ('+nf.format(Math.round(g.predicted_low))+'〜'+nf.format(Math.round(g.predicted_high))+')</span>':'';
         html+='<tr style="border-top:1px solid var(--line)"'+(d.date===todayJ?' style="background:var(--base-soft)"':'')+'><td style="padding:6px">'+fmtDay(d.date)+'('+wdayJp(d.date)+')</td><td style="padding:6px">'+evlab+'</td><td class="mono" style="padding:6px;text-align:right">'+(g?nf.format(Math.round(g.predicted))+'人':'—')+band+'</td><td class="mono" style="padding:6px;text-align:right">'+(s?yen(Math.round(s.predicted)):'—')+'</td></tr>';
       });
