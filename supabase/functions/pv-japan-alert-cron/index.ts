@@ -135,33 +135,56 @@ function isOutsideBusinessHours(ev: PvEvent): boolean {
   return /深夜|早朝/.test(String(ev.note ?? ""))
 }
 
-// 単独配信メッセージ（テキスト）。
-//  ・pv_confirmed=true（FOOD STADIUM 公式告知済み）→ 放映を断定。
-//  ・未確証だが営業時間外 → 断定せず「放映は要確認（直前発表の可能性）」＋深夜営業の判断材料として通知。
+// 単独配信メッセージ（LINE Flex＝リッチ表示）。
+//  ・pv_confirmed=true（FOOD STADIUM 公式告知済み）→ 放映を断定。赤ヘッダー。
+//  ・未確証だが営業時間外 → 断定せず「放映は要確認（直前発表の可能性）」＋深夜営業の判断材料。アンバーヘッダー。
+// 非対応端末/通知プレビュー用に altText（プレーン要約）も付ける。
 function buildAlertMessage(ev: PvEvent): Record<string, unknown> {
   const dow = dowOf(ev.event_date)
   const dateLabel = `${Number(ev.event_date.slice(5, 7))}/${Number(ev.event_date.slice(8, 10))}(${dow})`
   const icon = SPORT_ICON[ev.pv_sport] || "📺"
-  const lines = ev.pv_confirmed
-    ? [
-      "🇯🇵 PV日本戦が決定！",
-      `📅 ${dateLabel}`,
-      `${icon} ${ev.title}`,
-      "📺 東京ドーム フードコートのパブリックビューイング",
-    ]
-    : [
-      "🌙 深夜帯の日本戦に注意（放映は要確認）",
-      `📅 ${dateLabel}`,
-      `${icon} ${ev.title}`,
-      "📺 FOOD STADIUM でのPV放映は未確定（直前に発表される可能性）。日程・対戦相手も要確認。",
-    ]
-  if (ev.note) lines.push(`📝 ${ev.note}`)
-  lines.push(
-    ev.pv_confirmed
-      ? "⚠️ 集客大の見込み。深夜帯の放映は深夜営業の要注意日です。"
-      : "⚠️ 営業時間外の日本戦です。放映が出れば集客大。深夜営業を行うか早めにご検討ください。",
-  )
-  return { type: "text", text: lines.join("\n").slice(0, 4900) }
+  const confirmed = ev.pv_confirmed
+  const accent = confirmed ? "#C0392B" : "#B9770E" // 決定=赤 / 要確認=アンバー
+  const warnBg = confirmed ? "#FBEAEA" : "#FBF3E2"
+  const headTitle = confirmed ? "🇯🇵 PV日本戦が決定！" : "🌙 深夜帯の日本戦に注意"
+  const headSub = confirmed ? "東京ドーム フードコート パブリックビューイング" : "放映は要確認（直前発表の可能性）"
+  const venueLine = confirmed
+    ? "📺 東京ドーム フードコートのパブリックビューイング"
+    : "📺 FOOD STADIUM でのPV放映は未確定（直前に発表の可能性）。日程・対戦相手も要確認。"
+  const warn = confirmed
+    ? "⚠️ 集客大の見込み。深夜帯の放映は深夜営業の要注意日です。"
+    : "⚠️ 営業時間外の日本戦です。放映が出れば集客大。深夜営業を行うか早めにご検討ください。"
+
+  const body: Array<Record<string, unknown>> = [
+    { type: "text", text: `📅 ${dateLabel}`, weight: "bold", size: "lg", color: "#1F2D3D" },
+    { type: "text", text: `${icon} ${ev.title}`, weight: "bold", size: "md", color: "#1F2D3D", wrap: true, margin: "md" },
+    { type: "text", text: venueLine, size: "sm", color: "#555555", wrap: true, margin: "sm" },
+  ]
+  if (ev.note) body.push({ type: "text", text: `📝 ${ev.note}`, size: "sm", color: "#777777", wrap: true, margin: "sm" })
+  body.push({ type: "separator", margin: "lg" })
+  body.push({
+    type: "box", layout: "vertical", backgroundColor: warnBg, cornerRadius: "md", paddingAll: "10px", margin: "lg",
+    contents: [{ type: "text", text: warn, size: "sm", weight: "bold", color: accent, wrap: true }],
+  })
+
+  const altText = [headTitle, dateLabel, `${icon} ${ev.title}`, venueLine, ev.note ? `📝 ${ev.note}` : "", warn]
+    .filter(Boolean).join("\n").slice(0, 390)
+
+  return {
+    type: "flex",
+    altText,
+    contents: {
+      type: "bubble", size: "mega",
+      header: {
+        type: "box", layout: "vertical", backgroundColor: accent, paddingAll: "16px", spacing: "xs",
+        contents: [
+          { type: "text", text: headTitle, color: "#FFFFFF", size: "lg", weight: "bold", wrap: true },
+          { type: "text", text: headSub, color: "#FFFFFFCC", size: "sm", margin: "sm", wrap: true },
+        ],
+      },
+      body: { type: "box", layout: "vertical", paddingAll: "16px", spacing: "none", contents: body },
+    },
+  }
 }
 
 // --- LINE token / send（tokyo-dome-weekly-cron と同型） ---
