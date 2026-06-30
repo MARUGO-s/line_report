@@ -4,10 +4,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 // PV(パブリックビューイング)の「日本戦」を“単独で”即LINE配信する cron。
 //  - 毎10分起動。tokyo_dome_events の venue='public-viewing' / is_japan=true / 未来日(JST) のうち、
 //    まだ通知していない(pv_japan_alert_logs に無い)ものを、dome_weekly_enabled のルームへ単独通知する。
-//  - 配信対象は ① pv_confirmed=true（FOOD STADIUM 公式PV告知済み＝GS戦等）→「PV決定」と断定、
-//    ② 営業時間外(深夜/早朝)の日本戦（決勝T等）→ 公式告知が直前でも深夜営業判断に間に合うよう
-//    「放映は要確認」の事前通知。未確証かつ営業時間内（ボクシング17:00 等）は配信しない。
-//  - 週次ダイジェスト(tokyo-dome-weekly-cron)とは別経路。二重送信は (room_id, event_date, title) 一意で防止。
+//  - 配信対象は pv_confirmed=true（FOOD STADIUM 公式PV告知済み）のみ。「PV決定」と断定して配信する。
+//    未確証（営業時間外かどうかに関わらず）は配信しない（ユーザー指示。誤判定で未決定試合を送るのを防止）。
+//    未確証の試合はカレンダー/週次ダイジェスト(tokyo-dome-weekly-cron)には引き続き掲載される。
+//  - 週次ダイジェストとは別経路。二重送信は (room_id, event_date, title) 一意で防止。
 //  - 送信失敗(429月間上限 等)はログをロールバックし、次回以降に再試行（枠回復後に自動送信）。
 // 冪等。verify_jwt=false で pg_cron から起動。
 
@@ -17,11 +17,6 @@ const WDAY_JP = ["日", "月", "火", "水", "木", "金", "土"]
 const SPORT_ICON: Record<string, string> = { soccer: "⚽", baseball: "⚾", boxing: "🥊", olympic: "🏅", other: "📺" }
 
 type PvEvent = { event_date: string; title: string; note: string; pv_sport: string; source: string; pv_confirmed: boolean }
-
-// FOOD STADIUM TOKYO の営業時間（competitor profile: 11:00〜23:00）。
-// この外＝深夜/早朝の放映は「営業時間外」＝深夜営業/早朝営業の判断が要る日。
-const OPEN_HOUR = 11
-const CLOSE_HOUR = 23
 
 Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
@@ -64,12 +59,9 @@ Deno.serve(async (req) => {
     .map((r) => ({ roomId: String(r.room_id ?? "").trim(), storeKey: String(r.receipt_report_store_partition_key ?? "").trim() }))
     .filter((r) => r.roomId)
 
-  // 単独配信の対象は次のいずれか:
-  //  ① pv_confirmed=true（FOOD STADIUM 公式PV告知済み＝グループ戦等）→「PV決定」と断定配信。
-  //  ② 営業時間外(深夜/早朝)の日本戦（決勝T等）→ 公式告知が直前でも、深夜営業の判断に間に合うよう
-  //     「要確認の事前通知」として配信（ユーザー指示。決勝T進出が決まり放映発表が直前になりうるため）。
-  // ①でも②でもない＝未確証かつ営業時間内（両国開催・配信のみのボクシング17:00 等）は配信しない（カレンダー/週次には載る）。
-  const alertEvents = events.filter((e) => e.pv_confirmed || isOutsideBusinessHours(e))
+  // 単独配信の対象は pv_confirmed=true（FOOD STADIUM 公式PV告知済み）のみ。
+  // 未確証の試合は配信しない（カレンダー/週次ダイジェストには引き続き載る）。
+  const alertEvents = events.filter((e) => e.pv_confirmed)
   const unconfirmedCount = events.length - alertEvents.length
 
   if (!alertEvents.length || !rooms.length) {
@@ -123,37 +115,18 @@ Deno.serve(async (req) => {
   return json({ ok: true, today_jst: todayJst, sent_count: sent.length, skipped_count: skipped.length, unconfirmed_count: unconfirmedCount, errors }, 200)
 })
 
-// 放映が「営業時間外(深夜/早朝)」か。note 先頭の "H:MM JST" を JST時刻として解釈し、
-// 営業時間 [OPEN_HOUR, CLOSE_HOUR) の外なら true（＝深夜営業/早朝営業の判断が要る日）。
-// 時刻が取れない場合は note の「深夜/早朝」表記で代替判定。
-function isOutsideBusinessHours(ev: PvEvent): boolean {
-  const m = /(\d{1,2}):(\d{2})\s*JST/.exec(String(ev.note ?? ""))
-  if (m) {
-    const h = Number(m[1])
-    if (Number.isFinite(h)) return h < OPEN_HOUR || h >= CLOSE_HOUR
-  }
-  return /深夜|早朝/.test(String(ev.note ?? ""))
-}
-
-// 単独配信メッセージ（LINE Flex＝リッチ表示）。
-//  ・pv_confirmed=true（FOOD STADIUM 公式告知済み）→ 放映を断定。赤ヘッダー。
-//  ・未確証だが営業時間外 → 断定せず「放映は要確認（直前発表の可能性）」＋深夜営業の判断材料。アンバーヘッダー。
-// 非対応端末/通知プレビュー用に altText（プレーン要約）も付ける。
+// 単独配信メッセージ（LINE Flex＝リッチ表示）。pv_confirmed=true（FOOD STADIUM 公式告知済み）のみ
+// 呼ばれる前提で、放映を断定して案内する。非対応端末/通知プレビュー用に altText（プレーン要約）も付ける。
 function buildAlertMessage(ev: PvEvent): Record<string, unknown> {
   const dow = dowOf(ev.event_date)
   const dateLabel = `${Number(ev.event_date.slice(5, 7))}/${Number(ev.event_date.slice(8, 10))}(${dow})`
   const icon = SPORT_ICON[ev.pv_sport] || "📺"
-  const confirmed = ev.pv_confirmed
-  const accent = confirmed ? "#C0392B" : "#B9770E" // 決定=赤 / 要確認=アンバー
-  const warnBg = confirmed ? "#FBEAEA" : "#FBF3E2"
-  const headTitle = confirmed ? "🇯🇵 PV日本戦が決定！" : "🌙 深夜帯の日本戦に注意"
-  const headSub = confirmed ? "東京ドーム フードコート パブリックビューイング" : "放映は要確認（直前発表の可能性）"
-  const venueLine = confirmed
-    ? "📺 東京ドーム フードコートのパブリックビューイング"
-    : "📺 FOOD STADIUM でのPV放映は未確定（直前に発表の可能性）。日程・対戦相手も要確認。"
-  const warn = confirmed
-    ? "⚠️ 集客大の見込み。深夜帯の放映は深夜営業の要注意日です。"
-    : "⚠️ 営業時間外の日本戦です。放映が出れば集客大。深夜営業を行うか早めにご検討ください。"
+  const accent = "#C0392B"
+  const warnBg = "#FBEAEA"
+  const headTitle = "🇯🇵 PV日本戦が決定！"
+  const headSub = "東京ドーム フードコート パブリックビューイング"
+  const venueLine = "📺 東京ドーム フードコートのパブリックビューイング"
+  const warn = "⚠️ 集客大の見込み。深夜帯の放映は深夜営業の要注意日です。"
 
   const body: Array<Record<string, unknown>> = [
     { type: "text", text: `📅 ${dateLabel}`, weight: "bold", size: "lg", color: "#1F2D3D" },
