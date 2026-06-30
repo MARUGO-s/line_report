@@ -1,5 +1,6 @@
 import { allocateDailyBudgetsForMonth, enumerateMonthDates, getDefaultJapaneseHolidaySet, getJstBusinessDateForReceiptBudget, mergeStoreClosedDateLists, shouldDeferDailyBudgetUntilJstOpen } from "./sales_budget_allocation.ts";
 import { buildReceiptDailyOverrideKey, fetchReceiptDailyOverrideMap } from "./receipt_daily_overrides.ts";
+import { loadReceiptRowsFromStoreTable, loadStoreReceiptTableMap } from "./receipt_report_aggregate.ts";
 export const RECEIPT_BUDGET_STORE_UNKNOWN = "unknown_store";
 function formatYenAmount(value) {
   return `¥${Math.round(value).toLocaleString("ja-JP")}`;
@@ -61,16 +62,25 @@ async function fetchSalesBudgetRow(supabase, storePartitionKey, targetMonth) {
     store_closed_dates: closedArr
   };
 }
+// 集計ソースは正本＝店舗別テーブル（store_webhook_tables.receipt_table = line_receipt__<店舗>）。
+// 陳腐化し得る集約表 line_receipt_entries は参照しない（receipt_report_aggregate.ts と同一方針。
+// 古いテーブルのまま実績ゼロ扱いになり、日次予算累計が「予算まるごとマイナス」になっていた不具合の修正）。
+async function loadStoreReceiptRowsForDateRange(supabase, storePartitionKey, startDateIso, endDateIso) {
+  const tableMap = await loadStoreReceiptTableMap(supabase);
+  const receiptTable = tableMap?.get(storePartitionKey);
+  if (!receiptTable) return [];
+  const rows = await loadReceiptRowsFromStoreTable(supabase, receiptTable, startDateIso, endDateIso);
+  return rows ?? [];
+}
 async function loadStoreDayGrossSumForDate(supabase, storePartitionKey, receiptDateIso) {
   const overrideMap = await fetchReceiptDailyOverrideMap(supabase, [
     storePartitionKey
   ], receiptDateIso, receiptDateIso);
   const override = overrideMap.get(buildReceiptDailyOverrideKey(storePartitionKey, receiptDateIso));
   if (override) return override.gross_sales_yen;
-  const { data, error } = await supabase.from("line_receipt_entries").select("gross_sales_yen").eq("store_partition_key", storePartitionKey).eq("receipt_date", receiptDateIso);
-  if (error || !Array.isArray(data)) return 0;
+  const rows = await loadStoreReceiptRowsForDateRange(supabase, storePartitionKey, receiptDateIso, receiptDateIso);
   let sum = 0;
-  for (const row of data){
+  for (const row of rows){
     const g = Number(row.gross_sales_yen);
     if (Number.isFinite(g) && g >= 0) sum += Math.round(g);
   }
@@ -83,9 +93,8 @@ async function loadStoreGrossSumsByMonthDates(supabase, storePartitionKey, recei
   if (dates.length === 0) return sums;
   const start = dates[0];
   const end = dates[dates.length - 1];
-  const { data, error } = await supabase.from("line_receipt_entries").select("receipt_date, gross_sales_yen").eq("store_partition_key", storePartitionKey).gte("receipt_date", start).lte("receipt_date", end);
-  if (error || !Array.isArray(data)) return sums;
-  for (const row of data){
+  const rows = await loadStoreReceiptRowsForDateRange(supabase, storePartitionKey, start, end);
+  for (const row of rows){
     const dk = String(row.receipt_date ?? "").slice(0, 10);
     if (!sums.has(dk)) continue;
     const g = Number(row.gross_sales_yen);

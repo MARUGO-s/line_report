@@ -204,7 +204,7 @@ function normalizeConfiguredStorePartitionKey(value) {
   return bestKey;
 }
 /** store_webhook_tables（正本レジストリ）から store_partition_key → receipt_table を取得。
- *  キーは小文字化して引けるようにする（line_receipt__marugoD のような大文字混じりも、レジストリ側の正確なテーブル名で解決する）。 */ async function loadStoreReceiptTableMap(supabase) {
+ *  キーは小文字化して引けるようにする（line_receipt__marugoD のような大文字混じりも、レジストリ側の正確なテーブル名で解決する）。 */ export async function loadStoreReceiptTableMap(supabase) {
   const { data, error } = await supabase.from("store_webhook_tables").select("store_partition_key, receipt_table");
   if (error) {
     console.error("loadStoreReceiptTableMap failed:", error.message);
@@ -218,7 +218,7 @@ function normalizeConfiguredStorePartitionKey(value) {
   }
   return map;
 }
-/** 正本の店舗別テーブル（line_receipt__<店舗>）をレシート日付(inclusive)で取得。エラー時は null（呼び出し側でフォールバック）。 */ async function loadReceiptRowsFromStoreTable(supabase, receiptTable, periodStartDate, periodEndDate) {
+/** 正本の店舗別テーブル（line_receipt__<店舗>）をレシート日付(inclusive)で取得。エラー時は null（呼び出し側でフォールバック）。 */ export async function loadReceiptRowsFromStoreTable(supabase, receiptTable, periodStartDate, periodEndDate) {
   const { data, error } = await supabase.from(receiptTable).select("gross_sales_yen, party_count, guest_count, receipt_date").gte("receipt_date", periodStartDate).lte("receipt_date", periodEndDate).limit(20000);
   if (error) {
     console.error(`loadReceiptRowsFromStoreTable failed (${receiptTable}, ${periodStartDate}..${periodEndDate}):`, error.message);
