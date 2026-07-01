@@ -291,7 +291,7 @@ function appendReceiptReportYoySection(bodyContents, aggregate, yoy) {
     wrap: true
   });
   bodyContents.push(flexBaselineRow("昨年差異日", `${yoy.priorPeriodStartDate}〜${yoy.priorPeriodEndDate}`, "#666666"));
-  bodyContents.push(flexYoyMetricRow("売上", aggregate.totalGrossSalesYen, yoy.priorGrossSalesYen, formatSignedYenDiffText), flexYoyMetricRow("組数", aggregate.totalPartyCount, yoy.priorPartyCount, (d)=>formatSignedCountDiffText(d, "組")), flexYoyMetricRow("客数", aggregate.totalGuestCount, yoy.priorGuestCount, (d)=>formatSignedCountDiffText(d, "名")), flexYoyMetricRow("営業日数", aggregate.operatingDayCount, yoy.priorOperatingDayCount, (d)=>formatSignedCountDiffText(d, "日")));
+  bodyContents.push(flexYoyMetricRow("売上", aggregate.totalGrossSalesYen, yoy.priorGrossSalesYen, formatSignedYenDiffText), flexYoyMetricRow("組数", aggregate.totalPartyCount, yoy.priorPartyCount, (d)=>formatSignedCountDiffText(d, "組")), flexYoyMetricRow("客数", aggregate.totalGuestCount, yoy.priorGuestCount, (d)=>formatSignedCountDiffText(d, "名")));
 }
 function flexBudgetRow(row) {
   const suffix = row.valueSuffix;
