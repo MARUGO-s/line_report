@@ -1434,6 +1434,14 @@
       return d.toLocaleString('ja-JP', { hour12: false });
     }
 
+    // 自動命名用の日付（年/月/日のみ・JST）。例: 2026/6/22
+    function formatDateShort(value) {
+      if (!value) return '';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('ja-JP');
+    }
+
     function formatBytes(value) {
       const n = Number(value);
       if (!Number.isFinite(n) || n < 0) return '-';
@@ -1443,14 +1451,34 @@
       return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     }
 
+    // 種別ラベル。画像はLINE仕様でファイル名が付かない（写真にはメタのファイル名が無い）ため、
+    // 「レシート写真」等の分かりやすい種別名を見出しに使う。
+    function mediaTypeBaseLabel(type) {
+      if (type === 'image') return 'レシート写真';
+      if (type === 'video') return '動画';
+      if (type === 'audio') return '音声';
+      return 'ファイル';
+    }
+
+    // ファイル名が無いメディア（画像/動画/音声）に「種別 日付 投稿者」の見出しを自動生成する。
+    // 例: レシート写真 2026/6/22 河北 星矢
+    function buildAutoMediaName(item) {
+      const type = String(item && item.media_type || 'file');
+      const label = mediaTypeBaseLabel(type);
+      const date = formatDateShort(item && item.created_at);
+      const sender = String(item && item.sender_display_name || '').trim();
+      return [label, date, sender].filter(Boolean).join(' ') || label;
+    }
+
     function resolveMediaDisplayName(item) {
       const type = String(item && item.media_type || 'file');
-      const originalName = item && item.original_file_name ? String(item.original_file_name) : '(名称なし)';
-      if (type !== 'image') return originalName;
-      const preview = String(item && item.content_preview || '').replace(/\s+/g, ' ').trim();
-      if (!preview) return originalName;
-      if (preview.length <= 80) return preview;
-      return preview.slice(0, 79).trimEnd() + '…';
+      // ファイル(Excel/CSV/PDF 等)はLINEが付けた実ファイル名を優先。
+      if (type !== 'image' && item && item.original_file_name) {
+        return String(item.original_file_name);
+      }
+      // 画像はファイル名が無いのが仕様 → 「レシート写真 日付 投稿者」を自動生成
+      // （画像の解析テキストは見出しではなく「画像解析結果」ブロックに別途表示される）。
+      return buildAutoMediaName(item);
     }
 
     function getFileExtension(fileName) {
