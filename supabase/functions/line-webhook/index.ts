@@ -1321,7 +1321,14 @@ async function processReceiptImageEvent(
   }
 
   if (!analyzed.analysis?.receipt) {
-    const msg = analyzed.analysis?.summary
+    // AI側の一過性障害（HTTPエラー/ネットワーク/タイムアウト/空応答）は「非レシート」ではない。
+    // その場合は誤解を招く「読み取れませんでした」ではなく、再送を促す（2026-07-01 Groq 503 で
+    // bistrocavacava のレシートが消失した実障害。リトライ後もなお失敗したときの安全網）。
+    const failureStage = String(analyzed.failure?.stage ?? '')
+    const isTransientProviderFailure = /_(http_error|network_error|fetch_error|timeout|empty_content)$/.test(failureStage)
+    const msg = isTransientProviderFailure
+      ? '⚠ AI解析が一時的に混み合って処理できませんでした。お手数ですが、この画像をもう一度お送りください。'
+      : analyzed.analysis?.summary
       ? `画像を確認しました。\n${analyzed.analysis.summary}`
       : 'レシートとして読み取れる項目がありませんでした。'
     // 非レシート画像の返信: AI返信完全無しのみで抑止（レシート解析返信フラグは関係しない）

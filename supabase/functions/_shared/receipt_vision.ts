@@ -86,36 +86,65 @@ export async function analyzeLineImageWithGroqScout(
   }
 
   const imageDataUrl = `data:${mime};base64,${toBase64(bytes)}`
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${groqApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-      response_format: { type: 'json_object' },
-      temperature: 0.1,
-      // 経費(line_items)など明細つきJSONが途中切断されないよう余裕を持たせる
-      // （max_tokensは上限であり実出力分しか課金されない。380では明細つきで切れる）。
-      max_tokens: 1500,
-      messages: [
-        {
-          role: 'system',
-          content: buildReceiptVisionSystemPrompt(systemPromptAddition),
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: `この画像を解析してください。ファイル名: ${fileName || '(unknown)'}` },
-            { type: 'image_url', image_url: { url: imageDataUrl } },
-          ],
-        },
-      ],
-    }),
+  const requestBody = JSON.stringify({
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    response_format: { type: 'json_object' },
+    temperature: 0.1,
+    // 経費(line_items)など明細つきJSONが途中切断されないよう余裕を持たせる
+    // （max_tokensは上限であり実出力分しか課金されない。380では明細つきで切れる）。
+    max_tokens: 1500,
+    messages: [
+      {
+        role: 'system',
+        content: buildReceiptVisionSystemPrompt(systemPromptAddition),
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: `この画像を解析してください。ファイル名: ${fileName || '(unknown)'}` },
+          { type: 'image_url', image_url: { url: imageDataUrl } },
+        ],
+      },
+    ],
   })
 
-  if (!response.ok) {
+  // Groq はスパイク時に 503/500/429 を一時的に返すことがある（実障害: 2026-07-01 bistrocavacava の
+  // レシートが 503 で保存されず消失。Groq単独店はフォールバック先が無いためそのまま取りこぼす）。
+  // 一過性の 5xx/429・ネットワーク断だけ、短い待機で1回だけ再試行する。恒久エラー(4xx)は再試行しない。
+  const maxAttempts = 2
+  let response: Response | null = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${groqApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: requestBody,
+      })
+    } catch (e) {
+      if (attempt < maxAttempts) {
+        console.error('Groq image vision network error, retrying:', String(e).slice(0, 200))
+        await new Promise((r) => setTimeout(r, 600))
+        continue
+      }
+      return {
+        analysis: null,
+        failure: { stage: 'groq_network_error', message: String(e).slice(0, 300) },
+      }
+    }
+
+    if (response.ok) break
+
+    const transient = response.status === 429 || response.status >= 500
+    if (transient && attempt < maxAttempts) {
+      const errBody = await response.text().catch(() => '')
+      console.error('Groq image vision transient error, retrying:', response.status, errBody.slice(0, 200))
+      await new Promise((r) => setTimeout(r, 600))
+      continue
+    }
+
     const err = await response.text()
     console.error('Groq image vision failed:', response.status, err)
     return {
@@ -126,6 +155,10 @@ export async function analyzeLineImageWithGroqScout(
         message: normalizeInlineText(err).slice(0, 500) || 'Groq API request failed.',
       },
     }
+  }
+
+  if (!response) {
+    return { analysis: null, failure: { stage: 'groq_http_error', message: 'Groq API request failed.' } }
   }
 
   const json = await response.json()
