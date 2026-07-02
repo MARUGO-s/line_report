@@ -73,6 +73,10 @@ function mergeSalesTotalsWithManualMonth(
   if (receiptTotals.receipt_count > 0) return receiptTotals
 
   const gross = manual.gross_sales_yen
+  const tax = manual.tax_amount_yen ?? receiptTotals.total_tax_amount_yen
+  const net = manual.net_sales_yen ?? (
+    manual.tax_amount_yen != null ? Math.max(0, gross - manual.tax_amount_yen) : receiptTotals.total_net_sales_yen
+  )
   const party = manual.party_count != null
     ? manual.party_count
     : receiptTotals.total_party_count
@@ -84,8 +88,8 @@ function mergeSalesTotalsWithManualMonth(
   return {
     receipt_count: receiptCount,
     total_gross_sales_yen: gross,
-    total_net_sales_yen: receiptTotals.total_net_sales_yen,
-    total_tax_amount_yen: receiptTotals.total_tax_amount_yen,
+    total_net_sales_yen: net,
+    total_tax_amount_yen: tax,
     total_party_count: party,
     total_guest_count: guest,
     avg_gross_sales_yen: receiptCount > 0
@@ -366,7 +370,7 @@ export async function fetchManualMonthsForYearState(
   const endExclusive = `${year + 1}-01`
   const { data, error } = await supabase
     .from('line_sales_manual_month_gross')
-    .select('sales_month, gross_sales_yen, party_count, guest_count, operating_days_count')
+    .select('sales_month, gross_sales_yen, net_sales_yen, tax_amount_yen, party_count, guest_count, operating_days_count')
     .eq('store_partition_key', store_partition_key)
     .gte('sales_month', start)
     .lt('sales_month', endExclusive)
@@ -377,6 +381,8 @@ export async function fetchManualMonthsForYearState(
 
   const months: Record<string, {
     gross_sales_yen: number
+    net_sales_yen: number | null
+    tax_amount_yen: number | null
     party_count: number | null
     guest_count: number | null
     operating_days_count: number | null
@@ -386,6 +392,8 @@ export async function fetchManualMonthsForYearState(
     const sm = toSafeString(r.sales_month)
     if (!/^\d{4}-\d{2}$/.test(sm)) continue
     const gross = toNonNegativeInteger(r.gross_sales_yen)
+    const netRaw = r.net_sales_yen
+    const taxRaw = r.tax_amount_yen
     const partyRaw = r.party_count
     const guestRaw = r.guest_count
     const party = partyRaw === null || partyRaw === undefined || partyRaw === ''
@@ -400,9 +408,11 @@ export async function fetchManualMonthsForYearState(
       : toNonNegativeInteger(opRaw)
     months[sm] = {
       gross_sales_yen: gross,
+      net_sales_yen: netRaw === null || netRaw === undefined || netRaw === '' ? null : toNonNegativeInteger(netRaw),
+      tax_amount_yen: taxRaw === null || taxRaw === undefined || taxRaw === '' ? null : toNonNegativeInteger(taxRaw),
       party_count: party,
       guest_count: guest,
-      operating_days_count: operating_days_count > 0 ? operating_days_count : null,
+      operating_days_count: operating_days_count != null && operating_days_count > 0 ? operating_days_count : null,
     }
   }
 
@@ -459,7 +469,7 @@ export async function upsertManualMonthEntries(
         gross_sales_yen: yenVal,
         party_count: party,
         guest_count: guest,
-        operating_days_count: operatingDays > 0 ? operatingDays : null,
+        operating_days_count: operatingDays != null && operatingDays > 0 ? operatingDays : null,
       })
     }
     applied += 1
@@ -697,6 +707,8 @@ export async function fetchReceiptSalesState(
   const manual_comparison_party_count = manualComparison?.party_count ?? null
   const manual_comparison_guest_count = manualComparison?.guest_count ?? null
   const manual_month_gross_yen = manualThisMonth?.gross_sales_yen ?? null
+  const manual_month_net_sales_yen = manualThisMonth?.net_sales_yen ?? null
+  const manual_month_tax_amount_yen = manualThisMonth?.tax_amount_yen ?? null
   const manual_month_party_count = manualThisMonth?.party_count ?? null
   const manual_month_guest_count = manualThisMonth?.guest_count ?? null
   const manual_month_operating_days_count = manualThisMonth?.operating_days_count ?? null
@@ -796,6 +808,8 @@ export async function fetchReceiptSalesState(
     manual_comparison_party_count,
     manual_comparison_guest_count,
     manual_month_gross_yen,
+    manual_month_net_sales_yen,
+    manual_month_tax_amount_yen,
     manual_month_party_count,
     manual_month_guest_count,
     manual_month_operating_days_count,
@@ -1047,6 +1061,10 @@ export async function fetchAnalyticsMonthly(
       if (bucket.receipt_count > 0) continue
       if (monthsWithDayManual.has(monthKey)) continue
       bucket.gross_sales_yen = manual.gross_sales_yen
+      if (manual.net_sales_yen != null) bucket.net_sales_yen = manual.net_sales_yen
+      if (manual.tax_amount_yen != null) {
+        bucket.net_sales_yen = manual.net_sales_yen ?? Math.max(0, manual.gross_sales_yen - manual.tax_amount_yen)
+      }
       if (manual.party_count != null) bucket.party_count = manual.party_count
       if (manual.guest_count != null) bucket.guest_count = manual.guest_count
     }

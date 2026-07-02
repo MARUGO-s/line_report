@@ -22,8 +22,10 @@ import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
   countExistingReceiptsForDates,
   importDailyReceiptsOverwrite,
+  importManualMonthSalesOverwrite,
   parseMonthlyDailySalesWorkbook,
   resolveReceiptTableForStore,
+  type ManualMonthImportEntry,
 } from '../_shared/daily_sales_import.ts'
 import { resolveReceiptNamePartitionKey } from '../_shared/receipt_store_name_resolve.ts'
 import {
@@ -614,19 +616,32 @@ function formatDailySalesPeriodLabel(parsed: { period: string | null; entries: A
 }
 
 function buildDailySalesSummaryRows(
-  parsed: { period: string | null; entries: Array<{ sales_date: string }>; day_count: number; total_gross_yen: number },
+  parsed: {
+    import_mode?: string
+    period: string | null
+    entries: Array<{ sales_date: string }>
+    day_count: number
+    total_gross_yen: number
+    manual_month_entry?: ManualMonthImportEntry | null
+  },
   storeDisplay: string,
   fileStoreName: string | null,
   storeMatched: boolean,
   existingCount: number,
 ): Record<string, unknown>[] {
   const yen = (n: number) => '¥' + Number(n || 0).toLocaleString('ja-JP')
+  const manual = parsed.import_mode === 'manual_month' ? parsed.manual_month_entry ?? null : null
   const rows: Array<[string, string]> = [
     ['投入先店舗', storeDisplay],
     ['期間', formatDailySalesPeriodLabel(parsed)],
-    ['対象日数', `${parsed.day_count}日`],
+    ['取込形式', manual ? '月合計（合計だけ入力）' : '日別売上'],
+    ['対象日数', manual ? '日別なし' : `${parsed.day_count}日`],
     ['合計総売上', yen(parsed.total_gross_yen)],
   ]
+  if (manual?.tax_amount_yen != null) rows.push(['消費税', yen(manual.tax_amount_yen)])
+  if (manual?.party_count != null) rows.push(['会計組数', `${manual.party_count}`])
+  if (manual?.guest_count != null) rows.push(['客数', `${manual.guest_count}`])
+  if (manual?.operating_days_count != null) rows.push(['営業日数', `${manual.operating_days_count}日`])
   if (fileStoreName) rows.push(['ファイル店舗', `${fileStoreName}${storeMatched ? '（一致）' : '（不一致）'}`])
   if (existingCount > 0) rows.push(['既存データ', `${existingCount}件あり`])
   return rows.filter(([, v]) => v && String(v).trim()).map(([label, v]) => ({
@@ -640,7 +655,7 @@ function buildDailySalesSummaryRows(
 
 function buildDailySalesConfirmFlex(
   pendingId: number,
-  parsed: { period: string | null; entries: Array<{ sales_date: string }>; day_count: number; total_gross_yen: number },
+  parsed: { import_mode?: string; period: string | null; entries: Array<{ sales_date: string }>; day_count: number; total_gross_yen: number; manual_month_entry?: ManualMonthImportEntry | null },
   storeDisplay: string,
   fileStoreName: string | null,
   storeMatched: boolean,
@@ -648,7 +663,8 @@ function buildDailySalesConfirmFlex(
 ): Record<string, unknown> {
   const warn: Record<string, unknown>[] = []
   if (!storeMatched) warn.push({ type: 'text', text: `⚠️ このルームの店舗とファイルの店舗名が一致しません。投入先は【${storeDisplay}】です。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
-  if (existingCount > 0) warn.push({ type: 'text', text: `⚠️ 取込対象期間に既に ${existingCount}件 のデータがあります。「置き換えて登録」で期間を丸ごと置換します（0=休業の日は売上なしにクリア／以前のデータは残りません）。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
+  const isManualMonth = parsed.import_mode === 'manual_month'
+  if (existingCount > 0) warn.push({ type: 'text', text: isManualMonth ? `⚠️ 対象月に既に ${existingCount}件 の日別データがあります。「置き換えて登録」で日別データをクリアし、月合計として登録します。` : `⚠️ 取込対象期間に既に ${existingCount}件 のデータがあります。「置き換えて登録」で期間を丸ごと置換します（0=休業の日は売上なしにクリア／以前のデータは残りません）。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
   return {
     type: 'flex',
     altText: '日次売上の取込確認',
@@ -657,8 +673,8 @@ function buildDailySalesConfirmFlex(
       body: {
         type: 'box', layout: 'vertical', spacing: 'sm',
         contents: [
-          { type: 'text', text: '日次売上を登録しますか？', weight: 'bold', size: 'md', color: '#1a6fa8' },
-          { type: 'text', text: '月次日別売上管理表を読み取りました。総売上をレシートとして登録します。', wrap: true, size: 'xs', color: '#8a96a3' },
+          { type: 'text', text: isManualMonth ? '月合計売上を登録しますか？' : '日次売上を登録しますか？', weight: 'bold', size: 'md', color: '#1a6fa8' },
+          { type: 'text', text: isManualMonth ? '「合計だけ入力」を読み取りました。日別ではなく月合計の手入力売上として登録します。' : '月次日別売上管理表を読み取りました。総売上をレシートとして登録します。', wrap: true, size: 'xs', color: '#8a96a3' },
           { type: 'separator', margin: 'md' },
           ...buildDailySalesSummaryRows(parsed, storeDisplay, fileStoreName, storeMatched, existingCount),
           ...warn,
@@ -667,7 +683,7 @@ function buildDailySalesConfirmFlex(
       footer: {
         type: 'box', layout: 'vertical', spacing: 'sm',
         contents: [
-          { type: 'button', style: 'primary', color: '#1a6fa8', action: { type: 'postback', label: existingCount > 0 ? '置き換えて登録' : 'この内容で登録', data: `dsimp=${pendingId}`, displayText: '日次売上を登録します' } },
+          { type: 'button', style: 'primary', color: '#1a6fa8', action: { type: 'postback', label: existingCount > 0 ? '置き換えて登録' : 'この内容で登録', data: `dsimp=${pendingId}`, displayText: isManualMonth ? '月合計売上を登録します' : '日次売上を登録します' } },
           { type: 'button', style: 'secondary', action: { type: 'postback', label: '中止', data: `dsimp_skip=${pendingId}`, displayText: '取込を中止します' } },
         ],
       },
@@ -676,22 +692,23 @@ function buildDailySalesConfirmFlex(
 }
 
 function buildDailySalesImportedFlex(
-  parsed: { period: string | null; entries: Array<{ sales_date: string }>; day_count: number; total_gross_yen: number },
+  parsed: { import_mode?: string; period: string | null; entries: Array<{ sales_date: string }>; day_count: number; total_gross_yen: number; manual_month_entry?: ManualMonthImportEntry | null },
   storeDisplay: string,
   applied: number,
 ): Record<string, unknown> {
+  const isManualMonth = parsed.import_mode === 'manual_month'
   return {
     type: 'flex',
-    altText: '日次売上を登録しました',
+    altText: isManualMonth ? '月合計売上を登録しました' : '日次売上を登録しました',
     contents: {
       type: 'bubble',
       body: {
         type: 'box', layout: 'vertical', spacing: 'sm',
         contents: [
-          { type: 'text', text: '✅ 日次売上を登録しました', weight: 'bold', size: 'md', color: '#1a7f37' },
+          { type: 'text', text: isManualMonth ? '✅ 月合計売上を登録しました' : '✅ 日次売上を登録しました', weight: 'bold', size: 'md', color: '#1a7f37' },
           { type: 'separator', margin: 'md' },
           ...buildDailySalesSummaryRows(parsed, storeDisplay, null, true, 0),
-          { type: 'text', text: `${applied}日分をレシートとして登録（売上分析・前年比に反映）。`, size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
+          { type: 'text', text: isManualMonth ? '日別データは作らず、月合計の手入力売上として登録しました（売上分析・前年比に反映）。' : `${applied}日分をレシートとして登録（売上分析・前年比に反映）。`, size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
         ],
       },
     },
@@ -757,11 +774,13 @@ async function processDailySalesFileEvent(
   // 新規かつ店舗一致 → 即登録（ご要望どおり自動）。
   if (existingCount === 0 && storeMatched) {
     try {
-      const res = await importDailyReceiptsOverwrite(supabase, roomStoreKey, parsed.entries, coveredDates)
+      const res = parsed.import_mode === 'manual_month' && parsed.manual_month_entry
+        ? await importManualMonthSalesOverwrite(supabase, roomStoreKey, parsed.manual_month_entry, coveredDates)
+        : await importDailyReceiptsOverwrite(supabase, roomStoreKey, parsed.entries, coveredDates)
       if (replyToken) {
         await replyLineFlex(replyToken, buildDailySalesImportedFlex(parsed, storeDisplay, res.applied), accessToken, webhookReplyLog(registry, roomId, 'daily_sales_imported'))
       }
-      return { replied: !!replyToken, reason: 'daily_sales_auto_imported' }
+      return { replied: !!replyToken, reason: parsed.import_mode === 'manual_month' ? 'manual_month_sales_auto_imported' : 'daily_sales_auto_imported' }
     } catch (e) {
       const msg = (e as { message?: string })?.message || String(e)
       if (replyToken) await replyLineFlex(replyToken, buildSimpleNoticeFlex(`日次売上の登録に失敗しました: ${msg}`.slice(0, 300)), accessToken, webhookReplyLog(registry, roomId, 'daily_sales_import_failed'))
@@ -790,8 +809,10 @@ async function processDailySalesFileEvent(
         file_store_name: parsed.store_name,
         file_name: fileName,
         line_message_id: lineMessageId,
-        period: parsed.period,
-        entries: parsed.entries,
+	        period: parsed.period,
+	        import_mode: parsed.import_mode,
+	        manual_month_entry: parsed.manual_month_entry,
+	        entries: parsed.entries,
         covered_dates: coveredDates,
         day_count: parsed.day_count,
         total_gross_yen: parsed.total_gross_yen,
@@ -827,11 +848,11 @@ async function handleDailySalesImportPostback(
   if (!Number.isInteger(pendingId) || pendingId <= 0) return null
   const { data: pending, error } = await supabase
     .from('pending_daily_sales_imports')
-    .select('id, status, store_partition_key, entries, covered_dates')
+    .select('id, status, store_partition_key, import_mode, manual_month_entry, entries, covered_dates')
     .eq('id', pendingId)
     .maybeSingle()
   if (error || !pending) return buildSimpleNoticeFlex('対象の取込が見つかりませんでした。')
-  const p = pending as { id: number; status: string; store_partition_key: string | null; entries: unknown; covered_dates: unknown }
+  const p = pending as { id: number; status: string; store_partition_key: string | null; import_mode?: string | null; manual_month_entry?: unknown; entries: unknown; covered_dates: unknown }
   if (p.status === 'imported') return buildSimpleNoticeFlex('この取込はすでに登録済みです。')
   if (!isImport) {
     await supabase.from('pending_daily_sales_imports').update({ status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', pendingId)
@@ -844,6 +865,33 @@ async function handleDailySalesImportPostback(
   const coveredDates = Array.isArray(p.covered_dates)
     ? (p.covered_dates as unknown[]).map((d) => String(d ?? '').trim().slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
     : []
+  if (p.import_mode === 'manual_month') {
+    const raw = p.manual_month_entry && typeof p.manual_month_entry === 'object'
+      ? p.manual_month_entry as Record<string, unknown>
+      : null
+    const gross = Number(raw?.gross_sales_yen)
+    const salesMonth = String(raw?.sales_month ?? '').trim().slice(0, 7)
+    if (!storeKey || !raw || !/^\d{4}-\d{2}$/.test(salesMonth) || !Number.isFinite(gross) || gross <= 0) {
+      return buildSimpleNoticeFlex('登録できる月合計データがありませんでした。')
+    }
+    try {
+      const entry: ManualMonthImportEntry = {
+        sales_month: salesMonth,
+        gross_sales_yen: Math.round(gross),
+        tax_amount_yen: raw.tax_amount_yen == null || raw.tax_amount_yen === '' ? null : Math.round(Number(raw.tax_amount_yen)),
+        net_sales_yen: raw.net_sales_yen == null || raw.net_sales_yen === '' ? null : Math.round(Number(raw.net_sales_yen)),
+        party_count: raw.party_count == null || raw.party_count === '' ? null : Math.round(Number(raw.party_count)),
+        guest_count: raw.guest_count == null || raw.guest_count === '' ? null : Math.round(Number(raw.guest_count)),
+        operating_days_count: raw.operating_days_count == null || raw.operating_days_count === '' ? null : Math.round(Number(raw.operating_days_count)),
+      }
+      const res = await importManualMonthSalesOverwrite(supabase, storeKey, entry, coveredDates)
+      await supabase.from('pending_daily_sales_imports').update({ status: 'imported', updated_at: new Date().toISOString() }).eq('id', pendingId)
+      return buildSimpleNoticeFlex(`✅ ${res.sales_month} の月合計売上を登録しました（日別データ ${res.cleared_dates}日分をクリアして月合計として保存）。売上分析・前年比に反映されます。`)
+    } catch (e) {
+      const msg = (e as { message?: string })?.message || String(e)
+      return buildSimpleNoticeFlex(`登録に失敗しました: ${msg}`.slice(0, 300))
+    }
+  }
   if (!storeKey || (entries.length === 0 && coveredDates.length === 0)) return buildSimpleNoticeFlex('登録できる内容がありませんでした。')
   try {
     const res = await importDailyReceiptsOverwrite(supabase, storeKey, entries, coveredDates)

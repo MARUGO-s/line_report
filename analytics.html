@@ -2003,13 +2003,25 @@ function renderImportPreview(data) {
   parts.push(`ファイル: <b>${importEscapeHtml(data.file_name || '')}</b>`);
   if (data.store_name) parts.push(`対象店舗(ファイル記載): <b>${importEscapeHtml(data.store_name)}</b>${data.store_key ? `（${importEscapeHtml(data.store_key)}）` : ''}`);
   if (data.period) parts.push(`期間: ${importEscapeHtml(data.period)}`);
-  parts.push(`取込対象: <b>${data.day_count}日</b> / 合計総売上 <b>${importYen(data.total_gross_yen)}</b>`);
+  const isManualMonth = data.import_mode === 'manual_month';
+  const manual = isManualMonth && data.manual_month_entry && typeof data.manual_month_entry === 'object'
+    ? data.manual_month_entry : null;
+  parts.push(isManualMonth
+    ? `取込形式: <b>月合計（合計だけ入力）</b> / 合計総売上 <b>${importYen(data.total_gross_yen)}</b>`
+    : `取込対象: <b>${data.day_count}日</b> / 合計総売上 <b>${importYen(data.total_gross_yen)}</b>`);
+  if (manual && manual.tax_amount_yen != null) parts.push(`消費税 <b>${importYen(manual.tax_amount_yen)}</b>`);
+  if (manual && manual.party_count != null) parts.push(`会計組数 <b>${importEscapeHtml(manual.party_count)}</b>`);
+  if (manual && manual.guest_count != null) parts.push(`客数 <b>${importEscapeHtml(manual.guest_count)}</b>`);
+  if (manual && manual.operating_days_count != null) parts.push(`営業日数 <b>${importEscapeHtml(manual.operating_days_count)}日</b>`);
   if (data.skipped_zero_count) parts.push(`（総売上0の休業日 ${data.skipped_zero_count}日はスキップ）`);
   document.getElementById('importPreviewSummary').innerHTML = parts.join('　/　');
-  const rows = (data.entries || []).map((e) =>
-    `<tr><td>${importEscapeHtml(e.sales_date)}</td><td>${importYen(e.gross_sales_yen)}</td>` +
-    `<td>${e.party_count == null ? '—' : e.party_count}</td><td>${e.guest_count == null ? '—' : e.guest_count}</td></tr>`
-  ).join('');
+  const rows = isManualMonth && manual
+    ? `<tr><td>${importEscapeHtml(manual.sales_month || data.period || '')}</td><td>${importYen(manual.gross_sales_yen)}</td>` +
+      `<td>${manual.party_count == null ? '—' : importEscapeHtml(manual.party_count)}</td><td>${manual.guest_count == null ? '—' : importEscapeHtml(manual.guest_count)}</td></tr>`
+    : (data.entries || []).map((e) =>
+      `<tr><td>${importEscapeHtml(e.sales_date)}</td><td>${importYen(e.gross_sales_yen)}</td>` +
+      `<td>${e.party_count == null ? '—' : e.party_count}</td><td>${e.guest_count == null ? '—' : e.guest_count}</td></tr>`
+    ).join('');
   document.getElementById('importPreviewBody').innerHTML = rows ||
     '<tr><td colspan="4" style="text-align:center;color:var(--sub)">取込対象がありません</td></tr>';
   document.getElementById('importPreviewError').textContent = (data.warnings || []).join(' ');
@@ -2055,28 +2067,43 @@ async function confirmManualImport() {
   }));
   // ファイルに載っていた全日付(0=休業含む)。期間まるごと置換のため、この全日付の既存をクリアする。
   const coveredDates = Array.isArray(importPreviewState.covered_dates) ? importPreviewState.covered_dates : [];
-  if (!entries.length && !coveredDates.length) { errEl.textContent = '取込対象がありません。'; return; }
+  const isManualMonth = importPreviewState.import_mode === 'manual_month';
+  const manualMonthEntry = isManualMonth && importPreviewState.manual_month_entry && typeof importPreviewState.manual_month_entry === 'object'
+    ? importPreviewState.manual_month_entry : null;
+  if (!isManualMonth && !entries.length && !coveredDates.length) { errEl.textContent = '取込対象がありません。'; return; }
+  if (isManualMonth && !manualMonthEntry) { errEl.textContent = '月合計の取込対象がありません。'; return; }
   const btn = document.getElementById('importConfirmBtn');
   btn.disabled = true;
   errEl.textContent = '';
   try {
     const send = (confirmOverwrite) => apiFetch('/receipts/daily-receipts-import', {
       method: 'POST',
-      body: { store_key: storeKey, entries, covered_dates: coveredDates, ...(confirmOverwrite ? { confirm_overwrite: true } : {}) },
+      body: {
+        store_key: storeKey,
+        import_mode: isManualMonth ? 'manual_month' : 'daily',
+        manual_month_entry: manualMonthEntry,
+        entries,
+        covered_dates: coveredDates,
+        ...(confirmOverwrite ? { confirm_overwrite: true } : {}),
+      },
     });
     let res = await send(false);
     // 既存データがある場合はサーバが needs_confirm を返す。上書き確認を取ってから再送する（誤上書き防止）。
     if (res && res.needs_confirm) {
       const ok = window.confirm(
         `${storeKey} の対象期間には既に ${res.existing_count} 件のデータがあります。\n` +
-        `取込むと、これらは削除され、今回の ${res.day_count ?? entries.length} 日分で上書きされます。\n\n上書きして取込みますか？`
+        (isManualMonth
+          ? `取込むと、日別データは削除され、月合計として上書きされます。\n\n上書きして取込みますか？`
+          : `取込むと、これらは削除され、今回の ${res.day_count ?? entries.length} 日分で上書きされます。\n\n上書きして取込みますか？`)
       );
       if (!ok) { errEl.textContent = '取込を中止しました（既存データは保持）。'; return; }
       res = await send(true);
     }
     const n = (res && typeof res.applied === 'number') ? res.applied : entries.length;
     closeImportPreview();
-    document.getElementById('manualImportStatus').textContent = `取込完了: ${n}日分をレシート売上として登録しました（集計・分析でレシートと同等扱い）。`;
+    document.getElementById('manualImportStatus').textContent = isManualMonth
+      ? '取込完了: 月合計売上として登録しました（日別データは作らず、前年比・売上分析に反映）。'
+      : `取込完了: ${n}日分をレシート売上として登録しました（集計・分析でレシートと同等扱い）。`;
     if (typeof loadAll === 'function') await loadAll();
   } catch (e) {
     errEl.textContent = '反映に失敗: ' + (e && e.message ? e.message : String(e));

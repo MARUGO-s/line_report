@@ -1,8 +1,9 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { canonicalStorePartitionKeyForDb } from "./receipt_sheets_store_catalog.ts"
 
 export type ManualMonthSalesRecord = {
   gross_sales_yen: number
+  net_sales_yen: number | null
+  tax_amount_yen: number | null
   party_count: number | null
   guest_count: number | null
   /** その月の営業日数（前年比の途中期間按分に使用。未入力時は暦日数比） */
@@ -13,6 +14,8 @@ export type ManualMonthSalesRecord = {
 export type ManualMonthSalesUpsertEntry = {
   sales_month: string
   gross_sales_yen: number | null
+  net_sales_yen?: number | null
+  tax_amount_yen?: number | null
   party_count?: number | null
   guest_count?: number | null
   operating_days_count?: number | null
@@ -142,6 +145,8 @@ export function manualMonthSalesFromRow(
   if (!Number.isFinite(gross) || gross < 0) return null
   return {
     gross_sales_yen: Math.round(gross),
+    net_sales_yen: parseOptionalNonNegativeInt(row.net_sales_yen),
+    tax_amount_yen: parseOptionalNonNegativeInt(row.tax_amount_yen),
     party_count: parseOptionalNonNegativeInt(row.party_count),
     guest_count: parseOptionalNonNegativeInt(row.guest_count),
     operating_days_count: parseManualMonthOperatingDays(row.operating_days_count),
@@ -150,7 +155,7 @@ export function manualMonthSalesFromRow(
 }
 
 export async function fetchManualMonthSales(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   storePartitionKey: string,
   salesMonthYyyyMm: string,
 ): Promise<ManualMonthSalesRecord | null> {
@@ -160,7 +165,7 @@ export async function fetchManualMonthSales(
 
   const { data, error } = await supabase
     .from("line_sales_manual_month_gross")
-    .select("gross_sales_yen, party_count, guest_count, operating_days_count, updated_at")
+    .select("gross_sales_yen, net_sales_yen, tax_amount_yen, party_count, guest_count, operating_days_count, updated_at")
     .eq("store_partition_key", key)
     .eq("sales_month", month)
     .maybeSingle()
@@ -173,7 +178,7 @@ export async function fetchManualMonthSales(
 }
 
 export async function fetchManualMonthSalesMapForStore(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   storePartitionKey: string,
   salesMonths: string[],
 ): Promise<Map<string, ManualMonthSalesRecord>> {
@@ -186,7 +191,7 @@ export async function fetchManualMonthSalesMapForStore(
 
   const { data, error } = await supabase
     .from("line_sales_manual_month_gross")
-    .select("sales_month, gross_sales_yen, party_count, guest_count, operating_days_count, updated_at")
+    .select("sales_month, gross_sales_yen, net_sales_yen, tax_amount_yen, party_count, guest_count, operating_days_count, updated_at")
     .eq("store_partition_key", key)
     .in("sales_month", months)
 
@@ -205,7 +210,7 @@ export async function fetchManualMonthSalesMapForStore(
 }
 
 export async function upsertManualMonthSalesEntries(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   storePartitionKey: string,
   entries: ManualMonthSalesUpsertEntry[],
 ): Promise<void> {
@@ -231,6 +236,12 @@ export async function upsertManualMonthSalesEntries(
     const guest = entry.guest_count === undefined
       ? null
       : parseOptionalNonNegativeInt(entry.guest_count)
+    const net = entry.net_sales_yen === undefined
+      ? null
+      : parseOptionalNonNegativeInt(entry.net_sales_yen)
+    const tax = entry.tax_amount_yen === undefined
+      ? null
+      : parseOptionalNonNegativeInt(entry.tax_amount_yen)
     const operatingDays = entry.operating_days_count === undefined
       ? null
       : parseManualMonthOperatingDays(entry.operating_days_count)
@@ -243,6 +254,8 @@ export async function upsertManualMonthSalesEntries(
           store_partition_key: key,
           sales_month: salesMonth,
           gross_sales_yen: Math.round(entry.gross_sales_yen),
+          net_sales_yen: net,
+          tax_amount_yen: tax,
           party_count: party,
           guest_count: guest,
           operating_days_count: operatingDays,

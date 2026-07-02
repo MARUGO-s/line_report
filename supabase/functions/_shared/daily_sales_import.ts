@@ -2,6 +2,7 @@
 // admin-api（管理画面のドラッグ&ドロップ取込）と line-webhook（LINEへのファイルアップロード取込）の両方から使う。
 import * as XLSX from "https://esm.sh/xlsx@0.18.5"
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { upsertManualMonthSalesEntries } from "./manual_month_sales.ts"
 
 export type DailySalesImportEntry = {
   sales_date: string
@@ -10,11 +11,23 @@ export type DailySalesImportEntry = {
   guest_count: number | null
 }
 
+export type ManualMonthImportEntry = {
+  sales_month: string
+  gross_sales_yen: number
+  tax_amount_yen: number | null
+  net_sales_yen: number | null
+  party_count: number | null
+  guest_count: number | null
+  operating_days_count: number | null
+}
+
 export type DailySalesParseResult = {
   recognized: boolean // 「総売上」列＋日付が取れ、日次売上ファイルと判定できたか
+  import_mode: "daily" | "manual_month"
   store_name: string | null
   store_key: string | null // 新テンプレ C3 の店舗キー（あれば登録時の照合に最優先で使う）
   period: string | null
+  manual_month_entry: ManualMonthImportEntry | null
   entries: DailySalesImportEntry[]
   covered_dates: string[] // ファイルに日付行として載っている全日付（総売上0=休業の日も含む）。期間まるごと置換に使う。
   day_count: number
@@ -78,6 +91,16 @@ function parseImportDateCell(value: unknown): string | null {
   return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`
 }
 
+function enumerateImportMonthDates(salesMonth: string): string[] {
+  const m = String(salesMonth ?? "").trim().match(/^(\d{4})-(\d{2})$/)
+  if (!m) return []
+  const year = Number(m[1])
+  const month = Number(m[2])
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return []
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return Array.from({ length: days }, (_, i) => `${m[1]}-${m[2]}-${String(i + 1).padStart(2, "0")}`)
+}
+
 // 数値セル（数値 / "171,200" / "¥171,200" 等）→ 整数。解釈不可なら null。
 function parseImportNumber(value: unknown): number | null {
   if (value == null || value === "") return null
@@ -93,9 +116,11 @@ function parseImportNumber(value: unknown): number | null {
 export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: string): DailySalesParseResult {
   const fail = (error: string, extra: Partial<DailySalesParseResult> = {}): DailySalesParseResult => ({
     recognized: false,
+    import_mode: "daily",
     store_name: null,
     store_key: null,
     period: null,
+    manual_month_entry: null,
     entries: [],
     covered_dates: [],
     day_count: 0,
@@ -125,7 +150,7 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
     let storeKey: string | null = null
     let period: string | null = null
     let headerRowIdx = -1
-    let dateCol = 0, grossCol = -1, guestCol = -1, partyCol = -1
+    let dateCol = 0, grossCol = -1, taxCol = -1, guestCol = -1, partyCol = -1
     const looksLikeStoreKey = (s: string) => /^[a-z][a-z0-9_]{1,40}$/.test(s)
     for (let r = 0; r < rows.length; r++) {
       const row = rows[r] ?? []
@@ -149,6 +174,7 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
         }
         // ヘッダ: 「総売上(税込）」など接尾辞付きにも対応するため部分一致。
         if (v.includes("総売上")) { grossCol = c; headerRowIdx = r }
+        else if (v.includes("消費税")) taxCol = c
         else if (v.includes("客数")) guestCol = c
         else if (v.includes("組数")) partyCol = c
         else if (v.includes("日付")) dateCol = c
@@ -160,15 +186,47 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
 
     const collected: DailySalesImportEntry[] = []
     const coveredDateSet = new Set<string>() // 総売上0(休業)の日も含め、日付行として認識できた全日付
+    let manualMonthEntry: ManualMonthImportEntry | null = null
+    let positiveDailyGrossBeforeManualRow = 0
     let skippedZero = 0
     const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0
     for (let r = startIdx; r < rows.length; r++) {
       const row = rows[r] ?? []
+      const label = String(row[dateCol] ?? "").trim()
+      if (label.includes("合計だけ入力")) {
+        const gross = parseImportNumber(row[grossCol])
+        if (gross != null && gross > 0 && period && /^\d{4}-\d{2}$/.test(period)) {
+          const nextRows = rows.slice(r + 1, Math.min(rows.length, r + 4))
+          const totalRow = nextRows.find((candidate) => {
+            const totalLabel = String((candidate ?? [])[dateCol] ?? "").trim()
+            return totalLabel === "合計" || totalLabel.includes("合計")
+          }) ?? []
+          const totalGross = parseImportNumber(totalRow[grossCol])
+          const totalRowExists = totalRow.length > 0
+          const computedTotalGross = positiveDailyGrossBeforeManualRow + gross
+          // Excel/Numbersで再計算されていないファイルは、B38のキャッシュが古いことがある。
+          // その場合でも、日別売上が空で「合計だけ入力」だけなら B38 は B37 と同額になるため月合計として扱う。
+          if (totalRowExists && (totalGross === gross || (positiveDailyGrossBeforeManualRow === 0 && computedTotalGross === gross))) {
+            const tax = taxCol >= 0 ? parseImportNumber(row[taxCol]) : null
+            manualMonthEntry = {
+              sales_month: period,
+              gross_sales_yen: gross,
+              tax_amount_yen: tax,
+              net_sales_yen: tax != null ? Math.max(0, gross - tax) : null,
+              party_count: partyCol >= 0 ? parseImportNumber(row[partyCol]) : null,
+              guest_count: guestCol >= 0 ? parseImportNumber(row[guestCol]) : null,
+              operating_days_count: coveredDateSet.size > 0 ? coveredDateSet.size : null,
+            }
+          }
+        }
+        continue
+      }
       const iso = parseImportDateCell(row[dateCol])
       if (!iso) continue // 合計行・空行などはスキップ
       coveredDateSet.add(iso) // 0の日も「対象日」に含める（期間まるごと置換のため）
       const gross = parseImportNumber(row[grossCol])
       if (gross == null || gross <= 0) { skippedZero++; continue } // 休業日(総売上0)はスキップ
+      positiveDailyGrossBeforeManualRow += gross
       collected.push({
         sales_date: iso,
         gross_sales_yen: gross,
@@ -185,13 +243,36 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
 
     const warnings: string[] = []
     if (!storeName) warnings.push("対象店舗が読み取れませんでした。")
-    if (entries.length === 0) warnings.push("総売上が1円以上の日が見つかりませんでした。")
+    if (entries.length === 0 && !manualMonthEntry) warnings.push("総売上が1円以上の日が見つかりませんでした。")
+
+    if (manualMonthEntry) {
+      const manualCoveredDates = coveredDates.length > 0
+        ? coveredDates
+        : enumerateImportMonthDates(manualMonthEntry.sales_month)
+      return {
+        recognized: true,
+        import_mode: "manual_month",
+        store_name: storeName,
+        store_key: storeKey,
+        period,
+        manual_month_entry: manualMonthEntry,
+        entries: [],
+        covered_dates: manualCoveredDates,
+        day_count: 0,
+        total_gross_yen: manualMonthEntry.gross_sales_yen,
+        skipped_zero_count: skippedZero,
+        warnings,
+        error: null,
+      }
+    }
 
     return {
       recognized: entries.length > 0,
+      import_mode: "daily",
       store_name: storeName,
       store_key: storeKey,
       period,
+      manual_month_entry: null,
       entries,
       covered_dates: coveredDates,
       day_count: entries.length,
@@ -202,6 +283,76 @@ export function parseMonthlyDailySalesWorkbook(bytes: Uint8Array, fileName: stri
     }
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e))
+  }
+}
+
+export async function importManualMonthSalesOverwrite(
+  supabase: SupabaseClient,
+  storeKey: string,
+  entry: ManualMonthImportEntry,
+  coveredDates: string[] = [],
+): Promise<{ ok: boolean; applied: number; cleared_dates: number; receipt_table: string; cleared_manual_day: number; store_partition_key: string; sales_month: string }> {
+  const resolved = await resolveReceiptTableForStore(supabase, storeKey)
+  if (!resolved) {
+    throw { status: 400, message: "店舗が見つかりません（store_key）。" }
+  }
+  const key = String(storeKey ?? "").trim().toLowerCase()
+  const salesMonth = String(entry.sales_month ?? "").trim().slice(0, 7)
+  if (!/^\d{4}-\d{2}$/.test(salesMonth)) {
+    throw { status: 400, message: "対象月が不正です。" }
+  }
+  const gross = parseImportNumber(entry.gross_sales_yen)
+  if (gross == null || gross <= 0) {
+    throw { status: 400, message: "月合計の総売上が不正です。" }
+  }
+
+  const isIsoDate = (d: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(d ?? "").trim().slice(0, 10))
+  const sourceDates = coveredDates.length > 0 ? coveredDates : enumerateImportMonthDates(salesMonth)
+  const clearDates = [...new Set(
+    sourceDates
+      .map((d) => String(d ?? "").trim().slice(0, 10))
+      .filter((d) => isIsoDate(d) && d.slice(0, 7) === salesMonth),
+  )]
+
+  if (clearDates.length > 0) {
+    const { error: delRcpErr } = await supabase.from(resolved.receiptTable).delete().in("receipt_date", clearDates)
+    if (delRcpErr) {
+      throw { status: 500, message: `既存レシートのクリアに失敗しました: ${delRcpErr.message}` }
+    }
+  }
+
+  let clearedManualDay = 0
+  if (clearDates.length > 0) {
+    try {
+      const { error: delErr, count } = await supabase
+        .from("line_sales_manual_day")
+        .delete({ count: "exact" })
+        .eq("store_partition_key", key)
+        .in("sales_date", clearDates)
+      if (!delErr && typeof count === "number") clearedManualDay = count
+    } catch (_e) {
+      // 古い環境では line_sales_manual_day が無い可能性があるため、月次登録自体は継続する。
+    }
+  }
+
+  await upsertManualMonthSalesEntries(supabase, key, [{
+    sales_month: salesMonth,
+    gross_sales_yen: gross,
+    tax_amount_yen: entry.tax_amount_yen,
+    net_sales_yen: entry.net_sales_yen,
+    party_count: entry.party_count,
+    guest_count: entry.guest_count,
+    operating_days_count: entry.operating_days_count,
+  }])
+
+  return {
+    ok: true,
+    applied: 1,
+    cleared_dates: clearDates.length,
+    receipt_table: resolved.receiptTable,
+    cleared_manual_day: clearedManualDay,
+    store_partition_key: key,
+    sales_month: salesMonth,
   }
 }
 

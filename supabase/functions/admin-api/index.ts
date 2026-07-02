@@ -1,10 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import {
   importDailyReceiptsOverwrite,
+  importManualMonthSalesOverwrite,
   parseMonthlyDailySalesWorkbook,
   resolveReceiptTableForStore,
   countExistingReceiptsForDates,
   type DailySalesImportEntry,
+  type ManualMonthImportEntry,
 } from "../_shared/daily_sales_import.ts"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
 import {
@@ -4222,7 +4224,7 @@ async function fetchManualMonthsForYearState(
   const endExclusive = `${year + 1}-01`
   const { data, error } = await supabase
     .from("line_sales_manual_month_gross")
-    .select("sales_month, gross_sales_yen, party_count, guest_count, operating_days_count")
+    .select("sales_month, gross_sales_yen, net_sales_yen, tax_amount_yen, party_count, guest_count, operating_days_count")
     .eq("store_partition_key", store_partition_key)
     .gte("sales_month", start)
     .lt("sales_month", endExclusive)
@@ -4233,6 +4235,8 @@ async function fetchManualMonthsForYearState(
 
   const months: Record<string, {
     gross_sales_yen: number
+    net_sales_yen: number | null
+    tax_amount_yen: number | null
     party_count: number | null
     guest_count: number | null
     operating_days_count: number | null
@@ -4242,6 +4246,8 @@ async function fetchManualMonthsForYearState(
     const sm = toSafeString(r.sales_month)
     if (!/^\d{4}-\d{2}$/.test(sm)) continue
     const gross = toNonNegativeInteger(r.gross_sales_yen)
+    const netRaw = r.net_sales_yen
+    const taxRaw = r.tax_amount_yen
     const partyRaw = r.party_count
     const guestRaw = r.guest_count
     const party = partyRaw === null || partyRaw === undefined || partyRaw === ""
@@ -4256,9 +4262,11 @@ async function fetchManualMonthsForYearState(
       : toNonNegativeInteger(opRaw)
     months[sm] = {
       gross_sales_yen: gross,
+      net_sales_yen: netRaw === null || netRaw === undefined || netRaw === "" ? null : toNonNegativeInteger(netRaw),
+      tax_amount_yen: taxRaw === null || taxRaw === undefined || taxRaw === "" ? null : toNonNegativeInteger(taxRaw),
       party_count: party,
       guest_count: guest,
-      operating_days_count: operating_days_count > 0 ? operating_days_count : null,
+      operating_days_count: operating_days_count != null && operating_days_count > 0 ? operating_days_count : null,
     }
   }
 
@@ -4286,6 +4294,8 @@ async function upsertManualMonthEntries(
     party_count?: number | null
     guest_count?: number | null
     operating_days_count?: number | null
+    net_sales_yen?: number | null
+    tax_amount_yen?: number | null
   }> = []
   let applied = 0
 
@@ -4307,15 +4317,25 @@ async function upsertManualMonthEntries(
         ? null
         : toNonNegativeInteger(guestRaw)
       const opRaw = entry.operating_days_count
+      const netRaw = entry.net_sales_yen
+      const taxRaw = entry.tax_amount_yen
       const operatingDays = opRaw === null || opRaw === undefined || opRaw === ""
         ? null
         : toNonNegativeInteger(opRaw)
+      const net = netRaw === null || netRaw === undefined || netRaw === ""
+        ? null
+        : toNonNegativeInteger(netRaw)
+      const tax = taxRaw === null || taxRaw === undefined || taxRaw === ""
+        ? null
+        : toNonNegativeInteger(taxRaw)
       upsertPayload.push({
         sales_month,
         gross_sales_yen: yenVal,
+        net_sales_yen: net,
+        tax_amount_yen: tax,
         party_count: party,
         guest_count: guest,
-        operating_days_count: operatingDays > 0 ? operatingDays : null,
+        operating_days_count: operatingDays != null && operatingDays > 0 ? operatingDays : null,
       })
     }
     applied += 1
@@ -4361,9 +4381,11 @@ async function parseManualDaySalesImport(req: Request) {
   return {
     ok: true,
     file_name: fileValue.name,
+    import_mode: parsed.import_mode,
     store_name: parsed.store_name,
     store_key: parsed.store_key,
     period: parsed.period,
+    manual_month_entry: parsed.manual_month_entry,
     entries: parsed.entries,
     covered_dates: parsed.covered_dates,
     day_count: parsed.day_count,
@@ -4383,6 +4405,45 @@ async function importDailyReceiptsCommit(
     throw { status: 400, message: "store_key（店舗）を指定してください。" } satisfies AppError
   }
   const entriesRaw = body.entries
+  const importMode = toSafeString(body.import_mode).trim()
+  if (importMode === "manual_month") {
+    const raw = isRecord(body.manual_month_entry) ? body.manual_month_entry : null
+    if (!raw) throw { status: 400, message: "manual_month_entry is required." } satisfies AppError
+    const salesMonth = toSafeString(raw.sales_month).trim().slice(0, 7)
+    const gross = toNonNegativeInteger(raw.gross_sales_yen)
+    if (!/^\d{4}-\d{2}$/.test(salesMonth) || gross == null || gross <= 0) {
+      throw { status: 400, message: "manual_month_entry is invalid." } satisfies AppError
+    }
+    const entry: ManualMonthImportEntry = {
+      sales_month: salesMonth,
+      gross_sales_yen: gross,
+      tax_amount_yen: raw.tax_amount_yen == null || raw.tax_amount_yen === "" ? null : toNonNegativeInteger(raw.tax_amount_yen),
+      net_sales_yen: raw.net_sales_yen == null || raw.net_sales_yen === "" ? null : toNonNegativeInteger(raw.net_sales_yen),
+      party_count: raw.party_count == null || raw.party_count === "" ? null : toNonNegativeInteger(raw.party_count),
+      guest_count: raw.guest_count == null || raw.guest_count === "" ? null : toNonNegativeInteger(raw.guest_count),
+      operating_days_count: raw.operating_days_count == null || raw.operating_days_count === "" ? null : toNonNegativeInteger(raw.operating_days_count),
+    }
+    const coveredDates = (Array.isArray(body.covered_dates) ? body.covered_dates : [])
+      .map((d) => toSafeString(d).trim().slice(0, 10))
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d.slice(0, 7) === salesMonth)
+    if (body.confirm_overwrite !== true) {
+      const resolved = await resolveReceiptTableForStore(supabase, key)
+      if (resolved) {
+        const existing = await countExistingReceiptsForDates(supabase, resolved.receiptTable, coveredDates)
+        if (existing > 0) {
+          return {
+            ok: false,
+            needs_confirm: true,
+            existing_count: existing,
+            store_key: key,
+            day_count: 0,
+            message: `対象月には既に ${existing} 件の日別データがあります。取込むと削除され、月合計として上書きされます。`,
+          }
+        }
+      }
+    }
+    return await importManualMonthSalesOverwrite(supabase, key, entry, coveredDates)
+  }
   if (!Array.isArray(entriesRaw)) {
     throw { status: 400, message: "entries must be an array." } satisfies AppError
   }
