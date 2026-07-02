@@ -1977,6 +1977,11 @@
       let body = {};
       try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { raw: text }; }
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          await logoutToken().catch(function() {});
+          updateAuthState();
+          throw new Error('ログインの有効期限が切れたか、リンクが古い状態です。LINEの最新メッセージからもう一度開いてください。');
+        }
         throw new Error(body.error || ('API error: ' + res.status));
       }
       return body;
@@ -2451,6 +2456,7 @@
     }
 
     (async function init() {
+      const hadLoginTicketAtOpen = /[?&]lt=/.test(String(location.search || ''));
       if (window.LINE_REPORT_AUTH) {
         try {
           await LINE_REPORT_AUTH.consumeUrlAuthParams({
@@ -2461,6 +2467,9 @@
           console.error('consumeUrlAuthParams failed:', error);
           alert(error.message || String(error));
         }
+      }
+      if (hadLoginTicketAtOpen && isLineScopedReservationView() && !getToken()) {
+        alert('この予約リンクは期限切れか、すでに使用済みです。LINEの最新の予約通知からもう一度開いてください。');
       }
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
       dom.sourceFilter.value = state.source;

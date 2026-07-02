@@ -220,8 +220,13 @@
     if (!response.ok) {
       // ログインリンクは使い捨て(単一使用)。既に使用済み/期限切れ/無効(4xx)なら静かに失敗させ、
       // URLから lt を除去して通常のログイン画面へフォールバックする(別端末での再タップ対策)。
+      // LINE導線では、端末に残っている古い/期限切れセッションを温存すると、その後のAPI呼び出しが
+      // 401 のまま走って「画面は開くが何も操作できない」状態になる。lt が無効なら一旦セッションも消す。
       stripUrlParams(['lt']);
       if (response.status >= 400 && response.status < 500) {
+        if (isLineEntryUrl()) {
+          clearTokenStorage();
+        }
         return false;
       }
       var text = await response.text().catch(function () { return ''; });
