@@ -4,12 +4,14 @@
   <meta charset="utf-8">
   <base href="/line_report/">
   <script>
-    /* LINE経由（店舗）アクセスは売上分析ページのみ許可。このページは売上分析へ強制リダイレクト。 */
+    /* LINE経由（店舗）アクセスは通常は売上分析へリダイレクト。
+       ただし line_page=reservation 付きの使い捨て認証リンクだけは予約カレンダーを許可する。 */
     (function(){
       try {
         var p = new URLSearchParams(location.search);
         var isLine = (p.get('from') === 'line') || /Line\//i.test(String(navigator.userAgent || ''));
-        if (!isLine) return;
+        var allowReservationLinePage = (p.get('line_page') === 'reservation');
+        if (!isLine || allowReservationLinePage) return;
         var sk = '';
         try { sk = sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch (_) {}
         location.replace('/line_report/analytics.html?from=line' + (sk ? ('&store_key=' + encodeURIComponent(sk)) : ''));
@@ -1065,14 +1067,55 @@
     const SEARCH_FALLBACK_BATCH_SIZE = 6;
     const SEARCH_FALLBACK_MAX_HITS = 240;
 
+    function parseInitialLaunchState() {
+      try {
+        const params = new URLSearchParams(location.search);
+        const requestedMonth = String(params.get('month') || '').trim();
+        const requestedStoreKey = String(params.get('store_key') || '').trim();
+        const lineScopedReservationView =
+          (params.get('from') === 'line') &&
+          (params.get('line_page') === 'reservation') &&
+          !!requestedStoreKey;
+        const month = /^\d{4}-\d{2}$/.test(requestedMonth) ? requestedMonth : getCurrentMonthJst();
+        let activeStore = 'all';
+        if (requestedStoreKey === '__unmatched__') {
+          activeStore = '__unmatched__';
+        } else if (
+          requestedStoreKey &&
+          window.LINE_REPORT_PAGES &&
+          LINE_REPORT_PAGES.STORE_NAMES &&
+          LINE_REPORT_PAGES.STORE_NAMES[requestedStoreKey]
+        ) {
+          activeStore = requestedStoreKey;
+        }
+        return {
+          month: month,
+          activeStore: activeStore,
+          lineScopedReservationView: lineScopedReservationView,
+          lockedStoreKey: lineScopedReservationView ? activeStore : '',
+        };
+      } catch (_) {
+        return {
+          month: getCurrentMonthJst(),
+          activeStore: 'all',
+          lineScopedReservationView: false,
+          lockedStoreKey: '',
+        };
+      }
+    }
+
+    const initialLaunchState = parseInitialLaunchState();
+
     const state = {
-      currentMonth: getCurrentMonthJst(),
+      currentMonth: initialLaunchState.month,
       source: 'all',
       items: [],
       popupItems: {},
       searchHits: [],
       nameQuery: '',
-      activeStore: 'all',
+      activeStore: initialLaunchState.activeStore,
+      lockedStoreKey: initialLaunchState.lockedStoreKey,
+      lineScopedReservationView: !!initialLaunchState.lineScopedReservationView,
       visibleCount: 0,
       visibleSourceCounts: { tabelog: 0, ikyu: 0, manual: 0 },
       apiTotal: 0,
@@ -1085,6 +1128,10 @@
       suggestTimer: null,
       suggestSeq: 0,
     };
+
+    function isLineScopedReservationView() {
+      return !!state.lineScopedReservationView && !!state.lockedStoreKey && state.lockedStoreKey !== 'all';
+    }
 
     const dom = {
       authState: document.getElementById('authState'),
@@ -1649,6 +1696,7 @@
       const item = state.popupItems[popupId];
       if (!item) return;
       state.activePopupItem = item;
+      if (dom.resvEditBtn) dom.resvEditBtn.hidden = isLineScopedReservationView();
       const sourceLabel = sourceLabelFromItem(item);
       const summary = buildReservationSummary(item);
       dom.resvModalTitle.textContent = '予約詳細';
@@ -1720,6 +1768,7 @@
     }
 
     function openEditModal(item) {
+      if (isLineScopedReservationView()) return;
       state.editing = item || null;
       hideSuggestPops();
       if (dom.resvEditError) dom.resvEditError.textContent = '';
@@ -1773,6 +1822,7 @@
     }
 
     async function saveReservation() {
+      if (isLineScopedReservationView()) return;
       const visitIso = localInputToIso(dom.ef_visit_at.value);
       if (!visitIso) { dom.resvEditError.textContent = '来店日時を入力してください。'; return; }
       const storeKey = String(dom.ef_store.value || '').trim();
@@ -1805,6 +1855,7 @@
     }
 
     async function setReservationHidden(hidden) {
+      if (isLineScopedReservationView()) return;
       if (!state.editing) return;
       if (hidden && !confirm('この予約を非表示（キャンセル扱い）にします。\n記録は残るので、後で「非表示も表示」から復元できます。よろしいですか？')) return;
       dom.resvEditError.textContent = '';
@@ -1824,6 +1875,7 @@
     }
 
     async function deleteReservation() {
+      if (isLineScopedReservationView()) return;
       if (!state.editing) return;
       const it = state.editing;
       const label = String(it.customer_name_label || it.customer_name || '') || '(名前なし)';
@@ -1842,6 +1894,7 @@
     }
 
     function runSuggest(field) {
+      if (isLineScopedReservationView()) return;
       const input = field === 'phone' ? dom.ef_phone : dom.ef_name;
       const pop = field === 'phone' ? dom.ef_phone_pop : dom.ef_name_pop;
       const q = String(input.value || '').trim();
@@ -1982,12 +2035,19 @@
     }
 
     function openStoreSelectPop() {
+      if (isLineScopedReservationView()) return;
       renderStoreSelectOptions();
       dom.storeSelectPop.hidden = false;
       if (dom.storeSelectBtn) dom.storeSelectBtn.setAttribute('aria-expanded', 'true');
     }
 
     function setActiveStore(key) {
+      if (isLineScopedReservationView()) {
+        state.activeStore = state.lockedStoreKey;
+        if (dom.storeSelectLabel) dom.storeSelectLabel.textContent = storeLabelForKey(state.activeStore);
+        closeStoreSelectPop();
+        return;
+      }
       state.activeStore = key || 'all';
       if (dom.storeSelectLabel) dom.storeSelectLabel.textContent = storeLabelForKey(state.activeStore);
       closeStoreSelectPop();
@@ -2405,6 +2465,21 @@
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
       dom.sourceFilter.value = state.source;
       dom.nameFilterInput.value = state.nameQuery;
+      if (dom.storeSelectLabel) dom.storeSelectLabel.textContent = storeLabelForKey(state.activeStore);
+      if (isLineScopedReservationView()) {
+        if (dom.storeSelectBtn) {
+          dom.storeSelectBtn.disabled = true;
+          dom.storeSelectBtn.setAttribute('aria-disabled', 'true');
+          dom.storeSelectBtn.title = 'LINE通知から開いたため店舗固定です';
+        }
+        if (dom.storeSelectPop) dom.storeSelectPop.hidden = true;
+        if (dom.newReservationBtn) dom.newReservationBtn.hidden = true;
+        if (dom.resvEditBtn) dom.resvEditBtn.hidden = true;
+        if (dom.showHiddenToggle && dom.showHiddenToggle.parentElement) {
+          dom.showHiddenToggle.checked = false;
+          dom.showHiddenToggle.parentElement.hidden = true;
+        }
+      }
       updateAuthState();
       refreshSalesSheetNavLink();
       dom.monthTitle.textContent = formatMonthLabel(state.currentMonth);
