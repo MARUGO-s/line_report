@@ -969,6 +969,15 @@
     .ms-navlink .ext { margin-left: auto; display: flex; opacity: 0; transition: opacity 0.12s; }
     .ms-navlink:hover .ext { opacity: 0.7; }
     .ms-side-foot { border-top: 1px solid rgba(255, 255, 255, 0.06); padding: 14px 18px; }
+    .ms-logout {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; margin-top: 12px; padding: 9px 12px; border-radius: 9px;
+      border: 1px solid rgba(255, 255, 255, 0.12); background: transparent;
+      color: var(--side-text); font-size: 13px; font-weight: 700; cursor: pointer;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .ms-logout:hover { background: rgba(220, 53, 69, 0.14); color: #ff8f9a; border-color: rgba(220, 53, 69, 0.4); }
+    .ms-logout:disabled { opacity: 0.6; cursor: default; }
     .ms-conn { display: flex; align-items: center; gap: 10px; }
     .ms-cd { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none; }
     .ms-ct { font-size: 12.5px; font-weight: 700; color: #eef2f7; }
@@ -1101,6 +1110,10 @@
             <div class="ms-cs mono">hocbnifuactbvmyjraxy</div>
           </div>
         </div>
+        <button id="logoutBtn" type="button" class="ms-logout" aria-label="ログアウト">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          ログアウト
+        </button>
       </div>
     </aside>
 
@@ -1285,6 +1298,7 @@
       tokenInput: document.getElementById('tokenInput'),
       saveTokenBtn: document.getElementById('saveTokenBtn'),
       clearTokenBtn: document.getElementById('clearTokenBtn'),
+      logoutBtn: document.getElementById('logoutBtn'),
       typeFilter: document.getElementById('typeFilter'),
       roomFilter: document.getElementById('roomFilter'),
       limitSelect: document.getElementById('limitSelect'),
@@ -2721,6 +2735,20 @@
         alert(error.message || String(error));
       }
     });
+
+    if (dom.logoutBtn) {
+      dom.logoutBtn.addEventListener('click', async function() {
+        if (!window.confirm('ログアウトします。よろしいですか？')) return;
+        dom.logoutBtn.disabled = true;
+        try {
+          clearSiteCacheForToken(getToken(), FIXED_PROJECT_URL);
+          await logoutToken();
+        } catch (_) { /* 失敗してもトークンは消えているので続行 */ }
+        updateAuthState();
+        // 接続設定（ログイン）ページへ戻す。
+        window.location.href = './index.html';
+      });
+    }
 
     dom.clearTokenBtn.addEventListener('click', async function() {
       clearSiteCacheForToken(getToken(), FIXED_PROJECT_URL);
