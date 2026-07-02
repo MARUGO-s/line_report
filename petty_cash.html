@@ -570,6 +570,7 @@
   <script src="pages-config.js?v=20260610"></script>
   <script src="auth-session.js?v=20260624"></script>
   <script src="menu-logout.js?v=20260702"></script>
+  <script src="app-theme.js?v=20260702"></script>
   <script>
   'use strict';
   (function () {
@@ -639,22 +640,7 @@
     let records = [];        // 直近に取得した正規化済みレコード（現在の店舗・月）
     let receiptUploading = false;
 
-    /* ===== テーマ（共有キー line_reservation_calendar_theme） ===== */
-    function normalizeTheme(t) { return t === 'light' ? 'light' : 'dark'; }
-    function getTheme() { try { return normalizeTheme(localStorage.getItem(STORE_THEME_KEY)); } catch (_) { return 'dark'; } }
-    function applyTheme(theme) {
-      const t = normalizeTheme(theme);
-      document.body.setAttribute('data-theme', t);
-      const btn = dom.themeToggleBtn;
-      if (btn) {
-        const isLight = t === 'light';
-        btn.textContent = isLight ? 'ダークモード' : 'ライトモード';
-        btn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
-        btn.title = isLight ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
-      }
-    }
-    function setTheme(theme) { const t = normalizeTheme(theme); try { localStorage.setItem(STORE_THEME_KEY, t); } catch (_) {} applyTheme(t); }
-    function toggleTheme() { setTheme(document.body.getAttribute('data-theme') === 'light' ? 'dark' : 'light'); }
+    /* ===== テーマは共有モジュール app-theme.js が一元管理 ===== */
 
     /* ===== 認証・店舗ロック ===== */
     function getToken() { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY) || ''); }
@@ -1310,7 +1296,6 @@
 
     /* ===== events ===== */
     dom.reloadBtn.addEventListener('click', loadEntries);
-    dom.themeToggleBtn.addEventListener('click', toggleTheme);
     dom.addItem.addEventListener('click', () => { dom.itemList.appendChild(makeItemRow('', '', 'shokuzai')); });
     if (dom.taxModeSeg) {
       dom.taxModeSeg.addEventListener('click', (e) => {
@@ -1357,7 +1342,6 @@
 
     /* ===== init ===== */
     (async function init() {
-      applyTheme(getTheme());
       resetForm();                 // 明細1行 + 当日
       captureLockedStoreFromUrl(); // populateStores より前
       populateStores();

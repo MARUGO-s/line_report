@@ -1263,6 +1263,7 @@
   <script src="pages-config.js"></script>
   <script src="auth-session.js?v=20260624"></script>
   <script src="site-cache.js"></script>
+  <script src="app-theme.js?v=20260702"></script>
   <script>
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
@@ -1400,37 +1401,8 @@
       dom.authState.className = hasToken ? 'pill ok' : 'pill';
     }
 
-    function normalizeTheme(value) {
-      const theme = String(value || '').trim().toLowerCase();
-      return theme === 'light' ? 'light' : 'dark';
-    }
-
-    function getTheme() {
-      return normalizeTheme(localStorage.getItem(STORE_THEME_KEY));
-    }
-
-    function updateThemeToggleButton() {
-      const isLight = state.theme === 'light';
-      dom.themeToggleBtn.textContent = isLight ? 'ダークモード' : 'ライトモード';
-      dom.themeToggleBtn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
-      dom.themeToggleBtn.title = isLight ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
-    }
-
-    function applyTheme(theme) {
-      state.theme = normalizeTheme(theme);
-      document.body.setAttribute('data-theme', state.theme);
-      updateThemeToggleButton();
-    }
-
-    function setTheme(theme) {
-      const normalized = normalizeTheme(theme);
-      localStorage.setItem(STORE_THEME_KEY, normalized);
-      applyTheme(normalized);
-    }
-
-    function toggleTheme() {
-      setTheme(state.theme === 'light' ? 'dark' : 'light');
-    }
+    // テーマ（ダーク/ライト）は共有モジュール app-theme.js が一元管理する
+    // （#themeToggleBtn の配線・localStorage 保存・body/html への data-theme 反映）。
 
     function escapeHtml(value) {
       return String(value)
@@ -2794,9 +2766,6 @@
       }
     });
 
-    dom.themeToggleBtn.addEventListener('click', function() {
-      toggleTheme();
-    });
 
     dom.toggleMediaBulkDeleteBtn.addEventListener('click', async function() {
       try {
@@ -3098,7 +3067,6 @@
         }
       }
       dom.projectUrlInput.value = FIXED_PROJECT_URL;
-      applyTheme(getTheme());
       updateAuthState();
       refreshSalesSheetNavLink();
       updateMediaBulkDeleteButtonLabel();

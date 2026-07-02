@@ -580,6 +580,7 @@
   <script src="auth-session.js?v=20260624"></script>
   <script src="site-cache.js"></script>
   <script src="menu-logout.js?v=20260702"></script>
+  <script src="app-theme.js?v=20260702"></script>
   <script>
     'use strict';
 
@@ -637,30 +638,7 @@
     }
 
     /* ---------- テーマ切替（共有シェルと同じキー） ---------- */
-    function normalizeTheme(value) {
-      const theme = String(value || '').trim().toLowerCase();
-      return theme === 'light' ? 'light' : 'dark';
-    }
-    function getTheme() {
-      try { return normalizeTheme(localStorage.getItem(STORE_THEME_KEY)); } catch (_) { return 'dark'; }
-    }
-    function updateThemeToggleButton() {
-      const isLight = state.theme === 'light';
-      dom.themeToggleBtn.textContent = isLight ? 'ダークモード' : 'ライトモード';
-      dom.themeToggleBtn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
-      dom.themeToggleBtn.title = isLight ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
-    }
-    function applyTheme(theme) {
-      state.theme = normalizeTheme(theme);
-      document.body.setAttribute('data-theme', state.theme);
-      updateThemeToggleButton();
-    }
-    function setTheme(theme) {
-      const normalized = normalizeTheme(theme);
-      try { localStorage.setItem(STORE_THEME_KEY, normalized); } catch (_) {}
-      applyTheme(normalized);
-    }
-    function toggleTheme() { setTheme(state.theme === 'light' ? 'dark' : 'light'); }
+    // テーマ（ダーク/ライト）は共有モジュール app-theme.js が一元管理する。
 
     /* ---------- 料金前提（localStorage 永続化） ---------- */
     function loadRates() {
@@ -1014,7 +992,6 @@
     });
 
     dom.reloadBtn.addEventListener('click', load);
-    dom.themeToggleBtn.addEventListener('click', toggleTheme);
 
     dom.applyRatesBtn.addEventListener('click', function () {
       state.rates = readRateInputs();
@@ -1060,7 +1037,6 @@
           console.error('consumeUrlAuthParams failed:', error);
         }
       }
-      applyTheme(getTheme());
       updateAuthState();
       fillRateInputs();
       refreshSalesSheetNavLink();
