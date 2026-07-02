@@ -1696,7 +1696,7 @@
       const item = state.popupItems[popupId];
       if (!item) return;
       state.activePopupItem = item;
-      if (dom.resvEditBtn) dom.resvEditBtn.hidden = isLineScopedReservationView();
+      if (dom.resvEditBtn) dom.resvEditBtn.hidden = false;
       const sourceLabel = sourceLabelFromItem(item);
       const summary = buildReservationSummary(item);
       dom.resvModalTitle.textContent = '予約詳細';
@@ -1768,7 +1768,6 @@
     }
 
     function openEditModal(item) {
-      if (isLineScopedReservationView()) return;
       state.editing = item || null;
       hideSuggestPops();
       if (dom.resvEditError) dom.resvEditError.textContent = '';
@@ -1781,7 +1780,12 @@
       dom.ef_name.value = isEdit ? String(item.customer_name_label || item.customer_name || '') : '';
       dom.ef_phone.value = isEdit ? String(item.customer_phone || '') : '';
       const storeKey = isEdit ? getReservationStoreKey(item) : '';
-      populateEditStoreOptions(storeKey === '__unmatched__' ? '' : storeKey);
+      const fixedStoreKey = isLineScopedReservationView() ? state.lockedStoreKey : '';
+      populateEditStoreOptions(fixedStoreKey || (storeKey === '__unmatched__' ? '' : storeKey));
+      if (dom.ef_store) {
+        dom.ef_store.disabled = !!fixedStoreKey;
+        dom.ef_store.setAttribute('aria-disabled', fixedStoreKey ? 'true' : 'false');
+      }
       const party = isEdit ? String(item.party_size_label || '') : '';
       dom.ef_party.value = (party && party !== '不明') ? party : '';
       const rtype = isEdit ? String(item.reservation_type || '') : '';
@@ -1822,7 +1826,6 @@
     }
 
     async function saveReservation() {
-      if (isLineScopedReservationView()) return;
       const visitIso = localInputToIso(dom.ef_visit_at.value);
       if (!visitIso) { dom.resvEditError.textContent = '来店日時を入力してください。'; return; }
       const storeKey = String(dom.ef_store.value || '').trim();
@@ -1855,7 +1858,6 @@
     }
 
     async function setReservationHidden(hidden) {
-      if (isLineScopedReservationView()) return;
       if (!state.editing) return;
       if (hidden && !confirm('この予約を非表示（キャンセル扱い）にします。\n記録は残るので、後で「非表示も表示」から復元できます。よろしいですか？')) return;
       dom.resvEditError.textContent = '';
@@ -1875,7 +1877,6 @@
     }
 
     async function deleteReservation() {
-      if (isLineScopedReservationView()) return;
       if (!state.editing) return;
       const it = state.editing;
       const label = String(it.customer_name_label || it.customer_name || '') || '(名前なし)';
@@ -1894,7 +1895,6 @@
     }
 
     function runSuggest(field) {
-      if (isLineScopedReservationView()) return;
       const input = field === 'phone' ? dom.ef_phone : dom.ef_name;
       const pop = field === 'phone' ? dom.ef_phone_pop : dom.ef_name_pop;
       const q = String(input.value || '').trim();
@@ -2483,7 +2483,6 @@
         }
         if (dom.storeSelectPop) dom.storeSelectPop.hidden = true;
         if (dom.newReservationBtn) dom.newReservationBtn.hidden = true;
-        if (dom.resvEditBtn) dom.resvEditBtn.hidden = true;
         if (dom.showHiddenToggle && dom.showHiddenToggle.parentElement) {
           dom.showHiddenToggle.checked = false;
           dom.showHiddenToggle.parentElement.hidden = true;
