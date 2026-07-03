@@ -1,6 +1,9 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { LineImageReceiptAnalysis, LineReplyPayload } from './receipt_types.ts'
-import { buildReceiptFlexMessage } from './receipt_flex_reply.ts'
+import {
+  buildReceiptFlexMessage,
+  type ReceiptReplyVisibilityOptions,
+} from './receipt_flex_reply.ts'
 import {
   parseReceiptAnalysisDeleteDirective,
   parseReceiptCorrectionStartDirective,
@@ -541,6 +544,7 @@ async function buildUpdatedReceiptFlexReply(
   receipt: LineImageReceiptAnalysis,
   receiptDateIso: string,
   lineMessageId: string,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<Record<string, unknown>> {
   const storeDisplayName = registry.display_name || registry.store_partition_key
   const replyContext = await loadReceiptReplyContext(supabase, {
@@ -551,7 +555,7 @@ async function buildUpdatedReceiptFlexReply(
     receiptDateIso,
     lineMessageId,
   })
-  return buildReceiptFlexMessage(replyContext)
+  return buildReceiptFlexMessage(replyContext, replyVisibility)
 }
 
 async function startCorrectionSession(
@@ -622,6 +626,7 @@ async function finishCorrectionFromPending(
   roomId: string,
   userId: string | null,
   pending: PendingStoreReceiptCorrection,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<LineReplyPayload> {
   const storeDisplayName = registry.display_name || registry.store_partition_key
   const persisted = await updateStoreReceiptFromDraft(
@@ -643,6 +648,7 @@ async function finishCorrectionFromPending(
     persisted.receipt,
     persisted.receiptDateIso,
     pending.line_message_id,
+    replyVisibility,
   )
 }
 
@@ -662,6 +668,7 @@ export async function handleReceiptCorrectionPostback(
   roomId: string,
   userId: string | null,
   postbackData: string,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<LineReplyPayload | null> {
   const control = mapReceiptCorrectionPostbackToControl(postbackData)
   if (!control) return null
@@ -670,7 +677,7 @@ export async function handleReceiptCorrectionPostback(
     : control === 'cancel'
     ? RECEIPT_CORRECTION_CANCEL_TEXT
     : RECEIPT_CORRECTION_BACK_TEXT
-  return tryHandlePendingCorrection(supabase, registry, roomId, userId, text)
+  return tryHandlePendingCorrection(supabase, registry, roomId, userId, text, replyVisibility)
 }
 
 async function handleCorrectionValueInput(
@@ -764,6 +771,7 @@ async function tryHandlePendingCorrection(
   roomId: string,
   userId: string | null,
   text: string,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<LineReplyPayload | null> {
   const pending = await loadPendingCorrection(supabase, roomId, userId)
   if (!pending) return null
@@ -776,11 +784,26 @@ async function tryHandlePendingCorrection(
   }
 
   if (control === 'confirm') {
-    return finishCorrectionFromPending(supabase, registry, roomId, userId, pending)
+    return finishCorrectionFromPending(
+      supabase,
+      registry,
+      roomId,
+      userId,
+      pending,
+      replyVisibility,
+    )
   }
 
   if (pending.stage === 'input_value' && pending.current_field_key) {
-    return handleCorrectionValueInput(supabase, registry, roomId, userId, pending, text, control)
+    return handleCorrectionValueInput(
+      supabase,
+      registry,
+      roomId,
+      userId,
+      pending,
+      text,
+      control,
+    )
   }
 
   if (pending.stage === 'select_field') {
@@ -815,6 +838,7 @@ export async function handleStoreReceiptTextMessage(
   roomId: string,
   userId: string | null,
   text: string,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<LineReplyPayload | null> {
   const storeMismatchReply = await tryHandlePendingStoreNameMismatchConfirmation(
     supabase,
@@ -826,7 +850,14 @@ export async function handleStoreReceiptTextMessage(
   if (storeMismatchReply) return storeMismatchReply
 
   // 修正フローを重複確認より先に処理（「6」等が重複確認の 1/2/3 と誤判定されない）
-  const pendingReply = await tryHandlePendingCorrection(supabase, registry, roomId, userId, text)
+  const pendingReply = await tryHandlePendingCorrection(
+    supabase,
+    registry,
+    roomId,
+    userId,
+    text,
+    replyVisibility,
+  )
   if (pendingReply) return pendingReply
 
   const duplicateReply = await tryHandlePendingReceiptDuplicateConfirmation(
@@ -835,6 +866,7 @@ export async function handleStoreReceiptTextMessage(
     roomId,
     userId,
     text,
+    replyVisibility,
   )
   if (duplicateReply) return duplicateReply
 

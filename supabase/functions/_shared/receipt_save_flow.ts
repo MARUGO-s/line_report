@@ -1,6 +1,9 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { LineImageReceiptAnalysis, LineReplyPayload } from './receipt_types.ts'
-import { buildReceiptFlexMessage } from './receipt_flex_reply.ts'
+import {
+  buildReceiptFlexMessage,
+  type ReceiptReplyVisibilityOptions,
+} from './receipt_flex_reply.ts'
 import {
   buildReceiptDuplicateConfirmationFlexReply,
   clearPendingReceiptDuplicate,
@@ -33,6 +36,7 @@ export async function attemptReceiptRegistration(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
   payload: ReceiptRegistrationPayload,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<ReceiptRegistrationResult> {
   const sameDateExists = await hasExistingReceiptForDate(
     supabase,
@@ -95,5 +99,5 @@ export async function attemptReceiptRegistration(
     receiptDateIso: payload.receipt_date,
     lineMessageId: payload.line_message_id,
   })
-  return { saved: true, reply: buildReceiptFlexMessage(replyContext) }
+  return { saved: true, reply: buildReceiptFlexMessage(replyContext, replyVisibility) }
 }

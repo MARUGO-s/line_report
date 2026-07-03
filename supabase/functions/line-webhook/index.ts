@@ -48,6 +48,7 @@ import {
   isReceiptCorrectionPostbackData,
   lineReplyPayloadToMessages,
 } from '../_shared/receipt_correction.ts'
+import type { ReceiptReplyVisibilityOptions } from '../_shared/receipt_flex_reply.ts'
 import {
   applySauvageNetSalesAsGrossSales,
   computeReceiptHeuristicConfidence,
@@ -1104,6 +1105,7 @@ async function processReceiptImageEvent(
   suppressNonReceiptReply = false, // !non_receipt_image_reply_enabled: 非レシート画像の返信のみ抑止
   allowPettyCash = true,        // petty_receipt_analysis_enabled: 経費(小口)フローの許可（ONなら hard mute でも優先返信）
   salesRegistrationAllowed = true, // receipt_sales_registration_enabled: 売上(精算)をこのルームから本番DBへ登録するか（試運転ルームはOFF）
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<{ saved: boolean; replied: boolean; reason?: string }> {
   const lineMessageId = String(event.message?.id ?? '').trim()
   const rawReplyToken = String(event.replyToken ?? '').trim()
@@ -1646,7 +1648,12 @@ async function processReceiptImageEvent(
     return { saved: false, replied: !!receiptReplyToken, reason: 'sales_registration_disabled' }
   }
 
-  const result = await attemptReceiptRegistration(supabase, registry, registrationPayload)
+  const result = await attemptReceiptRegistration(
+    supabase,
+    registry,
+    registrationPayload,
+    replyVisibility,
+  )
 
   if (receiptReplyToken) {
     const messages = lineReplyPayloadToMessages(result.reply)
@@ -1672,6 +1679,7 @@ async function processReceiptTextEvent(
   event: LineEvent,
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
   suppressReply = false,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<{ handled: boolean; replied: boolean; reason?: string }> {
   const text = String(event.message?.text ?? '').trim()
   // AI返信完全無し（bot_reply_hard_mute_enabled）が ON のルームでは返信トークンを空にして
@@ -1694,6 +1702,7 @@ async function processReceiptTextEvent(
     roomId,
     userId,
     text,
+    replyVisibility,
   )
   if (!replyPayload) return { handled: false, replied: false }
 
@@ -1947,6 +1956,7 @@ Deno.serve(async (req) => {
     let pettyAnalysisAllowed = true
     // 売上(精算)レシートをこのルームから本番DBへ登録するか（既定ON）。試運転ルームは OFF にして本番テーブルを汚さない。
     let salesRegistrationAllowed = true
+    let receiptReplyVisibility: ReceiptReplyVisibilityOptions = { showExecutiveDetail: true }
     if (eventRoomId) {
       const muteFlags = await loadRoomSearchFlagsCached(eventRoomId)
       roomHardMuted = !!muteFlags?.bot_reply_hard_mute_enabled
@@ -1960,6 +1970,11 @@ Deno.serve(async (req) => {
       budgetEntryAllowed = muteFlags !== null ? !!muteFlags.budget_entry_enabled : false
       pettyAnalysisAllowed = muteFlags !== null ? muteFlags.petty_receipt_analysis_enabled !== false : true
       salesRegistrationAllowed = muteFlags !== null ? muteFlags.receipt_sales_registration_enabled !== false : true
+      receiptReplyVisibility = {
+        showExecutiveDetail: muteFlags !== null
+          ? muteFlags.receipt_reply_executive_detail_enabled !== false
+          : true,
+      }
     }
 
     // メディア閲覧用の保存（画像/動画/音声/ファイル）。1ルーム合計20MBまで、超過分は古い順に自動削除。
@@ -2004,7 +2019,16 @@ Deno.serve(async (req) => {
 
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
-        const result = await processReceiptImageEvent(registry as StoreRegistryRow, event, roomHardMuted, suppressReceiptReply, suppressNonReceiptReply, pettyAnalysisAllowed, salesRegistrationAllowed)
+        const result = await processReceiptImageEvent(
+          registry as StoreRegistryRow,
+          event,
+          roomHardMuted,
+          suppressReceiptReply,
+          suppressNonReceiptReply,
+          pettyAnalysisAllowed,
+          salesRegistrationAllowed,
+          receiptReplyVisibility,
+        )
         if (result.saved) receiptsSaved += 1
         if (result.replied) receiptReplies += 1
         if (result.reason && !result.saved) {
@@ -2049,6 +2073,7 @@ Deno.serve(async (req) => {
             eventRoomIdForPostback,
             postbackUserId,
             postbackData,
+            receiptReplyVisibility,
           )
           if (correctionPayload) {
             // 修正は適用済み。レシート操作の返信は AI返信完全無しの対象外。
@@ -2292,7 +2317,13 @@ Deno.serve(async (req) => {
       if (!dailySalesTemplateHandled && !roomConfigHandled && !budgetEntryHandled && !pettyCashHandled) try {
         // レシート操作の返信（重複確認 加算/中止/置き換え・修正・削除の結果）は AI返信完全無しの対象外。
         // 「レシートの解析結果を送信」または「レシート修正の返信を許可」の両方OFFのときだけ抑止する。
-        const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, suppressReceiptReply && !allowCorrectionReply)
+        const result = await processReceiptTextEvent(
+          registry as StoreRegistryRow,
+          event,
+          supabase,
+          suppressReceiptReply && !allowCorrectionReply,
+          receiptReplyVisibility,
+        )
         receiptHandled = result.handled
         if (result.handled) textHandled += 1
         if (result.replied) receiptReplies += 1

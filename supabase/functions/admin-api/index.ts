@@ -299,6 +299,7 @@ const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
   "message_search_enabled", "message_search_library_enabled",
   "send_room_summary", "receive_overall_summary_enabled",
   "media_file_access_enabled", "image_analysis_reply_enabled",
+  "receipt_reply_executive_detail_enabled",
   "receipt_correction_reply_enabled", "non_receipt_image_reply_enabled",
   "media_save_enabled", "budget_entry_enabled", "petty_receipt_analysis_enabled",
   "receipt_midreport_enabled", "receipt_monthend_report_enabled",
@@ -1505,6 +1506,7 @@ Deno.serve(async (req, info) => {
           message_search_library_enabled: payload.message_search_library_enabled,
           media_file_access_enabled: payload.media_file_access_enabled,
           image_analysis_reply_enabled: payload.image_analysis_reply_enabled,
+          receipt_reply_executive_detail_enabled: payload.receipt_reply_executive_detail_enabled,
           receipt_correction_reply_enabled: payload.receipt_correction_reply_enabled,
           non_receipt_image_reply_enabled: payload.non_receipt_image_reply_enabled,
           media_save_enabled: payload.media_save_enabled,
@@ -7386,6 +7388,7 @@ function buildRoomSettingsPayload(body: unknown): {
   message_search_library_enabled: boolean
   media_file_access_enabled: boolean
   image_analysis_reply_enabled: boolean
+  receipt_reply_executive_detail_enabled: boolean
   receipt_correction_reply_enabled: boolean
   non_receipt_image_reply_enabled: boolean
   gmail_reservation_alert_enabled: boolean
@@ -7508,6 +7511,12 @@ function buildRoomSettingsPayload(body: unknown): {
     throw { status: 400, message: "image_analysis_reply_enabled must be boolean when provided." } satisfies AppError
   }
   const imageAnalysisReplyEnabled = imageAnalysisReplyEnabledRaw !== false
+
+  const receiptReplyExecutiveDetailEnabledRaw = body.receipt_reply_executive_detail_enabled
+  if (receiptReplyExecutiveDetailEnabledRaw != null && typeof receiptReplyExecutiveDetailEnabledRaw !== "boolean") {
+    throw { status: 400, message: "receipt_reply_executive_detail_enabled must be boolean when provided." } satisfies AppError
+  }
+  const receiptReplyExecutiveDetailEnabled = receiptReplyExecutiveDetailEnabledRaw !== false
 
   const receiptCorrectionReplyEnabledRaw = body.receipt_correction_reply_enabled
   if (receiptCorrectionReplyEnabledRaw != null && typeof receiptCorrectionReplyEnabledRaw !== "boolean") {
@@ -7652,6 +7661,7 @@ function buildRoomSettingsPayload(body: unknown): {
     message_search_library_enabled: messageSearchLibraryEnabled,
     media_file_access_enabled: mediaFileAccessEnabled,
     image_analysis_reply_enabled: imageAnalysisReplyEnabled,
+    receipt_reply_executive_detail_enabled: receiptReplyExecutiveDetailEnabled,
     receipt_correction_reply_enabled: receiptCorrectionReplyEnabled,
     non_receipt_image_reply_enabled: nonReceiptImageReplyEnabled,
     gmail_reservation_alert_enabled: gmailReservationAlertEnabled,

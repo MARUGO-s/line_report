@@ -98,7 +98,15 @@ function sectionTitle(text: string) {
   }
 }
 
-export function buildReceiptFlexMessage(context: ReceiptReplyContext): Record<string, unknown> {
+export type ReceiptReplyVisibilityOptions = {
+  showExecutiveDetail?: boolean
+}
+
+export function buildReceiptFlexMessage(
+  context: ReceiptReplyContext,
+  options: ReceiptReplyVisibilityOptions = {},
+): Record<string, unknown> {
+  const showExecutiveDetail = options.showExecutiveDetail !== false
   const dateText = formatReceiptDateJa(context.receiptDateText, context.receiptDateIso)
   const unitPrice = context.unitPriceYen ?? (
     context.grossSalesYen != null && context.guestCount != null && context.guestCount > 0
@@ -118,17 +126,22 @@ export function buildReceiptFlexMessage(context: ReceiptReplyContext): Record<st
     kvRow('会計組数', formatCountOrDash(context.partyCount, ' 組')),
     kvRow('客数', formatCountOrDash(context.guestCount, ' 人')),
     kvRow('客単価', formatYenOrDash(unitPrice)),
-    { type: 'separator', margin: 'md' },
-    kvRow('営業日数', formatCountOrDash(context.businessDays, ' 日')),
-    kvRow('月間総売上', formatYenOrDash(context.monthGrossSalesYen)),
-    kvRow('1日平均', formatYenOrDash(context.monthDailyAvgGross)),
-    kvRow('月間会計組数', formatCountOrDash(context.monthPartyCount, ' 組')),
-    kvRow('1日平均', formatDecimalOrDash(context.monthDailyAvgParty, ' 組')),
-    kvRow('月間客数', formatCountOrDash(context.monthGuestCount, ' 人')),
-    kvRow('1日平均', formatDecimalOrDash(context.monthDailyAvgGuest, ' 名')),
   ]
 
-  if (context.monthBudgetYen != null) {
+  if (showExecutiveDetail) {
+    bodyContents.push(
+      { type: 'separator', margin: 'md' },
+      kvRow('営業日数', formatCountOrDash(context.businessDays, ' 日')),
+      kvRow('月間総売上', formatYenOrDash(context.monthGrossSalesYen)),
+      kvRow('1日平均', formatYenOrDash(context.monthDailyAvgGross)),
+      kvRow('月間会計組数', formatCountOrDash(context.monthPartyCount, ' 組')),
+      kvRow('1日平均', formatDecimalOrDash(context.monthDailyAvgParty, ' 組')),
+      kvRow('月間客数', formatCountOrDash(context.monthGuestCount, ' 人')),
+      kvRow('1日平均', formatDecimalOrDash(context.monthDailyAvgGuest, ' 名')),
+    )
+  }
+
+  if (showExecutiveDetail && context.monthBudgetYen != null) {
     bodyContents.push(
       { type: 'separator', margin: 'md' },
       sectionTitle('【予算】'),
@@ -152,7 +165,7 @@ export function buildReceiptFlexMessage(context: ReceiptReplyContext): Record<st
     )
   }
 
-  if (context.yoyPeriodLabel) {
+  if (showExecutiveDetail && context.yoyPeriodLabel) {
     const yoySalesDiffLabel = context.yoySalesDiffYen != null
       ? formatSignedYen(context.yoySalesDiffYen).replace(/^\+/, '')
       : '-'

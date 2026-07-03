@@ -66,6 +66,7 @@ const GROUP_OTHER_SEARCH_TEXT =
 type RoomSearchFlags = {
   bot_reply_hard_mute_enabled: boolean
   image_analysis_reply_enabled: boolean
+  receipt_reply_executive_detail_enabled: boolean
   receipt_correction_reply_enabled: boolean
   non_receipt_image_reply_enabled: boolean
   message_search_enabled: boolean
@@ -327,7 +328,7 @@ export async function loadRoomSearchFlags(
   const { data, error } = await supabase
     .from('room_summary_settings')
     .select(
-      'bot_reply_hard_mute_enabled, image_analysis_reply_enabled, receipt_correction_reply_enabled, non_receipt_image_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled, media_save_enabled, budget_entry_enabled, petty_receipt_analysis_enabled, receipt_sales_registration_enabled',
+      'bot_reply_hard_mute_enabled, image_analysis_reply_enabled, receipt_reply_executive_detail_enabled, receipt_correction_reply_enabled, non_receipt_image_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled, media_save_enabled, budget_entry_enabled, petty_receipt_analysis_enabled, receipt_sales_registration_enabled',
     )
     .eq('room_id', roomId)
     .maybeSingle()
@@ -340,6 +341,7 @@ export async function loadRoomSearchFlags(
     return {
       bot_reply_hard_mute_enabled: false,
       image_analysis_reply_enabled: true,
+      receipt_reply_executive_detail_enabled: true,
       receipt_correction_reply_enabled: false,
       non_receipt_image_reply_enabled: true,
       message_search_enabled: false,
@@ -360,6 +362,7 @@ export async function loadRoomSearchFlags(
   return {
     bot_reply_hard_mute_enabled: row.bot_reply_hard_mute_enabled === true,
     image_analysis_reply_enabled: row.image_analysis_reply_enabled !== false,
+    receipt_reply_executive_detail_enabled: row.receipt_reply_executive_detail_enabled !== false,
     receipt_correction_reply_enabled: row.receipt_correction_reply_enabled === true,
     non_receipt_image_reply_enabled: row.non_receipt_image_reply_enabled !== false,
     message_search_enabled: row.message_search_enabled === true,
@@ -381,7 +384,7 @@ async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<R
   const { data, error } = await supabase
     .from('room_summary_settings')
     .select(
-      'image_analysis_reply_enabled, receipt_correction_reply_enabled, non_receipt_image_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled, media_save_enabled, petty_receipt_analysis_enabled',
+      'image_analysis_reply_enabled, receipt_reply_executive_detail_enabled, receipt_correction_reply_enabled, non_receipt_image_reply_enabled, message_search_enabled, message_search_library_enabled, media_file_access_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled, media_save_enabled, petty_receipt_analysis_enabled',
     )
 
   if (error) {
@@ -389,6 +392,7 @@ async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<R
     return {
       bot_reply_hard_mute_enabled: false,
       image_analysis_reply_enabled: true,
+      receipt_reply_executive_detail_enabled: true,
       receipt_correction_reply_enabled: false,
       non_receipt_image_reply_enabled: true,
       message_search_enabled: false,
@@ -414,6 +418,7 @@ async function loadDirectMessageSearchFlags(supabase: SupabaseClient): Promise<R
   return {
     bot_reply_hard_mute_enabled: false,
     image_analysis_reply_enabled: anyReceiptOn('image_analysis_reply_enabled'),
+    receipt_reply_executive_detail_enabled: anyReceiptOn('receipt_reply_executive_detail_enabled'),
     receipt_correction_reply_enabled: any('receipt_correction_reply_enabled'),
     non_receipt_image_reply_enabled: anyReceiptOn('non_receipt_image_reply_enabled'),
     message_search_enabled: any('message_search_enabled'),
@@ -447,6 +452,7 @@ export async function loadSearchFlagsForContext(
     ...aggregate,
     bot_reply_hard_mute_enabled: personal?.bot_reply_hard_mute_enabled === true,
     image_analysis_reply_enabled: aggregate.image_analysis_reply_enabled,
+    receipt_reply_executive_detail_enabled: aggregate.receipt_reply_executive_detail_enabled,
     receipt_correction_reply_enabled: aggregate.receipt_correction_reply_enabled,
     non_receipt_image_reply_enabled: aggregate.non_receipt_image_reply_enabled,
   }

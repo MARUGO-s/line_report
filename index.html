@@ -5525,6 +5525,7 @@
         <div class="room-scope-modal-list" style="margin-top:12px;">
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigMediaAccess" type="checkbox">LINE添付保存（ルーム）</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigImageAnalysisReplyEnabled" type="checkbox">レシートの解析結果を送信</label>
+          <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptReplyExecutiveDetailEnabled" type="checkbox">幹部向け詳細を含める（予算・昨対・月累計）</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptCorrectionReplyEnabled" type="checkbox">レシート修正の返信を許可（AI返信完全無しでも修正は返信）</label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMidreportEnabled" type="checkbox"><span id="roomConfigReceiptMidreportLabel">売上中間報告をこのルームに送信</span></label>
           <label class="room-scope-option receipt-scope-option"><input id="roomConfigReceiptMonthendReportEnabled" type="checkbox"><span id="roomConfigReceiptMonthendReportLabel">売上月末レポートをこのルームに送信</span></label>
@@ -5745,6 +5746,7 @@
         <div class="room-scope-modal-list">
           <label class="room-scope-option"><input id="newRoomMediaFileAccessEnabled" type="checkbox">LINE添付保存（ルーム）</label>
           <label class="room-scope-option"><input id="newRoomImageAnalysisReplyEnabled" type="checkbox">レシートの解析結果を送信</label>
+          <label class="room-scope-option"><input id="newRoomReceiptReplyExecutiveDetailEnabled" type="checkbox">幹部向け詳細を含める（予算・昨対・月累計）</label>
           <label class="room-scope-option"><input id="newRoomReceiptCorrectionReplyEnabled" type="checkbox">レシート修正の返信を許可（AI返信完全無しでも修正は返信）</label>
           <label class="room-scope-option"><input id="newRoomPettyReceiptAnalysisEnabled" type="checkbox">小口レシートの解析をする（AI返信完全無しでも経費の解析・返信を優先）</label>
           <label class="room-scope-option"><input id="newRoomBudgetEntryEnabled" type="checkbox">予算登録を許可（このルームから月次予算を入力）</label>
@@ -5908,6 +5910,7 @@
     const NEW_ROOM_DEFAULT_TOMORROW_REMINDER_MAX_ITEMS_KEY = 'line_summary_new_room_default_tomorrow_reminder_max_items';
     const NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY = 'line_summary_new_room_default_media_file_access';
     const NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY = 'line_summary_new_room_default_image_analysis_reply';
+    const NEW_ROOM_DEFAULT_RECEIPT_REPLY_EXECUTIVE_DETAIL_KEY = 'line_summary_new_room_default_receipt_reply_executive_detail';
     const NEW_ROOM_DEFAULT_GOOGLE_CALENDAR_AUTO_REGISTER_KEY = 'line_summary_new_room_default_google_calendar_auto_register';
     const NEW_ROOM_DEFAULT_CALENDAR_AUTO_CREATE_KEY = 'line_summary_new_room_default_calendar_auto_create';
     const NEW_ROOM_DEFAULT_SILENT_AUTO_REGISTER_KEY = 'line_summary_new_room_default_silent_auto_register';
@@ -5948,6 +5951,7 @@
       bot_reply: false,
       media_access: true,
       image_analysis_reply: true,
+      receipt_reply_executive_detail: true,
       receipt_midreport: true,
       receipt_monthend: true,
       calendar_auto: false,
@@ -6010,6 +6014,7 @@
       newRoomTomorrowReminderMaxItems: document.getElementById('newRoomTomorrowReminderMaxItems'),
       newRoomMediaFileAccessEnabled: document.getElementById('newRoomMediaFileAccessEnabled'),
       newRoomImageAnalysisReplyEnabled: document.getElementById('newRoomImageAnalysisReplyEnabled'),
+      newRoomReceiptReplyExecutiveDetailEnabled: document.getElementById('newRoomReceiptReplyExecutiveDetailEnabled'),
       newRoomReceiptCorrectionReplyEnabled: document.getElementById('newRoomReceiptCorrectionReplyEnabled'),
       newRoomBudgetEntryEnabled: document.getElementById('newRoomBudgetEntryEnabled'),
       newRoomPettyReceiptAnalysisEnabled: document.getElementById('newRoomPettyReceiptAnalysisEnabled'),
@@ -6084,6 +6089,7 @@
       roomConfigTomorrowReminder: document.getElementById('roomConfigTomorrowReminder'),
       roomConfigMediaAccess: document.getElementById('roomConfigMediaAccess'),
       roomConfigImageAnalysisReplyEnabled: document.getElementById('roomConfigImageAnalysisReplyEnabled'),
+      roomConfigReceiptReplyExecutiveDetailEnabled: document.getElementById('roomConfigReceiptReplyExecutiveDetailEnabled'),
       roomConfigBudgetEntryEnabled: document.getElementById('roomConfigBudgetEntryEnabled'),
       roomConfigPettyReceiptAnalysisEnabled: document.getElementById('roomConfigPettyReceiptAnalysisEnabled'),
       roomConfigReceiptSalesRegistrationEnabled: document.getElementById('roomConfigReceiptSalesRegistrationEnabled'),
@@ -8392,6 +8398,10 @@
     function syncRoomConfigMediaSubOptions() {
       var canStore = dom.roomConfigMediaAccess && dom.roomConfigMediaAccess.checked;
       if (dom.roomConfigImageAnalysisReplyEnabled) dom.roomConfigImageAnalysisReplyEnabled.disabled = !canStore;
+      if (dom.roomConfigReceiptReplyExecutiveDetailEnabled) {
+        dom.roomConfigReceiptReplyExecutiveDetailEnabled.disabled =
+          !canStore || !(dom.roomConfigImageAnalysisReplyEnabled && dom.roomConfigImageAnalysisReplyEnabled.checked);
+      }
     }
 
     function syncRoomSummaryMutualExclusion() {
@@ -8439,6 +8449,10 @@
     function syncNewRoomMediaSubOptions() {
       var canStore = dom.newRoomMediaFileAccessEnabled && dom.newRoomMediaFileAccessEnabled.checked;
       if (dom.newRoomImageAnalysisReplyEnabled) dom.newRoomImageAnalysisReplyEnabled.disabled = !canStore;
+      if (dom.newRoomReceiptReplyExecutiveDetailEnabled) {
+        dom.newRoomReceiptReplyExecutiveDetailEnabled.disabled =
+          !canStore || !(dom.newRoomImageAnalysisReplyEnabled && dom.newRoomImageAnalysisReplyEnabled.checked);
+      }
     }
 
     function loadMergedGoogleCalendarAutoRegisterDefault() {
@@ -8481,6 +8495,12 @@
         dom.newRoomImageAnalysisReplyEnabled.checked = loadBooleanSetting(
           NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY,
           NEW_ROOM_RECEIPT_SITE_DEFAULTS.image_analysis_reply,
+        );
+      }
+      if (dom.newRoomReceiptReplyExecutiveDetailEnabled) {
+        dom.newRoomReceiptReplyExecutiveDetailEnabled.checked = loadBooleanSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_REPLY_EXECUTIVE_DETAIL_KEY,
+          NEW_ROOM_RECEIPT_SITE_DEFAULTS.receipt_reply_executive_detail,
         );
       }
       if (dom.newRoomReceiptCorrectionReplyEnabled) {
@@ -8541,6 +8561,9 @@
       const receiptCount =
         (dom.newRoomMediaFileAccessEnabled.checked ? 1 : 0) +
         (dom.newRoomMediaFileAccessEnabled.checked && dom.newRoomImageAnalysisReplyEnabled && dom.newRoomImageAnalysisReplyEnabled.checked ? 1 : 0) +
+        (dom.newRoomMediaFileAccessEnabled.checked
+          && dom.newRoomImageAnalysisReplyEnabled && dom.newRoomImageAnalysisReplyEnabled.checked
+          && dom.newRoomReceiptReplyExecutiveDetailEnabled && dom.newRoomReceiptReplyExecutiveDetailEnabled.checked ? 1 : 0) +
         (dom.newRoomReceiptCorrectionReplyEnabled && dom.newRoomReceiptCorrectionReplyEnabled.checked ? 1 : 0) +
         (dom.newRoomPettyReceiptAnalysisEnabled && dom.newRoomPettyReceiptAnalysisEnabled.checked ? 1 : 0) +
         (dom.newRoomBudgetEntryEnabled && dom.newRoomBudgetEntryEnabled.checked ? 1 : 0) +
@@ -8561,7 +8584,7 @@
       const bulk = getBulkReceiptSchedule();
       return {
         receiptCount: receiptCount,
-        receiptTotal: 7,
+        receiptTotal: 8,
         extraCount: extraCount,
         extraTotal: 11, // computeNewRoomConfigStats の extraCount 加算項の数（全ON時の最大値）。項を増減したらここも合わせる
         midLabel: formatReceiptMidreportScheduleLabel(bulk),
@@ -8606,6 +8629,7 @@
         receive_overall_summary_enabled: !!(dom.roomConfigReceiveOverallSummary && dom.roomConfigReceiveOverallSummary.checked),
         media_file_access_enabled: !!dom.roomConfigMediaAccess.checked,
         image_analysis_reply_enabled: !!(dom.roomConfigImageAnalysisReplyEnabled && dom.roomConfigImageAnalysisReplyEnabled.checked),
+        receipt_reply_executive_detail_enabled: !!(dom.roomConfigReceiptReplyExecutiveDetailEnabled && dom.roomConfigReceiptReplyExecutiveDetailEnabled.checked),
         budget_entry_enabled: !!(dom.roomConfigBudgetEntryEnabled && dom.roomConfigBudgetEntryEnabled.checked),
         room_config_access_enabled: !!(dom.roomConfigSelfEnabled && dom.roomConfigSelfEnabled.checked),
         room_config_password: (dom.roomConfigSelfPassword && dom.roomConfigSelfPassword.value)
@@ -8743,7 +8767,11 @@
         if (!media) {
           webhookReplies.push('LINE添付保存がOFFのため、画像・ファイルは保存されず、解析結果のLINE返信もありません。');
         } else if (imgReply) {
-          webhookReplies.push('メディア保存後、解析結果（レシート集計など）をこのルームのLINEに返信します。');
+          webhookReplies.push(
+            config.receipt_reply_executive_detail_enabled !== false
+              ? 'メディア保存後、解析結果をこのルームのLINEに返信します（当日売上に加えて月累計・予算・昨対も表示）。'
+              : 'メディア保存後、解析結果をこのルームのLINEに返信します（当日売上のみ表示）。',
+          );
         } else {
           webhookReplies.push('メディアは保存しますが、「レシートの解析結果を送信」がOFFのため、解析内容をLINEには返しません。');
         }
@@ -9968,6 +9996,9 @@
       const calendarSummary = storeKey ? getCalendarGmailSummaryForStore(storeKey) : resolveCalendarGmailSettingsForRoom('');
       if (config.media_file_access_enabled !== false) parts.push('添付保存');
       if (config.image_analysis_reply_enabled !== false) parts.push('解析返信');
+      if (config.image_analysis_reply_enabled !== false && config.receipt_reply_executive_detail_enabled !== false) {
+        parts.push('幹部詳細');
+      }
       if (calendarSummary.mixed) {
         parts.push('予定（ルームごと）');
       } else {
@@ -11208,6 +11239,7 @@
         calendar_tomorrow_reminder_enabled: tomorrowReminderInput ? !!tomorrowReminderInput.checked : parseDatasetBoolean(tr.dataset.roomTomorrowReminder, false),
         media_file_access_enabled: mediaFileAccessEnabledInput ? !!mediaFileAccessEnabledInput.checked : parseDatasetBoolean(tr.dataset.roomMediaAccess, true),
         image_analysis_reply_enabled: imageAnalysisReplyEnabledInput ? !!imageAnalysisReplyEnabledInput.checked : parseDatasetBoolean(tr.dataset.roomImageAnalysisReply, true),
+        receipt_reply_executive_detail_enabled: parseDatasetBoolean(tr.dataset.roomReceiptReplyExecutiveDetail, true),
         receipt_correction_reply_enabled: parseDatasetBoolean(tr.dataset.roomReceiptCorrectionReply, false),
         non_receipt_image_reply_enabled: parseDatasetBoolean(tr.dataset.roomNonReceiptImageReply, true),
         media_save_enabled: parseDatasetBoolean(tr.dataset.roomMediaSave, true),
@@ -11251,6 +11283,7 @@
       tr.dataset.roomTomorrowReminder = String(!!config.calendar_tomorrow_reminder_enabled);
       tr.dataset.roomMediaAccess = String(!!config.media_file_access_enabled);
       tr.dataset.roomImageAnalysisReply = String(!!config.image_analysis_reply_enabled);
+      tr.dataset.roomReceiptReplyExecutiveDetail = String(config.receipt_reply_executive_detail_enabled !== false);
       tr.dataset.roomReceiptCorrectionReply = String(!!config.receipt_correction_reply_enabled);
       tr.dataset.roomNonReceiptImageReply = String(config.non_receipt_image_reply_enabled !== false);
       tr.dataset.roomMediaSave = String(config.media_save_enabled !== false);
@@ -11299,6 +11332,7 @@
       if (config.calendar_tomorrow_reminder_enabled) enabledCount += 1;
       if (config.media_file_access_enabled) enabledCount += 1;
       if (config.media_file_access_enabled && config.image_analysis_reply_enabled) enabledCount += 1;
+      if (config.media_file_access_enabled && config.image_analysis_reply_enabled && config.receipt_reply_executive_detail_enabled) enabledCount += 1;
       if (config.calendar_ai_auto_create_enabled && config.calendar_silent_auto_register_enabled) enabledCount += 1;
       if (config.calendar_low_confidence_confirm_reply_enabled && config.calendar_ai_auto_create_enabled && config.calendar_silent_auto_register_enabled) enabledCount += 1;
       if (config.calendar_registration_reply_enabled && config.calendar_ai_auto_create_enabled && config.calendar_silent_auto_register_enabled) enabledCount += 1;
@@ -11317,7 +11351,7 @@
 
     function buildRoomConfigSummary(config) {
       const enabledCount = getRoomConfigEnabledCount(config);
-      return enabledCount + '/15 有効';
+      return enabledCount + '/16 有効';
     }
 
     function buildRoomConfigSavedMessage(storeKey, roomCount) {
@@ -11439,6 +11473,10 @@
         calendar_tomorrow_reminder_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_TOMORROW_REMINDER_KEY, false),
         media_file_access_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_MEDIA_FILE_ACCESS_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.media_access),
         image_analysis_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, NEW_ROOM_RECEIPT_SITE_DEFAULTS.image_analysis_reply),
+        receipt_reply_executive_detail_enabled: loadBooleanSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_REPLY_EXECUTIVE_DETAIL_KEY,
+          NEW_ROOM_RECEIPT_SITE_DEFAULTS.receipt_reply_executive_detail,
+        ),
         receipt_correction_reply_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_RECEIPT_CORRECTION_REPLY_KEY, false),
         budget_entry_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_BUDGET_ENTRY_KEY, false),
         petty_receipt_analysis_enabled: loadBooleanSetting(NEW_ROOM_DEFAULT_PETTY_RECEIPT_ANALYSIS_KEY, true),
@@ -11517,6 +11555,7 @@
         calendar_tomorrow_reminder_enabled: !!config.calendar_tomorrow_reminder_enabled,
         media_file_access_enabled: config.media_file_access_enabled !== false,
         image_analysis_reply_enabled: config.image_analysis_reply_enabled !== false,
+        receipt_reply_executive_detail_enabled: config.receipt_reply_executive_detail_enabled !== false,
         calendar_ai_auto_create_enabled: !!config.calendar_ai_auto_create_enabled,
         calendar_silent_auto_register_enabled: !!config.calendar_silent_auto_register_enabled,
         calendar_low_confidence_confirm_reply_enabled: !!config.calendar_low_confidence_confirm_reply_enabled,
@@ -11734,6 +11773,7 @@
         calendar_tomorrow_reminder_enabled: !!config.calendar_tomorrow_reminder_enabled,
         media_file_access_enabled: config.media_file_access_enabled !== false,
         image_analysis_reply_enabled: config.image_analysis_reply_enabled !== false,
+        receipt_reply_executive_detail_enabled: config.receipt_reply_executive_detail_enabled !== false,
         calendar_ai_auto_create_enabled: !!config.calendar_ai_auto_create_enabled,
         calendar_silent_auto_register_enabled: !!config.calendar_silent_auto_register_enabled,
         calendar_low_confidence_confirm_reply_enabled: !!config.calendar_low_confidence_confirm_reply_enabled,
@@ -12240,6 +12280,7 @@
           calendar_tomorrow_reminder_enabled: setting && setting.calendar_tomorrow_reminder_enabled === true,
           media_file_access_enabled: (setting && setting.media_file_access_enabled) !== false,
           image_analysis_reply_enabled: (setting && setting.image_analysis_reply_enabled) !== false,
+          receipt_reply_executive_detail_enabled: (setting && setting.receipt_reply_executive_detail_enabled) !== false,
           receipt_correction_reply_enabled: !!(setting && setting.receipt_correction_reply_enabled),
           non_receipt_image_reply_enabled: (setting && setting.non_receipt_image_reply_enabled) !== false,
           media_save_enabled: (setting && setting.media_save_enabled) !== false,
@@ -12279,6 +12320,7 @@
         tr.dataset.roomTomorrowReminder = String(roomFeatureConfig.calendar_tomorrow_reminder_enabled);
         tr.dataset.roomMediaAccess = String(roomFeatureConfig.media_file_access_enabled);
         tr.dataset.roomImageAnalysisReply = String(roomFeatureConfig.image_analysis_reply_enabled);
+        tr.dataset.roomReceiptReplyExecutiveDetail = String(roomFeatureConfig.receipt_reply_executive_detail_enabled);
         tr.dataset.roomReceiptCorrectionReply = String(roomFeatureConfig.receipt_correction_reply_enabled);
         tr.dataset.roomNonReceiptImageReply = String(roomFeatureConfig.non_receipt_image_reply_enabled);
         tr.dataset.roomMediaSave = String(roomFeatureConfig.media_save_enabled);
@@ -12334,6 +12376,10 @@
       dom.roomConfigMediaAccess.checked = !!config.media_file_access_enabled;
       if (dom.roomConfigImageAnalysisReplyEnabled) {
         dom.roomConfigImageAnalysisReplyEnabled.checked = !!config.image_analysis_reply_enabled;
+      }
+      if (dom.roomConfigReceiptReplyExecutiveDetailEnabled) {
+        dom.roomConfigReceiptReplyExecutiveDetailEnabled.checked =
+          config.receipt_reply_executive_detail_enabled !== false;
       }
       if (dom.roomConfigBudgetEntryEnabled) {
         dom.roomConfigBudgetEntryEnabled.checked = !!config.budget_entry_enabled;
@@ -12644,6 +12690,7 @@
       receive_overall_summary_enabled: '全体要約の受信',
       media_file_access_enabled: 'LINE添付アクセス',
       image_analysis_reply_enabled: '画像解析の返信',
+      receipt_reply_executive_detail_enabled: '幹部向け詳細返信',
       receipt_correction_reply_enabled: 'レシート訂正の返信',
       non_receipt_image_reply_enabled: 'レシート以外画像の返信',
       media_save_enabled: 'メディア保存',
@@ -12945,6 +12992,7 @@
           message_search_library_enabled: webhookConfig.message_search_library_enabled !== false,
           media_file_access_enabled: webhookConfig.media_file_access_enabled !== false,
           image_analysis_reply_enabled: webhookConfig.image_analysis_reply_enabled !== false,
+          receipt_reply_executive_detail_enabled: webhookConfig.receipt_reply_executive_detail_enabled !== false,
           receipt_correction_reply_enabled: !!webhookConfig.receipt_correction_reply_enabled,
           non_receipt_image_reply_enabled: webhookConfig.non_receipt_image_reply_enabled !== false,
           media_save_enabled: webhookConfig.media_save_enabled !== false,
@@ -13217,6 +13265,7 @@
         message_search_library_enabled: messageSearchLibraryEnabled,
         media_file_access_enabled: roomConfig.media_file_access_enabled,
         image_analysis_reply_enabled: roomConfig.image_analysis_reply_enabled,
+        receipt_reply_executive_detail_enabled: roomConfig.receipt_reply_executive_detail_enabled !== false,
         receipt_correction_reply_enabled: !!roomConfig.receipt_correction_reply_enabled,
         non_receipt_image_reply_enabled: roomConfig.non_receipt_image_reply_enabled !== false,
         media_save_enabled: roomConfig.media_save_enabled !== false,
@@ -13297,6 +13346,7 @@
         payload.calendar_tomorrow_reminder_enabled = !!opts.overrideConfig.calendar_tomorrow_reminder_enabled;
         payload.media_file_access_enabled = !!opts.overrideConfig.media_file_access_enabled;
         payload.image_analysis_reply_enabled = !!opts.overrideConfig.image_analysis_reply_enabled;
+        payload.receipt_reply_executive_detail_enabled = opts.overrideConfig.receipt_reply_executive_detail_enabled !== false;
         payload.budget_entry_enabled = !!opts.overrideConfig.budget_entry_enabled;
         payload.room_config_access_enabled = !!opts.overrideConfig.room_config_access_enabled;
         if (opts.overrideConfig.room_config_password !== undefined) {
@@ -14027,6 +14077,7 @@
       dom.newRoomTomorrowReminderMaxItems,
       dom.newRoomMediaFileAccessEnabled,
       dom.newRoomImageAnalysisReplyEnabled,
+      dom.newRoomReceiptReplyExecutiveDetailEnabled,
       dom.newRoomReceiptCorrectionReplyEnabled,
       dom.newRoomBudgetEntryEnabled,
       dom.newRoomPettyReceiptAnalysisEnabled,
@@ -14092,6 +14143,15 @@
     if (dom.newRoomImageAnalysisReplyEnabled) {
       dom.newRoomImageAnalysisReplyEnabled.addEventListener('change', function() {
         saveBooleanSetting(NEW_ROOM_DEFAULT_IMAGE_ANALYSIS_REPLY_KEY, !!dom.newRoomImageAnalysisReplyEnabled.checked);
+        syncNewRoomMediaSubOptions();
+      });
+    }
+    if (dom.newRoomReceiptReplyExecutiveDetailEnabled) {
+      dom.newRoomReceiptReplyExecutiveDetailEnabled.addEventListener('change', function() {
+        saveBooleanSetting(
+          NEW_ROOM_DEFAULT_RECEIPT_REPLY_EXECUTIVE_DETAIL_KEY,
+          !!dom.newRoomReceiptReplyExecutiveDetailEnabled.checked,
+        );
       });
     }
     if (dom.newRoomReceiptCorrectionReplyEnabled) {
@@ -14174,6 +14234,7 @@
       dom.newRoomTomorrowReminderMaxItems,
       dom.newRoomMediaFileAccessEnabled,
       dom.newRoomImageAnalysisReplyEnabled,
+      dom.newRoomReceiptReplyExecutiveDetailEnabled,
       dom.newRoomReceiptCorrectionReplyEnabled,
       dom.newRoomBudgetEntryEnabled,
       dom.newRoomPettyReceiptAnalysisEnabled,
@@ -14221,6 +14282,7 @@
       dom.roomConfigGoogleCalendarAutoRegister.addEventListener('change', syncRoomConfigCalendarSubOptions);
     }
     if (dom.roomConfigMediaAccess) dom.roomConfigMediaAccess.addEventListener('change', syncRoomConfigMediaSubOptions);
+    if (dom.roomConfigImageAnalysisReplyEnabled) dom.roomConfigImageAnalysisReplyEnabled.addEventListener('change', syncRoomConfigMediaSubOptions);
     if (dom.roomConfigSendSummary) dom.roomConfigSendSummary.addEventListener('change', syncRoomSummaryMutualExclusion);
     if (dom.roomConfigReceiveOverallSummary) dom.roomConfigReceiveOverallSummary.addEventListener('change', syncRoomSummaryMutualExclusion);
 
@@ -14234,6 +14296,7 @@
       dom.roomConfigTomorrowReminder,
       dom.roomConfigMediaAccess,
       dom.roomConfigImageAnalysisReplyEnabled,
+      dom.roomConfigReceiptReplyExecutiveDetailEnabled,
       dom.roomConfigGoogleCalendarAutoRegister,
       dom.roomConfigCalendarRegistrationReply,
       dom.roomConfigCalendarLowConfidenceConfirmReply,

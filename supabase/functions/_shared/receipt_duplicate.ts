@@ -1,6 +1,9 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { LineImageReceiptAnalysis, LineReplyPayload } from './receipt_types.ts'
-import { buildReceiptFlexMessage } from './receipt_flex_reply.ts'
+import {
+  buildReceiptFlexMessage,
+  type ReceiptReplyVisibilityOptions,
+} from './receipt_flex_reply.ts'
 import { loadReceiptReplyContext } from './receipt_reply_context.ts'
 import { normalizeInlineText, parseReceiptDateToIso } from './receipt_parse.ts'
 import {
@@ -255,6 +258,7 @@ async function completePendingDuplicateAndReply(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
   pending: PendingStoreReceiptDuplicate,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<LineReplyPayload> {
   const saveResult = await saveStoreReceiptEntry(supabase, pending.receipt_table, {
     lineMessageId: pending.line_message_id,
@@ -278,7 +282,7 @@ async function completePendingDuplicateAndReply(
     receiptDateIso: pending.receipt_date,
     lineMessageId: pending.line_message_id,
   })
-  return buildReceiptFlexMessage(replyContext)
+  return buildReceiptFlexMessage(replyContext, replyVisibility)
 }
 
 export async function tryHandlePendingReceiptDuplicateConfirmation(
@@ -287,6 +291,7 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
   roomId: string,
   userId: string | null,
   text: string,
+  replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<LineReplyPayload | null> {
   const pending = await loadPendingReceiptDuplicate(supabase, roomId, userId)
   if (!pending) return null
@@ -312,5 +317,5 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
     )
   }
   await clearPendingReceiptDuplicate(supabase, roomId, userId)
-  return completePendingDuplicateAndReply(supabase, registry, pending)
+  return completePendingDuplicateAndReply(supabase, registry, pending, replyVisibility)
 }
