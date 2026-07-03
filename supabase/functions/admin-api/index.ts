@@ -25,7 +25,12 @@ import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STO
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
 import { analyzeLineImageWithGroqScout, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
-import { answerFoodCourtQuestion, generateFoodCourtDailySummary, fcSalesDate } from "../_shared/foodcourt_compare.ts"
+import {
+  answerFoodCourtQuestion,
+  generateFoodCourtDailySummary,
+  generateFoodCourtPeriodSummary,
+  fcSalesDate,
+} from "../_shared/foodcourt_compare.ts"
 import {
   fetchManualMonthSales,
   fetchManualMonthSalesMapForStore,
@@ -958,6 +963,57 @@ Deno.serve(async (req, info) => {
       }, { onConflict: "report_id" })
       if (upErr) console.error("foodcourt_daily_ai_summary upsert failed:", upErr.message)
       return json({ summary, cached: false, reportCount: reports.length }, 200)
+    }
+    // 「分析サマリー（自動）」カードの期間集計版。「期間で見る」モード専用（単日と違いreport_idを持たないため
+    // 店舗+開始日+終了日でキャッシュ）。ロジックはdaily-summaryと同じ考え方。
+    if (req.method === "GET" && path === "/foodcourt/period-summary") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const startRaw = String(url.searchParams.get("start") ?? "").trim()
+      const endRaw = String(url.searchParams.get("end") ?? "").trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startRaw) || !/^\d{4}-\d{2}-\d{2}$/.test(endRaw)) {
+        return json({ error: "start/end must be YYYY-MM-DD." }, 400)
+      }
+      const startDate = startRaw <= endRaw ? startRaw : endRaw
+      const endDate = startRaw <= endRaw ? endRaw : startRaw
+      const { data: cached, error: cacheErr } = await supabase
+        .from("foodcourt_period_ai_summary")
+        .select("summary_text")
+        .eq("store_partition_key", storeKey)
+        .eq("start_date", startDate)
+        .eq("end_date", endDate)
+        .maybeSingle()
+      if (cacheErr) return json({ error: cacheErr.message }, 500)
+      if (cached && (cached as { summary_text?: unknown }).summary_text) {
+        return json({ summary: (cached as { summary_text: string }).summary_text, cached: true }, 200)
+      }
+      const { data, error } = await supabase
+        .from("foodcourt_tenant_reports")
+        .select("id, report_date, base_tenant_name, tenants, created_at")
+        .ilike("store_partition_key", storeKey)
+        .order("created_at", { ascending: false })
+        .limit(90)
+      if (error) return json({ error: error.message }, 500)
+      const reports = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
+      if (!reports.length) return json({ summary: null, reportCount: 0 }, 200)
+      const groqApiKey = Deno.env.get("GROQ_API_KEY") ?? ""
+      if (!groqApiKey) return json({ error: "GROQ_API_KEY is missing." }, 500)
+      const baseName = String((reports[0] as { base_tenant_name?: unknown }).base_tenant_name ?? "MARUGO S")
+      const events = await loadVenueEventsForReports(supabase, storeKey, reports)
+      const weather = await loadWeatherForReports(supabase, storeKey, reports)
+      const forecast = await loadForecastForStore(supabase, storeKey)
+      const modelVersion = String(Deno.env.get("GROQ_CHAT_MODEL") || "").trim() || "llama-3.3-70b-versatile"
+      const summary = await generateFoodCourtPeriodSummary(reports, baseName, startDate, endDate, groqApiKey, events, weather, forecast, supabase, storeKey)
+      if (!summary) return json({ summary: null, error: "生成に失敗しました。" }, 200)
+      const { error: upErr } = await supabase.from("foodcourt_period_ai_summary").upsert({
+        store_partition_key: storeKey,
+        start_date: startDate,
+        end_date: endDate,
+        summary_text: summary,
+        model_version: modelVersion,
+      }, { onConflict: "store_partition_key,start_date,end_date" })
+      if (upErr) console.error("foodcourt_period_ai_summary upsert failed:", upErr.message)
+      return json({ summary, cached: false }, 200)
     }
     // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
     if (req.method === "POST" && path === "/foodcourt/ask") {

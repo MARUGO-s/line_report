@@ -508,7 +508,7 @@
               MARUGO S フードコート分析の使用量（<span id="foodcourtTotal" class="mono">¥0</span>）
             </summary>
             <div class="assump-body">
-              <p class="ms-sub" style="margin-top:4px">東京ドーム内 MARUGO S の<strong>フードコート分析</strong>（データへの質問Q&amp;A・テナント表の画像抽出・東京ドームのイベント抽出）に使ったAIの実測トークンのみ。<strong>レシート解析は含みません</strong>。上の各プロバイダ合計にも含まれますが、ここでは用途別に切り出しています。</p>
+              <p class="ms-sub" style="margin-top:4px">東京ドーム内 MARUGO S の<strong>フードコート分析</strong>（データへの質問Q&amp;A・分析サマリー自動生成〈単日/期間〉・テナント表の画像抽出・東京ドームのイベント抽出）に使ったAIの実測トークンのみ。<strong>レシート解析は含みません</strong>。上の各プロバイダ合計にも含まれますが、ここでは用途別に切り出しています。</p>
               <div id="foodcourtBrkBody"></div>
             </div>
           </details>
@@ -899,7 +899,7 @@
     // モデル別の正確な内訳（実測トークン × モデル別単価）。groqのscout/70bなど同一プロバイダ複数モデルを分けて表示。
     const MODEL_LABELS = {
       'meta-llama/llama-4-scout-17b-16e-instruct': 'レシート/画像抽出（Vision）',
-      'llama-3.3-70b-versatile': 'フードコートQ&A・ドーム抽出',
+      'llama-3.3-70b-versatile': 'フードコートQ&A・分析サマリー（単日/期間）・ドーム抽出',
       'gemini-3.1-pro-preview': 'レシート解析（Gemini）',
       'claude-haiku-4-5': '経費レシート解析',
     };

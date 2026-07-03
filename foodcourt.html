@@ -1398,19 +1398,31 @@
     const text = buildAnalysisText(report, seriesReports, periodLabel);
     paintAnalysisSecs(parseAnalysis(text));
     if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
-    if (!report || report.id == null || periodLabel) return;
     const reqId = ++aiSummaryReq;
+    const applyAiResult = (body) => {
+      if (reqId !== aiSummaryReq) return; // 表示対象が切り替わっていたら破棄
+      if (!body || !body.summary) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
+      const aiSecs = parseAnalysis(body.summary);
+      if (!aiSecs.length) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
+      paintAnalysisSecs(aiSecs);
+      if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成';
+    };
+    const applyAiFailure = () => { if (reqId === aiSummaryReq && dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; };
+    if (periodLabel) {
+      // 「期間で見る」モード：単一のreport_idが無いため、店舗+開始日+終了日でキャッシュする専用エンドポイントを使う。
+      const m = /^(\d{4}-\d{2}-\d{2})〜(\d{4}-\d{2}-\d{2})$/.exec(periodLabel);
+      if (!m) return;
+      if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成中…';
+      apiFetch('/foodcourt/period-summary?store_key='+encodeURIComponent(currentStore())+'&start='+encodeURIComponent(m[1])+'&end='+encodeURIComponent(m[2]))
+        .then(applyAiResult)
+        .catch(applyAiFailure);
+      return;
+    }
+    if (!report || report.id == null) return;
     if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成中…';
     apiFetch('/foodcourt/daily-summary?store_key='+encodeURIComponent(currentStore())+'&report_id='+encodeURIComponent(report.id))
-      .then(body=>{
-        if (reqId !== aiSummaryReq) return; // 表示対象が切り替わっていたら破棄
-        if (!body || !body.summary) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
-        const aiSecs = parseAnalysis(body.summary);
-        if (!aiSecs.length) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
-        paintAnalysisSecs(aiSecs);
-        if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成';
-      })
-      .catch(()=>{ if (reqId === aiSummaryReq && dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; });
+      .then(applyAiResult)
+      .catch(applyAiFailure);
   }
 
   // ===== render: ranking / share / price / dist / classification =====
