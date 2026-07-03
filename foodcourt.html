@@ -735,6 +735,7 @@
   let forecast = [];               // 来客予測 [{target_date,metric,predicted,predicted_low,predicted_high,actual,...}]
   let calY = 0, calM = 0;          // カレンダー表示中の年・月（0=未初期化）
   let mode = 'single';             // 'single' | 'range'
+  let currentViewedReport = null;  // 画面に表示中の単日レポート（AIチャットに「今どの日を見ているか」を伝える用。期間表示中はnull）
   let domeFilter = 'all', domeLimit = 14;
   let calVenue = 'all'; // カレンダーの会場タブ（all/tokyo-dome/kanadevia/korakuen）
 
@@ -837,7 +838,10 @@
     dom.qBtn.disabled = true;
     try {
       const hist = qaHistory.slice(0, -1).slice(-8); // 直前までの会話（今回の質問は除く）最大8件
-      const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist });
+      // 画面に表示中の単日レポートIDを渡す。バックエンドはこれを「特に日付指定のない質問のデフォルト対象日」として使う
+      // （渡さないと、AIは全履歴のどの日の話をしているか画面と無関係に決めてしまい、時間軸がずれる原因になる）。
+      const viewingReportId = currentViewedReport && currentViewedReport.id != null ? currentViewedReport.id : null;
+      const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist, viewing_report_id: viewingReportId });
       qaHistory.push({ role:'assistant', content: b.answer || '(回答が空でした)' });
     } catch(e){
       qaHistory.push({ role:'assistant', content: (e&&e.message) || '質問に失敗しました。' });
@@ -1646,6 +1650,7 @@
     dom.resultArea.hidden = false;
     const series = baseSeriesFromReports(seriesReports, c.baseName);
     lastSeries = series;
+    currentViewedReport = (!periodLabel && report && report.id != null) ? report : null;
     renderHero(c, report, periodLabel);
     try { renderAnalysisBlocks(report, seriesReports, periodLabel); } catch(e){ dom.aiGrid.innerHTML='<div class="ai-block full"><p>分析テキストの生成に失敗しました。</p></div>'; }
     renderRanking(c);

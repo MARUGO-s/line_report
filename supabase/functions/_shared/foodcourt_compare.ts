@@ -983,6 +983,7 @@ export async function answerFoodCourtQuestion(
   storeKey?: string,
   history: Array<{ role: string; content: string }> = [],
   forecast: ForecastRow[] = [],
+  viewingDate?: string | null,
 ): Promise<string | null> {
   if (!groqApiKey) return null
   const q = String(question ?? '').trim().slice(0, 500)
@@ -1017,6 +1018,11 @@ export async function answerFoodCourtQuestion(
   const forecastCtx = buildForecastContext(forecast)                      // 学習型モデルの予測＋自己採点
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
   const fallbackModel = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  // 画面に表示中の単日レポートの対象日。これを渡さないと、AIは何十日分もの生データのどの日の話かを
+  // 画面と無関係に(会話文脈やイベントの派手さだけで)決めてしまい、時間軸がずれた回答をする原因になる。
+  const viewingBlock = viewingDate
+    ? `【画面表示中の対象日・最優先で厳守】ユーザーは今、対象日=${viewingDate}のレポート画面を見ている。質問に別の日付が明示されていない限り、これが質問の対象日である。他の日のデータと混同しないこと。`
+    : ''
 
   // --- 専門AI 2体を並列実行し、統合AIに渡す「分析メモ」を作らせる（同一プロンプト過積載を避けるための役割分担） ---
   const quantSystem = [
@@ -1031,7 +1037,7 @@ export async function answerFoodCourtQuestion(
     `(6) 来客予測モデルがあれば、自己採点(誤差%)を踏まえて参考程度に触れる。`,
     `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
   ].join('\n')
-  const quantUser = `質問: ${q}\n\n# 競合プロファイル\n${competitors}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}\n\n# 日次生データ\n${data}`
+  const quantUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 競合プロファイル\n${competitors}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}\n\n# 日次生データ\n${data}`
 
   const extSystem = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、会場イベント・天気の需要ドライバー分析専門家です。`,
@@ -1042,7 +1048,7 @@ export async function answerFoodCourtQuestion(
     `(4) 今後の予定イベントがあれば、想定される影響を打ち手につながる形で触れる。`,
     `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
   ].join('\n')
-  const extUser = `質問: ${q}\n\n# 会場イベント相関\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ\n${data}`
+  const extUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 会場イベント相関\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ\n${data}`
 
   const [quantRes, extRes] = await Promise.all([
     groqChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700),
@@ -1083,7 +1089,7 @@ export async function answerFoodCourtQuestion(
     const content = String((h && h.content) ?? '').trim().slice(0, 4000)
     if (role && content) convo.push({ role, content })
   }
-  const systemFull = system + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
+  const systemFull = (viewingBlock ? viewingBlock + '\n\n' : '') + system + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
   const messages = [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
   const r1 = await groqChat(messages, groqApiKey, primary, 1800)
   let ans = r1.content

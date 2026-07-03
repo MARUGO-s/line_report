@@ -978,7 +978,7 @@ Deno.serve(async (req, info) => {
       if (!groqApiKey) return json({ error: "GROQ_API_KEY is missing." }, 500)
       const { data, error } = await supabase
         .from("foodcourt_tenant_reports")
-        .select("report_date, tenants, created_at, base_tenant_name")
+        .select("id, report_date, tenants, created_at, base_tenant_name")
         .ilike("store_partition_key", storeKey)
         .order("created_at", { ascending: false })
         .limit(90)
@@ -992,8 +992,14 @@ Deno.serve(async (req, info) => {
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
+      // 画面に表示中の単日レポート(viewing_report_id)を、特に日付指定のない質問のデフォルト対象日としてAIに伝える。
+      // これが無いと、AIは全履歴のどの日の話かを画面と無関係に(会話文脈だけで)決めてしまい、時間軸がずれる。
+      const viewingReportIdRaw = (body as { viewing_report_id?: unknown }).viewing_report_id
+      const viewingReportId = viewingReportIdRaw != null ? String(viewingReportIdRaw) : ""
+      const viewingReport = viewingReportId ? reports.find((r) => String((r as { id?: unknown }).id ?? "") === viewingReportId) : null
+      const viewingDate = viewingReport ? fcSalesDate(viewingReport) : null
       // supabase + storeKey を渡すと、Q&Aの実測トークンを ai_usage_events に記録しAI使用料に合算する。
-      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast)
+      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
     }
     // 東京ドーム週次イベント配信（per-room）の設定を取得/保存（管理画面のカレンダー/予約タブから利用）。
