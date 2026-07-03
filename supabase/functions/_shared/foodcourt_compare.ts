@@ -4,6 +4,7 @@
 //   通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
@@ -39,6 +40,63 @@ export const FOODCOURT_STORE_KEYS: Record<string, { baseTenantName: string; expe
 // フードコート一覧らしさのマーカー（テナント表＝全テナントの対象/比較 売上・客数が並ぶ）。
 const FOODCOURT_MARKERS =
   /テナント|対象売上|比較売上|売上比率|客数比率|対象客数|比較客数|mallpro|5092\d{3}/i
+
+// 月末/月初に「日次ではなく月間の総売上（税抜）」の一覧が誤って送られてくることがある（テーブル自体に
+// 日次/月次を判別する印字が無い）。直近の日次実績の中央値の何倍を超えたら月次集計とみなすかの閾値。
+const FOODCOURT_MONTHLY_ANOMALY_MULTIPLIER = 6
+
+// フードコート画像の売上(税抜)と、レシート集計(税抜net・売上分析と同一の正本)を突き合わせる。1円でも
+// 差があれば乖離とみなす（誤差は許容しない・完全一致のみ合格）。一致すればnull、乖離があれば確認カード/
+// 記録カードに載せる注意文を返す。レシート未取込の日は判定しない。
+async function checkFoodCourtReceiptConsistency(
+  supabase: SupabaseClient,
+  storeKey: string,
+  salesDate: string,
+  imageSales: number,
+): Promise<string | null> {
+  try {
+    const rows = await fetchReceiptDailyAggForRange(supabase, storeKey, salesDate, salesDate)
+    const row = rows.find((r) => r.date === salesDate)
+    if (!row || row.receipt_count <= 0) return null
+    const diff = imageSales - row.net_sales_yen
+    if (diff === 0) return null
+    return `⚠ レシート集計(税抜${fcYen(row.net_sales_yen)})と画像の売上(税抜${fcYen(imageSales)})に差があります（差額${fcYen(diff)}）。日付や抽出結果をご確認ください。`
+  } catch (e) {
+    console.error('checkFoodCourtReceiptConsistency failed:', e instanceof Error ? e.message : String(e))
+    return null
+  }
+}
+
+// 推定の売上日(report_date換算)に、既にfoodcourt_tenant_reportsの登録があるか確認する。あれば「登録すると
+// 既存データを置き換える」旨の注意文を返す（saveFoodCourtReportは同一report_dateの他行を削除して1件に保つ
+// ため、実際に置き換わる。ここは確認カードで事前にそれをユーザーへ知らせるための表示専用チェック）。
+async function checkFoodCourtExistingReport(
+  supabase: SupabaseClient,
+  storeKey: string,
+  reportDate: string,
+  baseName: string,
+): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from('foodcourt_tenant_reports')
+      .select('tenants')
+      .eq('store_partition_key', storeKey)
+      .eq('report_date', reportDate)
+      .limit(1)
+      .maybeSingle()
+    if (!data) return null
+    const raw = Array.isArray((data as { tenants?: unknown }).tenants) ? (data as { tenants?: unknown[] }).tenants as unknown[] : []
+    const existing = raw.find((t) => {
+      const o = (t && typeof t === 'object') ? t as Record<string, unknown> : {}
+      return normalizeName(String(o.name ?? '')) === normalizeName(baseName)
+    })
+    const existingSales = existing ? numOrNull((existing as Record<string, unknown>).sales) : null
+    return `⚠ この日付は既に登録済みです（既存の売上${existingSales != null ? fcYen(existingSales) : '—'}）。登録すると既存データを置き換えます。`
+  } catch (e) {
+    console.error('checkFoodCourtExistingReport failed:', e instanceof Error ? e.message : String(e))
+    return null
+  }
+}
 
 export type FoodCourtTenant = {
   name: string
@@ -389,15 +447,16 @@ export function buildFoodCourtCompareFlex(cmp: FoodCourtComparison): Record<stri
 }
 
 // 短い記録通知（毎回の分析結果は出さず「記録した・サイトで質問してね」＋分析ページボタン）。
-export function buildFoodCourtAckFlex(n: number, pageUrl?: string | null): Record<string, unknown> {
+export function buildFoodCourtAckFlex(n: number, pageUrl?: string | null, salesDate?: string | null, receiptWarning?: string | null): Record<string, unknown> {
   const bubble: Record<string, unknown> = {
     type: 'bubble',
     body: {
       type: 'box', layout: 'vertical', spacing: 'sm',
       contents: [
         { type: 'text', text: '📊 フードコート集計を記録しました', weight: 'bold', size: 'md', color: '#1a6fa8' },
-        { type: 'text', text: `${n}テナント分を保存（売上には登録していません）。`, size: 'sm', color: '#444444', wrap: true },
+        { type: 'text', text: `${n}テナント分を保存（売上には登録していません）。${salesDate ? `売上日: ${salesDate}` : ''}`, size: 'sm', color: '#444444', wrap: true },
         { type: 'text', text: '下のボタンから分析ページを開き、データに質問できます。', size: 'xs', color: '#8a96a3', wrap: true },
+        ...(receiptWarning ? [{ type: 'text', text: receiptWarning, size: 'xs', color: '#c0392b', wrap: true, margin: 'md' }] : []),
       ],
     },
   }
@@ -1397,17 +1456,28 @@ export async function generateFoodCourtPeriodSummary(
   return ans
 }
 
+// 受信時刻(JST)からの「発行日」推定。テナント一覧は「前日の売上比較表」なので売上日はこの前日(-1)。
+function jstNowDate(): string {
+  const nowJst = new Date(Date.now() + 9 * 3600 * 1000)
+  return `${nowJst.getUTCFullYear()}-${String(nowJst.getUTCMonth() + 1).padStart(2, '0')}-${String(nowJst.getUTCDate()).padStart(2, '0')}`
+}
+
 export async function saveFoodCourtReport(
   supabase: SupabaseClient,
-  params: { storeKey: string; roomId: string; lineMessageId: string; baseName: string; tenants: FoodCourtTenant[] },
+  params: { storeKey: string; roomId: string; lineMessageId: string; baseName: string; tenants: FoodCourtTenant[]; reportDate?: string },
 ): Promise<void> {
   try {
     // report_date＝レポート発行日（＝送信日）。テナント一覧は「前日の売上比較表」なので
     // 売上日は report_date の前日(-1)。この日付が無いと一覧フィルタ(hasReportDate)で
-    // 除外され表示されないため、受信日(JST)を発行日として必ずセットする。
-    // ※深夜0時またぎで送信した場合のみ1日ズレうる→分析ページから手修正できる。
-    const nowJst = new Date(Date.now() + 9 * 3600 * 1000)
-    const reportDate = `${nowJst.getUTCFullYear()}-${String(nowJst.getUTCMonth() + 1).padStart(2, '0')}-${String(nowJst.getUTCDate()).padStart(2, '0')}`
+    // 除外され表示されないため、指定が無ければ受信日(JST)を発行日としてセットする。
+    const reportDate = (params.reportDate && /^\d{4}-\d{2}-\d{2}$/.test(params.reportDate)) ? params.reportDate : jstNowDate()
+    // 同じ店舗・同じ発行日(report_date)の行は1件だけに保つ（line_message_id違いの再送/別画像でも二重登録
+    // させない）。自分自身(line_message_id一致)はupsertで更新されるので対象から除外。
+    await supabase.from('foodcourt_tenant_reports')
+      .delete()
+      .eq('store_partition_key', params.storeKey)
+      .eq('report_date', reportDate)
+      .neq('line_message_id', params.lineMessageId)
     await supabase.from('foodcourt_tenant_reports').upsert({
       store_partition_key: params.storeKey,
       room_id: params.roomId,
@@ -1419,6 +1489,102 @@ export async function saveFoodCourtReport(
   } catch (e) {
     console.error('saveFoodCourtReport failed:', e instanceof Error ? e.message : String(e))
   }
+}
+
+// 売上日(YYYY-MM-DD)確認カード。LINE画像受信直後、即保存せずこのカードを返す。
+// 「この日付で登録」＝推定通り／「日付を指定」＝datetimepickerで売上日を選び直す／「キャンセル」＝破棄。
+function buildFoodCourtDateConfirmFlex(pendingId: number, tenantCount: number, guessedSalesDate: string, warnings?: Array<string | null | undefined>): Record<string, unknown> {
+  const warningLines = (warnings ?? []).filter((w): w is string => !!w)
+  return {
+    type: 'flex',
+    altText: `フードコート集計の日付確認（${guessedSalesDate}）`,
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'text', text: '📊 フードコート集計を検出しました', weight: 'bold', size: 'md', color: '#1a6fa8' },
+          { type: 'text', text: `${tenantCount}テナント分（売上には登録していません）。`, size: 'sm', color: '#444444', wrap: true },
+          { type: 'separator', margin: 'md' },
+          { type: 'text', text: '売上日（推定）', size: 'xs', color: '#8a96a3' },
+          { type: 'text', text: guessedSalesDate, weight: 'bold', size: 'lg', color: '#1a6fa8' },
+          { type: 'text', text: 'この日付で登録してよいですか？ 違う場合は「日付を指定する」から選び直せます。', size: 'xs', color: '#8a96a3', wrap: true, margin: 'md' },
+          ...warningLines.map((w) => ({ type: 'text', text: w, size: 'xs', color: '#c0392b', wrap: true, margin: 'md' })),
+        ],
+      },
+      footer: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'button', style: 'primary', color: '#1a6fa8', height: 'sm',
+            action: { type: 'postback', label: 'この日付で登録する', data: `fcimp=${pendingId}`, displayText: `${guessedSalesDate}で登録します` } },
+          { type: 'button', style: 'secondary', height: 'sm',
+            action: { type: 'datetimepicker', label: '日付を指定する', data: `fcimp_pick=${pendingId}`, mode: 'date', initial: guessedSalesDate } },
+          { type: 'button', style: 'secondary', height: 'sm',
+            action: { type: 'postback', label: 'キャンセル', data: `fcimp_skip=${pendingId}`, displayText: 'フードコート集計の登録をキャンセルします' } },
+        ],
+      },
+    },
+  }
+}
+
+function foodCourtSimpleNoticeFlex(text: string): Record<string, unknown> {
+  return {
+    type: 'flex',
+    altText: text.slice(0, 380),
+    contents: {
+      type: 'bubble',
+      body: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text, wrap: true, size: 'sm', color: '#444444' }] },
+    },
+  }
+}
+
+// フードコート日付確認カードの postback（fcimp=<id> 登録 / fcimp_pick=<id> 日付指定(datetimepicker) / fcimp_skip=<id> 破棄）。
+export async function handleFoodCourtReportPostback(
+  supabase: SupabaseClient,
+  postbackData: string,
+  pickedDate?: string | null,
+): Promise<Record<string, unknown> | null> {
+  const m = /^(fcimp|fcimp_pick|fcimp_skip)=(\d+)$/.exec(String(postbackData ?? '').trim())
+  if (!m) return null
+  const action = m[1]
+  const pendingId = Number(m[2])
+  if (!Number.isInteger(pendingId) || pendingId <= 0) return null
+
+  const { data: pending, error } = await supabase
+    .from('pending_foodcourt_reports')
+    .select('id, status, store_partition_key, room_id, line_message_id, base_tenant_name, tenants, guessed_sales_date')
+    .eq('id', pendingId)
+    .maybeSingle()
+  if (error || !pending) return foodCourtSimpleNoticeFlex('対象のフードコート集計が見つかりませんでした。')
+  const p = pending as {
+    id: number; status: string; store_partition_key: string; room_id: string | null; line_message_id: string | null
+    base_tenant_name: string; tenants: FoodCourtTenant[]; guessed_sales_date: string
+  }
+  if (p.status !== 'pending') return foodCourtSimpleNoticeFlex('この集計はすでに処理済みです。')
+
+  if (action === 'fcimp_skip') {
+    await supabase.from('pending_foodcourt_reports').update({ status: 'dismissed' }).eq('id', pendingId)
+    return foodCourtSimpleNoticeFlex('フードコート集計の登録をキャンセルしました。')
+  }
+
+  // 確定する売上日: fcimp=推定通り／fcimp_pick=ユーザーがdatetimepickerで選んだ日。
+  // 保存側は report_date(発行日)を持つため、売上日+1日を report_date として渡す（fcSalesDateの逆算）。
+  const salesDate = action === 'fcimp_pick' && pickedDate && /^\d{4}-\d{2}-\d{2}$/.test(pickedDate) ? pickedDate : p.guessed_sales_date
+  const reportDate = fcAddDays(salesDate, 1)
+  await saveFoodCourtReport(supabase, {
+    storeKey: p.store_partition_key,
+    roomId: p.room_id ?? '',
+    lineMessageId: p.line_message_id ?? `pending:${p.id}`,
+    baseName: p.base_tenant_name,
+    tenants: p.tenants,
+    reportDate,
+  })
+  await supabase.from('pending_foodcourt_reports').update({ status: 'registered' }).eq('id', pendingId)
+  const pageUrl = await buildFoodCourtDashboardLink(supabase, p.store_partition_key)
+  const tenantCount = Array.isArray(p.tenants) ? p.tenants.length : 0
+  const cmp = computeFoodCourtComparison(p.tenants, p.base_tenant_name)
+  const receiptWarning = cmp ? await checkFoodCourtReceiptConsistency(supabase, p.store_partition_key, salesDate, cmp.baseSales) : null
+  return buildFoodCourtAckFlex(tenantCount, pageUrl, salesDate, receiptWarning)
 }
 
 // オーケストレーション: 対象店舗＋マーカー一致のとき Gemini で抽出 → 比較が成立すれば
@@ -1464,11 +1630,50 @@ export async function maybeHandleFoodCourtReport(
   const cmp = computeFoodCourtComparison(tenants, cfg.baseTenantName)
   if (!cmp) return { handled: false }
 
-  await saveFoodCourtReport(supabase, {
-    storeKey: params.storeKey, roomId: params.roomId, lineMessageId: params.lineMessageId,
-    baseName: cfg.baseTenantName, tenants,
-  })
-  // 毎回の分析結果は出さず、短い記録通知＋店舗限定の分析ページリンクを返す（分析はサイトで質問）。
-  const pageUrl = await buildFoodCourtDashboardLink(supabase, params.storeKey)
-  return { handled: true, reply: buildFoodCourtAckFlex(tenants.length, pageUrl) }
+  // 月末/月初に「日次ではなく月間の総売上（税抜）」の一覧が誤って送られてくることがある。テーブル自体には
+  // 日次か月次かを判別する印字が無いため、直近の日次実績と比べて極端に大きい場合は月次集計とみなし、
+  // 登録せず通知だけ返す（分析データが月次の巨大値で汚染されるのを防ぐ）。十分な履歴が無い場合は判定しない。
+  const { data: recentRows } = await supabase
+    .from('foodcourt_tenant_reports')
+    .select('tenants, report_date, created_at')
+    .ilike('store_partition_key', params.storeKey)
+    .order('created_at', { ascending: false })
+    .limit(30)
+  const recentDaily = fcBaseDaily(Array.isArray(recentRows) ? recentRows as Array<Record<string, unknown>> : [], cfg.baseTenantName)
+  const recentSales = recentDaily.slice(-14).map((r) => r.sales).filter((v) => v > 0)
+  const medianRecentSales = recentSales.length >= 5 ? fcMedian(recentSales) : null
+  if (medianRecentSales != null && medianRecentSales > 0 && cmp.baseSales > medianRecentSales * FOODCOURT_MONTHLY_ANOMALY_MULTIPLIER) {
+    return {
+      handled: true,
+      reply: foodCourtSimpleNoticeFlex(
+        `検出した売上（${fcYen(cmp.baseSales)}）が直近の日次実績（中央値 ${fcYen(medianRecentSales)}）と比べて大きく乖離しているため、月間の総売上レポートの可能性があると判断し、登録しませんでした。日次のテナント一覧画像を再度お送りください。`,
+      ),
+    }
+  }
+
+  // 即保存はせず、「この日付でよいか」を確認するpendingカードを返す（postbackで本登録/日付指定/破棄）。
+  // 受信時刻(JST)からの推定発行日の前日＝推定売上日を初期値として提示する。
+  const guessedReportDate = jstNowDate()
+  const guessedSalesDate = fcAddDays(guessedReportDate, -1)
+  const { data: pendingRow, error: pendingErr } = await supabase
+    .from('pending_foodcourt_reports')
+    .upsert({
+      store_partition_key: params.storeKey,
+      room_id: params.roomId,
+      line_message_id: params.lineMessageId,
+      base_tenant_name: cfg.baseTenantName,
+      tenants,
+      guessed_sales_date: guessedSalesDate,
+      status: 'pending',
+    }, { onConflict: 'line_message_id' })
+    .select('id')
+    .single()
+  if (pendingErr || !pendingRow) {
+    console.error('pending_foodcourt_reports upsert failed:', pendingErr?.message)
+    return { handled: false }
+  }
+  const pendingId = Number((pendingRow as { id?: unknown }).id ?? 0)
+  const receiptWarning = await checkFoodCourtReceiptConsistency(supabase, params.storeKey, guessedSalesDate, cmp.baseSales)
+  const existingWarning = await checkFoodCourtExistingReport(supabase, params.storeKey, guessedReportDate, cfg.baseTenantName)
+  return { handled: true, reply: buildFoodCourtDateConfirmFlex(pendingId, tenants.length, guessedSalesDate, [receiptWarning, existingWarning]) }
 }

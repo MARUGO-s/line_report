@@ -14,7 +14,7 @@ import {
   clearPendingReceiptDuplicate,
 } from '../_shared/receipt_duplicate.ts'
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
-import { maybeHandleFoodCourtReport } from '../_shared/foodcourt_compare.ts'
+import { maybeHandleFoodCourtReport, handleFoodCourtReportPostback } from '../_shared/foodcourt_compare.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
@@ -106,7 +106,7 @@ type LineEvent = {
   webhookEventId?: string
   timestamp?: number
   replyToken?: string
-  postback?: { data?: string }
+  postback?: { data?: string; params?: { date?: string } }
   source?: { type?: string; userId?: string; groupId?: string; roomId?: string }
   message?: { id?: string; type?: string; text?: string }
 }
@@ -2092,6 +2092,28 @@ Deno.serve(async (req) => {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           console.error('handleReservationImportPostback failed:', msg)
+          errors.push(msg.slice(0, 160))
+        }
+      }
+
+      // フードコート集計の日付確認カードの postback（fcimp=登録 / fcimp_pick=日付指定(datetimepicker) / fcimp_skip=破棄）
+      if ((postbackData.startsWith('fcimp=') || postbackData.startsWith('fcimp_pick=') || postbackData.startsWith('fcimp_skip=')) && postbackReplyToken) {
+        try {
+          const pickedDate = postbackData.startsWith('fcimp_pick=') ? (event.postback?.params?.date ?? null) : null
+          const fcReply = await handleFoodCourtReportPostback(supabase, postbackData, pickedDate)
+          if (fcReply) {
+            await replyLineFlex(
+              postbackReplyToken,
+              fcReply,
+              lineAccessTokenForSearch,
+              webhookReplyLog(registry as StoreRegistryRow, eventRoomIdForPostback ?? '', 'foodcourt_report_import_result'),
+            )
+            receiptReplies += 1
+          }
+          continue
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('handleFoodCourtReportPostback failed:', msg)
           errors.push(msg.slice(0, 160))
         }
       }
