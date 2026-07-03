@@ -25,7 +25,7 @@ import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STO
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
 import { analyzeLineImageWithGroqScout, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
-import { answerFoodCourtQuestion } from "../_shared/foodcourt_compare.ts"
+import { answerFoodCourtQuestion, generateFoodCourtDailySummary, fcSalesDate } from "../_shared/foodcourt_compare.ts"
 import {
   fetchManualMonthSales,
   fetchManualMonthSalesMapForStore,
@@ -39,6 +39,7 @@ import {
   RECEIPT_STORE_PARTITION_UNKNOWN,
   toReceiptStorePartitionKey,
 } from "../_shared/receipt_report_aggregate.ts"
+import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
 import {
   fetchAnalyticsMonthly as fetchStoreAnalyticsMonthly,
   fetchManualMonthsForYearState as fetchStoreManualMonthsForYearState,
@@ -639,6 +640,10 @@ Deno.serve(async (req, info) => {
   if (storeScope) {
     const STORE_SCOPED_ALLOWED_PATHS = new Set<string>([
       "/auth/logout",
+      "/reservations/calendar",
+      "/reservations/search",
+      "/reservations/event",
+      "/reservations/customer-suggest",
       "/petty-cash",
       "/petty-cash/receipt-image",
       "/petty-cash/receipt-media",
@@ -826,7 +831,7 @@ Deno.serve(async (req, info) => {
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
-      const result = await createManualReservationEvent(supabase, body)
+      const result = await createManualReservationEvent(supabase, body, storeScope)
       return json(result, 200)
     }
     if (req.method === "PATCH" && path === "/reservations/event") {
@@ -834,7 +839,7 @@ Deno.serve(async (req, info) => {
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
-      const result = await updateReservationEvent(supabase, body)
+      const result = await updateReservationEvent(supabase, body, storeScope)
       return json(result, 200)
     }
     if (req.method === "POST" && path === "/reservations/customer-suggest") {
@@ -842,13 +847,13 @@ Deno.serve(async (req, info) => {
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
-      const result = await suggestReservationCustomers(supabase, body)
+      const result = await suggestReservationCustomers(supabase, body, storeScope)
       return json(result, 200)
     }
     // 完全削除（ハードデリート）: キャンセル(非表示)と異なり行を物理削除し履歴も残さない。
     // source/id は URL クエリで受ける（PII を含まない）。
     if (req.method === "DELETE" && path === "/reservations/event") {
-      const result = await deleteReservationEvent(supabase, url)
+      const result = await deleteReservationEvent(supabase, url, storeScope)
       return json(result, 200)
     }
 
@@ -884,6 +889,75 @@ Deno.serve(async (req, info) => {
       // 客数/売上/組数の正本（管理表＝レシート集計＋手入力）。日報が無い日も含む。画面はこれを優先採用。
       const baseDaily = await loadBaseDailyForReports(supabase, storeKey)
       return json({ store_key: storeKey, reports, events, weather, forecast, baseDaily }, 200)
+    }
+    // 「分析サマリー（自動）」カードのAI版。report_id単位でキャッシュし、閲覧のたびに再生成・再課金しない。
+    // 初回閲覧時にGroq(専門AI2体→統合AI)で生成しDBへ保存、以降は保存済みテキストを即返す。
+    if (req.method === "GET" && path === "/foodcourt/daily-summary") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const reportIdParam = url.searchParams.get("report_id")
+      const { data, error } = await supabase
+        .from("foodcourt_tenant_reports")
+        .select("id, report_date, base_tenant_name, tenants, created_at")
+        .ilike("store_partition_key", storeKey)
+        .order("created_at", { ascending: false })
+        .limit(90)
+      if (error) return json({ error: error.message }, 500)
+      const reports = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
+      if (!reports.length) return json({ summary: null, reportCount: 0 }, 200)
+      const target = reportIdParam
+        ? reports.find((r) => String((r as { id?: unknown }).id ?? "") === reportIdParam)
+        : reports[0]
+      if (!target) return json({ error: "report_id not found." }, 404)
+      const reportId = (target as { id?: unknown }).id
+      const { data: cached, error: cacheErr } = await supabase
+        .from("foodcourt_daily_ai_summary")
+        .select("summary_text")
+        .eq("report_id", reportId)
+        .maybeSingle()
+      if (cacheErr) return json({ error: cacheErr.message }, 500)
+      if (cached && (cached as { summary_text?: unknown }).summary_text) {
+        return json({ summary: (cached as { summary_text: string }).summary_text, cached: true, reportCount: reports.length }, 200)
+      }
+      const groqApiKey = Deno.env.get("GROQ_API_KEY") ?? ""
+      if (!groqApiKey) return json({ error: "GROQ_API_KEY is missing." }, 500)
+      const baseName = String((target as { base_tenant_name?: unknown }).base_tenant_name ?? "MARUGO S")
+      const events = await loadVenueEventsForReports(supabase, storeKey, reports)
+      const weather = await loadWeatherForReports(supabase, storeKey, reports)
+      const forecast = await loadForecastForStore(supabase, storeKey)
+      const modelVersion = String(Deno.env.get("GROQ_CHAT_MODEL") || "").trim() || "llama-3.3-70b-versatile"
+      const businessDate = fcSalesDate(target) || null
+      // 前回（直近の1つ前の営業日）に生成済みのAI分析を、自己検証の材料として渡す（日々の分析に連続性を持たせる）。
+      let priorSummary: { businessDate: string; summaryText: string } | null = null
+      if (businessDate) {
+        const { data: priorRow } = await supabase
+          .from("foodcourt_daily_ai_summary")
+          .select("business_date, summary_text")
+          .eq("store_partition_key", storeKey)
+          .lt("business_date", businessDate)
+          .order("business_date", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (priorRow && (priorRow as { summary_text?: unknown }).summary_text) {
+          priorSummary = {
+            businessDate: String((priorRow as { business_date?: unknown }).business_date ?? ""),
+            summaryText: String((priorRow as { summary_text: string }).summary_text),
+          }
+        }
+      }
+      // 曜日/イベント種別/天気ごとの統計パターンはgenerateFoodCourtDailySummary内でreportsから毎回
+      // 計算し直す（コード計算・状態を持たない＝データが増えるほど自動的に確度が上がる）。
+      const summary = await generateFoodCourtDailySummary(reports, baseName, target, groqApiKey, events, weather, forecast, supabase, storeKey, priorSummary)
+      if (!summary) return json({ summary: null, error: "生成に失敗しました。", reportCount: reports.length }, 200)
+      const { error: upErr } = await supabase.from("foodcourt_daily_ai_summary").upsert({
+        report_id: reportId,
+        store_partition_key: storeKey,
+        business_date: businessDate,
+        summary_text: summary,
+        model_version: modelVersion,
+      }, { onConflict: "report_id" })
+      if (upErr) console.error("foodcourt_daily_ai_summary upsert failed:", upErr.message)
+      return json({ summary, cached: false, reportCount: reports.length }, 200)
     }
     // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
     if (req.method === "POST" && path === "/foodcourt/ask") {
@@ -2972,6 +3046,7 @@ async function fetchReservationCalendarState(
 ) {
   const targetMonth = normalizeCalendarMonthParam(url.searchParams.get("month"))
   const sourceFilter = normalizeReservationSourceFilter(url.searchParams.get("source"))
+  const storeScope = normalizeReservationStoreScope(url.searchParams.get("store_key") ?? url.searchParams.get("store"))
   // 非表示（ソフト削除）の行は既定で除外。include_hidden=1 のときだけ含める（確認・復元用）。
   const includeHidden = url.searchParams.get("include_hidden") === "1"
   const range = buildJstMonthRange(targetMonth)
@@ -3022,6 +3097,7 @@ async function fetchReservationCalendarState(
       if (!includeHidden && record.manual_hidden === true) continue
       const item = buildReservationCalendarItem(source, record, summaryByCustomer)
       if (!item) continue
+      if (!reservationCalendarItemMatchesStoreScope(item, storeScope)) continue
       items.push(item)
       sourceCounts[source] += 1
     }
@@ -3044,6 +3120,7 @@ async function fetchReservationCalendarState(
       if (!includeHidden && record.manual_hidden === true) continue
       const item = buildReservationCalendarItem("manual", record, null)
       if (!item) continue
+      if (!reservationCalendarItemMatchesStoreScope(item, storeScope)) continue
       items.push(item)
       sourceCounts.manual += 1
     }
@@ -3074,6 +3151,7 @@ async function fetchReservationSearchState(
   }
 
   const sourceFilter = normalizeReservationSourceFilter(url.searchParams.get("source"))
+  const storeScope = normalizeReservationStoreScope(url.searchParams.get("store_key") ?? url.searchParams.get("store"))
   const limit = clampInt(
     url.searchParams.get("limit"),
     RESERVATION_SEARCH_DEFAULT_LIMIT,
@@ -3157,6 +3235,7 @@ async function fetchReservationSearchState(
       if (!includeHidden && record.manual_hidden === true) continue
       const item = buildReservationCalendarItem(source, record, summaryByCustomer)
       if (!item) continue
+      if (!reservationCalendarItemMatchesStoreScope(item, storeScope)) continue
       if (!matchesReservationSearchItem(item, query)) continue
       items.push(item)
       sourceCounts[source] += 1
@@ -3181,6 +3260,7 @@ async function fetchReservationSearchState(
       if (!includeHidden && record.manual_hidden === true) continue
       const item = buildReservationCalendarItem("manual", record, null)
       if (!item) continue
+      if (!reservationCalendarItemMatchesStoreScope(item, storeScope)) continue
       if (!matchesReservationSearchItem(item, query)) continue
       items.push(item)
       sourceCounts.manual += 1
@@ -3208,18 +3288,20 @@ async function fetchReservationSearchState(
 async function createManualReservationEvent(
   supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
+  enforcedStoreScope?: string | null,
 ) {
   const visitAtIso = normalizeReservationVisitAtIso(body.visit_at)
   if (!visitAtIso) {
     throw { status: 400, message: "visit_at is required (ISO datetime)." } satisfies AppError
   }
+  const enforcedStoreKey = normalizeReservationStoreScope(enforcedStoreScope)
   const insertRow = {
     customer_name: toSafeString(body.customer_name) || null,
     customer_phone: toSafeString(body.customer_phone) || null,
     visit_at: visitAtIso,
     reservation_type: toSafeString(body.reservation_type) || null,
     reservation_detail: toSafeString(body.reservation_detail) || null,
-    manual_store_key: toSafeString(body.manual_store_key) || null,
+    manual_store_key: enforcedStoreKey || toSafeString(body.manual_store_key) || null,
   }
   const { data, error } = await supabase
     .from("manual_reservation_visit_events")
@@ -3236,6 +3318,7 @@ async function createManualReservationEvent(
 async function updateReservationEvent(
   supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
+  enforcedStoreScope?: string | null,
 ) {
   const source = toSafeString(body.source)
   const table = reservationEventTableForSource(source)
@@ -3245,6 +3328,11 @@ async function updateReservationEvent(
   const id = Number(body.id)
   if (!Number.isInteger(id) || id <= 0) {
     throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const enforcedStoreKey = normalizeReservationStoreScope(enforcedStoreScope)
+  if (enforcedStoreKey) {
+    const record = await fetchReservationEventRecordForScopeCheck(supabase, table, id)
+    assertReservationEventMatchesStoreScope(source, record, enforcedStoreKey)
   }
   const isManualTable = table === "manual_reservation_visit_events"
   const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k)
@@ -3259,7 +3347,11 @@ async function updateReservationEvent(
   }
   if (has("reservation_type")) patch.reservation_type = toSafeString(body.reservation_type) || null
   if (has("reservation_detail")) patch.reservation_detail = toSafeString(body.reservation_detail) || null
-  if (has("manual_store_key")) patch.manual_store_key = toSafeString(body.manual_store_key) || null
+  if (has("manual_store_key")) {
+    patch.manual_store_key = enforcedStoreKey || toSafeString(body.manual_store_key) || null
+  } else if (enforcedStoreKey && isManualTable) {
+    patch.manual_store_key = enforcedStoreKey
+  }
   if (has("manual_hidden")) {
     const hidden = body.manual_hidden === true || body.manual_hidden === "true"
     patch.manual_hidden = hidden
@@ -3290,10 +3382,12 @@ async function updateReservationEvent(
 async function suggestReservationCustomers(
   supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
+  enforcedStoreScope?: string | null,
 ) {
   const q = toSafeString(body.q).trim()
   const field = toSafeString(body.field).toLowerCase() === "phone" ? "phone" : "name"
   const limit = clampInt(String(body.limit ?? ""), 8, 1, 20)
+  const enforcedStoreKey = normalizeReservationStoreScope(enforcedStoreScope)
   if (q.length < 1) return { ok: true, field, suggestions: [] as Array<Record<string, unknown>> }
 
   const col = field === "phone" ? "customer_phone" : "customer_name"
@@ -3317,6 +3411,7 @@ async function suggestReservationCustomers(
     }
     for (const row of (Array.isArray(data) ? data : [])) {
       if (!isRecord(row)) continue
+      if (enforcedStoreKey && !reservationEventRecordMatchesStoreScope(source, row, enforcedStoreKey)) continue
       const name = toSafeString(row.customer_name)
       const phone = toSafeString(row.customer_phone)
       if (!name && !phone) continue
@@ -3352,6 +3447,7 @@ async function suggestReservationCustomers(
 async function deleteReservationEvent(
   supabase: ReturnType<typeof createClient>,
   url: URL,
+  enforcedStoreScope?: string | null,
 ) {
   const source = toSafeString(url.searchParams.get("source"))
   const table = reservationEventTableForSource(source)
@@ -3362,24 +3458,40 @@ async function deleteReservationEvent(
   if (!Number.isInteger(id) || id <= 0) {
     throw { status: 400, message: "id is required." } satisfies AppError
   }
+  const enforcedStoreKey = normalizeReservationStoreScope(enforcedStoreScope)
 
-  if (table !== "manual_reservation_visit_events") {
-    const { data: row } = await supabase.from(table).select("gmail_message_id").eq("id", id).maybeSingle()
-    const gmid = toSafeString((row as { gmail_message_id?: string } | null)?.gmail_message_id)
-    if (gmid) {
-      const { error: histErr } = await supabase
-        .from("reservation_customer_visit_history")
-        .delete()
-        .eq("partner", source)
-        .eq("gmail_message_id", gmid)
-      if (histErr) console.error("Failed to delete reservation visit history:", histErr.message)
-    }
+  const selectColumns = table === "manual_reservation_visit_events"
+    ? "customer_name, customer_phone, reservation_detail, manual_store_key, created_at, visit_at"
+    : "gmail_message_id, customer_name, customer_phone, reservation_detail, manual_store_key, created_at, visit_at"
+  const { data: row } = await supabase.from(table).select(selectColumns).eq("id", id).maybeSingle()
+  if (enforcedStoreKey) {
+    assertReservationEventMatchesStoreScope(source, row, enforcedStoreKey)
+  }
+  const gmid = toSafeString((row as { gmail_message_id?: string } | null)?.gmail_message_id)
+  const customerName = toSafeString((row as { customer_name?: string } | null)?.customer_name)
+  const customerPhone = toSafeString((row as { customer_phone?: string } | null)?.customer_phone)
+
+  if (table === "manual_reservation_visit_events") {
+    const { error: histErr } = await supabase
+      .from("reservation_customer_visit_history")
+      .delete()
+      .eq("partner", "manual")
+      .eq("gmail_message_id", `manual:${id}`)
+    if (histErr) console.error("Failed to delete manual reservation visit history:", histErr.message)
+  } else if (gmid) {
+    const { error: histErr } = await supabase
+      .from("reservation_customer_visit_history")
+      .delete()
+      .eq("partner", source)
+      .eq("gmail_message_id", gmid)
+    if (histErr) console.error("Failed to delete reservation visit history:", histErr.message)
   }
 
   const { error } = await supabase.from(table).delete().eq("id", id)
   if (error) {
     throw { status: 500, message: `Failed to delete reservation: ${error.message}` } satisfies AppError
   }
+  await rebuildReservationSummaryForCustomer(supabase, source, customerName, customerPhone)
   return { ok: true, source, id, deleted: true }
 }
 
@@ -4637,6 +4749,33 @@ function getReservationSourceTables(
   }
 }
 
+function getReservationSummarySource(
+  source: string,
+): "tabelog" | "ikyu" | "manual" | null {
+  if (source === "tabelog" || source === "ikyu" || source === "manual") return source
+  return null
+}
+
+async function rebuildReservationSummaryForCustomer(
+  supabase: ReturnType<typeof createClient>,
+  source: string,
+  customerName: string | null,
+  customerPhone: string | null,
+) {
+  const partner = getReservationSummarySource(source)
+  const name = toSafeString(customerName)
+  const phone = toSafeString(customerPhone)
+  if (!partner || !name || !phone) return
+  const { error } = await supabase.rpc("rebuild_partner_reservation_summary", {
+    p_partner: partner,
+    p_customer_name: name,
+    p_customer_phone: phone,
+  })
+  if (error) {
+    console.error(`Failed to rebuild ${partner} reservation summary for ${name}/${phone}:`, error.message)
+  }
+}
+
 function buildReservationSummaryLookup(rows: unknown): Map<string, Record<string, unknown>> {
   const map = new Map<string, Record<string, unknown>>()
   const list = Array.isArray(rows) ? rows : []
@@ -4648,6 +4787,24 @@ function buildReservationSummaryLookup(rows: unknown): Map<string, Record<string
     map.set(`${name}__${phone}`, row)
   }
   return map
+}
+
+function extractReservationNoFromReservationRow(row: Record<string, unknown>): string | null {
+  const reservationDetail = toSafeString(row.reservation_detail)
+  if (!reservationDetail) return null
+  const parsedDetail = parseReservationCalendarDetail(reservationDetail)
+  const reservationNo = toSafeString(parsedDetail?.reservationNo)
+  return reservationNo || null
+}
+
+function buildReservationCountDedupeKey(
+  name: string,
+  phone: string,
+  row: Record<string, unknown>,
+): string | null {
+  const reservationNo = extractReservationNoFromReservationRow(row)
+  if (!reservationNo) return null
+  return `${name}__${phone}__${isReservationCancellationRow(row) ? "cancel" : "active"}__${reservationNo}`
 }
 
 async function buildReservationEffectiveSummaryLookup(
@@ -4688,12 +4845,16 @@ async function buildReservationEffectiveSummaryLookup(
   }
 
   const map = new Map<string, Record<string, unknown>>()
+  const seenReservationKeys = new Set<string>()
   const rows = Array.isArray(data) ? data : []
   for (const row of rows) {
     if (!isRecord(row)) continue
     const name = toSafeString(row.customer_name)
     const phone = toSafeString(row.customer_phone)
     if (!name || !phone) continue
+    const dedupeKey = buildReservationCountDedupeKey(name, phone, row)
+    if (dedupeKey && seenReservationKeys.has(dedupeKey)) continue
+    if (dedupeKey) seenReservationKeys.add(dedupeKey)
     const key = `${name}__${phone}`
     const prev = map.get(key)
     const isCancellation = isReservationCancellationRow(row)
@@ -4818,6 +4979,73 @@ function buildReservationCalendarItem(
     manual_hidden_reason: toSafeString(event.manual_hidden_reason) || null,
     manual_store_key: toSafeString(event.manual_store_key) || null,
     manual_edited_at: toSafeString(event.manual_edited_at) || toSafeString(event.updated_at) || null,
+  }
+}
+
+function normalizeReservationStoreScope(value: unknown): string | null {
+  const raw = String(value ?? "").trim()
+  return raw ? raw.toLowerCase() : null
+}
+
+function resolveReservationCalendarItemStoreKey(item: Record<string, unknown>): string | null {
+  const manualStoreKey = String(item.manual_store_key ?? "").trim()
+  if (manualStoreKey) return manualStoreKey.toLowerCase()
+  const storeName = String(item.store_name ?? "").trim()
+  if (!storeName) return null
+  const resolved = resolveReceiptNamePartitionKey(storeName)
+  return resolved ? String(resolved).trim().toLowerCase() : null
+}
+
+function reservationCalendarItemMatchesStoreScope(
+  item: Record<string, unknown>,
+  storeScope: string | null,
+): boolean {
+  if (!storeScope) return true
+  return resolveReservationCalendarItemStoreKey(item) === storeScope
+}
+
+function reservationEventRecordMatchesStoreScope(
+  source: "tabelog" | "ikyu" | "manual",
+  record: unknown,
+  storeScope: string | null,
+): boolean {
+  if (!storeScope || !isRecord(record)) return true
+  const item = buildReservationCalendarItem(source, record, null)
+  if (!item) return false
+  return reservationCalendarItemMatchesStoreScope(item, storeScope)
+}
+
+async function fetchReservationEventRecordForScopeCheck(
+  supabase: ReturnType<typeof createClient>,
+  table: string,
+  id: number,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase
+    .from(table)
+    .select("id, reservation_detail, manual_store_key, created_at, visit_at")
+    .eq("id", id)
+    .maybeSingle()
+  if (error) {
+    throw { status: 500, message: `Failed to verify reservation scope: ${error.message}` } satisfies AppError
+  }
+  if (!isRecord(data)) {
+    throw { status: 404, message: "対象の予約が見つかりません。" } satisfies AppError
+  }
+  return data
+}
+
+function assertReservationEventMatchesStoreScope(
+  source: string,
+  record: unknown,
+  storeScope: string | null,
+) {
+  const normalizedScope = normalizeReservationStoreScope(storeScope)
+  const normalizedSource = source === "tabelog" || source === "ikyu" || source === "manual"
+    ? source
+    : null
+  if (!normalizedScope || !normalizedSource) return
+  if (!reservationEventRecordMatchesStoreScope(normalizedSource, record, normalizedScope)) {
+    throw { status: 403, message: "他店舗の予約は編集できません。" } satisfies AppError
   }
 }
 

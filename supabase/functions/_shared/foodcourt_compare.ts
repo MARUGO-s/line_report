@@ -440,7 +440,7 @@ function fcAddDays(ymd: string, n: number): string {
 }
 // テナント一覧は「翌朝に出る“前日”の売上比較表」。report_date はレポート発行日なので、
 // 実際の売上が発生した日は前日(-1)。AIに渡す日付・相関はすべてこの“売上日”に揃える。
-function fcSalesDate(r: Record<string, unknown>): string {
+export function fcSalesDate(r: Record<string, unknown>): string {
   const rd = String((r as { report_date?: unknown }).report_date ?? '').trim()
   if (/^\d{4}-\d{2}-\d{2}/.test(rd)) return fcAddDays(rd.slice(0, 10), -1)
   const iso = String((r as { created_at?: unknown }).created_at ?? '')
@@ -827,6 +827,148 @@ function buildAnomalyDays(reports: Array<Record<string, unknown>>, baseName: str
   return `平均${fcYen(mean)}・SD${fcYen(sd)}。|Z|≧2の日（平常分析から切り分けて要因を見る）:\n` + out.slice(0, 8).join('\n')
 }
 
+// 「分析サマリー（自動）」1日分の日次サマリー用に、対象レポート(=1日)のFC内順位・シェア・自店史比較・
+// イベント/天気・直近推移を事前計算する。AIには数字を作らせず、ここで計算した事実だけを渡して意味を語らせる。
+function buildTargetDayFacts(
+  reports: Array<Record<string, unknown>>,
+  baseName: string,
+  targetReport: Record<string, unknown>,
+  events: VenueEvent[],
+  weather: WeatherDay[],
+): string {
+  const date = fcSalesDate(targetReport)
+  const raw = Array.isArray((targetReport as { tenants?: unknown }).tenants) ? (targetReport as { tenants?: unknown[] }).tenants as unknown[] : []
+  type Row = { name: string; sales: number; guests: number | null; kt: number | null }
+  const list: Row[] = []
+  for (const t of raw) {
+    const o = (t && typeof t === 'object') ? t as Record<string, unknown> : {}
+    const name = String(o.name ?? '').trim(); const sales = numOrNull(o.sales)
+    if (!name || sales == null) continue
+    const guests = numOrNull(o.guests)
+    list.push({ name, sales, guests, kt: (guests && guests > 0) ? sales / guests : null })
+  }
+  const base = list.find((t) => normalizeName(t.name) === normalizeName(baseName))
+  if (!base || !list.length) return ''
+  const byS = list.slice().sort((a, b) => b.sales - a.sales)
+  const salesRank = 1 + byS.findIndex((t) => t === base)
+  const total = list.reduce((s, t) => s + t.sales, 0)
+  const share = total > 0 ? base.sales / total * 100 : null
+  const byG = list.filter((t) => t.guests != null).sort((a, b) => (b.guests as number) - (a.guests as number))
+  const guestsRank = base.guests != null ? 1 + byG.findIndex((t) => t === base) : null
+  const byK = list.filter((t) => t.kt != null).sort((a, b) => (b.kt as number) - (a.kt as number))
+  const ktRank = base.kt != null ? 1 + byK.findIndex((t) => t === base) : null
+  const fcAvgSales = fcAvg(list.map((t) => t.sales))
+  const fcAvgGuests = fcAvg(list.map((t) => t.guests ?? NaN).filter((v) => isFinite(v)))
+  const fcAvgKt = fcAvg(list.map((t) => t.kt ?? NaN).filter((v) => isFinite(v)))
+  const fcMedKt = fcMedian(list.map((t) => t.kt ?? NaN).filter((v) => isFinite(v)))
+  const top = byS[0]
+  const above = salesRank > 1 ? byS[salesRank - 2] : null
+  const below = salesRank < byS.length ? byS[salesRank] : null
+
+  // 自店の履歴（対象日を除く全期間）と比較
+  const histAll = fcBaseDaily(reports, baseName)
+  const hist = histAll.filter((r) => r.date !== date)
+  const histSalesAvg = fcAvg(hist.map((r) => r.sales))
+  const histGuestsAvg = fcAvg(hist.map((r) => r.guests ?? NaN).filter((v) => isFinite(v)))
+  const dow = fcDow(date)
+  const sameDowAvg = fcAvg(hist.filter((r) => fcDow(r.date) === dow).map((r) => r.sales))
+  const rankAmongHist = 1 + hist.filter((r) => r.sales > base.sales).length
+
+  // イベント・天気（対象日）
+  const ev = (events || []).filter((e) => String(e.event_date ?? '').slice(0, 10) === date)
+  const wx = (weather || []).find((w) => String(w.weather_date ?? '').slice(0, 10) === date)
+
+  // 過去平均との差を「客数要因」「客単価要因」に分解
+  let decompLine = ''
+  if (base.guests != null && histGuestsAvg && histSalesAvg != null) {
+    const histKtAvg = histSalesAvg / histGuestsAvg
+    const diff = base.sales - histSalesAvg
+    const guestEffect = (base.guests - histGuestsAvg) * histKtAvg
+    const priceEffect = ((base.kt ?? histKtAvg) - histKtAvg) * base.guests
+    decompLine = `過去平均との差${fcYen(diff)}の主因は「${Math.abs(guestEffect) >= Math.abs(priceEffect) ? '客数' : '客単価'}」（客数の寄与${fcYen(guestEffect)}／客単価の寄与${fcYen(priceEffect)}）。`
+  }
+
+  // 直近の推移（対象日を含む直近3日）
+  const idx = histAll.findIndex((r) => r.date === date)
+  const recent = idx >= 0 ? histAll.slice(Math.max(0, idx - 2), idx + 1) : []
+  const trendLine = recent.length > 1 ? `直近${recent.length}日: ${recent.map((r) => `${r.date.slice(5)} ${fcYen(r.sales)}`).join(' → ')}` : ''
+  let prevDiffLine = ''
+  if (idx > 0) {
+    const prev = histAll[idx - 1]
+    const d = base.sales - prev.sales
+    prevDiffLine = `前回(${prev.date.slice(5)}) ${fcYen(prev.sales)} との差 ${fcYen(d)}（${prev.sales > 0 ? fcPct(d / prev.sales * 100) : '—'}）＝${d >= 0 ? '増' : '減'}。`
+  }
+
+  const L: string[] = []
+  L.push(`対象日: ${date}（${dow != null ? FC_DOW[dow] : '?'}）`)
+  L.push(`売上: ${fcYen(base.sales)}（FC平均${fcAvgSales != null ? fcYen(fcAvgSales) : '—'}の${fcAvgSales ? Math.round(base.sales / fcAvgSales * 100) : '—'}%、全${list.length}店中${salesRank}位）、売上シェア${share != null ? share.toFixed(1) : '—'}%`)
+  if (base.guests != null) L.push(`客数: ${base.guests}人（FC平均${fcAvgGuests != null ? Math.round(fcAvgGuests) + '人' : '—'}、${guestsRank ?? '—'}位）`)
+  if (base.kt != null) L.push(`客単価: ${fcYen(base.kt)}（FC平均${fcAvgKt != null ? fcYen(fcAvgKt) : '—'}・中央値${fcMedKt != null ? fcYen(fcMedKt) : '—'}、${ktRank ?? '—'}位）`)
+  if (top && top !== base) L.push(`首位: ${top.name} ${fcYen(top.sales)}（自店比${base.sales > 0 ? (top.sales / base.sales).toFixed(2) : '—'}倍）`)
+  if (above || below) L.push(`順位の前後: ${above ? '上位 ' + above.name + ' ' + fcYen(above.sales) + '（+' + fcYen(above.sales - base.sales) + '）' : ''}${above && below ? ' / ' : ''}${below ? '下位 ' + below.name + ' ' + fcYen(below.sales) + '（' + fcYen(below.sales - base.sales) + '）' : ''}`)
+  if (histSalesAvg != null) L.push(`自店史（対象日除く全${hist.length}日）平均比: ${histSalesAvg > 0 ? (base.sales / histSalesAvg * 100).toFixed(1) : '—'}%、履歴内順位${rankAmongHist}位`)
+  if (sameDowAvg != null) L.push(`同じ曜日（${dow != null ? FC_DOW[dow] : '?'}）平均比: ${sameDowAvg > 0 ? (base.sales / sameDowAvg * 100).toFixed(1) : '—'}%`)
+  L.push(ev.length ? `この日のイベント: ${ev.map((e) => `${e.category ? e.category + ':' : ''}${e.title}`).filter(Boolean).join('、')}` : `この日のイベント: なし`)
+  if (wx) L.push(`天気: ${String(wx.summary ?? '') || '—'}${(wx.precipitation_mm ?? 0) >= 1 ? '（雨）' : ''}`)
+  if (decompLine) L.push(decompLine)
+  if (trendLine) L.push(trendLine)
+  if (prevDiffLine) L.push(prevDiffLine)
+  return L.join('\n')
+}
+
+// 「曜日」「東京ドームのイベント種別」「天気」ごとに、実績の平均・サンプル数・ばらつき(CV)をコードで集計する。
+// 数値予測モデル(foodcourt-forecast-cron)の fit() と同じ発想＝AIには数字を作らせず、確度(サンプル数)つきの
+// 客観的事実だけを渡す。LLMが自由文で記憶を書き換える方式(蓄積知見)と違い、毎回`reports`から計算し直すため
+// 状態を持たず、データが増えるほど自動的に確度が上がる（＝数値予測モデルと同じ意味でのMAPE的な自己改善）。
+// AI側の役割は「複数の条件が同時に成立する日にどう組み合わさるか」を多角的に判断すること（コードは単変量集計のみ）。
+function buildConditionPatternStats(
+  reports: Array<Record<string, unknown>>,
+  baseName: string,
+  events: VenueEvent[],
+  weather: WeatherDay[],
+): string {
+  const daily = fcBaseDaily(reports, baseName).filter((r) => r.guests != null)
+  if (daily.length < 5) return ''
+  const overallAvg = fcAvg(daily.map((r) => r.sales)) ?? 0
+  if (overallAvg <= 0) return ''
+  const evByDate = new Map<string, VenueEvent[]>()
+  for (const e of (events || [])) { const d = String(e.event_date ?? '').slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { if (!evByDate.has(d)) evByDate.set(d, []); evByDate.get(d)!.push(e) } }
+  const wByDate = new Map<string, WeatherDay>()
+  for (const w of (weather || [])) { const d = String(w.weather_date ?? '').slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) wByDate.set(d, w) }
+  const confidence = (n: number) => n >= 6 ? '再現性あり' : n >= 3 ? '参考程度(やや少数)' : 'サンプル僅少(参考不可)'
+  const line = (label: string, xs: number[]): string | null => {
+    if (xs.length < 2) return null
+    const m = fcAvg(xs) ?? 0
+    const sd = fcStdev(xs)
+    const cv = (sd != null && m > 0) ? sd / m : null
+    return `${label}: n=${xs.length} 平均${fcYen(m)}（全体比${fcPct((m / overallAvg - 1) * 100)}）ばらつきCV=${cv != null ? Math.round(cv * 100) + '%' : '—'}［${confidence(xs.length)}］`
+  }
+  const L: string[] = ['※n=サンプル数(3未満は参考にしない)。CV(変動係数)が大きいほど条件だけでは説明できないばらつきがある。']
+  const wLines: string[] = []
+  for (let d = 0; d <= 6; d++) {
+    const ln = line(`${FC_DOW[d]}曜日`, daily.filter((r) => fcDow(r.date) === d).map((r) => r.sales))
+    if (ln) wLines.push(ln)
+  }
+  if (wLines.length) L.push('[曜日別]\n' + wLines.join('\n'))
+  const catBuckets = new Map<string, number[]>()
+  const noneBucket: number[] = []
+  for (const r of daily) {
+    const evs = evByDate.get(r.date) || []
+    if (!evs.length) { noneBucket.push(r.sales); continue }
+    for (const c of new Set(evs.map((e) => e.category || '不明'))) { if (!catBuckets.has(c)) catBuckets.set(c, []); catBuckets.get(c)!.push(r.sales) }
+  }
+  const evLines: string[] = []
+  for (const [cat, xs] of catBuckets) { const ln = line(cat, xs); if (ln) evLines.push(ln) }
+  const noneLn = line('イベント無し', noneBucket)
+  if (noneLn) evLines.push(noneLn)
+  if (evLines.length) L.push('[イベント種別]\n' + evLines.sort().join('\n'))
+  const rain = daily.filter((r) => { const w = wByDate.get(r.date); return w && (w.precipitation_mm ?? 0) >= 1 }).map((r) => r.sales)
+  const dry = daily.filter((r) => { const w = wByDate.get(r.date); return w && (w.precipitation_mm ?? 0) < 1 }).map((r) => r.sales)
+  const wxLines = [line('雨', rain), line('雨でない', dry)].filter((x): x is string => x != null)
+  if (wxLines.length) L.push('[天気]\n' + wxLines.join('\n'))
+  return L.length > 1 ? L.join('\n\n') : ''
+}
+
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
 // events（東京ドームのイベント日程）・weather（日次天気）を渡すと、客数増減との相関も踏まえて回答する。
 // 競合店プロファイル（業態・価格帯・飲み/食事傾向）も注入し、業態文脈を踏まえた分析にする。
@@ -873,6 +1015,44 @@ export async function answerFoodCourtQuestion(
   const storeCorr = buildStoreCorrelation(reports, baseName)               // 店舗間相関（カニバリ/アンカー）
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)   // 異常値Zスコア
   const forecastCtx = buildForecastContext(forecast)                      // 学習型モデルの予測＋自己採点
+  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
+  const fallbackModel = 'meta-llama/llama-4-scout-17b-16e-instruct'
+
+  // --- 専門AI 2体を並列実行し、統合AIに渡す「分析メモ」を作らせる（同一プロンプト過積載を避けるための役割分担） ---
+  const quantSystem = [
+    `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、他店舗比較と過去実績データの分析専門家です。`,
+    `担当は「他店舗との関係」と「過去の実績データ」のみ。イベント・天気は別担当なので触れなくてよい。`,
+    `【厳守】表の値をそのまま言い換えるだけの回答は禁止。数字は根拠として引用し、必ず「だから何を意味するか」まで述べる。`,
+    `(1) 競合プロファイル（各店の業態）を使い、客単価・客数の水準がその業態から見て妥当か想定外かを判定する。`,
+    `(2) 真の競合（同じ来店動機・時間帯・価格帯で客を奪い合う相手）を特定する。`,
+    `(3) 売上=客数×客単価の要因分解で、動きが「客数要因」か「客単価要因」かを切り分ける。`,
+    `(4) 店舗間相関（カニバリ/アンカー）を業態文脈で解釈する。ただし相関は因果ではないと明示する。`,
+    `(5) 異常値（Zスコア）の突出日/落込日は平常と切り離して注記する。`,
+    `(6) 来客予測モデルがあれば、自己採点(誤差%)を踏まえて参考程度に触れる。`,
+    `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
+  ].join('\n')
+  const quantUser = `質問: ${q}\n\n# 競合プロファイル\n${competitors}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}\n\n# 日次生データ\n${data}`
+
+  const extSystem = [
+    `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、会場イベント・天気の需要ドライバー分析専門家です。`,
+    `担当は「東京ドームのイベント」と「天気」のみ。競合比較・過去実績の話は別担当なので触れなくてよい。`,
+    `(1) 客数・売上に動きがある日は、そのイベント名・種別・規模・客層まで特定し、なぜ効いた/効かなかったかを客層・滞在時間と業態(ワイン×スパイス＝高単価大人向け)の相性で説明する。`,
+    `(2) 野球は対戦相手/デーナイター、ライブはアーティスト/客層、ドームシティの小ホール(後楽園ホール・カナデビアホール等)独自の集客動機も考慮する。`,
+    `(3) 天気(雨・猛暑等)とイベント有無の交互作用も見る。`,
+    `(4) 今後の予定イベントがあれば、想定される影響を打ち手につながる形で触れる。`,
+    `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
+  ].join('\n')
+  const extUser = `質問: ${q}\n\n# 会場イベント相関\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ\n${data}`
+
+  const [quantRes, extRes] = await Promise.all([
+    groqChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700),
+    groqChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700),
+  ])
+  if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
+  if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
+  const quantNote = quantRes.content || '(他店舗・過去データ分析メモ: 取得失敗)'
+  const extNote = extRes.content || '(イベント・天気分析メモ: 取得失敗)'
+
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリスト兼経営コンサルタントです。`,
     `目的は「表を見れば分かる事実の再掲」ではなく、数字の“奥”を読み解いた洞察（市場調査レベルの考察）を提供することです。`,
@@ -893,8 +1073,9 @@ export async function answerFoodCourtQuestion(
     `(11) 「来客予測（学習型モデル）」がある場合は、今後の予測客数・売上を仕入・人員の助言に使う。ただしモデルの自己採点（誤差%）も併記されているので、誤差が大きい時は「精度は発展途上（データ蓄積で改善）」と断った上で参考値として扱う。`,
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
     `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
+    `【専門AIメモの統合】以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。2つのメモが矛盾する場合や誇張がある場合は、必ず生データ・事前計算ブロックの数値で裏取りしてから採否を判断し、1つの一貫した最終回答にまとめること。`,
   ].join('\n')
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}\n\n# 日次生データ（全テナント）\n${data}`
+  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 日次生データ（全テナント）\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
@@ -904,17 +1085,129 @@ export async function answerFoodCourtQuestion(
   }
   const systemFull = system + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
   const messages = [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
-  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
   const r1 = await groqChat(messages, groqApiKey, primary, 1800)
   let ans = r1.content
   let usage = r1.usage
   if (!ans) {
-    const r2 = await groqChat(messages, groqApiKey, 'meta-llama/llama-4-scout-17b-16e-instruct', 1800)
+    const r2 = await groqChat(messages, groqApiKey, fallbackModel, 1800)
     ans = r2.content
     if (r2.usage) usage = r2.usage
   }
   // Q&Aの実測トークンをAI使用料に合算（best-effort・store_partition_keyで集計に乗る）。
   await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, usage)
+  return ans
+}
+
+// 「分析サマリー（自動）」カードの1日分をAIで生成する（従来はJSテンプレートで毎回同じ言い回しだった問題への対応）。
+// answerFoodCourtQuestion と同じ「専門AI2体(他店舗・過去データ／イベント・天気)を並列実行→統合AIが1本にまとめる」
+// 構成を使い、対象日(targetReport)の事実(buildTargetDayFacts)を軸に語らせる。呼び出し側(admin-api)で
+// report_id単位にキャッシュし、閲覧のたびに再生成しない運用を前提とする。
+export async function generateFoodCourtDailySummary(
+  reports: Array<Record<string, unknown>>,
+  baseName: string,
+  targetReport: Record<string, unknown>,
+  groqApiKey: string,
+  events: VenueEvent[] = [],
+  weather: WeatherDay[] = [],
+  forecast: ForecastRow[] = [],
+  supabase?: SupabaseClient | null,
+  storeKey?: string,
+  priorSummary?: { businessDate: string; summaryText: string } | null,
+): Promise<string | null> {
+  if (!groqApiKey) return null
+  canonFoodcourtReports(reports)
+  const targetFacts = buildTargetDayFacts(reports, baseName, targetReport, events, weather)
+  if (!targetFacts) return null
+  // 前回(直近の1つ前の営業日)のAI分析を「自己検証の材料」として渡す。同じ結論を毎回繰り返すのではなく、
+  // 前回の見立て（好調/不調の理由・客数要因か客単価要因か等）が今回の実績でも裏付けられたか、変わったかを
+  // 一言加えさせることで、日々の分析に連続性と自己修正を持たせる（数値予測モデルの自己採点と同じ発想）。
+  const priorBlock = priorSummary
+    ? `# 前回（${priorSummary.businessDate}）の分析（自己検証用の材料。今回の対象日ではない）\n${priorSummary.summaryText}`
+    : ''
+  // 曜日/イベント種別/天気ごとの実績統計(コード計算・サンプル数と確度つき)。LLMに記憶を書かせる方式ではなく
+  // 毎回reportsから計算し直すため、データが増えるほど自動的に確度が上がる（MAPE的な自己改善）。
+  const patternStats = buildConditionPatternStats(reports, baseName, events, weather)
+  const patternBlock = patternStats
+    ? `# 統計的パターン（条件別集計・コード計算・サンプル数と確度つき）\n${patternStats}`
+    : ''
+  const insights = buildBaseInsights(reports, baseName)
+  const eventCorr = buildEventCorrelation(reports, baseName, events)
+  const eventList = buildEventListText(events)
+  const weatherCorr = buildWeatherCorrelation(reports, baseName, weather)
+  const competitors = buildCompetitorContext(reports, baseName)
+  const decomposition = buildContributionDecomposition(reports, baseName)
+  const storeCorr = buildStoreCorrelation(reports, baseName)
+  const anomalies = buildAnomalyDays(reports, baseName, events, weather)
+  const forecastCtx = buildForecastContext(forecast)
+  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
+  const fallbackModel = 'meta-llama/llama-4-scout-17b-16e-instruct'
+
+  // --- 専門AI①: 対象日の他店舗比較・過去データ分析メモ ---
+  const quantSystem = [
+    `あなたは「${baseName}」専属の、他店舗比較と過去実績データの分析専門家です。`,
+    `担当は「対象日の他店舗との関係」と「過去の実績データとの比較」のみ。イベント・天気は別担当なので触れなくてよい。`,
+    `対象日の実績・順位・シェアと、自店史（平均・同曜日平均・履歴内順位）との比較データが与えられる。`,
+    `(1) 対象日の客単価・順位が業態(競合プロファイル)から見て妥当か想定外かを判定する。`,
+    `(2) 真の競合（同じ来店動機・価格帯で客を奪い合う相手）の視点で、対象日の順位の意味を語る。`,
+    `(3) 対象日と自店史平均の差が「客数要因」か「客単価要因」か（与えられた分解データを使う）。`,
+    `(4) 対象日が自店史の中でどの程度の位置(好調/不調/平常)かを、履歴内順位・同曜日平均比で語る。`,
+    `(5) 「前回の分析」が与えられている場合、そこで語った見立て（好調/不調の理由・客数要因か客単価要因か等）が今回の対象日の実績でも裏付けられたか、それとも変わったかを一言で検証する（同じ結論・同じ言い回しの繰り返しを避ける）。`,
+    `(6) 「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)。対象日に該当する曜日/イベント種別/天気の複数条件を同時に参照し、それぞれの確度(nが少ない条件は割り引く)を踏まえた上で、条件同士がどう重なって効いているか(多角的に)を判断する。単一条件の数字をそのまま言い換えるだけにしない。`,
+    `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（350字程度）。`,
+  ].join('\n')
+  const quantUser = `対象日の分析メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 期間サマリー（全体傾向）\n${insights || '(履歴不足)'}\n\n# 要因分解（前半→後半の全体傾向）\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
+
+  // --- 専門AI②: 対象日のイベント・天気分析メモ ---
+  const extSystem = [
+    `あなたは「${baseName}」専属の、会場イベント・天気の需要ドライバー分析専門家です。`,
+    `担当は「対象日の東京ドームのイベント」と「天気」のみ。競合比較・過去実績の話は別担当なので触れなくてよい。`,
+    `(1) 対象日にイベントがあれば、種別・規模・客層から、なぜ客数・売上に効いた/効かなかったかを説明する。`,
+    `(2) 対象日の天気(雨か否か)が客足にどう影響したかを説明する。`,
+    `(3) 今後の予定イベントがあれば、次に活かせる打ち手を一言添える。`,
+    `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（300字程度）。`,
+  ].join('\n')
+  const extUser = `対象日の分析メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 会場イベント相関（全体傾向）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（全体傾向）\n${weatherCorr || '(天気データなし)'}`
+
+  const [quantRes, extRes] = await Promise.all([
+    groqChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600),
+    groqChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600),
+  ])
+  if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
+  if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
+  const quantNote = quantRes.content || '(他店舗・過去データ分析メモ: 取得失敗)'
+  const extNote = extRes.content || '(イベント・天気分析メモ: 取得失敗)'
+
+  // --- 統合AI: 2つのメモ＋対象日の事実を、画面の固定7見出しフォーマットにまとめる ---
+  const system = [
+    `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリストです。`,
+    `目的は対象日の実績について、表の値の言い換えではなく「だから何を意味するか」まで踏み込んだ日次サマリーを作ることです。`,
+    `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象日の事実」ブロックの数値で裏取りしてから採否を判断する。`,
+    `【前回分析の自己検証】「前回の分析」が与えられている場合、そこで語った見立て（好調/不調の理由・客数要因か客単価要因か・イベント/天気の影響など）が今回の対象日の実績でも裏付けられたか、変わったかを必ずどこかの見出し（主に【この日の評価（条件別）】か【直近の勢い】）で一言検証すること。同じ結論・同じ言い回しを毎日繰り返さない。前回との継続性がある分析にする。`,
+    `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象日に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、それぞれの確度を踏まえながら「複数の条件が重なってどう効いたか」を多角的に判断し、【この日の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
+    `【出力フォーマット・厳守】必ず次の7つの見出しを、この順番・この表記（【】で囲む）で出力すること。見出し以外の前置き・締めの文章は書かない。`,
+    `【総評】対象日の総合評価(強い/弱い/平常)を1〜2文＋根拠。`,
+    `【売上】対象日の売上・FC平均比・順位を、意味づけとともに2〜3文。`,
+    `【客数】対象日の客数・FC平均比・順位を、意味づけとともに1〜2文。`,
+    `【客単価】対象日の客単価・FC平均比・順位を、業態文脈での意味づけとともに1〜2文。`,
+    `【競合環境】自店の業態・真の競合・強みを2〜3文（対象日に限らず一般的な立ち位置の説明でよい）。`,
+    `【この日の評価（条件別）】自店史平均比・同曜日平均比・履歴内順位・イベント/天気の影響・客数/客単価要因分解を2〜4文。`,
+    `【直近の勢い】直近の推移・前回との差、および前回分析の自己検証結果を1〜2文。`,
+    `各見出しの本文は短い文を2〜4行程度。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。客単価の順位は業態由来なので単価の高低そのものを優劣にしない。`,
+  ].join('\n')
+  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
+  const messages = [
+    { role: 'system', content: system },
+    { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象日の日次サマリーを作成してください。` },
+  ]
+  const r1 = await groqChat(messages, groqApiKey, primary, 1400)
+  let ans = r1.content
+  let usage = r1.usage
+  if (!ans) {
+    const r2 = await groqChat(messages, groqApiKey, fallbackModel, 1400)
+    ans = r2.content
+    if (r2.usage) usage = r2.usage
+  }
+  if (usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, usage)
   return ans
 }
 

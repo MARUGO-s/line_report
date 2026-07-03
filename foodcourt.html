@@ -557,7 +557,7 @@
     <!-- OVERVIEW -->
     <section class="panel show" data-panel="overview">
       <div class="card">
-        <div class="card-h"><div class="card-t"><span class="em">📋</span>分析サマリー（自動）</div><span class="pill beta">試験版</span></div>
+        <div class="card-h"><div class="card-t"><span class="em">📋</span>分析サマリー（自動）</div><span class="pill beta" id="aiStatusPill">試験版</span></div>
         <div class="ai-grid" id="aiGrid"></div>
         <div class="card-note" id="aiNote"></div>
       </div>
@@ -711,7 +711,7 @@
     resultArea:$('resultArea'),
     heroLogo:$('heroLogo'), heroName:$('heroName'), heroMeta:$('heroMeta'), heroRanks:$('heroRanks'), heroTotals:$('heroTotals'), kpis:$('kpis'),
     tabrow:$('tabrow'),
-    aiGrid:$('aiGrid'), aiNote:$('aiNote'),
+    aiGrid:$('aiGrid'), aiNote:$('aiNote'), aiStatusPill:$('aiStatusPill'),
     qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'), qClear:$('qClear'),
     rankTbody:$('rankTbody'), shareTbody:$('shareTbody'), shareNote:$('shareNote'), priceTbody:$('priceTbody'), distWrap:$('distWrap'), clsList:$('clsList'),
     trendCount:$('trendCount'), dailyTbody:$('dailyTbody'), trendNote:$('trendNote'),
@@ -1372,9 +1372,7 @@
     });
     return secs;
   }
-  function renderAnalysisBlocks(report, seriesReports, periodLabel){
-    const text = buildAnalysisText(report, seriesReports, periodLabel);
-    const secs = parseAnalysis(text);
+  function paintAnalysisSecs(secs){
     const note = secs.find(s=>s.title==='注意');
     const FULL = { '総評':1, '打ち手（試算）':1 };
     dom.aiGrid.innerHTML = secs.filter(s=>s.title!=='注意' && s.title!=='期間').map(s=>{
@@ -1388,6 +1386,27 @@
       return '<div class="ai-block'+full+'"><div class="ai-h">▍'+escapeHtml(s.title)+'</div>'+body+'</div>';
     }).join('');
     dom.aiNote.textContent = note ? note.body.join(' ') : '';
+  }
+  // まず即時にJSテンプレート版を表示（待ち時間ゼロ）。単日表示(report.idあり)なら、裏でAI版(専門AI2体→
+  // 統合AI・report_id単位でキャッシュ)を取得し、届いたら差し替える。期間集計モードやAI失敗時はテンプレのまま。
+  let aiSummaryReq = 0;
+  function renderAnalysisBlocks(report, seriesReports, periodLabel){
+    const text = buildAnalysisText(report, seriesReports, periodLabel);
+    paintAnalysisSecs(parseAnalysis(text));
+    if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
+    if (!report || report.id == null || periodLabel) return;
+    const reqId = ++aiSummaryReq;
+    if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成中…';
+    apiFetch('/foodcourt/daily-summary?store_key='+encodeURIComponent(currentStore())+'&report_id='+encodeURIComponent(report.id))
+      .then(body=>{
+        if (reqId !== aiSummaryReq) return; // 表示対象が切り替わっていたら破棄
+        if (!body || !body.summary) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
+        const aiSecs = parseAnalysis(body.summary);
+        if (!aiSecs.length) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
+        paintAnalysisSecs(aiSecs);
+        if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成';
+      })
+      .catch(()=>{ if (reqId === aiSummaryReq && dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; });
   }
 
   // ===== render: ranking / share / price / dist / classification =====

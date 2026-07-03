@@ -27,6 +27,7 @@ import {
   resolveReceiptTableForStore,
   type ManualMonthImportEntry,
 } from '../_shared/daily_sales_import.ts'
+import { fetchManualMonthSales, type ManualMonthSalesRecord } from '../_shared/manual_month_sales.ts'
 import { resolveReceiptNamePartitionKey } from '../_shared/receipt_store_name_resolve.ts'
 import {
   buildReceiptStoreMismatchFlexReply,
@@ -97,6 +98,8 @@ import {
 } from '../_shared/line_user_approval.ts'
 
 const STORE_KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]*$/
+const DAILY_SALES_TEMPLATE_KEY = 'daily_sales_management_xlsx'
+const DAILY_SALES_TEMPLATE_FILENAME = '日別売上管理表.xlsx'
 
 type LineEvent = {
   type?: string
@@ -113,6 +116,115 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+function decodeBase64Bytes(base64: string): Uint8Array {
+  const binary = atob(String(base64 || '').replace(/\s+/g, ''))
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+function buildTemplateDownloadUrl(storeKey: string): string {
+  const supabaseUrl = String(Deno.env.get('SUPABASE_URL') || '').replace(/\/+$/, '')
+  const base = supabaseUrl
+    ? `${supabaseUrl}/functions/v1/line-webhook`
+    : 'https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook'
+  return `${base}/${encodeURIComponent(storeKey)}?download=${encodeURIComponent(DAILY_SALES_TEMPLATE_KEY)}`
+}
+
+async function maybeServeTemplateDownload(
+  req: Request,
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+): Promise<Response | null> {
+  const url = new URL(req.url)
+  const requested = String(url.searchParams.get('download') || '').trim()
+  if (!requested) return null
+  if (requested !== DAILY_SALES_TEMPLATE_KEY) return jsonResponse({ ok: false, error: 'unknown template' }, 404)
+
+  const { data, error } = await supabase
+    .from('line_file_templates')
+    .select('filename, content_type, content_base64')
+    .eq('template_key', DAILY_SALES_TEMPLATE_KEY)
+    .maybeSingle()
+
+  if (error) {
+    console.error('line_file_templates lookup failed:', error.message)
+    return jsonResponse({ ok: false, error: 'template lookup failed' }, 500)
+  }
+  if (!data) return jsonResponse({ ok: false, error: 'template not found' }, 404)
+
+  const row = data as { filename?: unknown; content_type?: unknown; content_base64?: unknown }
+  const filename = String(row.filename || DAILY_SALES_TEMPLATE_FILENAME)
+  const encodedFilename = encodeURIComponent(filename)
+  const contentType = String(row.content_type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  const bytes = decodeBase64Bytes(String(row.content_base64 || ''))
+
+  const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': String(bytes.byteLength),
+      'Content-Disposition': `attachment; filename="daily-sales-template.xlsx"; filename*=UTF-8''${encodedFilename}`,
+      'Cache-Control': 'private, max-age=300',
+    },
+  })
+}
+
+function isDailySalesTemplateRequestText(text: string): boolean {
+  const compact = String(text || '').replace(/\s+/g, '').toLowerCase()
+  if (!compact) return false
+  const exact = new Set([
+    '日別売上管理表',
+    '月次日別売上管理表',
+    '売上管理表',
+    '売上管理表テンプレート',
+    '日別売上テンプレート',
+    '過去売上テンプレート',
+    'excelテンプレート',
+    'エクセルテンプレート',
+  ])
+  if (exact.has(compact)) return true
+  const asksTemplate = compact.includes('テンプレ') || compact.includes('ひな形') || compact.includes('雛形') || compact.includes('フォーマット') || compact.includes('ダウンロード')
+  const asksSalesSheet = compact.includes('売上') || compact.includes('日別') || compact.includes('excel') || compact.includes('エクセル')
+  return asksTemplate && asksSalesSheet
+}
+
+function buildDailySalesTemplateDownloadFlex(storeKey: string): Record<string, unknown> {
+  return {
+    type: 'flex',
+    altText: '日別売上管理表テンプレートのダウンロード',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          { type: 'text', text: '日別売上管理表テンプレート', weight: 'bold', size: 'md', wrap: true },
+          { type: 'text', text: '過去売上をLINEから登録するための基本Excelです。ダウンロードして金額を入力し、このトークへ送信してください。', size: 'sm', color: '#666666', wrap: true, margin: 'sm' },
+          { type: 'text', text: '月合計だけ登録する場合は、B37「合計だけ入力」に総売上を入れてください。', size: 'xs', color: '#888888', wrap: true, margin: 'md' },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            action: {
+              type: 'uri',
+              label: 'Excelをダウンロード',
+              uri: buildTemplateDownloadUrl(storeKey),
+            },
+          },
+        ],
+      },
+    },
+  }
 }
 
 function parseStoreKeyFromRequest(req: Request): string | null {
@@ -233,34 +345,6 @@ async function insertRawWebhookEvent(
   if (String(error.code) === '23505') return 'duplicate'
   console.error(`insert ${rawTable} failed:`, error.message)
   return 'error'
-}
-
-/** 期間集計（GP/期間）レポート用の「売上登録しません」通知（リッチテキスト=Flex）を組み立てる。 */
-function buildReceiptNonSalesNoticeFlex(summaryText: string): Record<string, unknown> {
-  const detail = String(summaryText || '').trim()
-  const bodyContents: Record<string, unknown>[] = [
-    { type: 'text', text: '期間集計レポート', weight: 'bold', size: 'md', color: '#1a6fa8' },
-    { type: 'separator', margin: 'md' },
-    {
-      type: 'text',
-      text: 'このレシートは日々の売上レシートではないため、売上には登録していません。',
-      wrap: true,
-      size: 'sm',
-      color: '#333333',
-      margin: 'md',
-    },
-  ]
-  if (detail) {
-    bodyContents.push({ type: 'text', text: detail, wrap: true, size: 'xs', color: '#8a96a3', margin: 'sm' })
-  }
-  return {
-    type: 'flex',
-    altText: 'このレシートは日々の売上ではないため登録していません（期間集計レポート）',
-    contents: {
-      type: 'bubble',
-      body: { type: 'box', layout: 'vertical', spacing: 'none', contents: bodyContents },
-    },
-  }
 }
 
 // ───────── 予約スクショ取込（予約確認画面 → 確認カード → 登録） ─────────
@@ -628,6 +712,7 @@ function buildDailySalesSummaryRows(
   fileStoreName: string | null,
   storeMatched: boolean,
   existingCount: number,
+  existingManualMonth: ManualMonthSalesRecord | null = null,
 ): Record<string, unknown>[] {
   const yen = (n: number) => '¥' + Number(n || 0).toLocaleString('ja-JP')
   const manual = parsed.import_mode === 'manual_month' ? parsed.manual_month_entry ?? null : null
@@ -643,6 +728,13 @@ function buildDailySalesSummaryRows(
   if (manual?.guest_count != null) rows.push(['客数', `${manual.guest_count}`])
   if (manual?.operating_days_count != null) rows.push(['営業日数', `${manual.operating_days_count}日`])
   if (fileStoreName) rows.push(['ファイル店舗', `${fileStoreName}${storeMatched ? '（一致）' : '（不一致）'}`])
+  if (existingManualMonth) {
+    rows.push(['既存月合計', yen(existingManualMonth.gross_sales_yen)])
+    if (existingManualMonth.tax_amount_yen != null) rows.push(['既存消費税', yen(existingManualMonth.tax_amount_yen)])
+    if (existingManualMonth.party_count != null) rows.push(['既存会計組数', `${existingManualMonth.party_count}`])
+    if (existingManualMonth.guest_count != null) rows.push(['既存客数', `${existingManualMonth.guest_count}`])
+    if (existingManualMonth.operating_days_count != null) rows.push(['既存営業日数', `${existingManualMonth.operating_days_count}日`])
+  }
   if (existingCount > 0) rows.push(['既存データ', `${existingCount}件あり`])
   return rows.filter(([, v]) => v && String(v).trim()).map(([label, v]) => ({
     type: 'box', layout: 'baseline', spacing: 'sm',
@@ -660,11 +752,14 @@ function buildDailySalesConfirmFlex(
   fileStoreName: string | null,
   storeMatched: boolean,
   existingCount: number,
+  existingManualMonth: ManualMonthSalesRecord | null = null,
 ): Record<string, unknown> {
   const warn: Record<string, unknown>[] = []
   if (!storeMatched) warn.push({ type: 'text', text: `⚠️ このルームの店舗とファイルの店舗名が一致しません。投入先は【${storeDisplay}】です。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
   const isManualMonth = parsed.import_mode === 'manual_month'
+  if (isManualMonth && existingManualMonth) warn.push({ type: 'text', text: '⚠️ 対象月に既に月合計売上が登録されています。「上書きして登録」で既存の月合計を上書きします。', wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
   if (existingCount > 0) warn.push({ type: 'text', text: isManualMonth ? `⚠️ 対象月に既に ${existingCount}件 の日別データがあります。「置き換えて登録」で日別データをクリアし、月合計として登録します。` : `⚠️ 取込対象期間に既に ${existingCount}件 のデータがあります。「置き換えて登録」で期間を丸ごと置換します（0=休業の日は売上なしにクリア／以前のデータは残りません）。`, wrap: true, size: 'xs', color: '#c0392b', margin: 'sm' })
+  const hasExisting = existingCount > 0 || !!existingManualMonth
   return {
     type: 'flex',
     altText: '日次売上の取込確認',
@@ -676,14 +771,14 @@ function buildDailySalesConfirmFlex(
           { type: 'text', text: isManualMonth ? '月合計売上を登録しますか？' : '日次売上を登録しますか？', weight: 'bold', size: 'md', color: '#1a6fa8' },
           { type: 'text', text: isManualMonth ? '「合計だけ入力」を読み取りました。日別ではなく月合計の手入力売上として登録します。' : '月次日別売上管理表を読み取りました。総売上をレシートとして登録します。', wrap: true, size: 'xs', color: '#8a96a3' },
           { type: 'separator', margin: 'md' },
-          ...buildDailySalesSummaryRows(parsed, storeDisplay, fileStoreName, storeMatched, existingCount),
+          ...buildDailySalesSummaryRows(parsed, storeDisplay, fileStoreName, storeMatched, existingCount, existingManualMonth),
           ...warn,
         ],
       },
       footer: {
         type: 'box', layout: 'vertical', spacing: 'sm',
         contents: [
-          { type: 'button', style: 'primary', color: '#1a6fa8', action: { type: 'postback', label: existingCount > 0 ? '置き換えて登録' : 'この内容で登録', data: `dsimp=${pendingId}`, displayText: isManualMonth ? '月合計売上を登録します' : '日次売上を登録します' } },
+          { type: 'button', style: 'primary', color: '#1a6fa8', action: { type: 'postback', label: hasExisting ? (isManualMonth ? '上書きして登録' : '置き換えて登録') : 'この内容で登録', data: `dsimp=${pendingId}`, displayText: isManualMonth ? '月合計売上を登録します' : '日次売上を登録します' } },
           { type: 'button', style: 'secondary', action: { type: 'postback', label: '中止', data: `dsimp_skip=${pendingId}`, displayText: '取込を中止します' } },
         ],
       },
@@ -733,7 +828,28 @@ async function processDailySalesFileEvent(
   const fetched = await fetchLineMessageBinary(lineMessageId, accessToken)
   if (!fetched.ok) return { replied: false, reason: fetched.error }
   const parsed = parseMonthlyDailySalesWorkbook(fetched.bytes, fileName)
-  if (!parsed.recognized) return { replied: false, reason: 'not_daily_sales_file' } // 日次売上ファイルでない→無反応（メディア保存のみ）
+  if (!parsed.recognized) {
+    const looksLikeDailySalesTemplate = !!(parsed.period || parsed.store_name || parsed.store_key || parsed.error)
+    if (looksLikeDailySalesTemplate) {
+      const replyToken = String(event.replyToken ?? '').trim()
+      if (replyToken) {
+        const detail = [
+          '日別売上管理表として読み取りましたが、登録対象の売上がありません。',
+          parsed.error ? `理由: ${parsed.error}` : '',
+          '月合計だけ登録する場合は、B37「合計だけ入力」の総売上欄に金額を入れてください。',
+          '日別で登録する場合は、各日の「総売上(税込）」欄に金額を入れてください。',
+        ].filter(Boolean).join('\n')
+        await replyLineFlex(
+          replyToken,
+          buildSimpleNoticeFlex(detail.slice(0, 500)),
+          accessToken,
+          webhookReplyLog(registry, roomId, 'daily_sales_import_no_rows'),
+        )
+      }
+      return { replied: !!replyToken, reason: 'daily_sales_import_no_rows' }
+    }
+    return { replied: false, reason: 'not_daily_sales_file' } // 日次売上ファイルでない→無反応（メディア保存のみ）
+  }
 
   // 売上のDB登録ゲート（試運転ルームは本番テーブルへ保存しない）。日次ファイルもレシートと同じ正本に書くため対象。
   if (!salesRegistrationAllowed) {
@@ -766,13 +882,16 @@ async function processDailySalesFileEvent(
     ? parsed.covered_dates
     : parsed.entries.map((e) => e.sales_date)
   const existingCount = await countExistingReceiptsForDates(supabase, receiptTable, coveredDates)
+  const existingManualMonth = parsed.import_mode === 'manual_month' && parsed.manual_month_entry
+    ? await fetchManualMonthSales(supabase, roomStoreKey, parsed.manual_month_entry.sales_month)
+    : null
   // 日次売上の登録はレシートと同等の「売上登録」操作なので、AI返信完全なし(ハードミュート)でも
   // 返信（自動登録の完了通知・重複/不一致の確認カード）を出す＝ミュートをバイパスする。
   // これがないと、確認カードが出ず置き換え/中止を押せないため、ミュート部屋では登録できなくなる。
   const replyToken = String(event.replyToken ?? '').trim()
 
   // 新規かつ店舗一致 → 即登録（ご要望どおり自動）。
-  if (existingCount === 0 && storeMatched) {
+  if (existingCount === 0 && !existingManualMonth && storeMatched) {
     try {
       const res = parsed.import_mode === 'manual_month' && parsed.manual_month_entry
         ? await importManualMonthSalesOverwrite(supabase, roomStoreKey, parsed.manual_month_entry, coveredDates)
@@ -831,7 +950,7 @@ async function processDailySalesFileEvent(
   if (!replyToken || !pendingId) return { replied: false, reason: 'daily_sales_confirm_no_reply' }
   await replyLineFlex(
     replyToken,
-    buildDailySalesConfirmFlex(pendingId, parsed, storeDisplay, parsed.store_name, storeMatched, existingCount),
+    buildDailySalesConfirmFlex(pendingId, parsed, storeDisplay, parsed.store_name, storeMatched, existingCount, existingManualMonth),
     accessToken,
     webhookReplyLog(registry, roomId, 'daily_sales_confirm'),
   )
@@ -1307,19 +1426,7 @@ async function processReceiptImageEvent(
   // マーカー（店舗プロンプトが付与）に加え、日付範囲「開始◯〜終了◯」の構造自体も普遍の安全網として検知する
   //   （複数日にまたがる＝期間集計＝1日の売上ではない）。単一日付の日計レシートは開始/終了が無いので当たらない。
   if (/期間集計|日付範囲|GP（グループ）|ＧＰ（グループ）|［期間］|\[期間\]|開始.{0,24}終了/.test(analyzedSummaryText)) {
-    // 売上には登録しないが、「これは日々の売上ではないので登録していません」の通知を返信する。
-    // 重要: この通知は receiptReplyToken を使う。
-    //   - AI返信完全無し(hard mute)であっても送る（レシート解析返信はhard muteをバイパスする）。
-    //   - ただし「レシートの解析結果を送信」(image_analysis_reply_enabled) が OFF のときは送らない。
-    if (receiptReplyToken) {
-      await replyLineFlex(
-        receiptReplyToken,
-        buildReceiptNonSalesNoticeFlex(analyzedSummaryText),
-        accessToken,
-        webhookReplyLog(registry, roomId, 'receipt_period_summary_notice'),
-      )
-    }
-    return { saved: false, replied: !!receiptReplyToken, reason: 'period_summary_skip' }
+    return { saved: false, replied: false, reason: 'period_summary_skip' }
   }
 
   // 予約管理アプリの「予約確認画面」スクショ（kind=reservation）。売上ではないので登録せず、
@@ -1603,6 +1710,14 @@ async function processReceiptTextEvent(
 }
 
 Deno.serve(async (req) => {
+  const supabase = createServiceClient()
+  if (!supabase) {
+    return jsonResponse({ ok: false, error: 'Server misconfigured' }, 500)
+  }
+
+  const templateDownloadResponse = await maybeServeTemplateDownload(req, supabase)
+  if (templateDownloadResponse) return templateDownloadResponse
+
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 })
   }
@@ -1612,11 +1727,6 @@ Deno.serve(async (req) => {
   // 管理Bot: 承認専用（店舗Botの DB・レシート・会話記録には触れない）
   if (requestedStoreKey === ADMIN_STORE_PARTITION_KEY) {
     return serveAdminApprovalWebhook(req)
-  }
-
-  const supabase = createServiceClient()
-  if (!supabase) {
-    return jsonResponse({ ok: false, error: 'Server misconfigured' }, 500)
   }
 
   let rawBody = ''
@@ -2052,11 +2162,28 @@ Deno.serve(async (req) => {
       const text = String(event.message?.text ?? '').trim()
       const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
 
+      let dailySalesTemplateHandled = false
+      if (!roomHardMuted && text && isDailySalesTemplateRequestText(text) && lineAccessTokenForSearch) {
+        dailySalesTemplateHandled = true
+        skipSearchMessageRecording = true
+        const replyToken = String(event.replyToken ?? '').trim()
+        if (replyToken) {
+          const result = await replyLineMessages(
+            replyToken,
+            [buildDailySalesTemplateDownloadFlex(storeKey)],
+            lineAccessTokenForSearch,
+            webhookReplyLog(registry as StoreRegistryRow, eventRoomId, 'daily_sales_template_download'),
+          )
+          receiptReplies += result.ok ? 1 : 0
+        }
+        textHandled += 1
+      }
+
       // ルーム・セルフ設定コマンド「設定」（独立）。他フローの許可状態に依存しない
       // （権限はハンドラ内で room_config_access_enabled＋パスワード設定済みを確認）。
       // トリガー完全一致でなければ {handled:false} で即フォールスルー＝既存処理に干渉しない。
       let roomConfigHandled = false
-      if (text && eventRoomId) {
+      if (!dailySalesTemplateHandled && text && eventRoomId) {
         try {
           const rcResult = await handleRoomConfigTextMessage(supabase, registry as StoreRegistryRow, {
             roomId: eventRoomId,
@@ -2076,7 +2203,7 @@ Deno.serve(async (req) => {
       // 予算登録フロー（独立・他に干渉しない）。トリガー「予算登録」or 予算pending中のみ作動し、
       // 処理した時だけ後続のレシート/検索処理をスキップする（部屋メッセージ記録は通常どおり）。
       let budgetEntryHandled = false
-      if (!roomConfigHandled && budgetEntryAllowed && text && eventRoomId && eventUserId) {
+      if (!dailySalesTemplateHandled && !roomConfigHandled && budgetEntryAllowed && text && eventRoomId && eventUserId) {
         try {
           const budgetResult = await handleBudgetEntryTextMessage(supabase, registry as StoreRegistryRow, {
             roomId: eventRoomId,
@@ -2097,7 +2224,7 @@ Deno.serve(async (req) => {
       // 小口現金（経費）取込フロー（独立・他に干渉しない）。「経費」or 経費pending中の「キャンセル」のみ作動。
       // 権限「小口レシートの解析をする」(petty_receipt_analysis_enabled) OFF のルームでは作動しない。
       let pettyCashHandled = false
-      if (!roomConfigHandled && !budgetEntryHandled && pettyAnalysisAllowed && text && eventRoomId && eventUserId) {
+      if (!dailySalesTemplateHandled && !roomConfigHandled && !budgetEntryHandled && pettyAnalysisAllowed && text && eventRoomId && eventUserId) {
         try {
           const pettyResult = await handlePettyCashTextMessage(supabase, registry as StoreRegistryRow, {
             roomId: eventRoomId,
@@ -2140,7 +2267,7 @@ Deno.serve(async (req) => {
       }
 
       let receiptHandled = false
-      if (!roomConfigHandled && !budgetEntryHandled && !pettyCashHandled) try {
+      if (!dailySalesTemplateHandled && !roomConfigHandled && !budgetEntryHandled && !pettyCashHandled) try {
         // レシート操作の返信（重複確認 加算/中止/置き換え・修正・削除の結果）は AI返信完全無しの対象外。
         // 「レシートの解析結果を送信」または「レシート修正の返信を許可」の両方OFFのときだけ抑止する。
         const result = await processReceiptTextEvent(registry as StoreRegistryRow, event, supabase, suppressReceiptReply && !allowCorrectionReply)
@@ -2153,7 +2280,7 @@ Deno.serve(async (req) => {
         errors.push(msg.slice(0, 160))
       }
 
-      if (!roomConfigHandled && !budgetEntryHandled && !pettyCashHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
+      if (!dailySalesTemplateHandled && !roomConfigHandled && !budgetEntryHandled && !pettyCashHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
         try {
           const searchResult = await handleLineSearchTextMessage(
             supabase,

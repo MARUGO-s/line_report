@@ -2,6 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
+import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_link_auth.ts"
+import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts"
 import {
   pilotStorePartitionKeysMatch,
   resolveReceiptSheetsStoreDisplayName,
@@ -123,7 +125,8 @@ Deno.serve(async (req) => {
     const storeDisplayName = resolveReceiptSheetsStoreDisplayName(storeKey)
       ?? matched.find((r) => r.storeName)?.storeName
       ?? null
-    const flex = buildTodayReservationFlex(storeDisplayName, today, matched)
+    const calendarUrl = await buildTodayReservationCalendarUrl(supabase, storeKey, today)
+    const flex = buildTodayReservationFlex(storeDisplayName, today, matched, calendarUrl)
     const sendResult = await sendLinePushMessages(target.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken))
     if (!sendResult.ok) {
       // 送信失敗時は予約行を取り消し、次回起動で再送できるようにする。
@@ -290,6 +293,7 @@ function buildTodayReservationFlex(
   storeDisplayName: string | null,
   today: { year: number; month: number; day: number },
   reservations: NormalizedReservation[],
+  calendarUrl?: string | null,
 ) {
   const dateLabel = jstDateLabel(today.year, today.month, today.day)
   const count = reservations.length
@@ -351,6 +355,26 @@ function buildTodayReservationFlex(
       spacing: "md",
       contents: bodyContents,
     },
+  } as Record<string, unknown>
+
+  if (calendarUrl) {
+    bubble.footer = {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "12px",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          height: "sm",
+          action: {
+            type: "uri",
+            label: "予約カレンダーを開く",
+            uri: calendarUrl,
+          },
+        },
+      ],
+    }
   }
 
   const altParts = [storeDisplayName, `本日のご予約 ${count}件`].filter(Boolean)
@@ -593,7 +617,8 @@ async function handleTestSend(
   const storeDisplayName = resolveReceiptSheetsStoreDisplayName(storeKey)
     ?? reservations.find((r) => r.storeName)?.storeName
     ?? null
-  const flex = buildTodayReservationFlex(storeDisplayName, today, reservations)
+  const calendarUrl = await buildTodayReservationCalendarUrl(supabase, storeKey, today)
+  const flex = buildTodayReservationFlex(storeDisplayName, today, reservations, calendarUrl)
   const sendResult = await sendLinePushMessages(spec.roomId, [flex], resolveStoreLineToken(storeKey, deps.lineAccessToken))
   if (!sendResult.ok) {
     return json({ ok: false, error: sendResult.error, mode: "test_today_reservation" }, 502)
@@ -607,4 +632,32 @@ async function handleTestSend(
     target_date: toJstDateString(today.year, today.month, today.day),
     reservation_count: reservations.length,
   }, 200)
+}
+
+function formatTargetMonth(today: { year: number; month: number }): string {
+  return `${String(today.year).padStart(4, "0")}-${pad2(today.month)}`
+}
+
+async function buildTodayReservationCalendarUrl(
+  supabase: DbClient,
+  storeKey: string,
+  today: { year: number; month: number },
+): Promise<string | null> {
+  const key = String(storeKey ?? "").trim()
+  if (!key) return null
+  const targetMonth = formatTargetMonth(today)
+  try {
+    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+      source: "line_today_reservation",
+      store_partition_key: key,
+      target_month: targetMonth,
+    })
+    return buildReservationCalendarPageUrl(key, {
+      loginToken: issued.token,
+      targetMonth,
+    })
+  } catch (error) {
+    console.error("buildTodayReservationCalendarUrl failed:", error)
+    return buildReservationCalendarPageUrl(key, { targetMonth })
+  }
 }
