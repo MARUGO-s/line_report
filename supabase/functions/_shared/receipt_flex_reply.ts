@@ -249,7 +249,7 @@ export function buildReceiptFlexMessage(
               ),
             },
           },
-          {
+          ...(showExecutiveDetail ? [{
             type: 'button',
             style: 'secondary',
             height: 'sm',
@@ -258,7 +258,7 @@ export function buildReceiptFlexMessage(
               label: '売上推移を見る',
               uri: trendUrl,
             },
-          },
+          }] : []),
         ],
         paddingAll: '12px',
       },
