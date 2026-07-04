@@ -9,6 +9,7 @@ import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v4'
 
 function buildFoodCourtPageUrl(storeKey: string, loginToken?: string | null): string {
   const key = String(storeKey || '').trim()
@@ -144,7 +145,7 @@ function numOrNull(v: unknown): number | null {
 // フードコートのAI（Q&A=Groqチャット／テナント表の画像抽出=Groq/Gemini Vision）の実測トークンを
 // ai_usage_events に1行記録し、AI使用料ページ（/usage/ai-cost＝実測トークン×公式単価）に反映させる。
 export interface FoodCourtAiUsage {
-  provider: 'groq' | 'gemini' | 'claude'
+  provider: 'groq' | 'gemini' | 'claude' | 'openai'
   model: string
   inputTokens: number
   outputTokens: number
@@ -171,6 +172,26 @@ function geminiUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null 
   const tot = Number(m.totalTokenCount ?? 0) || (inp + out + (th ?? 0))
   if (!inp && !out && !tot) return null
   return { provider: 'gemini', model, inputTokens: inp, outputTokens: out, thinkingTokens: th, totalTokens: tot }
+}
+function claudeUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
+  const u = (json && typeof json === 'object') ? (json as { usage?: unknown }).usage : null
+  if (!u || typeof u !== 'object') return null
+  const m = u as Record<string, unknown>
+  const inp = Number(m.input_tokens ?? 0) || 0
+  const out = Number(m.output_tokens ?? 0) || 0
+  const tot = inp + out
+  if (!inp && !out && !tot) return null
+  return { provider: 'claude', model, inputTokens: inp, outputTokens: out, thinkingTokens: null, totalTokens: tot }
+}
+function openaiUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
+  const u = (json && typeof json === 'object') ? (json as { usage?: unknown }).usage : null
+  if (!u || typeof u !== 'object') return null
+  const m = u as Record<string, unknown>
+  const inp = Number(m.prompt_tokens ?? m.input_tokens ?? 0) || 0
+  const out = Number(m.completion_tokens ?? m.output_tokens ?? 0) || 0
+  const tot = Number(m.total_tokens ?? 0) || (inp + out)
+  if (!inp && !out && !tot) return null
+  return { provider: 'openai', model, inputTokens: inp, outputTokens: out, thinkingTokens: null, totalTokens: tot }
 }
 async function recordFoodCourtAiUsage(
   supabase: SupabaseClient | null | undefined,
@@ -489,6 +510,223 @@ async function groqChat(
     const c = String(json?.choices?.[0]?.message?.content ?? '').trim()
     return { content: c || null, usage: groqUsageFrom(json, model) }
   } catch (e) { console.error('groqChat failed:', e instanceof Error ? e.message : String(e)); return { content: null, usage: null } }
+}
+
+type FoodCourtChatMessage = { role: string; content: string }
+type FoodCourtChatProvider = 'groq' | 'gemini' | 'claude' | 'openai'
+
+function resolveFoodCourtGeminiApiKey(): string {
+  return String(Deno.env.get('GEMINI_API_KEY') || Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('VISION_API_KEY') || '').trim()
+}
+
+function resolveFoodCourtClaudeApiKey(): string {
+  return String(Deno.env.get('claude_haiku') || Deno.env.get('CLAUDE_HAIKU') || Deno.env.get('ANTHROPIC_API_KEY') || '').trim()
+}
+
+function resolveFoodCourtOpenAiApiKey(): string {
+  return String(Deno.env.get('OPENAI_API_KEY') || Deno.env.get('FOODCOURT_OPENAI_API_KEY') || '').trim()
+}
+
+function resolveFoodCourtGeminiModel(): string {
+  return String(Deno.env.get('FOODCOURT_GEMINI_MODEL') || Deno.env.get('RECEIPT_GEMINI_MODEL') || '').trim() || 'gemini-3.1-pro-preview'
+}
+
+function resolveFoodCourtClaudeModel(): string {
+  return String(Deno.env.get('FOODCOURT_CLAUDE_MODEL') || Deno.env.get('CLAUDE_MODEL') || '').trim() || 'claude-haiku-4-5'
+}
+
+function resolveFoodCourtOpenAiModel(): string {
+  return String(Deno.env.get('FOODCOURT_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || '').trim() || 'gpt-5.5'
+}
+
+function extractGeminiText(json: unknown): string {
+  const candidates = (json && typeof json === 'object') ? (json as { candidates?: unknown }).candidates : null
+  const first = Array.isArray(candidates) ? candidates[0] : null
+  const parts = (first && typeof first === 'object')
+    ? ((first as { content?: { parts?: unknown } }).content?.parts)
+    : null
+  if (!Array.isArray(parts)) return ''
+  return parts.map((p) => String((p as { text?: unknown })?.text ?? '')).filter(Boolean).join('\n').trim()
+}
+
+function extractClaudeText(json: unknown): string {
+  const content = (json && typeof json === 'object') ? (json as { content?: unknown }).content : null
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((p) => {
+      const block = p as { type?: unknown; text?: unknown }
+      return block.type === 'text' ? String(block.text ?? '') : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
+async function geminiChat(
+  messages: FoodCourtChatMessage[],
+  apiKey: string,
+  model: string,
+  maxTokens = 1200,
+): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
+  if (!apiKey) return { content: null, usage: null }
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n').trim()
+  const contents = messages
+    .filter((m) => m.role !== 'system' && String(m.content ?? '').trim())
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: String(m.content ?? '') }],
+    }))
+  if (!contents.length) return { content: null, usage: null }
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        ...(system ? { system_instruction: { parts: [{ text: system }] } } : {}),
+        contents,
+        generationConfig: { temperature: 0.2, maxOutputTokens: maxTokens },
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      console.error('geminiChat http error:', model, res.status, err.slice(0, 300))
+      return { content: null, usage: null }
+    }
+    const json = await res.json().catch(() => null)
+    const content = extractGeminiText(json)
+    return { content: content || null, usage: geminiUsageFrom(json, model) }
+  } catch (e) {
+    console.error('geminiChat failed:', e instanceof Error ? e.message : String(e))
+    return { content: null, usage: null }
+  }
+}
+
+async function claudeChat(
+  messages: FoodCourtChatMessage[],
+  apiKey: string,
+  model: string,
+  maxTokens = 1200,
+): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
+  if (!apiKey) return { content: null, usage: null }
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n').trim()
+  const msg = messages
+    .filter((m) => m.role !== 'system' && String(m.content ?? '').trim())
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: String(m.content ?? ''),
+    }))
+  if (!msg.length) return { content: null, usage: null }
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        temperature: 0.2,
+        ...(system ? { system } : {}),
+        messages: msg,
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      console.error('claudeChat http error:', model, res.status, err.slice(0, 300))
+      return { content: null, usage: null }
+    }
+    const json = await res.json().catch(() => null)
+    const content = extractClaudeText(json)
+    return { content: content || null, usage: claudeUsageFrom(json, model) }
+  } catch (e) {
+    console.error('claudeChat failed:', e instanceof Error ? e.message : String(e))
+    return { content: null, usage: null }
+  }
+}
+
+async function openaiChat(
+  messages: FoodCourtChatMessage[],
+  apiKey: string,
+  model: string,
+  maxTokens = 1200,
+): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
+  if (!apiKey) return { content: null, usage: null }
+  try {
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        input: messages,
+        max_output_tokens: maxTokens,
+        reasoning: { effort: 'low' },
+        text: { verbosity: 'low' },
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      console.error('openaiChat http error:', model, res.status, err.slice(0, 300))
+      return { content: null, usage: null }
+    }
+    const json = await res.json().catch(() => null) as {
+      output_text?: string
+      output?: Array<{ content?: Array<{ text?: string; type?: string }> }>
+      usage?: unknown
+    } | null
+    const content = String(
+      json?.output_text ??
+        (json?.output ?? [])
+          .flatMap((item) => item.content ?? [])
+          .map((part) => part.text ?? '')
+          .join('\n'),
+    ).trim()
+    return { content: content || null, usage: openaiUsageFrom(json, model) }
+  } catch (e) {
+    console.error('openaiChat failed:', e instanceof Error ? e.message : String(e))
+    return { content: null, usage: null }
+  }
+}
+
+async function foodCourtAiChat(
+  messages: FoodCourtChatMessage[],
+  groqApiKey: string,
+  primaryGroqModel: string,
+  maxTokens: number,
+  preferred: FoodCourtChatProvider,
+  fallbackGroqModel?: string,
+): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
+  const order = Array.from(new Set<FoodCourtChatProvider>(
+    preferred === 'openai' ? [preferred, 'gemini', 'groq'] : [preferred, 'groq'],
+  ))
+  for (const provider of order) {
+    if (provider === 'openai') {
+      const res = await openaiChat(messages, resolveFoodCourtOpenAiApiKey(), resolveFoodCourtOpenAiModel(), maxTokens)
+      if (res.content) return res
+      continue
+    }
+    if (provider === 'gemini') {
+      const res = await geminiChat(messages, resolveFoodCourtGeminiApiKey(), resolveFoodCourtGeminiModel(), maxTokens)
+      if (res.content) return res
+      continue
+    }
+    if (provider === 'claude') {
+      const res = await claudeChat(messages, resolveFoodCourtClaudeApiKey(), resolveFoodCourtClaudeModel(), maxTokens)
+      if (res.content) return res
+      continue
+    }
+    const first = await groqChat(messages, groqApiKey, primaryGroqModel, maxTokens)
+    if (first.content) return first
+    if (fallbackGroqModel && fallbackGroqModel !== primaryGroqModel) {
+      const second = await groqChat(messages, groqApiKey, fallbackGroqModel, maxTokens)
+      if (second.content) return second
+    }
+  }
+  return { content: null, usage: null }
 }
 
 function fcAddDays(ymd: string, n: number): string {
@@ -1053,11 +1291,90 @@ function buildPeriodFacts(
   return L.join('\n')
 }
 
+// 来客予測モデル(foodcourt-forecast-cron)がバックテストまで済ませてfoodcourt_forecast_factorsに書き出した
+// 「フィット済み係数」を読み、AI解説用のテキストにする。予測モデルは曜日×イベント×天気を掛け算で組み合わせ、
+// サンプルが少ない係数は1(影響なし)へ自動収縮し、拡張窓バックテストで自己採点(MAPE)までしている＝
+// buildConditionPatternStats(単変量の別集計)より一段上の、唯一の学習結果。AI解説・チャット・自動サマリーは
+// すべてこの同じ係数を参照することで、数値予測モデルとAIの解説が矛盾しない「1本化された学習」になる。
+async function buildForecastFactorsContext(
+  supabase: SupabaseClient | null | undefined,
+  baseName: string,
+): Promise<string> {
+  if (!supabase) return ''
+  try {
+    const { data } = await supabase
+      .from('foodcourt_forecast_factors')
+      .select('model_version, mean_guests, wday_factors, wday_counts, event_factors, event_counts, weather_factors, weather_counts, history_days, backtest_days, mape_guests, mape_sales')
+      .eq('tenant_name', baseName)
+      .maybeSingle()
+    if (!data) return ''
+    const row = data as {
+      model_version: string; mean_guests: number
+      wday_factors: Record<string, number>; wday_counts: Record<string, number>
+      event_factors: Record<string, number>; event_counts: Record<string, number>
+      weather_factors: Record<string, number>; weather_counts: Record<string, number>
+      history_days: number; backtest_days: number; mape_guests: number | null; mape_sales: number | null
+    }
+    const confidence = (n: number) => n >= 6 ? '再現性あり' : n >= 3 ? '参考程度(やや少数)' : 'サンプル僅少(参考不可)'
+    const drivers: Array<{ label: string; factor: number; n: number }> = []
+    const factorLine = (label: string, factor: number, n: number) => {
+      const f = Number(factor)
+      const count = Math.max(0, Math.trunc(Number(n) || 0))
+      if (Number.isFinite(f) && count >= 3 && Math.abs(f - 1) >= 0.04) drivers.push({ label, factor: f, n: count })
+      return `${label}: ×${Number.isFinite(f) ? f.toFixed(2) : '—'}（n=${count}）［${confidence(count)}］`
+    }
+    const wdayLines = [1, 2, 3, 4, 5, 6, 7].map((d) => {
+      const f = row.wday_factors?.[String(d)]; const n = row.wday_counts?.[String(d)] ?? 0
+      return f != null ? factorLine(`${FC_DOW[d % 7]}曜日`, f, n) : null
+    }).filter((x): x is string => !!x)
+    const EVT_LABEL: Record<string, string> = {
+      soccer_pv: 'サッカーPV', japan: '日本戦PV(サッカー以外)', pro: 'プロ野球(ドーム本体)',
+      live: 'ライブ(ドーム本体)', dome: 'ドーム本体(アマ野球等)', sports: '世界スポーツ放映',
+      hall: '小ホールのみ(カナデビア等)', none: 'イベント無し',
+    }
+    const evtLines = Object.keys(EVT_LABEL).map((k) => {
+      const f = row.event_factors?.[k]; const n = row.event_counts?.[k] ?? 0
+      return f != null ? factorLine(EVT_LABEL[k], f, n) : null
+    }).filter((x): x is string => !!x)
+    const wxLines = ['rainy', 'dry'].map((k) => {
+      const f = row.weather_factors?.[k]; const n = row.weather_counts?.[k] ?? 0
+      return f != null ? factorLine(k === 'rainy' ? '雨' : '雨でない', f, n) : null
+    }).filter((x): x is string => !!x)
+    const mapeLine = (row.mape_guests != null || row.mape_sales != null)
+      ? `自己採点(バックテスト${row.backtest_days}日/履歴${row.history_days}日): 客数誤差±${row.mape_guests != null ? Math.round(row.mape_guests * 100) : '—'}%／売上誤差±${row.mape_sales != null ? Math.round(row.mape_sales * 100) : '—'}%（データが増えるほど改善）`
+      : `履歴${row.history_days}日・バックテスト${row.backtest_days}日`
+    const mapeGuests = row.mape_guests != null ? Number(row.mape_guests) : null
+    const reliability = row.backtest_days >= 14 && mapeGuests != null && mapeGuests <= 0.25
+      ? 'モデル信頼度: 中〜高（運営判断の参考に使える）'
+      : row.backtest_days >= 7 && mapeGuests != null && mapeGuests <= 0.4
+        ? 'モデル信頼度: 中（方向感の参考。断定は避ける）'
+        : 'モデル信頼度: 低〜蓄積中（仮説出し中心。断定不可）'
+    const L: string[] = [
+      `来客予測モデル(${row.model_version})の学習結果。ベース客数(全体平均)${Math.round(row.mean_guests)}人に、以下の係数を掛け合わせて予測している。係数はサンプル数が少ないほど1(影響なし)へ自動収縮済み。`,
+      mapeLine,
+      reliability,
+    ]
+    if (wdayLines.length) L.push('[曜日係数]\n' + wdayLines.join('\n'))
+    if (evtLines.length) L.push('[イベント種別係数]\n' + evtLines.join('\n'))
+    if (wxLines.length) L.push('[天気係数]\n' + wxLines.join('\n'))
+    const driverLines = drivers
+      .sort((a, b) => Math.abs(b.factor - 1) - Math.abs(a.factor - 1))
+      .slice(0, 8)
+      .map((d) => `${d.label}: ${d.factor >= 1 ? '押し上げ' : '押し下げ'}候補 ×${d.factor.toFixed(2)}（n=${d.n}）`)
+    if (driverLines.length) L.push('[強く効いている候補]\n' + driverLines.join('\n'))
+    return L.join('\n\n')
+  } catch (e) {
+    console.error('buildForecastFactorsContext failed:', e instanceof Error ? e.message : String(e))
+    return ''
+  }
+}
+
 // 「曜日」「東京ドームのイベント種別」「天気」ごとに、実績の平均・サンプル数・ばらつき(CV)をコードで集計する。
 // 数値予測モデル(foodcourt-forecast-cron)の fit() と同じ発想＝AIには数字を作らせず、確度(サンプル数)つきの
 // 客観的事実だけを渡す。LLMが自由文で記憶を書き換える方式(蓄積知見)と違い、毎回`reports`から計算し直すため
 // 状態を持たず、データが増えるほど自動的に確度が上がる（＝数値予測モデルと同じ意味でのMAPE的な自己改善）。
 // AI側の役割は「複数の条件が同時に成立する日にどう組み合わさるか」を多角的に判断すること（コードは単変量集計のみ）。
+// ※foodcourt_forecast_factors(buildForecastFactorsContext)が無い/未生成のときのフォールバックとしてのみ使う。
 function buildConditionPatternStats(
   reports: Array<Record<string, unknown>>,
   baseName: string,
@@ -1160,6 +1477,13 @@ export async function answerFoodCourtQuestion(
   const viewingBlock = viewingDate
     ? `【画面表示中の対象日・最優先で厳守】ユーザーは今、対象日=${viewingDate}のレポート画面を見ている。質問に別の日付が明示されていない限り、これが質問の対象日である。他の日のデータと混同しないこと。`
     : ''
+  // 曜日/イベント種別/天気の傾向は、来客予測モデルの学習係数(自己採点つき)を最優先で使う（未生成時のみ
+  // 単変量の簡易集計にフォールバック）。数値予測とAI解説が同じ学習結果を参照し矛盾なく1本化する。
+  const forecastFactorsCtx = await buildForecastFactorsContext(supabase, baseName)
+  const patternStats = forecastFactorsCtx || buildConditionPatternStats(reports, baseName, events, weather)
+  const patternBlock = patternStats
+    ? `# 統計的パターン（${forecastFactorsCtx ? '来客予測モデルの学習係数・自己採点つき' : '条件別集計・コード計算・サンプル数と確度つき'}）\n${patternStats}`
+    : ''
 
   // --- 専門AI 2体を並列実行し、統合AIに渡す「分析メモ」を作らせる（同一プロンプト過積載を避けるための役割分担） ---
   const quantSystem = [
@@ -1174,7 +1498,7 @@ export async function answerFoodCourtQuestion(
     `(6) 来客予測モデルがあれば、自己採点(誤差%)を踏まえて参考程度に触れる。`,
     `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
   ].join('\n')
-  const quantUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 競合プロファイル\n${competitors}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}\n\n# 日次生データ\n${data}`
+  const quantUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 競合プロファイル\n${competitors}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 日次生データ\n${data}`
 
   const extSystem = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、会場イベント・天気の需要ドライバー分析専門家です。`,
@@ -1187,14 +1511,35 @@ export async function answerFoodCourtQuestion(
   ].join('\n')
   const extUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 会場イベント相関\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関\n${weatherCorr || '(天気データなし)'}\n\n# 日次生データ\n${data}`
 
-  const [quantRes, extRes] = await Promise.all([
-    groqChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700),
-    groqChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700),
+  const opsSystem = [
+    `あなたは「${baseName}」専属の、飲食店オペレーション改善責任者です。`,
+    `担当は「明日から現場で試せる打ち手」に限定する。数字分析・イベント分析の断定は別担当に任せ、ここでは仕込み、人員、声かけ、商品見せ方、セット提案、ピーク対応、検証KPIへ落とし込む。`,
+    `【厳守】データに無い販売点数・原価・スタッフ人数は作らない。打ち手は必ず「狙う客層/来店動機」「実施条件」「見るべきKPI」をセットで書く。`,
+    `出力は最終回答ではなく「統合担当AIへの運営改善メモ」。見出し＋箇条書きで簡潔に（350字程度）。`,
+  ].join('\n')
+  const opsUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 競合プロファイル\n${competitors}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 日次生データ\n${data}`
+
+  const [quantRes, extRes, opsRes] = await Promise.all([
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'groq', fallbackModel),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
+  if (opsRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, opsRes.usage)
   const quantNote = quantRes.content || '(他店舗・過去データ分析メモ: 取得失敗)'
   const extNote = extRes.content || '(イベント・天気分析メモ: 取得失敗)'
+  const opsNote = opsRes.content || '(運営改善メモ: 取得失敗)'
+
+  const criticSystem = [
+    `あなたは「${baseName}」分析の反証・品質管理担当です。`,
+    `担当は、専門AIメモに含まれる言い過ぎ、根拠不足、相関と因果の混同、対象日/期間の取り違え、データに無い数字の混入を検出すること。`,
+    `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（300字程度）。`,
+  ].join('\n')
+  const criticUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用の根拠\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${storeCorr || '(店舗間相関なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 日次生データ\n${data}`
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 650, 'claude', fallbackModel)
+  if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
+  const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリスト兼経営コンサルタントです。`,
@@ -1216,9 +1561,11 @@ export async function answerFoodCourtQuestion(
     `(11) 「来客予測（学習型モデル）」がある場合は、今後の予測客数・売上を仕入・人員の助言に使う。ただしモデルの自己採点（誤差%）も併記されているので、誤差が大きい時は「精度は発展途上（データ蓄積で改善）」と断った上で参考値として扱う。`,
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
     `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
-    `【専門AIメモの統合】以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。2つのメモが矛盾する場合や誇張がある場合は、必ず生データ・事前計算ブロックの数値で裏取りしてから採否を判断し、1つの一貫した最終回答にまとめること。`,
+    `【専門AIメモの統合】以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。メモが矛盾する場合や誇張がある場合は、必ず生データ・事前計算ブロックの数値で裏取りしてから採否を判断し、1つの一貫した最終回答にまとめること。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱めること。`,
+    `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。来客予測モデルの学習係数(自己採点済み)であれば、来客予測の自己採点(誤差%)と矛盾しない範囲で解釈する。対象日/対象期間に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断する。nが少ない条件は「参考程度」と明示し、断定しない。`,
+    `【回答品質】最後に必ず、実行すべき次の一手または次に確認すべきKPIを1つ以上入れる。数字の羅列だけで終えない。`,
   ].join('\n')
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 日次生データ（全テナント）\n${data}`
+  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}\n\n# 日次生データ（全テナント）\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
@@ -1228,14 +1575,9 @@ export async function answerFoodCourtQuestion(
   }
   const systemFull = (viewingBlock ? viewingBlock + '\n\n' : '') + system + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
   const messages = [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
-  const r1 = await groqChat(messages, groqApiKey, primary, 1800)
-  let ans = r1.content
-  let usage = r1.usage
-  if (!ans) {
-    const r2 = await groqChat(messages, groqApiKey, fallbackModel, 1800)
-    ans = r2.content
-    if (r2.usage) usage = r2.usage
-  }
+  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1800, 'openai', fallbackModel)
+  const ans = r1.content
+  const usage = r1.usage
   // Q&Aの実測トークンをAI使用料に合算（best-effort・store_partition_keyで集計に乗る）。
   await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, usage)
   return ans
@@ -1267,11 +1609,13 @@ export async function generateFoodCourtDailySummary(
   const priorBlock = priorSummary
     ? `# 前回（${priorSummary.businessDate}）の分析（自己検証用の材料。今回の対象日ではない）\n${priorSummary.summaryText}`
     : ''
-  // 曜日/イベント種別/天気ごとの実績統計(コード計算・サンプル数と確度つき)。LLMに記憶を書かせる方式ではなく
-  // 毎回reportsから計算し直すため、データが増えるほど自動的に確度が上がる（MAPE的な自己改善）。
-  const patternStats = buildConditionPatternStats(reports, baseName, events, weather)
+  // 曜日/イベント種別/天気ごとの傾向は、来客予測モデルが自己採点(バックテストMAPE)まで済ませた
+  // フィット済み係数(foodcourt_forecast_factors)を最優先で使う。数値予測とAI解説が同じ学習結果を参照する
+  // ことで矛盾なく1本化される。未生成(cron未実行等)の場合のみ、単変量の簡易集計にフォールバックする。
+  const forecastFactorsCtx = await buildForecastFactorsContext(supabase, baseName)
+  const patternStats = forecastFactorsCtx || buildConditionPatternStats(reports, baseName, events, weather)
   const patternBlock = patternStats
-    ? `# 統計的パターン（条件別集計・コード計算・サンプル数と確度つき）\n${patternStats}`
+    ? `# 統計的パターン（${forecastFactorsCtx ? '来客予測モデルの学習係数・自己採点つき' : '条件別集計・コード計算・サンプル数と確度つき'}）\n${patternStats}`
     : ''
   const insights = buildBaseInsights(reports, baseName)
   const eventCorr = buildEventCorrelation(reports, baseName, events)
@@ -1311,20 +1655,45 @@ export async function generateFoodCourtDailySummary(
   ].join('\n')
   const extUser = `対象日の分析メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 会場イベント相関（全体傾向）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（全体傾向）\n${weatherCorr || '(天気データなし)'}`
 
-  const [quantRes, extRes] = await Promise.all([
-    groqChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600),
-    groqChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600),
+  // --- 専門AI③: 対象日の運営改善メモ ---
+  const opsSystem = [
+    `あなたは「${baseName}」専属の、飲食店オペレーション改善責任者です。`,
+    `担当は、対象日の実績から次回同条件の日に試すべき現場アクションを出すこと。`,
+    `(1) 仕込み量・人員配置・ピーク対応・声かけ・セット提案・商品見せ方のうち、データから言えるものだけを書く。`,
+    `(2) 売上要因が客数なら集客/導線、客単価ならセット/追加注文、イベント要因ならイベント客の動線に合わせる。`,
+    `(3) 必ず「狙う客層/来店動機」「実施条件」「見るべきKPI」をセットで書く。`,
+    `出力は最終回答ではなく「統合担当AIへの運営改善メモ」。見出し＋箇条書きで簡潔に（300字程度）。`,
+  ].join('\n')
+  const opsUser = `対象日の運営改善メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}${priorBlock ? '\n\n' + priorBlock : ''}`
+
+  const [quantRes, extRes, opsRes] = await Promise.all([
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
+  if (opsRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, opsRes.usage)
   const quantNote = quantRes.content || '(他店舗・過去データ分析メモ: 取得失敗)'
   const extNote = extRes.content || '(イベント・天気分析メモ: 取得失敗)'
+  const opsNote = opsRes.content || '(運営改善メモ: 取得失敗)'
 
-  // --- 統合AI: 2つのメモ＋対象日の事実を、画面の固定7見出しフォーマットにまとめる ---
+  // --- 専門AI④: 反証・品質管理メモ ---
+  const criticSystem = [
+    `あなたは「${baseName}」日次分析の反証・品質管理担当です。`,
+    `専門AIメモのうち、言い過ぎ、根拠不足、相関と因果の混同、対象日の取り違え、データに無い数字を検出する。`,
+    `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
+  ].join('\n')
+  const criticUser = `# 対象日の事実\n${targetFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用データ\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel)
+  if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
+  const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
+
+  // --- 統合AI: 4つのメモ＋対象日の事実を、画面の固定7見出しフォーマットにまとめる ---
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリストです。`,
     `目的は対象日の実績について、表の値の言い換えではなく「だから何を意味するか」まで踏み込んだ日次サマリーを作ることです。`,
-    `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象日の事実」ブロックの数値で裏取りしてから採否を判断する。`,
+    `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象日の事実」ブロックの数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
     `【前回分析の自己検証】「前回の分析」が与えられている場合、そこで語った見立て（好調/不調の理由・客数要因か客単価要因か・イベント/天気の影響など）が今回の対象日の実績でも裏付けられたか、変わったかを必ずどこかの見出し（主に【この日の評価（条件別）】か【直近の勢い】）で一言検証すること。同じ結論・同じ言い回しを毎日繰り返さない。前回との継続性がある分析にする。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象日に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、それぞれの確度を踏まえながら「複数の条件が重なってどう効いたか」を多角的に判断し、【この日の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【出力フォーマット・厳守】必ず次の7つの見出しを、この順番・この表記（【】で囲む）で出力すること。見出し以外の前置き・締めの文章は書かない。`,
@@ -1334,22 +1703,17 @@ export async function generateFoodCourtDailySummary(
     `【客単価】対象日の客単価・FC平均比・順位を、業態文脈での意味づけとともに1〜2文。`,
     `【競合環境】自店の業態・真の競合・強みを2〜3文（対象日に限らず一般的な立ち位置の説明でよい）。`,
     `【この日の評価（条件別）】自店史平均比・同曜日平均比・履歴内順位・イベント/天気の影響・客数/客単価要因分解を2〜4文。`,
-    `【直近の勢い】直近の推移・前回との差、および前回分析の自己検証結果を1〜2文。`,
+    `【直近の勢い】直近の推移・前回との差、および前回分析の自己検証結果を1〜2文。可能なら次に確認すべきKPIまたは次回同条件の日の打ち手を1つ入れる。`,
     `各見出しの本文は短い文を2〜4行程度。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。客単価の順位は業態由来なので単価の高低そのものを優劣にしない。`,
   ].join('\n')
-  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
+  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
   const messages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象日の日次サマリーを作成してください。` },
   ]
-  const r1 = await groqChat(messages, groqApiKey, primary, 1400)
-  let ans = r1.content
-  let usage = r1.usage
-  if (!ans) {
-    const r2 = await groqChat(messages, groqApiKey, fallbackModel, 1400)
-    ans = r2.content
-    if (r2.usage) usage = r2.usage
-  }
+  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1400, 'openai', fallbackModel)
+  const ans = r1.content
+  const usage = r1.usage
   if (usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, usage)
   return ans
 }
@@ -1373,9 +1737,12 @@ export async function generateFoodCourtPeriodSummary(
   canonFoodcourtReports(reports)
   const periodFacts = buildPeriodFacts(reports, baseName, startDate, endDate, events, weather)
   if (!periodFacts) return null
-  const patternStats = buildConditionPatternStats(reports, baseName, events, weather)
+  // 曜日/イベント種別/天気ごとの傾向は、来客予測モデルの学習係数(自己採点つき)を最優先で使う（未生成時のみ
+  // 単変量の簡易集計にフォールバック）。数値予測とAI解説が同じ学習結果を参照し矛盾なく1本化する。
+  const forecastFactorsCtx = await buildForecastFactorsContext(supabase, baseName)
+  const patternStats = forecastFactorsCtx || buildConditionPatternStats(reports, baseName, events, weather)
   const patternBlock = patternStats
-    ? `# 統計的パターン（条件別集計・コード計算・サンプル数と確度つき）\n${patternStats}`
+    ? `# 統計的パターン（${forecastFactorsCtx ? '来客予測モデルの学習係数・自己採点つき' : '条件別集計・コード計算・サンプル数と確度つき'}）\n${patternStats}`
     : ''
   const insights = buildBaseInsights(reports, baseName)
   const eventCorr = buildEventCorrelation(reports, baseName, events)
@@ -1414,20 +1781,45 @@ export async function generateFoodCourtPeriodSummary(
   ].join('\n')
   const extUser = `対象期間の分析メモを書いてください。\n\n# 対象期間の事実\n${periodFacts}\n\n# 会場イベント相関（全体傾向）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（全体傾向）\n${weatherCorr || '(天気データなし)'}`
 
-  const [quantRes, extRes] = await Promise.all([
-    groqChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600),
-    groqChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600),
+  // --- 専門AI③: 対象期間の運営改善メモ ---
+  const opsSystem = [
+    `あなたは「${baseName}」専属の、飲食店オペレーション改善責任者です。`,
+    `担当は、対象期間の傾向から次の同条件期間・イベント週に試すべき現場アクションを出すこと。`,
+    `(1) 仕込み量・人員配置・ピーク対応・声かけ・セット提案・商品見せ方のうち、データから言えるものだけを書く。`,
+    `(2) 売上要因が客数なら集客/導線、客単価ならセット/追加注文、イベント要因ならイベント客の動線に合わせる。`,
+    `(3) 必ず「狙う客層/来店動機」「実施条件」「見るべきKPI」をセットで書く。`,
+    `出力は最終回答ではなく「統合担当AIへの運営改善メモ」。見出し＋箇条書きで簡潔に（300字程度）。`,
+  ].join('\n')
+  const opsUser = `対象期間の運営改善メモを書いてください。\n\n# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}`
+
+  const [quantRes, extRes, opsRes] = await Promise.all([
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
+  if (opsRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, opsRes.usage)
   const quantNote = quantRes.content || '(他店舗・過去データ分析メモ: 取得失敗)'
   const extNote = extRes.content || '(イベント・天気分析メモ: 取得失敗)'
+  const opsNote = opsRes.content || '(運営改善メモ: 取得失敗)'
 
-  // --- 統合AI: 2つのメモ＋対象期間の事実を、画面の固定7見出しフォーマットにまとめる ---
+  // --- 専門AI④: 反証・品質管理メモ ---
+  const criticSystem = [
+    `あなたは「${baseName}」期間分析の反証・品質管理担当です。`,
+    `専門AIメモのうち、言い過ぎ、根拠不足、相関と因果の混同、期間の取り違え、データに無い数字を検出する。`,
+    `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
+  ].join('\n')
+  const criticUser = `# 対象期間の事実\n${periodFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用データ\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}`
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel)
+  if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
+  const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
+
+  // --- 統合AI: 4つのメモ＋対象期間の事実を、画面の固定7見出しフォーマットにまとめる ---
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリストです。`,
     `目的は対象期間(${startDate}〜${endDate})の実績について、表の値の言い換えではなく「だから何を意味するか」まで踏み込んだ期間サマリーを作ることです。`,
-    `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象期間の事実」ブロックの数値で裏取りしてから採否を判断する。`,
+    `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象期間の事実」ブロックの数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象期間に含まれる複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断し、【この期間の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【出力フォーマット・厳守】必ず次の7つの見出しを、この順番・この表記（【】で囲む）で出力すること。見出し以外の前置き・締めの文章は書かない。`,
     `【総評】対象期間の総合評価(強い/弱い/平常)を1〜2文＋根拠。`,
@@ -1436,22 +1828,17 @@ export async function generateFoodCourtPeriodSummary(
     `【客単価】対象期間の客単価・FC平均比を、業態文脈での意味づけとともに1〜2文。`,
     `【競合環境】自店の業態・真の競合・強みを2〜3文（対象期間に限らず一般的な立ち位置の説明でよい）。`,
     `【この期間の評価（条件別）】期間外の自店史平均比・イベント/天気の構成比の影響を2〜4文。`,
-    `【直近の勢い】この期間内での前半→後半の傾向を1〜2文。`,
+    `【直近の勢い】この期間内での前半→後半の傾向を1〜2文。可能なら次に確認すべきKPIまたは次回同条件期間の打ち手を1つ入れる。`,
     `各見出しの本文は短い文を2〜4行程度。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。客単価の順位は業態由来なので単価の高低そのものを優劣にしない。`,
   ].join('\n')
-  const contextBlock = `# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}${patternBlock ? '\n\n' + patternBlock : ''}`
+  const contextBlock = `# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}`
   const messages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象期間の日次サマリーを作成してください。` },
   ]
-  const r1 = await groqChat(messages, groqApiKey, primary, 1400)
-  let ans = r1.content
-  let usage = r1.usage
-  if (!ans) {
-    const r2 = await groqChat(messages, groqApiKey, fallbackModel, 1400)
-    ans = r2.content
-    if (r2.usage) usage = r2.usage
-  }
+  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1400, 'openai', fallbackModel)
+  const ans = r1.content
+  const usage = r1.usage
   if (usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, usage)
   return ans
 }

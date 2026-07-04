@@ -27,6 +27,7 @@ import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithGroqScout, type
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
 import {
   answerFoodCourtQuestion,
+  FOODCOURT_ANALYSIS_AI_VERSION,
   generateFoodCourtDailySummary,
   generateFoodCourtPeriodSummary,
   fcSalesDate,
@@ -920,6 +921,7 @@ Deno.serve(async (req, info) => {
         .from("foodcourt_daily_ai_summary")
         .select("summary_text")
         .eq("report_id", reportId)
+        .eq("model_version", FOODCOURT_ANALYSIS_AI_VERSION)
         .maybeSingle()
       if (cacheErr) return json({ error: cacheErr.message }, 500)
       if (cached && (cached as { summary_text?: unknown }).summary_text) {
@@ -931,7 +933,7 @@ Deno.serve(async (req, info) => {
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
-      const modelVersion = String(Deno.env.get("GROQ_CHAT_MODEL") || "").trim() || "llama-3.3-70b-versatile"
+      const modelVersion = FOODCOURT_ANALYSIS_AI_VERSION
       const businessDate = fcSalesDate(target) || null
       // 前回（直近の1つ前の営業日）に生成済みのAI分析を、自己検証の材料として渡す（日々の分析に連続性を持たせる）。
       let priorSummary: { businessDate: string; summaryText: string } | null = null
@@ -940,6 +942,7 @@ Deno.serve(async (req, info) => {
           .from("foodcourt_daily_ai_summary")
           .select("business_date, summary_text")
           .eq("store_partition_key", storeKey)
+          .eq("model_version", FOODCOURT_ANALYSIS_AI_VERSION)
           .lt("business_date", businessDate)
           .order("business_date", { ascending: false })
           .limit(1)
@@ -983,6 +986,7 @@ Deno.serve(async (req, info) => {
         .eq("store_partition_key", storeKey)
         .eq("start_date", startDate)
         .eq("end_date", endDate)
+        .eq("model_version", FOODCOURT_ANALYSIS_AI_VERSION)
         .maybeSingle()
       if (cacheErr) return json({ error: cacheErr.message }, 500)
       if (cached && (cached as { summary_text?: unknown }).summary_text) {
@@ -1003,7 +1007,7 @@ Deno.serve(async (req, info) => {
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
-      const modelVersion = String(Deno.env.get("GROQ_CHAT_MODEL") || "").trim() || "llama-3.3-70b-versatile"
+      const modelVersion = FOODCOURT_ANALYSIS_AI_VERSION
       const summary = await generateFoodCourtPeriodSummary(reports, baseName, startDate, endDate, groqApiKey, events, weather, forecast, supabase, storeKey)
       if (!summary) return json({ summary: null, error: "生成に失敗しました。" }, 200)
       const { error: upErr } = await supabase.from("foodcourt_period_ai_summary").upsert({
@@ -7910,6 +7914,7 @@ const AI_USAGE_GEMINI_MODEL = "gemini-3.1-pro-preview"
 const AI_USAGE_CLAUDE_STORE_KEYS = new Set<string>(["claudia2"])
 const AI_USAGE_CLAUDE_MODEL = "claude-haiku-4-5"
 const AI_USAGE_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+const AI_USAGE_OPENAI_MODEL = "gpt-5.5"
 
 type AiUsageStoreRow = {
   store_partition_key: string
@@ -7919,7 +7924,7 @@ type AiUsageStoreRow = {
 }
 
 type AiUsageProviderBucket = {
-  provider: "gemini" | "groq" | "claude"
+  provider: "gemini" | "groq" | "claude" | "openai"
   model: string
   store_count: number
   image_count: number
@@ -7988,6 +7993,19 @@ async function fetchAiUsageCostState(
     total_tokens: 0,
     stores: [],
   }
+  const openai: AiUsageProviderBucket = {
+    provider: "openai",
+    model: AI_USAGE_OPENAI_MODEL,
+    store_count: 0,
+    image_count: 0,
+    receipt_count: 0,
+    event_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    total_tokens: 0,
+    stores: [],
+  }
 
   for (const raw of rows) {
     const r = raw as Record<string, unknown>
@@ -8028,6 +8046,8 @@ async function fetchAiUsageCostState(
       ? groq
       : provider === "claude"
       ? claude
+      : provider === "openai"
+      ? openai
       : null
     if (!bucket) continue
     bucket.event_count += Number(r.event_count ?? 0) || 0
@@ -8084,6 +8104,7 @@ async function fetchAiUsageCostState(
     gemini,
     groq,
     claude,
+    openai,
     models,
     foodcourt: { store: FOODCOURT_STORE_KEY, models: foodcourtModels },
     generated_at: new Date().toISOString(),

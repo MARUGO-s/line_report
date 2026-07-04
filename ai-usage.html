@@ -546,6 +546,12 @@
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="groqChat_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">OpenAI（フードコート最終統合・gpt-5.5）</span></div>
+              <div class="rate-grid">
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="openai_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="openai_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              </div>
+
               <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini（ソバージュ・鮨こるり）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="gemini_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -589,13 +595,15 @@
     const RATES_KEY = 'line_report_ai_usage_rates_v1';
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
-    // 単価は各社の公式単価（USD / 100万トークン）。Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
+    // 単価は各社の公式単価（USD / 100万トークン）。OpenAI gpt-5.5 は $5/$30。
+    // Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
     // Groq llama-4-scout（レシート/画像抽出）の目安は $0.11/$0.34。Claude Haiku 4.5 は $1/$5（公式）。
     // フードコートQ&A・ドーム抽出は Groq llama-3.3-70b（目安 $0.59/$0.79）で別単価。
     // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
     const DEFAULT_RATES = {
       groq:     { inUsd: 0.11, outUsd: 0.34 },   // llama-4-scout（Vision/レシート・画像抽出）
       groqChat: { inUsd: 0.59, outUsd: 0.79 },   // llama-3.3-70b-versatile（フードコートQ&A・ドームLLM）
+      openai:   { inUsd: 5.00, outUsd: 30.00 },  // gpt-5.5（フードコート最終統合）
       gemini:   { inUsd: 2.00, outUsd: 12.00 },
       claude:   { inUsd: 1.00, outUsd: 5.00 },
       jpyPerUsd: 155,
@@ -604,6 +612,7 @@
     function rateKeyForModel(provider, model) {
       const m = String(model || '').toLowerCase();
       if (provider === 'groq') return (m.indexOf('scout') >= 0 || m.indexOf('vision') >= 0) ? 'groq' : 'groqChat';
+      if (provider === 'openai') return 'openai';
       if (provider === 'gemini') return 'gemini';
       if (provider === 'claude') return 'claude';
       return 'groq';
@@ -647,7 +656,7 @@
         if (!raw) return cloneRates(DEFAULT_RATES);
         const parsed = JSON.parse(raw);
         const out = cloneRates(DEFAULT_RATES);
-        ['groq', 'groqChat', 'gemini', 'claude'].forEach(function (p) {
+        ['groq', 'groqChat', 'openai', 'gemini', 'claude'].forEach(function (p) {
           if (parsed && parsed[p]) {
             ['inUsd', 'outUsd'].forEach(function (k) {
               const v = Number(parsed[p][k]);
@@ -664,6 +673,7 @@
       return {
         groq: Object.assign({}, r.groq),
         groqChat: Object.assign({}, r.groqChat),
+        openai: Object.assign({}, r.openai),
         gemini: Object.assign({}, r.gemini),
         claude: Object.assign({}, r.claude),
         jpyPerUsd: r.jpyPerUsd,
@@ -678,6 +688,8 @@
       document.getElementById('groq_outUsd').value = r.groq.outUsd;
       document.getElementById('groqChat_inUsd').value = r.groqChat.inUsd;
       document.getElementById('groqChat_outUsd').value = r.groqChat.outUsd;
+      document.getElementById('openai_inUsd').value = r.openai.inUsd;
+      document.getElementById('openai_outUsd').value = r.openai.outUsd;
       document.getElementById('gemini_inUsd').value = r.gemini.inUsd;
       document.getElementById('gemini_outUsd').value = r.gemini.outUsd;
       document.getElementById('claude_inUsd').value = r.claude.inUsd;
@@ -698,6 +710,10 @@
         groqChat: {
           inUsd: num('groqChat_inUsd', d.groqChat.inUsd),
           outUsd: num('groqChat_outUsd', d.groqChat.outUsd),
+        },
+        openai: {
+          inUsd: num('openai_inUsd', d.openai.inUsd),
+          outUsd: num('openai_outUsd', d.openai.outUsd),
         },
         gemini: {
           inUsd: num('gemini_inUsd', d.gemini.inUsd),
@@ -900,6 +916,7 @@
     const MODEL_LABELS = {
       'meta-llama/llama-4-scout-17b-16e-instruct': 'レシート/画像抽出（Vision）',
       'llama-3.3-70b-versatile': 'フードコートQ&A・分析サマリー（単日/期間）・ドーム抽出',
+      'gpt-5.5': 'フードコート分析の最終統合',
       'gemini-3.1-pro-preview': 'レシート解析（Gemini）',
       'claude-haiku-4-5': '経費レシート解析',
     };

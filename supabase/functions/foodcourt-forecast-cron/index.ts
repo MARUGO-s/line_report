@@ -29,6 +29,9 @@ type Factors = {
   evt: Record<string, number>
   weather: Record<string, number>
   spend: number
+  wdayN: Record<number, number>
+  evtN: Record<string, number>
+  weatherN: Record<string, number>
 }
 
 Deno.serve(async (req) => {
@@ -147,6 +150,29 @@ Deno.serve(async (req) => {
       .upsert(rows, { onConflict: "target_date,tenant_name,metric" })
     if (upErr) return json({ ok: false, error: `forecast upsert failed: ${upErr.message}`, rows: rows.length }, 500)
   }
+
+  // フィット済み係数(バックテスト自己採点つき)をAI解説側からも参照できるよう保存する。
+  // AI解説(foodcourt_compare.ts)の「統計的パターン」は、この唯一のモデル結果を使う（単変量の別集計と二重化しない）。
+  const { error: factorsErr } = await supabase
+    .from("foodcourt_forecast_factors")
+    .upsert({
+      tenant_name: BASE_TENANT,
+      model_version: MODEL_VERSION,
+      mean_guests: facFull.meanG,
+      wday_factors: facFull.wday,
+      wday_counts: facFull.wdayN,
+      event_factors: facFull.evt,
+      event_counts: facFull.evtN,
+      weather_factors: facFull.weather,
+      weather_counts: facFull.weatherN,
+      median_spend: facFull.spend,
+      history_days: hist.length,
+      backtest_days: back.length,
+      mape_guests: mapeG,
+      mape_sales: mapeS,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "tenant_name" })
+  if (factorsErr) console.error("foodcourt_forecast_factors upsert failed:", factorsErr.message)
   return json({ ok: true, model_version: MODEL_VERSION, ...summary }, 200)
 })
 
@@ -154,22 +180,28 @@ Deno.serve(async (req) => {
 function fit(h: Hist[]): Factors {
   const meanG = avg(h.map((x) => x.guests)) ?? 0
   const wday: Record<number, number> = {}
+  const wdayN: Record<number, number> = {}
   for (let d = 1; d <= 7; d++) {
     const xs = h.filter((x) => x.dow === d).map((x) => x.guests)
     wday[d] = shrink(meanG > 0 && xs.length ? (avg(xs)! / meanG) : 1, xs.length)
+    wdayN[d] = xs.length
   }
   const evt: Record<string, number> = {}
+  const evtN: Record<string, number> = {}
   for (const t of ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall", "none"]) {
     const xs = h.filter((x) => x.evType === t).map((x) => x.guests)
     evt[t] = shrink(meanG > 0 && xs.length ? (avg(xs)! / meanG) : 1, xs.length)
+    evtN[t] = xs.length
   }
   const weather: Record<string, number> = {}
+  const weatherN: Record<string, number> = {}
   for (const w of ["rainy", "dry"]) {
     const xs = h.filter((x) => (w === "rainy" ? x.rainy : !x.rainy)).map((x) => x.guests)
     weather[w] = shrink(meanG > 0 && xs.length ? (avg(xs)! / meanG) : 1, xs.length)
+    weatherN[w] = xs.length
   }
   const spend = median(h.map((x) => x.spend)) ?? 0
-  return { meanG, wday, evt, weather, spend }
+  return { meanG, wday, evt, weather, spend, wdayN, evtN, weatherN }
 }
 function predict(f: Factors, feat: Feat): { guests: number; sales: number } {
   const g = f.meanG * (f.wday[feat.dow] ?? 1) * (f.evt[feat.evType] ?? 1) * (f.weather[feat.rainy ? "rainy" : "dry"] ?? 1)
