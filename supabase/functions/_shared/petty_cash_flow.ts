@@ -61,6 +61,7 @@ function todayYmdJst(): string {
 
 // 品目ごとの内訳（小口現金ページと同じモデル）。n:品目 p:税抜価格 acct:勘定科目 rate:税率(8|10)。
 type PettyCashItem = { n: string; p: number; acct: 'shokuzai' | 'shomohin' | 'alcohol'; rate: 8 | 10 }
+type PettyTaxMode = 'ex' | 'in'
 // 品名から勘定科目を推定（既定。記録後に小口現金ページで修正可）。
 //   アルコール飲料 → alcohol、消耗品/衛生用品 → shomohin、それ以外 → shokuzai(食材)。
 //   ※「消毒用アルコール」等は飲料ではないので shomohin 側で先に拾う。
@@ -88,7 +89,7 @@ function pettyItemsLabel(items: PettyCashItem[] | null): string {
 // export はテスト用（運用上の呼び出しはこのモジュール内のみ）。
 export function extractExpenseFromReceipt(
   receipt: LineImageReceiptAnalysis | null,
-): { amount: number; tax: number; spentOn: string; item: string; supplier: string | null; items: PettyCashItem[] } | null {
+): { amount: number; tax: number; spentOn: string; item: string; supplier: string | null; items: PettyCashItem[]; taxMode: PettyTaxMode } | null {
   const tax = parseYenToInt(receipt?.taxAmount) ?? 0
   const gross = parseYenToInt(receipt?.grossSales)
   const net = parseYenToInt(receipt?.netSales)
@@ -220,6 +221,7 @@ export function extractExpenseFromReceipt(
   //   確定なので、store_name で検知したら rate を 10 に上書きする（rate=8 強制による科目「食材」化と
   //   外税8%上乗せの不一致を根本回避）。プロンプト側のSeriaブロックと二重の安全網。
   const isSeriaVendor = /(seria|セリア)/i.test(String(receipt?.storeName ?? ''))
+  const isLawsonVendor = /(lawson|ローソン)/i.test(String(receipt?.storeName ?? ''))
   const itemEntries = itemRows.map((i, idx) => {
     const p = i.amount != null && i.amount > 0 ? i.amount : 0
     let rate: 8 | 10
@@ -244,11 +246,34 @@ export function extractExpenseFromReceipt(
   let base: number | null = null
   let amount: number | null = null
   let taxResolved = tax
+  const breakdownSuggestsGrossDoubleCount =
+    breakdown.length > 0 &&
+    bdGross > 0 &&
+    bdTax >= 0 &&
+    gross != null &&
+    gross > 0 &&
+    Math.abs(gross - (bdGross + bdTax)) <= 3 &&
+    (!allPriced || Math.abs(itemsSum - bdGross) <= 3)
+  const lawsonLikelyInternalTaxTotal =
+    isLawsonVendor &&
+    gross != null &&
+    gross > 0 &&
+    tax > 0 &&
+    allPriced &&
+    Math.abs(itemsSum - Math.max(0, gross - tax)) <= 3
   // bdValid でも【内訳が信頼アンカーと不整合(bdSplitTrusted=false)】なら集計のbdTaxを税額に使わない。
   //   下の明細照合(itemsSum+itemsTax≒gross)へ落として、整合チェックで直した税率配分どおりの税額にする。
-  if (bdValid && bdSplitTrusted) {
+  if (breakdownSuggestsGrossDoubleCount) {
+    amount = bdGross
+    taxResolved = Math.min(bdTax, amount)
+    base = amount - taxResolved
+  } else if (bdValid && bdSplitTrusted) {
     amount = gross ?? bdGross
     taxResolved = Math.min(bdTax, amount)
+    base = amount - taxResolved
+  } else if (lawsonLikelyInternalTaxTotal) {
+    amount = itemsSum
+    taxResolved = Math.min(tax, amount)
     base = amount - taxResolved
   } else if (gross != null && gross > 0 && allPriced && Math.abs(itemsSum + itemsTax - gross) <= 3) {
     base = itemsSum
@@ -274,6 +299,7 @@ export function extractExpenseFromReceipt(
   const safeTax = Math.min(taxResolved, amount)
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
   const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
+  let taxMode: PettyTaxMode = breakdownSuggestsGrossDoubleCount ? 'in' : 'ex'
 
   // 【明細価格の 税込/税抜 自動判定（レシートごと）】店によって品目の印字が税込/税抜どちらもある。
   //   システムの品目価格(p)は「税抜」で統一しているため、レシートの数字から判定して正規化する:
@@ -284,6 +310,7 @@ export function extractExpenseFromReceipt(
     if (Math.abs(itemsSum - base) <= 3) {
       // 税抜印字（そのまま）
     } else if (Math.abs(itemsSum - amount) <= 3) {
+      taxMode = 'in'
       for (const it of itemEntries) it.p = Math.round(it.p / (1 + it.rate / 100))
       // 丸め誤差で Σp が本体とズレた分は最大価格の品目で吸収（±品数程度まで）
       const diff = base - itemEntries.reduce((s, it) => s + it.p, 0)
@@ -340,7 +367,7 @@ export function extractExpenseFromReceipt(
     // 明細価格が取れない時は本体価格を1品目に集約（科目別集計の取りこぼしを防ぐ）。
     items = [{ n: nm, p: base, acct, rate: defaultPettyRate(acct) }]
   }
-  return { amount, tax: safeTax, spentOn, item, supplier, items }
+  return { amount, tax: safeTax, spentOn, item, supplier, items, taxMode }
 }
 
 function textMessage(text: string): Record<string, unknown> {
@@ -388,6 +415,7 @@ type ExtractedExpense = {
   item: string | null
   amount: number
   tax: number
+  taxMode: PettyTaxMode
   supplier: string | null
   /** 取扱者（画像を投稿したユーザーの表示名）。確認カード表示用。 */
   handler?: string | null
@@ -565,6 +593,7 @@ type PendingRow = {
   item: string | null
   amount_yen: number | null
   tax_yen: number | null
+  tax_mode: PettyTaxMode | null
   handler: string | null
   store_name: string | null
   category: string | null
@@ -628,7 +657,7 @@ export async function handlePettyCashTextMessage(
     store_partition_key: storeKey || null,
     status: 'await_image',
     line_message_id: null,
-    spent_on: null, item: null, amount_yen: null, tax_yen: null, handler: null, store_name: null, category: null,
+    spent_on: null, item: null, amount_yen: null, tax_yen: null, tax_mode: null, handler: null, store_name: null, category: null,
     expires_at: expiresAt,
     updated_at: nowIso,
   }, { onConflict: 'conversation_key' })
@@ -715,6 +744,7 @@ export async function handlePettyCashImageIfPending(
     item: ex.item,
     amount_yen: ex.amount,
     tax_yen: ex.tax,
+    tax_mode: ex.taxMode,
     handler: handlerName,
     store_name: ex.supplier,
     items: ex.items,
@@ -722,7 +752,7 @@ export async function handlePettyCashImageIfPending(
   }).eq('id', pendingId)
 
   const replied = await sendReply(replyToken, [confirmFlex(pendingId, {
-    storeDisplayName: storeName, spentOn: ex.spentOn, item: ex.item, amount: ex.amount, tax: ex.tax, supplier: ex.supplier, items: ex.items, handler: handlerName,
+    storeDisplayName: storeName, spentOn: ex.spentOn, item: ex.item, amount: ex.amount, tax: ex.tax, taxMode: ex.taxMode, supplier: ex.supplier, items: ex.items, handler: handlerName,
   })], storeKey, roomId)
   return { handled: true, replied, saved: false, reason: 'petty_cash_confirm_card' }
 }
@@ -757,6 +787,7 @@ export async function savePettyCashPendingFromReceipt(
     item: ex.item,
     amount_yen: ex.amount,
     tax_yen: ex.tax,
+    tax_mode: ex.taxMode,
     handler: handlerName,
     store_name: ex.supplier,
     category: null,
@@ -820,7 +851,7 @@ export async function handlePettyCashPostback(
 
   const { data: pending, error } = await supabase
     .from(PENDING_TABLE)
-    .select('id, status, store_partition_key, line_message_id, spent_on, item, amount_yen, tax_yen, handler, store_name, category, items')
+    .select('id, status, store_partition_key, line_message_id, spent_on, item, amount_yen, tax_yen, tax_mode, handler, store_name, category, items')
     .eq('id', id)
     .maybeSingle()
   if (error || !pending) return simpleNoticeFlex('対象の経費が見つかりませんでした。')
@@ -838,6 +869,7 @@ export async function handlePettyCashPostback(
       item: p.item,
       amount: Math.max(0, Math.floor(Number(p.amount_yen ?? 0))),
       tax: Math.max(0, Math.floor(Number(p.tax_yen ?? 0))),
+      taxMode: p.tax_mode === 'in' ? 'in' : 'ex',
       supplier: p.store_name,
       handler: p.handler,
       items: p.items,
@@ -865,6 +897,7 @@ export async function handlePettyCashPostback(
     category: itemsLabel || p.category,
     amount_yen: amount,
     tax_yen: tax,
+    tax_mode: p.tax_mode === 'in' ? 'in' : 'ex',
     items: p.items,
     handler: p.handler,
     note: p.store_name ? ('仕入先: ' + p.store_name) : null,

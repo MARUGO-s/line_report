@@ -594,14 +594,97 @@
     const acctColor = (k) => { const a = ACCTS.find((x) => x.k === k); return a ? a.c : 'var(--acct-unknown)'; };
     const ACCT_RATE = { shokuzai: 8, shomohin: 10, alcohol: 10 };
     const rateOf = (acct) => ACCT_RATE[acct] || 10;
+    function includedTaxFromGross(gross, rate) {
+      const g = Math.max(0, Math.floor(Number(gross) || 0));
+      return Math.floor(g * rate / (100 + rate));
+    }
     function itemSplit(it, mode) {
       const p = Number(it.p) || 0;
       const rate = rateOf(it.acct);
       if (mode === 'in') {
-        const net = Math.floor(p * 100 / (100 + rate));
-        return { net: net, tax: p - net, rate: rate, gross: p };
+        const tax = includedTaxFromGross(p, rate);
+        return { net: p - tax, tax: tax, rate: rate, gross: p };
       }
       return { net: p, tax: Math.floor(p * rate / 100), rate: rate, gross: p + Math.floor(p * rate / 100) };
+    }
+    function rebalanceGroupedValues(seedItems, initialValues, targetTotal) {
+      const vals = initialValues.slice();
+      let diff = Math.floor(Number(targetTotal) || 0) - vals.reduce((s, v) => s + v, 0);
+      const order = seedItems.map((it, i) => ({ i: i, w: Math.max(0, Math.floor(Number(it.p) || 0)) }))
+        .sort((a, b) => b.w - a.w || a.i - b.i);
+      if (!order.length || diff === 0) return vals;
+      let guard = 0;
+      while (diff !== 0 && guard < 2000) {
+        let moved = false;
+        for (const o of order) {
+          if (diff === 0) break;
+          if (diff > 0) {
+            vals[o.i] += 1;
+            diff -= 1;
+            moved = true;
+          } else if (vals[o.i] > 0) {
+            vals[o.i] -= 1;
+            diff += 1;
+            moved = true;
+          }
+        }
+        if (!moved) break;
+        guard += 1;
+      }
+      return vals;
+    }
+    function cloneUiItems(items) {
+      return normItems(items).map((it) => ({ n: it.n, p: it.p, acct: it.acct, rate: it.rate }));
+    }
+    function convertCanonicalItemsToDisplay(items, mode) {
+      const list = cloneUiItems(items);
+      if (mode !== 'in' || !list.length) return list;
+      [8, 10].forEach((rate) => {
+        const idxs = [];
+        list.forEach((it, idx) => { if ((Number(it.rate) === 10 ? 10 : 8) === rate) idxs.push(idx); });
+        if (!idxs.length) return;
+        const groupItems = idxs.map((idx) => list[idx]);
+        const targetGross = groupItems.reduce((s, it) => s + it.p, 0) + Math.floor(groupItems.reduce((s, it) => s + it.p, 0) * rate / 100);
+        const grosses = rebalanceGroupedValues(
+          groupItems,
+          groupItems.map((it) => it.p + Math.floor(it.p * rate / 100)),
+          targetGross
+        );
+        idxs.forEach((idx, j) => { list[idx].p = grosses[j]; });
+      });
+      return list;
+    }
+    function convertDisplayItemsToCanonical(items, mode) {
+      const list = cloneUiItems(items);
+      if (mode !== 'in' || !list.length) return list;
+      [8, 10].forEach((rate) => {
+        const idxs = [];
+        list.forEach((it, idx) => { if ((Number(it.rate) === 10 ? 10 : 8) === rate) idxs.push(idx); });
+        if (!idxs.length) return;
+        const groupItems = idxs.map((idx) => list[idx]);
+        const grossTotal = groupItems.reduce((s, it) => s + it.p, 0);
+        const targetNet = grossTotal - includedTaxFromGross(grossTotal, rate);
+        const nets = rebalanceGroupedValues(
+          groupItems,
+          groupItems.map((it) => Math.max(0, it.p - includedTaxFromGross(it.p, rate))),
+          targetNet
+        );
+        idxs.forEach((idx, j) => { list[idx].p = nets[j]; });
+      });
+      return list;
+    }
+    function translateItemsBetweenModes(items, fromMode, toMode) {
+      return convertCanonicalItemsToDisplay(convertDisplayItemsToCanonical(items, fromMode), toMode);
+    }
+    function totalsFromCanonicalItems(items) {
+      let base = 0, base8 = 0, base10 = 0;
+      items.forEach((it) => {
+        base += it.p;
+        if ((Number(it.rate) === 10 ? 10 : 8) === 10) base10 += it.p;
+        else base8 += it.p;
+      });
+      const tax = Math.floor(base8 * 8 / 100) + Math.floor(base10 * 10 / 100);
+      return { base: base, tax: tax, total: base + tax };
     }
     // 旧データの category 文字列 → 3科目への寄せ（台帳/集計の見栄え用）。未知は '' = 未分類。
     const LEGACY_ACCT = { '食材・仕入': 'shokuzai', '食材': 'shokuzai', '仕入': 'shokuzai', '消耗品費': 'shomohin', '消耗品': 'shomohin', '衛生用品': 'shomohin', '雑貨': 'shomohin', 'アルコール': 'alcohol', '酒': 'alcohol', '酒類': 'alcohol' };
@@ -918,6 +1001,7 @@
     }
     function loadForEdit(r, message) {
       const items = r.items.length ? r.items : rowsFromLegacy(r);
+      const mode = r.taxMode || 'ex';
       editingId = r.id;
       editingAmountYen = (r.total != null && Number.isFinite(Number(r.total))) ? Math.floor(Number(r.total)) : null;
       dom.dateF.value = r.date || todayStr();
@@ -927,32 +1011,32 @@
       dom.editFlag.hidden = false; dom.editFlag.textContent = '編集中 ID:' + r.id;
       if (dom.editDeleteBtn) dom.editDeleteBtn.hidden = false;
       dom.addMsg.className = message ? 'msg ok' : 'msg'; dom.addMsg.textContent = message || '';
-      setTaxMode(r.taxMode || 'ex');
-      setItems(items);  // editingId/editingAmountYen 設定後に呼ぶ（recalc→updateMismatch がボタン表示を確定）
+      setTaxMode(mode);
+      setItems(convertCanonicalItemsToDisplay(items, mode));  // editingId/editingAmountYen 設定後に呼ぶ（recalc→updateMismatch がボタン表示を確定）
       setEntryOpen(true);
       try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
     }
     async function submitEntry() {
-      const items = readItems().filter((it) => it.n || it.p > 0);
-      if (!items.length) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '品目を1つ以上入力してください。'; return; }
+      const displayItems = readItems().filter((it) => it.n || it.p > 0);
+      if (!displayItems.length) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '品目を1つ以上入力してください。'; return; }
       const spent_on = dom.dateF.value;
       if (!spent_on) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '出金日を入力してください。'; return; }
-      let base = 0, base8 = 0, base10 = 0;
-      items.forEach((it) => { base += it.p; if (it.rate === 8) base8 += it.p; else base10 += it.p; });
-      const tax = Math.floor(base8 * 8 / 100) + Math.floor(base10 * 10 / 100);  // 1円未満切り捨て（税率別）
-      if (base + tax <= 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '価格を入力してください。'; return; }
-      const fields = { spent_on: spent_on, items: items, tax_mode: curTaxMode(), handler: dom.handlerF.value.trim(), note: dom.memoF.value.trim() };
+      const mode = curTaxMode();
+      const items = convertDisplayItemsToCanonical(displayItems, mode);
+      const totals = totalsFromCanonicalItems(items);
+      if (totals.total <= 0) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '価格を入力してください。'; return; }
+      const fields = { spent_on: spent_on, items: items, tax_mode: mode, handler: dom.handlerF.value.trim(), note: dom.memoF.value.trim() };
       dom.submitBtn.disabled = true;
       try {
         if (editingId) {
           await apiFetch('/petty-cash', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ id: editingId }, fields)) });
           exitEditMode();
-          dom.addMsg.className = 'msg ok'; dom.addMsg.textContent = '更新しました（出金 ' + yen(base + tax) + '）。';
+          dom.addMsg.className = 'msg ok'; dom.addMsg.textContent = '更新しました（出金 ' + yen(totals.total) + '）。';
         } else {
           const store = dom.storeF.value || lockedStore();
           if (!store) { dom.addMsg.className = 'msg err'; dom.addMsg.textContent = '店舗を選択してください（全店舗のままでは追加できません）。'; dom.submitBtn.disabled = false; return; }
           await apiFetch('/petty-cash', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ store_partition_key: store }, fields)) });
-          dom.addMsg.className = 'msg ok'; dom.addMsg.textContent = '追加しました（出金 ' + yen(base + tax) + '）。';
+          dom.addMsg.className = 'msg ok'; dom.addMsg.textContent = '追加しました（出金 ' + yen(totals.total) + '）。';
         }
         setItems([]); // 明細だけクリア（連続入力のため日付・パネルは維持）
         setEntryOpen(true);
@@ -1301,8 +1385,12 @@
       dom.taxModeSeg.addEventListener('click', (e) => {
         const b = e.target.closest('button');
         if (!b) return;
-        dom.taxModeSeg.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
-        recalc();
+        const nextMode = b.dataset.mode === 'in' ? 'in' : 'ex';
+        const prevMode = curTaxMode();
+        if (nextMode === prevMode) return;
+        const translated = translateItemsBetweenModes(readItems(), prevMode, nextMode);
+        setTaxMode(nextMode);
+        setItems(translated);
       });
     }
     dom.clearBtn.addEventListener('click', resetForm);

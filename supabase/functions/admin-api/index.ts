@@ -3566,6 +3566,7 @@ const PETTY_CASH_CATEGORIES = ["消耗品費", "食材・仕入", "雑費", "衛
 const PETTY_ACCT_KEYS = new Set(["shokuzai", "shomohin", "alcohol"])
 const PETTY_ACCT_NAMES: Record<string, string> = { shokuzai: "食材", shomohin: "消耗品", alcohol: "アルコール" }
 type PettyItem = { n: string; p: number; acct: string; rate: number }
+type PettyTaxMode = "ex" | "in"
 
 // items 配列を正規化（[{n,p,acct,rate}]）。各品目: 税抜価格 p(int≥0)、acct∈3科目、rate∈{8,10}。
 // 空行（名前も価格も無い）は除去。1件も無ければ null（＝従来の単一フィールド経路にフォールバック）。
@@ -3604,6 +3605,10 @@ function pettyTotalsFromItems(items: PettyItem[]): { base: number; tax: number; 
   return { base, tax, amount: base + tax }
 }
 
+function normalizePettyTaxMode(raw: unknown): PettyTaxMode {
+  return String(raw ?? "").trim().toLowerCase() === "in" ? "in" : "ex"
+}
+
 // 検索/旧表示用の品目テキスト（複数は「・名 ¥価格」改行、1件はそのまま）。
 function pettyItemText(items: PettyItem[]): string {
   const lines = items.map((it) => `${it.n}${it.p > 0 ? " ¥" + it.p.toLocaleString("ja-JP") : ""}`.trim()).filter(Boolean)
@@ -3628,7 +3633,7 @@ async function fetchPettyCashState(
 
   let query = supabase
     .from("petty_cash_entries")
-    .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, items, handler, source, note, line_message_id, created_at")
+    .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, tax_mode, items, handler, source, note, line_message_id, created_at")
     .eq("hidden", false)
     .order("spent_on", { ascending: false })
     .order("id", { ascending: false })
@@ -3753,6 +3758,7 @@ async function createPettyCashEntry(
   }
   // 新方式: items（品目ごとの勘定科目・税率）があれば、本体/税/出金額はサーバ側で導出して保存（パリティ保証）。
   const items = normalizePettyItems(body.items)
+  const taxMode = normalizePettyTaxMode(body.tax_mode)
   let insertRow: Record<string, unknown>
   if (items) {
     const t = pettyTotalsFromItems(items)
@@ -3766,6 +3772,7 @@ async function createPettyCashEntry(
       category: pettyCategoryLabel(items),
       amount_yen: t.amount,
       tax_yen: t.tax,
+      tax_mode: taxMode,
       items,
       handler: toSafeString(body.handler) || null,
       note: toSafeString(body.note) || null,
@@ -3789,6 +3796,7 @@ async function createPettyCashEntry(
       category: toSafeString(body.category) || null,
       amount_yen: amount,
       tax_yen: tax,
+      tax_mode: taxMode,
       handler: toSafeString(body.handler) || null,
       note: toSafeString(body.note) || null,
       source: "manual",
@@ -3976,13 +3984,14 @@ async function createPettyCashEntryFromReceiptImage(
         category: items ? pettyCategoryLabel(items) : null,
         amount_yen: expense.amount,
         tax_yen: Math.min(expense.amount, Math.max(0, expense.tax)),
+        tax_mode: expense.taxMode,
         items,
         handler: toSafeString(formData.get("handler")) || null,
         note: expense.supplier ? `仕入先: ${expense.supplier}` : null,
         source: "web_image",
         line_message_id: webMessageId,
       })
-      .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, items, handler, source, note, line_message_id, created_at")
+      .select("id, store_partition_key, spent_on, item, category, amount_yen, tax_yen, tax_mode, items, handler, source, note, line_message_id, created_at")
       .single()
     if (error) {
       throw { status: 500, message: `Failed to create petty cash entry: ${error.message}` } satisfies AppError
@@ -4029,6 +4038,7 @@ async function updatePettyCashEntry(
   }
   if (has("handler")) patch.handler = toSafeString(body.handler) || null
   if (has("note")) patch.note = toSafeString(body.note) || null
+  if (has("tax_mode")) patch.tax_mode = normalizePettyTaxMode(body.tax_mode)
   // 新方式: items を指定したら 本体/税/品目テキスト/科目ラベル をサーバ側で再導出（item/category/amount/tax は items が優先）。
   if (has("items")) {
     const items = normalizePettyItems(body.items)
