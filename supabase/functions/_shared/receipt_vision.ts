@@ -190,6 +190,144 @@ export async function analyzeLineImageWithGroqScout(
   return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null, usage }
 }
 
+function mergeVisionUsage(...items: Array<LineImageVisionUsage | null | undefined>): LineImageVisionUsage | null {
+  let inputTokens = 0
+  let outputTokens = 0
+  let totalTokens = 0
+  let thinkingTokens = 0
+  let hasThinking = false
+  let hasAny = false
+  for (const item of items) {
+    if (!item) continue
+    hasAny = true
+    inputTokens += item.inputTokens
+    outputTokens += item.outputTokens
+    totalTokens += item.totalTokens
+    if (item.thinkingTokens != null) {
+      hasThinking = true
+      thinkingTokens += item.thinkingTokens
+    }
+  }
+  return hasAny ? { inputTokens, outputTokens, totalTokens, thinkingTokens: hasThinking ? thinkingTokens : null } : null
+}
+
+function isCashOutLikeText(text: string): boolean {
+  return /レジ出金|出金伝票|今回出金額|現金出金|小口出金/.test(text)
+}
+
+function isCashOutLikeAnalysis(analysis: LineImageAnalysisResult | null): boolean {
+  if (!analysis?.receipt) return false
+  const text = [
+    analysis.summary ?? '',
+    analysis.receipt.storeName ?? '',
+    ...(analysis.receipt.items ?? []),
+    ...((analysis.receipt.lineItems ?? []).map((it) => String(it?.name ?? '').trim()).filter(Boolean)),
+  ].join(' ')
+  return isCashOutLikeText(text)
+}
+
+function buildExpenseIgnoreCashOutPrompt(
+  basePromptAddition: string,
+  analysis: LineImageAnalysisResult,
+): string {
+  const lines = [
+    String(basePromptAddition || '').trim(),
+    '【再確認・複数伝票対策】画像に複数の紙が写っている場合、店舗自身の「レジ出金」「今回出金額」「出金伝票」「仕入食材」「消耗品」などの紙は完全に無視してください。',
+    '【最重要】store_name・line_items・税率は、必ず仕入先の領収書/レシート側だけから読み直してください。レジ出金伝票の科目名を商品名に使ってはいけません。',
+  ]
+  const storeName = String(analysis.receipt?.storeName || '').trim()
+  if (storeName && !isCashOutLikeText(storeName)) {
+    lines.push(`【今回の集中対象】仕入先は「${storeName}」側の紙です。この紙の店名・商品名・税率だけを優先して再抽出してください。`)
+  }
+  const storePhone = String(analysis.receipt?.storePhone || '').trim()
+  if (storePhone) {
+    lines.push(`【補助手がかり】電話番号「${storePhone}」が見える紙があれば、その紙を仕入先レシートとして優先してください。`)
+  }
+  return lines.filter(Boolean).join('\n')
+}
+
+function scoreExpenseReceiptAnalysis(result: { analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null }): number {
+  const analysis = result.analysis
+  const receipt = analysis?.receipt
+  if (!analysis || !receipt) return -100
+  const lineItemCount = Array.isArray(receipt.lineItems) ? receipt.lineItems.filter((it) => String(it?.name ?? '').trim()).length : 0
+  const itemCount = Array.isArray(receipt.items) ? receipt.items.filter((v) => String(v ?? '').trim()).length : 0
+  const summaryText = [
+    analysis.summary ?? '',
+    receipt.storeName ?? '',
+    ...(receipt.items ?? []),
+    ...((receipt.lineItems ?? []).map((it) => String(it?.name ?? '').trim()).filter(Boolean)),
+  ].join(' ')
+  let score = 20
+  if (receipt.storeName) score += 6
+  if (receipt.grossSales || receipt.netSales) score += 4
+  if (receipt.taxAmount) score += 2
+  if (receipt.taxBreakdown?.length) score += 6
+  score += lineItemCount * 4
+  score += itemCount
+  if (isCashOutLikeText(summaryText)) score -= 30
+  if (lineItemCount === 0 && itemCount === 0) score -= 8
+  return score
+}
+
+function mergeExpenseReceiptAnalyses(
+  base: LineImageAnalysisResult,
+  detail: LineImageAnalysisResult,
+): LineImageAnalysisResult {
+  if (!base.receipt) return detail
+  if (!detail.receipt) return base
+  return {
+    summary: detail.summary || base.summary,
+    receiptModelConfidence: Math.max(base.receiptModelConfidence ?? 0, detail.receiptModelConfidence ?? 0),
+    reservation: detail.reservation ?? base.reservation ?? null,
+    receipt: {
+      storeName: detail.receipt.storeName || base.receipt.storeName,
+      storePhone: detail.receipt.storePhone || base.receipt.storePhone,
+      date: detail.receipt.date || base.receipt.date,
+      netSales: detail.receipt.netSales || base.receipt.netSales,
+      taxAmount: detail.receipt.taxAmount || base.receipt.taxAmount,
+      grossSales: detail.receipt.grossSales || base.receipt.grossSales,
+      partyCount: detail.receipt.partyCount || base.receipt.partyCount,
+      guestCount: detail.receipt.guestCount || base.receipt.guestCount,
+      unitPrice: detail.receipt.unitPrice || base.receipt.unitPrice,
+      items: (detail.receipt.items?.length ? detail.receipt.items : base.receipt.items) ?? [],
+      lineItems: detail.receipt.lineItems?.length ? detail.receipt.lineItems : base.receipt.lineItems,
+      taxBreakdown: detail.receipt.taxBreakdown?.length ? detail.receipt.taxBreakdown : base.receipt.taxBreakdown,
+    },
+  }
+}
+
+export async function analyzeExpenseReceiptWithGroqScout(
+  bytes: Uint8Array,
+  contentType: string | null,
+  fileName: string,
+  groqApiKey: string,
+  systemPromptAddition = '',
+): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
+  const full = await analyzeLineImageWithGroqScout(bytes, contentType, fileName, groqApiKey, systemPromptAddition)
+  if (!full.analysis?.receipt) return full
+
+  const focused = await analyzeLineImageWithGroqScout(
+    bytes,
+    contentType,
+    `${fileName || 'receipt'}#focused`,
+    groqApiKey,
+    buildExpenseIgnoreCashOutPrompt(systemPromptAddition, full.analysis),
+  )
+  const combinedUsage = mergeVisionUsage(full.usage, focused.usage)
+  if (!focused.analysis) return { ...full, usage: combinedUsage ?? full.usage }
+
+  const fullScore = isCashOutLikeAnalysis(full.analysis) ? -1000 : scoreExpenseReceiptAnalysis(full)
+  const focusedScore = isCashOutLikeAnalysis(focused.analysis) ? -1000 : scoreExpenseReceiptAnalysis(focused)
+  if (focusedScore <= fullScore + 1) return { ...full, usage: combinedUsage ?? full.usage }
+
+  return {
+    analysis: mergeExpenseReceiptAnalyses(full.analysis, focused.analysis),
+    failure: null,
+    usage: combinedUsage ?? focused.usage,
+  }
+}
+
 function extractTextFromGeminiResponse(payload: unknown): string {
   const candidates = (payload as { candidates?: unknown })?.candidates
   const list = Array.isArray(candidates) ? candidates : []

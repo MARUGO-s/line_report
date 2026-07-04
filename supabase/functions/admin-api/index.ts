@@ -23,7 +23,7 @@ import {
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
 import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
-import { analyzeLineImageWithGroqScout, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
+import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
 import {
   answerFoodCourtQuestion,
@@ -3947,7 +3947,7 @@ async function createPettyCashEntryFromReceiptImage(
 
   const bytes = new Uint8Array(await fileValue.arrayBuffer())
   const webMessageId = `web-petty-cash:${crypto.randomUUID()}`
-  const analyzed = await analyzeLineImageWithGroqScout(
+  const analyzed = await analyzeExpenseReceiptWithGroqScout(
     bytes,
     mimeType,
     originalFileName,

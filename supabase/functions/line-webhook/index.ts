@@ -57,7 +57,7 @@ import {
   resolveReceiptDateIsoForPersist,
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
-import { analyzeLineImageWithClaude, analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
+import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithClaude, analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
 import {
   combineStoreReceiptPromptAdditions,
   EXPENSE_RECEIPT_PROMPT_ADDITION,
@@ -1189,7 +1189,13 @@ async function processReceiptImageEvent(
   // 解析は Groq を採用（2026-06-12: Claude(Haiku)はTOBU等でJANコード行の混入・品名誤読・品目欠落が多く不正確、
   // かつ高コストのため。実測で Groq の方が同じTOBUレシートを正確に読めた）。経費フローの各ハンドラから「必要時のみ」呼ばれる。
   const reanalyzeAsExpense = async () => {
-    const g = await analyzeLineImageWithGroqScout(contentFetch.bytes, contentFetch.contentType, lineMessageId, groqApiKey, EXPENSE_RECEIPT_PROMPT_ADDITION)
+    const g = await analyzeExpenseReceiptWithGroqScout(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      lineMessageId,
+      groqApiKey,
+      EXPENSE_RECEIPT_PROMPT_ADDITION,
+    )
     await recordAiUsage('groq', GROQ_RECEIPT_MODEL, g.usage)
     return g.analysis?.receipt ?? null
   }
@@ -1466,7 +1472,7 @@ async function processReceiptImageEvent(
       'receipt に store_name（仕入先。Amazonの「支払い明細書」なら "Amazon"）・gross_sales（税込合計）・line_items を入れる。',
       'レジ出金伝票が写っていればその「今回出金額 ¥◯」も金額の手掛かりにする。反射・かすれは読める数値だけで receipt を作り kind=receipt を維持する。',
     ].join('\n')
-    const forcedExpense = await analyzeLineImageWithGroqScout(
+    const forcedExpense = await analyzeExpenseReceiptWithGroqScout(
       contentFetch.bytes,
       contentFetch.contentType,
       lineMessageId,
