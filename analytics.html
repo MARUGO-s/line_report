@@ -812,12 +812,20 @@
       </div>
       <div class="controls" style="gap:8px;margin-top:0">
         <button id="competitorNearbyBtn" class="btn" type="button">周辺を自動検索</button>
+        <select id="nearbyRadiusSelect" class="input" style="width:auto;padding:5px 8px;font-size:0.85rem">
+          <option value="100">半径100m</option>
+          <option value="200">半径200m</option>
+          <option value="300" selected>半径300m</option>
+          <option value="500">半径500m</option>
+          <option value="1000">半径1km</option>
+          <option value="2000">半径2km</option>
+        </select>
         <button id="competitorRefreshBtn" class="btn" type="button">口コミ情報を更新</button>
         <span id="competitorStatus" class="meta" style="margin-top:0">Google Places APIキー未設定の場合、更新だけ失敗します。</span>
       </div>
       <div id="nearbyPanel" class="nearby-panel">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <span style="font-weight:700;font-size:0.88rem">周辺店舗の候補（半径300m）</span>
+          <span id="nearbyPanelTitle" style="font-weight:700;font-size:0.88rem">周辺店舗の候補（半径300m）</span>
           <button id="nearbyCloseBtn" class="btn" type="button" style="padding:4px 10px;font-size:0.78rem">閉じる</button>
         </div>
         <div id="nearbyCandidates" class="nearby-candidates"><span class="meta">検索中…</span></div>
@@ -1460,6 +1468,8 @@ const dom = {
   competitorStatus: $('competitorStatus'),
   competitorList: $('competitorList'),
   nearbyPanel: $('nearbyPanel'),
+  nearbyPanelTitle: $('nearbyPanelTitle'),
+  nearbyRadiusSelect: $('nearbyRadiusSelect'),
   nearbyCloseBtn: $('nearbyCloseBtn'),
   nearbyCandidates: $('nearbyCandidates'),
   nearbyRegisterBtn: $('nearbyRegisterBtn'),
@@ -2416,11 +2426,14 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
 async function openNearbySearch() {
   const sk = state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
   if (!sk) { alert('店舗を選択してから実行してください。'); return; }
+  const radius = Number((dom.nearbyRadiusSelect && dom.nearbyRadiusSelect.value) || 300);
+  const radiusLabel = radius >= 1000 ? `${radius / 1000}km` : `${radius}m`;
+  if (dom.nearbyPanelTitle) dom.nearbyPanelTitle.textContent = `周辺店舗の候補（半径${radiusLabel}）`;
   if (dom.nearbyPanel) dom.nearbyPanel.classList.add('open');
   if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
   if (dom.nearbyStatus) dom.nearbyStatus.textContent = '';
   try {
-    const result = await apiFetch('/receipts/competitors/nearby-search', { method: 'POST', body: { store_key: sk } });
+    const result = await apiFetch('/receipts/competitors/nearby-search', { method: 'POST', body: { store_key: sk, radius } });
     _nearbyCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
     const ctx = await apiFetch(`/receipts/competitors?store_key=${encodeURIComponent(sk)}`);
     const registered = new Set(

@@ -224,19 +224,14 @@ type NearbyCandidate = {
 
 async function classifyNearbyWithAI(
   candidates: NearbyCandidate[],
-): Promise<NearbyCandidate[]> {
-  if (!candidates.length) return candidates
+): Promise<{ candidates: NearbyCandidate[]; debug: unknown }> {
+  if (!candidates.length) return { candidates, debug: { skipped: 'no candidates' } }
 
-  const geminiKey = (
-    Deno.env.get('GEMINI_API_KEY')
-    ?? Deno.env.get('GOOGLE_API_KEY')
-    ?? ''
-  ).trim()
-  if (!geminiKey) return candidates
+  const groqKey = String(Deno.env.get('GROQ_API_KEY') || '').trim()
+  if (!groqKey) return { candidates, debug: { skipped: 'no groq key' } }
 
   const list = candidates.map((c, i) => ({
     idx: i,
-    place_id: c.place_id,
     name: c.name ?? '不明',
     address: c.address ?? '',
     rating: c.rating,
@@ -257,53 +252,64 @@ async function classifyNearbyWithAI(
 店舗リスト:
 ${JSON.stringify(list, null, 2)}
 
-以下のJSON形式のみで回答してください（説明文不要）:
-{"classifications":[{"place_id":"...","is_competitor":true,"confidence":"high","reason":"理由を1文で"}]}`
+以下のJSON形式のみで回答してください（説明文不要）。idxは店舗リストのidxをそのまま返すこと:
+{"classifications":[{"idx":0,"is_competitor":true,"confidence":"high","reason":"理由を1文で"}]}`
 
   try {
-    const model = String(Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'gemini-3-flash-preview').trim()
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 1024 },
-        }),
-      },
-    )
-    if (!res.ok) return candidates
+    const model = String(Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'llama-3.3-70b-versatile').trim()
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1024,
+      }),
+    })
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '')
+      return { candidates, debug: { http_status: res.status, error: errBody.slice(0, 500), model } }
+    }
     const json = await res.json()
-    const text = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-    const parsed = JSON.parse(text)
-    if (!isRecord(parsed) || !Array.isArray(parsed.classifications)) return candidates
+    const rawText: string = json?.choices?.[0]?.message?.content ?? ''
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return { candidates, debug: { http_status: res.status, raw_text: rawText.slice(0, 300), error: 'no json match' } }
+    const parsed = JSON.parse(jsonMatch[0])
+    if (!isRecord(parsed) || !Array.isArray(parsed.classifications)) {
+      return { candidates, debug: { http_status: res.status, error: 'invalid parsed structure' } }
+    }
 
-    const classMap = new Map<string, { is_competitor: boolean; confidence: string; reason: string }>()
+    const classMap = new Map<number, { is_competitor: boolean; confidence: string; reason: string }>()
     for (const c of parsed.classifications) {
-      if (isRecord(c) && typeof c.place_id === 'string') {
-        classMap.set(c.place_id, {
-          is_competitor: Boolean(c.is_competitor),
-          confidence: typeof c.confidence === 'string' ? c.confidence : 'medium',
-          reason: typeof c.reason === 'string' ? c.reason : '',
-        })
+      if (isRecord(c) && (typeof c.idx === 'number' || typeof c.idx === 'string')) {
+        const idx = Number(c.idx)
+        if (Number.isInteger(idx) && idx >= 0) {
+          classMap.set(idx, {
+            is_competitor: Boolean(c.is_competitor),
+            confidence: typeof c.confidence === 'string' ? c.confidence : 'medium',
+            reason: typeof c.reason === 'string' ? c.reason : '',
+          })
+        }
       }
     }
 
-    return candidates.map((c) => {
-      const cls = classMap.get(c.place_id)
-      if (!cls) return c
-      return {
-        ...c,
-        ai_is_competitor: cls.is_competitor,
-        ai_confidence: (cls.confidence === 'high' || cls.confidence === 'medium' || cls.confidence === 'low')
-          ? cls.confidence
-          : 'medium',
-        ai_reason: cls.reason || null,
-      }
-    })
-  } catch (_) {
-    return candidates
+    return {
+      debug: { http_status: res.status, classified_count: classMap.size, model },
+      candidates: candidates.map((c, i) => {
+        const cls = classMap.get(i)
+        if (!cls) return c
+        return {
+          ...c,
+          ai_is_competitor: cls.is_competitor,
+          ai_confidence: (cls.confidence === 'high' || cls.confidence === 'medium' || cls.confidence === 'low')
+            ? cls.confidence
+            : 'medium',
+          ai_reason: cls.reason || null,
+        }
+      }),
+    }
+  } catch (e) {
+    return { candidates, debug: { error: String(e) } }
   }
 }
 
@@ -381,7 +387,7 @@ export async function nearbySearchGooglePlaces(
     })
     .filter((c): c is NearbyCandidate => c !== null)
 
-  const classified = await classifyNearbyWithAI(candidates)
+  const { candidates: classified } = await classifyNearbyWithAI(candidates)
   return { candidates: classified }
 }
 
