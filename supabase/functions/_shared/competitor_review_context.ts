@@ -256,7 +256,7 @@ export async function nearbySearchGooglePlaces(
       'X-Goog-FieldMask': fieldMask,
     },
     body: JSON.stringify({
-      includedTypes: ['restaurant', 'bar', 'cafe', 'food'],
+      includedTypes: ['restaurant', 'bar', 'cafe', 'food_court', 'fast_food_restaurant'],
       maxResultCount: 20,
       locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } },
       languageCode: 'ja',
