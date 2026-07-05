@@ -796,6 +796,14 @@ function fcAddDays(ymd: string, n: number): string {
   const dt = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + n))
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
 }
+function fcDaysBetween(fromYmd: string, toYmd: string): number {
+  const p = (s: string) => {
+    const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN
+  }
+  const a = p(fromYmd), b = p(toYmd)
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.round((b - a) / 86400000) : 0
+}
 // テナント一覧は「翌朝に出る“前日”の売上比較表」。report_date はレポート発行日なので、
 // 実際の売上が発生した日は前日(-1)。AIに渡す日付・相関はすべてこの“売上日”に揃える。
 export function fcSalesDate(r: Record<string, unknown>): string {
@@ -1418,11 +1426,44 @@ async function buildForecastFactorsContext(
       : row.backtest_days >= 7 && mapeGuests != null && mapeGuests <= 0.4
         ? 'モデル信頼度: 中（方向感の参考。断定は避ける）'
         : 'モデル信頼度: 低〜蓄積中（仮説出し中心。断定不可）'
+    // 学習の進化トラッキング: foodcourt_forecast_history から誤差の推移を読み、
+    // 「モデルが実際に賢くなっているか」の時系列証拠をAIに渡す（7日以上離れた2点で比較）。
+    let evolutionLine = ''
+    try {
+      const { data: histRows } = await supabase
+        .from('foodcourt_forecast_history')
+        .select('log_date, history_days, mape_guests')
+        .eq('tenant_name', baseName)
+        .order('log_date', { ascending: true })
+      const hs = (Array.isArray(histRows) ? histRows : [])
+        .map((r) => ({
+          date: String((r as { log_date?: unknown }).log_date ?? '').slice(0, 10),
+          days: Number((r as { history_days?: unknown }).history_days ?? 0),
+          mape: (r as { mape_guests?: unknown }).mape_guests != null ? Number((r as { mape_guests?: unknown }).mape_guests) : null,
+        }))
+        .filter((r) => r.date && r.mape != null)
+      if (hs.length >= 2) {
+        const latest = hs[hs.length - 1]
+        const past = hs.find((r) => fcDaysBetween(r.date, latest.date) >= 7) // 最古側から7日以上離れた点
+        if (past && past.date !== latest.date && past.mape != null && latest.mape != null) {
+          const pPct = Math.round(past.mape * 100)
+          const lPct = Math.round(latest.mape * 100)
+          const diff = pPct - lPct
+          const trend = diff >= 3
+            ? `${diff}pt改善＝データ蓄積でモデルは着実に賢くなっている`
+            : diff <= -3
+              ? `${Math.abs(diff)}pt悪化＝直近に予測しにくい日が続いた可能性。係数の断定は普段より控えること`
+              : 'ほぼ横ばい＝改善はデータ蓄積待ち'
+          evolutionLine = `[学習の進化(自動追跡)] ${past.date}(履歴${past.days}日): 客数誤差±${pPct}% → ${latest.date}(履歴${latest.days}日): ±${lPct}%（${trend}）`
+        }
+      }
+    } catch { /* 履歴テーブル未作成でも本文は成立させる */ }
     const L: string[] = [
       `来客予測モデル(${row.model_version})の学習結果。ベース客数(全体平均)${Math.round(row.mean_guests)}人に、以下の係数を掛け合わせて予測している。係数はサンプル数が少ないほど1(影響なし)へ自動収縮済み。`,
       mapeLine,
       reliability,
     ]
+    if (evolutionLine) L.push(evolutionLine)
     if (wdayLines.length) L.push('[曜日係数]\n' + wdayLines.join('\n'))
     if (evtLines.length) L.push('[イベント種別係数]\n' + evtLines.join('\n'))
     if (wxLines.length) L.push('[天気係数]\n' + wxLines.join('\n'))

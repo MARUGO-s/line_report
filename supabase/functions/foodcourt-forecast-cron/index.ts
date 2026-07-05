@@ -193,6 +193,22 @@ Deno.serve(async (req) => {
       updated_at: new Date().toISOString(),
     }, { onConflict: "tenant_name" })
   if (factorsErr) console.error("foodcourt_forecast_factors upsert failed:", factorsErr.message)
+
+  // 学習の進化トラッキング: 今日の学習結果を1行追記（同日再実行は上書き＝冪等）。
+  // factors は最新1行を上書きするため、「賢くなっているか」の時系列証拠はこちらが正本。
+  const { error: histErr } = await supabase
+    .from("foodcourt_forecast_history")
+    .upsert({
+      tenant_name: BASE_TENANT,
+      log_date: todayJst,
+      model_version: MODEL_VERSION,
+      history_days: hist.length,
+      backtest_days: back.length,
+      mape_guests: mapeG,
+      mape_sales: mapeS,
+      mean_guests: facFull.meanG,
+    }, { onConflict: "tenant_name,log_date" })
+  if (histErr) console.error("foodcourt_forecast_history upsert failed:", histErr.message)
   return json({ ok: true, model_version: MODEL_VERSION, ...summary }, 200)
 })
 
