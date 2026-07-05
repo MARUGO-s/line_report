@@ -9,7 +9,7 @@ import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v9'
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v10'
 
 function buildFoodCourtPageUrl(storeKey: string, loginToken?: string | null): string {
   const key = String(storeKey || '').trim()
@@ -662,6 +662,12 @@ async function openaiChat(
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   if (!apiKey) return { content: null, usage: null }
   try {
+    // o-series models (o1, o3, o4-mini, etc.) require max_completion_tokens and developer role instead of system
+    const isOSeries = /^o\d/.test(model)
+    const normalizedMessages = isOSeries
+      ? messages.map((m) => m.role === 'system' ? { ...m, role: 'developer' } : m)
+      : messages
+    const tokenParam = isOSeries ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -670,8 +676,8 @@ async function openaiChat(
       },
       body: JSON.stringify({
         model,
-        messages,
-        max_tokens: maxTokens,
+        messages: normalizedMessages,
+        ...tokenParam,
       }),
     })
     if (!res.ok) {
@@ -1734,7 +1740,7 @@ export async function answerFoodCourtQuestion(
   }
   const systemFull = (viewingBlock ? viewingBlock + '\n\n' : '') + system + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
   const messages = [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
-  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1800, 'groq', fallbackModel)
+  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1800, 'openai', fallbackModel)
   const ans = r1.content
   const usage = r1.usage
   // Q&Aの実測トークンをAI使用料に合算（best-effort・store_partition_keyで集計に乗る）。
@@ -1870,7 +1876,7 @@ export async function generateFoodCourtDailySummary(
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象日の日次サマリーを作成してください。` },
   ]
-  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1400, 'groq', fallbackModel)
+  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1400, 'openai', fallbackModel)
   const ans = r1.content
   const usage = r1.usage
   if (usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, usage)
@@ -1995,7 +2001,7 @@ export async function generateFoodCourtPeriodSummary(
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象期間の日次サマリーを作成してください。` },
   ]
-  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1400, 'groq', fallbackModel)
+  const r1 = await foodCourtAiChat(messages, groqApiKey, primary, 1400, 'openai', fallbackModel)
   const ans = r1.content
   const usage = r1.usage
   if (usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, usage)
