@@ -2399,8 +2399,13 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
   const sorted = candidates
     .map((c, i) => ({ c, i }))
     .sort((a, b) => {
-      const score = (x) => x.ai_is_competitor === true ? 0 : x.ai_is_competitor === false ? 2 : 1;
-      return score(a.c) - score(b.c);
+      const av = a.c.ai_is_competitor;
+      const bv = b.c.ai_is_competitor;
+      if (av === true && bv !== true) return -1;
+      if (av !== true && bv === true) return 1;
+      if (av === false && bv !== false) return 1;
+      if (av !== false && bv === false) return -1;
+      return 0;
     });
   dom.nearbyCandidates.innerHTML = sorted.map(({ c, i }) => {
     const alreadyRegistered = registeredPlaceIds.has(c.place_id);
