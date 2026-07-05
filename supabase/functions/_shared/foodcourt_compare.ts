@@ -188,10 +188,18 @@ function openaiUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null 
   if (!u || typeof u !== 'object') return null
   const m = u as Record<string, unknown>
   const inp = Number(m.prompt_tokens ?? m.input_tokens ?? 0) || 0
-  const out = Number(m.completion_tokens ?? m.output_tokens ?? 0) || 0
-  const tot = Number(m.total_tokens ?? 0) || (inp + out)
-  if (!inp && !out && !tot) return null
-  return { provider: 'openai', model, inputTokens: inp, outputTokens: out, thinkingTokens: null, totalTokens: tot }
+  const rawOut = Number(m.completion_tokens ?? m.output_tokens ?? 0) || 0
+  const tot = Number(m.total_tokens ?? 0) || (inp + rawOut)
+  // o系推論モデル: completion_tokens には reasoning(思考)トークンが含まれる。
+  // Geminiと同じ「output=本文のみ / thinking=思考」の意味に揃えて分離する
+  // （AI使用料ページは output+thinking を出力課金として合算するので二重計上しない）。
+  const details = (m.completion_tokens_details && typeof m.completion_tokens_details === 'object')
+    ? m.completion_tokens_details as Record<string, unknown>
+    : null
+  const reasoning = details && details.reasoning_tokens != null ? (Number(details.reasoning_tokens) || 0) : null
+  const out = reasoning != null ? Math.max(0, rawOut - reasoning) : rawOut
+  if (!inp && !rawOut && !tot) return null
+  return { provider: 'openai', model, inputTokens: inp, outputTokens: out, thinkingTokens: reasoning, totalTokens: tot }
 }
 async function recordFoodCourtAiUsage(
   supabase: SupabaseClient | null | undefined,

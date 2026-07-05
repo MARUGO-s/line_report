@@ -549,7 +549,7 @@
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="groqChat_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
-              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">OpenAI（フードコート最終統合・gpt-5.5）</span></div>
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">OpenAI（フードコート最終統合・o4-mini）</span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="openai_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="openai_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -601,10 +601,11 @@
 
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
-    const RATES_KEY = 'line_report_ai_usage_rates_v1';
+    // v2: OpenAI 単価を gpt-5.5($5/$30) → o4-mini($1.10/$4.40) に更新。保存済みの旧単価を引き継がないようキーを更新。
+    const RATES_KEY = 'line_report_ai_usage_rates_v2';
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
-    // 単価は各社の公式単価（USD / 100万トークン）。OpenAI gpt-5.5 は $5/$30。
+    // 単価は各社の公式単価（USD / 100万トークン）。OpenAI o4-mini は $1.10/$4.40（公式）。
     // Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
     // Groq llama-4-scout（レシート/画像抽出）の目安は $0.11/$0.34。Claude Haiku 4.5 は $1/$5（公式）。
     // フードコートQ&A・ドーム抽出は Groq llama-3.3-70b（目安 $0.59/$0.79）で別単価。
@@ -613,7 +614,7 @@
     const DEFAULT_RATES = {
       groq:     { inUsd: 0.11, outUsd: 0.34 },   // llama-4-scout（Vision/レシート・画像抽出）
       groqChat: { inUsd: 0.59, outUsd: 0.79 },   // llama-3.3-70b-versatile（フードコートQ&A・ドームLLM）
-      openai:   { inUsd: 5.00, outUsd: 30.00 },  // gpt-5.5（フードコート最終統合）
+      openai:   { inUsd: 1.10, outUsd: 4.40 },   // o4-mini（フードコート最終統合）
       grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
       gemini:   { inUsd: 2.00, outUsd: 12.00 },
       claude:   { inUsd: 1.00, outUsd: 5.00 },
@@ -905,7 +906,7 @@
       { provider: 'groq', model: 'llama-3.3-70b-versatile', title: 'Groq Chat', className: 'groq-chat' },
       { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini', className: 'gemini' },
       { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
-      { provider: 'openai', model: 'gpt-5.5', title: 'OpenAI', className: 'openai' },
+      { provider: 'openai', model: 'o4-mini', title: 'OpenAI', className: 'openai' },
       { provider: 'grok', model: 'grok-3-mini', title: 'Grok / xAI', className: 'grok' },
     ];
     function modelKey(provider, model) {
@@ -1035,7 +1036,8 @@
     const MODEL_LABELS = {
       'meta-llama/llama-4-scout-17b-16e-instruct': 'レシート/画像抽出（Vision）',
       'llama-3.3-70b-versatile': 'フードコートQ&A・分析サマリー・ドーム抽出',
-      'gpt-5.5': 'フードコート分析の最終統合',
+      'o4-mini': 'フードコート分析の最終統合',
+      'gpt-5.5': 'フードコート分析の最終統合（旧モデル）',
       'grok-3-mini': 'フードコート運営改善AI',
       'gemini-3.1-pro-preview': 'レシート解析・フードコート専門AI',
       'claude-haiku-4-5': '経費レシート解析・反証AI',
