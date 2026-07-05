@@ -261,7 +261,7 @@ ${JSON.stringify(list, null, 2)}
 {"classifications":[{"place_id":"...","is_competitor":true,"confidence":"high","reason":"理由を1文で"}]}`
 
   try {
-    const model = String(Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'gemini-2.5-flash').trim()
+    const model = String(Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'gemini-3-flash-preview').trim()
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       {
