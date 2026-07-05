@@ -43,6 +43,12 @@
       --warn-soft: rgba(216, 150, 31, 0.2);
       --claude: #d2795b;
       --claude-soft: rgba(210, 121, 91, 0.18);
+      --openai: #18a67d;
+      --openai-soft: rgba(24, 166, 125, 0.18);
+      --grok: #9d7cff;
+      --grok-soft: rgba(157, 124, 255, 0.18);
+      --groq-chat: #39b7c8;
+      --groq-chat-soft: rgba(57, 183, 200, 0.18);
       --err: #e05656;
       --err-soft: rgba(224, 86, 86, 0.18);
       --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 12px 32px -20px rgba(0, 0, 0, 0.7);
@@ -68,6 +74,12 @@
       --warn-soft: rgba(199, 125, 18, 0.14);
       --claude: #bd5f3a;
       --claude-soft: rgba(189, 95, 58, 0.12);
+      --openai: #0f8f6b;
+      --openai-soft: rgba(15, 143, 107, 0.12);
+      --grok: #7457d9;
+      --grok-soft: rgba(116, 87, 217, 0.12);
+      --groq-chat: #168699;
+      --groq-chat-soft: rgba(22, 134, 153, 0.12);
       --err: #d23b3b;
       --err-soft: rgba(210, 59, 59, 0.12);
       --shadow: 0 1px 2px rgba(20, 40, 80, 0.06), 0 10px 28px -18px rgba(20, 40, 80, 0.2);
@@ -195,6 +207,7 @@
 
     /* ---------- 合計サマリー ---------- */
     .totalrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 22px; }
+    .totalrow.all-ai { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
     @media (max-width: 720px) { .totalrow { grid-template-columns: 1fr; } }
     .total-card {
       border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; background: var(--surface);
@@ -205,9 +218,15 @@
     }
     .total-card.gemini::before { background: var(--warn); }
     .total-card.claude::before { background: var(--claude); }
+    .total-card.openai::before { background: var(--openai); }
+    .total-card.grok::before { background: var(--grok); }
+    .total-card.groq-chat::before { background: var(--groq-chat); }
     .tc-prov { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
     .total-card.gemini .tc-prov { color: var(--warn); }
     .total-card.claude .tc-prov { color: var(--claude); }
+    .total-card.openai .tc-prov { color: var(--openai); }
+    .total-card.grok .tc-prov { color: var(--grok); }
+    .total-card.groq-chat .tc-prov { color: var(--groq-chat); }
     .tc-model { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
     .tc-jpy { font-size: 30px; font-weight: 800; color: var(--text); margin-top: 12px; font-variant-numeric: tabular-nums; }
     .tc-usd { font-size: 13px; color: var(--text-2); margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -223,6 +242,9 @@
     .kpi.accent .k-v { color: var(--accent); }
     .kpi.gemini.accent .k-v { color: var(--warn); }
     .kpi.claude.accent .k-v { color: var(--claude); }
+    .kpi.openai.accent .k-v { color: var(--openai); }
+    .kpi.grok.accent .k-v { color: var(--grok); }
+    .kpi.groq-chat.accent .k-v { color: var(--groq-chat); }
 
     /* ---------- 前提条件エディタ ---------- */
     details.assump { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
@@ -347,7 +369,7 @@
       <div class="ms-content">
         <div class="ms-inner">
           <h1 class="ms-h1">AI使用料（実測トークン）</h1>
-          <p class="ms-sub">レシート画像のAI解析でAPIが返した<strong>実測トークン数</strong>に、各社の<strong>公式単価</strong>を掛けて算出します。<strong>Groq</strong> はその他全店、<strong>Gemini</strong> はソバージュ・鮨こるりの2店舗、<strong>Claude(Haiku)</strong> はクラウディア2の売上解析と<strong>全店の経費（小口）解析</strong>の合計を表示します。</p>
+          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、各社の<strong>公式単価</strong>を掛けて算出します。上部には現在使っているAIモデル（Groq Vision / Groq Chat / Gemini / Claude / OpenAI / Grok）をすべて表示します。</p>
 
           <section class="card">
             <div class="card-h">
@@ -370,27 +392,8 @@
             <div id="statusLine" class="statusline">トークンを確認しています…</div>
           </section>
 
-          <!-- 合計サマリー（Groq / Gemini） -->
-          <div class="totalrow">
-            <div class="total-card" id="groqTotalCard">
-              <div class="tc-prov">Groq（その他全店 合計）</div>
-              <div class="tc-model mono" id="groqModel">—</div>
-              <div class="tc-jpy" id="groqJpy">¥—</div>
-              <div class="tc-usd" id="groqUsd">$—</div>
-            </div>
-            <div class="total-card gemini" id="geminiTotalCard">
-              <div class="tc-prov">Gemini（2店舗 合計）</div>
-              <div class="tc-model mono" id="geminiModel">—</div>
-              <div class="tc-jpy" id="geminiJpy">¥—</div>
-              <div class="tc-usd" id="geminiUsd">$—</div>
-            </div>
-            <div class="total-card claude" id="claudeTotalCard">
-              <div class="tc-prov">Claude（クラウディア2＋経費 合計）</div>
-              <div class="tc-model mono" id="claudeModel">—</div>
-              <div class="tc-jpy" id="claudeJpy">¥—</div>
-              <div class="tc-usd" id="claudeUsd">$—</div>
-            </div>
-          </div>
+          <!-- 合計サマリー（現在使っているAIモデルをすべて表示） -->
+          <div class="totalrow all-ai" id="allAiTotalRow"></div>
 
           <!-- Groq ブロック -->
           <section class="card">
@@ -552,6 +555,12 @@
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="openai_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Grok / xAI（フードコート運営改善・grok-3-mini）</span></div>
+              <div class="rate-grid">
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="grok_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="grok_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              </div>
+
               <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini（ソバージュ・鮨こるり）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="gemini_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -599,11 +608,13 @@
     // Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
     // Groq llama-4-scout（レシート/画像抽出）の目安は $0.11/$0.34。Claude Haiku 4.5 は $1/$5（公式）。
     // フードコートQ&A・ドーム抽出は Groq llama-3.3-70b（目安 $0.59/$0.79）で別単価。
+    // Grok / xAI は grok-3-mini の目安 $0.30/$0.50。モデル差し替え時は画面上で上書きする。
     // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
     const DEFAULT_RATES = {
       groq:     { inUsd: 0.11, outUsd: 0.34 },   // llama-4-scout（Vision/レシート・画像抽出）
       groqChat: { inUsd: 0.59, outUsd: 0.79 },   // llama-3.3-70b-versatile（フードコートQ&A・ドームLLM）
       openai:   { inUsd: 5.00, outUsd: 30.00 },  // gpt-5.5（フードコート最終統合）
+      grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
       gemini:   { inUsd: 2.00, outUsd: 12.00 },
       claude:   { inUsd: 1.00, outUsd: 5.00 },
       jpyPerUsd: 155,
@@ -613,6 +624,7 @@
       const m = String(model || '').toLowerCase();
       if (provider === 'groq') return (m.indexOf('scout') >= 0 || m.indexOf('vision') >= 0) ? 'groq' : 'groqChat';
       if (provider === 'openai') return 'openai';
+      if (provider === 'grok' || provider === 'xai') return 'grok';
       if (provider === 'gemini') return 'gemini';
       if (provider === 'claude') return 'claude';
       return 'groq';
@@ -656,7 +668,7 @@
         if (!raw) return cloneRates(DEFAULT_RATES);
         const parsed = JSON.parse(raw);
         const out = cloneRates(DEFAULT_RATES);
-        ['groq', 'groqChat', 'openai', 'gemini', 'claude'].forEach(function (p) {
+        ['groq', 'groqChat', 'openai', 'grok', 'gemini', 'claude'].forEach(function (p) {
           if (parsed && parsed[p]) {
             ['inUsd', 'outUsd'].forEach(function (k) {
               const v = Number(parsed[p][k]);
@@ -674,6 +686,7 @@
         groq: Object.assign({}, r.groq),
         groqChat: Object.assign({}, r.groqChat),
         openai: Object.assign({}, r.openai),
+        grok: Object.assign({}, r.grok),
         gemini: Object.assign({}, r.gemini),
         claude: Object.assign({}, r.claude),
         jpyPerUsd: r.jpyPerUsd,
@@ -690,6 +703,8 @@
       document.getElementById('groqChat_outUsd').value = r.groqChat.outUsd;
       document.getElementById('openai_inUsd').value = r.openai.inUsd;
       document.getElementById('openai_outUsd').value = r.openai.outUsd;
+      document.getElementById('grok_inUsd').value = r.grok.inUsd;
+      document.getElementById('grok_outUsd').value = r.grok.outUsd;
       document.getElementById('gemini_inUsd').value = r.gemini.inUsd;
       document.getElementById('gemini_outUsd').value = r.gemini.outUsd;
       document.getElementById('claude_inUsd').value = r.claude.inUsd;
@@ -714,6 +729,10 @@
         openai: {
           inUsd: num('openai_inUsd', d.openai.inUsd),
           outUsd: num('openai_outUsd', d.openai.outUsd),
+        },
+        grok: {
+          inUsd: num('grok_inUsd', d.grok.inUsd),
+          outUsd: num('grok_outUsd', d.grok.outUsd),
         },
         gemini: {
           inUsd: num('gemini_inUsd', d.gemini.inUsd),
@@ -836,12 +855,16 @@
       const perCall = b.event_count ? jpy / b.event_count : 0;
 
       // モデル名（総計カード＋前提条件ラベル）
-      document.getElementById(prefix + 'Model').textContent = modelText || '—';
-      document.getElementById(prefix + 'ModelLabel').textContent = modelText || '';
+      const modelEl = document.getElementById(prefix + 'Model');
+      const modelLabelEl = document.getElementById(prefix + 'ModelLabel');
+      if (modelEl) modelEl.textContent = modelText || '—';
+      if (modelLabelEl) modelLabelEl.textContent = modelText || '';
 
       // 総計カード
-      document.getElementById(prefix + 'Usd').textContent = fmtUsd(usd);
-      document.getElementById(prefix + 'Jpy').textContent = fmtJpy(jpy);
+      const usdEl = document.getElementById(prefix + 'Usd');
+      const jpyEl = document.getElementById(prefix + 'Jpy');
+      if (usdEl) usdEl.textContent = fmtUsd(usd);
+      if (jpyEl) jpyEl.textContent = fmtJpy(jpy);
 
       // KPI（実測）
       document.getElementById(prefix + 'StoreCount').textContent = fmtInt(b.store_count) + ' 店舗';
@@ -864,6 +887,7 @@
       const r = state.rates;
       const jpy = r.jpyPerUsd;
 
+      renderAllAiCards();
       renderProvider('groq', data.groq, r.groq, jpy, data.groq && data.groq.model);
       renderProvider('gemini', data.gemini, r.gemini, jpy, data.gemini && data.gemini.model);
       renderProvider('claude', data.claude, r.claude, jpy, data.claude && data.claude.model);
@@ -874,6 +898,101 @@
 
       renderModelBreakdown();
       renderFoodcourtCard();
+    }
+
+    const KNOWN_AI_MODELS = [
+      { provider: 'groq', model: 'meta-llama/llama-4-scout-17b-16e-instruct', title: 'Groq Vision', className: '' },
+      { provider: 'groq', model: 'llama-3.3-70b-versatile', title: 'Groq Chat', className: 'groq-chat' },
+      { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini', className: 'gemini' },
+      { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
+      { provider: 'openai', model: 'gpt-5.5', title: 'OpenAI', className: 'openai' },
+      { provider: 'grok', model: 'grok-3-mini', title: 'Grok / xAI', className: 'grok' },
+    ];
+    function modelKey(provider, model) {
+      const p = String(provider || '').toLowerCase();
+      return (p === 'xai' ? 'grok' : p) + '::' + String(model || '').toLowerCase();
+    }
+    function displayProvider(provider) {
+      const p = String(provider || '').toLowerCase();
+      if (p === 'grok' || p === 'xai') return 'Grok / xAI';
+      if (p === 'openai') return 'OpenAI';
+      if (p === 'gemini') return 'Gemini';
+      if (p === 'claude') return 'Claude';
+      if (p === 'groq') return 'Groq';
+      return provider || 'AI';
+    }
+    function cardClassForModel(provider, model) {
+      const rateKey = rateKeyForModel(provider, model);
+      if (rateKey === 'groqChat') return 'groq-chat';
+      if (rateKey === 'openai') return 'openai';
+      if (rateKey === 'grok') return 'grok';
+      if (rateKey === 'gemini') return 'gemini';
+      if (rateKey === 'claude') return 'claude';
+      return '';
+    }
+    function mergeKnownAndActualModels() {
+      const byKey = new Map();
+      KNOWN_AI_MODELS.forEach(function (known) {
+        byKey.set(modelKey(known.provider, known.model), Object.assign({
+          event_count: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          thinking_tokens: 0,
+          total_tokens: 0,
+          known: true,
+        }, known));
+      });
+      const actual = (state.data && Array.isArray(state.data.models)) ? state.data.models : [];
+      actual.forEach(function (m) {
+        const key = modelKey(m.provider, m.model);
+        const base = byKey.get(key) || {
+          provider: m.provider,
+          model: m.model,
+          title: displayProvider(m.provider),
+          className: cardClassForModel(m.provider, m.model),
+          known: false,
+        };
+        byKey.set(key, Object.assign({}, base, {
+          provider: m.provider || base.provider,
+          model: m.model || base.model,
+          event_count: Number(m.event_count || 0),
+          input_tokens: Number(m.input_tokens || 0),
+          output_tokens: Number(m.output_tokens || 0),
+          thinking_tokens: Number(m.thinking_tokens || 0),
+          total_tokens: Number(m.total_tokens || 0),
+        }));
+      });
+      return Array.from(byKey.values()).sort(function (a, b) {
+        const costDiff = modelUsd(b) - modelUsd(a);
+        if (Math.abs(costDiff) > 0.000001) return costDiff;
+        return String(a.title || a.model).localeCompare(String(b.title || b.model), 'ja');
+      });
+    }
+    function renderAllAiCards() {
+      const el = document.getElementById('allAiTotalRow');
+      if (!el) return;
+      const models = mergeKnownAndActualModels();
+      const jpyPerUsd = state.rates.jpyPerUsd;
+      if (!models.length) {
+        el.innerHTML = '<div class="statusline">AI使用記録がまだありません。</div>';
+        return;
+      }
+      el.innerHTML = models.map(function (m) {
+        const usd = modelUsd(m);
+        const jpy = usd * jpyPerUsd;
+        const title = m.title || displayProvider(m.provider);
+        const cls = m.className || cardClassForModel(m.provider, m.model);
+        const usage = MODEL_LABELS[m.model] || '';
+        const outTok = Number(m.output_tokens || 0) + Number(m.thinking_tokens || 0);
+        return '<div class="total-card ' + escapeHtml(cls) + '">' +
+          '<div class="tc-prov">' + escapeHtml(title) + '</div>' +
+          '<div class="tc-model mono">' + escapeHtml(m.model || '—') + '</div>' +
+          (usage ? '<div class="tc-model">' + escapeHtml(usage) + '</div>' : '') +
+          '<div class="tc-jpy">' + fmtJpy(jpy) + '</div>' +
+          '<div class="tc-usd">' + fmtUsd(usd) + ' / ' + fmtInt(m.event_count) + '件</div>' +
+          '<div class="tc-model">入力 ' + fmtInt(m.input_tokens) + ' / 出力 ' + fmtInt(outTok) + ' Tok</div>' +
+          '</div>';
+      }).join('');
     }
 
     // MARUGO S のフードコート分析(Q&A・テナント表画像抽出・ドーム抽出)だけのAI使用量を別表示。
@@ -915,10 +1034,11 @@
     // モデル別の正確な内訳（実測トークン × モデル別単価）。groqのscout/70bなど同一プロバイダ複数モデルを分けて表示。
     const MODEL_LABELS = {
       'meta-llama/llama-4-scout-17b-16e-instruct': 'レシート/画像抽出（Vision）',
-      'llama-3.3-70b-versatile': 'フードコートQ&A・分析サマリー（単日/期間）・ドーム抽出',
+      'llama-3.3-70b-versatile': 'フードコートQ&A・分析サマリー・ドーム抽出',
       'gpt-5.5': 'フードコート分析の最終統合',
-      'gemini-3.1-pro-preview': 'レシート解析（Gemini）',
-      'claude-haiku-4-5': '経費レシート解析',
+      'grok-3-mini': 'フードコート運営改善AI',
+      'gemini-3.1-pro-preview': 'レシート解析・フードコート専門AI',
+      'claude-haiku-4-5': '経費レシート解析・反証AI',
     };
     function renderModelBreakdown() {
       const el = document.getElementById('modelBrkBody');

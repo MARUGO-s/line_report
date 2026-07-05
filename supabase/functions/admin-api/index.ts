@@ -1067,10 +1067,12 @@ Deno.serve(async (req, info) => {
     // 学習進化トラッキング: foodcourt_forecast_history の全行を返す（foodcourt-evolution.html 用）。
     if (req.method === "GET" && path === "/foodcourt/evolution-history") {
       const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "marugoS").trim()
+      const storeKeyNorm = storeKey.toLowerCase().replace(/[\s_\-]+/g, "")
+      const tenantName = storeKeyNorm === "marugos" ? "MARUGO S" : storeKey
       const { data, error } = await supabase
         .from("foodcourt_forecast_history")
         .select("log_date, model_version, history_days, backtest_days, mape_guests, mape_sales, mean_guests, created_at")
-        .eq("tenant_name", storeKey)
+        .eq("tenant_name", tenantName)
         .order("log_date", { ascending: true })
       if (error) return json({ error: error.message }, 500)
       return json({ rows: data ?? [] }, 200)
@@ -7927,6 +7929,7 @@ const AI_USAGE_CLAUDE_STORE_KEYS = new Set<string>(["claudia2"])
 const AI_USAGE_CLAUDE_MODEL = "claude-haiku-4-5"
 const AI_USAGE_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 const AI_USAGE_OPENAI_MODEL = "gpt-5.5"
+const AI_USAGE_GROK_MODEL = "grok-3-mini"
 
 type AiUsageStoreRow = {
   store_partition_key: string
@@ -7936,7 +7939,7 @@ type AiUsageStoreRow = {
 }
 
 type AiUsageProviderBucket = {
-  provider: "gemini" | "groq" | "claude" | "openai"
+  provider: "gemini" | "groq" | "claude" | "openai" | "grok"
   model: string
   store_count: number
   image_count: number
@@ -8018,6 +8021,19 @@ async function fetchAiUsageCostState(
     total_tokens: 0,
     stores: [],
   }
+  const grok: AiUsageProviderBucket = {
+    provider: "grok",
+    model: AI_USAGE_GROK_MODEL,
+    store_count: 0,
+    image_count: 0,
+    receipt_count: 0,
+    event_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    total_tokens: 0,
+    stores: [],
+  }
 
   for (const raw of rows) {
     const r = raw as Record<string, unknown>
@@ -8060,6 +8076,8 @@ async function fetchAiUsageCostState(
       ? claude
       : provider === "openai"
       ? openai
+      : provider === "grok" || provider === "xai"
+      ? grok
       : null
     if (!bucket) continue
     bucket.event_count += Number(r.event_count ?? 0) || 0
@@ -8117,6 +8135,7 @@ async function fetchAiUsageCostState(
     groq,
     claude,
     openai,
+    grok,
     models,
     foodcourt: { store: FOODCOURT_STORE_KEY, models: foodcourtModels },
     generated_at: new Date().toISOString(),

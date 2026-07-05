@@ -394,17 +394,65 @@ AI解説（`buildForecastFactorsContext`）はこれを読み、解釈ガイド�
 ### 7-3. 学習の進化トラッキング（`foodcourt_forecast_history`）
 
 2026-07-05追加。係数テーブル（`foodcourt_forecast_factors`）は最新1行を毎晩上書きするため、
-そのままでは「先月より賢くなったか」を後から証明できない。そこで毎晩の学習結果を追記保存する:
+そのままでは「先月より賢くなったか」を後から証明できない。そこで毎晩の学習結果を追記保存し、
+専用画面 `foodcourt-evolution.html` とAI分析文脈の両方で使う。
+
+**追加要素:**
+
+| 追加要素 | ファイル/テーブル | 役割 |
+|---|---|---|
+| 学習履歴テーブル | `foodcourt_forecast_history` | 毎晩の履歴日数・バックテスト日数・MAPE・平均客数を1日1行で保存 |
+| 学習cron追記処理 | `supabase/functions/foodcourt-forecast-cron/index.ts` | `forecast_predictions` と `foodcourt_forecast_factors` 保存後に、同日の学習結果を履歴へ upsert |
+| 管理API | `GET /foodcourt/evolution-history` | 履歴テーブルを日付昇順で返す |
+| 専用画面 | `foodcourt-evolution.html` | KPI、MAPE学習曲線、学習データ量バー、全履歴テーブルを表示 |
+| ナビ導線 | `foodcourt.html` | 「AI学習 進化」ページへのリンクを追加 |
+| AI分析への反映 | `foodcourt_compare.ts` | 履歴から7日以上離れた2点を比較し、改善/悪化の根拠をAI文脈へ渡す |
+
+**データフロー:**
+
+```text
+毎日 05:00 foodcourt-forecast-cron
+  ├─ foodcourt_daily_facts + foodcourt_daily_features を読む
+  ├─ fit() で曜日・イベント・天気係数を再学習
+  ├─ 拡張窓バックテストで MAPE を自己採点
+  ├─ forecast_predictions に予測を保存
+  ├─ foodcourt_forecast_factors に最新係数を上書き保存
+  └─ foodcourt_forecast_history に当日の学習結果を追記/上書き
+          ↓
+GET /foodcourt/evolution-history
+          ↓
+foodcourt-evolution.html
+  ├─ KPIカード
+  ├─ MAPE学習曲線
+  ├─ 学習データ量の推移
+  └─ 全履歴テーブル
+```
+
+`foodcourt_forecast_factors` は最新状態だけを持つテーブルなので、過去との比較には使えない。
+そのため「進化の軌跡」は `foodcourt_forecast_history` が正本になる。
 
 ```
 foodcourt_forecast_history（1日1行・追記型）
+  tenant_name     対象テナント（現状は MARUGO S）
   log_date        学習実行日
   history_days    その時点の学習データ日数
   backtest_days   バックテスト日数
-  mape_guests     客数誤差率（この推移が下がる＝賢くなっている証拠）
-  mape_sales      売上誤差率
+  mape_guests     客数誤差率（DB上は 0.49 = 49%）
+  mape_sales      売上誤差率（DB上は 0.49 = 49%）
   mean_guests     ベース客数
 ```
+
+MAPEは「平均絶対誤差率」。低いほど予測が当たりやすい。
+例: `0.30` は「平均30%程度ずれる」という意味。
+
+**専用画面で見るもの:**
+
+| 表示 | 意味 |
+|---|---|
+| KPIカード | 記録追跡日数、最新の学習データ日数、最新MAPE、平均客数、客数MAPEの傾き |
+| MAPE学習曲線 | 客数MAPEと売上MAPEの折れ線。理想はデータ蓄積に伴って下がること |
+| 学習データ量の推移 | `history_days` の増加。毎日取り込み続けるほど予測モデルが安定する |
+| 全履歴テーブル | 全記録を新しい順に表示し、前回記録とのMAPE差分を「改善/悪化/横ばい」で表示 |
 
 **AIへの自動フィードバック:**
 `buildForecastFactorsContext` が履歴から7日以上離れた2点を比較し、進化の証拠を全専門AIに渡す:
@@ -417,6 +465,23 @@ foodcourt_forecast_history（1日1行・追記型）
 - **改善時**: AIが「モデルは賢くなっている」と根拠付きで言える
 - **悪化時**: 「直近に予測しにくい日が続いた可能性。係数の断定は普段より控える」と自動で警告
 - これにより「進化する構造」がブラックボックスではなく、**検証可能な事実**になる
+
+**実装上の注意点:**
+
+- 画面は `store_key=marugoS` でAPIを呼ぶが、履歴テーブルは `tenant_name='MARUGO S'` で保存する。`GET /foodcourt/evolution-history` 側で `marugoS / marugos / MARUGO S` 系を `MARUGO S` へ正規化する。
+- DBのMAPEは比率形式（`0.49 = 49%`）。画面側で `abs(value) <= 1.5` の場合は `value * 100` として表示する。これをしないと `0.49%` と誤表示される。
+- 現状は MARUGO S 専用。複数テナントを切り替えるUIはまだない。
+- 「AIが勝手に学習している」のではなく、統計モデルが毎晩再計算され、その結果をAI分析に渡している。
+- MAPEは万能ではない。イベントの特殊日やデータ数が少ない条件では、短期的に悪化する。
+- `history_days` が増えても、似た条件のデータが増えない限り、特定イベントの予測精度は上がりにくい。
+
+**画面確認:**
+
+```text
+https://marugo-s.github.io/line_report/foodcourt-evolution.html
+```
+
+接続には管理トークン、または有効な店舗ログインセッションが必要。
 
 ---
 
