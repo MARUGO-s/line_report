@@ -9,7 +9,7 @@ import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v10'
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v11'
 
 function buildFoodCourtPageUrl(storeKey: string, loginToken?: string | null): string {
   const key = String(storeKey || '').trim()
@@ -544,7 +544,7 @@ function resolveFoodCourtClaudeModel(): string {
 }
 
 function resolveFoodCourtOpenAiModel(): string {
-  return String(Deno.env.get('FOODCOURT_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || '').trim() || 'gpt-5.5'
+  return String(Deno.env.get('FOODCOURT_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || '').trim() || 'o4-mini'
 }
 
 function extractGeminiText(json: unknown): string {
@@ -592,7 +592,8 @@ async function geminiChat(
       body: JSON.stringify({
         ...(system ? { system_instruction: { parts: [{ text: system }] } } : {}),
         contents,
-        generationConfig: { temperature: 0.2, maxOutputTokens: maxTokens },
+        // 思考(thinking)対応モデルは thinking トークンも maxOutputTokens を消費するため余裕(+4096)を足す
+        generationConfig: { temperature: 0.2, maxOutputTokens: maxTokens + 4096 },
       }),
     })
     if (!res.ok) {
@@ -662,12 +663,16 @@ async function openaiChat(
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   if (!apiKey) return { content: null, usage: null }
   try {
-    // o-series models (o1, o3, o4-mini, etc.) require max_completion_tokens and developer role instead of system
-    const isOSeries = /^o\d/.test(model)
-    const normalizedMessages = isOSeries
+    // 推論系モデル（o1/o3/o4-mini, gpt-5系）は max_tokens を拒否し max_completion_tokens を要求。
+    // さらに思考(reasoning)トークンも max_completion_tokens の枠を消費するため、
+    // 本文が空にならないよう思考分の余裕(+4000)を足し、reasoning_effort:'low' で思考を抑える。
+    const isReasoning = /^o\d/.test(model) || /^gpt-5/.test(model)
+    const normalizedMessages = isReasoning
       ? messages.map((m) => m.role === 'system' ? { ...m, role: 'developer' } : m)
       : messages
-    const tokenParam = isOSeries ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }
+    const tokenParam = isReasoning
+      ? { max_completion_tokens: maxTokens + 4000, reasoning_effort: 'low' }
+      : { max_tokens: maxTokens }
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
