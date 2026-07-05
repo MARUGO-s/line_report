@@ -934,9 +934,14 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
   }
   const hasAi = candidates.some((c) => c.ai_is_competitor !== null && c.ai_is_competitor !== undefined);
   const confScore = { high: 0, medium: 1, low: 2 };
+  // genre_match（自店と同系統か）を最優先の並び順にし、その中を従来通り is_competitor / confidence で並べる。
+  // ジャンルが違う店も除外はせず、優先度を下げて下の方に表示する。
+  const genreScore = (v) => (v === true ? 0 : (v === false ? 2 : 1));
   const sorted = candidates
     .map((c, i) => ({ c, i }))
     .sort((a, b) => {
+      const gDiff = genreScore(a.c.ai_genre_match) - genreScore(b.c.ai_genre_match);
+      if (gDiff !== 0) return gDiff;
       const av = a.c.ai_is_competitor, bv = b.c.ai_is_competitor;
       if (av === true && bv !== true) return -1;
       if (av !== true && bv === true) return 1;
@@ -961,6 +966,9 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
     const aiBadge = hasAi && c.ai_is_competitor !== null
       ? `<span class="nc-ai-badge ${escapeHtml(aiConf)}">${aiComp ? 'AI:競合' : 'AI:除外'}</span>`
       : '';
+    const genreBadge = c.ai_genre_match === true
+      ? `<span class="nc-ai-badge high">同ジャンル</span>`
+      : '';
     const aiReason = hasAi && c.ai_reason
       ? `<div class="nc-ai-reason">${escapeHtml(c.ai_reason)}</div>`
       : '';
@@ -970,7 +978,7 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
     return `<label class="nearby-candidate" style="cursor:${alreadyRegistered ? 'default' : 'pointer'}">
       <input type="checkbox" data-nearby-idx="${i}" ${alreadyRegistered ? 'disabled checked' : (autoChecked ? 'checked' : '')} style="width:16px;height:16px;flex-shrink:0">
       <div>
-        <div class="nc-name">${escapeHtml(c.name || '不明')}${registeredBadge ? '&nbsp;' + registeredBadge : ''}${aiBadge}</div>
+        <div class="nc-name">${escapeHtml(c.name || '不明')}${registeredBadge ? '&nbsp;' + registeredBadge : ''}${genreBadge}${aiBadge}</div>
         <div class="nc-meta">${rating}${total ? '　' + total : ''}</div>
         ${addr}${aiReason}${websiteLink}
       </div>
@@ -994,7 +1002,10 @@ async function openNearbySearch() {
   if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
   if (dom.nearbyStatus) dom.nearbyStatus.textContent = '';
   try {
-    const result = await apiFetch('/receipts/competitors/nearby-search', { method: 'POST', body: { store_key: sk, radius, ...coords } });
+    const result = await apiFetch('/receipts/competitors/nearby-search', {
+      method: 'POST',
+      body: { store_key: sk, store_name: currentStoreName(), address: STORE_ADDRESS[sk] || '', radius, ...coords },
+    });
     _nearbyCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
     const ctx = await apiFetch(`/receipts/competitors?store_key=${encodeURIComponent(sk)}`);
     const registered = new Set(

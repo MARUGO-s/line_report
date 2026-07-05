@@ -262,6 +262,7 @@ type NearbyCandidate = {
   ai_is_competitor: boolean | null
   ai_confidence: 'high' | 'medium' | 'low' | null
   ai_reason: string | null
+  ai_genre_match: boolean | null
 }
 
 function extractFirstBalanced(text: string, open: string, close: string): string | null {
@@ -302,6 +303,8 @@ function extractClassifications(text: string): { classifications: unknown[] } | 
 
 async function classifyNearbyWithAI(
   candidates: NearbyCandidate[],
+  storeName: string,
+  storeAddress: string,
 ): Promise<{ candidates: NearbyCandidate[]; debug: unknown }> {
   if (!candidates.length) return { candidates, debug: { skipped: 'no candidates' } }
 
@@ -316,29 +319,32 @@ async function classifyNearbyWithAI(
     review_count: c.user_ratings_total,
   }))
 
-  const prompt = `あなたは東京ドームシティ フードスタジアム内の飲食店「MARUGO S」（クラフトビール・串カツ・ビアホール系カジュアルダイニング、客単価2,500〜4,000円）の売上競合分析AIです。
+  const selfLabel = [storeName, storeAddress].filter(Boolean).join(' / ') || storeName
 
-以下の周辺店舗リストを見て、MARUGO Sへの売上影響を分析してください。
+  const prompt = `あなたは飲食店「${selfLabel}」の売上競合分析AIです。まず店名・住所から「${storeName}」の業態（料理ジャンル・提供形態・想定価格帯・飲み中心か食事中心か）を合理的に推定し、その推定業態を基準に以下の周辺店舗リストを分析してください。
 
-判断基準：
-- フードコート内・同ビル内の飲食店 → 強力な競合（高confidence）
-- アルコール提供の飲食店・ビアホール系 → 直接競合
-- ファストフード・カジュアル飲食 → 軽度競合
-- コンビニ・小売・非飲食 → 競合外（false）
-- 店名に「MARUGO」を含む → 自店のため除外（false）
+各店舗について次の3項目を判定すること：
+1. is_competitor（true/false）: 客数・売上・滞在時間を奪い合う競合とみなせるか
+   - 同ビル・同フロア・同フードコート内の飲食店 → 強い競合（high）
+   - 近接する飲食店全般（ジャンルが違っても来店動機や時間帯が重なるなら）→ 中〜軽度の競合
+   - コンビニ・小売・銀行・非飲食施設 → 競合外（false）
+   - 店名に「${storeName}」と同一・類似ブランドを含む → 自店のため除外（false）
+2. confidence（high/medium/low）: is_competitor=true の場合の確信度
+3. genre_match（true/false）: その店の料理ジャンル・業態が「${storeName}」の推定業態と同系統（似た客層・似た利用シーン）とみなせるか
+   - 例：「${storeName}」が寿司店と推定される場合、他の寿司店・和食店・割烹は true。焼肉店やラーメン店、カフェは false（競合ではあっても系統は別）
+   - 例：「${storeName}」が居酒屋・バル系と推定される場合、他の居酒屋・バル・ビアホールは true。ファミレスやファストフードは false
 
 reasonの書き方（重要）：
 - 「〇〇だから競合」という薄い説明は禁止
 - 「どの客層を奪うか」「どんな場面で選ばれるか」「価格帯・業態の重なり」を具体的に1文で
-- 例：「ドーム観戦後の打ち上げ需要を直撃、アルコール単価が近くビール好き客層が完全に重複する」
-- 例：「ランチ〜ディナー通しで営業し、ファミリー層のカジュアル外食需要を広く吸収するため夜間の集客に影響」
-- 例：「同フードコート内で視認性が高く、串揚げ・軽食系メニューで飲み需要の一部を代替される」
+- 例：「同じ和食・日本酒需要を持つ客層と競合し、接待利用の候補として直接比較される」
+- 例：「カジュアルな飲み需要を広く吸収するため、アルコール中心の来店動機を奪い合う」
 
 店舗リスト:
 ${JSON.stringify(list, null, 2)}
 
 以下のJSON形式のみで回答してください（説明文不要）。idxは店舗リストのidxをそのまま返すこと:
-{"classifications":[{"idx":0,"is_competitor":true,"confidence":"high","reason":"具体的な競合理由を1文で"}]}`
+{"classifications":[{"idx":0,"is_competitor":true,"confidence":"high","genre_match":true,"reason":"具体的な競合理由を1文で"}]}`
 
   try {
     const model = String(Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'llama-3.3-70b-versatile').trim()
@@ -362,7 +368,7 @@ ${JSON.stringify(list, null, 2)}
       return { candidates, debug: { http_status: res.status, raw_text: rawText.slice(0, 500), error: 'no valid json' } }
     }
 
-    const classMap = new Map<number, { is_competitor: boolean; confidence: string; reason: string }>()
+    const classMap = new Map<number, { is_competitor: boolean; confidence: string; reason: string; genre_match: boolean | null }>()
     for (const c of parsed.classifications) {
       if (isRecord(c) && (typeof c.idx === 'number' || typeof c.idx === 'string')) {
         const idx = Number(c.idx)
@@ -371,6 +377,7 @@ ${JSON.stringify(list, null, 2)}
             is_competitor: Boolean(c.is_competitor),
             confidence: typeof c.confidence === 'string' ? c.confidence : 'medium',
             reason: typeof c.reason === 'string' ? c.reason : '',
+            genre_match: typeof c.genre_match === 'boolean' ? c.genre_match : null,
           })
         }
       }
@@ -388,6 +395,7 @@ ${JSON.stringify(list, null, 2)}
             ? cls.confidence
             : 'medium',
           ai_reason: cls.reason || null,
+          ai_genre_match: cls.genre_match,
         }
       }),
     }
@@ -401,12 +409,14 @@ export async function nearbySearchGooglePlaces(
 ): Promise<{ candidates: NearbyCandidate[]; _debug?: unknown }> {
   const apiKey = getGooglePlacesApiKey()
 
-  // フードスタジアム東京（東京ドームシティ）をデフォルト座標とする
+  // フードスタジアム東京（東京ドームシティ）をデフォルト座標とする（呼び出し元が座標未送信の場合のフォールバックのみ）
   const lat = Number.isFinite(Number(body.lat)) ? Number(body.lat) : 35.70499
   const lng = Number.isFinite(Number(body.lng)) ? Number(body.lng) : 139.75188
   const radius = Number.isFinite(Number(body.radius)) && Number(body.radius) > 0
     ? Math.min(Number(body.radius), 2000)
     : 300
+  const storeName = shortText(body.store_name, 160) || shortText(body.store_key, 120) || '自店舗'
+  const storeAddress = shortText(body.address, 300) || ''
 
   const fieldMask = [
     'places.id',
@@ -462,11 +472,12 @@ export async function nearbySearchGooglePlaces(
         ai_is_competitor: null,
         ai_confidence: null,
         ai_reason: null,
+        ai_genre_match: null,
       } satisfies NearbyCandidate
     })
     .filter((c: NearbyCandidate | null): c is NearbyCandidate => c !== null)
 
-  const { candidates: classified, debug } = await classifyNearbyWithAI(candidates)
+  const { candidates: classified, debug } = await classifyNearbyWithAI(candidates, storeName, storeAddress)
   const websiteSample = placesRaw.slice(0, 3).map((p: unknown) => isRecord(p) ? {
     name: isRecord(p.displayName) && typeof p.displayName.text === 'string' ? p.displayName.text : null,
     websiteUri: p.websiteUri ?? '(none)',
@@ -493,6 +504,7 @@ function normalizeGooglePlaceCandidate(p: Record<string, unknown>): NearbyCandid
     ai_is_competitor: null,
     ai_confidence: null,
     ai_reason: null,
+    ai_genre_match: null,
   }
 }
 
