@@ -513,10 +513,18 @@ async function groqChat(
 }
 
 type FoodCourtChatMessage = { role: string; content: string }
-type FoodCourtChatProvider = 'groq' | 'gemini' | 'claude' | 'openai'
+type FoodCourtChatProvider = 'groq' | 'gemini' | 'claude' | 'openai' | 'grok'
 
 function resolveFoodCourtGeminiApiKey(): string {
   return String(Deno.env.get('GEMINI_API_KEY') || Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('VISION_API_KEY') || '').trim()
+}
+
+function resolveFoodCourtGrokApiKey(): string {
+  return String(Deno.env.get('XAI_API_KEY') || Deno.env.get('GROK_API_KEY') || '').trim()
+}
+
+function resolveFoodCourtGrokModel(): string {
+  return String(Deno.env.get('FOODCOURT_GROK_MODEL') || '').trim() || 'grok-3-mini'
 }
 
 function resolveFoodCourtClaudeApiKey(): string {
@@ -692,6 +700,50 @@ async function openaiChat(
   }
 }
 
+async function grokChat(
+  messages: FoodCourtChatMessage[],
+  apiKey: string,
+  model: string,
+  maxTokens = 1200,
+): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
+  if (!apiKey) return { content: null, usage: null }
+  try {
+    const res = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.3,
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      console.error('grokChat http error:', model, res.status, err.slice(0, 300))
+      return { content: null, usage: null }
+    }
+    const json = await res.json().catch(() => null) as {
+      choices?: Array<{ message?: { content?: string } }>
+      usage?: { prompt_tokens?: number; completion_tokens?: number }
+    } | null
+    const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
+    const usage = json?.usage ? {
+      provider: 'grok' as const,
+      model,
+      inputTokens: json.usage.prompt_tokens ?? 0,
+      outputTokens: json.usage.completion_tokens ?? 0,
+    } : null
+    return { content: content || null, usage }
+  } catch (e) {
+    console.error('grokChat failed:', e instanceof Error ? e.message : String(e))
+    return { content: null, usage: null }
+  }
+}
+
 async function foodCourtAiChat(
   messages: FoodCourtChatMessage[],
   groqApiKey: string,
@@ -716,6 +768,11 @@ async function foodCourtAiChat(
     }
     if (provider === 'claude') {
       const res = await claudeChat(messages, resolveFoodCourtClaudeApiKey(), resolveFoodCourtClaudeModel(), maxTokens)
+      if (res.content) return res
+      continue
+    }
+    if (provider === 'grok') {
+      const res = await grokChat(messages, resolveFoodCourtGrokApiKey(), resolveFoodCourtGrokModel(), maxTokens)
       if (res.content) return res
       continue
     }
@@ -1522,7 +1579,7 @@ export async function answerFoodCourtQuestion(
   const [quantRes, extRes, opsRes] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'groq', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
@@ -1669,7 +1726,7 @@ export async function generateFoodCourtDailySummary(
   const [quantRes, extRes, opsRes] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
@@ -1795,7 +1852,7 @@ export async function generateFoodCourtPeriodSummary(
   const [quantRes, extRes, opsRes] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
