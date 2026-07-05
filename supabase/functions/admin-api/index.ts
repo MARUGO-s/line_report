@@ -57,6 +57,12 @@ import {
   upsertReceiptSalesBudget as upsertStoreReceiptSalesBudget,
   updateStoreReceiptPhones,
 } from "../_shared/admin_receipt_sales.ts"
+import {
+  deactivateCompetitorPlace,
+  fetchCompetitorReviewContext,
+  refreshCompetitorReviews,
+  upsertCompetitorPlace,
+} from "../_shared/competitor_review_context.ts"
 import { isReceiptRoomAutoLinkEnabled } from "../_shared/auto_link_room.ts"
 import {
   authenticateAdminDashboardSessionToken,
@@ -669,6 +675,8 @@ Deno.serve(async (req, info) => {
       "/receipts/sales-manual-days/import",
       "/receipts/sales-manual-months",
       "/receipts/daily-receipts-import",
+      "/receipts/competitors",
+      "/receipts/competitors/refresh",
     ])
     if (!STORE_SCOPED_ALLOWED_PATHS.has(path)) {
       return json({ error: "この店舗用ログインからはこの操作はできません。" }, 403)
@@ -1230,6 +1238,39 @@ Deno.serve(async (req, info) => {
     if (req.method === "GET" && path === "/receipts/sales") {
       const receiptSalesState = await fetchStoreReceiptSalesState(supabase, url)
       return json(receiptSalesState, 200)
+    }
+
+    if (req.method === "GET" && path === "/receipts/competitors") {
+      const storeKey = String(url.searchParams.get("store_key") ?? "").trim()
+      const result = await fetchCompetitorReviewContext(supabase, storeKey)
+      return json(result, 200)
+    }
+
+    if (req.method === "PUT" && path === "/receipts/competitors") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await upsertCompetitorPlace(supabase, body)
+      return json(result, 200)
+    }
+
+    if (req.method === "DELETE" && path === "/receipts/competitors") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await deactivateCompetitorPlace(supabase, body)
+      return json(result, 200)
+    }
+
+    if (req.method === "POST" && path === "/receipts/competitors/refresh") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await refreshCompetitorReviews(supabase, body)
+      return json(result, 200)
     }
 
     if (req.method === "PUT" && path === "/receipts/sales-budget") {

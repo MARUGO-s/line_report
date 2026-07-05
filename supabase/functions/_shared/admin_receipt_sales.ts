@@ -22,6 +22,7 @@ import { sanitizeReceiptCountFromDb } from './receipt_parse.ts'
 import { queryStoreReceiptRows, loadStoreRegistry } from './store_receipt_query.ts'
 import { autoLinkDetectedRoomsForStore } from './auto_link_room.ts'
 import { parseReceiptPhonesInput } from './store_receipt_phones.ts'
+import { fetchCompetitorReviewContext } from './competitor_review_context.ts'
 import {
   buildJstDateKeysForMonth,
   buildJstMonthRange,
@@ -788,6 +789,12 @@ export async function fetchReceiptSalesState(
       },
       manualThisMonth,
     )
+  const competitor_review_context = selectedStoreKey
+    ? await fetchCompetitorReviewContext(supabase, storeKeyForManual).catch((e) => {
+      console.error('fetchCompetitorReviewContext failed:', e)
+      return null
+    })
+    : null
 
   return {
     month,
@@ -827,6 +834,7 @@ export async function fetchReceiptSalesState(
     store_options: storeOptions,
     totals,
     series,
+    competitor_review_context,
     available_store_count: storeOptions.length,
     source_row_count: rows.length,
     generated_at: new Date().toISOString(),

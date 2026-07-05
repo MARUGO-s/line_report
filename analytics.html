@@ -246,6 +246,40 @@
     .kpi-badge.down { color: var(--bad); background: rgba(255,124,159,0.12); }
     .kpi-badge.flat { color: var(--sub); }
 
+    /* competitor reviews */
+    .competitor-panel { display: grid; gap: 12px; }
+    .competitor-summary { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 10px; }
+    .competitor-metric {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 12px;
+      background: rgba(8,21,35,0.35);
+    }
+    .competitor-metric .lb { color: var(--sub); font-size: 0.74rem; margin-bottom: 5px; }
+    .competitor-metric .vl { font-family: "Barlow Condensed", sans-serif; font-size: 1.35rem; font-weight: 700; color: var(--accent); }
+    .competitor-list { display: grid; gap: 10px; }
+    .competitor-row {
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(8,21,35,0.28);
+    }
+    .competitor-name { font-weight: 800; color: var(--txt); }
+    .competitor-meta { color: var(--sub); font-size: 0.78rem; margin-top: 4px; line-height: 1.55; }
+    .competitor-excerpt { color: var(--sub); font-size: 0.82rem; margin-top: 7px; line-height: 1.55; }
+    .competitor-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .competitor-actions .btn { padding: 6px 10px; font-size: 0.78rem; }
+    .competitor-form { display: grid; grid-template-columns: minmax(9rem,1.2fr) minmax(12rem,2fr) auto; gap: 8px; align-items: center; }
+    .pressure-high { color: var(--bad); }
+    .pressure-medium { color: var(--warn); }
+    .pressure-low, .pressure-none { color: var(--ok); }
+    body[data-theme='light'] .competitor-metric,
+    body[data-theme='light'] .competitor-row { background: rgba(230,243,253,0.55); }
+
     /* Chart layout */
     .charts-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
     .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -610,6 +644,9 @@
       .kpi-card { padding: 10px 10px; }
       .kpi-value { font-size: 1.3rem; }
       .kpi-label { font-size: 0.72rem; }
+      .competitor-form { grid-template-columns: 1fr; }
+      .competitor-row { grid-template-columns: 1fr; }
+      .competitor-actions { justify-content: flex-start; }
 
       /* charts */
       .chart-card { padding: 12px; }
@@ -741,6 +778,29 @@
       <div class="kpi-card"><div class="kpi-label">予算達成率</div><div class="kpi-value" id="kpiBudgetAchieve">-</div><div class="kpi-sub" id="kpiBudgetDiff"></div></div>
       <div class="kpi-card"><div class="kpi-label">日次予算差（累計）</div><div class="kpi-value" id="kpiReceiptDailyDiff">-</div></div>
       <div class="kpi-card"><div class="kpi-label">前年同月対比</div><div class="kpi-value" id="kpiYoyPct">-</div></div>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="competitorReviewHeading">
+    <h2 class="card-title" id="competitorReviewHeading">周辺競合・口コミ</h2>
+    <div class="competitor-panel">
+      <div class="competitor-summary">
+        <div class="competitor-metric"><div class="lb">競合圧力</div><div class="vl" id="competitorPressure">-</div></div>
+        <div class="competitor-metric"><div class="lb">評価平均</div><div class="vl" id="competitorAvgRating">-</div></div>
+        <div class="competitor-metric"><div class="lb">口コミ件数</div><div class="vl" id="competitorTotalRatings">-</div></div>
+        <div class="competitor-metric"><div class="lb">登録競合</div><div class="vl" id="competitorCount">-</div></div>
+      </div>
+      <div id="competitorSummaryText" class="meta">店舗を選択すると、登録済みの周辺競合評価を表示します。</div>
+      <div class="competitor-form">
+        <input id="competitorNameInput" class="input" type="text" placeholder="競合店名（例: 近隣イタリアン）">
+        <input id="competitorPlaceIdInput" class="input" type="text" placeholder="Google Place ID（口コミ取得に必要）">
+        <button id="competitorAddBtn" class="btn primary" type="button">競合を追加</button>
+      </div>
+      <div class="controls" style="gap:8px;margin-top:0">
+        <button id="competitorRefreshBtn" class="btn" type="button">口コミ情報を更新</button>
+        <span id="competitorStatus" class="meta" style="margin-top:0">Google Places APIキー未設定の場合、更新だけ失敗します。</span>
+      </div>
+      <div id="competitorList" class="competitor-list"></div>
     </div>
   </section>
 
@@ -1361,6 +1421,17 @@ const dom = {
   kpiBudgetAchieve: $('kpiBudgetAchieve'), kpiBudgetDiff: $('kpiBudgetDiff'),
   kpiReceiptDailyDiff: $('kpiReceiptDailyDiff'),
   kpiYoyPct: $('kpiYoyPct'),
+  competitorPressure: $('competitorPressure'),
+  competitorAvgRating: $('competitorAvgRating'),
+  competitorTotalRatings: $('competitorTotalRatings'),
+  competitorCount: $('competitorCount'),
+  competitorSummaryText: $('competitorSummaryText'),
+  competitorNameInput: $('competitorNameInput'),
+  competitorPlaceIdInput: $('competitorPlaceIdInput'),
+  competitorAddBtn: $('competitorAddBtn'),
+  competitorRefreshBtn: $('competitorRefreshBtn'),
+  competitorStatus: $('competitorStatus'),
+  competitorList: $('competitorList'),
   openBudgetModalBtn: $('openBudgetModalBtn'), budgetRowHint: $('budgetRowHint'),
   openPriorYearModalBtn: $('openPriorYearModalBtn'), priorYearRowHint: $('priorYearRowHint'),
   receiptSheetsPilotLink: $('receiptSheetsPilotLink'),
@@ -2157,6 +2228,122 @@ function yen(v) {
   return '¥' + Number(v).toLocaleString('ja-JP');
 }
 function num(v) { return v == null ? '-' : Number(v).toLocaleString('ja-JP'); }
+
+function pressureLabel(level) {
+  const key = String(level || 'none');
+  if (key === 'high') return '高い';
+  if (key === 'medium') return '中程度';
+  if (key === 'low') return '低め';
+  return '未登録';
+}
+
+function formatRating(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2).replace(/\.00$/, '') : '-';
+}
+
+function renderCompetitorContext(ctx) {
+  if (!dom.competitorList) return;
+  const data = ctx && typeof ctx === 'object' ? ctx : null;
+  const pressure = String(data?.pressure_level || 'none');
+  if (dom.competitorPressure) {
+    dom.competitorPressure.textContent = pressureLabel(pressure);
+    dom.competitorPressure.className = 'vl pressure-' + pressure;
+  }
+  if (dom.competitorAvgRating) dom.competitorAvgRating.textContent = data?.avg_rating != null ? formatRating(data.avg_rating) : '-';
+  if (dom.competitorTotalRatings) dom.competitorTotalRatings.textContent = data?.total_ratings != null ? num(data.total_ratings) : '-';
+  if (dom.competitorCount) dom.competitorCount.textContent = data?.competitor_count != null ? num(data.competitor_count) : '-';
+  if (dom.competitorSummaryText) dom.competitorSummaryText.textContent = data?.summary || '競合店を登録すると、Google Places の評価・口コミ件数を売上分析の補助指標として表示します。';
+
+  const competitors = Array.isArray(data?.competitors) ? data.competitors : [];
+  if (!competitors.length) {
+    dom.competitorList.innerHTML = '<div class="meta">競合店はまだ登録されていません。Google Place ID を登録してください。</div>';
+    return;
+  }
+  dom.competitorList.innerHTML = competitors.map((c) => {
+    const latest = c.latest_snapshot || {};
+    const rating = latest.rating != null ? `評価 ${escapeHtml(formatRating(latest.rating))}` : '評価 未取得';
+    const total = latest.user_ratings_total != null ? `口コミ ${escapeHtml(num(latest.user_ratings_total))}件` : '口コミ 未取得';
+    const updated = latest.updated_at ? `更新 ${escapeHtml(new Date(latest.updated_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }))}` : '未更新';
+    const maps = c.google_maps_uri ? ` · <a href="${escapeHtml(c.google_maps_uri)}" target="_blank" rel="noopener noreferrer">Google Maps</a>` : '';
+    const place = c.place_id ? `Place ID: ${escapeHtml(String(c.place_id).slice(0, 18))}…` : 'Place ID 未設定';
+    const excerpt = latest.review_excerpt ? `<div class="competitor-excerpt">${escapeHtml(latest.review_excerpt)}</div>` : '';
+    return `
+      <div class="competitor-row" data-competitor-id="${escapeHtml(c.id)}">
+        <div>
+          <div class="competitor-name">${escapeHtml(c.competitor_name || '未設定')}</div>
+          <div class="competitor-meta">${rating} / ${total} / ${updated}${maps}<br>${escapeHtml(c.address || place)}</div>
+          ${excerpt}
+        </div>
+        <div class="competitor-actions">
+          <button class="btn" type="button" data-competitor-refresh="${escapeHtml(c.id)}">更新</button>
+          <button class="btn" type="button" data-competitor-delete="${escapeHtml(c.id)}">削除</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function reloadCompetitorContext() {
+  const sk = state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  if (!sk) {
+    renderCompetitorContext(null);
+    return;
+  }
+  const ctx = await apiFetch(`/receipts/competitors?store_key=${encodeURIComponent(sk)}`);
+  renderCompetitorContext(ctx);
+}
+
+async function addCompetitorFromForm() {
+  const sk = state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  if (!sk) throw new Error('店舗を選択してください。');
+  const name = String(dom.competitorNameInput?.value || '').trim();
+  const placeId = String(dom.competitorPlaceIdInput?.value || '').trim();
+  if (!name && !placeId) throw new Error('競合店名またはGoogle Place IDを入力してください。');
+  if (dom.competitorStatus) dom.competitorStatus.textContent = '競合店を登録中…';
+  const ctx = await apiFetch('/receipts/competitors', {
+    method: 'PUT',
+    body: { store_key: sk, competitor_name: name, place_id: placeId },
+  });
+  renderCompetitorContext(ctx);
+  if (dom.competitorNameInput) dom.competitorNameInput.value = '';
+  if (dom.competitorPlaceIdInput) dom.competitorPlaceIdInput.value = '';
+  if (placeId) {
+    try {
+      const refreshed = await apiFetch('/receipts/competitors/refresh', { method: 'POST', body: { store_key: sk } });
+      renderCompetitorContext(refreshed.context || ctx);
+      if (dom.competitorStatus) dom.competitorStatus.textContent = `登録・更新しました（${refreshed.refreshed || 0}件）。`;
+    } catch (e) {
+      if (dom.competitorStatus) dom.competitorStatus.textContent = '登録しました。口コミ更新は失敗: ' + e.message;
+    }
+  } else if (dom.competitorStatus) {
+    dom.competitorStatus.textContent = '登録しました。口コミ取得にはGoogle Place IDが必要です。';
+  }
+}
+
+async function refreshCompetitors(id) {
+  const sk = state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (dom.competitorStatus) dom.competitorStatus.textContent = 'Google Places から更新中…';
+  const body = { store_key: sk };
+  if (id) body.id = Number(id);
+  const result = await apiFetch('/receipts/competitors/refresh', { method: 'POST', body });
+  renderCompetitorContext(result.context);
+  const err = Array.isArray(result.errors) && result.errors.length ? ` / エラー ${result.errors.length}件` : '';
+  if (dom.competitorStatus) dom.competitorStatus.textContent = `更新しました（${result.refreshed || 0}件）${err}`;
+}
+
+async function deleteCompetitor(id) {
+  const sk = state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (!confirm('この競合店を売上分析から外しますか？')) return;
+  const ctx = await apiFetch('/receipts/competitors', {
+    method: 'DELETE',
+    body: { store_key: sk, id: Number(id) },
+  });
+  renderCompetitorContext(ctx);
+  if (dom.competitorStatus) dom.competitorStatus.textContent = '削除しました。';
+}
 
 function syncBudgetModalFromState() {
   if (dom.budgetModalTotal) {
@@ -3241,6 +3428,37 @@ document.getElementById('weekdayMetricTabs').addEventListener('click', (e) => {
 
 /* ── reload ── */
 dom.reloadBtn.addEventListener('click', loadAll);
+if (dom.competitorAddBtn) {
+  dom.competitorAddBtn.addEventListener('click', async () => {
+    try {
+      await addCompetitorFromForm();
+    } catch (e) {
+      if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.competitorRefreshBtn) {
+  dom.competitorRefreshBtn.addEventListener('click', async () => {
+    try {
+      await refreshCompetitors(null);
+    } catch (e) {
+      if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.competitorList) {
+  dom.competitorList.addEventListener('click', async (e) => {
+    const target = e.target;
+    const refreshBtn = target && target.closest ? target.closest('[data-competitor-refresh]') : null;
+    const deleteBtn = target && target.closest ? target.closest('[data-competitor-delete]') : null;
+    try {
+      if (refreshBtn) await refreshCompetitors(refreshBtn.getAttribute('data-competitor-refresh'));
+      if (deleteBtn) await deleteCompetitor(deleteBtn.getAttribute('data-competitor-delete'));
+    } catch (err) {
+      if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
+    }
+  });
+}
 
 /* ── store select ── */
 dom.storeSelect.addEventListener('change', () => {
@@ -3685,6 +3903,7 @@ async function loadAll() {
   if (!token) {
     dom.filterMeta.textContent = 'トークンを保存してください。';
     resetReceiptDailyDisconnected();
+    renderCompetitorContext(null);
     updateReceiptSheetsPilotUi();
     return;
   }
@@ -3697,6 +3916,7 @@ async function loadAll() {
     || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
   if (!state.storeKey) {
     clearAnalyticsAwaitingStore();
+    renderCompetitorContext(null);
     return;
   }
   updateReceiptSheetsPilotUi();
@@ -3841,6 +4061,7 @@ async function loadAll() {
     const manualMeta = salesData?.manual_month_has_entry ? ' / 月計手入力あり' : '';
     dom.filterMeta.textContent = `対象: ${salesData.selected_store_name ?? '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件 / API生データ ${salesData.source_row_count ?? 0}件${manualMeta}`;
     dom.lastRefresh.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
+    renderCompetitorContext(salesData?.competitor_review_context || null);
 
     renderAllCharts();
 
