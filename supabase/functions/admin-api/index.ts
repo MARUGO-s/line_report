@@ -59,10 +59,15 @@ import {
 } from "../_shared/admin_receipt_sales.ts"
 import {
   deactivateCompetitorPlace,
+  deactivateStoreReviewPlace,
   fetchCompetitorReviewContext,
+  fetchStoreReviewContext,
   nearbySearchGooglePlaces,
   refreshCompetitorReviews,
+  refreshStoreReview,
+  searchStoreReviewPlaces,
   upsertCompetitorPlace,
+  upsertStoreReviewPlace,
 } from "../_shared/competitor_review_context.ts"
 import { isReceiptRoomAutoLinkEnabled } from "../_shared/auto_link_room.ts"
 import {
@@ -679,6 +684,9 @@ Deno.serve(async (req, info) => {
       "/receipts/competitors",
       "/receipts/competitors/refresh",
       "/receipts/competitors/nearby-search",
+      "/receipts/store-reviews",
+      "/receipts/store-reviews/refresh",
+      "/receipts/store-reviews/search",
     ])
     if (!STORE_SCOPED_ALLOWED_PATHS.has(path)) {
       return json({ error: "この店舗用ログインからはこの操作はできません。" }, 403)
@@ -1245,6 +1253,48 @@ Deno.serve(async (req, info) => {
     if (req.method === "GET" && path === "/receipts/competitors") {
       const storeKey = String(url.searchParams.get("store_key") ?? "").trim()
       const result = await fetchCompetitorReviewContext(supabase, storeKey)
+      return json(result, 200)
+    }
+
+    if (req.method === "GET" && path === "/receipts/store-reviews") {
+      const storeKey = String(url.searchParams.get("store_key") ?? "").trim()
+      const result = await fetchStoreReviewContext(supabase, storeKey)
+      return json(result, 200)
+    }
+
+    if (req.method === "PUT" && path === "/receipts/store-reviews") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await upsertStoreReviewPlace(supabase, body)
+      return json(result, 200)
+    }
+
+    if (req.method === "DELETE" && path === "/receipts/store-reviews") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await deactivateStoreReviewPlace(supabase, body)
+      return json(result, 200)
+    }
+
+    if (req.method === "POST" && path === "/receipts/store-reviews/refresh") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await refreshStoreReview(supabase, body)
+      return json(result, 200)
+    }
+
+    if (req.method === "POST" && path === "/receipts/store-reviews/search") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await searchStoreReviewPlaces(body)
       return json(result, 200)
     }
 

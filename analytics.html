@@ -795,6 +795,42 @@
     </div>
   </section>
 
+  <section class="card" aria-labelledby="storeReviewHeading">
+    <h2 class="card-title" id="storeReviewHeading">自店舗口コミ</h2>
+    <div class="competitor-panel">
+      <div class="competitor-summary">
+        <div class="competitor-metric"><div class="lb">評価</div><div class="vl" id="storeReviewRating">-</div></div>
+        <div class="competitor-metric"><div class="lb">口コミ件数</div><div class="vl" id="storeReviewTotalRatings">-</div></div>
+        <div class="competitor-metric"><div class="lb">登録状態</div><div class="vl" id="storeReviewStatusMetric">未登録</div></div>
+        <div class="competitor-metric"><div class="lb">最終更新</div><div class="vl" id="storeReviewUpdatedAt">-</div></div>
+      </div>
+      <div id="storeReviewSummaryText" class="meta">店舗を選択すると、自店舗のGoogle口コミ評価を表示します。</div>
+      <div class="competitor-form">
+        <input id="storeReviewNameInput" class="input" type="text" placeholder="自店舗名（例: マルゴS）">
+        <input id="storeReviewPlaceIdInput" class="input" type="text" placeholder="Google Place ID（自店舗）">
+        <button id="storeReviewAddBtn" class="btn primary" type="button">自店舗を登録</button>
+      </div>
+      <div class="controls" style="gap:8px;margin-top:0">
+        <button id="storeReviewSearchBtn" class="btn" type="button">自店舗を検索</button>
+        <button id="storeReviewRefreshBtn" class="btn" type="button">自店舗口コミを更新</button>
+        <button id="storeReviewDeleteBtn" class="btn" type="button">登録解除</button>
+        <span id="storeReviewStatus" class="meta" style="margin-top:0">競合口コミとは別枠で管理します。</span>
+      </div>
+      <div id="storeReviewSearchPanel" class="nearby-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span id="storeReviewSearchTitle" style="font-weight:700;font-size:0.88rem">自店舗候補</span>
+          <button id="storeReviewSearchCloseBtn" class="btn" type="button" style="padding:4px 10px;font-size:0.78rem">閉じる</button>
+        </div>
+        <div id="storeReviewCandidates" class="nearby-candidates"><span class="meta">検索中…</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button id="storeReviewCandidateRegisterBtn" class="btn primary" type="button">選択した候補を自店舗に登録</button>
+          <span id="storeReviewSearchStatus" class="meta" style="margin-top:0"></span>
+        </div>
+      </div>
+      <div id="storeReviewList" class="competitor-list"></div>
+    </div>
+  </section>
+
   <section class="card" aria-labelledby="competitorReviewHeading">
     <h2 class="card-title" id="competitorReviewHeading">周辺競合・口コミ</h2>
     <div class="competitor-panel">
@@ -1455,6 +1491,25 @@ const dom = {
   kpiBudgetAchieve: $('kpiBudgetAchieve'), kpiBudgetDiff: $('kpiBudgetDiff'),
   kpiReceiptDailyDiff: $('kpiReceiptDailyDiff'),
   kpiYoyPct: $('kpiYoyPct'),
+  storeReviewRating: $('storeReviewRating'),
+  storeReviewTotalRatings: $('storeReviewTotalRatings'),
+  storeReviewStatusMetric: $('storeReviewStatusMetric'),
+  storeReviewUpdatedAt: $('storeReviewUpdatedAt'),
+  storeReviewSummaryText: $('storeReviewSummaryText'),
+  storeReviewNameInput: $('storeReviewNameInput'),
+  storeReviewPlaceIdInput: $('storeReviewPlaceIdInput'),
+  storeReviewAddBtn: $('storeReviewAddBtn'),
+  storeReviewSearchBtn: $('storeReviewSearchBtn'),
+  storeReviewRefreshBtn: $('storeReviewRefreshBtn'),
+  storeReviewDeleteBtn: $('storeReviewDeleteBtn'),
+  storeReviewStatus: $('storeReviewStatus'),
+  storeReviewSearchPanel: $('storeReviewSearchPanel'),
+  storeReviewSearchTitle: $('storeReviewSearchTitle'),
+  storeReviewSearchCloseBtn: $('storeReviewSearchCloseBtn'),
+  storeReviewCandidates: $('storeReviewCandidates'),
+  storeReviewCandidateRegisterBtn: $('storeReviewCandidateRegisterBtn'),
+  storeReviewSearchStatus: $('storeReviewSearchStatus'),
+  storeReviewList: $('storeReviewList'),
   competitorPressure: $('competitorPressure'),
   competitorAvgRating: $('competitorAvgRating'),
   competitorTotalRatings: $('competitorTotalRatings'),
@@ -2282,6 +2337,197 @@ function pressureLabel(level) {
 function formatRating(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n.toFixed(2).replace(/\.00$/, '') : '-';
+}
+
+function currentStoreKey() {
+  return state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+}
+
+function currentStoreName() {
+  const sk = currentStoreKey();
+  return (STORE_NAMES && STORE_NAMES[sk]) || sk || '';
+}
+
+function renderStoreReviewContext(ctx) {
+  if (!dom.storeReviewList) return;
+  const data = ctx && typeof ctx === 'object' ? ctx : null;
+  const place = data?.place || null;
+  const latest = data?.latest_snapshot || {};
+  if (dom.storeReviewRating) dom.storeReviewRating.textContent = data?.rating != null ? formatRating(data.rating) : '-';
+  if (dom.storeReviewTotalRatings) dom.storeReviewTotalRatings.textContent = data?.total_ratings != null ? num(data.total_ratings) : '-';
+  if (dom.storeReviewStatusMetric) dom.storeReviewStatusMetric.textContent = data?.registered ? '登録済み' : '未登録';
+  if (dom.storeReviewUpdatedAt) {
+    dom.storeReviewUpdatedAt.textContent = latest.updated_at
+      ? new Date(latest.updated_at).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })
+      : '-';
+  }
+  if (dom.storeReviewSummaryText) {
+    dom.storeReviewSummaryText.textContent = data?.summary || '自店舗のGoogle Place IDを登録すると、評価と口コミ件数を表示できます。';
+  }
+
+  if (!place) {
+    dom.storeReviewList.innerHTML = '<div class="meta">自店舗のGoogle Place IDは未登録です。「自店舗を検索」または手入力で登録してください。</div>';
+    if (dom.storeReviewNameInput) dom.storeReviewNameInput.value = currentStoreName();
+    return;
+  }
+
+  const rating = latest.rating != null ? `評価 ${escapeHtml(formatRating(latest.rating))}` : '評価 未取得';
+  const total = latest.user_ratings_total != null ? `口コミ ${escapeHtml(num(latest.user_ratings_total))}件` : '口コミ 未取得';
+  const updated = latest.updated_at ? `更新 ${escapeHtml(new Date(latest.updated_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }))}` : '未更新';
+  const maps = place.google_maps_uri ? ` · <a href="${escapeHtml(place.google_maps_uri)}" target="_blank" rel="noopener noreferrer">Google Maps</a>` : '';
+  const website = place.website_uri ? ` · <a href="${escapeHtml(place.website_uri)}" target="_blank" rel="noopener noreferrer">公式サイト</a>` : '';
+  const excerpt = latest.review_excerpt ? `<div class="competitor-excerpt">${escapeHtml(latest.review_excerpt)}</div>` : '';
+  dom.storeReviewList.innerHTML = `
+    <div class="competitor-row">
+      <div>
+        <div class="competitor-name">${escapeHtml(place.store_name || currentStoreName() || '自店舗')}</div>
+        <div class="competitor-meta">${rating} / ${total} / ${updated}${maps}${website}<br>${escapeHtml(place.address || '住所未取得')}</div>
+        ${excerpt}
+      </div>
+      <div class="competitor-actions">
+        <button class="btn" type="button" data-store-review-refresh="1">更新</button>
+        <button class="btn" type="button" data-store-review-delete="1">登録解除</button>
+      </div>
+    </div>
+  `;
+  if (dom.storeReviewNameInput) dom.storeReviewNameInput.value = place.store_name || currentStoreName();
+  if (dom.storeReviewPlaceIdInput) dom.storeReviewPlaceIdInput.value = place.place_id || '';
+}
+
+async function reloadStoreReviewContext() {
+  const sk = currentStoreKey();
+  if (!sk) {
+    renderStoreReviewContext(null);
+    return;
+  }
+  const ctx = await apiFetch(`/receipts/store-reviews?store_key=${encodeURIComponent(sk)}`);
+  renderStoreReviewContext(ctx);
+}
+
+async function addStoreReviewFromForm() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  const name = String(dom.storeReviewNameInput?.value || currentStoreName()).trim();
+  const placeId = String(dom.storeReviewPlaceIdInput?.value || '').trim();
+  if (!placeId) throw new Error('自店舗のGoogle Place IDを入力してください。');
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '自店舗を登録中…';
+  const ctx = await apiFetch('/receipts/store-reviews', {
+    method: 'PUT',
+    body: {
+      store_key: sk,
+      store_name: name,
+      place_id: placeId,
+      address: STORE_ADDRESS[sk] || '',
+      ...(STORE_COORDS[sk] || {}),
+    },
+  });
+  renderStoreReviewContext(ctx);
+  try {
+    const refreshed = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
+    renderStoreReviewContext(refreshed.context || ctx);
+    if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '登録・口コミ更新しました。';
+  } catch (e) {
+    if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '登録しました。口コミ更新は失敗: ' + e.message;
+  }
+}
+
+async function refreshStoreReview() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '自店舗口コミを更新中…';
+  const result = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
+  renderStoreReviewContext(result.context);
+  const err = Array.isArray(result.errors) && result.errors.length ? ` / ${result.errors.join(' / ')}` : '';
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = result.refreshed ? '更新しました。' : `更新対象がありません${err}`;
+}
+
+async function deleteStoreReview() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (!confirm('自店舗口コミのGoogle Place登録を解除しますか？')) return;
+  const ctx = await apiFetch('/receipts/store-reviews', { method: 'DELETE', body: { store_key: sk } });
+  renderStoreReviewContext(ctx);
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '登録解除しました。';
+}
+
+let _storeReviewCandidateCache = [];
+
+function renderStoreReviewCandidates(candidates) {
+  if (!dom.storeReviewCandidates) return;
+  if (!candidates.length) {
+    dom.storeReviewCandidates.innerHTML = '<span class="meta">候補が見つかりませんでした。Google Place IDを手入力してください。</span>';
+    return;
+  }
+  dom.storeReviewCandidates.innerHTML = candidates.map((c, i) => {
+    const rating = c.rating != null ? `★${Number(c.rating).toFixed(1)}` : '評価なし';
+    const total = c.user_ratings_total != null ? `口コミ${Number(c.user_ratings_total).toLocaleString('ja-JP')}件` : '';
+    const addr = c.address ? `<div class="nc-meta">${escapeHtml(c.address)}</div>` : '';
+    const website = c.website_uri
+      ? `<div class="nc-meta"><a href="${escapeHtml(c.website_uri)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-size:0.78rem" onclick="event.stopPropagation()">🌐 公式サイト</a></div>`
+      : '';
+    return `<label class="nearby-candidate" style="cursor:pointer">
+      <input type="radio" name="storeReviewCandidate" data-store-review-candidate-idx="${i}" ${i === 0 ? 'checked' : ''} style="width:16px;height:16px;flex-shrink:0">
+      <div>
+        <div class="nc-name">${escapeHtml(c.name || '不明')}</div>
+        <div class="nc-meta">${rating}${total ? '　' + total : ''}</div>
+        ${addr}${website}
+      </div>
+      <div></div>
+    </label>`;
+  }).join('');
+}
+
+async function openStoreReviewSearch() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (dom.storeReviewSearchPanel) dom.storeReviewSearchPanel.classList.add('open');
+  if (dom.storeReviewSearchTitle) dom.storeReviewSearchTitle.textContent = `自店舗候補: ${currentStoreName() || sk}`;
+  if (dom.storeReviewCandidates) dom.storeReviewCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
+  if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '';
+  const coords = STORE_COORDS[sk] || {};
+  const result = await apiFetch('/receipts/store-reviews/search', {
+    method: 'POST',
+    body: {
+      store_key: sk,
+      store_name: currentStoreName(),
+      address: STORE_ADDRESS[sk] || '',
+      ...coords,
+    },
+  });
+  _storeReviewCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
+  renderStoreReviewCandidates(_storeReviewCandidateCache);
+}
+
+async function registerSelectedStoreReviewCandidate() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  const checked = dom.storeReviewCandidates
+    ? dom.storeReviewCandidates.querySelector('input[name=storeReviewCandidate]:checked')
+    : null;
+  const candidate = checked ? _storeReviewCandidateCache[Number(checked.dataset.storeReviewCandidateIdx)] : null;
+  if (!candidate) {
+    if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '登録する候補を選択してください。';
+    return;
+  }
+  if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '自店舗として登録中…';
+  const ctx = await apiFetch('/receipts/store-reviews', {
+    method: 'PUT',
+    body: {
+      store_key: sk,
+      store_name: candidate.name || currentStoreName(),
+      place_id: candidate.place_id,
+      address: candidate.address || STORE_ADDRESS[sk] || '',
+      google_maps_uri: candidate.google_maps_uri || '',
+      website_uri: candidate.website_uri || '',
+      lat: candidate.lat,
+      lng: candidate.lng,
+    },
+  });
+  renderStoreReviewContext(ctx);
+  const refreshed = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
+  renderStoreReviewContext(refreshed.context || ctx);
+  if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '登録・口コミ更新しました。';
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '自店舗口コミを登録しました。';
 }
 
 function renderCompetitorContext(ctx) {
@@ -3578,6 +3824,70 @@ document.getElementById('weekdayMetricTabs').addEventListener('click', (e) => {
 
 /* ── reload ── */
 dom.reloadBtn.addEventListener('click', loadAll);
+if (dom.storeReviewAddBtn) {
+  dom.storeReviewAddBtn.addEventListener('click', async () => {
+    try {
+      await addStoreReviewFromForm();
+    } catch (e) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.storeReviewRefreshBtn) {
+  dom.storeReviewRefreshBtn.addEventListener('click', async () => {
+    try {
+      await refreshStoreReview();
+    } catch (e) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.storeReviewDeleteBtn) {
+  dom.storeReviewDeleteBtn.addEventListener('click', async () => {
+    try {
+      await deleteStoreReview();
+    } catch (e) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.storeReviewSearchBtn) {
+  dom.storeReviewSearchBtn.addEventListener('click', async () => {
+    try {
+      await openStoreReviewSearch();
+    } catch (e) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+      if (dom.storeReviewCandidates) dom.storeReviewCandidates.innerHTML = `<span class="meta" style="color:var(--bad)">エラー: ${escapeHtml(e && e.message ? e.message : String(e))}</span>`;
+    }
+  });
+}
+if (dom.storeReviewSearchCloseBtn) {
+  dom.storeReviewSearchCloseBtn.addEventListener('click', () => {
+    if (dom.storeReviewSearchPanel) dom.storeReviewSearchPanel.classList.remove('open');
+  });
+}
+if (dom.storeReviewCandidateRegisterBtn) {
+  dom.storeReviewCandidateRegisterBtn.addEventListener('click', async () => {
+    try {
+      await registerSelectedStoreReviewCandidate();
+    } catch (e) {
+      if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.storeReviewList) {
+  dom.storeReviewList.addEventListener('click', async (e) => {
+    const target = e.target;
+    const refreshBtn = target && target.closest ? target.closest('[data-store-review-refresh]') : null;
+    const deleteBtn = target && target.closest ? target.closest('[data-store-review-delete]') : null;
+    try {
+      if (refreshBtn) await refreshStoreReview();
+      if (deleteBtn) await deleteStoreReview();
+    } catch (err) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
+    }
+  });
+}
 if (dom.competitorAddBtn) {
   dom.competitorAddBtn.addEventListener('click', async () => {
     try {
@@ -4070,6 +4380,7 @@ async function loadAll() {
   if (!token) {
     dom.filterMeta.textContent = 'トークンを保存してください。';
     resetReceiptDailyDisconnected();
+    renderStoreReviewContext(null);
     renderCompetitorContext(null);
     updateReceiptSheetsPilotUi();
     return;
@@ -4083,6 +4394,7 @@ async function loadAll() {
     || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
   if (!state.storeKey) {
     clearAnalyticsAwaitingStore();
+    renderStoreReviewContext(null);
     renderCompetitorContext(null);
     return;
   }
@@ -4228,6 +4540,7 @@ async function loadAll() {
     const manualMeta = salesData?.manual_month_has_entry ? ' / 月計手入力あり' : '';
     dom.filterMeta.textContent = `対象: ${salesData.selected_store_name ?? '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件 / API生データ ${salesData.source_row_count ?? 0}件${manualMeta}`;
     dom.lastRefresh.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
+    renderStoreReviewContext(salesData?.store_review_context || null);
     renderCompetitorContext(salesData?.competitor_review_context || null);
 
     renderAllCharts();

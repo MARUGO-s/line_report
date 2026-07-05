@@ -40,10 +40,40 @@ type CompetitorSnapshotRow = {
   updated_at: string
 }
 
+type StoreReviewPlaceRow = {
+  id: number
+  store_partition_key: string
+  store_name: string | null
+  source: string
+  place_id: string | null
+  address: string | null
+  google_maps_uri: string | null
+  website_uri: string | null
+  lat: number | null
+  lng: number | null
+  is_active: boolean
+  updated_at: string
+}
+
+type StoreReviewSnapshotRow = {
+  id: number
+  store_review_place_id: number
+  source: string
+  snapshot_date: string
+  rating: number | null
+  user_ratings_total: number | null
+  review_count: number | null
+  review_excerpt: string | null
+  positive_terms: string[] | null
+  negative_terms: string[] | null
+  updated_at: string
+}
+
 type NormalizedGooglePlaceDetails = {
   name: string | null
   address: string | null
   googleMapsUri: string | null
+  websiteUri: string | null
   lat: number | null
   lng: number | null
   rating: number | null
@@ -105,11 +135,14 @@ function compactGoogleRaw(raw: Record<string, unknown>): Record<string, unknown>
     rating: raw.rating ?? null,
     userRatingCount: raw.userRatingCount ?? raw.user_ratings_total ?? null,
     googleMapsUri: raw.googleMapsUri ?? raw.url ?? null,
+    websiteUri: raw.websiteUri ?? raw.website ?? null,
   }
 }
 
 function mapPlacesNewResponse(data: Record<string, unknown>): NormalizedGooglePlaceDetails {
-  const displayName = isRecord(data.displayName) ? data.displayName.text : null
+  const displayName = isRecord(data.displayName) && typeof data.displayName.text === 'string'
+    ? data.displayName.text
+    : null
   const location = isRecord(data.location) ? data.location : {}
   const reviewsRaw = Array.isArray(data.reviews) ? data.reviews : []
   const reviewTexts = reviewsRaw
@@ -123,6 +156,7 @@ function mapPlacesNewResponse(data: Record<string, unknown>): NormalizedGooglePl
     name: shortText(displayName, 160),
     address: shortText(data.formattedAddress, 300),
     googleMapsUri: shortText(data.googleMapsUri, 500),
+    websiteUri: shortText(data.websiteUri, 500),
     lat: toNullableNumber(location.latitude),
     lng: toNullableNumber(location.longitude),
     rating: toNullableNumber(data.rating),
@@ -144,6 +178,7 @@ function mapPlacesLegacyResponse(data: Record<string, unknown>): NormalizedGoogl
     name: shortText(result.name, 160),
     address: shortText(result.formatted_address, 300),
     googleMapsUri: shortText(result.url, 500),
+    websiteUri: shortText(result.website, 500),
     lat: toNullableNumber(location.lat),
     lng: toNullableNumber(location.lng),
     rating: toNullableNumber(result.rating),
@@ -154,15 +189,7 @@ function mapPlacesLegacyResponse(data: Record<string, unknown>): NormalizedGoogl
 }
 
 async function fetchGooglePlaceDetails(placeId: string): Promise<NormalizedGooglePlaceDetails> {
-  const apiKey = (
-    Deno.env.get('GOOGLE_PLACES_API_KEY')
-    ?? Deno.env.get('GOOGLE_MAPS_API_KEY')
-    ?? Deno.env.get('GOOGLE_API_KEY')
-    ?? ''
-  ).trim()
-  if (!apiKey) {
-    throw { status: 500, message: 'GOOGLE_PLACES_API_KEY is not set.' } satisfies AppError
-  }
+  const apiKey = getGooglePlacesApiKey()
   const id = placeId.replace(/^places\//, '').trim()
   if (!id) {
     throw { status: 400, message: 'place_id is required.' } satisfies AppError
@@ -178,6 +205,7 @@ async function fetchGooglePlaceDetails(placeId: string): Promise<NormalizedGoogl
     'userRatingCount',
     'reviews',
     'googleMapsUri',
+    'websiteUri',
   ].join(',')
   const newRes = await fetch(newUrl, {
     headers: {
@@ -194,7 +222,7 @@ async function fetchGooglePlaceDetails(placeId: string): Promise<NormalizedGoogl
   const legacy = new URL('https://maps.googleapis.com/maps/api/place/details/json')
   legacy.searchParams.set('place_id', id)
   legacy.searchParams.set('language', 'ja')
-  legacy.searchParams.set('fields', 'name,rating,user_ratings_total,reviews,formatted_address,geometry,url')
+  legacy.searchParams.set('fields', 'name,rating,user_ratings_total,reviews,formatted_address,geometry,url,website')
   legacy.searchParams.set('key', apiKey)
   const legacyRes = await fetch(legacy.toString())
   const legacyBody = await legacyRes.json().catch(() => null)
@@ -206,6 +234,19 @@ async function fetchGooglePlaceDetails(placeId: string): Promise<NormalizedGoogl
     } satisfies AppError
   }
   return mapPlacesLegacyResponse(legacyBody)
+}
+
+function getGooglePlacesApiKey(): string {
+  const apiKey = (
+    Deno.env.get('GOOGLE_PLACES_API_KEY')
+    ?? Deno.env.get('GOOGLE_MAPS_API_KEY')
+    ?? Deno.env.get('GOOGLE_API_KEY')
+    ?? ''
+  ).trim()
+  if (!apiKey) {
+    throw { status: 500, message: 'GOOGLE_PLACES_API_KEY is not set.' } satisfies AppError
+  }
+  return apiKey
 }
 
 type NearbyCandidate = {
@@ -275,22 +316,29 @@ async function classifyNearbyWithAI(
     review_count: c.user_ratings_total,
   }))
 
-  const prompt = `あなたは東京ドームシティ フードスタジアム内の飲食店「MARUGO S」（クラフトビール・串カツ・ビアホール系カジュアルダイニング）の売上競合分析AIです。
+  const prompt = `あなたは東京ドームシティ フードスタジアム内の飲食店「MARUGO S」（クラフトビール・串カツ・ビアホール系カジュアルダイニング、客単価2,500〜4,000円）の売上競合分析AIです。
 
-以下の周辺店舗リストを見て、MARUGO Sの競合店かどうかを判定してください。
+以下の周辺店舗リストを見て、MARUGO Sへの売上影響を分析してください。
 
 判断基準：
-- フードコート内・隣接エリアの飲食店 → 競合（is_competitor: true）
-- アルコール提供の飲食店 → 特に重要な競合
-- ファストフード・スイーツ・カフェ → 軽度競合（true）
+- フードコート内・同ビル内の飲食店 → 強力な競合（高confidence）
+- アルコール提供の飲食店・ビアホール系 → 直接競合
+- ファストフード・カジュアル飲食 → 軽度競合
 - コンビニ・小売・非飲食 → 競合外（false）
 - 店名に「MARUGO」を含む → 自店のため除外（false）
+
+reasonの書き方（重要）：
+- 「〇〇だから競合」という薄い説明は禁止
+- 「どの客層を奪うか」「どんな場面で選ばれるか」「価格帯・業態の重なり」を具体的に1文で
+- 例：「ドーム観戦後の打ち上げ需要を直撃、アルコール単価が近くビール好き客層が完全に重複する」
+- 例：「ランチ〜ディナー通しで営業し、ファミリー層のカジュアル外食需要を広く吸収するため夜間の集客に影響」
+- 例：「同フードコート内で視認性が高く、串揚げ・軽食系メニューで飲み需要の一部を代替される」
 
 店舗リスト:
 ${JSON.stringify(list, null, 2)}
 
 以下のJSON形式のみで回答してください（説明文不要）。idxは店舗リストのidxをそのまま返すこと:
-{"classifications":[{"idx":0,"is_competitor":true,"confidence":"high","reason":"理由を1文で"}]}`
+{"classifications":[{"idx":0,"is_competitor":true,"confidence":"high","reason":"具体的な競合理由を1文で"}]}`
 
   try {
     const model = String(Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'llama-3.3-70b-versatile').trim()
@@ -351,15 +399,7 @@ ${JSON.stringify(list, null, 2)}
 export async function nearbySearchGooglePlaces(
   body: Record<string, unknown>,
 ): Promise<{ candidates: NearbyCandidate[]; _debug?: unknown }> {
-  const apiKey = (
-    Deno.env.get('GOOGLE_PLACES_API_KEY')
-    ?? Deno.env.get('GOOGLE_MAPS_API_KEY')
-    ?? Deno.env.get('GOOGLE_API_KEY')
-    ?? ''
-  ).trim()
-  if (!apiKey) {
-    throw { status: 500, message: 'GOOGLE_PLACES_API_KEY is not set.' } satisfies AppError
-  }
+  const apiKey = getGooglePlacesApiKey()
 
   // フードスタジアム東京（東京ドームシティ）をデフォルト座標とする
   const lat = Number.isFinite(Number(body.lat)) ? Number(body.lat) : 35.70499
@@ -399,11 +439,13 @@ export async function nearbySearchGooglePlaces(
   }
 
   const data = await res.json()
-  const placesRaw = Array.isArray(data.places) ? data.places : []
+  const placesRaw: unknown[] = Array.isArray(data.places) ? data.places : []
   const candidates: NearbyCandidate[] = placesRaw
-    .filter((p): p is Record<string, unknown> => isRecord(p))
-    .map((p) => {
-      const displayName = isRecord(p.displayName) ? p.displayName.text : null
+    .filter((p: unknown): p is Record<string, unknown> => isRecord(p))
+    .map((p: Record<string, unknown>): NearbyCandidate | null => {
+      const displayName = isRecord(p.displayName) && typeof p.displayName.text === 'string'
+        ? p.displayName.text
+        : null
       const location = isRecord(p.location) ? p.location : {}
       const id = typeof p.id === 'string' ? p.id : null
       if (!id) return null
@@ -422,10 +464,285 @@ export async function nearbySearchGooglePlaces(
         ai_reason: null,
       } satisfies NearbyCandidate
     })
-    .filter((c): c is NearbyCandidate => c !== null)
+    .filter((c: NearbyCandidate | null): c is NearbyCandidate => c !== null)
 
   const { candidates: classified, debug } = await classifyNearbyWithAI(candidates)
-  return { candidates: classified, _debug: debug }
+  const websiteSample = placesRaw.slice(0, 3).map((p: unknown) => isRecord(p) ? {
+    name: isRecord(p.displayName) && typeof p.displayName.text === 'string' ? p.displayName.text : null,
+    websiteUri: p.websiteUri ?? '(none)',
+  } : null)
+  const candidateWebsiteSample = classified.slice(0, 3).map((c) => ({ name: c.name, website_uri: c.website_uri }))
+  return { candidates: classified, _debug: { ...(isRecord(debug) ? debug : { info: debug }), websiteSample, candidateWebsiteSample } }
+}
+
+function normalizeGooglePlaceCandidate(p: Record<string, unknown>): NearbyCandidate | null {
+  const displayName = isRecord(p.displayName) ? p.displayName.text : null
+  const location = isRecord(p.location) ? p.location : {}
+  const id = typeof p.id === 'string' ? p.id : null
+  if (!id) return null
+  return {
+    place_id: id,
+    name: shortText(displayName, 160),
+    address: shortText(p.formattedAddress, 300),
+    google_maps_uri: shortText(p.googleMapsUri, 500),
+    website_uri: shortText(p.websiteUri, 500),
+    lat: toNullableNumber(location.latitude),
+    lng: toNullableNumber(location.longitude),
+    rating: toNullableNumber(p.rating),
+    user_ratings_total: toNullableNumber(p.userRatingCount),
+    ai_is_competitor: null,
+    ai_confidence: null,
+    ai_reason: null,
+  }
+}
+
+export async function searchStoreReviewPlaces(
+  body: Record<string, unknown>,
+): Promise<{ candidates: NearbyCandidate[]; query: string }> {
+  const apiKey = getGooglePlacesApiKey()
+  const storeName = shortText(body.store_name ?? body.name, 160)
+  const address = shortText(body.address, 300)
+  const storeKey = shortText(body.store_key, 120)
+  const query = [storeName, address || storeKey, 'レストラン']
+    .filter(Boolean)
+    .join(' ')
+    .trim()
+  if (!query) {
+    throw { status: 400, message: 'store_name or address is required.' } satisfies AppError
+  }
+
+  const lat = Number(body.lat)
+  const lng = Number(body.lng)
+  const bodyJson: Record<string, unknown> = {
+    textQuery: query,
+    languageCode: 'ja',
+    maxResultCount: 8,
+  }
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    bodyJson.locationBias = {
+      circle: {
+        center: { latitude: lat, longitude: lng },
+        radius: 900,
+      },
+    }
+  }
+
+  const fieldMask = [
+    'places.id',
+    'places.displayName',
+    'places.formattedAddress',
+    'places.location',
+    'places.rating',
+    'places.userRatingCount',
+    'places.googleMapsUri',
+    'places.websiteUri',
+  ].join(',')
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': fieldMask,
+    },
+    body: JSON.stringify(bodyJson),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw { status: 502, message: `Google Places Text Search failed: ${res.status} ${text.slice(0, 300)}` } satisfies AppError
+  }
+
+  const data = await res.json()
+  const placesRaw: unknown[] = Array.isArray(data.places) ? data.places : []
+  const candidates = placesRaw
+    .filter((p: unknown): p is Record<string, unknown> => isRecord(p))
+    .map((p: Record<string, unknown>): NearbyCandidate | null => normalizeGooglePlaceCandidate(p))
+    .filter((c: NearbyCandidate | null): c is NearbyCandidate => c !== null)
+  return { candidates, query }
+}
+
+export async function fetchStoreReviewContext(
+  supabase: SupabaseClient,
+  storeKeyRaw: string,
+): Promise<Record<string, unknown>> {
+  const storeKey = await resolveAnalyticsStoreKey(supabase, storeKeyRaw)
+  const { data: placeData, error: placeError } = await supabase
+    .from('store_review_places')
+    .select('id, store_partition_key, store_name, source, place_id, address, google_maps_uri, website_uri, lat, lng, is_active, updated_at')
+    .eq('store_partition_key', storeKey)
+    .eq('is_active', true)
+    .maybeSingle()
+  if (placeError) {
+    throw { status: 500, message: `Failed to fetch store review place: ${placeError.message}` } satisfies AppError
+  }
+
+  const place = (placeData && isRecord(placeData) ? placeData : null) as StoreReviewPlaceRow | null
+  let latestSnapshot: StoreReviewSnapshotRow | null = null
+  if (place) {
+    const { data: snapData, error: snapError } = await supabase
+      .from('store_review_snapshots')
+      .select('id, store_review_place_id, source, snapshot_date, rating, user_ratings_total, review_count, review_excerpt, positive_terms, negative_terms, updated_at')
+      .eq('store_review_place_id', place.id)
+      .order('snapshot_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (snapError) {
+      throw { status: 500, message: `Failed to fetch store review snapshot: ${snapError.message}` } satisfies AppError
+    }
+    latestSnapshot = (snapData && isRecord(snapData) ? snapData : null) as StoreReviewSnapshotRow | null
+  }
+
+  const rating = latestSnapshot?.rating != null ? Number(latestSnapshot.rating) : null
+  const totalRatings = latestSnapshot?.user_ratings_total != null ? Number(latestSnapshot.user_ratings_total) : null
+  const summary = !place
+    ? '自店舗のGoogle Place IDが未登録です。自店舗を検索して登録すると、評価と口コミ件数を売上分析に表示します。'
+    : rating != null
+      ? `自店舗の評価 ${roundToScale(rating, 2)} / 口コミ ${Math.max(0, totalRatings ?? 0).toLocaleString('ja-JP')}件。競合口コミとは別枠で管理しています。`
+      : '自店舗は登録済みですが、口コミ情報は未取得です。「自店舗口コミを更新」を押してください。'
+
+  return {
+    enabled: true,
+    store_key: storeKey,
+    registered: !!place,
+    place,
+    latest_snapshot: latestSnapshot,
+    rating,
+    total_ratings: totalRatings,
+    summary,
+    generated_at: new Date().toISOString(),
+  }
+}
+
+export async function upsertStoreReviewPlace(
+  supabase: SupabaseClient,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const storeKey = await resolveAnalyticsStoreKey(supabase, toSafeString(body.store_key))
+  const placeId = shortText(body.place_id, 220)
+  const storeName = shortText(body.store_name ?? body.name, 160)
+  const address = shortText(body.address, 300)
+  const googleMapsUri = shortText(body.google_maps_uri, 500)
+  const websiteUri = shortText(body.website_uri, 500)
+  const lat = Number(body.lat)
+  const lng = Number(body.lng)
+  if (!placeId) {
+    throw { status: 400, message: 'place_id is required.' } satisfies AppError
+  }
+
+  const now = new Date().toISOString()
+  const { data: existing, error: existingError } = await supabase
+    .from('store_review_places')
+    .select('id')
+    .eq('store_partition_key', storeKey)
+    .eq('is_active', true)
+    .maybeSingle()
+  if (existingError) {
+    throw { status: 500, message: `Failed to check store review place: ${existingError.message}` } satisfies AppError
+  }
+
+  const patch = {
+    store_partition_key: storeKey,
+    store_name: storeName,
+    source: 'google_places',
+    place_id: placeId,
+    address,
+    google_maps_uri: googleMapsUri,
+    website_uri: websiteUri,
+    lat: Number.isFinite(lat) ? lat : null,
+    lng: Number.isFinite(lng) ? lng : null,
+    is_active: true,
+    updated_at: now,
+  }
+  if (existing && isRecord(existing) && Number(existing.id) > 0) {
+    const { error } = await supabase
+      .from('store_review_places')
+      .update(patch)
+      .eq('id', Number(existing.id))
+    if (error) throw { status: 500, message: `Failed to update store review place: ${error.message}` } satisfies AppError
+  } else {
+    const { error } = await supabase.from('store_review_places').insert(patch)
+    if (error) throw { status: 500, message: `Failed to create store review place: ${error.message}` } satisfies AppError
+  }
+  return fetchStoreReviewContext(supabase, storeKey)
+}
+
+export async function deactivateStoreReviewPlace(
+  supabase: SupabaseClient,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const storeKey = await resolveAnalyticsStoreKey(supabase, toSafeString(body.store_key))
+  const { error } = await supabase
+    .from('store_review_places')
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq('store_partition_key', storeKey)
+    .eq('is_active', true)
+  if (error) throw { status: 500, message: `Failed to delete store review place: ${error.message}` } satisfies AppError
+  return fetchStoreReviewContext(supabase, storeKey)
+}
+
+export async function refreshStoreReview(
+  supabase: SupabaseClient,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const storeKey = await resolveAnalyticsStoreKey(supabase, toSafeString(body.store_key))
+  const { data, error } = await supabase
+    .from('store_review_places')
+    .select('id, store_partition_key, store_name, source, place_id, address, google_maps_uri, website_uri, lat, lng, is_active, updated_at')
+    .eq('store_partition_key', storeKey)
+    .eq('is_active', true)
+    .maybeSingle()
+  if (error) throw { status: 500, message: `Failed to fetch store review place: ${error.message}` } satisfies AppError
+  const place = (data && isRecord(data) ? data : null) as StoreReviewPlaceRow | null
+  if (!place || !place.place_id) {
+    return {
+      ok: false,
+      refreshed: 0,
+      errors: ['自店舗のGoogle Place IDが未登録です。'],
+      context: await fetchStoreReviewContext(supabase, storeKey),
+    }
+  }
+
+  const details = await fetchGooglePlaceDetails(String(place.place_id))
+  const now = new Date().toISOString()
+  const { error: placeErr } = await supabase
+    .from('store_review_places')
+    .update({
+      store_name: details.name || place.store_name,
+      address: details.address || place.address,
+      google_maps_uri: details.googleMapsUri || place.google_maps_uri,
+      website_uri: details.websiteUri || place.website_uri,
+      lat: details.lat ?? place.lat,
+      lng: details.lng ?? place.lng,
+      updated_at: now,
+    })
+    .eq('id', place.id)
+  if (placeErr) throw { status: 500, message: `Failed to update store review place: ${placeErr.message}` } satisfies AppError
+
+  const reviewTexts = details.reviewTexts
+  const snapshot = {
+    store_review_place_id: place.id,
+    source: 'google_places',
+    snapshot_date: now.slice(0, 10),
+    rating: details.rating,
+    user_ratings_total: details.userRatingsTotal,
+    review_count: reviewTexts.length,
+    review_excerpt: buildReviewExcerpt(reviewTexts),
+    positive_terms: inferPositiveTerms(reviewTexts),
+    negative_terms: inferNegativeTerms(reviewTexts),
+    raw: details.raw,
+    updated_at: now,
+  }
+  const { error: snapErr } = await supabase
+    .from('store_review_snapshots')
+    .upsert(snapshot, { onConflict: 'store_review_place_id,snapshot_date' })
+  if (snapErr) throw { status: 500, message: `Failed to save store review snapshot: ${snapErr.message}` } satisfies AppError
+
+  return {
+    ok: true,
+    refreshed: 1,
+    errors: [],
+    context: await fetchStoreReviewContext(supabase, storeKey),
+  }
 }
 
 export async function fetchCompetitorReviewContext(
