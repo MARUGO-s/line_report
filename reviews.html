@@ -599,6 +599,13 @@ function currentStoreName() {
   return (STORE_NAMES && STORE_NAMES[sk]) || sk || '';
 }
 
+/** STORE_COORDS は {lat, lon} だが、バックエンドの位置バイアスは {lat, lng} を読む。ここで変換する。 */
+function storeCoordsForApi(storeKey) {
+  const c = STORE_COORDS[storeKey];
+  if (!c || !Number.isFinite(c.lat) || !Number.isFinite(c.lon)) return {};
+  return { lat: c.lat, lng: c.lon };
+}
+
 /* ── API fetch ── */
 async function apiFetch(path, options = {}) {
   const token = getToken();
@@ -702,7 +709,7 @@ async function addStoreReviewFromForm() {
       store_name: name,
       place_id: placeId,
       address: STORE_ADDRESS[sk] || '',
-      ...(STORE_COORDS[sk] || {}),
+      ...storeCoordsForApi(sk),
     },
   });
   renderStoreReviewContext(ctx);
@@ -768,14 +775,13 @@ async function openStoreReviewSearch() {
   if (dom.storeReviewSearchTitle) dom.storeReviewSearchTitle.textContent = `自店舗候補: ${currentStoreName() || sk}`;
   if (dom.storeReviewCandidates) dom.storeReviewCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
   if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '';
-  const coords = STORE_COORDS[sk] || {};
   const result = await apiFetch('/receipts/store-reviews/search', {
     method: 'POST',
     body: {
       store_key: sk,
       store_name: currentStoreName(),
       address: STORE_ADDRESS[sk] || '',
-      ...coords,
+      ...storeCoordsForApi(sk),
     },
   });
   _storeReviewCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
@@ -976,14 +982,19 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
 async function openNearbySearch() {
   const sk = currentStoreKey();
   if (!sk) { alert('店舗を選択してから実行してください。'); return; }
+  const coords = storeCoordsForApi(sk);
+  if (coords.lat == null || coords.lng == null) {
+    alert('この店舗の座標が未設定のため、周辺検索の基準点を決められません。');
+    return;
+  }
   const radius = Number((dom.nearbyRadiusSelect && dom.nearbyRadiusSelect.value) || 300);
   const radiusLabel = radius >= 1000 ? `${radius / 1000}km` : `${radius}m`;
-  if (dom.nearbyPanelTitle) dom.nearbyPanelTitle.textContent = `周辺店舗の候補（半径${radiusLabel}）`;
+  if (dom.nearbyPanelTitle) dom.nearbyPanelTitle.textContent = `周辺店舗の候補（半径${radiusLabel}・${currentStoreName() || sk}周辺）`;
   if (dom.nearbyPanel) dom.nearbyPanel.classList.add('open');
   if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
   if (dom.nearbyStatus) dom.nearbyStatus.textContent = '';
   try {
-    const result = await apiFetch('/receipts/competitors/nearby-search', { method: 'POST', body: { store_key: sk, radius } });
+    const result = await apiFetch('/receipts/competitors/nearby-search', { method: 'POST', body: { store_key: sk, radius, ...coords } });
     _nearbyCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
     const ctx = await apiFetch(`/receipts/competitors?store_key=${encodeURIComponent(sk)}`);
     const registered = new Set(
