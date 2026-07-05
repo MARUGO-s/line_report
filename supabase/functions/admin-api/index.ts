@@ -657,6 +657,7 @@ Deno.serve(async (req, info) => {
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/dome-weekly",
+      "/foodcourt/evolution-history",
       "/analytics/holidays",
       "/analytics/monthly",
       "/weather/daily",
@@ -1062,6 +1063,17 @@ Deno.serve(async (req, info) => {
       // supabase + storeKey を渡すと、Q&Aの実測トークンを ai_usage_events に記録しAI使用料に合算する。
       const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
+    }
+    // 学習進化トラッキング: foodcourt_forecast_history の全行を返す（foodcourt-evolution.html 用）。
+    if (req.method === "GET" && path === "/foodcourt/evolution-history") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "marugoS").trim()
+      const { data, error } = await supabase
+        .from("foodcourt_forecast_history")
+        .select("log_date, model_version, history_days, backtest_days, mape_guests, mape_sales, mean_guests, created_at")
+        .eq("tenant_name", storeKey)
+        .order("log_date", { ascending: true })
+      if (error) return json({ error: error.message }, 500)
+      return json({ rows: data ?? [] }, 200)
     }
     // 東京ドーム週次イベント配信（per-room）の設定を取得/保存（管理画面のカレンダー/予約タブから利用）。
     if (req.method === "GET" && path === "/foodcourt/dome-weekly") {
