@@ -239,19 +239,8 @@ export async function nearbySearchGooglePlaces(
     ? Math.min(Number(body.radius), 2000)
     : 300
 
-  const requestBody = {
-    includedTypes: ['restaurant', 'bar', 'cafe', 'food'],
-    maxResultCount: 20,
-    locationRestriction: {
-      circle: {
-        center: { latitude: lat, longitude: lng },
-        radius,
-      },
-    },
-    languageCode: 'ja',
-  }
-
-  const fieldMask = [
+  // 新API（Places API New）を試し、未有効化(403)なら旧APIにフォールバック
+  const newFieldMask = [
     'places.id',
     'places.displayName',
     'places.formattedAddress',
@@ -260,41 +249,77 @@ export async function nearbySearchGooglePlaces(
     'places.userRatingCount',
     'places.googleMapsUri',
   ].join(',')
-
-  const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+  const newRes = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': fieldMask,
+      'X-Goog-FieldMask': newFieldMask,
     },
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({
+      includedTypes: ['restaurant', 'bar', 'cafe', 'food'],
+      maxResultCount: 20,
+      locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } },
+      languageCode: 'ja',
+    }),
   })
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw { status: 502, message: `Google Places Nearby Search failed: ${res.status} ${text.slice(0, 200)}` } satisfies AppError
+  if (newRes.ok) {
+    const data = await newRes.json()
+    const placesRaw = Array.isArray(data.places) ? data.places : []
+    const candidates: NearbyCandidate[] = placesRaw
+      .filter((p): p is Record<string, unknown> => isRecord(p))
+      .map((p) => {
+        const displayName = isRecord(p.displayName) ? p.displayName.text : null
+        const location = isRecord(p.location) ? p.location : {}
+        const id = typeof p.id === 'string' ? p.id : null
+        if (!id) return null
+        return {
+          place_id: id,
+          name: shortText(displayName, 160),
+          address: shortText(p.formattedAddress, 300),
+          google_maps_uri: shortText(p.googleMapsUri, 500),
+          lat: toNullableNumber(location.latitude),
+          lng: toNullableNumber(location.longitude),
+          rating: toNullableNumber(p.rating),
+          user_ratings_total: toNullableNumber(p.userRatingCount),
+        } satisfies NearbyCandidate
+      })
+      .filter((c): c is NearbyCandidate => c !== null)
+    return { candidates }
   }
 
-  const data = await res.json()
-  const placesRaw = Array.isArray(data.places) ? data.places : []
+  // 旧 Nearby Search API へフォールバック
+  const legacyUrl = new URL('https://maps.googleapis.com/maps/api/place/nearbysearch/json')
+  legacyUrl.searchParams.set('location', `${lat},${lng}`)
+  legacyUrl.searchParams.set('radius', String(Math.round(radius)))
+  legacyUrl.searchParams.set('type', 'restaurant')
+  legacyUrl.searchParams.set('language', 'ja')
+  legacyUrl.searchParams.set('key', apiKey)
+  const legacyRes = await fetch(legacyUrl.toString())
+  const legacyData = await legacyRes.json().catch(() => null)
+  if (!legacyRes.ok || !isRecord(legacyData) || (legacyData.status !== 'OK' && legacyData.status !== 'ZERO_RESULTS')) {
+    const status = isRecord(legacyData) ? String(legacyData.status ?? '') : ''
+    throw { status: 502, message: `Google Places Nearby Search failed${status ? `: ${status}` : ''}.` } satisfies AppError
+  }
 
-  const candidates: NearbyCandidate[] = placesRaw
+  const results = Array.isArray(legacyData.results) ? legacyData.results : []
+  const candidates: NearbyCandidate[] = results
     .filter((p): p is Record<string, unknown> => isRecord(p))
     .map((p) => {
-      const displayName = isRecord(p.displayName) ? p.displayName.text : null
-      const location = isRecord(p.location) ? p.location : {}
-      const id = typeof p.id === 'string' ? p.id : null
+      const id = typeof p.place_id === 'string' ? p.place_id : null
       if (!id) return null
+      const geometry = isRecord(p.geometry) ? p.geometry : {}
+      const location = isRecord(geometry.location) ? geometry.location : {}
       return {
         place_id: id,
-        name: shortText(displayName, 160),
-        address: shortText(p.formattedAddress, 300),
-        google_maps_uri: shortText(p.googleMapsUri, 500),
-        lat: toNullableNumber(location.latitude),
-        lng: toNullableNumber(location.longitude),
+        name: shortText(p.name, 160),
+        address: shortText(p.vicinity, 300),
+        google_maps_uri: null,
+        lat: toNullableNumber(location.lat),
+        lng: toNullableNumber(location.lng),
         rating: toNullableNumber(p.rating),
-        user_ratings_total: toNullableNumber(p.userRatingCount),
+        user_ratings_total: toNullableNumber(p.user_ratings_total),
       } satisfies NearbyCandidate
     })
     .filter((c): c is NearbyCandidate => c !== null)
