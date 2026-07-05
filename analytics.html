@@ -2396,7 +2396,13 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
     return;
   }
   const hasAi = candidates.some((c) => c.ai_is_competitor !== null && c.ai_is_competitor !== undefined);
-  dom.nearbyCandidates.innerHTML = candidates.map((c, i) => {
+  const sorted = candidates
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => {
+      const score = (x) => x.ai_is_competitor === true ? 0 : x.ai_is_competitor === false ? 2 : 1;
+      return score(a.c) - score(b.c);
+    });
+  dom.nearbyCandidates.innerHTML = sorted.map(({ c, i }) => {
     const alreadyRegistered = registeredPlaceIds.has(c.place_id);
     const aiComp = c.ai_is_competitor === true;
     const aiConf = c.ai_confidence || 'medium';
