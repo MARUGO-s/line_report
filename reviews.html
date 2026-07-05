@@ -1,0 +1,1459 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <base href="/line_report/">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+  <meta name="theme-color" content="#0b2035">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="LINE売上">
+  <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
+  <script>
+    (function(){try{
+      var unlocked=false; try{ unlocked = sessionStorage.getItem('line_report_admin_unlock')==='1'; }catch(_){}
+      var p=new URLSearchParams(location.search);
+      var line=!unlocked && ((p.get('from')==='line')||/Line\//i.test(String(navigator.userAgent||'')));
+      if(line)document.documentElement.setAttribute('data-entry','line');
+    }catch(_){}})();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="icons/logo-mark.svg">
+  <link rel="icon" href="icons/line-report-favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/line-report-favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/line-report-favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/line-report-apple-touch-icon.png">
+  <link rel="manifest" href="line-report.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&family=Barlow+Condensed:wght@600;700&display=swap">
+  <title>口コミ・競合分析</title>
+  <style>
+    :root {
+      --accent: #2563d4; --accent-press: #1f54b3; --accent-soft: rgba(37,99,212,.10);
+      --surface: #ffffff; --surface-2: #f5f7fa;
+      --sidebar: #0f1722; --sidebar-2: rgba(255,255,255,.06); --side-text: #aeb9c7; --side-text-strong: #fff;
+      --border: #e8ecf2; --border-strong: #dbe1e9;
+      --text: #15202e; --text-2: #5a6675; --text-3: #8995a4;
+      --ok: #1f9d57; --ok-soft: rgba(31,157,87,.12);
+      --warn: #c77d12; --warn-soft: rgba(199,125,18,.14);
+      --err: #d23b3b; --err-soft: rgba(210,59,59,.12);
+      --radius: 16px; --radius-sm: 9px;
+      --shadow-sm: 0 1px 2px rgba(20,34,58,.04), 0 4px 14px -8px rgba(20,34,58,.10);
+      --shadow: 0 2px 8px rgba(20,34,58,.06), 0 22px 48px -22px rgba(20,34,58,.24);
+      --pad: 18px; --gap: 16px; --row-h: 38px; --fs: 14px;
+      --app-bg: #edf0f5;
+      --bg0: var(--app-bg); --bg1: var(--app-bg);
+      --card: var(--surface); --line: var(--border);
+      --txt: var(--text); --sub: var(--text-2); --bad: var(--err);
+    }
+    body[data-theme='light'] {
+      --card: var(--surface); --line: var(--border); --txt: var(--text); --sub: var(--text-2); --bad: var(--err);
+      background: var(--app-bg) !important;
+    }
+    body[data-theme='dark'] {
+      --app-bg: #0c1117; --surface: #151c25; --surface-2: #1b232e;
+      --sidebar: #0a0f16; --sidebar-2: rgba(255,255,255,.05); --side-text: #99a6b6;
+      --border: #26313d; --border-strong: #33414f;
+      --text: #e7ecf2; --text-2: #9fadbd; --text-3: #6f7d8d;
+      --accent-soft: rgba(56,125,234,.16); --ok-soft: rgba(31,157,87,.16); --warn-soft: rgba(199,125,18,.18); --err-soft: rgba(210,59,59,.16);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.3); --shadow: 0 1px 3px rgba(0,0,0,.4), 0 10px 30px -18px rgba(0,0,0,.6);
+      --card: var(--surface); --line: var(--border); --txt: var(--text); --sub: var(--text-2); --bad: var(--err);
+      background: var(--app-bg) !important;
+    }
+    .hero { background: var(--surface) !important; border-color: var(--border) !important; box-shadow: var(--shadow-sm) !important; }
+    .hero h1 { font-family: "IBM Plex Sans JP","Hiragino Kaku Gothic ProN",sans-serif !important; text-transform: none !important; font-size: 22px !important; letter-spacing: -.015em !important; }
+    .pill { background: var(--surface) !important; border-color: var(--border) !important; color: var(--text-2) !important; }
+    .pill.ok { background: var(--ok-soft) !important; border-color: color-mix(in srgb,var(--ok) 30%,transparent) !important; color: var(--ok) !important; }
+    .pill.link { color: var(--accent) !important; background: var(--accent-soft) !important; border-color: transparent !important; }
+    .input, .select { background: var(--surface-2) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
+    .input:focus, .select:focus { outline: none !important; border-color: var(--accent) !important; background: var(--surface) !important; box-shadow: 0 0 0 3px var(--accent-soft) !important; }
+    .btn { background: var(--surface) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
+    .btn.primary { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      color: var(--text);
+      font-family: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Zen Kaku Gothic New", system-ui, sans-serif;
+      background: var(--app-bg);
+      font-size: var(--fs);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      padding: 20px;
+    }
+    body { padding-left: 240px; }
+    .lsa-side { position: fixed; left: 0; top: 0; bottom: 0; width: 220px; z-index: 600; background: var(--sidebar); padding: 14px 12px; display: flex; flex-direction: column; overflow-y: auto; }
+    .lsa-side-brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 16px; color: var(--side-text-strong); font-weight: 600; font-size: 14px; line-height: 1.25; }
+    .lsa-side-brand .mk { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 12px; letter-spacing: .04em; flex: none; }
+    .lsa-side-brand small { display: block; color: var(--side-text); font-weight: 400; font-size: 10.5px; }
+    .lsa-nav { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+    .lsa-navlabel { font-size: 11px; letter-spacing: .08em; color: var(--text-3); margin: 14px 10px 6px; font-weight: 600; }
+    .lsa-navitem { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px; color: var(--side-text); text-decoration: none; font-weight: 500; font-size: 13.5px; transition: background .14s, color .14s; }
+    .lsa-navitem:hover { background: var(--sidebar-2); color: var(--side-text-strong); }
+    .lsa-navitem.is-active { background: var(--accent); color: #fff; box-shadow: 0 6px 16px -8px var(--accent); }
+    .lsa-navitem svg { flex: none; opacity: .85; }
+    .lsa-navitem.is-active svg { opacity: 1; }
+    .lsa-navitem[hidden] { display: none !important; }
+    .lsa-side-foot { margin-top: auto; padding-top: 14px; }
+    .lsa-side-foot .conn { display: flex; align-items: center; gap: 9px; padding: 10px; border-radius: 10px; background: var(--sidebar-2); color: var(--side-text); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+    .lsa-side-foot .conn b { display: block; color: var(--side-text-strong); font-size: 12.5px; font-weight: 600; font-family: "IBM Plex Sans JP", sans-serif; }
+    .lsa-side-foot .conn .dt { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
+    html[data-entry="line"] .lsa-navitem:not(.is-active),
+    html[data-entry="line"] .lsa-navlabel,
+    html[data-entry="line"] #adminLink,
+    html[data-entry="line"] #mediaLink,
+    html[data-entry="line"] #reservationLink,
+    html[data-entry="line"] #analyticsLink { display: none !important; }
+    .lsa-navtoggle {
+      display: none; position: fixed; top: 10px; left: 10px; z-index: 680;
+      width: 42px; height: 42px; padding: 0; border-radius: 10px;
+      border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 88%, transparent);
+      color: var(--text); cursor: pointer; align-items: center; justify-content: center;
+      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    }
+    .lsa-navtoggle:hover { background: var(--surface-2); }
+    .lsa-nav-backdrop { display: none; position: fixed; inset: 0; z-index: 690; background: rgba(0,0,0,.45); }
+
+    @media (max-width: 920px) {
+      body { padding-left: 20px; padding-top: 64px; }
+      .lsa-navtoggle { display: inline-flex; }
+      .lsa-side {
+        width: 270px; max-width: 84vw; z-index: 700;
+        transform: translateX(-100%); transition: transform .26s ease;
+        box-shadow: 20px 0 60px -12px rgba(0,0,0,.55);
+      }
+      .lsa-side.open { transform: translateX(0); }
+      .lsa-nav-backdrop.open { display: block; }
+    }
+    .app { max-width: 1360px; margin: 0 auto; display: grid; gap: 16px; }
+    .hero, .card {
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+    .hero {
+      padding: 18px 20px;
+      background: linear-gradient(160deg,rgba(87,216,255,0.15),rgba(8,21,35,0.65));
+    }
+    .hero h1 {
+      font-family: "Barlow Condensed", sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      font-size: clamp(2rem,3.2vw,2.8rem);
+      line-height: 0.95;
+    }
+    .hero p { margin-top: 10px; color: var(--sub); }
+    .status { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; color: var(--sub); font-size: 0.88rem; align-items: center; }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: rgba(8,21,35,0.6);
+      text-decoration: none;
+      color: inherit;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    button.pill { font: inherit; cursor: pointer; }
+    .pill.ok { color: var(--ok); border-color: color-mix(in srgb,var(--ok) 55%,transparent); }
+    .pill.link { color: #9be8ff; display: inline-flex; align-items: center; }
+    .line-locked-store-label { font-weight: 600; color: var(--accent); min-width: 8rem; }
+    .adm-unlock-btn { color: var(--accent); cursor: pointer; font-weight: 600; }
+    .adm-modal { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); padding: 20px; }
+    .adm-modal[hidden] { display: none !important; }
+    .adm-box { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; width: 400px; max-width: 92vw; box-shadow: 0 20px 60px -20px rgba(0,0,0,.7); }
+    .adm-box .adm-title { font-size: 16px; font-weight: 700; }
+    .adm-box .adm-desc { font-size: 12.5px; opacity: .7; margin: 8px 0 14px; line-height: 1.6; }
+    .adm-box .input { width: 100%; }
+    .adm-box .adm-msg { font-size: 12px; min-height: 15px; margin-top: 8px; color: #ff6b6b; }
+    .adm-box .adm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+    body[data-entry="line"] #storeSelect { display: none !important; }
+    .card { background: var(--card); padding: 16px; }
+    .card-title { font-size: 1.08rem; padding-bottom: 8px; border-bottom: 1px solid rgba(155,220,255,0.18); margin-bottom: 14px; }
+    .controls { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+    .input, .select, .btn {
+      min-height: 38px; border-radius: 11px;
+      border: 1px solid var(--line);
+      background: rgba(8,21,35,0.6);
+      color: var(--txt); padding: 0 12px; font: inherit;
+    }
+    .btn { cursor: pointer; font-weight: 700; }
+    .btn.primary {
+      border-color: color-mix(in srgb,var(--accent) 60%,transparent);
+      background: linear-gradient(180deg,rgba(87,216,255,0.32),rgba(10,116,158,0.32));
+    }
+    .meta { margin-top: 8px; color: var(--sub); font-size: 0.87rem; }
+
+    /* competitor reviews */
+    .competitor-panel { display: grid; gap: 12px; }
+    .competitor-summary { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 10px; }
+    .competitor-metric {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 12px;
+      background: rgba(8,21,35,0.35);
+    }
+    .competitor-metric .lb { color: var(--sub); font-size: 0.74rem; margin-bottom: 5px; }
+    .competitor-metric .vl { font-family: "Barlow Condensed", sans-serif; font-size: 1.35rem; font-weight: 700; color: var(--accent); }
+    .competitor-list { display: grid; gap: 10px; }
+    .competitor-row {
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(8,21,35,0.28);
+    }
+    .competitor-name { font-weight: 800; color: var(--txt); }
+    .competitor-meta { color: var(--sub); font-size: 0.78rem; margin-top: 4px; line-height: 1.55; }
+    .competitor-excerpt { color: var(--sub); font-size: 0.82rem; margin-top: 7px; line-height: 1.55; }
+    .competitor-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .competitor-actions .btn { padding: 6px 10px; font-size: 0.78rem; }
+    .competitor-form { display: grid; grid-template-columns: minmax(9rem,1.2fr) minmax(12rem,2fr) auto; gap: 8px; align-items: center; }
+    .pressure-high { color: var(--bad); }
+    .pressure-medium { color: var(--warn); }
+    .pressure-low, .pressure-none { color: var(--ok); }
+    body[data-theme='light'] .competitor-metric,
+    body[data-theme='light'] .competitor-row { background: rgba(230,243,253,0.55); }
+    .nearby-panel { display: none; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: rgba(8,21,35,0.22); margin-top: 4px; }
+    .nearby-panel.open { display: flex; }
+    .nearby-candidates { display: grid; gap: 7px; max-height: 340px; overflow-y: auto; }
+    .nearby-candidate { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: rgba(8,21,35,0.28); }
+    .nearby-candidate .nc-name { font-weight: 700; font-size: 0.9rem; }
+    .nearby-candidate .nc-meta { color: var(--sub); font-size: 0.76rem; margin-top: 2px; }
+    .nearby-candidate .nc-registered { color: var(--ok); font-size: 0.75rem; font-weight: 700; }
+    .nearby-candidate .nc-ai-badge { font-size: 0.72rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; margin-left: 6px; }
+    .nc-ai-badge.high { background: rgba(59,200,120,0.18); color: var(--ok); }
+    .nc-ai-badge.medium { background: rgba(230,180,60,0.18); color: var(--warn); }
+    .nc-ai-badge.low { background: rgba(120,120,120,0.18); color: var(--sub); }
+    .nc-ai-reason { color: var(--sub); font-size: 0.74rem; margin-top: 3px; font-style: italic; }
+    body[data-theme='light'] .nearby-panel { background: rgba(220,238,252,0.5); }
+    body[data-theme='light'] .nearby-candidate { background: rgba(230,243,253,0.55); }
+
+    html { overflow-x: hidden; }
+    .app { min-width: 0; }
+    .app > * { min-width: 0; }
+    .hero, .card { min-width: 0; overflow: hidden; }
+
+    @media (max-width: 600px) {
+      body { padding: 10px; overflow-x: hidden; }
+      .app { gap: 10px; }
+      .hero { padding: 14px; }
+      .hero h1 { font-size: 1.7rem; }
+      .hero p { display: none; }
+      .status { gap: 6px; font-size: 0.8rem; }
+      .pill { padding: 3px 8px; }
+      .status { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .status::-webkit-scrollbar { display: none; }
+      .card { padding: 12px; }
+      .card-title { font-size: 0.97rem; margin-bottom: 10px; }
+      .controls { flex-direction: column; align-items: stretch; }
+      .controls .input, .controls .select, .controls .btn { width: 100%; min-width: 0; }
+      .btn-row { flex-direction: row !important; }
+      .btn-row .btn { flex: 1; }
+      #storeSelect { width: 100%; }
+      #reloadBtn { width: 100%; }
+      .competitor-form { grid-template-columns: 1fr; }
+      .competitor-row { grid-template-columns: 1fr; }
+      .competitor-actions { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+  <button id="lsaNavToggle" class="lsa-navtoggle" type="button" aria-label="メニューを開閉" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div id="lsaNavBackdrop" class="lsa-nav-backdrop" aria-hidden="true"></div>
+  <aside class="lsa-side">
+    <div class="lsa-side-brand"><span class="mk">LS</span><span>LINE Summary<small>Admin Console</small></span></div>
+    <nav class="lsa-nav">
+      <p class="lsa-navlabel">メニュー</p>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','auth')}catch(e){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>接続設定</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','global')}catch(e){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>利用状況</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','webhook')}catch(e){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg>Webhook設定</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','logs')}catch(e){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>ログ</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','permissions')}catch(e){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg>ユーザー権限</a>
+      <p class="lsa-navlabel">ページ</p>
+      <a class="lsa-navitem" href="media.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>メディア閲覧</a>
+      <a class="lsa-navitem" href="message-search.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>会話検索</a>
+      <a class="lsa-navitem" href="reservation.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>予約表</a>
+      <a class="lsa-navitem" id="analyticsLink" href="analytics.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg>売上分析</a>
+      <a class="lsa-navitem is-active" href="reviews.html" aria-current="page"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.9-6.2 3.9 1.6-7L2 9.2l7.1-.6L12 2z"/></svg>口コミ・競合</a>
+      <a class="lsa-navitem" href="ai-usage.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-1 5 3 3 0 0 1-4 2 3 3 0 0 1-4-2 3 3 0 0 1-1-5 3 3 0 0 1 2-5 3 3 0 0 1 3-3Z"/><path d="M12 8v8M9 12h6"/></svg>AI使用料</a>
+      <a class="lsa-navitem" href="petty_cash.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M21 9h-6a3 3 0 0 0 0 6h6a1 1 0 0 0 1-1V10a1 1 0 0 0-1-1z"/></svg>小口現金</a>
+      <a class="lsa-navitem" href="foodcourt.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M4 12h16M4 18h8"/><circle cx="19" cy="18" r="2"/></svg>フードコート分析</a>
+    </nav>
+    <div class="lsa-side-foot"><div class="conn"><span class="dt"></span><span><b>接続済み</b>hocbnifuactbvmyjraxy</span></div></div>
+  </aside>
+
+<div class="app">
+
+  <!-- Header -->
+  <header class="hero">
+    <h1>口コミ・競合分析</h1>
+    <p>自店舗のGoogle口コミと周辺競合店の評価を管理します</p>
+    <div class="status">
+      <span id="authState" class="pill">未接続</span>
+      <span id="lastRefresh" class="pill">最終更新: なし</span>
+      <a href="./index.html" class="pill link" id="adminLink">管理画面</a>
+      <a href="./media.html" class="pill link" id="mediaLink">メディア閲覧</a>
+      <a href="./reservation.html" class="pill link" id="reservationLink">予約表</a>
+      <a href="./analytics.html" class="pill link" id="analyticsHeaderLink">売上分析</a>
+      <button id="themeBtn" type="button" class="pill">ライトモード</button>
+    </div>
+  </header>
+
+  <!-- Auth -->
+  <section class="card" id="authCard">
+    <h2 class="card-title">接続</h2>
+    <div class="controls">
+      <input id="projectUrlInput" class="input" type="text" readonly tabindex="-1">
+      <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN">
+      <div class="controls btn-row">
+        <button id="saveTokenBtn" class="btn primary">保存して接続</button>
+        <button id="clearTokenBtn" class="btn">削除</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Filters -->
+  <section class="card">
+    <h2 class="card-title">絞り込み</h2>
+    <div class="controls">
+      <span id="lineLockedStoreLabel" class="pill line-locked-store-label" style="display:none" hidden aria-hidden="true"></span>
+      <button id="admUnlockBtn" type="button" class="pill adm-unlock-btn" style="display:none" hidden>管理者ログイン</button>
+      <div class="adm-modal" id="admModal" hidden>
+        <div class="adm-box">
+          <div class="adm-title">管理者としてログイン</div>
+          <p class="adm-desc">本部の管理トークンを入力すると、店舗ロックを解除して全メニュー・全店舗を表示します（店舗スタッフはそのままご利用ください）。</p>
+          <input class="input" id="admToken" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" />
+          <div class="adm-msg" id="admMsg"></div>
+          <div class="adm-actions">
+            <button class="btn" id="admCancel" type="button">キャンセル</button>
+            <button class="btn primary" id="admSubmit" type="button">ログインして解除</button>
+          </div>
+        </div>
+      </div>
+      <select id="storeSelect" class="select" aria-label="店舗選択">
+        <option value="">店舗を選択してください</option>
+      </select>
+      <button id="reloadBtn" class="btn primary">再読み込み</button>
+    </div>
+    <div id="filterMeta" class="meta">未取得</div>
+  </section>
+
+  <section class="card" aria-labelledby="storeReviewHeading">
+    <h2 class="card-title" id="storeReviewHeading">自店舗口コミ</h2>
+    <div class="competitor-panel">
+      <div class="competitor-summary">
+        <div class="competitor-metric"><div class="lb">評価</div><div class="vl" id="storeReviewRating">-</div></div>
+        <div class="competitor-metric"><div class="lb">口コミ件数</div><div class="vl" id="storeReviewTotalRatings">-</div></div>
+        <div class="competitor-metric"><div class="lb">登録状態</div><div class="vl" id="storeReviewStatusMetric">未登録</div></div>
+        <div class="competitor-metric"><div class="lb">最終更新</div><div class="vl" id="storeReviewUpdatedAt">-</div></div>
+      </div>
+      <div id="storeReviewSummaryText" class="meta">店舗を選択すると、自店舗のGoogle口コミ評価を表示します。</div>
+      <div class="competitor-form">
+        <input id="storeReviewNameInput" class="input" type="text" placeholder="自店舗名（例: マルゴS）">
+        <input id="storeReviewPlaceIdInput" class="input" type="text" placeholder="Google Place ID（自店舗）">
+        <button id="storeReviewAddBtn" class="btn primary" type="button">自店舗を登録</button>
+      </div>
+      <div class="controls" style="gap:8px;margin-top:0">
+        <button id="storeReviewSearchBtn" class="btn" type="button">自店舗を検索</button>
+        <button id="storeReviewRefreshBtn" class="btn" type="button">自店舗口コミを更新</button>
+        <button id="storeReviewDeleteBtn" class="btn" type="button">登録解除</button>
+        <span id="storeReviewStatus" class="meta" style="margin-top:0">競合口コミとは別枠で管理します。</span>
+      </div>
+      <div id="storeReviewSearchPanel" class="nearby-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span id="storeReviewSearchTitle" style="font-weight:700;font-size:0.88rem">自店舗候補</span>
+          <button id="storeReviewSearchCloseBtn" class="btn" type="button" style="padding:4px 10px;font-size:0.78rem">閉じる</button>
+        </div>
+        <div id="storeReviewCandidates" class="nearby-candidates"><span class="meta">検索中…</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button id="storeReviewCandidateRegisterBtn" class="btn primary" type="button">選択した候補を自店舗に登録</button>
+          <span id="storeReviewSearchStatus" class="meta" style="margin-top:0"></span>
+        </div>
+      </div>
+      <div id="storeReviewList" class="competitor-list"></div>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="competitorReviewHeading">
+    <h2 class="card-title" id="competitorReviewHeading">周辺競合・口コミ</h2>
+    <div class="competitor-panel">
+      <div class="competitor-summary">
+        <div class="competitor-metric"><div class="lb">競合圧力</div><div class="vl" id="competitorPressure">-</div></div>
+        <div class="competitor-metric"><div class="lb">評価平均</div><div class="vl" id="competitorAvgRating">-</div></div>
+        <div class="competitor-metric"><div class="lb">口コミ件数</div><div class="vl" id="competitorTotalRatings">-</div></div>
+        <div class="competitor-metric"><div class="lb">登録競合</div><div class="vl" id="competitorCount">-</div></div>
+      </div>
+      <div id="competitorSummaryText" class="meta">店舗を選択すると、登録済みの周辺競合評価を表示します。</div>
+      <div class="competitor-form">
+        <input id="competitorNameInput" class="input" type="text" placeholder="競合店名（例: 近隣イタリアン）">
+        <input id="competitorPlaceIdInput" class="input" type="text" placeholder="Google Place ID（口コミ取得に必要）">
+        <button id="competitorAddBtn" class="btn primary" type="button">競合を追加</button>
+      </div>
+      <div class="controls" style="gap:8px;margin-top:0">
+        <button id="competitorNearbyBtn" class="btn" type="button">周辺を自動検索</button>
+        <select id="nearbyRadiusSelect" class="input" style="width:auto;padding:5px 8px;font-size:0.85rem">
+          <option value="100">半径100m</option>
+          <option value="200">半径200m</option>
+          <option value="300" selected>半径300m</option>
+          <option value="500">半径500m</option>
+          <option value="1000">半径1km</option>
+          <option value="2000">半径2km</option>
+        </select>
+        <button id="competitorRefreshBtn" class="btn" type="button">口コミ情報を更新</button>
+        <span id="competitorStatus" class="meta" style="margin-top:0">Google Places APIキー未設定の場合、更新だけ失敗します。</span>
+      </div>
+      <div id="nearbyPanel" class="nearby-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span id="nearbyPanelTitle" style="font-weight:700;font-size:0.88rem">周辺店舗の候補（半径300m）</span>
+          <button id="nearbyCloseBtn" class="btn" type="button" style="padding:4px 10px;font-size:0.78rem">閉じる</button>
+        </div>
+        <div id="nearbyCandidates" class="nearby-candidates"><span class="meta">検索中…</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button id="nearbyRegisterBtn" class="btn primary" type="button">選択した店舗を登録</button>
+          <span id="nearbyStatus" class="meta" style="margin-top:0"></span>
+        </div>
+      </div>
+      <div id="competitorList" class="competitor-list"></div>
+    </div>
+  </section>
+
+</div>
+
+<script src="pages-config.js?v=20260706"></script>
+<script src="auth-session.js?v=20260624"></script>
+<script src="menu-logout.js?v=20260702"></script>
+<script>
+'use strict';
+
+const TOKEN_KEY = 'line_summary_admin_token';
+const THEME_KEY = 'line_reservation_calendar_theme';
+const PROJECT_URL = LINE_REPORT_PAGES.RECEIPT_ADMIN_PROJECT_URL;
+const STORE_NAMES = LINE_REPORT_PAGES.STORE_NAMES;
+const STORE_SELECT_PLACEHOLDER = '店舗を選択してください';
+
+/* ── store coordinates / address（自店舗検索のヒントに使用。analytics.html と同一） ── */
+const STORE_COORDS = {
+  marugo:              { lat: 35.6911, lon: 139.7060 },
+  marugosecond:        { lat: 35.6912, lon: 139.7066 },
+  marugogrande:        { lat: 35.6910, lon: 139.7058 },
+  sannanaichi:         { lat: 35.6907, lon: 139.7062 },
+  shenlong:            { lat: 35.6907, lon: 139.7064 },
+  claudia2:            { lat: 35.6912, lon: 139.7065 },
+  sauvage:             { lat: 35.6911, lon: 139.7064 },
+  barpelota:           { lat: 35.6892, lon: 139.7073 },
+  briccola:            { lat: 35.6919, lon: 139.7067 },
+  violette:            { lat: 35.6918, lon: 139.7068 },
+  marugootto:          { lat: 35.6931, lon: 139.7024 },
+  donaiya:             { lat: 35.6911, lon: 139.7066 },
+  marugoyotsuya:       { lat: 35.6877, lon: 139.7291 },
+  sushikoruri:         { lat: 35.6877, lon: 139.7291 },
+  bistrocavacava:      { lat: 35.6905, lon: 139.7222 },
+  marugoS:             { lat: 35.7032, lon: 139.7522 },
+  marugoshinbashi:     { lat: 35.6658, lon: 139.7562 },
+  marugomarunouchi:    { lat: 35.6788, lon: 139.7631 },
+  yakinikumarugo:      { lat: 35.6778, lon: 139.7614 },
+  erics:               { lat: 35.6826, lon: 139.7643 },
+  mitan:               { lat: 35.6826, lon: 139.7643 },
+  marugoD:             { lat: 34.9922, lon: 137.0127 },
+};
+
+const STORE_ADDRESS = {
+  marugo:              '新宿区新宿3丁目',
+  marugosecond:        '新宿区新宿3丁目',
+  marugogrande:        '新宿区新宿3丁目',
+  sannanaichi:         '新宿区新宿3丁目',
+  shenlong:            '新宿区新宿3丁目',
+  claudia2:            '新宿区新宿3丁目',
+  sauvage:             '新宿区新宿3丁目',
+  barpelota:           '新宿区新宿2丁目',
+  briccola:            '新宿区新宿3丁目',
+  violette:            '新宿区新宿3丁目',
+  marugootto:          '新宿区新宿3丁目',
+  donaiya:             '新宿区新宿3丁目',
+  marugoyotsuya:       '新宿区四谷1丁目',
+  sushikoruri:         '新宿区四谷1丁目',
+  bistrocavacava:      '新宿区荒木町',
+  marugoS:             '文京区後楽',
+  marugoshinbashi:     '港区新橋3丁目',
+  marugomarunouchi:    '千代田区丸の内2丁目',
+  yakinikumarugo:      '千代田区丸の内3丁目',
+  erics:               '千代田区丸の内1丁目',
+  mitan:               '千代田区丸の内1丁目',
+  marugoD:             '愛知県刈谷市中山町',
+};
+
+const state = {
+  theme: localStorage.getItem(THEME_KEY) || 'dark',
+  storeKey: '',
+  /** LINE 経由で URL の店舗に固定（他店舗は選択不可） */
+  lineLockedStoreKey: '',
+};
+
+/* ── dom refs ── */
+const $ = (id) => document.getElementById(id);
+const dom = {
+  authState: $('authState'), lastRefresh: $('lastRefresh'),
+  projectUrl: $('projectUrlInput'), tokenInput: $('tokenInput'),
+  saveToken: $('saveTokenBtn'), clearToken: $('clearTokenBtn'),
+  storeSelect: $('storeSelect'), reloadBtn: $('reloadBtn'),
+  filterMeta: $('filterMeta'), themeBtn: $('themeBtn'),
+  storeReviewRating: $('storeReviewRating'),
+  storeReviewTotalRatings: $('storeReviewTotalRatings'),
+  storeReviewStatusMetric: $('storeReviewStatusMetric'),
+  storeReviewUpdatedAt: $('storeReviewUpdatedAt'),
+  storeReviewSummaryText: $('storeReviewSummaryText'),
+  storeReviewNameInput: $('storeReviewNameInput'),
+  storeReviewPlaceIdInput: $('storeReviewPlaceIdInput'),
+  storeReviewAddBtn: $('storeReviewAddBtn'),
+  storeReviewSearchBtn: $('storeReviewSearchBtn'),
+  storeReviewRefreshBtn: $('storeReviewRefreshBtn'),
+  storeReviewDeleteBtn: $('storeReviewDeleteBtn'),
+  storeReviewStatus: $('storeReviewStatus'),
+  storeReviewSearchPanel: $('storeReviewSearchPanel'),
+  storeReviewSearchTitle: $('storeReviewSearchTitle'),
+  storeReviewSearchCloseBtn: $('storeReviewSearchCloseBtn'),
+  storeReviewCandidates: $('storeReviewCandidates'),
+  storeReviewCandidateRegisterBtn: $('storeReviewCandidateRegisterBtn'),
+  storeReviewSearchStatus: $('storeReviewSearchStatus'),
+  storeReviewList: $('storeReviewList'),
+  competitorPressure: $('competitorPressure'),
+  competitorAvgRating: $('competitorAvgRating'),
+  competitorTotalRatings: $('competitorTotalRatings'),
+  competitorCount: $('competitorCount'),
+  competitorSummaryText: $('competitorSummaryText'),
+  competitorNameInput: $('competitorNameInput'),
+  competitorPlaceIdInput: $('competitorPlaceIdInput'),
+  competitorAddBtn: $('competitorAddBtn'),
+  competitorRefreshBtn: $('competitorRefreshBtn'),
+  competitorNearbyBtn: $('competitorNearbyBtn'),
+  competitorStatus: $('competitorStatus'),
+  competitorList: $('competitorList'),
+  nearbyPanel: $('nearbyPanel'),
+  nearbyPanelTitle: $('nearbyPanelTitle'),
+  nearbyRadiusSelect: $('nearbyRadiusSelect'),
+  nearbyCloseBtn: $('nearbyCloseBtn'),
+  nearbyCandidates: $('nearbyCandidates'),
+  nearbyRegisterBtn: $('nearbyRegisterBtn'),
+  nearbyStatus: $('nearbyStatus'),
+};
+
+/* ── helpers ── */
+function getToken() {
+  return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(TOKEN_KEY) || '');
+}
+function setToken(t) {
+  if (window.LINE_REPORT_AUTH) LINE_REPORT_AUTH.setToken(t);
+  else localStorage.setItem(TOKEN_KEY, t);
+}
+function removeToken() {
+  if (window.LINE_REPORT_AUTH) LINE_REPORT_AUTH.clearToken();
+  else localStorage.removeItem(TOKEN_KEY);
+}
+async function logoutToken() {
+  if (window.LINE_REPORT_AUTH) {
+    await LINE_REPORT_AUTH.logout({
+      logoutUrl: LINE_REPORT_PAGES.receiptAdminApiUrl('/auth/logout'),
+      adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE,
+    });
+  } else {
+    removeToken();
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function num(v) { return v == null ? '-' : Number(v).toLocaleString('ja-JP'); }
+
+function pressureLabel(level) {
+  const key = String(level || 'none');
+  if (key === 'high') return '高い';
+  if (key === 'medium') return '中程度';
+  if (key === 'low') return '低め';
+  return '未登録';
+}
+
+function formatRating(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2).replace(/\.00$/, '') : '-';
+}
+
+function currentStoreKey() {
+  return state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+}
+
+function currentStoreName() {
+  const sk = currentStoreKey();
+  return (STORE_NAMES && STORE_NAMES[sk]) || sk || '';
+}
+
+/* ── API fetch ── */
+async function apiFetch(path, options = {}) {
+  const token = getToken();
+  if (!token) throw new Error('トークンが未設定です。');
+  const url = LINE_REPORT_PAGES.receiptAdminApiUrl(path);
+  const method = options.method || 'GET';
+  const headers = { 'x-admin-token': token };
+  const anonKey = LINE_REPORT_PAGES.RECEIPT_ADMIN_ANON_KEY || '';
+  if (anonKey) {
+    headers.apikey = anonKey;
+    headers.Authorization = 'Bearer ' + anonKey;
+  }
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json; charset=utf-8';
+  }
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    if (res.status === 401) {
+      await logoutToken();
+      updateAuthBadge();
+      throw new Error('ログインの有効期限が切れたか、古いリンクです。LINEの新しいメッセージから開くか、管理トークンを再入力してください。');
+    }
+    throw new Error(`API error ${res.status}: ${text.slice(0, 160)}`);
+  }
+  return res.json();
+}
+
+/* ── 自店舗口コミ ── */
+function renderStoreReviewContext(ctx) {
+  if (!dom.storeReviewList) return;
+  const data = ctx && typeof ctx === 'object' ? ctx : null;
+  const place = data?.place || null;
+  const latest = data?.latest_snapshot || {};
+  if (dom.storeReviewRating) dom.storeReviewRating.textContent = data?.rating != null ? formatRating(data.rating) : '-';
+  if (dom.storeReviewTotalRatings) dom.storeReviewTotalRatings.textContent = data?.total_ratings != null ? num(data.total_ratings) : '-';
+  if (dom.storeReviewStatusMetric) dom.storeReviewStatusMetric.textContent = data?.registered ? '登録済み' : '未登録';
+  if (dom.storeReviewUpdatedAt) {
+    dom.storeReviewUpdatedAt.textContent = latest.updated_at
+      ? new Date(latest.updated_at).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })
+      : '-';
+  }
+  if (dom.storeReviewSummaryText) {
+    dom.storeReviewSummaryText.textContent = data?.summary || '自店舗のGoogle Place IDを登録すると、評価と口コミ件数を表示できます。';
+  }
+
+  if (!place) {
+    dom.storeReviewList.innerHTML = '<div class="meta">自店舗のGoogle Place IDは未登録です。「自店舗を検索」または手入力で登録してください。</div>';
+    if (dom.storeReviewNameInput) dom.storeReviewNameInput.value = currentStoreName();
+    return;
+  }
+
+  const rating = latest.rating != null ? `評価 ${escapeHtml(formatRating(latest.rating))}` : '評価 未取得';
+  const total = latest.user_ratings_total != null ? `口コミ ${escapeHtml(num(latest.user_ratings_total))}件` : '口コミ 未取得';
+  const updated = latest.updated_at ? `更新 ${escapeHtml(new Date(latest.updated_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }))}` : '未更新';
+  const maps = place.google_maps_uri ? ` · <a href="${escapeHtml(place.google_maps_uri)}" target="_blank" rel="noopener noreferrer">Google Maps</a>` : '';
+  const website = place.website_uri ? ` · <a href="${escapeHtml(place.website_uri)}" target="_blank" rel="noopener noreferrer">公式サイト</a>` : '';
+  const excerpt = latest.review_excerpt ? `<div class="competitor-excerpt">${escapeHtml(latest.review_excerpt)}</div>` : '';
+  dom.storeReviewList.innerHTML = `
+    <div class="competitor-row">
+      <div>
+        <div class="competitor-name">${escapeHtml(place.store_name || currentStoreName() || '自店舗')}</div>
+        <div class="competitor-meta">${rating} / ${total} / ${updated}${maps}${website}<br>${escapeHtml(place.address || '住所未取得')}</div>
+        ${excerpt}
+      </div>
+      <div class="competitor-actions">
+        <button class="btn" type="button" data-store-review-refresh="1">更新</button>
+        <button class="btn" type="button" data-store-review-delete="1">登録解除</button>
+      </div>
+    </div>
+  `;
+  if (dom.storeReviewNameInput) dom.storeReviewNameInput.value = place.store_name || currentStoreName();
+  if (dom.storeReviewPlaceIdInput) dom.storeReviewPlaceIdInput.value = place.place_id || '';
+}
+
+async function reloadStoreReviewContext() {
+  const sk = currentStoreKey();
+  if (!sk) {
+    renderStoreReviewContext(null);
+    return;
+  }
+  const ctx = await apiFetch(`/receipts/store-reviews?store_key=${encodeURIComponent(sk)}`);
+  renderStoreReviewContext(ctx);
+}
+
+async function addStoreReviewFromForm() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  const name = String(dom.storeReviewNameInput?.value || currentStoreName()).trim();
+  const placeId = String(dom.storeReviewPlaceIdInput?.value || '').trim();
+  if (!placeId) throw new Error('自店舗のGoogle Place IDを入力してください。');
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '自店舗を登録中…';
+  const ctx = await apiFetch('/receipts/store-reviews', {
+    method: 'PUT',
+    body: {
+      store_key: sk,
+      store_name: name,
+      place_id: placeId,
+      address: STORE_ADDRESS[sk] || '',
+      ...(STORE_COORDS[sk] || {}),
+    },
+  });
+  renderStoreReviewContext(ctx);
+  try {
+    const refreshed = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
+    renderStoreReviewContext(refreshed.context || ctx);
+    if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '登録・口コミ更新しました。';
+  } catch (e) {
+    if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '登録しました。口コミ更新は失敗: ' + e.message;
+  }
+}
+
+async function refreshStoreReview() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '自店舗口コミを更新中…';
+  const result = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
+  renderStoreReviewContext(result.context);
+  const err = Array.isArray(result.errors) && result.errors.length ? ` / ${result.errors.join(' / ')}` : '';
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = result.refreshed ? '更新しました。' : `更新対象がありません${err}`;
+}
+
+async function deleteStoreReview() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (!confirm('自店舗口コミのGoogle Place登録を解除しますか？')) return;
+  const ctx = await apiFetch('/receipts/store-reviews', { method: 'DELETE', body: { store_key: sk } });
+  renderStoreReviewContext(ctx);
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '登録解除しました。';
+}
+
+let _storeReviewCandidateCache = [];
+
+function renderStoreReviewCandidates(candidates) {
+  if (!dom.storeReviewCandidates) return;
+  if (!candidates.length) {
+    dom.storeReviewCandidates.innerHTML = '<span class="meta">候補が見つかりませんでした。Google Place IDを手入力してください。</span>';
+    return;
+  }
+  dom.storeReviewCandidates.innerHTML = candidates.map((c, i) => {
+    const rating = c.rating != null ? `★${Number(c.rating).toFixed(1)}` : '評価なし';
+    const total = c.user_ratings_total != null ? `口コミ${Number(c.user_ratings_total).toLocaleString('ja-JP')}件` : '';
+    const addr = c.address ? `<div class="nc-meta">${escapeHtml(c.address)}</div>` : '';
+    const website = c.website_uri
+      ? `<div class="nc-meta"><a href="${escapeHtml(c.website_uri)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-size:0.78rem" onclick="event.stopPropagation()">🌐 公式サイト</a></div>`
+      : '';
+    return `<label class="nearby-candidate" style="cursor:pointer">
+      <input type="radio" name="storeReviewCandidate" data-store-review-candidate-idx="${i}" ${i === 0 ? 'checked' : ''} style="width:16px;height:16px;flex-shrink:0">
+      <div>
+        <div class="nc-name">${escapeHtml(c.name || '不明')}</div>
+        <div class="nc-meta">${rating}${total ? '　' + total : ''}</div>
+        ${addr}${website}
+      </div>
+      <div></div>
+    </label>`;
+  }).join('');
+}
+
+async function openStoreReviewSearch() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (dom.storeReviewSearchPanel) dom.storeReviewSearchPanel.classList.add('open');
+  if (dom.storeReviewSearchTitle) dom.storeReviewSearchTitle.textContent = `自店舗候補: ${currentStoreName() || sk}`;
+  if (dom.storeReviewCandidates) dom.storeReviewCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
+  if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '';
+  const coords = STORE_COORDS[sk] || {};
+  const result = await apiFetch('/receipts/store-reviews/search', {
+    method: 'POST',
+    body: {
+      store_key: sk,
+      store_name: currentStoreName(),
+      address: STORE_ADDRESS[sk] || '',
+      ...coords,
+    },
+  });
+  _storeReviewCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
+  renderStoreReviewCandidates(_storeReviewCandidateCache);
+}
+
+async function registerSelectedStoreReviewCandidate() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  const checked = dom.storeReviewCandidates
+    ? dom.storeReviewCandidates.querySelector('input[name=storeReviewCandidate]:checked')
+    : null;
+  const candidate = checked ? _storeReviewCandidateCache[Number(checked.dataset.storeReviewCandidateIdx)] : null;
+  if (!candidate) {
+    if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '登録する候補を選択してください。';
+    return;
+  }
+  if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '自店舗として登録中…';
+  const ctx = await apiFetch('/receipts/store-reviews', {
+    method: 'PUT',
+    body: {
+      store_key: sk,
+      store_name: candidate.name || currentStoreName(),
+      place_id: candidate.place_id,
+      address: candidate.address || STORE_ADDRESS[sk] || '',
+      google_maps_uri: candidate.google_maps_uri || '',
+      website_uri: candidate.website_uri || '',
+      lat: candidate.lat,
+      lng: candidate.lng,
+    },
+  });
+  renderStoreReviewContext(ctx);
+  const refreshed = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
+  renderStoreReviewContext(refreshed.context || ctx);
+  if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '登録・口コミ更新しました。';
+  if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '自店舗口コミを登録しました。';
+}
+
+/* ── 周辺競合・口コミ ── */
+function renderCompetitorContext(ctx) {
+  if (!dom.competitorList) return;
+  const data = ctx && typeof ctx === 'object' ? ctx : null;
+  const pressure = String(data?.pressure_level || 'none');
+  if (dom.competitorPressure) {
+    dom.competitorPressure.textContent = pressureLabel(pressure);
+    dom.competitorPressure.className = 'vl pressure-' + pressure;
+  }
+  if (dom.competitorAvgRating) dom.competitorAvgRating.textContent = data?.avg_rating != null ? formatRating(data.avg_rating) : '-';
+  if (dom.competitorTotalRatings) dom.competitorTotalRatings.textContent = data?.total_ratings != null ? num(data.total_ratings) : '-';
+  if (dom.competitorCount) dom.competitorCount.textContent = data?.competitor_count != null ? num(data.competitor_count) : '-';
+  if (dom.competitorSummaryText) dom.competitorSummaryText.textContent = data?.summary || '競合店を登録すると、Google Places の評価・口コミ件数を売上分析の補助指標として表示します。';
+
+  const competitors = Array.isArray(data?.competitors) ? data.competitors : [];
+  if (!competitors.length) {
+    dom.competitorList.innerHTML = '<div class="meta">競合店はまだ登録されていません。Google Place ID を登録してください。</div>';
+    return;
+  }
+  dom.competitorList.innerHTML = competitors.map((c) => {
+    const latest = c.latest_snapshot || {};
+    const rating = latest.rating != null ? `評価 ${escapeHtml(formatRating(latest.rating))}` : '評価 未取得';
+    const total = latest.user_ratings_total != null ? `口コミ ${escapeHtml(num(latest.user_ratings_total))}件` : '口コミ 未取得';
+    const updated = latest.updated_at ? `更新 ${escapeHtml(new Date(latest.updated_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }))}` : '未更新';
+    const maps = c.google_maps_uri ? ` · <a href="${escapeHtml(c.google_maps_uri)}" target="_blank" rel="noopener noreferrer">Google Maps</a>` : '';
+    const place = c.place_id ? `Place ID: ${escapeHtml(String(c.place_id).slice(0, 18))}…` : 'Place ID 未設定';
+    const excerpt = latest.review_excerpt ? `<div class="competitor-excerpt">${escapeHtml(latest.review_excerpt)}</div>` : '';
+    return `
+      <div class="competitor-row" data-competitor-id="${escapeHtml(c.id)}">
+        <div>
+          <div class="competitor-name">${escapeHtml(c.competitor_name || '未設定')}</div>
+          <div class="competitor-meta">${rating} / ${total} / ${updated}${maps}<br>${escapeHtml(c.address || place)}</div>
+          ${excerpt}
+        </div>
+        <div class="competitor-actions">
+          <button class="btn" type="button" data-competitor-refresh="${escapeHtml(c.id)}">更新</button>
+          <button class="btn" type="button" data-competitor-delete="${escapeHtml(c.id)}">削除</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function reloadCompetitorContext() {
+  const sk = currentStoreKey();
+  if (!sk) {
+    renderCompetitorContext(null);
+    return;
+  }
+  const ctx = await apiFetch(`/receipts/competitors?store_key=${encodeURIComponent(sk)}`);
+  renderCompetitorContext(ctx);
+}
+
+async function addCompetitorFromForm() {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  const name = String(dom.competitorNameInput?.value || '').trim();
+  const placeId = String(dom.competitorPlaceIdInput?.value || '').trim();
+  if (!name && !placeId) throw new Error('競合店名またはGoogle Place IDを入力してください。');
+  if (dom.competitorStatus) dom.competitorStatus.textContent = '競合店を登録中…';
+  const ctx = await apiFetch('/receipts/competitors', {
+    method: 'PUT',
+    body: { store_key: sk, competitor_name: name, place_id: placeId },
+  });
+  renderCompetitorContext(ctx);
+  if (dom.competitorNameInput) dom.competitorNameInput.value = '';
+  if (dom.competitorPlaceIdInput) dom.competitorPlaceIdInput.value = '';
+  if (placeId) {
+    try {
+      const refreshed = await apiFetch('/receipts/competitors/refresh', { method: 'POST', body: { store_key: sk } });
+      renderCompetitorContext(refreshed.context || ctx);
+      if (dom.competitorStatus) dom.competitorStatus.textContent = `登録・更新しました（${refreshed.refreshed || 0}件）。`;
+    } catch (e) {
+      if (dom.competitorStatus) dom.competitorStatus.textContent = '登録しました。口コミ更新は失敗: ' + e.message;
+    }
+  } else if (dom.competitorStatus) {
+    dom.competitorStatus.textContent = '登録しました。口コミ取得にはGoogle Place IDが必要です。';
+  }
+}
+
+async function refreshCompetitors(id) {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (dom.competitorStatus) dom.competitorStatus.textContent = 'Google Places から更新中…';
+  const body = { store_key: sk };
+  if (id) body.id = Number(id);
+  const result = await apiFetch('/receipts/competitors/refresh', { method: 'POST', body });
+  renderCompetitorContext(result.context);
+  const err = Array.isArray(result.errors) && result.errors.length ? ` / エラー ${result.errors.length}件` : '';
+  if (dom.competitorStatus) dom.competitorStatus.textContent = `更新しました（${result.refreshed || 0}件）${err}`;
+}
+
+async function deleteCompetitor(id) {
+  const sk = currentStoreKey();
+  if (!sk) throw new Error('店舗を選択してください。');
+  if (!confirm('この競合店を売上分析から外しますか？')) return;
+  const ctx = await apiFetch('/receipts/competitors', {
+    method: 'DELETE',
+    body: { store_key: sk, id: Number(id) },
+  });
+  renderCompetitorContext(ctx);
+  if (dom.competitorStatus) dom.competitorStatus.textContent = '削除しました。';
+}
+
+let _nearbyCandidateCache = [];
+
+function renderNearbyCandidates(candidates, registeredPlaceIds) {
+  if (!dom.nearbyCandidates) return;
+  if (!candidates.length) {
+    dom.nearbyCandidates.innerHTML = '<span class="meta">周辺に該当する店舗が見つかりませんでした。</span>';
+    return;
+  }
+  const hasAi = candidates.some((c) => c.ai_is_competitor !== null && c.ai_is_competitor !== undefined);
+  const confScore = { high: 0, medium: 1, low: 2 };
+  const sorted = candidates
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => {
+      const av = a.c.ai_is_competitor, bv = b.c.ai_is_competitor;
+      if (av === true && bv !== true) return -1;
+      if (av !== true && bv === true) return 1;
+      if (av === true && bv === true) {
+        const as_ = confScore[a.c.ai_confidence] ?? 1;
+        const bs_ = confScore[b.c.ai_confidence] ?? 1;
+        return as_ - bs_;
+      }
+      if (av === false && bv !== false) return 1;
+      if (av !== false && bv === false) return -1;
+      return 0;
+    });
+  dom.nearbyCandidates.innerHTML = sorted.map(({ c, i }) => {
+    const alreadyRegistered = registeredPlaceIds.has(c.place_id);
+    const aiComp = c.ai_is_competitor === true;
+    const aiConf = c.ai_confidence || 'medium';
+    const autoChecked = !alreadyRegistered && aiComp;
+    const rating = c.rating != null ? `★${Number(c.rating).toFixed(1)}` : '評価なし';
+    const total = c.user_ratings_total != null ? `口コミ${Number(c.user_ratings_total).toLocaleString('ja-JP')}件` : '';
+    const addr = c.address ? `<div class="nc-meta">${escapeHtml(c.address)}</div>` : '';
+    const registeredBadge = alreadyRegistered ? '<span class="nc-registered">登録済み</span>' : '';
+    const aiBadge = hasAi && c.ai_is_competitor !== null
+      ? `<span class="nc-ai-badge ${escapeHtml(aiConf)}">${aiComp ? 'AI:競合' : 'AI:除外'}</span>`
+      : '';
+    const aiReason = hasAi && c.ai_reason
+      ? `<div class="nc-ai-reason">${escapeHtml(c.ai_reason)}</div>`
+      : '';
+    const websiteLink = c.website_uri
+      ? `<div class="nc-meta"><a href="${escapeHtml(c.website_uri)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-size:0.78rem" onclick="event.stopPropagation()">🌐 公式サイト</a></div>`
+      : '';
+    return `<label class="nearby-candidate" style="cursor:${alreadyRegistered ? 'default' : 'pointer'}">
+      <input type="checkbox" data-nearby-idx="${i}" ${alreadyRegistered ? 'disabled checked' : (autoChecked ? 'checked' : '')} style="width:16px;height:16px;flex-shrink:0">
+      <div>
+        <div class="nc-name">${escapeHtml(c.name || '不明')}${registeredBadge ? '&nbsp;' + registeredBadge : ''}${aiBadge}</div>
+        <div class="nc-meta">${rating}${total ? '　' + total : ''}</div>
+        ${addr}${aiReason}${websiteLink}
+      </div>
+      <div></div>
+    </label>`;
+  }).join('');
+}
+
+async function openNearbySearch() {
+  const sk = currentStoreKey();
+  if (!sk) { alert('店舗を選択してから実行してください。'); return; }
+  const radius = Number((dom.nearbyRadiusSelect && dom.nearbyRadiusSelect.value) || 300);
+  const radiusLabel = radius >= 1000 ? `${radius / 1000}km` : `${radius}m`;
+  if (dom.nearbyPanelTitle) dom.nearbyPanelTitle.textContent = `周辺店舗の候補（半径${radiusLabel}）`;
+  if (dom.nearbyPanel) dom.nearbyPanel.classList.add('open');
+  if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
+  if (dom.nearbyStatus) dom.nearbyStatus.textContent = '';
+  try {
+    const result = await apiFetch('/receipts/competitors/nearby-search', { method: 'POST', body: { store_key: sk, radius } });
+    _nearbyCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
+    const ctx = await apiFetch(`/receipts/competitors?store_key=${encodeURIComponent(sk)}`);
+    const registered = new Set(
+      (Array.isArray(ctx.competitors) ? ctx.competitors : [])
+        .map((c) => c.place_id)
+        .filter(Boolean)
+    );
+    renderNearbyCandidates(_nearbyCandidateCache, registered);
+  } catch (e) {
+    if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = `<span class="meta" style="color:var(--bad)">エラー: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function registerSelectedNearby() {
+  const sk = currentStoreKey();
+  if (!sk) return;
+  const checkboxes = dom.nearbyCandidates ? dom.nearbyCandidates.querySelectorAll('input[type=checkbox]:checked:not(:disabled)') : [];
+  const selected = Array.from(checkboxes).map((el) => _nearbyCandidateCache[Number(el.dataset.nearbyIdx)]).filter(Boolean);
+  if (!selected.length) { if (dom.nearbyStatus) dom.nearbyStatus.textContent = '登録する店舗を選択してください。'; return; }
+  if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${selected.length}件を登録中…`;
+  let ok = 0, fail = 0;
+  for (const c of selected) {
+    try {
+      await apiFetch('/receipts/competitors', {
+        method: 'PUT',
+        body: { store_key: sk, competitor_name: c.name || '', place_id: c.place_id },
+      });
+      ok++;
+    } catch (_) { fail++; }
+  }
+  if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${ok}件登録しました${fail ? `（${fail}件失敗）` : ''}。口コミ更新中…`;
+  try {
+    const refreshed = await apiFetch('/receipts/competitors/refresh', { method: 'POST', body: { store_key: sk } });
+    renderCompetitorContext(refreshed.context);
+    if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${ok}件登録・口コミ取得完了。`;
+  } catch (_) {
+    await reloadCompetitorContext();
+    if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${ok}件登録しました（口コミ更新は手動でお試しください）。`;
+  }
+  if (dom.competitorStatus) dom.competitorStatus.textContent = '';
+}
+
+/* ── auth badge / theme ── */
+function updateAuthBadge() {
+  const ok = !!getToken();
+  dom.authState.textContent = ok ? 'ログイン済み' : '未接続';
+  dom.authState.classList.toggle('ok', ok);
+  dom.projectUrl.value = PROJECT_URL;
+  const authCard = document.getElementById('authCard');
+  if (authCard) authCard.style.display = ok ? 'none' : '';
+}
+
+dom.saveToken.addEventListener('click', () => {
+  const t = dom.tokenInput.value.trim();
+  if (!t) return alert('トークンを入力してください。');
+  dom.tokenInput.value = '';
+  (async function () {
+    try {
+      if (window.LINE_REPORT_AUTH) {
+        await LINE_REPORT_AUTH.loginWithToken(t, {
+          sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', LINE_REPORT_PAGES.PROJECT_URL),
+          adminSurface: 'line_report',
+        });
+        updateAuthBadge();
+      } else {
+        setToken(t);
+        updateAuthBadge();
+      }
+      await loadReviews();
+    } catch (error) {
+      alert(error && error.message ? error.message : String(error));
+    }
+  })();
+});
+
+dom.clearToken.addEventListener('click', async () => {
+  await logoutToken();
+  dom.tokenInput.value = '';
+  updateAuthBadge();
+  renderStoreReviewContext(null);
+  renderCompetitorContext(null);
+});
+
+function applyTheme(t) {
+  state.theme = t;
+  document.body.setAttribute('data-theme', t);
+  dom.themeBtn.textContent = t === 'dark' ? 'ライトモード' : 'ダークモード';
+  localStorage.setItem(THEME_KEY, t);
+}
+dom.themeBtn.addEventListener('click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
+
+/* ── LINEロック（?from=line） ── */
+function isLineEntryReviews() {
+  try { if (sessionStorage.getItem('line_report_admin_unlock') === '1') return false; } catch (_) { /* ignore */ }
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('from') === 'line') return true;
+  } catch (_) { /* ignore */ }
+  return /Line\//i.test(navigator.userAgent);
+}
+
+function readPersistedLineLockedStore() {
+  try {
+    return String(sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || '').trim();
+  } catch (_) { return ''; }
+}
+function persistLineLockedStore(storeKey) {
+  const key = String(storeKey || '').trim();
+  if (!key) return;
+  try { sessionStorage.setItem('line_locked_store', key); } catch (_) {}
+  try { localStorage.setItem('line_locked_store', key); } catch (_) {}
+}
+
+function captureLineEntryUrlParams() {
+  if (!isLineEntryReviews()) return null;
+  try {
+    const params = new URLSearchParams(location.search);
+    const rawKey = String(params.get('store_key') || params.get('store') || '').trim();
+    let storeKey = rawKey
+      ? (typeof LINE_REPORT_PAGES.resolveStoreKey === 'function'
+          ? LINE_REPORT_PAGES.resolveStoreKey(rawKey, '')
+          : rawKey.toLowerCase())
+      : '';
+    if (!storeKey) storeKey = readPersistedLineLockedStore();
+    if (!storeKey) return null;
+    persistLineLockedStore(storeKey);
+    return { storeKey };
+  } catch (_) {
+    return null;
+  }
+}
+
+function lineLockedStoreDisplayName(storeKey) {
+  const key = String(storeKey || '').trim();
+  if (!key) return '';
+  if (LINE_REPORT_PAGES.STORE_NAMES && LINE_REPORT_PAGES.STORE_NAMES[key]) {
+    return LINE_REPORT_PAGES.STORE_NAMES[key];
+  }
+  if (typeof LINE_REPORT_PAGES.resolveStoreName === 'function') {
+    return LINE_REPORT_PAGES.resolveStoreName(key, key);
+  }
+  return key;
+}
+
+function applyLineEntryStoreLock(entry) {
+  if (!entry || !entry.storeKey) return false;
+  state.lineLockedStoreKey = entry.storeKey;
+  state.storeKey = entry.storeKey;
+
+  const storeName = lineLockedStoreDisplayName(entry.storeKey);
+  if (dom.storeSelect) {
+    dom.storeSelect.innerHTML = '';
+    const opt = document.createElement('option');
+    opt.value = entry.storeKey;
+    opt.textContent = storeName;
+    dom.storeSelect.appendChild(opt);
+    dom.storeSelect.value = entry.storeKey;
+    dom.storeSelect.disabled = true;
+    dom.storeSelect.setAttribute('aria-hidden', 'true');
+  }
+
+  const label = document.getElementById('lineLockedStoreLabel');
+  if (label) {
+    label.textContent = storeName;
+    label.style.display = 'inline-flex';
+    label.removeAttribute('hidden');
+    label.setAttribute('aria-hidden', 'false');
+    label.title = 'この店舗のLINEから開いています（他店舗は選択できません）';
+  }
+
+  if (dom.filterMeta) {
+    dom.filterMeta.textContent = '対象店舗: ' + storeName;
+  }
+  return true;
+}
+
+function applyLineEntryChrome() {
+  if (!isLineEntryReviews()) return;
+  document.body.setAttribute('data-entry', 'line');
+  ['adminLink', 'mediaLink', 'reservationLink', 'analyticsHeaderLink'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = 'none';
+      el.setAttribute('hidden', '');
+      el.setAttribute('aria-hidden', 'true');
+    }
+  });
+}
+applyLineEntryChrome();
+
+/* ── 管理者ログイン（キオスク解除） ── */
+(function () {
+  var btn = document.getElementById('admUnlockBtn');
+  var modal = document.getElementById('admModal');
+  var tokenI = document.getElementById('admToken');
+  var msg = document.getElementById('admMsg');
+  var cancel = document.getElementById('admCancel');
+  var submit = document.getElementById('admSubmit');
+  if (!btn || !modal) return;
+  if (isLineEntryReviews()) { btn.style.display = 'inline-flex'; btn.removeAttribute('hidden'); }
+  function open() { modal.hidden = false; msg.textContent = ''; tokenI.value = ''; setTimeout(function () { try { tokenI.focus(); } catch (_) {} }, 50); }
+  function close() { modal.hidden = true; }
+  async function unlock() {
+    var t = tokenI.value.trim();
+    if (!t) { msg.textContent = 'トークンを入力してください。'; return; }
+    submit.disabled = true;
+    try {
+      if (window.LINE_REPORT_AUTH) {
+        await LINE_REPORT_AUTH.loginWithToken(t, { sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', LINE_REPORT_PAGES.PROJECT_URL), adminSurface: 'line_report' });
+      } else {
+        try { localStorage.setItem('line_summary_admin_token', t); } catch (_) {}
+      }
+      try { sessionStorage.setItem('line_report_admin_unlock', '1'); } catch (_) {}
+      try { localStorage.removeItem('line_locked_store'); sessionStorage.removeItem('line_locked_store'); } catch (_) {}
+      location.replace(location.pathname);
+    } catch (e) {
+      msg.textContent = (e && e.message) ? e.message : '認証に失敗しました。トークンをご確認ください。';
+      submit.disabled = false;
+    }
+  }
+  btn.addEventListener('click', open);
+  cancel.addEventListener('click', close);
+  submit.addEventListener('click', unlock);
+  tokenI.addEventListener('keydown', function (e) { if (e.key === 'Enter') unlock(); });
+  modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+})();
+
+/* ── reload / event bindings ── */
+dom.reloadBtn.addEventListener('click', loadReviews);
+if (dom.storeReviewAddBtn) {
+  dom.storeReviewAddBtn.addEventListener('click', async () => {
+    try {
+      await addStoreReviewFromForm();
+    } catch (e) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.storeReviewRefreshBtn) {
+  dom.storeReviewRefreshBtn.addEventListener('click', async () => {
+    try {
+      await refreshStoreReview();
+    } catch (e) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.storeReviewDeleteBtn) {
+  dom.storeReviewDeleteBtn.addEventListener('click', async () => {
+    try {
+      await deleteStoreReview();
+    } catch (e) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.storeReviewSearchBtn) {
+  dom.storeReviewSearchBtn.addEventListener('click', async () => {
+    try {
+      await openStoreReviewSearch();
+    } catch (e) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+      if (dom.storeReviewCandidates) dom.storeReviewCandidates.innerHTML = `<span class="meta" style="color:var(--bad)">エラー: ${escapeHtml(e && e.message ? e.message : String(e))}</span>`;
+    }
+  });
+}
+if (dom.storeReviewSearchCloseBtn) {
+  dom.storeReviewSearchCloseBtn.addEventListener('click', () => {
+    if (dom.storeReviewSearchPanel) dom.storeReviewSearchPanel.classList.remove('open');
+  });
+}
+if (dom.storeReviewCandidateRegisterBtn) {
+  dom.storeReviewCandidateRegisterBtn.addEventListener('click', async () => {
+    try {
+      await registerSelectedStoreReviewCandidate();
+    } catch (e) {
+      if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.storeReviewList) {
+  dom.storeReviewList.addEventListener('click', async (e) => {
+    const target = e.target;
+    const refreshBtn = target && target.closest ? target.closest('[data-store-review-refresh]') : null;
+    const deleteBtn = target && target.closest ? target.closest('[data-store-review-delete]') : null;
+    try {
+      if (refreshBtn) await refreshStoreReview();
+      if (deleteBtn) await deleteStoreReview();
+    } catch (err) {
+      if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
+    }
+  });
+}
+if (dom.competitorAddBtn) {
+  dom.competitorAddBtn.addEventListener('click', async () => {
+    try {
+      await addCompetitorFromForm();
+    } catch (e) {
+      if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.competitorRefreshBtn) {
+  dom.competitorRefreshBtn.addEventListener('click', async () => {
+    try {
+      await refreshCompetitors(null);
+    } catch (e) {
+      if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.competitorNearbyBtn) {
+  dom.competitorNearbyBtn.addEventListener('click', async () => {
+    try { await openNearbySearch(); }
+    catch (e) { if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e)); }
+  });
+}
+if (dom.nearbyCloseBtn) {
+  dom.nearbyCloseBtn.addEventListener('click', () => {
+    if (dom.nearbyPanel) dom.nearbyPanel.classList.remove('open');
+  });
+}
+if (dom.nearbyRegisterBtn) {
+  dom.nearbyRegisterBtn.addEventListener('click', async () => {
+    try { await registerSelectedNearby(); }
+    catch (e) { if (dom.nearbyStatus) dom.nearbyStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e)); }
+  });
+}
+if (dom.competitorList) {
+  dom.competitorList.addEventListener('click', async (e) => {
+    const target = e.target;
+    const refreshBtn = target && target.closest ? target.closest('[data-competitor-refresh]') : null;
+    const deleteBtn = target && target.closest ? target.closest('[data-competitor-delete]') : null;
+    try {
+      if (refreshBtn) await refreshCompetitors(refreshBtn.getAttribute('data-competitor-refresh'));
+      if (deleteBtn) await deleteCompetitor(deleteBtn.getAttribute('data-competitor-delete'));
+    } catch (err) {
+      if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
+    }
+  });
+}
+
+/* ── store select ── */
+function appendStoreSelectPlaceholder() {
+  const el = document.createElement('option');
+  el.value = '';
+  el.textContent = STORE_SELECT_PLACEHOLDER;
+  dom.storeSelect.appendChild(el);
+}
+
+function initStoreSelectOptions() {
+  if (state.lineLockedStoreKey) {
+    applyLineEntryStoreLock({ storeKey: state.lineLockedStoreKey });
+    return;
+  }
+  const stores = LINE_REPORT_PAGES.listStores();
+  const prev = dom.storeSelect.value || state.storeKey;
+  dom.storeSelect.innerHTML = '';
+  appendStoreSelectPlaceholder();
+  for (const s of stores) {
+    const el = document.createElement('option');
+    el.value = s.store_key;
+    el.textContent = s.store_name;
+    dom.storeSelect.appendChild(el);
+  }
+  const keys = stores.map((s) => s.store_key);
+  if (prev && keys.includes(prev)) {
+    dom.storeSelect.value = prev;
+    state.storeKey = prev;
+  } else {
+    dom.storeSelect.value = '';
+    state.storeKey = '';
+  }
+}
+
+dom.storeSelect.addEventListener('change', () => {
+  if (state.lineLockedStoreKey) {
+    dom.storeSelect.value = state.lineLockedStoreKey;
+    return;
+  }
+  state.storeKey = String(dom.storeSelect.value || '').trim();
+  if (!state.storeKey) {
+    renderStoreReviewContext(null);
+    renderCompetitorContext(null);
+    if (dom.filterMeta) dom.filterMeta.textContent = '未取得';
+    return;
+  }
+  loadReviews();
+});
+
+/* ── load ── */
+async function loadReviews() {
+  const token = getToken();
+  if (!token) {
+    if (dom.filterMeta) dom.filterMeta.textContent = 'トークンを保存してください。';
+    renderStoreReviewContext(null);
+    renderCompetitorContext(null);
+    return;
+  }
+  state.storeKey = state.lineLockedStoreKey
+    || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  if (!state.storeKey) {
+    if (dom.filterMeta) dom.filterMeta.textContent = '店舗を選択してください。';
+    renderStoreReviewContext(null);
+    renderCompetitorContext(null);
+    return;
+  }
+  if (dom.filterMeta) dom.filterMeta.textContent = '読み込み中…';
+  try {
+    await Promise.all([reloadStoreReviewContext(), reloadCompetitorContext()]);
+    if (dom.filterMeta) dom.filterMeta.textContent = '対象店舗: ' + currentStoreName();
+    if (dom.lastRefresh) dom.lastRefresh.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
+  } catch (e) {
+    if (dom.filterMeta) dom.filterMeta.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
+  }
+}
+
+/* ── init ── */
+applyTheme(state.theme);
+const lineEntryFromUrl = captureLineEntryUrlParams();
+initStoreSelectOptions();
+if (lineEntryFromUrl) applyLineEntryStoreLock(lineEntryFromUrl);
+
+(async function initAuthAndLoad() {
+  if (window.LINE_REPORT_AUTH) {
+    try {
+      await LINE_REPORT_AUTH.consumeUrlAuthParams({
+        exchangeUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/link-login', LINE_REPORT_PAGES.PROJECT_URL),
+        adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report',
+      });
+    } catch (error) {
+      console.error('consumeUrlAuthParams failed:', error);
+      alert(error.message || String(error));
+    }
+    if (LINE_REPORT_AUTH.consumeLegacyTokenNotice && LINE_REPORT_AUTH.consumeLegacyTokenNotice()) {
+      alert('以前保存されていた古いログイン情報は削除しました。LINEの新しいメッセージから開くか、管理トークンを再入力してください。');
+    }
+  } else {
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const urlToken = params.get('t');
+      if (urlToken) {
+        setToken(urlToken);
+        params.delete('t');
+        const qs = params.toString();
+        history.replaceState(null, '', location.pathname + (qs ? ('?' + qs) : '') + (location.hash || ''));
+      }
+    })();
+  }
+
+  updateAuthBadge();
+  if (getToken()) await loadReviews();
+})();
+</script>
+<script>
+  /* スマホ用ハンバーガーメニューの開閉（PCでは未使用） */
+  (function(){
+    var toggle = document.getElementById('lsaNavToggle');
+    var drawer = document.querySelector('.lsa-side');
+    var backdrop = document.getElementById('lsaNavBackdrop');
+    function setOpen(open){
+      if (drawer) drawer.classList.toggle('open', open);
+      if (backdrop) backdrop.classList.toggle('open', open);
+      if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    if (toggle) toggle.addEventListener('click', function(){ setOpen(!(drawer && drawer.classList.contains('open'))); });
+    if (backdrop) backdrop.addEventListener('click', function(){ setOpen(false); });
+    if (drawer) drawer.addEventListener('click', function(e){ if (e.target.closest && e.target.closest('.lsa-navitem')) setOpen(false); });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setOpen(false); });
+  })();
+</script>
+</body>
+</html>
