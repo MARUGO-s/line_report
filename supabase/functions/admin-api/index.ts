@@ -60,6 +60,7 @@ import {
 import {
   deactivateCompetitorPlace,
   fetchCompetitorReviewContext,
+  nearbySearchGooglePlaces,
   refreshCompetitorReviews,
   upsertCompetitorPlace,
 } from "../_shared/competitor_review_context.ts"
@@ -677,6 +678,7 @@ Deno.serve(async (req, info) => {
       "/receipts/daily-receipts-import",
       "/receipts/competitors",
       "/receipts/competitors/refresh",
+      "/receipts/competitors/nearby-search",
     ])
     if (!STORE_SCOPED_ALLOWED_PATHS.has(path)) {
       return json({ error: "この店舗用ログインからはこの操作はできません。" }, 403)
@@ -1270,6 +1272,15 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       const result = await refreshCompetitorReviews(supabase, body)
+      return json(result, 200)
+    }
+
+    if (req.method === "POST" && path === "/receipts/competitors/nearby-search") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await nearbySearchGooglePlaces(body)
       return json(result, 200)
     }
 

@@ -208,6 +208,100 @@ async function fetchGooglePlaceDetails(placeId: string): Promise<NormalizedGoogl
   return mapPlacesLegacyResponse(legacyBody)
 }
 
+type NearbyCandidate = {
+  place_id: string
+  name: string | null
+  address: string | null
+  google_maps_uri: string | null
+  lat: number | null
+  lng: number | null
+  rating: number | null
+  user_ratings_total: number | null
+}
+
+export async function nearbySearchGooglePlaces(
+  body: Record<string, unknown>,
+): Promise<{ candidates: NearbyCandidate[] }> {
+  const apiKey = (
+    Deno.env.get('GOOGLE_PLACES_API_KEY')
+    ?? Deno.env.get('GOOGLE_MAPS_API_KEY')
+    ?? Deno.env.get('GOOGLE_API_KEY')
+    ?? ''
+  ).trim()
+  if (!apiKey) {
+    throw { status: 500, message: 'GOOGLE_PLACES_API_KEY is not set.' } satisfies AppError
+  }
+
+  // フードスタジアム東京（東京ドームシティ）をデフォルト座標とする
+  const lat = Number.isFinite(Number(body.lat)) ? Number(body.lat) : 35.70499
+  const lng = Number.isFinite(Number(body.lng)) ? Number(body.lng) : 139.75188
+  const radius = Number.isFinite(Number(body.radius)) && Number(body.radius) > 0
+    ? Math.min(Number(body.radius), 2000)
+    : 300
+
+  const requestBody = {
+    includedTypes: ['restaurant', 'bar', 'cafe', 'food'],
+    maxResultCount: 20,
+    locationRestriction: {
+      circle: {
+        center: { latitude: lat, longitude: lng },
+        radius,
+      },
+    },
+    languageCode: 'ja',
+  }
+
+  const fieldMask = [
+    'places.id',
+    'places.displayName',
+    'places.formattedAddress',
+    'places.location',
+    'places.rating',
+    'places.userRatingCount',
+    'places.googleMapsUri',
+  ].join(',')
+
+  const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': fieldMask,
+    },
+    body: JSON.stringify(requestBody),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw { status: 502, message: `Google Places Nearby Search failed: ${res.status} ${text.slice(0, 200)}` } satisfies AppError
+  }
+
+  const data = await res.json()
+  const placesRaw = Array.isArray(data.places) ? data.places : []
+
+  const candidates: NearbyCandidate[] = placesRaw
+    .filter((p): p is Record<string, unknown> => isRecord(p))
+    .map((p) => {
+      const displayName = isRecord(p.displayName) ? p.displayName.text : null
+      const location = isRecord(p.location) ? p.location : {}
+      const id = typeof p.id === 'string' ? p.id : null
+      if (!id) return null
+      return {
+        place_id: id,
+        name: shortText(displayName, 160),
+        address: shortText(p.formattedAddress, 300),
+        google_maps_uri: shortText(p.googleMapsUri, 500),
+        lat: toNullableNumber(location.latitude),
+        lng: toNullableNumber(location.longitude),
+        rating: toNullableNumber(p.rating),
+        user_ratings_total: toNullableNumber(p.userRatingCount),
+      } satisfies NearbyCandidate
+    })
+    .filter((c): c is NearbyCandidate => c !== null)
+
+  return { candidates }
+}
+
 export async function fetchCompetitorReviewContext(
   supabase: SupabaseClient,
   storeKeyRaw: string,

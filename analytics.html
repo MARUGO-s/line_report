@@ -279,6 +279,15 @@
     .pressure-low, .pressure-none { color: var(--ok); }
     body[data-theme='light'] .competitor-metric,
     body[data-theme='light'] .competitor-row { background: rgba(230,243,253,0.55); }
+    .nearby-panel { display: none; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: rgba(8,21,35,0.22); margin-top: 4px; }
+    .nearby-panel.open { display: flex; }
+    .nearby-candidates { display: grid; gap: 7px; max-height: 340px; overflow-y: auto; }
+    .nearby-candidate { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: rgba(8,21,35,0.28); }
+    .nearby-candidate .nc-name { font-weight: 700; font-size: 0.9rem; }
+    .nearby-candidate .nc-meta { color: var(--sub); font-size: 0.76rem; margin-top: 2px; }
+    .nearby-candidate .nc-registered { color: var(--ok); font-size: 0.75rem; font-weight: 700; }
+    body[data-theme='light'] .nearby-panel { background: rgba(220,238,252,0.5); }
+    body[data-theme='light'] .nearby-candidate { background: rgba(230,243,253,0.55); }
 
     /* Chart layout */
     .charts-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
@@ -797,8 +806,20 @@
         <button id="competitorAddBtn" class="btn primary" type="button">競合を追加</button>
       </div>
       <div class="controls" style="gap:8px;margin-top:0">
+        <button id="competitorNearbyBtn" class="btn" type="button">周辺を自動検索</button>
         <button id="competitorRefreshBtn" class="btn" type="button">口コミ情報を更新</button>
         <span id="competitorStatus" class="meta" style="margin-top:0">Google Places APIキー未設定の場合、更新だけ失敗します。</span>
+      </div>
+      <div id="nearbyPanel" class="nearby-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span style="font-weight:700;font-size:0.88rem">周辺店舗の候補（半径300m）</span>
+          <button id="nearbyCloseBtn" class="btn" type="button" style="padding:4px 10px;font-size:0.78rem">閉じる</button>
+        </div>
+        <div id="nearbyCandidates" class="nearby-candidates"><span class="meta">検索中…</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button id="nearbyRegisterBtn" class="btn primary" type="button">選択した店舗を登録</button>
+          <span id="nearbyStatus" class="meta" style="margin-top:0"></span>
+        </div>
       </div>
       <div id="competitorList" class="competitor-list"></div>
     </div>
@@ -1430,8 +1451,14 @@ const dom = {
   competitorPlaceIdInput: $('competitorPlaceIdInput'),
   competitorAddBtn: $('competitorAddBtn'),
   competitorRefreshBtn: $('competitorRefreshBtn'),
+  competitorNearbyBtn: $('competitorNearbyBtn'),
   competitorStatus: $('competitorStatus'),
   competitorList: $('competitorList'),
+  nearbyPanel: $('nearbyPanel'),
+  nearbyCloseBtn: $('nearbyCloseBtn'),
+  nearbyCandidates: $('nearbyCandidates'),
+  nearbyRegisterBtn: $('nearbyRegisterBtn'),
+  nearbyStatus: $('nearbyStatus'),
   openBudgetModalBtn: $('openBudgetModalBtn'), budgetRowHint: $('budgetRowHint'),
   openPriorYearModalBtn: $('openPriorYearModalBtn'), priorYearRowHint: $('priorYearRowHint'),
   receiptSheetsPilotLink: $('receiptSheetsPilotLink'),
@@ -2343,6 +2370,82 @@ async function deleteCompetitor(id) {
   });
   renderCompetitorContext(ctx);
   if (dom.competitorStatus) dom.competitorStatus.textContent = '削除しました。';
+}
+
+let _nearbyCandidateCache = [];
+
+function renderNearbyCandidates(candidates, registeredPlaceIds) {
+  if (!dom.nearbyCandidates) return;
+  if (!candidates.length) {
+    dom.nearbyCandidates.innerHTML = '<span class="meta">周辺に該当する店舗が見つかりませんでした。</span>';
+    return;
+  }
+  dom.nearbyCandidates.innerHTML = candidates.map((c, i) => {
+    const alreadyRegistered = registeredPlaceIds.has(c.place_id);
+    const rating = c.rating != null ? `★${Number(c.rating).toFixed(1)}` : '評価なし';
+    const total = c.user_ratings_total != null ? `口コミ${Number(c.user_ratings_total).toLocaleString('ja-JP')}件` : '';
+    const addr = c.address ? `<div class="nc-meta">${escapeHtml(c.address)}</div>` : '';
+    const badge = alreadyRegistered ? '<span class="nc-registered">登録済み</span>' : '';
+    return `<label class="nearby-candidate" style="cursor:${alreadyRegistered ? 'default' : 'pointer'}">
+      <input type="checkbox" data-nearby-idx="${i}" ${alreadyRegistered ? 'disabled checked' : ''} style="width:16px;height:16px;flex-shrink:0">
+      <div>
+        <div class="nc-name">${escapeHtml(c.name || '不明')}${badge ? '&nbsp;' + badge : ''}</div>
+        <div class="nc-meta">${rating}${total ? '　' + total : ''}</div>
+        ${addr}
+      </div>
+      <div></div>
+    </label>`;
+  }).join('');
+}
+
+async function openNearbySearch() {
+  const sk = state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  if (!sk) { alert('店舗を選択してから実行してください。'); return; }
+  if (dom.nearbyPanel) dom.nearbyPanel.classList.add('open');
+  if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
+  if (dom.nearbyStatus) dom.nearbyStatus.textContent = '';
+  try {
+    const result = await apiFetch('/receipts/competitors/nearby-search', { method: 'POST', body: { store_key: sk } });
+    _nearbyCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
+    const ctx = await apiFetch(`/receipts/competitors?store_key=${encodeURIComponent(sk)}`);
+    const registered = new Set(
+      (Array.isArray(ctx.competitors) ? ctx.competitors : [])
+        .map((c) => c.place_id)
+        .filter(Boolean)
+    );
+    renderNearbyCandidates(_nearbyCandidateCache, registered);
+  } catch (e) {
+    if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = `<span class="meta" style="color:var(--bad)">エラー: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function registerSelectedNearby() {
+  const sk = state.lineLockedStoreKey || state.storeKey || String((dom.storeSelect && dom.storeSelect.value) || '').trim();
+  if (!sk) return;
+  const checkboxes = dom.nearbyCandidates ? dom.nearbyCandidates.querySelectorAll('input[type=checkbox]:checked:not(:disabled)') : [];
+  const selected = Array.from(checkboxes).map((el) => _nearbyCandidateCache[Number(el.dataset.nearbyIdx)]).filter(Boolean);
+  if (!selected.length) { if (dom.nearbyStatus) dom.nearbyStatus.textContent = '登録する店舗を選択してください。'; return; }
+  if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${selected.length}件を登録中…`;
+  let ok = 0, fail = 0;
+  for (const c of selected) {
+    try {
+      await apiFetch('/receipts/competitors', {
+        method: 'PUT',
+        body: { store_key: sk, competitor_name: c.name || '', place_id: c.place_id },
+      });
+      ok++;
+    } catch (_) { fail++; }
+  }
+  if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${ok}件登録しました${fail ? `（${fail}件失敗）` : ''}。口コミ更新中…`;
+  try {
+    const refreshed = await apiFetch('/receipts/competitors/refresh', { method: 'POST', body: { store_key: sk } });
+    renderCompetitorContext(refreshed.context);
+    if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${ok}件登録・口コミ取得完了。`;
+  } catch (_) {
+    await reloadCompetitorContext();
+    if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${ok}件登録しました（口コミ更新は手動でお試しください）。`;
+  }
+  if (dom.competitorStatus) dom.competitorStatus.textContent = '';
 }
 
 function syncBudgetModalFromState() {
@@ -3444,6 +3547,23 @@ if (dom.competitorRefreshBtn) {
     } catch (e) {
       if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e));
     }
+  });
+}
+if (dom.competitorNearbyBtn) {
+  dom.competitorNearbyBtn.addEventListener('click', async () => {
+    try { await openNearbySearch(); }
+    catch (e) { if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e)); }
+  });
+}
+if (dom.nearbyCloseBtn) {
+  dom.nearbyCloseBtn.addEventListener('click', () => {
+    if (dom.nearbyPanel) dom.nearbyPanel.classList.remove('open');
+  });
+}
+if (dom.nearbyRegisterBtn) {
+  dom.nearbyRegisterBtn.addEventListener('click', async () => {
+    try { await registerSelectedNearby(); }
+    catch (e) { if (dom.nearbyStatus) dom.nearbyStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e)); }
   });
 }
 if (dom.competitorList) {
