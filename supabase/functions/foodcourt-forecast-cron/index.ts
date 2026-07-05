@@ -34,6 +34,22 @@ type Factors = {
   weatherN: Record<string, number>
 }
 
+// --- 統計拡張(stats-ext-v1)の型 ---
+// 予測には使わない。AI解説が係数をどこまで信じてよいかを判断するための解釈コンテキスト。
+type CiEntry = { factor: number; lo: number; hi: number; n: number }          // 収縮前の生係数と95%CI
+type QuantEntry = { n: number; min: number; q25: number; med: number; q75: number; max: number }
+type InteractionEntry = { label: string; n: number; actual: number; expected: number; ratio: number } // 実測倍率 vs 独立仮定倍率
+type ResidualBiasEntry = { label: string; n: number; bias: number }           // 符号付き平均誤差率(+=過大予測)
+type EffectSizeEntry = { label: string; d: number; n1: number; n2: number; magnitude: string }
+type AdvancedStats = {
+  version: string
+  factor_ci: { wday: Record<string, CiEntry>; evt: Record<string, CiEntry>; weather: Record<string, CiEntry> }
+  quantiles: Record<string, QuantEntry>
+  interactions: InteractionEntry[]
+  residual_bias: ResidualBiasEntry[]
+  effect_sizes: EffectSizeEntry[]
+}
+
 Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
@@ -133,6 +149,9 @@ Deno.serve(async (req) => {
     rows.push({ target_date: d, tenant_name: BASE_TENANT, tenant_code: null, metric: "sales", predicted: sPred, predicted_low: Math.max(0, Math.round(sPred * (1 - bandS))), predicted_high: Math.round(sPred * (1 + bandS)), model_version: MODEL_VERSION, features: featJson, actual: sAct })
   }
 
+  // 統計拡張(stats-ext-v1): 予測には使わない。AI解説の解釈精度を上げる材料を毎晩まとめて再計算。
+  const advStats = computeAdvancedStats(hist, back)
+
   const summary = {
     history_days: hist.length,
     backtest_days: back.length,
@@ -142,7 +161,7 @@ Deno.serve(async (req) => {
     rows_to_upsert: rows.length,
   }
 
-  if (dryRun) return json({ ok: true, dry_run: true, model_version: MODEL_VERSION, ...summary, factors: facFull }, 200)
+  if (dryRun) return json({ ok: true, dry_run: true, model_version: MODEL_VERSION, ...summary, factors: facFull, advanced_stats: advStats }, 200)
 
   if (rows.length) {
     const { error: upErr } = await supabase
@@ -170,6 +189,7 @@ Deno.serve(async (req) => {
       backtest_days: back.length,
       mape_guests: mapeG,
       mape_sales: mapeS,
+      advanced_stats: advStats,
       updated_at: new Date().toISOString(),
     }, { onConflict: "tenant_name" })
   if (factorsErr) console.error("foodcourt_forecast_factors upsert failed:", factorsErr.message)
@@ -213,6 +233,187 @@ function shrink(rawFactor: number, n: number, k = SHRINK_K): number {
   if (!isFinite(rawFactor) || rawFactor <= 0) return 1
   return (n * rawFactor + k * 1) / (n + k)
 }
+
+// --- 統計拡張(stats-ext-v1) ---
+// fit()/predict()には一切影響しない純粋な追加計算。AI解説が「係数をどこまで信じてよいか」を
+// 判断するための材料（信頼区間・分布・交互作用・モデルの弱点・効果量）をまとめて算出する。
+function computeAdvancedStats(
+  h: Hist[],
+  back: Array<{ date: string; gPred: number; gAct: number }>,
+): AdvancedStats {
+  const meanG = avg(h.map((x) => x.guests)) ?? 0
+  const histByDate = new Map(h.map((x) => [x.date, x]))
+  const isWeekend = (x: Hist) => x.dow === 6 || x.dow === 7
+  const isBigEvent = (x: Hist) => x.evType === "pro" || x.evType === "live" || x.evType === "dome"
+
+  // ① 係数の95%信頼区間（収縮前の生の比率に対して）。
+  //    CIが1をまたぐ＝「効果が偶然でない」とは言い切れない、をAIが判定できるようにする。
+  const ciOf = (xs: number[]): CiEntry | null => {
+    if (meanG <= 0 || xs.length < 3) return null
+    const m = avg(xs)!
+    const s = sampleSd(xs)
+    if (s == null) return null
+    const se = s / Math.sqrt(xs.length)
+    const t = tCrit(xs.length - 1)
+    return {
+      factor: round2(m / meanG),
+      lo: round2(Math.max(0, (m - t * se) / meanG)),
+      hi: round2((m + t * se) / meanG),
+      n: xs.length,
+    }
+  }
+  const factorCi: AdvancedStats["factor_ci"] = { wday: {}, evt: {}, weather: {} }
+  for (let d = 1; d <= 7; d++) {
+    const ci = ciOf(h.filter((x) => x.dow === d).map((x) => x.guests))
+    if (ci) factorCi.wday[String(d)] = ci
+  }
+  for (const t of ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall", "none"]) {
+    const ci = ciOf(h.filter((x) => x.evType === t).map((x) => x.guests))
+    if (ci) factorCi.evt[t] = ci
+  }
+  for (const w of ["rainy", "dry"]) {
+    const ci = ciOf(h.filter((x) => (w === "rainy" ? x.rainy : !x.rainy)).map((x) => x.guests))
+    if (ci) factorCi.weather[w] = ci
+  }
+
+  // ② 条件別の客数分布（四分位数）。平均だけでは見えない「同じ条件でも最悪これだけ低い日がある」を渡す。
+  const quantiles: Record<string, QuantEntry> = {}
+  const quantOf = (key: string, xs: number[]) => {
+    if (xs.length < 3) return
+    const sorted = xs.slice().sort((a, b) => a - b)
+    quantiles[key] = {
+      n: xs.length,
+      min: Math.round(sorted[0]),
+      q25: Math.round(quantile(sorted, 0.25)),
+      med: Math.round(quantile(sorted, 0.5)),
+      q75: Math.round(quantile(sorted, 0.75)),
+      max: Math.round(sorted[sorted.length - 1]),
+    }
+  }
+  for (const t of ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall", "none"]) {
+    quantOf(`evt:${t}`, h.filter((x) => x.evType === t).map((x) => x.guests))
+  }
+  quantOf("weekend", h.filter(isWeekend).map((x) => x.guests))
+  quantOf("weekday", h.filter((x) => !isWeekend(x)).map((x) => x.guests))
+  quantOf("rainy", h.filter((x) => x.rainy).map((x) => x.guests))
+  quantOf("dry", h.filter((x) => !x.rainy).map((x) => x.guests))
+
+  // ③ 交互作用: 「条件が重なった日」の実測倍率 vs 独立仮定（生係数の掛け算）の倍率。
+  //    乗算モデルは独立を仮定しているため、実測との乖離＝モデルが構造的に外す領域をAIに知らせる。
+  const interactions: InteractionEntry[] = []
+  const marginalRatio = (xs: number[]): number | null => {
+    if (meanG <= 0 || !xs.length) return null
+    return avg(xs)! / meanG
+  }
+  const addInteraction = (label: string, r1: number | null, r2: number | null, combo: Hist[]) => {
+    if (r1 == null || r2 == null || combo.length < 3 || meanG <= 0) return
+    const actual = avg(combo.map((x) => x.guests))! / meanG
+    const expected = r1 * r2
+    if (expected <= 0) return
+    interactions.push({ label, n: combo.length, actual: round2(actual), expected: round2(expected), ratio: round2(actual / expected) })
+  }
+  const rWeekend = marginalRatio(h.filter(isWeekend).map((x) => x.guests))
+  const rWeekday = marginalRatio(h.filter((x) => !isWeekend(x)).map((x) => x.guests))
+  const rBig = marginalRatio(h.filter(isBigEvent).map((x) => x.guests))
+  const rNoBig = marginalRatio(h.filter((x) => !isBigEvent(x)).map((x) => x.guests))
+  const rRainy = marginalRatio(h.filter((x) => x.rainy).map((x) => x.guests))
+  addInteraction("土日×大型イベント(野球/ライブ/ドーム)", rWeekend, rBig, h.filter((x) => isWeekend(x) && isBigEvent(x)))
+  addInteraction("平日×大型イベント(野球/ライブ/ドーム)", rWeekday, rBig, h.filter((x) => !isWeekend(x) && isBigEvent(x)))
+  addInteraction("土日×イベント無し系", rWeekend, rNoBig, h.filter((x) => isWeekend(x) && !isBigEvent(x)))
+  addInteraction("雨×大型イベント(野球/ライブ/ドーム)", rRainy, rBig, h.filter((x) => x.rainy && isBigEvent(x)))
+
+  // ④ 残差バイアス: バックテスト(out-of-sample)の符号付き誤差率を条件別に集計。
+  //    「モデルはこの条件で系統的に過大/過小評価する」という自己申告の弱点リスト。
+  const residualBias: ResidualBiasEntry[] = []
+  const biasGroups: Record<string, number[]> = {}
+  for (const b of back) {
+    if (b.gAct <= 0) continue
+    const f = histByDate.get(b.date)
+    if (!f) continue
+    const err = (b.gPred - b.gAct) / b.gAct
+    const keys = [
+      `evt:${f.evType}`,
+      isWeekend(f) ? "weekend" : "weekday",
+      f.rainy ? "rainy" : "dry",
+    ]
+    for (const k of keys) (biasGroups[k] ??= []).push(err)
+  }
+  const BIAS_LABEL: Record<string, string> = {
+    "evt:soccer_pv": "サッカーPVの日", "evt:japan": "日本戦PVの日", "evt:pro": "プロ野球の日",
+    "evt:live": "ライブの日", "evt:dome": "ドーム本体(その他)の日", "evt:sports": "世界スポーツ放映の日",
+    "evt:hall": "小ホールのみの日", "evt:none": "イベント無しの日",
+    weekend: "土日", weekday: "平日", rainy: "雨の日", dry: "雨でない日",
+  }
+  for (const [k, errs] of Object.entries(biasGroups)) {
+    if (errs.length < 3) continue
+    const bias = avg(errs)!
+    if (Math.abs(bias) < 0.10) continue // ±10%未満の偏りはノイズとして報告しない
+    residualBias.push({ label: BIAS_LABEL[k] ?? k, n: errs.length, bias: round3(bias) })
+  }
+  residualBias.sort((a, b) => Math.abs(b.bias) - Math.abs(a.bias))
+
+  // ⑤ 効果量(Cohen's d): 「どの要因が本当に影響力が大きいか」を単位に依存せず比較可能にする。
+  const effectSizes: EffectSizeEntry[] = []
+  const addEffect = (label: string, g1: number[], g2: number[]) => {
+    if (g1.length < 2 || g2.length < 2) return
+    const d = cohensD(g1, g2)
+    if (d == null) return
+    effectSizes.push({ label, d: round2(d), n1: g1.length, n2: g2.length, magnitude: dMagnitude(d) })
+  }
+  const noneGuests = h.filter((x) => x.evType === "none").map((x) => x.guests)
+  const EVT_JP: Record<string, string> = {
+    soccer_pv: "サッカーPV", japan: "日本戦PV", pro: "プロ野球", live: "ライブ",
+    dome: "ドーム本体(その他)", sports: "世界スポーツ放映", hall: "小ホールのみ",
+  }
+  for (const t of Object.keys(EVT_JP)) {
+    addEffect(`${EVT_JP[t]} vs イベント無し`, h.filter((x) => x.evType === t).map((x) => x.guests), noneGuests)
+  }
+  addEffect("雨 vs 雨でない", h.filter((x) => x.rainy).map((x) => x.guests), h.filter((x) => !x.rainy).map((x) => x.guests))
+  addEffect("土日 vs 平日", h.filter(isWeekend).map((x) => x.guests), h.filter((x) => !isWeekend(x)).map((x) => x.guests))
+  effectSizes.sort((a, b) => Math.abs(b.d) - Math.abs(a.d))
+
+  return { version: "stats-ext-v1", factor_ci: factorCi, quantiles, interactions, residual_bias: residualBias, effect_sizes: effectSizes }
+}
+
+function sampleSd(xs: number[]): number | null {
+  if (xs.length < 2) return null
+  const m = avg(xs)!
+  const v = xs.reduce((s, x) => s + (x - m) * (x - m), 0) / (xs.length - 1)
+  return Math.sqrt(v)
+}
+function quantile(sorted: number[], p: number): number {
+  if (!sorted.length) return 0
+  const idx = (sorted.length - 1) * p
+  const lo = Math.floor(idx), hi = Math.ceil(idx)
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo)
+}
+// t分布の97.5%点（95%CI用）。df>30はほぼ正規分布なので1.96へ。
+function tCrit(df: number): number {
+  const table: Record<number, number> = { 1: 12.71, 2: 4.30, 3: 3.18, 4: 2.78, 5: 2.57, 6: 2.45, 7: 2.36, 8: 2.31, 9: 2.26, 10: 2.23, 12: 2.18, 15: 2.13, 20: 2.09, 25: 2.06, 30: 2.04 }
+  if (df <= 0) return 12.71
+  if (table[df]) return table[df]
+  const keys = Object.keys(table).map(Number).sort((a, b) => a - b)
+  for (const k of keys) if (df <= k) return table[k]
+  return 1.96
+}
+function cohensD(g1: number[], g2: number[]): number | null {
+  const m1 = avg(g1), m2 = avg(g2)
+  const s1 = sampleSd(g1), s2 = sampleSd(g2)
+  if (m1 == null || m2 == null || s1 == null || s2 == null) return null
+  const pooled = Math.sqrt(((g1.length - 1) * s1 * s1 + (g2.length - 1) * s2 * s2) / (g1.length + g2.length - 2))
+  if (!isFinite(pooled) || pooled <= 0) return null
+  return (m1 - m2) / pooled
+}
+function dMagnitude(d: number): string {
+  const a = Math.abs(d)
+  if (a >= 1.2) return "極めて大"
+  if (a >= 0.8) return "大"
+  if (a >= 0.5) return "中"
+  if (a >= 0.2) return "小"
+  return "ごく小"
+}
+function round2(v: number): number { return Math.round(v * 100) / 100 }
+function round3(v: number): number { return Math.round(v * 1000) / 1000 }
 function pickEvType(r: Record<string, unknown>): EvType {
   // 当店(marugoS)の売上ドライバー順で種別を決める。ドーム野球は当店の最強ドライバー＝PVより優先。
   // サッカーPVは「全体は大集客だが客はバーガー/ビールへ→当店への売上寄与は間接的・波及的」なので独立の控えめ係数として学習させる。

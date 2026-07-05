@@ -145,7 +145,7 @@ function numOrNull(v: unknown): number | null {
 // フードコートのAI（Q&A=Groqチャット／テナント表の画像抽出=Groq/Gemini Vision）の実測トークンを
 // ai_usage_events に1行記録し、AI使用料ページ（/usage/ai-cost＝実測トークン×公式単価）に反映させる。
 export interface FoodCourtAiUsage {
-  provider: 'groq' | 'gemini' | 'claude' | 'openai'
+  provider: 'groq' | 'gemini' | 'claude' | 'openai' | 'grok'
   model: string
   inputTokens: number
   outputTokens: number
@@ -731,11 +731,15 @@ async function grokChat(
       usage?: { prompt_tokens?: number; completion_tokens?: number }
     } | null
     const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
-    const usage = json?.usage ? {
-      provider: 'grok' as const,
+    const inp = Number(json?.usage?.prompt_tokens ?? 0) || 0
+    const out = Number(json?.usage?.completion_tokens ?? 0) || 0
+    const usage: FoodCourtAiUsage | null = json?.usage ? {
+      provider: 'grok',
       model,
-      inputTokens: json.usage.prompt_tokens ?? 0,
-      outputTokens: json.usage.completion_tokens ?? 0,
+      inputTokens: inp,
+      outputTokens: out,
+      thinkingTokens: null,
+      totalTokens: inp + out,
     } : null
     return { content: content || null, usage }
   } catch (e) {
@@ -1361,7 +1365,7 @@ async function buildForecastFactorsContext(
   try {
     const { data } = await supabase
       .from('foodcourt_forecast_factors')
-      .select('model_version, mean_guests, wday_factors, wday_counts, event_factors, event_counts, weather_factors, weather_counts, history_days, backtest_days, mape_guests, mape_sales')
+      .select('*')
       .eq('tenant_name', baseName)
       .maybeSingle()
     if (!data) return ''
@@ -1371,6 +1375,14 @@ async function buildForecastFactorsContext(
       event_factors: Record<string, number>; event_counts: Record<string, number>
       weather_factors: Record<string, number>; weather_counts: Record<string, number>
       history_days: number; backtest_days: number; mape_guests: number | null; mape_sales: number | null
+      advanced_stats?: {
+        version?: string
+        factor_ci?: { wday?: Record<string, { factor: number; lo: number; hi: number; n: number }>; evt?: Record<string, { factor: number; lo: number; hi: number; n: number }>; weather?: Record<string, { factor: number; lo: number; hi: number; n: number }> }
+        quantiles?: Record<string, { n: number; min: number; q25: number; med: number; q75: number; max: number }>
+        interactions?: Array<{ label: string; n: number; actual: number; expected: number; ratio: number }>
+        residual_bias?: Array<{ label: string; n: number; bias: number }>
+        effect_sizes?: Array<{ label: string; d: number; n1: number; n2: number; magnitude: string }>
+      } | null
     }
     const confidence = (n: number) => n >= 6 ? '再現性あり' : n >= 3 ? '参考程度(やや少数)' : 'サンプル僅少(参考不可)'
     const drivers: Array<{ label: string; factor: number; n: number }> = []
@@ -1419,6 +1431,64 @@ async function buildForecastFactorsContext(
       .slice(0, 8)
       .map((d) => `${d.label}: ${d.factor >= 1 ? '押し上げ' : '押し下げ'}候補 ×${d.factor.toFixed(2)}（n=${d.n}）`)
     if (driverLines.length) L.push('[強く効いている候補]\n' + driverLines.join('\n'))
+
+    // --- 統計拡張(stats-ext-v1): 係数を「どこまで信じてよいか」の判断材料 ---
+    const adv = row.advanced_stats
+    if (adv && typeof adv === 'object') {
+      const QK_LABEL: Record<string, string> = {
+        'evt:soccer_pv': 'サッカーPVの日', 'evt:japan': '日本戦PVの日', 'evt:pro': 'プロ野球の日',
+        'evt:live': 'ライブの日', 'evt:dome': 'ドーム本体(その他)の日', 'evt:sports': '世界スポーツ放映の日',
+        'evt:hall': '小ホールのみの日', 'evt:none': 'イベント無しの日',
+        weekend: '土日', weekday: '平日', rainy: '雨の日', dry: '雨でない日',
+      }
+      // ① 95%信頼区間: CIが1をまたぐ係数は「偶然の可能性を否定できない」と明示
+      const ciLines: string[] = []
+      const pushCi = (label: string, e?: { factor: number; lo: number; hi: number; n: number }) => {
+        if (!e) return
+        const crossesOne = e.lo <= 1 && e.hi >= 1
+        ciLines.push(`${label}: 生係数×${e.factor.toFixed(2)}（95%CI: ${e.lo.toFixed(2)}〜${e.hi.toFixed(2)}、n=${e.n}）${crossesOne ? '←CIが1をまたぐ＝効果は偶然の可能性を否定できない' : '←CIが1を含まない＝統計的に意味のある差'}`)
+      }
+      const EVT_CI_LABEL: Record<string, string> = {
+        soccer_pv: 'サッカーPV', japan: '日本戦PV', pro: 'プロ野球', live: 'ライブ',
+        dome: 'ドーム本体(その他)', sports: '世界スポーツ放映', hall: '小ホールのみ', none: 'イベント無し',
+      }
+      for (const k of Object.keys(EVT_CI_LABEL)) pushCi(EVT_CI_LABEL[k], adv.factor_ci?.evt?.[k])
+      pushCi('雨', adv.factor_ci?.weather?.rainy)
+      pushCi('雨でない', adv.factor_ci?.weather?.dry)
+      if (ciLines.length) {
+        L.push('[係数の95%信頼区間（収縮前の生係数）]\n※上の係数表は少数サンプルを1へ収縮した予測用の値。こちらは収縮前の生の値と不確実性の幅。\n' + ciLines.join('\n'))
+      }
+      // ② 条件別の分布: 「同じ条件でも最悪ここまで低い日がある」を平均と併せて渡す
+      const qLines = Object.entries(adv.quantiles ?? {})
+        .map(([k, q]) => `${QK_LABEL[k] ?? k}: 中央値${q.med}人［四分位: ${q.q25}〜${q.q75}人／実績range: ${q.min}〜${q.max}人／n=${q.n}］`)
+      if (qLines.length) {
+        L.push('[条件別の客数分布]\n※平均だけで判断しない。最小値〜最大値の幅が広い条件は「ブレやすい条件」として扱う。\n' + qLines.join('\n'))
+      }
+      // ③ 交互作用: 独立仮定（係数の掛け算）が実測とずれる組み合わせ
+      const itLines = (adv.interactions ?? []).map((it) => {
+        const gap = Math.round((it.ratio - 1) * 100)
+        const note = Math.abs(gap) < 10 ? 'ほぼ独立（掛け算予測が妥当）' : gap > 0 ? `実測が理論値より+${gap}%（相乗効果あり）` : `実測が理論値より${gap}%（重なっても伸びは頭打ち）`
+        return `${it.label}: 実測×${it.actual.toFixed(2)} vs 独立仮定×${it.expected.toFixed(2)}（n=${it.n}）→ ${note}`
+      })
+      if (itLines.length) {
+        L.push('[条件の組み合わせ（交互作用）]\n※予測モデルは「係数の掛け算＝条件は独立」を仮定。実測とのズレが大きい組み合わせは掛け算どおりに伸びない。\n' + itLines.join('\n'))
+      }
+      // ④ 残差バイアス: モデルが系統的に外す条件（自己申告の弱点）
+      const rbLines = (adv.residual_bias ?? []).map((rb) => {
+        const pct = Math.round(rb.bias * 100)
+        return `${rb.label}: 予測が実績より平均${pct > 0 ? '+' : ''}${pct}%${pct > 0 ? '（過大評価の傾向）' : '（過小評価の傾向）'}（n=${rb.n}）`
+      })
+      if (rbLines.length) {
+        L.push('[モデルの弱点（バックテスト残差の偏り）]\n※この条件の日の予測は、記載の方向に割り引いて解釈すること。\n' + rbLines.join('\n'))
+      }
+      // ⑤ 効果量: どの要因が「本当に」効いているかの横比較
+      const esLines = (adv.effect_sizes ?? []).slice(0, 8).map((es) =>
+        `${es.label}: d=${es.d.toFixed(2)}（効果量: ${es.magnitude}、n=${es.n1}/${es.n2}）`
+      )
+      if (esLines.length) {
+        L.push('[効果量（Cohen\'s d）による要因の影響力ランキング]\n※dの絶対値: 0.2未満=ごく小/0.2=小/0.5=中/0.8=大/1.2以上=極めて大。倍率(%)の見かけの大きさではなく、この値で「どの要因が確かに効いているか」を比較する。\n' + esLines.join('\n'))
+      }
+    }
     return L.join('\n\n')
   } catch (e) {
     console.error('buildForecastFactorsContext failed:', e instanceof Error ? e.message : String(e))
