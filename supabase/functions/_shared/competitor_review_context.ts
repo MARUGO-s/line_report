@@ -217,6 +217,93 @@ type NearbyCandidate = {
   lng: number | null
   rating: number | null
   user_ratings_total: number | null
+  ai_is_competitor: boolean | null
+  ai_confidence: 'high' | 'medium' | 'low' | null
+  ai_reason: string | null
+}
+
+async function classifyNearbyWithAI(
+  candidates: NearbyCandidate[],
+): Promise<NearbyCandidate[]> {
+  if (!candidates.length) return candidates
+
+  const geminiKey = (
+    Deno.env.get('GEMINI_API_KEY')
+    ?? Deno.env.get('GOOGLE_API_KEY')
+    ?? ''
+  ).trim()
+  if (!geminiKey) return candidates
+
+  const list = candidates.map((c, i) => ({
+    idx: i,
+    place_id: c.place_id,
+    name: c.name ?? '不明',
+    address: c.address ?? '',
+    rating: c.rating,
+    review_count: c.user_ratings_total,
+  }))
+
+  const prompt = `あなたは東京ドームシティ フードスタジアム内の飲食店「MARUGO S」（クラフトビール・串カツ・ビアホール系カジュアルダイニング）の売上競合分析AIです。
+
+以下の周辺店舗リストを見て、MARUGO Sの競合店かどうかを判定してください。
+
+判断基準：
+- フードコート内・隣接エリアの飲食店 → 競合（is_competitor: true）
+- アルコール提供の飲食店 → 特に重要な競合
+- ファストフード・スイーツ・カフェ → 軽度競合（true）
+- コンビニ・小売・非飲食 → 競合外（false）
+- 店名に「MARUGO」を含む → 自店のため除外（false）
+
+店舗リスト:
+${JSON.stringify(list, null, 2)}
+
+以下のJSON形式のみで回答してください（説明文不要）:
+{"classifications":[{"place_id":"...","is_competitor":true,"confidence":"high","reason":"理由を1文で"}]}`
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 1024 },
+        }),
+      },
+    )
+    if (!res.ok) return candidates
+    const json = await res.json()
+    const text = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    const parsed = JSON.parse(text)
+    if (!isRecord(parsed) || !Array.isArray(parsed.classifications)) return candidates
+
+    const classMap = new Map<string, { is_competitor: boolean; confidence: string; reason: string }>()
+    for (const c of parsed.classifications) {
+      if (isRecord(c) && typeof c.place_id === 'string') {
+        classMap.set(c.place_id, {
+          is_competitor: Boolean(c.is_competitor),
+          confidence: typeof c.confidence === 'string' ? c.confidence : 'medium',
+          reason: typeof c.reason === 'string' ? c.reason : '',
+        })
+      }
+    }
+
+    return candidates.map((c) => {
+      const cls = classMap.get(c.place_id)
+      if (!cls) return c
+      return {
+        ...c,
+        ai_is_competitor: cls.is_competitor,
+        ai_confidence: (cls.confidence === 'high' || cls.confidence === 'medium' || cls.confidence === 'low')
+          ? cls.confidence
+          : 'medium',
+        ai_reason: cls.reason || null,
+      }
+    })
+  } catch (_) {
+    return candidates
+  }
 }
 
 export async function nearbySearchGooglePlaces(
@@ -286,11 +373,15 @@ export async function nearbySearchGooglePlaces(
         lng: toNullableNumber(location.longitude),
         rating: toNullableNumber(p.rating),
         user_ratings_total: toNullableNumber(p.userRatingCount),
+        ai_is_competitor: null,
+        ai_confidence: null,
+        ai_reason: null,
       } satisfies NearbyCandidate
     })
     .filter((c): c is NearbyCandidate => c !== null)
 
-  return { candidates }
+  const classified = await classifyNearbyWithAI(candidates)
+  return { candidates: classified }
 }
 
 export async function fetchCompetitorReviewContext(

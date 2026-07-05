@@ -286,6 +286,11 @@
     .nearby-candidate .nc-name { font-weight: 700; font-size: 0.9rem; }
     .nearby-candidate .nc-meta { color: var(--sub); font-size: 0.76rem; margin-top: 2px; }
     .nearby-candidate .nc-registered { color: var(--ok); font-size: 0.75rem; font-weight: 700; }
+    .nearby-candidate .nc-ai-badge { font-size: 0.72rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; margin-left: 6px; }
+    .nc-ai-badge.high { background: rgba(59,200,120,0.18); color: var(--ok); }
+    .nc-ai-badge.medium { background: rgba(230,180,60,0.18); color: var(--warn); }
+    .nc-ai-badge.low { background: rgba(120,120,120,0.18); color: var(--sub); }
+    .nc-ai-reason { color: var(--sub); font-size: 0.74rem; margin-top: 3px; font-style: italic; }
     body[data-theme='light'] .nearby-panel { background: rgba(220,238,252,0.5); }
     body[data-theme='light'] .nearby-candidate { background: rgba(230,243,253,0.55); }
 
@@ -2380,18 +2385,28 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
     dom.nearbyCandidates.innerHTML = '<span class="meta">周辺に該当する店舗が見つかりませんでした。</span>';
     return;
   }
+  const hasAi = candidates.some((c) => c.ai_is_competitor !== null && c.ai_is_competitor !== undefined);
   dom.nearbyCandidates.innerHTML = candidates.map((c, i) => {
     const alreadyRegistered = registeredPlaceIds.has(c.place_id);
+    const aiComp = c.ai_is_competitor === true;
+    const aiConf = c.ai_confidence || 'medium';
+    const autoChecked = !alreadyRegistered && aiComp;
     const rating = c.rating != null ? `★${Number(c.rating).toFixed(1)}` : '評価なし';
     const total = c.user_ratings_total != null ? `口コミ${Number(c.user_ratings_total).toLocaleString('ja-JP')}件` : '';
     const addr = c.address ? `<div class="nc-meta">${escapeHtml(c.address)}</div>` : '';
-    const badge = alreadyRegistered ? '<span class="nc-registered">登録済み</span>' : '';
+    const registeredBadge = alreadyRegistered ? '<span class="nc-registered">登録済み</span>' : '';
+    const aiBadge = hasAi && c.ai_is_competitor !== null
+      ? `<span class="nc-ai-badge ${escapeHtml(aiConf)}">${aiComp ? 'AI:競合' : 'AI:除外'}</span>`
+      : '';
+    const aiReason = hasAi && c.ai_reason
+      ? `<div class="nc-ai-reason">${escapeHtml(c.ai_reason)}</div>`
+      : '';
     return `<label class="nearby-candidate" style="cursor:${alreadyRegistered ? 'default' : 'pointer'}">
-      <input type="checkbox" data-nearby-idx="${i}" ${alreadyRegistered ? 'disabled checked' : ''} style="width:16px;height:16px;flex-shrink:0">
+      <input type="checkbox" data-nearby-idx="${i}" ${alreadyRegistered ? 'disabled checked' : (autoChecked ? 'checked' : '')} style="width:16px;height:16px;flex-shrink:0">
       <div>
-        <div class="nc-name">${escapeHtml(c.name || '不明')}${badge ? '&nbsp;' + badge : ''}</div>
+        <div class="nc-name">${escapeHtml(c.name || '不明')}${registeredBadge ? '&nbsp;' + registeredBadge : ''}${aiBadge}</div>
         <div class="nc-meta">${rating}${total ? '　' + total : ''}</div>
-        ${addr}
+        ${addr}${aiReason}
       </div>
       <div></div>
     </label>`;
