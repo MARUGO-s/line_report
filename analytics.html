@@ -2396,13 +2396,18 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
     return;
   }
   const hasAi = candidates.some((c) => c.ai_is_competitor !== null && c.ai_is_competitor !== undefined);
+  const confScore = { high: 0, medium: 1, low: 2 };
   const sorted = candidates
     .map((c, i) => ({ c, i }))
     .sort((a, b) => {
-      const av = a.c.ai_is_competitor;
-      const bv = b.c.ai_is_competitor;
+      const av = a.c.ai_is_competitor, bv = b.c.ai_is_competitor;
       if (av === true && bv !== true) return -1;
       if (av !== true && bv === true) return 1;
+      if (av === true && bv === true) {
+        const as_ = confScore[a.c.ai_confidence] ?? 1;
+        const bs_ = confScore[b.c.ai_confidence] ?? 1;
+        return as_ - bs_;
+      }
       if (av === false && bv !== false) return 1;
       if (av !== false && bv === false) return -1;
       return 0;
