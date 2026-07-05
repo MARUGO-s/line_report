@@ -213,6 +213,7 @@ type NearbyCandidate = {
   name: string | null
   address: string | null
   google_maps_uri: string | null
+  website_uri: string | null
   lat: number | null
   lng: number | null
   rating: number | null
@@ -220,6 +221,42 @@ type NearbyCandidate = {
   ai_is_competitor: boolean | null
   ai_confidence: 'high' | 'medium' | 'low' | null
   ai_reason: string | null
+}
+
+function extractFirstBalanced(text: string, open: string, close: string): string | null {
+  const start = text.indexOf(open)
+  if (start === -1) return null
+  let depth = 0
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === open) depth++
+    else if (text[i] === close) {
+      depth--
+      if (depth === 0) return text.slice(start, i + 1)
+    }
+  }
+  return null
+}
+
+function extractClassifications(text: string): { classifications: unknown[] } | null {
+  const objStart = text.indexOf('{')
+  const arrStart = text.indexOf('[')
+  if (arrStart !== -1 && (objStart === -1 || arrStart < objStart)) {
+    const arrStr = extractFirstBalanced(text, '[', ']')
+    if (!arrStr) return null
+    try {
+      const arr = JSON.parse(arrStr)
+      if (Array.isArray(arr)) return { classifications: arr }
+    } catch (_) { return null }
+  }
+  const objStr = extractFirstBalanced(text, '{', '}')
+  if (!objStr) return null
+  try {
+    const obj = JSON.parse(objStr)
+    if (typeof obj === 'object' && obj !== null && Array.isArray((obj as Record<string, unknown>).classifications)) {
+      return obj as { classifications: unknown[] }
+    }
+  } catch (_) { return null }
+  return null
 }
 
 async function classifyNearbyWithAI(
@@ -272,11 +309,9 @@ ${JSON.stringify(list, null, 2)}
     }
     const json = await res.json()
     const rawText: string = json?.choices?.[0]?.message?.content ?? ''
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return { candidates, debug: { http_status: res.status, raw_text: rawText.slice(0, 300), error: 'no json match' } }
-    const parsed = JSON.parse(jsonMatch[0])
-    if (!isRecord(parsed) || !Array.isArray(parsed.classifications)) {
-      return { candidates, debug: { http_status: res.status, error: 'invalid parsed structure' } }
+    const parsed = extractClassifications(rawText)
+    if (!parsed) {
+      return { candidates, debug: { http_status: res.status, raw_text: rawText.slice(0, 500), error: 'no valid json' } }
     }
 
     const classMap = new Map<number, { is_competitor: boolean; confidence: string; reason: string }>()
@@ -315,7 +350,7 @@ ${JSON.stringify(list, null, 2)}
 
 export async function nearbySearchGooglePlaces(
   body: Record<string, unknown>,
-): Promise<{ candidates: NearbyCandidate[] }> {
+): Promise<{ candidates: NearbyCandidate[]; _debug?: unknown }> {
   const apiKey = (
     Deno.env.get('GOOGLE_PLACES_API_KEY')
     ?? Deno.env.get('GOOGLE_MAPS_API_KEY')
@@ -341,6 +376,7 @@ export async function nearbySearchGooglePlaces(
     'places.rating',
     'places.userRatingCount',
     'places.googleMapsUri',
+    'places.websiteUri',
   ].join(',')
   const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
     method: 'POST',
@@ -376,6 +412,7 @@ export async function nearbySearchGooglePlaces(
         name: shortText(displayName, 160),
         address: shortText(p.formattedAddress, 300),
         google_maps_uri: shortText(p.googleMapsUri, 500),
+        website_uri: shortText(p.websiteUri, 500),
         lat: toNullableNumber(location.latitude),
         lng: toNullableNumber(location.longitude),
         rating: toNullableNumber(p.rating),
@@ -387,8 +424,8 @@ export async function nearbySearchGooglePlaces(
     })
     .filter((c): c is NearbyCandidate => c !== null)
 
-  const { candidates: classified } = await classifyNearbyWithAI(candidates)
-  return { candidates: classified }
+  const { candidates: classified, debug } = await classifyNearbyWithAI(candidates)
+  return { candidates: classified, _debug: debug }
 }
 
 export async function fetchCompetitorReviewContext(

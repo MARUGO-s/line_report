@@ -2427,12 +2427,15 @@ function renderNearbyCandidates(candidates, registeredPlaceIds) {
     const aiReason = hasAi && c.ai_reason
       ? `<div class="nc-ai-reason">${escapeHtml(c.ai_reason)}</div>`
       : '';
+    const websiteLink = c.website_uri
+      ? `<div class="nc-meta"><a href="${escapeHtml(c.website_uri)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-size:0.78rem" onclick="event.stopPropagation()">🌐 公式サイト</a></div>`
+      : '';
     return `<label class="nearby-candidate" style="cursor:${alreadyRegistered ? 'default' : 'pointer'}">
       <input type="checkbox" data-nearby-idx="${i}" ${alreadyRegistered ? 'disabled checked' : (autoChecked ? 'checked' : '')} style="width:16px;height:16px;flex-shrink:0">
       <div>
         <div class="nc-name">${escapeHtml(c.name || '不明')}${registeredBadge ? '&nbsp;' + registeredBadge : ''}${aiBadge}</div>
         <div class="nc-meta">${rating}${total ? '　' + total : ''}</div>
-        ${addr}${aiReason}
+        ${addr}${aiReason}${websiteLink}
       </div>
       <div></div>
     </label>`;
