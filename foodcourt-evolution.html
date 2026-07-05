@@ -420,10 +420,12 @@
     return body;
   }
 
-  async function tryConnect(){
+  // tryConnect と loadData を統合: 認証確認と同時にデータも取得し、二重APIコールを防ぐ。
+  async function tryConnectAndLoad(){
     try{
-      await apiFetch('/foodcourt/evolution-history?store_key=marugoS');
+      const body = await apiFetch('/foodcourt/evolution-history?store_key=marugoS');
       setAuthBadge(true);
+      historyRows = Array.isArray(body.rows) ? body.rows : [];
       return true;
     }catch(_){ setAuthBadge(false); return false; }
   }
@@ -433,8 +435,8 @@
     if(!t){ dom.authMsg.textContent='トークンを入力してください。'; dom.authMsg.className='msg err'; return; }
     try{ sessionStorage.setItem(TOKEN_KEY, t); localStorage.setItem(TOKEN_KEY, t); }catch(_){}
     dom.authMsg.textContent='接続中…'; dom.authMsg.className='msg';
-    const ok = await tryConnect();
-    if(ok){ dom.authMsg.textContent=''; await loadData(); }
+    const ok = await tryConnectAndLoad();
+    if(ok){ dom.authMsg.textContent=''; dom.resultArea.hidden = false; dom.loadMsg.textContent=''; render(); }
     else{ dom.authMsg.textContent='トークンが正しくないか、接続に失敗しました。'; dom.authMsg.className='msg err'; }
   });
   dom.tokenInput.addEventListener('keydown', e=>{ if(e.key==='Enter') dom.tokenBtn.click(); });
@@ -486,6 +488,7 @@
     const latestG = mapePct(latest.mape_guests);
     const latestS = mapePct(latest.mape_sales);
     const firstG  = mapePct(first.mape_guests);
+    const firstS  = mapePct(first.mape_sales);
     const deltaG  = (latestG!=null && firstG!=null) ? latestG - firstG : null;
     const trackingDays = rows.length;
     const histDays = latest.history_days || 0;
@@ -527,7 +530,7 @@
       <div class="kpi">
         <div class="kpi-k">💴 売上 MAPE（最新）</div>
         <div class="kpi-v">${latestS!=null ? latestS.toFixed(1) : '—'}<small>%</small></div>
-        <div class="kpi-sub">初回: ${firstG!=null ? firstG.toFixed(1)+'%' : '—'}</div>
+        <div class="kpi-sub">初回: ${firstS!=null ? firstS.toFixed(1)+'%' : '—'}</div>
       </div>
       <div class="kpi">
         <div class="kpi-k">📐 平均客数（学習値）</div>
@@ -620,13 +623,12 @@
       });
     }
 
-    // compute CSS variables at runtime
     const cs = getComputedStyle(document.documentElement);
     const accentColor = cs.getPropertyValue('--accent').trim() || 'oklch(0.62 0.17 256)';
     const purpleColor = cs.getPropertyValue('--purple').trim() || 'oklch(0.72 0.18 310)';
 
-    makePath(gVals, 'oklch(0.62 0.17 256)', false);
-    makePath(sVals, 'oklch(0.72 0.18 310)', true);
+    makePath(gVals, accentColor, false);
+    makePath(sVals, purpleColor, true);
 
     // latest label
     const latestIdx = rows.length-1;
@@ -681,7 +683,7 @@
         const prevMg = mapePct(prev.mape_guests);
         const d = prevMg!=null ? mg - prevMg : null;
         if(d == null) deltaHtml = '<span class="neg">—</span>';
-        else if(Math.abs(d) < 0.05) deltaHtml = '<span class="neutral">→ 横ばい</span>';
+        else if(Math.abs(d) < 1.0) deltaHtml = '<span class="neutral">→ 横ばい</span>';
         else if(d<0) deltaHtml = '<span class="good">▼ '+Math.abs(d).toFixed(1)+'pt 改善</span>';
         else deltaHtml = '<span class="bad">▲ '+d.toFixed(1)+'pt 悪化</span>';
       }
@@ -714,8 +716,8 @@
   async function init(){
     const token = getToken();
     if(token){
-      const ok = await tryConnect();
-      if(ok) await loadData();
+      const ok = await tryConnectAndLoad();
+      if(ok){ dom.resultArea.hidden = false; render(); }
     } else {
       setAuthBadge(false);
     }
