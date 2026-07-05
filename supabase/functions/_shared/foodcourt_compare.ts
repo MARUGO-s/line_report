@@ -9,7 +9,7 @@ import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v5'
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v6'
 
 function buildFoodCourtPageUrl(storeKey: string, loginToken?: string | null): string {
   const key = String(storeKey || '').trim()
@@ -662,7 +662,7 @@ async function openaiChat(
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   if (!apiKey) return { content: null, usage: null }
   try {
-    const res = await fetch('https://api.openai.com/v1/responses', {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -670,10 +670,8 @@ async function openaiChat(
       },
       body: JSON.stringify({
         model,
-        input: messages,
-        max_output_tokens: maxTokens,
-        reasoning: { effort: 'low' },
-        text: { verbosity: 'low' },
+        messages,
+        max_tokens: maxTokens,
       }),
     })
     if (!res.ok) {
@@ -682,17 +680,10 @@ async function openaiChat(
       return { content: null, usage: null }
     }
     const json = await res.json().catch(() => null) as {
-      output_text?: string
-      output?: Array<{ content?: Array<{ text?: string; type?: string }> }>
+      choices?: Array<{ message?: { content?: string } }>
       usage?: unknown
     } | null
-    const content = String(
-      json?.output_text ??
-        (json?.output ?? [])
-          .flatMap((item) => item.content ?? [])
-          .map((part) => part.text ?? '')
-          .join('\n'),
-    ).trim()
+    const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
     return { content: content || null, usage: openaiUsageFrom(json, model) }
   } catch (e) {
     console.error('openaiChat failed:', e instanceof Error ? e.message : String(e))
