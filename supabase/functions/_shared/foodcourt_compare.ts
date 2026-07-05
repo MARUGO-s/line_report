@@ -9,7 +9,7 @@ import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v4'
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v5'
 
 function buildFoodCourtPageUrl(storeKey: string, loginToken?: string | null): string {
   const key = String(storeKey || '').trim()
