@@ -1642,6 +1642,7 @@ Deno.serve(async (req, info) => {
           receipt_correction_reply_enabled: payload.receipt_correction_reply_enabled,
           non_receipt_image_reply_enabled: payload.non_receipt_image_reply_enabled,
           media_save_enabled: payload.media_save_enabled,
+          review_alert_enabled: payload.review_alert_enabled,
           budget_entry_enabled: payload.budget_entry_enabled,
           petty_receipt_analysis_enabled: payload.petty_receipt_analysis_enabled,
           receipt_sales_registration_enabled: payload.receipt_sales_registration_enabled,
@@ -7540,6 +7541,7 @@ function buildRoomSettingsPayload(body: unknown): {
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
   media_save_enabled: boolean
+  review_alert_enabled?: boolean
   budget_entry_enabled?: boolean
   petty_receipt_analysis_enabled?: boolean
   receipt_sales_registration_enabled?: boolean
@@ -7702,6 +7704,13 @@ function buildRoomSettingsPayload(body: unknown): {
   }
   const mediaSaveEnabled = mediaSaveEnabledRaw !== false
 
+  // 口コミ新着通知（review-alert-cron宛て、既定OFF）。未指定なら undefined＝upsertに含めず既存値を保持。
+  const reviewAlertEnabledRaw = body.review_alert_enabled
+  if (reviewAlertEnabledRaw != null && typeof reviewAlertEnabledRaw !== "boolean") {
+    throw { status: 400, message: "review_alert_enabled must be boolean when provided." } satisfies AppError
+  }
+  const reviewAlertEnabled = reviewAlertEnabledRaw != null ? reviewAlertEnabledRaw === true : undefined
+
   const budgetEntryEnabledRaw = body.budget_entry_enabled
   if (budgetEntryEnabledRaw != null && typeof budgetEntryEnabledRaw !== "boolean") {
     throw { status: 400, message: "budget_entry_enabled must be boolean when provided." } satisfies AppError
@@ -7813,6 +7822,7 @@ function buildRoomSettingsPayload(body: unknown): {
     receipt_midreport_enabled: receiptMidreportEnabled,
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,
     media_save_enabled: mediaSaveEnabled,
+    review_alert_enabled: reviewAlertEnabled,
     budget_entry_enabled: budgetEntryEnabled,
     petty_receipt_analysis_enabled: pettyReceiptAnalysisEnabled,
     receipt_sales_registration_enabled: receiptSalesRegistrationEnabled,
