@@ -280,24 +280,44 @@ function extractFirstBalanced(text: string, open: string, close: string): string
 }
 
 function extractClassifications(text: string): { classifications: unknown[] } | null {
-  const objStart = text.indexOf('{')
-  const arrStart = text.indexOf('[')
-  if (arrStart !== -1 && (objStart === -1 || arrStart < objStart)) {
-    const arrStr = extractFirstBalanced(text, '[', ']')
-    if (!arrStr) return null
+  // 1. ```json ... ``` ブロックがあれば最優先でパースを試みる
+  const mdMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+  if (mdMatch) {
+    const content = mdMatch[1].trim()
     try {
-      const arr = JSON.parse(arrStr)
-      if (Array.isArray(arr)) return { classifications: arr }
-    } catch (_) { return null }
+      const parsed = JSON.parse(content)
+      if (Array.isArray(parsed)) return { classifications: parsed }
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).classifications)) {
+        return parsed as { classifications: unknown[] }
+      }
+    } catch (_) { /* ignore and fallback */ }
   }
-  const objStr = extractFirstBalanced(text, '{', '}')
-  if (!objStr) return null
-  try {
-    const obj = JSON.parse(objStr)
-    if (typeof obj === 'object' && obj !== null && Array.isArray((obj as Record<string, unknown>).classifications)) {
-      return obj as { classifications: unknown[] }
+
+  // 2. テキスト内のすべての { または [ の出現位置について、有効な JSON が取れるか試す
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '{') {
+      const str = extractFirstBalanced(text.slice(i), '{', '}')
+      if (str) {
+        try {
+          const parsed = JSON.parse(str)
+          if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).classifications)) {
+            return parsed as { classifications: unknown[] }
+          }
+        } catch (_) {}
+      }
+    } else if (text[i] === '[') {
+      const str = extractFirstBalanced(text.slice(i), '[', ']')
+      if (str) {
+        try {
+          const parsed = JSON.parse(str)
+          if (Array.isArray(parsed)) {
+            return { classifications: parsed }
+          }
+        } catch (_) {}
+      }
     }
-  } catch (_) { return null }
+  }
+
   return null
 }
 
