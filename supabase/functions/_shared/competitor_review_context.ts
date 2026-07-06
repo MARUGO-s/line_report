@@ -374,7 +374,10 @@ ${JSON.stringify(list, null, 2)}
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 1024,
+        // 最大20件 × (idx/is_competitor/confidence/genre_match/reason) を安全に返すための余裕。
+        // 1024 だと候補数が多い時にJSON出力が途中で切れ（finish_reason:"length"）、
+        // 分類が丸ごと失敗してAIバッジが全滅する不具合があったため引き上げた。
+        max_tokens: 3072,
       }),
     })
     if (!res.ok) {
@@ -383,9 +386,13 @@ ${JSON.stringify(list, null, 2)}
     }
     const json = await res.json()
     const rawText: string = json?.choices?.[0]?.message?.content ?? ''
+    const finishReason = json?.choices?.[0]?.finish_reason ?? null
     const parsed = extractClassifications(rawText)
     if (!parsed) {
-      return { candidates, debug: { http_status: res.status, raw_text: rawText.slice(0, 500), error: 'no valid json' } }
+      return {
+        candidates,
+        debug: { http_status: res.status, finish_reason: finishReason, raw_text: rawText.slice(0, 800), error: 'no valid json' },
+      }
     }
 
     const classMap = new Map<number, { is_competitor: boolean; confidence: string; reason: string; genre_match: boolean | null }>()
@@ -404,7 +411,7 @@ ${JSON.stringify(list, null, 2)}
     }
 
     return {
-      debug: { http_status: res.status, classified_count: classMap.size, model },
+      debug: { http_status: res.status, finish_reason: finishReason, classified_count: classMap.size, total_count: candidates.length, model },
       candidates: candidates.map((c, i) => {
         const cls = classMap.get(i)
         if (!cls) return c

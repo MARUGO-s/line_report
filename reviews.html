@@ -1007,6 +1007,7 @@ async function openNearbySearch() {
       body: { store_key: sk, store_name: currentStoreName(), address: STORE_ADDRESS[sk] || '', radius, ...coords },
     });
     _nearbyCandidateCache = Array.isArray(result.candidates) ? result.candidates : [];
+    if (result._debug) console.log('[nearby-search debug]', result._debug);
     const ctx = await apiFetch(`/receipts/competitors?store_key=${encodeURIComponent(sk)}`);
     const registered = new Set(
       (Array.isArray(ctx.competitors) ? ctx.competitors : [])
