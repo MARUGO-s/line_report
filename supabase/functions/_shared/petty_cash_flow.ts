@@ -222,6 +222,7 @@ export function extractExpenseFromReceipt(
   //   外税8%上乗せの不一致を根本回避）。プロンプト側のSeriaブロックと二重の安全網。
   const isSeriaVendor = /(seria|セリア)/i.test(String(receipt?.storeName ?? ''))
   const isLawsonVendor = /(lawson|ローソン)/i.test(String(receipt?.storeName ?? ''))
+  const isFamilyMartVendor = /(family\s*mart|familymart|ファミリーマート|ファミマ)/i.test(String(receipt?.storeName ?? ''))
   const itemEntries = itemRows.map((i, idx) => {
     const p = i.amount != null && i.amount > 0 ? i.amount : 0
     let rate: 8 | 10
@@ -233,6 +234,23 @@ export function extractExpenseFromReceipt(
     const acct: 'shokuzai' | 'shomohin' | 'alcohol' = rate === 8 ? 'shokuzai' : classifyPettyAcct(i.name)
     return { n: i.name || '(品目)', p, acct, rate }
   })
+  // FamilyMart の小型レシートは同じ商品が複数行に分かれることがあり、OCRが2行目を落とすと
+  // 下流の汎用補完が「(明細補完 10%対象)」のような実在しない品目を作ってしまう。
+  // 1品の税込単価×整数個がレシート合計(gross)に一致する場合は、同じ商品行の繰り返しとして復元する。
+  if (
+    isFamilyMartVendor &&
+    itemEntries.length === 1 &&
+    gross != null &&
+    gross > 0 &&
+    itemEntries[0].p > 0 &&
+    itemEntries[0].rate === 8
+  ) {
+    const count = Math.round(gross / itemEntries[0].p)
+    if (count >= 2 && count <= 10 && Math.abs(itemEntries[0].p * count - gross) <= 2) {
+      const first = itemEntries[0]
+      for (let i = 1; i < count; i++) itemEntries.push({ ...first })
+    }
+  }
   // 税は税率ごとにまとめて1円未満切り捨て（レシートの「うち税額」と同じ方式）。
   let itB8 = 0, itB10 = 0
   for (const it of itemEntries) { if (it.rate === 10) itB10 += it.p; else itB8 += it.p }
@@ -307,9 +325,10 @@ export function extractExpenseFromReceipt(
   //     Σ印字価格 ≒ 出金額(税込合計) → 印字は税込 → 各品目 p = round(p ÷ (1+税率)) で税抜へ変換
   //   どちらにも一致しない（±3円超）= 価格の誤読が混ざっている → 変換せず、確認カード/台帳の⚠検証に委ねる。
   if (allPriced && itemEntries.length) {
-    if (Math.abs(itemsSum - base) <= 3) {
+    const entrySum = itemEntries.reduce((s, it) => s + (it.p > 0 ? it.p : 0), 0)
+    if (Math.abs(entrySum - base) <= 3) {
       // 税抜印字（そのまま）
-    } else if (Math.abs(itemsSum - amount) <= 3) {
+    } else if (Math.abs(entrySum - amount) <= 3) {
       taxMode = 'in'
       for (const it of itemEntries) it.p = Math.round(it.p / (1 + it.rate / 100))
       // 丸め誤差で Σp が本体とズレた分は最大価格の品目で吸収（±品数程度まで）
@@ -329,7 +348,8 @@ export function extractExpenseFromReceipt(
     // (a) tax_breakdown が読めている税率は、その税抜小計を品目が満たすよう不足分を補完（税率は確定）。
     //     ※集計ベースなので価格未取得の品目があっても安全（高島屋で買物袋¥5が読めなくても10%¥5を補える）。
     //     ただし集計の内訳が信頼アンカーと不整合(bdSplitTrusted=false)なら使わない（誤読集計でのニセ補完を防ぐ）。
-    if (bdValid && bdSplitTrusted) {
+    //     FamilyMart は内税コンビニレシートで、10%対象行が無いのに汎用補完が架空の10%品目を作る事故があったため除外。
+    if (bdValid && bdSplitTrusted && !isFamilyMartVendor) {
       for (const b of breakdown) {
         const groupNet = Math.max(0, (b.total ?? 0) - b.tax)
         const covered = itemEntries.reduce((s, it) => s + (it.rate === b.rate ? it.p : 0), 0)
@@ -339,7 +359,7 @@ export function extractExpenseFromReceipt(
     }
     // (b) それでも明細(税込)が支払総額に届かない＝AIが税率別集計の行ごと落とした税率がある。残差を補完。
     //     税率は tax_breakdown に無い方（多くは10%＝レジ袋等）を推定。税込/税抜の正規化が効く全品価格ありの時だけ。
-    if (allPriced) {
+    if (allPriced && !isFamilyMartVendor) {
       let g8 = 0, g10 = 0
       for (const it of itemEntries) { if (it.rate === 10) g10 += it.p; else g8 += it.p }
       const itemsGross = (g8 + g10) + Math.floor((g8 * 8) / 100) + Math.floor((g10 * 10) / 100)
