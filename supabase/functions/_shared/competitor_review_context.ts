@@ -69,6 +69,31 @@ type StoreReviewSnapshotRow = {
   updated_at: string
 }
 
+type StoreReviewProfileRow = {
+  id: number
+  store_review_place_id: number
+  store_partition_key: string
+  profile_version: string
+  model: string | null
+  cuisine_genres: string[] | null
+  service_styles: string[] | null
+  price_band: string | null
+  visit_motives: string[] | null
+  customer_segments: string[] | null
+  strengths: string[] | null
+  weaknesses: string[] | null
+  competitor_keywords: string[] | null
+  adjacent_competitor_keywords: string[] | null
+  excluded_keywords: string[] | null
+  summary: string | null
+  rag_document: string | null
+  dictionary: Record<string, unknown> | null
+  source_snapshot_id: number | null
+  source_snapshot_date: string | null
+  generated_at: string
+  updated_at: string
+}
+
 type NormalizedGooglePlaceDetails = {
   name: string | null
   address: string | null
@@ -126,6 +151,113 @@ function inferPositiveTerms(texts: string[]): string[] {
 
 function inferNegativeTerms(texts: string[]): string[] {
   return keywordHits(texts, ['遅い', '高い', '狭い', 'うるさい', '不満', '残念', '待つ', '接客', '混雑'])
+}
+
+function uniqStrings(values: unknown, max = 16): string[] {
+  const raw = Array.isArray(values)
+    ? values
+    : (typeof values === 'string' ? values.split(/[,\n、/]+/) : [])
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const value of raw) {
+    const s = shortText(value, 80)
+    if (!s || seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+    if (out.length >= max) break
+  }
+  return out
+}
+
+function normalizeForKeyword(value: unknown): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[‐‑‒–—―ー－-]/g, '')
+}
+
+function inferStoreProfileSeed(place: StoreReviewPlaceRow, latest: StoreReviewSnapshotRow | null): {
+  cuisineGenres: string[]
+  serviceStyles: string[]
+  priceBand: string
+  visitMotives: string[]
+  customerSegments: string[]
+  strengths: string[]
+  weaknesses: string[]
+  competitorKeywords: string[]
+  adjacentCompetitorKeywords: string[]
+  excludedKeywords: string[]
+} {
+  const hay = normalizeForKeyword([
+    place.store_name,
+    place.address,
+    latest?.review_excerpt,
+    ...(latest?.positive_terms ?? []),
+    ...(latest?.negative_terms ?? []),
+  ].filter(Boolean).join(' '))
+  const baseExcluded = ['コンビニ', 'スーパー', '薬局', 'ドラッグストア', '銀行', 'ATM', '不動産', '美容', 'サロン', 'ホテル', '駐車場', 'クリニック', '歯科', '病院', '学校', 'オフィス', '小売']
+  let cuisineGenres = ['飲食店']
+  let serviceStyles = ['レストラン']
+  let visitMotives = ['食事', '近隣利用']
+  let customerSegments = ['近隣客', '目的来店客']
+  let direct = ['レストラン', '居酒屋', 'バル', '飲食店', 'カフェ']
+  let adjacent = ['ファストフード', 'フードコート', 'ダイニングバー']
+  let priceBand = '未推定'
+
+  if (/寿司|鮨|すし|sushi|koruri/.test(hay)) {
+    cuisineGenres = ['寿司', '和食']
+    serviceStyles = ['カウンター・テーブル飲食', '食事中心']
+    visitMotives = ['寿司・和食の食事', '会食', '接待']
+    customerSegments = ['和食目的客', '会食客', '近隣勤務者']
+    direct = ['寿司', '鮨', 'すし', '和食', '日本料理', '割烹', '海鮮']
+    adjacent = ['居酒屋', '天ぷら', 'そば', 'うどん', '定食']
+    priceBand = '中価格帯以上'
+  } else if (/焼肉|yakiniku|ホルモン|肉/.test(hay)) {
+    cuisineGenres = ['焼肉', '肉料理']
+    serviceStyles = ['テーブル飲食', '食事・飲み併用']
+    visitMotives = ['焼肉会食', '宴会', '食事']
+    customerSegments = ['グループ客', '肉料理目的客', '近隣勤務者']
+    direct = ['焼肉', 'ホルモン', '韓国料理', 'ステーキ', '肉料理']
+    adjacent = ['居酒屋', 'バル', '鉄板焼き', 'しゃぶしゃぶ']
+    priceBand = '中価格帯以上'
+  } else if (/ビストロ|bistro|ワイン|wine|バル|bal|イタリアン|フレンチ|cava|pelota|まるごっと|marugo/.test(hay)) {
+    cuisineGenres = ['ビストロ', 'イタリアン・洋食', 'ワイン']
+    serviceStyles = ['食事・飲み併用', 'カジュアルダイニング']
+    visitMotives = ['ワイン利用', '会食', 'デート', '仕事帰りの食事']
+    customerSegments = ['ワイン・洋食目的客', '近隣勤務者', '少人数会食客']
+    direct = ['ビストロ', 'イタリアン', 'フレンチ', 'ワインバー', 'バル', '洋食', 'ダイニングバー']
+    adjacent = ['居酒屋', 'スペイン料理', 'カフェ', '肉バル']
+    priceBand = '中価格帯'
+  } else if (/カフェ|cafe|喫茶/.test(hay)) {
+    cuisineGenres = ['カフェ']
+    serviceStyles = ['軽食・喫茶', '短時間利用']
+    visitMotives = ['休憩', '軽食', '待ち合わせ']
+    customerSegments = ['カフェ利用客', '近隣客', '観光客']
+    direct = ['カフェ', '喫茶', 'コーヒー', 'ベーカリー']
+    adjacent = ['ファストフード', 'レストラン', 'スイーツ']
+    priceBand = '低〜中価格帯'
+  } else if (/フードコート|foodcourt|後楽|東京ドーム/.test(hay)) {
+    cuisineGenres = ['フードコート内飲食']
+    serviceStyles = ['短時間・回転型', '食事中心']
+    visitMotives = ['イベント前後の食事', '短時間の食事', 'ファミリー利用']
+    customerSegments = ['施設来訪客', 'イベント客', 'ファミリー客']
+    direct = ['フードコート', 'レストラン', 'ファストフード', 'カフェ', 'ラーメン', '丼', '和食', '洋食']
+    adjacent = ['売店', 'テイクアウト', 'スイーツ']
+    priceBand = '低〜中価格帯'
+  }
+
+  return {
+    cuisineGenres,
+    serviceStyles,
+    priceBand,
+    visitMotives,
+    customerSegments,
+    strengths: uniqStrings([...(latest?.positive_terms ?? []), 'Google口コミ評価', '立地'], 8),
+    weaknesses: uniqStrings(latest?.negative_terms ?? [], 8),
+    competitorKeywords: uniqStrings(direct, 18),
+    adjacentCompetitorKeywords: uniqStrings(adjacent, 18),
+    excludedKeywords: baseExcluded,
+  }
 }
 
 function compactGoogleRaw(raw: Record<string, unknown>): Record<string, unknown> {
@@ -249,6 +381,218 @@ function getGooglePlacesApiKey(): string {
   return apiKey
 }
 
+function parseFirstJsonObject(text: string): Record<string, unknown> | null {
+  const direct = text.trim()
+  try {
+    const parsed = JSON.parse(direct)
+    return isRecord(parsed) ? parsed : null
+  } catch (_) { /* fallback */ }
+  const block = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+  if (block) {
+    try {
+      const parsed = JSON.parse(block[1].trim())
+      return isRecord(parsed) ? parsed : null
+    } catch (_) { /* fallback */ }
+  }
+  const balanced = extractFirstBalanced(text, '{', '}')
+  if (!balanced) return null
+  try {
+    const parsed = JSON.parse(balanced)
+    return isRecord(parsed) ? parsed : null
+  } catch (_) {
+    return null
+  }
+}
+
+function profileRowForAi(profile: StoreReviewProfileRow | null): Record<string, unknown> | null {
+  if (!profile) return null
+  return {
+    summary: profile.summary ?? '',
+    cuisine_genres: profile.cuisine_genres ?? [],
+    service_styles: profile.service_styles ?? [],
+    price_band: profile.price_band ?? '',
+    visit_motives: profile.visit_motives ?? [],
+    customer_segments: profile.customer_segments ?? [],
+    strengths: profile.strengths ?? [],
+    weaknesses: profile.weaknesses ?? [],
+    competitor_keywords: profile.competitor_keywords ?? [],
+    adjacent_competitor_keywords: profile.adjacent_competitor_keywords ?? [],
+    excluded_keywords: profile.excluded_keywords ?? [],
+    dictionary: profile.dictionary ?? {},
+    rag_document: profile.rag_document ?? '',
+  }
+}
+
+function sanitizeProfilePayload(
+  parsed: Record<string, unknown> | null,
+  place: StoreReviewPlaceRow,
+  latest: StoreReviewSnapshotRow | null,
+  model: string | null,
+  source: 'ai' | 'fallback',
+): Record<string, unknown> {
+  const seed = inferStoreProfileSeed(place, latest)
+  const cuisineGenres = uniqStrings(parsed?.cuisine_genres, 12)
+  const serviceStyles = uniqStrings(parsed?.service_styles, 12)
+  const visitMotives = uniqStrings(parsed?.visit_motives, 12)
+  const customerSegments = uniqStrings(parsed?.customer_segments, 12)
+  const strengths = uniqStrings(parsed?.strengths, 12)
+  const weaknesses = uniqStrings(parsed?.weaknesses, 12)
+  const competitorKeywords = uniqStrings(parsed?.competitor_keywords, 20)
+  const adjacentKeywords = uniqStrings(parsed?.adjacent_competitor_keywords, 20)
+  const excludedKeywords = uniqStrings(parsed?.excluded_keywords, 20)
+  const summary = shortText(parsed?.summary, 700)
+    || `${place.store_name || '自店舗'}は${seed.cuisineGenres.join('・')}系の店舗として扱います。`
+  const ragDocument = shortText(parsed?.rag_document, 2400)
+    || [
+      `店舗名: ${place.store_name || ''}`,
+      `住所: ${place.address || ''}`,
+      `推定ジャンル: ${seed.cuisineGenres.join('、')}`,
+      `提供形態: ${seed.serviceStyles.join('、')}`,
+      `来店動機: ${seed.visitMotives.join('、')}`,
+      latest?.rating != null ? `Google評価: ${latest.rating} / 口コミ ${latest.user_ratings_total ?? 0}件` : '',
+      latest?.review_excerpt ? `口コミ抜粋: ${latest.review_excerpt}` : '',
+    ].filter(Boolean).join('\n')
+
+  const direct = competitorKeywords.length ? competitorKeywords : seed.competitorKeywords
+  const adjacent = adjacentKeywords.length ? adjacentKeywords : seed.adjacentCompetitorKeywords
+  const excluded = excludedKeywords.length ? excludedKeywords : seed.excludedKeywords
+  return {
+    model,
+    cuisine_genres: cuisineGenres.length ? cuisineGenres : seed.cuisineGenres,
+    service_styles: serviceStyles.length ? serviceStyles : seed.serviceStyles,
+    price_band: shortText(parsed?.price_band, 80) || seed.priceBand,
+    visit_motives: visitMotives.length ? visitMotives : seed.visitMotives,
+    customer_segments: customerSegments.length ? customerSegments : seed.customerSegments,
+    strengths: strengths.length ? strengths : seed.strengths,
+    weaknesses: weaknesses.length ? weaknesses : seed.weaknesses,
+    competitor_keywords: direct,
+    adjacent_competitor_keywords: adjacent,
+    excluded_keywords: excluded,
+    summary,
+    rag_document: ragDocument,
+    dictionary: {
+      source,
+      direct_keywords: direct,
+      adjacent_keywords: adjacent,
+      excluded_keywords: excluded,
+      cuisine_genres: cuisineGenres.length ? cuisineGenres : seed.cuisineGenres,
+      visit_motives: visitMotives.length ? visitMotives : seed.visitMotives,
+      rule: 'direct_keywordsを同ジャンル・直接競合として最優先、adjacent_keywordsを周辺競合として次点、excluded_keywordsは原則除外。',
+    },
+    source_snapshot_id: latest?.id ?? null,
+    source_snapshot_date: latest?.snapshot_date ?? null,
+    generated_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+}
+
+async function buildStoreReviewProfilePayload(
+  place: StoreReviewPlaceRow,
+  latest: StoreReviewSnapshotRow | null,
+): Promise<Record<string, unknown>> {
+  const groqKey = String(Deno.env.get('GROQ_API_KEY') || '').trim()
+  const model = String(Deno.env.get('STORE_PROFILE_MODEL') || Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'llama-3.3-70b-versatile').trim()
+  if (!groqKey) return sanitizeProfilePayload(null, place, latest, null, 'fallback')
+
+  const input = {
+    store_name: place.store_name,
+    address: place.address,
+    website_uri: place.website_uri,
+    rating: latest?.rating ?? null,
+    user_ratings_total: latest?.user_ratings_total ?? null,
+    review_excerpt: latest?.review_excerpt ?? null,
+    positive_terms: latest?.positive_terms ?? [],
+    negative_terms: latest?.negative_terms ?? [],
+  }
+  const prompt = `あなたは飲食店の商圏・口コミ・競合分析担当です。以下の自店舗資料を一度だけ詳しく精査し、あとでRAG風コンテキストとして再利用できる「店舗理解資料」と「競合辞典」を作ってください。
+
+自店舗資料:
+${JSON.stringify(input, null, 2)}
+
+要件:
+- 店舗名だけに頼らず、住所、口コミ抜粋、評価、ポジティブ/ネガティブ語から業態・客層・来店動機を推定する
+- 競合検索で優先すべき同ジャンル/同利用シーンのキーワードを competitor_keywords に入れる
+- ジャンルは違っても客を奪い合う周辺競合を adjacent_competitor_keywords に入れる
+- 飲食競合ではない施設や自店誤検出を除外しやすい語を excluded_keywords に入れる
+- rag_document は、後続の競合判定AIが自店舗を理解するための保存資料として、具体的に書く
+
+以下のJSONのみで返してください:
+{
+  "summary": "店舗理解の要約",
+  "cuisine_genres": ["主要ジャンル"],
+  "service_styles": ["提供形態"],
+  "price_band": "価格帯推定",
+  "visit_motives": ["来店動機"],
+  "customer_segments": ["客層"],
+  "strengths": ["口コミや情報から見た強み"],
+  "weaknesses": ["注意点"],
+  "competitor_keywords": ["直接競合キーワード"],
+  "adjacent_competitor_keywords": ["周辺競合キーワード"],
+  "excluded_keywords": ["除外キーワード"],
+  "rag_document": "保存資料本文"
+}`
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 2200,
+      }),
+    })
+    if (!res.ok) return sanitizeProfilePayload(null, place, latest, model, 'fallback')
+    const json = await res.json()
+    const rawText: string = json?.choices?.[0]?.message?.content ?? ''
+    return sanitizeProfilePayload(parseFirstJsonObject(rawText), place, latest, model, 'ai')
+  } catch (_) {
+    return sanitizeProfilePayload(null, place, latest, model, 'fallback')
+  }
+}
+
+async function fetchLatestStoreReviewProfile(
+  supabase: SupabaseClient,
+  storeKeyRaw: string,
+): Promise<StoreReviewProfileRow | null> {
+  const storeKey = await resolveAnalyticsStoreKey(supabase, storeKeyRaw)
+  const { data, error } = await supabase
+    .from('store_review_profiles')
+    .select('id, store_review_place_id, store_partition_key, profile_version, model, cuisine_genres, service_styles, price_band, visit_motives, customer_segments, strengths, weaknesses, competitor_keywords, adjacent_competitor_keywords, excluded_keywords, summary, rag_document, dictionary, source_snapshot_id, source_snapshot_date, generated_at, updated_at')
+    .eq('store_partition_key', storeKey)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) {
+    throw { status: 500, message: `Failed to fetch store review profile: ${error.message}` } satisfies AppError
+  }
+  return (data && isRecord(data) ? data : null) as StoreReviewProfileRow | null
+}
+
+async function upsertStoreReviewProfileFromSnapshot(
+  supabase: SupabaseClient,
+  storeKey: string,
+  place: StoreReviewPlaceRow,
+  latest: StoreReviewSnapshotRow | null,
+): Promise<StoreReviewProfileRow> {
+  const payload = await buildStoreReviewProfilePayload(place, latest)
+  const patch = {
+    store_review_place_id: place.id,
+    store_partition_key: storeKey,
+    profile_version: 'store-review-profile-v1',
+    ...payload,
+  }
+  const { data, error } = await supabase
+    .from('store_review_profiles')
+    .upsert(patch, { onConflict: 'store_review_place_id' })
+    .select('id, store_review_place_id, store_partition_key, profile_version, model, cuisine_genres, service_styles, price_band, visit_motives, customer_segments, strengths, weaknesses, competitor_keywords, adjacent_competitor_keywords, excluded_keywords, summary, rag_document, dictionary, source_snapshot_id, source_snapshot_date, generated_at, updated_at')
+    .single()
+  if (error) {
+    throw { status: 500, message: `Failed to save store review profile: ${error.message}` } satisfies AppError
+  }
+  return data as StoreReviewProfileRow
+}
+
 type NearbyCandidate = {
   place_id: string
   name: string | null
@@ -263,6 +607,84 @@ type NearbyCandidate = {
   ai_confidence: 'high' | 'medium' | 'low' | null
   ai_reason: string | null
   ai_genre_match: boolean | null
+}
+
+function isSameBrandCandidate(candidateName: string, storeName: string): boolean {
+  const c = normalizeForKeyword(candidateName)
+  const s = normalizeForKeyword(storeName)
+  if (!c || !s) return false
+  return c === s || c.includes(s) || s.includes(c)
+}
+
+function keywordMatch(text: string, keywords: string[]): string | null {
+  const hay = normalizeForKeyword(text)
+  for (const keyword of keywords) {
+    const k = normalizeForKeyword(keyword)
+    if (k && hay.includes(k)) return keyword
+  }
+  return null
+}
+
+function applyProfileDictionaryClassification(
+  candidates: NearbyCandidate[],
+  storeName: string,
+  profile: StoreReviewProfileRow | null,
+): NearbyCandidate[] {
+  if (!profile) return candidates
+  const direct = uniqStrings(profile.competitor_keywords, 24)
+  const adjacent = uniqStrings(profile.adjacent_competitor_keywords, 24)
+  const excluded = uniqStrings(profile.excluded_keywords, 24)
+  if (!direct.length && !adjacent.length && !excluded.length) return candidates
+
+  return candidates.map((candidate) => {
+    const text = [candidate.name, candidate.address].filter(Boolean).join(' ')
+    if (isSameBrandCandidate(candidate.name || '', storeName)) {
+      return {
+        ...candidate,
+        ai_is_competitor: false,
+        ai_confidence: 'high',
+        ai_genre_match: false,
+        ai_reason: '保存済み店舗理解資料上の自店舗名と近く、自店または同一ブランドの可能性が高いため除外。',
+      }
+    }
+    const excludedHit = keywordMatch(text, excluded)
+    const directHit = keywordMatch(text, direct)
+    const adjacentHit = keywordMatch(text, adjacent)
+    if (directHit) {
+      return {
+        ...candidate,
+        ai_is_competitor: true,
+        ai_confidence: 'high',
+        ai_genre_match: true,
+        ai_reason: `保存済み店舗理解資料の直接競合辞典「${directHit}」に該当し、同じ来店動機・客層で比較されやすい。`,
+      }
+    }
+    if (adjacentHit) {
+      return {
+        ...candidate,
+        ai_is_competitor: true,
+        ai_confidence: 'medium',
+        ai_genre_match: false,
+        ai_reason: `保存済み店舗理解資料の周辺競合辞典「${adjacentHit}」に該当し、ジャンルは違っても食事・飲み需要を奪い合う。`,
+      }
+    }
+    if (excludedHit) {
+      return {
+        ...candidate,
+        ai_is_competitor: false,
+        ai_confidence: 'high',
+        ai_genre_match: false,
+        ai_reason: `保存済み店舗理解資料の除外辞典「${excludedHit}」に該当し、飲食の直接競合ではない可能性が高い。`,
+      }
+    }
+    return {
+      ...candidate,
+      ai_is_competitor: candidate.ai_is_competitor ?? null,
+      ai_confidence: candidate.ai_confidence ?? 'low',
+      ai_genre_match: candidate.ai_genre_match ?? null,
+      ai_reason: candidate.ai_reason ?? '保存済み店舗理解資料の競合辞典には明確に該当しないため、Google Places上の飲食候補として低優先で確認対象にしています。',
+    }
+  })
 }
 
 function extractFirstBalanced(text: string, open: string, close: string): string | null {
@@ -325,23 +747,38 @@ async function classifyNearbyWithAI(
   candidates: NearbyCandidate[],
   storeName: string,
   storeAddress: string,
+  profile: StoreReviewProfileRow | null,
 ): Promise<{ candidates: NearbyCandidate[]; debug: unknown }> {
   if (!candidates.length) return { candidates, debug: { skipped: 'no candidates' } }
 
+  const profiledCandidates = applyProfileDictionaryClassification(candidates, storeName, profile)
+  const profileForPrompt = profileRowForAi(profile)
   const groqKey = String(Deno.env.get('GROQ_API_KEY') || '').trim()
-  if (!groqKey) return { candidates, debug: { skipped: 'no groq key' } }
+  if (!groqKey) return { candidates: profiledCandidates, debug: { skipped: 'no groq key', profile_applied: !!profile } }
 
-  const list = candidates.map((c, i) => ({
+  const list = profiledCandidates.map((c, i) => ({
     idx: i,
     name: c.name ?? '不明',
     address: c.address ?? '',
     rating: c.rating,
     review_count: c.user_ratings_total,
+    dictionary_guess: c.ai_is_competitor == null ? null : {
+      is_competitor: c.ai_is_competitor,
+      confidence: c.ai_confidence,
+      genre_match: c.ai_genre_match,
+      reason: c.ai_reason,
+    },
   }))
 
   const selfLabel = [storeName, storeAddress].filter(Boolean).join(' / ') || storeName
 
-  const prompt = `あなたは飲食店「${selfLabel}」の売上競合分析AIです。まず店名・住所から「${storeName}」の業態（料理ジャンル・提供形態・想定価格帯・飲み中心か食事中心か）を合理的に推定し、その推定業態を基準に以下の周辺店舗リストを分析してください。
+  const profileBlock = profileForPrompt
+    ? `保存済み店舗理解資料（RAG風コンテキスト。最優先で参照）:\n${JSON.stringify(profileForPrompt, null, 2)}`
+    : `保存済み店舗理解資料は未作成です。店名・住所から補助的に推定してください。`
+
+  const prompt = `あなたは飲食店「${selfLabel}」の売上競合分析AIです。以下の保存済み店舗理解資料を最優先の基準として読み込み、その自店舗資料・競合辞典に照らして周辺店舗リストを分析してください。
+
+${profileBlock}
 
 各店舗について次の3項目を判定すること：
 1. is_competitor（true/false）: 客数・売上・滞在時間を奪い合う競合とみなせるか
@@ -350,9 +787,10 @@ async function classifyNearbyWithAI(
    - コンビニ・小売・銀行・非飲食施設 → 競合外（false）
    - 店名に「${storeName}」と同一・類似ブランドを含む → 自店のため除外（false）
 2. confidence（high/medium/low）: is_competitor=true の場合の確信度
-3. genre_match（true/false）: その店の料理ジャンル・業態が「${storeName}」の推定業態と同系統（似た客層・似た利用シーン）とみなせるか
+3. genre_match（true/false）: その店の料理ジャンル・業態が保存済み店舗理解資料上の自店舗業態と同系統（似た客層・似た利用シーン）とみなせるか
    - 例：「${storeName}」が寿司店と推定される場合、他の寿司店・和食店・割烹は true。焼肉店やラーメン店、カフェは false（競合ではあっても系統は別）
    - 例：「${storeName}」が居酒屋・バル系と推定される場合、他の居酒屋・バル・ビアホールは true。ファミレスやファストフードは false
+   - 保存済み競合辞典の direct_keywords に該当する場合は原則 true として優先する
 
 reasonの書き方（重要）：
 - 「〇〇だから競合」という薄い説明は禁止
@@ -382,7 +820,7 @@ ${JSON.stringify(list, null, 2)}
     })
     if (!res.ok) {
       const errBody = await res.text().catch(() => '')
-      return { candidates, debug: { http_status: res.status, error: errBody.slice(0, 500), model } }
+      return { candidates: profiledCandidates, debug: { http_status: res.status, error: errBody.slice(0, 500), model, profile_applied: !!profile } }
     }
     const json = await res.json()
     const rawText: string = json?.choices?.[0]?.message?.content ?? ''
@@ -390,8 +828,8 @@ ${JSON.stringify(list, null, 2)}
     const parsed = extractClassifications(rawText)
     if (!parsed) {
       return {
-        candidates,
-        debug: { http_status: res.status, finish_reason: finishReason, raw_text: rawText.slice(0, 800), error: 'no valid json' },
+        candidates: profiledCandidates,
+        debug: { http_status: res.status, finish_reason: finishReason, raw_text: rawText.slice(0, 800), error: 'no valid json', profile_applied: !!profile },
       }
     }
 
@@ -411,8 +849,8 @@ ${JSON.stringify(list, null, 2)}
     }
 
     return {
-      debug: { http_status: res.status, finish_reason: finishReason, classified_count: classMap.size, total_count: candidates.length, model },
-      candidates: candidates.map((c, i) => {
+      debug: { http_status: res.status, finish_reason: finishReason, classified_count: classMap.size, total_count: profiledCandidates.length, model, profile_applied: !!profile },
+      candidates: profiledCandidates.map((c, i) => {
         const cls = classMap.get(i)
         if (!cls) return c
         return {
@@ -427,11 +865,12 @@ ${JSON.stringify(list, null, 2)}
       }),
     }
   } catch (e) {
-    return { candidates, debug: { error: String(e) } }
+    return { candidates: profiledCandidates, debug: { error: String(e), profile_applied: !!profile } }
   }
 }
 
 export async function nearbySearchGooglePlaces(
+  supabase: SupabaseClient,
   body: Record<string, unknown>,
 ): Promise<{ candidates: NearbyCandidate[]; _debug?: unknown }> {
   const apiKey = getGooglePlacesApiKey()
@@ -444,6 +883,7 @@ export async function nearbySearchGooglePlaces(
     : 300
   const storeName = shortText(body.store_name, 160) || shortText(body.store_key, 120) || '自店舗'
   const storeAddress = shortText(body.address, 300) || ''
+  const storeKeyRaw = shortText(body.store_key, 120) || storeName
 
   const fieldMask = [
     'places.id',
@@ -504,13 +944,23 @@ export async function nearbySearchGooglePlaces(
     })
     .filter((c: NearbyCandidate | null): c is NearbyCandidate => c !== null)
 
-  const { candidates: classified, debug } = await classifyNearbyWithAI(candidates, storeName, storeAddress)
+  const profile = await fetchLatestStoreReviewProfile(supabase, storeKeyRaw).catch(() => null)
+  const { candidates: classified, debug } = await classifyNearbyWithAI(candidates, storeName, storeAddress, profile)
   const websiteSample = placesRaw.slice(0, 3).map((p: unknown) => isRecord(p) ? {
     name: isRecord(p.displayName) && typeof p.displayName.text === 'string' ? p.displayName.text : null,
     websiteUri: p.websiteUri ?? '(none)',
   } : null)
   const candidateWebsiteSample = classified.slice(0, 3).map((c) => ({ name: c.name, website_uri: c.website_uri }))
-  return { candidates: classified, _debug: { ...(isRecord(debug) ? debug : { info: debug }), websiteSample, candidateWebsiteSample } }
+  return {
+    candidates: classified,
+    _debug: {
+      ...(isRecord(debug) ? debug : { info: debug }),
+      profile_loaded: !!profile,
+      profile_updated_at: profile?.updated_at ?? null,
+      websiteSample,
+      candidateWebsiteSample,
+    },
+  }
 }
 
 function normalizeGooglePlaceCandidate(p: Record<string, unknown>): NearbyCandidate | null {
@@ -616,6 +1066,7 @@ export async function fetchStoreReviewContext(
 
   const place = (placeData && isRecord(placeData) ? placeData : null) as StoreReviewPlaceRow | null
   let latestSnapshot: StoreReviewSnapshotRow | null = null
+  let profile: StoreReviewProfileRow | null = null
   if (place) {
     const { data: snapData, error: snapError } = await supabase
       .from('store_review_snapshots')
@@ -629,6 +1080,17 @@ export async function fetchStoreReviewContext(
       throw { status: 500, message: `Failed to fetch store review snapshot: ${snapError.message}` } satisfies AppError
     }
     latestSnapshot = (snapData && isRecord(snapData) ? snapData : null) as StoreReviewSnapshotRow | null
+    const { data: profileData, error: profileError } = await supabase
+      .from('store_review_profiles')
+      .select('id, store_review_place_id, store_partition_key, profile_version, model, cuisine_genres, service_styles, price_band, visit_motives, customer_segments, strengths, weaknesses, competitor_keywords, adjacent_competitor_keywords, excluded_keywords, summary, rag_document, dictionary, source_snapshot_id, source_snapshot_date, generated_at, updated_at')
+      .eq('store_review_place_id', place.id)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (profileError) {
+      throw { status: 500, message: `Failed to fetch store review profile: ${profileError.message}` } satisfies AppError
+    }
+    profile = (profileData && isRecord(profileData) ? profileData : null) as StoreReviewProfileRow | null
   }
 
   const rating = latestSnapshot?.rating != null ? Number(latestSnapshot.rating) : null
@@ -645,10 +1107,88 @@ export async function fetchStoreReviewContext(
     registered: !!place,
     place,
     latest_snapshot: latestSnapshot,
+    profile,
     rating,
     total_ratings: totalRatings,
     summary,
     generated_at: new Date().toISOString(),
+  }
+}
+
+async function fetchStoreReviewPlaceAndLatest(
+  supabase: SupabaseClient,
+  storeKey: string,
+): Promise<{ place: StoreReviewPlaceRow | null; latest: StoreReviewSnapshotRow | null; profile: StoreReviewProfileRow | null }> {
+  const { data: placeData, error: placeError } = await supabase
+    .from('store_review_places')
+    .select('id, store_partition_key, store_name, source, place_id, address, google_maps_uri, website_uri, lat, lng, is_active, updated_at')
+    .eq('store_partition_key', storeKey)
+    .eq('is_active', true)
+    .maybeSingle()
+  if (placeError) throw { status: 500, message: `Failed to fetch store review place: ${placeError.message}` } satisfies AppError
+  const place = (placeData && isRecord(placeData) ? placeData : null) as StoreReviewPlaceRow | null
+  if (!place) return { place: null, latest: null, profile: null }
+
+  const { data: snapData, error: snapError } = await supabase
+    .from('store_review_snapshots')
+    .select('id, store_review_place_id, source, snapshot_date, rating, user_ratings_total, review_count, review_excerpt, positive_terms, negative_terms, updated_at')
+    .eq('store_review_place_id', place.id)
+    .order('snapshot_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (snapError) throw { status: 500, message: `Failed to fetch store review snapshot: ${snapError.message}` } satisfies AppError
+
+  const { data: profileData, error: profileError } = await supabase
+    .from('store_review_profiles')
+    .select('id, store_review_place_id, store_partition_key, profile_version, model, cuisine_genres, service_styles, price_band, visit_motives, customer_segments, strengths, weaknesses, competitor_keywords, adjacent_competitor_keywords, excluded_keywords, summary, rag_document, dictionary, source_snapshot_id, source_snapshot_date, generated_at, updated_at')
+    .eq('store_review_place_id', place.id)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (profileError) throw { status: 500, message: `Failed to fetch store review profile: ${profileError.message}` } satisfies AppError
+
+  return {
+    place,
+    latest: (snapData && isRecord(snapData) ? snapData : null) as StoreReviewSnapshotRow | null,
+    profile: (profileData && isRecord(profileData) ? profileData : null) as StoreReviewProfileRow | null,
+  }
+}
+
+export async function ensureStoreReviewProfile(
+  supabase: SupabaseClient,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const storeKey = await resolveAnalyticsStoreKey(supabase, toSafeString(body.store_key))
+  const force = body.force === true
+  const { place, latest, profile } = await fetchStoreReviewPlaceAndLatest(supabase, storeKey)
+  if (!place) {
+    return {
+      ok: false,
+      created: false,
+      updated: false,
+      reason: '自店舗のGoogle Place IDが未登録です。',
+      context: await fetchStoreReviewContext(supabase, storeKey),
+    }
+  }
+
+  if (profile && !force) {
+    return {
+      ok: true,
+      created: false,
+      updated: false,
+      profile,
+      context: await fetchStoreReviewContext(supabase, storeKey),
+    }
+  }
+
+  const saved = await upsertStoreReviewProfileFromSnapshot(supabase, storeKey, place, latest)
+  return {
+    ok: true,
+    created: !profile,
+    updated: !!profile,
+    profile: saved,
+    context: await fetchStoreReviewContext(supabase, storeKey),
   }
 }
 
@@ -776,10 +1316,34 @@ export async function refreshStoreReview(
     .upsert(snapshot, { onConflict: 'store_review_place_id,snapshot_date' })
   if (snapErr) throw { status: 500, message: `Failed to save store review snapshot: ${snapErr.message}` } satisfies AppError
 
+  let profileError: string | null = null
+  try {
+    const { data: savedSnapshotData, error: savedSnapshotError } = await supabase
+      .from('store_review_snapshots')
+      .select('id, store_review_place_id, source, snapshot_date, rating, user_ratings_total, review_count, review_excerpt, positive_terms, negative_terms, updated_at')
+      .eq('store_review_place_id', place.id)
+      .eq('snapshot_date', snapshot.snapshot_date)
+      .maybeSingle()
+    if (savedSnapshotError) throw savedSnapshotError
+    const savedSnapshot = (savedSnapshotData && isRecord(savedSnapshotData) ? savedSnapshotData : null) as StoreReviewSnapshotRow | null
+    await upsertStoreReviewProfileFromSnapshot(supabase, storeKey, {
+      ...place,
+      store_name: details.name || place.store_name,
+      address: details.address || place.address,
+      google_maps_uri: details.googleMapsUri || place.google_maps_uri,
+      website_uri: details.websiteUri || place.website_uri,
+      lat: details.lat ?? place.lat,
+      lng: details.lng ?? place.lng,
+      updated_at: now,
+    }, savedSnapshot)
+  } catch (e) {
+    profileError = e instanceof Error ? e.message : String(e)
+  }
+
   return {
-    ok: true,
+    ok: profileError ? false : true,
     refreshed: 1,
-    errors: [],
+    errors: profileError ? [`店舗理解資料の保存に失敗: ${profileError}`] : [],
     context: await fetchStoreReviewContext(supabase, storeKey),
   }
 }

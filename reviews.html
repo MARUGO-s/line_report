@@ -229,8 +229,21 @@
     .nc-ai-badge.medium { background: rgba(230,180,60,0.18); color: var(--warn); }
     .nc-ai-badge.low { background: rgba(120,120,120,0.18); color: var(--sub); }
     .nc-ai-reason { color: var(--sub); font-size: 0.74rem; margin-top: 3px; font-style: italic; }
+    .store-profile-box {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(56,189,248,0.08);
+      color: var(--sub);
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+    .store-profile-box strong { color: var(--txt); }
+    .store-profile-tags { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+    .store-profile-tag { border:1px solid var(--line); border-radius:999px; padding:2px 8px; color:var(--accent); background:rgba(56,189,248,0.08); }
     body[data-theme='light'] .nearby-panel { background: rgba(220,238,252,0.5); }
     body[data-theme='light'] .nearby-candidate { background: rgba(230,243,253,0.55); }
+    body[data-theme='light'] .store-profile-box { background: rgba(230,243,253,0.55); }
 
     html { overflow-x: hidden; }
     .app { min-width: 0; }
@@ -355,6 +368,7 @@
         <div class="competitor-metric"><div class="lb">最終更新</div><div class="vl" id="storeReviewUpdatedAt">-</div></div>
       </div>
       <div id="storeReviewSummaryText" class="meta">店舗を選択すると、自店舗のGoogle口コミ評価を表示します。</div>
+      <div id="storeReviewProfileBox" class="store-profile-box" hidden></div>
       <div class="competitor-form">
         <input id="storeReviewNameInput" class="input" type="text" placeholder="自店舗名（例: マルゴS）">
         <input id="storeReviewPlaceIdInput" class="input" type="text" placeholder="Google Place ID（自店舗）">
@@ -509,6 +523,7 @@ const dom = {
   storeReviewStatusMetric: $('storeReviewStatusMetric'),
   storeReviewUpdatedAt: $('storeReviewUpdatedAt'),
   storeReviewSummaryText: $('storeReviewSummaryText'),
+  storeReviewProfileBox: $('storeReviewProfileBox'),
   storeReviewNameInput: $('storeReviewNameInput'),
   storeReviewPlaceIdInput: $('storeReviewPlaceIdInput'),
   storeReviewAddBtn: $('storeReviewAddBtn'),
@@ -639,11 +654,37 @@ async function apiFetch(path, options = {}) {
 }
 
 /* ── 自店舗口コミ ── */
+function renderStoreReviewProfile(profile) {
+  if (!dom.storeReviewProfileBox) return;
+  if (!profile) {
+    dom.storeReviewProfileBox.hidden = true;
+    dom.storeReviewProfileBox.innerHTML = '';
+    return;
+  }
+  const genres = Array.isArray(profile.cuisine_genres) ? profile.cuisine_genres : [];
+  const direct = Array.isArray(profile.competitor_keywords) ? profile.competitor_keywords : [];
+  const adjacent = Array.isArray(profile.adjacent_competitor_keywords) ? profile.adjacent_competitor_keywords : [];
+  const updated = profile.updated_at
+    ? new Date(profile.updated_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+    : '保存済み';
+  const tags = [...genres.slice(0, 4), ...direct.slice(0, 5), ...adjacent.slice(0, 3)]
+    .filter(Boolean)
+    .map((t) => `<span class="store-profile-tag">${escapeHtml(t)}</span>`)
+    .join('');
+  dom.storeReviewProfileBox.hidden = false;
+  dom.storeReviewProfileBox.innerHTML = `
+    <div><strong>店舗理解資料:</strong> 保存済み（${escapeHtml(updated)}）。周辺検索ではこの資料と競合辞典を優先して、自店に近い競合を上位表示します。</div>
+    ${profile.summary ? `<div>${escapeHtml(profile.summary)}</div>` : ''}
+    ${tags ? `<div class="store-profile-tags">${tags}</div>` : ''}
+  `;
+}
+
 function renderStoreReviewContext(ctx) {
   if (!dom.storeReviewList) return;
   const data = ctx && typeof ctx === 'object' ? ctx : null;
   const place = data?.place || null;
   const latest = data?.latest_snapshot || {};
+  renderStoreReviewProfile(data?.profile || null);
   if (dom.storeReviewRating) dom.storeReviewRating.textContent = data?.rating != null ? formatRating(data.rating) : '-';
   if (dom.storeReviewTotalRatings) dom.storeReviewTotalRatings.textContent = data?.total_ratings != null ? num(data.total_ratings) : '-';
   if (dom.storeReviewStatusMetric) dom.storeReviewStatusMetric.textContent = data?.registered ? '登録済み' : '未登録';
@@ -689,10 +730,38 @@ async function reloadStoreReviewContext() {
   const sk = currentStoreKey();
   if (!sk) {
     renderStoreReviewContext(null);
-    return;
+    return null;
   }
   const ctx = await apiFetch(`/receipts/store-reviews?store_key=${encodeURIComponent(sk)}`);
   renderStoreReviewContext(ctx);
+  return ctx;
+}
+
+async function ensureStoreReviewProfileOnce(options = {}) {
+  const sk = currentStoreKey();
+  if (!sk) return null;
+  const force = options.force === true;
+  const silent = options.silent === true;
+  if (dom.storeReviewStatus && !silent) {
+    dom.storeReviewStatus.textContent = force ? '店舗理解資料を再作成中…' : '店舗理解資料を確認・作成中…';
+  }
+  const result = await apiFetch('/receipts/store-reviews/profile/ensure', {
+    method: 'POST',
+    body: { store_key: sk, force },
+  });
+  if (result.context) renderStoreReviewContext(result.context);
+  if (dom.storeReviewStatus && !silent) {
+    if (result.ok) {
+      dom.storeReviewStatus.textContent = result.created
+        ? '自店舗を精査し、店舗理解資料と競合辞典を保存しました。'
+        : result.updated
+          ? '店舗理解資料と競合辞典を更新しました。'
+          : '保存済み店舗理解資料を読み込みました。';
+    } else {
+      dom.storeReviewStatus.textContent = result.reason || '店舗理解資料は未作成です。';
+    }
+  }
+  return result;
 }
 
 async function addStoreReviewFromForm() {
@@ -716,6 +785,9 @@ async function addStoreReviewFromForm() {
   try {
     const refreshed = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
     renderStoreReviewContext(refreshed.context || ctx);
+    if (!(refreshed.context && refreshed.context.profile)) {
+      await ensureStoreReviewProfileOnce({ force: true, silent: true });
+    }
     if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '登録・口コミ更新しました。';
   } catch (e) {
     if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '登録しました。口コミ更新は失敗: ' + e.message;
@@ -728,6 +800,9 @@ async function refreshStoreReview() {
   if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '自店舗口コミを更新中…';
   const result = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
   renderStoreReviewContext(result.context);
+  if (!(result.context && result.context.profile)) {
+    await ensureStoreReviewProfileOnce({ force: true, silent: true });
+  }
   const err = Array.isArray(result.errors) && result.errors.length ? ` / ${result.errors.join(' / ')}` : '';
   if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = result.refreshed ? '更新しました。' : `更新対象がありません${err}`;
 }
@@ -816,6 +891,9 @@ async function registerSelectedStoreReviewCandidate() {
   renderStoreReviewContext(ctx);
   const refreshed = await apiFetch('/receipts/store-reviews/refresh', { method: 'POST', body: { store_key: sk } });
   renderStoreReviewContext(refreshed.context || ctx);
+  if (!(refreshed.context && refreshed.context.profile)) {
+    await ensureStoreReviewProfileOnce({ force: true, silent: true });
+  }
   if (dom.storeReviewSearchStatus) dom.storeReviewSearchStatus.textContent = '登録・口コミ更新しました。';
   if (dom.storeReviewStatus) dom.storeReviewStatus.textContent = '自店舗口コミを登録しました。';
 }
@@ -999,7 +1077,7 @@ async function openNearbySearch() {
   const radiusLabel = radius >= 1000 ? `${radius / 1000}km` : `${radius}m`;
   if (dom.nearbyPanelTitle) dom.nearbyPanelTitle.textContent = `周辺店舗の候補（半径${radiusLabel}・${currentStoreName() || sk}周辺）`;
   if (dom.nearbyPanel) dom.nearbyPanel.classList.add('open');
-  if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = '<span class="meta">Google Places を検索中…</span>';
+  if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = '<span class="meta">保存済み店舗理解資料とGoogle Placesを照合中…</span>';
   if (dom.nearbyStatus) dom.nearbyStatus.textContent = '';
   try {
     const result = await apiFetch('/receipts/competitors/nearby-search', {
@@ -1416,7 +1494,10 @@ async function loadReviews() {
   }
   if (dom.filterMeta) dom.filterMeta.textContent = '読み込み中…';
   try {
-    await Promise.all([reloadStoreReviewContext(), reloadCompetitorContext()]);
+    const [storeCtx] = await Promise.all([reloadStoreReviewContext(), reloadCompetitorContext()]);
+    if (storeCtx && storeCtx.registered && !storeCtx.profile) {
+      await ensureStoreReviewProfileOnce({ silent: false });
+    }
     if (dom.filterMeta) dom.filterMeta.textContent = '対象店舗: ' + currentStoreName();
     if (dom.lastRefresh) dom.lastRefresh.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
   } catch (e) {

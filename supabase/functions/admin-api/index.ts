@@ -60,6 +60,7 @@ import {
 import {
   deactivateCompetitorPlace,
   deactivateStoreReviewPlace,
+  ensureStoreReviewProfile,
   fetchCompetitorReviewContext,
   fetchStoreReviewContext,
   nearbySearchGooglePlaces,
@@ -685,6 +686,7 @@ Deno.serve(async (req, info) => {
       "/receipts/competitors/refresh",
       "/receipts/competitors/nearby-search",
       "/receipts/store-reviews",
+      "/receipts/store-reviews/profile/ensure",
       "/receipts/store-reviews/refresh",
       "/receipts/store-reviews/search",
     ])
@@ -1289,6 +1291,15 @@ Deno.serve(async (req, info) => {
       return json(result, 200)
     }
 
+    if (req.method === "POST" && path === "/receipts/store-reviews/profile/ensure") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const result = await ensureStoreReviewProfile(supabase, body)
+      return json(result, 200)
+    }
+
     if (req.method === "POST" && path === "/receipts/store-reviews/search") {
       const body = await parseJson(workReq)
       if (!isRecord(body)) {
@@ -1330,7 +1341,7 @@ Deno.serve(async (req, info) => {
       if (!isRecord(body)) {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
-      const result = await nearbySearchGooglePlaces(body)
+      const result = await nearbySearchGooglePlaces(supabase, body)
       return json(result, 200)
     }
 
