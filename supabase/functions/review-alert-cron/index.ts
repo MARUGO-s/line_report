@@ -190,8 +190,14 @@ async function checkStoreReviewAndAlert(
       excerpt: snap?.review_excerpt ? String(snap.review_excerpt) : null,
       mapsUri: placeRow.google_maps_uri ? String(placeRow.google_maps_uri) : null,
     })
+    const pushErrors: string[] = []
     for (const roomId of roomIds) {
-      await pushLineMessagesToTarget(roomId, [message], token)
+      const pushResult = await pushLineMessagesToTarget(roomId, [message], token)
+      if (!pushResult.ok) pushErrors.push(`${roomId}: ${pushResult.error ?? "unknown error"}`)
+    }
+    // push が1件でも失敗したら baseline を更新しない＝次回実行で再送を試みる（サイレント消失を防ぐ）
+    if (pushErrors.length > 0) {
+      return { checked: true, alerted: false, error: `LINE push failed: ${pushErrors.join("; ")}` }
     }
     await supabase.from("store_review_places").update({ last_alerted_rating_total: currentTotal }).eq("id", placeRow.id)
   }
@@ -244,8 +250,13 @@ async function checkCompetitorReviewAndAlert(
       excerpt: snap?.review_excerpt ? String(snap.review_excerpt) : null,
       mapsUri: comp.google_maps_uri ? String(comp.google_maps_uri) : null,
     })
+    const pushErrors: string[] = []
     for (const roomId of roomIds) {
-      await pushLineMessagesToTarget(roomId, [message], token)
+      const pushResult = await pushLineMessagesToTarget(roomId, [message], token)
+      if (!pushResult.ok) pushErrors.push(`${roomId}: ${pushResult.error ?? "unknown error"}`)
+    }
+    if (pushErrors.length > 0) {
+      return { checked: true, alerted: false, error: `LINE push failed: ${pushErrors.join("; ")}` }
     }
     await supabase.from("competitor_places").update({ last_alerted_rating_total: currentTotal }).eq("id", comp.id)
   }
