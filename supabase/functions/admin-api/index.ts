@@ -321,6 +321,7 @@ const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
   "calendar_tomorrow_reminder_enabled", "calendar_ai_auto_create_enabled",
   "calendar_silent_auto_register_enabled", "calendar_low_confidence_confirm_reply_enabled",
   "calendar_registration_reply_enabled", "dome_weekly_enabled",
+  "review_alert_enabled",
 ]
 const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," +
   ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
