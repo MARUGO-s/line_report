@@ -190,6 +190,18 @@ export async function pushLineTextToTarget(
   text: string,
   channelAccessToken: string,
 ): Promise<{ ok: boolean; error?: string }> {
+  return pushLineMessagesToTarget(to, [{ type: 'text', text: String(text ?? '').slice(0, 4900) }], channelAccessToken)
+}
+
+/**
+ * グループ(C…)/ルーム(R…)/1:1(U…) のいずれの宛先にも任意のメッセージ配列（Flex等）を push できる版。
+ * pushLineTextToTarget のテキスト専用版はこの薄いラッパーになっている。
+ */
+export async function pushLineMessagesToTarget(
+  to: string,
+  messages: Record<string, unknown>[],
+  channelAccessToken: string,
+): Promise<{ ok: boolean; error?: string }> {
   const target = String(to ?? '').trim()
   if (!/^[UCR]/.test(target)) {
     return { ok: false, error: 'invalid push target' }
@@ -204,12 +216,12 @@ export async function pushLineTextToTarget(
       },
       body: JSON.stringify({
         to: target,
-        messages: [{ type: 'text', text: String(text ?? '').slice(0, 4900) }],
+        messages: messages.slice(0, 5),
       }),
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error('pushLineTextToTarget fetch threw:', msg)
+    console.error('pushLineMessagesToTarget fetch threw:', msg)
     return { ok: false, error: `LINE push threw: ${msg}` }
   }
   if (!response.ok) {

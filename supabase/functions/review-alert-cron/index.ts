@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { refreshStoreReview, refreshCompetitorReviews } from "../_shared/competitor_review_context.ts"
-import { pushLineTextToTarget, resolveChannelAccessToken } from "../_shared/line_client.ts"
+import { pushLineMessagesToTarget, resolveChannelAccessToken } from "../_shared/line_client.ts"
 
 // 自店舗・登録済み競合店の「新着口コミ」をLINEに通知する cron（1日1回）。
 //  - 対象は room_summary_settings.review_alert_enabled=true の部屋（receipt_report_store_partition_key で店舗に紐づく）。
@@ -181,7 +181,7 @@ async function checkStoreReviewAndAlert(
 
   const delta = currentTotal - lastAlerted
   if (!dryRun) {
-    const text = buildAlertText({
+    const message = buildAlertFlexMessage({
       kind: "self",
       name: String(placeRow.store_name || storeKey),
       delta,
@@ -191,7 +191,7 @@ async function checkStoreReviewAndAlert(
       mapsUri: placeRow.google_maps_uri ? String(placeRow.google_maps_uri) : null,
     })
     for (const roomId of roomIds) {
-      await pushLineTextToTarget(roomId, text, token)
+      await pushLineMessagesToTarget(roomId, [message], token)
     }
     await supabase.from("store_review_places").update({ last_alerted_rating_total: currentTotal }).eq("id", placeRow.id)
   }
@@ -235,7 +235,7 @@ async function checkCompetitorReviewAndAlert(
 
   const delta = currentTotal - lastAlerted
   if (!dryRun) {
-    const text = buildAlertText({
+    const message = buildAlertFlexMessage({
       kind: "competitor",
       name: String(comp.competitor_name || "競合店"),
       delta,
@@ -245,14 +245,19 @@ async function checkCompetitorReviewAndAlert(
       mapsUri: comp.google_maps_uri ? String(comp.google_maps_uri) : null,
     })
     for (const roomId of roomIds) {
-      await pushLineTextToTarget(roomId, text, token)
+      await pushLineMessagesToTarget(roomId, [message], token)
     }
     await supabase.from("competitor_places").update({ last_alerted_rating_total: currentTotal }).eq("id", comp.id)
   }
   return { checked: true, alerted: true }
 }
 
-function buildAlertText(params: {
+// LINE制御文字（Flexのtextフィールドに紛れ込むと配信エラーになりうる）を除去して長さを丸める。
+function flexSafeText(value: string, maxLen: number): string {
+  return String(value ?? "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").slice(0, maxLen)
+}
+
+function buildAlertFlexMessage(params: {
   kind: "self" | "competitor"
   name: string
   delta: number
@@ -260,23 +265,77 @@ function buildAlertText(params: {
   rating: number | null
   excerpt: string | null
   mapsUri: string | null
-}): string {
-  const lines: string[] = []
-  const label = params.kind === "self" ? "📢 自店舗に新しい口コミ" : "📢 競合店に新しい口コミ"
-  lines.push(label)
-  lines.push(`${params.name}`)
+}): Record<string, unknown> {
+  const isSelf = params.kind === "self"
+  const accent = isSelf ? "#1E4FB1" : "#C7720B"
+  const headTitle = isSelf ? "📢 自店舗に新しい口コミ" : "📢 競合店に新しい口コミ"
   const ratingText = params.rating != null ? `★${params.rating.toFixed(1)}` : "評価なし"
-  lines.push(`${ratingText}（新着${params.delta}件・累計${params.total}件）`)
+  const countText = `新着${params.delta}件・累計${params.total}件`
+
+  const body: Array<Record<string, unknown>> = [
+    { type: "text", text: flexSafeText(params.name, 120), weight: "bold", size: "lg", color: "#1F2D3D", wrap: true },
+    {
+      type: "box",
+      layout: "baseline",
+      margin: "md",
+      contents: [
+        { type: "text", text: ratingText, size: "xl", weight: "bold", color: accent, flex: 0 },
+        { type: "text", text: countText, size: "sm", color: "#555555", margin: "md", gravity: "bottom" },
+      ],
+    },
+  ]
   if (params.excerpt) {
-    const excerpt = params.excerpt.length > 200 ? params.excerpt.slice(0, 200) + "…" : params.excerpt
-    lines.push("")
-    lines.push(`最新の口コミ:\n${excerpt}`)
+    const excerpt = flexSafeText(params.excerpt, 220)
+    body.push({ type: "separator", margin: "lg" })
+    body.push({
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#F5F6F8",
+      cornerRadius: "md",
+      paddingAll: "10px",
+      margin: "lg",
+      contents: [
+        { type: "text", text: "最新の口コミ", size: "xs", weight: "bold", color: "#8A94A6" },
+        { type: "text", text: excerpt, size: "sm", color: "#333333", wrap: true, margin: "sm" },
+      ],
+    })
+  }
+
+  const bubble: Record<string, unknown> = {
+    type: "bubble",
+    size: "mega",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: accent,
+      paddingAll: "16px",
+      contents: [
+        { type: "text", text: headTitle, color: "#FFFFFF", size: "md", weight: "bold", wrap: true },
+      ],
+    },
+    body: { type: "box", layout: "vertical", paddingAll: "16px", contents: body },
   }
   if (params.mapsUri) {
-    lines.push("")
-    lines.push(params.mapsUri)
+    bubble.footer = {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "12px",
+      contents: [
+        {
+          type: "button",
+          style: "link",
+          height: "sm",
+          action: { type: "uri", label: "Googleマップで見る", uri: params.mapsUri },
+        },
+      ],
+    }
   }
-  return lines.join("\n").slice(0, 4900)
+
+  const altLines = [headTitle, params.name, `${ratingText}（${countText}）`]
+  if (params.excerpt) altLines.push(flexSafeText(params.excerpt, 80))
+  const altText = altLines.filter(Boolean).join(" / ").slice(0, 390)
+
+  return { type: "flex", altText, contents: bubble }
 }
 
 function json(payload: unknown, status = 200): Response {
