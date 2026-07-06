@@ -812,10 +812,10 @@ ${JSON.stringify(list, null, 2)}
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: prompt }],
-        // 最大20件 × (idx/is_competitor/confidence/genre_match/reason) を安全に返すための余裕。
-        // 1024 だと候補数が多い時にJSON出力が途中で切れ（finish_reason:"length"）、
-        // 分類が丸ごと失敗してAIバッジが全滅する不具合があったため引き上げた。
-        max_tokens: 3072,
+        // 最大35件（Nearby Search20件+ジャンル検索の合流分）× (idx/is_competitor/confidence/genre_match/reason)
+        // を安全に返すための余裕。小さすぎるとJSON出力が途中で切れ（finish_reason:"length"）、
+        // 分類が丸ごと失敗してAIバッジが全滅する不具合があったため引き上げてある。
+        max_tokens: 5000,
       }),
     })
     if (!res.ok) {
@@ -945,7 +945,14 @@ export async function nearbySearchGooglePlaces(
     .filter((c: NearbyCandidate | null): c is NearbyCandidate => c !== null)
 
   const profile = await fetchLatestStoreReviewProfile(supabase, storeKeyRaw).catch(() => null)
-  const { candidates: classified, debug } = await classifyNearbyWithAI(candidates, storeName, storeAddress, profile)
+  const { candidates: expandedCandidates, queries: genreQueries } = await expandCandidatesWithProfileGenreSearch(
+    candidates,
+    profile,
+    lat,
+    lng,
+    radius,
+  )
+  const { candidates: classified, debug } = await classifyNearbyWithAI(expandedCandidates, storeName, storeAddress, profile)
   const websiteSample = placesRaw.slice(0, 3).map((p: unknown) => isRecord(p) ? {
     name: isRecord(p.displayName) && typeof p.displayName.text === 'string' ? p.displayName.text : null,
     websiteUri: p.websiteUri ?? '(none)',
@@ -957,10 +964,96 @@ export async function nearbySearchGooglePlaces(
       ...(isRecord(debug) ? debug : { info: debug }),
       profile_loaded: !!profile,
       profile_updated_at: profile?.updated_at ?? null,
+      nearby_search_count: candidates.length,
+      genre_search_queries: genreQueries,
+      genre_search_added_count: expandedCandidates.length - candidates.length,
       websiteSample,
       candidateWebsiteSample,
     },
   }
+}
+
+// 半径ベースのNearby Searchは Google 側の maxResultCount:20 上限と物理的な半径制限があるため、
+// 自店と同じビル・同じ通りに密集する居酒屋/ラーメン等で20枠が埋まると、数百m先の同業態（ビストロ/
+// フレンチ/ワインバー等）の真の競合が候補にすら入らない。店舗理解資料の業態キーワードでText Searchを
+// 別途走らせ、Nearby Searchの候補に合流させることで、半径の外・上限漏れの同業態競合を拾えるようにする。
+async function searchTextPlacesForKeyword(
+  keyword: string,
+  lat: number,
+  lng: number,
+  biasRadius: number,
+): Promise<NearbyCandidate[]> {
+  const apiKey = getGooglePlacesApiKey()
+  const fieldMask = [
+    'places.id',
+    'places.displayName',
+    'places.formattedAddress',
+    'places.location',
+    'places.rating',
+    'places.userRatingCount',
+    'places.googleMapsUri',
+    'places.websiteUri',
+  ].join(',')
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': fieldMask,
+      },
+      body: JSON.stringify({
+        textQuery: keyword,
+        languageCode: 'ja',
+        maxResultCount: 10,
+        locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: biasRadius } },
+      }),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    const placesRaw: unknown[] = Array.isArray(data.places) ? data.places : []
+    return placesRaw
+      .filter((p: unknown): p is Record<string, unknown> => isRecord(p))
+      .map((p: Record<string, unknown>): NearbyCandidate | null => normalizeGooglePlaceCandidate(p))
+      .filter((c: NearbyCandidate | null): c is NearbyCandidate => c !== null)
+  } catch (_) {
+    return []
+  }
+}
+
+async function expandCandidatesWithProfileGenreSearch(
+  candidates: NearbyCandidate[],
+  profile: StoreReviewProfileRow | null,
+  lat: number,
+  lng: number,
+  radius: number,
+): Promise<{ candidates: NearbyCandidate[]; queries: string[] }> {
+  if (!profile) return { candidates, queries: [] }
+  // 直接競合(cuisine_genres/competitor_keywords)を優先し、隣接競合(adjacent_competitor_keywords)を補う。
+  // API呼び出し数を抑えるため上位数件のみ検索する。
+  const direct = uniqStrings([...(profile.cuisine_genres ?? []), ...(profile.competitor_keywords ?? [])], 24)
+  const adjacent = uniqStrings(profile.adjacent_competitor_keywords, 24)
+  const queries = [...direct.slice(0, 3), ...adjacent.slice(0, 2)]
+  if (!queries.length) return { candidates, queries: [] }
+
+  // Nearby Search の半径がとても狭く設定されていても、実商圏（隣接エリアまで）を確実に拾えるよう
+  // Text Search 側の位置バイアスは広めに固定する。
+  const biasRadius = Math.max(radius, 900)
+  const seen = new Set(candidates.map((c) => c.place_id))
+  const merged = [...candidates]
+  // AI分類プロンプトのトークン上限に収まるよう、合流後の候補数に上限を設ける。
+  const MAX_TOTAL_CANDIDATES = 35
+  for (const keyword of queries) {
+    if (merged.length >= MAX_TOTAL_CANDIDATES) break
+    const found = await searchTextPlacesForKeyword(keyword, lat, lng, biasRadius)
+    for (const c of found) {
+      if (merged.length >= MAX_TOTAL_CANDIDATES) break
+      if (seen.has(c.place_id)) continue
+      seen.add(c.place_id)
+      merged.push(c)
+    }
+  }
+  return { candidates: merged, queries }
 }
 
 function normalizeGooglePlaceCandidate(p: Record<string, unknown>): NearbyCandidate | null {
