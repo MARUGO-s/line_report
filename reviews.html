@@ -217,6 +217,15 @@
     .pressure-low, .pressure-none { color: var(--ok); }
     body[data-theme='light'] .competitor-metric,
     body[data-theme='light'] .competitor-row { background: rgba(230,243,253,0.55); }
+    .competitor-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .competitor-tab {
+      padding: 7px 14px; border-radius: 999px; font-size: 0.84rem; font-weight: 700;
+      border: 1px solid var(--line); background: rgba(8,21,35,0.5); color: var(--sub); cursor: pointer; font-family: inherit;
+    }
+    .competitor-tab.active { background: rgba(87,216,255,0.18); border-color: var(--accent); color: var(--accent); }
+    body[data-theme='light'] .competitor-tab { background: rgba(230,243,253,0.55); }
+    .competitor-tab-panel { display: none; }
+    .competitor-tab-panel.active { display: block; }
     .nearby-panel { display: none; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: rgba(8,21,35,0.22); margin-top: 4px; }
     .nearby-panel.open { display: flex; }
     .nearby-candidates { display: grid; gap: 7px; max-height: 340px; overflow-y: auto; }
@@ -423,18 +432,25 @@
         <button id="competitorRefreshBtn" class="btn" type="button">口コミ情報を更新</button>
         <span id="competitorStatus" class="meta" style="margin-top:0">Google Places APIキー未設定の場合、更新だけ失敗します。</span>
       </div>
-      <div id="nearbyPanel" class="nearby-panel">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <span id="nearbyPanelTitle" style="font-weight:700;font-size:0.88rem">周辺店舗の候補（半径300m）</span>
-          <button id="nearbyCloseBtn" class="btn" type="button" style="padding:4px 10px;font-size:0.78rem">閉じる</button>
-        </div>
-        <div id="nearbyCandidates" class="nearby-candidates"><span class="meta">検索中…</span></div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <button id="nearbyRegisterBtn" class="btn primary" type="button">選択した店舗を登録</button>
-          <span id="nearbyStatus" class="meta" style="margin-top:0"></span>
+      <div class="competitor-tabs">
+        <button id="competitorTabRegisteredBtn" class="competitor-tab active" type="button" data-competitor-tab="registered">登録済み競合<span id="competitorTabRegisteredCount"></span></button>
+        <button id="competitorTabCandidatesBtn" class="competitor-tab" type="button" data-competitor-tab="candidates">周辺検索の候補</button>
+      </div>
+      <div id="competitorTabPanelRegistered" class="competitor-tab-panel active" data-competitor-tab-panel="registered">
+        <div id="competitorList" class="competitor-list"></div>
+      </div>
+      <div id="competitorTabPanelCandidates" class="competitor-tab-panel" data-competitor-tab-panel="candidates">
+        <div id="nearbyPanel" class="nearby-panel open">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <span id="nearbyPanelTitle" style="font-weight:700;font-size:0.88rem">周辺店舗の候補（半径300m）</span>
+          </div>
+          <div id="nearbyCandidates" class="nearby-candidates"><span class="meta">「周辺を自動検索」を押すと候補が表示されます。</span></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button id="nearbyRegisterBtn" class="btn primary" type="button">選択した店舗を登録</button>
+            <span id="nearbyStatus" class="meta" style="margin-top:0"></span>
+          </div>
         </div>
       </div>
-      <div id="competitorList" class="competitor-list"></div>
     </div>
   </section>
 
@@ -550,10 +566,14 @@ const dom = {
   competitorNearbyBtn: $('competitorNearbyBtn'),
   competitorStatus: $('competitorStatus'),
   competitorList: $('competitorList'),
+  competitorTabRegisteredBtn: $('competitorTabRegisteredBtn'),
+  competitorTabCandidatesBtn: $('competitorTabCandidatesBtn'),
+  competitorTabRegisteredCount: $('competitorTabRegisteredCount'),
+  competitorTabPanelRegistered: $('competitorTabPanelRegistered'),
+  competitorTabPanelCandidates: $('competitorTabPanelCandidates'),
   nearbyPanel: $('nearbyPanel'),
   nearbyPanelTitle: $('nearbyPanelTitle'),
   nearbyRadiusSelect: $('nearbyRadiusSelect'),
-  nearbyCloseBtn: $('nearbyCloseBtn'),
   nearbyCandidates: $('nearbyCandidates'),
   nearbyRegisterBtn: $('nearbyRegisterBtn'),
   nearbyStatus: $('nearbyStatus'),
@@ -899,6 +919,20 @@ async function registerSelectedStoreReviewCandidate() {
 }
 
 /* ── 周辺競合・口コミ ── */
+function switchCompetitorTab(tab) {
+  const isRegistered = tab === 'registered';
+  if (dom.competitorTabRegisteredBtn) dom.competitorTabRegisteredBtn.classList.toggle('active', isRegistered);
+  if (dom.competitorTabCandidatesBtn) dom.competitorTabCandidatesBtn.classList.toggle('active', !isRegistered);
+  if (dom.competitorTabPanelRegistered) dom.competitorTabPanelRegistered.classList.toggle('active', isRegistered);
+  if (dom.competitorTabPanelCandidates) dom.competitorTabPanelCandidates.classList.toggle('active', !isRegistered);
+}
+if (dom.competitorTabRegisteredBtn) {
+  dom.competitorTabRegisteredBtn.addEventListener('click', () => switchCompetitorTab('registered'));
+}
+if (dom.competitorTabCandidatesBtn) {
+  dom.competitorTabCandidatesBtn.addEventListener('click', () => switchCompetitorTab('candidates'));
+}
+
 function renderCompetitorContext(ctx) {
   if (!dom.competitorList) return;
   const data = ctx && typeof ctx === 'object' ? ctx : null;
@@ -913,6 +947,7 @@ function renderCompetitorContext(ctx) {
   if (dom.competitorSummaryText) dom.competitorSummaryText.textContent = data?.summary || '競合店を登録すると、Google Places の評価・口コミ件数を売上分析の補助指標として表示します。';
 
   const competitors = Array.isArray(data?.competitors) ? data.competitors : [];
+  if (dom.competitorTabRegisteredCount) dom.competitorTabRegisteredCount.textContent = ` (${competitors.length})`;
   if (!competitors.length) {
     dom.competitorList.innerHTML = '<div class="meta">競合店はまだ登録されていません。Google Place ID を登録してください。</div>';
     return;
@@ -1076,7 +1111,7 @@ async function openNearbySearch() {
   const radius = Number((dom.nearbyRadiusSelect && dom.nearbyRadiusSelect.value) || 300);
   const radiusLabel = radius >= 1000 ? `${radius / 1000}km` : `${radius}m`;
   if (dom.nearbyPanelTitle) dom.nearbyPanelTitle.textContent = `周辺店舗の候補（半径${radiusLabel}・${currentStoreName() || sk}周辺）`;
-  if (dom.nearbyPanel) dom.nearbyPanel.classList.add('open');
+  switchCompetitorTab('candidates');
   if (dom.nearbyCandidates) dom.nearbyCandidates.innerHTML = '<span class="meta">保存済み店舗理解資料とGoogle Placesを照合中…</span>';
   if (dom.nearbyStatus) dom.nearbyStatus.textContent = '';
   try {
@@ -1125,6 +1160,7 @@ async function registerSelectedNearby() {
     if (dom.nearbyStatus) dom.nearbyStatus.textContent = `${ok}件登録しました（口コミ更新は手動でお試しください）。`;
   }
   if (dom.competitorStatus) dom.competitorStatus.textContent = '';
+  if (ok > 0) switchCompetitorTab('registered');
 }
 
 /* ── auth badge / theme ── */
@@ -1400,11 +1436,6 @@ if (dom.competitorNearbyBtn) {
   dom.competitorNearbyBtn.addEventListener('click', async () => {
     try { await openNearbySearch(); }
     catch (e) { if (dom.competitorStatus) dom.competitorStatus.textContent = 'エラー: ' + (e && e.message ? e.message : String(e)); }
-  });
-}
-if (dom.nearbyCloseBtn) {
-  dom.nearbyCloseBtn.addEventListener('click', () => {
-    if (dom.nearbyPanel) dom.nearbyPanel.classList.remove('open');
   });
 }
 if (dom.nearbyRegisterBtn) {
