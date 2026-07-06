@@ -67,3 +67,9 @@ verify_jwt = false
 # verify_jwt は他cronと同様 false。二重送信は pv_japan_alert_logs (room_id+event_date+title) で防止。
 [functions.pv-japan-alert-cron]
 verify_jwt = false
+
+# review-alert-cron は pg_cron（1日1回 JST08:10）から呼ばれ、自店舗・登録済み競合の新着口コミを
+# review_alert_enabled=true のルームへLINE通知する。verify_jwt は他cronと同様 false。
+# 二重送信は last_alerted_rating_total（直近通知時点の累計口コミ数）で防止する冪等設計。
+[functions.review-alert-cron]
+verify_jwt = false
