@@ -356,6 +356,80 @@ export async function importManualMonthSalesOverwrite(
   }
 }
 
+// 「月別売上の手入力」画面から、対象月に実際に登録されている売上データ（Excel一括取込・画像解析レシート等の
+// 日別レシート／日別手入力上書き／月合計手入力）をまとめて削除する＝その月を未登録の状態に戻す。
+export async function clearDailyReceiptsForMonth(
+  supabase: SupabaseClient,
+  storeKey: string,
+  salesMonth: string,
+): Promise<{
+  ok: boolean
+  cleared_dates: number
+  cleared_receipts: number
+  cleared_manual_day: number
+  receipt_table: string
+  store_partition_key: string
+  sales_month: string
+}> {
+  const resolved = await resolveReceiptTableForStore(supabase, storeKey)
+  if (!resolved) {
+    throw { status: 400, message: "店舗が見つかりません（store_key）。" }
+  }
+  const key = String(storeKey ?? "").trim().toLowerCase()
+  const salesMonthNorm = String(salesMonth ?? "").trim().slice(0, 7)
+  if (!/^\d{4}-\d{2}$/.test(salesMonthNorm)) {
+    throw { status: 400, message: "対象月が不正です。" }
+  }
+  const clearDates = enumerateImportMonthDates(salesMonthNorm)
+  if (clearDates.length === 0) {
+    return {
+      ok: true,
+      cleared_dates: 0,
+      cleared_receipts: 0,
+      cleared_manual_day: 0,
+      receipt_table: resolved.receiptTable,
+      store_partition_key: key,
+      sales_month: salesMonthNorm,
+    }
+  }
+
+  const { error: delRcpErr, count: receiptCount } = await supabase
+    .from(resolved.receiptTable)
+    .delete({ count: "exact" })
+    .in("receipt_date", clearDates)
+  if (delRcpErr) {
+    throw { status: 500, message: `レシートの削除に失敗しました: ${delRcpErr.message}` }
+  }
+
+  let clearedManualDay = 0
+  try {
+    const { error: delErr, count } = await supabase
+      .from("line_sales_manual_day")
+      .delete({ count: "exact" })
+      .eq("store_partition_key", key)
+      .in("sales_date", clearDates)
+    if (!delErr && typeof count === "number") clearedManualDay = count
+  } catch (_e) {
+    // 古い環境では line_sales_manual_day が無い可能性があるため、削除自体は継続する。
+  }
+
+  // 月合計の手入力（あれば）も一緒に解除し、その月を完全に未登録状態へ戻す。
+  await upsertManualMonthSalesEntries(supabase, key, [{
+    sales_month: salesMonthNorm,
+    gross_sales_yen: null,
+  }])
+
+  return {
+    ok: true,
+    cleared_dates: clearDates.length,
+    cleared_receipts: typeof receiptCount === "number" ? receiptCount : 0,
+    cleared_manual_day: clearedManualDay,
+    receipt_table: resolved.receiptTable,
+    store_partition_key: key,
+    sales_month: salesMonthNorm,
+  }
+}
+
 // 店舗キー → レシートテーブル名・表示名（store_webhook_tables から。存在確認も兼ねる）。
 export async function resolveReceiptTableForStore(
   supabase: SupabaseClient,

@@ -416,10 +416,27 @@ export async function fetchManualMonthsForYearState(
     }
   }
 
+  // レシート集計ベースの月別合計（手入力が無い月でも「実際に何円登録済みか」を参考表示するため）。
+  const receiptTotals: Record<string, { gross_sales_yen: number; day_count: number }> = {}
+  try {
+    const dailyRows = await fetchReceiptDailyAggForRange(supabase, store_partition_key, `${year}-01-01`, `${year}-12-31`)
+    for (const row of dailyRows) {
+      if (!row.gross_sales_yen || row.gross_sales_yen <= 0) continue
+      const sm = row.date.slice(0, 7)
+      const cur = receiptTotals[sm] ?? { gross_sales_yen: 0, day_count: 0 }
+      cur.gross_sales_yen += row.gross_sales_yen
+      cur.day_count += 1
+      receiptTotals[sm] = cur
+    }
+  } catch (_e) {
+    // 参考値の取得に失敗しても手入力機能自体は継続する。
+  }
+
   return {
     year,
     store_partition_key,
     months,
+    receipt_totals: receiptTotals,
     generated_at: new Date().toISOString(),
   }
 }

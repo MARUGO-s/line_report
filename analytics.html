@@ -524,10 +524,27 @@
       flex-direction: column;
       gap: 6px;
     }
+    .manual-month-grid .manual-month-block-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
     .manual-month-grid .manual-month-block-title {
       font-size: 0.78rem;
       font-weight: 600;
       color: var(--text);
+    }
+    .manual-month-grid .manual-month-ref {
+      font-size: 0.68rem;
+      color: var(--sub);
+      margin: -2px 0 2px;
+    }
+    .manual-month-grid .manual-month-delete-btn {
+      font-size: 0.66rem;
+      padding: 2px 6px;
+      line-height: 1.4;
+      white-space: nowrap;
     }
     .manual-month-grid label span { display: block; font-size: 0.68rem; color: var(--sub); margin-bottom: 3px; }
     .budget-preview-wrap { margin-top: 12px; max-height: min(40vh, 280px); overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
@@ -2237,10 +2254,25 @@ function ensureManualMonthGridBuilt() {
     const suffix = String(mi).padStart(2, '0');
     const block = document.createElement('div');
     block.className = 'manual-month-block';
+    const head = document.createElement('div');
+    head.className = 'manual-month-block-head';
     const title = document.createElement('div');
     title.className = 'manual-month-block-title';
     title.textContent = `${mi}月`;
-    block.appendChild(title);
+    head.appendChild(title);
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn manual-month-delete-btn';
+    delBtn.id = 'manualDel' + suffix;
+    delBtn.textContent = '登録データを削除';
+    delBtn.hidden = true;
+    head.appendChild(delBtn);
+    block.appendChild(head);
+    const ref = document.createElement('div');
+    ref.className = 'manual-month-ref';
+    ref.id = 'manualRef' + suffix;
+    ref.hidden = true;
+    block.appendChild(ref);
     appendManualMonthField(block, '総売上（円）', 'manualG' + suffix, '1000');
     appendManualMonthField(block, '会計組数', 'manualP' + suffix, '1');
     appendManualMonthField(block, '客数', 'manualC' + suffix, '1');
@@ -2269,6 +2301,7 @@ async function refreshManualMonthForm(year) {
     `/receipts/sales-manual-months?year=${year}&store_key=${encodeURIComponent(sk)}`,
   );
   const months = data?.months ?? {};
+  const receiptTotals = data?.receipt_totals ?? {};
   for (let mi = 1; mi <= 12; mi++) {
     const suffix = String(mi).padStart(2, '0');
     const key = `${year}-${suffix}`;
@@ -2276,6 +2309,8 @@ async function refreshManualMonthForm(year) {
     const elP = document.getElementById('manualP' + suffix);
     const elC = document.getElementById('manualC' + suffix);
     const elO = document.getElementById('manualO' + suffix);
+    const elRef = document.getElementById('manualRef' + suffix);
+    const elDel = document.getElementById('manualDel' + suffix);
     const raw = months[key];
     const row = raw != null && typeof raw === 'object' ? raw : null;
     const gross = row ? row.gross_sales_yen : raw;
@@ -2293,6 +2328,23 @@ async function refreshManualMonthForm(year) {
     if (elO) {
       const o = row?.operating_days_count;
       elO.value = o != null && Number.isFinite(Number(o)) ? String(o) : '';
+    }
+    const rt = receiptTotals[key];
+    const hasReceiptTotal = rt && Number.isFinite(Number(rt.gross_sales_yen)) && Number(rt.gross_sales_yen) > 0;
+    if (elRef) {
+      if (hasReceiptTotal) {
+        elRef.textContent = `現在の登録額（レシート集計・${rt.day_count}日分）: ¥${Math.round(Number(rt.gross_sales_yen)).toLocaleString('ja-JP')}`;
+        elRef.hidden = false;
+      } else {
+        elRef.textContent = '';
+        elRef.hidden = true;
+      }
+    }
+    if (elDel) {
+      const hasAnyData = hasReceiptTotal || (gross != null && Number.isFinite(Number(gross)));
+      elDel.hidden = !hasAnyData;
+      elDel.dataset.year = String(year);
+      elDel.dataset.month = suffix;
     }
   }
 }
@@ -3037,6 +3089,32 @@ if (dom.priorYearModalClear) {
       loadAll();
     } catch (e) {
       if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = 'クリアに失敗: ' + (e && e.message ? e.message : String(e));
+    }
+  });
+}
+if (dom.manualMonthGrid) {
+  dom.manualMonthGrid.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('.manual-month-delete-btn');
+    if (!btn) return;
+    const year = btn.dataset.year;
+    const mi = btn.dataset.month;
+    if (!year || !mi) return;
+    const monthLabel = `${year}年${Number(mi)}月`;
+    if (!confirm(`${monthLabel}に登録されている売上データ（レシート・手入力）をすべて削除します。元に戻せません。よろしいですか？`)) return;
+    btn.disabled = true;
+    if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '削除中…';
+    try {
+      await apiFetch('/receipts/daily-receipts', {
+        method: 'DELETE',
+        body: { store_key: state.storeKey, sales_month: `${year}-${mi}` },
+      });
+      await refreshManualMonthForm(Number(year));
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = `${monthLabel}のデータを削除しました`;
+      loadAll();
+    } catch (e) {
+      if (dom.priorYearModalHint) dom.priorYearModalHint.textContent = '削除に失敗: ' + (e && e.message ? e.message : String(e));
+    } finally {
+      btn.disabled = false;
     }
   });
 }

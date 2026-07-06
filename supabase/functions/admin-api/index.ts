@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import {
   importDailyReceiptsOverwrite,
   importManualMonthSalesOverwrite,
+  clearDailyReceiptsForMonth,
   parseMonthlyDailySalesWorkbook,
   resolveReceiptTableForStore,
   countExistingReceiptsForDates,
@@ -683,6 +684,7 @@ Deno.serve(async (req, info) => {
       "/receipts/sales-manual-days/import",
       "/receipts/sales-manual-months",
       "/receipts/daily-receipts-import",
+      "/receipts/daily-receipts",
       "/receipts/competitors",
       "/receipts/competitors/refresh",
       "/receipts/competitors/nearby-search",
@@ -1399,6 +1401,20 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       const result = await importDailyReceiptsCommit(supabase, body)
+      return json(result, 200)
+    }
+    // 「月別売上の手入力」画面から、対象月の登録済みデータ（日別レシート・日別手入力・月合計手入力）をまとめて削除。
+    if (req.method === "DELETE" && path === "/receipts/daily-receipts") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const key = toSafeString(body.store_key).trim().toLowerCase()
+      if (!key || key === "__all__") {
+        throw { status: 400, message: "store_key（店舗）を指定してください。" } satisfies AppError
+      }
+      const salesMonth = toSafeString(body.sales_month).trim().slice(0, 7)
+      const result = await clearDailyReceiptsForMonth(supabase, key, salesMonth)
       return json(result, 200)
     }
 
