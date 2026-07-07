@@ -29,6 +29,7 @@ import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
 import {
   answerFoodCourtQuestion,
   FOODCOURT_ANALYSIS_AI_VERSION,
+  resolveFoodCourtDailyAnalysisVersion,
   generateFoodCourtDailySummary,
   generateFoodCourtPeriodSummary,
   fcSalesDate,
@@ -395,7 +396,7 @@ async function loadVenueEventsForReports(
   const hi = hiCand[hiCand.length - 1]
   const { data, error } = await supabase
     .from("tokyo_dome_events")
-    .select("event_date, title, category, venue, is_japan, note")
+    .select("event_date, title, category, venue, is_japan, note, expected_attendance")
     .gte("event_date", lo)
     .lte("event_date", hi)
     .order("event_date", { ascending: true })
@@ -408,6 +409,9 @@ async function loadVenueEventsForReports(
     venue: String((e as { venue?: unknown }).venue ?? "tokyo-dome"),
     is_japan: (e as { is_japan?: unknown }).is_japan === true,
     note: String((e as { note?: unknown }).note ?? ""),
+    expected_attendance: (e as { expected_attendance?: unknown }).expected_attendance == null
+      ? null
+      : Number((e as { expected_attendance?: unknown }).expected_attendance),
   })).filter((e) => e.event_date && e.title)
 }
 
@@ -673,6 +677,7 @@ Deno.serve(async (req, info) => {
       "/foodcourt/ask",
       "/foodcourt/dome-weekly",
       "/foodcourt/evolution-history",
+      "/foodcourt/events/attendance",
       "/analytics/holidays",
       "/analytics/monthly",
       "/weather/daily",
@@ -927,6 +932,8 @@ Deno.serve(async (req, info) => {
       const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
       if (!storeKey) return json({ error: "store_key is required." }, 400)
       const reportIdParam = url.searchParams.get("report_id")
+      // 実効バージョン: ループが日次で有効なときだけ v12-loop（無効の間は v11 のまま＝既存キャッシュを維持）。
+      const dailyAiVersion = resolveFoodCourtDailyAnalysisVersion()
       const { data, error } = await supabase
         .from("foodcourt_tenant_reports")
         .select("id, report_date, base_tenant_name, tenants, created_at")
@@ -945,7 +952,7 @@ Deno.serve(async (req, info) => {
         .from("foodcourt_daily_ai_summary")
         .select("summary_text")
         .eq("report_id", reportId)
-        .eq("model_version", FOODCOURT_ANALYSIS_AI_VERSION)
+        .eq("model_version", dailyAiVersion)
         .maybeSingle()
       if (cacheErr) return json({ error: cacheErr.message }, 500)
       if (cached && (cached as { summary_text?: unknown }).summary_text) {
@@ -957,7 +964,7 @@ Deno.serve(async (req, info) => {
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
-      const modelVersion = FOODCOURT_ANALYSIS_AI_VERSION
+      const modelVersion = dailyAiVersion
       const businessDate = fcSalesDate(target) || null
       // 前回（直近の1つ前の営業日）に生成済みのAI分析を、自己検証の材料として渡す（日々の分析に連続性を持たせる）。
       let priorSummary: { businessDate: string; summaryText: string } | null = null
@@ -966,7 +973,7 @@ Deno.serve(async (req, info) => {
           .from("foodcourt_daily_ai_summary")
           .select("business_date, summary_text")
           .eq("store_partition_key", storeKey)
-          .eq("model_version", FOODCOURT_ANALYSIS_AI_VERSION)
+          .eq("model_version", dailyAiVersion)
           .lt("business_date", businessDate)
           .order("business_date", { ascending: false })
           .limit(1)
@@ -1134,6 +1141,34 @@ Deno.serve(async (req, info) => {
         .maybeSingle()
       if (error) return json({ error: error.message }, 500)
       return json({ ok: true, config: data ?? null }, 200)
+    }
+    // 東京ドームイベントの予想動員数を手入力で更新する（自動取得元に動員数が無いため）。
+    // 来客予測モデル(foodcourt-forecast-cron)が「最強ドライバー」として使う唯一の入力経路。
+    if (req.method === "PUT" && path === "/foodcourt/events/attendance") {
+      const body = await workReq.json().catch(() => ({})) as Record<string, unknown>
+      const eventDate = String(body.event_date ?? "").slice(0, 10)
+      const venue = String(body.venue ?? "").trim()
+      const title = String(body.title ?? "").trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate) || !venue || !title) {
+        return json({ error: "event_date, venue, title are required." }, 400)
+      }
+      let attendance: number | null = null
+      if (body.expected_attendance !== null && body.expected_attendance !== undefined && body.expected_attendance !== "") {
+        const v = Number(body.expected_attendance)
+        if (!Number.isFinite(v) || v < 0) return json({ error: "expected_attendance must be a non-negative number." }, 400)
+        attendance = Math.round(v)
+      }
+      const { data, error } = await supabase
+        .from("tokyo_dome_events")
+        .update({ expected_attendance: attendance, updated_at: new Date().toISOString() })
+        .eq("event_date", eventDate)
+        .eq("venue", venue)
+        .eq("title", title)
+        .select("event_date, venue, title, category, expected_attendance")
+        .maybeSingle()
+      if (error) return json({ error: error.message }, 500)
+      if (!data) return json({ error: "event not found." }, 404)
+      return json({ ok: true, event: data }, 200)
     }
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {
       const result = await createPettyCashEntryFromReceiptImage(supabase, workReq, storeScope)

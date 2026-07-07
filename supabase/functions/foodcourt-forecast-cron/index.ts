@@ -3,25 +3,36 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 
 // フードコート（MARUGO S）来客予測の「自己再学習型」モデル cron。
 // 毎日、蓄積された全実績から係数を学習し直し（＝貯まるほど精度が上がる）、客数・売上を予測する。
-//  - 学習: 売上=客数×客単価 を土台に、客数を「ベース × 曜日係数 × イベント係数(種別) × 天気係数」で表す乗算モデル。
-//          各係数は実績の平均比から推定し、サンプルが少ない係数は1へ収縮(shrink)して過学習を防ぐ。
-//  - 予測: 直近の特徴量(foodcourt_daily_features＝イベント＋天気＋曜日)から、当日〜+14日を予測。売上=予測客数×中央客単価。
-//  - 自己採点: 拡張窓バックテスト（その日より前のデータだけで学習→当日を予測）で out-of-sample の MAPE(平均絶対誤差率) を算出。
-//              過去日は out-of-sample 予測＋実績を forecast_predictions に保存し、画面/AIが「予測 vs 実績」で精度を確認できる。
+//
+// 2モデルを毎晩バックテストで比較し、精度の良い方を自動採用する「モデル選択ループ」を実装している:
+//  A) 乗算モデル(mult-factor-v1・レガシー): 客数=ベース×曜日係数×イベント係数(種別)×天気係数。
+//     各係数は実績の平均比から推定し、サンプルが少ない係数は1へ収縮(shrink)。AI解説(foodcourt_forecast_factors)
+//     はこのモデルの係数を常に参照する（解釈しやすい「倍率」の形を保つため、勝敗に関係なく毎晩計算）。
+//  B) ポアソン回帰(glm-poisson-v1): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント種別+天気
+//     +log(1+予想動員数)+トレンド(時間) の一般化線形モデルで推定(IRLS)。曜日×イベント等の交互作用は
+//     入れていないが、係数はリッジ正則化(過学習防止＝旧モデルのshrinkに相当)つきの最尤推定になり、
+//     「予想動員数」という連続値の特徴量と「トレンド(開店後の伸び)」を扱える。
+//     リッジの強さλも複数候補をバックテストして最も当たる値を自動選択する（固定値に頼らない＝ループを閉じる）。
+//  - 予測: 直近の特徴量(foodcourt_daily_features＝イベント＋天気＋曜日＋予想動員数)から、当日〜+14日を予測。
+//          売上=予測客数×中央客単価。
+//  - 自己採点: 拡張窓バックテスト（その日より前のデータだけで学習→当日を予測）で out-of-sample の MAPE(平均絶対誤差率) を
+//              A/Bそれぞれ算出し、誤差が小さい方を当日の本番予測に採用する。過去日は採用モデルの out-of-sample
+//              予測＋実績を forecast_predictions に保存し、画面/AIが「予測 vs 実績」で精度を確認できる。
 // 冪等: forecast_predictions の (target_date, tenant_name, metric) 一意で upsert。verify_jwt=false で pg_cron から起動。
 
 type DbClient = ReturnType<typeof createClient>
 const BASE_TENANT = "MARUGO S"
-const MODEL_VERSION = "mult-factor-v1"
-const SHRINK_K = 4        // 係数のサンプルが少ないとき 1（影響なし）へ収縮する強さ
+const MODEL_VERSION = "mult-factor-v1"  // レガシー乗算モデルの識別子（AI解説用係数は常にこのモデルで算出）
+const SHRINK_K = 4        // 乗算モデルの係数のサンプルが少ないとき 1（影響なし）へ収縮する強さ
 const MIN_TRAIN = 4       // バックテストで予測を始める最小学習日数
 const HORIZON_DAYS = 14   // 何日先まで予測するか
 const PAST_WINDOW = 28    // 何日前までの「予測 vs 実績」を保存するか
+const LAMBDA_GRID = [1, 2, 4, 8, 16]  // GLMのリッジ正則化強度の候補（バックテストで自動選択）
 
 // 会場規模を区別する: "live"=東京ドーム本体コンサート(大)、"dome"=ドーム本体のアマ野球/その他(大)、
 // "hall"=小ホール(カナデビア/後楽園 等)のみの日(小)。pro=ドーム野球。
 type EvType = "soccer_pv" | "japan" | "pro" | "live" | "dome" | "sports" | "hall" | "none"
-type Feat = { date: string; dow: number; evType: EvType; rainy: boolean }
+type Feat = { date: string; dow: number; evType: EvType; rainy: boolean; attendance: number }
 type Hist = Feat & { guests: number; sales: number; spend: number }
 type Factors = {
   meanG: number
@@ -33,6 +44,8 @@ type Factors = {
   evtN: Record<string, number>
   weatherN: Record<string, number>
 }
+// GLM(ポアソン回帰)のフィット結果。係数と、トレンド項の標準化に使った基準値（予測時に同じ変換を再現するため保持）。
+type GlmModel = { beta: number[]; startEpoch: number; meanT: number; sdT: number; spend: number }
 
 // --- 統計拡張(stats-ext-v1)の型 ---
 // 予測には使わない。AI解説が係数をどこまで信じてよいかを判断するための解釈コンテキスト。
@@ -67,7 +80,7 @@ Deno.serve(async (req) => {
   // 1) 特徴量（イベント＋天気＋曜日）を取得（過去〜未来）
   const { data: featRows, error: featErr } = await supabase
     .from("foodcourt_daily_features")
-    .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, has_soccer_pv, has_dome_main, is_rainy")
+    .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, has_soccer_pv, has_dome_main, is_rainy, max_expected_attendance")
     .gte("business_date", loDate)
     .lte("business_date", hiDate)
     .order("business_date", { ascending: true })
@@ -81,6 +94,7 @@ Deno.serve(async (req) => {
       dow: Number((r as { iso_dow?: unknown }).iso_dow ?? 0) || isoDow(d),
       evType: pickEvType(r as Record<string, unknown>),
       rainy: (r as { is_rainy?: unknown }).is_rainy === true,
+      attendance: Math.max(0, num((r as { max_expected_attendance?: unknown }).max_expected_attendance) ?? 0),
     })
   }
 
@@ -99,7 +113,7 @@ Deno.serve(async (req) => {
     const guests = num((r as { guests?: unknown }).guests)
     const sales = num((r as { sales?: unknown }).sales)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || guests == null || guests <= 0 || sales == null) continue
-    const f = featByDate.get(d) ?? { date: d, dow: isoDow(d), evType: "none" as const, rainy: false }
+    const f = featByDate.get(d) ?? { date: d, dow: isoDow(d), evType: "none" as const, rainy: false, attendance: 0 }
     const spend = num((r as { avg_spend?: unknown }).avg_spend) ?? Math.round(sales / guests)
     hist.push({ ...f, guests, sales, spend })
   }
@@ -109,21 +123,58 @@ Deno.serve(async (req) => {
     return json({ ok: true, skipped: true, reason: "not_enough_history", history_days: hist.length }, 200)
   }
 
-  // 3) 拡張窓バックテスト（out-of-sample）で自己採点
-  const back: Array<{ date: string; gPred: number; gAct: number; sPred: number; sAct: number }> = []
-  for (let i = MIN_TRAIN; i < hist.length; i++) {
-    const train = hist.slice(0, i)
-    const fac = fit(train)
-    const p = predict(fac, hist[i])
-    back.push({ date: hist[i].date, gPred: p.guests, gAct: hist[i].guests, sPred: p.sales, sAct: hist[i].sales })
+  // 3) 拡張窓バックテスト（out-of-sample）で、乗算モデル(legacy)とポアソン回帰(GLM)を比較する。
+  //    a) まずGLMのリッジ強度λ候補を粗いストライドでバックテストし、最も当たるλを選ぶ（データが増えても計算量が
+  //       跳ね上がらないよう間引く。数十日規模の現状はストライド1＝全日評価）。
+  //    b) 選んだλのGLMと、レガシー乗算モデルを全日程でバックテストし、guestsのMAPEが小さい方を本番採用する。
+  //    これが「誤差実績を使って次の予測方法そのものを自動選択する」閉じたループ。
+  type BackRow = { date: string; gPred: number; gAct: number; sPred: number; sAct: number }
+  const selectStride = hist.length > 60 ? 3 : 1
+  function runBacktest(predictor: (train: Hist[], target: Hist) => { guests: number; sales: number } | null, stride: number): BackRow[] {
+    const out: BackRow[] = []
+    for (let i = MIN_TRAIN; i < hist.length; i += stride) {
+      const train = hist.slice(0, i)
+      const p = predictor(train, hist[i])
+      if (!p) continue
+      out.push({ date: hist[i].date, gPred: p.guests, gAct: hist[i].guests, sPred: p.sales, sAct: hist[i].sales })
+    }
+    return out
   }
-  const mapeG = mape(back.map((b) => [b.gPred, b.gAct]))
-  const mapeS = mape(back.map((b) => [b.sPred, b.sAct]))
-  const bandG = mapeG ?? 0.25 // 予測区間の幅（バックテスト誤差率。無ければ暫定±25%）
-  const bandS = mapeS ?? 0.25
+  const legacyPredictor = (train: Hist[], target: Hist) => predict(fit(train), target)
+  const glmPredictor = (lambda: number) => (train: Hist[], target: Hist): { guests: number; sales: number } | null => {
+    const m = fitGLM(train, lambda)
+    if (!m) return null
+    const guests = predictGLMGuests(m, target)
+    return { guests, sales: Math.max(0, Math.round(guests * (m.spend || 0))) }
+  }
 
-  // 4) 本予測: 全データで学習し、当日〜+14日を予測。過去日は out-of-sample 予測＋実績を保存。
+  let bestLambda = LAMBDA_GRID[0]
+  let bestLambdaMape = Infinity
+  for (const lambda of LAMBDA_GRID) {
+    const rows0 = runBacktest(glmPredictor(lambda), selectStride)
+    const m = mape(rows0.map((r) => [r.gPred, r.gAct]))
+    if (m != null && m < bestLambdaMape) { bestLambdaMape = m; bestLambda = lambda }
+  }
+
+  const backLegacy = runBacktest(legacyPredictor, 1)
+  const backGlm = runBacktest(glmPredictor(bestLambda), 1)
+  const mapeLegacyG = mape(backLegacy.map((b) => [b.gPred, b.gAct]))
+  const mapeLegacyS = mape(backLegacy.map((b) => [b.sPred, b.sAct]))
+  const mapeGlmG = mape(backGlm.map((b) => [b.gPred, b.gAct]))
+  // GLMがバックテストできない(データ不足でfitGLMがnullを返す等)場合はレガシーのまま。両方採点できた場合のみ比較。
+  const glmWins = mapeGlmG != null && (mapeLegacyG == null || mapeGlmG < mapeLegacyG)
+
+  const back = glmWins ? backGlm : backLegacy
+  const mapeG = glmWins ? mapeGlmG : mapeLegacyG
+  const mapeS = mape(back.map((b) => [b.sPred, b.sAct]))
+  const bandG = mapeG ?? 0.25 // 予測区間の幅（採用モデルのバックテスト誤差率。無ければ暫定±25%）
+  const bandS = mapeS ?? 0.25
+  const chosenModelVersion = glmWins ? `glm-poisson-v1(lambda=${bestLambda})` : MODEL_VERSION
+
+  // 4) 本予測: 全データで学習し、当日〜+14日を予測（採用モデルを使用）。過去日は out-of-sample 予測＋実績を保存。
+  //    AI解説(foodcourt_forecast_factors)向けの乗算係数は、採否に関係なく常に計算して維持する（解釈用の唯一の係数源）。
   const facFull = fit(hist)
+  const glmFull = glmWins ? fitGLM(hist, bestLambda) : null
   const lastActual = hist[hist.length - 1].date
   const rows: Array<Record<string, unknown>> = []
   const backByDate = new Map(back.map((b) => [b.date, b]))
@@ -137,19 +188,24 @@ Deno.serve(async (req) => {
     if (isPast) {
       const b = backByDate.get(d)
       const h = hist.find((x) => x.date === d)
-      if (!b || !h) continue // 学習初期(MIN_TRAIN未満)で out-of-sample 予測が無い日はスキップ
+      if (!b || !h) continue // 学習初期(MIN_TRAIN未満)で out-of-sample 予測が無い日、または間引かれた日はスキップ
       gPred = b.gPred; sPred = b.sPred; gAct = h.guests; sAct = h.sales
+    } else if (glmWins && glmFull) {
+      const guests = predictGLMGuests(glmFull, f)
+      gPred = guests; sPred = Math.max(0, Math.round(guests * (glmFull.spend || 0)))
+      upcoming.push({ date: d, guests: gPred, sales: sPred, evType: f.evType, rainy: f.rainy })
     } else {
       const p = predict(facFull, f)
       gPred = p.guests; sPred = p.sales
       upcoming.push({ date: d, guests: gPred, sales: sPred, evType: f.evType, rainy: f.rainy })
     }
-    const featJson = { dow: f.dow, evType: f.evType, rainy: f.rainy }
-    rows.push({ target_date: d, tenant_name: BASE_TENANT, tenant_code: null, metric: "guests", predicted: gPred, predicted_low: Math.max(0, Math.round(gPred * (1 - bandG))), predicted_high: Math.round(gPred * (1 + bandG)), model_version: MODEL_VERSION, features: featJson, actual: gAct })
-    rows.push({ target_date: d, tenant_name: BASE_TENANT, tenant_code: null, metric: "sales", predicted: sPred, predicted_low: Math.max(0, Math.round(sPred * (1 - bandS))), predicted_high: Math.round(sPred * (1 + bandS)), model_version: MODEL_VERSION, features: featJson, actual: sAct })
+    const featJson = { dow: f.dow, evType: f.evType, rainy: f.rainy, attendance: f.attendance }
+    rows.push({ target_date: d, tenant_name: BASE_TENANT, tenant_code: null, metric: "guests", predicted: gPred, predicted_low: Math.max(0, Math.round(gPred * (1 - bandG))), predicted_high: Math.round(gPred * (1 + bandG)), model_version: chosenModelVersion, features: featJson, actual: gAct })
+    rows.push({ target_date: d, tenant_name: BASE_TENANT, tenant_code: null, metric: "sales", predicted: sPred, predicted_low: Math.max(0, Math.round(sPred * (1 - bandS))), predicted_high: Math.round(sPred * (1 + bandS)), model_version: chosenModelVersion, features: featJson, actual: sAct })
   }
 
   // 統計拡張(stats-ext-v1): 予測には使わない。AI解説の解釈精度を上げる材料を毎晩まとめて再計算。
+  // 残差バイアスは「実際に採用されたモデル」のバックテスト結果(back)を使う＝AIに見せる弱点が実態と一致する。
   const advStats = computeAdvancedStats(hist, back)
 
   const summary = {
@@ -159,9 +215,16 @@ Deno.serve(async (req) => {
     mape_sales: mapeS != null ? Math.round(mapeS * 1000) / 10 : null,
     upcoming: upcoming.slice(0, HORIZON_DAYS),
     rows_to_upsert: rows.length,
+    model_selection: {
+      chosen: chosenModelVersion,
+      glm_wins: glmWins,
+      glm_lambda: bestLambda,
+      legacy_mape_guests: mapeLegacyG != null ? Math.round(mapeLegacyG * 1000) / 10 : null,
+      glm_mape_guests: mapeGlmG != null ? Math.round(mapeGlmG * 1000) / 10 : null,
+    },
   }
 
-  if (dryRun) return json({ ok: true, dry_run: true, model_version: MODEL_VERSION, ...summary, factors: facFull, advanced_stats: advStats }, 200)
+  if (dryRun) return json({ ok: true, dry_run: true, model_version: chosenModelVersion, ...summary, factors: facFull, glm_factors: glmFull, advanced_stats: advStats }, 200)
 
   if (rows.length) {
     const { error: upErr } = await supabase
@@ -186,22 +249,31 @@ Deno.serve(async (req) => {
       weather_counts: facFull.weatherN,
       median_spend: facFull.spend,
       history_days: hist.length,
-      backtest_days: back.length,
-      mape_guests: mapeG,
-      mape_sales: mapeS,
+      backtest_days: backLegacy.length,
+      mape_guests: mapeLegacyG,
+      mape_sales: mapeLegacyS,
       advanced_stats: advStats,
+      // 実際に forecast_predictions を生成したモデルの情報（AI解説の乗算係数とは別枠。透明性のための記録）。
+      model_selection: {
+        chosen: chosenModelVersion,
+        glm_wins: glmWins,
+        glm_lambda: bestLambda,
+        legacy_mape_guests: mapeLegacyG,
+        glm_mape_guests: mapeGlmG,
+      },
       updated_at: new Date().toISOString(),
     }, { onConflict: "tenant_name" })
   if (factorsErr) console.error("foodcourt_forecast_factors upsert failed:", factorsErr.message)
 
   // 学習の進化トラッキング: 今日の学習結果を1行追記（同日再実行は上書き＝冪等）。
-  // factors は最新1行を上書きするため、「賢くなっているか」の時系列証拠はこちらが正本。
+  // 「賢くなっているか」を実際の本番予測（採用モデル）の精度で追うため、ここは chosenModelVersion / 採用モデルのMAPEを記録する
+  // （AI解説用の乗算係数は常にレガシーだが、本番の予測精度はGLMが勝てばGLMのものを反映させる）。
   const { error: histErr } = await supabase
     .from("foodcourt_forecast_history")
     .upsert({
       tenant_name: BASE_TENANT,
       log_date: todayJst,
-      model_version: MODEL_VERSION,
+      model_version: chosenModelVersion,
       history_days: hist.length,
       backtest_days: back.length,
       mape_guests: mapeG,
@@ -209,7 +281,7 @@ Deno.serve(async (req) => {
       mean_guests: facFull.meanG,
     }, { onConflict: "tenant_name,log_date" })
   if (histErr) console.error("foodcourt_forecast_history upsert failed:", histErr.message)
-  return json({ ok: true, model_version: MODEL_VERSION, ...summary }, 200)
+  return json({ ok: true, model_version: chosenModelVersion, ...summary }, 200)
 })
 
 // --- model ---
@@ -248,6 +320,123 @@ function predict(f: Factors, feat: Feat): { guests: number; sales: number } {
 function shrink(rawFactor: number, n: number, k = SHRINK_K): number {
   if (!isFinite(rawFactor) || rawFactor <= 0) return 1
   return (n * rawFactor + k * 1) / (n + k)
+}
+
+// --- GLM(ポアソン回帰・IRLS) ---
+// 客数(カウントデータ)を log(客数) = 切片 + 曜日 + イベント種別 + 天気 + log(1+予想動員数) + トレンド(時間)
+// の対数線形モデルで推定する。乗算モデル(fit/predict)と違い、
+//  - 予想動員数という連続値の特徴量をそのまま扱える（イベント種別の粗い分類だけでなく規模を反映）
+//  - トレンド項で「開店後に客数が伸び続けている」段階的な変化を捉えられる
+//  - リッジ正則化(λ)が、サンプルの少ない係数を0(＝乗算モデルでいう「1倍＝無効果」)へ寄せる役割を、
+//    全特徴量に対して統一的な統計的裏付けをもって行う（乗算モデルの shrink() に相当するが連続値にも効く）。
+const WDAY_LEVELS = [2, 3, 4, 5, 6, 7] as const   // 曜日ダミー（基準=1=月曜）
+const EVT_LEVELS = ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall"] as const // イベント種別ダミー（基準=none）
+const GLM_COLS = 1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1 /*rainy*/ + 1 /*attendance*/ + 1 /*trend*/
+
+// 特徴量1件を設計行列の1行に変換する（trendStdは呼び出し側で標準化済みの値を渡す）。
+function designRow(f: Feat, trendStd: number): number[] {
+  const row = new Array(GLM_COLS).fill(0)
+  row[0] = 1
+  const wi = WDAY_LEVELS.indexOf(f.dow as typeof WDAY_LEVELS[number])
+  if (wi >= 0) row[1 + wi] = 1
+  const ei = EVT_LEVELS.indexOf(f.evType as typeof EVT_LEVELS[number])
+  if (ei >= 0) row[1 + WDAY_LEVELS.length + ei] = 1
+  row[1 + WDAY_LEVELS.length + EVT_LEVELS.length] = f.rainy ? 1 : 0
+  row[1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1] = Math.log1p(Math.max(0, f.attendance || 0))
+  row[1 + WDAY_LEVELS.length + EVT_LEVELS.length + 2] = trendStd
+  return row
+}
+// 日付を「1970-01-01からの通算日数」に変換（トレンド項の時間軸に使う）。
+function epochDay(ymd: string): number {
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return 0
+  return Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000)
+}
+// 連立一次方程式 A x = b をガウスの消去法(部分ピボット選択)で解く。特異(ほぼ0ピボット)ならnull。
+function solveLinearSystem(Ain: number[][], bin: number[]): number[] | null {
+  const n = bin.length
+  const A = Ain.map((row) => row.slice())
+  const b = bin.slice()
+  for (let col = 0; col < n; col++) {
+    let piv = col
+    let best = Math.abs(A[col][col])
+    for (let r = col + 1; r < n; r++) { const v = Math.abs(A[r][col]); if (v > best) { best = v; piv = r } }
+    if (best < 1e-10) return null
+    if (piv !== col) { const t = A[col]; A[col] = A[piv]; A[piv] = t; const tb = b[col]; b[col] = b[piv]; b[piv] = tb }
+    const pv = A[col][col]
+    for (let r = col + 1; r < n; r++) {
+      const f = A[r][col] / pv
+      if (f === 0) continue
+      for (let c = col; c < n; c++) A[r][c] -= f * A[col][c]
+      b[r] -= f * b[col]
+    }
+  }
+  const x = new Array(n).fill(0)
+  for (let r = n - 1; r >= 0; r--) {
+    let s = b[r]
+    for (let c = r + 1; c < n; c++) s -= A[r][c] * x[c]
+    x[r] = s / A[r][r]
+  }
+  return x
+}
+// ポアソン回帰をIRLS(反復重み付き最小二乗)で学習する。リッジ(λ、切片は正則化しない)で過学習を防ぐ。
+// トレンド項は学習ウィンドウ内の通算日数を標準化して使う（予測時も同じ基準(startEpoch/meanT/sdT)で変換する）。
+function fitGLM(train: Hist[], lambda: number): GlmModel | null {
+  const n = train.length
+  if (n < 2) return null
+  const startEpoch = epochDay(train[0].date)
+  const epochs = train.map((h) => epochDay(h.date) - startEpoch)
+  const meanT = avg(epochs) ?? 0
+  const sdT = sampleSd(epochs) || 1
+  const X = train.map((h, i) => designRow(h, (epochs[i] - meanT) / sdT))
+  const y = train.map((h) => h.guests)
+  const p = X[0].length
+  let beta = new Array(p).fill(0)
+  beta[0] = Math.log(Math.max(1, avg(y) ?? 1))
+  for (let iter = 0; iter < 25; iter++) {
+    const W = new Array(n); const z = new Array(n)
+    for (let i = 0; i < n; i++) {
+      let eta = 0
+      for (let a = 0; a < p; a++) eta += X[i][a] * beta[a]
+      const mu = Math.exp(Math.max(-20, Math.min(20, eta)))
+      const muC = Math.max(mu, 1e-6)
+      W[i] = muC
+      z[i] = eta + (y[i] - muC) / muC
+    }
+    const XtWX: number[][] = Array.from({ length: p }, () => new Array(p).fill(0))
+    const XtWz: number[] = new Array(p).fill(0)
+    for (let i = 0; i < n; i++) {
+      const xi = X[i], wi = W[i], zi = z[i]
+      for (let a = 0; a < p; a++) {
+        const xa = xi[a]
+        if (xa === 0) continue // ダミー列のスパース性を利用して省略（速度対策）
+        XtWz[a] += xa * wi * zi
+        for (let b = 0; b < p; b++) {
+          const xb = xi[b]
+          if (xb === 0) continue
+          XtWX[a][b] += xa * wi * xb
+        }
+      }
+    }
+    for (let a = 1; a < p; a++) XtWX[a][a] += lambda // リッジ（切片は正則化しない）
+    const newBeta = solveLinearSystem(XtWX, XtWz)
+    if (!newBeta) break // 特異になったら直前のbetaのまま打ち切り
+    let diff = 0
+    for (let a = 0; a < p; a++) diff += Math.abs(newBeta[a] - beta[a])
+    beta = newBeta
+    if (diff < 1e-6) break
+  }
+  const spend = median(train.map((h) => h.spend)) ?? 0
+  return { beta, startEpoch, meanT, sdT, spend }
+}
+// 学習済みGLMで客数を予測する（学習時と同じトレンド標準化を再現する）。
+function predictGLMGuests(m: GlmModel, f: Feat): number {
+  const t = (epochDay(f.date) - m.startEpoch - m.meanT) / m.sdT
+  const row = designRow(f, t)
+  let eta = 0
+  for (let a = 0; a < row.length; a++) eta += row[a] * m.beta[a]
+  const mu = Math.exp(Math.max(-20, Math.min(20, eta)))
+  return Math.max(0, Math.round(mu))
 }
 
 // --- 統計拡張(stats-ext-v1) ---

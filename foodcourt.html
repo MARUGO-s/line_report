@@ -820,6 +820,16 @@
     if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
     return body;
   }
+  async function apiPut(path, payload){
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try { res = await fetch(url, { method:'PUT', headers:{ 'x-admin-token':getToken(), 'Content-Type':'application/json' }, body: JSON.stringify(payload||{}) }); }
+    catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
+    if (res.status===401 || res.status===403){ setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
+    const body = await res.json().catch(()=>({}));
+    if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
+    return body;
+  }
   // データに質問：会話履歴を保持し、前のやり取りを踏まえて返信させる。
   let qaHistory = [];
   function renderQaThread(thinking){
@@ -1627,7 +1637,15 @@
       // 東京ドーム本体は最大集客＝小ホール(カナデビア等)と混在しても目立つ塗りバッジ＋太字。
       const dome=venueOf(e)==='tokyo-dome';
       const vTag=dome?'<span class="ld-dome-badge">🏟 東京ドーム</span>':venueTag(e);
-      return '<div class="ld-ev-row'+(past?' past':'')+(dome?' dome':'')+'" data-d="'+dOf(e)+'"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+vTag+jpTag(e)+'<span class="ld-ev-t">'+escapeHtml(e.title||'')+'</span>'+noteHtml+'</div>'; };
+      // 予想動員数（手入力）: 来客予測モデルの最強ドライバー。自動取得元には無いため、ここで直接入力する。
+      const attVal=(e.expected_attendance!=null && isFinite(e.expected_attendance))?String(e.expected_attendance):'';
+      const attHtml='<span class="ld-att" data-date="'+escapeHtml(dOf(e))+'" data-venue="'+escapeHtml(venueOf(e))+'" data-title="'+escapeHtml(e.title||'')+'" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;vertical-align:middle">'
+        +'<span style="font-size:11px;color:var(--tx-2)">👥予想</span>'
+        +'<input type="number" min="0" step="1" class="ld-att-input" value="'+escapeHtml(attVal)+'" placeholder="人数" style="width:64px;font-size:11px;padding:1px 4px;border:1px solid var(--bd,#ccc);border-radius:4px">'
+        +'<button type="button" class="ld-att-save" style="font-size:11px;padding:1px 6px;border:1px solid var(--bd,#ccc);border-radius:4px;background:var(--bg-2,#f2f2f2);cursor:pointer">保存</button>'
+        +'<span class="ld-att-state" style="font-size:10px;color:var(--tx-2)"></span>'
+        +'</span>';
+      return '<div class="ld-ev-row'+(past?' past':'')+(dome?' dome':'')+'" data-d="'+dOf(e)+'"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+vTag+jpTag(e)+'<span class="ld-ev-t">'+escapeHtml(e.title||'')+'</span>'+noteHtml+attHtml+'</div>'; };
     const dayHtml=(g)=>{ const d=g.d; const past=d<todayJ; const has=guestsByDate.has(d); const n=g.evs.length;
       const cnt = has
         ? '<span class="ld-cntb" title="その日のマルゴS全体の客数（イベント単位ではありません）">👥 '+nf.format(guestsByDate.get(d))+'</span>'
@@ -1904,7 +1922,33 @@
   }
   function closeDayPopup(){ if(!dom.dpModal) return; dom.dpModal.classList.remove('show'); dom.dpModal.setAttribute('aria-hidden','true'); }
   dom.calGrid.addEventListener('click', e=>{ const c=e.target.closest('.cell'); if(c && c.dataset.date) openDayPopup(c.dataset.date); });
-  dom.domeList.addEventListener('click', e=>{ const r=e.target.closest('.ld-day,.ld-ev-row,.ld-row'); if(r && r.dataset.d) openDayPopup(r.dataset.d); });
+  dom.domeList.addEventListener('click', e=>{
+    const saveBtn=e.target.closest('.ld-att-save');
+    if(saveBtn){ e.stopPropagation(); saveAttendance(saveBtn.closest('.ld-att')); return; }
+    if(e.target.closest('.ld-att')) return; // 入力欄クリックは日別ポップアップを開かない
+    const r=e.target.closest('.ld-day,.ld-ev-row,.ld-row'); if(r && r.dataset.d) openDayPopup(r.dataset.d);
+  });
+  // 予想動員数（手入力）の保存。来客予測モデル(foodcourt-forecast-cron)が動員数を使えるようにする唯一の入力経路。
+  async function saveAttendance(wrap){
+    if(!wrap) return;
+    const input=wrap.querySelector('.ld-att-input');
+    const stateEl=wrap.querySelector('.ld-att-state');
+    const date=wrap.dataset.date, venue=wrap.dataset.venue, title=wrap.dataset.title;
+    const raw=(input.value||'').trim();
+    const attendance = raw==='' ? null : Number(raw);
+    if(raw!=='' && (!isFinite(attendance) || attendance<0)){ stateEl.textContent='数値エラー'; stateEl.style.color='#c00'; return; }
+    stateEl.textContent='保存中…'; stateEl.style.color='';
+    try{
+      await apiPut('/foodcourt/events/attendance', { event_date:date, venue:venue, title:title, expected_attendance:attendance });
+      const idx=(events||[]).findIndex(ev=>String(ev.event_date).slice(0,10)===date && venueOf(ev)===venue && String(ev.title||'')===title);
+      if(idx>=0) events[idx].expected_attendance = attendance;
+      stateEl.textContent='保存済み'; stateEl.style.color='var(--ok,#2a7)';
+      setTimeout(()=>{ if(stateEl) stateEl.textContent=''; }, 2000);
+    }catch(err){
+      stateEl.textContent = err && err.message ? err.message : '保存に失敗しました';
+      stateEl.style.color='#c00';
+    }
+  }
   dom.dpClose.addEventListener('click', closeDayPopup);
   dom.dpBackdrop.addEventListener('click', closeDayPopup);
   document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDayPopup(); });
