@@ -3,9 +3,9 @@
 MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売上・客数データを解析する
 **5エージェント構成のマルチAIパイプライン**の設計と動作を解説する。
 
-バージョン: `foodcourt-analysis-ai-v4`（2026-07-05更新）  
+バージョン: `foodcourt-analysis-ai-v4`（2026-07-05更新／2026-07-07: 品質評価ループ＝第6エージェントを追加・既定OFF→ §3-3）  
 関連ファイル: [`supabase/functions/_shared/foodcourt_compare.ts`](../supabase/functions/_shared/foodcourt_compare.ts)  
-関連ドキュメント: [フードコート学習システム構造.md](フードコート学習システム構造.md)、[フードコート売上分析_設計書.md](フードコート売上分析_設計書.md)
+関連ドキュメント: [フードコート学習システム構造.md](フードコート学習システム構造.md)、[フードコートAIループシステム全体解説.md](フードコートAIループシステム全体解説.md)、[フードコート売上分析_設計書.md](フードコート売上分析_設計書.md)
 
 ---
 
@@ -133,6 +133,22 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
       ↓
 ラウンド3（直列）: 統合AI⑤ → 全ての情報を受け取り最終出力 → 約3〜6秒
 ```
+
+### 3-3. 品質評価ループ＝第6のエージェント（2026-07-07追加・既定OFF）
+
+統合AI⑤の最終出力の後段に、**評価AI⑥**によるループを追加できる（AIループエンジニアリング）。
+
+```
+統合AI⑤の回答 → [評価AI⑥] 5軸採点（正確性/論理性/専門性/実用性/根拠・JSONのみ）
+   → 合格（総合90＋全項目80）なら返却
+   → 不合格なら「改善点だけ」を統合AI⑤に渡して再生成 → 再評価
+   → 上限（Q&A=3／日次=2／期間=1ループ）に達したら最高得点の回答を返す
+```
+
+- 再ループ時に専門AI①②③・反証AI④は**再実行しない**（メモを使い回し、統合AI⑤だけ再生成）＝コスト増を最小化
+- 合否は評価AIの自己申告ではなくコード側が閾値判定。全ループは `foodcourt_ai_loop_runs` / `foodcourt_ai_loop_iterations` に保存
+- **既定は完全OFF**（環境変数 `FOODCOURT_LOOP_ENABLED` ＋ surface別 `FOODCOURT_LOOP_APPLY_TO_*` の両方をtrueにしたときだけ動く。OFFの間は従来と完全に同一動作・キャッシュも従来版を維持）
+- 詳細な仕組み・有効化手順は [フードコートAIループシステム全体解説.md](フードコートAIループシステム全体解説.md)、設計・実装ログは [AI_LOOP_ENGINEERING_DESIGN.md](AI_LOOP_ENGINEERING_DESIGN.md) を参照
 
 ---
 
@@ -582,7 +598,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 
 - **前年比なし**: MARUGO S は新規オープン（2026年〜）のため前年同月比は計算不可
 - **学習初期の精度**: データが増えるほどMAPEが下がる。少量データ期は係数の信頼性が低い
-- **イベント動員数**: 東京ドームの実際の動員数は非公開のため、モデルに組み込めていない（将来課題）
+- **イベント動員数**: 公式の動員数は非公開のため**手入力**（foodcourt.html のイベント一覧「👥予想」欄→GLMが `log(1+動員数)` として使用）。未入力のイベントは規模の効果を反映できない
 
 ---
 
@@ -590,10 +606,11 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 
 | 優先度 | 改善内容 | 期待効果 |
 |---|---|---|
-| 高 | 東京ドームの動員数の取込 | イベント係数の精度が大幅改善 |
+| ~~高~~ 済 | ~~東京ドームの動員数の取込~~ → 2026-07-07対応済み（手入力UI＋GLM） | イベント係数の精度が大幅改善（入力の運用継続が前提） |
+| 高 | 品質評価ループ（§3-3）の有効化と閾値チューニング | 回答品質の底上げ（まずQ&Aのみの段階導入を推奨） |
 | 中 | 会場×客層別の係数（野球/ライブ/格闘技） | 業態相性の予測精度向上 |
 | 中 | 客単価のイベント別係数化 | 売上予測の精度向上 |
-| 低 | 交互作用項（曜日×イベント種別）の乗算モデル拡張 | 「土曜の野球」など複合条件の精度向上 |
+| 低 | 交互作用項（曜日×イベント種別）のGLM拡張 | 「土曜の野球」など複合条件の精度向上 |
 | 低 | Gemini 3.5 Flash → 3.1 Pro へのアップグレード | イベント分析の深度向上（月+$0.7程度） |
 
 ---
@@ -606,7 +623,9 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | [`supabase/functions/foodcourt-forecast-cron/index.ts`](../supabase/functions/foodcourt-forecast-cron/index.ts) | 来客予測モデルの学習エンジン・係数の保存 |
 | [`supabase/migrations/20260703170000_foodcourt_forecast_factors.sql`](../supabase/migrations/20260703170000_foodcourt_forecast_factors.sql) | 学習係数保存テーブルの定義 |
 | [`supabase/functions/admin-api/index.ts`](../supabase/functions/admin-api/index.ts) | AI分析APIエンドポイント・キャッシュ管理 |
-| [`foodcourt.html`](../foodcourt.html) | フードコート分析画面（Q&A・日次/期間サマリー表示） |
+| [`foodcourt.html`](../foodcourt.html) | フードコート分析画面（Q&A・日次/期間サマリー表示・動員数入力） |
+| [フードコートAIループシステム全体解説.md](フードコートAIループシステム全体解説.md) | 2つの自己改善ループ（モデル選択＋品質評価）の全体像・有効化手順 |
+| [AI_LOOP_ENGINEERING_DESIGN.md](AI_LOOP_ENGINEERING_DESIGN.md) | 品質評価ループの設計書・実装ログ（Phase 1〜3） |
 | [フードコート学習システム構造.md](フードコート学習システム構造.md) | データ収集〜予測モデルの全体構造 |
 | [フードコート売上分析_設計書.md](フードコート売上分析_設計書.md) | 分析フレームワーク詳細 |
 | [フードコート競合店プロファイル.md](フードコート競合店プロファイル.md) | 競合11店の業態プロファイル |
