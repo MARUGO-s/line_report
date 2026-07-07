@@ -174,6 +174,53 @@
     /* Milestone badge */
     .milestone{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;border-radius:999px;padding:2px 8px;background:var(--base-soft);color:var(--base-tx);margin-left:8px;vertical-align:middle;}
 
+    /* AI Loop section */
+    .reason-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;border-radius:999px;padding:3px 9px;}
+    .reason-passed{background:var(--good-soft);color:var(--good);}
+    .reason-max_loop_best{background:var(--warn-soft);color:var(--warn-tx);}
+    .reason-evaluation_failed{background:var(--bad-soft);color:var(--bad);}
+    .reason-generation_failed{background:var(--bad-soft);color:var(--bad);}
+    .surface-badge{display:inline-block;font-size:10.5px;font-weight:600;border-radius:6px;padding:2px 7px;background:var(--accent-soft);color:var(--accent-tx);}
+    .loop-run{border:1px solid var(--line-soft);border-radius:13px;overflow:hidden;margin-bottom:10px;}
+    .loop-run-head{display:flex;align-items:center;gap:10px;padding:13px 16px;cursor:pointer;background:var(--bg);transition:background .12s;flex-wrap:wrap;}
+    .loop-run-head:hover{background:var(--hover);}
+    .loop-run-head .lrh-l{flex:1;min-width:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    .loop-run-head .lrh-r{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+    .loop-score-big{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}
+    .loop-chevron{transition:transform .2s;color:var(--tx-3);}
+    .loop-run.open .loop-chevron{transform:rotate(180deg);}
+    .loop-detail{display:none;padding:0 16px 16px;border-top:1px solid var(--line-soft);background:var(--surface);}
+    .loop-run.open .loop-detail{display:block;}
+    .loop-iter{margin-top:14px;}
+    .loop-iter-head{font-size:12px;font-weight:700;color:var(--tx-2);margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+    .iter-pass{font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;}
+    .iter-pass.ok{background:var(--good-soft);color:var(--good);}
+    .iter-pass.ng{background:var(--bad-soft);color:var(--bad);}
+    .score-bars{display:flex;flex-direction:column;gap:5px;}
+    .score-bar-row{display:flex;align-items:center;gap:8px;font-size:11.5px;}
+    .score-bar-label{width:52px;flex:none;color:var(--tx-3);text-align:right;}
+    .score-bar-track{flex:1;height:7px;border-radius:4px;background:var(--bar-track);overflow:hidden;}
+    .score-bar-fill{height:100%;border-radius:4px;transition:width .4s ease;}
+    .score-bar-val{width:32px;flex:none;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;}
+    .sbar-good{background:var(--good);}
+    .sbar-warn{background:var(--warn-tx);}
+    .sbar-bad{background:var(--bad);}
+    .improvement-list{margin-top:10px;padding:10px 13px;background:var(--bg);border-radius:9px;border-left:3px solid var(--accent);}
+    .improvement-list p{font-size:11.5px;font-weight:700;color:var(--tx-3);margin:0 0 6px;}
+    .improvement-list li{font-size:12px;color:var(--tx-2);line-height:1.65;margin-bottom:4px;}
+    .loop-kpi-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+    .loop-kpi-sm{background:var(--bg);border:1px solid var(--line-soft);border-radius:11px;padding:11px 14px;min-width:100px;}
+    .loop-kpi-sm .k{font-size:10.5px;color:var(--tx-3);font-weight:600;}
+    .loop-kpi-sm .v{font-size:19px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums;}
+    .loop-total-bar{margin:10px 0 4px;height:6px;border-radius:3px;background:var(--bar-track);overflow:hidden;}
+    .loop-total-bar-fill{height:100%;border-radius:3px;}
+    .model-sel-card{background:var(--bg);border:1px solid var(--line-soft);border-radius:11px;padding:13px 16px;margin-top:10px;}
+    .model-sel-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;}
+    .winner-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;}
+    .winner-glm{background:var(--accent-soft);color:var(--accent-tx);}
+    .winner-legacy{background:var(--base-soft);color:var(--base-tx);}
+    .section-divider{margin:28px 0 4px;font-size:13px;font-weight:700;color:var(--tx-3);letter-spacing:.06em;text-transform:uppercase;}
+
     /* Shell layout (sidebar) */
     .ms-shell{display:flex;min-height:100vh;}
     .ms-side{width:220px;flex:none;background:var(--bg);border-right:1px solid var(--line-soft);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto;}
@@ -340,6 +387,27 @@
       </div>
     </div>
 
+    <!-- AI Loop② quality evaluation runs -->
+    <div class="card" id="loopCard" style="display:none">
+      <div class="card-h">
+        <div class="card-t"><span class="em">🔬</span>AI 回答品質ループ（ループ②）</div>
+      </div>
+      <div class="loop-kpi-row" id="loopKpiRow"></div>
+      <div style="margin-top:18px" id="loopRunsWrap">
+        <div style="color:var(--tx-3);font-size:13px">データなし</div>
+      </div>
+      <div class="card-note">統合AI⑤の回答を評価AI⑥が5軸（正確性・論理性・専門性・実用性・根拠）で採点。不合格なら改善点だけを渡して再生成。最大N回ループ後、最高得点の回答を返す。合格ライン：総合90点・各項目80点。</div>
+    </div>
+
+    <!-- Model selection detail (Loop①) -->
+    <div class="card" id="modelSelCard" style="display:none">
+      <div class="card-h">
+        <div class="card-t"><span class="em">⚖️</span>モデル選択ログ（ループ①最新）</div>
+      </div>
+      <div id="modelSelWrap"><div style="color:var(--tx-3);font-size:13px">データなし</div></div>
+      <div class="card-note">毎晩 JST 05:00 の学習cronが「レガシー乗算モデル vs ポアソン回帰GLM」をバックテストで競わせ、MAPEが低い方を採用。λ自動選択はリッジ強度 {1,2,4,8,16} を全バックテストして最良を選ぶ。</div>
+    </div>
+
   </div><!-- /resultArea -->
   <div id="loadMsg" class="msg"></div>
 
@@ -423,9 +491,14 @@
   // tryConnect と loadData を統合: 認証確認と同時にデータも取得し、二重APIコールを防ぐ。
   async function tryConnectAndLoad(){
     try{
-      const body = await apiFetch('/foodcourt/evolution-history?store_key=marugoS');
+      const [histBody, loopBody] = await Promise.all([
+        apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
+        apiFetch('/foodcourt/ai-loop-runs?limit=30').catch(()=>({ runs: [] })),
+      ]);
       setAuthBadge(true);
-      historyRows = Array.isArray(body.rows) ? body.rows : [];
+      historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
+      modelSelectionData = histBody.model_selection ?? null;
+      loopRuns = Array.isArray(loopBody.runs) ? loopBody.runs : [];
       return true;
     }catch(_){ setAuthBadge(false); return false; }
   }
@@ -447,20 +520,27 @@
     if(v==null) return null;
     const n = Number(v);
     if(!Number.isFinite(n)) return null;
-    // DB stores MAPE as a ratio (0.49 = 49%). Keep backward compatibility if a percent value is ever returned.
     return Math.abs(n) <= 1.5 ? n * 100 : n;
   };
   const escH = s => String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   function fmtDate(ymd){ if(!ymd) return '—'; const m=String(ymd).match(/(\d{4})-(\d{2})-(\d{2})/); return m ? m[1]+'/'+m[2]+'/'+m[3] : ymd; }
+  function fmtDatetime(iso){ if(!iso) return '—'; const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); return m ? m[1]+'/'+m[2]+'/'+m[3]+' '+m[4]+':'+m[5] : iso.slice(0,16); }
 
   let historyRows = [];
+  let loopRuns = [];
+  let modelSelectionData = null;
 
   async function loadData(){
     dom.loadMsg.textContent = '読み込み中…'; dom.loadMsg.className='msg';
     dom.resultArea.hidden = true;
     try{
-      const body = await apiFetch('/foodcourt/evolution-history?store_key=marugoS');
-      historyRows = Array.isArray(body.rows) ? body.rows : [];
+      const [histBody, loopBody] = await Promise.all([
+        apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
+        apiFetch('/foodcourt/ai-loop-runs?limit=30').catch(()=>({ runs: [] })),
+      ]);
+      historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
+      modelSelectionData = histBody.model_selection ?? null;
+      loopRuns = Array.isArray(loopBody.runs) ? loopBody.runs : [];
       dom.loadMsg.textContent = '';
       dom.resultArea.hidden = false;
       render();
@@ -478,6 +558,8 @@
     renderMapeChart();
     renderHistBars();
     renderTable();
+    renderLoopRuns();
+    renderModelSelection();
   }
 
   function renderKpi(){
@@ -710,6 +792,139 @@
         <td>${deltaHtml}</td>
       </tr>`;
     }).join('');
+  }
+
+  // ===== AI Loop② runs =====
+  function scoreClass(s){ return s>=80?'sbar-good':s>=60?'sbar-warn':'sbar-bad'; }
+  function scoreTextClass(s){ return s>=80?'good':s>=60?'neutral':'bad'; }
+
+  function renderScoreBars(iter){
+    const axes = [
+      {k:'正確性', v:Number(iter.score_accuracy||0)},
+      {k:'論理性', v:Number(iter.score_logic||0)},
+      {k:'専門性', v:Number(iter.score_expertise||0)},
+      {k:'実用性', v:Number(iter.score_practicality||0)},
+      {k:'根拠',   v:Number(iter.score_evidence||0)},
+    ];
+    return `<div class="score-bars">${axes.map(a=>`
+      <div class="score-bar-row">
+        <div class="score-bar-label">${escH(a.k)}</div>
+        <div class="score-bar-track"><div class="score-bar-fill ${scoreClass(a.v)}" style="width:${a.v}%"></div></div>
+        <div class="score-bar-val ${scoreTextClass(a.v)}">${a.v}</div>
+      </div>`).join('')}</div>`;
+  }
+
+  function renderImprovements(iter){
+    let pts = [];
+    try{
+      const ev = typeof iter.evaluation==='string' ? JSON.parse(iter.evaluation) : (iter.evaluation||{});
+      const raw = ev.improvement_points;
+      if(Array.isArray(raw)) pts = raw;
+      else if(typeof raw==='string' && raw.trim()) pts = [raw];
+    }catch(_){}
+    if(!pts.length) return '';
+    return `<div class="improvement-list"><p>📝 評価AIからの改善指摘</p><ul style="margin:0;padding-left:18px">${
+      pts.map(p=>`<li>${escH(String(p))}</li>`).join('')
+    }</ul></div>`;
+  }
+
+  function reasonLabel(r){
+    const map={'passed':'✅ 合格','max_loop_best':'⚡ 上限到達→最高点採用','evaluation_failed':'⚠️ 評価失敗','generation_failed':'❌ 生成失敗'};
+    return map[r]||r||'—';
+  }
+  function surfaceLabel(s){
+    return {ask:'Q&A',daily_summary:'日次サマリー',period_summary:'期間サマリー'}[s]||s||'—';
+  }
+
+  function renderLoopRuns(){
+    const wrap = document.getElementById('loopRunsWrap');
+    const kpiRow = document.getElementById('loopKpiRow');
+    const card = document.getElementById('loopCard');
+    if(!loopRuns.length){ card.style.display='none'; return; }
+    card.style.display='';
+
+    // KPIs
+    const total = loopRuns.length;
+    const passed = loopRuns.filter(r=>r.returned_reason==='passed').length;
+    const scores = loopRuns.map(r=>Number(r.final_score)).filter(v=>Number.isFinite(v)&&v>0);
+    const avgScore = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length) : null;
+    const avgLoops = loopRuns.map(r=>Array.isArray(r.iterations)?r.iterations.length:0);
+    const avgLoopN = avgLoops.length ? (avgLoops.reduce((a,b)=>a+b,0)/avgLoops.length) : null;
+    kpiRow.innerHTML = `
+      <div class="loop-kpi-sm"><div class="k">総実行数</div><div class="v">${total}</div></div>
+      <div class="loop-kpi-sm"><div class="k">合格数</div><div class="v ${passed>0?'good':'neutral'}">${passed}</div></div>
+      <div class="loop-kpi-sm"><div class="k">合格率</div><div class="v ${passed/total>=0.5?'good':'neutral'}">${total?Math.round(passed/total*100):0}%</div></div>
+      <div class="loop-kpi-sm"><div class="k">平均スコア</div><div class="v">${avgScore!=null?avgScore.toFixed(1):'—'}</div></div>
+      <div class="loop-kpi-sm"><div class="k">平均ループ数</div><div class="v">${avgLoopN!=null?avgLoopN.toFixed(1):'—'}</div></div>`;
+
+    // Run list
+    wrap.innerHTML = loopRuns.map((run,ri)=>{
+      const iters = Array.isArray(run.iterations)?run.iterations:[];
+      const score = run.final_score!=null ? Number(run.final_score) : null;
+      const scoreHtml = score!=null
+        ? `<span class="loop-score-big ${scoreTextClass(score)}">${score.toFixed(0)}</span><span style="font-size:12px;color:var(--tx-3)">点</span>`
+        : '<span style="font-size:13px;color:var(--tx-3)">—</span>';
+      const rClass = 'reason-'+(run.returned_reason||'');
+      const itersHtml = iters.map(it=>{
+        const total = Number(it.total_score||0);
+        return `<div class="loop-iter">
+          <div class="loop-iter-head">
+            ループ ${it.loop_index}回目
+            <span class="iter-pass ${it.passed?'ok':'ng'}">${it.passed?'合格':'不合格'}</span>
+            <span style="font-size:12px;color:var(--tx-3);margin-left:auto">合計 <b class="${scoreTextClass(total)}">${total}</b>点</span>
+          </div>
+          ${renderScoreBars(it)}
+          ${renderImprovements(it)}
+        </div>`;
+      }).join('<hr style="border:none;border-top:1px solid var(--line-soft);margin:12px 0">');
+
+      return `<div class="loop-run" id="lr${ri}">
+        <div class="loop-run-head" onclick="(function(el){el.closest('.loop-run').classList.toggle('open')})(this)">
+          <div class="lrh-l">
+            <span class="surface-badge">${escH(surfaceLabel(run.surface))}</span>
+            <span style="font-size:12px;color:var(--tx-3)">${escH(fmtDatetime(run.created_at))}</span>
+            <span class="reason-badge ${rClass}">${escH(reasonLabel(run.returned_reason))}</span>
+          </div>
+          <div class="lrh-r">
+            ${scoreHtml}
+            <svg class="loop-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="loop-detail">
+          ${iters.length ? itersHtml : '<div style="color:var(--tx-3);font-size:12px;padding-top:10px">ループ詳細データなし</div>'}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ===== Model selection (Loop①) =====
+  function renderModelSelection(){
+    const wrap = document.getElementById('modelSelWrap');
+    const card = document.getElementById('modelSelCard');
+    const ms = modelSelectionData;
+    if(!ms){ card.style.display='none'; return; }
+    card.style.display='';
+
+    const winner = String(ms.winner||'').includes('glm') ? 'glm' : 'legacy';
+    const mapeL = ms.mape_legacy!=null ? (Number(ms.mape_legacy)*100).toFixed(1)+'%' : '—';
+    const mapeG = ms.mape_glm!=null   ? (Number(ms.mape_glm)*100).toFixed(1)+'%'    : '—';
+    const lambda = ms.best_lambda!=null ? ms.best_lambda : '—';
+
+    wrap.innerHTML = `
+      <div class="model-sel-card">
+        <div class="model-sel-row">
+          <span style="font-weight:700">採用モデル:</span>
+          <span class="winner-badge ${winner==='glm'?'winner-glm':'winner-legacy'}">${winner==='glm'?'🔬 GLM (ポアソン回帰)':'📊 レガシー乗算モデル'}</span>
+        </div>
+        <div style="display:flex;gap:18px;margin-top:12px;flex-wrap:wrap;font-size:13px">
+          <div><span style="color:var(--tx-3)">レガシー MAPE:</span> <b class="${winner==='legacy'?'good':''}">${escH(mapeL)}</b></div>
+          <div><span style="color:var(--tx-3)">GLM MAPE:</span> <b class="${winner==='glm'?'good':''}">${escH(mapeG)}</b></div>
+          <div><span style="color:var(--tx-3)">採用 λ (リッジ):</span> <b>${escH(String(lambda))}</b></div>
+          ${ms.backtest_days!=null?`<div><span style="color:var(--tx-3)">バックテスト:</span> <b>${ms.backtest_days}日</b></div>`:''}
+        </div>
+        ${ms.note?`<div style="margin-top:10px;font-size:12px;color:var(--tx-3)">${escH(ms.note)}</div>`:''}
+      </div>
+      <div class="card-note" style="margin-top:10px">毎晩のcronが更新。GLMは動員数入力が増えると精度が上がりレガシーを逆転する見込み。</div>`;
   }
 
   // ===== init =====

@@ -677,6 +677,7 @@ Deno.serve(async (req, info) => {
       "/foodcourt/ask",
       "/foodcourt/dome-weekly",
       "/foodcourt/evolution-history",
+      "/foodcourt/ai-loop-runs",
       "/foodcourt/events/attendance",
       "/analytics/holidays",
       "/analytics/monthly",
@@ -1105,7 +1106,41 @@ Deno.serve(async (req, info) => {
         .eq("tenant_name", tenantName)
         .order("log_date", { ascending: true })
       if (error) return json({ error: error.message }, 500)
-      return json({ rows: data ?? [] }, 200)
+      // model_selection detail from factors (single row per tenant)
+      const { data: factors } = await supabase
+        .from("foodcourt_forecast_factors")
+        .select("model_selection, updated_at")
+        .eq("tenant_name", tenantName)
+        .maybeSingle()
+      return json({ rows: data ?? [], model_selection: factors?.model_selection ?? null }, 200)
+    }
+    if (req.method === "GET" && path === "/foodcourt/ai-loop-runs") {
+      const limit = Math.min(parseInt(String(url.searchParams.get("limit") ?? "30")), 50)
+      const { data: runs, error: runsErr } = await supabase
+        .from("foodcourt_ai_loop_runs")
+        .select("id, surface, source_ref, final_score, returned_reason, created_at")
+        .order("created_at", { ascending: false })
+        .limit(limit)
+      if (runsErr) return json({ error: runsErr.message }, 500)
+      if (!runs || runs.length === 0) return json({ runs: [] }, 200)
+      const runIds = runs.map((r: Record<string, unknown>) => r.id as string)
+      const { data: iters, error: itersErr } = await supabase
+        .from("foodcourt_ai_loop_iterations")
+        .select("run_id, loop_index, total_score, score_accuracy, score_logic, score_expertise, score_practicality, score_evidence, passed, evaluation, created_at")
+        .in("run_id", runIds)
+        .order("loop_index", { ascending: true })
+      if (itersErr) return json({ error: itersErr.message }, 500)
+      const itersByRun = new Map<string, unknown[]>()
+      for (const it of (iters ?? [])) {
+        const rid = (it as Record<string, unknown>).run_id as string
+        if (!itersByRun.has(rid)) itersByRun.set(rid, [])
+        itersByRun.get(rid)!.push(it)
+      }
+      const result = runs.map((r: Record<string, unknown>) => ({
+        ...r,
+        iterations: itersByRun.get(r.id as string) ?? [],
+      }))
+      return json({ runs: result }, 200)
     }
     // 東京ドーム週次イベント配信（per-room）の設定を取得/保存（管理画面のカレンダー/予約タブから利用）。
     if (req.method === "GET" && path === "/foodcourt/dome-weekly") {

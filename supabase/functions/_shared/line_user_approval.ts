@@ -290,7 +290,9 @@ export async function notifyApprovalAdminOfNewFollower(
   sourceStoreDisplayName: string,
   storeAccessToken: string,
 ): Promise<void> {
-  const adminToken = resolveChannelAccessToken(ADMIN_STORE_PARTITION_KEY)
+  // 管理者ユーザーへの push は LINE_CHANNEL_ACCESS_TOKEN（デフォルト）を使う。
+  // 管理者が友だち追加しているのはデフォルト Bot のため。
+  const adminToken = resolveChannelAccessToken('')
   const adminUserIds = resolveApprovalAdminUserIds()
   if (!adminToken || !adminUserIds.length) {
     console.error('notifyApprovalAdmin: missing admin token or admin user ids')
@@ -711,7 +713,8 @@ async function notifyApprovalAdminOfNewRoom(
   if ((settings as { bot_access_approved?: boolean } | null)?.bot_access_approved === true) return
   if ((settings as { bot_access_notify_sent_at?: string } | null)?.bot_access_notify_sent_at) return
 
-  const adminToken = resolveChannelAccessToken(ADMIN_STORE_PARTITION_KEY)
+  // 管理者ユーザーへの push は LINE_CHANNEL_ACCESS_TOKEN（デフォルト）を使う。
+  const adminToken = resolveChannelAccessToken('')
   const adminUserIds = resolveApprovalAdminUserIds()
   if (!adminToken || !adminUserIds.length) return
 
