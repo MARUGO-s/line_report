@@ -873,40 +873,71 @@ function resolveFoodCourtLoopConfig(surface: FoodCourtLoopSurface): FoodCourtLoo
   const evaluatorProvider: FoodCourtChatProvider = (['groq', 'gemini', 'claude', 'openai', 'grok'] as const).includes(providerRaw as FoodCourtChatProvider)
     ? providerRaw as FoodCourtChatProvider
     : 'claude'
-  return { enabled, maxLoops, passTotal, passEach, evaluatorProvider, evaluatorMaxTokens: 700 }
+  // 評価JSONが上限で切れると採点不能(evaluation_failed)になる。本番初回で700ちょうどで切れた実績があるため
+  // 余裕を持たせる（プロンプト側でも件数・文字数を制限して通常は数百トークンに収まる想定）。
+  return { enabled, maxLoops, passTotal, passEach, evaluatorProvider, evaluatorMaxTokens: 1200 }
 }
 
-// 評価AIのJSON出力を頑健にパースする（```json フェンス・前後の余計な文章を許容）。壊れていればnull。
+// 評価AIのJSON出力を頑健にパースする（```json フェンス・前後の余計な文章を許容）。
+// トークン上限で途中切断されたJSONでも、スコア類だけは正規表現で救出して採点を成立させる
+// （本番初回で700トークンちょうどで切れて evaluation_failed になった実績への対策）。完全に読めなければnull。
 function parseLoopEvaluationJson(raw: string | null): FoodCourtLoopEvaluation | null {
   if (!raw) return null
   const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/i, '').trim()
   const match = cleaned.match(/\{[\s\S]*\}/)
   const jsonText = match ? match[0] : cleaned
-  let parsed: unknown
-  try { parsed = JSON.parse(jsonText) } catch { return null }
-  if (!parsed || typeof parsed !== 'object') return null
-  const o = parsed as Record<string, unknown>
   const clamp = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0 }
-  const scoresRaw = (o.scores && typeof o.scores === 'object') ? o.scores as Record<string, unknown> : {}
-  const scores = {
-    accuracy: clamp(scoresRaw.accuracy),
-    logic: clamp(scoresRaw.logic),
-    expertise: clamp(scoresRaw.expertise),
-    practicality: clamp(scoresRaw.practicality),
-    evidence: clamp(scoresRaw.evidence),
-  }
-  const total = o.total_score != null
-    ? clamp(o.total_score)
-    : Math.round((scores.accuracy + scores.logic + scores.expertise + scores.practicality + scores.evidence) / 5)
   const arr = (v: unknown): string[] => Array.isArray(v) ? v.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 10) : []
-  return {
-    total_score: total,
-    scores,
-    passed: false, // 合否は呼び出し側(runFoodCourtLoopEngineering)が閾値で再計算する（評価AIの自己申告を信用しない）
-    improvement_points: arr(o.improvement_points),
-    risk_flags: arr(o.risk_flags),
-    factuality_notes: arr(o.factuality_notes),
+
+  let parsed: unknown = null
+  try { parsed = JSON.parse(jsonText) } catch { parsed = null }
+  if (parsed && typeof parsed === 'object') {
+    const o = parsed as Record<string, unknown>
+    const scoresRaw = (o.scores && typeof o.scores === 'object') ? o.scores as Record<string, unknown> : {}
+    const scores = {
+      accuracy: clamp(scoresRaw.accuracy),
+      logic: clamp(scoresRaw.logic),
+      expertise: clamp(scoresRaw.expertise),
+      practicality: clamp(scoresRaw.practicality),
+      evidence: clamp(scoresRaw.evidence),
+    }
+    const total = o.total_score != null
+      ? clamp(o.total_score)
+      : Math.round((scores.accuracy + scores.logic + scores.expertise + scores.practicality + scores.evidence) / 5)
+    return {
+      total_score: total,
+      scores,
+      passed: false, // 合否は呼び出し側(runFoodCourtLoopEngineering)が閾値で再計算する（評価AIの自己申告を信用しない）
+      improvement_points: arr(o.improvement_points),
+      risk_flags: arr(o.risk_flags),
+      factuality_notes: arr(o.factuality_notes),
+    }
   }
+
+  // --- 途中切断フォールバック ---
+  // JSONとして閉じていなくても、"total_score":95 や "accuracy":90 のようなキー:数値ペアと、
+  // improvement_points 配列内の完成済み文字列だけを正規表現で拾う。5軸すべて取れた場合のみ採用
+  // （部分的すぎる救出は誤採点になるため破棄してnull＝evaluation_failed扱いに任せる）。
+  const num = (key: string): number | null => {
+    const m = cleaned.match(new RegExp(`"${key}"\\s*:\\s*(\\d+(?:\\.\\d+)?)`))
+    return m ? clamp(m[1]) : null
+  }
+  const accuracy = num('accuracy'), logic = num('logic'), expertise = num('expertise'),
+    practicality = num('practicality'), evidence = num('evidence')
+  if (accuracy == null || logic == null || expertise == null || practicality == null || evidence == null) return null
+  const scores = { accuracy, logic, expertise, practicality, evidence }
+  const total = num('total_score') ?? Math.round((accuracy + logic + expertise + practicality + evidence) / 5)
+  // improvement_points の完成済み要素だけ拾う（切れかけの最後の要素は含まれない）
+  const points: string[] = []
+  const arrMatch = cleaned.match(/"improvement_points"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+  if (arrMatch) {
+    for (const m of arrMatch[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+      const s = m[1].replace(/\\"/g, '"').trim()
+      if (s) points.push(s)
+      if (points.length >= 10) break
+    }
+  }
+  return { total_score: total, scores, passed: false, improvement_points: points, risk_flags: [], factuality_notes: [] }
 }
 
 // 統合回答を品質評価AIに採点させる。評価AI自身は回答を書き直さず、採点と改善点だけを返す。
@@ -928,6 +959,8 @@ async function evaluateFoodCourtAnswer(params: {
     '- 相関を因果と断定している',
     '- 売上日とレポート発行日を混同している',
     '- 抽象的な打ち手だけで終えている（KPIに落とし込めていない）',
+    // 出力が長いとトークン上限でJSONが途中で切れて採点不能になる。件数・文字数を厳しく制限して短いJSONに収めさせる。
+    '【出力長の厳守】improvement_points は最重要のものだけ最大3件・各60字以内。risk_flags は最大2件・各40字以内。factuality_notes は最大2件・各40字以内。それ以上書かない。',
     'JSONのみで返答すること。他の文章・前置き・コードフェンスは一切書かない。',
     '{"total_score":number,"scores":{"accuracy":number,"logic":number,"expertise":number,"practicality":number,"evidence":number},"improvement_points":string[],"risk_flags":string[],"factuality_notes":string[]}',
   ].join('\n')
