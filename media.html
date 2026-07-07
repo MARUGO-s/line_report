@@ -1418,7 +1418,7 @@
       if (!value) return '-';
       const d = new Date(value);
       if (Number.isNaN(d.getTime())) return '-';
-      return d.toLocaleString('ja-JP', { hour12: false });
+      return d.toLocaleString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' });
     }
 
     // 自動命名用の日付（年/月/日のみ・JST）。例: 2026/6/22
@@ -1426,7 +1426,7 @@
       if (!value) return '';
       const d = new Date(value);
       if (Number.isNaN(d.getTime())) return '';
-      return d.toLocaleDateString('ja-JP');
+      return d.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
     }
 
     function formatBytes(value) {
