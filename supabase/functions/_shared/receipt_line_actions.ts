@@ -70,6 +70,7 @@ export function buildReceiptAnalyticsDashboardUri(
     const withoutToken = `${ANALYTICS_BASE}?${new URLSearchParams({
       store_key: storePartitionKey,
       month: targetMonth,
+      from: 'line',
       v: ANALYTICS_APP_VERSION,
     }).toString()}`
     if (withoutToken.length <= LINE_MESSAGING_URI_MAX_LEN) return withoutToken

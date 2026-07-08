@@ -705,7 +705,7 @@ Deno.serve(async (req, info) => {
     // URLクエリの店舗キーをスコープへ強制(他店舗を明示要求していたら拒否)。
     for (const p of ["store", "store_key"]) {
       const requested = String(url.searchParams.get(p) ?? "").trim().toLowerCase()
-      if (requested && requested !== storeScope) {
+      if (requested && requested !== storeScope.toLowerCase()) {
         return json({ error: "他店舗のデータにはアクセスできません。" }, 403)
       }
       url.searchParams.set(p, storeScope)
@@ -726,7 +726,7 @@ Deno.serve(async (req, info) => {
           for (const p of ["store", "store_key", "store_partition_key"]) {
             if (p in bodyObj) {
               const v = String(bodyObj[p] ?? "").trim().toLowerCase()
-              if (v && v !== storeScope) {
+              if (v && v !== storeScope.toLowerCase()) {
                 return json({ error: "他店舗のデータにはアクセスできません。" }, 403)
               }
               bodyObj[p] = storeScope

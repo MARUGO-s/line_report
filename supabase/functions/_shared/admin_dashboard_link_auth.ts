@@ -255,7 +255,7 @@ export async function authenticateAdminDashboardSessionToken(
   }
   return {
     ok: true,
-    storeScope: storeRaw ? storeRaw.toLowerCase() : null,
+    storeScope: storeRaw || null,
     roomScope: null,
     scopeKind,
   }
