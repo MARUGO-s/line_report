@@ -12,6 +12,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "4521"],
       "port": 4521
+    },
+    {
+      "name": "line-report",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "/Users/yoshito/Desktop/🗜️ アーカイブ/旧アーカイブ/web"],
+      "port": 8765
     }
   ]
 }

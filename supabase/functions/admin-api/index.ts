@@ -323,12 +323,13 @@ const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
   "calendar_tomorrow_reminder_enabled", "calendar_ai_auto_create_enabled",
   "calendar_silent_auto_register_enabled", "calendar_low_confidence_confirm_reply_enabled",
   "calendar_registration_reply_enabled", "dome_weekly_enabled",
-  "review_alert_enabled",
+  "review_alert_enabled", "foodcourt_weekly_report_enabled",
 ]
 const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," +
   ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
   ",today_reservation_alert_hour,today_reservation_alert_minute" +
-  ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute"
+  ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute" +
+  ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute"
 
 function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -355,6 +356,19 @@ function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<strin
   if ("dome_weekly_minute" in body) {
     const v = Number(body.dome_weekly_minute)
     out.dome_weekly_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
+  }
+  // フードコート週次レポートの曜日・時刻（NULL許容＝既定 月曜1/9時/0分）
+  if ("foodcourt_weekly_dow" in body) {
+    const v = Number(body.foodcourt_weekly_dow)
+    out.foodcourt_weekly_dow = (Number.isInteger(v) && v >= 0 && v <= 6) ? v : null
+  }
+  if ("foodcourt_weekly_hour" in body) {
+    const v = Number(body.foodcourt_weekly_hour)
+    out.foodcourt_weekly_hour = (Number.isInteger(v) && v >= 0 && v <= 23) ? v : null
+  }
+  if ("foodcourt_weekly_minute" in body) {
+    const v = Number(body.foodcourt_weekly_minute)
+    out.foodcourt_weekly_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
   }
   return out
 }
@@ -1124,9 +1138,23 @@ Deno.serve(async (req, info) => {
       const viewingReportId = viewingReportIdRaw != null ? String(viewingReportIdRaw) : ""
       const viewingReport = viewingReportId ? reports.find((r) => String((r as { id?: unknown }).id ?? "") === viewingReportId) : null
       const viewingDate = viewingReport ? fcSalesDate(viewingReport) : null
-      // supabase + storeKey を渡すと、Q&Aの実測トークンを ai_usage_events に記録しAI使用料に合算する。
-      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate, dailyLogs)
-      return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
+      try {
+        const qaResult = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate, dailyLogs)
+        return json({
+          answer: qaResult.answer || "回答を生成できませんでした。もう一度お試しください。",
+          reportCount: reports.length,
+          loop_score: qaResult.loopScore,
+          loop_count: qaResult.loopCount,
+        }, 200)
+      } catch (e) {
+        console.error("foodcourt/ask error:", e)
+        return json({
+          answer: "⚠️ データの容量が大きい、または一時的な負荷のため、回答の生成に失敗しました。\n少し時間をおいてもう一度お試しいただくか、質問をもう少し短く・具体的にしてみてください。",
+          reportCount: reports.length,
+          loop_score: null,
+          loop_count: 0,
+        }, 200)
+      }
     }
     // 学習進化トラッキング: foodcourt_forecast_history の全行を返す（foodcourt-evolution.html 用）。
     if (req.method === "GET" && path === "/foodcourt/evolution-history") {

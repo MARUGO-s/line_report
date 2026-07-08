@@ -442,6 +442,91 @@
       .ms-nav-backdrop.open{display:block;}
       .phead{padding-top:58px;}      /* 固定ハンバーガーと見出しの重なりを避ける */
     }
+
+    /* AI分析進捗ポップアップ */
+    .ai-progress-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .ai-progress-overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .ai-progress-box {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 24px;
+      width: 420px;
+      max-width: 90vw;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transform: scale(0.9);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .ai-progress-overlay.show .ai-progress-box {
+      transform: scale(1);
+    }
+    .ai-progress-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--tx-1);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ai-progress-steps {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .ai-progress-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.88rem;
+      color: var(--tx-3);
+      transition: color 0.3s;
+    }
+    .ai-progress-step.active {
+      color: var(--tx-1);
+      font-weight: 700;
+    }
+    .ai-progress-step.done {
+      color: var(--ok);
+    }
+    .ai-progress-icon {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .ai-progress-icon .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--line);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: ai-spin 0.8s linear infinite;
+    }
+    @keyframes ai-spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -564,7 +649,13 @@
     <!-- OVERVIEW -->
     <section class="panel show" data-panel="overview">
       <div class="card">
-        <div class="card-h"><div class="card-t"><span class="em">📋</span>分析サマリー（自動）</div><span class="pill beta" id="aiStatusPill">試験版</span></div>
+        <div class="card-h">
+          <div class="card-t"><span class="em">📋</span>分析サマリー（自動）</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn secondary" id="summaryExportBtn" style="font-size:11px;padding:3px 8px;display:none" onclick="exportSummary()">📄 レポート出力</button>
+            <span class="pill beta" id="aiStatusPill">試験版</span>
+          </div>
+        </div>
         <div class="ai-grid" id="aiGrid"></div>
         <div class="card-note" id="aiNote"></div>
       </div>
@@ -770,6 +861,394 @@
   const isJp = e => !!(e && e.is_japan);
   const jpTag = e => isJp(e) ? '<span style="display:inline-block;font-size:10px;font-weight:800;color:#fff;background:#C0392B;border-radius:4px;padding:0 5px;margin-right:5px;vertical-align:middle">🇯🇵日本戦</span>' : '';
   const escapeHtml = (s)=> String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+
+  // レポート出力用の状態と関数
+  let currentSummaryText = '';
+  let currentSummaryPeriod = '';
+
+  function openReportWindow(title, rawContent) {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('ポップアップブロックが有効になっているため、レポートを開けませんでした。ポップアップの許可をお願いします。');
+      return;
+    }
+
+    const formattedContent = formatReportText(rawContent);
+    const storeName = STORE_NAMES[currentStore()] || currentStore();
+    const dateStr = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const html = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>AI分析レポート - ${escapeHtml(storeName)}</title>
+  <style>
+    :root {
+      --primary: #2C3E50;
+      --text: #2C3E50;
+      --bg: #FFFFFF;
+      --line: #E2E8F0;
+      --accent: #3498DB;
+    }
+    body {
+      font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.8;
+      margin: 0;
+      padding: 40px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .no-print-bar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 30px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 15px;
+    }
+    .btn-print {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      transition: opacity 0.2s;
+    }
+    .btn-print:hover {
+      opacity: 0.9;
+    }
+    .report-header {
+      margin-bottom: 40px;
+      border-bottom: 3px double var(--primary);
+      padding-bottom: 20px;
+    }
+    .report-title-meta {
+      font-size: 14px;
+      color: #7F8C8D;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .report-title {
+      font-size: 26px;
+      font-weight: bold;
+      color: var(--primary);
+      margin: 0 0 10px 0;
+    }
+    .report-subtitle {
+      font-size: 16px;
+      color: #555;
+      margin: 0;
+      font-weight: bold;
+    }
+    .report-body {
+      font-size: 16px;
+    }
+    .report-body p {
+      margin: 0 0 15px 0;
+    }
+    .report-body h2 {
+      font-size: 1.25rem;
+      border-left: 6px solid var(--primary);
+      padding-left: 12px;
+      margin: 35px 0 15px 0;
+      color: var(--primary);
+      font-weight: bold;
+    }
+    .report-body h3 {
+      font-size: 1.05rem;
+      margin: 25px 0 10px 0;
+      color: var(--primary);
+      font-weight: bold;
+    }
+    .report-body ul {
+      margin: 0 0 20px 0;
+      padding-left: 22px;
+    }
+    .report-body li {
+      margin-bottom: 8px;
+    }
+    .report-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 14px;
+    }
+    .report-body th {
+      padding: 10px 12px;
+      background: var(--primary);
+      color: #fff;
+      text-align: left;
+      font-weight: bold;
+      border: 1px solid var(--line);
+    }
+    .report-body td {
+      padding: 10px 12px;
+      text-align: left;
+      border: 1px solid var(--line);
+    }
+    .report-body tr:nth-child(even) {
+      background: #F8FAFC;
+    }
+    .report-footer {
+      margin-top: 60px;
+      border-top: 1px solid var(--line);
+      padding-top: 20px;
+      text-align: center;
+      font-size: 12px;
+      color: #95A5A6;
+    }
+    @media print {
+      body {
+        padding: 0;
+      }
+      .no-print-bar {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="no-print-bar">
+      <button class="btn-print" onclick="window.print()">
+        🖨️ PDFとして保存 / 印刷
+      </button>
+    </div>
+    
+    <header class="report-header">
+      <div class="report-title-meta">
+        <div>店舗: ${escapeHtml(storeName)}</div>
+        <div>出力日時: ${dateStr}</div>
+      </div>
+      <h1 class="report-title">AI分析レポート</h1>
+      <p class="report-subtitle">対象: ${escapeHtml(title)}</p>
+    </header>
+
+    <main class="report-body">
+      ${formattedContent}
+    </main>
+
+    <footer class="report-footer">
+      <p>© MARUGO S - AI Analysis Report System</p>
+    </footer>
+  </div>
+</body>
+</html>`;
+
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  }
+
+  function formatReportText(text) {
+    const lines = String(text || '').split('\n');
+    let html = '';
+    let listLevel = 0; // 0: no list, 1: ul, 2: nested ul
+    let inTable = false;
+    let isHeaderRow = false;
+
+    const closeLists = (targetLevel) => {
+      while (listLevel > targetLevel) {
+        html += '</ul>';
+        listLevel--;
+      }
+    };
+
+    const openListTo = (targetLevel) => {
+      while (listLevel < targetLevel) {
+        html += '<ul style="margin: 4px 0; padding-left: 20px;">';
+        listLevel++;
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // テーブル行の処理
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        closeLists(0);
+        const cells = trimmed.split('|').map(c => c.trim()).filter((c, idx, arr) => idx > 0 && idx < arr.length - 1);
+        
+        // ヘッダー区切り線はスキップ
+        if (cells.every(c => /^:?-+:?$/.test(c))) {
+          continue;
+        }
+
+        if (!inTable) {
+          html += '<table>';
+          inTable = true;
+          isHeaderRow = true;
+        }
+
+        html += '<tr>';
+        for (const cell of cells) {
+          if (isHeaderRow) {
+            html += `<th>${escapeHtml(cell)}</th>`;
+          } else {
+            html += `<td>${escapeHtml(cell)}</td>`;
+          }
+        }
+        html += '</tr>';
+        isHeaderRow = false;
+        continue;
+      } else {
+        if (inTable) {
+          html += '</table>';
+          inTable = false;
+        }
+      }
+
+      if (!trimmed) {
+        closeLists(0);
+        continue;
+      }
+
+      // 見出し判定
+      const hMatch = trimmed.match(/^【([^】]+)】$/) || trimmed.match(/^■\s*(.+)$/) || trimmed.match(/^###\s*(.+)$/);
+      if (hMatch) {
+        closeLists(0);
+        const headingText = hMatch[1];
+        html += `<h2>${escapeHtml(headingText)}</h2>`;
+        continue;
+      }
+
+      // セパレータ小見出し
+      if (trimmed.startsWith('ーー') || trimmed.startsWith('---')) {
+        closeLists(0);
+        html += `<div style="margin: 20px 0 15px 0; font-weight: bold; color: var(--primary); border-bottom: 1px solid var(--line); padding-bottom: 6px;">${escapeHtml(trimmed)}</div>`;
+        continue;
+      }
+
+      // 箇条書き
+      const leadingSpaces = line.match(/^\s*/)[0].length;
+      let targetListLevel = 0;
+      let cleanLine = trimmed;
+
+      const isBullet = trimmed.startsWith('-') || trimmed.startsWith('・') || trimmed.startsWith('*') || /^\d+[\).)]/.test(trimmed);
+      if (isBullet) {
+        targetListLevel = (leadingSpaces >= 2) ? 2 : 1;
+        cleanLine = trimmed.replace(/^[-・*]\s*/, '').replace(/^\d+[\).)]\s*/, '');
+      }
+
+      if (targetListLevel > 0) {
+        if (listLevel > targetListLevel) {
+          closeLists(targetListLevel);
+        } else if (listLevel < targetListLevel) {
+          openListTo(targetListLevel);
+        }
+        html += `<li style="margin-bottom: 6px;">${escapeHtml(cleanLine)}</li>`;
+      } else {
+        closeLists(0);
+        html += `<p style="margin: 0 0 12px 0;">${escapeHtml(trimmed)}</p>`;
+      }
+    }
+
+    closeLists(0);
+    if (inTable) {
+      html += '</table>';
+    }
+    return html;
+  }
+
+  window.exportSingleQa = function(idx) {
+    const assistantMsg = qaHistory[idx];
+    const userMsg = idx > 0 ? qaHistory[idx - 1] : null;
+    const question = userMsg ? userMsg.content : 'データへの質問';
+    const answer = assistantMsg ? assistantMsg.content : '';
+    openReportWindow('データに質問: ' + question, answer);
+  };
+
+  window.exportSummary = function() {
+    if (!currentSummaryText) {
+      alert('エクスポート可能な分析サマリーが存在しません。');
+      return;
+    }
+    openReportWindow(currentSummaryPeriod + ' の分析サマリー', currentSummaryText);
+  };
+
+  // AI分析進捗ポップアップの制御
+  let progressTimer = null;
+  let currentProgressSteps = [];
+  let currentStepIndex = 0;
+  let summaryProgressTimeout = null;
+
+  function showProgressPopup(title, steps) {
+    const overlay = $('aiProgressOverlay');
+    const titleEl = $('aiProgressTitleText');
+    if (!overlay) return;
+
+    titleEl.textContent = title;
+    currentProgressSteps = steps;
+    currentStepIndex = 0;
+
+    renderProgressSteps();
+
+    overlay.classList.add('show');
+    overlay.setAttribute('aria-hidden', 'false');
+
+    if (progressTimer) clearInterval(progressTimer);
+    progressTimer = setInterval(() => {
+      if (currentStepIndex < currentProgressSteps.length - 2) {
+        currentStepIndex++;
+        renderProgressSteps();
+      }
+    }, 2000); // 2秒ごとに推移
+  }
+
+  function renderProgressSteps() {
+    const container = $('aiProgressSteps');
+    if (!container) return;
+
+    container.innerHTML = currentProgressSteps.map((step, idx) => {
+      let statusClass = '';
+      let iconHtml = '';
+
+      if (idx < currentStepIndex) {
+        statusClass = 'done';
+        iconHtml = '✅';
+      } else if (idx === currentStepIndex) {
+        statusClass = 'active';
+        iconHtml = '<div class="spinner"></div>';
+      } else {
+        statusClass = '';
+        iconHtml = '⚪';
+      }
+
+      return '<div class="ai-progress-step ' + statusClass + '">'
+        + '<div class="ai-progress-icon">' + iconHtml + '</div>'
+        + '<div>' + escapeHtml(step) + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function hideProgressPopup() {
+    const overlay = $('aiProgressOverlay');
+    if (!overlay) return;
+
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+
+    currentStepIndex = currentProgressSteps.length - 1;
+    renderProgressSteps();
+
+    setTimeout(() => {
+      overlay.classList.remove('show');
+      overlay.setAttribute('aria-hidden', 'true');
+    }, 500);
+  }
   function catSlug(c){ return c==='プロ野球'?'pro':c==='アマ野球'?'ama':c==='ライブ'?'live':c==='スポーツ中継'?'sports':'other'; }
   function shorten(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
   function genreTag(category){ if(!category) return '<span class="neg">—</span>'; return '<span class="ld-g '+catSlug(category)+'">'+(EVT_ICON[category]||'🎫')+' '+escapeHtml(category)+'</span>'; }
@@ -838,7 +1317,18 @@
   // データに質問：会話履歴を保持し、前のやり取りを踏まえて返信させる。
   let qaHistory = [];
   function renderQaThread(thinking){
-    const parts = qaHistory.map(m => '<div class="'+(m.role==='user'?'qa-q':'qa-a')+'">'+escapeHtml(m.content)+'</div>');
+    const parts = qaHistory.map((m, idx) => {
+      if (m.role === 'user') {
+        return '<div class="qa-q">' + escapeHtml(m.content) + '</div>';
+      } else {
+        const scoreBadge = (m.score != null)
+          ? '<span class="qa-score-badge" title="AI自己採点（100点満点）">⭐ ' + m.score + '点</span>'
+          : '';
+        const exportBtn = `<button class="btn secondary" style="font-size:11px;padding:2px 6px;display:inline-flex;align-items:center;gap:3px;border-radius:4px" onclick="exportSingleQa(${idx})">📄 レポート出力</button>`;
+        const actionRow = `<div class="qa-score-row" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:8px">${scoreBadge || '<span></span>'}${exportBtn}</div>`;
+        return '<div class="qa-a">' + escapeHtml(m.content) + actionRow + '</div>';
+      }
+    });
     if (thinking) parts.push('<div class="qa-a qa-thinking">考え中…（蓄積データと直前の会話を参照しています）</div>');
     dom.qAnswer.innerHTML = parts.join('');
     dom.qAnswer.style.display = parts.length ? 'block' : 'none';
@@ -846,6 +1336,7 @@
     dom.qAnswer.scrollTop = dom.qAnswer.scrollHeight;
   }
   function clearQa(){ qaHistory = []; renderQaThread(false); dom.qInput.focus(); }
+
   async function askQuestion(q){
     const question = String(q!=null?q:(dom.qInput.value||'')).trim();
     if (!question){ dom.qInput.focus(); return; }
@@ -853,20 +1344,31 @@
     qaHistory.push({ role:'user', content:question });
     renderQaThread(true);
     dom.qBtn.disabled = true;
+
+    showProgressPopup('AIがデータ回答を作成中', [
+      '質問の文脈とこれまでの対話履歴を読み込んでいます...',
+      'フードコートの蓄積データをスキャンしています...',
+      '専門分析AI(売上・イベント・天候)が考察を作成しています...',
+      '統合AIが回答テキストを作成しています...',
+      '回答を表示します'
+    ]);
+
     try {
       const hist = qaHistory.slice(0, -1).slice(-8); // 直前までの会話（今回の質問は除く）最大8件
       // 画面に表示中の単日レポートIDを渡す。バックエンドはこれを「特に日付指定のない質問のデフォルト対象日」として使う
       // （渡さないと、AIは全履歴のどの日の話をしているか画面と無関係に決めてしまい、時間軸がずれる原因になる）。
       const viewingReportId = currentViewedReport && currentViewedReport.id != null ? currentViewedReport.id : null;
       const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist, viewing_report_id: viewingReportId });
-      qaHistory.push({ role:'assistant', content: b.answer || '(回答が空でした)' });
+      qaHistory.push({ role:'assistant', content: b.answer || '(回答が空でした)', score: b.loop_score != null ? b.loop_score : null });
     } catch(e){
       qaHistory.push({ role:'assistant', content: (e&&e.message) || '質問に失敗しました。' });
     } finally {
       dom.qBtn.disabled = false;
       renderQaThread(false);
+      hideProgressPopup();
     }
   }
+
   function renderSuggestions(){
     dom.qSuggest.innerHTML = SUGGESTED_Q.map(s=>'<button class="qchip">'+escapeHtml(s)+'</button>').join('');
     dom.qSuggest.querySelectorAll('.qchip').forEach(b=>b.addEventListener('click', ()=>{ dom.qInput.value=b.textContent; dom.qInput.focus(); }));
@@ -1393,7 +1895,11 @@
     });
     return secs;
   }
-  function paintAnalysisSecs(secs){
+  function paintAnalysisSecs(secs, rawText){
+    currentSummaryText = rawText || '';
+    const btn = $('summaryExportBtn');
+    if (btn) btn.style.display = currentSummaryText ? 'inline-block' : 'none';
+
     const note = secs.find(s=>s.title==='注意');
     const FULL = { '総評':1, '打ち手（試算）':1 };
     dom.aiGrid.innerHTML = secs.filter(s=>s.title!=='注意' && s.title!=='期間').map(s=>{
@@ -1412,8 +1918,9 @@
   // 統合AI・report_id単位でキャッシュ)を取得し、届いたら差し替える。期間集計モードやAI失敗時はテンプレのまま。
   let aiSummaryReq = 0;
   function renderAnalysisBlocks(report, seriesReports, periodLabel){
+    currentSummaryPeriod = periodLabel || (report ? (report.report_date || salesDateOf(report) || '') : '');
     const text = buildAnalysisText(report, seriesReports, periodLabel);
-    paintAnalysisSecs(parseAnalysis(text));
+    paintAnalysisSecs(parseAnalysis(text), text);
     if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
     const reqId = ++aiSummaryReq;
     const applyAiResult = (body) => {
@@ -1421,25 +1928,66 @@
       if (!body || !body.summary) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
       const aiSecs = parseAnalysis(body.summary);
       if (!aiSecs.length) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
-      paintAnalysisSecs(aiSecs);
+      paintAnalysisSecs(aiSecs, body.summary);
       if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成';
     };
     const applyAiFailure = () => { if (reqId === aiSummaryReq && dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; };
+
+    if (summaryProgressTimeout) clearTimeout(summaryProgressTimeout);
+
     if (periodLabel) {
       // 「期間で見る」モード：単一のreport_idが無いため、店舗+開始日+終了日でキャッシュする専用エンドポイントを使う。
       const m = /^(\d{4}-\d{2}-\d{2})〜(\d{4}-\d{2}-\d{2})$/.exec(periodLabel);
       if (!m) return;
       if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成中…';
+
+      summaryProgressTimeout = setTimeout(() => {
+        showProgressPopup('AI分析サマリーを作成中', [
+          '指定された期間の売上データを集計しています...',
+          '期間中の天気情報と東京ドームのイベントを照合しています...',
+          '専門分析AIが曜日・ドーム対戦成績などの相関を確認しています...',
+          '統合AIがレポートサマリーを取りまとめています...',
+          '分析サマリーを表示します'
+        ]);
+      }, 500);
+
       apiFetch('/foodcourt/period-summary?store_key='+encodeURIComponent(currentStore())+'&start='+encodeURIComponent(m[1])+'&end='+encodeURIComponent(m[2]))
-        .then(applyAiResult)
-        .catch(applyAiFailure);
+        .then((body) => {
+          clearTimeout(summaryProgressTimeout);
+          hideProgressPopup();
+          applyAiResult(body);
+        })
+        .catch((err) => {
+          clearTimeout(summaryProgressTimeout);
+          hideProgressPopup();
+          applyAiFailure(err);
+        });
       return;
     }
     if (!report || report.id == null) return;
     if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成中…';
+
+    summaryProgressTimeout = setTimeout(() => {
+      showProgressPopup('AI分析サマリーを作成中', [
+        '対象日の売上データを集計しています...',
+        '当日の天気情報と東京ドームのイベントを照合しています...',
+        '専門分析AIが曜日・ドーム対戦成績などの相関を確認しています...',
+        '統合AIがレポートサマリーを取りまとめています...',
+        '分析サマリーを表示します'
+      ]);
+    }, 500);
+
     apiFetch('/foodcourt/daily-summary?store_key='+encodeURIComponent(currentStore())+'&report_id='+encodeURIComponent(report.id))
-      .then(applyAiResult)
-      .catch(applyAiFailure);
+      .then((body) => {
+        clearTimeout(summaryProgressTimeout);
+        hideProgressPopup();
+        applyAiResult(body);
+      })
+      .catch((err) => {
+        clearTimeout(summaryProgressTimeout);
+        hideProgressPopup();
+        applyAiFailure(err);
+      });
   }
 
   // ===== render: ranking / share / price / dist / classification =====
@@ -2003,5 +2551,11 @@
     document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setOpen(false); });
   })();
 </script>
+  <div id="aiProgressOverlay" class="ai-progress-overlay" aria-hidden="true">
+    <div class="ai-progress-box">
+      <div class="ai-progress-title">🤖 <span id="aiProgressTitleText">AI分析中</span></div>
+      <div id="aiProgressSteps" class="ai-progress-steps"></div>
+    </div>
+  </div>
 </body>
 </html>

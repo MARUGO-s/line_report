@@ -611,6 +611,15 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+function formatExcerpt(text) {
+  if (!text) return '';
+  const parts = text.split(/\s*[\/\uFF0F]\s*/).map(p => p.trim()).filter(Boolean);
+  if (!parts.length) return '';
+  return `<div class="competitor-excerpt" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">` +
+    parts.map(p => `<div class="excerpt-item" style="line-height:1.55; font-size:0.82rem; color:var(--text-2); background:var(--surface-2); padding:8px 12px; border-radius:8px; border-left:3px solid var(--accent);">${escapeHtml(p)}</div>`).join('') +
+    `</div>`;
+}
+
 function num(v) { return v == null ? '-' : Number(v).toLocaleString('ja-JP'); }
 
 function pressureLabel(level) {
@@ -729,7 +738,7 @@ function renderStoreReviewContext(ctx) {
   const updated = latest.updated_at ? `更新 ${escapeHtml(new Date(latest.updated_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }))}` : '未更新';
   const maps = place.google_maps_uri ? ` · <a href="${escapeHtml(place.google_maps_uri)}" target="_blank" rel="noopener noreferrer">Google Maps</a>` : '';
   const website = place.website_uri ? ` · <a href="${escapeHtml(place.website_uri)}" target="_blank" rel="noopener noreferrer">公式サイト</a>` : '';
-  const excerpt = latest.review_excerpt ? `<div class="competitor-excerpt">${escapeHtml(latest.review_excerpt)}</div>` : '';
+  const excerpt = formatExcerpt(latest.review_excerpt);
   dom.storeReviewList.innerHTML = `
     <div class="competitor-row">
       <div>
@@ -960,7 +969,7 @@ function renderCompetitorContext(ctx) {
     const updated = latest.updated_at ? `更新 ${escapeHtml(new Date(latest.updated_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }))}` : '未更新';
     const maps = c.google_maps_uri ? ` · <a href="${escapeHtml(c.google_maps_uri)}" target="_blank" rel="noopener noreferrer">Google Maps</a>` : '';
     const place = c.place_id ? `Place ID: ${escapeHtml(String(c.place_id).slice(0, 18))}…` : 'Place ID 未設定';
-    const excerpt = latest.review_excerpt ? `<div class="competitor-excerpt">${escapeHtml(latest.review_excerpt)}</div>` : '';
+    const excerpt = formatExcerpt(latest.review_excerpt);
     return `
       <div class="competitor-row" data-competitor-id="${escapeHtml(c.id)}">
         <div>
