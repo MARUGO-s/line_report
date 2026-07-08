@@ -678,6 +678,7 @@ Deno.serve(async (req, info) => {
       "/foodcourt/dome-weekly",
       "/foodcourt/evolution-history",
       "/foodcourt/ai-loop-runs",
+      "/foodcourt/daily-logs",
       "/foodcourt/events/attendance",
       "/analytics/holidays",
       "/analytics/monthly",
@@ -1205,6 +1206,71 @@ Deno.serve(async (req, info) => {
       if (!data) return json({ error: "event not found." }, 404)
       return json({ ok: true, event: data }, 200)
     }
+    // フードコート日報 CRUD ────────────────────────────────────────────────
+    if (req.method === "GET" && path === "/foodcourt/daily-logs") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const from = String(url.searchParams.get("from") ?? "").slice(0, 10)
+      const to = String(url.searchParams.get("to") ?? "").slice(0, 10)
+      const limit = Math.min(parseInt(String(url.searchParams.get("limit") ?? "90")), 366)
+      let q = supabase
+        .from("foodcourt_daily_logs")
+        .select("id, log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, issues, next_actions, memo, created_at, updated_at")
+        .ilike("store_partition_key", storeKey)
+        .order("log_date", { ascending: false })
+        .limit(limit)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(from)) q = q.gte("log_date", from)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(to)) q = q.lte("log_date", to)
+      const { data, error } = await q
+      if (error) return json({ error: error.message }, 500)
+      return json({ logs: data ?? [] }, 200)
+    }
+
+    if (req.method === "PUT" && path === "/foodcourt/daily-logs") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) return json({ error: "Invalid JSON body." }, 400)
+      const storeKey = String(body.store_key ?? body.store ?? url.searchParams.get("store_key") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const logDate = String(body.log_date ?? "").slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(logDate)) return json({ error: "log_date (YYYY-MM-DD) is required." }, 400)
+      const actions = Array.isArray(body.actions) ? body.actions : []
+      const now = new Date().toISOString()
+      const { data, error } = await supabase
+        .from("foodcourt_daily_logs")
+        .upsert({
+          store_partition_key: storeKey,
+          log_date: logDate,
+          handler: String(body.handler ?? "").slice(0, 100) || null,
+          actions,
+          guest_impact: String(body.guest_impact ?? "").slice(0, 2000) || null,
+          sales_impact: String(body.sales_impact ?? "").slice(0, 2000) || null,
+          weather_note: String(body.weather_note ?? "").slice(0, 500) || null,
+          event_note: String(body.event_note ?? "").slice(0, 500) || null,
+          issues: String(body.issues ?? "").slice(0, 2000) || null,
+          next_actions: String(body.next_actions ?? "").slice(0, 2000) || null,
+          memo: String(body.memo ?? "").slice(0, 3000) || null,
+          updated_at: now,
+        }, { onConflict: "store_partition_key,log_date" })
+        .select("id, log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, issues, next_actions, memo, created_at, updated_at")
+        .single()
+      if (error) return json({ error: error.message }, 500)
+      return json({ ok: true, log: data }, 200)
+    }
+
+    if (req.method === "DELETE" && path === "/foodcourt/daily-logs") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      const logDate = String(url.searchParams.get("log_date") ?? "").slice(0, 10)
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(logDate)) return json({ error: "log_date is required." }, 400)
+      const { error } = await supabase
+        .from("foodcourt_daily_logs")
+        .delete()
+        .ilike("store_partition_key", storeKey)
+        .eq("log_date", logDate)
+      if (error) return json({ error: error.message }, 500)
+      return json({ ok: true }, 200)
+    }
+
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {
       const result = await createPettyCashEntryFromReceiptImage(supabase, workReq, storeScope)
       return json(result, 200)

@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <script>
+    (function () {
+      try {
+        var host = String(window.location.hostname || '');
+        var isLocal = host === '127.0.0.1' || host === 'localhost';
+        if (isLocal && window.location.protocol === 'https:') {
+          window.location.replace('http://' + window.location.host + window.location.pathname + window.location.search + window.location.hash);
+          return;
+        }
+        if (isLocal && window.location.protocol === 'http:' && !/\/line_report[\-\/]/.test(window.location.pathname)) {
+          var port = window.location.port || '8765';
+          window.location.replace('http://127.0.0.1:' + port + '/line_report/foodcourt-report.html' + window.location.search + window.location.hash);
+          return;
+        }
+        if (window.location.protocol !== 'file:') return;
+        var next = 'http://127.0.0.1:8765/line_report/foodcourt-report.html' + (window.location.search || '') + (window.location.hash || '');
+        window.location.replace(next);
+      } catch (_) {}
+    })();
+  </script>
+  <base href="/line_report/">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+  <meta name="theme-color" content="#15171d">
+  <title>フードコート 日報</title>
+  <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
+  <style>
+    :root {
+      --bg:        oklch(0.16 0.014 256);
+      --bg2:       oklch(0.135 0.012 256);
+      --surface:   oklch(0.215 0.017 258);
+      --surface2:  oklch(0.255 0.019 258);
+      --hover:     oklch(0.29 0.021 258);
+      --line:      oklch(1 0 0 / 0.08);
+      --tx-1:      oklch(0.97 0 0);
+      --tx-2:      oklch(0.75 0.012 258);
+      --tx-3:      oklch(0.57 0.014 258);
+      --accent:    oklch(0.62 0.17 256);
+      --accent-tx: oklch(0.76 0.13 256);
+      --accent-soft: oklch(0.62 0.17 256 / 0.16);
+      --good:      oklch(0.74 0.15 158);
+      --good-soft: oklch(0.74 0.15 158 / 0.16);
+      --bad:       oklch(0.68 0.16 25);
+      --bad-soft:  oklch(0.68 0.16 25 / 0.15);
+      --warn-tx:   oklch(0.82 0.13 75);
+      --warn-soft: oklch(0.78 0.13 75 / 0.15);
+      --orange:    oklch(0.72 0.16 50);
+      --orange-soft: oklch(0.72 0.16 50 / 0.15);
+      color-scheme: dark;
+    }
+    body[data-theme='light'] {
+      color-scheme: light;
+      --bg:        oklch(0.95 0.005 256);
+      --bg2:       oklch(0.98 0.004 256);
+      --surface:   oklch(1 0 0);
+      --surface2:  oklch(0.965 0.004 256);
+      --hover:     oklch(0.93 0.006 256);
+      --line:      oklch(0 0 0 / 0.10);
+      --tx-1:      oklch(0.15 0.012 258);
+      --tx-2:      oklch(0.38 0.012 258);
+      --tx-3:      oklch(0.55 0.012 258);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--tx-1); font-family: system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.55; min-height: 100dvh; }
+
+    /* ─── Header ─── */
+    .hdr { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg2); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 50; }
+    .hdr-title { font-size: 15px; font-weight: 700; color: var(--tx-1); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hdr-title small { font-weight: 400; font-size: 11px; color: var(--tx-3); margin-left: 6px; }
+    .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; background: var(--surface2); color: var(--tx-3); }
+    .pill.live { background: var(--good-soft); color: var(--good); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .icon-btn { background: none; border: none; cursor: pointer; padding: 5px; border-radius: 6px; color: var(--tx-2); font-size: 16px; line-height: 1; }
+    .icon-btn:hover { background: var(--hover); color: var(--tx-1); }
+
+    /* ─── Nav tabs ─── */
+    .page-nav { display: flex; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg2); overflow-x: auto; }
+    .nav-tab { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--tx-2); background: none; border: none; cursor: pointer; white-space: nowrap; }
+    .nav-tab:hover { background: var(--hover); color: var(--tx-1); }
+    .nav-tab.active { background: var(--accent-soft); color: var(--accent-tx); }
+
+    /* ─── Auth card ─── */
+    .auth-card { max-width: 420px; margin: 32px auto; padding: 24px; background: var(--surface); border-radius: 12px; border: 1px solid var(--line); }
+    .auth-card h2 { font-size: 15px; margin-bottom: 12px; color: var(--tx-1); }
+    .auth-input { width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; color: var(--tx-1); font-size: 13px; }
+    .auth-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { filter: brightness(1.15); }
+    .btn-ghost { background: var(--surface2); color: var(--tx-2); }
+    .btn-ghost:hover { background: var(--hover); color: var(--tx-1); }
+    .btn-danger { background: var(--bad-soft); color: var(--bad); }
+    .btn-danger:hover { background: var(--bad); color: #fff; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .auth-msg { font-size: 12px; color: var(--bad); margin-top: 6px; }
+
+    /* ─── Main layout ─── */
+    .main-wrap { display: grid; grid-template-columns: 300px 1fr; gap: 0; height: calc(100dvh - 96px); overflow: hidden; }
+    @media (max-width: 760px) { .main-wrap { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; } }
+
+    /* ─── Left: Calendar panel ─── */
+    .cal-panel { border-right: 1px solid var(--line); overflow-y: auto; padding: 16px 12px; background: var(--bg2); }
+    .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .cal-nav-btn { background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px; color: var(--tx-2); font-size: 14px; }
+    .cal-nav-btn:hover { background: var(--hover); color: var(--tx-1); }
+    .cal-month-lbl { font-size: 14px; font-weight: 700; color: var(--tx-1); }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .cal-dow { text-align: center; font-size: 10px; font-weight: 700; color: var(--tx-3); padding: 3px 0 5px; }
+    .cal-dow:first-child { color: var(--bad); }
+    .cal-dow:last-child { color: var(--accent); }
+    .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 6px; font-size: 12px; cursor: pointer; position: relative; border: none; background: none; color: var(--tx-2); }
+    .cal-cell:hover { background: var(--hover); color: var(--tx-1); }
+    .cal-cell.empty { cursor: default; }
+    .cal-cell.today { color: var(--accent-tx); font-weight: 700; }
+    .cal-cell.selected { background: var(--accent); color: #fff; }
+    .cal-cell.selected:hover { filter: brightness(1.1); }
+    .cal-cell.has-log::after { content: ''; position: absolute; bottom: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--good); }
+    .cal-cell.selected.has-log::after { background: #fff; }
+    .cal-cell.has-log.selected::after { background: rgba(255,255,255,0.85); }
+    .cal-cell.sun { color: var(--bad); }
+    .cal-cell.sat { color: var(--accent); }
+    .cal-cell.other-month { opacity: 0.3; }
+
+    /* 最近の日報リスト（左カラム下部）*/
+    .recent-hdr { font-size: 11px; font-weight: 700; color: var(--tx-3); text-transform: uppercase; letter-spacing: .06em; padding: 14px 2px 6px; }
+    .recent-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 6px; border-radius: 7px; cursor: pointer; }
+    .recent-item:hover { background: var(--hover); }
+    .recent-item.active { background: var(--accent-soft); }
+    .recent-date { font-size: 11px; font-weight: 700; color: var(--accent-tx); white-space: nowrap; line-height: 1.3; }
+    .recent-preview { font-size: 11px; color: var(--tx-2); line-height: 1.4; flex: 1; overflow: hidden; }
+    .recent-preview b { color: var(--tx-1); }
+
+    /* ─── Right: Entry panel ─── */
+    .entry-panel { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ─── Date header / KPI strip ─── */
+    .date-hdr { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .date-hdr-title { font-size: 18px; font-weight: 800; color: var(--tx-1); }
+    .date-hdr-wday { font-size: 13px; color: var(--tx-2); }
+    .kpi-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+    .kpi-chip { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 90px; }
+    .kpi-chip-lbl { font-size: 10px; font-weight: 700; color: var(--tx-3); text-transform: uppercase; letter-spacing: .05em; }
+    .kpi-chip-val { font-size: 18px; font-weight: 800; color: var(--tx-1); line-height: 1.2; }
+    .kpi-chip-val.good { color: var(--good); }
+    .kpi-chip-val.bad { color: var(--bad); }
+    .kpi-chip-sub { font-size: 10px; color: var(--tx-3); margin-top: 1px; }
+
+    /* ─── Events / weather pills ─── */
+    .ctx-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+    .ctx-pill { font-size: 11px; padding: 3px 9px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
+    .ctx-pill.event { background: var(--accent-soft); color: var(--accent-tx); }
+    .ctx-pill.weather { background: var(--warn-soft); color: var(--warn-tx); }
+    .ctx-pill.dome { background: var(--orange-soft); color: var(--orange); }
+
+    /* ─── Form sections ─── */
+    .section { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+    .section-title { font-size: 12px; font-weight: 700; color: var(--tx-3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+    .section-icon { font-size: 14px; }
+
+    /* Actions builder */
+    .action-list { display: flex; flex-direction: column; gap: 6px; }
+    .action-row { display: flex; align-items: flex-start; gap: 6px; }
+    .action-cat { flex-shrink: 0; padding: 6px 8px; background: var(--bg2); border: 1px solid var(--line); border-radius: 7px; font-size: 11px; color: var(--tx-1); cursor: pointer; appearance: none; min-width: 110px; }
+    .action-cat:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .action-text { flex: 1; padding: 6px 9px; background: var(--bg2); border: 1px solid var(--line); border-radius: 7px; font-size: 12px; color: var(--tx-1); resize: none; min-height: 34px; font-family: inherit; }
+    .action-text:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .action-del { flex-shrink: 0; background: none; border: none; cursor: pointer; color: var(--tx-3); font-size: 16px; padding: 5px; border-radius: 5px; line-height: 1; }
+    .action-del:hover { background: var(--bad-soft); color: var(--bad); }
+    .add-action-btn { display: flex; align-items: center; gap: 5px; padding: 6px 10px; background: none; border: 1px dashed var(--line); border-radius: 7px; font-size: 12px; color: var(--tx-3); cursor: pointer; width: 100%; justify-content: center; margin-top: 2px; }
+    .add-action-btn:hover { border-color: var(--accent); color: var(--accent-tx); background: var(--accent-soft); }
+
+    /* Textarea fields */
+    .field-label { font-size: 11px; font-weight: 700; color: var(--tx-3); margin-bottom: 5px; display: block; }
+    .field-textarea { width: 100%; padding: 8px 10px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; color: var(--tx-1); font-size: 12px; resize: vertical; font-family: inherit; min-height: 60px; }
+    .field-textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .field-input { width: 100%; padding: 7px 10px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; color: var(--tx-1); font-size: 12px; font-family: inherit; }
+    .field-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .field-group { display: flex; flex-direction: column; gap: 4px; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 500px) { .two-col { grid-template-columns: 1fr; } }
+
+    /* ─── Save bar ─── */
+    .save-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .save-msg { font-size: 12px; color: var(--good); flex: 1; }
+    .save-msg.err { color: var(--bad); }
+
+    /* ─── Empty state ─── */
+    .empty-hint { text-align: center; padding: 48px 20px; color: var(--tx-3); font-size: 13px; }
+    .empty-hint p { margin-top: 6px; font-size: 12px; }
+
+    /* ─── Cat badge ─── */
+    .cat-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+    .cat-promotion { background: var(--accent-soft); color: var(--accent-tx); }
+    .cat-menu      { background: var(--warn-soft); color: var(--warn-tx); }
+    .cat-service   { background: var(--good-soft); color: var(--good); }
+    .cat-environment { background: oklch(0.65 0.12 290 / 0.18); color: oklch(0.78 0.12 290); }
+    .cat-staff     { background: var(--orange-soft); color: var(--orange); }
+    .cat-other     { background: var(--surface2); color: var(--tx-2); }
+
+    /* ─── History tab ─── */
+    .history-wrap { padding: 16px; }
+    .history-search { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+    .history-search input { flex: 1; min-width: 140px; padding: 7px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: var(--tx-1); font-size: 12px; }
+    .history-search input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .log-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; cursor: pointer; }
+    .log-card:hover { border-color: var(--accent); }
+    .log-card + .log-card { margin-top: 10px; }
+    .log-card-hdr { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+    .log-card-date { font-size: 14px; font-weight: 800; color: var(--tx-1); }
+    .log-card-handler { font-size: 11px; color: var(--tx-3); }
+    .log-card-kpis { display: flex; gap: 10px; flex-wrap: wrap; }
+    .log-card-kpi { font-size: 11px; color: var(--tx-2); }
+    .log-card-kpi b { color: var(--tx-1); }
+    .log-card-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+    .log-card-action { font-size: 11px; padding: 2px 8px; border-radius: 5px; background: var(--surface2); color: var(--tx-2); }
+    .log-card-texts { font-size: 12px; color: var(--tx-2); margin-top: 8px; line-height: 1.5; }
+    .log-card-texts b { color: var(--accent-tx); }
+    .no-results { text-align: center; padding: 32px; color: var(--tx-3); font-size: 13px; }
+
+    /* ─── Loading spinner ─── */
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<header class="hdr">
+  <span class="hdr-title">📋 フードコート 日報<small>MARUGO S</small></span>
+  <span class="pill" id="authBadge">未接続</span>
+  <button class="icon-btn" id="themeBtn" title="テーマ切替">🌗</button>
+</header>
+
+<nav class="page-nav">
+  <button class="nav-tab active" id="tabEntry" onclick="switchTab('entry')">✏️ 入力</button>
+  <button class="nav-tab" id="tabHistory" onclick="switchTab('history')">📚 履歴一覧</button>
+  <a class="nav-tab" href="foodcourt.html" style="text-decoration:none">📊 売上分析</a>
+</nav>
+
+<div id="authCardWrap">
+  <div class="auth-card">
+    <h2>管理トークンでログイン</h2>
+    <input id="tokenInput" class="auth-input" type="password" placeholder="lrst_ セッションまたは管理トークン">
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn btn-primary" id="loginBtn">ログイン</button>
+    </div>
+    <div class="auth-msg" id="authMsg"></div>
+  </div>
+</div>
+
+<!-- ===== Entry tab ===== -->
+<div id="entryTab" class="hidden">
+  <div class="main-wrap">
+
+    <!-- Left: calendar -->
+    <aside class="cal-panel">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" id="calPrev">‹</button>
+        <span class="cal-month-lbl" id="calMonthLbl"></span>
+        <button class="cal-nav-btn" id="calNext">›</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+
+      <div class="recent-hdr">最近の日報</div>
+      <div id="recentList"></div>
+    </aside>
+
+    <!-- Right: form -->
+    <section class="entry-panel" id="entryPanel">
+      <div class="empty-hint" id="emptyHint">
+        ← カレンダーから日付を選んでください
+        <p>日報のある日は緑のドットで表示されます</p>
+      </div>
+
+      <div id="formWrap" class="hidden">
+        <!-- Date header -->
+        <div class="date-hdr">
+          <span class="date-hdr-title" id="formDateLbl"></span>
+          <span class="date-hdr-wday" id="formWdayLbl"></span>
+        </div>
+
+        <!-- KPI strip (from sales data) -->
+        <div class="kpi-strip" id="kpiStrip"></div>
+
+        <!-- Context pills (events / weather) -->
+        <div class="ctx-pills" id="ctxPills"></div>
+
+        <!-- 担当者 -->
+        <div class="section">
+          <div class="section-title"><span class="section-icon">👤</span>担当者</div>
+          <div class="field-group">
+            <input class="field-input" id="fHandler" placeholder="担当者名（例: 田中）" maxlength="50">
+          </div>
+        </div>
+
+        <!-- やったこと -->
+        <div class="section">
+          <div class="section-title"><span class="section-icon">🎯</span>施策・取り組み</div>
+          <div class="action-list" id="actionList"></div>
+          <button class="add-action-btn" id="addActionBtn">＋ 施策を追加</button>
+        </div>
+
+        <!-- 客数・売上への影響 -->
+        <div class="section">
+          <div class="section-title"><span class="section-icon">📈</span>結果・考察</div>
+          <div class="two-col">
+            <div class="field-group">
+              <label class="field-label">👥 客数への影響</label>
+              <textarea class="field-textarea" id="fGuestImpact" placeholder="例: 呼び込みで通常比＋15%、ランチ12時台に集中" rows="3"></textarea>
+            </div>
+            <div class="field-group">
+              <label class="field-label">💴 売上への影響</label>
+              <textarea class="field-textarea" id="fSalesImpact" placeholder="例: おすすめ提案でセット率が上がり客単価向上" rows="3"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- コンテキスト -->
+        <div class="section">
+          <div class="section-title"><span class="section-icon">🌤</span>背景・コンテキスト</div>
+          <div class="two-col">
+            <div class="field-group">
+              <label class="field-label">天気・気候メモ</label>
+              <input class="field-input" id="fWeatherNote" placeholder="例: 夕方から雨、蒸し暑い" maxlength="200">
+            </div>
+            <div class="field-group">
+              <label class="field-label">イベント・特記</label>
+              <input class="field-input" id="fEventNote" placeholder="例: 東京ドームで巨人戦 4万人" maxlength="200">
+            </div>
+          </div>
+        </div>
+
+        <!-- 課題・申し送り -->
+        <div class="section">
+          <div class="section-title"><span class="section-icon">📝</span>課題・申し送り</div>
+          <div class="two-col">
+            <div class="field-group">
+              <label class="field-label">課題・問題点</label>
+              <textarea class="field-textarea" id="fIssues" placeholder="例: 13時台にレジ渋滞が発生" rows="3"></textarea>
+            </div>
+            <div class="field-group">
+              <label class="field-label">翌日への申し送り</label>
+              <textarea class="field-textarea" id="fNextActions" placeholder="例: 仕込み量を1.2倍に増やす" rows="3"></textarea>
+            </div>
+          </div>
+          <div class="field-group" style="margin-top:10px">
+            <label class="field-label">自由記述・メモ</label>
+            <textarea class="field-textarea" id="fMemo" placeholder="その他、気づいたことを自由に記載" rows="3"></textarea>
+          </div>
+        </div>
+
+        <!-- Save bar -->
+        <div class="save-bar">
+          <button class="btn btn-primary" id="saveBtn">💾 保存</button>
+          <button class="btn btn-danger" id="deleteBtn" style="display:none">🗑 削除</button>
+          <span class="save-msg" id="saveMsg"></span>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ===== History tab ===== -->
+<div id="historyTab" class="hidden">
+  <div class="history-wrap">
+    <div class="history-search">
+      <input id="historySearch" placeholder="キーワード検索（施策内容・メモ等）" oninput="renderHistory()">
+      <select id="historyMonthFilter" onchange="renderHistory()" style="padding:7px 10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;color:var(--tx-1);font-size:12px;">
+        <option value="">すべての月</option>
+      </select>
+    </div>
+    <div id="historyList"></div>
+  </div>
+</div>
+
+<script src="pages-config.js?v=20260622"></script>
+<script src="auth-session.js?v=20260624"></script>
+<script>
+'use strict';
+(function () {
+  const PAGES = window.LINE_REPORT_PAGES;
+  const AUTH  = window.LINE_REPORT_AUTH;
+  const STORE = 'marugoS';
+
+  const $ = id => document.getElementById(id);
+
+  // ─── helpers ───────────────────────────────────────────────────────────────
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const nf = new Intl.NumberFormat('ja-JP');
+  const yen = v => '¥' + nf.format(Math.round(Number(v) || 0));
+  const ymd2label = d => { const [y,m,dd] = String(d||'').split('-'); return `${+m}月${+dd}日`; };
+  const WDAYS = ['日','月','火','水','木','金','土'];
+  function wdayOf(ymd) {
+    if (!ymd) return '';
+    const d = new Date(ymd + 'T12:00:00+09:00');
+    return isNaN(d.getTime()) ? '' : WDAYS[d.getDay()];
+  }
+  function todayJst() {
+    const d = new Date(Date.now() + 9 * 3600_000);
+    return d.toISOString().slice(0, 10);
+  }
+  function addMonths(ym, n) {
+    let [y, m] = ym.split('-').map(Number);
+    m += n;
+    while (m > 12) { m -= 12; y++; }
+    while (m < 1)  { m += 12; y--; }
+    return `${y}-${String(m).padStart(2,'0')}`;
+  }
+
+  // ─── state ──────────────────────────────────────────────────────────────────
+  let logs = [];             // { id, log_date, handler, actions, guest_impact, sales_impact, ... }
+  let salesByDate = new Map(); // 'YYYY-MM-DD' -> { guests, sales, sales_gross }
+  let eventsByDate = new Map();
+  let weatherByDate = new Map();
+  let calYM = todayJst().slice(0, 7);  // 'YYYY-MM'
+  let selectedDate = '';
+  let savingOrDeleting = false;
+  let currentTab = 'entry';
+
+  // ─── auth ───────────────────────────────────────────────────────────────────
+  function getToken() { try { return AUTH ? AUTH.getToken() : ''; } catch(_) { return ''; } }
+
+  function setAuthBadge(ok) {
+    const b = $('authBadge');
+    b.innerHTML = ok ? '<span class="dot"></span>接続済み' : '未接続';
+    b.className = 'pill' + (ok ? ' live' : '');
+    $('authCardWrap').classList.toggle('hidden', ok);
+    $('entryTab').classList.toggle('hidden', !ok || currentTab !== 'entry');
+    $('historyTab').classList.toggle('hidden', !ok || currentTab !== 'history');
+  }
+
+  $('loginBtn').addEventListener('click', async () => {
+    const t = $('tokenInput').value.trim();
+    if (!t) return;
+    $('authMsg').textContent = '';
+    try {
+      await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
+      setAuthBadge(true);
+      await loadAll();
+    } catch(e) {
+      $('authMsg').textContent = e.message || String(e);
+    }
+  });
+  $('tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+  // ─── theme ──────────────────────────────────────────────────────────────────
+  (function initTheme() {
+    const saved = (() => { try { return localStorage.getItem('fc_report_theme') || ''; } catch(_) { return ''; } })();
+    document.body.setAttribute('data-theme', saved === 'light' ? 'light' : 'dark');
+  })();
+  $('themeBtn').addEventListener('click', () => {
+    const next = document.body.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    document.body.setAttribute('data-theme', next);
+    try { localStorage.setItem('fc_report_theme', next); } catch(_) {}
+  });
+
+  // ─── tab ────────────────────────────────────────────────────────────────────
+  window.switchTab = function(tab) {
+    currentTab = tab;
+    $('tabEntry').classList.toggle('active', tab === 'entry');
+    $('tabHistory').classList.toggle('active', tab === 'history');
+    const authed = !!getToken();
+    $('entryTab').classList.toggle('hidden', !authed || tab !== 'entry');
+    $('historyTab').classList.toggle('hidden', !authed || tab !== 'history');
+    if (tab === 'history') renderHistory();
+  };
+
+  // ─── API ────────────────────────────────────────────────────────────────────
+  async function apiFetch(path) {
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try { res = await fetch(url, { headers: { 'x-admin-token': getToken() } }); }
+    catch(_) { throw new Error('通信に失敗しました。'); }
+    if (res.status === 401 || res.status === 403) { setAuthBadge(false); throw new Error('認証エラー'); }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.error) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  }
+  async function apiPut(path, payload) {
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try { res = await fetch(url, { method: 'PUT', headers: { 'x-admin-token': getToken(), 'content-type': 'application/json' }, body: JSON.stringify(payload) }); }
+    catch(_) { throw new Error('通信に失敗しました。'); }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.error) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  }
+  async function apiDelete(path) {
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try { res = await fetch(url, { method: 'DELETE', headers: { 'x-admin-token': getToken() } }); }
+    catch(_) { throw new Error('通信に失敗しました。'); }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.error) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  }
+
+  // ─── load ────────────────────────────────────────────────────────────────────
+  async function loadAll() {
+    const [logsBody, fcBody] = await Promise.allSettled([
+      apiFetch(`/foodcourt/daily-logs?store_key=${STORE}&limit=180`),
+      apiFetch(`/foodcourt/reports?store_key=${STORE}&limit=180`).catch(() => null),
+    ]);
+    if (logsBody.status === 'fulfilled') {
+      logs = Array.isArray(logsBody.value.logs) ? logsBody.value.logs : [];
+    }
+    if (fcBody.status === 'fulfilled' && fcBody.value) {
+      buildSalesMaps(fcBody.value);
+    }
+    renderCalendar();
+    renderRecent();
+    if (!selectedDate) {
+      selectedDate = todayJst();
+    }
+    selectDate(selectedDate);
+  }
+
+  function buildSalesMaps(fcBody) {
+    salesByDate.clear();
+    eventsByDate.clear();
+    weatherByDate.clear();
+    const addDays = (ymd, n) => { const d = new Date(ymd + 'T12:00:00+09:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+    // baseDailyByDate from foodcourt API
+    const baseDaily = Array.isArray(fcBody.baseDaily) ? fcBody.baseDaily : [];
+    for (const row of baseDaily) {
+      const date = String(row.date || '').slice(0, 10);
+      if (!date) continue;
+      salesByDate.set(date, { guests: row.guests ?? null, sales: row.sales ?? null, sales_gross: row.sales_gross ?? null });
+    }
+    // events: report_date = 翌日 -> sales date = report_date - 1
+    const events = Array.isArray(fcBody.events) ? fcBody.events : [];
+    for (const ev of events) {
+      const date = String(ev.event_date || ev.event_at || '').slice(0, 10);
+      if (!date) continue;
+      if (!eventsByDate.has(date)) eventsByDate.set(date, []);
+      eventsByDate.get(date).push(ev);
+    }
+    // weather
+    const weather = Array.isArray(fcBody.weather) ? fcBody.weather : [];
+    for (const w of weather) {
+      const date = String(w.weather_date || '').slice(0, 10);
+      if (date) weatherByDate.set(date, w);
+    }
+  }
+
+  // ─── Calendar ───────────────────────────────────────────────────────────────
+  function renderCalendar() {
+    const [y, m] = calYM.split('-').map(Number);
+    $('calMonthLbl').textContent = `${y}年${m}月`;
+
+    const logDates = new Set(logs.map(l => String(l.log_date || '').slice(0, 10)));
+    const today = todayJst();
+
+    const firstDow = new Date(y, m - 1, 1).getDay(); // 0=Sun
+    const daysInMonth = new Date(y, m, 0).getDate();
+
+    let html = ['日','月','火','水','木','金','土'].map((d,i) => `<span class="cal-dow">${d}</span>`).join('');
+
+    // blank cells before
+    for (let i = 0; i < firstDow; i++) html += '<button class="cal-cell empty"></button>';
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dow = new Date(y, m - 1, d).getDay();
+      const cls = [
+        'cal-cell',
+        dow === 0 ? 'sun' : dow === 6 ? 'sat' : '',
+        ymd === today ? 'today' : '',
+        ymd === selectedDate ? 'selected' : '',
+        logDates.has(ymd) ? 'has-log' : '',
+      ].filter(Boolean).join(' ');
+      html += `<button class="${cls}" onclick="selectDate('${ymd}')">${d}</button>`;
+    }
+    $('calGrid').innerHTML = html;
+  }
+
+  $('calPrev').addEventListener('click', () => { calYM = addMonths(calYM, -1); renderCalendar(); });
+  $('calNext').addEventListener('click', () => { calYM = addMonths(calYM, +1); renderCalendar(); });
+
+  // ─── Recent list ─────────────────────────────────────────────────────────────
+  function renderRecent() {
+    const recent = logs.slice(0, 15);
+    if (!recent.length) { $('recentList').innerHTML = '<div style="font-size:11px;color:var(--tx-3);padding:6px 4px">まだ日報がありません</div>'; return; }
+    $('recentList').innerHTML = recent.map(l => {
+      const date = String(l.log_date || '').slice(0, 10);
+      const wday = wdayOf(date);
+      const acts = Array.isArray(l.actions) ? l.actions : [];
+      const preview = acts.length ? acts.slice(0,2).map(a => String(a.text||'')).filter(Boolean).join(' / ') : (String(l.memo||'').slice(0,40) || '記録なし');
+      const isActive = date === selectedDate;
+      return `<div class="recent-item${isActive?' active':''}" onclick="selectDate('${date}')">
+        <div class="recent-date">${ymd2label(date)}<br><span style="font-size:10px;font-weight:400;color:var(--tx-3)">(${wday})</span></div>
+        <div class="recent-preview">${esc(preview.slice(0,60))}${preview.length>60?'…':''}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ─── Select date ─────────────────────────────────────────────────────────────
+  window.selectDate = function(ymd) {
+    selectedDate = ymd;
+    // sync calYM to selected month
+    const newYM = ymd.slice(0, 7);
+    if (newYM !== calYM) { calYM = newYM; }
+    renderCalendar();
+    renderRecent();
+    renderForm(ymd);
+  };
+
+  function renderForm(ymd) {
+    $('emptyHint').classList.add('hidden');
+    $('formWrap').classList.remove('hidden');
+
+    const wday = wdayOf(ymd);
+    const dowIdx = new Date(ymd + 'T12:00:00+09:00').getDay();
+    const wdayColor = dowIdx === 0 ? 'var(--bad)' : dowIdx === 6 ? 'var(--accent)' : 'var(--tx-2)';
+    $('formDateLbl').textContent = `${ymd2label(ymd)}`;
+    $('formWdayLbl').innerHTML = `<span style="color:${wdayColor};font-weight:700">${wday}曜日</span>`;
+
+    // KPI strip
+    const s = salesByDate.get(ymd);
+    let kpiHtml = '';
+    if (s) {
+      const gv = s.guests != null ? nf.format(s.guests) + '人' : '—';
+      const sv = s.sales != null ? yen(s.sales) : '—';
+      const uv = (s.guests && s.sales) ? yen(Math.round(s.sales / s.guests)) : '—';
+      kpiHtml = `
+        <div class="kpi-chip"><span class="kpi-chip-lbl">客数</span><span class="kpi-chip-val">${esc(gv)}</span></div>
+        <div class="kpi-chip"><span class="kpi-chip-lbl">売上（税抜）</span><span class="kpi-chip-val">${esc(sv)}</span></div>
+        <div class="kpi-chip"><span class="kpi-chip-lbl">客単価</span><span class="kpi-chip-val">${esc(uv)}</span></div>
+      `;
+    } else {
+      kpiHtml = '<div style="font-size:11px;color:var(--tx-3)">この日の売上データなし</div>';
+    }
+    $('kpiStrip').innerHTML = kpiHtml;
+
+    // Context pills
+    let ctxHtml = '';
+    const evts = eventsByDate.get(ymd) || [];
+    for (const ev of evts.slice(0, 4)) {
+      const title = String(ev.title || ev.category || '').slice(0, 20);
+      ctxHtml += `<span class="ctx-pill dome">⚾ ${esc(title)}</span>`;
+    }
+    const wx = weatherByDate.get(ymd);
+    if (wx) {
+      const code = Number(wx.weather_code || 0);
+      const icon = code <= 1 ? '☀️' : code <= 3 ? '⛅' : code < 65 ? '🌧️' : '☁️';
+      const temp = wx.temp_max != null ? `${Math.round(wx.temp_max)}°` : '';
+      ctxHtml += `<span class="ctx-pill weather">${icon} ${temp}</span>`;
+    }
+    $('ctxPills').innerHTML = ctxHtml;
+
+    // Existing log
+    const existing = logs.find(l => String(l.log_date || '').slice(0, 10) === ymd);
+
+    $('fHandler').value = String(existing?.handler || '');
+    buildActionRows(Array.isArray(existing?.actions) ? existing.actions : []);
+    $('fGuestImpact').value  = String(existing?.guest_impact || '');
+    $('fSalesImpact').value  = String(existing?.sales_impact || '');
+    $('fWeatherNote').value  = String(existing?.weather_note || '');
+    $('fEventNote').value    = String(existing?.event_note || '');
+    $('fIssues').value       = String(existing?.issues || '');
+    $('fNextActions').value  = String(existing?.next_actions || '');
+    $('fMemo').value         = String(existing?.memo || '');
+    $('deleteBtn').style.display = existing ? 'inline-flex' : 'none';
+    $('saveMsg').textContent = '';
+    $('saveMsg').className = 'save-msg';
+  }
+
+  // ─── Action rows ─────────────────────────────────────────────────────────────
+  const CAT_OPTIONS = [
+    { value: 'promotion',    label: '🎯 販促・集客' },
+    { value: 'menu',         label: '📋 メニュー提案' },
+    { value: 'service',      label: '👥 接客・サービス' },
+    { value: 'environment',  label: '🏪 環境・設備' },
+    { value: 'staff',        label: '👤 スタッフ' },
+    { value: 'other',        label: '📝 その他' },
+  ];
+
+  function catOpts(selected) {
+    return CAT_OPTIONS.map(o => `<option value="${o.value}"${o.value === selected ? ' selected' : ''}>${o.label}</option>`).join('');
+  }
+
+  function buildActionRows(actions) {
+    const list = $('actionList');
+    list.innerHTML = '';
+    const rows = actions.length ? actions : [];
+    for (const act of rows) addActionRow(String(act.cat || 'promotion'), String(act.text || ''));
+  }
+
+  function addActionRow(cat = 'promotion', text = '') {
+    const row = document.createElement('div');
+    row.className = 'action-row';
+    row.innerHTML = `
+      <select class="action-cat">${catOpts(cat)}</select>
+      <textarea class="action-text" rows="1" placeholder="施策内容を入力...">${esc(text)}</textarea>
+      <button class="action-del" title="削除">✕</button>
+    `;
+    row.querySelector('.action-del').addEventListener('click', () => row.remove());
+    // auto-expand textarea
+    const ta = row.querySelector('textarea');
+    ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; });
+    if (text) { setTimeout(() => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }, 0); }
+    $('actionList').appendChild(row);
+  }
+
+  $('addActionBtn').addEventListener('click', () => addActionRow());
+
+  // ─── Save / Delete ────────────────────────────────────────────────────────────
+  function collectActions() {
+    return Array.from($('actionList').querySelectorAll('.action-row')).map(row => ({
+      cat: row.querySelector('select').value,
+      text: row.querySelector('textarea').value.trim(),
+    })).filter(a => a.text);
+  }
+
+  $('saveBtn').addEventListener('click', async () => {
+    if (savingOrDeleting || !selectedDate) return;
+    savingOrDeleting = true;
+    $('saveBtn').disabled = true;
+    $('saveMsg').textContent = '保存中…';
+    $('saveMsg').className = 'save-msg';
+    try {
+      const result = await apiPut('/foodcourt/daily-logs', {
+        store_key: STORE,
+        log_date: selectedDate,
+        handler: $('fHandler').value.trim(),
+        actions: collectActions(),
+        guest_impact:  $('fGuestImpact').value.trim(),
+        sales_impact:  $('fSalesImpact').value.trim(),
+        weather_note:  $('fWeatherNote').value.trim(),
+        event_note:    $('fEventNote').value.trim(),
+        issues:        $('fIssues').value.trim(),
+        next_actions:  $('fNextActions').value.trim(),
+        memo:          $('fMemo').value.trim(),
+      });
+      // update local state
+      const idx = logs.findIndex(l => String(l.log_date || '').slice(0, 10) === selectedDate);
+      if (idx >= 0) logs[idx] = result.log; else logs.unshift(result.log);
+      logs.sort((a, b) => String(b.log_date || '') < String(a.log_date || '') ? -1 : 1);
+      $('saveMsg').textContent = '✓ 保存しました';
+      $('deleteBtn').style.display = 'inline-flex';
+      renderCalendar();
+      renderRecent();
+    } catch(e) {
+      $('saveMsg').textContent = '保存に失敗: ' + (e.message || String(e));
+      $('saveMsg').className = 'save-msg err';
+    } finally {
+      savingOrDeleting = false;
+      $('saveBtn').disabled = false;
+    }
+  });
+
+  $('deleteBtn').addEventListener('click', async () => {
+    if (savingOrDeleting || !selectedDate) return;
+    if (!confirm(`${ymd2label(selectedDate)} の日報を削除しますか？`)) return;
+    savingOrDeleting = true;
+    $('deleteBtn').disabled = true;
+    try {
+      await apiDelete(`/foodcourt/daily-logs?store_key=${STORE}&log_date=${selectedDate}`);
+      logs = logs.filter(l => String(l.log_date || '').slice(0, 10) !== selectedDate);
+      $('saveMsg').textContent = '削除しました';
+      $('deleteBtn').style.display = 'none';
+      renderCalendar();
+      renderRecent();
+      // reset form
+      buildActionRows([]);
+      $('fHandler').value = $('fGuestImpact').value = $('fSalesImpact').value = '';
+      $('fWeatherNote').value = $('fEventNote').value = $('fIssues').value = $('fNextActions').value = $('fMemo').value = '';
+    } catch(e) {
+      $('saveMsg').textContent = '削除に失敗: ' + (e.message || String(e));
+      $('saveMsg').className = 'save-msg err';
+    } finally {
+      savingOrDeleting = false;
+      $('deleteBtn').disabled = false;
+    }
+  });
+
+  // ─── History tab ──────────────────────────────────────────────────────────────
+  function buildHistoryMonthFilter() {
+    const months = [...new Set(logs.map(l => String(l.log_date || '').slice(0, 7)))].sort().reverse();
+    const sel = $('historyMonthFilter');
+    const cur = sel.value;
+    const opts = months.map(m => {
+      const [y, mo] = m.split('-');
+      return `<option value="${m}"${m === cur ? ' selected' : ''}>${+y}年${+mo}月</option>`;
+    }).join('');
+    sel.innerHTML = '<option value="">すべての月</option>' + opts;
+  }
+
+  window.renderHistory = function() {
+    buildHistoryMonthFilter();
+    const q = String($('historySearch').value || '').trim().toLowerCase();
+    const monthFil = String($('historyMonthFilter').value || '');
+
+    const CAT_LABEL = { promotion:'販促・集客', menu:'メニュー提案', service:'接客・サービス', environment:'環境・設備', staff:'スタッフ', other:'その他' };
+
+    let filtered = logs.filter(l => {
+      if (monthFil && !String(l.log_date || '').startsWith(monthFil)) return false;
+      if (!q) return true;
+      const blob = [
+        l.handler, l.guest_impact, l.sales_impact, l.weather_note, l.event_note,
+        l.issues, l.next_actions, l.memo,
+        ...(Array.isArray(l.actions) ? l.actions.map(a => a.text) : []),
+      ].join(' ').toLowerCase();
+      return blob.includes(q);
+    });
+
+    if (!filtered.length) {
+      $('historyList').innerHTML = '<div class="no-results">該当する日報がありません</div>';
+      return;
+    }
+
+    $('historyList').innerHTML = filtered.map(l => {
+      const date = String(l.log_date || '').slice(0, 10);
+      const wday = wdayOf(date);
+      const acts = Array.isArray(l.actions) ? l.actions : [];
+      const s = salesByDate.get(date);
+      const gv = s?.guests != null ? nf.format(s.guests) + '人' : null;
+      const sv = s?.sales != null ? yen(s.sales) : null;
+      const kpis = [gv && `👥 <b>${esc(gv)}</b>`, sv && `💴 <b>${esc(sv)}</b>`].filter(Boolean).join(' ');
+
+      const actHtml = acts.map(a => {
+        const catCls = `cat-${a.cat || 'other'}`;
+        const catLabel = CAT_LABEL[a.cat] || 'その他';
+        return `<span class="log-card-action"><span class="cat-badge ${catCls}">${esc(catLabel)}</span> ${esc(String(a.text||'').slice(0,40))}</span>`;
+      }).join('');
+
+      const texts = [
+        l.guest_impact && `<b>客数:</b> ${esc(String(l.guest_impact).slice(0,80))}`,
+        l.sales_impact && `<b>売上:</b> ${esc(String(l.sales_impact).slice(0,80))}`,
+        l.issues && `<b>課題:</b> ${esc(String(l.issues).slice(0,80))}`,
+        l.next_actions && `<b>申送:</b> ${esc(String(l.next_actions).slice(0,80))}`,
+      ].filter(Boolean).join('<br>');
+
+      return `<div class="log-card" onclick="window.switchTab('entry');selectDate('${date}')">
+        <div class="log-card-hdr">
+          <span class="log-card-date">${ymd2label(date)} (${wday})</span>
+          ${l.handler ? `<span class="log-card-handler">👤 ${esc(l.handler)}</span>` : ''}
+          <div class="log-card-kpis">${kpis}</div>
+        </div>
+        ${actHtml ? `<div class="log-card-actions">${actHtml}</div>` : ''}
+        ${texts ? `<div class="log-card-texts">${texts}</div>` : ''}
+      </div>`;
+    }).join('');
+  };
+
+  // ─── Init ────────────────────────────────────────────────────────────────────
+  (async function init() {
+    if (AUTH?.consumeUrlAuthParams) {
+      try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' }); }
+      catch(_) {}
+    }
+    const authed = !!getToken();
+    setAuthBadge(authed);
+    if (authed) await loadAll();
+  })();
+
+})();
+</script>
+</body>
+</html>
