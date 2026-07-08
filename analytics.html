@@ -114,13 +114,13 @@
     .lsa-side-foot .conn b { display: block; color: var(--side-text-strong); font-size: 12.5px; font-weight: 600; font-family: "IBM Plex Sans JP", sans-serif; }
     .lsa-side-foot .conn .dt { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
     /* LINE経由は売上分析以外へ遷移させない：サイドナビ（売上分析以外）・グループ見出し・ヘッダーの外部リンクを非表示 */
-    html[data-entry="line"] .lsa-navitem:not(.is-active),
+    /* html[data-entry="line"] .lsa-navitem:not(.is-active),
     html[data-entry="line"] .lsa-navlabel,
     html[data-entry="line"] #adminLink,
     html[data-entry="line"] #mediaLink,
     html[data-entry="line"] #reservationLink,
     html[data-entry="line"] #receiptSheetsPilotHeaderLink,
-    html[data-entry="line"] #receiptSheetsPilotLink { display: none !important; }
+    html[data-entry="line"] #receiptSheetsPilotLink { display: none !important; } */
     .lsa-navtoggle {
       display: none; position: fixed; top: 10px; left: 10px; z-index: 680;
       width: 42px; height: 42px; padding: 0; border-radius: 10px;
@@ -663,6 +663,8 @@
       <a class="lsa-navitem" href="reviews.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.9-6.2 3.9 1.6-7L2 9.2l7.1-.6L12 2z"/></svg>口コミ・競合</a>
       <a class="lsa-navitem" href="ai-usage.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-1 5 3 3 0 0 1-4 2 3 3 0 0 1-4-2 3 3 0 0 1-1-5 3 3 0 0 1 2-5 3 3 0 0 1 3-3Z"/><path d="M12 8v8M9 12h6"/></svg>AI使用料</a>
       <a class="lsa-navitem" href="petty_cash.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M21 9h-6a3 3 0 0 0 0 6h6a1 1 0 0 0 1-1V10a1 1 0 0 0-1-1z"/></svg>小口現金</a>
+      <a class="lsa-navitem" href="foodcourt.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M4 12h16M4 18h8"/><circle cx="19" cy="18" r="2"/></svg>フードコート分析</a>
+      <a class="lsa-navitem" href="foodcourt-report.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="18" rx="1"/><path d="M7 8h6M7 12h6M7 16h3"/><path d="M19 11v6l-2-1-2 1v-6"/><path d="M17 3v8"/></svg>フードコート日報</a>
       <a class="lsa-navitem" id="salesSheetNavLink" href="#" target="_blank" rel="noopener noreferrer" hidden aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>売上シート</a>
     </nav>
     <div class="lsa-side-foot"><div class="conn"><span class="dt"></span><span><b>接続済み</b>hocbnifuactbvmyjraxy</span></div></div>
