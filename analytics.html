@@ -114,13 +114,12 @@
     .lsa-side-foot .conn b { display: block; color: var(--side-text-strong); font-size: 12.5px; font-weight: 600; font-family: "IBM Plex Sans JP", sans-serif; }
     .lsa-side-foot .conn .dt { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
     /* LINE経由は売上分析以外へ遷移させない：サイドナビ（売上分析以外）・グループ見出し・ヘッダーの外部リンクを非表示 */
-    /* html[data-entry="line"] .lsa-navitem:not(.is-active),
+    /* LINE経由時は、売上分析・フードコート分析・フードコート日報以外のメニューを非表示 */
+    html[data-entry="line"] .lsa-navitem:not([href="analytics.html"]):not([href="foodcourt.html"]):not([href="foodcourt-report.html"]):not(.is-active),
     html[data-entry="line"] .lsa-navlabel,
-    html[data-entry="line"] #adminLink,
-    html[data-entry="line"] #mediaLink,
-    html[data-entry="line"] #reservationLink,
-    html[data-entry="line"] #receiptSheetsPilotHeaderLink,
-    html[data-entry="line"] #receiptSheetsPilotLink { display: none !important; } */
+    html[data-entry="line"] #salesSheetNavLink {
+      display: none !important;
+    }
     .lsa-navtoggle {
       display: none; position: fixed; top: 10px; left: 10px; z-index: 680;
       width: 42px; height: 42px; padding: 0; border-radius: 10px;

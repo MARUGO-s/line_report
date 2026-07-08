@@ -425,8 +425,12 @@
     .ms-cs{font-size:11.5px;color:var(--tx-3);margin-top:1px;}
     .ms-main{display:flex;flex-direction:column;min-width:0;}
     /* LINE経由は他ページへ遷移させない：サイドナビのリンク（現在ページ以外）とラベルを隠す */
-    /* html[data-entry="line"] .ms-navlink:not(.active),
-    html[data-entry="line"] .ms-navlabel{display:none !important;} */
+    /* LINE経由時は、売上分析・フードコート分析・フードコート日報以外のメニューを非表示 */
+    html[data-entry="line"] .ms-navlink:not([href="analytics.html"]):not([href="./analytics.html"]):not([href="foodcourt.html"]):not([href="./foodcourt.html"]):not([href="foodcourt-report.html"]):not([href="./foodcourt-report.html"]):not(.active),
+    html[data-entry="line"] .ms-navlabel,
+    html[data-entry="line"] #salesSheetNavLink {
+      display: none !important;
+    }
     .ms-navtoggle{display:none;position:fixed;top:10px;left:10px;z-index:70;width:42px;height:42px;padding:0;border-radius:10px;border:1px solid var(--line);background:color-mix(in srgb, var(--surface) 88%, transparent);color:var(--tx-1);cursor:pointer;align-items:center;justify-content:center;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);}
     .ms-navtoggle:hover{background:var(--hover);}
     .ms-nav-backdrop{display:none;position:fixed;inset:0;z-index:71;background:rgba(0,0,0,.45);}
