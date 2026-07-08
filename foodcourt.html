@@ -1651,7 +1651,11 @@
         ? '<span class="ld-cntb" title="その日のマルゴS全体の客数（イベント単位ではありません）">👥 '+nf.format(guestsByDate.get(d))+'</span>'
         : '<span class="ld-cntb none">—</span>';
       const nev='<span class="ld-nev">'+n+'件</span>';
-      return '<div class="ld-day'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span>'+nev+cnt+'</div>'
+      const bdAtt = baseDailyByDate.get(d)?.attendance;
+      const attBadge = (bdAtt != null && isFinite(bdAtt))
+        ? '<span class="ld-cntb" title="日報に入力された動員数" style="color:var(--blue,#3b82f6)">📋 '+nf.format(bdAtt)+'人</span>'
+        : '';
+      return '<div class="ld-day'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span>'+nev+cnt+attBadge+'</div>'
         + g.evs.map(e=>evRowHtml(e,past)).join('');
     };
     const sepHtml=label=>'<div class="ld-today-sep" id="domeTodayAnchor">'+label+'</div>';

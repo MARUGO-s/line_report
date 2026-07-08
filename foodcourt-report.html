@@ -334,6 +334,10 @@
               <input class="field-input" id="fEventNote" placeholder="例: 東京ドームで巨人戦 4万人" maxlength="200">
             </div>
           </div>
+          <div class="field-group" style="margin-top:10px">
+            <label class="field-label">👥 動員数（人）<span style="font-weight:400;color:var(--tx-2);font-size:12px;margin-left:6px">— 入力すると分析ページの動員数に自動反映されます</span></label>
+            <input class="field-input" id="fAttendance" type="number" min="0" step="1" placeholder="例: 40000（東京ドーム等のイベント来場者数）" style="max-width:280px">
+          </div>
         </div>
 
         <!-- 課題・申し送り -->
@@ -663,6 +667,7 @@
     $('fSalesImpact').value  = String(existing?.sales_impact || '');
     $('fWeatherNote').value  = String(existing?.weather_note || '');
     $('fEventNote').value    = String(existing?.event_note || '');
+    $('fAttendance').value   = (existing?.daily_attendance != null) ? String(existing.daily_attendance) : '';
     $('fIssues').value       = String(existing?.issues || '');
     $('fNextActions').value  = String(existing?.next_actions || '');
     $('fMemo').value         = String(existing?.memo || '');
@@ -732,11 +737,12 @@
         actions: collectActions(),
         guest_impact:  $('fGuestImpact').value.trim(),
         sales_impact:  $('fSalesImpact').value.trim(),
-        weather_note:  $('fWeatherNote').value.trim(),
-        event_note:    $('fEventNote').value.trim(),
-        issues:        $('fIssues').value.trim(),
-        next_actions:  $('fNextActions').value.trim(),
-        memo:          $('fMemo').value.trim(),
+        weather_note:     $('fWeatherNote').value.trim(),
+        event_note:       $('fEventNote').value.trim(),
+        daily_attendance: $('fAttendance').value.trim() === '' ? null : Number($('fAttendance').value),
+        issues:           $('fIssues').value.trim(),
+        next_actions:     $('fNextActions').value.trim(),
+        memo:             $('fMemo').value.trim(),
       });
       // update local state
       const idx = logs.findIndex(l => String(l.log_date || '').slice(0, 10) === selectedDate);
@@ -770,7 +776,7 @@
       // reset form
       buildActionRows([]);
       $('fHandler').value = $('fGuestImpact').value = $('fSalesImpact').value = '';
-      $('fWeatherNote').value = $('fEventNote').value = $('fIssues').value = $('fNextActions').value = $('fMemo').value = '';
+      $('fWeatherNote').value = $('fEventNote').value = $('fAttendance').value = $('fIssues').value = $('fNextActions').value = $('fMemo').value = '';
     } catch(e) {
       $('saveMsg').textContent = '削除に失敗: ' + (e.message || String(e));
       $('saveMsg').className = 'save-msg err';

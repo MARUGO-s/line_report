@@ -424,7 +424,7 @@ async function loadVenueEventsForReports(
 async function loadBaseDailyForReports(
   supabase: ReturnType<typeof createClient>,
   storeKey: string,
-): Promise<Array<{ date: string; guests: number | null; sales: number | null; party: number | null; has_manual: boolean }>> {
+): Promise<Array<{ date: string; guests: number | null; sales: number | null; party: number | null; has_manual: boolean; attendance: number | null }>> {
   if (String(storeKey ?? "").trim().toLowerCase() !== "marugos") return []
   const todayIso = new Date().toISOString().slice(0, 10)
   const lo = addDaysIso(todayIso, -400)
@@ -432,13 +432,32 @@ async function loadBaseDailyForReports(
   const rows = await fetchReceiptDailyAggForRange(supabase, storeKey, lo, hi)
   // 売上(sales)は税抜net＝日報と一致させる正本。手入力上書きは売上分析と同じく総売上(gross)側にのみ効くため、
   // net はレシート集計のまま（受領レシートが無い手入力のみの日は net=null＝当店売上未確定として扱う）。
-  return rows.map((r) => ({
+  const base = rows.map((r) => ({
     date: r.date,
     guests: (r.manual_guest || r.receipt_count > 0) ? r.guest_count : null,
     sales: r.receipt_count > 0 ? r.net_sales_yen : null,
     party: (r.manual_party || r.receipt_count > 0) ? r.party_count : null,
     has_manual: r.manual_guest || r.manual_party || r.manual_gross,
+    attendance: null as number | null,
   }))
+  // 日報(foodcourt_daily_logs)の動員数を baseDaily にマージ。
+  const { data: attRows } = await supabase
+    .from("foodcourt_daily_logs")
+    .select("log_date, daily_attendance")
+    .ilike("store_partition_key", storeKey)
+    .gte("log_date", lo)
+    .lte("log_date", hi)
+    .not("daily_attendance", "is", null)
+  if (Array.isArray(attRows) && attRows.length > 0) {
+    const attMap = new Map(
+      attRows.map((r) => [String((r as { log_date?: unknown }).log_date ?? "").slice(0, 10), Number((r as { daily_attendance?: unknown }).daily_attendance)])
+    )
+    for (const b of base) {
+      const v = attMap.get(b.date)
+      if (v != null && Number.isFinite(v)) b.attendance = v
+    }
+  }
+  return base
 }
 
 // 自己再学習型の来客予測（forecast_predictions）を返す。基準店（マルゴS）のみ。当日前後の窓で guests/sales。
@@ -1215,7 +1234,7 @@ Deno.serve(async (req, info) => {
       const limit = Math.min(parseInt(String(url.searchParams.get("limit") ?? "90")), 366)
       let q = supabase
         .from("foodcourt_daily_logs")
-        .select("id, log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, issues, next_actions, memo, created_at, updated_at")
+        .select("id, log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, issues, next_actions, memo, daily_attendance, created_at, updated_at")
         .ilike("store_partition_key", storeKey)
         .order("log_date", { ascending: false })
         .limit(limit)
@@ -1249,9 +1268,12 @@ Deno.serve(async (req, info) => {
           issues: String(body.issues ?? "").slice(0, 2000) || null,
           next_actions: String(body.next_actions ?? "").slice(0, 2000) || null,
           memo: String(body.memo ?? "").slice(0, 3000) || null,
+          daily_attendance: (body.daily_attendance !== null && body.daily_attendance !== undefined && body.daily_attendance !== "")
+            ? (() => { const v = Number(body.daily_attendance); return Number.isFinite(v) && v >= 0 ? Math.round(v) : null })()
+            : null,
           updated_at: now,
         }, { onConflict: "store_partition_key,log_date" })
-        .select("id, log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, issues, next_actions, memo, created_at, updated_at")
+        .select("id, log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, issues, next_actions, memo, daily_attendance, created_at, updated_at")
         .single()
       if (error) return json({ error: error.message }, 500)
       return json({ ok: true, log: data }, 200)
