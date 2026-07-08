@@ -1105,6 +1105,19 @@ Deno.serve(async (req, info) => {
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
+      // 現場日報（foodcourt_daily_logs）: Q&A分析の精度向上のため直近60日分を取得してAIに渡す。
+      // 担当者が記録した施策・動員数・客数/売上への影響評価を数値実績と照合させる。
+      const todayForLogs = new Date().toISOString().slice(0, 10)
+      const logsFrom = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+      const { data: dailyLogsData } = await supabase
+        .from("foodcourt_daily_logs")
+        .select("log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, daily_attendance, issues, next_actions")
+        .ilike("store_partition_key", storeKey)
+        .gte("log_date", logsFrom)
+        .lte("log_date", todayForLogs)
+        .order("log_date", { ascending: false })
+        .limit(60)
+      const dailyLogs = Array.isArray(dailyLogsData) ? dailyLogsData as Array<Record<string, unknown>> : []
       // 画面に表示中の単日レポート(viewing_report_id)を、特に日付指定のない質問のデフォルト対象日としてAIに伝える。
       // これが無いと、AIは全履歴のどの日の話かを画面と無関係に(会話文脈だけで)決めてしまい、時間軸がずれる。
       const viewingReportIdRaw = (body as { viewing_report_id?: unknown }).viewing_report_id
@@ -1112,7 +1125,7 @@ Deno.serve(async (req, info) => {
       const viewingReport = viewingReportId ? reports.find((r) => String((r as { id?: unknown }).id ?? "") === viewingReportId) : null
       const viewingDate = viewingReport ? fcSalesDate(viewingReport) : null
       // supabase + storeKey を渡すと、Q&Aの実測トークンを ai_usage_events に記録しAI使用料に合算する。
-      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate)
+      const answer = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate, dailyLogs)
       return json({ answer: answer || "回答を生成できませんでした。もう一度お試しください。", reportCount: reports.length }, 200)
     }
     // 学習進化トラッキング: foodcourt_forecast_history の全行を返す（foodcourt-evolution.html 用）。

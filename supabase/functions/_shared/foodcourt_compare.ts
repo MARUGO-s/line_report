@@ -1979,6 +1979,48 @@ function buildConditionPatternStats(
   return L.length > 1 ? L.join('\n\n') : ''
 }
 
+// 日報(foodcourt_daily_logs)をテキストブロックに変換してAIのコンテキストに渡す。
+// 担当者が現場で記録した施策・客数/売上の主観的評価・課題を数値実績と照合させる。
+function buildDailyLogsContext(logs: Array<Record<string, unknown>>): string {
+  if (!Array.isArray(logs) || logs.length === 0) return ''
+  const CAT_LABEL: Record<string, string> = {
+    promotion: '販促・集客', menu: 'メニュー提案', service: '接客・サービス',
+    environment: '環境・設備', staff: 'スタッフ', other: 'その他',
+  }
+  const lines: string[] = []
+  for (const log of logs.slice(0, 60)) {
+    const date = String((log as { log_date?: unknown }).log_date ?? '').slice(0, 10)
+    if (!date) continue
+    const handler = String((log as { handler?: unknown }).handler ?? '').trim()
+    const actions = Array.isArray((log as { actions?: unknown }).actions) ? (log as { actions?: unknown[] }).actions as unknown[] : []
+    const guestImpact = String((log as { guest_impact?: unknown }).guest_impact ?? '').trim()
+    const salesImpact = String((log as { sales_impact?: unknown }).sales_impact ?? '').trim()
+    const weatherNote = String((log as { weather_note?: unknown }).weather_note ?? '').trim()
+    const eventNote = String((log as { event_note?: unknown }).event_note ?? '').trim()
+    const issues = String((log as { issues?: unknown }).issues ?? '').trim()
+    const nextActions = String((log as { next_actions?: unknown }).next_actions ?? '').trim()
+    const attendanceRaw = (log as { daily_attendance?: unknown }).daily_attendance
+    const attendance = attendanceRaw != null ? Number(attendanceRaw) : null
+    const parts: string[] = [`▶ ${date}${handler ? `（担当:${handler}）` : ''}`]
+    if (attendance != null && Number.isFinite(attendance)) parts.push(`  動員数: ${attendance.toLocaleString()}人`)
+    if (weatherNote) parts.push(`  天気: ${weatherNote}`)
+    if (eventNote) parts.push(`  イベント: ${eventNote}`)
+    const actionTexts = actions.map((a) => {
+      const ao = (a && typeof a === 'object') ? a as Record<string, unknown> : {}
+      const cat = CAT_LABEL[String(ao.cat ?? '')] || String(ao.cat ?? '')
+      const text = String(ao.text ?? '').trim()
+      return text ? `[${cat}] ${text}` : null
+    }).filter(Boolean)
+    if (actionTexts.length) parts.push(`  実施施策: ${actionTexts.join(' ／ ')}`)
+    if (guestImpact) parts.push(`  客数への影響（担当者評価）: ${guestImpact}`)
+    if (salesImpact) parts.push(`  売上への影響（担当者評価）: ${salesImpact}`)
+    if (issues) parts.push(`  課題・問題点: ${issues}`)
+    if (nextActions) parts.push(`  申し送り: ${nextActions}`)
+    lines.push(parts.join('\n'))
+  }
+  return lines.join('\n\n')
+}
+
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
 // events（東京ドームのイベント日程）・weather（日次天気）を渡すと、客数増減との相関も踏まえて回答する。
 // 競合店プロファイル（業態・価格帯・飲み/食事傾向）も注入し、業態文脈を踏まえた分析にする。
@@ -1994,6 +2036,7 @@ export async function answerFoodCourtQuestion(
   history: Array<{ role: string; content: string }> = [],
   forecast: ForecastRow[] = [],
   viewingDate?: string | null,
+  dailyLogs: Array<Record<string, unknown>> = [],
 ): Promise<string | null> {
   if (!groqApiKey) return null
   const q = String(question ?? '').trim().slice(0, 500)
@@ -2040,6 +2083,9 @@ export async function answerFoodCourtQuestion(
   const patternBlock = patternStats
     ? `# 統計的パターン（${forecastFactorsCtx ? '来客予測モデルの学習係数・自己採点つき' : '条件別集計・コード計算・サンプル数と確度つき'}）\n${patternStats}`
     : ''
+  // 現場日報（foodcourt_daily_logs）: 担当者が記録した実施施策・客数/売上への影響評価・課題。
+  // 数値実績と突き合わせて「施策の効果仮説」を立てる材料として使う。
+  const dailyLogsCtx = buildDailyLogsContext(dailyLogs)
 
   // --- 専門AI 2体を並列実行し、統合AIに渡す「分析メモ」を作らせる（同一プロンプト過積載を避けるための役割分担） ---
   const quantSystem = [
@@ -2073,7 +2119,7 @@ export async function answerFoodCourtQuestion(
     `【厳守】データに無い販売点数・原価・スタッフ人数は作らない。打ち手は必ず「狙う客層/来店動機」「実施条件」「見るべきKPI」をセットで書く。`,
     `出力は最終回答ではなく「統合担当AIへの運営改善メモ」。見出し＋箇条書きで簡潔に（350字程度）。`,
   ].join('\n')
-  const opsUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 競合プロファイル\n${competitors}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 日次生データ\n${data}`
+  const opsUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 競合プロファイル\n${competitors}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 現場日報・施策記録（実際に行った施策・担当者の客数/売上影響評価・課題）\n${dailyLogsCtx || '(日報データなし)'}\n\n# 日次生データ\n${data}`
 
   const [quantRes, extRes, opsRes] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel),
@@ -2115,13 +2161,14 @@ export async function answerFoodCourtQuestion(
     `(9) イベント深掘りと交互作用：野球は対戦相手・デー/ナイター、ライブはアーティスト・客層（若年女性公演はデザート/カフェ/ドリンクの単価感度が高い等）で効き方が変わる。東京ドーム本体が無イベントでも、ドームシティの各会場（後楽園ホール＝格闘技で中年男性、プリズムホール＝展示/即売、カナデビアホール＝ライブ/舞台、ラクーア＝アイドル）が独立した来館動機になりうる点も考慮。交互作用（雨×イベント有無、猛暑×デザート/ドリンク等）も組み合わせて見る。`,
     `(10) 仮説は「支持／不支持／条件付き」で判定し、効果量（リフト率や差・倍率）を数値で添える。相関と因果は区別し、因果を主張する前に他要因（曜日・天気・イベント）を考慮する。データに無い指標（販売点数・推定来館者数による捕捉率・前年同曜日比など）は「データにありません／取得すれば精度が上がる」と明示し捏造しない。`,
     `(11) 「来客予測（学習型モデル）」がある場合は、今後の予測客数・売上を仕入・人員の助言に使う。ただしモデルの自己採点（誤差%）も併記されているので、誤差が大きい時は「精度は発展途上（データ蓄積で改善）」と断った上で参考値として扱う。`,
+    `(12) 「現場日報・施策記録」がある場合は、担当者が記録した実施施策（[販促・集客][メニュー提案][接客・サービス]等）・動員数・担当者の客数/売上評価を必ず数値実績と照合せよ。「施策を打った日/翌日の客数・売上が実際にどう変わったか」を日報の記述とデータを突き合わせて分析し、施策の効果仮説を立てる。担当者の評価は主観なので必ずデータで裏取りしてから採否を判断し、整合・不整合を明記すること。`,
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
     `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
     `【専門AIメモの統合】以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。メモが矛盾する場合や誇張がある場合は、必ず生データ・事前計算ブロックの数値で裏取りしてから採否を判断し、1つの一貫した最終回答にまとめること。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱めること。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。来客予測モデルの学習係数(自己採点済み)であれば、来客予測の自己採点(誤差%)と矛盾しない範囲で解釈する。対象日/対象期間に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【回答品質】最後に必ず、実行すべき次の一手または次に確認すべきKPIを1つ以上入れる。数字の羅列だけで終えない。`,
   ].join('\n')
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の“前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}\n\n# 日次生データ（全テナント）\n${data}`
+  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の”前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 現場日報・施策記録（担当者が記録した実施施策・動員数・客数/売上影響評価・課題）\n${dailyLogsCtx || '(日報データなし)'}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}\n\n# 日次生データ（全テナント）\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
