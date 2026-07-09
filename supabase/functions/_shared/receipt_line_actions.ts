@@ -3,6 +3,7 @@ import { normalizeInlineText } from './receipt_parse.ts'
 const LINE_MESSAGING_URI_MAX_LEN = 1000
 const LINE_MESSAGE_ACTION_TEXT_MAX_LEN = 300
 const ANALYTICS_BASE = 'https://marugo-s.github.io/line_report/analytics.html'
+const FOODCOURT_REPORT_BASE = 'https://marugo-s.github.io/line_report/foodcourt-report.html'
 /**
  * 売上ページ(analytics.html)のデプロイ版数。URL に ?v= で付与してブラウザ／LINEアプリ内
  * ブラウザのキャッシュを無効化する。analytics.html の UI を更新したらこの値を更新する。
@@ -76,6 +77,17 @@ export function buildReceiptAnalyticsDashboardUri(
     if (withoutToken.length <= LINE_MESSAGING_URI_MAX_LEN) return withoutToken
   }
   return `${ANALYTICS_BASE}?store_key=${encodeURIComponent(storePartitionKey)}&v=${ANALYTICS_APP_VERSION}`.slice(0, LINE_MESSAGING_URI_MAX_LEN)
+}
+
+export function buildFoodcourtReportUri(
+  options?: { loginToken?: string | null },
+): string {
+  const params = new URLSearchParams({ from: 'line' })
+  const loginToken = String(options?.loginToken ?? '').trim()
+  if (loginToken) params.set('lt', loginToken)
+  const candidate = `${FOODCOURT_REPORT_BASE}?${params.toString()}`
+  if (candidate.length <= LINE_MESSAGING_URI_MAX_LEN) return candidate
+  return FOODCOURT_REPORT_BASE.slice(0, LINE_MESSAGING_URI_MAX_LEN)
 }
 
 export type ReceiptCorrectionStartDirective = {

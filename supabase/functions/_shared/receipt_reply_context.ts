@@ -21,12 +21,13 @@ import {
   type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
 import { fetchManualDayBudgetMapForStore } from './manual_day_sales.ts'
-import { buildReceiptAnalyticsDashboardUri } from './receipt_line_actions.ts'
+import { buildReceiptAnalyticsDashboardUri, buildFoodcourtReportUri } from './receipt_line_actions.ts'
 
 export type ReceiptReplyContext = {
   storeDisplayName: string
   storePartitionKey: string
   analyticsDashboardUrl: string
+  foodcourtReportUrl: string | null
   receiptDateText: string
   receiptDateIso: string
   taxAmountYen: number | null
@@ -430,10 +431,27 @@ export async function loadReceiptReplyContext(
 
   const businessDays = monthAgg.businessDays > 0 ? monthAgg.businessDays : null
 
+  // マルゴエス（marugoS）のみフードコート日報ページへのワンタイムログインリンクを発行する。
+  const FOODCOURT_REPORT_STORE = 'marugoS'
+  let foodcourtReportUrl: string | null = null
+  if (params.storePartitionKey === FOODCOURT_REPORT_STORE) {
+    try {
+      const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+        source: 'line_receipt_report_dailylog',
+        store_partition_key: params.storePartitionKey,
+      })
+      foodcourtReportUrl = buildFoodcourtReportUri({ loginToken: issued.token })
+    } catch (err) {
+      console.error('buildFoodcourtReportUrl failed:', err)
+      foodcourtReportUrl = buildFoodcourtReportUri()
+    }
+  }
+
   return {
     storeDisplayName: params.storeDisplayName,
     storePartitionKey: params.storePartitionKey,
     analyticsDashboardUrl,
+    foodcourtReportUrl,
     receiptDateText: params.receipt.date ?? params.receiptDateIso,
     receiptDateIso: params.receiptDateIso,
     taxAmountYen: parseCurrencyAmount(params.receipt.taxAmount),

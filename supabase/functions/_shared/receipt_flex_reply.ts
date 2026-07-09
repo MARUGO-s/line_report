@@ -259,6 +259,17 @@ export function buildReceiptFlexMessage(
               uri: trendUrl,
             },
           }] : []),
+          ...(context.foodcourtReportUrl ? [{
+            type: 'button',
+            style: 'primary',
+            color: '#1a6fa8',
+            height: 'sm',
+            action: {
+              type: 'uri',
+              label: '📋 日報を記入する',
+              uri: context.foodcourtReportUrl,
+            },
+          }] : []),
         ],
         paddingAll: '12px',
       },
