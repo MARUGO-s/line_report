@@ -1,249 +1,441 @@
-# LINE-WINE Admin（レガシー）
+# LINE Report — MARUGO S 管理システム
 
-> **本リポジトリの本番 LINE レポート（レシート・検索・管理画面）** は別系統です。  
-> → [**README-PAGES.md**](./docs/README-PAGES.md) ／ [**DOCS-INDEX.md**](./docs/DOCS-INDEX.md)
+> **リポジトリ**: `MARUGO-s/line_report`  
+> **本番 GitHub Pages**: `https://marugo-s.github.io/line_report/`  
+> **バックエンド Supabase**: `https://hocbnifuactbvmyjraxy.supabase.co`（プロジェクト名: hocbn）  
+> **最終更新**: 2026-07-09
 
 ---
 
-ワイン価格管理アプリ（Node.js + SQLite + LINE Webhook + OCR連携）の管理API/管理画面です。
+## 目次
 
-## 1. ローカル起動
+1. [システム概要](#1-システム概要)
+2. [画面一覧（全ページ）](#2-画面一覧全ページ)
+3. [アーキテクチャ](#3-アーキテクチャ)
+4. [認証・セキュリティ](#4-認証セキュリティ)
+5. [Supabase Edge Functions](#5-supabase-edge-functions)
+6. [フードコート専用システム（marugoS）](#6-フードコート専用システムmarugos)
+7. [LINE Webhook フロー](#7-line-webhook-フロー)
+8. [フロントエンド共通仕様](#8-フロントエンド共通仕様)
+9. [デプロイ手順](#9-デプロイ手順)
+10. [ローカル開発](#10-ローカル開発)
+11. [ドキュメント索引](#11-ドキュメント索引)
+
+---
+
+## 1. システム概要
+
+マルゴグループ（飲食店チェーン）向けの **LINE 連携型 店舗管理プラットフォーム** です。
+
+### 主な機能
+
+| 機能カテゴリ | 概要 |
+|---|---|
+| **LINE レシート解析** | スタッフが撮影したレジ精算書をAIが自動解析し、売上・客数・予算達成率をLINEに返信 |
+| **売上分析ダッシュボード** | 全店舗の日次・月次売上、前年比、予算比をブラウザで閲覧 |
+| **フードコート AI 分析** | MARUGO S（東京ドーム）専用。来客予測・施策効果・AI経営アドバイスを自動生成 |
+| **フードコート日報** | MARUGO S スタッフが現場の施策・出来事を記録する日報入力システム |
+| **AI 学習進化トラッキング** | 来客予測モデルの精度推移と合否判定をリアルタイム表示 |
+| **予約表** | Gmail 予約メールを自動取り込み、来客履歴と紐付けてブラウザで管理 |
+| **メディア閲覧** | LINE で受け取った画像・動画をブラウザで閲覧・管理 |
+| **会話検索** | 全 LINE グループの会話をキーワード全文検索 |
+| **口コミ・競合分析** | Google マップ・競合店の口コミをAIが自動収集・要約 |
+| **AI 使用料管理** | Groq / Gemini / Claude の API 使用量・コストを一元管理 |
+| **小口現金管理** | 経費レシートをLINEに送るだけで自動記帳 |
+
+---
+
+## 2. 画面一覧（全ページ）
+
+| ページ名 | URL | 認証 | 説明 |
+|---|---|---|---|
+| **管理コンソール** | `/index.html` | ✅ 要 | 全機能の起点。ルーム設定・権限管理・店舗設定 |
+| **売上分析** | `/analytics.html` | ✅ 要 | 全店舗・月別・日次の売上ダッシュボード |
+| **メディア閲覧** | `/media.html` | ✅ 要 | LINE 受信画像・動画のギャラリー |
+| **会話検索** | `/message-search.html` | ✅ 要 | LINE グループ会話の全文検索 |
+| **予約表** | `/reservation.html` | ✅ 要 | 予約カレンダー・来店履歴管理 |
+| **口コミ・競合** | `/reviews.html` | ✅ 要 | Google 口コミ分析・競合店比較 |
+| **AI 使用料** | `/ai-usage.html` | ✅ 要 | AI API コスト・使用量ダッシュボード |
+| **小口現金** | `/petty_cash.html` | ✅ 要 | 経費仕訳・小口現金帳 |
+| **フードコート分析** | `/foodcourt.html` | ✅ 要 | MARUGO S 専用 来客予測・売上分析・施策提言 |
+| **AI学習 進化** | `/foodcourt-evolution.html` | ✅ 要 | MARUGO S 専用 予測モデルの精度推移・合否判定 |
+| **フードコート日報** | `/foodcourt-report.html` | ✅ 要 | MARUGO S 専用 現場日報の入力・閲覧 |
+
+### 認証フロー
+
+1. `index.html`（接続設定）で管理トークン（`lrst_xxxx`）を入力しログイン
+2. セッションは `auth-session.js` が `sessionStorage` + `localStorage`（スコープ別）に保存
+3. 同一ドメイン・同一パス配下のページ間でセッションは自動共有される
+4. LINE リンクからのアクセスは `?lt=lrlt_xxxx`（ワンタイムログインチケット）で自動ログイン
+
+---
+
+## 3. アーキテクチャ
+
+```
+┌─────────────────────────────────────────────────┐
+│         GitHub Pages（静的配信）                  │
+│  HTML + CSS + JS（認証・UI）                     │
+│  https://marugo-s.github.io/line_report/         │
+└──────────────────┬──────────────────────────────┘
+                   │ HTTPS（API呼び出し）
+┌──────────────────▼──────────────────────────────┐
+│     Supabase (hocbn)                             │
+│  ┌────────────────┐  ┌────────────────────────┐  │
+│  │  Edge Functions│  │      Database          │  │
+│  │  ・line-webhook│  │  ・line_receipt__*     │  │
+│  │  ・admin-api   │  │  ・line_webhook_raw__* │  │
+│  │  ・各種 cron   │  │  ・foodcourt_*         │  │
+│  └────────┬───────┘  │  ・reservation_*       │  │
+│           │          │  ・admin_dashboard_*   │  │
+│  ┌────────▼───────┐  └────────────────────────┘  │
+│  │ AI 外部API連携  │                              │
+│  │ ・Groq (主力)  │                              │
+│  │ ・Gemini       │                              │
+│  │ ・Claude       │                              │
+│  └────────────────┘                              │
+└─────────────────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────┐
+│         LINE Messaging API                       │
+│  グループチャット / トークルームでの              │
+│  レシート送信・会話・返信                         │
+└─────────────────────────────────────────────────┘
+```
+
+### 設定の単一ソース
+
+`pages-config.js` がフロントエンド全体で使う URL・店舗情報を一元管理します。
+
+```javascript
+PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co'  // 全 API の向き先
+ADMIN_SURFACE = 'line_report'                               // 認証面識別子
+```
+
+---
+
+## 4. 認証・セキュリティ
+
+### トークンの種類
+
+| 種類 | プレフィックス | 有効期限 | 用途 |
+|---|---|---|---|
+| **ログインリンクトークン（lt）** | `lrlt_` | 24時間・1回限り | LINE リンクでの自動ログイン用 |
+| **セッショントークン（st）** | `lrst_` | 3日間 | ブラウザが保持するセッション |
+| **管理トークン** | なし（生値） | 無期限 | `ADMIN_DASHBOARD_TOKEN` 環境変数の値 |
+
+### ストレージ方針（`auth-session.js`）
+
+- 生の管理トークンは永続化しない（初回読込時に自動削除）
+- セッショントークンは `sessionStorage` + スコープ別 `localStorage` に保存
+- スコープ = `origin + ディレクトリパス` のハッシュ → 同一アプリ配下でのみ共有
+
+### 店舗スコープ（marugoS 等）
+
+LINE リンクから開いた画面はセッション作成時に `store_partition_key` がメタデータに付与され、**その店舗のデータのみ**閲覧・操作できる。
+
+---
+
+## 5. Supabase Edge Functions
+
+### 常駐 Function 一覧
+
+| Function 名 | トリガー | 役割 |
+|---|---|---|
+| `line-webhook` | LINE Webhook（店舗別） | レシート解析・会話応答・予約受付の全ハンドリング |
+| `line-admin-webhook` | LINE Webhook（@392hdime 管理Bot） | 新規ユーザー・ルームの承認専用 |
+| `admin-api` | HTTPS リクエスト | 全管理画面の API バックエンド |
+| `admin-line-test-push` | 手動 / テスト | LINE へのテスト Push 送信 |
+
+### Cron Function 一覧
+
+| Function 名 | 実行時刻（JST） | 役割 |
+|---|---|---|
+| `foodcourt-forecast-cron` | 毎朝 05:00 | 来客予測モデルの学習・更新（marugoS 専用） |
+| `gmail-alert-cron` | 定期 | Gmail 予約メール取込 → LINE 通知 |
+| `receipt-midreport-cron` | 定期 | 月中の売上速報レポートを LINE に送信 |
+| `receipt-sheets-sync-cron` | 定期 | Supabase ↔ Google スプレッドシート 同期 |
+| `reservation-today-cron` | 毎朝 | 当日予約を LINE に通知 |
+| `review-alert-cron` | 定期 | 新着口コミを検出して LINE アラート |
+| `room-messages-retention-cron` | 定期 | 古いメッセージの自動削除 |
+| `tokyo-dome-events-cron` | 定期 | 東京ドームイベント情報を自動取得・更新 |
+| `tokyo-dome-weekly-cron` | 毎週 | 翌週のドームイベントスケジュールを LINE 配信 |
+| `weather-daily-cron` | 毎日 | 気象データを取得・DB に保存 |
+| `pv-japan-alert-cron` | 定期 | PV ジャパン関連アラート |
+
+### Edge Secrets（hocbn に設定が必要な環境変数）
+
+```
+GROQ_API_KEY
+GEMINI_API_KEY
+CLAUDE_API_KEY（Anthropic）
+LINE_CHANNEL_SECRET__{STORE_KEY}  例: LINE_CHANNEL_SECRET__MARUGO_S
+LINE_CHANNEL_ACCESS_TOKEN__{STORE_KEY}
+ADMIN_DASHBOARD_TOKEN
+GMAIL_CLIENT_ID
+GMAIL_CLIENT_SECRET
+GMAIL_REFRESH_TOKEN
+GMAIL_ALERT_ENABLED
+```
+
+---
+
+## 6. フードコート専用システム（marugoS）
+
+MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）専用の高度な分析基盤です。
+
+### 6-1. 来客予測モデル（ループ①）
+
+毎晩 JST 05:00 に 2 つのモデルをバックテストで競わせ、誤差の小さい方を自動採用します。
+
+```
+レガシー乗算モデル (mult-factor-v1)
+  客数 = ベース × 曜日係数 × イベント係数 × 天気係数
+
+ポアソン回帰GLM (glm-poisson-v1)
+  log(客数) = 切片 + 曜日 + イベント種別 + 天気
+              + log(1 + 予想動員数) + トレンド
+  ※ リッジ強度 λ は {1,2,4,8,16} から自動選択
+```
+
+→ MAPE（平均絶対誤差率）が小さい方を当日の予測に採用  
+→ 採用結果は `foodcourt_forecast_factors.model_selection` に記録
+
+### 6-2. AI 品質評価ループ（ループ②）
+
+5エージェントAI が生成した回答を「第6の評価AI」が5軸で採点し、不合格なら再生成します。
+
+```
+専門AI × 3（来客分析 / 気象 / 施策提言）
+  ↓
+反証AI（矛盾・過信を指摘）
+  ↓
+統合AI⑤（総合回答を生成）
+  ↓
+評価AI⑥（正確性・論理性・専門性・実用性・根拠 の5軸で採点）
+  合格基準: 総合90点以上 / 各項目80点以上
+  ↓ 不合格なら
+改善点だけを統合AI に渡して再生成（最大N回）
+  ↓ 合格した回答を返す
+```
+
+### 6-3. AI 学習進化ページ（foodcourt-evolution.html）
+
+- **合格判定ライン**: デフォルト 65点（現行データ量が少ないため暫定値）
+- スライダーで任意に変更可（30〜95点）
+- 設定値は Supabase DB（`/settings/console`）にも保存（デバイス間共有）
+- `localStorage` にも保存（即時反映・オフライン対応）
+- **合否バッジ**: 🟢 合格・自動採用中 / 🔴 評価点不足（再提出＆再評価中）
+
+### 6-4. フードコート日報（foodcourt-report.html）
+
+MARUGO S スタッフが毎日記録する現場日報システム。
+
+**記録できる内容:**
+
+| フィールド | 説明 |
+|---|---|
+| 担当者名 | 当日の責任者 |
+| 施策（actions） | カテゴリ付き自由記述（販促 / メニュー / 接客 / 環境 / スタッフ / その他） |
+| 客数への影響 | 担当者評価（良い / 悪い / 変わらず） |
+| 売上への影響 | 担当者評価 |
+| 天気・気候メモ | 体感・特記事項 |
+| イベント・特記事項 | 当日の特別事項 |
+| 動員数 | 東京ドームの実際の集客数（予測モデルの精度向上に使用） |
+| 課題・問題点 | 改善が必要な事項 |
+| 翌日への申し送り | 引継ぎ事項 |
+| 自由メモ | その他 |
+
+**レシートカードからのアクセス（2026-07-09 実装）:**  
+MARUGO S のレシート解析カードに「📋 日報を記入する」ボタンを追加。  
+タップするとワンタイムログインチケット（`?lt=`）付き URL で自動ログインして日報ページへ遷移。
+
+### 6-5. 主な DB テーブル（marugoS 関連）
+
+| テーブル名 | 内容 |
+|---|---|
+| `line_receipt__marugoS` | レシート解析結果（売上・客数・予算比較） |
+| `foodcourt_daily_facts` | 来客予測の学習データ（気象・イベント・実績客数） |
+| `foodcourt_forecast_predictions` | 翌日〜14日先の予測値 |
+| `foodcourt_forecast_factors` | 係数・モデル選択結果・バックテスト誤差 |
+| `foodcourt_forecast_history` | 予測精度の推移ログ |
+| `foodcourt_daily_logs` | 日報データ（施策・評価・申し送り） |
+| `tokyo_dome_events` | 東京ドームイベント一覧（動員予測値含む） |
+
+---
+
+## 7. LINE Webhook フロー
+
+### レシート解析フロー
+
+```
+スタッフが LINE グループに精算書画像を送信
+  ↓
+line-webhook が受信
+  ↓
+Groq で事前判定（レシートか否か）
+  ↓ レシートの可能性あり
+「解析中…」プッシュ通知を送信
+  ↓
+Gemini（高精度店舗）or Groq でレシート解析
+  ↓
+売上・客数・予算データを DB に保存
+  ↓
+Flex メッセージで結果返信（店名・日付・消費税・総売上・客数・客単価・月間集計・予算比・前年比）
+  ↓
+フッターボタン:
+  「この結果を修正」（修正コマンドをLINEに送信）
+  「この解析結果を削除」（削除コマンドをLINEに送信）
+  「売上推移を見る」（analytics.html へのワンタイムログインリンク）
+  「📋 日報を記入する」※marugoS のみ（foodcourt-report.html へのワンタイムログインリンク）
+```
+
+### AI使用モデルの使い分け
+
+| 店舗・用途 | 使用モデル |
+|---|---|
+| 通常レシート解析（大多数） | Groq（Llama 4 Scout） |
+| 高精度が必要な店舗 | Gemini 2.0 Flash |
+| 売上集計（Claude採用店） | Claude Haiku（現在は空＝全店Groq） |
+| 経費レシート再解析 | Claude |
+| AI 品質評価ループ | Claude / Gemini |
+
+---
+
+## 8. フロントエンド共通仕様
+
+### 共通 JS ファイル
+
+| ファイル | 役割 |
+|---|---|
+| `pages-config.js` | Supabase URL・店舗名マップ・API パス生成 |
+| `auth-session.js` | ログイン・セッション管理・ワンタイムトークン交換 |
+| `app-theme.js` | ダーク / ライトテーマ切替 |
+| `menu-logout.js` | サイドバーのログアウト処理 |
+| `site-cache.js` | キャッシュ制御 |
+
+### サイドバーナビゲーション
+
+全ページ共通の左サイドバー（PC）/ ハンバーガーメニュー（スマホ）を実装。  
+LINE 経由アクセス（`?from=line`）時は一部メニューを自動非表示。
+
+### 認証バッジ
+
+ヘッダー右上に接続状態を表示：
+- 🟢 `接続済み` — セッション有効
+- ⚫ `未接続` — 未ログイン → ログインフォームを表示
+
+### localStorage の用途
+
+| キー | 用途 |
+|---|---|
+| `fc_theme` / `fc_report_theme` | テーマ設定（ダーク/ライト）の記憶 |
+| `fc_passing_score` | AI評価合格ラインの即時反映用キャッシュ |
+| `line_summary_admin_session__scope__{hash}` | スコープ別セッショントークン |
+
+---
+
+## 9. デプロイ手順
+
+### フロントエンド（GitHub Pages）
 
 ```bash
-cd /Users/yoshito/Desktop/LINE-WINE
-npm install
-cp .env.example .env
-npm run start
+git add .
+git commit -m "変更内容の説明"
+git push origin main
+# → GitHub Actions が自動で Pages に配信（約1〜2分）
 ```
 
-- 管理画面: `http://127.0.0.1:3200/admin/`
-- ヘルス: `http://127.0.0.1:3200/api/health`
-- LINE Webhook: `http://127.0.0.1:3200/webhooks/line`
+### Edge Functions（Supabase）
 
-## 2. 環境変数
-
-```env
-PORT=3200
-HOST=127.0.0.1
-DB_PATH=./wine_price.db
-
-LINE_CHANNEL_SECRET=
-LINE_CHANNEL_ACCESS_TOKEN=
-
-OCR_ENDPOINT=
-OCR_AUTH_TOKEN=
-OCR_REQUEST_FORMAT=json_base64
-OCR_BASE64_FIELD=imageBase64
-OCR_IMAGE_FIELD=image
-OCR_EXTRA_FIELDS=
-OCR_TIMEOUT_MS=12000
-WEB_SEARCH_ENABLED=false
-WEB_SEARCH_TIMEOUT_MS=5000
-WEB_SEARCH_MAX_RESULTS=3
-WEB_SUMMARY_MAX_SOURCES=6
-WEB_SEARCH_PROVIDER=auto
-WEB_SEARCH_PRIORITY_DOMAINS=www.wine-searcher.com,www.vivino.com,www.cellartracker.com
-WEB_SEARCH_QUERY_SUFFIX=wine
-WEB_SEARCH_WIKIPEDIA_LANGS=en,ja
-SERPAPI_API_KEY=
-WEB_SEARCH_SERPAPI_ENGINE=google
-WEB_SEARCH_SERPAPI_HL=ja
-WEB_SEARCH_SERPAPI_GL=jp
-WEB_SEARCH_SERPAPI_NUM=5
-LLM_PROVIDER=auto
-VISION_PROVIDER=groq
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.0-flash-lite
-GEMINI_TIMEOUT_MS=5000
-GEMINI_MAX_CANDIDATES=3
-GEMINI_WINE_FLOW_ENABLED=true
-GEMINI_WINE_ANALYSIS_MODEL=gemini-2.0-flash-lite
-GEMINI_WINE_REPLY_MODEL=gemini-2.0-flash-lite
-GEMINI_WINE_TIMEOUT_MS=12000
-GROQ_API_KEY=
-GROQ_MODEL=llama-3.1-8b-instant
-GROQ_TIMEOUT_MS=5000
-GROQ_MAX_CANDIDATES=3
-GROQ_WINE_FLOW_ENABLED=true
-GROQ_WINE_ANALYSIS_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
-GROQ_WINE_REPLY_MODEL=llama-3.1-8b-instant
-GROQ_WINE_TIMEOUT_MS=12000
-USD_TO_JPY=150
-EUR_TO_JPY=165
-GEMINI_VISION_ENABLED=true
-GEMINI_VISION_MODEL=gemini-2.0-flash-lite
-GEMINI_VISION_TIMEOUT_MS=12000
-GEMINI_VISION_MAX_CANDIDATES=3
-GEMINI_VISION_MAX_IMAGE_BYTES=3500000
-GROQ_VISION_ENABLED=true
-GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
-GROQ_VISION_TIMEOUT_MS=12000
-GROQ_VISION_MAX_CANDIDATES=3
-GROQ_VISION_MAX_IMAGE_BYTES=3500000
-
-ADMIN_TOKEN=
-BACKUP_DIR=./backups
-BACKUP_RETENTION=30
-```
-
-- `ADMIN_TOKEN`: 設定すると `/api/*`（`/api/health` 以外）で管理認証が必須
-- `BACKUP_DIR`: バックアップ `.db` の保存先
-- `BACKUP_RETENTION`: 保持世代数（古いファイルは自動削除）
-
-### OCR設定例（無料テスト向け）
-
-`ocr.space` を使う場合:
-
-```env
-OCR_ENDPOINT=https://api.ocr.space/parse/image
-OCR_REQUEST_FORMAT=multipart
-OCR_IMAGE_FIELD=file
-OCR_EXTRA_FIELDS=apikey=helloworld&language=jpn&isOverlayRequired=false&OCREngine=1
-```
-
-本番利用では `helloworld` ではなく、正式APIキーへ置き換えてください。
-
-### 国会図書館OCR-Liteを使う場合（推奨）
-
-NDLOCR-Lite は公式にHTTP APIを提供していないため、このリポジトリ内の `ocr-bridge` でAPI化して利用します。
-
-- 詳細手順: `ocr-bridge/README.md`
-
-`line-wine-api` 側の設定例:
-
-```env
-OCR_ENDPOINT=https://<your-ocr-bridge>.onrender.com/ocr
-OCR_AUTH_TOKEN=<OCR_BRIDGE_TOKEN>
-OCR_REQUEST_FORMAT=multipart
-OCR_IMAGE_FIELD=image
-OCR_EXTRA_FIELDS=
-OCR_TIMEOUT_MS=60000
-```
-
-注: `line-wine-ocr` を Render Free で動かすと、OCR実行時にメモリ不足になる可能性があります。実運用は `Standard (2GB)` 以上を推奨します。
-
-### DB未一致時のWeb検索フォールバック
-
-`WEB_SEARCH_ENABLED=true` を設定すると、OCRでDB照合できなかった場合に Web 候補を返信します。
-
-```env
-WEB_SEARCH_ENABLED=true
-WEB_SEARCH_TIMEOUT_MS=5000
-WEB_SEARCH_MAX_RESULTS=3
-WEB_SUMMARY_MAX_SOURCES=6
-WEB_SEARCH_PROVIDER=auto
-WEB_SEARCH_PRIORITY_DOMAINS=www.wine-searcher.com,www.vivino.com,www.cellartracker.com
-WEB_SEARCH_QUERY_SUFFIX=wine
-WEB_SEARCH_WIKIPEDIA_LANGS=en,ja
-SERPAPI_API_KEY=<Renderの秘密環境変数>
-WEB_SEARCH_SERPAPI_ENGINE=google
-WEB_SEARCH_SERPAPI_HL=ja
-WEB_SEARCH_SERPAPI_GL=jp
-WEB_SEARCH_SERPAPI_NUM=5
-LLM_PROVIDER=auto
-VISION_PROVIDER=groq
-GEMINI_API_KEY=<Renderの秘密環境変数>
-GEMINI_MODEL=gemini-2.0-flash-lite
-GEMINI_TIMEOUT_MS=5000
-GEMINI_MAX_CANDIDATES=3
-GEMINI_WINE_FLOW_ENABLED=true
-GEMINI_WINE_ANALYSIS_MODEL=gemini-2.0-flash-lite
-GEMINI_WINE_REPLY_MODEL=gemini-2.0-flash-lite
-GEMINI_WINE_TIMEOUT_MS=12000
-GROQ_API_KEY=<Renderの秘密環境変数>
-GROQ_MODEL=llama-3.1-8b-instant
-GROQ_TIMEOUT_MS=5000
-GROQ_MAX_CANDIDATES=3
-GROQ_WINE_FLOW_ENABLED=true
-GROQ_WINE_ANALYSIS_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
-GROQ_WINE_REPLY_MODEL=llama-3.1-8b-instant
-GROQ_WINE_TIMEOUT_MS=12000
-USD_TO_JPY=150
-EUR_TO_JPY=165
-GEMINI_VISION_ENABLED=true
-GEMINI_VISION_MODEL=gemini-2.0-flash-lite
-GEMINI_VISION_TIMEOUT_MS=12000
-GEMINI_VISION_MAX_CANDIDATES=3
-GEMINI_VISION_MAX_IMAGE_BYTES=3500000
-GROQ_VISION_ENABLED=true
-GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
-GROQ_VISION_TIMEOUT_MS=12000
-GROQ_VISION_MAX_CANDIDATES=3
-GROQ_VISION_MAX_IMAGE_BYTES=3500000
-```
-
-- `WEB_SEARCH_PROVIDER=auto` の場合、`SERPAPI_API_KEY` が設定されていれば SerpAPI（Google検索）を優先し、未設定時は Wikipedia / DuckDuckGo を使います。
-- `WEB_SEARCH_PRIORITY_DOMAINS` の既定値は `www.wine-searcher.com,www.vivino.com,www.cellartracker.com` です。まずこの3サイトを `site:` 指定で検索し、ヒット結果を統合して要約します。
-- 3サイトでヒットしない場合のみ、通常のWeb検索（SerpAPI全体検索 / Wikipedia / DuckDuckGo）へフォールバックします。
-- `WEB_SUMMARY_MAX_SOURCES` は要約時に参照するWebソース数です。市場価格/セパージュ/味わい/特徴/評価ポイント/受賞歴/飲み頃/ワイナリー歴史の抽出率を上げたい場合は `6-8` を推奨します。
-- `WEB_SEARCH_PROVIDER=serpapi` で SerpAPI のみ、`WEB_SEARCH_PROVIDER=free` で無料ソースのみを使います。
-- `LLM_PROVIDER=auto` では Gemini APIキーがあれば Gemini を優先し、未設定なら Groq を使います。固定する場合は `gemini` か `groq` を指定します（Web要約/解析のLLM）。
-- `VISION_PROVIDER=groq` で、画像候補抽出（ラベル画像入力）は Groq を優先します。`auto` の場合は `groq -> gemini` の順で利用します。
-- Gemini最小コスト運用は `GEMINI_MODEL=gemini-2.0-flash-lite` を推奨します。
-- `GEMINI_API_KEY` を設定すると、OCR誤字補正・Web要約・LINE返信を Gemini で実行できます。
-- `GROQ_API_KEY` を設定すると、OCR誤字を補正した候補名を先に生成してから Web 検索します。
-- `GROQ_VISION_ENABLED=true` で、画像から Groq Vision 候補名を抽出して DB照合精度を上げます。
-- `GROQ_WINE_FLOW_ENABLED=true` で、DB未一致時に「画像+Web根拠」から構造化JSONを作成し、LINE向けに再要約して返信します。
-- `USD_TO_JPY` / `EUR_TO_JPY` で価格換算レートを固定指定できます（LINE返信の価格帯は常に日本円表示）。
-- DB未一致時の返信は `1.このワインの正体 / 2.生産者・産地 / 3.生産者・ワイナリーの歴史 / 4.セパージュ / 5.味わい / 6.受賞・評価ポイント（年付き履歴） / 7.価格帯（円表示）` の順で返し、末尾に `参照ソース / 検索モード / 参照URL` を付与します。
-
-## 3. 管理認証
-
-- 管理画面の「管理認証」で `ADMIN_TOKEN` を保存すると、以降のAPI呼び出しに `x-admin-token` ヘッダーが付きます。
-- APIを直接叩く場合は以下のどちらかを指定します。
-  - `x-admin-token: <ADMIN_TOKEN>`
-  - `Authorization: Bearer <ADMIN_TOKEN>`
-
-## 4. バックアップ
-
-- `GET /api/admin/backups`: バックアップ一覧
-- `POST /api/admin/backup`: 手動バックアップ作成
-
-例:
+`supabase/functions/**` に変更をプッシュすると `.github/workflows/deploy-edge-functions.yml` が自動実行されます。
 
 ```bash
-curl -sS -X POST 'http://127.0.0.1:3200/api/admin/backup' \
-  -H 'Content-Type: application/json' \
-  -H 'x-admin-token: <ADMIN_TOKEN>' \
-  -d '{"reason":"manual"}'
+# 手動デプロイ（supabase CLI が必要な場合）
+supabase link --project-ref hocbnifuactbvmyjraxy
+supabase functions deploy line-webhook --project-ref hocbnifuactbvmyjraxy --use-api
+supabase functions deploy admin-api --project-ref hocbnifuactbvmyjraxy --use-api
 ```
 
-## 5. 主なAPI
+### DB マイグレーション
 
-- `GET /api/stores`
-- `POST /api/stores`
-- `GET /api/products`
-- `POST /api/products`
-- `GET /api/prices/current`
-- `GET /api/prices/history`
-- `POST /api/prices`
-- `GET /api/ingestion/files`
-- `GET /api/ingestion/files/:id/errors`
-- `GET /api/ingestion/template`
-- `GET /api/ingestion/mappings`
-- `GET /api/ingestion/mappings/:storeId`
-- `POST /api/ingestion/mappings`
-- `POST /api/ingestion/csv`
-- `GET /api/reply-templates`
-- `POST /api/reply-templates`
-- `POST /api/ocr/resolve`
-- `POST /api/ocr/vision-url`
-- `POST /api/line/simulate`
-- `POST /webhooks/line`
+```bash
+supabase db push --project-ref hocbnifuactbvmyjraxy
+```
 
-## 6. 実運用チェックリスト
+---
 
-1. `ADMIN_TOKEN` を必ず設定
-2. HTTPSで公開（LINE Webhook URLもHTTPS必須）
-3. `npm run start` を `pm2` / `systemd` などで常駐化
-4. `/api/health` の死活監視を設定
-5. 定期バックアップ（例: cronで `POST /api/admin/backup` を1日1回）
-6. `backups/` を別ストレージへ二次保管
-7. LINE DevelopersでWebhook URLを本番URLに設定
-8. NDLOCR-Lite を使う場合は `ocr-bridge` の `/health` と `/ocr` も監視
+## 10. ローカル開発
 
-## 7. 備考
+```bash
+# ローカルサーバー起動（ポート 8765）
+./scripts/local-line-report-pages.sh
 
-- 価格登録は `price_history` に追記され、`current_prices` が自動更新されます。
-- 同一CSV（同一ハッシュ）の再投入は `409 Conflict` で拒否されます。
-- 店舗ごとのCSV列マッピングは `store_csv_mappings` に保存されます。
+# アクセス URL
+http://127.0.0.1:8765/line_report/
+
+# 各ページのローカル URL
+http://127.0.0.1:8765/line_report/index.html              # 管理コンソール
+http://127.0.0.1:8765/line_report/analytics.html           # 売上分析
+http://127.0.0.1:8765/line_report/foodcourt.html           # フードコート分析
+http://127.0.0.1:8765/line_report/foodcourt-evolution.html # AI学習 進化
+http://127.0.0.1:8765/line_report/foodcourt-report.html    # フードコート日報
+```
+
+> ローカルでも API は本番 Supabase（hocbn）に接続します。
+
+### テスト用ダミーデータ
+
+```bash
+# ダミー売上・予算を投入
+./scripts/dummy-sales-seed.sh seed-all
+
+# ダミーデータを削除
+./scripts/dummy-sales-seed.sh delete-all
+```
+
+---
+
+## 11. ドキュメント索引
+
+| ドキュメント | 内容 |
+|---|---|
+| [DOCS-INDEX.md](./docs/DOCS-INDEX.md) | 全ドキュメントの索引・用語集 |
+| [CHANGELOG-2026-05.md](./docs/CHANGELOG-2026-05.md) | 2026年5月の機能追加・変更履歴 |
+| [フードコートAIループシステム全体解説.md](./docs/フードコートAIループシステム全体解説.md) | 来客予測ループ・品質評価ループの全体設計 |
+| [フードコートAI分析システム_設計解説.md](./docs/フードコートAI分析システム_設計解説.md) | 5エージェントAI構成の設計書 |
+| [フードコート来客予測モデル.md](./docs/フードコート来客予測モデル.md) | 予測モデルの数理設計詳細 |
+| [フードコート学習システム構造.md](./docs/フードコート学習システム構造.md) | データフロー・学習の仕組み |
+| [フードコート日報システム.md](./docs/フードコート日報システム.md) | 日報システムの設計・APIエンドポイント |
+| [フードコート売上分析_設計書.md](./docs/フードコート売上分析_設計書.md) | 売上分析機能の設計 |
+| [フードコート競合店プロファイル.md](./docs/フードコート競合店プロファイル.md) | 競合分析データの仕様 |
+| [AI_LOOP_ENGINEERING_DESIGN.md](./docs/AI_LOOP_ENGINEERING_DESIGN.md) | 品質評価ループの工学設計書・実装ログ |
+| [LINE-RECEIPT-ANALYSIS.md](./docs/LINE-RECEIPT-ANALYSIS.md) | レシート解析の仕様・プロンプト設計 |
+| [LINE-SEARCH-PRESENTATION.md](./docs/LINE-SEARCH-PRESENTATION.md) | LINE 会話検索の設計 |
+| [LINE-GROUP-BOT-IMPORTANT.md](./docs/LINE-GROUP-BOT-IMPORTANT.md) | LINE グループBot の注意事項 |
+| [LINE-USER-APPROVAL-SECURITY.md](./docs/LINE-USER-APPROVAL-SECURITY.md) | ユーザー承認・セキュリティ設計 |
+| [ROOM-LINKING-GUIDE.md](./docs/ROOM-LINKING-GUIDE.md) | ルーム自動連携の仕組みとリスク |
+| [ROOM-PERMISSION-DETAIL-GUIDE.md](./docs/ROOM-PERMISSION-DETAIL-GUIDE.md) | ルーム権限の優先順位・詳細仕様 |
+| [ROOM-SELF-CONFIG-GUIDE.md](./docs/ROOM-SELF-CONFIG-GUIDE.md) | スタッフによるルーム設定変更 |
+| [ROOM-PERMISSION-TEST-CHECKLIST.md](./docs/ROOM-PERMISSION-TEST-CHECKLIST.md) | 権限設定のテストチェックリスト |
+| [RESERVATION-GMAIL-GUIDE.md](./docs/RESERVATION-GMAIL-GUIDE.md) | Gmail 予約連携の設定・運用 |
+| [SECURITY.md](./docs/SECURITY.md) | セキュリティポリシー |
+| [README-PAGES.md](./docs/README-PAGES.md) | Pages配信の技術詳細（旧メイン README） |
+| [操作マニュアル.md](./docs/操作マニュアル.md) | スタッフ向け操作手順 |
+| [小口経費の登録手順.md](./docs/小口経費の登録手順.md) | 経費レシートの登録方法 |
+| [スプレッドシート売上バックアップ-GAS.md](./docs/スプレッドシート売上バックアップ-GAS.md) | Google スプレッドシート連携（GAS）の設定 |
+| [店舗運用修正記録.md](./docs/店舗運用修正記録.md) | 店舗ごとの設定変更・運用メモ |
+
+---
+
+## 変更履歴（直近）
+
+| 日付 | 変更内容 |
+|---|---|
+| 2026-07-09 | フードコート日報ページ（`foodcourt-report.html`）の認証バグ修正（themeBtn ID 不一致によりログイン済みでも「未接続」になる問題） |
+| 2026-07-09 | レシート解析カードに「📋 日報を記入する」ボタンを追加（marugoS 専用・ワンタイムログインリンク付き） |
+| 2026-07-08 | AI 評価合格ラインのスライダー設定を Supabase DB に保存するよう変更（複数デバイス間で共有可能） |
+| 2026-07-08 | フードコート日報システム（`foodcourt-report.html`）を新設 |
+| 2026-07-07 | AI 学習進化ページに「再提出＆再評価中」バッジと合格ライン設定スライダーを追加 |
+| 2026-07-07 | 来客予測ループ（ループ①）・AI品質評価ループ（ループ②）を本番デプロイ |
+| 2026-07-06 | フードコート日報ページにナビゲーションバーを追加 |
