@@ -1373,7 +1373,7 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
     if (missing > 0) L.push(`注: イベントありだが動員予想未入力の日が${missing}日ある。規模比較は入力日のみ有効。`)
   }
 
-  // プロ野球（巨人戦）の開始時間・勝敗結果・試合時間・点差の影響分析
+  // プロ野球（巨人戦）の開始時間・勝敗結果・試合時間・点差・連勝連敗の影響分析
   const baseballWins: number[] = []; const baseballLosses: number[] = []
   const baseballWinsS: number[] = []; const baseballLossesS: number[] = []
   const baseballDay: number[] = []; const baseballNight: number[] = []
@@ -1383,6 +1383,9 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
   const baseballClose: number[] = []; const baseballCloseS: number[] = []
   const baseballMid: number[] = []; const baseballMidS: number[] = []
   const baseballBlowout: number[] = []; const baseballBlowoutS: number[] = []
+  const baseballWinStreak: number[] = []; const baseballWinStreakS: number[] = []
+  const baseballLossStreak: number[] = []; const baseballLossStreakS: number[] = []
+  const baseballNoStreak: number[] = []; const baseballNoStreakS: number[] = []
 
   for (const r of daily) {
     const hits = byDate.get(r.date) || []
@@ -1438,11 +1441,23 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
           baseballBlowout.push(g); baseballBlowoutS.push(s)
         }
       }
+
+      // 5) 連勝・連敗別 (streak_before)
+      if (bb.streak_before != null && bb.streak_before !== undefined) {
+        const streak = bb.streak_before
+        if (streak >= 2) {
+          baseballWinStreak.push(g); baseballWinStreakS.push(s)
+        } else if (streak <= -2) {
+          baseballLossStreak.push(g); baseballLossStreakS.push(s)
+        } else {
+          baseballNoStreak.push(g); baseballNoStreakS.push(s)
+        }
+      }
     }
   }
 
   const bbL: string[] = []
-  if (baseballWins.length || baseballLosses.length || baseballDay.length || baseballNight.length || baseballShort.length || baseballLong.length || baseballClose.length || baseballMid.length || baseballBlowout.length) {
+  if (baseballWins.length || baseballLosses.length || baseballDay.length || baseballNight.length || baseballShort.length || baseballLong.length || baseballClose.length || baseballMid.length || baseballBlowout.length || baseballWinStreak.length || baseballLossStreak.length || baseballNoStreak.length) {
     bbL.push('【プロ野球詳細分析】')
     if (baseballWins.length && baseballLosses.length) {
       bbL.push(`・勝敗別: 勝ち試合(${baseballWins.length}日) 平均客数 ${Math.round(fcAvg(baseballWins)!)}人 / 売上 ${fcYen(fcAvg(baseballWinsS)!)} vs 負け試合(${baseballLosses.length}日) 平均客数 ${Math.round(fcAvg(baseballLosses)!)}人 / 売上 ${fcYen(fcAvg(baseballLossesS)!)}`)
@@ -1459,6 +1474,13 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
       if (baseballMid.length) parts.push(`中点差(2〜4点差: ${baseballMid.length}日) 平均客数 ${Math.round(fcAvg(baseballMid)!)}人/売上 ${fcYen(fcAvg(baseballMidS)!)}`)
       if (baseballBlowout.length) parts.push(`大点差(5点差以上: ${baseballBlowout.length}日) 平均客数 ${Math.round(fcAvg(baseballBlowout)!)}人/売上 ${fcYen(fcAvg(baseballBlowoutS)!)}`)
       bbL.push(`・接戦度・点差別: ${parts.join(' vs ')}`)
+    }
+    if (baseballWinStreak.length || baseballLossStreak.length || baseballNoStreak.length) {
+      const parts: string[] = []
+      if (baseballWinStreak.length) parts.push(`連勝中(2連勝以上: ${baseballWinStreak.length}日) 平均客数 ${Math.round(fcAvg(baseballWinStreak)!)}人/売上 ${fcYen(fcAvg(baseballWinStreakS)!)}`)
+      if (baseballLossStreak.length) parts.push(`連敗中(2連敗以上: ${baseballLossStreak.length}日) 平均客数 ${Math.round(fcAvg(baseballLossStreak)!)}人/売上 ${fcYen(fcAvg(baseballLossStreakS)!)}`)
+      if (baseballNoStreak.length) parts.push(`連勝連敗なし(-1〜+1: ${baseballNoStreak.length}日) 平均客数 ${Math.round(fcAvg(baseballNoStreak)!)}人/売上 ${fcYen(fcAvg(baseballNoStreakS)!)}`)
+      bbL.push(`・直前の連勝・連敗状況別: ${parts.join(' vs ')}`)
     }
     L.push(bbL.join('\n'))
   }
@@ -1510,6 +1532,8 @@ export type VenueEvent = {
   game_result?: string | null
   game_score?: string | null
   score_margin?: number | null
+  streak_before?: number | null
+  streak_after?: number | null
 }
 export type ForecastRow = { target_date: string; metric: string; predicted: number; predicted_low?: number | null; predicted_high?: number | null; actual?: number | null; model_version?: string }
 
@@ -1530,6 +1554,9 @@ function fcFormatEventsForDay(hits: VenueEvent[]): string {
     if (h.game_result) details.push(`結果:${h.game_result}`)
     if (h.game_score) details.push(`スコア:${h.game_score}`)
     if (h.score_margin != null && h.score_margin !== undefined) details.push(`点差:${h.score_margin}点差`)
+    if (h.streak_before != null && h.streak_before !== undefined && h.streak_before !== 0) {
+      details.push(h.streak_before > 0 ? `${h.streak_before}連勝中` : `${Math.abs(h.streak_before)}連敗中`)
+    }
     return `${h.category}${vl ? `@${vl}` : ''}:${h.title}（${details.join('／')}）`
   }).join('｜')
 }

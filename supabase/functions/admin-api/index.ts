@@ -414,6 +414,42 @@ async function loadVenueEventsForReports(
   const hiCand = [addDaysIso(maxBase > todayIso ? maxBase : todayIso, 45), addDaysIso(todayIso, 400)].sort()
   const lo = loCand[0]
   const hi = hiCand[hiCand.length - 1]
+  const { data: gamesData } = await supabase
+    .from("giants_game_results")
+    .select("game_date, game_result")
+    .order("game_date", { ascending: true })
+    
+  const streakBeforeMap: Record<string, number> = {}
+  const streakAfterMap: Record<string, number> = {}
+  let currentStreak = 0
+  if (gamesData && Array.isArray(gamesData)) {
+    for (const g of gamesData) {
+      const d = String(g.game_date ?? "").slice(0, 10)
+      if (!d) continue
+      
+      streakBeforeMap[d] = currentStreak
+      
+      const res = g.game_result
+      if (res === "○") {
+        if (currentStreak > 0) {
+          currentStreak += 1
+        } else {
+          currentStreak = 1
+        }
+      } else if (res === "●") {
+        if (currentStreak < 0) {
+          currentStreak -= 1
+        } else {
+          currentStreak = -1
+        }
+      } else if (res === "△") {
+        currentStreak = 0
+      }
+      
+      streakAfterMap[d] = currentStreak
+    }
+  }
+
   const { data, error } = await supabase
     .from("tokyo_dome_events")
     .select("event_date, title, category, venue, is_japan, note, expected_attendance, start_time, game_duration, game_result, game_score, score_margin")
@@ -422,22 +458,27 @@ async function loadVenueEventsForReports(
     .order("event_date", { ascending: true })
     .limit(600)
   if (error || !Array.isArray(data)) return []
-  return data.map((e) => ({
-    event_date: String((e as { event_date?: unknown }).event_date ?? "").slice(0, 10),
-    title: String((e as { title?: unknown }).title ?? ""),
-    category: String((e as { category?: unknown }).category ?? ""),
-    venue: String((e as { venue?: unknown }).venue ?? "tokyo-dome"),
-    is_japan: (e as { is_japan?: unknown }).is_japan === true,
-    note: String((e as { note?: unknown }).note ?? ""),
-    expected_attendance: (e as { expected_attendance?: unknown }).expected_attendance == null
-      ? null
-      : Number((e as { expected_attendance?: unknown }).expected_attendance),
-    start_time: (e as { start_time?: unknown }).start_time ? String((e as { start_time?: unknown }).start_time) : null,
-    game_duration: (e as { game_duration?: unknown }).game_duration ? String((e as { game_duration?: unknown }).game_duration) : null,
-    game_result: (e as { game_result?: unknown }).game_result ? String((e as { game_result?: unknown }).game_result) : null,
-    game_score: (e as { game_score?: unknown }).game_score ? String((e as { game_score?: unknown }).game_score) : null,
-    score_margin: (e as { score_margin?: unknown }).score_margin == null ? null : Number((e as { score_margin?: unknown }).score_margin),
-  })).filter((e) => e.event_date && e.title)
+  return data.map((e) => {
+    const dateStr = String((e as { event_date?: unknown }).event_date ?? "").slice(0, 10)
+    return {
+      event_date: dateStr,
+      title: String((e as { title?: unknown }).title ?? ""),
+      category: String((e as { category?: unknown }).category ?? ""),
+      venue: String((e as { venue?: unknown }).venue ?? "tokyo-dome"),
+      is_japan: (e as { is_japan?: unknown }).is_japan === true,
+      note: String((e as { note?: unknown }).note ?? ""),
+      expected_attendance: (e as { expected_attendance?: unknown }).expected_attendance == null
+        ? null
+        : Number((e as { expected_attendance?: unknown }).expected_attendance),
+      start_time: (e as { start_time?: unknown }).start_time ? String((e as { start_time?: unknown }).start_time) : null,
+      game_duration: (e as { game_duration?: unknown }).game_duration ? String((e as { game_duration?: unknown }).game_duration) : null,
+      game_result: (e as { game_result?: unknown }).game_result ? String((e as { game_result?: unknown }).game_result) : null,
+      game_score: (e as { game_score?: unknown }).game_score ? String((e as { game_score?: unknown }).game_score) : null,
+      score_margin: (e as { score_margin?: unknown }).score_margin == null ? null : Number((e as { score_margin?: unknown }).score_margin),
+      streak_before: streakBeforeMap[dateStr] ?? 0,
+      streak_after: streakAfterMap[dateStr] ?? 0,
+    }
+  }).filter((e) => e.event_date && e.title)
 }
 
 // 基準店(marugoS)の日次「正本」客数/売上/組数。
