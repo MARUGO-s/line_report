@@ -56,13 +56,13 @@ Deno.serve(async (req) => {
 
   const { data: roomSettings, error: settingsError } = await supabase
     .from("room_summary_settings")
-    .select("room_id, is_enabled, today_reservation_alert_enabled, today_reservation_alert_hour, today_reservation_alert_minute, receipt_report_store_partition_key")
+    .select("room_id, is_enabled, today_reservation_alert_enabled, today_reservation_alert_hour, today_reservation_alert_minute, receipt_report_store_partition_key, room_name")
   if (settingsError) {
     return json({ ok: false, error: `Failed to load room_summary_settings: ${settingsError.message}` }, 500)
   }
 
   // いまこの瞬間(JST)に送るべきルームを抽出（時刻一致＋トグルON＋ルーム有効）。
-  const targetRooms: Array<{ roomId: string; storeKey: string }> = []
+  const targetRooms: Array<{ roomId: string; storeKey: string; roomName: string }> = []
   for (const row of (Array.isArray(roomSettings) ? roomSettings : [])) {
     const roomId = String(row.room_id ?? "").trim()
     if (!roomId) continue
@@ -71,7 +71,11 @@ Deno.serve(async (req) => {
     const h = row.today_reservation_alert_hour != null ? Number(row.today_reservation_alert_hour) : DEFAULT_ALERT_HOUR_JST
     const m = row.today_reservation_alert_minute != null ? Number(row.today_reservation_alert_minute) : DEFAULT_ALERT_MINUTE_JST
     if (jst.hour !== h || jst.minute !== m) continue
-    targetRooms.push({ roomId, storeKey: String(row.receipt_report_store_partition_key ?? "").trim() })
+    targetRooms.push({
+      roomId,
+      storeKey: String(row.receipt_report_store_partition_key ?? "").trim(),
+      roomName: String(row.room_name ?? "").trim(),
+    })
   }
 
   const nowJst = `${toJstDateString(jst.year, jst.month, jst.day)} ${pad2(jst.hour)}:${pad2(jst.minute)}`

@@ -4,6 +4,7 @@ import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_li
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts";
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts";
 import { pilotStorePartitionKeysMatch } from "../_shared/receipt_sheets_store_catalog.ts";
+import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts";
 
 type GmailAlertEnv = {
   enabled: boolean;
@@ -1274,7 +1275,7 @@ async function resolveGmailAlertTargetRooms(
   const { data, error } = await supabase
     .from("room_summary_settings")
     .select(
-      "room_id, is_enabled, gmail_reservation_alert_enabled, receipt_report_store_partition_key",
+      "room_id, is_enabled, gmail_reservation_alert_enabled, receipt_report_store_partition_key, room_name",
     );
 
   if (error) {
@@ -1297,9 +1298,18 @@ async function resolveGmailAlertTargetRooms(
     const roomId = String(r?.room_id ?? "").trim();
     if (!roomId || seen.has(roomId)) continue;
     seen.add(roomId);
+
+    let storeKey = String(r?.receipt_report_store_partition_key ?? "").trim();
+    if (!storeKey) {
+      const resolved = await resolveStorePartitionKeyForRoom(supabase, roomId);
+      storeKey = String(resolved ?? "").trim();
+    }
+
+
+
     targets.push({
       roomId,
-      storeKey: String(r?.receipt_report_store_partition_key ?? "").trim(),
+      storeKey,
     });
   }
 

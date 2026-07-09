@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
 
 // ドームシティ「週次イベント配信」cron。
 // 毎分起動し、ルームごとの設定（dome_weekly_enabled / 曜日 / 時刻）が「今この瞬間(JST)」に一致する
@@ -60,13 +61,13 @@ Deno.serve(async (req) => {
 
   const { data: rows, error: settingsError } = await supabase
     .from("room_summary_settings")
-    .select("room_id, is_enabled, dome_weekly_enabled, dome_weekly_dow, dome_weekly_hour, dome_weekly_minute, receipt_report_store_partition_key")
+    .select("room_id, is_enabled, dome_weekly_enabled, dome_weekly_dow, dome_weekly_hour, dome_weekly_minute, receipt_report_store_partition_key, room_name")
   if (settingsError) {
     return json({ ok: false, error: `Failed to load room_summary_settings: ${settingsError.message}` }, 500)
   }
 
   // いまこの瞬間(JST)に送るべきルームを抽出（トグルON＋曜日・時刻一致＋ルーム有効）。
-  const targets: Array<{ roomId: string; storeKey: string }> = []
+  const targets: Array<{ roomId: string; storeKey: string; roomName: string }> = []
   for (const row of (Array.isArray(rows) ? rows : [])) {
     const roomId = String(row.room_id ?? "").trim()
     if (!roomId) continue
@@ -76,7 +77,11 @@ Deno.serve(async (req) => {
     const hour = row.dome_weekly_hour != null ? Number(row.dome_weekly_hour) : DEFAULT_HOUR
     const minute = row.dome_weekly_minute != null ? Number(row.dome_weekly_minute) : DEFAULT_MINUTE
     if (jst.dow !== dow || jst.hour !== hour || jst.minute !== minute) continue
-    targets.push({ roomId, storeKey: String(row.receipt_report_store_partition_key ?? "").trim() })
+    targets.push({
+      roomId,
+      storeKey: String(row.receipt_report_store_partition_key ?? "").trim(),
+      roomName: String(row.room_name ?? "").trim(),
+    })
   }
 
   const win = nextWeekWindow(jst)
@@ -98,7 +103,16 @@ Deno.serve(async (req) => {
   const errors: string[] = []
 
   for (const t of targets) {
-    const storeKey = t.storeKey || "marugos"
+    let storeKey = t.storeKey
+    if (!storeKey) {
+      storeKey = String((await resolveStorePartitionKeyForRoom(supabase, t.roomId)) ?? "").trim()
+    }
+    if (!storeKey) {
+      storeKey = "marugos"
+    }
+
+
+
     // 二重送信防止：先にログ行を確保（同一週は1回だけ）。
     const { error: insErr } = await supabase
       .from("tokyo_dome_weekly_logs")
