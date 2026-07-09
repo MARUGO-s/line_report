@@ -1918,7 +1918,9 @@
   // 統合AI・report_id単位でキャッシュ)を取得し、届いたら差し替える。期間集計モードやAI失敗時はテンプレのまま。
   let aiSummaryReq = 0;
   function renderAnalysisBlocks(report, seriesReports, periodLabel){
-    currentSummaryPeriod = periodLabel || (report ? (report.report_date || salesDateOf(report) || '') : '');
+    // ヘッダー「売上日」と同じく売上発生日を使う（report_date は翌朝の発行日＝+1 なのでラベルに使わない）。
+    // 例: 火曜 07-07 の売上 → report_date 07-08 → 表示は 2026-07-07。
+    currentSummaryPeriod = periodLabel || (report ? (salesDateOf(report) || String(report.report_date || '').slice(0, 10) || '') : '');
     const text = buildAnalysisText(report, seriesReports, periodLabel);
     paintAnalysisSecs(parseAnalysis(text), text);
     if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
