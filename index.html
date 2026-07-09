@@ -10446,7 +10446,7 @@
           '<td><code style="font-size:0.82em;">' + escapeHtml(webhookContextJa(row.context)) + '</code></td>' +
           '<td><span class="tag ' + tagClass(row.status) + '">' + escapeHtml(row.status || '-') + '</span></td>' +
           '<td>' + escapeHtml(logReasonJa(row)) + '</td>' +
-          '<td>' + escapeHtml(String(row.target_room_id || '-')) + '</td>' +
+          '<td>' + escapeHtml(getRoomSettingNameFromState(row.target_room_id) || String(row.target_room_id || '-').slice(0, 12)) + '</td>' +
           '<td>' + (row.line_send_success ? '成功' : (row.line_send_attempted ? '失敗' : '未実行')) + '</td>';
         dom.logTableBody.appendChild(tr);
       }
