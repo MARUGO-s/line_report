@@ -416,9 +416,21 @@ async function loadVenueEventsForReports(
   const hi = hiCand[hiCand.length - 1]
   const { data: gamesData } = await supabase
     .from("giants_game_results")
-    .select("game_date, game_result")
+    .select("game_date, game_result, opponent, venue, attendance, game_score, score_margin, game_duration, start_time")
     .order("game_date", { ascending: true })
     
+  interface GiantsGameRow {
+    game_date: string
+    game_result: string | null
+    opponent: string
+    venue: string
+    attendance: number | null
+    game_score: string | null
+    score_margin: number | null
+    game_duration: string | null
+    start_time: string | null
+  }
+  const gamesMap: Record<string, GiantsGameRow> = {}
   const streakBeforeMap: Record<string, number> = {}
   const streakAfterMap: Record<string, number> = {}
   let currentStreak = 0
@@ -427,6 +439,7 @@ async function loadVenueEventsForReports(
       const d = String(g.game_date ?? "").slice(0, 10)
       if (!d) continue
       
+      gamesMap[d] = g as unknown as GiantsGameRow
       streakBeforeMap[d] = currentStreak
       
       const res = g.game_result
@@ -460,6 +473,9 @@ async function loadVenueEventsForReports(
   if (error || !Array.isArray(data)) return []
   return data.map((e) => {
     const dateStr = String((e as { event_date?: unknown }).event_date ?? "").slice(0, 10)
+    const isBaseball = String((e as { category?: unknown }).category ?? "") === "プロ野球"
+    const g = isBaseball ? gamesMap[dateStr] : null
+    
     return {
       event_date: dateStr,
       title: String((e as { title?: unknown }).title ?? ""),
@@ -467,14 +483,18 @@ async function loadVenueEventsForReports(
       venue: String((e as { venue?: unknown }).venue ?? "tokyo-dome"),
       is_japan: (e as { is_japan?: unknown }).is_japan === true,
       note: String((e as { note?: unknown }).note ?? ""),
-      expected_attendance: (e as { expected_attendance?: unknown }).expected_attendance == null
-        ? null
-        : Number((e as { expected_attendance?: unknown }).expected_attendance),
-      start_time: (e as { start_time?: unknown }).start_time ? String((e as { start_time?: unknown }).start_time) : null,
-      game_duration: (e as { game_duration?: unknown }).game_duration ? String((e as { game_duration?: unknown }).game_duration) : null,
-      game_result: (e as { game_result?: unknown }).game_result ? String((e as { game_result?: unknown }).game_result) : null,
-      game_score: (e as { game_score?: unknown }).game_score ? String((e as { game_score?: unknown }).game_score) : null,
-      score_margin: (e as { score_margin?: unknown }).score_margin == null ? null : Number((e as { score_margin?: unknown }).score_margin),
+      expected_attendance: g
+        ? (g.attendance != null ? Number(g.attendance) : null)
+        : ((e as { expected_attendance?: unknown }).expected_attendance == null
+          ? null
+          : Number((e as { expected_attendance?: unknown }).expected_attendance)),
+      start_time: g ? g.start_time : ((e as { start_time?: unknown }).start_time ? String((e as { start_time?: unknown }).start_time) : null),
+      game_duration: g ? g.game_duration : ((e as { game_duration?: unknown }).game_duration ? String((e as { game_duration?: unknown }).game_duration) : null),
+      game_result: g ? g.game_result : ((e as { game_result?: unknown }).game_result ? String((e as { game_result?: unknown }).game_result) : null),
+      game_score: g ? g.game_score : ((e as { game_score?: unknown }).game_score ? String((e as { game_score?: unknown }).game_score) : null),
+      score_margin: g
+        ? (g.score_margin != null ? Number(g.score_margin) : null)
+        : ((e as { score_margin?: unknown }).score_margin == null ? null : Number((e as { score_margin?: unknown }).score_margin)),
       streak_before: streakBeforeMap[dateStr] ?? 0,
       streak_after: streakAfterMap[dateStr] ?? 0,
     }
