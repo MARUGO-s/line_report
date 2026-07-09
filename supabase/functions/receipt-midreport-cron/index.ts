@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
 import { loadReceiptReportAggregateForRoom } from "./functions/_shared/receipt_report_aggregate.ts";
 import { buildReceiptReportFlexMessages } from "./functions/_shared/receipt_report_flex.ts";
-import { recordLineWebhookDeliveryLog } from "./functions/_shared/line_webhook_delivery_log.ts";
+import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const RECEIPT_MID_REPORT_TITLE = "中間報告";
 const RECEIPT_MONTH_END_REPORT_TITLE = "月間報告";
