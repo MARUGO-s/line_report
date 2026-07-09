@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+// deploy re-trigger marker (2026-07-09)
 import {
   importDailyReceiptsOverwrite,
   importManualMonthSalesOverwrite,
