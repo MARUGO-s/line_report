@@ -10,10 +10,10 @@ import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-07-09: 日報×実績の効果対照表をコード側で組み立ててAIに渡すため v14 に上げ、旧キャッシュを再生成させる。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v14-nippou-impact'
-// 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績リンクを含む。
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v15-dynamic-drivers'
+// 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v14-loop-nippou-impact'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v15-loop-dynamic-drivers'
 // 日次サマリーの「実効」キャッシュバージョン。ループが日次で実際に有効なときだけ loop 版になり、
 // 無効（既定）の間は v13-daily-logs を使う（日報注入の再生成は必要なので v11 には戻さない）。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
@@ -1343,27 +1343,95 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
   const venName = (v: string) => fcVenueLabel(v) || (v === 'tokyo-dome' ? '東京ドーム' : v)
   const venRows = Array.from(byVenue.entries()).filter(([, a]) => a.length).sort((a, b) => (fcAvg(b[1]) ?? 0) - (fcAvg(a[1]) ?? 0))
   if (venRows.length >= 2) { L.push('会場別の平均客数（会場で客層が違う＝取り込み方を変える）:'); for (const [v, a] of venRows) L.push(`・${venName(v)}: ${a.length}日 / 平均客数 ${Math.round(fcAvg(a) ?? 0)}人`) }
-  // データのある日付ごとのイベント有無を提示（モデルが個別イベントを名指しで語れるように・売上も添える）
-  const sample = daily.slice(-14).map((r) => { const hits = byDate.get(r.date) || []; const lab = hits.length ? hits.map((h) => { const vl = fcVenueLabel(h.venue); return `${h.category}${vl ? `@${vl}` : ''}:${h.title}` }).join('｜') : 'イベントなし'; const dw = fcDow(r.date); return `${r.date}(${dw != null ? FC_DOW[dw] : '?'}) 客数${r.guests}人 売上${fcYen(r.sales)} ${lab}` })
-  if (sample.length) L.push('—\n直近の日別イベント（この具体的な対応を使って“どのイベントがどう効いたか”を述べること）:\n' + sample.join('\n'))
+  // 動員数が入っているイベント日だけで、規模帯ごとの平均客数（動的ドライバー）
+  const withAtt: Array<{ att: number; guests: number; sales: number }> = []
+  for (const r of daily) {
+    const hits = byDate.get(r.date) || []
+    const maxAtt = Math.max(
+      0,
+      ...hits.map((h) => (h.expected_attendance != null && Number.isFinite(h.expected_attendance) ? Number(h.expected_attendance) : 0)),
+    )
+    if (maxAtt > 0 && r.guests != null) withAtt.push({ att: maxAtt, guests: r.guests as number, sales: r.sales })
+  }
+  if (withAtt.length >= 3) {
+    const bands: Array<{ label: string; lo: number; hi: number }> = [
+      { label: '小規模(~1.5万人)', lo: 1, hi: 15000 },
+      { label: '中規模(1.5〜3.5万)', lo: 15000, hi: 35000 },
+      { label: '大規模(3.5万~)', lo: 35000, hi: 1e9 },
+    ]
+    L.push('動員規模帯ごとの平均客数（予想動員が入力された日のみ・規模は動的要因）:')
+    for (const b of bands) {
+      const rows = withAtt.filter((x) => x.att >= b.lo && x.att < b.hi)
+      if (!rows.length) continue
+      L.push(`・${b.label}: ${rows.length}日 / 平均客数${Math.round(fcAvg(rows.map((x) => x.guests)) ?? 0)}人 / 平均売上${fcYen(fcAvg(rows.map((x) => x.sales)) ?? 0)}`)
+    }
+    const missing = daily.filter((r) => {
+      const hits = byDate.get(r.date) || []
+      if (!hits.length) return false
+      return !hits.some((h) => h.expected_attendance != null && Number.isFinite(h.expected_attendance) && Number(h.expected_attendance) > 0)
+    }).length
+    if (missing > 0) L.push(`注: イベントありだが動員予想未入力の日が${missing}日ある。規模比較は入力日のみ有効。`)
+  }
+
+  // データのある日付ごとのイベント有無を提示（モデルが個別イベントを名指しで語れるように・売上・動員も添える）
+  const sample = daily.slice(-14).map((r) => {
+    const hits = byDate.get(r.date) || []
+    const lab = fcFormatEventsForDay(hits)
+    const dw = fcDow(r.date)
+    return `${r.date}(${dw != null ? FC_DOW[dw] : '?'}) 客数${r.guests}人 売上${fcYen(r.sales)} ${lab}`
+  })
+  if (sample.length) L.push('—\n直近の日別イベント（タイトル＋動員予想を使い、“どの規模のイベントがどう効いたか”を述べること）:\n' + sample.join('\n'))
   return L.join('\n')
 }
 
-// 今後の会場イベント予定をテキスト化（最大25件）。
+// 今後の会場イベント予定をテキスト化（最大25件）。動員予想を必ず併記。
 function buildEventListText(events: VenueEvent[]): string {
   if (!Array.isArray(events) || !events.length) return ''
   const sorted = events.slice().filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date ?? '').slice(0, 10)))
     .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date))).slice(0, 25)
-  const lines = sorted.map((e) => { const d = e.event_date.slice(0, 10); const dw = fcDow(d); const vl = fcVenueLabel(e.venue); const jp = e.is_japan ? '🇯🇵日本戦(集客大・深夜営業あり) ' : ''; const nt = e.note ? ` ※${e.note}` : ''; return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}${vl ? `/${vl}` : ''}] ${jp}${e.title}${nt}` })
+  const lines = sorted.map((e) => {
+    const d = e.event_date.slice(0, 10)
+    const dw = fcDow(d)
+    const vl = fcVenueLabel(e.venue)
+    const jp = e.is_japan ? '🇯🇵日本戦(集客大・深夜営業あり) ' : ''
+    const nt = e.note ? ` ※${e.note}` : ''
+    const att = fcEventAttendanceLabel(e)
+    return `${d}(${dw != null ? FC_DOW[dw] : '?'}) [${e.category}${vl ? `/${vl}` : ''}] ${jp}${e.title} ｜${att}${nt}`
+  })
   // PV(スポーツ中継)の運用知見をAIが必ず踏まえるよう注記。
   if (sorted.some((e) => e.category === 'スポーツ中継')) {
     lines.push('※PV観戦(スポーツ中継)の見方: フードコート全体は集客増が見込める日。当店の売上寄与は断定せず、実績の客数/客単価/売上で判断する（蓄積で随時更新・固定の結論にしない）。現場の仮説として『サッカー放映は客がバーガー/ビールに流れやすく、野球の方が当店売上は伸びやすい』があるが要検証。日本戦は深夜営業の可能性に備える。')
   }
+  lines.push('※動員予想はイベント規模の動的ドライバー。同種イベントでも動員が違う日は客数リフトが異なる前提で比較すること。未入力日は種別のみで語り、規模断定はしない。')
   return lines.join('\n')
 }
 
-export type VenueEvent = { event_date: string; title: string; category: string; venue?: string; is_japan?: boolean; note?: string }
+export type VenueEvent = {
+  event_date: string
+  title: string
+  category: string
+  venue?: string
+  is_japan?: boolean
+  note?: string
+  /** 手入力の予想動員（tokyo_dome_events.expected_attendance）。未入力は null */
+  expected_attendance?: number | null
+}
 export type ForecastRow = { target_date: string; metric: string; predicted: number; predicted_low?: number | null; predicted_high?: number | null; actual?: number | null; model_version?: string }
+
+function fcEventAttendanceLabel(e: VenueEvent): string {
+  const n = e.expected_attendance
+  if (n != null && Number.isFinite(n) && n >= 0) return `動員予想${Math.round(n).toLocaleString('ja-JP')}人`
+  return '動員予想未入力'
+}
+
+/** 同日イベントを「種別名:タイトル(動員…)」形式で短く並べる */
+function fcFormatEventsForDay(hits: VenueEvent[]): string {
+  if (!hits.length) return 'イベントなし'
+  return hits.map((h) => {
+    const vl = fcVenueLabel(h.venue)
+    return `${h.category}${vl ? `@${vl}` : ''}:${h.title}（${fcEventAttendanceLabel(h)}）`
+  }).join('｜')
+}
 
 // 学習型モデルの予測（forecast_predictions）を、精度（過去の予測vs実績MAPE）＋今後の予測としてテキスト化。
 function buildForecastContext(forecast: ForecastRow[]): string {
@@ -1670,8 +1738,12 @@ function buildTargetDayFacts(
   if (above || below) L.push(`順位の前後: ${above ? '上位 ' + above.name + ' ' + fcYen(above.sales) + '（+' + fcYen(above.sales - base.sales) + '）' : ''}${above && below ? ' / ' : ''}${below ? '下位 ' + below.name + ' ' + fcYen(below.sales) + '（' + fcYen(below.sales - base.sales) + '）' : ''}`)
   if (histSalesAvg != null) L.push(`自店史（対象日除く全${hist.length}日）平均比: ${histSalesAvg > 0 ? (base.sales / histSalesAvg * 100).toFixed(1) : '—'}%、履歴内順位${rankAmongHist}位`)
   if (sameDowAvg != null) L.push(`同じ曜日（${dow != null ? FC_DOW[dow] : '?'}）平均比: ${sameDowAvg > 0 ? (base.sales / sameDowAvg * 100).toFixed(1) : '—'}%`)
-  L.push(ev.length ? `この日のイベント: ${ev.map((e) => `${e.category ? e.category + ':' : ''}${e.title}`).filter(Boolean).join('、')}` : `この日のイベント: なし`)
-  if (wx) L.push(`天気: ${String(wx.summary ?? '') || '—'}${(wx.precipitation_mm ?? 0) >= 1 ? '（雨）' : ''}`)
+  L.push(ev.length
+    ? `この日のイベント: ${ev.map((e) => `${e.category ? e.category + ':' : ''}${e.title}（${fcEventAttendanceLabel(e)}）`).filter(Boolean).join('、')}`
+    : `この日のイベント: なし`)
+  const maxAtt = Math.max(0, ...ev.map((e) => (e.expected_attendance != null && Number.isFinite(e.expected_attendance) ? Number(e.expected_attendance) : 0)))
+  if (maxAtt > 0) L.push(`この日の最大動員予想: ${maxAtt.toLocaleString('ja-JP')}人（規模ドライバー。同種イベントでも動員差で客数リフトが変わりうる）`)
+  if (wx) L.push(`天気: ${String(wx.summary ?? '') || '—'}${(wx.precipitation_mm ?? 0) >= 1 ? '（雨）' : ''}${wx.temp_max != null ? ` 最高${wx.temp_max}℃` : ''}`)
   if (decompLine) L.push(decompLine)
   if (trendLine) L.push(trendLine)
   if (prevDiffLine) L.push(prevDiffLine)
@@ -1753,6 +1825,24 @@ function buildPeriodFacts(
   if (top && top !== base) L.push(`首位: ${top.name} ${fcYen(top.sales)}（自店比${base.sales > 0 ? (top.sales / base.sales).toFixed(2) : '—'}倍）`)
   if (outsideAvg != null && periodDailyAvg != null) L.push(`この期間外の自店史（${outside.length}日）の日平均比: ${outsideAvg > 0 ? (periodDailyAvg / outsideAvg * 100).toFixed(1) : '—'}%`)
   L.push(`イベントがあった日: ${daysWithEvent}/${dates.length}日、雨の日: ${rainyDays}/${dates.length}日`)
+  // 期間内イベントで動員予想が入っているものを規模順に数件（動的ドライバー）
+  const periodEvWithAtt: VenueEvent[] = []
+  for (const list of evByDate.values()) {
+    for (const e of list) {
+      if (e.expected_attendance != null && Number.isFinite(e.expected_attendance) && Number(e.expected_attendance) > 0) {
+        periodEvWithAtt.push(e)
+      }
+    }
+  }
+  periodEvWithAtt.sort((a, b) => Number(b.expected_attendance) - Number(a.expected_attendance))
+  if (periodEvWithAtt.length) {
+    L.push('期間内の動員予想が入ったイベント（規模順・上位）:')
+    for (const e of periodEvWithAtt.slice(0, 8)) {
+      L.push(`・${String(e.event_date).slice(0, 10)} ${e.category}:${e.title} ｜${fcEventAttendanceLabel(e)}`)
+    }
+  } else if (daysWithEvent > 0) {
+    L.push('注: 期間内にイベントはあるが動員予想が未入力。規模比較はできないため種別のみで語ること。')
+  }
   return L.join('\n')
 }
 
@@ -2045,6 +2135,7 @@ export function buildDailyLogImpactContext(
   logs: Array<Record<string, unknown>>,
   reports: Array<Record<string, unknown>>,
   baseName: string,
+  events: VenueEvent[] = [],
 ): string {
   if (!Array.isArray(logs) || !logs.length) return ''
   const daily = fcBaseDaily(reports, baseName)
@@ -2057,6 +2148,13 @@ export function buildDailyLogImpactContext(
   const guestsAll = daily.map((d) => d.guests).filter((g): g is number => g != null && g > 0)
   const avgSales = fcAvg(salesAll)
   const avgGuests = fcAvg(guestsAll)
+  const eventsByDate = new Map<string, VenueEvent[]>()
+  for (const e of events || []) {
+    const d = String(e.event_date ?? '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue
+    if (!eventsByDate.has(d)) eventsByDate.set(d, [])
+    eventsByDate.get(d)!.push(e)
+  }
   const rel = (cur: number, base: number | null | undefined) => {
     if (base == null || !isFinite(base) || base === 0) return '—'
     return fcPct((cur / base - 1) * 100)
@@ -2064,8 +2162,9 @@ export function buildDailyLogImpactContext(
   const lines: string[] = [
     '【日報×実績 効果対照（コード計算・数字は捏造禁止）】',
     '各日報の「実施施策」について、同日の基準店実績を前日・同曜日平均・全日平均と比較した。',
+    '動的要因として、同日のイベント名・動員予想（手入力）・日報の動員数も併記する。',
     '担当者評価は主観。実績比と整合すれば「データと一致」、乖離すれば「主観と実績が不一致」と明記すること。',
-    'イベント・天気の影響は別ブロックも参照し、施策単独の因果は断定せず「仮説」とすること。',
+    'イベント規模（動員）・天気の交絡を切り分け候補として挙げ、施策単独の因果は断定せず「仮説」とすること。',
   ]
   let n = 0
   for (const log of logs.slice(0, 40)) {
@@ -2077,12 +2176,15 @@ export function buildDailyLogImpactContext(
     const salesImpact = String((log as { sales_impact?: unknown }).sales_impact ?? '').trim()
     const issues = String((log as { issues?: unknown }).issues ?? '').trim()
     const memo = String((log as { memo?: unknown }).memo ?? '').trim()
+    const logAttRaw = (log as { daily_attendance?: unknown }).daily_attendance
+    const logAtt = logAttRaw != null ? Number(logAttRaw) : null
     // 施策も考察も無い日はスキップ（空日報でノイズを増やさない）
-    if (!actionTexts.length && !guestImpact && !salesImpact && !issues && !memo) continue
+    if (!actionTexts.length && !guestImpact && !salesImpact && !issues && !memo && !(logAtt != null && Number.isFinite(logAtt))) continue
     n += 1
     const row = byDate.get(date)
     const dow = fcDow(date)
     const dowLabel = dow != null ? FC_DOW[dow] : '?'
+    const dayEvents = eventsByDate.get(date) || []
     const parts: string[] = [`▶ ${date}（${dowLabel}）`]
     if (actionTexts.length) parts.push(`  現場が試したこと: ${actionTexts.join(' ／ ')}`)
     else parts.push('  現場が試したこと: （施策カテゴリの記載なし・評価/メモのみ）')
@@ -2090,6 +2192,15 @@ export function buildDailyLogImpactContext(
     if (salesImpact) parts.push(`  担当者の売上感: ${salesImpact}`)
     if (issues) parts.push(`  課題: ${issues.slice(0, 200)}`)
     if (memo) parts.push(`  メモ: ${memo.slice(0, 200)}`)
+    // 動的要因: 日報動員 + イベント動員予想
+    if (logAtt != null && Number.isFinite(logAtt)) parts.push(`  日報の動員数: ${Math.round(logAtt).toLocaleString('ja-JP')}人`)
+    if (dayEvents.length) {
+      parts.push(`  同日イベント: ${fcFormatEventsForDay(dayEvents)}`)
+      const maxEvAtt = Math.max(0, ...dayEvents.map((e) => (e.expected_attendance != null && Number.isFinite(e.expected_attendance) ? Number(e.expected_attendance) : 0)))
+      if (maxEvAtt > 0) parts.push(`  イベント最大動員予想: ${maxEvAtt.toLocaleString('ja-JP')}人（規模ドライバー）`)
+    } else {
+      parts.push('  同日イベント: なし')
+    }
     if (!row) {
       parts.push('  実績: （この日のテナント一覧実績なし＝数値照合不可）')
       lines.push(parts.join('\n'))
@@ -2149,6 +2260,11 @@ export function foodCourtNippouPromptRules(baseName: string): string {
     `(N4) 因果は原則「仮説」。効果があった/薄かったの判定は「支持／不支持／条件付き」＋効果量（%や差分）で書く。`,
     `(N5) 日報が無い日は施策を捏造しない。施策あり日があれば、総評や評価見出しで必ず触れる。`,
     `(N6) 次の一手は、日報の成功施策の継続/強化、または失敗・課題の改善に接続する（${baseName}向けに具体化）。`,
+    `【動的要因・必須】固定の曜日パターンだけで終わらせない。`,
+    `(D1) イベントは「種別」だけでなく「タイトル」と「動員予想（人数）」を材料にする。動員が大きい日は需要の上限が上がりやすいが、当店捕捉率は別問題。`,
+    `(D2) 同種イベント（例: プロ野球）でも動員が違う日は、客数リフトが異なりうる前提で比較する。動員未入力日は規模を断定しない。`,
+    `(D3) 日報の動員数とイベント動員予想が両方ある日は、規模感の材料として両方を引用し、客数実績との関係を述べる。`,
+    `(D4) 天気（雨・気温）・曜日・イベント規模・現場施策を同時に並べ、「何が主因候補か」を仮説として整理する。`,
   ].join('\n')
 }
 
@@ -2157,18 +2273,19 @@ export function buildFoodCourtNippouBlocks(
   logs: Array<Record<string, unknown>>,
   reports: Array<Record<string, unknown>>,
   baseName: string,
+  events: VenueEvent[] = [],
 ): { logsCtx: string; impactCtx: string; block: string; hasNippou: boolean } {
   const logsCtx = buildDailyLogsContext(logs)
-  const impactCtx = buildDailyLogImpactContext(logs, reports, baseName)
+  const impactCtx = buildDailyLogImpactContext(logs, reports, baseName, events)
   const hasNippou = !!(logsCtx || impactCtx)
   const parts: string[] = []
   if (logsCtx) {
-    parts.push(`# 現場日報・施策記録（原文：担当者が「試したこと」・評価・課題）\n${logsCtx}`)
+    parts.push(`# 現場日報・施策記録（原文：担当者が「試したこと」・評価・課題・動員数）\n${logsCtx}`)
   } else {
     parts.push('# 現場日報・施策記録\n(日報データなし)')
   }
   if (impactCtx) {
-    parts.push(`# 日報×実績 効果対照（コード計算・施策と数字のリンク）\n${impactCtx}`)
+    parts.push(`# 日報×実績 効果対照（コード計算・施策・動員・イベント規模と数字のリンク）\n${impactCtx}`)
   }
   return { logsCtx, impactCtx, block: parts.join('\n\n'), hasNippou }
 }
@@ -2236,7 +2353,7 @@ export async function answerFoodCourtQuestion(
     ? `# 統計的パターン（${forecastFactorsCtx ? '来客予測モデルの学習係数・自己採点つき' : '条件別集計・コード計算・サンプル数と確度つき'}）\n${patternStats}`
     : ''
   // 現場日報: 原文＋コード側「施策×実績」効果対照（普段の売上AI分析と日報をリンク）
-  const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName)
+  const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
 
   // --- 専門AI 2体を並列実行し、統合AIに渡す「分析メモ」を作らせる（同一プロンプト過積載を避けるための役割分担） ---
@@ -2405,7 +2522,7 @@ export async function generateFoodCourtDailySummary(
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)
   const forecastCtx = buildForecastContext(forecast)
   // 現場日報: 原文＋施策×実績の効果対照（普段の売上AI分析レポートと日報をリンク）
-  const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName)
+  const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const dailyLogsBlock = nippou.block
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
@@ -2556,7 +2673,7 @@ export async function generateFoodCourtPeriodSummary(
   const storeCorr = buildStoreCorrelation(reports, baseName)
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)
   const forecastCtx = buildForecastContext(forecast)
-  const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName)
+  const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const dailyLogsBlock = nippou.block
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
@@ -3018,7 +3135,7 @@ export async function generateFoodCourtWeeklyReport(
     const d = String((l as { log_date?: unknown }).log_date ?? '').slice(0, 10)
     return d >= weekStart && d <= weekEnd
   })
-  const nippou = buildFoodCourtNippouBlocks(weekLogs, reports, baseName)
+  const nippou = buildFoodCourtNippouBlocks(weekLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const logsBlock = nippou.hasNippou
     ? `# 日報リンク（${weekStart}〜${weekEnd}）\n${nippou.block}`

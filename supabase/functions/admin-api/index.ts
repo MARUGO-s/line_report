@@ -396,7 +396,7 @@ async function loadVenueEventsForReports(
   supabase: ReturnType<typeof createClient>,
   storeKey: string,
   reports: Array<Record<string, unknown>>,
-): Promise<Array<{ event_date: string; title: string; category: string; venue: string; is_japan: boolean; note: string }>> {
+): Promise<Array<{ event_date: string; title: string; category: string; venue: string; is_japan: boolean; note: string; expected_attendance: number | null }>> {
   if (String(storeKey ?? "").trim().toLowerCase() !== "marugos") return []
   const dates: string[] = []
   for (const r of (Array.isArray(reports) ? reports : [])) {
