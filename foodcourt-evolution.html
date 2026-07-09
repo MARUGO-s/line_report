@@ -141,6 +141,11 @@
     .kpi-delta.bad{color:var(--bad);}
     .kpi-delta.neutral{color:var(--tx-3);}
 
+    .kpi.highlight-good { border-color: var(--good); background: var(--good-soft); }
+    .kpi.highlight-bad { border-color: var(--bad); background: var(--bad-soft); }
+    @keyframes pulse-bad{0%{box-shadow:0 0 0 0 oklch(0.68 0.16 25 / .4);}70%{box-shadow:0 0 0 6px transparent;}100%{box-shadow:0 0 0 0 transparent;}}
+    .pulse-bad-anim { animation: pulse-bad 2.4s infinite; }
+
     /* Chart */
     .chart-wrap{margin-top:4px;overflow:hidden;}
     .chart-area{position:relative;}
@@ -149,14 +154,7 @@
     .chart-legend span{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--tx-2);}
     .chart-legend i{display:inline-block;width:22px;height:3px;border-radius:2px;flex:none;}
 
-    /* Progress bar (history days) */
-    .hist-bar-wrap{margin-top:14px;display:flex;flex-direction:column;gap:7px;}
-    .hist-bar-row{display:flex;align-items:center;gap:12px;font-size:12px;}
-    .hist-bar-label{width:70px;flex:none;color:var(--tx-3);text-align:right;}
-    .hist-bar-track{flex:1;height:8px;border-radius:4px;background:var(--bar-track);overflow:hidden;}
-    .hist-bar-fill{height:100%;border-radius:4px;background:var(--bar);transition:width .5s ease;}
-    .hist-bar-val{width:60px;flex:none;font-weight:700;font-variant-numeric:tabular-nums;color:var(--tx-1);}
-    .hist-bar-mape{width:80px;flex:none;font-size:11px;color:var(--tx-3);font-variant-numeric:tabular-nums;}
+
 
     /* Table */
     .tbl{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px;}
@@ -256,6 +254,14 @@
     @media(max-width:480px){
       .kpi-grid{grid-template-columns:1fr;}
     }
+    .kpi.highlight-level {
+      background: linear-gradient(135deg, var(--surface) 30%, var(--accent-soft)) !important;
+      border: 1px solid var(--accent) !important;
+    }
+    .kpi.highlight-trust {
+      background: linear-gradient(135deg, var(--surface) 30%, var(--base-soft)) !important;
+      border: 1px solid var(--base-line) !important;
+    }
   </style>
 </head>
 <body>
@@ -331,6 +337,24 @@
   <!-- main result area -->
   <div id="resultArea" hidden>
 
+    <!-- Evolution Settings Card (Passing Score config) -->
+    <div class="card" id="evolutionSettingsCard" style="margin-bottom:18px;">
+      <div class="card-h">
+        <div class="card-t"><span class="em">⚙️</span>AI評価合格基準の設定</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:260px;">
+          <span style="font-size:13.5px; font-weight:600; color:var(--tx-2);">合格判定ライン:</span>
+          <input type="range" id="passingScoreRange" min="30" max="95" value="65" style="flex:1; accent-color:var(--accent);">
+          <span id="passingScoreLabel" class="mono" style="font-size:16px; font-weight:700; color:var(--accent-tx); width:45px; text-align:right;">65点</span>
+        </div>
+        <div style="font-size:12px; color:var(--tx-3); flex:2; min-width:280px; line-height:1.4;">
+          ※現在データ量が乏しいため、一時的に合格点を <b>65点</b> としています（基準点はスライダーで任意に変更可能です）。<br>
+          スコアは <code>100 - 客数MAPE</code> で算出され、基準値に満たない場合は再提出状態となります。
+        </div>
+      </div>
+    </div>
+
     <!-- KPI overview -->
     <div class="card">
       <div class="card-h">
@@ -351,21 +375,17 @@
           <svg id="mapeSvg" width="100%" viewBox="0 0 900 220" preserveAspectRatio="none"></svg>
         </div>
         <div class="chart-legend">
-          <span><i style="background:var(--accent)"></i>客数 MAPE</span>
-          <span><i style="background:var(--purple)"></i>売上 MAPE</span>
+          <span><i style="background:var(--accent)"></i>客数 MAPE (実線)</span>
+          <span><i style="background:var(--purple)"></i>売上 MAPE (破線)</span>
+          <span><i style="background:var(--accent);opacity:0.15;height:10px;width:10px;border-radius:0;"></i>学習データ量 (背景バー)</span>
+          <span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent)"></i>● レガシーモデル採用日</span>
+          <span><i style="display:inline-block;width:10px;height:10px;transform:rotate(45deg);background:#ffd700"></i>◆ GLMモデル採用日</span>
         </div>
       </div>
       <div class="card-note">MAPE（平均絶対誤差率）が低いほど予測精度が高い。データが蓄積されるにつれ低下するのが理想の学習曲線。</div>
     </div>
 
-    <!-- History days growth -->
-    <div class="card">
-      <div class="card-h">
-        <div class="card-t"><span class="em">📚</span>学習データ量の推移（記録日ごと）</div>
-      </div>
-      <div class="hist-bar-wrap" id="histBarsWrap"></div>
-      <div class="card-note">学習に使った過去の日数。毎日1日分ずつ増え、データが多いほどモデルは安定する。</div>
-    </div>
+
 
     <!-- Detail table -->
     <div class="card">
@@ -436,9 +456,11 @@
     reloadBtn:  $('reloadBtn'),
     kpiGrid: $('kpiGrid'), kpiNote: $('kpiNote'),
     mapeSvg: $('mapeSvg'),
-    histBarsWrap: $('histBarsWrap'),
+
     histTbody: $('histTbody'),
     msNavToggle: $('msNavToggle'), msSide: $('msSide'), msNavBackdrop: $('msNavBackdrop'),
+    passingScoreRange: $('passingScoreRange'),
+    passingScoreLabel: $('passingScoreLabel'),
   };
 
   // ===== theme =====
@@ -568,11 +590,34 @@
   function render(){
     renderKpi();
     renderMapeChart();
-    renderHistBars();
+
     renderTable();
     renderLoopRuns();
     renderModelSelection();
   }
+
+  // 合格基準点設定の読み込み
+  let passingScore = 65; // デフォルト65点
+  try {
+    const savedPass = localStorage.getItem('fc_passing_score');
+    if (savedPass) passingScore = Number(savedPass);
+  } catch(_) {}
+
+  function initPassingScoreConfig() {
+    if (!dom.passingScoreRange || !dom.passingScoreLabel) return;
+    dom.passingScoreRange.value = passingScore;
+    dom.passingScoreLabel.textContent = passingScore + '点';
+
+    dom.passingScoreRange.addEventListener('input', (e) => {
+      passingScore = Number(e.target.value);
+      dom.passingScoreLabel.textContent = passingScore + '点';
+      try { localStorage.setItem('fc_passing_score', passingScore); } catch(_) {}
+      renderKpi(); // リアルタイムにKPIを更新
+    });
+  }
+
+  // 読み込み完了時などに実行するため、初期化呼び出しを loadData と domContentLoaded 付近に追加。
+  initPassingScoreConfig();
 
   function renderKpi(){
     const rows = historyRows;
@@ -587,6 +632,70 @@
     const trackingDays = rows.length;
     const histDays = latest.history_days || 0;
     const meanG = latest.mean_guests!=null ? Math.round(Number(latest.mean_guests)) : null;
+
+    // スコア計算 (100 - 客数MAPE)
+    const latestScore = latestG != null ? Math.max(0, Math.round(100 - latestG)) : null;
+    const firstScore = firstG != null ? Math.max(0, Math.round(100 - firstG)) : null;
+
+    // AI評価基準判定
+    let passStatusBadge = '判定不可';
+    let passStatusSub = 'データが足りません';
+    let isPassed = false;
+
+    if (latestScore != null) {
+      isPassed = latestScore >= passingScore;
+      if (isPassed) {
+        passStatusBadge = `<span class="pill live" style="background:var(--good-soft);color:var(--good);border:none;">🟢 合格・自動採用中</span>`;
+        passStatusSub = `予測スコア: <b>${latestScore}点</b> (基準点: ${passingScore}点以上)`;
+      } else {
+        passStatusBadge = `<span class="pill pulse-bad-anim" style="background:var(--bad-soft);color:var(--bad);border:none;">🔴 評価点不足（再提出＆再評価中）</span>`;
+        passStatusSub = `評価不足: <b>${latestScore}点</b> (合格点は ${passingScore}点)`;
+      }
+    }
+
+    // ゲーミフィケーション用: AIレベル判定 (学習データ日数に基づく)
+    let aiLevel = 1;
+    let aiLevelName = 'ひよこAI';
+    let aiLevelEmoji = '🐣';
+    let aiLevelSub = 'データ収集中（目安14日）';
+    if (histDays >= 60) {
+      aiLevel = 4;
+      aiLevelName = '大賢者AI';
+      aiLevelEmoji = '🧙‍♂️';
+      aiLevelSub = '最高精度モード（データ60日超）';
+    } else if (histDays >= 30) {
+      aiLevel = 3;
+      aiLevelName = '一人前AI';
+      aiLevelEmoji = '🤖';
+      aiLevelSub = '実用的な精度（データ30日超）';
+    } else if (histDays >= 14) {
+      aiLevel = 2;
+      aiLevelName = '見習いAI';
+      aiLevelEmoji = '🎓';
+      aiLevelSub = '傾向が出始めています（データ14日超）';
+    }
+
+    // ゲーミフィケーション用: 信頼度星マーク判定 (最新客数MAPEに基づく)
+    let stars = '判定中';
+    let starsSub = '十分なデータが必要です';
+    if (latestG != null) {
+      if (latestG < 15) {
+        stars = '⭐⭐⭐⭐⭐';
+        starsSub = '超高精度（誤差15%未満）';
+      } else if (latestG < 25) {
+        stars = '⭐⭐⭐⭐☆';
+        starsSub = '高精度（誤差25%未満）';
+      } else if (latestG < 40) {
+        stars = '⭐⭐⭐☆☆';
+        starsSub = '標準精度（誤差40%未満）';
+      } else if (latestG < 55) {
+        stars = '⭐⭐☆☆☆';
+        starsSub = '参考程度（誤差55%未満）';
+      } else {
+        stars = '⭐☆☆☆☆';
+        starsSub = '誤差大きめ';
+      }
+    }
 
     // learning rate: simple linear regression slope (mape_guests vs index)
     let slope = null;
@@ -606,15 +715,30 @@
     const deltaLabel = (d, unit) => d==null ? '—' : (d<0?'▼ ':d>0?'▲ ':'')+Math.abs(Math.round(d*10)/10).toFixed(1)+(unit||'pt');
 
     dom.kpiGrid.innerHTML = `
-      <div class="kpi">
-        <div class="kpi-k">📅 記録追跡日数</div>
-        <div class="kpi-v">${trackingDays}<small>日</small></div>
-        <div class="kpi-sub">${fmtDate(first.log_date)} から</div>
+      <div class="kpi ${latestScore != null ? (isPassed ? 'highlight-good' : 'highlight-bad') : ''}">
+        <div class="kpi-k">📊 AIモデル合否判定</div>
+        <div class="kpi-v" style="font-size:18px;margin-top:10px;">${passStatusBadge}</div>
+        <div class="kpi-sub" style="font-weight:600;margin-top:6px;">${passStatusSub}</div>
       </div>
       <div class="kpi">
-        <div class="kpi-k">📚 学習データ量</div>
-        <div class="kpi-v">${histDays}<small>日分</small></div>
-        <div class="kpi-sub">バックテスト ${latest.backtest_days||0} 日</div>
+        <div class="kpi-k">🎯 初回評価スコア</div>
+        <div class="kpi-v">${firstScore != null ? firstScore : '—'}<small>点</small></div>
+        <div class="kpi-sub">初回客数MAPE: ${firstG != null ? firstG.toFixed(1)+'%' : '—'}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">🚀 最新評価スコア</div>
+        <div class="kpi-v">${latestScore != null ? latestScore : '—'}<small>点</small></div>
+        <div class="kpi-sub">初回比: ${latestScore != null && firstScore != null ? (latestScore >= firstScore ? '+' : '') + (latestScore - firstScore) : '—'}点</div>
+      </div>
+      <div class="kpi highlight-level">
+        <div class="kpi-k">🧠 AI学習レベル</div>
+        <div class="kpi-v">${aiLevelEmoji} Lv.${aiLevel}<small> ${aiLevelName}</small></div>
+        <div class="kpi-sub">${aiLevelSub}</div>
+      </div>
+      <div class="kpi highlight-trust">
+        <div class="kpi-k">⭐ 予測の信頼度</div>
+        <div class="kpi-v" style="color:var(--base-tx);letter-spacing:1px">${stars}</div>
+        <div class="kpi-sub">${starsSub}</div>
       </div>
       <div class="kpi">
         <div class="kpi-k">🎯 客数 MAPE（最新）</div>
@@ -627,14 +751,9 @@
         <div class="kpi-sub">初回: ${firstS!=null ? firstS.toFixed(1)+'%' : '—'}</div>
       </div>
       <div class="kpi">
-        <div class="kpi-k">📐 平均客数（学習値）</div>
-        <div class="kpi-v">${meanG!=null ? nf.format(meanG) : '—'}<small>人</small></div>
-        <div class="kpi-sub">全学習データの平均</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-k">🔺 学習速度（傾き）</div>
-        <div class="kpi-v ${slope!=null&&slope<0?'good':slope!=null&&slope>0?'bad':'neutral'}">${slope!=null ? (slope<0?'▼':'▲')+Math.abs(slope).toFixed(2) : '—'}<small>%/日</small></div>
-        <div class="kpi-sub">${slope!=null ? (slope<0?'改善傾向':slope>0?'悪化傾向':'横ばい') : '記録不足'}</div>
+        <div class="kpi-k">📚 学習データ量</div>
+        <div class="kpi-v">${histDays}<small>日分</small></div>
+        <div class="kpi-sub">バックテスト ${latest.backtest_days||0} 日</div>
       </div>
     `;
 
@@ -663,6 +782,28 @@
 
     const xOf = i => padL + (i/(n-1)) * gW;
     const yOf = v => padT + gH - ((v-minV)/(maxV-minV))*gH;
+
+    // 1. Background learning data days (bar chart)
+    const maxDaysVal = Math.max(...rows.map(r=>r.history_days||0), 30);
+    const bgBarGroup = document.createElementNS('http://www.w3.org/2000/svg','g');
+    const barW = n > 1 ? Math.max(4, (gW / (n-1)) * 0.35) : 10;
+    rows.forEach((r, i) => {
+      const d = r.history_days || 0;
+      const x = xOf(i);
+      const h = (d / maxDaysVal) * gH;
+      const y = padT + gH - h;
+      
+      const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      rect.setAttribute('x', (x - barW / 2).toFixed(1));
+      rect.setAttribute('y', y.toFixed(1));
+      rect.setAttribute('width', barW.toFixed(1));
+      rect.setAttribute('height', h.toFixed(1));
+      rect.setAttribute('fill', 'var(--accent)');
+      rect.setAttribute('fill-opacity', '0.06');
+      rect.setAttribute('rx', '2');
+      bgBarGroup.appendChild(rect);
+    });
+    svg.appendChild(bgBarGroup);
 
     // grid lines
     const gridY = [0,25,50,75,100].filter(v=>v>=minV&&v<=maxV);
@@ -699,8 +840,8 @@
     svg.appendChild(xg);
 
     // helper: build polyline path
-    function makePath(vals, color, isDashed){
-      const pts = vals.map((v,i)=>v!=null?[xOf(i),yOf(v)]:null).filter(p=>p);
+    function makePath(vals, color, isDashed, isGuestPath){
+      const pts = vals.map((v,i)=>v!=null?[xOf(i),yOf(v),i]:null).filter(p=>p);
       if(pts.length<2) return;
       const d = pts.map((p,i)=>(i===0?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
       const path = document.createElementNS('http://www.w3.org/2000/svg','path');
@@ -708,12 +849,45 @@
       path.setAttribute('stroke',color); path.setAttribute('stroke-width','2.5'); path.setAttribute('stroke-linecap','round'); path.setAttribute('stroke-linejoin','round');
       if(isDashed) path.setAttribute('stroke-dasharray','6,4');
       svg.appendChild(path);
+      
       // dots
       pts.forEach(p=>{
-        const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
-        c.setAttribute('cx',p[0]); c.setAttribute('cy',p[1]); c.setAttribute('r','3');
-        c.setAttribute('fill',color); c.setAttribute('stroke','var(--bg)'); c.setAttribute('stroke-width','1.5');
-        svg.appendChild(c);
+        const idx = p[2];
+        const r = rows[idx];
+        const x = p[0];
+        const y = p[1];
+        
+        if (isGuestPath && r && r.model_version) {
+          const isGlm = String(r.model_version).includes('glm');
+          if (isGlm) {
+            // GLM Model: Gold Diamond
+            const glow = document.createElementNS('http://www.w3.org/2000/svg','circle');
+            glow.setAttribute('cx', x.toFixed(1)); glow.setAttribute('cy', y.toFixed(1)); glow.setAttribute('r', '7');
+            glow.setAttribute('fill', '#ffd700'); glow.setAttribute('fill-opacity', '0.25');
+            svg.appendChild(glow);
+
+            const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+            const size = 5.5;
+            const points = `${x.toFixed(1)},${(y-size).toFixed(1)} ${(x+size).toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${(y+size).toFixed(1)} ${(x-size).toFixed(1)},${y.toFixed(1)}`;
+            poly.setAttribute('points', points);
+            poly.setAttribute('fill', '#ffd700');
+            poly.setAttribute('stroke', 'var(--bg)');
+            poly.setAttribute('stroke-width', '1.5');
+            svg.appendChild(poly);
+          } else {
+            // Legacy Model: Regular Blue Dot
+            const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+            c.setAttribute('cx',x.toFixed(1)); c.setAttribute('cy',y.toFixed(1)); c.setAttribute('r','3.5');
+            c.setAttribute('fill',color); c.setAttribute('stroke','var(--bg)'); c.setAttribute('stroke-width','1.5');
+            svg.appendChild(c);
+          }
+        } else {
+          // Others (Sales MAPE): Regular dots
+          const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+          c.setAttribute('cx',x.toFixed(1)); c.setAttribute('cy',y.toFixed(1)); c.setAttribute('r','3');
+          c.setAttribute('fill',color); c.setAttribute('stroke','var(--bg)'); c.setAttribute('stroke-width','1.5');
+          svg.appendChild(c);
+        }
       });
     }
 
@@ -721,8 +895,8 @@
     const accentColor = cs.getPropertyValue('--accent').trim() || 'oklch(0.62 0.17 256)';
     const purpleColor = cs.getPropertyValue('--purple').trim() || 'oklch(0.72 0.18 310)';
 
-    makePath(gVals, accentColor, false);
-    makePath(sVals, purpleColor, true);
+    makePath(gVals, accentColor, false, true);
+    makePath(sVals, purpleColor, true, false);
 
     // latest label
     const latestIdx = rows.length-1;
@@ -736,29 +910,7 @@
     }
   }
 
-  // ===== history days bar =====
-  function renderHistBars(){
-    const rows = historyRows;
-    if(!rows.length){ dom.histBarsWrap.innerHTML=''; return; }
-    const maxDays = Math.max(...rows.map(r=>r.history_days||0));
-    // show at most last 30
-    const display = rows.slice(-30).reverse();
-    dom.histBarsWrap.innerHTML = display.map(r => {
-      const d = r.history_days || 0;
-      const pct = maxDays>0 ? (d/maxDays*100).toFixed(1) : 0;
-      const ymd = String(r.log_date||'');
-      const m = ymd.match(/\d{4}-(\d{2})-(\d{2})/);
-      const label = m ? m[1]+'/'+m[2] : ymd.slice(5,10);
-      const mgRaw = mapePct(r.mape_guests);
-      const mg = mgRaw!=null ? mgRaw.toFixed(1)+'%' : '—';
-      return `<div class="hist-bar-row">
-        <div class="hist-bar-label">${escH(label)}</div>
-        <div class="hist-bar-track"><div class="hist-bar-fill" style="width:${pct}%"></div></div>
-        <div class="hist-bar-val">${d}日</div>
-        <div class="hist-bar-mape">客MAPE ${escH(mg)}</div>
-      </div>`;
-    }).join('');
-  }
+
 
   // ===== detail table =====
   function renderTable(){
