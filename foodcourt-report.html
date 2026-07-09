@@ -947,7 +947,7 @@
   // ─── Init ────────────────────────────────────────────────────────────────────
   (async function init() {
     if (AUTH?.consumeUrlAuthParams) {
-      try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' }); }
+      try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report', targetStore: STORE }); }
       catch(_) {}
     }
     const authed = !!getToken();

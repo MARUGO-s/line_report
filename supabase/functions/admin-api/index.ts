@@ -649,6 +649,25 @@ Deno.serve(async (req, info) => {
     }, 429)
   }
 
+  if (req.method === "POST" && path === "/auth/verify") {
+    try {
+      const fallbackToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
+      const authResult = await authenticate(req, supabase, fallbackToken)
+      if (!authResult.ok) {
+        return json({ error: authResult.message }, authResult.status)
+      }
+      return json({
+        ok: true,
+        storeScope: authResult.storeScope,
+        roomScope: authResult.roomScope,
+        scopeKind: authResult.scopeKind,
+      }, 200)
+    } catch (e) {
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
+  }
+
   if (req.method === "POST" && path === "/auth/link-login") {
     try {
       const body = await parseJson(workReq)
@@ -6610,7 +6629,7 @@ function extractClientIp(headers: Headers, info?: { remoteAddr?: { hostname?: st
 
 function resolveAdminRateLimit(method: string, path: string): { maxRequests: number; windowMs: number } {
   // 資格情報を提示する認証エンドポイントは総当たりの標的。既定(180/分)より厳しくする。
-  if (method === "POST" && (path === "/auth/link-login" || path === "/auth/session" || path === "/auth/room-config-login")) {
+  if (method === "POST" && (path === "/auth/link-login" || path === "/auth/session" || path === "/auth/room-config-login" || path === "/auth/verify")) {
     return {
       maxRequests: 20,
       windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,

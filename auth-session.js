@@ -197,15 +197,42 @@
     var params = new URLSearchParams(global.location.search);
     var loginToken = String(params.get('lt') || '').trim();
     if (!loginToken) return false;
-    // LINEリンク(from=line)に新しい lt が載っている場合は、端末に残った既存セッションがあっても
-    // 必ず交換する。期限切れ/別店舗スコープの古いセッションが新しい lt をスキップさせ、その lt を
-    // 未使用のまま失効させて「LINEからクリックしてもトークン入力を求められる」不具合の原因だったため。
-    // 通常ページ(from=line以外)では従来どおり既存セッションを尊重し、使い捨て lt を無駄にしない。
+
+    // 既に unexpired なセッションがあり、かつアクセス対象の店舗/ルームスコープと一致していれば、
+    // 使い捨ての lt を重複消費せず、既存セッションを再利用して速やかにログイン状態に入る。
+    // これにより、ページ更新(リロード)やバックボタン等で lt が再送されても「既に使用済み」で
+    // ログアウトさせられてしまう現象を防ぐ。
     var existing = getToken();
-    if (existing && isSessionToken(existing) && !isLineEntryUrl()) {
-      stripUrlParams(['lt']);
-      return true;
+    if (existing && isSessionToken(existing)) {
+      try {
+        var verifyUrl = exchangeUrl.replace(/\/auth\/link-login$/, '/auth/verify');
+        var verifyResponse = await fetch(verifyUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'x-admin-token': existing,
+            'x-admin-surface': adminSurface,
+          },
+        });
+        if (verifyResponse.ok) {
+          var verifyBody = await verifyResponse.json().catch(function () { return {}; });
+          var targetStore = String(options.targetStore || params.get('store_key') || params.get('store') || '').trim();
+          var targetRoom = String(options.targetRoom || params.get('room_id') || '').trim();
+
+          var isStoreMatched = !targetStore || !verifyBody.storeScope || verifyBody.storeScope === targetStore;
+          var isRoomMatched = !targetRoom || !verifyBody.roomScope || verifyBody.roomScope === targetRoom;
+
+          if (isStoreMatched && isRoomMatched) {
+            // 既存セッションが有効でスコープも一致！新しい lt の消費（とそれに伴う失敗・クリア）をスキップ
+            stripUrlParams(['lt']);
+            return true;
+          }
+        }
+      } catch (verifyErr) {
+        console.warn('Session verification failed, will attempt loginToken exchange:', verifyErr);
+      }
     }
+
     var response = await fetch(exchangeUrl, {
       method: 'POST',
       headers: {
