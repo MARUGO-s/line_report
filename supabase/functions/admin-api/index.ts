@@ -463,14 +463,27 @@ async function loadVenueEventsForReports(
     }
   }
 
-  const { data, error } = await supabase
+  let data: any[] = []
+  const firstTry = await supabase
     .from("tokyo_dome_events")
     .select("event_date, title, category, venue, is_japan, note, expected_attendance, start_time, game_duration, game_result, game_score, score_margin")
     .gte("event_date", lo)
     .lte("event_date", hi)
     .order("event_date", { ascending: true })
     .limit(600)
-  if (error || !Array.isArray(data)) return []
+  if (!firstTry.error && Array.isArray(firstTry.data)) {
+    data = firstTry.data
+  } else {
+    const secondTry = await supabase
+      .from("tokyo_dome_events")
+      .select("event_date, title, category, venue, is_japan, note, expected_attendance")
+      .gte("event_date", lo)
+      .lte("event_date", hi)
+      .order("event_date", { ascending: true })
+      .limit(600)
+    if (secondTry.error || !Array.isArray(secondTry.data)) return []
+    data = secondTry.data
+  }
   return data.map((e) => {
     const dateStr = String((e as { event_date?: unknown }).event_date ?? "").slice(0, 10)
     const isBaseball = String((e as { category?: unknown }).category ?? "") === "プロ野球"
