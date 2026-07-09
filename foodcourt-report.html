@@ -371,57 +371,64 @@
 
         <!-- やったこと -->
         <div class="section">
-          <div class="section-title"><span class="section-icon">🎯</span>施策・取り組み</div>
+          <div class="section-title"><span class="section-icon">🎯</span>施策・取り組み<span class="section-icon-sub" style="font-size:11px;font-weight:400;color:var(--tx-3);margin-left:6px">— 本日実施した売上対策アクションを追加してください</span></div>
+          <p class="field-desc">試食、呼び込み、セット提案、陳列変更、人員配置など、売上に影響を与えた取り組みを分類して記録します（AI効果検証の教師データになります）。</p>
           <div class="action-list" id="actionList"></div>
           <button class="add-action-btn" id="addActionBtn">＋ 施策を追加</button>
         </div>
 
         <!-- 客数・売上への影響 -->
         <div class="section">
-          <div class="section-title"><span class="section-icon">📈</span>結果・考察</div>
+          <div class="section-title"><span class="section-icon">📈</span>結果・考察<span class="section-icon-sub" style="font-size:11px;font-weight:400;color:var(--tx-3);margin-left:6px">— データからは読み取れない現場の「変化の要因」を入力してください</span></div>
           <div class="two-col">
             <div class="field-group">
-              <label class="field-label">👥 客数への影響</label>
-              <textarea class="field-textarea" id="fGuestImpact" placeholder="例: 呼び込みで通常比＋15%、ランチ12時台に集中" rows="3"></textarea>
+              <label class="field-label">👥 客数への影響（行列・客層の変化）</label>
+              <textarea class="field-textarea" id="fGuestImpact" placeholder="例: デーゲーム終了後の17時台に長蛇の列ができ、購入を諦めて立ち去る離脱客（機会損失）が約5組発生した。夜はアルコール需要の団体客が多かった。" rows="3"></textarea>
+              <span class="field-help">※行列の長さによる注文諦め、立ち止まり客層の特徴、ピーク時の混雑ピークのズレなどを書くとAIが客数変動を正確に解釈します。</span>
             </div>
             <div class="field-group">
-              <label class="field-label">💴 売上への影響</label>
-              <textarea class="field-textarea" id="fSalesImpact" placeholder="例: おすすめ提案でセット率が上がり客単価向上" rows="3"></textarea>
+              <label class="field-label">💴 売上・客単価への影響（セット率・品揃え）</label>
+              <textarea class="field-textarea" id="fSalesImpact" placeholder="例: ビールと唐揚げのセット注文のおすすめを徹底し、注文率が向上。3名以上のまとめ買い客が多く、1会計あたりの平均単価が伸びた。" rows="3"></textarea>
+              <span class="field-help">※セットメニューの推奨、特定商品のまとめ買い状況、高単価商品の注文比率などを書くとAIが単価要因を正確に分解します。</span>
             </div>
           </div>
         </div>
 
         <!-- コンテキスト -->
         <div class="section">
-          <div class="section-title"><span class="section-icon">🌤</span>背景・コンテキスト</div>
+          <div class="section-title"><span class="section-icon">🌤</span>背景・コンテキスト<span class="section-icon-sub" style="font-size:11px;font-weight:400;color:var(--tx-3);margin-left:6px">— 自動取得データ以外の、突発的な天候・周辺環境の変化</span></div>
           <div class="two-col">
             <div class="field-group">
-              <label class="field-label">天気・気候メモ</label>
-              <input class="field-input" id="fWeatherNote" placeholder="例: 夕方から雨、蒸し暑い" maxlength="200">
+              <label class="field-label">☀️ 天気・気候メモ（体感・急な変化）</label>
+              <input class="field-input" id="fWeatherNote" placeholder="例: 14時頃に激しいゲリラ豪雨があり、ドーム通路からの雨宿り客で一時的に席が満席になった。湿度が高くビールの出が良かった。" maxlength="200">
+              <span class="field-help">※予報以外の急な雨、エアコンの効き具合、蒸し暑さなど「客足や飲み物の注文率に影響した体感」を記入します。</span>
             </div>
             <div class="field-group">
-              <label class="field-label">イベント・特記</label>
-              <input class="field-input" id="fEventNote" placeholder="例: 周辺ラクーアでの特別セール、団体客のご予約あり等（ドーム公式イベント以外）" maxlength="200">
+              <label class="field-label">🏟 店舗特記・周辺状況（ドーム公式イベント以外）</label>
+              <input class="field-input" id="fEventNote" placeholder="例: 周辺ラクーアでの特別セールがありドーム周辺が終日混雑。修学旅行生の団体（約30名）の来店があり一時満席。" maxlength="200">
+              <span class="field-help">※周辺商業施設のセール、修学旅行の団体予約、テレビ・SNSでの店舗紹介など、ドームイベント以外の外的要因を記入します。</span>
             </div>
           </div>
         </div>
 
         <!-- 課題・申し送り -->
         <div class="section">
-          <div class="section-title"><span class="section-icon">📝</span>課題・申し送り</div>
+          <div class="section-title"><span class="section-icon">📝</span>課題・申し送り<span class="section-icon-sub" style="font-size:11px;font-weight:400;color:var(--tx-3);margin-left:6px">— 明日以降の機会損失の防止・仕込み量予測の精度向上</span></div>
           <div class="two-col">
             <div class="field-group">
-              <label class="field-label">課題・問題点</label>
-              <textarea class="field-textarea" id="fIssues" placeholder="例: 13時台にレジ渋滞が発生" rows="3"></textarea>
+              <label class="field-label">⚠️ 運営上の課題・ボトルネック</label>
+              <textarea class="field-textarea" id="fIssues" placeholder="例: 19時のピーク時に米が一時的に切れてしまい、丼物の注文をお断りした。人員不足で提供時間が伸び、列が滞留した。" rows="3"></textarea>
+              <span class="field-help">※食材の仕込み切れ（欠品）、機器トラブル、スタッフ不足による提供遅延などのボトルネックを記録します。</span>
             </div>
             <div class="field-group">
-              <label class="field-label">翌日への申し送り</label>
-              <textarea class="field-textarea" id="fNextActions" placeholder="例: 仕込み量を1.2倍に増やす" rows="3"></textarea>
+              <label class="field-label">📋 翌日以降に向けたアクション（改善・仕込み）</label>
+              <textarea class="field-textarea" id="fNextActions" placeholder="例: 明日のライブはファミリー層（子供連れ）が多いと予想されるため、キッズメニューの仕込みを通常の1.5倍にする。" rows="3"></textarea>
+              <span class="field-help">※翌日の客層に合わせた仕込み指示、人員の配置見直し、推奨販売のターゲット指定などを記録します。</span>
             </div>
           </div>
           <div class="field-group" style="margin-top:10px">
             <label class="field-label">自由記述・メモ</label>
-            <textarea class="field-textarea" id="fMemo" placeholder="その他、気づいたことを自由に記載" rows="3"></textarea>
+            <textarea class="field-textarea" id="fMemo" placeholder="その他, 気づいたことやAIに引き継ぎたい現場の気づきを自由に記載" rows="3"></textarea>
           </div>
         </div>
 
