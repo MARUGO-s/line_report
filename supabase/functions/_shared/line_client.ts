@@ -139,6 +139,7 @@ export async function pushLineMessages(
   toUserId: string,
   messages: Record<string, unknown>[],
   channelAccessToken: string,
+  logCtx?: LineWebhookDeliveryLogContext,
 ): Promise<{ ok: boolean; error?: string }> {
   const userId = String(toUserId ?? '').trim()
   if (!userId.startsWith('U')) {
@@ -160,11 +161,41 @@ export async function pushLineMessages(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('pushLineMessages fetch threw:', msg)
+    if (logCtx?.storePartitionKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: logCtx.storePartitionKey,
+        method: 'push',
+        context: logCtx.context,
+        targetRoomId: userId,
+        attempted: true,
+        success: false,
+        httpStatus: 0,
+        reason: `LINEプッシュが例外で失敗: ${msg.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      })
+    }
     return { ok: false, error: `LINE push threw: ${msg}` }
   }
-  if (!response.ok) {
-    const errText = await response.text()
-    return { ok: false, error: `LINE push API ${response.status}: ${errText}` }
+  const httpStatus = response.status
+  const ok = response.ok
+  const errText = ok ? '' : await response.text()
+
+  if (logCtx?.storePartitionKey) {
+    void recordLineWebhookDeliveryLog({
+      storePartitionKey: logCtx.storePartitionKey,
+      method: 'push',
+      context: logCtx.context,
+      targetRoomId: userId,
+      attempted: true,
+      success: ok,
+      httpStatus,
+      reason: ok ? 'プッシュ通知でLINEへ送信しました。' : `LINEプッシュAPIエラー: ${errText.slice(0, 200)}`,
+      details: { message_count: Math.min(messages.length, 5) },
+    })
+  }
+
+  if (!ok) {
+    return { ok: false, error: `LINE push API ${httpStatus}: ${errText}` }
   }
   return { ok: true }
 }
@@ -173,11 +204,13 @@ export async function pushLineText(
   toUserId: string,
   text: string,
   channelAccessToken: string,
+  logCtx?: LineWebhookDeliveryLogContext,
 ): Promise<{ ok: boolean; error?: string }> {
   return pushLineMessages(
     toUserId,
     [{ type: 'text', text: String(text ?? '').slice(0, 4900) }],
     channelAccessToken,
+    logCtx,
   )
 }
 
@@ -189,8 +222,9 @@ export async function pushLineTextToTarget(
   to: string,
   text: string,
   channelAccessToken: string,
+  logCtx?: LineWebhookDeliveryLogContext,
 ): Promise<{ ok: boolean; error?: string }> {
-  return pushLineMessagesToTarget(to, [{ type: 'text', text: String(text ?? '').slice(0, 4900) }], channelAccessToken)
+  return pushLineMessagesToTarget(to, [{ type: 'text', text: String(text ?? '').slice(0, 4900) }], channelAccessToken, logCtx)
 }
 
 /**
@@ -201,6 +235,7 @@ export async function pushLineMessagesToTarget(
   to: string,
   messages: Record<string, unknown>[],
   channelAccessToken: string,
+  logCtx?: LineWebhookDeliveryLogContext,
 ): Promise<{ ok: boolean; error?: string }> {
   const target = String(to ?? '').trim()
   if (!/^[UCR]/.test(target)) {
@@ -222,11 +257,41 @@ export async function pushLineMessagesToTarget(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('pushLineMessagesToTarget fetch threw:', msg)
+    if (logCtx?.storePartitionKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: logCtx.storePartitionKey,
+        method: 'push',
+        context: logCtx.context,
+        targetRoomId: target,
+        attempted: true,
+        success: false,
+        httpStatus: 0,
+        reason: `LINEプッシュが例外で失敗: ${msg.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      })
+    }
     return { ok: false, error: `LINE push threw: ${msg}` }
   }
-  if (!response.ok) {
-    const errText = await response.text()
-    return { ok: false, error: `LINE push API ${response.status}: ${errText}` }
+  const httpStatus = response.status
+  const ok = response.ok
+  const errText = ok ? '' : await response.text()
+
+  if (logCtx?.storePartitionKey) {
+    void recordLineWebhookDeliveryLog({
+      storePartitionKey: logCtx.storePartitionKey,
+      method: 'push',
+      context: logCtx.context,
+      targetRoomId: target,
+      attempted: true,
+      success: ok,
+      httpStatus,
+      reason: ok ? 'プッシュ通知でLINEへ送信しました。' : `LINEプッシュAPIエラー: ${errText.slice(0, 200)}`,
+      details: { message_count: Math.min(messages.length, 5) },
+    })
+  }
+
+  if (!ok) {
+    return { ok: false, error: `LINE push API ${httpStatus}: ${errText}` }
   }
   return { ok: true }
 }

@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
 import { loadReceiptReportAggregateForRoom } from "./functions/_shared/receipt_report_aggregate.ts";
 import { buildReceiptReportFlexMessages } from "./functions/_shared/receipt_report_flex.ts";
+import { recordLineWebhookDeliveryLog } from "./functions/_shared/line_webhook_delivery_log.ts";
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const RECEIPT_MID_REPORT_TITLE = "中間報告";
 const RECEIPT_MONTH_END_REPORT_TITLE = "月間報告";
@@ -153,7 +154,7 @@ Deno.serve(async (req)=>{
       if (!targetIds.length) return json({ ok: false, mode: "notify_admin", error: `to filter '${toFilter}' matched no configured admin id` }, 200);
       const sendResults = [];
       for (const uid of targetIds){
-        const r = await sendLinePushMessages(uid, [{ type: "text", text: message.slice(0, 4900) }], adminToken);
+        const r = await sendLinePushMessages(uid, [{ type: "text", text: message.slice(0, 4900) }], adminToken, viaStore);
         sendResults.push({ to: maskId(uid), ok: r.ok, error: r.ok ? undefined : r.error });
       }
       return json({ mode: "notify_admin", to_filter: toFilter || null, recipients: targetIds.length, sent: sendResults.filter((r)=>r.ok).length, failed: sendResults.filter((r)=>!r.ok).length, results: sendResults }, 200);
@@ -308,7 +309,7 @@ async function dispatchReceiptReport(supabase, lineAccessToken, schedule, target
       storePartitionKey,
       reportKind: schedule.reportKind
     });
-    const sendResult = await sendLinePushMessages(roomId, reportMessages, resolveStoreLineToken(storePartitionKey, lineAccessToken));
+    const sendResult = await sendLinePushMessages(roomId, reportMessages, resolveStoreLineToken(storePartitionKey, lineAccessToken), storePartitionKey);
     if (!sendResult.ok) {
       // 恒久エラー(LINE 400系=友だち解除/Bot退出/無効ルーム等の宛先不達)は再送しても直らないので予約行を残す
       //   ＝同じ部屋を毎分リトライしない（minute>=m の窓中ずっと無駄打ちするのを防ぐ）。
@@ -435,7 +436,7 @@ async function handleReceiptReportTestSend(spec, deps) {
     storePartitionKey,
     reportKind: slice.reportKind
   });
-  const sendResult = await sendLinePushMessages(spec.roomId, reportMessages, resolveStoreLineToken(storePartitionKey, deps.lineAccessToken));
+  const sendResult = await sendLinePushMessages(spec.roomId, reportMessages, resolveStoreLineToken(storePartitionKey, deps.lineAccessToken), storePartitionKey);
   if (!sendResult.ok) {
     return json({
       ok: false,
@@ -555,23 +556,60 @@ function buildScheduleSliceForKind(kind, jst) {
     rangeEndIso: buildJstDateStartUtcIso(nextMonth.year, nextMonth.month, 1)
   };
 }
-async function sendLinePushMessages(to, messages, token) {
-  const response = await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      to,
-      messages: messages.slice(0, 5)
-    })
-  });
-  if (!response.ok) {
-    const err = await response.text();
+async function sendLinePushMessages(to, messages, token, storePartitionKey) {
+  let response;
+  try {
+    response = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        to,
+        messages: messages.slice(0, 5)
+      })
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (storePartitionKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey,
+        method: 'push',
+        context: 'receipt_midreport',
+        targetRoomId: to,
+        attempted: true,
+        success: false,
+        httpStatus: 0,
+        reason: `LINEプッシュが例外で失敗: ${msg.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      });
+    }
+    return { ok: false, error: `LINE push threw: ${msg}` };
+  }
+
+  const httpStatus = response.status;
+  const ok = response.ok;
+  const errText = ok ? '' : await response.text();
+
+  if (storePartitionKey) {
+    void recordLineWebhookDeliveryLog({
+      storePartitionKey,
+      method: 'push',
+      context: 'receipt_midreport',
+      targetRoomId: to,
+      attempted: true,
+      success: ok,
+      httpStatus,
+      reason: ok ? '「売上中間・月間報告」を送信しました。' : `LINEプッシュAPIエラー: ${errText.slice(0, 200)}`,
+      details: { message_count: Math.min(messages.length, 5) },
+    });
+  }
+
+  if (!ok) {
     return {
       ok: false,
-      error: `LINE push API error (${response.status}): ${err}`
+      error: `LINE push API error (${httpStatus}): ${errText}`
     };
   }
   return {

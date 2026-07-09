@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 
 // PV(パブリックビューイング)の「日本戦」を“単独で”即LINE配信する cron。
 //  - 毎10分起動。tokyo_dome_events の venue='public-viewing' / is_japan=true / 未来日(JST) のうち、
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
         if (String(insErr.code ?? "") === "23505") { skipped.push(key); continue }
         errors.push(`${key}: reserve failed (${insErr.message})`); continue
       }
-      const r2 = await sendLinePush(r.roomId, [buildAlertMessage(ev)], resolveStoreLineToken(r.storeKey || "marugos", lineAccessToken))
+      const r2 = await sendLinePush(r.roomId, [buildAlertMessage(ev)], resolveStoreLineToken(r.storeKey || "marugos", lineAccessToken), r.storeKey || "marugos")
       if (!r2.ok) {
         try { await supabase.from("pv_japan_alert_logs").delete().eq("room_id", r.roomId).eq("event_date", ev.event_date).eq("title", ev.title).eq("pv_confirmed", ev.pv_confirmed) } catch (_e) { /* noop */ }
         errors.push(`${key}: ${r2.error}`); continue
@@ -173,14 +174,52 @@ function resolveStoreLineToken(storeKey: string, fallbackToken: string): string 
   }
   return sanitizeLineToken(fallbackToken)
 }
-async function sendLinePush(to: string, messages: unknown[], token: string): Promise<{ ok: true } | { ok: false; error: string }> {
+async function sendLinePush(to: string, messages: unknown[], token: string, storeKey?: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!token) return { ok: false, error: "missing line token" }
-  const res = await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-    body: JSON.stringify({ to, messages: messages.slice(0, 5) }),
-  })
-  if (!res.ok) return { ok: false, error: `LINE push API error (${res.status}): ${await res.text()}` }
+  let res: Response
+  try {
+    res = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ to, messages: messages.slice(0, 5) }),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: 'push',
+        context: 'pv_japan_alert',
+        targetRoomId: to,
+        attempted: true,
+        success: false,
+        httpStatus: 0,
+        reason: `LINEプッシュが例外で失敗: ${msg.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      })
+    }
+    return { ok: false, error: `LINE push threw: ${msg}` }
+  }
+
+  const httpStatus = res.status
+  const ok = res.ok
+  const errText = ok ? '' : await res.text()
+
+  if (storeKey) {
+    void recordLineWebhookDeliveryLog({
+      storePartitionKey: storeKey,
+      method: 'push',
+      context: 'pv_japan_alert',
+      targetRoomId: to,
+      attempted: true,
+      success: ok,
+      httpStatus,
+      reason: ok ? '「PV日本戦通知」を送信しました。' : `LINEプッシュAPIエラー: ${errText.slice(0, 200)}`,
+      details: { message_count: Math.min(messages.length, 5) },
+    })
+  }
+
+  if (!ok) return { ok: false, error: `LINE push API error (${httpStatus}): ${errText}` }
   return { ok: true }
 }
 
