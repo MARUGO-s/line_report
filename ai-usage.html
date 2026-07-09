@@ -424,8 +424,8 @@
               <p class="ms-sub" style="margin-top:0">すべてのAIモデルの合計トークン使用量と概算費用の推移です。タブで月毎・日毎の集計を切り替えることができます。</p>
               
               <div class="ts-tab-bar" style="margin-top:14px; margin-bottom: 14px;">
-                <button class="ts-tab active" data-mode="month">月毎に集計</button>
-                <button class="ts-tab" data-mode="day">日毎に集計</button>
+                <button class="ts-tab" data-mode="month">月毎に集計</button>
+                <button class="ts-tab active" data-mode="day">日毎に集計</button>
               </div>
 
               <!-- グラフ表示領域 -->
@@ -693,7 +693,7 @@
     const state = {
       period: 'this-month',
       theme: 'dark',
-      timeSeriesMode: 'month', // 月毎 or 日毎
+      timeSeriesMode: 'day', // デフォルトを日毎に集計に変更
       data: null,   // 直近 of /usage/ai-cost レスポンス
       rates: loadRates(),
       chart: null, // Chart.js インスタンス保持用
