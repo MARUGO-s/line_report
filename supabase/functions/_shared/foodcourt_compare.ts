@@ -1373,6 +1373,74 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
     if (missing > 0) L.push(`注: イベントありだが動員予想未入力の日が${missing}日ある。規模比較は入力日のみ有効。`)
   }
 
+  // プロ野球（巨人戦）の開始時間・勝敗結果・試合時間の影響分析
+  const baseballWins: number[] = []; const baseballLosses: number[] = []
+  const baseballWinsS: number[] = []; const baseballLossesS: number[] = []
+  const baseballDay: number[] = []; const baseballNight: number[] = []
+  const baseballDayS: number[] = []; const baseballNightS: number[] = []
+  const baseballShort: number[] = []; const baseballLong: number[] = []
+  const baseballShortS: number[] = []; const baseballLongS: number[] = []
+
+  for (const r of daily) {
+    const hits = byDate.get(r.date) || []
+    const bb = hits.find((h) => h.category === 'プロ野球' && (h.venue === 'tokyo-dome' || !h.venue))
+    if (bb) {
+      const g = r.guests as number
+      const s = r.sales
+      
+      // 1) 勝敗別 (game_result)
+      if (bb.game_result === '○') {
+        baseballWins.push(g); baseballWinsS.push(s)
+      } else if (bb.game_result === '●') {
+        baseballLosses.push(g); baseballLossesS.push(s)
+      }
+      
+      // 2) 開始時間別 (start_time)
+      if (bb.start_time) {
+        const hh = parseInt(bb.start_time.split(':')[0], 10)
+        if (!isNaN(hh)) {
+          if (hh <= 15) {
+            baseballDay.push(g); baseballDayS.push(s)
+          } else {
+            baseballNight.push(g); baseballNightS.push(s)
+          }
+        }
+      }
+      
+      // 3) 試合時間別 (game_duration)
+      if (bb.game_duration) {
+        const parts = bb.game_duration.split(':')
+        if (parts.length >= 2) {
+          const hours = parseInt(parts[0], 10)
+          const mins = parseInt(parts[1], 10)
+          if (!isNaN(hours) && !isNaN(mins)) {
+            const totalMins = hours * 60 + mins
+            if (totalMins <= 180) { // 3時間以下
+              baseballShort.push(g); baseballShortS.push(s)
+            } else {
+              baseballLong.push(g); baseballLongS.push(s)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const bbL: string[] = []
+  if (baseballWins.length || baseballLosses.length || baseballDay.length || baseballNight.length || baseballShort.length || baseballLong.length) {
+    bbL.push('【プロ野球詳細分析】')
+    if (baseballWins.length && baseballLosses.length) {
+      bbL.push(`・勝敗別: 勝ち試合(${baseballWins.length}日) 平均客数 ${Math.round(fcAvg(baseballWins)!)}人 / 売上 ${fcYen(fcAvg(baseballWinsS)!)} vs 負け試合(${baseballLosses.length}日) 平均客数 ${Math.round(fcAvg(baseballLosses)!)}人 / 売上 ${fcYen(fcAvg(baseballLossesS)!)}`)
+    }
+    if (baseballDay.length && baseballNight.length) {
+      bbL.push(`・時間帯別: デーゲーム(${baseballDay.length}日) 平均客数 ${Math.round(fcAvg(baseballDay)!)}人 / 売上 ${fcYen(fcAvg(baseballDayS)!)} vs ナイター(${baseballNight.length}日) 平均客数 ${Math.round(fcAvg(baseballNight)!)}人 / 売上 ${fcYen(fcAvg(baseballNightS)!)}`)
+    }
+    if (baseballShort.length && baseballLong.length) {
+      bbL.push(`・試合時間別: 3時間以内・スピード決着(${baseballShort.length}日) 平均客数 ${Math.round(fcAvg(baseballShort)!)}人 / 売上 ${fcYen(fcAvg(baseballShortS)!)} vs 3時間超・長期戦(${baseballLong.length}日) 平均客数 ${Math.round(fcAvg(baseballLong)!)}人 / 売上 ${fcYen(fcAvg(baseballLongS)!)}`)
+    }
+    L.push(bbL.join('\n'))
+  }
+
   // データのある日付ごとのイベント有無を提示（モデルが個別イベントを名指しで語れるように・売上・動員も添える）
   const sample = daily.slice(-14).map((r) => {
     const hits = byDate.get(r.date) || []
@@ -1415,6 +1483,9 @@ export type VenueEvent = {
   note?: string
   /** 手入力の予想動員（tokyo_dome_events.expected_attendance）。未入力は null */
   expected_attendance?: number | null
+  start_time?: string | null
+  game_duration?: string | null
+  game_result?: string | null
 }
 export type ForecastRow = { target_date: string; metric: string; predicted: number; predicted_low?: number | null; predicted_high?: number | null; actual?: number | null; model_version?: string }
 
@@ -1429,7 +1500,11 @@ function fcFormatEventsForDay(hits: VenueEvent[]): string {
   if (!hits.length) return 'イベントなし'
   return hits.map((h) => {
     const vl = fcVenueLabel(h.venue)
-    return `${h.category}${vl ? `@${vl}` : ''}:${h.title}（${fcEventAttendanceLabel(h)}）`
+    const details: string[] = [fcEventAttendanceLabel(h)]
+    if (h.start_time) details.push(`開始:${h.start_time}`)
+    if (h.game_duration) details.push(`時間:${h.game_duration}`)
+    if (h.game_result) details.push(`結果:${h.game_result}`)
+    return `${h.category}${vl ? `@${vl}` : ''}:${h.title}（${details.join('／')}）`
   }).join('｜')
 }
 

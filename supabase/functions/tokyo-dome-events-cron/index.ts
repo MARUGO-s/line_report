@@ -120,28 +120,46 @@ Deno.serve(async (req) => {
 
   const allDates = rows.map((r) => r.event_date).sort()
 
-  // 4) Pro-Baseball Giants Audience Attendance Sync (from baseball-freak.com/audience/giants.html)
-  // 東京ドームでのプロ野球開催日の観客動員数を自動取得して tokyo_dome_events に反映する。
+  // 4) Pro-Baseball Giants Game details Sync (from baseball-freak.com/audience/giants.html & /game/giants.html)
+  // 東京ドームでのプロ野球開催日の観客動員数・開始時間・試合時間・勝敗結果を自動取得して tokyo_dome_events に反映する。
   let giantsSyncCount = 0
   let giantsError: string | null = null
   try {
-    const giantsRes = await fetch("https://baseball-freak.com/audience/giants.html", {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" }
-    })
-    if (!giantsRes.ok) {
-      giantsError = `fetch giants audience ${giantsRes.status}`
+    const [audRes, gameRes] = await Promise.all([
+      fetch("https://baseball-freak.com/audience/giants.html", { headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" } }),
+      fetch("https://baseball-freak.com/game/giants.html", { headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" } })
+    ])
+    
+    if (!audRes.ok) {
+      giantsError = `fetch giants audience ${audRes.status}`
+    } else if (!gameRes.ok) {
+      giantsError = `fetch giants games ${gameRes.status}`
     } else {
-      const html = await giantsRes.text()
+      const audHtml = await audRes.text()
+      const gameHtml = await gameRes.text()
+      
       let year = new Date().getFullYear()
-      const yearMatch = html.match(/<strong>(\d{4})年<\/strong>/)
+      const yearMatch = audHtml.match(/<strong>(\d{4})年<\/strong>/)
       if (yearMatch) {
         year = parseInt(yearMatch[1], 10)
       }
       
-      const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
-      let trMatch
-      while ((trMatch = trRegex.exec(html)) !== null) {
-        const trContent = trMatch[1]
+      interface GiantsDateMap {
+        [date: string]: {
+          attendance?: number
+          result?: string
+          duration?: string
+          stadium?: string
+          startTime?: string
+        }
+      }
+      const dataMap: GiantsDateMap = {}
+      
+      // Parse audience html
+      const audTrRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
+      let audTrMatch
+      while ((audTrMatch = audTrRegex.exec(audHtml)) !== null) {
+        const trContent = audTrMatch[1]
         const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi
         const tds: string[] = []
         let tdMatch
@@ -161,21 +179,63 @@ Deno.serve(async (req) => {
           const attText = tds[1].replace(/<[^>]+>/g, "").trim()
           const numString = attText.replace(/[^\d]/g, "")
           const attendance = parseInt(numString, 10)
-          if (isNaN(attendance)) continue
           
-          const stadiumText = tds[7].replace(/<[^>]+>/g, "").trim()
-          if (stadiumText === "東京ドーム") {
-            const { error: updateErr } = await supabase
-              .from("tokyo_dome_events")
-              .update({ expected_attendance: attendance, updated_at: new Date().toISOString() })
-              .eq("event_date", dateString)
-              .eq("venue", "tokyo-dome")
-              .eq("category", "プロ野球")
-            if (updateErr) {
-              console.error(`Failed to update giants attendance for date ${dateString}:`, updateErr)
-            } else {
-              giantsSyncCount++
-            }
+          const result = tds[2].replace(/<[^>]+>/g, "").trim() // ○, ●, △
+          const duration = tds[6].replace(/<[^>]+>/g, "").trim() // e.g. 2:23
+          const stadium = tds[7].replace(/<[^>]+>/g, "").trim()
+          
+          dataMap[dateString] = { attendance: isNaN(attendance) ? undefined : attendance, result, duration, stadium }
+        }
+      }
+      
+      // Parse game html for start times
+      const gameTrRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
+      let gameTrMatch
+      while ((gameTrMatch = gameTrRegex.exec(gameHtml)) !== null) {
+        const trContent = gameTrMatch[1]
+        const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi
+        const tds: string[] = []
+        let tdMatch
+        while ((tdMatch = tdRegex.exec(trContent)) !== null) {
+          tds.push(tdMatch[1])
+        }
+        
+        if (tds.length >= 8) {
+          const dateText = tds[0].replace(/<[^>]+>/g, "").trim()
+          const dateParts = dateText.match(/(\d{1,2})月(\d{1,2})日/)
+          if (!dateParts) continue
+          
+          const month = dateParts[1].padStart(2, "0")
+          const day = dateParts[2].padStart(2, "0")
+          const dateString = `${year}-${month}-${day}`
+          
+          const startTime = tds[7].replace(/<[^>]+>/g, "").trim() // e.g. 18:15
+          if (dataMap[dateString]) {
+            dataMap[dateString].startTime = startTime
+          }
+        }
+      }
+      
+      // Write merged results to Supabase for Tokyo Dome matches
+      for (const [dateString, info] of Object.entries(dataMap)) {
+        if (info.stadium === "東京ドーム") {
+          const { error: updateErr } = await supabase
+            .from("tokyo_dome_events")
+            .update({
+              expected_attendance: info.attendance ?? null,
+              start_time: info.startTime ?? null,
+              game_duration: info.duration ?? null,
+              game_result: info.result ?? null,
+              updated_at: new Date().toISOString()
+            })
+            .eq("event_date", dateString)
+            .eq("venue", "tokyo-dome")
+            .eq("category", "プロ野球")
+            
+          if (updateErr) {
+            console.error(`Failed to update Giants game details for date ${dateString}:`, updateErr)
+          } else {
+            giantsSyncCount++
           }
         }
       }

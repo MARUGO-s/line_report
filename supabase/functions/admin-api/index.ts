@@ -416,7 +416,7 @@ async function loadVenueEventsForReports(
   const hi = hiCand[hiCand.length - 1]
   const { data, error } = await supabase
     .from("tokyo_dome_events")
-    .select("event_date, title, category, venue, is_japan, note, expected_attendance")
+    .select("event_date, title, category, venue, is_japan, note, expected_attendance, start_time, game_duration, game_result")
     .gte("event_date", lo)
     .lte("event_date", hi)
     .order("event_date", { ascending: true })
@@ -432,6 +432,9 @@ async function loadVenueEventsForReports(
     expected_attendance: (e as { expected_attendance?: unknown }).expected_attendance == null
       ? null
       : Number((e as { expected_attendance?: unknown }).expected_attendance),
+    start_time: (e as { start_time?: unknown }).start_time ? String((e as { start_time?: unknown }).start_time) : null,
+    game_duration: (e as { game_duration?: unknown }).game_duration ? String((e as { game_duration?: unknown }).game_duration) : null,
+    game_result: (e as { game_result?: unknown }).game_result ? String((e as { game_result?: unknown }).game_result) : null,
   })).filter((e) => e.event_date && e.title)
 }
 
