@@ -2528,7 +2528,7 @@ async function fetchState(
   url: URL,
   adminSurface: string,
 ) {
-  const logsLimit = clampInt(url.searchParams.get("logs_limit"), 30, 10, 30)
+  const logsLimit = clampInt(url.searchParams.get("logs_limit"), 100, 10, 200)
   const logsFetchLimit = logsLimit * 8
   const webhookStoreKeyRaw = String(url.searchParams.get("webhook_store_key") ?? "").trim().toLowerCase()
 

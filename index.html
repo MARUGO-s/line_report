@@ -618,7 +618,7 @@
     }
 
     .log-table-wrap {
-      max-height: 520px;
+      max-height: 800px;
       overflow-x: auto;
       overflow-y: auto;
     }
@@ -9873,7 +9873,7 @@
     }
 
     function buildAdminStatePath() {
-      let path = '/state?logs_limit=30';
+      let path = '/state?logs_limit=100';
       if (webhookLogStoreKey) {
         path += '&webhook_store_key=' + encodeURIComponent(webhookLogStoreKey);
       }
