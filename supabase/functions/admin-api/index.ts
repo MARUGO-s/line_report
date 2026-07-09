@@ -32,8 +32,13 @@ import {
   resolveFoodCourtDailyAnalysisVersion,
   generateFoodCourtDailySummary,
   generateFoodCourtPeriodSummary,
+  generateFoodCourtWeeklyReport,
   fcSalesDate,
 } from "../_shared/foodcourt_compare.ts"
+import {
+  pushLineTextToTarget,
+  resolveChannelAccessToken,
+} from "../_shared/line_client.ts"
 import {
   fetchManualMonthSales,
   fetchManualMonthSalesMapForStore,
@@ -455,13 +460,16 @@ async function loadBaseDailyForReports(
     attendance: null as number | null,
   }))
   // 日報(foodcourt_daily_logs)の動員数を baseDaily にマージ。
-  const { data: attRows } = await supabase
+  const { data: attRows, error: attErr } = await supabase
     .from("foodcourt_daily_logs")
     .select("log_date, daily_attendance")
     .ilike("store_partition_key", storeKey)
     .gte("log_date", lo)
     .lte("log_date", hi)
     .not("daily_attendance", "is", null)
+  if (attErr) {
+    console.error("loadBaseDailyForReports daily_logs attendance failed:", attErr.message)
+  }
   if (Array.isArray(attRows) && attRows.length > 0) {
     const attMap = new Map(
       attRows.map((r) => [String((r as { log_date?: unknown }).log_date ?? "").slice(0, 10), Number((r as { daily_attendance?: unknown }).daily_attendance)])
@@ -472,6 +480,59 @@ async function loadBaseDailyForReports(
     }
   }
   return base
+}
+
+/** フードコート日報を AI 分析用に読み込む。失敗時は error を返し、呼び出し側で可視化できるようにする。 */
+async function loadFoodCourtDailyLogs(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  opts?: { from?: string; to?: string; limit?: number },
+): Promise<{ logs: Array<Record<string, unknown>>; error: string | null; count: number }> {
+  const key = String(storeKey ?? "").trim()
+  if (!key) return { logs: [], error: "store_key is required", count: 0 }
+  const limit = Math.min(Math.max(1, opts?.limit ?? 60), 120)
+  let q = supabase
+    .from("foodcourt_daily_logs")
+    .select(
+      "log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, daily_attendance, issues, next_actions, memo",
+    )
+    .ilike("store_partition_key", key)
+    .order("log_date", { ascending: false })
+    .limit(limit)
+  const from = String(opts?.from ?? "").slice(0, 10)
+  const to = String(opts?.to ?? "").slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(from)) q = q.gte("log_date", from)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) q = q.lte("log_date", to)
+  const { data, error } = await q
+  if (error) {
+    console.error("loadFoodCourtDailyLogs failed:", key, error.message)
+    return { logs: [], error: error.message, count: 0 }
+  }
+  const logs = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
+  return { logs, error: null, count: logs.length }
+}
+
+/** JST 基準の YYYY-MM-DD（日報の「今日」と 60 日窓を UTC ずれなく揃える） */
+function jstDateIso(offsetDays = 0): string {
+  const jst = new Date(Date.now() + 9 * 3600 * 1000 + offsetDays * 24 * 3600 * 1000)
+  return jst.toISOString().slice(0, 10)
+}
+
+/** 先週の月曜〜日曜（JST） */
+function lastWeekMonSunJst(): { weekStart: string; weekEnd: string } {
+  const jstNow = new Date(Date.now() + 9 * 3600 * 1000)
+  // getUTC* は JST シフト後の UTC 表現なので曜日・日付として使える
+  const dow = jstNow.getUTCDay() // 0=日
+  // 今週月曜 = 今日 - ((dow+6)%7) 日
+  const daysSinceMon = (dow + 6) % 7
+  const thisMon = new Date(jstNow)
+  thisMon.setUTCDate(jstNow.getUTCDate() - daysSinceMon)
+  const lastMon = new Date(thisMon)
+  lastMon.setUTCDate(thisMon.getUTCDate() - 7)
+  const lastSun = new Date(lastMon)
+  lastSun.setUTCDate(lastMon.getUTCDate() + 6)
+  const fmt = (d: Date) => d.toISOString().slice(0, 10)
+  return { weekStart: fmt(lastMon), weekEnd: fmt(lastSun) }
 }
 
 // 自己再学習型の来客予測（forecast_predictions）を返す。基準店（マルゴS）のみ。当日前後の窓で guests/sales。
@@ -712,6 +773,9 @@ Deno.serve(async (req, info) => {
       "/foodcourt/evolution-history",
       "/foodcourt/ai-loop-runs",
       "/foodcourt/daily-logs",
+      "/foodcourt/daily-summary",
+      "/foodcourt/period-summary",
+      "/foodcourt/weekly-report",
       "/foodcourt/events/attendance",
       "/analytics/holidays",
       "/analytics/monthly",
@@ -1020,10 +1084,31 @@ Deno.serve(async (req, info) => {
           }
         }
       }
+      // 現場日報: 対象日の前後14日＋対象日を含めて AI に渡す（施策効果の照合用）。
+      const logsTo = businessDate || jstDateIso(0)
+      const logsFrom = addDaysIso(logsTo, -14)
+      const { logs: dailyLogs, error: dailyLogsError, count: dailyLogsCount } = await loadFoodCourtDailyLogs(
+        supabase,
+        storeKey,
+        { from: logsFrom, to: logsTo, limit: 30 },
+      )
+      if (dailyLogsError) {
+        console.error("foodcourt/daily-summary daily_logs load failed:", dailyLogsError)
+      }
       // 曜日/イベント種別/天気ごとの統計パターンはgenerateFoodCourtDailySummary内でreportsから毎回
       // 計算し直す（コード計算・状態を持たない＝データが増えるほど自動的に確度が上がる）。
-      const summary = await generateFoodCourtDailySummary(reports, baseName, target, groqApiKey, events, weather, forecast, supabase, storeKey, priorSummary)
-      if (!summary) return json({ summary: null, error: "生成に失敗しました。", reportCount: reports.length }, 200)
+      const summary = await generateFoodCourtDailySummary(
+        reports, baseName, target, groqApiKey, events, weather, forecast, supabase, storeKey, priorSummary, dailyLogs,
+      )
+      if (!summary) {
+        return json({
+          summary: null,
+          error: "生成に失敗しました。",
+          reportCount: reports.length,
+          daily_logs_count: dailyLogsCount,
+          daily_logs_error: dailyLogsError,
+        }, 200)
+      }
       const { error: upErr } = await supabase.from("foodcourt_daily_ai_summary").upsert({
         report_id: reportId,
         store_partition_key: storeKey,
@@ -1032,7 +1117,13 @@ Deno.serve(async (req, info) => {
         model_version: modelVersion,
       }, { onConflict: "report_id" })
       if (upErr) console.error("foodcourt_daily_ai_summary upsert failed:", upErr.message)
-      return json({ summary, cached: false, reportCount: reports.length }, 200)
+      return json({
+        summary,
+        cached: false,
+        reportCount: reports.length,
+        daily_logs_count: dailyLogsCount,
+        daily_logs_error: dailyLogsError,
+      }, 200)
     }
     // 「分析サマリー（自動）」カードの期間集計版。「期間で見る」モード専用（単日と違いreport_idを持たないため
     // 店舗+開始日+終了日でキャッシュ）。ロジックはdaily-summaryと同じ考え方。
@@ -1074,8 +1165,25 @@ Deno.serve(async (req, info) => {
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
       const modelVersion = FOODCOURT_ANALYSIS_AI_VERSION
-      const summary = await generateFoodCourtPeriodSummary(reports, baseName, startDate, endDate, groqApiKey, events, weather, forecast, supabase, storeKey)
-      if (!summary) return json({ summary: null, error: "生成に失敗しました。" }, 200)
+      const { logs: dailyLogs, error: dailyLogsError, count: dailyLogsCount } = await loadFoodCourtDailyLogs(
+        supabase,
+        storeKey,
+        { from: startDate, to: endDate, limit: 90 },
+      )
+      if (dailyLogsError) {
+        console.error("foodcourt/period-summary daily_logs load failed:", dailyLogsError)
+      }
+      const summary = await generateFoodCourtPeriodSummary(
+        reports, baseName, startDate, endDate, groqApiKey, events, weather, forecast, supabase, storeKey, dailyLogs,
+      )
+      if (!summary) {
+        return json({
+          summary: null,
+          error: "生成に失敗しました。",
+          daily_logs_count: dailyLogsCount,
+          daily_logs_error: dailyLogsError,
+        }, 200)
+      }
       const { error: upErr } = await supabase.from("foodcourt_period_ai_summary").upsert({
         store_partition_key: storeKey,
         start_date: startDate,
@@ -1084,7 +1192,12 @@ Deno.serve(async (req, info) => {
         model_version: modelVersion,
       }, { onConflict: "store_partition_key,start_date,end_date" })
       if (upErr) console.error("foodcourt_period_ai_summary upsert failed:", upErr.message)
-      return json({ summary, cached: false }, 200)
+      return json({
+        summary,
+        cached: false,
+        daily_logs_count: dailyLogsCount,
+        daily_logs_error: dailyLogsError,
+      }, 200)
     }
     // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
     if (req.method === "POST" && path === "/foodcourt/ask") {
@@ -1120,18 +1233,17 @@ Deno.serve(async (req, info) => {
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
       // 現場日報（foodcourt_daily_logs）: Q&A分析の精度向上のため直近60日分を取得してAIに渡す。
-      // 担当者が記録した施策・動員数・客数/売上への影響評価を数値実績と照合させる。
-      const todayForLogs = new Date().toISOString().slice(0, 10)
-      const logsFrom = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString().slice(0, 10)
-      const { data: dailyLogsData } = await supabase
-        .from("foodcourt_daily_logs")
-        .select("log_date, handler, actions, guest_impact, sales_impact, weather_note, event_note, daily_attendance, issues, next_actions")
-        .ilike("store_partition_key", storeKey)
-        .gte("log_date", logsFrom)
-        .lte("log_date", todayForLogs)
-        .order("log_date", { ascending: false })
-        .limit(60)
-      const dailyLogs = Array.isArray(dailyLogsData) ? dailyLogsData as Array<Record<string, unknown>> : []
+      // 失敗時は空配列にせず error をレスポンス・ログに出し、サイレント劣化を防ぐ。
+      const todayForLogs = jstDateIso(0)
+      const logsFrom = jstDateIso(-60)
+      const { logs: dailyLogs, error: dailyLogsError, count: dailyLogsCount } = await loadFoodCourtDailyLogs(
+        supabase,
+        storeKey,
+        { from: logsFrom, to: todayForLogs, limit: 60 },
+      )
+      if (dailyLogsError) {
+        console.error("foodcourt/ask daily_logs load failed:", dailyLogsError)
+      }
       // 画面に表示中の単日レポート(viewing_report_id)を、特に日付指定のない質問のデフォルト対象日としてAIに伝える。
       // これが無いと、AIは全履歴のどの日の話かを画面と無関係に(会話文脈だけで)決めてしまい、時間軸がずれる。
       const viewingReportIdRaw = (body as { viewing_report_id?: unknown }).viewing_report_id
@@ -1140,11 +1252,18 @@ Deno.serve(async (req, info) => {
       const viewingDate = viewingReport ? fcSalesDate(viewingReport) : null
       try {
         const qaResult = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate, dailyLogs)
+        let answer = qaResult.answer || "回答を生成できませんでした。もう一度お試しください。"
+        // 日報テーブル読込失敗時は回答末尾に注意を付与（AIは「日報なし」と誤認するため）。
+        if (dailyLogsError) {
+          answer += `\n\n⚠️ システム注意: 現場日報の取得に失敗したため、施策記録は未参照です（${dailyLogsError}）。`
+        }
         return json({
-          answer: qaResult.answer || "回答を生成できませんでした。もう一度お試しください。",
+          answer,
           reportCount: reports.length,
           loop_score: qaResult.loopScore,
           loop_count: qaResult.loopCount,
+          daily_logs_count: dailyLogsCount,
+          daily_logs_error: dailyLogsError,
         }, 200)
       } catch (e) {
         console.error("foodcourt/ask error:", e)
@@ -1153,6 +1272,8 @@ Deno.serve(async (req, info) => {
           reportCount: reports.length,
           loop_score: null,
           loop_count: 0,
+          daily_logs_count: dailyLogsCount,
+          daily_logs_error: dailyLogsError,
         }, 200)
       }
     }
@@ -1350,6 +1471,159 @@ Deno.serve(async (req, info) => {
         .eq("log_date", logDate)
       if (error) return json({ error: error.message }, 500)
       return json({ ok: true }, 200)
+    }
+
+    // フードコート週次経営レポート生成（cron または管理画面から）。
+    // cron: POST body { room_id, store_key, cron: true } + Authorization: Bearer <CRON_AUTH_TOKEN>
+    // 手動: 同上 + x-admin-token。week_start/week_end 省略時は先週(月〜日 JST)。
+    if (req.method === "POST" && path === "/foodcourt/weekly-report") {
+      let body: Record<string, unknown> = {}
+      try {
+        const raw = await parseJson(workReq)
+        if (isRecord(raw)) body = raw
+      } catch {
+        body = {}
+      }
+      const storeKey = String(body.store_key ?? body.store ?? url.searchParams.get("store_key") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const roomId = String(body.room_id ?? "").trim()
+      const pushToLine = body.cron === true || body.push === true
+      let weekStart = String(body.week_start ?? "").slice(0, 10)
+      let weekEnd = String(body.week_end ?? "").slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart) || !/^\d{4}-\d{2}-\d{2}$/.test(weekEnd)) {
+        const w = lastWeekMonSunJst()
+        weekStart = w.weekStart
+        weekEnd = w.weekEnd
+      }
+      if (weekStart > weekEnd) {
+        const t = weekStart
+        weekStart = weekEnd
+        weekEnd = t
+      }
+
+      // キャッシュヒット（同週・同店舗）
+      const { data: cachedRow } = await supabase
+        .from("foodcourt_weekly_reports")
+        .select("id, ai_report, raw_data, loop_score, loop_count, created_at")
+        .eq("store_partition_key", storeKey)
+        .eq("week_start", weekStart)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const force = body.force === true
+      if (!force && cachedRow && (cachedRow as { ai_report?: unknown }).ai_report) {
+        const report = String((cachedRow as { ai_report: string }).ai_report)
+        let linePush: { ok: boolean; error?: string } | null = null
+        if (pushToLine && roomId) {
+          const token = resolveChannelAccessToken(storeKey)
+          if (token) {
+            const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）\n\n${report}`.slice(0, 4900)
+            linePush = await pushLineTextToTarget(roomId, text, token)
+          } else {
+            linePush = { ok: false, error: "LINE channel access token not configured for store." }
+          }
+        }
+        return json({
+          ok: true,
+          cached: true,
+          store_key: storeKey,
+          week_start: weekStart,
+          week_end: weekEnd,
+          report,
+          raw_data: (cachedRow as { raw_data?: unknown }).raw_data ?? null,
+          loop_score: (cachedRow as { loop_score?: unknown }).loop_score ?? null,
+          loop_count: (cachedRow as { loop_count?: unknown }).loop_count ?? null,
+          line_push: linePush,
+        }, 200)
+      }
+
+      const groqApiKey = Deno.env.get("GROQ_API_KEY") ?? ""
+      if (!groqApiKey) return json({ error: "GROQ_API_KEY is missing." }, 500)
+      const { data, error } = await supabase
+        .from("foodcourt_tenant_reports")
+        .select("id, report_date, tenants, created_at, base_tenant_name")
+        .ilike("store_partition_key", storeKey)
+        .order("created_at", { ascending: false })
+        .limit(90)
+      if (error) return json({ error: error.message }, 500)
+      const reports = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
+      if (!reports.length) {
+        return json({ error: "まだフードコートレポートがありません。", store_key: storeKey, week_start: weekStart, week_end: weekEnd }, 200)
+      }
+      const baseName = String((reports[0] as { base_tenant_name?: unknown }).base_tenant_name ?? "MARUGO S")
+      const events = await loadVenueEventsForReports(supabase, storeKey, reports)
+      const weather = await loadWeatherForReports(supabase, storeKey, reports)
+      const forecast = await loadForecastForStore(supabase, storeKey)
+      const { logs: dailyLogs, error: dailyLogsError, count: dailyLogsCount } = await loadFoodCourtDailyLogs(
+        supabase,
+        storeKey,
+        { from: weekStart, to: weekEnd, limit: 14 },
+      )
+      if (dailyLogsError) console.error("foodcourt/weekly-report daily_logs load failed:", dailyLogsError)
+
+      let result: Awaited<ReturnType<typeof generateFoodCourtWeeklyReport>>
+      try {
+        result = await generateFoodCourtWeeklyReport(
+          reports, baseName, weekStart, weekEnd, groqApiKey, events, weather, forecast, supabase, storeKey, dailyLogs,
+        )
+      } catch (e) {
+        console.error("foodcourt/weekly-report generate error:", e)
+        return json({
+          error: "週次レポートの生成に失敗しました。",
+          detail: e instanceof Error ? e.message : String(e),
+          daily_logs_count: dailyLogsCount,
+          daily_logs_error: dailyLogsError,
+        }, 500)
+      }
+      if (!result.report) {
+        return json({
+          error: "週次レポートを生成できませんでした（期間内データ不足の可能性）。",
+          store_key: storeKey,
+          week_start: weekStart,
+          week_end: weekEnd,
+          daily_logs_count: dailyLogsCount,
+          daily_logs_error: dailyLogsError,
+          raw_data: result.rawData,
+        }, 200)
+      }
+
+      const { error: upErr } = await supabase.from("foodcourt_weekly_reports").insert({
+        store_partition_key: storeKey,
+        week_start: weekStart,
+        week_end: weekEnd,
+        ai_report: result.report,
+        raw_data: result.rawData,
+        loop_score: result.loopScore,
+        loop_count: result.loopCount,
+      })
+      if (upErr) console.error("foodcourt_weekly_reports insert failed:", upErr.message)
+
+      let linePush: { ok: boolean; error?: string } | null = null
+      if (pushToLine && roomId) {
+        const token = resolveChannelAccessToken(storeKey)
+        if (token) {
+          const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）\n\n${result.report}`.slice(0, 4900)
+          linePush = await pushLineTextToTarget(roomId, text, token)
+          if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
+        } else {
+          linePush = { ok: false, error: "LINE channel access token not configured for store." }
+        }
+      }
+
+      return json({
+        ok: true,
+        cached: false,
+        store_key: storeKey,
+        week_start: weekStart,
+        week_end: weekEnd,
+        report: result.report,
+        raw_data: result.rawData,
+        loop_score: result.loopScore,
+        loop_count: result.loopCount,
+        daily_logs_count: dailyLogsCount,
+        daily_logs_error: dailyLogsError,
+        line_push: linePush,
+      }, 200)
     }
 
     if (req.method === "POST" && path === "/petty-cash/receipt-image") {
@@ -2152,7 +2426,20 @@ async function authenticate(
   | { ok: false; status: number; message: string }
 > {
   const provided = req.headers.get("x-admin-token") ?? ""
+  // cron から admin-api を叩く経路（週次レポート等）: Authorization: Bearer <CRON_AUTH_TOKEN|ADMIN_DASHBOARD_TOKEN>
   if (!provided) {
+    const authHeader = req.headers.get("Authorization") ?? ""
+    const bearer = /^Bearer\s+(.+)$/i.exec(authHeader)?.[1]?.trim() ?? ""
+    if (bearer) {
+      const cronTok = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim()
+      if (cronTok && secureEqual(bearer, cronTok)) {
+        return { ok: true, storeScope: null, roomScope: null, scopeKind: "cron" }
+      }
+      // vault が ADMIN_DASHBOARD_TOKEN と同値で運用されている場合も許可
+      if (fallbackToken && secureEqual(bearer, fallbackToken)) {
+        return { ok: true, storeScope: null, roomScope: null, scopeKind: null }
+      }
+    }
     return { ok: false, status: 401, message: "Unauthorized." }
   }
 
