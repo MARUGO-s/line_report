@@ -13,3 +13,13 @@ supabase/.temp/
 ocr-bridge/__pycache__/
 line_report
 deno.lock
+
+# ローカルAI設定（シークレットが入りやすい）
+.claude/
+.claude/settings.local.json
+
+# Google Drive の衝突コピー
+*'(1)'*
+*" (1)"*
+* (1).*
+vendor (1)/
