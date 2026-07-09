@@ -8468,6 +8468,52 @@ async function fetchAiUsageCostState(
     })
   }
 
+  // 時系列データ（日次）
+  let dailyTotals: Array<Record<string, unknown>> = []
+  const { data: dailyData, error: dailyError } = await supabase.rpc("ai_usage_time_series", {
+    p_from, p_to, p_by: "day"
+  })
+  if (dailyError) {
+    console.error("ai_usage_time_series daily failed:", dailyError.message)
+  } else {
+    dailyTotals = (Array.isArray(dailyData) ? dailyData : []).map((raw) => {
+      const r = raw as Record<string, unknown>
+      return {
+        period_date: String(r.period_date ?? ""),
+        provider: String(r.provider ?? ""),
+        model: String(r.model ?? "(unknown)"),
+        event_count: Number(r.event_count ?? 0) || 0,
+        input_tokens: Number(r.input_tokens ?? 0) || 0,
+        output_tokens: Number(r.output_tokens ?? 0) || 0,
+        thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
+        total_tokens: Number(r.total_tokens ?? 0) || 0,
+      }
+    })
+  }
+
+  // 時系列データ（月次）: 月次は全体の推移が見たいため p_from, p_to は null (全期間)で取得
+  let monthlyTotals: Array<Record<string, unknown>> = []
+  const { data: monthlyData, error: monthlyError } = await supabase.rpc("ai_usage_time_series", {
+    p_from: null, p_to: null, p_by: "month"
+  })
+  if (monthlyError) {
+    console.error("ai_usage_time_series monthly failed:", monthlyError.message)
+  } else {
+    monthlyTotals = (Array.isArray(monthlyData) ? monthlyData : []).map((raw) => {
+      const r = raw as Record<string, unknown>
+      return {
+        period_date: String(r.period_date ?? ""),
+        provider: String(r.provider ?? ""),
+        model: String(r.model ?? "(unknown)"),
+        event_count: Number(r.event_count ?? 0) || 0,
+        input_tokens: Number(r.input_tokens ?? 0) || 0,
+        output_tokens: Number(r.output_tokens ?? 0) || 0,
+        thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
+        total_tokens: Number(r.total_tokens ?? 0) || 0,
+      }
+    })
+  }
+
   return {
     period: { from: p_from, to: p_to },
     gemini,
@@ -8477,6 +8523,8 @@ async function fetchAiUsageCostState(
     grok,
     models,
     foodcourt: { store: FOODCOURT_STORE_KEY, models: foodcourtModels },
+    daily_totals: dailyTotals,
+    monthly_totals: monthlyTotals,
     generated_at: new Date().toISOString(),
   }
 }
