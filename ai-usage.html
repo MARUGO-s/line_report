@@ -391,34 +391,36 @@
           <h1 class="ms-h1">AI使用料（実測トークン）</h1>
           <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、各社の<strong>公式単価</strong>を掛けて算出します。上部には現在使っているAIモデル（Groq Vision / Groq Chat / Gemini / Claude / OpenAI / Grok）をすべて表示します。</p>
 
-          <section class="card">
-            <div class="card-h">
-              <span class="ch-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4M8 4h8M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M6 20h12"/></svg></span>
-              <span class="ch-t">集計期間</span>
-              <span class="ch-tag" id="periodTag">—</span>
-            </div>
-            <div class="toolbar">
-              <div class="tabs" role="tablist" id="periodTabs">
-                <button type="button" class="tab active" data-period="this-month">当月</button>
-                <button type="button" class="tab" data-period="last-month">先月</button>
-                <button type="button" class="tab" data-period="all">全期間</button>
+          <!-- 集計期間アコーディオン -->
+          <details class="assump" id="periodBox">
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              集計期間の設定（現在: <span id="periodTag" class="mono">—</span>）
+            </summary>
+            <div class="assump-body" style="padding-top: 10px;">
+              <div class="toolbar" style="margin-top: 0;">
+                <div class="tabs" role="tablist" id="periodTabs">
+                  <button type="button" class="tab active" data-period="this-month">当月</button>
+                  <button type="button" class="tab" data-period="last-month">先月</button>
+                  <button type="button" class="tab" data-period="all">全期間</button>
+                </div>
+                <span class="spacer"></span>
+                <button id="reloadBtn" class="button" type="button">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+                  再読み込み
+                </button>
               </div>
-              <span class="spacer"></span>
-              <button id="reloadBtn" class="button" type="button">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
-                再読み込み
-              </button>
+              <div id="statusLine" class="statusline" style="margin-top: 12px; margin-bottom: 0;">トークンを確認しています…</div>
             </div>
-            <div id="statusLine" class="statusline">トークンを確認しています…</div>
-          </section>
+          </details>
 
-          <!-- 時系列集計（月毎・日毎タブ ＆ グラフ表示） -->
-          <section class="card" id="timeSeriesBox">
-            <div class="card-h">
-              <span class="ch-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>
-              <span class="ch-t">AI使用トークン・費用の時系列推移</span>
-            </div>
-            <div class="card-body" style="padding: 18px 24px 24px;">
+          <!-- 時系列集計（月毎・日毎タブ ＆ グラフ表示・デフォルト開） -->
+          <details class="assump" id="timeSeriesBox" open>
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              AI使用トークン・費用の時系列推移
+            </summary>
+            <div class="assump-body" style="padding-top: 12px;">
               <p class="ms-sub" style="margin-top:0">すべてのAIモデルの合計トークン使用量と概算費用の推移です。タブで月毎・日毎の集計を切り替えることができます。</p>
               
               <div class="ts-tab-bar" style="margin-top:14px; margin-bottom: 14px;">
@@ -433,122 +435,133 @@
 
               <div id="timeSeriesBody"></div>
             </div>
-          </section>
+          </details>
 
-          <!-- 合計サマリー（現在使っているAIモデルをすべて表示） -->
-          <div class="totalrow all-ai" id="allAiTotalRow"></div>
+          <!-- 現在使用中のAIモデル一覧 -->
+          <details class="assump" id="allAiTotalBox">
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              現在使用中のAIモデル一覧
+            </summary>
+            <div class="assump-body" style="padding-top: 12px;">
+              <div class="totalrow all-ai" id="allAiTotalRow"></div>
+            </div>
+          </details>
 
           <!-- Groq ブロック -->
-          <section class="card">
-            <div class="card-h">
-              <span class="ch-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg></span>
-              <span class="ch-t">Groq（その他全店をまとめて集計）</span>
-              <span class="ch-tag" id="groqStoreCount">— 店舗</span>
+          <details class="assump" id="groqBox">
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              Groq（その他全店をまとめて集計 / <span id="groqStoreCount" class="mono">— 店舗</span>）
+            </summary>
+            <div class="assump-body" style="padding-top: 12px;">
+              <div class="kpis">
+                <div class="kpi accent">
+                  <div class="k-l">実測コスト（円）</div>
+                  <div class="k-v" id="groqJpy2">¥—</div>
+                  <div class="k-s" id="groqPerImage">1解析あたり —</div>
+                </div>
+                <div class="kpi">
+                  <div class="k-l">実測コスト（USD）</div>
+                  <div class="k-v" id="groqUsd2">$—</div>
+                  <div class="k-s">実測トークン × 公式単価</div>
+                </div>
+                <div class="kpi">
+                  <div class="k-l">入力トークン（実測）</div>
+                  <div class="k-v" id="groqInTok">—</div>
+                  <div class="k-s" id="groqEvents">実測ログ — 件</div>
+                </div>
+                <div class="kpi accent">
+                  <div class="k-l">出力トークン（実測）</div>
+                  <div class="k-v" id="groqOutTok">—</div>
+                  <div class="k-s">課金対象の出力合計</div>
+                </div>
+              </div>
+              <p class="ms-sub" id="groqRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
+              <details class="brk" id="groqBrk">
+                <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
+                <div id="groqBrkBody"></div>
+              </details>
             </div>
-            <div class="kpis">
-              <div class="kpi accent">
-                <div class="k-l">実測コスト（円）</div>
-                <div class="k-v" id="groqJpy2">¥—</div>
-                <div class="k-s" id="groqPerImage">1解析あたり —</div>
-              </div>
-              <div class="kpi">
-                <div class="k-l">実測コスト（USD）</div>
-                <div class="k-v" id="groqUsd2">$—</div>
-                <div class="k-s">実測トークン × 公式単価</div>
-              </div>
-              <div class="kpi">
-                <div class="k-l">入力トークン（実測）</div>
-                <div class="k-v" id="groqInTok">—</div>
-                <div class="k-s" id="groqEvents">実測ログ — 件</div>
-              </div>
-              <div class="kpi accent">
-                <div class="k-l">出力トークン（実測）</div>
-                <div class="k-v" id="groqOutTok">—</div>
-                <div class="k-s">課金対象の出力合計</div>
-              </div>
-            </div>
-            <p class="ms-sub" id="groqRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
-            <details class="brk" id="groqBrk">
-              <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
-              <div id="groqBrkBody"></div>
-            </details>
-          </section>
+          </details>
 
           <!-- Gemini ブロック -->
-          <section class="card">
-            <div class="card-h">
-              <span class="ch-ico gemini"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 6.1L21 11l-6.6 1.9L12 19l-2.4-6.1L3 11l6.6-1.9z"/></svg></span>
-              <span class="ch-t">Gemini（2店舗をまとめて集計）</span>
-              <span class="ch-tag gemini" id="geminiStoreCount">— 店舗</span>
+          <details class="assump" id="geminiBox">
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              Gemini（ソバージュ・鮨こるり / <span id="geminiStoreCount" class="mono">— 店舗</span>）
+            </summary>
+            <div class="assump-body" style="padding-top: 12px;">
+              <div class="kpis">
+                <div class="kpi gemini accent">
+                  <div class="k-l">実測コスト（円）</div>
+                  <div class="k-v" id="geminiJpy2">¥—</div>
+                  <div class="k-s" id="geminiPerImage">1解析あたり —</div>
+                </div>
+                <div class="kpi">
+                  <div class="k-l">実測コスト（USD）</div>
+                  <div class="k-v" id="geminiUsd2">$—</div>
+                  <div class="k-s">実測トークン × 公式単価</div>
+                </div>
+                <div class="kpi">
+                  <div class="k-l">入力トークン（実測）</div>
+                  <div class="k-v" id="geminiInTok">—</div>
+                  <div class="k-s" id="geminiEvents">実測ログ — 件</div>
+                </div>
+                <div class="kpi gemini accent">
+                  <div class="k-l">出力トークン（実測・思考込み）</div>
+                  <div class="k-v" id="geminiOutTok">—</div>
+                  <div class="k-s" id="geminiThinking">うち思考 — トークン</div>
+                </div>
+              </div>
+              <p class="ms-sub" id="geminiRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
+              <details class="brk" id="geminiBrk">
+                <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
+                <div id="geminiBrkBody"></div>
+              </details>
             </div>
-            <div class="kpis">
-              <div class="kpi gemini accent">
-                <div class="k-l">実測コスト（円）</div>
-                <div class="k-v" id="geminiJpy2">¥—</div>
-                <div class="k-s" id="geminiPerImage">1解析あたり —</div>
-              </div>
-              <div class="kpi">
-                <div class="k-l">実測コスト（USD）</div>
-                <div class="k-v" id="geminiUsd2">$—</div>
-                <div class="k-s">実測トークン × 公式単価</div>
-              </div>
-              <div class="kpi">
-                <div class="k-l">入力トークン（実測）</div>
-                <div class="k-v" id="geminiInTok">—</div>
-                <div class="k-s" id="geminiEvents">実測ログ — 件</div>
-              </div>
-              <div class="kpi gemini accent">
-                <div class="k-l">出力トークン（実測・思考込み）</div>
-                <div class="k-v" id="geminiOutTok">—</div>
-                <div class="k-s" id="geminiThinking">うち思考 — トークン</div>
-              </div>
-            </div>
-            <p class="ms-sub" id="geminiRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
-            <details class="brk" id="geminiBrk">
-              <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
-              <div id="geminiBrkBody"></div>
-            </details>
-          </section>
+          </details>
 
           <!-- Claude ブロック -->
-          <section class="card">
-            <div class="card-h">
-              <span class="ch-ico claude"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M5 5l14 14M19 5L5 19"/></svg></span>
-              <span class="ch-t">Claude / Haiku（クラウディア2の売上＋全店の経費）</span>
-              <span class="ch-tag claude" id="claudeStoreCount">— 店舗</span>
+          <details class="assump" id="claudeBox">
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              Claude / Haiku（クラウディア2の売上＋全店の経費 / <span id="claudeStoreCount" class="mono">— 店舗</span>）
+            </summary>
+            <div class="assump-body" style="padding-top: 12px;">
+              <div class="kpis">
+                <div class="kpi claude accent">
+                  <div class="k-l">実測コスト（円）</div>
+                  <div class="k-v" id="claudeJpy2">¥—</div>
+                  <div class="k-s" id="claudePerImage">1解析あたり —</div>
+                </div>
+                <div class="kpi">
+                  <div class="k-l">実測コスト（USD）</div>
+                  <div class="k-v" id="claudeUsd2">$—</div>
+                  <div class="k-s">実測トークン × 公式単価</div>
+                </div>
+                <div class="kpi">
+                  <div class="k-l">入力トークン（実測）</div>
+                  <div class="k-v" id="claudeInTok">—</div>
+                  <div class="k-s" id="claudeEvents">実測ログ — 件</div>
+                </div>
+                <div class="kpi claude accent">
+                  <div class="k-l">出力トークン（実測）</div>
+                  <div class="k-v" id="claudeOutTok">—</div>
+                  <div class="k-s">課金対象の出力合計</div>
+                </div>
+              </div>
+              <p class="ms-sub" id="claudeRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
+              <p class="ms-sub" style="margin:6px 2px 0;font-size:11.5px">※ 内訳の店舗一覧はクラウディア2のみですが、トークン・コストには<strong>全店の経費（小口）解析</strong>も合算されています。</p>
+              <details class="brk" id="claudeBrk">
+                <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
+                <div id="claudeBrkBody"></div>
+              </details>
             </div>
-            <div class="kpis">
-              <div class="kpi claude accent">
-                <div class="k-l">実測コスト（円）</div>
-                <div class="k-v" id="claudeJpy2">¥—</div>
-                <div class="k-s" id="claudePerImage">1解析あたり —</div>
-              </div>
-              <div class="kpi">
-                <div class="k-l">実測コスト（USD）</div>
-                <div class="k-v" id="claudeUsd2">$—</div>
-                <div class="k-s">実測トークン × 公式単価</div>
-              </div>
-              <div class="kpi">
-                <div class="k-l">入力トークン（実測）</div>
-                <div class="k-v" id="claudeInTok">—</div>
-                <div class="k-s" id="claudeEvents">実測ログ — 件</div>
-              </div>
-              <div class="kpi claude accent">
-                <div class="k-l">出力トークン（実測）</div>
-                <div class="k-v" id="claudeOutTok">—</div>
-                <div class="k-s">課金対象の出力合計</div>
-              </div>
-            </div>
-            <p class="ms-sub" id="claudeRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
-            <p class="ms-sub" style="margin:6px 2px 0;font-size:11.5px">※ 内訳の店舗一覧はクラウディア2のみですが、トークン・コストには<strong>全店の経費（小口）解析</strong>も合算されています。</p>
-            <details class="brk" id="claudeBrk">
-              <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
-              <div id="claudeBrkBody"></div>
-            </details>
-          </section>
+          </details>
 
-          <!-- MARUGO S フードコート分析のAI使用量（用途別に別表示） -->
-          <details class="assump" id="foodcourtBox" open>
+          <!-- MARUGO S フードコート分析のAI使用量（用途別に別表示・デフォルト閉じ） -->
+          <details class="assump" id="foodcourtBox">
             <summary>
               <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
               MARUGO S フードコート分析の使用量（<span id="foodcourtTotal" class="mono">¥0</span>）
@@ -559,8 +572,8 @@
             </div>
           </details>
 
-          <!-- モデル別コスト内訳（最も正確・実測トークン×モデル別単価） -->
-          <details class="assump" id="modelBox" open>
+          <!-- モデル別コスト内訳（最も正確・実測トークン×モデル別単価・デフォルト閉じ） -->
+          <details class="assump" id="modelBox">
             <summary>
               <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
               モデル別コスト内訳（最も正確）
