@@ -652,7 +652,7 @@
         <div class="card-h">
           <div class="card-t"><span class="em">📋</span>分析サマリー（自動）</div>
           <div style="display:flex;align-items:center;gap:8px">
-            <button class="btn secondary" id="summaryExportBtn" style="font-size:11px;padding:3px 8px;display:none" onclick="exportSummary()">📄 レポート出力</button>
+            <button class="btn secondary" id="summaryExportBtn" style="font-size:11px;padding:3px 8px;display:none" onclick="exportSummary()">📄 分析サマリーを出力</button>
             <span class="pill beta" id="aiStatusPill">試験版</span>
           </div>
         </div>
@@ -1161,12 +1161,41 @@
     return html;
   }
 
+  // Q&A 回答のレポート出力（分析サマリー exportSummary とは別経路。取り違え防止）
   window.exportSingleQa = function(idx) {
-    const assistantMsg = qaHistory[idx];
-    const userMsg = idx > 0 ? qaHistory[idx - 1] : null;
-    const question = userMsg ? userMsg.content : 'データへの質問';
-    const answer = assistantMsg ? assistantMsg.content : '';
-    openReportWindow('データに質問: ' + question, answer);
+    const i = Number(idx);
+    if (!Number.isFinite(i) || i < 0 || i >= qaHistory.length) {
+      alert('エクスポート対象の回答が見つかりません。');
+      return;
+    }
+    const assistantMsg = qaHistory[i];
+    if (!assistantMsg || assistantMsg.role !== 'assistant') {
+      alert('このメッセージは AI 回答ではないためエクスポートできません。');
+      return;
+    }
+    // 直前の user を探す（間に別メッセージが挟まっても拾う）
+    let question = String(assistantMsg.question || '').trim();
+    if (!question) {
+      for (let j = i - 1; j >= 0; j--) {
+        if (qaHistory[j] && qaHistory[j].role === 'user') {
+          question = String(qaHistory[j].content || '').trim();
+          break;
+        }
+      }
+    }
+    if (!question) question = '（質問文なし）';
+    const answer = String(assistantMsg.content || '').trim();
+    if (!answer) {
+      alert('回答本文が空のためエクスポートできません。');
+      return;
+    }
+    const scoreLine = (assistantMsg.score != null && assistantMsg.score !== '')
+      ? `\n\n【採点】\nAI自己採点: ${assistantMsg.score}点`
+      : '';
+    // 本文に質問を埋め込み、タイトルも Q&A 専用にして分析サマリーと混同しない
+    const body = `【質問】\n${question}\n\n【回答】\n${answer}${scoreLine}`;
+    const shortQ = question.length > 40 ? question.slice(0, 40) + '…' : question;
+    openReportWindow('Q&A回答レポート: ' + shortQ, body);
   };
 
   window.exportSummary = function() {
@@ -1324,7 +1353,8 @@
         const scoreBadge = (m.score != null)
           ? '<span class="qa-score-badge" title="AI自己採点（100点満点）">⭐ ' + m.score + '点</span>'
           : '';
-        const exportBtn = `<button class="btn secondary" style="font-size:11px;padding:2px 6px;display:inline-flex;align-items:center;gap:3px;border-radius:4px" onclick="exportSingleQa(${idx})">📄 レポート出力</button>`;
+        // ラベルを分析サマリー側と区別（「レポート出力」が2つ並ぶと取り違えやすい）
+        const exportBtn = `<button type="button" class="btn secondary" data-qa-export="${idx}" style="font-size:11px;padding:2px 6px;display:inline-flex;align-items:center;gap:3px;border-radius:4px">📄 この回答を出力</button>`;
         const actionRow = `<div class="qa-score-row" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:8px">${scoreBadge || '<span></span>'}${exportBtn}</div>`;
         return '<div class="qa-a">' + escapeHtml(m.content) + actionRow + '</div>';
       }
@@ -1333,6 +1363,14 @@
     dom.qAnswer.innerHTML = parts.join('');
     dom.qAnswer.style.display = parts.length ? 'block' : 'none';
     if (dom.qClear) dom.qClear.style.display = qaHistory.length ? '' : 'none';
+    // イベント委譲（inline onclick より確実。分析サマリーの exportSummary と混線しない）
+    dom.qAnswer.querySelectorAll('[data-qa-export]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.exportSingleQa(btn.getAttribute('data-qa-export'));
+      });
+    });
     dom.qAnswer.scrollTop = dom.qAnswer.scrollHeight;
   }
   function clearQa(){ qaHistory = []; renderQaThread(false); dom.qInput.focus(); }
@@ -1359,9 +1397,19 @@
       // （渡さないと、AIは全履歴のどの日の話をしているか画面と無関係に決めてしまい、時間軸がずれる原因になる）。
       const viewingReportId = currentViewedReport && currentViewedReport.id != null ? currentViewedReport.id : null;
       const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist, viewing_report_id: viewingReportId });
-      qaHistory.push({ role:'assistant', content: b.answer || '(回答が空でした)', score: b.loop_score != null ? b.loop_score : null });
+      // question を回答側にも保持（レポート出力時に分析サマリーと取り違えないため）
+      qaHistory.push({
+        role: 'assistant',
+        content: b.answer || '(回答が空でした)',
+        score: b.loop_score != null ? b.loop_score : null,
+        question: question,
+      });
     } catch(e){
-      qaHistory.push({ role:'assistant', content: (e&&e.message) || '質問に失敗しました。' });
+      qaHistory.push({
+        role: 'assistant',
+        content: (e&&e.message) || '質問に失敗しました。',
+        question: question,
+      });
     } finally {
       dom.qBtn.disabled = false;
       renderQaThread(false);
