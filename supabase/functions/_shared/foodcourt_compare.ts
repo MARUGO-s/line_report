@@ -1373,13 +1373,16 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
     if (missing > 0) L.push(`注: イベントありだが動員予想未入力の日が${missing}日ある。規模比較は入力日のみ有効。`)
   }
 
-  // プロ野球（巨人戦）の開始時間・勝敗結果・試合時間の影響分析
+  // プロ野球（巨人戦）の開始時間・勝敗結果・試合時間・点差の影響分析
   const baseballWins: number[] = []; const baseballLosses: number[] = []
   const baseballWinsS: number[] = []; const baseballLossesS: number[] = []
   const baseballDay: number[] = []; const baseballNight: number[] = []
   const baseballDayS: number[] = []; const baseballNightS: number[] = []
   const baseballShort: number[] = []; const baseballLong: number[] = []
   const baseballShortS: number[] = []; const baseballLongS: number[] = []
+  const baseballClose: number[] = []; const baseballCloseS: number[] = []
+  const baseballMid: number[] = []; const baseballMidS: number[] = []
+  const baseballBlowout: number[] = []; const baseballBlowoutS: number[] = []
 
   for (const r of daily) {
     const hits = byDate.get(r.date) || []
@@ -1423,11 +1426,23 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
           }
         }
       }
+
+      // 4) 点差（接戦度）別 (score_margin)
+      if (bb.score_margin != null && bb.score_margin !== undefined) {
+        const margin = bb.score_margin
+        if (margin <= 1) {
+          baseballClose.push(g); baseballCloseS.push(s)
+        } else if (margin <= 4) {
+          baseballMid.push(g); baseballMidS.push(s)
+        } else {
+          baseballBlowout.push(g); baseballBlowoutS.push(s)
+        }
+      }
     }
   }
 
   const bbL: string[] = []
-  if (baseballWins.length || baseballLosses.length || baseballDay.length || baseballNight.length || baseballShort.length || baseballLong.length) {
+  if (baseballWins.length || baseballLosses.length || baseballDay.length || baseballNight.length || baseballShort.length || baseballLong.length || baseballClose.length || baseballMid.length || baseballBlowout.length) {
     bbL.push('【プロ野球詳細分析】')
     if (baseballWins.length && baseballLosses.length) {
       bbL.push(`・勝敗別: 勝ち試合(${baseballWins.length}日) 平均客数 ${Math.round(fcAvg(baseballWins)!)}人 / 売上 ${fcYen(fcAvg(baseballWinsS)!)} vs 負け試合(${baseballLosses.length}日) 平均客数 ${Math.round(fcAvg(baseballLosses)!)}人 / 売上 ${fcYen(fcAvg(baseballLossesS)!)}`)
@@ -1437,6 +1452,13 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
     }
     if (baseballShort.length && baseballLong.length) {
       bbL.push(`・試合時間別: 3時間以内・スピード決着(${baseballShort.length}日) 平均客数 ${Math.round(fcAvg(baseballShort)!)}人 / 売上 ${fcYen(fcAvg(baseballShortS)!)} vs 3時間超・長期戦(${baseballLong.length}日) 平均客数 ${Math.round(fcAvg(baseballLong)!)}人 / 売上 ${fcYen(fcAvg(baseballLongS)!)}`)
+    }
+    if (baseballClose.length || baseballMid.length || baseballBlowout.length) {
+      const parts: string[] = []
+      if (baseballClose.length) parts.push(`接戦(1点差以内: ${baseballClose.length}日) 平均客数 ${Math.round(fcAvg(baseballClose)!)}人/売上 ${fcYen(fcAvg(baseballCloseS)!)}`)
+      if (baseballMid.length) parts.push(`中点差(2〜4点差: ${baseballMid.length}日) 平均客数 ${Math.round(fcAvg(baseballMid)!)}人/売上 ${fcYen(fcAvg(baseballMidS)!)}`)
+      if (baseballBlowout.length) parts.push(`大点差(5点差以上: ${baseballBlowout.length}日) 平均客数 ${Math.round(fcAvg(baseballBlowout)!)}人/売上 ${fcYen(fcAvg(baseballBlowoutS)!)}`)
+      bbL.push(`・接戦度・点差別: ${parts.join(' vs ')}`)
     }
     L.push(bbL.join('\n'))
   }
@@ -1481,11 +1503,13 @@ export type VenueEvent = {
   venue?: string
   is_japan?: boolean
   note?: string
-  /** 手入力の予想動員（tokyo_dome_events.expected_attendance）。未入力は null */
+  /** 手入力の予想動員（tokyo_dome_events.expected_attendance）。未入力 is null */
   expected_attendance?: number | null
   start_time?: string | null
   game_duration?: string | null
   game_result?: string | null
+  game_score?: string | null
+  score_margin?: number | null
 }
 export type ForecastRow = { target_date: string; metric: string; predicted: number; predicted_low?: number | null; predicted_high?: number | null; actual?: number | null; model_version?: string }
 
@@ -1504,6 +1528,8 @@ function fcFormatEventsForDay(hits: VenueEvent[]): string {
     if (h.start_time) details.push(`開始:${h.start_time}`)
     if (h.game_duration) details.push(`時間:${h.game_duration}`)
     if (h.game_result) details.push(`結果:${h.game_result}`)
+    if (h.game_score) details.push(`スコア:${h.game_score}`)
+    if (h.score_margin != null && h.score_margin !== undefined) details.push(`点差:${h.score_margin}点差`)
     return `${h.category}${vl ? `@${vl}` : ''}:${h.title}（${details.join('／')}）`
   }).join('｜')
 }

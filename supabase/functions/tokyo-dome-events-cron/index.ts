@@ -151,6 +151,8 @@ Deno.serve(async (req) => {
           duration?: string
           stadium?: string
           startTime?: string
+          score?: string
+          margin?: number
         }
       }
       const dataMap: GiantsDateMap = {}
@@ -181,10 +183,22 @@ Deno.serve(async (req) => {
           const attendance = parseInt(numString, 10)
           
           const result = tds[2].replace(/<[^>]+>/g, "").trim() // ○, ●, △
+          const score = tds[3].replace(/<[^>]+>/g, "").trim() // e.g. 3 - 1
           const duration = tds[6].replace(/<[^>]+>/g, "").trim() // e.g. 2:23
           const stadium = tds[7].replace(/<[^>]+>/g, "").trim()
           
-          dataMap[dateString] = { attendance: isNaN(attendance) ? undefined : attendance, result, duration, stadium }
+          // Calculate score margin
+          let margin: number | undefined = undefined
+          const parts = score.split("-")
+          if (parts.length === 2) {
+            const s1 = parseInt(parts[0].trim(), 10)
+            const s2 = parseInt(parts[1].trim(), 10)
+            if (!isNaN(s1) && !isNaN(s2)) {
+              margin = Math.abs(s1 - s2)
+            }
+          }
+          
+          dataMap[dateString] = { attendance: isNaN(attendance) ? undefined : attendance, result, duration, stadium, score, margin }
         }
       }
       
@@ -226,6 +240,8 @@ Deno.serve(async (req) => {
               start_time: info.startTime ?? null,
               game_duration: info.duration ?? null,
               game_result: info.result ?? null,
+              game_score: info.score ?? null,
+              score_margin: info.margin ?? null,
               updated_at: new Date().toISOString()
             })
             .eq("event_date", dateString)
