@@ -445,7 +445,6 @@
 (function(){
   const PAGES = window.LINE_REPORT_PAGES;
   const AUTH  = window.LINE_REPORT_AUTH;
-  const TOKEN_KEY = 'line_summary_admin_token';
   const $ = (id) => document.getElementById(id);
 
   const dom = {
@@ -493,7 +492,7 @@
   });
 
   // ===== auth =====
-  function getToken(){ try{ return AUTH ? AUTH.getToken() : (sessionStorage.getItem(TOKEN_KEY)||localStorage.getItem(TOKEN_KEY)||''); }catch(_){ return ''; } }
+  function getToken(){ try{ return AUTH ? AUTH.getToken() : ''; }catch(_){ return ''; } }
   function setAuthBadge(ok){
     dom.authBadge.innerHTML = ok ? '<span class="dot"></span>接続済み' : '未接続';
     dom.authBadge.className = 'pill' + (ok ? ' live' : '');
@@ -554,11 +553,26 @@
   dom.tokenBtn.addEventListener('click', async()=>{
     const t = dom.tokenInput.value.trim();
     if(!t){ dom.authMsg.textContent='トークンを入力してください。'; dom.authMsg.className='msg err'; return; }
-    try{ sessionStorage.setItem(TOKEN_KEY, t); localStorage.setItem(TOKEN_KEY, t); }catch(_){}
     dom.authMsg.textContent='接続中…'; dom.authMsg.className='msg';
-    const ok = await tryConnectAndLoad();
-    if(ok){ dom.authMsg.textContent=''; dom.resultArea.hidden = false; dom.loadMsg.textContent=''; render(); }
-    else{ dom.authMsg.textContent='トークンが正しくないか、接続に失敗しました。'; dom.authMsg.className='msg err'; }
+    try {
+      await AUTH.loginWithToken(t, {
+        sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL),
+        adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+      });
+      const ok = await tryConnectAndLoad();
+      if(ok){
+        dom.authMsg.textContent='';
+        dom.resultArea.hidden = false;
+        dom.loadMsg.textContent='';
+        render();
+      } else {
+        dom.authMsg.textContent='接続確認に失敗しました。';
+        dom.authMsg.className='msg err';
+      }
+    } catch(err) {
+      dom.authMsg.textContent = err.message || 'ログインに失敗しました。';
+      dom.authMsg.className = 'msg err';
+    }
   });
   dom.tokenInput.addEventListener('keydown', e=>{ if(e.key==='Enter') dom.tokenBtn.click(); });
 
@@ -1141,6 +1155,14 @@
 
   // ===== init =====
   async function init(){
+    if (AUTH?.consumeUrlAuthParams) {
+      try {
+        await AUTH.consumeUrlAuthParams({
+          exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL),
+          adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+        });
+      } catch(_) {}
+    }
     const token = getToken();
     if(token){
       const ok = await tryConnectAndLoad();
