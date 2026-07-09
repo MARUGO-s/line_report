@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
+import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 
 // ドームシティ「週次イベント配信」cron。
 // 毎分起動し、ルームごとの設定（dome_weekly_enabled / 曜日 / 時刻）が「今この瞬間(JST)」に一致する
@@ -51,7 +52,7 @@ Deno.serve(async (req) => {
     const win = nextWeekWindow(jst)
     const events = await loadEvents(supabase, win.startStr, win.endStr)
     const flex = buildWeeklyFlex(win, events)
-    const r = await sendLinePush(roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken))
+    const r = await sendLinePush(roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
     return json({ ok: r.ok, mode: "test_send", room_id: roomId, week: `${win.startStr}〜${win.endStr}`, event_count: events.length, error: r.ok ? undefined : r.error }, r.ok ? 200 : 502)
   }
 
@@ -122,7 +123,7 @@ Deno.serve(async (req) => {
       else errors.push(`${t.roomId}: failed to reserve log (${insErr.message})`)
       continue
     }
-    const r = await sendLinePush(t.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken))
+    const r = await sendLinePush(t.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
     if (!r.ok) {
       try { await supabase.from("tokyo_dome_weekly_logs").delete().eq("room_id", t.roomId).eq("week_start_date", win.startStr) } catch (_e) { /* noop */ }
       errors.push(`${t.roomId}: ${r.error}`)
@@ -245,14 +246,52 @@ function resolveStoreLineToken(storeKey: string, fallbackToken: string): string 
   }
   return sanitizeLineToken(fallbackToken)
 }
-async function sendLinePush(to: string, messages: unknown[], token: string): Promise<{ ok: true } | { ok: false; error: string }> {
+async function sendLinePush(to: string, messages: unknown[], token: string, storeKey?: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!token) return { ok: false, error: "missing line token" }
-  const res = await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-    body: JSON.stringify({ to, messages: messages.slice(0, 5) }),
-  })
-  if (!res.ok) return { ok: false, error: `LINE push API error (${res.status}): ${await res.text()}` }
+  let res: Response
+  try {
+    res = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ to, messages: messages.slice(0, 5) }),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: 'push',
+        context: 'tokyo_dome_weekly',
+        targetRoomId: to,
+        attempted: true,
+        success: false,
+        httpStatus: 0,
+        reason: `LINEプッシュが例外で失敗: ${msg.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      })
+    }
+    return { ok: false, error: `LINE push threw: ${msg}` }
+  }
+
+  const httpStatus = res.status
+  const ok = res.ok
+  const errText = ok ? '' : await res.text()
+
+  if (storeKey) {
+    void recordLineWebhookDeliveryLog({
+      storePartitionKey: storeKey,
+      method: 'push',
+      context: 'tokyo_dome_weekly',
+      targetRoomId: to,
+      attempted: true,
+      success: ok,
+      httpStatus,
+      reason: ok ? '「東京ドーム週次配信」を送信しました。' : `LINEプッシュAPIエラー: ${errText.slice(0, 200)}`,
+      details: { message_count: Math.min(messages.length, 5) },
+    })
+  }
+
+  if (!ok) return { ok: false, error: `LINE push API error (${httpStatus}): ${errText}` }
   return { ok: true }
 }
 

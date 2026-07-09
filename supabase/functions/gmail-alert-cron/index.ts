@@ -5,6 +5,7 @@ import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts";
 import { pilotStorePartitionKeysMatch } from "../_shared/receipt_sheets_store_catalog.ts";
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts";
+import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
 
 type GmailAlertEnv = {
   enabled: boolean;
@@ -400,6 +401,7 @@ async function sendTestReservationLineNotification(params: {
       targetRoomId,
       linePayload,
       roomToken,
+      target.storeKey,
     );
     if (!sendResult.ok) {
       failedRooms.push({
@@ -617,6 +619,7 @@ async function maybeSendGmailReservationAlerts(params: {
         targetRoomId,
         linePayload,
         roomToken,
+        target.storeKey,
       );
       if (!sendResult.ok) {
         await writeDeliveryLog(supabase, {
@@ -3660,6 +3663,7 @@ async function sendLineMessage(
   to: string,
   payload: LineMessagePayload,
   token: string,
+  storeKey?: string,
 ) {
   const fallbackText =
     truncateForLine(payload.text || "予約メール通知", 4900) || "予約メール通知";
@@ -3668,7 +3672,7 @@ async function sendLineMessage(
     : [];
 
   if (richMessages.length > 0) {
-    const richResult = await sendLinePush(to, richMessages, token);
+    const richResult = await sendLinePush(to, richMessages, token, storeKey);
     if (richResult.ok) return richResult;
 
     console.warn(
@@ -3677,18 +3681,19 @@ async function sendLineMessage(
     const fallbackResult = await sendLinePush(to, [{
       type: "text",
       text: fallbackText,
-    }], token);
+    }], token, storeKey);
     if (fallbackResult.ok) return fallbackResult;
     return fallbackResult;
   }
 
-  return await sendLinePush(to, [{ type: "text", text: fallbackText }], token);
+  return await sendLinePush(to, [{ type: "text", text: fallbackText }], token, storeKey);
 }
 
 async function sendLinePush(
   to: string,
   messages: Array<Record<string, unknown>>,
   token: string,
+  storeKey?: string,
 ) {
   try {
     const response = await fetch("https://api.line.me/v2/bot/message/push", {
@@ -3703,24 +3708,55 @@ async function sendLinePush(
       }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
+    const httpStatus = response.status;
+    const ok = response.ok;
+    const errText = ok ? "" : await response.text();
+
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: "push",
+        context: "gmail_alert",
+        targetRoomId: to,
+        attempted: true,
+        success: ok,
+        httpStatus,
+        reason: ok ? "Gmail予約通知を配信しました。" : `LINEプッシュAPIエラー: ${errText.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      });
+    }
+
+    if (!ok) {
       console.error(
-        `Failed to send LINE message to ${to}. Status: ${response.status} Error: ${errorText}`,
+        `Failed to send LINE message to ${to}. Status: ${httpStatus} Error: ${errText}`,
       );
       return {
         ok: false as const,
-        status: response.status,
-        error: errorText || `HTTP ${response.status}`,
+        status: httpStatus,
+        error: errText || `HTTP ${httpStatus}`,
       };
     }
 
-    return { ok: true as const, status: response.status as number };
+    return { ok: true as const, status: httpStatus as number };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error(`Network or fetch error while sending to ${to}:`, error);
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: "push",
+        context: "gmail_alert",
+        targetRoomId: to,
+        attempted: true,
+        success: false,
+        httpStatus: 0,
+        reason: `LINEプッシュが例外で失敗: ${msg.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      });
+    }
     return {
       ok: false as const,
-      error: error instanceof Error ? error.message : String(error),
+      error: msg,
     };
   }
 }

@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
+import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
 import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_link_auth.ts"
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts"
@@ -131,7 +132,7 @@ Deno.serve(async (req) => {
       ?? null
     const calendarUrl = await buildTodayReservationCalendarUrl(supabase, storeKey, today)
     const flex = buildTodayReservationFlex(storeDisplayName, today, matched, calendarUrl)
-    const sendResult = await sendLinePushMessages(target.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken))
+    const sendResult = await sendLinePushMessages(target.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
     if (!sendResult.ok) {
       // 送信失敗時は予約行を取り消し、次回起動で再送できるようにする。
       try {
@@ -537,15 +538,52 @@ function resolveStoreLineToken(storeKey: string, fallbackToken: string): string 
   return sanitizeLineToken(fallbackToken)
 }
 
-async function sendLinePushMessages(to: string, messages: unknown[], token: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const response = await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-    body: JSON.stringify({ to, messages: messages.slice(0, 5) }),
-  })
-  if (!response.ok) {
-    const err = await response.text()
-    return { ok: false, error: `LINE push API error (${response.status}): ${err}` }
+async function sendLinePushMessages(to: string, messages: unknown[], token: string, storeKey?: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  let response: Response
+  try {
+    response = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ to, messages: messages.slice(0, 5) }),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: 'push',
+        context: 'reservation_today',
+        targetRoomId: to,
+        attempted: true,
+        success: false,
+        httpStatus: 0,
+        reason: `LINEプッシュが例外で失敗: ${msg.slice(0, 200)}`,
+        details: { message_count: Math.min(messages.length, 5) },
+      })
+    }
+    return { ok: false, error: `LINE push threw: ${msg}` }
+  }
+
+  const httpStatus = response.status
+  const ok = response.ok
+  const errText = ok ? '' : await response.text()
+
+  if (storeKey) {
+    void recordLineWebhookDeliveryLog({
+      storePartitionKey: storeKey,
+      method: 'push',
+      context: 'reservation_today',
+      targetRoomId: to,
+      attempted: true,
+      success: ok,
+      httpStatus,
+      reason: ok ? '「本日の予約」を配信しました。' : `LINEプッシュAPIエラー: ${errText.slice(0, 200)}`,
+      details: { message_count: Math.min(messages.length, 5) },
+    })
+  }
+
+  if (!ok) {
+    return { ok: false, error: `LINE push API error (${httpStatus}): ${errText}` }
   }
   return { ok: true }
 }
@@ -623,7 +661,7 @@ async function handleTestSend(
     ?? null
   const calendarUrl = await buildTodayReservationCalendarUrl(supabase, storeKey, today)
   const flex = buildTodayReservationFlex(storeDisplayName, today, reservations, calendarUrl)
-  const sendResult = await sendLinePushMessages(spec.roomId, [flex], resolveStoreLineToken(storeKey, deps.lineAccessToken))
+  const sendResult = await sendLinePushMessages(spec.roomId, [flex], resolveStoreLineToken(storeKey, deps.lineAccessToken), storeKey)
   if (!sendResult.ok) {
     return json({ ok: false, error: sendResult.error, mode: "test_today_reservation" }, 502)
   }
