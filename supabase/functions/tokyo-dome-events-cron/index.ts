@@ -119,6 +119,71 @@ Deno.serve(async (req) => {
   }
 
   const allDates = rows.map((r) => r.event_date).sort()
+
+  // 4) Pro-Baseball Giants Audience Attendance Sync (from baseball-freak.com/audience/giants.html)
+  // 東京ドームでのプロ野球開催日の観客動員数を自動取得して tokyo_dome_events に反映する。
+  let giantsSyncCount = 0
+  let giantsError: string | null = null
+  try {
+    const giantsRes = await fetch("https://baseball-freak.com/audience/giants.html", {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" }
+    })
+    if (!giantsRes.ok) {
+      giantsError = `fetch giants audience ${giantsRes.status}`
+    } else {
+      const html = await giantsRes.text()
+      let year = new Date().getFullYear()
+      const yearMatch = html.match(/<strong>(\d{4})年<\/strong>/)
+      if (yearMatch) {
+        year = parseInt(yearMatch[1], 10)
+      }
+      
+      const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
+      let trMatch
+      while ((trMatch = trRegex.exec(html)) !== null) {
+        const trContent = trMatch[1]
+        const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi
+        const tds: string[] = []
+        let tdMatch
+        while ((tdMatch = tdRegex.exec(trContent)) !== null) {
+          tds.push(tdMatch[1])
+        }
+        
+        if (tds.length >= 8) {
+          const dateText = tds[0].replace(/<[^>]+>/g, "").trim()
+          const dateParts = dateText.match(/(\d{1,2})月(\d{1,2})日/)
+          if (!dateParts) continue
+          
+          const month = dateParts[1].padStart(2, "0")
+          const day = dateParts[2].padStart(2, "0")
+          const dateString = `${year}-${month}-${day}`
+          
+          const attText = tds[1].replace(/<[^>]+>/g, "").trim()
+          const numString = attText.replace(/[^\d]/g, "")
+          const attendance = parseInt(numString, 10)
+          if (isNaN(attendance)) continue
+          
+          const stadiumText = tds[7].replace(/<[^>]+>/g, "").trim()
+          if (stadiumText === "東京ドーム") {
+            const { error: updateErr } = await supabase
+              .from("tokyo_dome_events")
+              .update({ expected_attendance: attendance, updated_at: new Date().toISOString() })
+              .eq("event_date", dateString)
+              .eq("venue", "tokyo-dome")
+              .eq("category", "プロ野球")
+            if (updateErr) {
+              console.error(`Failed to update giants attendance for date ${dateString}:`, updateErr)
+            } else {
+              giantsSyncCount++
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    giantsError = e instanceof Error ? e.message : String(e)
+  }
+
   return json({
     ok: true,
     dome_upserted: domeEvents.length,
@@ -126,6 +191,8 @@ Deno.serve(async (req) => {
     upserted: rows.length,
     dome_error: domeError,
     hall_errors: Object.fromEntries(hallResults.map((r) => [r.venue, r.error])),
+    giants_audience_synced: giantsSyncCount,
+    giants_audience_error: giantsError,
     date_range: { min: allDates[0] ?? null, max: allDates[allDates.length - 1] ?? null },
   }, 200)
 })
