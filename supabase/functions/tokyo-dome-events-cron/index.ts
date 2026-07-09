@@ -153,6 +153,7 @@ Deno.serve(async (req) => {
           startTime?: string
           score?: string
           margin?: number
+          opponent?: string
         }
       }
       const dataMap: GiantsDateMap = {}
@@ -184,6 +185,7 @@ Deno.serve(async (req) => {
           
           const result = tds[2].replace(/<[^>]+>/g, "").trim() // ○, ●, △
           const score = tds[3].replace(/<[^>]+>/g, "").trim() // e.g. 3 - 1
+          const opponent = tds[4].replace(/<[^>]+>/g, "").trim() // e.g. 阪神
           const duration = tds[6].replace(/<[^>]+>/g, "").trim() // e.g. 2:23
           const stadium = tds[7].replace(/<[^>]+>/g, "").trim()
           
@@ -198,7 +200,7 @@ Deno.serve(async (req) => {
             }
           }
           
-          dataMap[dateString] = { attendance: isNaN(attendance) ? undefined : attendance, result, duration, stadium, score, margin }
+          dataMap[dateString] = { attendance: isNaN(attendance) ? undefined : attendance, result, duration, stadium, score, margin, opponent }
         }
       }
       
@@ -230,8 +232,30 @@ Deno.serve(async (req) => {
         }
       }
       
-      // Write merged results to Supabase for Tokyo Dome matches
+      // Write merged results to Supabase
       for (const [dateString, info] of Object.entries(dataMap)) {
+        // 1) Upsert to the dedicated giants_game_results table (all stadiums)
+        if (info.opponent && info.stadium) {
+          const { error: upsertErr } = await supabase
+            .from("giants_game_results")
+            .upsert({
+              game_date: dateString,
+              opponent: info.opponent,
+              venue: info.stadium,
+              attendance: info.attendance ?? null,
+              game_result: info.result ?? null,
+              game_score: info.score ?? null,
+              score_margin: info.margin ?? null,
+              game_duration: info.duration ?? null,
+              start_time: info.startTime ?? null,
+              updated_at: new Date().toISOString()
+            })
+          if (upsertErr) {
+            console.error(`Failed to upsert to giants_game_results for date ${dateString}:`, upsertErr)
+          }
+        }
+
+        // 2) Update tokyo_dome_events for matches held in Tokyo Dome
         if (info.stadium === "東京ドーム") {
           const { error: updateErr } = await supabase
             .from("tokyo_dome_events")
