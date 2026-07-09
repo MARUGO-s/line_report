@@ -1173,7 +1173,25 @@ Deno.serve(async (req, info) => {
         .select("model_selection, updated_at")
         .eq("tenant_name", tenantName)
         .maybeSingle()
-      return json({ rows: data ?? [], model_selection: factors?.model_selection ?? null }, 200)
+
+      // line_admin_console_settings から foodcourt_evolution_passing_score を読み込む
+      const { data: passSetting } = await supabase
+        .from("line_admin_console_settings")
+        .select("setting_value")
+        .eq("setting_key", "foodcourt_evolution_passing_score")
+        .maybeSingle()
+
+      let passingScore = 65
+      if (passSetting?.setting_value) {
+        const parsed = parseInt(passSetting.setting_value, 10)
+        if (!isNaN(parsed)) passingScore = parsed
+      }
+
+      return json({
+        rows: data ?? [],
+        model_selection: factors?.model_selection ?? null,
+        passing_score: passingScore
+      }, 200)
     }
     if (req.method === "GET" && path === "/foodcourt/ai-loop-runs") {
       const limit = Math.min(parseInt(String(url.searchParams.get("limit") ?? "30")), 50)

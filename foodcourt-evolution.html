@@ -512,6 +512,26 @@
     return body;
   }
 
+  async function apiPut(path, payload){
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try{
+      res = await fetch(url, {
+        method: 'PUT',
+        headers:{
+          'x-admin-token': getToken(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+    }
+    catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
+    if(res.status===401||res.status===403){ setAuthBadge(false); throw new Error('認証が必要です。'); }
+    const body = await res.json().catch(()=>({}));
+    if(!res.ok||body.error) throw new Error(body.error||('エラー（HTTP '+res.status+'）'));
+    return body;
+  }
+
   // tryConnect と loadData を統合: 認証確認と同時にデータも取得し、二重APIコールを防ぐ。
   async function tryConnectAndLoad(){
     try{
@@ -523,6 +543,10 @@
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
       modelSelectionData = histBody.model_selection ?? null;
       loopRuns = Array.isArray(loopBody.runs) ? loopBody.runs : [];
+      if (histBody.passing_score != null) {
+        passingScore = Number(histBody.passing_score);
+        syncPassingScoreUI();
+      }
       return true;
     }catch(_){ setAuthBadge(false); return false; }
   }
@@ -575,6 +599,10 @@
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
       modelSelectionData = histBody.model_selection ?? null;
       loopRuns = Array.isArray(loopBody.runs) ? loopBody.runs : [];
+      if (histBody.passing_score != null) {
+        passingScore = Number(histBody.passing_score);
+        syncPassingScoreUI();
+      }
       dom.loadMsg.textContent = '';
       dom.resultArea.hidden = false;
       render();
@@ -603,16 +631,36 @@
     if (savedPass) passingScore = Number(savedPass);
   } catch(_) {}
 
-  function initPassingScoreConfig() {
+  function syncPassingScoreUI() {
     if (!dom.passingScoreRange || !dom.passingScoreLabel) return;
     dom.passingScoreRange.value = passingScore;
     dom.passingScoreLabel.textContent = passingScore + '点';
+  }
 
+  function initPassingScoreConfig() {
+    if (!dom.passingScoreRange || !dom.passingScoreLabel) return;
+    syncPassingScoreUI();
+
+    // ドラッグ中のリアルタイムUI更新（API通信はしない）
     dom.passingScoreRange.addEventListener('input', (e) => {
       passingScore = Number(e.target.value);
       dom.passingScoreLabel.textContent = passingScore + '点';
       try { localStorage.setItem('fc_passing_score', passingScore); } catch(_) {}
       renderKpi(); // リアルタイムにKPIを更新
+    });
+
+    // 指を離して確定した時に、Supabase DBに保存する
+    dom.passingScoreRange.addEventListener('change', async (e) => {
+      const score = Number(e.target.value);
+      try {
+        await apiPut('/settings/console', {
+          settings: {
+            foodcourt_evolution_passing_score: String(score)
+          }
+        });
+      } catch (err) {
+        console.error('Failed to save passing score to database:', err);
+      }
     });
   }
 
