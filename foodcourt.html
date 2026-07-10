@@ -2172,7 +2172,7 @@
     const b=eventMonthBounds(); if(b){ k=Math.max(b.min,Math.min(b.max,k)); }
     calY=Math.floor(k/12); calM=(k%12)+1; renderCalendar();
   }
-  const CAL_VENUE_ORDER = ['tokyo-dome','kanadevia','korakuen','prism','laqua','public-viewing'];
+  const CAL_VENUE_ORDER = ['tokyo-dome','kanadevia','korakuen','prism','laqua','public-viewing','imm'];
   // タブ用の短い表示名（無ければ VENUE_FULL）。PV観戦は世界スポーツ放映の専用タブ。
   const CAL_TAB_LABEL = { 'public-viewing':'📺 PV観戦' };
   function renderCalVenueTabs(){
