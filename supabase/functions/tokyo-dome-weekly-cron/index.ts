@@ -22,6 +22,7 @@ const WEEKLY_VENUES: Array<{ venue: string; label: string; icon: string; accent:
   { venue: "tokyo-dome", label: "東京ドーム", icon: "🏟️", accent: "#1F2D3D" },
   { venue: "kanadevia", label: "カナデビアホール", icon: "🎤", accent: "#B0007A" },
   { venue: "korakuen", label: "後楽園ホール", icon: "🥊", accent: "#1F6FB0" },
+  { venue: "imm", label: "IMMシアター", icon: "🎭", accent: "#D35400", onlyIfPresent: true },
   { venue: "public-viewing", label: "PV観戦（世界スポーツ放映）", icon: "📺", accent: "#C0392B", onlyIfPresent: true },
 ]
 const WEEKLY_PER_VENUE_MAX = 14 // 1会場あたりの最大表示件数（超過は「ほかN件」）
