@@ -484,9 +484,12 @@ function parseImmTheaterSchedule(html: string): ExtractedEvent[] {
     } else if (spans.length === 2) {
       const endM = spans[1].match(/(?:(\d{4})\.)?(\d{2})\.(\d{2})/)
       if (endM) {
-        const endY = endM[1] ? Number(endM[1]) : startY
+        let endY = endM[1] ? Number(endM[1]) : startY
         const endMth = Number(endM[2])
         const endDay = Number(endM[3])
+        if (!endM[1] && endMth < startMth) {
+          endY = startY + 1
+        }
         
         const startDate = new Date(Date.UTC(startY, startMth - 1, startDay))
         const endDate = new Date(Date.UTC(endY, endMth - 1, endDay))

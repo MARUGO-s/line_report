@@ -1634,7 +1634,7 @@ function fcVenueLabel(venue?: string): string {
   if (v === "prism") return "プリズムホール"
   if (v === "laqua") return "ラクーア"
   if (v === "public-viewing") return "PV観戦(世界スポーツ放映)"
-  if (v === "imm") return "IMMシアター"
+  if (v === "imm" || v === "imm-theater" || v === "imm_theater") return "IMMシアター"
   return "" // tokyo-dome / 不明は無印
 }
 export type WeatherDay = { weather_date: string; weather_code: number | null; temp_max: number | null; temp_min: number | null; precipitation_mm: number | null; precip_prob: number | null; summary: string }
