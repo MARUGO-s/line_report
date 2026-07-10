@@ -73,8 +73,18 @@ Deno.serve(async (req) => {
   }
   const totalHall = hallResults.reduce((s, r) => s + r.events.length, 0)
 
-  if (domeEvents.length === 0 && totalHall === 0) {
-    return json({ ok: false, error: "no events extracted (dome+halls)", dome_error: domeError, halls: hallResults.map((r) => ({ venue: r.venue, error: r.error })) }, 200)
+  // 2b) IMMシアター: IMMシアター公式サイトのスケジュールを独自にパース
+  const immUrl = (Deno.env.get("IMM_THEATER_SCHEDULE_URL") ?? "").trim() || "https://imm.theater/schedule/"
+  let immEvents: ExtractedEvent[] = []
+  let immError: string | null = null
+  try {
+    const immRes = await fetch(immUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; line-report-bot/1.0)" } })
+    if (!immRes.ok) { immError = `fetch ${immRes.status}` }
+    else { immEvents = parseImmTheaterSchedule(await immRes.text()) }
+  } catch (e) { immError = e instanceof Error ? e.message : String(e) }
+
+  if (domeEvents.length === 0 && totalHall === 0 && immEvents.length === 0) {
+    return json({ ok: false, error: "no events extracted (dome+halls+imm)", dome_error: domeError, halls: hallResults.map((r) => ({ venue: r.venue, error: r.error })), imm_error: immError }, 200)
   }
 
   if (dryRun || debug) {
@@ -82,6 +92,7 @@ Deno.serve(async (req) => {
       ok: true, dry_run: true,
       dome: { count: domeEvents.length, error: domeError, events: domeEvents },
       halls: hallResults.map((r) => ({ venue: r.venue, count: r.events.length, error: r.error, events: r.events })),
+      imm: { count: immEvents.length, error: immError, events: immEvents },
       ...(debug ? { groq_raw: (domeRaw ?? "").slice(0, 1000) } : {}),
     }, 200)
   }
@@ -110,6 +121,7 @@ Deno.serve(async (req) => {
   const rows = [
     ...domeEvents.map((e) => ({ event_date: e.event_date, venue: "tokyo-dome", title: e.title, category: e.category, source: "tokyo-dome.co.jp", updated_at: now })),
     ...hallResults.flatMap((r) => r.events.map((e) => ({ event_date: e.event_date, venue: r.venue, title: e.title, category: e.category, source: r.source, updated_at: now }))),
+    ...immEvents.map((e) => ({ event_date: e.event_date, venue: "imm", title: e.title, category: e.category, source: "imm.theater", updated_at: now })),
   ]
   const { error } = await supabase
     .from("tokyo_dome_events")
@@ -427,6 +439,80 @@ function parseDomeCityHallCalendar(html: string): ExtractedEvent[] {
       }
     }
   }
+  out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
+  return out
+}
+
+// IMMシアターの公式サイト公演スケジュールHTMLを確定パースする。
+// 構造: <li class="xfade-in"> 内に <div class="period"> (日付) ＋ <div class="ttl"> (公演名)。
+// カテゴリは基本的に演劇・お笑いステージのため「その他」とする。
+function parseImmTheaterSchedule(html: string): ExtractedEvent[] {
+  const stripTags = (s: string) => String(s ?? "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ").trim()
+  const out: ExtractedEvent[] = []
+  const seen = new Set<string>()
+  
+  const liRe = /<li class="xfade-in">([\s\S]*?)<\/li>/g
+  let lm: RegExpExecArray | null
+  while ((lm = liRe.exec(html))) {
+    const li = lm[1]
+    
+    const ttlM = li.match(/<div class="ttl">([\s\S]*?)<\/div>/)
+    if (!ttlM) continue
+    const title = stripTags(ttlM[1]).trim()
+    if (!title || /^(reserved|貸切|非公開|未定|準備中|tba)$/i.test(title)) continue
+    
+    const periodM = li.match(/<div class="period">([\s\S]*?)<\/div>/)
+    if (!periodM) continue
+    const periodHtml = periodM[1]
+    
+    const spans = Array.from(periodHtml.matchAll(/<span>([\s\S]*?)<\/span>/g)).map(m => stripTags(m[1]))
+    if (spans.length === 0) continue
+    
+    const startM = spans[0].match(/(\d{4})\.(\d{2})\.(\d{2})/)
+    if (!startM) continue
+    const startY = Number(startM[1])
+    const startMth = Number(startM[2])
+    const startDay = Number(startM[3])
+    
+    let dates: string[] = []
+    
+    if (spans.length === 1) {
+      dates.push(`${startY}-${String(startMth).padStart(2, "0")}-${String(startDay).padStart(2, "0")}`)
+    } else if (spans.length === 2) {
+      const endM = spans[1].match(/(?:(\d{4})\.)?(\d{2})\.(\d{2})/)
+      if (endM) {
+        const endY = endM[1] ? Number(endM[1]) : startY
+        const endMth = Number(endM[2])
+        const endDay = Number(endM[3])
+        
+        const startDate = new Date(Date.UTC(startY, startMth - 1, startDay))
+        const endDate = new Date(Date.UTC(endY, endMth - 1, endDay))
+        
+        let cur = new Date(startDate)
+        let limit = 0
+        while (cur <= endDate && limit < 60) {
+          const y = cur.getUTCFullYear()
+          const m = cur.getUTCMonth() + 1
+          const d = cur.getUTCDate()
+          dates.push(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`)
+          cur.setUTCDate(cur.getUTCDate() + 1)
+          limit++
+        }
+      }
+    }
+    
+    for (const date of dates) {
+      const cleanTitle = title.slice(0, 200)
+      const key = `${date}__${cleanTitle}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ event_date: date, title: cleanTitle, category: "その他" })
+    }
+  }
+  
   out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
   return out
 }

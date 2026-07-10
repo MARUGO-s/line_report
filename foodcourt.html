@@ -849,12 +849,12 @@
   const EVT_ICON = { 'プロ野球':'⚾', 'アマ野球':'🥎', 'ライブ':'🎤', 'スポーツ中継':'📺', 'その他':'🎫' };
   // 会場ラベル（東京ドーム本体は無印・各ホールは会場名を表示。カナデビア等は来館動機が独立するため区別する）。
   // public-viewing＝フードコートの大型モニターでの世界スポーツ放映（W杯/WBC/世界ボクシング/五輪等）。
-  const VENUE_LABEL = { 'kanadevia':'カナデビア', 'korakuen':'後楽園H', 'prism':'プリズムH', 'laqua':'ラクーア', 'public-viewing':'PV観戦' };
+  const VENUE_LABEL = { 'kanadevia':'カナデビア', 'korakuen':'後楽園H', 'prism':'プリズムH', 'laqua':'ラクーア', 'public-viewing':'PV観戦', 'imm':'IMMシアター' };
   const venueOf = e => String((e&&e.venue)||'tokyo-dome');
   const venueLabelOf = e => { const v=venueOf(e); return (v && v!=='tokyo-dome') ? (VENUE_LABEL[v]||v) : ''; };
   const venueTag = e => { const l=venueLabelOf(e); return l ? '<span style="display:inline-block;font-size:10px;font-weight:700;color:var(--accent,#b07);background:rgba(176,0,119,.10);border-radius:4px;padding:0 5px;margin-right:5px;vertical-align:middle">🏛'+escapeHtml(l)+'</span>' : ''; };
   // 開催場所のフルネーム（東京ドーム本体も含め全会場）。ポップアップで開催場所を必ず明記するのに使う。
-  const VENUE_FULL = { 'tokyo-dome':'東京ドーム', 'kanadevia':'カナデビアホール', 'korakuen':'後楽園ホール', 'prism':'プリズムホール', 'laqua':'ラクーア', 'public-viewing':'パブリックビューイング' };
+  const VENUE_FULL = { 'tokyo-dome':'東京ドーム', 'kanadevia':'カナデビアホール', 'korakuen':'後楽園ホール', 'prism':'プリズムホール', 'laqua':'ラクーア', 'public-viewing':'パブリックビューイング', 'imm':'IMMシアター' };
   const venueFullName = e => { const v=venueOf(e); return VENUE_FULL[v] || v; };
   const venueBadge = e => '<span style="display:inline-block;font-size:11px;font-weight:700;color:var(--accent,#b07);background:rgba(176,0,119,.12);border-radius:5px;padding:1px 7px;margin-right:6px;vertical-align:middle">📍'+escapeHtml(venueFullName(e))+'</span>';
   // 日本人/日本代表が出る放映＝集客大・深夜営業の要注意日。一目で分かるよう赤い🇯🇵バッジを付ける。
