@@ -1349,7 +1349,7 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
     const hits = byDate.get(r.date) || []
     const maxAtt = Math.max(
       0,
-      ...hits.map((h) => (h.expected_attendance != null && Number.isFinite(h.expected_attendance) ? Number(h.expected_attendance) : 0)),
+      ...hits.map((h) => resolveEventAttendance(h)?.mid ?? 0),
     )
     if (maxAtt > 0 && r.guests != null) withAtt.push({ att: maxAtt, guests: r.guests as number, sales: r.sales })
   }
@@ -1359,7 +1359,7 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
       { label: '中規模(1.5〜3.5万)', lo: 15000, hi: 35000 },
       { label: '大規模(3.5万~)', lo: 35000, hi: 1e9 },
     ]
-    L.push('動員規模帯ごとの平均客数（予想動員が入力された日のみ・規模は動的要因）:')
+    L.push('動員規模帯ごとの平均客数（実測/手入力/推定いずれかの動員データがある日のみ・規模は動的要因）:')
     for (const b of bands) {
       const rows = withAtt.filter((x) => x.att >= b.lo && x.att < b.hi)
       if (!rows.length) continue
@@ -1368,9 +1368,9 @@ function buildEventCorrelation(reports: Array<Record<string, unknown>>, baseName
     const missing = daily.filter((r) => {
       const hits = byDate.get(r.date) || []
       if (!hits.length) return false
-      return !hits.some((h) => h.expected_attendance != null && Number.isFinite(h.expected_attendance) && Number(h.expected_attendance) > 0)
+      return !hits.some((h) => resolveEventAttendance(h) != null)
     }).length
-    if (missing > 0) L.push(`注: イベントありだが動員予想未入力の日が${missing}日ある。規模比較は入力日のみ有効。`)
+    if (missing > 0) L.push(`注: イベントありだが動員（実測/手入力/推定いずれも）が無い日が${missing}日ある。規模比較は有効な日のみ。`)
   }
 
   // プロ野球（巨人戦）の開始時間・勝敗結果・試合時間・点差・連勝連敗の影響分析
@@ -1514,7 +1514,7 @@ function buildEventListText(events: VenueEvent[]): string {
   if (sorted.some((e) => e.category === 'スポーツ中継')) {
     lines.push('※PV観戦(スポーツ中継)の見方: フードコート全体は集客増が見込める日。当店の売上寄与は断定せず、実績の客数/客単価/売上で判断する（蓄積で随時更新・固定の結論にしない）。現場の仮説として『サッカー放映は客がバーガー/ビールに流れやすく、野球の方が当店売上は伸びやすい』があるが要検証。日本戦は深夜営業の可能性に備える。')
   }
-  lines.push('※動員予想はイベント規模の動的ドライバー。同種イベントでも動員が違う日は客数リフトが異なる前提で比較すること。未入力日は種別のみで語り、規模断定はしない。')
+  lines.push('※動員数はイベント規模の動的ドライバー。同種イベントでも動員が違う日は客数リフトが異なる前提で比較すること。「動員推定」表記は会場収容人数からの機械算出（実測ではない）のため、規模感の参考にとどめ断定しない。')
   return lines.join('\n')
 }
 
@@ -1537,10 +1537,41 @@ export type VenueEvent = {
 }
 export type ForecastRow = { target_date: string; metric: string; predicted: number; predicted_low?: number | null; predicted_high?: number | null; actual?: number | null; model_version?: string }
 
-function fcEventAttendanceLabel(e: VenueEvent): string {
+// カナデビアホール／後楽園ホール／東京ドーム本体ライブは、実績・手入力の動員数が公表されないことが多い。
+// 会場の公称収容人数をベースに「収容人数×2/3(下限)〜×1.0(中央値)〜×4/3(上限、満席超の立ち見等を許容)」の
+// 仮想動員レンジを機械的に算出し、動員データが完全に欠落する事態を避ける（あくまで推定・実測ではない）。
+const VENUE_CAPACITY: Record<string, number> = {
+  kanadevia: 3000,  // カナデビアホール（旧TOKYO DOME CITY HALL）公称最大収容
+  korakuen: 2000,   // 後楽園ホール 公称収容
+}
+const TOKYO_DOME_LIVE_CAPACITY = 45000 // 東京ドーム本体ライブはステージ形式で3.5万〜5.5万人と幅が大きいため中間値を採用
+
+function capacityBaseAttendance(venue?: string, category?: string): number | null {
+  const v = String(venue ?? '').trim()
+  if (v in VENUE_CAPACITY) return VENUE_CAPACITY[v]
+  if (v === 'tokyo-dome' && category === 'ライブ') return TOKYO_DOME_LIVE_CAPACITY
+  return null
+}
+
+type ResolvedAttendance = { mid: number; low: number; high: number; estimated: boolean }
+
+// expected_attendance（実績自動取得 or 手入力）を優先し、無ければ会場収容ベースの推定レンジを返す。
+function resolveEventAttendance(e: VenueEvent): ResolvedAttendance | null {
   const n = e.expected_attendance
-  if (n != null && Number.isFinite(n) && n >= 0) return `動員予想${Math.round(n).toLocaleString('ja-JP')}人`
-  return '動員予想未入力'
+  if (n != null && Number.isFinite(n) && n >= 0) {
+    const v = Math.round(n)
+    return { mid: v, low: v, high: v, estimated: false }
+  }
+  const cap = capacityBaseAttendance(e.venue, e.category)
+  if (cap == null) return null
+  return { mid: Math.round(cap), low: Math.round(cap * 2 / 3), high: Math.round(cap * 4 / 3), estimated: true }
+}
+
+function fcEventAttendanceLabel(e: VenueEvent): string {
+  const r = resolveEventAttendance(e)
+  if (!r) return '動員データなし'
+  if (r.estimated) return `動員推定${r.mid.toLocaleString('ja-JP')}人（会場収容ベースの仮値・幅${r.low.toLocaleString('ja-JP')}〜${r.high.toLocaleString('ja-JP')}人、実測ではない）`
+  return `動員予想${r.mid.toLocaleString('ja-JP')}人`
 }
 
 /** 同日イベントを「種別名:タイトル(動員…)」形式で短く並べる */
@@ -1869,8 +1900,8 @@ function buildTargetDayFacts(
   L.push(ev.length
     ? `この日のイベント: ${ev.map((e) => `${e.category ? e.category + ':' : ''}${e.title}（${fcEventAttendanceLabel(e)}）`).filter(Boolean).join('、')}`
     : `この日のイベント: なし`)
-  const maxAtt = Math.max(0, ...ev.map((e) => (e.expected_attendance != null && Number.isFinite(e.expected_attendance) ? Number(e.expected_attendance) : 0)))
-  if (maxAtt > 0) L.push(`この日の最大動員予想: ${maxAtt.toLocaleString('ja-JP')}人（規模ドライバー。同種イベントでも動員差で客数リフトが変わりうる）`)
+  const maxAtt = Math.max(0, ...ev.map((e) => resolveEventAttendance(e)?.mid ?? 0))
+  if (maxAtt > 0) L.push(`この日の最大動員（実測/手入力/推定）: ${maxAtt.toLocaleString('ja-JP')}人（規模ドライバー。同種イベントでも動員差で客数リフトが変わりうる）`)
   if (wx) L.push(`天気: ${String(wx.summary ?? '') || '—'}${(wx.precipitation_mm ?? 0) >= 1 ? '（雨）' : ''}${wx.temp_max != null ? ` 最高${wx.temp_max}℃` : ''}`)
   if (decompLine) L.push(decompLine)
   if (trendLine) L.push(trendLine)
@@ -1954,22 +1985,21 @@ function buildPeriodFacts(
   if (outsideAvg != null && periodDailyAvg != null) L.push(`この期間外の自店史（${outside.length}日）の日平均比: ${outsideAvg > 0 ? (periodDailyAvg / outsideAvg * 100).toFixed(1) : '—'}%`)
   L.push(`イベントがあった日: ${daysWithEvent}/${dates.length}日、雨の日: ${rainyDays}/${dates.length}日`)
   // 期間内イベントで動員予想が入っているものを規模順に数件（動的ドライバー）
-  const periodEvWithAtt: VenueEvent[] = []
+  const periodEvWithAtt: Array<{ e: VenueEvent; mid: number }> = []
   for (const list of evByDate.values()) {
     for (const e of list) {
-      if (e.expected_attendance != null && Number.isFinite(e.expected_attendance) && Number(e.expected_attendance) > 0) {
-        periodEvWithAtt.push(e)
-      }
+      const r = resolveEventAttendance(e)
+      if (r) periodEvWithAtt.push({ e, mid: r.mid })
     }
   }
-  periodEvWithAtt.sort((a, b) => Number(b.expected_attendance) - Number(a.expected_attendance))
+  periodEvWithAtt.sort((a, b) => b.mid - a.mid)
   if (periodEvWithAtt.length) {
-    L.push('期間内の動員予想が入ったイベント（規模順・上位）:')
-    for (const e of periodEvWithAtt.slice(0, 8)) {
+    L.push('期間内の動員（実測/手入力/推定）が入ったイベント（規模順・上位）:')
+    for (const { e } of periodEvWithAtt.slice(0, 8)) {
       L.push(`・${String(e.event_date).slice(0, 10)} ${e.category}:${e.title} ｜${fcEventAttendanceLabel(e)}`)
     }
   } else if (daysWithEvent > 0) {
-    L.push('注: 期間内にイベントはあるが動員予想が未入力。規模比較はできないため種別のみで語ること。')
+    L.push('注: 期間内にイベントはあるが動員データが無い。規模比較はできないため種別のみで語ること。')
   }
   return L.join('\n')
 }
@@ -2324,8 +2354,8 @@ export function buildDailyLogImpactContext(
     if (logAtt != null && Number.isFinite(logAtt)) parts.push(`  日報の動員数: ${Math.round(logAtt).toLocaleString('ja-JP')}人`)
     if (dayEvents.length) {
       parts.push(`  同日イベント: ${fcFormatEventsForDay(dayEvents)}`)
-      const maxEvAtt = Math.max(0, ...dayEvents.map((e) => (e.expected_attendance != null && Number.isFinite(e.expected_attendance) ? Number(e.expected_attendance) : 0)))
-      if (maxEvAtt > 0) parts.push(`  イベント最大動員予想: ${maxEvAtt.toLocaleString('ja-JP')}人（規模ドライバー）`)
+      const maxEvAtt = Math.max(0, ...dayEvents.map((e) => resolveEventAttendance(e)?.mid ?? 0))
+      if (maxEvAtt > 0) parts.push(`  イベント最大動員（実測/手入力/推定）: ${maxEvAtt.toLocaleString('ja-JP')}人（規模ドライバー）`)
     } else {
       parts.push('  同日イベント: なし')
     }
@@ -2389,9 +2419,10 @@ export function foodCourtNippouPromptRules(baseName: string): string {
     `(N5) 日報が無い日は施策を捏造しない。施策あり日があれば、総評や評価見出しで必ず触れる。`,
     `(N6) 次の一手は、日報の成功施策の継続/強化、または失敗・課題の改善に接続する（${baseName}向けに具体化）。`,
     `【動的要因・必須】固定の曜日パターンだけで終わらせない。`,
-    `(D1) イベントは「種別」だけでなく「タイトル」と「動員予想（人数）」を材料にする。動員が大きい日は需要の上限が上がりやすいが、当店捕捉率は別問題。`,
-    `(D2) 同種イベント（例: プロ野球）でも動員が違う日は、客数リフトが異なりうる前提で比較する。動員未入力日は規模を断定しない。`,
-    `(D3) 日報の動員数とイベント動員予想が両方ある日は、規模感の材料として両方を引用し、客数実績との関係を述べる。`,
+    `(D1) イベントは「種別」だけでなく「タイトル」と「動員数（人数）」を材料にする。動員が大きい日は需要の上限が上がりやすいが、当店捕捉率は別問題。`,
+    `(D2) 同種イベント（例: プロ野球）でも動員が違う日は、客数リフトが異なりうる前提で比較する。動員データが無い日は規模を断定しない。`,
+    `(D2b) 動員数には3種類ある: 実測（プロ野球はNPB系サイトから試合終了後に自動取得＝確度高）／手入力（担当者の予想）／推定（カナデビアホール・後楽園ホール・東京ドーム本体ライブは実測が公表されないため、会場収容人数×2/3〜×4/3の仮想レンジで機械的に算出＝確度低）。「動員推定」と表記されている数値は実測ではないため、断定的な結論の根拠にはせず、あくまで規模感の参考程度に扱うこと。`,
+    `(D3) 日報の動員数とイベント動員（実測/手入力/推定）が両方ある日は、規模感の材料として両方を引用し、客数実績との関係を述べる。`,
     `(D4) 天気（雨・気温）・曜日・イベント規模・現場施策を同時に並べ、「何が主因候補か」を仮説として整理する。`,
   ].join('\n')
 }
