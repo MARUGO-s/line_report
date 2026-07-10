@@ -2223,6 +2223,17 @@
   }
   function renderDomeList(){
     const guestsByDate=new Map(); (lastSeries||[]).forEach(p=>{ const d=ymdJst(p.when); if(d&&p.guests!=null) guestsByDate.set(d,p.guests); });
+    const resolveEventAttendance = e => {
+      const n = e.expected_attendance;
+      if (n != null && isFinite(n) && n >= 0) return Math.round(n);
+      const v = venueOf(e);
+      if (v === 'kanadevia') return 3000;
+      if (v === 'korakuen') return 2000;
+      if (v === 'imm') return 700;
+      if (v === 'tokyo-dome' && e.category === 'ライブ') return 45000;
+      return null;
+    };
+
     const todayJ=ymdJst(new Date().toISOString());
     let list=(events||[]).filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(String(e.event_date||'').slice(0,10)));
     if(domeFilter!=='all') list=list.filter(e=>catSlug(e.category)===domeFilter);
@@ -2240,8 +2251,9 @@
       // 東京ドーム本体は最大集客＝小ホール(カナデビア等)と混在しても目立つ塗りバッジ＋太字。
       const dome=venueOf(e)==='tokyo-dome';
       const vTag=dome?'<span class="ld-dome-badge">🏟 東京ドーム</span>':venueTag(e);
-      // 予想動員数（手入力）: 来客予測モデルの最強ドライバー。自動取得元には無いため、ここで直接入力する。
-      const attVal=(e.expected_attendance!=null && isFinite(e.expected_attendance))?String(e.expected_attendance):'';
+      // 予想動員数（手入力）: 登録済みの値か、無ければキャパに基づく推定値を初期挿入する
+      const resolvedAtt = resolveEventAttendance(e);
+      const attVal=resolvedAtt!=null?String(resolvedAtt):'';
       const attHtml='<span class="ld-att" data-date="'+escapeHtml(dOf(e))+'" data-venue="'+escapeHtml(venueOf(e))+'" data-title="'+escapeHtml(e.title||'')+'" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;vertical-align:middle">'
         +'<span style="font-size:11px;color:var(--tx-2)">👥予想</span>'
         +'<input type="number" min="0" step="1" class="ld-att-input" value="'+escapeHtml(attVal)+'" placeholder="人数" style="width:64px;font-size:11px;padding:1px 4px;border:1px solid var(--bd,#ccc);border-radius:4px">'
@@ -2256,8 +2268,9 @@
       const nev='<span class="ld-nev">'+n+'件</span>';
       let maxAtt = null;
       for (const ev of g.evs) {
-        if (ev.expected_attendance != null && isFinite(ev.expected_attendance)) {
-          if (maxAtt === null || ev.expected_attendance > maxAtt) maxAtt = ev.expected_attendance;
+        const att = resolveEventAttendance(ev);
+        if (att !== null) {
+          if (maxAtt === null || att > maxAtt) maxAtt = att;
         }
       }
       const attBadge = (maxAtt !== null)
