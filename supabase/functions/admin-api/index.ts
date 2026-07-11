@@ -84,6 +84,7 @@ import {
   exchangeAdminDashboardLoginLinkToken,
   exchangeRoomConfigLoginLink,
   hashRoomConfigPassword,
+  issueAdminDashboardLoginLinkToken,
   issueAdminDashboardSessionToken,
   revokeAdminDashboardSessionToken,
   revokeAllAdminDashboardAuthTokens,
@@ -104,6 +105,19 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-token, x-admin-surface",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+}
+
+const FOODCOURT_WEEKLY_REPORT_PAGE_BASE = "https://marugo-s.github.io/line_report/foodcourt-weekly-report.html"
+
+function weeklyReportHtml(report: string): string {
+  const escape = (value: string) => value.replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] ?? c))
+  return `<article class="weekly-report-content">${escape(report).replace(/\n/g, "<br>")}</article>`
+}
+
+async function buildFoodCourtWeeklyReportLink(supabase: ReturnType<typeof createClient>, storeKey: string, weekStart: string): Promise<string> {
+  const issued = await issueAdminDashboardLoginLinkToken(supabase, { source: "line_foodcourt_weekly", store_partition_key: storeKey })
+  const params = new URLSearchParams({ store_key: storeKey, week_start: weekStart, from: "line", lt: issued.token })
+  return `${FOODCOURT_WEEKLY_REPORT_PAGE_BASE}?${params.toString()}`
 }
 
 type AppError = {
@@ -1572,6 +1586,20 @@ Deno.serve(async (req, info) => {
       return json({ ok: true }, 200)
     }
 
+    if (req.method === "GET" && path === "/foodcourt/weekly-report") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      const weekStart = String(url.searchParams.get("week_start") ?? "").slice(0, 10)
+      if (!storeKey || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return json({ error: "store_key and week_start are required." }, 400)
+      const { data, error } = await supabase.from("foodcourt_weekly_reports")
+        .select("store_partition_key,week_start,week_end,ai_report,report_html,raw_data,loop_score,loop_count,created_at")
+        .ilike("store_partition_key", storeKey).eq("week_start", weekStart).order("created_at", { ascending: false }).limit(1).maybeSingle()
+      if (error) return json({ error: error.message }, 500)
+      if (!data) return json({ error: "週次レポートが見つかりません。" }, 404)
+      const row = data as Record<string, unknown>
+      const report = String(row.ai_report ?? "")
+      return json({ ...row, report_html: String(row.report_html ?? "") || weeklyReportHtml(report) }, 200)
+    }
+
     // フードコート週次経営レポート生成（cron または管理画面から）。
     // cron: POST body { room_id, store_key, cron: true } + Authorization: Bearer <CRON_AUTH_TOKEN>
     // 手動: 同上 + x-admin-token。week_start/week_end 省略時は先週(月〜日 JST)。
@@ -1603,7 +1631,7 @@ Deno.serve(async (req, info) => {
       // キャッシュヒット（同週・同店舗）
       const { data: cachedRow } = await supabase
         .from("foodcourt_weekly_reports")
-        .select("id, ai_report, raw_data, loop_score, loop_count, created_at")
+        .select("id, ai_report, report_html, raw_data, loop_score, loop_count, created_at")
         .eq("store_partition_key", storeKey)
         .eq("week_start", weekStart)
         .order("created_at", { ascending: false })
@@ -1616,9 +1644,8 @@ Deno.serve(async (req, info) => {
         if (pushToLine && roomId) {
           const token = resolveChannelAccessToken(storeKey)
           if (token) {
-            const adminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
-            const reportUrl = `https://marugo-s.github.io/line_report/weekly-report.html?store_key=${encodeURIComponent(storeKey)}&week_start=${encodeURIComponent(weekStart)}${adminToken ? `&t=${encodeURIComponent(adminToken)}` : ""}`
-            const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）\n\n${report}\n\n🔗 Webでグラフや他店比較を表示:\n${reportUrl}`.slice(0, 4900)
+            const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
+            const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）を作成しました。\n${link}`
             linePush = await pushLineTextToTarget(roomId, text, token)
           } else {
             linePush = { ok: false, error: "LINE channel access token not configured for store." }
@@ -1631,6 +1658,7 @@ Deno.serve(async (req, info) => {
           week_start: weekStart,
           week_end: weekEnd,
           report,
+          report_html: String((cachedRow as { report_html?: unknown }).report_html ?? "") || weeklyReportHtml(report),
           raw_data: (cachedRow as { raw_data?: unknown }).raw_data ?? null,
           loop_score: (cachedRow as { loop_score?: unknown }).loop_score ?? null,
           loop_count: (cachedRow as { loop_count?: unknown }).loop_count ?? null,
@@ -1688,11 +1716,13 @@ Deno.serve(async (req, info) => {
         }, 200)
       }
 
+      const reportHtml = weeklyReportHtml(result.report)
       const { error: upErr } = await supabase.from("foodcourt_weekly_reports").insert({
         store_partition_key: storeKey,
         week_start: weekStart,
         week_end: weekEnd,
         ai_report: result.report,
+        report_html: reportHtml,
         raw_data: result.rawData,
         loop_score: result.loopScore,
         loop_count: result.loopCount,
@@ -1703,9 +1733,8 @@ Deno.serve(async (req, info) => {
       if (pushToLine && roomId) {
         const token = resolveChannelAccessToken(storeKey)
         if (token) {
-          const adminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
-          const reportUrl = `https://marugo-s.github.io/line_report/weekly-report.html?store_key=${encodeURIComponent(storeKey)}&week_start=${encodeURIComponent(weekStart)}${adminToken ? `&t=${encodeURIComponent(adminToken)}` : ""}`
-          const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）\n\n${result.report}\n\n🔗 Webでグラフや他店比較を表示:\n${reportUrl}`.slice(0, 4900)
+          const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
+          const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）を作成しました。\n${link}`
           linePush = await pushLineTextToTarget(roomId, text, token)
           if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
         } else {
@@ -1720,6 +1749,7 @@ Deno.serve(async (req, info) => {
         week_start: weekStart,
         week_end: weekEnd,
         report: result.report,
+        report_html: reportHtml,
         raw_data: result.rawData,
         loop_score: result.loopScore,
         loop_count: result.loopCount,
@@ -2537,6 +2567,17 @@ async function authenticate(
       const cronTok = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim()
       if (cronTok && secureEqual(bearer, cronTok)) {
         return { ok: true, storeScope: null, roomScope: null, scopeKind: "cron" }
+      }
+      // DB cron は Vault のトークンを使う。Edge Function の環境変数が未同期でも、
+      // service-role 経由で同じ Vault 値と照合できれば許可する（値はレスポンスに出さない）。
+      try {
+        const { data: vaultCronToken } = await supabase.rpc("resolve_edge_cron_auth_token")
+        const dbCronToken = String(vaultCronToken ?? "").trim()
+        if (dbCronToken && secureEqual(bearer, dbCronToken)) {
+          return { ok: true, storeScope: null, roomScope: null, scopeKind: "cron" }
+        }
+      } catch (_err) {
+        // Vault 未設定時は既存の環境変数・管理トークン照合を継続する。
       }
       // vault が ADMIN_DASHBOARD_TOKEN と同値で運用されている場合も許可
       if (fallbackToken && secureEqual(bearer, fallbackToken)) {

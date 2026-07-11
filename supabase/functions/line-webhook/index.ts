@@ -1592,8 +1592,8 @@ async function processReceiptImageEvent(
     }
     if (receiptReplyToken) {
       // 店名不一致＝別店舗のレシート＝経費の可能性が高い。経費候補として pending を作り、
-      // 不一致カードに「経費（小口）として記録」ボタンを足す（「経費」と先打ちしなくてもOK）。
-      // 権限「小口レシートの解析をする」OFF のルームではボタンを付けない（pendingも作らない）。
+      // いったん不一致カードを挟まず、すぐ「小口現金に記録しますか？」の確認カードを出す。
+      // 権限「小口レシートの解析をする」OFF、または金額不読で pending を作れない場合だけ従来の不一致カードへ戻す。
       let pettyPendingId: number | null = null
       if (allowPettyCash) {
         try {
@@ -1604,12 +1604,15 @@ async function processReceiptImageEvent(
           console.error('savePettyCashPendingFromReceipt threw:', String(e))
         }
       }
-      const flexMessage = buildReceiptStoreMismatchFlexReply(guidance, pettyPendingId)
+      const pettyConfirmMessage = pettyPendingId
+        ? await handlePettyCashPostback(supabase, registry, `pcreview=${pettyPendingId}`)
+        : null
+      const flexMessage = pettyConfirmMessage ?? buildReceiptStoreMismatchFlexReply(guidance, pettyPendingId)
       await replyLineFlex(
         receiptReplyToken,
         flexMessage,
         accessToken,
-        webhookReplyLog(registry, roomId, 'receipt_store_mismatch'),
+        webhookReplyLog(registry, roomId, pettyConfirmMessage ? 'petty_cash_store_mismatch_confirm' : 'receipt_store_mismatch'),
       )
     }
     return {

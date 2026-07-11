@@ -66,11 +66,14 @@ type PettyTaxMode = 'ex' | 'in'
 //   アルコール飲料 → alcohol、消耗品/衛生用品 → shomohin、それ以外 → shokuzai(食材)。
 //   ※「消毒用アルコール」等は飲料ではないので shomohin 側で先に拾う。
 const ALCOHOL_DRINK_RE = /(ビール|発泡酒|ワイン|シャンパン|スパークリング|日本酒|清酒|焼酎|ウイスキー|ウィスキー|ハイボール|サワー|酎ハイ|チューハイ|ジン|ウォッカ|ラム|テキーラ|リキュール|梅酒|ハウスワイン|生樽|樽生|地酒|スピリッツ|sake|beer|wine|whisky|whiskey|vodka|tequila)/i
-const SHOMOHIN_RE = /(消耗品|日用品|雑貨|備品|事務用品|洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|レジ袋|レジブクロ|買物袋|買い物袋|マイバッグ|ショッピングバッグ|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/
-function classifyPettyAcct(name: string): 'shokuzai' | 'shomohin' | 'alcohol' {
+const SHOMOHIN_RE = /(消耗品|日用品|雑貨|備品|事務用品|洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|レジ袋|レジブクロ|買物袋|買い物袋|マイバッグ|ショッピングバッグ|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|単[0-9０-９一二三四五]|PRE単|富士通|アルカリ|マンガン|コバエ|小バエ|ハエ|虫取り|虫とり|防虫|殺虫|捕虫|虫よけ|虫除け|バルくん|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/i
+function classifyPettyAcct(name: string, opts?: { rate?: 8 | 10 | null; supplier?: string | null }): 'shokuzai' | 'shomohin' | 'alcohol' {
   const s = String(name ?? '')
+  const supplier = String(opts?.supplier ?? '')
+  if (/(seria|セリア)/i.test(`${supplier} ${s}`)) return 'shomohin'
   if (SHOMOHIN_RE.test(s)) return 'shomohin'
   if (ALCOHOL_DRINK_RE.test(s)) return 'alcohol'
+  if (opts?.rate === 10 && /(10%対象|10％対象|日用品|雑貨|備品|文具|電池|単[0-9０-９一二三四五]|PRE単|富士通|コバエ|小バエ|ハエ|虫)/i.test(`${supplier} ${s}`)) return 'shomohin'
   return 'shokuzai'
 }
 function defaultPettyRate(acct: 'shokuzai' | 'shomohin' | 'alcohol'): 8 | 10 {
@@ -197,7 +200,7 @@ export function extractExpenseFromReceipt(
     }
     const primaryTaxAnchors = strongTaxAnchors.length > 0 ? strongTaxAnchors : taxAnchors
     const taxDist = (rateOf: (i: number) => 8 | 10 | null): number | null => taxDistForAnchors(rateOf, primaryTaxAnchors)
-    const food = (i: number): 8 | 10 => defaultPettyRate(classifyPettyAcct(itemRows[i].name))
+    const food = (i: number): 8 | 10 => defaultPettyRate(classifyPettyAcct(itemRows[i].name, { supplier }))
     const bdCand = (i: number): 8 | 10 | null => bdRateByIndex.get(i) ?? null
     const cands: Array<(i: number) => 8 | 10 | null> = []
     if (bdRateByIndex.size) cands.push(bdCand)
@@ -230,8 +233,8 @@ export function extractExpenseFromReceipt(
     else if (chosenRateOf) rate = chosenRateOf(idx)
     else if (bdRateByIndex.has(idx)) rate = bdRateByIndex.get(idx)!
     else if (i.rate === 8 || i.rate === 10) rate = i.rate
-    else rate = defaultPettyRate(classifyPettyAcct(i.name))
-    const acct: 'shokuzai' | 'shomohin' | 'alcohol' = rate === 8 ? 'shokuzai' : classifyPettyAcct(i.name)
+    else rate = defaultPettyRate(classifyPettyAcct(i.name, { supplier }))
+    const acct: 'shokuzai' | 'shomohin' | 'alcohol' = rate === 8 ? 'shokuzai' : classifyPettyAcct(i.name, { rate, supplier })
     return { n: i.name || '(品目)', p, acct, rate }
   })
   // FamilyMart の小型レシートは同じ商品が複数行に分かれることがあり、OCRが2行目を落とすと
@@ -383,7 +386,7 @@ export function extractExpenseFromReceipt(
     const nameItems = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
     item = nameItems.length > 1 ? nameItems.map((s) => '・' + s).join('\n') : (nameItems[0] || supplier || '経費')
     const nm = nameItems[0] || supplier || '経費'
-    const acct = classifyPettyAcct(`${nameItems.join(' ')} ${supplier ?? ''}`)
+    const acct = classifyPettyAcct(nameItems.join(' '), { supplier })
     // 明細価格が取れない時は本体価格を1品目に集約（科目別集計の取りこぼしを防ぐ）。
     items = [{ n: nm, p: base, acct, rate: defaultPettyRate(acct) }]
   }
@@ -456,6 +459,7 @@ function itemsTotalWithTax(items?: PettyCashItem[] | null): number | null {
 
 function confirmFlex(pendingId: number, x: ExtractedExpense): Record<string, unknown> {
   const base = Math.max(0, x.amount - x.tax)
+  const acctLabel = pettyItemsLabel(x.items) || '—'
   // 検証: 明細の税込合計(税率別＋切り捨て)と支払合計のズレ(±1円超)は黙って通さず、警告＋「不一致を確認して記録」にする。
   const itemsTotal = itemsTotalWithTax(x.items)
   const mismatch = itemsTotal != null && Math.abs(itemsTotal - x.amount) > 1
@@ -481,6 +485,7 @@ function confirmFlex(pendingId: number, x: ExtractedExpense): Record<string, unk
             ['店舗', x.storeDisplayName],
             ['日付', x.spentOn],
             ['仕入先', x.supplier],
+            ['勘定科目', acctLabel],
             ['品目', x.item],
             ['本体', formatYen(base)],
             ['税額', x.tax > 0 ? formatYen(x.tax) : '—'],
@@ -508,32 +513,6 @@ function simpleNoticeFlex(text: string): Record<string, unknown> {
     contents: {
       type: 'bubble',
       body: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text, wrap: true, size: 'sm', color: '#333333' }] },
-    },
-  }
-}
-
-// レジ出金（経費）伝票を検知したときの案内カード（売上に登録せず、経費記録へ誘導）。
-function cashOutOfferFlex(pendingId: number, amount: number): Record<string, unknown> {
-  return {
-    type: 'flex',
-    altText: 'レジ出金（経費）の伝票',
-    contents: {
-      type: 'bubble',
-      body: {
-        type: 'box', layout: 'vertical', spacing: 'sm',
-        contents: [
-          { type: 'text', text: 'レジ出金（経費）の伝票のようです', weight: 'bold', size: 'md', color: '#1a6fa8', wrap: true },
-          { type: 'text', text: `これは「売上」ではないため、売上には登録していません。出金額 ${formatYen(amount)} を小口現金（経費）として記録できます。`, size: 'sm', color: '#444444', wrap: true },
-          { type: 'text', text: '※「記録」を押すと内容確認カードが出ます。', size: 'xs', color: '#8a96a3', wrap: true },
-        ],
-      },
-      footer: {
-        type: 'box', layout: 'vertical', spacing: 'sm',
-        contents: [
-          { type: 'button', style: 'primary', color: '#1a6fa8', height: 'sm', action: { type: 'postback', label: '経費（小口）として記録', data: `pcreview=${pendingId}`, displayText: '経費（小口）として記録します' } },
-          { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '了解（記録しない）', text: '了解' } },
-        ],
-      },
     },
   }
 }
@@ -570,6 +549,7 @@ function doneFlex(p: PendingRow, pageUrl?: string | null): Record<string, unknow
   const amount = Math.max(0, Math.floor(Number(p.amount_yen ?? 0)))
   const tax = Math.max(0, Math.floor(Number(p.tax_yen ?? 0)))
   const base = Math.max(0, amount - tax)
+  const acctLabel = pettyItemsLabel(p.items) || String(p.category ?? '').trim() || '—'
   const bubble: Record<string, unknown> = {
     type: 'bubble',
     body: {
@@ -579,6 +559,7 @@ function doneFlex(p: PendingRow, pageUrl?: string | null): Record<string, unknow
         { type: 'separator', margin: 'md' },
         ...fieldRows([
           ['日付', p.spent_on],
+          ['勘定科目', acctLabel],
           ['品目', p.item],
           ['本体', formatYen(base)],
           ['税額', tax > 0 ? formatYen(tax) : '—'],
@@ -848,9 +829,9 @@ export async function handlePettyCashCashOutSlip(
     const replied = await sendReply(replyToken, [simpleNoticeFlex('レジ出金（経費）の伝票のようです。売上には登録していません。金額が読み取れなかったため、小口現金ページから手入力してください。')], storeKey, roomId)
     return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_unreadable' }
   }
-  const ex = extractExpenseFromReceipt(exReceipt)
-  const replied = await sendReply(replyToken, [cashOutOfferFlex(pendingId, ex?.amount ?? 0)], storeKey, roomId)
-  return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_offer' }
+  const confirm = await handlePettyCashPostback(supabase, registry, `pcreview=${pendingId}`)
+  const replied = await sendReply(replyToken, [confirm ?? simpleNoticeFlex('出金（経費）レシートを読み取りました。小口現金ページから内容をご確認ください。')], storeKey, roomId)
+  return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_confirm' }
 }
 
 // 確認カードの postback。
