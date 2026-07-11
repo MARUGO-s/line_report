@@ -37,7 +37,7 @@ import {
   fcSalesDate,
 } from "../_shared/foodcourt_compare.ts"
 import {
-  pushLineTextToTarget,
+  pushLineMessagesToTarget,
   resolveChannelAccessToken,
 } from "../_shared/line_client.ts"
 import {
@@ -118,6 +118,19 @@ async function buildFoodCourtWeeklyReportLink(supabase: ReturnType<typeof create
   const issued = await issueAdminDashboardLoginLinkToken(supabase, { source: "line_foodcourt_weekly", store_partition_key: storeKey })
   const params = new URLSearchParams({ store_key: storeKey, week_start: weekStart, from: "line", lt: issued.token })
   return `${FOODCOURT_WEEKLY_REPORT_PAGE_BASE}?${params.toString()}`
+}
+
+function weeklyReportFlex(weekStart: string, weekEnd: string, rawData: unknown, link: string): Record<string, unknown> {
+  const raw = (rawData && typeof rawData === "object") ? rawData as Record<string, unknown> : {}
+  const yen = (value: unknown) => `¥${Math.round(Number(value) || 0).toLocaleString("ja-JP")}`
+  const guests = Math.round(Number(raw.totalGuests) || 0).toLocaleString("ja-JP")
+  const rank = Number(raw.avgRank)
+  const cells = [
+    { type: "box", layout: "vertical", flex: 1, contents: [{ type: "text", text: "週売上", size: "xs", color: "#7A869A" }, { type: "text", text: yen(raw.totalSales), weight: "bold", size: "md", color: "#173B5E" }] },
+    { type: "box", layout: "vertical", flex: 1, contents: [{ type: "text", text: "客数", size: "xs", color: "#7A869A" }, { type: "text", text: `${guests}人`, weight: "bold", size: "md", color: "#173B5E" }] },
+    { type: "box", layout: "vertical", flex: 1, contents: [{ type: "text", text: "平均順位", size: "xs", color: "#7A869A" }, { type: "text", text: Number.isFinite(rank) ? `${rank.toFixed(1)}位` : "-", weight: "bold", size: "md", color: "#173B5E" }] },
+  ]
+  return { type: "flex", altText: `フードコート週次レポート ${weekStart}〜${weekEnd}`, contents: { type: "bubble", size: "mega", header: { type: "box", layout: "vertical", backgroundColor: "#0B6EA8", paddingAll: "18px", contents: [{ type: "text", text: "FOODCOURT WEEKLY", color: "#B9E8FF", size: "xs", weight: "bold" }, { type: "text", text: "週次経営報告", color: "#FFFFFF", size: "xl", weight: "bold", margin: "sm" }, { type: "text", text: `${weekStart} 〜 ${weekEnd}`, color: "#D7F0FF", size: "sm", margin: "sm" }] }, body: { type: "box", layout: "vertical", paddingAll: "18px", contents: [{ type: "box", layout: "horizontal", spacing: "md", contents: cells }] }, footer: { type: "box", layout: "vertical", paddingAll: "14px", contents: [{ type: "button", style: "primary", color: "#0B83C5", action: { type: "uri", label: "週次報告を開く", uri: link } }] } } }
 }
 
 type AppError = {
@@ -1645,8 +1658,7 @@ Deno.serve(async (req, info) => {
           const token = resolveChannelAccessToken(storeKey)
           if (token) {
             const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
-            const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）を作成しました。\n${link}`
-            linePush = await pushLineTextToTarget(roomId, text, token)
+            linePush = await pushLineMessagesToTarget(roomId, [weeklyReportFlex(weekStart, weekEnd, (cachedRow as { raw_data?: unknown }).raw_data, link)], token)
           } else {
             linePush = { ok: false, error: "LINE channel access token not configured for store." }
           }
@@ -1734,8 +1746,7 @@ Deno.serve(async (req, info) => {
         const token = resolveChannelAccessToken(storeKey)
         if (token) {
           const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
-          const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）を作成しました。\n${link}`
-          linePush = await pushLineTextToTarget(roomId, text, token)
+          linePush = await pushLineMessagesToTarget(roomId, [weeklyReportFlex(weekStart, weekEnd, result.rawData, link)], token)
           if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
         } else {
           linePush = { ok: false, error: "LINE channel access token not configured for store." }
