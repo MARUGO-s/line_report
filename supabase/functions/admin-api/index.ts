@@ -37,7 +37,7 @@ import {
   fcSalesDate,
 } from "../_shared/foodcourt_compare.ts"
 import {
-  pushLineTextToTarget,
+  pushLineMessagesToTarget,
   resolveChannelAccessToken,
 } from "../_shared/line_client.ts"
 import {
@@ -118,6 +118,58 @@ async function buildFoodCourtWeeklyReportLink(supabase: ReturnType<typeof create
   const issued = await issueAdminDashboardLoginLinkToken(supabase, { source: "line_foodcourt_weekly", store_partition_key: storeKey })
   const params = new URLSearchParams({ store_key: storeKey, week_start: weekStart, from: "line", lt: issued.token })
   return `${FOODCOURT_WEEKLY_REPORT_PAGE_BASE}?${params.toString()}`
+}
+
+function buildWeeklyReportFlexMessage(weekStart: string, weekEnd: string, reportUrl: string): Record<string, unknown> {
+  return {
+    type: "flex",
+    altText: `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）を作成しました。`,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#1a3a5c",
+        paddingAll: "16px",
+        contents: [
+          { type: "text", text: "📊 フードコート週次レポート", color: "#ffffff", size: "sm", weight: "bold" },
+          { type: "text", text: `${weekStart}（月）〜 ${weekEnd}（日）`, color: "#a8c4e0", size: "xs", margin: "xs" },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "box", layout: "horizontal", spacing: "sm",
+            contents: [
+              { type: "text", text: "週売上合計", color: "#666666", size: "xs", flex: 1 },
+              { type: "text", text: "客数・客単価", color: "#666666", size: "xs", flex: 1 },
+              { type: "text", text: "週平均売上順位", color: "#666666", size: "xs", flex: 1 },
+            ],
+          },
+          { type: "text", text: "Webで詳細・グラフを確認できます", color: "#888888", size: "xxs", margin: "md", wrap: true },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "button",
+            action: { type: "uri", label: "📈 レポートを開く", uri: reportUrl },
+            style: "primary",
+            color: "#1a3a5c",
+            height: "sm",
+          },
+        ],
+      },
+    },
+  }
 }
 
 type AppError = {
@@ -1645,8 +1697,7 @@ Deno.serve(async (req, info) => {
           const token = resolveChannelAccessToken(storeKey)
           if (token) {
             const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
-            const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）を作成しました。\n${link}`
-            linePush = await pushLineTextToTarget(roomId, text, token)
+            linePush = await pushLineMessagesToTarget(roomId, [buildWeeklyReportFlexMessage(weekStart, weekEnd, link)], token)
           } else {
             linePush = { ok: false, error: "LINE channel access token not configured for store." }
           }
@@ -1734,8 +1785,7 @@ Deno.serve(async (req, info) => {
         const token = resolveChannelAccessToken(storeKey)
         if (token) {
           const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
-          const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）を作成しました。\n${link}`
-          linePush = await pushLineTextToTarget(roomId, text, token)
+          linePush = await pushLineMessagesToTarget(roomId, [buildWeeklyReportFlexMessage(weekStart, weekEnd, link)], token)
           if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
         } else {
           linePush = { ok: false, error: "LINE channel access token not configured for store." }
