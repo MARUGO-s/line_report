@@ -610,6 +610,7 @@
       <button class="btn primary" id="dayBtn">単日</button>
     </div>
     <div class="ctl-grow"></div>
+    <a class="btn ghost" id="weeklyReportBtn" href="foodcourt-weekly-report.html">週次報告</a>
     <button class="btn" id="reloadBtn">更新</button>
   </div>
   <div id="loadMsg" class="msg"></div>
@@ -2593,6 +2594,7 @@
 
   (async function init(){
     captureLockedStoreFromUrl();
+    (function(){ const d=new Date(); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day-7); const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); const a=document.getElementById('weeklyReportBtn'); if(a)a.href='foodcourt-weekly-report.html?store_key='+encodeURIComponent(currentStore())+'&week_start='+y+'-'+m+'-'+dd; })();
     setModeButtons();
     if (AUTH && AUTH.consumeUrlAuthParams){
       try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' }); } catch(_){}
