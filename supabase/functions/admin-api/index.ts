@@ -1616,7 +1616,9 @@ Deno.serve(async (req, info) => {
         if (pushToLine && roomId) {
           const token = resolveChannelAccessToken(storeKey)
           if (token) {
-            const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）\n\n${report}`.slice(0, 4900)
+            const adminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
+            const reportUrl = `https://marugo-s.github.io/line_report/weekly-report.html?store_key=${encodeURIComponent(storeKey)}&week_start=${encodeURIComponent(weekStart)}${adminToken ? `&t=${encodeURIComponent(adminToken)}` : ""}`
+            const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）\n\n${report}\n\n🔗 Webでグラフや他店比較を表示:\n${reportUrl}`.slice(0, 4900)
             linePush = await pushLineTextToTarget(roomId, text, token)
           } else {
             linePush = { ok: false, error: "LINE channel access token not configured for store." }
@@ -1701,7 +1703,9 @@ Deno.serve(async (req, info) => {
       if (pushToLine && roomId) {
         const token = resolveChannelAccessToken(storeKey)
         if (token) {
-          const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）\n\n${result.report}`.slice(0, 4900)
+          const adminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
+          const reportUrl = `https://marugo-s.github.io/line_report/weekly-report.html?store_key=${encodeURIComponent(storeKey)}&week_start=${encodeURIComponent(weekStart)}${adminToken ? `&t=${encodeURIComponent(adminToken)}` : ""}`
+          const text = `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）\n\n${result.report}\n\n🔗 Webでグラフや他店比較を表示:\n${reportUrl}`.slice(0, 4900)
           linePush = await pushLineTextToTarget(roomId, text, token)
           if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
         } else {

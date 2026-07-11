@@ -2641,6 +2641,188 @@ export async function answerFoodCourtQuestion(
   return { answer: loopResult.answer, loopScore: loopResult.loopScore, loopCount: loopResult.loopCount }
 }
 
+export async function generateFoodCourtWeeklyReport(
+  reports: Array<Record<string, unknown>>,
+  baseName: string,
+  weekStart: string,  // YYYY-MM-DD (月曜)
+  weekEnd: string,    // YYYY-MM-DD (日曜)
+  groqApiKey: string,
+  events: VenueEvent[] = [],
+  weather: WeatherDay[] = [],
+  forecast: ForecastRow[] = [],
+  supabase?: SupabaseClient | null,
+  storeKey?: string,
+  dailyLogs: Array<Record<string, unknown>> = [],
+): Promise<{ report: string | null; rawData: FoodCourtWeeklyRawData; loopScore: number | null; loopCount: number }> {
+  const rawData = buildWeeklyRawData(reports, baseName, weekStart, weekEnd, dailyLogs)
+  if (!groqApiKey) return { report: null, rawData, loopScore: null, loopCount: 0 }
+  canonFoodcourtReports(reports)
+
+  // 期間サマリーと同じ分析コンテキストを構築
+  const periodFacts = buildPeriodFacts(reports, baseName, weekStart, weekEnd, events, weather)
+  if (!periodFacts) return { report: null, rawData, loopScore: null, loopCount: 0 }
+
+  const forecastFactorsCtx = await buildForecastFactorsContext(supabase, baseName)
+  const patternStats = forecastFactorsCtx || buildConditionPatternStats(reports, baseName, events, weather)
+  const patternBlock = patternStats
+    ? `# 統計的パターン（${forecastFactorsCtx ? '来客予測モデルの学習係数・自己採点つき' : '条件別集計'}）\n${patternStats}`
+    : ''
+  const insights = buildBaseInsights(reports, baseName)
+  const eventCorr = buildEventCorrelation(reports, baseName, events)
+  const eventList = buildEventListText(events)
+  const weatherCorr = buildWeatherCorrelation(reports, baseName, weather)
+  const competitors = buildCompetitorContext(reports, baseName)
+  const decomposition = buildContributionDecomposition(reports, baseName)
+  const storeCorr = buildStoreCorrelation(reports, baseName)
+  const anomalies = buildAnomalyDays(reports, baseName, events, weather)
+  const forecastCtx = buildForecastContext(forecast)
+  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
+  const fallbackModel = 'meta-llama/llama-4-scout-17b-16e-instruct'
+
+  // 日報（施策記録）＋週内の施策×実績効果対照
+  const weekLogs = dailyLogs.filter((l) => {
+    const d = String((l as { log_date?: unknown }).log_date ?? '').slice(0, 10)
+    return d >= weekStart && d <= weekEnd
+  })
+  const nippou = buildFoodCourtNippouBlocks(weekLogs, reports, baseName, events)
+  const nippouRules = foodCourtNippouPromptRules(baseName)
+  const logsBlock = nippou.hasNippou
+    ? `# 日報リンク（${weekStart}〜${weekEnd}）\n${nippou.block}`
+    : ''
+
+  // 週内（月曜〜日曜）の各店舗日次生データを構築（Q&Aと同等の情報密度にするための材料）
+  const blocks: string[] = []
+  const inWeekReports = reports.filter((r) => {
+    const d = fcSalesDate(r)
+    return d && d >= weekStart && d <= weekEnd
+  })
+  for (const r of inWeekReports) {
+    const rawTenants = Array.isArray((r as { tenants?: unknown }).tenants) ? (r as { tenants?: unknown[] }).tenants as unknown[] : []
+    const rows: string[] = []
+    for (const t of rawTenants) {
+      const o = (t && typeof t === 'object') ? t as Record<string, unknown> : {}
+      const name = String(o.name ?? '').trim()
+      const sales = numOrNull(o.sales)
+      if (!name || sales == null) continue
+      const guests = numOrNull(o.guests)
+      const kt = (guests && guests > 0) ? Math.round(sales / guests) : null
+      const mark = normalizeName(name) === normalizeName(baseName) ? '★基準' : ''
+      rows.push(`${name}${mark}\t売上${sales}\t客数${guests ?? '-'}\t客単価${kt ?? '-'}`)
+    }
+    if (rows.length) blocks.push(`■${fcDayLabel(r)}\n${rows.join('\n')}`)
+  }
+  const data = blocks.reverse().join('\n\n')
+
+  // --- 専門AI並列実行（Q&Aと同等の高解像度分析構成）---
+  const quantSystem = [
+    `あなたは「${baseName}」専属の他店舗比較・過去実績データ分析専門家です。`,
+    `担当は「対象週の他店舗との関係」と「過去の実績データとの比較」および「日報施策の数値効果」のみ。`,
+    `【厳守】表の値をそのまま言い換えるだけの回答は禁止。数字は根拠として引用し、必ず「だから何を意味するか」まで述べること。`,
+    `(1) 今週の客単価・順位が業態から見て妥当か想定外かを判定する。`,
+    `(2) 真の競合（同じ来店動機・時間帯・価格帯で客を奪い合う相手）を特定する。`,
+    `(3) 売上=客数×客単価の要因分解で、動きが客数要因か客単価要因かを切り分ける。`,
+    `(4) 店舗間相関（カニバリ/アンカー）を業態文脈で解釈する。ただし相関は因果ではないと明示する。`,
+    `(5) 異常値（Zスコア）の突出日/落込日は平常と切り離して注記する。`,
+    `(6) 来客予測モデルがあれば、自己採点(誤差%)を踏まえて参考程度に触れる。`,
+    `(7) 「日報×実績 効果対照」がある場合、施策日の客数/売上が前日比・同曜日比でどう動いたかを数値で述べ、施策との関係は仮説として書く。`,
+    `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
+  ].join('\n')
+  const quantUser = `今週の分析メモを書いてください。\n\n# 対象週の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 全体傾向\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
+
+  const extSystem = [
+    `あなたは「${baseName}」専属の、会場イベント・天気の需要ドライバー分析専門家です。`,
+    `担当は「東京ドームのイベント」と「天気」のみ。他店比較や日報の数値検証は別担当なので触れなくてよい。`,
+    `(1) 今週の客数・売上に大きな動きがあった日について、その日のイベント名・種別・規模・客層を特定し、なぜ効いた/効かなかったかを客層の懐事情・滞在時間と自店業態(ワイン×スパイスの高単価・大人向け)の相性から説明する。`,
+    `(2) 野球は対戦相手やデー/ナイター、ライブはアーティストやファン層、ドームシティの小ホール(後楽園ホール・カナデビア等)独自の集客動機も考慮する。`,
+    `(3) 天気（雨・猛暑など）とイベントの交互作用も分析する。`,
+    `(4) 来週の予定イベントがあれば、活かせる具体的な打ち手を一言添える。`,
+    `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
+  ].join('\n')
+  const extUser = `今週の分析メモを書いてください。\n\n# 対象週の事実\n${periodFacts}\n\n# イベント相関\n${eventCorr || '(データなし)'}\n\n# 来週のイベント予定\n${eventList || '(予定なし)'}\n\n# 天気相関\n${weatherCorr || '(データなし)'}\n\n${nippou.impactCtx ? nippou.impactCtx + '\n\n' : ''}# 日次生データ\n${data}`
+
+  const opsSystem = [
+    `あなたは「${baseName}」専属の、飲食店経営アドバイザー（運営改善担当）です。`,
+    `担当は「今週の施策の効果を日報×実績で検証し、来週の重点アクションを3〜5件出すこと」。`,
+    `【厳守】データに無い販売点数や原価は作らない。打ち手は必ず「狙う客層/実施条件/見るべきKPI」をセットで書くこと。`,
+    `【現場の大前提・重要】フードコート店舗であるため、デリバリー（外部配達代行など）の新規導入や強化を提案することは非現実的であり禁止します。代わりに、テイクアウト（持ち帰り）用の容器・セットメニューの工夫や、客席呼び込みによる自店集客を提案してください。`,
+    nippouRules,
+    `出力は最終回答ではなく「統合担当AIへの経営改善メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
+  ].join('\n')
+  const opsUser = `今週の経営改善メモを書いてください。\n\n# 対象週の事実\n${periodFacts}\n\n${logsBlock ? logsBlock + '\n\n' : ''}# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 来週のイベント予定\n${eventList || '(予定なし)'}\n\n# 日次生データ\n${data}`
+
+  const criticSystem = [
+    `あなたは「${baseName}」週次分析の反証・品質管理担当です。`,
+    `専門AIメモのうち、言い過ぎ・根拠不足・相関と因果の混同・データに無い数字を検出する。`,
+    `日報施策の効果断定は効果対照の数値が無いなら「仮説に弱める」よう指摘する。`,
+    `採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（300字程度）。`,
+  ].join('\n')
+
+  const [quantRes, extRes, opsRes] = await Promise.all([
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel),
+  ])
+  for (const u of [quantRes.usage, extRes.usage, opsRes.usage]) {
+    if (u) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
+  }
+  const quantNote = quantRes.content || '(他店舗・過去データ分析メモ: 取得失敗)'
+  const extNote = extRes.content || '(イベント・天気分析メモ: 取得失敗)'
+  const opsNote = opsRes.content || '(経営改善メモ: 取得失敗)'
+
+  const criticUser = `# 対象週の事実\n${periodFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 経営改善・施策効果\n${opsNote}\n\n${logsBlock || '(日報なし)'}`
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 650, 'claude', fallbackModel)
+  if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
+  const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
+
+  // --- 統合AI: 週次経営レポートフォーマットで出力 ---
+  const system = [
+    `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）の優秀な経営アドバイザーです。`,
+    `目的は先週（${weekStart}〜${weekEnd}）の実績について、経営者に週次で届ける「経営レポート」を作ることです。`,
+    `以下の専門AIメモを参考意見として使い、「対象週の事実」と「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わない。`,
+    nippouRules,
+    `【グラフ・テーブル（表）の積極的盛り込み要請】`,
+    `- レポートを視覚的にも非常にわかりやすくするため、マークダウン形式のテーブル（表）を積極的にレポート内に含めてください。`,
+    `- 特に「## 売上・客数の推移」セクション内では、曜日ごとの実績（売上・客数・単価・順位など）をまとめたマークダウンテーブル（ | 曜日 | 売上 | ... | ）を必ず1つ以上挿入してください。`,
+    `- 「## 施策効果測定」セクション内でも、実施した日報施策と効果（施策名、実施日、前日比売上差など）を対照したテーブルを積極的に作成してください。`,
+    `【出力フォーマット・厳守】必ず次の5つの見出しを、この順番・この表記（##で始める）で出力すること。`,
+    `## 週次総評`,
+    `今週の総合評価（強い/弱い/平常）を2〜3文＋主要因。前週と比較できる場合は言及する。`,
+    `## 売上・客数の推移`,
+    `週合計売上・客数・平均順位・フードコート内シェアを説明する。曜日ごとの実績をまとめたマークダウンテーブルを必ず挿入し、曜日ごとの波や傾向（週末の強さや特定イベント日の伸びなど）を3〜4文で解説する。`,
+    `## 施策効果測定`,
+    `日報の「現場が試したこと」を引用し、効果対照の前日比・同曜日比でどれだけ実績につながったかを評価する。検証用のテーブルを積極的に挿入し、施策効果について2〜4文で記述する。日報が無い場合はその旨とデータから読み取れる動きのみ。`,
+    `## 環境要因（イベント・天気）`,
+    `今週のイベント・天気が売上・客数に与えた影響を2〜3文で説明する。施策効果との切り分け候補にも触れる。`,
+    `## 来週の重点施策`,
+    `来週に向けた具体的なアクションを3〜5件、箇ラ書きで書く（「狙う客層」「実施タイミング」「確認すべきKPI」をセットで）。日報の学びを接続する。`,
+    `各見出しの本文は経営者が読む想定で、プロフェッショナルかつ具体的に書く。断定できないことは「仮説」と明示する。`,
+  ].join('\n')
+  const contextBlock = `# 対象週の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${logsBlock ? logsBlock + '\n\n' : ''}# 他店舗・過去データ分析メモ\n${quantNote}\n\n# イベント・天気分析メモ\n${extNote}\n\n# 経営改善・施策効果メモ\n${opsNote}\n\n# 反証メモ\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 日次生データ（全テナント）\n${data}`
+  const baseMessages = [
+    { role: 'system', content: system },
+    { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、${weekStart}〜${weekEnd}の週次経営レポートを作成してください。` },
+  ]
+
+  const loopResult = await runFoodCourtLoopEngineering({
+    // FoodCourtLoopSurface は ask | daily_summary | period_summary。週次は ask と同じ評価軸・上限を使う。
+    surface: 'ask',
+    initialGenerate: (feedback) => foodCourtAiChat(
+      feedback ? appendLoopFeedback(baseMessages, feedback) : baseMessages,
+      groqApiKey, primary, 1800, 'openai', fallbackModel,
+    ),
+    evaluationContext: contextBlock,
+    question: `「${baseName}」の${weekStart}〜${weekEnd}週の経営レポートを5見出しフォーマット厳守で生成するタスク`,
+    sourceRef: { week_start: weekStart, week_end: weekEnd, surface: 'weekly_report' },
+    groqApiKey,
+    primaryModel: primary,
+    fallbackModel,
+    supabase,
+    storeKey,
+  })
+  for (const u of loopResult.usages) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
+  return { report: loopResult.answer, rawData, loopScore: loopResult.loopScore, loopCount: loopResult.loopCount }
+}
+
 // 「分析サマリー（自動）」カードの1日分をAIで生成する（従来はJSテンプレートで毎回同じ言い回しだった問題への対応）。
 // answerFoodCourtQuestion と同じ「専門AI2体(他店舗・過去データ／イベント・天気)を並列実行→統合AIが1本にまとめる」
 // 構成を使い、対象日(targetReport)の事実(buildTargetDayFacts)を軸に語らせる。呼び出し側(admin-api)で
@@ -2706,7 +2888,7 @@ export async function generateFoodCourtDailySummary(
     `(7) 日報×実績対照がある場合、対象日の施策と客数/売上の前日比・同曜日比を数値で述べる（因果は仮説）。`,
     `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（350字程度）。`,
   ].join('\n')
-  const quantUser = `対象日の分析メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 期間サマリー（全体傾向）\n${insights || '(履歴不足)'}\n\n# 要因分解（前半→後半の全体傾向）\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${dailyLogsBlock}${priorBlock ? '\n\n' + priorBlock : ''}`
+  const quantUser = `対象日の分析メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 期間サマリー（全体傾向）\n${insights || '(履歴不足)'}\n\n# 要因分解（前半→後半の全体傾向）\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${dailyLogsBlock}${priorBlock ? '\n\n' + priorBlock : ''}\n\n# 日次生データ\n${data}`
 
   // --- 専門AI②: 対象日のイベント・天気分析メモ ---
   const extSystem = [
