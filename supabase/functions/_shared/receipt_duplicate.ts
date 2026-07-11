@@ -333,7 +333,11 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
       return '日付が認識できませんでした。次の形式で入力してください（例: 2026年7月10日 / 2026-07-10 / 7/10）'
     }
     await updatePendingReceiptDuplicateDate(supabase, roomId, userId, newDateIso)
-    const updatedPending = { ...pending, receipt_date: newDateIso, awaiting_date_change: false }
+    const updatedReceipt = {
+      ...pending.receipt_payload,
+      date: formatJapaneseReceiptDateFromIso(newDateIso) ?? newDateIso,
+    }
+    const updatedPending = { ...pending, receipt_date: newDateIso, receipt_payload: updatedReceipt, awaiting_date_change: false }
     const sameDateExists = await hasExistingReceiptForDate(supabase, pending.receipt_table, newDateIso)
     if (sameDateExists) {
       return buildReceiptDuplicateConfirmationFlexReply(updatedPending.receipt_payload, newDateIso)
