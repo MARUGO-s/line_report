@@ -512,32 +512,6 @@ function simpleNoticeFlex(text: string): Record<string, unknown> {
   }
 }
 
-// レジ出金（経費）伝票を検知したときの案内カード（売上に登録せず、経費記録へ誘導）。
-function cashOutOfferFlex(pendingId: number, amount: number): Record<string, unknown> {
-  return {
-    type: 'flex',
-    altText: 'レジ出金（経費）の伝票',
-    contents: {
-      type: 'bubble',
-      body: {
-        type: 'box', layout: 'vertical', spacing: 'sm',
-        contents: [
-          { type: 'text', text: 'レジ出金（経費）の伝票のようです', weight: 'bold', size: 'md', color: '#1a6fa8', wrap: true },
-          { type: 'text', text: `これは「売上」ではないため、売上には登録していません。出金額 ${formatYen(amount)} を小口現金（経費）として記録できます。`, size: 'sm', color: '#444444', wrap: true },
-          { type: 'text', text: '※「記録」を押すと内容確認カードが出ます。', size: 'xs', color: '#8a96a3', wrap: true },
-        ],
-      },
-      footer: {
-        type: 'box', layout: 'vertical', spacing: 'sm',
-        contents: [
-          { type: 'button', style: 'primary', color: '#1a6fa8', height: 'sm', action: { type: 'postback', label: '経費（小口）として記録', data: `pcreview=${pendingId}`, displayText: '経費（小口）として記録します' } },
-          { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '了解（記録しない）', text: '了解' } },
-        ],
-      },
-    },
-  }
-}
-
 // 小口現金ページのURLを組み立てる（store_key で店舗指定、from=line でロック、lt はワンタイムログイン）。
 function buildPettyCashPageUrl(storeKey: string, loginToken?: string | null): string {
   const key = String(storeKey || '').trim()
@@ -848,9 +822,9 @@ export async function handlePettyCashCashOutSlip(
     const replied = await sendReply(replyToken, [simpleNoticeFlex('レジ出金（経費）の伝票のようです。売上には登録していません。金額が読み取れなかったため、小口現金ページから手入力してください。')], storeKey, roomId)
     return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_unreadable' }
   }
-  const ex = extractExpenseFromReceipt(exReceipt)
-  const replied = await sendReply(replyToken, [cashOutOfferFlex(pendingId, ex?.amount ?? 0)], storeKey, roomId)
-  return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_offer' }
+  const confirm = await handlePettyCashPostback(supabase, registry, `pcreview=${pendingId}`)
+  const replied = await sendReply(replyToken, [confirm ?? simpleNoticeFlex('出金（経費）レシートを読み取りました。小口現金ページから内容をご確認ください。')], storeKey, roomId)
+  return { handled: true, replied, saved: false, reason: 'petty_cash_cashout_confirm' }
 }
 
 // 確認カードの postback。
