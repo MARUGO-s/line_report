@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
       const { data: compRows, error: compErr } = await supabase
         .from("competitor_places")
         .select("id, competitor_name, place_id, google_maps_uri, last_alerted_rating_total")
-        .eq("store_partition_key", storeKey)
+        .ilike("store_partition_key", storeKey)
         .eq("is_active", true)
         .eq("source", "google_places")
       if (compErr) throw compErr
@@ -144,7 +144,7 @@ async function checkStoreReviewAndAlert(
   const { data: placeData, error: placeErr } = await supabase
     .from("store_review_places")
     .select("id, place_id, store_name, google_maps_uri, last_alerted_rating_total")
-    .eq("store_partition_key", storeKey)
+    .ilike("store_partition_key", storeKey)
     .eq("is_active", true)
     .maybeSingle()
   if (placeErr) return { checked: false, alerted: false, error: `load failed: ${placeErr.message}` }
