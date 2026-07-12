@@ -32,6 +32,27 @@
     --danger:    oklch(0.64 0.2 25);
     --r-card: 18px;
   }
+  body[data-theme='light']{
+    --bg:        oklch(0.98 0.003 256);
+    --surface:   oklch(1 0 0);
+    --surface2:  oklch(0.95 0.006 258);
+    --press:     oklch(0.91 0.008 258);
+    --line:      oklch(0 0 0 / 0.10);
+    --line-soft: oklch(0 0 0 / 0.07);
+    --tx-1:      oklch(0.22 0.02 258);
+    --tx-2:      oklch(0.42 0.02 258);
+    --tx-3:      oklch(0.56 0.02 258);
+    --accent:    oklch(0.55 0.17 256);
+    --accent-tx: oklch(0.48 0.15 256);
+    --accent-ghost: oklch(0.55 0.17 256 / 0.12);
+    --on:        oklch(0.55 0.17 256);
+    --off:       oklch(0.82 0.01 258);
+    --live:      oklch(0.55 0.14 158);
+    --live-soft: oklch(0.55 0.14 158 / 0.14);
+    --warn-tx:   oklch(0.55 0.14 70);
+    --warn-soft: oklch(0.55 0.14 70 / 0.14);
+    --danger:    oklch(0.55 0.19 25);
+  }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{margin:0;padding:0;}
   body{
@@ -46,6 +67,7 @@
   .phone{max-width:480px;margin:0 auto;min-height:100vh;background:var(--bg);position:relative;}
   @media (min-width:520px){
     body{background:oklch(0.11 0.01 256);padding:26px 0 40px;}
+    body[data-theme='light']{background:oklch(0.93 0.006 258);}
     .phone{min-height:auto;border:1px solid var(--line);border-radius:30px;overflow:hidden;box-shadow:0 30px 80px -30px #000;}
   }
 
@@ -80,6 +102,9 @@
   .roomchip .rc-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;}
   .roomchip:active{background:var(--press);}
   .roomchip svg{flex:none;color:var(--tx-3);}
+  .theme-toggle{flex:none;font-family:inherit;font-size:11.5px;font-weight:600;color:var(--tx-3);
+    background:var(--surface);border:1px solid var(--line-soft);border-radius:999px;padding:6px 12px;cursor:pointer;}
+  .theme-toggle:active{background:var(--press);}
   .search{display:flex;align-items:center;gap:9px;margin-top:13px;background:var(--surface);
     border:1px solid var(--line-soft);border-radius:12px;padding:0 12px;}
   .search svg{color:var(--tx-3);flex:none;}
@@ -164,6 +189,7 @@
           </span>
         </div>
       </div>
+      <button id="themeToggleBtn" type="button" class="theme-toggle" aria-pressed="false">ライトモード</button>
     </div>
     <div class="search" id="searchWrap">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -187,6 +213,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="./pages-config.js"></script>
+<script src="./app-theme.js?v=20260712"></script>
 <script>
 (function(){
   'use strict';
@@ -333,7 +360,7 @@
     for(i=0;i<24;i++) hourOpt += '<option value="'+i+'"'+(i===domeWeekly.hour?' selected':'')+'>'+i+'時</option>';
     var minOpt='';
     for(i=0;i<60;i+=5) minOpt += '<option value="'+i+'"'+(i===domeWeekly.minute?' selected':'')+'>'+(i<10?'0'+i:i)+'分</option>';
-    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--card,#fff);color:inherit;font-size:13px;';
+    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
     return '<div class="dome-when" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px 14px;">'
       + '<span style="font-size:12px;color:#8a94a6;font-weight:700;width:100%">📅 配信タイミング（翌週 日〜土のイベントを送る曜日・時刻）</span>'
       + '<select class="dome-sel" data-dome="dow" style="'+ss+'">'+dowOpt+'</select>'
@@ -350,7 +377,7 @@
     for(i=0;i<24;i++) hourOpt += '<option value="'+i+'"'+(i===fcWeekly.hour?' selected':'')+'>'+i+'時</option>';
     var minOpt='';
     for(i=0;i<60;i+=5) minOpt += '<option value="'+i+'"'+(i===fcWeekly.minute?' selected':'')+'>'+(i<10?'0'+i:i)+'分</option>';
-    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--card,#fff);color:inherit;font-size:13px;';
+    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
     return '<div class="fc-weekly-when" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px 14px;">'
       + '<span style="font-size:12px;color:#1a6fa8;font-weight:700;width:100%">📅 配信タイミング（先週分を送る曜日・時刻）</span>'
       + '<select class="fc-weekly-sel" data-fcw="dow" style="'+ss+'">'+dowOpt+'</select>'
