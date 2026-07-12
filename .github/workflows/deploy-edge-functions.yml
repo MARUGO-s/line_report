@@ -1,17 +1,22 @@
 name: Deploy Edge Functions
 
-# main にマージされたら Edge Functions を本番へ自動デプロイする。
+# main にマージされたら DB マイグレーションと Edge Functions を本番へ自動デプロイする。
 #
-# ※ Supabase の GitHub 統合（Dashboard の Integrations）は DB マイグレーションだけを
-#    自動適用し、Edge Functions は対象外。このワークフローがその穴を埋める。
+# ※ 当初は「Supabase の GitHub 統合（Dashboard の Integrations）が DB マイグレーションだけは
+#    自動適用してくれる」前提でこのワークフローは Edge Functions のみを担当していたが、
+#    2026-07-12 に実際は複数のマイグレーションが未適用のまま放置されていたことが判明した
+#    （Dashboard 連携が機能していなかった/設定されていなかった）。そのため、マイグレーション
+#    適用もこのワークフロー自身で確実に行うようにした。
 #    これにより「シークレット変更時のマーカー行ハック」や「config.toml の
-#    verify_jwt 設定漏れによる 401」を防ぎ、関数コードを常に git と同期させる。
+#    verify_jwt 設定漏れによる 401」を防ぎ、関数コード・DBスキーマを常に git と同期させる。
 #
 # 必要な事前設定（1回だけ・人手）:
 #   GitHub リポジトリ → Settings → Secrets and variables → Actions →
-#   "New repository secret" で SUPABASE_ACCESS_TOKEN を登録する。
-#   値は Supabase ダッシュボード → Account → Access Tokens で発行したトークン。
-#   （トークンはこのファイルやコードには絶対に書かない）
+#   "New repository secret" で以下を登録する:
+#     - SUPABASE_ACCESS_TOKEN: Supabase ダッシュボード → Account → Access Tokens で発行
+#     - SUPABASE_DB_PASSWORD:  Supabase ダッシュボード → Project Settings → Database の
+#                              データベースパスワード（`supabase link` の非対話認証に使う）
+#   （値はこのファイルやコードには絶対に書かない）
 
 on:
   push:
@@ -19,6 +24,7 @@ on:
     paths:
       - 'supabase/functions/**'
       - 'supabase/config.toml'
+      - 'supabase/migrations/**'
       - '.github/workflows/deploy-edge-functions.yml'
   workflow_dispatch: {}   # 手動実行（Actions タブの Run workflow）も可能
 
@@ -32,6 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       PROJECT_REF: hocbnifuactbvmyjraxy   # 公開情報（URL に出る）。秘密ではない
     steps:
       - name: Checkout
@@ -41,6 +48,17 @@ jobs:
         uses: supabase/setup-cli@v2   # composite 方式・Node ランタイム非依存
         with:
           version: 2.106.0   # ローカル CLI と同一。必要なら更新可
+
+      - name: Link project and apply DB migrations
+        # SUPABASE_DB_PASSWORD が未設定の場合はスキップし、Edge Functions のデプロイだけは
+        # 継続する（シークレット未設定でワークフロー全体を落とさないための保険）。
+        run: |
+          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::warning::SUPABASE_DB_PASSWORD が未設定のため、DBマイグレーションの自動適用をスキップします。リポジトリSecretsに追加してください。"
+            exit 0
+          fi
+          supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push
 
       - name: Deploy all functions
         # 関数名を省略すると supabase/functions 配下の全関数ディレクトリ
