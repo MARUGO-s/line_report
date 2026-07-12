@@ -422,7 +422,8 @@ const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," 
   ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
   ",today_reservation_alert_hour,today_reservation_alert_minute" +
   ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute" +
-  ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute"
+  ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute" +
+  ",review_alert_hour,review_alert_minute"
 
 function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -462,6 +463,15 @@ function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<strin
   if ("foodcourt_weekly_minute" in body) {
     const v = Number(body.foodcourt_weekly_minute)
     out.foodcourt_weekly_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
+  }
+  // 口コミ新着通知の配信時刻（毎日・NULL許容＝既定 8時/10分）
+  if ("review_alert_hour" in body) {
+    const v = Number(body.review_alert_hour)
+    out.review_alert_hour = (Number.isInteger(v) && v >= 0 && v <= 23) ? v : null
+  }
+  if ("review_alert_minute" in body) {
+    const v = Number(body.review_alert_minute)
+    out.review_alert_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
   }
   return out
 }
