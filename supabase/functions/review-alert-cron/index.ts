@@ -3,20 +3,31 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { refreshStoreReview, refreshCompetitorReviews } from "../_shared/competitor_review_context.ts"
 import { pushLineMessagesToTarget, resolveChannelAccessToken } from "../_shared/line_client.ts"
 
-// 自店舗・登録済み競合店の「新着口コミ」をLINEに通知する cron（1日1回）。
+// 自店舗・登録済み競合店の「新着口コミ」をLINEに通知するcron。
+//  - pg_cronは毎分起動。ルームごとの配信時刻(review_alert_hour/minute、既定8時10分)に一致した時だけ処理する
+//    （reservation-today-cron等と同じ「毎分起動＋関数側で時刻一致判定」方式）。
 //  - 対象は room_summary_settings.review_alert_enabled=true の部屋（receipt_report_store_partition_key で店舗に紐づく）。
 //  - 各店舗について、自店舗レビュー(store_review_places)・登録競合(competitor_places)を
 //    refreshStoreReview/refreshCompetitorReviews で再取得（Google Places→スナップショット保存は既存ロジックを再利用）。
 //  - 新着判定は user_ratings_total（累計口コミ数）の増分。last_alerted_rating_total がNULLの初回は
 //    ベースライン記録のみ（既存の口コミをまとめて通知しない）。増分があった回だけ対象ルームへpush。
-//  - 冪等: 通知後に last_alerted_rating_total を更新するので、同日中に複数回起動しても二重通知しない。
+//  - 冪等: 通知後に last_alerted_rating_total を更新するので、同じ時刻に複数回起動しても二重通知しない。
 // verify_jwt=false で pg_cron(invoke_review_alert_cron)から起動。
 
 type DbClient = ReturnType<typeof createClient>
 
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000
+
+function toJstHourMinute(base = new Date()): { hour: number; minute: number } {
+  const jst = new Date(base.getTime() + JST_OFFSET_MS)
+  return { hour: jst.getUTCHours(), minute: jst.getUTCMinutes() }
+}
+
 type RoomRow = {
   room_id: string
   receipt_report_store_partition_key: string | null
+  review_alert_hour: number | null
+  review_alert_minute: number | null
 }
 
 type PlaceCheckResult = {
@@ -57,25 +68,31 @@ Deno.serve(async (req) => {
   const url = new URL(req.url)
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())
 
-  // 1) 通知ONの部屋 → 店舗キーごとにルームIDをまとめる（1店舗を複数ルームが購読しているケースにも対応）
+  // 1) 通知ONの部屋 → 店舗キーごとにルームIDをまとめる（1店舗を複数ルームが購読しているケースにも対応）。
+  //    毎分起動なので、ルームごとに設定された配信時刻(JST)と一致した時だけ対象にする
+  //    （reservation-today-cron等と同じ「毎分起動＋関数側で時刻一致判定」方式。dry_run時は時刻を無視して常に対象にする）。
   const { data: roomRows, error: roomErr } = await supabase
     .from("room_summary_settings")
-    .select("room_id, receipt_report_store_partition_key")
+    .select("room_id, receipt_report_store_partition_key, review_alert_hour, review_alert_minute")
     .eq("review_alert_enabled", true)
   if (roomErr) return json({ ok: false, error: `rooms load failed: ${roomErr.message}` }, 500)
 
+  const nowJst = toJstHourMinute()
   const roomsByStore = new Map<string, string[]>()
   for (const r of (Array.isArray(roomRows) ? roomRows : []) as RoomRow[]) {
     const storeKey = String(r.receipt_report_store_partition_key ?? "").trim()
     const roomId = String(r.room_id ?? "").trim()
     if (!storeKey || !roomId) continue
+    const h = r.review_alert_hour != null ? Number(r.review_alert_hour) : 8
+    const m = r.review_alert_minute != null ? Number(r.review_alert_minute) : 10
+    if (!dryRun && (nowJst.hour !== h || nowJst.minute !== m)) continue
     const list = roomsByStore.get(storeKey)
     if (list) list.push(roomId)
     else roomsByStore.set(storeKey, [roomId])
   }
 
   if (roomsByStore.size === 0) {
-    return json({ ok: true, no_target: true, room_count: 0 }, 200)
+    return json({ ok: true, no_target: true, room_count: 0, now_jst: nowJst }, 200)
   }
 
   const errors: string[] = []
