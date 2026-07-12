@@ -875,9 +875,26 @@
       return;
     }
 
-    const formattedContent = formatReportText(rawContent);
+    // グラフと組み合わせる「総評／強み・弱み／打ち手」は本文から抜き出してダッシュボード側で見せ、
+    // 詳細本文（下段）では二重掲載を避けるため取り除く。chartDataが無い（Q&A出力等）場合は従来通り。
+    let bodySourceText = rawContent;
+    let narrative = null;
+    if (chartData) {
+      const extracted = extractAndStripSections(rawContent, [
+        { key: 'overview', test: t => t === '総評' },
+        { key: 'swot', test: t => t === '強み・弱み' },
+        { key: 'actions', test: t => t.indexOf('打ち手') >= 0 },
+      ]);
+      bodySourceText = extracted.remainingText;
+      narrative = {
+        overviewHtml: renderNarrativeHtml(extracted.picked.overview),
+        swotHtml: renderSwotHtml(extracted.picked.swot),
+        actionsHtml: renderActionsHtml(extracted.picked.actions),
+      };
+    }
+    const formattedContent = formatReportText(bodySourceText);
     const storeName = STORE_NAMES[currentStore()] || currentStore();
-    const chartsHtml = buildChartsHtml(chartData);
+    const chartsHtml = buildChartsHtml(chartData, narrative);
     const chartsScript = buildChartsScript(chartData);
     const dateStr = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     // CDN依存だと社内ネットワーク等でブロックされ得るため、既存の他画面（analytics.html等）と同じくvendor同梱版を使う
@@ -1038,6 +1055,24 @@
       align-items: center;
       gap: 8px;
     }
+    .narrative-box {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin: 0 0 20px 0;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+    .narrative-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: var(--primary);
+      margin-bottom: 10px;
+    }
+    .highlight-box .narrative-title {
+      margin-bottom: 12px;
+    }
     .kpi-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1121,7 +1156,7 @@
       .no-print-bar {
         display: none;
       }
-      .chart-container, .kpi-grid, .dash-section {
+      .chart-container, .kpi-grid, .narrative-box, .highlight-box {
         page-break-inside: avoid;
       }
     }
@@ -1178,8 +1213,77 @@
     win.focus();
   }
 
-  // レポート先頭に置く「一目でわかる」ダッシュボード（KPIカード＋グラフ）のHTMLを組み立てる
-  function buildChartsHtml(chartData) {
+  // rawContent（【総評】等の見出し付きテキスト）から指定セクションを抜き出し、残りのテキストも返す。
+  // defs: [{key, test(title)=>boolean}]。戻り値: { picked: {key: string[]|null}, remainingText }
+  function extractAndStripSections(rawText, defs) {
+    const lines = String(rawText || '').split('\n');
+    const picked = {};
+    defs.forEach(d => { picked[d.key] = null; });
+    const remaining = [];
+    let activeKey = null;
+    lines.forEach(line => {
+      const m = line.match(/^【([^】]+)】(.*)$/);
+      if (m) {
+        const def = defs.find(d => d.test(m[1]));
+        if (def) {
+          activeKey = def.key;
+          picked[activeKey] = [];
+          if (m[2].trim()) picked[activeKey].push(m[2].trim());
+        } else {
+          activeKey = null;
+          remaining.push(line);
+        }
+        return;
+      }
+      if (activeKey) {
+        if (line.trim()) picked[activeKey].push(line.trim());
+      } else {
+        remaining.push(line);
+      }
+    });
+    return { picked, remainingText: remaining.join('\n') };
+  }
+
+  // 「総評」：地の文をそのまま段落として表示（数値は色付け強調）
+  function renderNarrativeHtml(lines) {
+    if (!lines || !lines.length) return '';
+    return lines.map(l => `<p style="margin:0 0 10px 0;line-height:1.75">${formatTextWithHighlight(l)}</p>`).join('');
+  }
+
+  // 「強み・弱み」：strengths/weaknessesを2カラムの色分けカードで見せる
+  function renderSwotHtml(lines) {
+    if (!lines || !lines.length) return '';
+    const strengthLine = lines.find(l => l.startsWith('強み：'));
+    const weaknessLine = lines.find(l => l.startsWith('弱み：'));
+    const noteLine = lines.find(l => l.startsWith('※'));
+    if (!strengthLine && !weaknessLine) return '';
+    const col = (label, emoji, text, bg, border, color) => `
+      <div style="flex:1;min-width:200px;background:${bg};border-left:4px solid ${border};border-radius:6px;padding:14px 16px;">
+        <div style="font-weight:bold;color:${color};margin-bottom:6px;font-size:13px;">${emoji} ${label}</div>
+        <div style="line-height:1.7;font-size:14px;color:#333;">${escapeHtml((text || '').replace(/^(強み|弱み)：/, ''))}</div>
+      </div>`;
+    return `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin:16px 0 8px 0;">
+        ${strengthLine ? col('強み', '💪', strengthLine, '#EAFAF1', '#27AE60', '#1E8449') : ''}
+        ${weaknessLine ? col('弱み（伸びしろ）', '📌', weaknessLine, '#FDEDEC', '#E74C3C', '#C0392B') : ''}
+      </div>
+      ${noteLine ? `<div style="font-size:12px;color:#95A5A6;margin-bottom:4px;">${escapeHtml(noteLine)}</div>` : ''}`;
+  }
+
+  // 「打ち手（試算）」＝対策：箇条書きを矢印付きのアクションリストにする
+  function renderActionsHtml(lines) {
+    if (!lines || !lines.length) return '';
+    const items = lines.map(l => l.replace(/^・/, '').trim()).filter(Boolean);
+    if (!items.length) return '';
+    return items.map(t => `
+      <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start;">
+        <span style="color:#F39C12;font-weight:bold;font-size:16px;flex:0 0 auto;">→</span>
+        <span style="line-height:1.7;font-size:14px;">${formatTextWithHighlight(t)}</span>
+      </div>`).join('');
+  }
+
+  // レポート先頭に置く「一目でわかる」ダッシュボード（KPIカード＋グラフ＋総評／強み弱み／対策）のHTMLを組み立てる
+  function buildChartsHtml(chartData, narrative) {
     if (!chartData || !chartData.ranking) return '';
     const r = chartData.ranking;
     const sh = chartData.share;
@@ -1214,6 +1318,12 @@
       </div>
     </div>`;
 
+    const overviewHtml = narrative && narrative.overviewHtml ? `
+    <div class="narrative-box">
+      <div class="narrative-title">📝 総評（この結果の背景）</div>
+      ${narrative.overviewHtml}
+    </div>` : '';
+
     const rankingChart = `
     <div class="chart-container">
       <h3>📊 店舗別売上ランキング（上位＋自店）</h3>
@@ -1232,10 +1342,23 @@
       <canvas id="trendChart"></canvas>
     </div>` : '';
 
+    const swotHtml = narrative && narrative.swotHtml ? `
+    <div class="narrative-box">
+      <div class="narrative-title">⚖️ 強み・弱み</div>
+      ${narrative.swotHtml}
+    </div>` : '';
+
+    const actionsHtml = narrative && narrative.actionsHtml ? `
+    <div class="highlight-box">
+      <div class="narrative-title" style="color:#B45309;">💡 打ち手（対策）</div>
+      ${narrative.actionsHtml}
+    </div>` : '';
+
     return `
     <section class="dash-section">
       <div class="dash-title">📋 データダッシュボード</div>
       ${kpiCards}
+      ${overviewHtml}
       <div class="chart-grid">
         ${rankingChart}
         ${shareChart}
@@ -1243,6 +1366,8 @@
       <div class="chart-grid full">
         ${trendChart}
       </div>
+      ${swotHtml}
+      ${actionsHtml}
     </section>`;
   }
 
