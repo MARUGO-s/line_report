@@ -718,6 +718,64 @@ function addDaysIso(iso: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+// businessDateIso を含む月の「前月」の範囲を返す（月次振り返りは常に完全に終わった月を対象にする）。
+function previousMonthRange(businessDateIso: string): { yearMonth: string; monthStart: string; monthEnd: string } | null {
+  const d = new Date(`${businessDateIso}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return null
+  const firstOfThisMonth = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
+  const lastOfPrevMonth = new Date(firstOfThisMonth.getTime() - 24 * 3600 * 1000)
+  const firstOfPrevMonth = new Date(Date.UTC(lastOfPrevMonth.getUTCFullYear(), lastOfPrevMonth.getUTCMonth(), 1))
+  const yearMonth = `${lastOfPrevMonth.getUTCFullYear()}-${String(lastOfPrevMonth.getUTCMonth() + 1).padStart(2, "0")}`
+  return {
+    yearMonth,
+    monthStart: firstOfPrevMonth.toISOString().slice(0, 10),
+    monthEnd: lastOfPrevMonth.toISOString().slice(0, 10),
+  }
+}
+
+// 「先月の振り返り」を store_partition_key + year_month でキャッシュしつつ取得する。
+// 未生成なら generateFoodCourtPeriodSummary を月境界で呼んで生成・保存する（月に1回だけAI生成・以降はキャッシュ）。
+// データ不足等でnullが返ることもあり、その場合は日次分析側で単に「先月の振り返り」ブロックなしとして扱う。
+async function getOrGenerateMonthlyRetrospective(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  baseName: string,
+  yearMonth: string,
+  monthStart: string,
+  monthEnd: string,
+  groqApiKey: string,
+  reports: Array<Record<string, unknown>>,
+  events: Awaited<ReturnType<typeof loadVenueEventsForReports>>,
+  weather: Awaited<ReturnType<typeof loadWeatherForReports>>,
+  forecast: Awaited<ReturnType<typeof loadForecastForStore>>,
+  dailyLogs: Array<Record<string, unknown>>,
+): Promise<string | null> {
+  const { data: cached, error: cacheErr } = await supabase
+    .from("foodcourt_monthly_retrospective")
+    .select("summary_text")
+    .eq("store_partition_key", storeKey)
+    .eq("year_month", yearMonth)
+    .maybeSingle()
+  if (cacheErr) console.error("foodcourt_monthly_retrospective select failed:", cacheErr.message)
+  if (cached && (cached as { summary_text?: unknown }).summary_text) {
+    return String((cached as { summary_text: string }).summary_text)
+  }
+  const summary = await generateFoodCourtPeriodSummary(
+    reports, baseName, monthStart, monthEnd, groqApiKey, events, weather, forecast, supabase, storeKey, dailyLogs,
+  )
+  if (!summary) return null
+  const { error: upErr } = await supabase.from("foodcourt_monthly_retrospective").upsert({
+    store_partition_key: storeKey,
+    year_month: yearMonth,
+    month_start: monthStart,
+    month_end: monthEnd,
+    summary_text: summary,
+    model_version: "v1",
+  }, { onConflict: "store_partition_key,year_month" })
+  if (upErr) console.error("foodcourt_monthly_retrospective upsert failed:", upErr.message)
+  return summary
+}
+
 // 東京ドーム周辺の日次天気を、レポート期間に合わせて取得する（マルゴSのみ）。
 // マルゴSは東京ドーム内フードコートのため、天気（雨/気温）と客数・売上が相関する。
 async function loadWeatherForReports(
@@ -943,6 +1001,7 @@ Deno.serve(async (req, info) => {
       "/foodcourt/period-summary",
       "/foodcourt/weekly-report",
       "/foodcourt/weekly-report/list",
+      "/foodcourt/monthly-retrospective",
       "/foodcourt/events/attendance",
       "/analytics/holidays",
       "/analytics/monthly",
@@ -1277,10 +1336,22 @@ Deno.serve(async (req, info) => {
       if (dailyLogsError) {
         console.error("foodcourt/daily-summary daily_logs load failed:", dailyLogsError)
       }
+      // 「先月の振り返り」を学習材料として渡す（月に1回だけAI生成・以降は月末までキャッシュ再利用）。
+      // reportsは既に読み込み済みの直近90件（前月分は通常この範囲に収まる）を再利用し、追加クエリはしない。
+      let monthlyRetro: string | null = null
+      if (businessDate) {
+        const monthRange = previousMonthRange(businessDate)
+        if (monthRange) {
+          monthlyRetro = await getOrGenerateMonthlyRetrospective(
+            supabase, storeKey, baseName, monthRange.yearMonth, monthRange.monthStart, monthRange.monthEnd,
+            groqApiKey, reports, events, weather, forecast, dailyLogs,
+          )
+        }
+      }
       // 曜日/イベント種別/天気ごとの統計パターンはgenerateFoodCourtDailySummary内でreportsから毎回
       // 計算し直す（コード計算・状態を持たない＝データが増えるほど自動的に確度が上がる）。
       const summary = await generateFoodCourtDailySummary(
-        reports, baseName, target, groqApiKey, events, weather, forecast, supabase, storeKey, priorSummary, dailyLogs,
+        reports, baseName, target, groqApiKey, events, weather, forecast, supabase, storeKey, priorSummary, dailyLogs, monthlyRetro,
       )
       if (!summary) {
         return json({
@@ -1683,6 +1754,20 @@ Deno.serve(async (req, info) => {
       const row = data as Record<string, unknown>
       const report = String(row.ai_report ?? "")
       return json({ ...row, report_html: String(row.report_html ?? "") || weeklyReportHtml(report) }, 200)
+    }
+
+    // 月次振り返り（AI生成・キャッシュ済み）を単独で確認するための参照用エンドポイント。
+    // 通常は日次分析生成が内部で自動的に取得・生成するため、これは検証・将来のUI表示用。
+    if (req.method === "GET" && path === "/foodcourt/monthly-retrospective") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      const yearMonth = String(url.searchParams.get("year_month") ?? "").trim()
+      if (!storeKey || !/^\d{4}-\d{2}$/.test(yearMonth)) return json({ error: "store_key and year_month(YYYY-MM) are required." }, 400)
+      const { data, error } = await supabase.from("foodcourt_monthly_retrospective")
+        .select("store_partition_key,year_month,month_start,month_end,summary_text,model_version,created_at")
+        .ilike("store_partition_key", storeKey).eq("year_month", yearMonth).maybeSingle()
+      if (error) return json({ error: error.message }, 500)
+      if (!data) return json({ error: "月次振り返りが見つかりません（まだ生成されていません）。" }, 404)
+      return json(data, 200)
     }
 
     // フードコート週次経営レポート生成（cron または管理画面から）。
