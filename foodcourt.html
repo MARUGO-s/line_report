@@ -869,12 +869,38 @@
   let currentSummaryPeriod = '';
 
   function openReportWindow(title, rawContent, chartData) {
+    // window.open直後、ユーザー操作の文脈が生きているうちに一度フォーカスしておく（後段の処理で
+    // 例外が起きても、ここまでは実行済みにしてタブが切り替わらない事態を避ける）。
     const win = window.open('', '_blank');
     if (!win) {
       alert('ポップアップブロックが有効になっているため、レポートを開けませんでした。ポップアップの許可をお願いします。');
       return;
     }
+    try { win.focus(); } catch (e) {}
 
+    // 本体の組み立てで例外が起きても、最低限の内容でタブへの書き込み・フォーカスまでは必ず行う
+    let html;
+    try {
+      html = buildReportHtml(title, rawContent, chartData);
+    } catch (e) {
+      console.error('openReportWindow: レポート本文の組み立てに失敗。プレーンテキストにフォールバックします。', e);
+      html = buildReportHtml(title, rawContent, null);
+    }
+
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    focusReportWindow(win);
+  }
+
+  // 新規タブへフォーカスを移す。ブラウザによってはwindow.open直後の1回だけでは
+  // 切り替わらないことがあるため、少し間を空けてもう一度試みる。
+  function focusReportWindow(win) {
+    try { win.focus(); } catch (e) {}
+    setTimeout(() => { try { win.focus(); } catch (e) {} }, 50);
+  }
+
+  function buildReportHtml(title, rawContent, chartData) {
     // グラフと組み合わせる「総評／強み・弱み／打ち手」は本文から抜き出してダッシュボード側で見せ、
     // 詳細本文（下段）では二重掲載を避けるため取り除く。chartDataが無い（Q&A出力等）場合は従来通り。
     let bodySourceText = rawContent;
@@ -1166,7 +1192,7 @@
   <div class="container">
     <div class="no-print-bar">
       <div class="btn-group">
-        <button class="btn-back" onclick="history.back()">
+        <button class="btn-back" onclick="closeReportTab()">
           ← 前のページに戻る
         </button>
       </div>
@@ -1197,6 +1223,19 @@
     </footer>
   </div>
   <script>
+    // このタブは window.open('', '_blank') + document.write() で作られており、
+    // 自分自身のナビゲーション履歴を持たないため history.back() は機能しない。
+    // 「戻る」＝このタブを閉じて元のタブに戻る、という動作にする。
+    function closeReportTab() {
+      window.close();
+      // ブラウザによっては script で開いたタブでも close() が無視される場合があるため、
+      // 閉じられなかったときは（history.back()がダメ元でも動く可能性があるため）フォールバックする。
+      setTimeout(function() {
+        if (!window.closed) {
+          try { history.back(); } catch (e) {}
+        }
+      }, 150);
+    }
     // スクロール位置の復元など、開いた直後に実行する処理
     document.addEventListener('DOMContentLoaded', function() {
       window.scrollTo(0, 0);
@@ -1206,11 +1245,7 @@
 </body>
 </html>`;
 
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-    // 開いたタブにフォーカスを移す
-    win.focus();
+    return html;
   }
 
   // rawContent（【総評】等の見出し付きテキスト）から指定セクションを抜き出し、残りのテキストも返す。
