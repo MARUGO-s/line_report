@@ -939,8 +939,10 @@ Deno.serve(async (req, info) => {
       "/foodcourt/ai-loop-runs",
       "/foodcourt/daily-logs",
       "/foodcourt/daily-summary",
+      "/foodcourt/daily-summary/list",
       "/foodcourt/period-summary",
       "/foodcourt/weekly-report",
+      "/foodcourt/weekly-report/list",
       "/foodcourt/events/attendance",
       "/analytics/holidays",
       "/analytics/monthly",
@@ -1189,6 +1191,21 @@ Deno.serve(async (req, info) => {
       // 客数/売上/組数の正本（管理表＝レシート集計＋手入力）。日報が無い日も含む。画面はこれを優先採用。
       const baseDaily = await loadBaseDailyForReports(supabase, storeKey)
       return json({ store_key: storeKey, reports, events, weather, forecast, baseDaily }, 200)
+    }
+    // 「レポート一覧」タブ用：日次AIサマリーの一覧（本文は含まない軽量版。クリック時に
+    // /foodcourt/daily-summary?report_id=... で本文を取得する）。
+    if (req.method === "GET" && path === "/foodcourt/daily-summary/list") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 90) || 90, 1), 365)
+      const { data, error } = await supabase
+        .from("foodcourt_daily_ai_summary")
+        .select("report_id, business_date, model_version, created_at")
+        .ilike("store_partition_key", storeKey)
+        .order("business_date", { ascending: false })
+        .limit(limit)
+      if (error) return json({ error: error.message }, 500)
+      return json({ items: data ?? [] }, 200)
     }
     // 「分析サマリー（自動）」カードのAI版。report_id単位でキャッシュし、閲覧のたびに再生成・再課金しない。
     // 初回閲覧時にGroq(専門AI2体→統合AI)で生成しDBへ保存、以降は保存済みテキストを即返す。
@@ -1636,6 +1653,22 @@ Deno.serve(async (req, info) => {
         .eq("log_date", logDate)
       if (error) return json({ error: error.message }, 500)
       return json({ ok: true }, 200)
+    }
+
+    // 「レポート一覧」タブ用：週次レポートの一覧（本文は含まない軽量版。クリック時に
+    // /foodcourt/weekly-report?week_start=... で本文を取得する）。
+    if (req.method === "GET" && path === "/foodcourt/weekly-report/list") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 52) || 52, 1), 260)
+      const { data, error } = await supabase
+        .from("foodcourt_weekly_reports")
+        .select("week_start, week_end, loop_score, created_at")
+        .ilike("store_partition_key", storeKey)
+        .order("week_start", { ascending: false })
+        .limit(limit)
+      if (error) return json({ error: error.message }, 500)
+      return json({ items: data ?? [] }, 200)
     }
 
     if (req.method === "GET" && path === "/foodcourt/weekly-report") {
