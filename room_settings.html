@@ -333,7 +333,7 @@
     for(i=0;i<24;i++) hourOpt += '<option value="'+i+'"'+(i===domeWeekly.hour?' selected':'')+'>'+i+'時</option>';
     var minOpt='';
     for(i=0;i<60;i+=5) minOpt += '<option value="'+i+'"'+(i===domeWeekly.minute?' selected':'')+'>'+(i<10?'0'+i:i)+'分</option>';
-    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--card,#fff);color:inherit;font-size:13px;';
+    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
     return '<div class="dome-when" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px 14px;">'
       + '<span style="font-size:12px;color:#8a94a6;font-weight:700;width:100%">📅 配信タイミング（翌週 日〜土のイベントを送る曜日・時刻）</span>'
       + '<select class="dome-sel" data-dome="dow" style="'+ss+'">'+dowOpt+'</select>'
@@ -350,7 +350,7 @@
     for(i=0;i<24;i++) hourOpt += '<option value="'+i+'"'+(i===fcWeekly.hour?' selected':'')+'>'+i+'時</option>';
     var minOpt='';
     for(i=0;i<60;i+=5) minOpt += '<option value="'+i+'"'+(i===fcWeekly.minute?' selected':'')+'>'+(i<10?'0'+i:i)+'分</option>';
-    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--card,#fff);color:inherit;font-size:13px;';
+    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
     return '<div class="fc-weekly-when" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px 14px;">'
       + '<span style="font-size:12px;color:#1a6fa8;font-weight:700;width:100%">📅 配信タイミング（先週分を送る曜日・時刻）</span>'
       + '<select class="fc-weekly-sel" data-fcw="dow" style="'+ss+'">'+dowOpt+'</select>'
