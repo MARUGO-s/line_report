@@ -8,6 +8,8 @@ import { loadReceiptReplyContext } from './receipt_reply_context.ts'
 import { normalizeInlineText, parseReceiptDateToIso } from './receipt_parse.ts'
 import {
   deleteReceiptsForDateExcludingLineMessageId,
+  deleteReceiptsForDateByLineMessageIds,
+  getLineMessageIdsForDate,
   hasExistingReceiptForDate,
   saveStoreReceiptEntry,
   type StoreRegistryRow,
@@ -28,6 +30,7 @@ export type PendingStoreReceiptDuplicate = {
   store_display_name: string
   sender_display_name: string | null
   awaiting_date_change: boolean
+  existing_line_message_ids: string[]
 }
 
 function conversationKey(roomId: string, userId: string | null): string {
@@ -161,6 +164,7 @@ export async function savePendingReceiptDuplicate(
   payload: PendingStoreReceiptDuplicate,
 ): Promise<boolean> {
   const expiresAt = new Date(Date.now() + PENDING_TTL_MIN * 60 * 1000).toISOString()
+  const existingIds = await getLineMessageIdsForDate(supabase, payload.receipt_table, payload.receipt_date)
   const { error } = await supabase.from(PENDING_TABLE).upsert({
     conversation_key: conversationKey(payload.room_id, payload.user_id),
     store_partition_key: payload.store_partition_key,
@@ -174,6 +178,7 @@ export async function savePendingReceiptDuplicate(
     store_display_name: payload.store_display_name,
     sender_display_name: payload.sender_display_name,
     awaiting_date_change: false,
+    existing_line_message_ids: existingIds.length > 0 ? JSON.stringify(existingIds) : null,
     expires_at: expiresAt,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'conversation_key' })
@@ -200,6 +205,16 @@ export async function loadPendingReceiptDuplicate(
     await clearPendingReceiptDuplicate(supabase, roomId, userId)
     return null
   }
+  const existingIdsRaw = (data as { existing_line_message_ids?: unknown }).existing_line_message_ids
+  let existingIds: string[] = []
+  if (existingIdsRaw != null) {
+    try {
+      const parsed = JSON.parse(String(existingIdsRaw))
+      existingIds = Array.isArray(parsed) ? parsed.map(String) : []
+    } catch {
+      existingIds = []
+    }
+  }
   return {
     store_partition_key: String((data as { store_partition_key?: unknown }).store_partition_key ?? ''),
     receipt_table: String((data as { receipt_table?: unknown }).receipt_table ?? ''),
@@ -218,6 +233,7 @@ export async function loadPendingReceiptDuplicate(
       ? String((data as { sender_display_name?: unknown }).sender_display_name)
       : null,
     awaiting_date_change: !!(data as { awaiting_date_change?: unknown }).awaiting_date_change,
+    existing_line_message_ids: existingIds,
   }
 }
 
@@ -361,11 +377,10 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
     return '新しい日付を入力してください（例: 2026年7月10日 / 2026-07-10 / 7/10）'
   }
   if (choice === 'replace') {
-    await deleteReceiptsForDateExcludingLineMessageId(
+    await deleteReceiptsForDateByLineMessageIds(
       supabase,
       pending.receipt_table,
-      pending.receipt_date,
-      pending.line_message_id,
+      pending.existing_line_message_ids,
     )
   }
   await clearPendingReceiptDuplicate(supabase, roomId, userId)
