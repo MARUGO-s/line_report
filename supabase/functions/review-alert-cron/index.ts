@@ -151,8 +151,24 @@ async function checkStoreReviewAndAlert(
   const placeRow = placeData as StoreReviewPlaceRow | null
   if (!placeRow || !placeRow.place_id) return { checked: false, alerted: false }
 
-  // Google Places 再取得＋スナップショット保存（既存の「自店舗口コミを更新」と同じロジックを再利用）
-  await refreshStoreReview(supabase, { store_key: storeKey })
+  // Google Places 再取得＋スナップショット保存（既存の「自店舗口コミを更新」と同じロジックを再利用）。
+  // 戻り値を無視すると、取得に失敗した日でも古いスナップショットをそのまま「最新」として読んでしまい
+  // 失敗が完全に見えなくなる（実際にマルゴエスでこれが起きていた）ため、必ず結果を確認して記録する。
+  try {
+    const refreshResult = await refreshStoreReview(supabase, { store_key: storeKey }) as { ok?: boolean; errors?: string[] }
+    if (refreshResult?.ok === false) {
+      const msg = Array.isArray(refreshResult.errors) && refreshResult.errors.length > 0
+        ? refreshResult.errors.join("; ")
+        : "refresh returned ok:false"
+      await logReviewAlertCheck(supabase, { storeKey, kind: "self", targetName: placeRow.store_name, placeId: placeRow.place_id, ok: false, error: msg })
+      return { checked: false, alerted: false, error: `refresh failed: ${msg}` }
+    }
+    await logReviewAlertCheck(supabase, { storeKey, kind: "self", targetName: placeRow.store_name, placeId: placeRow.place_id, ok: true })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await logReviewAlertCheck(supabase, { storeKey, kind: "self", targetName: placeRow.store_name, placeId: placeRow.place_id, ok: false, error: msg })
+    return { checked: false, alerted: false, error: `refresh threw: ${msg}` }
+  }
 
   const { data: snapData, error: snapErr } = await supabase
     .from("store_review_snapshots")
@@ -212,8 +228,23 @@ async function checkCompetitorReviewAndAlert(
   token: string,
   dryRun: boolean,
 ): Promise<PlaceCheckResult> {
-  // Google Places 再取得＋スナップショット保存（既存の「口コミ情報を更新」と同じロジックを再利用。id指定でこの1件だけ）
-  await refreshCompetitorReviews(supabase, { store_key: storeKey, id: comp.id })
+  // Google Places 再取得＋スナップショット保存（既存の「口コミ情報を更新」と同じロジックを再利用。id指定でこの1件だけ）。
+  // refreshStoreReview と同様、戻り値を確認しないと失敗を古いスナップショットで隠してしまう。
+  try {
+    const refreshResult = await refreshCompetitorReviews(supabase, { store_key: storeKey, id: comp.id }) as { ok?: boolean; errors?: string[] }
+    if (refreshResult?.ok === false) {
+      const msg = Array.isArray(refreshResult.errors) && refreshResult.errors.length > 0
+        ? refreshResult.errors.join("; ")
+        : "refresh returned ok:false"
+      await logReviewAlertCheck(supabase, { storeKey, kind: "competitor", targetName: comp.competitor_name, placeId: comp.place_id, ok: false, error: msg })
+      return { checked: false, alerted: false, error: `refresh failed: ${msg}` }
+    }
+    await logReviewAlertCheck(supabase, { storeKey, kind: "competitor", targetName: comp.competitor_name, placeId: comp.place_id, ok: true })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await logReviewAlertCheck(supabase, { storeKey, kind: "competitor", targetName: comp.competitor_name, placeId: comp.place_id, ok: false, error: msg })
+    return { checked: false, alerted: false, error: `refresh threw: ${msg}` }
+  }
 
   const { data: snapData, error: snapErr } = await supabase
     .from("competitor_review_snapshots")
@@ -261,6 +292,26 @@ async function checkCompetitorReviewAndAlert(
     await supabase.from("competitor_places").update({ last_alerted_rating_total: currentTotal }).eq("id", comp.id)
   }
   return { checked: true, alerted: true }
+}
+
+/** 自店舗・競合の口コミ再取得チェック結果を記録する（成功・失敗とも）。障害の見える化用。 */
+async function logReviewAlertCheck(
+  supabase: DbClient,
+  input: { storeKey: string; kind: "self" | "competitor"; targetName?: string | null; placeId?: string | null; ok: boolean; error?: string },
+): Promise<void> {
+  try {
+    const { error } = await supabase.from("review_alert_check_logs").insert({
+      store_partition_key: input.storeKey,
+      check_kind: input.kind,
+      target_name: input.targetName ?? null,
+      place_id: input.placeId ?? null,
+      ok: input.ok,
+      error: input.error ?? null,
+    })
+    if (error) console.error("logReviewAlertCheck insert failed:", error.message)
+  } catch (e) {
+    console.error("logReviewAlertCheck unexpected error:", e)
+  }
 }
 
 // LINE制御文字（Flexのtextフィールドに紛れ込むと配信エラーになりうる）を除去して長さを丸める。
