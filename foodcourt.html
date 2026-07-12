@@ -25,7 +25,7 @@
   <base href="/line_report/">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'self'">
   <meta name="theme-color" content="#15171d">
   <title>フードコート内 売上比較</title>
   <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
@@ -901,23 +901,22 @@
       html = buildReportHtml(title, rawContent, null);
     }
 
-    // window.open('', '_blank') → document.write() の方式は、ブラウザ（特にスマホのアプリ内
-    // ブラウザ等）によっては「タブは開くが中身が反映されない／フォーカスが移らない」ことがある。
-    // 生成したHTMLをBlobにしてURLを作り、そのURLへ実際に遷移する<a target="_blank">をクリックする
-    // 方式にすると通常のPC/スマホブラウザでは確実に新規タブへ切り替わり内容も表示されるが、
-    // LINEのアプリ内ブラウザ(WebView)はblob: URLをtarget="_blank"で新規タブに開こうとすると
-    // 「外部アプリケーションを開こうとしています」という確認ダイアログが出て、許可しても
-    // 何も表示されない（blob: URLは生成元タブの中でしか有効でなく、外部ハンドオフでは解決
-    // できないため）。LINE経由と判定できる場合は新規タブを試みず、同じタブ内で遷移する
-    // （「戻る」ボタンはwindow.close()が効かない場合history.back()にフォールバックするので、
-    // 同一タブ遷移でも正しく元のページへ戻れる）。
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
+    // LINEのアプリ内ブラウザ(WebView)は、blob: URLへの遷移そのもの（新規タブでも同一タブ内でも）を
+    // 「外部アプリで開く」ハンドオフとして扱ってしまい、許可しても内容を表示できない
+    // （blob: URLは生成元タブの中でしか解決できないため）。この環境では blob:/新規タブを一切使わず、
+    // 現在のページの上に全画面オーバーレイでiframe(srcdoc)を重ねて中身をそのまま表示する
+    // （ナビゲーションが発生しないため、URLスキームの制限を受けない）。
     const isLineInApp = /Line\//i.test(String(navigator.userAgent || ''));
     if (isLineInApp) {
-      location.href = url;
+      showReportOverlay(html);
       return;
     }
+
+    // 通常のPC/スマホブラウザでは、生成したHTMLをBlobにしてURLを作り、そのURLへ実際に遷移する
+    // <a target="_blank">をクリックする方式にすると、通常のリンククリックと同じ扱いになるため
+    // 確実に新規タブへ切り替わり内容も表示される。
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.target = '_blank';
@@ -927,6 +926,32 @@
     document.body.removeChild(a);
     // 生成したURLはタブ側の読み込みが終わる十分な時間を置いてから解放する
     setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
+  }
+
+  // LINEアプリ内ブラウザ向け：ナビゲーションを伴わない全画面オーバーレイでレポートを表示する。
+  window.closeReportOverlay = function() {
+    const overlay = $('lrReportOverlay');
+    if (overlay) overlay.remove();
+    document.body.style.overflow = '';
+  };
+  function showReportOverlay(html) {
+    const existing = $('lrReportOverlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'lrReportOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#fff;';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕ 閉じる';
+    closeBtn.setAttribute('type', 'button');
+    closeBtn.style.cssText = 'position:absolute;top:8px;right:8px;z-index:1;background:#2C3E50;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:bold;';
+    closeBtn.addEventListener('click', () => window.closeReportOverlay());
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('srcdoc', html);
+    iframe.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#fff;';
+    overlay.appendChild(closeBtn);
+    overlay.appendChild(iframe);
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
   }
 
   function buildReportHtml(title, rawContent, chartData) {
@@ -1252,10 +1277,17 @@
     </footer>
   </div>
   <script>
-    // このタブは window.open('', '_blank') + document.write() で作られており、
-    // 自分自身のナビゲーション履歴を持たないため history.back() は機能しない。
-    // 「戻る」＝このタブを閉じて元のタブに戻る、という動作にする。
+    // このレポートは (a) 新規タブ（自分自身のナビゲーション履歴を持たずhistory.back()が
+    // 機能しない）、または (b) LINEアプリ内ブラウザ向けの全画面iframeオーバーレイ、のどちらかで
+    // 表示される。(b)の場合は親ページのcloseReportOverlay()を呼んでオーバーレイを閉じ、
+    // それ以外はタブを閉じる（閉じられない場合はhistory.back()にフォールバック）。
     function closeReportTab() {
+      try {
+        if (window.parent && window.parent !== window && typeof window.parent.closeReportOverlay === 'function') {
+          window.parent.closeReportOverlay();
+          return;
+        }
+      } catch (e) {}
       window.close();
       // ブラウザによっては script で開いたタブでも close() が無視される場合があるため、
       // 閉じられなかったときは（history.back()がダメ元でも動く可能性があるため）フォールバックする。
