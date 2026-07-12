@@ -120,6 +120,27 @@ async function buildFoodCourtWeeklyReportLink(supabase: ReturnType<typeof create
   return `${FOODCOURT_WEEKLY_REPORT_PAGE_BASE}?${params.toString()}`
 }
 
+/**
+ * ルーム×週で1回だけLINE送信を許可する（先に予約行を確保してから送信する方式）。
+ * foodcourt-weekly-report-cron は5分おきに±5分の許容誤差で起動するため、分ぴったりの設定
+ * （例: minute=0）だと同一時間帯に複数回一致し、二重送信が起きる。この関数で吸収する。
+ */
+async function reserveFoodCourtWeeklyReportSend(
+  supabase: ReturnType<typeof createClient>,
+  roomId: string,
+  weekStart: string,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("foodcourt_weekly_report_sends")
+    .insert({ room_id: roomId, week_start: weekStart })
+  if (error) {
+    if (String((error as { code?: string }).code ?? "") === "23505") return false
+    console.error("reserveFoodCourtWeeklyReportSend insert failed:", error.message)
+    return false
+  }
+  return true
+}
+
 function buildWeeklyReportFlexMessage(weekStart: string, weekEnd: string, reportUrl: string): Record<string, unknown> {
   return {
     type: "flex",
@@ -1812,12 +1833,20 @@ Deno.serve(async (req, info) => {
         const report = String((cachedRow as { ai_report: string }).ai_report)
         let linePush: { ok: boolean; error?: string } | null = null
         if (pushToLine && roomId) {
-          const token = resolveChannelAccessToken(storeKey)
-          if (token) {
-            const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
-            linePush = await pushLineMessagesToTarget(roomId, [buildWeeklyReportFlexMessage(weekStart, weekEnd, link)], token)
+          if (await reserveFoodCourtWeeklyReportSend(supabase, roomId, weekStart)) {
+            const token = resolveChannelAccessToken(storeKey)
+            if (token) {
+              const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
+              linePush = await pushLineMessagesToTarget(roomId, [buildWeeklyReportFlexMessage(weekStart, weekEnd, link)], token)
+            } else {
+              linePush = { ok: false, error: "LINE channel access token not configured for store." }
+            }
+            if (!linePush.ok) {
+              // 送信失敗時は予約行を取り消し、次回起動（cron再試行）で再送できるようにする
+              await supabase.from("foodcourt_weekly_report_sends").delete().eq("room_id", roomId).eq("week_start", weekStart)
+            }
           } else {
-            linePush = { ok: false, error: "LINE channel access token not configured for store." }
+            linePush = { ok: false, error: "already_sent_this_week" }
           }
         }
         return json({
@@ -1900,13 +1929,21 @@ Deno.serve(async (req, info) => {
 
       let linePush: { ok: boolean; error?: string } | null = null
       if (pushToLine && roomId) {
-        const token = resolveChannelAccessToken(storeKey)
-        if (token) {
-          const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
-          linePush = await pushLineMessagesToTarget(roomId, [buildWeeklyReportFlexMessage(weekStart, weekEnd, link)], token)
-          if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
+        if (await reserveFoodCourtWeeklyReportSend(supabase, roomId, weekStart)) {
+          const token = resolveChannelAccessToken(storeKey)
+          if (token) {
+            const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
+            linePush = await pushLineMessagesToTarget(roomId, [buildWeeklyReportFlexMessage(weekStart, weekEnd, link)], token)
+            if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
+          } else {
+            linePush = { ok: false, error: "LINE channel access token not configured for store." }
+          }
+          if (!linePush.ok) {
+            // 送信失敗時は予約行を取り消し、次回起動（cron再試行）で再送できるようにする
+            await supabase.from("foodcourt_weekly_report_sends").delete().eq("room_id", roomId).eq("week_start", weekStart)
+          }
         } else {
-          linePush = { ok: false, error: "LINE channel access token not configured for store." }
+          linePush = { ok: false, error: "already_sent_this_week" }
         }
       }
 
