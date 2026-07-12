@@ -445,6 +445,20 @@ export async function hasExistingReceiptForDate(
   return data != null
 }
 
+export async function getLineMessageIdsForDate(
+  supabase: SupabaseClient,
+  receiptTable: string,
+  receiptDateIso: string,
+): Promise<string[]> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(receiptDateIso ?? '').trim())) return []
+  const { data, error } = await supabase
+    .from(receiptTable)
+    .select('line_message_id')
+    .eq('receipt_date', receiptDateIso.trim())
+  if (error || !Array.isArray(data)) return []
+  return data.map(row => String((row as { line_message_id: unknown }).line_message_id ?? '')).filter(Boolean)
+}
+
 export async function deleteReceiptsForDateExcludingLineMessageId(
   supabase: SupabaseClient,
   receiptTable: string,
@@ -466,6 +480,26 @@ export async function deleteReceiptsForDateExcludingLineMessageId(
   }
   // 検索インデックスも同日分を同期削除（置き換えで幽霊が残らないように）
   await deleteReceiptSearchIndexForDate(supabase, receiptTable, receiptDateIso.trim(), exclude)
+}
+
+export async function deleteReceiptsForDateByLineMessageIds(
+  supabase: SupabaseClient,
+  receiptTable: string,
+  lineMessageIds: string[],
+): Promise<void> {
+  if (!Array.isArray(lineMessageIds) || lineMessageIds.length === 0) return
+  const ids = lineMessageIds.map(id => String(id ?? '').trim()).filter(Boolean)
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from(receiptTable)
+    .delete()
+    .in('line_message_id', ids)
+  if (error) {
+    console.error('deleteReceiptsForDateByLineMessageIds failed:', error.message)
+  }
+  for (const id of ids) {
+    await deleteReceiptSearchIndexEntries(supabase, receiptTable, { lineMessageId: id })
+  }
 }
 
 export async function saveStoreReceiptEntry(
