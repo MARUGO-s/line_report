@@ -869,16 +869,7 @@
   let currentSummaryPeriod = '';
 
   function openReportWindow(title, rawContent, chartData) {
-    // window.open直後、ユーザー操作の文脈が生きているうちに一度フォーカスしておく（後段の処理で
-    // 例外が起きても、ここまでは実行済みにしてタブが切り替わらない事態を避ける）。
-    const win = window.open('', '_blank');
-    if (!win) {
-      alert('ポップアップブロックが有効になっているため、レポートを開けませんでした。ポップアップの許可をお願いします。');
-      return;
-    }
-    try { win.focus(); } catch (e) {}
-
-    // 本体の組み立てで例外が起きても、最低限の内容でタブへの書き込み・フォーカスまでは必ず行う
+    // 本体の組み立てで例外が起きても、最低限の内容は必ず開けるようにフォールバックする
     let html;
     try {
       html = buildReportHtml(title, rawContent, chartData);
@@ -887,17 +878,21 @@
       html = buildReportHtml(title, rawContent, null);
     }
 
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-    focusReportWindow(win);
-  }
-
-  // 新規タブへフォーカスを移す。ブラウザによってはwindow.open直後の1回だけでは
-  // 切り替わらないことがあるため、少し間を空けてもう一度試みる。
-  function focusReportWindow(win) {
-    try { win.focus(); } catch (e) {}
-    setTimeout(() => { try { win.focus(); } catch (e) {} }, 50);
+    // window.open('', '_blank') → document.write() の方式は、ブラウザ（特にスマホのアプリ内
+    // ブラウザ等）によっては「タブは開くが中身が反映されない／フォーカスが移らない」ことがある。
+    // 生成したHTMLをBlobにしてURLを作り、そのURLへ実際に遷移する<a target="_blank">をクリックする
+    // 方式は、通常のリンククリックと同じ扱いになるため、より確実に新規タブへ切り替わり内容も表示される。
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // 生成したURLはタブ側の読み込みが終わる十分な時間を置いてから解放する
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
   }
 
   function buildReportHtml(title, rawContent, chartData) {
