@@ -904,9 +904,20 @@
     // window.open('', '_blank') → document.write() の方式は、ブラウザ（特にスマホのアプリ内
     // ブラウザ等）によっては「タブは開くが中身が反映されない／フォーカスが移らない」ことがある。
     // 生成したHTMLをBlobにしてURLを作り、そのURLへ実際に遷移する<a target="_blank">をクリックする
-    // 方式は、通常のリンククリックと同じ扱いになるため、より確実に新規タブへ切り替わり内容も表示される。
+    // 方式にすると通常のPC/スマホブラウザでは確実に新規タブへ切り替わり内容も表示されるが、
+    // LINEのアプリ内ブラウザ(WebView)はblob: URLをtarget="_blank"で新規タブに開こうとすると
+    // 「外部アプリケーションを開こうとしています」という確認ダイアログが出て、許可しても
+    // 何も表示されない（blob: URLは生成元タブの中でしか有効でなく、外部ハンドオフでは解決
+    // できないため）。LINE経由と判定できる場合は新規タブを試みず、同じタブ内で遷移する
+    // （「戻る」ボタンはwindow.close()が効かない場合history.back()にフォールバックするので、
+    // 同一タブ遷移でも正しく元のページへ戻れる）。
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
+    const isLineInApp = /Line\//i.test(String(navigator.userAgent || ''));
+    if (isLineInApp) {
+      location.href = url;
+      return;
+    }
     const a = document.createElement('a');
     a.href = url;
     a.target = '_blank';
