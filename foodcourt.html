@@ -883,6 +883,7 @@
 <head>
   <meta charset="UTF-8">
   <title>AI分析レポート - ${escapeHtml(storeName)}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"><\/script>
   <style>
     :root {
       --primary: #2C3E50;
@@ -900,17 +901,23 @@
       padding: 40px;
     }
     .container {
-      max-width: 800px;
+      max-width: 900px;
       margin: 0 auto;
     }
     .no-print-bar {
       display: flex;
-      justify-content: flex-end;
+      justify-content: space-between;
+      align-items: center;
       margin-bottom: 30px;
       border-bottom: 1px solid var(--line);
       padding-bottom: 15px;
+      gap: 12px;
     }
-    .btn-print {
+    .btn-group {
+      display: flex;
+      gap: 10px;
+    }
+    .btn-print, .btn-back {
       background: var(--primary);
       color: #fff;
       border: none;
@@ -924,8 +931,11 @@
       font-size: 14px;
       transition: opacity 0.2s;
     }
-    .btn-print:hover {
+    .btn-print:hover, .btn-back:hover {
       opacity: 0.9;
+    }
+    .btn-back {
+      background: #7F8C8D;
     }
     .report-header {
       margin-bottom: 40px;
@@ -952,22 +962,22 @@
       font-weight: bold;
     }
     .report-body {
-      font-size: 16px;
+      font-size: 15px;
     }
     .report-body p {
       margin: 0 0 15px 0;
     }
     .report-body h2 {
-      font-size: 1.25rem;
+      font-size: 1.3rem;
       border-left: 6px solid var(--primary);
       padding-left: 12px;
-      margin: 35px 0 15px 0;
+      margin: 35px 0 20px 0;
       color: var(--primary);
       font-weight: bold;
     }
     .report-body h3 {
       font-size: 1.05rem;
-      margin: 25px 0 10px 0;
+      margin: 25px 0 15px 0;
       color: var(--primary);
       font-weight: bold;
     }
@@ -983,22 +993,43 @@
       border-collapse: collapse;
       margin: 20px 0;
       font-size: 14px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     .report-body th {
-      padding: 10px 12px;
-      background: var(--primary);
+      padding: 12px;
+      background: linear-gradient(135deg, var(--primary), #34495E);
       color: #fff;
       text-align: left;
       font-weight: bold;
-      border: 1px solid var(--line);
+      border: 1px solid #ddd;
     }
     .report-body td {
-      padding: 10px 12px;
+      padding: 12px;
       text-align: left;
-      border: 1px solid var(--line);
+      border: 1px solid #ddd;
     }
     .report-body tr:nth-child(even) {
       background: #F8FAFC;
+    }
+    .report-body tr:hover {
+      background: #EBF0F7;
+    }
+    .highlight-box {
+      background: #FEF3E2;
+      border-left: 4px solid #F39C12;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 4px;
+    }
+    .chart-container {
+      position: relative;
+      width: 100%;
+      height: 300px;
+      margin: 30px 0;
+      padding: 20px;
+      background: #F5F7FA;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     .report-footer {
       margin-top: 60px;
@@ -1015,17 +1046,27 @@
       .no-print-bar {
         display: none;
       }
+      .chart-container {
+        page-break-inside: avoid;
+      }
     }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="no-print-bar">
-      <button class="btn-print" onclick="window.print()">
-        🖨️ PDFとして保存 / 印刷
-      </button>
+      <div class="btn-group">
+        <button class="btn-back" onclick="history.back()">
+          ← 前のページに戻る
+        </button>
+      </div>
+      <div class="btn-group">
+        <button class="btn-print" onclick="window.print()">
+          🖨️ PDFとして保存 / 印刷
+        </button>
+      </div>
     </div>
-    
+
     <header class="report-header">
       <div class="report-title-meta">
         <div>店舗: ${escapeHtml(storeName)}</div>
@@ -1043,12 +1084,21 @@
       <p>© MARUGO S - AI Analysis Report System</p>
     </footer>
   </div>
+  <script>
+    // スクロール位置の復元など、開いた直後に実行する処理
+    document.addEventListener('DOMContentLoaded', function() {
+      // ページを上部にスクロール
+      window.scrollTo(0, 0);
+    });
+  <\/script>
 </body>
 </html>`;
 
     win.document.open();
     win.document.write(html);
     win.document.close();
+    // 開いたタブにフォーカスを移す
+    win.focus();
   }
 
   function formatReportText(text) {
@@ -1148,10 +1198,12 @@
         } else if (listLevel < targetListLevel) {
           openListTo(targetListLevel);
         }
-        html += `<li style="margin-bottom: 6px;">${escapeHtml(cleanLine)}</li>`;
+        const formattedLine = formatTextWithHighlight(cleanLine);
+        html += `<li style="margin-bottom: 8px; line-height: 1.6;">${formattedLine}</li>`;
       } else {
         closeLists(0);
-        html += `<p style="margin: 0 0 12px 0;">${escapeHtml(trimmed)}</p>`;
+        const formattedLine = formatTextWithHighlight(trimmed);
+        html += `<p style="margin: 0 0 14px 0; line-height: 1.7;">${formattedLine}</p>`;
       }
     }
 
@@ -1160,6 +1212,18 @@
       html += '</table>';
     }
     return html;
+  }
+
+  function formatTextWithHighlight(text) {
+    // 数値（金額や比率）を太字にする
+    let formatted = escapeHtml(text);
+    // 金額パターン（¥1,000,000 や 100万 など）
+    formatted = formatted.replace(/¥?(\d{1,3}(,\d{3})*|\d+)万?円?/g, '<strong style="color: #E74C3C; font-weight: bold;">$&</strong>');
+    // パーセンテージ
+    formatted = formatted.replace(/(\d+(\.\d+)?%)/g, '<strong style="color: #27AE60; font-weight: bold;">$&</strong>');
+    // 時間表示
+    formatted = formatted.replace(/(\d+時間|\d+分)/g, '<strong style="color: #3498DB; font-weight: bold;">$&</strong>');
+    return formatted;
   }
 
   // Q&A 回答のレポート出力（分析サマリー exportSummary とは別経路。取り違え防止）
