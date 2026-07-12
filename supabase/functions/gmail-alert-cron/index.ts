@@ -6,6 +6,7 @@ import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_re
 import { pilotStorePartitionKeysMatch } from "../_shared/receipt_sheets_store_catalog.ts";
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts";
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
+import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";
 
 type GmailAlertEnv = {
   enabled: boolean;
@@ -3695,6 +3696,20 @@ async function sendLinePush(
   token: string,
   storeKey?: string,
 ) {
+  if (isBlockedByMarugosecondLockdown(storeKey, to)) {
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: "push",
+        context: "gmail_alert",
+        targetRoomId: to,
+        attempted: false,
+        success: false,
+        reason: "一時ロックダウン中のためブロック（マルゴセカンド送信元調査用）",
+      });
+    }
+    return { ok: false as const, error: "blocked_by_marugosecond_lockdown" };
+  }
   try {
     const response = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",

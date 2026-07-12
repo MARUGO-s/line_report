@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
+import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
 import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_link_auth.ts"
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts"
@@ -539,6 +540,20 @@ function resolveStoreLineToken(storeKey: string, fallbackToken: string): string 
 }
 
 async function sendLinePushMessages(to: string, messages: unknown[], token: string, storeKey?: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (isBlockedByMarugosecondLockdown(storeKey, to)) {
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: 'push',
+        context: 'reservation_today',
+        targetRoomId: to,
+        attempted: false,
+        success: false,
+        reason: '一時ロックダウン中のためブロック（マルゴセカンド送信元調査用）',
+      })
+    }
+    return { ok: false, error: 'blocked_by_marugosecond_lockdown' }
+  }
   let response: Response
   try {
     response = await fetch("https://api.line.me/v2/bot/message/push", {

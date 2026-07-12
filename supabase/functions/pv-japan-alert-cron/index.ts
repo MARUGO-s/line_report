@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
+import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 
 // PV(パブリックビューイング)の「日本戦」を“単独で”即LINE配信する cron。
 //  - 毎10分起動。tokyo_dome_events の venue='public-viewing' / is_japan=true / 未来日(JST) のうち、
@@ -176,6 +177,20 @@ function resolveStoreLineToken(storeKey: string, fallbackToken: string): string 
 }
 async function sendLinePush(to: string, messages: unknown[], token: string, storeKey?: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!token) return { ok: false, error: "missing line token" }
+  if (isBlockedByMarugosecondLockdown(storeKey, to)) {
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: 'push',
+        context: 'pv_japan_alert',
+        targetRoomId: to,
+        attempted: false,
+        success: false,
+        reason: '一時ロックダウン中のためブロック（マルゴセカンド送信元調査用）',
+      })
+    }
+    return { ok: false, error: 'blocked_by_marugosecond_lockdown' }
+  }
   let res: Response
   try {
     res = await fetch("https://api.line.me/v2/bot/message/push", {

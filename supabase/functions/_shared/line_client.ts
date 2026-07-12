@@ -3,6 +3,22 @@ import { recordLineWebhookDeliveryLog } from './line_webhook_delivery_log.ts'
 
 export type { LineWebhookDeliveryLogContext }
 
+// 2026-07-12夜: マルゴセカンドで原因不明のPush消費が発生している件の切り分け用、一時ロックダウン。
+// MARUGOSECOND_PUSH_LOCKDOWN=1 のシークレットが設定されている間だけ有効になり、
+// マルゴセカンド(store_partition_key='marugosecond')の push 宛先を「今月は杉谷」グループと
+// 杉谷康雄個人のみに制限する。他店舗の送信には一切影響しない。調査後はシークレットを削除するだけで
+// 元の挙動に戻る（コード変更・再デプロイ不要）。
+const MARUGOSECOND_LOCKDOWN_ALLOWED_ROOM_IDS = new Set<string>([
+  'C5397da7d1ef8afdc920a7033398505e9', // 今月は杉谷（グループ）
+  'U60ee78c1c8672e99cc42284bb4d309cc', // 杉谷康雄（個人）
+])
+
+export function isBlockedByMarugosecondLockdown(storeKey: string | undefined | null, roomId: string): boolean {
+  if (Deno.env.get('MARUGOSECOND_PUSH_LOCKDOWN') !== '1') return false
+  if (String(storeKey ?? '').trim().toLowerCase() !== 'marugosecond') return false
+  return !MARUGOSECOND_LOCKDOWN_ALLOWED_ROOM_IDS.has(String(roomId ?? '').trim())
+}
+
 export async function fetchLineMessageBinary(
   lineMessageId: string,
   lineAccessToken: string,
@@ -145,6 +161,20 @@ export async function pushLineMessages(
   if (!userId.startsWith('U')) {
     return { ok: false, error: 'invalid user id' }
   }
+  if (isBlockedByMarugosecondLockdown(logCtx?.storePartitionKey, userId)) {
+    if (logCtx?.storePartitionKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: logCtx.storePartitionKey,
+        method: 'push',
+        context: logCtx.context,
+        targetRoomId: userId,
+        attempted: false,
+        success: false,
+        reason: '一時ロックダウン中のためブロック（マルゴセカンド送信元調査用）',
+      })
+    }
+    return { ok: false, error: 'blocked_by_marugosecond_lockdown' }
+  }
   let response: Response
   try {
     response = await fetch('https://api.line.me/v2/bot/message/push', {
@@ -240,6 +270,20 @@ export async function pushLineMessagesToTarget(
   const target = String(to ?? '').trim()
   if (!/^[UCR]/.test(target)) {
     return { ok: false, error: 'invalid push target' }
+  }
+  if (isBlockedByMarugosecondLockdown(logCtx?.storePartitionKey, target)) {
+    if (logCtx?.storePartitionKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: logCtx.storePartitionKey,
+        method: 'push',
+        context: logCtx.context,
+        targetRoomId: target,
+        attempted: false,
+        success: false,
+        reason: '一時ロックダウン中のためブロック（マルゴセカンド送信元調査用）',
+      })
+    }
+    return { ok: false, error: 'blocked_by_marugosecond_lockdown' }
   }
   let response: Response
   try {
