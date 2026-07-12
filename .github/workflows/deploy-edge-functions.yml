@@ -52,13 +52,21 @@ jobs:
       - name: Link project and apply DB migrations
         # SUPABASE_DB_PASSWORD が未設定の場合はスキップし、Edge Functions のデプロイだけは
         # 継続する（シークレット未設定でワークフロー全体を落とさないための保険）。
+        # continue-on-error: マイグレーション履歴の不整合など db push 側の問題で
+        # このステップが失敗しても、Edge Functions のデプロイ自体は止めない
+        # （関数コードのデプロイはDBスキーマ変更と独立して価値があるため）。
+        # ただし失敗時はジョブサマリーに warning を残すので、Actions タブで気づける。
+        continue-on-error: true
         run: |
           if [ -z "$SUPABASE_DB_PASSWORD" ]; then
             echo "::warning::SUPABASE_DB_PASSWORD が未設定のため、DBマイグレーションの自動適用をスキップします。リポジトリSecretsに追加してください。"
             exit 0
           fi
           supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-          supabase db push
+          if ! supabase db push; then
+            echo "::warning::supabase db push が失敗しました。マイグレーション履歴の不整合の可能性があります。Edge Functionsのデプロイは続行します。"
+            exit 1
+          fi
 
       - name: Deploy all functions
         # 関数名を省略すると supabase/functions 配下の全関数ディレクトリ
