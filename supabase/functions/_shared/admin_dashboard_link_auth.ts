@@ -9,6 +9,9 @@ export const ROOM_CONFIG_SCOPE = "room_config"
 const LOGIN_LINK_TTL_SEC = 24 * 60 * 60
 const SESSION_TTL_REMEMBER_SEC = 3 * 24 * 60 * 60
 const SESSION_TTL_EPHEMERAL_SEC = 12 * 60 * 60
+// 設定変更を伴わない「閲覧専用」リンク（例: フードコート週次レポート）向け。
+// metadata.reusable===true で発行すると、単一使用にせず・実質無期限（10年）で何度でも開ける。
+export const REUSABLE_VIEW_LINK_TTL_SEC = 10 * 365 * 24 * 60 * 60
 
 function toIsoAfterSeconds(seconds: number): string {
   return new Date(Date.now() + (seconds * 1000)).toISOString()
@@ -81,20 +84,22 @@ async function insertAuthTokenRow(
 export async function issueAdminDashboardLoginLinkToken(
   supabase: SupabaseClient,
   metadata?: Record<string, unknown>,
+  options?: { ttlSeconds?: number },
 ): Promise<{ token: string; expires_at: string }> {
   const token = generateOpaqueToken(LOGIN_LINK_PREFIX)
-  const expiresAt = toIsoAfterSeconds(LOGIN_LINK_TTL_SEC)
+  const ttlSec = options?.ttlSeconds && options.ttlSeconds > 0 ? options.ttlSeconds : LOGIN_LINK_TTL_SEC
+  const expiresAt = toIsoAfterSeconds(ttlSec)
   await insertAuthTokenRow(supabase, "login_link", token, expiresAt, metadata)
   return { token, expires_at: expiresAt }
 }
 
 export async function issueAdminDashboardSessionToken(
   supabase: SupabaseClient,
-  options?: { rememberLogin?: boolean; metadata?: Record<string, unknown> },
+  options?: { rememberLogin?: boolean; metadata?: Record<string, unknown>; ttlSeconds?: number },
 ): Promise<{ token: string; expires_at: string }> {
-  const ttlSec = options?.rememberLogin === false
-    ? SESSION_TTL_EPHEMERAL_SEC
-    : SESSION_TTL_REMEMBER_SEC
+  const ttlSec = options?.ttlSeconds && options.ttlSeconds > 0
+    ? options.ttlSeconds
+    : (options?.rememberLogin === false ? SESSION_TTL_EPHEMERAL_SEC : SESSION_TTL_REMEMBER_SEC)
   const token = generateOpaqueToken(SESSION_PREFIX)
   const expiresAt = toIsoAfterSeconds(ttlSec)
   await insertAuthTokenRow(supabase, "session", token, expiresAt, options?.metadata)
@@ -126,29 +131,36 @@ export async function exchangeAdminDashboardLoginLinkToken(
   if (!data) {
     throw new Error("Login link is invalid, already used, or expired.")
   }
-  // 単一使用を原子的に保証: used_at が未設定の行だけを更新し、1行更新できたときのみ続行する
-  // （並行交換・再利用での二重発行を防ぐ）。
-  const { data: claimed, error: markUsedError } = await supabase
-    .from(TOKEN_TABLE)
-    .update({ used_at: nowIso })
-    .eq("id", data.id)
-    .is("used_at", null)
-    .select("id")
-    .maybeSingle()
-  if (markUsedError) {
-    throw new Error(`Failed to consume login link token: ${markUsedError.message}`)
-  }
-  if (!claimed) {
-    throw new Error("Login link has already been used.")
+  const existingMeta = normalizeMetadata(data.metadata)
+  // 設定変更を伴わない閲覧専用リンク（reusable===true。フードコート週次レポート等）は、
+  // 単一使用にせず・何度でも・どの端末からでも開けるようにする（used_atを消費しない）。
+  const isReusableViewLink = existingMeta.reusable === true
+  if (!isReusableViewLink) {
+    // 単一使用を原子的に保証: used_at が未設定の行だけを更新し、1行更新できたときのみ続行する
+    // （並行交換・再利用での二重発行を防ぐ）。
+    const { data: claimed, error: markUsedError } = await supabase
+      .from(TOKEN_TABLE)
+      .update({ used_at: nowIso })
+      .eq("id", data.id)
+      .is("used_at", null)
+      .select("id")
+      .maybeSingle()
+    if (markUsedError) {
+      throw new Error(`Failed to consume login link token: ${markUsedError.message}`)
+    }
+    if (!claimed) {
+      throw new Error("Login link has already been used.")
+    }
   }
   const mergedMetadata = {
-    ...normalizeMetadata(data.metadata),
+    ...existingMeta,
     ...normalizeMetadata(options?.metadata),
     exchanged_at: nowIso,
   }
   return await issueAdminDashboardSessionToken(supabase, {
     rememberLogin: options?.rememberLogin,
     metadata: mergedMetadata,
+    ttlSeconds: isReusableViewLink ? REUSABLE_VIEW_LINK_TTL_SEC : undefined,
   })
 }
 
