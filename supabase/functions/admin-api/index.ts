@@ -86,6 +86,7 @@ import {
   hashRoomConfigPassword,
   issueAdminDashboardLoginLinkToken,
   issueAdminDashboardSessionToken,
+  REUSABLE_VIEW_LINK_TTL_SEC,
   revokeAdminDashboardSessionToken,
   revokeAllAdminDashboardAuthTokens,
   ROOM_CONFIG_SCOPE,
@@ -115,7 +116,12 @@ function weeklyReportHtml(report: string): string {
 }
 
 async function buildFoodCourtWeeklyReportLink(supabase: ReturnType<typeof createClient>, storeKey: string, weekStart: string): Promise<string> {
-  const issued = await issueAdminDashboardLoginLinkToken(supabase, { source: "line_foodcourt_weekly", store_partition_key: storeKey })
+  // 閲覧専用（設定変更なし）のレポートリンクなので、単一使用・期限つきにせず何度でも開けるようにする。
+  const issued = await issueAdminDashboardLoginLinkToken(
+    supabase,
+    { source: "line_foodcourt_weekly", store_partition_key: storeKey, reusable: true },
+    { ttlSeconds: REUSABLE_VIEW_LINK_TTL_SEC },
+  )
   const params = new URLSearchParams({ store_key: storeKey, week_start: weekStart, from: "line", lt: issued.token })
   return `${FOODCOURT_WEEKLY_REPORT_PAGE_BASE}?${params.toString()}`
 }
