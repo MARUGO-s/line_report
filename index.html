@@ -11249,6 +11249,7 @@
         receipt_correction_reply_enabled: parseDatasetBoolean(tr.dataset.roomReceiptCorrectionReply, false),
         non_receipt_image_reply_enabled: parseDatasetBoolean(tr.dataset.roomNonReceiptImageReply, true),
         media_save_enabled: parseDatasetBoolean(tr.dataset.roomMediaSave, true),
+        review_alert_enabled: parseDatasetBoolean(tr.dataset.roomReviewAlertEnabled, false),
         calendar_ai_auto_create_enabled: gCalRow,
         calendar_silent_auto_register_enabled: gCalRow,
         calendar_low_confidence_confirm_reply_enabled: parseDatasetBoolean(tr.dataset.roomCalendarLowConfConfirm, false),
@@ -11293,6 +11294,7 @@
       tr.dataset.roomReceiptCorrectionReply = String(!!config.receipt_correction_reply_enabled);
       tr.dataset.roomNonReceiptImageReply = String(config.non_receipt_image_reply_enabled !== false);
       tr.dataset.roomMediaSave = String(config.media_save_enabled !== false);
+      tr.dataset.roomReviewAlertEnabled = String(!!config.review_alert_enabled);
       tr.dataset.roomCalendarAutoCreate = String(!!config.calendar_ai_auto_create_enabled);
       tr.dataset.roomSilentAutoRegister = String(!!config.calendar_silent_auto_register_enabled);
       tr.dataset.roomCalendarLowConfConfirm = String(!!config.calendar_low_confidence_confirm_reply_enabled);
@@ -12290,6 +12292,7 @@
           receipt_correction_reply_enabled: !!(setting && setting.receipt_correction_reply_enabled),
           non_receipt_image_reply_enabled: (setting && setting.non_receipt_image_reply_enabled) !== false,
           media_save_enabled: (setting && setting.media_save_enabled) !== false,
+          review_alert_enabled: !!(setting && setting.review_alert_enabled),
           calendar_ai_auto_create_enabled: gCalMerged,
           calendar_silent_auto_register_enabled: gCalMerged,
           calendar_low_confidence_confirm_reply_enabled: !!(setting && setting.calendar_low_confidence_confirm_reply_enabled),
@@ -12330,6 +12333,7 @@
         tr.dataset.roomReceiptCorrectionReply = String(roomFeatureConfig.receipt_correction_reply_enabled);
         tr.dataset.roomNonReceiptImageReply = String(roomFeatureConfig.non_receipt_image_reply_enabled);
         tr.dataset.roomMediaSave = String(roomFeatureConfig.media_save_enabled);
+        tr.dataset.roomReviewAlertEnabled = String(roomFeatureConfig.review_alert_enabled);
         tr.dataset.roomCalendarAutoCreate = String(gCalMerged);
         tr.dataset.roomSilentAutoRegister = String(gCalMerged);
         tr.dataset.roomCalendarLowConfConfirm = String(!!(setting && setting.calendar_low_confidence_confirm_reply_enabled));
@@ -12703,6 +12707,7 @@
       receipt_correction_reply_enabled: 'レシート訂正の返信',
       non_receipt_image_reply_enabled: 'レシート以外画像の返信',
       media_save_enabled: 'メディア保存',
+      review_alert_enabled: '口コミ新着通知',
       receipt_midreport_enabled: '中間レポート',
       receipt_monthend_report_enabled: '月末レポート',
       calendar_tomorrow_reminder_enabled: '明日予定配信',
