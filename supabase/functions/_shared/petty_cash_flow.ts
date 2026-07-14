@@ -65,7 +65,9 @@ type PettyTaxMode = 'ex' | 'in'
 // 品名から勘定科目を推定（既定。記録後に小口現金ページで修正可）。
 //   アルコール飲料 → alcohol、消耗品/衛生用品 → shomohin、それ以外 → shokuzai(食材)。
 //   ※「消毒用アルコール」等は飲料ではないので shomohin 側で先に拾う。
-const ALCOHOL_DRINK_RE = /(ビール|発泡酒|ワイン|シャンパン|スパークリング|日本酒|清酒|焼酎|ウイスキー|ウィスキー|ハイボール|サワー|酎ハイ|チューハイ|ジン|ウォッカ|ラム|テキーラ|リキュール|梅酒|ハウスワイン|生樽|樽生|地酒|スピリッツ|sake|beer|wine|whisky|whiskey|vodka|tequila)/i
+//   ※本みりん・味醂は酒税法上の酒類（軽減税率対象外・10%）。「みりん風調味料」「みりん干し」
+//     「みりん漬け」は酒類ではない食品(8%)なので、みりん単体は後続文字（風/干/漬）で除外する。
+const ALCOHOL_DRINK_RE = /(ビール|発泡酒|ワイン|シャンパン|スパークリング|日本酒|清酒|焼酎|ウイスキー|ウィスキー|ハイボール|サワー|酎ハイ|チューハイ|ジン|ウォッカ|ラム|テキーラ|リキュール|梅酒|ハウスワイン|生樽|樽生|地酒|スピリッツ|本みりん|本味醂|味醂(?![風干漬])|みりん(?![風干漬])|sake|beer|wine|whisky|whiskey|vodka|tequila)/i
 const SHOMOHIN_RE = /(消耗品|日用品|雑貨|備品|事務用品|洗剤|消毒|除菌|アルコール消毒|ペーパー|タオル|ナフキン|ふきん|布巾|ラップ|アルミホイル|ホイル|手袋|ゴム手|ゴミ袋|ごみ袋|ポリ袋|レジ袋|レジブクロ|買物袋|買い物袋|マイバッグ|ショッピングバッグ|スポンジ|たわし|掃除|清掃|文具|電池|乾電池|単[0-9０-９一二三四五]|PRE単|富士通|アルカリ|マンガン|コバエ|小バエ|ハエ|虫取り|虫とり|防虫|殺虫|捕虫|虫よけ|虫除け|バルくん|割り箸|割箸|箸|ストロー|カップ|紙コップ|容器|包装|ラベル|マスク|衛生|トイレット|ティッシュ)/i
 function classifyPettyAcct(name: string, opts?: { rate?: 8 | 10 | null; supplier?: string | null }): 'shokuzai' | 'shomohin' | 'alcohol' {
   const s = String(name ?? '')
@@ -232,13 +234,22 @@ export function extractExpenseFromReceipt(
   const isFamilyMartVendor = /(family\s*mart|familymart|ファミリーマート|ファミマ)/i.test(String(receipt?.storeName ?? ''))
   const itemEntries = itemRows.map((i, idx) => {
     const p = i.amount != null && i.amount > 0 ? i.amount : 0
+    // 【酒類の確定補正】本みりん等の酒類は軽減税率の対象外＝法律上必ず10%。OCRや税率配分が
+    //   8% と誤読しても「rate=8→食材で確定」ロジックに乗せず、税率10%・科目アルコールで確定する
+    //   （実障害: 2026-07-14 クック-Y の宝酒造 本みりん ¥499 が 8%・食材となり出金額が¥10不一致）。
+    const isAlcoholItem = classifyPettyAcct(i.name, { supplier }) === 'alcohol'
     let rate: 8 | 10
-    if (isSeriaVendor) rate = 10
+    if (isAlcoholItem) rate = 10
+    else if (isSeriaVendor) rate = 10
     else if (chosenRateOf) rate = chosenRateOf(idx)
     else if (bdRateByIndex.has(idx)) rate = bdRateByIndex.get(idx)!
     else if (i.rate === 8 || i.rate === 10) rate = i.rate
     else rate = defaultPettyRate(classifyPettyAcct(i.name, { supplier }))
-    const acct: 'shokuzai' | 'shomohin' | 'alcohol' = rate === 8 ? 'shokuzai' : classifyPettyAcct(i.name, { rate, supplier })
+    const acct: 'shokuzai' | 'shomohin' | 'alcohol' = isAlcoholItem
+      ? 'alcohol'
+      : rate === 8
+      ? 'shokuzai'
+      : classifyPettyAcct(i.name, { rate, supplier })
     return { n: i.name || '(品目)', p, acct, rate }
   })
   // FamilyMart の小型レシートは同じ商品が複数行に分かれることがあり、OCRが2行目を落とすと
