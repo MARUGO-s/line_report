@@ -96,6 +96,10 @@ export function extractExpenseFromReceipt(
   const tax = parseYenToInt(receipt?.taxAmount) ?? 0
   const gross = parseYenToInt(receipt?.grossSales)
   const net = parseYenToInt(receipt?.netSales)
+  // supplier は下の税率整合チェック・品目分類のクロージャ（classifyPettyAcct への受け渡し）でも参照する。
+  // 宣言が使用より後ろにあると TDZ の ReferenceError で経費解析全体が落ちるため、必ず関数先頭で宣言する
+  // （実障害: 2026-07-11 fe9a512 で後方宣言のまま参照が追加され、小口レシート解析が全件失敗した）。
+  const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
   // 商品明細（品名＋価格＋税率）。価格は数値化。
   const lineItems = Array.isArray(receipt?.lineItems) ? receipt!.lineItems! : []
   const itemRows = lineItems
@@ -319,7 +323,6 @@ export function extractExpenseFromReceipt(
   }
   const safeTax = Math.min(taxResolved, amount)
   const spentOn = normalizeDateYmd(receipt?.date) ?? todayYmdJst()
-  const supplier = receipt?.storeName ? String(receipt.storeName).trim() : null
   let taxMode: PettyTaxMode = breakdownSuggestsGrossDoubleCount ? 'in' : 'ex'
 
   // 【明細価格の 税込/税抜 自動判定（レシートごと）】店によって品目の印字が税込/税抜どちらもある。
