@@ -398,11 +398,23 @@ export function extractExpenseFromReceipt(
     items = itemEntries
   } else {
     const nameItems = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
-    item = nameItems.length > 1 ? nameItems.map((s) => '・' + s).join('\n') : (nameItems[0] || supplier || '経費')
-    const nm = nameItems[0] || supplier || '経費'
+    // 品目が本当に何も読めていない時は、無理に代用品目（店名や「経費」）を作らず読み取り失敗として返す
+    // （呼び出し元が「手入力してください」に案内する）。下の自己参照チェックと合わせて、
+    // 「店名を品目名として使う」架空品目が生成される事故を防ぐ。
+    if (nameItems.length === 0) return null
+    item = nameItems.length > 1 ? nameItems.map((s) => '・' + s).join('\n') : nameItems[0]
+    const nm = nameItems[0]
     const acct = classifyPettyAcct(nameItems.join(' '), { supplier })
     // 明細価格が取れない時は本体価格を1品目に集約（科目別集計の取りこぼしを防ぐ）。
     items = [{ n: nm, p: base, acct, rate: defaultPettyRate(acct) }]
+  }
+  // 【品目名が仕入先名そのものになっている自己参照を防ぐ・最終防波堤】
+  // 併写のClaudia2レジ出金伝票（自店の入出金票）をAIが仕入先と誤認し、そのまま唯一の品目としても
+  // 使ってしまう事故が複数回起きている（例: 仕入先「Claudia2」・品目「Claudia2」¥912。実在の
+  // FamilyMartレシートの生しょうが・生にんにくが完全に無視された）。店名＝商品名は実在しないため、
+  // 品目が1件かつ仕入先名と一致する場合は読み取り失敗として返す（誤った内容での自動登録を防ぐ）。
+  if (items.length === 1 && supplier && items[0].n.trim().toLowerCase() === supplier.trim().toLowerCase()) {
+    return null
   }
   return { amount, tax: safeTax, spentOn, item, supplier, items, taxMode }
 }
