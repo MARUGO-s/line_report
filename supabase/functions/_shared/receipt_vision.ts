@@ -161,7 +161,20 @@ export async function analyzeLineImageWithGroqScout(
     return { analysis: null, failure: { stage: 'groq_http_error', message: 'Groq API request failed.' } }
   }
 
-  const json = await response.json()
+  // response.ok でも本文が空/切断されていて JSON として不正な場合がある（Groq側の一過性障害）。
+  // ここで例外を投げると呼び出し元まで伝播し「レシート処理中にエラーが発生しました」を返してしまうため、
+  // 5xx/429 と同様に failure として扱う（未捕捉例外にしない）。
+  // deno-lint-ignore no-explicit-any
+  let json: any
+  try {
+    json = await response.json()
+  } catch (e) {
+    console.error('Groq image vision response JSON parse failed:', String(e).slice(0, 200))
+    return {
+      analysis: null,
+      failure: { stage: 'groq_invalid_json', message: String(e).slice(0, 300) },
+    }
+  }
   const usage = extractGroqUsage(json)
   const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
   if (!content) {
@@ -565,7 +578,17 @@ export async function analyzeLineImageWithClaude(
     }
   }
 
-  const json = await response.json()
+  // deno-lint-ignore no-explicit-any
+  let json: any
+  try {
+    json = await response.json()
+  } catch (e) {
+    console.error('Claude image vision response JSON parse failed:', String(e).slice(0, 200))
+    return {
+      analysis: null,
+      failure: { stage: 'claude_invalid_json', message: String(e).slice(0, 300) },
+    }
+  }
   const usage = extractClaudeUsage(json)
   const content = extractTextFromClaudeResponse(json)
   if (!content) {
