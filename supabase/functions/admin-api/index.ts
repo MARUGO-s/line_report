@@ -2521,6 +2521,7 @@ Deno.serve(async (req, info) => {
           today_reservation_alert_enabled: payload.today_reservation_alert_enabled,
           today_reservation_alert_hour: payload.today_reservation_alert_hour,
           today_reservation_alert_minute: payload.today_reservation_alert_minute,
+          gmail_alert_interval_minutes: payload.gmail_alert_interval_minutes,
           receipt_midreport_enabled: payload.receipt_midreport_enabled,
           receipt_monthend_report_enabled: payload.receipt_monthend_report_enabled,
           receipt_schedule_override: payload.receipt_schedule_override,
@@ -8433,6 +8434,7 @@ function buildRoomSettingsPayload(body: unknown): {
   today_reservation_alert_enabled: boolean
   today_reservation_alert_hour: number | null
   today_reservation_alert_minute: number | null
+  gmail_alert_interval_minutes: number | null
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
   media_save_enabled: boolean
@@ -8650,6 +8652,16 @@ function buildRoomSettingsPayload(body: unknown): {
   const todayReservationAlertHour = parseScheduleInt(body.today_reservation_alert_hour, "today_reservation_alert_hour", 0, 23)
   const todayReservationAlertMinute = parseScheduleInt(body.today_reservation_alert_minute, "today_reservation_alert_minute", 0, 59)
 
+  // 予約メール通知(gmail-alert-cron)の配信間隔（分）。NULL/1=リアルタイム（毎分チェック）。
+  let gmailAlertIntervalMinutes: number | null = null
+  if (body.gmail_alert_interval_minutes != null && body.gmail_alert_interval_minutes !== "") {
+    const v = Number(body.gmail_alert_interval_minutes)
+    if (!GMAIL_ALERT_INTERVAL_MINUTES_ALLOWED.has(v)) {
+      throw { status: 400, message: "gmail_alert_interval_minutes must be one of the allowed interval values." } satisfies AppError
+    }
+    gmailAlertIntervalMinutes = v
+  }
+
   let receiptReportStorePartitionKey: string | null = null
   if (body.receipt_report_store_partition_key != null) {
     const rawKey = typeof body.receipt_report_store_partition_key === "string"
@@ -8714,6 +8726,7 @@ function buildRoomSettingsPayload(body: unknown): {
     today_reservation_alert_enabled: todayReservationAlertEnabled,
     today_reservation_alert_hour: todayReservationAlertHour,
     today_reservation_alert_minute: todayReservationAlertMinute,
+    gmail_alert_interval_minutes: gmailAlertIntervalMinutes,
     receipt_midreport_enabled: receiptMidreportEnabled,
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,
     media_save_enabled: mediaSaveEnabled,
