@@ -125,6 +125,14 @@ Deno.serve(async (req) => {
       else errors.push(`${t.roomId}: failed to reserve log (${insErr.message})`)
       continue
     }
+
+    // 開催予定0件の週は「開催予定はありません」だけのPushを送らない（グループ宛は人数分課金されるため）。
+    // 重複防止ログはこの週分を既に確保済みなので、同週中の再実行では再送されない。
+    if (events.length === 0) {
+      skipped.push({ room_id: t.roomId, reason: "zero_events" })
+      continue
+    }
+
     const r = await sendLinePush(t.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
     if (!r.ok) {
       try { await supabase.from("tokyo_dome_weekly_logs").delete().eq("room_id", t.roomId).eq("week_start_date", win.startStr) } catch (_e) { /* noop */ }
