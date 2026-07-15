@@ -11,6 +11,28 @@ export type FoodCourtLoopScores = {
   }
 }
 
+export const FOODCOURT_PASSING_SCORE_MIN = 30
+export const FOODCOURT_PASSING_SCORE_MAX = 95
+
+export function normalizeFoodCourtPassingScore(value: unknown): number | null {
+  if (typeof value === 'string' && value.trim() === '') return null
+  const score = Number(value)
+  if (!Number.isInteger(score)) return null
+  if (score < FOODCOURT_PASSING_SCORE_MIN || score > FOODCOURT_PASSING_SCORE_MAX) return null
+  return score
+}
+
+export function resolveFoodCourtPassingThresholds(
+  configuredScore: unknown,
+  fallbackTotal: number,
+  fallbackEach: number,
+): { passTotal: number; passEach: number } {
+  const score = normalizeFoodCourtPassingScore(configuredScore)
+  return score == null
+    ? { passTotal: fallbackTotal, passEach: fallbackEach }
+    : { passTotal: score, passEach: score }
+}
+
 export function buildFoodCourtRevisionMessages(
   messages: FoodCourtLoopMessage[],
   feedback: string,

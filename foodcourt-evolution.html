@@ -347,10 +347,11 @@
           <span style="font-size:13.5px; font-weight:600; color:var(--tx-2);">合格判定ライン:</span>
           <input type="range" id="passingScoreRange" min="30" max="95" value="65" style="flex:1; accent-color:var(--accent);">
           <span id="passingScoreLabel" class="mono" style="font-size:16px; font-weight:700; color:var(--accent-tx); width:45px; text-align:right;">65点</span>
+          <span id="passingScoreSaveStatus" style="font-size:12px;color:var(--tx-3);width:54px;">保存済み</span>
         </div>
         <div style="font-size:12px; color:var(--tx-3); flex:2; min-width:280px; line-height:1.4;">
-          ※現在データ量が乏しいため、一時的に合格点を <b>65点</b> としています（基準点はスライダーで任意に変更可能です）。<br>
-          スコアは <code>100 - 直近14日客数MAPE</code> で算出し、基準未達でも予測を止めず毎日再学習します。
+          総合点・各評価項目・品質合格RAGの採用に同じ基準点を使います。人が承認したRAG学習は基準点にかかわらず保持します。<br>
+          予測スコアは <code>100 - 直近14日客数MAPE</code> で算出し、基準未達でも予測を止めず毎日再学習します。
         </div>
       </div>
     </div>
@@ -473,6 +474,7 @@
     msNavToggle: $('msNavToggle'), msSide: $('msSide'), msNavBackdrop: $('msNavBackdrop'),
     passingScoreRange: $('passingScoreRange'),
     passingScoreLabel: $('passingScoreLabel'),
+    passingScoreSaveStatus: $('passingScoreSaveStatus'),
     ragDownloadBtn: $('ragDownloadBtn'),
   };
 
@@ -698,7 +700,10 @@
     dom.passingScoreRange.addEventListener('input', (e) => {
       passingScore = Number(e.target.value);
       dom.passingScoreLabel.textContent = passingScore + '点';
-      try { localStorage.setItem('fc_passing_score', passingScore); } catch(_) {}
+      if (dom.passingScoreSaveStatus) {
+        dom.passingScoreSaveStatus.textContent = '未保存';
+        dom.passingScoreSaveStatus.style.color = 'var(--tx-3)';
+      }
       renderKpi(); // リアルタイムにKPIを更新
     });
 
@@ -711,8 +716,17 @@
             foodcourt_evolution_passing_score: String(score)
           }
         });
+        try { localStorage.setItem('fc_passing_score', String(score)); } catch(_) {}
+        if (dom.passingScoreSaveStatus) {
+          dom.passingScoreSaveStatus.textContent = '保存済み';
+          dom.passingScoreSaveStatus.style.color = 'var(--ok)';
+        }
       } catch (err) {
         console.error('Failed to save passing score to database:', err);
+        if (dom.passingScoreSaveStatus) {
+          dom.passingScoreSaveStatus.textContent = '保存失敗';
+          dom.passingScoreSaveStatus.style.color = 'var(--bad)';
+        }
       }
     });
   }

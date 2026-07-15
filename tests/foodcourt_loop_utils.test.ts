@@ -6,8 +6,23 @@ import {
   foodCourtEvaluationPassed,
   foodCourtLoopHasBudget,
   foodCourtTextSimilarity,
+  normalizeFoodCourtPassingScore,
   rankFoodCourtRagDocuments,
+  resolveFoodCourtPassingThresholds,
 } from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
+
+test('configured passing score controls both total and per-axis thresholds', () => {
+  assert.deepEqual(resolveFoodCourtPassingThresholds('72', 75, 65), { passTotal: 72, passEach: 72 })
+  assert.deepEqual(resolveFoodCourtPassingThresholds('', 75, 65), { passTotal: 75, passEach: 65 })
+})
+
+test('passing score accepts only whole numbers within the slider range', () => {
+  assert.equal(normalizeFoodCourtPassingScore(30), 30)
+  assert.equal(normalizeFoodCourtPassingScore('95'), 95)
+  assert.equal(normalizeFoodCourtPassingScore(29), null)
+  assert.equal(normalizeFoodCourtPassingScore(96), null)
+  assert.equal(normalizeFoodCourtPassingScore('65.5'), null)
+})
 
 test('evaluation context keeps both ends within the size budget', () => {
   const compact = compactFoodCourtEvaluationContext('A'.repeat(200) + 'MIDDLE' + 'Z'.repeat(200), 120)

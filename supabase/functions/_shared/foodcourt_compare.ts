@@ -12,6 +12,7 @@ import {
   foodCourtLoopHasBudget,
   foodCourtTextSimilarity,
   rankFoodCourtRagDocuments,
+  resolveFoodCourtPassingThresholds,
 } from './foodcourt_loop_utils.ts'
 
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
@@ -893,13 +894,34 @@ function fcMaxLoopsEnvName(surface: FoodCourtLoopSurface): string {
   if (surface === 'weekly_report') return 'FOODCOURT_LOOP_MAX_WEEKLY'
   return 'FOODCOURT_LOOP_MAX_ASK'
 }
-function resolveFoodCourtLoopConfig(surface: FoodCourtLoopSurface): FoodCourtLoopConfig {
+async function resolveFoodCourtLoopConfig(
+  surface: FoodCourtLoopSurface,
+  supabase?: SupabaseClient | null,
+): Promise<FoodCourtLoopConfig> {
   const enabled = fcEnvFlag('FOODCOURT_LOOP_ENABLED', true) && fcEnvFlag(fcApplyFlagName(surface), true)
   // surface専用の上限(例: FOODCOURT_LOOP_MAX_DAILY)を優先し、無ければ共通のFOODCOURT_LOOP_MAX、それも無ければsurfaceごとの既定値。
   const maxLoopsRaw = Number(Deno.env.get(fcMaxLoopsEnvName(surface)) ?? Deno.env.get('FOODCOURT_LOOP_MAX') ?? FOODCOURT_LOOP_DEFAULT_MAX[surface])
   const maxLoops = Number.isFinite(maxLoopsRaw) && maxLoopsRaw > 0 ? Math.min(5, Math.trunc(maxLoopsRaw)) : FOODCOURT_LOOP_DEFAULT_MAX[surface]
-  const passTotal = Number(Deno.env.get('FOODCOURT_LOOP_PASS_TOTAL') ?? '75') || 75
-  const passEach = Number(Deno.env.get('FOODCOURT_LOOP_PASS_EACH') ?? '65') || 65
+  const fallbackTotal = Number(Deno.env.get('FOODCOURT_LOOP_PASS_TOTAL') ?? '75') || 75
+  const fallbackEach = Number(Deno.env.get('FOODCOURT_LOOP_PASS_EACH') ?? '65') || 65
+  let configuredScore: unknown = null
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('line_admin_console_settings')
+      .select('setting_value')
+      .eq('setting_key', 'foodcourt_evolution_passing_score')
+      .maybeSingle()
+    if (error) {
+      console.error('Failed to load foodcourt AI passing score:', error.message)
+    } else {
+      configuredScore = data?.setting_value
+    }
+  }
+  const { passTotal, passEach } = resolveFoodCourtPassingThresholds(
+    configuredScore,
+    fallbackTotal,
+    fallbackEach,
+  )
   const providerRaw = String(Deno.env.get('FOODCOURT_LOOP_EVALUATOR_PROVIDER') ?? '').trim().toLowerCase()
   const evaluatorProvider: FoodCourtChatProvider = (['groq', 'gemini', 'claude', 'openai', 'grok'] as const).includes(providerRaw as FoodCourtChatProvider)
     ? providerRaw as FoodCourtChatProvider
@@ -1242,7 +1264,7 @@ export async function runFoodCourtLoopEngineering(params: {
   storeKey?: string
   deadlineAt?: number
 }): Promise<{ answer: string | null; usages: FoodCourtAiUsage[]; loopScore: number | null; loopCount: number }> {
-  const config = resolveFoodCourtLoopConfig(params.surface)
+  const config = await resolveFoodCourtLoopConfig(params.surface, params.supabase)
   const usages: FoodCourtAiUsage[] = []
   if (!config.enabled) {
     const gen = await params.initialGenerate()
@@ -1250,7 +1272,7 @@ export async function runFoodCourtLoopEngineering(params: {
     return { answer: gen.content, usages, loopScore: null, loopCount: 1 }
   }
 
-  const modelVersion = `foodcourt-loop-v1(${config.evaluatorProvider})`
+  const modelVersion = `foodcourt-loop-v1(${config.evaluatorProvider};pass=${config.passTotal})`
   const runId = await saveFoodCourtLoopRun(params.supabase, {
     storeKey: String(params.storeKey ?? ''),
     surface: params.surface,

@@ -37,6 +37,11 @@ import {
   fcSalesDate,
 } from "../_shared/foodcourt_compare.ts"
 import {
+  FOODCOURT_PASSING_SCORE_MAX,
+  FOODCOURT_PASSING_SCORE_MIN,
+  normalizeFoodCourtPassingScore,
+} from "../_shared/foodcourt_loop_utils.ts"
+import {
   pushLineMessagesToTarget,
   resolveChannelAccessToken,
 } from "../_shared/line_client.ts"
@@ -109,6 +114,23 @@ const corsHeaders = {
 }
 
 const FOODCOURT_WEEKLY_REPORT_PAGE_BASE = "https://marugo-s.github.io/line_report/foodcourt-weekly-report.html"
+
+async function resolveFoodCourtPassingAwareCacheVersion(
+  supabase: ReturnType<typeof createClient>,
+  baseVersion: string,
+): Promise<string> {
+  const { data, error } = await supabase
+    .from("line_admin_console_settings")
+    .select("setting_value")
+    .eq("setting_key", "foodcourt_evolution_passing_score")
+    .maybeSingle()
+  if (error) {
+    console.error("Failed to load foodcourt passing score for cache version:", error.message)
+    return baseVersion
+  }
+  const score = normalizeFoodCourtPassingScore(data?.setting_value)
+  return score == null ? baseVersion : `${baseVersion}-pass${score}`
+}
 
 function weeklyReportHtml(report: string): string {
   const escape = (value: string) => value.replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] ?? c))
@@ -1331,7 +1353,10 @@ Deno.serve(async (req, info) => {
       if (!storeKey) return json({ error: "store_key is required." }, 400)
       const reportIdParam = url.searchParams.get("report_id")
       // 実効バージョン: ループが日次で有効なときだけ v12-loop（無効の間は v11 のまま＝既存キャッシュを維持）。
-      const dailyAiVersion = resolveFoodCourtDailyAnalysisVersion()
+      const dailyAiVersion = await resolveFoodCourtPassingAwareCacheVersion(
+        supabase,
+        resolveFoodCourtDailyAnalysisVersion(),
+      )
       const { data, error } = await supabase
         .from("foodcourt_tenant_reports")
         .select("id, report_date, base_tenant_name, tenants, created_at")
@@ -1448,13 +1473,17 @@ Deno.serve(async (req, info) => {
       }
       const startDate = startRaw <= endRaw ? startRaw : endRaw
       const endDate = startRaw <= endRaw ? endRaw : startRaw
+      const periodAiVersion = await resolveFoodCourtPassingAwareCacheVersion(
+        supabase,
+        FOODCOURT_ANALYSIS_AI_VERSION,
+      )
       const { data: cached, error: cacheErr } = await supabase
         .from("foodcourt_period_ai_summary")
         .select("summary_text")
         .eq("store_partition_key", storeKey)
         .eq("start_date", startDate)
         .eq("end_date", endDate)
-        .eq("model_version", FOODCOURT_ANALYSIS_AI_VERSION)
+        .eq("model_version", periodAiVersion)
         .maybeSingle()
       if (cacheErr) return json({ error: cacheErr.message }, 500)
       if (cached && (cached as { summary_text?: unknown }).summary_text) {
@@ -1475,7 +1504,7 @@ Deno.serve(async (req, info) => {
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
-      const modelVersion = FOODCOURT_ANALYSIS_AI_VERSION
+      const modelVersion = periodAiVersion
       const { logs: dailyLogs, error: dailyLogsError, count: dailyLogsCount } = await loadFoodCourtDailyLogs(
         supabase,
         storeKey,
@@ -1613,11 +1642,7 @@ Deno.serve(async (req, info) => {
         .eq("setting_key", "foodcourt_evolution_passing_score")
         .maybeSingle()
 
-      let passingScore = 65
-      if (passSetting?.setting_value) {
-        const parsed = parseInt(passSetting.setting_value, 10)
-        if (!isNaN(parsed)) passingScore = parsed
-      }
+      const passingScore = normalizeFoodCourtPassingScore(passSetting?.setting_value) ?? 65
 
       return json({
         rows: data ?? [],
@@ -2441,7 +2466,17 @@ Deno.serve(async (req, info) => {
         const key = String(rawKey).trim()
         if (!key || key.length > 200) continue
         const raw = settings[rawKey]
-        const value = raw == null ? "" : (typeof raw === "string" ? raw : String(raw))
+        let value = raw == null ? "" : (typeof raw === "string" ? raw : String(raw))
+        if (key === "foodcourt_evolution_passing_score") {
+          const score = normalizeFoodCourtPassingScore(value)
+          if (score == null) {
+            throw {
+              status: 400,
+              message: `foodcourt_evolution_passing_score must be an integer from ${FOODCOURT_PASSING_SCORE_MIN} to ${FOODCOURT_PASSING_SCORE_MAX}.`,
+            } satisfies AppError
+          }
+          value = String(score)
+        }
         if (value.length > 20000) continue
         rows.push({ setting_key: key, setting_value: value, updated_at: now })
       }
