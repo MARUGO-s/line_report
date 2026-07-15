@@ -304,6 +304,7 @@ async function sendTestReservationLineNotification(params: {
   let targetRoomIds = await resolveGmailAlertTargetRooms(
     supabase,
     fallbackTargetRoomId,
+    { bypassThrottle: true },
   );
   if (roomOverride) {
     targetRoomIds = [{ roomId: roomOverride, storeKey: "" }];
@@ -510,6 +511,7 @@ async function maybeSendGmailReservationAlerts(params: {
   const enabledTargets = await resolveGmailAlertTargetRooms(
     supabase,
     env.fallbackTargetRoomId,
+    { now },
   );
   if (enabledTargets.length === 0) {
     return { skipped: true, reason: "no_target_rooms" };
@@ -655,6 +657,8 @@ async function maybeSendGmailReservationAlerts(params: {
 
       batchSuccessfulRoomIds.push(targetRoomId);
       successfulTargetRoomIds.add(targetRoomId);
+      // 配信間隔スロットリングの起点を更新（このルームの次回対象タイミングをここから数える）。
+      await markGmailAlertRoomSent(supabase, targetRoomId, now.toISOString());
       await writeDeliveryLog(supabase, {
         jst_hour: jstHour,
         status: "gmail_alert_sent",
@@ -1275,11 +1279,12 @@ function resolveRoomLineToken(storeKey: string, fallbackToken: string): string {
 async function resolveGmailAlertTargetRooms(
   supabase: ReturnType<typeof createClient>,
   fallbackTargetRoomId: string,
+  opts: { now?: Date; bypassThrottle?: boolean } = {},
 ): Promise<GmailAlertTarget[]> {
   const { data, error } = await supabase
     .from("room_summary_settings")
     .select(
-      "room_id, is_enabled, gmail_reservation_alert_enabled, receipt_report_store_partition_key, room_name",
+      "room_id, is_enabled, gmail_reservation_alert_enabled, receipt_report_store_partition_key, room_name, gmail_alert_interval_minutes, gmail_alert_last_sent_at",
     );
 
   if (error) {
@@ -1290,6 +1295,9 @@ async function resolveGmailAlertTargetRooms(
     const fallback = String(fallbackTargetRoomId ?? "").trim();
     return fallback ? [{ roomId: fallback, storeKey: "" }] : [];
   }
+
+  const now = opts.now ?? new Date();
+  const bypassThrottle = opts.bypassThrottle === true;
 
   const rows = Array.isArray(data) ? data : [];
   const seen = new Set<string>();
@@ -1302,6 +1310,25 @@ async function resolveGmailAlertTargetRooms(
     const roomId = String(r?.room_id ?? "").trim();
     if (!roomId || seen.has(roomId)) continue;
     seen.add(roomId);
+
+    // 配信間隔スロットリング: NULL/1=毎回対象（従来どおりのリアルタイム）。2以上なら、
+    // 前回このルームへ送信できてからその分数が経過するまでスキップし、まとめて配信する
+    // （グループ宛Pushは参加人数分課金されるため、細切れ送信より回数を減らせる）。
+    if (!bypassThrottle) {
+      const intervalMinutes = r?.gmail_alert_interval_minutes != null
+        ? Number(r.gmail_alert_interval_minutes)
+        : 1;
+      if (Number.isFinite(intervalMinutes) && intervalMinutes > 1) {
+        const lastSentAtRaw = String(r?.gmail_alert_last_sent_at ?? "").trim();
+        const lastSentAtMs = lastSentAtRaw ? Date.parse(lastSentAtRaw) : NaN;
+        if (
+          Number.isFinite(lastSentAtMs) &&
+          now.getTime() - lastSentAtMs < intervalMinutes * 60_000
+        ) {
+          continue;
+        }
+      }
+    }
 
     let storeKey = String(r?.receipt_report_store_partition_key ?? "").trim();
     if (!storeKey) {
@@ -1322,6 +1349,28 @@ async function resolveGmailAlertTargetRooms(
 
   const fallback = String(fallbackTargetRoomId ?? "").trim();
   return fallback ? [{ roomId: fallback, storeKey: "" }] : [];
+}
+
+// このルームへ実際に配信できた時刻を記録する（配信間隔スロットリングの起点。best-effort）。
+async function markGmailAlertRoomSent(
+  supabase: ReturnType<typeof createClient>,
+  roomId: string,
+  sentAtIso: string,
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from("room_summary_settings")
+      .update({ gmail_alert_last_sent_at: sentAtIso })
+      .eq("room_id", roomId);
+    if (error) {
+      console.error("markGmailAlertRoomSent failed:", error.message);
+    }
+  } catch (e) {
+    console.error(
+      "markGmailAlertRoomSent threw:",
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }
 
 function planGmailAlertDeliveryBatches(

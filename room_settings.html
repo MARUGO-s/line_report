@@ -263,7 +263,7 @@
       {key:'petty_receipt_analysis_enabled', t:'小口レシートの解析', d:'小口現金のレシートを自動解析します'},
     ]},
     { id:'calendar', title:'予約・カレンダー', icon:'calendar', caption:'予約通知・カレンダー連携', items:[
-      {key:'gmail_reservation_alert_enabled', t:'Gmail予約通知', d:'Gmailで受信した予約をLINEに通知します'},
+      {key:'gmail_reservation_alert_enabled', t:'Gmail予約通知', d:'Gmailで受信した予約をLINEに通知します', extra:'gmailAlertInterval'},
       {key:'today_reservation_alert_enabled', t:'本日の予約状況を配信', d:'当日の予約一覧を毎朝配信します'},
       {key:'calendar_tomorrow_reminder_enabled', t:'明日の予定を配信', d:'翌日の予定を配信します'},
       {key:'calendar_ai_auto_create_enabled', t:'予定の自動登録', d:'予定をカレンダーに自動登録します'},
@@ -279,6 +279,13 @@
   var fcWeekly = { dow:1, hour:9, minute:0 };
   // 口コミの新着通知の配信時刻（毎日・曜日なし。NULL=既定 8時/10分）。
   var reviewAlert = { hour:8, minute:10 };
+  // Gmail予約通知の配信間隔（分）。NULL/1=リアルタイム（毎分チェック）。
+  var gmailAlertInterval = { minutes:1 };
+  var GMAIL_ALERT_INTERVAL_OPTIONS = [
+    [1,'1分ごと（リアルタイム）'], [15,'15分ごとにまとめる'], [30,'30分ごとにまとめる'],
+    [60,'1時間ごとにまとめる'], [120,'2時間ごとにまとめる'], [180,'3時間ごとにまとめる'],
+    [360,'6時間ごとにまとめる'], [720,'12時間ごとにまとめる'], [1440,'1日1回にまとめる'],
+  ];
   var WDAY_JP = ['日','月','火','水','木','金','土'];
 
   var el = function(id){ return document.getElementById(id); };
@@ -348,6 +355,7 @@
         fcWeekly.minute = (cfg.foodcourt_weekly_minute != null) ? Number(cfg.foodcourt_weekly_minute) : 0;
         reviewAlert.hour   = (cfg.review_alert_hour   != null) ? Number(cfg.review_alert_hour)   : 8;
         reviewAlert.minute = (cfg.review_alert_minute != null) ? Number(cfg.review_alert_minute) : 10;
+        gmailAlertInterval.minutes = (cfg.gmail_alert_interval_minutes != null) ? Number(cfg.gmail_alert_interval_minutes) : 1;
         var roomName = (cfg.room_name && String(cfg.room_name).trim()) || roomId || 'このルーム';
         el('loginScreen').hidden = true; el('appScreen').hidden = false;
         el('roomChipId').textContent = roomName;
@@ -404,6 +412,19 @@
       + '</div>';
   }
 
+  // Gmail予約通知の「配信間隔」セレクタ（トグルの直下に表示）。グループ宛Pushは参加人数分
+  // 課金されるため、細切れに届くより間隔を空けてまとめた方が送信回数（コスト）を抑えられる。
+  function gmailAlertIntervalControlHtml(){
+    var opt = GMAIL_ALERT_INTERVAL_OPTIONS.map(function(o){
+      return '<option value="'+o[0]+'"'+(o[0]===gmailAlertInterval.minutes?' selected':'')+'>'+esc(o[1])+'</option>';
+    }).join('');
+    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
+    return '<div class="gmail-alert-interval-when" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px 14px;">'
+      + '<span style="font-size:12px;color:#8a94a6;font-weight:700;width:100%">⏱ 配信間隔（1分ごとのリアルタイム、または間隔を空けてまとめて配信）</span>'
+      + '<select class="gmail-alert-interval-sel" data-gmailalertinterval="minutes" style="'+ss+'width:100%;">'+opt+'</select>'
+      + '</div>';
+  }
+
 
   function render(){
     el('list').innerHTML = SECTIONS.map(function(sec){
@@ -418,6 +439,7 @@
         if (it.extra === 'domeWeekly') r += domeWeeklyControlHtml();
         if (it.extra === 'fcWeekly') r += fcWeeklyControlHtml();
         if (it.extra === 'reviewAlert') r += reviewAlertControlHtml();
+        if (it.extra === 'gmailAlertInterval') r += gmailAlertIntervalControlHtml();
         return r;
       }).join('');
       return '<section class="sec" data-sec="'+sec.id+'">'+
@@ -485,6 +507,12 @@
     if (raSel){
       var kind = raSel.dataset.reviewalert; var val = parseInt(raSel.value, 10);
       if (!isNaN(val)){ reviewAlert[kind] = val; saveField('review_alert_'+kind, val); }
+      return;
+    }
+    var gaiSel = e.target.closest('select.gmail-alert-interval-sel');
+    if (gaiSel){
+      var val = parseInt(gaiSel.value, 10);
+      if (!isNaN(val)){ gmailAlertInterval.minutes = val; saveField('gmail_alert_interval_minutes', val); }
       return;
     }
     var inp = e.target.closest('input[type=checkbox]');

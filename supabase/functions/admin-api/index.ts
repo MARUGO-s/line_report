@@ -429,7 +429,12 @@ const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," 
   ",today_reservation_alert_hour,today_reservation_alert_minute" +
   ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute" +
   ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute" +
-  ",review_alert_hour,review_alert_minute"
+  ",review_alert_hour,review_alert_minute" +
+  ",gmail_alert_interval_minutes"
+
+// 予約メール通知(gmail-alert-cron)の配信間隔（分）として許可する値。
+// 1(既定・null扱い)=毎分チェック(リアルタイム)。それ以外は「N分おきにまとめて配信」。
+const GMAIL_ALERT_INTERVAL_MINUTES_ALLOWED = new Set([1, 15, 30, 60, 120, 180, 360, 720, 1440])
 
 function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -478,6 +483,11 @@ function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<strin
   if ("review_alert_minute" in body) {
     const v = Number(body.review_alert_minute)
     out.review_alert_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
+  }
+  // 予約メール通知の配信間隔（分）。NULL/1=リアルタイム（毎分チェック）。
+  if ("gmail_alert_interval_minutes" in body) {
+    const v = Number(body.gmail_alert_interval_minutes)
+    out.gmail_alert_interval_minutes = GMAIL_ALERT_INTERVAL_MINUTES_ALLOWED.has(v) ? v : null
   }
   return out
 }
