@@ -876,8 +876,9 @@ function fcEnvFlag(name: string, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase())
 }
 function fcRequestDeadlineAt(): number {
-  const raw = Number(Deno.env.get('FOODCOURT_AI_REQUEST_BUDGET_MS') ?? '52000')
-  const budget = Number.isFinite(raw) ? Math.max(20000, Math.min(55000, Math.trunc(raw))) : 52000
+  // Supabase's 150-second request idle limitに40秒の応答余裕を残し、改善ループを完了させる。
+  const raw = Number(Deno.env.get('FOODCOURT_AI_REQUEST_BUDGET_MS') ?? '110000')
+  const budget = Number.isFinite(raw) ? Math.max(20000, Math.min(110000, Math.trunc(raw))) : 110000
   return Date.now() + budget
 }
 function fcApplyFlagName(surface: FoodCourtLoopSurface): string {
