@@ -128,6 +128,13 @@ Deno.serve(async (req) => {
       continue
     }
 
+    // 予約0件の日は「本日のご予約はありません」だけのPushを送らない（グループ宛は人数分課金されるため）。
+    // 重複防止ログ自体はこの分は既に確保済みなので、同日中の再実行では二重送信されない。
+    if (matched.length === 0) {
+      skipped.push({ room_id: target.roomId, reason: "zero_reservations" })
+      continue
+    }
+
     const storeDisplayName = resolveReceiptSheetsStoreDisplayName(storeKey)
       ?? matched.find((r) => r.storeName)?.storeName
       ?? null
