@@ -1,4 +1,4 @@
--- フードコートAIの長期学習フィードバック。
+-- フードコートAIの長期学習フィードバック（本番適用version: 20260715120023）。
 -- 合格回答または人が helpful と評価した回答だけを、次回生成の参考例として再利用する。
 
 alter table public.foodcourt_ai_loop_runs
