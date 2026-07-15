@@ -54,6 +54,33 @@ export function foodCourtTextSimilarity(a: string, b: string): number {
   return shared / Math.max(aa.size, bb.size)
 }
 
+export type FoodCourtRagDocumentCandidate = {
+  source_run_id: string
+  search_text: string
+  document_markdown: string
+  final_score?: number | null
+  updated_at?: string | null
+}
+
+export function rankFoodCourtRagDocuments(
+  taskText: string,
+  documents: FoodCourtRagDocumentCandidate[],
+  limit = 2,
+): FoodCourtRagDocumentCandidate[] {
+  const safeLimit = Math.max(1, Math.min(5, Math.trunc(limit) || 1))
+  return documents
+    .map((document) => ({
+      document,
+      similarity: foodCourtTextSimilarity(taskText, document.search_text),
+    }))
+    .sort((a, b) => b.similarity - a.similarity
+      || Number(b.document.final_score ?? 0) - Number(a.document.final_score ?? 0)
+      || String(b.document.updated_at ?? '').localeCompare(String(a.document.updated_at ?? '')))
+    .filter((candidate, index) => index === 0 || candidate.similarity >= 0.03)
+    .slice(0, safeLimit)
+    .map((candidate) => candidate.document)
+}
+
 export function compactFoodCourtEvaluationContext(context: string, maxChars = 14000): string {
   if (context.length <= maxChars) return context
   const marker = '\n\n...（評価用に中間部分を省略）...\n\n'

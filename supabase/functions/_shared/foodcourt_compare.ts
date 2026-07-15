@@ -11,6 +11,7 @@ import {
   foodCourtEvaluationPassed,
   foodCourtLoopHasBudget,
   foodCourtTextSimilarity,
+  rankFoodCourtRagDocuments,
 } from './foodcourt_loop_utils.ts'
 
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
@@ -1120,6 +1121,54 @@ async function loadFoodCourtLearningMemory(
 ): Promise<string> {
   if (!supabase || !storeKey) return ''
   try {
+    const { data: ragRows, error: ragError } = await supabase
+      .from('foodcourt_ai_rag_documents')
+      .select('source_run_id,search_text,document_markdown,final_score,metadata,updated_at')
+      .ilike('store_partition_key', storeKey)
+      .eq('surface', surface)
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(80)
+    if (!ragError && Array.isArray(ragRows) && ragRows.length) {
+      const ranked = rankFoodCourtRagDocuments(taskText, ragRows.map((row) => ({
+        source_run_id: String((row as { source_run_id?: unknown }).source_run_id ?? ''),
+        search_text: String((row as { search_text?: unknown }).search_text ?? ''),
+        document_markdown: String((row as { document_markdown?: unknown }).document_markdown ?? ''),
+        final_score: Number((row as { final_score?: unknown }).final_score ?? 0),
+        updated_at: String((row as { updated_at?: unknown }).updated_at ?? ''),
+      })), 2)
+
+      const riskCounts = new Map<string, number>()
+      for (const row of ragRows) {
+        const metadata = (row as { metadata?: unknown }).metadata
+        if (!metadata || typeof metadata !== 'object') continue
+        const risks = (metadata as { risk_flags?: unknown }).risk_flags
+        if (!Array.isArray(risks)) continue
+        for (const risk of risks) {
+          const text = String(risk ?? '').trim().slice(0, 120)
+          if (text) riskCounts.set(text, (riskCounts.get(text) ?? 0) + 1)
+        }
+      }
+      const repeatedRisks = Array.from(riskCounts.entries())
+        .filter(([, count]) => count >= 2)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([text]) => `- ${text}`)
+
+      const blocks: string[] = []
+      if (ranked.length) {
+        const examples = ranked.map((document, index) =>
+          `## 参考${index + 1}\n${document.document_markdown.slice(0, 2400)}`,
+        ).join('\n\n')
+        blocks.push(`# RAGから検索した承認済み学習内容\n今回の実データを最優先し、過去の数字・日付は流用しないこと。\n\n${examples}`)
+      }
+      if (repeatedRisks.length) blocks.push(`# 過去の評価で繰り返し検出された注意事項\n${repeatedRisks.join('\n')}`)
+      if (blocks.length) return blocks.join('\n\n')
+    } else if (ragError && String((ragError as { code?: unknown }).code ?? '') !== '42P01') {
+      console.error('foodcourt_ai_rag_documents select failed:', ragError.message)
+    }
+
+    // RAGテーブルの初回デプロイ前または未バックフィル時だけ、従来の実行履歴検索へフォールバックする。
     const { data: runs, error } = await supabase
       .from('foodcourt_ai_loop_runs')
       .select('id,user_input,final_answer,final_score,returned_reason,source_ref,created_at')

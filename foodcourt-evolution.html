@@ -410,6 +410,19 @@
     </div>
 
     <!-- AI Loop② quality evaluation runs -->
+    <div class="card" id="ragCard" style="display:none">
+      <div class="card-h">
+        <div class="card-t"><span class="em">📚</span>RAG学習ファイル</div>
+        <button class="btn ghost" id="ragDownloadBtn" style="font-size:12px;padding:6px 12px;display:flex;align-items:center;gap:7px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          Markdownを書き出す
+        </button>
+      </div>
+      <div class="loop-kpi-row" id="ragKpiRow"></div>
+      <div id="ragRecentWrap"></div>
+    </div>
+
+    <!-- AI Loop② quality evaluation runs -->
     <div class="card" id="loopCard" style="display:none">
       <div class="card-h">
         <div class="card-t"><span class="em">🔬</span>AI 回答品質ループ（ループ②）</div>
@@ -460,6 +473,7 @@
     msNavToggle: $('msNavToggle'), msSide: $('msSide'), msNavBackdrop: $('msNavBackdrop'),
     passingScoreRange: $('passingScoreRange'),
     passingScoreLabel: $('passingScoreLabel'),
+    ragDownloadBtn: $('ragDownloadBtn'),
   };
 
   // ===== theme =====
@@ -550,14 +564,17 @@
   // tryConnect と loadData を統合: 認証確認と同時にデータも取得し、二重APIコールを防ぐ。
   async function tryConnectAndLoad(){
     try{
-      const [histBody, loopBody] = await Promise.all([
+      const [histBody, loopBody, ragBody] = await Promise.all([
         apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
         apiFetch('/foodcourt/ai-loop-runs?limit=30&store_key=marugoS').catch(()=>({ runs: [] })),
+        apiFetch('/foodcourt/ai-rag?limit=100&store_key=marugoS').catch(()=>({ count:0, documents:[] })),
       ]);
       setAuthBadge(true);
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
       modelSelectionData = histBody.model_selection ?? null;
       loopRuns = Array.isArray(loopBody.runs) ? loopBody.runs : [];
+      ragDocuments = Array.isArray(ragBody.documents) ? ragBody.documents : [];
+      ragCount = Number(ragBody.count || ragDocuments.length || 0);
       if (histBody.passing_score != null) {
         passingScore = Number(histBody.passing_score);
         syncPassingScoreUI();
@@ -616,19 +633,24 @@
 
   let historyRows = [];
   let loopRuns = [];
+  let ragDocuments = [];
+  let ragCount = 0;
   let modelSelectionData = null;
 
   async function loadData(){
     dom.loadMsg.textContent = '読み込み中…'; dom.loadMsg.className='msg';
     dom.resultArea.hidden = true;
     try{
-      const [histBody, loopBody] = await Promise.all([
+      const [histBody, loopBody, ragBody] = await Promise.all([
         apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
         apiFetch('/foodcourt/ai-loop-runs?limit=30&store_key=marugoS').catch(()=>({ runs: [] })),
+        apiFetch('/foodcourt/ai-rag?limit=100&store_key=marugoS').catch(()=>({ count:0, documents:[] })),
       ]);
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
       modelSelectionData = histBody.model_selection ?? null;
       loopRuns = Array.isArray(loopBody.runs) ? loopBody.runs : [];
+      ragDocuments = Array.isArray(ragBody.documents) ? ragBody.documents : [];
+      ragCount = Number(ragBody.count || ragDocuments.length || 0);
       if (histBody.passing_score != null) {
         passingScore = Number(histBody.passing_score);
         syncPassingScoreUI();
@@ -651,6 +673,7 @@
 
     renderTable();
     renderLoopRuns();
+    renderRagDocuments();
     renderModelSelection();
   }
 
@@ -1083,8 +1106,59 @@
       const result = await apiPost('/foodcourt/ai-loop-feedback', { run_id:runId, rating });
       const run = loopRuns.find(r=>r.id===runId);
       if(run) run.feedback = result.feedback || { rating };
+      const ragBody = await apiFetch('/foodcourt/ai-rag?limit=100&store_key=marugoS').catch(()=>null);
+      if(ragBody){
+        ragDocuments = Array.isArray(ragBody.documents) ? ragBody.documents : [];
+        ragCount = Number(ragBody.count || ragDocuments.length || 0);
+      }
       renderLoopRuns();
+      renderRagDocuments();
     }catch(e){ alert(e.message||String(e)); }
+  }
+  window.setLoopFeedback = setLoopFeedback;
+
+  function buildRagMarkdown(){
+    const generated = new Date().toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'});
+    const header = `# フードコートAI RAG学習ファイル\n\n- 店舗: marugoS\n- 文書数: ${ragCount}\n- 書き出し日時: ${generated} JST\n`;
+    return header + ragDocuments.map((document, index)=>
+      `\n\n---\n\n<!-- document ${index + 1}: ${String(document.source_run_id||'')} -->\n\n${String(document.document_markdown||'').trim()}`
+    ).join('') + '\n';
+  }
+
+  function downloadRagMarkdown(){
+    if(!ragDocuments.length) return;
+    const blob = new Blob([buildRagMarkdown()], { type:'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const ymd = new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
+    link.href = url;
+    link.download = `foodcourt-rag-marugos-${ymd}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }
+  dom.ragDownloadBtn.addEventListener('click', downloadRagMarkdown);
+
+  function renderRagDocuments(){
+    const card = document.getElementById('ragCard');
+    const kpi = document.getElementById('ragKpiRow');
+    const recent = document.getElementById('ragRecentWrap');
+    card.style.display = '';
+    dom.ragDownloadBtn.disabled = ragDocuments.length === 0;
+    const humanApproved = ragDocuments.filter(document=>document.source_type==='human_helpful').length;
+    const latest = ragDocuments[0]?.updated_at ? fmtDatetime(ragDocuments[0].updated_at) : '—';
+    kpi.innerHTML = `
+      <div class="loop-kpi-sm"><div class="k">有効な学習文書</div><div class="v">${ragCount}</div></div>
+      <div class="loop-kpi-sm"><div class="k">人による承認</div><div class="v ${humanApproved>0?'good':'neutral'}">${humanApproved}</div></div>
+      <div class="loop-kpi-sm"><div class="k">最終更新</div><div class="v" style="font-size:14px">${escH(latest)}</div></div>`;
+    if(!ragDocuments.length){
+      recent.innerHTML = '<div style="color:var(--tx-3);font-size:13px;margin-top:14px">承認済みの学習文書はまだありません。</div>';
+      return;
+    }
+    recent.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">${ragDocuments.slice(0,6).map(document=>`
+      <span class="surface-badge" title="${escH(String(document.title||''))}">${escH(surfaceLabel(document.surface))} · ${document.final_score!=null?escH(String(Math.round(Number(document.final_score))))+'点':'人の承認'}</span>
+    `).join('')}</div>`;
   }
 
   function renderLoopRuns(){

@@ -1052,6 +1052,7 @@ Deno.serve(async (req, info) => {
       "/foodcourt/evolution-history",
       "/foodcourt/ai-loop-runs",
       "/foodcourt/ai-loop-feedback",
+      "/foodcourt/ai-rag",
       "/foodcourt/daily-logs",
       "/foodcourt/daily-summary",
       "/foodcourt/daily-summary/list",
@@ -1664,6 +1665,29 @@ Deno.serve(async (req, info) => {
         feedback: feedbackByRun.get(r.id as string) ?? null,
       }))
       return json({ runs: result }, 200)
+    }
+    if (req.method === "GET" && path === "/foodcourt/ai-rag") {
+      const requestedStore = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? storeScope ?? "").trim()
+      const surface = String(url.searchParams.get("surface") ?? "").trim()
+      const allowedSurfaces = new Set(["ask", "daily_summary", "period_summary", "weekly_report"])
+      if (surface && !allowedSurfaces.has(surface)) return json({ error: "Invalid surface." }, 400)
+      const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(200, Math.trunc(rawLimit))) : 100
+      let ragQuery = supabase
+        .from("foodcourt_ai_rag_documents")
+        .select("source_run_id,surface,source_type,title,document_markdown,final_score,metadata,created_at,updated_at", { count: "exact" })
+        .eq("is_active", true)
+        .order("updated_at", { ascending: false })
+        .limit(limit)
+      if (requestedStore) ragQuery = ragQuery.ilike("store_partition_key", requestedStore)
+      if (surface) ragQuery = ragQuery.eq("surface", surface)
+      const { data, error, count } = await ragQuery
+      if (error) return json({ error: error.message }, 500)
+      return json({
+        count: count ?? data?.length ?? 0,
+        generated_at: new Date().toISOString(),
+        documents: data ?? [],
+      }, 200)
     }
     if (req.method === "POST" && path === "/foodcourt/ai-loop-feedback") {
       const body = await parseJson(workReq)

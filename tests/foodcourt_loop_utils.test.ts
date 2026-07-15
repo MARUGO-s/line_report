@@ -6,6 +6,7 @@ import {
   foodCourtEvaluationPassed,
   foodCourtLoopHasBudget,
   foodCourtTextSimilarity,
+  rankFoodCourtRagDocuments,
 } from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
 
 test('evaluation context keeps both ends within the size budget', () => {
@@ -44,4 +45,23 @@ test('Japanese bigram similarity ranks related questions higher', () => {
   const related = foodCourtTextSimilarity('イベント日の客数を分析', 'イベントによる来客数の変化')
   const unrelated = foodCourtTextSimilarity('イベント日の客数を分析', '消耗品の勘定科目')
   assert.ok(related > unrelated)
+})
+
+test('RAG ranking keeps the most relevant approved document first', () => {
+  const ranked = rankFoodCourtRagDocuments('東京ドームイベント日の客数を分析', [
+    {
+      source_run_id: 'unrelated',
+      search_text: '消耗品の勘定科目とレシート',
+      document_markdown: '# unrelated',
+      final_score: 98,
+    },
+    {
+      source_run_id: 'related',
+      search_text: '東京ドームのイベント開催日に来客数と売上が増えた',
+      document_markdown: '# related',
+      final_score: 85,
+    },
+  ])
+  assert.equal(ranked[0]?.source_run_id, 'related')
+  assert.equal(ranked.some((row) => row.source_run_id === 'unrelated'), false)
 })
