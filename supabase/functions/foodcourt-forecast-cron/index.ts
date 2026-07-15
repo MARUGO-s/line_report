@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { chooseFoodCourtGlm } from "../_shared/foodcourt_forecast_utils.ts"
 
 // フードコート（MARUGO S）来客予測の「自己再学習型」モデル cron。
 // 毎日、蓄積された全実績から係数を学習し直し（＝貯まるほど精度が上がる）、客数・売上を予測する。
@@ -27,6 +28,7 @@ const SHRINK_K = 4        // 乗算モデルの係数のサンプルが少ない
 const MIN_TRAIN = 4       // バックテストで予測を始める最小学習日数
 const HORIZON_DAYS = 14   // 何日先まで予測するか
 const PAST_WINDOW = 28    // 何日前までの「予測 vs 実績」を保存するか
+const MODEL_HOLDOUT_DAYS = 14 // モデル選択は直近期間で比較し、古い誤差に固定されないようにする
 const LAMBDA_GRID = [1, 2, 4, 8, 16]  // GLMのリッジ正則化強度の候補（バックテストで自動選択）
 
 // 会場規模を区別する: "live"=東京ドーム本体コンサート(大)、"dome"=ドーム本体のアマ野球/その他(大)、
@@ -74,14 +76,12 @@ Deno.serve(async (req) => {
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())
 
   const todayJst = jstDate(new Date())
-  const loDate = addDays(todayJst, -(PAST_WINDOW + 60))
   const hiDate = addDays(todayJst, HORIZON_DAYS)
 
   // 1) 特徴量（イベント＋天気＋曜日）を取得（過去〜未来）
   const { data: featRows, error: featErr } = await supabase
     .from("foodcourt_daily_features")
     .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, has_soccer_pv, has_dome_main, is_rainy, max_expected_attendance")
-    .gte("business_date", loDate)
     .lte("business_date", hiDate)
     .order("business_date", { ascending: true })
   if (featErr) return json({ ok: false, error: `features load failed: ${featErr.message}` }, 500)
@@ -150,9 +150,13 @@ Deno.serve(async (req) => {
 
   let bestLambda = LAMBDA_GRID[0]
   let bestLambdaMape = Infinity
+  const holdoutStartIndex = Math.max(MIN_TRAIN + 1, hist.length - MODEL_HOLDOUT_DAYS)
+  const holdoutStartDate = hist[Math.min(holdoutStartIndex, hist.length - 1)].date
   for (const lambda of LAMBDA_GRID) {
     const rows0 = runBacktest(glmPredictor(lambda), selectStride)
-    const m = mape(rows0.map((r) => [r.gPred, r.gAct]))
+    const tuningRows = rows0.filter((r) => r.date < holdoutStartDate)
+    const scoredRows = tuningRows.length >= 4 ? tuningRows : rows0
+    const m = mape(scoredRows.map((r) => [r.gPred, r.gAct]))
     if (m != null && m < bestLambdaMape) { bestLambdaMape = m; bestLambda = lambda }
   }
 
@@ -161,12 +165,19 @@ Deno.serve(async (req) => {
   const mapeLegacyG = mape(backLegacy.map((b) => [b.gPred, b.gAct]))
   const mapeLegacyS = mape(backLegacy.map((b) => [b.sPred, b.sAct]))
   const mapeGlmG = mape(backGlm.map((b) => [b.gPred, b.gAct]))
-  // GLMがバックテストできない(データ不足でfitGLMがnullを返す等)場合はレガシーのまま。両方採点できた場合のみ比較。
-  const glmWins = mapeGlmG != null && (mapeLegacyG == null || mapeGlmG < mapeLegacyG)
+  const recentLegacy = backLegacy.filter((b) => b.date >= holdoutStartDate)
+  const recentGlm = backGlm.filter((b) => b.date >= holdoutStartDate)
+  const rollingLegacyG = mape(recentLegacy.map((b) => [b.gPred, b.gAct]))
+  const rollingGlmG = mape(recentGlm.map((b) => [b.gPred, b.gAct]))
+  // λはholdoutより前で選び、モデル同士は直近holdoutで比較する。データ不足時だけ全期間MAPEへフォールバック。
+  const glmWins = chooseFoodCourtGlm(rollingLegacyG, rollingGlmG, mapeLegacyG, mapeGlmG)
 
   const back = glmWins ? backGlm : backLegacy
   const mapeG = glmWins ? mapeGlmG : mapeLegacyG
   const mapeS = mape(back.map((b) => [b.sPred, b.sAct]))
+  const recentBack = back.filter((b) => b.date >= holdoutStartDate)
+  const rollingMapeG = mape(recentBack.map((b) => [b.gPred, b.gAct]))
+  const rollingMapeS = mape(recentBack.map((b) => [b.sPred, b.sAct]))
   const bandG = mapeG ?? 0.25 // 予測区間の幅（採用モデルのバックテスト誤差率。無ければ暫定±25%）
   const bandS = mapeS ?? 0.25
   const chosenModelVersion = glmWins ? `glm-poisson-v1(lambda=${bestLambda})` : MODEL_VERSION
@@ -213,6 +224,8 @@ Deno.serve(async (req) => {
     backtest_days: back.length,
     mape_guests: mapeG != null ? Math.round(mapeG * 1000) / 10 : null, // %
     mape_sales: mapeS != null ? Math.round(mapeS * 1000) / 10 : null,
+    rolling_mape_guests: rollingMapeG != null ? Math.round(rollingMapeG * 1000) / 10 : null,
+    rolling_mape_sales: rollingMapeS != null ? Math.round(rollingMapeS * 1000) / 10 : null,
     upcoming: upcoming.slice(0, HORIZON_DAYS),
     rows_to_upsert: rows.length,
     model_selection: {
@@ -221,6 +234,9 @@ Deno.serve(async (req) => {
       glm_lambda: bestLambda,
       legacy_mape_guests: mapeLegacyG != null ? Math.round(mapeLegacyG * 1000) / 10 : null,
       glm_mape_guests: mapeGlmG != null ? Math.round(mapeGlmG * 1000) / 10 : null,
+      recent_legacy_mape_guests: rollingLegacyG != null ? Math.round(rollingLegacyG * 1000) / 10 : null,
+      recent_glm_mape_guests: rollingGlmG != null ? Math.round(rollingGlmG * 1000) / 10 : null,
+      holdout_days: recentBack.length,
     },
   }
 
@@ -252,6 +268,8 @@ Deno.serve(async (req) => {
       backtest_days: backLegacy.length,
       mape_guests: mapeLegacyG,
       mape_sales: mapeLegacyS,
+      rolling_mape_guests: rollingMapeG,
+      rolling_mape_sales: rollingMapeS,
       advanced_stats: advStats,
       // 実際に forecast_predictions を生成したモデルの情報（AI解説の乗算係数とは別枠。透明性のための記録）。
       model_selection: {
@@ -260,6 +278,9 @@ Deno.serve(async (req) => {
         glm_lambda: bestLambda,
         legacy_mape_guests: mapeLegacyG,
         glm_mape_guests: mapeGlmG,
+        recent_legacy_mape_guests: rollingLegacyG,
+        recent_glm_mape_guests: rollingGlmG,
+        holdout_days: recentBack.length,
       },
       updated_at: new Date().toISOString(),
     }, { onConflict: "tenant_name" })
@@ -278,6 +299,8 @@ Deno.serve(async (req) => {
       backtest_days: back.length,
       mape_guests: mapeG,
       mape_sales: mapeS,
+      rolling_mape_guests: rollingMapeG,
+      rolling_mape_sales: rollingMapeS,
       mean_guests: facFull.meanG,
     }, { onConflict: "tenant_name,log_date" })
   if (histErr) console.error("foodcourt_forecast_history upsert failed:", histErr.message)

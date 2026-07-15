@@ -5,19 +5,26 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
+import {
+  buildFoodCourtRevisionMessages,
+  compactFoodCourtEvaluationContext,
+  foodCourtEvaluationPassed,
+  foodCourtLoopHasBudget,
+  foodCourtTextSimilarity,
+} from './foodcourt_loop_utils.ts'
 
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-07-09: 日報×実績の効果対照表をコード側で組み立ててAIに渡すため v14 に上げ、旧キャッシュを再生成させる。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v15-dynamic-drivers'
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v16-loop-learning'
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v15-loop-dynamic-drivers'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v16-loop-learning'
 // 日次サマリーの「実効」キャッシュバージョン。ループが日次で実際に有効なときだけ loop 版になり、
 // 無効（既定）の間は v13-daily-logs を使う（日報注入の再生成は必要なので v11 には戻さない）。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
-  return (fcEnvFlag('FOODCOURT_LOOP_ENABLED', false) && fcEnvFlag('FOODCOURT_LOOP_APPLY_TO_DAILY', false))
+  return (fcEnvFlag('FOODCOURT_LOOP_ENABLED', true) && fcEnvFlag('FOODCOURT_LOOP_APPLY_TO_DAILY', true))
     ? FOODCOURT_DAILY_ANALYSIS_AI_VERSION
     : FOODCOURT_ANALYSIS_AI_VERSION
 }
@@ -517,12 +524,14 @@ async function groqChat(
   apiKey: string,
   model: string,
   maxTokens = 800,
+  signal?: AbortSignal,
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, temperature: 0.2, max_tokens: maxTokens, messages }),
+      signal,
     })
     if (!res.ok) { console.error('groqChat http error:', model, res.status); return { content: null, usage: null } }
     const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown } | null
@@ -594,6 +603,7 @@ async function geminiChat(
   apiKey: string,
   model: string,
   maxTokens = 1200,
+  signal?: AbortSignal,
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   if (!apiKey) return { content: null, usage: null }
   const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n').trim()
@@ -614,6 +624,7 @@ async function geminiChat(
         // 思考(thinking)対応モデルは thinking トークンも maxOutputTokens を消費するため余裕(+4096)を足す
         generationConfig: { temperature: 0.2, maxOutputTokens: maxTokens + 4096 },
       }),
+      signal,
     })
     if (!res.ok) {
       const err = await res.text().catch(() => '')
@@ -634,6 +645,7 @@ async function claudeChat(
   apiKey: string,
   model: string,
   maxTokens = 1200,
+  signal?: AbortSignal,
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   if (!apiKey) return { content: null, usage: null }
   const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n').trim()
@@ -659,6 +671,7 @@ async function claudeChat(
         ...(system ? { system } : {}),
         messages: msg,
       }),
+      signal,
     })
     if (!res.ok) {
       const err = await res.text().catch(() => '')
@@ -679,6 +692,7 @@ async function openaiChat(
   apiKey: string,
   model: string,
   maxTokens = 1200,
+  signal?: AbortSignal,
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   if (!apiKey) return { content: null, usage: null }
   try {
@@ -703,6 +717,7 @@ async function openaiChat(
         messages: normalizedMessages,
         ...tokenParam,
       }),
+      signal,
     })
     if (!res.ok) {
       const err = await res.text().catch(() => '')
@@ -726,6 +741,7 @@ async function grokChat(
   apiKey: string,
   model: string,
   maxTokens = 1200,
+  signal?: AbortSignal,
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   if (!apiKey) return { content: null, usage: null }
   try {
@@ -741,6 +757,7 @@ async function grokChat(
         max_tokens: maxTokens,
         temperature: 0.3,
       }),
+      signal,
     })
     if (!res.ok) {
       const err = await res.text().catch(() => '')
@@ -776,35 +793,43 @@ async function foodCourtAiChat(
   maxTokens: number,
   preferred: FoodCourtChatProvider,
   fallbackGroqModel?: string,
+  options?: { deadlineAt?: number; perProviderMs?: number },
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   const order = Array.from(new Set<FoodCourtChatProvider>(
     preferred === 'openai' ? [preferred, 'gemini', 'groq'] : [preferred, 'groq'],
   ))
+  const nextSignal = (): AbortSignal | undefined => {
+    const remaining = options?.deadlineAt != null ? options.deadlineAt - Date.now() : null
+    if (remaining != null && remaining <= 0) return AbortSignal.abort('foodcourt_ai_deadline')
+    const timeoutMs = Math.max(250, Math.min(options?.perProviderMs ?? 12000, remaining ?? Number.MAX_SAFE_INTEGER))
+    return Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined
+  }
   for (const provider of order) {
+    if (options?.deadlineAt != null && Date.now() >= options.deadlineAt) break
     if (provider === 'openai') {
-      const res = await openaiChat(messages, resolveFoodCourtOpenAiApiKey(), resolveFoodCourtOpenAiModel(), maxTokens)
+      const res = await openaiChat(messages, resolveFoodCourtOpenAiApiKey(), resolveFoodCourtOpenAiModel(), maxTokens, nextSignal())
       if (res.content) return res
       continue
     }
     if (provider === 'gemini') {
-      const res = await geminiChat(messages, resolveFoodCourtGeminiApiKey(), resolveFoodCourtGeminiModel(), maxTokens)
+      const res = await geminiChat(messages, resolveFoodCourtGeminiApiKey(), resolveFoodCourtGeminiModel(), maxTokens, nextSignal())
       if (res.content) return res
       continue
     }
     if (provider === 'claude') {
-      const res = await claudeChat(messages, resolveFoodCourtClaudeApiKey(), resolveFoodCourtClaudeModel(), maxTokens)
+      const res = await claudeChat(messages, resolveFoodCourtClaudeApiKey(), resolveFoodCourtClaudeModel(), maxTokens, nextSignal())
       if (res.content) return res
       continue
     }
     if (provider === 'grok') {
-      const res = await grokChat(messages, resolveFoodCourtGrokApiKey(), resolveFoodCourtGrokModel(), maxTokens)
+      const res = await grokChat(messages, resolveFoodCourtGrokApiKey(), resolveFoodCourtGrokModel(), maxTokens, nextSignal())
       if (res.content) return res
       continue
     }
-    const first = await groqChat(messages, groqApiKey, primaryGroqModel, maxTokens)
+    const first = await groqChat(messages, groqApiKey, primaryGroqModel, maxTokens, nextSignal())
     if (first.content) return first
     if (fallbackGroqModel && fallbackGroqModel !== primaryGroqModel) {
-      const second = await groqChat(messages, groqApiKey, fallbackGroqModel, maxTokens)
+      const second = await groqChat(messages, groqApiKey, fallbackGroqModel, maxTokens, nextSignal())
       if (second.content) return second
     }
   }
@@ -812,10 +837,10 @@ async function foodCourtAiChat(
 }
 
 // ===== AIループエンジニアリング（設計: docs/AI_LOOP_ENGINEERING_DESIGN.md） =====
-// 統合回答を品質評価AIが採点し、不合格なら改善点だけを渡して再生成、最大3ループ、
-// 不合格が続けば最高得点回答を返す。Phase 1は /foodcourt/ask（Q&A）のみに適用する
-// （環境変数 FOODCOURT_LOOP_APPLY_TO_ASK 等でsurfaceごとにON/OFF・既定はOFF＝既存動作のまま）。
-export type FoodCourtLoopSurface = 'ask' | 'daily_summary' | 'period_summary'
+// 統合回答を品質評価AIが採点し、不合格なら改善点と前回回答を渡して再生成する。
+// Q&A・日次・期間・週次の各surfaceで、不合格が続けば最高得点回答を返す。
+// （環境変数 FOODCOURT_LOOP_APPLY_TO_ASK 等でsurfaceごとにON/OFF。既定は全surfaceでON）。
+export type FoodCourtLoopSurface = 'ask' | 'daily_summary' | 'period_summary' | 'weekly_report'
 
 export type FoodCourtLoopEvaluation = {
   total_score: number
@@ -848,26 +873,32 @@ function fcEnvFlag(name: string, fallback: boolean): boolean {
   if (raw == null || raw === '') return fallback
   return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase())
 }
+function fcRequestDeadlineAt(): number {
+  const raw = Number(Deno.env.get('FOODCOURT_AI_REQUEST_BUDGET_MS') ?? '52000')
+  const budget = Number.isFinite(raw) ? Math.max(20000, Math.min(55000, Math.trunc(raw))) : 52000
+  return Date.now() + budget
+}
 function fcApplyFlagName(surface: FoodCourtLoopSurface): string {
   if (surface === 'daily_summary') return 'FOODCOURT_LOOP_APPLY_TO_DAILY'
   if (surface === 'period_summary') return 'FOODCOURT_LOOP_APPLY_TO_PERIOD'
+  if (surface === 'weekly_report') return 'FOODCOURT_LOOP_APPLY_TO_WEEKLY'
   return 'FOODCOURT_LOOP_APPLY_TO_ASK'
 }
-// surfaceごとのmaxLoops既定値（11章）。Q&Aは自由度が高く効果が大きいため3、日次/期間はコスト優先で控えめにする。
-// 期間サマリーは最もコストが高くなりやすいため、11章の「最大1〜2ループ」のうち控えめな下限(1)を既定にする。
-const FOODCOURT_LOOP_DEFAULT_MAX: Record<FoodCourtLoopSurface, number> = { ask: 2, daily_summary: 2, period_summary: 1 }
+// surfaceごとのmaxLoops既定値。各surfaceとも初回生成＋最大1回の改善再生成とする。
+const FOODCOURT_LOOP_DEFAULT_MAX: Record<FoodCourtLoopSurface, number> = { ask: 2, daily_summary: 2, period_summary: 2, weekly_report: 2 }
 function fcMaxLoopsEnvName(surface: FoodCourtLoopSurface): string {
   if (surface === 'daily_summary') return 'FOODCOURT_LOOP_MAX_DAILY'
   if (surface === 'period_summary') return 'FOODCOURT_LOOP_MAX_PERIOD'
+  if (surface === 'weekly_report') return 'FOODCOURT_LOOP_MAX_WEEKLY'
   return 'FOODCOURT_LOOP_MAX_ASK'
 }
 function resolveFoodCourtLoopConfig(surface: FoodCourtLoopSurface): FoodCourtLoopConfig {
-  const enabled = fcEnvFlag('FOODCOURT_LOOP_ENABLED', false) && fcEnvFlag(fcApplyFlagName(surface), false)
+  const enabled = fcEnvFlag('FOODCOURT_LOOP_ENABLED', true) && fcEnvFlag(fcApplyFlagName(surface), true)
   // surface専用の上限(例: FOODCOURT_LOOP_MAX_DAILY)を優先し、無ければ共通のFOODCOURT_LOOP_MAX、それも無ければsurfaceごとの既定値。
   const maxLoopsRaw = Number(Deno.env.get(fcMaxLoopsEnvName(surface)) ?? Deno.env.get('FOODCOURT_LOOP_MAX') ?? FOODCOURT_LOOP_DEFAULT_MAX[surface])
   const maxLoops = Number.isFinite(maxLoopsRaw) && maxLoopsRaw > 0 ? Math.min(5, Math.trunc(maxLoopsRaw)) : FOODCOURT_LOOP_DEFAULT_MAX[surface]
-  const passTotal = Number(Deno.env.get('FOODCOURT_LOOP_PASS_TOTAL') ?? '90') || 90
-  const passEach = Number(Deno.env.get('FOODCOURT_LOOP_PASS_EACH') ?? '80') || 80
+  const passTotal = Number(Deno.env.get('FOODCOURT_LOOP_PASS_TOTAL') ?? '75') || 75
+  const passEach = Number(Deno.env.get('FOODCOURT_LOOP_PASS_EACH') ?? '65') || 65
   const providerRaw = String(Deno.env.get('FOODCOURT_LOOP_EVALUATOR_PROVIDER') ?? '').trim().toLowerCase()
   const evaluatorProvider: FoodCourtChatProvider = (['groq', 'gemini', 'claude', 'openai', 'grok'] as const).includes(providerRaw as FoodCourtChatProvider)
     ? providerRaw as FoodCourtChatProvider
@@ -948,6 +979,7 @@ async function evaluateFoodCourtAnswer(params: {
   primary: string
   fallbackModel: string
   config: FoodCourtLoopConfig
+  deadlineAt?: number
 }): Promise<{ evaluation: FoodCourtLoopEvaluation | null; usage: FoodCourtAiUsage | null }> {
   const evalSystem = [
     'あなたはフードコート売上分析AIの品質評価者です。以下の実データ・分析メモ・最終回答を比較し、100点満点で採点してください。',
@@ -963,27 +995,26 @@ async function evaluateFoodCourtAnswer(params: {
     'JSONのみで返答すること。他の文章・前置き・コードフェンスは一切書かない。',
     '{"total_score":number,"scores":{"accuracy":number,"logic":number,"expertise":number,"practicality":number,"evidence":number},"improvement_points":string[],"risk_flags":string[],"factuality_notes":string[]}',
   ].join('\n')
-  const evalUser = `質問/タスク: ${params.question}\n\n# 分析の材料（実データ含む）\n${params.contextBlock}\n\n# 評価対象の最終回答\n${params.finalAnswer}`
+  const evaluationContext = compactFoodCourtEvaluationContext(params.contextBlock)
+  const evalUser = `質問/タスク: ${params.question}\n\n# 分析の材料（実データ含む）\n${evaluationContext}\n\n# 評価対象の最終回答\n${params.finalAnswer}`
   const res = await foodCourtAiChat(
     [{ role: 'system', content: evalSystem }, { role: 'user', content: evalUser }],
     params.groqApiKey, params.primary, params.config.evaluatorMaxTokens, params.config.evaluatorProvider, params.fallbackModel,
+    { deadlineAt: params.deadlineAt, perProviderMs: 9000 },
   )
   return { evaluation: parseLoopEvaluationJson(res.content), usage: res.usage }
 }
 
-// 評価結果から、再生成AIへ渡す「改善点だけ」を作る（前回回答全文は渡さない＝形式は維持したまま不足だけ直させる）。
+// 評価結果から、再生成AIへ渡す改善指示を作る。
 function buildLoopFeedback(evaluation: FoodCourtLoopEvaluation): string {
   const lines: string[] = []
   if (evaluation.improvement_points.length) lines.push('改善点（ここだけ直す。他は変えない）:\n' + evaluation.improvement_points.map((p) => `- ${p}`).join('\n'))
   if (evaluation.risk_flags.length) lines.push('弱めるべき/断定を避けるべき主張:\n' + evaluation.risk_flags.map((p) => `- ${p}`).join('\n'))
   return lines.length ? lines.join('\n\n') : '総合的な具体性・根拠づけをもう一段上げてください。'
 }
-// 直前のメッセージ列に、改善点の指示だけを追加する（回答本文はメッセージに含めない＝前回答全文を渡さない設計）。
-function appendLoopFeedback(messages: FoodCourtChatMessage[], feedback: string): FoodCourtChatMessage[] {
-  return [...messages, {
-    role: 'system',
-    content: `直前の回答は品質評価で改善が必要と判定されました。以下の改善点だけを直し、良かった点・出力形式はそのまま維持して回答し直してください。\n\n${feedback}`,
-  }]
+// 前回回答を assistant メッセージとして添え、改善指示で不足箇所を修正させる。
+function appendLoopFeedback(messages: FoodCourtChatMessage[], feedback: string, previousAnswer: string): FoodCourtChatMessage[] {
+  return buildFoodCourtRevisionMessages(messages, feedback, previousAnswer)
 }
 
 async function saveFoodCourtLoopRun(
@@ -1006,7 +1037,7 @@ async function saveFoodCourtLoopRun(
       user_input: row.userInput,
       model_version: row.modelVersion,
       max_loops: row.maxLoops,
-      status: 'completed',
+      status: 'running',
     }).select('id').maybeSingle()
     if (error) { console.error('foodcourt_ai_loop_runs insert failed:', error.message); return null }
     const id = data ? String((data as { id?: unknown }).id ?? '').trim() : ''
@@ -1079,12 +1110,78 @@ async function saveFoodCourtLoopIteration(
   }
 }
 
-// 共通ループエンジン。ループが無効(既定)なら初回生成のみを返し、既存動作と完全に同じ（DB保存もしない）。
+// 過去回答を無条件に教材化すると誤答が増幅するため、合格済みまたは人が helpful と評価した回答だけを使う。
+// 評価AIの risk_flags は同じ指摘が複数回出たものだけを、恒久的な注意事項として再利用する。
+async function loadFoodCourtLearningMemory(
+  supabase: SupabaseClient | null | undefined,
+  storeKey: string | undefined,
+  surface: FoodCourtLoopSurface,
+  taskText: string,
+): Promise<string> {
+  if (!supabase || !storeKey) return ''
+  try {
+    const { data: runs, error } = await supabase
+      .from('foodcourt_ai_loop_runs')
+      .select('id,user_input,final_answer,final_score,returned_reason,source_ref,created_at')
+      .ilike('store_partition_key', storeKey)
+      .eq('surface', surface)
+      .not('final_answer', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(40)
+    if (error || !Array.isArray(runs) || !runs.length) return ''
+
+    const runIds = runs.map((r) => String((r as { id?: unknown }).id ?? '')).filter(Boolean)
+    const [{ data: feedback }, { data: iterations }] = await Promise.all([
+      supabase.from('foodcourt_ai_feedback').select('run_id,rating').in('run_id', runIds),
+      supabase.from('foodcourt_ai_loop_iterations').select('run_id,evaluation,created_at').in('run_id', runIds)
+        .order('created_at', { ascending: false }).limit(80),
+    ])
+    const helpful = new Set((Array.isArray(feedback) ? feedback : [])
+      .filter((f) => String((f as { rating?: unknown }).rating ?? '') === 'helpful')
+      .map((f) => String((f as { run_id?: unknown }).run_id ?? '')))
+
+    const candidates = runs
+      .filter((r) => String((r as { returned_reason?: unknown }).returned_reason ?? '') === 'passed'
+        || helpful.has(String((r as { id?: unknown }).id ?? '')))
+      .map((r) => {
+        const input = String((r as { user_input?: unknown }).user_input ?? '')
+        const source = JSON.stringify((r as { source_ref?: unknown }).source_ref ?? {})
+        return { row: r, similarity: foodCourtTextSimilarity(taskText, `${input}\n${source}`) }
+      })
+      .sort((a, b) => b.similarity - a.similarity
+        || Number((b.row as { final_score?: unknown }).final_score ?? 0) - Number((a.row as { final_score?: unknown }).final_score ?? 0))
+
+    const riskCounts = new Map<string, number>()
+    for (const it of (Array.isArray(iterations) ? iterations : [])) {
+      const ev = (it as { evaluation?: unknown }).evaluation
+      if (!ev || typeof ev !== 'object') continue
+      for (const risk of (Array.isArray((ev as { risk_flags?: unknown }).risk_flags) ? (ev as { risk_flags: unknown[] }).risk_flags : [])) {
+        const text = String(risk ?? '').trim().slice(0, 120)
+        if (text) riskCounts.set(text, (riskCounts.get(text) ?? 0) + 1)
+      }
+    }
+    const repeatedRisks = Array.from(riskCounts.entries()).filter(([, n]) => n >= 2)
+      .sort((a, b) => b[1] - a[1]).slice(0, 4).map(([text]) => `- ${text}`)
+
+    const blocks: string[] = []
+    if (candidates.length) {
+      const best = candidates[0].row as { final_answer?: unknown; final_score?: unknown }
+      blocks.push(`# 過去の承認済み回答（参考例。今回の事実を優先し、数字や日付は流用しない）\n${String(best.final_answer ?? '').slice(0, 2600)}\n評価: ${String(best.final_score ?? '人による承認')}`)
+    }
+    if (repeatedRisks.length) blocks.push(`# 過去の評価で繰り返し検出された注意事項\n${repeatedRisks.join('\n')}`)
+    return blocks.join('\n\n')
+  } catch (e) {
+    console.error('loadFoodCourtLearningMemory failed:', e instanceof Error ? e.message : String(e))
+    return ''
+  }
+}
+
+// 共通ループエンジン。ループが明示的に無効なら初回生成のみを返す（DB保存もしない）。
 // 有効時: 生成→評価→(不合格なら)改善点のみ渡して再生成→最大maxLoops→最高得点回答を返す。
 // 再ループ時は統合AIのみ再生成する（専門AI・反証AIは呼び出し側が最初に1回生成したメモをそのまま使い回す）。
 export async function runFoodCourtLoopEngineering(params: {
   surface: FoodCourtLoopSurface
-  initialGenerate: (feedback?: string) => Promise<FoodCourtLoopGenerated>
+  initialGenerate: (feedback?: string, previousAnswer?: string) => Promise<FoodCourtLoopGenerated>
   evaluationContext: string
   question: string
   userInput?: string | null
@@ -1094,6 +1191,7 @@ export async function runFoodCourtLoopEngineering(params: {
   fallbackModel: string
   supabase?: SupabaseClient | null
   storeKey?: string
+  deadlineAt?: number
 }): Promise<{ answer: string | null; usages: FoodCourtAiUsage[]; loopScore: number | null; loopCount: number }> {
   const config = resolveFoodCourtLoopConfig(params.surface)
   const usages: FoodCourtAiUsage[] = []
@@ -1114,24 +1212,25 @@ export async function runFoodCourtLoopEngineering(params: {
   })
 
   const startTime = Date.now()
+  const deadlineAt = params.deadlineAt ?? (startTime + 25000)
   let bestAnswer: string | null = null
   let bestScore = -1
   let bestLoopIndex: number | null = null
   let feedback: string | undefined
+  let previousAnswer: string | undefined
   let finalLoopIndex = 0
   let returnedReason = 'generation_failed'
 
   for (let loopIndex = 1; loopIndex <= config.maxLoops; loopIndex++) {
-    finalLoopIndex = loopIndex
-
-    // タイムアウト（60秒）を回避するため、実行開始から25秒が経過していたらループを打ち切り、それまでの最良の回答を返す。
-    if (Date.now() - startTime > 25000) {
+    // 生成と評価を完了できる残り時間が無ければ、採点済みの最良回答を返す。
+    if (!foodCourtLoopHasBudget(deadlineAt, Date.now(), loopIndex)) {
       console.warn(`[runFoodCourtLoopEngineering] Timeout prevention triggered at loop index ${loopIndex} (elapsed: ${Date.now() - startTime}ms). Returning best answer so far.`)
       returnedReason = 'timeout_prevented'
       break
     }
+    finalLoopIndex = loopIndex
 
-    const gen = await params.initialGenerate(feedback)
+    const gen = await params.initialGenerate(feedback, previousAnswer)
     if (gen.usage) usages.push(gen.usage)
     if (!gen.content) break // 生成失敗: それまでのベストがあればそれを採用して打ち切る
 
@@ -1143,12 +1242,11 @@ export async function runFoodCourtLoopEngineering(params: {
       primary: params.primaryModel,
       fallbackModel: params.fallbackModel,
       config,
+      deadlineAt,
     })
     if (evalRes.usage) usages.push(evalRes.usage)
     const evaluation = evalRes.evaluation
-    const scoresOk = !!evaluation && [evaluation.scores.accuracy, evaluation.scores.logic, evaluation.scores.expertise, evaluation.scores.practicality, evaluation.scores.evidence]
-      .every((s) => s >= config.passEach)
-    const passed = !!evaluation && evaluation.total_score >= config.passTotal && scoresOk
+    const passed = foodCourtEvaluationPassed(evaluation, config.passTotal, config.passEach)
     const finalEvaluation: FoodCourtLoopEvaluation | null = evaluation ? { ...evaluation, passed } : null
 
     await saveFoodCourtLoopIteration(params.supabase, runId, {
@@ -1167,6 +1265,7 @@ export async function runFoodCourtLoopEngineering(params: {
     // 取りこぼさないよう、最初の生成物を無条件でbestにする。
     const score = evaluation ? evaluation.total_score : -1
     if (passed || score > bestScore || bestAnswer === null) { bestScore = score; bestAnswer = gen.content; bestLoopIndex = loopIndex }
+    previousAnswer = gen.content
 
     if (passed) { returnedReason = 'passed'; break }
     if (!evaluation) { returnedReason = 'evaluation_failed'; break } // 評価AI失敗: これ以上ループしても改善点が得られない
@@ -2031,6 +2130,7 @@ async function buildForecastFactorsContext(
       event_factors: Record<string, number>; event_counts: Record<string, number>
       weather_factors: Record<string, number>; weather_counts: Record<string, number>
       history_days: number; backtest_days: number; mape_guests: number | null; mape_sales: number | null
+      rolling_mape_guests?: number | null; rolling_mape_sales?: number | null
       advanced_stats?: {
         version?: string
         factor_ci?: { wday?: Record<string, { factor: number; lo: number; hi: number; n: number }>; evt?: Record<string, { factor: number; lo: number; hi: number; n: number }>; weather?: Record<string, { factor: number; lo: number; hi: number; n: number }> }
@@ -2065,10 +2165,15 @@ async function buildForecastFactorsContext(
       const f = row.weather_factors?.[k]; const n = row.weather_counts?.[k] ?? 0
       return f != null ? factorLine(k === 'rainy' ? '雨' : '雨でない', f, n) : null
     }).filter((x): x is string => !!x)
+    const recentMape = row.rolling_mape_guests != null || row.rolling_mape_sales != null
+      ? `、直近14日: 客数±${row.rolling_mape_guests != null ? Math.round(row.rolling_mape_guests * 100) : '—'}%／売上±${row.rolling_mape_sales != null ? Math.round(row.rolling_mape_sales * 100) : '—'}%`
+      : ''
     const mapeLine = (row.mape_guests != null || row.mape_sales != null)
-      ? `自己採点(バックテスト${row.backtest_days}日/履歴${row.history_days}日): 客数誤差±${row.mape_guests != null ? Math.round(row.mape_guests * 100) : '—'}%／売上誤差±${row.mape_sales != null ? Math.round(row.mape_sales * 100) : '—'}%（データが増えるほど改善）`
+      ? `自己採点(バックテスト${row.backtest_days}日/履歴${row.history_days}日): 全期間 客数誤差±${row.mape_guests != null ? Math.round(row.mape_guests * 100) : '—'}%／売上誤差±${row.mape_sales != null ? Math.round(row.mape_sales * 100) : '—'}%${recentMape}`
       : `履歴${row.history_days}日・バックテスト${row.backtest_days}日`
-    const mapeGuests = row.mape_guests != null ? Number(row.mape_guests) : null
+    const mapeGuests = row.rolling_mape_guests != null
+      ? Number(row.rolling_mape_guests)
+      : (row.mape_guests != null ? Number(row.mape_guests) : null)
     const reliability = row.backtest_days >= 14 && mapeGuests != null && mapeGuests <= 0.25
       ? 'モデル信頼度: 中〜高（運営判断の参考に使える）'
       : row.backtest_days >= 7 && mapeGuests != null && mapeGuests <= 0.4
@@ -2080,14 +2185,16 @@ async function buildForecastFactorsContext(
     try {
       const { data: histRows } = await supabase
         .from('foodcourt_forecast_history')
-        .select('log_date, history_days, mape_guests')
+        .select('log_date, history_days, mape_guests, rolling_mape_guests')
         .eq('tenant_name', baseName)
         .order('log_date', { ascending: true })
       const hs = (Array.isArray(histRows) ? histRows : [])
         .map((r) => ({
           date: String((r as { log_date?: unknown }).log_date ?? '').slice(0, 10),
           days: Number((r as { history_days?: unknown }).history_days ?? 0),
-          mape: (r as { mape_guests?: unknown }).mape_guests != null ? Number((r as { mape_guests?: unknown }).mape_guests) : null,
+          mape: (r as { rolling_mape_guests?: unknown }).rolling_mape_guests != null
+            ? Number((r as { rolling_mape_guests?: unknown }).rolling_mape_guests)
+            : ((r as { mape_guests?: unknown }).mape_guests != null ? Number((r as { mape_guests?: unknown }).mape_guests) : null),
         }))
         .filter((r) => r.date && r.mape != null)
       if (hs.length >= 2) {
@@ -2471,6 +2578,7 @@ export async function answerFoodCourtQuestion(
   dailyLogs: Array<Record<string, unknown>> = [],
 ): Promise<{ answer: string | null; loopScore: number | null; loopCount: number }> {
   if (!groqApiKey) return { answer: null, loopScore: null, loopCount: 0 }
+  const deadlineAt = fcRequestDeadlineAt()
   const q = String(question ?? '').trim().slice(0, 500)
   if (!q) return { answer: null, loopScore: null, loopCount: 0 }
   canonFoodcourtReports(reports) // OCR誤読の店名を安定codeで正規化し、11店として一貫分析する
@@ -2558,9 +2666,9 @@ export async function answerFoodCourtQuestion(
   const opsUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 競合プロファイル\n${competitors}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
 
   const [quantRes, extRes, opsRes] = await Promise.all([
-    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
@@ -2577,7 +2685,7 @@ export async function answerFoodCourtQuestion(
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（300字程度）。`,
   ].join('\n')
   const criticUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用の根拠\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${storeCorr || '(店舗間相関なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 650, 'claude', fallbackModel)
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 650, 'claude', fallbackModel, { deadlineAt, perProviderMs: 7000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
@@ -2607,7 +2715,8 @@ export async function answerFoodCourtQuestion(
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。来客予測モデルの学習係数(自己採点済み)であれば、来客予測の自己採点(誤差%)と矛盾しない範囲で解釈する。対象日/対象期間に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【回答品質】最後に必ず、実行すべき次の一手または次に確認すべきKPIを1つ以上入れる。数字の羅列だけで終えない。日報があるときは次の一手を日報の学びと接続する。`,
   ].join('\n')
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の”前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}\n\n# 日次生データ（全テナント）\n${data}`
+  const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'ask', q)
+  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の”前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${learningMemory ? '\n\n' + learningMemory : ''}\n\n# 日次生データ（全テナント）\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
@@ -2621,9 +2730,10 @@ export async function answerFoodCourtQuestion(
   // ときだけ有効。既定はOFFで、無効時は従来どおり1回生成して返すだけ（挙動・使用量記録とも変わらない）。
   const loopResult = await runFoodCourtLoopEngineering({
     surface: 'ask',
-    initialGenerate: (feedback) => foodCourtAiChat(
-      feedback ? appendLoopFeedback(baseMessages, feedback) : baseMessages,
-      groqApiKey, primary, 1800, 'openai', fallbackModel,
+    initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
+      feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
+      groqApiKey, primary, 1800, feedback && previousAnswer ? 'groq' : 'openai', fallbackModel,
+      { deadlineAt, perProviderMs: 11000 },
     ),
     evaluationContext: contextBlock,
     question: q,
@@ -2634,6 +2744,7 @@ export async function answerFoodCourtQuestion(
     fallbackModel,
     supabase,
     storeKey,
+    deadlineAt,
   })
   // Q&Aの実測トークンをAI使用料に合算（best-effort・store_partition_keyで集計に乗る）。ループ有効時は
   // 生成AI・評価AIの全呼び出し分をまとめて記録する。
@@ -2659,6 +2770,7 @@ export async function generateFoodCourtDailySummary(
   monthlyRetro?: string | null,
 ): Promise<string | null> {
   if (!groqApiKey) return null
+  const deadlineAt = fcRequestDeadlineAt()
   canonFoodcourtReports(reports)
   const targetFacts = buildTargetDayFacts(reports, baseName, targetReport, events, weather)
   if (!targetFacts) return null
@@ -2737,9 +2849,9 @@ export async function generateFoodCourtDailySummary(
   const opsUser = `対象日の運営改善メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${dailyLogsBlock}${priorBlock ? '\n\n' + priorBlock : ''}`
 
   const [quantRes, extRes, opsRes] = await Promise.all([
-    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
@@ -2756,7 +2868,7 @@ export async function generateFoodCourtDailySummary(
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
   ].join('\n')
   const criticUser = `# 対象日の事実\n${targetFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用データ\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}\n\n${dailyLogsBlock}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel)
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel, { deadlineAt, perProviderMs: 7000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
@@ -2779,7 +2891,8 @@ export async function generateFoodCourtDailySummary(
     `【直近の勢い】直近の推移・前回との差、および前回分析の自己検証結果を1〜2文。可能なら次に確認すべきKPI、または日報の学びを踏まえた次回同条件の打ち手を1つ入れる。`,
     `各見出しの本文は短い文を2〜4行程度。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。客単価の順位は業態由来なので単価の高低そのものを優劣にしない。`,
   ].join('\n')
-  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}${monthlyBlock ? '\n\n' + monthlyBlock : ''}`
+  const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'daily_summary', targetFacts)
+  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}${monthlyBlock ? '\n\n' + monthlyBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}`
   const baseMessages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象日の日次サマリーを作成してください。` },
@@ -2789,9 +2902,10 @@ export async function generateFoodCourtDailySummary(
   // ときだけ有効。既定はOFFで、無効時は従来どおり1回生成して返すだけ（挙動・使用量記録とも変わらない）。
   const loopResult = await runFoodCourtLoopEngineering({
     surface: 'daily_summary',
-    initialGenerate: (feedback) => foodCourtAiChat(
-      feedback ? appendLoopFeedback(baseMessages, feedback) : baseMessages,
-      groqApiKey, primary, 1400, 'openai', fallbackModel,
+    initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
+      feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
+      groqApiKey, primary, 1400, feedback && previousAnswer ? 'groq' : 'openai', fallbackModel,
+      { deadlineAt, perProviderMs: 11000 },
     ),
     evaluationContext: contextBlock,
     // Q&Aと違い自由質問が無いため、評価AIに渡す固定タスク文言を用意する。
@@ -2802,6 +2916,7 @@ export async function generateFoodCourtDailySummary(
     fallbackModel,
     supabase,
     storeKey,
+    deadlineAt,
   })
   for (const u of loopResult.usages) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
   return loopResult.answer
@@ -2824,6 +2939,7 @@ export async function generateFoodCourtPeriodSummary(
   dailyLogs: Array<Record<string, unknown>> = [],
 ): Promise<string | null> {
   if (!groqApiKey) return null
+  const deadlineAt = fcRequestDeadlineAt()
   canonFoodcourtReports(reports)
   const periodFacts = buildPeriodFacts(reports, baseName, startDate, endDate, events, weather)
   if (!periodFacts) return null
@@ -2888,9 +3004,9 @@ export async function generateFoodCourtPeriodSummary(
   const opsUser = `対象期間の運営改善メモを書いてください。\n\n# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${dailyLogsBlock}`
 
   const [quantRes, extRes, opsRes] = await Promise.all([
-    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
@@ -2907,7 +3023,7 @@ export async function generateFoodCourtPeriodSummary(
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
   ].join('\n')
   const criticUser = `# 対象期間の事実\n${periodFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用データ\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}\n\n${dailyLogsBlock}${patternBlock ? '\n\n' + patternBlock : ''}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel)
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel, { deadlineAt, perProviderMs: 7000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
@@ -2928,7 +3044,8 @@ export async function generateFoodCourtPeriodSummary(
     `【直近の勢い】この期間内での前半→後半の傾向を1〜2文。日報の学びを踏まえた次回同条件期間の打ち手またはKPIを1つ入れる。`,
     `各見出しの本文は短い文を2〜4行程度。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。客単価の順位は業態由来なので単価の高低そのものを優劣にしない。`,
   ].join('\n')
-  const contextBlock = `# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}`
+  const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'period_summary', `${startDate} ${endDate} ${periodFacts}`)
+  const contextBlock = `# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}`
   const baseMessages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象期間の日次サマリーを作成してください。` },
@@ -2938,9 +3055,10 @@ export async function generateFoodCourtPeriodSummary(
   // 既定はOFFで、無効時は従来どおり1回生成して返すだけ（挙動・使用量記録・キャッシュバージョンとも変わらない）。
   const loopResult = await runFoodCourtLoopEngineering({
     surface: 'period_summary',
-    initialGenerate: (feedback) => foodCourtAiChat(
-      feedback ? appendLoopFeedback(baseMessages, feedback) : baseMessages,
-      groqApiKey, primary, 1400, 'openai', fallbackModel,
+    initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
+      feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
+      groqApiKey, primary, 1400, feedback && previousAnswer ? 'groq' : 'openai', fallbackModel,
+      { deadlineAt, perProviderMs: 11000 },
     ),
     evaluationContext: contextBlock,
     question: `「${baseName}」の${startDate}〜${endDate}の期間サマリーを、7見出しフォーマット厳守で生成するタスク`,
@@ -2950,6 +3068,7 @@ export async function generateFoodCourtPeriodSummary(
     fallbackModel,
     supabase,
     storeKey,
+    deadlineAt,
   })
   for (const u of loopResult.usages) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
   return loopResult.answer
@@ -3278,6 +3397,7 @@ export async function generateFoodCourtWeeklyReport(
 ): Promise<{ report: string | null; rawData: FoodCourtWeeklyRawData; loopScore: number | null; loopCount: number }> {
   const rawData = buildWeeklyRawData(reports, baseName, weekStart, weekEnd, dailyLogs)
   if (!groqApiKey) return { report: null, rawData, loopScore: null, loopCount: 0 }
+  const deadlineAt = fcRequestDeadlineAt()
   canonFoodcourtReports(reports)
 
   // 期間サマリーと同じ分析コンテキストを構築
@@ -3351,9 +3471,9 @@ export async function generateFoodCourtWeeklyReport(
   ].join('\n')
 
   const [quantRes, extRes, opsRes] = await Promise.all([
-    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel),
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 9000 }),
   ])
   for (const u of [quantRes.usage, extRes.usage, opsRes.usage]) {
     if (u) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
@@ -3363,7 +3483,7 @@ export async function generateFoodCourtWeeklyReport(
   const opsNote = opsRes.content || '(経営改善メモ: 取得失敗)'
 
   const criticUser = `# 対象週の事実\n${periodFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 経営改善・施策効果\n${opsNote}\n\n${logsBlock || '(日報なし)'}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 500, 'claude', fallbackModel)
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 500, 'claude', fallbackModel, { deadlineAt, perProviderMs: 7000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
@@ -3386,18 +3506,19 @@ export async function generateFoodCourtWeeklyReport(
     `来週に向けた具体的なアクションを3〜5件、箇条書きで書く（「狙う客層」「実施タイミング」「確認すべきKPI」をセットで）。日報の学びを接続する。`,
     `各見出しの本文は経営者が読む想定で、プロフェッショナルかつ具体的に書く。断定できないことは「仮説」と明示する。`,
   ].join('\n')
-  const contextBlock = `# 対象週の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${logsBlock ? logsBlock + '\n\n' : ''}# 他店舗・過去データ分析メモ\n${quantNote}\n\n# イベント・天気分析メモ\n${extNote}\n\n# 経営改善・施策効果メモ\n${opsNote}\n\n# 反証メモ\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}`
+  const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'weekly_report', `${weekStart} ${weekEnd} ${periodFacts}`)
+  const contextBlock = `# 対象週の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${logsBlock ? logsBlock + '\n\n' : ''}# 他店舗・過去データ分析メモ\n${quantNote}\n\n# イベント・天気分析メモ\n${extNote}\n\n# 経営改善・施策効果メモ\n${opsNote}\n\n# 反証メモ\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}`
   const baseMessages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、${weekStart}〜${weekEnd}の週次経営レポートを作成してください。` },
   ]
 
   const loopResult = await runFoodCourtLoopEngineering({
-    // FoodCourtLoopSurface は ask | daily_summary | period_summary。週次は ask と同じ評価軸・上限を使う。
-    surface: 'ask',
-    initialGenerate: (feedback) => foodCourtAiChat(
-      feedback ? appendLoopFeedback(baseMessages, feedback) : baseMessages,
-      groqApiKey, primary, 1800, 'openai', fallbackModel,
+    surface: 'weekly_report',
+    initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
+      feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
+      groqApiKey, primary, 1800, feedback && previousAnswer ? 'groq' : 'openai', fallbackModel,
+      { deadlineAt, perProviderMs: 11000 },
     ),
     evaluationContext: contextBlock,
     question: `「${baseName}」の${weekStart}〜${weekEnd}週の経営レポートを5見出しフォーマット厳守で生成するタスク`,
@@ -3407,6 +3528,7 @@ export async function generateFoodCourtWeeklyReport(
     fallbackModel,
     supabase,
     storeKey,
+    deadlineAt,
   })
   for (const u of loopResult.usages) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
   return { report: loopResult.answer, rawData, loopScore: loopResult.loopScore, loopCount: loopResult.loopCount }

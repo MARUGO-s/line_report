@@ -1051,6 +1051,7 @@ Deno.serve(async (req, info) => {
       "/foodcourt/dome-weekly",
       "/foodcourt/evolution-history",
       "/foodcourt/ai-loop-runs",
+      "/foodcourt/ai-loop-feedback",
       "/foodcourt/daily-logs",
       "/foodcourt/daily-summary",
       "/foodcourt/daily-summary/list",
@@ -1593,7 +1594,7 @@ Deno.serve(async (req, info) => {
       const tenantName = storeKeyNorm === "marugos" ? "MARUGO S" : storeKey
       const { data, error } = await supabase
         .from("foodcourt_forecast_history")
-        .select("log_date, model_version, history_days, backtest_days, mape_guests, mape_sales, mean_guests, created_at")
+        .select("log_date, model_version, history_days, backtest_days, mape_guests, mape_sales, rolling_mape_guests, rolling_mape_sales, mean_guests, created_at")
         .eq("tenant_name", tenantName)
         .order("log_date", { ascending: true })
       if (error) return json({ error: error.message }, 500)
@@ -1625,11 +1626,14 @@ Deno.serve(async (req, info) => {
     }
     if (req.method === "GET" && path === "/foodcourt/ai-loop-runs") {
       const limit = Math.min(parseInt(String(url.searchParams.get("limit") ?? "30")), 50)
-      const { data: runs, error: runsErr } = await supabase
+      const requestedStore = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? storeScope ?? "").trim()
+      let runsQuery = supabase
         .from("foodcourt_ai_loop_runs")
         .select("id, surface, source_ref, final_score, returned_reason, created_at")
         .order("created_at", { ascending: false })
         .limit(limit)
+      if (requestedStore) runsQuery = runsQuery.ilike("store_partition_key", requestedStore)
+      const { data: runs, error: runsErr } = await runsQuery
       if (runsErr) return json({ error: runsErr.message }, 500)
       if (!runs || runs.length === 0) return json({ runs: [] }, 200)
       const runIds = runs.map((r: Record<string, unknown>) => r.id as string)
@@ -1639,17 +1643,58 @@ Deno.serve(async (req, info) => {
         .in("run_id", runIds)
         .order("loop_index", { ascending: true })
       if (itersErr) return json({ error: itersErr.message }, 500)
+      const { data: feedbackRows, error: feedbackErr } = await supabase
+        .from("foodcourt_ai_feedback")
+        .select("run_id,rating,note,updated_at")
+        .in("run_id", runIds)
+      if (feedbackErr) return json({ error: feedbackErr.message }, 500)
       const itersByRun = new Map<string, unknown[]>()
       for (const it of (iters ?? [])) {
         const rid = (it as Record<string, unknown>).run_id as string
         if (!itersByRun.has(rid)) itersByRun.set(rid, [])
         itersByRun.get(rid)!.push(it)
       }
+      const feedbackByRun = new Map<string, unknown>()
+      for (const row of (feedbackRows ?? [])) {
+        feedbackByRun.set(String((row as Record<string, unknown>).run_id ?? ""), row)
+      }
       const result = runs.map((r: Record<string, unknown>) => ({
         ...r,
         iterations: itersByRun.get(r.id as string) ?? [],
+        feedback: feedbackByRun.get(r.id as string) ?? null,
       }))
       return json({ runs: result }, 200)
+    }
+    if (req.method === "POST" && path === "/foodcourt/ai-loop-feedback") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) return json({ error: "Invalid JSON body." }, 400)
+      const runId = String(body.run_id ?? "").trim()
+      const rating = String(body.rating ?? "").trim()
+      const note = String(body.note ?? "").trim().slice(0, 1000) || null
+      if (!runId || !["helpful", "not_helpful"].includes(rating)) {
+        return json({ error: "run_id and rating(helpful|not_helpful) are required." }, 400)
+      }
+      const { data: run, error: runErr } = await supabase
+        .from("foodcourt_ai_loop_runs")
+        .select("id,store_partition_key,surface")
+        .eq("id", runId)
+        .maybeSingle()
+      if (runErr) return json({ error: runErr.message }, 500)
+      if (!run) return json({ error: "AI loop run not found." }, 404)
+      const runStore = String((run as Record<string, unknown>).store_partition_key ?? "")
+      if (storeScope && runStore.toLowerCase() !== storeScope.toLowerCase()) {
+        return json({ error: "Forbidden for this store." }, 403)
+      }
+      const { data, error } = await supabase.from("foodcourt_ai_feedback").upsert({
+        run_id: runId,
+        store_partition_key: runStore,
+        surface: String((run as Record<string, unknown>).surface ?? ""),
+        rating,
+        note,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "run_id" }).select("run_id,rating,note,updated_at").single()
+      if (error) return json({ error: error.message }, 500)
+      return json({ ok: true, feedback: data }, 200)
     }
     // 東京ドーム週次イベント配信（per-room）の設定を取得/保存（管理画面のカレンダー/予約タブから利用）。
     if (req.method === "GET" && path === "/foodcourt/dome-weekly") {
@@ -1839,6 +1884,7 @@ Deno.serve(async (req, info) => {
       }
       const storeKey = String(body.store_key ?? body.store ?? url.searchParams.get("store_key") ?? "").trim()
       if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const weeklyStoreKey = storeKey.toLowerCase()
       const roomId = String(body.room_id ?? "").trim()
       const pushToLine = body.cron === true || body.push === true
       let weekStart = String(body.week_start ?? "").slice(0, 10)
@@ -1858,7 +1904,7 @@ Deno.serve(async (req, info) => {
       const { data: cachedRow } = await supabase
         .from("foodcourt_weekly_reports")
         .select("id, ai_report, report_html, raw_data, loop_score, loop_count, created_at")
-        .eq("store_partition_key", storeKey)
+        .eq("store_partition_key", weeklyStoreKey)
         .eq("week_start", weekStart)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -1950,8 +1996,8 @@ Deno.serve(async (req, info) => {
       }
 
       const reportHtml = weeklyReportHtml(result.report)
-      const { error: upErr } = await supabase.from("foodcourt_weekly_reports").insert({
-        store_partition_key: storeKey,
+      const { error: upErr } = await supabase.from("foodcourt_weekly_reports").upsert({
+        store_partition_key: weeklyStoreKey,
         week_start: weekStart,
         week_end: weekEnd,
         ai_report: result.report,
@@ -1959,7 +2005,7 @@ Deno.serve(async (req, info) => {
         raw_data: result.rawData,
         loop_score: result.loopScore,
         loop_count: result.loopCount,
-      })
+      }, { onConflict: "store_partition_key,week_start" })
       if (upErr) console.error("foodcourt_weekly_reports insert failed:", upErr.message)
 
       let linePush: { ok: boolean; error?: string } | null = null

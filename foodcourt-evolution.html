@@ -350,7 +350,7 @@
         </div>
         <div style="font-size:12px; color:var(--tx-3); flex:2; min-width:280px; line-height:1.4;">
           ※現在データ量が乏しいため、一時的に合格点を <b>65点</b> としています（基準点はスライダーで任意に変更可能です）。<br>
-          スコアは <code>100 - 客数MAPE</code> で算出され、基準値に満たない場合は再提出状態となります。
+          スコアは <code>100 - 直近14日客数MAPE</code> で算出し、基準未達でも予測を止めず毎日再学習します。
         </div>
       </div>
     </div>
@@ -531,12 +531,28 @@
     return body;
   }
 
+  async function apiPost(path, payload){
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try{
+      res = await fetch(url, {
+        method: 'POST',
+        headers:{ 'x-admin-token': getToken(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
+    if(res.status===401||res.status===403){ setAuthBadge(false); throw new Error('認証が必要です。'); }
+    const body = await res.json().catch(()=>({}));
+    if(!res.ok||body.error) throw new Error(body.error||('エラー（HTTP '+res.status+'）'));
+    return body;
+  }
+
   // tryConnect と loadData を統合: 認証確認と同時にデータも取得し、二重APIコールを防ぐ。
   async function tryConnectAndLoad(){
     try{
       const [histBody, loopBody] = await Promise.all([
         apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
-        apiFetch('/foodcourt/ai-loop-runs?limit=30').catch(()=>({ runs: [] })),
+        apiFetch('/foodcourt/ai-loop-runs?limit=30&store_key=marugoS').catch(()=>({ runs: [] })),
       ]);
       setAuthBadge(true);
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
@@ -608,7 +624,7 @@
     try{
       const [histBody, loopBody] = await Promise.all([
         apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
-        apiFetch('/foodcourt/ai-loop-runs?limit=30').catch(()=>({ runs: [] })),
+        apiFetch('/foodcourt/ai-loop-runs?limit=30&store_key=marugoS').catch(()=>({ runs: [] })),
       ]);
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
       modelSelectionData = histBody.model_selection ?? null;
@@ -686,8 +702,8 @@
     if(!rows.length){ dom.kpiGrid.innerHTML='<div style="color:var(--tx-3);font-size:13px">まだ記録がありません。学習cronが初回実行されると自動的に記録が始まります。</div>'; return; }
     const latest = rows[rows.length-1];
     const first  = rows[0];
-    const latestG = mapePct(latest.mape_guests);
-    const latestS = mapePct(latest.mape_sales);
+    const latestG = mapePct(latest.rolling_mape_guests!=null ? latest.rolling_mape_guests : latest.mape_guests);
+    const latestS = mapePct(latest.rolling_mape_sales!=null ? latest.rolling_mape_sales : latest.mape_sales);
     const firstG  = mapePct(first.mape_guests);
     const firstS  = mapePct(first.mape_sales);
     const deltaG  = (latestG!=null && firstG!=null) ? latestG - firstG : null;
@@ -707,10 +723,10 @@
     if (latestScore != null) {
       isPassed = latestScore >= passingScore;
       if (isPassed) {
-        passStatusBadge = `<span class="pill live" style="background:var(--good-soft);color:var(--good);border:none;">🟢 合格・自動採用中</span>`;
+        passStatusBadge = `<span class="pill live" style="background:var(--good-soft);color:var(--good);border:none;">精度基準を達成</span>`;
         passStatusSub = `予測スコア: <b>${latestScore}点</b> (基準点: ${passingScore}点以上)`;
       } else {
-        passStatusBadge = `<span class="pill pulse-bad-anim" style="background:var(--bad-soft);color:var(--bad);border:none;">🔴 評価点不足（再提出＆再評価中）</span>`;
+        passStatusBadge = `<span class="pill pulse-bad-anim" style="background:var(--bad-soft);color:var(--bad);border:none;">精度基準未達（継続学習中）</span>`;
         passStatusSub = `評価不足: <b>${latestScore}点</b> (合格点は ${passingScore}点)`;
       }
     }
@@ -1055,11 +1071,20 @@
   }
 
   function reasonLabel(r){
-    const map={'passed':'✅ 合格','max_loop_best':'⚡ 上限到達→最高点採用','evaluation_failed':'⚠️ 評価失敗','generation_failed':'❌ 生成失敗'};
+    const map={'passed':'合格','max_loop_best':'上限到達・最高点採用','evaluation_failed':'評価失敗','generation_failed':'生成失敗','timeout_prevented':'時間予算で終了','interrupted':'途中終了'};
     return map[r]||r||'—';
   }
   function surfaceLabel(s){
-    return {ask:'Q&A',daily_summary:'日次サマリー',period_summary:'期間サマリー'}[s]||s||'—';
+    return {ask:'Q&A',daily_summary:'日次サマリー',period_summary:'期間サマリー',weekly_report:'週次レポート'}[s]||s||'—';
+  }
+
+  async function setLoopFeedback(runId, rating){
+    try{
+      const result = await apiPost('/foodcourt/ai-loop-feedback', { run_id:runId, rating });
+      const run = loopRuns.find(r=>r.id===runId);
+      if(run) run.feedback = result.feedback || { rating };
+      renderLoopRuns();
+    }catch(e){ alert(e.message||String(e)); }
   }
 
   function renderLoopRuns(){
@@ -1091,6 +1116,12 @@
         ? `<span class="loop-score-big ${scoreTextClass(score)}">${score.toFixed(0)}</span><span style="font-size:12px;color:var(--tx-3)">点</span>`
         : '<span style="font-size:13px;color:var(--tx-3)">—</span>';
       const rClass = 'reason-'+(run.returned_reason||'');
+      const feedbackRating = run.feedback && run.feedback.rating ? String(run.feedback.rating) : '';
+      const feedbackHtml = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)">
+        <span style="font-size:12px;color:var(--tx-3)">この回答を今後の参考例にする</span>
+        <button class="btn ghost" style="font-size:12px;padding:6px 10px;${feedbackRating==='helpful'?'border-color:var(--good);color:var(--good)':''}" onclick="event.stopPropagation();setLoopFeedback('${escH(String(run.id||''))}','helpful')">役に立った</button>
+        <button class="btn ghost" style="font-size:12px;padding:6px 10px;${feedbackRating==='not_helpful'?'border-color:var(--bad);color:var(--bad)':''}" onclick="event.stopPropagation();setLoopFeedback('${escH(String(run.id||''))}','not_helpful')">改善が必要</button>
+      </div>`;
       const itersHtml = iters.map(it=>{
         const total = Number(it.total_score||0);
         return `<div class="loop-iter">
@@ -1118,6 +1149,7 @@
         </div>
         <div class="loop-detail">
           ${iters.length ? itersHtml : '<div style="color:var(--tx-3);font-size:12px;padding-top:10px">ループ詳細データなし</div>'}
+          ${feedbackHtml}
         </div>
       </div>`;
     }).join('');
