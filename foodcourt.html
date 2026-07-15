@@ -663,6 +663,7 @@
           <div class="card-t"><span class="em">📋</span>分析サマリー（自動）</div>
           <div style="display:flex;align-items:center;gap:8px">
             <button class="btn secondary" id="summaryExportBtn" style="font-size:11px;padding:3px 8px;display:none" onclick="exportSummary()">📄 分析サマリーを出力</button>
+            <span class="pill" id="aiScorePill" title="AI自己採点（100点満点）" style="display:none"></span>
             <span class="pill beta" id="aiStatusPill">試験版</span>
           </div>
         </div>
@@ -833,7 +834,7 @@
     resultArea:$('resultArea'),
     heroLogo:$('heroLogo'), heroName:$('heroName'), heroMeta:$('heroMeta'), heroRanks:$('heroRanks'), heroTotals:$('heroTotals'), kpis:$('kpis'),
     tabrow:$('tabrow'),
-    aiGrid:$('aiGrid'), aiNote:$('aiNote'), aiStatusPill:$('aiStatusPill'),
+    aiGrid:$('aiGrid'), aiNote:$('aiNote'), aiScorePill:$('aiScorePill'), aiStatusPill:$('aiStatusPill'),
     qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'), qClear:$('qClear'),
     rankTbody:$('rankTbody'), shareTbody:$('shareTbody'), shareNote:$('shareNote'), priceTbody:$('priceTbody'), distWrap:$('distWrap'), clsList:$('clsList'),
     trendCount:$('trendCount'), dailyTbody:$('dailyTbody'), trendNote:$('trendNote'),
@@ -2715,6 +2716,17 @@
   // まず即時にJSテンプレート版を表示（待ち時間ゼロ）。単日表示(report.idあり)なら、裏でAI版(専門AI2体→
   // 統合AI・report_id単位でキャッシュ)を取得し、届いたら差し替える。期間集計モードやAI失敗時はテンプレのまま。
   let aiSummaryReq = 0;
+  function showAiSummaryScore(score){
+    if (!dom.aiScorePill) return;
+    const value = Number(score);
+    if (score == null || !Number.isFinite(value)) {
+      dom.aiScorePill.style.display = 'none';
+      dom.aiScorePill.textContent = '';
+      return;
+    }
+    dom.aiScorePill.textContent = 'AI自己採点 ' + Math.round(value) + '点';
+    dom.aiScorePill.style.display = 'inline-flex';
+  }
   function renderAnalysisBlocks(report, seriesReports, periodLabel){
     // ヘッダー「売上日」と同じく売上発生日を使う（report_date は翌朝の発行日＝+1 なのでラベルに使わない）。
     // 例: 火曜 07-07 の売上 → report_date 07-08 → 表示は 2026-07-07。
@@ -2722,6 +2734,7 @@
     const text = buildAnalysisText(report, seriesReports, periodLabel);
     paintAnalysisSecs(parseAnalysis(text), text);
     if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
+    showAiSummaryScore(null);
     const reqId = ++aiSummaryReq;
     const applyAiResult = (body) => {
       if (reqId !== aiSummaryReq) return; // 表示対象が切り替わっていたら破棄
@@ -2729,9 +2742,14 @@
       const aiSecs = parseAnalysis(body.summary);
       if (!aiSecs.length) { if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; return; }
       paintAnalysisSecs(aiSecs, body.summary);
+      showAiSummaryScore(body.loop_score);
       if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成';
     };
-    const applyAiFailure = () => { if (reqId === aiSummaryReq && dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版'; };
+    const applyAiFailure = () => {
+      if (reqId !== aiSummaryReq) return;
+      showAiSummaryScore(null);
+      if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
+    };
 
     if (summaryProgressTimeout) clearTimeout(summaryProgressTimeout);
 

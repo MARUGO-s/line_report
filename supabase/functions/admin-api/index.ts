@@ -132,6 +132,41 @@ async function resolveFoodCourtPassingAwareCacheVersion(
   return score == null ? baseVersion : `${baseVersion}-pass${score}`
 }
 
+type FoodCourtLoopScoreInfo = { loop_score: number | null; loop_count: number }
+
+async function loadLatestFoodCourtLoopScore(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  surface: "daily_summary" | "period_summary",
+  sourceRef: Record<string, unknown>,
+): Promise<FoodCourtLoopScoreInfo> {
+  const { data, error } = await supabase
+    .from("foodcourt_ai_loop_runs")
+    .select("source_ref, final_score, final_loop_index, created_at")
+    .ilike("store_partition_key", storeKey)
+    .eq("surface", surface)
+    .eq("status", "completed")
+    .order("created_at", { ascending: false })
+    .limit(100)
+  if (error) {
+    console.error(`Failed to load ${surface} loop score:`, error.message)
+    return { loop_score: null, loop_count: 0 }
+  }
+  const row = (Array.isArray(data) ? data : []).find((candidate) => {
+    const actual = candidate && typeof candidate.source_ref === "object" && candidate.source_ref
+      ? candidate.source_ref as Record<string, unknown>
+      : {}
+    return Object.entries(sourceRef).every(([key, expected]) => String(actual[key] ?? "") === String(expected ?? ""))
+  })
+  if (!row) return { loop_score: null, loop_count: 0 }
+  const score = row.final_score == null ? null : Number(row.final_score)
+  const count = row.final_loop_index == null ? 0 : Number(row.final_loop_index)
+  return {
+    loop_score: score != null && Number.isFinite(score) ? score : null,
+    loop_count: Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0,
+  }
+}
+
 function weeklyReportHtml(report: string): string {
   const escape = (value: string) => value.replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] ?? c))
   return `<article class="weekly-report-content">${escape(report).replace(/\n/g, "<br>")}</article>`
@@ -1379,7 +1414,13 @@ Deno.serve(async (req, info) => {
         .maybeSingle()
       if (cacheErr) return json({ error: cacheErr.message }, 500)
       if (cached && (cached as { summary_text?: unknown }).summary_text) {
-        return json({ summary: (cached as { summary_text: string }).summary_text, cached: true, reportCount: reports.length }, 200)
+        const loop = await loadLatestFoodCourtLoopScore(supabase, storeKey, "daily_summary", { report_id: reportId })
+        return json({
+          summary: (cached as { summary_text: string }).summary_text,
+          cached: true,
+          reportCount: reports.length,
+          ...loop,
+        }, 200)
       }
       const groqApiKey = Deno.env.get("GROQ_API_KEY") ?? ""
       if (!groqApiKey) return json({ error: "GROQ_API_KEY is missing." }, 500)
@@ -1453,12 +1494,14 @@ Deno.serve(async (req, info) => {
         model_version: modelVersion,
       }, { onConflict: "report_id" })
       if (upErr) console.error("foodcourt_daily_ai_summary upsert failed:", upErr.message)
+      const loop = await loadLatestFoodCourtLoopScore(supabase, storeKey, "daily_summary", { report_id: reportId })
       return json({
         summary,
         cached: false,
         reportCount: reports.length,
         daily_logs_count: dailyLogsCount,
         daily_logs_error: dailyLogsError,
+        ...loop,
       }, 200)
     }
     // 「分析サマリー（自動）」カードの期間集計版。「期間で見る」モード専用（単日と違いreport_idを持たないため
@@ -1487,7 +1530,11 @@ Deno.serve(async (req, info) => {
         .maybeSingle()
       if (cacheErr) return json({ error: cacheErr.message }, 500)
       if (cached && (cached as { summary_text?: unknown }).summary_text) {
-        return json({ summary: (cached as { summary_text: string }).summary_text, cached: true }, 200)
+        const loop = await loadLatestFoodCourtLoopScore(supabase, storeKey, "period_summary", {
+          start_date: startDate,
+          end_date: endDate,
+        })
+        return json({ summary: (cached as { summary_text: string }).summary_text, cached: true, ...loop }, 200)
       }
       const { data, error } = await supabase
         .from("foodcourt_tenant_reports")
@@ -1532,11 +1579,16 @@ Deno.serve(async (req, info) => {
         model_version: modelVersion,
       }, { onConflict: "store_partition_key,start_date,end_date" })
       if (upErr) console.error("foodcourt_period_ai_summary upsert failed:", upErr.message)
+      const loop = await loadLatestFoodCourtLoopScore(supabase, storeKey, "period_summary", {
+        start_date: startDate,
+        end_date: endDate,
+      })
       return json({
         summary,
         cached: false,
         daily_logs_count: dailyLogsCount,
         daily_logs_error: dailyLogsError,
+        ...loop,
       }, 200)
     }
     // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
