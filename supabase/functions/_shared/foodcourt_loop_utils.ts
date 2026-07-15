@@ -98,9 +98,111 @@ export function rankFoodCourtRagDocuments(
     .sort((a, b) => b.similarity - a.similarity
       || Number(b.document.final_score ?? 0) - Number(a.document.final_score ?? 0)
       || String(b.document.updated_at ?? '').localeCompare(String(a.document.updated_at ?? '')))
-    .filter((candidate, index) => index === 0 || candidate.similarity >= 0.03)
+    .filter((candidate) => candidate.similarity >= 0.03)
     .slice(0, safeLimit)
     .map((candidate) => candidate.document)
+}
+
+export type FoodCourtEvolutionReadinessCounts = {
+  totalRuns: number
+  completedRuns: number
+  acceptedExamples: number
+  humanHelpfulExamples: number
+  dailyAcceptedExamples: number
+  acceptedSurfaces: number
+}
+
+export const FOODCOURT_EVOLUTION_READINESS_THRESHOLDS = {
+  promptCandidate: {
+    acceptedExamples: 20,
+    humanHelpfulExamples: 5,
+    dailyAcceptedExamples: 5,
+  },
+  modelDistillation: {
+    acceptedExamples: 100,
+    humanHelpfulExamples: 20,
+    dailyAcceptedExamples: 30,
+    acceptedSurfaces: 3,
+  },
+} as const
+
+function safeCount(value: unknown): number {
+  const count = Number(value)
+  return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0
+}
+
+function readinessRequirement(current: number, required: number) {
+  return {
+    current,
+    required,
+    met: current >= required,
+  }
+}
+
+export function assessFoodCourtEvolutionReadiness(input: FoodCourtEvolutionReadinessCounts) {
+  const counts: FoodCourtEvolutionReadinessCounts = {
+    totalRuns: safeCount(input.totalRuns),
+    completedRuns: safeCount(input.completedRuns),
+    acceptedExamples: safeCount(input.acceptedExamples),
+    humanHelpfulExamples: safeCount(input.humanHelpfulExamples),
+    dailyAcceptedExamples: safeCount(input.dailyAcceptedExamples),
+    acceptedSurfaces: safeCount(input.acceptedSurfaces),
+  }
+  const promptRequirements = {
+    acceptedExamples: readinessRequirement(
+      counts.acceptedExamples,
+      FOODCOURT_EVOLUTION_READINESS_THRESHOLDS.promptCandidate.acceptedExamples,
+    ),
+    humanHelpfulExamples: readinessRequirement(
+      counts.humanHelpfulExamples,
+      FOODCOURT_EVOLUTION_READINESS_THRESHOLDS.promptCandidate.humanHelpfulExamples,
+    ),
+    dailyAcceptedExamples: readinessRequirement(
+      counts.dailyAcceptedExamples,
+      FOODCOURT_EVOLUTION_READINESS_THRESHOLDS.promptCandidate.dailyAcceptedExamples,
+    ),
+  }
+  const distillationRequirements = {
+    acceptedExamples: readinessRequirement(
+      counts.acceptedExamples,
+      FOODCOURT_EVOLUTION_READINESS_THRESHOLDS.modelDistillation.acceptedExamples,
+    ),
+    humanHelpfulExamples: readinessRequirement(
+      counts.humanHelpfulExamples,
+      FOODCOURT_EVOLUTION_READINESS_THRESHOLDS.modelDistillation.humanHelpfulExamples,
+    ),
+    dailyAcceptedExamples: readinessRequirement(
+      counts.dailyAcceptedExamples,
+      FOODCOURT_EVOLUTION_READINESS_THRESHOLDS.modelDistillation.dailyAcceptedExamples,
+    ),
+    acceptedSurfaces: readinessRequirement(
+      counts.acceptedSurfaces,
+      FOODCOURT_EVOLUTION_READINESS_THRESHOLDS.modelDistillation.acceptedSurfaces,
+    ),
+  }
+  const promptCandidateReady = Object.values(promptRequirements).every((requirement) => requirement.met)
+  const modelDistillationReady = Object.values(distillationRequirements).every((requirement) => requirement.met)
+  return {
+    status: promptCandidateReady ? 'candidate_evaluation_ready' : 'collecting_data',
+    promotionMode: 'manual_only',
+    counts,
+    gates: {
+      ragReuse: {
+        ready: counts.acceptedExamples >= 1,
+        requirements: {
+          acceptedExamples: readinessRequirement(counts.acceptedExamples, 1),
+        },
+      },
+      promptCandidate: {
+        ready: promptCandidateReady,
+        requirements: promptRequirements,
+      },
+      modelDistillation: {
+        ready: modelDistillationReady,
+        requirements: distillationRequirements,
+      },
+    },
+  }
 }
 
 export function compactFoodCourtEvaluationContext(context: string, maxChars = 14000): string {

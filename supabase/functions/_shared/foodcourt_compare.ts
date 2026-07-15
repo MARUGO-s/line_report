@@ -1220,6 +1220,7 @@ async function loadFoodCourtLearningMemory(
         const source = JSON.stringify((r as { source_ref?: unknown }).source_ref ?? {})
         return { row: r, similarity: foodCourtTextSimilarity(taskText, `${input}\n${source}`) }
       })
+      .filter((candidate) => candidate.similarity >= 0.03)
       .sort((a, b) => b.similarity - a.similarity
         || Number((b.row as { final_score?: unknown }).final_score ?? 0) - Number((a.row as { final_score?: unknown }).final_score ?? 0))
 

@@ -37,10 +37,12 @@ import {
   fcSalesDate,
 } from "../_shared/foodcourt_compare.ts"
 import {
+  assessFoodCourtEvolutionReadiness,
   FOODCOURT_PASSING_SCORE_MAX,
   FOODCOURT_PASSING_SCORE_MIN,
   normalizeFoodCourtPassingScore,
 } from "../_shared/foodcourt_loop_utils.ts"
+import { buildFoodCourtDistillationRecords } from "../_shared/foodcourt_distillation.ts"
 import {
   pushLineMessagesToTarget,
   resolveChannelAccessToken,
@@ -1110,6 +1112,8 @@ Deno.serve(async (req, info) => {
       "/foodcourt/ai-loop-runs",
       "/foodcourt/ai-loop-feedback",
       "/foodcourt/ai-rag",
+      "/foodcourt/ai-distillation-dataset",
+      "/foodcourt/evolution-readiness",
       "/foodcourt/daily-logs",
       "/foodcourt/daily-summary",
       "/foodcourt/daily-summary/list",
@@ -1764,6 +1768,118 @@ Deno.serve(async (req, info) => {
         count: count ?? data?.length ?? 0,
         generated_at: new Date().toISOString(),
         documents: data ?? [],
+      }, 200)
+    }
+    if (req.method === "GET" && path === "/foodcourt/evolution-readiness") {
+      const requestedStore = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? storeScope ?? "").trim()
+      let acceptedQuery = supabase
+        .from("foodcourt_ai_rag_documents")
+        .select("source_run_id,surface,source_type", { count: "exact" })
+        .eq("is_active", true)
+        .limit(1000)
+      let humanHelpfulQuery = supabase
+        .from("foodcourt_ai_rag_documents")
+        .select("source_run_id", { count: "exact", head: true })
+        .eq("is_active", true)
+        .eq("source_type", "human_helpful")
+      let dailyAcceptedQuery = supabase
+        .from("foodcourt_ai_rag_documents")
+        .select("source_run_id", { count: "exact", head: true })
+        .eq("is_active", true)
+        .eq("surface", "daily_summary")
+      let totalRunsQuery = supabase
+        .from("foodcourt_ai_loop_runs")
+        .select("id", { count: "exact", head: true })
+      let completedRunsQuery = supabase
+        .from("foodcourt_ai_loop_runs")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "completed")
+      if (requestedStore) {
+        acceptedQuery = acceptedQuery.ilike("store_partition_key", requestedStore)
+        humanHelpfulQuery = humanHelpfulQuery.ilike("store_partition_key", requestedStore)
+        dailyAcceptedQuery = dailyAcceptedQuery.ilike("store_partition_key", requestedStore)
+        totalRunsQuery = totalRunsQuery.ilike("store_partition_key", requestedStore)
+        completedRunsQuery = completedRunsQuery.ilike("store_partition_key", requestedStore)
+      }
+      const [acceptedResult, humanResult, dailyResult, totalResult, completedResult] = await Promise.all([
+        acceptedQuery,
+        humanHelpfulQuery,
+        dailyAcceptedQuery,
+        totalRunsQuery,
+        completedRunsQuery,
+      ])
+      const readinessError = acceptedResult.error ?? humanResult.error ?? dailyResult.error ?? totalResult.error ?? completedResult.error
+      if (readinessError) return json({ error: readinessError.message }, 500)
+      const acceptedRows = Array.isArray(acceptedResult.data) ? acceptedResult.data : []
+      const acceptedSurfaces = new Set(acceptedRows.map((row) => String((row as Record<string, unknown>).surface ?? "")).filter(Boolean))
+      const readiness = assessFoodCourtEvolutionReadiness({
+        totalRuns: totalResult.count ?? 0,
+        completedRuns: completedResult.count ?? 0,
+        acceptedExamples: acceptedResult.count ?? acceptedRows.length,
+        humanHelpfulExamples: humanResult.count ?? 0,
+        dailyAcceptedExamples: dailyResult.count ?? 0,
+        acceptedSurfaces: acceptedSurfaces.size,
+      })
+      return json({
+        generated_at: new Date().toISOString(),
+        store_key: requestedStore || null,
+        ...readiness,
+      }, 200)
+    }
+    if (req.method === "GET" && path === "/foodcourt/ai-distillation-dataset") {
+      const requestedStore = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? storeScope ?? "").trim()
+      const surface = String(url.searchParams.get("surface") ?? "").trim()
+      const allowedSurfaces = new Set(["ask", "daily_summary", "period_summary", "weekly_report"])
+      if (surface && !allowedSurfaces.has(surface)) return json({ error: "Invalid surface." }, 400)
+      const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(200, Math.trunc(rawLimit))) : 100
+      let acceptedQuery = supabase
+        .from("foodcourt_ai_rag_documents")
+        .select("source_run_id,surface,source_type,final_score,updated_at")
+        .eq("is_active", true)
+        .order("updated_at", { ascending: false })
+        .limit(limit)
+      if (requestedStore) acceptedQuery = acceptedQuery.ilike("store_partition_key", requestedStore)
+      if (surface) acceptedQuery = acceptedQuery.eq("surface", surface)
+      const { data: acceptedRows, error: acceptedError } = await acceptedQuery
+      if (acceptedError) return json({ error: acceptedError.message }, 500)
+      if (!acceptedRows?.length) {
+        return json({
+          dataset_version: "foodcourt-distillation-v1",
+          generated_at: new Date().toISOString(),
+          count: 0,
+          records: [],
+        }, 200)
+      }
+
+      const runIds = acceptedRows.map((row) => String((row as Record<string, unknown>).source_run_id ?? "")).filter(Boolean)
+      const [{ data: runs, error: runsError }, { data: iterations, error: iterationsError }, { data: feedbackRows, error: feedbackError }] = await Promise.all([
+        supabase.from("foodcourt_ai_loop_runs")
+          .select("id,store_partition_key,surface,source_ref,user_input,model_version,final_loop_index,best_loop_index,final_score,final_answer,returned_reason,created_at")
+          .in("id", runIds),
+        supabase.from("foodcourt_ai_loop_iterations")
+          .select("run_id,loop_index,feedback_from_previous,integrated_answer,evaluation,total_score,passed,created_at")
+          .in("run_id", runIds)
+          .order("loop_index", { ascending: true }),
+        supabase.from("foodcourt_ai_feedback")
+          .select("run_id,rating,note,updated_at")
+          .in("run_id", runIds),
+      ])
+      const datasetError = runsError ?? iterationsError ?? feedbackError
+      if (datasetError) return json({ error: datasetError.message }, 500)
+
+      const records = buildFoodCourtDistillationRecords(
+        acceptedRows as Record<string, unknown>[],
+        (runs ?? []) as Record<string, unknown>[],
+        (iterations ?? []) as Record<string, unknown>[],
+        (feedbackRows ?? []) as Record<string, unknown>[],
+      )
+      return json({
+        dataset_version: "foodcourt-distillation-v1",
+        generated_at: new Date().toISOString(),
+        count: records.length,
+        acceptance_rule: "quality_passed_or_human_helpful_excluding_not_helpful",
+        records,
       }, 200)
     }
     if (req.method === "POST" && path === "/foodcourt/ai-loop-feedback") {

@@ -212,6 +212,17 @@
     .loop-kpi-sm .v{font-size:19px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums;}
     .loop-total-bar{margin:10px 0 4px;height:6px;border-radius:3px;background:var(--bar-track);overflow:hidden;}
     .loop-total-bar-fill{height:100%;border-radius:3px;}
+    .readiness-status{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:12.5px;color:var(--tx-2);}
+    .readiness-status strong{display:block;color:var(--tx-1);font-size:13px;margin-bottom:2px;}
+    .readiness-list{margin-top:16px;border-top:1px solid var(--line-soft);}
+    .readiness-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,2fr) auto;gap:14px;align-items:center;padding:13px 2px;border-bottom:1px solid var(--line-soft);}
+    .readiness-name{font-size:12.5px;font-weight:700;}
+    .readiness-detail{font-size:11.5px;color:var(--tx-3);line-height:1.55;}
+    .readiness-progress{height:6px;border-radius:3px;background:var(--bar-track);overflow:hidden;margin-top:6px;}
+    .readiness-progress span{display:block;height:100%;border-radius:3px;background:var(--accent);}
+    .readiness-state{font-size:11px;font-weight:700;border-radius:6px;padding:3px 8px;white-space:nowrap;}
+    .readiness-state.ready{color:var(--good);background:var(--good-soft);}
+    .readiness-state.wait{color:var(--warn-tx);background:var(--warn-soft);}
     .model-sel-card{background:var(--bg);border:1px solid var(--line-soft);border-radius:11px;padding:13px 16px;margin-top:10px;}
     .model-sel-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;}
     .winner-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;}
@@ -253,6 +264,8 @@
     }
     @media(max-width:480px){
       .kpi-grid{grid-template-columns:1fr;}
+      .readiness-row{grid-template-columns:1fr auto;}
+      .readiness-detail{grid-column:1 / -1;grid-row:2;}
     }
     .kpi.highlight-level {
       background: linear-gradient(135deg, var(--surface) 30%, var(--accent-soft)) !important;
@@ -410,7 +423,22 @@
       </div>
     </div>
 
-    <!-- AI Loop② quality evaluation runs -->
+    <!-- Safe evolution readiness and distillation export -->
+    <div class="card" id="readinessCard" style="display:none">
+      <div class="card-h">
+        <div class="card-t"><span class="em">🧭</span>自己進化の準備状況</div>
+        <button class="btn ghost" id="datasetDownloadBtn" style="font-size:12px;padding:6px 12px;display:flex;align-items:center;gap:7px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          蒸留データを書き出す
+        </button>
+      </div>
+      <div id="readinessStatus"></div>
+      <div class="loop-kpi-row" id="readinessKpiRow"></div>
+      <div class="readiness-list" id="readinessGates"></div>
+      <div class="card-note">品質合格または人が「役に立った」と承認した回答だけを教材候補にします。「改善が必要」は除外します。JSONLは学習用データの書き出しであり、モデルへの自動学習・自動昇格は行いません。</div>
+    </div>
+
+    <!-- Accepted RAG documents -->
     <div class="card" id="ragCard" style="display:none">
       <div class="card-h">
         <div class="card-t"><span class="em">📚</span>RAG学習ファイル</div>
@@ -476,6 +504,11 @@
     passingScoreLabel: $('passingScoreLabel'),
     passingScoreSaveStatus: $('passingScoreSaveStatus'),
     ragDownloadBtn: $('ragDownloadBtn'),
+    datasetDownloadBtn: $('datasetDownloadBtn'),
+    readinessCard: $('readinessCard'),
+    readinessStatus: $('readinessStatus'),
+    readinessKpiRow: $('readinessKpiRow'),
+    readinessGates: $('readinessGates'),
   };
 
   // ===== theme =====
@@ -566,10 +599,11 @@
   // tryConnect と loadData を統合: 認証確認と同時にデータも取得し、二重APIコールを防ぐ。
   async function tryConnectAndLoad(){
     try{
-      const [histBody, loopBody, ragBody] = await Promise.all([
+      const [histBody, loopBody, ragBody, readinessBody] = await Promise.all([
         apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
         apiFetch('/foodcourt/ai-loop-runs?limit=30&store_key=marugoS').catch(()=>({ runs: [] })),
         apiFetch('/foodcourt/ai-rag?limit=100&store_key=marugoS').catch(()=>({ count:0, documents:[] })),
+        apiFetch('/foodcourt/evolution-readiness?store_key=marugoS').catch(()=>null),
       ]);
       setAuthBadge(true);
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
@@ -577,6 +611,7 @@
       loopRuns = Array.isArray(loopBody.runs) ? loopBody.runs : [];
       ragDocuments = Array.isArray(ragBody.documents) ? ragBody.documents : [];
       ragCount = Number(ragBody.count || ragDocuments.length || 0);
+      evolutionReadiness = readinessBody;
       if (histBody.passing_score != null) {
         passingScore = Number(histBody.passing_score);
         syncPassingScoreUI();
@@ -637,22 +672,25 @@
   let loopRuns = [];
   let ragDocuments = [];
   let ragCount = 0;
+  let evolutionReadiness = null;
   let modelSelectionData = null;
 
   async function loadData(){
     dom.loadMsg.textContent = '読み込み中…'; dom.loadMsg.className='msg';
     dom.resultArea.hidden = true;
     try{
-      const [histBody, loopBody, ragBody] = await Promise.all([
+      const [histBody, loopBody, ragBody, readinessBody] = await Promise.all([
         apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
         apiFetch('/foodcourt/ai-loop-runs?limit=30&store_key=marugoS').catch(()=>({ runs: [] })),
         apiFetch('/foodcourt/ai-rag?limit=100&store_key=marugoS').catch(()=>({ count:0, documents:[] })),
+        apiFetch('/foodcourt/evolution-readiness?store_key=marugoS').catch(()=>null),
       ]);
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
       modelSelectionData = histBody.model_selection ?? null;
       loopRuns = Array.isArray(loopBody.runs) ? loopBody.runs : [];
       ragDocuments = Array.isArray(ragBody.documents) ? ragBody.documents : [];
       ragCount = Number(ragBody.count || ragDocuments.length || 0);
+      evolutionReadiness = readinessBody;
       if (histBody.passing_score != null) {
         passingScore = Number(histBody.passing_score);
         syncPassingScoreUI();
@@ -675,6 +713,7 @@
 
     renderTable();
     renderLoopRuns();
+    renderEvolutionReadiness();
     renderRagDocuments();
     renderModelSelection();
   }
@@ -1125,7 +1164,9 @@
         ragDocuments = Array.isArray(ragBody.documents) ? ragBody.documents : [];
         ragCount = Number(ragBody.count || ragDocuments.length || 0);
       }
+      evolutionReadiness = await apiFetch('/foodcourt/evolution-readiness?store_key=marugoS').catch(()=>evolutionReadiness);
       renderLoopRuns();
+      renderEvolutionReadiness();
       renderRagDocuments();
     }catch(e){ alert(e.message||String(e)); }
   }
@@ -1153,6 +1194,74 @@
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
   }
   dom.ragDownloadBtn.addEventListener('click', downloadRagMarkdown);
+
+  async function downloadDistillationDataset(){
+    const button = dom.datasetDownloadBtn;
+    const originalLabel = button.innerHTML;
+    button.disabled = true;
+    try{
+      button.textContent = '生成中...';
+      const body = await apiFetch('/foodcourt/ai-distillation-dataset?limit=200&store_key=marugoS');
+      const records = Array.isArray(body.records) ? body.records : [];
+      if(!records.length) throw new Error('書き出せる承認済みデータがありません。');
+      const jsonl = records.map(record=>JSON.stringify(record)).join('\n')+'\n';
+      const blob = new Blob([jsonl], { type:'application/x-ndjson;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const ymd = new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
+      link.href = url;
+      link.download = `foodcourt-distillation-marugos-${ymd}.jsonl`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 1000);
+    }catch(e){
+      alert(e.message||String(e));
+    }finally{
+      button.innerHTML = originalLabel;
+      button.disabled = Number(evolutionReadiness?.counts?.acceptedExamples||0) < 1;
+    }
+  }
+  dom.datasetDownloadBtn.addEventListener('click', downloadDistillationDataset);
+
+  function renderEvolutionReadiness(){
+    const data = evolutionReadiness;
+    if(!data){ dom.readinessCard.style.display='none'; return; }
+    dom.readinessCard.style.display='';
+    const counts = data.counts || {};
+    const collecting = data.status === 'collecting_data';
+    dom.readinessStatus.innerHTML = `<div class="readiness-status">
+      <span class="readiness-state ${collecting?'wait':'ready'}">${collecting?'収集中':'評価準備完了'}</span>
+      <div><strong>${collecting?'安全に使える学習例を蓄積中です':'プロンプト候補の比較評価を開始できます'}</strong>
+      モデルやプロンプトの自動昇格は停止しています。十分な件数と人の評価がそろった後も、昇格は手動確認が必要です。</div>
+    </div>`;
+    dom.readinessKpiRow.innerHTML = `
+      <div class="loop-kpi-sm"><div class="k">総ループ実行</div><div class="v">${nf.format(Number(counts.totalRuns||0))}</div></div>
+      <div class="loop-kpi-sm"><div class="k">承認済み教材</div><div class="v ${Number(counts.acceptedExamples||0)>0?'good':'neutral'}">${nf.format(Number(counts.acceptedExamples||0))}</div></div>
+      <div class="loop-kpi-sm"><div class="k">人による承認</div><div class="v ${Number(counts.humanHelpfulExamples||0)>0?'good':'neutral'}">${nf.format(Number(counts.humanHelpfulExamples||0))}</div></div>
+      <div class="loop-kpi-sm"><div class="k">日次分析教材</div><div class="v">${nf.format(Number(counts.dailyAcceptedExamples||0))}</div></div>`;
+    dom.datasetDownloadBtn.disabled = Number(counts.acceptedExamples||0) < 1;
+    const gateLabels = {
+      ragReuse:['RAGでの再利用','承認済み回答を関連する次回分析の参考にする'],
+      promptCandidate:['プロンプト候補の比較評価','現行版と改善候補を同じ問題で比較できる最低量'],
+      modelDistillation:['モデル蒸留の検討','偏りを抑えて学習データを検証できる最低量'],
+    };
+    const requirementLabels = {
+      acceptedExamples:'承認済み', humanHelpfulExamples:'人の承認', dailyAcceptedExamples:'日次', acceptedSurfaces:'分析種別'
+    };
+    dom.readinessGates.innerHTML = Object.entries(data.gates||{}).map(([key,gate])=>{
+      const requirements = Object.entries(gate.requirements||{});
+      const ratios = requirements.map(([,r])=>Number(r.required)>0?Number(r.current)/Number(r.required):1);
+      const progress = Math.max(0,Math.min(100,Math.round((ratios.length?Math.min(...ratios):0)*100)));
+      const detail = requirements.map(([name,r])=>`${requirementLabels[name]||name} ${nf.format(Number(r.current||0))}/${nf.format(Number(r.required||0))}`).join(' ・ ');
+      const labels = gateLabels[key] || [key,''];
+      return `<div class="readiness-row">
+        <div class="readiness-name">${escH(labels[0])}</div>
+        <div class="readiness-detail">${escH(labels[1])}<div>${escH(detail)}</div><div class="readiness-progress"><span style="width:${progress}%"></span></div></div>
+        <span class="readiness-state ${gate.ready?'ready':'wait'}">${gate.ready?'利用可能':'データ待ち'}</span>
+      </div>`;
+    }).join('');
+  }
 
   function renderRagDocuments(){
     const card = document.getElementById('ragCard');

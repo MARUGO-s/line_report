@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  assessFoodCourtEvolutionReadiness,
   buildFoodCourtRevisionMessages,
   compactFoodCourtEvaluationContext,
   foodCourtEvaluationPassed,
@@ -79,4 +80,45 @@ test('RAG ranking keeps the most relevant approved document first', () => {
   ])
   assert.equal(ranked[0]?.source_run_id, 'related')
   assert.equal(ranked.some((row) => row.source_run_id === 'unrelated'), false)
+})
+
+test('RAG ranking returns no document when every candidate is unrelated', () => {
+  const ranked = rankFoodCourtRagDocuments('東京ドームイベント日の客数を分析', [
+    {
+      source_run_id: 'unrelated',
+      search_text: '消耗品の勘定科目とレシート',
+      document_markdown: '# unrelated',
+      final_score: 98,
+    },
+  ])
+  assert.deepEqual(ranked, [])
+})
+
+test('evolution readiness never enables automatic promotion', () => {
+  const readiness = assessFoodCourtEvolutionReadiness({
+    totalRuns: 200,
+    completedRuns: 200,
+    acceptedExamples: 120,
+    humanHelpfulExamples: 25,
+    dailyAcceptedExamples: 35,
+    acceptedSurfaces: 4,
+  })
+  assert.equal(readiness.gates.promptCandidate.ready, true)
+  assert.equal(readiness.gates.modelDistillation.ready, true)
+  assert.equal(readiness.promotionMode, 'manual_only')
+})
+
+test('evolution readiness remains in data collection below evidence thresholds', () => {
+  const readiness = assessFoodCourtEvolutionReadiness({
+    totalRuns: 29,
+    completedRuns: 28,
+    acceptedExamples: 3,
+    humanHelpfulExamples: 0,
+    dailyAcceptedExamples: 0,
+    acceptedSurfaces: 2,
+  })
+  assert.equal(readiness.status, 'collecting_data')
+  assert.equal(readiness.gates.ragReuse.ready, true)
+  assert.equal(readiness.gates.promptCandidate.ready, false)
+  assert.equal(readiness.gates.modelDistillation.ready, false)
 })

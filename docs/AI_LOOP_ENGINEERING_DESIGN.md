@@ -481,52 +481,48 @@ Phase 2以降で部分再実行を追加。
 - キャッシュには最終回答だけ保存
 - ループ詳細は `foodcourt_ai_loop_*` に保存
 
-## 14. 将来拡張
+## 14. 学習データ再利用と将来拡張
 
-PDF要件に対応する拡張先。
+2026-07-16時点で、安全に自動化できる収集・再利用・書き出しまで実装済み。モデルのファインチューニングと本番モデルの自動昇格は未実装で、準備度ゲートが満たされた後も手動承認を必須とする。
 
-### 14.1 RAG
+### 14.1 RAG（実装済み）
 
-- `foodcourt_ai_loop_iterations` から `passed=true` かつ `total_score>=90` の回答を抽出
-- `improvement_points` とともに成功/失敗例として検索可能にする
-- 将来 `embedding` 列または別テーブル `foodcourt_ai_answer_embeddings` を追加
+- DBトリガーが、品質合格または人が `helpful` とした回答だけを `foodcourt_ai_rag_documents` へ同期する。
+- `not_helpful` は即時に無効化し、次回プロンプトへ混入させない。
+- 同一店舗・同一surface内で日本語bigram類似度を計算し、類似度0.03未満は採用しない。
+- 現在は字句検索であり、embeddingによる意味検索ではない。将来 `pgvector` を導入する場合も、現在の承認条件を前段ゲートとして維持する。
 
-### 14.2 蒸溜
+### 14.2 蒸留データ出力（実装済み）
 
-学習データとして以下を出力できる。
+`GET /foodcourt/ai-distillation-dataset` は、承認済みrunから以下をJSONL向け構造として出力する。
 
 ```json
 {
-  "input": "ユーザー質問 + 実データコンテキスト",
-  "draft_answer": "初回回答",
-  "evaluation": {...},
-  "improvement_points": [...],
-  "final_answer": "合格または最高点回答"
+  "input": {"task": "質問または定型分析", "source_ref": {}},
+  "initial_response": "初回回答",
+  "initial_evaluation": {"improvement_points": []},
+  "preferred_response": "品質合格または人が承認した最終回答",
+  "trajectory": [{"loop_index": 1, "score": 62, "evaluator_feedback": {}}]
 }
 ```
 
-### 14.3 ユーザーフィードバック学習
+この出力は教師データ候補であり、出力しただけで基盤モデルが学習するわけではない。
 
-管理画面に「この回答は役に立った/違う」ボタンを追加する場合:
+### 14.3 ユーザーフィードバック学習（実装済み）
 
-```sql
-create table public.foodcourt_ai_answer_feedback (
-  id bigint generated always as identity primary key,
-  run_id uuid references public.foodcourt_ai_loop_runs(id),
-  rating integer check (rating between 1 and 5),
-  comment text,
-  created_at timestamptz not null default now()
-);
-```
+- 管理画面の「役に立った」「改善が必要」を `foodcourt_ai_feedback` に保存する。
+- `helpful` は品質点にかかわらず承認教材にできる。
+- `not_helpful` はRAGと蒸留データセットの両方から除外する。
 
-### 14.4 回答ランキング/成功回答再利用
+### 14.4 進化準備度ゲート（実装済み）
 
-- `total_score`
-- ユーザーフィードバック
-- 再利用回数
-- 類似質問一致度
+`GET /foodcourt/evolution-readiness` と `foodcourt-evolution.html` で次を監視する。
 
-でランキング可能。
+- RAG再利用: 承認済み1件以上
+- プロンプト候補の比較評価: 承認済み20件、人の承認5件、日次分析5件
+- モデル蒸留の検討: 承認済み100件、人の承認20件、日次分析30件、3種類以上のsurface
+
+件数を満たしても `promotionMode=manual_only` を維持する。現行プロンプトと候補版の固定評価セット比較、回帰検査、コスト確認なしに本番昇格させない。
 
 ## 15. 実装順序
 
