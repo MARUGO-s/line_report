@@ -1382,11 +1382,12 @@ Deno.serve(async (req, info) => {
       return json({ items: data ?? [] }, 200)
     }
     // 「分析サマリー（自動）」カードのAI版。report_id単位でキャッシュし、閲覧のたびに再生成・再課金しない。
-    // 初回閲覧時にGroq(専門AI2体→統合AI)で生成しDBへ保存、以降は保存済みテキストを即返す。
+    // 初回閲覧時にGroqで生成しDBへ保存する。画面から明示的にforce=1が指定された場合だけ再生成する。
     if (req.method === "GET" && path === "/foodcourt/daily-summary") {
       const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
       if (!storeKey) return json({ error: "store_key is required." }, 400)
       const reportIdParam = url.searchParams.get("report_id")
+      const forceRegenerate = url.searchParams.get("force") === "1"
       // 実効バージョン: ループが日次で有効なときだけ v12-loop（無効の間は v11 のまま＝既存キャッシュを維持）。
       const dailyAiVersion = await resolveFoodCourtPassingAwareCacheVersion(
         supabase,
@@ -1413,7 +1414,7 @@ Deno.serve(async (req, info) => {
         .eq("model_version", dailyAiVersion)
         .maybeSingle()
       if (cacheErr) return json({ error: cacheErr.message }, 500)
-      if (cached && (cached as { summary_text?: unknown }).summary_text) {
+      if (!forceRegenerate && cached && (cached as { summary_text?: unknown }).summary_text) {
         const loop = await loadLatestFoodCourtLoopScore(supabase, storeKey, "daily_summary", { report_id: reportId })
         return json({
           summary: (cached as { summary_text: string }).summary_text,
@@ -1498,6 +1499,7 @@ Deno.serve(async (req, info) => {
       return json({
         summary,
         cached: false,
+        regenerated: forceRegenerate,
         reportCount: reports.length,
         daily_logs_count: dailyLogsCount,
         daily_logs_error: dailyLogsError,
@@ -1509,6 +1511,7 @@ Deno.serve(async (req, info) => {
     if (req.method === "GET" && path === "/foodcourt/period-summary") {
       const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
       if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const forceRegenerate = url.searchParams.get("force") === "1"
       const startRaw = String(url.searchParams.get("start") ?? "").trim()
       const endRaw = String(url.searchParams.get("end") ?? "").trim()
       if (!/^\d{4}-\d{2}-\d{2}$/.test(startRaw) || !/^\d{4}-\d{2}-\d{2}$/.test(endRaw)) {
@@ -1529,7 +1532,7 @@ Deno.serve(async (req, info) => {
         .eq("model_version", periodAiVersion)
         .maybeSingle()
       if (cacheErr) return json({ error: cacheErr.message }, 500)
-      if (cached && (cached as { summary_text?: unknown }).summary_text) {
+      if (!forceRegenerate && cached && (cached as { summary_text?: unknown }).summary_text) {
         const loop = await loadLatestFoodCourtLoopScore(supabase, storeKey, "period_summary", {
           start_date: startDate,
           end_date: endDate,
@@ -1586,6 +1589,7 @@ Deno.serve(async (req, info) => {
       return json({
         summary,
         cached: false,
+        regenerated: forceRegenerate,
         daily_logs_count: dailyLogsCount,
         daily_logs_error: dailyLogsError,
         ...loop,

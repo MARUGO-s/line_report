@@ -662,6 +662,7 @@
         <div class="card-h">
           <div class="card-t"><span class="em">📋</span>分析サマリー（自動）</div>
           <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn secondary" id="summaryRegenerateBtn" type="button" title="保存済みの分析を使わず、AI分析ループをもう一度実行します" style="font-size:11px;padding:3px 8px;display:none">↻ 再生成</button>
             <button class="btn secondary" id="summaryExportBtn" style="font-size:11px;padding:3px 8px;display:none" onclick="exportSummary()">📄 分析サマリーを出力</button>
             <span class="pill" id="aiScorePill" title="AI自己採点（100点満点）" style="display:none"></span>
             <span class="pill beta" id="aiStatusPill">試験版</span>
@@ -835,6 +836,7 @@
     heroLogo:$('heroLogo'), heroName:$('heroName'), heroMeta:$('heroMeta'), heroRanks:$('heroRanks'), heroTotals:$('heroTotals'), kpis:$('kpis'),
     tabrow:$('tabrow'),
     aiGrid:$('aiGrid'), aiNote:$('aiNote'), aiScorePill:$('aiScorePill'), aiStatusPill:$('aiStatusPill'),
+    summaryRegenerateBtn:$('summaryRegenerateBtn'),
     qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'), qClear:$('qClear'),
     rankTbody:$('rankTbody'), shareTbody:$('shareTbody'), shareNote:$('shareNote'), priceTbody:$('priceTbody'), distWrap:$('distWrap'), clsList:$('clsList'),
     trendCount:$('trendCount'), dailyTbody:$('dailyTbody'), trendNote:$('trendNote'),
@@ -2716,6 +2718,7 @@
   // まず即時にJSテンプレート版を表示（待ち時間ゼロ）。単日表示(report.idあり)なら、裏でAI版(専門AI2体→
   // 統合AI・report_id単位でキャッシュ)を取得し、届いたら差し替える。期間集計モードやAI失敗時はテンプレのまま。
   let aiSummaryReq = 0;
+  let currentAiSummaryContext = null;
   function showAiSummaryScore(score){
     if (!dom.aiScorePill) return;
     const value = Number(score);
@@ -2727,14 +2730,18 @@
     dom.aiScorePill.textContent = 'AI自己採点 ' + Math.round(value) + '点';
     dom.aiScorePill.style.display = 'inline-flex';
   }
-  function renderAnalysisBlocks(report, seriesReports, periodLabel){
-    // ヘッダー「売上日」と同じく売上発生日を使う（report_date は翌朝の発行日＝+1 なのでラベルに使わない）。
-    // 例: 火曜 07-07 の売上 → report_date 07-08 → 表示は 2026-07-07。
-    currentSummaryPeriod = periodLabel || (report ? (salesDateOf(report) || String(report.report_date || '').slice(0, 10) || '') : '');
-    const text = buildAnalysisText(report, seriesReports, periodLabel);
-    paintAnalysisSecs(parseAnalysis(text), text);
-    if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
-    showAiSummaryScore(null);
+  function setAiSummaryRegenerateState(available, busy){
+    if (!dom.summaryRegenerateBtn) return;
+    dom.summaryRegenerateBtn.style.display = available ? 'inline-flex' : 'none';
+    dom.summaryRegenerateBtn.disabled = !!busy;
+    dom.summaryRegenerateBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
+  }
+  function requestAiSummary(report, periodLabel, forceRegenerate){
+    const periodMatch = periodLabel ? /^(\d{4}-\d{2}-\d{2})〜(\d{4}-\d{2}-\d{2})$/.exec(periodLabel) : null;
+    const available = !!periodMatch || !!(report && report.id != null);
+    setAiSummaryRegenerateState(available, available);
+    if (!available) return;
+
     const reqId = ++aiSummaryReq;
     const applyAiResult = (body) => {
       if (reqId !== aiSummaryReq) return; // 表示対象が切り替わっていたら破棄
@@ -2745,67 +2752,71 @@
       showAiSummaryScore(body.loop_score);
       if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成';
     };
-    const applyAiFailure = () => {
+    const applyAiFailure = (err) => {
       if (reqId !== aiSummaryReq) return;
-      showAiSummaryScore(null);
-      if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
+      if (dom.aiStatusPill) dom.aiStatusPill.textContent = forceRegenerate ? '再生成失敗' : '試験版';
+      if (forceRegenerate) alert('AI分析サマリーの再生成に失敗しました: ' + ((err && err.message) || ''));
     };
 
     if (summaryProgressTimeout) clearTimeout(summaryProgressTimeout);
+    if (dom.aiStatusPill) dom.aiStatusPill.textContent = forceRegenerate ? '再生成中…' : 'AI生成中…';
 
-    if (periodLabel) {
+    let path;
+    let progressSteps;
+    if (periodMatch) {
       // 「期間で見る」モード：単一のreport_idが無いため、店舗+開始日+終了日でキャッシュする専用エンドポイントを使う。
-      const m = /^(\d{4}-\d{2}-\d{2})〜(\d{4}-\d{2}-\d{2})$/.exec(periodLabel);
-      if (!m) return;
-      if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成中…';
-
-      summaryProgressTimeout = setTimeout(() => {
-        showProgressPopup('AI分析サマリーを作成中', [
-          '指定された期間の売上データを集計しています...',
-          '期間中の天気情報と東京ドームのイベントを照合しています...',
-          '専門分析AIが曜日・ドーム対戦成績などの相関を確認しています...',
-          '統合AIがレポートサマリーを取りまとめています...',
-          '分析サマリーを表示します'
-        ]);
-      }, 500);
-
-      apiFetch('/foodcourt/period-summary?store_key='+encodeURIComponent(currentStore())+'&start='+encodeURIComponent(m[1])+'&end='+encodeURIComponent(m[2]))
-        .then((body) => {
-          clearTimeout(summaryProgressTimeout);
-          hideProgressPopup();
-          applyAiResult(body);
-        })
-        .catch((err) => {
-          clearTimeout(summaryProgressTimeout);
-          hideProgressPopup();
-          applyAiFailure(err);
-        });
-      return;
-    }
-    if (!report || report.id == null) return;
-    if (dom.aiStatusPill) dom.aiStatusPill.textContent = 'AI生成中…';
-
-    summaryProgressTimeout = setTimeout(() => {
-      showProgressPopup('AI分析サマリーを作成中', [
+      path = '/foodcourt/period-summary?store_key='+encodeURIComponent(currentStore())+'&start='+encodeURIComponent(periodMatch[1])+'&end='+encodeURIComponent(periodMatch[2]);
+      progressSteps = [
+        '指定された期間の売上データを集計しています...',
+        '期間中の天気情報と東京ドームのイベントを照合しています...',
+        '専門分析AIが曜日・ドーム対戦成績などの相関を確認しています...',
+        '統合AIがレポートサマリーを取りまとめています...',
+        '分析サマリーを表示します'
+      ];
+    } else {
+      path = '/foodcourt/daily-summary?store_key='+encodeURIComponent(currentStore())+'&report_id='+encodeURIComponent(report.id);
+      progressSteps = [
         '対象日の売上データを集計しています...',
         '当日の天気情報と東京ドームのイベントを照合しています...',
         '専門分析AIが曜日・ドーム対戦成績などの相関を確認しています...',
         '統合AIがレポートサマリーを取りまとめています...',
         '分析サマリーを表示します'
-      ]);
+      ];
+    }
+    if (forceRegenerate) path += '&force=1&request_id=' + encodeURIComponent(String(Date.now()));
+
+    summaryProgressTimeout = setTimeout(() => {
+      showProgressPopup(forceRegenerate ? 'AI分析サマリーを再生成中' : 'AI分析サマリーを作成中', progressSteps);
     }, 500);
 
-    apiFetch('/foodcourt/daily-summary?store_key='+encodeURIComponent(currentStore())+'&report_id='+encodeURIComponent(report.id))
+    apiFetch(path)
       .then((body) => {
-        clearTimeout(summaryProgressTimeout);
-        hideProgressPopup();
         applyAiResult(body);
       })
       .catch((err) => {
+        applyAiFailure(err);
+      })
+      .finally(() => {
+        if (reqId !== aiSummaryReq) return;
         clearTimeout(summaryProgressTimeout);
         hideProgressPopup();
-        applyAiFailure(err);
+        setAiSummaryRegenerateState(true, false);
       });
+  }
+  function renderAnalysisBlocks(report, seriesReports, periodLabel){
+    // ヘッダー「売上日」と同じく売上発生日を使う（report_date は翌朝の発行日＝+1 なのでラベルに使わない）。
+    // 例: 火曜 07-07 の売上 → report_date 07-08 → 表示は 2026-07-07。
+    currentSummaryPeriod = periodLabel || (report ? (salesDateOf(report) || String(report.report_date || '').slice(0, 10) || '') : '');
+    currentAiSummaryContext = { report: report, seriesReports: seriesReports, periodLabel: periodLabel || null };
+    const text = buildAnalysisText(report, seriesReports, periodLabel);
+    paintAnalysisSecs(parseAnalysis(text), text);
+    if (dom.aiStatusPill) dom.aiStatusPill.textContent = '試験版';
+    showAiSummaryScore(null);
+    requestAiSummary(report, periodLabel, false);
+  }
+  function regenerateAiSummary(){
+    if (!currentAiSummaryContext) return;
+    requestAiSummary(currentAiSummaryContext.report, currentAiSummaryContext.periodLabel, true);
   }
 
   // ===== render: ranking / share / price / dist / classification =====
@@ -3233,6 +3244,7 @@
   dom.qBtn.addEventListener('click', ()=>askQuestion());
   dom.qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') askQuestion(); });
   if (dom.qClear) dom.qClear.addEventListener('click', clearQa);
+  if (dom.summaryRegenerateBtn) dom.summaryRegenerateBtn.addEventListener('click', regenerateAiSummary);
   dom.reloadBtn.addEventListener('click', loadReports);
   dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]){ mode='single'; setModeButtons(); render(reports[i]); } });
   dom.rangeBtn.addEventListener('click', renderRange);
