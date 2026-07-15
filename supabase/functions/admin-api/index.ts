@@ -86,6 +86,7 @@ import {
   hashRoomConfigPassword,
   issueAdminDashboardLoginLinkToken,
   issueAdminDashboardSessionToken,
+  REUSABLE_VIEW_LINK_TTL_SEC,
   revokeAdminDashboardSessionToken,
   revokeAllAdminDashboardAuthTokens,
   ROOM_CONFIG_SCOPE,
@@ -115,22 +116,87 @@ function weeklyReportHtml(report: string): string {
 }
 
 async function buildFoodCourtWeeklyReportLink(supabase: ReturnType<typeof createClient>, storeKey: string, weekStart: string): Promise<string> {
-  const issued = await issueAdminDashboardLoginLinkToken(supabase, { source: "line_foodcourt_weekly", store_partition_key: storeKey })
+  // 閲覧専用（設定変更なし）のレポートリンクなので、単一使用・期限つきにせず何度でも開けるようにする。
+  const issued = await issueAdminDashboardLoginLinkToken(
+    supabase,
+    { source: "line_foodcourt_weekly", store_partition_key: storeKey, reusable: true },
+    { ttlSeconds: REUSABLE_VIEW_LINK_TTL_SEC },
+  )
   const params = new URLSearchParams({ store_key: storeKey, week_start: weekStart, from: "line", lt: issued.token })
   return `${FOODCOURT_WEEKLY_REPORT_PAGE_BASE}?${params.toString()}`
 }
 
-function weeklyReportFlex(weekStart: string, weekEnd: string, rawData: unknown, link: string): Record<string, unknown> {
-  const raw = (rawData && typeof rawData === "object") ? rawData as Record<string, unknown> : {}
-  const yen = (value: unknown) => `¥${Math.round(Number(value) || 0).toLocaleString("ja-JP")}`
-  const guests = Math.round(Number(raw.totalGuests) || 0).toLocaleString("ja-JP")
-  const rank = Number(raw.avgRank)
-  const cells = [
-    { type: "box", layout: "vertical", flex: 1, contents: [{ type: "text", text: "週売上", size: "xs", color: "#7A869A" }, { type: "text", text: yen(raw.totalSales), weight: "bold", size: "md", color: "#173B5E" }] },
-    { type: "box", layout: "vertical", flex: 1, contents: [{ type: "text", text: "客数", size: "xs", color: "#7A869A" }, { type: "text", text: `${guests}人`, weight: "bold", size: "md", color: "#173B5E" }] },
-    { type: "box", layout: "vertical", flex: 1, contents: [{ type: "text", text: "平均順位", size: "xs", color: "#7A869A" }, { type: "text", text: Number.isFinite(rank) ? `${rank.toFixed(1)}位` : "-", weight: "bold", size: "md", color: "#173B5E" }] },
-  ]
-  return { type: "flex", altText: `フードコート週次レポート ${weekStart}〜${weekEnd}`, contents: { type: "bubble", size: "mega", header: { type: "box", layout: "vertical", backgroundColor: "#0B6EA8", paddingAll: "18px", contents: [{ type: "text", text: "FOODCOURT WEEKLY", color: "#B9E8FF", size: "xs", weight: "bold" }, { type: "text", text: "週次経営報告", color: "#FFFFFF", size: "xl", weight: "bold", margin: "sm" }, { type: "text", text: `${weekStart} 〜 ${weekEnd}`, color: "#D7F0FF", size: "sm", margin: "sm" }] }, body: { type: "box", layout: "vertical", paddingAll: "18px", contents: [{ type: "box", layout: "horizontal", spacing: "md", contents: cells }] }, footer: { type: "box", layout: "vertical", paddingAll: "14px", contents: [{ type: "button", style: "primary", color: "#0B83C5", action: { type: "uri", label: "週次報告を開く", uri: link } }] } } }
+/**
+ * ルーム×週で1回だけLINE送信を許可する（先に予約行を確保してから送信する方式）。
+ * foodcourt-weekly-report-cron は5分おきに±5分の許容誤差で起動するため、分ぴったりの設定
+ * （例: minute=0）だと同一時間帯に複数回一致し、二重送信が起きる。この関数で吸収する。
+ */
+async function reserveFoodCourtWeeklyReportSend(
+  supabase: ReturnType<typeof createClient>,
+  roomId: string,
+  weekStart: string,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("foodcourt_weekly_report_sends")
+    .insert({ room_id: roomId, week_start: weekStart })
+  if (error) {
+    if (String((error as { code?: string }).code ?? "") === "23505") return false
+    console.error("reserveFoodCourtWeeklyReportSend insert failed:", error.message)
+    return false
+  }
+  return true
+}
+
+function buildWeeklyReportFlexMessage(weekStart: string, weekEnd: string, reportUrl: string): Record<string, unknown> {
+  return {
+    type: "flex",
+    altText: `📊 フードコート週次レポート（${weekStart}〜${weekEnd}）を作成しました。`,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#1a3a5c",
+        paddingAll: "16px",
+        contents: [
+          { type: "text", text: "📊 フードコート週次レポート", color: "#ffffff", size: "sm", weight: "bold" },
+          { type: "text", text: `${weekStart}（月）〜 ${weekEnd}（日）`, color: "#a8c4e0", size: "xs", margin: "xs" },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "box", layout: "horizontal", spacing: "sm",
+            contents: [
+              { type: "text", text: "週売上合計", color: "#666666", size: "xs", flex: 1 },
+              { type: "text", text: "客数・客単価", color: "#666666", size: "xs", flex: 1 },
+              { type: "text", text: "週平均売上順位", color: "#666666", size: "xs", flex: 1 },
+            ],
+          },
+          { type: "text", text: "Webで詳細・グラフを確認できます", color: "#888888", size: "xxs", margin: "md", wrap: true },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "button",
+            action: { type: "uri", label: "📈 レポートを開く", uri: reportUrl },
+            style: "primary",
+            color: "#1a3a5c",
+            height: "sm",
+          },
+        ],
+      },
+    },
+  }
 }
 
 type AppError = {
@@ -362,7 +428,13 @@ const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," 
   ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
   ",today_reservation_alert_hour,today_reservation_alert_minute" +
   ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute" +
-  ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute"
+  ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute" +
+  ",review_alert_hour,review_alert_minute" +
+  ",gmail_alert_interval_minutes,gmail_alert_anchor_hour,gmail_alert_anchor_minute"
+
+// 予約メール通知(gmail-alert-cron)の配信間隔（分）として許可する値。
+// 1(既定・null扱い)=毎分チェック(リアルタイム)。それ以外は「N分おきにまとめて配信」。
+const GMAIL_ALERT_INTERVAL_MINUTES_ALLOWED = new Set([1, 15, 30, 60, 120, 180, 360, 720, 1440])
 
 function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -402,6 +474,29 @@ function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<strin
   if ("foodcourt_weekly_minute" in body) {
     const v = Number(body.foodcourt_weekly_minute)
     out.foodcourt_weekly_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
+  }
+  // 口コミ新着通知の配信時刻（毎日・NULL許容＝既定 8時/10分）
+  if ("review_alert_hour" in body) {
+    const v = Number(body.review_alert_hour)
+    out.review_alert_hour = (Number.isInteger(v) && v >= 0 && v <= 23) ? v : null
+  }
+  if ("review_alert_minute" in body) {
+    const v = Number(body.review_alert_minute)
+    out.review_alert_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
+  }
+  // 予約メール通知の配信間隔（分）。NULL/1=リアルタイム（毎分チェック）。
+  if ("gmail_alert_interval_minutes" in body) {
+    const v = Number(body.gmail_alert_interval_minutes)
+    out.gmail_alert_interval_minutes = GMAIL_ALERT_INTERVAL_MINUTES_ALLOWED.has(v) ? v : null
+  }
+  // 予約メール通知の基準時刻（まとめ配信のみで使用、NULL は既定 10:00）。
+  if ("gmail_alert_anchor_hour" in body) {
+    const v = Number(body.gmail_alert_anchor_hour)
+    out.gmail_alert_anchor_hour = (Number.isInteger(v) && v >= 0 && v <= 23) ? v : null
+  }
+  if ("gmail_alert_anchor_minute" in body) {
+    const v = Number(body.gmail_alert_anchor_minute)
+    out.gmail_alert_anchor_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
   }
   return out
 }
@@ -679,6 +774,64 @@ function addDaysIso(iso: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+// businessDateIso を含む月の「前月」の範囲を返す（月次振り返りは常に完全に終わった月を対象にする）。
+function previousMonthRange(businessDateIso: string): { yearMonth: string; monthStart: string; monthEnd: string } | null {
+  const d = new Date(`${businessDateIso}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return null
+  const firstOfThisMonth = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
+  const lastOfPrevMonth = new Date(firstOfThisMonth.getTime() - 24 * 3600 * 1000)
+  const firstOfPrevMonth = new Date(Date.UTC(lastOfPrevMonth.getUTCFullYear(), lastOfPrevMonth.getUTCMonth(), 1))
+  const yearMonth = `${lastOfPrevMonth.getUTCFullYear()}-${String(lastOfPrevMonth.getUTCMonth() + 1).padStart(2, "0")}`
+  return {
+    yearMonth,
+    monthStart: firstOfPrevMonth.toISOString().slice(0, 10),
+    monthEnd: lastOfPrevMonth.toISOString().slice(0, 10),
+  }
+}
+
+// 「先月の振り返り」を store_partition_key + year_month でキャッシュしつつ取得する。
+// 未生成なら generateFoodCourtPeriodSummary を月境界で呼んで生成・保存する（月に1回だけAI生成・以降はキャッシュ）。
+// データ不足等でnullが返ることもあり、その場合は日次分析側で単に「先月の振り返り」ブロックなしとして扱う。
+async function getOrGenerateMonthlyRetrospective(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  baseName: string,
+  yearMonth: string,
+  monthStart: string,
+  monthEnd: string,
+  groqApiKey: string,
+  reports: Array<Record<string, unknown>>,
+  events: Awaited<ReturnType<typeof loadVenueEventsForReports>>,
+  weather: Awaited<ReturnType<typeof loadWeatherForReports>>,
+  forecast: Awaited<ReturnType<typeof loadForecastForStore>>,
+  dailyLogs: Array<Record<string, unknown>>,
+): Promise<string | null> {
+  const { data: cached, error: cacheErr } = await supabase
+    .from("foodcourt_monthly_retrospective")
+    .select("summary_text")
+    .eq("store_partition_key", storeKey)
+    .eq("year_month", yearMonth)
+    .maybeSingle()
+  if (cacheErr) console.error("foodcourt_monthly_retrospective select failed:", cacheErr.message)
+  if (cached && (cached as { summary_text?: unknown }).summary_text) {
+    return String((cached as { summary_text: string }).summary_text)
+  }
+  const summary = await generateFoodCourtPeriodSummary(
+    reports, baseName, monthStart, monthEnd, groqApiKey, events, weather, forecast, supabase, storeKey, dailyLogs,
+  )
+  if (!summary) return null
+  const { error: upErr } = await supabase.from("foodcourt_monthly_retrospective").upsert({
+    store_partition_key: storeKey,
+    year_month: yearMonth,
+    month_start: monthStart,
+    month_end: monthEnd,
+    summary_text: summary,
+    model_version: "v1",
+  }, { onConflict: "store_partition_key,year_month" })
+  if (upErr) console.error("foodcourt_monthly_retrospective upsert failed:", upErr.message)
+  return summary
+}
+
 // 東京ドーム周辺の日次天気を、レポート期間に合わせて取得する（マルゴSのみ）。
 // マルゴSは東京ドーム内フードコートのため、天気（雨/気温）と客数・売上が相関する。
 async function loadWeatherForReports(
@@ -900,8 +1053,11 @@ Deno.serve(async (req, info) => {
       "/foodcourt/ai-loop-runs",
       "/foodcourt/daily-logs",
       "/foodcourt/daily-summary",
+      "/foodcourt/daily-summary/list",
       "/foodcourt/period-summary",
       "/foodcourt/weekly-report",
+      "/foodcourt/weekly-report/list",
+      "/foodcourt/monthly-retrospective",
       "/foodcourt/events/attendance",
       "/analytics/holidays",
       "/analytics/monthly",
@@ -1151,6 +1307,21 @@ Deno.serve(async (req, info) => {
       const baseDaily = await loadBaseDailyForReports(supabase, storeKey)
       return json({ store_key: storeKey, reports, events, weather, forecast, baseDaily }, 200)
     }
+    // 「レポート一覧」タブ用：日次AIサマリーの一覧（本文は含まない軽量版。クリック時に
+    // /foodcourt/daily-summary?report_id=... で本文を取得する）。
+    if (req.method === "GET" && path === "/foodcourt/daily-summary/list") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 90) || 90, 1), 365)
+      const { data, error } = await supabase
+        .from("foodcourt_daily_ai_summary")
+        .select("report_id, business_date, model_version, created_at")
+        .ilike("store_partition_key", storeKey)
+        .order("business_date", { ascending: false })
+        .limit(limit)
+      if (error) return json({ error: error.message }, 500)
+      return json({ items: data ?? [] }, 200)
+    }
     // 「分析サマリー（自動）」カードのAI版。report_id単位でキャッシュし、閲覧のたびに再生成・再課金しない。
     // 初回閲覧時にGroq(専門AI2体→統合AI)で生成しDBへ保存、以降は保存済みテキストを即返す。
     if (req.method === "GET" && path === "/foodcourt/daily-summary") {
@@ -1221,10 +1392,22 @@ Deno.serve(async (req, info) => {
       if (dailyLogsError) {
         console.error("foodcourt/daily-summary daily_logs load failed:", dailyLogsError)
       }
+      // 「先月の振り返り」を学習材料として渡す（月に1回だけAI生成・以降は月末までキャッシュ再利用）。
+      // reportsは既に読み込み済みの直近90件（前月分は通常この範囲に収まる）を再利用し、追加クエリはしない。
+      let monthlyRetro: string | null = null
+      if (businessDate) {
+        const monthRange = previousMonthRange(businessDate)
+        if (monthRange) {
+          monthlyRetro = await getOrGenerateMonthlyRetrospective(
+            supabase, storeKey, baseName, monthRange.yearMonth, monthRange.monthStart, monthRange.monthEnd,
+            groqApiKey, reports, events, weather, forecast, dailyLogs,
+          )
+        }
+      }
       // 曜日/イベント種別/天気ごとの統計パターンはgenerateFoodCourtDailySummary内でreportsから毎回
       // 計算し直す（コード計算・状態を持たない＝データが増えるほど自動的に確度が上がる）。
       const summary = await generateFoodCourtDailySummary(
-        reports, baseName, target, groqApiKey, events, weather, forecast, supabase, storeKey, priorSummary, dailyLogs,
+        reports, baseName, target, groqApiKey, events, weather, forecast, supabase, storeKey, priorSummary, dailyLogs, monthlyRetro,
       )
       if (!summary) {
         return json({
@@ -1599,18 +1782,48 @@ Deno.serve(async (req, info) => {
       return json({ ok: true }, 200)
     }
 
+    // 「レポート一覧」タブ用：週次レポートの一覧（本文は含まない軽量版。クリック時に
+    // /foodcourt/weekly-report?week_start=... で本文を取得する）。
+    if (req.method === "GET" && path === "/foodcourt/weekly-report/list") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 52) || 52, 1), 260)
+      const { data, error } = await supabase
+        .from("foodcourt_weekly_reports")
+        .select("week_start, week_end, loop_score, created_at")
+        .ilike("store_partition_key", storeKey)
+        .order("week_start", { ascending: false })
+        .limit(limit)
+      if (error) return json({ error: error.message }, 500)
+      return json({ items: data ?? [] }, 200)
+    }
+
     if (req.method === "GET" && path === "/foodcourt/weekly-report") {
       const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
       const weekStart = String(url.searchParams.get("week_start") ?? "").slice(0, 10)
       if (!storeKey || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return json({ error: "store_key and week_start are required." }, 400)
       const { data, error } = await supabase.from("foodcourt_weekly_reports")
-        .select("store_partition_key,week_start,week_end,ai_report,report_html,loop_score,loop_count,created_at")
+        .select("store_partition_key,week_start,week_end,ai_report,report_html,raw_data,loop_score,loop_count,created_at")
         .ilike("store_partition_key", storeKey).eq("week_start", weekStart).order("created_at", { ascending: false }).limit(1).maybeSingle()
       if (error) return json({ error: error.message }, 500)
       if (!data) return json({ error: "週次レポートが見つかりません。" }, 404)
       const row = data as Record<string, unknown>
       const report = String(row.ai_report ?? "")
       return json({ ...row, report_html: String(row.report_html ?? "") || weeklyReportHtml(report) }, 200)
+    }
+
+    // 月次振り返り（AI生成・キャッシュ済み）を単独で確認するための参照用エンドポイント。
+    // 通常は日次分析生成が内部で自動的に取得・生成するため、これは検証・将来のUI表示用。
+    if (req.method === "GET" && path === "/foodcourt/monthly-retrospective") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      const yearMonth = String(url.searchParams.get("year_month") ?? "").trim()
+      if (!storeKey || !/^\d{4}-\d{2}$/.test(yearMonth)) return json({ error: "store_key and year_month(YYYY-MM) are required." }, 400)
+      const { data, error } = await supabase.from("foodcourt_monthly_retrospective")
+        .select("store_partition_key,year_month,month_start,month_end,summary_text,model_version,created_at")
+        .ilike("store_partition_key", storeKey).eq("year_month", yearMonth).maybeSingle()
+      if (error) return json({ error: error.message }, 500)
+      if (!data) return json({ error: "月次振り返りが見つかりません（まだ生成されていません）。" }, 404)
+      return json(data, 200)
     }
 
     // フードコート週次経営レポート生成（cron または管理画面から）。
@@ -1655,12 +1868,20 @@ Deno.serve(async (req, info) => {
         const report = String((cachedRow as { ai_report: string }).ai_report)
         let linePush: { ok: boolean; error?: string } | null = null
         if (pushToLine && roomId) {
-          const token = resolveChannelAccessToken(storeKey)
-          if (token) {
-            const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
-            linePush = await pushLineMessagesToTarget(roomId, [weeklyReportFlex(weekStart, weekEnd, (cachedRow as { raw_data?: unknown }).raw_data, link)], token)
+          if (await reserveFoodCourtWeeklyReportSend(supabase, roomId, weekStart)) {
+            const token = resolveChannelAccessToken(storeKey)
+            if (token) {
+              const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
+              linePush = await pushLineMessagesToTarget(roomId, [buildWeeklyReportFlexMessage(weekStart, weekEnd, link)], token)
+            } else {
+              linePush = { ok: false, error: "LINE channel access token not configured for store." }
+            }
+            if (!linePush.ok) {
+              // 送信失敗時は予約行を取り消し、次回起動（cron再試行）で再送できるようにする
+              await supabase.from("foodcourt_weekly_report_sends").delete().eq("room_id", roomId).eq("week_start", weekStart)
+            }
           } else {
-            linePush = { ok: false, error: "LINE channel access token not configured for store." }
+            linePush = { ok: false, error: "already_sent_this_week" }
           }
         }
         return json({
@@ -1743,13 +1964,21 @@ Deno.serve(async (req, info) => {
 
       let linePush: { ok: boolean; error?: string } | null = null
       if (pushToLine && roomId) {
-        const token = resolveChannelAccessToken(storeKey)
-        if (token) {
-          const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
-          linePush = await pushLineMessagesToTarget(roomId, [weeklyReportFlex(weekStart, weekEnd, result.rawData, link)], token)
-          if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
+        if (await reserveFoodCourtWeeklyReportSend(supabase, roomId, weekStart)) {
+          const token = resolveChannelAccessToken(storeKey)
+          if (token) {
+            const link = await buildFoodCourtWeeklyReportLink(supabase, storeKey, weekStart)
+            linePush = await pushLineMessagesToTarget(roomId, [buildWeeklyReportFlexMessage(weekStart, weekEnd, link)], token)
+            if (!linePush.ok) console.error("weekly-report LINE push failed:", linePush.error)
+          } else {
+            linePush = { ok: false, error: "LINE channel access token not configured for store." }
+          }
+          if (!linePush.ok) {
+            // 送信失敗時は予約行を取り消し、次回起動（cron再試行）で再送できるようにする
+            await supabase.from("foodcourt_weekly_report_sends").delete().eq("room_id", roomId).eq("week_start", weekStart)
+          }
         } else {
-          linePush = { ok: false, error: "LINE channel access token not configured for store." }
+          linePush = { ok: false, error: "already_sent_this_week" }
         }
       }
 
@@ -2301,6 +2530,9 @@ Deno.serve(async (req, info) => {
           today_reservation_alert_enabled: payload.today_reservation_alert_enabled,
           today_reservation_alert_hour: payload.today_reservation_alert_hour,
           today_reservation_alert_minute: payload.today_reservation_alert_minute,
+          gmail_alert_interval_minutes: payload.gmail_alert_interval_minutes,
+          gmail_alert_anchor_hour: payload.gmail_alert_anchor_hour,
+          gmail_alert_anchor_minute: payload.gmail_alert_anchor_minute,
           receipt_midreport_enabled: payload.receipt_midreport_enabled,
           receipt_monthend_report_enabled: payload.receipt_monthend_report_enabled,
           receipt_schedule_override: payload.receipt_schedule_override,
@@ -8213,6 +8445,9 @@ function buildRoomSettingsPayload(body: unknown): {
   today_reservation_alert_enabled: boolean
   today_reservation_alert_hour: number | null
   today_reservation_alert_minute: number | null
+  gmail_alert_interval_minutes: number | null
+  gmail_alert_anchor_hour: number | null
+  gmail_alert_anchor_minute: number | null
   receipt_midreport_enabled: boolean
   receipt_monthend_report_enabled: boolean
   media_save_enabled: boolean
@@ -8430,6 +8665,28 @@ function buildRoomSettingsPayload(body: unknown): {
   const todayReservationAlertHour = parseScheduleInt(body.today_reservation_alert_hour, "today_reservation_alert_hour", 0, 23)
   const todayReservationAlertMinute = parseScheduleInt(body.today_reservation_alert_minute, "today_reservation_alert_minute", 0, 59)
 
+  // 予約メール通知(gmail-alert-cron)の配信間隔（分）。NULL/1=リアルタイム（毎分チェック）。
+  let gmailAlertIntervalMinutes: number | null = null
+  if (body.gmail_alert_interval_minutes != null && body.gmail_alert_interval_minutes !== "") {
+    const v = Number(body.gmail_alert_interval_minutes)
+    if (!GMAIL_ALERT_INTERVAL_MINUTES_ALLOWED.has(v)) {
+      throw { status: 400, message: "gmail_alert_interval_minutes must be one of the allowed interval values." } satisfies AppError
+    }
+    gmailAlertIntervalMinutes = v
+  }
+  const gmailAlertAnchorHour = body.gmail_alert_anchor_hour == null || body.gmail_alert_anchor_hour === ""
+    ? null
+    : Number(body.gmail_alert_anchor_hour)
+  const gmailAlertAnchorMinute = body.gmail_alert_anchor_minute == null || body.gmail_alert_anchor_minute === ""
+    ? null
+    : Number(body.gmail_alert_anchor_minute)
+  if (gmailAlertAnchorHour != null && (!Number.isInteger(gmailAlertAnchorHour) || gmailAlertAnchorHour < 0 || gmailAlertAnchorHour > 23)) {
+    throw { status: 400, message: "gmail_alert_anchor_hour must be an hour from 0 to 23." } satisfies AppError
+  }
+  if (gmailAlertAnchorMinute != null && (!Number.isInteger(gmailAlertAnchorMinute) || gmailAlertAnchorMinute < 0 || gmailAlertAnchorMinute > 59)) {
+    throw { status: 400, message: "gmail_alert_anchor_minute must be a minute from 0 to 59." } satisfies AppError
+  }
+
   let receiptReportStorePartitionKey: string | null = null
   if (body.receipt_report_store_partition_key != null) {
     const rawKey = typeof body.receipt_report_store_partition_key === "string"
@@ -8494,6 +8751,9 @@ function buildRoomSettingsPayload(body: unknown): {
     today_reservation_alert_enabled: todayReservationAlertEnabled,
     today_reservation_alert_hour: todayReservationAlertHour,
     today_reservation_alert_minute: todayReservationAlertMinute,
+    gmail_alert_interval_minutes: gmailAlertIntervalMinutes,
+    gmail_alert_anchor_hour: gmailAlertAnchorHour,
+    gmail_alert_anchor_minute: gmailAlertAnchorMinute,
     receipt_midreport_enabled: receiptMidreportEnabled,
     receipt_monthend_report_enabled: receiptMonthendReportEnabled,
     media_save_enabled: mediaSaveEnabled,

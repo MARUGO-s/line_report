@@ -1,5 +1,470 @@
 <!doctype html>
-<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>フードコート週次報告</title>
-<style>:root{--ink:#17202a;--muted:#637381;--blue:#0b6ea8;--line:#dfe5ea}body{margin:0;background:#f4f6f8;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP",sans-serif}main{max-width:920px;margin:auto;padding:30px 18px 64px}.head{background:linear-gradient(135deg,#075782,#0b8bc2);color:#fff;border-radius:8px;padding:24px;margin-bottom:18px}.kicker{font-size:12px;font-weight:800;letter-spacing:.08em;color:#ccefff}.title{font-size:28px;margin:7px 0}.meta{color:#d7f1ff;font-size:14px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}.kpi,.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px}.label{font-size:12px;font-weight:700;color:var(--muted)}.value{font-size:24px;font-weight:800;margin-top:5px;color:#173b5e}.chart{display:flex;height:170px;gap:8px;align-items:end;padding-top:12px;border-bottom:1px solid var(--line)}.bar{flex:1;min-width:0;background:#1494cf;border-radius:4px 4px 0 0;position:relative}.bar span{position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--muted);white-space:nowrap}.rank{margin-top:38px;display:flex;gap:7px}.rank span{flex:1;text-align:center;background:#eaf5fb;color:#0b6ea8;border-radius:4px;padding:6px 2px;font-size:12px;font-weight:700}.card{line-height:1.85;margin-top:18px}.err{color:#b42318}.loading{color:var(--muted)}@media(max-width:580px){.grid{grid-template-columns:1fr}.title{font-size:24px}}</style>
-<script src="./pages-config.js"></script><script src="./auth-session.js"></script></head><body><main><header class="head"><div class="kicker">FOODCOURT WEEKLY REPORT</div><h1 class="title">週次経営報告</h1><div class="meta" id="meta"></div></header><section class="grid" id="kpis"></section><section class="card"><div class="label">日別売上推移</div><div class="chart" id="salesChart"></div><div class="label" style="margin-top:34px">日別順位</div><div class="rank" id="rankChart"></div></section><section class="card" id="content"><p class="loading">報告書を読み込んでいます。</p></section></main>
-<script>(async function(){const P=window.LINE_REPORT_PAGES,q=new URLSearchParams(location.search),store=q.get('store_key')||'',week=q.get('week_start')||'',el=document.getElementById('content'),yen=n=>'¥'+Math.round(Number(n)||0).toLocaleString('ja-JP');try{if(window.LINE_REPORT_AUTH&&LINE_REPORT_AUTH.consumeUrlAuthParams)await LINE_REPORT_AUTH.consumeUrlAuthParams({exchangeUrl:P.adminApiUrl('/auth/link-login',P.PROJECT_URL),adminSurface:P.ADMIN_SURFACE||'line_report'});const token=window.LINE_REPORT_AUTH&&LINE_REPORT_AUTH.getToken?LINE_REPORT_AUTH.getToken():'';const r=await fetch(P.adminApiUrl('/foodcourt/weekly-report?store_key='+encodeURIComponent(store)+'&week_start='+encodeURIComponent(week),P.PROJECT_URL),{headers:{'x-admin-token':token,'x-admin-surface':P.ADMIN_SURFACE||'line_report'}}),b=await r.json();if(!r.ok)throw new Error(b.error||'読み込みに失敗しました。');document.getElementById('meta').textContent=(b.week_start||'')+' から '+(b.week_end||'');const d=b.raw_data||{},rows=Array.isArray(d.dailySales)?d.dailySales:[],max=Math.max(1,...rows.map(x=>Number(x.sales)||0));document.getElementById('kpis').innerHTML=[['週売上',yen(d.totalSales)],['週客数',(Number(d.totalGuests)||0).toLocaleString('ja-JP')+'人'],['平均順位',Number(d.avgRank)?Number(d.avgRank).toFixed(1)+'位':'-']].map(x=>'<div class="kpi"><div class="label">'+x[0]+'</div><div class="value">'+x[1]+'</div></div>').join('');document.getElementById('salesChart').innerHTML=rows.map(x=>'<div class="bar" style="height:'+Math.max(4,Math.round((Number(x.sales)||0)/max*100))+'%"><span>'+String(x.date||'').slice(5)+'</span></div>').join('');document.getElementById('rankChart').innerHTML=rows.map(x=>'<span>'+String(x.date||'').slice(5)+'<br>'+((x.salesRank==null)?'-':x.salesRank+'位')+'</span>').join('');el.innerHTML=b.report_html||'';}catch(e){el.innerHTML='<p class="err">'+String(e.message||e)+'</p>';}})();</script></body></html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>フードコート週次報告 - 可視化ダッシュボード</title>
+  
+  <!-- Chart.js and Marked.js (Markdown parser) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  
+  <style>
+    :root {
+      --bg:        oklch(0.16 0.014 256);
+      --bg2:       oklch(0.135 0.012 256);
+      --surface:   oklch(0.215 0.017 258);
+      --surface2:  oklch(0.255 0.019 258);
+      --hover:     oklch(0.29 0.021 258);
+      --line:      oklch(1 0 0 / 0.08);
+      --line-soft: oklch(1 0 0 / 0.05);
+      --tx-1:      oklch(0.97 0 0);
+      --tx-2:      oklch(0.75 0.012 258);
+      --tx-3:      oklch(0.57 0.014 258);
+      --accent:    oklch(0.62 0.17 256);
+      --accent-tx: oklch(0.76 0.13 256);
+      --accent-soft: oklch(0.62 0.17 256 / 0.16);
+      --good:      oklch(0.74 0.15 158);
+      --good-soft: oklch(0.74 0.15 158 / 0.16);
+      --bad:       oklch(0.68 0.16 25);
+      --bad-soft:  oklch(0.68 0.16 25 / 0.15);
+      color-scheme: dark;
+    }
+    
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg2);
+      color: var(--tx-1);
+      font-family: -apple-system, BlinkMacSystemFont, "Noto Sans JP", sans-serif;
+      font-size: 14px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: 80px;
+    }
+    
+    .mono { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+    .wrap { max-width: 1060px; margin: 0 auto; padding: 24px 18px; }
+    
+    /* Header */
+    .hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 24px;
+    }
+    .hdr-l { min-width: 0; }
+    .kicker { color: var(--accent); font-weight: 700; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
+    .title { font-size: 24px; font-weight: 800; color: var(--tx-1); margin-top: 4px; }
+    .meta { color: var(--tx-3); font-size: 13.5px; margin-top: 4px; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 4px 12px; border: 1px solid var(--line); color: var(--tx-2); background: var(--surface2); }
+    
+    /* Layout */
+    .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    @media (min-width: 820px) {
+      .grid { grid-template-columns: 1.6fr 1fr; }
+    }
+    
+    /* Cards */
+    .card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 16px; padding: 22px 24px; margin-bottom: 20px; }
+    .card-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+    .card-t { font-size: 15.5px; font-weight: 700; color: var(--tx-1); display: flex; align-items: center; gap: 8px; }
+    
+    /* KPI Strip */
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .kpi { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; padding: 14px 16px; text-align: center; }
+    .kpi-lbl { font-size: 11px; font-weight: 600; color: var(--tx-3); text-transform: uppercase; }
+    .kpi-val { font-size: 21px; font-weight: 800; color: var(--tx-1); margin-top: 6px; }
+    
+    /* Charts */
+    .chart-container { position: relative; width: 100%; height: 260px; margin-bottom: 10px; }
+    
+    /* Tables */
+    .tbl { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+    .tbl th { font-size: 11px; font-weight: 600; color: var(--tx-3); text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    .tbl th:first-child { text-align: left; }
+    .tbl td { padding: 9px 10px; border-bottom: 1px solid var(--line-soft); text-align: right; white-space: nowrap; }
+    .tbl td:first-child { text-align: left; }
+    .tbl tr:last-child td { border-bottom: 0; }
+    .tbl tr.base td { background: var(--accent-soft); color: var(--accent-tx); font-weight: bold; }
+    
+    /* Markdown AI Report Styling */
+    .md-report h2 { font-size: 15px; font-weight: 700; margin-top: 24px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); color: var(--accent-tx); display: flex; align-items: center; gap: 8px; }
+    .md-report h2::before { content: '✦'; color: var(--accent); font-size: 11px; }
+    .md-report p { margin-bottom: 14px; font-size: 13.5px; color: var(--tx-2); text-align: justify; }
+    .md-report ul, .md-report ol { margin-left: 20px; margin-bottom: 14px; color: var(--tx-2); font-size: 13.5px; }
+    .md-report li { margin-bottom: 6px; }
+    .md-report table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 12.5px; border: 1px solid var(--line); }
+    .md-report th { background: var(--surface2); color: var(--tx-3); padding: 8px 10px; font-weight: 600; border: 1px solid var(--line); text-align: left; }
+    .md-report td { padding: 8px 10px; border: 1px solid var(--line-soft); text-align: left; }
+    .md-report tr:nth-child(even) { background: var(--bg2); }
+    
+    /* Loader & Errors */
+    .loader-overlay { position: fixed; inset: 0; background: var(--bg2); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; transition: opacity 0.3s ease; }
+    .spinner { width: 36px; height: 36px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loader-text { font-size: 13.5px; color: var(--tx-2); font-weight: 600; }
+    
+    .err-box { padding: 24px; text-align: center; color: var(--bad); background: var(--bad-soft); border-radius: 12px; border: 1px solid var(--bad); margin-top: 30px; }
+  </style>
+  
+  <script src="./pages-config.js"></script>
+  <script src="./auth-session.js"></script>
+</head>
+<body>
+  
+  <!-- Loading View -->
+  <div id="loader" class="loader-overlay">
+    <div class="spinner"></div>
+    <div class="loader-text">週次報告をロード中…</div>
+  </div>
+
+  <div class="wrap">
+    <!-- Header -->
+    <header class="hdr">
+      <div class="hdr-l">
+        <div class="kicker" id="kickerLabel">FOODCOURT WEEKLY ADVISOR</div>
+        <h1 class="title">週次経営分析レポート</h1>
+        <div class="meta" id="metaRange">期間: 読み込み中…</div>
+      </div>
+      <div>
+        <span class="pill" id="storePill">読み込み中…</span>
+      </div>
+    </header>
+
+    <div id="errorBox" class="err-box" style="display: none;"></div>
+
+    <main id="mainPanel" style="display: none;">
+      <!-- KPI stats -->
+      <section class="kpis">
+        <div class="kpi">
+          <div class="kpi-lbl">週売上合計</div>
+          <div class="kpi-val mono" id="kpiSales">-</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-lbl">週客数合計</div>
+          <div class="kpi-val mono" id="kpiGuests">-</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-lbl">平均客単価</div>
+          <div class="kpi-val mono" id="kpiKt">-</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-lbl">週平均売上順位</div>
+          <div class="kpi-val mono" id="kpiRank">-</div>
+        </div>
+      </section>
+
+      <div class="grid">
+        <!-- AI report display -->
+        <article class="card">
+          <div class="card-h">
+            <h2 class="card-t">🤖 AI週次経営アドバイザー</h2>
+          </div>
+          <div id="aiReportContainer" class="md-report"></div>
+        </article>
+
+        <!-- Right charts and statistics -->
+        <aside>
+          <div class="card">
+            <div class="card-h">
+              <h2 class="card-t">📈 日次売上・客数推移</h2>
+            </div>
+            <div class="chart-container">
+              <canvas id="salesChart"></canvas>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <h2 class="card-t">🍩 フードホール内売上シェア</h2>
+            </div>
+            <div class="chart-container" style="height: 220px;">
+              <canvas id="shareChart"></canvas>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <h2 class="card-t">🏆 テナント別週合計ランキング</h2>
+            </div>
+            <table class="tbl" id="tenantTable">
+              <thead>
+                <tr>
+                  <th class="l">店舗</th>
+                  <th>週売上</th>
+                  <th>シェア</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    (async function() {
+      const P = window.LINE_REPORT_PAGES || window.PAGES;
+      const q = new URLSearchParams(location.search);
+      const store = q.get('store_key') || q.get('store') || '';
+      const week = q.get('week_start') || '';
+      const $ = (id) => document.getElementById(id);
+      
+      if (!store || !week) {
+        showError('store_key および week_start パラメータが必要です。');
+        return;
+      }
+      
+      // Resolve store display label
+      if (P && typeof P.getPreferredStoreDisplayLabel === 'function') {
+        $('storePill').textContent = P.getPreferredStoreDisplayLabel(store);
+      } else {
+        $('storePill').textContent = store;
+      }
+      
+      try {
+        // Authenticate with URL params first
+        if (window.LINE_REPORT_AUTH && typeof LINE_REPORT_AUTH.consumeUrlAuthParams === 'function') {
+          await LINE_REPORT_AUTH.consumeUrlAuthParams({
+            exchangeUrl: P.adminApiUrl('/auth/link-login', P.PROJECT_URL),
+            adminSurface: P.ADMIN_SURFACE || 'line_report'
+          });
+        }
+        
+        const token = window.LINE_REPORT_AUTH && typeof LINE_REPORT_AUTH.getToken === 'function'
+          ? LINE_REPORT_AUTH.getToken()
+          : '';
+          
+        const data = await fetchWeeklyReport(store, week, token);
+        renderWeeklyDashboard(data);
+      } catch (err) {
+        showError(err.message || '週次レポートのロードに失敗しました。');
+      } finally {
+        $('loader').style.opacity = '0';
+        setTimeout(() => $('loader').style.display = 'none', 300);
+      }
+      
+      async function fetchWeeklyReport(storeKey, weekStart, token) {
+        const url = P.adminApiUrl(`/foodcourt/weekly-report?store_key=${encodeURIComponent(storeKey)}&week_start=${encodeURIComponent(weekStart)}`, P.PROJECT_URL);
+        const res = await fetch(url, {
+          headers: {
+            'x-admin-token': token,
+            'x-admin-surface': P.ADMIN_SURFACE || 'line_report'
+          }
+        });
+        
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('セッションの認証に失敗しました。LINEトーク画面から再度リンクを開き直してください。');
+        }
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || `通信エラーが発生しました (HTTP ${res.status})`);
+        }
+        
+        return await res.json();
+      }
+      
+      function showError(msg) {
+        $('errorBox').textContent = msg;
+        $('errorBox').style.display = 'block';
+        $('mainPanel').style.display = 'none';
+        $('loader').style.display = 'none';
+      }
+      
+      function renderWeeklyDashboard(data) {
+        if (!data.ai_report) {
+          showError('指定された週のレポートがまだ存在しないか、データ不足です。');
+          return;
+        }
+        
+        $('mainPanel').style.display = 'block';
+        $('metaRange').textContent = `${data.week_start} (月) 〜 ${data.week_end} (日)`;
+        
+        // Render markdown with marked.js
+        if (window.marked && typeof window.marked.parse === 'function') {
+          window.marked.setOptions({ gfm: true, breaks: true });
+          $('aiReportContainer').innerHTML = window.marked.parse(data.ai_report);
+        } else if (data.report_html) {
+          $('aiReportContainer').innerHTML = data.report_html;
+        } else {
+          $('aiReportContainer').innerHTML = `<pre style="white-space: pre-wrap; font-family: inherit;">${data.ai_report}</pre>`;
+        }
+        
+        const raw = data.raw_data;
+        if (!raw) return;
+        
+        // KPI Mapping
+        if (raw.totalSales != null) $('kpiSales').textContent = `¥${raw.totalSales.toLocaleString()}`;
+        if (raw.totalGuests != null) $('kpiGuests').textContent = `${raw.totalGuests.toLocaleString()}人`;
+        if (raw.totalSales != null && raw.totalGuests) {
+          const avgKt = Math.round(raw.totalSales / raw.totalGuests);
+          $('kpiKt').textContent = `¥${avgKt.toLocaleString()}`;
+        }
+        if (raw.avgRank != null) $('kpiRank').textContent = `${raw.avgRank}位`;
+        
+        // Render charts and tables
+        const dates = (raw.dailySales || []).map(d => d.date.slice(5)); // MM-DD format
+        const dailySalesVal = (raw.dailySales || []).map(d => d.sales || 0);
+        const dailyGuestsVal = (raw.dailySales || []).map(d => d.guests || 0);
+        
+        if (window.Chart) {
+          renderSalesChart(dates, dailySalesVal, dailyGuestsVal);
+          renderShareChart(raw.tenantRows || [], raw.baseName);
+        }
+        
+        renderTenantTable(raw.tenantRows || [], raw.baseName);
+      }
+      
+      function renderSalesChart(labels, sales, guests) {
+        const ctx = $('salesChart').getContext('2d');
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: '売上 (円)',
+                data: sales,
+                yAxisID: 'ySales',
+                backgroundColor: 'rgba(98, 111, 237, 0.6)',
+                borderColor: 'rgba(98, 111, 237, 1)',
+                borderWidth: 1.5,
+                borderRadius: 4,
+                order: 2
+              },
+              {
+                label: '客数 (人)',
+                data: guests,
+                yAxisID: 'yGuests',
+                type: 'line',
+                borderColor: 'rgba(235, 87, 87, 0.85)',
+                backgroundColor: 'rgba(235, 87, 87, 0.1)',
+                borderWidth: 2.5,
+                tension: 0.35,
+                pointRadius: 3,
+                order: 1
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                labels: { color: '#ccc', font: { size: 10 } },
+                position: 'top'
+              }
+            },
+            scales: {
+              x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', font: { size: 9 } } },
+              ySales: {
+                type: 'linear',
+                position: 'left',
+                grid: { color: 'rgba(255,255,255,0.05)' },
+                ticks: {
+                  color: '#888',
+                  font: { size: 9 },
+                  callback: (v) => v >= 10000 ? (v/10000) + '万' : v
+                }
+              },
+              yGuests: {
+                type: 'linear',
+                position: 'right',
+                grid: { drawOnChartArea: false },
+                ticks: { color: '#888', font: { size: 9 } }
+              }
+            }
+          }
+        });
+      }
+      
+      function renderShareChart(tenantRows, baseName) {
+        const ctx = $('shareChart').getContext('2d');
+        const sorted = [...tenantRows].sort((a, b) => (b.sales || 0) - (a.sales || 0));
+        const limit = 4;
+        const labels = [];
+        const data = [];
+        const colors = [];
+        
+        let otherSales = 0;
+        const palette = [
+          'rgba(98, 111, 237, 0.8)',
+          'rgba(46, 204, 113, 0.75)',
+          'rgba(241, 196, 15, 0.75)',
+          'rgba(155, 89, 182, 0.75)',
+          'rgba(149, 165, 166, 0.6)'
+        ];
+        
+        sorted.forEach((row, idx) => {
+          const isBase = row.name && row.name.toLowerCase().includes('marugo');
+          const sales = row.sales || 0;
+          if (idx < limit) {
+            labels.push(row.name);
+            data.push(sales);
+            colors.push(isBase ? 'rgba(235, 137, 87, 0.85)' : palette[idx % palette.length]);
+          } else {
+            otherSales += sales;
+          }
+        });
+        
+        if (otherSales > 0) {
+          labels.push('その他他店');
+          data.push(otherSales);
+          colors.push(palette[4]);
+        }
+        
+        new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: data,
+              backgroundColor: colors,
+              borderWidth: 1,
+              borderColor: 'rgba(21, 23, 29, 0.9)'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'right',
+                labels: { color: '#bbb', font: { size: 10 }, boxWidth: 12 }
+              }
+            },
+            cutout: '65%'
+          }
+        });
+      }
+      
+      function renderTenantTable(tenantRows, baseName) {
+        const tbody = $('tenantTable').querySelector('tbody');
+        tbody.innerHTML = '';
+        
+        const sorted = [...tenantRows].sort((a, b) => (b.sales || 0) - (a.sales || 0));
+        
+        sorted.forEach((row) => {
+          const tr = document.createElement('tr');
+          const isBase = row.name && row.name.toLowerCase().includes('marugo');
+          if (isBase) tr.className = 'base';
+          
+          const salesStr = row.sales != null ? `¥${row.sales.toLocaleString()}` : '-';
+          const ratioStr = row.salesRatio != null ? `${row.salesRatio.toFixed(1)}%` : '-';
+          
+          tr.innerHTML = `
+            <td class="l">${row.name}</td>
+            <td class="mono">${salesStr}</td>
+            <td class="mono">${ratioStr}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

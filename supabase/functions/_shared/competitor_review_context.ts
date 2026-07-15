@@ -321,6 +321,17 @@ function mapPlacesLegacyResponse(data: Record<string, unknown>): NormalizedGoogl
 }
 
 async function fetchGooglePlaceDetails(placeId: string): Promise<NormalizedGooglePlaceDetails> {
+  // 一時的なネットワークエラー/レート制限で毎日のreview-alert-cronチェックが丸ごと欠落する事例が
+  // あったため、1回だけ間隔を空けて再試行する。
+  try {
+    return await fetchGooglePlaceDetailsOnce(placeId)
+  } catch (e) {
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    return await fetchGooglePlaceDetailsOnce(placeId)
+  }
+}
+
+async function fetchGooglePlaceDetailsOnce(placeId: string): Promise<NormalizedGooglePlaceDetails> {
   const apiKey = getGooglePlacesApiKey()
   const id = placeId.replace(/^places\//, '').trim()
   if (!id) {

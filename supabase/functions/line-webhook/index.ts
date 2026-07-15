@@ -379,6 +379,50 @@ function buildReservationImportDetailJson(r: LineImageReservationAnalysis): stri
   return JSON.stringify(detail)
 }
 
+// 氏名は空白除去、電話番号は数字のみに正規化して比較する（OCR/表記ゆれ「080-6260-2238」と
+// 「08062602238」、姓名間の全角/半角スペース差異などを吸収するため）。
+function normalizeReservationName(s: string | null | undefined): string {
+  return String(s ?? '').replace(/[\s　]+/g, '').trim()
+}
+function normalizeReservationPhone(s: string | null | undefined): string {
+  return String(s ?? '').replace(/[^\d]/g, '')
+}
+
+// 予約スクショの重複検知: 同店舗・同日（JSTの暦日）・同氏名・同電話番号の既存予約
+// (manual_reservation_visit_events、非表示を除く)を1件返す。無ければ null。
+// 「別予約」の誤爆を避けるため、氏名・電話のどちらかが読めない場合や日付不明の場合は検索しない。
+async function findSameDayManualReservationMatch(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  storeKey: string,
+  customerName: string | null | undefined,
+  customerPhone: string | null | undefined,
+  dateYmd: string | null | undefined,
+): Promise<{ id: number; visit_at: string } | null> {
+  const name = normalizeReservationName(customerName)
+  const phone = normalizeReservationPhone(customerPhone)
+  if (!name || !phone || !storeKey) return null
+  const dayStart = combineReservationVisitAtIso(String(dateYmd ?? ''), '00:00')
+  if (!dayStart) return null
+  const dayEnd = new Date(new Date(dayStart).getTime() + 24 * 3600 * 1000).toISOString()
+  const { data, error } = await supabase
+    .from('manual_reservation_visit_events')
+    .select('id, visit_at, customer_name, customer_phone')
+    .eq('manual_store_key', storeKey)
+    .eq('manual_hidden', false)
+    .gte('visit_at', dayStart)
+    .lt('visit_at', dayEnd)
+  if (error || !Array.isArray(data)) return null
+  for (const row of data as Array<{ id: number; visit_at: string; customer_name: string | null; customer_phone: string | null }>) {
+    if (
+      normalizeReservationName(row.customer_name) === name &&
+      normalizeReservationPhone(row.customer_phone) === phone
+    ) {
+      return { id: row.id, visit_at: row.visit_at }
+    }
+  }
+  return null
+}
+
 function reservationFieldRowsForFlex(
   r: LineImageReservationAnalysis,
   visitAtIso: string | null,
@@ -410,13 +454,65 @@ function reservationFieldRowsForFlex(
     }))
 }
 
-// 解析した予約内容の確認カード（「この内容で登録」/「破棄」postback付き）。
+// 解析した予約内容の確認カード。
+//   通常時: 「この内容で登録」/「破棄」の2択。
+//   existingMatch あり（同店舗・同日・同氏名・同電話番号の予約が既に登録済み）のときは、
+//   誤って別予約として重複登録しないよう「更新する（上書き）」を1st候補にした3択にする。
 function buildReservationConfirmFlex(
   pendingId: number,
   r: LineImageReservationAnalysis,
   visitAtIso: string | null,
+  existingMatch: { id: number; visit_at: string } | null = null,
 ): Record<string, unknown> {
   const altParts = [r.storeName, r.date, r.time, r.customerName].filter(Boolean).join(' ')
+  const isDuplicate = !!existingMatch
+  const headerContents: Record<string, unknown>[] = isDuplicate
+    ? [
+        { type: 'text', text: '⚠ 同じ日に同じお客様の予約が既にあります', weight: 'bold', size: 'md', color: '#c0392b' },
+        {
+          type: 'text',
+          text: `既存の登録内容: ${formatReservationVisitLabelJst(existingMatch!.visit_at)}\n変更後の内容と見比べて、更新するか新規の別予約として登録するか選んでください。`,
+          wrap: true,
+          size: 'xs',
+          color: '#8a96a3',
+        },
+      ]
+    : [
+        { type: 'text', text: '予約を登録しますか？', weight: 'bold', size: 'md', color: '#1a6fa8' },
+        { type: 'text', text: '予約確認画面を読み取りました。内容を確認して登録してください。', wrap: true, size: 'xs', color: '#8a96a3' },
+      ]
+  const footerButtons: Record<string, unknown>[] = isDuplicate
+    ? [
+        {
+          type: 'button',
+          style: 'primary',
+          color: '#c0392b',
+          action: { type: 'postback', label: '更新する（上書き）', data: `resv_update=${pendingId}`, displayText: '予約内容を更新します' },
+        },
+        {
+          type: 'button',
+          style: 'secondary',
+          action: { type: 'postback', label: '別予約として新規登録', data: `resv_imp=${pendingId}`, displayText: '別予約として登録します' },
+        },
+        {
+          type: 'button',
+          style: 'secondary',
+          action: { type: 'postback', label: '破棄（登録しない）', data: `resv_imp_skip=${pendingId}`, displayText: '予約登録を取りやめます' },
+        },
+      ]
+    : [
+        {
+          type: 'button',
+          style: 'primary',
+          color: '#1a6fa8',
+          action: { type: 'postback', label: 'この内容で登録', data: `resv_imp=${pendingId}`, displayText: '予約を登録します' },
+        },
+        {
+          type: 'button',
+          style: 'secondary',
+          action: { type: 'postback', label: '破棄（登録しない）', data: `resv_imp_skip=${pendingId}`, displayText: '予約登録を取りやめます' },
+        },
+      ]
   return {
     type: 'flex',
     altText: `予約の登録確認: ${altParts}`.slice(0, 380),
@@ -427,8 +523,7 @@ function buildReservationConfirmFlex(
         layout: 'vertical',
         spacing: 'sm',
         contents: [
-          { type: 'text', text: '予約を登録しますか？', weight: 'bold', size: 'md', color: '#1a6fa8' },
-          { type: 'text', text: '予約確認画面を読み取りました。内容を確認して登録してください。', wrap: true, size: 'xs', color: '#8a96a3' },
+          ...headerContents,
           { type: 'separator', margin: 'md' },
           ...reservationFieldRowsForFlex(r, visitAtIso),
         ],
@@ -437,19 +532,7 @@ function buildReservationConfirmFlex(
         type: 'box',
         layout: 'vertical',
         spacing: 'sm',
-        contents: [
-          {
-            type: 'button',
-            style: 'primary',
-            color: '#1a6fa8',
-            action: { type: 'postback', label: 'この内容で登録', data: `resv_imp=${pendingId}`, displayText: '予約を登録します' },
-          },
-          {
-            type: 'button',
-            style: 'secondary',
-            action: { type: 'postback', label: '破棄（登録しない）', data: `resv_imp_skip=${pendingId}`, displayText: '予約登録を取りやめます' },
-          },
-        ],
+        contents: footerButtons,
       },
     },
   }
@@ -468,6 +551,16 @@ async function handleReservationImageDetected(
 ): Promise<{ saved: boolean; replied: boolean; reason?: string }> {
   const storeKey = String(registry.store_partition_key ?? '').trim()
   const visitAtIso = combineReservationVisitAtIso(reservation.date, reservation.time)
+
+  // 同店舗・同日・同氏名・同電話番号の予約が既に登録済みなら、確認カードで「更新」を選べるようにする
+  // （「変更」スクショを送っても新規の別予約として重複登録されてしまうのを防ぐ）。
+  const existingMatch = await findSameDayManualReservationMatch(
+    supabase,
+    storeKey,
+    reservation.customerName,
+    reservation.customerPhone,
+    reservation.date,
+  )
 
   // べき等化: 同一 line_message_id で pending 済みなら再利用（Webhook 再送で二重カードを出さない）。
   let pendingId: number | null = null
@@ -503,7 +596,14 @@ async function handleReservationImageDetected(
     }
     const { data: ins, error } = await supabase
       .from('pending_reservation_imports')
-      .insert({ room_id: roomId, store_partition_key: storeKey || null, line_message_id: lineMessageId, payload, status: 'pending' })
+      .insert({
+        room_id: roomId,
+        store_partition_key: storeKey || null,
+        line_message_id: lineMessageId,
+        payload,
+        status: 'pending',
+        existing_event_id: existingMatch?.id ?? null,
+      })
       .select('id')
       .single()
     if (error) {
@@ -518,11 +618,11 @@ async function handleReservationImageDetected(
   }
   await replyLineFlex(
     replyToken,
-    buildReservationConfirmFlex(pendingId, reservation, visitAtIso),
+    buildReservationConfirmFlex(pendingId, reservation, visitAtIso, existingMatch),
     accessToken,
     webhookReplyLog(registry, roomId, 'reservation_image_confirm'),
   )
-  return { saved: false, replied: true, reason: 'reservation_confirm_card' }
+  return { saved: false, replied: true, reason: existingMatch ? 'reservation_confirm_card_duplicate' : 'reservation_confirm_card' }
 }
 
 function buildSimpleNoticeFlex(text: string): Record<string, unknown> {
@@ -616,26 +716,82 @@ function buildReservationRegisteredFlex(
   }
 }
 
-// 確認カードの postback（resv_imp=<id> 登録 / resv_imp_skip=<id> 破棄）。
+// 既存予約を「更新（上書き）」した結果カード。新規登録と違い、予約回数は変わらない
+// （同一予約の内容変更のため）ことが分かるようメッセージを分ける。
+function buildReservationUpdatedFlex(
+  payload: Record<string, unknown>,
+  visitAtIso: string,
+): Record<string, unknown> {
+  const str = (v: unknown) => { const s = String(v ?? '').trim(); return s || null }
+  const rows: Array<[string, string | null]> = [
+    ['店舗', str(payload.store_name)],
+    ['来店日時', visitAtIso ? formatReservationVisitLabelJst(visitAtIso) : null],
+    ['予約者', str(payload.customer_name)],
+    ['電話', str(payload.customer_phone)],
+    ['人数', str(payload.party_size)],
+    ['コース', str(payload.plan)],
+    ['アレルギー', str(payload.allergy)],
+    ['苦手・嫌い', str(payload.dislikes)],
+    ['記念日', str(payload.anniversary)],
+    ['メモ', str(payload.notes)],
+  ]
+  const fieldBoxes = rows.filter(([, v]) => v).map(([label, v]) => ({
+    type: 'box',
+    layout: 'baseline',
+    spacing: 'sm',
+    contents: [
+      { type: 'text', text: label, size: 'sm', color: '#8a96a3', flex: 2 },
+      { type: 'text', text: String(v), size: 'sm', color: '#333333', flex: 5, wrap: true },
+    ],
+  }))
+  return {
+    type: 'flex',
+    altText: '予約内容を更新しました',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          { type: 'text', text: '✅ 予約内容を更新しました', weight: 'bold', size: 'md', color: '#1a7f37' },
+          { type: 'separator', margin: 'md' },
+          ...fieldBoxes,
+          { type: 'text', text: '既存の予約をこの内容で上書きしました（別予約として重複登録はしていません）。', size: 'xs', color: '#8a96a3', margin: 'md', wrap: true },
+        ],
+      },
+    },
+  }
+}
+
+// 確認カードの postback（resv_imp=<id> 登録 / resv_update=<id> 既存予約を更新 / resv_imp_skip=<id> 破棄）。
 async function handleReservationImportPostback(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
   postbackData: string,
 ): Promise<Record<string, unknown> | null> {
   const isRegister = postbackData.startsWith('resv_imp=')
+  const isUpdate = postbackData.startsWith('resv_update=')
+  const isSkip = postbackData.startsWith('resv_imp_skip=')
   const pendingId = Number(postbackData.split('=')[1] ?? '')
   if (!Number.isInteger(pendingId) || pendingId <= 0) return null
 
   const { data: pending, error } = await supabase
     .from('pending_reservation_imports')
-    .select('id, status, payload, store_partition_key')
+    .select('id, status, payload, store_partition_key, existing_event_id')
     .eq('id', pendingId)
     .maybeSingle()
   if (error || !pending) return buildSimpleNoticeFlex('対象の予約が見つかりませんでした。')
-  const p = pending as { id: number; status: string; payload: Record<string, unknown>; store_partition_key: string | null }
+  const p = pending as {
+    id: number
+    status: string
+    payload: Record<string, unknown>
+    store_partition_key: string | null
+    existing_event_id: number | null
+  }
 
   if (p.status === 'registered') return buildSimpleNoticeFlex('この予約はすでに登録済みです。')
 
-  if (!isRegister) {
+  if (isSkip) {
     await supabase.from('pending_reservation_imports')
       .update({ status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', pendingId)
     return buildSimpleNoticeFlex('予約の登録を取りやめました。')
@@ -646,6 +802,53 @@ async function handleReservationImportPostback(
   if (!visitAt) {
     return buildSimpleNoticeFlex('来店日時が読み取れなかったため自動登録できませんでした。お手数ですが予約表から手動で追加してください。')
   }
+
+  // 「更新する（上書き）」: 新規行は作らず、確認カード時点で見つかっていた既存予約を書き換える。
+  // 予約回数(visit_count)は同一予約の内容変更なので増減させない。履歴の内容だけ合わせる（best-effort）。
+  if (isUpdate) {
+    const existingEventId = Number(p.existing_event_id ?? 0)
+    if (!Number.isInteger(existingEventId) || existingEventId <= 0) {
+      return buildSimpleNoticeFlex('更新対象の既存予約が見つかりませんでした。お手数ですが「別予約として新規登録」からやり直してください。')
+    }
+    const updateRow = {
+      customer_name: (payload.customer_name as string | null) ?? null,
+      customer_phone: (payload.customer_phone as string | null) ?? null,
+      visit_at: visitAt,
+      reservation_type: (payload.reservation_type as string | null) ?? '予約',
+      reservation_detail: (payload.reservation_detail as string | null) ?? null,
+      manual_edited_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    const { error: updErr } = await supabase
+      .from('manual_reservation_visit_events')
+      .update(updateRow)
+      .eq('id', existingEventId)
+    if (updErr) {
+      console.error('manual reservation update (from import) failed:', updErr.message)
+      return buildSimpleNoticeFlex('更新に失敗しました。時間をおいて再度お試しください。')
+    }
+    try {
+      const { error: histErr } = await supabase
+        .from('reservation_customer_visit_history')
+        .update({
+          visit_at: visitAt,
+          reservation_type: updateRow.reservation_type,
+          reservation_detail: updateRow.reservation_detail,
+        })
+        .eq('partner', 'manual')
+        .eq('gmail_message_id', `manual:${existingEventId}`)
+      if (histErr) console.error('reservation_customer_visit_history update (from import) failed:', histErr.message)
+    } catch (e) {
+      console.error('reservation_customer_visit_history update threw:', (e as Error)?.message)
+    }
+    await supabase.from('pending_reservation_imports')
+      .update({ status: 'registered', manual_reservation_id: existingEventId, updated_at: new Date().toISOString() })
+      .eq('id', pendingId)
+    return buildReservationUpdatedFlex(payload, visitAt)
+  }
+
+  if (!isRegister) return null
+
   const insertRow = {
     customer_name: (payload.customer_name as string | null) ?? null,
     customer_phone: (payload.customer_phone as string | null) ?? null,
@@ -2109,8 +2312,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 予約スクショ確認カードの postback（resv_imp=登録 / resv_imp_skip=破棄）
-      if ((postbackData.startsWith('resv_imp=') || postbackData.startsWith('resv_imp_skip=')) && postbackReplyToken) {
+      // 予約スクショ確認カードの postback（resv_imp=登録 / resv_update=既存予約を更新 / resv_imp_skip=破棄）
+      if (
+        (postbackData.startsWith('resv_imp=') || postbackData.startsWith('resv_update=') || postbackData.startsWith('resv_imp_skip='))
+        && postbackReplyToken
+      ) {
         try {
           const reservationReply = await handleReservationImportPostback(supabase, postbackData)
           if (reservationReply) {

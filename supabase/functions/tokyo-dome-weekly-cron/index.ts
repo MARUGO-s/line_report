@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
+import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 
 // ドームシティ「週次イベント配信」cron。
 // 毎分起動し、ルームごとの設定（dome_weekly_enabled / 曜日 / 時刻）が「今この瞬間(JST)」に一致する
@@ -124,6 +125,14 @@ Deno.serve(async (req) => {
       else errors.push(`${t.roomId}: failed to reserve log (${insErr.message})`)
       continue
     }
+
+    // 開催予定0件の週は「開催予定はありません」だけのPushを送らない（グループ宛は人数分課金されるため）。
+    // 重複防止ログはこの週分を既に確保済みなので、同週中の再実行では再送されない。
+    if (events.length === 0) {
+      skipped.push({ room_id: t.roomId, reason: "zero_events" })
+      continue
+    }
+
     const r = await sendLinePush(t.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
     if (!r.ok) {
       try { await supabase.from("tokyo_dome_weekly_logs").delete().eq("room_id", t.roomId).eq("week_start_date", win.startStr) } catch (_e) { /* noop */ }
@@ -249,6 +258,20 @@ function resolveStoreLineToken(storeKey: string, fallbackToken: string): string 
 }
 async function sendLinePush(to: string, messages: unknown[], token: string, storeKey?: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!token) return { ok: false, error: "missing line token" }
+  if (isBlockedByMarugosecondLockdown(storeKey, to)) {
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: 'push',
+        context: 'tokyo_dome_weekly',
+        targetRoomId: to,
+        attempted: false,
+        success: false,
+        reason: '一時ロックダウン中のためブロック（マルゴセカンド送信元調査用）',
+      })
+    }
+    return { ok: false, error: 'blocked_by_marugosecond_lockdown' }
+  }
   let res: Response
   try {
     res = await fetch("https://api.line.me/v2/bot/message/push", {

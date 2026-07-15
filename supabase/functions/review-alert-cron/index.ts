@@ -3,20 +3,31 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { refreshStoreReview, refreshCompetitorReviews } from "../_shared/competitor_review_context.ts"
 import { pushLineMessagesToTarget, resolveChannelAccessToken } from "../_shared/line_client.ts"
 
-// 自店舗・登録済み競合店の「新着口コミ」をLINEに通知する cron（1日1回）。
+// 自店舗・登録済み競合店の「新着口コミ」をLINEに通知するcron。
+//  - pg_cronは毎分起動。ルームごとの配信時刻(review_alert_hour/minute、既定8時10分)に一致した時だけ処理する
+//    （reservation-today-cron等と同じ「毎分起動＋関数側で時刻一致判定」方式）。
 //  - 対象は room_summary_settings.review_alert_enabled=true の部屋（receipt_report_store_partition_key で店舗に紐づく）。
 //  - 各店舗について、自店舗レビュー(store_review_places)・登録競合(competitor_places)を
 //    refreshStoreReview/refreshCompetitorReviews で再取得（Google Places→スナップショット保存は既存ロジックを再利用）。
 //  - 新着判定は user_ratings_total（累計口コミ数）の増分。last_alerted_rating_total がNULLの初回は
 //    ベースライン記録のみ（既存の口コミをまとめて通知しない）。増分があった回だけ対象ルームへpush。
-//  - 冪等: 通知後に last_alerted_rating_total を更新するので、同日中に複数回起動しても二重通知しない。
+//  - 冪等: 通知後に last_alerted_rating_total を更新するので、同じ時刻に複数回起動しても二重通知しない。
 // verify_jwt=false で pg_cron(invoke_review_alert_cron)から起動。
 
 type DbClient = ReturnType<typeof createClient>
 
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000
+
+function toJstHourMinute(base = new Date()): { hour: number; minute: number } {
+  const jst = new Date(base.getTime() + JST_OFFSET_MS)
+  return { hour: jst.getUTCHours(), minute: jst.getUTCMinutes() }
+}
+
 type RoomRow = {
   room_id: string
   receipt_report_store_partition_key: string | null
+  review_alert_hour: number | null
+  review_alert_minute: number | null
 }
 
 type PlaceCheckResult = {
@@ -57,25 +68,31 @@ Deno.serve(async (req) => {
   const url = new URL(req.url)
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())
 
-  // 1) 通知ONの部屋 → 店舗キーごとにルームIDをまとめる（1店舗を複数ルームが購読しているケースにも対応）
+  // 1) 通知ONの部屋 → 店舗キーごとにルームIDをまとめる（1店舗を複数ルームが購読しているケースにも対応）。
+  //    毎分起動なので、ルームごとに設定された配信時刻(JST)と一致した時だけ対象にする
+  //    （reservation-today-cron等と同じ「毎分起動＋関数側で時刻一致判定」方式。dry_run時は時刻を無視して常に対象にする）。
   const { data: roomRows, error: roomErr } = await supabase
     .from("room_summary_settings")
-    .select("room_id, receipt_report_store_partition_key")
+    .select("room_id, receipt_report_store_partition_key, review_alert_hour, review_alert_minute")
     .eq("review_alert_enabled", true)
   if (roomErr) return json({ ok: false, error: `rooms load failed: ${roomErr.message}` }, 500)
 
+  const nowJst = toJstHourMinute()
   const roomsByStore = new Map<string, string[]>()
   for (const r of (Array.isArray(roomRows) ? roomRows : []) as RoomRow[]) {
     const storeKey = String(r.receipt_report_store_partition_key ?? "").trim()
     const roomId = String(r.room_id ?? "").trim()
     if (!storeKey || !roomId) continue
+    const h = r.review_alert_hour != null ? Number(r.review_alert_hour) : 8
+    const m = r.review_alert_minute != null ? Number(r.review_alert_minute) : 10
+    if (!dryRun && (nowJst.hour !== h || nowJst.minute !== m)) continue
     const list = roomsByStore.get(storeKey)
     if (list) list.push(roomId)
     else roomsByStore.set(storeKey, [roomId])
   }
 
   if (roomsByStore.size === 0) {
-    return json({ ok: true, no_target: true, room_count: 0 }, 200)
+    return json({ ok: true, no_target: true, room_count: 0, now_jst: nowJst }, 200)
   }
 
   const errors: string[] = []
@@ -102,7 +119,7 @@ Deno.serve(async (req) => {
       const { data: compRows, error: compErr } = await supabase
         .from("competitor_places")
         .select("id, competitor_name, place_id, google_maps_uri, last_alerted_rating_total")
-        .eq("store_partition_key", storeKey)
+        .ilike("store_partition_key", storeKey)
         .eq("is_active", true)
         .eq("source", "google_places")
       if (compErr) throw compErr
@@ -144,15 +161,31 @@ async function checkStoreReviewAndAlert(
   const { data: placeData, error: placeErr } = await supabase
     .from("store_review_places")
     .select("id, place_id, store_name, google_maps_uri, last_alerted_rating_total")
-    .eq("store_partition_key", storeKey)
+    .ilike("store_partition_key", storeKey)
     .eq("is_active", true)
     .maybeSingle()
   if (placeErr) return { checked: false, alerted: false, error: `load failed: ${placeErr.message}` }
   const placeRow = placeData as StoreReviewPlaceRow | null
   if (!placeRow || !placeRow.place_id) return { checked: false, alerted: false }
 
-  // Google Places 再取得＋スナップショット保存（既存の「自店舗口コミを更新」と同じロジックを再利用）
-  await refreshStoreReview(supabase, { store_key: storeKey })
+  // Google Places 再取得＋スナップショット保存（既存の「自店舗口コミを更新」と同じロジックを再利用）。
+  // 戻り値を無視すると、取得に失敗した日でも古いスナップショットをそのまま「最新」として読んでしまい
+  // 失敗が完全に見えなくなる（実際にマルゴエスでこれが起きていた）ため、必ず結果を確認して記録する。
+  try {
+    const refreshResult = await refreshStoreReview(supabase, { store_key: storeKey }) as { ok?: boolean; errors?: string[] }
+    if (refreshResult?.ok === false) {
+      const msg = Array.isArray(refreshResult.errors) && refreshResult.errors.length > 0
+        ? refreshResult.errors.join("; ")
+        : "refresh returned ok:false"
+      await logReviewAlertCheck(supabase, { storeKey, kind: "self", targetName: placeRow.store_name, placeId: placeRow.place_id, ok: false, error: msg })
+      return { checked: false, alerted: false, error: `refresh failed: ${msg}` }
+    }
+    await logReviewAlertCheck(supabase, { storeKey, kind: "self", targetName: placeRow.store_name, placeId: placeRow.place_id, ok: true })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await logReviewAlertCheck(supabase, { storeKey, kind: "self", targetName: placeRow.store_name, placeId: placeRow.place_id, ok: false, error: msg })
+    return { checked: false, alerted: false, error: `refresh threw: ${msg}` }
+  }
 
   const { data: snapData, error: snapErr } = await supabase
     .from("store_review_snapshots")
@@ -212,8 +245,23 @@ async function checkCompetitorReviewAndAlert(
   token: string,
   dryRun: boolean,
 ): Promise<PlaceCheckResult> {
-  // Google Places 再取得＋スナップショット保存（既存の「口コミ情報を更新」と同じロジックを再利用。id指定でこの1件だけ）
-  await refreshCompetitorReviews(supabase, { store_key: storeKey, id: comp.id })
+  // Google Places 再取得＋スナップショット保存（既存の「口コミ情報を更新」と同じロジックを再利用。id指定でこの1件だけ）。
+  // refreshStoreReview と同様、戻り値を確認しないと失敗を古いスナップショットで隠してしまう。
+  try {
+    const refreshResult = await refreshCompetitorReviews(supabase, { store_key: storeKey, id: comp.id }) as { ok?: boolean; errors?: string[] }
+    if (refreshResult?.ok === false) {
+      const msg = Array.isArray(refreshResult.errors) && refreshResult.errors.length > 0
+        ? refreshResult.errors.join("; ")
+        : "refresh returned ok:false"
+      await logReviewAlertCheck(supabase, { storeKey, kind: "competitor", targetName: comp.competitor_name, placeId: comp.place_id, ok: false, error: msg })
+      return { checked: false, alerted: false, error: `refresh failed: ${msg}` }
+    }
+    await logReviewAlertCheck(supabase, { storeKey, kind: "competitor", targetName: comp.competitor_name, placeId: comp.place_id, ok: true })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await logReviewAlertCheck(supabase, { storeKey, kind: "competitor", targetName: comp.competitor_name, placeId: comp.place_id, ok: false, error: msg })
+    return { checked: false, alerted: false, error: `refresh threw: ${msg}` }
+  }
 
   const { data: snapData, error: snapErr } = await supabase
     .from("competitor_review_snapshots")
@@ -261,6 +309,26 @@ async function checkCompetitorReviewAndAlert(
     await supabase.from("competitor_places").update({ last_alerted_rating_total: currentTotal }).eq("id", comp.id)
   }
   return { checked: true, alerted: true }
+}
+
+/** 自店舗・競合の口コミ再取得チェック結果を記録する（成功・失敗とも）。障害の見える化用。 */
+async function logReviewAlertCheck(
+  supabase: DbClient,
+  input: { storeKey: string; kind: "self" | "competitor"; targetName?: string | null; placeId?: string | null; ok: boolean; error?: string },
+): Promise<void> {
+  try {
+    const { error } = await supabase.from("review_alert_check_logs").insert({
+      store_partition_key: input.storeKey,
+      check_kind: input.kind,
+      target_name: input.targetName ?? null,
+      place_id: input.placeId ?? null,
+      ok: input.ok,
+      error: input.error ?? null,
+    })
+    if (error) console.error("logReviewAlertCheck insert failed:", error.message)
+  } catch (e) {
+    console.error("logReviewAlertCheck unexpected error:", e)
+  }
 }
 
 // LINE制御文字（Flexのtextフィールドに紛れ込むと配信エラーになりうる）を除去して長さを丸める。

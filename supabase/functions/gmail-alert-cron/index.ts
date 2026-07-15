@@ -6,6 +6,7 @@ import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_re
 import { pilotStorePartitionKeysMatch } from "../_shared/receipt_sheets_store_catalog.ts";
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts";
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
+import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";
 
 type GmailAlertEnv = {
   enabled: boolean;
@@ -303,6 +304,7 @@ async function sendTestReservationLineNotification(params: {
   let targetRoomIds = await resolveGmailAlertTargetRooms(
     supabase,
     fallbackTargetRoomId,
+    { bypassThrottle: true },
   );
   if (roomOverride) {
     targetRoomIds = [{ roomId: roomOverride, storeKey: "" }];
@@ -509,6 +511,7 @@ async function maybeSendGmailReservationAlerts(params: {
   const enabledTargets = await resolveGmailAlertTargetRooms(
     supabase,
     env.fallbackTargetRoomId,
+    { now },
   );
   if (enabledTargets.length === 0) {
     return { skipped: true, reason: "no_target_rooms" };
@@ -654,6 +657,8 @@ async function maybeSendGmailReservationAlerts(params: {
 
       batchSuccessfulRoomIds.push(targetRoomId);
       successfulTargetRoomIds.add(targetRoomId);
+      // 配信間隔スロットリングの起点を更新（このルームの次回対象タイミングをここから数える）。
+      await markGmailAlertRoomSent(supabase, targetRoomId, now.toISOString());
       await writeDeliveryLog(supabase, {
         jst_hour: jstHour,
         status: "gmail_alert_sent",
@@ -1274,11 +1279,12 @@ function resolveRoomLineToken(storeKey: string, fallbackToken: string): string {
 async function resolveGmailAlertTargetRooms(
   supabase: ReturnType<typeof createClient>,
   fallbackTargetRoomId: string,
+  opts: { now?: Date; bypassThrottle?: boolean } = {},
 ): Promise<GmailAlertTarget[]> {
   const { data, error } = await supabase
     .from("room_summary_settings")
     .select(
-      "room_id, is_enabled, gmail_reservation_alert_enabled, receipt_report_store_partition_key, room_name",
+      "room_id, is_enabled, gmail_reservation_alert_enabled, receipt_report_store_partition_key, room_name, gmail_alert_interval_minutes, gmail_alert_anchor_hour, gmail_alert_anchor_minute",
     );
 
   if (error) {
@@ -1289,6 +1295,9 @@ async function resolveGmailAlertTargetRooms(
     const fallback = String(fallbackTargetRoomId ?? "").trim();
     return fallback ? [{ roomId: fallback, storeKey: "" }] : [];
   }
+
+  const now = opts.now ?? new Date();
+  const bypassThrottle = opts.bypassThrottle === true;
 
   const rows = Array.isArray(data) ? data : [];
   const seen = new Set<string>();
@@ -1301,6 +1310,27 @@ async function resolveGmailAlertTargetRooms(
     const roomId = String(r?.room_id ?? "").trim();
     if (!roomId || seen.has(roomId)) continue;
     seen.add(roomId);
+
+    // NULL/1=毎分のリアルタイム通知。まとめ配信は「最後に送った時刻」ではなく、
+    // JST の基準時刻を起点にした固定スロットで判定する。
+    // 例: 基準10:00・12時間ごとなら、毎日10:00と22:00にだけ送る。
+    if (!bypassThrottle) {
+      const intervalMinutes = r?.gmail_alert_interval_minutes != null
+        ? Number(r.gmail_alert_interval_minutes)
+        : 1;
+      if (Number.isFinite(intervalMinutes) && intervalMinutes > 1) {
+        const anchorHour = r?.gmail_alert_anchor_hour != null && Number.isInteger(Number(r.gmail_alert_anchor_hour))
+          ? Number(r.gmail_alert_anchor_hour)
+          : 10;
+        const anchorMinute = r?.gmail_alert_anchor_minute != null && Number.isInteger(Number(r.gmail_alert_anchor_minute))
+          ? Number(r.gmail_alert_anchor_minute)
+          : 0;
+        const jst = new Date(now.getTime() + 9 * 60 * 60_000);
+        const minuteOfDay = jst.getUTCHours() * 60 + jst.getUTCMinutes();
+        const anchorMinuteOfDay = anchorHour * 60 + anchorMinute;
+        if (minuteOfDay < anchorMinuteOfDay || (minuteOfDay - anchorMinuteOfDay) % intervalMinutes !== 0) continue;
+      }
+    }
 
     let storeKey = String(r?.receipt_report_store_partition_key ?? "").trim();
     if (!storeKey) {
@@ -1321,6 +1351,28 @@ async function resolveGmailAlertTargetRooms(
 
   const fallback = String(fallbackTargetRoomId ?? "").trim();
   return fallback ? [{ roomId: fallback, storeKey: "" }] : [];
+}
+
+// このルームへ実際に配信できた時刻を記録する（配信間隔スロットリングの起点。best-effort）。
+async function markGmailAlertRoomSent(
+  supabase: ReturnType<typeof createClient>,
+  roomId: string,
+  sentAtIso: string,
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from("room_summary_settings")
+      .update({ gmail_alert_last_sent_at: sentAtIso })
+      .eq("room_id", roomId);
+    if (error) {
+      console.error("markGmailAlertRoomSent failed:", error.message);
+    }
+  } catch (e) {
+    console.error(
+      "markGmailAlertRoomSent threw:",
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }
 
 function planGmailAlertDeliveryBatches(
@@ -3695,6 +3747,20 @@ async function sendLinePush(
   token: string,
   storeKey?: string,
 ) {
+  if (isBlockedByMarugosecondLockdown(storeKey, to)) {
+    if (storeKey) {
+      void recordLineWebhookDeliveryLog({
+        storePartitionKey: storeKey,
+        method: "push",
+        context: "gmail_alert",
+        targetRoomId: to,
+        attempted: false,
+        success: false,
+        reason: "一時ロックダウン中のためブロック（マルゴセカンド送信元調査用）",
+      });
+    }
+    return { ok: false as const, error: "blocked_by_marugosecond_lockdown" };
+  }
   try {
     const response = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",

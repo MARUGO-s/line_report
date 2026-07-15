@@ -2640,7 +2640,6 @@ export async function answerFoodCourtQuestion(
   for (const u of loopResult.usages) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
   return { answer: loopResult.answer, loopScore: loopResult.loopScore, loopCount: loopResult.loopCount }
 }
-
 // 「分析サマリー（自動）」カードの1日分をAIで生成する（従来はJSテンプレートで毎回同じ言い回しだった問題への対応）。
 // answerFoodCourtQuestion と同じ「専門AI2体(他店舗・過去データ／イベント・天気)を並列実行→統合AIが1本にまとめる」
 // 構成を使い、対象日(targetReport)の事実(buildTargetDayFacts)を軸に語らせる。呼び出し側(admin-api)で
@@ -2657,6 +2656,7 @@ export async function generateFoodCourtDailySummary(
   storeKey?: string,
   priorSummary?: { businessDate: string; summaryText: string } | null,
   dailyLogs: Array<Record<string, unknown>> = [],
+  monthlyRetro?: string | null,
 ): Promise<string | null> {
   if (!groqApiKey) return null
   canonFoodcourtReports(reports)
@@ -2667,6 +2667,11 @@ export async function generateFoodCourtDailySummary(
   // 一言加えさせることで、日々の分析に連続性と自己修正を持たせる（数値予測モデルの自己採点と同じ発想）。
   const priorBlock = priorSummary
     ? `# 前回（${priorSummary.businessDate}）の分析（自己検証用の材料。今回の対象日ではない）\n${priorSummary.summaryText}`
+    : ''
+  // 先月の振り返り（月次AI要約）を「学習材料」として渡す。日次の分析は直近1〜2日の比較が中心になりがち
+  // なので、月単位の季節性・トレンドを踏まえられるようにする（データが蓄積するほど自動的に厚みが増す）。
+  const monthlyBlock = monthlyRetro
+    ? `# 先月の振り返り（学習材料。月単位のトレンド・季節性の参考にする。今回の対象日そのものではない）\n${monthlyRetro}`
     : ''
   // 曜日/イベント種別/天気ごとの傾向は、来客予測モデルが自己採点(バックテストMAPE)まで済ませた
   // フィット済み係数(foodcourt_forecast_factors)を最優先で使う。数値予測とAI解説が同じ学習結果を参照する
@@ -2762,6 +2767,7 @@ export async function generateFoodCourtDailySummary(
     `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象日の事実」および「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
     `【前回分析の自己検証】「前回の分析」が与えられている場合、そこで語った見立て（好調/不調の理由・客数要因か客単価要因か・イベント/天気の影響など）が今回の対象日の実績でも裏付けられたか、変わったかを必ずどこかの見出し（主に【この日の評価（条件別）】か【直近の勢い】）で一言検証すること。同じ結論・同じ言い回しを毎日繰り返さない。前回との継続性がある分析にする。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象日に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、それぞれの確度を踏まえながら「複数の条件が重なってどう効いたか」を多角的に判断し、【この日の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
+    `【月次トレンドの参照】「先月の振り返り」が与えられている場合、そこで語られた月単位のトレンド・季節性（例:月内で伸びていた時期か、曜日構成、イベント密度など）と対象日の実績が整合するか、それとも先月から変化したかを、【総評】か【直近の勢い】のどちらかで一言だけ軽く触れる。対象日そのものの分析を月次の話にすり替えない。`,
     nippouRules,
     `【出力フォーマット・厳守】必ず次の7つの見出しを、この順番・この表記（【】で囲む）で出力すること。見出し以外の前置き・締めの文章は書かない。`,
     `【総評】対象日の総合評価(強い/弱い/平常)を1〜2文＋根拠。日報施策があれば一言触れる。`,
@@ -2773,7 +2779,7 @@ export async function generateFoodCourtDailySummary(
     `【直近の勢い】直近の推移・前回との差、および前回分析の自己検証結果を1〜2文。可能なら次に確認すべきKPI、または日報の学びを踏まえた次回同条件の打ち手を1つ入れる。`,
     `各見出しの本文は短い文を2〜4行程度。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。客単価の順位は業態由来なので単価の高低そのものを優劣にしない。`,
   ].join('\n')
-  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
+  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}${monthlyBlock ? '\n\n' + monthlyBlock : ''}`
   const baseMessages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象日の日次サマリーを作成してください。` },

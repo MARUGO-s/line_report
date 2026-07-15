@@ -8,6 +8,9 @@ import { loadReceiptReplyContext } from './receipt_reply_context.ts'
 import { normalizeInlineText, parseReceiptDateToIso } from './receipt_parse.ts'
 import {
   deleteReceiptsForDateExcludingLineMessageId,
+  deleteReceiptsForDateByLineMessageIds,
+  getLineMessageIdsForDate,
+  hasExistingReceiptForDate,
   saveStoreReceiptEntry,
   type StoreRegistryRow,
 } from './store_receipt.ts'
@@ -26,6 +29,8 @@ export type PendingStoreReceiptDuplicate = {
   summary_text: string | null
   store_display_name: string
   sender_display_name: string | null
+  awaiting_date_change: boolean
+  existing_line_message_ids: string[]
 }
 
 function conversationKey(roomId: string, userId: string | null): string {
@@ -117,14 +122,14 @@ export function buildReceiptDuplicateConfirmationFlexReply(
           },
           {
             type: 'text',
-            text: 'ボタンまたは「加算」「中止」「置き換え」、番号 1／2／3 で返信できます。',
+            text: 'ボタンまたは「加算」「中止」「置き換え」「日付変更」、番号 1／2／3／4 で返信できます。',
             size: 'xs',
             color: '#555555',
             wrap: true,
           },
           {
             type: 'text',
-            text: '1・加算 … 既存のまま今回も追加。2・中止 … 登録しない。3・置き換え … 同日分を削除して今回のみ。',
+            text: '1・加算 … 既存のまま今回も追加。2・中止 … 登録しない。3・置き換え … 同日分を削除して今回のみ。4・日付変更 … 登録日付を変更して登録。',
             size: 'xs',
             color: '#333333',
             wrap: true,
@@ -147,6 +152,7 @@ export function buildReceiptDuplicateConfirmationFlexReply(
           { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '1 加算', text: '加算' } },
           { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '2 中止', text: '中止' } },
           { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '3 置き換え', text: '置き換え' } },
+          { type: 'button', style: 'primary', height: 'sm', action: { type: 'message', label: '4 日付変更', text: '日付変更' } },
         ],
       },
     },
@@ -158,6 +164,7 @@ export async function savePendingReceiptDuplicate(
   payload: PendingStoreReceiptDuplicate,
 ): Promise<boolean> {
   const expiresAt = new Date(Date.now() + PENDING_TTL_MIN * 60 * 1000).toISOString()
+  const existingIds = await getLineMessageIdsForDate(supabase, payload.receipt_table, payload.receipt_date)
   const { error } = await supabase.from(PENDING_TABLE).upsert({
     conversation_key: conversationKey(payload.room_id, payload.user_id),
     store_partition_key: payload.store_partition_key,
@@ -170,6 +177,8 @@ export async function savePendingReceiptDuplicate(
     summary_text: normalizeInlineText(payload.summary_text ?? '').slice(0, 240) || null,
     store_display_name: payload.store_display_name,
     sender_display_name: payload.sender_display_name,
+    awaiting_date_change: false,
+    existing_line_message_ids: existingIds.length > 0 ? JSON.stringify(existingIds) : null,
     expires_at: expiresAt,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'conversation_key' })
@@ -196,6 +205,16 @@ export async function loadPendingReceiptDuplicate(
     await clearPendingReceiptDuplicate(supabase, roomId, userId)
     return null
   }
+  const existingIdsRaw = (data as { existing_line_message_ids?: unknown }).existing_line_message_ids
+  let existingIds: string[] = []
+  if (existingIdsRaw != null) {
+    try {
+      const parsed = JSON.parse(String(existingIdsRaw))
+      existingIds = Array.isArray(parsed) ? parsed.map(String) : []
+    } catch {
+      existingIds = []
+    }
+  }
   return {
     store_partition_key: String((data as { store_partition_key?: unknown }).store_partition_key ?? ''),
     receipt_table: String((data as { receipt_table?: unknown }).receipt_table ?? ''),
@@ -213,6 +232,8 @@ export async function loadPendingReceiptDuplicate(
     sender_display_name: (data as { sender_display_name?: unknown }).sender_display_name != null
       ? String((data as { sender_display_name?: unknown }).sender_display_name)
       : null,
+    awaiting_date_change: !!(data as { awaiting_date_change?: unknown }).awaiting_date_change,
+    existing_line_message_ids: existingIds,
   }
 }
 
@@ -240,7 +261,7 @@ export async function clearPendingReceiptDuplicate(
   await supabase.from(PENDING_TABLE).delete().eq('conversation_key', conversationKey(roomId, userId))
 }
 
-export function normalizeReceiptDuplicateDecision(rawText: string): 'add' | 'cancel' | 'replace' | null {
+export function normalizeReceiptDuplicateDecision(rawText: string): 'add' | 'cancel' | 'replace' | 'date_change' | null {
   const compact = normalizeForRuleParsing(rawText)
     .toLowerCase()
     .replace(/\s+/g, '')
@@ -248,6 +269,7 @@ export function normalizeReceiptDuplicateDecision(rawText: string): 'add' | 'can
   if (!compact) return null
   if (/^(置換|置き換え|上書き|差し替え|入れ替え|3|３|replace|overwrite)$/.test(compact)) return 'replace'
   if (/^(中止|キャンセル|やめる|不要|登録しない|しない|いいえ|no|n|2|２)$/.test(compact)) return 'cancel'
+  if (/^(日付変更|日付を変更|日付修正|日付を修正|変更|4|４|datechange|changedate)$/.test(compact)) return 'date_change'
   if (/^(加算|重複登録|重複|追加|累積|複数|1|１|add|はい|ok|okay|yes|y|登録|登録して|お願いします|おねがいします|お願い|おねがい)$/.test(compact)) {
     return 'add'
   }
@@ -285,6 +307,29 @@ async function completePendingDuplicateAndReply(
   return buildReceiptFlexMessage(replyContext, replyVisibility)
 }
 
+async function markPendingReceiptDuplicateAwaitingDateChange(
+  supabase: SupabaseClient,
+  roomId: string,
+  userId: string | null,
+): Promise<void> {
+  await supabase
+    .from(PENDING_TABLE)
+    .update({ awaiting_date_change: true, updated_at: new Date().toISOString() })
+    .eq('conversation_key', conversationKey(roomId, userId))
+}
+
+async function updatePendingReceiptDuplicateDate(
+  supabase: SupabaseClient,
+  roomId: string,
+  userId: string | null,
+  newDateIso: string,
+): Promise<void> {
+  await supabase
+    .from(PENDING_TABLE)
+    .update({ receipt_date: newDateIso, awaiting_date_change: false, updated_at: new Date().toISOString() })
+    .eq('conversation_key', conversationKey(roomId, userId))
+}
+
 export async function tryHandlePendingReceiptDuplicateConfirmation(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
@@ -297,9 +342,28 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
   if (!pending) return null
   if (pending.store_partition_key !== registry.store_partition_key) return null
 
+  // 日付変更待機中: 入力を新しい日付として解析する
+  if (pending.awaiting_date_change) {
+    const newDateIso = parseReceiptDateToIso(text)
+    if (!newDateIso) {
+      return '日付が認識できませんでした。次の形式で入力してください（例: 2026年7月10日 / 2026-07-10 / 7/10）'
+    }
+    await updatePendingReceiptDuplicateDate(supabase, roomId, userId, newDateIso)
+    const updatedReceipt = {
+      ...pending.receipt_payload,
+      date: formatJapaneseReceiptDateFromIso(newDateIso) ?? newDateIso,
+    }
+    const updatedPending = { ...pending, receipt_date: newDateIso, receipt_payload: updatedReceipt, awaiting_date_change: false }
+    const sameDateExists = await hasExistingReceiptForDate(supabase, pending.receipt_table, newDateIso)
+    if (sameDateExists) {
+      return buildReceiptDuplicateConfirmationFlexReply(updatedPending.receipt_payload, newDateIso)
+    }
+    return completePendingDuplicateAndReply(supabase, registry, updatedPending, replyVisibility)
+  }
+
   const choice = normalizeReceiptDuplicateDecision(text)
   if (choice == null) {
-    // 「加算／中止／置き換え（＋ボタン・1／2／3）」以外の通常メッセージは無視する（催促しない）。
+    // 「加算／中止／置き換え／日付変更（＋ボタン・1／2／3／4）」以外の通常メッセージは無視する（催促しない）。
     // 重複確認はリッチカードのボタンで操作してもらう想定。保留中に無関係な会話（別ユーザーの
     // トーク等）へ誤って再プロンプトを返さないよう、ここでは null を返して通常処理へ通す。
     return null
@@ -308,12 +372,15 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
     await clearPendingReceiptDuplicate(supabase, roomId, userId)
     return '登録を中止しました。'
   }
+  if (choice === 'date_change') {
+    await markPendingReceiptDuplicateAwaitingDateChange(supabase, roomId, userId)
+    return '新しい日付を入力してください（例: 2026年7月10日 / 2026-07-10 / 7/10）'
+  }
   if (choice === 'replace') {
-    await deleteReceiptsForDateExcludingLineMessageId(
+    await deleteReceiptsForDateByLineMessageIds(
       supabase,
       pending.receipt_table,
-      pending.receipt_date,
-      pending.line_message_id,
+      pending.existing_line_message_ids,
     )
   }
   await clearPendingReceiptDuplicate(supabase, roomId, userId)
