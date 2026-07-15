@@ -2033,8 +2033,19 @@
   // ===== auth / API (データ層・据え置き) =====
   function getToken(){ try { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY)||''); } catch(_){ return ''; } }
   function lockedStore(){ try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch(_){ return ''; } }
-  // 店舗はマルゴエス固定（選択UIは廃止）。LINEリンクのロックがあればそれ、無ければ既定。
-  function currentStore(){ return lockedStore() || DEFAULT_STORE; }
+  // 通常の管理画面アクセスはマルゴエス固定。LINEリンクなどURLに店舗キーが明示された場合だけ
+  // その店舗を使う。過去のLINEリンクがlocalStorageへ残っていても、直接アクセスへ持ち越さない。
+  function currentStore(){
+    try {
+      const p = new URLSearchParams(location.search);
+      const raw = String(p.get('store_key') || p.get('store') || '').trim();
+      if (raw) {
+        const resolved = (PAGES && PAGES.resolveStoreKey) ? PAGES.resolveStoreKey(raw, '') : raw;
+        if (resolved) return String(resolved).trim();
+      }
+    } catch(_){}
+    return DEFAULT_STORE;
+  }
   function captureLockedStoreFromUrl(){
     try {
       const p = new URLSearchParams(location.search);
