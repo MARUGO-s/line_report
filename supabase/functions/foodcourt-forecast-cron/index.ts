@@ -9,10 +9,11 @@ import { chooseFoodCourtGlm } from "../_shared/foodcourt_forecast_utils.ts"
 //  A) 乗算モデル(mult-factor-v3・レガシー): 客数=ベース×曜日係数×イベント/会場係数(客層)×天気係数。
 //     各係数は実績の平均比から推定し、サンプルが少ない係数は1へ収縮(shrink)。AI解説(foodcourt_forecast_factors)
 //     はこのモデルの係数を常に参照する（解釈しやすい「倍率」の形を保つため、勝敗に関係なく毎晩計算）。
-//  B) ポアソン回帰(glm-poisson-v4): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント/会場×客層+雨
-//     +log(1+降水量)+猛暑+log(1+予想動員数)+トレンド(時間) の一般化線形モデルで推定(IRLS)。イベント係数は
+//  B) ポアソン回帰(glm-poisson-v5): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント/会場×客層+雨
+//     +log(1+降水量)+猛暑+log(1+予想動員数)+トレンド(時間)+トレンド二次+季節性 の一般化線形モデルで推定(IRLS)。イベント係数は
 //     東京ドーム本体/カナデビア/後楽園を分け、会場ごとの客層差（野球/大型ライブ/若年層ライブ/格闘技等）を扱う。
-//     v4で交互作用項(土日×大型/雨×大型/猛暑×大型イベント)を追加。係数はリッジ正則化(過学習防止＝旧モデルのshrinkに相当)つきの最尤推定になり、
+//     v4で交互作用項(土日×大型/雨×大型/猛暑×大型イベント)、v5で年周期季節性と非線形トレンドを追加。
+//     係数はリッジ正則化(過学習防止＝旧モデルのshrinkに相当)つきの最尤推定になり、
 //     「予想動員数」という連続値の特徴量と「トレンド(開店後の伸び)」を扱える。
 //     リッジの強さλも複数候補をバックテストして最も当たる値を自動選択する（固定値に頼らない＝ループを閉じる）。
 //  - 予測: 直近の特徴量(foodcourt_daily_features＝イベント＋天気＋曜日＋予想動員数)から、当日〜+14日を予測。
@@ -224,7 +225,7 @@ Deno.serve(async (req) => {
   const rollingMaeS = mae(recentBack.map((b) => [b.sPred, b.sAct]))
   const bandG = mapeG ?? 0.25 // 予測区間の幅（採用モデルのバックテスト誤差率。無ければ暫定±25%）
   const bandS = mapeS ?? 0.25
-  const chosenModelVersion = glmWins ? `glm-poisson-v4(lambda=${bestLambda})` : MODEL_VERSION
+  const chosenModelVersion = glmWins ? `glm-poisson-v5(lambda=${bestLambda})` : MODEL_VERSION
 
   // 4) 本予測: 全データで学習し、当日〜+14日を予測（採用モデルを使用）。過去日は out-of-sample 予測＋実績を保存。
   //    AI解説(foodcourt_forecast_factors)向けの乗算係数は、採否に関係なく常に計算して維持する（解釈用の唯一の係数源）。
@@ -519,7 +520,12 @@ function isBigEvType(t: EvType): boolean { return BIG_EVTYPES.has(t) }
 //  3) 猛暑×大型イベント（猛暑日の大型はドリンク/休憩需要で当店利用が変わる）
 // フル曜日×イベント(6×9)は小データで過学習するため、経営的に意味の大きい3項に絞る。リッジがスパース列を0へ寄せる。
 const INTERACTION_COLS = 3
-const GLM_COLS = 1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1 /*rainy*/ + 1 /*precip*/ + 1 /*hot*/ + 1 /*attendance*/ + 1 /*trend*/ + INTERACTION_COLS
+// 季節性/非線形トレンド(season-trend-v1):
+//  1) トレンド二次項 trend^2（開店効果が徐々に飽和する/加速する非線形成長を対数線形の一定成長率より柔軟に捉える）
+//  2)+3) 年周期の季節性 sin/cos(2π×年内通日/365.25)（月別ダミー12本より過学習しにくい2列で四季の波を表す。データが1年に近づくほど効く）
+// いずれも小データではリッジが0（＝季節性/非線形なし）へ寄せるため安全。前年同曜日比(#8後半)は1年蓄積後に別途追加する。
+const SEASON_COLS = 3
+const GLM_COLS = 1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1 /*rainy*/ + 1 /*precip*/ + 1 /*hot*/ + 1 /*attendance*/ + 1 /*trend*/ + INTERACTION_COLS + SEASON_COLS
 
 // 特徴量1件を設計行列の1行に変換する（trendStdは呼び出し側で標準化済みの値を渡す）。
 function designRow(f: Feat, trendStd: number): number[] {
@@ -542,6 +548,12 @@ function designRow(f: Feat, trendStd: number): number[] {
   row[interStart] = weekend * big              // 土日×大型イベント
   row[interStart + 1] = (f.rainy ? 1 : 0) * big // 雨×大型イベント
   row[interStart + 2] = (f.hotDay ? 1 : 0) * big // 猛暑×大型イベント
+  // --- 非線形トレンド + 季節性(season-trend-v1) ---
+  const seasonStart = interStart + INTERACTION_COLS
+  row[seasonStart] = trendStd * trendStd        // トレンド二次項（飽和/加速）
+  const ang = 2 * Math.PI * (dayOfYear(f.date) / 365.25)
+  row[seasonStart + 1] = Math.sin(ang)          // 年周期季節性(sin)
+  row[seasonStart + 2] = Math.cos(ang)          // 年周期季節性(cos)
   return row
 }
 // 日付を「1970-01-01からの通算日数」に変換（トレンド項の時間軸に使う）。
@@ -549,6 +561,14 @@ function epochDay(ymd: string): number {
   const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (!m) return 0
   return Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000)
+}
+// 年内通日(1-366)。年周期の季節性(sin/cos)の位相に使う。
+function dayOfYear(ymd: string): number {
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return 0
+  const start = Date.UTC(+m[1], 0, 1)
+  const cur = Date.UTC(+m[1], +m[2] - 1, +m[3])
+  return Math.floor((cur - start) / 86400000) + 1
 }
 // 連立一次方程式 A x = b をガウスの消去法(部分ピボット選択)で解く。特異(ほぼ0ピボット)ならnull。
 function solveLinearSystem(Ain: number[][], bin: number[]): number[] | null {
