@@ -6,11 +6,13 @@ import { chooseFoodCourtGlm } from "../_shared/foodcourt_forecast_utils.ts"
 // 毎日、蓄積された全実績から係数を学習し直し（＝貯まるほど精度が上がる）、客数・売上を予測する。
 //
 // 2モデルを毎晩バックテストで比較し、精度の良い方を自動採用する「モデル選択ループ」を実装している:
-//  A) 乗算モデル(mult-factor-v2・レガシー): 客数=ベース×曜日係数×イベント係数(種別)×天気係数。
+//  A) 乗算モデル(mult-factor-v3・レガシー): 客数=ベース×曜日係数×イベント/会場係数(客層)×天気係数。
 //     各係数は実績の平均比から推定し、サンプルが少ない係数は1へ収縮(shrink)。AI解説(foodcourt_forecast_factors)
 //     はこのモデルの係数を常に参照する（解釈しやすい「倍率」の形を保つため、勝敗に関係なく毎晩計算）。
-//  B) ポアソン回帰(glm-poisson-v2): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント種別+雨
-//     +log(1+降水量)+猛暑+log(1+予想動員数)+トレンド(時間) の一般化線形モデルで推定(IRLS)。曜日×イベント等の交互作用は
+//  B) ポアソン回帰(glm-poisson-v3): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント/会場×客層+雨
+//     +log(1+降水量)+猛暑+log(1+予想動員数)+トレンド(時間) の一般化線形モデルで推定(IRLS)。イベント係数は
+//     東京ドーム本体/カナデビア/後楽園を分け、会場ごとの客層差（野球/大型ライブ/若年層ライブ/格闘技等）を扱う。
+//     曜日×イベント等の交互作用は
 //     入れていないが、係数はリッジ正則化(過学習防止＝旧モデルのshrinkに相当)つきの最尤推定になり、
 //     「予想動員数」という連続値の特徴量と「トレンド(開店後の伸び)」を扱える。
 //     リッジの強さλも複数候補をバックテストして最も当たる値を自動選択する（固定値に頼らない＝ループを閉じる）。
@@ -25,7 +27,7 @@ import { chooseFoodCourtGlm } from "../_shared/foodcourt_forecast_utils.ts"
 
 type DbClient = ReturnType<typeof createClient>
 const BASE_TENANT = "MARUGO S"
-const MODEL_VERSION = "mult-factor-v2"  // レガシー乗算モデルの識別子（AI解説用係数は常にこのモデルで算出）
+const MODEL_VERSION = "mult-factor-v3"  // レガシー乗算モデルの識別子（AI解説用係数は常にこのモデルで算出）
 const SHRINK_K = 4        // 乗算モデルの係数のサンプルが少ないとき 1（影響なし）へ収縮する強さ
 const MIN_TRAIN = 4       // バックテストで予測を始める最小学習日数
 const HORIZON_DAYS = 14   // 何日先まで予測するか
@@ -33,9 +35,13 @@ const PAST_WINDOW = 28    // 何日前までの「予測 vs 実績」を保存�
 const MODEL_HOLDOUT_DAYS = 14 // モデル選択は直近期間で比較し、古い誤差に固定されないようにする
 const LAMBDA_GRID = [1, 2, 4, 8, 16]  // GLMのリッジ正則化強度の候補（バックテストで自動選択）
 
-// 会場規模を区別する: "live"=東京ドーム本体コンサート(大)、"dome"=ドーム本体のアマ野球/その他(大)、
-// "hall"=小ホール(カナデビア/後楽園 等)のみの日(小)。pro=ドーム野球。
-type EvType = "soccer_pv" | "japan" | "pro" | "live" | "dome" | "sports" | "hall" | "none"
+// 会場×客層を区別する:
+//   "live"=東京ドーム本体コンサート(大), "dome"=ドーム本体のアマ野球/その他(大), pro=ドーム野球。
+//   小ホールは venue-segment-v1 として "hall_kanadevia"(ライブ/若年層) /
+//   "hall_korakuen"(格闘技/中年男性) / "hall_other"(その他小ホール) に分ける。
+const EVENT_MODEL_TYPES = ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall_kanadevia", "hall_korakuen", "hall_other"] as const
+const EVENT_TYPES = [...EVENT_MODEL_TYPES, "none"] as const
+type EvType = typeof EVENT_TYPES[number]
 type Feat = { date: string; dow: number; evType: EvType; rainy: boolean; precipMm: number; hotDay: boolean; attendance: number }
 type Hist = Feat & { guests: number; sales: number; spend: number }
 type Factors = {
@@ -94,7 +100,7 @@ Deno.serve(async (req) => {
   // 1) 特徴量（イベント＋天気＋曜日）を取得（過去〜未来）
   const { data: featRows, error: featErr } = await supabase
     .from("foodcourt_daily_features")
-    .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, has_soccer_pv, has_dome_main, is_rainy, precipitation_mm, temp_max, max_expected_attendance")
+    .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, has_soccer_pv, has_dome_main, has_kanadevia, has_korakuen, is_rainy, precipitation_mm, temp_max, max_expected_attendance")
     .lte("business_date", hiDate)
     .order("business_date", { ascending: true })
   if (featErr) return json({ ok: false, error: `features load failed: ${featErr.message}` }, 500)
@@ -219,7 +225,7 @@ Deno.serve(async (req) => {
   const rollingMaeS = mae(recentBack.map((b) => [b.sPred, b.sAct]))
   const bandG = mapeG ?? 0.25 // 予測区間の幅（採用モデルのバックテスト誤差率。無ければ暫定±25%）
   const bandS = mapeS ?? 0.25
-  const chosenModelVersion = glmWins ? `glm-poisson-v2(lambda=${bestLambda})` : MODEL_VERSION
+  const chosenModelVersion = glmWins ? `glm-poisson-v3(lambda=${bestLambda})` : MODEL_VERSION
 
   // 4) 本予測: 全データで学習し、当日〜+14日を予測（採用モデルを使用）。過去日は out-of-sample 予測＋実績を保存。
   //    AI解説(foodcourt_forecast_factors)向けの乗算係数は、採否に関係なく常に計算して維持する（解釈用の唯一の係数源）。
@@ -408,7 +414,7 @@ function fit(h: Hist[]): Factors {
   }
   const evt: Record<string, number> = {}
   const evtN: Record<string, number> = {}
-  for (const t of ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall", "none"]) {
+  for (const t of EVENT_TYPES) {
     const xs = h.filter((x) => x.evType === t).map((x) => x.guests)
     evt[t] = shrink(meanG > 0 && xs.length ? (avg(xs)! / meanG) : 1, xs.length)
     evtN[t] = xs.length
@@ -463,7 +469,7 @@ function fitSpendModel(h: Hist[]): SpendModel {
   const baseSpend = median(h.map((x) => x.spend)) ?? 0
   const eventFactors: Record<string, number> = {}
   const eventCounts: Record<string, number> = {}
-  for (const t of ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall", "none"]) {
+  for (const t of EVENT_TYPES) {
     const xs = h.filter((x) => x.evType === t).map((x) => x.spend)
     eventFactors[t] = shrinkSpend(baseSpend > 0 && xs.length ? ((median(xs) ?? baseSpend) / baseSpend) : 1, xs.length)
     eventCounts[t] = xs.length
@@ -504,7 +510,7 @@ function shrinkSpend(rawFactor: number, n: number): number {
 //  - リッジ正則化(λ)が、サンプルの少ない係数を0(＝乗算モデルでいう「1倍＝無効果」)へ寄せる役割を、
 //    全特徴量に対して統一的な統計的裏付けをもって行う（乗算モデルの shrink() に相当するが連続値にも効く）。
 const WDAY_LEVELS = [2, 3, 4, 5, 6, 7] as const   // 曜日ダミー（基準=1=月曜）
-const EVT_LEVELS = ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall"] as const // イベント種別ダミー（基準=none）
+const EVT_LEVELS = EVENT_MODEL_TYPES // イベント/会場×客層ダミー（基準=none）
 const GLM_COLS = 1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1 /*rainy*/ + 1 /*precip*/ + 1 /*hot*/ + 1 /*attendance*/ + 1 /*trend*/
 
 // 特徴量1件を設計行列の1行に変換する（trendStdは呼び出し側で標準化済みの値を渡す）。
@@ -649,7 +655,7 @@ function computeAdvancedStats(
     const ci = ciOf(h.filter((x) => x.dow === d).map((x) => x.guests))
     if (ci) factorCi.wday[String(d)] = ci
   }
-  for (const t of ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall", "none"]) {
+  for (const t of EVENT_TYPES) {
     const ci = ciOf(h.filter((x) => x.evType === t).map((x) => x.guests))
     if (ci) factorCi.evt[t] = ci
   }
@@ -672,7 +678,7 @@ function computeAdvancedStats(
       max: Math.round(sorted[sorted.length - 1]),
     }
   }
-  for (const t of ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall", "none"]) {
+  for (const t of EVENT_TYPES) {
     quantOf(`evt:${t}`, h.filter((x) => x.evType === t).map((x) => x.guests))
   }
   quantOf("weekend", h.filter(isWeekend).map((x) => x.guests))
@@ -723,7 +729,8 @@ function computeAdvancedStats(
   const BIAS_LABEL: Record<string, string> = {
     "evt:soccer_pv": "サッカーPVの日", "evt:japan": "日本戦PVの日", "evt:pro": "プロ野球の日",
     "evt:live": "ライブの日", "evt:dome": "ドーム本体(その他)の日", "evt:sports": "世界スポーツ放映の日",
-    "evt:hall": "小ホールのみの日", "evt:none": "イベント無しの日",
+    "evt:hall_kanadevia": "カナデビアホールの日", "evt:hall_korakuen": "後楽園ホールの日",
+    "evt:hall_other": "その他小ホールの日", "evt:none": "イベント無しの日",
     weekend: "土日", weekday: "平日", rainy: "雨の日", dry: "雨でない日",
   }
   for (const [k, errs] of Object.entries(biasGroups)) {
@@ -745,7 +752,8 @@ function computeAdvancedStats(
   const noneGuests = h.filter((x) => x.evType === "none").map((x) => x.guests)
   const EVT_JP: Record<string, string> = {
     soccer_pv: "サッカーPV", japan: "日本戦PV", pro: "プロ野球", live: "ライブ",
-    dome: "ドーム本体(その他)", sports: "世界スポーツ放映", hall: "小ホールのみ",
+    dome: "ドーム本体(その他)", sports: "世界スポーツ放映",
+    hall_kanadevia: "カナデビアホール", hall_korakuen: "後楽園ホール", hall_other: "その他小ホール",
   }
   for (const t of Object.keys(EVT_JP)) {
     addEffect(`${EVT_JP[t]} vs イベント無し`, h.filter((x) => x.evType === t).map((x) => x.guests), noneGuests)
@@ -799,14 +807,16 @@ function round3(v: number): number { return Math.round(v * 1000) / 1000 }
 function pickEvType(r: Record<string, unknown>): EvType {
   // 当店(marugoS)の売上ドライバー順で種別を決める。ドーム野球は当店の最強ドライバー＝PVより優先。
   // サッカーPVは「全体は大集客だが客はバーガー/ビールへ→当店への売上寄与は間接的・波及的」なので独立の控えめ係数として学習させる。
-  // 会場規模を加味（ユーザー指示）: 東京ドーム本体(has_dome_main)は大集客、カナデビア等の小ホールのみの日は小。
+  // 会場×客層を加味（#5）: 東京ドーム本体(has_dome_main)は大集客、カナデビア/後楽園は小ホールでも客層が異なるため別係数。
   if (r.has_pro_baseball === true) return "pro"            // ドーム野球＝当店の最強ドライバー（同日にPVが重なってもこちらを優先）
   if (r.has_soccer_pv === true) return "soccer_pv"          // サッカーPV＝高集客でも当店売上は間接的・波及的（過大評価を避け別係数で学習）
   if (r.has_japan_match === true) return "japan"            // サッカー以外の日本戦PV（WBC/世界ボクシング/五輪 等）
   if (r.has_live === true && r.has_dome_main === true) return "live"  // 東京ドーム本体コンサート＝大集客（従来のlive係数を維持）
   if (r.has_dome_main === true) return "dome"               // ドーム本体のアマ野球/その他（live以外）＝大集客
   if (r.has_sports_broadcast === true) return "sports"     // 日本以外の世界スポーツ放映
-  if (r.has_live === true || r.has_event === true) return "hall"  // 小ホール(カナデビア/後楽園等)のみ＝小集客。ドーム本体無しなのでlive係数を当てない
+  if (r.has_korakuen === true) return "hall_korakuen"       // 後楽園ホール＝格闘技/ボクシング/プロレス中心。中年男性客層として別学習。
+  if (r.has_kanadevia === true) return "hall_kanadevia"     // カナデビアホール＝ライブ/舞台中心。若年層・公演客として別学習。
+  if (r.has_live === true || r.has_event === true) return "hall_other"  // その他小ホール/ラクーア/プリズム等。ドーム本体無しなのでlive係数を当てない。
   return "none"
 }
 
