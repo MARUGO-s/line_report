@@ -6,16 +6,18 @@ import { chooseFoodCourtGlm } from "../_shared/foodcourt_forecast_utils.ts"
 // 毎日、蓄積された全実績から係数を学習し直し（＝貯まるほど精度が上がる）、客数・売上を予測する。
 //
 // 2モデルを毎晩バックテストで比較し、精度の良い方を自動採用する「モデル選択ループ」を実装している:
-//  A) 乗算モデル(mult-factor-v1・レガシー): 客数=ベース×曜日係数×イベント係数(種別)×天気係数。
+//  A) 乗算モデル(mult-factor-v2・レガシー): 客数=ベース×曜日係数×イベント係数(種別)×天気係数。
 //     各係数は実績の平均比から推定し、サンプルが少ない係数は1へ収縮(shrink)。AI解説(foodcourt_forecast_factors)
 //     はこのモデルの係数を常に参照する（解釈しやすい「倍率」の形を保つため、勝敗に関係なく毎晩計算）。
-//  B) ポアソン回帰(glm-poisson-v1): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント種別+天気
-//     +log(1+予想動員数)+トレンド(時間) の一般化線形モデルで推定(IRLS)。曜日×イベント等の交互作用は
+//  B) ポアソン回帰(glm-poisson-v2): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント種別+雨
+//     +log(1+降水量)+猛暑+log(1+予想動員数)+トレンド(時間) の一般化線形モデルで推定(IRLS)。曜日×イベント等の交互作用は
 //     入れていないが、係数はリッジ正則化(過学習防止＝旧モデルのshrinkに相当)つきの最尤推定になり、
 //     「予想動員数」という連続値の特徴量と「トレンド(開店後の伸び)」を扱える。
 //     リッジの強さλも複数候補をバックテストして最も当たる値を自動選択する（固定値に頼らない＝ループを閉じる）。
 //  - 予測: 直近の特徴量(foodcourt_daily_features＝イベント＋天気＋曜日＋予想動員数)から、当日〜+14日を予測。
-//          売上=予測客数×中央客単価。
+//          売上=予測客数×予測客単価。客単価はイベント種別で調整する動的モデル(spend-model-v1)で推定する
+//          （従来の全期間中央値固定を廃止。イベント日はドリンク比率等で単価が変わるため）。
+//          天気は「雨フラグ」に加え、降水量(mm・連続値)と猛暑(最高気温≥30℃)フラグも特徴量に使う。
 //  - 自己採点: 拡張窓バックテスト（その日より前のデータだけで学習→当日を予測）で out-of-sample の MAPE(平均絶対誤差率) を
 //              A/Bそれぞれ算出し、誤差が小さい方を当日の本番予測に採用する。過去日は採用モデルの out-of-sample
 //              予測＋実績を forecast_predictions に保存し、画面/AIが「予測 vs 実績」で精度を確認できる。
@@ -23,7 +25,7 @@ import { chooseFoodCourtGlm } from "../_shared/foodcourt_forecast_utils.ts"
 
 type DbClient = ReturnType<typeof createClient>
 const BASE_TENANT = "MARUGO S"
-const MODEL_VERSION = "mult-factor-v1"  // レガシー乗算モデルの識別子（AI解説用係数は常にこのモデルで算出）
+const MODEL_VERSION = "mult-factor-v2"  // レガシー乗算モデルの識別子（AI解説用係数は常にこのモデルで算出）
 const SHRINK_K = 4        // 乗算モデルの係数のサンプルが少ないとき 1（影響なし）へ収縮する強さ
 const MIN_TRAIN = 4       // バックテストで予測を始める最小学習日数
 const HORIZON_DAYS = 14   // 何日先まで予測するか
@@ -34,7 +36,7 @@ const LAMBDA_GRID = [1, 2, 4, 8, 16]  // GLMのリッジ正則化強度の候補
 // 会場規模を区別する: "live"=東京ドーム本体コンサート(大)、"dome"=ドーム本体のアマ野球/その他(大)、
 // "hall"=小ホール(カナデビア/後楽園 等)のみの日(小)。pro=ドーム野球。
 type EvType = "soccer_pv" | "japan" | "pro" | "live" | "dome" | "sports" | "hall" | "none"
-type Feat = { date: string; dow: number; evType: EvType; rainy: boolean; attendance: number }
+type Feat = { date: string; dow: number; evType: EvType; rainy: boolean; precipMm: number; hotDay: boolean; attendance: number }
 type Hist = Feat & { guests: number; sales: number; spend: number }
 type Factors = {
   meanG: number
@@ -42,12 +44,23 @@ type Factors = {
   evt: Record<string, number>
   weather: Record<string, number>
   spend: number
+  spendEvt: Record<string, number>
+  spendEvtN: Record<string, number>
+  spendWeather: Record<string, number>
+  spendWeatherN: Record<string, number>
   wdayN: Record<number, number>
   evtN: Record<string, number>
   weatherN: Record<string, number>
 }
 // GLM(ポアソン回帰)のフィット結果。係数と、トレンド項の標準化に使った基準値（予測時に同じ変換を再現するため保持）。
-type GlmModel = { beta: number[]; startEpoch: number; meanT: number; sdT: number; spend: number }
+type GlmModel = { beta: number[]; startEpoch: number; meanT: number; sdT: number; spend: SpendModel }
+type SpendModel = {
+  baseSpend: number
+  eventFactors: Record<string, number>
+  eventCounts: Record<string, number>
+  weatherFactors: Record<string, number>
+  weatherCounts: Record<string, number>
+}
 
 // --- 統計拡張(stats-ext-v1)の型 ---
 // 予測には使わない。AI解説が係数をどこまで信じてよいかを判断するための解釈コンテキスト。
@@ -81,7 +94,7 @@ Deno.serve(async (req) => {
   // 1) 特徴量（イベント＋天気＋曜日）を取得（過去〜未来）
   const { data: featRows, error: featErr } = await supabase
     .from("foodcourt_daily_features")
-    .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, has_soccer_pv, has_dome_main, is_rainy, max_expected_attendance")
+    .select("business_date, iso_dow, has_event, has_pro_baseball, has_live, has_sports_broadcast, has_japan_match, has_soccer_pv, has_dome_main, is_rainy, precipitation_mm, temp_max, max_expected_attendance")
     .lte("business_date", hiDate)
     .order("business_date", { ascending: true })
   if (featErr) return json({ ok: false, error: `features load failed: ${featErr.message}` }, 500)
@@ -94,6 +107,8 @@ Deno.serve(async (req) => {
       dow: Number((r as { iso_dow?: unknown }).iso_dow ?? 0) || isoDow(d),
       evType: pickEvType(r as Record<string, unknown>),
       rainy: (r as { is_rainy?: unknown }).is_rainy === true,
+      precipMm: Math.max(0, num((r as { precipitation_mm?: unknown }).precipitation_mm) ?? 0),
+      hotDay: (num((r as { temp_max?: unknown }).temp_max) ?? 0) >= 30,
       attendance: Math.max(0, num((r as { max_expected_attendance?: unknown }).max_expected_attendance) ?? 0),
     })
   }
@@ -113,7 +128,7 @@ Deno.serve(async (req) => {
     const guests = num((r as { guests?: unknown }).guests)
     const sales = num((r as { sales?: unknown }).sales)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || guests == null || guests <= 0 || sales == null) continue
-    const f = featByDate.get(d) ?? { date: d, dow: isoDow(d), evType: "none" as const, rainy: false, attendance: 0 }
+    const f = featByDate.get(d) ?? { date: d, dow: isoDow(d), evType: "none" as const, rainy: false, precipMm: 0, hotDay: false, attendance: 0 }
     const spend = num((r as { avg_spend?: unknown }).avg_spend) ?? Math.round(sales / guests)
     hist.push({ ...f, guests, sales, spend })
   }
@@ -126,7 +141,8 @@ Deno.serve(async (req) => {
   // 3) 拡張窓バックテスト（out-of-sample）で、乗算モデル(legacy)とポアソン回帰(GLM)を比較する。
   //    a) まずGLMのリッジ強度λ候補を粗いストライドでバックテストし、最も当たるλを選ぶ（データが増えても計算量が
   //       跳ね上がらないよう間引く。数十日規模の現状はストライド1＝全日評価）。
-  //    b) 選んだλのGLMと、レガシー乗算モデルを全日程でバックテストし、guestsのMAPEが小さい方を本番採用する。
+  //    b) 選んだλのGLMと、レガシー乗算モデルを全日程でバックテストし、売上WAPEが小さい方を本番採用する。
+  //       MAPEだけだと客数/売上の小さい日が過大に効くため、経営影響に近いWAPEを主指標、MAPE/MAEを補助指標として記録する。
   //    これが「誤差実績を使って次の予測方法そのものを自動選択する」閉じたループ。
   type BackRow = { date: string; gPred: number; gAct: number; sPred: number; sAct: number }
   const selectStride = hist.length > 60 ? 3 : 1
@@ -145,19 +161,19 @@ Deno.serve(async (req) => {
     const m = fitGLM(train, lambda)
     if (!m) return null
     const guests = predictGLMGuests(m, target)
-    return { guests, sales: Math.max(0, Math.round(guests * (m.spend || 0))) }
+    return { guests, sales: Math.max(0, Math.round(guests * predictSpend(m.spend, target))) }
   }
 
   let bestLambda = LAMBDA_GRID[0]
-  let bestLambdaMape = Infinity
+  let bestLambdaWape = Infinity
   const holdoutStartIndex = Math.max(MIN_TRAIN + 1, hist.length - MODEL_HOLDOUT_DAYS)
   const holdoutStartDate = hist[Math.min(holdoutStartIndex, hist.length - 1)].date
   for (const lambda of LAMBDA_GRID) {
     const rows0 = runBacktest(glmPredictor(lambda), selectStride)
     const tuningRows = rows0.filter((r) => r.date < holdoutStartDate)
     const scoredRows = tuningRows.length >= 4 ? tuningRows : rows0
-    const m = mape(scoredRows.map((r) => [r.gPred, r.gAct]))
-    if (m != null && m < bestLambdaMape) { bestLambdaMape = m; bestLambda = lambda }
+    const w = wape(scoredRows.map((r) => [r.sPred, r.sAct]))
+    if (w != null && w < bestLambdaWape) { bestLambdaWape = w; bestLambda = lambda }
   }
 
   const backLegacy = runBacktest(legacyPredictor, 1)
@@ -165,22 +181,45 @@ Deno.serve(async (req) => {
   const mapeLegacyG = mape(backLegacy.map((b) => [b.gPred, b.gAct]))
   const mapeLegacyS = mape(backLegacy.map((b) => [b.sPred, b.sAct]))
   const mapeGlmG = mape(backGlm.map((b) => [b.gPred, b.gAct]))
+  const mapeGlmS = mape(backGlm.map((b) => [b.sPred, b.sAct]))
+  const wapeLegacyG = wape(backLegacy.map((b) => [b.gPred, b.gAct]))
+  const wapeLegacyS = wape(backLegacy.map((b) => [b.sPred, b.sAct]))
+  const wapeGlmG = wape(backGlm.map((b) => [b.gPred, b.gAct]))
+  const wapeGlmS = wape(backGlm.map((b) => [b.sPred, b.sAct]))
+  const maeLegacyG = mae(backLegacy.map((b) => [b.gPred, b.gAct]))
+  const maeLegacyS = mae(backLegacy.map((b) => [b.sPred, b.sAct]))
+  const maeGlmG = mae(backGlm.map((b) => [b.gPred, b.gAct]))
+  const maeGlmS = mae(backGlm.map((b) => [b.sPred, b.sAct]))
   const recentLegacy = backLegacy.filter((b) => b.date >= holdoutStartDate)
   const recentGlm = backGlm.filter((b) => b.date >= holdoutStartDate)
   const rollingLegacyG = mape(recentLegacy.map((b) => [b.gPred, b.gAct]))
   const rollingGlmG = mape(recentGlm.map((b) => [b.gPred, b.gAct]))
-  // λはholdoutより前で選び、モデル同士は直近holdoutで比較する。データ不足時だけ全期間MAPEへフォールバック。
-  const glmWins = chooseFoodCourtGlm(rollingLegacyG, rollingGlmG, mapeLegacyG, mapeGlmG)
+  const rollingLegacyS = mape(recentLegacy.map((b) => [b.sPred, b.sAct]))
+  const rollingGlmS = mape(recentGlm.map((b) => [b.sPred, b.sAct]))
+  const rollingLegacyWapeG = wape(recentLegacy.map((b) => [b.gPred, b.gAct]))
+  const rollingGlmWapeG = wape(recentGlm.map((b) => [b.gPred, b.gAct]))
+  const rollingLegacyWapeS = wape(recentLegacy.map((b) => [b.sPred, b.sAct]))
+  const rollingGlmWapeS = wape(recentGlm.map((b) => [b.sPred, b.sAct]))
+  // λはholdoutより前で選び、モデル同士は直近holdoutの売上WAPEで比較する。データ不足時だけ全期間売上WAPEへフォールバック。
+  const glmWins = chooseFoodCourtGlm(rollingLegacyWapeS, rollingGlmWapeS, wapeLegacyS, wapeGlmS)
 
   const back = glmWins ? backGlm : backLegacy
   const mapeG = glmWins ? mapeGlmG : mapeLegacyG
   const mapeS = mape(back.map((b) => [b.sPred, b.sAct]))
+  const wapeG = glmWins ? wapeGlmG : wapeLegacyG
+  const wapeS = glmWins ? wapeGlmS : wapeLegacyS
+  const maeG = glmWins ? maeGlmG : maeLegacyG
+  const maeS = glmWins ? maeGlmS : maeLegacyS
   const recentBack = back.filter((b) => b.date >= holdoutStartDate)
   const rollingMapeG = mape(recentBack.map((b) => [b.gPred, b.gAct]))
   const rollingMapeS = mape(recentBack.map((b) => [b.sPred, b.sAct]))
+  const rollingWapeG = wape(recentBack.map((b) => [b.gPred, b.gAct]))
+  const rollingWapeS = wape(recentBack.map((b) => [b.sPred, b.sAct]))
+  const rollingMaeG = mae(recentBack.map((b) => [b.gPred, b.gAct]))
+  const rollingMaeS = mae(recentBack.map((b) => [b.sPred, b.sAct]))
   const bandG = mapeG ?? 0.25 // 予測区間の幅（採用モデルのバックテスト誤差率。無ければ暫定±25%）
   const bandS = mapeS ?? 0.25
-  const chosenModelVersion = glmWins ? `glm-poisson-v1(lambda=${bestLambda})` : MODEL_VERSION
+  const chosenModelVersion = glmWins ? `glm-poisson-v2(lambda=${bestLambda})` : MODEL_VERSION
 
   // 4) 本予測: 全データで学習し、当日〜+14日を予測（採用モデルを使用）。過去日は out-of-sample 予測＋実績を保存。
   //    AI解説(foodcourt_forecast_factors)向けの乗算係数は、採否に関係なく常に計算して維持する（解釈用の唯一の係数源）。
@@ -203,14 +242,14 @@ Deno.serve(async (req) => {
       gPred = b.gPred; sPred = b.sPred; gAct = h.guests; sAct = h.sales
     } else if (glmWins && glmFull) {
       const guests = predictGLMGuests(glmFull, f)
-      gPred = guests; sPred = Math.max(0, Math.round(guests * (glmFull.spend || 0)))
+      gPred = guests; sPred = Math.max(0, Math.round(guests * predictSpend(glmFull.spend, f)))
       upcoming.push({ date: d, guests: gPred, sales: sPred, evType: f.evType, rainy: f.rainy })
     } else {
       const p = predict(facFull, f)
       gPred = p.guests; sPred = p.sales
       upcoming.push({ date: d, guests: gPred, sales: sPred, evType: f.evType, rainy: f.rainy })
     }
-    const featJson = { dow: f.dow, evType: f.evType, rainy: f.rainy, attendance: f.attendance }
+    const featJson = { dow: f.dow, evType: f.evType, rainy: f.rainy, precipMm: f.precipMm, hotDay: f.hotDay, attendance: f.attendance }
     rows.push({ target_date: d, tenant_name: BASE_TENANT, tenant_code: null, metric: "guests", predicted: gPred, predicted_low: Math.max(0, Math.round(gPred * (1 - bandG))), predicted_high: Math.round(gPred * (1 + bandG)), model_version: chosenModelVersion, features: featJson, actual: gAct })
     rows.push({ target_date: d, tenant_name: BASE_TENANT, tenant_code: null, metric: "sales", predicted: sPred, predicted_low: Math.max(0, Math.round(sPred * (1 - bandS))), predicted_high: Math.round(sPred * (1 + bandS)), model_version: chosenModelVersion, features: featJson, actual: sAct })
   }
@@ -222,20 +261,37 @@ Deno.serve(async (req) => {
   const summary = {
     history_days: hist.length,
     backtest_days: back.length,
-    mape_guests: mapeG != null ? Math.round(mapeG * 1000) / 10 : null, // %
-    mape_sales: mapeS != null ? Math.round(mapeS * 1000) / 10 : null,
-    rolling_mape_guests: rollingMapeG != null ? Math.round(rollingMapeG * 1000) / 10 : null,
-    rolling_mape_sales: rollingMapeS != null ? Math.round(rollingMapeS * 1000) / 10 : null,
+    mape_guests: pct1(mapeG), // %
+    mape_sales: pct1(mapeS),
+    wape_guests: pct1(wapeG),
+    wape_sales: pct1(wapeS),
+    mae_guests: round0(maeG),
+    mae_sales: round0(maeS),
+    rolling_mape_guests: pct1(rollingMapeG),
+    rolling_mape_sales: pct1(rollingMapeS),
+    rolling_wape_guests: pct1(rollingWapeG),
+    rolling_wape_sales: pct1(rollingWapeS),
+    rolling_mae_guests: round0(rollingMaeG),
+    rolling_mae_sales: round0(rollingMaeS),
     upcoming: upcoming.slice(0, HORIZON_DAYS),
     rows_to_upsert: rows.length,
     model_selection: {
       chosen: chosenModelVersion,
       glm_wins: glmWins,
       glm_lambda: bestLambda,
-      legacy_mape_guests: mapeLegacyG != null ? Math.round(mapeLegacyG * 1000) / 10 : null,
-      glm_mape_guests: mapeGlmG != null ? Math.round(mapeGlmG * 1000) / 10 : null,
-      recent_legacy_mape_guests: rollingLegacyG != null ? Math.round(rollingLegacyG * 1000) / 10 : null,
-      recent_glm_mape_guests: rollingGlmG != null ? Math.round(rollingGlmG * 1000) / 10 : null,
+      selection_metric: "sales_wape",
+      legacy_wape_sales: pct1(wapeLegacyS),
+      glm_wape_sales: pct1(wapeGlmS),
+      recent_legacy_wape_sales: pct1(rollingLegacyWapeS),
+      recent_glm_wape_sales: pct1(rollingGlmWapeS),
+      legacy_mape_guests: pct1(mapeLegacyG),
+      glm_mape_guests: pct1(mapeGlmG),
+      legacy_mape_sales: pct1(mapeLegacyS),
+      glm_mape_sales: pct1(mapeGlmS),
+      recent_legacy_mape_guests: pct1(rollingLegacyG),
+      recent_glm_mape_guests: pct1(rollingGlmG),
+      recent_legacy_mape_sales: pct1(rollingLegacyS),
+      recent_glm_mape_sales: pct1(rollingGlmS),
       holdout_days: recentBack.length,
     },
   }
@@ -276,11 +332,36 @@ Deno.serve(async (req) => {
         chosen: chosenModelVersion,
         glm_wins: glmWins,
         glm_lambda: bestLambda,
+        selection_metric: "sales_wape",
         legacy_mape_guests: mapeLegacyG,
+        legacy_mape_sales: mapeLegacyS,
         glm_mape_guests: mapeGlmG,
+        glm_mape_sales: mapeGlmS,
+        legacy_wape_guests: wapeLegacyG,
+        legacy_wape_sales: wapeLegacyS,
+        glm_wape_guests: wapeGlmG,
+        glm_wape_sales: wapeGlmS,
+        legacy_mae_guests: maeLegacyG,
+        legacy_mae_sales: maeLegacyS,
+        glm_mae_guests: maeGlmG,
+        glm_mae_sales: maeGlmS,
         recent_legacy_mape_guests: rollingLegacyG,
         recent_glm_mape_guests: rollingGlmG,
+        recent_legacy_mape_sales: rollingLegacyS,
+        recent_glm_mape_sales: rollingGlmS,
+        recent_legacy_wape_guests: rollingLegacyWapeG,
+        recent_glm_wape_guests: rollingGlmWapeG,
+        recent_legacy_wape_sales: rollingLegacyWapeS,
+        recent_glm_wape_sales: rollingGlmWapeS,
         holdout_days: recentBack.length,
+        spend_model: {
+          version: "spend-model-v1",
+          base_spend: facFull.spend,
+          event_factors: facFull.spendEvt,
+          event_counts: facFull.spendEvtN,
+          weather_factors: facFull.spendWeather,
+          weather_counts: facFull.spendWeatherN,
+        },
       },
       updated_at: new Date().toISOString(),
     }, { onConflict: "tenant_name" })
@@ -299,8 +380,16 @@ Deno.serve(async (req) => {
       backtest_days: back.length,
       mape_guests: mapeG,
       mape_sales: mapeS,
+      wape_guests: wapeG,
+      wape_sales: wapeS,
+      mae_guests: maeG,
+      mae_sales: maeS,
       rolling_mape_guests: rollingMapeG,
       rolling_mape_sales: rollingMapeS,
+      rolling_wape_guests: rollingWapeG,
+      rolling_wape_sales: rollingWapeS,
+      rolling_mae_guests: rollingMaeG,
+      rolling_mae_sales: rollingMaeS,
       mean_guests: facFull.meanG,
     }, { onConflict: "tenant_name,log_date" })
   if (histErr) console.error("foodcourt_forecast_history upsert failed:", histErr.message)
@@ -331,13 +420,32 @@ function fit(h: Hist[]): Factors {
     weather[w] = shrink(meanG > 0 && xs.length ? (avg(xs)! / meanG) : 1, xs.length)
     weatherN[w] = xs.length
   }
-  const spend = median(h.map((x) => x.spend)) ?? 0
-  return { meanG, wday, evt, weather, spend, wdayN, evtN, weatherN }
+  const spendModel = fitSpendModel(h)
+  return {
+    meanG,
+    wday,
+    evt,
+    weather,
+    spend: spendModel.baseSpend,
+    spendEvt: spendModel.eventFactors,
+    spendEvtN: spendModel.eventCounts,
+    spendWeather: spendModel.weatherFactors,
+    spendWeatherN: spendModel.weatherCounts,
+    wdayN,
+    evtN,
+    weatherN,
+  }
 }
 function predict(f: Factors, feat: Feat): { guests: number; sales: number } {
   const g = f.meanG * (f.wday[feat.dow] ?? 1) * (f.evt[feat.evType] ?? 1) * (f.weather[feat.rainy ? "rainy" : "dry"] ?? 1)
   const guests = Math.max(0, Math.round(g))
-  const sales = Math.max(0, Math.round(guests * (f.spend || 0)))
+  const sales = Math.max(0, Math.round(guests * predictSpend({
+    baseSpend: f.spend,
+    eventFactors: f.spendEvt,
+    eventCounts: f.spendEvtN,
+    weatherFactors: f.spendWeather,
+    weatherCounts: f.spendWeatherN,
+  }, feat)))
   return { guests, sales }
 }
 function shrink(rawFactor: number, n: number, k = SHRINK_K): number {
@@ -345,16 +453,59 @@ function shrink(rawFactor: number, n: number, k = SHRINK_K): number {
   return (n * rawFactor + k * 1) / (n + k)
 }
 
+function spendWeatherKey(f: Feat): string {
+  if (f.hotDay) return "hot"
+  if (f.rainy) return "rainy"
+  return "normal"
+}
+
+function fitSpendModel(h: Hist[]): SpendModel {
+  const baseSpend = median(h.map((x) => x.spend)) ?? 0
+  const eventFactors: Record<string, number> = {}
+  const eventCounts: Record<string, number> = {}
+  for (const t of ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall", "none"]) {
+    const xs = h.filter((x) => x.evType === t).map((x) => x.spend)
+    eventFactors[t] = shrinkSpend(baseSpend > 0 && xs.length ? ((median(xs) ?? baseSpend) / baseSpend) : 1, xs.length)
+    eventCounts[t] = xs.length
+  }
+  const weatherFactors: Record<string, number> = {}
+  const weatherCounts: Record<string, number> = {}
+  for (const key of ["hot", "rainy", "normal"]) {
+    const xs = h.filter((x) => spendWeatherKey(x) === key).map((x) => x.spend)
+    weatherFactors[key] = shrinkSpend(baseSpend > 0 && xs.length ? ((median(xs) ?? baseSpend) / baseSpend) : 1, xs.length)
+    weatherCounts[key] = xs.length
+  }
+  return { baseSpend, eventFactors, eventCounts, weatherFactors, weatherCounts }
+}
+
+function predictSpend(model: SpendModel, feat: Feat): number {
+  const base = Math.max(0, model.baseSpend || 0)
+  if (base <= 0) return 0
+  const raw = base
+    * (model.eventFactors[feat.evType] ?? 1)
+    * (model.weatherFactors[spendWeatherKey(feat)] ?? 1)
+  return Math.max(0, Math.round(raw))
+}
+
+function shrinkSpend(rawFactor: number, n: number): number {
+  // 客単価は日次サンプルが少ない段階でもブレやすいため、客数係数より少し強めに1倍へ寄せ、
+  // さらに極端な外れ値で売上予測が暴れないよう安全な範囲に収める。
+  const factor = shrink(rawFactor, n, SHRINK_K + 2)
+  return Math.max(0.65, Math.min(1.45, factor))
+}
+
 // --- GLM(ポアソン回帰・IRLS) ---
-// 客数(カウントデータ)を log(客数) = 切片 + 曜日 + イベント種別 + 天気 + log(1+予想動員数) + トレンド(時間)
+// 客数(カウントデータ)を log(客数) = 切片 + 曜日 + イベント種別 + 天気 + log(1+降水量)
+// + 猛暑(最高気温30℃以上) + log(1+予想動員数) + トレンド(時間)
 // の対数線形モデルで推定する。乗算モデル(fit/predict)と違い、
 //  - 予想動員数という連続値の特徴量をそのまま扱える（イベント種別の粗い分類だけでなく規模を反映）
+//  - 雨の有無だけでなく、降水量と猛暑の影響も連続/閾値特徴量として反映できる
 //  - トレンド項で「開店後に客数が伸び続けている」段階的な変化を捉えられる
 //  - リッジ正則化(λ)が、サンプルの少ない係数を0(＝乗算モデルでいう「1倍＝無効果」)へ寄せる役割を、
 //    全特徴量に対して統一的な統計的裏付けをもって行う（乗算モデルの shrink() に相当するが連続値にも効く）。
 const WDAY_LEVELS = [2, 3, 4, 5, 6, 7] as const   // 曜日ダミー（基準=1=月曜）
 const EVT_LEVELS = ["soccer_pv", "japan", "pro", "live", "dome", "sports", "hall"] as const // イベント種別ダミー（基準=none）
-const GLM_COLS = 1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1 /*rainy*/ + 1 /*attendance*/ + 1 /*trend*/
+const GLM_COLS = 1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1 /*rainy*/ + 1 /*precip*/ + 1 /*hot*/ + 1 /*attendance*/ + 1 /*trend*/
 
 // 特徴量1件を設計行列の1行に変換する（trendStdは呼び出し側で標準化済みの値を渡す）。
 function designRow(f: Feat, trendStd: number): number[] {
@@ -364,9 +515,12 @@ function designRow(f: Feat, trendStd: number): number[] {
   if (wi >= 0) row[1 + wi] = 1
   const ei = EVT_LEVELS.indexOf(f.evType as typeof EVT_LEVELS[number])
   if (ei >= 0) row[1 + WDAY_LEVELS.length + ei] = 1
-  row[1 + WDAY_LEVELS.length + EVT_LEVELS.length] = f.rainy ? 1 : 0
-  row[1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1] = Math.log1p(Math.max(0, f.attendance || 0))
-  row[1 + WDAY_LEVELS.length + EVT_LEVELS.length + 2] = trendStd
+  const weatherStart = 1 + WDAY_LEVELS.length + EVT_LEVELS.length
+  row[weatherStart] = f.rainy ? 1 : 0
+  row[weatherStart + 1] = Math.log1p(Math.max(0, f.precipMm || 0))
+  row[weatherStart + 2] = f.hotDay ? 1 : 0
+  row[weatherStart + 3] = Math.log1p(Math.max(0, f.attendance || 0))
+  row[weatherStart + 4] = trendStd
   return row
 }
 // 日付を「1970-01-01からの通算日数」に変換（トレンド項の時間軸に使う）。
@@ -449,7 +603,7 @@ function fitGLM(train: Hist[], lambda: number): GlmModel | null {
     beta = newBeta
     if (diff < 1e-6) break
   }
-  const spend = median(train.map((h) => h.spend)) ?? 0
+  const spend = fitSpendModel(train)
   return { beta, startEpoch, meanT, sdT, spend }
 }
 // 学習済みGLMで客数を予測する（学習時と同じトレンド標準化を再現する）。
@@ -661,6 +815,24 @@ function mape(pairs: Array<[number, number]>): number | null {
   const xs = pairs.filter(([, a]) => a > 0).map(([p, a]) => Math.abs(p - a) / a)
   return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null
 }
+// WAPE(加重絶対誤差率)= Σ|予測-実績| / Σ実績。MAPEと違い実績の小さい日で誤差率が跳ね上がらず、
+// 実績(売上・客数)の大きい日を重く扱う＝経営判断に近い指標。分母が0以下なら評価不能としてnull。
+function wape(pairs: Array<[number, number]>): number | null {
+  let num = 0, den = 0
+  for (const [p, a] of pairs) {
+    if (!(a > 0)) continue
+    num += Math.abs(p - a)
+    den += a
+  }
+  return den > 0 ? num / den : null
+}
+// MAE(平均絶対誤差)= mean|予測-実績|。誤差率でなく実数（客数なら「人」、売上なら「円」）の平均ズレ。
+function mae(pairs: Array<[number, number]>): number | null {
+  const xs = pairs.filter(([, a]) => a != null && isFinite(a)).map(([p, a]) => Math.abs(p - a))
+  return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null
+}
+function pct1(v: number | null): number | null { return v != null ? Math.round(v * 1000) / 10 : null }
+function round0(v: number | null): number | null { return v != null ? Math.round(v) : null }
 function avg(a: number[]): number | null { const x = a.filter((v) => v != null && isFinite(v)); return x.length ? x.reduce((s, v) => s + v, 0) / x.length : null }
 function median(a: number[]): number | null { const x = a.filter((v) => v != null && isFinite(v)).slice().sort((p, q) => p - q); if (!x.length) return null; const m = Math.floor(x.length / 2); return x.length % 2 ? x[m] : (x[m - 1] + x[m]) / 2 }
 function num(v: unknown): number | null { if (v == null) return null; const n = Number(v); return isFinite(n) ? n : null }
