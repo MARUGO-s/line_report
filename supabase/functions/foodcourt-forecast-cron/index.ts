@@ -9,11 +9,10 @@ import { chooseFoodCourtGlm } from "../_shared/foodcourt_forecast_utils.ts"
 //  A) 乗算モデル(mult-factor-v3・レガシー): 客数=ベース×曜日係数×イベント/会場係数(客層)×天気係数。
 //     各係数は実績の平均比から推定し、サンプルが少ない係数は1へ収縮(shrink)。AI解説(foodcourt_forecast_factors)
 //     はこのモデルの係数を常に参照する（解釈しやすい「倍率」の形を保つため、勝敗に関係なく毎晩計算）。
-//  B) ポアソン回帰(glm-poisson-v3): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント/会場×客層+雨
+//  B) ポアソン回帰(glm-poisson-v4): 客数(カウントデータ)を log(客数) = 切片+曜日+イベント/会場×客層+雨
 //     +log(1+降水量)+猛暑+log(1+予想動員数)+トレンド(時間) の一般化線形モデルで推定(IRLS)。イベント係数は
 //     東京ドーム本体/カナデビア/後楽園を分け、会場ごとの客層差（野球/大型ライブ/若年層ライブ/格闘技等）を扱う。
-//     曜日×イベント等の交互作用は
-//     入れていないが、係数はリッジ正則化(過学習防止＝旧モデルのshrinkに相当)つきの最尤推定になり、
+//     v4で交互作用項(土日×大型/雨×大型/猛暑×大型イベント)を追加。係数はリッジ正則化(過学習防止＝旧モデルのshrinkに相当)つきの最尤推定になり、
 //     「予想動員数」という連続値の特徴量と「トレンド(開店後の伸び)」を扱える。
 //     リッジの強さλも複数候補をバックテストして最も当たる値を自動選択する（固定値に頼らない＝ループを閉じる）。
 //  - 予測: 直近の特徴量(foodcourt_daily_features＝イベント＋天気＋曜日＋予想動員数)から、当日〜+14日を予測。
@@ -225,7 +224,7 @@ Deno.serve(async (req) => {
   const rollingMaeS = mae(recentBack.map((b) => [b.sPred, b.sAct]))
   const bandG = mapeG ?? 0.25 // 予測区間の幅（採用モデルのバックテスト誤差率。無ければ暫定±25%）
   const bandS = mapeS ?? 0.25
-  const chosenModelVersion = glmWins ? `glm-poisson-v3(lambda=${bestLambda})` : MODEL_VERSION
+  const chosenModelVersion = glmWins ? `glm-poisson-v4(lambda=${bestLambda})` : MODEL_VERSION
 
   // 4) 本予測: 全データで学習し、当日〜+14日を予測（採用モデルを使用）。過去日は out-of-sample 予測＋実績を保存。
   //    AI解説(foodcourt_forecast_factors)向けの乗算係数は、採否に関係なく常に計算して維持する（解釈用の唯一の係数源）。
@@ -511,7 +510,16 @@ function shrinkSpend(rawFactor: number, n: number): number {
 //    全特徴量に対して統一的な統計的裏付けをもって行う（乗算モデルの shrink() に相当するが連続値にも効く）。
 const WDAY_LEVELS = [2, 3, 4, 5, 6, 7] as const   // 曜日ダミー（基準=1=月曜）
 const EVT_LEVELS = EVENT_MODEL_TYPES // イベント/会場×客層ダミー（基準=none）
-const GLM_COLS = 1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1 /*rainy*/ + 1 /*precip*/ + 1 /*hot*/ + 1 /*attendance*/ + 1 /*trend*/
+// 大型イベント＝当店の来客が最も跳ねる東京ドーム本体系(プロ野球/本体ライブ/本体その他)。交互作用の主対象。
+const BIG_EVTYPES = new Set<EvType>(["pro", "live", "dome"])
+function isBigEvType(t: EvType): boolean { return BIG_EVTYPES.has(t) }
+// 交互作用項(interaction-v1): 主効果だけでは表せない「条件の重なりで効き方が変わる」領域を明示的に足す。
+//  1) 土日×大型イベント（週末の大型は平日と伸び方が違う）
+//  2) 雨×大型イベント（大型集客日は雨でも来る＝雨の減衰が弱まる/強まる）
+//  3) 猛暑×大型イベント（猛暑日の大型はドリンク/休憩需要で当店利用が変わる）
+// フル曜日×イベント(6×9)は小データで過学習するため、経営的に意味の大きい3項に絞る。リッジがスパース列を0へ寄せる。
+const INTERACTION_COLS = 3
+const GLM_COLS = 1 + WDAY_LEVELS.length + EVT_LEVELS.length + 1 /*rainy*/ + 1 /*precip*/ + 1 /*hot*/ + 1 /*attendance*/ + 1 /*trend*/ + INTERACTION_COLS
 
 // 特徴量1件を設計行列の1行に変換する（trendStdは呼び出し側で標準化済みの値を渡す）。
 function designRow(f: Feat, trendStd: number): number[] {
@@ -527,6 +535,13 @@ function designRow(f: Feat, trendStd: number): number[] {
   row[weatherStart + 2] = f.hotDay ? 1 : 0
   row[weatherStart + 3] = Math.log1p(Math.max(0, f.attendance || 0))
   row[weatherStart + 4] = trendStd
+  // --- 交互作用項(interaction-v1) ---
+  const interStart = weatherStart + 5
+  const big = isBigEvType(f.evType) ? 1 : 0
+  const weekend = (f.dow === 6 || f.dow === 7) ? 1 : 0
+  row[interStart] = weekend * big              // 土日×大型イベント
+  row[interStart + 1] = (f.rainy ? 1 : 0) * big // 雨×大型イベント
+  row[interStart + 2] = (f.hotDay ? 1 : 0) * big // 猛暑×大型イベント
   return row
 }
 // 日付を「1970-01-01からの通算日数」に変換（トレンド項の時間軸に使う）。
