@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { parseTokyoDomeSchedule, type ExtractedTokyoDomeEvent } from "../_shared/tokyo_dome_schedule.ts"
 
 // 東京ドーム＋ドームシティ各会場の公式イベント予定を取得し、tokyo_dome_events へ upsert する cron。
 // マルゴS（東京ドーム内フードコート）の客数・売上との相関分析に使う。分析専用・送信なし。
@@ -25,7 +26,7 @@ const MAX_TEXT_CHARS = 40000
 // 開催イベントのみ書き込み、PV放映は別経路（定期Web検索ルーティン）が venue='public-viewing' で投入する。
 const VALID_CATEGORIES = new Set(["プロ野球", "アマ野球", "ライブ", "スポーツ中継", "その他"])
 
-type ExtractedEvent = { event_date: string; title: string; category: string }
+type ExtractedEvent = ExtractedTokyoDomeEvent
 
 Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
@@ -128,6 +129,47 @@ Deno.serve(async (req) => {
     .upsert(rows, { onConflict: "event_date,venue,title" })
   if (error) {
     return json({ ok: false, error: `upsert failed: ${error.message}`, extracted: rows.length }, 500)
+  }
+
+  // The official schedule is a snapshot, while upsert alone only adds/updates rows.
+  // Reconcile deterministic Tokyo Dome results so corrected dates/titles do not
+  // leave stale official rows in DB. Never reconcile an LLM fallback or another source.
+  let domeStaleDeleted = 0
+  let domeReconcileError: string | null = null
+  if ((domeRaw ?? "").startsWith("deterministic:") && domeEvents.length >= 3) {
+    const sortedDates = domeEvents.map((event) => event.event_date).sort()
+    const minDate = sortedDates[0]
+    const maxDate = sortedDates[sortedDates.length - 1]
+    const freshKeys = new Set(domeEvents.map((event) => `${event.event_date}__${event.title}`))
+    const { data: existing, error: existingError } = await supabase
+      .from("tokyo_dome_events")
+      .select("event_date,title")
+      .eq("venue", "tokyo-dome")
+      .eq("source", "tokyo-dome.co.jp")
+      .gte("event_date", minDate)
+      .lte("event_date", maxDate)
+
+    if (existingError) {
+      domeReconcileError = `snapshot load failed: ${existingError.message}`
+    } else {
+      for (const row of (Array.isArray(existing) ? existing : [])) {
+        const eventDate = String((row as { event_date?: unknown }).event_date ?? "").slice(0, 10)
+        const title = String((row as { title?: unknown }).title ?? "")
+        if (!eventDate || !title || freshKeys.has(`${eventDate}__${title}`)) continue
+        const { error: deleteError } = await supabase
+          .from("tokyo_dome_events")
+          .delete()
+          .eq("event_date", eventDate)
+          .eq("venue", "tokyo-dome")
+          .eq("title", title)
+          .eq("source", "tokyo-dome.co.jp")
+        if (deleteError) {
+          domeReconcileError = `stale delete failed (${eventDate} ${title}): ${deleteError.message}`
+          break
+        }
+        domeStaleDeleted++
+      }
+    }
   }
 
   const allDates = rows.map((r) => r.event_date).sort()
@@ -302,6 +344,8 @@ Deno.serve(async (req) => {
     halls_upserted: Object.fromEntries(hallResults.map((r) => [r.venue, r.events.length])),
     upserted: rows.length,
     dome_error: domeError,
+    dome_stale_deleted: domeStaleDeleted,
+    dome_reconcile_error: domeReconcileError,
     hall_errors: Object.fromEntries(hallResults.map((r) => [r.venue, r.error])),
     giants_audience_synced: giantsSyncCount,
     giants_audience_error: giantsError,
@@ -325,72 +369,6 @@ function htmlToText(html: string): string {
   t = t.replace(/[ \t　]+/g, " ")
   t = t.replace(/\n{2,}/g, "\n").replace(/[ ]*\n[ ]*/g, "\n")
   return t.trim()
-}
-
-// 公式カレンダーを「日付ごと」に確定パースする（LLMの日付ズレを避ける主経路）。
-// 構造: 「YYYY年MM月」見出し → 「DD」+「(曜)」のセル → セル内に「野球/コンサート等」の直後行がイベント名。
-function parseScheduleDeterministic(text: string): ExtractedEvent[] {
-  const lines = String(text ?? "").split("\n").map((s) => s.trim())
-  const MONTH = /^(\d{4})年(\d{1,2})月$/
-  const WD = /^[（(][日月火水木金土][）)]$/
-  const isDay = (s: string) => /^\d{1,2}$/.test(s)
-  const out: ExtractedEvent[] = []
-  const seen = new Set<string>()
-  let curY = 0, curM = 0
-  for (let i = 0; i < lines.length; i++) {
-    const ln = lines[i]
-    const mm = ln.match(MONTH)
-    if (mm) { curY = Number(mm[1]); curM = Number(mm[2]); continue }
-    if (curY && curM && isDay(ln) && i + 1 < lines.length && WD.test(lines[i + 1])) {
-      const day = Number(ln)
-      if (day < 1 || day > 31) continue
-      // この日のセル内容を、次の日セル/月見出しまで収集
-      const content: string[] = []
-      let j = i + 2
-      for (; j < lines.length; j++) {
-        const c = lines[j]
-        if (MONTH.test(c)) break
-        if (isDay(c) && j + 1 < lines.length && WD.test(lines[j + 1])) break
-        if (c) content.push(c)
-      }
-      const date = `${curY}-${String(curM).padStart(2, "0")}-${String(day).padStart(2, "0")}`
-      for (let k = 0; k < content.length; k++) {
-        const cat = markerCategory(content[k])
-        if (!cat) continue
-        // マーカー直後で、時刻/連絡先/別マーカーでない最初の行をタイトルとみなす
-        let title = ""
-        for (let t = k + 1; t < content.length; t++) {
-          const cc = content[t]
-          if (markerCategory(cc)) break
-          if (/^(開場|開始|開演|開門|終演|開催)/.test(cc)) continue
-          if (cc.startsWith("【") || /TEL|電話|お?問い合わせ|チケット|発売/.test(cc)) continue
-          title = cc; break
-        }
-        if (!title) continue
-        if (/TOKYO\s*DOME\s*TOUR/i.test(title)) continue   // 毎日の館内ツアー（イベントではない）
-        const category = cat === "野球"
-          ? (/(大学|高校|社会人|選手権|リトル|シニア|ボーイズ|女子|クラブ選手権|アマチュア)/.test(title) ? "アマ野球" : "プロ野球")
-          : cat === "コンサート" ? "ライブ" : "その他"
-        const cleanTitle = title.replace(/\s+/g, " ").slice(0, 200)
-        const key = `${date}__${cleanTitle}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        out.push({ event_date: date, title: cleanTitle, category })
-      }
-      i = j - 1
-    }
-  }
-  out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
-  return out
-}
-
-// セル内の「カテゴリ見出し」行を判定（タイトル行と区別）。該当しなければ null。
-function markerCategory(s: string): "野球" | "コンサート" | "その他" | null {
-  const t = String(s ?? "").trim()
-  if (t === "野球") return "野球"
-  if (t === "コンサート") return "コンサート"
-  if (t === "イベント" || t === "その他" || t === "展示会" || t === "展示" || t === "格闘技" || t === "プロレス" || t === "式典") return "その他"
-  return null
 }
 
 // ドームシティ各ホール（カナデビア／後楽園）の公式カレンダーHTMLを会場構造から確定パースする（共通構造）。
@@ -522,7 +500,7 @@ function parseImmTheaterSchedule(html: string): ExtractedEvent[] {
 
 async function extractEvents(scheduleText: string, apiKey: string): Promise<{ events: ExtractedEvent[] | null; raw: string | null; usage: DomeAiUsage | null }> {
   // 主経路: コードで日付ごとに確定パース（LLMの日付ズレを排除）。十分な件数が取れたらこれを採用（＝AIトークン消費なし）。
-  const deterministic = parseScheduleDeterministic(scheduleText)
+  const deterministic = parseTokyoDomeSchedule(scheduleText)
   if (deterministic.length >= 3) {
     return { events: deterministic, raw: `deterministic:${deterministic.length}`, usage: null }
   }
