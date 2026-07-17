@@ -7,6 +7,10 @@ import { pilotStorePartitionKeysMatch } from "../_shared/receipt_sheets_store_ca
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts";
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";
+import {
+  isLikelyReservationNotificationMail,
+  resolveReservationYear,
+} from "../_shared/reservation_mail_rules.ts";
 
 type GmailAlertEnv = {
   enabled: boolean;
@@ -15,6 +19,7 @@ type GmailAlertEnv = {
   refreshToken: string;
   query: string;
   maxMessages: number;
+  scanMessages: number;
   fallbackTargetRoomId: string;
   aiEnabled: boolean;
   aiApiKey: string;
@@ -41,6 +46,19 @@ type GmailMessageAlert = {
   reservation: ReservationMailDetails | null;
   reservationExtractSource: "rule" | "ai" | "rule_plus_ai" | "none";
 };
+
+type IgnoredGmailMessage = {
+  id: string;
+  threadId: string | null;
+  subject: string;
+  from: string;
+  internalDateIso: string | null;
+  reason: "unsupported_route" | "non_reservation_notification";
+};
+
+type GmailMessageFetchResult =
+  | { kind: "alert"; alert: GmailMessageAlert }
+  | { kind: "ignored"; message: IgnoredGmailMessage };
 
 type ReservationEventLabel = "新規予約" | "予約変更" | "予約キャンセル";
 
@@ -95,6 +113,8 @@ const DEFAULT_GMAIL_ALERT_QUERY =
   "is:inbox newer_than:7d (予約 OR reservation OR booking)";
 const DEFAULT_GMAIL_ALERT_MAX_MESSAGES = 20;
 const MAX_GMAIL_ALERT_MAX_MESSAGES = 20;
+const DEFAULT_GMAIL_ALERT_SCAN_MESSAGES = 500;
+const MAX_GMAIL_ALERT_SCAN_MESSAGES = 500;
 const DEFAULT_GMAIL_ALERT_AI_MAX_BODY_CHARS = 6000;
 const MIN_GMAIL_ALERT_AI_MAX_BODY_CHARS = 1500;
 const MAX_GMAIL_ALERT_AI_MAX_BODY_CHARS = 12000;
@@ -521,7 +541,7 @@ async function maybeSendGmailReservationAlerts(params: {
   const primaryListedMessages = await listGmailMessages(
     accessToken,
     env.query,
-    env.maxMessages,
+    env.scanMessages,
   );
   const relaxedQuery = buildRelaxedGmailAlertQuery(env.query);
   let listedMessages = primaryListedMessages;
@@ -531,7 +551,7 @@ async function maybeSendGmailReservationAlerts(params: {
     const relaxedListedMessages = await listGmailMessages(
       accessToken,
       relaxedQuery,
-      env.maxMessages,
+      env.scanMessages,
     );
     if (relaxedListedMessages.length > 0) {
       listedMessages = relaxedListedMessages;
@@ -547,12 +567,13 @@ async function maybeSendGmailReservationAlerts(params: {
     supabase,
     listedMessages.map((message) => message.id),
   );
+  unnotifiedMessageIds = unnotifiedMessageIds.slice(0, env.maxMessages);
 
   if (unnotifiedMessageIds.length === 0 && relaxedQuery && !usedRelaxedQuery) {
     const relaxedListedMessages = await listGmailMessages(
       accessToken,
       relaxedQuery,
-      env.maxMessages,
+      env.scanMessages,
     );
     if (relaxedListedMessages.length > 0) {
       listedMessages = mergeUniqueGmailMessageLists(
@@ -564,6 +585,7 @@ async function maybeSendGmailReservationAlerts(params: {
         supabase,
         listedMessages.map((message) => message.id),
       );
+      unnotifiedMessageIds = unnotifiedMessageIds.slice(0, env.maxMessages);
     }
   }
 
@@ -576,6 +598,7 @@ async function maybeSendGmailReservationAlerts(params: {
     unnotifiedSet.has(message.id)
   );
   const alerts: GmailMessageAlert[] = [];
+  const ignoredMessages: IgnoredGmailMessage[] = [];
   const extractSourceCounts: Record<string, number> = {
     rule: 0,
     ai: 0,
@@ -584,16 +607,31 @@ async function maybeSendGmailReservationAlerts(params: {
   };
 
   for (const message of messagesToFetch) {
-    const detail = await fetchGmailMessageAlert(accessToken, message.id, env);
-    if (!detail) continue;
-    const enriched = await maybeAccumulatePartnerVisitHistory(supabase, detail);
+    const fetched = await fetchGmailMessageAlert(accessToken, message.id, env);
+    if (!fetched) continue;
+    if (fetched.kind === "ignored") {
+      ignoredMessages.push(fetched.message);
+      continue;
+    }
+    const enriched = await maybeAccumulatePartnerVisitHistory(
+      supabase,
+      fetched.alert,
+    );
     alerts.push(enriched);
     extractSourceCounts[enriched.reservationExtractSource] =
       (extractSourceCounts[enriched.reservationExtractSource] ?? 0) + 1;
   }
 
+  if (ignoredMessages.length > 0) {
+    await saveIgnoredGmailMessages(supabase, ignoredMessages);
+  }
+
   if (alerts.length === 0) {
-    return { skipped: true, reason: "no_alert_payload" };
+    return {
+      skipped: true,
+      reason: "no_alert_payload",
+      ignored_count: ignoredMessages.length,
+    };
   }
 
   const deliveryBatches = planGmailAlertDeliveryBatches(alerts, enabledTargets);
@@ -1462,6 +1500,15 @@ function loadGmailAlertEnv(fallbackOverallRoomId: string): GmailAlertEnvState {
       rawMaxMessages <= MAX_GMAIL_ALERT_MAX_MESSAGES
     ? rawMaxMessages
     : DEFAULT_GMAIL_ALERT_MAX_MESSAGES;
+  const rawScanMessages = Number(
+    Deno.env.get("GMAIL_ALERT_SCAN_MESSAGES") ??
+      DEFAULT_GMAIL_ALERT_SCAN_MESSAGES,
+  );
+  const scanMessages = Number.isInteger(rawScanMessages) &&
+      rawScanMessages >= maxMessages &&
+      rawScanMessages <= MAX_GMAIL_ALERT_SCAN_MESSAGES
+    ? rawScanMessages
+    : DEFAULT_GMAIL_ALERT_SCAN_MESSAGES;
 
   if (!enabled) {
     return {
@@ -1473,6 +1520,7 @@ function loadGmailAlertEnv(fallbackOverallRoomId: string): GmailAlertEnvState {
         refreshToken,
         query,
         maxMessages,
+        scanMessages,
         fallbackTargetRoomId,
         aiEnabled,
         aiApiKey,
@@ -1498,6 +1546,7 @@ function loadGmailAlertEnv(fallbackOverallRoomId: string): GmailAlertEnvState {
       refreshToken,
       query,
       maxMessages,
+      scanMessages,
       fallbackTargetRoomId,
       aiEnabled,
       aiApiKey,
@@ -1592,17 +1641,33 @@ async function filterUnnotifiedGmailMessageIds(
     return [];
   }
 
-  const { data, error } = await supabase
-    .from("gmail_reservation_alert_logs")
-    .select("gmail_message_id")
-    .in("gmail_message_id", uniqueIds);
+  const [sentResult, ignoredResult] = await Promise.all([
+    supabase
+      .from("gmail_reservation_alert_logs")
+      .select("gmail_message_id")
+      .in("gmail_message_id", uniqueIds),
+    supabase
+      .from("gmail_reservation_ignored_messages")
+      .select("gmail_message_id")
+      .in("gmail_message_id", uniqueIds),
+  ]);
 
-  if (error) {
-    throw new Error(`Failed to query Gmail alert log table: ${error.message}`);
+  if (sentResult.error) {
+    throw new Error(
+      `Failed to query Gmail alert log table: ${sentResult.error.message}`,
+    );
+  }
+  if (ignoredResult.error) {
+    throw new Error(
+      `Failed to query ignored Gmail message table: ${ignoredResult.error.message}`,
+    );
   }
 
   const existing = new Set<string>(
-    (Array.isArray(data) ? data : [])
+    [
+      ...(Array.isArray(sentResult.data) ? sentResult.data : []),
+      ...(Array.isArray(ignoredResult.data) ? ignoredResult.data : []),
+    ]
       .map((row: any) => String(row?.gmail_message_id ?? "").trim())
       .filter((value: string) => value.length > 0),
   );
@@ -1613,7 +1678,7 @@ async function fetchGmailMessageAlert(
   accessToken: string,
   messageId: string,
   env: GmailAlertEnv,
-): Promise<GmailMessageAlert | null> {
+): Promise<GmailMessageFetchResult | null> {
   const normalizedMessageId = String(messageId ?? "").trim();
   if (!normalizedMessageId) {
     return null;
@@ -1654,15 +1719,37 @@ async function fetchGmailMessageAlert(
     "(送信元不明)";
   const bodyText = extractGmailBodyText(data?.payload);
   const snippet = normalizeInlineText(String(data?.snippet ?? ""));
-  const route = inferReservationSite(subject, from, bodyText);
-  if (!isSupportedReservationRoute(route)) return null;
-  if (!isLikelyReservationNotificationMail(subject, snippet, bodyText)) {
-    return null;
-  }
   const internalDateMs = Number(data?.internalDate);
   const internalDateIso = Number.isFinite(internalDateMs) && internalDateMs > 0
     ? new Date(internalDateMs).toISOString()
     : null;
+  const route = inferReservationSite(subject, from, bodyText);
+  if (!isSupportedReservationRoute(route)) {
+    return {
+      kind: "ignored",
+      message: {
+        id: String(data?.id ?? normalizedMessageId),
+        threadId: String(data?.threadId ?? "").trim() || null,
+        subject,
+        from,
+        internalDateIso,
+        reason: "unsupported_route",
+      },
+    };
+  }
+  if (!isLikelyReservationNotificationMail(subject, snippet, bodyText)) {
+    return {
+      kind: "ignored",
+      message: {
+        id: String(data?.id ?? normalizedMessageId),
+        threadId: String(data?.threadId ?? "").trim() || null,
+        subject,
+        from,
+        internalDateIso,
+        reason: "non_reservation_notification",
+      },
+    };
+  }
   const reservationByRule = extractReservationMailDetails(
     subject,
     bodyText,
@@ -1704,15 +1791,18 @@ async function fetchGmailMessageAlert(
   });
 
   return {
-    id: String(data?.id ?? normalizedMessageId),
-    threadId: String(data?.threadId ?? "").trim() || null,
-    subject,
-    from,
-    snippet,
-    internalDateIso,
-    eventLabel,
-    reservation,
-    reservationExtractSource,
+    kind: "alert",
+    alert: {
+      id: String(data?.id ?? normalizedMessageId),
+      threadId: String(data?.threadId ?? "").trim() || null,
+      subject,
+      from,
+      snippet,
+      internalDateIso,
+      eventLabel,
+      reservation,
+      reservationExtractSource,
+    },
   };
 }
 
@@ -2475,37 +2565,6 @@ function formatReservationDateTimeLabel(
   }/${String(parsed.day).padStart(2, "0")}(${weekday}) ${hh}:${mm}`;
 }
 
-// 予約日の西暦を「メール受信日」基準で妥当化する。
-// 明示年が妥当（受信年-1〜+2）ならそれを採用。不正（例: 金額¥2000由来の2000年）や年無しのときは、
-// 受信日以降に最初に来る (月/日) の年を採用する（その月日が受信日より過去なら翌年）。
-function resolveReservationYear(
-  rawYear: number | null,
-  month: number,
-  day: number,
-  receivedIso: string | null,
-): number {
-  const base = receivedIso ? new Date(receivedIso) : new Date();
-  const safeBase = Number.isNaN(base.getTime()) ? new Date() : base;
-  const parts = new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(safeBase);
-  const pick = (t: string) =>
-    Number(parts.find((p) => p.type === t)?.value ?? "");
-  const baseYear = pick("year");
-  const baseMd = pick("month") * 100 + pick("day");
-  if (
-    rawYear != null && Number.isInteger(rawYear) &&
-    rawYear >= baseYear - 1 && rawYear <= baseYear + 2
-  ) {
-    return rawYear;
-  }
-  const md = month * 100 + day;
-  return md >= baseMd ? baseYear : baseYear + 1;
-}
-
 function parseReservationDateTime(
   source: string,
   receivedIso: string | null,
@@ -2545,35 +2604,6 @@ function parseReservationDateTime(
     };
   }
   return null;
-}
-
-function inferReservationYear(
-  text: string,
-  receivedIso: string | null,
-): number {
-  const yearHit = text.match(/(20\d{2})/);
-  if (yearHit) return Number(yearHit[1]);
-  if (receivedIso) {
-    const date = new Date(receivedIso);
-    if (!Number.isNaN(date.getTime())) {
-      const yearText = new Intl.DateTimeFormat("ja-JP", {
-        timeZone: "Asia/Tokyo",
-        year: "numeric",
-      }).format(date);
-      const year = Number(String(yearText).replace(/[^\d]/g, ""));
-      if (Number.isInteger(year) && year >= 2000 && year <= 2100) return year;
-    }
-  }
-  const nowJstYear = Number(
-    new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      year: "numeric",
-    }).format(new Date()).replace(/[^\d]/g, ""),
-  );
-  return Number.isInteger(nowJstYear) && nowJstYear >= 2000 &&
-      nowJstYear <= 2100
-    ? nowJstYear
-    : new Date().getUTCFullYear();
 }
 
 function formatReservationPartySizeLabel(
@@ -2848,40 +2878,6 @@ function isSupportedReservationRoute(
     normalized.includes("tabelog");
 }
 
-function isLikelyReservationNotificationMail(
-  subject: string,
-  snippet: string,
-  bodyText: string,
-): boolean {
-  const compact = normalizeInlineText(`${subject} ${snippet} ${bodyText}`)
-    .toLowerCase();
-  if (!compact) return false;
-
-  // 予約成立通知（新規/変更/キャンセル）ではなく、当日一覧/時点一覧/Vポイント利用まとめ等の
-  // 「お知らせ・リマインド配信」は除外する（題名に新規予約/変更/キャンセルが無く、本日の予約状況を
-  // まとめて知らせるだけのメール。例:【Vポイント利用予約まとめ情報】本日Vポイントのご利用が…）。
-  const hasReminderDigestCue =
-    /(本日のご来店一覧|ネット予約一覧|時点の予約一覧|ご来店予定の|食べログネット予約一覧|まとめ情報|Vポイント利用予約まとめ|本日のVポイント利用|お値引きをお願い)/i
-      .test(compact);
-  if (hasReminderDigestCue) return false;
-
-  const hasReservationCue =
-    /(予約|来店|人数|コース|予約番号|ご予約|reservation|booking)/i.test(
-      compact,
-    );
-  if (!hasReservationCue) return false;
-
-  const hasNonReservationCue =
-    /(セキュリティ|security|ログイン|signin|パスワード|password|認証|verification|本人確認|地図に表示|google\s*マップ|口コミ|レビュー|お知らせ|ニュース|メルマガ|広告|プロモーション)/i
-      .test(compact);
-  if (
-    hasNonReservationCue &&
-    !/(予約番号|来店日時|ご予約内容|予約内容|人数)/i.test(compact)
-  ) return false;
-
-  return true;
-}
-
 function normalizeReservationNo(raw: string | null): string | null {
   const normalized = normalizeInlineText(String(raw ?? ""));
   if (!normalized) return null;
@@ -2937,20 +2933,27 @@ function buildVisitDateTimeFromMail(
   const timeOnly = normalizeInlineText(timePart);
   const ymdFull = dateOnly.match(/(20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
   if (ymdFull) {
-    return `${ymdFull[1]}/${String(Number(ymdFull[2])).padStart(2, "0")}/${
+    const month = Number(ymdFull[2]);
+    const day = Number(ymdFull[3]);
+    const year = resolveReservationYear(
+      Number(ymdFull[1]),
+      month,
+      day,
+      internalDateIso,
+    );
+    return `${year}/${String(month).padStart(2, "0")}/${
       String(Number(ymdFull[3])).padStart(2, "0")
     } ${timeOnly}`;
   }
 
   const md = dateOnly.match(/(\d{1,2})[\/\-月](\d{1,2})/);
   if (md) {
-    const year = inferReservationYear(
-      `${bodyText}\n${subject}`,
-      internalDateIso,
-    );
+    const month = Number(md[1]);
+    const day = Number(md[2]);
+    const year = resolveReservationYear(null, month, day, internalDateIso);
     return `${String(year).padStart(4, "0")}/${
-      String(Number(md[1])).padStart(2, "0")
-    }/${String(Number(md[2])).padStart(2, "0")} ${timeOnly}`;
+      String(month).padStart(2, "0")
+    }/${String(day).padStart(2, "0")} ${timeOnly}`;
   }
 
   const compactDigits = dateOnly.replace(/[^\d]/g, "");
@@ -2967,10 +2970,7 @@ function buildVisitDateTimeFromMail(
       Number.isInteger(month) && Number.isInteger(day) && month >= 1 &&
       month <= 12 && day >= 1 && day <= 31
     ) {
-      const year = inferReservationYear(
-        `${bodyText}\n${subject}`,
-        internalDateIso,
-      );
+      const year = resolveReservationYear(null, month, day, internalDateIso);
       return `${String(year).padStart(4, "0")}/${
         String(month).padStart(2, "0")
       }/${String(day).padStart(2, "0")} ${timeOnly}`;
@@ -3638,6 +3638,38 @@ async function saveGmailReservationAlertLogs(
     .upsert(rows, { onConflict: "gmail_message_id" });
   if (error) {
     throw new Error(`Failed to save Gmail alert logs: ${error.message}`);
+  }
+}
+
+async function saveIgnoredGmailMessages(
+  supabase: ReturnType<typeof createClient>,
+  messages: IgnoredGmailMessage[],
+): Promise<void> {
+  if (messages.length === 0) return;
+  const rows = messages.map((message) => ({
+    gmail_message_id: message.id,
+    gmail_thread_id: message.threadId,
+    gmail_subject: message.subject,
+    gmail_from: message.from,
+    gmail_internal_date: message.internalDateIso,
+    ignore_reason: message.reason,
+    created_at: new Date().toISOString(),
+  }));
+  const { error } = await supabase
+    .from("gmail_reservation_ignored_messages")
+    .upsert(rows, { onConflict: "gmail_message_id" });
+  if (error) {
+    throw new Error(`Failed to save ignored Gmail messages: ${error.message}`);
+  }
+
+  const retentionCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    .toISOString();
+  const { error: pruneError } = await supabase
+    .from("gmail_reservation_ignored_messages")
+    .delete()
+    .lt("created_at", retentionCutoff);
+  if (pruneError) {
+    console.error("Failed to prune ignored Gmail messages:", pruneError.message);
   }
 }
 

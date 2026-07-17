@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test:foodcourt": "node --test tests/foodcourt_*.test.ts"
+    "test:foodcourt": "node --test tests/foodcourt_*.test.ts",
+    "test:reservation": "node --test tests/reservation_*.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",
