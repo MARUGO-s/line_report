@@ -57,7 +57,7 @@ import {
   resolveReceiptDateIsoForPersist,
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
-import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithClaude, analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
+import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithClaude, analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, isTransientLineImageVisionFailure, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
 import {
   combineStoreReceiptPromptAdditions,
   EXPENSE_RECEIPT_PROMPT_ADDITION,
@@ -86,6 +86,7 @@ import {
   createServiceClient,
   type StoreRegistryRow,
 } from '../_shared/store_receipt.ts'
+import { recordLineWebhookDeliveryLog } from '../_shared/line_webhook_delivery_log.ts'
 import { serveAdminApprovalWebhook } from '../_shared/line_admin_webhook.ts'
 import {
   ADMIN_STORE_PARTITION_KEY,
@@ -1441,7 +1442,10 @@ async function processReceiptImageEvent(
       // 予約管理アプリの「予約確認画面」は Groq の事前判定で確定。Gemini昇格も非レシート早期returnもせず、
       // 後段の予約分岐（確認カード）で処理する。
       analyzed = pre
-    } else if (!shouldEscalateToGeminiReceipt(pre.analysis)) {
+    } else if (
+      !isTransientLineImageVisionFailure(pre.failure) &&
+      !shouldEscalateToGeminiReceipt(pre.analysis)
+    ) {
       // 売上の手掛かりが皆無（メニュー・献立・お品書き等）→ Gemini を呼ばず、解析中push も結果返信もしない。
       console.log(
         `[receipt_pre_filter] skip non-receipt image (store=${registry.store_partition_key}, msg=${lineMessageId})`,
@@ -1492,7 +1496,10 @@ async function processReceiptImageEvent(
 
     if (pre.analysis?.reservation) {
       analyzed = pre
-    } else if (!shouldEscalateToGeminiReceipt(pre.analysis)) {
+    } else if (
+      !isTransientLineImageVisionFailure(pre.failure) &&
+      !shouldEscalateToGeminiReceipt(pre.analysis)
+    ) {
       console.log(`[receipt_pre_filter] skip non-receipt image (store=${registry.store_partition_key}, msg=${lineMessageId})`)
       return { saved: false, replied: false, reason: 'pre_filter_non_receipt' }
     } else {
@@ -1558,6 +1565,29 @@ async function processReceiptImageEvent(
       receiptPromptAddition,
     )
     await recordAiUsage('groq', GROQ_RECEIPT_MODEL, analyzed.usage)
+
+    // Groqの一過性障害時だけGeminiへ退避する。通常時の安価なGroq経路は維持しつつ、
+    // レシートとフードコート表が同時に無反応になる単一障害点をなくす。
+    if (
+      !analyzed.analysis &&
+      isTransientLineImageVisionFailure(analyzed.failure) &&
+      resolveGeminiApiKey()
+    ) {
+      console.error(
+        `[receipt_analysis_fallback] Groq failed; retrying with Gemini (store=${registry.store_partition_key}, msg=${lineMessageId}, stage=${analyzed.failure?.stage ?? 'unknown'})`,
+      )
+      const fallback = await analyzeLineImageWithGemini(
+        contentFetch.bytes,
+        contentFetch.contentType,
+        lineMessageId,
+        resolveGeminiApiKey(),
+        receiptPromptAddition,
+        receiptGeminiModel,
+      )
+      await recordAiUsage('gemini', receiptGeminiModel, fallback.usage)
+      if (fallback.analysis) analyzed = fallback
+      else if (fallback.failure) analyzed = fallback
+    }
   }
 
   // 受信専用店（例: バルペロタ）で反射・光により kind を general と誤判定して receipt を外した場合、
@@ -1691,17 +1721,44 @@ async function processReceiptImageEvent(
     // その場合は誤解を招く「読み取れませんでした」ではなく、再送を促す（2026-07-01 Groq 503 で
     // bistrocavacava のレシートが消失した実障害。リトライ後もなお失敗したときの安全網）。
     const failureStage = String(analyzed.failure?.stage ?? '')
-    const isTransientProviderFailure = /_(http_error|network_error|fetch_error|timeout|empty_content)$/.test(failureStage)
+    const isTransientProviderFailure = isTransientLineImageVisionFailure(analyzed.failure)
+    if (analyzed.failure) {
+      await recordLineWebhookDeliveryLog({
+        storePartitionKey: registry.store_partition_key,
+        method: 'reply',
+        context: 'receipt_image_analysis_failed',
+        targetRoomId: roomId,
+        attempted: false,
+        success: false,
+        reason: failureStage || 'image_analysis_failed',
+        details: {
+          line_message_id: lineMessageId,
+          provider_message: String(analyzed.failure.message ?? '').slice(0, 300),
+          provider_http_status: analyzed.failure.httpStatus ?? null,
+        },
+      })
+    }
     const msg = isTransientProviderFailure
       ? '⚠ AI解析が一時的に混み合って処理できませんでした。お手数ですが、この画像をもう一度お送りください。'
       : analyzed.analysis?.summary
       ? `画像を確認しました。\n${analyzed.analysis.summary}`
       : 'レシートとして読み取れる項目がありませんでした。'
-    // 非レシート画像の返信: AI返信完全無しのみで抑止（レシート解析返信フラグは関係しない）
-    if (nonReceiptReplyToken) {
-      await replyLineText(nonReceiptReplyToken, msg, accessToken, webhookReplyLog(registry, roomId, 'receipt_image_no_receipt'))
+    // プロバイダー障害は「その他画像」ではなく解析失敗なので、レシート解析返信の設定に従う。
+    // これにより non_receipt_image_reply_enabled=false の部屋でも無言終了しない。
+    const failureReplyToken = isTransientProviderFailure ? receiptReplyToken : nonReceiptReplyToken
+    if (failureReplyToken) {
+      await replyLineText(
+        failureReplyToken,
+        msg,
+        accessToken,
+        webhookReplyLog(
+          registry,
+          roomId,
+          isTransientProviderFailure ? 'receipt_image_analysis_failed' : 'receipt_image_no_receipt',
+        ),
+      )
     }
-    return { saved: false, replied: !!nonReceiptReplyToken, reason: analyzed.failure?.stage ?? 'no_receipt' }
+    return { saved: false, replied: !!failureReplyToken, reason: failureStage || 'no_receipt' }
   }
 
   const receiptRaw = analyzed.analysis.receipt

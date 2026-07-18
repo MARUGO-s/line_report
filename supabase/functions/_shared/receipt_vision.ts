@@ -61,12 +61,25 @@ function extractGroqUsage(payload: unknown): LineImageVisionUsage | null {
   return { inputTokens: input, outputTokens: output, thinkingTokens: null, totalTokens: total }
 }
 
+export function isTransientLineImageVisionFailure(
+  failure: LineImageVisionFailure | null | undefined,
+): boolean {
+  if (!failure) return false
+  const status = Number(failure.httpStatus ?? 0)
+  if (status === 429 || status >= 500) return true
+  return /(?:network_error|fetch_error|timeout|invalid_json|empty_content|unparsable_model_output)$/.test(
+    String(failure.stage ?? ''),
+  )
+}
+
 export async function analyzeLineImageWithGroqScout(
   bytes: Uint8Array,
   contentType: string | null,
   fileName: string,
   groqApiKey: string,
   systemPromptAddition = '',
+  timeoutMs = 25000,
+  retryDelayMs = 600,
 ): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
   if (!groqApiKey) {
     return { analysis: null, failure: { stage: 'missing_api_key', message: 'GROQ_API_KEY is missing.' } }
@@ -114,6 +127,9 @@ export async function analyzeLineImageWithGroqScout(
   const maxAttempts = 2
   let response: Response | null = null
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController()
+    const boundedTimeoutMs = Math.max(250, Math.min(timeoutMs, 60000))
+    const timer = setTimeout(() => controller.abort(), boundedTimeoutMs)
     try {
       response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -122,17 +138,29 @@ export async function analyzeLineImageWithGroqScout(
           'Content-Type': 'application/json',
         },
         body: requestBody,
+        signal: controller.signal,
       })
     } catch (e) {
+      const timedOut = controller.signal.aborted
       if (attempt < maxAttempts) {
-        console.error('Groq image vision network error, retrying:', String(e).slice(0, 200))
-        await new Promise((r) => setTimeout(r, 600))
+        console.error(
+          timedOut ? 'Groq image vision timeout, retrying:' : 'Groq image vision network error, retrying:',
+          String(e).slice(0, 200),
+        )
+        if (retryDelayMs > 0) await new Promise((r) => setTimeout(r, retryDelayMs))
         continue
       }
       return {
         analysis: null,
-        failure: { stage: 'groq_network_error', message: String(e).slice(0, 300) },
+        failure: {
+          stage: timedOut ? 'groq_timeout' : 'groq_network_error',
+          message: timedOut
+            ? `Groq image vision timed out after ${boundedTimeoutMs}ms`
+            : String(e).slice(0, 300),
+        },
       }
+    } finally {
+      clearTimeout(timer)
     }
 
     if (response.ok) break
@@ -141,7 +169,7 @@ export async function analyzeLineImageWithGroqScout(
     if (transient && attempt < maxAttempts) {
       const errBody = await response.text().catch(() => '')
       console.error('Groq image vision transient error, retrying:', response.status, errBody.slice(0, 200))
-      await new Promise((r) => setTimeout(r, 600))
+      if (retryDelayMs > 0) await new Promise((r) => setTimeout(r, retryDelayMs))
       continue
     }
 
