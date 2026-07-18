@@ -3,6 +3,8 @@ export type LineImageReceiptAnalysis = {
   /** レシート印字の電話番号（03-xxxx-xxxx 等） */
   storePhone: string | null
   date: string | null
+  /** レシートに印字された精算時刻（営業日判定用）。例: "00:12:02" */
+  printedTime?: string | null
   netSales: string | null
   taxAmount: string | null
   grossSales: string | null

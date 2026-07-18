@@ -81,6 +81,15 @@ test("uses the previous business date for receipts printed before 05:00 JST", ()
     gross_sales: "¥489,050",
   });
   assert.equal(normalized?.date, "2026年7月10日");
+
+  const separatelyTimed = normalizeLineImageReceiptAnalysis({
+    store_name: "BAR PELOTA",
+    date: "2026-07-11",
+    receipt_time: "00:12:02",
+    gross_sales: "¥489,050",
+  });
+  assert.equal(separatelyTimed?.date, "2026年7月10日");
+  assert.equal(separatelyTimed?.printedTime, "00:12:02");
 });
 
 test("Groq image analysis stops after its bounded timeout", async () => {

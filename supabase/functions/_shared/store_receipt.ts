@@ -73,6 +73,7 @@ export function receiptRowToAnalysis(row: StoreReceiptRow): LineImageReceiptAnal
       : (source.storeName != null ? String(source.storeName) : null),
     storePhone: source.storePhone != null ? String(source.storePhone) : null,
     date: source.date != null ? String(source.date) : fromColumns.date,
+    printedTime: source.printedTime != null ? String(source.printedTime) : null,
     netSales: currencyFromRawOrDb(source.netSales, row.net_sales_yen),
     taxAmount: currencyFromRawOrDb(source.taxAmount, row.tax_amount_yen),
     grossSales: currencyFromRawOrDb(source.grossSales, row.gross_sales_yen),

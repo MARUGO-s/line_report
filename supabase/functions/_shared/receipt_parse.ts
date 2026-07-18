@@ -303,6 +303,10 @@ export function normalizeLineImageReceiptAnalysis(
     40,
   )
   let date = normalizeReceiptFieldText(data.date ?? data.issued_at ?? data.issued_date, 80)
+  const printedTime = normalizeReceiptFieldText(
+    data.receipt_time ?? data.settlement_time ?? data.closed_at ?? data.time,
+    20,
+  )
   let netSales = normalizeReceiptFieldText(data.net_sales ?? data.subtotal ?? data.net_amount, 40)
   let taxAmount = normalizeReceiptFieldText(data.tax_amount ?? data.consumption_tax ?? data.tax, 40)
   let grossSales = normalizeReceiptFieldText(data.gross_sales ?? data.total_amount ?? data.total_sales, 40)
@@ -389,7 +393,8 @@ export function normalizeLineImageReceiptAnalysis(
     .slice(0, 4)
 
   // 時刻つき精算は 05:00 未満なら前営業日へ寄せてから、表示用の日付にも反映する。
-  const dateIso = date ? resolveReceiptDateIsoForPersist(date) : null
+  const dateWithPrintedTime = date && printedTime ? `${date} ${printedTime}` : date
+  const dateIso = dateWithPrintedTime ? resolveReceiptDateIsoForPersist(dateWithPrintedTime) : null
   if (dateIso) date = formatJapaneseReceiptDateFromIso(dateIso)
 
   if (!storePhone) {
@@ -417,7 +422,7 @@ export function normalizeLineImageReceiptAnalysis(
   )
   if (!hasAnyField) return null
 
-  return { storeName, storePhone, date, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items, lineItems, taxBreakdown }
+  return { storeName, storePhone, date, printedTime, netSales, taxAmount, grossSales, partyCount, guestCount, unitPrice, items, lineItems, taxBreakdown }
 }
 
 // ソバージュ専用: レシートの「総売上」には出前（デリバリー）の預かり金が含まれ当店の売上ではないため、

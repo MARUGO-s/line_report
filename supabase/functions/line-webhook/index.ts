@@ -1229,6 +1229,7 @@ async function handleDailySalesImportPostback(
 // 「この店舗のレシートで確定」と宣言して1回だけ Azure で再解析する対象。
 const FORCE_RECEIPT_RETRY_STORE_KEYS = new Set<string>(['barpelota'])
 const FOOTER_COUNT_RETRY_STORE_KEYS = new Set<string>(['marugos', 'sauvage'])
+const PRINTED_TIME_RETRY_STORE_KEYS = new Set<string>(['barpelota'])
 const CLAUDE_RECEIPT_MODEL = 'claude-haiku-4-5'
 
 function resolveClaudeApiKey(): string {
@@ -1485,6 +1486,49 @@ async function processReceiptImageEvent(
             ...initialReceipt,
             partyCount: retriedReceipt.partyCount || initialReceipt.partyCount,
             guestCount: retriedReceipt.guestCount || initialReceipt.guestCount,
+          },
+        },
+      }
+    }
+  }
+
+  // バー・ペロタの精算票は日付の直後に時刻が必ず印字される。時刻を落とすと深夜精算を前営業日に
+  // 寄せられないため、初回抽出で receipt_time が欠けた場合だけ時刻専用の再読取を行う。
+  const receiptAfterFooterRetry = analyzed.analysis?.receipt ?? null
+  const needsPrintedTimeRetry = !!receiptAfterFooterRetry &&
+    PRINTED_TIME_RETRY_STORE_KEYS.has(receiptStoreKey) &&
+    !String(receiptAfterFooterRetry.printedTime ?? '').trim()
+  if (needsPrintedTimeRetry) {
+    const timeRetryPrompt = [
+      receiptPromptAddition,
+      '',
+      '【印字時刻の再確認。最優先】このバー・ペロタの精算票は、見出し「精算」の直下に「YYYY-MM-DD HH:MM:SS」の日時が必ずある。',
+      '日付と時刻を別々に出力すること。例: 「2026-07-11 00:12:02」なら receipt.date="2026-07-11"、receipt_time="00:12:02"。00:00〜04:59 は前日の営業日に登録するため、時刻の省略は絶対にしない。',
+    ].join('\n')
+    const timeRetry = await analyzeLineImageWithAzureFoundry(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      `${lineMessageId}#printed-time`,
+      azureFoundryProjectEndpoint,
+      azureFoundryApiKey,
+      azureFoundryDeployment,
+      timeRetryPrompt,
+    )
+    await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, timeRetry.usage)
+    const retriedReceipt = timeRetry.analysis?.receipt ?? null
+    if (retriedReceipt?.printedTime) {
+      analyzed = {
+        ...analyzed,
+        analysis: {
+          ...analyzed.analysis!,
+          receiptModelConfidence: Math.max(
+            analyzed.analysis?.receiptModelConfidence ?? 0,
+            timeRetry.analysis?.receiptModelConfidence ?? 0,
+          ),
+          receipt: {
+            ...receiptAfterFooterRetry,
+            date: retriedReceipt.date || receiptAfterFooterRetry.date,
+            printedTime: retriedReceipt.printedTime,
           },
         },
       }

@@ -480,6 +480,7 @@ function mergeExpenseReceiptAnalyses(
       storeName: detail.receipt.storeName || base.receipt.storeName,
       storePhone: detail.receipt.storePhone || base.receipt.storePhone,
       date: detail.receipt.date || base.receipt.date,
+      printedTime: detail.receipt.printedTime || base.receipt.printedTime,
       netSales: detail.receipt.netSales || base.receipt.netSales,
       taxAmount: detail.receipt.taxAmount || base.receipt.taxAmount,
       grossSales: detail.receipt.grossSales || base.receipt.grossSales,
