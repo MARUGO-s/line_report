@@ -9311,7 +9311,6 @@ const AI_USAGE_GEMINI_MODEL = "gemini-3.1-pro-preview"
 const AI_USAGE_CLAUDE_STORE_KEYS = new Set<string>(["claudia2"])
 const AI_USAGE_CLAUDE_MODEL = "claude-haiku-4-5"
 const AI_USAGE_AZURE_MODEL = AZURE_FOUNDRY_VISION_MODEL
-const AI_USAGE_GROQ_MODEL = "legacy-groq"
 const AI_USAGE_OPENAI_MODEL = "gpt-5.5"
 const AI_USAGE_GROK_MODEL = "grok-3-mini"
 
@@ -9323,7 +9322,7 @@ type AiUsageStoreRow = {
 }
 
 type AiUsageProviderBucket = {
-  provider: "azure_openai" | "gemini" | "groq" | "claude" | "openai" | "grok"
+  provider: "azure_openai" | "gemini" | "claude" | "openai" | "grok"
   model: string
   store_count: number
   image_count: number
@@ -9369,19 +9368,6 @@ async function fetchAiUsageCostState(
   const azure: AiUsageProviderBucket = {
     provider: "azure_openai",
     model: AI_USAGE_AZURE_MODEL,
-    store_count: 0,
-    image_count: 0,
-    receipt_count: 0,
-    event_count: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    thinking_tokens: 0,
-    total_tokens: 0,
-    stores: [],
-  }
-  const groq: AiUsageProviderBucket = {
-    provider: "groq",
-    model: AI_USAGE_GROQ_MODEL,
     store_count: 0,
     image_count: 0,
     receipt_count: 0,
@@ -9450,11 +9436,10 @@ async function fetchAiUsageCostState(
   }
   gemini.stores.sort((a, b) => b.image_count - a.image_count)
   azure.stores.sort((a, b) => b.image_count - a.image_count)
-  groq.stores.sort((a, b) => b.image_count - a.image_count)
   claude.stores.sort((a, b) => b.image_count - a.image_count)
 
   // 実測トークン（ai_usage_events）をプロバイダ別に合算してバケットに足し込む。
-  // provider は「実際に応答したプロバイダ」なので、Gemini採用店の Groq フォールバック分は groq 側に入る。
+  // provider は実際に応答したプロバイダ。旧Groqイベントは履歴としてDBに残し、この画面の集計からは除外する。
   const { data: tokenData, error: tokenError } = await supabase.rpc("ai_usage_token_totals", { p_from, p_to })
   if (tokenError) {
     throw { status: 500, message: `ai_usage_token_totals failed: ${tokenError.message}` } satisfies AppError
@@ -9466,8 +9451,6 @@ async function fetchAiUsageCostState(
       ? azure
       : provider === "gemini"
       ? gemini
-      : provider === "groq"
-      ? groq
       : provider === "claude"
       ? claude
       : provider === "openai"
@@ -9499,7 +9482,7 @@ async function fetchAiUsageCostState(
       thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
       total_tokens: Number(r.total_tokens ?? 0) || 0,
     }
-  })
+  }).filter((row) => row.provider !== "groq")
 
   // MARUGO S のフードコート分析(Q&A・テナント表画像抽出・東京ドーム抽出)だけを surface='foodcourt' で抽出。
   // 同じ marugoS でもレシート解析(surface=null)とは混ぜず、別表示できるようにする。
@@ -9522,7 +9505,7 @@ async function fetchAiUsageCostState(
         thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
         total_tokens: Number(r.total_tokens ?? 0) || 0,
       }
-    })
+    }).filter((row) => row.provider !== "groq")
   }
 
   // 時系列データ（日次）
@@ -9545,7 +9528,7 @@ async function fetchAiUsageCostState(
         thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
         total_tokens: Number(r.total_tokens ?? 0) || 0,
       }
-    })
+    }).filter((row) => row.provider !== "groq")
   }
 
   // 時系列データ（月次）: 月次は全体の推移が見たいため p_from, p_to は null (全期間)で取得
@@ -9568,14 +9551,13 @@ async function fetchAiUsageCostState(
         thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
         total_tokens: Number(r.total_tokens ?? 0) || 0,
       }
-    })
+    }).filter((row) => row.provider !== "groq")
   }
 
   return {
     period: { from: p_from, to: p_to },
     azure,
     gemini,
-    groq,
     claude,
     openai,
     grok,

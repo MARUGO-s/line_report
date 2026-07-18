@@ -47,8 +47,6 @@
       --openai-soft: rgba(24, 166, 125, 0.18);
       --grok: #9d7cff;
       --grok-soft: rgba(157, 124, 255, 0.18);
-      --groq-chat: #39b7c8;
-      --groq-chat-soft: rgba(57, 183, 200, 0.18);
       --err: #e05656;
       --err-soft: rgba(224, 86, 86, 0.18);
       --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 12px 32px -20px rgba(0, 0, 0, 0.7);
@@ -78,8 +76,6 @@
       --openai-soft: rgba(15, 143, 107, 0.12);
       --grok: #7457d9;
       --grok-soft: rgba(116, 87, 217, 0.12);
-      --groq-chat: #168699;
-      --groq-chat-soft: rgba(22, 134, 153, 0.12);
       --err: #d23b3b;
       --err-soft: rgba(210, 59, 59, 0.12);
       --shadow: 0 1px 2px rgba(20, 40, 80, 0.06), 0 10px 28px -18px rgba(20, 40, 80, 0.2);
@@ -220,13 +216,11 @@
     .total-card.claude::before { background: var(--claude); }
     .total-card.openai::before { background: var(--openai); }
     .total-card.grok::before { background: var(--grok); }
-    .total-card.groq-chat::before { background: var(--groq-chat); }
     .tc-prov { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
     .total-card.gemini .tc-prov { color: var(--warn); }
     .total-card.claude .tc-prov { color: var(--claude); }
     .total-card.openai .tc-prov { color: var(--openai); }
     .total-card.grok .tc-prov { color: var(--grok); }
-    .total-card.groq-chat .tc-prov { color: var(--groq-chat); }
     .tc-model { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
     .tc-jpy { font-size: 30px; font-weight: 800; color: var(--text); margin-top: 12px; font-variant-numeric: tabular-nums; }
     .tc-usd { font-size: 13px; color: var(--text-2); margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -244,7 +238,6 @@
     .kpi.claude.accent .k-v { color: var(--claude); }
     .kpi.openai.accent .k-v { color: var(--openai); }
     .kpi.grok.accent .k-v { color: var(--grok); }
-    .kpi.groq-chat.accent .k-v { color: var(--groq-chat); }
 
     /* 時系列用タブスイッチ */
     .ts-tab-bar { display: flex; gap: 8px; margin-top: 14px; }
@@ -389,7 +382,7 @@
       <div class="ms-content">
         <div class="ms-inner">
           <h1 class="ms-h1">AI使用料（実測トークン）</h1>
-          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、各社の<strong>公式単価</strong>を掛けて算出します。上部には現在使っているAIモデル（Groq Vision / Groq Chat / Gemini / Claude / OpenAI / Grok）をすべて表示します。</p>
+          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、各社の<strong>公式単価</strong>を掛けて算出します。レシート解析は Azure Foundry（GPT-5.4 nano）の実測値を表示します。旧Groqの履歴はこの画面の集計対象から除外しています。</p>
 
           <!-- 集計期間アコーディオン -->
           <details class="assump" id="periodBox">
@@ -448,39 +441,39 @@
             </div>
           </details>
 
-          <!-- Groq ブロック -->
-          <details class="assump" id="groqBox">
+          <!-- Azure Foundry ブロック -->
+          <details class="assump" id="azureBox">
             <summary>
               <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-              Groq（その他全店をまとめて集計 / <span id="groqStoreCount" class="mono">— 店舗</span>）
+              Azure Foundry（レシート解析 / <span id="azureStoreCount" class="mono">— 店舗</span>）
             </summary>
             <div class="assump-body" style="padding-top: 12px;">
               <div class="kpis">
                 <div class="kpi accent">
                   <div class="k-l">実測コスト（円）</div>
-                  <div class="k-v" id="groqJpy2">¥—</div>
-                  <div class="k-s" id="groqPerImage">1解析あたり —</div>
+                  <div class="k-v" id="azureJpy2">¥—</div>
+                  <div class="k-s" id="azurePerImage">1解析あたり —</div>
                 </div>
                 <div class="kpi">
                   <div class="k-l">実測コスト（USD）</div>
-                  <div class="k-v" id="groqUsd2">$—</div>
+                  <div class="k-v" id="azureUsd2">$—</div>
                   <div class="k-s">実測トークン × 公式単価</div>
                 </div>
                 <div class="kpi">
                   <div class="k-l">入力トークン（実測）</div>
-                  <div class="k-v" id="groqInTok">—</div>
-                  <div class="k-s" id="groqEvents">実測ログ — 件</div>
+                  <div class="k-v" id="azureInTok">—</div>
+                  <div class="k-s" id="azureEvents">実測ログ — 件</div>
                 </div>
                 <div class="kpi accent">
                   <div class="k-l">出力トークン（実測）</div>
-                  <div class="k-v" id="groqOutTok">—</div>
+                  <div class="k-v" id="azureOutTok">—</div>
                   <div class="k-s">課金対象の出力合計</div>
                 </div>
               </div>
-              <p class="ms-sub" id="groqRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
-              <details class="brk" id="groqBrk">
+              <p class="ms-sub" id="azureRefLine" style="margin:10px 2px 0;font-size:12px">受信画像 — 枚 ／ 登録レシート — 件</p>
+              <details class="brk" id="azureBrk">
                 <summary><span class="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>店舗別の内訳を表示</summary>
-                <div id="groqBrkBody"></div>
+                <div id="azureBrkBody"></div>
               </details>
             </div>
           </details>
@@ -579,7 +572,7 @@
               モデル別コスト内訳（最も正確）
             </summary>
             <div class="assump-body">
-              <p class="ms-sub" style="margin-top:4px">同じプロバイダでもモデルごとに単価が違うため（例: Groq の Vision=llama-4-scout と チャット=llama-3.3-70b）、実測トークンをモデル別の公式単価で合算した内訳です。上の各カードの金額もこの方式で計算しています。</p>
+              <p class="ms-sub" style="margin-top:4px">同じプロバイダでもモデルごとに単価が違うため、実測トークンをモデル別の公式単価で合算した内訳です。Azure Foundry のレシート解析は GPT-5.4 nano の単価で計算します。</p>
               <div id="modelBrkBody"></div>
             </div>
           </details>
@@ -595,16 +588,10 @@
             <div class="assump-body">
               <p class="ms-sub" style="margin-top:4px">トークン数はAPIの実測値を使うため入力不要です。ここでは100万トークンあたりの<strong>公式単価（USD）</strong>と為替レートのみ設定します。値はこのブラウザに保存され、次回も使われます。</p>
 
-              <div class="card-h" style="margin-top:18px"><span class="ch-t" style="font-size:14px">Groq Vision（レシート/画像抽出・llama-4-scout）</span><span class="ch-tag mono" id="groqModelLabel"></span></div>
+              <div class="card-h" style="margin-top:18px"><span class="ch-t" style="font-size:14px">Azure Foundry（レシート/画像抽出・GPT-5.4 nano）</span><span class="ch-tag mono" id="azureModelLabel"></span></div>
               <div class="rate-grid">
-                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="groq_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
-                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="groq_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
-              </div>
-
-              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Groq Chat（フードコートQ&amp;A・ドーム抽出・llama-3.3-70b）</span></div>
-              <div class="rate-grid">
-                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="groqChat_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
-                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="groqChat_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="azure_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="azure_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
               <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">OpenAI（フードコート最終統合・o4-mini）</span></div>
@@ -660,34 +647,30 @@
 
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
-    // v2: OpenAI 単価を gpt-5.5($5/$30) → o4-mini($1.10/$4.40) に更新。保存済みの旧単価を引き継がないようキーを更新。
-    const RATES_KEY = 'line_report_ai_usage_rates_v3';
+    // Azure Foundry をレシート解析の標準表示へ切替。旧Groq単価の保存値を引き継がない。
+    const RATES_KEY = 'line_report_ai_usage_rates_v4';
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
-    // 単価は各社の公式単価（USD / 100万トークン）。OpenAI o4-mini は $1.10/$4.40（公式）。
+    // 単価は各社の公式単価（USD / 100万トークン）。Azure Foundry GPT-5.4 nano は $0.20/$1.25。
     // Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
-    // Groq Qwen 3.6 27B（レシート/画像抽出）は $0.60/$3.00。Claude Haiku 4.5 は $1/$5（公式）。
-    // フードコートQ&A・ドーム抽出は Groq llama-3.3-70b（目安 $0.59/$0.79）で別単価。
     // Grok / xAI は grok-3-mini の目安 $0.30/$0.50。モデル差し替え時は画面上で上書きする。
     // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
     const DEFAULT_RATES = {
-      groq:     { inUsd: 0.60, outUsd: 3.00 },   // qwen3.6-27b（Vision/レシート・画像抽出）
-      groqChat: { inUsd: 0.59, outUsd: 0.79 },   // llama-3.3-70b-versatile（フードコートQ&A・ドームLLM）
+      azure:    { inUsd: 0.20, outUsd: 1.25 },   // Azure Foundry GPT-5.4 nano（レシート・画像抽出）
       openai:   { inUsd: 1.10, outUsd: 4.40 },   // o4-mini（フードコート最終統合）
       grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
       gemini:   { inUsd: 2.00, outUsd: 12.00 },
       claude:   { inUsd: 1.00, outUsd: 5.00 },
       jpyPerUsd: 155,
     };
-    // 実測ログの model 名 → 単価キーの対応。未知の groq モデルはチャット扱い（scout以外）。
+    // 実測ログの provider / model 名 → 単価キーの対応。
     function rateKeyForModel(provider, model) {
-      const m = String(model || '').toLowerCase();
-      if (provider === 'groq') return (m.indexOf('qwen3.6-27b') >= 0 || m.indexOf('scout') >= 0 || m.indexOf('vision') >= 0) ? 'groq' : 'groqChat';
+      if (provider === 'azure_openai' || provider === 'azure') return 'azure';
       if (provider === 'openai') return 'openai';
       if (provider === 'grok' || provider === 'xai') return 'grok';
       if (provider === 'gemini') return 'gemini';
       if (provider === 'claude') return 'claude';
-      return 'groq';
+      return 'azure';
     }
 
     const state = {
@@ -730,7 +713,7 @@
         if (!raw) return cloneRates(DEFAULT_RATES);
         const parsed = JSON.parse(raw);
         const out = cloneRates(DEFAULT_RATES);
-        ['groq', 'groqChat', 'openai', 'grok', 'gemini', 'claude'].forEach(function (p) {
+        ['azure', 'openai', 'grok', 'gemini', 'claude'].forEach(function (p) {
           if (parsed && parsed[p]) {
             ['inUsd', 'outUsd'].forEach(function (k) {
               const v = Number(parsed[p][k]);
@@ -745,8 +728,7 @@
     }
     function cloneRates(r) {
       return {
-        groq: Object.assign({}, r.groq),
-        groqChat: Object.assign({}, r.groqChat),
+        azure: Object.assign({}, r.azure),
         openai: Object.assign({}, r.openai),
         grok: Object.assign({}, r.grok),
         gemini: Object.assign({}, r.gemini),
@@ -759,10 +741,8 @@
     }
     function fillRateInputs() {
       const r = state.rates;
-      document.getElementById('groq_inUsd').value = r.groq.inUsd;
-      document.getElementById('groq_outUsd').value = r.groq.outUsd;
-      document.getElementById('groqChat_inUsd').value = r.groqChat.inUsd;
-      document.getElementById('groqChat_outUsd').value = r.groqChat.outUsd;
+      document.getElementById('azure_inUsd').value = r.azure.inUsd;
+      document.getElementById('azure_outUsd').value = r.azure.outUsd;
       document.getElementById('openai_inUsd').value = r.openai.inUsd;
       document.getElementById('openai_outUsd').value = r.openai.outUsd;
       document.getElementById('grok_inUsd').value = r.grok.inUsd;
@@ -780,13 +760,9 @@
       }
       const d = DEFAULT_RATES;
       return {
-        groq: {
-          inUsd: num('groq_inUsd', d.groq.inUsd),
-          outUsd: num('groq_outUsd', d.groq.outUsd),
-        },
-        groqChat: {
-          inUsd: num('groqChat_inUsd', d.groqChat.inUsd),
-          outUsd: num('groqChat_outUsd', d.groqChat.outUsd),
+        azure: {
+          inUsd: num('azure_inUsd', d.azure.inUsd),
+          outUsd: num('azure_outUsd', d.azure.outUsd),
         },
         openai: {
           inUsd: num('openai_inUsd', d.openai.inUsd),
@@ -865,9 +841,7 @@
     }
     function rateForModel(provider, model) {
       const m = String(model || '').toLowerCase();
-      // 7/17以前のScout実績は当時の単価で保持し、Qwen移行後の費用と混ぜない。
-      if (provider === 'groq' && m.indexOf('llama-4-scout') >= 0) return { inUsd: 0.11, outUsd: 0.34 };
-      return state.rates[rateKeyForModel(provider, model)] || DEFAULT_RATES.groq;
+      return state.rates[rateKeyForModel(provider, model)] || DEFAULT_RATES.azure;
     }
     // 思考トークンは出力として課金されるため出力側に含める（無ければ0）。
     function modelUsd(m) {
@@ -879,8 +853,9 @@
     // provider の合計USD＝そのproviderの各モデルをモデル別単価で合算（最も正確）。
     // models が無い旧レスポンスのときだけ従来のprovider一括計算にフォールバック。
     function providerUsdAccurate(provider, fallbackBucket) {
+      const targetProvider = provider === 'azure' ? 'azure_openai' : provider;
       const models = (state.data && Array.isArray(state.data.models))
-        ? state.data.models.filter(function (m) { return m.provider === provider; })
+        ? state.data.models.filter(function (m) { return m.provider === targetProvider; })
         : null;
       if (models && models.length) {
         return models.reduce(function (s, m) { return s + modelUsd(m); }, 0);
@@ -956,7 +931,7 @@
       const jpy = r.jpyPerUsd;
 
       renderAllAiCards();
-      renderProvider('groq', data.groq, r.groq, jpy, data.groq && data.groq.model);
+      renderProvider('azure', data.azure, r.azure, jpy, data.azure && data.azure.model);
       renderProvider('gemini', data.gemini, r.gemini, jpy, data.gemini && data.gemini.model);
       renderProvider('claude', data.claude, r.claude, jpy, data.claude && data.claude.model);
 
@@ -970,8 +945,7 @@
     }
 
     const KNOWN_AI_MODELS = [
-      { provider: 'groq', model: 'qwen/qwen3.6-27b', title: 'Groq Vision', className: '' },
-      { provider: 'groq', model: 'llama-3.3-70b-versatile', title: 'Groq Chat', className: 'groq-chat' },
+      { provider: 'azure_openai', model: 'gpt-5.4-nano', title: 'Azure Foundry', className: '' },
       { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini', className: 'gemini' },
       { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
       { provider: 'openai', model: 'o4-mini', title: 'OpenAI', className: 'openai' },
@@ -987,12 +961,12 @@
       if (p === 'openai') return 'OpenAI';
       if (p === 'gemini') return 'Gemini';
       if (p === 'claude') return 'Claude';
-      if (p === 'groq') return 'Groq';
+      if (p === 'azure_openai' || p === 'azure') return 'Azure Foundry';
       return provider || 'AI';
     }
     function cardClassForModel(provider, model) {
       const rateKey = rateKeyForModel(provider, model);
-      if (rateKey === 'groqChat') return 'groq-chat';
+      if (rateKey === 'azure') return '';
       if (rateKey === 'openai') return 'openai';
       if (rateKey === 'grok') return 'grok';
       if (rateKey === 'gemini') return 'gemini';
@@ -1011,7 +985,9 @@
           known: true,
         }, known));
       });
-      const actual = (state.data && Array.isArray(state.data.models)) ? state.data.models : [];
+      const actual = (state.data && Array.isArray(state.data.models))
+        ? state.data.models.filter(function (m) { return m.provider !== 'groq'; })
+        : [];
       actual.forEach(function (m) {
         const key = modelKey(m.provider, m.model);
         const base = byKey.get(key) || {
@@ -1070,7 +1046,9 @@
       const totalEl = document.getElementById('foodcourtTotal');
       if (!el) return;
       const fc = (state.data && state.data.foodcourt) || null;
-      const models = (fc && Array.isArray(fc.models)) ? fc.models.slice() : [];
+      const models = (fc && Array.isArray(fc.models))
+        ? fc.models.filter(function (m) { return m.provider !== 'groq'; }).slice()
+        : [];
       const jpyPerUsd = state.rates.jpyPerUsd;
       if (!models.length) {
         if (totalEl) totalEl.textContent = '¥0';
@@ -1100,11 +1078,9 @@
         '</table>';
     }
 
-    // モデル別の正確な内訳（実測トークン × モデル別単価）。groqのscout/70bなど同一プロバイダ複数モデルを分けて表示。
+    // モデル別の正確な内訳（実測トークン × モデル別単価）。旧Groq履歴は除外する。
     const MODEL_LABELS = {
-      'qwen/qwen3.6-27b': 'レシート/画像抽出（Vision）',
-      'meta-llama/llama-4-scout-17b-16e-instruct': 'レシート/画像抽出（旧Vision）',
-      'llama-3.3-70b-versatile': 'フードコートQ&A・分析サマリー・ドーム抽出',
+      'gpt-5.4-nano': 'レシート・小口経費の画像抽出（Azure Foundry）',
       'o4-mini': 'フードコート分析の最終統合',
       'gpt-5.5': 'フードコート分析の最終統合（旧モデル）',
       'grok-3-mini': 'フードコート運営改善AI',
@@ -1114,7 +1090,9 @@
     function renderModelBreakdown() {
       const el = document.getElementById('modelBrkBody');
       if (!el) return;
-      const models = (state.data && Array.isArray(state.data.models)) ? state.data.models.slice() : [];
+      const models = (state.data && Array.isArray(state.data.models))
+        ? state.data.models.filter(function (m) { return m.provider !== 'groq'; }).slice()
+        : [];
       if (!models.length) {
         el.innerHTML = '<p class="statusline">モデル別の実測ログがまだありません。</p>';
         return;
@@ -1161,7 +1139,7 @@
 
       // 日付ごとにグループ化
       const groups = {};
-      totals.forEach(function (row) {
+      totals.filter(function (row) { return row.provider !== 'groq'; }).forEach(function (row) {
         const d = row.period_date;
         if (!groups[d]) {
           groups[d] = {
