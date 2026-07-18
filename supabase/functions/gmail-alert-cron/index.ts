@@ -7,6 +7,7 @@ import { pilotStorePartitionKeysMatch } from "../_shared/receipt_sheets_store_ca
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts";
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";
+import { resolveGroqTextModel } from "../_shared/groq_model.ts";
 import {
   isLikelyReservationNotificationMail,
   resolveReservationYear,
@@ -3404,7 +3405,7 @@ async function extractReservationMailDetailsWithGroq(params: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
+          model: resolveGroqTextModel(Deno.env.get("GROQ_RESERVATION_MODEL") || Deno.env.get("GROQ_CHAT_MODEL")),
           temperature: 0,
           messages: [
             {

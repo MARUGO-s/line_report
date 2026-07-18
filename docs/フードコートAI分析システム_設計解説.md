@@ -199,7 +199,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 | 項目 | 内容 |
 |---|---|
 | プロバイダー | Groq |
-| モデル | `llama-3.3-70b-versatile`（`GROQ_CHAT_MODEL`環境変数で変更可） |
+| モデル | `openai/gpt-oss-120b`（`GROQ_CHAT_MODEL`環境変数で変更可。旧Llama指定は自動的に置換） |
 | フォールバック | `qwen/qwen3.6-27b` |
 | 最大出力 | 600〜700トークン |
 | 出力用途 | 統合AIへの「分析メモ（下書き）」 |
@@ -225,7 +225,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 |---|---|
 | プロバイダー | Google |
 | モデル | `gemini-3.5-flash`（`FOODCOURT_GEMINI_MODEL`環境変数で制御） |
-| フォールバック | Groq `llama-3.3-70b-versatile` |
+| フォールバック | Groq `openai/gpt-oss-120b` |
 | 最大出力 | 600〜700トークン |
 | 出力用途 | 統合AIへの「分析メモ（下書き）」 |
 
@@ -249,7 +249,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 | プロバイダー | xAI（Elon Musk率いるAI企業） |
 | モデル | `grok-3-mini`（`FOODCOURT_GROK_MODEL`環境変数で変更可） |
 | APIキー変数 | `XAI_API_KEY` |
-| フォールバック | Groq `llama-3.3-70b-versatile` |
+| フォールバック | Groq `openai/gpt-oss-120b` |
 | 最大出力 | 600〜700トークン |
 | 出力用途 | 統合AIへの「運営改善メモ（下書き）」 |
 
@@ -286,7 +286,7 @@ Grok 3 miniは他のAIと根本的に異なる知識源を持つ。**X（旧Twit
 | プロバイダー | Anthropic |
 | モデル | `claude-haiku-4-5`（`FOODCOURT_CLAUDE_MODEL`環境変数で変更可） |
 | APIキー変数 | `claude_haiku` |
-| フォールバック | Groq `llama-3.3-70b-versatile` |
+| フォールバック | Groq `openai/gpt-oss-120b` |
 | 最大出力 | 550〜650トークン |
 | 出力用途 | 統合AIへの「反証メモ」 |
 
@@ -566,7 +566,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | 変数名 | 用途 | 現在の設定 |
 |---|---|---|
 | `GROQ_API_KEY` | Groq API認証（専門AI①） | 設定済み |
-| `GROQ_CHAT_MODEL` | 専門AI①のモデル名 | 未設定（デフォルト: `llama-3.3-70b-versatile`） |
+| `GROQ_CHAT_MODEL` | 専門AI①のモデル名 | 未設定（デフォルト: `openai/gpt-oss-120b`） |
 | `GEMINI_API_KEY` | Gemini API認証（専門AI②） | 設定済み |
 | `FOODCOURT_GEMINI_MODEL` | 専門AI②のモデル名 | `gemini-3.5-flash` |
 | `XAI_API_KEY` | xAI API認証（専門AI③） | **設定済み** |

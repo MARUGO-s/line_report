@@ -7,6 +7,7 @@ import {
   type AppError,
 } from './admin_utils.ts'
 import { loadStoreRegistry } from './store_receipt_query.ts'
+import { resolveGroqTextModel } from './groq_model.ts'
 
 type CompetitorPlaceRow = {
   id: number
@@ -502,7 +503,7 @@ async function buildStoreReviewProfilePayload(
   latest: StoreReviewSnapshotRow | null,
 ): Promise<Record<string, unknown>> {
   const groqKey = String(Deno.env.get('GROQ_API_KEY') || '').trim()
-  const model = String(Deno.env.get('STORE_PROFILE_MODEL') || Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'llama-3.3-70b-versatile').trim()
+  const model = resolveGroqTextModel(Deno.env.get('STORE_PROFILE_MODEL') || Deno.env.get('COMPETITOR_CLASSIFY_MODEL'))
   if (!groqKey) return sanitizeProfilePayload(null, place, latest, null, 'fallback')
 
   const input = {
@@ -816,7 +817,7 @@ ${JSON.stringify(list, null, 2)}
 {"classifications":[{"idx":0,"is_competitor":true,"confidence":"high","genre_match":true,"reason":"具体的な競合理由を1文で"}]}`
 
   try {
-    const model = String(Deno.env.get('COMPETITOR_CLASSIFY_MODEL') || 'llama-3.3-70b-versatile').trim()
+    const model = resolveGroqTextModel(Deno.env.get('COMPETITOR_CLASSIFY_MODEL'))
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },

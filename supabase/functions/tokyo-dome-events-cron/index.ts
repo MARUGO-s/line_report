@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { parseTokyoDomeSchedule, type ExtractedTokyoDomeEvent } from "../_shared/tokyo_dome_schedule.ts"
+import { GROQ_TEXT_FALLBACK_MODEL, resolveGroqTextModel } from "../_shared/groq_model.ts"
 
 // 東京ドーム＋ドームシティ各会場の公式イベント予定を取得し、tokyo_dome_events へ upsert する cron。
 // マルゴS（東京ドーム内フードコート）の客数・売上との相関分析に使う。分析専用・送信なし。
@@ -519,12 +520,12 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<{ ev
   ].join("\n")
   const user = `次のテキストは東京ドーム公式のイベント日程表です。イベントを抽出してください。\n\n----\n${scheduleText}\n----`
 
-  const primary = (Deno.env.get("GROQ_CHAT_MODEL") || "").trim() || "llama-3.3-70b-versatile"
+  const primary = resolveGroqTextModel(Deno.env.get("GROQ_DOME_MODEL") || Deno.env.get("GROQ_CHAT_MODEL"))
   const r1 = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, primary, 4000)
   let raw = r1.content
   let usage = r1.usage
   if (!raw) {
-    const r2 = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, "qwen/qwen3.6-27b", 4000)
+    const r2 = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, GROQ_TEXT_FALLBACK_MODEL, 4000)
     raw = r2.content
     if (r2.usage) usage = r2.usage
   }

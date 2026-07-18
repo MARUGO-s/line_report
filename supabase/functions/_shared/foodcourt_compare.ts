@@ -14,6 +14,7 @@ import {
   rankFoodCourtRagDocuments,
   resolveFoodCourtPassingThresholds,
 } from './foodcourt_loop_utils.ts'
+import { GROQ_TEXT_FALLBACK_MODEL, resolveGroqTextModel } from './groq_model.ts'
 
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
@@ -2697,8 +2698,8 @@ export async function answerFoodCourtQuestion(
   const storeCorr = buildStoreCorrelation(reports, baseName)               // 店舗間相関（カニバリ/アンカー）
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)   // 異常値Zスコア
   const forecastCtx = buildForecastContext(forecast)                      // 学習型モデルの予測＋自己採点
-  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const fallbackModel = 'qwen/qwen3.6-27b'
+  const primary = resolveGroqTextModel(Deno.env.get('GROQ_CHAT_MODEL'))
+  const fallbackModel = GROQ_TEXT_FALLBACK_MODEL
   // 画面に表示中の単日レポートの対象日。これを渡さないと、AIは何十日分もの生データのどの日の話かを
   // 画面と無関係に(会話文脈やイベントの派手さだけで)決めてしまい、時間軸がずれた回答をする原因になる。
   const viewingBlock = viewingDate
@@ -2894,8 +2895,8 @@ export async function generateFoodCourtDailySummary(
   const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const dailyLogsBlock = nippou.block
-  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const fallbackModel = 'qwen/qwen3.6-27b'
+  const primary = resolveGroqTextModel(Deno.env.get('GROQ_CHAT_MODEL'))
+  const fallbackModel = GROQ_TEXT_FALLBACK_MODEL
 
   // --- 専門AI①: 対象日の他店舗比較・過去データ分析メモ ---
   const quantSystem = [
@@ -3050,8 +3051,8 @@ export async function generateFoodCourtPeriodSummary(
   const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const dailyLogsBlock = nippou.block
-  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const fallbackModel = 'qwen/qwen3.6-27b'
+  const primary = resolveGroqTextModel(Deno.env.get('GROQ_CHAT_MODEL'))
+  const fallbackModel = GROQ_TEXT_FALLBACK_MODEL
 
   // --- 専門AI①: 対象期間の他店舗比較・過去データ分析メモ ---
   const quantSystem = [
@@ -3515,8 +3516,8 @@ export async function generateFoodCourtWeeklyReport(
   const decomposition = buildContributionDecomposition(reports, baseName)
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)
   const forecastCtx = buildForecastContext(forecast)
-  const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const fallbackModel = 'qwen/qwen3.6-27b'
+  const primary = resolveGroqTextModel(Deno.env.get('GROQ_CHAT_MODEL'))
+  const fallbackModel = GROQ_TEXT_FALLBACK_MODEL
 
   // 日報（施策記録）＋週内の施策×実績効果対照
   const weekLogs = dailyLogs.filter((l) => {
