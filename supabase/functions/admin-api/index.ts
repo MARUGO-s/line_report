@@ -1107,6 +1107,7 @@ Deno.serve(async (req, info) => {
       "/petty-cash/receipt-media",
       "/foodcourt/reports",
       "/foodcourt/ask",
+      "/foodcourt/qa-history",
       "/foodcourt/dome-weekly",
       "/foodcourt/evolution-history",
       "/foodcourt/ai-loop-runs",
@@ -1653,8 +1654,24 @@ Deno.serve(async (req, info) => {
         if (dailyLogsError) {
           answer += `\n\n⚠️ システム注意: 現場日報の取得に失敗したため、施策記録は未参照です（${dailyLogsError}）。`
         }
+        const { data: savedQa, error: saveQaError } = await supabase
+          .from("foodcourt_qa_history")
+          .insert({
+            store_partition_key: storeKey,
+            question,
+            answer,
+            loop_score: qaResult.loopScore,
+            loop_count: qaResult.loopCount,
+            source_ref: { viewing_report_id: viewingReportId || null, viewing_date: viewingDate ?? null },
+          })
+          .select("id, created_at")
+          .single()
+        if (saveQaError) console.error("foodcourt/ask Q&A history save failed:", saveQaError.message)
         return json({
           answer,
+          history_id: savedQa?.id ?? null,
+          history_created_at: savedQa?.created_at ?? null,
+          history_saved: !saveQaError,
           reportCount: reports.length,
           loop_score: qaResult.loopScore,
           loop_count: qaResult.loopCount,
@@ -1672,6 +1689,36 @@ Deno.serve(async (req, info) => {
           daily_logs_error: dailyLogsError,
         }, 200)
       }
+    }
+    if (req.method === "GET" && path === "/foodcourt/qa-history") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(200, Math.trunc(rawLimit))) : 100
+      const { data, error } = await supabase
+        .from("foodcourt_qa_history")
+        .select("id, question, answer, loop_score, loop_count, source_ref, created_at")
+        .ilike("store_partition_key", storeKey)
+        .order("created_at", { ascending: false })
+        .limit(limit)
+      if (error) return json({ error: error.message }, 500)
+      return json({ items: data ?? [] }, 200)
+    }
+    if (req.method === "DELETE" && path === "/foodcourt/qa-history") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      const id = Number(url.searchParams.get("id") ?? "")
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      if (!Number.isSafeInteger(id) || id <= 0) return json({ error: "id is required." }, 400)
+      const { data, error } = await supabase
+        .from("foodcourt_qa_history")
+        .delete()
+        .ilike("store_partition_key", storeKey)
+        .eq("id", id)
+        .select("id")
+        .maybeSingle()
+      if (error) return json({ error: error.message }, 500)
+      if (!data) return json({ error: "Q&A履歴が見つかりません。" }, 404)
+      return json({ ok: true, id }, 200)
     }
     // 学習進化トラッキング: foodcourt_forecast_history の全行を返す（foodcourt-evolution.html 用）。
     if (req.method === "GET" && path === "/foodcourt/evolution-history") {

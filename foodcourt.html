@@ -197,6 +197,19 @@
     .rl-arrow{font-size:12px;color:var(--accent,#2f6bd6);font-weight:600;flex:0 0 auto;white-space:nowrap;}
     .rl-empty,.rl-error{font-size:12.5px;color:var(--tx-3);padding:8px 2px;}
     .rl-error{color:var(--bad);}
+    .report-accordion{border:1px solid var(--line-soft);border-radius:12px;background:var(--surface);overflow:hidden;}
+    .report-accordion>summary{display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;list-style:none;font-weight:700;color:var(--tx-1);user-select:none;}
+    .report-accordion>summary::-webkit-details-marker{display:none;}
+    .report-accordion>summary::after{content:'開く ↓';margin-left:auto;color:var(--accent,#2f6bd6);font-size:12px;}
+    .report-accordion[open]>summary::after{content:'閉じる ↑';}
+    .report-accordion-body{border-top:1px solid var(--line-soft);padding:12px;max-height:min(52vh,520px);overflow-y:auto;overscroll-behavior:contain;}
+    .qa-archive-item{border:1px solid var(--line-soft);border-radius:10px;margin-bottom:8px;background:var(--surface);overflow:hidden;}
+    .qa-archive-item>summary{padding:12px;cursor:pointer;list-style:none;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;}
+    .qa-archive-item>summary::-webkit-details-marker{display:none;}
+    .qa-archive-question{font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .qa-archive-meta{font-size:11.5px;color:var(--tx-3);white-space:nowrap;}
+    .qa-archive-answer{border-top:1px solid var(--line-soft);padding:13px 14px;white-space:pre-wrap;font-size:13px;line-height:1.65;max-height:320px;overflow-y:auto;}
+    .qa-archive-actions{display:flex;justify-content:flex-end;padding:0 14px 12px;}
 
     .tbl{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;}
     .tbl th{font-size:11.5px;font-weight:600;color:var(--tx-3);text-align:right;padding:0 10px 9px;border-bottom:1px solid var(--line);white-space:nowrap;}
@@ -791,12 +804,26 @@
       <div class="card">
         <div class="card-h"><div class="card-t"><span class="em">📅</span>日次分析アーカイブ</div></div>
         <div class="card-note">過去に生成したAI分析サマリーを日付ごとに一覧できます。クリックするとグラフ付きレポートを新しいタブで開きます。</div>
-        <div id="dailyReportList" style="margin-top:10px"></div>
+        <details class="report-accordion" style="margin-top:10px">
+          <summary>日次分析を表示</summary>
+          <div class="report-accordion-body" id="dailyReportList"></div>
+        </details>
       </div>
       <div class="card">
         <div class="card-h"><div class="card-t"><span class="em">🗓️</span>週次レポートアーカイブ</div></div>
         <div class="card-note">毎週配信されたフードコート週次経営レポートを一覧できます。クリックするとグラフ付きレポートを新しいタブで開きます。</div>
-        <div id="weeklyReportList" style="margin-top:10px"></div>
+        <details class="report-accordion" style="margin-top:10px">
+          <summary>週次レポートを表示</summary>
+          <div class="report-accordion-body" id="weeklyReportList"></div>
+        </details>
+      </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">💬</span>Q&amp;A回答アーカイブ</div></div>
+        <div class="card-note">データへの質問とAIの回答を自動保存します。質問を開くと回答を確認でき、不要な履歴は削除できます。</div>
+        <details class="report-accordion" style="margin-top:10px">
+          <summary>保存したQ&amp;Aを表示</summary>
+          <div class="report-accordion-body" id="qaHistoryList"></div>
+        </details>
       </div>
     </section>
 
@@ -1862,6 +1889,54 @@
     });
   }
 
+  async function loadQaHistoryList() {
+    const wrap = $('qaHistoryList');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="rl-empty">読み込み中…</div>';
+    let body;
+    try {
+      body = await apiFetch('/foodcourt/qa-history?store_key=' + encodeURIComponent(currentStore()) + '&limit=100');
+    } catch (e) {
+      wrap.innerHTML = '<div class="rl-error">' + escapeHtml(e.message || '読み込みに失敗しました。') + '</div>';
+      return;
+    }
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (!items.length) {
+      wrap.innerHTML = '<div class="rl-empty">保存されたQ&amp;Aはまだありません。「概要・AI分析」のデータに質問すると自動保存されます。</div>';
+      return;
+    }
+    wrap.innerHTML = items.map((it) => {
+      const created = it.created_at ? new Date(it.created_at).toLocaleString('ja-JP') : '日時不明';
+      const score = it.loop_score != null ? ('・自己採点 ' + Number(it.loop_score) + '点') : '';
+      return '<details class="qa-archive-item" data-qa-history-id="' + escapeHtml(String(it.id)) + '">'
+        + '<summary><span class="qa-archive-question">Q. ' + escapeHtml(it.question || '（質問なし）') + '</span>'
+        + '<span class="qa-archive-meta">' + escapeHtml(created + score) + '</span></summary>'
+        + '<div class="qa-archive-answer">' + escapeHtml(it.answer || '（回答なし）') + '</div>'
+        + '<div class="qa-archive-actions"><button type="button" class="btn secondary" data-delete-qa="' + escapeHtml(String(it.id)) + '">削除</button></div>'
+        + '</details>';
+    }).join('');
+    wrap.querySelectorAll('[data-delete-qa]').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = btn.getAttribute('data-delete-qa');
+        if (!id || !confirm('このQ&A履歴を削除しますか？')) return;
+        btn.disabled = true;
+        try {
+          await apiDelete('/foodcourt/qa-history?store_key=' + encodeURIComponent(currentStore()) + '&id=' + encodeURIComponent(id));
+          const item = btn.closest('[data-qa-history-id]');
+          if (item) item.remove();
+          if (!wrap.querySelector('[data-qa-history-id]')) {
+            wrap.innerHTML = '<div class="rl-empty">保存されたQ&amp;Aはありません。</div>';
+          }
+        } catch (err) {
+          alert('Q&A履歴の削除に失敗しました: ' + ((err && err.message) || ''));
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
   async function openArchivedDailyReport(reportId) {
     if (!Number.isFinite(reportId) || reportId <= 0) return;
     const report = reports.find((r) => Number(r.id) === reportId);
@@ -2094,6 +2169,16 @@
     if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
     return body;
   }
+  async function apiDelete(path){
+    const url = PAGES.receiptAdminApiUrl(path);
+    let res;
+    try { res = await fetch(url, { method:'DELETE', headers:{ 'x-admin-token':getToken() } }); }
+    catch(_){ throw new Error('通信に失敗しました（ネットワーク/接続先）。'); }
+    if (res.status===401 || res.status===403){ setAuthBadge(false); throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。'); }
+    const body = await res.json().catch(()=>({}));
+    if (!res.ok || body.error) throw new Error(body.error || ('エラー（HTTP ' + res.status + '）'));
+    return body;
+  }
   // データに質問：会話履歴を保持し、前のやり取りを踏まえて返信させる。
   let qaHistory = [];
   function renderQaThread(thinking){
@@ -2154,7 +2239,11 @@
         content: b.answer || '(回答が空でした)',
         score: b.loop_score != null ? b.loop_score : null,
         question: question,
+        historyId: b.history_id != null ? b.history_id : null,
       });
+      if (b.history_saved === false) {
+        alert('回答は表示しましたが、Q&A履歴の保存に失敗しました。管理者へご確認ください。');
+      }
     } catch(e){
       qaHistory.push({
         role: 'assistant',
@@ -3248,7 +3337,7 @@
     // 東京ドーム一覧は表示された時点で初期スクロールを「今日」に合わせる（過去は上にスクロールで表示）。
     if(t.dataset.tab==='dome') requestAnimationFrame(scrollDomeToToday);
     // レポート一覧タブは開くたびに最新化する（店舗切替後も追随させるため毎回取得）。
-    if(t.dataset.tab==='reports') { loadDailyReportList(); loadWeeklyReportList(); }
+    if(t.dataset.tab==='reports') { loadDailyReportList(); loadWeeklyReportList(); loadQaHistoryList(); }
     // タブ切替時のページ全体の自動スクロールはしない（その場に留まる）。
   });
   dom.domeFilt.addEventListener('click', e=>{
