@@ -165,7 +165,7 @@ function numOrNull(v: unknown): number | null {
 // フードコートのAI（Q&A=Groqチャット／テナント表の画像抽出=Groq/Gemini Vision）の実測トークンを
 // ai_usage_events に1行記録し、AI使用料ページ（/usage/ai-cost＝実測トークン×公式単価）に反映させる。
 export interface FoodCourtAiUsage {
-  provider: 'groq' | 'gemini' | 'claude' | 'openai' | 'grok'
+  provider: 'azure_openai' | 'groq' | 'gemini' | 'claude' | 'openai' | 'grok'
   model: string
   inputTokens: number
   outputTokens: number
@@ -181,6 +181,20 @@ function groqUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
   const tot = Number(m.total_tokens ?? 0) || (inp + out)
   if (!inp && !out && !tot) return null
   return { provider: 'groq', model, inputTokens: inp, outputTokens: out, thinkingTokens: null, totalTokens: tot }
+}
+function azureFoundryUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
+  const u = (json && typeof json === 'object') ? (json as { usage?: unknown }).usage : null
+  if (!u || typeof u !== 'object') return null
+  const m = u as Record<string, unknown>
+  const inp = Number(m.input_tokens ?? 0) || 0
+  const out = Number(m.output_tokens ?? 0) || 0
+  const tot = Number(m.total_tokens ?? 0) || (inp + out)
+  const details = (m.output_tokens_details && typeof m.output_tokens_details === 'object')
+    ? m.output_tokens_details as Record<string, unknown>
+    : null
+  const thinking = details?.reasoning_tokens != null ? (Number(details.reasoning_tokens) || 0) : null
+  if (!inp && !out && !tot) return null
+  return { provider: 'azure_openai', model, inputTokens: inp, outputTokens: out, thinkingTokens: thinking, totalTokens: tot }
 }
 function geminiUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
   const u = (json && typeof json === 'object') ? (json as { usageMetadata?: unknown }).usageMetadata : null
@@ -326,49 +340,50 @@ export async function extractFoodCourtTenants(
   return tenantsFromParsed(parseFirstJson(text))
 }
 
-// Groq Qwen Vision で抽出（印字されたクリーンな表向け）。失敗時は呼び出し側で Gemini にフォールバック。
-export async function extractFoodCourtTenantsGroq(
+// Azure AI Foundry でフードコート表を直接抽出。失敗時だけ呼び出し側で Gemini に退避する。
+export async function extractFoodCourtTenantsAzureFoundry(
   bytes: Uint8Array,
   contentType: string | null,
-  groqApiKey: string,
-  timeoutMs = 25000,
+  projectEndpoint: string,
+  apiKey: string,
+  deployment: string,
+  timeoutMs = 40000,
   onUsage?: (u: FoodCourtAiUsage) => void,
 ): Promise<FoodCourtTenant[] | null> {
-  if (!groqApiKey || !bytes || bytes.byteLength <= 0) return null
+  if (!projectEndpoint || !apiKey || !bytes || bytes.byteLength <= 0) return null
   const mime = String(contentType ?? '').trim().toLowerCase()
   if (!/^image\/(png|jpe?g|webp|gif)$/.test(mime)) return null
+  const endpoint = `${projectEndpoint.replace(/\/+$/, '')}/openai/v1/responses`
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   let res: Response
   try {
-    res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    res = await fetch(endpoint, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${groqApiKey}`, 'Content-Type': 'application/json' },
+      headers: { 'api-key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen/qwen3.6-27b',
-        response_format: { type: 'json_object' },
-        temperature: 0.1,
-        max_tokens: 2000,
-        messages: [
-          { role: 'system', content: EXTRACT_PROMPT },
-          { role: 'user', content: [
-            { type: 'text', text: 'このフードコートのテナント一覧表を全行JSONで抽出してください。' },
-            { type: 'image_url', image_url: { url: `data:${mime};base64,${toBase64(bytes)}` } },
-          ] },
+        model: deployment || 'gpt-5.4-nano',
+        instructions: EXTRACT_PROMPT,
+        input: [{ role: 'user', content: [
+          { type: 'input_text', text: 'このフードコートのテナント一覧表を全行JSONで抽出してください。' },
+          { type: 'input_image', image_url: `data:${mime};base64,${toBase64(bytes)}`, detail: 'high' },
         ],
+        }],
+        text: { format: { type: 'json_object' } },
+        max_output_tokens: 2000,
       }),
       signal: controller.signal,
     })
   } catch (e) {
-    console.error('extractFoodCourtTenantsGroq fetch failed:', e instanceof Error ? e.message : String(e))
+    console.error('extractFoodCourtTenantsAzureFoundry fetch failed:', e instanceof Error ? e.message : String(e))
     return null
   } finally {
     clearTimeout(timer)
   }
-  if (!res.ok) { console.error('extractFoodCourtTenantsGroq http error:', res.status); return null }
-  const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown } | null
-  if (onUsage) { const u = groqUsageFrom(json, 'qwen/qwen3.6-27b'); if (u) onUsage(u) }
-  const content = String(json?.choices?.[0]?.message?.content ?? '')
+  if (!res.ok) { console.error('extractFoodCourtTenantsAzureFoundry http error:', res.status); return null }
+  const json = await res.json().catch(() => null) as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }>; usage?: unknown } | null
+  if (onUsage) { const u = azureFoundryUsageFrom(json, deployment || 'gpt-5.4-nano'); if (u) onUsage(u) }
+  const content = String(json?.output_text ?? json?.output?.flatMap((v) => v.content ?? []).map((v) => v.text ?? '').join('\n') ?? '')
   return tenantsFromParsed(parseFirstJson(content))
 }
 
@@ -3278,7 +3293,7 @@ export async function handleFoodCourtReportPostback(
   return buildFoodCourtAckFlex(tenantCount, pageUrl, salesDate, receiptWarning)
 }
 
-// オーケストレーション: 対象店舗＋マーカー一致のとき Gemini で抽出 → 比較が成立すれば
+// オーケストレーション: 対象店舗＋マーカー一致のとき Azure Foundry で抽出 → 比較が成立すれば
 //   保存＋カードを返し handled=true（売上登録しない）。成立しなければ handled=false（通常処理へ）。
 export async function maybeHandleFoodCourtReport(
   supabase: SupabaseClient,
@@ -3291,7 +3306,9 @@ export async function maybeHandleFoodCourtReport(
     detectText: string
     geminiApiKey: string
     geminiModel: string
-    groqApiKey?: string
+    azureFoundryProjectEndpoint?: string
+    azureFoundryApiKey?: string
+    azureFoundryDeployment?: string
     /** 自店レシートとして確信できない画像のとき true＝マーカー不一致でも抽出を試す（検知の取りこぼし防止）。 */
     forceAttempt?: boolean
   },
@@ -3300,7 +3317,7 @@ export async function maybeHandleFoodCourtReport(
   if (!cfg) return { handled: false }
   if (!looksLikeFoodCourtReport(params.detectText) && !params.forceAttempt) return { handled: false }
 
-  // Groqで十分とみなす最小テナント数（想定数-1。安価なGroqを優先しつつ取りこぼし時だけGeminiへ）。
+  // Azure で十分とみなす最小テナント数（想定数-1。読み落とし時だけ Gemini へ退避する）。
   const minOk = cfg.expectedTenants ? Math.max(5, cfg.expectedTenants - 1) : 5
   const valid = (ts: FoodCourtTenant[] | null) =>
     (ts && ts.length >= 3 && computeFoodCourtComparison(ts, cfg.baseTenantName)) ? ts : null
@@ -3308,9 +3325,17 @@ export async function maybeHandleFoodCourtReport(
   // 画像抽出で消費したトークンを記録（成立有無に関わらず・AI使用料に反映）。
   const aiUsages: FoodCourtAiUsage[] = []
   const onUsage = (u: FoodCourtAiUsage) => { aiUsages.push(u) }
-  // 1) まず Groq Qwen Vision で抽出（印字されたクリーンな表は読める想定）。
-  let tenants = valid(await extractFoodCourtTenantsGroq(params.bytes, params.contentType, params.groqApiKey ?? '', 25000, onUsage))
-  // 2) Groqが表として成立しない or テナント数が想定より少ない（読み落とし疑い）→ 高精度な Gemini にフォールバック。
+  // 1) まず Azure Foundry で抽出する。
+  let tenants = valid(await extractFoodCourtTenantsAzureFoundry(
+    params.bytes,
+    params.contentType,
+    params.azureFoundryProjectEndpoint ?? '',
+    params.azureFoundryApiKey ?? '',
+    params.azureFoundryDeployment ?? 'gpt-5.4-nano',
+    40000,
+    onUsage,
+  ))
+  // 2) Azure が表として成立しない、またはテナント数が想定より少ないときだけ Gemini に退避する。
   if ((!tenants || tenants.length < minOk) && params.geminiApiKey) {
     const g = valid(await extractFoodCourtTenants(params.bytes, params.contentType, params.geminiApiKey, params.geminiModel, 30000, onUsage))
     if (g) tenants = g

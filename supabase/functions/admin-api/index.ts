@@ -25,7 +25,7 @@ import {
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
 import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
-import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithGroqScout, GROQ_VISION_MODEL, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
+import { analyzeExpenseReceiptWithAzureFoundry, AZURE_FOUNDRY_VISION_MODEL, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
 import {
   answerFoodCourtQuestion,
@@ -358,7 +358,7 @@ const DOCUMENT_PDF_EXTRACT_MAX_PAGES = 120
 const DOCUMENT_TEXT_BINARY_RATIO_MAX = 0.08
 const PETTY_CASH_RECEIPT_IMAGE_BUCKET = "line-media"
 const PETTY_CASH_RECEIPT_IMAGE_MAX_BYTES = GROQ_VISION_BASE64_MAX_BYTES
-const GROQ_RECEIPT_MODEL = GROQ_VISION_MODEL
+const AZURE_RECEIPT_MODEL = AZURE_FOUNDRY_VISION_MODEL
 const PDFJS_MODULE_URL = "https://esm.sh/pdfjs-dist@4.10.38/build/pdf.mjs"
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -5197,8 +5197,8 @@ async function recordPettyCashWebAiUsage(
   try {
     const { error } = await supabase.from("ai_usage_events").insert({
       store_partition_key: storeKey,
-      provider: "groq",
-      model: GROQ_RECEIPT_MODEL,
+      provider: "azure_openai",
+      model: AZURE_RECEIPT_MODEL,
       input_tokens: usage.inputTokens,
       output_tokens: usage.outputTokens,
       thinking_tokens: usage.thinkingTokens,
@@ -5300,18 +5300,22 @@ async function createPettyCashEntryFromReceiptImage(
     throw { status: 400, message: "JPEGまたはPNG画像だけアップロードできます。" } satisfies AppError
   }
 
-  const groqApiKey = String(Deno.env.get("GROQ_API_KEY") ?? "").trim()
-  if (!groqApiKey) {
-    throw { status: 500, message: "GROQ_API_KEY is missing." } satisfies AppError
+  const azureFoundryProjectEndpoint = String(Deno.env.get("AZURE_FOUNDRY_PROJECT_ENDPOINT") ?? "").trim()
+  const azureFoundryApiKey = String(Deno.env.get("AZURE_FOUNDRY_API_KEY") ?? "").trim()
+  const azureFoundryDeployment = String(Deno.env.get("AZURE_FOUNDRY_VISION_DEPLOYMENT") ?? "").trim() || AZURE_RECEIPT_MODEL
+  if (!azureFoundryProjectEndpoint || !azureFoundryApiKey) {
+    throw { status: 500, message: "Azure Foundry receipt-analysis configuration is missing." } satisfies AppError
   }
 
   const bytes = new Uint8Array(await fileValue.arrayBuffer())
   const webMessageId = `web-petty-cash:${crypto.randomUUID()}`
-  const analyzed = await analyzeExpenseReceiptWithGroqScout(
+  const analyzed = await analyzeExpenseReceiptWithAzureFoundry(
     bytes,
     mimeType,
     originalFileName,
-    groqApiKey,
+    azureFoundryProjectEndpoint,
+    azureFoundryApiKey,
+    azureFoundryDeployment,
     EXPENSE_RECEIPT_PROMPT_ADDITION,
   )
   await recordPettyCashWebAiUsage(supabase, storeKey, webMessageId, analyzed.usage)
@@ -9299,14 +9303,15 @@ function normalizePath(pathname: string): string {
   return stripped || "/"
 }
 
-// レシート画像解析に Gemini を使う店舗（line-webhook と同一）。他店は Groq。
+// レシート画像解析は Azure Foundry が通常経路。Gemini は Azure 障害時だけの退避先。
 const AI_USAGE_GEMINI_STORE_KEYS = new Set<string>(["sauvage", "sushikoruri"])
 const AI_USAGE_GEMINI_MODEL = "gemini-3.1-pro-preview"
 // レシート画像解析に Claude(Haiku) を使う店舗（line-webhook の CLAUDE_RECEIPT_STORE_KEYS と同一）。
 // ＋経費（小口）の再解析も Claude を使うため、claude バケットには「claudia2の売上解析」と「全店の経費解析」のトークンが入る。
 const AI_USAGE_CLAUDE_STORE_KEYS = new Set<string>(["claudia2"])
 const AI_USAGE_CLAUDE_MODEL = "claude-haiku-4-5"
-const AI_USAGE_GROQ_MODEL = GROQ_VISION_MODEL
+const AI_USAGE_AZURE_MODEL = AZURE_FOUNDRY_VISION_MODEL
+const AI_USAGE_GROQ_MODEL = "legacy-groq"
 const AI_USAGE_OPENAI_MODEL = "gpt-5.5"
 const AI_USAGE_GROK_MODEL = "grok-3-mini"
 
@@ -9318,7 +9323,7 @@ type AiUsageStoreRow = {
 }
 
 type AiUsageProviderBucket = {
-  provider: "gemini" | "groq" | "claude" | "openai" | "grok"
+  provider: "azure_openai" | "gemini" | "groq" | "claude" | "openai" | "grok"
   model: string
   store_count: number
   image_count: number
@@ -9351,6 +9356,19 @@ async function fetchAiUsageCostState(
   const gemini: AiUsageProviderBucket = {
     provider: "gemini",
     model: AI_USAGE_GEMINI_MODEL,
+    store_count: 0,
+    image_count: 0,
+    receipt_count: 0,
+    event_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    total_tokens: 0,
+    stores: [],
+  }
+  const azure: AiUsageProviderBucket = {
+    provider: "azure_openai",
+    model: AI_USAGE_AZURE_MODEL,
     store_count: 0,
     image_count: 0,
     receipt_count: 0,
@@ -9424,17 +9442,14 @@ async function fetchAiUsageCostState(
       image_count: Number(r.image_count ?? 0) || 0,
       receipt_count: Number(r.receipt_count ?? 0) || 0,
     }
-    const bucket = AI_USAGE_GEMINI_STORE_KEYS.has(key)
-      ? gemini
-      : AI_USAGE_CLAUDE_STORE_KEYS.has(key)
-      ? claude
-      : groq
+    const bucket = azure
     bucket.stores.push(row)
     bucket.store_count += 1
     bucket.image_count += row.image_count
     bucket.receipt_count += row.receipt_count
   }
   gemini.stores.sort((a, b) => b.image_count - a.image_count)
+  azure.stores.sort((a, b) => b.image_count - a.image_count)
   groq.stores.sort((a, b) => b.image_count - a.image_count)
   claude.stores.sort((a, b) => b.image_count - a.image_count)
 
@@ -9447,7 +9462,9 @@ async function fetchAiUsageCostState(
   for (const raw of (Array.isArray(tokenData) ? tokenData : [])) {
     const r = raw as Record<string, unknown>
     const provider = String(r.provider ?? "").trim()
-    const bucket = provider === "gemini"
+    const bucket = provider === "azure_openai"
+      ? azure
+      : provider === "gemini"
       ? gemini
       : provider === "groq"
       ? groq
@@ -9556,6 +9573,7 @@ async function fetchAiUsageCostState(
 
   return {
     period: { from: p_from, to: p_to },
+    azure,
     gemini,
     groq,
     claude,

@@ -10,6 +10,7 @@ import { buildReceiptVisionSystemPrompt } from './receipt_prompt.ts'
 
 const VISION_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png'])
 export const GROQ_VISION_MODEL = 'qwen/qwen3.6-27b'
+export const AZURE_FOUNDRY_VISION_MODEL = 'gpt-5.4-nano'
 
 function isVisionAnalyzableImageMime(contentType: string | null): boolean {
   return VISION_IMAGE_MIME_TYPES.has(String(contentType ?? '').trim().toLowerCase())
@@ -60,6 +61,35 @@ function extractGroqUsage(payload: unknown): LineImageVisionUsage | null {
   const total = toTokenCount(u.total_tokens) || (input + output)
   if (input <= 0 && output <= 0 && total <= 0) return null
   return { inputTokens: input, outputTokens: output, thinkingTokens: null, totalTokens: total }
+}
+
+/** Azure AI Foundry Responses API の usage から実測トークンを取り出す。 */
+function extractAzureFoundryUsage(payload: unknown): LineImageVisionUsage | null {
+  const u = (payload as { usage?: Record<string, unknown> })?.usage
+  if (!u || typeof u !== 'object') return null
+  const input = toTokenCount(u.input_tokens)
+  const output = toTokenCount(u.output_tokens)
+  const total = toTokenCount(u.total_tokens) || (input + output)
+  const details = u.output_tokens_details as Record<string, unknown> | undefined
+  const thinking = details?.reasoning_tokens == null ? null : toTokenCount(details.reasoning_tokens)
+  if (input <= 0 && output <= 0 && total <= 0) return null
+  return { inputTokens: input, outputTokens: output, thinkingTokens: thinking, totalTokens: total }
+}
+
+function extractAzureFoundryOutputText(payload: unknown): string {
+  const direct = (payload as { output_text?: unknown })?.output_text
+  if (typeof direct === 'string' && direct.trim()) return direct.trim()
+  const output = (payload as { output?: unknown })?.output
+  const messages = Array.isArray(output) ? output : []
+  const parts: string[] = []
+  for (const message of messages) {
+    const content = (message as { content?: unknown })?.content
+    for (const part of (Array.isArray(content) ? content : [])) {
+      const text = (part as { text?: unknown })?.text
+      if (typeof text === 'string' && text.trim()) parts.push(text)
+    }
+  }
+  return parts.join('\n').trim()
 }
 
 export function isTransientLineImageVisionFailure(
@@ -240,6 +270,122 @@ export async function analyzeLineImageWithGroqScout(
   return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null, usage }
 }
 
+/**
+ * Azure AI Foundry の Responses API を使う標準レシート画像解析。
+ * Azure は通常経路、Gemini は Azure 自体が失敗した場合だけの退避先として呼び出し側で使う。
+ */
+export async function analyzeLineImageWithAzureFoundry(
+  bytes: Uint8Array,
+  contentType: string | null,
+  fileName: string,
+  projectEndpoint: string,
+  apiKey: string,
+  deployment = AZURE_FOUNDRY_VISION_MODEL,
+  systemPromptAddition = '',
+  timeoutMs = 40000,
+  retryDelayMs = 600,
+): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
+  if (!projectEndpoint || !apiKey) {
+    return { analysis: null, failure: { stage: 'azure_foundry_missing_config', message: 'Azure Foundry endpoint or API key is missing.' } }
+  }
+  if (bytes.byteLength <= 0 || bytes.byteLength > GROQ_VISION_BASE64_MAX_BYTES) {
+    return { analysis: null, failure: { stage: 'invalid_image_size', message: `Image bytes out of range: ${bytes.byteLength}` } }
+  }
+  const mime = String(contentType ?? '').trim().toLowerCase()
+  if (!isVisionAnalyzableImageMime(mime)) {
+    return { analysis: null, failure: { stage: 'unsupported_mime', message: `Unsupported image mime: ${mime || '(empty)'}` } }
+  }
+
+  const endpoint = `${projectEndpoint.replace(/\/+$/, '')}/openai/v1/responses`
+  const body = JSON.stringify({
+    model: deployment || AZURE_FOUNDRY_VISION_MODEL,
+    instructions: buildReceiptVisionSystemPrompt(systemPromptAddition),
+    input: [{
+      role: 'user',
+      content: [
+        { type: 'input_text', text: `この画像を解析してください。ファイル名: ${fileName || '(unknown)'}` },
+        { type: 'input_image', image_url: `data:${mime};base64,${toBase64(bytes)}`, detail: 'high' },
+      ],
+    }],
+    text: { format: { type: 'json_object' } },
+    max_output_tokens: 1500,
+  })
+
+  const maxAttempts = 2
+  let response: Response | null = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController()
+    const boundedTimeoutMs = Math.max(250, Math.min(timeoutMs, 60000))
+    const timer = setTimeout(() => controller.abort(), boundedTimeoutMs)
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'api-key': apiKey, 'Content-Type': 'application/json' },
+        body,
+        signal: controller.signal,
+      })
+    } catch (e) {
+      const timedOut = controller.signal.aborted
+      if (attempt < maxAttempts) {
+        console.error(timedOut ? 'Azure Foundry image vision timeout, retrying:' : 'Azure Foundry image vision network error, retrying:', String(e).slice(0, 200))
+        if (retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+        continue
+      }
+      return {
+        analysis: null,
+        failure: {
+          stage: timedOut ? 'azure_foundry_timeout' : 'azure_foundry_network_error',
+          message: timedOut ? `Azure Foundry image vision timed out after ${boundedTimeoutMs}ms` : String(e).slice(0, 300),
+        },
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+    if (response.ok) break
+    const transient = response.status === 429 || response.status >= 500
+    if (transient && attempt < maxAttempts) {
+      console.error('Azure Foundry image vision transient error, retrying:', response.status)
+      if (retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+      continue
+    }
+    const err = await response.text().catch(() => '')
+    console.error('Azure Foundry image vision failed:', response.status, normalizeInlineText(err).slice(0, 500))
+    return {
+      analysis: null,
+      failure: {
+        stage: 'azure_foundry_http_error',
+        httpStatus: response.status,
+        message: normalizeInlineText(err).slice(0, 500) || 'Azure Foundry API request failed.',
+      },
+    }
+  }
+  if (!response) return { analysis: null, failure: { stage: 'azure_foundry_http_error', message: 'Azure Foundry API request failed.' } }
+
+  let json: unknown
+  try {
+    json = await response.json()
+  } catch (e) {
+    return { analysis: null, failure: { stage: 'azure_foundry_invalid_json', message: String(e).slice(0, 300) } }
+  }
+  const usage = extractAzureFoundryUsage(json)
+  const content = extractAzureFoundryOutputText(json)
+  if (!content) {
+    return { analysis: null, failure: { stage: 'azure_foundry_empty_content', message: 'Azure Foundry response content is empty.' }, usage }
+  }
+  const extracted = parseFirstJsonObject(content)
+  if (extracted && typeof extracted === 'object') {
+    const normalized = normalizeLineImageAnalysisResult(extracted as Record<string, unknown>)
+    if (normalized) return { analysis: normalized, failure: null, usage }
+  }
+  const salvaged = salvageLineImageAnalysisResultFromText(content)
+  if (salvaged) return { analysis: salvaged, failure: null, usage }
+  const fallbackSummary = normalizeInlineText(content).slice(0, 240)
+  if (!fallbackSummary) {
+    return { analysis: null, failure: { stage: 'azure_foundry_unparsable_model_output', message: 'Azure Foundry response could not be parsed.' }, usage }
+  }
+  return { analysis: { summary: fallbackSummary, receipt: null, receiptModelConfidence: null }, failure: null, usage }
+}
+
 function mergeVisionUsage(...items: Array<LineImageVisionUsage | null | undefined>): LineImageVisionUsage | null {
   let inputTokens = 0
   let outputTokens = 0
@@ -371,6 +517,42 @@ export async function analyzeExpenseReceiptWithGroqScout(
   const focusedScore = isCashOutLikeAnalysis(focused.analysis) ? -1000 : scoreExpenseReceiptAnalysis(focused)
   if (focusedScore <= fullScore + 1) return { ...full, usage: combinedUsage ?? full.usage }
 
+  return {
+    analysis: mergeExpenseReceiptAnalyses(full.analysis, focused.analysis),
+    failure: null,
+    usage: combinedUsage ?? focused.usage,
+  }
+}
+
+/** Azure Foundry を使う小口・経費向けの二段階再解析。 */
+export async function analyzeExpenseReceiptWithAzureFoundry(
+  bytes: Uint8Array,
+  contentType: string | null,
+  fileName: string,
+  projectEndpoint: string,
+  apiKey: string,
+  deployment = AZURE_FOUNDRY_VISION_MODEL,
+  systemPromptAddition = '',
+): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
+  const full = await analyzeLineImageWithAzureFoundry(
+    bytes, contentType, fileName, projectEndpoint, apiKey, deployment, systemPromptAddition,
+  )
+  if (!full.analysis?.receipt) return full
+  const focused = await analyzeLineImageWithAzureFoundry(
+    bytes,
+    contentType,
+    `${fileName || 'receipt'}#focused`,
+    projectEndpoint,
+    apiKey,
+    deployment,
+    buildExpenseIgnoreCashOutPrompt(systemPromptAddition, full.analysis),
+  )
+  const combinedUsage = mergeVisionUsage(full.usage, focused.usage)
+  if (!focused.analysis) return { ...full, usage: combinedUsage ?? full.usage }
+
+  const fullScore = isCashOutLikeAnalysis(full.analysis) ? -1000 : scoreExpenseReceiptAnalysis(full)
+  const focusedScore = isCashOutLikeAnalysis(focused.analysis) ? -1000 : scoreExpenseReceiptAnalysis(focused)
+  if (focusedScore <= fullScore + 1) return { ...full, usage: combinedUsage ?? full.usage }
   return {
     analysis: mergeExpenseReceiptAnalyses(full.analysis, focused.analysis),
     failure: null,
