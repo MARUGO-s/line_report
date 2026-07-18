@@ -165,7 +165,7 @@
 |------|------|
 | プロバイダー | Groq |
 | モデル（既定） | `llama-3.3-70b-versatile`（`GROQ_CHAT_MODEL` で変更可） |
-| フォールバック | `meta-llama/llama-4-scout-17b-16e-instruct` |
+| フォールバック | `qwen/qwen3.6-27b` |
 | 最大出力 | 約600〜700トークン |
 | 出力 | 統合AI向けの**分析メモ（下書き）** |
 

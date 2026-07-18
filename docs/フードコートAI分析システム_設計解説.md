@@ -200,7 +200,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 |---|---|
 | プロバイダー | Groq |
 | モデル | `llama-3.3-70b-versatile`（`GROQ_CHAT_MODEL`環境変数で変更可） |
-| フォールバック | `meta-llama/llama-4-scout-17b-16e-instruct` |
+| フォールバック | `qwen/qwen3.6-27b` |
 | 最大出力 | 600〜700トークン |
 | 出力用途 | 統合AIへの「分析メモ（下書き）」 |
 
@@ -583,7 +583,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 専門AI②（gemini preferred）: gemini → groq
 反証AI④（claude preferred）: claude → groq
 専門AI③（grok preferred）  : grok → groq
-専門AI①（groq preferred）  : groq(primary) → groq(llama-4-scout)
+専門AI①（groq preferred）  : groq(primary) → groq(qwen/qwen3.6-27b)
 ```
 
 ---

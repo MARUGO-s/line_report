@@ -273,11 +273,10 @@ MARUGO S のレシート解析カードに「📋 日報を記入する」ボタ
   ↓
 line-webhook が受信
   ↓
-Groq で事前判定（レシートか否か）
-  ↓ レシートの可能性あり
-「解析中…」プッシュ通知を送信
+Azure Foundry（GPT-5.4 nano）で画像解析
+  「解析中…」プッシュ通知を送信
   ↓
-Gemini（高精度店舗）or Groq でレシート解析
+Azure の失敗時だけ Gemini、さらに失敗時だけ Claude へ退避
   ↓
 売上・客数・予算データを DB に保存
   ↓
@@ -294,10 +293,9 @@ Flex メッセージで結果返信（店名・日付・消費税・総売上・
 
 | 店舗・用途 | 使用モデル |
 |---|---|
-| 通常レシート解析（大多数） | Groq（Llama 4 Scout） |
-| 高精度が必要な店舗 | Gemini 2.0 Flash |
-| 売上集計（Claude採用店） | Claude Haiku（現在は空＝全店Groq） |
-| 経費レシート再解析 | Claude |
+| 通常レシート解析（全店舗） | Azure Foundry（GPT-5.4 nano） |
+| Azure障害時の退避 | Gemini、次に Claude Haiku |
+| 経費レシート再解析 | Azure Foundry（GPT-5.4 nano） |
 | AI 品質評価ループ | Claude / Gemini |
 
 ---

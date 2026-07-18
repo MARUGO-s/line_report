@@ -11,7 +11,7 @@
 | 項目 | 内容 |
 |------|------|
 | 受信方式 | LINE 公式アカウントへレシート画像を送信 |
-| 解析エンジン | Groq Vision（`meta-llama/llama-4-scout-17b-16e-instruct`） |
+| 解析エンジン | Azure Foundry（`gpt-5.4-nano`） |
 | 保存先 DB | Supabase プロジェクト `hocbnifuactbvmyjraxy` |
 | Edge Function | `line-webhook/{store_partition_key}` |
 | 返信形式 | Flex Message（売上レポート）＋ 確認用 Flex / テキスト |
@@ -32,7 +32,8 @@ LINE トーク（店舗用 Webhook URL が設定された公式アカウント�
     │
     ├─ 生イベント保存 … line_webhook_raw__{store_partition_key}
     │
-    ├─ 画像取得 → Groq で OCR 解析
+    ├─ 画像取得 → Azure Foundry で OCR / 構造化解析
+    │   （失敗時のみ Gemini、次に Claude Haiku へ退避）
     │
     ├─ 店名一致チェック
     ├─ 同日重複チェック
