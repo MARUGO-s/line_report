@@ -1587,6 +1587,30 @@ async function processReceiptImageEvent(
       await recordAiUsage('gemini', receiptGeminiModel, fallback.usage)
       if (fallback.analysis) analyzed = fallback
       else if (fallback.failure) analyzed = fallback
+
+      // GroqとGeminiが同時に障害（レート上限/割当超過等）を起こすと売上取りこぼしが連鎖するため、
+      // 両方失敗した場合だけ、独立したプロバイダーであるClaudeへさらに退避する
+      // （実障害: 2026-07-18 Groq(qwen3.6-27b・プレビュー)とGemini割当超過が同時発生しbriccolaが全滅）。
+      if (
+        !analyzed.analysis &&
+        shouldFallbackLineImageVisionFailure(fallback.failure) &&
+        resolveClaudeApiKey()
+      ) {
+        console.error(
+          `[receipt_analysis_fallback] Gemini also failed; retrying with Claude (store=${registry.store_partition_key}, msg=${lineMessageId}, stage=${fallback.failure?.stage ?? 'unknown'})`,
+        )
+        const secondFallback = await analyzeLineImageWithClaude(
+          contentFetch.bytes,
+          contentFetch.contentType,
+          lineMessageId,
+          resolveClaudeApiKey(),
+          receiptPromptAddition,
+          CLAUDE_RECEIPT_MODEL,
+        )
+        await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, secondFallback.usage)
+        if (secondFallback.analysis) analyzed = secondFallback
+        else if (secondFallback.failure) analyzed = secondFallback
+      }
     }
   }
 
