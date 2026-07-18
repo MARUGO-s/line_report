@@ -59,6 +59,13 @@ test("Marugo S prompt requires both party and guest counts from the daily report
   assert.match(prompt, /guest_count="112"/);
 });
 
+test("Sauvage prompt maps its handwritten footer by unit, not left-to-right position", () => {
+  const prompt = resolveBuiltinStoreReceiptPrompt("sauvage");
+  assert.match(prompt, /39人 27組/);
+  assert.match(prompt, /guest_count="39"/);
+  assert.match(prompt, /party_count="27"/);
+});
+
 test("Groq image analysis stops after its bounded timeout", async () => {
   const originalFetch = globalThis.fetch;
   let attempts = 0;

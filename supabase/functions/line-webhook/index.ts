@@ -1228,7 +1228,7 @@ async function handleDailySalesImportPostback(
 // 受信専用店（レシートしか送られない店）: Azure が反射・光で kind を外して general 誤判定したとき、
 // 「この店舗のレシートで確定」と宣言して1回だけ Azure で再解析する対象。
 const FORCE_RECEIPT_RETRY_STORE_KEYS = new Set<string>(['barpelota'])
-const MARUGO_S_COUNT_RETRY_STORE_KEYS = new Set<string>(['marugos'])
+const FOOTER_COUNT_RETRY_STORE_KEYS = new Set<string>(['marugos', 'sauvage'])
 const CLAUDE_RECEIPT_MODEL = 'claude-haiku-4-5'
 
 function resolveClaudeApiKey(): string {
@@ -1438,24 +1438,33 @@ async function processReceiptImageEvent(
     }
   }
 
-  // マルゴエスの日計精算レポートは、画像下部の「会計組数・客数」が小さく、売上金額だけ読めても
-  // 106組・112名のような二つの数値を落とすことがある。欠損時だけ Azure に数値部分を再確認させ、
+  // マルゴエス／ソバージュの日計精算レポートは、画像下部の人数・組数が小さく、売上金額だけ読めても
+  // 二つの数値を落とすことがある。欠損時だけ Azure に数値部分を再確認させ、
   // 初回で正しく読めた金額・日付・店名はそのまま保持する。
   const initialReceipt = analyzed.analysis?.receipt ?? null
-  const needsMarugoSCountRetry = !!initialReceipt &&
-    MARUGO_S_COUNT_RETRY_STORE_KEYS.has(String(registry.store_partition_key ?? '').toLowerCase()) &&
+  const receiptStoreKey = String(registry.store_partition_key ?? '').toLowerCase()
+  const needsFooterCountRetry = !!initialReceipt &&
+    FOOTER_COUNT_RETRY_STORE_KEYS.has(receiptStoreKey) &&
     (!String(initialReceipt.partyCount ?? '').trim() || !String(initialReceipt.guestCount ?? '').trim())
-  if (needsMarugoSCountRetry) {
+  if (needsFooterCountRetry) {
+    const countRetryInstruction = receiptStoreKey === 'sauvage'
+      ? [
+        '【人数・組数の再確認。最優先】このソバージュ（SOBA-JU）のレジ精算レポートでは、画像の一番下に手書きで「◯人 ◯組」と記載される。',
+        '単位文字を正本にし、「人」または「名」の直前の数値を guest_count、「組」の直前の数値を party_count に必ず入れる。例: 「39人 27組」なら guest_count="39"、party_count="27"。左右の位置だけで逆にしないこと。',
+      ].join('\n')
+      : [
+        '【会計組数・客数の再確認。最優先】このマルゴエスの日計精算レポートでは、画像下部の「会計組数・客数」の横並びを必ず読むこと。左の「◯組」を party_count、右の「◯名」を guest_count に入れる。',
+        'この二つは必須。薄くても左右のラベルと位置関係で数字を読み直し、既に読めた売上金額ではなく組数・客数の抽出を最優先にすること。',
+      ].join('\n')
     const countRetryPrompt = [
       receiptPromptAddition,
       '',
-      '【会計組数・客数の再確認。最優先】このマルゴエスの日計精算レポートでは、画像下部の「会計組数・客数」の横並びを必ず読むこと。左の「◯組」を party_count、右の「◯名」を guest_count に入れる。',
-      'この二つは必須。薄くても左右のラベルと位置関係で数字を読み直し、既に読めた売上金額ではなく組数・客数の抽出を最優先にすること。',
+      countRetryInstruction,
     ].join('\n')
     const countRetry = await analyzeLineImageWithAzureFoundry(
       contentFetch.bytes,
       contentFetch.contentType,
-      `${lineMessageId}#marugos-counts`,
+      `${lineMessageId}#footer-counts`,
       azureFoundryProjectEndpoint,
       azureFoundryApiKey,
       azureFoundryDeployment,

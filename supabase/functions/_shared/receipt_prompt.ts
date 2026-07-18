@@ -314,6 +314,18 @@ function buildMarugoSBuiltinPrompt(): string {
   ].join('\n')
 }
 
+/** ソバージュ（SOBA-JU）の日計レジ精算レポート。末尾の手書き人数・組数を確実に拾う。 */
+function buildSauvageBuiltinPrompt(): string {
+  return [
+    '【ソバージュ（SOBA-JU）レジ精算レポート固有・組数と客数の抽出（最優先）】',
+    '・見出しが「レジ精算レポート」で、店舗名が「SOBA-JU」または「ソバージュ」の画像は、その日の売上精算である。反射・斜め撮影・手書きがあっても必ず kind="receipt" にする。',
+    '・「売上サマリー」の「純売上」= net_sales、「総売上」= gross_sales、「消費税, 10% 税額」= tax_amount を読む。総売上に出前の預かり金が含まれる場合の売上補正はシステム側で行うため、ここでは印字どおりに抽出する。',
+    '・【最重要: 最下部の手書き人数・組数】用紙の一番下に、手書きで「◯人 ◯組」と必ず記される。数字の左右の位置ではなく、直後の単位文字を正本にする。「人」または「名」の直前の数値 → guest_count、「組」の直前の数値 → party_count。',
+    '・例: 最下部が「39人 27組」なら guest_count="39"、party_count="27"。この並びを party_count="39"、guest_count="27" と逆にしては絶対にいけない。',
+    '・手書き数値が薄くても、最下部を拡大して数字と単位を必ず読み直す。売上金額だけ読めても party_count と guest_count を null にしない。summary にも「組数:◯組 / 客数:◯名」を含める。',
+  ].join('\n')
+}
+
 /**
  * コード側に常駐する店舗固有のレシート解析ルール（恒久・UIで消えない）。
  * DB追記より優先で先頭に置く。例: 鮨こるりは手書きの「売上日報」をレシート扱いにする必要がある。
@@ -322,6 +334,7 @@ const STORE_BUILTIN_RECEIPT_PROMPT_BUILDERS: Record<string, () => string> = {
   sushikoruri: buildSushikoruriBuiltinPrompt,
   barpelota: buildBarpelotaBuiltinPrompt,
   claudia2: buildClaudia2BuiltinPrompt,
+  sauvage: buildSauvageBuiltinPrompt,
   // マルゴ系（同一POS）: 期間集計レポートの誤登録防止。単一日の日計はそのまま売上として扱う。
   marugo: buildMarugoGroupBuiltinPrompt,
   marugod: buildMarugoGroupBuiltinPrompt,
