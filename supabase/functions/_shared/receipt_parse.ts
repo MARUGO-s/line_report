@@ -255,8 +255,32 @@ export function getJstBusinessDateForReceiptBudget(
   return iso
 }
 
+function shiftIsoDateBackOneDay(iso: string): string {
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return iso
+  const previous = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) - 1))
+  return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}-${String(previous.getUTCDate()).padStart(2, '0')}`
+}
+
+/** レシートに併記された営業時間を読む。日付単体・予約時刻などは対象にしない。 */
+function extractReceiptPrintedHour(raw: string | null): number | null {
+  const normalized = decodeEscapedUnicodeSequences(raw ?? '').trim()
+  const match = normalized.match(
+    /\d{4}\s*(?:[-/.年])\s*\d{1,2}\s*(?:[-/.月])\s*\d{1,2}\s*(?:日)?\s*[T　 ]+([01]?\d|2[0-3])(?:\s*(?::|時)\s*[0-5]?\d)?/,
+  )
+  if (!match?.[1]) return null
+  const hour = Number(match[1])
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null
+}
+
 export function resolveReceiptDateIsoForPersist(raw: string | null): string {
-  return parseReceiptDateToIso(raw) ?? getJstBusinessDateForReceiptBudget(new Date())
+  const dateIso = parseReceiptDateToIso(raw)
+  if (!dateIso) return getJstBusinessDateForReceiptBudget(new Date())
+  // 店舗の営業日は 05:00 開始。深夜 00:00〜04:59 の精算は前日の売上として扱う。
+  const hour = extractReceiptPrintedHour(raw)
+  return hour != null && hour < RECEIPT_BUDGET_BUSINESS_DAY_START_HOUR_JST
+    ? shiftIsoDateBackOneDay(dateIso)
+    : dateIso
 }
 
 function formatJapaneseReceiptDateFromIso(iso: string | null): string | null {
@@ -364,7 +388,8 @@ export function normalizeLineImageReceiptAnalysis(
     .filter((x): x is { rate: number; total: string | null; tax: string | null } => x != null && (x.total != null || x.tax != null))
     .slice(0, 4)
 
-  const dateIso = parseReceiptDateToIso(date)
+  // 時刻つき精算は 05:00 未満なら前営業日へ寄せてから、表示用の日付にも反映する。
+  const dateIso = date ? resolveReceiptDateIsoForPersist(date) : null
   if (dateIso) date = formatJapaneseReceiptDateFromIso(dateIso)
 
   if (!storePhone) {

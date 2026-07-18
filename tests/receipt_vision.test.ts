@@ -7,6 +7,10 @@ import {
   shouldFallbackLineImageVisionFailure,
 } from "../supabase/functions/_shared/receipt_vision.ts";
 import { resolveBuiltinStoreReceiptPrompt } from "../supabase/functions/_shared/receipt_prompt.ts";
+import {
+  normalizeLineImageReceiptAnalysis,
+  resolveReceiptDateIsoForPersist,
+} from "../supabase/functions/_shared/receipt_parse.ts";
 
 test("classifies provider failures that should use a fallback", () => {
   assert.equal(
@@ -64,6 +68,19 @@ test("Sauvage prompt maps its handwritten footer by unit, not left-to-right posi
   assert.match(prompt, /39人 27組/);
   assert.match(prompt, /guest_count="39"/);
   assert.match(prompt, /party_count="27"/);
+});
+
+test("uses the previous business date for receipts printed before 05:00 JST", () => {
+  assert.equal(resolveReceiptDateIsoForPersist("2026-07-11 00:12:02"), "2026-07-10");
+  assert.equal(resolveReceiptDateIsoForPersist("2026年7月11日 4時59分"), "2026-07-10");
+  assert.equal(resolveReceiptDateIsoForPersist("2026-07-11 05:00:00"), "2026-07-11");
+
+  const normalized = normalizeLineImageReceiptAnalysis({
+    store_name: "BAR PELOTA",
+    date: "2026-07-11 00:12:02",
+    gross_sales: "¥489,050",
+  });
+  assert.equal(normalized?.date, "2026年7月10日");
 });
 
 test("Groq image analysis stops after its bounded timeout", async () => {
