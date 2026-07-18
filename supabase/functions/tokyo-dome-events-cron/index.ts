@@ -524,7 +524,7 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<{ ev
   let raw = r1.content
   let usage = r1.usage
   if (!raw) {
-    const r2 = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, "meta-llama/llama-4-scout-17b-16e-instruct", 4000)
+    const r2 = await groqChat([{ role: "system", content: system }, { role: "user", content: user }], apiKey, "qwen/qwen3.6-27b", 4000)
     raw = r2.content
     if (r2.usage) usage = r2.usage
   }

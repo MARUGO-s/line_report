@@ -9,6 +9,7 @@ import {
 import { buildReceiptVisionSystemPrompt } from './receipt_prompt.ts'
 
 const VISION_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png'])
+export const GROQ_VISION_MODEL = 'qwen/qwen3.6-27b'
 
 function isVisionAnalyzableImageMime(contentType: string | null): boolean {
   return VISION_IMAGE_MIME_TYPES.has(String(contentType ?? '').trim().toLowerCase())
@@ -72,6 +73,14 @@ export function isTransientLineImageVisionFailure(
   )
 }
 
+/** Groq側の障害・設定不整合なら、入力画像自体の不備を除いて別プロバイダーへ退避する。 */
+export function shouldFallbackLineImageVisionFailure(
+  failure: LineImageVisionFailure | null | undefined,
+): boolean {
+  if (!failure) return false
+  return !/^(?:invalid_image_size|unsupported_mime)$/.test(String(failure.stage ?? ''))
+}
+
 export async function analyzeLineImageWithGroqScout(
   bytes: Uint8Array,
   contentType: string | null,
@@ -100,7 +109,7 @@ export async function analyzeLineImageWithGroqScout(
 
   const imageDataUrl = `data:${mime};base64,${toBase64(bytes)}`
   const requestBody = JSON.stringify({
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    model: GROQ_VISION_MODEL,
     response_format: { type: 'json_object' },
     temperature: 0.1,
     // 経費(line_items)など明細つきJSONが途中切断されないよう余裕を持たせる

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   analyzeLineImageWithGroqScout,
   isTransientLineImageVisionFailure,
+  shouldFallbackLineImageVisionFailure,
 } from "../supabase/functions/_shared/receipt_vision.ts";
 
 test("classifies provider failures that should use a fallback", () => {
@@ -28,6 +29,24 @@ test("classifies provider failures that should use a fallback", () => {
       message: "timed out",
     }),
     true,
+  );
+});
+
+test("falls back for retired models but not invalid image input", () => {
+  assert.equal(
+    shouldFallbackLineImageVisionFailure({
+      stage: "groq_http_error",
+      message: "model_not_found",
+      httpStatus: 404,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldFallbackLineImageVisionFailure({
+      stage: "invalid_image_size",
+      message: "image too large",
+    }),
+    false,
   );
 });
 

@@ -146,7 +146,7 @@ const groqConfig = {
 
 const groqVisionConfig = {
   enabled: asBooleanEnv(process.env.GROQ_VISION_ENABLED, true),
-  model: String(process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct").trim(),
+  model: String(process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b").trim(),
   timeoutMs: Math.max(1000, Number(process.env.GROQ_VISION_TIMEOUT_MS || 12000) || 12000),
   maxCandidates: Math.max(1, Math.min(5, Number(process.env.GROQ_VISION_MAX_CANDIDATES || 3) || 3)),
   maxImageBytes: Math.max(
@@ -158,7 +158,7 @@ const groqVisionConfig = {
 const groqWineFlowConfig = {
   enabled: asBooleanEnv(process.env.GROQ_WINE_FLOW_ENABLED, true),
   analysisModel: String(
-    process.env.GROQ_WINE_ANALYSIS_MODEL || process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
+    process.env.GROQ_WINE_ANALYSIS_MODEL || process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b"
   ).trim(),
   replyModel: String(process.env.GROQ_WINE_REPLY_MODEL || process.env.GROQ_MODEL || "llama-3.1-8b-instant").trim(),
   timeoutMs: Math.max(1000, Number(process.env.GROQ_WINE_TIMEOUT_MS || 12000) || 12000)

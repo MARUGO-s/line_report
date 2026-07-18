@@ -57,7 +57,7 @@ import {
   resolveReceiptDateIsoForPersist,
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
-import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithClaude, analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, isTransientLineImageVisionFailure, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
+import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithClaude, analyzeLineImageWithGemini, analyzeLineImageWithGroqScout, GROQ_VISION_MODEL, shouldFallbackLineImageVisionFailure, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
 import {
   combineStoreReceiptPromptAdditions,
   EXPENSE_RECEIPT_PROMPT_ADDITION,
@@ -1360,7 +1360,7 @@ async function processReceiptImageEvent(
   const useGeminiForReceipt = GEMINI_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
   const useClaudeForReceipt = !useGeminiForReceipt && CLAUDE_RECEIPT_STORE_KEYS.has(String(registry.store_partition_key ?? ''))
   const receiptGeminiModel = resolveReceiptGeminiModel()
-  const GROQ_RECEIPT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  const GROQ_RECEIPT_MODEL = GROQ_VISION_MODEL
   const CLAUDE_RECEIPT_MODEL = 'claude-haiku-4-5'
 
   // AI使用料ページの「実測」表示用に、APIが返した実測トークンを1行記録する。
@@ -1443,7 +1443,7 @@ async function processReceiptImageEvent(
       // 後段の予約分岐（確認カード）で処理する。
       analyzed = pre
     } else if (
-      !isTransientLineImageVisionFailure(pre.failure) &&
+      !shouldFallbackLineImageVisionFailure(pre.failure) &&
       !shouldEscalateToGeminiReceipt(pre.analysis)
     ) {
       // 売上の手掛かりが皆無（メニュー・献立・お品書き等）→ Gemini を呼ばず、解析中push も結果返信もしない。
@@ -1497,7 +1497,7 @@ async function processReceiptImageEvent(
     if (pre.analysis?.reservation) {
       analyzed = pre
     } else if (
-      !isTransientLineImageVisionFailure(pre.failure) &&
+      !shouldFallbackLineImageVisionFailure(pre.failure) &&
       !shouldEscalateToGeminiReceipt(pre.analysis)
     ) {
       console.log(`[receipt_pre_filter] skip non-receipt image (store=${registry.store_partition_key}, msg=${lineMessageId})`)
@@ -1566,11 +1566,11 @@ async function processReceiptImageEvent(
     )
     await recordAiUsage('groq', GROQ_RECEIPT_MODEL, analyzed.usage)
 
-    // Groqの一過性障害時だけGeminiへ退避する。通常時の安価なGroq経路は維持しつつ、
+    // Groq側の障害・モデル廃止・設定不整合時はGeminiへ退避する。通常時のGroq経路は維持しつつ、
     // レシートとフードコート表が同時に無反応になる単一障害点をなくす。
     if (
       !analyzed.analysis &&
-      isTransientLineImageVisionFailure(analyzed.failure) &&
+      shouldFallbackLineImageVisionFailure(analyzed.failure) &&
       resolveGeminiApiKey()
     ) {
       console.error(
@@ -1721,7 +1721,7 @@ async function processReceiptImageEvent(
     // その場合は誤解を招く「読み取れませんでした」ではなく、再送を促す（2026-07-01 Groq 503 で
     // bistrocavacava のレシートが消失した実障害。リトライ後もなお失敗したときの安全網）。
     const failureStage = String(analyzed.failure?.stage ?? '')
-    const isTransientProviderFailure = isTransientLineImageVisionFailure(analyzed.failure)
+    const isProviderFailure = !!analyzed.failure
     if (analyzed.failure) {
       await recordLineWebhookDeliveryLog({
         storePartitionKey: registry.store_partition_key,
@@ -1738,14 +1738,14 @@ async function processReceiptImageEvent(
         },
       })
     }
-    const msg = isTransientProviderFailure
-      ? '⚠ AI解析が一時的に混み合って処理できませんでした。お手数ですが、この画像をもう一度お送りください。'
+    const msg = isProviderFailure
+      ? '⚠ AI画像解析を完了できませんでした。お手数ですが、少し時間をおいてこの画像をもう一度お送りください。'
       : analyzed.analysis?.summary
       ? `画像を確認しました。\n${analyzed.analysis.summary}`
       : 'レシートとして読み取れる項目がありませんでした。'
     // プロバイダー障害は「その他画像」ではなく解析失敗なので、レシート解析返信の設定に従う。
     // これにより non_receipt_image_reply_enabled=false の部屋でも無言終了しない。
-    const failureReplyToken = isTransientProviderFailure ? receiptReplyToken : nonReceiptReplyToken
+    const failureReplyToken = isProviderFailure ? receiptReplyToken : nonReceiptReplyToken
     if (failureReplyToken) {
       await replyLineText(
         failureReplyToken,
@@ -1754,7 +1754,7 @@ async function processReceiptImageEvent(
         webhookReplyLog(
           registry,
           roomId,
-          isTransientProviderFailure ? 'receipt_image_analysis_failed' : 'receipt_image_no_receipt',
+          isProviderFailure ? 'receipt_image_analysis_failed' : 'receipt_image_no_receipt',
         ),
       )
     }

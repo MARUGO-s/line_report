@@ -661,17 +661,17 @@
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
     // v2: OpenAI 単価を gpt-5.5($5/$30) → o4-mini($1.10/$4.40) に更新。保存済みの旧単価を引き継がないようキーを更新。
-    const RATES_KEY = 'line_report_ai_usage_rates_v2';
+    const RATES_KEY = 'line_report_ai_usage_rates_v3';
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
     // 単価は各社の公式単価（USD / 100万トークン）。OpenAI o4-mini は $1.10/$4.40（公式）。
     // Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
-    // Groq llama-4-scout（レシート/画像抽出）の目安は $0.11/$0.34。Claude Haiku 4.5 は $1/$5（公式）。
+    // Groq Qwen 3.6 27B（レシート/画像抽出）は $0.60/$3.00。Claude Haiku 4.5 は $1/$5（公式）。
     // フードコートQ&A・ドーム抽出は Groq llama-3.3-70b（目安 $0.59/$0.79）で別単価。
     // Grok / xAI は grok-3-mini の目安 $0.30/$0.50。モデル差し替え時は画面上で上書きする。
     // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
     const DEFAULT_RATES = {
-      groq:     { inUsd: 0.11, outUsd: 0.34 },   // llama-4-scout（Vision/レシート・画像抽出）
+      groq:     { inUsd: 0.60, outUsd: 3.00 },   // qwen3.6-27b（Vision/レシート・画像抽出）
       groqChat: { inUsd: 0.59, outUsd: 0.79 },   // llama-3.3-70b-versatile（フードコートQ&A・ドームLLM）
       openai:   { inUsd: 1.10, outUsd: 4.40 },   // o4-mini（フードコート最終統合）
       grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
@@ -682,7 +682,7 @@
     // 実測ログの model 名 → 単価キーの対応。未知の groq モデルはチャット扱い（scout以外）。
     function rateKeyForModel(provider, model) {
       const m = String(model || '').toLowerCase();
-      if (provider === 'groq') return (m.indexOf('scout') >= 0 || m.indexOf('vision') >= 0) ? 'groq' : 'groqChat';
+      if (provider === 'groq') return (m.indexOf('qwen3.6-27b') >= 0 || m.indexOf('scout') >= 0 || m.indexOf('vision') >= 0) ? 'groq' : 'groqChat';
       if (provider === 'openai') return 'openai';
       if (provider === 'grok' || provider === 'xai') return 'grok';
       if (provider === 'gemini') return 'gemini';
@@ -863,9 +863,15 @@
     function providerUsd(inputTokens, outputTokens, rate) {
       return (Number(inputTokens || 0) * rate.inUsd + Number(outputTokens || 0) * rate.outUsd) / 1e6;
     }
+    function rateForModel(provider, model) {
+      const m = String(model || '').toLowerCase();
+      // 7/17以前のScout実績は当時の単価で保持し、Qwen移行後の費用と混ぜない。
+      if (provider === 'groq' && m.indexOf('llama-4-scout') >= 0) return { inUsd: 0.11, outUsd: 0.34 };
+      return state.rates[rateKeyForModel(provider, model)] || DEFAULT_RATES.groq;
+    }
     // 思考トークンは出力として課金されるため出力側に含める（無ければ0）。
     function modelUsd(m) {
-      const rate = state.rates[rateKeyForModel(m.provider, m.model)] || DEFAULT_RATES.groq;
+      const rate = rateForModel(m.provider, m.model);
       const inTok = Number(m.input_tokens || 0);
       const outTok = Number(m.output_tokens || 0) + Number(m.thinking_tokens || 0);
       return (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
@@ -964,7 +970,7 @@
     }
 
     const KNOWN_AI_MODELS = [
-      { provider: 'groq', model: 'meta-llama/llama-4-scout-17b-16e-instruct', title: 'Groq Vision', className: '' },
+      { provider: 'groq', model: 'qwen/qwen3.6-27b', title: 'Groq Vision', className: '' },
       { provider: 'groq', model: 'llama-3.3-70b-versatile', title: 'Groq Chat', className: 'groq-chat' },
       { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini', className: 'gemini' },
       { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
@@ -1096,7 +1102,8 @@
 
     // モデル別の正確な内訳（実測トークン × モデル別単価）。groqのscout/70bなど同一プロバイダ複数モデルを分けて表示。
     const MODEL_LABELS = {
-      'meta-llama/llama-4-scout-17b-16e-instruct': 'レシート/画像抽出（Vision）',
+      'qwen/qwen3.6-27b': 'レシート/画像抽出（Vision）',
+      'meta-llama/llama-4-scout-17b-16e-instruct': 'レシート/画像抽出（旧Vision）',
       'llama-3.3-70b-versatile': 'フードコートQ&A・分析サマリー・ドーム抽出',
       'o4-mini': 'フードコート分析の最終統合',
       'gpt-5.5': 'フードコート分析の最終統合（旧モデル）',
@@ -1116,7 +1123,7 @@
       models.sort(function (a, b) { return modelUsd(b) - modelUsd(a); });
       let totalJpy = 0;
       const rows = models.map(function (mm) {
-        const rate = state.rates[rateKeyForModel(mm.provider, mm.model)] || DEFAULT_RATES.groq;
+        const rate = rateForModel(mm.provider, mm.model);
         const jpy = modelUsd(mm) * jpyPerUsd;
         totalJpy += jpy;
         const use = MODEL_LABELS[mm.model] || '';

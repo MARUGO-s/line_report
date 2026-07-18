@@ -326,7 +326,7 @@ export async function extractFoodCourtTenants(
   return tenantsFromParsed(parseFirstJson(text))
 }
 
-// 安価な Groq(llama-4-scout) で抽出（印字されたクリーンな表向け）。失敗時は呼び出し側で Gemini にフォールバック。
+// Groq Qwen Vision で抽出（印字されたクリーンな表向け）。失敗時は呼び出し側で Gemini にフォールバック。
 export async function extractFoodCourtTenantsGroq(
   bytes: Uint8Array,
   contentType: string | null,
@@ -345,7 +345,7 @@ export async function extractFoodCourtTenantsGroq(
       method: 'POST',
       headers: { Authorization: `Bearer ${groqApiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        model: 'qwen/qwen3.6-27b',
         response_format: { type: 'json_object' },
         temperature: 0.1,
         max_tokens: 2000,
@@ -367,7 +367,7 @@ export async function extractFoodCourtTenantsGroq(
   }
   if (!res.ok) { console.error('extractFoodCourtTenantsGroq http error:', res.status); return null }
   const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown } | null
-  if (onUsage) { const u = groqUsageFrom(json, 'meta-llama/llama-4-scout-17b-16e-instruct'); if (u) onUsage(u) }
+  if (onUsage) { const u = groqUsageFrom(json, 'qwen/qwen3.6-27b'); if (u) onUsage(u) }
   const content = String(json?.choices?.[0]?.message?.content ?? '')
   return tenantsFromParsed(parseFirstJson(content))
 }
@@ -2683,7 +2683,7 @@ export async function answerFoodCourtQuestion(
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)   // 異常値Zスコア
   const forecastCtx = buildForecastContext(forecast)                      // 学習型モデルの予測＋自己採点
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const fallbackModel = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  const fallbackModel = 'qwen/qwen3.6-27b'
   // 画面に表示中の単日レポートの対象日。これを渡さないと、AIは何十日分もの生データのどの日の話かを
   // 画面と無関係に(会話文脈やイベントの派手さだけで)決めてしまい、時間軸がずれた回答をする原因になる。
   const viewingBlock = viewingDate
@@ -2880,7 +2880,7 @@ export async function generateFoodCourtDailySummary(
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const dailyLogsBlock = nippou.block
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const fallbackModel = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  const fallbackModel = 'qwen/qwen3.6-27b'
 
   // --- 専門AI①: 対象日の他店舗比較・過去データ分析メモ ---
   const quantSystem = [
@@ -3036,7 +3036,7 @@ export async function generateFoodCourtPeriodSummary(
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const dailyLogsBlock = nippou.block
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const fallbackModel = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  const fallbackModel = 'qwen/qwen3.6-27b'
 
   // --- 専門AI①: 対象期間の他店舗比較・過去データ分析メモ ---
   const quantSystem = [
@@ -3308,7 +3308,7 @@ export async function maybeHandleFoodCourtReport(
   // 画像抽出で消費したトークンを記録（成立有無に関わらず・AI使用料に反映）。
   const aiUsages: FoodCourtAiUsage[] = []
   const onUsage = (u: FoodCourtAiUsage) => { aiUsages.push(u) }
-  // 1) まず安価な Groq(llama-4-scout) で抽出（印字されたクリーンな表は読める想定）。
+  // 1) まず Groq Qwen Vision で抽出（印字されたクリーンな表は読める想定）。
   let tenants = valid(await extractFoodCourtTenantsGroq(params.bytes, params.contentType, params.groqApiKey ?? '', 25000, onUsage))
   // 2) Groqが表として成立しない or テナント数が想定より少ない（読み落とし疑い）→ 高精度な Gemini にフォールバック。
   if ((!tenants || tenants.length < minOk) && params.geminiApiKey) {
@@ -3491,7 +3491,7 @@ export async function generateFoodCourtWeeklyReport(
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)
   const forecastCtx = buildForecastContext(forecast)
   const primary = String(Deno.env.get('GROQ_CHAT_MODEL') || '').trim() || 'llama-3.3-70b-versatile'
-  const fallbackModel = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  const fallbackModel = 'qwen/qwen3.6-27b'
 
   // 日報（施策記録）＋週内の施策×実績効果対照
   const weekLogs = dailyLogs.filter((l) => {

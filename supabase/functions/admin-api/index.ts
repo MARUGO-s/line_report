@@ -25,7 +25,7 @@ import {
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
 import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
-import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithGroqScout, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
+import { analyzeExpenseReceiptWithGroqScout, analyzeLineImageWithGroqScout, GROQ_VISION_MODEL, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
 import {
   answerFoodCourtQuestion,
@@ -358,7 +358,7 @@ const DOCUMENT_PDF_EXTRACT_MAX_PAGES = 120
 const DOCUMENT_TEXT_BINARY_RATIO_MAX = 0.08
 const PETTY_CASH_RECEIPT_IMAGE_BUCKET = "line-media"
 const PETTY_CASH_RECEIPT_IMAGE_MAX_BYTES = GROQ_VISION_BASE64_MAX_BYTES
-const GROQ_RECEIPT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+const GROQ_RECEIPT_MODEL = GROQ_VISION_MODEL
 const PDFJS_MODULE_URL = "https://esm.sh/pdfjs-dist@4.10.38/build/pdf.mjs"
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -9306,7 +9306,7 @@ const AI_USAGE_GEMINI_MODEL = "gemini-3.1-pro-preview"
 // ＋経費（小口）の再解析も Claude を使うため、claude バケットには「claudia2の売上解析」と「全店の経費解析」のトークンが入る。
 const AI_USAGE_CLAUDE_STORE_KEYS = new Set<string>(["claudia2"])
 const AI_USAGE_CLAUDE_MODEL = "claude-haiku-4-5"
-const AI_USAGE_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+const AI_USAGE_GROQ_MODEL = GROQ_VISION_MODEL
 const AI_USAGE_OPENAI_MODEL = "gpt-5.5"
 const AI_USAGE_GROK_MODEL = "grok-3-mini"
 
