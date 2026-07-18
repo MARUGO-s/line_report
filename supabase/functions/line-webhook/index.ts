@@ -1228,6 +1228,7 @@ async function handleDailySalesImportPostback(
 // 受信専用店（レシートしか送られない店）: Azure が反射・光で kind を外して general 誤判定したとき、
 // 「この店舗のレシートで確定」と宣言して1回だけ Azure で再解析する対象。
 const FORCE_RECEIPT_RETRY_STORE_KEYS = new Set<string>(['barpelota'])
+const MARUGO_S_COUNT_RETRY_STORE_KEYS = new Set<string>(['marugos'])
 const CLAUDE_RECEIPT_MODEL = 'claude-haiku-4-5'
 
 function resolveClaudeApiKey(): string {
@@ -1434,6 +1435,50 @@ async function processReceiptImageEvent(
       )
       await recordAiUsage('claude', CLAUDE_RECEIPT_MODEL, secondFallback.usage)
       if (secondFallback.analysis || secondFallback.failure) analyzed = secondFallback
+    }
+  }
+
+  // マルゴエスの日計精算レポートは、画像下部の「会計組数・客数」が小さく、売上金額だけ読めても
+  // 106組・112名のような二つの数値を落とすことがある。欠損時だけ Azure に数値部分を再確認させ、
+  // 初回で正しく読めた金額・日付・店名はそのまま保持する。
+  const initialReceipt = analyzed.analysis?.receipt ?? null
+  const needsMarugoSCountRetry = !!initialReceipt &&
+    MARUGO_S_COUNT_RETRY_STORE_KEYS.has(String(registry.store_partition_key ?? '').toLowerCase()) &&
+    (!String(initialReceipt.partyCount ?? '').trim() || !String(initialReceipt.guestCount ?? '').trim())
+  if (needsMarugoSCountRetry) {
+    const countRetryPrompt = [
+      receiptPromptAddition,
+      '',
+      '【会計組数・客数の再確認。最優先】このマルゴエスの日計精算レポートでは、画像下部の「会計組数・客数」の横並びを必ず読むこと。左の「◯組」を party_count、右の「◯名」を guest_count に入れる。',
+      'この二つは必須。薄くても左右のラベルと位置関係で数字を読み直し、既に読めた売上金額ではなく組数・客数の抽出を最優先にすること。',
+    ].join('\n')
+    const countRetry = await analyzeLineImageWithAzureFoundry(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      `${lineMessageId}#marugos-counts`,
+      azureFoundryProjectEndpoint,
+      azureFoundryApiKey,
+      azureFoundryDeployment,
+      countRetryPrompt,
+    )
+    await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, countRetry.usage)
+    const retriedReceipt = countRetry.analysis?.receipt ?? null
+    if (retriedReceipt && (String(retriedReceipt.partyCount ?? '').trim() || String(retriedReceipt.guestCount ?? '').trim())) {
+      analyzed = {
+        ...analyzed,
+        analysis: {
+          ...analyzed.analysis!,
+          receiptModelConfidence: Math.max(
+            analyzed.analysis?.receiptModelConfidence ?? 0,
+            countRetry.analysis?.receiptModelConfidence ?? 0,
+          ),
+          receipt: {
+            ...initialReceipt,
+            partyCount: retriedReceipt.partyCount || initialReceipt.partyCount,
+            guestCount: retriedReceipt.guestCount || initialReceipt.guestCount,
+          },
+        },
+      }
     }
   }
 

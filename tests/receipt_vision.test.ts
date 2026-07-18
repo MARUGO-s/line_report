@@ -6,6 +6,7 @@ import {
   isTransientLineImageVisionFailure,
   shouldFallbackLineImageVisionFailure,
 } from "../supabase/functions/_shared/receipt_vision.ts";
+import { resolveBuiltinStoreReceiptPrompt } from "../supabase/functions/_shared/receipt_prompt.ts";
 
 test("classifies provider failures that should use a fallback", () => {
   assert.equal(
@@ -49,6 +50,13 @@ test("falls back for retired models but not invalid image input", () => {
     }),
     false,
   );
+});
+
+test("Marugo S prompt requires both party and guest counts from the daily report footer", () => {
+  const prompt = resolveBuiltinStoreReceiptPrompt("marugoS");
+  assert.match(prompt, /会計組数・客数/);
+  assert.match(prompt, /party_count="106"/);
+  assert.match(prompt, /guest_count="112"/);
 });
 
 test("Groq image analysis stops after its bounded timeout", async () => {

@@ -302,6 +302,18 @@ function buildMarugoGroupBuiltinPrompt(): string {
   ].join('\n')
 }
 
+/** マルゴエス（日計精算レポート）固有。末尾の会計組数・客数を必ず拾う。 */
+function buildMarugoSBuiltinPrompt(): string {
+  return [
+    buildMarugoGroupBuiltinPrompt(),
+    '【マルゴエス（MARUGO:S）日計精算レポート固有・組数と客数の抽出（最優先）】',
+    '・見出しが「日計精算レポート」で、下部に「会計組数・客数」と横並びで印字される画像は、その日の売上精算である。kind="receipt" にする。',
+    '・下部の横並びは左が会計組数、右が客数である。例: 「106組　112名」と読める場合は party_count="106"、guest_count="112" を必ず入れる。',
+    '・「組」「名」の文字が薄くても、ラベル「会計組数・客数」と左右の位置関係から二つの数値を読み直すこと。どちらか一方だけを null にしてはいけない。',
+    '・純売上、消費税、総売上と同じく party_count・guest_count はこの日計精算レポートの必須項目。summary にも「組数:◯組 / 客数:◯名」を含める。',
+  ].join('\n')
+}
+
 /**
  * コード側に常駐する店舗固有のレシート解析ルール（恒久・UIで消えない）。
  * DB追記より優先で先頭に置く。例: 鮨こるりは手書きの「売上日報」をレシート扱いにする必要がある。
@@ -313,7 +325,7 @@ const STORE_BUILTIN_RECEIPT_PROMPT_BUILDERS: Record<string, () => string> = {
   // マルゴ系（同一POS）: 期間集計レポートの誤登録防止。単一日の日計はそのまま売上として扱う。
   marugo: buildMarugoGroupBuiltinPrompt,
   marugod: buildMarugoGroupBuiltinPrompt,
-  marugos: buildMarugoGroupBuiltinPrompt,
+  marugos: buildMarugoSBuiltinPrompt,
   marugogrande: buildMarugoGroupBuiltinPrompt,
   marugomarunouchi: buildMarugoGroupBuiltinPrompt,
   marugootto: buildMarugoGroupBuiltinPrompt,
