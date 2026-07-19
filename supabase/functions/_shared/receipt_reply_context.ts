@@ -62,10 +62,39 @@ export type ReceiptReplyContext = {
 
 type MonthAgg = {
   gross: number
+  net: number
+  tax: number
   party: number
   guest: number
   businessDays: number
-  byDate: Map<string, { gross: number; party: number; guest: number }>
+  byDate: Map<string, { gross: number; net: number; tax: number; party: number; guest: number }>
+}
+
+type DayAgg = { gross: number; net: number; tax: number; party: number; guest: number }
+
+/** 返信カード上段は、保存済みの同日分があればその合計を正本にする。 */
+export function resolveReceiptReplyDayValues(
+  dayAgg: DayAgg | undefined,
+  receipt: LineImageReceiptAnalysis,
+): Pick<ReceiptReplyContext, 'taxAmountYen' | 'grossSalesYen' | 'partyCount' | 'guestCount' | 'unitPriceYen'> {
+  if (dayAgg) {
+    return {
+      taxAmountYen: dayAgg.tax,
+      grossSalesYen: dayAgg.gross,
+      partyCount: dayAgg.party,
+      guestCount: dayAgg.guest,
+      unitPriceYen: dayAgg.guest > 0 ? Math.round(dayAgg.gross / dayAgg.guest) : null,
+    }
+  }
+  const party = parseIntegerCount(receipt.partyCount)
+  const guest = parseIntegerCount(receipt.guestCount)
+  return {
+    taxAmountYen: parseCurrencyAmount(receipt.taxAmount),
+    grossSalesYen: parseCurrencyAmount(receipt.grossSales),
+    partyCount: party != null && isPlausibleReceiptCount(party) ? party : null,
+    guestCount: guest != null && isPlausibleReceiptCount(guest, 99_999) ? guest : null,
+    unitPriceYen: parseCurrencyAmount(receipt.unitPrice),
+  }
 }
 
 function parsePositiveWeight(value: unknown, fallback: number): number {
@@ -152,6 +181,8 @@ function mergePriorAggWithManualMonth(
   const ratio = computeComparableMonthProgressRatio(priorMonth, priorEndDate)
   return {
     gross: prorateManualWholeMonthValue(manualMonth.gross_sales_yen, ratio) ?? priorAgg.gross,
+    net: priorAgg.net,
+    tax: priorAgg.tax,
     party: prorateManualWholeMonthValue(manualMonth.party_count, ratio) ?? priorAgg.party,
     guest: prorateManualWholeMonthValue(manualMonth.guest_count, ratio) ?? priorAgg.guest,
     businessDays: prorateManualWholeMonthValue(manualMonth.operating_days_count, ratio) ?? priorAgg.businessDays,
@@ -235,7 +266,7 @@ async function loadMonthAggUpToDate(
   month: string,
   endDateIso: string,
 ): Promise<MonthAgg> {
-  const empty: MonthAgg = { gross: 0, party: 0, guest: 0, businessDays: 0, byDate: new Map() }
+  const empty: MonthAgg = { gross: 0, net: 0, tax: 0, party: 0, guest: 0, businessDays: 0, byDate: new Map() }
   const startDateStr = `${month}-01`
   const endParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(endDateIso)
   if (!endParts) return empty
@@ -247,15 +278,17 @@ async function loadMonthAggUpToDate(
 
   const { data, error } = await supabase
     .from(receiptTable)
-    .select('receipt_date, gross_sales_yen, party_count, guest_count')
+    .select('receipt_date, net_sales_yen, tax_amount_yen, gross_sales_yen, party_count, guest_count')
     .gte('receipt_date', startDateStr)
     .lt('receipt_date', endDateStr)
     .limit(20000)
 
   if (error || !Array.isArray(data)) return empty
 
-  const byDate = new Map<string, { gross: number; party: number; guest: number }>()
+  const byDate = new Map<string, { gross: number; net: number; tax: number; party: number; guest: number }>()
   let gross = 0
+  let net = 0
+  let tax = 0
   let party = 0
   let guest = 0
 
@@ -264,13 +297,21 @@ async function loadMonthAggUpToDate(
     if (!dateKey.startsWith(month)) continue
     const g = Number((row as { gross_sales_yen?: unknown }).gross_sales_yen)
     const gVal = Number.isFinite(g) ? g : 0
+    const n = Number((row as { net_sales_yen?: unknown }).net_sales_yen)
+    const nVal = Number.isFinite(n) ? n : 0
+    const t = Number((row as { tax_amount_yen?: unknown }).tax_amount_yen)
+    const tVal = Number.isFinite(t) ? t : 0
     const pVal = sanitizeReceiptCountFromDb((row as { party_count?: unknown }).party_count)
     const guVal = sanitizeReceiptCountFromDb((row as { guest_count?: unknown }).guest_count, 99_999)
     gross += gVal
+    net += nVal
+    tax += tVal
     party += pVal
     guest += guVal
-    const prev = byDate.get(dateKey) ?? { gross: 0, party: 0, guest: 0 }
+    const prev = byDate.get(dateKey) ?? { gross: 0, net: 0, tax: 0, party: 0, guest: 0 }
     prev.gross += gVal
+    prev.net += nVal
+    prev.tax += tVal
     prev.party += pVal
     prev.guest += guVal
     byDate.set(dateKey, prev)
@@ -278,6 +319,8 @@ async function loadMonthAggUpToDate(
 
   return {
     gross,
+    net,
+    tax,
     party,
     guest,
     businessDays: byDate.size,
@@ -375,6 +418,10 @@ export async function loadReceiptReplyContext(
     month,
     params.receiptDateIso,
   )
+  // 同日の複数レシートを「加算」した場合、返信カード上段も今回の1枚分ではなく
+  // DBに保存された当日合計を表示する。月間・予算・前年比と同じ集計基準に揃える。
+  const dayAgg = monthAgg.byDate.get(params.receiptDateIso)
+  const replyDayValues = resolveReceiptReplyDayValues(dayAgg, params.receipt)
 
   const budgetRow = await fetchBudgetForStoreMonth(supabase, params.storePartitionKey, month)
   const holidaySet = budgetRow ? await fetchJapaneseHolidaySet() : null
@@ -454,17 +501,7 @@ export async function loadReceiptReplyContext(
     foodcourtReportUrl,
     receiptDateText: params.receipt.date ?? params.receiptDateIso,
     receiptDateIso: params.receiptDateIso,
-    taxAmountYen: parseCurrencyAmount(params.receipt.taxAmount),
-    grossSalesYen: parseCurrencyAmount(params.receipt.grossSales),
-    partyCount: (() => {
-      const p = parseIntegerCount(params.receipt.partyCount)
-      return p != null && isPlausibleReceiptCount(p) ? p : null
-    })(),
-    guestCount: (() => {
-      const g = parseIntegerCount(params.receipt.guestCount)
-      return g != null && isPlausibleReceiptCount(g, 99_999) ? g : null
-    })(),
-    unitPriceYen: parseCurrencyAmount(params.receipt.unitPrice),
+    ...replyDayValues,
     monthGrossSalesYen: monthAgg.gross,
     monthPartyCount: monthAgg.party,
     monthGuestCount: monthAgg.guest,

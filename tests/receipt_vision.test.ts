@@ -16,6 +16,7 @@ import {
   normalizeLineImageReceiptAnalysis,
   resolveReceiptDateIsoForPersist,
 } from "../supabase/functions/_shared/receipt_parse.ts";
+import { resolveReceiptReplyDayValues } from "../supabase/functions/_shared/receipt_reply_context.ts";
 
 test("expense prompt keeps the SEIYU supplier rule within the configured limit", () => {
   assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /SEIYU（西友）/);
@@ -271,6 +272,34 @@ test("keeps 組数 and 客数 in their own fields", () => {
   assert.equal(receipt?.partyCount, "86組");
   assert.equal(receipt?.guestCount, "220名");
   assert.equal(receipt?.unitPrice, "¥4,154");
+});
+
+test("uses the stored daily aggregate in the reply after a duplicate receipt is added", () => {
+  const values = resolveReceiptReplyDayValues({
+    net: 444_018,
+    tax: 44_382,
+    gross: 488_400,
+    party: 48,
+    guest: 114,
+  }, {
+    storeName: "マルゴ",
+    storePhone: null,
+    date: "2026年7月19日",
+    netSales: "¥222,009",
+    taxAmount: "¥22,191",
+    grossSales: "¥244,200",
+    partyCount: "24組",
+    guestCount: "57名",
+    unitPrice: "¥4,284",
+    items: [],
+  });
+  assert.deepEqual(values, {
+    taxAmountYen: 44_382,
+    grossSalesYen: 488_400,
+    partyCount: 48,
+    guestCount: 114,
+    unitPriceYen: 4_284,
+  });
 });
 
 test("swaps 組数/客数 when the model puts them in the wrong fields", () => {
