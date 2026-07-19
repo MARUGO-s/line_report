@@ -54,6 +54,7 @@ import {
   computeReceiptHeuristicConfidence,
   mergeReceiptConfidence,
   normalizeInlineText,
+  isSingleDayPeriodSettlementReport,
   resolveReceiptDateIsoForPersist,
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
@@ -1658,9 +1659,10 @@ async function processReceiptImageEvent(
   // （経費の先打ち await_image 取込と reanalyzeAsExpense の定義は、精算解析を省くため上方へ移動済み。
   //   ここまで来た時点で await_image の経費 pending は無い＝以降は通常の精算レシートとして処理する。）
 
-  // マーカー（店舗プロンプトが付与）に加え、日付範囲「開始◯〜終了◯」の構造自体も普遍の安全網として検知する
-  //   （複数日にまたがる＝期間集計＝1日の売上ではない）。単一日付の日計レシートは開始/終了が無いので当たらない。
-  if (/期間集計|日付範囲|GP（グループ）|ＧＰ（グループ）|［期間］|\[期間\]|開始.{0,24}終了/.test(analyzedSummaryText)) {
+  // 期間指定帳票は複数日だけを除外する。開始日=終了日・全指定・(1日)は後日再発行した
+  // 1営業日分の日計なので、タイトルに[期間]があっても通常の売上として登録する。
+  const isSingleDayPeriodSettlement = isSingleDayPeriodSettlementReport(analyzedSummaryText)
+  if (!isSingleDayPeriodSettlement && /期間集計|日付範囲|GP（グループ）|ＧＰ（グループ）|［期間］|\[期間\]|開始.{0,24}終了/.test(analyzedSummaryText)) {
     return { saved: false, replied: false, reason: 'period_summary_skip' }
   }
 

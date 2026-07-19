@@ -14,6 +14,7 @@ import {
 } from "../supabase/functions/_shared/receipt_prompt.ts";
 import {
   normalizeLineImageReceiptAnalysis,
+  isSingleDayPeriodSettlementReport,
   resolveReceiptDateIsoForPersist,
 } from "../supabase/functions/_shared/receipt_parse.ts";
 import { resolveReceiptReplyDayValues } from "../supabase/functions/_shared/receipt_reply_context.ts";
@@ -105,6 +106,14 @@ test("Marugo daily-settlement prompt preserves both digits of the guest count", 
   const prompt = resolveBuiltinStoreReceiptPrompt("marugo");
   assert.match(prompt, /24組 57名/);
   assert.match(prompt, /客数の十の位を落とさない/);
+});
+
+test("treats a one-day all-term period report as a reissued daily settlement", () => {
+  const oneDay = '売上点検[期間] 取引別点検 日付範囲 開始:2026年07月14日(火) 終了:2026年07月14日(火) 曜日指定:全指定（1日） 分析レベル:合計値';
+  const multiDay = '売上点検[期間] 日付範囲 開始:2026年07月01日 終了:2026年07月14日 曜日指定:全指定（14日）';
+  assert.equal(isSingleDayPeriodSettlementReport(oneDay), true);
+  assert.equal(isSingleDayPeriodSettlementReport(multiDay), false);
+  assert.match(resolveBuiltinStoreReceiptPrompt("marugoyotsuya"), /後日再発行/);
 });
 
 test("Sauvage prompt maps its handwritten footer by unit, not left-to-right position", () => {

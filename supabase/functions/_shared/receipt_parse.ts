@@ -57,6 +57,22 @@ export function looksLikeSalesDateDigits(raw: string): boolean {
   return /^20\d{6}$/.test(digits)
 }
 
+/**
+ * マルゴPOSの「期間指定」帳票でも、開始日＝終了日・曜日全指定・(1日)なら、
+ * 後日再発行した1営業日分の日計として扱う。複数日を1日に誤登録しないため、
+ * この3つの印字条件が全て揃う場合だけ true にする。
+ */
+export function isSingleDayPeriodSettlementReport(raw: string): boolean {
+  const text = String(raw ?? '').normalize('NFKC').replace(/\s+/g, ' ')
+  if (!/日付範囲/.test(text) || !/開始\s*[:：]/.test(text) || !/終了\s*[:：]/.test(text)) return false
+  if (!/曜日指定\s*[:：]\s*全指定/.test(text)) return false
+  if (!/(?:\(\s*1日\s*\)|1日分)/.test(text)) return false
+  const dates = [...text.matchAll(/(20\d{2})\D{0,6}(\d{1,2})\D{0,6}(\d{1,2})/g)]
+    .map((m) => toIsoDateStringSafe(Number(m[1]), Number(m[2]), Number(m[3])))
+    .filter((date): date is string => !!date)
+  return dates.length >= 2 && new Set(dates).size === 1
+}
+
 /** レシート印字の英字略称（CAVA,CAVA 等）かどうか */
 export function looksLikeOcrLatinStoreLabel(name: string): boolean {
   const t = String(name ?? '').trim()
