@@ -11,7 +11,7 @@
 | 項目 | 内容 |
 |------|------|
 | 受信方式 | LINE 公式アカウントへレシート画像を送信 |
-| 解析エンジン | Azure Foundry（`gpt-5.4-nano`） |
+| 解析エンジン | 売上: Azure Foundry（`gpt-5.4-nano`）／小口: Gemini Flash（`gemini-3-flash-preview`） |
 | 保存先 DB | Supabase プロジェクト `hocbnifuactbvmyjraxy` |
 | Edge Function | `line-webhook/{store_partition_key}` |
 | 返信形式 | Flex Message（売上レポート）＋ 確認用 Flex / テキスト |
@@ -32,7 +32,7 @@ LINE トーク（店舗用 Webhook URL が設定された公式アカウント�
     │
     ├─ 生イベント保存 … line_webhook_raw__{store_partition_key}
     │
-    ├─ 画像取得 → Azure Foundry で OCR / 構造化解析
+    ├─ 画像取得 → 売上は Azure Foundry で OCR / 構造化解析
     │   （失敗時のみ Gemini、次に Claude Haiku へ退避）
     │
     ├─ 店名一致チェック
@@ -90,7 +90,12 @@ https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook/marugoyotsuya
 
 | Secret | 用途 |
 |--------|------|
-| `GROQ_API_KEY` | レシート画像解析 |
+| `AZURE_FOUNDRY_PROJECT_ENDPOINT` / `AZURE_FOUNDRY_API_KEY` | 売上レシートの第1解析（Azure Foundry） |
+| `AZURE_FOUNDRY_VISION_DEPLOYMENT` | Azure画像解析モデル名（未設定時 `gpt-5.4-nano`） |
+| `GEMINI_API_KEY` | 小口解析、および売上解析のAzure障害時フォールバック |
+| `RECEIPT_GEMINI_FLASH_MODEL` | 小口の通常解析・バルぺロタ精算票のフォールバック（未設定時 `gemini-3-flash-preview`） |
+| `RECEIPT_GEMINI_MODEL` | 小口の条件付きPro再確認・他店舗売上のGeminiフォールバック（未設定時 `gemini-3.1-pro-preview`） |
+| `CLAUDE_API_KEY` | Azure/Geminiがともに失敗した売上レシートの最終フォールバック |
 | `LINE_CHANNEL_ACCESS_TOKEN` | 共通アクセストークン |
 | `LINE_CHANNEL_ACCESS_TOKEN__{STORE_KEY}` | 店舗別トークン（任意・優先） |
 | `LINE_CHANNEL_SECRET` | 共通チャネルシークレット |
@@ -122,7 +127,7 @@ npx supabase functions deploy line-webhook --project-ref hocbnifuactbvmyjraxy
 ```mermaid
 flowchart TD
   A[レシート画像を LINE 送信] --> B[Webhook 受信]
-  B --> C[Groq で解析]
+  B --> C[Azure Foundry で解析]
   C --> D{レシートとして読める?}
   D -->|No| E[テキストで案内のみ]
   D -->|Yes| F{確信度 >= 0.52?}
@@ -138,7 +143,7 @@ flowchart TD
 
 ### 解析項目
 
-Groq が JSON 形式で抽出する主な項目:
+画像解析モデルが JSON 形式で抽出する主な項目:
 
 | フィールド | 内容 |
 |-----------|------|
@@ -301,30 +306,33 @@ Flex の「売上推移を見る」は同画面へ遷移します。LINE 経由�
 
 精算用プロンプトは総売上・客数向けで、経費の **明細・税・仕入先** をうまく取れないため、別プロンプトでの再解析が必要です。
 
-#### AI 呼び出し回数（現在＝売上はGroq、経費の明細だけClaude）
+#### AI ルーティング（2026-07-19 現在）
 
-| ケース | 売上(精算)解析 | 経費再解析(③) | 合計 |
-|--------|:---:|:---:|:---:|
-| 売上レシート（自店） | ✓(Groq) | – | Groq1 |
-| 経費（店名不一致・レジ出金） | ✓(Groq) | ✓(Groq) | Groq2 |
-| 経費（A：先打ち） | **省略** | ✓(Groq) | Groq1 |
+| ケース | 第1段階 | 品質確認 / フォールバック | 備考 |
+|--------|---|---|---|
+| 売上レシート（自店） | Azure Foundry `gpt-5.4-nano` | Azure失敗時のみ Gemini、さらに失敗時のみ Claude Haiku | 通常の売上登録経路 |
+| バルペロタの精算票 | Azure Foundry `gpt-5.4-nano` | Azure失敗時は Gemini Flash、Flashも失敗時のみ Claude Haiku | 精算票のGemini退避を低コスト化 |
+| 経費（店名不一致・レジ出金） | 売上判定は Azure、その後 Gemini Flash で経費再解析 | 明細・金額・税率が不足したときのみ Gemini Pro。Gemini障害時のみ Azure | 売上テーブルへは保存しない |
+| 経費（A: `経費` 先打ち） | Gemini Flash | 不足時のみ Gemini Pro、Gemini障害時のみ Azure | 売上解析を省略 |
+| 管理画面の小口画像アップロード | Gemini Flash | 不足時のみ Gemini Pro、Gemini障害時のみ Azure | LINEと同じ小口ルール |
 
-> 売上(精算)も経費の明細再解析(`reanalyzeAsExpense`)も **Groq**（ソバージュ・鮨こるりの売上は Gemini）。
-> ※**2026-06-12**: claudia2の売上を Claude→Groq、さらに**経費の明細も Claude→Groq** へ変更（Claude(Haiku)はTOBU等で**JANコード行の混入・品名誤読・品目欠落**が多く不正確、かつ高コストと実測で判明。同じTOBUレシートをGroqの方が正確に読めた）。→ **現在 Claude は全経路で不使用**。Claude売上解析の経路（＋下記オプションB最適化）は休止・コードは再有効化用に残置。
+小口で Pro へ昇格するのは、総額を取れない、経費として確定できない、または西友のように混在税率の明細・税率別集計が不完全な場合だけです。通常の小口画像はFlash 1回で完結します。
+
+`ai_usage_events` にはプロバイダー・モデル・実測トークンを呼び出し単位で保存し、`ai-usage.html` でFlash / Pro / Azure / Claudeを別々に集計します。`output_tokens` は思考トークンを含む課金対象出力として1回だけ計算します。
 
 ### オプションA：経費「先打ち」時は精算解析をスキップ（2026-06-10）
 
-`経費` 等を **先打ち**（`await_image` pending）してから画像を送った場合のみ、**精算解析（① Groq 判定＋② Claude/Gemini）をスキップ** し、**経費専用解析だけ** 実行します。
+`経費` 等を **先打ち**（`await_image` pending）してから画像を送った場合のみ、**精算解析をスキップ** し、Gemini Flashによる**経費専用解析だけ**を実行します。
 
 - 実装: `processReceiptImageEvent`（`line-webhook/index.ts`）で、精算解析の **前** に `handlePettyCashImageIfPending(receipt:null)` を呼び、`await_image` なら 経費解析 → 確認カード返信 → `return`（精算解析に到達しない）。`pending` 無し／期限切れは `{handled:false}` で通常の精算解析へフォールスルー。
-- 効果: 先打ちフローの AI 呼び出しを **経費解析1回** に削減（Groq判定＋精算Claude の2回分を節約）。「解析中」push も省略＝**push 枠も節約**。
+- 効果: 通常はFlash 1回で完結し、売上判定を省く。Proは必要な画像にだけ追加するため、精度とコストを両立する。「解析中」push も省略する。
 - **不変**: **先打ちしない通常アップロードは従来どおり**（精算解析 → 必要時のみ経費再解析）。
 
-> **運用推奨**: 経費レシートは **先に「経費」と送ってから画像** を送る運用にすると、経費1枚ごとに Claude 呼び出しを1回節約できます（先打ちなしでも下記オプションBで自動節約）。
+> **運用推奨**: 経費レシートは **先に「経費」と送ってから画像** を送ると、売上判定を省き、通常はGemini Flash 1回で完了します。
 
-### オプションB：店名不一致(経費)はGroq事前判定で精算パスを自動スキップ（2026-06-12）
+### 旧仕様メモ: Groq事前判定による経費最適化（2026-06-12、現在は未使用）
 
-> ⚠️ **現在休止中**：同日に claudia2 を Claude→Groq へ変更し `CLAUDE_RECEIPT_STORE_KEYS` が空になったため、Claude売上解析の経路自体が走らず、この最適化も発動しません。**Claude売上解析店を再設定すると自動で有効化**されます（コードは残置）。
+> ⚠️ これは旧Groq/Claude構成の履歴です。現行の売上第1解析はAzure、小口通常解析はGemini Flashであり、この節の最適化は実行されません。
 
 Claude採用店（claudia2）に**別店舗のレシート（＝経費）**を送ると、従来は「精算解析(②Claude)→経費再解析(③Claude)」で**Claudeが2回**走っていた（店名不一致は②の結果で初めて判明する仕組みだったため）。これを、**先打ちしなくても**①Groqの事前判定で店名不一致を確定できたら②を省く方式にした。
 
@@ -401,7 +409,7 @@ LINE取込は品名から `acct` を推定し（飲料→アルコール／洗�
 | パス | 役割 |
 |------|------|
 | `supabase/functions/line-webhook/index.ts` | Webhook エントリ（画像・テキスト振り分け） |
-| `supabase/functions/_shared/receipt_vision.ts` | Groq 画像解析 |
+| `supabase/functions/_shared/receipt_vision.ts` | Azure / Gemini / Claude の画像解析とフォールバック判定 |
 | `supabase/functions/_shared/receipt_save_flow.ts` | 重複確認 → 保存 → 返信組み立て |
 | `supabase/functions/_shared/receipt_store_mismatch.ts` | 店名不一致案内 |
 | `supabase/functions/_shared/receipt_duplicate.ts` | 同日重複確認 |
