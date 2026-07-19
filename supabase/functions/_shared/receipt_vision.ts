@@ -303,7 +303,7 @@ export async function analyzeLineImageWithAzureFoundry(
     input: [{
       role: 'user',
       content: [
-        { type: 'input_text', text: `この画像を解析してください。ファイル名: ${fileName || '(unknown)'}` },
+        { type: 'input_text', text: `この画像を解析し、結果は必ず有効な JSON オブジェクトのみで返してください。ファイル名: ${fileName || '(unknown)'}` },
         { type: 'input_image', image_url: `data:${mime};base64,${toBase64(bytes)}`, detail: 'high' },
       ],
     }],

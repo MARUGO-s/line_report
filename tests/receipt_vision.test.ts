@@ -159,6 +159,8 @@ test("Azure Foundry image analysis sends Responses API image input and parses JS
     );
     assert.equal(requestUrl, "https://example.services.ai.azure.com/api/projects/test/openai/v1/responses");
     assert.equal(requestBody?.model, "gpt-5.4-nano");
+    const input = requestBody?.input as Array<{ content?: Array<{ type?: string; text?: string }> }>;
+    assert.match(String(input?.[0]?.content?.find((part) => part.type === "input_text")?.text ?? ""), /JSON/);
     assert.equal(result.failure, null);
     assert.equal(result.analysis?.receipt?.storeName, "Test Store");
     assert.equal(result.usage?.totalTokens, 30);
