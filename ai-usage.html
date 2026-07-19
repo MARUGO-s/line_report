@@ -382,7 +382,7 @@
       <div class="ms-content">
         <div class="ms-inner">
           <h1 class="ms-h1">AI使用料（実測トークン）</h1>
-          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、各社の<strong>公式単価</strong>を掛けて算出します。レシート解析は Azure Foundry（GPT-5.4 nano）の実測値を表示します。旧Groqの履歴はこの画面の集計対象から除外しています。</p>
+          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、モデルごとの<strong>公式単価</strong>を掛けて算出します。通常の精算レシートは Gemini Flash Lite、Azure は障害時の退避先です。旧Groqの履歴はこの画面の集計対象から除外しています。</p>
 
           <!-- 集計期間アコーディオン -->
           <details class="assump" id="periodBox">
@@ -647,19 +647,19 @@
 
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
-    // Azure Foundry をレシート解析の標準表示へ切替。旧Groq単価の保存値を引き継がない。
-    const RATES_KEY = 'line_report_ai_usage_rates_v4';
+    // モデル別単価へ移行。旧のプロバイダ一括単価の保存値を引き継がない。
+    const RATES_KEY = 'line_report_ai_usage_rates_v5';
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
-    // 単価は各社の公式単価（USD / 100万トークン）。Azure Foundry GPT-5.4 nano は $0.20/$1.25。
-    // Gemini 3.1 Pro は ≤20万トークンのプロンプトで $2/$12、Gemini 3 Flash は $0.50/$3。
+    // 単価は各社の公式単価（USD / 100万トークン）。通常の精算レシートは Flash Lite $0.25/$1.50。
+    // Gemini 3.1 Pro は ≤20万トークンで $2/$12、Gemini 3 Flash は $0.50/$3。
     // Grok / xAI は grok-3-mini の目安 $0.30/$0.50。モデル差し替え時は画面上で上書きする。
     // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
     const DEFAULT_RATES = {
       azure:    { inUsd: 0.20, outUsd: 1.25 },   // Azure Foundry GPT-5.4 nano（レシート・画像抽出）
       openai:   { inUsd: 1.10, outUsd: 4.40 },   // o4-mini（フードコート最終統合）
       grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
-      gemini:   { inUsd: 2.00, outUsd: 12.00 },
+      gemini:   { inUsd: 0.25, outUsd: 1.50 },
       claude:   { inUsd: 1.00, outUsd: 5.00 },
       jpyPerUsd: 155,
     };
@@ -839,10 +839,14 @@
     function providerUsd(inputTokens, outputTokens, rate) {
       return (Number(inputTokens || 0) * rate.inUsd + Number(outputTokens || 0) * rate.outUsd) / 1e6;
     }
+    const GEMINI_FLASH_LITE_RATE = { inUsd: 0.25, outUsd: 1.50 };
     const GEMINI_FLASH_RATE = { inUsd: 0.50, outUsd: 3.00 };
+    const GEMINI_PRO_RATE = { inUsd: 2.00, outUsd: 12.00 };
     function rateForModel(provider, model) {
       const m = String(model || '').toLowerCase();
+      if (provider === 'gemini' && m === 'gemini-3.1-flash-lite') return GEMINI_FLASH_LITE_RATE;
       if (provider === 'gemini' && m === 'gemini-3-flash-preview') return GEMINI_FLASH_RATE;
+      if (provider === 'gemini' && m === 'gemini-3.1-pro-preview') return GEMINI_PRO_RATE;
       return state.rates[rateKeyForModel(provider, model)] || DEFAULT_RATES.azure;
     }
     // API記録の output_tokens は思考を含む課金対象出力。thinking_tokens は内訳表示だけに使う。
@@ -947,12 +951,10 @@
     }
 
     const KNOWN_AI_MODELS = [
-      { provider: 'azure_openai', model: 'gpt-5.4-nano', title: 'Azure Foundry', className: '' },
+      { provider: 'gemini', model: 'gemini-3.1-flash-lite', title: 'Gemini / Flash Lite', className: 'gemini' },
       { provider: 'gemini', model: 'gemini-3-flash-preview', title: 'Gemini / Flash', className: 'gemini' },
       { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini', className: 'gemini' },
       { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
-      { provider: 'openai', model: 'o4-mini', title: 'OpenAI', className: 'openai' },
-      { provider: 'grok', model: 'grok-3-mini', title: 'Grok / xAI', className: 'grok' },
     ];
     function modelKey(provider, model) {
       const p = String(provider || '').toLowerCase();
@@ -1471,3 +1473,4 @@
   </script>
 </body>
 </html>
+      'gemini-3.1-flash-lite': '通常の精算レシート解析',

@@ -9354,9 +9354,8 @@ function normalizePath(pathname: string): string {
   return stripped || "/"
 }
 
-// レシート画像解析は Azure Foundry が通常経路。Gemini は Azure 障害時だけの退避先。
-const AI_USAGE_GEMINI_STORE_KEYS = new Set<string>(["sauvage", "sushikoruri"])
-const AI_USAGE_GEMINI_MODEL = "gemini-3.1-pro-preview"
+// レシート画像解析は Gemini Flash Lite が通常経路。Azure は障害時の退避先。
+const AI_USAGE_GEMINI_MODEL = "gemini-3.1-flash-lite"
 // レシート画像解析に Claude(Haiku) を使う店舗（line-webhook の CLAUDE_RECEIPT_STORE_KEYS と同一）。
 // ＋経費（小口）の再解析も Claude を使うため、claude バケットには「claudia2の売上解析」と「全店の経費解析」のトークンが入る。
 const AI_USAGE_CLAUDE_STORE_KEYS = new Set<string>(["claudia2"])
@@ -9469,22 +9468,10 @@ async function fetchAiUsageCostState(
     stores: [],
   }
 
-  for (const raw of rows) {
-    const r = raw as Record<string, unknown>
-    const key = String(r.store_partition_key ?? "").trim()
-    if (!key) continue
-    const row: AiUsageStoreRow = {
-      store_partition_key: key,
-      display_name: String(r.display_name ?? key),
-      image_count: Number(r.image_count ?? 0) || 0,
-      receipt_count: Number(r.receipt_count ?? 0) || 0,
-    }
-    const bucket = azure
-    bucket.stores.push(row)
-    bucket.store_count += 1
-    bucket.image_count += row.image_count
-    bucket.receipt_count += row.receipt_count
-  }
+  // ai_usage_image_counts は過去の受信画像数で、どのAIが実際に応答したかは判別できない。
+  // Azureへ一括帰属させると、Flash Lite移行後もAzure利用に見えてしまうため、費用表示は
+  // ai_usage_events の実測ログだけを正本にする（rows は後方互換のため取得のみ維持）。
+  void rows
   gemini.stores.sort((a, b) => b.image_count - a.image_count)
   azure.stores.sort((a, b) => b.image_count - a.image_count)
   claude.stores.sort((a, b) => b.image_count - a.image_count)
