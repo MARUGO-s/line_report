@@ -75,6 +75,9 @@ function classifyPettyAcct(name: string, opts?: { rate?: 8 | 10 | null; supplier
   if (/(seria|セリア)/i.test(`${supplier} ${s}`)) return 'shomohin'
   if (SHOMOHIN_RE.test(s)) return 'shomohin'
   if (ALCOHOL_DRINK_RE.test(s)) return 'alcohol'
+  // 西友の領収証では「※」付きだけが食品(8%)で、※無しの10%行は消耗品または酒類。
+  // 酒類は上で確定しているため、残りを食材扱いに戻さない。
+  if (/(seiyu|西友)/i.test(supplier) && opts?.rate === 10) return 'shomohin'
   if (opts?.rate === 10 && /(10%対象|10％対象|日用品|雑貨|備品|文具|電池|単[0-9０-９一二三四五]|PRE単|富士通|コバエ|小バエ|ハエ|虫)/i.test(`${supplier} ${s}`)) return 'shomohin'
   return 'shokuzai'
 }
@@ -353,6 +356,21 @@ export function extractExpenseFromReceipt(
       if (diff !== 0 && Math.abs(diff) <= itemEntries.length + 2) {
         const maxIt = itemEntries.reduce((a, b) => (b.p > a.p ? b : a))
         maxIt.p += diff
+      }
+    }
+  }
+
+  // 税率別集計が明瞭な外税レシートでは、端数処理により商品行の税込表示と税抜対象額が1〜2円ずれることがある。
+  // 集計行を正本にして税率ごとの小さな差だけを補正し、明細＋税と受領額を一致させる。
+  if (bdValid && bdSplitTrusted && itemEntries.length) {
+    for (const b of breakdown) {
+      const targetNet = Math.max(0, (b.total ?? 0) - b.tax)
+      const entries = itemEntries.filter((it) => it.rate === b.rate && it.p > 0)
+      const currentNet = entries.reduce((sum, it) => sum + it.p, 0)
+      const diff = targetNet - currentNet
+      if (entries.length && diff !== 0 && Math.abs(diff) <= 2) {
+        const smallest = entries.reduce((a, b) => (b.p < a.p ? b : a))
+        if (smallest.p + diff > 0) smallest.p += diff
       }
     }
   }
