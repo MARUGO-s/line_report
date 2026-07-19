@@ -308,7 +308,9 @@ export async function analyzeLineImageWithAzureFoundry(
       ],
     }],
     text: { format: { type: 'json_object' } },
-    max_output_tokens: 1500,
+    // スーパー等は商品行が多く、1,500ではJSON明細が途中で切れる。
+    // 出力量は実際に生成された分だけ課金されるため、上限だけを4,000に広げる。
+    max_output_tokens: 4000,
   })
 
   const maxAttempts = 2

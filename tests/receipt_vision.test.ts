@@ -20,6 +20,7 @@ test("expense prompt keeps the SEIYU supplier rule within the configured limit",
   assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /SEIYU（西友）/);
   assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /T8011503002037/);
   assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /税抜金額対象/);
+  assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /購入した\*\*個数\*\*であり、line_items の件数ではない/);
   assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /総額¥4,288を「パプリカ」等の単一商品 price にしてはいけない/);
   assert.ok(EXPENSE_RECEIPT_PROMPT_ADDITION.length <= STORE_RECEIPT_PROMPT_MAX_CHARS);
 });
