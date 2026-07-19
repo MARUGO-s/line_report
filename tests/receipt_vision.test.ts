@@ -6,11 +6,21 @@ import {
   isTransientLineImageVisionFailure,
   shouldFallbackLineImageVisionFailure,
 } from "../supabase/functions/_shared/receipt_vision.ts";
-import { resolveBuiltinStoreReceiptPrompt } from "../supabase/functions/_shared/receipt_prompt.ts";
+import {
+  EXPENSE_RECEIPT_PROMPT_ADDITION,
+  resolveBuiltinStoreReceiptPrompt,
+  STORE_RECEIPT_PROMPT_MAX_CHARS,
+} from "../supabase/functions/_shared/receipt_prompt.ts";
 import {
   normalizeLineImageReceiptAnalysis,
   resolveReceiptDateIsoForPersist,
 } from "../supabase/functions/_shared/receipt_parse.ts";
+
+test("expense prompt keeps the SEIYU supplier rule within the configured limit", () => {
+  assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /SEIYU（西友）/);
+  assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /T8011503002037/);
+  assert.ok(EXPENSE_RECEIPT_PROMPT_ADDITION.length <= STORE_RECEIPT_PROMPT_MAX_CHARS);
+});
 
 test("classifies provider failures that should use a fallback", () => {
   assert.equal(

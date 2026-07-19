@@ -411,8 +411,23 @@ function isCashOutLikeText(text: string): boolean {
   return /レジ出金|出金伝票|今回出金額|現金出金|小口出金/.test(text)
 }
 
+function hasSupplierReceiptEvidence(analysis: LineImageAnalysisResult | null): boolean {
+  const receipt = analysis?.receipt
+  if (!receipt) return false
+  const storeName = String(receipt.storeName ?? '').trim()
+  // Claudia2 はこのフローでは自店の出金伝票であり、仕入先名には使わない。
+  if (storeName && !isCashOutLikeText(storeName) && !/claudia/i.test(storeName)) return true
+  const itemText = [
+    ...(receipt.items ?? []),
+    ...((receipt.lineItems ?? []).map((item) => String(item?.name ?? '').trim()).filter(Boolean)),
+  ].join(' ')
+  return !!itemText && !isCashOutLikeText(itemText)
+}
+
 function isCashOutLikeAnalysis(analysis: LineImageAnalysisResult | null): boolean {
   if (!analysis?.receipt) return false
+  // 仕入先レシートの店名・明細が取れているなら、要約文に出金票への言及があっても仕入先を優先する。
+  if (hasSupplierReceiptEvidence(analysis)) return false
   const text = [
     analysis.summary ?? '',
     analysis.receipt.storeName ?? '',
@@ -440,6 +455,15 @@ function buildExpenseIgnoreCashOutPrompt(
     lines.push(`【補助手がかり】電話番号「${storePhone}」が見える紙があれば、その紙を仕入先レシートとして優先してください。`)
   }
   return lines.filter(Boolean).join('\n')
+}
+
+function buildExpenseSupplierRescuePrompt(basePromptAddition: string): string {
+  return [
+    String(basePromptAddition || '').trim(),
+    '【仕入先レシート救済再解析・最重要】この画像には自店のレジ出金伝票だけでなく、仕入先の領収書／レシートが写っている可能性があります。紙の左右・上下・大きさ・配置では一切判断せず、画像内の各紙を独立して確認してください。',
+    '【選択規則】「レジ出金」「今回出金額」「仕入食材」「消耗品」等だけが印字された自店伝票は仕入先レシートに選ばない。仕入先ロゴ、登録番号、電話番号、商品明細、税率別集計、合計のいずれかを持つ紙を優先し、その紙だけから store_name・line_items・税率を抽出すること。',
+    '【出力規則】仕入先レシートが1枚でもある場合、必ずその仕入先を receipt.store_name にして kind="receipt" を返す。自店出金票の金額は仕入先レシートの合計との照合にのみ使ってよい。仕入先側が小さくてもロゴ・合計・税率集計を読み直し、空の receipt や自店名だけの receipt を返さないこと。',
+  ].join('\n')
 }
 
 function scoreExpenseReceiptAnalysis(result: { analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null }): number {
@@ -511,7 +535,20 @@ export async function analyzeExpenseReceiptWithGroqScout(
     groqApiKey,
     buildExpenseIgnoreCashOutPrompt(systemPromptAddition, full.analysis),
   )
-  const combinedUsage = mergeVisionUsage(full.usage, focused.usage)
+  let rescue: typeof focused | null = null
+  if (isCashOutLikeAnalysis(full.analysis) && (!focused.analysis || isCashOutLikeAnalysis(focused.analysis))) {
+    rescue = await analyzeLineImageWithGroqScout(
+      bytes,
+      contentType,
+      `${fileName || 'receipt'}#supplier-rescue`,
+      groqApiKey,
+      buildExpenseSupplierRescuePrompt(systemPromptAddition),
+    )
+  }
+  const combinedUsage = mergeVisionUsage(full.usage, focused.usage, rescue?.usage)
+  if (rescue?.analysis && !isCashOutLikeAnalysis(rescue.analysis)) {
+    return { analysis: mergeExpenseReceiptAnalyses(full.analysis!, rescue.analysis), failure: null, usage: combinedUsage ?? rescue.usage }
+  }
   if (!focused.analysis) return { ...full, usage: combinedUsage ?? full.usage }
 
   const fullScore = isCashOutLikeAnalysis(full.analysis) ? -1000 : scoreExpenseReceiptAnalysis(full)
@@ -548,7 +585,22 @@ export async function analyzeExpenseReceiptWithAzureFoundry(
     deployment,
     buildExpenseIgnoreCashOutPrompt(systemPromptAddition, full.analysis),
   )
-  const combinedUsage = mergeVisionUsage(full.usage, focused.usage)
+  let rescue: typeof focused | null = null
+  if (isCashOutLikeAnalysis(full.analysis) && (!focused.analysis || isCashOutLikeAnalysis(focused.analysis))) {
+    rescue = await analyzeLineImageWithAzureFoundry(
+      bytes,
+      contentType,
+      `${fileName || 'receipt'}#supplier-rescue`,
+      projectEndpoint,
+      apiKey,
+      deployment,
+      buildExpenseSupplierRescuePrompt(systemPromptAddition),
+    )
+  }
+  const combinedUsage = mergeVisionUsage(full.usage, focused.usage, rescue?.usage)
+  if (rescue?.analysis && !isCashOutLikeAnalysis(rescue.analysis)) {
+    return { analysis: mergeExpenseReceiptAnalyses(full.analysis!, rescue.analysis), failure: null, usage: combinedUsage ?? rescue.usage }
+  }
   if (!focused.analysis) return { ...full, usage: combinedUsage ?? full.usage }
 
   const fullScore = isCashOutLikeAnalysis(full.analysis) ? -1000 : scoreExpenseReceiptAnalysis(full)
