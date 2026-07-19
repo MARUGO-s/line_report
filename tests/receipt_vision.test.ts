@@ -100,6 +100,12 @@ test("Marugo S prompt requires both party and guest counts from the daily report
   assert.match(prompt, /guest_count="112"/);
 });
 
+test("Marugo daily-settlement prompt preserves both digits of the guest count", () => {
+  const prompt = resolveBuiltinStoreReceiptPrompt("marugo");
+  assert.match(prompt, /24組 57名/);
+  assert.match(prompt, /客数の十の位を落とさない/);
+});
+
 test("Sauvage prompt maps its handwritten footer by unit, not left-to-right position", () => {
   const prompt = resolveBuiltinStoreReceiptPrompt("sauvage");
   assert.match(prompt, /39人 27組/);
