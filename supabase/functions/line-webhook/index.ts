@@ -1329,6 +1329,11 @@ async function processReceiptImageEvent(
 
   const receiptGeminiModel = resolveReceiptGeminiModel()
   const receiptGeminiFlashModel = resolveReceiptGeminiFlashModel()
+  // バルペロタの精算票はAzure失敗時の通常フォールバックもFlashで処理する。
+  // 小口用のPro再確認や他店舗の通常レシート経路は従来どおりProを維持する。
+  const normalReceiptGeminiModel = registry.store_partition_key === 'barpelota'
+    ? receiptGeminiFlashModel
+    : receiptGeminiModel
   const AZURE_RECEIPT_MODEL = azureFoundryDeployment
 
   // AI使用料ページの「実測」表示用に、APIが返した実測トークンを1行記録する。
@@ -1461,9 +1466,9 @@ async function processReceiptImageEvent(
       lineMessageId,
       resolveGeminiApiKey(),
       receiptPromptAddition,
-      receiptGeminiModel,
+      normalReceiptGeminiModel,
     )
-    await recordAiUsage('gemini', receiptGeminiModel, fallback.usage)
+    await recordAiUsage('gemini', normalReceiptGeminiModel, fallback.usage)
     if (fallback.analysis || fallback.failure) analyzed = fallback
 
     if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(fallback.failure) && resolveClaudeApiKey()) {
