@@ -112,6 +112,29 @@ function extractPartyGuestCountsFromText(raw: string | null): { party: number | 
   return { party: null, guest: null }
 }
 
+/**
+ * 「33組 98名」を AI が guest_count="33組" のように取り違えて返す事故の安全網。
+ * 値に付いた単位（組／名・人）だけで機械的に振り分け直す。単位が無い値には触らない。
+ * 実害: 2026-07-19 マルゴ四谷・マルゴグランデの日計で組数が客数として登録され、客単価が数倍になった。
+ */
+function reassignPartyGuestCountsByUnit(
+  party: string | null,
+  guest: string | null,
+): { party: string | null; guest: string | null } {
+  const isParty = (v: string | null) => !!v && /組/.test(v) && !/[名人]/.test(v)
+  const isGuest = (v: string | null) => !!v && /[名人]/.test(v) && !/組/.test(v)
+  if (isParty(guest)) {
+    // 客数欄に「◯組」が入っている
+    if (!party || isGuest(party)) return { party: guest, guest: isGuest(party) ? party : null }
+    return { party, guest: null } // 組数は既にある＝重複値なので客数は捨てる（誤った客単価を作らない）
+  }
+  if (isGuest(party) && !guest) {
+    // 組数欄に「◯名」が入っている
+    return { party: null, guest: party }
+  }
+  return { party, guest }
+}
+
 function salvageOverreadTaxAmount(rawTax: string | null, grossAmount: number): number | null {
   if (!rawTax || !Number.isFinite(grossAmount) || grossAmount <= 0) return null
   const digits = decodeEscapedUnicodeSequences(rawTax).replace(/[^\d]/g, '')
@@ -262,11 +285,14 @@ function shiftIsoDateBackOneDay(iso: string): string {
   return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}-${String(previous.getUTCDate()).padStart(2, '0')}`
 }
 
-/** レシートに併記された営業時間を読む。日付単体・予約時刻などは対象にしない。 */
+/** レシートに併記された営業時間を読む。日付単体・予約時刻などは対象にしない。
+ *  ※「分」まで必ず伴うことを条件にする。以前は分を省略可にしていたため、"2026年7月19日 22:36:00" の
+ *    先頭1桁だけが `[01]?\d` に食われて 22時→2時と誤読され、夜の精算が前日へずらされる実害が出た
+ *    （2026-07-19 マルゴ四谷の日計が 07-18 として登録）。時(2桁)を先に試すよう並び順も入れ替えている。 */
 function extractReceiptPrintedHour(raw: string | null): number | null {
   const normalized = decodeEscapedUnicodeSequences(raw ?? '').trim()
   const match = normalized.match(
-    /\d{4}\s*(?:[-/.年])\s*\d{1,2}\s*(?:[-/.月])\s*\d{1,2}\s*(?:日)?\s*[T　 ]+([01]?\d|2[0-3])(?:\s*(?::|時)\s*[0-5]?\d)?/,
+    /\d{4}\s*(?:[-/.年])\s*\d{1,2}\s*(?:[-/.月])\s*\d{1,2}\s*(?:日)?\s*(?:\([^)]{0,4}\))?\s*[T　 ]*(2[0-3]|[01]?\d)\s*(?::|時)\s*[0-5]\d/,
   )
   if (!match?.[1]) return null
   const hour = Number(match[1])
@@ -329,11 +355,46 @@ export function normalizeLineImageReceiptAnalysis(
   if (!partyCount && combinedCounts.party != null) partyCount = String(combinedCounts.party)
   if (!guestCount && combinedCounts.guest != null) guestCount = String(combinedCounts.guest)
 
-  const grossNum = parseCurrencyAmount(grossSales)
+  const reassigned = reassignPartyGuestCountsByUnit(partyCount, guestCount)
+  if (reassigned.party !== partyCount || reassigned.guest !== guestCount) {
+    partyCount = reassigned.party
+    guestCount = reassigned.guest
+    // 取り違えた客数から AI が算出した客単価は必ず誤り。捨てて下の再計算に任せる。
+    if (!guestCount) unitPrice = null
+  }
+
+  let grossNum = parseCurrencyAmount(grossSales)
   let taxNum = parseCurrencyAmount(taxAmount)
-  const netNum = parseCurrencyAmount(netSales)
+  let netNum = parseCurrencyAmount(netSales)
+  // 安全網: 純売上と総売上を取り違えて返す事故（実害: 2026-07-19 マルゴグランデで
+  // net=¥913,900 / gross=¥830,858 と逆転し、総売上が税抜で登録された）。
+  // 「純売上 = 総売上 + 消費税」が成り立つ＝入れ替わりが確定なので機械的に戻す。
+  if (
+    grossNum != null && netNum != null && taxNum != null && taxNum > 0 &&
+    netNum > grossNum &&
+    Math.abs(netNum - (grossNum + taxNum)) <= Math.max(2, netNum * 0.005)
+  ) {
+    const swapped = grossNum
+    grossNum = netNum
+    netNum = swapped
+    grossSales = formatYenAmount(grossNum)
+    netSales = formatYenAmount(netNum)
+  }
   if (grossNum != null && taxNum != null && taxNum > grossNum) {
     taxNum = salvageOverreadTaxAmount(taxAmount, grossNum)
+  }
+  // 安全網: 純売上・総売上が両方読めているのに消費税だけ桁/数字を誤読した場合は
+  // 「総売上 − 純売上」で消費税を引き直す（実害: 2026-07-19 マルゴエスで
+  //  ¥21,029 が ¥41,029 と読まれ、純売上+消費税が総売上と合わなくなった）。
+  //  税率20%超になるような差は元から異常なので触らない（別形式のレシートを壊さない）。
+  if (grossNum != null && netNum != null && taxNum != null && grossNum > 0) {
+    const impliedTax = grossNum - netNum
+    if (
+      impliedTax >= grossNum * 0.03 && impliedTax <= grossNum * 0.2 &&
+      Math.abs(netNum + taxNum - grossNum) > Math.max(3, grossNum * 0.02)
+    ) {
+      taxNum = Math.round(impliedTax)
+    }
   }
   let normalizedGrossNum = grossNum
   let normalizedNetNum = netNum

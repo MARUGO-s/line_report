@@ -225,3 +225,105 @@ test("Azure Foundry image analysis stops after its bounded timeout", async () =>
     globalThis.fetch = originalFetch;
   }
 });
+
+test("keeps evening settlements on the printed day (22時 is not 2時)", () => {
+  // 実害: "2026年7月19日 22:36:00" の 22 が 2 と読まれ、マルゴ四谷の日計が 07-18 に登録された。
+  assert.equal(resolveReceiptDateIsoForPersist("2026年7月19日 22:36:00"), "2026-07-19");
+  assert.equal(resolveReceiptDateIsoForPersist("2026年 7月19日(日)22時36分000101"), "2026-07-19");
+  assert.equal(resolveReceiptDateIsoForPersist("2026-07-19 21:05:00"), "2026-07-19");
+  // 深夜の精算は従来どおり前営業日へ寄せる。
+  assert.equal(resolveReceiptDateIsoForPersist("2026年7月20日 01:09:01"), "2026-07-19");
+
+  const normalized = normalizeLineImageReceiptAnalysis({
+    store_name: "マルゴ 四谷",
+    date: "2026年7月19日",
+    receipt_time: "22:36:00",
+    gross_sales: "¥353,900",
+  });
+  assert.equal(normalized?.date, "2026年7月19日");
+});
+
+test("moves a 「◯組」 misread out of guest_count and drops the derived unit price", () => {
+  const receipt = normalizeLineImageReceiptAnalysis({
+    store_name: "マルゴ 四谷",
+    date: "2026年7月19日",
+    gross_sales: "¥353,900",
+    guest_count: "33組",
+    unit_price: "¥10,724",
+  });
+  assert.equal(receipt?.partyCount, "33組");
+  assert.equal(receipt?.guestCount, null);
+  assert.equal(receipt?.unitPrice, null);
+});
+
+test("keeps 組数 and 客数 in their own fields", () => {
+  const receipt = normalizeLineImageReceiptAnalysis({
+    gross_sales: "¥913,900",
+    party_count: "86組",
+    guest_count: "220名",
+  });
+  assert.equal(receipt?.partyCount, "86組");
+  assert.equal(receipt?.guestCount, "220名");
+  assert.equal(receipt?.unitPrice, "¥4,154");
+});
+
+test("swaps 組数/客数 when the model puts them in the wrong fields", () => {
+  const receipt = normalizeLineImageReceiptAnalysis({
+    party_count: "220名",
+    guest_count: "86組",
+  });
+  assert.equal(receipt?.partyCount, "86組");
+  assert.equal(receipt?.guestCount, "220名");
+});
+
+test("un-swaps 純売上/総売上 when net = gross + tax", () => {
+  // 実害: マルゴグランデ 2026-07-19（純¥830,858 税¥83,042 総¥913,900）が逆転して登録された。
+  const receipt = normalizeLineImageReceiptAnalysis({
+    net_sales: "¥913,900",
+    tax_amount: "¥83,042",
+    gross_sales: "¥830,858",
+  });
+  assert.equal(receipt?.netSales, "¥830,858");
+  assert.equal(receipt?.grossSales, "¥913,900");
+  assert.equal(receipt?.taxAmount, "¥83,042");
+});
+
+test("leaves 純売上/総売上 alone when they are already consistent", () => {
+  const receipt = normalizeLineImageReceiptAnalysis({
+    net_sales: "¥830,858",
+    tax_amount: "¥83,042",
+    gross_sales: "¥913,900",
+  });
+  assert.equal(receipt?.netSales, "¥830,858");
+  assert.equal(receipt?.grossSales, "¥913,900");
+});
+
+test("keeps 総売上 as printed when it is not a tax-swapped pair", () => {
+  // 出前の預かり金などで net > gross でも、gross + tax と一致しなければ触らない。
+  const receipt = normalizeLineImageReceiptAnalysis({
+    net_sales: "¥500,000",
+    tax_amount: "¥30,000",
+    gross_sales: "¥400,000",
+  });
+  assert.equal(receipt?.netSales, "¥500,000");
+  assert.equal(receipt?.grossSales, "¥400,000");
+});
+
+test("recomputes 消費税 from 総売上 − 純売上 when the model misreads a digit", () => {
+  // 実害: マルゴエス 2026-07-19 で 消費税¥21,029 が ¥41,029 と読まれた。
+  const receipt = normalizeLineImageReceiptAnalysis({
+    net_sales: "¥211,886",
+    tax_amount: "¥41,029",
+    gross_sales: "¥232,915",
+  });
+  assert.equal(receipt?.taxAmount, "¥21,029");
+});
+
+test("leaves 消費税 alone on tax-inclusive receipts where net equals gross", () => {
+  const receipt = normalizeLineImageReceiptAnalysis({
+    net_sales: "¥10,000",
+    tax_amount: "¥909",
+    gross_sales: "¥10,000",
+  });
+  assert.equal(receipt?.taxAmount, "¥909");
+});
