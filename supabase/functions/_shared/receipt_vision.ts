@@ -468,6 +468,53 @@ function buildExpenseSupplierRescuePrompt(basePromptAddition: string): string {
   ].join('\n')
 }
 
+function isSeiyuExpenseAnalysis(analysis: LineImageAnalysisResult | null): boolean {
+  const receipt = analysis?.receipt
+  if (!receipt) return false
+  const text = [
+    analysis.summary ?? '',
+    receipt.storeName ?? '',
+    receipt.storePhone ?? '',
+    ...(receipt.items ?? []),
+    ...((receipt.lineItems ?? []).map((item) => String(item?.name ?? '').trim()).filter(Boolean)),
+  ].join(' ')
+  return /(seiyu|西友|T8011503002037)/i.test(text)
+}
+
+function parseReceiptAmount(value: string | null | undefined): number | null {
+  const digits = String(value ?? '').replace(/[^0-9]/g, '')
+  if (!digits) return null
+  const amount = Number(digits)
+  return Number.isFinite(amount) && amount > 0 ? amount : null
+}
+
+function needsSeiyuDetailRetry(analysis: LineImageAnalysisResult | null): boolean {
+  if (!isSeiyuExpenseAnalysis(analysis)) return false
+  const receipt = analysis?.receipt
+  if (!receipt) return false
+  const rows = (receipt.lineItems ?? []).filter((item) => String(item?.name ?? '').trim())
+  // 西友の食品＋レジ袋のような混在票で1商品行しか取れない、または商品価格に小計/合計を
+  // 流用している結果は登録に使わず、専用の短い指示で再確認する。
+  if (rows.length < 2 || !(receipt.taxBreakdown?.length)) return true
+  const aggregateAmounts = new Set([
+    parseReceiptAmount(receipt.netSales),
+    parseReceiptAmount(receipt.grossSales),
+  ].filter((amount): amount is number => amount != null))
+  return rows.some((row) => {
+    const price = parseReceiptAmount(row?.price)
+    return price != null && aggregateAmounts.has(price)
+  })
+}
+
+function buildSeiyuExpenseDetailPrompt(): string {
+  return [
+    '【西友（SEIYU）小口レシート専用の再確認】この画像から、西友ロゴまたは登録番号 T8011503002037 の領収書だけを読み取る。自店のレジ出金票は総額照合以外に使わない。紙の左右・上下・大きさでは選ばない。',
+    '必ず JSON の receipt.line_items を商品行単位で返す。「合計42点」は購入個数であり明細42行ではない。例: 「※94 パプリカ ¥99 ×40 ¥3,960」は name="パプリカ ×40", price="¥3,960", rate=8 の1行。「¥6 ×2 = ¥12」の袋代行は、品名が読みにくくても name="レジ袋 ×2", price="¥12", rate=10 の1行として絶対に落とさない。',
+    '先頭に※がある商品だけが食材・8%。※無しは10%で、酒類名以外は消耗品（レジ袋を含む）。パプリカという品名だけで税率を推測せず、※印を正本にする。',
+    '「小計」「税抜金額対象」「消費税額」「合計」を商品価格に使わない。お預り金（例:¥5,000）とお釣りは支払合計ではない。合計を gross_sales、税率別の税込小計と税額を tax_breakdown に入れる。画像に「8%対象¥3,960、10%対象¥11、8%税¥316、10%税¥1、合計¥4,288」が印字されていれば、その数値をそのまま使う。',
+  ].join('\n')
+}
+
 function scoreExpenseReceiptAnalysis(result: { analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null }): number {
   const analysis = result.analysis
   const receipt = analysis?.receipt
@@ -547,7 +594,28 @@ export async function analyzeExpenseReceiptWithGroqScout(
       buildExpenseSupplierRescuePrompt(systemPromptAddition),
     )
   }
-  const combinedUsage = mergeVisionUsage(full.usage, focused.usage, rescue?.usage)
+  let seiyuDetail: typeof focused | null = null
+  if (needsSeiyuDetailRetry(full.analysis) || needsSeiyuDetailRetry(focused.analysis)) {
+    seiyuDetail = await analyzeLineImageWithGroqScout(
+      bytes,
+      contentType,
+      `${fileName || 'receipt'}#seiyu-detail`,
+      groqApiKey,
+      buildSeiyuExpenseDetailPrompt(),
+    )
+  }
+  const combinedUsage = mergeVisionUsage(full.usage, focused.usage, rescue?.usage, seiyuDetail?.usage)
+  const baseScore = Math.max(
+    isCashOutLikeAnalysis(full.analysis) ? -1000 : scoreExpenseReceiptAnalysis(full),
+    isCashOutLikeAnalysis(focused.analysis) ? -1000 : scoreExpenseReceiptAnalysis(focused),
+    rescue?.analysis && !isCashOutLikeAnalysis(rescue.analysis) ? scoreExpenseReceiptAnalysis(rescue) : -1000,
+  )
+  if (seiyuDetail?.analysis && !isCashOutLikeAnalysis(seiyuDetail.analysis) && scoreExpenseReceiptAnalysis(seiyuDetail) >= baseScore) {
+    const base = focused.analysis && scoreExpenseReceiptAnalysis(focused) > scoreExpenseReceiptAnalysis(full)
+      ? focused.analysis
+      : full.analysis!
+    return { analysis: mergeExpenseReceiptAnalyses(base, seiyuDetail.analysis), failure: null, usage: combinedUsage ?? seiyuDetail.usage }
+  }
   if (rescue?.analysis && !isCashOutLikeAnalysis(rescue.analysis)) {
     return { analysis: mergeExpenseReceiptAnalyses(full.analysis!, rescue.analysis), failure: null, usage: combinedUsage ?? rescue.usage }
   }
@@ -599,7 +667,30 @@ export async function analyzeExpenseReceiptWithAzureFoundry(
       buildExpenseSupplierRescuePrompt(systemPromptAddition),
     )
   }
-  const combinedUsage = mergeVisionUsage(full.usage, focused.usage, rescue?.usage)
+  let seiyuDetail: typeof focused | null = null
+  if (needsSeiyuDetailRetry(full.analysis) || needsSeiyuDetailRetry(focused.analysis)) {
+    seiyuDetail = await analyzeLineImageWithAzureFoundry(
+      bytes,
+      contentType,
+      `${fileName || 'receipt'}#seiyu-detail`,
+      projectEndpoint,
+      apiKey,
+      deployment,
+      buildSeiyuExpenseDetailPrompt(),
+    )
+  }
+  const combinedUsage = mergeVisionUsage(full.usage, focused.usage, rescue?.usage, seiyuDetail?.usage)
+  const baseScore = Math.max(
+    isCashOutLikeAnalysis(full.analysis) ? -1000 : scoreExpenseReceiptAnalysis(full),
+    isCashOutLikeAnalysis(focused.analysis) ? -1000 : scoreExpenseReceiptAnalysis(focused),
+    rescue?.analysis && !isCashOutLikeAnalysis(rescue.analysis) ? scoreExpenseReceiptAnalysis(rescue) : -1000,
+  )
+  if (seiyuDetail?.analysis && !isCashOutLikeAnalysis(seiyuDetail.analysis) && scoreExpenseReceiptAnalysis(seiyuDetail) >= baseScore) {
+    const base = focused.analysis && scoreExpenseReceiptAnalysis(focused) > scoreExpenseReceiptAnalysis(full)
+      ? focused.analysis
+      : full.analysis!
+    return { analysis: mergeExpenseReceiptAnalyses(base, seiyuDetail.analysis), failure: null, usage: combinedUsage ?? seiyuDetail.usage }
+  }
   if (rescue?.analysis && !isCashOutLikeAnalysis(rescue.analysis)) {
     return { analysis: mergeExpenseReceiptAnalyses(full.analysis!, rescue.analysis), failure: null, usage: combinedUsage ?? rescue.usage }
   }
