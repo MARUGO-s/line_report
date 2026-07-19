@@ -115,6 +115,15 @@ export function extractExpenseFromReceipt(
     }))
     .filter((x) => x.name || x.amount != null)
     .slice(0, 30)
+  // 西友で「商品1行の価格 = 小計/合計」になった結果は、実商品を読めていない誤解析。
+  // 正しい1品購入まで拒否しないため、仕入先が西友かつ集計金額を商品価格に流用した場合だけ止める。
+  const isSeiyuVendor = /(seiyu|西友)/i.test(String(supplier ?? ''))
+  if (
+    isSeiyuVendor &&
+    itemRows.length === 1 &&
+    itemRows[0].amount != null &&
+    [gross, net].some((amount) => amount != null && Math.abs(amount - itemRows[0].amount!) <= 1)
+  ) return null
   const itemsSum = itemRows.reduce((s, i) => s + (i.amount != null && i.amount > 0 ? i.amount : 0), 0)
   const allPriced = itemRows.length > 0 && itemRows.every((i) => i.amount != null && i.amount > 0)
 

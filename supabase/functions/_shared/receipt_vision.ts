@@ -33,6 +33,19 @@ export type LineImageVisionUsage = {
   totalTokens: number
 }
 
+type ExpenseVisionFallbackOptions = {
+  geminiApiKey?: string | null
+  geminiModel?: string | null
+}
+
+type ExpenseVisionResult = {
+  analysis: LineImageAnalysisResult | null
+  failure: LineImageVisionFailure | null
+  usage?: LineImageVisionUsage | null
+  /** Azure結果が不完全な西友票だけで使うGemini救済分。呼び出し側で別プロバイダーとして記録する。 */
+  fallbackUsage?: LineImageVisionUsage | null
+}
+
 function toTokenCount(value: unknown): number {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
@@ -506,6 +519,22 @@ function needsSeiyuDetailRetry(analysis: LineImageAnalysisResult | null): boolea
   })
 }
 
+function isCompleteSeiyuDetail(analysis: LineImageAnalysisResult | null): boolean {
+  if (!isSeiyuExpenseAnalysis(analysis)) return false
+  const receipt = analysis?.receipt
+  if (!receipt) return false
+  const rows = (receipt.lineItems ?? []).filter((item) => String(item?.name ?? '').trim())
+  if (rows.length < 2) return false
+  const aggregateAmounts = new Set([
+    parseReceiptAmount(receipt.netSales),
+    parseReceiptAmount(receipt.grossSales),
+  ].filter((amount): amount is number => amount != null))
+  return !rows.some((row) => {
+    const price = parseReceiptAmount(row?.price)
+    return price != null && aggregateAmounts.has(price)
+  })
+}
+
 function buildSeiyuExpenseDetailPrompt(): string {
   return [
     '【西友（SEIYU）小口レシート専用の再確認】この画像から、西友ロゴまたは登録番号 T8011503002037 の領収書だけを読み取る。自店のレジ出金票は総額照合以外に使わない。紙の左右・上下・大きさでは選ばない。',
@@ -641,7 +670,8 @@ export async function analyzeExpenseReceiptWithAzureFoundry(
   apiKey: string,
   deployment = AZURE_FOUNDRY_VISION_MODEL,
   systemPromptAddition = '',
-): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
+  fallbackOptions: ExpenseVisionFallbackOptions = {},
+): Promise<ExpenseVisionResult> {
   const full = await analyzeLineImageWithAzureFoundry(
     bytes, contentType, fileName, projectEndpoint, apiKey, deployment, systemPromptAddition,
   )
@@ -679,30 +709,60 @@ export async function analyzeExpenseReceiptWithAzureFoundry(
       buildSeiyuExpenseDetailPrompt(),
     )
   }
+  let geminiDetail: Awaited<ReturnType<typeof analyzeLineImageWithGemini>> | null = null
+  const geminiApiKey = String(fallbackOptions.geminiApiKey ?? '').trim()
+  if (
+    !isCompleteSeiyuDetail(seiyuDetail?.analysis ?? null) &&
+    geminiApiKey &&
+    (needsSeiyuDetailRetry(full.analysis) || needsSeiyuDetailRetry(focused.analysis))
+  ) {
+    // Azure nanoで明細が1行に潰れた時だけ、同じ画像をGeminiで精度救済する。
+    // 通常経路・他仕入先のコストや役割分担には影響しない。
+    geminiDetail = await analyzeLineImageWithGemini(
+      bytes,
+      contentType,
+      `${fileName || 'receipt'}#seiyu-gemini-rescue`,
+      geminiApiKey,
+      buildSeiyuExpenseDetailPrompt(),
+      String(fallbackOptions.geminiModel ?? '').trim() || 'gemini-3.1-pro-preview',
+    )
+  }
+  const selectedSeiyuDetail = isCompleteSeiyuDetail(geminiDetail?.analysis ?? null)
+    ? geminiDetail
+    : isCompleteSeiyuDetail(seiyuDetail?.analysis ?? null)
+    ? seiyuDetail
+    : null
   const combinedUsage = mergeVisionUsage(full.usage, focused.usage, rescue?.usage, seiyuDetail?.usage)
+  const fallbackUsage = geminiDetail?.usage ?? null
   const baseScore = Math.max(
     isCashOutLikeAnalysis(full.analysis) ? -1000 : scoreExpenseReceiptAnalysis(full),
     isCashOutLikeAnalysis(focused.analysis) ? -1000 : scoreExpenseReceiptAnalysis(focused),
     rescue?.analysis && !isCashOutLikeAnalysis(rescue.analysis) ? scoreExpenseReceiptAnalysis(rescue) : -1000,
   )
-  if (seiyuDetail?.analysis && !isCashOutLikeAnalysis(seiyuDetail.analysis) && scoreExpenseReceiptAnalysis(seiyuDetail) >= baseScore) {
+  if (selectedSeiyuDetail?.analysis && scoreExpenseReceiptAnalysis(selectedSeiyuDetail) >= baseScore) {
     const base = focused.analysis && scoreExpenseReceiptAnalysis(focused) > scoreExpenseReceiptAnalysis(full)
       ? focused.analysis
       : full.analysis!
-    return { analysis: mergeExpenseReceiptAnalyses(base, seiyuDetail.analysis), failure: null, usage: combinedUsage ?? seiyuDetail.usage }
+    return {
+      analysis: mergeExpenseReceiptAnalyses(base, selectedSeiyuDetail.analysis),
+      failure: null,
+      usage: combinedUsage ?? selectedSeiyuDetail.usage,
+      fallbackUsage,
+    }
   }
   if (rescue?.analysis && !isCashOutLikeAnalysis(rescue.analysis)) {
-    return { analysis: mergeExpenseReceiptAnalyses(full.analysis!, rescue.analysis), failure: null, usage: combinedUsage ?? rescue.usage }
+    return { analysis: mergeExpenseReceiptAnalyses(full.analysis!, rescue.analysis), failure: null, usage: combinedUsage ?? rescue.usage, fallbackUsage }
   }
-  if (!focused.analysis) return { ...full, usage: combinedUsage ?? full.usage }
+  if (!focused.analysis) return { ...full, usage: combinedUsage ?? full.usage, fallbackUsage }
 
   const fullScore = isCashOutLikeAnalysis(full.analysis) ? -1000 : scoreExpenseReceiptAnalysis(full)
   const focusedScore = isCashOutLikeAnalysis(focused.analysis) ? -1000 : scoreExpenseReceiptAnalysis(focused)
-  if (focusedScore <= fullScore + 1) return { ...full, usage: combinedUsage ?? full.usage }
+  if (focusedScore <= fullScore + 1) return { ...full, usage: combinedUsage ?? full.usage, fallbackUsage }
   return {
     analysis: mergeExpenseReceiptAnalyses(full.analysis, focused.analysis),
     failure: null,
     usage: combinedUsage ?? focused.usage,
+    fallbackUsage,
   }
 }
 

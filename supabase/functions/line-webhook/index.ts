@@ -1356,18 +1356,28 @@ async function processReceiptImageEvent(
 
   // 経費(小口)専用の再解析（独立経路）: 売上(精算)解析プロンプトには一切手を入れず、
   // 経費専用の追記(EXPENSE_RECEIPT_PROMPT_ADDITION)で line_items・小計/外税 を取得する。
-  // Azure Foundry を通常経路として使う。経費フローの各ハンドラから「必要時のみ」呼ばれる。
+  // 小口レシートはGeminiを通常経路にする。Geminiキー未設定時のみAzureへ退避する。
   const reanalyzeAsExpense = async () => {
-    const g = await analyzeExpenseReceiptWithAzureFoundry(
-      contentFetch.bytes,
-      contentFetch.contentType,
-      lineMessageId,
-      azureFoundryProjectEndpoint,
-      azureFoundryApiKey,
-      azureFoundryDeployment,
-      EXPENSE_RECEIPT_PROMPT_ADDITION,
-    )
-    await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, g.usage)
+    const geminiApiKey = resolveGeminiApiKey()
+    const g = geminiApiKey
+      ? await analyzeLineImageWithGemini(
+        contentFetch.bytes,
+        contentFetch.contentType,
+        lineMessageId,
+        geminiApiKey,
+        EXPENSE_RECEIPT_PROMPT_ADDITION,
+        receiptGeminiModel,
+      )
+      : await analyzeExpenseReceiptWithAzureFoundry(
+        contentFetch.bytes,
+        contentFetch.contentType,
+        lineMessageId,
+        azureFoundryProjectEndpoint,
+        azureFoundryApiKey,
+        azureFoundryDeployment,
+        EXPENSE_RECEIPT_PROMPT_ADDITION,
+      )
+    await recordAiUsage(geminiApiKey ? 'gemini' : 'azure_openai', geminiApiKey ? receiptGeminiModel : AZURE_RECEIPT_MODEL, g.usage)
     return g.analysis?.receipt ?? null
   }
 
@@ -1654,16 +1664,26 @@ async function processReceiptImageEvent(
       'receipt に store_name（仕入先。Amazonの「支払い明細書」なら "Amazon"）・gross_sales（税込合計）・line_items を入れる。',
       'レジ出金伝票が写っていればその「今回出金額 ¥◯」も金額の手掛かりにする。反射・かすれは読める数値だけで receipt を作り kind=receipt を維持する。',
     ].join('\n')
-    const forcedExpense = await analyzeExpenseReceiptWithAzureFoundry(
-      contentFetch.bytes,
-      contentFetch.contentType,
-      lineMessageId,
-      azureFoundryProjectEndpoint,
-      azureFoundryApiKey,
-      azureFoundryDeployment,
-      forcedExpensePrompt,
-    )
-    await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, forcedExpense.usage)
+    const geminiApiKey = resolveGeminiApiKey()
+    const forcedExpense = geminiApiKey
+      ? await analyzeLineImageWithGemini(
+        contentFetch.bytes,
+        contentFetch.contentType,
+        lineMessageId,
+        geminiApiKey,
+        forcedExpensePrompt,
+        receiptGeminiModel,
+      )
+      : await analyzeExpenseReceiptWithAzureFoundry(
+        contentFetch.bytes,
+        contentFetch.contentType,
+        lineMessageId,
+        azureFoundryProjectEndpoint,
+        azureFoundryApiKey,
+        azureFoundryDeployment,
+        forcedExpensePrompt,
+      )
+    await recordAiUsage(geminiApiKey ? 'gemini' : 'azure_openai', geminiApiKey ? receiptGeminiModel : AZURE_RECEIPT_MODEL, forcedExpense.usage)
     if (forcedExpense.analysis?.receipt) analyzed = forcedExpense
   }
 
