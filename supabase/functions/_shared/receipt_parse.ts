@@ -203,6 +203,37 @@ function toIsoDateStringSafe(year: number, month: number, day: number): string |
   return iso
 }
 
+/**
+ * 自店の「売上日計精算レポート」かどうか（＝経費レシートでは絶対にない）。
+ *
+ * 「経費」と先に送って画像待ちのときは、次に来た画像を無条件で経費として扱う実装だったため、
+ * その待ち状態のまま売上の日計精算レポートを送ると、売上が小口現金の出金として記録されかけた
+ * （実害: 2026-07-20 クラウディア2。品目に「純売上/消費税/総売上/現計/Square」が並び、
+ *  出金額 ¥850,100 の確認カードが出た）。仕入先レシートには出ない語だけで判定する。
+ */
+export function looksLikeSalesSettlementReceipt(receipt: LineImageReceiptAnalysis | null): boolean {
+  if (!receipt) return false
+  // 会計組数・客数は売上精算レポートだけの項目（仕入先レシートには存在しない）。
+  if (receipt.partyCount && receipt.guestCount) return true
+  const text = [
+    receipt.storeName ?? '',
+    ...(receipt.items ?? []),
+    ...((receipt.lineItems ?? []).map((li) => String(li?.name ?? ''))),
+  ].join(' ')
+  const markers = [
+    /日計精算|精算レポート|点検レポート/,
+    /営業日付|営業日/,
+    /会計組数|客単価/,
+    /純売上/,
+    /総売上/,
+    /店内飲食売上|テイクアウト売上/,
+    /現計/,
+    /売掛/,
+  ]
+  const hits = markers.filter((re) => re.test(text)).length
+  return hits >= 2
+}
+
 export function parseReceiptDateToIso(raw: string | null): string | null {
   if (!raw) return null
   const normalized = decodeEscapedUnicodeSequences(raw).trim()

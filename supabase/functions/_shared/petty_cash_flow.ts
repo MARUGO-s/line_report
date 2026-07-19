@@ -8,6 +8,7 @@ import type { LineImageReceiptAnalysis } from './receipt_types.ts'
 import { replyLineMessages, resolveChannelAccessToken } from './line_client.ts'
 import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import { fetchLineDisplayNameByUserId } from './line_display_names.ts'
+import { looksLikeSalesSettlementReceipt } from './receipt_parse.ts'
 
 const PENDING_TABLE = 'petty_cash_pending'
 const ENTRIES_TABLE = 'petty_cash_entries'
@@ -782,6 +783,12 @@ export async function handlePettyCashImageIfPending(
 
   // 経費専用に再解析（明細・小計/外税を取得）。失敗時のみ売上解析をフォールバック。売上(精算)解析には非依存。
   const receiptForExpense = (args.reanalyze ? await args.reanalyze() : null) ?? receipt
+  // 自店の売上日計精算レポートは、経費待ち(await_image)であっても絶対に経費にしない。
+  // pending は消さずに残すので、続けて本来の経費レシートを送ればそのまま経費として処理できる。
+  if (looksLikeSalesSettlementReceipt(receiptForExpense)) {
+    console.info(`[petty_cash] sales settlement report passed through to sales flow (store=${storeKey}, msg=${lineMessageId})`)
+    return { handled: false, replied: false, reason: 'petty_cash_sales_report_passthrough' }
+  }
   const ex = extractExpenseFromReceipt(receiptForExpense)
   if (!ex) {
     await clearPending(supabase, key)
@@ -822,6 +829,8 @@ export async function savePettyCashPendingFromReceipt(
   const { roomId, userId, lineMessageId, receipt } = args
   // 経費専用に再解析（明細・小計/外税）。失敗時のみ売上解析をフォールバック。
   const receiptForExpense = (args.reanalyze ? await args.reanalyze() : null) ?? receipt
+  // 店名不一致でも、売上の日計精算レポートを経費候補にしてはいけない（別店舗の売上レポートの誤送信）。
+  if (looksLikeSalesSettlementReceipt(receiptForExpense)) return null
   const ex = extractExpenseFromReceipt(receiptForExpense)
   if (!ex) return null
   const storeKey = String(registry.store_partition_key ?? '').trim()
