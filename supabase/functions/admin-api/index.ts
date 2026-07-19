@@ -25,7 +25,7 @@ import {
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
 import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
-import { analyzeExpenseReceiptWithAzureFoundry, analyzeLineImageWithGemini, AZURE_FOUNDRY_VISION_MODEL, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
+import { analyzeExpenseReceiptWithAzureFoundry, analyzeLineImageWithGemini, AZURE_FOUNDRY_VISION_MODEL, shouldFallbackLineImageVisionFailure, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
 import {
   answerFoodCourtQuestion,
@@ -5317,8 +5317,9 @@ async function createPettyCashEntryFromReceiptImage(
   const geminiModel = resolveReceiptGeminiModel()
   // 小口レシートは、同じ西友画像で実測済みのGeminiを通常経路にする。
   // AzureはGeminiキー未設定時だけの退避先で、売上・分析系のAzure利用には影響しない。
-  const analyzed = geminiApiKey
-    ? await analyzeLineImageWithGemini(
+  let analyzed: Awaited<ReturnType<typeof analyzeLineImageWithGemini>> | Awaited<ReturnType<typeof analyzeExpenseReceiptWithAzureFoundry>>
+  if (geminiApiKey) {
+    analyzed = await analyzeLineImageWithGemini(
       bytes,
       mimeType,
       originalFileName,
@@ -5326,7 +5327,22 @@ async function createPettyCashEntryFromReceiptImage(
       EXPENSE_RECEIPT_PROMPT_ADDITION,
       geminiModel,
     )
-    : await analyzeExpenseReceiptWithAzureFoundry(
+    await recordPettyCashWebAiUsage(supabase, storeKey, webMessageId, analyzed.usage, "gemini", geminiModel)
+    if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(analyzed.failure)) {
+      console.error("petty cash Gemini analysis failed; retrying with Azure:", analyzed.failure?.stage ?? "unknown")
+      analyzed = await analyzeExpenseReceiptWithAzureFoundry(
+        bytes,
+        mimeType,
+        originalFileName,
+        azureFoundryProjectEndpoint,
+        azureFoundryApiKey,
+        azureFoundryDeployment,
+        EXPENSE_RECEIPT_PROMPT_ADDITION,
+      )
+      await recordPettyCashWebAiUsage(supabase, storeKey, webMessageId, analyzed.usage, "azure_openai", AZURE_RECEIPT_MODEL)
+    }
+  } else {
+    analyzed = await analyzeExpenseReceiptWithAzureFoundry(
       bytes,
       mimeType,
       originalFileName,
@@ -5335,14 +5351,8 @@ async function createPettyCashEntryFromReceiptImage(
       azureFoundryDeployment,
       EXPENSE_RECEIPT_PROMPT_ADDITION,
     )
-  await recordPettyCashWebAiUsage(
-    supabase,
-    storeKey,
-    webMessageId,
-    analyzed.usage,
-    geminiApiKey ? "gemini" : "azure_openai",
-    geminiApiKey ? geminiModel : AZURE_RECEIPT_MODEL,
-  )
+    await recordPettyCashWebAiUsage(supabase, storeKey, webMessageId, analyzed.usage, "azure_openai", AZURE_RECEIPT_MODEL)
+  }
   if (analyzed.failure) {
     throw { status: 422, message: `レシート画像を解析できませんでした: ${analyzed.failure.message}` } satisfies AppError
   }

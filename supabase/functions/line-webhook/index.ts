@@ -1359,8 +1359,9 @@ async function processReceiptImageEvent(
   // 小口レシートはGeminiを通常経路にする。Geminiキー未設定時のみAzureへ退避する。
   const reanalyzeAsExpense = async () => {
     const geminiApiKey = resolveGeminiApiKey()
-    const g = geminiApiKey
-      ? await analyzeLineImageWithGemini(
+    let g: Awaited<ReturnType<typeof analyzeLineImageWithGemini>> | Awaited<ReturnType<typeof analyzeExpenseReceiptWithAzureFoundry>>
+    if (geminiApiKey) {
+      g = await analyzeLineImageWithGemini(
         contentFetch.bytes,
         contentFetch.contentType,
         lineMessageId,
@@ -1368,7 +1369,22 @@ async function processReceiptImageEvent(
         EXPENSE_RECEIPT_PROMPT_ADDITION,
         receiptGeminiModel,
       )
-      : await analyzeExpenseReceiptWithAzureFoundry(
+      await recordAiUsage('gemini', receiptGeminiModel, g.usage)
+      if (!g.analysis && shouldFallbackLineImageVisionFailure(g.failure)) {
+        console.error(`[petty_cash_gemini_fallback] Gemini failed; retrying with Azure (msg=${lineMessageId}, stage=${g.failure?.stage ?? 'unknown'})`)
+        g = await analyzeExpenseReceiptWithAzureFoundry(
+          contentFetch.bytes,
+          contentFetch.contentType,
+          lineMessageId,
+          azureFoundryProjectEndpoint,
+          azureFoundryApiKey,
+          azureFoundryDeployment,
+          EXPENSE_RECEIPT_PROMPT_ADDITION,
+        )
+        await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, g.usage)
+      }
+    } else {
+      g = await analyzeExpenseReceiptWithAzureFoundry(
         contentFetch.bytes,
         contentFetch.contentType,
         lineMessageId,
@@ -1377,7 +1393,8 @@ async function processReceiptImageEvent(
         azureFoundryDeployment,
         EXPENSE_RECEIPT_PROMPT_ADDITION,
       )
-    await recordAiUsage(geminiApiKey ? 'gemini' : 'azure_openai', geminiApiKey ? receiptGeminiModel : AZURE_RECEIPT_MODEL, g.usage)
+      await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, g.usage)
+    }
     return g.analysis?.receipt ?? null
   }
 
@@ -1665,8 +1682,9 @@ async function processReceiptImageEvent(
       'レジ出金伝票が写っていればその「今回出金額 ¥◯」も金額の手掛かりにする。反射・かすれは読める数値だけで receipt を作り kind=receipt を維持する。',
     ].join('\n')
     const geminiApiKey = resolveGeminiApiKey()
-    const forcedExpense = geminiApiKey
-      ? await analyzeLineImageWithGemini(
+    let forcedExpense: Awaited<ReturnType<typeof analyzeLineImageWithGemini>> | Awaited<ReturnType<typeof analyzeExpenseReceiptWithAzureFoundry>>
+    if (geminiApiKey) {
+      forcedExpense = await analyzeLineImageWithGemini(
         contentFetch.bytes,
         contentFetch.contentType,
         lineMessageId,
@@ -1674,7 +1692,22 @@ async function processReceiptImageEvent(
         forcedExpensePrompt,
         receiptGeminiModel,
       )
-      : await analyzeExpenseReceiptWithAzureFoundry(
+      await recordAiUsage('gemini', receiptGeminiModel, forcedExpense.usage)
+      if (!forcedExpense.analysis && shouldFallbackLineImageVisionFailure(forcedExpense.failure)) {
+        console.error(`[petty_cash_gemini_fallback] Gemini forced reanalysis failed; retrying with Azure (msg=${lineMessageId}, stage=${forcedExpense.failure?.stage ?? 'unknown'})`)
+        forcedExpense = await analyzeExpenseReceiptWithAzureFoundry(
+          contentFetch.bytes,
+          contentFetch.contentType,
+          lineMessageId,
+          azureFoundryProjectEndpoint,
+          azureFoundryApiKey,
+          azureFoundryDeployment,
+          forcedExpensePrompt,
+        )
+        await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, forcedExpense.usage)
+      }
+    } else {
+      forcedExpense = await analyzeExpenseReceiptWithAzureFoundry(
         contentFetch.bytes,
         contentFetch.contentType,
         lineMessageId,
@@ -1683,7 +1716,8 @@ async function processReceiptImageEvent(
         azureFoundryDeployment,
         forcedExpensePrompt,
       )
-    await recordAiUsage(geminiApiKey ? 'gemini' : 'azure_openai', geminiApiKey ? receiptGeminiModel : AZURE_RECEIPT_MODEL, forcedExpense.usage)
+      await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, forcedExpense.usage)
+    }
     if (forcedExpense.analysis?.receipt) analyzed = forcedExpense
   }
 
