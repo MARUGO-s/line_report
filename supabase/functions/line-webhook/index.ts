@@ -6,6 +6,7 @@ import {
   replyLineText,
   resolveChannelAccessToken,
   resolveGeminiApiKey,
+  resolveReceiptGeminiFlashModel,
   resolveReceiptGeminiModel,
 } from '../_shared/line_client.ts'
 import {
@@ -14,7 +15,7 @@ import {
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import { maybeHandleFoodCourtReport, handleFoodCourtReportPostback } from '../_shared/foodcourt_compare.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
-import { handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
+import { extractExpenseFromReceipt, handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import {
@@ -55,7 +56,7 @@ import {
   resolveReceiptDateIsoForPersist,
 } from '../_shared/receipt_parse.ts'
 import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from '../_shared/receipt_types.ts'
-import { analyzeExpenseReceiptWithAzureFoundry, analyzeLineImageWithAzureFoundry, analyzeLineImageWithClaude, analyzeLineImageWithGemini, AZURE_FOUNDRY_VISION_MODEL, shouldFallbackLineImageVisionFailure, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
+import { analyzeExpenseReceiptWithAzureFoundry, analyzeLineImageWithAzureFoundry, analyzeLineImageWithClaude, analyzeLineImageWithGemini, AZURE_FOUNDRY_VISION_MODEL, needsGeminiProPettyCashReview, shouldFallbackLineImageVisionFailure, type LineImageVisionUsage } from '../_shared/receipt_vision.ts'
 import {
   combineStoreReceiptPromptAdditions,
   EXPENSE_RECEIPT_PROMPT_ADDITION,
@@ -1327,6 +1328,7 @@ async function processReceiptImageEvent(
   )
 
   const receiptGeminiModel = resolveReceiptGeminiModel()
+  const receiptGeminiFlashModel = resolveReceiptGeminiFlashModel()
   const AZURE_RECEIPT_MODEL = azureFoundryDeployment
 
   // AI使用料ページの「実測」表示用に、APIが返した実測トークンを1行記録する。
@@ -1356,7 +1358,7 @@ async function processReceiptImageEvent(
 
   // 経費(小口)専用の再解析（独立経路）: 売上(精算)解析プロンプトには一切手を入れず、
   // 経費専用の追記(EXPENSE_RECEIPT_PROMPT_ADDITION)で line_items・小計/外税 を取得する。
-  // 小口レシートはGeminiを通常経路にする。Geminiキー未設定時のみAzureへ退避する。
+  // 小口レシートはGemini Flashを通常経路にし、整合性が取れない時だけProへ昇格する。
   const reanalyzeAsExpense = async () => {
     const geminiApiKey = resolveGeminiApiKey()
     let g: Awaited<ReturnType<typeof analyzeLineImageWithGemini>> | Awaited<ReturnType<typeof analyzeExpenseReceiptWithAzureFoundry>>
@@ -1367,9 +1369,24 @@ async function processReceiptImageEvent(
         lineMessageId,
         geminiApiKey,
         EXPENSE_RECEIPT_PROMPT_ADDITION,
-        receiptGeminiModel,
+        receiptGeminiFlashModel,
       )
-      await recordAiUsage('gemini', receiptGeminiModel, g.usage)
+      await recordAiUsage('gemini', receiptGeminiFlashModel, g.usage)
+      if (needsGeminiProPettyCashReview(g.analysis) || !extractExpenseFromReceipt(g.analysis?.receipt ?? null)) {
+        console.info(`[petty_cash_flash_review] Flash result needs Pro review (msg=${lineMessageId})`)
+        const proReview = await analyzeLineImageWithGemini(
+          contentFetch.bytes,
+          contentFetch.contentType,
+          `${lineMessageId}#pro-review`,
+          geminiApiKey,
+          EXPENSE_RECEIPT_PROMPT_ADDITION,
+          receiptGeminiModel,
+        )
+        await recordAiUsage('gemini', receiptGeminiModel, proReview.usage)
+        if (proReview.analysis || !g.analysis || shouldFallbackLineImageVisionFailure(proReview.failure)) {
+          g = proReview
+        }
+      }
       if (!g.analysis && shouldFallbackLineImageVisionFailure(g.failure)) {
         console.error(`[petty_cash_gemini_fallback] Gemini failed; retrying with Azure (msg=${lineMessageId}, stage=${g.failure?.stage ?? 'unknown'})`)
         g = await analyzeExpenseReceiptWithAzureFoundry(
@@ -1690,9 +1707,24 @@ async function processReceiptImageEvent(
         lineMessageId,
         geminiApiKey,
         forcedExpensePrompt,
-        receiptGeminiModel,
+        receiptGeminiFlashModel,
       )
-      await recordAiUsage('gemini', receiptGeminiModel, forcedExpense.usage)
+      await recordAiUsage('gemini', receiptGeminiFlashModel, forcedExpense.usage)
+      if (needsGeminiProPettyCashReview(forcedExpense.analysis) || !extractExpenseFromReceipt(forcedExpense.analysis?.receipt ?? null)) {
+        console.info(`[petty_cash_flash_review] Flash forced result needs Pro review (msg=${lineMessageId})`)
+        const proReview = await analyzeLineImageWithGemini(
+          contentFetch.bytes,
+          contentFetch.contentType,
+          `${lineMessageId}#pro-review`,
+          geminiApiKey,
+          forcedExpensePrompt,
+          receiptGeminiModel,
+        )
+        await recordAiUsage('gemini', receiptGeminiModel, proReview.usage)
+        if (proReview.analysis || !forcedExpense.analysis || shouldFallbackLineImageVisionFailure(proReview.failure)) {
+          forcedExpense = proReview
+        }
+      }
       if (!forcedExpense.analysis && shouldFallbackLineImageVisionFailure(forcedExpense.failure)) {
         console.error(`[petty_cash_gemini_fallback] Gemini forced reanalysis failed; retrying with Azure (msg=${lineMessageId}, stage=${forcedExpense.failure?.stage ?? 'unknown'})`)
         forcedExpense = await analyzeExpenseReceiptWithAzureFoundry(

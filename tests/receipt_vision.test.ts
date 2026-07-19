@@ -4,6 +4,7 @@ import {
   analyzeLineImageWithAzureFoundry,
   analyzeLineImageWithGroqScout,
   isTransientLineImageVisionFailure,
+  needsGeminiProPettyCashReview,
   shouldFallbackLineImageVisionFailure,
 } from "../supabase/functions/_shared/receipt_vision.ts";
 import {
@@ -68,6 +69,28 @@ test("falls back for retired models but not invalid image input", () => {
     }),
     false,
   );
+});
+
+test("upgrades incomplete petty cash analyses to Gemini Pro", () => {
+  assert.equal(needsGeminiProPettyCashReview(null), true);
+  assert.equal(needsGeminiProPettyCashReview({
+    summary: "receipt",
+    receipt: { storeName: "SEIYU 練馬Part1", grossSales: "¥4,288", lineItems: [{ name: "パプリカ", price: "¥3,960", rate: 8 }] },
+    receiptModelConfidence: 0.9,
+  }), true);
+  assert.equal(needsGeminiProPettyCashReview({
+    summary: "receipt",
+    receipt: {
+      storeName: "SEIYU 練馬Part1",
+      grossSales: "¥4,288",
+      lineItems: [
+        { name: "レジ袋", price: "¥12", rate: 10 },
+        { name: "パプリカ", price: "¥3,960", rate: 8 },
+      ],
+      taxBreakdown: [{ rate: 8, total: "¥4,276", tax: "¥316" }, { rate: 10, total: "¥12", tax: "¥1" }],
+    },
+    receiptModelConfidence: 0.9,
+  }), false);
 });
 
 test("Marugo S prompt requires both party and guest counts from the daily report footer", () => {

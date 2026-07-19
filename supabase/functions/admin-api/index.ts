@@ -25,7 +25,7 @@ import {
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
 import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
-import { analyzeExpenseReceiptWithAzureFoundry, analyzeLineImageWithGemini, AZURE_FOUNDRY_VISION_MODEL, shouldFallbackLineImageVisionFailure, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
+import { analyzeExpenseReceiptWithAzureFoundry, analyzeLineImageWithGemini, AZURE_FOUNDRY_VISION_MODEL, needsGeminiProPettyCashReview, shouldFallbackLineImageVisionFailure, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
 import { extractExpenseFromReceipt } from "../_shared/petty_cash_flow.ts"
 import {
   answerFoodCourtQuestion,
@@ -47,6 +47,7 @@ import {
   pushLineMessagesToTarget,
   resolveChannelAccessToken,
   resolveGeminiApiKey,
+  resolveReceiptGeminiFlashModel,
   resolveReceiptGeminiModel,
 } from "../_shared/line_client.ts"
 import {
@@ -5314,9 +5315,10 @@ async function createPettyCashEntryFromReceiptImage(
   const bytes = new Uint8Array(await fileValue.arrayBuffer())
   const webMessageId = `web-petty-cash:${crypto.randomUUID()}`
   const geminiApiKey = resolveGeminiApiKey()
-  const geminiModel = resolveReceiptGeminiModel()
-  // 小口レシートは、同じ西友画像で実測済みのGeminiを通常経路にする。
-  // AzureはGeminiキー未設定時だけの退避先で、売上・分析系のAzure利用には影響しない。
+  const geminiFlashModel = resolveReceiptGeminiFlashModel()
+  const geminiProModel = resolveReceiptGeminiModel()
+  // 小口レシートはFlashを通常経路にし、金額・税率・明細が不完全な場合だけProへ昇格する。
+  // AzureはGemini障害時だけの退避先で、売上・分析系のAzure利用には影響しない。
   let analyzed: Awaited<ReturnType<typeof analyzeLineImageWithGemini>> | Awaited<ReturnType<typeof analyzeExpenseReceiptWithAzureFoundry>>
   if (geminiApiKey) {
     analyzed = await analyzeLineImageWithGemini(
@@ -5325,9 +5327,24 @@ async function createPettyCashEntryFromReceiptImage(
       originalFileName,
       geminiApiKey,
       EXPENSE_RECEIPT_PROMPT_ADDITION,
-      geminiModel,
+      geminiFlashModel,
     )
-    await recordPettyCashWebAiUsage(supabase, storeKey, webMessageId, analyzed.usage, "gemini", geminiModel)
+    await recordPettyCashWebAiUsage(supabase, storeKey, webMessageId, analyzed.usage, "gemini", geminiFlashModel)
+    if (needsGeminiProPettyCashReview(analyzed.analysis) || !extractExpenseFromReceipt(analyzed.analysis?.receipt ?? null)) {
+      console.info("petty cash Flash result needs Pro review")
+      const proReview = await analyzeLineImageWithGemini(
+        bytes,
+        mimeType,
+        `${originalFileName}#pro-review`,
+        geminiApiKey,
+        EXPENSE_RECEIPT_PROMPT_ADDITION,
+        geminiProModel,
+      )
+      await recordPettyCashWebAiUsage(supabase, storeKey, webMessageId, proReview.usage, "gemini", geminiProModel)
+      if (proReview.analysis || !analyzed.analysis || shouldFallbackLineImageVisionFailure(proReview.failure)) {
+        analyzed = proReview
+      }
+    }
     if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(analyzed.failure)) {
       console.error("petty cash Gemini analysis failed; retrying with Azure:", analyzed.failure?.stage ?? "unknown")
       analyzed = await analyzeExpenseReceiptWithAzureFoundry(

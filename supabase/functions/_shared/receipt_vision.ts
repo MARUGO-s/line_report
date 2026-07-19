@@ -519,6 +519,16 @@ function needsSeiyuDetailRetry(analysis: LineImageAnalysisResult | null): boolea
   })
 }
 
+/**
+ * 小口の通常経路（Gemini Flash）でPro再解析が必要かを判定する。
+ * 西友以外は金額が取れていればFlashの結果を採用し、西友だけは明細・税率別集計を厳格に確認する。
+ */
+export function needsGeminiProPettyCashReview(analysis: LineImageAnalysisResult | null): boolean {
+  const receipt = analysis?.receipt
+  if (!receipt || parseReceiptAmount(receipt.grossSales) == null) return true
+  return needsSeiyuDetailRetry(analysis)
+}
+
 function isCompleteSeiyuDetail(analysis: LineImageAnalysisResult | null): boolean {
   if (!isSeiyuExpenseAnalysis(analysis)) return false
   const receipt = analysis?.receipt

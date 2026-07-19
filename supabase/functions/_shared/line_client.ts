@@ -355,3 +355,8 @@ export function resolveGeminiApiKey(): string {
 export function resolveReceiptGeminiModel(): string {
   return String(Deno.env.get('RECEIPT_GEMINI_MODEL') || '').trim() || 'gemini-3.1-pro-preview'
 }
+
+/** 小口レシートの通常解析モデル。高額なProは整合性確認に失敗した場合だけ使う。 */
+export function resolveReceiptGeminiFlashModel(): string {
+  return String(Deno.env.get('RECEIPT_GEMINI_FLASH_MODEL') || '').trim() || 'gemini-3-flash-preview'
+}

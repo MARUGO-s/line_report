@@ -482,7 +482,7 @@
           <details class="assump" id="geminiBox">
             <summary>
               <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-              Gemini（ソバージュ・鮨こるり / <span id="geminiStoreCount" class="mono">— 店舗</span>）
+              Gemini Pro（専門解析・再確認 / <span id="geminiStoreCount" class="mono">— 店舗</span>）
             </summary>
             <div class="assump-body" style="padding-top: 12px;">
               <div class="kpis">
@@ -606,7 +606,7 @@
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="grok_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
-              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini（ソバージュ・鮨こるり）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini Pro（専門解析・再確認）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="gemini_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="gemini_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -652,7 +652,7 @@
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
     // 単価は各社の公式単価（USD / 100万トークン）。Azure Foundry GPT-5.4 nano は $0.20/$1.25。
-    // Gemini 3.x Pro は ≤20万トークンのプロンプトで $2/$12。
+    // Gemini 3.1 Pro は ≤20万トークンのプロンプトで $2/$12、Gemini 3 Flash は $0.50/$3。
     // Grok / xAI は grok-3-mini の目安 $0.30/$0.50。モデル差し替え時は画面上で上書きする。
     // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
     const DEFAULT_RATES = {
@@ -839,15 +839,17 @@
     function providerUsd(inputTokens, outputTokens, rate) {
       return (Number(inputTokens || 0) * rate.inUsd + Number(outputTokens || 0) * rate.outUsd) / 1e6;
     }
+    const GEMINI_FLASH_RATE = { inUsd: 0.50, outUsd: 3.00 };
     function rateForModel(provider, model) {
       const m = String(model || '').toLowerCase();
+      if (provider === 'gemini' && m === 'gemini-3-flash-preview') return GEMINI_FLASH_RATE;
       return state.rates[rateKeyForModel(provider, model)] || DEFAULT_RATES.azure;
     }
-    // 思考トークンは出力として課金されるため出力側に含める（無ければ0）。
+    // API記録の output_tokens は思考を含む課金対象出力。thinking_tokens は内訳表示だけに使う。
     function modelUsd(m) {
       const rate = rateForModel(m.provider, m.model);
       const inTok = Number(m.input_tokens || 0);
-      const outTok = Number(m.output_tokens || 0) + Number(m.thinking_tokens || 0);
+      const outTok = Number(m.output_tokens || 0);
       return (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
     }
     // provider の合計USD＝そのproviderの各モデルをモデル別単価で合算（最も正確）。
@@ -946,6 +948,7 @@
 
     const KNOWN_AI_MODELS = [
       { provider: 'azure_openai', model: 'gpt-5.4-nano', title: 'Azure Foundry', className: '' },
+      { provider: 'gemini', model: 'gemini-3-flash-preview', title: 'Gemini / Flash', className: 'gemini' },
       { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini', className: 'gemini' },
       { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
       { provider: 'openai', model: 'o4-mini', title: 'OpenAI', className: 'openai' },
@@ -1028,7 +1031,7 @@
         const title = m.title || displayProvider(m.provider);
         const cls = m.className || cardClassForModel(m.provider, m.model);
         const usage = MODEL_LABELS[m.model] || '';
-        const outTok = Number(m.output_tokens || 0) + Number(m.thinking_tokens || 0);
+        const outTok = Number(m.output_tokens || 0);
         return '<div class="total-card ' + escapeHtml(cls) + '">' +
           '<div class="tc-prov">' + escapeHtml(title) + '</div>' +
           '<div class="tc-model mono">' + escapeHtml(m.model || '—') + '</div>' +
@@ -1066,7 +1069,7 @@
           (use ? '<br><span class="ms-sub" style="font-size:11px">' + escapeHtml(use) + '</span>' : '') + '</td>' +
           '<td>' + fmtInt(mm.event_count) + '</td>' +
           '<td>' + fmtInt(mm.input_tokens) + '</td>' +
-          '<td>' + fmtInt(Number(mm.output_tokens || 0) + Number(mm.thinking_tokens || 0)) + '</td>' +
+          '<td>' + fmtInt(Number(mm.output_tokens || 0)) + '</td>' +
           '<td>' + fmtJpy(jpy) + '</td>' +
           '</tr>';
       }).join('');
@@ -1084,6 +1087,7 @@
       'o4-mini': 'フードコート分析の最終統合',
       'gpt-5.5': 'フードコート分析の最終統合（旧モデル）',
       'grok-3-mini': 'フードコート運営改善AI',
+      'gemini-3-flash-preview': '小口レシートの通常解析（低コスト）',
       'gemini-3.1-pro-preview': 'レシート解析・フードコート専門AI',
       'claude-haiku-4-5': '経費レシート解析・反証AI',
     };
@@ -1110,7 +1114,7 @@
           (use ? '<br><span class="ms-sub" style="font-size:11px">' + escapeHtml(use) + '</span>' : '') + '</td>' +
           '<td>' + escapeHtml(mm.provider) + '</td>' +
           '<td>' + fmtInt(mm.input_tokens) + '</td>' +
-          '<td>' + fmtInt(Number(mm.output_tokens || 0) + Number(mm.thinking_tokens || 0)) + '</td>' +
+          '<td>' + fmtInt(Number(mm.output_tokens || 0)) + '</td>' +
           '<td class="mono">$' + rate.inUsd + ' / $' + rate.outUsd + '</td>' +
           '<td>' + fmtJpy(jpy) + '</td>' +
           '</tr>';
@@ -1151,7 +1155,7 @@
           };
         }
         const inTok = Number(row.input_tokens || 0);
-        const outTok = Number(row.output_tokens || 0) + Number(row.thinking_tokens || 0);
+        const outTok = Number(row.output_tokens || 0);
         const usd = modelUsd(row);
         const jpy = usd * jpyPerUsd;
 
