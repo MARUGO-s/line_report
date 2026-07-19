@@ -6,8 +6,19 @@ import { normalizeInlineText } from './receipt_parse.ts'
 import { MARUGO_GROUP_STORE_OPTIONS } from './marugo_group_stores.ts'
 import { RECEIPT_SHEETS_STORE_CATALOG } from './receipt_sheets_store_catalog.ts'
 
-export function normalizeStoreToken(value: string): string {
+/** 店名末尾のローマ数字を算用数字へ（クラウディアⅡ／クラウディアII ＝ クラウディア2）。
+ *  実害: 2026-07-20 クラウディア2の日計精算レポートが、印字名「クラウディアⅡ」と登録名
+ *  「クラウディア2」の不一致で“別店舗のレシート”＝経費候補と判定され、売上が登録されなかった。 */
+function normalizeTrailingRomanNumeral(value: string): string {
   return String(value || '')
+    .replace(/[ⅠⅡⅢⅣⅤ]/g, (m) => String('ⅠⅡⅢⅣⅤ'.indexOf(m) + 1))
+    .replace(/[ⅰⅱⅲⅳⅴ]/g, (m) => String('ⅰⅱⅲⅳⅴ'.indexOf(m) + 1))
+    // 半角の I を並べた表記は、カタカナ/ひらがな/漢字の直後かつ末尾のときだけ数字とみなす。
+    .replace(/([ぁ-んァ-ヶ一-龠々])(III|II)(?=\s*$)/gi, (_m, head: string, roman: string) => `${head}${roman.length}`)
+}
+
+export function normalizeStoreToken(value: string): string {
+  return normalizeTrailingRomanNumeral(String(value || ''))
     .toLowerCase()
     .replace(/株式会社ワルツ/g, '')
     .replace(/[^0-9a-zぁ-んァ-ヶ一-龠々]/g, '')
@@ -60,7 +71,17 @@ const RECEIPT_BRAND_PARTITION_ALIASES: ReadonlyArray<{
   },
   {
     partitionKey: 'claudia2',
-    labels: ['クラウディア2', 'クラウディアツー', 'Pizzeria Claudia2', 'PIZZERIA CLAUDIA2', 'CLAUDIA2'],
+    labels: [
+      'クラウディア2',
+      'クラウディアツー',
+      // レシート印字は「クラウディアⅡ」（ローマ数字）。登録名「クラウディア2」と綴りが違う。
+      'クラウディアⅡ',
+      'クラウディアII',
+      'Pizzeria Claudia2',
+      'PIZZERIA CLAUDIA2',
+      'CLAUDIA2',
+      'CLAUDIA II',
+    ],
   },
   {
     partitionKey: 'sauvage',

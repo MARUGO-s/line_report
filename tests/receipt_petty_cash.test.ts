@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { looksLikeSalesSettlementReceipt } from "../supabase/functions/_shared/receipt_parse.ts";
+import { looksLikeSalesSettlementReceipt, normalizeLineImageReceiptAnalysis } from "../supabase/functions/_shared/receipt_parse.ts";
+import { receiptStoreNameMatchesRegistry } from "../supabase/functions/_shared/receipt_store_name_match.ts";
+import { resolveBuiltinStoreReceiptPrompt } from "../supabase/functions/_shared/receipt_prompt.ts";
 
 test("recognises a daily sales settlement report as sales, never as an expense", () => {
   // 実害: 2026-07-20 クラウディア2。「経費」先打ちの画像待ち中に日計精算レポートを送ったため、
@@ -68,4 +70,64 @@ test("treats an ordinary supplier receipt as an expense", () => {
     taxBreakdown: [],
   };
   assert.equal(looksLikeSalesSettlementReceipt(supplier), false);
+});
+
+test("matches クラウディアⅡ on the receipt with the registered クラウディア2", () => {
+  // 実害: 2026-07-20。印字名「クラウディアⅡ」が登録名「クラウディア2」と一致せず、
+  // 自店の日計精算レポートが「別店舗のレシート＝経費候補」として扱われ売上が登録されなかった。
+  for (const printed of ["クラウディアⅡ", "クラウディアII", "Claudia2", "クラウディア2"]) {
+    assert.equal(
+      receiptStoreNameMatchesRegistry("クラウディア2", "claudia2", printed, null, ["0362731083"]),
+      true,
+      printed,
+    );
+  }
+});
+
+test("still rejects a different store's receipt", () => {
+  assert.equal(
+    receiptStoreNameMatchesRegistry("クラウディア2", "claudia2", "マルゴ 四谷", null, ["0362731083"]),
+    false,
+  );
+  assert.equal(
+    receiptStoreNameMatchesRegistry("クラウディア2", "claudia2", "シェンロン&クラウディア", null, ["0362731083"]),
+    false,
+  );
+});
+
+test("keeps Claudia2 daily settlement fields as printed", () => {
+  const receipt = normalizeLineImageReceiptAnalysis({
+    store_name: "クラウディアⅡ",
+    date: "2026年7月19日",
+    net_sales: "772869",
+    tax_amount: "77231",
+    gross_sales: "850100",
+    party_count: "104組",
+    guest_count: "248名",
+    unit_price: "3428",
+  });
+  assert.deepEqual(receipt && {
+    date: receipt.date,
+    netSales: receipt.netSales,
+    taxAmount: receipt.taxAmount,
+    grossSales: receipt.grossSales,
+    partyCount: receipt.partyCount,
+    guestCount: receipt.guestCount,
+    unitPrice: receipt.unitPrice,
+  }, {
+    date: "2026年7月19日",
+    netSales: "¥772,869",
+    taxAmount: "¥77,231",
+    grossSales: "¥850,100",
+    partyCount: "104組",
+    guestCount: "248名",
+    unitPrice: "¥3,428",
+  });
+});
+
+test("includes the Claudia2 daily settlement rule in the vision prompt", () => {
+  const prompt = resolveBuiltinStoreReceiptPrompt("claudia2");
+  assert.match(prompt, /日計精算レポート＝売上/);
+  assert.match(prompt, /純売上¥772,869/);
+  assert.match(prompt, /現計.*Square.*gross_sales に使わない/);
 });
