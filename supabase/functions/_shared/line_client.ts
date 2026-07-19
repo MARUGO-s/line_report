@@ -360,3 +360,11 @@ export function resolveReceiptGeminiModel(): string {
 export function resolveReceiptGeminiFlashModel(): string {
   return String(Deno.env.get('RECEIPT_GEMINI_FLASH_MODEL') || '').trim() || 'gemini-3-flash-preview'
 }
+
+/**
+ * 通常の売上レシート画像解析モデル。小口のFlash/Pro経路とは分離し、
+ * RECEIPT_GEMINI_FLASH_LITE_MODEL で安全に差し替えられるようにする。
+ */
+export function resolveReceiptGeminiFlashLiteModel(): string {
+  return String(Deno.env.get('RECEIPT_GEMINI_FLASH_LITE_MODEL') || '').trim() || 'gemini-3.1-flash-lite'
+}

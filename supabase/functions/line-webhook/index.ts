@@ -7,6 +7,7 @@ import {
   resolveChannelAccessToken,
   resolveGeminiApiKey,
   resolveReceiptGeminiFlashModel,
+  resolveReceiptGeminiFlashLiteModel,
   resolveReceiptGeminiModel,
 } from '../_shared/line_client.ts'
 import {
@@ -1329,11 +1330,9 @@ async function processReceiptImageEvent(
 
   const receiptGeminiModel = resolveReceiptGeminiModel()
   const receiptGeminiFlashModel = resolveReceiptGeminiFlashModel()
-  // バルペロタの精算票はAzure失敗時の通常フォールバックもFlashで処理する。
-  // 小口用のPro再確認や他店舗の通常レシート経路は従来どおりProを維持する。
-  const normalReceiptGeminiModel = registry.store_partition_key === 'barpelota'
-    ? receiptGeminiFlashModel
-    : receiptGeminiModel
+  // 売上の日計・精算レシートはFlash Liteを通常経路にする。
+  // 小口用のFlash/Pro経路は従来どおり別モデルのまま維持する。
+  const normalReceiptGeminiModel = resolveReceiptGeminiFlashLiteModel()
   const AZURE_RECEIPT_MODEL = azureFoundryDeployment
 
   // AI使用料ページの「実測」表示用に、APIが返した実測トークンを1行記録する。
@@ -1441,39 +1440,39 @@ async function processReceiptImageEvent(
     }
   }
 
-  let analyzed: Awaited<ReturnType<typeof analyzeLineImageWithAzureFoundry>>
+  let analyzed: Awaited<ReturnType<typeof analyzeLineImageWithGemini>> | Awaited<ReturnType<typeof analyzeLineImageWithAzureFoundry>>
 
-  // すべての店舗で Azure Foundry を最初の画像解析として使う。Groq の事前判定は行わない。
-  analyzed = await analyzeLineImageWithAzureFoundry(
+  // 全店舗の通常レシートは Gemini Flash Lite を最初の画像解析として使う。
+  // Gemini障害時だけ Azure Foundry nano、さらに失敗時だけClaudeへ退避する。
+  analyzed = await analyzeLineImageWithGemini(
     contentFetch.bytes,
     contentFetch.contentType,
     lineMessageId,
-    azureFoundryProjectEndpoint,
-    azureFoundryApiKey,
-    azureFoundryDeployment,
+    resolveGeminiApiKey(),
     receiptPromptAddition,
+    normalReceiptGeminiModel,
   )
-  await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, analyzed.usage)
+  await recordAiUsage('gemini', normalReceiptGeminiModel, analyzed.usage)
 
-  // Azure が失敗した時だけ Gemini へ退避する。Gemini も失敗した場合だけ Claude を使う。
-  if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(analyzed.failure) && resolveGeminiApiKey()) {
+  if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(analyzed.failure)) {
     console.error(
-      `[receipt_analysis_fallback] Azure Foundry failed; retrying with Gemini (store=${registry.store_partition_key}, msg=${lineMessageId}, stage=${analyzed.failure?.stage ?? 'unknown'})`,
+      `[receipt_analysis_fallback] Gemini Flash Lite failed; retrying with Azure Foundry (store=${registry.store_partition_key}, msg=${lineMessageId}, stage=${analyzed.failure?.stage ?? 'unknown'})`,
     )
-    const fallback = await analyzeLineImageWithGemini(
+    const fallback = await analyzeLineImageWithAzureFoundry(
       contentFetch.bytes,
       contentFetch.contentType,
       lineMessageId,
-      resolveGeminiApiKey(),
+      azureFoundryProjectEndpoint,
+      azureFoundryApiKey,
+      azureFoundryDeployment,
       receiptPromptAddition,
-      normalReceiptGeminiModel,
     )
-    await recordAiUsage('gemini', normalReceiptGeminiModel, fallback.usage)
+    await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, fallback.usage)
     if (fallback.analysis || fallback.failure) analyzed = fallback
 
     if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(fallback.failure) && resolveClaudeApiKey()) {
       console.error(
-        `[receipt_analysis_fallback] Gemini also failed; retrying with Claude (store=${registry.store_partition_key}, msg=${lineMessageId}, stage=${fallback.failure?.stage ?? 'unknown'})`,
+        `[receipt_analysis_fallback] Azure Foundry also failed; retrying with Claude (store=${registry.store_partition_key}, msg=${lineMessageId}, stage=${fallback.failure?.stage ?? 'unknown'})`,
       )
       const secondFallback = await analyzeLineImageWithClaude(
         contentFetch.bytes,
@@ -1489,7 +1488,7 @@ async function processReceiptImageEvent(
   }
 
   // マルゴエス／ソバージュの日計精算レポートは、画像下部の人数・組数が小さく、売上金額だけ読めても
-  // 二つの数値を落とすことがある。欠損時だけ Azure に数値部分を再確認させ、
+  // 二つの数値を落とすことがある。欠損時だけ Gemini Flash Lite に数値部分を再確認させ、
   // 初回で正しく読めた金額・日付・店名はそのまま保持する。
   const initialReceipt = analyzed.analysis?.receipt ?? null
   const receiptStoreKey = String(registry.store_partition_key ?? '').toLowerCase()
@@ -1511,16 +1510,15 @@ async function processReceiptImageEvent(
       '',
       countRetryInstruction,
     ].join('\n')
-    const countRetry = await analyzeLineImageWithAzureFoundry(
+    const countRetry = await analyzeLineImageWithGemini(
       contentFetch.bytes,
       contentFetch.contentType,
       `${lineMessageId}#footer-counts`,
-      azureFoundryProjectEndpoint,
-      azureFoundryApiKey,
-      azureFoundryDeployment,
+      resolveGeminiApiKey(),
       countRetryPrompt,
+      normalReceiptGeminiModel,
     )
-    await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, countRetry.usage)
+    await recordAiUsage('gemini', normalReceiptGeminiModel, countRetry.usage)
     const retriedReceipt = countRetry.analysis?.receipt ?? null
     if (retriedReceipt && (String(retriedReceipt.partyCount ?? '').trim() || String(retriedReceipt.guestCount ?? '').trim())) {
       analyzed = {
@@ -1554,16 +1552,15 @@ async function processReceiptImageEvent(
       '【印字時刻の再確認。最優先】このバー・ペロタの精算票は、見出し「精算」の直下に「YYYY-MM-DD HH:MM:SS」の日時が必ずある。',
       '日付と時刻を別々に出力すること。例: 「2026-07-11 00:12:02」なら receipt.date="2026-07-11"、receipt_time="00:12:02"。00:00〜04:59 は前日の営業日に登録するため、時刻の省略は絶対にしない。',
     ].join('\n')
-    const timeRetry = await analyzeLineImageWithAzureFoundry(
+    const timeRetry = await analyzeLineImageWithGemini(
       contentFetch.bytes,
       contentFetch.contentType,
       `${lineMessageId}#printed-time`,
-      azureFoundryProjectEndpoint,
-      azureFoundryApiKey,
-      azureFoundryDeployment,
+      resolveGeminiApiKey(),
       timeRetryPrompt,
+      normalReceiptGeminiModel,
     )
-    await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, timeRetry.usage)
+    await recordAiUsage('gemini', normalReceiptGeminiModel, timeRetry.usage)
     const retriedReceipt = timeRetry.analysis?.receipt ?? null
     if (retriedReceipt?.printedTime) {
       analyzed = {
@@ -1598,16 +1595,15 @@ async function processReceiptImageEvent(
       '必ず kind="receipt" を出力し、receipt に読み取れる主要項目（store_name, date, net_sales=純売上, gross_sales=合計/税込, party_count=通常取引数, guest_count=客数 など）を入れること。',
       '反射・光・かすれがあっても、読める数値だけでも receipt に入れて kind=receipt を維持し、receipt_confidence は 0.6 以上にする。',
     ].join('\n')
-    const forcedRetry = await analyzeLineImageWithAzureFoundry(
+    const forcedRetry = await analyzeLineImageWithGemini(
       contentFetch.bytes,
       contentFetch.contentType,
       lineMessageId,
-      azureFoundryProjectEndpoint,
-      azureFoundryApiKey,
-      azureFoundryDeployment,
+      resolveGeminiApiKey(),
       forcedReceiptPrompt,
+      normalReceiptGeminiModel,
     )
-    await recordAiUsage('azure_openai', AZURE_RECEIPT_MODEL, forcedRetry.usage)
+    await recordAiUsage('gemini', normalReceiptGeminiModel, forcedRetry.usage)
     if (forcedRetry.analysis?.receipt) analyzed = forcedRetry
   }
 
