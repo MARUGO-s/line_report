@@ -8,6 +8,7 @@ import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 import {
   buildFoodCourtRevisionMessages,
   compactFoodCourtEvaluationContext,
+  foodCourtEvaluationScoreAnchors,
   foodCourtEvaluationSurfaceRules,
   foodCourtEvaluationPassed,
   foodCourtLoopHasBudget,
@@ -1028,6 +1029,7 @@ async function evaluateFoodCourtAnswer(params: {
     'あなたはフードコート売上分析AIの品質評価者です。以下の実データ・分析メモ・最終回答を比較し、100点満点で採点してください。',
     'あなた自身は回答を書き直さない。採点と改善点のみを返す。',
     '評価軸: 1.正確性 2.論理性 3.専門性 4.実用性 5.根拠',
+    ...foodCourtEvaluationScoreAnchors(),
     '禁止（見つけたら improvement_points/risk_flags に指摘として書く）:',
     '- データに無い数字を正しいものとして扱っている',
     '- 相関を因果と断定している',
@@ -1294,7 +1296,7 @@ export async function runFoodCourtLoopEngineering(params: {
     return { answer: gen.content, usages, loopScore: null, loopCount: 1 }
   }
 
-  const modelVersion = `foodcourt-loop-v1(${config.evaluatorProvider};pass=${config.passTotal})`
+  const modelVersion = `foodcourt-loop-v2-calibrated(${config.evaluatorProvider};pass=${config.passTotal}/${config.passEach})`
   const runId = await saveFoodCourtLoopRun(params.supabase, {
     storeKey: String(params.storeKey ?? ''),
     surface: params.surface,
@@ -2794,6 +2796,7 @@ export async function answerFoodCourtQuestion(
     `(3) 真の競合（代替関係）を特定する。席は共有なので“客の財布と滞在時間”の奪い合い。同じ来店動機・時間帯・価格帯で客を奪い合う相手はどの店か。同ジャンル競合の有無（ワインは自店がほぼ独占）も強み/弱みとして語る。`,
     `(4) 需要ドライバーの中でも【東京ドームのイベント】を最重要視し、具体的に深掘りする。提供データの「会場イベント相関」「直近の日別イベント（日付・客数・売上・イベント名つき）」を必ず使い、客数・売上に動きがある日は次を必ず述べる: (a) その日に**どんなイベントが・いつ（昼興行か夜公演か）あったかをイベント名・種別・規模・客層まで特定**する（例: NiziUライブ＝若年女性中心で物販・グッズ後の軽い飲食、巨人戦などプロ野球＝幅広い年齢の野球ファンで試合前後に長め滞在、大学野球＝昼開催で飲酒需要が薄い、コンサート＝開演前後に集中、等）。(b) そのイベントが${baseName}の客数・売上に**どれだけ・なぜ**効いた/効かなかったかを実数を引用してメカニズムで説明する（観客の客層・財布・滞在時間・開演時間帯と、ワイン×スパイスという高単価・大人向け業態の相性）。(c) 取り込めたイベント／取りこぼしたイベントを切り分け、次に同種のイベントが来たときの打ち手につなげる。「イベント日は客数が多い」で終わらせない。天気・曜日は補助要因として絡める。`,
     `(5) 自店の構造的な強み・弱みと打開仮説。打ち手は「誰の・どの来店動機を・どう取るか」まで具体化し、検証方法（次に何の数字を見れば効果が分かるか）も添える。なお、本店舗はフードコート（FOOD STADIUM TOKYO）であり、デリバリー（外部配達代行など）の新規導入や強化を提案することは非現実的であるため厳禁とする。代わりに、テイクアウト（持ち帰り）用の容器・セットメニューの工夫や、客席呼び込みによる自店集客を提案すること。`,
+    `(5-2) 施策効果の実績値が無い場合、増収額・客数リフト率・客単価上昇額を予測値として作らない。施策は「検証仮説」とし、対象客・実施方法・観測KPIを示す。数値を置く場合は効果予測ではなく、明確に「検証用の目標/判定ライン」と表記し、設定根拠を添える。`,
     `【分析フレームワーク（設計書準拠・必ず踏まえる）】`,
     `(6) 要因分解を最初に：売上＝客数×客単価。売上が動いたら必ず「客数要因」か「客単価要因」かを切り分ける（提供の「要因分解」ブロックの数値を使う）。集客が課題なら集客策、単価が課題なら単価策、と打ち手を取り違えない。`,
     `(7) 店舗間のカニバリ/アンカー：提供の「店舗間相関」を使い、負相関＝同じ来店動機の食い合い(カニバリ)候補、正相関＝連動/アンカー（人気店の集客が周辺も底上げ）候補として業態文脈で解釈する。ただし相関は因果ではない（曜日・イベント等の共通要因で連動しうる）ことを明示する。`,
@@ -2826,7 +2829,8 @@ export async function answerFoodCourtQuestion(
     surface: 'ask',
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
-      groqApiKey, primary, 1800, feedback && previousAnswer ? 'groq' : 'openai', fallbackModel,
+      // 改稿を廉価モデルに落とすと1周目より品質が下がり点数が伸びないため、両周ともOpenAI系で統一する。
+      groqApiKey, primary, 1800, 'openai', fallbackModel,
       { deadlineAt, perProviderMs: 11000 },
     ),
     evaluationContext: contextBlock,
@@ -3155,7 +3159,7 @@ export async function generateFoodCourtPeriodSummary(
     surface: 'period_summary',
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
-      groqApiKey, primary, 1400, feedback && previousAnswer ? 'groq' : 'openai', fallbackModel,
+      groqApiKey, primary, 1400, 'openai', fallbackModel,
       { deadlineAt, perProviderMs: 11000 },
     ),
     evaluationContext: contextBlock,
@@ -3625,7 +3629,7 @@ export async function generateFoodCourtWeeklyReport(
     surface: 'weekly_report',
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
-      groqApiKey, primary, 1800, feedback && previousAnswer ? 'groq' : 'openai', fallbackModel,
+      groqApiKey, primary, 1800, 'openai', fallbackModel,
       { deadlineAt, perProviderMs: 11000 },
     ),
     evaluationContext: contextBlock,

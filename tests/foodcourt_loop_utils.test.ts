@@ -5,6 +5,7 @@ import {
   buildFoodCourtRevisionMessages,
   compactFoodCourtEvaluationContext,
   foodCourtEvaluationPassed,
+  foodCourtEvaluationScoreAnchors,
   foodCourtEvaluationSurfaceRules,
   foodCourtLoopHasBudget,
   foodCourtTextSimilarity,
@@ -60,7 +61,22 @@ test('daily evaluation does not demand unavailable data', () => {
   assert.match(rules, /入力に実際に含まれるデータだけ/)
   assert.match(rules, /統計的有意差/)
   assert.match(rules, /日報記録を確認できない/)
-  assert.deepEqual(foodCourtEvaluationSurfaceRules('ask'), [])
+  assert.deepEqual(foodCourtEvaluationSurfaceRules('period_summary'), [])
+})
+
+test('ask evaluation accepts cautious testable hypotheses without invented lift', () => {
+  const rules = foodCourtEvaluationSurfaceRules('ask').join('\n')
+  assert.match(rules, /ユーザーの質問に直接/)
+  assert.match(rules, /検証仮説/)
+  assert.match(rules, /根拠のないリフト率/)
+  assert.match(rules, /主観と明記/)
+})
+
+test('evaluation score anchors define 70 as usable passing quality', () => {
+  const anchors = foodCourtEvaluationScoreAnchors().join('\n')
+  assert.match(anchors, /70〜79点: 実用可能な合格水準/)
+  assert.match(anchors, /機械的に60点台へ寄せない/)
+  assert.match(anchors, /不足データの存在だけを理由に69点以下へ落とさない/)
 })
 
 test('daily-like score passes with total 70 and per-axis 65', () => {
