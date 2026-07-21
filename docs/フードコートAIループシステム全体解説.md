@@ -20,7 +20,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の分
 | 何を測る | バックテスト誤差（MAPE） | 評価AIによる採点（5軸100点） |
 | 何が変わる | 翌晩どの予測モデル・パラメータを使うか | その場で回答を改善して再生成するか |
 | 頻度 | 毎晩1回（cron JST 05:00） | リクエストごと（最大Nループ） |
-| 状態 | **本番で稼働中** | **本番デプロイ済み・既定OFF**（環境変数で有効化） |
+| 状態 | **本番で稼働中** | **Q&Aのみ本番稼働中**（日次・期間・週次は明示OFF） |
 
 どちらも「AIに数字を作らせない・自己申告を信用しない」という既存の設計原則の延長にある。
 ループ①は自分の予測の外れ具合を、ループ②は自分の文章の品質を、**外部の物差しで測ってから次の行動を決める**。
@@ -122,39 +122,42 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の分
 
 | 対象 | surface | ループ上限（既定） | 理由 |
 |---|---|---|---|
-| Q&A（データに質問） | `ask` | 3 | 自由質問で品質評価の効果が最大。キャッシュも無い |
+| Q&A（データに質問） | `ask` | 2 | 自由質問で品質評価の効果が最大。初回＋最大1回の改善 |
 | 日次サマリー | `daily_summary` | 2 | 1レポート初回閲覧時のみ生成（以降キャッシュ） |
-| 期間サマリー | `period_summary` | 1 | 最もコストが高いため最小（不合格でも1回目を返す） |
+| 期間サマリー | `period_summary` | 2 | 有効化する場合も初回＋最大1回の改善 |
+| 週次レポート | `weekly_report` | 2 | 有効化する場合も初回＋最大1回の改善 |
 
 再ループは**統合AIだけ**を再生成する（専門AI3体＋反証AIは使い回し）ため、
 1ループ追加あたりの増分は「統合AI1回＋評価AI1回」に抑えられる。合格したら即終了。
 
-### 3-3. 有効化の方法（既定は完全OFF）
+### 3-3. 本番の段階導入設定（2026-07-21）
 
-コードは本番デプロイ済みだが、環境変数が未設定のため**従来と全く同じ動作**をしている。
-Supabaseダッシュボード（Edge Functions → Secrets）で設定すると有効になる:
-
-```
-FOODCOURT_LOOP_ENABLED=true          # 全体スイッチ（これが無いと何も起きない）
-FOODCOURT_LOOP_APPLY_TO_ASK=true     # Q&Aに適用（まずここだけの段階導入を推奨）
-FOODCOURT_LOOP_APPLY_TO_DAILY=false  # 日次サマリー
-FOODCOURT_LOOP_APPLY_TO_PERIOD=false # 期間サマリー
-```
-
-任意の調整用（未設定なら既定値）:
+品質ループは環境変数未設定時にOFFとなる fail-closed 設計とし、本番ではQ&Aだけを明示的に有効化している。
+Supabase Edge Functions Secrets の設定は次のとおり:
 
 ```
-FOODCOURT_LOOP_PASS_TOTAL=90         # 合格ライン（総合）
-FOODCOURT_LOOP_PASS_EACH=80          # 合格ライン（各項目）
-FOODCOURT_LOOP_MAX_ASK=3             # surfaceごとのループ上限
-FOODCOURT_LOOP_MAX_DAILY=2
-FOODCOURT_LOOP_MAX_PERIOD=1
-FOODCOURT_LOOP_EVALUATOR_PROVIDER=claude  # 評価AIのプロバイダー
+FOODCOURT_LOOP_ENABLED=true
+FOODCOURT_LOOP_APPLY_TO_ASK=true
+FOODCOURT_LOOP_APPLY_TO_DAILY=false
+FOODCOURT_LOOP_APPLY_TO_PERIOD=false
+FOODCOURT_LOOP_APPLY_TO_WEEKLY=false
 ```
 
-**キャッシュ挙動（重要）**: 日次サマリーのキャッシュバージョンは、ループが実際に有効なときだけ
-`v12-loop` に切り替わる。OFFの間は従来の `v11` キャッシュがそのまま生き続けるため、
-**デプロイしただけでは再生成コストは一切発生しない**。OFFに戻せば旧キャッシュに即復帰する。
+現在の安全運用値:
+
+```
+FOODCOURT_LOOP_PASS_TOTAL=70
+FOODCOURT_LOOP_PASS_EACH=70
+FOODCOURT_LOOP_MAX_ASK=2
+FOODCOURT_LOOP_EVALUATOR_PROVIDER=claude
+FOODCOURT_AI_REQUEST_BUDGET_MS=110000
+```
+
+管理画面の合格ライン設定 `foodcourt_evolution_passing_score` が存在する場合は、その整数値が
+総合点・各評価軸の両方へ優先適用される。2026-07-21時点の本番値は70点。
+
+**キャッシュ挙動**: 現行の通常版・loop版はどちらも `foodcourt-analysis-ai-v16-loop-learning`
+であり、日次ループをOFFにしてもキャッシュバージョンは変わらない。
 
 ### 3-4. 記録テーブル
 

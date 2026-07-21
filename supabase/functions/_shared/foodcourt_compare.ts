@@ -24,10 +24,10 @@ export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v16-loop-lea
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
 export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v16-loop-learning'
-// 日次サマリーの「実効」キャッシュバージョン。ループが日次で実際に有効なときだけ loop 版になり、
-// 無効（既定）の間は v13-daily-logs を使う（日報注入の再生成は必要なので v11 には戻さない）。
+// 日次サマリーの「実効」キャッシュバージョン。品質ループは未設定時OFF（fail closed）。
+// 現行では通常版・loop版とも v16 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
-  return (fcEnvFlag('FOODCOURT_LOOP_ENABLED', true) && fcEnvFlag('FOODCOURT_LOOP_APPLY_TO_DAILY', true))
+  return (fcEnvFlag('FOODCOURT_LOOP_ENABLED', false) && fcEnvFlag('FOODCOURT_LOOP_APPLY_TO_DAILY', false))
     ? FOODCOURT_DAILY_ANALYSIS_AI_VERSION
     : FOODCOURT_ANALYSIS_AI_VERSION
 }
@@ -857,7 +857,7 @@ async function foodCourtAiChat(
 // ===== AIループエンジニアリング（設計: docs/AI_LOOP_ENGINEERING_DESIGN.md） =====
 // 統合回答を品質評価AIが採点し、不合格なら改善点と前回回答を渡して再生成する。
 // Q&A・日次・期間・週次の各surfaceで、不合格が続けば最高得点回答を返す。
-// （環境変数 FOODCOURT_LOOP_APPLY_TO_ASK 等でsurfaceごとにON/OFF。既定は全surfaceでON）。
+// （環境変数 FOODCOURT_LOOP_APPLY_TO_ASK 等でsurfaceごとにON/OFF。未設定時は全surfaceでOFF）。
 export type FoodCourtLoopSurface = 'ask' | 'daily_summary' | 'period_summary' | 'weekly_report'
 
 export type FoodCourtLoopEvaluation = {
@@ -915,7 +915,8 @@ async function resolveFoodCourtLoopConfig(
   surface: FoodCourtLoopSurface,
   supabase?: SupabaseClient | null,
 ): Promise<FoodCourtLoopConfig> {
-  const enabled = fcEnvFlag('FOODCOURT_LOOP_ENABLED', true) && fcEnvFlag(fcApplyFlagName(surface), true)
+  // コスト増・予期しない再生成を避けるため、全体・surfaceの両方を明示ONした場合だけ有効化する。
+  const enabled = fcEnvFlag('FOODCOURT_LOOP_ENABLED', false) && fcEnvFlag(fcApplyFlagName(surface), false)
   // surface専用の上限(例: FOODCOURT_LOOP_MAX_DAILY)を優先し、無ければ共通のFOODCOURT_LOOP_MAX、それも無ければsurfaceごとの既定値。
   const maxLoopsRaw = Number(Deno.env.get(fcMaxLoopsEnvName(surface)) ?? Deno.env.get('FOODCOURT_LOOP_MAX') ?? FOODCOURT_LOOP_DEFAULT_MAX[surface])
   const maxLoops = Number.isFinite(maxLoopsRaw) && maxLoopsRaw > 0 ? Math.min(5, Math.trunc(maxLoopsRaw)) : FOODCOURT_LOOP_DEFAULT_MAX[surface]

@@ -381,17 +381,19 @@ return result.answer
 
 ```text
 FOODCOURT_LOOP_ENABLED=true
-FOODCOURT_LOOP_MAX=3
-FOODCOURT_LOOP_PASS_TOTAL=90
-FOODCOURT_LOOP_PASS_EACH=80
+FOODCOURT_LOOP_MAX_ASK=2
+FOODCOURT_LOOP_PASS_TOTAL=70
+FOODCOURT_LOOP_PASS_EACH=70
 FOODCOURT_LOOP_EVALUATOR_PROVIDER=claude
 FOODCOURT_LOOP_EVALUATOR_MODEL=claude-haiku-4-5
 FOODCOURT_LOOP_APPLY_TO_ASK=true
 FOODCOURT_LOOP_APPLY_TO_DAILY=false
 FOODCOURT_LOOP_APPLY_TO_PERIOD=false
+FOODCOURT_LOOP_APPLY_TO_WEEKLY=false
+FOODCOURT_AI_REQUEST_BUDGET_MS=110000
 ```
 
-初期はQ&AだけON推奨。
+本番はQ&AだけONで段階導入する。管理画面の合格ライン設定が存在する場合は、環境変数より優先する。
 
 ## 10. 評価AIプロンプト設計
 
@@ -629,7 +631,7 @@ Phase 2以降で部分再実行を追加。
 - **ループ共通ユーティリティ**（`supabase/functions/_shared/foodcourt_compare.ts`、`foodCourtAiChat`の直後に追加）:
   `parseLoopEvaluationJson` / `evaluateFoodCourtAnswer` / `buildLoopFeedback` / `appendLoopFeedback` / `saveFoodCourtLoopRun` / `updateFoodCourtLoopRun` / `saveFoodCourtLoopIteration` / `runFoodCourtLoopEngineering`（`export`）。
 - **Q&Aへの適用**: `answerFoodCourtQuestion()`の最終統合AI呼び出しを`runFoodCourtLoopEngineering()`経由に置き換え。専門AI3体・反証AIは初回の1回だけ実行し、再ループ時は統合AIのみ`appendLoopFeedback`で改善点を追加して再生成（12.1「標準再生成」のみ実装。12.2「部分再実行」は未実装）。
-- **環境変数**: 9章の一覧をそのまま使用。`FOODCOURT_LOOP_ENABLED`と`FOODCOURT_LOOP_APPLY_TO_ASK`が両方truenのときだけ有効化。**未設定時は両方false扱い＝既定は完全OFF**（無効時は`initialGenerate()`を1回呼ぶだけで、DB保存も含めループ導入前と全く同じ動作）。
+- **環境変数**: 9章の一覧をそのまま使用。`FOODCOURT_LOOP_ENABLED`と`FOODCOURT_LOOP_APPLY_TO_ASK`が両方trueのときだけ有効化。**未設定時は両方false扱い＝既定は完全OFF**（無効時は`initialGenerate()`を1回呼ぶだけで、DB保存も含めループ導入前と全く同じ動作）。
 
 ### 設計書からの変更点（実装中に見つけた修正）
 
