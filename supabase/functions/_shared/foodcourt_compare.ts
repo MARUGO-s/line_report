@@ -168,7 +168,7 @@ function numOrNull(v: unknown): number | null {
 // フードコートのAI（Q&A=Groqチャット／テナント表の画像抽出=Groq/Gemini Vision）の実測トークンを
 // ai_usage_events に1行記録し、AI使用料ページ（/usage/ai-cost＝実測トークン×公式単価）に反映させる。
 export interface FoodCourtAiUsage {
-  provider: 'azure_openai' | 'groq' | 'gemini' | 'claude' | 'openai' | 'grok'
+  provider: 'azure_openai' | 'groq' | 'gemini' | 'claude' | 'openai' | 'grok' | 'moonshot'
   model: string
   inputTokens: number
   outputTokens: number
@@ -238,6 +238,22 @@ function openaiUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null 
   const out = reasoning != null ? Math.max(0, rawOut - reasoning) : rawOut
   if (!inp && !rawOut && !tot) return null
   return { provider: 'openai', model, inputTokens: inp, outputTokens: out, thinkingTokens: reasoning, totalTokens: tot }
+}
+// Moonshot(Kimi)はOpenAI互換。completion_tokens に reasoning(思考)が含まれるため openai と同様に分離する。
+function moonshotUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
+  const u = (json && typeof json === 'object') ? (json as { usage?: unknown }).usage : null
+  if (!u || typeof u !== 'object') return null
+  const m = u as Record<string, unknown>
+  const inp = Number(m.prompt_tokens ?? m.input_tokens ?? 0) || 0
+  const rawOut = Number(m.completion_tokens ?? m.output_tokens ?? 0) || 0
+  const tot = Number(m.total_tokens ?? 0) || (inp + rawOut)
+  const details = (m.completion_tokens_details && typeof m.completion_tokens_details === 'object')
+    ? m.completion_tokens_details as Record<string, unknown>
+    : null
+  const reasoning = details && details.reasoning_tokens != null ? (Number(details.reasoning_tokens) || 0) : null
+  const out = reasoning != null ? Math.max(0, rawOut - reasoning) : rawOut
+  if (!inp && !rawOut && !tot) return null
+  return { provider: 'moonshot', model, inputTokens: inp, outputTokens: out, thinkingTokens: reasoning, totalTokens: tot }
 }
 async function recordFoodCourtAiUsage(
   supabase: SupabaseClient | null | undefined,
@@ -562,7 +578,7 @@ async function groqChat(
 }
 
 type FoodCourtChatMessage = { role: string; content: string }
-type FoodCourtChatProvider = 'groq' | 'gemini' | 'claude' | 'openai' | 'grok'
+type FoodCourtChatProvider = 'groq' | 'gemini' | 'claude' | 'openai' | 'grok' | 'moonshot'
 
 function resolveFoodCourtGeminiApiKey(): string {
   return String(Deno.env.get('GEMINI_API_KEY') || Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('VISION_API_KEY') || '').trim()
@@ -580,6 +596,10 @@ function resolveFoodCourtClaudeApiKey(): string {
   return String(Deno.env.get('claude_haiku') || Deno.env.get('CLAUDE_HAIKU') || Deno.env.get('ANTHROPIC_API_KEY') || '').trim()
 }
 
+function resolveFoodCourtMoonshotApiKey(): string {
+  return String(Deno.env.get('MOONSHOT_API_KEY') || Deno.env.get('KIMI_API_KEY') || '').trim()
+}
+
 function resolveFoodCourtOpenAiApiKey(): string {
   return String(Deno.env.get('OPENAI_API_KEY') || Deno.env.get('FOODCOURT_OPENAI_API_KEY') || '').trim()
 }
@@ -590,6 +610,10 @@ function resolveFoodCourtGeminiModel(): string {
 
 function resolveFoodCourtClaudeModel(): string {
   return String(Deno.env.get('FOODCOURT_CLAUDE_MODEL') || Deno.env.get('CLAUDE_MODEL') || '').trim() || 'claude-haiku-4-5'
+}
+
+function resolveFoodCourtMoonshotModel(): string {
+  return String(Deno.env.get('FOODCOURT_MOONSHOT_MODEL') || '').trim() || 'kimi-k3'
 }
 
 function resolveFoodCourtOpenAiModel(): string {
@@ -708,6 +732,48 @@ async function claudeChat(
   }
 }
 
+async function moonshotChat(
+  messages: FoodCourtChatMessage[],
+  apiKey: string,
+  model: string,
+  maxTokens = 650,
+  signal?: AbortSignal,
+): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
+  if (!apiKey) return { content: null, usage: null }
+  try {
+    // Kimi K3 は temperature=1 のみ許可。completion枠には推論トークンも含まれるため本文分の余裕を足す。
+    const res = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 1,
+        reasoning_effort: 'low',
+        max_tokens: maxTokens + 1000,
+      }),
+      signal,
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      console.error('moonshotChat http error:', model, res.status, err.slice(0, 300))
+      return { content: null, usage: null }
+    }
+    const json = await res.json().catch(() => null) as {
+      choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>
+      usage?: unknown
+    } | null
+    const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
+    return { content: content || null, usage: moonshotUsageFrom(json, model) }
+  } catch (e) {
+    console.error('moonshotChat failed:', e instanceof Error ? e.message : String(e))
+    return { content: null, usage: null }
+  }
+}
+
 async function openaiChat(
   messages: FoodCourtChatMessage[],
   apiKey: string,
@@ -817,7 +883,11 @@ async function foodCourtAiChat(
   options?: { deadlineAt?: number; perProviderMs?: number },
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
   const order = Array.from(new Set<FoodCourtChatProvider>(
-    preferred === 'openai' ? [preferred, 'gemini', 'groq'] : [preferred, 'groq'],
+    preferred === 'openai'
+      ? [preferred, 'gemini', 'groq']
+      : preferred === 'moonshot'
+        ? [preferred, 'claude'] // 反証AI④: Kimi K3 → Claude Haiku
+        : [preferred, 'groq'],
   ))
   const nextSignal = (): AbortSignal | undefined => {
     const remaining = options?.deadlineAt != null ? options.deadlineAt - Date.now() : null
@@ -839,6 +909,11 @@ async function foodCourtAiChat(
     }
     if (provider === 'claude') {
       const res = await claudeChat(messages, resolveFoodCourtClaudeApiKey(), resolveFoodCourtClaudeModel(), maxTokens, nextSignal())
+      if (res.content) return res
+      continue
+    }
+    if (provider === 'moonshot') {
+      const res = await moonshotChat(messages, resolveFoodCourtMoonshotApiKey(), resolveFoodCourtMoonshotModel(), maxTokens, nextSignal())
       if (res.content) return res
       continue
     }
@@ -1297,7 +1372,7 @@ export async function runFoodCourtLoopEngineering(params: {
     return { answer: gen.content, usages, loopScore: null, loopCount: 1 }
   }
 
-  const modelVersion = `foodcourt-loop-v2-calibrated(gen=${resolveFoodCourtOpenAiModel()};eval=${config.evaluatorProvider};pass=${config.passTotal}/${config.passEach})`
+  const modelVersion = `foodcourt-loop-v2-calibrated(gen=${resolveFoodCourtOpenAiModel()};critic=${resolveFoodCourtMoonshotModel()}->${resolveFoodCourtClaudeModel()};eval=${config.evaluatorProvider};pass=${config.passTotal}/${config.passEach})`
   const runId = await saveFoodCourtLoopRun(params.supabase, {
     storeKey: String(params.storeKey ?? ''),
     surface: params.surface,
@@ -2782,7 +2857,7 @@ export async function answerFoodCourtQuestion(
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（300字程度）。`,
   ].join('\n')
   const criticUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用の根拠\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${storeCorr || '(店舗間相関なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 650, 'claude', fallbackModel, { deadlineAt, perProviderMs: 7000 })
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 650, 'moonshot', fallbackModel, { deadlineAt, perProviderMs: 25000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
@@ -2967,7 +3042,7 @@ export async function generateFoodCourtDailySummary(
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
   ].join('\n')
   const criticUser = `# 対象日の事実\n${targetFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用データ\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}\n\n${dailyLogsBlock}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel, { deadlineAt, perProviderMs: 7000 })
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'moonshot', fallbackModel, { deadlineAt, perProviderMs: 25000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
@@ -3126,7 +3201,7 @@ export async function generateFoodCourtPeriodSummary(
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
   ].join('\n')
   const criticUser = `# 対象期間の事実\n${periodFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用データ\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}\n\n${dailyLogsBlock}${patternBlock ? '\n\n' + patternBlock : ''}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel, { deadlineAt, perProviderMs: 7000 })
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'moonshot', fallbackModel, { deadlineAt, perProviderMs: 25000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
@@ -3596,7 +3671,7 @@ export async function generateFoodCourtWeeklyReport(
   const opsNote = opsRes.content || '(経営改善メモ: 取得失敗)'
 
   const criticUser = `# 対象週の事実\n${periodFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 経営改善・施策効果\n${opsNote}\n\n${logsBlock || '(日報なし)'}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 500, 'claude', fallbackModel, { deadlineAt, perProviderMs: 7000 })
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 500, 'moonshot', fallbackModel, { deadlineAt, perProviderMs: 25000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 

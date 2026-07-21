@@ -106,7 +106,7 @@
          └──────┬───────┘              │
                 ▼                      │
           反証AI④                      │
-          Claude（批判的レビュー）       │
+          Kimi K3（失敗時Claude Haiku）  │
                 │                      │
                 └──────────┬───────────┘
                            ▼
@@ -129,7 +129,7 @@
 |---------|------|------|----------|
 | 0 | コードが統計・コンテキストを組み立て | 同期・課金なし | 数十ms〜数百ms |
 | 1 | 専門AI①②③ | **並列** `Promise.all` | 約2〜4秒 |
-| 2 | 反証AI④ | 直列（①②③の出力待ち） | 約1〜2秒 |
+| 2 | 反証AI④ | 直列（①②③の出力待ち） | 約4〜25秒（Kimi K3、失敗時Haiku） |
 | 3 | 統合AI⑤ | 直列 | 約3〜6秒 |
 | 4+ | 評価AI⑥＋統合再生成（任意） | ループ上限まで | 1回あたり+数秒 |
 
@@ -192,7 +192,7 @@
 |------|------|
 | プロバイダー | Google |
 | モデル（既定） | `gemini-3.5-flash` 系（`FOODCOURT_GEMINI_MODEL`） |
-| フォールバック | Groq Llama |
+| フォールバック | Groq `qwen/qwen3.6-27b` |
 | 最大出力 | 約600〜700トークン |
 
 **強み**
@@ -217,7 +217,7 @@
 | プロバイダー | xAI |
 | モデル（既定） | `grok-3-mini`（`FOODCOURT_GROK_MODEL`） |
 | APIキー | `XAI_API_KEY` 等 |
-| フォールバック | Groq Llama |
+| フォールバック | Groq `qwen/qwen3.6-27b` |
 | 最大出力 | 約600〜700トークン |
 
 **強み（他AIと根本的に違う点）**
@@ -250,12 +250,14 @@ Grok は **X（旧 Twitter）上のリアルタイムに近い世論・トレン
 
 ---
 
-### 4-4. 反証AI④ — 品質管理・反証（Claude）
+### 4-4. 反証AI④ — 品質管理・反証（Kimi K3 → Claude Haiku）
 
 | 項目 | 内容 |
 |------|------|
-| プロバイダー | Anthropic |
-| モデル（既定） | `claude-haiku-4-5`（`FOODCOURT_CLAUDE_MODEL`） |
+| 優先プロバイダー | Moonshot |
+| 優先モデル | `kimi-k3`（`FOODCOURT_MOONSHOT_MODEL`） |
+| API設定 | `temperature=1` / `reasoning_effort=low` / `max_tokens=本文上限+1000` |
+| フォールバック | Anthropic `claude-haiku-4-5`（`FOODCOURT_CLAUDE_MODEL`） |
 | 最大出力 | 約550〜650トークン |
 | 出力 | **反証メモ**（統合AIへの編集指示） |
 

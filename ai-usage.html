@@ -661,6 +661,7 @@
       grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
       gemini:   { inUsd: 0.25, outUsd: 1.50 },
       claude:   { inUsd: 1.00, outUsd: 5.00 },
+      moonshot: { inUsd: 3.00, outUsd: 15.00 },  // Kimi K3（フードコート反証AI。入力はキャッシュミス単価。ヒット時は$0.30）
       jpyPerUsd: 155,
     };
     // 実測ログの provider / model 名 → 単価キーの対応。
@@ -670,6 +671,7 @@
       if (provider === 'grok' || provider === 'xai') return 'grok';
       if (provider === 'gemini') return 'gemini';
       if (provider === 'claude') return 'claude';
+      if (provider === 'moonshot' || provider === 'kimi') return 'moonshot';
       return 'azure';
     }
 
@@ -713,7 +715,7 @@
         if (!raw) return cloneRates(DEFAULT_RATES);
         const parsed = JSON.parse(raw);
         const out = cloneRates(DEFAULT_RATES);
-        ['azure', 'openai', 'grok', 'gemini', 'claude'].forEach(function (p) {
+        ['azure', 'openai', 'grok', 'gemini', 'claude', 'moonshot'].forEach(function (p) {
           if (parsed && parsed[p]) {
             ['inUsd', 'outUsd'].forEach(function (k) {
               const v = Number(parsed[p][k]);
@@ -733,6 +735,7 @@
         grok: Object.assign({}, r.grok),
         gemini: Object.assign({}, r.gemini),
         claude: Object.assign({}, r.claude),
+        moonshot: Object.assign({}, r.moonshot),
         jpyPerUsd: r.jpyPerUsd,
       };
     }
@@ -780,6 +783,8 @@
           inUsd: num('claude_inUsd', d.claude.inUsd),
           outUsd: num('claude_outUsd', d.claude.outUsd),
         },
+        // UI入力欄はまだ設けず、Kimi K3の公式単価を固定使用する。
+        moonshot: Object.assign({}, d.moonshot),
         jpyPerUsd: (function () { const v = Number(document.getElementById('jpyPerUsd').value); return Number.isFinite(v) && v > 0 ? v : d.jpyPerUsd; })(),
       };
     }
@@ -863,7 +868,11 @@
       const rate = rateForModel(m.provider, m.model);
       const inTok = Number(m.input_tokens || 0);
       const outTok = Number(m.output_tokens || 0);
-      return (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
+      // Kimi K3はcompletion_tokensからreasoningを分離保存しているため、課金計算時だけ本文+推論へ戻す。
+      const billableOutTok = (m.provider === 'moonshot' || m.provider === 'kimi')
+        ? outTok + Number(m.thinking_tokens || 0)
+        : outTok;
+      return (inTok * rate.inUsd + billableOutTok * rate.outUsd) / 1e6;
     }
     // provider の合計USD＝そのproviderの各モデルをモデル別単価で合算（最も正確）。
     // models が無い旧レスポンスのときだけ従来のprovider一括計算にフォールバック。
@@ -976,6 +985,7 @@
       if (p === 'gemini') return 'Gemini';
       if (p === 'claude') return 'Claude';
       if (p === 'azure_openai' || p === 'azure') return 'Azure Foundry';
+      if (p === 'moonshot' || p === 'kimi') return 'Moonshot / Kimi';
       return provider || 'AI';
     }
     function cardClassForModel(provider, model) {
@@ -1099,6 +1109,7 @@
       'o4-mini': 'フードコート分析の最終統合（旧モデル）',
       'gpt-5.5': 'フードコート分析の最終統合（旧モデル）',
       'grok-3-mini': 'フードコート運営改善AI',
+      'kimi-k3': 'フードコート反証AI（Moonshot Kimi K3）',
       'qwen/qwen3.6-27b': 'フードコート専門AI①（数値・他店比較 / Alibaba Cloud Qwen）',
       'openai/gpt-oss-120b': 'フードコート専門AI①フォールバック（Groq GPT-OSS）',
       'gemini-3-flash-preview': '小口レシートの通常解析（低コスト）',
