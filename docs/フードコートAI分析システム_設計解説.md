@@ -576,6 +576,9 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | `FOODCOURT_CLAUDE_MODEL` | 反証AI④のモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
 | `OPENAI_API_KEY` | OpenAI API認証（統合AI⑤） | 設定済み |
 | `FOODCOURT_OPENAI_MODEL` | 統合AI⑤のモデル名 | `gpt-5.6-luna` |
+| `MOONSHOT_API_KEY` | Moonshot(Kimi) API認証（スタンバイ・未配線） | **設定済み**（`api.moonshot.ai`。残高不足で現在は生成不可） |
+
+> **スタンバイAI（登録のみ・未稼働）**: Moonshot社「Kimi」を予備プロバイダとして `MOONSHOT_API_KEY` に登録済み。認証は成功する（`/v1/models` が HTTP 200）が、アカウント残高不足のためチャット補完は HTTP 429（`exceeded_current_quota_error`）で失敗する。チャージ後に専門AI①や反証AI④等へ組み込み可能。利用可能モデル: `kimi-k2.6`・`kimi-k2.7-code`（推論対応・262kコンテキスト・画像/動画入力対応）。エンドポイントは国際版 `https://api.moonshot.ai/v1`（中国版 `api.moonshot.cn` は本キー対象外＝401）。
 
 ### フォールバック優先順位
 
@@ -584,7 +587,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 専門AI②（gemini preferred）: gemini → groq
 反証AI④（claude preferred）: claude → groq
 専門AI③（grok preferred）  : grok → groq
-専門AI①（groq preferred）  : groq(kimi-k2-instruct-0905) → groq(openai/gpt-oss-120b)
+専門AI①（groq preferred）  : groq(qwen/qwen3.6-27b) → groq(openai/gpt-oss-120b)
 ```
 
 ---
