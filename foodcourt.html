@@ -2242,7 +2242,10 @@
         historyId: b.history_id != null ? b.history_id : null,
       });
       if (b.history_saved === false) {
-        alert('回答は表示しましたが、Q&A履歴の保存に失敗しました。管理者へご確認ください。');
+        alert('回答は表示しましたが、Q&A履歴の保存に失敗しました。管理者へご確認ください。' + (b.history_error ? '\n' + b.history_error : ''));
+      } else {
+        // 保存済みのQ&Aアーカイブを即時更新する。タブを開き直さないと見えない誤解を防ぐ。
+        loadQaHistoryList().catch(() => {});
       }
     } catch(e){
       qaHistory.push({

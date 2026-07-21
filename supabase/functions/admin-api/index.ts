@@ -1675,6 +1675,7 @@ Deno.serve(async (req, info) => {
           history_id: savedQa?.id ?? null,
           history_created_at: savedQa?.created_at ?? null,
           history_saved: !saveQaError,
+          history_error: saveQaError?.message ?? null,
           reportCount: reports.length,
           loop_score: qaResult.loopScore,
           loop_count: qaResult.loopCount,

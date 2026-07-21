@@ -199,13 +199,13 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 | 項目 | 内容 |
 |---|---|
 | プロバイダー | Groq |
-| モデル | `qwen/qwen3.6-27b`（Alibaba Cloud Qwen 3.6 27B。`FOODCOURT_GROQ_MODEL`環境変数で変更可。旧Llama指定は自動的に置換） |
+| モデル | `qwen/qwen3.6-27b`（Alibaba Cloud Qwen 3.6 27B。`FOODCOURT_GROQ_MODEL`環境変数で変更可） |
 | フォールバック | `openai/gpt-oss-120b` |
 | 最大出力 | 600〜700トークン |
 | 出力用途 | 統合AIへの「分析メモ（下書き）」 |
 
-**Groqを使う理由:**
-- Llama 3.3 70Bは数値・統計の推論タスクで高いパフォーマンスを持つオープンソースモデル
+**Groq/Qwenを使う理由:**
+- Qwen 3.6 27BはGroqアカウントで利用可能な非OpenAI系モデルで、数値・統計の推論タスクと長い入力コンテキストに適する
 - Groqの専用ハードウェア（LPU）による超高速推論（他の2専門AIと並列実行するため速度が重要）
 - **「数字と数字の関係性から意味を引き出す」という分析的思考が強み**
 
