@@ -164,6 +164,22 @@ function numOrNull(v: unknown): number | null {
   return Number.isFinite(n) ? Math.round(n) : null
 }
 
+function stripThinkingBlocks(text: string): string {
+  let s = String(text ?? '')
+  // Some reasoning-capable OpenAI-compatible models may leak chain-of-thought inside <think> blocks.
+  // Remove both closed blocks and an accidental leading unclosed block before returning/storing text.
+  s = s.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+  if (/^<think>/i.test(s)) {
+    const markers = ['【総評】', '## ', '### ', '# ', 'Q.', '回答:', '結論']
+    const positions = markers
+      .map((m) => s.indexOf(m))
+      .filter((i) => i > 0)
+      .sort((a, b) => a - b)
+    if (positions.length) s = s.slice(positions[0]).trim()
+  }
+  return s
+}
+
 // ===== AI使用量の記録 =====
 // フードコートのAI（Q&A=Groqチャット／テナント表の画像抽出=Groq/Gemini Vision）の実測トークンを
 // ai_usage_events に1行記録し、AI使用料ページ（/usage/ai-cost＝実測トークン×公式単価）に反映させる。
@@ -572,7 +588,7 @@ async function groqChat(
     })
     if (!res.ok) { console.error('groqChat http error:', model, res.status); return { content: null, usage: null } }
     const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown } | null
-    const c = String(json?.choices?.[0]?.message?.content ?? '').trim()
+    const c = stripThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
     return { content: c || null, usage: groqUsageFrom(json, model) }
   } catch (e) { console.error('groqChat failed:', e instanceof Error ? e.message : String(e)); return { content: null, usage: null } }
 }
@@ -677,7 +693,7 @@ async function geminiChat(
       return { content: null, usage: null }
     }
     const json = await res.json().catch(() => null)
-    const content = extractGeminiText(json)
+    const content = stripThinkingBlocks(extractGeminiText(json))
     return { content: content || null, usage: geminiUsageFrom(json, model) }
   } catch (e) {
     console.error('geminiChat failed:', e instanceof Error ? e.message : String(e))
@@ -724,7 +740,7 @@ async function claudeChat(
       return { content: null, usage: null }
     }
     const json = await res.json().catch(() => null)
-    const content = extractClaudeText(json)
+    const content = stripThinkingBlocks(extractClaudeText(json))
     return { content: content || null, usage: claudeUsageFrom(json, model) }
   } catch (e) {
     console.error('claudeChat failed:', e instanceof Error ? e.message : String(e))
@@ -766,7 +782,7 @@ async function moonshotChat(
       choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>
       usage?: unknown
     } | null
-    const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
+    const content = stripThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
     return { content: content || null, usage: moonshotUsageFrom(json, model) }
   } catch (e) {
     console.error('moonshotChat failed:', e instanceof Error ? e.message : String(e))
@@ -815,7 +831,7 @@ async function openaiChat(
       choices?: Array<{ message?: { content?: string } }>
       usage?: unknown
     } | null
-    const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
+    const content = stripThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
     return { content: content || null, usage: openaiUsageFrom(json, model) }
   } catch (e) {
     console.error('openaiChat failed:', e instanceof Error ? e.message : String(e))
@@ -855,7 +871,7 @@ async function grokChat(
       choices?: Array<{ message?: { content?: string } }>
       usage?: { prompt_tokens?: number; completion_tokens?: number }
     } | null
-    const content = String(json?.choices?.[0]?.message?.content ?? '').trim()
+    const content = stripThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
     const inp = Number(json?.usage?.prompt_tokens ?? 0) || 0
     const out = Number(json?.usage?.completion_tokens ?? 0) || 0
     const usage: FoodCourtAiUsage | null = json?.usage ? {
