@@ -844,6 +844,9 @@
     const GEMINI_PRO_RATE = { inUsd: 2.00, outUsd: 12.00 };
     const OPENAI_O4_MINI_RATE = { inUsd: 1.10, outUsd: 4.40 };
     const OPENAI_GPT_5_6_LUNA_RATE = { inUsd: 1.00, outUsd: 6.00 };
+    // Groq上のフードコート専門AI①系。Kimi K2 は非OpenAI系（Moonshot）でプロバイダ多様性確保用。
+    const GROQ_GPT_OSS_RATE = { inUsd: 0.15, outUsd: 0.60 };
+    const GROQ_KIMI_K2_RATE = { inUsd: 1.00, outUsd: 3.00 };
     function rateForModel(provider, model) {
       const m = String(model || '').toLowerCase();
       if (provider === 'gemini' && m === 'gemini-3.1-flash-lite') return GEMINI_FLASH_LITE_RATE;
@@ -851,6 +854,8 @@
       if (provider === 'gemini' && m === 'gemini-3.1-pro-preview') return GEMINI_PRO_RATE;
       if (provider === 'openai' && m === 'o4-mini') return OPENAI_O4_MINI_RATE;
       if (provider === 'openai' && m === 'gpt-5.6-luna') return OPENAI_GPT_5_6_LUNA_RATE;
+      if (provider === 'groq' && m === 'openai/gpt-oss-120b') return GROQ_GPT_OSS_RATE;
+      if (provider === 'groq' && m === 'moonshotai/kimi-k2-instruct-0905') return GROQ_KIMI_K2_RATE;
       return state.rates[rateKeyForModel(provider, model)] || DEFAULT_RATES.azure;
     }
     // API記録の output_tokens は思考を含む課金対象出力。thinking_tokens は内訳表示だけに使う。
@@ -1094,6 +1099,8 @@
       'o4-mini': 'フードコート分析の最終統合（旧モデル）',
       'gpt-5.5': 'フードコート分析の最終統合（旧モデル）',
       'grok-3-mini': 'フードコート運営改善AI',
+      'moonshotai/kimi-k2-instruct-0905': 'フードコート専門AI①（数値・他店比較 / Moonshot Kimi K2）',
+      'openai/gpt-oss-120b': 'フードコート専門AI①フォールバック（Groq GPT-OSS）',
       'gemini-3-flash-preview': '小口レシートの通常解析（低コスト）',
       'gemini-3.1-pro-preview': 'レシート解析・フードコート専門AI',
       'claude-haiku-4-5': '経費レシート解析・反証AI',

@@ -44,7 +44,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 ├─────────────────┬───────────────────┬──────────────────────────────────┤
 │ 専門AI①         │ 専門AI②           │ 専門AI③                         │
 │ Groq             │ Gemini            │ Grok (xAI)                       │
-│ llama-3.3-70b   │ gemini-3.5-flash  │ grok-3-mini                      │
+│ Kimi K2         │ gemini-3.5-flash  │ grok-3-mini                      │
 ├─────────────────┼───────────────────┼──────────────────────────────────┤
 │ 【強みの知識】   │ 【強みの知識】     │ 【強みの知識】                   │
 │                  │                   │                                  │
@@ -98,7 +98,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
   [専門AI①]               [専門AI②]                [専門AI③]
   数値分析・他店舗比較      イベント・天気              運営改善
   Groq                     Gemini                     Grok (xAI)
-  llama-3.3-70b            gemini-3.5-flash           grok-3-mini
+  Kimi K2 (Moonshot)       gemini-3.5-flash           grok-3-mini
   統計的パターン知識         エンタメ・世界知識          リアルタイムトレンド知識
   最大700トークン出力        最大700トークン出力         最大700トークン出力
          │                       │                          │
@@ -199,8 +199,8 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 | 項目 | 内容 |
 |---|---|
 | プロバイダー | Groq |
-| モデル | `openai/gpt-oss-120b`（`GROQ_CHAT_MODEL`環境変数で変更可。旧Llama指定は自動的に置換） |
-| フォールバック | `qwen/qwen3.6-27b` |
+| モデル | `moonshotai/kimi-k2-instruct-0905`（Moonshot Kimi K2。`FOODCOURT_GROQ_MODEL`環境変数で変更可。旧Llama指定は自動的に置換） |
+| フォールバック | `openai/gpt-oss-120b` |
 | 最大出力 | 600〜700トークン |
 | 出力用途 | 統合AIへの「分析メモ（下書き）」 |
 
@@ -339,7 +339,7 @@ Grok 3 miniは他のAIと根本的に異なる知識源を持つ。**X（旧Twit
 
 | エージェント | プロバイダー | モデル | 選定の核心理由 |
 |---|---|---|---|
-| 専門AI① 数値分析 | Groq | llama-3.3-70b | 数値の統計的パターン推論に強い。超高速で並列実行に適合 |
+| 専門AI① 数値分析 | Groq | moonshotai/kimi-k2-instruct-0905 | 数学・推論に強い非OpenAI系（Moonshot）。プロバイダ多様性を確保しつつ数値統計パターン推論に適合 |
 | 専門AI② イベント・天気 | Google | gemini-3.5-flash | アーティスト・スポーツ等の世界知識が最も豊富 |
 | **専門AI③ 運営改善** | **xAI** | **grok-3-mini** | **X（Twitter）学習によるリアルタイムトレンド知識。東京ドームの客層・流行を現在進行形で把握** |
 | 反証AI④ 品質管理 | Anthropic | claude-haiku-4-5 | 安全性重視の設計で「言い過ぎ検出」の負の評価タスクに適する |
@@ -567,7 +567,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | 変数名 | 用途 | 現在の設定 |
 |---|---|---|
 | `GROQ_API_KEY` | Groq API認証（専門AI①） | 設定済み |
-| `GROQ_CHAT_MODEL` | 専門AI①のモデル名 | 未設定（デフォルト: `openai/gpt-oss-120b`） |
+| `FOODCOURT_GROQ_MODEL` | 専門AI①のモデル名（フードコート専用） | 未設定（デフォルト: `moonshotai/kimi-k2-instruct-0905`） |
 | `GEMINI_API_KEY` | Gemini API認証（専門AI②） | 設定済み |
 | `FOODCOURT_GEMINI_MODEL` | 専門AI②のモデル名 | `gemini-3.5-flash` |
 | `XAI_API_KEY` | xAI API認証（専門AI③） | **設定済み** |
@@ -584,7 +584,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 専門AI②（gemini preferred）: gemini → groq
 反証AI④（claude preferred）: claude → groq
 専門AI③（grok preferred）  : grok → groq
-専門AI①（groq preferred）  : groq(primary) → groq(qwen/qwen3.6-27b)
+専門AI①（groq preferred）  : groq(kimi-k2-instruct-0905) → groq(openai/gpt-oss-120b)
 ```
 
 ---
@@ -595,7 +595,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 
 | AI | プロバイダー | モデル | 入力/1M | 出力/1M |
 |---|---|---|---|---|
-| 専門AI① | Groq | llama-3.3-70b | 約$0.59 | 約$0.79 |
+| 専門AI① | Groq | moonshotai/kimi-k2-instruct-0905 | $1.00 | $3.00 |
 | 専門AI② | Google | gemini-3.5-flash | $1.50 | $9.00 |
 | **専門AI③** | **xAI** | **grok-3-mini** | **$0.30** | **$0.50** |
 | 反証AI④ | Anthropic | claude-haiku-4-5 | $1.00 | $5.00 |
