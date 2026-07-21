@@ -279,19 +279,20 @@ Grok 3 miniは他のAIと根本的に異なる知識源を持つ。**X（旧Twit
 
 ---
 
-### 反証AI④ ── 品質管理・反証専門（Kimi K3 → Claude Haiku）
+### 反証AI④ ── 品質管理・反証専門（surface別）
 
 | 項目 | 内容 |
 |---|---|
-| 優先プロバイダー | Moonshot |
-| 優先モデル | `kimi-k3`（`FOODCOURT_MOONSHOT_MODEL`環境変数で変更可） |
+| Q&A・期間・週次 | Moonshot `kimi-k3` → Claude `claude-haiku-4-5` |
+| 日次 | Claude `claude-haiku-4-5` → Groq |
+| Kimiモデル設定 | `FOODCOURT_MOONSHOT_MODEL`環境変数（既定 `kimi-k3`） |
 | APIキー変数 | `MOONSHOT_API_KEY` |
-| フォールバック | Anthropic `claude-haiku-4-5` |
 | 最大出力 | 550〜650トークン |
 | 出力用途 | 統合AIへの「反証メモ」 |
 
 **Kimi K3を優先し、Claude Haikuをフォールバックにする理由:**
-- Kimi K3の長文脈・推論能力を「言い過ぎ」「根拠不足」「相関と因果の混同」の検出へ集中させる。`temperature=1`（モデル制約）・`reasoning_effort=low`で運用し、推論品質を保ちつつ時間と出力トークンを抑える。
+- Q&A・期間・週次は入力コンテキストが大きく、複数の論点や期間横断の因果候補を監査する必要があるため、Kimi K3の長文脈・推論能力を使う。`temperature=1`（モデル制約）・`reasoning_effort=low`で運用する。
+- 日次は対象日が限定され変化も小さいため、深い推論より速度・安定性・コストを優先してClaude Haikuを使う。
 - Kimiがタイムアウト・残高不足・API障害・空本文になった場合は、実績のあるClaude Haikuへ自動退避する。
 - 評価AI⑥は引き続きClaude Haikuのため、採点基準の安定性は維持する。
 
@@ -343,7 +344,7 @@ Grok 3 miniは他のAIと根本的に異なる知識源を持つ。**X（旧Twit
 | 専門AI① 数値分析 | Groq | qwen/qwen3.6-27b | 数学・推論に強い非OpenAI系（Alibaba Cloud）。プロバイダ多様性を確保しつつ数値統計パターン推論に適合 |
 | 専門AI② イベント・天気 | Google | gemini-3.5-flash | アーティスト・スポーツ等の世界知識が最も豊富 |
 | **専門AI③ 運営改善** | **xAI** | **grok-3-mini** | **X（Twitter）学習によるリアルタイムトレンド知識。東京ドームの客層・流行を現在進行形で把握** |
-| 反証AI④ 品質管理 | Moonshot → Anthropic | kimi-k3 → claude-haiku-4-5 | Kimiの推論力で根拠不足・因果断定を監査し、失敗時はHaikuへ退避 |
+| 反証AI④ 品質管理 | surface別 | Q&A/期間/週次: kimi-k3 → Haiku、日次: Haiku | 深いコンテキストだけKimiを使い、定型日次は速度・コストを優先 |
 | 統合AI⑤ 最終生成 | OpenAI | gpt-5.6-luna | 複数AIメモの矛盾解消・統合整形を担当 |
 
 ---
@@ -573,21 +574,22 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | `FOODCOURT_GEMINI_MODEL` | 専門AI②のモデル名 | `gemini-3.5-flash` |
 | `XAI_API_KEY` | xAI API認証（専門AI③） | **設定済み** |
 | `FOODCOURT_GROK_MODEL` | 専門AI③のモデル名 | 未設定（デフォルト: `grok-3-mini`） |
-| `claude_haiku` | Claude API認証（反証AI④フォールバック・評価AI⑥） | 設定済み |
-| `FOODCOURT_CLAUDE_MODEL` | 反証AI④フォールバック/評価AI⑥のClaudeモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
+| `claude_haiku` | Claude API認証（日次反証・Kimiフォールバック・評価AI⑥） | 設定済み |
+| `FOODCOURT_CLAUDE_MODEL` | 日次反証/フォールバック/評価AI⑥のClaudeモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
 | `OPENAI_API_KEY` | OpenAI API認証（統合AI⑤） | 設定済み |
 | `FOODCOURT_OPENAI_MODEL` | 統合AI⑤のモデル名 | `gpt-5.6-luna` |
-| `MOONSHOT_API_KEY` | Moonshot(Kimi) API認証（反証AI④優先） | **設定済み・稼働確認済み** |
-| `FOODCOURT_MOONSHOT_MODEL` | 反証AI④の優先モデル | `kimi-k3` |
+| `MOONSHOT_API_KEY` | Moonshot(Kimi) API認証（Q&A・期間・週次の反証AI④） | **設定済み・稼働確認済み** |
+| `FOODCOURT_MOONSHOT_MODEL` | Q&A・期間・週次の反証AI④モデル | `kimi-k3` |
 
-> **Kimi K3実測仕様**: 国際版 `https://api.moonshot.ai/v1` を使用。`temperature=1`のみ許可。推論強度は `reasoning_effort=low`。コンテキストは1,048,576トークン。反証AI④で優先使用し、失敗時はClaude Haikuへフォールバックする。
+> **Kimi K3実測仕様**: 国際版 `https://api.moonshot.ai/v1` を使用。`temperature=1`のみ許可。推論強度は `reasoning_effort=low`。コンテキストは1,048,576トークン。Q&A・期間・週次の反証で使用し、失敗時はClaude Haikuへフォールバックする。日次反証は最初からClaude Haiku。
 
 ### フォールバック優先順位
 
 ```
 統合AI⑤（openai preferred）: openai → gemini → groq
 専門AI②（gemini preferred）: gemini → groq
-反証AI④（moonshot preferred）: moonshot(kimi-k3) → claude(claude-haiku-4-5)
+反証AI④（Q&A・期間・週次）: moonshot(kimi-k3) → claude(claude-haiku-4-5)
+反証AI④（日次）          : claude(claude-haiku-4-5) → groq
 専門AI③（grok preferred）  : grok → groq
 専門AI①（groq preferred）  : groq(qwen/qwen3.6-27b) → groq(openai/gpt-oss-120b)
 ```
@@ -603,8 +605,8 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | 専門AI① | Groq | qwen/qwen3.6-27b | $0.29 | $0.59 |
 | 専門AI② | Google | gemini-3.5-flash | $1.50 | $9.00 |
 | **専門AI③** | **xAI** | **grok-3-mini** | **$0.30** | **$0.50** |
-| 反証AI④ | Moonshot | kimi-k3 | $3.00（キャッシュヒット$0.30） | $15.00 |
-| 反証AI④フォールバック / 評価AI⑥ | Anthropic | claude-haiku-4-5 | $1.00 | $5.00 |
+| 反証AI④（Q&A・期間・週次） | Moonshot | kimi-k3 | $3.00（キャッシュヒット$0.30） | $15.00 |
+| 反証AI④（日次）/ Kimiフォールバック / 評価AI⑥ | Anthropic | claude-haiku-4-5 | $1.00 | $5.00 |
 | 統合AI⑤ | OpenAI | gpt-5.6-luna | $1.00 | $6.00 |
 
 ### 月額試算（約55回/月のパイプライン実行）

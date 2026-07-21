@@ -1372,7 +1372,8 @@ export async function runFoodCourtLoopEngineering(params: {
     return { answer: gen.content, usages, loopScore: null, loopCount: 1 }
   }
 
-  const modelVersion = `foodcourt-loop-v2-calibrated(gen=${resolveFoodCourtOpenAiModel()};critic=${resolveFoodCourtMoonshotModel()}->${resolveFoodCourtClaudeModel()};eval=${config.evaluatorProvider};pass=${config.passTotal}/${config.passEach})`
+  const criticLabel = params.surface === 'daily_summary' ? resolveFoodCourtClaudeModel() : `${resolveFoodCourtMoonshotModel()}->${resolveFoodCourtClaudeModel()}`
+  const modelVersion = `foodcourt-loop-v2-calibrated(gen=${resolveFoodCourtOpenAiModel()};critic=${criticLabel};eval=${config.evaluatorProvider};pass=${config.passTotal}/${config.passEach})`
   const runId = await saveFoodCourtLoopRun(params.supabase, {
     storeKey: String(params.storeKey ?? ''),
     surface: params.surface,
@@ -3042,7 +3043,7 @@ export async function generateFoodCourtDailySummary(
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
   ].join('\n')
   const criticUser = `# 対象日の事実\n${targetFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用データ\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}\n\n${dailyLogsBlock}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'moonshot', fallbackModel, { deadlineAt, perProviderMs: 25000 })
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel, { deadlineAt, perProviderMs: 8000 })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
