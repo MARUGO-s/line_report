@@ -8,6 +8,7 @@ import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 import {
   buildFoodCourtRevisionMessages,
   compactFoodCourtEvaluationContext,
+  foodCourtEvaluationSurfaceRules,
   foodCourtEvaluationPassed,
   foodCourtLoopHasBudget,
   foodCourtTextSimilarity,
@@ -1013,6 +1014,7 @@ function parseLoopEvaluationJson(raw: string | null): FoodCourtLoopEvaluation | 
 
 // 統合回答を品質評価AIに採点させる。評価AI自身は回答を書き直さず、採点と改善点だけを返す。
 async function evaluateFoodCourtAnswer(params: {
+  surface: FoodCourtLoopSurface
   question: string
   contextBlock: string
   finalAnswer: string
@@ -1031,6 +1033,7 @@ async function evaluateFoodCourtAnswer(params: {
     '- 相関を因果と断定している',
     '- 売上日とレポート発行日を混同している',
     '- 抽象的な打ち手だけで終えている（KPIに落とし込めていない）',
+    ...foodCourtEvaluationSurfaceRules(params.surface),
     // 出力が長いとトークン上限でJSONが途中で切れて採点不能になる。件数・文字数を厳しく制限して短いJSONに収めさせる。
     '【出力長の厳守】improvement_points は最重要のものだけ最大3件・各60字以内。risk_flags は最大2件・各40字以内。factuality_notes は最大2件・各40字以内。それ以上書かない。',
     'JSONのみで返答すること。他の文章・前置き・コードフェンスは一切書かない。',
@@ -1041,7 +1044,7 @@ async function evaluateFoodCourtAnswer(params: {
   const res = await foodCourtAiChat(
     [{ role: 'system', content: evalSystem }, { role: 'user', content: evalUser }],
     params.groqApiKey, params.primary, params.config.evaluatorMaxTokens, params.config.evaluatorProvider, params.fallbackModel,
-    { deadlineAt: params.deadlineAt, perProviderMs: 9000 },
+    { deadlineAt: params.deadlineAt, perProviderMs: 12000 },
   )
   return { evaluation: parseLoopEvaluationJson(res.content), usage: res.usage }
 }
@@ -1325,6 +1328,7 @@ export async function runFoodCourtLoopEngineering(params: {
     if (!gen.content) break // 生成失敗: それまでのベストがあればそれを採用して打ち切る
 
     const evalRes = await evaluateFoodCourtAnswer({
+      surface: params.surface,
       question: params.question,
       contextBlock: params.evaluationContext,
       finalAnswer: gen.content,
@@ -2968,7 +2972,10 @@ export async function generateFoodCourtDailySummary(
     `目的は対象日の実績について、表の値の言い換えではなく「だから何を意味するか」まで踏み込んだ日次サマリーを作ることです。日報がある日は、日報とリンクした「施策×実績レポート」としても書く。`,
     `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象日の事実」および「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
     `【前回分析の自己検証】「前回の分析」が与えられている場合、そこで語った見立て（好調/不調の理由・客数要因か客単価要因か・イベント/天気の影響など）が今回の対象日の実績でも裏付けられたか、変わったかを必ずどこかの見出し（主に【この日の評価（条件別）】か【直近の勢い】）で一言検証すること。同じ結論・同じ言い回しを毎日繰り返さない。前回との継続性がある分析にする。`,
+    `【比較可能性】前回分析と対象日の曜日・イベント規模・天気など主要条件が違う場合は、前回仮説が支持/否定されたと断定せず「条件が異なるため直接比較できない」と書く。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象日に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、それぞれの確度を踏まえながら「複数の条件が重なってどう効いたか」を多角的に判断し、【この日の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
+    `【不足データの扱い】入力に無い他店のイベント捕捉率・時間帯別実績・統計的有意差は作らない。日報ブロックが無い場合は「施策なし」ではなく「日報記録を確認できない」と書く。`,
+    `【打ち手】根拠のない客数+○%・客単価+○円などの目標を作らない。基準値がある場合だけ数値化し、無い場合は「次回記録する観測可能なKPI」を1つ示す。`,
     `【月次トレンドの参照】「先月の振り返り」が与えられている場合、そこで語られた月単位のトレンド・季節性（例:月内で伸びていた時期か、曜日構成、イベント密度など）と対象日の実績が整合するか、それとも先月から変化したかを、【総評】か【直近の勢い】のどちらかで一言だけ軽く触れる。対象日そのものの分析を月次の話にすり替えない。`,
     nippouRules,
     `【出力フォーマット・厳守】必ず次の7つの見出しを、この順番・この表記（【】で囲む）で出力すること。見出し以外の前置き・締めの文章は書かない。`,
@@ -2994,7 +3001,8 @@ export async function generateFoodCourtDailySummary(
     surface: 'daily_summary',
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
-      groqApiKey, primary, 1400, feedback && previousAnswer ? 'groq' : 'openai', fallbackModel,
+      // 改稿だけ廉価モデルへ切り替えると、1周目より品質が下がる実績があったため同じOpenAI系で統一する。
+      groqApiKey, primary, 1400, 'openai', fallbackModel,
       { deadlineAt, perProviderMs: 11000 },
     ),
     evaluationContext: contextBlock,

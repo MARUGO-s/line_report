@@ -5,6 +5,7 @@ import {
   buildFoodCourtRevisionMessages,
   compactFoodCourtEvaluationContext,
   foodCourtEvaluationPassed,
+  foodCourtEvaluationSurfaceRules,
   foodCourtLoopHasBudget,
   foodCourtTextSimilarity,
   normalizeFoodCourtPassingScore,
@@ -12,8 +13,9 @@ import {
   resolveFoodCourtPassingThresholds,
 } from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
 
-test('configured passing score controls both total and per-axis thresholds', () => {
-  assert.deepEqual(resolveFoodCourtPassingThresholds('72', 75, 65), { passTotal: 72, passEach: 72 })
+test('configured passing score keeps a five-point per-axis margin', () => {
+  assert.deepEqual(resolveFoodCourtPassingThresholds('72', 75, 65), { passTotal: 72, passEach: 67 })
+  assert.deepEqual(resolveFoodCourtPassingThresholds('70', 75, 65), { passTotal: 70, passEach: 65 })
   assert.deepEqual(resolveFoodCourtPassingThresholds('', 75, 65), { passTotal: 75, passEach: 65 })
 })
 
@@ -42,6 +44,8 @@ test('revision includes the previous answer before feedback', () => {
   assert.equal(messages.at(-2)?.role, 'assistant')
   assert.equal(messages.at(-2)?.content, '初回回答')
   assert.match(messages.at(-1)?.content ?? '', /根拠を追加する/)
+  assert.match(messages.at(-1)?.content ?? '', /現データでは確認できない/)
+  assert.match(messages.at(-1)?.content ?? '', /指摘箇所だけ/)
 })
 
 test('evaluation requires total and every axis to pass', () => {
@@ -49,6 +53,23 @@ test('evaluation requires total and every axis to pass', () => {
   assert.equal(foodCourtEvaluationPassed(base, 90, 80), true)
   assert.equal(foodCourtEvaluationPassed({ ...base, scores: { ...base.scores, evidence: 79 } }, 90, 80), false)
   assert.equal(foodCourtEvaluationPassed({ ...base, total_score: 89 }, 90, 80), false)
+})
+
+test('daily evaluation does not demand unavailable data', () => {
+  const rules = foodCourtEvaluationSurfaceRules('daily_summary').join('\n')
+  assert.match(rules, /入力に実際に含まれるデータだけ/)
+  assert.match(rules, /統計的有意差/)
+  assert.match(rules, /日報記録を確認できない/)
+  assert.deepEqual(foodCourtEvaluationSurfaceRules('ask'), [])
+})
+
+test('daily-like score passes with total 70 and per-axis 65', () => {
+  const evaluation = {
+    total_score: 72,
+    scores: { accuracy: 70, logic: 70, expertise: 73, practicality: 68, evidence: 69 },
+  }
+  assert.equal(foodCourtEvaluationPassed(evaluation, 70, 65), true)
+  assert.equal(foodCourtEvaluationPassed(evaluation, 70, 70), false)
 })
 
 test('later loop requires enough remaining budget', () => {

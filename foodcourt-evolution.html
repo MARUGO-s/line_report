@@ -363,7 +363,7 @@
           <span id="passingScoreSaveStatus" style="font-size:12px;color:var(--tx-3);width:54px;">保存済み</span>
         </div>
         <div style="font-size:12px; color:var(--tx-3); flex:2; min-width:280px; line-height:1.4;">
-          総合点・各評価項目・品質合格RAGの採用に同じ基準点を使います。人が承認したRAG学習は基準点にかかわらず保持します。<br>
+          表示値は総合点・予測スコア・品質合格RAGの基準です。AI回答の各評価軸は総合点より5点低い値を最低ラインにします。人が承認したRAG学習は基準点にかかわらず保持します。<br>
           予測スコアは <code>100 - 直近14日客数MAPE</code> で算出し、基準未達でも予測を止めず毎日再学習します。
         </div>
       </div>
@@ -460,7 +460,7 @@
       <div style="margin-top:18px" id="loopRunsWrap">
         <div style="color:var(--tx-3);font-size:13px">データなし</div>
       </div>
-      <div class="card-note">統合AI⑤の回答を評価AI⑥が5軸（正確性・論理性・専門性・実用性・根拠）で採点。不合格なら改善点だけを渡して再生成。最大N回ループ後、最高得点の回答を返す。合格ライン：総合90点・各項目80点。</div>
+      <div class="card-note">統合AI⑤の回答を評価AI⑥が5軸（正確性・論理性・専門性・実用性・根拠）で採点。不合格なら改善点だけを渡して再生成。最大N回ループ後、最高得点の回答を返す。<span id="loopThresholdNote">合格ラインを読み込み中。</span></div>
     </div>
 
     <!-- Model selection detail (Loop①) -->
@@ -503,6 +503,7 @@
     passingScoreRange: $('passingScoreRange'),
     passingScoreLabel: $('passingScoreLabel'),
     passingScoreSaveStatus: $('passingScoreSaveStatus'),
+    loopThresholdNote: $('loopThresholdNote'),
     ragDownloadBtn: $('ragDownloadBtn'),
     datasetDownloadBtn: $('datasetDownloadBtn'),
     readinessCard: $('readinessCard'),
@@ -729,6 +730,9 @@
     if (!dom.passingScoreRange || !dom.passingScoreLabel) return;
     dom.passingScoreRange.value = passingScore;
     dom.passingScoreLabel.textContent = passingScore + '点';
+    if (dom.loopThresholdNote) {
+      dom.loopThresholdNote.textContent = `合格ライン：総合${passingScore}点・各項目${Math.max(30, passingScore - 5)}点。`;
+    }
   }
 
   function initPassingScoreConfig() {
@@ -739,6 +743,9 @@
     dom.passingScoreRange.addEventListener('input', (e) => {
       passingScore = Number(e.target.value);
       dom.passingScoreLabel.textContent = passingScore + '点';
+      if (dom.loopThresholdNote) {
+        dom.loopThresholdNote.textContent = `合格ライン：総合${passingScore}点・各項目${Math.max(30, passingScore - 5)}点。`;
+      }
       if (dom.passingScoreSaveStatus) {
         dom.passingScoreSaveStatus.textContent = '未保存';
         dom.passingScoreSaveStatus.style.color = 'var(--tx-3)';

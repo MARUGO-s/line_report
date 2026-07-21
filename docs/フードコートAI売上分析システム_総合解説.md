@@ -577,7 +577,7 @@ FOODCOURT_LOOP_APPLY_TO_PERIOD=false
 FOODCOURT_LOOP_APPLY_TO_WEEKLY=false
 FOODCOURT_LOOP_MAX_ASK=2
 FOODCOURT_LOOP_PASS_TOTAL=70
-FOODCOURT_LOOP_PASS_EACH=70
+FOODCOURT_LOOP_PASS_EACH=65
 ```
 
 全体フラグとsurface別フラグの両方がtrueの場合だけ有効。未設定時はOFFとなる。現行の通常版・loop版は同一キャッシュバージョンのため、日次をOFFにしても不要な再生成は発生しない。
