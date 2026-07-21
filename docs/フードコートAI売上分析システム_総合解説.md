@@ -164,7 +164,7 @@
 | 項目 | 内容 |
 |------|------|
 | プロバイダー | Groq |
-| モデル（既定） | `moonshotai/kimi-k2-instruct-0905`（Moonshot Kimi K2。`FOODCOURT_GROQ_MODEL` で変更可。旧Llama指定は自動的に置換） |
+| モデル（既定） | `qwen/qwen3.6-27b`（Alibaba Cloud Qwen 3.6 27B。`FOODCOURT_GROQ_MODEL` で変更可。旧Llama指定は自動的に置換） |
 | フォールバック | `openai/gpt-oss-120b` |
 | 最大出力 | 約600〜700トークン |
 | 出力 | 統合AI向けの**分析メモ（下書き）** |

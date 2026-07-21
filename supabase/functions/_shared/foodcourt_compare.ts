@@ -16,7 +16,7 @@ import {
   rankFoodCourtRagDocuments,
   resolveFoodCourtPassingThresholds,
 } from './foodcourt_loop_utils.ts'
-import { GROQ_TEXT_FALLBACK_MODEL, GROQ_TEXT_KIMI_MODEL, resolveGroqTextModel } from './groq_model.ts'
+import { GROQ_TEXT_FALLBACK_MODEL, GROQ_TEXT_FOODCOURT_MODEL, resolveGroqTextModel } from './groq_model.ts'
 
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
@@ -185,6 +185,7 @@ function groqUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
   if (!inp && !out && !tot) return null
   return { provider: 'groq', model, inputTokens: inp, outputTokens: out, thinkingTokens: null, totalTokens: tot }
 }
+
 function azureFoundryUsageFrom(json: unknown, model: string): FoodCourtAiUsage | null {
   const u = (json && typeof json === 'object') ? (json as { usage?: unknown }).usage : null
   if (!u || typeof u !== 'object') return null
@@ -2705,7 +2706,7 @@ export async function answerFoodCourtQuestion(
   const storeCorr = buildStoreCorrelation(reports, baseName)               // 店舗間相関（カニバリ/アンカー）
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)   // 異常値Zスコア
   const forecastCtx = buildForecastContext(forecast)                      // 学習型モデルの予測＋自己採点
-  const primary = resolveGroqTextModel(Deno.env.get('FOODCOURT_GROQ_MODEL'), GROQ_TEXT_KIMI_MODEL)
+  const primary = resolveGroqTextModel(Deno.env.get('FOODCOURT_GROQ_MODEL'), GROQ_TEXT_FOODCOURT_MODEL)
   const fallbackModel = GROQ_TEXT_FALLBACK_MODEL
   // 画面に表示中の単日レポートの対象日。これを渡さないと、AIは何十日分もの生データのどの日の話かを
   // 画面と無関係に(会話文脈やイベントの派手さだけで)決めてしまい、時間軸がずれた回答をする原因になる。
@@ -2904,7 +2905,7 @@ export async function generateFoodCourtDailySummary(
   const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const dailyLogsBlock = nippou.block
-  const primary = resolveGroqTextModel(Deno.env.get('FOODCOURT_GROQ_MODEL'), GROQ_TEXT_KIMI_MODEL)
+  const primary = resolveGroqTextModel(Deno.env.get('FOODCOURT_GROQ_MODEL'), GROQ_TEXT_FOODCOURT_MODEL)
   const fallbackModel = GROQ_TEXT_FALLBACK_MODEL
 
   // --- 専門AI①: 対象日の他店舗比較・過去データ分析メモ ---
@@ -3064,7 +3065,7 @@ export async function generateFoodCourtPeriodSummary(
   const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
   const dailyLogsBlock = nippou.block
-  const primary = resolveGroqTextModel(Deno.env.get('FOODCOURT_GROQ_MODEL'), GROQ_TEXT_KIMI_MODEL)
+  const primary = resolveGroqTextModel(Deno.env.get('FOODCOURT_GROQ_MODEL'), GROQ_TEXT_FOODCOURT_MODEL)
   const fallbackModel = GROQ_TEXT_FALLBACK_MODEL
 
   // --- 専門AI①: 対象期間の他店舗比較・過去データ分析メモ ---
@@ -3529,7 +3530,7 @@ export async function generateFoodCourtWeeklyReport(
   const decomposition = buildContributionDecomposition(reports, baseName)
   const anomalies = buildAnomalyDays(reports, baseName, events, weather)
   const forecastCtx = buildForecastContext(forecast)
-  const primary = resolveGroqTextModel(Deno.env.get('FOODCOURT_GROQ_MODEL'), GROQ_TEXT_KIMI_MODEL)
+  const primary = resolveGroqTextModel(Deno.env.get('FOODCOURT_GROQ_MODEL'), GROQ_TEXT_FOODCOURT_MODEL)
   const fallbackModel = GROQ_TEXT_FALLBACK_MODEL
 
   // 日報（施策記録）＋週内の施策×実績効果対照
