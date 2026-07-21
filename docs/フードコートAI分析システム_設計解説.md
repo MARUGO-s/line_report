@@ -114,7 +114,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
                                     ▼
                           [統合AI⑤]
                           最終回答生成
-                          OpenAI (o4-mini)
+                          OpenAI (GPT-5.6 Luna)
                           推論モデル・矛盾解消に特化
                           最大1400〜1800トークン出力
                                     │
@@ -316,16 +316,17 @@ Grok 3 miniは他のAIと根本的に異なる知識源を持つ。**X（旧Twit
 | 項目 | 内容 |
 |---|---|
 | プロバイダー | OpenAI |
-| モデル | `o4-mini`（`FOODCOURT_OPENAI_MODEL`環境変数で制御） |
-| APIエンドポイント | `/v1/responses`（Responses API） |
+| モデル | `gpt-5.6-luna`（`FOODCOURT_OPENAI_MODEL`環境変数で制御） |
+| APIエンドポイント | `/v1/chat/completions`（Chat Completions API） |
 | フォールバック順 | OpenAI失敗 → Gemini → Groq |
 | 最大出力 | 1400〜1800トークン |
 | 出力用途 | **ユーザーへの最終回答** |
 
-**o4-miniを使う理由:**
-- 推論（reasoning）モデルなので「4つの異なるAIメモの矛盾を解消する」という統合タスクに最も適している
-- 反証AI④が「禁止した断定」を使わず「仮説」「データ不足」に言い換える編集判断が得意
-- gpt-5.5（$5/$30/1M）より約1/5のコストで同等の統合能力
+**GPT-5.6 Lunaを使う理由:**
+- 複数の専門AIメモと反証メモを統合する推論・編集タスクに対応
+- 反証AI④が禁止した断定を「仮説」「データ不足」へ言い換える編集判断を担う
+- 公式単価が入力$1・出力$6/1Mトークンで、従来のo4-miniとほぼ同等コスト
+- 品質ループの初回生成と改善再生成で同じモデルを使い、モデル切替による品質低下を防ぐ
 
 **担当するタスク:**
 1. 専門AI①②③のメモと反証AI④の指摘を受け取り、矛盾を解消
@@ -342,7 +343,7 @@ Grok 3 miniは他のAIと根本的に異なる知識源を持つ。**X（旧Twit
 | 専門AI② イベント・天気 | Google | gemini-3.5-flash | アーティスト・スポーツ等の世界知識が最も豊富 |
 | **専門AI③ 運営改善** | **xAI** | **grok-3-mini** | **X（Twitter）学習によるリアルタイムトレンド知識。東京ドームの客層・流行を現在進行形で把握** |
 | 反証AI④ 品質管理 | Anthropic | claude-haiku-4-5 | 安全性重視の設計で「言い過ぎ検出」の負の評価タスクに適する |
-| 統合AI⑤ 最終生成 | OpenAI | o4-mini | 推論モデルで複数AIメモの矛盾解消・統合整形が得意 |
+| 統合AI⑤ 最終生成 | OpenAI | gpt-5.6-luna | 複数AIメモの矛盾解消・統合整形を担当 |
 
 ---
 
@@ -574,7 +575,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | `claude_haiku` | Claude API認証（反証AI④） | 設定済み |
 | `FOODCOURT_CLAUDE_MODEL` | 反証AI④のモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
 | `OPENAI_API_KEY` | OpenAI API認証（統合AI⑤） | 設定済み |
-| `FOODCOURT_OPENAI_MODEL` | 統合AI⑤のモデル名 | `o4-mini` |
+| `FOODCOURT_OPENAI_MODEL` | 統合AI⑤のモデル名 | `gpt-5.6-luna` |
 
 ### フォールバック優先順位
 
@@ -598,7 +599,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | 専門AI② | Google | gemini-3.5-flash | $1.50 | $9.00 |
 | **専門AI③** | **xAI** | **grok-3-mini** | **$0.30** | **$0.50** |
 | 反証AI④ | Anthropic | claude-haiku-4-5 | $1.00 | $5.00 |
-| 統合AI⑤ | OpenAI | o4-mini | $1.10 | $4.40 |
+| 統合AI⑤ | OpenAI | gpt-5.6-luna | $1.00 | $6.00 |
 
 ### 月額試算（約55回/月のパイプライン実行）
 

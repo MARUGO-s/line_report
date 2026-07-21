@@ -111,7 +111,7 @@
                 └──────────┬───────────┘
                            ▼
                      統合AI⑤
-                     OpenAI o4-mini
+                     OpenAI GPT-5.6 Luna
                      （矛盾解消・最終文章）
                            │
               ┌────────────┴────────────┐
@@ -282,13 +282,13 @@ Grok は **X（旧 Twitter）上のリアルタイムに近い世論・トレン
 
 ---
 
-### 4-5. 統合AI⑤ — 最終回答生成（OpenAI o4-mini）
+### 4-5. 統合AI⑤ — 最終回答生成（OpenAI GPT-5.6 Luna）
 
 | 項目 | 内容 |
 |------|------|
 | プロバイダー | OpenAI |
-| モデル（既定） | `o4-mini`（`FOODCOURT_OPENAI_MODEL`） |
-| API | Responses API（`/v1/responses`） |
+| モデル（既定） | `gpt-5.6-luna`（`FOODCOURT_OPENAI_MODEL`） |
+| API | Chat Completions API（`/v1/chat/completions`） |
 | フォールバック | OpenAI失敗 → Gemini → Groq |
 | 最大出力 | 約1400〜1800トークン |
 | 出力 | **ユーザーが見る最終文章** |
@@ -321,7 +321,7 @@ Grok は **X（旧 Twitter）上のリアルタイムに近い世論・トレン
 | ② イベント・天気 | Gemini | エンタメ／スポーツの世界知識 |
 | ③ 運営改善 | Grok | リアルタイム寄りのトレンド知識 |
 | ④ 反証 | Claude | 言い過ぎ検出・論理検証 |
-| ⑤ 統合 | o4-mini | 矛盾解消・最終整形 |
+| ⑤ 統合 | GPT-5.6 Luna | 矛盾解消・最終整形 |
 | ⑥ 評価 | Claude 等 | 採点専用（再生成しない） |
 
 **同じ「野球の日」でも:**

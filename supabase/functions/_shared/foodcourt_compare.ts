@@ -592,7 +592,7 @@ function resolveFoodCourtClaudeModel(): string {
 }
 
 function resolveFoodCourtOpenAiModel(): string {
-  return String(Deno.env.get('FOODCOURT_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || '').trim() || 'o4-mini'
+  return String(Deno.env.get('FOODCOURT_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || '').trim() || 'gpt-5.6-luna'
 }
 
 function extractGeminiText(json: unknown): string {
@@ -1296,7 +1296,7 @@ export async function runFoodCourtLoopEngineering(params: {
     return { answer: gen.content, usages, loopScore: null, loopCount: 1 }
   }
 
-  const modelVersion = `foodcourt-loop-v2-calibrated(${config.evaluatorProvider};pass=${config.passTotal}/${config.passEach})`
+  const modelVersion = `foodcourt-loop-v2-calibrated(gen=${resolveFoodCourtOpenAiModel()};eval=${config.evaluatorProvider};pass=${config.passTotal}/${config.passEach})`
   const runId = await saveFoodCourtLoopRun(params.supabase, {
     storeKey: String(params.storeKey ?? ''),
     surface: params.surface,

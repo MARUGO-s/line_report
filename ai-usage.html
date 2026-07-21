@@ -594,7 +594,7 @@
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="azure_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
-              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">OpenAI（フードコート最終統合・o4-mini）</span></div>
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">OpenAI（フードコート最終統合・GPT-5.6 Luna）</span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="openai_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="openai_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -648,7 +648,7 @@
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
     // モデル別単価へ移行。旧のプロバイダ一括単価の保存値を引き継がない。
-    const RATES_KEY = 'line_report_ai_usage_rates_v5';
+    const RATES_KEY = 'line_report_ai_usage_rates_v6';
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
     // 単価は各社の公式単価（USD / 100万トークン）。通常の精算レシートは Flash Lite $0.25/$1.50。
@@ -657,7 +657,7 @@
     // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
     const DEFAULT_RATES = {
       azure:    { inUsd: 0.20, outUsd: 1.25 },   // Azure Foundry GPT-5.4 nano（レシート・画像抽出）
-      openai:   { inUsd: 1.10, outUsd: 4.40 },   // o4-mini（フードコート最終統合）
+      openai:   { inUsd: 1.00, outUsd: 6.00 },   // GPT-5.6 Luna（フードコート最終統合）
       grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
       gemini:   { inUsd: 0.25, outUsd: 1.50 },
       claude:   { inUsd: 1.00, outUsd: 5.00 },
@@ -842,11 +842,15 @@
     const GEMINI_FLASH_LITE_RATE = { inUsd: 0.25, outUsd: 1.50 };
     const GEMINI_FLASH_RATE = { inUsd: 0.50, outUsd: 3.00 };
     const GEMINI_PRO_RATE = { inUsd: 2.00, outUsd: 12.00 };
+    const OPENAI_O4_MINI_RATE = { inUsd: 1.10, outUsd: 4.40 };
+    const OPENAI_GPT_5_6_LUNA_RATE = { inUsd: 1.00, outUsd: 6.00 };
     function rateForModel(provider, model) {
       const m = String(model || '').toLowerCase();
       if (provider === 'gemini' && m === 'gemini-3.1-flash-lite') return GEMINI_FLASH_LITE_RATE;
       if (provider === 'gemini' && m === 'gemini-3-flash-preview') return GEMINI_FLASH_RATE;
       if (provider === 'gemini' && m === 'gemini-3.1-pro-preview') return GEMINI_PRO_RATE;
+      if (provider === 'openai' && m === 'o4-mini') return OPENAI_O4_MINI_RATE;
+      if (provider === 'openai' && m === 'gpt-5.6-luna') return OPENAI_GPT_5_6_LUNA_RATE;
       return state.rates[rateKeyForModel(provider, model)] || DEFAULT_RATES.azure;
     }
     // API記録の output_tokens は思考を含む課金対象出力。thinking_tokens は内訳表示だけに使う。
@@ -1086,7 +1090,8 @@
     // モデル別の正確な内訳（実測トークン × モデル別単価）。旧Groq履歴は除外する。
     const MODEL_LABELS = {
       'gpt-5.4-nano': 'レシート・小口経費の画像抽出（Azure Foundry）',
-      'o4-mini': 'フードコート分析の最終統合',
+      'gpt-5.6-luna': 'フードコート分析の最終統合（現行）',
+      'o4-mini': 'フードコート分析の最終統合（旧モデル）',
       'gpt-5.5': 'フードコート分析の最終統合（旧モデル）',
       'grok-3-mini': 'フードコート運営改善AI',
       'gemini-3-flash-preview': '小口レシートの通常解析（低コスト）',

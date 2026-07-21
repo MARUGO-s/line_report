@@ -9361,7 +9361,7 @@ const AI_USAGE_GEMINI_MODEL = "gemini-3.1-flash-lite"
 const AI_USAGE_CLAUDE_STORE_KEYS = new Set<string>(["claudia2"])
 const AI_USAGE_CLAUDE_MODEL = "claude-haiku-4-5"
 const AI_USAGE_AZURE_MODEL = AZURE_FOUNDRY_VISION_MODEL
-const AI_USAGE_OPENAI_MODEL = "gpt-5.5"
+const AI_USAGE_OPENAI_MODEL = "gpt-5.6-luna"
 const AI_USAGE_GROK_MODEL = "grok-3-mini"
 
 type AiUsageStoreRow = {
