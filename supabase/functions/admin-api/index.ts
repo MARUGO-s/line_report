@@ -1111,6 +1111,8 @@ Deno.serve(async (req, info) => {
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
+      "/foodcourt/ai-fallback-events",
+      "/foodcourt/ai-fallback-events/ack",
       "/foodcourt/dome-weekly",
       "/foodcourt/evolution-history",
       "/foodcourt/ai-loop-runs",
@@ -1723,6 +1725,57 @@ Deno.serve(async (req, info) => {
       if (error) return json({ error: error.message }, 500)
       if (!data) return json({ error: "Q&A履歴が見つかりません。" }, 404)
       return json({ ok: true, id }, 200)
+    }
+    // 各AIが希望プロバイダ/モデルで反応せずフォールバックした事象の一覧＋未確認件数。
+    if (req.method === "GET" && path === "/foodcourt/ai-fallback-events") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const rawLimit = Number(url.searchParams.get("limit") ?? "50")
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(200, Math.trunc(rawLimit))) : 50
+      const unackedOnly = String(url.searchParams.get("unacked") ?? "").trim() === "1"
+      let listQuery = supabase
+        .from("foodcourt_ai_fallback_events")
+        .select("id, surface, role, preferred_provider, preferred_model, used_provider, used_model, outcome, attempts, acknowledged, created_at")
+        .ilike("store_partition_key", storeKey)
+        .order("created_at", { ascending: false })
+        .limit(limit)
+      if (unackedOnly) listQuery = listQuery.eq("acknowledged", false)
+      const { data, error } = await listQuery
+      if (error) return json({ error: error.message }, 500)
+      // 未確認件数はバッジ用に別集計（一覧の limit に影響されない正確な件数）。
+      const { count: unackedCount, error: countErr } = await supabase
+        .from("foodcourt_ai_fallback_events")
+        .select("id", { count: "exact", head: true })
+        .ilike("store_partition_key", storeKey)
+        .eq("acknowledged", false)
+      if (countErr) return json({ error: countErr.message }, 500)
+      return json({ items: data ?? [], unacked_count: unackedCount ?? 0 }, 200)
+    }
+    // フォールバック事象を「確認済み」にする。id 指定で1件、未指定なら店舗の未確認をすべて確認済みにする。
+    if (req.method === "POST" && path === "/foodcourt/ai-fallback-events/ack") {
+      let body: Record<string, unknown> = {}
+      try {
+        const raw = await parseJson(workReq)
+        if (isRecord(raw)) body = raw
+      } catch {
+        body = {}
+      }
+      const storeKey = String(body.store_key ?? body.store ?? url.searchParams.get("store_key") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      const idRaw = body.id ?? url.searchParams.get("id")
+      let ackQuery = supabase
+        .from("foodcourt_ai_fallback_events")
+        .update({ acknowledged: true })
+        .ilike("store_partition_key", storeKey)
+        .eq("acknowledged", false)
+      if (idRaw != null && String(idRaw).trim() !== "") {
+        const id = Number(idRaw)
+        if (!Number.isSafeInteger(id) || id <= 0) return json({ error: "id is invalid." }, 400)
+        ackQuery = ackQuery.eq("id", id)
+      }
+      const { data, error } = await ackQuery.select("id")
+      if (error) return json({ error: error.message }, 500)
+      return json({ ok: true, acknowledged: (data ?? []).length }, 200)
     }
     // 学習進化トラッキング: foodcourt_forecast_history の全行を返す（foodcourt-evolution.html 用）。
     if (req.method === "GET" && path === "/foodcourt/evolution-history") {

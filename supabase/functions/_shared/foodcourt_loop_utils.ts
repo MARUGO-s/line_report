@@ -253,3 +253,66 @@ export function compactFoodCourtEvaluationContext(context: string, maxChars = 14
   const side = Math.max(1, Math.floor((maxChars - marker.length) / 2))
   return context.slice(0, side) + marker + context.slice(-side)
 }
+
+// ===== AIフォールバック検知（docs/AI_LOOP_ENGINEERING_DESIGN.md 16章 リスク対策の可観測化） =====
+// 各AI呼び出し（foodCourtAiChat）は preferred プロバイダから順に試し、失敗したら別プロバイダ/別モデルへ
+// フォールバックする。従来はどのAIが反応せず退避したか内部ログにしか出ず、管理画面から見えなかった。
+// ここでは「1回のAI呼び出しの試行ログ」から、フォールバックとして記録すべきか（＝希望どおりでなかったか）を
+// 判定する純関数を提供する。DB書き込み・fetchは行わないためユニットテストできる。
+
+export type FoodCourtAiAttempt = {
+  provider: string
+  model: string | null
+  ok: boolean
+  // 失敗理由（http_5xx / http_4xx / empty_content / exception / missing_key / timeout など）。成功時は null。
+  reason?: string | null
+}
+
+export type FoodCourtFallbackEvent = {
+  preferredProvider: string
+  preferredModel: string | null
+  usedProvider: string | null
+  usedModel: string | null
+  outcome: 'fallback_success' | 'all_failed'
+  attempts: FoodCourtAiAttempt[]
+}
+
+// 試行ログから、フォールバック記録が必要かを判定して整形する。
+// 記録する条件:
+//  - 1つ目の希望が失敗し、別プロバイダ/別モデルで成功した（fallback_success）
+//  - あるいは全滅（どの試行も ok=false）だった（all_failed）
+// 記録しない条件（null を返す）:
+//  - 試行が空（deadline 等で1回も呼べなかった）
+//  - 1つ目の試行がそのまま成功した（＝フォールバックしていない）
+export function buildFoodCourtFallbackEvent(
+  preferredProvider: string,
+  attempts: FoodCourtAiAttempt[],
+): FoodCourtFallbackEvent | null {
+  if (!Array.isArray(attempts) || attempts.length === 0) return null
+  const first = attempts[0]
+  const preferredModel = first?.model ?? null
+  const success = attempts.find((a) => a && a.ok) ?? null
+
+  if (success) {
+    // 1つ目がそのまま成功＝フォールバックしていない → 記録不要。
+    if (first && first.ok) return null
+    return {
+      preferredProvider,
+      preferredModel,
+      usedProvider: success.provider,
+      usedModel: success.model ?? null,
+      outcome: 'fallback_success',
+      attempts,
+    }
+  }
+
+  // すべて失敗＝全滅。最初の希望が単発失敗でも「反応しなかった」ので記録する。
+  return {
+    preferredProvider,
+    preferredModel,
+    usedProvider: null,
+    usedModel: null,
+    outcome: 'all_failed',
+    attempts,
+  }
+}

@@ -210,6 +210,22 @@
     .qa-archive-meta{font-size:11.5px;color:var(--tx-3);white-space:nowrap;}
     .qa-archive-answer{border-top:1px solid var(--line-soft);padding:13px 14px;white-space:pre-wrap;font-size:13px;line-height:1.65;max-height:320px;overflow-y:auto;}
     .qa-archive-actions{display:flex;justify-content:flex-end;padding:0 14px 12px;}
+    /* AIフォールバック履歴 */
+    .tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 5px;margin-left:5px;border-radius:9px;background:var(--bad,#d64545);color:#fff;font-size:10.5px;font-weight:700;line-height:1;}
+    .fb-item{border:1px solid var(--line-soft);border-radius:10px;margin-bottom:8px;background:var(--surface);overflow:hidden;}
+    .fb-item.fb-unacked{border-color:var(--bad,#d64545);}
+    .fb-item>summary{padding:12px;cursor:pointer;list-style:none;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;}
+    .fb-item>summary::-webkit-details-marker{display:none;}
+    .fb-title{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .fb-meta{font-size:11.5px;color:var(--tx-3);white-space:nowrap;}
+    .fb-pill{display:inline-block;padding:1px 7px;border-radius:8px;font-size:10.5px;font-weight:700;margin-right:6px;}
+    .fb-pill.ok{background:rgba(214,69,69,.12);color:var(--bad,#d64545);}
+    .fb-pill.bad{background:var(--bad,#d64545);color:#fff;}
+    .fb-body{border-top:1px solid var(--line-soft);padding:12px 14px;font-size:12.5px;line-height:1.6;}
+    .fb-attempt{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;padding:2px 0;}
+    .fb-attempt .ng{color:var(--bad,#d64545);}
+    .fb-attempt .go{color:var(--good,#2e9e5b);}
+    .fb-actions{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0 10px;}
 
     .tbl{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;}
     .tbl th{font-size:11.5px;font-weight:600;color:var(--tx-3);text-align:right;padding:0 10px 9px;border-bottom:1px solid var(--line);white-space:nowrap;}
@@ -665,7 +681,7 @@
         <button class="tab" data-tab="trend"><span class="em">📈</span>売上推移</button>
         <button class="tab" data-tab="dome"><span class="em">🏟️</span>東京ドーム連動</button>
         <button class="tab" data-tab="weather"><span class="em">🌦️</span>天気連動</button>
-        <button class="tab" data-tab="reports"><span class="em">📚</span>レポート一覧</button>
+        <button class="tab" data-tab="reports"><span class="em">📚</span>レポート一覧<span class="tab-badge" id="fallbackTabBadge" hidden>0</span></button>
       </div>
     </div>
 
@@ -825,6 +841,18 @@
           <div class="report-accordion-body" id="qaHistoryList"></div>
         </details>
       </div>
+      <div class="card">
+        <div class="card-h"><div class="card-t"><span class="em">⚠️</span>AIフォールバック履歴</div></div>
+        <div class="card-note">各AI（専門AI・反証AI・統合AI・評価AI）が本来のAIで反応せず、別のAIに切り替わった（フォールバックした）事象を自動記録します。未確認の発生があるとタブに件数バッジが出ます。</div>
+        <div class="fb-actions">
+          <span class="rl-empty" id="fallbackSummary" style="padding:0"></span>
+          <button type="button" class="btn secondary" id="fallbackAckAllBtn" hidden>すべて確認済みにする</button>
+        </div>
+        <details class="report-accordion" style="margin-top:6px" id="fallbackAccordion">
+          <summary>フォールバック履歴を表示</summary>
+          <div class="report-accordion-body" id="fallbackList"></div>
+        </details>
+      </div>
     </section>
 
   </div>
@@ -861,6 +889,7 @@
     resultArea:$('resultArea'),
     heroLogo:$('heroLogo'), heroName:$('heroName'), heroMeta:$('heroMeta'), heroRanks:$('heroRanks'), heroTotals:$('heroTotals'), kpis:$('kpis'),
     tabrow:$('tabrow'),
+    fallbackTabBadge:$('fallbackTabBadge'), fallbackList:$('fallbackList'), fallbackSummary:$('fallbackSummary'), fallbackAckAllBtn:$('fallbackAckAllBtn'), fallbackAccordion:$('fallbackAccordion'),
     aiGrid:$('aiGrid'), aiNote:$('aiNote'), aiScorePill:$('aiScorePill'), aiStatusPill:$('aiStatusPill'),
     qSuggest:$('qSuggest'), qInput:$('qInput'), qBtn:$('qBtn'), qAnswer:$('qAnswer'), qClear:$('qClear'),
     rankTbody:$('rankTbody'), shareTbody:$('shareTbody'), shareNote:$('shareNote'), priceTbody:$('priceTbody'), distWrap:$('distWrap'), clsList:$('clsList'),
@@ -1935,6 +1964,123 @@
         }
       });
     });
+  }
+
+  // ===== AIフォールバック履歴 =====
+  const FB_ROLE_LABELS = {
+    specialist_quant: '専門AI①（数値・他店比較）',
+    specialist_ext: '専門AI②（イベント・天気）',
+    specialist_ops: '専門AI③（運営改善）',
+    critic: '反証AI④',
+    integrator: '統合AI⑤',
+    evaluator: '評価AI⑥',
+    tenant_extractor: 'テナント表抽出AI',
+  };
+  const FB_SURFACE_LABELS = {
+    ask: 'Q&A', daily_summary: '日次', period_summary: '期間', weekly_report: '週次', tenant_extract: 'テナント抽出',
+  };
+  function fbRoleLabel(r){ return FB_ROLE_LABELS[r] || String(r || 'AI'); }
+  function fbSurfaceLabel(s){ return FB_SURFACE_LABELS[s] || String(s || '-'); }
+  function updateFallbackBadge(count){
+    const n = Number(count) || 0;
+    if (dom.fallbackTabBadge){
+      dom.fallbackTabBadge.textContent = String(n);
+      dom.fallbackTabBadge.hidden = n <= 0;
+    }
+    if (dom.fallbackAckAllBtn) dom.fallbackAckAllBtn.hidden = n <= 0;
+  }
+  function renderFallbackAttempts(attempts){
+    if (!Array.isArray(attempts) || !attempts.length) return '<div class="fb-attempt">（試行ログなし）</div>';
+    return attempts.map((a) => {
+      const ok = !!(a && a.ok);
+      const prov = escapeHtml(String((a && a.provider) || '?'));
+      const model = escapeHtml(String((a && a.model) || ''));
+      const reason = a && a.reason ? escapeHtml(String(a.reason)) : '';
+      const mark = ok ? '<span class="go">✔ 成功</span>' : '<span class="ng">✗ 失敗' + (reason ? '（' + reason + '）' : '') + '</span>';
+      return '<div class="fb-attempt">' + prov + (model ? ' / ' + model : '') + ' … ' + mark + '</div>';
+    }).join('');
+  }
+  async function loadFallbackList(){
+    const wrap = dom.fallbackList;
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="rl-empty">読み込み中…</div>';
+    let body;
+    try {
+      body = await apiFetch('/foodcourt/ai-fallback-events?store_key=' + encodeURIComponent(currentStore()) + '&limit=100');
+    } catch (e) {
+      wrap.innerHTML = '<div class="rl-error">' + escapeHtml(e.message || '読み込みに失敗しました。') + '</div>';
+      return;
+    }
+    const items = Array.isArray(body.items) ? body.items : [];
+    updateFallbackBadge(body.unacked_count);
+    if (dom.fallbackSummary){
+      dom.fallbackSummary.textContent = items.length
+        ? ('直近' + items.length + '件・未確認' + (Number(body.unacked_count) || 0) + '件')
+        : '';
+    }
+    if (!items.length){
+      wrap.innerHTML = '<div class="rl-empty">フォールバックの記録はまだありません（各AIが正常に応答しています）。</div>';
+      return;
+    }
+    wrap.innerHTML = items.map((it) => {
+      const created = it.created_at ? new Date(it.created_at).toLocaleString('ja-JP') : '日時不明';
+      const allFailed = it.outcome === 'all_failed';
+      const pill = allFailed
+        ? '<span class="fb-pill bad">全滅</span>'
+        : '<span class="fb-pill ok">切替</span>';
+      const from = escapeHtml(String(it.preferred_provider || '?')) + (it.preferred_model ? ' / ' + escapeHtml(String(it.preferred_model)) : '');
+      const to = allFailed ? '（応答なし）' : (escapeHtml(String(it.used_provider || '?')) + (it.used_model ? ' / ' + escapeHtml(String(it.used_model)) : ''));
+      const title = pill + escapeHtml(fbSurfaceLabel(it.surface) + '・' + fbRoleLabel(it.role));
+      const unacked = !it.acknowledged;
+      return '<details class="fb-item' + (unacked ? ' fb-unacked' : '') + '" data-fb-id="' + escapeHtml(String(it.id)) + '">'
+        + '<summary><span class="fb-title">' + title + '</span>'
+        + '<span class="fb-meta">' + escapeHtml(created) + (unacked ? '・未確認' : '') + '</span></summary>'
+        + '<div class="fb-body">'
+        + '<div style="margin-bottom:8px">本来: <b>' + from + '</b> → 実際: <b>' + to + '</b></div>'
+        + '<div style="margin-bottom:6px;color:var(--tx-3)">試行ログ:</div>'
+        + renderFallbackAttempts(it.attempts)
+        + '<div class="fb-actions" style="margin-top:12px">'
+        + '<span></span>'
+        + (unacked ? '<button type="button" class="btn secondary" data-fb-ack="' + escapeHtml(String(it.id)) + '">確認済みにする</button>' : '<span class="rl-empty" style="padding:0">確認済み</span>')
+        + '</div>'
+        + '</div>'
+        + '</details>';
+    }).join('');
+    wrap.querySelectorAll('[data-fb-ack]').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = btn.getAttribute('data-fb-ack');
+        if (!id) return;
+        btn.disabled = true;
+        try {
+          await apiPost('/foodcourt/ai-fallback-events/ack', { store_key: currentStore(), id: Number(id) });
+          await loadFallbackList();
+        } catch (err) {
+          alert('確認済みへの更新に失敗しました: ' + ((err && err.message) || ''));
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+  async function ackAllFallbacks(){
+    if (!confirm('未確認のフォールバック履歴をすべて確認済みにしますか？')) return;
+    if (dom.fallbackAckAllBtn) dom.fallbackAckAllBtn.disabled = true;
+    try {
+      await apiPost('/foodcourt/ai-fallback-events/ack', { store_key: currentStore() });
+      await loadFallbackList();
+    } catch (err) {
+      alert('一括確認に失敗しました: ' + ((err && err.message) || ''));
+    } finally {
+      if (dom.fallbackAckAllBtn) dom.fallbackAckAllBtn.disabled = false;
+    }
+  }
+  // バッジだけ更新する軽量チェック（一覧を描画せず未確認件数のみ取得）。
+  async function refreshFallbackBadge(){
+    try {
+      const body = await apiFetch('/foodcourt/ai-fallback-events?store_key=' + encodeURIComponent(currentStore()) + '&limit=1');
+      updateFallbackBadge(body.unacked_count);
+    } catch (_) { /* バッジは best-effort */ }
   }
 
   async function openArchivedDailyReport(reportId) {
@@ -3303,6 +3449,8 @@
       dom.loadMsg.className='msg';
       dom.loadMsg.textContent = droppedNoDate ? ('日付を取得できなかったレポート '+droppedNoDate+'件は、日付が確定できないため表示から除外しました。') : '';
       populateReports();
+      // 未確認のAIフォールバックがあればタブにバッジを出す（一覧描画は不要な軽量チェック）。
+      refreshFallbackBadge();
     } catch(e){ dom.loadMsg.className='msg err'; dom.loadMsg.textContent=(e&&e.message)||'読み込みに失敗しました。'; }
   }
   async function connectWithToken(){
@@ -3340,9 +3488,10 @@
     // 東京ドーム一覧は表示された時点で初期スクロールを「今日」に合わせる（過去は上にスクロールで表示）。
     if(t.dataset.tab==='dome') requestAnimationFrame(scrollDomeToToday);
     // レポート一覧タブは開くたびに最新化する（店舗切替後も追随させるため毎回取得）。
-    if(t.dataset.tab==='reports') { loadDailyReportList(); loadWeeklyReportList(); loadQaHistoryList(); }
+    if(t.dataset.tab==='reports') { loadDailyReportList(); loadWeeklyReportList(); loadQaHistoryList(); loadFallbackList(); }
     // タブ切替時のページ全体の自動スクロールはしない（その場に留まる）。
   });
+  if(dom.fallbackAckAllBtn) dom.fallbackAckAllBtn.addEventListener('click', ackAllFallbacks);
   dom.domeFilt.addEventListener('click', e=>{
     const b = e.target.closest('.fbtn'); if(!b) return;
     domeFilter = b.dataset.g; domeLimit = 14; renderDomeFilter(); renderDomeList();

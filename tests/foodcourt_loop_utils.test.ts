@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   assessFoodCourtEvolutionReadiness,
   buildFoodCourtRevisionMessages,
+  buildFoodCourtFallbackEvent,
   compactFoodCourtEvaluationContext,
   foodCourtEvaluationPassed,
   foodCourtEvaluationScoreAnchors,
@@ -158,4 +159,61 @@ test('evolution readiness remains in data collection below evidence thresholds',
   assert.equal(readiness.gates.ragReuse.ready, true)
   assert.equal(readiness.gates.promptCandidate.ready, false)
   assert.equal(readiness.gates.modelDistillation.ready, false)
+})
+
+test('fallback event: preferred provider succeeds first -> not recorded', () => {
+  const event = buildFoodCourtFallbackEvent('moonshot', [
+    { provider: 'moonshot', model: 'kimi-k3', ok: true, reason: null },
+  ])
+  assert.equal(event, null)
+})
+
+test('fallback event: empty attempts (deadline before any call) -> not recorded', () => {
+  assert.equal(buildFoodCourtFallbackEvent('moonshot', []), null)
+})
+
+test('fallback event: preferred fails then next provider succeeds -> fallback_success', () => {
+  const event = buildFoodCourtFallbackEvent('moonshot', [
+    { provider: 'moonshot', model: 'kimi-k3', ok: false, reason: 'http_500' },
+    { provider: 'claude', model: 'claude-haiku-4-5', ok: true, reason: null },
+  ])
+  assert.ok(event)
+  assert.equal(event!.outcome, 'fallback_success')
+  assert.equal(event!.preferredProvider, 'moonshot')
+  assert.equal(event!.preferredModel, 'kimi-k3')
+  assert.equal(event!.usedProvider, 'claude')
+  assert.equal(event!.usedModel, 'claude-haiku-4-5')
+  assert.equal(event!.attempts.length, 2)
+})
+
+test('fallback event: groq primary model fails then fallback model succeeds -> fallback_success', () => {
+  const event = buildFoodCourtFallbackEvent('groq', [
+    { provider: 'groq', model: 'qwen/qwen3.6-27b', ok: false, reason: 'model_not_found' },
+    { provider: 'groq', model: 'openai/gpt-oss-120b', ok: true, reason: null },
+  ])
+  assert.ok(event)
+  assert.equal(event!.outcome, 'fallback_success')
+  assert.equal(event!.usedModel, 'openai/gpt-oss-120b')
+})
+
+test('fallback event: all providers fail -> all_failed with null used provider', () => {
+  const event = buildFoodCourtFallbackEvent('openai', [
+    { provider: 'openai', model: 'gpt-5.6-luna', ok: false, reason: 'timeout' },
+    { provider: 'gemini', model: 'gemini-3.1-pro-preview', ok: false, reason: 'http_500' },
+    { provider: 'groq', model: 'qwen/qwen3.6-27b', ok: false, reason: 'empty_content' },
+  ])
+  assert.ok(event)
+  assert.equal(event!.outcome, 'all_failed')
+  assert.equal(event!.usedProvider, null)
+  assert.equal(event!.usedModel, null)
+  assert.equal(event!.attempts.length, 3)
+})
+
+test('fallback event: single preferred failure (no alternative tried) -> all_failed', () => {
+  const event = buildFoodCourtFallbackEvent('claude', [
+    { provider: 'claude', model: 'claude-haiku-4-5', ok: false, reason: 'auth_error' },
+  ])
+  assert.ok(event)
+  assert.equal(event!.outcome, 'all_failed')
+  assert.equal(event!.preferredProvider, 'claude')
 })
