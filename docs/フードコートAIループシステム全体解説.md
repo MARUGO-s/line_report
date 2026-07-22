@@ -201,4 +201,10 @@ AI使用料ページに合算される。
 - [ ] 大きなイベントは「👥予想」に動員数を入力する（GLMの精度に直結）
 - [ ] 週1回程度 [foodcourt-evolution.html](../foodcourt-evolution.html) でMAPEの低下とmodel_versionを確認
 - [ ] ループ②を有効化したら、`foodcourt_ai_loop_runs` の `returned_reason` 分布と
-      AI使用料ページのコスト推移を最初の1週間は確認する（評価が厳しすぎて毎回3ループ回っていないか）
+      AI使用料ページのコスト推移を最初の1週間は確認する（評価が厳しすぎて毎回最大ループまで回っていないか）
+- [ ] 週次レポートは手動force生成せず、次回の自然cron後に `weekly_report` の初回本番確認を行う。
+      確認日は次回月曜9時台（JST）を目安にし、以下を確認する:
+      - `foodcourt_weekly_reports` に対象週の新規レポートが作成されていること
+      - `foodcourt_ai_loop_runs.surface='weekly_report'` に新規runがあり、`status='completed'`、`final_score`、`final_loop_index`、`returned_reason` が記録されていること
+      - `ai_usage_events` に `moonshot / kimi-k3` と `claude-haiku-4-5`（評価AI）が記録されていること
+      - `final_loop_index` が毎回2に張り付かず、コストが想定内であること
