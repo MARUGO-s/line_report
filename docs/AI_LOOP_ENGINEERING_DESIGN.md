@@ -387,13 +387,13 @@ FOODCOURT_LOOP_PASS_EACH=65
 FOODCOURT_LOOP_EVALUATOR_PROVIDER=claude
 FOODCOURT_LOOP_EVALUATOR_MODEL=claude-haiku-4-5
 FOODCOURT_LOOP_APPLY_TO_ASK=true
-FOODCOURT_LOOP_APPLY_TO_DAILY=false
-FOODCOURT_LOOP_APPLY_TO_PERIOD=false
-FOODCOURT_LOOP_APPLY_TO_WEEKLY=false
+FOODCOURT_LOOP_APPLY_TO_DAILY=true
+FOODCOURT_LOOP_APPLY_TO_PERIOD=true
+FOODCOURT_LOOP_APPLY_TO_WEEKLY=true
 FOODCOURT_AI_REQUEST_BUDGET_MS=110000
 ```
 
-本番はQ&AだけONで段階導入する。管理画面の合格ライン設定が存在する場合は、環境変数より優先する。
+2026-07-22時点の本番はQ&A・日次・期間・週次の全surfaceをONにしている。管理画面の合格ライン設定が存在する場合は、環境変数より優先する。反証AI④は日次=Claude Haiku、Q&A/期間/週次=Kimi K3→Claude Haikuフォールバックで運用し、評価AI⑥はClaude Haikuのまま維持する。
 
 ## 10. 評価AIプロンプト設計
 
@@ -631,7 +631,7 @@ Phase 2以降で部分再実行を追加。
 - **ループ共通ユーティリティ**（`supabase/functions/_shared/foodcourt_compare.ts`、`foodCourtAiChat`の直後に追加）:
   `parseLoopEvaluationJson` / `evaluateFoodCourtAnswer` / `buildLoopFeedback` / `appendLoopFeedback` / `saveFoodCourtLoopRun` / `updateFoodCourtLoopRun` / `saveFoodCourtLoopIteration` / `runFoodCourtLoopEngineering`（`export`）。
 - **Q&Aへの適用**: `answerFoodCourtQuestion()`の最終統合AI呼び出しを`runFoodCourtLoopEngineering()`経由に置き換え。専門AI3体・反証AIは初回の1回だけ実行し、再ループ時は統合AIのみ`appendLoopFeedback`で改善点を追加して再生成（12.1「標準再生成」のみ実装。12.2「部分再実行」は未実装）。
-- **環境変数**: 9章の一覧をそのまま使用。`FOODCOURT_LOOP_ENABLED`と`FOODCOURT_LOOP_APPLY_TO_ASK`が両方trueのときだけ有効化。**未設定時は両方false扱い＝既定は完全OFF**（無効時は`initialGenerate()`を1回呼ぶだけで、DB保存も含めループ導入前と全く同じ動作）。
+- **環境変数**: 9章の一覧をそのまま使用。`FOODCOURT_LOOP_ENABLED`とsurface別の`FOODCOURT_LOOP_APPLY_TO_*`が両方trueのときだけ有効化。**未設定時はfalse扱い＝既定は完全OFF**（無効時は`initialGenerate()`を1回呼ぶだけで、DB保存も含めループ導入前と全く同じ動作）。2026-07-22時点の本番はQ&A・日次・期間・週次の全surfaceを明示ON。
 
 ### 設計書からの変更点（実装中に見つけた修正）
 
@@ -645,7 +645,7 @@ Phase 2以降で部分再実行を追加。
 
 ### 未実施
 
-- Supabase本番(hocbn)へのマイグレーション適用・Edge Functionデプロイ、および環境変数(`FOODCOURT_LOOP_*`)の設定。`deno check`によるQ&A/日次/期間サマリー実装ファイル（`foodcourt_compare.ts`・`admin-api/index.ts`）の型チェックは通過済み（既存の無関係なエラーのみ残存）。実際のAI呼び出しを伴う動作確認は本番デプロイ後に必要。
+- なし（2026-07-22時点でSupabase本番(hocbn)へのマイグレーション適用・Edge Functionデプロイ・`FOODCOURT_LOOP_*`設定は完了）。本番ではQ&A・日次・期間・週次の全surfaceがONで、期間サマリーは本番ループ実行を確認済み。週次は次回生成時に同じ設定で適用される。
 
 ## 20. Phase 2（日次サマリー）実装状況（2026-07-07・追記）
 
@@ -658,7 +658,7 @@ Phase 2以降で部分再実行を追加。
 ### 前回の相談で挙げた3つの懸念への対応
 
 1. **バージョン定数の共用問題**: `foodcourt_compare.ts`に`FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v12-loop'`を新設し、日次サマリー(`admin-api`の`/foodcourt/daily-summary`内の3箇所)だけこちらを参照するよう変更。期間サマリー(`/foodcourt/period-summary`)は従来どおり`FOODCOURT_ANALYSIS_AI_VERSION`のまま独立させたため、日次のバージョンアップが期間サマリーのキャッシュを巻き添えで無効化することはない。
-2. **surfaceごとのmaxLoops**: `resolveFoodCourtLoopConfig`を拡張し、`FOODCOURT_LOOP_MAX_ASK` / `FOODCOURT_LOOP_MAX_DAILY` / `FOODCOURT_LOOP_MAX_PERIOD`という専用環境変数を用意（優先順位: surface専用 → 共通の`FOODCOURT_LOOP_MAX` → surfaceごとの既定値）。既定値はask=3・daily=2・period=1（後述のとおりperiodは控えめ指示によりさらに引き下げ）。テストで正しく優先順位が働くことを確認済み。
+2. **surfaceごとのmaxLoops**: `resolveFoodCourtLoopConfig`を拡張し、`FOODCOURT_LOOP_MAX_ASK` / `FOODCOURT_LOOP_MAX_DAILY` / `FOODCOURT_LOOP_MAX_PERIOD` / `FOODCOURT_LOOP_MAX_WEEKLY`という専用環境変数を用意（優先順位: surface専用 → 共通の`FOODCOURT_LOOP_MAX` → surfaceごとの既定値）。2026-07-22時点の既定値は全surface=2（初回＋最大1回の改善）。テストで正しく優先順位が働くことを確認済み。
 3. **固定タスク文言**: 上記のとおり対応済み。
 
 ### 検証
@@ -675,9 +675,9 @@ Phase 2以降で部分再実行を追加。
 
 ### 「控えめで」の反映
 
-ユーザー指示により、11章「期間: 最大1〜2ループ」のうち**下限の1を既定値に変更**（`FOODCOURT_LOOP_DEFAULT_MAX.period_summary = 1`。日次のask=3・daily=2はそのまま）。合格しなければ即座に最高点回答（実質1回生成した回答）を返す、最も保守的な設定。
+当初は「期間: 最大1〜2ループ」の下限1を既定値にする案だったが、2026-07-22時点の実装は全surface共通で上限2（初回＋最大1回の改善）に揃えている。合格すれば即終了し、不合格続きでも最高点回答を返すため、過剰な再生成は避ける。
 
-さらに、日次では新しい`FOODCOURT_DAILY_ANALYSIS_AI_VERSION`を発行してキャッシュを明示的に無効化したが、**期間サマリーの`model_version`（`FOODCOURT_ANALYSIS_AI_VERSION`）は意図的にそのまま据え置いた**。ループは既定でOFFのため、有効化するまでは生成ロジックが実質変わらず、バージョンを上げても「中身は同じだが課金だけ発生する」再生成が起きるだけになる。バージョンを上げる（＝既存キャッシュを一斉に無効化する）のは、実際に`FOODCOURT_LOOP_APPLY_TO_PERIOD=true`にして有効化する段になってから、まとめて行うのが合理的と判断した。
+さらに、日次では新しい`FOODCOURT_DAILY_ANALYSIS_AI_VERSION`を発行してキャッシュを明示的に無効化したが、**期間サマリーの`model_version`（`FOODCOURT_ANALYSIS_AI_VERSION`）は意図的にそのまま据え置いた**。2026-07-22時点で`FOODCOURT_LOOP_APPLY_TO_PERIOD=true`に有効化済みだが、既存期間キャッシュを一斉再生成して課金を発生させないため、バージョンは引き続き据え置く。未キャッシュ期間、またはforce/キャッシュ更新が走る期間から品質ループが適用される。
 
 ### 検証
 

@@ -130,17 +130,17 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の分
 再ループは**統合AIだけ**を再生成する（専門AI3体＋反証AIは使い回し）ため、
 1ループ追加あたりの増分は「統合AI1回＋評価AI1回」に抑えられる。合格したら即終了。
 
-### 3-3. 本番の段階導入設定（2026-07-21）
+### 3-3. 本番の段階導入設定（2026-07-22）
 
-品質ループは環境変数未設定時にOFFとなる fail-closed 設計とし、本番ではQ&Aだけを明示的に有効化している。
+品質ループは環境変数未設定時にOFFとなる fail-closed 設計とし、2026-07-22時点の本番ではQ&A・日次・期間・週次の全surfaceを明示的に有効化している。
 Supabase Edge Functions Secrets の設定は次のとおり:
 
 ```
 FOODCOURT_LOOP_ENABLED=true
 FOODCOURT_LOOP_APPLY_TO_ASK=true
-FOODCOURT_LOOP_APPLY_TO_DAILY=false
-FOODCOURT_LOOP_APPLY_TO_PERIOD=false
-FOODCOURT_LOOP_APPLY_TO_WEEKLY=false
+FOODCOURT_LOOP_APPLY_TO_DAILY=true
+FOODCOURT_LOOP_APPLY_TO_PERIOD=true
+FOODCOURT_LOOP_APPLY_TO_WEEKLY=true
 ```
 
 現在の安全運用値:
@@ -149,12 +149,15 @@ FOODCOURT_LOOP_APPLY_TO_WEEKLY=false
 FOODCOURT_LOOP_PASS_TOTAL=70
 FOODCOURT_LOOP_PASS_EACH=65
 FOODCOURT_LOOP_MAX_ASK=2
+FOODCOURT_LOOP_MAX_DAILY=2
 FOODCOURT_LOOP_EVALUATOR_PROVIDER=claude
 FOODCOURT_AI_REQUEST_BUDGET_MS=110000
 ```
 
 管理画面の合格ライン設定 `foodcourt_evolution_passing_score` が存在する場合は、その整数値が
-総合点・各評価軸の両方へ優先適用される。2026-07-21時点の本番値は70点。
+総合点・各評価軸の両方へ優先適用される。2026-07-22時点の本番値は70点。
+
+反証AI④のsurface別構成は、日次のみClaude Haiku（Kimiを呼ばない・短時間上限）とし、Q&A・期間・週次はKimi K3→Claude Haikuフォールバックにする。Qwenは日次反証AIではなく、専門AI①（数値/他店比較）として全surface共通で使う。
 
 **キャッシュ挙動**: 現行の通常版・loop版はどちらも `foodcourt-analysis-ai-v16-loop-learning`
 であり、日次ループをOFFにしてもキャッシュバージョンは変わらない。
