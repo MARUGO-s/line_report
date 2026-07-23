@@ -15,6 +15,7 @@ import {
   normalizeFoodCourtPassingScore,
   rankFoodCourtRagDocuments,
   resolveFoodCourtPassingThresholds,
+  stripFoodCourtThinkingBlocks,
 } from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
 
 test('configured passing score keeps a five-point per-axis margin', () => {
@@ -252,4 +253,26 @@ test('number audit feedback: includes coefficient removal instruction', () => {
   assert.match(fb, /係数/)
   assert.match(fb, /0\.76/)
   assert.match(fb, /検証用の目標/)
+})
+
+test('thinking strip: removes closed think block and preserves answer', () => {
+  assert.equal(
+    stripFoodCourtThinkingBlocks('<think>internal reasoning</think>【総評】回答本文'),
+    '【総評】回答本文',
+  )
+})
+
+test('thinking strip: unclosed think-only output becomes empty (forces fallback)', () => {
+  assert.equal(stripFoodCourtThinkingBlocks('<think>\nreasoning only and token limit'), '')
+})
+
+test('thinking strip: unclosed think followed by report heading keeps report only', () => {
+  assert.equal(
+    stripFoodCourtThinkingBlocks('<think>reasoning...\n【総評】実際の回答'),
+    '【総評】実際の回答',
+  )
+})
+
+test('thinking strip: orphan closing tag keeps content after close', () => {
+  assert.equal(stripFoodCourtThinkingBlocks('leaked reasoning</think>## 週次総評\n本文'), '## 週次総評\n本文')
 })

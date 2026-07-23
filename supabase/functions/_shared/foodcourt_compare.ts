@@ -24,6 +24,7 @@ import {
 import {
   auditFoodCourtAnswerNumbers,
   buildFoodCourtNumberAuditFeedback,
+  stripFoodCourtThinkingBlocks,
 } from './foodcourt_loop_utils.ts'
 import { GROQ_TEXT_FALLBACK_MODEL, GROQ_TEXT_FOODCOURT_MODEL, resolveGroqTextModel } from './groq_model.ts'
 
@@ -31,7 +32,7 @@ import { GROQ_TEXT_FALLBACK_MODEL, GROQ_TEXT_FOODCOURT_MODEL, resolveGroqTextMod
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-07-09: 日報×実績の効果対照表をコード側で組み立ててAIに渡すため v14 に上げ、旧キャッシュを再生成させる。
-// 2026-07-22: 数値監査(未根拠係数の不合格化)＋施策の固定フォーマットを導入したため v17 に上げ、旧キャッシュを再生成させる。
+// 2026-07-23: 数値監査(未根拠係数の不合格化)＋施策の固定フォーマットを導入したため v17 に上げ、旧キャッシュを再生成させる。
 export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v17-number-audit'
 
 // 全surface共通の「施策の固定フォーマット」。統合AIの最終出力で打ち手/次の一手を書く際に必ず守らせる。
@@ -178,22 +179,6 @@ function numOrNull(v: unknown): number | null {
   if (v == null) return null
   const n = Number(String(v).replace(/[^\d.-]/g, ''))
   return Number.isFinite(n) ? Math.round(n) : null
-}
-
-function stripThinkingBlocks(text: string): string {
-  let s = String(text ?? '')
-  // Some reasoning-capable OpenAI-compatible models may leak chain-of-thought inside <think> blocks.
-  // Remove both closed blocks and an accidental leading unclosed block before returning/storing text.
-  s = s.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-  if (/^<think>/i.test(s)) {
-    const markers = ['【総評】', '## ', '### ', '# ', 'Q.', '回答:', '結論']
-    const positions = markers
-      .map((m) => s.indexOf(m))
-      .filter((i) => i > 0)
-      .sort((a, b) => a - b)
-    if (positions.length) s = s.slice(positions[0]).trim()
-  }
-  return s
 }
 
 // ===== AI使用量の記録 =====
@@ -597,15 +582,23 @@ async function groqChat(
 ): Promise<FoodCourtChatResult> {
   if (!apiKey) return { content: null, usage: null, reason: 'missing_key' }
   try {
+    const isQwen36 = String(model).toLowerCase() === 'qwen/qwen3.6-27b'
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, temperature: 0.2, max_tokens: maxTokens, messages }),
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        max_tokens: maxTokens,
+        messages,
+        // Qwen3.6は非思考モード＋reasoning非表示で、<think>漏出・思考だけで出力上限消費を防ぐ。
+        ...(isQwen36 ? { reasoning_effort: 'none', reasoning_format: 'hidden' } : {}),
+      }),
       signal,
     })
     if (!res.ok) { console.error('groqChat http error:', model, res.status); return { content: null, usage: null, reason: httpReason(res.status) } }
     const json = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown } | null
-    const c = stripThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
+    const c = stripFoodCourtThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
     return { content: c || null, usage: groqUsageFrom(json, model), reason: c ? null : 'empty_content' }
   } catch (e) { console.error('groqChat failed:', e instanceof Error ? e.message : String(e)); return { content: null, usage: null, reason: exceptionReason(e) } }
 }
@@ -734,7 +727,7 @@ async function geminiChat(
       return { content: null, usage: null, reason: httpReason(res.status) }
     }
     const json = await res.json().catch(() => null)
-    const content = stripThinkingBlocks(extractGeminiText(json))
+    const content = stripFoodCourtThinkingBlocks(extractGeminiText(json))
     return { content: content || null, usage: geminiUsageFrom(json, model), reason: content ? null : 'empty_content' }
   } catch (e) {
     console.error('geminiChat failed:', e instanceof Error ? e.message : String(e))
@@ -781,7 +774,7 @@ async function claudeChat(
       return { content: null, usage: null, reason: httpReason(res.status) }
     }
     const json = await res.json().catch(() => null)
-    const content = stripThinkingBlocks(extractClaudeText(json))
+    const content = stripFoodCourtThinkingBlocks(extractClaudeText(json))
     return { content: content || null, usage: claudeUsageFrom(json, model), reason: content ? null : 'empty_content' }
   } catch (e) {
     console.error('claudeChat failed:', e instanceof Error ? e.message : String(e))
@@ -823,7 +816,7 @@ async function moonshotChat(
       choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>
       usage?: unknown
     } | null
-    const content = stripThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
+    const content = stripFoodCourtThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
     return { content: content || null, usage: moonshotUsageFrom(json, model), reason: content ? null : 'empty_content' }
   } catch (e) {
     console.error('moonshotChat failed:', e instanceof Error ? e.message : String(e))
@@ -872,7 +865,7 @@ async function openaiChat(
       choices?: Array<{ message?: { content?: string } }>
       usage?: unknown
     } | null
-    const content = stripThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
+    const content = stripFoodCourtThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
     return { content: content || null, usage: openaiUsageFrom(json, model), reason: content ? null : 'empty_content' }
   } catch (e) {
     console.error('openaiChat failed:', e instanceof Error ? e.message : String(e))
@@ -912,7 +905,7 @@ async function grokChat(
       choices?: Array<{ message?: { content?: string } }>
       usage?: { prompt_tokens?: number; completion_tokens?: number }
     } | null
-    const content = stripThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
+    const content = stripFoodCourtThinkingBlocks(String(json?.choices?.[0]?.message?.content ?? '').trim())
     const inp = Number(json?.usage?.prompt_tokens ?? 0) || 0
     const out = Number(json?.usage?.completion_tokens ?? 0) || 0
     const usage: FoodCourtAiUsage | null = json?.usage ? {

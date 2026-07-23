@@ -52,3 +52,9 @@ test('all four final integrators share the fixed action format rule', () => {
   assert.match(source, /対象客\(誰の・どの来店動機\)/)
   assert.match(source, /判定・中止ライン/)
 })
+
+test('Groq Qwen3.6 fallback disables visible reasoning', () => {
+  assert.match(source, /isQwen36/)
+  assert.match(source, /reasoning_effort:\s*'none'/)
+  assert.match(source, /reasoning_format:\s*'hidden'/)
+})

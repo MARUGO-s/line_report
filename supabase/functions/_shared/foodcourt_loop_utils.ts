@@ -392,3 +392,24 @@ export function buildFoodCourtNumberAuditFeedback(audit: FoodCourtNumberAudit): 
   }
   return lines.join('\n')
 }
+
+// 推論系モデルが本文に漏らした <think> ブロックを除去する。
+// 未クローズの <think>（トークン上限で思考途中終了）も、本文が無ければ空文字へしてフォールバック可能にする。
+export function stripFoodCourtThinkingBlocks(text: string): string {
+  let s = String(text ?? '')
+  s = s.replace(/<think>[\s\S]*?<\/think>/gi, ' ')
+  const lastClose = s.toLowerCase().lastIndexOf('</think>')
+  if (lastClose >= 0) s = s.slice(lastClose + '</think>'.length)
+  const openIdx = s.toLowerCase().indexOf('<think>')
+  if (openIdx >= 0) {
+    const after = s.slice(openIdx + '<think>'.length)
+    const markers = ['【総評】', '【週次', '## ', '### ', '# ', '回答:', '結論:']
+    let cut = -1
+    for (const m of markers) {
+      const i = after.indexOf(m)
+      if (i >= 0 && (cut < 0 || i < cut)) cut = i
+    }
+    s = cut >= 0 ? after.slice(cut) : s.slice(0, openIdx)
+  }
+  return s.trim()
+}
