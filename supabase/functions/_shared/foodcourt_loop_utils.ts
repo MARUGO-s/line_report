@@ -316,3 +316,79 @@ export function buildFoodCourtFallbackEvent(
     attempts,
   }
 }
+
+// ===== 回答内の数値の根拠チェック（コード側の決定論的検査） =====
+// 統合AIの最終回答に、コードが渡した事実ブロック（evaluationContext）に存在しない
+// 「係数」や「金額/客数」が混入していないかを検査する純関数。DB/fetch非依存でテスト可能。
+// 目的: 評価AIが繰り返し指摘する「データに無い係数」「根拠のない金額・客数」を、
+// 再生成フィードバックへ決定論的に差し込み、捏造数値を減らす。
+
+export type FoodCourtNumberAudit = {
+  // 事実ブロックに存在しない係数（×0.76 / 1.27倍 / 係数0.60 等）。捏造の可能性が高い。
+  ungroundedCoefficients: string[]
+  // 事実ブロックに存在しない金額（¥）・客数（人）の種類数。新規の目標値かもしれないため soft シグナル。
+  ungroundedValueCount: number
+}
+
+// 文字列から数値集合（カンマ除去後の Number）を作る。比較は数値の一致で行う。
+function fcExtractNumberSet(text: string): Set<number> {
+  const set = new Set<number>()
+  for (const m of String(text ?? '').matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
+    const n = Number(m[0].replace(/,/g, ''))
+    if (Number.isFinite(n)) set.add(n)
+  }
+  return set
+}
+
+export function auditFoodCourtAnswerNumbers(answer: string, factsText: string): FoodCourtNumberAudit {
+  const factNums = fcExtractNumberSet(factsText)
+  const a = String(answer ?? '')
+
+  // 係数: ×0.76 / x1.27 / ✕0.6 / 係数0.62 / 係数×0.62 / 1.5倍 など。整数倍(2倍等)は日本語表現で頻出のため対象外。
+  const coeffSet = new Set<number>()
+  const coeffRe = /(?:[×xX✕＊*]|係数[×xX]?)\s*(\d+\.\d+)|(\d+\.\d+)\s*倍/g
+  for (const m of a.matchAll(coeffRe)) {
+    const raw = m[1] ?? m[2]
+    if (raw == null) continue
+    const v = Number(raw)
+    if (Number.isFinite(v)) coeffSet.add(v)
+  }
+  const ungroundedCoefficients: string[] = []
+  for (const v of coeffSet) {
+    if (!factNums.has(v)) ungroundedCoefficients.push(String(v))
+  }
+
+  // 金額(¥)・客数(人)で、事実ブロックに無い値の種類数。
+  // 1〜31は日付由来の数値と衝突しやすいため無視するが、32以上は目標客数（65→80等）も検知する。
+  const seen = new Set<number>()
+  let ungroundedValueCount = 0
+  for (const m of a.matchAll(/¥\s*([\d,]+)|([\d,]+)\s*人/g)) {
+    const raw = m[1] ?? m[2]
+    if (raw == null) continue
+    const v = Number(raw.replace(/,/g, ''))
+    if (!Number.isFinite(v) || v < 32) continue
+    if (seen.has(v)) continue
+    seen.add(v)
+    if (!factNums.has(v)) ungroundedValueCount++
+  }
+
+  return { ungroundedCoefficients: ungroundedCoefficients.slice(0, 12), ungroundedValueCount }
+}
+
+// 数値監査の結果を、再生成フィードバックに差し込む短い指示文へ整形する。問題なしなら空文字。
+export function buildFoodCourtNumberAuditFeedback(audit: FoodCourtNumberAudit): string {
+  const lines: string[] = []
+  if (audit.ungroundedCoefficients.length) {
+    lines.push(
+      '【コード検査・要修正】次の係数は提供データに存在しません。該当する統計/予測ブロックの数値だけを使い、' +
+      'データに無い係数は必ず削除すること: ' + audit.ungroundedCoefficients.join(', '),
+    )
+  }
+  if (audit.ungroundedValueCount > 0) {
+    lines.push(
+      '【コード検査・注意】提供データに無い金額/客数が約' + audit.ungroundedValueCount +
+      '件あります。新規の金額・客数は実績値として断定せず、「検証用の目標/判定ライン（設定根拠つき）」または「仮説」と明記すること。',
+    )
+  }
+  return lines.join('\n')
+}

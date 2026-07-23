@@ -4,6 +4,8 @@ import {
   assessFoodCourtEvolutionReadiness,
   buildFoodCourtRevisionMessages,
   buildFoodCourtFallbackEvent,
+  auditFoodCourtAnswerNumbers,
+  buildFoodCourtNumberAuditFeedback,
   compactFoodCourtEvaluationContext,
   foodCourtEvaluationPassed,
   foodCourtEvaluationScoreAnchors,
@@ -216,4 +218,38 @@ test('fallback event: single preferred failure (no alternative tried) -> all_fai
   assert.ok(event)
   assert.equal(event!.outcome, 'all_failed')
   assert.equal(event!.preferredProvider, 'claude')
+})
+
+test('number audit: flags coefficients absent from facts', () => {
+  const facts = '曜日係数 土日×1.31。イベント×1.32。雨×1.06。FC平均比64%。'
+  const answer = '火曜係数×0.76と小ホール係数×0.60を適用。土日は×1.31で妥当。'
+  const audit = auditFoodCourtAnswerNumbers(answer, facts)
+  assert.deepEqual(audit.ungroundedCoefficients.sort(), ['0.6', '0.76'])
+})
+
+test('number audit: coefficient present in facts is not flagged (comma/decimal tolerant)', () => {
+  const facts = 'イベント係数 1.27倍。日曜 1.50。'
+  const answer = '交互作用×1.27を反映し、日曜は1.5倍で見込む。'
+  const audit = auditFoodCourtAnswerNumbers(answer, facts)
+  assert.equal(audit.ungroundedCoefficients.length, 0)
+})
+
+test('number audit: counts ungrounded yen/customer values as soft signal', () => {
+  const facts = '売上¥173,280。客数1,981人。FC平均¥745,508。'
+  const answer = 'ランチセット¥1,200を提案。目標客数は2,500人。売上¥173,280は妥当。'
+  const audit = auditFoodCourtAnswerNumbers(answer, facts)
+  // ¥1,200 と 2,500人 は facts に無い / ¥173,280 は facts にある
+  assert.equal(audit.ungroundedValueCount, 2)
+})
+
+test('number audit feedback: empty when nothing ungrounded', () => {
+  const audit = { ungroundedCoefficients: [], ungroundedValueCount: 0 }
+  assert.equal(buildFoodCourtNumberAuditFeedback(audit), '')
+})
+
+test('number audit feedback: includes coefficient removal instruction', () => {
+  const fb = buildFoodCourtNumberAuditFeedback({ ungroundedCoefficients: ['0.76'], ungroundedValueCount: 3 })
+  assert.match(fb, /係数/)
+  assert.match(fb, /0\.76/)
+  assert.match(fb, /検証用の目標/)
 })

@@ -28,7 +28,7 @@ test('ask/period/weekly critic④ use Moonshot Kimi with Claude Haiku fallback',
 
 test('daily critic④ stays Claude Haiku (routine summary)', () => {
   const claudeCritics = source.match(
-    /criticRes = await foodCourtAiChat\([^\n]*,\s*550,\s*'claude',[^\n]*\)/g,
+    /criticRes = await foodCourtAiChat\([^\n]*,\s*550,\s*'claude',[^\n]*perProviderMs:\s*15000[^\n]*\)/g,
   ) ?? []
   assert.equal(claudeCritics.length, 1)
 })
@@ -43,4 +43,12 @@ test('Moonshot usage is recorded under its own provider and separates reasoning 
   assert.match(source, /provider:\s*'moonshot'/)
   assert.match(source, /completion_tokens_details/)
   assert.match(source, /reasoning_tokens/)
+})
+
+test('all four final integrators share the fixed action format rule', () => {
+  // one declaration + four final-system references (ask/daily/period/weekly)
+  const refs = source.match(/FOODCOURT_ACTION_FORMAT_RULE/g) ?? []
+  assert.equal(refs.length, 5)
+  assert.match(source, /対象客\(誰の・どの来店動機\)/)
+  assert.match(source, /判定・中止ライン/)
 })

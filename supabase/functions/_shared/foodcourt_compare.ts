@@ -21,16 +21,27 @@ import {
   type FoodCourtAiAttempt,
   type FoodCourtFallbackEvent,
 } from './foodcourt_loop_utils.ts'
+import {
+  auditFoodCourtAnswerNumbers,
+  buildFoodCourtNumberAuditFeedback,
+} from './foodcourt_loop_utils.ts'
 import { GROQ_TEXT_FALLBACK_MODEL, GROQ_TEXT_FOODCOURT_MODEL, resolveGroqTextModel } from './groq_model.ts'
 
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
 const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-07-09: 日報×実績の効果対照表をコード側で組み立ててAIに渡すため v14 に上げ、旧キャッシュを再生成させる。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v16-loop-learning'
+// 2026-07-22: 数値監査(未根拠係数の不合格化)＋施策の固定フォーマットを導入したため v17 に上げ、旧キャッシュを再生成させる。
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v17-number-audit'
+
+// 全surface共通の「施策の固定フォーマット」。統合AIの最終出力で打ち手/次の一手を書く際に必ず守らせる。
+// 実用性・根拠の低スコア（抽象的な施策・根拠のない価格/客数目標）への対策。
+const FOODCOURT_ACTION_FORMAT_RULE =
+  '【施策の書式・厳守】打ち手・次の一手を書くときは、各施策に必ず「対象客(誰の・どの来店動機)／実施条件(曜日・時間帯・イベント条件)／実施内容(具体的に)／観測KPI(何を見るか)／判定・中止ライン(いつ・どう成否判定するか)」を含める。' +
+  '価格・客数・増加率などの数値は「実績値」「現場が決めた目標」「検証用の判定ライン(設定根拠つき)」のいずれかに限り、効果予測の数値を新規に作らない。根拠の無い数値は書かず「未計測」とすること。'
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v16-loop-learning'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v17-number-audit'
 // 日次サマリーの「実効」キャッシュバージョン。品質ループは未設定時OFF（fail closed）。
 // 現行では通常版・loop版とも v16 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
@@ -1470,6 +1481,8 @@ export async function runFoodCourtLoopEngineering(params: {
   surface: FoodCourtLoopSurface
   initialGenerate: (feedback?: string, previousAnswer?: string) => Promise<FoodCourtLoopGenerated>
   evaluationContext: string
+  // 数値監査の正本。専門AIメモ/RAG回答を除き、コード計算・生データ・日報原文だけを渡す。
+  numberAuditFacts?: string
   question: string
   userInput?: string | null
   sourceRef?: Record<string, unknown>
@@ -1537,8 +1550,30 @@ export async function runFoodCourtLoopEngineering(params: {
     })
     if (evalRes.usage) usages.push(evalRes.usage)
     const evaluation = evalRes.evaluation
-    const passed = foodCourtEvaluationPassed(evaluation, config.passTotal, config.passEach)
-    const finalEvaluation: FoodCourtLoopEvaluation | null = evaluation ? { ...evaluation, passed } : null
+    // コード側の決定論的な数値検査: 提供データに無い係数・金額/客数が混入していないか確認する。
+    const numberAudit = auditFoodCourtAnswerNumbers(gen.content, params.numberAuditFacts ?? params.evaluationContext)
+    const numberAuditFeedback = buildFoodCourtNumberAuditFeedback(numberAudit)
+    // 「データに無い係数」は捏造の可能性が高い最重要問題。評価AIが合格としてもコード監査NGなら不合格。
+    const cleanEnough = numberAudit.ungroundedCoefficients.length === 0
+    const auditPenalty = cleanEnough ? 0 : 15
+    const adjustedEvaluation: FoodCourtLoopEvaluation | null = evaluation ? {
+      ...evaluation,
+      total_score: Math.max(0, evaluation.total_score - auditPenalty),
+      scores: cleanEnough ? evaluation.scores : {
+        ...evaluation.scores,
+        accuracy: Math.min(evaluation.scores.accuracy, 60),
+        evidence: Math.min(evaluation.scores.evidence, 60),
+      },
+      improvement_points: cleanEnough
+        ? evaluation.improvement_points
+        : [
+          ...evaluation.improvement_points,
+          `コード監査: 提供データに無い係数（${numberAudit.ungroundedCoefficients.join(', ')}）を削除`,
+        ].slice(0, 4),
+      passed: false,
+    } : null
+    const passed = foodCourtEvaluationPassed(adjustedEvaluation, config.passTotal, config.passEach) && cleanEnough
+    const finalEvaluation: FoodCourtLoopEvaluation | null = adjustedEvaluation ? { ...adjustedEvaluation, passed } : null
 
     await saveFoodCourtLoopIteration(params.supabase, runId, {
       loopIndex,
@@ -1554,14 +1589,16 @@ export async function runFoodCourtLoopEngineering(params: {
     // 返らない事故になり得るため、合格したループは無条件でbestを上書きする。また bestAnswer===null（まだ
     // 1件も候補が無い）の場合も、評価AI自体が失敗(evaluation=null・score=-1)していた場合に生成結果を
     // 取りこぼさないよう、最初の生成物を無条件でbestにする。
-    const score = evaluation ? evaluation.total_score : -1
+    // 未根拠係数がある候補をbestとして採用しにくくする（評価AIスコアから15点の安全ペナルティ）。
+    const score = finalEvaluation ? finalEvaluation.total_score : -1
     if (passed || score > bestScore || bestAnswer === null) { bestScore = score; bestAnswer = gen.content; bestLoopIndex = loopIndex }
     previousAnswer = gen.content
 
     if (passed) { returnedReason = 'passed'; break }
-    if (!evaluation) { returnedReason = 'evaluation_failed'; break } // 評価AI失敗: これ以上ループしても改善点が得られない
+    if (!finalEvaluation) { returnedReason = 'evaluation_failed'; break } // 評価AI失敗: これ以上ループしても改善点が得られない
     if (loopIndex >= config.maxLoops) { returnedReason = 'max_loop_best'; break }
-    feedback = buildLoopFeedback(evaluation)
+    feedback = buildLoopFeedback(finalEvaluation)
+    if (numberAuditFeedback) feedback = feedback + '\n\n' + numberAuditFeedback
   }
 
   await updateFoodCourtLoopRun(params.supabase, runId, {
@@ -3006,6 +3043,7 @@ export async function answerFoodCourtQuestion(
     `【専門AIメモの統合】以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。メモが矛盾する場合や誇張がある場合は、必ず生データ・事前計算ブロック・日報×実績対照の数値で裏取りしてから採否を判断し、1つの一貫した最終回答にまとめること。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱めること。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。来客予測モデルの学習係数(自己採点済み)であれば、来客予測の自己採点(誤差%)と矛盾しない範囲で解釈する。対象日/対象期間に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【回答品質】最後に必ず、実行すべき次の一手または次に確認すべきKPIを1つ以上入れる。数字の羅列だけで終えない。日報があるときは次の一手を日報の学びと接続する。`,
+    FOODCOURT_ACTION_FORMAT_RULE,
   ].join('\n')
   const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'ask', q)
   const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の”前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${learningMemory ? '\n\n' + learningMemory : ''}\n\n# 日次生データ（全テナント）\n${data}`
@@ -3161,7 +3199,7 @@ export async function generateFoodCourtDailySummary(
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
   ].join('\n')
   const criticUser = `# 対象日の事実\n${targetFacts}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用データ\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}\n\n${dailyLogsBlock}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}`
-  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel, { deadlineAt, perProviderMs: 8000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'critic' } })
+  const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 550, 'claude', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'critic' } })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
@@ -3175,6 +3213,7 @@ export async function generateFoodCourtDailySummary(
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象日に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、それぞれの確度を踏まえながら「複数の条件が重なってどう効いたか」を多角的に判断し、【この日の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【不足データの扱い】入力に無い他店のイベント捕捉率・時間帯別実績・統計的有意差は作らない。日報ブロックが無い場合は「施策なし」ではなく「日報記録を確認できない」と書く。`,
     `【打ち手】根拠のない客数+○%・客単価+○円などの目標を作らない。基準値がある場合だけ数値化し、無い場合は「次回記録する観測可能なKPI」を1つ示す。`,
+    FOODCOURT_ACTION_FORMAT_RULE,
     `【月次トレンドの参照】「先月の振り返り」が与えられている場合、そこで語られた月単位のトレンド・季節性（例:月内で伸びていた時期か、曜日構成、イベント密度など）と対象日の実績が整合するか、それとも先月から変化したかを、【総評】か【直近の勢い】のどちらかで一言だけ軽く触れる。対象日そのものの分析を月次の話にすり替えない。`,
     nippouRules,
     `【出力フォーマット・厳守】必ず次の7つの見出しを、この順番・この表記（【】で囲む）で出力すること。見出し以外の前置き・締めの文章は書かない。`,
@@ -3330,6 +3369,7 @@ export async function generateFoodCourtPeriodSummary(
     `目的は対象期間(${startDate}〜${endDate})の実績について、表の値の言い換えではなく「だから何を意味するか」まで踏み込んだ期間サマリーを作ることです。期間中の日報は施策レポートとして必ずリンクする。`,
     `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象期間の事実」および「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象期間に含まれる複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断し、【この期間の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
+    FOODCOURT_ACTION_FORMAT_RULE,
     nippouRules,
     `【出力フォーマット・厳守】必ず次の7つの見出しを、この順番・この表記（【】で囲む）で出力すること。見出し以外の前置き・締めの文章は書かない。`,
     `【総評】対象期間の総合評価(強い/弱い/平常)を1〜2文＋根拠。日報施策の有無にも触れる。`,
@@ -3817,6 +3857,7 @@ export async function generateFoodCourtWeeklyReport(
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）の経営アドバイザーです。`,
     `目的は先週（${weekStart}〜${weekEnd}）の実績について、経営者に週次で届ける「経営レポート」を作ることです。日報がある週は日報リンクの施策効果レポートとしても書く。`,
     `以下の専門AIメモを参考意見として使い、「対象週の事実」と「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わない。`,
+    FOODCOURT_ACTION_FORMAT_RULE,
     nippouRules,
     `【出力フォーマット・厳守】必ず次の5つの見出しを、この順番・この表記（##で始める）で出力すること。`,
     `## 週次総評`,
