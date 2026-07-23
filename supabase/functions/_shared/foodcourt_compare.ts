@@ -2987,9 +2987,9 @@ export async function answerFoodCourtQuestion(
   const opsUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 競合プロファイル\n${competitors}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
 
   const [quantRes, extRes, opsRes] = await Promise.all([
-    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_quant' } }),
-    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ext' } }),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ops' } }),
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_quant' } }),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ext' } }),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ops' } }),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
@@ -3057,7 +3057,7 @@ export async function answerFoodCourtQuestion(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       // 改稿を廉価モデルに落とすと1周目より品質が下がり点数が伸びないため、両周ともOpenAI系で統一する。
       groqApiKey, primary, 1800, 'openai', fallbackModel,
-      { deadlineAt, perProviderMs: 11000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'integrator' } },
+      { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'integrator' } },
     ),
     evaluationContext: contextBlock,
     numberAuditFacts: `# コード計算・生データのみ\n${insights || ''}\n${decomposition || ''}\n${storeCorr || ''}\n${eventCorr || ''}\n${weatherCorr || ''}\n${anomalies || ''}\n${forecastCtx || ''}\n${patternBlock || ''}\n${nippou.block}\n${data}`,
@@ -3174,9 +3174,9 @@ export async function generateFoodCourtDailySummary(
   const opsUser = `対象日の運営改善メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${dailyLogsBlock}${priorBlock ? '\n\n' + priorBlock : ''}`
 
   const [quantRes, extRes, opsRes] = await Promise.all([
-    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_quant' } }),
-    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ext' } }),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ops' } }),
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_quant' } }),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ext' } }),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ops' } }),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
@@ -3235,7 +3235,7 @@ export async function generateFoodCourtDailySummary(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       // 改稿だけ廉価モデルへ切り替えると、1周目より品質が下がる実績があったため同じOpenAI系で統一する。
       groqApiKey, primary, 1400, 'openai', fallbackModel,
-      { deadlineAt, perProviderMs: 11000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'integrator' } },
+      { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'integrator' } },
     ),
     evaluationContext: contextBlock,
     numberAuditFacts: `# コード計算・日報原文のみ\n${targetFacts}\n${dailyLogsBlock}\n${patternBlock || ''}`,
@@ -3335,9 +3335,9 @@ export async function generateFoodCourtPeriodSummary(
   const opsUser = `対象期間の運営改善メモを書いてください。\n\n# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${dailyLogsBlock}`
 
   const [quantRes, extRes, opsRes] = await Promise.all([
-    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_quant' } }),
-    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ext' } }),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ops' } }),
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_quant' } }),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ext' } }),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ops' } }),
   ])
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
@@ -3390,7 +3390,7 @@ export async function generateFoodCourtPeriodSummary(
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       groqApiKey, primary, 1400, 'openai', fallbackModel,
-      { deadlineAt, perProviderMs: 11000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'integrator' } },
+      { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'integrator' } },
     ),
     evaluationContext: contextBlock,
     numberAuditFacts: `# コード計算・日報原文のみ\n${periodFacts}\n${dailyLogsBlock}\n${patternBlock || ''}`,
@@ -3832,9 +3832,9 @@ export async function generateFoodCourtWeeklyReport(
   ].join('\n')
 
   const [quantRes, extRes, opsRes] = await Promise.all([
-    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_quant' } }),
-    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ext' } }),
-    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 9000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ops' } }),
+    foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_quant' } }),
+    foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ext' } }),
+    foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ops' } }),
   ])
   for (const u of [quantRes.usage, extRes.usage, opsRes.usage]) {
     if (u) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
@@ -3880,7 +3880,7 @@ export async function generateFoodCourtWeeklyReport(
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       groqApiKey, primary, 1800, 'openai', fallbackModel,
-      { deadlineAt, perProviderMs: 11000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'integrator' } },
+      { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'integrator' } },
     ),
     evaluationContext: contextBlock,
     numberAuditFacts: `# コード計算・日報原文のみ\n${periodFacts}\n${logsBlock || ''}\n${patternBlock || ''}`,

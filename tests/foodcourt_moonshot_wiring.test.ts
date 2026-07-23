@@ -58,3 +58,10 @@ test('Groq Qwen3.6 fallback disables visible reasoning', () => {
   assert.match(source, /reasoning_effort:\s*'none'/)
   assert.match(source, /reasoning_format:\s*'hidden'/)
 })
+
+test('specialists and integrators have production-safe timeout budgets', () => {
+  const specialists = source.match(/perProviderMs:\s*15000,\s*fallbackLog:\s*\{[^}]*role:\s*'specialist_/g) ?? []
+  assert.equal(specialists.length, 12) // 3 specialists × 4 surfaces
+  const integrators = source.match(/perProviderMs:\s*25000,\s*fallbackLog:\s*\{[^}]*role:\s*'integrator'/g) ?? []
+  assert.equal(integrators.length, 4)
+})
