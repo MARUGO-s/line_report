@@ -2010,6 +2010,9 @@
       background: rgba(25, 189, 255, 0.18);
     }
 
+    /* 列幅合計ぶんの最小幅を確保し、狭い領域での列潰れ（1文字ずつ折り返し）を防ぐ。
+       .log-table--webhook と同じ狙い。現状このクラスはJS未使用だが将来の要約ログ用に保険。 */
+    .log-table--summary { min-width: 760px; }
     .log-table--summary th:nth-child(1),
     .log-table--summary td:nth-child(1) { width: 164px; }
     .log-table--summary th:nth-child(2),
@@ -2035,6 +2038,12 @@
     /* 8列: 実行時刻 / 店舗 / 方式 / コンテキスト / 状態 / 理由 / ルーム / 送信
        （ヘッダ・行ともJSで8列描画。table-layout:fixed なので列ごとに幅指定し、
         長い店舗キー・ルームIDは break-all で折り返してはみ出し＝重なりを防ぐ） */
+    /* 列幅の合計ぶんの最小幅を確保する。これが無い（min-width:0）と、
+       表示領域が狭いとき table-layout:fixed が全列を比例縮小してしまい、
+       日本語が1文字ずつ折り返される・末尾の「送信」列が切れる。
+       最小幅を持たせることで .log-table-wrap の overflow-x:auto が効き、
+       狭いときは横スクロール、広いときは「理由」列が余白を吸収する。 */
+    .log-table--webhook { min-width: 1006px; }
     .log-table--webhook th:nth-child(1),
     .log-table--webhook td:nth-child(1) { width: 138px; }
     .log-table--webhook th:nth-child(2),
