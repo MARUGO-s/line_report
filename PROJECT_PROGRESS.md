@@ -98,7 +98,10 @@ New records are appended below.
   - `AGENTS.md`, `AI_HANDOFF.md`, `PROJECT_PROGRESS.md`を追加。
 - Deployment scope:
   - Supabase DB migration、Edge Functions、Secrets、LINE/Google/AI providers、本番データの変更なし。
-  - Push後はGitHub Pagesだけが更新対象。`.github/workflows/deploy-edge-functions.yml`のpathsには今回の変更が該当しないためEdge Function自動デプロイは起動しない想定。
+  - Integration commit `1aecf7ef806b4573630b714dab55a1c3b4a6552e`とGraphify生成物整合commit `2c8eaf0956cab5f34da37437d19765e6d6bdc87c`を`main`へpush。
+  - GitHub Pages workflow run `30233350201`（HEAD `2c8eaf0956cab5f34da37437d19765e6d6bdc87c`）はsuccess。
+  - 公開`index.html`、`system-map.html`、`environment.html`、`graph.html`、`graph-stats.json`、`knowledge-system-manifest.json`は全てHTTP 200。
+  - 公開環境図に2,982ノード、6,750関係、SQL 176ファイル/417ノード、3層図を確認。公開manifestにローカル`/Users/`パスなし。
+  - 今回HEADの`Deploy Edge Functions` workflowは起動していない。Supabase DB/Functions/Secretsは変更なし。
 - Remaining:
-  - commit/push、GitHub Pages反映、公開`system-map.html`/environment/graph/statsと未認証ゲートを確認。
   - 認証済み本番全体管理者で4表示を切り替える最終操作確認。
