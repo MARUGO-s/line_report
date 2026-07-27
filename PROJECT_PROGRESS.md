@@ -68,6 +68,8 @@ New records are appended below.
   - `npm test`はknowledge 7、structure 7、foodcourt 44、reservation 4、receipt 28、合計90/90 success。
   - `npm run knowledge:update` / `npm run knowledge:check` success。最終Graphify 3,708ノード、8,874関係、305コミュニティ、SQL 176ファイル、migration 175/175。
   - ローカル`/line_report/index.html`、`system-map.html`、`pages-config.js`がHTTP 200。静的href/srcの欠落なし。
+  - Commit `8f6e779`を`main`へpush。GitHub Pagesをlegacy branch-root配信からActions workflow配信へ切替。
+  - Pages run `30277607753` success。本番`index.html`、`analytics.html`、`system-map.html`、`pages-config.js`、環境図、graph statsは全てHTTP 200。
 
 ### 2026-07-27 11:48 JST - Graphify・Obsidian・AI開発知識環境を導入
 
