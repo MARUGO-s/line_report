@@ -8,9 +8,9 @@
 - `docs/SECURITY.md`: セキュリティ不変条件の既存正本。
 
 ## Generated outputs
-- `system-map/graph.html`: Graphifyコード/SQLグラフ。
-- `system-map/environment.html`: 3層環境図。
-- `system-map/graph-stats.json`: ノード/関係/SQL coverage。
+- `public/system-map/graph.html`: Graphifyコード/SQLグラフ。
+- `public/system-map/environment.html`: 3層環境図。
+- `public/system-map/graph-stats.json`: ノード/関係/SQL coverage。
 - `docs/AI_CONTEXT.md`: AI向け短縮コンテキスト。
 - Obsidian `70_AI作業環境/`: AI入口・図・ルール・チェックリスト。
 - Obsidian `80_リポジトリ文書/`: README/docsの自動ミラー。

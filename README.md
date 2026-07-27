@@ -106,7 +106,7 @@
 
 ### 設定の単一ソース
 
-`pages-config.js` がフロントエンド全体で使う URL・店舗情報を一元管理します。
+`public/pages-config.js` がフロントエンド全体で使う URL・店舗情報を一元管理します。
 
 ```javascript
 PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co'  // 全 API の向き先
@@ -115,9 +115,9 @@ ADMIN_SURFACE = 'line_report'                               // 認証面識別�
 
 ### Graphify × Obsidian × AI 開発知識環境
 
-- `system-map.html`: 既存管理セッションを`POST /auth/verify`で確認してからマップを表示。
-- `system-map/graph.html`: Graphifyによる自作コード・SQL migrationの構造図。
-- `system-map/environment.html`: 本番・業務AI・AI開発知識循環の3層環境図。
+- `public/system-map.html`: 既存管理セッションを`POST /auth/verify`で確認してからマップを表示（公開URLは`/system-map.html`）。
+- `public/system-map/graph.html`: Graphifyによる自作コード・SQL migrationの構造図。
+- `public/system-map/environment.html`: 本番・業務AI・AI開発知識循環の3層環境図。
 - `knowledge/system-architecture.json`: 環境図の構造化された正本。
 - Obsidian `アプリ知識/10_アプリ別/LINE Report/`:
   - `70_AI作業環境`: AI入口、環境図、チェックリスト、Graphify/Obsidianブリッジ
@@ -329,11 +329,11 @@ Flex メッセージで結果返信（店名・日付・消費税・総売上・
 
 | ファイル | 役割 |
 |---|---|
-| `pages-config.js` | Supabase URL・店舗名マップ・API パス生成 |
-| `auth-session.js` | ログイン・セッション管理・ワンタイムトークン交換 |
-| `app-theme.js` | ダーク / ライトテーマ切替 |
-| `menu-logout.js` | サイドバーのログアウト処理 |
-| `site-cache.js` | キャッシュ制御 |
+| `public/pages-config.js` | Supabase URL・店舗名マップ・API パス生成 |
+| `public/auth-session.js` | ログイン・セッション管理・ワンタイムトークン交換 |
+| `public/app-theme.js` | ダーク / ライトテーマ切替 |
+| `public/menu-logout.js` | サイドバーのログアウト処理 |
+| `public/site-cache.js` | キャッシュ制御 |
 
 ### サイドバーナビゲーション
 
@@ -387,6 +387,8 @@ supabase db push --project-ref hocbnifuactbvmyjraxy
 ---
 
 ## 10. ローカル開発
+
+リポジトリの配置規約は [REPOSITORY_STRUCTURE.md](./docs/REPOSITORY_STRUCTURE.md) を参照してください。GitHub Pagesの公開HTML/JSは`public/`へ集約し、Actionsで従来URLのまま配信します。DB・バックアップ等の端末ローカル状態は`.local/`へ集約します。
 
 ```bash
 # ローカルサーバー起動（ポート 8765）

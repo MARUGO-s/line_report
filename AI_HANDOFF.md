@@ -14,10 +14,11 @@
 - Current state: `PROJECT_PROGRESS.md`
 - Security source: `docs/SECURITY.md`
 - Documentation index: `docs/DOCS-INDEX.md`
+- Repository layout: `docs/REPOSITORY_STRUCTURE.md`
 - Architecture model: `knowledge/system-architecture.json`
-- Public system page: `system-map.html`
-- Generated code/SQL graph: `system-map/graph.html`
-- Generated environment diagrams: `system-map/environment.html`
+- Public system page source: `public/system-map.html`
+- Generated code/SQL graph: `public/system-map/graph.html`
+- Generated environment diagrams: `public/system-map/environment.html`
 - Obsidian app folder: `アプリ知識/10_アプリ別/LINE Report`
 - AI entry note: `70_AI作業環境/00_AI_START_HERE.md`
 - Repository docs mirror: `80_リポジトリ文書/`
@@ -45,10 +46,11 @@ npm run knowledge:update
 
 ## Important boundaries
 
-- `pages-config.js` is the frontend URL/store catalog source.
-- `auth-session.js` manages scoped `lrst_` sessions and one-time `lrlt_` exchange.
+- `public/pages-config.js` is the frontend URL/store catalog source.
+- `public/auth-session.js` manages scoped `lrst_` sessions and one-time `lrlt_` exchange.
 - Public Pages never read business tables directly; use protected Edge Functions.
 - `docs/SECURITY.md` invariants remain mandatory.
 - Own-store reviews (`store_review_*`) and competitor reviews remain separate.
 - `line_receipt__*` source rows and `line_room_receipt_search` index are separate.
 - Graphify excludes vendor/node_modules/generated/secret paths but includes SQL migrations.
+- GitHub Actions publishes `public/` to GitHub Pages at the existing `/line_report/*` URLs. Local DBs and backups belong under `.local/`.

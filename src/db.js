@@ -7,9 +7,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 
+const legacyDbPath = path.join(projectRoot, "wine_price.db");
+const organizedDbPath = path.join(projectRoot, ".local", "sqlite", "wine_price.db");
 export const dbPath = process.env.DB_PATH
   ? path.resolve(projectRoot, process.env.DB_PATH)
-  : path.join(projectRoot, "wine_price.db");
+  : fs.existsSync(legacyDbPath)
+    ? legacyDbPath
+    : organizedDbPath;
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");

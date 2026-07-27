@@ -43,6 +43,32 @@
 
 New records are appended below.
 
+### 2026-07-27 - リポジトリ構成を整理
+
+- Request: `line_report-main`直下に公開ページ、ローカルDB、復旧用バックアップ、生成物が混在していたため、既存URLを壊さずに整理する。
+- Public site:
+  - GitHub Pagesの公開HTML/JS、icons、vendor、system-mapを`public/`へ集約。
+  - `.github/workflows/deploy-pages.yml`を追加し、`public/`だけをPages artifactとして配信する構成へ変更。
+  - 公開URLは従来どおり`https://marugo-s.github.io/line_report/*.html`を維持。
+- Local state:
+  - SQLite DB/WAL/SHMを`.local/sqlite/`へ移動。
+  - 復旧作業用SQL・スクリプトを`.local/backups/restore-work/`へ移動。
+  - ローカル`deno.lock`を`.local/`へ移動し、不要な`.DS_Store`と自己参照`line_report` symlinkを除去。
+  - 壊れたClaude worktree登録と約35MBの残骸を清掃。未統合の`wip-local-fix`ブランチは保護して変更していない。
+- Compatibility:
+  - 旧Express/SQLiteは旧配置が残る場合に優先し、整理後は`.local/sqlite/wine_price.db`と`.local/backups/runtime`を既定にする互換フォールバックを追加。
+  - ローカルPagesサーバーは`.local/pages-preview/line_report -> public/`を使い、本番同様の`/line_report/` URLを維持。
+- Guardrails:
+  - `docs/REPOSITORY_STRUCTURE.md`を追加し、配置ルールを正本化。
+  - `AGENTS.md`、`AI_HANDOFF.md`、README、DOCS-INDEX、SECURITYへ新構成を反映。
+  - `tests/repository_structure.test.mjs`を追加し、公開ファイル、Pages workflow、ローカル状態、既存docsリンクを検査。
+  - Graphify/Obsidian生成先と検査を`public/system-map/`へ更新し、`.local/`と公開system-map生成物をGraphify入力から除外。
+- Verification:
+  - `npm run check` success。
+  - `npm test`はknowledge 7、structure 7、foodcourt 44、reservation 4、receipt 28、合計90/90 success。
+  - `npm run knowledge:update` / `npm run knowledge:check` success。最終Graphify 3,708ノード、8,874関係、305コミュニティ、SQL 176ファイル、migration 175/175。
+  - ローカル`/line_report/index.html`、`system-map.html`、`pages-config.js`がHTTP 200。静的href/srcの欠落なし。
+
 ### 2026-07-27 11:48 JST - Graphify・Obsidian・AI開発知識環境を導入
 
 - Request: Instatic TalksXと同様に、LINE ReportへObsidianとGraphifyを十分に連携した開発知識システムと、AIが活用できる環境図を構築する。

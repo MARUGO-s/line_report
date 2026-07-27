@@ -1,10 +1,11 @@
 node_modules/**
 vendor/**
 graphify-out/**
-system-map/**
+public/system-map/**
 knowledge/**
 backups/**
 data/**
+.local/**
 .claude/**
 .env*
 **/.clasp.json

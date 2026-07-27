@@ -15,6 +15,6 @@ if ! node scripts/check-graphify-sql-coverage.mjs; then
 fi
 graphify cluster-only . --no-label
 
-mkdir -p system-map
-cp graphify-out/graph.html system-map/graph.html
-cp graphify-out/GRAPH_REPORT.md system-map/GRAPH_REPORT.md
+mkdir -p public/system-map
+cp graphify-out/graph.html public/system-map/graph.html
+cp graphify-out/GRAPH_REPORT.md public/system-map/GRAPH_REPORT.md

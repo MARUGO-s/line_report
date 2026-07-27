@@ -6,7 +6,7 @@ import { join } from "node:path";
 const projectDir = fileURLToPath(new URL("../", import.meta.url));
 const modelPath = join(projectDir, "knowledge/system-architecture.json");
 const graphPath = join(projectDir, "graphify-out/graph.json");
-const publicDir = join(projectDir, "system-map");
+const publicDir = join(projectDir, "public/system-map");
 const docsDir = join(projectDir, "docs");
 
 const vaultAppDir =
@@ -435,7 +435,7 @@ Graphifyで対象を絞った後だけ、必要なソースを読む。静的HTM
 - [[05_AI作業チェックリスト]]
 - [[06_Graphify_Obsidianブリッジ]]
 - Canvas: \`runtime-system.canvas\` / \`business-ai-system.canvas\` / \`ai-knowledge-loop.canvas\`
-- Web: \`system-map.html\`
+- Web公開URL: \`system-map.html\`（ソース: \`public/system-map.html\`）
 
 ## 作業終了（必須）
 1. 変更領域のNode構文/TypeScriptチェックと既存テスト群を実行。
@@ -578,9 +578,9 @@ const systemDoc = `# Graphify × Obsidian × AI Knowledge System — LINE Report
 - \`docs/SECURITY.md\`: セキュリティ不変条件の既存正本。
 
 ## Generated outputs
-- \`system-map/graph.html\`: Graphifyコード/SQLグラフ。
-- \`system-map/environment.html\`: 3層環境図。
-- \`system-map/graph-stats.json\`: ノード/関係/SQL coverage。
+- \`public/system-map/graph.html\`: Graphifyコード/SQLグラフ。
+- \`public/system-map/environment.html\`: 3層環境図。
+- \`public/system-map/graph-stats.json\`: ノード/関係/SQL coverage。
 - \`docs/AI_CONTEXT.md\`: AI向け短縮コンテキスト。
 - Obsidian \`70_AI作業環境/\`: AI入口・図・ルール・チェックリスト。
 - Obsidian \`80_リポジトリ文書/\`: README/docsの自動ミラー。
@@ -656,8 +656,8 @@ await writeFile(join(publicDir, "knowledge-system-manifest.json"), `${JSON.strin
   architectureHash,
   graph: stats,
   outputs: [
-    "system-map/environment.html",
-    "system-map/graph-stats.json",
+    "public/system-map/environment.html",
+    "public/system-map/graph-stats.json",
     "docs/AI_CONTEXT.md",
     "docs/AI_KNOWLEDGE_SYSTEM.md",
     "Obsidian:70_AI作業環境/00_AI_START_HERE.md",

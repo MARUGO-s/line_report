@@ -263,7 +263,11 @@ const securityConfig = {
 };
 
 const opsConfig = {
-  backupDir: String(process.env.BACKUP_DIR || "").trim() || path.join(projectRoot, "backups"),
+  backupDir:
+    String(process.env.BACKUP_DIR || "").trim() ||
+    (fs.existsSync(path.join(projectRoot, "backups"))
+      ? path.join(projectRoot, "backups")
+      : path.join(projectRoot, ".local", "backups", "runtime")),
   backupRetention: Math.max(0, Number(process.env.BACKUP_RETENTION || 30) || 30)
 };
 

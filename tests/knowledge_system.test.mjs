@@ -79,16 +79,16 @@ test("generated maps, stats, AI context, and management entry are wired", async 
     indexSource,
     packageSource,
   ] = await Promise.all([
-    readFile(new URL("system-map.html", root), "utf8"),
-    readFile(new URL("system-map/environment.html", root), "utf8"),
-    readFile(new URL("system-map/graph-stats.json", root), "utf8"),
+    readFile(new URL("public/system-map.html", root), "utf8"),
+    readFile(new URL("public/system-map/environment.html", root), "utf8"),
+    readFile(new URL("public/system-map/graph-stats.json", root), "utf8"),
     readFile(
-      new URL("system-map/knowledge-system-manifest.json", root),
+      new URL("public/system-map/knowledge-system-manifest.json", root),
       "utf8",
     ),
     readFile(new URL("docs/AI_CONTEXT.md", root), "utf8"),
     readFile(new URL("AGENTS.md", root), "utf8"),
-    readFile(new URL("index.html", root), "utf8"),
+    readFile(new URL("public/index.html", root), "utf8"),
     readFile(new URL("package.json", root), "utf8"),
   ]);
   const stats = JSON.parse(statsSource);
@@ -120,7 +120,7 @@ test("generated maps, stats, AI context, and management entry are wired", async 
 });
 
 test("system-map inline scripts parse and defer map loading until auth succeeds", async () => {
-  const systemPage = await readFile(new URL("system-map.html", root), "utf8");
+  const systemPage = await readFile(new URL("public/system-map.html", root), "utf8");
   const scripts = [...systemPage.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
     .map((match) => match[1].trim())
     .filter(Boolean);
@@ -139,7 +139,7 @@ async function runSystemMapScenario({
   verify = { ok: false, status: 401, body: {} },
   stats = { ok: true, body: { nodes: 10, edges: 20, communities: 3, sqlFiles: 4 } },
 }) {
-  const source = await readFile(new URL("system-map.html", root), "utf8");
+  const source = await readFile(new URL("public/system-map.html", root), "utf8");
   const script = [...source.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
     .map((match) => match[1])
     .find((body) => body.includes("var gate = document.getElementById('gate')"));
@@ -273,7 +273,7 @@ test("knowledge security boundaries exclude secret and customer data sources", a
   const [ignore, architecture, environment] = await Promise.all([
     readFile(new URL(".graphifyignore", root), "utf8"),
     readFile(new URL("knowledge/system-architecture.json", root), "utf8"),
-    readFile(new URL("system-map/environment.html", root), "utf8"),
+    readFile(new URL("public/system-map/environment.html", root), "utf8"),
   ]);
   assert.match(ignore, /\.env\*/);
   assert.match(ignore, /vendor\/\*\*/);

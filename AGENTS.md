@@ -4,7 +4,7 @@ These rules apply to every AI or automated coding agent working in this reposito
 
 ## Required startup
 
-1. Read `PROJECT_PROGRESS.md`, `AI_HANDOFF.md`, `docs/SECURITY.md`, `docs/DOCS-INDEX.md`, and `docs/AI_KNOWLEDGE_SYSTEM.md`.
+1. Read `PROJECT_PROGRESS.md`, `AI_HANDOFF.md`, `docs/SECURITY.md`, `docs/DOCS-INDEX.md`, `docs/REPOSITORY_STRUCTURE.md`, and `docs/AI_KNOWLEDGE_SYSTEM.md`.
 2. Read Obsidian:
    `/Users/yoshito/Library/CloudStorage/Dropbox/web/アプリ知識/10_アプリ別/LINE Report/70_AI作業環境/00_AI_START_HERE.md`.
 3. Check `git status --short`, branch, and HEAD. Never overwrite unrelated work.
@@ -18,6 +18,7 @@ These rules apply to every AI or automated coding agent working in this reposito
 - After Graphify narrows the area, read only the relevant functions, migrations, static HTML sections, and existing docs.
 - Large inline JavaScript inside `.html`, GitHub/Supabase/LINE settings, secrets, and external service state still require direct verification.
 - Do not start with blind repository-wide `grep`/`read` loops.
+- Keep GitHub Pages compatibility files under `public/` as defined in `docs/REPOSITORY_STRUCTURE.md`; the deployment workflow publishes that directory at the existing URLs. Put local DBs, backups, restore material, and temporary state under `.local/`; never commit them.
 
 ## Source-of-truth priority
 

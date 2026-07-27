@@ -50,11 +50,11 @@ const requiredRepoFiles = [
   "knowledge/system-architecture.json",
   "docs/AI_CONTEXT.md",
   "docs/AI_KNOWLEDGE_SYSTEM.md",
-  "system-map/graph.html",
-  "system-map/environment.html",
-  "system-map/graph-stats.json",
-  "system-map/knowledge-system-manifest.json",
-  "system-map.html",
+  "public/system-map/graph.html",
+  "public/system-map/environment.html",
+  "public/system-map/graph-stats.json",
+  "public/system-map/knowledge-system-manifest.json",
+  "public/system-map.html",
 ];
 for (const file of requiredRepoFiles) {
   if (!(await exists(join(projectDir, file)))) errors.push(`missing repo file: ${file}`);
@@ -134,12 +134,12 @@ if (!(await exists(manifestPath))) {
   }
 }
 
-if (await exists(join(projectDir, "system-map/graph-stats.json"))) {
+if (await exists(join(projectDir, "public/system-map/graph-stats.json"))) {
   const graph = JSON.parse(
     await readFile(join(projectDir, "graphify-out/graph.json"), "utf8"),
   );
   const stats = JSON.parse(
-    await readFile(join(projectDir, "system-map/graph-stats.json"), "utf8"),
+    await readFile(join(projectDir, "public/system-map/graph-stats.json"), "utf8"),
   );
   const communities = new Set(
     (graph.nodes ?? [])
@@ -159,7 +159,7 @@ if (await exists(join(projectDir, "system-map/graph-stats.json"))) {
     stats.sqlNodes !== sqlNodes.length ||
     stats.sqlFiles !== sqlFiles
   ) {
-    errors.push("system-map/graph-stats.json does not match graphify-out/graph.json");
+    errors.push("public/system-map/graph-stats.json does not match graphify-out/graph.json");
   }
   const graphSources = new Set(
     (graph.nodes ?? []).map((node) => String(node.source_file ?? "")),

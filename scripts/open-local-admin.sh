@@ -2,12 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVE_ROOT="$(dirname "${ROOT}")"
+SERVE_ROOT="${ROOT}/.local/pages-preview"
 LINK_PATH="${SERVE_ROOT}/line_report"
 PORTS=(8765 8785)
 URL=""
 
-ln -sfn "$(basename "${ROOT}")" "${LINK_PATH}" 2>/dev/null || true
+mkdir -p "${SERVE_ROOT}"
+ln -sfn "${ROOT}/public" "${LINK_PATH}" 2>/dev/null || true
 
 start_port() {
   local port="$1"

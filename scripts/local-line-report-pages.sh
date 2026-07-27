@@ -2,18 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVE_ROOT="$(dirname "$ROOT")"
-LINK_NAME="line_report"
-LINK_PATH="${SERVE_ROOT}/${LINK_NAME}"
+SERVE_ROOT="${ROOT}/.local/pages-preview"
+SITE_LINK="${SERVE_ROOT}/line_report"
 
-# 常に line_report-main → line_report のシンボリックリンクを維持（終了時に削除しない）
-if [[ "$(basename "${ROOT}")" != "${LINK_NAME}" ]]; then
-  if [[ -e "${LINK_PATH}" && ! -L "${LINK_PATH}" ]]; then
-    echo "Error: ${LINK_PATH} exists and is not a symlink." >&2
-    exit 1
-  fi
-  ln -sfn "$(basename "${ROOT}")" "${LINK_PATH}"
-fi
+mkdir -p "${SERVE_ROOT}"
+ln -sfn "${ROOT}/public" "${SITE_LINK}"
 
 PORT="${PORT:-8765}"
 BASE_URL="http://127.0.0.1:${PORT}/line_report/"

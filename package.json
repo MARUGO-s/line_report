@@ -1,5 +1,5 @@
 {
-  "name": "wine-price-admin",
+  "name": "line-report-admin",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,9 +11,10 @@
     "knowledge:generate": "node scripts/generate-knowledge-system.mjs",
     "knowledge:check": "node scripts/check-knowledge-system.mjs",
     "knowledge:search": "node scripts/search-knowledge-vault.mjs",
-    "check": "node --check pages-config.js && node --check auth-session.js && node --check app-theme.js && node --check menu-logout.js && node --check site-cache.js && node --check scripts/check-graphify-sql-coverage.mjs && node --check scripts/generate-knowledge-system.mjs && node --check scripts/check-knowledge-system.mjs && node --check scripts/search-knowledge-vault.mjs && bash -n scripts/update-knowledge-vault.sh && bash -n scripts/ensure-graphify-sql-parser.sh && bash -n scripts/refresh-system-map.sh",
-    "test": "npm run test:knowledge && npm run test:foodcourt && npm run test:reservation && npm run test:receipt",
+    "check": "node --check public/pages-config.js && node --check public/auth-session.js && node --check public/app-theme.js && node --check public/menu-logout.js && node --check public/site-cache.js && node --check scripts/check-graphify-sql-coverage.mjs && node --check scripts/generate-knowledge-system.mjs && node --check scripts/check-knowledge-system.mjs && node --check scripts/search-knowledge-vault.mjs && bash -n scripts/update-knowledge-vault.sh && bash -n scripts/ensure-graphify-sql-parser.sh && bash -n scripts/refresh-system-map.sh && bash -n scripts/local-line-report-pages.sh && bash -n scripts/open-local-admin.sh",
+    "test": "npm run test:knowledge && npm run test:structure && npm run test:foodcourt && npm run test:reservation && npm run test:receipt",
     "test:knowledge": "node --test tests/knowledge_system.test.mjs",
+    "test:structure": "node --test tests/repository_structure.test.mjs",
     "test:foodcourt": "node --test tests/foodcourt_*.test.ts",
     "test:reservation": "node --test tests/reservation_*.test.ts",
     "test:receipt": "node --test tests/receipt_*.test.ts"

@@ -31,6 +31,7 @@
 | [CHANGELOG-2026-05.md](./CHANGELOG-2026-05.md) | 開発 | 2026年5月の変更履歴（技術詳細・マイグレーション） |
 | [LINE-SEARCH-PRESENTATION.md](./LINE-SEARCH-PRESENTATION.md) | 説明・プレゼン | LINE 検索（記録と検索、グループ／1対1、売上と会話の違い） |
 | [SECURITY.md](./SECURITY.md) | 運用・開発 | **セキュリティ中核** — 不変条件・DB層防御・認証認可・Webhook/cron・監査結果・新規追加チェックリスト・検証クエリ |
+| [REPOSITORY_STRUCTURE.md](./REPOSITORY_STRUCTURE.md) | 開発・AI | ルート公開ファイルを残す理由、各ディレクトリの役割、`.local/`の配置ルール |
 | [AI_KNOWLEDGE_SYSTEM.md](./AI_KNOWLEDGE_SYSTEM.md) | AI・開発 | Graphify（コード/SQL）・Obsidian（手書き/既存文書ミラー）・AI作業循環・環境図・更新/検査コマンド |
 | [AI_CONTEXT.md](./AI_CONTEXT.md) | AI | `knowledge:update`で生成する短縮コンテキスト。作業開始時の情報源順位・必須フロー |
 | [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | 運用・説明 | 利用許可・ルーム承認・管理 Bot・管理画面連携 |
@@ -75,7 +76,7 @@
 
 | 領域 | 主なファイル |
 |------|----------------|
-| 店舗・Webhook URL | `pages-config.js` |
+| 店舗・Webhook URL | `public/pages-config.js` |
 | LINE 検索 UI・待ち2分 | `supabase/functions/_shared/line_search_bot.ts` |
 | 利用許可・管理 Bot | `supabase/functions/_shared/line_user_approval.ts` |
 | ルーム自動連携 | `supabase/functions/_shared/auto_link_room.ts` |

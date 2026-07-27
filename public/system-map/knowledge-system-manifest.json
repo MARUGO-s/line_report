@@ -1,17 +1,17 @@
 {
-  "generatedAt": "2026-07-27T03:00:33.239Z",
+  "generatedAt": "2026-07-27T14:53:11.821Z",
   "architectureHash": "3a987b79f17d7053b2f99e1510f009c4d506ad4fcda93546088a30bf6c50525d",
   "graph": {
-    "nodes": 2982,
-    "edges": 6750,
-    "communities": 294,
-    "builtAtCommit": "2c8eaf0956cab5f34da37437d19765e6d6bdc87c",
+    "nodes": 3708,
+    "edges": 8874,
+    "communities": 305,
+    "builtAtCommit": "d6698aeba22bf63d205656d0c6667c122d52ef8d",
     "sqlNodes": 417,
     "sqlFiles": 176
   },
   "outputs": [
-    "system-map/environment.html",
-    "system-map/graph-stats.json",
+    "public/system-map/environment.html",
+    "public/system-map/graph-stats.json",
     "docs/AI_CONTEXT.md",
     "docs/AI_KNOWLEDGE_SYSTEM.md",
     "Obsidian:70_AI作業環境/00_AI_START_HERE.md",

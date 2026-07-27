@@ -33,7 +33,7 @@
   - 売上分析（analytics）: `/functions/v1/admin-api`（hocbn・店舗別 `line_receipt__*` を集計）
   - LINE Webhook: `/functions/v1/line-webhook/{store_partition_key}`（店舗別・hocbn）
   - 店舗別テーブル: `line_webhook_raw__{key}`（生イベント）, `line_receipt__{key}`（レシート）
-  - 設定の単一ソース: `pages-config.js`
+  - 設定の単一ソース: `public/pages-config.js`
   - Google スプレッドシート（売上シート）: **BISTRO CAVA CAVA のみ**（`RECEIPT_SHEETS_PILOT_ENABLED = true`、hocbn）
   - GAS の `SUPABASE_RECEIPT_SHEETS_SYNC_URL` は hocbn の `receipt-sheets-sync-cron` を指す
 - **DB マイグレーション**: `20260523140000_store_partition_webhook_tables.sql`, `20260523150000_sales_budget_tables.sql`, `20260526220000_reservation_customer_visit_history.sql` など
@@ -54,7 +54,7 @@
   - 売上識別: `raw_payload._seed_tag = line_report_dummy_sales_v1`
   - 予算識別: `store_closed_dates._seed_tag = line_report_dummy_budget_v1`
   店舗ごとの LINE 署名検証は Edge Secret `LINE_CHANNEL_SECRET__{STORE_KEY}`（例: `LINE_CHANNEL_SECRET__MARUGO`）または共通 `LINE_CHANNEL_SECRET`。
-- **本番反映**: このリポジトリへ commit & push（GitHub Pages が自動配信）
+- **本番反映**: `public/`を更新してcommit & push（GitHub ActionsがPagesへ自動配信）
 - **ローカル確認**: `./scripts/local-line-report-pages.sh`
 - **AI/構成確認**:
   ```bash
