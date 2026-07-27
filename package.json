@@ -6,6 +6,14 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "graphify:system-map": "bash scripts/refresh-system-map.sh",
+    "knowledge:update": "bash scripts/update-knowledge-vault.sh",
+    "knowledge:generate": "node scripts/generate-knowledge-system.mjs",
+    "knowledge:check": "node scripts/check-knowledge-system.mjs",
+    "knowledge:search": "node scripts/search-knowledge-vault.mjs",
+    "check": "node --check pages-config.js && node --check auth-session.js && node --check app-theme.js && node --check menu-logout.js && node --check site-cache.js && node --check scripts/check-graphify-sql-coverage.mjs && node --check scripts/generate-knowledge-system.mjs && node --check scripts/check-knowledge-system.mjs && node --check scripts/search-knowledge-vault.mjs && bash -n scripts/update-knowledge-vault.sh && bash -n scripts/ensure-graphify-sql-parser.sh && bash -n scripts/refresh-system-map.sh",
+    "test": "npm run test:knowledge && npm run test:foodcourt && npm run test:reservation && npm run test:receipt",
+    "test:knowledge": "node --test tests/knowledge_system.test.mjs",
     "test:foodcourt": "node --test tests/foodcourt_*.test.ts",
     "test:reservation": "node --test tests/reservation_*.test.ts",
     "test:receipt": "node --test tests/receipt_*.test.ts"

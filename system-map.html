@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <script>
+    (function () {
+      try {
+        var host = String(location.hostname || '');
+        var isLocal = host === '127.0.0.1' || host === 'localhost';
+        if (isLocal && location.protocol === 'https:') {
+          location.replace('http://' + location.host + location.pathname + location.search + location.hash);
+          return;
+        }
+        if (location.protocol === 'file:') {
+          location.replace('http://127.0.0.1:8765/line_report/system-map.html');
+          return;
+        }
+        var params = new URLSearchParams(location.search);
+        var isLine = params.get('from') === 'line' || /Line\//i.test(String(navigator.userAgent || ''));
+        if (isLine) {
+          var storeKey = '';
+          try {
+            storeKey = sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || '';
+          } catch (_) {}
+          location.replace('./analytics.html?from=line' + (storeKey ? ('&store_key=' + encodeURIComponent(storeKey)) : ''));
+        }
+      } catch (_) {}
+    })();
+  </script>
+  <base href="/line_report/">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="theme-color" content="#0b2035">
+  <title>システムマップ | LINE Report</title>
+  <link rel="icon" type="image/svg+xml" href="icons/logo-mark.svg">
+  <style>
+    :root{color-scheme:light;font-family:"IBM Plex Sans JP","Hiragino Kaku Gothic ProN",system-ui,sans-serif;--bg:#edf0f5;--panel:#fff;--line:#dbe1e9;--text:#15202e;--sub:#5a6675;--accent:#2563d4;--nav:#0f1722}
+    :root[data-theme=dark]{color-scheme:dark;--bg:#0c1117;--panel:#151c25;--line:#2a3542;--text:#e7ecf2;--sub:#9fadbd;--nav:#090e15}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);min-height:100vh}
+    header{align-items:center;background:var(--nav);color:#fff;display:flex;gap:16px;justify-content:space-between;padding:14px 20px}
+    .brand{font-size:18px;font-weight:850}.actions{display:flex;gap:8px;flex-wrap:wrap}
+    a,button{font:inherit}.btn{align-items:center;background:transparent;border:1px solid rgba(255,255,255,.22);border-radius:9px;color:#fff;cursor:pointer;display:inline-flex;font-size:12px;font-weight:800;min-height:36px;padding:0 12px;text-decoration:none}
+    main{margin:0 auto;max-width:1600px;padding:18px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 34px rgba(15,23,42,.08);overflow:hidden}
+    .head{align-items:flex-end;display:flex;gap:16px;justify-content:space-between;padding:18px}.head h1{font-size:24px;margin:0}.head p{color:var(--sub);font-size:13px;margin:6px 0 0}
+    .stats{display:flex;flex-wrap:wrap;gap:7px;justify-content:flex-end}.stat{background:var(--bg);border:1px solid var(--line);border-radius:999px;color:var(--sub);font-size:11px;font-weight:800;padding:7px 10px}
+    .tabs{border-top:1px solid var(--line);display:flex;gap:8px;overflow-x:auto;padding:10px 16px}.tab{background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--sub);cursor:pointer;flex:none;font-size:12px;font-weight:800;padding:9px 13px}.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+    iframe{background:#07111f;border:0;display:block;height:min(76vh,900px);min-height:620px;width:100%}
+    .gate{padding:48px 24px;text-align:center}.gate h1{font-size:22px;margin:0 0 10px}.gate p{color:var(--sub);line-height:1.7;margin:0 auto 20px;max-width:620px}.gate .btn{background:var(--accent);border-color:var(--accent)}
+    [hidden]{display:none!important}
+    @media(max-width:700px){header{align-items:flex-start;flex-direction:column}main{padding:10px}.head{align-items:flex-start;flex-direction:column}.stats{justify-content:flex-start}iframe{height:72vh;min-height:560px}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">LINE Report · システムマップ</div>
+    <div class="actions">
+      <button id="themeToggleBtn" class="btn" type="button">テーマ</button>
+      <a class="btn" href="./index.html">管理コンソールへ戻る</a>
+    </div>
+  </header>
+  <main>
+    <section id="gate" class="card gate">
+      <h1 id="gateTitle">管理セッションを確認しています</h1>
+      <p id="gateText">コード・SQL構造と運用環境図を読み込む前に、既存のLINE Report管理セッションを確認します。</p>
+      <a id="loginLink" class="btn" href="./index.html" hidden>接続設定へ戻る</a>
+    </section>
+    <section id="mapCard" class="card" hidden>
+      <div class="head">
+        <div>
+          <h1>Graphify × Obsidian × AI</h1>
+          <p>コード/SQL構造と、本番・業務AI・開発知識循環を同じ管理画面から確認できます。</p>
+        </div>
+        <div id="stats" class="stats"><span class="stat">グラフ情報を読み込み中</span></div>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-src="system-map/graph.html" type="button">コード・SQL構成</button>
+        <button class="tab" data-src="system-map/environment.html#runtime" type="button">本番・配信構成</button>
+        <button class="tab" data-src="system-map/environment.html#business" type="button">業務データ・AI</button>
+        <button class="tab" data-src="system-map/environment.html#knowledge" type="button">AI開発知識循環</button>
+      </div>
+      <iframe id="mapFrame" src="about:blank" title="LINE Report システムマップ"></iframe>
+    </section>
+  </main>
+  <script src="pages-config.js?v=20260726"></script>
+  <script src="auth-session.js?v=20260624"></script>
+  <script src="app-theme.js?v=20260702"></script>
+  <script>
+    (function () {
+      'use strict';
+      var gate = document.getElementById('gate');
+      var card = document.getElementById('mapCard');
+      var frame = document.getElementById('mapFrame');
+      var tabs = Array.from(document.querySelectorAll('.tab'));
+
+      function deny(message) {
+        document.getElementById('gateTitle').textContent = '管理セッションが必要です';
+        document.getElementById('gateText').textContent = message || '管理コンソールでログインしてから開いてください。';
+        document.getElementById('loginLink').hidden = false;
+      }
+
+      function activate(tab) {
+        tabs.forEach(function (item) { item.classList.toggle('active', item === tab); });
+        frame.src = tab.getAttribute('data-src');
+      }
+
+      tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () { activate(tab); });
+      });
+
+      async function start() {
+        if (!window.LINE_REPORT_PAGES || !window.LINE_REPORT_AUTH) {
+          deny('認証用の共通スクリプトを読み込めませんでした。');
+          return;
+        }
+        var token = LINE_REPORT_AUTH.getToken();
+        if (!token) {
+          deny('セッションがありません。管理コンソールの接続設定でログインしてください。');
+          return;
+        }
+        try {
+          var response = await fetch(LINE_REPORT_PAGES.adminApiUrl('/auth/verify'), {
+            method: 'POST',
+            headers: {
+              'x-admin-token': token,
+              'x-admin-surface': LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report',
+            },
+          });
+          if (!response.ok) {
+            deny('セッションが期限切れ、またはこの画面へのアクセス権がありません。');
+            return;
+          }
+          var authState = await response.json().catch(function () { return {}; });
+          if (authState.storeScope || authState.roomScope || authState.scopeKind) {
+            deny('システムマップは全体管理者だけが開けます。店舗・ルーム限定セッションでは利用できません。');
+            return;
+          }
+          gate.hidden = true;
+          card.hidden = false;
+          activate(tabs[0]);
+          try {
+            var statsResponse = await fetch('system-map/graph-stats.json', { cache: 'no-store' });
+            if (!statsResponse.ok) throw new Error('stats unavailable');
+            var stats = await statsResponse.json();
+            document.getElementById('stats').innerHTML =
+              '<span class="stat">' + Number(stats.nodes || 0).toLocaleString() + 'ノード</span>' +
+              '<span class="stat">' + Number(stats.edges || 0).toLocaleString() + '関係</span>' +
+              '<span class="stat">' + Number(stats.communities || 0).toLocaleString() + 'コミュニティ</span>' +
+              '<span class="stat">SQL ' + Number(stats.sqlFiles || 0).toLocaleString() + 'ファイル</span>';
+          } catch (_) {
+            document.getElementById('stats').innerHTML =
+              '<span class="stat">グラフ統計を取得できませんでした</span>';
+          }
+        } catch (_) {
+          deny('認証APIへ接続できませんでした。通信状態を確認してください。');
+        }
+      }
+
+      start();
+    })();
+  </script>
+</body>
+</html>

@@ -31,6 +31,8 @@
 | [CHANGELOG-2026-05.md](./CHANGELOG-2026-05.md) | 開発 | 2026年5月の変更履歴（技術詳細・マイグレーション） |
 | [LINE-SEARCH-PRESENTATION.md](./LINE-SEARCH-PRESENTATION.md) | 説明・プレゼン | LINE 検索（記録と検索、グループ／1対1、売上と会話の違い） |
 | [SECURITY.md](./SECURITY.md) | 運用・開発 | **セキュリティ中核** — 不変条件・DB層防御・認証認可・Webhook/cron・監査結果・新規追加チェックリスト・検証クエリ |
+| [AI_KNOWLEDGE_SYSTEM.md](./AI_KNOWLEDGE_SYSTEM.md) | AI・開発 | Graphify（コード/SQL）・Obsidian（手書き/既存文書ミラー）・AI作業循環・環境図・更新/検査コマンド |
+| [AI_CONTEXT.md](./AI_CONTEXT.md) | AI | `knowledge:update`で生成する短縮コンテキスト。作業開始時の情報源順位・必須フロー |
 | [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | 運用・説明 | 利用許可・ルーム承認・管理 Bot・管理画面連携 |
 | [ROOM-SELF-CONFIG-GUIDE.md](./ROOM-SELF-CONFIG-GUIDE.md) | 運用・開発 | **ルーム・セルフ設定**（LINEワンパス＋ルーム個別パスワード）— フロー・データモデル・API・設定項目・運用・トラブルシュート |
 | [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md) | **必読** | グループは Bot **1体のみ**（LINE 仕様）／退出の誤解 |
@@ -58,12 +60,14 @@
 
 ## おすすめの読む順番
 
-1. [README-PAGES.md](./README-PAGES.md) — 本番 URL とデプロイ  
-2. [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md) — グループに Bot を1体だけ  
-3. [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md) — 自動連携の注意  
-4. [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) — 許可・承認  
-5. [LINE-SEARCH-PRESENTATION.md](./LINE-SEARCH-PRESENTATION.md) — 検索機能の説明  
-6. 必要に応じて [ROOM-PERMISSION-DETAIL-GUIDE.md](./ROOM-PERMISSION-DETAIL-GUIDE.md)、[LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md)
+1. [README-PAGES.md](./README-PAGES.md) — 本番 URL とデプロイ
+2. [SECURITY.md](./SECURITY.md) — 認証/RLS/Webhook/cronの不変条件
+3. [AI_KNOWLEDGE_SYSTEM.md](./AI_KNOWLEDGE_SYSTEM.md) — AI開発時の検索・Graphify・書き戻し
+4. [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md) — グループに Bot を1体だけ
+5. [ROOM-LINKING-GUIDE.md](./ROOM-LINKING-GUIDE.md) — 自動連携の注意
+6. [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) — 許可・承認
+7. [LINE-SEARCH-PRESENTATION.md](./LINE-SEARCH-PRESENTATION.md) — 検索機能の説明
+8. 必要に応じて [ROOM-PERMISSION-DETAIL-GUIDE.md](./ROOM-PERMISSION-DETAIL-GUIDE.md)、[LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md)
 
 ---
 
@@ -93,4 +97,4 @@
 
 ---
 
-*最終更新: 2026-07-19（LINE-RECEIPT-ANALYSIS.mdを現行のAzure / Gemini Flash / Gemini Pro / Claudeルーティングへ更新。2026-07-16: フードコートAI学習・自己進化システム_完全設計書.md を追加。）*
+*最終更新: 2026-07-26（Graphify・Obsidian・AI知識循環、SQL coverage、システム環境図を追加。2026-07-19: LINE-RECEIPT-ANALYSIS.mdを現行ルーティングへ更新。）*

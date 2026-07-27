@@ -10,7 +10,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 
 ## 1. セキュリティの基本構造（不変条件）
 
-この6つは「新しい関数・エンドポイント・テーブルを足すたびに必ず守る」恒久ルール。
+この7つは「新しい関数・エンドポイント・テーブルを足すたびに必ず守る」恒久ルール。
 
 1. **公開フロントは直接DB/RPCを叩かない。** GitHub Pages の静的HTML/JS は全世界に公開される前提。業務データへのアクセスは**すべて Edge Function 経由**（`admin-api` / `line-webhook` 等）。Edge Function は `SUPABASE_SERVICE_ROLE_KEY` で接続する。`pages-config.js` の anon JWT は Edge Function 呼び出しの Bearer 用で**公開して問題ない**（脆弱性にしない）。
 2. **anon / authenticated に SECURITY DEFINER 関数の EXECUTE を渡さない。** SECURITY DEFINER は RLS をバイパスするため、公開 anon キーで叩けると致命的。
@@ -18,6 +18,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 4. **LINE Webhook の署名検証はフェイルクローズ。** secret 未設定でも必ず拒否する（`return false`）。
 5. **新しい関数には `SET search_path = public` を固定**し、**新しい RLS ポリシーは `auth.x()` を `(select auth.x())` で包む**（[supabase-advisor 規約]）。
 6. **本番スキーマ変更は必ず migration ファイル経由。** GitHub 統合が main マージで自動適用する。MCP 等で直接 DDL を打つと履歴がズレる。
+7. **公開システムマップはコード・SQL構造だけ。** Graphify入力から`.env*`、backups、data、node_modules、vendor、生成物を除外し、投稿/メッセージ/レシート/顧客/添付メディア等の実データを含めない。通常導線`system-map.html`は既存管理セッションを`/auth/verify`で検証してからiframeを読み込む。
 
 ---
 
@@ -141,6 +142,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - [ ] 新しい `verify_jwt=false` 関数 → 関数側で認可を実装＋`config.toml` に `verify_jwt=false` を追記
 - [ ] 新しい署名/トークン照合 → 定数時間比較・secret 未設定はフェイルクローズ
 - [ ] スキーマ変更 → migration ファイル経由（直接 DDL 禁止）。適用後に `get_advisors` を再実行
+- [ ] コード/SQL構造変更 → `npm run knowledge:update` と `npm run knowledge:check`。GraphifyのSQL coverageが全migrationを含むこと
 
 ---
 

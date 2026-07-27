@@ -23,3 +23,6 @@ deno.lock
 *" (1)"*
 * (1).*
 vendor (1)/
+
+# Graphifyのローカル作業出力（公開用は system-map/ へコピー）
+graphify-out/

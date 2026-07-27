@@ -24,6 +24,7 @@
 | メディア | https://marugo-s.github.io/line_report/media.html |
 | 会話検索 | https://marugo-s.github.io/line_report/message-search.html |
 | 予約表 | https://marugo-s.github.io/line_report/reservation.html |
+| システムマップ | https://marugo-s.github.io/line_report/system-map.html |
 
 - **Supabase（本番・hocbn）**: `https://hocbnifuactbvmyjraxy.supabase.co` — 管理 API・Webhook・Gmail・DB は **すべてここ**
 - **Supabase（旧・jhpm）**: `https://jhpmzqxqvapdkyvvhyra.supabase.co`（レガシー参照用。運用は hocbn のみ）
@@ -55,6 +56,13 @@
   店舗ごとの LINE 署名検証は Edge Secret `LINE_CHANNEL_SECRET__{STORE_KEY}`（例: `LINE_CHANNEL_SECRET__MARUGO`）または共通 `LINE_CHANNEL_SECRET`。
 - **本番反映**: このリポジトリへ commit & push（GitHub Pages が自動配信）
 - **ローカル確認**: `./scripts/local-line-report-pages.sh`
+- **AI/構成確認**:
+  ```bash
+  npm run knowledge:search -- "<依頼・症状・機能名>"
+  npm run knowledge:check
+  npm run knowledge:update
+  ```
+  `system-map.html`は管理セッションを確認してからコード/SQL構成と3層環境図を表示する。
 
 従来 URL `LINE-management` も並行稼働（同一 API・同一データ）。新規リンク・UI 改修は **line_report** を正とします。
 

@@ -56,6 +56,7 @@
 | **予約表** | `/reservation.html` | ✅ 要 | 予約カレンダー・来店履歴管理 |
 | **口コミ・競合** | `/reviews.html` | ✅ 要 | Google 口コミ分析・競合店比較 |
 | **AI 使用料** | `/ai-usage.html` | ✅ 要 | AI API コスト・使用量ダッシュボード |
+| **システムマップ** | `/system-map.html` | ✅ 要 | Graphifyコード/SQL構成、本番・業務AI・開発知識循環 |
 | **小口現金** | `/petty_cash.html` | ✅ 要 | 経費仕訳・小口現金帳 |
 | **フードコート分析** | `/foodcourt.html` | ✅ 要 | MARUGO S 専用 来客予測・売上分析・施策提言 |
 | **AI学習 進化** | `/foodcourt-evolution.html` | ✅ 要 | MARUGO S 専用 予測モデルの精度推移・合否判定 |
@@ -111,6 +112,28 @@
 PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co'  // 全 API の向き先
 ADMIN_SURFACE = 'line_report'                               // 認証面識別子
 ```
+
+### Graphify × Obsidian × AI 開発知識環境
+
+- `system-map.html`: 既存管理セッションを`POST /auth/verify`で確認してからマップを表示。
+- `system-map/graph.html`: Graphifyによる自作コード・SQL migrationの構造図。
+- `system-map/environment.html`: 本番・業務AI・AI開発知識循環の3層環境図。
+- `knowledge/system-architecture.json`: 環境図の構造化された正本。
+- Obsidian `アプリ知識/10_アプリ別/LINE Report/`:
+  - `70_AI作業環境`: AI入口、環境図、チェックリスト、Graphify/Obsidianブリッジ
+  - `80_リポジトリ文書`: README/docsの自動ミラー
+  - `90_Graphify`: コード・SQLノートとCanvas
+
+標準フロー:
+
+```bash
+npm run knowledge:search -- "<依頼・症状・機能名>"
+npm run knowledge:check
+graphify query "<コード・SQL上の質問>"
+npm run knowledge:update
+```
+
+Graphifyは`tree-sitter-sql`を使ってmigrationを解析します。`vendor`、`node_modules`、生成物、バックアップ、秘密設定は`.graphifyignore`で除外します。
 
 ---
 
@@ -375,6 +398,7 @@ http://127.0.0.1:8765/line_report/
 # 各ページのローカル URL
 http://127.0.0.1:8765/line_report/index.html              # 管理コンソール
 http://127.0.0.1:8765/line_report/analytics.html           # 売上分析
+http://127.0.0.1:8765/line_report/system-map.html          # システムマップ
 http://127.0.0.1:8765/line_report/foodcourt.html           # フードコート分析
 http://127.0.0.1:8765/line_report/foodcourt-evolution.html # AI学習 進化
 http://127.0.0.1:8765/line_report/foodcourt-report.html    # フードコート日報
@@ -408,6 +432,7 @@ http://127.0.0.1:8765/line_report/foodcourt-report.html    # フードコート�
 | [フードコート売上分析_設計書.md](./docs/フードコート売上分析_設計書.md) | 売上分析機能の設計 |
 | [フードコート競合店プロファイル.md](./docs/フードコート競合店プロファイル.md) | 競合分析データの仕様 |
 | [AI_LOOP_ENGINEERING_DESIGN.md](./docs/AI_LOOP_ENGINEERING_DESIGN.md) | 品質評価ループの工学設計書・実装ログ |
+| [AI_KNOWLEDGE_SYSTEM.md](./docs/AI_KNOWLEDGE_SYSTEM.md) | Graphify・Obsidian・AI開発知識循環の構成・更新・検査 |
 | [LINE-RECEIPT-ANALYSIS.md](./docs/LINE-RECEIPT-ANALYSIS.md) | レシート解析の仕様・プロンプト設計 |
 | [LINE-SEARCH-PRESENTATION.md](./docs/LINE-SEARCH-PRESENTATION.md) | LINE 会話検索の設計 |
 | [LINE-GROUP-BOT-IMPORTANT.md](./docs/LINE-GROUP-BOT-IMPORTANT.md) | LINE グループBot の注意事項 |
