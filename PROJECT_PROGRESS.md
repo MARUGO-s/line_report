@@ -91,6 +91,8 @@ New records are appended below.
   - 新規AI unit tests 5/5、既存LHA tests 4/4。
   - ローカルAPI E2E: 未認証401、AIキーなし基本分析200（総売上1,519,300円・最高日2026-06-12）、質問回答200、空データ200、501字質問400、未対応店舗400。
   - `npm run check`、既存`npm test` 90/90、UIインラインJS構文、実画面のAIカード/Q&A表示を確認。
+  - Commit `1af2957`（機能）と`980c07a`（入力検証補強）をmainへpush。Pages run `30355275104`、Edge Functions run `30355274736`/`30355681784`はsuccess。
+  - 本番`pos-journal.html`はHTTP 200でAI分析UIを確認、新AI API未認証は401。
 
 ### 2026-07-27 - リポジトリ構成を整理
 
