@@ -43,6 +43,30 @@
 
 New records are appended below.
 
+### 2026-07-28 - Bistro CAVACAVA POS電子ジャーナル保管・アップロード・削除
+
+- Request: `/Volumes/KIOXIA/202606` のPOS電子ジャーナルをWebで確認するだけでなく、今後のLZHファイルを画面からアップロード・保管し、保管済み原本を削除できるようにする。削除は `delete` の確認入力を必須にする。
+- Store mapping:
+  - ファイル名先頭の店舗コード `1015` を既存店舗キー `bistrocavacava`、表示名 `Bistro CAVACAVA` に固定。
+  - 未登録コード・選択店舗不一致・対象月不一致は保存前に拒否。
+- Database and Storage:
+  - migration `20260728092020_pos_journal_storage.sql` で `pos_journal_files` とprivate bucket `pos-journals`（8MB/件）を追加。
+  - 公開Pagesからの直接参照を禁止し、RLS有効・anon/authenticated権限なし。admin-apiのservice_role経由のみ。
+  - 同一店舗×営業日と同一店舗×SHA-256を重複防止。Storage削除後に削除スナップショットを記録してからテーブル行を削除。
+- API:
+  - `GET /pos-journals`: 店舗・月の原本一覧と保存済み解析データから月次集計を返す。
+  - `POST /pos-journals/upload`: multipart複数LZH、LH5をEdge内で解凍、ESC/POS除去、CP932解析、Storage→DBの順で保存。DB失敗時はStorageをロールバック。
+  - `GET /pos-journals/download`: private原本の期限付き署名URL。
+  - `DELETE /pos-journals/file`: JSON `confirmation` が半角小文字の `delete` 完全一致の場合だけ、Storage APIで原本削除→削除スナップショット→テーブル削除。
+- UI:
+  - `pos-journal.html`へ管理セッション、対象月、複数選択/ドラッグ＆ドロップ、進捗・部分失敗、保管一覧、原本DL、delete確認モーダルを追加。
+  - 2026年6月の静的互換データはDB未投入時の表示フォールバックとして維持し、ローカルパスを公開JSONから除去。
+- Verification:
+  - LHA/LH5 unit tests 4/4。CP932実ジャーナルサンプルで2026-06-02、総売上105,000円、会計2件を確認。
+  - ローカルAPI E2E: upload 200、一覧/集計200、同一SHA重複スキップ、署名URL200、`DELETE`は400、`delete`は200、Storage/DB残0、削除後の再アップロード成功。
+  - migration単体をローカルPostgresへ適用し、private bucket・RLS・anon/authenticated SELECT不可・partial unique indexを確認。
+  - `npm run check`、既存`npm test` 90/90、`npm run knowledge:update`/`knowledge:check`、`git diff --check`成功。
+
 ### 2026-07-27 - リポジトリ構成を整理
 
 - Request: `line_report-main`直下に公開ページ、ローカルDB、復旧用バックアップ、生成物が混在していたため、既存URLを壊さずに整理する。

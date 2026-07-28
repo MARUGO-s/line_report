@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'" />
+  <title>電子ジャーナル（POS取込） | LINE Report</title>
+  <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
+  <link rel="icon" type="image/svg+xml" href="icons/logo-mark.svg" />
+  <style>
+    /* 既定はダーク（他ページと統一）。body[data-theme='light'] でライト。テーマキーは全ページ共有。 */
+    :root {
+      --app-bg: #0c1117;
+      --surface: #151c25;
+      --surface-2: #1b232e;
+      --sidebar: #0a0f16;
+      --sidebar-2: rgba(255, 255, 255, 0.05);
+      --side-text: #99a6b6;
+      --border: #26313d;
+      --border-strong: #33414f;
+      --text: #e7ecf2;
+      --text-2: #9fadbd;
+      --text-3: #6f7d8d;
+      --accent: #3f7bea;
+      --accent-soft: rgba(56, 125, 234, 0.16);
+      --ok: #36b37e;
+      --ok-soft: rgba(54, 179, 126, 0.18);
+      --warn: #d8961f;
+      --warn-soft: rgba(216, 150, 31, 0.2);
+      --err: #e05656;
+      --err-soft: rgba(224, 86, 86, 0.18);
+      /* 勘定科目カラー（食材=緑 / 消耗品=青 / アルコール=琥珀）。両テーマで可読。 */
+      --acct-shokuzai: #2fae6b;
+      --acct-shomohin: #4a86e8;
+      --acct-alcohol: #d8961f;
+      --acct-unknown: #7d8a99;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 12px 32px -20px rgba(0, 0, 0, 0.7);
+    }
+    body[data-theme='light'] {
+      --app-bg: #eef1f5;
+      --surface: #ffffff;
+      --surface-2: #f5f7fa;
+      --sidebar: #0f1620;
+      --sidebar-2: rgba(255, 255, 255, 0.06);
+      --side-text: #aab6c5;
+      --border: #e3e8ef;
+      --border-strong: #d3dae3;
+      --text: #1e2632;
+      --text-2: #5a6675;
+      --text-3: #8b97a6;
+      --accent: #2563d4;
+      --accent-soft: rgba(37, 99, 212, 0.1);
+      --ok: #1f9d57;
+      --ok-soft: rgba(31, 157, 87, 0.12);
+      --warn: #c77d12;
+      --warn-soft: rgba(199, 125, 18, 0.14);
+      --err: #d23b3b;
+      --err-soft: rgba(210, 59, 59, 0.12);
+      --acct-shokuzai: #1f9d61;
+      --acct-shomohin: #2f6fe0;
+      --acct-alcohol: #c77d12;
+      --acct-unknown: #8b97a6;
+      --shadow: 0 1px 2px rgba(20, 40, 80, 0.06), 0 10px 28px -18px rgba(20, 40, 80, 0.2);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      color: var(--text); background: var(--app-bg);
+      font-family: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Zen Kaku Gothic New", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.5; -webkit-text-size-adjust: 100%;
+    }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+    [hidden] { display: none !important; }
+
+    /* ---------- シェル（サイドバー＋トップバー）: 他ページと共通 ---------- */
+    .ms-shell { display: grid; grid-template-columns: 264px 1fr; min-height: 100vh; }
+    .ms-side { background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
+    .ms-brand { display: flex; align-items: center; gap: 11px; padding: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+    .ms-logo { width: 38px; height: 38px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; color: #fff; flex: none; }
+    .ms-bt { font-size: 15px; font-weight: 700; line-height: 1.2; color: #eef2f7; }
+    .ms-bs { font-size: 11.5px; color: var(--side-text); margin-top: 2px; }
+    .ms-nav { flex: 1; overflow-y: auto; padding: 16px 12px; }
+    .ms-navlabel { font-size: 11px; font-weight: 600; color: var(--side-text); letter-spacing: 0.08em; text-transform: uppercase; padding: 0 10px; margin: 18px 0 8px; }
+    .ms-navlabel:first-child { margin-top: 0; }
+    .ms-navlink { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px; font-size: 13.5px; font-weight: 500; color: var(--side-text); text-decoration: none; cursor: pointer; transition: background 0.12s, color 0.12s; }
+    .ms-navlink:hover { background: var(--sidebar-2); color: #eef2f7; }
+    .ms-navlink.active { background: var(--accent); color: #fff; }
+    .ms-navlink .ni { flex: none; display: flex; color: currentColor; opacity: 0.85; }
+    .ms-navlink .ext { margin-left: auto; display: flex; opacity: 0; transition: opacity 0.12s; }
+    .ms-navlink:hover .ext { opacity: 0.7; }
+    .ms-side-foot { border-top: 1px solid rgba(255, 255, 255, 0.06); padding: 14px 18px; }
+    .ms-conn { display: flex; align-items: center; gap: 10px; }
+    .ms-cd { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none; }
+    .ms-ct { font-size: 12.5px; font-weight: 700; color: #eef2f7; }
+    .ms-cs { font-size: 11.5px; color: var(--side-text); margin-top: 1px; }
+    .ms-main { display: flex; flex-direction: column; min-width: 0; }
+    .ms-topbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 32px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: color-mix(in srgb, var(--app-bg) 86%, transparent); backdrop-filter: blur(8px); z-index: 5; }
+    .ms-content { padding: 34px 32px 80px; }
+    .ms-inner { max-width: 1180px; margin: 0 auto; }
+    .ms-h1 { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: 0.01em; color: var(--text); }
+    .ms-sub { font-size: 14px; color: var(--text-3); margin: 8px 0 0; line-height: 1.5; }
+
+    /* LINE店舗ロック時（from=line / line_locked_store）はサイドバー等を隠し、小口現金のみのキオスク表示にする。
+       他ページ（管理画面・他店データ）へ遷移させないためのセキュリティ措置。 */
+    body.line-locked .ms-side { display: none !important; }
+    body.line-locked .ms-navtoggle, body.line-locked .ms-nav-backdrop { display: none !important; }
+    body.line-locked .ms-shell { grid-template-columns: 1fr; }
+    body.line-locked .ms-topbar { padding-left: 32px; }
+    @media (max-width: 880px) { body.line-locked .ms-topbar { padding-left: 16px; } }
+
+    /* 管理者ログイン（キオスク解除）ボタン＋モーダル */
+    .pill.adm-unlock { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); cursor: pointer; }
+    .pill.adm-unlock:hover { background: var(--accent-soft); color: var(--accent); }
+    .adm-modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); padding: 20px; }
+    .adm-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 22px; width: 400px; max-width: 92vw; box-shadow: var(--shadow); }
+    .adm-title { font-size: 16px; font-weight: 700; }
+    .adm-desc { font-size: 12.5px; color: var(--text-3); margin: 8px 0 14px; line-height: 1.6; }
+    .adm-box .input { width: 100%; }
+    .adm-msg { font-size: 12px; min-height: 15px; margin-top: 8px; color: var(--err); }
+    .adm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+
+    /* ---------- ピル ---------- */
+    .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--text-2); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px; }
+    .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+    .pill .d { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+    button.pill { font: inherit; cursor: pointer; }
+    .pill.theme-toggle:hover { background: var(--surface-2); color: var(--text); }
+
+    /* ---------- 共通フォーム部品 ---------- */
+    .input, .usel {
+      font: inherit; font-size: 13.5px; color: var(--text); background: var(--surface);
+      border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; outline: none;
+      transition: border-color 0.15s; width: 100%; min-width: 0;
+    }
+    .input:focus, .usel:focus { border-color: var(--accent); }
+    .input.mono { font-variant-numeric: tabular-nums; }
+    .usel {
+      appearance: none; -webkit-appearance: none; padding-right: 30px; cursor: pointer;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236f7d8d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+      background-repeat: no-repeat; background-position: right 9px center;
+    }
+    .btn {
+      font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; padding: 9px 15px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; transition: background 0.12s, filter 0.12s, border-color 0.12s;
+    }
+    .btn:hover { background: var(--surface); }
+    .btn.btn-primary { background: var(--accent); border-color: transparent; color: #fff; }
+    .btn.btn-primary:hover { filter: brightness(1.08); }
+    .btn.btn-danger { background: var(--err); border-color: transparent; color: #fff; }
+    .btn.btn-danger:hover { filter: brightness(1.08); }
+    .btn:disabled { opacity: 0.55; cursor: default; }
+    .btn.sm { padding: 7px 11px; font-size: 12.5px; }
+
+    /* ---------- カード ---------- */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; margin-top: 16px; }
+    .msg { font-size: 12.5px; min-height: 16px; margin-top: 10px; }
+    .msg.err { color: var(--err); }
+    .msg.ok { color: var(--ok); }
+
+    /* ---------- 認証カード ---------- */
+    #authCard .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    #authCard input { width: 280px; max-width: 60vw; }
+    #authCard label { font-size: 11.5px; color: var(--text-3); font-weight: 600; display: block; margin-bottom: 6px; }
+
+    /* ---------- フィルタバー ---------- */
+    .filterbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; }
+    .fb-field { display: flex; flex-direction: column; gap: 5px; }
+    .fb-field label { font-size: 11.5px; color: var(--text-3); font-weight: 600; }
+    .fb-field .input, .fb-field .usel { width: auto; min-width: 168px; }
+    .fb-spacer { flex: 1 1 auto; }
+
+    /* ---------- 入力フォーム（折りたたみ） ---------- */
+    .entry { padding: 0; overflow: hidden; }
+    .entry-toggle { width: 100%; display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: transparent; border: 0; cursor: pointer; font: inherit; color: var(--text); text-align: left; }
+    .entry-toggle .ch-ico { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; flex: none; }
+    .entry-toggle .ch-t { font-size: 16px; font-weight: 700; }
+    .entry-toggle .et-tip { font-size: 12px; color: var(--text-3); }
+    .entry-toggle .edit-flag { font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 3px 9px; border-radius: 999px; }
+    .entry-toggle .et-chev { margin-left: auto; transition: transform 0.2s; color: var(--text-3); display: inline-flex; }
+    .entry-toggle[aria-expanded="true"] .et-chev { transform: rotate(180deg); }
+    .entry-toggle[aria-expanded="true"] .et-tip { display: none; }
+    .entry-panel { max-height: 0; overflow: hidden; transition: max-height 0.28s ease; }
+    .entry-panel.open { max-height: 3200px; }
+    .entry-panel-in { padding: 6px 20px 20px; border-top: 1px solid var(--border); }
+    .entry-grid { display: grid; grid-template-columns: 1fr 300px; gap: 22px; margin-top: 12px; }
+    @media (max-width: 1080px) { .entry-grid { grid-template-columns: 1fr; } }
+
+    .receipt-upload { border: 1px solid var(--border); border-radius: 14px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 64%, transparent), var(--surface-2)); padding: 14px; margin-top: 12px; display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; }
+    .receipt-drop { min-height: 104px; border: 1px dashed color-mix(in srgb, var(--accent) 54%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--surface) 76%, transparent); display: flex; align-items: center; gap: 14px; padding: 16px; cursor: pointer; transition: border-color .15s, background .15s, transform .15s; }
+    .receipt-drop:hover, .receipt-drop.dragover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
+    .ru-ico { width: 44px; height: 44px; border-radius: 12px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; }
+    .ru-title { font-size: 14px; font-weight: 800; color: var(--text); }
+    .ru-sub { font-size: 12px; color: var(--text-3); margin-top: 3px; }
+    .ru-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+    .ru-note { font-size: 11px; color: var(--text-3); text-align: right; max-width: 220px; }
+    .receipt-upload.busy .receipt-drop { opacity: .62; pointer-events: none; }
+    @media (max-width: 760px) {
+      .receipt-upload { grid-template-columns: 1fr; }
+      .ru-actions { align-items: stretch; }
+      .ru-note { text-align: left; max-width: none; }
+    }
+
+    .ei-head { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 10px; }
+    .ei-head label { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+    .ei-hint { font-size: 11px; color: var(--text-3); }
+    .item-head, .item-row { display: grid; grid-template-columns: 1fr 128px 52px 116px 34px; gap: 8px; align-items: center; }
+    .item-head { font-size: 11px; color: var(--text-3); font-weight: 600; padding: 0 2px 6px; }
+    .item-head .ih-num { text-align: right; }
+    .items { display: flex; flex-direction: column; gap: 8px; }
+    .iseg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-2); width: 100%; }
+    .iseg button { font: inherit; font-size: 12px; font-weight: 600; border: 0; background: transparent; color: var(--text-3); padding: 8px 0; flex: 1; cursor: pointer; min-width: 0; }
+    .iseg button.active { background: var(--accent); color: #fff; }
+    .irate { display: flex; align-items: center; justify-content: center; height: 38px; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); }
+    .irate.r8 { color: var(--acct-shokuzai); background: var(--ok-soft); border-color: color-mix(in srgb, var(--acct-shokuzai) 40%, transparent); }
+    .iyen { display: flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 9px; padding: 0 9px; background: var(--surface); }
+    .iyen::before { content: '¥'; color: var(--text-3); font-size: 12px; }
+    .iyen input { border: 0; background: transparent; padding: 9px 2px; width: 100%; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font: inherit; }
+    .iyen input:focus { outline: none; }
+    .iyen:focus-within { border-color: var(--accent); }
+    .irm { width: 34px; height: 38px; border: 1px solid var(--border); background: var(--surface); color: var(--text-3); border-radius: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .irm:hover { border-color: var(--err); color: var(--err); }
+    .add-item { margin-top: 12px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--accent); background: transparent; border: 1px dashed var(--border); border-radius: 9px; padding: 9px 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .add-item:hover { border-color: var(--accent); background: var(--accent-soft); }
+    @media (max-width: 680px) {
+      .item-head { display: none; }
+      .item-row { grid-template-columns: 1fr 1fr; grid-template-areas: "name name" "acct rate" "yen del"; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+      .item-row .iname { grid-area: name; } .item-row .iacct { grid-area: acct; } .item-row .irate { grid-area: rate; }
+      .item-row .iyen { grid-area: yen; } .item-row .irm { grid-area: del; justify-self: end; width: 44px; }
+    }
+
+    .meta-top { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .meta-top .mrow { grid-template-columns: 1fr; gap: 6px; }
+    .meta-top .mrow label { font-size: 11.5px; color: var(--text-3); padding-top: 0; }
+    .entry-meta { display: flex; flex-direction: column; gap: 12px; }
+    .mrow { display: flex; flex-direction: column; gap: 5px; }
+    .mrow label { font-size: 11.5px; color: var(--text-3); font-weight: 600; }
+    .calcbox { border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2); padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
+    .cb-line { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--text-2); }
+    .cb-line b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+    .cb-line.sub { font-size: 11.5px; color: var(--text-3); padding-left: 10px; }
+    .cb-line.total { border-top: 1px solid var(--border); padding-top: 9px; margin-top: 1px; font-size: 14px; color: var(--text); font-weight: 700; }
+    .cb-line.total b { color: var(--accent); font-size: 20px; }
+    .entry-actions { display: flex; gap: 10px; align-items: center; margin-top: 2px; }
+
+    /* ---------- 月集計 ---------- */
+    .sum-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+    .sum-k { font-size: 11.5px; color: var(--text-3); font-weight: 600; }
+    .sum-v { font-size: 28px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; margin-top: 4px; }
+    .sum-sub { font-size: 12px; color: var(--text-3); margin-top: 3px; font-variant-numeric: tabular-nums; }
+    .sum-count { margin-left: auto; text-align: right; }
+    .sc-k { font-size: 11.5px; color: var(--text-3); font-weight: 600; }
+    .sc-v { font-size: 20px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; margin-top: 4px; }
+    .cat-break { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-top: 18px; }
+    .cat-chip { border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2); padding: 12px 13px; }
+    .cc-top { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+    .cc-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+    .cc-v { font-size: 17px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; margin-top: 8px; }
+    .cc-bar { height: 5px; border-radius: 99px; background: var(--border); margin-top: 8px; overflow: hidden; }
+    .cc-bar i { display: block; height: 100%; border-radius: 99px; }
+
+    /* ---------- 台帳 ---------- */
+    .led-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .led-title { font-size: 16px; font-weight: 700; }
+    .usel.sm { width: auto; min-width: 116px; padding: 7px 28px 7px 10px; font-size: 12.5px; }
+    .searchbox { display: flex; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; background: var(--surface); min-width: 170px; flex: 1 1 200px; max-width: 300px; }
+    .searchbox svg { color: var(--text-3); flex: none; }
+    .searchbox input { border: 0; background: transparent; padding: 8px 0; font: inherit; font-size: 13px; color: var(--text); outline: none; min-width: 0; width: 100%; }
+    .led-count { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; margin-left: auto; }
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .ltable { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .ltable th { font-size: 11.5px; font-weight: 600; color: var(--text-3); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .ltable th.c-num { text-align: right; }
+    .ltable td { padding: 11px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .ltable .c-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .ltable .c-num.total { color: var(--accent); font-weight: 700; }
+    .ltable tfoot td { border-bottom: 0; border-top: 2px solid var(--border); font-weight: 700; padding-top: 12px; }
+    .tf-label { color: var(--text-3); font-weight: 600; }
+    .c-date { white-space: nowrap; color: var(--text-2); font-variant-numeric: tabular-nums; }
+    .c-desc { min-width: 320px; }
+    .ld-store { display: inline-block; font-size: 10.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 5px; padding: 1px 6px; margin-bottom: 5px; }
+    .ld-items { display: flex; flex-direction: column; gap: 3px; }
+    .ld-item { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+    .ld-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .ld-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+    .ld-rate { font-size: 10.5px; font-weight: 700; color: var(--text-3); background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; flex: none; }
+    .ld-yen { margin-left: auto; color: var(--text-2); font-variant-numeric: tabular-nums; padding-left: 14px; }
+    .ld-memo { font-size: 11.5px; color: var(--text-3); margin-top: 6px; }
+    .acct-tags { display: flex; flex-direction: column; gap: 4px; }
+    .acct-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+    .at-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .row-acts { display: flex; gap: 6px; }
+    .mini { font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); border-radius: 7px; padding: 5px 9px; white-space: nowrap; }
+    .mini:hover { background: var(--surface); color: var(--text); }
+    .mini.del:hover { border-color: var(--err); color: var(--err); }
+    .led-empty { text-align: center; padding: 28px 10px; color: var(--text-3); font-size: 13px; }
+
+    /* ---------- ハンバーガー（スマホ） ---------- */
+    .ms-navtoggle { display: none; position: fixed; top: 10px; left: 10px; z-index: 30; width: 42px; height: 42px; padding: 0; border-radius: 10px; border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--text); cursor: pointer; align-items: center; justify-content: center; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+    .ms-navtoggle:hover { background: var(--surface-2); }
+    .ms-nav-backdrop { display: none; position: fixed; inset: 0; z-index: 31; background: rgba(0,0,0,.45); }
+    @media (max-width: 880px) {
+      .ms-shell { grid-template-columns: 1fr; }
+      .ms-navtoggle { display: inline-flex; }
+      .ms-side { position: fixed; left: 0; top: 0; bottom: 0; height: 100vh; width: 270px; max-width: 84vw; z-index: 32; transform: translateX(-100%); transition: transform .26s ease; box-shadow: 20px 0 60px -12px rgba(0,0,0,.55); }
+      .ms-side.open { transform: translateX(0); }
+      .ms-nav-backdrop.open { display: block; }
+      .ms-content { padding: 22px 16px 60px; }
+      .ms-topbar { padding: 12px 16px 12px 64px; }
+    }
+
+    /* ===== 電子ジャーナル(POS取込)ページ専用 ===== */
+    .pj-content { padding: 26px 32px 60px; }
+    .pj-inner { max-width: 1180px; margin: 0 auto; }
+    .pj-h1 { font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: .01em; }
+    .pj-sub { color: var(--text-2); margin: 0 0 22px; font-size: 13px; max-width: 860px; }
+    .pj-src { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+    .pj-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 20px; }
+    .pj-field { display: flex; flex-direction: column; gap: 4px; }
+    .pj-field label { font-size: 11px; font-weight: 600; color: var(--text-3); letter-spacing: .04em; }
+    .pj-field select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 8px 12px; font-size: 13.5px; }
+    .pj-badge { margin-left: auto; font-size: 12px; color: var(--text-2); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; }
+    .pj-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; margin-bottom: 22px; }
+    .pj-kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 15px 16px; box-shadow: var(--shadow); }
+    .pj-kpi .k-l { font-size: 11.5px; color: var(--text-3); font-weight: 600; letter-spacing: .03em; }
+    .pj-kpi .k-v { font-size: 22px; font-weight: 700; margin-top: 5px; letter-spacing: .01em; }
+    .pj-kpi .k-s { font-size: 11.5px; color: var(--text-2); margin-top: 3px; }
+    .pj-kpi.accent .k-v { color: var(--accent); }
+    .pj-grid2 { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; margin-bottom: 22px; }
+    @media (max-width: 900px){ .pj-grid2 { grid-template-columns: 1fr; } }
+    .pj-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow); }
+    .pj-card h2 { font-size: 14px; font-weight: 700; margin: 0 0 14px; display:flex; align-items:center; gap:8px; }
+    .pj-card h2 .c-note { font-size: 11px; font-weight: 500; color: var(--text-3); margin-left:auto; }
+    .pj-chart-wrap { position: relative; height: 250px; }
+    .pj-pay .pay-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .pj-pay .pay-name { width: 96px; font-size: 13px; font-weight: 600; }
+    .pj-pay .pay-bar { flex: 1; height: 12px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+    .pj-pay .pay-bar > span { display: block; height: 100%; border-radius: 999px; }
+    .pj-pay .pay-val { width: 132px; text-align: right; font-size: 13px; }
+    .pj-pay .pay-val small { color: var(--text-3); }
+    table.pj-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.pj-table th, table.pj-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+    table.pj-table th { color: var(--text-3); font-weight: 600; font-size: 11.5px; letter-spacing: .03em; position: sticky; top: 0; background: var(--surface); }
+    table.pj-table td.l, table.pj-table th.l { text-align: left; }
+    table.pj-table tbody tr.day-row { cursor: pointer; }
+    table.pj-table tbody tr.day-row:hover { background: var(--surface-2); }
+    table.pj-table tbody tr.closed td { color: var(--text-3); }
+    .wx { display:inline-flex; align-items:center; gap:4px; }
+    .chip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-weight:600; }
+    .chip.gray { background: var(--surface-2); color: var(--text-3); }
+    .rk-bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; min-width: 60px; }
+    .rk-bar > span { display:block; height:100%; background: var(--accent); border-radius:999px; }
+    .receipts-cell { background: var(--surface-2); }
+    .receipts-box { padding: 8px 6px 12px; }
+    .rc { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--surface); }
+    .rc-head { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:baseline; font-size:12.5px; color: var(--text-2); margin-bottom:6px; }
+    .rc-head b { color: var(--text); font-size: 13.5px; }
+    .rc table { width:100%; border-collapse:collapse; font-size:12.5px; }
+    .rc td { padding: 3px 6px; border-bottom: 1px dashed var(--border); text-align:right; }
+    .rc td.l { text-align:left; }
+    .rc .rc-tot td { border-top: 1px solid var(--border-strong); border-bottom: none; font-weight:700; padding-top:6px; }
+    .pj-empty { padding: 40px; text-align:center; color: var(--text-3); }
+    .table-scroll { overflow-x: auto; }
+    .pj-auth { margin: 0 0 16px; }
+    .pj-auth .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .pj-auth label { display:block; font-size:11.5px; color:var(--text-3); margin-bottom:7px; font-weight:600; }
+    .pj-auth .input { max-width:340px; }
+    .pj-upload { margin-bottom:18px; }
+    .pj-upload-head { display:flex; gap:14px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; }
+    .pj-upload-title { font-size:15px; font-weight:800; }
+    .pj-upload-note { font-size:12px; color:var(--text-3); margin-top:4px; max-width:760px; line-height:1.65; }
+    .pj-upload-box { margin-top:14px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; border:1px dashed color-mix(in srgb,var(--accent) 55%,var(--border)); border-radius:12px; padding:16px; background:var(--surface-2); }
+    .pj-upload-box.dragover { background:var(--accent-soft); border-color:var(--accent); }
+    .pj-upload-box.busy { opacity:.65; pointer-events:none; }
+    .pj-upload-copy b { display:block; font-size:14px; }
+    .pj-upload-copy span { color:var(--text-3); font-size:12px; }
+    .pj-message { min-height:18px; margin-top:10px; font-size:12.5px; white-space:pre-line; }
+    .pj-message.ok { color:var(--ok); } .pj-message.err { color:var(--err); } .pj-message.warn { color:var(--warn); }
+    .pj-file-card { margin-bottom:22px; }
+    .file-action { display:inline-flex; gap:6px; align-items:center; justify-content:flex-end; }
+    .file-action button { padding:5px 8px; font-size:11.5px; border-radius:7px; }
+    .pj-modal { position:fixed; inset:0; z-index:80; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.6); padding:18px; }
+    .pj-modal-box { width:460px; max-width:100%; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:22px; box-shadow:var(--shadow); }
+    .pj-modal-title { font-size:17px; font-weight:800; }
+    .pj-modal-copy { color:var(--text-2); font-size:13px; line-height:1.7; margin:9px 0 14px; }
+    .pj-delete-name { padding:9px 11px; background:var(--surface-2); border-radius:9px; color:var(--text); font-size:12px; word-break:break-all; margin-bottom:12px; }
+    .pj-modal-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:14px; }
+    @media (max-width:700px) { .pj-upload-box { grid-template-columns:1fr; } .pj-badge { margin-left:0; } }
+
+  </style>
+</head>
+<body>
+  <!-- 描画前に保存済みテーマ＋LINE店舗ロックを適用（ちらつき防止）。テーマキーは全ページ共有。 -->
+  <script>try{
+    document.body.setAttribute('data-theme',(localStorage.getItem('line_reservation_calendar_theme')==='light')?'light':'dark');
+    var _q=new URLSearchParams(location.search);
+    if(_q.get('from')==='line' || localStorage.getItem('line_locked_store')) document.body.classList.add('line-locked');
+  }catch(e){}</script>
+
+  <button id="msNavToggle" class="ms-navtoggle" type="button" aria-label="メニューを開閉" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div id="msNavBackdrop" class="ms-nav-backdrop" aria-hidden="true"></div>
+
+  <div class="ms-shell">
+    <aside class="ms-side">
+      <div class="ms-brand">
+        <span class="ms-logo">LS</span>
+        <div>
+          <div class="ms-bt">LINE Summary</div>
+          <div class="ms-bs">Admin Console</div>
+        </div>
+      </div>
+      <nav class="ms-nav">
+        <div class="ms-navlabel">メニュー</div>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span>接続設定</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>利用状況</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></span>Webhook設定</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg></span>ログ</a>
+        <a class="ms-navlink" href="./index.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg></span>ユーザー権限</a>
+
+        <div class="ms-navlabel">ページ</div>
+        <a class="ms-navlink" href="./media.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>メディア閲覧<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./message-search.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>会話検索<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./reservation.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>予約表<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./analytics.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg></span>売上分析<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./reviews.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.9-6.2 3.9 1.6-7L2 9.2l7.1-.6L12 2z"/></svg></span>口コミ・競合<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./ai-usage.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-1 5 3 3 0 0 1-4 2 3 3 0 0 1-4-2 3 3 0 0 1-1-5 3 3 0 0 1 2-5 3 3 0 0 1 3-3Z"/><path d="M12 8v8M9 12h6"/></svg></span>AI使用料<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./petty_cash.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M21 9h-6a3 3 0 0 0 0 6h6a1 1 0 0 0 1-1V10a1 1 0 0 0-1-1z"/></svg></span>小口現金</a>
+        <a class="ms-navlink" href="./foodcourt.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M4 12h16M4 18h8"/><circle cx="19" cy="18" r="2"/></svg></span>フードコート分析<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./foodcourt-evolution.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h2M20 12h2M12 2v2M12 20v2"/><circle cx="12" cy="12" r="4"/><path d="M6 6l1.5 1.5M16.5 16.5L18 18M18 6l-1.5 1.5M7.5 16.5L6 18"/></svg></span>AI学習 進化<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink" href="./foodcourt-report.html"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="18" rx="1"/><path d="M7 8h6M7 12h6M7 16h3"/><path d="M19 11v6l-2-1-2 1v-6"/><path d="M17 3v8"/></svg></span>フードコート日報<span class="ext"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></span></a>
+        <a class="ms-navlink active" aria-current="page"><span class="ni"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l3 3v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></span>電子ジャーナル</a>
+      </nav>
+      <div class="ms-side-foot">
+        <div class="ms-conn">
+          <span class="ms-cd"></span>
+          <div>
+            <div class="ms-ct">接続済み</div>
+            <div class="ms-cs mono">hocbnifuactbvmyjraxy</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="ms-main">
+      <div class="ms-topbar">
+        <button id="admUnlockBtn" type="button" class="pill adm-unlock" hidden>管理者ログイン</button>
+        <span id="authState" class="pill">未接続</span>
+        <button id="themeToggleBtn" type="button" class="pill theme-toggle" aria-pressed="false">ライトモード</button>
+      </div>
+
+      <div class="pj-content">
+        <div class="pj-inner">
+          <h1 class="pj-h1">電子ジャーナル（POS取込）</h1>
+          <p class="pj-sub"><strong>Bistro CAVACAVA</strong>（店舗コード1015）のレジ電子ジャーナル（.lzh）を取り込み、原本を非公開で保管し、日計精算レポート・会計明細・天候を集計して表示します。</p>
+          <div class="pj-src" id="srcInfo"></div>
+
+          <section class="card pj-auth" id="authCard" hidden>
+            <label for="tokenInput">管理トークン（本部）／またはLINEの最新リンクから開いてください</label>
+            <div class="toolbar">
+              <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" />
+              <button class="btn btn-primary" id="saveTokenBtn" type="button">接続</button>
+            </div>
+            <div class="pj-message err" id="authMsg"></div>
+          </section>
+
+          <div class="pj-toolbar">
+            <div class="pj-field">
+              <label>店舗</label>
+              <select id="storeSel"></select>
+            </div>
+            <div class="pj-field">
+              <label>対象月</label>
+              <input class="input mono" id="monthSel" type="month" min="2020-01" max="2099-12" />
+            </div>
+            <button class="btn sm" id="reloadBtn" type="button">再読込</button>
+            <span class="pj-badge" id="rangeBadge"></span>
+          </div>
+
+          <section class="pj-card pj-upload">
+            <div class="pj-upload-head">
+              <div>
+                <div class="pj-upload-title">LZHジャーナルをアップロード</div>
+                <div class="pj-upload-note">複数ファイルを一括選択できます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。同じ内容・同じ営業日は重複登録しません。</div>
+              </div>
+              <span class="chip gray">非公開Storage保管</span>
+            </div>
+            <div class="pj-upload-box" id="uploadDrop" role="button" tabindex="0" aria-label="LZHファイルを選択">
+              <div class="pj-upload-copy">
+                <b>ここへLZHファイルをドロップ</b>
+                <span>または「ファイルを選択」から複数選択（1件8MB以下・最大62件）</span>
+              </div>
+              <button class="btn btn-primary" id="uploadPickBtn" type="button">ファイルを選択</button>
+              <input id="uploadInput" type="file" accept=".lzh,application/x-lzh-compressed,application/octet-stream" multiple hidden />
+            </div>
+            <div class="pj-message" id="uploadMsg"></div>
+          </section>
+
+          <section class="pj-card pj-file-card">
+            <h2>保管ファイル <span class="c-note">原本ダウンロード・削除</span></h2>
+            <div class="table-scroll">
+              <table class="pj-table">
+                <thead><tr><th class="l">営業日</th><th class="l">ファイル名</th><th>サイズ</th><th>総売上</th><th>会計</th><th>アップロード</th><th>操作</th></tr></thead>
+                <tbody id="fileBody"></tbody>
+              </table>
+            </div>
+            <div class="pj-empty" id="fileEmpty">保管ファイルはありません。</div>
+          </section>
+
+          <div id="mainWrap" hidden>
+            <div class="pj-kpis" id="kpis"></div>
+
+            <div class="pj-grid2">
+              <div class="pj-card">
+                <h2>日別 総売上の推移 <span class="c-note">棒: 総売上 / 線: 客数</span></h2>
+                <div class="pj-chart-wrap"><canvas id="trendChart"></canvas></div>
+              </div>
+              <div class="pj-card pj-pay">
+                <h2>決済方法の内訳</h2>
+                <div id="payBox"></div>
+              </div>
+            </div>
+
+            <div class="pj-card" style="margin-bottom:22px;">
+              <h2>日別サマリー <span class="c-note">行をクリックで会計明細を表示</span></h2>
+              <div class="table-scroll">
+              <table class="pj-table" id="dayTable">
+                <thead>
+                  <tr>
+                    <th class="l">営業日</th><th class="l">曜</th><th class="l">天候</th><th>気温</th>
+                    <th>組数</th><th>客数</th><th>客単価</th>
+                    <th>純売上</th><th>消費税</th><th>総売上</th>
+                    <th>現金</th><th>クレジット</th>
+                  </tr>
+                </thead>
+                <tbody id="dayBody"></tbody>
+              </table>
+              </div>
+            </div>
+
+            <div class="pj-card">
+              <h2>商品別ランキング <span class="c-note">会計明細ベース・金額順</span></h2>
+              <div class="table-scroll">
+              <table class="pj-table" id="rankTable">
+                <thead><tr><th style="width:36px">#</th><th class="l">商品名</th><th>数量</th><th>売上金額</th><th class="l" style="width:220px">構成</th></tr></thead>
+                <tbody id="rankBody"></tbody>
+              </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="pj-empty" id="emptyState" hidden>データを読み込めませんでした。<code>public/pos-journal-*.json</code> を確認してください。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pj-modal" id="deleteModal" hidden>
+    <div class="pj-modal-box" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
+      <div class="pj-modal-title" id="deleteModalTitle">保管ファイルを削除</div>
+      <div class="pj-modal-copy">原本ファイルと解析結果が完全に削除され、元に戻せません。削除する場合は確認欄へ半角小文字で <strong>delete</strong> と入力してください。</div>
+      <div class="pj-delete-name" id="deleteFileName"></div>
+      <input class="input mono" id="deleteConfirmInput" type="text" autocomplete="off" placeholder="delete" />
+      <div class="pj-message err" id="deleteMsg"></div>
+      <div class="pj-modal-actions">
+        <button class="btn" id="deleteCancelBtn" type="button">キャンセル</button>
+        <button class="btn btn-danger" id="deleteSubmitBtn" type="button" disabled>完全に削除</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="pages-config.js?v=20260610"></script>
+  <script src="auth-session.js?v=20260624"></script>
+  <script src="menu-logout.js?v=20260702"></script>
+  <script src="app-theme.js?v=20260702"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script>
+  'use strict';
+  (function () {
+    var PAGES = window.LINE_REPORT_PAGES || {};
+    var AUTH = window.LINE_REPORT_AUTH || null;
+    var STORE_KEY = 'bistrocavacava';
+    var STORE_CODE = '1015';
+    var STORE_NAME = (PAGES.getPreferredStoreDisplayLabel && PAGES.getPreferredStoreDisplayLabel(STORE_KEY)) || 'Bistro CAVACAVA';
+    var LEGACY_DATA_URL = './pos-journal-202606.json';
+    var WD = ['日','月','火','水','木','金','土'];
+    var trendChart = null;
+    var currentFiles = [];
+    var deleteTarget = null;
+    var lastSummary = null;
+
+    var el = function (id) { return document.getElementById(id); };
+    var yen = function (n) { return '¥' + (Number(n)||0).toLocaleString('ja-JP'); };
+    var num = function (n) { return (Number(n)||0).toLocaleString('ja-JP'); };
+    var esc = function (s) { return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); };
+    var getToken = function () { return AUTH ? AUTH.getToken() : ''; };
+
+    function currentMonth() {
+      var d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    }
+    function savedMonth() {
+      try { return localStorage.getItem('pos_journal_month') || '2026-06'; } catch (_) { return '2026-06'; }
+    }
+    function setAuth(ok) {
+      el('authState').textContent = ok ? 'ログイン済み' : '未接続';
+      el('authState').className = ok ? 'pill ok' : 'pill';
+      el('authCard').hidden = !!ok;
+    }
+    function setMessage(node, message, kind) {
+      node.textContent = message || '';
+      node.className = 'pj-message' + (kind ? ' ' + kind : '');
+    }
+    async function apiFetch(path, options) {
+      var url = PAGES.receiptAdminApiUrl ? PAGES.receiptAdminApiUrl(path) : '';
+      if (!url) throw new Error('API設定を読み込めません。');
+      var headers = Object.assign({
+        'x-admin-token': getToken(),
+        'x-admin-surface': PAGES.ADMIN_SURFACE || 'line_report'
+      }, (options && options.headers) || {});
+      var response;
+      if (!getToken()) throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。');
+      try { response = await fetch(url, Object.assign({}, options || {}, { headers: headers })); }
+      catch (_) { throw new Error('通信に失敗しました。ネットワークをご確認ください。'); }
+      var body = await response.json().catch(function () { return {}; });
+      if (response.status === 401 || response.status === 403) setAuth(false);
+      if (!response.ok || body.error) throw new Error(body.error || ('HTTP ' + response.status));
+      return body;
+    }
+    async function saveToken() {
+      var token = el('tokenInput').value.trim();
+      if (!token) { setMessage(el('authMsg'), 'トークンを入力してください。', 'err'); return; }
+      el('saveTokenBtn').disabled = true;
+      try {
+        await AUTH.loginWithToken(token, {
+          sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL),
+          adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+        });
+        el('tokenInput').value = '';
+        setMessage(el('authMsg'), '', '');
+        setAuth(true);
+        await loadCurrent();
+      } catch (error) {
+        setMessage(el('authMsg'), error && error.message ? error.message : String(error), 'err');
+      } finally { el('saveTokenBtn').disabled = false; }
+    }
+
+    function populateControls() {
+      el('storeSel').innerHTML = '<option value="' + STORE_KEY + '">' + esc(STORE_NAME) + '（コード' + STORE_CODE + '）</option>';
+      el('storeSel').disabled = true;
+      el('monthSel').value = savedMonth();
+    }
+    function weatherIcon(w) {
+      if (!w) return '';
+      if (/雨/.test(w)) return '🌧'; if (/雪/.test(w)) return '❄️';
+      if (/曇|くもり|ｸﾓﾘ/.test(w)) return '☁️'; if (/晴/.test(w)) return '☀️';
+      return '•';
+    }
+    function formatSize(bytes) {
+      var n = Number(bytes)||0;
+      if (n < 1024) return n + ' B';
+      if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+      return (n/(1024*1024)).toFixed(1) + ' MB';
+    }
+    function renderFiles(files) {
+      currentFiles = Array.isArray(files) ? files : [];
+      el('fileEmpty').hidden = currentFiles.length > 0;
+      el('fileBody').innerHTML = currentFiles.map(function (file) {
+        return '<tr>'
+          + '<td class="l">' + esc(file.business_date) + '</td>'
+          + '<td class="l">' + esc(file.original_file_name) + '</td>'
+          + '<td>' + formatSize(file.file_size_bytes) + '</td>'
+          + '<td>' + yen(file.gross_sales) + '</td>'
+          + '<td>' + num(file.receipts_count) + '</td>'
+          + '<td>' + esc(String(file.uploaded_at||'').replace('T',' ').slice(0,16)) + '</td>'
+          + '<td><span class="file-action"><button class="btn" data-download="' + file.id + '">DL</button><button class="btn btn-danger" data-delete="' + file.id + '">削除</button></span></td>'
+          + '</tr>';
+      }).join('');
+    }
+
+    function render(data) {
+      lastSummary = data || {};
+      el('mainWrap').hidden = false;
+      el('emptyState').hidden = true;
+      var t = data.totals || {}, m = data.meta || {}, days = data.days || [];
+      var openDays = days.filter(function (d) { return (d.gross_sales||0) > 0; });
+      el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / 保管ファイル ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分';
+      el('rangeBadge').textContent = '営業日 ' + openDays.length + '日（記録 ' + days.length + '日）';
+      var kpis = [
+        { l:'総売上',v:yen(t.gross_sales),s:'純売上 '+yen(t.net_sales),accent:true },
+        { l:'消費税',v:yen(t.tax),s:'内税' }, { l:'客数',v:num(t.guests)+' 名',s:(t.groups||0)+' 組' },
+        { l:'客単価',v:yen(t.avg_spend),s:'総売上 ÷ 客数' }, { l:'営業日数',v:openDays.length+' 日',s:'記録 '+days.length+' 日' },
+        { l:'1日平均',v:yen(openDays.length?Math.round((t.gross_sales||0)/openDays.length):0),s:'営業日あたり' }
+      ];
+      el('kpis').innerHTML = kpis.map(function(k){return '<div class="pj-kpi '+(k.accent?'accent':'')+'"><div class="k-l">'+k.l+'</div><div class="k-v">'+k.v+'</div><div class="k-s">'+k.s+'</div></div>';}).join('');
+      var pays=[{n:'現金',v:t.cash_amount||0,c:'var(--ok)'},{n:'クレジット',v:t.credit_amount||0,c:'var(--accent)'},{n:'食べログ',v:t.tabelog_amount||0,c:'#d8961f'},{n:'一休',v:t.ikyu_amount||0,c:'#9b6dd8'},{n:'ぐるなび',v:t.gurunavi_amount||0,c:'#e05656'}].filter(function(p){return p.v>0;});
+      var paySum=pays.reduce(function(a,p){return a+p.v;},0)||1;
+      el('payBox').innerHTML=pays.map(function(p){var pct=Math.round(p.v/paySum*100);return '<div class="pay-row"><div class="pay-name">'+p.n+'</div><div class="pay-bar"><span style="width:'+pct+'%;background:'+p.c+'"></span></div><div class="pay-val">'+yen(p.v)+' <small>'+pct+'%</small></div></div>';}).join('')||'<div class="pj-empty">決済データなし</div>';
+      el('dayBody').innerHTML=days.map(function(d,idx){var dt=d.business_date||'',wd=dt?WD[new Date(dt+'T00:00:00').getDay()]:'',cash=(d.pay_cash||{}).amount||0,cr=(d.pay_credit||{}).amount||0,rc=(d.receipts||[]).length,wx=d.weather?'<span class="wx">'+weatherIcon(d.weather)+esc(d.weather)+'</span>':'—';return '<tr class="day-row '+((d.gross_sales||0)===0?'closed':'')+'" data-idx="'+idx+'"><td class="l">'+esc(dt)+(rc?' <span class="chip">'+rc+'会計</span>':'')+'</td><td class="l">'+wd+'</td><td class="l">'+wx+'</td><td>'+(d.temp_c!=null?d.temp_c+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td>'+(cash?yen(cash):'—')+'</td><td>'+(cr?yen(cr):'—')+'</td></tr><tr class="receipts-cell" data-detail="'+idx+'" hidden><td colspan="12" class="l"><div class="receipts-box">'+receiptsHTML(d)+'</div></td></tr>';}).join('');
+      el('dayBody').querySelectorAll('tr.day-row').forEach(function(tr){tr.addEventListener('click',function(){var det=el('dayBody').querySelector('tr[data-detail="'+tr.getAttribute('data-idx')+'"]');if(det)det.hidden=!det.hidden;});});
+      var rank=(data.item_ranking||[]).slice(0,40),maxAmt=rank.length?rank[0].amount:1;
+      el('rankBody').innerHTML=rank.map(function(r,i){return '<tr><td>'+(i+1)+'</td><td class="l">'+esc(r.name)+'</td><td>'+num(r.qty)+'</td><td>'+yen(r.amount)+'</td><td class="l"><div class="rk-bar"><span style="width:'+Math.round(r.amount/maxAmt*100)+'%"></span></div></td></tr>';}).join('');
+      drawTrend(openDays);
+    }
+    function receiptsHTML(d) {
+      var rs=d.receipts||[]; if(!rs.length)return '<div style="color:var(--text-3);padding:6px 4px">この日の会計明細はありません。</div>';
+      return rs.map(function(r){var items=(r.items||[]).map(function(it){return '<tr><td class="l">'+esc(it.name)+'</td><td>'+yen(it.unit)+'</td><td>×'+it.qty+'</td><td>'+yen(it.amount)+'</td></tr>';}).join('');return '<div class="rc"><div class="rc-head"><b>会計 No.'+esc(r.no)+'</b><span>'+esc(r.time||'')+'</span><span class="chip '+(r.pay==='現金'?'gray':'')+'">'+esc(r.pay||'')+'</span>'+(r.guests!=null?'<span>'+r.guests+'名</span>':'')+'</div><table><tbody>'+items+'<tr class="rc-tot"><td class="l" colspan="3">合計</td><td>'+yen(r.total)+'</td></tr></tbody></table></div>';}).join('');
+    }
+    function cssVar(name){return getComputedStyle(document.body).getPropertyValue(name).trim()||'#3f7bea';}
+    function drawTrend(openDays){if(!window.Chart)return;var ctx=el('trendChart').getContext('2d');if(trendChart)trendChart.destroy();var accent=cssVar('--accent'),ok=cssVar('--ok'),grid=cssVar('--border'),text=cssVar('--text-2');trendChart=new Chart(ctx,{data:{labels:openDays.map(function(d){return Number(d.business_date.slice(8,10))+'日';}),datasets:[{type:'bar',label:'総売上',data:openDays.map(function(d){return d.gross_sales||0;}),backgroundColor:accent,borderRadius:4,yAxisID:'y',order:2},{type:'line',label:'客数',data:openDays.map(function(d){return d.guests||0;}),borderColor:ok,backgroundColor:ok,tension:.3,yAxisID:'y1',order:1,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:text,boxWidth:12}},tooltip:{callbacks:{label:function(c){return c.dataset.label==='総売上'?'総売上: ¥'+c.parsed.y.toLocaleString('ja-JP'):'客数: '+c.parsed.y+'名';}}}},scales:{x:{ticks:{color:text},grid:{color:grid}},y:{position:'left',ticks:{color:text,callback:function(v){return '¥'+(v/1000)+'k';}},grid:{color:grid}},y1:{position:'right',beginAtZero:true,ticks:{color:text,precision:0},grid:{drawOnChartArea:false}}}}});}
+
+    async function loadCurrent() {
+      var month=el('monthSel').value||savedMonth();
+      try { localStorage.setItem('pos_journal_month',month); } catch (_) {}
+      if (!getToken()) { setAuth(false); renderFiles([]); await loadLegacy(month); return; }
+      setAuth(true);
+      try {
+        var state=await apiFetch('/pos-journals?store_key='+encodeURIComponent(STORE_KEY)+'&month='+encodeURIComponent(month),{method:'GET'});
+        renderFiles(state.files||[]);
+        if ((state.files||[]).length) render(state.summary||{});
+        else await loadLegacy(month,true);
+      } catch(error) {
+        if (/認証|ログイン|トークン|Unauthorized|Forbidden/i.test(String(error.message||''))) {
+          renderFiles([]); await loadLegacy(month,true); return;
+        }
+        renderFiles([]); setMessage(el('uploadMsg'),error.message,'err'); await loadLegacy(month,true);
+      }
+    }
+    async function loadLegacy(month, preserveFiles) {
+      if (month!=='2026-06') { if(!preserveFiles)renderFiles([]); render({meta:{file_count:0,day_count:0},totals:{},days:[],item_ranking:[]}); return; }
+      try { var response=await fetch(LEGACY_DATA_URL,{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);var data=await response.json();data.meta=data.meta||{};data.meta.store_key=STORE_KEY;data.meta.store_name=STORE_NAME;render(data);if(!preserveFiles)renderFiles([]); }
+      catch(error){el('mainWrap').hidden=true;el('emptyState').hidden=false;el('emptyState').textContent='データ読込エラー: '+error.message;}
+    }
+    async function uploadFiles(fileList) {
+      var files=Array.from(fileList||[]).filter(function(f){return /\.lzh$/i.test(f.name);});
+      if(!files.length){setMessage(el('uploadMsg'),'LZHファイルを選択してください。','err');return;}
+      if(!getToken()){setAuth(false);setMessage(el('uploadMsg'),'先に管理トークンで接続してください。','err');return;}
+      var form=new FormData();files.forEach(function(file){form.append('files',file,file.name);});form.append('store_key',STORE_KEY);form.append('month',el('monthSel').value);
+      el('uploadDrop').classList.add('busy');el('uploadPickBtn').disabled=true;setMessage(el('uploadMsg'),files.length+'件を解析・保存しています…','');
+      try {var result=await apiFetch('/pos-journals/upload',{method:'POST',body:form});var parts=[];if(result.uploaded_count)parts.push(result.uploaded_count+'件を保存');if(result.duplicate_count)parts.push(result.duplicate_count+'件は重複のためスキップ');if(result.failed_count)parts.push(result.failed_count+'件失敗');var failure=(result.failures||[]).map(function(f){return f.original_file_name+': '+f.error;}).join('\n');setMessage(el('uploadMsg'),parts.join(' / ')+(failure?'\n'+failure:''),result.failed_count?'warn':'ok');await loadCurrent();}
+      catch(error){setMessage(el('uploadMsg'),error.message,'err');}
+      finally{el('uploadDrop').classList.remove('busy');el('uploadPickBtn').disabled=false;el('uploadInput').value='';}
+    }
+    async function downloadFile(id) {try{var body=await apiFetch('/pos-journals/download?store_key='+encodeURIComponent(STORE_KEY)+'&id='+encodeURIComponent(id),{method:'GET'});window.open(body.signed_url,'_blank','noopener,noreferrer');}catch(error){setMessage(el('uploadMsg'),error.message,'err');}}
+    function openDelete(id){deleteTarget=currentFiles.find(function(f){return String(f.id)===String(id);})||null;if(!deleteTarget)return;el('deleteFileName').textContent=deleteTarget.business_date+' / '+deleteTarget.original_file_name;el('deleteConfirmInput').value='';el('deleteSubmitBtn').disabled=true;setMessage(el('deleteMsg'),'','');el('deleteModal').hidden=false;setTimeout(function(){el('deleteConfirmInput').focus();},30);}
+    function closeDelete(){el('deleteModal').hidden=true;deleteTarget=null;}
+    async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
+
+    var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
+    document.addEventListener('DOMContentLoaded',async function(){populateControls();if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadDrop').addEventListener('drop',function(e){uploadFiles(e.dataTransfer.files);});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});await loadCurrent();});
+  })();
+  </script>
+
+  <script>
+  // モバイル用サイドバー開閉
+  (function () {
+    var toggle = document.getElementById('msNavToggle');
+    var drawer = document.querySelector('.ms-side');
+    var backdrop = document.getElementById('msNavBackdrop');
+    function setOpen(o) {
+      if (!drawer) return;
+      drawer.classList.toggle('open', o);
+      if (backdrop) backdrop.classList.toggle('open', o);
+      if (toggle) toggle.setAttribute('aria-expanded', o ? 'true' : 'false');
+    }
+    if (toggle) toggle.addEventListener('click', function () { setOpen(!drawer.classList.contains('open')); });
+    if (backdrop) backdrop.addEventListener('click', function () { setOpen(false); });
+    if (drawer) drawer.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('.ms-navlink')) setOpen(false); });
+  })();
+  </script>
+</body>
+</html>

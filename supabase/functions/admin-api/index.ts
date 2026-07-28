@@ -106,6 +106,13 @@ import {
   fetchLineRoomCalendarSearchState,
   fetchLineRoomMessageSearchState,
 } from "../_shared/line_room_message_search.ts"
+import {
+  buildPosJournalSummary,
+  detectPosJournalStoreCode,
+  parsePosJournalLzh,
+  resolvePosJournalStore,
+  type PosJournalDay,
+} from "../_shared/pos_journal.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
 
@@ -361,6 +368,9 @@ const DOCUMENT_PDF_EXTRACT_MAX_PAGES = 120
 const DOCUMENT_TEXT_BINARY_RATIO_MAX = 0.08
 const PETTY_CASH_RECEIPT_IMAGE_BUCKET = "line-media"
 const PETTY_CASH_RECEIPT_IMAGE_MAX_BYTES = GROQ_VISION_BASE64_MAX_BYTES
+const POS_JOURNAL_BUCKET = "pos-journals"
+const POS_JOURNAL_UPLOAD_MAX_BYTES = 8 * 1024 * 1024
+const POS_JOURNAL_UPLOAD_MAX_FILES = 62
 const AZURE_RECEIPT_MODEL = AZURE_FOUNDRY_VISION_MODEL
 const PDFJS_MODULE_URL = "https://esm.sh/pdfjs-dist@4.10.38/build/pdf.mjs"
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -1108,6 +1118,10 @@ Deno.serve(async (req, info) => {
       "/petty-cash",
       "/petty-cash/receipt-image",
       "/petty-cash/receipt-media",
+      "/pos-journals",
+      "/pos-journals/upload",
+      "/pos-journals/file",
+      "/pos-journals/download",
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
@@ -1301,6 +1315,12 @@ Deno.serve(async (req, info) => {
     if (req.method === "GET" && path === "/documents") {
       const documentState = await fetchDocumentState(supabase, url)
       return json(documentState, 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals") {
+      return json(await fetchPosJournalState(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/download") {
+      return json(await fetchPosJournalDownloadUrl(supabase, url), 200)
     }
 
     if (req.method === "GET" && path === "/reservations/calendar") {
@@ -2674,6 +2694,12 @@ Deno.serve(async (req, info) => {
     if (req.method === "POST" && path === "/documents") {
       const created = await uploadDocumentFile(req, supabase)
       return json({ success: true, document: created }, 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/upload") {
+      return json(await uploadPosJournalFiles(workReq, supabase, storeScope), 200)
+    }
+    if (req.method === "DELETE" && path === "/pos-journals/file") {
+      return json(await deletePosJournalFile(supabase, workReq, storeScope), 200)
     }
 
     const permissionPath = parseDocumentPermissionPath(path)
@@ -7142,6 +7168,541 @@ function extractFileExt(fileName: string): string {
     .replace(/[^a-z0-9]/g, "")
 }
 
+function normalizeYearMonth(value: unknown): string {
+  const month = String(value ?? "").trim().slice(0, 7)
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw { status: 400, message: "month must be YYYY-MM." } satisfies AppError
+  }
+  return month
+}
+
+function normalizePosJournalStoreKey(value: unknown): string {
+  const key = String(value ?? "").trim()
+  if (!key || key === "__all__") {
+    throw {
+      status: 400,
+      message: "store_key（店舗）を指定してください。",
+    } satisfies AppError
+  }
+  return key
+}
+
+function posJournalFileRow(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null
+  const id = Number(value.id)
+  const businessDate = String(value.business_date ?? "").slice(0, 10)
+  if (
+    !Number.isInteger(id) || id <= 0 ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(businessDate)
+  ) return null
+  const parsedData = isRecord(value.parsed_data) ? value.parsed_data : {}
+  return {
+    id,
+    store_key: toSafeString(value.store_partition_key),
+    store_code: toSafeString(value.store_code),
+    business_date: businessDate,
+    month: toSafeString(value.year_month) || businessDate.slice(0, 7),
+    original_file_name: toSafeString(value.original_file_name),
+    inner_file_name: value.inner_file_name == null
+      ? null
+      : toSafeString(value.inner_file_name),
+    file_size_bytes: toNonNegativeInteger(value.file_size_bytes),
+    sha256_hex: toSafeString(value.sha256_hex),
+    net_sales: toNonNegativeInteger(value.net_sales),
+    tax: toNonNegativeInteger(value.tax_yen),
+    gross_sales: toNonNegativeInteger(value.gross_sales),
+    groups: toNonNegativeInteger(value.groups_count),
+    guests: toNonNegativeInteger(value.guests_count),
+    receipts_count: toNonNegativeInteger(value.receipts_count),
+    uploaded_at: String(value.uploaded_at ?? ""),
+    parsed_data: parsedData,
+  }
+}
+
+async function fetchPosJournalRows(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  month: string,
+): Promise<Record<string, unknown>[]> {
+  const { data, error } = await supabase
+    .from("pos_journal_files")
+    .select(
+      "id, store_partition_key, store_code, business_date, year_month, original_file_name, inner_file_name, file_size_bytes, sha256_hex, parsed_data, net_sales, tax_yen, gross_sales, groups_count, guests_count, receipts_count, storage_deleted_at, storage_delete_error, uploaded_at",
+    )
+    .eq("store_partition_key", storeKey)
+    .eq("year_month", month)
+    .is("storage_deleted_at", null)
+    .order("business_date", { ascending: true })
+    .order("id", { ascending: true })
+  if (error) {
+    throw {
+      status: 500,
+      message: `電子ジャーナル一覧の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return (Array.isArray(data) ? data : [])
+    .map(posJournalFileRow)
+    .filter((row): row is Record<string, unknown> => row !== null)
+}
+
+async function fetchPosJournalState(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const month = normalizeYearMonth(url.searchParams.get("month"))
+  const rows = await fetchPosJournalRows(supabase, storeKey, month)
+  const days = rows
+    .map((row) =>
+      isRecord(row.parsed_data) ? row.parsed_data as PosJournalDay : null
+    )
+    .filter((day): day is PosJournalDay =>
+      day !== null && typeof day.business_date === "string" &&
+      Array.isArray(day.receipts)
+    )
+  const storeCode = toSafeString(rows[0]?.store_code)
+  const knownStore = resolvePosJournalStore(storeCode) ??
+    (storeKey.toLowerCase() === "bistrocavacava"
+      ? resolvePosJournalStore("1015")
+      : null)
+  const resolvedStoreCode = storeCode || (knownStore ? "1015" : "")
+  const storeName = knownStore?.storeName || storeKey
+  const summary = buildPosJournalSummary({
+    storeKey,
+    storeName,
+    storeCode: resolvedStoreCode,
+    month,
+    days,
+    fileCount: rows.length,
+  })
+  return {
+    ok: true,
+    store_key: storeKey,
+    store_name: storeName,
+    month,
+    files: rows.map(({ parsed_data: _parsedData, ...row }) => row),
+    summary,
+  }
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const stableBytes = new Uint8Array(bytes.byteLength)
+  stableBytes.set(bytes)
+  const digest = await crypto.subtle.digest("SHA-256", stableBytes.buffer)
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+}
+
+function buildPosJournalStoragePath(
+  storeKey: string,
+  businessDate: string,
+  hash: string,
+  originalFileName: string,
+): string {
+  const month = businessDate.slice(0, 7)
+  const safeName = sanitizeUploadFileName(originalFileName || "journal.lzh")
+  return `${storeKey}/${month}/${businessDate}/${
+    hash.slice(0, 16)
+  }-${crypto.randomUUID()}-${safeName}`
+}
+
+async function uploadPosJournalFiles(
+  req: Request,
+  supabase: ReturnType<typeof createClient>,
+  storeScope: string | null,
+) {
+  const contentLength = Number(req.headers.get("content-length") ?? "")
+  const maxPayload =
+    POS_JOURNAL_UPLOAD_MAX_BYTES * POS_JOURNAL_UPLOAD_MAX_FILES + 1024 * 1024
+  if (Number.isFinite(contentLength) && contentLength > maxPayload) {
+    throw {
+      status: 400,
+      message: "アップロード全体のサイズが大きすぎます。",
+    } satisfies AppError
+  }
+  let formData: FormData
+  try {
+    formData = await req.formData()
+  } catch {
+    throw {
+      status: 400,
+      message: "Upload request must be multipart/form-data.",
+    } satisfies AppError
+  }
+  const fileValues = formData.getAll("files").filter((value): value is File =>
+    value instanceof File
+  )
+  if (!fileValues.length) {
+    const single = formData.get("file")
+    if (single instanceof File) fileValues.push(single)
+  }
+  if (!fileValues.length) {
+    throw {
+      status: 400,
+      message: "LZHファイルを選択してください。",
+    } satisfies AppError
+  }
+  if (fileValues.length > POS_JOURNAL_UPLOAD_MAX_FILES) {
+    throw {
+      status: 400,
+      message:
+        `一度にアップロードできるのは${POS_JOURNAL_UPLOAD_MAX_FILES}件までです。`,
+    } satisfies AppError
+  }
+
+  const requestedStore = toSafeString(formData.get("store_key"))
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw {
+      status: 400,
+      message: "店舗を選択してください。",
+    } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw {
+      status: 403,
+      message: "他店舗のデータにはアクセスできません。",
+    } satisfies AppError
+  }
+  const expectedMonthRaw = toSafeString(formData.get("month"))
+  const expectedMonth = expectedMonthRaw
+    ? normalizeYearMonth(expectedMonthRaw)
+    : ""
+  const successes: Record<string, unknown>[] = []
+  const duplicates: Record<string, unknown>[] = []
+  const failures: Record<string, unknown>[] = []
+
+  for (const file of fileValues) {
+    const originalFileName = sanitizeUploadFileName(file.name || "journal.lzh")
+    let storagePath = ""
+    try {
+      if (extractFileExt(originalFileName) !== "lzh") {
+        throw new Error("LZHファイルのみアップロードできます。")
+      }
+      if (!Number.isFinite(file.size) || file.size <= 0) {
+        throw new Error("空のファイルはアップロードできません。")
+      }
+      if (file.size > POS_JOURNAL_UPLOAD_MAX_BYTES) {
+        throw new Error(
+          `1ファイルは${
+            Math.floor(POS_JOURNAL_UPLOAD_MAX_BYTES / (1024 * 1024))
+          }MB以下にしてください。`,
+        )
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const storeCode = detectPosJournalStoreCode(originalFileName)
+      const mappedStore = resolvePosJournalStore(storeCode)
+      if (!mappedStore) {
+        throw new Error(`未登録の店舗コードです: ${storeCode || "不明"}`)
+      }
+      if (mappedStore.storeKey.toLowerCase() !== storeKey.toLowerCase()) {
+        throw new Error(
+          `店舗コード${storeCode}は${mappedStore.storeName}です。選択店舗と一致しません。`,
+        )
+      }
+      const day = parsePosJournalLzh(bytes, originalFileName)
+      const businessDate = day.business_date
+      if (expectedMonth && businessDate.slice(0, 7) !== expectedMonth) {
+        throw new Error(
+          `営業日${businessDate}は選択中の${expectedMonth}に含まれません。`,
+        )
+      }
+      const hash = await sha256Hex(bytes)
+      const { data: existingHash, error: existingHashError } = await supabase
+        .from("pos_journal_files")
+        .select("id, business_date, original_file_name")
+        .eq("store_partition_key", storeKey)
+        .eq("sha256_hex", hash)
+        .is("storage_deleted_at", null)
+        .maybeSingle()
+      if (existingHashError) {
+        throw new Error(`重複確認に失敗しました: ${existingHashError.message}`)
+      }
+      if (existingHash) {
+        duplicates.push({
+          original_file_name: originalFileName,
+          id: Number(existingHash.id),
+          business_date: String(existingHash.business_date ?? ""),
+          reason: "同じ内容のファイルは既に保管されています。",
+        })
+        continue
+      }
+      const { data: existingDate, error: existingDateError } = await supabase
+        .from("pos_journal_files")
+        .select("id, original_file_name")
+        .eq("store_partition_key", storeKey)
+        .eq("business_date", businessDate)
+        .is("storage_deleted_at", null)
+        .maybeSingle()
+      if (existingDateError) {
+        throw new Error(
+          `営業日の重複確認に失敗しました: ${existingDateError.message}`,
+        )
+      }
+      if (existingDate) {
+        throw new Error(
+          `営業日${businessDate}は既に保管済みです。既存ファイルを削除してから再アップロードしてください。`,
+        )
+      }
+      storagePath = buildPosJournalStoragePath(
+        storeKey,
+        businessDate,
+        hash,
+        originalFileName,
+      )
+      const { error: uploadError } = await supabase.storage.from(
+        POS_JOURNAL_BUCKET,
+      ).upload(storagePath, bytes, {
+        contentType: "application/x-lzh-compressed",
+        upsert: false,
+      })
+      if (uploadError) {
+        throw new Error(`原本の保存に失敗しました: ${uploadError.message}`)
+      }
+      const payload = {
+        store_partition_key: storeKey,
+        store_code: storeCode,
+        business_date: businessDate,
+        year_month: businessDate.slice(0, 7),
+        original_file_name: originalFileName,
+        inner_file_name: originalFileName.replace(/\.lzh$/i, ".jnl"),
+        storage_bucket: POS_JOURNAL_BUCKET,
+        storage_path: storagePath,
+        mime_type: "application/x-lzh-compressed",
+        file_size_bytes: bytes.byteLength,
+        sha256_hex: hash,
+        parsed_data: day,
+        net_sales: Number(day.net_sales) || 0,
+        tax_yen: Number(day.tax) || 0,
+        gross_sales: Number(day.gross_sales) || 0,
+        groups_count: Number(day.groups) || 0,
+        guests_count: Number(day.guests) || 0,
+        receipts_count: Array.isArray(day.receipts) ? day.receipts.length : 0,
+      }
+      const { data: inserted, error: insertError } = await supabase
+        .from("pos_journal_files")
+        .insert(payload)
+        .select(
+          "id, store_partition_key, store_code, business_date, year_month, original_file_name, inner_file_name, file_size_bytes, sha256_hex, parsed_data, net_sales, tax_yen, gross_sales, groups_count, guests_count, receipts_count, storage_deleted_at, storage_delete_error, uploaded_at",
+        )
+        .single()
+      if (insertError) {
+        await supabase.storage.from(POS_JOURNAL_BUCKET).remove([storagePath])
+        storagePath = ""
+        throw new Error(`解析結果の保存に失敗しました: ${insertError.message}`)
+      }
+      const normalized = posJournalFileRow(inserted)
+      if (!normalized) throw new Error("保存した電子ジャーナル行が不正です。")
+      successes.push(normalized)
+      storagePath = ""
+    } catch (error) {
+      if (storagePath) {
+        try {
+          await supabase.storage.from(POS_JOURNAL_BUCKET).remove([storagePath])
+        } catch (_) {
+          // Best-effort rollback; the table insert is never committed on this path.
+        }
+      }
+      failures.push({
+        original_file_name: originalFileName,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  return {
+    ok: failures.length === 0,
+    uploaded_count: successes.length,
+    duplicate_count: duplicates.length,
+    failed_count: failures.length,
+    uploaded: successes.map(({ parsed_data: _parsedData, ...row }) => row),
+    duplicates,
+    failures,
+  }
+}
+
+async function fetchPosJournalDownloadUrl(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const id = Number(url.searchParams.get("id"))
+  if (!Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const { data: row, error } = await supabase
+    .from("pos_journal_files")
+    .select(
+      "id, store_partition_key, storage_bucket, storage_path, original_file_name",
+    )
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `電子ジャーナルの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!row) {
+    throw {
+      status: 404,
+      message: "電子ジャーナルが見つかりません。",
+    } satisfies AppError
+  }
+  const signedUrl = await createSignedMediaDownloadUrl(
+    supabase,
+    toSafeString(row.storage_bucket),
+    toSafeString(row.storage_path),
+    toSafeString(row.original_file_name) || "journal.lzh",
+  )
+  if (!signedUrl) {
+    throw {
+      status: 500,
+      message: "ダウンロードURLを生成できませんでした。",
+    } satisfies AppError
+  }
+  return { ok: true, id, signed_url: signedUrl }
+}
+
+async function deletePosJournalFile(
+  supabase: ReturnType<typeof createClient>,
+  req: Request,
+  storeScope: string | null,
+) {
+  const body = await parseJson(req)
+  if (!isRecord(body)) {
+    throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+  }
+  if (String(body.confirmation ?? "") !== "delete") {
+    throw {
+      status: 400,
+      message: "削除確認欄へ半角小文字で delete と入力してください。",
+    } satisfies AppError
+  }
+  const id = Number(body.id)
+  if (!Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const requestedStore = String(body.store_key ?? "").trim()
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw {
+      status: 403,
+      message: "他店舗のデータにはアクセスできません。",
+    } satisfies AppError
+  }
+  const { data: row, error: fetchError } = await supabase
+    .from("pos_journal_files")
+    .select(
+      "id, store_partition_key, store_code, business_date, original_file_name, inner_file_name, storage_bucket, storage_path, mime_type, file_size_bytes, sha256_hex, parsed_data, net_sales, tax_yen, gross_sales, groups_count, guests_count, receipts_count, uploaded_at, created_at",
+    )
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .is("storage_deleted_at", null)
+    .maybeSingle()
+  if (fetchError) {
+    throw {
+      status: 500,
+      message: `削除対象の取得に失敗しました: ${fetchError.message}`,
+    } satisfies AppError
+  }
+  if (!row) {
+    throw {
+      status: 404,
+      message: "削除対象の電子ジャーナルが見つかりません。",
+    } satisfies AppError
+  }
+  const bucket = toSafeString(row.storage_bucket)
+  const storagePath = toSafeString(row.storage_path)
+  const { error: removeError } = await supabase.storage.from(bucket).remove([
+    storagePath,
+  ])
+  if (removeError) {
+    throw {
+      status: 500,
+      message: `原本ファイルの削除に失敗しました: ${removeError.message}`,
+    } satisfies AppError
+  }
+  const deletedAt = new Date().toISOString()
+  const deleteSnapshot = {
+    id: Number(row.id),
+    store_partition_key: String(row.store_partition_key ?? ""),
+    store_code: String(row.store_code ?? ""),
+    business_date: String(row.business_date ?? ""),
+    original_file_name: String(row.original_file_name ?? ""),
+    inner_file_name: row.inner_file_name == null
+      ? null
+      : String(row.inner_file_name),
+    storage_bucket: String(row.storage_bucket ?? ""),
+    storage_path: String(row.storage_path ?? ""),
+    mime_type: String(row.mime_type ?? ""),
+    file_size_bytes: Number(row.file_size_bytes ?? 0),
+    sha256_hex: String(row.sha256_hex ?? ""),
+    parsed_data: row.parsed_data,
+    net_sales: Number(row.net_sales ?? 0),
+    tax_yen: Number(row.tax_yen ?? 0),
+    gross_sales: Number(row.gross_sales ?? 0),
+    groups_count: Number(row.groups_count ?? 0),
+    guests_count: Number(row.guests_count ?? 0),
+    receipts_count: Number(row.receipts_count ?? 0),
+    uploaded_at: String(row.uploaded_at ?? ""),
+    created_at: String(row.created_at ?? ""),
+    storage_deleted_at: deletedAt,
+  }
+  const { error: tombstoneError } = await supabase
+    .from("pos_journal_files")
+    .update({
+      storage_deleted_at: deletedAt,
+      storage_delete_error: null,
+      delete_snapshot: deleteSnapshot,
+      updated_at: deletedAt,
+    })
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+  if (tombstoneError) {
+    throw {
+      status: 500,
+      message:
+        `原本は削除されましたが、削除状態の記録に失敗しました: ${tombstoneError.message}`,
+    } satisfies AppError
+  }
+  const { error: deleteError } = await supabase
+    .from("pos_journal_files")
+    .delete()
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+  if (deleteError) {
+    throw {
+      status: 500,
+      message:
+        `原本は削除済みです。保管テーブルの行削除に失敗しましたが、画面と集計からは除外されています: ${deleteError.message}`,
+    } satisfies AppError
+  }
+  return {
+    ok: true,
+    deleted: {
+      id,
+      store_key: storeKey,
+      business_date: String(row.business_date ?? ""),
+      original_file_name: String(row.original_file_name ?? ""),
+    },
+  }
+}
+
 function buildDocumentStoragePath(roomId: string | null, originalFileName: string): string {
   const now = new Date()
   const y = now.getUTCFullYear()
@@ -7431,7 +7992,7 @@ function resolveAdminRateLimit(method: string, path: string): { maxRequests: num
       windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,
     }
   }
-  if (method === "POST" && (path === "/documents" || path === "/petty-cash/receipt-image")) {
+  if (method === "POST" && (path === "/documents" || path === "/petty-cash/receipt-image" || path === "/pos-journals/upload")) {
     return {
       maxRequests: ADMIN_RATE_LIMIT_UPLOAD_MAX_REQUESTS,
       windowMs: ADMIN_RATE_LIMIT_UPLOAD_WINDOW_MS,

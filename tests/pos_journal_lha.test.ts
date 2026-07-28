@@ -1,0 +1,167 @@
+import {
+  decodeLh5,
+  extractLhaArchive,
+  listLhaEntries,
+} from "../supabase/functions/_shared/pos_journal_lha.ts";
+import {
+  buildPosJournalSummary,
+  detectPosJournalStoreCode,
+  parsePosJournalText,
+  resolvePosJournalStore,
+} from "../supabase/functions/_shared/pos_journal.ts";
+
+function assertEquals(actual: unknown, expected: unknown): void {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) {
+    throw new Error(`assertEquals failed\nactual: ${a}\nexpected: ${e}`);
+  }
+}
+
+function assertThrows(fn: () => unknown): void {
+  let thrown = false;
+  try {
+    fn();
+  } catch {
+    thrown = true;
+  }
+  if (!thrown) throw new Error("Expected function to throw");
+}
+
+function crc16(bytes: Uint8Array): number {
+  let crc = 0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc & 1) ? ((crc >>> 1) ^ 0xa001) : (crc >>> 1);
+    }
+  }
+  return crc & 0xffff;
+}
+
+function wrapLevel2Lh0(fileName: string, payload: Uint8Array): Uint8Array {
+  const fileNameBytes = new TextEncoder().encode(fileName);
+  const commonExt = new Uint8Array([0x00, 0x61, 0x62, 0x63, 0x00, 0x00]);
+  const nameExt = new Uint8Array(1 + fileNameBytes.length + 2);
+  nameExt[0] = 0x01;
+  nameExt.set(fileNameBytes, 1);
+  new DataView(nameExt.buffer).setUint16(
+    nameExt.length - 2,
+    commonExt.length,
+    true,
+  );
+  const headerSize = 26 + nameExt.length + commonExt.length;
+  const archive = new Uint8Array(headerSize + payload.length + 1);
+  const view = new DataView(archive.buffer);
+  view.setUint16(0, headerSize, true);
+  archive.set(new TextEncoder().encode("-lh0-"), 2);
+  view.setUint32(7, payload.length, true);
+  view.setUint32(11, payload.length, true);
+  archive[20] = 2;
+  view.setUint16(21, crc16(payload), true);
+  archive[23] = 0x55;
+  view.setUint16(24, nameExt.length, true);
+  archive.set(nameExt, 26);
+  archive.set(commonExt, 26 + nameExt.length);
+  archive.set(payload, headerSize);
+  return archive;
+}
+
+Deno.test("POS store code 1015 resolves to existing Bistro CAVACAVA store", () => {
+  assertEquals(
+    detectPosJournalStoreCode("101520260602221907580001.lzh"),
+    "1015",
+  );
+  assertEquals(resolvePosJournalStore("1015"), {
+    storeKey: "bistrocavacava",
+    storeName: "Bistro CAVACAVA",
+  });
+  assertEquals(resolvePosJournalStore("9999"), null);
+});
+
+Deno.test("monthly summary de-duplicates business dates and sorts them", () => {
+  const summary = buildPosJournalSummary({
+    storeKey: "bistrocavacava",
+    storeName: "Bistro CAVACAVA",
+    storeCode: "1015",
+    month: "2026-06",
+    fileCount: 3,
+    days: [
+      {
+        business_date: "2026-06-03",
+        gross_sales: 2200,
+        net_sales: 2000,
+        tax: 200,
+        groups: 1,
+        guests: 2,
+        pay_cash: { amount: 2200 },
+        receipts: [],
+        source: "b.lzh",
+      },
+      {
+        business_date: "2026-06-02",
+        gross_sales: 1100,
+        net_sales: 1000,
+        tax: 100,
+        groups: 1,
+        guests: 1,
+        pay_credit: { amount: 1100 },
+        receipts: [],
+        source: "a.lzh",
+      },
+      {
+        business_date: "2026-06-03",
+        gross_sales: 3300,
+        net_sales: 3000,
+        tax: 300,
+        groups: 2,
+        guests: 3,
+        pay_cash: { amount: 3300 },
+        receipts: [],
+        source: "new.lzh",
+      },
+    ],
+  });
+  assertEquals(summary.days.map((day) => day.business_date), [
+    "2026-06-02",
+    "2026-06-03",
+  ]);
+  assertEquals(summary.totals.gross_sales, 4400);
+  assertEquals(summary.totals.guests, 4);
+  assertEquals(summary.totals.avg_spend, 1100);
+});
+
+Deno.test("invalid and truncated LHA files fail closed", () => {
+  assertThrows(() => listLhaEntries(new Uint8Array()));
+  assertThrows(() => decodeLh5(new Uint8Array([0]), 10));
+  assertThrows(() => extractLhaArchive(new Uint8Array(30)));
+});
+
+Deno.test("journal parser reads completed sale with a fullwidth payment digit", () => {
+  const text = [
+    "0001-01   No.1001  2026年 6月 2日(火) 20時32分",
+    "  0000000000101   コース６品",
+    "                      @8,000x   1     \\8,000",
+    "合 計                        \\８,０００",
+    "        計２       クレジット         \\8,000",
+    "                               2名",
+    "0001-01   No.1002  2026年 6月 2日(火) 22時19分",
+    "★★   日計精算レポート   ★★",
+    "  営業日付：                    2026年 6月 2日",
+    "純 売 上                           \\７,２７３",
+    "消 費 税                              \\７２７",
+    "総 売 上                           \\８,０００",
+    " 会計組数・客数",
+    "                  １組                    ２名",
+    " クレジット計",
+    "                  １回              \\８,０００",
+    "0001-01   No.1003  2026年 6月 2日(火) 22時20分",
+    "★電子ｼﾞｬｰﾅﾙ送信    正常終了",
+  ].join("\r\n");
+  const day = parsePosJournalText(text, "101520260602221907580001.lzh");
+  assertEquals(day.business_date, "2026-06-02");
+  assertEquals(day.gross_sales, 8000);
+  assertEquals(day.receipts.length, 1);
+  assertEquals(day.receipts[0].pay, "クレジット");
+  assertEquals(day.receipts[0].items[0].name, "コース６品");
+});

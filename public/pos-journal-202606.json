@@ -1,0 +1,3610 @@
+{
+ "meta": {
+  "store_name": "Bistro CAVACAVA",
+  "store_code": "1015",
+  "month": "2026-06",
+  "file_count": 21,
+  "day_count": 21,
+  "generated_at": "2026-07-28T17:51:10+09:00",
+  "store_key": "bistrocavacava"
+ },
+ "totals": {
+  "net_sales": 1381207,
+  "tax": 138093,
+  "gross_sales": 1519300,
+  "groups": 63,
+  "guests": 137,
+  "avg_spend": 11090,
+  "cash_amount": 130700,
+  "credit_amount": 1388600,
+  "tabelog_amount": 0,
+  "ikyu_amount": 0,
+  "gurunavi_amount": 0
+ },
+ "payment_breakdown": {
+  "クレジット": {
+   "count": 57,
+   "amount": 1422800
+  },
+  "現金": {
+   "count": 8,
+   "amount": 130700
+  }
+ },
+ "item_ranking": [
+  {
+   "code": "0000000000102",
+   "name": "コース８品",
+   "qty": 42,
+   "amount": 420000
+  },
+  {
+   "code": "0000000000101",
+   "name": "コース６品",
+   "qty": 34,
+   "amount": 272000
+  },
+  {
+   "code": "0000000008102",
+   "name": "Glass Wine",
+   "qty": 148,
+   "amount": 213800
+  },
+  {
+   "code": "0000000002100",
+   "name": "Bottle Wine",
+   "qty": 16,
+   "amount": 166000
+  },
+  {
+   "code": "0000000000027",
+   "name": "SPｺ-ｽ",
+   "qty": 29,
+   "amount": 142600
+  },
+  {
+   "code": "0000000002101",
+   "name": "ﾍﾟｱﾘﾝｸﾞ",
+   "qty": 25,
+   "amount": 125000
+  },
+  {
+   "code": "0000000000029",
+   "name": "Cocktail",
+   "qty": 31,
+   "amount": 28700
+  },
+  {
+   "code": "0000000002107",
+   "name": "Soft Drink",
+   "qty": 32,
+   "amount": 25100
+  },
+  {
+   "code": "0000000000123",
+   "name": "L.魚料理",
+   "qty": 10,
+   "amount": 22000
+  },
+  {
+   "code": "0000000000115",
+   "name": "三右衛門肩ﾛ-ｽ",
+   "qty": 8,
+   "amount": 20800
+  },
+  {
+   "code": "0000000009300",
+   "name": "ｱﾙﾄﾊｳｽ",
+   "qty": 25,
+   "amount": 17500
+  },
+  {
+   "code": "0000000000122",
+   "name": "L.肉料理",
+   "qty": 6,
+   "amount": 15000
+  },
+  {
+   "code": "0000000000023",
+   "name": "Whisky",
+   "qty": 11,
+   "amount": 9800
+  },
+  {
+   "code": "0000000000108",
+   "name": "鰆ポワレ",
+   "qty": 4,
+   "amount": 9600
+  },
+  {
+   "code": "0000000000103",
+   "name": "ｼｬﾙｷｭﾄﾘ-盛",
+   "qty": 3,
+   "amount": 9600
+  },
+  {
+   "code": "0000000000100",
+   "name": "★アラカルト",
+   "qty": 8,
+   "amount": 9200
+  },
+  {
+   "code": "0000000000031",
+   "name": "SPパン",
+   "qty": 8,
+   "amount": 8000
+  },
+  {
+   "code": "0000000002105",
+   "name": "サッポロ赤星",
+   "qty": 7,
+   "amount": 7000
+  },
+  {
+   "code": "0000000000001",
+   "name": "チャージ料",
+   "qty": 13,
+   "amount": 6500
+  },
+  {
+   "code": "0000000009201",
+   "name": "ｺ-ﾋ-",
+   "qty": 7,
+   "amount": 4200
+  },
+  {
+   "code": "0000000002104",
+   "name": "アサヒ中瓶",
+   "qty": 4,
+   "amount": 4000
+  },
+  {
+   "code": "0000000000104",
+   "name": "フリット",
+   "qty": 3,
+   "amount": 3600
+  },
+  {
+   "code": "0000000009100",
+   "name": "ﾁ-ｽﾞ盛",
+   "qty": 2,
+   "amount": 3600
+  },
+  {
+   "code": "0000000008100",
+   "name": "ﾄﾞﾗｲｾﾞﾛ",
+   "qty": 6,
+   "amount": 3000
+  },
+  {
+   "code": "0000000000127",
+   "name": "L.ﾃﾞｻﾞ-ﾄ",
+   "qty": 5,
+   "amount": 3000
+  },
+  {
+   "code": "0000000000024",
+   "name": "Sherry",
+   "qty": 3,
+   "amount": 2700
+  },
+  {
+   "code": "0000000000124",
+   "name": "L.ﾘｿﾞｯﾄ",
+   "qty": 1,
+   "amount": 1800
+  },
+  {
+   "code": "0000000009200",
+   "name": "ｻﾝﾍﾟﾚｸﾞﾘﾉ",
+   "qty": 1,
+   "amount": 1200
+  },
+  {
+   "code": "0000000000107",
+   "name": "ﾐｯｸｽｵﾘ-ﾌﾞ",
+   "qty": 1,
+   "amount": 600
+  }
+ ],
+ "days": [
+  {
+   "business_date": "2026-06-02",
+   "net_sales": 95455,
+   "tax": 9545,
+   "gross_sales": 105000,
+   "groups": 2,
+   "guests": 8,
+   "avg_spend": 13125,
+   "dinein_items": 36,
+   "dinein_sales": 105000,
+   "discount_total": 0,
+   "pay_total": 105000,
+   "tax_out": 0,
+   "tax_in": 9545,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 2,
+    "amount": 105000
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "雨",
+   "temp_c": 27,
+   "receipts": [
+    {
+     "no": "7784",
+     "time": "20:32",
+     "pay": "クレジット",
+     "total": 22000,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 1,
+       "amount": 5000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 6,
+       "amount": 9000
+      },
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 1,
+       "amount": 8000
+      }
+     ]
+    },
+    {
+     "no": "7786",
+     "time": "21:05",
+     "pay": "クレジット",
+     "total": 83000,
+     "guests": 6,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 6,
+       "amount": 60000
+      },
+      {
+       "code": "0000000002105",
+       "name": "サッポロ赤星",
+       "unit": 1000,
+       "qty": 3,
+       "amount": 3000
+      },
+      {
+       "code": "0000000008100",
+       "name": "ﾄﾞﾗｲｾﾞﾛ",
+       "unit": 500,
+       "qty": 2,
+       "amount": 1000
+      },
+      {
+       "code": "0000000000023",
+       "name": "Whisky",
+       "unit": 800,
+       "qty": 4,
+       "amount": 3200
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 3,
+       "amount": 3600
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2000,
+       "qty": 2,
+       "amount": 4000
+      },
+      {
+       "code": "0000000000023",
+       "name": "Whisky",
+       "unit": 1000,
+       "qty": 3,
+       "amount": 3000
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 900,
+       "qty": 2,
+       "amount": 1800
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1800,
+       "qty": 1,
+       "amount": 1800
+      }
+     ]
+    }
+   ],
+   "source": "101520260602221907580001.lzh"
+  },
+  {
+   "business_date": "2026-06-03",
+   "net_sales": 38274,
+   "tax": 3826,
+   "gross_sales": 42100,
+   "groups": 3,
+   "guests": 5,
+   "avg_spend": 8420,
+   "dinein_items": 23,
+   "dinein_sales": 42100,
+   "discount_total": 0,
+   "pay_total": 42100,
+   "tax_out": 0,
+   "tax_in": 3826,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 3,
+    "amount": 42100
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "晴れ",
+   "temp_c": 23,
+   "receipts": [
+    {
+     "no": "7793",
+     "time": "19:20",
+     "pay": "クレジット",
+     "total": 25700,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 3,
+       "amount": 3000
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 2,
+       "amount": 1400
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 2,
+       "amount": 1400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2400,
+       "qty": 1,
+       "amount": 2400
+      }
+     ]
+    },
+    {
+     "no": "7795",
+     "time": "20:52",
+     "pay": "クレジット",
+     "total": 7800,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 1,
+       "amount": 5000
+      },
+      {
+       "code": "0000000008100",
+       "name": "ﾄﾞﾗｲｾﾞﾛ",
+       "unit": 500,
+       "qty": 1,
+       "amount": 500
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000009201",
+       "name": "ｺ-ﾋ-",
+       "unit": 600,
+       "qty": 1,
+       "amount": 600
+      },
+      {
+       "code": "0000000000100",
+       "name": "★アラカルト",
+       "unit": 800,
+       "qty": 1,
+       "amount": 800
+      }
+     ]
+    },
+    {
+     "no": "7799",
+     "time": "22:27",
+     "pay": "クレジット",
+     "total": 8600,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1300,
+       "qty": 2,
+       "amount": 2600
+      },
+      {
+       "code": "0000000000001",
+       "name": "チャージ料",
+       "unit": 500,
+       "qty": 2,
+       "amount": 1000
+      },
+      {
+       "code": "0000000009100",
+       "name": "ﾁ-ｽﾞ盛",
+       "unit": 1800,
+       "qty": 1,
+       "amount": 1800
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 2,
+       "amount": 3200
+      }
+     ]
+    }
+   ],
+   "source": "101520260603222707590001.lzh"
+  },
+  {
+   "business_date": "2026-06-04",
+   "net_sales": 0,
+   "tax": 0,
+   "gross_sales": 0,
+   "groups": 0,
+   "guests": 0,
+   "avg_spend": 0,
+   "dinein_items": 0,
+   "dinein_sales": 0,
+   "discount_total": 0,
+   "pay_total": 0,
+   "tax_out": 0,
+   "tax_in": 0,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 23,
+   "receipts": [],
+   "source": "101520260604220007600001.lzh"
+  },
+  {
+   "business_date": "2026-06-05",
+   "net_sales": 64001,
+   "tax": 6399,
+   "gross_sales": 70400,
+   "groups": 2,
+   "guests": 6,
+   "avg_spend": 11733,
+   "dinein_items": 16,
+   "dinein_sales": 70400,
+   "discount_total": 0,
+   "pay_total": 70400,
+   "tax_out": 0,
+   "tax_in": 6399,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 2,
+    "amount": 70400
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 23,
+   "receipts": [
+    {
+     "no": "7810",
+     "time": "17:39",
+     "pay": "クレジット",
+     "total": 6400,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000122",
+       "name": "L.肉料理",
+       "unit": 2500,
+       "qty": 2,
+       "amount": 5000
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      }
+     ]
+    },
+    {
+     "no": "7812",
+     "time": "21:31",
+     "pay": "クレジット",
+     "total": 64000,
+     "guests": 4,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 4,
+       "amount": 40000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 4,
+       "amount": 20000
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 1000,
+       "qty": 4,
+       "amount": 4000
+      }
+     ]
+    }
+   ],
+   "source": "101520260605221707610001.lzh"
+  },
+  {
+   "business_date": "2026-06-06",
+   "net_sales": 44638,
+   "tax": 4462,
+   "gross_sales": 49100,
+   "groups": 5,
+   "guests": 9,
+   "avg_spend": 5456,
+   "dinein_items": 19,
+   "dinein_sales": 49100,
+   "discount_total": 0,
+   "pay_total": 49100,
+   "tax_out": 0,
+   "tax_in": 4462,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 5,
+    "amount": 49100
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "晴れ",
+   "temp_c": 25,
+   "receipts": [
+    {
+     "no": "7820",
+     "time": "12:40",
+     "pay": "クレジット",
+     "total": 6600,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000123",
+       "name": "L.魚料理",
+       "unit": 2200,
+       "qty": 1,
+       "amount": 2200
+      },
+      {
+       "code": "0000000000122",
+       "name": "L.肉料理",
+       "unit": 2500,
+       "qty": 1,
+       "amount": 2500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      }
+     ]
+    },
+    {
+     "no": "7822",
+     "time": "17:50",
+     "pay": "クレジット",
+     "total": 7100,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000123",
+       "name": "L.魚料理",
+       "unit": 2200,
+       "qty": 1,
+       "amount": 2200
+      },
+      {
+       "code": "0000000000122",
+       "name": "L.肉料理",
+       "unit": 2500,
+       "qty": 1,
+       "amount": 2500
+      },
+      {
+       "code": "0000000009200",
+       "name": "ｻﾝﾍﾟﾚｸﾞﾘﾉ",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000000127",
+       "name": "L.ﾃﾞｻﾞ-ﾄ",
+       "unit": 600,
+       "qty": 2,
+       "amount": 1200
+      }
+     ]
+    },
+    {
+     "no": "7824",
+     "time": "19:55",
+     "pay": "クレジット",
+     "total": 26000,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      }
+     ]
+    },
+    {
+     "no": "7826",
+     "time": "21:46",
+     "pay": "クレジット",
+     "total": 3700,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000000001",
+       "name": "チャージ料",
+       "unit": 500,
+       "qty": 2,
+       "amount": 1000
+      }
+     ]
+    },
+    {
+     "no": "7828",
+     "time": "22:45",
+     "pay": "クレジット",
+     "total": 5700,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 1,
+       "amount": 5000
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      }
+     ]
+    }
+   ],
+   "source": "101520260606225307620001.lzh"
+  },
+  {
+   "business_date": "2026-06-08",
+   "net_sales": 86547,
+   "tax": 8653,
+   "gross_sales": 95200,
+   "groups": 3,
+   "guests": 7,
+   "avg_spend": 13600,
+   "dinein_items": 15,
+   "dinein_sales": 95200,
+   "discount_total": 0,
+   "pay_total": 95200,
+   "tax_out": 0,
+   "tax_in": 8653,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 3,
+    "amount": 95200
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 25,
+   "receipts": [
+    {
+     "no": "7836",
+     "time": "20:17",
+     "pay": "クレジット",
+     "total": 30000,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 2,
+       "amount": 20000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      }
+     ]
+    },
+    {
+     "no": "7839",
+     "time": "21:21",
+     "pay": "クレジット",
+     "total": 26200,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 9000,
+       "qty": 1,
+       "amount": 9000
+      },
+      {
+       "code": "0000000009201",
+       "name": "ｺ-ﾋ-",
+       "unit": 600,
+       "qty": 2,
+       "amount": 1200
+      }
+     ]
+    },
+    {
+     "no": "7840",
+     "time": "21:23",
+     "pay": "クレジット",
+     "total": 39000,
+     "guests": 3,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 3,
+       "amount": 24000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 3,
+       "amount": 15000
+      }
+     ]
+    }
+   ],
+   "source": "101520260608220907630001.lzh"
+  },
+  {
+   "business_date": "2026-06-09",
+   "net_sales": 69274,
+   "tax": 6926,
+   "gross_sales": 76200,
+   "groups": 2,
+   "guests": 6,
+   "avg_spend": 12700,
+   "dinein_items": 26,
+   "dinein_sales": 76200,
+   "discount_total": 0,
+   "pay_total": 76200,
+   "tax_out": 0,
+   "tax_in": 6926,
+   "pay_cash": {
+    "count": 1,
+    "amount": 37300
+   },
+   "pay_credit": {
+    "count": 1,
+    "amount": 38900
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 25,
+   "receipts": [
+    {
+     "no": "7848",
+     "time": "20:27",
+     "pay": "クレジット",
+     "total": 38900,
+     "guests": 3,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 3,
+       "amount": 24000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 3,
+       "amount": 3600
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 7500,
+       "qty": 1,
+       "amount": 7500
+      },
+      {
+       "code": "0000000000024",
+       "name": "Sherry",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 2,
+       "amount": 1400
+      },
+      {
+       "code": "0000000009201",
+       "name": "ｺ-ﾋ-",
+       "unit": 600,
+       "qty": 1,
+       "amount": 600
+      }
+     ]
+    },
+    {
+     "no": "7851",
+     "time": "21:15",
+     "pay": "現金",
+     "total": 37300,
+     "guests": 3,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 3,
+       "amount": 24000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2000,
+       "qty": 1,
+       "amount": 2000
+      },
+      {
+       "code": "0000000000024",
+       "name": "Sherry",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000002105",
+       "name": "サッポロ赤星",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 1,
+       "amount": 1600
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 3,
+       "amount": 2100
+      }
+     ]
+    }
+   ],
+   "source": "101520260609215807640001.lzh"
+  },
+  {
+   "business_date": "2026-06-10",
+   "net_sales": 98455,
+   "tax": 9845,
+   "gross_sales": 108300,
+   "groups": 3,
+   "guests": 8,
+   "avg_spend": 13538,
+   "dinein_items": 24,
+   "dinein_sales": 108300,
+   "discount_total": 0,
+   "pay_total": 108300,
+   "tax_out": 0,
+   "tax_in": 9845,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 3,
+    "amount": 108300
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "晴れ",
+   "temp_c": 25,
+   "receipts": [
+    {
+     "no": "7864",
+     "time": "20:11",
+     "pay": "クレジット",
+     "total": 6600,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000001",
+       "name": "チャージ料",
+       "unit": 500,
+       "qty": 1,
+       "amount": 500
+      },
+      {
+       "code": "0000000000104",
+       "name": "フリット",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 1,
+       "amount": 1600
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1400,
+       "qty": 1,
+       "amount": 1400
+      },
+      {
+       "code": "0000000000100",
+       "name": "★アラカルト",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      }
+     ]
+    },
+    {
+     "no": "7866",
+     "time": "21:19",
+     "pay": "クレジット",
+     "total": 32200,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 2,
+       "amount": 3000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 12000,
+       "qty": 1,
+       "amount": 12000
+      },
+      {
+       "code": "0000000009201",
+       "name": "ｺ-ﾋ-",
+       "unit": 600,
+       "qty": 2,
+       "amount": 1200
+      }
+     ]
+    },
+    {
+     "no": "7869",
+     "time": "21:56",
+     "pay": "クレジット",
+     "total": 69500,
+     "guests": 5,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 5,
+       "amount": 50000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1900,
+       "qty": 5,
+       "amount": 9500
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 10000,
+       "qty": 1,
+       "amount": 10000
+      }
+     ]
+    }
+   ],
+   "source": "101520260610225307650001.lzh"
+  },
+  {
+   "business_date": "2026-06-11",
+   "net_sales": 21910,
+   "tax": 2190,
+   "gross_sales": 24100,
+   "groups": 2,
+   "guests": 3,
+   "avg_spend": 8033,
+   "dinein_items": 11,
+   "dinein_sales": 24100,
+   "discount_total": 0,
+   "pay_total": 24100,
+   "tax_out": 0,
+   "tax_in": 2190,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 2,
+    "amount": 24100
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 25,
+   "receipts": [
+    {
+     "no": "7878",
+     "time": "20:23",
+     "pay": "クレジット",
+     "total": 17000,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 2,
+       "amount": 2000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1400,
+       "qty": 1,
+       "amount": 1400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000000100",
+       "name": "★アラカルト",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      }
+     ]
+    },
+    {
+     "no": "7882",
+     "time": "21:22",
+     "pay": "クレジット",
+     "total": 7100,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 1,
+       "amount": 5000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      }
+     ]
+    }
+   ],
+   "source": "101520260611221607660001.lzh"
+  },
+  {
+   "business_date": "2026-06-12",
+   "net_sales": 190457,
+   "tax": 19043,
+   "gross_sales": 209500,
+   "groups": 7,
+   "guests": 15,
+   "avg_spend": 13967,
+   "dinein_items": 61,
+   "dinein_sales": 209500,
+   "discount_total": 0,
+   "pay_total": 209500,
+   "tax_out": 0,
+   "tax_in": 19043,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 7,
+    "amount": 209500
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 26,
+   "receipts": [
+    {
+     "no": "7889",
+     "time": "13:41",
+     "pay": "クレジット",
+     "total": 3500,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000122",
+       "name": "L.肉料理",
+       "unit": 2500,
+       "qty": 1,
+       "amount": 2500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      }
+     ]
+    },
+    {
+     "no": "7891",
+     "time": "14:08",
+     "pay": "クレジット",
+     "total": 3700,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000122",
+       "name": "L.肉料理",
+       "unit": 2500,
+       "qty": 1,
+       "amount": 2500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      }
+     ]
+    },
+    {
+     "no": "7893",
+     "time": "21:35",
+     "pay": "クレジット",
+     "total": 31700,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 2,
+       "amount": 20000
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 7,
+       "amount": 6300
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2400,
+       "qty": 1,
+       "amount": 2400
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 800,
+       "qty": 2,
+       "amount": 1600
+      }
+     ]
+    },
+    {
+     "no": "7897",
+     "time": "22:09",
+     "pay": "クレジット",
+     "total": 21000,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000000100",
+       "name": "★アラカルト",
+       "unit": 2400,
+       "qty": 1,
+       "amount": 2400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 3,
+       "amount": 2100
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1800,
+       "qty": 1,
+       "amount": 1800
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1400,
+       "qty": 1,
+       "amount": 1400
+      },
+      {
+       "code": "0000000000107",
+       "name": "ﾐｯｸｽｵﾘ-ﾌﾞ",
+       "unit": 600,
+       "qty": 1,
+       "amount": 600
+      }
+     ]
+    },
+    {
+     "no": "7898",
+     "time": "22:12",
+     "pay": "クレジット",
+     "total": 31600,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 2,
+       "amount": 20000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 800,
+       "qty": 2,
+       "amount": 1600
+      }
+     ]
+    },
+    {
+     "no": "7900",
+     "time": "22:51",
+     "pay": "クレジット",
+     "total": 25400,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000002105",
+       "name": "サッポロ赤星",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 2,
+       "amount": 2000
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 1300,
+       "qty": 1,
+       "amount": 1300
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 3,
+       "amount": 3600
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 800,
+       "qty": 1,
+       "amount": 800
+      }
+     ]
+    },
+    {
+     "no": "7902",
+     "time": "22:59",
+     "pay": "クレジット",
+     "total": 92600,
+     "guests": 5,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 5,
+       "amount": 50000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 5,
+       "amount": 25000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 14000,
+       "qty": 1,
+       "amount": 14000
+      },
+      {
+       "code": "0000000002104",
+       "name": "アサヒ中瓶",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000002105",
+       "name": "サッポロ赤星",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 800,
+       "qty": 2,
+       "amount": 1600
+      }
+     ]
+    }
+   ],
+   "source": "101520260612235407670001.lzh"
+  },
+  {
+   "business_date": "2026-06-13",
+   "net_sales": 38456,
+   "tax": 3844,
+   "gross_sales": 42300,
+   "groups": 4,
+   "guests": 6,
+   "avg_spend": 7050,
+   "dinein_items": 17,
+   "dinein_sales": 42300,
+   "discount_total": 0,
+   "pay_total": 42300,
+   "tax_out": 0,
+   "tax_in": 3844,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 4,
+    "amount": 42300
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "晴れ",
+   "temp_c": 26,
+   "receipts": [
+    {
+     "no": "7909",
+     "time": "12:46",
+     "pay": "クレジット",
+     "total": 2800,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000123",
+       "name": "L.魚料理",
+       "unit": 2200,
+       "qty": 1,
+       "amount": 2200
+      },
+      {
+       "code": "0000000000127",
+       "name": "L.ﾃﾞｻﾞ-ﾄ",
+       "unit": 600,
+       "qty": 1,
+       "amount": 600
+      }
+     ]
+    },
+    {
+     "no": "7912",
+     "time": "20:31",
+     "pay": "クレジット",
+     "total": 13400,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000008100",
+       "name": "ﾄﾞﾗｲｾﾞﾛ",
+       "unit": 500,
+       "qty": 2,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1400,
+       "qty": 1,
+       "amount": 1400
+      }
+     ]
+    },
+    {
+     "no": "7914",
+     "time": "21:48",
+     "pay": "クレジット",
+     "total": 20400,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000000024",
+       "name": "Sherry",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 800,
+       "qty": 2,
+       "amount": 1600
+      }
+     ]
+    },
+    {
+     "no": "7917",
+     "time": "22:47",
+     "pay": "クレジット",
+     "total": 5700,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 1,
+       "amount": 5000
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      }
+     ]
+    }
+   ],
+   "source": "101520260613230507680001.lzh"
+  },
+  {
+   "business_date": "2026-06-16",
+   "net_sales": 3364,
+   "tax": 336,
+   "gross_sales": 3700,
+   "groups": 1,
+   "guests": 1,
+   "avg_spend": 3700,
+   "dinein_items": 3,
+   "dinein_sales": 3700,
+   "discount_total": 0,
+   "pay_total": 3700,
+   "tax_out": 0,
+   "tax_in": 336,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 1,
+    "amount": 3700
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "晴れ",
+   "temp_c": 26,
+   "receipts": [
+    {
+     "no": "7925",
+     "time": "22:03",
+     "pay": "クレジット",
+     "total": 3700,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000100",
+       "name": "★アラカルト",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      }
+     ]
+    }
+   ],
+   "source": "101520260616221807690001.lzh"
+  },
+  {
+   "business_date": "2026-06-17",
+   "net_sales": 12000,
+   "tax": 1200,
+   "gross_sales": 13200,
+   "groups": 1,
+   "guests": 2,
+   "avg_spend": 6600,
+   "dinein_items": 8,
+   "dinein_sales": 13200,
+   "discount_total": 0,
+   "pay_total": 13200,
+   "tax_out": 0,
+   "tax_in": 1200,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 1,
+    "amount": 13200
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "晴れ",
+   "temp_c": 26,
+   "receipts": [
+    {
+     "no": "7933",
+     "time": "21:57",
+     "pay": "クレジット",
+     "total": 13200,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000001",
+       "name": "チャージ料",
+       "unit": 500,
+       "qty": 2,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 2,
+       "amount": 3000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2600,
+       "qty": 2,
+       "amount": 5200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2000,
+       "qty": 2,
+       "amount": 4000
+      }
+     ]
+    }
+   ],
+   "source": "101520260617221907700001.lzh"
+  },
+  {
+   "business_date": "2026-06-18",
+   "net_sales": 88819,
+   "tax": 8881,
+   "gross_sales": 97700,
+   "groups": 2,
+   "guests": 6,
+   "avg_spend": 16283,
+   "dinein_items": 16,
+   "dinein_sales": 97700,
+   "discount_total": 0,
+   "pay_total": 97700,
+   "tax_out": 0,
+   "tax_in": 8881,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 2,
+    "amount": 97700
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 26,
+   "receipts": [
+    {
+     "no": "7941",
+     "time": "21:23",
+     "pay": "クレジット",
+     "total": 26000,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      }
+     ]
+    },
+    {
+     "no": "7943",
+     "time": "21:48",
+     "pay": "クレジット",
+     "total": 71700,
+     "guests": 4,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 4,
+       "amount": 40000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 10000,
+       "qty": 1,
+       "amount": 10000
+      },
+      {
+       "code": "0000000002104",
+       "name": "アサヒ中瓶",
+       "unit": 1000,
+       "qty": 2,
+       "amount": 2000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 8000,
+       "qty": 1,
+       "amount": 8000
+      },
+      {
+       "code": "0000000000023",
+       "name": "Whisky",
+       "unit": 900,
+       "qty": 3,
+       "amount": 2700
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 9000,
+       "qty": 1,
+       "amount": 9000
+      }
+     ]
+    }
+   ],
+   "source": "101520260618222307710001.lzh"
+  },
+  {
+   "business_date": "2026-06-19",
+   "net_sales": 137639,
+   "tax": 13761,
+   "gross_sales": 151400,
+   "groups": 5,
+   "guests": 15,
+   "avg_spend": 10093,
+   "dinein_items": 64,
+   "dinein_sales": 151400,
+   "discount_total": 0,
+   "pay_total": 151400,
+   "tax_out": 0,
+   "tax_in": 13761,
+   "pay_cash": {
+    "count": 1,
+    "amount": 17100
+   },
+   "pay_credit": {
+    "count": 4,
+    "amount": 134300
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "晴れ",
+   "temp_c": 28,
+   "receipts": [
+    {
+     "no": "7951",
+     "time": "13:56",
+     "pay": "クレジット",
+     "total": 4000,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000124",
+       "name": "L.ﾘｿﾞｯﾄ",
+       "unit": 1800,
+       "qty": 1,
+       "amount": 1800
+      },
+      {
+       "code": "0000000000123",
+       "name": "L.魚料理",
+       "unit": 2200,
+       "qty": 1,
+       "amount": 2200
+      }
+     ]
+    },
+    {
+     "no": "7954",
+     "time": "18:28",
+     "pay": "クレジット",
+     "total": 5600,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000123",
+       "name": "L.魚料理",
+       "unit": 2200,
+       "qty": 2,
+       "amount": 4400
+      },
+      {
+       "code": "0000000000127",
+       "name": "L.ﾃﾞｻﾞ-ﾄ",
+       "unit": 600,
+       "qty": 2,
+       "amount": 1200
+      }
+     ]
+    },
+    {
+     "no": "7957",
+     "time": "21:39",
+     "pay": "クレジット",
+     "total": 17100,
+     "guests": 3,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000000115",
+       "name": "三右衛門肩ﾛ-ｽ",
+       "unit": 2600,
+       "qty": 1,
+       "amount": 2600
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 5,
+       "amount": 4500
+      }
+     ]
+    },
+    {
+     "no": "7958",
+     "time": "21:39",
+     "pay": "クレジット",
+     "total": 17100,
+     "guests": 3,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000000115",
+       "name": "三右衛門肩ﾛ-ｽ",
+       "unit": 2600,
+       "qty": 1,
+       "amount": 2600
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 5,
+       "amount": 4500
+      }
+     ]
+    },
+    {
+     "no": "7959",
+     "time": "21:39",
+     "pay": "現金",
+     "total": 17100,
+     "guests": 3,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000000115",
+       "name": "三右衛門肩ﾛ-ｽ",
+       "unit": 2600,
+       "qty": 1,
+       "amount": 2600
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 5,
+       "amount": 4500
+      }
+     ]
+    },
+    {
+     "no": "7960",
+     "time": "21:40",
+     "pay": "クレジット",
+     "total": 22600,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 2,
+       "amount": 20000
+      },
+      {
+       "code": "0000000008100",
+       "name": "ﾄﾞﾗｲｾﾞﾛ",
+       "unit": 500,
+       "qty": 1,
+       "amount": 500
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 3,
+       "amount": 2100
+      }
+     ]
+    },
+    {
+     "no": "7963",
+     "time": "21:51",
+     "pay": "クレジット",
+     "total": 102100,
+     "guests": 6,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 6,
+       "amount": 30000
+      },
+      {
+       "code": "0000000000108",
+       "name": "鰆ポワレ",
+       "unit": 2400,
+       "qty": 4,
+       "amount": 9600
+      },
+      {
+       "code": "0000000000115",
+       "name": "三右衛門肩ﾛ-ｽ",
+       "unit": 2600,
+       "qty": 4,
+       "amount": 10400
+      },
+      {
+       "code": "0000000000103",
+       "name": "ｼｬﾙｷｭﾄﾘ-盛",
+       "unit": 3200,
+       "qty": 2,
+       "amount": 6400
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 12000,
+       "qty": 1,
+       "amount": 12000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 2,
+       "amount": 3000
+      },
+      {
+       "code": "0000000002105",
+       "name": "サッポロ赤星",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 3,
+       "amount": 2100
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 1,
+       "amount": 1600
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1100,
+       "qty": 1,
+       "amount": 1100
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2000,
+       "qty": 1,
+       "amount": 2000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 6,
+       "amount": 9000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2400,
+       "qty": 1,
+       "amount": 2400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 2,
+       "amount": 2400
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 3,
+       "amount": 2100
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 2,
+       "amount": 2000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1800,
+       "qty": 1,
+       "amount": 1800
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 1,
+       "amount": 1600
+      },
+      {
+       "code": "0000000000023",
+       "name": "Whisky",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      }
+     ]
+    }
+   ],
+   "source": "101520260619230207720001.lzh"
+  },
+  {
+   "business_date": "2026-06-20",
+   "net_sales": 76729,
+   "tax": 7671,
+   "gross_sales": 84400,
+   "groups": 6,
+   "guests": 10,
+   "avg_spend": 8440,
+   "dinein_items": 33,
+   "dinein_sales": 84400,
+   "discount_total": 0,
+   "pay_total": 84400,
+   "tax_out": 0,
+   "tax_in": 7671,
+   "pay_cash": {
+    "count": 2,
+    "amount": 40100
+   },
+   "pay_credit": {
+    "count": 4,
+    "amount": 44300
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "雨",
+   "temp_c": 25,
+   "receipts": [
+    {
+     "no": "7975",
+     "time": "12:56",
+     "pay": "クレジット",
+     "total": 11500,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 2600,
+       "qty": 1,
+       "amount": 2600
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 1,
+       "amount": 1600
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2400,
+       "qty": 1,
+       "amount": 2400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2400,
+       "qty": 1,
+       "amount": 2400
+      }
+     ]
+    },
+    {
+     "no": "7979",
+     "time": "13:54",
+     "pay": "現金",
+     "total": 4400,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000123",
+       "name": "L.魚料理",
+       "unit": 2200,
+       "qty": 2,
+       "amount": 4400
+      }
+     ]
+    },
+    {
+     "no": "7981",
+     "time": "14:01",
+     "pay": "クレジット",
+     "total": 2200,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000123",
+       "name": "L.魚料理",
+       "unit": 2200,
+       "qty": 1,
+       "amount": 2200
+      }
+     ]
+    },
+    {
+     "no": "7982",
+     "time": "14:07",
+     "pay": "クレジット",
+     "total": 2200,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000123",
+       "name": "L.魚料理",
+       "unit": 2200,
+       "qty": 1,
+       "amount": 2200
+      }
+     ]
+    },
+    {
+     "no": "7985",
+     "time": "20:22",
+     "pay": "現金",
+     "total": 35700,
+     "guests": 3,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 1,
+       "amount": 10000
+      },
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 1,
+       "amount": 5000
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 1300,
+       "qty": 1,
+       "amount": 1300
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 2,
+       "amount": 1400
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 2,
+       "amount": 1400
+      },
+      {
+       "code": "0000000009201",
+       "name": "ｺ-ﾋ-",
+       "unit": 600,
+       "qty": 1,
+       "amount": 600
+      }
+     ]
+    },
+    {
+     "no": "7987",
+     "time": "21:01",
+     "pay": "クレジット",
+     "total": 28400,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 2,
+       "amount": 3000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 2,
+       "amount": 2000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 2,
+       "amount": 2400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 500,
+       "qty": 1,
+       "amount": 500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1400,
+       "qty": 1,
+       "amount": 1400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 800,
+       "qty": 2,
+       "amount": 1600
+      }
+     ]
+    }
+   ],
+   "source": "101520260620221807730001.lzh"
+  },
+  {
+   "business_date": "2026-06-23",
+   "net_sales": 103729,
+   "tax": 10371,
+   "gross_sales": 114100,
+   "groups": 6,
+   "guests": 12,
+   "avg_spend": 9508,
+   "dinein_items": 41,
+   "dinein_sales": 114100,
+   "discount_total": 0,
+   "pay_total": 114100,
+   "tax_out": 0,
+   "tax_in": 10371,
+   "pay_cash": {
+    "count": 1,
+    "amount": 10000
+   },
+   "pay_credit": {
+    "count": 5,
+    "amount": 104100
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 24,
+   "receipts": [
+    {
+     "no": "8000",
+     "time": "20:10",
+     "pay": "クレジット",
+     "total": 52000,
+     "guests": 4,
+     "items": [
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 4,
+       "amount": 32000
+      },
+      {
+       "code": "0000000002101",
+       "name": "ﾍﾟｱﾘﾝｸﾞ",
+       "unit": 5000,
+       "qty": 4,
+       "amount": 20000
+      }
+     ]
+    },
+    {
+     "no": "8003",
+     "time": "21:01",
+     "pay": "クレジット",
+     "total": 24600,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 3,
+       "amount": 2100
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 1,
+       "amount": 1600
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2400,
+       "qty": 1,
+       "amount": 2400
+      },
+      {
+       "code": "0000000000101",
+       "name": "コース６品",
+       "unit": 8000,
+       "qty": 2,
+       "amount": 16000
+      }
+     ]
+    },
+    {
+     "no": "8005",
+     "time": "21:16",
+     "pay": "クレジット",
+     "total": 5700,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 1,
+       "amount": 5000
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      }
+     ]
+    },
+    {
+     "no": "8008",
+     "time": "22:15",
+     "pay": "現金",
+     "total": 10000,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000100",
+       "name": "★アラカルト",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000000001",
+       "name": "チャージ料",
+       "unit": 500,
+       "qty": 2,
+       "amount": 1000
+      },
+      {
+       "code": "0000000009100",
+       "name": "ﾁ-ｽﾞ盛",
+       "unit": 1800,
+       "qty": 1,
+       "amount": 1800
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 4,
+       "amount": 6000
+      }
+     ]
+    },
+    {
+     "no": "8010",
+     "time": "22:28",
+     "pay": "クレジット",
+     "total": 18900,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000001",
+       "name": "チャージ料",
+       "unit": 500,
+       "qty": 2,
+       "amount": 1000
+      },
+      {
+       "code": "0000000000100",
+       "name": "★アラカルト",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000000103",
+       "name": "ｼｬﾙｷｭﾄﾘ-盛",
+       "unit": 3200,
+       "qty": 1,
+       "amount": 3200
+      },
+      {
+       "code": "0000000000115",
+       "name": "三右衛門肩ﾛ-ｽ",
+       "unit": 2600,
+       "qty": 1,
+       "amount": 2600
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 4,
+       "amount": 6000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 2600,
+       "qty": 2,
+       "amount": 5200
+      }
+     ]
+    },
+    {
+     "no": "8013",
+     "time": "22:56",
+     "pay": "クレジット",
+     "total": 2900,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000000001",
+       "name": "チャージ料",
+       "unit": 500,
+       "qty": 1,
+       "amount": 500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1400,
+       "qty": 1,
+       "amount": 1400
+      }
+     ]
+    }
+   ],
+   "source": "101520260623231107740001.lzh"
+  },
+  {
+   "business_date": "2026-06-24",
+   "net_sales": 20274,
+   "tax": 2026,
+   "gross_sales": 22300,
+   "groups": 2,
+   "guests": 3,
+   "avg_spend": 7433,
+   "dinein_items": 14,
+   "dinein_sales": 22300,
+   "discount_total": 0,
+   "pay_total": 22300,
+   "tax_out": 0,
+   "tax_in": 2026,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 2,
+    "amount": 22300
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "曇り",
+   "temp_c": 26,
+   "receipts": [
+    {
+     "no": "8020",
+     "time": "21:02",
+     "pay": "クレジット",
+     "total": 16200,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000000029",
+       "name": "Cocktail",
+       "unit": 900,
+       "qty": 2,
+       "amount": 1800
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1400,
+       "qty": 1,
+       "amount": 1400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 1,
+       "amount": 1600
+      },
+      {
+       "code": "0000000009300",
+       "name": "ｱﾙﾄﾊｳｽ",
+       "unit": 700,
+       "qty": 2,
+       "amount": 1400
+      }
+     ]
+    },
+    {
+     "no": "8023",
+     "time": "21:38",
+     "pay": "クレジット",
+     "total": 6100,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000104",
+       "name": "フリット",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000000001",
+       "name": "チャージ料",
+       "unit": 500,
+       "qty": 1,
+       "amount": 500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 2,
+       "amount": 2400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 2,
+       "amount": 2000
+      }
+     ]
+    }
+   ],
+   "source": "101520260624220607750001.lzh"
+  },
+  {
+   "business_date": "2026-06-25",
+   "net_sales": 2728,
+   "tax": 272,
+   "gross_sales": 3000,
+   "groups": 1,
+   "guests": 1,
+   "avg_spend": 3000,
+   "dinein_items": 3,
+   "dinein_sales": 3000,
+   "discount_total": 0,
+   "pay_total": 3000,
+   "tax_out": 0,
+   "tax_in": 272,
+   "pay_cash": {
+    "count": 1,
+    "amount": 3000
+   },
+   "pay_credit": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "雨",
+   "temp_c": 24,
+   "receipts": [
+    {
+     "no": "8029",
+     "time": "22:03",
+     "pay": "現金",
+     "total": 3000,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000031",
+       "name": "SPパン",
+       "unit": 1000,
+       "qty": 3,
+       "amount": 3000
+      }
+     ]
+    }
+   ],
+   "source": "101520260625220407760001.lzh"
+  },
+  {
+   "business_date": "2026-06-26",
+   "net_sales": 103365,
+   "tax": 10335,
+   "gross_sales": 113700,
+   "groups": 3,
+   "guests": 8,
+   "avg_spend": 14213,
+   "dinein_items": 25,
+   "dinein_sales": 113700,
+   "discount_total": 0,
+   "pay_total": 113700,
+   "tax_out": 0,
+   "tax_in": 10335,
+   "pay_cash": {
+    "count": 2,
+    "amount": 23200
+   },
+   "pay_credit": {
+    "count": 1,
+    "amount": 90500
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "雨",
+   "temp_c": 25,
+   "receipts": [
+    {
+     "no": "8036",
+     "time": "21:17",
+     "pay": "現金",
+     "total": 18200,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000027",
+       "name": "SPｺ-ｽ",
+       "unit": 5000,
+       "qty": 2,
+       "amount": 10000
+      },
+      {
+       "code": "0000000002104",
+       "name": "アサヒ中瓶",
+       "unit": 1000,
+       "qty": 1,
+       "amount": 1000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1000,
+       "qty": 2,
+       "amount": 2000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1600,
+       "qty": 1,
+       "amount": 1600
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1400,
+       "qty": 1,
+       "amount": 1400
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      }
+     ]
+    },
+    {
+     "no": "8039",
+     "time": "23:10",
+     "pay": "クレジット",
+     "total": 90500,
+     "guests": 5,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 4,
+       "amount": 40000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 10000,
+       "qty": 1,
+       "amount": 10000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 18500,
+       "qty": 1,
+       "amount": 18500
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 16000,
+       "qty": 1,
+       "amount": 16000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 3,
+       "amount": 4500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      }
+     ]
+    },
+    {
+     "no": "8040",
+     "time": "23:20",
+     "pay": "現金",
+     "total": 5000,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000031",
+       "name": "SPパン",
+       "unit": 1000,
+       "qty": 5,
+       "amount": 5000
+      }
+     ]
+    }
+   ],
+   "source": "101520260626000307770001.lzh"
+  },
+  {
+   "business_date": "2026-06-30",
+   "net_sales": 85093,
+   "tax": 8507,
+   "gross_sales": 93600,
+   "groups": 3,
+   "guests": 6,
+   "avg_spend": 15600,
+   "dinein_items": 20,
+   "dinein_sales": 93600,
+   "discount_total": 0,
+   "pay_total": 93600,
+   "tax_out": 0,
+   "tax_in": 8507,
+   "pay_cash": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_credit": {
+    "count": 3,
+    "amount": 93600
+   },
+   "pay_tabelog": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_ikyu": {
+    "count": 0,
+    "amount": 0
+   },
+   "pay_gurunavi": {
+    "count": 0,
+    "amount": 0
+   },
+   "weather": "晴れ",
+   "temp_c": 28,
+   "receipts": [
+    {
+     "no": "8048",
+     "time": "19:33",
+     "pay": "クレジット",
+     "total": 21900,
+     "guests": 2,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 2,
+       "amount": 20000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000002107",
+       "name": "Soft Drink",
+       "unit": 700,
+       "qty": 1,
+       "amount": 700
+      }
+     ]
+    },
+    {
+     "no": "8050",
+     "time": "21:50",
+     "pay": "クレジット",
+     "total": 7200,
+     "guests": 1,
+     "items": [
+      {
+       "code": "0000000000104",
+       "name": "フリット",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 1,
+       "amount": 1500
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000000100",
+       "name": "★アラカルト",
+       "unit": 900,
+       "qty": 1,
+       "amount": 900
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1200,
+       "qty": 1,
+       "amount": 1200
+      }
+     ]
+    },
+    {
+     "no": "8052",
+     "time": "22:11",
+     "pay": "クレジット",
+     "total": 64500,
+     "guests": 3,
+     "items": [
+      {
+       "code": "0000000000102",
+       "name": "コース８品",
+       "unit": 10000,
+       "qty": 3,
+       "amount": 30000
+      },
+      {
+       "code": "0000000008102",
+       "name": "Glass Wine",
+       "unit": 1500,
+       "qty": 3,
+       "amount": 4500
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 7000,
+       "qty": 1,
+       "amount": 7000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 6000,
+       "qty": 1,
+       "amount": 6000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 9000,
+       "qty": 1,
+       "amount": 9000
+      },
+      {
+       "code": "0000000002100",
+       "name": "Bottle Wine",
+       "unit": 8000,
+       "qty": 1,
+       "amount": 8000
+      }
+     ]
+    }
+   ],
+   "source": "101520260630234107780001.lzh"
+  }
+ ]
+}
