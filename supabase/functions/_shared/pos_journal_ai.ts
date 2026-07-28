@@ -140,11 +140,23 @@ function boundedText(value: unknown, maxLength: number): string {
 }
 
 function normalizeYearMonth(value: unknown): string {
-  const month = String(value ?? "").trim().slice(0, 7);
+  const month = String(value ?? "").trim();
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     throw new Error("month must be YYYY-MM.");
   }
   return month;
+}
+
+function isValidIsoDate(value: string): boolean {
+  const matched = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!matched) return false;
+  const year = Number(matched[1]);
+  const month = Number(matched[2]);
+  const day = Number(matched[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day;
 }
 
 function sanitizeReceiptItem(value: unknown): PosJournalReceiptItem | null {
@@ -196,7 +208,7 @@ function sanitizePaymentBlock(
 function sanitizeDay(value: unknown, month: string): PosJournalDay | null {
   if (!isRecord(value)) return null;
   const date = String(value.business_date ?? "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0, 7) !== month) {
+  if (!isValidIsoDate(date) || date.slice(0, 7) !== month) {
     return null;
   }
   const rawReceipts = Array.isArray(value.receipts) ? value.receipts : [];
@@ -253,9 +265,15 @@ export function normalizePosJournalAiSummary(
   if (rawDays.length > MAX_DAYS) {
     throw new Error(`Too many journal days (max ${MAX_DAYS}).`);
   }
-  const days = rawDays
-    .map((day) => sanitizeDay(day, month))
-    .filter((day): day is PosJournalDay => day !== null);
+  const days = rawDays.map((day) => {
+    const normalized = sanitizeDay(day, month);
+    if (!normalized) {
+      throw new Error(
+        "Each journal day must have a valid business_date within the selected month.",
+      );
+    }
+    return normalized;
+  });
   return buildPosJournalSummary({
     storeKey: expected.storeKey,
     storeName: expected.storeName,

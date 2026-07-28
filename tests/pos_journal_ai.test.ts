@@ -86,12 +86,6 @@ function sampleSummary() {
         pay_credit: { count: 2, amount: 30000 },
         receipts: [],
       },
-      {
-        business_date: "2026-07-01",
-        gross_sales: 777777,
-        guests: 99,
-        receipts: [],
-      },
     ],
   };
 }
@@ -164,6 +158,25 @@ Deno.test("oversized day arrays fail instead of being silently truncated", () =>
         business_date: `2026-06-${String((index % 30) + 1).padStart(2, "0")}`,
         receipts: [],
       })),
+    }, expected)
+  );
+});
+
+Deno.test("invalid dates and extra month suffixes are rejected", () => {
+  assertThrows(() =>
+    normalizePosJournalAiSummary({
+      days: [{ business_date: "2026-06-31", receipts: [] }],
+    }, expected)
+  );
+  assertThrows(() =>
+    normalizePosJournalAiSummary({ days: [] }, {
+      ...expected,
+      month: "2026-06-extra",
+    })
+  );
+  assertThrows(() =>
+    normalizePosJournalAiSummary({
+      days: [{ business_date: "2026-07-01", receipts: [] }],
     }, expected)
   );
 });

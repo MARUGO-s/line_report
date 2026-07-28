@@ -7194,7 +7194,7 @@ function extractFileExt(fileName: string): string {
 }
 
 function normalizeYearMonth(value: unknown): string {
-  const month = String(value ?? "").trim().slice(0, 7)
+  const month = String(value ?? "").trim()
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     throw { status: 400, message: "month must be YYYY-MM." } satisfies AppError
   }
