@@ -94,6 +94,25 @@ New records are appended below.
   - Commit `1af2957`（機能）と`980c07a`（入力検証補強）をmainへpush。Pages run `30355275104`、Edge Functions run `30355274736`/`30355681784`はsuccess。
   - 本番`pos-journal.html`はHTTP 200でAI分析UIを確認、新AI API未認証は401。
 
+### 2026-07-28 - 電子ジャーナルAI分析のPDF保存・DB履歴・削除
+
+- Request: AI分析結果をPDFとして保存できるようにし、データベースへ蓄積、不要な履歴を削除できるようにする。
+- Database/API:
+  - migration `20260728115706_pos_journal_ai_analysis_history.sql`でprivate table `pos_journal_ai_analyses`を追加。
+  - 分析本文、AI/基本分析区分、provider/model、警告、分析時点のfactsスナップショット、ファイル/日数、総売上、客数、客単価、生成日時を履歴ごとに保存。
+  - 分析実行ごとに追加保存。同じ月の複数履歴を保持し、一覧は`created_at desc, id desc`。
+  - `GET /pos-journals/ai-history`、`GET /pos-journals/ai-history/item`、`DELETE /pos-journals/ai-history/item`を追加。削除は店舗スコープと`confirmation === "delete"`完全一致を必須にする。
+  - AI分析の表示はDB保存失敗で失わず、`history_saved=false`と警告を返すフェイルソフト設計。空データ/空本文は保存しない。
+- UI/PDF:
+  - AI分析カードに「PDFで保存」と「AI分析履歴」を追加。履歴から再表示、PDF、削除が可能。
+  - PDFはブラウザ印刷の「PDFとして保存」を使用し、A4専用レイアウトで店舗、対象月、生成日時、AI種別/モデル、主要KPI、分析全文、注意を含める。
+  - PDFは保存時点のfactsスナップショットを使うため、後日POSデータが変わっても履歴の主要数値が変化しない。
+- Verification:
+  - migration単体をローカルDBへ適用し、RLS有効、anon/authenticated直接SELECT不可を確認。
+  - API E2E: 自動保存200、一覧200、詳細200、`DELETE`確認文字は400、`delete`は200、削除後詳細404。
+  - 新規履歴テスト3/3、AI/LHAテスト10/10、既存`npm test` 90/90、`npm run check`成功。
+  - 実画面のPDF保存処理からA4 PDFを生成。1ページ、日本語、店舗、総売上1,519,300円、改善提案を確認し、全ページをPNGへレンダリングして文字切れ・重なりなしを確認。
+
 ### 2026-07-27 - リポジトリ構成を整理
 
 - Request: `line_report-main`直下に公開ページ、ローカルDB、復旧用バックアップ、生成物が混在していたため、既存URLを壊さずに整理する。

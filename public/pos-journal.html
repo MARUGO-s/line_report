@@ -402,6 +402,39 @@
     .pj-qa-msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
     .pj-qa-msg.assistant { align-self:flex-start; background:var(--surface); border:1px solid var(--border); color:var(--text-2); }
     .pj-qa-meta { font-size:10.5px; color:var(--text-3); margin-top:5px; }
+    .pj-ai-history { margin-top:16px; border-top:1px solid var(--border); padding-top:15px; }
+    .pj-ai-history-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .pj-ai-history-title { font-size:13px; font-weight:750; }
+    .pj-ai-history-list { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+    .pj-ai-history-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+    .pj-ai-history-main { min-width:0; }
+    .pj-ai-history-name { font-weight:700; font-size:12.5px; }
+    .pj-ai-history-meta { color:var(--text-3); font-size:11px; margin-top:3px; }
+    .pj-ai-history-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+    .pj-ai-history-actions .btn { padding:5px 8px; font-size:11px; border-radius:7px; }
+    .pj-ai-history-empty { color:var(--text-3); font-size:12px; padding:10px 0; }
+    #analysisPrintReport { display:none; }
+    .print-report { color:#1f2937; background:#fff; font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif; font-size:9.5pt; line-height:1.48; }
+    .print-report-header { border-bottom:3px double #1f3b5b; padding-bottom:10px; margin-bottom:12px; }
+    .print-report-kicker { color:#60748a; font-size:8.5pt; }
+    .print-report h1 { color:#1f3b5b; font-size:19pt; margin:2px 0 4px; }
+    .print-report-meta { display:flex; flex-wrap:wrap; gap:5px 16px; color:#536273; font-size:8.5pt; }
+    .print-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; margin:11px 0 13px; }
+    .print-kpi { border:1px solid #cbd5e1; border-radius:7px; padding:7px 8px; }
+    .print-kpi span { display:block; color:#64748b; font-size:7.8pt; }
+    .print-kpi b { display:block; color:#102a43; font-size:12pt; margin-top:1px; }
+    .print-section { border-top:1px solid #d8e1ea; padding-top:7px; margin-top:8px; }
+    .print-section h2 { break-after:avoid; color:#1f3b5b; font-size:11pt; margin:0 0 3px; border-left:4px solid #3f7bea; padding-left:7px; }
+    .print-section p { margin:2px 0; white-space:pre-wrap; }
+    .print-warning { break-inside:avoid; color:#8a5a00; background:#fff8e6; border:1px solid #f0d08a; padding:6px 8px; margin-top:9px; border-radius:6px; }
+    .print-footer { break-inside:avoid; border-top:1px solid #cbd5e1; color:#64748b; font-size:7.8pt; margin-top:12px; padding-top:6px; display:flex; justify-content:space-between; }
+    @media print {
+      @page { size:A4; margin:10mm 11mm; }
+      body.print-analysis-report { background:#fff !important; }
+      body.print-analysis-report > *:not(#analysisPrintReport) { display:none !important; }
+      body.print-analysis-report #analysisPrintReport { display:block !important; }
+      .print-kpis { grid-template-columns:repeat(2,1fr); }
+    }
     @media (max-width:760px) { .pj-ai-output { grid-template-columns:1fr; } .pj-qa-form { grid-template-columns:1fr auto; } .pj-qa-form .qa-clear { grid-column:1/-1; justify-self:start; } .pj-qa-msg { max-width:96%; } }
     .pj-file-card { margin-bottom:22px; }
     .file-action { display:inline-flex; gap:6px; align-items:center; justify-content:flex-end; }
@@ -546,6 +579,7 @@
                 </div>
                 <div class="pj-ai-actions">
                   <span class="pj-ai-status" id="aiStatus"></span>
+                  <button class="btn" id="aiPdfBtn" type="button" disabled>PDFで保存</button>
                   <button class="btn btn-primary" id="aiAnalyzeBtn" type="button">AIで月次分析</button>
                 </div>
               </div>
@@ -561,6 +595,14 @@
                   <button class="btn qa-clear" id="qaClearBtn" type="button">会話をクリア</button>
                 </div>
                 <div class="pj-qa-thread" id="qaThread"></div>
+              </div>
+              <div class="pj-ai-history">
+                <div class="pj-ai-history-head">
+                  <div class="pj-ai-history-title">AI分析履歴</div>
+                  <button class="btn sm" id="aiHistoryReloadBtn" type="button">履歴を再読込</button>
+                </div>
+                <div class="pj-ai-history-list" id="aiHistoryList"></div>
+                <div class="pj-ai-history-empty" id="aiHistoryEmpty">保存された分析はありません。</div>
               </div>
             </section>
 
@@ -623,6 +665,22 @@
     </div>
   </div>
 
+  <div class="pj-modal" id="analysisDeleteModal" hidden>
+    <div class="pj-modal-box" role="dialog" aria-modal="true" aria-labelledby="analysisDeleteTitle">
+      <div class="pj-modal-title" id="analysisDeleteTitle">AI分析履歴を削除</div>
+      <div class="pj-modal-copy">保存済みの分析結果をデータベースから完全に削除します。削除する場合は確認欄へ半角小文字で <strong>delete</strong> と入力してください。</div>
+      <div class="pj-delete-name" id="analysisDeleteName"></div>
+      <input class="input mono" id="analysisDeleteInput" type="text" autocomplete="off" placeholder="delete" />
+      <div class="pj-message err" id="analysisDeleteMsg"></div>
+      <div class="pj-modal-actions">
+        <button class="btn" id="analysisDeleteCancel" type="button">キャンセル</button>
+        <button class="btn btn-danger" id="analysisDeleteSubmit" type="button" disabled>完全に削除</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="analysisPrintReport" class="print-report" aria-hidden="true"></div>
+
   <script src="pages-config.js?v=20260610"></script>
   <script src="auth-session.js?v=20260624"></script>
   <script src="menu-logout.js?v=20260702"></script>
@@ -644,6 +702,9 @@
     var lastSummary = null;
     var qaHistory = [];
     var aiRequestId = 0;
+    var currentAnalysis = null;
+    var analysisHistory = [];
+    var analysisDeleteTarget = null;
     var AI_SUGGESTIONS = ['一番売れた日は？','客単価を上げるには？','雨の日の傾向は？','売れ筋商品を教えて','決済方法の比率は？'];
 
     var el = function (id) { return document.getElementById(id); };
@@ -735,9 +796,11 @@
       }).join('');
     }
 
-    function resetAiForDataChange() {
+    function resetAiForDataChange(preserveHistory) {
       aiRequestId += 1;
       qaHistory = [];
+      currentAnalysis = null;
+      if (!preserveHistory) analysisHistory = [];
       el('aiBadge').textContent = '未実行';
       el('aiBadge').className = 'chip gray';
       el('aiStatus').textContent = '';
@@ -746,7 +809,9 @@
       el('aiEmpty').hidden = false;
       el('aiEmpty').textContent = '「AIで月次分析」を押すと、この月の分析を表示します。';
       el('aiWarning').textContent = '';
+      el('aiPdfBtn').disabled = true;
       renderQaThread(false);
+      if (!preserveHistory) renderAnalysisHistory();
     }
     function parseAiSections(text) {
       var sections = [], current = null;
@@ -762,6 +827,22 @@
     }
     function renderAiAnalysis(body) {
       var text = String(body.analysis||'').trim();
+      currentAnalysis = text ? {
+        id: body.history_item && body.history_item.id ? body.history_item.id : null,
+        month: body.history_item && body.history_item.month ? body.history_item.month : el('monthSel').value,
+        analysis_text: text,
+        ai_generated: body.ai_generated === true,
+        provider: body.ai_generated ? 'groq' : null,
+        model: body.model || null,
+        warning: body.warning || null,
+        facts_snapshot: body.facts || {},
+        gross_sales: Number(body.facts && body.facts.totals && body.facts.totals.grossSales) || Number(lastSummary && lastSummary.totals && lastSummary.totals.gross_sales) || 0,
+        guests_count: Number(body.facts && body.facts.totals && body.facts.totals.guests) || Number(lastSummary && lastSummary.totals && lastSummary.totals.guests) || 0,
+        average_spend: Number(body.facts && body.facts.totals && body.facts.totals.averageSpend) || Number(lastSummary && lastSummary.totals && lastSummary.totals.avg_spend) || 0,
+        source_file_count: Number(body.facts && body.facts.coverage && body.facts.coverage.recordedDays) || Number(lastSummary && lastSummary.meta && lastSummary.meta.file_count) || 0,
+        source_day_count: Number(body.facts && body.facts.coverage && body.facts.coverage.recordedDays) || Number(lastSummary && lastSummary.meta && lastSummary.meta.day_count) || 0,
+        created_at: body.history_item && body.history_item.created_at ? body.history_item.created_at : new Date().toISOString()
+      } : null;
       var sections = parseAiSections(text);
       el('aiEmpty').hidden = !!text;
       el('aiOutput').hidden = !text;
@@ -774,7 +855,11 @@
       el('aiBadge').textContent = body.ai_generated ? 'AI生成' : '基本分析';
       el('aiBadge').className = 'chip' + (body.ai_generated ? '' : ' gray');
       el('aiStatus').textContent = body.model ? ('モデル: '+body.model) : '';
-      el('aiWarning').textContent = body.warning || '';
+      var warnings = [];
+      if (body.warning) warnings.push(body.warning);
+      if (body.history_saved === false) warnings.push('分析は表示しましたが、データベースへの履歴保存に失敗しました。' + (body.history_error ? ' ' + body.history_error : ''));
+      el('aiWarning').textContent = warnings.join(' ');
+      el('aiPdfBtn').disabled = !currentAnalysis;
     }
     async function analyzeWithAi() {
       if (!lastSummary || !Array.isArray(lastSummary.days) || !lastSummary.days.length) {
@@ -800,6 +885,7 @@
         });
         if (requestId !== aiRequestId) return;
         renderAiAnalysis(body);
+        if (body.history_saved !== false) loadAnalysisHistory();
       } catch(error) {
         if (requestId !== aiRequestId) return;
         el('aiBadge').textContent = 'エラー';
@@ -867,6 +953,141 @@
         renderQaThread(false);
       }
     }
+    function formatHistoryDate(value) {
+      var date = value ? new Date(value) : null;
+      if (!date || isNaN(date.getTime())) return String(value||'');
+      return date.toLocaleString('ja-JP', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    }
+    function renderAnalysisHistory() {
+      el('aiHistoryEmpty').hidden = analysisHistory.length > 0;
+      el('aiHistoryList').innerHTML = analysisHistory.map(function(item) {
+        var type = item.ai_generated ? 'AI生成' : '基本分析';
+        return '<div class="pj-ai-history-item">'
+          + '<div class="pj-ai-history-main"><div class="pj-ai-history-name">'+esc(item.month)+' / '+esc(type)+'</div>'
+          + '<div class="pj-ai-history-meta">'+esc(formatHistoryDate(item.created_at))+'・総売上 '+yen(item.gross_sales)+'・客数 '+num(item.guests_count)+'名'+(item.model?'・'+esc(item.model):'')+'</div></div>'
+          + '<div class="pj-ai-history-actions">'
+          + '<button type="button" class="btn" data-analysis-view="'+item.id+'">表示</button>'
+          + '<button type="button" class="btn" data-analysis-pdf="'+item.id+'">PDF</button>'
+          + '<button type="button" class="btn btn-danger" data-analysis-delete="'+item.id+'">削除</button>'
+          + '</div></div>';
+      }).join('');
+    }
+    async function loadAnalysisHistory() {
+      if (!getToken()) {
+        analysisHistory = [];
+        renderAnalysisHistory();
+        return;
+      }
+      try {
+        var body = await apiFetch('/pos-journals/ai-history?store_key='+encodeURIComponent(STORE_KEY)+'&month='+encodeURIComponent(el('monthSel').value)+'&limit=50',{method:'GET'});
+        analysisHistory = Array.isArray(body.items) ? body.items : [];
+        renderAnalysisHistory();
+      } catch(error) {
+        analysisHistory = [];
+        renderAnalysisHistory();
+        el('aiWarning').textContent = 'AI分析履歴の読込に失敗しました。' + (error && error.message ? ' '+error.message : '');
+      }
+    }
+    async function fetchAnalysisHistoryItem(id) {
+      var body = await apiFetch('/pos-journals/ai-history/item?store_key='+encodeURIComponent(STORE_KEY)+'&id='+encodeURIComponent(id),{method:'GET'});
+      return body.item || null;
+    }
+    async function showAnalysisHistoryItem(id) {
+      try {
+        var item = await fetchAnalysisHistoryItem(id);
+        if (!item) throw new Error('AI分析履歴が見つかりません。');
+        renderAiAnalysis({
+          analysis:item.analysis_text,
+          ai_generated:item.ai_generated,
+          model:item.model,
+          warning:item.warning,
+          facts:item.facts_snapshot,
+          history_saved:true,
+          history_item:item
+        });
+        currentAnalysis = item;
+        el('aiStatus').textContent = '保存履歴: '+formatHistoryDate(item.created_at)+(item.model?' / '+item.model:'');
+        el('aiPdfBtn').disabled = false;
+        el('aiOutput').scrollIntoView({behavior:'smooth',block:'start'});
+      } catch(error) {
+        el('aiWarning').textContent = error && error.message ? error.message : String(error);
+      }
+    }
+    function analysisReportHtml(item) {
+      var facts = item && item.facts_snapshot && typeof item.facts_snapshot === 'object' ? item.facts_snapshot : {};
+      var totals = facts.totals || {};
+      var coverage = facts.coverage || {};
+      var sections = parseAiSections(item.analysis_text || '');
+      var sectionHtml = sections.length ? sections.map(function(section) {
+        return '<section class="print-section"><h2>'+esc(section.title)+'</h2>'+section.lines.map(function(line){return '<p>'+esc(line)+'</p>';}).join('')+'</section>';
+      }).join('') : '<section class="print-section"><h2>分析結果</h2><p>'+esc(item.analysis_text||'')+'</p></section>';
+      var generatedAt = formatHistoryDate(item.created_at);
+      return '<div class="print-report-header"><div class="print-report-kicker">LINE Report / POS電子ジャーナル</div>'
+        + '<h1>AI売上分析レポート</h1><div class="print-report-meta"><span>店舗: '+esc(STORE_NAME)+'</span><span>対象月: '+esc(item.month||el('monthSel').value)+'</span><span>生成: '+esc(generatedAt)+'</span><span>種別: '+esc(item.ai_generated?'AI生成':'基本分析')+'</span>'+(item.model?'<span>モデル: '+esc(item.model)+'</span>':'')+'</div></div>'
+        + '<div class="print-kpis"><div class="print-kpi"><span>総売上</span><b>'+yen(item.gross_sales||totals.grossSales)+'</b></div>'
+        + '<div class="print-kpi"><span>客数</span><b>'+num(item.guests_count||totals.guests)+'名</b></div>'
+        + '<div class="print-kpi"><span>客単価</span><b>'+yen(item.average_spend||totals.averageSpend)+'</b></div>'
+        + '<div class="print-kpi"><span>記録日数</span><b>'+num(item.source_day_count||coverage.recordedDays)+'日</b></div></div>'
+        + sectionHtml
+        + (item.warning?'<div class="print-warning">'+esc(item.warning)+'</div>':'')
+        + '<div class="print-footer"><span>Bistro CAVACAVA POS Analysis</span><span>このレポートは保存時点のデータスナップショットに基づきます。</span></div>';
+    }
+    function saveAnalysisPdf(item) {
+      if (!item || !String(item.analysis_text||'').trim()) {
+        el('aiWarning').textContent = 'PDFに保存できる分析結果がありません。';
+        return;
+      }
+      el('analysisPrintReport').innerHTML = analysisReportHtml(item);
+      document.body.classList.add('print-analysis-report');
+      var cleanup = function() {
+        document.body.classList.remove('print-analysis-report');
+        window.removeEventListener('afterprint',cleanup);
+      };
+      window.addEventListener('afterprint',cleanup);
+      setTimeout(function(){window.print();setTimeout(cleanup,1500);},50);
+    }
+    async function saveHistoryPdf(id) {
+      try {
+        var item = await fetchAnalysisHistoryItem(id);
+        if (!item) throw new Error('AI分析履歴が見つかりません。');
+        saveAnalysisPdf(item);
+      } catch(error) {
+        el('aiWarning').textContent = error && error.message ? error.message : String(error);
+      }
+    }
+    function openAnalysisDelete(id) {
+      analysisDeleteTarget = analysisHistory.find(function(item){return String(item.id)===String(id);}) || null;
+      if (!analysisDeleteTarget) return;
+      el('analysisDeleteName').textContent = analysisDeleteTarget.month+' / '+formatHistoryDate(analysisDeleteTarget.created_at);
+      el('analysisDeleteInput').value = '';
+      el('analysisDeleteSubmit').disabled = true;
+      setMessage(el('analysisDeleteMsg'),'','');
+      el('analysisDeleteModal').hidden = false;
+      setTimeout(function(){el('analysisDeleteInput').focus();},30);
+    }
+    function closeAnalysisDelete() {
+      el('analysisDeleteModal').hidden = true;
+      analysisDeleteTarget = null;
+    }
+    async function submitAnalysisDelete() {
+      if (!analysisDeleteTarget || el('analysisDeleteInput').value !== 'delete') return;
+      el('analysisDeleteSubmit').disabled = true;
+      try {
+        await apiFetch('/pos-journals/ai-history/item',{
+          method:'DELETE',
+          headers:{'Content-Type':'application/json; charset=utf-8'},
+          body:JSON.stringify({id:analysisDeleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})
+        });
+        if (currentAnalysis && String(currentAnalysis.id) === String(analysisDeleteTarget.id)) {
+          resetAiForDataChange(true);
+        }
+        closeAnalysisDelete();
+        await loadAnalysisHistory();
+      } catch(error) {
+        setMessage(el('analysisDeleteMsg'),error && error.message ? error.message : String(error),'err');
+        el('analysisDeleteSubmit').disabled = false;
+      }
+    }
 
     function render(data) {
       var previousSignature = lastSummary && lastSummary.meta ? String(lastSummary.meta.month||'')+':'+String(lastSummary.meta.day_count||'')+':'+String((lastSummary.totals||{}).gross_sales||0) : '';
@@ -912,6 +1133,7 @@
         renderFiles(state.files||[]);
         if ((state.files||[]).length) render(state.summary||{});
         else await loadLegacy(month,true);
+        await loadAnalysisHistory();
       } catch(error) {
         if (/認証|ログイン|トークン|Unauthorized|Forbidden/i.test(String(error.message||''))) {
           renderFiles([]); await loadLegacy(month,true); return;
@@ -920,8 +1142,8 @@
       }
     }
     async function loadLegacy(month, preserveFiles) {
-      if (month!=='2026-06') { if(!preserveFiles)renderFiles([]); render({meta:{file_count:0,day_count:0},totals:{},days:[],item_ranking:[]}); return; }
-      try { var response=await fetch(LEGACY_DATA_URL,{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);var data=await response.json();data.meta=data.meta||{};data.meta.store_key=STORE_KEY;data.meta.store_name=STORE_NAME;data.meta.storage_mode='legacy_static';render(data);if(!preserveFiles)renderFiles([]); }
+      if (month!=='2026-06') { if(!preserveFiles)renderFiles([]); render({meta:{file_count:0,day_count:0},totals:{},days:[],item_ranking:[]});await loadAnalysisHistory();return; }
+      try { var response=await fetch(LEGACY_DATA_URL,{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);var data=await response.json();data.meta=data.meta||{};data.meta.store_key=STORE_KEY;data.meta.store_name=STORE_NAME;data.meta.storage_mode='legacy_static';render(data);if(!preserveFiles)renderFiles([]);await loadAnalysisHistory(); }
       catch(error){el('mainWrap').hidden=true;el('emptyState').hidden=false;el('emptyState').textContent='データ読込エラー: '+error.message;}
     }
     async function uploadFiles(fileList) {
@@ -940,7 +1162,7 @@
     async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
 
     var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
-    document.addEventListener('DOMContentLoaded',async function(){populateControls();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadDrop').addEventListener('drop',function(e){uploadFiles(e.dataTransfer.files);});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});await loadCurrent();});
+    document.addEventListener('DOMContentLoaded',async function(){populateControls();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadDrop').addEventListener('drop',function(e){uploadFiles(e.dataTransfer.files);});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
   })();
   </script>
 

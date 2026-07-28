@@ -1133,6 +1133,8 @@ Deno.serve(async (req, info) => {
       "/pos-journals/download",
       "/pos-journals/ai-analysis",
       "/pos-journals/ai-ask",
+      "/pos-journals/ai-history",
+      "/pos-journals/ai-history/item",
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
@@ -1346,6 +1348,19 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await askPosJournalAi(supabase, body, storeScope), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/ai-history") {
+      return json(await fetchPosJournalAiHistory(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/ai-history/item") {
+      return json(await fetchPosJournalAiHistoryItem(supabase, url), 200)
+    }
+    if (req.method === "DELETE" && path === "/pos-journals/ai-history/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await deletePosJournalAiHistoryItem(supabase, body, storeScope), 200)
     }
 
     if (req.method === "GET" && path === "/reservations/calendar") {
@@ -7686,6 +7701,99 @@ async function resolvePosJournalAiSummary(
   return normalizePosJournalAiSummary(body.summary, expected)
 }
 
+type PosJournalAiHistoryListRow = {
+  id: number
+  store_key: string
+  store_code: string
+  month: string
+  ai_generated: boolean
+  provider: string | null
+  model: string | null
+  warning: string | null
+  source_file_count: number
+  source_day_count: number
+  gross_sales: number
+  guests_count: number
+  average_spend: number
+  created_at: string
+}
+
+function normalizePosJournalAiHistoryRow(
+  value: unknown,
+): PosJournalAiHistoryListRow | null {
+  if (!isRecord(value)) return null
+  const id = Number(value.id)
+  const month = String(value.year_month ?? "").trim()
+  if (!Number.isSafeInteger(id) || id <= 0 || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return null
+  }
+  return {
+    id,
+    store_key: toSafeString(value.store_partition_key),
+    store_code: toSafeString(value.store_code),
+    month,
+    ai_generated: value.ai_generated === true,
+    provider: value.provider == null ? null : toSafeString(value.provider) || null,
+    model: value.model == null ? null : toSafeString(value.model) || null,
+    warning: value.warning == null ? null : String(value.warning).slice(0, 1000),
+    source_file_count: toNonNegativeInteger(value.source_file_count),
+    source_day_count: toNonNegativeInteger(value.source_day_count),
+    gross_sales: toNonNegativeInteger(value.gross_sales),
+    guests_count: toNonNegativeInteger(value.guests_count),
+    average_spend: toNonNegativeInteger(value.average_spend),
+    created_at: String(value.created_at ?? ""),
+  }
+}
+
+async function savePosJournalAiAnalysis(
+  supabase: ReturnType<typeof createClient>,
+  expected: { storeKey: string; storeName: string; storeCode: string; month: string },
+  summary: ReturnType<typeof buildPosJournalSummary>,
+  facts: ReturnType<typeof buildPosJournalAiFacts>,
+  result: Awaited<ReturnType<typeof generatePosJournalAiAnalysis>>,
+): Promise<
+  | { saved: true; item: PosJournalAiHistoryListRow }
+  | { saved: false; error: string }
+> {
+  const analysisText = String(result.text ?? "").trim()
+  if (!analysisText || !summary.days.length) {
+    return { saved: false, error: "分析本文または分析対象データが空のため履歴を保存しませんでした。" }
+  }
+  try {
+    const { data, error } = await supabase
+      .from("pos_journal_ai_analyses")
+      .insert({
+        store_partition_key: expected.storeKey,
+        store_code: expected.storeCode,
+        year_month: expected.month,
+        analysis_text: analysisText,
+        ai_generated: result.aiGenerated,
+        provider: result.aiGenerated ? "groq" : null,
+        model: result.model,
+        warning: result.warning,
+        facts_snapshot: facts,
+        source_file_count: toNonNegativeInteger(summary.meta.file_count),
+        source_day_count: summary.days.length,
+        gross_sales: toNonNegativeInteger(summary.totals.gross_sales),
+        guests_count: toNonNegativeInteger(summary.totals.guests),
+        average_spend: toNonNegativeInteger(summary.totals.avg_spend),
+      })
+      .select(
+        "id, store_partition_key, store_code, year_month, ai_generated, provider, model, warning, source_file_count, source_day_count, gross_sales, guests_count, average_spend, created_at",
+      )
+      .single()
+    if (error) return { saved: false, error: error.message }
+    const item = normalizePosJournalAiHistoryRow(data)
+    if (!item) return { saved: false, error: "保存したAI分析履歴の形式が不正です。" }
+    return { saved: true, item }
+  } catch (error) {
+    return {
+      saved: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 async function analyzePosJournalWithAi(
   supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
@@ -7717,6 +7825,13 @@ async function analyzePosJournalWithAi(
     String(Deno.env.get("GROQ_API_KEY") ?? "").trim(),
   )
   await recordPosJournalAiUsage(supabase, expected.storeKey, result.usage)
+  const history = await savePosJournalAiAnalysis(
+    supabase,
+    expected,
+    summary,
+    facts,
+    result,
+  )
   return {
     ok: true,
     analysis: result.text,
@@ -7724,6 +7839,9 @@ async function analyzePosJournalWithAi(
     model: result.model,
     warning: result.warning,
     facts,
+    history_saved: history.saved,
+    history_item: history.saved ? history.item : null,
+    history_error: history.saved ? null : history.error,
   }
 }
 
@@ -7769,6 +7887,147 @@ async function askPosJournalAi(
     ai_generated: result.aiGenerated,
     model: result.model,
     warning: result.warning,
+  }
+}
+
+function posJournalAiHistoryStoreAndMonth(
+  url: URL,
+): { storeKey: string; month: string } {
+  return {
+    storeKey: normalizePosJournalStoreKey(
+      url.searchParams.get("store_key") || url.searchParams.get("store"),
+    ),
+    month: normalizeYearMonth(url.searchParams.get("month")),
+  }
+}
+
+async function fetchPosJournalAiHistory(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const { storeKey, month } = posJournalAiHistoryStoreAndMonth(url)
+  const rawLimit = Number(url.searchParams.get("limit") ?? "50")
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(100, Math.trunc(rawLimit)))
+    : 50
+  const { data, error } = await supabase
+    .from("pos_journal_ai_analyses")
+    .select(
+      "id, store_partition_key, store_code, year_month, ai_generated, provider, model, warning, source_file_count, source_day_count, gross_sales, guests_count, average_spend, created_at",
+    )
+    .eq("store_partition_key", storeKey)
+    .eq("year_month", month)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw {
+      status: 500,
+      message: `AI分析履歴の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return {
+    ok: true,
+    store_key: storeKey,
+    month,
+    items: (Array.isArray(data) ? data : [])
+      .map(normalizePosJournalAiHistoryRow)
+      .filter((item): item is PosJournalAiHistoryListRow => item !== null),
+  }
+}
+
+async function fetchPosJournalAiHistoryItem(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const id = Number(url.searchParams.get("id"))
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("pos_journal_ai_analyses")
+    .select(
+      "id, store_partition_key, store_code, year_month, analysis_text, ai_generated, provider, model, warning, facts_snapshot, source_file_count, source_day_count, gross_sales, guests_count, average_spend, created_at",
+    )
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `AI分析履歴の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "AI分析履歴が見つかりません。" } satisfies AppError
+  }
+  const item = normalizePosJournalAiHistoryRow(data)
+  if (!item) {
+    throw { status: 500, message: "AI分析履歴の形式が不正です。" } satisfies AppError
+  }
+  return {
+    ok: true,
+    item: {
+      ...item,
+      analysis_text: String(data.analysis_text ?? ""),
+      facts_snapshot: isRecord(data.facts_snapshot)
+        ? data.facts_snapshot
+        : {},
+    },
+  }
+}
+
+async function deletePosJournalAiHistoryItem(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  if (String(body.confirmation ?? "") !== "delete") {
+    throw {
+      status: 400,
+      message: "削除確認欄へ半角小文字で delete と入力してください。",
+    } satisfies AppError
+  }
+  const id = Number(body.id)
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const requestedStore = String(body.store_key ?? "").trim()
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw {
+      status: 403,
+      message: "他店舗のデータにはアクセスできません。",
+    } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("pos_journal_ai_analyses")
+    .delete()
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .select("id, year_month")
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `AI分析履歴の削除に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "AI分析履歴が見つかりません。" } satisfies AppError
+  }
+  return {
+    ok: true,
+    deleted: { id: Number(data.id), month: String(data.year_month ?? "") },
   }
 }
 
