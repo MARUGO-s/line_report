@@ -687,7 +687,7 @@
       el('emptyState').hidden = true;
       var t = data.totals || {}, m = data.meta || {}, days = data.days || [];
       var openDays = days.filter(function (d) { return (d.gross_sales||0) > 0; });
-      el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / 保管ファイル ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分';
+      el('srcInfo').textContent = m.storage_mode === 'legacy_static' ? (STORE_NAME + '（店舗コード' + STORE_CODE + '） / 既存取込データ ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分 / 原本は未保管のため上のアップロードから保存してください') : (STORE_NAME + '（店舗コード' + STORE_CODE + '） / Storage保管ファイル ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分');
       el('rangeBadge').textContent = '営業日 ' + openDays.length + '日（記録 ' + days.length + '日）';
       var kpis = [
         { l:'総売上',v:yen(t.gross_sales),s:'純売上 '+yen(t.net_sales),accent:true },
@@ -731,7 +731,7 @@
     }
     async function loadLegacy(month, preserveFiles) {
       if (month!=='2026-06') { if(!preserveFiles)renderFiles([]); render({meta:{file_count:0,day_count:0},totals:{},days:[],item_ranking:[]}); return; }
-      try { var response=await fetch(LEGACY_DATA_URL,{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);var data=await response.json();data.meta=data.meta||{};data.meta.store_key=STORE_KEY;data.meta.store_name=STORE_NAME;render(data);if(!preserveFiles)renderFiles([]); }
+      try { var response=await fetch(LEGACY_DATA_URL,{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);var data=await response.json();data.meta=data.meta||{};data.meta.store_key=STORE_KEY;data.meta.store_name=STORE_NAME;data.meta.storage_mode='legacy_static';render(data);if(!preserveFiles)renderFiles([]); }
       catch(error){el('mainWrap').hidden=true;el('emptyState').hidden=false;el('emptyState').textContent='データ読込エラー: '+error.message;}
     }
     async function uploadFiles(fileList) {

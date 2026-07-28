@@ -6,7 +6,8 @@
   "file_count": 21,
   "day_count": 21,
   "generated_at": "2026-07-28T17:51:10+09:00",
-  "store_key": "bistrocavacava"
+  "store_key": "bistrocavacava",
+  "storage_mode": "legacy_static"
  },
  "totals": {
   "net_sales": 1381207,
