@@ -378,6 +378,31 @@
     .pj-upload-copy span { color:var(--text-3); font-size:12px; }
     .pj-message { min-height:18px; margin-top:10px; font-size:12.5px; white-space:pre-line; }
     .pj-message.ok { color:var(--ok); } .pj-message.err { color:var(--err); } .pj-message.warn { color:var(--warn); }
+    .pj-ai-card { margin-bottom: 22px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent-soft) 35%, var(--surface)), var(--surface)); }
+    .pj-ai-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap; }
+    .pj-ai-title { display:flex; align-items:center; gap:9px; font-size:16px; font-weight:800; }
+    .pj-ai-sub { color:var(--text-3); font-size:12px; line-height:1.65; margin-top:5px; max-width:780px; }
+    .pj-ai-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pj-ai-status { font-size:11px; color:var(--text-3); }
+    .pj-ai-output { margin-top:14px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .pj-ai-section { background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:13px 14px; }
+    .pj-ai-section.full { grid-column:1/-1; }
+    .pj-ai-section h3 { font-size:12.5px; color:var(--accent); margin:0 0 7px; }
+    .pj-ai-section p { margin:4px 0; color:var(--text-2); line-height:1.7; white-space:pre-wrap; }
+    .pj-ai-empty { margin-top:14px; color:var(--text-3); font-size:12.5px; }
+    .pj-ai-warning { margin-top:9px; color:var(--warn); font-size:12px; }
+    .pj-qa { margin-top:16px; border-top:1px solid var(--border); padding-top:15px; }
+    .pj-qa-title { font-size:13px; font-weight:750; margin-bottom:8px; }
+    .pj-qa-suggest { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
+    .pj-qchip { border:1px solid var(--border); color:var(--text-2); background:var(--surface); border-radius:999px; font:inherit; font-size:11.5px; padding:5px 10px; cursor:pointer; }
+    .pj-qchip:hover { border-color:var(--accent); color:var(--accent); }
+    .pj-qa-form { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; }
+    .pj-qa-thread { margin-top:12px; display:flex; flex-direction:column; gap:9px; max-height:420px; overflow:auto; }
+    .pj-qa-msg { max-width:88%; padding:10px 12px; border-radius:12px; line-height:1.7; white-space:pre-wrap; }
+    .pj-qa-msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
+    .pj-qa-msg.assistant { align-self:flex-start; background:var(--surface); border:1px solid var(--border); color:var(--text-2); }
+    .pj-qa-meta { font-size:10.5px; color:var(--text-3); margin-top:5px; }
+    @media (max-width:760px) { .pj-ai-output { grid-template-columns:1fr; } .pj-qa-form { grid-template-columns:1fr auto; } .pj-qa-form .qa-clear { grid-column:1/-1; justify-self:start; } .pj-qa-msg { max-width:96%; } }
     .pj-file-card { margin-bottom:22px; }
     .file-action { display:inline-flex; gap:6px; align-items:center; justify-content:flex-end; }
     .file-action button { padding:5px 8px; font-size:11.5px; border-radius:7px; }
@@ -513,6 +538,32 @@
           <div id="mainWrap" hidden>
             <div class="pj-kpis" id="kpis"></div>
 
+            <section class="pj-card pj-ai-card">
+              <div class="pj-ai-head">
+                <div>
+                  <div class="pj-ai-title">🤖 AI売上分析 <span class="chip" id="aiBadge">未実行</span></div>
+                  <div class="pj-ai-sub">対象月の日別売上・客数・客単価・曜日・天候・決済方法・商品構成を根拠に、強み・変動要因・注目日・改善案を分析します。AIが利用できない場合も、画面の基本分析へ自動で切り替わります。</div>
+                </div>
+                <div class="pj-ai-actions">
+                  <span class="pj-ai-status" id="aiStatus"></span>
+                  <button class="btn btn-primary" id="aiAnalyzeBtn" type="button">AIで月次分析</button>
+                </div>
+              </div>
+              <div class="pj-ai-empty" id="aiEmpty">「AIで月次分析」を押すと、この月の分析を表示します。</div>
+              <div class="pj-ai-output" id="aiOutput" hidden></div>
+              <div class="pj-ai-warning" id="aiWarning"></div>
+              <div class="pj-qa">
+                <div class="pj-qa-title">データに質問</div>
+                <div class="pj-qa-suggest" id="qaSuggest"></div>
+                <div class="pj-qa-form">
+                  <input class="input" id="qaInput" type="text" maxlength="500" placeholder="例: 一番売れた日は？ 客単価を上げるには？ 雨の日の傾向は？" />
+                  <button class="btn btn-primary" id="qaAskBtn" type="button">質問する</button>
+                  <button class="btn qa-clear" id="qaClearBtn" type="button">会話をクリア</button>
+                </div>
+                <div class="pj-qa-thread" id="qaThread"></div>
+              </div>
+            </section>
+
             <div class="pj-grid2">
               <div class="pj-card">
                 <h2>日別 総売上の推移 <span class="c-note">棒: 総売上 / 線: 客数</span></h2>
@@ -591,6 +642,9 @@
     var currentFiles = [];
     var deleteTarget = null;
     var lastSummary = null;
+    var qaHistory = [];
+    var aiRequestId = 0;
+    var AI_SUGGESTIONS = ['一番売れた日は？','客単価を上げるには？','雨の日の傾向は？','売れ筋商品を教えて','決済方法の比率は？'];
 
     var el = function (id) { return document.getElementById(id); };
     var yen = function (n) { return '¥' + (Number(n)||0).toLocaleString('ja-JP'); };
@@ -681,8 +735,144 @@
       }).join('');
     }
 
+    function resetAiForDataChange() {
+      aiRequestId += 1;
+      qaHistory = [];
+      el('aiBadge').textContent = '未実行';
+      el('aiBadge').className = 'chip gray';
+      el('aiStatus').textContent = '';
+      el('aiOutput').hidden = true;
+      el('aiOutput').innerHTML = '';
+      el('aiEmpty').hidden = false;
+      el('aiEmpty').textContent = '「AIで月次分析」を押すと、この月の分析を表示します。';
+      el('aiWarning').textContent = '';
+      renderQaThread(false);
+    }
+    function parseAiSections(text) {
+      var sections = [], current = null;
+      String(text||'').split(/\r?\n/).forEach(function(line) {
+        var match = line.match(/^【([^】]+)】\s*(.*)$/);
+        if (match) {
+          current = { title: match[1], lines: [] };
+          if (match[2]) current.lines.push(match[2]);
+          sections.push(current);
+        } else if (current && line.trim()) current.lines.push(line.trim());
+      });
+      return sections;
+    }
+    function renderAiAnalysis(body) {
+      var text = String(body.analysis||'').trim();
+      var sections = parseAiSections(text);
+      el('aiEmpty').hidden = !!text;
+      el('aiOutput').hidden = !text;
+      el('aiOutput').innerHTML = sections.length ? sections.map(function(section) {
+        var full = /総評|改善提案|注意/.test(section.title) ? ' full' : '';
+        return '<section class="pj-ai-section'+full+'"><h3>▍'+esc(section.title)+'</h3>'
+          + section.lines.map(function(line){return '<p>'+esc(line)+'</p>';}).join('')
+          + '</section>';
+      }).join('') : (text ? '<section class="pj-ai-section full"><p>'+esc(text)+'</p></section>' : '');
+      el('aiBadge').textContent = body.ai_generated ? 'AI生成' : '基本分析';
+      el('aiBadge').className = 'chip' + (body.ai_generated ? '' : ' gray');
+      el('aiStatus').textContent = body.model ? ('モデル: '+body.model) : '';
+      el('aiWarning').textContent = body.warning || '';
+    }
+    async function analyzeWithAi() {
+      if (!lastSummary || !Array.isArray(lastSummary.days) || !lastSummary.days.length) {
+        el('aiWarning').textContent = '分析対象のデータがありません。';
+        return;
+      }
+      if (!getToken()) {
+        setAuth(false);
+        el('aiWarning').textContent = 'AI分析には管理トークンまたはLINEの店舗ログインが必要です。';
+        return;
+      }
+      var requestId = ++aiRequestId;
+      el('aiAnalyzeBtn').disabled = true;
+      el('aiBadge').textContent = '分析中…';
+      el('aiBadge').className = 'chip';
+      el('aiStatus').textContent = '売上・客数・天候・商品構成を分析しています';
+      el('aiWarning').textContent = '';
+      try {
+        var body = await apiFetch('/pos-journals/ai-analysis', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json; charset=utf-8'},
+          body: JSON.stringify({store_key:STORE_KEY,month:el('monthSel').value,summary:lastSummary})
+        });
+        if (requestId !== aiRequestId) return;
+        renderAiAnalysis(body);
+      } catch(error) {
+        if (requestId !== aiRequestId) return;
+        el('aiBadge').textContent = 'エラー';
+        el('aiBadge').className = 'chip gray';
+        el('aiStatus').textContent = '';
+        el('aiWarning').textContent = error && error.message ? error.message : String(error);
+      } finally {
+        if (requestId === aiRequestId) el('aiAnalyzeBtn').disabled = false;
+      }
+    }
+    function renderQaSuggestions() {
+      el('qaSuggest').innerHTML = AI_SUGGESTIONS.map(function(question) {
+        return '<button type="button" class="pj-qchip">'+esc(question)+'</button>';
+      }).join('');
+      el('qaSuggest').querySelectorAll('.pj-qchip').forEach(function(button) {
+        button.addEventListener('click', function() {
+          el('qaInput').value = button.textContent;
+          el('qaInput').focus();
+        });
+      });
+    }
+    function renderQaThread(thinking) {
+      var html = qaHistory.map(function(message) {
+        var meta = message.role === 'assistant' && message.meta ? '<div class="pj-qa-meta">'+esc(message.meta)+'</div>' : '';
+        return '<div class="pj-qa-msg '+message.role+'">'+esc(message.content)+meta+'</div>';
+      });
+      if (thinking) html.push('<div class="pj-qa-msg assistant">考え中… 対象月のPOSデータを確認しています。</div>');
+      el('qaThread').innerHTML = html.join('');
+      el('qaThread').hidden = !html.length;
+      el('qaClearBtn').disabled = !qaHistory.length;
+      el('qaThread').scrollTop = el('qaThread').scrollHeight;
+    }
+    async function askAiQuestion(questionOverride) {
+      var question = String(questionOverride != null ? questionOverride : el('qaInput').value).trim();
+      if (!question) { el('qaInput').focus(); return; }
+      if (!lastSummary || !Array.isArray(lastSummary.days) || !lastSummary.days.length) {
+        el('aiWarning').textContent = '質問できるデータがありません。';
+        return;
+      }
+      if (!getToken()) {
+        setAuth(false);
+        el('aiWarning').textContent = '質問には管理トークンまたはLINEの店舗ログインが必要です。';
+        return;
+      }
+      var history = qaHistory.slice(-8).map(function(message){return {role:message.role,content:message.content};});
+      qaHistory.push({role:'user',content:question});
+      el('qaInput').value = '';
+      renderQaThread(true);
+      el('qaAskBtn').disabled = true;
+      try {
+        var body = await apiFetch('/pos-journals/ai-ask', {
+          method:'POST',
+          headers:{'Content-Type':'application/json; charset=utf-8'},
+          body:JSON.stringify({store_key:STORE_KEY,month:el('monthSel').value,summary:lastSummary,question:question,history:history})
+        });
+        qaHistory.push({
+          role:'assistant',
+          content:body.answer || '回答が空でした。',
+          meta:(body.ai_generated ? 'AI生成' : '基本回答') + (body.model ? ' / '+body.model : '') + (body.warning ? ' / '+body.warning : '')
+        });
+      } catch(error) {
+        qaHistory.push({role:'assistant',content:error && error.message ? error.message : String(error),meta:'エラー'});
+      } finally {
+        el('qaAskBtn').disabled = false;
+        renderQaThread(false);
+      }
+    }
+
     function render(data) {
+      var previousSignature = lastSummary && lastSummary.meta ? String(lastSummary.meta.month||'')+':'+String(lastSummary.meta.day_count||'')+':'+String((lastSummary.totals||{}).gross_sales||0) : '';
+      var nextSignature = data && data.meta ? String(data.meta.month||'')+':'+String(data.meta.day_count||'')+':'+String((data.totals||{}).gross_sales||0) : '';
       lastSummary = data || {};
+      if (previousSignature !== nextSignature) resetAiForDataChange();
       el('mainWrap').hidden = false;
       el('emptyState').hidden = true;
       var t = data.totals || {}, m = data.meta || {}, days = data.days || [];
@@ -750,7 +940,7 @@
     async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
 
     var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
-    document.addEventListener('DOMContentLoaded',async function(){populateControls();if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadDrop').addEventListener('drop',function(e){uploadFiles(e.dataTransfer.files);});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});await loadCurrent();});
+    document.addEventListener('DOMContentLoaded',async function(){populateControls();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadDrop').addEventListener('drop',function(e){uploadFiles(e.dataTransfer.files);});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});await loadCurrent();});
   })();
   </script>
 

@@ -113,6 +113,15 @@ import {
   resolvePosJournalStore,
   type PosJournalDay,
 } from "../_shared/pos_journal.ts"
+import {
+  answerPosJournalAiQuestion,
+  buildPosJournalAiFacts,
+  generatePosJournalAiAnalysis,
+  normalizePosJournalAiHistory,
+  normalizePosJournalAiQuestion,
+  normalizePosJournalAiSummary,
+  type PosJournalAiUsage,
+} from "../_shared/pos_journal_ai.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
 
@@ -1122,6 +1131,8 @@ Deno.serve(async (req, info) => {
       "/pos-journals/upload",
       "/pos-journals/file",
       "/pos-journals/download",
+      "/pos-journals/ai-analysis",
+      "/pos-journals/ai-ask",
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
@@ -1321,6 +1332,20 @@ Deno.serve(async (req, info) => {
     }
     if (req.method === "GET" && path === "/pos-journals/download") {
       return json(await fetchPosJournalDownloadUrl(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/ai-analysis") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await analyzePosJournalWithAi(supabase, body, storeScope), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/ai-ask") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await askPosJournalAi(supabase, body, storeScope), 200)
     }
 
     if (req.method === "GET" && path === "/reservations/calendar") {
@@ -7570,6 +7595,181 @@ async function fetchPosJournalDownloadUrl(
     } satisfies AppError
   }
   return { ok: true, id, signed_url: signedUrl }
+}
+
+function resolvePosJournalAiStore(
+  body: Record<string, unknown>,
+  storeScope: string | null,
+): { storeKey: string; storeName: string; storeCode: string; month: string } {
+  const requestedStore = String(body.store_key ?? body.store ?? "").trim()
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw {
+      status: 403,
+      message: "他店舗のデータにはアクセスできません。",
+    } satisfies AppError
+  }
+  const mapped = resolvePosJournalStore("1015")
+  if (!mapped || mapped.storeKey.toLowerCase() !== storeKey.toLowerCase()) {
+    throw {
+      status: 400,
+      message: "現在、電子ジャーナルAI分析はBistro CAVACAVAのみ対応しています。",
+    } satisfies AppError
+  }
+  return {
+    storeKey: mapped.storeKey,
+    storeName: mapped.storeName,
+    storeCode: "1015",
+    month: normalizeYearMonth(body.month),
+  }
+}
+
+async function recordPosJournalAiUsage(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  usage: PosJournalAiUsage | null,
+): Promise<void> {
+  if (!usage) return
+  try {
+    const { error } = await supabase.from("ai_usage_events").insert({
+      store_partition_key: storeKey,
+      provider: usage.provider,
+      model: usage.model,
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      thinking_tokens: null,
+      total_tokens: usage.totalTokens,
+      line_message_id: null,
+      surface: "pos_journal",
+    })
+    if (error) {
+      console.error("pos journal ai_usage_events insert failed:", error.message)
+    }
+  } catch (error) {
+    console.error(
+      "pos journal ai_usage_events insert threw:",
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+}
+
+async function resolvePosJournalAiSummary(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  expected: { storeKey: string; storeName: string; storeCode: string; month: string },
+) {
+  const rows = await fetchPosJournalRows(supabase, expected.storeKey, expected.month)
+  const storedDays = rows
+    .map((row) =>
+      isRecord(row.parsed_data) ? row.parsed_data as PosJournalDay : null
+    )
+    .filter((day): day is PosJournalDay =>
+      day !== null && typeof day.business_date === "string" &&
+      Array.isArray(day.receipts)
+    )
+  if (storedDays.length) {
+    return buildPosJournalSummary({
+      storeKey: expected.storeKey,
+      storeName: expected.storeName,
+      storeCode: expected.storeCode,
+      month: expected.month,
+      days: storedDays,
+      fileCount: rows.length,
+    })
+  }
+  return normalizePosJournalAiSummary(body.summary, expected)
+}
+
+async function analyzePosJournalWithAi(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const expected = resolvePosJournalAiStore(body, storeScope)
+  let summary
+  try {
+    summary = await resolvePosJournalAiSummary(supabase, body, expected)
+  } catch (error) {
+    throw {
+      status: 400,
+      message: error instanceof Error ? error.message : "分析データが不正です。",
+    } satisfies AppError
+  }
+  if (!summary.days.length) {
+    return {
+      ok: true,
+      analysis: null,
+      ai_generated: false,
+      model: null,
+      warning: "分析対象の電子ジャーナルデータがありません。",
+      facts: buildPosJournalAiFacts(summary),
+    }
+  }
+  const facts = buildPosJournalAiFacts(summary)
+  const result = await generatePosJournalAiAnalysis(
+    facts,
+    String(Deno.env.get("GROQ_API_KEY") ?? "").trim(),
+  )
+  await recordPosJournalAiUsage(supabase, expected.storeKey, result.usage)
+  return {
+    ok: true,
+    analysis: result.text,
+    ai_generated: result.aiGenerated,
+    model: result.model,
+    warning: result.warning,
+    facts,
+  }
+}
+
+async function askPosJournalAi(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const expected = resolvePosJournalAiStore(body, storeScope)
+  let summary
+  let question
+  let history
+  try {
+    summary = await resolvePosJournalAiSummary(supabase, body, expected)
+    question = normalizePosJournalAiQuestion(body.question)
+    history = normalizePosJournalAiHistory(body.history)
+  } catch (error) {
+    throw {
+      status: 400,
+      message: error instanceof Error ? error.message : "質問データが不正です。",
+    } satisfies AppError
+  }
+  if (!summary.days.length) {
+    return {
+      ok: true,
+      answer: "分析対象の電子ジャーナルデータがありません。対象月を確認するか、LZHファイルをアップロードしてください。",
+      ai_generated: false,
+      model: null,
+      warning: "データが空です。",
+    }
+  }
+  const facts = buildPosJournalAiFacts(summary)
+  const result = await answerPosJournalAiQuestion(
+    facts,
+    question,
+    history,
+    String(Deno.env.get("GROQ_API_KEY") ?? "").trim(),
+  )
+  await recordPosJournalAiUsage(supabase, expected.storeKey, result.usage)
+  return {
+    ok: true,
+    answer: result.text,
+    ai_generated: result.aiGenerated,
+    model: result.model,
+    warning: result.warning,
+  }
 }
 
 async function deletePosJournalFile(

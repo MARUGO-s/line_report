@@ -69,6 +69,29 @@ New records are appended below.
   - Commit `4e6d70a`をmainへpush。Pages run `30351184119`、DB migration＋全Edge Functions run `30351184113`はいずれもsuccess。
   - 本番`pos-journal.html`/静的JSONはHTTP 200、新API未認証は401。本番DBで`pos_journal_files`、private bucket（8MB）、RLS有効、anon/authenticated SELECT不可を確認。
 
+### 2026-07-28 - 電子ジャーナルへAI月次分析・自由質問を追加
+
+- Request: 電子ジャーナルのデータも既存の売上分析と同様にAIで分析できるようにする。
+- Analysis scope:
+  - 月次総売上・営業日平均・客数・客単価・組単価。
+  - 最高/最低営業日、前半/後半、中央値、標準偏差、異常日。
+  - 曜日別・天候別、決済比率、商品売上構成と上位集中度。
+  - 総評、売上推移、客数/客単価、曜日/天候、決済/商品、注目日、改善提案、注意点。
+- API/UI:
+  - `POST /pos-journals/ai-analysis`: 月次分析。保存済みデータがあればDB解析JSONを正本とし、未保管の2026年6月互換データは検証・再集計した画面データを使う。
+  - `POST /pos-journals/ai-ask`: 最大500字の自由質問と直近8件の会話文脈。最高日、客単価、天候、商品、決済などに回答。
+  - Groqの実測トークンは`ai_usage_events.surface='pos_journal'`へ記録し、AI使用料へ反映。
+  - AIキーなし/API失敗/タイムアウト時は、画面を壊さず同じ事実データから基本分析・定型回答へフォールバック。
+  - `pos-journal.html`へAI分析カード、進行状態、見出し別分析、質問候補、会話スレッドを追加。
+- Safety:
+  - クライアントの合計値・ランキングを信用せず日次/会計明細から再計算。DB保存済み月はクライアントJSONよりDBを優先。
+  - 店舗/月を強制し、62日・1日200会計・1会計100品・リクエスト約900KBの上限、質問長・履歴数/文字数を検証。
+  - 商品名などPOS文字列はプロンプト内で非信頼データとして扱い、命令に従わず、外部要因や利益を捏造しないよう制約。
+- Verification:
+  - 新規AI unit tests 5/5、既存LHA tests 4/4。
+  - ローカルAPI E2E: 未認証401、AIキーなし基本分析200（総売上1,519,300円・最高日2026-06-12）、質問回答200、空データ200、501字質問400、未対応店舗400。
+  - `npm run check`、既存`npm test` 90/90、UIインラインJS構文、実画面のAIカード/Q&A表示を確認。
+
 ### 2026-07-27 - リポジトリ構成を整理
 
 - Request: `line_report-main`直下に公開ページ、ローカルDB、復旧用バックアップ、生成物が混在していたため、既存URLを壊さずに整理する。
