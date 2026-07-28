@@ -66,6 +66,8 @@ New records are appended below.
   - ローカルAPI E2E: upload 200、一覧/集計200、同一SHA重複スキップ、署名URL200、`DELETE`は400、`delete`は200、Storage/DB残0、削除後の再アップロード成功。
   - migration単体をローカルPostgresへ適用し、private bucket・RLS・anon/authenticated SELECT不可・partial unique indexを確認。
   - `npm run check`、既存`npm test` 90/90、`npm run knowledge:update`/`knowledge:check`、`git diff --check`成功。
+  - Commit `4e6d70a`をmainへpush。Pages run `30351184119`、DB migration＋全Edge Functions run `30351184113`はいずれもsuccess。
+  - 本番`pos-journal.html`/静的JSONはHTTP 200、新API未認証は401。本番DBで`pos_journal_files`、private bucket（8MB）、RLS有効、anon/authenticated SELECT不可を確認。
 
 ### 2026-07-27 - リポジトリ構成を整理
 
