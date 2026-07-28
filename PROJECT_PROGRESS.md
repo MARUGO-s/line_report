@@ -112,6 +112,8 @@ New records are appended below.
   - API E2E: 自動保存200、一覧200、詳細200、`DELETE`確認文字は400、`delete`は200、削除後詳細404。
   - 新規履歴テスト3/3、AI/LHAテスト10/10、既存`npm test` 90/90、`npm run check`成功。
   - 実画面のPDF保存処理からA4 PDFを生成。1ページ、日本語、店舗、総売上1,519,300円、改善提案を確認し、全ページをPNGへレンダリングして文字切れ・重なりなしを確認。
+  - Commit `580915d`をmainへpush。Pages run `30364591130`、DB migration＋全Edge Functions run `30364585947`はsuccess。
+  - 本番`pos-journal.html`はHTTP 200でPDF/履歴/削除UIを確認。履歴API未認証401。本番DBで`pos_journal_ai_analyses`、RLS有効、anon/authenticated SELECT不可、service_role insert/delete可を確認。
 
 ### 2026-07-27 - リポジトリ構成を整理
 
