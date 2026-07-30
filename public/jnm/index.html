@@ -2516,11 +2516,20 @@ function dayHtml(g){
 }
 
 const REPORT_STORE_KEY='jnl2txt_saved_reports_v1';
+const FORECAST_STORE_KEY='jnl2txt_sales_forecasts_v1';
+const AI_HISTORY_LOCAL_KEY='jnl2txt_ai_history_v1';
+const CLOUD_DATA_LOCAL_KEYS=[REPORT_STORE_KEY, FORECAST_STORE_KEY, AI_HISTORY_LOCAL_KEY];
 let currentReport=null;
 
+/** 売上・予測・AI履歴はクラウドのみ。端末に残った旧キャッシュを破棄する */
+function purgeLocalCloudDataCaches(){
+  for(const key of CLOUD_DATA_LOCAL_KEYS){
+    try{ localStorage.removeItem(key); }catch(_){}
+  }
+}
+purgeLocalCloudDataCaches();
+
 // 保存・削除の処理中／完了状態を画面下部のトーストで表示する。
-// desktopStorage.save()はネイティブ側の実際の書き込み完了を待つPromiseを返すため
-// （macOS/Windowsとも）、「保存中…」表示中に処理が本当に終わっていない状態を防げる。
 let saveToastTimer=null;
 function showSaveStatus(text){
   clearTimeout(saveToastTimer);
@@ -2528,15 +2537,13 @@ function showSaveStatus(text){
   if(!el){ el=document.createElement('div'); el.id='saveToast'; el.className='save-toast'; document.body.appendChild(el); }
   el.textContent=text; el.classList.remove('done','error'); el.classList.add('show');
 }
+
 function finishSaveStatus(text,isError=false){
   const el=document.getElementById('saveToast');
   if(!el) return;
   el.textContent=text; el.classList.add('done'); el.classList.toggle('error',isError);
   saveToastTimer=setTimeout(()=>el.classList.remove('show'),1800);
 }
-
-const EMBEDDED_BACKUP = /* @EMBEDDED_BACKUP_START@ */ null /* @EMBEDDED_BACKUP_END@ */;
-function isEmptyReportsRaw(raw){return raw==null||raw==='[]'||(Array.isArray(raw)&&raw.length===0);}
 
 function reportHasSalesSummary(r) {
   if (!r || typeof r !== 'object') return false;
@@ -2557,36 +2564,31 @@ function reportSummaryCustomers(r) {
   return lunch + dinner;
 }
 
+function pickDefinedSummary(r) {
+  if (!r || typeof r !== 'object') return {};
+  const out = {};
+  for (const k of ['total','totalSales','foodTotal','drinkTotal','salesCount','topProducts','totalCustomers','lunchTotal','dinnerTotal','lunchCustomers','dinnerCustomers','weekdayBreakdown','hourlyBreakdown','createdAt','parserVersion','verificationVersion','categoryVersion','mealPeriodVersion']) {
+    if (r[k] !== undefined) out[k] = r[k];
+  }
+  return out;
+}
+
 async function fetchSupabaseReports() {
   try {
-    // 一覧用メタデータのみ取得（20MB -> 5KBへ大幅軽量化）
     const body = await adminApiFetch('/pos-journals/saved-reports?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=200', { method: 'GET' });
     const rows = Array.isArray(body.items) ? body.items : [];
-    // 既存ローカルに金額サマリーがある場合は消さない（AIチャット参照用）
-    let localById = {};
-    try {
-      const raw = localStorage.getItem(REPORT_STORE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        parsed.forEach(r => { if (r?.id) localById[String(r.id)] = r; });
-      }
-    } catch (_) {}
-
     return rows.map(row => {
-      const id = String(row.id || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`);
-      const local = localById[id] || {};
-      // ローカルの詳細・件数・解析版をクラウドのメタデータで消さない
+      const id = String(row.id || '');
       return {
-        ...local,
         id,
-        title: row.title || local.title || '売上レポート',
-        period: row.period || local.period || '',
-        createdAt: local.createdAt || row.created_at || local.createdAt,
-        ...pickDefinedSummary(local)
+        title: row.title || '売上レポート',
+        period: row.period || '',
+        createdAt: row.created_at || '',
+        ...pickDefinedSummary(row)
       };
-    });
+    }).filter(r => r.id);
   } catch (err) {
-    console.warn('admin-api fetch error, fallback to local:', err);
+    console.warn('admin-api fetch error:', err);
     return null;
   }
 }
@@ -2611,86 +2613,124 @@ async function fetchSupabaseReportById(id) {
 }
 
 async function hydrateSavedReport(r) {
-  if (reportHasSalesSummary(r)) return r;
+  if (reportHasSalesSummary(r) && (isDetailedReportHtml(r.body) || isDetailedReportHtml(r.previewHtml) || (Array.isArray(r.sales) && r.sales.length))) {
+    return r;
+  }
   if (!r?.id) return r;
   const full = await fetchSupabaseReportById(r.id);
-  const merged = full ? { ...r, ...full } : r;
-  if (reportHasSalesSummary(merged)) {
-    try {
-      const raw = localStorage.getItem(REPORT_STORE_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(list)) {
-        const idx = list.findIndex(x => String(x.id) === String(merged.id));
-        if (idx >= 0) list[idx] = { ...list[idx], ...merged };
-        else list.unshift(merged);
-        localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(list));
-      }
-    } catch (_) {}
-  }
-  return merged;
+  return full ? { ...r, ...full, id: r.id } : r;
 }
 
 async function readSavedReports() {
+  purgeLocalCloudDataCaches();
   try {
-    let local = [];
-    try {
-      const raw = localStorage.getItem(REPORT_STORE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      local = Array.isArray(parsed) ? parsed : [];
-    } catch (_) { local = []; }
-
+    if (!getAdminToken()) return [];
     const remoteReports = await fetchSupabaseReports();
-    // 認証失敗・通信失敗時はローカルを維持
-    if (remoteReports === null) return local;
-
-    // クラウド取得成功時はクラウドを正とする（DB削除後に端末キャッシュが残らないようにする）
-    if (remoteReports.length === 0) {
-      if (local.length > 0) {
-        try { localStorage.setItem(REPORT_STORE_KEY, JSON.stringify([])); } catch (_) {}
-      }
-      return [];
-    }
-
-    // リモート一覧（メタ）にローカルの詳細サマリーをマージ（ローカル詳細を優先）
-    const localById = {};
-    local.forEach(r => { if (r?.id) localById[String(r.id)] = r; });
-    const merged = remoteReports.map(r => {
-      const loc = localById[String(r.id)] || {};
-      return {
-        ...r,
-        ...loc,
-        id: r.id,
-        title: r.title || loc.title,
-        period: r.period || loc.period,
-        createdAt: loc.createdAt || r.createdAt,
-        ...pickDefinedSummary(loc),
-        body: loc.body || r.body,
-        previewHtml: loc.previewHtml || r.previewHtml,
-        sales: loc.sales || r.sales
-      };
-    });
-    // クラウドに無いローカルのみの残骸は捨てる（削除済みレポートの復活防止）
-    try {
-      localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(merged));
-    } catch (_) {}
-    return merged;
+    if (remoteReports === null) return [];
+    return remoteReports;
   } catch (e) {
     console.error('readSavedReports error:', e);
-    try {
-      const raw = localStorage.getItem(REPORT_STORE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (_) { return []; }
+    return [];
   }
 }
 
-function pickDefinedSummary(r) {
-  if (!r || typeof r !== 'object') return {};
-  const out = {};
-  for (const k of ['total','totalSales','foodTotal','drinkTotal','salesCount','topProducts','totalCustomers','lunchTotal','dinnerTotal','lunchCustomers','dinnerCustomers','weekdayBreakdown','hourlyBreakdown','createdAt','parserVersion','verificationVersion','categoryVersion','mealPeriodVersion']) {
-    if (r[k] !== undefined) out[k] = r[k];
+async function writeSavedReports(reports, newRecords) {
+  try {
+    const toUpload = Array.isArray(newRecords) ? newRecords : reports;
+    let uploaded = 0;
+    let failed = 0;
+    let lastErr = null;
+    const hasToken = !!getAdminToken();
+
+    if (!hasToken) {
+      setAuthUiState(false);
+      const card = document.getElementById('authCard');
+      if (card) {
+        card.hidden = false;
+        try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+      }
+      return {
+        ok: false,
+        remote: false,
+        local: false,
+        reason: 'auth',
+        error: new Error('クラウド保存には管理トークン接続が必要です。画面上部で接続するか、LINEの最新リンクから開いてください。')
+      };
+    }
+
+    for (const r of toUpload) {
+      const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      try {
+        await adminApiFetch('/pos-journals/saved-reports', {
+          method: 'POST',
+          body: JSON.stringify({
+            id,
+            title: String(r.title || '売上レポート'),
+            period: String(r.period || ''),
+            data: buildCloudReportData({ ...r, id }, { includeBody: false }),
+            store_key: STORE_KEY
+          })
+        });
+        if (isDetailedReportHtml(r.body)) {
+          try {
+            await adminApiFetch('/pos-journals/saved-reports', {
+              method: 'POST',
+              body: JSON.stringify({
+                id,
+                title: String(r.title || '売上レポート'),
+                period: String(r.period || ''),
+                data: buildCloudReportData({ ...r, id }, { includeBody: true }),
+                store_key: STORE_KEY
+              })
+            });
+          } catch (_) {}
+        }
+        uploaded++;
+      } catch (err) {
+        failed++;
+        lastErr = err;
+        console.warn('admin-api write error:', err);
+      }
+    }
+
+    purgeLocalCloudDataCaches();
+    if (uploaded < toUpload.length || failed > 0) {
+      return {
+        ok: false,
+        remote: uploaded > 0,
+        local: false,
+        uploaded,
+        failed,
+        error: lastErr || new Error('クラウド保存に失敗しました'),
+        reason: 'upload'
+      };
+    }
+
+    return {
+      ok: true,
+      remote: true,
+      local: false,
+      uploaded,
+      failed: 0
+    };
+  } catch (e) {
+    console.error('writeSavedReports error:', e);
+    return { ok: false, remote: false, local: false, reason: 'exception', error: e };
   }
-  return out;
+}
+
+async function deleteSavedReport(id) {
+  try {
+    await adminApiFetch('/pos-journals/saved-reports/item', {
+      method: 'DELETE',
+      body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
+    });
+    purgeLocalCloudDataCaches();
+    return true;
+  } catch (e) {
+    console.error('deleteSavedReport error:', e);
+    return false;
+  }
 }
 
 function isStaleReport(r) {
@@ -2754,141 +2794,6 @@ function buildCloudReportData(r, { includeBody = false } = {}) {
   return data;
 }
 
-async function writeSavedReports(reports, newRecords) {
-  try {
-    const toUpload = Array.isArray(newRecords) ? newRecords : reports;
-    let uploaded = 0;
-    let failed = 0;
-    let lastErr = null;
-    const hasToken = !!getAdminToken();
-
-    // クラウド保存必須：トークン未接続なら保存しない
-    if (!hasToken) {
-      setAuthUiState(false);
-      const card = document.getElementById('authCard');
-      if (card) {
-        card.hidden = false;
-        try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-      }
-      return {
-        ok: false,
-        remote: false,
-        local: false,
-        reason: 'auth',
-        error: new Error('クラウド保存には管理トークン接続が必要です。画面上部で接続するか、LINEの最新リンクから開いてください。')
-      };
-    }
-
-    const persistLocal = (list) => {
-      try {
-        localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(list));
-        return true;
-      } catch (_) {
-        try {
-          const keepBody = list.map(r => {
-            const { sales, relatedReports, ...rest } = r;
-            return rest;
-          });
-          localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(keepBody));
-          return true;
-        } catch (_) {}
-        try {
-          const compact = list.map((r, i) => {
-            if (i < 8 && isDetailedReportHtml(r.body)) {
-              const { sales, relatedReports, ...rest } = r;
-              return rest;
-            }
-            const { body, sales, relatedReports, ...rest } = r;
-            return { ...rest, previewHtml: rest.previewHtml || buildSavedReportPreviewHtml(r) };
-          });
-          localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(compact));
-          return true;
-        } catch (e2) {
-          return false;
-        }
-      }
-    };
-
-    for (const r of toUpload) {
-      const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-      try {
-        // 要約＋件数・解析版をクラウドへ必須保存
-        await adminApiFetch('/pos-journals/saved-reports', {
-          method: 'POST',
-          body: JSON.stringify({
-            id,
-            title: String(r.title || '売上レポート'),
-            period: String(r.period || ''),
-            data: buildCloudReportData({ ...r, id }, { includeBody: false }),
-            store_key: STORE_KEY
-          })
-        });
-        // 詳細HTMLは可能な範囲で追加保存（失敗しても要約があればクラウド保存成功）
-        if (isDetailedReportHtml(r.body)) {
-          try {
-            await adminApiFetch('/pos-journals/saved-reports', {
-              method: 'POST',
-              body: JSON.stringify({
-                id,
-                title: String(r.title || '売上レポート'),
-                period: String(r.period || ''),
-                data: buildCloudReportData({ ...r, id }, { includeBody: true }),
-                store_key: STORE_KEY
-              })
-            });
-          } catch (_) {}
-        }
-        uploaded++;
-      } catch (err) {
-        failed++;
-        lastErr = err;
-        console.warn('admin-api write error:', err);
-      }
-    }
-
-    // 全件クラウド保存できて初めて成功
-    if (uploaded < toUpload.length || failed > 0) {
-      return {
-        ok: false,
-        remote: uploaded > 0,
-        local: false,
-        uploaded,
-        failed,
-        error: lastErr || new Error('クラウド保存に失敗しました'),
-        reason: 'upload'
-      };
-    }
-
-    // クラウド成功後に端末キャッシュも更新（表示高速化用）
-    persistLocal(reports);
-    return {
-      ok: true,
-      remote: true,
-      local: true,
-      uploaded,
-      failed: 0
-    };
-  } catch (e) {
-    console.error('writeSavedReports error:', e);
-    return { ok: false, remote: false, reason: 'exception', error: e };
-  }
-}
-
-async function deleteSavedReport(id) {
-  try {
-    await adminApiFetch('/pos-journals/saved-reports/item', {
-      method: 'DELETE',
-      body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
-    });
-    const current = await readSavedReports();
-    const filtered = current.filter(x => x.id !== id);
-    localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(filtered));
-    return true;
-  } catch (e) {
-    console.error('deleteSavedReport error:', e);
-    return false;
-  }
-}
 function reportStamp(){
   const now=new Date();
   return `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} 作成`;
@@ -3190,15 +3095,7 @@ async function saveSalesForecastSnapshot(result, horizon) {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    // 端末キャッシュ（閲覧高速化）
-    try {
-      const key = 'jnl2txt_sales_forecasts_v1';
-      const raw = localStorage.getItem(key);
-      const list = raw ? JSON.parse(raw) : [];
-      const arr = Array.isArray(list) ? list : [];
-      arr.unshift({ ...payload, created_at: payload.forecasted_at });
-      localStorage.setItem(key, JSON.stringify(arr.slice(0, 50)));
-    } catch (_) {}
+    purgeLocalCloudDataCaches();
     return { ok: true, id, title };
   } catch (err) {
     console.warn('saveSalesForecastSnapshot error:', err);
@@ -3212,20 +3109,11 @@ async function fetchSalesForecastHistory() {
       '/pos-journals/sales-forecasts?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=100',
       { method: 'GET' }
     );
-    const items = Array.isArray(body.items) ? body.items : [];
-    if (items.length === 0) {
-      try { localStorage.setItem('jnl2txt_sales_forecasts_v1', '[]'); } catch (_) {}
-    }
-    return items;
+    purgeLocalCloudDataCaches();
+    return Array.isArray(body.items) ? body.items : [];
   } catch (err) {
     console.warn('fetchSalesForecastHistory error:', err);
-    try {
-      const raw = localStorage.getItem('jnl2txt_sales_forecasts_v1');
-      const list = raw ? JSON.parse(raw) : [];
-      return Array.isArray(list) ? list : [];
-    } catch (_) {
-      return [];
-    }
+    return [];
   }
 }
 
@@ -3238,13 +3126,7 @@ async function fetchSalesForecastById(id) {
     return body.item || null;
   } catch (err) {
     console.warn('fetchSalesForecastById error:', err);
-    try {
-      const raw = localStorage.getItem('jnl2txt_sales_forecasts_v1');
-      const list = raw ? JSON.parse(raw) : [];
-      return (Array.isArray(list) ? list : []).find(x => String(x.id) === String(id)) || null;
-    } catch (_) {
-      return null;
-    }
+    return null;
   }
 }
 
@@ -4260,7 +4142,7 @@ async function renderSavedReports(filter='all'){
   view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">保存済みレポート</span><button class="rv-btn rv-btn-ghost" id="savedClose">閉じる</button></div>
     <div class="saved-wrap">
       <h1 class="r-title">保存済みレポート</h1>
-      <p class="r-meta">レポートはクラウドへ必ず保存されます（管理トークン接続が必要です）。</p>
+      <p class="r-meta">レポートはクラウドのみに保存されます（端末には残しません。管理トークン接続が必要です）。</p>
       <div class="controls" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
         <div style="display:flex; gap:8px;">
           <button class="rv-btn rv-btn-secondary ${filter==='all'?'active':''}" data-filter="all">すべて</button>
@@ -4284,24 +4166,19 @@ async function renderSavedReports(filter='all'){
     showAppLoading('レポートを読み込み中...', 'データを表示します');
     try {
       const targetId = b.dataset.open;
-      let local = reports.find(x => x.id === targetId);
-      let remote = null;
-      if (!local || !(isDetailedReportHtml(local.body) || isDetailedReportHtml(local.previewHtml) || (Array.isArray(local.sales) && local.sales.length) || reportHasSalesSummary(local))) {
-        remote = await fetchSupabaseReportById(targetId);
-      } else if (!reportHasSalesSummary(local) || !local.parserVersion) {
-        remote = await fetchSupabaseReportById(targetId);
-      }
+      const listItem = reports.find(x => x.id === targetId) || { id: targetId };
+      const remote = await fetchSupabaseReportById(targetId);
       let r = remote ? {
+        ...listItem,
         ...remote,
-        ...pickDefinedSummary(local || {}),
-        ...(local || {}),
-        ...pickDefinedSummary(remote),
         id: targetId,
-        title: remote.title || local?.title,
-        period: remote.period || local?.period,
-        body: (local && isDetailedReportHtml(local.body) ? local.body : null) || remote.body || remote.previewHtml || local?.previewHtml,
-        sales: local?.sales || remote.sales
-      } : local;
+        title: remote.title || listItem.title,
+        period: remote.period || listItem.period,
+        body: remote.body || remote.previewHtml || '',
+        previewHtml: remote.previewHtml || remote.body || '',
+        createdAt: remote.createdAt || listItem.createdAt,
+        sales: remote.sales || listItem.sales
+      } : listItem;
       if (r) {
         const body = resolveSavedReportBody(r);
         renderReport({ ...r, body, saved: true });
@@ -5257,8 +5134,6 @@ function renderAiAnalysis(text, skipAutoSave = false, title = null, period = nul
   }
 }
 
-const AI_HISTORY_LOCAL_KEY = 'jnl2txt_ai_history_v1';
-
 async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, reportPeriod = null) {
   try {
     if (!analysisText) return;
@@ -5293,84 +5168,49 @@ async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, report
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    
-    // 1. ローカルストレージに即時自動保存 (デュアル自動保存)
-    try {
-      const localRaw = localStorage.getItem(AI_HISTORY_LOCAL_KEY);
-      const localList = localRaw ? JSON.parse(localRaw) : [];
-      localList.unshift(record);
-      localStorage.setItem(AI_HISTORY_LOCAL_KEY, JSON.stringify(localList.slice(0, 100)));
-    } catch (e) {
-      console.warn('Local AI history save warning:', e);
-    }
 
     showSaveStatus('AI分析結果を自動保存中…');
 
-    // 2. admin-api 経由で ai_analysis_history テーブルへ保存
-    try {
-      await adminApiFetch('/pos-journals/report-ai-history', {
-        method: 'POST',
-        body: JSON.stringify({
-          id: record.id,
-          report_title: record.report_title,
-          report_period: record.report_period,
-          analysis_result: record.analysis_result,
-          sales_data: record.sales_data,
-          store_key: STORE_KEY
-        })
-      });
-    } catch (err) {
-      console.warn('admin-api remote save warning:', err);
-    }
-
+    await adminApiFetch('/pos-journals/report-ai-history', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: record.id,
+        report_title: record.report_title,
+        report_period: record.report_period,
+        analysis_result: record.analysis_result,
+        sales_data: record.sales_data,
+        store_key: STORE_KEY
+      })
+    });
+    purgeLocalCloudDataCaches();
     finishSaveStatus('AI分析を自動保存しました');
   } catch (err) {
     console.error('saveAiAnalysisToSupabase error:', err);
-    finishSaveStatus('AI分析を自動保存しました');
+    finishSaveStatus('AI分析のクラウド保存に失敗しました', true);
   }
 }
 
 async function fetchAiHistory() {
-  let cloudItems = null;
   try {
     const body = await adminApiFetch('/pos-journals/report-ai-history?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=100', { method: 'GET' });
-    cloudItems = Array.isArray(body.items) ? body.items : null;
+    purgeLocalCloudDataCaches();
+    return Array.isArray(body.items) ? body.items : [];
   } catch (err) {
     console.warn('fetchAiHistory remote fetch error:', err);
+    return [];
   }
-
-  let localItems = [];
-  try {
-    const localRaw = localStorage.getItem(AI_HISTORY_LOCAL_KEY);
-    if (localRaw) localItems = JSON.parse(localRaw);
-  } catch (e) {}
-
-  if (Array.isArray(cloudItems)) {
-    if (cloudItems.length === 0) {
-      try { localStorage.setItem(AI_HISTORY_LOCAL_KEY, '[]'); } catch (_) {}
-      return [];
-    }
-    return cloudItems;
-  }
-  return localItems;
 }
 
 async function deleteAiHistory(id) {
-  try {
-    const localRaw = localStorage.getItem(AI_HISTORY_LOCAL_KEY);
-    if (localRaw) {
-      const localList = JSON.parse(localRaw).filter(x => x.id !== id);
-      localStorage.setItem(AI_HISTORY_LOCAL_KEY, JSON.stringify(localList));
-    }
-  } catch (e) {}
-
   try {
     await adminApiFetch('/pos-journals/report-ai-history/item', {
       method: 'DELETE',
       body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
     });
+    purgeLocalCloudDataCaches();
   } catch (e) {
     console.error('deleteAiHistory error:', e);
+    return false;
   }
   return true;
 }

@@ -8106,17 +8106,69 @@ type SavedReportListRow = {
   title: string
   period: string
   created_at: string
+  total?: number
+  totalSales?: number
+  foodTotal?: number
+  drinkTotal?: number
+  roomTotal?: number
+  salesCount?: number
+  totalCustomers?: number
+  lunchTotal?: number
+  dinnerTotal?: number
+  lunchCustomers?: number
+  dinnerCustomers?: number
+  parserVersion?: string
+  verificationVersion?: string
+  categoryVersion?: string
+  mealPeriodVersion?: string
+}
+
+function pickSavedReportListSummary(
+  data: unknown,
+): Partial<SavedReportListRow> {
+  if (!isRecord(data)) return {}
+  const out: Partial<SavedReportListRow> = {}
+  const numKeys = [
+    "total",
+    "totalSales",
+    "foodTotal",
+    "drinkTotal",
+    "roomTotal",
+    "salesCount",
+    "totalCustomers",
+    "lunchTotal",
+    "dinnerTotal",
+    "lunchCustomers",
+    "dinnerCustomers",
+  ] as const
+  for (const key of numKeys) {
+    const n = Number(data[key])
+    if (Number.isFinite(n)) out[key] = n
+  }
+  const strKeys = [
+    "parserVersion",
+    "verificationVersion",
+    "categoryVersion",
+    "mealPeriodVersion",
+  ] as const
+  for (const key of strKeys) {
+    const v = toSafeString(data[key])
+    if (v) out[key] = v
+  }
+  return out
 }
 
 function normalizeSavedReportListRow(value: unknown): SavedReportListRow | null {
   if (!isRecord(value)) return null
   const id = toSafeString(value.id)
   if (!id) return null
+  const summary = pickSavedReportListSummary(value.data)
   return {
     id,
     title: toSafeString(value.title) || "売上レポート",
     period: toSafeString(value.period),
     created_at: String(value.created_at ?? ""),
+    ...summary,
   }
 }
 
@@ -8133,7 +8185,7 @@ async function fetchSavedReportsList(
     : 200
   const { data, error } = await supabase
     .from("saved_reports")
-    .select("id, title, period, created_at")
+    .select("id, title, period, created_at, data")
     .eq("store_partition_key", storeKey)
     .order("created_at", { ascending: false })
     .limit(limit)
