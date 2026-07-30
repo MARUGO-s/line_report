@@ -1034,6 +1034,7 @@
       <button id="monthlyBtn" class="btn-primary" style="display:none" disabled>月間レポートを作成</button>
       <button id="savedBtn" class="btn-secondary">保存済みレポート</button>
       <button id="aiHistoryBtn" class="btn-secondary">🤖 AI分析履歴</button>
+      <button id="mainAiChatBtn" onclick="toggleAiChat()" class="btn-secondary">💬 AIチャット</button>
       <button id="themeToggleBtn" onclick="toggleAppTheme()" class="btn-secondary">テーマ切り替え</button>
       <button id="dlall" class="btn-secondary" disabled>すべて .txt で保存</button>
       <button id="clear" class="btn-secondary" disabled>クリア</button>
@@ -4133,6 +4134,12 @@ async function sendAiChat() {
   const loadingId = appendAiChatLoading();
   const compactData = buildCompactSalesDataForAI();
   
+  const strictSystemInstruction = `【絶対遵守プロンプト規約】
+1. あなたは店舗の保存済み売上データ専用の厳密なアナリストAIです。
+2. 質問の答えや数字に関しては、必ず提示された保存データ・資料（salesData）のみから厳密に引用・計算して回答してください。
+3. 推測やWeb情報、一般的な曖昧な推量で数字を答えることは【完全禁止】です。
+4. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください。`;
+
   try {
     const res = await fetch(AI_ENDPOINT, {
       method: 'POST',
@@ -4143,6 +4150,7 @@ async function sendAiChat() {
       body: JSON.stringify({
         action: 'chat',
         message: msg,
+        systemInstruction: strictSystemInstruction,
         salesData: compactData,
         chatHistory: aiChatHistory.slice(-6)
       })
