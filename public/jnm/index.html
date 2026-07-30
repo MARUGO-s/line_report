@@ -2110,11 +2110,10 @@ function parseWeatherFromRecord(rec){
 function collectWeatherByDate(itemList=null){
   const map=new Map();
   const source=Array.isArray(itemList)?itemList:items;
-  source.forEach(it=>{
-    if(it.error||!it.bytes) return;
+  const ingestText=(text)=>{
+    if(!text) return;
     try{
-      const recs=splitRecords(convert(it.bytes, encSel.value));
-      recs.forEach(rec=>{
+      splitRecords(text).forEach(rec=>{
         const w=parseWeatherFromRecord(rec);
         if(!w) return;
         const prev=map.get(w.date)||{};
@@ -2124,8 +2123,48 @@ function collectWeatherByDate(itemList=null){
         });
       });
     }catch(_){}
+  };
+  source.forEach(it=>{
+    if(it.error) return;
+    if(it.bytes && it.bytes.length){
+      try{ ingestText(convert(it.bytes, encSel.value)); }catch(_){}
+    }
+    // 解凍済みプレビューからも補強（クラウド復元時の bytes-only 経路と併用）
+    if(it.preview && !String(it.preview).startsWith('（')) ingestText(it.preview);
   });
   return map;
+}
+
+function weatherByDateFromMap(weatherMap){
+  const out={};
+  if(!weatherMap || typeof weatherMap.forEach!=='function') return out;
+  weatherMap.forEach((w,date)=>{
+    if(!date) return;
+    if(!w?.weather && w?.tempC==null) return;
+    out[date]={ weather: w.weather||'', tempC: w.tempC!=null ? w.tempC : null };
+  });
+  return out;
+}
+
+function weatherByDateFromDays(days){
+  const out={};
+  (days||[]).forEach(d=>{
+    if(!d?.date) return;
+    if(!d.weather && !Number.isFinite(d.tempC)) return;
+    out[d.date]={ weather: d.weather||'', tempC: Number.isFinite(d.tempC) ? d.tempC : null };
+  });
+  return out;
+}
+
+function applyWeatherByDateToSales(sales, weatherByDate){
+  if(!Array.isArray(sales)||!sales.length||!weatherByDate||typeof weatherByDate!=='object') return sales;
+  sales.forEach(s=>{
+    const w=weatherByDate[s.date];
+    if(!w) return;
+    if(!s.weather && w.weather) s.weather=w.weather;
+    if(!Number.isFinite(s.tempC) && w.tempC!=null) s.tempC=Number(w.tempC);
+  });
+  return sales;
 }
 
 function formatDayWeather(d){
@@ -2264,7 +2303,7 @@ function parserSelfCheck(){
   if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-31-v17';
+const PARSER_VERSION='2026-07-31-v18';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -3197,6 +3236,7 @@ function buildCloudReportData(r, { includeBody = false } = {}) {
     previewHtml: r.previewHtml,
     sourceMonths,
     journalIds: Array.isArray(r.journalIds) ? r.journalIds : [],
+    weatherByDate: (r.weatherByDate && typeof r.weatherByDate === 'object') ? r.weatherByDate : {},
     sales
   };
   if (includeBody && isDetailedReportHtml(r.body) && String(r.body).length < 350000) {
@@ -3313,13 +3353,28 @@ function reviveSalesList(list) {
   return list.map(reviveSaleFromCloud).filter(Boolean);
 }
 
+/** アップロード用の LZH 原本バイトを返す（解凍後の .jnl ではなく原本） */
+function resolveLzhUploadPayload(it) {
+  if (!it || it.error) return null;
+  if (it.lzhBytes && it.lzhBytes.length) {
+    const fileName = it.lzhName || (/\.lzh$/i.test(it.name) ? it.name : `${String(it.name || 'journal').replace(/\.jnl$/i, '')}.lzh`);
+    return { bytes: it.lzhBytes, fileName };
+  }
+  // 互換: まだ解凍していない LZH をそのまま持っている場合
+  if (it.bytes && it.bytes.length && (/\.lzh$/i.test(it.name) || isLzh(it.name, it.bytes))) {
+    return { bytes: it.bytes, fileName: /\.lzh$/i.test(it.name) ? it.name : `${it.name}.lzh` };
+  }
+  return null;
+}
+
 /** 読み込み済み LZH をクラウド（pos_journal_files）へ保管 */
 async function uploadJournalsToCloud(itemList) {
   if (!getAdminToken()) return { ok: false, reason: 'auth', journals: [] };
-  const lzhItems = (itemList || []).filter(it =>
-    !it.error && it.bytes && it.bytes.length && (/\.lzh$/i.test(it.name) || isLzh(it.name, it.bytes))
-  );
-  if (!lzhItems.length) return { ok: true, uploaded: 0, duplicates: 0, failed: 0, journals: [] };
+  const lzhItems = (itemList || []).map(it => {
+    const payload = resolveLzhUploadPayload(it);
+    return payload ? { ...it, _upload: payload } : null;
+  }).filter(Boolean);
+  if (!lzhItems.length) return { ok: true, uploaded: 0, duplicates: 0, failed: 0, journals: [], skipped: true };
 
   const journals = [];
   let uploaded = 0, duplicates = 0, failed = 0;
@@ -3328,8 +3383,8 @@ async function uploadJournalsToCloud(itemList) {
     const batch = lzhItems.slice(i, i + batchSize);
     const form = new FormData();
     batch.forEach(it => {
-      const fileName = /\.lzh$/i.test(it.name) ? it.name : `${it.name}.lzh`;
-      form.append('files', new File([it.bytes], fileName, { type: 'application/x-lzh-compressed' }));
+      const fileName = it._upload.fileName;
+      form.append('files', new File([it._upload.bytes], fileName, { type: 'application/x-lzh-compressed' }));
     });
     form.append('store_key', STORE_KEY);
     try {
@@ -4139,6 +4194,7 @@ async function resolveSalesForCurrentReport(){
   let sales=reviveSalesList(currentReport?.sales);
   if(sales.length){
     sales=applyAllCategoryOverridesToSales(sales).sales;
+    applyWeatherByDateToSales(sales, currentReport?.weatherByDate);
     return enrichSalesWeatherFromCloudJournals(sales);
   }
   let months=sourceMonthsFromReport(currentReport);
@@ -4150,10 +4206,13 @@ async function resolveSalesForCurrentReport(){
   if(!months.length) return [];
   const fromMonthReports=await loadSalesFromCloudMonthReports(months);
   if(fromMonthReports.length){
+    applyWeatherByDateToSales(fromMonthReports, currentReport?.weatherByDate);
     return enrichSalesWeatherFromCloudJournals(fromMonthReports);
   }
   const loaded=await loadSalesFromCloudJournals(months);
-  return applyAllCategoryOverridesToSales(loaded.sales||[]).sales;
+  const fromJournals=applyAllCategoryOverridesToSales(loaded.sales||[]).sales;
+  applyWeatherByDateToSales(fromJournals, currentReport?.weatherByDate);
+  return fromJournals;
 }
 
 /** 未反映のドラッグ移動をまとめてクラウドへ永続化 */
@@ -4576,6 +4635,9 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
     if (!silent) alert('完了した売上レコードが見つかりませんでした。');
     return null;
   }
+
+  // クラウド再表示時など、伝票に天候が無い場合はレポート保存分で先に復元
+  if (options.weatherByDate) applyWeatherByDateToSales(sales, options.weatherByDate);
   
   const months=new Set(sales.map(s=>s.date.slice(0,7)));
   if(kind==='monthly' && !start && !end && !monthFilter && !salesOverride && months.size!==1){
@@ -4603,6 +4665,12 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
   if(peopleComplete&&lunch.customers+dinner.customers!==summaryCustomers){
     audit.warnings.push(`客数差異: レシート集計${lunch.customers+dinner.customers}名 / 日計集計${summaryCustomers}名（売上レポートは作成）`);
   }
+  const weatherByDate = {
+    ...(options.weatherByDate && typeof options.weatherByDate === 'object' ? options.weatherByDate : {}),
+    ...weatherByDateFromDays(days)
+  };
+  // 伝票側にも天候を残し、クラウド再表示でも日別一覧に出るようにする
+  applyWeatherByDateToSales(sales, weatherByDate);
   const reportBody=kind==='monthly' ? monthlyReportHtml(days,total,tax,sales.length,sales) : days.map(dayHtml).join('');
   const body=auditHtml(audit)+reportBody;
   
@@ -4631,6 +4699,7 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
     dinnerTotal: dinner.total,
     lunchCustomers: lunch.customers,
     dinnerCustomers: dinner.customers,
+    weatherByDate,
     parserVersion: PARSER_VERSION,
     verificationVersion: VERIFICATION_VERSION,
     categoryVersion: CATEGORY_VERSION,
@@ -4801,9 +4870,12 @@ async function saveCurrentReport(options = {}){
   reports.unshift(...records);
   const result = await writeSavedReports(reports.slice(0, 100), records);
   if (result && result.ok) {
-    const jNote = journalUpload.uploaded || journalUpload.duplicates
-      ? `（ジャーナル ${Number(journalUpload.uploaded || 0) + Number(journalUpload.duplicates || 0)}件）`
-      : '';
+    const jUploaded = Number(journalUpload.uploaded || 0) + Number(journalUpload.duplicates || 0);
+    const jFailed = Number(journalUpload.failed || 0);
+    let jNote = '';
+    if (jUploaded) jNote = `（ジャーナル ${jUploaded}件）`;
+    else if (jFailed) jNote = `（ジャーナル原本の保管に失敗 ${jFailed}件）`;
+    else if (journalUpload.skipped) jNote = '（ジャーナル原本なし＝天候はレポート内に保存）';
     finishSaveStatus(`クラウドに${records.length}件保存しました${jNote}`);
     if (openList) await renderSavedReports();
   } else {
@@ -5083,17 +5155,27 @@ async function renderSavedReports(filter='all'){
         sales = await resolveSalesForCurrentReport();
       } else {
         sales = applyAllCategoryOverridesToSales(sales).sales;
+        applyWeatherByDateToSales(sales, r.weatherByDate);
         sales = await enrichSalesWeatherFromCloudJournals(sales);
       }
       if (sales.length) {
         restorePaymentsMap(sales);
         const isMonthly = /月間/.test(String(r.title || ''));
-        const rebuilt = buildReport(isMonthly ? 'monthly' : 'daily', '', '', null, sales, { silent: true, skipRender: true });
+        const rebuilt = buildReport(isMonthly ? 'monthly' : 'daily', '', '', null, sales, {
+          silent: true,
+          skipRender: true,
+          weatherByDate: r.weatherByDate || null
+        });
         if (rebuilt) {
           rebuilt.id = r.id;
           rebuilt.sourceMonths = r.sourceMonths || sourceMonthsFromReport(r);
           rebuilt.journalIds = r.journalIds || [];
           if (r.createdAt) rebuilt.createdAt = r.createdAt;
+          // 既存の weatherByDate もマージして欠落を防ぐ
+          rebuilt.weatherByDate = {
+            ...(r.weatherByDate && typeof r.weatherByDate === 'object' ? r.weatherByDate : {}),
+            ...(rebuilt.weatherByDate || {})
+          };
           r = rebuilt;
           // 天候・客数・分類を反映した最新HTMLをクラウドへも残す
           try { await writeSavedReports([r], [r]); } catch (_) {}
@@ -5437,9 +5519,13 @@ async function addFiles(list){
       const meta = folderMetaFromFile(f);
       let buf=new Uint8Array(await f.arrayBuffer());
       let name=f.name;
+      // クラウド保管用に LZH 原本を残す（解凍後は .jnl になるため）
+      let lzhBytes=null, lzhName=null;
       // .lzh は解凍して中の .jnl を取り出す
       if(isLzh(name,buf)){
         try{
+          lzhBytes=buf;
+          lzhName=/\.lzh$/i.test(f.name)?f.name:`${f.name}.lzh`;
           buf=unlzh(buf).bytes;
           name=name.replace(/\.lzh$/i,'') + '.jnl';
         }catch(e){
@@ -5450,7 +5536,7 @@ async function addFiles(list){
       const fingerprint=byteFingerprint(buf);
       if(items.some(it=>!it.error&&it.fingerprint===fingerprint&&sameBytes(it.bytes,buf))){ duplicateFiles++; continue; }
       const r=process(buf,enc,mode);
-      items.push({name,bytes:buf,fingerprint,preview:r.preview,total:r.total,extracted:r.extracted,summary:r.summary,audit:r.audit,sourceFolder:meta.sourceFolder,folderMonth:meta.folderMonth});
+      items.push({name,bytes:buf,lzhBytes,lzhName,fingerprint,preview:r.preview,total:r.total,extracted:r.extracted,summary:r.summary,audit:r.audit,sourceFolder:meta.sourceFolder,folderMonth:meta.folderMonth});
       added++;
     }
   }finally{
