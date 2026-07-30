@@ -1883,6 +1883,85 @@ function applyCategoryOverrideToSales(sales,key,category){
   }));
 }
 
+/** クラウド上の分類ルールを伝票へ一括適用 */
+function applyAllCategoryOverridesToSales(sales){
+  const overrides=readProductCategoryOverrides();
+  if(!Array.isArray(sales)||!sales.length||!overrides||!Object.keys(overrides).length){
+    return { sales: Array.isArray(sales)?sales:[], changed:false };
+  }
+  let changed=false;
+  const next=sales.map(s=>({
+    ...s,
+    items:(Array.isArray(s.items)?s.items:[]).map(it=>{
+      const k=productGroupKey(it.code,it.name);
+      const cat=overrides[k];
+      if(cat&&SALES_CATEGORIES.includes(cat)&&it.category!==cat){
+        changed=true;
+        return { ...it, category:cat, needsReview:false, known:true, byOverride:true };
+      }
+      return it;
+    })
+  }));
+  return { sales:next, changed };
+}
+
+async function loadSalesFromCloudMonthReports(months){
+  const monthSet=new Set((months||[]).filter(m=>/^\d{4}-\d{2}$/.test(m)));
+  if(!monthSet.size) return [];
+  const list=await fetchSupabaseReports();
+  if(!Array.isArray(list)||!list.length) return [];
+  const merged=[];
+  const seen=new Set();
+  for(const item of list){
+    const mk=monthKeyFromReport(item);
+    if(!mk||!monthSet.has(mk)) continue;
+    if(!/月間/.test(String(item.title||''))) continue;
+    const full=await fetchSupabaseReportById(item.id);
+    reviveSalesList(full?.sales).forEach(p=>{
+      if(!p?.date) return;
+      const key=`${p.date}|${p.no}|${p.total}|${p.time||''}`;
+      if(seen.has(key)) return;
+      seen.add(key);
+      merged.push(p);
+    });
+  }
+  return applyAllCategoryOverridesToSales(merged).sales;
+}
+
+/** 分類変更を、伝票を持つ全クラウドレポートへ反映 */
+async function propagateCategoryOverridesToCloudReports(changedKeys){
+  const list=await fetchSupabaseReports();
+  if(!Array.isArray(list)||!list.length) return { updated:0, checked:0 };
+  const keySet=Array.isArray(changedKeys)&&changedKeys.length?new Set(changedKeys):null;
+  let updated=0, checked=0;
+  for(let i=0;i<list.length;i++){
+    const item=list[i];
+    showAppLoading('分類を全レポートへ反映中...', `${i+1}/${list.length}（更新 ${updated}）`);
+    await yieldToUI();
+    const full=await fetchSupabaseReportById(item.id);
+    if(!full||!Array.isArray(full.sales)||!full.sales.length) continue;
+    checked++;
+    const sales0=reviveSalesList(full.sales);
+    if(keySet){
+      const hit=sales0.some(s=>(s.items||[]).some(it=>keySet.has(productGroupKey(it.code,it.name))));
+      if(!hit) continue;
+    }
+    const { sales, changed }=applyAllCategoryOverridesToSales(sales0);
+    if(!changed) continue;
+    restorePaymentsMap(sales);
+    const isMonthly=/月間/.test(String(full.title||''));
+    const rebuilt=buildReport(isMonthly?'monthly':'daily','','',null,sales,{ silent:true, skipRender:true });
+    if(!rebuilt) continue;
+    rebuilt.id=full.id;
+    rebuilt.sourceMonths=Array.isArray(full.sourceMonths)?full.sourceMonths:sourceMonthsFromReport(full);
+    rebuilt.journalIds=Array.isArray(full.journalIds)?full.journalIds:[];
+    if(full.createdAt) rebuilt.createdAt=full.createdAt;
+    const result=await writeSavedReports([rebuilt],[rebuilt]);
+    if(result?.ok) updated++;
+  }
+  return { updated, checked };
+}
+
 // 会計時刻が16:00未満ならランチ、16:00以降ならディナー。
 // 時刻欠落をランチへ誤分類しないよう、不明時刻は空文字で返して検算停止する。
 const DINNER_START_MINUTES=16*60;
@@ -3851,7 +3930,7 @@ function classificationEditorHtml(sales){
 
 async function resolveSalesForCurrentReport(){
   let sales=reviveSalesList(currentReport?.sales);
-  if(sales.length) return sales;
+  if(sales.length) return applyAllCategoryOverridesToSales(sales).sales;
   let months=sourceMonthsFromReport(currentReport);
   if(!months.length){
     const period=String(currentReport?.period||'');
@@ -3859,8 +3938,10 @@ async function resolveSalesForCurrentReport(){
     months=[...new Set(found)];
   }
   if(!months.length) return [];
+  const fromMonthReports=await loadSalesFromCloudMonthReports(months);
+  if(fromMonthReports.length) return fromMonthReports;
   const loaded=await loadSalesFromCloudJournals(months);
-  return loaded.sales||[];
+  return applyAllCategoryOverridesToSales(loaded.sales||[]).sales;
 }
 
 async function reclassifyProductInCurrentReport(key,category){
@@ -3944,12 +4025,15 @@ async function reclassifyProductInCurrentReport(key,category){
     }
 
     const result=await writeSavedReports(toSave,toSave);
+    // 合算ビューだけでなく、各月の保存済みレポートへも同じ分類を反映
+    showAppLoading('分類を全レポートへ反映中...','月別レポートの集計を更新しています');
+    const prop=await propagateCategoryOverridesToCloudReports([key]);
     if(result?.ok){
-      finishSaveStatus('分類をクラウドに保存し、集計を更新しました');
+      finishSaveStatus(`分類をクラウドに保存しました（月別レポート ${prop.updated}件を更新）`);
     }else{
       const msg=result?.error?.message||result?.reason||'保存に失敗しました';
       finishSaveStatus(msg,true);
-      alert('集計は更新しましたが、クラウドへの保存に失敗しました。\n'+msg);
+      alert('表示中レポートの保存に失敗しました。\n'+msg);
     }
   }catch(err){
     console.error('reclassifyProductInCurrentReport:',err);
@@ -4743,6 +4827,9 @@ async function renderSavedReports(filter='all'){
     try {
       const targetId = b.dataset.open;
       const listItem = reports.find(x => x.id === targetId) || { id: targetId };
+      if (!productCategoryOverridesLoaded) {
+        try { await loadProductCategoryOverridesFromCloud(); } catch (_) {}
+      }
       const remote = await fetchSupabaseReportById(targetId);
       let r = remote ? {
         ...listItem,
@@ -4755,12 +4842,36 @@ async function renderSavedReports(filter='all'){
         createdAt: remote.createdAt || listItem.createdAt,
         sales: remote.sales || listItem.sales
       } : listItem;
-      if (r) {
-        const body = resolveSavedReportBody(r);
-        renderReport({ ...r, body, saved: true });
-      } else {
+      if (!r) {
         alert('レポートを開けませんでした。');
+        return;
       }
+      let sales = reviveSalesList(r.sales);
+      if (!sales.length) {
+        // 合算レポートなどで伝票が落ちている場合は月別から復元
+        currentReport = r;
+        sales = await resolveSalesForCurrentReport();
+      }
+      const applied = applyAllCategoryOverridesToSales(sales);
+      sales = applied.sales;
+      if (sales.length && applied.changed) {
+        restorePaymentsMap(sales);
+        const isMonthly = /月間/.test(String(r.title || ''));
+        const rebuilt = buildReport(isMonthly ? 'monthly' : 'daily', '', '', null, sales, { silent: true, skipRender: true });
+        if (rebuilt) {
+          rebuilt.id = r.id;
+          rebuilt.sourceMonths = r.sourceMonths || sourceMonthsFromReport(r);
+          rebuilt.journalIds = r.journalIds || [];
+          if (r.createdAt) rebuilt.createdAt = r.createdAt;
+          r = rebuilt;
+          // 分類ルールに合わせてクラウド側も直す
+          try { await writeSavedReports([r], [r]); } catch (_) {}
+        }
+      } else if (sales.length) {
+        r = { ...r, sales };
+      }
+      const body = resolveSavedReportBody(r);
+      renderReport({ ...r, body, sales: r.sales || sales, saved: true });
     } finally {
       hideAppLoading();
     }
@@ -4835,31 +4946,40 @@ async function renderSavedReports(filter='all'){
       };
 
       // 1) レポートに保存された伝票があれば使う
+      if (!productCategoryOverridesLoaded) {
+        try { await loadProductCategoryOverridesFromCloud(); } catch (_) {}
+      }
       validReports.forEach(r => {
         reviveSalesList(r.sales).forEach(pushSale);
       });
 
-      // 2) 伝票が無い場合のみ、クラウド上のジャーナル原本を読み直して解析
-      //    （salesCountの合算と比較しない。重複選択や空salesの要約レポートで誤判定するため）
+      // 2) 伝票が無い場合のみ、月別レポート／ジャーナルから復元
       const monthsNeeded = [...new Set(validReports.flatMap(sourceMonthsFromReport))];
       if (mergedSales.length === 0) {
         if (!monthsNeeded.length) {
           alert('合算に必要な月情報が見つかりませんでした。\nジャーナルを再読み込みしてレポートを保存し直してください。');
           return;
         }
-        showAppLoading('ジャーナルを読み込み中...', monthsNeeded.join(' / ') + ' の原本を解析しています');
-        const fromJournals = await loadSalesFromCloudJournals(monthsNeeded);
-        fromJournals.sales.forEach(pushSale);
-        if (!fromJournals.fileCount) {
-          alert(
-            '選択したレポートに伝票データがなく、クラウドにも元ジャーナルがありません。\n' +
-            '対象月のジャーナル（.lzh）を再度読み込んで保存してください。\n' +
-            '（保存時にジャーナルもクラウドへ保管されます）\n\n' +
-            '対象月: ' + monthsNeeded.join(', ')
-          );
-          return;
+        showAppLoading('月別レポートから復元中...', monthsNeeded.join(' / '));
+        (await loadSalesFromCloudMonthReports(monthsNeeded)).forEach(pushSale);
+        if (!mergedSales.length) {
+          showAppLoading('ジャーナルを読み込み中...', monthsNeeded.join(' / ') + ' の原本を解析しています');
+          const fromJournals = await loadSalesFromCloudJournals(monthsNeeded);
+          fromJournals.sales.forEach(pushSale);
+          if (!fromJournals.fileCount) {
+            alert(
+              '選択したレポートに伝票データがなく、クラウドにも元ジャーナルがありません。\n' +
+              '対象月のジャーナル（.lzh）を再度読み込んで保存してください。\n' +
+              '（保存時にジャーナルもクラウドへ保管されます）\n\n' +
+              '対象月: ' + monthsNeeded.join(', ')
+            );
+            return;
+          }
         }
       }
+
+      const overridden = applyAllCategoryOverridesToSales(mergedSales);
+      mergedSales.splice(0, mergedSales.length, ...overridden.sales);
 
       if (mergedSales.length === 0) {
         alert('合算可能な売上データが見つかりませんでした。\n対象月のジャーナルを再読み込みして保存し直してください。');
