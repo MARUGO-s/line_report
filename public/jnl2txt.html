@@ -743,6 +743,7 @@
       <button id="pdfBtn" class="btn-primary" disabled>レポートを作成</button>
       <button id="monthlyBtn" class="btn-primary" style="display:none" disabled>月間レポートを作成</button>
       <button id="savedBtn" class="btn-secondary">保存済みレポート</button>
+      <button id="aiHistoryBtn" class="btn-secondary">🤖 AI分析履歴</button>
       <button id="dlall" class="btn-secondary" disabled>すべて .txt で保存</button>
       <button id="clear" class="btn-secondary" disabled>クリア</button>
     </div>
@@ -2912,6 +2913,10 @@ savedBtn.addEventListener('click', () => {
     }
   }, 50);
 });
+const aiHistoryBtn = document.getElementById('aiHistoryBtn');
+if (aiHistoryBtn) {
+  aiHistoryBtn.addEventListener('click', () => renderAiHistory());
+}
 dlAllBtn.addEventListener('click',()=> items.filter(it=>!it.error).forEach((it,i)=> setTimeout(()=>download(txtName(it.name),it.preview), i*300)));
 clearBtn.addEventListener('click',()=>{ 
   items=[]; 
@@ -3115,7 +3120,7 @@ async function aiAnalyze() {
   }
 }
 
-function renderAiAnalysis(text) {
+function renderAiAnalysis(text, skipAutoSave = false) {
   if (currentReport) currentReport.aiAnalysisText = text;
   const area = document.getElementById('aiAnalysisArea');
   area.innerHTML = `
@@ -3127,6 +3132,134 @@ function renderAiAnalysis(text) {
     ${simpleMarkdown(text)}
   `;
   area.hidden = false;
+  if (!skipAutoSave) {
+    saveAiAnalysisToSupabase(text);
+  }
+}
+
+async function saveAiAnalysisToSupabase(analysisText) {
+  try {
+    if (!analysisText) return;
+    const title = currentReport?.title || '売上分析レポート';
+    const period = currentReport?.period || '';
+    const payload = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      report_title: String(title),
+      report_period: String(period),
+      analysis_result: String(analysisText),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    showSaveStatus('AI分析結果を自動保存中…');
+    const res = await fetch(SUPABASE_AI_HISTORY_URL, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      finishSaveStatus('AI分析を自動保存しました');
+    } else {
+      finishSaveStatus('自動保存失敗', true);
+    }
+  } catch (err) {
+    console.error('saveAiAnalysisToSupabase error:', err);
+    finishSaveStatus('自動保存エラー', true);
+  }
+}
+
+async function fetchAiHistory() {
+  try {
+    const res = await fetch(`${SUPABASE_AI_HISTORY_URL}?select=*&order=created_at.desc&limit=100`, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+    return await res.json();
+  } catch (err) {
+    console.error('fetchAiHistory error:', err);
+    return [];
+  }
+}
+
+async function deleteAiHistory(id) {
+  try {
+    const res = await fetch(`${SUPABASE_AI_HISTORY_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+      }
+    });
+    return res.ok;
+  } catch (e) {
+    console.error('deleteAiHistory error:', e);
+    return false;
+  }
+}
+
+async function renderAiHistory() {
+  const view = document.getElementById('reportView');
+  showAppLoading('AI分析履歴を読み込み中...', 'クラウドデータと同期しています');
+  
+  try {
+    const historyList = await fetchAiHistory();
+    const rows = historyList.length ? historyList.map(item => {
+      const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '';
+      return `<div class="saved-item">
+        <div class="saved-meta">
+          <div class="saved-title">🤖 ${esc(item.report_title)} <span style="font-size:12px;opacity:.7;font-weight:normal;">(${esc(item.report_period)})</span></div>
+          <div class="saved-sub">作成日時: ${esc(dateStr)}</div>
+        </div>
+        <button data-open-ai="${esc(item.id)}">レポートを開く</button>
+        <button data-delete-ai="${esc(item.id)}">削除</button>
+      </div>`;
+    }).join('') : '<p class="empty">過去に保存されたAI分析レポートはありません。</p>';
+
+    view.innerHTML = `<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">🤖 AI分析履歴</span><button class="rv-btn rv-btn-ghost" id="aiHistoryClose">閉じる</button></div>
+      <div class="saved-wrap">
+        <h1 class="r-title">🤖 AI分析履歴一覧</h1>
+        <p class="r-meta">AIによって分析されたコンサルティングレポートの全履歴（自動保存済み）です。</p>
+        <div class="saved-list">${rows}</div>
+      </div>`;
+
+    view.hidden = false;
+    document.body.classList.add('report-open');
+
+    view.querySelector('#aiHistoryClose').onclick = () => {
+      view.hidden = true;
+      document.body.classList.remove('report-open');
+    };
+
+    view.querySelectorAll('[data-open-ai]').forEach(b => b.onclick = () => {
+      const item = historyList.find(x => x.id === b.dataset.openAi);
+      if (item) {
+        currentReport = { title: item.report_title, period: item.report_period, aiAnalysisText: item.analysis_result };
+        renderAiAnalysis(item.analysis_result, true);
+      }
+    });
+
+    view.querySelectorAll('[data-delete-ai]').forEach(b => b.onclick = async () => {
+      if (!confirm('このAI分析レポート履歴を削除しますか？')) return;
+      showSaveStatus('削除中…');
+      const ok = await deleteAiHistory(b.dataset.deleteAi);
+      if (ok) finishSaveStatus('削除しました'); else finishSaveStatus('削除失敗', true);
+      renderAiHistory();
+    });
+  } catch (err) {
+    alert('AI分析履歴の読み込み中にエラーが発生しました: ' + err.message);
+  } finally {
+    hideAppLoading();
+  }
 }
 
 function downloadAiAnalysisText() {
