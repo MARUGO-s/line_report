@@ -2319,17 +2319,51 @@ function finishSaveStatus(text,isError=false){
 const EMBEDDED_BACKUP = /* @EMBEDDED_BACKUP_START@ */ null /* @EMBEDDED_BACKUP_END@ */;
 function isEmptyReportsRaw(raw){return raw==null||raw==='[]'||(Array.isArray(raw)&&raw.length===0);}
 
+function reportHasSalesSummary(r) {
+  if (!r || typeof r !== 'object') return false;
+  return [r.total, r.totalSales, r.foodTotal, r.drinkTotal, r.salesCount]
+    .some(v => Number.isFinite(Number(v)));
+}
+
+function reportSummaryTotal(r) {
+  const n = Number(r?.total ?? r?.totalSales);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function reportSummaryCustomers(r) {
+  const direct = Number(r?.totalCustomers);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const lunch = Number(r?.lunchCustomers) || 0;
+  const dinner = Number(r?.dinnerCustomers) || 0;
+  return lunch + dinner;
+}
+
 async function fetchSupabaseReports() {
   try {
     // 一覧用メタデータのみ取得（20MB -> 5KBへ大幅軽量化）
     const body = await adminApiFetch('/pos-journals/saved-reports?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=200', { method: 'GET' });
     const rows = Array.isArray(body.items) ? body.items : [];
-    return rows.map(row => ({
-      id: String(row.id || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`),
-      title: row.title || '売上レポート',
-      period: row.period || '',
-      createdAt: row.created_at
-    }));
+    // 既存ローカルに金額サマリーがある場合は消さない（AIチャット参照用）
+    let localById = {};
+    try {
+      const raw = localStorage.getItem(REPORT_STORE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        parsed.forEach(r => { if (r?.id) localById[String(r.id)] = r; });
+      }
+    } catch (_) {}
+
+    return rows.map(row => {
+      const id = String(row.id || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`);
+      const local = localById[id] || {};
+      return {
+        ...local,
+        id,
+        title: row.title || local.title || '売上レポート',
+        period: row.period || local.period || '',
+        createdAt: row.created_at || local.createdAt
+      };
+    });
   } catch (err) {
     console.warn('admin-api fetch error, fallback to local:', err);
     return null;
@@ -2346,12 +2380,33 @@ async function fetchSupabaseReportById(id) {
       id: row.id,
       title: row.title || d.title,
       period: row.period || d.period,
+      createdAt: row.created_at || d.createdAt,
       ...d
     };
   } catch (e) {
     console.error('fetchSupabaseReportById error:', e);
     return null;
   }
+}
+
+async function hydrateSavedReport(r) {
+  if (reportHasSalesSummary(r)) return r;
+  if (!r?.id) return r;
+  const full = await fetchSupabaseReportById(r.id);
+  const merged = full ? { ...r, ...full } : r;
+  if (reportHasSalesSummary(merged)) {
+    try {
+      const raw = localStorage.getItem(REPORT_STORE_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(list)) {
+        const idx = list.findIndex(x => String(x.id) === String(merged.id));
+        if (idx >= 0) list[idx] = { ...list[idx], ...merged };
+        else list.unshift(merged);
+        localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(list));
+      }
+    } catch (_) {}
+  }
+  return merged;
 }
 
 async function readSavedReports() {
@@ -3128,22 +3183,33 @@ function showLoading(text = 'ファイルを読み込み中...', detail = '') {
   if (!loader) {
     loader = document.createElement('div');
     loader.className = 'drop-load';
-    loader.innerHTML = `
-      <div class="drop-load-spinner"></div>
-      <div class="drop-load-text"></div>
-      <div class="drop-load-detail"></div>
-    `;
+    loader.innerHTML = '<div class="drop-load-spinner"></div><div class="drop-load-text"></div><div class="drop-load-detail"></div>';
     drop.appendChild(loader);
   }
   drop.classList.add('loading');
   loader.querySelector('.drop-load-text').textContent = text;
   loader.querySelector('.drop-load-detail').textContent = detail;
+  if (emptyState && !items.length) {
+    emptyState.hidden = false;
+    emptyState.classList.add('loading');
+    emptyState.textContent = detail ? text + '（' + detail + '）' : text;
+  }
 }
 
 function hideLoading() {
   drop.classList.remove('loading');
   const loader = drop.querySelector('.drop-load');
   if (loader) loader.remove();
+  if (emptyState) {
+    emptyState.classList.remove('loading');
+    if (!items.length) emptyState.textContent = 'まだファイルが読み込まれていません。';
+  }
+}
+
+function yieldToUI() {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
 }
 
 function updatePeriodInputs() {
@@ -3161,40 +3227,46 @@ function updatePeriodInputs() {
 }
 
 async function addFiles(list){
-  const total = list.length;
-  showLoading('ファイルを読み込み中...', `0 / ${total} 件を処理中`);
-  
+  const files=[...list];
+  const total=files.length;
+  if(!total){ hideLoading(); return; }
+  showLoading('ファイルを読み込み中...', `0 / ${total} 件`);
+  await yieldToUI();
+
   const enc=encSel.value, mode=modeSel.value;
   let duplicateFiles=0, metadataFiles=0;
-  let processed = 0;
-  
-  for(const f of list){
-    processed++;
-    showLoading('ファイルを読み込み中...', `${processed} / ${total} 件を処理中 (${f.name})`);
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    
-    if(f.name.startsWith('._')){ metadataFiles++; continue; }
-    let buf=new Uint8Array(await f.arrayBuffer());
-    let name=f.name;
-    // .lzh は解凍して中の .jnl を取り出す
-    if(isLzh(name,buf)){
-      try{
-        buf=unlzh(buf).bytes;
-        name=name.replace(/\.lzh$/i,'') + '.jnl';
-      }catch(e){
-        items.push({name:f.name,error:'解凍に失敗しました（'+e.message+'）'});
-        continue;
+  let processed=0;
+  try{
+    for(const f of files){
+      processed++;
+      const shortName=f.name.length>40?f.name.slice(0,37)+'…':f.name;
+      showLoading('読み込み中…', `${processed} / ${total} 件（${shortName}）`);
+      await yieldToUI();
+
+      if(f.name.startsWith('._')){ metadataFiles++; continue; }
+      let buf=new Uint8Array(await f.arrayBuffer());
+      let name=f.name;
+      // .lzh は解凍して中の .jnl を取り出す
+      if(isLzh(name,buf)){
+        try{
+          buf=unlzh(buf).bytes;
+          name=name.replace(/\.lzh$/i,'') + '.jnl';
+        }catch(e){
+          items.push({name:f.name,error:'解凍に失敗しました（'+e.message+'）'});
+          continue;
+        }
       }
+      const fingerprint=byteFingerprint(buf);
+      if(items.some(it=>!it.error&&it.fingerprint===fingerprint&&sameBytes(it.bytes,buf))){ duplicateFiles++; continue; }
+      const r=process(buf,enc,mode);
+      items.push({name,bytes:buf,fingerprint,preview:r.preview,total:r.total,extracted:r.extracted,summary:r.summary,audit:r.audit});
     }
-    const fingerprint=byteFingerprint(buf);
-    if(items.some(it=>!it.error&&it.fingerprint===fingerprint&&sameBytes(it.bytes,buf))){ duplicateFiles++; continue; }
-    const r=process(buf,enc,mode);
-    items.push({name,bytes:buf,fingerprint,preview:r.preview,total:r.total,extracted:r.extracted,summary:r.summary,audit:r.audit});
+  }finally{
+    render();
+    hideLoading();
+    if(typeof updatePeriodInputs==='function') updatePeriodInputs();
   }
-  render();
-  hideLoading();
-  updatePeriodInputs();
-  
+
   const notices=[];
   if(duplicateFiles) notices.push(`同じ内容のファイル${duplicateFiles}件は重複集計を防ぐため追加しませんでした。`);
   if(metadataFiles) notices.push(`macOSの管理ファイル${metadataFiles}件は集計対象外として無視しました。`);
@@ -3244,7 +3316,11 @@ document.querySelectorAll('.tab').forEach(t=>{
 });
 
 // events
-picker.addEventListener('change',async e=>{ await addFiles(e.target.files); picker.value=''; });
+picker.addEventListener('change',async e=>{
+  const files=e.target.files;
+  picker.value='';
+  if(files&&files.length) await addFiles(files);
+});
 encSel.addEventListener('change',reprocess);
 modeSel.addEventListener('change',reprocess);
 saveCategorySettingsBtn.addEventListener('click',saveCategorySettings);
@@ -3308,12 +3384,15 @@ if(aiChatInput) {
   drop.classList.remove('over');
 }));
 drop.addEventListener('drop',async e=>{
-  showLoading('フォルダをスキャン中...', 'ファイルを検索しています');
-  const fs=await collectDroppedFiles(e.dataTransfer);
-  if(fs.length) {
-    await addFiles(fs);
-  } else {
+  showLoading('読み込み中…', 'ファイルを検索しています');
+  await yieldToUI();
+  try{
+    const fs=await collectDroppedFiles(e.dataTransfer);
+    if(fs.length) await addFiles(fs);
+    else hideLoading();
+  }catch(err){
     hideLoading();
+    alert('ファイルの読み込みに失敗しました。\n'+(err&&err.message?err.message:err));
   }
 });
 
@@ -4053,62 +4132,90 @@ function buildCompactSalesDataForAI() {
   };
 }
 
-async function searchSavedReportsByQuery(query) {
-  const q = query.trim().toLowerCase();
-  
-  // 1. 年月パターンの正規表現抽出 (例: 202606, 2026年6月, 2026-06, 2026/06, 2026年, 2025年以前)
-  const monthMatch = q.match(/(\d{4})[年/._-]?\s*(0?[1-9]|1[0-2])(?:月|日)?/) || q.match(/(\d{4})(0[1-9]|1[0-2])/);
+async function searchSavedReportsByQuery(query, chatHistory = []) {
+  let q = String(query || '').trim().toLowerCase();
+
+  // 続きの質問（「なぜゼロなの」等）では直近のユーザー発話から年月を引き継ぐ
+  const hasPeriodHint = /(\d{4})/.test(q);
+  if (!hasPeriodHint && Array.isArray(chatHistory)) {
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+      const item = chatHistory[i];
+      if (!item || item.role !== 'user') continue;
+      const prev = String(item.content || '');
+      if (/(\d{4})[年/._-]?\s*(0?[1-9]|1[0-2])|(?:\d{4})(0[1-9]|1[0-2])|(\d{4})年?/.test(prev)) {
+        q = `${prev} ${q}`.trim().toLowerCase();
+        break;
+      }
+    }
+  }
+
+  const monthMatch = q.match(/(\d{4})[年/._-]?\s*(0?[1-9]|1[0-2])(?:月)?/) || q.match(/(\d{4})(0[1-9]|1[0-2])/);
   const beforeYearMatch = q.match(/(\d{4})年?\s*(?:より前|以前|前)/);
-  const yearMatch = q.match(/(\d{4})年?/);
+  const yearOnlyMatch = !monthMatch && !beforeYearMatch ? q.match(/(\d{4})年?/) : null;
 
   const reports = await readSavedReports();
   const allReports = currentReport ? [currentReport, ...reports] : reports;
-
   if (allReports.length === 0) return null;
 
-  // A. 特定年月の検索 (例: 202606, 2026年6月)
+  async function summarizeMatched(matched, label) {
+    const hydrated = [];
+    for (const r of matched) hydrated.push(await hydrateSavedReport(r));
+
+    // 同期間の日別＋月間が両方ある場合は二重計上を避けるため月間を優先
+    const monthly = hydrated.filter(r => String(r.title || '').includes('月間'));
+    const use = monthly.length ? monthly : hydrated;
+
+    let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
+    use.forEach(r => {
+      totSales += reportSummaryTotal(r);
+      fTot += Number(r.foodTotal) || 0;
+      dTot += Number(r.drinkTotal) || 0;
+      cust += reportSummaryCustomers(r);
+      count += Number(r.salesCount) || 0;
+    });
+
+    // サマリーが無い場合でも sales 明細から集計
+    if (totSales === 0 && fTot === 0 && dTot === 0) {
+      use.forEach(r => {
+        const sales = Array.isArray(r.sales) ? r.sales : [];
+        sales.forEach(s => {
+          totSales += Number(s.total) || 0;
+          fTot += Number(s.foodTotal) || 0;
+          dTot += Number(s.drinkTotal) || 0;
+          cust += Number(s.customers) || Number(s.guestCount) || 0;
+          count += 1;
+        });
+      });
+    }
+
+    const catTot = fTot + dTot || 1;
+    return {
+      label,
+      totalSales: totSales,
+      foodTotal: fTot,
+      drinkTotal: dTot,
+      foodPct: Math.round((fTot / catTot) * 100),
+      drinkPct: Math.round((dTot / catTot) * 100),
+      totalCustomers: cust,
+      avgSpend: cust ? Math.round(totSales / cust) : 0,
+      salesCount: count,
+      sourceCount: use.length
+    };
+  }
+
   if (monthMatch) {
     const year = monthMatch[1];
     const month = String(parseInt(monthMatch[2], 10)).padStart(2, '0');
     const targetKey = `${year}-${month}`;
     const targetJa = `${year}年${parseInt(month, 10)}月`;
-
-    // 保存レポート一覧から period や title が一致するものを検索
     const matched = allReports.filter(r => {
       const p = String(r.period || r.title || '');
       return p.includes(targetKey) || p.includes(targetJa) || (p.includes(year) && p.includes(`${parseInt(month, 10)}月`));
     });
-
-    if (matched.length > 0) {
-      let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
-      matched.forEach(r => {
-        totSales += r.total || r.totalSales || 0;
-        fTot += r.foodTotal || 0;
-        dTot += r.drinkTotal || 0;
-        cust += r.totalCustomers || (r.lunchCustomers + r.dinnerCustomers) || 0;
-        count += r.salesCount || 1;
-      });
-      const catTot = fTot + dTot || 1;
-      return {
-        label: `${targetJa}の売上データ`,
-        totalSales: totSales,
-        foodTotal: fTot,
-        drinkTotal: dTot,
-        foodPct: Math.round((fTot / catTot) * 100),
-        drinkPct: Math.round((dTot / catTot) * 100),
-        totalCustomers: cust,
-        avgSpend: cust ? Math.round(totSales / cust) : 0,
-        salesCount: count,
-        sourceCount: matched.length
-      };
-    } else {
-      return {
-        notMatchedLabel: targetJa
-      };
-    }
+    if (matched.length > 0) return await summarizeMatched(matched, `${targetJa}の売上データ`);
+    return { notMatchedLabel: targetJa };
   }
 
-  // B. 特定年または年以前の検索 (例: 2025年より前, 2024年)
   if (beforeYearMatch) {
     const targetYear = parseInt(beforeYearMatch[1], 10);
     const matched = allReports.filter(r => {
@@ -4116,37 +4223,27 @@ async function searchSavedReportsByQuery(query) {
       const yMatch = p.match(/(\d{4})/);
       return yMatch && parseInt(yMatch[1], 10) < targetYear;
     });
-
     if (matched.length > 0) {
-      let totSales = 0, fTot = 0, dTot = 0, cust = 0;
-      matched.forEach(r => {
-        totSales += r.total || r.totalSales || 0;
-        fTot += r.foodTotal || 0;
-        dTot += r.drinkTotal || 0;
-        cust += r.totalCustomers || (r.lunchCustomers + r.dinnerCustomers) || 0;
-      });
-      const catTot = fTot + dTot || 1;
-      return {
-        label: `${targetYear}年より前 (${targetYear - 1}年以前) の全保存データ`,
-        totalSales: totSales,
-        foodTotal: fTot,
-        drinkTotal: dTot,
-        foodPct: Math.round((fTot / catTot) * 100),
-        drinkPct: Math.round((dTot / catTot) * 100),
-        totalCustomers: cust,
-        avgSpend: cust ? Math.round(totSales / cust) : 0
-      };
+      return await summarizeMatched(matched, `${targetYear}年より前 (${targetYear - 1}年以前) の全保存データ`);
     }
+  }
+
+  if (yearOnlyMatch) {
+    const targetYear = yearOnlyMatch[1];
+    const matched = allReports.filter(r => {
+      const p = String(r.period || r.title || '');
+      return p.includes(targetYear) || p.includes(`${targetYear}年`);
+    });
+    if (matched.length > 0) return await summarizeMatched(matched, `${targetYear}年の売上データ`);
+    return { notMatchedLabel: `${targetYear}年` };
   }
 
   return null;
 }
 
-async function generateLocalConsultantReply(userMsg, salesData) {
+async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []) {
   const msg = userMsg.trim();
-  
-  // 保存済み全売上レポートからの動的検索・参照
-  const queryResult = await searchSavedReportsByQuery(msg);
+  const queryResult = await searchSavedReportsByQuery(msg, chatHistory);
 
   if (queryResult) {
     if (queryResult.notMatchedLabel) {
@@ -4175,8 +4272,6 @@ ${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustom
   }
 
   const total = yen(salesData.totalSales || 0);
-  const cust = salesData.totalCustomers || 0;
-  const avg = salesData.overallAvgSpendPerCustomer ? yen(salesData.overallAvgSpendPerCustomer) : '不明';
   const foodTot = salesData.foodTotal || 0;
   const drinkTot = salesData.drinkTotal || 0;
   const catTotal = foodTot + drinkTot || 1;
@@ -4185,8 +4280,21 @@ ${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustom
 
   let yearlySummaryStr = '';
   if (salesData.yearlyBreakdown && salesData.yearlyBreakdown.length > 0) {
-    yearlySummaryStr = '\n\n**📅 保存データの年別売上・ドリンク比率一覧**:\n' + 
+    yearlySummaryStr = '\n\n**📅 保存データの年別売上・ドリンク比率一覧**:\n' +
       salesData.yearlyBreakdown.map(y => `- **${y.year}年**: 総売上 ${yen(y.totalSales)} / ドリンク比率 **${y.drinkPct}%** (フード ${y.foodPct}%)`).join('\n');
+  }
+
+  const hasAnySales = Number(salesData.totalSales) > 0 || foodTot > 0 || drinkTot > 0;
+  if (!hasAnySales) {
+    const savedList = await readSavedReports();
+    const periods = savedList.map(r => r.period || r.title).filter(Boolean).slice(0, 8).join('、');
+    return `### 📊 データ参照結果
+
+現在開いているレポート／読み込み済みジャーナルからは売上数値を取得できませんでした。
+
+- **保存済み売上データ一覧**: ${periods || 'データなし'}
+
+年月を指定して質問してください（例: 「2026年6月の売上比率は？」）。該当月の保存データがあれば、ジャーナル集計値をそのまま回答します。`;
   }
 
   return `### 📊 店舗売上データ参照回答 (${salesData.title || '売上データ'})
@@ -4205,18 +4313,31 @@ async function sendAiChat() {
   const input = document.getElementById('aiChatInput');
   const msg = input.value.trim();
   if(!msg) return;
-  
+
   input.value = '';
   input.disabled = true;
   const sendBtn = document.getElementById('aiChatSend');
   sendBtn.disabled = true;
-  
+
   appendAiChatMessage('user', msg);
   aiChatHistory.push({ role: 'user', content: msg });
-  
+
   const loadingId = appendAiChatLoading();
   const compactData = buildCompactSalesDataForAI();
-  
+
+  // 保存ジャーナルへの事実照会はローカル集計を優先（一覧APIが金額を持たないため）
+  const queryResult = await searchSavedReportsByQuery(msg, aiChatHistory);
+  if (queryResult && !queryResult.notMatchedLabel) {
+    removeAiChatLoading(loadingId);
+    const reply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
+    appendAiChatMessage('ai', reply);
+    aiChatHistory.push({ role: 'assistant', content: reply });
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+    return;
+  }
+
   const strictSystemInstruction = `【絶対遵守プロンプト規約】
 1. あなたは店舗の保存済み売上データ専用の厳密なアナリストAIです。
 2. 質問の答えや数字に関しては、必ず提示された保存データ・資料（salesData）のみから厳密に引用・計算して回答してください。
@@ -4236,32 +4357,31 @@ async function sendAiChat() {
         message: msg,
         systemInstruction: strictSystemInstruction,
         salesData: compactData,
-        chatHistory: aiChatHistory // パネルを閉じるまで会話履歴を100%全件記憶・文脈保持
+        chatHistory: aiChatHistory
       })
     });
-    
+
     removeAiChatLoading(loadingId);
-    
+
     let reply = null;
     if (res.ok) {
       const result = await res.json();
       reply = result.reply || result.text || result.message;
-      if (result.error && result.error.includes('Gemini API')) {
+      if (result.error && String(result.error).includes('Gemini API')) {
         reply = null;
       }
     }
-    
-    // Remote APIが失敗した場合でも、高度なスマートローカルAIアドバイザーが保存データから即時検索・回答
+
     if (!reply) {
-      reply = await generateLocalConsultantReply(msg, compactData);
+      reply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
     }
-    
+
     appendAiChatMessage('ai', reply);
     aiChatHistory.push({ role: 'assistant', content: reply });
   } catch(err) {
     console.warn('AI Chat remote error, fallback to local advisor:', err);
     removeAiChatLoading(loadingId);
-    const fallbackReply = await generateLocalConsultantReply(msg, compactData);
+    const fallbackReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
     appendAiChatMessage('ai', fallbackReply);
     aiChatHistory.push({ role: 'assistant', content: fallbackReply });
   } finally {
