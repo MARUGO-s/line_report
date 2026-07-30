@@ -1043,7 +1043,7 @@
 </div>
 
 <section id="authCard" hidden style="margin:0 24px 16px; padding:14px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface);">
-  <label for="tokenInput" style="font-size:12.5px; font-weight:600; display:block; margin-bottom:8px;">保存済みレポート／AI分析履歴を使うには管理トークンで接続してください（またはLINEの最新リンクから開いてください）</label>
+  <label for="tokenInput" style="font-size:12.5px; font-weight:600; display:block; margin-bottom:8px;">レポートはクラウドへ必ず保存します。管理トークンで接続してください（またはLINEの最新リンクから開いてください）</label>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <input id="tokenInput" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" style="flex:1; min-width:220px; padding:8px 10px; border:1px solid var(--border-input); border-radius:6px; background:var(--page); color:var(--text);">
     <button class="btn-primary" id="saveTokenBtn" type="button" style="padding:8px 16px; cursor:pointer;">接続</button>
@@ -1074,7 +1074,7 @@
 
 <!-- 変換 -->
 <section id="convert" class="conv">
-  <p class="intro">レジの電子ジャーナル（.jnl）や、それを圧縮した書庫（.lzh）から制御コードを除いてテキストに変換します。.lzh はアプリ内で自動解凍します。ファイルを読み込むと、<b>レポート作成〜保存まで自動実行</b>されます。処理はこの端末内で行われます。</p>
+  <p class="intro">レジの電子ジャーナル（.jnl）や、それを圧縮した書庫（.lzh）から制御コードを除いてテキストに変換します。.lzh はアプリ内で自動解凍します。ファイルを読み込むと、<b>レポート作成〜クラウド保存まで自動実行</b>されます（管理トークン接続が必要です）。解析処理はこの端末内で行われます。</p>
 
   <label class="drop" id="drop">
     <div class="d1">ここに .lzh / .jnl ファイルまたはフォルダをドラッグ＆ドロップ</div>
@@ -2620,6 +2620,23 @@ async function writeSavedReports(reports, newRecords) {
     let lastErr = null;
     const hasToken = !!getAdminToken();
 
+    // クラウド保存必須：トークン未接続なら保存しない
+    if (!hasToken) {
+      setAuthUiState(false);
+      const card = document.getElementById('authCard');
+      if (card) {
+        card.hidden = false;
+        try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+      }
+      return {
+        ok: false,
+        remote: false,
+        local: false,
+        reason: 'auth',
+        error: new Error('クラウド保存には管理トークン接続が必要です。画面上部で接続するか、LINEの最新リンクから開いてください。')
+      };
+    }
+
     const persistLocal = (list) => {
       try {
         localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(list));
@@ -2650,38 +2667,22 @@ async function writeSavedReports(reports, newRecords) {
       }
     };
 
-    const localOk = persistLocal(reports);
-    if (!localOk) {
-      return { ok: false, remote: false, reason: 'quota', error: lastErr };
-    }
-
-    if (!hasToken) {
-      return { ok: true, remote: false, reason: 'auth', local: true };
-    }
-
     for (const r of toUpload) {
       const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       try {
-        // まず要約＋件数・解析版を確実にクラウドへ（巨大bodyで全体失敗しない）
-        let lightOk = false;
-        try {
-          await adminApiFetch('/pos-journals/saved-reports', {
-            method: 'POST',
-            body: JSON.stringify({
-              id,
-              title: String(r.title || '売上レポート'),
-              period: String(r.period || ''),
-              data: buildCloudReportData({ ...r, id }, { includeBody: false }),
-              store_key: STORE_KEY
-            })
-          });
-          lightOk = true;
-        } catch (err) {
-          lastErr = err;
-          console.warn('admin-api light write error:', err);
-        }
-        // 詳細HTMLは任意（失敗しても要約は残す）
-        if (lightOk && isDetailedReportHtml(r.body)) {
+        // 要約＋件数・解析版をクラウドへ必須保存
+        await adminApiFetch('/pos-journals/saved-reports', {
+          method: 'POST',
+          body: JSON.stringify({
+            id,
+            title: String(r.title || '売上レポート'),
+            period: String(r.period || ''),
+            data: buildCloudReportData({ ...r, id }, { includeBody: false }),
+            store_key: STORE_KEY
+          })
+        });
+        // 詳細HTMLは可能な範囲で追加保存（失敗しても要約があればクラウド保存成功）
+        if (isDetailedReportHtml(r.body)) {
           try {
             await adminApiFetch('/pos-journals/saved-reports', {
               method: 'POST',
@@ -2695,8 +2696,7 @@ async function writeSavedReports(reports, newRecords) {
             });
           } catch (_) {}
         }
-        if (lightOk) uploaded++;
-        else failed++;
+        uploaded++;
       } catch (err) {
         failed++;
         lastErr = err;
@@ -2704,19 +2704,30 @@ async function writeSavedReports(reports, newRecords) {
       }
     }
 
-    // 端末保存できていれば成功扱い（クラウド失敗は警告）
+    // 全件クラウド保存できて初めて成功
+    if (uploaded < toUpload.length || failed > 0) {
+      return {
+        ok: false,
+        remote: uploaded > 0,
+        local: false,
+        uploaded,
+        failed,
+        error: lastErr || new Error('クラウド保存に失敗しました'),
+        reason: 'upload'
+      };
+    }
+
+    // クラウド成功後に端末キャッシュも更新（表示高速化用）
+    persistLocal(reports);
     return {
       ok: true,
-      remote: uploaded > 0,
+      remote: true,
       local: true,
       uploaded,
-      failed,
-      error: failed ? lastErr : null,
-      reason: uploaded === 0 && toUpload.length > 0 ? 'upload-partial' : undefined
+      failed: 0
     };
   } catch (e) {
     console.error('writeSavedReports error:', e);
-    try { localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports)); } catch (_) {}
     return { ok: false, remote: false, reason: 'exception', error: e };
   }
 }
@@ -3179,7 +3190,20 @@ async function saveCurrentReport(options = {}){
   const silent = !!options.silent;
   const openList = options.openList !== false;
   if (!currentReport) return { ok: false, reason: 'empty' };
-  showSaveStatus('保存中…');
+  if (!getAdminToken()) {
+    finishSaveStatus('クラウド未接続のため保存できません', true);
+    if (!silent) {
+      alert('レポートはクラウドへ必ず保存します。\n画面上部で管理トークンを接続するか、LINEの最新リンクから開き直してください。');
+    }
+    setAuthUiState(false);
+    const card = document.getElementById('authCard');
+    if (card) {
+      card.hidden = false;
+      try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+    }
+    return { ok: false, reason: 'auth' };
+  }
+  showSaveStatus('クラウドに保存中…');
   const reports = (await readSavedReports()).map(report => report);
   const bundle = currentReport.relatedReports?.length ? currentReport.relatedReports : [currentReport];
   const records = bundle.map((report, idx) => {
@@ -3204,31 +3228,23 @@ async function saveCurrentReport(options = {}){
       totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers || 0) + (report.dinnerCustomers || 0)) || 0,
       weekdayBreakdown: aiSnap.weekdayBreakdown || report.weekdayBreakdown || [],
       hourlyBreakdown: (aiSnap.hourlyBreakdown || report.hourlyBreakdown || []).slice(0, 24),
-      // クラウド容量不足時のフォールバック用（開くときは body を優先）
       previewHtml: isDetailedReportHtml(fullBody) ? fullBody : buildSavedReportPreviewHtml(report, aiSnap)
     };
   });
   reports.unshift(...records);
   const result = await writeSavedReports(reports.slice(0, 100), records);
   if (result && result.ok) {
-    if (result.reason === 'auth') {
-      finishSaveStatus(`端末に${records.length}件保存（クラウド未同期）`);
-      if (!silent) {
-        alert('管理トークン未接続のため、クラウドには保存できていません。\n画面上部でトークン接続するか、LINEの最新リンクから開き直してください。\n（この端末内には保存済みです）');
-      }
-    } else if (result.failed && result.uploaded === 0) {
-      finishSaveStatus(`端末に${records.length}件保存（クラウド同期失敗）`);
-    } else if (result.failed) {
-      finishSaveStatus(`保存完了（クラウド ${result.uploaded}件 / 失敗 ${result.failed}件）`);
-    } else {
-      finishSaveStatus(`${records.length}件のレポートを保存しました`);
-    }
+    finishSaveStatus(`クラウドに${records.length}件保存しました`);
     if (openList) await renderSavedReports();
   } else {
-    finishSaveStatus('保存に失敗しました', true);
+    const msg = result?.error?.message || (
+      result?.reason === 'auth' ? '管理トークン未接続です' :
+      result?.reason === 'upload' ? `クラウド保存に失敗（成功 ${result.uploaded || 0} / 失敗 ${result.failed || 0}）` :
+      result?.reason || '保存に失敗しました'
+    );
+    finishSaveStatus(msg, true);
     if (!silent) {
-      const msg = result?.error?.message || result?.reason || '';
-      alert('レポートの保存に失敗しました。' + (msg ? `\n${msg}` : ''));
+      alert('クラウドへの保存に失敗しました。\n' + msg);
     }
   }
   return result;
@@ -3342,10 +3358,25 @@ async function autoBuildAndSaveAfterLoad() {
     }
 
     currentReport = { ...allReports[allReports.length - 1], relatedReports: allReports };
-    showAppLoading('レポートを自動保存中...', `${allReports.length}件を月別に保存しています`);
+    if (!getAdminToken()) {
+      hideAppLoading();
+      finishSaveStatus('クラウド未接続のため保存できません', true);
+      alert('レポートはクラウドへ必ず保存します。\n画面上部で管理トークンを接続するか、LINEの最新リンクから開き直してから、もう一度読み込んでください。');
+      setAuthUiState(false);
+      const card = document.getElementById('authCard');
+      if (card) {
+        card.hidden = false;
+        try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+      }
+      return { ok: false, reason: 'auth' };
+    }
+    showAppLoading('クラウドに自動保存中...', `${allReports.length}件を月別に保存しています`);
     await yieldToUI();
     const result = await saveCurrentReport({ silent: true, openList: true });
     hideAppLoading();
+    if (!result?.ok) {
+      finishSaveStatus(result?.error?.message || 'クラウド自動保存に失敗しました', true);
+    }
     return result || { ok: false };
   } catch (err) {
     hideAppLoading();
@@ -3423,7 +3454,7 @@ async function renderSavedReports(filter='all'){
   view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">保存済みレポート</span><button class="rv-btn rv-btn-ghost" id="savedClose">閉じる</button></div>
     <div class="saved-wrap">
       <h1 class="r-title">保存済みレポート</h1>
-      <p class="r-meta">クラウド（管理トークン接続時）とこの端末に保存されます。</p>
+      <p class="r-meta">レポートはクラウドへ必ず保存されます（管理トークン接続が必要です）。</p>
       <div class="controls" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
         <div style="display:flex; gap:8px;">
           <button class="rv-btn rv-btn-secondary ${filter==='all'?'active':''}" data-filter="all">すべて</button>
