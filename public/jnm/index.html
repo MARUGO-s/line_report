@@ -312,11 +312,15 @@
     border-radius:var(--rv-radius-md,10px);padding:14px 16px;margin:20px 0;font-family:var(--rv-font-body,inherit)}
   .classification-editor h4{margin:0 0 5px;font-family:var(--rv-font-heading,inherit);font-size:15px;font-weight:600}
   .classification-editor .editor-note{font-size:11px;opacity:.6;margin:0 0 12px;line-height:1.6}
+  .classification-editor .classify-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
+  .classification-editor .classify-pending{font-size:12px;opacity:.75}
+  .classification-editor .classify-pending.has-pending{opacity:1;font-weight:600;color:var(--rv-accent,#b68235)}
   .classification-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
   .classification-lane{background:transparent;border:1px solid var(--rv-neutral-700,#dfe3ea);border-radius:var(--rv-radius-md,8px);min-height:90px;padding:8px}
   .classification-lane.over{background:color-mix(in srgb, var(--rv-accent,#5b8edb) 10%, transparent);border-color:var(--rv-accent,#5b8edb)}
   .classification-lane h5{font-size:11px;margin:0 0 7px;opacity:.7}
   .classification-item{display:flex;align-items:center;justify-content:space-between;gap:5px;background:color-mix(in srgb, var(--rv-text,#000) 4%, transparent);border:1px solid var(--rv-neutral-700,#e4e3de);border-radius:var(--rv-radius-sm,6px);padding:5px 7px;margin:4px 0;font-size:11px;cursor:grab}
+  .classification-item.pending-move{outline:1px dashed var(--rv-accent,#b68235);outline-offset:1px}
   .classification-item small{font-family:var(--rv-font-sans,inherit);opacity:.6;white-space:nowrap}
   @media (max-width:760px){.category-grid{grid-template-columns:1fr}.classification-board{grid-template-columns:1fr 1fr}}
   select{font-size:13px;padding:7px 10px;border-radius:7px;border:1px solid var(--border-input);
@@ -4016,10 +4020,60 @@ function classificationEditorHtml(sales){
     const row=totals.get(key)||{key,code:item.code,name:item.name,category:item.category,qty:0,amount:0};
     row.qty+=item.qty; row.amount+=item.amount; row.category=item.category; totals.set(key,row);
   }));
+  // 未確定のドラッグ移動を表示に反映
+  Object.entries(pendingCategoryMoves||{}).forEach(([key,category])=>{
+    const row=totals.get(key);
+    if(row&&SALES_CATEGORIES.includes(category)) row.category=category;
+  });
   const lanes=new Map(SALES_CATEGORIES.map(c=>[c,[]]));
   [...totals.values()].sort((a,b)=>b.amount-a.amount).forEach(row=>lanes.get(row.category)?.push(row));
-  const laneHtml=SALES_CATEGORIES.map(category=>`<div class="classification-lane" data-category="${esc(category)}"><h5>${esc(category)}（ここへ移動）</h5>${lanes.get(category).map(row=>`<div class="classification-item" draggable="true" data-product-key="${esc(row.key)}"><span>${esc(row.name)}</span><small>${yen(row.amount)}</small></div>`).join('')}</div>`).join('');
-  return `<div class="classification-editor"><h4>商品分類ワークスペース</h4><p class="editor-note">商品をドラッグして分類を変更すると、そのルールはクラウドに永続保存され、すべての月別レポートと今後の読み込み・合算・再解析に必ず反映されます。</p><div class="classification-board">${laneHtml}</div></div>`;
+  const pendingCount=Object.keys(pendingCategoryMoves||{}).length;
+  const laneHtml=SALES_CATEGORIES.map(category=>`<div class="classification-lane" data-category="${esc(category)}"><h5>${esc(category)}（ここへ移動）</h5>${lanes.get(category).map(row=>`<div class="classification-item${pendingCategoryMoves[row.key]?' pending-move':''}" draggable="true" data-product-key="${esc(row.key)}"><span>${esc(row.name)}</span><small>${yen(row.amount)}</small></div>`).join('')}</div>`).join('');
+  return `<div class="classification-editor">
+    <h4>商品分類ワークスペース</h4>
+    <p class="editor-note">商品をドラッグして分類レーンへ移せます。移動だけではまだ保存されません。「分類を更新」を押すと、移動した商品すべての分類ルールと集計がクラウドへ反映されます。</p>
+    <div class="classify-actions">
+      <button type="button" class="rv-btn rv-btn-primary" id="classifyCommitBtn" ${pendingCount?'' :'disabled'}>分類を更新${pendingCount?`（${pendingCount}件）`:''}</button>
+      <button type="button" class="rv-btn rv-btn-secondary" id="classifyResetBtn" ${pendingCount?'' :'disabled'}>移動を取り消す</button>
+      <span class="classify-pending${pendingCount?' has-pending':''}" id="classifyPendingLabel">${pendingCount?`未反映の移動: ${pendingCount}件`:'未反映の移動はありません'}</span>
+    </div>
+    <div class="classification-board">${laneHtml}</div>
+  </div>`;
+}
+
+let pendingCategoryMoves={};
+
+function pendingCategoryMoveCount(){
+  return Object.keys(pendingCategoryMoves||{}).length;
+}
+
+function updateClassifyCommitUi(){
+  const view=document.getElementById('reportView');
+  if(!view) return;
+  const n=pendingCategoryMoveCount();
+  const commit=view.querySelector('#classifyCommitBtn');
+  const reset=view.querySelector('#classifyResetBtn');
+  const label=view.querySelector('#classifyPendingLabel');
+  if(commit){
+    commit.disabled=!n;
+    commit.textContent=n?`分類を更新（${n}件）`:'分類を更新';
+  }
+  if(reset) reset.disabled=!n;
+  if(label){
+    label.textContent=n?`未反映の移動: ${n}件`:'未反映の移動はありません';
+    label.classList.toggle('has-pending', !!n);
+  }
+}
+
+function queuePendingCategoryMove(key,category){
+  if(!key||!category||!SALES_CATEGORIES.includes(category)) return;
+  pendingCategoryMoves={...pendingCategoryMoves,[key]:category};
+  updateClassifyCommitUi();
+}
+
+function clearPendingCategoryMoves(){
+  pendingCategoryMoves={};
+  updateClassifyCommitUi();
 }
 
 async function resolveSalesForCurrentReport(){
@@ -4038,41 +4092,59 @@ async function resolveSalesForCurrentReport(){
   return applyAllCategoryOverridesToSales(loaded.sales||[]).sales;
 }
 
-async function reclassifyProductInCurrentReport(key,category){
-  if(!key||!category) return;
+/** 未反映のドラッグ移動をまとめてクラウドへ永続化 */
+async function commitPendingCategoryMoves(){
+  const entries=Object.entries(pendingCategoryMoves||{});
+  if(!entries.length){
+    alert('移動した商品がありません。先にドラッグで分類を変更してください。');
+    return;
+  }
   if(!getAdminToken()){
-    alert('分類の変更にはクラウド接続が必要です。\n画面上部で管理トークンを接続するか、LINEの最新リンクから開き直してください。');
+    alert('分類の更新にはクラウド接続が必要です。\n画面上部で管理トークンを接続するか、LINEの最新リンクから開き直してください。');
     return;
   }
   if(!currentReport){
-    alert('再集計するレポートがありません。');
+    alert('更新するレポートがありません。');
     return;
   }
-  showAppLoading('分類を永続保存中...','ルールをクラウドへ確定しています');
+  const keys=entries.map(([k])=>k);
+  showAppLoading('分類を更新中...', `${keys.length}件の移動をクラウドへ保存しています`);
   try{
-    // 1) ルールをクラウドへ保存＋検証（失敗したらここで止まる）
-    await saveProductCategoryOverride(key,category);
+    try{ await loadProductCategoryOverridesFromCloud(); }catch(_){}
+    const saved={...readProductCategoryOverrides()};
+    entries.forEach(([key,category])=>{
+      if(!SALES_CATEGORIES.includes(category)) return;
+      saved[key]=category;
+    });
+    productCategoryOverridesCache=saved;
+    await persistProductCategoryOverridesToCloud(saved);
+    // 検証
+    for(const [key,category] of entries){
+      if(readProductCategoryOverrides()[key]!==category){
+        throw new Error(`分類ルールの保存確認に失敗しました: ${key}`);
+      }
+    }
 
     let sales=await resolveSalesForCurrentReport();
     if(!sales.length){
-      alert('このレポートに伝票データがありません。\n分類ルールはクラウドに保存済みです。対象月のジャーナルを読み込み直すと集計にも反映されます。');
+      clearPendingCategoryMoves();
+      alert('分類ルールはクラウドに保存しました。\nこの画面に伝票が無いため集計反映は、対象月のレポートを開き直すかジャーナルを再読み込みしてください。');
       return;
     }
     restorePaymentsMap(sales);
-    sales=applyCategoryOverrideToSales(sales,key,category);
+    entries.forEach(([key,category])=>{
+      sales=applyCategoryOverrideToSales(sales,key,category);
+    });
 
-    // 2) 影響する月の日別・月間レポートを伝票付きで上書き（永続化の本体）
-    const monthSave=await upsertMonthReportsFromSales(sales,{ productKey:key });
-
-    // 3) その他の保存済みレポートにも漏れなく反映
+    const monthSave=await upsertMonthReportsFromSales(sales);
     showAppLoading('分類を全レポートへ反映中...','残りのレポートを更新しています');
-    const prop=await propagateCategoryOverridesToCloudReports([key]);
+    const prop=await propagateCategoryOverridesToCloudReports(keys);
 
-    // 4) 画面を最新の分類で再描画
     const keepId=currentReport.id||null;
     const keepCreatedAt=currentReport.createdAt;
     const isMonthly=/月間/.test(String(currentReport.title||''));
     activeReportTab='classify';
+    clearPendingCategoryMoves();
     const rebuilt=buildReport(isMonthly?'monthly':'daily','','',null,sales,{ silent:false });
     if(rebuilt){
       if(keepId) currentReport.id=keepId;
@@ -4083,35 +4155,63 @@ async function reclassifyProductInCurrentReport(key,category){
     if(monthSave.failed>0||prop.failed>0){
       finishSaveStatus('分類ルールは保存済み。一部レポートの更新に失敗',true);
       alert(
-        '分類ルールはクラウドに保存しましたが、一部レポートの更新に失敗しました。\n' +
-        `月別更新失敗: ${monthSave.failed} / その他失敗: ${prop.failed}\n` +
-        'もう一度同じ商品をドラッグするか、ページを再読み込みしてください。'
+        '分類ルールは保存しましたが、一部レポートの更新に失敗しました。\n' +
+        `月別更新失敗: ${monthSave.failed} / その他失敗: ${prop.failed}`
       );
     }else{
-      finishSaveStatus(`分類を永続保存しました（月別 ${monthSave.updated}件 / 追加反映 ${prop.updated}件）`);
+      finishSaveStatus(`分類を更新しました（${keys.length}商品 / 月別 ${monthSave.updated}件）`);
     }
   }catch(err){
-    console.error('reclassifyProductInCurrentReport:',err);
-    finishSaveStatus('分類の保存に失敗しました',true);
-    alert('分類の永続保存に失敗しました: '+(err?.message||err));
+    console.error('commitPendingCategoryMoves:',err);
+    finishSaveStatus('分類の更新に失敗しました',true);
+    alert('分類の更新に失敗しました: '+(err?.message||err));
   }finally{
     hideAppLoading();
   }
 }
 
+function resetPendingCategoryMovesAndRedraw(){
+  if(!pendingCategoryMoveCount()) return;
+  if(!confirm('まだ更新していない移動をすべて取り消しますか？')) return;
+  clearPendingCategoryMoves();
+  // レーン位置を元に戻すため再描画
+  if(currentReport?.sales?.length){
+    const isMonthly=/月間/.test(String(currentReport.title||''));
+    const keepId=currentReport.id;
+    const keepCreatedAt=currentReport.createdAt;
+    activeReportTab='classify';
+    buildReport(isMonthly?'monthly':'daily','','',null,currentReport.sales,{ silent:false });
+    if(keepId) currentReport.id=keepId;
+    if(keepCreatedAt) currentReport.createdAt=keepCreatedAt;
+  }else{
+    updateClassifyCommitUi();
+  }
+}
+
 function bindClassificationEditor(){
   const view=document.getElementById('reportView');
+  const commitBtn=view.querySelector('#classifyCommitBtn');
+  const resetBtn=view.querySelector('#classifyResetBtn');
+  if(commitBtn) commitBtn.onclick=()=>commitPendingCategoryMoves();
+  if(resetBtn) resetBtn.onclick=()=>resetPendingCategoryMovesAndRedraw();
+
   view.querySelectorAll('.classification-item').forEach(item=>item.addEventListener('dragstart',event=>{
     event.dataTransfer.setData('text/plain',item.dataset.productKey||'');
   }));
   view.querySelectorAll('.classification-lane').forEach(lane=>{
     lane.addEventListener('dragover',event=>{event.preventDefault();lane.classList.add('over');});
     lane.addEventListener('dragleave',()=>lane.classList.remove('over'));
-    lane.addEventListener('drop',async event=>{
+    lane.addEventListener('drop',event=>{
       event.preventDefault(); lane.classList.remove('over');
       const key=event.dataTransfer.getData('text/plain'), category=lane.dataset.category;
       if(!key||!category) return;
-      await reclassifyProductInCurrentReport(key,category);
+      // 画面上だけ移動（クラウド同期は「分類を更新」まで保留）
+      const item=[...view.querySelectorAll('.classification-item')].find(el=>el.dataset.productKey===key);
+      if(item){
+        lane.appendChild(item);
+        item.classList.add('pending-move');
+      }
+      queuePendingCategoryMove(key,category);
     });
   });
   view.querySelectorAll('.report-tab').forEach(tab=>{
@@ -4125,6 +4225,7 @@ function bindClassificationEditor(){
       if(classifyContent) classifyContent.hidden = target!=='classify';
     });
   });
+  updateClassifyCommitUi();
 }
 
 let _monthlyTabCounter = 0;
@@ -4325,7 +4426,11 @@ function renderReport({
   }
   view.querySelector('#rAiAnalyze').onclick=aiAnalyze;
   view.querySelector('#rAiChat').onclick=toggleAiChat;
-  view.querySelector('#rClose').onclick=()=>{ view.hidden=true; document.body.classList.remove('report-open'); currentReport=null; activeReportTab='report'; };
+  view.querySelector('#rClose').onclick=()=>{
+    if(pendingCategoryMoveCount() && !confirm('まだ「分類を更新」していない移動があります。閉じると破棄されます。よろしいですか？')) return;
+    clearPendingCategoryMoves();
+    view.hidden=true; document.body.classList.remove('report-open'); currentReport=null; activeReportTab='report';
+  };
   aiChatHistory = [];
   if (aiAnalysisText) {
     renderAiAnalysis(aiAnalysisText);
