@@ -7,27 +7,88 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Lora:wght@400;600&display=swap" rel="stylesheet">
+<script src="../app-theme.js"></script>
+<script src="app-theme.js"></script>
 <style>
-  :root{
-    --accent:#475569;
-    --page:oklch(97.5% 0.005 250);
-    --surface:#fff;
-    --border:oklch(90.5% 0.01 250);
-    --border-sub:oklch(93% 0.01 250);
-    --border-input:oklch(85% 0.01 250);
-    --text:oklch(22% 0.02 250);
-    --text-2:oklch(45% 0.02 250);
-    --text-3:oklch(55% 0.01 250);
-    --pill-bg:oklch(96% 0.005 250);
-    --green-t:oklch(45% 0.13 150);
-    --green-bg:oklch(94% 0.05 150);
-    --tint:oklch(96% 0.02 250);
+  :root {
+    --accent:#3f7bea;
+    --page:#0c1117;
+    --surface:#151c25;
+    --border:#26313d;
+    --border-sub:#1f2937;
+    --border-input:#374151;
+    --text:#e7ecf2;
+    --text-2:#9fadbd;
+    --text-3:#6f7d8d;
+    --pill-bg:#1b232e;
+    --green-t:#36b37e;
+    --green-bg:rgba(54, 179, 126, 0.18);
+    --tint:#1b232e;
   }
-  /* ===== レポート画面専用トークン（"Classical" デザインシステム参照） =====
-     メインの変換画面（:root の --accent 等）には影響しない。#reportView 配下限定。 */
-  #reportView{
-    --rv-bg:#f3f2f2;
-    --rv-text:#201f1d;
+
+  /* ☀️ Light Mode Styles */
+  body[data-theme='light'], html[data-theme='light'] {
+    --accent:#475569;
+    --page:#f8fafc;
+    --surface:#ffffff;
+    --border:#e2e8f0;
+    --border-sub:#f1f5f9;
+    --border-input:#cbd5e1;
+    --text:#0f172a;
+    --text-2:#475569;
+    --text-3:#64748b;
+    --pill-bg:#f1f5f9;
+    --green-t:#16a34a;
+    --green-bg:#dcfce7;
+    --tint:#f8fafc;
+  }
+
+  body[data-theme='light'] #reportView {
+    --rv-bg:#f3f4f6;
+    --rv-text:#1f2937;
+    --rv-accent:#b68235;
+    --rv-accent-300:#facb8d;
+    --rv-accent-500:#c28d41;
+    --rv-accent-700:#7d5411;
+    --rv-neutral-400:#9ca3af;
+    --rv-neutral-600:#4b5563;
+    --rv-neutral-700:#374151;
+    --rv-divider:rgba(31, 41, 55, 0.16);
+  }
+
+  /* 🌙 Dark Mode Styles */
+  body[data-theme='dark'], html[data-theme='dark'] {
+    --accent:#3f7bea;
+    --page:#0c1117;
+    --surface:#151c25;
+    --border:#26313d;
+    --border-sub:#1f2937;
+    --border-input:#374151;
+    --text:#e7ecf2;
+    --text-2:#9fadbd;
+    --text-3:#6f7d8d;
+    --pill-bg:#1b232e;
+    --green-t:#36b37e;
+    --green-bg:rgba(54, 179, 126, 0.18);
+    --tint:#1b232e;
+  }
+
+  body[data-theme='dark'] #reportView {
+    --rv-bg:#0d131a;
+    --rv-text:#e2e8f0;
+    --rv-accent:#d4af37;
+    --rv-accent-300:#fcd34d;
+    --rv-accent-500:#f59e0b;
+    --rv-accent-700:#b45309;
+    --rv-neutral-400:#9ca3af;
+    --rv-neutral-600:#d1d5db;
+    --rv-neutral-700:#e5e7eb;
+    --rv-divider:rgba(226, 232, 240, 0.16);
+  }
+
+  #reportView {
+    --rv-bg:#0d131a;
+    --rv-text:#e2e8f0;
     --rv-accent:#b68235;
     --rv-accent-300:#facb8d;
     --rv-accent-500:#c28d41;
@@ -841,6 +902,7 @@
       <button id="monthlyBtn" class="btn-primary" style="display:none" disabled>月間レポートを作成</button>
       <button id="savedBtn" class="btn-secondary">保存済みレポート</button>
       <button id="aiHistoryBtn" class="btn-secondary">🤖 AI分析履歴</button>
+      <button id="themeToggleBtn" class="btn-secondary">テーマ切り替え</button>
       <button id="dlall" class="btn-secondary" disabled>すべて .txt で保存</button>
       <button id="clear" class="btn-secondary" disabled>クリア</button>
     </div>
@@ -2386,7 +2448,7 @@ function renderReport({
     ?`　/　フード ${yen(foodTotal)}　/　飲料 ${yen(drinkTotal)}${roomTotal>0?`　/　室料 ${yen(roomTotal)}`:''}${otherTotal>0?`　/　その他 ${yen(otherTotal)}`:''}`:'';
   const mealMeta=Number.isFinite(lunchTotal)&&Number.isFinite(dinnerTotal)
     ?`　/　ランチ ${yen(lunchTotal)}　/　ディナー ${yen(dinnerTotal)}`:'';
-  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">${esc(title)} プレビュー</span><button class="rv-btn rv-btn-primary" id="rHtml" ${stale?'disabled':''}>${stale?'再作成が必要':'HTMLで保存'}</button><button class="rv-btn rv-btn-secondary" id="rPrint" ${stale?'disabled':''}>${stale?'':'印刷／PDF'}</button><button class="rv-btn rv-btn-secondary" id="rSave" ${saved?'disabled':''}>${saved?'保存済み':'アプリ内に保存'}</button><button class="rv-btn rv-btn-primary ai-btn" id="rAiAnalyze">AI分析</button><button class="rv-btn rv-btn-secondary" id="rAiChat">AIチャット</button><button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button></div><div id="aiAnalysisArea" class="ai-analysis" hidden></div><div class="report"><h1 class="r-title">${esc(title)}</h1><p class="r-meta">対象期間 ${esc(period)}　/　${salesCount}件　/　総売上 ${yen(total)}${categoryMeta}${mealMeta}　/　${esc(createdAt)}</p>${staleNotice}${body}</div>`;
+  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">${esc(title)} プレビュー</span><button class="rv-btn rv-btn-primary" id="rHtml" ${stale?'disabled':''}>${stale?'再作成が必要':'HTMLで保存'}</button><button class="rv-btn rv-btn-secondary" id="rPrint" ${stale?'disabled':''}>${stale?'':'印刷／PDF'}</button><button class="rv-btn rv-btn-secondary" id="rSave" ${saved?'disabled':''}>${saved?'保存済み':'アプリ内に保存'}</button><button class="rv-btn rv-btn-primary ai-btn" id="rAiAnalyze">AI分析</button><button class="rv-btn rv-btn-secondary" id="rAiChat">AIチャット</button><button class="rv-btn rv-btn-secondary" onclick="window.LINE_REPORT_THEME ? window.LINE_REPORT_THEME.set(window.LINE_REPORT_THEME.get() === 'light' ? 'dark' : 'light') : null">テーマ切替</button><button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button></div><div id="aiAnalysisArea" class="ai-analysis" hidden></div><div class="report"><h1 class="r-title">${esc(title)}</h1><p class="r-meta">対象期間 ${esc(period)}　/年 ${salesCount}件　/　総売上 ${yen(total)}${categoryMeta}${mealMeta}　/　${esc(createdAt)}</p>${staleNotice}${body}</div>`;
   view.hidden=false; document.body.classList.add('report-open');
   if(sales?.length) bindClassificationEditor();
   if(!stale){
