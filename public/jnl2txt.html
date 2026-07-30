@@ -1942,7 +1942,8 @@ const SUPABASE_REST_URL = `${SUPABASE_URL}/rest/v1/saved_reports`;
 
 async function fetchSupabaseReports() {
   try {
-    const res = await fetch(`${SUPABASE_REST_URL}?select=id,title,period,data,created_at&order=created_at.desc&limit=200`, {
+    // 一覧用メタデータのみ取得（20MB -> 5KBへ大幅軽量化）
+    const res = await fetch(`${SUPABASE_REST_URL}?select=id,title,period,created_at&order=created_at.desc&limit=200`, {
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON_KEY,
@@ -1953,25 +1954,12 @@ async function fetchSupabaseReports() {
     if (!res.ok) throw new Error('Supabase fetch failed: ' + res.status);
     const rows = await res.json();
     if (!Array.isArray(rows)) return [];
-    return rows.map(row => {
-      const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
-      return {
-        id: String(row.id || d.id || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`),
-        title: row.title || d.title || '売上レポート',
-        period: row.period || d.period || '',
-        salesCount: d.salesCount || (Array.isArray(d.sales) ? d.sales.length : 0),
-        total: d.total || 0,
-        foodTotal: d.foodTotal,
-        drinkTotal: d.drinkTotal,
-        roomTotal: d.roomTotal || 0,
-        otherTotal: d.otherTotal || 0,
-        chargeTotal: d.chargeTotal || 0,
-        lunchTotal: d.lunchTotal,
-        dinnerTotal: d.dinnerTotal,
-        createdAt: d.createdAt || row.created_at,
-        ...d
-      };
-    });
+    return rows.map(row => ({
+      id: String(row.id || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`),
+      title: row.title || '売上レポート',
+      period: row.period || '',
+      createdAt: row.created_at
+    }));
   } catch (err) {
     console.warn('Supabase fetch error, fallback to local:', err);
     return null;
@@ -2565,13 +2553,24 @@ async function renderSavedReports(filter='all'){
     updateMergeBtnState();
   });
   
-  mergeBtn.onclick = () => {
+  mergeBtn.onclick = async () => {
     const checkedIds = [...view.querySelectorAll('.report-select:checked')].map(cb => cb.dataset.id);
-    const selectedReports = reports.filter(r => checkedIds.includes(r.id));
+    if (checkedIds.length === 0) return;
     
-    const mergedSales = [];
-    const seen = new Set();
-    let hasSalesData = false;
+    showAppLoading('選択データを合算中...', '詳細データを読み込んでいます');
+    try {
+      const selectedReports = await Promise.all(checkedIds.map(async id => {
+        let r = reports.find(x => x.id === id);
+        if (!r || !r.sales) {
+          const fetched = await fetchSupabaseReportById(id);
+          if (fetched) r = fetched;
+        }
+        return r;
+      }));
+      
+      const mergedSales = [];
+      const seen = new Set();
+      let hasSalesData = false;
     
     selectedReports.forEach(r => {
       if (Array.isArray(r.sales)) {
@@ -2606,6 +2605,9 @@ async function renderSavedReports(filter='all'){
         hideAppLoading();
       }
     }, 100);
+    } finally {
+      hideAppLoading();
+    }
   };
 }
 
