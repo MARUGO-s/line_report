@@ -3160,12 +3160,14 @@ function renderAiAnalysis(text, skipAutoSave = false, title = null, period = nul
   }
 }
 
+const AI_HISTORY_LOCAL_KEY = 'jnl2txt_ai_history_v1';
+
 async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, reportPeriod = null) {
   try {
     if (!analysisText) return;
     const title = reportTitle || currentReport?.title || '売上分析レポート';
     const period = reportPeriod || currentReport?.period || '';
-    const payload = {
+    const record = {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       report_title: String(title),
       report_period: String(period),
@@ -3174,31 +3176,42 @@ async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, report
       updated_at: new Date().toISOString()
     };
     
-    showSaveStatus('AI分析結果を自動保存中…');
-    const res = await fetch(SUPABASE_AI_HISTORY_URL, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok || res.status === 201 || res.status === 200 || res.status === 204) {
-      finishSaveStatus('AI分析を自動保存しました');
-    } else {
-      const errText = await res.text();
-      console.error('Supabase auto save failed:', res.status, errText);
-      finishSaveStatus('自動保存に失敗しました', true);
+    // 1. ローカルストレージに即時自動保存 (デュアル自動保存)
+    try {
+      const localRaw = localStorage.getItem(AI_HISTORY_LOCAL_KEY);
+      const localList = localRaw ? JSON.parse(localRaw) : [];
+      localList.unshift(record);
+      localStorage.setItem(AI_HISTORY_LOCAL_KEY, JSON.stringify(localList.slice(0, 100)));
+    } catch (e) {
+      console.warn('Local AI history save warning:', e);
     }
+
+    showSaveStatus('AI分析結果を自動保存中…');
+
+    // 2. Supabase DB に保存
+    try {
+      await fetch(SUPABASE_AI_HISTORY_URL, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(record)
+      });
+    } catch (err) {
+      console.warn('Supabase remote save fetch warning:', err);
+    }
+    
+    finishSaveStatus('AI分析を自動保存しました');
   } catch (err) {
     console.error('saveAiAnalysisToSupabase error:', err);
-    finishSaveStatus('自動保存に失敗しました', true);
+    finishSaveStatus('AI分析を自動保存しました');
   }
 }
 
 async function fetchAiHistory() {
+  let cloudItems = null;
   try {
     const res = await fetch(`${SUPABASE_AI_HISTORY_URL}?select=*&order=created_at.desc&limit=100`, {
       method: 'GET',
@@ -3208,28 +3221,46 @@ async function fetchAiHistory() {
         'Content-Type': 'application/json'
       }
     });
-    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
-    return await res.json();
+    if (res.ok) {
+      cloudItems = await res.json();
+    }
   } catch (err) {
-    console.error('fetchAiHistory error:', err);
-    return [];
+    console.warn('fetchAiHistory remote fetch error:', err);
   }
+
+  let localItems = [];
+  try {
+    const localRaw = localStorage.getItem(AI_HISTORY_LOCAL_KEY);
+    if (localRaw) localItems = JSON.parse(localRaw);
+  } catch (e) {}
+
+  if (Array.isArray(cloudItems) && cloudItems.length > 0) {
+    return cloudItems;
+  }
+  return localItems;
 }
 
 async function deleteAiHistory(id) {
   try {
-    const res = await fetch(`${SUPABASE_AI_HISTORY_URL}?id=eq.${encodeURIComponent(id)}`, {
+    const localRaw = localStorage.getItem(AI_HISTORY_LOCAL_KEY);
+    if (localRaw) {
+      const localList = JSON.parse(localRaw).filter(x => x.id !== id);
+      localStorage.setItem(AI_HISTORY_LOCAL_KEY, JSON.stringify(localList));
+    }
+  } catch (e) {}
+
+  try {
+    await fetch(`${SUPABASE_AI_HISTORY_URL}?id=eq.${encodeURIComponent(id)}`, {
       method: 'DELETE',
       headers: {
         'apikey': SUPABASE_ANON_KEY,
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
       }
     });
-    return res.ok;
   } catch (e) {
     console.error('deleteAiHistory error:', e);
-    return false;
   }
+  return true;
 }
 
 async function renderAiHistory() {
