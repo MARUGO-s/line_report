@@ -4816,13 +4816,10 @@ async function renderSavedReports(filter='all'){
         reviveSalesList(r.sales).forEach(pushSale);
       });
 
-      // 2) 足りなければクラウド上のジャーナル原本を読み直して解析
+      // 2) 伝票が無い場合のみ、クラウド上のジャーナル原本を読み直して解析
+      //    （salesCountの合算と比較しない。重複選択や空salesの要約レポートで誤判定するため）
       const monthsNeeded = [...new Set(validReports.flatMap(sourceMonthsFromReport))];
-      const expectedCount = validReports.reduce((s, r) => s + (Number(r.salesCount) || 0), 0);
-      const needJournals = mergedSales.length === 0
-        || (expectedCount > 0 && mergedSales.length < Math.max(10, expectedCount * 0.5));
-
-      if (needJournals) {
+      if (mergedSales.length === 0) {
         if (!monthsNeeded.length) {
           alert('合算に必要な月情報が見つかりませんでした。\nジャーナルを再読み込みしてレポートを保存し直してください。');
           return;
@@ -4832,8 +4829,8 @@ async function renderSavedReports(filter='all'){
         fromJournals.sales.forEach(pushSale);
         if (!fromJournals.fileCount) {
           alert(
-            'クラウドに元ジャーナルがありません。\n' +
-            '合算分析するには、対象月のジャーナル（.lzh）を再度読み込んで保存してください。\n' +
+            '選択したレポートに伝票データがなく、クラウドにも元ジャーナルがありません。\n' +
+            '対象月のジャーナル（.lzh）を再度読み込んで保存してください。\n' +
             '（保存時にジャーナルもクラウドへ保管されます）\n\n' +
             '対象月: ' + monthsNeeded.join(', ')
           );
