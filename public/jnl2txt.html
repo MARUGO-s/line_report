@@ -3108,6 +3108,7 @@ function buildSalesDataForAI() {
   const sales = d.sales || [];
   const daily = {};
   const products = {};
+  const hourly = {};
   const weekdays = { '月': { total: 0, count: 0, customers: 0 }, '火': { total: 0, count: 0, customers: 0 }, '水': { total: 0, count: 0, customers: 0 }, '木': { total: 0, count: 0, customers: 0 }, '金': { total: 0, count: 0, customers: 0 }, '土': { total: 0, count: 0, customers: 0 }, '日': { total: 0, count: 0, customers: 0 } };
   
   let totalCustomers = 0;
@@ -3124,6 +3125,22 @@ function buildSalesDataForAI() {
 
     totalCustomers += s.customers || 0;
     totalGroups += 1;
+
+    // Hourly breakdown
+    let hourKey = null;
+    if (s.time) {
+      const match = String(s.time).match(/^(\d{1,2}):/);
+      if (match) hourKey = parseInt(match[1], 10);
+    } else if (s.date && String(s.date).includes(' ')) {
+      const match = String(s.date).match(/\s+(\d{1,2}):/);
+      if (match) hourKey = parseInt(match[1], 10);
+    }
+    if (hourKey !== null && !isNaN(hourKey)) {
+      if (!hourly[hourKey]) hourly[hourKey] = { total: 0, count: 0, customers: 0 };
+      hourly[hourKey].total += s.total || 0;
+      hourly[hourKey].count += 1;
+      hourly[hourKey].customers += s.customers || 0;
+    }
 
     // Weekday breakdown
     if (s.date) {
@@ -3147,6 +3164,13 @@ function buildSalesDataForAI() {
   const dailyArr = Object.keys(daily).sort().map(k => ({
     date: k,
     ...daily[k]
+  }));
+
+  const hourlySummary = Object.keys(hourly).map(h => parseInt(h, 10)).sort((a,b) => a - b).map(h => ({
+    hour: h,
+    totalSales: hourly[h].total,
+    count: hourly[h].count,
+    customers: hourly[h].customers
   }));
   
   const topProducts = Object.entries(products)
@@ -3182,6 +3206,7 @@ function buildSalesDataForAI() {
     dinnerCustomers: d.dinnerCustomers,
     dinnerAvgSpend: d.dinnerCustomers ? Math.round(d.dinnerTotal / d.dinnerCustomers) : 0,
     weekdayBreakdown: weekdaySummary,
+    hourlyBreakdown: hourlySummary,
     topProducts: topProducts,
     dailyBreakdown: dailyArr
   };
@@ -3255,6 +3280,12 @@ function buildAiVisualDashboardHTML() {
     const grandTot = lunchTot + dinnerTot || 1;
     const lunchPct = Math.round((lunchTot / grandTot) * 100);
     const dinnerPct = 100 - lunchPct;
+
+    const foodTot = d.foodTotal || sales.foodTotal || 0;
+    const drinkTot = d.drinkTotal || sales.drinkTotal || 0;
+    const catGrandTot = foodTot + drinkTot || 1;
+    const foodPct = Math.round((foodTot / catGrandTot) * 100);
+    const drinkPct = 100 - foodPct;
     
     const weekdays = sales.weekdayBreakdown || [];
     const maxDaySales = Math.max(...weekdays.map(w => w.totalSales || 0), 1);
@@ -3267,6 +3298,19 @@ function buildAiVisualDashboardHTML() {
           <div class="ai-bar-fill" style="width:${pct}%"></div>
         </div>
         <span class="ai-bar-val">${yen(w.totalSales)}</span>
+      </div>`;
+    }).join('') : '';
+
+    const hourlyList = sales.hourlyBreakdown || [];
+    const maxHourSales = Math.max(...hourlyList.map(h => h.totalSales || 0), 1);
+    const hourlyChartHTML = hourlyList.length ? hourlyList.map(h => {
+      const pct = Math.round((h.totalSales / maxHourSales) * 100);
+      return `<div class="ai-bar-row">
+        <span class="ai-bar-label" style="width:46px;">${h.hour}時台</span>
+        <div class="ai-bar-track">
+          <div class="ai-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,#059669,#10b981)"></div>
+        </div>
+        <span class="ai-bar-val">${yen(h.totalSales)} (${h.count}件)</span>
       </div>`;
     }).join('') : '';
 
@@ -3302,26 +3346,39 @@ function buildAiVisualDashboardHTML() {
             <span class="ai-kpi-sub">総来店客数: ${totalCust} 名</span>
           </div>
           <div class="ai-kpi-card">
-            <span class="ai-kpi-label">ランチ売上</span>
-            <span class="ai-kpi-value">${yen(lunchTot)}</span>
-            <span class="ai-kpi-sub">構成比: ${lunchPct}%</span>
+            <span class="ai-kpi-label">フード売上</span>
+            <span class="ai-kpi-value">${yen(foodTot)}</span>
+            <span class="ai-kpi-sub">構成比: ${foodPct}%</span>
           </div>
           <div class="ai-kpi-card">
-            <span class="ai-kpi-label">ディナー売上</span>
-            <span class="ai-kpi-value">${yen(dinnerTot)}</span>
-            <span class="ai-kpi-sub">構成比: ${dinnerPct}%</span>
+            <span class="ai-kpi-label">ドリンク売上</span>
+            <span class="ai-kpi-value">${yen(drinkTot)}</span>
+            <span class="ai-kpi-sub">構成比: ${drinkPct}%</span>
           </div>
         </div>
 
-        <!-- Lunch vs Dinner Progress Bar -->
-        <div class="ai-chart-section" style="padding:14px 16px;">
-          <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;">
-            <span style="color:#2563eb;">☀️ ランチ比率: ${lunchPct}% (${yen(lunchTot)})</span>
-            <span style="color:#7c3aed;">🌙 ディナー比率: ${dinnerPct}% (${yen(dinnerTot)})</span>
+        <!-- Food vs Drink & Lunch vs Dinner Progress Bars -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px;">
+          <div class="ai-chart-section" style="padding:14px 16px;margin-bottom:0;">
+            <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:4px;">
+              <span style="color:#16a34a;">🍖 フード比率: ${foodPct}% (${yen(foodTot)})</span>
+              <span style="color:#d97706;">🍹 ドリンク比率: ${drinkPct}% (${yen(drinkTot)})</span>
+            </div>
+            <div class="ai-progress-track">
+              <div class="ai-progress-lunch" style="width:${foodPct}%;background:#16a34a;"></div>
+              <div class="ai-progress-dinner" style="width:${drinkPct}%;background:#d97706;"></div>
+            </div>
           </div>
-          <div class="ai-progress-track">
-            <div class="ai-progress-lunch" style="width:${lunchPct}%"></div>
-            <div class="ai-progress-dinner" style="width:${dinnerPct}%"></div>
+
+          <div class="ai-chart-section" style="padding:14px 16px;margin-bottom:0;">
+            <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:4px;">
+              <span style="color:#2563eb;">☀️ ランチ比率: ${lunchPct}% (${yen(lunchTot)})</span>
+              <span style="color:#7c3aed;">🌙 ディナー比率: ${dinnerPct}% (${yen(dinnerTot)})</span>
+            </div>
+            <div class="ai-progress-track">
+              <div class="ai-progress-lunch" style="width:${lunchPct}%;"></div>
+              <div class="ai-progress-dinner" style="width:${dinnerPct}%;"></div>
+            </div>
           </div>
         </div>
 
@@ -3331,6 +3388,12 @@ function buildAiVisualDashboardHTML() {
           <div class="ai-chart-section" style="margin-bottom:0;">
             <div class="ai-chart-title">📅 曜日別売上バランス</div>
             ${barChartHTML}
+          </div>` : ''}
+
+          ${hourlyChartHTML ? `
+          <div class="ai-chart-section" style="margin-bottom:0;">
+            <div class="ai-chart-title">⏰ 時間帯別売上推移</div>
+            ${hourlyChartHTML}
           </div>` : ''}
           
           ${prodChartHTML ? `
