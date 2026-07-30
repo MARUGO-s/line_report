@@ -2901,17 +2901,24 @@ function buildSalesForecast(history, horizon = 3) {
 
     let predicted;
     let basis;
+    const trendWeight = steps <= 2 ? 0.20 : steps <= 4 ? 0.10 : 0.05;
     if (yoy != null && seasonal != null) {
-      predicted = yoy * 0.45 + seasonal * 0.35 + recentAvg * 0.20;
+      const tw = trendWeight;
+      predicted = yoy * 0.45 + seasonal * 0.35 + recentAvg * (0.20 - tw + 0.15) + trendVal * tw;
+      // renormalize-ish: keep primarily historical anchors when gap is large
+      if (steps > 3) predicted = yoy * 0.5 + seasonal * 0.35 + recentAvg * 0.15;
       basis = '前年同月＋季節平均＋直近平均';
     } else if (yoy != null) {
-      predicted = yoy * 0.55 + recentAvg * 0.25 + trendVal * 0.20;
+      if (steps > 3) predicted = yoy * 0.7 + recentAvg * 0.3;
+      else predicted = yoy * 0.55 + recentAvg * 0.25 + trendVal * 0.20;
       basis = '前年同月＋直近平均＋トレンド';
     } else if (seasonal != null) {
-      predicted = seasonal * 0.55 + recentAvg * 0.25 + trendVal * 0.20;
+      if (steps > 3) predicted = seasonal * 0.7 + recentAvg * 0.3;
+      else predicted = seasonal * 0.55 + recentAvg * 0.25 + trendVal * 0.20;
       basis = '季節平均＋直近平均＋トレンド';
     } else {
-      predicted = recentAvg * 0.55 + trendVal * 0.45;
+      if (steps > 3) predicted = recentAvg;
+      else predicted = recentAvg * 0.55 + trendVal * 0.45;
       basis = '直近平均＋トレンド';
     }
     predicted = Math.round(Math.max(0, predicted));
