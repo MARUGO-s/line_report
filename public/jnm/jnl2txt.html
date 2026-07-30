@@ -2435,12 +2435,14 @@ async function fetchSupabaseReports() {
     return rows.map(row => {
       const id = String(row.id || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`);
       const local = localById[id] || {};
+      // ローカルの詳細・件数・解析版をクラウドのメタデータで消さない
       return {
         ...local,
         id,
         title: row.title || local.title || '売上レポート',
         period: row.period || local.period || '',
-        createdAt: row.created_at || local.createdAt
+        createdAt: local.createdAt || row.created_at || local.createdAt,
+        ...pickDefinedSummary(local)
       };
     });
   } catch (err) {
@@ -2506,18 +2508,29 @@ async function readSavedReports() {
       return local;
     }
 
-    // リモート一覧（メタ）にローカルの詳細サマリーをマージ
+    // リモート一覧（メタ）にローカルの詳細サマリーをマージ（ローカル詳細を優先）
     const localById = {};
     local.forEach(r => { if (r?.id) localById[String(r.id)] = r; });
     const merged = remoteReports.map(r => {
       const loc = localById[String(r.id)] || {};
-      return { ...loc, ...r, ...pickDefinedSummary(loc) };
+      return {
+        ...r,
+        ...loc,
+        id: r.id,
+        title: r.title || loc.title,
+        period: r.period || loc.period,
+        createdAt: loc.createdAt || r.createdAt,
+        ...pickDefinedSummary(loc),
+        body: loc.body || r.body,
+        previewHtml: loc.previewHtml || r.previewHtml,
+        sales: loc.sales || r.sales
+      };
     });
     // ローカルにあってリモートに無い新規も残す
     remoteReports.forEach(r => { delete localById[String(r.id)]; });
     const pendingLocal = Object.values(localById);
     const result = [...pendingLocal, ...merged];
-    localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(result));
+    // クラウドメタだけでローカル詳細を上書きしない（件数・解析版・body を守る）
     return result;
   } catch (e) {
     console.error('readSavedReports error:', e);
@@ -2538,6 +2551,67 @@ function pickDefinedSummary(r) {
   return out;
 }
 
+function isStaleReport(r) {
+  if (!r || typeof r !== 'object') return false;
+  const hasAnyVersion = !!(r.parserVersion || r.verificationVersion || r.categoryVersion || r.mealPeriodVersion);
+  // クラウド一覧のメタデータのみ（バージョン無し）は旧解析扱いにしない
+  if (!hasAnyVersion) return false;
+  return (r.parserVersion && r.parserVersion !== PARSER_VERSION)
+    || (r.verificationVersion && r.verificationVersion !== VERIFICATION_VERSION)
+    || (r.categoryVersion && r.categoryVersion !== CATEGORY_VERSION)
+    || (r.mealPeriodVersion && r.mealPeriodVersion !== MEAL_PERIOD_VERSION);
+}
+
+function formatReportCount(r) {
+  const n = Number(r?.salesCount);
+  return Number.isFinite(n) ? `${n}件` : '—件';
+}
+
+function formatReportCreatedAt(v) {
+  if (!v) return '';
+  const s = String(v);
+  if (/^\d{4}年/.test(s)) return s;
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  return s;
+}
+
+function buildCloudReportData(r, { includeBody = false } = {}) {
+  const data = {
+    id: r.id,
+    title: r.title,
+    period: r.period,
+    createdAt: r.createdAt,
+    salesCount: Number.isFinite(Number(r.salesCount)) ? Number(r.salesCount) : 0,
+    total: Number(r.total ?? r.totalSales) || 0,
+    totalSales: Number(r.total ?? r.totalSales) || 0,
+    foodTotal: r.foodTotal,
+    drinkTotal: r.drinkTotal,
+    roomTotal: r.roomTotal,
+    otherTotal: r.otherTotal,
+    chargeTotal: r.chargeTotal,
+    lunchTotal: r.lunchTotal,
+    dinnerTotal: r.dinnerTotal,
+    lunchCustomers: r.lunchCustomers,
+    dinnerCustomers: r.dinnerCustomers,
+    totalCustomers: r.totalCustomers,
+    topProducts: Array.isArray(r.topProducts) ? r.topProducts.slice(0, 30) : [],
+    weekdayBreakdown: r.weekdayBreakdown || [],
+    hourlyBreakdown: (r.hourlyBreakdown || []).slice(0, 24),
+    parserVersion: r.parserVersion || PARSER_VERSION,
+    verificationVersion: r.verificationVersion || VERIFICATION_VERSION,
+    categoryVersion: r.categoryVersion || CATEGORY_VERSION,
+    mealPeriodVersion: r.mealPeriodVersion || MEAL_PERIOD_VERSION,
+    previewHtml: r.previewHtml
+  };
+  if (includeBody && isDetailedReportHtml(r.body) && String(r.body).length < 350000) {
+    data.body = r.body;
+  }
+  return data;
+}
+
 async function writeSavedReports(reports, newRecords) {
   try {
     const toUpload = Array.isArray(newRecords) ? newRecords : reports;
@@ -2551,7 +2625,6 @@ async function writeSavedReports(reports, newRecords) {
         localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(list));
         return true;
       } catch (_) {
-        // 1) sales を落として body（詳細HTML）は残す
         try {
           const keepBody = list.map(r => {
             const { sales, relatedReports, ...rest } = r;
@@ -2560,10 +2633,12 @@ async function writeSavedReports(reports, newRecords) {
           localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(keepBody));
           return true;
         } catch (_) {}
-        // 2) それでもダメなら古いものから body を要約に落とす
         try {
           const compact = list.map((r, i) => {
-            if (i < 8 && isDetailedReportHtml(r.body)) return r; // 直近は詳細維持
+            if (i < 8 && isDetailedReportHtml(r.body)) {
+              const { sales, relatedReports, ...rest } = r;
+              return rest;
+            }
             const { body, sales, relatedReports, ...rest } = r;
             return { ...rest, previewHtml: rest.previewHtml || buildSavedReportPreviewHtml(r) };
           });
@@ -2575,16 +2650,20 @@ async function writeSavedReports(reports, newRecords) {
       }
     };
 
+    const localOk = persistLocal(reports);
+    if (!localOk) {
+      return { ok: false, remote: false, reason: 'quota', error: lastErr };
+    }
+
     if (!hasToken) {
-      if (!persistLocal(reports)) return { ok: false, remote: false, reason: 'quota' };
-      return { ok: true, remote: false, reason: 'auth' };
+      return { ok: true, remote: false, reason: 'auth', local: true };
     }
 
     for (const r of toUpload) {
       const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       try {
-        const { sales, relatedReports, ...data } = r;
-        // 詳細HTML(body)もクラウドへ。失敗時は要約のみで再送
+        // まず要約＋件数・解析版を確実にクラウドへ（巨大bodyで全体失敗しない）
+        let lightOk = false;
         try {
           await adminApiFetch('/pos-journals/saved-reports', {
             method: 'POST',
@@ -2592,24 +2671,32 @@ async function writeSavedReports(reports, newRecords) {
               id,
               title: String(r.title || '売上レポート'),
               period: String(r.period || ''),
-              data: { ...data, id, sales: undefined },
+              data: buildCloudReportData({ ...r, id }, { includeBody: false }),
               store_key: STORE_KEY
             })
           });
-        } catch (sizeErr) {
-          const { body, previewHtml, ...light } = data;
-          await adminApiFetch('/pos-journals/saved-reports', {
-            method: 'POST',
-            body: JSON.stringify({
-              id,
-              title: String(r.title || '売上レポート'),
-              period: String(r.period || ''),
-              data: { ...light, id, previewHtml: previewHtml || buildSavedReportPreviewHtml(r) },
-              store_key: STORE_KEY
-            })
-          });
+          lightOk = true;
+        } catch (err) {
+          lastErr = err;
+          console.warn('admin-api light write error:', err);
         }
-        uploaded++;
+        // 詳細HTMLは任意（失敗しても要約は残す）
+        if (lightOk && isDetailedReportHtml(r.body)) {
+          try {
+            await adminApiFetch('/pos-journals/saved-reports', {
+              method: 'POST',
+              body: JSON.stringify({
+                id,
+                title: String(r.title || '売上レポート'),
+                period: String(r.period || ''),
+                data: buildCloudReportData({ ...r, id }, { includeBody: true }),
+                store_key: STORE_KEY
+              })
+            });
+          } catch (_) {}
+        }
+        if (lightOk) uploaded++;
+        else failed++;
       } catch (err) {
         failed++;
         lastErr = err;
@@ -2617,13 +2704,16 @@ async function writeSavedReports(reports, newRecords) {
       }
     }
 
-    if (!persistLocal(reports)) {
-      return { ok: false, remote: uploaded > 0, reason: 'quota', error: lastErr };
-    }
-    if (uploaded === 0 && toUpload.length > 0) {
-      return { ok: false, remote: false, reason: 'upload', error: lastErr };
-    }
-    return { ok: true, remote: uploaded > 0, uploaded, failed };
+    // 端末保存できていれば成功扱い（クラウド失敗は警告）
+    return {
+      ok: true,
+      remote: uploaded > 0,
+      local: true,
+      uploaded,
+      failed,
+      error: failed ? lastErr : null,
+      reason: uploaded === 0 && toUpload.length > 0 ? 'upload-partial' : undefined
+    };
   } catch (e) {
     console.error('writeSavedReports error:', e);
     try { localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports)); } catch (_) {}
@@ -2853,7 +2943,7 @@ function renderReport({
     categoryVersion=categoryVersion||CATEGORY_VERSION;
     mealPeriodVersion=mealPeriodVersion||MEAL_PERIOD_VERSION;
   }
-  const stale=saved&&(parserVersion!==PARSER_VERSION||verificationVersion!==VERIFICATION_VERSION||categoryVersion!==CATEGORY_VERSION||mealPeriodVersion!==MEAL_PERIOD_VERSION);
+  const stale=isStaleReport({parserVersion,verificationVersion,categoryVersion,mealPeriodVersion});
   currentReport={title,period,salesCount,total,body,createdAt,parserVersion,verificationVersion,categoryVersion,mealPeriodVersion,foodTotal,drinkTotal,roomTotal,otherTotal,chargeTotal,lunchTotal,dinnerTotal,lunchCustomers,dinnerCustomers,sales,aiAnalysisText,topProducts,totalCustomers};
   if (Array.isArray(sales) && sales.length) {
     currentReport.topProducts = collectProductsFromReport(currentReport).slice(0, 40);
@@ -2866,7 +2956,8 @@ function renderReport({
     ?`　/　フード ${yen(foodTotal)}　/　飲料 ${yen(drinkTotal)}${roomTotal>0?`　/　室料 ${yen(roomTotal)}`:''}${otherTotal>0?`　/　その他 ${yen(otherTotal)}`:''}`:'';
   const mealMeta=Number.isFinite(lunchTotal)&&Number.isFinite(dinnerTotal)
     ?`　/　ランチ ${yen(lunchTotal)}　/　ディナー ${yen(dinnerTotal)}`:'';
-  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">${esc(title)} プレビュー</span><button class="rv-btn rv-btn-primary" id="rHtml" ${stale?'disabled':''}>${stale?'再作成が必要':'HTMLで保存'}</button><button class="rv-btn rv-btn-secondary" id="rPrint" ${stale?'disabled':''}>${stale?'':'印刷／PDF'}</button><button class="rv-btn rv-btn-secondary" id="rSave" ${saved?'disabled':''}>${saved?'保存済み':'アプリ内に保存'}</button><button class="rv-btn rv-btn-primary ai-btn" id="rAiAnalyze">AI分析</button><button class="rv-btn rv-btn-secondary" id="rAiChat">AIチャット</button><button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button><button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button></div><div id="aiAnalysisArea" class="ai-analysis" hidden></div><div class="report"><h1 class="r-title">${esc(title)}</h1><p class="r-meta">対象期間 ${esc(period)}　/　${salesCount}件　/　総売上 ${yen(total)}${categoryMeta}${mealMeta}　/　${esc(createdAt)}</p>${staleNotice}${body}</div>`;
+  const countLabel=Number.isFinite(Number(salesCount))?`${salesCount}件`:'—件';
+  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">${esc(title)} プレビュー</span><button class="rv-btn rv-btn-primary" id="rHtml" ${stale?'disabled':''}>${stale?'再作成が必要':'HTMLで保存'}</button><button class="rv-btn rv-btn-secondary" id="rPrint" ${stale?'disabled':''}>${stale?'':'印刷／PDF'}</button><button class="rv-btn rv-btn-secondary" id="rSave" ${saved?'disabled':''}>${saved?'保存済み':'アプリ内に保存'}</button><button class="rv-btn rv-btn-primary ai-btn" id="rAiAnalyze">AI分析</button><button class="rv-btn rv-btn-secondary" id="rAiChat">AIチャット</button><button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button><button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button></div><div id="aiAnalysisArea" class="ai-analysis" hidden></div><div class="report"><h1 class="r-title">${esc(title)}</h1><p class="r-meta">対象期間 ${esc(period)}　/　${countLabel}　/　総売上 ${yen(total)}${categoryMeta}${mealMeta}　/　${esc(formatReportCreatedAt(createdAt))}</p>${staleNotice}${body}</div>`;
   view.hidden=false; document.body.classList.add('report-open');
   if(sales?.length) bindClassificationEditor();
   if(!stale){
@@ -3104,6 +3195,11 @@ async function saveCurrentReport(options = {}){
       ...withoutBundle,
       body: fullBody,
       createdAt: withoutBundle.createdAt || reportStamp(),
+      salesCount: Number(withoutBundle.salesCount) || (Array.isArray(withoutBundle.sales) ? withoutBundle.sales.length : 0),
+      parserVersion: withoutBundle.parserVersion || PARSER_VERSION,
+      verificationVersion: withoutBundle.verificationVersion || VERIFICATION_VERSION,
+      categoryVersion: withoutBundle.categoryVersion || CATEGORY_VERSION,
+      mealPeriodVersion: withoutBundle.mealPeriodVersion || MEAL_PERIOD_VERSION,
       topProducts: Array.isArray(aiSnap.topProducts) ? aiSnap.topProducts.slice(0, 30) : (report.topProducts || []),
       totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers || 0) + (report.dinnerCustomers || 0)) || 0,
       weekdayBreakdown: aiSnap.weekdayBreakdown || report.weekdayBreakdown || [],
@@ -3120,6 +3216,8 @@ async function saveCurrentReport(options = {}){
       if (!silent) {
         alert('管理トークン未接続のため、クラウドには保存できていません。\n画面上部でトークン接続するか、LINEの最新リンクから開き直してください。\n（この端末内には保存済みです）');
       }
+    } else if (result.failed && result.uploaded === 0) {
+      finishSaveStatus(`端末に${records.length}件保存（クラウド同期失敗）`);
     } else if (result.failed) {
       finishSaveStatus(`保存完了（クラウド ${result.uploaded}件 / 失敗 ${result.failed}件）`);
     } else {
@@ -3306,7 +3404,7 @@ async function renderSavedReports(filter='all'){
   });
   const filtered=filter==='all'?sorted:sorted.filter(r=>filter==='monthly'?String(r.title||'').includes('月間'):String(r.title||'').includes('日別'));
   const rows=filtered.length?filtered.map(r=>{
-    const stale=r.parserVersion!==PARSER_VERSION||r.verificationVersion!==VERIFICATION_VERSION||r.categoryVersion!==CATEGORY_VERSION||r.mealPeriodVersion!==MEAL_PERIOD_VERSION;
+    const stale=isStaleReport(r);
     const categorySummary=Number.isFinite(r.foodTotal)&&Number.isFinite(r.drinkTotal)
       ?`　/　フード ${yen(r.foodTotal)}　/　飲料 ${yen(r.drinkTotal)}`:'';
     const mealSummary=Number.isFinite(r.lunchTotal)&&Number.isFinite(r.dinnerTotal)
@@ -3315,7 +3413,7 @@ async function renderSavedReports(filter='all'){
       <input type="checkbox" class="report-select" data-id="${esc(r.id)}" style="margin-right:8px; width:16px; height:16px; cursor:pointer;">
       <div class="saved-meta">
         <div class="saved-title">${esc(reportListTitle(r.title,r.period))}${stale?'（旧解析版）':''}</div>
-        <div class="saved-sub">${esc(r.period)}　/　${r.salesCount}件${categorySummary}${mealSummary}　/　${esc(r.createdAt)}${stale?'　/　元データから再作成してください':''}</div>
+        <div class="saved-sub">${esc(r.period)}　/　${formatReportCount(r)}${categorySummary}${mealSummary}　/　${esc(formatReportCreatedAt(r.createdAt))}${stale?'　/　元データから再作成してください':''}</div>
       </div>
       <button data-open="${esc(r.id)}">開く</button>
       <button data-delete="${esc(r.id)}">削除</button>
@@ -3348,10 +3446,24 @@ async function renderSavedReports(filter='all'){
     showAppLoading('レポートを読み込み中...', 'データを表示します');
     try {
       const targetId = b.dataset.open;
-      let r = reports.find(x => x.id === targetId);
-      if (!r || !(isDetailedReportHtml(r.body) || isDetailedReportHtml(r.previewHtml) || (Array.isArray(r.sales) && r.sales.length))) {
-        r = await fetchSupabaseReportById(targetId) || r;
+      let local = reports.find(x => x.id === targetId);
+      let remote = null;
+      if (!local || !(isDetailedReportHtml(local.body) || isDetailedReportHtml(local.previewHtml) || (Array.isArray(local.sales) && local.sales.length) || reportHasSalesSummary(local))) {
+        remote = await fetchSupabaseReportById(targetId);
+      } else if (!reportHasSalesSummary(local) || !local.parserVersion) {
+        remote = await fetchSupabaseReportById(targetId);
       }
+      let r = remote ? {
+        ...remote,
+        ...pickDefinedSummary(local || {}),
+        ...(local || {}),
+        ...pickDefinedSummary(remote),
+        id: targetId,
+        title: remote.title || local?.title,
+        period: remote.period || local?.period,
+        body: (local && isDetailedReportHtml(local.body) ? local.body : null) || remote.body || remote.previewHtml || local?.previewHtml,
+        sales: local?.sales || remote.sales
+      } : local;
       if (r) {
         const body = resolveSavedReportBody(r);
         renderReport({ ...r, body, saved: true });
