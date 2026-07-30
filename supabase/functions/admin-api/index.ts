@@ -1139,6 +1139,8 @@ Deno.serve(async (req, info) => {
       "/pos-journals/saved-reports/item",
       "/pos-journals/report-ai-history",
       "/pos-journals/report-ai-history/item",
+      "/pos-journals/sales-forecasts",
+      "/pos-journals/sales-forecasts/item",
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
@@ -1390,6 +1392,26 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await deleteSavedReportItem(supabase, body, storeScope), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/sales-forecasts") {
+      return json(await fetchSalesForecastsList(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/sales-forecasts/item") {
+      return json(await fetchSalesForecastItem(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/sales-forecasts") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await saveSalesForecast(supabase, body, storeScope), 200)
+    }
+    if (req.method === "DELETE" && path === "/pos-journals/sales-forecasts/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await deleteSalesForecastItem(supabase, body, storeScope), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/report-ai-history") {
       return json(await fetchReportAiHistoryList(supabase, url), 200)
@@ -8239,6 +8261,199 @@ async function deleteSavedReportItem(
   }
   if (!data) {
     throw { status: 404, message: "保存済みレポートが見つかりません。" } satisfies AppError
+  }
+  return { ok: true, deleted: { id: String(data.id) } }
+}
+
+// ===== jnl2txt.html 売上予測スナップショット (sales_forecasts) =====
+
+type SalesForecastListRow = {
+  id: string
+  title: string
+  horizon_months: number
+  forecasted_at: string
+  method: string
+  confidence: string
+  created_at: string
+  forecast_months: string[]
+}
+
+function normalizeSalesForecastListRow(value: unknown): SalesForecastListRow | null {
+  if (!isRecord(value)) return null
+  const id = toSafeString(value.id)
+  if (!id) return null
+  const forecasts = Array.isArray(value.forecasts) ? value.forecasts : []
+  const forecastMonths = forecasts
+    .map((row) => isRecord(row) ? toSafeString(row.month) : "")
+    .filter(Boolean)
+  return {
+    id,
+    title: toSafeString(value.title) || "売上予測",
+    horizon_months: toNonNegativeInteger(value.horizon_months) || forecastMonths.length || 3,
+    forecasted_at: String(value.forecasted_at ?? value.created_at ?? ""),
+    method: toSafeString(value.method),
+    confidence: toSafeString(value.confidence),
+    created_at: String(value.created_at ?? ""),
+    forecast_months: forecastMonths,
+  }
+}
+
+async function fetchSalesForecastsList(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(300, Math.trunc(rawLimit)))
+    : 100
+  const { data, error } = await supabase
+    .from("sales_forecasts")
+    .select(
+      "id, title, horizon_months, forecasted_at, method, confidence, forecasts, created_at",
+    )
+    .eq("store_partition_key", storeKey)
+    .order("forecasted_at", { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw {
+      status: 500,
+      message: `売上予測履歴の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return {
+    ok: true,
+    store_key: storeKey,
+    items: (Array.isArray(data) ? data : [])
+      .map(normalizeSalesForecastListRow)
+      .filter((item): item is SalesForecastListRow => item !== null),
+  }
+}
+
+async function fetchSalesForecastItem(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const id = toSafeString(url.searchParams.get("id"))
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("sales_forecasts")
+    .select(
+      "id, title, horizon_months, forecasted_at, method, confidence, history_snapshot, forecasts, meta, created_at, updated_at",
+    )
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `売上予測の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "売上予測が見つかりません。" } satisfies AppError
+  }
+  return { ok: true, item: data }
+}
+
+async function saveSalesForecast(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  if (!Array.isArray(body.forecasts)) {
+    throw { status: 400, message: "forecasts is required." } satisfies AppError
+  }
+  const id = toSafeString(body.id) || `${Date.now()}_${crypto.randomUUID().slice(0, 8)}`
+  const horizon = toNonNegativeInteger(body.horizon_months) ||
+    body.forecasts.length ||
+    3
+  const now = new Date().toISOString()
+  const { error } = await supabase
+    .from("sales_forecasts")
+    .upsert({
+      id,
+      title: toSafeString(body.title) || "売上予測",
+      horizon_months: horizon,
+      forecasted_at: toSafeString(body.forecasted_at) || now,
+      method: toSafeString(body.method),
+      confidence: toSafeString(body.confidence),
+      history_snapshot: Array.isArray(body.history_snapshot)
+        ? body.history_snapshot
+        : [],
+      forecasts: body.forecasts,
+      meta: isRecord(body.meta) ? body.meta : {},
+      store_partition_key: storeKey,
+      updated_at: now,
+    }, { onConflict: "id" })
+  if (error) {
+    throw {
+      status: 500,
+      message: `売上予測の保存に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return { ok: true, id }
+}
+
+async function deleteSalesForecastItem(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  if (String(body.confirmation ?? "") !== "delete") {
+    throw {
+      status: 400,
+      message: "削除確認欄へ半角小文字で delete と入力してください。",
+    } satisfies AppError
+  }
+  const id = toSafeString(body.id)
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("sales_forecasts")
+    .delete()
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .select("id")
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `売上予測の削除に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "売上予測が見つかりません。" } satisfies AppError
   }
   return { ok: true, deleted: { id: String(data.id) } }
 }

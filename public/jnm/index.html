@@ -1135,6 +1135,7 @@
       <button id="monthlyBtn" class="btn-primary" style="display:none" disabled>月間レポートを作成</button>
       <button id="savedBtn" class="btn-secondary">保存済みレポート</button>
       <button id="forecastBtn" class="btn-secondary">売上予測</button>
+      <button id="forecastHistoryMainBtn" class="btn-secondary">予測履歴・MAPE</button>
       <button id="aiHistoryBtn" class="btn-secondary">🤖 AI分析履歴</button>
       <button id="mainAiChatBtn" onclick="toggleAiChat()" class="btn-secondary">💬 AIチャット</button>
       <button id="themeToggleBtn" onclick="toggleAppTheme()" class="btn-secondary">テーマ切り替え</button>
@@ -3005,6 +3006,154 @@ function forecastBarHtml(label, amount, maxAmount, isPred = false) {
   </div>`;
 }
 
+async function saveSalesForecastSnapshot(result, horizon) {
+  if (!result?.forecasts?.length) return { ok: false, reason: 'empty' };
+  if (!getAdminToken()) return { ok: false, reason: 'auth' };
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const first = result.forecasts[0]?.month || '';
+  const last = result.forecasts[result.forecasts.length - 1]?.month || '';
+  const title = `売上予測（${horizon}か月）${first && last ? ` ${monthKeyLabel(first)}〜${monthKeyLabel(last)}` : ''}`;
+  const payload = {
+    id,
+    title,
+    horizon_months: horizon,
+    forecasted_at: new Date().toISOString(),
+    method: result.method || '',
+    confidence: result.confidence || '',
+    history_snapshot: (result.history || []).map(h => ({
+      month: h.month,
+      label: h.label,
+      total: h.total,
+      foodTotal: h.foodTotal,
+      drinkTotal: h.drinkTotal,
+      customers: h.customers,
+      salesCount: h.salesCount
+    })),
+    forecasts: result.forecasts.map(f => ({
+      month: f.month,
+      label: f.label,
+      total: f.total,
+      foodTotal: f.foodTotal,
+      drinkTotal: f.drinkTotal,
+      lunchTotal: f.lunchTotal,
+      dinnerTotal: f.dinnerTotal,
+      customers: f.customers,
+      salesCount: f.salesCount,
+      low: f.low,
+      high: f.high,
+      basis: f.basis,
+      yoy: f.yoy,
+      yoyPct: f.yoyPct
+    })),
+    meta: {
+      sourceLabel: result.sourceLabel || '保存済みレポート',
+      note: result.note || '',
+      confidenceLabel: result.confidenceLabel || ''
+    },
+    store_key: STORE_KEY
+  };
+  try {
+    await adminApiFetch('/pos-journals/sales-forecasts', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    // 端末キャッシュ（閲覧高速化）
+    try {
+      const key = 'jnl2txt_sales_forecasts_v1';
+      const raw = localStorage.getItem(key);
+      const list = raw ? JSON.parse(raw) : [];
+      const arr = Array.isArray(list) ? list : [];
+      arr.unshift({ ...payload, created_at: payload.forecasted_at });
+      localStorage.setItem(key, JSON.stringify(arr.slice(0, 50)));
+    } catch (_) {}
+    return { ok: true, id, title };
+  } catch (err) {
+    console.warn('saveSalesForecastSnapshot error:', err);
+    return { ok: false, error: err };
+  }
+}
+
+async function fetchSalesForecastHistory() {
+  try {
+    const body = await adminApiFetch(
+      '/pos-journals/sales-forecasts?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=100',
+      { method: 'GET' }
+    );
+    return Array.isArray(body.items) ? body.items : [];
+  } catch (err) {
+    console.warn('fetchSalesForecastHistory error:', err);
+    try {
+      const raw = localStorage.getItem('jnl2txt_sales_forecasts_v1');
+      const list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (_) {
+      return [];
+    }
+  }
+}
+
+async function fetchSalesForecastById(id) {
+  try {
+    const body = await adminApiFetch(
+      '/pos-journals/sales-forecasts/item?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id),
+      { method: 'GET' }
+    );
+    return body.item || null;
+  } catch (err) {
+    console.warn('fetchSalesForecastById error:', err);
+    try {
+      const raw = localStorage.getItem('jnl2txt_sales_forecasts_v1');
+      const list = raw ? JSON.parse(raw) : [];
+      return (Array.isArray(list) ? list : []).find(x => String(x.id) === String(id)) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+/** 予測と保存レポート実績を突き合わせて MAPE を算出 */
+async function compareForecastToActuals(forecastItem) {
+  const forecasts = Array.isArray(forecastItem?.forecasts) ? forecastItem.forecasts : [];
+  const bundle = await collectMonthlyHistoryForForecast();
+  const actualByMonth = new Map((bundle.history || []).map(h => [h.month, h]));
+  const rows = forecasts.map(f => {
+    const month = String(f.month || '');
+    const predicted = Number(f.total) || 0;
+    const actualRow = actualByMonth.get(month);
+    const actual = actualRow ? Number(actualRow.total) || 0 : null;
+    const ape = actual != null && actual > 0
+      ? Math.abs(actual - predicted) / actual * 100
+      : null;
+    return {
+      month,
+      label: f.label || monthKeyLabel(month),
+      predicted,
+      predictedFood: Number(f.foodTotal) || 0,
+      predictedDrink: Number(f.drinkTotal) || 0,
+      actual,
+      actualFood: actualRow ? Number(actualRow.foodTotal) || 0 : null,
+      actualDrink: actualRow ? Number(actualRow.drinkTotal) || 0 : null,
+      diff: actual != null ? actual - predicted : null,
+      ape
+    };
+  });
+  const scored = rows.filter(r => r.ape != null);
+  const mape = scored.length
+    ? scored.reduce((s, r) => s + r.ape, 0) / scored.length
+    : null;
+  return {
+    rows,
+    mape,
+    comparedCount: scored.length,
+    pendingCount: rows.length - scored.length
+  };
+}
+
+function formatMape(mape) {
+  if (mape == null || !Number.isFinite(mape)) return '—';
+  return `${mape.toFixed(1)}%`;
+}
+
 async function renderSalesForecast(horizon = 3) {
   const view = document.getElementById('reportView');
   showAppLoading('売上予測を作成中...', '保存済みレポートのカテゴリ別実績を集計しています');
@@ -3016,6 +3165,15 @@ async function renderSalesForecast(horizon = 3) {
       ...result.history.slice(-6).map(h => h.total),
       ...result.forecasts.map(f => f.high || f.total)
     );
+
+    let saveStatus = '';
+    if (result.forecasts.length) {
+      showAppLoading('売上予測を保存中...', 'データベースへスナップショットを書き込んでいます');
+      const saved = await saveSalesForecastSnapshot(result, horizon);
+      if (saved.ok) saveStatus = `クラウドに予測を保存しました（後から実績と比較できます）`;
+      else if (saved.reason === 'auth') saveStatus = '未接続のため予測をクラウド保存できませんでした';
+      else saveStatus = '予測のクラウド保存に失敗しました（画面上の結果は表示中）';
+    }
 
     const histRows = result.history.slice(-12).map(h =>
       `<tr><td>${esc(h.label)}</td><td>${yen(h.total)}</td><td>${yen(h.foodTotal)}</td><td>${yen(h.drinkTotal)}</td><td>${h.customers ? h.customers + '名' : '—'}</td></tr>`
@@ -3053,13 +3211,14 @@ async function renderSalesForecast(horizon = 3) {
       <span class="rv-nav-page">売上予測</span>
       <button class="rv-btn rv-btn-secondary" id="forecastHorizon3">3か月</button>
       <button class="rv-btn rv-btn-secondary" id="forecastHorizon6">6か月</button>
+      <button class="rv-btn rv-btn-secondary" id="forecastHistoryBtn">予測履歴・MAPE</button>
       <button class="rv-btn rv-btn-secondary" id="forecastOpenSaved">保存済みレポート</button>
       <button class="rv-btn rv-btn-ghost" id="forecastClose">閉じる</button>
     </div>
     <div class="saved-wrap">
       <h1 class="r-title">売上予測</h1>
-      <p class="r-meta">データソース: <b>保存済みレポート</b>（フード／ドリンク等のカテゴリ別集計済み）。読み込み中のファイルではなく、クラウド／端末に保存されたレポート全体を使います。</p>
-      <p class="forecast-note">${esc(result.note || '')}${result.method ? `／手法: ${esc(result.method)}` : ''}</p>
+      <p class="r-meta">データソース: <b>保存済みレポート</b>。予測完了と同時にデータベースへ保存し、後から実績と比較して MAPE（平均絶対パーセント誤差）を確認できます。</p>
+      <p class="forecast-note">${esc(result.note || '')}${result.method ? `／手法: ${esc(result.method)}` : ''}${saveStatus ? `／${esc(saveStatus)}` : ''}</p>
       ${hero}
       <h3 class="table-h">実績と予測の比較</h3>
       <div style="margin:12px 0 24px">${chartHist}${chartPred}</div>
@@ -3080,11 +3239,145 @@ async function renderSalesForecast(horizon = 3) {
       document.body.classList.remove('report-open');
     };
     view.querySelector('#forecastOpenSaved').onclick = () => renderSavedReports();
+    view.querySelector('#forecastHistoryBtn').onclick = () => renderForecastHistory();
     view.querySelector('#forecastHorizon3').onclick = () => renderSalesForecast(3);
     view.querySelector('#forecastHorizon6').onclick = () => renderSalesForecast(6);
+    if (saveStatus && !saveStatus.includes('保存しました')) {
+      finishSaveStatus(saveStatus, true);
+    } else if (saveStatus) {
+      finishSaveStatus(saveStatus);
+    }
   } catch (err) {
     console.error('renderSalesForecast error:', err);
     alert('売上予測の作成に失敗しました。\n' + (err?.message || ''));
+  } finally {
+    hideAppLoading();
+  }
+}
+
+async function renderForecastHistory() {
+  const view = document.getElementById('reportView');
+  showAppLoading('予測履歴を読み込み中...', 'データベースと同期しています');
+  try {
+    const items = await fetchSalesForecastHistory();
+    const rows = items.length ? items.map(item => {
+      const months = Array.isArray(item.forecast_months) && item.forecast_months.length
+        ? `${monthKeyLabel(item.forecast_months[0])}〜${monthKeyLabel(item.forecast_months[item.forecast_months.length - 1])}`
+        : `${item.horizon_months || '—'}か月`;
+      return `<div class="saved-item">
+        <div class="saved-meta">
+          <div class="saved-title">${esc(item.title || '売上予測')}</div>
+          <div class="saved-sub">${esc(formatReportCreatedAt(item.forecasted_at || item.created_at))}　/　対象 ${esc(months)}　/　信頼度 ${esc(item.confidence || '—')}</div>
+        </div>
+        <button data-forecast-open="${esc(item.id)}">開く・MAPE</button>
+        <button data-forecast-delete="${esc(item.id)}">削除</button>
+      </div>`;
+    }).join('') : '<p class="empty">保存された売上予測はまだありません。「売上予測」で作成するとここに残ります。</p>';
+
+    view.innerHTML = `<div class="rv-nav">
+      <span class="rv-nav-brand">JNL変換ツール</span>
+      <span class="rv-nav-page">予測履歴・MAPE</span>
+      <button class="rv-btn rv-btn-secondary" id="forecastHistNew">新規予測</button>
+      <button class="rv-btn rv-btn-ghost" id="forecastHistClose">閉じる</button>
+    </div>
+    <div class="saved-wrap">
+      <h1 class="r-title">予測履歴</h1>
+      <p class="r-meta">過去の予測スナップショットです。開くと、その後に蓄積した保存レポート実績との差（MAPE）を確認できます。</p>
+      <div class="saved-list">${rows}</div>
+    </div>`;
+    view.hidden = false;
+    document.body.classList.add('report-open');
+    view.querySelector('#forecastHistClose').onclick = () => {
+      view.hidden = true;
+      document.body.classList.remove('report-open');
+    };
+    view.querySelector('#forecastHistNew').onclick = () => renderSalesForecast(3);
+    view.querySelectorAll('[data-forecast-open]').forEach(b => {
+      b.onclick = () => renderForecastDetail(b.getAttribute('data-forecast-open'));
+    });
+    view.querySelectorAll('[data-forecast-delete]').forEach(b => {
+      b.onclick = async () => {
+        if (!confirm('この予測履歴を削除しますか？')) return;
+        try {
+          await adminApiFetch('/pos-journals/sales-forecasts/item', {
+            method: 'DELETE',
+            body: JSON.stringify({
+              id: b.getAttribute('data-forecast-delete'),
+              store_key: STORE_KEY,
+              confirmation: 'delete'
+            })
+          });
+          finishSaveStatus('削除しました');
+          renderForecastHistory();
+        } catch (err) {
+          finishSaveStatus('削除に失敗しました', true);
+          alert(err?.message || '削除に失敗しました');
+        }
+      };
+    });
+  } catch (err) {
+    console.error('renderForecastHistory error:', err);
+    alert('予測履歴の読み込みに失敗しました。\n' + (err?.message || ''));
+  } finally {
+    hideAppLoading();
+  }
+}
+
+async function renderForecastDetail(id) {
+  const view = document.getElementById('reportView');
+  showAppLoading('予測を読み込み中...', '実績と比較して MAPE を算出しています');
+  try {
+    const item = await fetchSalesForecastById(id);
+    if (!item) {
+      alert('予測データが見つかりません。');
+      return renderForecastHistory();
+    }
+    const cmp = await compareForecastToActuals(item);
+    const mapeNote = cmp.mape == null
+      ? 'まだ実績月が揃っていないため MAPE は算出できません（実績待ちの月があります）。'
+      : `MAPE（平均絶対パーセント誤差）: <b>${esc(formatMape(cmp.mape))}</b>　／　比較済み ${cmp.comparedCount} か月　／　実績待ち ${cmp.pendingCount} か月。値が小さいほど予測精度が高いです。`;
+
+    const rows = cmp.rows.map(r => {
+      const ape = r.ape != null ? `${r.ape.toFixed(1)}%` : '実績待ち';
+      const diff = r.diff != null ? `${r.diff >= 0 ? '+' : ''}${yen(r.diff)}` : '—';
+      const actual = r.actual != null ? yen(r.actual) : '—';
+      return `<tr>
+        <td>${esc(r.label)}</td>
+        <td>${yen(r.predicted)}</td>
+        <td>${actual}</td>
+        <td>${diff}</td>
+        <td>${esc(ape)}</td>
+        <td>${r.actual != null ? yen(r.actualFood) : '—'}</td>
+        <td>${r.actual != null ? yen(r.actualDrink) : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    view.innerHTML = `<div class="rv-nav">
+      <span class="rv-nav-brand">JNL変換ツール</span>
+      <span class="rv-nav-page">予測詳細・MAPE</span>
+      <button class="rv-btn rv-btn-secondary" id="forecastDetailBack">履歴一覧</button>
+      <button class="rv-btn rv-btn-ghost" id="forecastDetailClose">閉じる</button>
+    </div>
+    <div class="saved-wrap">
+      <h1 class="r-title">${esc(item.title || '売上予測')}</h1>
+      <p class="r-meta">予測日時 ${esc(formatReportCreatedAt(item.forecasted_at || item.created_at))}　／　${esc(item.method || '')}</p>
+      <p class="forecast-note">${mapeNote}</p>
+      <h3 class="table-h">予測 vs 実績</h3>
+      <table class="month-table"><thead><tr>
+        <th>月</th><th>予測売上</th><th>実績売上</th><th>差（実績−予測）</th><th>APE</th><th>実績フード</th><th>実績ドリンク</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+      <p class="forecast-note">MAPE = 各月の APE（|実績−予測|÷実績×100）の平均。実績が揃うほど予測の修正判断に使えます。</p>
+    </div>`;
+    view.hidden = false;
+    document.body.classList.add('report-open');
+    view.querySelector('#forecastDetailBack').onclick = () => renderForecastHistory();
+    view.querySelector('#forecastDetailClose').onclick = () => {
+      view.hidden = true;
+      document.body.classList.remove('report-open');
+    };
+  } catch (err) {
+    console.error('renderForecastDetail error:', err);
+    alert('予測詳細の表示に失敗しました。\n' + (err?.message || ''));
   } finally {
     hideAppLoading();
   }
@@ -4344,6 +4637,10 @@ savedBtn.addEventListener('click', () => {
 const forecastBtn = document.getElementById('forecastBtn');
 if (forecastBtn) {
   forecastBtn.addEventListener('click', () => { renderSalesForecast(3); });
+}
+const forecastHistoryMainBtn = document.getElementById('forecastHistoryMainBtn');
+if (forecastHistoryMainBtn) {
+  forecastHistoryMainBtn.addEventListener('click', () => { renderForecastHistory(); });
 }
 const aiHistoryBtn = document.getElementById('aiHistoryBtn');
 if (aiHistoryBtn) {
