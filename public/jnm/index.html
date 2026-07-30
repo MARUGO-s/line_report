@@ -888,18 +888,18 @@
   .ai-kpi-label {
     font-size: 11px;
     font-weight: 600;
-    color: #64748b;
+    color: #64748b !important;
     margin-bottom: 4px;
   }
   .ai-kpi-value {
     font-size: 20px;
     font-weight: 700;
-    color: #0f172a;
+    color: #0f172a !important;
     line-height: 1.2;
   }
   .ai-kpi-sub {
     font-size: 11px;
-    color: #94a3b8;
+    color: #64748b !important;
     margin-top: 4px;
   }
   .ai-chart-section {
@@ -912,7 +912,7 @@
   .ai-chart-title {
     font-size: 14px;
     font-weight: 700;
-    color: #1e293b;
+    color: #1e293b !important;
     margin-bottom: 14px;
     display: flex;
     align-items: center;
@@ -927,7 +927,7 @@
   .ai-bar-label {
     width: 44px;
     font-weight: 600;
-    color: #475569;
+    color: #475569 !important;
   }
   .ai-bar-track {
     flex: 1;
@@ -945,7 +945,7 @@
   }
   .ai-bar-val {
     font-weight: 600;
-    color: #334155;
+    color: #334155 !important;
     width: 100px;
     text-align: right;
   }
@@ -964,6 +964,65 @@
   .ai-progress-dinner {
     background: #8b5cf6;
     height: 100%;
+  }
+  .ai-ratio-food { color: #16a34a !important; }
+  .ai-ratio-drink { color: #d97706 !important; }
+  .ai-ratio-lunch { color: #2563eb !important; }
+  .ai-ratio-dinner { color: #7c3aed !important; }
+
+  /* AI分析カードは白背景固定。ダークテーマの一括白文字指定を打ち消す */
+  body[data-theme='dark'] .ai-analysis {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+  body[data-theme='dark'] .ai-analysis h1,
+  body[data-theme='dark'] .ai-analysis h2,
+  body[data-theme='dark'] .ai-analysis h3,
+  body[data-theme='dark'] .ai-analysis .ai-chart-title {
+    color: #7d5411 !important;
+  }
+  body[data-theme='dark'] .ai-analysis p,
+  body[data-theme='dark'] .ai-analysis li,
+  body[data-theme='dark'] .ai-analysis div,
+  body[data-theme='dark'] .ai-analysis span:not(.ai-ratio-food):not(.ai-ratio-drink):not(.ai-ratio-lunch):not(.ai-ratio-dinner):not(.pill-live):not(.mark) {
+    color: #0f172a !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-kpi-card {
+    background: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-kpi-label {
+    color: #64748b !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-kpi-value {
+    color: #0f172a !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-kpi-sub {
+    color: #64748b !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-chart-section {
+    background: #ffffff !important;
+    border-color: #e2e8f0 !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-bar-label {
+    color: #475569 !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-bar-val {
+    color: #334155 !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-bar-track,
+  body[data-theme='dark'] .ai-analysis .ai-progress-track {
+    background: #e2e8f0 !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-ratio-food { color: #16a34a !important; }
+  body[data-theme='dark'] .ai-analysis .ai-ratio-drink { color: #d97706 !important; }
+  body[data-theme='dark'] .ai-analysis .ai-ratio-lunch { color: #2563eb !important; }
+  body[data-theme='dark'] .ai-analysis .ai-ratio-dinner { color: #7c3aed !important; }
+  body[data-theme='dark'] .ai-analysis .ai-visual-heading {
+    color: #7d5411 !important;
+  }
+  body[data-theme='dark'] .ai-analysis-close {
+    color: #64748b !important;
   }
 
   .ai-analysis {
@@ -5033,7 +5092,7 @@ function buildAiVisualDashboardHTML() {
 
     return `
       <div style="border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:24px;">
-        <h2 style="font-size:18px;font-weight:700;color:var(--rv-accent-700);margin:0 0 12px 0;display:flex;align-items:center;gap:8px;">
+        <h2 class="ai-visual-heading" style="font-size:18px;font-weight:700;margin:0 0 12px 0;display:flex;align-items:center;gap:8px;">
           📊 経営ハイライト・ビジュアルサマリー
         </h2>
         
@@ -5065,8 +5124,8 @@ function buildAiVisualDashboardHTML() {
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px;">
           <div class="ai-chart-section" style="padding:14px 16px;margin-bottom:0;">
             <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:4px;">
-              <span style="color:#16a34a;">🍖 フード比率: ${foodPct}% (${yen(foodTot)})</span>
-              <span style="color:#d97706;">🍹 ドリンク比率: ${drinkPct}% (${yen(drinkTot)})</span>
+              <span class="ai-ratio-food">🍖 フード比率: ${foodPct}% (${yen(foodTot)})</span>
+              <span class="ai-ratio-drink">🍹 ドリンク比率: ${drinkPct}% (${yen(drinkTot)})</span>
             </div>
             <div class="ai-progress-track">
               <div class="ai-progress-lunch" style="width:${foodPct}%;background:#16a34a;"></div>
@@ -5076,8 +5135,8 @@ function buildAiVisualDashboardHTML() {
 
           <div class="ai-chart-section" style="padding:14px 16px;margin-bottom:0;">
             <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:4px;">
-              <span style="color:#2563eb;">☀️ ランチ比率: ${lunchPct}% (${yen(lunchTot)})</span>
-              <span style="color:#7c3aed;">🌙 ディナー比率: ${dinnerPct}% (${yen(dinnerTot)})</span>
+              <span class="ai-ratio-lunch">☀️ ランチ比率: ${lunchPct}% (${yen(lunchTot)})</span>
+              <span class="ai-ratio-dinner">🌙 ディナー比率: ${dinnerPct}% (${yen(dinnerTot)})</span>
             </div>
             <div class="ai-progress-track">
               <div class="ai-progress-lunch" style="width:${lunchPct}%;"></div>
