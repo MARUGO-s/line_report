@@ -24,6 +24,9 @@ export type PosJournalReceipt = {
   pay: string;
   total: number | null;
   guests: number | null;
+  table_no?: string;
+  slip_no?: string;
+  staff_name?: string;
   items: PosJournalReceiptItem[];
 };
 
@@ -271,9 +274,27 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
   if (!items.length) return null;
   let total: number | null = null;
   let guests: number | null = null;
+  let tableNo = "";
+  let slipNo = "";
+  let staffName = "";
   for (const line of record.lines) {
+    const normalized = String(line || "").normalize("NFKC");
     if (/合\s*計\s/.test(line)) total = amount(line) ?? total;
     guests = firstInt(line, "名") ?? guests;
+    const table = normalized.match(
+      /伝票\s*No\.?\s*([^\s]+)\s+テーブル\s*No\.?\s*([^\s]+)/,
+    );
+    if (table) {
+      const slip = String(table[1] || "").trim();
+      const tbl = String(table[2] || "").trim();
+      if (slip && !/^保留/.test(slip)) slipNo = slip;
+      if (tbl && !/^保留/.test(tbl) && tbl !== ".") tableNo = tbl;
+    }
+    const staff = normalized.match(/^\s*\d{1,2}扱\s*(.+?)\s*(?:\d+\s*名)?\s*$/);
+    if (staff) {
+      const name = String(staff[1] || "").replace(/\s+/g, " ").trim();
+      if (name) staffName = name;
+    }
   }
   return {
     no: record.no,
@@ -283,6 +304,9 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
     pay,
     total,
     guests,
+    ...(tableNo ? { table_no: tableNo } : {}),
+    ...(slipNo ? { slip_no: slipNo } : {}),
+    ...(staffName ? { staff_name: staffName } : {}),
     items,
   };
 }

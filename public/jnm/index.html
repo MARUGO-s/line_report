@@ -1868,9 +1868,31 @@ function parserSelfCheck(){
   if(!bodyTimeOnly||!validateReceipt(bodyTimeOnly).some(issue=>issue.includes('会計時刻'))) failed.push('本文時刻の誤採用停止');
   const signedCategoryChart=donutChart([['フード',-100],['飲料',600]]);
   if(!signedCategoryChart.includes('取消相殺')) failed.push('カテゴリ純額マイナス時の円グラフ停止');
+  const withTable=`0001-01 No.12 2026年 6月 1日(月) 20時00分
+0000000000001 チャージ料
+@1,000x 1 \\1,000
+伝票No.     2  ﾃｰﾌﾞﾙNo.    5  保留No.
+合 計 \\1,000
+計1 現計 \\1,000
+控え番号 12
+1名
+01扱大竹俊活                 1名`;
+  const tableParsed=parseReceipt(withTable);
+  if(tableParsed?.tableNo!=='5'||tableParsed?.slipNo!=='2'||tableParsed?.staffName!=='大竹俊活'){
+    failed.push('テーブルNo・伝票No・担当者の抽出');
+  }
+  const withSeat=`0001-01 No.13 2026年 6月 1日(月) 20時00分
+0000000000001 チャージ料
+@1,000x 1 \\1,000
+伝票No.     1  テーブルNo.    S  保留No.
+合 計 \\1,000
+計1 現計 \\1,000
+控え番号 13
+1名`;
+  if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-31-v12';
+const PARSER_VERSION='2026-07-31-v13';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -2017,6 +2039,34 @@ function parseReceiptPayments(rec,change=0){
   return {byMethod,tenderedByMethod,details,total,tenderedTotal,change};
 }
 
+/** 伝票No / テーブルNo / 担当者（〇扱氏名）をレシート本文から取得 */
+function parseReceiptTableMeta(rec){
+  const text=String(rec).normalize('NFKC');
+  let tableNo='', slipNo='', staffName='';
+  for(const line of text.split('\n')){
+    const table=line.match(/伝票\s*No\.?\s*([^\s]+)\s+テーブル\s*No\.?\s*([^\s]+)/);
+    if(table){
+      const slip=String(table[1]||'').trim();
+      const tbl=String(table[2]||'').trim();
+      if(slip && !/^保留/.test(slip)) slipNo=slip;
+      // 「テーブルNo.  保留No.」のように値が空の行は捨てる
+      if(tbl && !/^保留/.test(tbl) && tbl!=='.') tableNo=tbl;
+    }
+    // 移動記録（座席移動）は会計ではないが、単独ラベルも拾えるようにする
+    const move=line.match(/(?:移動元|移動先)?テーブル\s*No\.?\s*([^\s]+)/);
+    if(!tableNo && move){
+      const tbl=String(move[1]||'').trim();
+      if(tbl && !/^保留/.test(tbl) && tbl!=='.') tableNo=tbl;
+    }
+    const staff=line.match(/^\s*\d{1,2}扱\s*(.+?)\s*(?:\d+\s*名)?\s*$/);
+    if(staff){
+      const name=String(staff[1]||'').replace(/\s+/g,' ').trim();
+      if(name) staffName=name;
+    }
+  }
+  return { tableNo, slipNo, staffName };
+}
+
 function parseReceipt(rec){
   // 日付・番号・会計時刻は必ず先頭ヘッダー1行だけから取得する。
   // 本文中の控え番号や別時刻を拾って誤った営業日・時間帯へ入れない。
@@ -2039,6 +2089,7 @@ function parseReceipt(rec){
   const customers=isSplitFragment?0:(customerCountReliable?customerCountCandidates[0]:0);
   const payments=parseReceiptPayments(rec,change);
   let method=payments.byMethod.size>1?'併用':([...payments.byMethod.keys()][0]||'その他');
+  const { tableNo, slipNo, staffName }=parseReceiptTableMeta(rec);
   // 商品明細（レシート内で純額を集計＝取消を相殺）
   const map=new Map(); let pend=null;
   for(const ln of rec.split('\n')){
@@ -2064,6 +2115,7 @@ function parseReceipt(rec){
     total, tax,
     points:ptM?numOf(ptM[1]):0,groups:isSplitFragment?0:1,customers,
     customerCountCandidates,customerCountReliable,isSplitFragment,
+    tableNo, slipNo, staffName,
     method,payments,change,items,itemTotal};
 }
 
@@ -2143,7 +2195,7 @@ function collectSalesAudit(itemList=null){
       const key=`${p.date}|${p.no}`;
       const paymentSignature=[...p.payments.byMethod].sort(([a],[b])=>a.localeCompare(b,'ja'))
         .map(([method,amount])=>`${method}:${amount}`).join(';');
-      const signature=`${p.time}|${p.mealPeriod}|${p.customers}|${p.total}|${p.tax}|${p.points}|${paymentSignature}|${p.items.map(x=>`${x.code}:${x.name}:${x.category}:${x.qty}:${x.amount}`).join(';')}`;
+      const signature=`${p.time}|${p.mealPeriod}|${p.customers}|${p.tableNo||''}|${p.slipNo||''}|${p.total}|${p.tax}|${p.points}|${paymentSignature}|${p.items.map(x=>`${x.code}:${x.name}:${x.category}:${x.qty}:${x.amount}`).join(';')}`;
       if(seen.has(key)){
         duplicateCount++;
         if(seen.get(key)!==signature) critical.push(`${p.date} No.${p.no}: 同じ伝票番号で内容が異なります`);
@@ -2216,13 +2268,38 @@ function combineMealPeriods(days){
   return combined;
 }
 
+function addToTableStats(byTable, receipt){
+  const key=receipt.tableNo?String(receipt.tableNo):'';
+  if(!key) return;
+  const row=byTable.get(key)||{total:0,customers:0,groups:0,count:0};
+  row.total+=receipt.total||0;
+  row.customers+=receipt.customers||0;
+  row.groups+=receipt.isSplitFragment?0:1;
+  row.count+=1;
+  byTable.set(key,row);
+}
+function tableStatsPairs(byTable){
+  return [...byTable.entries()]
+    .sort((a,b)=>b[1].total-a[1].total || String(a[0]).localeCompare(String(b[0]),'ja'))
+    .map(([table,row])=>[table,row.total]);
+}
+function tableStatsTable(byTable){
+  const rows=[...byTable.entries()]
+    .sort((a,b)=>b[1].total-a[1].total || String(a[0]).localeCompare(String(b[0]),'ja'));
+  if(!rows.length) return '<p class="empty">テーブル番号の記載がある会計はありません。</p>';
+  const body=rows.map(([table,row])=>
+    `<tr><td>卓 ${esc(table)}</td><td>${row.count}件</td><td>${row.groups}組</td><td>${row.customers}名</td><td>${yen(row.total)}</td><td>${averageCustomerPrice(row.total,row.customers)}</td></tr>`
+  ).join('');
+  return `<table class="month-table"><thead><tr><th>テーブル</th><th>件数</th><th>組数</th><th>客数</th><th>売上</th><th>平均客単価</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
 function groupByDate(sales){
   const days=new Map();
   for(const s of sales){
     if(!days.has(s.date)) days.set(s.date,{date:s.date,weekday:s.weekday,receipts:[],
       total:0,tax:0,groups:0,customers:0,peopleComplete:true,
       byMethod:new Map(),receiptByMethod:new Map(),hasPaymentSummary:false,
-      byProduct:new Map(),byHour:new Map(),
+      byProduct:new Map(),byHour:new Map(),byTable:new Map(),
       byCategory:newCategoryMap(),
       byCategoryQty:newCategoryMap(),
       productByCategory:newCategoryProductMap(),
@@ -2231,6 +2308,7 @@ function groupByDate(sales){
     const g=days.get(s.date);
     g.receipts.push(s); g.total+=s.total; g.tax+=s.tax;
     addReceiptToMealPeriod(g.byMealPeriod.get(s.mealPeriod),s);
+    addToTableStats(g.byTable,s);
     s.payments.byMethod.forEach((v,k)=>g.receiptByMethod.set(k,(g.receiptByMethod.get(k)||0)+v));
     g.byHour.set(s.hour,(g.byHour.get(s.hour)||0)+s.total);
     for(const it of s.items){
@@ -2401,9 +2479,11 @@ function receiptCard(r){
   const mealClass=r.mealPeriod==='ランチ'?'lunch':'dinner';
   const rows=r.items.map(it=>`<tr><td>${esc(it.name)}</td><td class="qty">${it.qty}点</td><td class="amt">${yen(it.amount)}</td></tr>`).join('');
   const changeLine=r.method==='現金'&&r.change?` <span class="rc-tax">（お釣 ${yen(r.change)}）</span>`:'';
+  const tableBadge=r.tableNo?`<span class="rc-time">卓 ${esc(r.tableNo)}${r.slipNo?`・伝票${esc(r.slipNo)}`:''}</span>`:'';
+  const staffBadge=r.staffName?`<span class="rc-time">${esc(r.staffName)}</span>`:'';
   return `<div class="rc">
     <div class="rc-head"><span class="rc-no">No.${esc(r.no)}</span><span class="rc-time">${esc(r.time)}</span>
-      <span class="rc-time">${r.customers}名</span><span class="meal-badge ${mealClass}">${esc(r.mealPeriod)}</span>
+      <span class="rc-time">${r.customers}名</span>${tableBadge}${staffBadge}<span class="meal-badge ${mealClass}">${esc(r.mealPeriod)}</span>
       <span class="rc-badge ${cls}">${esc(r.method)}</span></div>
     <table>${rows}</table>
     <div class="rc-total"><span>合計 <span class="rc-tax">（内税 ${yen(r.tax)}${r.points?' ・'+r.points+'点':''}）</span>${changeLine}</span><b>${yen(r.total)}</b></div>
@@ -2439,11 +2519,15 @@ function dayHtml(g){
     <div class="chart"><h4>当日のカテゴリ別合計（チャージはフードに含む${room?'／室料は独立集計':''}）</h4>${donutChart([['フード',food],['飲料',drinks],...(room?[['室料',room]]:[])])}</div>
     <div class="chart"><h4>支払方法別の内訳</h4>${donutChart([...g.byMethod])}</div>
     <div class="chart wide"><h4>時間帯別の売上</h4>${barsV([...g.byHour])}</div>
+    ${g.byTable.size?`<div class="chart wide"><h4>テーブル別の売上</h4>${barsH(tableStatsPairs(g.byTable))}</div>`:''}
     <div class="chart wide"><h4>フードの商品別売上（純額・チャージ含む）</h4>${barsH([...g.productByCategory.get('フード')])}</div>
     <div class="chart wide"><h4>飲料の商品別売上（純額）</h4>${barsH([...g.productByCategory.get('飲料')])}</div>
   </div>`;
+  const tableBlock=g.byTable.size
+    ?`<h4 class="table-h">テーブル別集計</h4>${tableStatsTable(g.byTable)}<p class="rv-note">ジャーナルの「テーブルNo.」から集計しています（例: 1〜10、S）。</p>`
+    :'';
   const receipts=`<div class="receipts-h">会計明細（${n}件）</div>` + g.receipts.map(receiptCard).join('');
-  return `<section class="day-section"><h3 class="day-h">${esc(heading)}</h3>${kpis}<h4 class="table-h">ランチ・ディナー別分析（会計時刻で分類）</h4>${mealPeriodTable(g.byMealPeriod)}${charts}${receipts}</section>`;
+  return `<section class="day-section"><h3 class="day-h">${esc(heading)}</h3>${kpis}<h4 class="table-h">ランチ・ディナー別分析（会計時刻で分類）</h4>${mealPeriodTable(g.byMealPeriod)}${charts}${tableBlock}${receipts}</section>`;
 }
 
 const REPORT_STORE_KEY='jnl2txt_saved_reports_v1';
@@ -3529,7 +3613,7 @@ function switchMonthTab(groupId, idx) {
 }
 
 function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
-  const byMethod=new Map(), byHour=new Map(), byProduct=new Map();
+  const byMethod=new Map(), byHour=new Map(), byProduct=new Map(), byTable=new Map();
   const byCategory=newCategoryMap();
   const byCategoryQty=newCategoryMap();
   const productByCategory=newCategoryProductMap();
@@ -3538,6 +3622,15 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
     d.byMethod.forEach((v,k)=>byMethod.set(k,(byMethod.get(k)||0)+v));
     d.byHour.forEach((v,k)=>byHour.set(k,(byHour.get(k)||0)+v));
     d.byProduct.forEach((v,k)=>byProduct.set(k,(byProduct.get(k)||0)+v));
+    (d.byTable||new Map()).forEach((row,table)=>{
+      const prev=byTable.get(table)||{total:0,customers:0,groups:0,count:0};
+      byTable.set(table,{
+        total:prev.total+row.total,
+        customers:prev.customers+row.customers,
+        groups:prev.groups+row.groups,
+        count:prev.count+row.count
+      });
+    });
     d.byCategory.forEach((v,k)=>byCategory.set(k,(byCategory.get(k)||0)+v));
     d.byCategoryQty.forEach((v,k)=>byCategoryQty.set(k,(byCategoryQty.get(k)||0)+v));
     d.productByCategory.forEach((products,category)=>{
@@ -3625,7 +3718,8 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
             <div class="rv-card-kicker">月間の支払方法別内訳</div>
             ${donutChart([...byMethod])}
           </div>
-          <div class="charts"><div class="chart"><h4>ランチのフード・飲料（16:00未満）</h4>${mealCategoryChart(lunch)}</div><div class="chart"><h4>ディナーのフード・飲料（16:00以降）</h4>${mealCategoryChart(dinner)}</div><div class="chart wide"><h4>月間の時間帯別売上</h4>${barsV([...byHour])}</div></div>
+          <div class="charts"><div class="chart"><h4>ランチのフード・飲料（16:00未満）</h4>${mealCategoryChart(lunch)}</div><div class="chart"><h4>ディナーのフード・飲料（16:00以降）</h4>${mealCategoryChart(dinner)}</div><div class="chart wide"><h4>月間の時間帯別売上</h4>${barsV([...byHour])}</div>${byTable.size?`<div class="chart wide"><h4>月間のテーブル別売上</h4>${barsH(tableStatsPairs(byTable))}</div>`:''}</div>
+          ${byTable.size?`<h4 class="table-h">月間のテーブル別集計</h4>${tableStatsTable(byTable)}<p class="rv-note">ジャーナルの「テーブルNo.」から集計しています。</p>`:''}
           <h4 class="table-h">日別のフード・飲料売上（チャージはフードに含む${roomCol?'／室料は独立集計':''}）</h4>
           <table class="month-table category-table"><thead><tr><th>日付</th><th>フード</th><th>飲料</th>${roomCol?'<th>室料</th>':''}<th>その他</th><th>合計</th></tr></thead><tbody>${categoryRows}<tr><td>月間合計</td><td>${yen(food)}</td><td>${yen(drinks)}</td>${roomCol?`<td>${yen(room)}</td>`:''}<td>${yen(other)}</td><td>${yen(totalAll)}</td></tr></tbody></table>
         </div>
@@ -3648,7 +3742,7 @@ function auditHtml(audit){
     `確定会計 ${audit.sales.length}件`,
     `日計照合 ${audit.reconciledFiles}/${audit.summaryFiles}ファイル`,
     `重複除外 ${audit.duplicateCount}件`,
-    '商品純額・支払純額・フード/飲料分類・会計時刻・レシート客数・税額を確認'
+    '商品純額・支払純額・フード/飲料分類・会計時刻・レシート客数・テーブルNo・税額を確認'
   ];
   const tag=audit.warnings.length?` <span class="rv-tag rv-tag-outline">注意あり</span>`:'';
   const warningRow=audit.warnings.length
