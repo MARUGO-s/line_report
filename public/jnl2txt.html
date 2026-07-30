@@ -3094,9 +3094,23 @@ async function aiAnalyze() {
   const btn = document.getElementById('rAiAnalyze');
   const area = document.getElementById('aiAnalysisArea');
   
-  if(btn) btn.disabled = true;
-  area.hidden = false;
-  area.innerHTML = '<div style="text-align:center"><div class="ai-loading"></div><p style="margin-top:12px;font-size:13px;color:var(--text-2);">AIが売上データを分析しています...</p></div>';
+  if (btn) btn.disabled = true;
+  
+  // 画面中央ポップアップ（モーダル）による動的進捗表示
+  showAppLoading('🤖 AIが売上データを高度分析中...', 'データから強み・弱みを抽出しています');
+  
+  let step = 0;
+  const messages = [
+    '曜日別・時間帯別のボトルネックを計算中... 📊',
+    'メニュー構成比と客単価の改善点を抽出中... 💡',
+    '店舗の弱点と営業アドバイスレポートを執筆中... ✍️',
+    'コンサルティング分析の仕上げを行っています... ✨'
+  ];
+  
+  const stepInterval = setInterval(() => {
+    step = (step + 1) % messages.length;
+    showAppLoading('🤖 AIが売上データを高度分析中...', messages[step]);
+  }, 2500);
   
   try {
     const data = buildSalesDataForAI();
@@ -3110,17 +3124,26 @@ async function aiAnalyze() {
     });
     
     const result = await res.json();
-    if(!res.ok) throw new Error(result.error || ('AI analysis failed: ' + res.status));
-    renderAiAnalysis(result.reply || result.text || result.message || '結果がありません');
+    if (!res.ok) throw new Error(result.error || ('AI analysis failed: ' + res.status));
+    
+    const replyText = result.reply || result.text || result.message || '結果がありません';
+    renderAiAnalysis(replyText, false, data.title, data.period);
+    
+    setTimeout(() => {
+      area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 300);
   } catch (err) {
+    area.hidden = false;
     area.innerHTML = `<button class="ai-analysis-close" onclick="document.getElementById('aiAnalysisArea').hidden=true">✕</button>
                       <p style="color:#a33a2b;text-align:center;">エラーが発生しました: ${err.message}</p>`;
   } finally {
-    if(btn) btn.disabled = false;
+    clearInterval(stepInterval);
+    hideAppLoading();
+    if (btn) btn.disabled = false;
   }
 }
 
-function renderAiAnalysis(text, skipAutoSave = false) {
+function renderAiAnalysis(text, skipAutoSave = false, title = null, period = null) {
   if (currentReport) currentReport.aiAnalysisText = text;
   const area = document.getElementById('aiAnalysisArea');
   area.innerHTML = `
@@ -3133,15 +3156,15 @@ function renderAiAnalysis(text, skipAutoSave = false) {
   `;
   area.hidden = false;
   if (!skipAutoSave) {
-    saveAiAnalysisToSupabase(text);
+    saveAiAnalysisToSupabase(text, title, period);
   }
 }
 
-async function saveAiAnalysisToSupabase(analysisText) {
+async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, reportPeriod = null) {
   try {
     if (!analysisText) return;
-    const title = currentReport?.title || '売上分析レポート';
-    const period = currentReport?.period || '';
+    const title = reportTitle || currentReport?.title || '売上分析レポート';
+    const period = reportPeriod || currentReport?.period || '';
     const payload = {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       report_title: String(title),
@@ -3162,14 +3185,16 @@ async function saveAiAnalysisToSupabase(analysisText) {
       },
       body: JSON.stringify(payload)
     });
-    if (res.ok) {
+    if (res.ok || res.status === 201 || res.status === 200 || res.status === 204) {
       finishSaveStatus('AI分析を自動保存しました');
     } else {
-      finishSaveStatus('自動保存失敗', true);
+      const errText = await res.text();
+      console.error('Supabase auto save failed:', res.status, errText);
+      finishSaveStatus('自動保存に失敗しました', true);
     }
   } catch (err) {
     console.error('saveAiAnalysisToSupabase error:', err);
-    finishSaveStatus('自動保存エラー', true);
+    finishSaveStatus('自動保存に失敗しました', true);
   }
 }
 
