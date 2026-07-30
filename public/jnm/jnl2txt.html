@@ -259,6 +259,9 @@
   .drop-load-spinner{width:28px;height:28px;border-radius:50%;border:3px solid oklch(88% 0.01 250);border-top-color:var(--accent);animation:save-toast-spin .7s linear infinite}
   .drop-load-text{font-size:14px;font-weight:700;color:oklch(28% 0.02 250)}
   .drop-load-detail{font-size:12px;color:var(--text-2);min-height:1.2em}
+  body[data-theme='dark'] .drop-load{background:rgba(15,23,42,.92)}
+  body[data-theme='dark'] .drop-load-text{color:#f1f5f9}
+  body[data-theme='dark'] .drop-load-detail{color:#cbd5e1}
   .drop .d1{font-size:15px;font-weight:600;color:oklch(28% 0.02 250);margin-bottom:6px}
   .drop .d2{font-size:12px;color:oklch(52% 0.02 250)}
   input[type=file]{display:none}
@@ -3358,11 +3361,19 @@ async function collectDropEntry(entry){
   return [];
 }
 async function collectDroppedFiles(dataTransfer){
-  const entries=[...dataTransfer.items||[]].map(item=>item.webkitGetAsEntry?.()).filter(Boolean);
-  if(!entries.length) return [...(dataTransfer.files||[])];
-  const files=[];
-  for(const entry of entries) files.push(...await collectDropEntry(entry));
-  return files;
+  // FileList / entries はイベント同期中にスナップショットする
+  const fileSnapshot = [...(dataTransfer?.files || [])];
+  const entries = [...(dataTransfer?.items || [])]
+    .map(item => item.webkitGetAsEntry?.())
+    .filter(Boolean);
+  if (!entries.length) return fileSnapshot;
+  const files = [];
+  for (const entry of entries) {
+    try {
+      files.push(...await collectDropEntry(entry));
+    } catch (_) {}
+  }
+  return files.length ? files : fileSnapshot;
 }
 
 // tabs
@@ -3445,12 +3456,24 @@ if(aiChatInput) {
   drop.classList.remove('over');
 }));
 drop.addEventListener('drop',async e=>{
-  showLoading('読み込み中…', 'ファイルを検索しています');
+  // dataTransfer は drop イベントの同期処理中だけ有効。await 前に必ず取得する。
+  let files = [];
+  try {
+    files = await collectDroppedFiles(e.dataTransfer);
+  } catch (err) {
+    alert('ファイルの読み込みに失敗しました。\n'+(err&&err.message?err.message:err));
+    return;
+  }
+  if (!files.length) {
+    // FileList フォールバック（一部ブラウザ・フォルダ以外）
+    files = [...(e.dataTransfer?.files || [])];
+  }
+  if (!files.length) return;
+
+  showLoading('読み込み中…', `ファイルを準備しています（${files.length}件）`);
   await yieldToUI();
   try{
-    const fs=await collectDroppedFiles(e.dataTransfer);
-    if(fs.length) await addFiles(fs);
-    else hideLoading();
+    await addFiles(files);
   }catch(err){
     hideLoading();
     alert('ファイルの読み込みに失敗しました。\n'+(err&&err.message?err.message:err));
