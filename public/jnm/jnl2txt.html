@@ -2459,49 +2459,100 @@ async function hydrateSavedReport(r) {
 
 async function readSavedReports() {
   try {
+    let local = [];
+    try {
+      const raw = localStorage.getItem(REPORT_STORE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      local = Array.isArray(parsed) ? parsed : [];
+    } catch (_) { local = []; }
+
     const remoteReports = await fetchSupabaseReports();
-    if (remoteReports !== null) {
-      localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(remoteReports));
-      return remoteReports;
+    // 認証失敗・通信失敗時はローカルを維持
+    if (remoteReports === null) return local;
+
+    // クラウドが空なのにローカルにデータがある場合はローカルを優先（保存直後の取りこぼし防止）
+    if (remoteReports.length === 0 && local.length > 0) {
+      return local;
     }
 
-    const raw = localStorage.getItem(REPORT_STORE_KEY);
-    const parsed = typeof raw === 'string' ? JSON.parse(raw ?? '[]') : (raw ?? []);
-    return Array.isArray(parsed) ? parsed : [];
+    // リモート一覧（メタ）にローカルの詳細サマリーをマージ
+    const localById = {};
+    local.forEach(r => { if (r?.id) localById[String(r.id)] = r; });
+    const merged = remoteReports.map(r => {
+      const loc = localById[String(r.id)] || {};
+      return { ...loc, ...r, ...pickDefinedSummary(loc) };
+    });
+    // ローカルにあってリモートに無い新規も残す
+    remoteReports.forEach(r => { delete localById[String(r.id)]; });
+    const pendingLocal = Object.values(localById);
+    const result = [...pendingLocal, ...merged];
+    localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(result));
+    return result;
   } catch (e) {
     console.error('readSavedReports error:', e);
-    return [];
+    try {
+      const raw = localStorage.getItem(REPORT_STORE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) { return []; }
   }
+}
+
+function pickDefinedSummary(r) {
+  if (!r || typeof r !== 'object') return {};
+  const out = {};
+  for (const k of ['total','totalSales','foodTotal','drinkTotal','salesCount','topProducts','totalCustomers','lunchTotal','dinnerTotal','lunchCustomers','dinnerCustomers','weekdayBreakdown','hourlyBreakdown','createdAt','parserVersion','verificationVersion','categoryVersion','mealPeriodVersion']) {
+    if (r[k] !== undefined) out[k] = r[k];
+  }
+  return out;
 }
 
 async function writeSavedReports(reports, newRecords) {
   try {
-    // newRecords（今回新規追加された分のみ）が渡された場合はそれだけをAPIへ送る。
-    // 未指定時は互換のため reports 全件を送る（呼び出し元の変更漏れ対策）。
     const toUpload = Array.isArray(newRecords) ? newRecords : reports;
+    let uploaded = 0;
+    let failed = 0;
+    let lastErr = null;
+    const hasToken = !!getAdminToken();
+
+    if (!hasToken) {
+      // 未接続でも端末内には残す
+      localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
+      return { ok: true, remote: false, reason: 'auth' };
+    }
+
     for (const r of toUpload) {
       const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       try {
+        // data は巨大HTML body / sales を除外したサマリーのみ送る
+        const { body, sales, relatedReports, ...data } = r;
         await adminApiFetch('/pos-journals/saved-reports', {
           method: 'POST',
           body: JSON.stringify({
             id,
             title: String(r.title || '売上レポート'),
             period: String(r.period || ''),
-            data: r,
+            data: { ...data, id },
             store_key: STORE_KEY
           })
         });
+        uploaded++;
       } catch (err) {
+        failed++;
+        lastErr = err;
         console.warn('admin-api write error:', err);
       }
     }
 
     localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
-    return true;
+    if (uploaded === 0 && toUpload.length > 0) {
+      return { ok: false, remote: false, reason: 'upload', error: lastErr };
+    }
+    return { ok: true, remote: uploaded > 0, uploaded, failed };
   } catch (e) {
     console.error('writeSavedReports error:', e);
-    return false;
+    try { localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports)); } catch (_) {}
+    return { ok: false, remote: false, reason: 'exception', error: e };
   }
 }
 
@@ -2927,15 +2978,16 @@ async function saveCurrentReport(){
   const reports=(await readSavedReports()).map(report=>report);
   const bundle=currentReport.relatedReports?.length?currentReport.relatedReports:[currentReport];
   // sales明細は容量が大きいため除外し、AIチャット用に商品サマリー(topProducts)は残す。
-  const records=bundle.map(report=>{
+  const records=bundle.map((report, idx)=>{
     const prev = currentReport;
     currentReport = report;
     const aiSnap = buildSalesDataForAI();
     currentReport = prev;
     const {relatedReports, sales, body, ...withoutBundle}=report;
     return {
-      id:`${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+      id:`${Date.now()}_${idx}_${Math.random().toString(36).slice(2,8)}`,
       ...withoutBundle,
+      createdAt: withoutBundle.createdAt || reportStamp(),
       topProducts: Array.isArray(aiSnap.topProducts) ? aiSnap.topProducts.slice(0, 30) : (report.topProducts || []),
       totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers||0)+(report.dinnerCustomers||0)) || 0,
       weekdayBreakdown: aiSnap.weekdayBreakdown || report.weekdayBreakdown || [],
@@ -2943,9 +2995,22 @@ async function saveCurrentReport(){
     };
   });
   reports.unshift(...records);
-  const ok=await writeSavedReports(reports.slice(0,100), records);
-  if(ok){ finishSaveStatus('保存しました'); renderSavedReports(); }
-  else { finishSaveStatus('保存に失敗しました',true); }
+  const result=await writeSavedReports(reports.slice(0,100), records);
+  if(result && result.ok){
+    if(result.reason==='auth'){
+      finishSaveStatus('端末内に保存（未接続のためクラウド未同期）');
+      alert('管理トークン未接続のため、クラウドには保存できていません。\n画面上部でトークン接続するか、LINEの最新リンクから開き直して再度保存してください。\n（この端末内には一時保存されています）');
+    } else if(result.failed){
+      finishSaveStatus(`保存しました（クラウド ${result.uploaded}件 / 失敗 ${result.failed}件）`);
+    } else {
+      finishSaveStatus('保存しました');
+    }
+    renderSavedReports();
+  } else {
+    finishSaveStatus('保存に失敗しました',true);
+    const msg = result?.error?.message || result?.reason || '';
+    alert('レポートの保存に失敗しました。' + (msg ? `\n${msg}` : '') + '\n管理トークン接続状態をご確認ください。');
+  }
 }
 
 async function renderSavedReports(filter='all'){
@@ -2976,7 +3041,7 @@ async function renderSavedReports(filter='all'){
   view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">保存済みレポート</span><button class="rv-btn rv-btn-ghost" id="savedClose">閉じる</button></div>
     <div class="saved-wrap">
       <h1 class="r-title">保存済みレポート</h1>
-      <p class="r-meta">この端末のアプリ内に保存されています。</p>
+      <p class="r-meta">クラウド（管理トークン接続時）とこの端末に保存されます。</p>
       <div class="controls" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
         <div style="display:flex; gap:8px;">
           <button class="rv-btn rv-btn-secondary ${filter==='all'?'active':''}" data-filter="all">すべて</button>
