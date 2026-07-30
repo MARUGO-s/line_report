@@ -3951,6 +3951,36 @@ function toggleAiChat() {
 function buildCompactSalesDataForAI() {
   if (!currentReport) return {};
   const full = buildSalesDataForAI();
+  const sales = currentReport.sales || [];
+  
+  // 年別売上・フード・ドリンクの集計表を動的作成
+  const yearly = {};
+  sales.forEach(s => {
+    if (!s.date) return;
+    const yearStr = String(s.date).slice(0, 4);
+    if (!yearly[yearStr]) yearly[yearStr] = { total: 0, food: 0, drink: 0, count: 0 };
+    yearly[yearStr].total += s.total || 0;
+    yearly[yearStr].food += s.foodTotal || 0;
+    yearly[yearStr].drink += s.drinkTotal || 0;
+    yearly[yearStr].count += 1;
+  });
+
+  const yearlyArr = Object.keys(yearly).sort().map(y => {
+    const tot = yearly[y].total || 1;
+    const fTot = yearly[y].food || 0;
+    const dTot = yearly[y].drink || 0;
+    const catTot = fTot + dTot || 1;
+    return {
+      year: y,
+      totalSales: tot,
+      foodTotal: fTot,
+      drinkTotal: dTot,
+      foodPct: Math.round((fTot / catTot) * 100),
+      drinkPct: Math.round((dTot / catTot) * 100),
+      count: yearly[y].count
+    };
+  });
+
   return {
     title: full.title || '売上レポート',
     period: full.period || '',
@@ -3962,22 +3992,103 @@ function buildCompactSalesDataForAI() {
     drinkTotal: full.drinkTotal || 0,
     lunchTotal: full.lunchTotal || 0,
     dinnerTotal: full.dinnerTotal || 0,
+    yearlyBreakdown: yearlyArr,
     topProducts: (full.topProducts || []).slice(0, 5),
     weekdayBreakdown: full.weekdayBreakdown || [],
     hourlyBreakdown: (full.hourlyBreakdown || []).slice(0, 10)
   };
 }
 
-function generateLocalConsultantReply(userMsg, sales) {
-  const msg = userMsg.toLowerCase();
-  const total = yen(sales.totalSales || 0);
-  const cust = sales.totalCustomers || 0;
-  const avg = sales.overallAvgSpendPerCustomer ? yen(sales.overallAvgSpendPerCustomer) : '不明';
-  const foodTot = sales.foodTotal || 0;
-  const drinkTot = sales.drinkTotal || 0;
+function calculateSalesForPeriodQuery(query, salesList) {
+  if (!salesList || salesList.length === 0) return null;
+  const q = query.toLowerCase();
+  
+  let filtered = salesList;
+  let label = '対象期間';
+
+  // 1. 年指定の判定 (例: 2025年より前, 2024年, 2023年以前)
+  const beforeYearMatch = q.match(/(\d{4})年?\s*(?:より前|以前|前)/);
+  const exactYearMatch = q.match(/(\d{4})年/);
+  
+  if (beforeYearMatch) {
+    const targetYear = parseInt(beforeYearMatch[1], 10);
+    filtered = salesList.filter(s => {
+      const y = parseInt(String(s.date).slice(0, 4), 10);
+      return y < targetYear;
+    });
+    label = `${targetYear}年より前 (${targetYear - 1}年以前)`;
+  } else if (exactYearMatch) {
+    const targetYear = parseInt(exactYearMatch[1], 10);
+    filtered = salesList.filter(s => {
+      const y = parseInt(String(s.date).slice(0, 4), 10);
+      return y === targetYear;
+    });
+    label = `${targetYear}年`;
+  }
+
+  if (filtered.length === 0) return null;
+
+  let total = 0, food = 0, drink = 0, count = filtered.length, cust = 0;
+  filtered.forEach(s => {
+    total += s.total || 0;
+    food += s.foodTotal || 0;
+    drink += s.drinkTotal || 0;
+    cust += s.customers || 0;
+  });
+
+  const catTotal = food + drink || 1;
+  const foodPct = Math.round((food / catTotal) * 100);
+  const drinkPct = 100 - foodPct;
+
+  return {
+    label,
+    total,
+    food,
+    drink,
+    foodPct,
+    drinkPct,
+    count,
+    cust
+  };
+}
+
+function generateLocalConsultantReply(userMsg, salesData) {
+  const msg = userMsg.trim();
+  const salesList = currentReport?.sales || [];
+  
+  // 特定期間の問い合わせ（例: 2025年より前、2024年、特定の年）の場合、動的計算を実行
+  const periodCalc = calculateSalesForPeriodQuery(msg, salesList);
+
+  if (periodCalc) {
+    return `### 📊 ${periodCalc.label} の売上構成・比率データ分析
+
+ご指定の期間 **【${periodCalc.label}】** (伝票数: ${periodCalc.count}件) の詳細集計結果です:
+
+- **総売上高**: ${yen(periodCalc.total)}
+- **🍖 フード売上**: ${yen(periodCalc.food)} (**${periodCalc.foodPct}%**)
+- **🍹 ドリンク売上**: ${yen(periodCalc.drink)} (**${periodCalc.drinkPct}%**)
+${periodCalc.cust ? `- **総客数**: ${periodCalc.cust}名 (平均客単価: ${yen(Math.round(periodCalc.total / periodCalc.cust))})` : ''}
+
+**💡 分析考察**:
+${periodCalc.label}のドリンク比率は **${periodCalc.drinkPct}%** でした。
+全体や他の期間と比較してドリンク比率の変化を分析することで、メニュー改定や季節変動の影響を正確に把握することができます。`;
+  }
+
+  const total = yen(salesData.totalSales || 0);
+  const cust = salesData.totalCustomers || 0;
+  const avg = salesData.overallAvgSpendPerCustomer ? yen(salesData.overallAvgSpendPerCustomer) : '不明';
+  const foodTot = salesData.foodTotal || 0;
+  const drinkTot = salesData.drinkTotal || 0;
   const catTotal = foodTot + drinkTot || 1;
   const foodPct = Math.round((foodTot / catTotal) * 100);
   const drinkPct = 100 - foodPct;
+
+  // 年別データの要約一覧が存在する場合
+  let yearlySummaryStr = '';
+  if (salesData.yearlyBreakdown && salesData.yearlyBreakdown.length > 0) {
+    yearlySummaryStr = '\n\n**📅 年別売上・ドリンク比率推移**:\n' + 
+      salesData.yearlyBreakdown.map(y => `- **${y.year}年**: 総売上 ${yen(y.totalSales)} / ドリンク比率 **${y.drinkPct}%** (フード ${y.foodPct}%)`).join('\n');
+  }
 
   if (msg.includes('対策') || msg.includes('売上') || msg.includes('アップ') || msg.includes('改善') || msg.includes('伸ばす')) {
     return `### 💡 売上アップに向けた具体的アクションプラン
@@ -3985,32 +4096,24 @@ function generateLocalConsultantReply(userMsg, sales) {
 現在のおすすめ施策提案（データ分析に基づく）:
 
 1. **客単価の向上（現在の客単価: ${avg}）**
-   - **ドリンク併売率の強化**: 現在のドリンク比率は **${drinkPct}%** です。アルコールや季節限定ドリンクのセット提案（例: 「料理＋お得なペアリングドリンク」）を強化することで、客単価を +300円〜500円 引き上げ可能です。
-   - **おすすめ商品のワンプッシュ追加**: 人気TOP5商品にサイドメニューやトッピングのセット選択肢を追加。
+   - **ドリンク併売率の強化**: 現在のドリンク比率は **${drinkPct}%** です。アルコールや季節限定ドリンクのセット提案を強化することで客単価を引き上げ可能です。
+   - **おすすめ商品のワンプッシュ追加**: 人気TOP5商品にサイドメニューのセット選択肢を追加。
 
 2. **ピークタイムと閑散期の最適化**
-   - **時間帯別の集客施策**: 売上が集中するピーク時間帯（夜のディナータイム等）のオペレーション速度を高め、テーブル回転率を向上させます。
-   - **限定ハッピーアワー / 早割りプラン**: 閑散時間帯（15時〜17時や早い時間帯）に限定割引メニューを用意し、来店分散を促します。
+   - **時間帯別の集客施策**: 売上が集中するピーク時間帯のオペレーション速度を高めます。
 
 3. **リピート率向上施策**
-   - **LINE公式アカウント連携**: ご来店感謝クーポンや次回使えるドリンク券を発行し、再来店サイクルを短縮化します。`;
-  } else if (msg.includes('ドリンク') || msg.includes('フード') || msg.includes('比率') || msg.includes('構成')) {
-    return `### 🍷 フード・ドリンク構成比の分析と対策
-
-現在の売上構成:
-- **フード売上**: ${yen(foodTot)} (${foodPct}%)
-- **ドリンク売上**: ${yen(drinkTot)} (${drinkPct}%)
-
-**アドバイス**:
-一般的に飲食店の理想的な利益率はドリンク比率35%〜45%以上とされています。
-ドリンクは原価率が低いため、飲み放題プランの導入や季節のハイボール・オリジナルカクテルのメニュー強化が全体の粗利率を即座に改善させます。`;
+   - ご来店感謝クーポンや次回使えるドリンク券を発行します。`;
   } else {
-    return `### 📊 店舗分析アドバイス (${sales.title || '売上データ'})
+    return `### 📊 店舗分析データ回答 (${salesData.title || '売上データ'})
 
-対象期間 **${sales.period || '全体'}** の総売上は **${total}** (総客数: ${cust}名 / 平均客単価: ${avg}) です。
+対象期間 **${salesData.period || '全体'}** の集計結果です:
 
-ご質問「${userMsg}」について:
-- **おすすめのネクストステップ**: メニュー別売上の上位商品（${(sales.topProducts || []).map(p => p.name).slice(0,3).join('・')} など）を中心とした看板メニューのセット化、および客単価アップ施策の実施を推奨いたします。`;
+- **総売上高**: ${total}
+- **🍖 フード売上**: ${yen(foodTot)} (${foodPct}%)
+- **🍹 ドリンク売上**: ${yen(drinkTot)} (${drinkPct}%)${yearlySummaryStr}
+
+ご質問「${userMsg}」について、特定年や月別の比較分析を行いたい場合は「2024年のドリンク比率は？」「2023年の売上は？」とお気軽にご質問ください。`;
   }
 }
 
