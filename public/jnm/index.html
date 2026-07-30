@@ -4000,79 +4000,125 @@ function buildCompactSalesDataForAI() {
   };
 }
 
-function calculateSalesForPeriodQuery(query, salesList) {
-  if (!salesList || salesList.length === 0) return null;
-  const q = query.toLowerCase();
+async function searchSavedReportsByQuery(query) {
+  const q = query.trim().toLowerCase();
   
-  let filtered = salesList;
-  let label = '対象期間';
-
-  // 1. 年指定の判定 (例: 2025年より前, 2024年, 2023年以前)
+  // 1. 年月パターンの正規表現抽出 (例: 202606, 2026年6月, 2026-06, 2026/06, 2026年, 2025年以前)
+  const monthMatch = q.match(/(\d{4})[年/._-]?\s*(0?[1-9]|1[0-2])(?:月|日)?/) || q.match(/(\d{4})(0[1-9]|1[0-2])/);
   const beforeYearMatch = q.match(/(\d{4})年?\s*(?:より前|以前|前)/);
-  const exactYearMatch = q.match(/(\d{4})年/);
-  
-  if (beforeYearMatch) {
-    const targetYear = parseInt(beforeYearMatch[1], 10);
-    filtered = salesList.filter(s => {
-      const y = parseInt(String(s.date).slice(0, 4), 10);
-      return y < targetYear;
+  const yearMatch = q.match(/(\d{4})年?/);
+
+  const reports = await readSavedReports();
+  const allReports = currentReport ? [currentReport, ...reports] : reports;
+
+  if (allReports.length === 0) return null;
+
+  // A. 特定年月の検索 (例: 202606, 2026年6月)
+  if (monthMatch) {
+    const year = monthMatch[1];
+    const month = String(parseInt(monthMatch[2], 10)).padStart(2, '0');
+    const targetKey = `${year}-${month}`;
+    const targetJa = `${year}年${parseInt(month, 10)}月`;
+
+    // 保存レポート一覧から period や title が一致するものを検索
+    const matched = allReports.filter(r => {
+      const p = String(r.period || r.title || '');
+      return p.includes(targetKey) || p.includes(targetJa) || (p.includes(year) && p.includes(`${parseInt(month, 10)}月`));
     });
-    label = `${targetYear}年より前 (${targetYear - 1}年以前)`;
-  } else if (exactYearMatch) {
-    const targetYear = parseInt(exactYearMatch[1], 10);
-    filtered = salesList.filter(s => {
-      const y = parseInt(String(s.date).slice(0, 4), 10);
-      return y === targetYear;
-    });
-    label = `${targetYear}年`;
+
+    if (matched.length > 0) {
+      let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
+      matched.forEach(r => {
+        totSales += r.total || r.totalSales || 0;
+        fTot += r.foodTotal || 0;
+        dTot += r.drinkTotal || 0;
+        cust += r.totalCustomers || (r.lunchCustomers + r.dinnerCustomers) || 0;
+        count += r.salesCount || 1;
+      });
+      const catTot = fTot + dTot || 1;
+      return {
+        label: `${targetJa}の売上データ`,
+        totalSales: totSales,
+        foodTotal: fTot,
+        drinkTotal: dTot,
+        foodPct: Math.round((fTot / catTot) * 100),
+        drinkPct: Math.round((dTot / catTot) * 100),
+        totalCustomers: cust,
+        avgSpend: cust ? Math.round(totSales / cust) : 0,
+        salesCount: count,
+        sourceCount: matched.length
+      };
+    } else {
+      return {
+        notMatchedLabel: targetJa
+      };
+    }
   }
 
-  if (filtered.length === 0) return null;
+  // B. 特定年または年以前の検索 (例: 2025年より前, 2024年)
+  if (beforeYearMatch) {
+    const targetYear = parseInt(beforeYearMatch[1], 10);
+    const matched = allReports.filter(r => {
+      const p = String(r.period || r.title || '');
+      const yMatch = p.match(/(\d{4})/);
+      return yMatch && parseInt(yMatch[1], 10) < targetYear;
+    });
 
-  let total = 0, food = 0, drink = 0, count = filtered.length, cust = 0;
-  filtered.forEach(s => {
-    total += s.total || 0;
-    food += s.foodTotal || 0;
-    drink += s.drinkTotal || 0;
-    cust += s.customers || 0;
-  });
+    if (matched.length > 0) {
+      let totSales = 0, fTot = 0, dTot = 0, cust = 0;
+      matched.forEach(r => {
+        totSales += r.total || r.totalSales || 0;
+        fTot += r.foodTotal || 0;
+        dTot += r.drinkTotal || 0;
+        cust += r.totalCustomers || (r.lunchCustomers + r.dinnerCustomers) || 0;
+      });
+      const catTot = fTot + dTot || 1;
+      return {
+        label: `${targetYear}年より前 (${targetYear - 1}年以前) の全保存データ`,
+        totalSales: totSales,
+        foodTotal: fTot,
+        drinkTotal: dTot,
+        foodPct: Math.round((fTot / catTot) * 100),
+        drinkPct: Math.round((dTot / catTot) * 100),
+        totalCustomers: cust,
+        avgSpend: cust ? Math.round(totSales / cust) : 0
+      };
+    }
+  }
 
-  const catTotal = food + drink || 1;
-  const foodPct = Math.round((food / catTotal) * 100);
-  const drinkPct = 100 - foodPct;
-
-  return {
-    label,
-    total,
-    food,
-    drink,
-    foodPct,
-    drinkPct,
-    count,
-    cust
-  };
+  return null;
 }
 
-function generateLocalConsultantReply(userMsg, salesData) {
+async function generateLocalConsultantReply(userMsg, salesData) {
   const msg = userMsg.trim();
-  const salesList = currentReport?.sales || [];
   
-  // 特定期間の問い合わせ（例: 2025年より前、2024年、特定の年）の場合、動的計算を実行
-  const periodCalc = calculateSalesForPeriodQuery(msg, salesList);
+  // 保存済み全売上レポートからの動的検索・参照
+  const queryResult = await searchSavedReportsByQuery(msg);
 
-  if (periodCalc) {
-    return `### 📊 ${periodCalc.label} の売上構成・比率データ分析
+  if (queryResult) {
+    if (queryResult.notMatchedLabel) {
+      const savedList = await readSavedReports();
+      const periods = savedList.map(r => r.period || r.title).filter(Boolean).slice(0, 5).join('、');
+      return `### 📊 データ検索結果
 
-ご指定の期間 **【${periodCalc.label}】** (伝票数: ${periodCalc.count}件) の詳細集計結果です:
+ご質問の **【${queryResult.notMatchedLabel}】** のデータは、現在端末およびクラウドに保存されているジャーナル売上データの中には含まれておりませんでした。
 
-- **総売上高**: ${yen(periodCalc.total)}
-- **🍖 フード売上**: ${yen(periodCalc.food)} (**${periodCalc.foodPct}%**)
-- **🍹 ドリンク売上**: ${yen(periodCalc.drink)} (**${periodCalc.drinkPct}%**)
-${periodCalc.cust ? `- **総客数**: ${periodCalc.cust}名 (平均客単価: ${yen(Math.round(periodCalc.total / periodCalc.cust))})` : ''}
+- **保存済み売上データ一覧**: ${periods || 'データなし'}
 
-**💡 分析考察**:
-${periodCalc.label}のドリンク比率は **${periodCalc.drinkPct}%** でした。
-全体や他の期間と比較してドリンク比率の変化を分析することで、メニュー改定や季節変動の影響を正確に把握することができます。`;
+※該当する年月の電子ジャーナル（.jnl/.lzh）ファイルを読み込んでレポートを作成すると、自動的に保存されAIチャットで参照できるようになります。`;
+    }
+
+    return `### 📊 ${queryResult.label} の集計結果 (保存ジャーナル参照)
+
+保存されている売上ジャーナルデータより、ご指定の **【${queryResult.label}】** を正確に抽出・集計いたしました:
+
+- **総売上高**: **${yen(queryResult.totalSales)}**
+- **🍖 フード売上**: ${yen(queryResult.foodTotal)} (**${queryResult.foodPct}%**)
+- **🍹 ドリンク売上**: ${yen(queryResult.drinkTotal)} (**${queryResult.drinkPct}%**)
+${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustomers}名 (平均客単価: ${yen(queryResult.avgSpend)})` : ''}
+
+**💡 分析メモ**:
+保存データから引用した正確な数値です。推測やWeb情報は含まれておりません。`;
   }
 
   const total = yen(salesData.totalSales || 0);
@@ -4084,38 +4130,22 @@ ${periodCalc.label}のドリンク比率は **${periodCalc.drinkPct}%** でし�
   const foodPct = Math.round((foodTot / catTotal) * 100);
   const drinkPct = 100 - foodPct;
 
-  // 年別データの要約一覧が存在する場合
   let yearlySummaryStr = '';
   if (salesData.yearlyBreakdown && salesData.yearlyBreakdown.length > 0) {
-    yearlySummaryStr = '\n\n**📅 年別売上・ドリンク比率推移**:\n' + 
+    yearlySummaryStr = '\n\n**📅 保存データの年別売上・ドリンク比率一覧**:\n' + 
       salesData.yearlyBreakdown.map(y => `- **${y.year}年**: 総売上 ${yen(y.totalSales)} / ドリンク比率 **${y.drinkPct}%** (フード ${y.foodPct}%)`).join('\n');
   }
 
-  if (msg.includes('対策') || msg.includes('売上') || msg.includes('アップ') || msg.includes('改善') || msg.includes('伸ばす')) {
-    return `### 💡 売上アップに向けた具体的アクションプラン
+  return `### 📊 店舗売上データ参照回答 (${salesData.title || '売上データ'})
 
-現在のおすすめ施策提案（データ分析に基づく）:
+対象期間 **${salesData.period || '全体'}** の保存ジャーナル集計結果です:
 
-1. **客単価の向上（現在の客単価: ${avg}）**
-   - **ドリンク併売率の強化**: 現在のドリンク比率は **${drinkPct}%** です。アルコールや季節限定ドリンクのセット提案を強化することで客単価を引き上げ可能です。
-   - **おすすめ商品のワンプッシュ追加**: 人気TOP5商品にサイドメニューのセット選択肢を追加。
-
-2. **ピークタイムと閑散期の最適化**
-   - **時間帯別の集客施策**: 売上が集中するピーク時間帯のオペレーション速度を高めます。
-
-3. **リピート率向上施策**
-   - ご来店感謝クーポンや次回使えるドリンク券を発行します。`;
-  } else {
-    return `### 📊 店舗分析データ回答 (${salesData.title || '売上データ'})
-
-対象期間 **${salesData.period || '全体'}** の集計結果です:
-
-- **総売上高**: ${total}
+- **総売上高**: **${total}**
 - **🍖 フード売上**: ${yen(foodTot)} (${foodPct}%)
 - **🍹 ドリンク売上**: ${yen(drinkTot)} (${drinkPct}%)${yearlySummaryStr}
 
-ご質問「${userMsg}」について、特定年や月別の比較分析を行いたい場合は「2024年のドリンク比率は？」「2023年の売上は？」とお気軽にご質問ください。`;
-  }
+ご質問「${userMsg}」について:
+特定の年月（例: 「2026年6月の売上は？」「2024年のドリンク比率は？」）をご指定いただければ、保存済みの電子ジャーナルデータから正確な数値を即座に抽出・回答いたします。`;
 }
 
 async function sendAiChat() {
@@ -4138,7 +4168,8 @@ async function sendAiChat() {
 1. あなたは店舗の保存済み売上データ専用の厳密なアナリストAIです。
 2. 質問の答えや数字に関しては、必ず提示された保存データ・資料（salesData）のみから厳密に引用・計算して回答してください。
 3. 推測やWeb情報、一般的な曖昧な推量で数字を答えることは【完全禁止】です。
-4. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください。`;
+4. チャットパネルを閉じるまでの過去の会話履歴（chatHistory）をすべて踏まえ、前後の文脈を完璧に引き継いで会話・回答してください。
+5. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください。`;
 
   try {
     const res = await fetch(AI_ENDPOINT, {
@@ -4152,7 +4183,7 @@ async function sendAiChat() {
         message: msg,
         systemInstruction: strictSystemInstruction,
         salesData: compactData,
-        chatHistory: aiChatHistory.slice(-6)
+        chatHistory: aiChatHistory // パネルを閉じるまで会話履歴を100%全件記憶・文脈保持
       })
     });
     
@@ -4167,9 +4198,9 @@ async function sendAiChat() {
       }
     }
     
-    // Remote APIが失敗した場合でも、高度なスマートローカルAIアドバイザーがフォールバック回答を即時生成
+    // Remote APIが失敗した場合でも、高度なスマートローカルAIアドバイザーが保存データから即時検索・回答
     if (!reply) {
-      reply = generateLocalConsultantReply(msg, compactData);
+      reply = await generateLocalConsultantReply(msg, compactData);
     }
     
     appendAiChatMessage('ai', reply);
@@ -4177,7 +4208,7 @@ async function sendAiChat() {
   } catch(err) {
     console.warn('AI Chat remote error, fallback to local advisor:', err);
     removeAiChatLoading(loadingId);
-    const fallbackReply = generateLocalConsultantReply(msg, compactData);
+    const fallbackReply = await generateLocalConsultantReply(msg, compactData);
     appendAiChatMessage('ai', fallbackReply);
     aiChatHistory.push({ role: 'assistant', content: fallbackReply });
   } finally {
