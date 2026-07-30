@@ -339,7 +339,7 @@
     margin-bottom:14px;overflow:hidden}
   .card .chead{display:flex;align-items:center;gap:10px;padding:11px 16px;
     border-bottom:1px solid var(--border-sub)}
-  .card .fname{font-size:13px;font-weight:600;color:oklch(20% 0.02 250);
+  .card .fname{font-size:13px;font-weight:600;color:var(--text);
     word-break:break-all;min-width:0}
   .card .count{font-size:11px;color:var(--text-2);background:var(--pill-bg);
     padding:2px 8px;border-radius:100px;white-space:nowrap}
@@ -348,8 +348,14 @@
     border:none;border-radius:6px;padding:5px 10px;margin-left:auto}
   .btn-small.danger{color:#a33a2b;background:#fff3f0;margin-left:0}
   .card pre{margin:0;padding:14px 16px;font-family:ui-monospace,'SF Mono',Menlo,monospace;
-    font-size:12px;line-height:1.65;color:oklch(28% 0.015 250);
+    font-size:12px;line-height:1.65;color:var(--text);
     max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+  body[data-theme='dark'] .card pre{
+    color:#e2e8f0 !important;
+    background:#0f172a;
+  }
+  body[data-theme='dark'] .card .fname{color:#f8fafc !important}
+  body[data-theme='dark'] .btn-small.danger{color:#fca5a5;background:#3f1d1d}
 
   .foot{text-align:center;font-size:11px;color:var(--text-3);margin-top:8px}
   [hidden]{display:none!important}
