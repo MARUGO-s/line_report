@@ -1997,7 +1997,7 @@ async function propagateCategoryOverridesToCloudReports(changedKeys){
     const { sales, changed }=applyAllCategoryOverridesToSales(sales0);
     if(!changed) continue;
     restorePaymentsMap(sales);
-    const isMonthly=/月間/.test(String(full.title||''));
+    const isMonthly=isMonthlyReportTitle(full.title);
     const rebuilt=buildReport(isMonthly?'monthly':'daily','','',null,sales,{ silent:true, skipRender:true });
     if(!rebuilt){ failed++; continue; }
     rebuilt.id=full.id;
@@ -2303,7 +2303,7 @@ function parserSelfCheck(){
   if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-31-v18';
+const PARSER_VERSION='2026-07-31-v19';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -3491,10 +3491,40 @@ function reportStamp(){
   return `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} 作成`;
 }
 function reportPeriod(days){ return days.length>1?`${days[0].date} 〜 ${days[days.length-1].date}`:days[0].date; }
+/** 単月「2026年6月」／複数月「2026年1月〜6月」／年またぎ「2025年11月〜2026年2月」 */
+function formatMonthSpanLabel(monthKeys){
+  const months=[...new Set((monthKeys||[]).map(m=>String(m||'')).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort();
+  if(!months.length) return '';
+  if(months.length===1) return monthKeyLabel(months[0]);
+  const [y1,m1]=months[0].split('-');
+  const [y2,m2]=months[months.length-1].split('-');
+  if(y1===y2) return `${y1}年${Number(m1)}月〜${Number(m2)}月`;
+  return `${y1}年${Number(m1)}月〜${y2}年${Number(m2)}月`;
+}
+function isMonthlyReportTitle(title){
+  const t=String(title||'');
+  if(/日別/.test(t)) return false;
+  return /月間|月別|^合算売上レポート/.test(t);
+}
 function reportListTitle(title,period){
-  const match=String(period||'').match(/(\d{4})-(\d{2})/);
-  if(match&&(String(title||'').includes('月間売上レポート')||String(title||'').includes('日別売上レポート'))) return `${title}（${match[1]}年${Number(match[2])}月）`;
-  return title||'レポート';
+  const t=String(title||'');
+  const periodStr=String(period||'');
+  // 期間が複数月にまたがる場合は合算タイトルに揃える（旧・単月誤ラベルもここで補正）
+  const rangeMatch=periodStr.match(/(\d{4})-(\d{2})(?:-\d{2})?\s*[〜～~\-]+\s*(\d{4})-(\d{2})/);
+  if(rangeMatch){
+    const startKey=`${rangeMatch[1]}-${rangeMatch[2]}`;
+    const endKey=`${rangeMatch[3]}-${rangeMatch[4]}`;
+    if(startKey!==endKey){
+      const label=formatMonthSpanLabel([startKey,endKey]);
+      const base=/日別/.test(t)?'合算日別売上レポート':'合算売上レポート';
+      const folder=t.match(/\s*\/\s*フォルダ\s+[^）]+/);
+      return `${base}（${label}${folder?folder[0]:''}）`;
+    }
+  }
+  if(/（\d{4}年\d{1,2}月/.test(t)) return t||'レポート';
+  const match=periodStr.match(/(\d{4})-(\d{2})/);
+  if(match&&(/月間売上レポート|日別売上レポート|合算/.test(t))) return `${t}（${match[1]}年${Number(match[2])}月）`;
+  return t||'レポート';
 }
 
 function monthKeyFromReport(r) {
@@ -4265,7 +4295,7 @@ async function commitPendingCategoryMoves(){
 
     const keepId=currentReport.id||null;
     const keepCreatedAt=currentReport.createdAt;
-    const isMonthly=/月間/.test(String(currentReport.title||''));
+    const isMonthly=isMonthlyReportTitle(currentReport.title);
     activeReportTab='classify';
     clearPendingCategoryMoves();
     const rebuilt=buildReport(isMonthly?'monthly':'daily','','',null,sales,{ silent:false });
@@ -4299,7 +4329,7 @@ function resetPendingCategoryMovesAndRedraw(){
   clearPendingCategoryMoves();
   // レーン位置を元に戻すため再描画
   if(currentReport?.sales?.length){
-    const isMonthly=/月間/.test(String(currentReport.title||''));
+    const isMonthly=isMonthlyReportTitle(currentReport.title);
     const keepId=currentReport.id;
     const keepCreatedAt=currentReport.createdAt;
     activeReportTab='classify';
@@ -4674,12 +4704,14 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
   const reportBody=kind==='monthly' ? monthlyReportHtml(days,total,tax,sales.length,sales) : days.map(dayHtml).join('');
   const body=auditHtml(audit)+reportBody;
   
-  const title = kind === 'monthly' 
-    ? ((start || end || monthFilter || salesOverride) ? '月間売上レポート' : '月間売上レポート') 
-    : '日別売上レポート';
-  const monthLabel = monthFilter
-    ? `${monthFilter.slice(0,4)}年${Number(monthFilter.slice(5))}月`
-    : (sales[0]?.date ? `${String(sales[0].date).slice(0,4)}年${Number(String(sales[0].date).slice(5,7))}月` : '');
+  const monthKeys = monthFilter
+    ? [monthFilter]
+    : [...months].filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
+  const multiMonth = monthKeys.length > 1;
+  const title = kind === 'monthly'
+    ? (multiMonth ? '合算売上レポート' : '月間売上レポート')
+    : (multiMonth ? '合算日別売上レポート' : '日別売上レポート');
+  const monthLabel = formatMonthSpanLabel(monthKeys);
   const folderNote = options.folderLabel ? ` / フォルダ ${options.folderLabel}` : '';
   const titled = monthLabel ? `${title}（${monthLabel}${folderNote}）` : `${title}${folderNote}`;
     
@@ -4927,7 +4959,7 @@ function resolveSavedReportBody(r) {
       const days = groupByDate(r.sales);
       const total = days.reduce((s, d) => s + d.total, 0);
       const tax = days.reduce((s, d) => s + d.tax, 0);
-      const kind = /月間|月別|monthly/i.test(String(r.title || '')) ? 'monthly' : 'daily';
+      const kind = isMonthlyReportTitle(r.title) || /monthly/i.test(String(r.title || '')) ? 'monthly' : 'daily';
       const rebuilt = kind === 'monthly'
         ? monthlyReportHtml(days, total, tax, r.sales.length, r.sales)
         : days.map(dayHtml).join('');
@@ -5160,7 +5192,7 @@ async function renderSavedReports(filter='all'){
       }
       if (sales.length) {
         restorePaymentsMap(sales);
-        const isMonthly = /月間/.test(String(r.title || ''));
+        const isMonthly = isMonthlyReportTitle(r.title);
         const rebuilt = buildReport(isMonthly ? 'monthly' : 'daily', '', '', null, sales, {
           silent: true,
           skipRender: true,
