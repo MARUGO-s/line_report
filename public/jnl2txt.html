@@ -781,6 +781,14 @@ window.onunhandledrejection = function(event) {
     window.webkit.messageHandlers.nativeLog.postMessage(err);
   }
 };
+
+// Global Supabase Constants (Must be declared at script start)
+const SUPABASE_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvY2JuaWZ1YWN0YnZteWpyYXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNzQ2OTgsImV4cCI6MjA4Mjk1MDY5OH0.q33wfcASsQf0Fec3S6fa5CVG2KC9m5Q912Szu7KIyN0';
+
+// Global Drag & Drop prevent default to allow drop zone handling
+window.addEventListener('dragover', function(e) { e.preventDefault(); }, false);
+window.addEventListener('drop', function(e) { e.preventDefault(); }, false);
 // ============ LZH(-lh5-) 解凍エンジン（実ファイルでバイト一致検証済み） ============
 // LHA書庫を解凍して中の1ファイル（.jnl）のバイト列を取り出す。
 // -lh4/5/6/7- のHuffman+LZSS、および -lh0-（無圧縮）に対応。
@@ -2881,8 +2889,6 @@ drop.addEventListener('drop',async e=>{
 });
 
 // print events
-const SUPABASE_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvY2JuaWZ1YWN0YnZteWpyYXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNzQ2OTgsImV4cCI6MjA4Mjk1MDY5OH0.q33wfcASsQf0Fec3S6fa5CVG2KC9m5Q912Szu7KIyN0';
 const AI_ENDPOINT = `${SUPABASE_URL}/functions/v1/ai-analyze`;
 
 let aiChatHistory = [];
