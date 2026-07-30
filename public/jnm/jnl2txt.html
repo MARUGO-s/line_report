@@ -2643,9 +2643,12 @@ async function readSavedReports() {
     // 認証失敗・通信失敗時はローカルを維持
     if (remoteReports === null) return local;
 
-    // クラウドが空なのにローカルにデータがある場合はローカルを優先（保存直後の取りこぼし防止）
-    if (remoteReports.length === 0 && local.length > 0) {
-      return local;
+    // クラウド取得成功時はクラウドを正とする（DB削除後に端末キャッシュが残らないようにする）
+    if (remoteReports.length === 0) {
+      if (local.length > 0) {
+        try { localStorage.setItem(REPORT_STORE_KEY, JSON.stringify([])); } catch (_) {}
+      }
+      return [];
     }
 
     // リモート一覧（メタ）にローカルの詳細サマリーをマージ（ローカル詳細を優先）
@@ -2666,12 +2669,11 @@ async function readSavedReports() {
         sales: loc.sales || r.sales
       };
     });
-    // ローカルにあってリモートに無い新規も残す
-    remoteReports.forEach(r => { delete localById[String(r.id)]; });
-    const pendingLocal = Object.values(localById);
-    const result = [...pendingLocal, ...merged];
-    // クラウドメタだけでローカル詳細を上書きしない（件数・解析版・body を守る）
-    return result;
+    // クラウドに無いローカルのみの残骸は捨てる（削除済みレポートの復活防止）
+    try {
+      localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(merged));
+    } catch (_) {}
+    return merged;
   } catch (e) {
     console.error('readSavedReports error:', e);
     try {
@@ -3210,7 +3212,11 @@ async function fetchSalesForecastHistory() {
       '/pos-journals/sales-forecasts?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=100',
       { method: 'GET' }
     );
-    return Array.isArray(body.items) ? body.items : [];
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (items.length === 0) {
+      try { localStorage.setItem('jnl2txt_sales_forecasts_v1', '[]'); } catch (_) {}
+    }
+    return items;
   } catch (err) {
     console.warn('fetchSalesForecastHistory error:', err);
     try {
@@ -5339,7 +5345,11 @@ async function fetchAiHistory() {
     if (localRaw) localItems = JSON.parse(localRaw);
   } catch (e) {}
 
-  if (Array.isArray(cloudItems) && cloudItems.length > 0) {
+  if (Array.isArray(cloudItems)) {
+    if (cloudItems.length === 0) {
+      try { localStorage.setItem(AI_HISTORY_LOCAL_KEY, '[]'); } catch (_) {}
+      return [];
+    }
     return cloudItems;
   }
   return localItems;
