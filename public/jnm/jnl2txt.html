@@ -1710,6 +1710,57 @@ function parseReceiptHeader(rec){
     minute:+minute
   };
 }
+
+/** ジャーナル「天候入力」レコードから営業日の天候・気温を取得 */
+function parseWeatherFromRecord(rec){
+  const text=String(rec).normalize('NFKC');
+  if(!text.includes('天候入力')) return null;
+  let date='';
+  const header=parseReceiptHeader(rec);
+  if(header?.date) date=header.date;
+  else {
+    const m=text.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
+    if(m) date=`${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`;
+  }
+  if(!date) return null;
+  let weather='', tempC=null;
+  for(const line of text.split('\n')){
+    const w=line.match(/天候\s*([^\s　]+)/);
+    if(w && !line.includes('入力') && w[1]!=='入力') weather=w[1].trim();
+    const t=line.match(/気温\s*(\d+)/);
+    if(t) tempC=Number(t[1]);
+  }
+  if(!weather && tempC==null) return null;
+  return { date, weather, tempC };
+}
+
+function collectWeatherByDate(itemList=null){
+  const map=new Map();
+  const source=Array.isArray(itemList)?itemList:items;
+  source.forEach(it=>{
+    if(it.error||!it.bytes) return;
+    try{
+      const recs=splitRecords(convert(it.bytes, encSel.value));
+      recs.forEach(rec=>{
+        const w=parseWeatherFromRecord(rec);
+        if(!w) return;
+        const prev=map.get(w.date)||{};
+        map.set(w.date,{
+          weather: w.weather || prev.weather || '',
+          tempC: w.tempC!=null ? w.tempC : (prev.tempC??null)
+        });
+      });
+    }catch(_){}
+  });
+  return map;
+}
+
+function formatDayWeather(d){
+  return d?.weather ? String(d.weather) : '—';
+}
+function formatDayTemp(d){
+  return Number.isFinite(d?.tempC) ? `${d.tempC}℃` : '—';
+}
 function receiptCustomerCounts(rec){
   const lines=String(rec).normalize('NFKC').split('\n');
   const counts=[];
@@ -1819,7 +1870,7 @@ function parserSelfCheck(){
   if(!signedCategoryChart.includes('取消相殺')) failed.push('カテゴリ純額マイナス時の円グラフ停止');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-30-v11';
+const PARSER_VERSION='2026-07-31-v12';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -2218,6 +2269,13 @@ function groupByDate(sales){
     }
   });
   days.forEach(g=>{ if(!g.hasPaymentSummary) g.byMethod=new Map(g.receiptByMethod); });
+  const weatherMap=collectWeatherByDate(items);
+  days.forEach(g=>{
+    const w=weatherMap.get(g.date);
+    if(!w) return;
+    g.weather=w.weather||'';
+    g.tempC=w.tempC!=null?w.tempC:null;
+  });
   return [...days.values()].sort((a,b)=>a.date<b.date?-1:1);
 }
 
@@ -2355,7 +2413,10 @@ function receiptCard(r){
 function dayHtml(g){
   const n=g.receipts.length;
   const [Y,M,D]=g.date.split('-');
-  const heading=`${+Y}年${+M}月${+D}日${g.weekday?'（'+g.weekday+'）':''} の売上`;
+  const weatherNote=g.weather||Number.isFinite(g.tempC)
+    ? `　／　天候 ${g.weather||'—'}${Number.isFinite(g.tempC)?` ${g.tempC}℃`:''}`
+    : '';
+  const heading=`${+Y}年${+M}月${+D}日${g.weekday?'（'+g.weekday+'）':''} の売上${weatherNote}`;
   const food=g.byCategory.get('フード')||0, drinks=g.byCategory.get('飲料')||0, room=g.byCategory.get('室料')||0;
   const foodQty=g.byCategoryQty.get('フード')||0, drinkQty=g.byCategoryQty.get('飲料')||0, roomQty=g.byCategoryQty.get('室料')||0;
   const foodSub=`${foodQty}点${g.chargeTotal?`・うちチャージ ${yen(g.chargeTotal)}`:''}`;
@@ -2369,6 +2430,7 @@ function dayHtml(g){
     ${kpiTile('客数', g.peopleComplete?g.customers+'名':'—')}
     ${kpiTile('平均客単価', g.peopleComplete?averageCustomerPrice(g.total,g.customers):'—')}
     ${kpiTile('消費税（内税）', yen(g.tax))}
+    ${kpiTile('天候', formatDayWeather(g), Number.isFinite(g.tempC)?`気温 ${g.tempC}℃`:'ジャーナル天候入力')}
     ${mealPeriodKpis(g.byMealPeriod)}
   </div>`;
   const charts=`<div class="charts">
@@ -3502,7 +3564,7 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
   const food=byCategory.get('フード')||0, drinks=byCategory.get('飲料')||0, room=byCategory.get('室料')||0;
   const foodQty=byCategoryQty.get('フード')||0, drinkQty=byCategoryQty.get('飲料')||0, roomQty=byCategoryQty.get('室料')||0;
   const roomCol=room>0;
-  const rows=days.map(d=>`<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${d.receipts.length}件</td><td>${d.peopleComplete?d.groups+'組':'—'}</td><td>${d.peopleComplete?d.customers+'名':'—'}</td><td>${yen(d.total)}</td><td>${yen(d.tax)}</td><td>${d.peopleComplete?averageCustomerPrice(d.total,d.customers):'—'}</td></tr>`).join('');
+  const rows=days.map(d=>`<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${esc(formatDayWeather(d))}</td><td>${esc(formatDayTemp(d))}</td><td>${d.receipts.length}件</td><td>${d.peopleComplete?d.groups+'組':'—'}</td><td>${d.peopleComplete?d.customers+'名':'—'}</td><td>${yen(d.total)}</td><td>${yen(d.tax)}</td><td>${d.peopleComplete?averageCustomerPrice(d.total,d.customers):'—'}</td></tr>`).join('');
   const other=byCategory.get('その他')||0;
   const categoryRows=days.map(d=>`<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${yen(d.byCategory.get('フード')||0)}</td><td>${yen(d.byCategory.get('飲料')||0)}</td>${roomCol?`<td>${yen(d.byCategory.get('室料')||0)}</td>`:''}<td>${yen(d.byCategory.get('その他')||0)}</td><td>${yen(d.total)}</td></tr>`).join('');
   const dailyMealRows=days.map(d=>{
@@ -3538,7 +3600,8 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
           <div class="msec-tab" onclick="switchMonthTab('${gid}',3)">商品別</div>
         </div>
         <div class="msec-pane">
-          <table class="month-table"><thead><tr><th>日付</th><th>取引件数</th><th>組数</th><th>客数</th><th>売上</th><th>消費税</th><th>平均客単価</th></tr></thead><tbody>${rows}<tr><td>月間合計</td><td>${salesCount}件</td><td>${effectivePeopleComplete?groups+'組':'—'}</td><td>${effectivePeopleComplete?customers+'名':'—'}</td><td>${yen(totalAll)}</td><td>${yen(totalTax)}</td><td>${effectivePeopleComplete?averageCustomerPrice(totalAll,customers):'—'}</td></tr></tbody></table>
+          <table class="month-table"><thead><tr><th>日付</th><th>天候</th><th>気温</th><th>取引件数</th><th>組数</th><th>客数</th><th>売上</th><th>消費税</th><th>平均客単価</th></tr></thead><tbody>${rows}<tr><td>月間合計</td><td>—</td><td>—</td><td>${salesCount}件</td><td>${effectivePeopleComplete?groups+'組':'—'}</td><td>${effectivePeopleComplete?customers+'名':'—'}</td><td>${yen(totalAll)}</td><td>${yen(totalTax)}</td><td>${effectivePeopleComplete?averageCustomerPrice(totalAll,customers):'—'}</td></tr></tbody></table>
+          <p class="rv-note">天候・気温はジャーナルの「天候入力」レコードから取得します。未入力の日は — 表示です。</p>
         </div>
         <div class="msec-pane" hidden>
           <h4 class="table-h">月間のランチ・ディナー別分析（16:00を境界）</h4>
