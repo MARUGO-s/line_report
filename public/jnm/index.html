@@ -1342,14 +1342,18 @@ async function adminApiFetch(path, options) {
   if (!url) throw new Error('API設定を読み込めません。');
   const token = getAdminToken();
   if (!token) throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。');
+  const opts = options || {};
   const headers = Object.assign({
-    'Content-Type': 'application/json; charset=utf-8',
     'x-admin-token': token,
     'x-admin-surface': PAGES.ADMIN_SURFACE || 'line_report'
-  }, (options && options.headers) || {});
+  }, opts.headers || {});
+  // FormData はブラウザに Content-Type（boundary）を任せる
+  if (!(opts.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json; charset=utf-8';
+  }
   let response;
   try {
-    response = await fetch(url, Object.assign({}, options || {}, { headers }));
+    response = await fetch(url, Object.assign({}, opts, { headers }));
   } catch (_) {
     throw new Error('通信に失敗しました。ネットワークをご確認ください。');
   }
@@ -1997,7 +2001,7 @@ function parserSelfCheck(){
   if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-31-v15';
+const PARSER_VERSION='2026-07-31-v16';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -2867,12 +2871,22 @@ function formatReportCreatedAt(v) {
 }
 
 function buildCloudReportData(r, { includeBody = false } = {}) {
+  let sales = Array.isArray(r.sales) ? r.sales.map(serializeSaleForCloud) : [];
+  const sourceMonths = Array.isArray(r.sourceMonths) && r.sourceMonths.length
+    ? r.sourceMonths
+    : [...new Set(sales.map(s => String(s.date || '').slice(0, 7)).filter(m => /^\d{4}-\d{2}$/.test(m)))];
+  // 伝票が大きすぎる場合はジャーナル原本側に任せ、要約＋メタだけ残す
+  try {
+    if (JSON.stringify(sales).length > 1400000) sales = [];
+  } catch (_) {
+    sales = [];
+  }
   const data = {
     id: r.id,
     title: r.title,
     period: r.period,
     createdAt: r.createdAt,
-    salesCount: Number.isFinite(Number(r.salesCount)) ? Number(r.salesCount) : 0,
+    salesCount: Number.isFinite(Number(r.salesCount)) ? Number(r.salesCount) : (Array.isArray(r.sales) ? r.sales.length : sales.length),
     total: Number(r.total ?? r.totalSales) || 0,
     totalSales: Number(r.total ?? r.totalSales) || 0,
     foodTotal: r.foodTotal,
@@ -2892,12 +2906,205 @@ function buildCloudReportData(r, { includeBody = false } = {}) {
     verificationVersion: r.verificationVersion || VERIFICATION_VERSION,
     categoryVersion: r.categoryVersion || CATEGORY_VERSION,
     mealPeriodVersion: r.mealPeriodVersion || MEAL_PERIOD_VERSION,
-    previewHtml: r.previewHtml
+    previewHtml: r.previewHtml,
+    sourceMonths,
+    journalIds: Array.isArray(r.journalIds) ? r.journalIds : [],
+    sales
   };
   if (includeBody && isDetailedReportHtml(r.body) && String(r.body).length < 350000) {
     data.body = r.body;
   }
   return data;
+}
+
+/** 合算分析用に伝票をJSON化（Mapを普通のオブジェクトへ） */
+function serializeSaleForCloud(s) {
+  const pay = s?.payments || {};
+  const byMethod = pay.byMethod instanceof Map
+    ? Object.fromEntries(pay.byMethod)
+    : (pay.byMethod && typeof pay.byMethod === 'object' ? pay.byMethod : {});
+  return {
+    no: s.no,
+    date: s.date,
+    weekday: s.weekday || '',
+    hour: s.hour,
+    minute: s.minute,
+    hasAccountingTime: !!s.hasAccountingTime,
+    mealPeriod: s.mealPeriod || '',
+    time: s.time || '',
+    total: Number(s.total) || 0,
+    tax: Number(s.tax) || 0,
+    points: Number(s.points) || 0,
+    groups: Number(s.groups) || 0,
+    customers: Number(s.customers) || 0,
+    customerCountReliable: s.customerCountReliable !== false,
+    isSplitFragment: !!s.isSplitFragment,
+    tableNo: s.tableNo || '',
+    method: s.method || 'その他',
+    change: Number(s.change) || 0,
+    payments: {
+      byMethod,
+      total: Number(pay.total) || 0,
+      change: Number(pay.change) || 0,
+      details: Array.isArray(pay.details) ? pay.details : []
+    },
+    items: (Array.isArray(s.items) ? s.items : []).map(it => ({
+      code: it.code,
+      name: it.name,
+      qty: Number(it.qty) || 0,
+      amount: Number(it.amount) || 0,
+      category: it.category || 'その他',
+      isCharge: !!it.isCharge,
+      known: it.known !== false,
+      byCode: !!it.byCode,
+      needsReview: !!it.needsReview
+    })),
+    itemTotal: Number(s.itemTotal) || 0
+  };
+}
+
+function reviveSaleFromCloud(s) {
+  if (!s || typeof s !== 'object') return null;
+  const byMethodObj = s.payments?.byMethod && typeof s.payments.byMethod === 'object'
+    ? s.payments.byMethod
+    : {};
+  const byMethod = byMethodObj instanceof Map
+    ? byMethodObj
+    : new Map(Object.entries(byMethodObj).map(([k, v]) => [k, Number(v) || 0]));
+  return {
+    ...s,
+    payments: {
+      ...(s.payments || {}),
+      byMethod,
+      total: Number(s.payments?.total) || 0,
+      change: Number(s.payments?.change) || 0,
+      details: Array.isArray(s.payments?.details) ? s.payments.details : []
+    },
+    items: Array.isArray(s.items) ? s.items : []
+  };
+}
+
+function reviveSalesList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(reviveSaleFromCloud).filter(Boolean);
+}
+
+/** 読み込み済み LZH をクラウド（pos_journal_files）へ保管 */
+async function uploadJournalsToCloud(itemList) {
+  if (!getAdminToken()) return { ok: false, reason: 'auth', journals: [] };
+  const lzhItems = (itemList || []).filter(it =>
+    !it.error && it.bytes && it.bytes.length && (/\.lzh$/i.test(it.name) || isLzh(it.name, it.bytes))
+  );
+  if (!lzhItems.length) return { ok: true, uploaded: 0, duplicates: 0, failed: 0, journals: [] };
+
+  const journals = [];
+  let uploaded = 0, duplicates = 0, failed = 0;
+  const batchSize = 40;
+  for (let i = 0; i < lzhItems.length; i += batchSize) {
+    const batch = lzhItems.slice(i, i + batchSize);
+    const form = new FormData();
+    batch.forEach(it => {
+      const fileName = /\.lzh$/i.test(it.name) ? it.name : `${it.name}.lzh`;
+      form.append('files', new File([it.bytes], fileName, { type: 'application/x-lzh-compressed' }));
+    });
+    form.append('store_key', STORE_KEY);
+    try {
+      const result = await adminApiFetch('/pos-journals/upload', { method: 'POST', body: form });
+      uploaded += Number(result.uploaded_count) || 0;
+      duplicates += Number(result.duplicate_count) || 0;
+      failed += Number(result.failed_count) || 0;
+      (result.uploaded || []).forEach(row => {
+        if (row?.id) journals.push({
+          id: Number(row.id),
+          business_date: String(row.business_date || ''),
+          original_file_name: String(row.original_file_name || '')
+        });
+      });
+      (result.duplicates || []).forEach(row => {
+        if (row?.id) journals.push({
+          id: Number(row.id),
+          business_date: String(row.business_date || ''),
+          original_file_name: String(row.original_file_name || ''),
+          duplicate: true
+        });
+      });
+    } catch (err) {
+      console.warn('uploadJournalsToCloud batch error:', err);
+      failed += batch.length;
+    }
+  }
+  return { ok: failed === 0 || journals.length > 0, uploaded, duplicates, failed, journals };
+}
+
+async function fetchJournalFilesForMonth(month) {
+  const body = await adminApiFetch(
+    '/pos-journals?store_key=' + encodeURIComponent(STORE_KEY) + '&month=' + encodeURIComponent(month),
+    { method: 'GET' }
+  );
+  return Array.isArray(body.files) ? body.files : [];
+}
+
+async function downloadJournalBytesById(id) {
+  const body = await adminApiFetch(
+    '/pos-journals/download?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id),
+    { method: 'GET' }
+  );
+  const signed = body.signed_url || body.url;
+  if (!signed) throw new Error('ダウンロードURLを取得できませんでした');
+  const res = await fetch(signed);
+  if (!res.ok) throw new Error('ジャーナル原本の取得に失敗しました (HTTP ' + res.status + ')');
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+function salesFromJournalBytes(fileName, bytes) {
+  let buf = bytes;
+  const name = String(fileName || 'journal.lzh');
+  try {
+    if (isLzh(name, buf)) buf = unlzh(buf).bytes;
+  } catch (err) {
+    console.warn('salesFromJournalBytes unlzh failed:', name, err);
+    return [];
+  }
+  const it = {
+    name,
+    bytes: buf,
+    ...process(buf, encSel.value, modeSel.value || 'success')
+  };
+  return collectSalesAudit([it]).sales || [];
+}
+
+async function loadSalesFromCloudJournals(months) {
+  const monthList = [...new Set((months || []).filter(m => /^\d{4}-\d{2}$/.test(m)))];
+  const merged = [];
+  const seen = new Set();
+  let fileCount = 0;
+  for (const month of monthList) {
+    const files = await fetchJournalFilesForMonth(month);
+    for (const file of files) {
+      fileCount++;
+      try {
+        const bytes = await downloadJournalBytesById(file.id);
+        const sales = salesFromJournalBytes(file.original_file_name || file.inner_file_name, bytes);
+        sales.forEach(p => {
+          const key = `${p.date}|${p.no}|${p.total}|${p.time || ''}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          merged.push(p);
+        });
+      } catch (err) {
+        console.warn('loadSalesFromCloudJournals file error:', file?.id, err);
+      }
+    }
+  }
+  return { sales: merged, fileCount, months: monthList };
+}
+
+function sourceMonthsFromReport(r) {
+  if (Array.isArray(r?.sourceMonths) && r.sourceMonths.length) {
+    return r.sourceMonths.filter(m => /^\d{4}-\d{2}$/.test(m));
+  }
+  const key = monthKeyFromReport(r);
+  return key ? [key] : [];
 }
 
 function reportStamp(){
@@ -3799,6 +4006,13 @@ function restorePaymentsMap(sales) {
   sales.forEach(s => {
     if (!s || !s.payments) return;
     if (s.payments.byMethod && typeof s.payments.byMethod.forEach === 'function') return;
+    // クラウド保存のプレーンオブジェクトを Map に戻す
+    if (s.payments.byMethod && typeof s.payments.byMethod === 'object' && !Array.isArray(s.payments.byMethod)) {
+      s.payments.byMethod = new Map(
+        Object.entries(s.payments.byMethod).map(([k, v]) => [k, Number(v) || 0])
+      );
+      return;
+    }
     const byMethod = new Map();
     if (Array.isArray(s.payments.details) && s.payments.details.length > 0) {
       const tenderedByMethod = new Map();
@@ -3998,6 +4212,18 @@ async function saveCurrentReport(options = {}){
     return { ok: false, reason: 'auth' };
   }
   showSaveStatus('クラウドに保存中…');
+  // 元ジャーナルもクラウドへ（合算分析で再読込するため）
+  let journalUpload = { journals: [] };
+  try {
+    const sourceItems = items.filter(it => !it.error && it.bytes);
+    if (sourceItems.length) {
+      showSaveStatus('ジャーナルをクラウドへ保存中…');
+      journalUpload = await uploadJournalsToCloud(sourceItems);
+    }
+  } catch (err) {
+    console.warn('journal upload before report save:', err);
+  }
+  const allJournalIds = [...new Set((journalUpload.journals || []).map(j => Number(j.id)).filter(Boolean))];
   const reports = (await readSavedReports()).map(report => report);
   const bundle = currentReport.relatedReports?.length ? currentReport.relatedReports : [currentReport];
   const records = bundle.map((report, idx) => {
@@ -4008,12 +4234,19 @@ async function saveCurrentReport(options = {}){
     // 詳細HTML(body)と伝票(sales)は残す。以前は容量対策で捨てて要約だけになり詳細が消えていた
     const { relatedReports, ...withoutBundle } = report;
     const fullBody = withoutBundle.body || '';
+    const salesArr = Array.isArray(withoutBundle.sales) ? withoutBundle.sales : [];
+    const sourceMonths = [...new Set(salesArr.map(s => String(s.date || '').slice(0, 7)).filter(m => /^\d{4}-\d{2}$/.test(m)))];
+    const monthSet = new Set(sourceMonths);
+    const journalIdsForReport = (journalUpload.journals || [])
+      .filter(j => !monthSet.size || monthSet.has(String(j.business_date || '').slice(0, 7)))
+      .map(j => Number(j.id))
+      .filter(Boolean);
     return {
       id: `${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 8)}`,
       ...withoutBundle,
       body: fullBody,
       createdAt: withoutBundle.createdAt || reportStamp(),
-      salesCount: Number(withoutBundle.salesCount) || (Array.isArray(withoutBundle.sales) ? withoutBundle.sales.length : 0),
+      salesCount: Number(withoutBundle.salesCount) || salesArr.length,
       parserVersion: withoutBundle.parserVersion || PARSER_VERSION,
       verificationVersion: withoutBundle.verificationVersion || VERIFICATION_VERSION,
       categoryVersion: withoutBundle.categoryVersion || CATEGORY_VERSION,
@@ -4022,13 +4255,18 @@ async function saveCurrentReport(options = {}){
       totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers || 0) + (report.dinnerCustomers || 0)) || 0,
       weekdayBreakdown: aiSnap.weekdayBreakdown || report.weekdayBreakdown || [],
       hourlyBreakdown: (aiSnap.hourlyBreakdown || report.hourlyBreakdown || []).slice(0, 24),
-      previewHtml: isDetailedReportHtml(fullBody) ? fullBody : buildSavedReportPreviewHtml(report, aiSnap)
+      previewHtml: isDetailedReportHtml(fullBody) ? fullBody : buildSavedReportPreviewHtml(report, aiSnap),
+      sourceMonths,
+      journalIds: journalIdsForReport.length ? journalIdsForReport : (Array.isArray(withoutBundle.journalIds) ? withoutBundle.journalIds : allJournalIds)
     };
   });
   reports.unshift(...records);
   const result = await writeSavedReports(reports.slice(0, 100), records);
   if (result && result.ok) {
-    finishSaveStatus(`クラウドに${records.length}件保存しました`);
+    const jNote = journalUpload.uploaded || journalUpload.duplicates
+      ? `（ジャーナル ${Number(journalUpload.uploaded || 0) + Number(journalUpload.duplicates || 0)}件）`
+      : '';
+    finishSaveStatus(`クラウドに${records.length}件保存しました${jNote}`);
     if (openList) await renderSavedReports();
   } else {
     const msg = result?.error?.message || (
@@ -4164,11 +4402,13 @@ async function autoBuildAndSaveAfterLoad() {
       }
       return { ok: false, reason: 'auth' };
     }
-    showAppLoading('クラウドに自動保存中...', `${allReports.length}件を月別に保存しています`);
+    showAppLoading('クラウドに自動保存中...', `${allReports.length}件を月別に保存（ジャーナル原本も保管）`);
     await yieldToUI();
     const result = await saveCurrentReport({ silent: true, openList: true });
     hideAppLoading();
-    if (!result?.ok) {
+    if (result?.ok) {
+      finishSaveStatus(`クラウドに${allReports.length}件保存しました（ジャーナル原本も保管）`);
+    } else if (!result?.ok) {
       finishSaveStatus(result?.error?.message || 'クラウド自動保存に失敗しました', true);
     }
     return result || { ok: false };
@@ -4334,55 +4574,78 @@ async function renderSavedReports(filter='all'){
   mergeBtn.onclick = async () => {
     const checkedIds = [...view.querySelectorAll('.report-select:checked')].map(cb => cb.dataset.id);
     if (checkedIds.length === 0) return;
-    
-    showAppLoading('選択データを合算中...', '詳細データを読み込んでいます');
+
+    showAppLoading('選択データを合算中...', 'クラウドから詳細／ジャーナルを読み込んでいます');
     try {
+      if (!getAdminToken()) {
+        alert('合算分析にはクラウド接続が必要です。\n画面上部で管理トークンを接続するか、LINEの最新リンクから開き直してください。');
+        return;
+      }
+
       const selectedReports = await Promise.all(checkedIds.map(async id => {
         let r = reports.find(x => x.id === id);
-        if (!r || !r.sales) {
-          const fetched = await fetchSupabaseReportById(id);
-          if (fetched) r = fetched;
-        }
+        const fetched = await fetchSupabaseReportById(id);
+        if (fetched) r = { ...(r || {}), ...fetched, id };
         return r;
       }));
-      
+      const validReports = selectedReports.filter(Boolean);
+      if (!validReports.length) {
+        alert('選択されたレポートをクラウドから取得できませんでした。');
+        return;
+      }
+
       const mergedSales = [];
       const seen = new Set();
-      let hasSalesData = false;
-    
-    selectedReports.forEach(r => {
-      if (Array.isArray(r.sales)) {
-        hasSalesData = true;
-        r.sales.forEach(p => {
-          const key = `${p.date}|${p.no}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            mergedSales.push(p);
-          }
-        });
+      const pushSale = (p) => {
+        if (!p || !p.date) return;
+        const key = `${p.date}|${p.no}|${p.total}|${p.time || ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        mergedSales.push(p);
+      };
+
+      // 1) レポートに保存された伝票があれば使う
+      validReports.forEach(r => {
+        reviveSalesList(r.sales).forEach(pushSale);
+      });
+
+      // 2) 足りなければクラウド上のジャーナル原本を読み直して解析
+      const monthsNeeded = [...new Set(validReports.flatMap(sourceMonthsFromReport))];
+      const expectedCount = validReports.reduce((s, r) => s + (Number(r.salesCount) || 0), 0);
+      const needJournals = mergedSales.length === 0
+        || (expectedCount > 0 && mergedSales.length < Math.max(10, expectedCount * 0.5));
+
+      if (needJournals) {
+        if (!monthsNeeded.length) {
+          alert('合算に必要な月情報が見つかりませんでした。\nジャーナルを再読み込みしてレポートを保存し直してください。');
+          return;
+        }
+        showAppLoading('ジャーナルを読み込み中...', monthsNeeded.join(' / ') + ' の原本を解析しています');
+        const fromJournals = await loadSalesFromCloudJournals(monthsNeeded);
+        fromJournals.sales.forEach(pushSale);
+        if (!fromJournals.fileCount) {
+          alert(
+            'クラウドに元ジャーナルがありません。\n' +
+            '合算分析するには、対象月のジャーナル（.lzh）を再度読み込んで保存してください。\n' +
+            '（保存時にジャーナルもクラウドへ保管されます）\n\n' +
+            '対象月: ' + monthsNeeded.join(', ')
+          );
+          return;
+        }
       }
-    });
-    
-    if (!hasSalesData) {
-      alert("選択されたレポートに売上の詳細データ（伝票データ）が含まれていません。\nWebブラウザ版で保存されたデータは容量削減のため合算できません。");
-      return;
-    }
-    
-    if (mergedSales.length === 0) {
-      alert("合算可能な売上データが見つかりませんでした。");
-      return;
-    }
-    
-    showAppLoading('データを合算中...', `${selectedReports.length} 件のレポートをマージしています`);
-    setTimeout(() => {
-      try {
-        buildBothReports(mergedSales);
-      } catch (err) {
-        alert("合算処理中にエラーが発生しました: " + err.message);
-      } finally {
-        hideAppLoading();
+
+      if (mergedSales.length === 0) {
+        alert('合算可能な売上データが見つかりませんでした。\n対象月のジャーナルを再読み込みして保存し直してください。');
+        return;
       }
-    }, 100);
+
+      showAppLoading('データを合算中...', `${validReports.length} 件 / ${mergedSales.length} 伝票をマージしています`);
+      await yieldToUI();
+      restorePaymentsMap(mergedSales);
+      buildBothReports(mergedSales);
+    } catch (err) {
+      console.error('mergeAnalyze error:', err);
+      alert('合算処理中にエラーが発生しました: ' + (err?.message || err));
     } finally {
       hideAppLoading();
     }
