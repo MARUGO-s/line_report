@@ -2680,7 +2680,29 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
     ? ((start || end || monthFilter || salesOverride) ? '期間集計売上レポート' : '月間売上レポート') 
     : '日別売上レポート';
     
-  renderReport({title,period:reportPeriod(days),sales, salesCount:sales.length,total,body,foodTotal,drinkTotal,roomTotal,otherTotal,chargeTotal,lunchTotal:lunch.total,dinnerTotal:dinner.total,lunchCustomers:lunch.customers,dinnerCustomers:dinner.customers});
+  const reportObj = {
+    title,
+    period: reportPeriod(days),
+    sales,
+    salesCount: sales.length,
+    total,
+    body,
+    foodTotal,
+    drinkTotal,
+    roomTotal,
+    otherTotal,
+    chargeTotal,
+    lunchTotal: lunch.total,
+    dinnerTotal: dinner.total,
+    lunchCustomers: lunch.customers,
+    dinnerCustomers: dinner.customers
+  };
+
+  currentReport = reportObj;
+  const computedAiData = buildSalesDataForAI();
+  Object.assign(reportObj, computedAiData);
+
+  renderReport(reportObj);
 }
 
 function buildBothReports(salesOverride=null){
@@ -3292,6 +3314,37 @@ function buildSalesDataForAI() {
   if (!currentReport) return {};
   const d = currentReport;
   const sales = d.sales || [];
+  
+  // sales配列（明細データ）が無い保存レポート・履歴ビューの場合でも、既存のサマリープロパティから売上データを即座に復元・返却
+  if (sales.length === 0 && (d.total || d.totalSales || d.foodTotal || d.drinkTotal)) {
+    const totSales = d.total || d.totalSales || 0;
+    const totCust = d.totalCustomers || ((d.lunchCustomers || 0) + (d.dinnerCustomers || 0)) || 0;
+    return {
+      title: d.title || '売上レポート',
+      period: d.period || '',
+      totalSales: totSales,
+      salesCount: d.salesCount || 0,
+      totalGroups: d.totalGroups || d.salesCount || 0,
+      totalCustomers: totCust,
+      overallAvgSpendPerCustomer: totCust ? Math.round(totSales / totCust) : (d.overallAvgSpendPerCustomer || 0),
+      foodTotal: d.foodTotal || 0,
+      drinkTotal: d.drinkTotal || 0,
+      roomTotal: d.roomTotal || 0,
+      otherTotal: d.otherTotal || 0,
+      chargeTotal: d.chargeTotal || 0,
+      lunchTotal: d.lunchTotal || 0,
+      lunchCustomers: d.lunchCustomers || 0,
+      lunchAvgSpend: d.lunchCustomers ? Math.round((d.lunchTotal || 0) / d.lunchCustomers) : 0,
+      dinnerTotal: d.dinnerTotal || 0,
+      dinnerCustomers: d.dinnerCustomers || 0,
+      dinnerAvgSpend: d.dinnerCustomers ? Math.round((d.dinnerTotal || 0) / d.dinnerCustomers) : 0,
+      weekdayBreakdown: d.weekdayBreakdown || [],
+      hourlyBreakdown: d.hourlyBreakdown || [],
+      topProducts: d.topProducts || [],
+      dailyBreakdown: d.dailyBreakdown || []
+    };
+  }
+
   const daily = {};
   const products = {};
   const hourly = {};
