@@ -1345,17 +1345,19 @@ document.addEventListener('DOMContentLoaded', async function () {
   setAuthUiState(!!getAdminToken());
   if (getAdminToken()) {
     try {
-      await loadProductCategoryOverridesFromCloud();
-      const keys = Object.keys(readProductCategoryOverrides());
+      const overridesNow = await loadProductCategoryOverridesFromCloud();
+      const keys = Object.keys(overridesNow);
       if (keys.length) {
-        const syncKey = 'jnl2txt_category_overrides_synced_v1';
-        let already = false;
-        try { already = sessionStorage.getItem(syncKey) === '1'; } catch (_) {}
-        if (!already) {
-          try { sessionStorage.setItem(syncKey, '1'); } catch (_) {}
+        // 「同期済みか」はDB側のsyncedFingerprintで判定する（タブ／キャッシュに依存しない）。
+        // overrides自体に変更が無ければ、何度アクセスしても79件ループは走らない。
+        const currentFingerprint = fingerprintProductCategoryOverrides(overridesNow);
+        if (currentFingerprint !== productCategoryOverridesSyncedFingerprint) {
           showAppLoading('分類ルールを同期中...', '保存済みレポートへ反映しています');
           try {
             const prop = await propagateCategoryOverridesToCloudReports(keys);
+            if (prop.failed === 0) {
+              await persistProductCategoryOverridesToCloud(overridesNow, currentFingerprint);
+            }
             if (prop.updated) finishSaveStatus(`分類ルールを ${prop.updated} 件のレポートへ反映しました`);
           } catch (err) {
             console.warn('override sync:', err);
@@ -1820,6 +1822,10 @@ const PRODUCT_CATEGORY_OVERRIDES_KEY='jnl2txt-product-category-overrides-v1';
 const CATEGORY_OVERRIDES_REPORT_ID='jnl2txt_category_overrides_v1';
 let productCategoryOverridesCache={};
 let productCategoryOverridesLoaded=false;
+// 全レポートへの反映が完了した時点のoverrides内容を指紋化してクラウドに残す。
+// タブ／ブラウザ単位のsessionStorageではなくDB側で「同期済みか」を判定するため、
+// キャッシュクリアや新規タブでも、実際にoverridesが変わっていない限り79件ループを再実行しない。
+let productCategoryOverridesSyncedFingerprint=null;
 
 function isCategoryOverridesReportId(id){
   return String(id||'')===CATEGORY_OVERRIDES_REPORT_ID;
@@ -1831,6 +1837,11 @@ function readProductCategoryOverrides(){
     : {};
 }
 
+function fingerprintProductCategoryOverrides(overrides){
+  const obj=overrides&&typeof overrides==='object'?overrides:{};
+  return Object.keys(obj).sort().map(k=>k+'='+obj[k]).join('|');
+}
+
 async function loadProductCategoryOverridesFromCloud(){
   if(!getAdminToken()) return readProductCategoryOverrides();
   try{
@@ -1838,6 +1849,8 @@ async function loadProductCategoryOverridesFromCloud(){
     const fromCloud=(item&&typeof item.overrides==='object'&&item.overrides)
       ? item.overrides
       : {};
+    productCategoryOverridesSyncedFingerprint=
+      (item&&typeof item.syncedFingerprint==='string')?item.syncedFingerprint:'';
     let merged={...fromCloud};
     // 旧ローカル設定があれば一度だけクラウドへ移行
     try{
@@ -1858,14 +1871,17 @@ async function loadProductCategoryOverridesFromCloud(){
   }
 }
 
-async function persistProductCategoryOverridesToCloud(overrides){
+async function persistProductCategoryOverridesToCloud(overrides,syncedFingerprint){
   if(!getAdminToken()) throw new Error('クラウド接続が必要です。管理トークンを接続してください。');
   const clean=overrides&&typeof overrides==='object'?{...overrides}:{};
+  // fingerprint省略時は「overridesが変わった＝まだ全レポートへ反映済みとは言えない」を表すため空にする。
+  const fingerprint=typeof syncedFingerprint==='string'?syncedFingerprint:'';
   const data={
     id:CATEGORY_OVERRIDES_REPORT_ID,
     title:'商品分類ルール',
     kind:'product_category_overrides',
     overrides:clean,
+    syncedFingerprint:fingerprint,
     salesCount:0,
     total:0,
     totalSales:0,
@@ -1891,6 +1907,8 @@ async function persistProductCategoryOverridesToCloud(overrides){
     }
   }
   productCategoryOverridesCache={...got};
+  productCategoryOverridesSyncedFingerprint=
+    (verified&&typeof verified.syncedFingerprint==='string')?verified.syncedFingerprint:fingerprint;
   productCategoryOverridesLoaded=true;
   return got;
 }
@@ -4292,6 +4310,9 @@ async function commitPendingCategoryMoves(){
     const monthSave=await upsertMonthReportsFromSales(sales);
     showAppLoading('分類を全レポートへ反映中...','残りのレポートを更新しています');
     const prop=await propagateCategoryOverridesToCloudReports(keys);
+    if(prop.failed===0){
+      try{ await persistProductCategoryOverridesToCloud(saved, fingerprintProductCategoryOverrides(saved)); }catch(_){}
+    }
 
     const keepId=currentReport.id||null;
     const keepCreatedAt=currentReport.createdAt;
