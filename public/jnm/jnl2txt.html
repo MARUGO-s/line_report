@@ -783,7 +783,52 @@
     background: #fff;
     border: 1px solid var(--border-sub);
     border-bottom-left-radius: 4px;
+    color: #0f172a;
   }
+  .ai-msg-ai * {
+    color: inherit;
+  }
+  .ai-msg-user * {
+    color: #fff;
+  }
+
+  /* ダークモード: AIチャットは吹き出し内のコントラストを保証 */
+  body[data-theme='dark'] .ai-panel {
+    background: #151c25 !important;
+    border-left-color: #334155 !important;
+  }
+  body[data-theme='dark'] .ai-panel-header,
+  body[data-theme='dark'] .ai-chat-input {
+    background: #1b232e !important;
+    border-color: #334155 !important;
+    color: #f8fafc !important;
+  }
+  body[data-theme='dark'] .ai-panel-close {
+    color: #cbd5e1 !important;
+  }
+  body[data-theme='dark'] .ai-msg-ai {
+    background: #1e293b !important;
+    color: #f1f5f9 !important;
+    border-color: #334155 !important;
+  }
+  body[data-theme='dark'] .ai-msg-ai,
+  body[data-theme='dark'] .ai-msg-ai *:not(a) {
+    color: #f1f5f9 !important;
+  }
+  body[data-theme='dark'] .ai-msg-user {
+    background: var(--accent, #3f7bea) !important;
+    color: #ffffff !important;
+  }
+  body[data-theme='dark'] .ai-msg-user,
+  body[data-theme='dark'] .ai-msg-user * {
+    color: #ffffff !important;
+  }
+  body[data-theme='dark'] .ai-chat-input input {
+    background: #0f172a !important;
+    color: #f8fafc !important;
+    border-color: #334155 !important;
+  }
+
   /* AI Visual Dashboard Styles */
   .ai-kpi-grid {
     display: grid;
