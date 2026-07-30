@@ -2544,36 +2544,69 @@ async function writeSavedReports(reports, newRecords) {
     let lastErr = null;
     const hasToken = !!getAdminToken();
 
-    if (!hasToken) {
-      // 未接続でも端末内には残す
+    const persistLocal = (list) => {
       try {
-        localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
+        localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(list));
+        return true;
       } catch (_) {
-        const compact = reports.map(r => {
-          const { body, sales, relatedReports, ...rest } = r;
-          return rest;
-        });
-        try { localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(compact)); }
-        catch (e2) { return { ok: false, remote: false, reason: 'quota', error: e2 }; }
+        // 1) sales を落として body（詳細HTML）は残す
+        try {
+          const keepBody = list.map(r => {
+            const { sales, relatedReports, ...rest } = r;
+            return rest;
+          });
+          localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(keepBody));
+          return true;
+        } catch (_) {}
+        // 2) それでもダメなら古いものから body を要約に落とす
+        try {
+          const compact = list.map((r, i) => {
+            if (i < 8 && isDetailedReportHtml(r.body)) return r; // 直近は詳細維持
+            const { body, sales, relatedReports, ...rest } = r;
+            return { ...rest, previewHtml: rest.previewHtml || buildSavedReportPreviewHtml(r) };
+          });
+          localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(compact));
+          return true;
+        } catch (e2) {
+          return false;
+        }
       }
+    };
+
+    if (!hasToken) {
+      if (!persistLocal(reports)) return { ok: false, remote: false, reason: 'quota' };
       return { ok: true, remote: false, reason: 'auth' };
     }
 
     for (const r of toUpload) {
       const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       try {
-        // data は巨大HTML body / sales を除外したサマリーのみ送る
-        const { body, sales, relatedReports, previewHtml, ...data } = r;
-        await adminApiFetch('/pos-journals/saved-reports', {
-          method: 'POST',
-          body: JSON.stringify({
-            id,
-            title: String(r.title || '売上レポート'),
-            period: String(r.period || ''),
-            data: { ...data, id, previewHtml },
-            store_key: STORE_KEY
-          })
-        });
+        const { sales, relatedReports, ...data } = r;
+        // 詳細HTML(body)もクラウドへ。失敗時は要約のみで再送
+        try {
+          await adminApiFetch('/pos-journals/saved-reports', {
+            method: 'POST',
+            body: JSON.stringify({
+              id,
+              title: String(r.title || '売上レポート'),
+              period: String(r.period || ''),
+              data: { ...data, id, sales: undefined },
+              store_key: STORE_KEY
+            })
+          });
+        } catch (sizeErr) {
+          const { body, previewHtml, ...light } = data;
+          await adminApiFetch('/pos-journals/saved-reports', {
+            method: 'POST',
+            body: JSON.stringify({
+              id,
+              title: String(r.title || '売上レポート'),
+              period: String(r.period || ''),
+              data: { ...light, id, previewHtml: previewHtml || buildSavedReportPreviewHtml(r) },
+              store_key: STORE_KEY
+            })
+          });
+        }
         uploaded++;
       } catch (err) {
         failed++;
@@ -2582,19 +2615,8 @@ async function writeSavedReports(reports, newRecords) {
       }
     }
 
-    try {
-      localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
-    } catch (quotaErr) {
-      // 容量不足時はプレビューHTMLを落として再試行
-      const compact = reports.map(r => {
-        const { body, sales, relatedReports, previewHtml, ...rest } = r;
-        return rest;
-      });
-      try {
-        localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(compact));
-      } catch (e2) {
-        return { ok: false, remote: uploaded > 0, reason: 'quota', error: quotaErr };
-      }
+    if (!persistLocal(reports)) {
+      return { ok: false, remote: uploaded > 0, reason: 'quota', error: lastErr };
     }
     if (uploaded === 0 && toUpload.length > 0) {
       return { ok: false, remote: false, reason: 'upload', error: lastErr };
@@ -3072,17 +3094,20 @@ async function saveCurrentReport(options = {}){
     currentReport = report;
     const aiSnap = buildSalesDataForAI();
     currentReport = prev;
-    const { relatedReports, sales, body, ...withoutBundle } = report;
+    // 詳細HTML(body)と伝票(sales)は残す。以前は容量対策で捨てて要約だけになり詳細が消えていた
+    const { relatedReports, ...withoutBundle } = report;
+    const fullBody = withoutBundle.body || '';
     return {
       id: `${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 8)}`,
       ...withoutBundle,
+      body: fullBody,
       createdAt: withoutBundle.createdAt || reportStamp(),
       topProducts: Array.isArray(aiSnap.topProducts) ? aiSnap.topProducts.slice(0, 30) : (report.topProducts || []),
       totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers || 0) + (report.dinnerCustomers || 0)) || 0,
       weekdayBreakdown: aiSnap.weekdayBreakdown || report.weekdayBreakdown || [],
       hourlyBreakdown: (aiSnap.hourlyBreakdown || report.hourlyBreakdown || []).slice(0, 24),
-      // 端末内プレビュー用に軽量HTMLを残す（クラウド送信時は writeSavedReports 側で除外）
-      previewHtml: buildSavedReportPreviewHtml(report, aiSnap)
+      // クラウド容量不足時のフォールバック用（開くときは body を優先）
+      previewHtml: isDetailedReportHtml(fullBody) ? fullBody : buildSavedReportPreviewHtml(report, aiSnap)
     };
   });
   reports.unshift(...records);
@@ -3109,7 +3134,14 @@ async function saveCurrentReport(options = {}){
   return result;
 }
 
+function isDetailedReportHtml(html) {
+  const s = String(html || '');
+  return s.length > 400 && /day-section|月間サマリー|会計明細|ランチ・ディナー/.test(s);
+}
+
 function buildSavedReportPreviewHtml(report, aiSnap) {
+  // 詳細HTMLがある場合はそれを使う（要約だけの表示に落とさない）
+  if (isDetailedReportHtml(report?.body)) return report.body;
   const products = (aiSnap?.topProducts || report.topProducts || []).slice(0, 15);
   const productRows = products.length
     ? products.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.name)}</td><td style="text-align:right">${p.qty}点</td><td style="text-align:right">${yen(p.amt)}</td></tr>`).join('')
@@ -3123,7 +3155,30 @@ function buildSavedReportPreviewHtml(report, aiSnap) {
     </div>
     <h3>売れ筋商品</h3>
     <table class="month-table"><thead><tr><th>#</th><th>商品</th><th>点数</th><th>金額</th></tr></thead><tbody>${productRows}</tbody></table>
+    <p class="empty" style="margin-top:12px">※この表示は要約です。詳細レポートを見るには、ジャーナルを再読み込みして保存し直してください。</p>
   </div>`;
+}
+
+/** 保存済みレポートを開くとき、詳細HTMLを優先。無ければ伝票から再生成 */
+function resolveSavedReportBody(r) {
+  if (isDetailedReportHtml(r?.body)) return r.body;
+  if (isDetailedReportHtml(r?.previewHtml)) return r.previewHtml;
+  if (Array.isArray(r?.sales) && r.sales.length) {
+    try {
+      restorePaymentsMap(r.sales);
+      const days = groupByDate(r.sales);
+      const total = days.reduce((s, d) => s + d.total, 0);
+      const tax = days.reduce((s, d) => s + d.tax, 0);
+      const kind = /月間|月別|monthly/i.test(String(r.title || '')) ? 'monthly' : 'daily';
+      const rebuilt = kind === 'monthly'
+        ? monthlyReportHtml(days, total, tax, r.sales.length, r.sales)
+        : days.map(dayHtml).join('');
+      if (isDetailedReportHtml(rebuilt)) return rebuilt;
+    } catch (err) {
+      console.warn('resolveSavedReportBody rebuild failed:', err);
+    }
+  }
+  return r?.body || r?.previewHtml || `<p class="empty">このレポートの詳細HTMLは保存されていません。売上サマリーのみ表示できます。<br>総売上 ${yen(r?.total || r?.totalSales || 0)} / フード ${yen(r?.foodTotal || 0)} / ドリンク ${yen(r?.drinkTotal || 0)}<br>詳細を復元するには、同じジャーナルを再アップロードしてください。</p>`;
 }
 
 async function autoBuildAndSaveAfterLoad() {
@@ -3292,11 +3347,11 @@ async function renderSavedReports(filter='all'){
     try {
       const targetId = b.dataset.open;
       let r = reports.find(x => x.id === targetId);
-      if (!r || !(r.body || r.previewHtml)) {
+      if (!r || !(isDetailedReportHtml(r.body) || isDetailedReportHtml(r.previewHtml) || (Array.isArray(r.sales) && r.sales.length))) {
         r = await fetchSupabaseReportById(targetId) || r;
       }
       if (r) {
-        const body = r.body || r.previewHtml || `<p class="empty">このレポートの詳細HTMLは保存されていません。売上サマリーのみ表示できます。<br>総売上 ${yen(r.total || r.totalSales || 0)} / フード ${yen(r.foodTotal || 0)} / ドリンク ${yen(r.drinkTotal || 0)}</p>`;
+        const body = resolveSavedReportBody(r);
         renderReport({ ...r, body, saved: true });
       } else {
         alert('レポートを開けませんでした。');
