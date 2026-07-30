@@ -1942,7 +1942,7 @@ const SUPABASE_REST_URL = `${SUPABASE_URL}/rest/v1/saved_reports`;
 
 async function fetchSupabaseReports() {
   try {
-    const res = await fetch(`${SUPABASE_REST_URL}?select=*&order=created_at.desc`, {
+    const res = await fetch(`${SUPABASE_REST_URL}?select=id,title,period,data,created_at&order=created_at.desc&limit=200`, {
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON_KEY,
@@ -1952,14 +1952,44 @@ async function fetchSupabaseReports() {
     });
     if (!res.ok) throw new Error('Supabase fetch failed: ' + res.status);
     const rows = await res.json();
-    return rows.map(row => ({
-      id: row.id,
-      title: row.title,
-      period: row.period,
-      ...(typeof row.data === 'string' ? JSON.parse(row.data) : row.data)
-    }));
+    return rows.map(row => {
+      const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
+      return {
+        id: row.id,
+        title: row.title || d.title,
+        period: row.period || d.period,
+        ...d
+      };
+    });
   } catch (err) {
     console.warn('Supabase fetch error, fallback to local:', err);
+    return null;
+  }
+}
+
+async function fetchSupabaseReportById(id) {
+  try {
+    const res = await fetch(`${SUPABASE_REST_URL}?id=eq.${encodeURIComponent(id)}&select=*`, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (!rows || rows.length === 0) return null;
+    const row = rows[0];
+    const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
+    return {
+      id: row.id,
+      title: row.title || d.title,
+      period: row.period || d.period,
+      ...d
+    };
+  } catch (e) {
+    console.error('fetchSupabaseReportById error:', e);
     return null;
   }
 }
@@ -2483,7 +2513,19 @@ async function renderSavedReports(filter='all'){
     
   view.hidden=false; document.body.classList.add('report-open');
   view.querySelector('#savedClose').onclick=()=>{ view.hidden=true; document.body.classList.remove('report-open'); };
-  view.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{ const r=reports.find(x=>x.id===b.dataset.open); if(r) renderReport({...r,saved:true}); });
+  view.querySelectorAll('[data-open]').forEach(b=>b.onclick=async()=>{
+    showAppLoading('レポートを読み込み中...', 'データを表示します');
+    try {
+      const targetId = b.dataset.open;
+      let r = reports.find(x => x.id === targetId);
+      if (!r || !r.body) {
+        r = await fetchSupabaseReportById(targetId) || r;
+      }
+      if (r) renderReport({ ...r, saved: true });
+    } finally {
+      hideAppLoading();
+    }
+  });
   view.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{
     if(!confirm('この保存済みレポートを削除しますか？')) return;
     showSaveStatus('削除中…');
