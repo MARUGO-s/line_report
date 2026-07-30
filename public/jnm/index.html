@@ -2545,7 +2545,16 @@ async function writeSavedReports(reports, newRecords) {
 
     if (!hasToken) {
       // 未接続でも端末内には残す
-      localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
+      try {
+        localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
+      } catch (_) {
+        const compact = reports.map(r => {
+          const { body, sales, relatedReports, ...rest } = r;
+          return rest;
+        });
+        try { localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(compact)); }
+        catch (e2) { return { ok: false, remote: false, reason: 'quota', error: e2 }; }
+      }
       return { ok: true, remote: false, reason: 'auth' };
     }
 
@@ -2553,14 +2562,14 @@ async function writeSavedReports(reports, newRecords) {
       const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       try {
         // data は巨大HTML body / sales を除外したサマリーのみ送る
-        const { body, sales, relatedReports, ...data } = r;
+        const { body, sales, relatedReports, previewHtml, ...data } = r;
         await adminApiFetch('/pos-journals/saved-reports', {
           method: 'POST',
           body: JSON.stringify({
             id,
             title: String(r.title || '売上レポート'),
             period: String(r.period || ''),
-            data: { ...data, id },
+            data: { ...data, id, previewHtml },
             store_key: STORE_KEY
           })
         });
@@ -2572,7 +2581,20 @@ async function writeSavedReports(reports, newRecords) {
       }
     }
 
-    localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
+    try {
+      localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
+    } catch (quotaErr) {
+      // 容量不足時はプレビューHTMLを落として再試行
+      const compact = reports.map(r => {
+        const { body, sales, relatedReports, previewHtml, ...rest } = r;
+        return rest;
+      });
+      try {
+        localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(compact));
+      } catch (e2) {
+        return { ok: false, remote: uploaded > 0, reason: 'quota', error: quotaErr };
+      }
+    }
     if (uploaded === 0 && toUpload.length > 0) {
       return { ok: false, remote: false, reason: 'upload', error: lastErr };
     }
@@ -2878,7 +2900,8 @@ function restorePaymentsMap(sales) {
   });
 }
 
-function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=null,salesOverride=null){
+function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=null,salesOverride=null, options={}){
+  const silent = !!options.silent;
   const start = startFilter !== null ? startFilter : startDateInput.value;
   const end = endFilter !== null ? endFilter : endDateInput.value;
   
@@ -2894,15 +2917,20 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
   }
   
   if(audit.critical.length && !salesOverride){
-    alert(`検算で問題が見つかったため、レポート作成を中止しました。\n\n${audit.critical.slice(0,8).join('\n')}${audit.critical.length>8?`\nほか${audit.critical.length-8}件`:''}`);
-    return;
+    if (!silent) {
+      alert(`検算で問題が見つかったため、レポート作成を中止しました。\n\n${audit.critical.slice(0,8).join('\n')}${audit.critical.length>8?`\nほか${audit.critical.length-8}件`:''}`);
+    }
+    return null;
   }
-  if(sales.length===0){ alert('完了した売上レコードが見つかりませんでした。'); return; }
+  if(sales.length===0){
+    if (!silent) alert('完了した売上レコードが見つかりませんでした。');
+    return null;
+  }
   
   const months=new Set(sales.map(s=>s.date.slice(0,7)));
   if(kind==='monthly' && !start && !end && !monthFilter && !salesOverride && months.size!==1){
-    alert(`月間レポートには1か月分だけ読み込んでください。\n現在は${[...months].join('、')}のデータが混在しています。`);
-    return;
+    if (!silent) alert(`月間レポートには1か月分だけ読み込んでください。\n現在は${[...months].join('、')}のデータが混在しています。`);
+    return null;
   }
   const days=groupByDate(sales), total=days.reduce((s,d)=>s+d.total,0), tax=days.reduce((s,d)=>s+d.tax,0);
   const foodTotal=days.reduce((sum,d)=>sum+(d.byCategory.get('フード')||0),0);
@@ -2913,12 +2941,12 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
   const mealPeriods=combineMealPeriods(days);
   const lunch=mealPeriods.get('ランチ'),dinner=mealPeriods.get('ディナー');
   if(foodTotal+drinkTotal+roomTotal+otherTotal!==total){
-    alert(`カテゴリ分類合計${yen(foodTotal+drinkTotal+roomTotal+otherTotal)}と総売上${yen(total)}が一致しないため、レポート作成を中止しました。`);
-    return;
+    if (!silent) alert(`カテゴリ分類合計${yen(foodTotal+drinkTotal+roomTotal+otherTotal)}と総売上${yen(total)}が一致しないため、レポート作成を中止しました。`);
+    return null;
   }
   if(lunch.total+dinner.total!==total||lunch.receipts.length+dinner.receipts.length!==sales.length){
-    alert('ランチ・ディナー分類の会計数または売上が総合計と一致しないため、レポート作成を中止しました。');
-    return;
+    if (!silent) alert('ランチ・ディナー分類の会計数または売上が総合計と一致しないため、レポート作成を中止しました。');
+    return null;
   }
   const summaryCustomers=days.reduce((sum,d)=>sum+d.customers,0);
   const peopleComplete=days.every(d=>d.peopleComplete);
@@ -2947,97 +2975,161 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
     lunchTotal: lunch.total,
     dinnerTotal: dinner.total,
     lunchCustomers: lunch.customers,
-    dinnerCustomers: dinner.customers
+    dinnerCustomers: dinner.customers,
+    parserVersion: PARSER_VERSION,
+    verificationVersion: VERIFICATION_VERSION,
+    categoryVersion: CATEGORY_VERSION,
+    mealPeriodVersion: MEAL_PERIOD_VERSION,
+    createdAt: reportStamp()
   };
 
   currentReport = reportObj;
   const computedAiData = buildSalesDataForAI();
   Object.assign(reportObj, computedAiData);
 
-  renderReport(reportObj);
+  if (!options.skipRender) renderReport(reportObj);
+  return reportObj;
 }
 
-function buildBothReports(salesOverride=null){
+function buildBothReports(salesOverride=null, options={}){
+  const silent = !!options.silent;
+  const skipRender = silent || !!options.skipRender;
   const start = startDateInput.value;
   const end = endDateInput.value;
-  
+  const reports = [];
+  const pushCurrent = () => { if (currentReport) reports.push({ ...currentReport }); };
+
   if (salesOverride) {
-    const reports = [];
-    buildReport('daily', start, end, null, salesOverride);
-    if (currentReport) reports.push(currentReport);
-    buildReport('monthly', start, end, null, salesOverride);
-    if (currentReport) reports.push(currentReport);
-    
-    if(reports.length) currentReport={...reports[reports.length-1],relatedReports:reports};
-    return;
+    if (!buildReport('daily', start, end, null, salesOverride, { silent, skipRender })) return false;
+    pushCurrent();
+    if (!buildReport('monthly', start, end, null, salesOverride, { silent, skipRender })) return false;
+    pushCurrent();
+    if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+    return reports.length > 0;
   }
-  
+
   if (start || end) {
-    const reports = [];
-    buildReport('daily', start, end);
-    if (currentReport) reports.push(currentReport);
-    buildReport('monthly', start, end);
-    if (currentReport) reports.push(currentReport);
-    
-    if(reports.length) currentReport={...reports[reports.length-1],relatedReports:reports};
-    return;
+    if (!buildReport('daily', start, end, null, null, { silent, skipRender })) return false;
+    pushCurrent();
+    if (!buildReport('monthly', start, end, null, null, { silent, skipRender })) return false;
+    pushCurrent();
+    if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+    return reports.length > 0;
   }
-  
-  const audit=collectSalesAudit();
-  if(audit.critical.length){
-    alert(`検算で問題が見つかったため、レポート作成を中止しました。\n\n${audit.critical.slice(0,8).join('\n')}${audit.critical.length>8?`\nほか${audit.critical.length-8}件`:''}`);
-    return;
+
+  const audit = collectSalesAudit();
+  if (audit.critical.length) {
+    if (!silent) {
+      alert(`検算で問題が見つかったため、レポート作成を中止しました。\n\n${audit.critical.slice(0,8).join('\n')}${audit.critical.length>8?`\nほか${audit.critical.length-8}件`:''}`);
+    }
+    return false;
   }
-  const months=[...new Set(audit.sales.map(s=>s.date.slice(0,7)))].sort();
-  if(!months.length){ alert('完了した売上レコードが見つかりませんでした。'); return; }
-  const reports=[];
-  for(const month of months){
-    buildReport('daily', null, null, month);
-    if(currentReport) reports.push(currentReport);
-    buildReport('monthly', null, null, month);
-    if(currentReport) reports.push(currentReport);
+  const months = [...new Set(audit.sales.map(s => s.date.slice(0, 7)))].sort();
+  if (!months.length) {
+    if (!silent) alert('完了した売上レコードが見つかりませんでした。');
+    return false;
   }
-  if(reports.length) currentReport={...reports[reports.length-1],relatedReports:reports};
+  for (const month of months) {
+    if (!buildReport('daily', null, null, month, null, { silent, skipRender })) continue;
+    pushCurrent();
+    if (!buildReport('monthly', null, null, month, null, { silent, skipRender })) continue;
+    pushCurrent();
+  }
+  if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+  return reports.length > 0;
 }
 
-async function saveCurrentReport(){
-  if(!currentReport) return;
+async function saveCurrentReport(options = {}){
+  const silent = !!options.silent;
+  const openList = options.openList !== false;
+  if (!currentReport) return { ok: false, reason: 'empty' };
   showSaveStatus('保存中…');
-  const reports=(await readSavedReports()).map(report=>report);
-  const bundle=currentReport.relatedReports?.length?currentReport.relatedReports:[currentReport];
-  // sales明細は容量が大きいため除外し、AIチャット用に商品サマリー(topProducts)は残す。
-  const records=bundle.map((report, idx)=>{
+  const reports = (await readSavedReports()).map(report => report);
+  const bundle = currentReport.relatedReports?.length ? currentReport.relatedReports : [currentReport];
+  const records = bundle.map((report, idx) => {
     const prev = currentReport;
     currentReport = report;
     const aiSnap = buildSalesDataForAI();
     currentReport = prev;
-    const {relatedReports, sales, body, ...withoutBundle}=report;
+    const { relatedReports, sales, body, ...withoutBundle } = report;
     return {
-      id:`${Date.now()}_${idx}_${Math.random().toString(36).slice(2,8)}`,
+      id: `${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 8)}`,
       ...withoutBundle,
       createdAt: withoutBundle.createdAt || reportStamp(),
       topProducts: Array.isArray(aiSnap.topProducts) ? aiSnap.topProducts.slice(0, 30) : (report.topProducts || []),
-      totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers||0)+(report.dinnerCustomers||0)) || 0,
+      totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers || 0) + (report.dinnerCustomers || 0)) || 0,
       weekdayBreakdown: aiSnap.weekdayBreakdown || report.weekdayBreakdown || [],
-      hourlyBreakdown: (aiSnap.hourlyBreakdown || report.hourlyBreakdown || []).slice(0, 24)
+      hourlyBreakdown: (aiSnap.hourlyBreakdown || report.hourlyBreakdown || []).slice(0, 24),
+      // 端末内プレビュー用に軽量HTMLを残す（クラウド送信時は writeSavedReports 側で除外）
+      previewHtml: buildSavedReportPreviewHtml(report, aiSnap)
     };
   });
   reports.unshift(...records);
-  const result=await writeSavedReports(reports.slice(0,100), records);
-  if(result && result.ok){
-    if(result.reason==='auth'){
-      finishSaveStatus('端末内に保存（未接続のためクラウド未同期）');
-      alert('管理トークン未接続のため、クラウドには保存できていません。\n画面上部でトークン接続するか、LINEの最新リンクから開き直して再度保存してください。\n（この端末内には一時保存されています）');
-    } else if(result.failed){
-      finishSaveStatus(`保存しました（クラウド ${result.uploaded}件 / 失敗 ${result.failed}件）`);
+  const result = await writeSavedReports(reports.slice(0, 100), records);
+  if (result && result.ok) {
+    if (result.reason === 'auth') {
+      finishSaveStatus(`端末に${records.length}件保存（クラウド未同期）`);
+      if (!silent) {
+        alert('管理トークン未接続のため、クラウドには保存できていません。\n画面上部でトークン接続するか、LINEの最新リンクから開き直してください。\n（この端末内には保存済みです）');
+      }
+    } else if (result.failed) {
+      finishSaveStatus(`保存完了（クラウド ${result.uploaded}件 / 失敗 ${result.failed}件）`);
     } else {
-      finishSaveStatus('保存しました');
+      finishSaveStatus(`${records.length}件のレポートを保存しました`);
     }
-    renderSavedReports();
+    if (openList) await renderSavedReports();
   } else {
-    finishSaveStatus('保存に失敗しました',true);
-    const msg = result?.error?.message || result?.reason || '';
-    alert('レポートの保存に失敗しました。' + (msg ? `\n${msg}` : '') + '\n管理トークン接続状態をご確認ください。');
+    finishSaveStatus('保存に失敗しました', true);
+    if (!silent) {
+      const msg = result?.error?.message || result?.reason || '';
+      alert('レポートの保存に失敗しました。' + (msg ? `\n${msg}` : ''));
+    }
+  }
+  return result;
+}
+
+function buildSavedReportPreviewHtml(report, aiSnap) {
+  const products = (aiSnap?.topProducts || report.topProducts || []).slice(0, 15);
+  const productRows = products.length
+    ? products.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.name)}</td><td style="text-align:right">${p.qty}点</td><td style="text-align:right">${yen(p.amt)}</td></tr>`).join('')
+    : '<tr><td colspan="4">商品明細なし</td></tr>';
+  return `<div class="report"><h1 class="r-title">${esc(report.title || '売上レポート')}</h1>
+    <p class="r-meta">対象期間 ${esc(report.period || '')}　/　${report.salesCount || 0}件　/　総売上 ${yen(report.total || report.totalSales || 0)}</p>
+    <div class="kpis">
+      <div class="kpi"><div class="k-l">総売上</div><div class="k-v">${yen(report.total || report.totalSales || 0)}</div></div>
+      <div class="kpi"><div class="k-l">フード</div><div class="k-v">${yen(report.foodTotal || 0)}</div></div>
+      <div class="kpi"><div class="k-l">ドリンク</div><div class="k-v">${yen(report.drinkTotal || 0)}</div></div>
+    </div>
+    <h3>売れ筋商品</h3>
+    <table class="month-table"><thead><tr><th>#</th><th>商品</th><th>点数</th><th>金額</th></tr></thead><tbody>${productRows}</tbody></table>
+  </div>`;
+}
+
+async function autoBuildAndSaveAfterLoad() {
+  const usable = items.filter(it => !it.error && (it.extracted > 0 || it.total > 0));
+  if (!usable.length) return { ok: false, reason: 'no-sales' };
+
+  showAppLoading('レポートを自動作成中...', '読み込み完了 → 集計中');
+  await yieldToUI();
+  try {
+    const built = buildBothReports(null, { silent: true });
+    if (!built || !currentReport) {
+      hideAppLoading();
+      finishSaveStatus('自動作成できる売上がありません', true);
+      return { ok: false, reason: 'build' };
+    }
+
+    const count = currentReport.relatedReports?.length || 1;
+    showAppLoading('レポートを自動保存中...', `${count}件を保存しています`);
+    await yieldToUI();
+    const result = await saveCurrentReport({ silent: true, openList: true });
+    hideAppLoading();
+    return result || { ok: false };
+  } catch (err) {
+    hideAppLoading();
+    console.error('autoBuildAndSaveAfterLoad error:', err);
+    finishSaveStatus('自動保存に失敗しました', true);
+    return { ok: false, error: err };
   }
 }
 
@@ -3093,10 +3185,15 @@ async function renderSavedReports(filter='all'){
     try {
       const targetId = b.dataset.open;
       let r = reports.find(x => x.id === targetId);
-      if (!r || !r.body) {
+      if (!r || !(r.body || r.previewHtml)) {
         r = await fetchSupabaseReportById(targetId) || r;
       }
-      if (r) renderReport({ ...r, saved: true });
+      if (r) {
+        const body = r.body || r.previewHtml || `<p class="empty">このレポートの詳細HTMLは保存されていません。売上サマリーのみ表示できます。<br>総売上 ${yen(r.total || r.totalSales || 0)} / フード ${yen(r.foodTotal || 0)} / ドリンク ${yen(r.drinkTotal || 0)}</p>`;
+        renderReport({ ...r, body, saved: true });
+      } else {
+        alert('レポートを開けませんでした。');
+      }
     } finally {
       hideAppLoading();
     }
@@ -3393,6 +3490,7 @@ async function addFiles(list){
   const enc=encSel.value, mode=modeSel.value;
   let duplicateFiles=0, metadataFiles=0;
   let processed=0;
+  let added=0;
   try{
     for(const f of files){
       processed++;
@@ -3417,6 +3515,7 @@ async function addFiles(list){
       if(items.some(it=>!it.error&&it.fingerprint===fingerprint&&sameBytes(it.bytes,buf))){ duplicateFiles++; continue; }
       const r=process(buf,enc,mode);
       items.push({name,bytes:buf,fingerprint,preview:r.preview,total:r.total,extracted:r.extracted,summary:r.summary,audit:r.audit});
+      added++;
     }
   }finally{
     render();
@@ -3428,6 +3527,11 @@ async function addFiles(list){
   if(duplicateFiles) notices.push(`同じ内容のファイル${duplicateFiles}件は重複集計を防ぐため追加しませんでした。`);
   if(metadataFiles) notices.push(`macOSの管理ファイル${metadataFiles}件は集計対象外として無視しました。`);
   if(notices.length) alert(notices.join('\n'));
+
+  // 読み込み成功分があれば、レポート作成→保存まで自動実行
+  if (added > 0 && items.some(it => !it.error && it.extracted > 0)) {
+    await autoBuildAndSaveAfterLoad();
+  }
 }
 
 function readDirectoryEntries(directoryEntry){
