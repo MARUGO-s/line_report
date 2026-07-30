@@ -1875,11 +1875,10 @@ function parserSelfCheck(){
 合 計 \\1,000
 計1 現計 \\1,000
 控え番号 12
-1名
-01扱大竹俊活                 1名`;
+1名`;
   const tableParsed=parseReceipt(withTable);
-  if(tableParsed?.tableNo!=='5'||tableParsed?.slipNo!=='2'||tableParsed?.staffName!=='大竹俊活'){
-    failed.push('テーブルNo・伝票No・担当者の抽出');
+  if(tableParsed?.tableNo!=='5'||tableParsed?.slipNo!=='2'){
+    failed.push('テーブルNo・伝票Noの抽出');
   }
   const withSeat=`0001-01 No.13 2026年 6月 1日(月) 20時00分
 0000000000001 チャージ料
@@ -1892,7 +1891,7 @@ function parserSelfCheck(){
   if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-31-v13';
+const PARSER_VERSION='2026-07-31-v14';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -2039,10 +2038,10 @@ function parseReceiptPayments(rec,change=0){
   return {byMethod,tenderedByMethod,details,total,tenderedTotal,change};
 }
 
-/** 伝票No / テーブルNo / 担当者（〇扱氏名）をレシート本文から取得 */
+/** 伝票No / テーブルNo をレシート本文から取得 */
 function parseReceiptTableMeta(rec){
   const text=String(rec).normalize('NFKC');
-  let tableNo='', slipNo='', staffName='';
+  let tableNo='', slipNo='';
   for(const line of text.split('\n')){
     const table=line.match(/伝票\s*No\.?\s*([^\s]+)\s+テーブル\s*No\.?\s*([^\s]+)/);
     if(table){
@@ -2058,13 +2057,8 @@ function parseReceiptTableMeta(rec){
       const tbl=String(move[1]||'').trim();
       if(tbl && !/^保留/.test(tbl) && tbl!=='.') tableNo=tbl;
     }
-    const staff=line.match(/^\s*\d{1,2}扱\s*(.+?)\s*(?:\d+\s*名)?\s*$/);
-    if(staff){
-      const name=String(staff[1]||'').replace(/\s+/g,' ').trim();
-      if(name) staffName=name;
-    }
   }
-  return { tableNo, slipNo, staffName };
+  return { tableNo, slipNo };
 }
 
 function parseReceipt(rec){
@@ -2089,7 +2083,7 @@ function parseReceipt(rec){
   const customers=isSplitFragment?0:(customerCountReliable?customerCountCandidates[0]:0);
   const payments=parseReceiptPayments(rec,change);
   let method=payments.byMethod.size>1?'併用':([...payments.byMethod.keys()][0]||'その他');
-  const { tableNo, slipNo, staffName }=parseReceiptTableMeta(rec);
+  const { tableNo, slipNo }=parseReceiptTableMeta(rec);
   // 商品明細（レシート内で純額を集計＝取消を相殺）
   const map=new Map(); let pend=null;
   for(const ln of rec.split('\n')){
@@ -2115,7 +2109,7 @@ function parseReceipt(rec){
     total, tax,
     points:ptM?numOf(ptM[1]):0,groups:isSplitFragment?0:1,customers,
     customerCountCandidates,customerCountReliable,isSplitFragment,
-    tableNo, slipNo, staffName,
+    tableNo, slipNo,
     method,payments,change,items,itemTotal};
 }
 
@@ -2480,10 +2474,9 @@ function receiptCard(r){
   const rows=r.items.map(it=>`<tr><td>${esc(it.name)}</td><td class="qty">${it.qty}点</td><td class="amt">${yen(it.amount)}</td></tr>`).join('');
   const changeLine=r.method==='現金'&&r.change?` <span class="rc-tax">（お釣 ${yen(r.change)}）</span>`:'';
   const tableBadge=r.tableNo?`<span class="rc-time">卓 ${esc(r.tableNo)}${r.slipNo?`・伝票${esc(r.slipNo)}`:''}</span>`:'';
-  const staffBadge=r.staffName?`<span class="rc-time">${esc(r.staffName)}</span>`:'';
   return `<div class="rc">
     <div class="rc-head"><span class="rc-no">No.${esc(r.no)}</span><span class="rc-time">${esc(r.time)}</span>
-      <span class="rc-time">${r.customers}名</span>${tableBadge}${staffBadge}<span class="meal-badge ${mealClass}">${esc(r.mealPeriod)}</span>
+      <span class="rc-time">${r.customers}名</span>${tableBadge}<span class="meal-badge ${mealClass}">${esc(r.mealPeriod)}</span>
       <span class="rc-badge ${cls}">${esc(r.method)}</span></div>
     <table>${rows}</table>
     <div class="rc-total"><span>合計 <span class="rc-tax">（内税 ${yen(r.tax)}${r.points?' ・'+r.points+'点':''}）</span>${changeLine}</span><b>${yen(r.total)}</b></div>
