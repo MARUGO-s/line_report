@@ -2025,10 +2025,11 @@ function validateReceipt(r){
 }
 const PARSER_CHECK=parserSelfCheck();
 
-function collectSalesAudit(){
+function collectSalesAudit(itemList=null){
   const enc=encSel.value, sales=[],critical=[],warnings=[],seen=new Map();
   let reconciledFiles=0, summaryFiles=0, duplicateCount=0;
-  items.forEach((it,index)=>{
+  const sourceItems = Array.isArray(itemList) ? itemList : items;
+  sourceItems.forEach((it,index)=>{
     if(it.error) return;
     const recs=splitRecords(convert(it.bytes, enc));
     const fileCompleted=completedRecords(recs);
@@ -2905,7 +2906,7 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
   const start = startFilter !== null ? startFilter : startDateInput.value;
   const end = endFilter !== null ? endFilter : endDateInput.value;
   
-  const audit=collectSalesAudit(), allSales=salesOverride || audit.sales;
+  const audit=collectSalesAudit(options.itemList || null), allSales=salesOverride || audit.sales;
   let sales=allSales;
   restorePaymentsMap(sales);
   
@@ -2957,11 +2958,16 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
   const body=auditHtml(audit)+reportBody;
   
   const title = kind === 'monthly' 
-    ? ((start || end || monthFilter || salesOverride) ? '期間集計売上レポート' : '月間売上レポート') 
+    ? ((start || end || monthFilter || salesOverride) ? '月間売上レポート' : '月間売上レポート') 
     : '日別売上レポート';
+  const monthLabel = monthFilter
+    ? `${monthFilter.slice(0,4)}年${Number(monthFilter.slice(5))}月`
+    : (sales[0]?.date ? `${String(sales[0].date).slice(0,4)}年${Number(String(sales[0].date).slice(5,7))}月` : '');
+  const folderNote = options.folderLabel ? ` / フォルダ ${options.folderLabel}` : '';
+  const titled = monthLabel ? `${title}（${monthLabel}${folderNote}）` : `${title}${folderNote}`;
     
   const reportObj = {
-    title,
+    title: titled,
     period: reportPeriod(days),
     sales,
     salesCount: sales.length,
@@ -2994,21 +3000,35 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
 function buildBothReports(salesOverride=null, options={}){
   const silent = !!options.silent;
   const skipRender = silent || !!options.skipRender;
-  const start = startDateInput.value;
-  const end = endDateInput.value;
+  // 自動保存時は期間入力を無視し、必ず月ごとに分割する
+  const forceByMonth = !!options.byMonth;
+  const start = forceByMonth ? '' : startDateInput.value;
+  const end = forceByMonth ? '' : endDateInput.value;
   const reports = [];
   const pushCurrent = () => { if (currentReport) reports.push({ ...currentReport }); };
+  const itemList = options.itemList || null;
 
   if (salesOverride) {
-    if (!buildReport('daily', start, end, null, salesOverride, { silent, skipRender })) return false;
-    pushCurrent();
-    if (!buildReport('monthly', start, end, null, salesOverride, { silent, skipRender })) return false;
-    pushCurrent();
+    const months = [...new Set(salesOverride.map(s => String(s.date || '').slice(0, 7)).filter(Boolean))].sort();
+    if (forceByMonth && months.length >= 1) {
+      for (const month of months) {
+        const monthSales = salesOverride.filter(s => String(s.date || '').slice(0, 7) === month);
+        if (!buildReport('daily', null, null, month, monthSales, { silent, skipRender, itemList, folderLabel: options.folderLabel })) continue;
+        pushCurrent();
+        if (!buildReport('monthly', null, null, month, monthSales, { silent, skipRender, itemList, folderLabel: options.folderLabel })) continue;
+        pushCurrent();
+      }
+    } else {
+      if (!buildReport('daily', start || null, end || null, null, salesOverride, { silent, skipRender, itemList, folderLabel: options.folderLabel })) return false;
+      pushCurrent();
+      if (!buildReport('monthly', start || null, end || null, null, salesOverride, { silent, skipRender, itemList, folderLabel: options.folderLabel })) return false;
+      pushCurrent();
+    }
     if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
     return reports.length > 0;
   }
 
-  if (start || end) {
+  if (!forceByMonth && (start || end)) {
     if (!buildReport('daily', start, end, null, null, { silent, skipRender })) return false;
     pushCurrent();
     if (!buildReport('monthly', start, end, null, null, { silent, skipRender })) return false;
@@ -3017,12 +3037,13 @@ function buildBothReports(salesOverride=null, options={}){
     return reports.length > 0;
   }
 
-  const audit = collectSalesAudit();
+  const audit = collectSalesAudit(itemList);
   if (audit.critical.length) {
     if (!silent) {
       alert(`検算で問題が見つかったため、レポート作成を中止しました。\n\n${audit.critical.slice(0,8).join('\n')}${audit.critical.length>8?`\nほか${audit.critical.length-8}件`:''}`);
     }
-    return false;
+    // 自動保存時は警告があっても月次分割を試行する
+    if (!silent) return false;
   }
   const months = [...new Set(audit.sales.map(s => s.date.slice(0, 7)))].sort();
   if (!months.length) {
@@ -3030,9 +3051,9 @@ function buildBothReports(salesOverride=null, options={}){
     return false;
   }
   for (const month of months) {
-    if (!buildReport('daily', null, null, month, null, { silent, skipRender })) continue;
+    if (!buildReport('daily', null, null, month, null, { silent, skipRender, itemList, folderLabel: options.folderLabel })) continue;
     pushCurrent();
-    if (!buildReport('monthly', null, null, month, null, { silent, skipRender })) continue;
+    if (!buildReport('monthly', null, null, month, null, { silent, skipRender, itemList, folderLabel: options.folderLabel })) continue;
     pushCurrent();
   }
   if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
@@ -3109,18 +3130,64 @@ async function autoBuildAndSaveAfterLoad() {
   const usable = items.filter(it => !it.error && (it.extracted > 0 || it.total > 0));
   if (!usable.length) return { ok: false, reason: 'no-sales' };
 
-  showAppLoading('レポートを自動作成中...', '読み込み完了 → 集計中');
+  showAppLoading('レポートを自動作成中...', 'フォルダ／月ごとに分類しています');
   await yieldToUI();
+
+  // 自動作成中は期間フィルタを無効化し、1本の結合レポートにしない
+  const prevStart = startDateInput.value;
+  const prevEnd = endDateInput.value;
+  startDateInput.value = '';
+  endDateInput.value = '';
+
   try {
-    const built = buildBothReports(null, { silent: true });
-    if (!built || !currentReport) {
+    const groups = new Map();
+    usable.forEach(it => {
+      const key = it.folderMonth
+        || (it.sourceFolder ? `folder:${it.sourceFolder}` : 'default');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(it);
+    });
+
+    const allReports = [];
+    let gi = 0;
+    for (const [key, groupItems] of groups) {
+      gi++;
+      const folderLabel = groupItems.find(it => it.sourceFolder)?.sourceFolder
+        || (key.startsWith('folder:') ? key.slice(7) : (key === 'default' ? '' : key));
+      showAppLoading('レポートを自動作成中...', `グループ ${gi}/${groups.size}${folderLabel ? `（${folderLabel}）` : ''}`);
+      await yieldToUI();
+
+      const audit = collectSalesAudit(groupItems);
+      if (!audit.sales.length) continue;
+
+      // フォルダ名から月が分かる場合は、その月の売上を優先（フォルダ単位で分ける）
+      let salesForGroup = audit.sales;
+      if (/^\d{4}-\d{2}$/.test(key)) {
+        const monthSales = audit.sales.filter(s => String(s.date || '').slice(0, 7) === key);
+        if (monthSales.length) salesForGroup = monthSales;
+      }
+
+      const ok = buildBothReports(salesForGroup, {
+        silent: true,
+        byMonth: true,
+        itemList: groupItems,
+        folderLabel: folderLabel || undefined
+      });
+      if (ok && currentReport?.relatedReports?.length) {
+        allReports.push(...currentReport.relatedReports);
+      } else if (ok && currentReport) {
+        allReports.push(currentReport);
+      }
+    }
+
+    if (!allReports.length) {
       hideAppLoading();
       finishSaveStatus('自動作成できる売上がありません', true);
       return { ok: false, reason: 'build' };
     }
 
-    const count = currentReport.relatedReports?.length || 1;
-    showAppLoading('レポートを自動保存中...', `${count}件を保存しています`);
+    currentReport = { ...allReports[allReports.length - 1], relatedReports: allReports };
+    showAppLoading('レポートを自動保存中...', `${allReports.length}件を月別に保存しています`);
     await yieldToUI();
     const result = await saveCurrentReport({ silent: true, openList: true });
     hideAppLoading();
@@ -3130,7 +3197,47 @@ async function autoBuildAndSaveAfterLoad() {
     console.error('autoBuildAndSaveAfterLoad error:', err);
     finishSaveStatus('自動保存に失敗しました', true);
     return { ok: false, error: err };
+  } finally {
+    startDateInput.value = prevStart;
+    endDateInput.value = prevEnd;
   }
+}
+
+function inferMonthFromFolderName(name) {
+  const base = String(name || '').replace(/\/+$/, '').split(/[/\\]/).filter(Boolean).pop() || '';
+  // 店舗コード+YY+MM（例: 232307 → 2023-07）
+  let m = base.match(/^(\d{2})(\d{2})(0[1-9]|1[0-2])$/);
+  if (m) return `20${m[2]}-${m[3]}`;
+  // YYYYMM（例: 202307）
+  m = base.match(/^(20\d{2})(0[1-9]|1[0-2])$/);
+  if (m) return `${m[1]}-${m[2]}`;
+  // YYMM（例: 2307）
+  m = base.match(/^(\d{2})(0[1-9]|1[0-2])$/);
+  if (m) return `20${m[1]}-${m[2]}`;
+  return null;
+}
+
+function folderMetaFromFile(f) {
+  const rel = String(f.webkitRelativePath || f._sourceFolder || '');
+  const parts = rel.split(/[/\\]/).filter(Boolean);
+  const top = f._topFolder || parts[0] || '';
+  const candidates = [];
+  if (f._topFolder) candidates.push(f._topFolder);
+  candidates.push(...parts);
+  let folderMonth = f._folderMonth || null;
+  let monthFolder = '';
+  for (const part of [...candidates].reverse()) {
+    const m = inferMonthFromFolderName(part);
+    if (m) {
+      folderMonth = folderMonth || m;
+      monthFolder = part;
+      break;
+    }
+  }
+  return {
+    sourceFolder: monthFolder || top || '',
+    folderMonth
+  };
 }
 
 async function renderSavedReports(filter='all'){
@@ -3473,6 +3580,13 @@ function updatePeriodInputs() {
     dates.sort();
     const minDate = dates[0];
     const maxDate = dates[dates.length - 1];
+    const months = new Set(dates.map(d => String(d).slice(0, 7)));
+    // 複数月は期間を埋めない（1本の結合レポート化を防ぐ）
+    if (months.size > 1) {
+      startDateInput.value = '';
+      endDateInput.value = '';
+      return;
+    }
     if (minDate && maxDate) {
       if (!startDateInput.value) startDateInput.value = minDate;
       if (!endDateInput.value) endDateInput.value = maxDate;
@@ -3499,6 +3613,7 @@ async function addFiles(list){
       await yieldToUI();
 
       if(f.name.startsWith('._')){ metadataFiles++; continue; }
+      const meta = folderMetaFromFile(f);
       let buf=new Uint8Array(await f.arrayBuffer());
       let name=f.name;
       // .lzh は解凍して中の .jnl を取り出す
@@ -3507,14 +3622,14 @@ async function addFiles(list){
           buf=unlzh(buf).bytes;
           name=name.replace(/\.lzh$/i,'') + '.jnl';
         }catch(e){
-          items.push({name:f.name,error:'解凍に失敗しました（'+e.message+'）'});
+          items.push({name:f.name,error:'解凍に失敗しました（'+e.message+'）',sourceFolder:meta.sourceFolder,folderMonth:meta.folderMonth});
           continue;
         }
       }
       const fingerprint=byteFingerprint(buf);
       if(items.some(it=>!it.error&&it.fingerprint===fingerprint&&sameBytes(it.bytes,buf))){ duplicateFiles++; continue; }
       const r=process(buf,enc,mode);
-      items.push({name,bytes:buf,fingerprint,preview:r.preview,total:r.total,extracted:r.extracted,summary:r.summary,audit:r.audit});
+      items.push({name,bytes:buf,fingerprint,preview:r.preview,total:r.total,extracted:r.extracted,summary:r.summary,audit:r.audit,sourceFolder:meta.sourceFolder,folderMonth:meta.folderMonth});
       added++;
     }
   }finally{
@@ -3545,14 +3660,45 @@ function readDirectoryEntries(directoryEntry){
     readBatch();
   });
 }
-async function collectDropEntry(entry){
+async function collectDropEntry(entry, pathParts = [], topFolder = null){
   if(entry.isFile){
-    return await new Promise(resolve=>entry.file(file=>resolve([file]),()=>resolve([])));
+    return await new Promise(resolve=>entry.file(file=>{
+      const top = topFolder || pathParts[0] || '';
+      const relPath = pathParts.length ? pathParts.join('/') + '/' + entry.name : entry.name;
+      let folderMonth = null;
+      let monthFolder = '';
+      for (const part of [...pathParts, top].reverse()) {
+        const m = inferMonthFromFolderName(part);
+        if (m) {
+          folderMonth = m;
+          monthFolder = part;
+          break;
+        }
+      }
+      try {
+        Object.defineProperty(file, '_topFolder', { value: monthFolder || top, writable: true });
+        Object.defineProperty(file, '_sourceFolder', { value: relPath, writable: true });
+        Object.defineProperty(file, '_folderMonth', { value: folderMonth, writable: true });
+      } catch (_) {
+        file._topFolder = monthFolder || top;
+        file._sourceFolder = relPath;
+        file._folderMonth = folderMonth;
+      }
+      // webkitRelativePath が空のとき用に相対パスを残す
+      if (!file.webkitRelativePath && relPath) {
+        try {
+          Object.defineProperty(file, 'webkitRelativePath', { value: relPath, configurable: true });
+        } catch (_) {}
+      }
+      resolve([file]);
+    },()=>resolve([])));
   }
   if(entry.isDirectory){
+    const nextTop = topFolder || entry.name;
+    const nextParts = [...pathParts, entry.name];
     const children=await readDirectoryEntries(entry);
     const files=[];
-    for(const child of children) files.push(...await collectDropEntry(child));
+    for(const child of children) files.push(...await collectDropEntry(child, nextParts, nextTop));
     return files;
   }
   return [];
