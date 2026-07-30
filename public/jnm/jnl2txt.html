@@ -1340,7 +1340,27 @@ document.addEventListener('DOMContentLoaded', async function () {
   }
   setAuthUiState(!!getAdminToken());
   if (getAdminToken()) {
-    try { await loadProductCategoryOverridesFromCloud(); } catch (_) {}
+    try {
+      await loadProductCategoryOverridesFromCloud();
+      const keys = Object.keys(readProductCategoryOverrides());
+      if (keys.length) {
+        const syncKey = 'jnl2txt_category_overrides_synced_v1';
+        let already = false;
+        try { already = sessionStorage.getItem(syncKey) === '1'; } catch (_) {}
+        if (!already) {
+          try { sessionStorage.setItem(syncKey, '1'); } catch (_) {}
+          showAppLoading('分類ルールを同期中...', '保存済みレポートへ反映しています');
+          try {
+            const prop = await propagateCategoryOverridesToCloudReports(keys);
+            if (prop.updated) finishSaveStatus(`分類ルールを ${prop.updated} 件のレポートへ反映しました`);
+          } catch (err) {
+            console.warn('override sync:', err);
+          } finally {
+            hideAppLoading();
+          }
+        }
+      }
+    } catch (_) {}
   }
   const saveBtn = document.getElementById('saveTokenBtn');
   const tokenInput = document.getElementById('tokenInput');
