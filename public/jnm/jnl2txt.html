@@ -3623,11 +3623,26 @@ async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, report
     if (!analysisText) return;
     const title = reportTitle || currentReport?.title || '売上分析レポート';
     const period = reportPeriod || currentReport?.period || '';
+    
+    // ダッシュボード再現に必要な売上データのスナップショットを抽出
+    const salesSnapshot = currentReport ? {
+      total: currentReport.total || 0,
+      salesCount: currentReport.salesCount || 0,
+      foodTotal: currentReport.foodTotal || 0,
+      drinkTotal: currentReport.drinkTotal || 0,
+      lunchTotal: currentReport.lunchTotal || 0,
+      dinnerTotal: currentReport.dinnerTotal || 0,
+      lunchCustomers: currentReport.lunchCustomers || 0,
+      dinnerCustomers: currentReport.dinnerCustomers || 0,
+      sales: (currentReport.sales || []).slice(0, 500)
+    } : null;
+
     const record = {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       report_title: String(title),
       report_period: String(period),
       analysis_result: String(analysisText),
+      sales_data: salesSnapshot,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -3721,13 +3736,41 @@ async function deleteAiHistory(id) {
 
 function openAiHistoryReportView(item) {
   const view = document.getElementById('reportView');
+  const snap = item.sales_data || {};
+  
   currentReport = {
     title: item.report_title || 'AI売上分析レポート',
     period: item.report_period || '',
     aiAnalysisText: item.analysis_result || '',
-    total: 0,
-    salesCount: 0
+    total: snap.total || 0,
+    salesCount: snap.salesCount || 0,
+    foodTotal: snap.foodTotal || 0,
+    drinkTotal: snap.drinkTotal || 0,
+    lunchTotal: snap.lunchTotal || 0,
+    dinnerTotal: snap.dinnerTotal || 0,
+    lunchCustomers: snap.lunchCustomers || 0,
+    dinnerCustomers: snap.dinnerCustomers || 0,
+    sales: snap.sales || []
   };
+
+  // スマートフォールバック: 旧データ等でsales_dataが空の場合、AI解析文章から数値を正規表現抽出して復元
+  if (!currentReport.total && item.analysis_result) {
+    const text = item.analysis_result;
+    const totalMatch = text.match(/(?:総売上高?|売上合計|総売上)[：:]?\s*¥?\s*([0-9,]+)/);
+    if (totalMatch) currentReport.total = parseInt(totalMatch[1].replace(/,/g, ''), 10);
+
+    const foodMatch = text.match(/(?:フード売上?|フード)[：:]?\s*¥?\s*([0-9,]+)/);
+    if (foodMatch) currentReport.foodTotal = parseInt(foodMatch[1].replace(/,/g, ''), 10);
+
+    const drinkMatch = text.match(/(?:ドリンク売上?|飲料売上?|ドリンク)[：:]?\s*¥?\s*([0-9,]+)/);
+    if (drinkMatch) currentReport.drinkTotal = parseInt(drinkMatch[1].replace(/,/g, ''), 10);
+
+    const lunchMatch = text.match(/(?:ランチ売上?|ランチ)[：:]?\s*¥?\s*([0-9,]+)/);
+    if (lunchMatch) currentReport.lunchTotal = parseInt(lunchMatch[1].replace(/,/g, ''), 10);
+
+    const dinnerMatch = text.match(/(?:ディナー売上?|ディナー)[：:]?\s*¥?\s*([0-9,]+)/);
+    if (dinnerMatch) currentReport.dinnerTotal = parseInt(dinnerMatch[1].replace(/,/g, ''), 10);
+  }
   
   view.innerHTML = `<div class="rv-nav">
     <span class="rv-nav-brand">JNL変換ツール</span>
