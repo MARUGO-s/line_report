@@ -4176,14 +4176,13 @@ function renderReport({
   const mealMeta=Number.isFinite(lunchTotal)&&Number.isFinite(dinnerTotal)
     ?`　/　ランチ ${yen(lunchTotal)}　/　ディナー ${yen(dinnerTotal)}`:'';
   const countLabel=Number.isFinite(Number(salesCount))?`${salesCount}件`:'—件';
-  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">${esc(title)} プレビュー</span><button class="rv-btn rv-btn-primary" id="rHtml" ${stale?'disabled':''}>${stale?'再作成が必要':'HTMLで保存'}</button><button class="rv-btn rv-btn-secondary" id="rPrint" ${stale?'disabled':''}>${stale?'':'印刷／PDF'}</button><button class="rv-btn rv-btn-secondary" id="rSave" ${saved?'disabled':''}>${saved?'保存済み':'アプリ内に保存'}</button><button class="rv-btn rv-btn-primary ai-btn" id="rAiAnalyze">AI分析</button><button class="rv-btn rv-btn-secondary" id="rAiChat">AIチャット</button><button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button><button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button></div><div id="aiAnalysisArea" class="ai-analysis" hidden></div><div class="report"><h1 class="r-title">${esc(title)}</h1><p class="r-meta">対象期間 ${esc(period)}　/　${countLabel}　/　総売上 ${yen(total)}${categoryMeta}${mealMeta}　/　${esc(formatReportCreatedAt(createdAt))}</p>${staleNotice}${body}</div>`;
+  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">${esc(title)} プレビュー</span><button class="rv-btn rv-btn-primary" id="rHtml" ${stale?'disabled':''}>${stale?'再作成が必要':'HTMLで保存'}</button><button class="rv-btn rv-btn-secondary" id="rPrint" ${stale?'disabled':''}>${stale?'':'印刷／PDF'}</button><button class="rv-btn rv-btn-primary ai-btn" id="rAiAnalyze">AI分析</button><button class="rv-btn rv-btn-secondary" id="rAiChat">AIチャット</button><button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button><button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button></div><div id="aiAnalysisArea" class="ai-analysis" hidden></div><div class="report"><h1 class="r-title">${esc(title)}</h1><p class="r-meta">対象期間 ${esc(period)}　/　${countLabel}　/　総売上 ${yen(total)}${categoryMeta}${mealMeta}　/　${esc(formatReportCreatedAt(createdAt))}</p>${staleNotice}${body}</div>`;
   view.hidden=false; document.body.classList.add('report-open');
   if(sales?.length) bindClassificationEditor();
   if(!stale){
     view.querySelector('#rHtml').onclick=()=>downloadReportHtml();
     view.querySelector('#rPrint').onclick=()=>window.print();
   }
-  view.querySelector('#rSave').onclick=saveCurrentReport;
   view.querySelector('#rAiAnalyze').onclick=aiAnalyze;
   view.querySelector('#rAiChat').onclick=toggleAiChat;
   view.querySelector('#rClose').onclick=()=>{ view.hidden=true; document.body.classList.remove('report-open'); currentReport=null; activeReportTab='report'; };
@@ -4338,9 +4337,26 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
   return reportObj;
 }
 
-function buildBothReports(salesOverride=null, options={}){
+async function persistDisplayedReport(options = {}) {
+  if (!currentReport) return { ok: false, reason: 'empty' };
+  if (options.skipPersist) return { ok: true, skipped: true };
+  if (!getAdminToken()) {
+    finishSaveStatus('クラウド未接続のため自動保存できません', true);
+    if (!options.silent) {
+      alert('レポートはクラウドへ自動保存します。\n画面上部で管理トークンを接続するか、LINEの最新リンクから開き直してください。');
+    }
+    return { ok: false, reason: 'auth' };
+  }
+  return await saveCurrentReport({
+    silent: options.silent !== false,
+    openList: !!options.openList
+  });
+}
+
+async function buildBothReports(salesOverride=null, options={}){
   const silent = !!options.silent;
   const skipRender = silent || !!options.skipRender;
+  const skipPersist = !!options.skipPersist || silent;
   // 自動保存時は期間入力を無視し、必ず月ごとに分割する
   const forceByMonth = !!options.byMonth;
   const start = forceByMonth ? '' : startDateInput.value;
@@ -4348,6 +4364,12 @@ function buildBothReports(salesOverride=null, options={}){
   const reports = [];
   const pushCurrent = () => { if (currentReport) reports.push({ ...currentReport }); };
   const itemList = options.itemList || null;
+  const finish = async (ok) => {
+    if (!ok || skipPersist) return ok;
+    showSaveStatus('クラウドに自動保存中…');
+    await persistDisplayedReport({ silent: true, openList: false });
+    return ok;
+  };
 
   if (salesOverride) {
     const months = [...new Set(salesOverride.map(s => String(s.date || '').slice(0, 7)).filter(Boolean))].sort();
@@ -4360,22 +4382,22 @@ function buildBothReports(salesOverride=null, options={}){
         pushCurrent();
       }
     } else {
-      if (!buildReport('daily', start || null, end || null, null, salesOverride, { silent, skipRender, itemList, folderLabel: options.folderLabel })) return false;
+      if (!buildReport('daily', start || null, end || null, null, salesOverride, { silent, skipRender, itemList, folderLabel: options.folderLabel })) return finish(false);
       pushCurrent();
-      if (!buildReport('monthly', start || null, end || null, null, salesOverride, { silent, skipRender, itemList, folderLabel: options.folderLabel })) return false;
+      if (!buildReport('monthly', start || null, end || null, null, salesOverride, { silent, skipRender, itemList, folderLabel: options.folderLabel })) return finish(false);
       pushCurrent();
     }
     if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
-    return reports.length > 0;
+    return finish(reports.length > 0);
   }
 
   if (!forceByMonth && (start || end)) {
-    if (!buildReport('daily', start, end, null, null, { silent, skipRender })) return false;
+    if (!buildReport('daily', start, end, null, null, { silent, skipRender })) return finish(false);
     pushCurrent();
-    if (!buildReport('monthly', start, end, null, null, { silent, skipRender })) return false;
+    if (!buildReport('monthly', start, end, null, null, { silent, skipRender })) return finish(false);
     pushCurrent();
     if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
-    return reports.length > 0;
+    return finish(reports.length > 0);
   }
 
   const audit = collectSalesAudit(itemList);
@@ -4398,7 +4420,7 @@ function buildBothReports(salesOverride=null, options={}){
     pushCurrent();
   }
   if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
-  return reports.length > 0;
+  return finish(reports.length > 0);
 }
 
 async function saveCurrentReport(options = {}){
@@ -4577,9 +4599,10 @@ async function autoBuildAndSaveAfterLoad() {
         if (monthSales.length) salesForGroup = monthSales;
       }
 
-      const ok = buildBothReports(salesForGroup, {
+      const ok = await buildBothReports(salesForGroup, {
         silent: true,
         byMonth: true,
+        skipPersist: true,
         itemList: groupItems,
         folderLabel: folderLabel || undefined
       });
@@ -4846,7 +4869,7 @@ async function renderSavedReports(filter='all'){
       showAppLoading('データを合算中...', `${validReports.length} 件 / ${mergedSales.length} 伝票をマージしています`);
       await yieldToUI();
       restorePaymentsMap(mergedSales);
-      buildBothReports(mergedSales);
+      await buildBothReports(mergedSales);
     } catch (err) {
       console.error('mergeAnalyze error:', err);
       alert('合算処理中にエラーが発生しました: ' + (err?.message || err));
@@ -5189,9 +5212,9 @@ saveCategorySettingsBtn.addEventListener('click',saveCategorySettings);
 resetCategorySettingsBtn.addEventListener('click',resetCategorySettings);
 pdfBtn.addEventListener('click', () => {
   showAppLoading('レポートを作成中...', 'データを集計しています');
-  setTimeout(() => {
+  setTimeout(async () => {
     try {
-      buildBothReports();
+      await buildBothReports();
     } finally {
       hideAppLoading();
     }
@@ -5199,9 +5222,12 @@ pdfBtn.addEventListener('click', () => {
 });
 monthlyBtn.addEventListener('click', () => {
   showAppLoading('月間レポートを作成中...', 'データを集計しています');
-  setTimeout(() => {
+  setTimeout(async () => {
     try {
-      buildReport('monthly');
+      if (buildReport('monthly')) {
+        showSaveStatus('クラウドに自動保存中…');
+        await persistDisplayedReport({ silent: true, openList: false });
+      }
     } finally {
       hideAppLoading();
     }
@@ -6034,7 +6060,7 @@ function formatItemBreakdownReply(queryResult, userMsg) {
 - **フード**: ${yen(queryResult.foodTotal)} (${queryResult.foodPct}%)
 - **ドリンク**: ${yen(queryResult.drinkTotal)} (${queryResult.drinkPct}%)
 
-商品内訳を答えるには、該当月の .jnl / .lzh を読み込んでレポートを作成し、「アプリ内に保存」し直してください（新しい保存形式では商品別個数も保持します）。`;
+商品内訳を答えるには、該当月の .jnl / .lzh を読み込んでレポートを作成し直してください（新しい保存形式では商品別個数も保持します）。`;
   }
 
   const food = products.filter(p => /フード|食品|料理/.test(String(p.category || '')) || p.category === 'フード');
