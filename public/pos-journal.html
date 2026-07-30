@@ -1952,12 +1952,23 @@ async function fetchSupabaseReports() {
     });
     if (!res.ok) throw new Error('Supabase fetch failed: ' + res.status);
     const rows = await res.json();
+    if (!Array.isArray(rows)) return [];
     return rows.map(row => {
       const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
       return {
-        id: row.id,
-        title: row.title || d.title,
-        period: row.period || d.period,
+        id: String(row.id || d.id || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`),
+        title: row.title || d.title || '売上レポート',
+        period: row.period || d.period || '',
+        salesCount: d.salesCount || (Array.isArray(d.sales) ? d.sales.length : 0),
+        total: d.total || 0,
+        foodTotal: d.foodTotal,
+        drinkTotal: d.drinkTotal,
+        roomTotal: d.roomTotal || 0,
+        otherTotal: d.otherTotal || 0,
+        chargeTotal: d.chargeTotal || 0,
+        lunchTotal: d.lunchTotal,
+        dinnerTotal: d.dinnerTotal,
+        createdAt: d.createdAt || row.created_at,
         ...d
       };
     });
