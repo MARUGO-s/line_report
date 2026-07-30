@@ -1856,14 +1856,16 @@ async function loadProductCategoryOverridesFromCloud(){
 
 async function persistProductCategoryOverridesToCloud(overrides){
   if(!getAdminToken()) throw new Error('クラウド接続が必要です。管理トークンを接続してください。');
+  const clean=overrides&&typeof overrides==='object'?{...overrides}:{};
   const data={
     id:CATEGORY_OVERRIDES_REPORT_ID,
     title:'商品分類ルール',
     kind:'product_category_overrides',
-    overrides:overrides&&typeof overrides==='object'?overrides:{},
+    overrides:clean,
     salesCount:0,
     total:0,
-    totalSales:0
+    totalSales:0,
+    updatedAt:new Date().toISOString()
   };
   await adminApiFetch('/pos-journals/saved-reports',{
     method:'POST',
@@ -1875,15 +1877,37 @@ async function persistProductCategoryOverridesToCloud(overrides){
       store_key:STORE_KEY
     })
   });
+  // 保存確認（取りこぼし防止）
+  const verified=await fetchSupabaseReportById(CATEGORY_OVERRIDES_REPORT_ID);
+  const got=(verified&&typeof verified.overrides==='object')?verified.overrides:{};
+  const keys=Object.keys(clean);
+  for(const k of keys){
+    if(got[k]!==clean[k]){
+      throw new Error('分類ルールのクラウド保存確認に失敗しました。もう一度お試しください。');
+    }
+  }
+  productCategoryOverridesCache={...got};
+  productCategoryOverridesLoaded=true;
+  return got;
 }
 
 async function saveProductCategoryOverride(key,category){
+  if(!key) throw new Error('商品キーがありません');
+  // 最新を読んでから更新（他端末の変更を潰さない）
+  try{ await loadProductCategoryOverridesFromCloud(); }catch(_){}
   const saved={...readProductCategoryOverrides()};
   if(category==='自動分類') delete saved[key];
-  else saved[key]=category;
+  else {
+    if(!SALES_CATEGORIES.includes(category)) throw new Error('不正なカテゴリです: '+category);
+    saved[key]=category;
+  }
   productCategoryOverridesCache=saved;
   await persistProductCategoryOverridesToCloud(saved);
-  return saved;
+  // 再確認
+  if(category!=='自動分類' && readProductCategoryOverrides()[key]!==category){
+    throw new Error('分類ルールがクラウドに残っていません');
+  }
+  return readProductCategoryOverrides();
 }
 
 function applyCategoryOverrideToSales(sales,key,category){
@@ -1951,9 +1975,9 @@ async function loadSalesFromCloudMonthReports(months){
 /** 分類変更を、伝票を持つ全クラウドレポートへ反映 */
 async function propagateCategoryOverridesToCloudReports(changedKeys){
   const list=await fetchSupabaseReports();
-  if(!Array.isArray(list)||!list.length) return { updated:0, checked:0 };
+  if(!Array.isArray(list)||!list.length) return { updated:0, checked:0, failed:0 };
   const keySet=Array.isArray(changedKeys)&&changedKeys.length?new Set(changedKeys):null;
-  let updated=0, checked=0;
+  let updated=0, checked=0, failed=0;
   for(let i=0;i<list.length;i++){
     const item=list[i];
     showAppLoading('分類を全レポートへ反映中...', `${i+1}/${list.length}（更新 ${updated}）`);
@@ -1971,15 +1995,63 @@ async function propagateCategoryOverridesToCloudReports(changedKeys){
     restorePaymentsMap(sales);
     const isMonthly=/月間/.test(String(full.title||''));
     const rebuilt=buildReport(isMonthly?'monthly':'daily','','',null,sales,{ silent:true, skipRender:true });
-    if(!rebuilt) continue;
+    if(!rebuilt){ failed++; continue; }
     rebuilt.id=full.id;
     rebuilt.sourceMonths=Array.isArray(full.sourceMonths)?full.sourceMonths:sourceMonthsFromReport(full);
     rebuilt.journalIds=Array.isArray(full.journalIds)?full.journalIds:[];
     if(full.createdAt) rebuilt.createdAt=full.createdAt;
     const result=await writeSavedReports([rebuilt],[rebuilt]);
     if(result?.ok) updated++;
+    else failed++;
   }
-  return { updated, checked };
+  return { updated, checked, failed };
+}
+
+/** 伝票を月ごとに分割し、日別・月間レポートをクラウドへ上書き（分類の永続化本体） */
+async function upsertMonthReportsFromSales(sales, { productKey=null } = {}){
+  const list=await fetchSupabaseReports();
+  const byMonth=new Map();
+  (sales||[]).forEach(s=>{
+    const m=String(s.date||'').slice(0,7);
+    if(!/^\d{4}-\d{2}$/.test(m)) return;
+    if(!byMonth.has(m)) byMonth.set(m,[]);
+    byMonth.get(m).push(s);
+  });
+  let updated=0, failed=0, skipped=0;
+  const months=[...byMonth.keys()].sort();
+  for(let i=0;i<months.length;i++){
+    const month=months[i];
+    const monthSales=byMonth.get(month)||[];
+    if(productKey){
+      const hit=monthSales.some(s=>(s.items||[]).some(it=>productGroupKey(it.code,it.name)===productKey));
+      if(!hit){ skipped++; continue; }
+    }
+    showAppLoading('分類を月別レポートへ保存中...', `${month}（${i+1}/${months.length}）`);
+    await yieldToUI();
+    restorePaymentsMap(monthSales);
+    const daily=buildReport('daily',null,null,month,monthSales,{ silent:true, skipRender:true });
+    const monthly=buildReport('monthly',null,null,month,monthSales,{ silent:true, skipRender:true });
+    const existingDaily=list.find(r=>/日別/.test(String(r.title||''))&&monthKeyFromReport(r)===month);
+    const existingMonthly=list.find(r=>/月間/.test(String(r.title||''))&&monthKeyFromReport(r)===month);
+    const batch=[];
+    if(daily){
+      daily.id=existingDaily?.id||`${Date.now()}_d_${month.replace('-','')}_${Math.random().toString(36).slice(2,6)}`;
+      daily.sourceMonths=[month];
+      if(existingDaily?.createdAt) daily.createdAt=existingDaily.createdAt;
+      batch.push(daily);
+    }
+    if(monthly){
+      monthly.id=existingMonthly?.id||`${Date.now()}_m_${month.replace('-','')}_${Math.random().toString(36).slice(2,6)}`;
+      monthly.sourceMonths=[month];
+      if(existingMonthly?.createdAt) monthly.createdAt=existingMonthly.createdAt;
+      batch.push(monthly);
+    }
+    if(!batch.length){ failed++; continue; }
+    const result=await writeSavedReports(batch,batch);
+    if(result?.ok) updated+=batch.length;
+    else failed+=batch.length;
+  }
+  return { updated, failed, skipped, months:months.length };
 }
 
 // 会計時刻が16:00未満ならランチ、16:00以降ならディナー。
@@ -2490,7 +2562,9 @@ function collectSalesAudit(itemList=null){
   });
   if(duplicateCount) warnings.push(`重複伝票${duplicateCount}件を自動除外`);
   sales.sort((a,b)=> a.date!==b.date ? (a.date<b.date?-1:1) : (a.no-b.no));
-  return {sales,critical,warnings,reconciledFiles,summaryFiles,duplicateCount};
+  // クラウド分類ルールを必ず再適用（解析直後の取りこぼし防止）
+  const overridden=applyAllCategoryOverridesToSales(sales);
+  return {sales:overridden.sales,critical,warnings,reconciledFiles,summaryFiles,duplicateCount};
 }
 function collectSales(){
   return collectSalesAudit().sales;
@@ -3945,7 +4019,7 @@ function classificationEditorHtml(sales){
   const lanes=new Map(SALES_CATEGORIES.map(c=>[c,[]]));
   [...totals.values()].sort((a,b)=>b.amount-a.amount).forEach(row=>lanes.get(row.category)?.push(row));
   const laneHtml=SALES_CATEGORIES.map(category=>`<div class="classification-lane" data-category="${esc(category)}"><h5>${esc(category)}（ここへ移動）</h5>${lanes.get(category).map(row=>`<div class="classification-item" draggable="true" data-product-key="${esc(row.key)}"><span>${esc(row.name)}</span><small>${yen(row.amount)}</small></div>`).join('')}</div>`).join('');
-  return `<div class="classification-editor"><h4>商品分類ワークスペース</h4><p class="editor-note">商品コードで自動分類できない商品は「その他」に仮置きしています。商品をドラッグして分類を変更すると、クラウド上の伝票で月間集計を再計算し、分類ルールとレポートをクラウドへ保存します（他の端末・次回の読み込みにも適用されます）。</p><div class="classification-board">${laneHtml}</div></div>`;
+  return `<div class="classification-editor"><h4>商品分類ワークスペース</h4><p class="editor-note">商品をドラッグして分類を変更すると、そのルールはクラウドに永続保存され、すべての月別レポートと今後の読み込み・合算・再解析に必ず反映されます。</p><div class="classification-board">${laneHtml}</div></div>`;
 }
 
 async function resolveSalesForCurrentReport(){
@@ -3974,90 +4048,52 @@ async function reclassifyProductInCurrentReport(key,category){
     alert('再集計するレポートがありません。');
     return;
   }
-  showAppLoading('分類を更新中...','クラウドに保存して集計し直しています');
+  showAppLoading('分類を永続保存中...','ルールをクラウドへ確定しています');
   try{
-    if(!productCategoryOverridesLoaded){
-      try{ await loadProductCategoryOverridesFromCloud(); }catch(_){}
-    }
+    // 1) ルールをクラウドへ保存＋検証（失敗したらここで止まる）
     await saveProductCategoryOverride(key,category);
 
     let sales=await resolveSalesForCurrentReport();
     if(!sales.length){
-      alert('このレポートに伝票データがなく、クラウド上のジャーナルも見つかりませんでした。\n対象月のジャーナルを読み込んで保存し直してから、もう一度お試しください。');
+      alert('このレポートに伝票データがありません。\n分類ルールはクラウドに保存済みです。対象月のジャーナルを読み込み直すと集計にも反映されます。');
       return;
     }
     restorePaymentsMap(sales);
     sales=applyCategoryOverrideToSales(sales,key,category);
 
+    // 2) 影響する月の日別・月間レポートを伝票付きで上書き（永続化の本体）
+    const monthSave=await upsertMonthReportsFromSales(sales,{ productKey:key });
+
+    // 3) その他の保存済みレポートにも漏れなく反映
+    showAppLoading('分類を全レポートへ反映中...','残りのレポートを更新しています');
+    const prop=await propagateCategoryOverridesToCloudReports([key]);
+
+    // 4) 画面を最新の分類で再描画
     const keepId=currentReport.id||null;
-    const keepSourceMonths=Array.isArray(currentReport.sourceMonths)?currentReport.sourceMonths:sourceMonthsFromReport(currentReport);
-    const keepJournalIds=Array.isArray(currentReport.journalIds)?currentReport.journalIds:[];
     const keepCreatedAt=currentReport.createdAt;
-    const related=Array.isArray(currentReport.relatedReports)?currentReport.relatedReports:[];
     const isMonthly=/月間/.test(String(currentReport.title||''));
     activeReportTab='classify';
-
-    const toSave=[];
-    if(related.length>=2){
-      const dailyPrev=related.find(r=>/日別/.test(String(r.title||'')));
-      const monthlyPrev=related.find(r=>/月間/.test(String(r.title||'')));
-      const daily=buildReport('daily','','',null,sales,{silent:true,skipRender:true});
-      const monthly=buildReport('monthly','','',null,sales,{silent:true,skipRender:true});
-      if(!daily&&!monthly){
-        alert('再集計に失敗しました。');
-        return;
-      }
-      if(daily){
-        daily.id=dailyPrev?.id||`${Date.now()}_d_${Math.random().toString(36).slice(2,6)}`;
-        daily.sourceMonths=keepSourceMonths;
-        daily.journalIds=keepJournalIds;
-        if(dailyPrev?.createdAt) daily.createdAt=dailyPrev.createdAt;
-        toSave.push(daily);
-      }
-      if(monthly){
-        monthly.id=monthlyPrev?.id||keepId||`${Date.now()}_m_${Math.random().toString(36).slice(2,6)}`;
-        monthly.sourceMonths=keepSourceMonths;
-        monthly.journalIds=keepJournalIds;
-        if(monthlyPrev?.createdAt) monthly.createdAt=monthlyPrev.createdAt;
-        toSave.push(monthly);
-      }
-      const primary=isMonthly?(monthly||daily):(daily||monthly);
-      primary.relatedReports=toSave;
-      renderReport({...primary,saved:false});
-      currentReport.relatedReports=toSave;
-    }else{
-      const rebuilt=buildReport(
-        isMonthly?'monthly':'daily',
-        '',
-        '',
-        null,
-        sales,
-        { silent:false }
-      );
-      if(!rebuilt) return;
-      currentReport.id=keepId||currentReport.id||`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-      currentReport.sourceMonths=keepSourceMonths.length
-        ? keepSourceMonths
-        : [...new Set(sales.map(s=>String(s.date||'').slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))];
-      currentReport.journalIds=keepJournalIds;
+    const rebuilt=buildReport(isMonthly?'monthly':'daily','','',null,sales,{ silent:false });
+    if(rebuilt){
+      if(keepId) currentReport.id=keepId;
+      currentReport.sourceMonths=[...new Set(sales.map(s=>String(s.date||'').slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))];
       if(keepCreatedAt) currentReport.createdAt=keepCreatedAt;
-      toSave.push(currentReport);
     }
 
-    const result=await writeSavedReports(toSave,toSave);
-    // 合算ビューだけでなく、各月の保存済みレポートへも同じ分類を反映
-    showAppLoading('分類を全レポートへ反映中...','月別レポートの集計を更新しています');
-    const prop=await propagateCategoryOverridesToCloudReports([key]);
-    if(result?.ok){
-      finishSaveStatus(`分類をクラウドに保存しました（月別レポート ${prop.updated}件を更新）`);
+    if(monthSave.failed>0||prop.failed>0){
+      finishSaveStatus('分類ルールは保存済み。一部レポートの更新に失敗',true);
+      alert(
+        '分類ルールはクラウドに保存しましたが、一部レポートの更新に失敗しました。\n' +
+        `月別更新失敗: ${monthSave.failed} / その他失敗: ${prop.failed}\n` +
+        'もう一度同じ商品をドラッグするか、ページを再読み込みしてください。'
+      );
     }else{
-      const msg=result?.error?.message||result?.reason||'保存に失敗しました';
-      finishSaveStatus(msg,true);
-      alert('表示中レポートの保存に失敗しました。\n'+msg);
+      finishSaveStatus(`分類を永続保存しました（月別 ${monthSave.updated}件 / 追加反映 ${prop.updated}件）`);
     }
   }catch(err){
     console.error('reclassifyProductInCurrentReport:',err);
-    alert('分類の更新に失敗しました: '+(err?.message||err));
+    finishSaveStatus('分類の保存に失敗しました',true);
+    alert('分類の永続保存に失敗しました: '+(err?.message||err));
   }finally{
     hideAppLoading();
   }
@@ -4665,6 +4701,11 @@ function resolveSavedReportBody(r) {
 async function autoBuildAndSaveAfterLoad() {
   const usable = items.filter(it => !it.error && (it.extracted > 0 || it.total > 0));
   if (!usable.length) return { ok: false, reason: 'no-sales' };
+
+  // 分類ルールを先に読み、新規レポートへ必ず適用
+  if (getAdminToken()) {
+    try { await loadProductCategoryOverridesFromCloud(); } catch (_) {}
+  }
 
   showAppLoading('レポートを自動作成中...', 'フォルダ／月ごとに分類しています');
   await yieldToUI();
