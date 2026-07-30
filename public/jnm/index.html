@@ -158,6 +158,23 @@
     border-bottom-color: #387dea !important;
   }
 
+  /* 🎯 選択中のタブボタン（保存済みレポートフィルター・各種タブ用） */
+  button[data-filter].active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    border-color: #1d4ed8 !important;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4) !important;
+  }
+
+  body[data-theme='dark'] button[data-filter].active {
+    background: #3b82f6 !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    border-color: #60a5fa !important;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.5) !important;
+  }
+
   body[data-theme='dark'] #reportView {
     --rv-bg:#0d131a;
     --rv-text:#f8fafc;
@@ -2744,9 +2761,9 @@ async function renderSavedReports(filter='all'){
       <p class="r-meta">この端末のアプリ内に保存されています。</p>
       <div class="controls" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
         <div style="display:flex; gap:8px;">
-          <button class="rv-btn rv-btn-secondary" data-filter="all">すべて</button>
-          <button class="rv-btn rv-btn-secondary" data-filter="daily">日別レポート</button>
-          <button class="rv-btn rv-btn-secondary" data-filter="monthly">月間レポート</button>
+          <button class="rv-btn rv-btn-secondary ${filter==='all'?'active':''}" data-filter="all">すべて</button>
+          <button class="rv-btn rv-btn-secondary ${filter==='daily'?'active':''}" data-filter="daily">日別レポート</button>
+          <button class="rv-btn rv-btn-secondary ${filter==='monthly'?'active':''}" data-filter="monthly">月間レポート</button>
         </div>
         <div style="display:flex; align-items:center; gap:12px;">
           <label style="font-size:12px; opacity:.65; cursor:pointer; display:flex; align-items:center; gap:4px; user-select:none;">
