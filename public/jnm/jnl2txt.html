@@ -1322,6 +1322,7 @@ async function saveAdminToken() {
     if (input) input.value = '';
     if (msgEl) msgEl.textContent = '';
     setAuthUiState(true);
+    try { await loadProductCategoryOverridesFromCloud(); } catch (_) {}
   } catch (err) {
     if (msgEl) msgEl.textContent = err && err.message ? err.message : '接続に失敗しました。';
   } finally {
@@ -1338,6 +1339,9 @@ document.addEventListener('DOMContentLoaded', async function () {
     } catch (_) {}
   }
   setAuthUiState(!!getAdminToken());
+  if (getAdminToken()) {
+    try { await loadProductCategoryOverridesFromCloud(); } catch (_) {}
+  }
   const saveBtn = document.getElementById('saveTokenBtn');
   const tokenInput = document.getElementById('tokenInput');
   if (saveBtn) saveBtn.addEventListener('click', saveAdminToken);
@@ -1789,16 +1793,94 @@ function classifyProduct(code,name){
 }
 
 const PRODUCT_CATEGORY_OVERRIDES_KEY='jnl2txt-product-category-overrides-v1';
-function readProductCategoryOverrides(){
-  try{
-    const saved=JSON.parse(localStorage.getItem(PRODUCT_CATEGORY_OVERRIDES_KEY)||'{}');
-    return saved&&typeof saved==='object'?saved:{};
-  }catch(_){ return {}; }
+const CATEGORY_OVERRIDES_REPORT_ID='jnl2txt_category_overrides_v1';
+let productCategoryOverridesCache={};
+let productCategoryOverridesLoaded=false;
+
+function isCategoryOverridesReportId(id){
+  return String(id||'')===CATEGORY_OVERRIDES_REPORT_ID;
 }
-function saveProductCategoryOverride(key,category){
-  const saved=readProductCategoryOverrides();
-  if(category==='自動分類') delete saved[key]; else saved[key]=category;
-  localStorage.setItem(PRODUCT_CATEGORY_OVERRIDES_KEY,JSON.stringify(saved));
+
+function readProductCategoryOverrides(){
+  return productCategoryOverridesCache&&typeof productCategoryOverridesCache==='object'
+    ? productCategoryOverridesCache
+    : {};
+}
+
+async function loadProductCategoryOverridesFromCloud(){
+  if(!getAdminToken()) return readProductCategoryOverrides();
+  try{
+    const item=await fetchSupabaseReportById(CATEGORY_OVERRIDES_REPORT_ID);
+    const fromCloud=(item&&typeof item.overrides==='object'&&item.overrides)
+      ? item.overrides
+      : {};
+    let merged={...fromCloud};
+    // 旧ローカル設定があれば一度だけクラウドへ移行
+    try{
+      const legacy=JSON.parse(localStorage.getItem(PRODUCT_CATEGORY_OVERRIDES_KEY)||'{}');
+      if(legacy&&typeof legacy==='object'&&Object.keys(legacy).length){
+        merged={...legacy,...fromCloud};
+        localStorage.removeItem(PRODUCT_CATEGORY_OVERRIDES_KEY);
+        productCategoryOverridesCache=merged;
+        await persistProductCategoryOverridesToCloud(merged);
+      }
+    }catch(_){}
+    productCategoryOverridesCache=merged;
+    productCategoryOverridesLoaded=true;
+    return merged;
+  }catch(err){
+    console.warn('loadProductCategoryOverridesFromCloud:', err);
+    return readProductCategoryOverrides();
+  }
+}
+
+async function persistProductCategoryOverridesToCloud(overrides){
+  if(!getAdminToken()) throw new Error('クラウド接続が必要です。管理トークンを接続してください。');
+  const data={
+    id:CATEGORY_OVERRIDES_REPORT_ID,
+    title:'商品分類ルール',
+    kind:'product_category_overrides',
+    overrides:overrides&&typeof overrides==='object'?overrides:{},
+    salesCount:0,
+    total:0,
+    totalSales:0
+  };
+  await adminApiFetch('/pos-journals/saved-reports',{
+    method:'POST',
+    body:JSON.stringify({
+      id:CATEGORY_OVERRIDES_REPORT_ID,
+      title:'商品分類ルール',
+      period:'',
+      data,
+      store_key:STORE_KEY
+    })
+  });
+}
+
+async function saveProductCategoryOverride(key,category){
+  const saved={...readProductCategoryOverrides()};
+  if(category==='自動分類') delete saved[key];
+  else saved[key]=category;
+  productCategoryOverridesCache=saved;
+  await persistProductCategoryOverridesToCloud(saved);
+  return saved;
+}
+
+function applyCategoryOverrideToSales(sales,key,category){
+  if(!Array.isArray(sales)||!key) return Array.isArray(sales)?sales:[];
+  return sales.map(s=>({
+    ...s,
+    items:(Array.isArray(s.items)?s.items:[]).map(it=>{
+      if(productGroupKey(it.code,it.name)!==key) return it;
+      return {
+        ...it,
+        category,
+        needsReview:false,
+        known:true,
+        byOverride:true
+      };
+    })
+  }));
 }
 
 // 会計時刻が16:00未満ならランチ、16:00以降ならディナー。
@@ -2702,7 +2784,7 @@ async function fetchSupabaseReports() {
         createdAt: row.created_at || '',
         ...pickDefinedSummary(row)
       };
-    }).filter(r => r.id);
+    }).filter(r => r.id && !isCategoryOverridesReportId(r.id) && r.title !== '商品分類ルール');
   } catch (err) {
     console.warn('admin-api fetch error:', err);
     return null;
@@ -3764,7 +3846,117 @@ function classificationEditorHtml(sales){
   const lanes=new Map(SALES_CATEGORIES.map(c=>[c,[]]));
   [...totals.values()].sort((a,b)=>b.amount-a.amount).forEach(row=>lanes.get(row.category)?.push(row));
   const laneHtml=SALES_CATEGORIES.map(category=>`<div class="classification-lane" data-category="${esc(category)}"><h5>${esc(category)}（ここへ移動）</h5>${lanes.get(category).map(row=>`<div class="classification-item" draggable="true" data-product-key="${esc(row.key)}"><span>${esc(row.name)}</span><small>${yen(row.amount)}</small></div>`).join('')}</div>`).join('');
-  return `<div class="classification-editor"><h4>商品分類ワークスペース</h4><p class="editor-note">商品コードで自動分類できない商品は「その他」に仮置きしています。商品をドラッグして分類を変更すると、月間集計を再計算します。変更内容はこのMac／Windowsアプリのローカルに保存され、次回以降も適用されます。</p><div class="classification-board">${laneHtml}</div></div>`;
+  return `<div class="classification-editor"><h4>商品分類ワークスペース</h4><p class="editor-note">商品コードで自動分類できない商品は「その他」に仮置きしています。商品をドラッグして分類を変更すると、クラウド上の伝票で月間集計を再計算し、分類ルールとレポートをクラウドへ保存します（他の端末・次回の読み込みにも適用されます）。</p><div class="classification-board">${laneHtml}</div></div>`;
+}
+
+async function resolveSalesForCurrentReport(){
+  let sales=reviveSalesList(currentReport?.sales);
+  if(sales.length) return sales;
+  let months=sourceMonthsFromReport(currentReport);
+  if(!months.length){
+    const period=String(currentReport?.period||'');
+    const found=[...period.matchAll(/(20\d{2})-(\d{2})/g)].map(m=>`${m[1]}-${m[2]}`);
+    months=[...new Set(found)];
+  }
+  if(!months.length) return [];
+  const loaded=await loadSalesFromCloudJournals(months);
+  return loaded.sales||[];
+}
+
+async function reclassifyProductInCurrentReport(key,category){
+  if(!key||!category) return;
+  if(!getAdminToken()){
+    alert('分類の変更にはクラウド接続が必要です。\n画面上部で管理トークンを接続するか、LINEの最新リンクから開き直してください。');
+    return;
+  }
+  if(!currentReport){
+    alert('再集計するレポートがありません。');
+    return;
+  }
+  showAppLoading('分類を更新中...','クラウドに保存して集計し直しています');
+  try{
+    if(!productCategoryOverridesLoaded){
+      try{ await loadProductCategoryOverridesFromCloud(); }catch(_){}
+    }
+    await saveProductCategoryOverride(key,category);
+
+    let sales=await resolveSalesForCurrentReport();
+    if(!sales.length){
+      alert('このレポートに伝票データがなく、クラウド上のジャーナルも見つかりませんでした。\n対象月のジャーナルを読み込んで保存し直してから、もう一度お試しください。');
+      return;
+    }
+    restorePaymentsMap(sales);
+    sales=applyCategoryOverrideToSales(sales,key,category);
+
+    const keepId=currentReport.id||null;
+    const keepSourceMonths=Array.isArray(currentReport.sourceMonths)?currentReport.sourceMonths:sourceMonthsFromReport(currentReport);
+    const keepJournalIds=Array.isArray(currentReport.journalIds)?currentReport.journalIds:[];
+    const keepCreatedAt=currentReport.createdAt;
+    const related=Array.isArray(currentReport.relatedReports)?currentReport.relatedReports:[];
+    const isMonthly=/月間/.test(String(currentReport.title||''));
+    activeReportTab='classify';
+
+    const toSave=[];
+    if(related.length>=2){
+      const dailyPrev=related.find(r=>/日別/.test(String(r.title||'')));
+      const monthlyPrev=related.find(r=>/月間/.test(String(r.title||'')));
+      const daily=buildReport('daily','','',null,sales,{silent:true,skipRender:true});
+      const monthly=buildReport('monthly','','',null,sales,{silent:true,skipRender:true});
+      if(!daily&&!monthly){
+        alert('再集計に失敗しました。');
+        return;
+      }
+      if(daily){
+        daily.id=dailyPrev?.id||`${Date.now()}_d_${Math.random().toString(36).slice(2,6)}`;
+        daily.sourceMonths=keepSourceMonths;
+        daily.journalIds=keepJournalIds;
+        if(dailyPrev?.createdAt) daily.createdAt=dailyPrev.createdAt;
+        toSave.push(daily);
+      }
+      if(monthly){
+        monthly.id=monthlyPrev?.id||keepId||`${Date.now()}_m_${Math.random().toString(36).slice(2,6)}`;
+        monthly.sourceMonths=keepSourceMonths;
+        monthly.journalIds=keepJournalIds;
+        if(monthlyPrev?.createdAt) monthly.createdAt=monthlyPrev.createdAt;
+        toSave.push(monthly);
+      }
+      const primary=isMonthly?(monthly||daily):(daily||monthly);
+      primary.relatedReports=toSave;
+      renderReport({...primary,saved:false});
+      currentReport.relatedReports=toSave;
+    }else{
+      const rebuilt=buildReport(
+        isMonthly?'monthly':'daily',
+        '',
+        '',
+        null,
+        sales,
+        { silent:false }
+      );
+      if(!rebuilt) return;
+      currentReport.id=keepId||currentReport.id||`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      currentReport.sourceMonths=keepSourceMonths.length
+        ? keepSourceMonths
+        : [...new Set(sales.map(s=>String(s.date||'').slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))];
+      currentReport.journalIds=keepJournalIds;
+      if(keepCreatedAt) currentReport.createdAt=keepCreatedAt;
+      toSave.push(currentReport);
+    }
+
+    const result=await writeSavedReports(toSave,toSave);
+    if(result?.ok){
+      finishSaveStatus('分類をクラウドに保存し、集計を更新しました');
+    }else{
+      const msg=result?.error?.message||result?.reason||'保存に失敗しました';
+      finishSaveStatus(msg,true);
+      alert('集計は更新しましたが、クラウドへの保存に失敗しました。\n'+msg);
+    }
+  }catch(err){
+    console.error('reclassifyProductInCurrentReport:',err);
+    alert('分類の更新に失敗しました: '+(err?.message||err));
+  }finally{
+    hideAppLoading();
+  }
 }
 
 function bindClassificationEditor(){
@@ -3775,12 +3967,11 @@ function bindClassificationEditor(){
   view.querySelectorAll('.classification-lane').forEach(lane=>{
     lane.addEventListener('dragover',event=>{event.preventDefault();lane.classList.add('over');});
     lane.addEventListener('dragleave',()=>lane.classList.remove('over'));
-    lane.addEventListener('drop',event=>{
+    lane.addEventListener('drop',async event=>{
       event.preventDefault(); lane.classList.remove('over');
       const key=event.dataTransfer.getData('text/plain'), category=lane.dataset.category;
       if(!key||!category) return;
-      saveProductCategoryOverride(key,category);
-      buildReport('monthly');
+      await reclassifyProductInCurrentReport(key,category);
     });
   });
   view.querySelectorAll('.report-tab').forEach(tab=>{
@@ -3952,7 +4143,8 @@ function renderReport({
   sales=null,aiAnalysisText=null,topProducts=null,totalCustomers=null,
   parserVersion,verificationVersion,categoryVersion,mealPeriodVersion,
   foodTotal=null,drinkTotal=null,roomTotal=0,otherTotal=0,chargeTotal=0,
-  lunchTotal=null,dinnerTotal=null,lunchCustomers=null,dinnerCustomers=null
+  lunchTotal=null,dinnerTotal=null,lunchCustomers=null,dinnerCustomers=null,
+  id=null,sourceMonths=null,journalIds=null,relatedReports=null
 }){
   const view=document.getElementById('reportView');
   if(!saved){
@@ -3962,7 +4154,16 @@ function renderReport({
     mealPeriodVersion=mealPeriodVersion||MEAL_PERIOD_VERSION;
   }
   const stale=isStaleReport({parserVersion,verificationVersion,categoryVersion,mealPeriodVersion});
-  currentReport={title,period,salesCount,total,body,createdAt,parserVersion,verificationVersion,categoryVersion,mealPeriodVersion,foodTotal,drinkTotal,roomTotal,otherTotal,chargeTotal,lunchTotal,dinnerTotal,lunchCustomers,dinnerCustomers,sales,aiAnalysisText,topProducts,totalCustomers};
+  const prev=currentReport||{};
+  currentReport={
+    title,period,salesCount,total,body,createdAt,parserVersion,verificationVersion,categoryVersion,mealPeriodVersion,
+    foodTotal,drinkTotal,roomTotal,otherTotal,chargeTotal,lunchTotal,dinnerTotal,lunchCustomers,dinnerCustomers,
+    sales,aiAnalysisText,topProducts,totalCustomers,
+    id:id||prev.id||null,
+    sourceMonths:Array.isArray(sourceMonths)?sourceMonths:(Array.isArray(prev.sourceMonths)?prev.sourceMonths:[]),
+    journalIds:Array.isArray(journalIds)?journalIds:(Array.isArray(prev.journalIds)?prev.journalIds:[]),
+    relatedReports:relatedReports||prev.relatedReports
+  };
   if (Array.isArray(sales) && sales.length) {
     currentReport.topProducts = collectProductsFromReport(currentReport).slice(0, 40);
     currentReport.totalCustomers = sales.reduce((n, s) => n + (Number(s.customers) || 0), 0);
