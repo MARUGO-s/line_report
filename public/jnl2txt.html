@@ -590,6 +590,103 @@
     border: 1px solid var(--border-sub);
     border-bottom-left-radius: 4px;
   }
+  /* AI Visual Dashboard Styles */
+  .ai-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    margin: 16px 0 24px 0;
+  }
+  .ai-kpi-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  }
+  .ai-kpi-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    margin-bottom: 4px;
+  }
+  .ai-kpi-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.2;
+  }
+  .ai-kpi-sub {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-top: 4px;
+  }
+  .ai-chart-section {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 18px;
+    margin-bottom: 24px;
+  }
+  .ai-chart-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ai-bar-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+  .ai-bar-label {
+    width: 44px;
+    font-weight: 600;
+    color: #475569;
+  }
+  .ai-bar-track {
+    flex: 1;
+    height: 18px;
+    background: #f1f5f9;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+    margin: 0 10px;
+  }
+  .ai-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #b68235, #d4af37);
+    border-radius: 4px;
+  }
+  .ai-bar-val {
+    font-weight: 600;
+    color: #334155;
+    width: 100px;
+    text-align: right;
+  }
+  .ai-progress-track {
+    height: 14px;
+    background: #e2e8f0;
+    border-radius: 7px;
+    overflow: hidden;
+    display: flex;
+    margin: 8px 0;
+  }
+  .ai-progress-lunch {
+    background: #3b82f6;
+    height: 100%;
+  }
+  .ai-progress-dinner {
+    background: #8b5cf6;
+    height: 100%;
+  }
+
   .ai-analysis {
     background: #fff;
     border: 1px solid var(--rv-accent, #b68235);
@@ -3143,15 +3240,125 @@ async function aiAnalyze() {
   }
 }
 
+function buildAiVisualDashboardHTML() {
+  if (!currentReport) return '';
+  try {
+    const d = currentReport;
+    const sales = buildSalesDataForAI();
+    
+    const totalSalesStr = yen(d.total || sales.totalSales || 0);
+    const totalCust = sales.totalCustomers || (d.lunchCustomers + d.dinnerCustomers) || 0;
+    const avgSpendStr = totalCust ? yen(Math.round((d.total || sales.totalSales) / totalCust)) : '-';
+    
+    const lunchTot = d.lunchTotal || sales.lunchTotal || 0;
+    const dinnerTot = d.dinnerTotal || sales.dinnerTotal || 0;
+    const grandTot = lunchTot + dinnerTot || 1;
+    const lunchPct = Math.round((lunchTot / grandTot) * 100);
+    const dinnerPct = 100 - lunchPct;
+    
+    const weekdays = sales.weekdayBreakdown || [];
+    const maxDaySales = Math.max(...weekdays.map(w => w.totalSales || 0), 1);
+    
+    const barChartHTML = weekdays.length ? weekdays.map(w => {
+      const pct = Math.round((w.totalSales / maxDaySales) * 100);
+      return `<div class="ai-bar-row">
+        <span class="ai-bar-label">${w.weekday}曜日</span>
+        <div class="ai-bar-track">
+          <div class="ai-bar-fill" style="width:${pct}%"></div>
+        </div>
+        <span class="ai-bar-val">${yen(w.totalSales)}</span>
+      </div>`;
+    }).join('') : '';
+
+    const topProds = (sales.topProducts || []).slice(0, 5);
+    const maxProdAmt = Math.max(...topProds.map(p => p.amt || 0), 1);
+    const prodChartHTML = topProds.map(p => {
+      const pct = Math.round((p.amt / maxProdAmt) * 100);
+      return `<div class="ai-bar-row">
+        <span class="ai-bar-label" style="width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)}</span>
+        <div class="ai-bar-track">
+          <div class="ai-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,#3b82f6,#60a5fa)"></div>
+        </div>
+        <span class="ai-bar-val">${yen(p.amt)} (${p.qty}点)</span>
+      </div>`;
+    }).join('');
+
+    return `
+      <div style="border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:24px;">
+        <h2 style="font-size:18px;font-weight:700;color:var(--rv-accent-700);margin:0 0 12px 0;display:flex;align-items:center;gap:8px;">
+          📊 経営ハイライト・ビジュアルサマリー
+        </h2>
+        
+        <!-- KPI Cards -->
+        <div class="ai-kpi-grid">
+          <div class="ai-kpi-card">
+            <span class="ai-kpi-label">総売上高</span>
+            <span class="ai-kpi-value">${totalSalesStr}</span>
+            <span class="ai-kpi-sub">${sales.salesCount || 0} 件の伝票データ</span>
+          </div>
+          <div class="ai-kpi-card">
+            <span class="ai-kpi-label">総客数 / 客単価</span>
+            <span class="ai-kpi-value">${avgSpendStr}</span>
+            <span class="ai-kpi-sub">総来店客数: ${totalCust} 名</span>
+          </div>
+          <div class="ai-kpi-card">
+            <span class="ai-kpi-label">ランチ売上</span>
+            <span class="ai-kpi-value">${yen(lunchTot)}</span>
+            <span class="ai-kpi-sub">構成比: ${lunchPct}%</span>
+          </div>
+          <div class="ai-kpi-card">
+            <span class="ai-kpi-label">ディナー売上</span>
+            <span class="ai-kpi-value">${yen(dinnerTot)}</span>
+            <span class="ai-kpi-sub">構成比: ${dinnerPct}%</span>
+          </div>
+        </div>
+
+        <!-- Lunch vs Dinner Progress Bar -->
+        <div class="ai-chart-section" style="padding:14px 16px;">
+          <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;">
+            <span style="color:#2563eb;">☀️ ランチ比率: ${lunchPct}% (${yen(lunchTot)})</span>
+            <span style="color:#7c3aed;">🌙 ディナー比率: ${dinnerPct}% (${yen(dinnerTot)})</span>
+          </div>
+          <div class="ai-progress-track">
+            <div class="ai-progress-lunch" style="width:${lunchPct}%"></div>
+            <div class="ai-progress-dinner" style="width:${dinnerPct}%"></div>
+          </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;">
+          ${barChartHTML ? `
+          <div class="ai-chart-section" style="margin-bottom:0;">
+            <div class="ai-chart-title">📅 曜日別売上バランス</div>
+            ${barChartHTML}
+          </div>` : ''}
+          
+          ${prodChartHTML ? `
+          <div class="ai-chart-section" style="margin-bottom:0;">
+            <div class="ai-chart-title">🏆 売上高 TOP 5 メニュー</div>
+            ${prodChartHTML}
+          </div>` : ''}
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    console.error('buildAiVisualDashboardHTML error:', e);
+    return '';
+  }
+}
+
 function renderAiAnalysis(text, skipAutoSave = false, title = null, period = null) {
   if (currentReport) currentReport.aiAnalysisText = text;
   const area = document.getElementById('aiAnalysisArea');
+  const visualHTML = buildAiVisualDashboardHTML();
+  
   area.innerHTML = `
     <div class="ai-analysis-header">
       <button class="rv-btn rv-btn-secondary ai-analysis-pdf-btn" onclick="window.print()">📄 PDFで保存 / 印刷</button>
       <button class="rv-btn rv-btn-secondary ai-analysis-pdf-btn" onclick="downloadAiAnalysisText()">💾 テキスト保存</button>
       <button class="ai-analysis-close" onclick="document.getElementById('aiAnalysisArea').hidden=true">✕</button>
     </div>
+    ${visualHTML}
     ${simpleMarkdown(text)}
   `;
   area.hidden = false;
