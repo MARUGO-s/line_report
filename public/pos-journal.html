@@ -2475,7 +2475,7 @@ async function renderSavedReports(filter='all'){
     
   view.hidden=false; document.body.classList.add('report-open');
   view.querySelector('#savedClose').onclick=()=>{ view.hidden=true; document.body.classList.remove('report-open'); };
-  view.querySelectorAll('[data-open]').forEach(b=>b.onclick=async()=>{ const r=(await readSavedReports()).find(x=>x.id===b.dataset.open); if(r) renderReport({...r,saved:true}); });
+  view.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{ const r=reports.find(x=>x.id===b.dataset.open); if(r) renderReport({...r,saved:true}); });
   view.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{
     if(!confirm('この保存済みレポートを削除しますか？')) return;
     showSaveStatus('削除中…');
@@ -2836,7 +2836,19 @@ monthlyBtn.addEventListener('click', () => {
     }
   }, 100);
 });
-savedBtn.addEventListener('click', () => renderSavedReports());
+savedBtn.addEventListener('click', () => {
+  showAppLoading('保存済みレポートを読み込み中...', 'データベースと同期しています');
+  setTimeout(async () => {
+    try {
+      await renderSavedReports();
+    } catch (err) {
+      console.error('renderSavedReports error:', err);
+      alert('保存済みレポートの表示中にエラーが発生しました。');
+    } finally {
+      hideAppLoading();
+    }
+  }, 50);
+});
 dlAllBtn.addEventListener('click',()=> items.filter(it=>!it.error).forEach((it,i)=> setTimeout(()=>download(txtName(it.name),it.preview), i*300)));
 clearBtn.addEventListener('click',()=>{ 
   items=[]; 
