@@ -2712,7 +2712,7 @@ function auditHtml(audit){
 
 function renderReport({
   title,period,salesCount,total,body,createdAt=reportStamp(),saved=false,
-  sales=null,aiAnalysisText=null,
+  sales=null,aiAnalysisText=null,topProducts=null,totalCustomers=null,
   parserVersion,verificationVersion,categoryVersion,mealPeriodVersion,
   foodTotal=null,drinkTotal=null,roomTotal=0,otherTotal=0,chargeTotal=0,
   lunchTotal=null,dinnerTotal=null,lunchCustomers=null,dinnerCustomers=null
@@ -2725,7 +2725,13 @@ function renderReport({
     mealPeriodVersion=mealPeriodVersion||MEAL_PERIOD_VERSION;
   }
   const stale=saved&&(parserVersion!==PARSER_VERSION||verificationVersion!==VERIFICATION_VERSION||categoryVersion!==CATEGORY_VERSION||mealPeriodVersion!==MEAL_PERIOD_VERSION);
-  currentReport={title,period,salesCount,total,body,createdAt,parserVersion,verificationVersion,categoryVersion,mealPeriodVersion,foodTotal,drinkTotal,roomTotal,otherTotal,chargeTotal,lunchTotal,dinnerTotal,lunchCustomers,dinnerCustomers,sales,aiAnalysisText};
+  currentReport={title,period,salesCount,total,body,createdAt,parserVersion,verificationVersion,categoryVersion,mealPeriodVersion,foodTotal,drinkTotal,roomTotal,otherTotal,chargeTotal,lunchTotal,dinnerTotal,lunchCustomers,dinnerCustomers,sales,aiAnalysisText,topProducts,totalCustomers};
+  if (Array.isArray(sales) && sales.length) {
+    currentReport.topProducts = collectProductsFromReport(currentReport).slice(0, 40);
+    currentReport.totalCustomers = sales.reduce((n, s) => n + (Number(s.customers) || 0), 0);
+  } else if (Array.isArray(topProducts) && topProducts.length) {
+    currentReport.topProducts = topProducts;
+  }
   const staleNotice=stale?`<div class="rv-card rv-elev-sm" style="margin-bottom:var(--rv-space-6)"><div class="rv-card-kicker">旧解析版のレポートです <span class="rv-tag rv-tag-outline">注意あり</span></div><p class="rv-card-body">現在の検算ルールを通っていないため、PDF保存はできません。元データを読み込み直して再作成してください。</p></div>`:'';
   const categoryMeta=Number.isFinite(foodTotal)&&Number.isFinite(drinkTotal)
     ?`　/　フード ${yen(foodTotal)}　/　飲料 ${yen(drinkTotal)}${roomTotal>0?`　/　室料 ${yen(roomTotal)}`:''}${otherTotal>0?`　/　その他 ${yen(otherTotal)}`:''}`:'';
@@ -2917,11 +2923,21 @@ async function saveCurrentReport(){
   showSaveStatus('保存中…');
   const reports=(await readSavedReports()).map(report=>report);
   const bundle=currentReport.relatedReports?.length?currentReport.relatedReports:[currentReport];
-  // sales明細はプレビュー再生成用の一時データで、保存済みレポートには不要。
-  // 複数月を一括保存した際にlocalStorage容量を圧迫しないよう除外する。
+  // sales明細は容量が大きいため除外し、AIチャット用に商品サマリー(topProducts)は残す。
   const records=bundle.map(report=>{
-    const {relatedReports, sales, ...withoutBundle}=report;
-    return {id:`${Date.now()}_${Math.random().toString(36).slice(2,8)}`, ...withoutBundle};
+    const prev = currentReport;
+    currentReport = report;
+    const aiSnap = buildSalesDataForAI();
+    currentReport = prev;
+    const {relatedReports, sales, body, ...withoutBundle}=report;
+    return {
+      id:`${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+      ...withoutBundle,
+      topProducts: Array.isArray(aiSnap.topProducts) ? aiSnap.topProducts.slice(0, 30) : (report.topProducts || []),
+      totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers||0)+(report.dinnerCustomers||0)) || 0,
+      weekdayBreakdown: aiSnap.weekdayBreakdown || report.weekdayBreakdown || [],
+      hourlyBreakdown: (aiSnap.hourlyBreakdown || report.hourlyBreakdown || []).slice(0, 24)
+    };
   });
   reports.unshift(...records);
   const ok=await writeSavedReports(reports.slice(0,100), records);
@@ -4177,26 +4193,114 @@ function buildCompactSalesDataForAI() {
   };
 }
 
+function wantsItemBreakdown(msg) {
+  return /(アイテム|商品|メニュー|品目|売れ筋|ランキング|何が売|売れたもの|売れた商品|点数|個数)/.test(String(msg || ''));
+}
+
+function collectProductsFromReport(r) {
+  const map = new Map();
+  const add = (name, qty, amt, category) => {
+    if (!name) return;
+    const key = String(name);
+    const row = map.get(key) || { name: key, qty: 0, amt: 0, category: category || 'その他' };
+    row.qty += Number(qty) || 0;
+    row.amt += Number(amt) || 0;
+    if (category) row.category = category;
+    map.set(key, row);
+  };
+
+  if (Array.isArray(r?.topProducts)) {
+    r.topProducts.forEach(p => add(p.name || p.product || p.title, p.qty || p.quantity, p.amt || p.amount || p.total, p.category));
+  }
+  if (Array.isArray(r?.sales)) {
+    r.sales.forEach(s => {
+      (s.items || []).forEach(i => add(i.name, i.qty, i.amount, i.category));
+    });
+  }
+  return [...map.values()].sort((a, b) => b.amt - a.amt);
+}
+
+function mergeProductLists(lists) {
+  const map = new Map();
+  lists.flat().forEach(p => {
+    const key = String(p.name || '');
+    if (!key) return;
+    const row = map.get(key) || { name: key, qty: 0, amt: 0, category: p.category || 'その他' };
+    row.qty += Number(p.qty) || 0;
+    row.amt += Number(p.amt) || 0;
+    if (p.category) row.category = p.category;
+    map.set(key, row);
+  });
+  return [...map.values()].sort((a, b) => b.amt - a.amt);
+}
+
+function formatItemBreakdownReply(queryResult, userMsg) {
+  const products = Array.isArray(queryResult.topProducts) ? queryResult.topProducts : [];
+  if (!products.length) {
+    return `### 🧾 ${queryResult.label} の商品内訳
+
+ご質問「${userMsg}」について、該当期間の保存データには **商品別の明細（商品名・個数）がまだ含まれていません**。
+
+現在参照できたのはカテゴリ集計のみです:
+- **総売上高**: **${yen(queryResult.totalSales)}**
+- **フード**: ${yen(queryResult.foodTotal)} (${queryResult.foodPct}%)
+- **ドリンク**: ${yen(queryResult.drinkTotal)} (${queryResult.drinkPct}%)
+
+商品内訳を答えるには、該当月の .jnl / .lzh を読み込んでレポートを作成し、「アプリ内に保存」し直してください（新しい保存形式では商品別個数も保持します）。`;
+  }
+
+  const food = products.filter(p => /フード|食品|料理/.test(String(p.category || '')) || p.category === 'フード');
+  const drink = products.filter(p => /ドリンク|飲料|飲/.test(String(p.category || '')) || p.category === 'ドリンク' || p.category === '飲料');
+  const other = products.filter(p => !food.includes(p) && !drink.includes(p));
+  const top = products.slice(0, 20);
+  const lines = top.map((p, i) => `${i + 1}. **${p.name}** — ${p.qty}点 / ${yen(p.amt)}${p.category ? `（${p.category}）` : ''}`).join('\n');
+
+  let catBlocks = '';
+  if (food.length) {
+    catBlocks += '\n\n**🍖 フード上位**\n' + food.slice(0, 8).map(p => `- ${p.name}: ${p.qty}点 / ${yen(p.amt)}`).join('\n');
+  }
+  if (drink.length) {
+    catBlocks += '\n\n**🍹 ドリンク上位**\n' + drink.slice(0, 8).map(p => `- ${p.name}: ${p.qty}点 / ${yen(p.amt)}`).join('\n');
+  }
+  if (other.length && other.length !== products.length) {
+    catBlocks += '\n\n**その他**\n' + other.slice(0, 5).map(p => `- ${p.name}: ${p.qty}点 / ${yen(p.amt)}`).join('\n');
+  }
+
+  return `### 🧾 ${queryResult.label} の商品内訳 (保存ジャーナル参照)
+
+ご質問の **売れた商品の内容・個数** を、保存データから集計しました（売上金額順・上位${top.length}件）:
+
+${lines}${catBlocks}
+
+**参考（カテゴリ合計）**
+- 総売上 ${yen(queryResult.totalSales)} / フード ${yen(queryResult.foodTotal)} (${queryResult.foodPct}%) / ドリンク ${yen(queryResult.drinkTotal)} (${queryResult.drinkPct}%)
+
+**💡 分析メモ**: 保存データから引用した正確な数値です。推測は含みません。`;
+}
+
 async function searchSavedReportsByQuery(query, chatHistory = []) {
   let q = String(query || '').trim().toLowerCase();
 
-  // 続きの質問（「なぜゼロなの」等）では直近のユーザー発話から年月を引き継ぐ
+  // 続きの質問では直近のユーザー発話から年月を引き継ぐ
   const hasPeriodHint = /(\d{4})/.test(q);
   if (!hasPeriodHint && Array.isArray(chatHistory)) {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const item = chatHistory[i];
       if (!item || item.role !== 'user') continue;
       const prev = String(item.content || '');
-      if (/(\d{4})[年/._-]?\s*(0?[1-9]|1[0-2])|(?:\d{4})(0[1-9]|1[0-2])|(\d{4})年?/.test(prev)) {
+      if (/(\d{4})\s*年\s*\d{1,2}\s*月|(\d{4})[\/_.-](0?[1-9]|1[0-2])|(\d{4})(0[1-9]|1[0-2])|(\d{4})年?/.test(prev)) {
         q = `${prev} ${q}`.trim().toLowerCase();
         break;
       }
     }
   }
 
-  const monthMatch = q.match(/(\d{4})[年/._-]?\s*(0?[1-9]|1[0-2])(?:月)?/) || q.match(/(\d{4})(0[1-9]|1[0-2])/);
-  const beforeYearMatch = q.match(/(\d{4})年?\s*(?:より前|以前|前)/);
-  const yearOnlyMatch = !monthMatch && !beforeYearMatch ? q.match(/(\d{4})年?/) : null;
+  // 年月抽出（「2026年 5月」「2026/05」「202605」を優先）
+  const monthMatch = q.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/)
+    || q.match(/(\d{4})[\/_.-](0?[1-9]|1[0-2])(?!\d)/)
+    || q.match(/(\d{4})(0[1-9]|1[0-2])(?!\d)/);
+  const beforeYearMatch = q.match(/(\d{4})\s*年?\s*(?:より前|以前|前)/);
+  const yearOnlyMatch = !monthMatch && !beforeYearMatch ? q.match(/(\d{4})\s*年?/) : null;
 
   const reports = await readSavedReports();
   const allReports = currentReport ? [currentReport, ...reports] : reports;
@@ -4206,7 +4310,6 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     const hydrated = [];
     for (const r of matched) hydrated.push(await hydrateSavedReport(r));
 
-    // 同期間の日別＋月間が両方ある場合は二重計上を避けるため月間を優先
     const monthly = hydrated.filter(r => String(r.title || '').includes('月間'));
     const use = monthly.length ? monthly : hydrated;
 
@@ -4219,7 +4322,6 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
       count += Number(r.salesCount) || 0;
     });
 
-    // サマリーが無い場合でも sales 明細から集計
     if (totSales === 0 && fTot === 0 && dTot === 0) {
       use.forEach(r => {
         const sales = Array.isArray(r.sales) ? r.sales : [];
@@ -4233,6 +4335,7 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
       });
     }
 
+    const topProducts = mergeProductLists(use.map(collectProductsFromReport)).slice(0, 40);
     const catTot = fTot + dTot || 1;
     return {
       label,
@@ -4244,7 +4347,8 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
       totalCustomers: cust,
       avgSpend: cust ? Math.round(totSales / cust) : 0,
       salesCount: count,
-      sourceCount: use.length
+      sourceCount: use.length,
+      topProducts
     };
   }
 
@@ -4303,6 +4407,10 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
 ※該当する年月の電子ジャーナル（.jnl/.lzh）ファイルを読み込んでレポートを作成すると、自動的に保存されAIチャットで参照できるようになります。`;
     }
 
+    if (wantsItemBreakdown(msg)) {
+      return formatItemBreakdownReply(queryResult, msg);
+    }
+
     return `### 📊 ${queryResult.label} の集計結果 (保存ジャーナル参照)
 
 保存されている売上ジャーナルデータより、ご指定の **【${queryResult.label}】** を正確に抽出・集計いたしました:
@@ -4311,9 +4419,28 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
 - **🍖 フード売上**: ${yen(queryResult.foodTotal)} (**${queryResult.foodPct}%**)
 - **🍹 ドリンク売上**: ${yen(queryResult.drinkTotal)} (**${queryResult.drinkPct}%**)
 ${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustomers}名 (平均客単価: ${yen(queryResult.avgSpend)})` : ''}
+${(queryResult.topProducts && queryResult.topProducts.length) ? `\n**売れ筋商品 TOP5**\n` + queryResult.topProducts.slice(0, 5).map((p, i) => `${i + 1}. ${p.name}（${p.qty}点 / ${yen(p.amt)}）`).join('\n') : ''}
 
 **💡 分析メモ**:
-保存データから引用した正確な数値です。推測やWeb情報は含まれておりません。`;
+保存データから引用した正確な数値です。推測やWeb情報は含まれておりません。商品の詳細内訳が必要な場合は「アイテムの内訳は？」と聞いてください。`;
+  }
+
+  // 開いているレポートから商品内訳
+  if (wantsItemBreakdown(msg)) {
+    const products = (salesData.topProducts && salesData.topProducts.length)
+      ? salesData.topProducts
+      : collectProductsFromReport(currentReport || {});
+    if (products.length) {
+      return formatItemBreakdownReply({
+        label: salesData.period || salesData.title || '現在のレポート',
+        totalSales: salesData.totalSales || 0,
+        foodTotal: salesData.foodTotal || 0,
+        drinkTotal: salesData.drinkTotal || 0,
+        foodPct: Math.round(((salesData.foodTotal || 0) / ((salesData.foodTotal || 0) + (salesData.drinkTotal || 0) || 1)) * 100),
+        drinkPct: Math.round(((salesData.drinkTotal || 0) / ((salesData.foodTotal || 0) + (salesData.drinkTotal || 0) || 1)) * 100),
+        topProducts: products
+      }, msg);
+    }
   }
 
   const total = yen(salesData.totalSales || 0);
@@ -4339,7 +4466,7 @@ ${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustom
 
 - **保存済み売上データ一覧**: ${periods || 'データなし'}
 
-年月を指定して質問してください（例: 「2026年6月の売上比率は？」）。該当月の保存データがあれば、ジャーナル集計値をそのまま回答します。`;
+年月を指定して質問してください（例: 「2026年5月の売上比率は？」「2026年5月のアイテム内訳は？」）。`;
   }
 
   return `### 📊 店舗売上データ参照回答 (${salesData.title || '売上データ'})
@@ -4351,7 +4478,7 @@ ${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustom
 - **🍹 ドリンク売上**: ${yen(drinkTot)} (${drinkPct}%)${yearlySummaryStr}
 
 ご質問「${userMsg}」について:
-特定の年月（例: 「2026年6月の売上は？」「2024年のドリンク比率は？」）をご指定いただければ、保存済みの電子ジャーナルデータから正確な数値を即座に抽出・回答いたします。`;
+特定の年月や「アイテムの内訳」をご指定いただければ、保存済みの電子ジャーナルデータから正確な数値を抽出・回答いたします。`;
 }
 
 async function sendAiChat() {
