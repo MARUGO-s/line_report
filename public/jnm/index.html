@@ -6,7 +6,7 @@
 <title>JNL → TXT 変換ツール</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Lora:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Cormorant+Garamond:wght@400;600&family=Lora:wght@400;600&display=swap" rel="stylesheet">
 <script>
 (function() {
   const KEY = 'line_reservation_calendar_theme';
@@ -207,8 +207,9 @@
     --rv-space-4:18.4px; --rv-space-6:27.6px; --rv-space-8:36.8px;
     --rv-radius-sm:2px; --rv-radius-md:4px; --rv-radius-lg:7px;
     --rv-shadow-sm:0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
-    --rv-font-heading:'Cormorant Garamond', Georgia, serif;
-    --rv-font-body:'Lora', Georgia, serif;
+    /* 日本語＋数字を同一書体に（Cormorant は数字だけ別見た目になる） */
+    --rv-font-heading:'Noto Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', 'Cormorant Garamond', Georgia, serif;
+    --rv-font-body:'Noto Serif JP', 'Lora', Georgia, serif;
     --rv-font-sans:'Noto Sans JP', ui-sans-serif, system-ui, sans-serif;
   }
   *{box-sizing:border-box}
@@ -416,7 +417,8 @@
   .report{max-width:820px;margin:0 auto;padding:var(--rv-space-8) var(--rv-space-4) var(--rv-space-8);
     font-family:var(--rv-font-body);color:var(--rv-text)}
   .r-title{font-family:var(--rv-font-heading);font-size:32px;font-weight:600;
-    line-height:1.15;margin:0 0 var(--rv-space-2);color:var(--rv-text)}
+    line-height:1.15;margin:0 0 var(--rv-space-2);color:var(--rv-text);
+    font-feature-settings:"palt" 0;font-variant-numeric:normal}
   .r-meta{font-family:var(--rv-font-sans);font-variant-numeric:tabular-nums;font-weight:300;
     font-size:13px;opacity:.6;margin:0 0 var(--rv-space-6)}
   .rv-card{display:flex;flex-direction:column;gap:var(--rv-space-2);
