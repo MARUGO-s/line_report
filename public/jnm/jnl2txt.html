@@ -3683,6 +3683,41 @@ async function deleteAiHistory(id) {
   return true;
 }
 
+function openAiHistoryReportView(item) {
+  const view = document.getElementById('reportView');
+  currentReport = {
+    title: item.report_title || 'AI売上分析レポート',
+    period: item.report_period || '',
+    aiAnalysisText: item.analysis_result || '',
+    total: 0,
+    salesCount: 0
+  };
+  
+  view.innerHTML = `<div class="rv-nav">
+    <span class="rv-nav-brand">JNL変換ツール</span>
+    <span class="rv-nav-page">🤖 ${esc(item.report_title)} プレビュー</span>
+    <button class="rv-btn rv-btn-secondary" onclick="window.print()">📄 PDFで保存 / 印刷</button>
+    <button class="rv-btn rv-btn-secondary" onclick="downloadAiAnalysisText()">💾 テキスト保存</button>
+    <button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button>
+    <button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button>
+  </div>
+  <div id="aiAnalysisArea" class="ai-analysis" style="display:block;margin-top:24px;"></div>
+  <div class="report">
+    <h1 class="r-title">${esc(item.report_title)}</h1>
+    <p class="r-meta">対象期間 ${esc(item.report_period)}　/　作成日時 ${esc(item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '')}</p>
+  </div>`;
+  
+  view.hidden = false;
+  document.body.classList.add('report-open');
+  
+  view.querySelector('#rClose').onclick = () => {
+    view.hidden = true;
+    document.body.classList.remove('report-open');
+  };
+
+  renderAiAnalysis(item.analysis_result, true, item.report_title, item.report_period);
+}
+
 async function renderAiHistory() {
   const view = document.getElementById('reportView');
   showAppLoading('AI分析履歴を読み込み中...', 'クラウドデータと同期しています');
@@ -3691,22 +3726,29 @@ async function renderAiHistory() {
     const historyList = await fetchAiHistory();
     const rows = historyList.length ? historyList.map(item => {
       const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '';
-      return `<div class="saved-item">
-        <div class="saved-meta">
-          <div class="saved-title">🤖 ${esc(item.report_title)} <span style="font-size:12px;opacity:.7;font-weight:normal;">(${esc(item.report_period)})</span></div>
-          <div class="saved-sub">作成日時: ${esc(dateStr)}</div>
+      return `<div class="saved-item" style="display:flex;justify-content:space-between;align-items:center;padding:16px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;background:var(--surface);">
+        <div class="saved-meta" style="flex:1;">
+          <div class="saved-title" style="font-size:16px;font-weight:700;">🤖 ${esc(item.report_title)} <span style="font-size:13px;opacity:.8;font-weight:normal;">(${esc(item.report_period)})</span></div>
+          <div class="saved-sub" style="font-size:12px;color:var(--text-2);margin-top:4px;">作成日時: ${esc(dateStr)}</div>
         </div>
-        <button data-open-ai="${esc(item.id)}">レポートを開く</button>
-        <button data-delete-ai="${esc(item.id)}">削除</button>
+        <div style="display:flex;gap:8px;">
+          <button class="rv-btn rv-btn-primary" data-open-ai="${esc(item.id)}" style="cursor:pointer;padding:8px 16px;font-size:13px;">レポートを開く</button>
+          <button class="rv-btn rv-btn-secondary" data-delete-ai="${esc(item.id)}" style="cursor:pointer;padding:8px 16px;font-size:13px;color:#ef4444;border-color:rgba(239,68,68,0.4);">🗑️ 削除</button>
+        </div>
       </div>`;
     }).join('') : '<p class="empty">過去に保存されたAI分析レポートはありません。</p>';
 
-    view.innerHTML = `<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">🤖 AI分析履歴</span><button class="rv-btn rv-btn-ghost" id="aiHistoryClose">閉じる</button></div>
-      <div class="saved-wrap">
-        <h1 class="r-title">🤖 AI分析履歴一覧</h1>
-        <p class="r-meta">AIによって分析されたコンサルティングレポートの全履歴（自動保存済み）です。</p>
-        <div class="saved-list">${rows}</div>
-      </div>`;
+    view.innerHTML = `<div class="rv-nav">
+      <span class="rv-nav-brand">JNL変換ツール</span>
+      <span class="rv-nav-page">🤖 AI分析履歴</span>
+      <button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button>
+      <button class="rv-btn rv-btn-ghost" id="aiHistoryClose">閉じる</button>
+    </div>
+    <div class="saved-wrap" style="max-width:900px;margin:24px auto;padding:0 16px;">
+      <h1 class="r-title" style="font-size:22px;font-weight:700;margin-bottom:8px;">🤖 AI分析履歴一覧</h1>
+      <p class="r-meta" style="color:var(--text-2);margin-bottom:24px;">AIによって分析されたコンサルティングレポートの全履歴（自動保存済み）です。</p>
+      <div class="saved-list">${rows}</div>
+    </div>`;
 
     view.hidden = false;
     document.body.classList.add('report-open');
@@ -3716,20 +3758,29 @@ async function renderAiHistory() {
       document.body.classList.remove('report-open');
     };
 
-    view.querySelectorAll('[data-open-ai]').forEach(b => b.onclick = () => {
-      const item = historyList.find(x => x.id === b.dataset.openAi);
-      if (item) {
-        currentReport = { title: item.report_title, period: item.report_period, aiAnalysisText: item.analysis_result };
-        renderAiAnalysis(item.analysis_result, true);
-      }
+    view.querySelectorAll('[data-open-ai]').forEach(b => {
+      b.onclick = (e) => {
+        e.preventDefault();
+        const targetId = b.getAttribute('data-open-ai');
+        const item = historyList.find(x => String(x.id) === String(targetId));
+        if (item) {
+          openAiHistoryReportView(item);
+        } else {
+          alert('指定されたAIレポートが見つかりません');
+        }
+      };
     });
 
-    view.querySelectorAll('[data-delete-ai]').forEach(b => b.onclick = async () => {
-      if (!confirm('このAI分析レポート履歴を削除しますか？')) return;
-      showSaveStatus('削除中…');
-      const ok = await deleteAiHistory(b.dataset.deleteAi);
-      if (ok) finishSaveStatus('削除しました'); else finishSaveStatus('削除失敗', true);
-      renderAiHistory();
+    view.querySelectorAll('[data-delete-ai]').forEach(b => {
+      b.onclick = async (e) => {
+        e.preventDefault();
+        const targetId = b.getAttribute('data-delete-ai');
+        if (!confirm('このAI分析レポート履歴を削除しますか？')) return;
+        showSaveStatus('削除中…');
+        const ok = await deleteAiHistory(targetId);
+        if (ok) finishSaveStatus('削除しました'); else finishSaveStatus('削除失敗', true);
+        renderAiHistory();
+      };
     });
   } catch (err) {
     alert('AI分析履歴の読み込み中にエラーが発生しました: ' + err.message);
