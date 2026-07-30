@@ -106,15 +106,15 @@
     color: #f8fafc !important;
   }
 
-  body[data-theme='dark'] h1,
-  body[data-theme='dark'] h2,
-  body[data-theme='dark'] h3,
-  body[data-theme='dark'] h4,
-  body[data-theme='dark'] p,
-  body[data-theme='dark'] li,
-  body[data-theme='dark'] div,
-  body[data-theme='dark'] label,
-  body[data-theme='dark'] span:not(.pill-live):not(.mark),
+  body[data-theme='dark'] h1:not(.ai-analysis *),
+  body[data-theme='dark'] h2:not(.ai-analysis *),
+  body[data-theme='dark'] h3:not(.ai-analysis *),
+  body[data-theme='dark'] h4:not(.ai-analysis *),
+  body[data-theme='dark'] p:not(.ai-analysis *),
+  body[data-theme='dark'] li:not(.ai-analysis *),
+  body[data-theme='dark'] div:not(.ai-analysis):not(.ai-analysis *),
+  body[data-theme='dark'] label:not(.ai-analysis *),
+  body[data-theme='dark'] span:not(.pill-live):not(.mark):not(.ai-analysis *),
   body[data-theme='dark'] .title,
   body[data-theme='dark'] .guide,
   body[data-theme='dark'] .conv,
@@ -970,59 +970,76 @@
   .ai-ratio-lunch { color: #2563eb !important; }
   .ai-ratio-dinner { color: #7c3aed !important; }
 
-  /* AI分析カードは白背景固定。ダークテーマの一括白文字指定を打ち消す */
+  /* AI分析: ダークモードでは暗いカード＋明るい文字でコントラストを確保 */
   body[data-theme='dark'] .ai-analysis {
-    background: #ffffff !important;
-    color: #0f172a !important;
+    background: #151c25 !important;
+    border-color: #d4af37 !important;
+    color: #f1f5f9 !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
   }
   body[data-theme='dark'] .ai-analysis h1,
   body[data-theme='dark'] .ai-analysis h2,
   body[data-theme='dark'] .ai-analysis h3,
-  body[data-theme='dark'] .ai-analysis .ai-chart-title {
-    color: #7d5411 !important;
+  body[data-theme='dark'] .ai-analysis .ai-chart-title,
+  body[data-theme='dark'] .ai-analysis .ai-visual-heading {
+    color: #fbbf24 !important;
   }
   body[data-theme='dark'] .ai-analysis p,
   body[data-theme='dark'] .ai-analysis li,
   body[data-theme='dark'] .ai-analysis div,
+  body[data-theme='dark'] .ai-analysis strong,
   body[data-theme='dark'] .ai-analysis span:not(.ai-ratio-food):not(.ai-ratio-drink):not(.ai-ratio-lunch):not(.ai-ratio-dinner):not(.pill-live):not(.mark) {
-    color: #0f172a !important;
+    color: #e2e8f0 !important;
   }
   body[data-theme='dark'] .ai-analysis .ai-kpi-card {
-    background: #f8fafc !important;
-    border-color: #e2e8f0 !important;
+    background: #1e293b !important;
+    border-color: #334155 !important;
+    box-shadow: none !important;
   }
-  body[data-theme='dark'] .ai-analysis .ai-kpi-label {
-    color: #64748b !important;
+  body[data-theme='dark'] .ai-analysis .ai-kpi-label,
+  body[data-theme='dark'] .ai-analysis .ai-kpi-sub {
+    color: #94a3b8 !important;
   }
   body[data-theme='dark'] .ai-analysis .ai-kpi-value {
-    color: #0f172a !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-kpi-sub {
-    color: #64748b !important;
+    color: #f8fafc !important;
   }
   body[data-theme='dark'] .ai-analysis .ai-chart-section {
-    background: #ffffff !important;
-    border-color: #e2e8f0 !important;
+    background: #1e293b !important;
+    border-color: #334155 !important;
   }
-  body[data-theme='dark'] .ai-analysis .ai-bar-label {
-    color: #475569 !important;
-  }
+  body[data-theme='dark'] .ai-analysis .ai-bar-label,
   body[data-theme='dark'] .ai-analysis .ai-bar-val {
-    color: #334155 !important;
+    color: #cbd5e1 !important;
   }
   body[data-theme='dark'] .ai-analysis .ai-bar-track,
   body[data-theme='dark'] .ai-analysis .ai-progress-track {
-    background: #e2e8f0 !important;
+    background: #0f172a !important;
   }
-  body[data-theme='dark'] .ai-analysis .ai-ratio-food { color: #16a34a !important; }
-  body[data-theme='dark'] .ai-analysis .ai-ratio-drink { color: #d97706 !important; }
-  body[data-theme='dark'] .ai-analysis .ai-ratio-lunch { color: #2563eb !important; }
-  body[data-theme='dark'] .ai-analysis .ai-ratio-dinner { color: #7c3aed !important; }
-  body[data-theme='dark'] .ai-analysis .ai-visual-heading {
-    color: #7d5411 !important;
-  }
+  body[data-theme='dark'] .ai-analysis .ai-ratio-food { color: #4ade80 !important; }
+  body[data-theme='dark'] .ai-analysis .ai-ratio-drink { color: #fbbf24 !important; }
+  body[data-theme='dark'] .ai-analysis .ai-ratio-lunch { color: #60a5fa !important; }
+  body[data-theme='dark'] .ai-analysis .ai-ratio-dinner { color: #c4b5fd !important; }
   body[data-theme='dark'] .ai-analysis-close {
-    color: #64748b !important;
+    color: #cbd5e1 !important;
+  }
+  body[data-theme='dark'] .ai-analysis .ai-visual-divider {
+    border-bottom-color: #334155 !important;
+  }
+
+  /* 月次アコーディオンもダークで読めるように */
+  body[data-theme='dark'] .month-accordion {
+    background: #151c25 !important;
+    border-color: #334155 !important;
+  }
+  body[data-theme='dark'] .month-accordion-summary {
+    background: #1e293b !important;
+    color: #f8fafc !important;
+  }
+  body[data-theme='dark'] .month-summary-title {
+    color: #f8fafc !important;
+  }
+  body[data-theme='dark'] .month-summary-meta {
+    color: #94a3b8 !important;
   }
 
   .ai-analysis {
@@ -5091,7 +5108,7 @@ function buildAiVisualDashboardHTML() {
     }).join('');
 
     return `
-      <div style="border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:24px;">
+      <div class="ai-visual-divider" style="border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:24px;">
         <h2 class="ai-visual-heading" style="font-size:18px;font-weight:700;margin:0 0 12px 0;display:flex;align-items:center;gap:8px;">
           📊 経営ハイライト・ビジュアルサマリー
         </h2>
