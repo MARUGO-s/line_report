@@ -2264,7 +2264,7 @@ function parserSelfCheck(){
   if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-31-v16';
+const PARSER_VERSION='2026-07-31-v17';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -2568,6 +2568,14 @@ function collectSalesAudit(itemList=null){
   sales.sort((a,b)=> a.date!==b.date ? (a.date<b.date?-1:1) : (a.no-b.no));
   // クラウド分類ルールを必ず再適用（解析直後の取りこぼし防止）
   const overridden=applyAllCategoryOverridesToSales(sales);
+  // 天候・気温を各伝票へ付与（クラウド保存後も日別一覧で復元できるようにする）
+  const weatherMap=collectWeatherByDate(sourceItems);
+  overridden.sales.forEach(s=>{
+    const w=weatherMap.get(s.date);
+    if(!w) return;
+    if(w.weather) s.weather=w.weather;
+    if(w.tempC!=null) s.tempC=w.tempC;
+  });
   return {sales:overridden.sales,critical,warnings,reconciledFiles,summaryFiles,duplicateCount};
 }
 function collectSales(){
@@ -2665,12 +2673,18 @@ function groupByDate(sales){
       byCategoryQty:newCategoryMap(),
       productByCategory:newCategoryProductMap(),
       byMealPeriod:newMealPeriodMap(),
-      chargeTotal:0,chargeQty:0});
+      chargeTotal:0,chargeQty:0,
+      weather:'', tempC:null, hasDaySummary:false});
     const g=days.get(s.date);
     g.receipts.push(s); g.total+=s.total; g.tax+=s.tax;
+    // 伝票に付いた天候・気温（クラウド復元用）
+    if(s.weather) g.weather=s.weather;
+    if(Number.isFinite(s.tempC)) g.tempC=s.tempC;
     addReceiptToMealPeriod(g.byMealPeriod.get(s.mealPeriod),s);
     addToTableStats(g.byTable,s);
-    s.payments.byMethod.forEach((v,k)=>g.receiptByMethod.set(k,(g.receiptByMethod.get(k)||0)+v));
+    if(s.payments?.byMethod?.forEach){
+      s.payments.byMethod.forEach((v,k)=>g.receiptByMethod.set(k,(g.receiptByMethod.get(k)||0)+v));
+    }
     g.byHour.set(s.hour,(g.byHour.get(s.hour)||0)+s.total);
     for(const it of s.items){
       g.byProduct.set(it.name,(g.byProduct.get(it.name)||0)+it.amount);
@@ -2701,6 +2715,7 @@ function groupByDate(sales){
     if(g){
       if(!it.summary.available){ g.peopleComplete=false; return; }
       g.groups+=it.summary.groups||0; g.customers+=it.summary.customers||0;
+      g.hasDaySummary=true;
       if(it.summary.paymentMatched){
         it.summary.payments.byMethod.forEach((v,k)=>g.byMethod.set(k,(g.byMethod.get(k)||0)+v));
         g.hasPaymentSummary=true;
@@ -2708,12 +2723,20 @@ function groupByDate(sales){
     }
   });
   days.forEach(g=>{ if(!g.hasPaymentSummary) g.byMethod=new Map(g.receiptByMethod); });
+  // ジャーナルがメモリにある場合は天候を上書き補強
   const weatherMap=collectWeatherByDate(items);
   days.forEach(g=>{
     const w=weatherMap.get(g.date);
-    if(!w) return;
-    g.weather=w.weather||'';
-    g.tempC=w.tempC!=null?w.tempC:null;
+    if(w){
+      if(w.weather) g.weather=w.weather;
+      if(w.tempC!=null) g.tempC=w.tempC;
+    }
+    // 日計サマリーが無い（クラウド再表示など）場合は伝票から組数・客数を復元
+    if(!g.hasDaySummary){
+      g.groups=g.receipts.filter(r=>!r.isSplitFragment).length;
+      g.customers=g.receipts.reduce((n,r)=>n+(Number(r.customers)||0),0);
+      g.peopleComplete=g.customers>0||g.groups>0;
+    }
   });
   return [...days.values()].sort((a,b)=>a.date<b.date?-1:1);
 }
@@ -3207,6 +3230,8 @@ function serializeSaleForCloud(s) {
     tableNo: s.tableNo || '',
     method: s.method || 'その他',
     change: Number(s.change) || 0,
+    weather: s.weather || '',
+    tempC: Number.isFinite(s.tempC) ? s.tempC : null,
     payments: {
       byMethod,
       total: Number(pay.total) || 0,
@@ -3238,6 +3263,8 @@ function reviveSaleFromCloud(s) {
     : new Map(Object.entries(byMethodObj).map(([k, v]) => [k, Number(v) || 0]));
   return {
     ...s,
+    tempC: Number.isFinite(Number(s.tempC)) ? Number(s.tempC) : null,
+    weather: s.weather || '',
     payments: {
       ...(s.payments || {}),
       byMethod,
@@ -3247,6 +3274,38 @@ function reviveSaleFromCloud(s) {
     },
     items: Array.isArray(s.items) ? s.items : []
   };
+}
+
+/** クラウド伝票に天候が無い場合、ジャーナル原本から補完 */
+async function enrichSalesWeatherFromCloudJournals(sales){
+  if(!Array.isArray(sales)||!sales.length||!getAdminToken()) return sales;
+  const need=sales.some(s=>!s.weather&&!Number.isFinite(s.tempC));
+  if(!need) return sales;
+  const months=[...new Set(sales.map(s=>String(s.date||'').slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))];
+  if(!months.length) return sales;
+  try{
+    for(const month of months){
+      const files=await fetchJournalFilesForMonth(month);
+      for(const file of files){
+        try{
+          const bytes=await downloadJournalBytesById(file.id);
+          let buf=bytes;
+          const name=file.original_file_name||file.inner_file_name||'journal.lzh';
+          if(isLzh(name,buf)) buf=unlzh(buf).bytes;
+          const wmap=collectWeatherByDate([{ name, bytes:buf }]);
+          sales.forEach(s=>{
+            const w=wmap.get(s.date);
+            if(!w) return;
+            if(!s.weather&&w.weather) s.weather=w.weather;
+            if(!Number.isFinite(s.tempC)&&w.tempC!=null) s.tempC=w.tempC;
+          });
+        }catch(_){}
+      }
+    }
+  }catch(err){
+    console.warn('enrichSalesWeatherFromCloudJournals:', err);
+  }
+  return sales;
 }
 
 function reviveSalesList(list) {
@@ -4078,7 +4137,10 @@ function clearPendingCategoryMoves(){
 
 async function resolveSalesForCurrentReport(){
   let sales=reviveSalesList(currentReport?.sales);
-  if(sales.length) return applyAllCategoryOverridesToSales(sales).sales;
+  if(sales.length){
+    sales=applyAllCategoryOverridesToSales(sales).sales;
+    return enrichSalesWeatherFromCloudJournals(sales);
+  }
   let months=sourceMonthsFromReport(currentReport);
   if(!months.length){
     const period=String(currentReport?.period||'');
@@ -4087,7 +4149,9 @@ async function resolveSalesForCurrentReport(){
   }
   if(!months.length) return [];
   const fromMonthReports=await loadSalesFromCloudMonthReports(months);
-  if(fromMonthReports.length) return fromMonthReports;
+  if(fromMonthReports.length){
+    return enrichSalesWeatherFromCloudJournals(fromMonthReports);
+  }
   const loaded=await loadSalesFromCloudJournals(months);
   return applyAllCategoryOverridesToSales(loaded.sales||[]).sales;
 }
@@ -5017,10 +5081,11 @@ async function renderSavedReports(filter='all'){
         // 合算レポートなどで伝票が落ちている場合は月別から復元
         currentReport = r;
         sales = await resolveSalesForCurrentReport();
+      } else {
+        sales = applyAllCategoryOverridesToSales(sales).sales;
+        sales = await enrichSalesWeatherFromCloudJournals(sales);
       }
-      const applied = applyAllCategoryOverridesToSales(sales);
-      sales = applied.sales;
-      if (sales.length && applied.changed) {
+      if (sales.length) {
         restorePaymentsMap(sales);
         const isMonthly = /月間/.test(String(r.title || ''));
         const rebuilt = buildReport(isMonthly ? 'monthly' : 'daily', '', '', null, sales, { silent: true, skipRender: true });
@@ -5030,11 +5095,11 @@ async function renderSavedReports(filter='all'){
           rebuilt.journalIds = r.journalIds || [];
           if (r.createdAt) rebuilt.createdAt = r.createdAt;
           r = rebuilt;
-          // 分類ルールに合わせてクラウド側も直す
+          // 天候・客数・分類を反映した最新HTMLをクラウドへも残す
           try { await writeSavedReports([r], [r]); } catch (_) {}
+        } else {
+          r = { ...r, sales };
         }
-      } else if (sales.length) {
-        r = { ...r, sales };
       }
       const body = resolveSavedReportBody(r);
       renderReport({ ...r, body, sales: r.sales || sales, saved: true });
