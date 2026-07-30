@@ -1135,6 +1135,10 @@ Deno.serve(async (req, info) => {
       "/pos-journals/ai-ask",
       "/pos-journals/ai-history",
       "/pos-journals/ai-history/item",
+      "/pos-journals/saved-reports",
+      "/pos-journals/saved-reports/item",
+      "/pos-journals/report-ai-history",
+      "/pos-journals/report-ai-history/item",
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
@@ -1361,6 +1365,48 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await deletePosJournalAiHistoryItem(supabase, body, storeScope), 200)
+    }
+
+    // ── jnl2txt.html（POS電子ジャーナル→売上分析Webアプリ）の保存済みレポート／AI分析履歴 ──
+    // 旧実装はブラウザから anon キーで saved_reports/ai_analysis_history を直接叩いており、
+    // RLS が全公開だったため晒されていた。pos_journal_* と同じ service_role 経由・
+    // store_partition_key スコープの admin-api ルートへ移行する。
+    if (req.method === "GET" && path === "/pos-journals/saved-reports") {
+      return json(await fetchSavedReportsList(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/saved-reports/item") {
+      return json(await fetchSavedReportItem(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/saved-reports") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await saveSavedReport(supabase, body, storeScope), 200)
+    }
+    if (req.method === "DELETE" && path === "/pos-journals/saved-reports/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await deleteSavedReportItem(supabase, body, storeScope), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/report-ai-history") {
+      return json(await fetchReportAiHistoryList(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/report-ai-history") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await saveReportAiHistory(supabase, body, storeScope), 200)
+    }
+    if (req.method === "DELETE" && path === "/pos-journals/report-ai-history/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await deleteReportAiHistoryItem(supabase, body, storeScope), 200)
     }
 
     if (req.method === "GET" && path === "/reservations/calendar") {
@@ -8029,6 +8075,288 @@ async function deletePosJournalAiHistoryItem(
     ok: true,
     deleted: { id: Number(data.id), month: String(data.year_month ?? "") },
   }
+}
+
+// ===== jnl2txt.html 保存済みレポート (saved_reports) =====
+
+type SavedReportListRow = {
+  id: string
+  title: string
+  period: string
+  created_at: string
+}
+
+function normalizeSavedReportListRow(value: unknown): SavedReportListRow | null {
+  if (!isRecord(value)) return null
+  const id = toSafeString(value.id)
+  if (!id) return null
+  return {
+    id,
+    title: toSafeString(value.title) || "売上レポート",
+    period: toSafeString(value.period),
+    created_at: String(value.created_at ?? ""),
+  }
+}
+
+async function fetchSavedReportsList(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const rawLimit = Number(url.searchParams.get("limit") ?? "200")
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(500, Math.trunc(rawLimit)))
+    : 200
+  const { data, error } = await supabase
+    .from("saved_reports")
+    .select("id, title, period, created_at")
+    .eq("store_partition_key", storeKey)
+    .order("created_at", { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw {
+      status: 500,
+      message: `保存済みレポートの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return {
+    ok: true,
+    store_key: storeKey,
+    items: (Array.isArray(data) ? data : [])
+      .map(normalizeSavedReportListRow)
+      .filter((item): item is SavedReportListRow => item !== null),
+  }
+}
+
+async function fetchSavedReportItem(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const id = toSafeString(url.searchParams.get("id"))
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("saved_reports")
+    .select("id, title, period, data, created_at, updated_at")
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `保存済みレポートの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "保存済みレポートが見つかりません。" } satisfies AppError
+  }
+  return { ok: true, item: data }
+}
+
+async function saveSavedReport(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  if (!isRecord(body.data)) {
+    throw { status: 400, message: "data is required." } satisfies AppError
+  }
+  const id = toSafeString(body.id) || `${Date.now()}_${crypto.randomUUID().slice(0, 8)}`
+  const { error } = await supabase
+    .from("saved_reports")
+    .upsert({
+      id,
+      title: toSafeString(body.title) || "売上レポート",
+      period: toSafeString(body.period),
+      data: body.data,
+      store_partition_key: storeKey,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "id" })
+  if (error) {
+    throw {
+      status: 500,
+      message: `保存済みレポートの保存に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return { ok: true, id }
+}
+
+async function deleteSavedReportItem(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  if (String(body.confirmation ?? "") !== "delete") {
+    throw {
+      status: 400,
+      message: "削除確認欄へ半角小文字で delete と入力してください。",
+    } satisfies AppError
+  }
+  const id = toSafeString(body.id)
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("saved_reports")
+    .delete()
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .select("id")
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `保存済みレポートの削除に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "保存済みレポートが見つかりません。" } satisfies AppError
+  }
+  return { ok: true, deleted: { id: String(data.id) } }
+}
+
+// ===== jnl2txt.html AI分析履歴 (ai_analysis_history) =====
+// 一覧の1件ごとに analysis_result/sales_data を含めて返す（旧クライアントの select=* と同じ形）。
+// saved_reports と異なり単体取得エンドポイントは持たない（旧実装も一覧のみで再表示していたため）。
+
+async function fetchReportAiHistoryList(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(300, Math.trunc(rawLimit)))
+    : 100
+  const { data, error } = await supabase
+    .from("ai_analysis_history")
+    .select("id, report_title, report_period, analysis_result, sales_data, created_at")
+    .eq("store_partition_key", storeKey)
+    .order("created_at", { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw {
+      status: 500,
+      message: `AI分析履歴の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return { ok: true, store_key: storeKey, items: Array.isArray(data) ? data : [] }
+}
+
+async function saveReportAiHistory(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const analysisResult = toSafeString(body.analysis_result)
+  if (!analysisResult) {
+    throw { status: 400, message: "analysis_result is required." } satisfies AppError
+  }
+  const id = toSafeString(body.id) || `${Date.now()}_${crypto.randomUUID().slice(0, 8)}`
+  const { error } = await supabase
+    .from("ai_analysis_history")
+    .insert({
+      id,
+      report_title: toSafeString(body.report_title) || "AI売上分析レポート",
+      report_period: toSafeString(body.report_period),
+      analysis_result: analysisResult,
+      sales_data: isRecord(body.sales_data) ? body.sales_data : null,
+      store_partition_key: storeKey,
+      updated_at: new Date().toISOString(),
+    })
+  if (error) {
+    throw {
+      status: 500,
+      message: `AI分析履歴の保存に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return { ok: true, id }
+}
+
+async function deleteReportAiHistoryItem(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  if (String(body.confirmation ?? "") !== "delete") {
+    throw {
+      status: 400,
+      message: "削除確認欄へ半角小文字で delete と入力してください。",
+    } satisfies AppError
+  }
+  const id = toSafeString(body.id)
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("ai_analysis_history")
+    .delete()
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .select("id")
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `AI分析履歴の削除に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "AI分析履歴が見つかりません。" } satisfies AppError
+  }
+  return { ok: true, deleted: { id: String(data.id) } }
 }
 
 async function deletePosJournalFile(

@@ -33,6 +33,10 @@
 </script>
 <script src="../app-theme.js"></script>
 <script src="app-theme.js"></script>
+<script src="../pages-config.js"></script>
+<script src="pages-config.js"></script>
+<script src="../auth-session.js"></script>
+<script src="auth-session.js"></script>
 <style>
   :root {
     --accent:#3f7bea;
@@ -954,8 +958,20 @@
     <div class="pill-live">オフライン動作</div>
     <div class="cap">レジ電子ジャーナルの変換 / 端末内処理のみ</div>
   </div>
-  <button id="themeToggleBtn" onclick="toggleAppTheme()" class="btn-secondary" style="margin-left:auto; padding:6px 14px; font-weight:600; cursor:pointer; font-size:13px;">テーマ切替</button>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <span id="authState" class="pill-live" style="color:var(--text-2); background:var(--pill-bg);">未接続</span>
+    <button id="themeToggleBtn" onclick="toggleAppTheme()" class="btn-secondary" style="margin-left:auto; padding:6px 14px; font-weight:600; cursor:pointer; font-size:13px;">テーマ切替</button>
+  </div>
 </div>
+
+<section id="authCard" hidden style="margin:0 24px 16px; padding:14px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface);">
+  <label for="tokenInput" style="font-size:12.5px; font-weight:600; display:block; margin-bottom:8px;">保存済みレポート／AI分析履歴を使うには管理トークンで接続してください（またはLINEの最新リンクから開いてください）</label>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <input id="tokenInput" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" style="flex:1; min-width:220px; padding:8px 10px; border:1px solid var(--border-input); border-radius:6px; background:var(--page); color:var(--text);">
+    <button class="btn-primary" id="saveTokenBtn" type="button" style="padding:8px 16px; cursor:pointer;">接続</button>
+  </div>
+  <div id="authMsg" style="font-size:12px; color:#e5484d; margin-top:6px;"></div>
+</section>
 
 <div class="tabs">
   <div class="tab" data-tab="guide">使い方</div>
@@ -1078,6 +1094,77 @@ window.onunhandledrejection = function(event) {
 // Global Supabase Constants (Must be declared at script start)
 const SUPABASE_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvY2JuaWZ1YWN0YnZteWpyYXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNzQ2OTgsImV4cCI6MjA4Mjk1MDY5OH0.q33wfcASsQf0Fec3S6fa5CVG2KC9m5Q912Szu7KIyN0';
+
+// 保存済みレポート/AI分析履歴は admin-api 経由（x-admin-token 認証）でのみアクセスする。
+// SUPABASE_ANON_KEY はこれらのテーブルに対しては使用しない（RLSで anon/authenticated からの直接アクセスは遮断済み）。
+const PAGES = window.LINE_REPORT_PAGES || {};
+const AUTH = window.LINE_REPORT_AUTH || null;
+const STORE_KEY = 'bistrocavacava';
+function getAdminToken() { return AUTH ? AUTH.getToken() : ''; }
+function setAuthUiState(ok) {
+  const stateEl = document.getElementById('authState');
+  const cardEl = document.getElementById('authCard');
+  if (stateEl) { stateEl.textContent = ok ? 'ログイン済み' : '未接続'; }
+  if (cardEl) { cardEl.hidden = !!ok; }
+}
+async function saveAdminToken() {
+  const input = document.getElementById('tokenInput');
+  const msgEl = document.getElementById('authMsg');
+  const btn = document.getElementById('saveTokenBtn');
+  const token = input ? input.value.trim() : '';
+  if (!token) return;
+  if (!AUTH || !AUTH.loginWithToken) { if (msgEl) msgEl.textContent = '認証モジュールを読み込めません。'; return; }
+  if (btn) btn.disabled = true;
+  try {
+    await AUTH.loginWithToken(token, {
+      sessionUrl: PAGES.adminApiUrl ? PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL) : '',
+      adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+    });
+    if (input) input.value = '';
+    if (msgEl) msgEl.textContent = '';
+    setAuthUiState(true);
+  } catch (err) {
+    if (msgEl) msgEl.textContent = err && err.message ? err.message : '接続に失敗しました。';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+document.addEventListener('DOMContentLoaded', async function () {
+  if (AUTH && AUTH.consumeUrlAuthParams) {
+    try {
+      await AUTH.consumeUrlAuthParams({
+        exchangeUrl: PAGES.adminApiUrl ? PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL) : '',
+        adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+      });
+    } catch (_) {}
+  }
+  setAuthUiState(!!getAdminToken());
+  const saveBtn = document.getElementById('saveTokenBtn');
+  const tokenInput = document.getElementById('tokenInput');
+  if (saveBtn) saveBtn.addEventListener('click', saveAdminToken);
+  if (tokenInput) tokenInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') saveAdminToken(); });
+});
+async function adminApiFetch(path, options) {
+  const url = PAGES.adminApiUrl ? PAGES.adminApiUrl(path) : '';
+  if (!url) throw new Error('API設定を読み込めません。');
+  const token = getAdminToken();
+  if (!token) throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。');
+  const headers = Object.assign({
+    'Content-Type': 'application/json; charset=utf-8',
+    'x-admin-token': token,
+    'x-admin-surface': PAGES.ADMIN_SURFACE || 'line_report'
+  }, (options && options.headers) || {});
+  let response;
+  try {
+    response = await fetch(url, Object.assign({}, options || {}, { headers }));
+  } catch (_) {
+    throw new Error('通信に失敗しました。ネットワークをご確認ください。');
+  }
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 401 || response.status === 403) setAuthUiState(false);
+  if (!response.ok || body.error) throw new Error(body.error || ('HTTP ' + response.status));
+  return body;
+}
 
 // Global Drag & Drop prevent default to allow drop zone handling
 window.addEventListener('dragover', function(e) { e.preventDefault(); }, false);
@@ -2231,22 +2318,12 @@ function finishSaveStatus(text,isError=false){
 
 const EMBEDDED_BACKUP = /* @EMBEDDED_BACKUP_START@ */ null /* @EMBEDDED_BACKUP_END@ */;
 function isEmptyReportsRaw(raw){return raw==null||raw==='[]'||(Array.isArray(raw)&&raw.length===0);}
-const SUPABASE_REST_URL = `${SUPABASE_URL}/rest/v1/saved_reports`;
 
 async function fetchSupabaseReports() {
   try {
     // 一覧用メタデータのみ取得（20MB -> 5KBへ大幅軽量化）
-    const res = await fetch(`${SUPABASE_REST_URL}?select=id,title,period,created_at&order=created_at.desc&limit=200`, {
-      method: 'GET',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    if (!res.ok) throw new Error('Supabase fetch failed: ' + res.status);
-    const rows = await res.json();
-    if (!Array.isArray(rows)) return [];
+    const body = await adminApiFetch('/pos-journals/saved-reports?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=200', { method: 'GET' });
+    const rows = Array.isArray(body.items) ? body.items : [];
     return rows.map(row => ({
       id: String(row.id || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`),
       title: row.title || '売上レポート',
@@ -2254,25 +2331,16 @@ async function fetchSupabaseReports() {
       createdAt: row.created_at
     }));
   } catch (err) {
-    console.warn('Supabase fetch error, fallback to local:', err);
+    console.warn('admin-api fetch error, fallback to local:', err);
     return null;
   }
 }
 
 async function fetchSupabaseReportById(id) {
   try {
-    const res = await fetch(`${SUPABASE_REST_URL}?id=eq.${encodeURIComponent(id)}&select=*`, {
-      method: 'GET',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    if (!res.ok) return null;
-    const rows = await res.json();
-    if (!rows || rows.length === 0) return null;
-    const row = rows[0];
+    const body = await adminApiFetch('/pos-journals/saved-reports/item?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id), { method: 'GET' });
+    const row = body.item;
+    if (!row) return null;
     const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
     return {
       id: row.id,
@@ -2303,29 +2371,27 @@ async function readSavedReports() {
   }
 }
 
-async function writeSavedReports(reports) {
+async function writeSavedReports(reports, newRecords) {
   try {
-    const payload = reports.map(r => ({
-      id: String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
-      title: String(r.title || '売上レポート'),
-      period: String(r.period || ''),
-      data: r,
-      updated_at: new Date().toISOString()
-    }));
-
-    const res = await fetch(`${SUPABASE_REST_URL}`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates,return=minimal'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-      console.warn('Supabase write error, status:', res.status);
+    // newRecords（今回新規追加された分のみ）が渡された場合はそれだけをAPIへ送る。
+    // 未指定時は互換のため reports 全件を送る（呼び出し元の変更漏れ対策）。
+    const toUpload = Array.isArray(newRecords) ? newRecords : reports;
+    for (const r of toUpload) {
+      const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      try {
+        await adminApiFetch('/pos-journals/saved-reports', {
+          method: 'POST',
+          body: JSON.stringify({
+            id,
+            title: String(r.title || '売上レポート'),
+            period: String(r.period || ''),
+            data: r,
+            store_key: STORE_KEY
+          })
+        });
+      } catch (err) {
+        console.warn('admin-api write error:', err);
+      }
     }
 
     localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
@@ -2338,12 +2404,9 @@ async function writeSavedReports(reports) {
 
 async function deleteSavedReport(id) {
   try {
-    await fetch(`${SUPABASE_REST_URL}?id=eq.${encodeURIComponent(id)}`, {
+    await adminApiFetch('/pos-journals/saved-reports/item', {
       method: 'DELETE',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-      }
+      body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
     });
     const current = await readSavedReports();
     const filtered = current.filter(x => x.id !== id);
@@ -2761,7 +2824,7 @@ async function saveCurrentReport(){
     return {id:`${Date.now()}_${Math.random().toString(36).slice(2,8)}`, ...withoutBundle};
   });
   reports.unshift(...records);
-  const ok=await writeSavedReports(reports.slice(0,100));
+  const ok=await writeSavedReports(reports.slice(0,100), records);
   if(ok){ finishSaveStatus('保存しました'); renderSavedReports(); }
   else { finishSaveStatus('保存に失敗しました',true); }
 }
@@ -3720,21 +3783,23 @@ async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, report
 
     showSaveStatus('AI分析結果を自動保存中…');
 
-    // 2. Supabase DB に保存
+    // 2. admin-api 経由で ai_analysis_history テーブルへ保存
     try {
-      await fetch(SUPABASE_AI_HISTORY_URL, {
+      await adminApiFetch('/pos-journals/report-ai-history', {
         method: 'POST',
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(record)
+        body: JSON.stringify({
+          id: record.id,
+          report_title: record.report_title,
+          report_period: record.report_period,
+          analysis_result: record.analysis_result,
+          sales_data: record.sales_data,
+          store_key: STORE_KEY
+        })
       });
     } catch (err) {
-      console.warn('Supabase remote save fetch warning:', err);
+      console.warn('admin-api remote save warning:', err);
     }
-    
+
     finishSaveStatus('AI分析を自動保存しました');
   } catch (err) {
     console.error('saveAiAnalysisToSupabase error:', err);
@@ -3745,17 +3810,8 @@ async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, report
 async function fetchAiHistory() {
   let cloudItems = null;
   try {
-    const res = await fetch(`${SUPABASE_AI_HISTORY_URL}?select=*&order=created_at.desc&limit=100`, {
-      method: 'GET',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    if (res.ok) {
-      cloudItems = await res.json();
-    }
+    const body = await adminApiFetch('/pos-journals/report-ai-history?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=100', { method: 'GET' });
+    cloudItems = Array.isArray(body.items) ? body.items : null;
   } catch (err) {
     console.warn('fetchAiHistory remote fetch error:', err);
   }
@@ -3782,12 +3838,9 @@ async function deleteAiHistory(id) {
   } catch (e) {}
 
   try {
-    await fetch(`${SUPABASE_AI_HISTORY_URL}?id=eq.${encodeURIComponent(id)}`, {
+    await adminApiFetch('/pos-journals/report-ai-history/item', {
       method: 'DELETE',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-      }
+      body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
     });
   } catch (e) {
     console.error('deleteAiHistory error:', e);
