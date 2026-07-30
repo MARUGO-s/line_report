@@ -2293,13 +2293,7 @@ async function readSavedReports() {
       return remoteReports;
     }
 
-    let raw = null;
-    if (window.desktopStorage?.load) {
-      raw = await window.desktopStorage.load();
-    }
-    if (isEmptyReportsRaw(raw) && localStorage.getItem(REPORT_STORE_KEY)) {
-      raw = localStorage.getItem(REPORT_STORE_KEY);
-    }
+    const raw = localStorage.getItem(REPORT_STORE_KEY);
     const parsed = typeof raw === 'string' ? JSON.parse(raw ?? '[]') : (raw ?? []);
     return Array.isArray(parsed) ? parsed : [];
   } catch (e) {
@@ -2333,11 +2327,7 @@ async function writeSavedReports(reports) {
       console.warn('Supabase write error, status:', res.status);
     }
 
-    if (window.desktopStorage?.save) {
-      await Promise.resolve(window.desktopStorage.save(reports));
-    } else {
-      localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
-    }
+    localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(reports));
     return true;
   } catch (e) {
     console.error('writeSavedReports error:', e);
@@ -2356,9 +2346,6 @@ async function deleteSavedReport(id) {
     });
     const current = await readSavedReports();
     const filtered = current.filter(x => x.id !== id);
-    if (window.desktopStorage?.save) {
-      await Promise.resolve(window.desktopStorage.save(filtered));
-    }
     localStorage.setItem(REPORT_STORE_KEY, JSON.stringify(filtered));
     return true;
   } catch (e) {
@@ -2747,9 +2734,8 @@ async function saveCurrentReport(){
   // sales明細はプレビュー再生成用の一時データで、保存済みレポートには不要。
   // 複数月を一括保存した際にlocalStorage容量を圧迫しないよう除外する。
   const records=bundle.map(report=>{
-    const {relatedReports,...withoutBundle}=report;
-    const compact=window.desktopStorage?.save?withoutBundle:(()=>{const {sales,...small}=withoutBundle; return small;})();
-    return {id:`${Date.now()}_${Math.random().toString(36).slice(2,8)}`,...compact};
+    const {relatedReports, sales, ...withoutBundle}=report;
+    return {id:`${Date.now()}_${Math.random().toString(36).slice(2,8)}`, ...withoutBundle};
   });
   reports.unshift(...records);
   const ok=await writeSavedReports(reports.slice(0,100));
