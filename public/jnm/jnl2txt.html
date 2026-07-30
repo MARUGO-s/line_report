@@ -3455,11 +3455,12 @@ function buildAiVisualDashboardHTML() {
   if (!currentReport) return '';
   try {
     const d = currentReport;
-    const sales = buildSalesDataForAI();
+    const sales = (d.sales && d.sales.length > 0) ? buildSalesDataForAI() : d;
     
-    const totalSalesStr = yen(d.total || sales.totalSales || 0);
+    const totalSalesVal = d.total || sales.totalSales || sales.total || 0;
+    const totalSalesStr = yen(totalSalesVal);
     const totalCust = sales.totalCustomers || (d.lunchCustomers + d.dinnerCustomers) || 0;
-    const avgSpendStr = totalCust ? yen(Math.round((d.total || sales.totalSales) / totalCust)) : '-';
+    const avgSpendStr = totalCust ? yen(Math.round(totalSalesVal / totalCust)) : (sales.overallAvgSpendPerCustomer ? yen(sales.overallAvgSpendPerCustomer) : '-');
     
     const lunchTot = d.lunchTotal || sales.lunchTotal || 0;
     const dinnerTot = d.dinnerTotal || sales.dinnerTotal || 0;
@@ -3624,17 +3625,23 @@ async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, report
     const title = reportTitle || currentReport?.title || '売上分析レポート';
     const period = reportPeriod || currentReport?.period || '';
     
-    // ダッシュボード再現に必要な売上データのスナップショットを抽出
+    // ダッシュボード再現に必要な売上データの完全スナップショットを抽出
+    const baseSales = buildSalesDataForAI();
     const salesSnapshot = currentReport ? {
-      total: currentReport.total || 0,
-      salesCount: currentReport.salesCount || 0,
-      foodTotal: currentReport.foodTotal || 0,
-      drinkTotal: currentReport.drinkTotal || 0,
-      lunchTotal: currentReport.lunchTotal || 0,
-      dinnerTotal: currentReport.dinnerTotal || 0,
-      lunchCustomers: currentReport.lunchCustomers || 0,
-      dinnerCustomers: currentReport.dinnerCustomers || 0,
-      sales: (currentReport.sales || []).slice(0, 500)
+      total: currentReport.total || baseSales.totalSales || 0,
+      totalSales: currentReport.total || baseSales.totalSales || 0,
+      salesCount: currentReport.salesCount || baseSales.salesCount || 0,
+      foodTotal: currentReport.foodTotal || baseSales.foodTotal || 0,
+      drinkTotal: currentReport.drinkTotal || baseSales.drinkTotal || 0,
+      lunchTotal: currentReport.lunchTotal || baseSales.lunchTotal || 0,
+      dinnerTotal: currentReport.dinnerTotal || baseSales.dinnerTotal || 0,
+      lunchCustomers: currentReport.lunchCustomers || baseSales.lunchCustomers || 0,
+      dinnerCustomers: currentReport.dinnerCustomers || baseSales.dinnerCustomers || 0,
+      totalCustomers: baseSales.totalCustomers || ((currentReport.lunchCustomers || 0) + (currentReport.dinnerCustomers || 0)) || 0,
+      overallAvgSpendPerCustomer: baseSales.overallAvgSpendPerCustomer || 0,
+      weekdayBreakdown: baseSales.weekdayBreakdown || [],
+      hourlyBreakdown: baseSales.hourlyBreakdown || [],
+      topProducts: baseSales.topProducts || []
     } : null;
 
     const record = {
@@ -3742,7 +3749,8 @@ function openAiHistoryReportView(item) {
     title: item.report_title || 'AI売上分析レポート',
     period: item.report_period || '',
     aiAnalysisText: item.analysis_result || '',
-    total: snap.total || 0,
+    total: snap.total || snap.totalSales || 0,
+    totalSales: snap.totalSales || snap.total || 0,
     salesCount: snap.salesCount || 0,
     foodTotal: snap.foodTotal || 0,
     drinkTotal: snap.drinkTotal || 0,
@@ -3750,6 +3758,11 @@ function openAiHistoryReportView(item) {
     dinnerTotal: snap.dinnerTotal || 0,
     lunchCustomers: snap.lunchCustomers || 0,
     dinnerCustomers: snap.dinnerCustomers || 0,
+    totalCustomers: snap.totalCustomers || 0,
+    overallAvgSpendPerCustomer: snap.overallAvgSpendPerCustomer || 0,
+    weekdayBreakdown: snap.weekdayBreakdown || [],
+    hourlyBreakdown: snap.hourlyBreakdown || [],
+    topProducts: snap.topProducts || [],
     sales: snap.sales || []
   };
 
