@@ -25,7 +25,6 @@ export type PosJournalReceipt = {
   total: number | null;
   guests: number | null;
   table_no?: string;
-  slip_no?: string;
   items: PosJournalReceiptItem[];
 };
 
@@ -274,18 +273,15 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
   let total: number | null = null;
   let guests: number | null = null;
   let tableNo = "";
-  let slipNo = "";
   for (const line of record.lines) {
     const normalized = String(line || "").normalize("NFKC");
     if (/合\s*計\s/.test(line)) total = amount(line) ?? total;
     guests = firstInt(line, "名") ?? guests;
     const table = normalized.match(
-      /伝票\s*No\.?\s*([^\s]+)\s+テーブル\s*No\.?\s*([^\s]+)/,
+      /(?:伝票\s*No\.?\s*[^\s]+\s+)?テーブル\s*No\.?\s*([^\s]+)/,
     );
     if (table) {
-      const slip = String(table[1] || "").trim();
-      const tbl = String(table[2] || "").trim();
-      if (slip && !/^保留/.test(slip)) slipNo = slip;
+      const tbl = String(table[1] || "").trim();
       if (tbl && !/^保留/.test(tbl) && tbl !== ".") tableNo = tbl;
     }
   }
@@ -298,7 +294,6 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
     total,
     guests,
     ...(tableNo ? { table_no: tableNo } : {}),
-    ...(slipNo ? { slip_no: slipNo } : {}),
     items,
   };
 }

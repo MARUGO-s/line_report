@@ -1877,8 +1877,8 @@ function parserSelfCheck(){
 控え番号 12
 1名`;
   const tableParsed=parseReceipt(withTable);
-  if(tableParsed?.tableNo!=='5'||tableParsed?.slipNo!=='2'){
-    failed.push('テーブルNo・伝票Noの抽出');
+  if(tableParsed?.tableNo!=='5'){
+    failed.push('テーブルNoの抽出');
   }
   const withSeat=`0001-01 No.13 2026年 6月 1日(月) 20時00分
 0000000000001 チャージ料
@@ -1891,7 +1891,7 @@ function parserSelfCheck(){
   if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-31-v14';
+const PARSER_VERSION='2026-07-31-v15';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -2038,27 +2038,19 @@ function parseReceiptPayments(rec,change=0){
   return {byMethod,tenderedByMethod,details,total,tenderedTotal,change};
 }
 
-/** 伝票No / テーブルNo をレシート本文から取得 */
+/** テーブルNo をレシート本文から取得 */
 function parseReceiptTableMeta(rec){
   const text=String(rec).normalize('NFKC');
-  let tableNo='', slipNo='';
+  let tableNo='';
   for(const line of text.split('\n')){
-    const table=line.match(/伝票\s*No\.?\s*([^\s]+)\s+テーブル\s*No\.?\s*([^\s]+)/);
+    const table=line.match(/(?:伝票\s*No\.?\s*[^\s]+\s+)?テーブル\s*No\.?\s*([^\s]+)/);
     if(table){
-      const slip=String(table[1]||'').trim();
-      const tbl=String(table[2]||'').trim();
-      if(slip && !/^保留/.test(slip)) slipNo=slip;
+      const tbl=String(table[1]||'').trim();
       // 「テーブルNo.  保留No.」のように値が空の行は捨てる
       if(tbl && !/^保留/.test(tbl) && tbl!=='.') tableNo=tbl;
     }
-    // 移動記録（座席移動）は会計ではないが、単独ラベルも拾えるようにする
-    const move=line.match(/(?:移動元|移動先)?テーブル\s*No\.?\s*([^\s]+)/);
-    if(!tableNo && move){
-      const tbl=String(move[1]||'').trim();
-      if(tbl && !/^保留/.test(tbl) && tbl!=='.') tableNo=tbl;
-    }
   }
-  return { tableNo, slipNo };
+  return { tableNo };
 }
 
 function parseReceipt(rec){
@@ -2083,7 +2075,7 @@ function parseReceipt(rec){
   const customers=isSplitFragment?0:(customerCountReliable?customerCountCandidates[0]:0);
   const payments=parseReceiptPayments(rec,change);
   let method=payments.byMethod.size>1?'併用':([...payments.byMethod.keys()][0]||'その他');
-  const { tableNo, slipNo }=parseReceiptTableMeta(rec);
+  const { tableNo }=parseReceiptTableMeta(rec);
   // 商品明細（レシート内で純額を集計＝取消を相殺）
   const map=new Map(); let pend=null;
   for(const ln of rec.split('\n')){
@@ -2109,7 +2101,7 @@ function parseReceipt(rec){
     total, tax,
     points:ptM?numOf(ptM[1]):0,groups:isSplitFragment?0:1,customers,
     customerCountCandidates,customerCountReliable,isSplitFragment,
-    tableNo, slipNo,
+    tableNo,
     method,payments,change,items,itemTotal};
 }
 
@@ -2189,7 +2181,7 @@ function collectSalesAudit(itemList=null){
       const key=`${p.date}|${p.no}`;
       const paymentSignature=[...p.payments.byMethod].sort(([a],[b])=>a.localeCompare(b,'ja'))
         .map(([method,amount])=>`${method}:${amount}`).join(';');
-      const signature=`${p.time}|${p.mealPeriod}|${p.customers}|${p.tableNo||''}|${p.slipNo||''}|${p.total}|${p.tax}|${p.points}|${paymentSignature}|${p.items.map(x=>`${x.code}:${x.name}:${x.category}:${x.qty}:${x.amount}`).join(';')}`;
+      const signature=`${p.time}|${p.mealPeriod}|${p.customers}|${p.tableNo||''}|${p.total}|${p.tax}|${p.points}|${paymentSignature}|${p.items.map(x=>`${x.code}:${x.name}:${x.category}:${x.qty}:${x.amount}`).join(';')}`;
       if(seen.has(key)){
         duplicateCount++;
         if(seen.get(key)!==signature) critical.push(`${p.date} No.${p.no}: 同じ伝票番号で内容が異なります`);
@@ -2473,7 +2465,7 @@ function receiptCard(r){
   const mealClass=r.mealPeriod==='ランチ'?'lunch':'dinner';
   const rows=r.items.map(it=>`<tr><td>${esc(it.name)}</td><td class="qty">${it.qty}点</td><td class="amt">${yen(it.amount)}</td></tr>`).join('');
   const changeLine=r.method==='現金'&&r.change?` <span class="rc-tax">（お釣 ${yen(r.change)}）</span>`:'';
-  const tableBadge=r.tableNo?`<span class="rc-time">卓 ${esc(r.tableNo)}${r.slipNo?`・伝票${esc(r.slipNo)}`:''}</span>`:'';
+  const tableBadge=r.tableNo?`<span class="rc-time">卓 ${esc(r.tableNo)}</span>`:'';
   return `<div class="rc">
     <div class="rc-head"><span class="rc-no">No.${esc(r.no)}</span><span class="rc-time">${esc(r.time)}</span>
       <span class="rc-time">${r.customers}名</span>${tableBadge}<span class="meal-badge ${mealClass}">${esc(r.mealPeriod)}</span>
