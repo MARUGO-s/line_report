@@ -56,7 +56,7 @@
     --rv-divider:rgba(31, 41, 55, 0.16);
   }
 
-  /* 🌙 Dark Mode Styles */
+  /* 🌙 Dark Mode High Contrast Overrides */
   body[data-theme='dark'], html[data-theme='dark'] {
     --accent:#3f7bea;
     --page:#0c1117;
@@ -64,22 +64,83 @@
     --border:#26313d;
     --border-sub:#1f2937;
     --border-input:#374151;
-    --text:#e7ecf2;
-    --text-2:#9fadbd;
-    --text-3:#6f7d8d;
+    --text:#f8fafc;
+    --text-2:#cbd5e1;
+    --text-3:#94a3b8;
     --pill-bg:#1b232e;
     --green-t:#36b37e;
     --green-bg:rgba(54, 179, 126, 0.18);
     --tint:#1b232e;
   }
 
+  body[data-theme='dark'] {
+    background: #0c1117 !important;
+    color: #f8fafc !important;
+  }
+
+  body[data-theme='dark'] h1,
+  body[data-theme='dark'] h2,
+  body[data-theme='dark'] h3,
+  body[data-theme='dark'] h4,
+  body[data-theme='dark'] p,
+  body[data-theme='dark'] li,
+  body[data-theme='dark'] div,
+  body[data-theme='dark'] label,
+  body[data-theme='dark'] span:not(.pill-live):not(.mark),
+  body[data-theme='dark'] .title,
+  body[data-theme='dark'] .guide,
+  body[data-theme='dark'] .conv,
+  body[data-theme='dark'] .intro,
+  body[data-theme='dark'] .d1,
+  body[data-theme='dark'] .category-field,
+  body[data-theme='dark'] summary {
+    color: #f8fafc !important;
+  }
+
+  body[data-theme='dark'] .d2,
+  body[data-theme='dark'] .cap,
+  body[data-theme='dark'] .settings-note,
+  body[data-theme='dark'] .foot,
+  body[data-theme='dark'] .empty,
+  body[data-theme='dark'] .r-meta {
+    color: #cbd5e1 !important;
+  }
+
+  body[data-theme='dark'] input[type="text"],
+  body[data-theme='dark'] input[type="date"],
+  body[data-theme='dark'] select {
+    background: #1b232e !important;
+    color: #f8fafc !important;
+    border-color: #334155 !important;
+  }
+
+  body[data-theme='dark'] .drop {
+    background: #151c25 !important;
+    border-color: #334155 !important;
+  }
+
+  body[data-theme='dark'] .btn-secondary {
+    background: #1b232e !important;
+    color: #f8fafc !important;
+    border-color: #334155 !important;
+  }
+
+  body[data-theme='dark'] .tab {
+    color: #cbd5e1 !important;
+  }
+
+  body[data-theme='dark'] .tab.active {
+    color: #387dea !important;
+    border-bottom-color: #387dea !important;
+  }
+
   body[data-theme='dark'] #reportView {
     --rv-bg:#0d131a;
-    --rv-text:#e2e8f0;
+    --rv-text:#f8fafc;
     --rv-accent:#d4af37;
     --rv-accent-300:#fcd34d;
     --rv-accent-500:#f59e0b;
-    --rv-accent-700:#b45309;
+    --rv-accent-700:#fbbf24;
     --rv-neutral-400:#9ca3af;
     --rv-neutral-600:#d1d5db;
     --rv-neutral-700:#e5e7eb;
