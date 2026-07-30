@@ -2792,43 +2792,64 @@ function currentMonthKey() {
 }
 
 async function collectMonthlyHistoryForForecast() {
+  // 分析・予測の主データは「保存済みレポート」（カテゴリ別済み）
   const reports = await readSavedReports();
   const byMonth = new Map();
 
-  for (const raw of reports) {
+  // カテゴリ合計が無い月間は詳細取得を試す（一覧メタだけだとフード/ドリンクが欠ける）
+  const candidates = reports.filter(r => monthKeyFromReport(r));
+  for (const raw of candidates) {
     const key = monthKeyFromReport(raw);
     if (!key) continue;
     const isMonthly = /月間|月別/.test(String(raw.title || ''));
-    // 日別だけの月は後で月間が無ければ使う
     let r = raw;
-    if (!reportHasSalesSummary(r)) {
+    const needsHydrate = !reportHasSalesSummary(r)
+      || (isMonthly && !(Number.isFinite(Number(r.foodTotal)) && Number.isFinite(Number(r.drinkTotal))));
+    if (needsHydrate) {
       try { r = await hydrateSavedReport(r); } catch (_) {}
     }
     const total = reportSummaryTotal(r);
-    if (!total && !isMonthly) continue;
+    if (!total) continue;
+    // 日別は月間が無いときだけ使う
+    if (!isMonthly && byMonth.has(key) && byMonth.get(key).isMonthly) continue;
+
+    const foodTotal = Number(r.foodTotal) || 0;
+    const drinkTotal = Number(r.drinkTotal) || 0;
+    const hasCategories = foodTotal > 0 || drinkTotal > 0;
     const row = {
       month: key,
       label: monthKeyLabel(key),
       total,
-      foodTotal: Number(r.foodTotal) || 0,
-      drinkTotal: Number(r.drinkTotal) || 0,
+      foodTotal,
+      drinkTotal,
+      lunchTotal: Number(r.lunchTotal) || 0,
+      dinnerTotal: Number(r.dinnerTotal) || 0,
       customers: reportSummaryCustomers(r),
       salesCount: Number(r.salesCount) || 0,
       isMonthly,
-      id: r.id
+      hasCategories,
+      source: 'saved-report',
+      id: r.id,
+      title: r.title || ''
     };
     const prev = byMonth.get(key);
     if (!prev) {
       byMonth.set(key, row);
       continue;
     }
-    // 月間レポート優先。同種なら売上の大きい方
-    if ((row.isMonthly && !prev.isMonthly) || (row.isMonthly === prev.isMonthly && row.total >= prev.total)) {
-      byMonth.set(key, row);
-    }
+    const betterMonthly = row.isMonthly && !prev.isMonthly;
+    const betterCats = row.hasCategories && !prev.hasCategories && row.isMonthly === prev.isMonthly;
+    const betterTotal = row.isMonthly === prev.isMonthly && row.hasCategories === prev.hasCategories && row.total >= prev.total;
+    if (betterMonthly || betterCats || betterTotal) byMonth.set(key, row);
   }
 
-  return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+  const history = [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+  return {
+    history,
+    reportCount: reports.length,
+    monthCount: history.length,
+    sourceLabel: '保存済みレポート'
+  };
 }
 
 function linearProject(values, stepsAhead) {
@@ -2847,15 +2868,19 @@ function linearProject(values, stepsAhead) {
   return Math.max(0, intercept + slope * (n - 1 + stepsAhead));
 }
 
-function buildSalesForecast(history, horizon = 3) {
-  const series = Array.isArray(history) ? history.filter(h => h && h.month && Number(h.total) > 0) : [];
+function buildSalesForecast(historyOrBundle, horizon = 3) {
+  const bundle = Array.isArray(historyOrBundle)
+    ? { history: historyOrBundle, sourceLabel: '保存済みレポート' }
+    : (historyOrBundle || {});
+  const series = (bundle.history || []).filter(h => h && h.month && Number(h.total) > 0);
   if (!series.length) {
     return {
       history: [],
       forecasts: [],
       method: '',
       confidence: 'low',
-      note: '保存済みの月次売上が見つかりません。ジャーナルを読み込んで月間レポートを保存してください。'
+      sourceLabel: bundle.sourceLabel || '保存済みレポート',
+      note: '保存済みレポートに月次売上が見つかりません。ジャーナルから月間レポートを作成してクラウド保存してください。'
     };
   }
 
@@ -2868,6 +2893,11 @@ function buildSalesForecast(history, horizon = 3) {
   const recentCat = recentFood + recentDrink || 1;
   const foodShare = recentFood / recentCat;
   const drinkShare = recentDrink / recentCat;
+  const recentLunch = recent.reduce((s, h) => s + (h.lunchTotal || 0), 0);
+  const recentDinner = recent.reduce((s, h) => s + (h.dinnerTotal || 0), 0);
+  const recentMeal = recentLunch + recentDinner || 1;
+  const lunchShare = recentLunch / recentMeal;
+  const dinnerShare = recentDinner / recentMeal;
   const recentCust = recent.reduce((s, h) => s + (h.customers || 0), 0);
   const recentSalesCnt = recent.reduce((s, h) => s + (h.salesCount || 0), 0);
   const custRate = recentAvg > 0 && recentCust > 0 ? recentCust / recent.reduce((s, h) => s + h.total, 0) : 0;
@@ -2883,7 +2913,6 @@ function buildSalesForecast(history, horizon = 3) {
   const nowKey = currentMonthKey();
   const lastKey = series[series.length - 1].month;
   let start = addMonthKey(nowKey, series.some(h => h.month === nowKey) ? 1 : 0);
-  // 最新実績より先から出す
   if (start <= lastKey) start = addMonthKey(lastKey, 1);
 
   const forecasts = [];
@@ -2901,29 +2930,28 @@ function buildSalesForecast(history, horizon = 3) {
 
     let predicted;
     let basis;
-    const trendWeight = steps <= 2 ? 0.20 : steps <= 4 ? 0.10 : 0.05;
     if (yoy != null && seasonal != null) {
-      const tw = trendWeight;
-      predicted = yoy * 0.45 + seasonal * 0.35 + recentAvg * (0.20 - tw + 0.15) + trendVal * tw;
-      // renormalize-ish: keep primarily historical anchors when gap is large
       if (steps > 3) predicted = yoy * 0.5 + seasonal * 0.35 + recentAvg * 0.15;
-      basis = '前年同月＋季節平均＋直近平均';
+      else predicted = yoy * 0.45 + seasonal * 0.35 + recentAvg * 0.20;
+      basis = '前年同月＋季節平均＋直近平均（保存レポート）';
     } else if (yoy != null) {
       if (steps > 3) predicted = yoy * 0.7 + recentAvg * 0.3;
       else predicted = yoy * 0.55 + recentAvg * 0.25 + trendVal * 0.20;
-      basis = '前年同月＋直近平均＋トレンド';
+      basis = '前年同月＋直近平均＋トレンド（保存レポート）';
     } else if (seasonal != null) {
       if (steps > 3) predicted = seasonal * 0.7 + recentAvg * 0.3;
       else predicted = seasonal * 0.55 + recentAvg * 0.25 + trendVal * 0.20;
-      basis = '季節平均＋直近平均＋トレンド';
+      basis = '季節平均＋直近平均＋トレンド（保存レポート）';
     } else {
       if (steps > 3) predicted = recentAvg;
       else predicted = recentAvg * 0.55 + trendVal * 0.45;
-      basis = '直近平均＋トレンド';
+      basis = '直近平均＋トレンド（保存レポート）';
     }
     predicted = Math.round(Math.max(0, predicted));
     const foodTotal = Math.round(predicted * foodShare);
     const drinkTotal = Math.round(predicted * drinkShare);
+    const lunchTotal = Math.round(predicted * lunchShare);
+    const dinnerTotal = Math.round(predicted * dinnerShare);
     const customers = custRate ? Math.round(predicted * custRate) : 0;
     const salesCount = txnRate ? Math.round(predicted * txnRate) : 0;
     const yoyDiff = yoy != null ? predicted - yoy : null;
@@ -2935,6 +2963,8 @@ function buildSalesForecast(history, horizon = 3) {
       total: predicted,
       foodTotal,
       drinkTotal,
+      lunchTotal,
+      dinnerTotal,
       customers,
       salesCount,
       basis,
@@ -2949,14 +2979,18 @@ function buildSalesForecast(history, horizon = 3) {
   const years = new Set(series.map(h => h.month.slice(0, 4)));
   const confidence = series.length >= 12 || years.size >= 2 ? 'high' : series.length >= 4 ? 'medium' : 'low';
   const confLabel = confidence === 'high' ? '高' : confidence === 'medium' ? '中' : '低';
+  const catMonths = series.filter(h => h.hasCategories).length;
 
   return {
     history: series,
     forecasts,
     confidence,
     confidenceLabel: confLabel,
-    method: '前年同月・季節性・直近平均・線形トレンドの合成',
-    note: `保存済み ${series.length} か月分の実績から、今後 ${horizon} か月を予測しています（信頼度: ${confLabel}）。実際の売上は天候・イベント・営業日数で変動します。`
+    sourceLabel: bundle.sourceLabel || '保存済みレポート',
+    reportCount: bundle.reportCount,
+    monthCount: bundle.monthCount || series.length,
+    method: '保存済みレポートのカテゴリ別実績（フード／ドリンク）＋前年同月・季節性・直近平均',
+    note: `保存済みレポート ${series.length} か月分（カテゴリあり ${catMonths} か月）から、今後 ${horizon} か月を予測しています（信頼度: ${confLabel}）。実際の売上は天候・イベント・営業日数で変動します。`
   };
 }
 
@@ -2971,10 +3005,10 @@ function forecastBarHtml(label, amount, maxAmount, isPred = false) {
 
 async function renderSalesForecast(horizon = 3) {
   const view = document.getElementById('reportView');
-  showAppLoading('売上予測を作成中...', '保存済みジャーナルから月次実績を集計しています');
+  showAppLoading('売上予測を作成中...', '保存済みレポートのカテゴリ別実績を集計しています');
   try {
-    const history = await collectMonthlyHistoryForForecast();
-    const result = buildSalesForecast(history, horizon);
+    const bundle = await collectMonthlyHistoryForForecast();
+    const result = buildSalesForecast(bundle, horizon);
     const maxAmount = Math.max(
       1,
       ...result.history.slice(-6).map(h => h.total),
@@ -3022,7 +3056,7 @@ async function renderSalesForecast(horizon = 3) {
     </div>
     <div class="saved-wrap">
       <h1 class="r-title">売上予測</h1>
-      <p class="r-meta">保存済みの過去ジャーナル実績から、翌月以降の売上を推計します。</p>
+      <p class="r-meta">データソース: <b>保存済みレポート</b>（フード／ドリンク等のカテゴリ別集計済み）。読み込み中のファイルではなく、クラウド／端末に保存されたレポート全体を使います。</p>
       <p class="forecast-note">${esc(result.note || '')}${result.method ? `／手法: ${esc(result.method)}` : ''}</p>
       ${hero}
       <h3 class="table-h">実績と予測の比較</h3>
@@ -3031,7 +3065,7 @@ async function renderSalesForecast(horizon = 3) {
       <table class="month-table"><thead><tr>
         <th>月</th><th>予測売上</th><th>想定レンジ</th><th>フード</th><th>ドリンク</th><th>客数</th><th>前年同月比</th>
       </tr></thead><tbody>${predRows}</tbody></table>
-      <h3 class="table-h">直近の実績（最大12か月）</h3>
+      <h3 class="table-h">直近の実績（保存レポート・最大12か月）</h3>
       <table class="month-table"><thead><tr>
         <th>月</th><th>総売上</th><th>フード</th><th>ドリンク</th><th>客数</th>
       </tr></thead><tbody>${histRows}</tbody></table>
@@ -3060,25 +3094,27 @@ function wantsSalesForecast(msg) {
 
 function formatForecastChatReply(result) {
   if (!result?.forecasts?.length) {
-    return `### 📈 売上予測
+    return `### 📈 売上予測（保存済みレポート）
 
-${result?.note || '保存済みの月次売上から予測を作成できませんでした。'}
+${result?.note || '保存済みレポートから予測を作成できませんでした。'}
 
-ジャーナルを読み込んで月間レポートをクラウド保存すると、予測に利用できます。`;
+ジャーナルから月間レポートを作成してクラウド保存すると、カテゴリ別実績をもとに予測できます。`;
   }
   const lines = result.forecasts.map(f => {
     const yoy = f.yoy != null ? ` / 前年同月 ${yen(f.yoy)}（${f.yoyPct >= 0 ? '+' : ''}${f.yoyPct}%）` : '';
     return `- **${f.label}**: **${yen(f.total)}**（${yen(f.low)}〜${yen(f.high)}）／フード ${yen(f.foodTotal)}・ドリンク ${yen(f.drinkTotal)}${yoy}`;
   }).join('\n');
-  const recent = result.history.slice(-3).map(h => `- ${h.label}: ${yen(h.total)}`).join('\n');
-  return `### 📈 保存ジャーナルに基づく売上予測
+  const recent = result.history.slice(-3).map(h => `- ${h.label}: ${yen(h.total)}（F ${yen(h.foodTotal)} / D ${yen(h.drinkTotal)}）`).join('\n');
+  return `### 📈 保存済みレポートに基づく売上予測
+
+データソース: **保存済みレポート**（カテゴリ別集計済み）
 
 ${result.note}
 
 **予測**
 ${lines}
 
-**直近実績**
+**直近実績（レポート）**
 ${recent || '—'}
 
 **手法**: ${result.method}
@@ -5294,9 +5330,9 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
   const msg = userMsg.trim();
 
   if (wantsSalesForecast(msg)) {
-    const history = await collectMonthlyHistoryForForecast();
+    const bundle = await collectMonthlyHistoryForForecast();
     const horizon = /6\s*か?月|半年/.test(msg) ? 6 : 3;
-    const result = buildSalesForecast(history, horizon);
+    const result = buildSalesForecast(bundle, horizon);
     return formatForecastChatReply(result);
   }
 
@@ -5319,9 +5355,9 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
       return formatItemBreakdownReply(queryResult, msg);
     }
 
-    return `### 📊 ${queryResult.label} の集計結果 (保存ジャーナル参照)
+    return `### 📊 ${queryResult.label} の集計結果（保存済みレポート参照）
 
-保存されている売上ジャーナルデータより、ご指定の **【${queryResult.label}】** を正確に抽出・集計いたしました:
+保存済みレポートより、ご指定の **【${queryResult.label}】** を正確に抽出・集計いたしました:
 
 - **総売上高**: **${yen(queryResult.totalSales)}**
 - **🍖 フード売上**: ${yen(queryResult.foodTotal)} (**${queryResult.foodPct}%**)
@@ -5330,7 +5366,7 @@ ${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustom
 ${(queryResult.topProducts && queryResult.topProducts.length) ? `\n**売れ筋商品 TOP5**\n` + queryResult.topProducts.slice(0, 5).map((p, i) => `${i + 1}. ${p.name}（${p.qty}点 / ${yen(p.amt)}）`).join('\n') : ''}
 
 **💡 分析メモ**:
-保存データから引用した正確な数値です。推測やWeb情報は含まれておりません。商品の詳細内訳が必要な場合は「アイテムの内訳は？」と聞いてください。`;
+保存済みレポート（カテゴリ別集計）から引用した正確な数値です。推測やWeb情報は含まれておりません。商品の詳細内訳が必要な場合は「アイテムの内訳は？」と聞いてください。`;
   }
 
   // 開いているレポートから商品内訳
