@@ -43,6 +43,11 @@
 
 New records are appended below.
 
+### 2026-07-31 - Remove Journal Report「クラウド連携」badge
+
+- Request: ヘッダーの「クラウド連携」バッジを削除。
+- Change: `public/jnm` ナビの `.pill-live` 要素とCSSを除去（`jnl2txt.html` / `index.html` 同期）。
+
 ### 2026-07-31 - Journal Report multi-store select and isolation
 
 - Request: 店舗選択UI、店舗ごとの独立保存、非管理者の横断禁止、管理者の横断閲覧・分析。
