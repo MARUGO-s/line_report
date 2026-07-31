@@ -37,13 +37,22 @@
 ## Open product work
 
 - Actual provider/API and production-data work remains governed by existing feature docs and operations log.
-- 2026-07-31: Journal AIチャット「PDFにする」で `ai_chat_pdf_history` へ質問＋回答を自動保存し、一覧ページ `jnm/ai-chat-pdf-history.html` を追加（migration + `admin-api` + Pages）。本番反映は migration 適用と `admin-api` デプロイが必要。
+- 2026-07-31: Journal Report 全店舗ドロップダウン＋store_partition_key分離＋管理者横断サマリーを追加。店舗用ログインは自店固定。
 
 ## Continuation log
 
 New records are appended below.
 
+### 2026-07-31 - Journal Report multi-store select and isolation
+
+- Request: 店舗選択UI、店舗ごとの独立保存、非管理者の横断禁止、管理者の横断閲覧・分析。
+- Isolation: 既存テーブルの `store_partition_key` + admin-api 強制（物理分割はしない）。
+- UI: `public/jnm` に店舗セレクト、スコープバッジ、管理者横断サマリー。
+- API: `GET /pos-journals/saved-reports/cross-store-summary`（フル管理者のみ）。保存時の他店舗ID衝突を409。
+- Category overrides: ID を店舗別に変更。
+
 ### 2026-07-31 - AIチャットPDF履歴（質問＋回答）をDB保存
+（質問＋回答）をDB保存
 
 - Request: AIチャット表示結果を「PDFにする」押下時に Supabase の新テーブルへ自動保存し、質問起点の一覧ページを用意する。
 - Database: migration `20260731070000_ai_chat_pdf_history.sql`（`ai_chat_pdf_history`、RLS、service_roleのみ）。

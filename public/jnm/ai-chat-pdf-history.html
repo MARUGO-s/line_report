@@ -210,6 +210,9 @@
   <nav class="hd">
     <div class="brand">Journal Report</div>
     <div class="hd-actions">
+      <label for="storeSelect" style="font-size:12px;font-weight:700;color:var(--text-2);">店舗</label>
+      <select id="storeSelect" class="input" style="min-width:160px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-weight:600;"></select>
+      <span id="storeScopeBadge" class="tag" style="display:none;"></span>
       <span id="authState" class="tag">未接続</span>
       <a class="btn" href="./jnl2txt.html">レポートへ戻る</a>
       <button type="button" class="btn" onclick="toggleAppTheme()">テーマ切替</button>
@@ -248,17 +251,105 @@
 <script>
 const PAGES = window.LINE_REPORT_PAGES || {};
 const AUTH = window.LINE_REPORT_AUTH || null;
-const STORE_KEY = 'bistrocavacava';
+const JOURNAL_STORE_STORAGE_KEY = 'jnl2txt_selected_store_v1';
+let STORE_KEY = 'bistrocavacava';
+let authStoreScope = null;
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function getAdminToken() { return AUTH ? AUTH.getToken() : ''; }
-
+function resolveStoreDisplayName(key) {
+  const k = String(key || '').trim();
+  if (!k) return '';
+  if (PAGES.STORE_NAMES && PAGES.STORE_NAMES[k]) return PAGES.STORE_NAMES[k];
+  if (PAGES.resolveStoreName) return PAGES.resolveStoreName(k, k);
+  return k;
+}
+function listJournalStores() {
+  if (typeof PAGES.listStores === 'function') {
+    try {
+      return (PAGES.listStores() || []).map((s) => ({
+        store_key: String(s.store_key || '').trim(),
+        store_name: String(s.store_name || s.store_key || '').trim()
+      })).filter((s) => s.store_key);
+    } catch (_) {}
+  }
+  const names = PAGES.STORE_NAMES || {};
+  return Object.keys(names).map((k) => ({ store_key: k, store_name: names[k] }));
+}
+function readPersistedStoreKey() {
+  try { return String(sessionStorage.getItem(JOURNAL_STORE_STORAGE_KEY) || localStorage.getItem(JOURNAL_STORE_STORAGE_KEY) || '').trim(); }
+  catch (_) { return ''; }
+}
+function persistStoreKey(key) {
+  try { sessionStorage.setItem(JOURNAL_STORE_STORAGE_KEY, key); } catch (_) {}
+  try { localStorage.setItem(JOURNAL_STORE_STORAGE_KEY, key); } catch (_) {}
+}
+function updateStoreScopeBadge() {
+  const badge = document.getElementById('storeScopeBadge');
+  if (!badge) return;
+  if (!getAdminToken()) { badge.style.display = 'none'; return; }
+  badge.style.display = 'inline-flex';
+  if (authStoreScope) {
+    badge.textContent = '店舗限定';
+    badge.title = resolveStoreDisplayName(authStoreScope) + ' のみ';
+  } else {
+    badge.textContent = '管理者・横断可';
+    badge.title = '店舗を切り替えて横断閲覧できます';
+  }
+}
 function setAuthUiState(ok) {
   const stateEl = document.getElementById('authState');
   const cardEl = document.getElementById('authCard');
   if (stateEl) stateEl.textContent = ok ? 'ログイン済み' : '未接続';
   if (cardEl) cardEl.hidden = !!ok;
+  updateStoreScopeBadge();
 }
+async function refreshAuthScope() {
+  authStoreScope = null;
+  if (!getAdminToken() || !PAGES.adminApiUrl) { updateStoreScopeBadge(); return; }
+  try {
+    const res = await fetch(PAGES.adminApiUrl('/auth/verify', PAGES.PROJECT_URL), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'x-admin-token': getAdminToken(),
+        'x-admin-surface': PAGES.ADMIN_SURFACE || 'line_report'
+      },
+      body: '{}'
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok && !body.error) authStoreScope = body.storeScope ? String(body.storeScope).trim() : null;
+  } catch (_) {}
+  updateStoreScopeBadge();
+}
+function fillStoreSelectOptions(selectedKey) {
+  const sel = document.getElementById('storeSelect');
+  if (!sel) return;
+  const stores = listJournalStores();
+  const prev = selectedKey || sel.value || STORE_KEY;
+  sel.innerHTML = '';
+  for (const s of stores) {
+    const opt = document.createElement('option');
+    opt.value = s.store_key;
+    opt.textContent = s.store_name;
+    sel.appendChild(opt);
+  }
+  const keys = stores.map((s) => s.store_key);
+  const want = authStoreScope || (keys.includes(prev) ? prev : (keys[0] || ''));
+  if (want) sel.value = want;
+  sel.disabled = !!authStoreScope;
+}
+async function applySelectedStore(nextKey) {
+  let key = String(nextKey || '').trim().toLowerCase();
+  if (authStoreScope) key = String(authStoreScope).toLowerCase();
+  if (!key) key = 'bistrocavacava';
+  STORE_KEY = key;
+  persistStoreKey(key);
+  const sel = document.getElementById('storeSelect');
+  if (sel) sel.value = key;
+  updateStoreScopeBadge();
+}
+
 
 async function saveAdminToken() {
   const input = document.getElementById('tokenInput');
@@ -279,6 +370,9 @@ async function saveAdminToken() {
     if (input) input.value = '';
     if (msgEl) msgEl.textContent = '';
     setAuthUiState(true);
+    await refreshAuthScope();
+    fillStoreSelectOptions(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+    await applySelectedStore(authStoreScope || readPersistedStoreKey() || STORE_KEY);
     await loadHistory();
   } catch (err) {
     if (msgEl) msgEl.textContent = err && err.message ? err.message : '接続に失敗しました。';
@@ -428,6 +522,18 @@ document.addEventListener('DOMContentLoaded', async function () {
     } catch (_) {}
   }
   setAuthUiState(!!getAdminToken());
+  await refreshAuthScope();
+  fillStoreSelectOptions(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+  await applySelectedStore(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+  document.getElementById('storeSelect')?.addEventListener('change', async (e) => {
+    if (authStoreScope) {
+      fillStoreSelectOptions(authStoreScope);
+      await applySelectedStore(authStoreScope);
+      return;
+    }
+    await applySelectedStore(e.target.value);
+    await loadHistory();
+  });
   document.getElementById('saveTokenBtn')?.addEventListener('click', saveAdminToken);
   document.getElementById('tokenInput')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') saveAdminToken();

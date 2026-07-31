@@ -1378,6 +1378,10 @@ Deno.serve(async (req, info) => {
     if (req.method === "GET" && path === "/pos-journals/saved-reports") {
       return json(await fetchSavedReportsList(supabase, url), 200)
     }
+    if (req.method === "GET" && path === "/pos-journals/saved-reports/cross-store-summary") {
+      // フル管理者のみ（店舗スコープは STORE_SCOPED_ALLOWED_PATHS 外のため 403）
+      return json(await fetchSavedReportsCrossStoreSummary(supabase, storeScope), 200)
+    }
     if (req.method === "GET" && path === "/pos-journals/saved-reports/item") {
       return json(await fetchSavedReportItem(supabase, url), 200)
     }
@@ -8254,6 +8258,40 @@ async function fetchSavedReportsList(
   }
 }
 
+/** フル管理者向け: 店舗ごとの保存件数サマリー（店舗スコープでは拒否） */
+async function fetchSavedReportsCrossStoreSummary(
+  supabase: ReturnType<typeof createClient>,
+  storeScope: string | null,
+) {
+  if (storeScope) {
+    throw {
+      status: 403,
+      message: "店舗用ログインからは横断集計はできません。",
+    } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("saved_reports")
+    .select("store_partition_key")
+    .limit(20000)
+  if (error) {
+    throw {
+      status: 500,
+      message: `店舗横断サマリーの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  const counts = new Map<string, number>()
+  for (const row of Array.isArray(data) ? data : []) {
+    const key = toSafeString((row as { store_partition_key?: unknown }).store_partition_key)
+      .toLowerCase()
+    if (!key) continue
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  const items = Array.from(counts.entries())
+    .map(([store_key, report_count]) => ({ store_key, report_count }))
+    .sort((a, b) => b.report_count - a.report_count || a.store_key.localeCompare(b.store_key))
+  return { ok: true, items, total_reports: items.reduce((n, x) => n + x.report_count, 0) }
+}
+
 async function fetchSavedReportItem(
   supabase: ReturnType<typeof createClient>,
   url: URL,
@@ -8303,6 +8341,26 @@ async function saveSavedReport(
     throw { status: 400, message: "data is required." } satisfies AppError
   }
   const id = toSafeString(body.id) || `${Date.now()}_${crypto.randomUUID().slice(0, 8)}`
+  const { data: existing, error: existingError } = await supabase
+    .from("saved_reports")
+    .select("id, store_partition_key")
+    .eq("id", id)
+    .maybeSingle()
+  if (existingError) {
+    throw {
+      status: 500,
+      message: `保存済みレポートの確認に失敗しました: ${existingError.message}`,
+    } satisfies AppError
+  }
+  if (
+    existing &&
+    toSafeString(existing.store_partition_key).toLowerCase() !== storeKey.toLowerCase()
+  ) {
+    throw {
+      status: 409,
+      message: "同一IDが他店舗に存在するため保存できません。店舗ごとの独立IDを使ってください。",
+    } satisfies AppError
+  }
   const { error } = await supabase
     .from("saved_reports")
     .upsert({
