@@ -205,3 +205,18 @@ New records are appended below.
   - 今回HEADの`Deploy Edge Functions` workflowは起動していない。Supabase DB/Functions/Secretsは変更なし。
 - Remaining:
   - 認証済み本番全体管理者で4表示を切り替える最終操作確認。
+
+### 2026-07-31 - AI分析ベースをマルゴグループ（ワイン推し）特化へ
+
+- Request: Journal／売上AI分析・チャットを、一般飲食ではなくマルゴグループ専用（ワイン推し・ワイン充実）の前提で行う。会社情報は https://05-marugo-group.com 。
+- Changes:
+  - `supabase/functions/ai-analyze/index.ts` に `MARUGO_COMPANY_CONTEXT` を追加し、analyze/chat 既定プロンプトを更新。
+  - `public/jnm/jnl2txt.html` / `index.html` のチャット厳格指示と分析 `systemInstruction` を同前提へ。
+  - `pos_journal_ai.ts` の月次分析・Q&A system もマルゴ／ワイン軸へ更新。
+  - `docs/店舗運用修正記録.md` に追記。
+- Verification:
+  - 埋め込みJS定数を Node で実行し会社URL含有を確認。
+  - `npm run check`、`npm run test:structure` success。
+  - Graphify／Obsidian はこのクラウド環境に未配置のため `knowledge:check` は未実施。
+- Deploy notes:
+  - Pages（`public/jnm`）と Edge Function `ai-analyze`（および `pos_journal_ai` を使う `admin-api`）の反映が必要。
