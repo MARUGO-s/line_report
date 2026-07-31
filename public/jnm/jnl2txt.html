@@ -6534,6 +6534,27 @@ ${lines}${catBlocks}
 **💡 分析メモ**: 保存データから引用した正確な数値です。推測は含みません。`;
 }
 
+/** メッセージ中の「年月」参照をすべて（重複除く）抽出する。比較依頼（例: 202606と202607を比較して）の検知に使う */
+function extractAllMonthRefs(q) {
+  const results = [];
+  const seen = new Set();
+  const patterns = [
+    /(\d{4})\s*年\s*(\d{1,2})\s*月/g,
+    /(\d{4})[\/_.-](0?[1-9]|1[0-2])(?!\d)/g,
+    /(\d{4})(0[1-9]|1[0-2])(?!\d)/g
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(q))) {
+      const year = m[1];
+      const month = String(parseInt(m[2], 10)).padStart(2, '0');
+      const key = `${year}-${month}`;
+      if (!seen.has(key)) { seen.add(key); results.push({ year, month, key }); }
+    }
+  }
+  return results;
+}
+
 async function searchSavedReportsByQuery(query, chatHistory = []) {
   let q = String(query || '').trim().toLowerCase();
 
@@ -6608,6 +6629,26 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     };
   }
 
+  // 複数期間の比較依頼（例:「202606と202607の営業比較分析をして」）を検知。
+  // 単一期間ロジックだと最初の月だけを拾って確定扱いにしてしまい、AIに「これ以外の数字は禁止」と
+  // 指示してしまうため比較ができなくなる。2件以上の年月が見つかった場合はそれぞれ個別に集計して返す。
+  const allMonthRefs = extractAllMonthRefs(q);
+  if (allMonthRefs.length >= 2) {
+    const periods = [];
+    for (const ref of allMonthRefs.slice(0, 4)) {
+      const targetJa = `${ref.year}年${parseInt(ref.month, 10)}月`;
+      const matched = allReports.filter(r => {
+        const p = String(r.period || r.title || '');
+        return p.includes(ref.key) || p.includes(targetJa) || (p.includes(ref.year) && p.includes(`${parseInt(ref.month, 10)}月`));
+      });
+      if (matched.length > 0) {
+        periods.push(await summarizeMatched(matched, `${targetJa}の売上データ`));
+      }
+    }
+    if (periods.length >= 2) return { multiPeriod: true, periods };
+    // 実データが1件以下しか見つからなかった場合は、単一期間ロジックへフォールスルーする
+  }
+
   if (monthMatch) {
     const year = monthMatch[1];
     const month = String(parseInt(monthMatch[2], 10)).padStart(2, '0');
@@ -6669,6 +6710,27 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
 - **保存済み売上データ一覧**: ${periods || 'データなし'}
 
 ※該当する年月の電子ジャーナル（.jnl/.lzh）ファイルを読み込んでレポートを作成すると、自動的に保存されAIチャットで参照できるようになります。`;
+    }
+
+    if (queryResult.multiPeriod) {
+      const rows = queryResult.periods.map(p =>
+        `- **${p.label}**: 総売上 ${yen(p.totalSales)}（🍖フード ${yen(p.foodTotal)} / 🍹ドリンク ${yen(p.drinkTotal)}、客数 ${p.totalCustomers}名、客単価 ${yen(p.avgSpend)}）`
+      ).join('\n');
+      const [a, b] = queryResult.periods;
+      const diff = (a && b) ? b.totalSales - a.totalSales : 0;
+      const diffPct = (a && b && a.totalSales) ? Math.round(diff / a.totalSales * 100) : 0;
+      const diffLine = (a && b)
+        ? `\n**${b.label}は${a.label}比で総売上 ${diff >= 0 ? '+' : ''}${yen(diff)}（${diffPct >= 0 ? '+' : ''}${diffPct}%）**`
+        : '';
+      return `### 📊 期間比較（保存済みレポート参照）
+
+保存済みレポートより、ご指定の複数期間を正確に抽出・集計いたしました:
+
+${rows}
+${diffLine}
+
+**💡 分析メモ**:
+保存済みレポート（カテゴリ別集計）から引用した正確な数値です。推測やWeb情報は含まれておりません。`;
     }
 
     if (wantsItemBreakdown(msg)) {
@@ -6779,7 +6841,27 @@ async function sendAiChat() {
 
   const verifiedData = (queryResult && !queryResult.notMatchedLabel) ? queryResult : null;
 
-  const verifiedDataBlock = verifiedData ? `
+  function formatVerifiedPeriodBlock(p) {
+    return `- ${p.label}
+  - 総売上高: ${yen(p.totalSales)}
+  - フード売上: ${yen(p.foodTotal)} (${p.foodPct}%)
+  - ドリンク売上: ${yen(p.drinkTotal)} (${p.drinkPct}%)
+  - 総来店客数: ${p.totalCustomers}名 (平均客単価: ${yen(p.avgSpend)})
+  - 対象レポート件数: ${p.sourceCount}件
+${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5: ' + p.topProducts.slice(0, 5).map(x => `${x.name}(${x.qty}点/${yen(x.amt)})`).join('、') : ''}`;
+  }
+
+  let verifiedDataBlock = '';
+  if (verifiedData && verifiedData.multiPeriod) {
+    // 比較依頼：複数期間それぞれの確定数値を提示し、AIにはこれらの間での比較・差分の言及を許可する
+    verifiedDataBlock = `
+
+【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
+${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
+
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
+  } else if (verifiedData) {
+    verifiedDataBlock = `
 
 【確定済み集計データ（${verifiedData.label} / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 - 総売上高: ${yen(verifiedData.totalSales)}
@@ -6789,7 +6871,8 @@ async function sendAiChat() {
 - 対象レポート件数: ${verifiedData.sourceCount}件
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5: ' + verifiedData.topProducts.slice(0, 5).map(p => `${p.name}(${p.qty}点/${yen(p.amt)})`).join('、') : ''}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。` : '';
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
+  }
 
   const strictSystemInstruction = `【絶対遵守プロンプト規約】
 1. あなたは店舗の保存済み売上データ専用の厳密なアナリストAIです。
