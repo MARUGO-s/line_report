@@ -7195,7 +7195,7 @@ ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋�
 【絶対遵守プロンプト規約】
 1. あなたはマルゴグループ各店舗の保存済み売上データ専用の厳密なアナリストAIです。営業・売上に関するあらゆる種類の質問（実績照会、期間比較、トレンド、客単価、商品構成、ワイン／ドリンク比率、原因分析、改善提案、今後の見通しなど）に幅広く対応してください。
 2. 数値（金額・件数・客数・比率など）は、必ず提示された保存データ・資料（salesDataや確定済み集計データ）のみから厳密に引用・計算してください。数値についての推測・Web情報・一般的な相場観での代用は【完全禁止】です。
-3. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。
+3. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
 4. チャットパネルを閉じるまでの過去の会話履歴（chatHistory）をすべて踏まえ、前後の文脈を完璧に引き継いで会話・回答してください。
 5. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください（このデータが無い旨の説明自体は推測ではないため、上記3の表記は不要です）。
 6. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。${verifiedDataBlock}`;
@@ -7212,7 +7212,8 @@ ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋�
         message: msg,
         systemInstruction: strictSystemInstruction,
         salesData: compactData,
-        chatHistory: aiChatHistory
+        chatHistory: aiChatHistory,
+        orchestrationMode: 'auto'
       })
     });
 
@@ -7222,8 +7223,9 @@ ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋�
     const reply = (res.ok && result.text) ? result.text : null;
 
     if (reply) {
-      // Kimi (Moonshot AI) 応答成功
-      const displayReply = result.note ? `${reply}\n\n---\n_${result.note}_` : reply;
+      // Kimi 応答成功（戦略系は Perplexity/Grok をオーケストレーション済み）
+      const modeNote = result.note || (result.mode ? `モード: ${result.mode}` : '');
+      const displayReply = modeNote ? `${reply}\n\n---\n_${modeNote}_` : reply;
       appendAiChatMessage('ai', displayReply);
       aiChatHistory.push({ role: 'assistant', content: reply });
     } else {
