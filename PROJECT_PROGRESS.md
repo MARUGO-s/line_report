@@ -206,6 +206,13 @@ New records are appended below.
 - Remaining:
   - 認証済み本番全体管理者で4表示を切り替える最終操作確認。
 
+### 2026-07-31 - AI参照を保存済み月間レポート優先に
+
+- Request: ジャーナル検索より、カテゴリ分け済みの保存済みレポート（2023-07〜）を正本にしたい。
+- Cause: `saved-reports` が created_at 降順+limit のため日別が月間を押し出していた。
+- Fix: API `kind=monthly|daily`、クライアントは月間優先＋欠月だけ日別補完。
+- Deploy: Pages + `admin-api`。
+
 ### 2026-07-31 - AIチャット年クエリに月次推移を付与
 
 - Request: 「今年の売り上げの推移」で月次が無いと返る問題を直す。

@@ -2978,11 +2978,13 @@ function pickDefinedSummary(r) {
   return out;
 }
 
-async function fetchSupabaseReports() {
+async function fetchSupabaseReports(options = {}) {
   try {
-    const body = await adminApiFetch('/pos-journals/saved-reports?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=200', { method: 'GET' });
-    const rows = Array.isArray(body.items) ? body.items : [];
-    return rows.map(row => {
+    // kind: 'monthly' | 'daily' | 'all'
+    // AI・推移・予測はカテゴリ分け済みの月間レポートを正本にする。
+    // 日別が大量にあると単一 limit で古い月間が落ちるため、all は月間+日別を分けて取得する。
+    const kind = ['monthly', 'daily', 'all'].includes(options.kind) ? options.kind : 'all';
+    const mapRows = (rows) => (Array.isArray(rows) ? rows : []).map(row => {
       const id = String(row.id || '');
       return {
         id,
@@ -2992,6 +2994,32 @@ async function fetchSupabaseReports() {
         ...pickDefinedSummary(row)
       };
     }).filter(r => r.id && !isCategoryOverridesReportId(r.id) && r.title !== '商品分類ルール');
+
+    const fetchKind = async (k, lim) => {
+      const qs = new URLSearchParams({
+        store_key: STORE_KEY,
+        limit: String(lim),
+        kind: k
+      });
+      const body = await adminApiFetch('/pos-journals/saved-reports?' + qs.toString(), { method: 'GET' });
+      return mapRows(body.items);
+    };
+
+    if (kind === 'all') {
+      const monthlyLimit = Number.isFinite(Number(options.monthlyLimit)) ? Number(options.monthlyLimit) : 500;
+      const dailyLimit = Number.isFinite(Number(options.dailyLimit)) ? Number(options.dailyLimit) : 500;
+      const [monthly, daily] = await Promise.all([
+        fetchKind('monthly', monthlyLimit),
+        fetchKind('daily', dailyLimit)
+      ]);
+      const byId = new Map();
+      for (const r of [...monthly, ...daily]) byId.set(r.id, r);
+      return [...byId.values()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    }
+
+    const defaultLimit = 500;
+    const limit = Number.isFinite(Number(options.limit)) ? Math.max(1, Math.min(2000, Number(options.limit))) : defaultLimit;
+    return await fetchKind(kind, limit);
   } catch (err) {
     console.warn('admin-api fetch error:', err);
     return null;
@@ -3026,13 +3054,54 @@ async function hydrateSavedReport(r) {
   return full ? { ...r, ...full, id: r.id } : r;
 }
 
-async function readSavedReports() {
+async function readSavedReports(options = {}) {
   purgeLocalCloudDataCaches();
   try {
     if (!getAdminToken()) return [];
-    const remoteReports = await fetchSupabaseReports();
-    if (remoteReports === null) return [];
-    return remoteReports;
+    // 既定: 月間レポートを優先取得し、月間が無い月だけ日別で補完する。
+    // ジャーナル原本ではなく、カテゴリ分け済みの保存済みレポートを AI／予測／一覧の正本にする。
+    const mode = options.mode || 'monthly_first';
+    if (mode === 'raw' || options.kind) {
+      const remoteReports = await fetchSupabaseReports({
+        kind: options.kind || 'all',
+        limit: options.limit
+      });
+      if (remoteReports === null) return [];
+      return remoteReports;
+    }
+
+    const monthly = await fetchSupabaseReports({ kind: 'monthly', limit: options.monthlyLimit || 500 });
+    if (monthly === null) return [];
+    const byMonth = new Map();
+    for (const r of monthly) {
+      const key = monthKeyFromReport(r);
+      if (!key) continue;
+      if (!byMonth.has(key)) byMonth.set(key, r);
+    }
+
+    // 月間が少ない／欠ける月がある場合のみ日別を追加取得して補完
+    let daily = [];
+    const needDailyFill = options.includeDailyFill !== false;
+    if (needDailyFill) {
+      daily = await fetchSupabaseReports({ kind: 'daily', limit: options.dailyLimit || 500 }) || [];
+      for (const r of daily) {
+        const key = monthKeyFromReport(r);
+        if (!key) continue;
+        if (byMonth.has(key)) continue; // 月間がある月は日別を使わない
+        byMonth.set(key, r);
+      }
+    }
+
+    // 一覧表示用に、取得した月間＋補完日別を返す（作成日新しい順）
+    const merged = [...monthly];
+    const monthlyIds = new Set(monthly.map(r => r.id));
+    for (const r of daily) {
+      if (!monthlyIds.has(r.id) && byMonth.get(monthKeyFromReport(r))?.id === r.id) {
+        merged.push(r);
+      }
+    }
+    // AI検索は title/period でマッチするため、月間を全て含めた配列を返す
+    return merged.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   } catch (e) {
     console.error('readSavedReports error:', e);
     return [];
@@ -5080,13 +5149,22 @@ function folderMetaFromFile(f) {
 }
 
 async function renderSavedReports(filter='all'){
-  const view=document.getElementById('reportView'), reports=await readSavedReports();
+  const view=document.getElementById('reportView');
+  // 一覧も保存済みレポート（月間優先）を正本にする。フィルター時は API 側 kind で取りこぼしを防ぐ。
+  let reports;
+  if (filter === 'monthly') {
+    reports = await readSavedReports({ mode: 'raw', kind: 'monthly', limit: 500 });
+  } else if (filter === 'daily') {
+    reports = await readSavedReports({ mode: 'raw', kind: 'daily', limit: 500 });
+  } else {
+    reports = await readSavedReports({ includeDailyFill: true });
+  }
   const periodKey=r=>(String(r.period).match(/^\d{4}-\d{2}-\d{2}/)||[''])[0];
   const sorted=reports.slice().sort((a,b)=>{
     const cmp=periodKey(b).localeCompare(periodKey(a));
     return cmp!==0?cmp:String(b.createdAt).localeCompare(String(a.createdAt));
   });
-  const filtered=filter==='all'?sorted:sorted.filter(r=>filter==='monthly'?String(r.title||'').includes('月間'):String(r.title||'').includes('日別'));
+  const filtered=sorted;
   const rows=filtered.length?filtered.map(r=>{
     const stale=isStaleReport(r);
     const categorySummary=Number.isFinite(r.foodTotal)&&Number.isFinite(r.drinkTotal)
