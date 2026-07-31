@@ -1,7 +1,8 @@
 // Supabase Edge Function: AI Analyze / Chat
-// Gemini 3.6 Flash を使用して売上データの分析・チャットを行うプロキシ
+// Kimi (Moonshot AI, K3) を使用して売上データの分析・チャットを行うプロキシ
 
-const MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"];
+const KIMI_MODEL_DEFAULT = "kimi-k3";
+const KIMI_ENDPOINT = "https://api.moonshot.ai/v1/chat/completions";
 
 const SYSTEM_PROMPT_ANALYZE = `あなたは飲食店・レストランの売上分析と店舗経営コンサルティングの最高責任者（プロアナリスト）です。
 与えられた売上データ・顧客データ・メニューデータに基づき、経営陣や店長がそのまま店舗の改善・売上倍増のための戦略資料として活用できる「店舗経営・売上多角分析＆営業戦略レポート」を作成してください。
@@ -54,6 +55,75 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
 };
 
+type ChatContent = { role: string; parts: { text: string }[] };
+
+/** role/parts形式をOpenAI互換のmessages（role/content）へ変換 */
+function contentsToOpenAiMessages(contents: ChatContent[]) {
+  return contents.map((c) => ({
+    role: c.role === "model" ? "assistant" : "user",
+    content: c.parts.map((p) => p.text).join("\n"),
+  }));
+}
+
+/** Kimi K3等の推論モデルが出力に含める<think>...</think>ブロックを除去する（foodcourt_loop_utils.tsの実装を移植） */
+function stripThinkingBlocks(text: string): string {
+  let s = String(text ?? "");
+  s = s.replace(/<think>[\s\S]*?<\/think>/gi, " ");
+  const lastClose = s.toLowerCase().lastIndexOf("</think>");
+  if (lastClose >= 0) s = s.slice(lastClose + "</think>".length);
+  const openIdx = s.toLowerCase().indexOf("<think>");
+  if (openIdx >= 0) {
+    const after = s.slice(openIdx + "<think>".length);
+    const markers = ["【総評】", "## ", "### ", "# ", "回答:", "結論:"];
+    let cut = -1;
+    for (const m of markers) {
+      const i = after.indexOf(m);
+      if (i >= 0 && (cut < 0 || i < cut)) cut = i;
+    }
+    s = cut >= 0 ? after.slice(cut) : s.slice(0, openIdx);
+  }
+  return s.trim();
+}
+
+async function callKimi(
+  contents: ChatContent[]
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const apiKey = Deno.env.get("MOONSHOT_API_KEY") || Deno.env.get("KIMI_API_KEY");
+  if (!apiKey) return { ok: false, error: "MOONSHOT_API_KEY not configured" };
+  const model = Deno.env.get("KIMI_MODEL") || KIMI_MODEL_DEFAULT;
+
+  try {
+    const res = await fetch(KIMI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: contentsToOpenAiMessages(contents),
+        // Kimi K3 は temperature=1 のみ許可
+        temperature: 1,
+        reasoning_effort: "low",
+        max_tokens: 10192,
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("Kimi API error:", res.status, errText);
+      return { ok: false, error: errText };
+    }
+    const data = await res.json();
+    const rawText = data?.choices?.[0]?.message?.content || "";
+    const text = stripThinkingBlocks(rawText);
+    if (!text) return { ok: false, error: "Kimi returned an empty response" };
+    return { ok: true, text };
+  } catch (e) {
+    console.error("Kimi API fetch error:", e);
+    return { ok: false, error: String(e) };
+  }
+}
+
 Deno.serve(async (req: Request) => {
   // CORS preflight
   if (req.method === "OPTIONS") {
@@ -67,10 +137,9 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) {
+  if (!Deno.env.get("MOONSHOT_API_KEY") && !Deno.env.get("KIMI_API_KEY")) {
     return new Response(
-      JSON.stringify({ error: "GEMINI_API_KEY not configured" }),
+      JSON.stringify({ error: "MOONSHOT_API_KEY が未設定です" }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -80,7 +149,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const { action, salesData, message, chatHistory } = body;
+    const { action, salesData, message, chatHistory, systemInstruction } = body;
 
     if (!action || !salesData) {
       return new Response(
@@ -108,7 +177,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    let contents;
+    let contents: ChatContent[];
 
     if (action === "analyze") {
       contents = [
@@ -116,7 +185,7 @@ Deno.serve(async (req: Request) => {
           role: "user",
           parts: [
             {
-              text: `${SYSTEM_PROMPT_ANALYZE}\n\n以下の売上データを分析してください：\n\n${salesContext}`,
+              text: `${systemInstruction || SYSTEM_PROMPT_ANALYZE}\n\n以下の売上データを分析してください：\n\n${salesContext}`,
             },
           ],
         },
@@ -131,14 +200,15 @@ Deno.serve(async (req: Request) => {
           }
         );
       }
-      // チャット履歴を構築
+      // チャット履歴を構築（クライアントは各項目を {role, content} で送る。
+      // 後方互換のため text も見る）
       const history = chatHistory || [];
       contents = [
         {
           role: "user",
           parts: [
             {
-              text: `${SYSTEM_PROMPT_CHAT}\n\n参照する売上データ：\n${salesContext}`,
+              text: `${systemInstruction || SYSTEM_PROMPT_CHAT}\n\n参照する売上データ：\n${salesContext}`,
             },
           ],
         },
@@ -150,10 +220,12 @@ Deno.serve(async (req: Request) => {
             },
           ],
         },
-        ...history.map((h: { role: string; text: string }) => ({
-          role: h.role === "user" ? "user" : "model",
-          parts: [{ text: h.text }],
-        })),
+        ...history
+          .map((h: { role: string; content?: string; text?: string }) => ({
+            role: h.role === "user" ? "user" : "model",
+            parts: [{ text: String(h.content ?? h.text ?? "").trim() }],
+          }))
+          .filter((h: { parts: { text: string }[] }) => h.parts[0].text.length > 0),
         {
           role: "user",
           parts: [{ text: message }],
@@ -169,61 +241,31 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Gemini API 呼び出し（モデルフォールバック対応）
-    let lastErrorText = "";
-    let lastStatus = 500;
-    let geminiData = null;
+    const kimiResult = await callKimi(contents);
 
-    for (const model of MODELS) {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          generationConfig: {
-            temperature: action === "analyze" ? 0.3 : 0.5,
-            maxOutputTokens: 8192,
-          },
-        }),
-      });
-
-      if (res.ok) {
-        geminiData = await res.json();
-        break;
-      }
-
-      lastStatus = res.status;
-      lastErrorText = await res.text();
-      console.error(`Gemini API (${model}) error:`, res.status, lastErrorText);
-    }
-
-    if (!geminiData) {
-      let friendlyError = "Gemini APIの呼び出しに失敗しました。";
-      if (lastErrorText.includes("RESOURCE_EXHAUSTED") || lastErrorText.includes("Quota exceeded")) {
-        friendlyError = "Gemini APIの利用クォータ上限（429）に達しました。Google AI Studioで有効なAPIキーが設定されているかご確認ください。";
-      } else if (lastErrorText.includes("API_KEY_INVALID")) {
-        friendlyError = "Gemini APIキーが無効です。SupabaseのGEMINI_API_KEYをご確認ください。";
-      }
+    if (kimiResult.ok) {
       return new Response(
-        JSON.stringify({
-          error: friendlyError,
-          detail: lastErrorText,
-        }),
-        {
-          status: 502,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        JSON.stringify({ text: kimiResult.text, provider: "kimi" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const text =
-      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-    return new Response(JSON.stringify({ text }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    let friendlyError = "Kimi (Moonshot AI) の呼び出しに失敗しました。";
+    if (kimiResult.error.includes("401") || kimiResult.error.toLowerCase().includes("invalid")) {
+      friendlyError = "KimiのAPIキーが無効です。SupabaseのMOONSHOT_API_KEYをご確認ください。";
+    } else if (kimiResult.error.includes("429")) {
+      friendlyError = "Kimi APIの利用クォータ上限に達しました。";
+    }
+    return new Response(
+      JSON.stringify({
+        error: friendlyError,
+        detail: kimiResult.error,
+      }),
+      {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   } catch (e) {
     console.error("Edge Function error:", e);
     return new Response(

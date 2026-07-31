@@ -6900,27 +6900,29 @@ ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋�
 
     removeAiChatLoading(loadingId);
 
-    let reply = null;
-    if (res.ok) {
-      const result = await res.json();
-      reply = result.reply || result.text || result.message;
-      if (result.error && String(result.error).includes('Gemini API')) {
-        reply = null;
-      }
-    }
+    const result = await res.json().catch(() => ({}));
+    const reply = (res.ok && result.text) ? result.text : null;
 
-    if (!reply) {
-      reply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
+    if (reply) {
+      // Kimi (Moonshot AI) 応答成功
+      const displayReply = result.note ? `${reply}\n\n---\n_${result.note}_` : reply;
+      appendAiChatMessage('ai', displayReply);
+      aiChatHistory.push({ role: 'assistant', content: reply });
+    } else {
+      // Kimi呼び出し失敗。エラー内容を明記した上で、ローカル集計ロジックの回答にフォールバックする。
+      const errDetail = result.error || `HTTP ${res.status}`;
+      const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
+      const displayReply = `⚠️ **AI接続エラー**: ${errDetail}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
+      appendAiChatMessage('ai', displayReply);
+      aiChatHistory.push({ role: 'assistant', content: localReply });
     }
-
-    appendAiChatMessage('ai', reply);
-    aiChatHistory.push({ role: 'assistant', content: reply });
   } catch(err) {
     console.warn('AI Chat remote error, fallback to local advisor:', err);
     removeAiChatLoading(loadingId);
-    const fallbackReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
-    appendAiChatMessage('ai', fallbackReply);
-    aiChatHistory.push({ role: 'assistant', content: fallbackReply });
+    const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
+    const displayReply = `⚠️ **AI接続エラー**: ${err && err.message ? err.message : String(err)}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
+    appendAiChatMessage('ai', displayReply);
+    aiChatHistory.push({ role: 'assistant', content: localReply });
   } finally {
     input.disabled = false;
     sendBtn.disabled = false;
