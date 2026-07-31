@@ -43,6 +43,11 @@
 
 New records are appended below.
 
+### 2026-07-31 - Remove Journal Report「クラウド連携」badge
+
+- Request: ヘッダーの「クラウド連携」バッジを削除。
+- Change: `public/jnm` ナビの `.pill-live` 要素とCSSを除去（`jnl2txt.html` / `index.html` 同期）。
+
 ### 2026-07-31 - Journal Report light-mode text contrast
 
 - Request: ライトモードの文字視認性を上げ、濃くする。
