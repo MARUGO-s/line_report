@@ -229,15 +229,15 @@
   ::selection{background:color-mix(in srgb, var(--accent) 30%, transparent)}
 
   /* Header */
-  .hd{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-4);
-    background:var(--page);border-bottom:1px solid var(--border)}
+  .hd{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) 24px;
+    background:var(--page);border-bottom:1px solid var(--border);flex-wrap:wrap}
   .hd .mark{width:28px;height:28px;border-radius:6px;background:var(--accent);
     display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .hd .mark i{width:12px;height:12px;border:2px solid var(--page);border-radius:3px;display:block}
   .hd .title{font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:18px}
   .pill-live{font-size:11px;letter-spacing:.02em;background:var(--color-accent-100);color:var(--color-accent-800);
-    padding:3px 10px;border-radius:calc(var(--radius-md) * .75)}
-  .hd .cap{font-size:13px;color:var(--text-2)}
+    padding:3px 10px;border-radius:calc(var(--radius-md) * .75);white-space:nowrap}
+  .hd .cap{font-size:13px;color:var(--text-2);flex:1 1 180px;min-width:0}
 
   /* Tabs — Classicalの .seg / .seg-opt 相当（div+clickの既存方式は維持、見た目のみ segmented control 化） */
   .tabs{display:inline-flex;overflow:hidden;border:1px solid var(--border);border-radius:var(--radius-md)}
@@ -246,23 +246,23 @@
   .tab+.tab{border-left:1px solid var(--border)}
   .tab.active{color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
   .tab:not(.active):hover{background:color-mix(in srgb, var(--text) 7%, transparent)}
-  .page-hd{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;
-    gap:var(--space-3);max-width:1100px;width:100%;margin:0;padding:var(--space-8) 24px var(--space-6);box-sizing:border-box}
+  .page-hd{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;
+    gap:var(--space-3);max-width:1280px;width:100%;margin:0;padding:var(--space-8) 24px var(--space-4);box-sizing:border-box}
   .page-hd h1{margin:0 0 var(--space-1);font-size:32px}
-  .page-hd .page-sub{margin:0;font-size:13.5px;color:var(--text-2)}
+  .page-hd .page-sub{margin:0;font-size:13.5px;color:var(--text-2);max-width:46em}
 
   /* Guide */
-  .guide{max-width:1100px;width:100%;margin:0;padding:24px;box-sizing:border-box;
+  .guide{max-width:1280px;width:100%;margin:0;padding:8px 24px 40px;box-sizing:border-box;
     font-size:14px;line-height:1.9;color:var(--text-2)}
   .guide h1{font-size:20px;font-weight:700;margin:0 0 16px;color:var(--text)}
   .guide h2{font-size:15px;font-weight:600;margin:24px 0 10px;color:var(--text)}
   .guide p{margin:0 0 20px}
-  .guide ol{margin:0 0 20px;padding-left:20px}
+  .guide ol,.guide ul{margin:0 0 20px;padding-left:20px}
   .guide li{margin-bottom:6px}
 
   /* Converter */
-  .conv{max-width:1100px;width:100%;margin:0;padding:24px;box-sizing:border-box}
-  .intro{font-size:13px;color:var(--text-2);margin:0 0 18px}
+  .conv{max-width:1280px;width:100%;margin:0;padding:8px 24px 40px;box-sizing:border-box}
+  .intro{font-size:13px;color:var(--text-2);margin:0 0 18px;max-width:54em;line-height:1.7}
   .drop{display:block;border:1.5px dashed var(--border-input);background:var(--surface);
     border-radius:10px;padding:34px 20px;text-align:center;cursor:pointer;
     transition:background .15s,border-color .15s;position:relative}
@@ -398,12 +398,21 @@
   .btn-block{width:100%}
   .btn-cta{background:var(--text)!important;border-color:var(--text)!important;color:var(--page)!important;font-weight:600}
   .btn-cta:hover{background:var(--text-2)!important;border-color:var(--text-2)!important}
-  .layout-grid{display:grid;grid-template-columns:360px 1fr;gap:var(--space-6);align-items:start}
-  @media (max-width:860px){.layout-grid{grid-template-columns:1fr}}
-  .col-left{display:flex;flex-direction:column;gap:var(--space-4)}
+  .layout-grid{
+    display:grid;
+    grid-template-columns:minmax(320px, 400px) minmax(0, 1fr);
+    gap:var(--space-6);
+    align-items:start;
+  }
+  @media (max-width:960px){
+    .layout-grid{grid-template-columns:1fr}
+    .col-left{max-width:560px}
+  }
+  .col-left{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+  .col-right{min-width:0}
   .tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2)}
-  .tool-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-1);
-    padding:var(--space-3) var(--space-2);font-size:11.5px;text-align:center;line-height:1.3}
+  .tool-btn{display:flex;align-items:center;justify-content:center;gap:6px;
+    padding:12px 10px;font-size:12px;text-align:center;line-height:1.35;min-height:44px}
   .results-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4);flex-wrap:wrap;gap:var(--space-2)}
   .results-header h2{margin:0}
 
@@ -1129,7 +1138,7 @@
   </div>
 </nav>
 
-<section id="authCard" hidden class="card" style="margin:var(--space-4) var(--space-6) 0;">
+<section id="authCard" hidden class="card" style="margin:var(--space-4) 24px 0;max-width:1280px;box-sizing:border-box;">
   <label for="tokenInput" style="font-size:12.5px; font-weight:600; display:block;">レポートはクラウドへ必ず保存します。管理トークンで接続してください（またはLINEの最新リンクから開いてください）</label>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <input id="tokenInput" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" class="input" style="flex:1; min-width:220px;">
@@ -1198,7 +1207,7 @@
 
 <!-- 変換 -->
 <section id="convert" class="conv">
-  <p class="intro">レジの電子ジャーナル（.jnl / .lzh）を変換し、店舗ごとの売上レポートとしてクラウド保存します。.lzh はアプリ内で自動解凍します。ファイル読込後は<strong>レポート作成〜クラウド保存</strong>まで自動実行されます（認証が必要）。解析は端末内、保存・AI分析は店舗スコープのクラウドAPI経由です。</p>
+  <p class="intro">.jnl / .lzh を読み込むと、選択中の店舗へ売上レポートを自動保存します。解析は端末内、保存とAIは認証付きクラウドAPI経由です。</p>
 
   <div class="layout-grid">
     <div class="col-left">
