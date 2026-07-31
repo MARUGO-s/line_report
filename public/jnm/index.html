@@ -884,6 +884,12 @@
   .ai-msg-user * {
     color: var(--page);
   }
+  .ai-msg-pdf-btn{
+    display:block;margin-top:8px;font-size:11px;font-weight:600;
+    color:var(--accent);background:transparent;border:1px solid var(--accent);
+    border-radius:var(--radius-md);padding:4px 10px;cursor:pointer;
+  }
+  .ai-msg-pdf-btn:hover{background:color-mix(in srgb, var(--accent) 10%, transparent)}
 
   /* AI Visual Dashboard Styles */
   .ai-kpi-grid {
@@ -6755,9 +6761,12 @@ async function sendAiChat() {
   const loadingId = appendAiChatLoading();
   const compactData = buildCompactSalesDataForAI();
 
-  // 保存ジャーナルへの事実照会はローカル集計を優先（一覧APIが金額を持たないため）
+  // 保存ジャーナルへの事実照会はまずローカル集計で正確な数値を確定する（一覧APIが金額を持たないため）。
+  // ただし確定した数値を固定テンプレートでそのまま返すのではなく、AIへ「検算済みの正解」として
+  // 渡し、AIに文章化させることで、数字の正確性と会話の自然さ・柔軟な追加指示への対応を両立する。
   const queryResult = await searchSavedReportsByQuery(msg, aiChatHistory);
-  if (queryResult && !queryResult.notMatchedLabel) {
+  if (queryResult && queryResult.notMatchedLabel) {
+    // 期間は認識できたが該当データが無い、という結果は確定事実なのでローカルでそのまま返す
     removeAiChatLoading(loadingId);
     const reply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
     appendAiChatMessage('ai', reply);
@@ -6768,12 +6777,27 @@ async function sendAiChat() {
     return;
   }
 
+  const verifiedData = (queryResult && !queryResult.notMatchedLabel) ? queryResult : null;
+
+  const verifiedDataBlock = verifiedData ? `
+
+【確定済み集計データ（${verifiedData.label} / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
+- 総売上高: ${yen(verifiedData.totalSales)}
+- フード売上: ${yen(verifiedData.foodTotal)} (${verifiedData.foodPct}%)
+- ドリンク売上: ${yen(verifiedData.drinkTotal)} (${verifiedData.drinkPct}%)
+- 総来店客数: ${verifiedData.totalCustomers}名 (平均客単価: ${yen(verifiedData.avgSpend)})
+- 対象レポート件数: ${verifiedData.sourceCount}件
+${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5: ' + verifiedData.topProducts.slice(0, 5).map(p => `${p.name}(${p.qty}点/${yen(p.amt)})`).join('、') : ''}
+
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。` : '';
+
   const strictSystemInstruction = `【絶対遵守プロンプト規約】
 1. あなたは店舗の保存済み売上データ専用の厳密なアナリストAIです。
 2. 質問の答えや数字に関しては、必ず提示された保存データ・資料（salesData）のみから厳密に引用・計算して回答してください。
 3. 推測やWeb情報、一般的な曖昧な推量で数字を答えることは【完全禁止】です。
 4. チャットパネルを閉じるまでの過去の会話履歴（chatHistory）をすべて踏まえ、前後の文脈を完璧に引き継いで会話・回答してください。
-5. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください。`;
+5. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください。
+6. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。${verifiedDataBlock}`;
 
   try {
     const res = await fetch(AI_ENDPOINT, {
@@ -6826,8 +6850,40 @@ function appendAiChatMessage(role, text) {
   const div = document.createElement('div');
   div.className = role === 'user' ? 'ai-msg-user' : 'ai-msg-ai';
   div.innerHTML = simpleMarkdown(text);
+  if (role !== 'user') {
+    const pdfBtn = document.createElement('button');
+    pdfBtn.type = 'button';
+    pdfBtn.className = 'ai-msg-pdf-btn';
+    pdfBtn.textContent = '📄 PDFにする';
+    pdfBtn.onclick = () => openAiChatMessagePdfView(text);
+    div.appendChild(pdfBtn);
+  }
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+}
+
+/** チャットの1回答をそのまま #reportView に印刷用レイアウトで開く（window.print()でPDF保存可能） */
+function openAiChatMessagePdfView(text) {
+  const view = document.getElementById('reportView');
+  const now = new Date();
+  view.innerHTML = `<div class="rv-nav">
+    <span class="rv-nav-brand">Journal Report</span>
+    <span class="rv-nav-page">AIチャット分析結果</span>
+    <button class="rv-btn rv-btn-secondary" onclick="window.print()">📄 PDFで保存 / 印刷</button>
+    <button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button>
+    <button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button>
+  </div>
+  <div class="report">
+    <h1 class="r-title">AIチャット分析結果</h1>
+    <p class="r-meta">出力日時 ${esc(now.toLocaleString('ja-JP'))}</p>
+    ${simpleMarkdown(text)}
+  </div>`;
+  view.hidden = false;
+  document.body.classList.add('report-open');
+  view.querySelector('#rClose').onclick = () => {
+    view.hidden = true;
+    document.body.classList.remove('report-open');
+  };
 }
 
 function appendAiChatLoading() {
