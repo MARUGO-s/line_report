@@ -37,11 +37,19 @@
 ## Open product work
 
 - Actual provider/API and production-data work remains governed by existing feature docs and operations log.
-- For this knowledge-system task, Supabase schema, Edge Functions, secrets, production data, and external providers are not changed.
+- 2026-07-31: Journal AIチャット「PDFにする」で `ai_chat_pdf_history` へ質問＋回答を自動保存し、一覧ページ `jnm/ai-chat-pdf-history.html` を追加（migration + `admin-api` + Pages）。本番反映は migration 適用と `admin-api` デプロイが必要。
 
 ## Continuation log
 
 New records are appended below.
+
+### 2026-07-31 - AIチャットPDF履歴（質問＋回答）をDB保存
+
+- Request: AIチャット表示結果を「PDFにする」押下時に Supabase の新テーブルへ自動保存し、質問起点の一覧ページを用意する。
+- Database: migration `20260731070000_ai_chat_pdf_history.sql`（`ai_chat_pdf_history`、RLS、service_roleのみ）。
+- API: `admin-api` の `/pos-journals/chat-pdf-history`（GET/POST）と `/item`（GET/DELETE）、店舗スコープ許可リスト追加。
+- UI: `public/jnm/jnl2txt.html` / `index.html` で PDF ボタン時に保存、ツールボタンと専用ページ `ai-chat-pdf-history.html` で質問リスト表示。
+- Docs: `docs/店舗運用修正記録.md`、`docs/REPOSITORY_STRUCTURE.md` を更新。
 
 ### 2026-07-28 - Bistro CAVACAVA POS電子ジャーナル保管・アップロード・削除
 
