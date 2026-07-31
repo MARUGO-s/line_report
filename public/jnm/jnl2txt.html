@@ -42,10 +42,10 @@
     /* ===== Classical design system — light (default) ===== */
     --color-bg:#f3f2f2;
     --color-surface:#eae9e9;
-    --color-text:#201f1d;
-    --color-accent:#b68235;
-    --color-accent-2:#ac803e;
-    --color-divider:color-mix(in srgb, #201f1d 16%, transparent);
+    --color-text:#161512;
+    --color-accent:#a06f24;
+    --color-accent-2:#8a5f1a;
+    --color-divider:color-mix(in srgb, #161512 20%, transparent);
 
     --color-neutral-100:#f8f4f4;
     --color-neutral-200:#eae7e7;
@@ -87,8 +87,9 @@
     --border-sub:var(--color-divider);
     --border-input:var(--color-divider);
     --text:var(--color-text);
-    --text-2:color-mix(in srgb, var(--color-text) 70%, transparent);
-    --text-3:color-mix(in srgb, var(--color-text) 55%, transparent);
+    /* ライト既定: 二次／補助テキストを濃くして視認性を確保 */
+    --text-2:color-mix(in srgb, var(--color-text) 88%, transparent);
+    --text-3:color-mix(in srgb, var(--color-text) 74%, transparent);
     --pill-bg:var(--color-neutral-100);
     --tint:var(--color-accent-100);
     --green-t:#2f7d4f;
@@ -97,29 +98,29 @@
 
   /* ☀️ Light Mode（:root と同値。data-theme='light' 指定時も明示的に固定） */
   body[data-theme='light'], html[data-theme='light'] {
-    --color-bg:#f3f2f2; --color-surface:#eae9e9; --color-text:#201f1d;
-    --color-accent:#b68235; --color-accent-2:#ac803e;
-    --color-divider:color-mix(in srgb, #201f1d 16%, transparent);
+    --color-bg:#f3f2f2; --color-surface:#eae9e9; --color-text:#161512;
+    --color-accent:#a06f24; --color-accent-2:#8a5f1a;
+    --color-divider:color-mix(in srgb, #161512 20%, transparent);
     --accent:var(--color-accent); --page:var(--color-bg); --surface:var(--color-surface);
     --border:var(--color-divider); --border-sub:var(--color-divider); --border-input:var(--color-divider);
     --text:var(--color-text);
-    --text-2:color-mix(in srgb, var(--color-text) 70%, transparent);
-    --text-3:color-mix(in srgb, var(--color-text) 55%, transparent);
+    --text-2:color-mix(in srgb, var(--color-text) 88%, transparent);
+    --text-3:color-mix(in srgb, var(--color-text) 74%, transparent);
     --pill-bg:var(--color-neutral-100); --tint:var(--color-accent-100);
     --green-t:#2f7d4f; --green-bg:#e3efe6;
   }
 
   body[data-theme='light'] #reportView {
     --rv-bg:#f3f2f2;
-    --rv-text:#201f1d;
-    --rv-accent:#b68235;
+    --rv-text:#161512;
+    --rv-accent:#a06f24;
     --rv-accent-300:#facb8d;
     --rv-accent-500:#c28d41;
     --rv-accent-700:#7d5411;
-    --rv-neutral-400:#bab6b6;
-    --rv-neutral-600:#7d7979;
-    --rv-neutral-700:#605d5d;
-    --rv-divider:color-mix(in srgb, #201f1d 16%, transparent);
+    --rv-neutral-400:#9e9a9a;
+    --rv-neutral-600:#5c5858;
+    --rv-neutral-700:#454242;
+    --rv-divider:color-mix(in srgb, #161512 22%, transparent);
   }
 
   /* 🌙 Dark Mode — Classicalと同系統の暖色インクトーンで独自設計（デザイン指定はライトのみのため） */
@@ -303,8 +304,27 @@
     color:#0f172a !important;
   }
   body[data-theme='light'] .app-loader .drop-load-detail{
-    color:#475569 !important;
+    color:#334155 !important;
   }
+  /* ライト: セクション見出し・レポート内の薄い文字を濃くする */
+  body[data-theme='light'] .card-kicker,
+  body[data-theme='light'] .category-settings summary{
+    color:var(--color-accent-700);
+  }
+  body[data-theme='light'] .r-meta{opacity:.78}
+  body[data-theme='light'] .rv-card-body{opacity:.95}
+  body[data-theme='light'] .rv-stat-label,
+  body[data-theme='light'] .rv-stat-label-sm,
+  body[data-theme='light'] .kpi .k-l,
+  body[data-theme='light'] .rc-time,
+  body[data-theme='light'] .rc td.qty{opacity:.8}
+  body[data-theme='light'] .rv-stat-sub,
+  body[data-theme='light'] .kpi .k-s,
+  body[data-theme='light'] .rv-donut-hole-label,
+  body[data-theme='light'] .rv-pct{opacity:.72}
+  body[data-theme='light'] .classification-editor .editor-note,
+  body[data-theme='light'] .classification-item small{opacity:.75}
+  body[data-theme='light'] .classification-lane h5{opacity:.82}
   .drop .d1{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px}
   .drop .d2{font-size:12px;color:var(--text-2)}
   input[type=file]{display:none}
