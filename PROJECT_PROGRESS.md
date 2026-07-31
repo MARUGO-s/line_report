@@ -206,6 +206,13 @@ New records are appended below.
 - Remaining:
   - 認証済み本番全体管理者で4表示を切り替える最終操作確認。
 
+### 2026-07-31 - AIチャット年クエリに月次推移を付与
+
+- Request: 「今年の売り上げの推移」で月次が無いと返る問題を直す。
+- Cause: 年指定が年合計のみに集約され、AIへ月次系列が渡っていなかった。
+- Fix: `summarizeMatched` の `monthlyBreakdown` を確定データ／ローカル回答に含め、推移説明を許可。
+- Deploy: Pages（`public/jnm`）。Edge Function 変更なし。
+
 ### 2026-07-31 - AI分析ベースをマルゴグループ（ワイン推し）特化へ
 
 - Request: Journal／売上AI分析・チャットを、一般飲食ではなくマルゴグループ専用（ワイン推し・ワイン充実）の前提で行う。会社情報は https://05-marugo-group.com 。
