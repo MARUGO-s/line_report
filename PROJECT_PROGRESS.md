@@ -206,6 +206,12 @@ New records are appended below.
 - Remaining:
   - 認証済み本番全体管理者で4表示を切り替える最終操作確認。
 
+### 2026-07-31 - AI分析を店舗住所基準に（新宿三丁目固定廃止）
+
+- Request: 系列23店舗。四谷・丸の内・地方店もあり、ジャーナル店舗の住所で分析したい。
+- Fix: `STORE_LOCATION_PROFILES` + AIプロンプトへ店舗立地ブロック。全店新宿三丁目前提を禁止。
+- Deploy: Pages + `ai-analyze`（ユーザー端末からも deploy 可）。
+
 ### 2026-07-31 - Journal AI 意図ルーティング＋Perplexity/Grok
 
 - Request: 数値は Kimi、戦略・対策は Perplexity/Grok を自動オーケストレーション。
