@@ -69,11 +69,52 @@ jobs:
           fi
 
       - name: Deploy all functions
-        # 関数名を省略すると supabase/functions 配下の全関数ディレクトリ
-        # （_shared は共通コードとして自動除外）をデプロイする。
-        # config.toml の [functions.X] verify_jwt 設定もそのまま反映されるため、
-        # gmail-alert-cron / line-webhook / admin-api 等の verify_jwt=false が
-        # 確実に適用され、過去にあった「毎分 401」トラップの再発を防ぐ。
-        # --use-api: Docker 不要のサーバー側バンドル。_shared への共通 import も
-        #            各関数に取り込まれる。
-        run: supabase functions deploy --project-ref "$PROJECT_REF" --use-api
+        # 関数を1つずつデプロイする。一括 deploy は Supabase API の 502/409
+        # （deployment already exists）で全体が落ちることがあるため、個別+リトライにする。
+        # config.toml の [functions.X] verify_jwt も各デプロイで反映される。
+        # --use-api: Docker 不要のサーバー側バンドル。_shared への共通 import も取り込む。
+        run: |
+          set -euo pipefail
+          mapfile -t FUNCS < <(
+            find supabase/functions -mindepth 1 -maxdepth 1 -type d ! -name '_shared' -printf '%f\n' | sort
+          )
+          # 変更の多い入口を先にデプロイ
+          PRIORITY=(ai-analyze admin-api line-webhook)
+          ORDER=()
+          for p in "${PRIORITY[@]}"; do
+            for f in "${FUNCS[@]}"; do
+              if [ "$f" = "$p" ]; then ORDER+=("$f"); fi
+            done
+          done
+          for f in "${FUNCS[@]}"; do
+            skip=0
+            for p in "${PRIORITY[@]}"; do
+              if [ "$f" = "$p" ]; then skip=1; break; fi
+            done
+            if [ "$skip" -eq 0 ]; then ORDER+=("$f"); fi
+          done
+
+          failed=()
+          for name in "${ORDER[@]}"; do
+            ok=0
+            for attempt in 1 2 3 4; do
+              echo "::group::Deploy ${name} (attempt ${attempt})"
+              if supabase functions deploy "$name" --project-ref "$PROJECT_REF" --use-api; then
+                ok=1
+                echo "::endgroup::"
+                break
+              fi
+              echo "::endgroup::"
+              echo "::warning::Deploy ${name} attempt ${attempt} failed; waiting before retry"
+              sleep $((attempt * 15))
+            done
+            if [ "$ok" -ne 1 ]; then
+              failed+=("$name")
+            fi
+          done
+
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Failed to deploy: ${failed[*]}"
+            exit 1
+          fi
+          echo "Deployed functions: ${ORDER[*]}"
