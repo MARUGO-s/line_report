@@ -9,6 +9,7 @@ import {
   orchestrationNote,
   type JournalChatIntent,
 } from "../_shared/journal_ai_orchestrate.ts";
+import { buildStoreLocationPromptBlock } from "../_shared/marugo_group_stores.ts";
 
 const KIMI_MODEL_DEFAULT = "kimi-k3";
 const KIMI_ENDPOINT = "https://api.moonshot.ai/v1/chat/completions";
@@ -21,16 +22,16 @@ const MARUGO_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常に
 
 グループの立ち位置（根底に置くこと）:
 - 単なる一般飲食店や普通のBarではない。「気軽にワインを楽しめる」ことを核にした、ワイン推し・ワイン充実が強みの会社である。
-- 新宿三丁目を中心に、四谷・新橋・丸の内・愛知県刈谷市など約25店舗を展開（2026年1月時点）。
-- グラスワインの品揃え、ワインと料理のペアリング、ワイン業者を中心とした約70社のパートナーシップ、近隣店舗間の情報・人材・食材・顧客共有が競争優位。
-- 業態はワインバー、ワイン&イタリアン、ピッツェリア、ビストロ、スペインバル、フードホール、焼肉、鮨、蕎麦、たこ焼きなど多様だが、グループ横断の共通軸は「ワイン」。分析もこの軸で行う。
-- 店舗ごとの個性（データ上の店舗名・商品構成・客単価帯）を読み取り、その店舗コンセプトに沿ったワイン活用を提案する。寿司・蕎麦・たこ焼き等でも「グループのワイン強みをどう活かすか」を視野に入れる（無理な一般論や他業種の定石の押し付けは禁止）。
+- 系列は23店舗。新宿三丁目に多くの店舗がある一方で、四谷・荒木町・新橋・丸の内・水道橋（東京ドームシティ）・愛知県刈谷など、エリアは分散している。
+- グラスワインの品揃え、ワインと料理のペアリング、ワイン業者を中心とした約70社のパートナーシップが競争優位。
+- 業態はワインバー、ワイン&イタリアン、ピッツェリア、ビストロ、スペインバル、フードホール、焼肉、鮨、蕎麦、たこ焼きなど多様だが、グループ横断の共通軸は「ワイン」。
+- 【最重要】分析対象のジャーナル／売上は「どの店舗か」が分かっている。必ずその店舗の住所・エリアを基準に分析すること。全店を新宿三丁目基準にしてはいけない。
 
 分析・アドバイスの優先視点:
-1. ドリンク（特にワイン）比率・グラス／ボトル構成・ワイン単品の売れ筋
-2. フード×ワインのペアリング・クロスセルによる客単価向上
-3. 閑散帯でもワイン提案で単価を守る／伸ばす施策
-4. グループ内送客・エリア内回遊（新宿三丁目密集の利点）
+1. 対象店舗の立地（住所・商圏・客層・時間帯）に合った施策
+2. ドリンク（特にワイン）比率・グラス／ボトル構成・ワイン単品の売れ筋
+3. フード×ワインのペアリング・クロスセルによる客単価向上
+4. 同エリアの姉妹店連携は「その店舗のエリアで妥当な場合のみ」（新宿三丁目密集の話を他エリアに転用しない）
 5. 提供データに無い原価・在庫・利益は捏造しない`;
 
 const SYSTEM_PROMPT_ANALYZE = `${MARUGO_COMPANY_CONTEXT}
@@ -65,13 +66,14 @@ const SYSTEM_PROMPT_ANALYZE = `${MARUGO_COMPANY_CONTEXT}
   - ランチ客のディナー／ワイン再来店送客
 - **【集客・グループ連携オペレーション】**
   - 閑散曜日のワイン企画・予約誘導
-  - 新宿三丁目など近隣姉妹店への送客・回遊の活用
+  - 対象店舗のエリアで妥当な姉妹店送客・回遊（他エリアへの新宿三丁目話の転用禁止）
 
 ---
 【執筆時の注意点】
 - 丁寧で説得力のあるビジネス日本語を使用してください。
 - 抽象的な表現を避け、提供されたデータ内の具体数値（売上金額、人数、単価、構成比％、点数）を豊富に引用し、数値的根拠を持って論述してください。
-- 「一般的なBar／居酒屋なら…」ではなく、「マルゴグループのワイン強みを前提にすると…」という語り口で書いてください。`;
+- 「一般的なBar／居酒屋なら…」ではなく、「マルゴグループのワイン強み＋この店舗の立地」を前提にした語り口で書いてください。
+- 新宿三丁目を全店のデフォルト立地にしてはいけません。`;
 
 const SYSTEM_PROMPT_CHAT = `${MARUGO_COMPANY_CONTEXT}
 
@@ -186,7 +188,12 @@ Deno.serve(async (req: Request) => {
       systemInstruction,
       orchestrationMode,
       intent: intentOverride,
+      storeKey,
+      storeName,
+      storeLocationBlock,
     } = body;
+    const locationBlock = String(storeLocationBlock || "").trim()
+      || buildStoreLocationPromptBlock(storeKey, storeName);
 
     if (!action || !salesData) {
       return new Response(
@@ -223,7 +230,7 @@ Deno.serve(async (req: Request) => {
           role: "user",
           parts: [
             {
-              text: `${systemInstruction || SYSTEM_PROMPT_ANALYZE}\n\n以下の売上データを分析してください：\n\n${salesContext}`,
+              text: `${systemInstruction || SYSTEM_PROMPT_ANALYZE}\n\n${locationBlock}\n\n以下の売上データを分析してください：\n\n${salesContext}`,
             },
           ],
         },
@@ -245,9 +252,10 @@ Deno.serve(async (req: Request) => {
       );
 
       if (intent === "strategy" || intent === "mixed") {
+        const locHint = locationBlock.replace(/\n/g, " / ").slice(0, 400);
         briefs = await gatherExternalBriefs(
           String(message),
-          "MARUGO GROUP / https://05-marugo-group.com / wine-focused restaurants",
+          `MARUGO GROUP (23 stores, multi-area) / https://05-marugo-group.com / ${locHint}`,
           intent,
         );
       }
@@ -260,7 +268,7 @@ Deno.serve(async (req: Request) => {
           parts: [
             {
               text:
-                `${systemInstruction || SYSTEM_PROMPT_CHAT}\n\n参照する売上データ：\n${salesContext}${externalBlock}`,
+                `${systemInstruction || SYSTEM_PROMPT_CHAT}\n\n${locationBlock}\n\n参照する売上データ：\n${salesContext}${externalBlock}`,
             },
           ],
         },
