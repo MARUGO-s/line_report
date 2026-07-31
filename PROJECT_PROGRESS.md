@@ -43,6 +43,11 @@
 
 New records are appended below.
 
+### 2026-07-31 - Receipt correction multi-field edits
+
+- Request: 「この結果を修正」で複数箇所を直せるようにする。
+- Change: `receipt_correction.ts` で変更済み項目の蓄積・可視化、「すべて保存して終了」、`5 140000` 形式の一括入力を追加。`line-webhook` デプロイ対象。
+
 ### 2026-07-31 - Remove Journal Report「クラウド連携」badge
 
 - Request: ヘッダーの「クラウド連携」バッジを削除。

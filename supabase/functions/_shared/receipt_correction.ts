@@ -63,7 +63,11 @@ type PendingStoreReceiptCorrection = {
   stage: ReceiptCorrectionStage
   current_field_key: ReceiptCorrectionFieldKey | null
   draft: LineImageReceiptAnalysis
+  /** このセッション中に変更した項目（複数修正の可視化・確定ボタン表示用） */
+  changed_field_keys: ReceiptCorrectionFieldKey[]
 }
+
+const DRAFT_CHANGED_KEYS_META = '__changedFieldKeys'
 
 const RECEIPT_CORRECTION_FIELDS: Array<{
   key: ReceiptCorrectionFieldKey
@@ -107,6 +111,44 @@ function normalizeReceiptCorrectionDraft(raw: unknown): LineImageReceiptAnalysis
     unitPrice: source.unitPrice != null ? String(source.unitPrice) : null,
     items: Array.isArray(source.items) ? source.items.map(String) : [],
   }
+}
+
+function normalizeChangedFieldKeys(raw: unknown): ReceiptCorrectionFieldKey[] {
+  if (!Array.isArray(raw)) return []
+  const out: ReceiptCorrectionFieldKey[] = []
+  for (const item of raw) {
+    const key = normalizeReceiptCorrectionFieldKey(item)
+    if (key && !out.includes(key)) out.push(key)
+  }
+  return out
+}
+
+function encodePendingDraftJson(
+  draft: LineImageReceiptAnalysis,
+  changedFieldKeys: ReceiptCorrectionFieldKey[],
+): Record<string, unknown> {
+  return {
+    ...draft,
+    [DRAFT_CHANGED_KEYS_META]: changedFieldKeys,
+  }
+}
+
+function decodePendingDraftJson(raw: unknown): {
+  draft: LineImageReceiptAnalysis
+  changedFieldKeys: ReceiptCorrectionFieldKey[]
+} {
+  const source = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {}
+  return {
+    draft: normalizeReceiptCorrectionDraft(source),
+    changedFieldKeys: normalizeChangedFieldKeys(source[DRAFT_CHANGED_KEYS_META]),
+  }
+}
+
+function withChangedField(
+  keys: ReceiptCorrectionFieldKey[],
+  fieldKey: ReceiptCorrectionFieldKey,
+): ReceiptCorrectionFieldKey[] {
+  return keys.includes(fieldKey) ? keys : [...keys, fieldKey]
 }
 
 function normalizeReceiptCorrectionFieldKey(raw: unknown): ReceiptCorrectionFieldKey | null {
@@ -174,10 +216,36 @@ function parseReceiptCorrectionFieldChoice(rawText: string): ReceiptCorrectionFi
   return null
 }
 
+/**
+ * 項目選択画面で「5 140000」「総売上:140000」のように番号/項目名＋値を一度に送る入力。
+ * 複数箇所を連続修正しやすくする。
+ */
+function parseReceiptCorrectionFieldAndValueCombo(
+  rawText: string,
+): { fieldKey: ReceiptCorrectionFieldKey; valueText: string } | null {
+  const text = String(rawText ?? '').trim()
+  if (!text) return null
+  const numbered = text.match(/^([1-8])\s*[:：]\s*(.+)$/u)
+    ?? text.match(/^([1-8])\s+(.+)$/u)
+  if (numbered) {
+    const idx = Number(numbered[1])
+    const fieldKey = RECEIPT_CORRECTION_FIELDS[idx - 1]?.key
+    const valueText = String(numbered[2] ?? '').trim()
+    if (fieldKey && valueText) return { fieldKey, valueText }
+  }
+  const named = text.match(/^(店名|店舗名|店舗|日付|営業日|会計日|純売上|消費税|税|総売上|売上|会計組数|組数|客数|人数|客単価|単価)\s*[:：]?\s*(.+)$/u)
+  if (named) {
+    const fieldKey = parseReceiptCorrectionFieldChoice(String(named[1] ?? ''))
+    const valueText = String(named[2] ?? '').trim()
+    if (fieldKey && valueText) return { fieldKey, valueText }
+  }
+  return null
+}
+
 function normalizeReceiptCorrectionControl(rawText: string): 'confirm' | 'cancel' | 'back' | null {
   const compact = normalizeForRuleParsing(rawText).replace(/\s+/g, '').toLowerCase()
   if (!compact) return null
-  if (/^(確定|保存|反映|完了|ok|はい)$/.test(compact)) return 'confirm'
+  if (/^(確定|保存|反映|完了|ok|はい|すべて保存して終了|全て保存して終了)$/.test(compact)) return 'confirm'
   if (/^(キャンセル|中止|終了|やめる|破棄|取消|取り消し)$/.test(compact)) return 'cancel'
   if (/^(戻る|もどる|back|項目選択|修正項目)$/.test(compact)) return 'back'
   return null
@@ -255,7 +323,7 @@ async function savePendingCorrection(
     line_message_id: state.line_message_id,
     stage: state.stage,
     current_field_key: state.current_field_key,
-    draft_json: state.draft,
+    draft_json: encodePendingDraftJson(state.draft, state.changed_field_keys),
     expires_at: expiresAt,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'conversation_key' })
@@ -279,6 +347,7 @@ async function loadPendingCorrection(
   }
   const stageRaw = String((data as { stage?: unknown }).stage ?? '')
   const currentFieldRaw = String((data as { current_field_key?: unknown }).current_field_key ?? '')
+  const decoded = decodePendingDraftJson((data as { draft_json?: unknown }).draft_json)
   return {
     store_partition_key: String((data as { store_partition_key?: unknown }).store_partition_key ?? ''),
     receipt_table: String((data as { receipt_table?: unknown }).receipt_table ?? ''),
@@ -286,7 +355,8 @@ async function loadPendingCorrection(
     line_message_id: String((data as { line_message_id?: unknown }).line_message_id ?? ''),
     stage: stageRaw === 'input_value' ? 'input_value' : 'select_field',
     current_field_key: normalizeReceiptCorrectionFieldKey(currentFieldRaw),
-    draft: normalizeReceiptCorrectionDraft((data as { draft_json?: unknown }).draft_json),
+    draft: decoded.draft,
+    changed_field_keys: decoded.changedFieldKeys,
   }
 }
 
@@ -346,7 +416,7 @@ function buildReceiptCorrectionConfirmCancelFooter(): Record<string, unknown> {
         height: 'sm',
         action: {
           type: 'postback',
-          label: '確定',
+          label: 'すべて保存して終了',
           data: RECEIPT_CORRECTION_POSTBACK_CONFIRM,
           displayText: '確定',
         },
@@ -392,31 +462,44 @@ function buildReceiptCorrectionCancelOnlyFooter(): Record<string, unknown> {
 function buildFieldSelectionPrompt(
   draft: LineImageReceiptAnalysis,
   note?: string,
-  options?: { showConfirm?: boolean },
+  options?: { showConfirm?: boolean; changedFieldKeys?: ReceiptCorrectionFieldKey[] },
 ): Record<string, unknown> {
-  const showConfirm = options?.showConfirm === true
-  const fieldRows = RECEIPT_CORRECTION_FIELDS.map((field, idx) => ({
-    type: 'box',
-    layout: 'horizontal',
-    spacing: 'md',
-    margin: 'xs',
-    contents: [
-      { type: 'text', text: `${idx + 1}. ${field.label}`, size: 'sm', color: '#888888', flex: 4, wrap: true },
-      {
-        type: 'text',
-        text: lineSafeFlexText(getReceiptCorrectionFieldValue(draft, field.key) || '-', 120),
-        size: 'sm',
-        color: '#111111',
-        flex: 6,
-        align: 'start',
-        wrap: true,
-      },
-    ],
-  }))
+  const changedFieldKeys = options?.changedFieldKeys ?? []
+  const showConfirm = options?.showConfirm === true || changedFieldKeys.length > 0
+  const fieldRows = RECEIPT_CORRECTION_FIELDS.map((field, idx) => {
+    const changed = changedFieldKeys.includes(field.key)
+    return {
+      type: 'box',
+      layout: 'horizontal',
+      spacing: 'md',
+      margin: 'xs',
+      contents: [
+        {
+          type: 'text',
+          text: `${idx + 1}. ${field.label}${changed ? ' ✓' : ''}`,
+          size: 'sm',
+          color: changed ? '#1E4FB1' : '#555555',
+          weight: changed ? 'bold' : 'regular',
+          flex: 4,
+          wrap: true,
+        },
+        {
+          type: 'text',
+          text: lineSafeFlexText(getReceiptCorrectionFieldValue(draft, field.key) || '-', 120),
+          size: 'sm',
+          color: changed ? '#1E4FB1' : '#111111',
+          weight: changed ? 'bold' : 'regular',
+          flex: 6,
+          align: 'start',
+          wrap: true,
+        },
+      ],
+    }
+  })
   const bodyContents: Record<string, unknown>[] = [
     {
       type: 'text',
-      text: 'レシート修正中です。修正する項目番号を返信してください。',
+      text: '複数の項目を続けて直せます。修正する項目番号を返信してください。',
       size: 'sm',
       wrap: true,
     },
@@ -426,7 +509,22 @@ function buildFieldSelectionPrompt(
       type: 'text',
       text: lineSafeFlexText(note, 500),
       size: 'xs',
-      color: '#666666',
+      color: '#444444',
+      wrap: true,
+      margin: 'sm',
+    })
+  }
+  if (changedFieldKeys.length > 0) {
+    const labels = changedFieldKeys
+      .map((key) => getReceiptCorrectionFieldConfig(key)?.label)
+      .filter(Boolean)
+      .join('・')
+    bodyContents.push({
+      type: 'text',
+      text: `変更済み: ${labels}（まだ保存前です）`,
+      size: 'xs',
+      color: '#1E4FB1',
+      weight: 'bold',
       wrap: true,
       margin: 'sm',
     })
@@ -435,19 +533,24 @@ function buildFieldSelectionPrompt(
   bodyContents.push({
     type: 'text',
     text: showConfirm
-      ? '1〜8 の番号で項目を選び、値を入力したあと「確定」で保存できます。'
-      : '1〜8 の番号で項目を選び、表示された画面で新しい値を送ってください（例: 会計組数を3にする → 6 → 3）。',
+      ? '番号で続けて修正できます。例: 5 → 新しい金額、または「5 140000」。すべて終わったら「すべて保存して終了」。'
+      : '番号で項目を選び、次の画面で新しい値を送ってください。一気に直す例: 「6 3」（会計組数を3に）。複数直してから最後に保存できます。',
     size: 'xxs',
-    color: '#888888',
+    color: '#555555',
     wrap: true,
     margin: 'md',
   })
   return {
     type: 'flex',
-    altText: 'レシート修正 番号を選んでください',
+    altText: 'レシート修正 番号を選んでください（複数可）',
     contents: {
       type: 'bubble',
-      header: buildCorrectionFlexHeader('レシート修正', '番号を返信して項目を選んでください'),
+      header: buildCorrectionFlexHeader(
+        'レシート修正',
+        showConfirm
+          ? '続けて番号を送るか、保存して終了してください'
+          : '複数箇所OK・番号を返信して項目を選んでください',
+      ),
       body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: bodyContents },
       footer: showConfirm
         ? buildReceiptCorrectionConfirmCancelFooter()
@@ -484,9 +587,9 @@ function buildValueInputPrompt(
           { type: 'text', text: `${field.label}の新しい値を送ってください。`, size: 'sm', wrap: true },
           {
             type: 'text',
-            text: '※一覧の番号（1〜8）ではなく、この項目の値として送ってください。',
+            text: '※一覧の番号（1〜8）ではなく、この項目の値として送ってください。入力後は一覧に戻り、他の項目も続けて直せます。',
             size: 'xxs',
-            color: '#888888',
+            color: '#555555',
             wrap: true,
             margin: 'sm',
           },
@@ -496,12 +599,12 @@ function buildValueInputPrompt(
             spacing: 'md',
             margin: 'md',
             contents: [
-              { type: 'text', text: '現在値', size: 'sm', color: '#7A7A7A', flex: 4 },
+              { type: 'text', text: '現在値', size: 'sm', color: '#555555', flex: 4 },
               { type: 'text', text: lineSafeFlexText(currentValue, 200), size: 'sm', flex: 6, align: 'start', wrap: true },
             ],
           },
-          { type: 'text', text: `入力のヒント: ${kindHint}`, size: 'xs', color: '#666666', wrap: true, margin: 'sm' },
-          { type: 'text', text: '未設定にする場合は「-」または「なし」と入力してください。', size: 'xxs', color: '#888888', wrap: true },
+          { type: 'text', text: `入力のヒント: ${kindHint}`, size: 'xs', color: '#444444', wrap: true, margin: 'sm' },
+          { type: 'text', text: '未設定にする場合は「-」または「なし」と入力してください。', size: 'xxs', color: '#555555', wrap: true },
         ],
       },
       footer: {
@@ -608,6 +711,7 @@ async function startCorrectionSession(
     stage: 'select_field',
     current_field_key: null,
     draft,
+    changed_field_keys: [],
   })
   const targetLabel = [
     draft.storeName ? `店名:${draft.storeName}` : '',
@@ -616,7 +720,7 @@ async function startCorrectionSession(
   return buildFieldSelectionPrompt(
     draft,
     targetLabel ? `対象: ${targetLabel}` : (targetLineMessageId ? '対象: 指定レシート' : '対象: 直近のレシート'),
-    { showConfirm: false },
+    { showConfirm: false, changedFieldKeys: [] },
   )
 }
 
@@ -680,6 +784,49 @@ export async function handleReceiptCorrectionPostback(
   return tryHandlePendingCorrection(supabase, registry, roomId, userId, text, replyVisibility)
 }
 
+async function applyCorrectionFieldValue(
+  supabase: SupabaseClient,
+  roomId: string,
+  userId: string | null,
+  pending: PendingStoreReceiptCorrection,
+  fieldKey: ReceiptCorrectionFieldKey,
+  rawValueText: string,
+): Promise<LineReplyPayload> {
+  const normalizedValue = normalizeReceiptCorrectionInputValue(fieldKey, rawValueText)
+  if (!normalizedValue.ok) {
+    const errFlex = buildValueInputPrompt(fieldKey, pending.draft)
+    return typeof errFlex === 'string'
+      ? [{ type: 'text', text: `${normalizedValue.error}\n${errFlex}` }]
+      : [
+        { type: 'text', text: normalizedValue.error },
+        errFlex,
+      ]
+  }
+
+  const fieldLabel = getReceiptCorrectionFieldConfig(fieldKey)?.label ?? '項目'
+  const previousValue = getReceiptCorrectionFieldValue(pending.draft, fieldKey)
+  const nextDraft = setReceiptCorrectionFieldValue(pending.draft, fieldKey, normalizedValue.value)
+  const displayValue = normalizedValue.value ?? '未設定'
+  const unchanged = String(previousValue ?? '').trim() === String(normalizedValue.value ?? '').trim()
+  const changedFieldKeys = unchanged
+    ? pending.changed_field_keys
+    : withChangedField(pending.changed_field_keys, fieldKey)
+  await savePendingCorrection(supabase, roomId, userId, {
+    ...pending,
+    stage: 'select_field',
+    current_field_key: null,
+    draft: nextDraft,
+    changed_field_keys: changedFieldKeys,
+  })
+  const note = unchanged
+    ? `${fieldLabel}は ${displayValue} のままです。別の項目も直す場合は番号を送ってください。`
+    : `${fieldLabel}を ${displayValue} に変更しました（まだ保存前）。他の項目も直す場合は番号を送ってください。全部終わったら「すべて保存して終了」を押してください。`
+  return buildFieldSelectionPrompt(nextDraft, note, {
+    showConfirm: true,
+    changedFieldKeys,
+  })
+}
+
 async function handleCorrectionValueInput(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
@@ -696,7 +843,9 @@ async function handleCorrectionValueInput(
       stage: 'select_field',
       current_field_key: null,
     })
-    return buildFieldSelectionPrompt(pending.draft, '修正項目を再選択してください。')
+    return buildFieldSelectionPrompt(pending.draft, '修正項目を再選択してください。', {
+      changedFieldKeys: pending.changed_field_keys,
+    })
   }
 
   if (control === 'back') {
@@ -705,7 +854,9 @@ async function handleCorrectionValueInput(
       stage: 'select_field',
       current_field_key: null,
     })
-    return buildFieldSelectionPrompt(pending.draft)
+    return buildFieldSelectionPrompt(pending.draft, undefined, {
+      changedFieldKeys: pending.changed_field_keys,
+    })
   }
 
   if (control) {
@@ -718,32 +869,14 @@ async function handleCorrectionValueInput(
       ]
   }
 
-  const normalizedValue = normalizeReceiptCorrectionInputValue(currentFieldKey, text)
-  if (!normalizedValue.ok) {
-    const errFlex = buildValueInputPrompt(currentFieldKey, pending.draft)
-    return typeof errFlex === 'string'
-      ? [{ type: 'text', text: `${normalizedValue.error}\n${errFlex}` }]
-      : [
-        { type: 'text', text: normalizedValue.error },
-        errFlex,
-      ]
-  }
-
-  const fieldLabel = getReceiptCorrectionFieldConfig(currentFieldKey)?.label ?? '項目'
-  const previousValue = getReceiptCorrectionFieldValue(pending.draft, currentFieldKey)
-  const nextDraft = setReceiptCorrectionFieldValue(pending.draft, currentFieldKey, normalizedValue.value)
-  const displayValue = normalizedValue.value ?? '未設定'
-  const unchanged = String(previousValue ?? '').trim() === String(normalizedValue.value ?? '').trim()
-  await savePendingCorrection(supabase, roomId, userId, {
-    ...pending,
-    stage: 'select_field',
-    current_field_key: null,
-    draft: nextDraft,
-  })
-  const note = unchanged
-    ? `${fieldLabel}は ${displayValue} のままです。別の値に変える場合は番号を選び直して新しい値を送ってください。`
-    : `${fieldLabel}を ${displayValue} に変更しました。続けて修正する場合は番号、完了する場合は下の「確定」を押してください。`
-  return buildFieldSelectionPrompt(nextDraft, note, { showConfirm: true })
+  return applyCorrectionFieldValue(
+    supabase,
+    roomId,
+    userId,
+    pending,
+    currentFieldKey,
+    text,
+  )
 }
 
 /**
@@ -807,6 +940,17 @@ async function tryHandlePendingCorrection(
   }
 
   if (pending.stage === 'select_field') {
+    const combo = parseReceiptCorrectionFieldAndValueCombo(text)
+    if (combo) {
+      return applyCorrectionFieldValue(
+        supabase,
+        roomId,
+        userId,
+        pending,
+        combo.fieldKey,
+        combo.valueText,
+      )
+    }
     const field = parseReceiptCorrectionFieldChoice(text)
     if (!field) {
       const compact = normalizeForRuleParsing(text).replace(/\s+/g, '')
@@ -817,9 +961,11 @@ async function tryHandlePendingCorrection(
         return null
       }
       const hint = /^\d+$/.test(compact) && !/^[1-8]$/.test(compact)
-        ? '番号は1〜8で送ってください。値だけ変えたい場合は、先に項目番号（例: 会計組数なら6）を送り、次のメッセージで新しい値を送ってください。'
-        : '修正する項目番号（1〜8）を返信してください。'
-      return buildFieldSelectionPrompt(pending.draft, hint)
+        ? '番号は1〜8で送ってください。例: 会計組数を3にするなら「6」のあと「3」、または「6 3」。'
+        : '修正する項目番号（1〜8）を返信してください。複数直してから最後に保存できます。'
+      return buildFieldSelectionPrompt(pending.draft, hint, {
+        changedFieldKeys: pending.changed_field_keys,
+      })
     }
     await savePendingCorrection(supabase, roomId, userId, {
       ...pending,
@@ -829,7 +975,9 @@ async function tryHandlePendingCorrection(
     return buildValueInputPrompt(field, pending.draft)
   }
 
-  return buildFieldSelectionPrompt(pending.draft, '修正を続ける場合は番号（1〜8）を送ってください。')
+  return buildFieldSelectionPrompt(pending.draft, '修正を続ける場合は番号（1〜8）を送ってください。', {
+    changedFieldKeys: pending.changed_field_keys,
+  })
 }
 
 export async function handleStoreReceiptTextMessage(
