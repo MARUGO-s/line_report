@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JNL → TXT 変換ツール</title>
+<title>Journal Report</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Cormorant+Garamond:wght@400;600&family=Lora:wght@400;600&display=swap" rel="stylesheet">
@@ -39,162 +39,166 @@
 <script src="auth-session.js"></script>
 <style>
   :root {
-    --accent:#3f7bea;
-    --page:#0c1117;
-    --surface:#151c25;
-    --border:#26313d;
-    --border-sub:#1f2937;
-    --border-input:#374151;
-    --text:#e7ecf2;
-    --text-2:#9fadbd;
-    --text-3:#6f7d8d;
-    --pill-bg:#1b232e;
-    --green-t:#36b37e;
-    --green-bg:rgba(54, 179, 126, 0.18);
-    --tint:#1b232e;
+    /* ===== Classical design system — light (default) ===== */
+    --color-bg:#f3f2f2;
+    --color-surface:#eae9e9;
+    --color-text:#201f1d;
+    --color-accent:#b68235;
+    --color-accent-2:#ac803e;
+    --color-divider:color-mix(in srgb, #201f1d 16%, transparent);
+
+    --color-neutral-100:#f8f4f4;
+    --color-neutral-200:#eae7e7;
+    --color-neutral-300:#d7d3d3;
+    --color-neutral-400:#bab6b6;
+    --color-neutral-500:#9b9797;
+    --color-neutral-600:#7d7979;
+    --color-neutral-700:#605d5d;
+    --color-neutral-800:#444141;
+    --color-neutral-900:#2d2b2b;
+
+    --color-accent-100:#fff3e4;
+    --color-accent-200:#ffe3bf;
+    --color-accent-300:#facb8d;
+    --color-accent-400:#e1ad66;
+    --color-accent-500:#c28d41;
+    --color-accent-600:#a06f24;
+    --color-accent-700:#7d5411;
+    --color-accent-800:#5a3b0a;
+    --color-accent-900:#3a270d;
+
+    --font-heading:"Cormorant Garamond", "Noto Serif JP", system-ui, sans-serif;
+    --font-heading-weight:600;
+    --font-body:"Lora", "Noto Serif JP", system-ui, sans-serif;
+    --font-sans:'Noto Sans JP', ui-sans-serif, system-ui, sans-serif;
+
+    --space-1:4.6px; --space-2:9.2px; --space-3:13.8px;
+    --space-4:18.4px; --space-6:27.6px; --space-8:36.8px;
+    --radius-sm:2px; --radius-md:4px; --radius-lg:7px;
+    --shadow-sm:0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
+    --shadow-md:0 3px 10px color-mix(in srgb, #2d2b2b 16%, transparent);
+    --shadow-lg:0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);
+
+    /* 既存の変数名はこれらのトークンへのエイリアスとして維持（他CSS/JSからの参照を無変更に保つ） */
+    --accent:var(--color-accent);
+    --page:var(--color-bg);
+    --surface:var(--color-surface);
+    --border:var(--color-divider);
+    --border-sub:var(--color-divider);
+    --border-input:var(--color-divider);
+    --text:var(--color-text);
+    --text-2:color-mix(in srgb, var(--color-text) 70%, transparent);
+    --text-3:color-mix(in srgb, var(--color-text) 55%, transparent);
+    --pill-bg:var(--color-neutral-100);
+    --tint:var(--color-accent-100);
+    --green-t:#2f7d4f;
+    --green-bg:#e3efe6;
   }
 
-  /* ☀️ Light Mode Styles */
+  /* ☀️ Light Mode（:root と同値。data-theme='light' 指定時も明示的に固定） */
   body[data-theme='light'], html[data-theme='light'] {
-    --accent:#475569;
-    --page:#f8fafc;
-    --surface:#ffffff;
-    --border:#e2e8f0;
-    --border-sub:#f1f5f9;
-    --border-input:#cbd5e1;
-    --text:#0f172a;
-    --text-2:#475569;
-    --text-3:#64748b;
-    --pill-bg:#f1f5f9;
-    --green-t:#16a34a;
-    --green-bg:#dcfce7;
-    --tint:#f8fafc;
+    --color-bg:#f3f2f2; --color-surface:#eae9e9; --color-text:#201f1d;
+    --color-accent:#b68235; --color-accent-2:#ac803e;
+    --color-divider:color-mix(in srgb, #201f1d 16%, transparent);
+    --accent:var(--color-accent); --page:var(--color-bg); --surface:var(--color-surface);
+    --border:var(--color-divider); --border-sub:var(--color-divider); --border-input:var(--color-divider);
+    --text:var(--color-text);
+    --text-2:color-mix(in srgb, var(--color-text) 70%, transparent);
+    --text-3:color-mix(in srgb, var(--color-text) 55%, transparent);
+    --pill-bg:var(--color-neutral-100); --tint:var(--color-accent-100);
+    --green-t:#2f7d4f; --green-bg:#e3efe6;
   }
 
   body[data-theme='light'] #reportView {
-    --rv-bg:#f3f4f6;
-    --rv-text:#1f2937;
+    --rv-bg:#f3f2f2;
+    --rv-text:#201f1d;
     --rv-accent:#b68235;
     --rv-accent-300:#facb8d;
     --rv-accent-500:#c28d41;
     --rv-accent-700:#7d5411;
-    --rv-neutral-400:#9ca3af;
-    --rv-neutral-600:#4b5563;
-    --rv-neutral-700:#374151;
-    --rv-divider:rgba(31, 41, 55, 0.16);
+    --rv-neutral-400:#bab6b6;
+    --rv-neutral-600:#7d7979;
+    --rv-neutral-700:#605d5d;
+    --rv-divider:color-mix(in srgb, #201f1d 16%, transparent);
   }
 
-  /* 🌙 Dark Mode High Contrast Overrides */
+  /* 🌙 Dark Mode — Classicalと同系統の暖色インクトーンで独自設計（デザイン指定はライトのみのため） */
   body[data-theme='dark'], html[data-theme='dark'] {
-    --accent:#3f7bea;
-    --page:#0c1117;
-    --surface:#151c25;
-    --border:#26313d;
-    --border-sub:#1f2937;
-    --border-input:#374151;
-    --text:#f8fafc;
-    --text-2:#cbd5e1;
-    --text-3:#94a3b8;
-    --pill-bg:#1b232e;
-    --green-t:#36b37e;
-    --green-bg:rgba(54, 179, 126, 0.18);
-    --tint:#1b232e;
+    --color-bg:#1c1a18;
+    --color-surface:#26221f;
+    --color-text:#f3f2f0;
+    --color-accent:#c99a4e;
+    --color-accent-2:#bf9257;
+    --color-divider:color-mix(in srgb, #f3f2f0 18%, transparent);
+
+    --color-neutral-100:#2b2724;
+    --color-neutral-200:#37322e;
+    --color-neutral-300:#4a443f;
+    --color-neutral-400:#645c55;
+    --color-neutral-500:#83786f;
+    --color-neutral-600:#a89c90;
+    --color-neutral-700:#c7bcb1;
+    --color-neutral-800:#e2d9d0;
+    --color-neutral-900:#f3ede6;
+
+    --color-accent-100:#3a2b16;
+    --color-accent-200:#573d14;
+    --color-accent-300:#79561f;
+    --color-accent-400:#9b7232;
+    --color-accent-500:#bc8f4e;
+    --color-accent-600:#dbaf70;
+    --color-accent-700:#f5cd96;
+    --color-accent-800:#ffe3be;
+    --color-accent-900:#fff3e4;
+
+    --accent:var(--color-accent);
+    --page:var(--color-bg);
+    --surface:var(--color-surface);
+    --border:var(--color-divider);
+    --border-sub:var(--color-divider);
+    --border-input:var(--color-divider);
+    --text:var(--color-text);
+    --text-2:color-mix(in srgb, var(--color-text) 78%, transparent);
+    --text-3:color-mix(in srgb, var(--color-text) 60%, transparent);
+    --pill-bg:var(--color-neutral-100);
+    --tint:var(--color-accent-100);
+    --green-t:#5fb787;
+    --green-bg:rgba(95, 183, 135, 0.16);
   }
 
   body[data-theme='dark'] {
-    background: #0c1117 !important;
-    color: #f8fafc !important;
+    background: var(--color-bg);
+    color: var(--color-text);
   }
 
-  body[data-theme='dark'] h1:not(.ai-analysis *):not(.app-loader *),
-  body[data-theme='dark'] h2:not(.ai-analysis *):not(.app-loader *),
-  body[data-theme='dark'] h3:not(.ai-analysis *):not(.app-loader *),
-  body[data-theme='dark'] h4:not(.ai-analysis *):not(.app-loader *),
-  body[data-theme='dark'] p:not(.ai-analysis *):not(.app-loader *),
-  body[data-theme='dark'] li:not(.ai-analysis *):not(.app-loader *),
-  body[data-theme='dark'] div:not(.ai-analysis):not(.ai-analysis *):not(.app-loader):not(.app-loader *),
-  body[data-theme='dark'] label:not(.ai-analysis *):not(.app-loader *),
-  body[data-theme='dark'] span:not(.pill-live):not(.mark):not(.ai-analysis *):not(.app-loader *),
-  body[data-theme='dark'] .title,
-  body[data-theme='dark'] .guide,
-  body[data-theme='dark'] .conv,
-  body[data-theme='dark'] .intro,
-  body[data-theme='dark'] .d1,
-  body[data-theme='dark'] .category-field,
-  body[data-theme='dark'] summary {
-    color: #f8fafc !important;
-  }
-
-  body[data-theme='dark'] .d2,
-  body[data-theme='dark'] .cap,
-  body[data-theme='dark'] .settings-note,
-  body[data-theme='dark'] .foot,
-  body[data-theme='dark'] .empty,
-  body[data-theme='dark'] .r-meta {
-    color: #cbd5e1 !important;
-  }
-
-  body[data-theme='dark'] input[type="text"],
-  body[data-theme='dark'] input[type="date"],
-  body[data-theme='dark'] select {
-    background: #1b232e !important;
-    color: #f8fafc !important;
-    border-color: #334155 !important;
-  }
-
-  body[data-theme='dark'] .drop {
-    background: #151c25 !important;
-    border-color: #334155 !important;
-  }
-
-  body[data-theme='dark'] .btn-secondary {
-    background: #1b232e !important;
-    color: #f8fafc !important;
-    border-color: #334155 !important;
-  }
-
-  body[data-theme='dark'] .tab {
-    color: #cbd5e1 !important;
-  }
-
-  body[data-theme='dark'] .tab.active {
-    color: #387dea !important;
-    border-bottom-color: #387dea !important;
-  }
-
-  /* 🎯 選択中のタブボタン（保存済みレポートフィルター・各種タブ用） */
-  button[data-filter].active {
-    background: #2563eb !important;
-    color: #ffffff !important;
-    font-weight: 700 !important;
-    border-color: #1d4ed8 !important;
-    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4) !important;
-  }
-
-  body[data-theme='dark'] button[data-filter].active {
-    background: #3b82f6 !important;
-    color: #ffffff !important;
-    font-weight: 700 !important;
-    border-color: #60a5fa !important;
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.5) !important;
+  /* 🎯 選択中のフィルターボタン（保存済みレポート等のフィルタートグル。上部の.tabsは別途アウトライン表示） */
+  button[data-filter].active,
+  .rv-btn.active,
+  .rv-btn[data-filter].active,
+  button.rv-btn-secondary.active {
+    background: var(--color-accent) !important;
+    color: var(--color-bg) !important;
+    font-weight: 600 !important;
+    border-color: var(--color-accent) !important;
+    box-shadow: none !important;
   }
 
   body[data-theme='dark'] #reportView {
-    --rv-bg:#0d131a;
-    --rv-text:#f8fafc;
-    --rv-accent:#d4af37;
-    --rv-accent-300:#fcd34d;
-    --rv-accent-500:#f59e0b;
-    --rv-accent-700:#fbbf24;
-    --rv-neutral-400:#9ca3af;
-    --rv-neutral-600:#d1d5db;
-    --rv-neutral-700:#e5e7eb;
-    --rv-divider:rgba(226, 232, 240, 0.16);
+    --rv-bg:#1c1a18;
+    --rv-text:#f3f2f0;
+    --rv-accent:#c99a4e;
+    --rv-accent-300:#dbaf70;
+    --rv-accent-500:#bc8f4e;
+    --rv-accent-700:#79561f;
+    --rv-neutral-400:#645c55;
+    --rv-neutral-600:#a89c90;
+    --rv-neutral-700:#c7bcb1;
+    --rv-divider:color-mix(in srgb, #f3f2f0 18%, transparent);
   }
 
   #reportView {
-    --rv-bg:#0d131a;
-    --rv-text:#e2e8f0;
+    --rv-bg:#f3f2f2;
+    --rv-text:#201f1d;
     --rv-accent:#b68235;
     --rv-accent-300:#facb8d;
     --rv-accent-500:#c28d41;
@@ -207,6 +211,8 @@
     --rv-space-4:18.4px; --rv-space-6:27.6px; --rv-space-8:36.8px;
     --rv-radius-sm:2px; --rv-radius-md:4px; --rv-radius-lg:7px;
     --rv-shadow-sm:0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
+    --rv-shadow-md:0 3px 10px color-mix(in srgb, #2d2b2b 16%, transparent);
+    --rv-shadow-lg:0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);
     /* 日本語＋数字を同一書体に（Cormorant は数字だけ別見た目になる） */
     --rv-font-heading:'Noto Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', 'Cormorant Garamond', Georgia, serif;
     --rv-font-body:'Noto Serif JP', 'Lora', Georgia, serif;
@@ -215,35 +221,41 @@
   *{box-sizing:border-box}
   html,body{margin:0}
   body{
-    font-family:'Noto Sans JP',-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;
+    font-family:var(--font-body),'Noto Sans JP',-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;
     background:var(--page);color:var(--text);min-height:100vh;
     display:flex;flex-direction:column;
   }
-  ::selection{background:oklch(85% 0.05 250)}
+  h1,h2,h3,h4{font-family:var(--font-heading);font-weight:var(--font-heading-weight);letter-spacing:-0.015em;margin:0 0 var(--space-2)}
+  ::selection{background:color-mix(in srgb, var(--accent) 30%, transparent)}
 
   /* Header */
-  .hd{display:flex;align-items:center;gap:16px;padding:14px 24px;
-    background:var(--surface);border-bottom:1px solid var(--border)}
-  .hd .mark{width:32px;height:32px;border-radius:8px;background:var(--accent);
+  .hd{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-4);
+    background:var(--page);border-bottom:1px solid var(--border)}
+  .hd .mark{width:28px;height:28px;border-radius:6px;background:var(--accent);
     display:flex;align-items:center;justify-content:center;flex-shrink:0}
-  .hd .mark i{width:14px;height:14px;border:2px solid #fff;border-radius:3px;display:block}
-  .hd .title{font-size:16px;font-weight:700;letter-spacing:.01em}
-  .pill-live{font-size:11px;font-weight:600;color:var(--green-t);background:var(--green-bg);
-    padding:3px 9px;border-radius:100px}
-  .hd .cap{margin-left:auto;font-size:12px;color:var(--text-2)}
+  .hd .mark i{width:12px;height:12px;border:2px solid var(--page);border-radius:3px;display:block}
+  .hd .title{font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:18px}
+  .pill-live{font-size:11px;letter-spacing:.02em;background:var(--color-accent-100);color:var(--color-accent-800);
+    padding:3px 10px;border-radius:calc(var(--radius-md) * .75)}
+  .hd .cap{font-size:13px;color:var(--text-2)}
 
-  /* Tabs */
-  .tabs{display:flex;gap:2px;padding:0 24px;background:var(--surface);
-    border-bottom:1px solid var(--border)}
-  .tab{padding:11px 16px;font-size:13px;font-weight:600;cursor:pointer;
-    border-bottom:2px solid transparent;color:var(--text-2);user-select:none}
-  .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+  /* Tabs — Classicalの .seg / .seg-opt 相当（div+clickの既存方式は維持、見た目のみ segmented control 化） */
+  .tabs{display:inline-flex;overflow:hidden;border:1px solid var(--border);border-radius:var(--radius-md)}
+  .tab{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;font-size:13px;font-weight:400;
+    font-family:var(--font-body);cursor:pointer;color:var(--text);user-select:none}
+  .tab+.tab{border-left:1px solid var(--border)}
+  .tab.active{color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+  .tab:not(.active):hover{background:color-mix(in srgb, var(--text) 7%, transparent)}
+  .page-hd{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;
+    gap:var(--space-3);max-width:1280px;margin:0 auto;padding:var(--space-8) var(--space-6) var(--space-6)}
+  .page-hd h1{margin:0 0 var(--space-1);font-size:32px}
+  .page-hd .page-sub{margin:0;font-size:13.5px;color:var(--text-2)}
 
   /* Guide */
   .guide{max-width:720px;margin:0 auto;padding:40px 24px;
-    font-size:14px;line-height:1.9;color:oklch(30% 0.02 250)}
-  .guide h1{font-size:20px;font-weight:700;margin:0 0 16px;color:oklch(18% 0.02 250)}
-  .guide h2{font-size:15px;font-weight:600;margin:24px 0 10px;color:oklch(18% 0.02 250)}
+    font-size:14px;line-height:1.9;color:var(--text-2)}
+  .guide h1{font-size:20px;font-weight:700;margin:0 0 16px;color:var(--text)}
+  .guide h2{font-size:15px;font-weight:600;margin:24px 0 10px;color:var(--text)}
   .guide p{margin:0 0 20px}
   .guide ol{margin:0 0 20px;padding-left:20px}
   .guide li{margin-bottom:6px}
@@ -258,7 +270,7 @@
   .drop.loading{pointer-events:none;border-color:var(--accent);background:var(--tint)}
   .drop-load{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(255,255,255,.88);border-radius:10px;z-index:2}
   .drop-load-spinner{width:28px;height:28px;border-radius:50%;border:3px solid oklch(88% 0.01 250);border-top-color:var(--accent);animation:save-toast-spin .7s linear infinite}
-  .drop-load-text{font-size:14px;font-weight:700;color:oklch(28% 0.02 250)}
+  .drop-load-text{font-size:14px;font-weight:700;color:var(--text)}
   .drop-load-detail{font-size:12px;color:var(--text-2);min-height:1.2em}
   body[data-theme='dark'] .drop-load{background:rgba(15,23,42,.92)}
   body[data-theme='dark'] .drop-load-text{color:#f1f5f9 !important}
@@ -293,8 +305,8 @@
   body[data-theme='light'] .app-loader .drop-load-detail{
     color:#475569 !important;
   }
-  .drop .d1{font-size:15px;font-weight:600;color:oklch(28% 0.02 250);margin-bottom:6px}
-  .drop .d2{font-size:12px;color:oklch(52% 0.02 250)}
+  .drop .d1{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px}
+  .drop .d2{font-size:12px;color:var(--text-2)}
   input[type=file]{display:none}
 
   .controls{display:flex;align-items:center;gap:10px;margin:16px 0 20px;flex-wrap:wrap}
@@ -305,7 +317,7 @@
   .category-settings .settings-note{font-size:11px;color:var(--text-2);margin:10px 0 12px;line-height:1.6}
   .category-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
   .category-field{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--text-2)}
-  .category-field input{font:inherit;font-size:12px;padding:7px 8px;border:1px solid var(--border-input);border-radius:6px;color:var(--text);background:#fff}
+  .category-field input{font:inherit;font-size:12px;padding:7px 8px;border:1px solid var(--border-input);border-radius:6px;color:var(--text);background:var(--page)}
   .category-settings .settings-actions{display:flex;gap:8px;margin-top:12px;align-items:center}
   .category-settings .settings-status{font-size:11px;color:var(--green-t)}
   .classification-editor{background:transparent;border:1px solid var(--rv-neutral-700,#d9dee8);
@@ -329,18 +341,23 @@
     background:var(--surface);color:var(--text);font-family:inherit;cursor:pointer}
   .btns{margin-left:auto;display:flex;gap:8px}
   button{font-family:inherit;cursor:pointer}
-  .btn-primary{font-size:12.5px;font-weight:600;color:#fff;background:var(--accent);
-    border:none;border-radius:7px;padding:8px 14px}
-  .btn-secondary{font-size:12.5px;font-weight:600;color:oklch(35% 0.02 250);background:var(--surface);
-    border:1px solid var(--border-input);border-radius:7px;padding:8px 14px}
+  .btn-primary{font-size:12.5px;font-weight:600;font-family:var(--font-heading);color:var(--accent);background:transparent;
+    border:1px solid var(--accent);border-radius:var(--radius-md);padding:8px 14px}
+  .btn-primary:hover{background:color-mix(in srgb, var(--accent) 12%, transparent)}
+  .btn-secondary{font-size:12.5px;font-weight:600;font-family:var(--font-heading);color:var(--text);background:transparent;
+    border:1px solid var(--border-input);border-radius:var(--radius-md);padding:8px 14px}
+  .btn-secondary:hover{background:color-mix(in srgb, var(--text) 7%, transparent)}
   button:disabled{opacity:.45;cursor:default}
 
   .empty{text-align:center;padding:40px 0;font-size:13px;color:var(--text-3)}
   .empty.loading{color:var(--text-2);font-weight:600}
   .empty.loading::before{content:'';display:block;width:24px;height:24px;margin:0 auto 12px;border-radius:50%;border:3px solid oklch(88% 0.01 250);border-top-color:var(--accent);animation:save-toast-spin .7s linear infinite}
 
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;
-    margin-bottom:14px;overflow:hidden}
+  .card{display:flex;flex-direction:column;gap:var(--space-2);background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--radius-md);
+    padding:var(--space-3);margin-bottom:14px}
+  .card.card-flush{padding:0;overflow:hidden}
+  .card-kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
   .card .chead{display:flex;align-items:center;gap:10px;padding:11px 16px;
     border-bottom:1px solid var(--border-sub)}
   .card .fname{font-size:13px;font-weight:600;color:var(--text);
@@ -354,15 +371,41 @@
   .card pre{margin:0;padding:14px 16px;font-family:ui-monospace,'SF Mono',Menlo,monospace;
     font-size:12px;line-height:1.65;color:var(--text);
     max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-all}
-  body[data-theme='dark'] .card pre{
-    color:#e2e8f0 !important;
-    background:#0f172a;
-  }
-  body[data-theme='dark'] .card .fname{color:#f8fafc !important}
   body[data-theme='dark'] .btn-small.danger{color:#fca5a5;background:#3f1d1d}
 
   .foot{text-align:center;font-size:11px;color:var(--text-3);margin-top:8px}
   [hidden]{display:none!important}
+
+  /* ===== Classical追加コンポーネント（Journal Reportリスキン） ===== */
+  .tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.02em;
+    padding:3px 10px;border-radius:calc(var(--radius-md) * .75)}
+  .tag-accent{background:var(--color-accent-100);color:var(--color-accent-800)}
+  .tag-outline{border:1px solid var(--accent);color:var(--accent)}
+  .tag-neutral{background:var(--color-neutral-100);color:var(--color-neutral-800)}
+  .nav-brand{font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:18px}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field-label{font-size:12px;color:var(--text-2)}
+  .input{width:100%;min-height:36px;padding:6px 10px;font:inherit;font-size:14px;
+    color:var(--text);background:var(--page);border:1px solid var(--border-input);border-radius:var(--radius-md)}
+  .input:hover{border-color:color-mix(in srgb, var(--text) 45%, transparent)}
+  .input:focus-visible{border-color:var(--accent);outline:none}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer}
+  .btn-ghost{color:var(--accent);background:transparent;border:1px solid transparent;
+    font-size:12.5px;font-weight:600;border-radius:var(--radius-md);padding:8px 14px}
+  .btn-ghost:hover{background:color-mix(in srgb, var(--accent) 10%, transparent)}
+  .btn-ghost:disabled{opacity:.45;cursor:default}
+  .btn-icon{width:36px;height:36px;padding:0}
+  .btn-block{width:100%}
+  .btn-cta{background:var(--text)!important;border-color:var(--text)!important;color:var(--page)!important;font-weight:600}
+  .btn-cta:hover{background:var(--text-2)!important;border-color:var(--text-2)!important}
+  .layout-grid{display:grid;grid-template-columns:360px 1fr;gap:var(--space-6);align-items:start}
+  @media (max-width:860px){.layout-grid{grid-template-columns:1fr}}
+  .col-left{display:flex;flex-direction:column;gap:var(--space-4)}
+  .tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2)}
+  .tool-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-1);
+    padding:var(--space-3) var(--space-2);font-size:11.5px;text-align:center;line-height:1.3}
+  .results-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4);flex-wrap:wrap;gap:var(--space-2)}
+  .results-header h2{margin:0}
 
   /* ===== 保存状態トースト ===== */
   .save-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(12px);
@@ -398,61 +441,28 @@
   .rv-btn-secondary{color:var(--rv-text);border-color:var(--rv-neutral-700)}
   .rv-btn-secondary:hover{background:color-mix(in srgb, var(--rv-text) 7%, transparent)}
   
-  /* 🎯 選択中のタブ（絶対に最優先される視認性抜群の青色・アクティブスタイル） */
-  .rv-btn.active,
-  .rv-btn[data-filter].active,
-  button[data-filter].active,
-  button.rv-btn-secondary.active,
-  .tab.active {
-    background-color: #2563eb !important;
-    background: #2563eb !important;
-    color: #ffffff !important;
-    font-weight: 700 !important;
-    border-color: #1d4ed8 !important;
-    box-shadow: 0 3px 10px rgba(37, 99, 235, 0.45) !important;
-  }
-
-  body[data-theme='dark'] .rv-btn.active,
-  body[data-theme='dark'] .rv-btn[data-filter].active,
-  body[data-theme='dark'] button[data-filter].active,
-  body[data-theme='dark'] button.rv-btn-secondary.active,
-  body[data-theme='dark'] .tab.active {
-    background-color: #3b82f6 !important;
-    background: #3b82f6 !important;
-    color: #ffffff !important;
-    font-weight: 700 !important;
-    border-color: #60a5fa !important;
-    box-shadow: 0 3px 10px rgba(59, 130, 246, 0.6) !important;
-  }
   .rv-btn-ghost{color:var(--rv-accent);border:none;padding-inline:var(--rv-space-1)}
   .rv-btn-ghost:hover{background:color-mix(in srgb, var(--rv-accent) 10%, transparent)}
 
   /* 保存済みレポート: 合算操作の視認性 */
   .saved-select-label{
-    font-size:13px;font-weight:600;color:#1f2937;cursor:pointer;
+    font-size:13px;font-weight:600;color:var(--rv-text);cursor:pointer;
     display:flex;align-items:center;gap:8px;user-select:none;
   }
   .saved-select-label input[type="checkbox"]{
-    width:16px;height:16px;accent-color:#2563eb;cursor:pointer;
+    width:16px;height:16px;accent-color:var(--rv-accent);cursor:pointer;
   }
   #mergeAnalyzeBtn.rv-btn-merge{
     font-size:12.5px;font-weight:700;padding:8px 14px;
-    color:#fff;background:#2563eb;border:1px solid #1d4ed8;
-    border-radius:8px;box-shadow:0 2px 8px rgba(37,99,235,.28);
+    color:var(--rv-bg);background:var(--rv-accent);border:1px solid var(--rv-accent-700);
+    border-radius:8px;box-shadow:0 2px 8px color-mix(in srgb, var(--rv-accent) 28%, transparent);
   }
   #mergeAnalyzeBtn.rv-btn-merge:hover:not(:disabled){
-    background:#1d4ed8;border-color:#1e40af;
+    background:var(--rv-accent-700);border-color:var(--rv-accent-700);
   }
   #mergeAnalyzeBtn.rv-btn-merge:disabled{
-    opacity:1;color:#334155;background:#e2e8f0;border-color:#94a3b8;
+    opacity:1;color:var(--rv-neutral-600);background:color-mix(in srgb, var(--rv-text) 8%, transparent);border-color:var(--rv-neutral-700);
     box-shadow:none;cursor:default;
-  }
-  body[data-theme='dark'] .saved-select-label{color:#f1f5f9}
-  body[data-theme='dark'] #mergeAnalyzeBtn.rv-btn-merge{
-    color:#fff;background:#3b82f6;border-color:#60a5fa;
-  }
-  body[data-theme='dark'] #mergeAnalyzeBtn.rv-btn-merge:disabled{
-    color:#e2e8f0;background:#334155;border-color:#64748b;
   }
   .report{max-width:820px;margin:0 auto;padding:var(--rv-space-8) var(--rv-space-4) var(--rv-space-8);
     font-family:var(--rv-font-body);color:var(--rv-text)}
@@ -534,20 +544,20 @@
   .rc .rc-total b{font-family:var(--rv-font-sans);font-weight:400;font-size:15px;font-variant-numeric:tabular-nums}
   .rc-tax{font-family:var(--rv-font-sans);font-weight:300;font-size:11px;opacity:.55}
   .month-accordion {
-    border: 1px solid #e1e0d9;
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid var(--rv-neutral-700);
+    border-radius: var(--rv-radius-md);
+    background: var(--rv-bg);
     margin-bottom: 15px;
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    box-shadow: var(--rv-shadow-sm);
     transition: border-color 0.2s;
   }
   .month-accordion:hover {
-    border-color: #c3c2b7;
+    border-color: var(--rv-accent);
   }
   .month-accordion-summary {
     padding: 12px 16px;
-    background: #f7f6f2;
+    background: color-mix(in srgb, var(--rv-text) 4%, transparent);
     cursor: pointer;
     font-weight: bold;
     font-size: 14px;
@@ -558,22 +568,22 @@
     outline: none;
   }
   .month-accordion-summary::marker {
-    color: #52514e;
+    color: var(--rv-neutral-600);
   }
   .month-summary-title {
-    color: #0b0b0b;
+    color: var(--rv-text);
   }
   .month-summary-meta {
     font-size: 12px;
     font-weight: normal;
-    color: #666;
+    color: var(--rv-neutral-600);
     margin-left: auto;
     padding-right: 10px;
   }
   .month-accordion-content {
     padding: 16px 16px 8px 16px;
-    border-top: 1px solid #e1e0d9;
-    background: #faf9f6;
+    border-top: 1px solid var(--rv-neutral-700);
+    background: color-mix(in srgb, var(--rv-text) 2%, transparent);
   }
   .month-table-section {
     margin-bottom: 24px;
@@ -584,12 +594,12 @@
   .month-table-subh {
     font-size: 13px;
     margin: 0 0 8px 0;
-    color: #52514e;
-    border-left: 3px solid #eb6834;
+    color: var(--rv-neutral-600);
+    border-left: 3px solid var(--rv-accent);
     padding-left: 8px;
   }
   .month-total-row td {
-    background: #f2f1ed;
+    background: color-mix(in srgb, var(--rv-text) 5%, transparent);
     font-weight: bold;
   }
   .month-table{width:100%;border-collapse:collapse;background:transparent;border:1px solid var(--rv-neutral-700);border-radius:var(--rv-radius-md);overflow:hidden;font-size:12px;margin-bottom:var(--rv-space-4)}
@@ -774,15 +784,15 @@
     @page{margin:14mm}
   }
 
-  /* AI Panel Styles */
+  /* AI Panel Styles（グローバルトークンで統一。#reportView外なので --rv-* は使わない） */
   .ai-panel {
     position: fixed;
     top: 0;
     right: 0;
     width: 380px;
     height: 100vh;
-    background: var(--rv-bg, #f3f2f2);
-    border-left: 1px solid var(--rv-neutral-700, #d9dee8);
+    background: var(--page);
+    border-left: 1px solid var(--border);
     box-shadow: -4px 0 24px rgba(0,0,0,0.1);
     z-index: 9999;
     display: flex;
@@ -799,8 +809,9 @@
     align-items: center;
     justify-content: space-between;
     padding: 16px 20px;
-    background: var(--surface, #fff);
-    border-bottom: 1px solid var(--border-sub, #eaeaea);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-sub);
+    color: var(--text);
     font-weight: 700;
   }
   .ai-panel-close {
@@ -820,8 +831,8 @@
   }
   .ai-chat-input {
     padding: 16px;
-    background: var(--surface, #fff);
-    border-top: 1px solid var(--border-sub, #eaeaea);
+    background: var(--surface);
+    border-top: 1px solid var(--border-sub);
     display: flex;
     gap: 8px;
   }
@@ -832,13 +843,15 @@
     border-radius: 20px;
     font-size: 14px;
     outline: none;
+    background: var(--page);
+    color: var(--text);
   }
   .ai-chat-input input:focus {
     border-color: var(--accent);
   }
   .ai-chat-input button {
     background: var(--accent);
-    color: #fff;
+    color: var(--page);
     border: none;
     padding: 0 16px;
     border-radius: 20px;
@@ -855,58 +868,21 @@
   .ai-msg-user {
     align-self: flex-end;
     background: var(--accent);
-    color: #fff;
+    color: var(--page);
     border-bottom-right-radius: 4px;
   }
   .ai-msg-ai {
     align-self: flex-start;
-    background: #fff;
+    background: var(--surface);
     border: 1px solid var(--border-sub);
     border-bottom-left-radius: 4px;
-    color: #0f172a;
+    color: var(--text);
   }
   .ai-msg-ai * {
     color: inherit;
   }
   .ai-msg-user * {
-    color: #fff;
-  }
-
-  /* ダークモード: AIチャットは吹き出し内のコントラストを保証 */
-  body[data-theme='dark'] .ai-panel {
-    background: #151c25 !important;
-    border-left-color: #334155 !important;
-  }
-  body[data-theme='dark'] .ai-panel-header,
-  body[data-theme='dark'] .ai-chat-input {
-    background: #1b232e !important;
-    border-color: #334155 !important;
-    color: #f8fafc !important;
-  }
-  body[data-theme='dark'] .ai-panel-close {
-    color: #cbd5e1 !important;
-  }
-  body[data-theme='dark'] .ai-msg-ai {
-    background: #1e293b !important;
-    color: #f1f5f9 !important;
-    border-color: #334155 !important;
-  }
-  body[data-theme='dark'] .ai-msg-ai,
-  body[data-theme='dark'] .ai-msg-ai *:not(a) {
-    color: #f1f5f9 !important;
-  }
-  body[data-theme='dark'] .ai-msg-user {
-    background: var(--accent, #3f7bea) !important;
-    color: #ffffff !important;
-  }
-  body[data-theme='dark'] .ai-msg-user,
-  body[data-theme='dark'] .ai-msg-user * {
-    color: #ffffff !important;
-  }
-  body[data-theme='dark'] .ai-chat-input input {
-    background: #0f172a !important;
-    color: #f8fafc !important;
-    border-color: #334155 !important;
+    color: var(--page);
   }
 
   /* AI Visual Dashboard Styles */
@@ -917,34 +893,34 @@
     margin: 16px 0 24px 0;
   }
   .ai-kpi-card {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    background: color-mix(in srgb, var(--rv-text) 3%, transparent);
+    border: 1px solid var(--rv-neutral-700);
     border-radius: 10px;
     padding: 14px 16px;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    box-shadow: var(--rv-shadow-sm);
   }
   .ai-kpi-label {
     font-size: 11px;
     font-weight: 600;
-    color: #64748b !important;
+    color: var(--rv-neutral-600);
     margin-bottom: 4px;
   }
   .ai-kpi-value {
     font-size: 20px;
     font-weight: 700;
-    color: #0f172a !important;
+    color: var(--rv-text);
     line-height: 1.2;
   }
   .ai-kpi-sub {
     font-size: 11px;
-    color: #64748b !important;
+    color: var(--rv-neutral-600);
     margin-top: 4px;
   }
   .ai-chart-section {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
+    background: var(--rv-bg);
+    border: 1px solid var(--rv-neutral-700);
     border-radius: 10px;
     padding: 18px;
     margin-bottom: 24px;
@@ -952,7 +928,7 @@
   .ai-chart-title {
     font-size: 14px;
     font-weight: 700;
-    color: #1e293b !important;
+    color: var(--rv-text);
     margin-bottom: 14px;
     display: flex;
     align-items: center;
@@ -967,12 +943,12 @@
   .ai-bar-label {
     width: 44px;
     font-weight: 600;
-    color: #475569 !important;
+    color: var(--rv-neutral-600);
   }
   .ai-bar-track {
     flex: 1;
     height: 18px;
-    background: #f1f5f9;
+    background: color-mix(in srgb, var(--rv-text) 8%, transparent);
     border-radius: 4px;
     overflow: hidden;
     position: relative;
@@ -980,116 +956,45 @@
   }
   .ai-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, #b68235, #d4af37);
+    background: linear-gradient(90deg, var(--rv-accent), var(--rv-accent-500));
     border-radius: 4px;
   }
   .ai-bar-val {
     font-weight: 600;
-    color: #334155 !important;
+    color: var(--rv-text);
     width: 100px;
     text-align: right;
   }
   .ai-progress-track {
     height: 14px;
-    background: #e2e8f0;
+    background: color-mix(in srgb, var(--rv-text) 10%, transparent);
     border-radius: 7px;
     overflow: hidden;
     display: flex;
     margin: 8px 0;
   }
   .ai-progress-lunch {
-    background: #3b82f6;
+    background: var(--rv-accent);
     height: 100%;
   }
   .ai-progress-dinner {
-    background: #8b5cf6;
+    background: var(--rv-accent-700);
     height: 100%;
   }
-  .ai-ratio-food { color: #16a34a !important; }
-  .ai-ratio-drink { color: #d97706 !important; }
-  .ai-ratio-lunch { color: #2563eb !important; }
-  .ai-ratio-dinner { color: #7c3aed !important; }
-
-  /* AI分析: ダークモードでは暗いカード＋明るい文字でコントラストを確保 */
-  body[data-theme='dark'] .ai-analysis {
-    background: #151c25 !important;
-    border-color: #d4af37 !important;
-    color: #f1f5f9 !important;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
-  }
-  body[data-theme='dark'] .ai-analysis h1,
-  body[data-theme='dark'] .ai-analysis h2,
-  body[data-theme='dark'] .ai-analysis h3,
-  body[data-theme='dark'] .ai-analysis .ai-chart-title,
-  body[data-theme='dark'] .ai-analysis .ai-visual-heading {
-    color: #fbbf24 !important;
-  }
-  body[data-theme='dark'] .ai-analysis p,
-  body[data-theme='dark'] .ai-analysis li,
-  body[data-theme='dark'] .ai-analysis div,
-  body[data-theme='dark'] .ai-analysis strong,
-  body[data-theme='dark'] .ai-analysis span:not(.ai-ratio-food):not(.ai-ratio-drink):not(.ai-ratio-lunch):not(.ai-ratio-dinner):not(.pill-live):not(.mark) {
-    color: #e2e8f0 !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-kpi-card {
-    background: #1e293b !important;
-    border-color: #334155 !important;
-    box-shadow: none !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-kpi-label,
-  body[data-theme='dark'] .ai-analysis .ai-kpi-sub {
-    color: #94a3b8 !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-kpi-value {
-    color: #f8fafc !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-chart-section {
-    background: #1e293b !important;
-    border-color: #334155 !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-bar-label,
-  body[data-theme='dark'] .ai-analysis .ai-bar-val {
-    color: #cbd5e1 !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-bar-track,
-  body[data-theme='dark'] .ai-analysis .ai-progress-track {
-    background: #0f172a !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-ratio-food { color: #4ade80 !important; }
-  body[data-theme='dark'] .ai-analysis .ai-ratio-drink { color: #fbbf24 !important; }
-  body[data-theme='dark'] .ai-analysis .ai-ratio-lunch { color: #60a5fa !important; }
-  body[data-theme='dark'] .ai-analysis .ai-ratio-dinner { color: #c4b5fd !important; }
-  body[data-theme='dark'] .ai-analysis-close {
-    color: #cbd5e1 !important;
-  }
-  body[data-theme='dark'] .ai-analysis .ai-visual-divider {
-    border-bottom-color: #334155 !important;
-  }
-
-  /* 月次アコーディオンもダークで読めるように */
-  body[data-theme='dark'] .month-accordion {
-    background: #151c25 !important;
-    border-color: #334155 !important;
-  }
-  body[data-theme='dark'] .month-accordion-summary {
-    background: #1e293b !important;
-    color: #f8fafc !important;
-  }
-  body[data-theme='dark'] .month-summary-title {
-    color: #f8fafc !important;
-  }
-  body[data-theme='dark'] .month-summary-meta {
-    color: #94a3b8 !important;
-  }
+  .ai-ratio-food { color: #2f7d4f; }
+  .ai-ratio-drink { color: var(--rv-accent-700); }
+  .ai-ratio-lunch { color: var(--rv-accent); }
+  .ai-ratio-dinner { color: var(--rv-accent-700); }
+  body[data-theme='dark'] .ai-ratio-food { color: #6fcf9a; }
 
   .ai-analysis {
-    background: #fff;
+    background: var(--rv-bg);
     border: 1px solid var(--rv-accent, #b68235);
     border-radius: 8px;
     padding: 24px;
     margin: 24px auto;
     max-width: 820px;
-    box-shadow: 0 4px 12px rgba(182,130,53,0.1);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--rv-accent) 10%, transparent);
     font-size: 14px;
     line-height: 1.6;
     position: relative;
@@ -1152,31 +1057,37 @@
 </head>
 <body>
 
-<div class="hd" style="display:flex; justify-content:space-between; align-items:center;">
-  <div style="display:flex; align-items:center; gap:16px;">
-    <div class="mark"><i></i></div>
-    <div class="title">JNL → TXT 変換ツール</div>
-    <div class="pill-live">オフライン動作</div>
-    <div class="cap">レジ電子ジャーナルの変換 / 端末内処理のみ</div>
+<nav class="hd">
+  <div class="mark"><i></i></div>
+  <div class="title nav-brand">Journal Report</div>
+  <div class="pill-live">オフライン動作</div>
+  <div class="cap">レジ電子ジャーナルの変換・端末内処理のみ</div>
+  <div style="display:flex; align-items:center; gap:10px; margin-left:auto;">
+    <span id="authState" class="tag tag-outline">未接続</span>
+    <button type="button" onclick="toggleAppTheme()" class="btn btn-ghost btn-icon" title="表示設定（ダーク/ライト切替）" aria-label="表示設定">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
   </div>
-  <div style="display:flex; align-items:center; gap:10px;">
-    <span id="authState" class="pill-live" style="color:var(--text-2); background:var(--pill-bg);">未接続</span>
-    <button id="themeToggleBtn" onclick="toggleAppTheme()" class="btn-secondary" style="margin-left:auto; padding:6px 14px; font-weight:600; cursor:pointer; font-size:13px;">テーマ切替</button>
-  </div>
-</div>
+</nav>
 
-<section id="authCard" hidden style="margin:0 24px 16px; padding:14px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface);">
-  <label for="tokenInput" style="font-size:12.5px; font-weight:600; display:block; margin-bottom:8px;">レポートはクラウドへ必ず保存します。管理トークンで接続してください（またはLINEの最新リンクから開いてください）</label>
+<section id="authCard" hidden class="card" style="margin:var(--space-4) var(--space-6) 0;">
+  <label for="tokenInput" style="font-size:12.5px; font-weight:600; display:block;">レポートはクラウドへ必ず保存します。管理トークンで接続してください（またはLINEの最新リンクから開いてください）</label>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
-    <input id="tokenInput" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" style="flex:1; min-width:220px; padding:8px 10px; border:1px solid var(--border-input); border-radius:6px; background:var(--page); color:var(--text);">
+    <input id="tokenInput" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off" class="input" style="flex:1; min-width:220px;">
     <button class="btn-primary" id="saveTokenBtn" type="button" style="padding:8px 16px; cursor:pointer;">接続</button>
   </div>
-  <div id="authMsg" style="font-size:12px; color:#e5484d; margin-top:6px;"></div>
+  <div id="authMsg" style="font-size:12px; color:#e5484d;"></div>
 </section>
 
-<div class="tabs">
-  <div class="tab" data-tab="guide">使い方</div>
-  <div class="tab active" data-tab="convert">JNL → TXT 変換</div>
+<div class="page-hd">
+  <div>
+    <h1>Journal Report</h1>
+    <p class="page-sub">Extract data from .jnl / .lzh journals and generate summary reports</p>
+  </div>
+  <div class="tabs">
+    <div class="tab" data-tab="guide">使い方</div>
+    <div class="tab active" data-tab="convert">変換</div>
+  </div>
 </div>
 
 <!-- 使い方 -->
@@ -1199,71 +1110,104 @@
 <section id="convert" class="conv">
   <p class="intro">レジの電子ジャーナル（.jnl）や、それを圧縮した書庫（.lzh）から制御コードを除いてテキストに変換します。.lzh はアプリ内で自動解凍します。ファイルを読み込むと、<b>レポート作成〜クラウド保存まで自動実行</b>されます（管理トークン接続が必要です）。解析処理はこの端末内で行われます。</p>
 
-  <label class="drop" id="drop">
-    <div class="d1">ここに .lzh / .jnl ファイルまたはフォルダをドラッグ＆ドロップ</div>
-    <div class="d2">フォルダ内を再帰的に読み込みます。クリックして複数ファイルを選択することもできます。.lzh は自動で解凍します</div>
-    <input type="file" id="picker" accept=".jnl,.txt,.lzh" multiple>
-  </label>
+  <div class="layout-grid">
+    <div class="col-left">
 
-  <details class="category-settings" id="categorySettings">
-    <summary>店舗別の商品コード設定（この端末に保存）</summary>
-    <div class="settings-note">商品コードはカンマ・空白・改行で区切って入力できます。範囲は <code>0100-0199</code> の形式です。ここで指定した分類が、商品名や月にかかわらず常に優先されます。</div>
-    <div class="category-grid">
-      <label class="category-field">フードの商品コード・範囲
-        <input id="foodCodes" type="text" autocomplete="off" spellcheck="false">
-      </label>
-      <label class="category-field">ドリンクの商品コード・範囲
-        <input id="drinkCodes" type="text" autocomplete="off" spellcheck="false">
-      </label>
-      <label class="category-field">その他（個室料金等）の商品コード・範囲
-        <input id="otherCodes" type="text" autocomplete="off" spellcheck="false">
-      </label>
-      <label class="category-field">チャージの商品コード・範囲（フード内数）
-        <input id="chargeCodes" type="text" autocomplete="off" spellcheck="false">
-      </label>
-    </div>
-    <div class="settings-actions">
-      <button id="saveCategorySettings" class="btn-primary" type="button">設定を保存</button>
-      <button id="resetCategorySettings" class="btn-secondary" type="button">初期設定に戻す</button>
-      <span id="categorySettingsStatus" class="settings-status" aria-live="polite"></span>
-    </div>
-  </details>
+      <div class="card">
+        <div class="card-kicker">取り込み</div>
+        <label class="drop" id="drop">
+          <div class="d1">ここに .lzh / .jnl ファイルまたはフォルダをドラッグ＆ドロップ</div>
+          <div class="d2">フォルダ内を再帰的に読み込みます。クリックして複数ファイルを選択することもできます。.lzh は自動で解凍します</div>
+          <input type="file" id="picker" accept=".jnl,.txt,.lzh" multiple>
+        </label>
 
-  <div class="controls">
-    <label>抽出</label>
-    <select id="mode">
-      <option value="success" selected>完了した売上のみ</option>
-      <option value="all">すべてのレコード</option>
-      <option value="void">取消・エラーのみ</option>
-    </select>
-    <label class="sp">文字コード</label>
-    <select id="enc">
-      <option value="shift_jis" selected>Shift-JIS（レジ標準）</option>
-      <option value="utf-8">UTF-8</option>
-      <option value="euc-jp">EUC-JP</option>
-    </select>
-    <label class="sp">集計期間</label>
-    <input type="date" id="startDate">
-    <span style="margin:0 4px; color:var(--text-2);">〜</span>
-    <input type="date" id="endDate">
-    <div class="btns">
-      <button id="pdfBtn" class="btn-primary" disabled>レポートを作成</button>
-      <button id="monthlyBtn" class="btn-primary" style="display:none" disabled>月間レポートを作成</button>
-      <button id="savedBtn" class="btn-secondary">保存済みレポート</button>
-      <button id="forecastBtn" class="btn-secondary">売上予測</button>
-      <button id="forecastHistoryMainBtn" class="btn-secondary">予測履歴・MAPE</button>
-      <button id="aiHistoryBtn" class="btn-secondary">🤖 AI分析履歴</button>
-      <button id="mainAiChatBtn" onclick="toggleAiChat()" class="btn-secondary">💬 AIチャット</button>
-      <button id="themeToggleBtn" onclick="toggleAppTheme()" class="btn-secondary">テーマ切り替え</button>
-      <button id="dlall" class="btn-secondary" disabled>すべて .txt で保存</button>
-      <button id="clear" class="btn-secondary" disabled>クリア</button>
+        <details class="category-settings" id="categorySettings">
+          <summary>店舗別の商品コード設定（この端末に保存）</summary>
+          <div class="settings-note">商品コードはカンマ・空白・改行で区切って入力できます。範囲は <code>0100-0199</code> の形式です。ここで指定した分類が、商品名や月にかかわらず常に優先されます。</div>
+          <div class="category-grid">
+            <label class="category-field">フードの商品コード・範囲
+              <input id="foodCodes" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="category-field">ドリンクの商品コード・範囲
+              <input id="drinkCodes" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="category-field">その他（個室料金等）の商品コード・範囲
+              <input id="otherCodes" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="category-field">チャージの商品コード・範囲（フード内数）
+              <input id="chargeCodes" type="text" autocomplete="off" spellcheck="false">
+            </label>
+          </div>
+          <div class="settings-actions">
+            <button id="saveCategorySettings" class="btn-primary" type="button">設定を保存</button>
+            <button id="resetCategorySettings" class="btn-secondary" type="button">初期設定に戻す</button>
+            <span id="categorySettingsStatus" class="settings-status" aria-live="polite"></span>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <div class="card-kicker">変換設定</div>
+        <div class="field">
+          <label class="field-label" for="mode">抽出</label>
+          <select id="mode" class="input">
+            <option value="success" selected>完了した売上のみ</option>
+            <option value="all">すべてのレコード</option>
+            <option value="void">取消・エラーのみ</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="enc">文字コード</label>
+          <select id="enc" class="input">
+            <option value="shift_jis" selected>Shift-JIS（レジ標準）</option>
+            <option value="utf-8">UTF-8</option>
+            <option value="euc-jp">EUC-JP</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">集計期間</label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="date" id="startDate" class="input">
+            <span style="color:var(--text-2);">〜</span>
+            <input type="date" id="endDate" class="input">
+          </div>
+        </div>
+      </div>
+
+      <button id="pdfBtn" class="btn btn-primary btn-cta btn-block" disabled>レポートを作成</button>
+      <button id="monthlyBtn" class="btn btn-secondary btn-block" style="display:none" disabled>月間レポートを作成</button>
+
+      <div class="card">
+        <div class="card-kicker">分析ツール</div>
+        <div class="tool-grid">
+          <button id="savedBtn" class="btn btn-secondary tool-btn">保存済みレポート</button>
+          <button id="forecastBtn" class="btn btn-secondary tool-btn">売上予測</button>
+          <button id="forecastHistoryMainBtn" class="btn btn-secondary tool-btn">予測履歴・MAPE</button>
+          <button id="aiHistoryBtn" class="btn btn-secondary tool-btn">🤖 AI分析履歴</button>
+        </div>
+        <button id="mainAiChatBtn" onclick="toggleAiChat()" class="btn btn-secondary btn-block">💬 AIチャット</button>
+      </div>
+
+    </div>
+
+    <div class="col-right">
+      <div class="results-header">
+        <div style="display:flex; align-items:baseline; gap:12px;">
+          <h2>変換結果</h2>
+          <span class="tag tag-neutral" id="fileCountTag">0 件</span>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button id="dlall" class="btn btn-secondary" disabled>すべて .txt で保存</button>
+          <button id="clear" class="btn btn-ghost" disabled>クリア</button>
+        </div>
+      </div>
+
+      <div id="emptyState" class="empty">まだファイルが読み込まれていません。</div>
+      <div id="files"></div>
+
+      <div class="foot">制御コード（ESC/FS）を除去 → 指定の文字コードでデコード → 改行を整えて出力します。</div>
     </div>
   </div>
-
-  <div id="emptyState" class="empty">まだファイルが読み込まれていません。</div>
-  <div id="files"></div>
-
-  <div class="foot">制御コード（ESC/FS）を除去 → 指定の文字コードでデコード → 改行を整えて出力します。</div>
 </section>
 
 <div id="reportView" hidden></div>
@@ -3966,7 +3910,7 @@ async function renderSalesForecast(horizon = 3) {
       : `<p class="empty">${esc(result.note || '予測できません')}</p>`;
 
     view.innerHTML = `<div class="rv-nav">
-      <span class="rv-nav-brand">JNL変換ツール</span>
+      <span class="rv-nav-brand">Journal Report</span>
       <span class="rv-nav-page">売上予測</span>
       <button class="rv-btn rv-btn-secondary" id="forecastHorizon3">3か月</button>
       <button class="rv-btn rv-btn-secondary" id="forecastHorizon6">6か月</button>
@@ -4034,7 +3978,7 @@ async function renderForecastHistory() {
     }).join('') : '<p class="empty">保存された売上予測はまだありません。「売上予測」で作成するとここに残ります。</p>';
 
     view.innerHTML = `<div class="rv-nav">
-      <span class="rv-nav-brand">JNL変換ツール</span>
+      <span class="rv-nav-brand">Journal Report</span>
       <span class="rv-nav-page">予測履歴・MAPE</span>
       <button class="rv-btn rv-btn-secondary" id="forecastHistNew">新規予測</button>
       <button class="rv-btn rv-btn-ghost" id="forecastHistClose">閉じる</button>
@@ -4112,7 +4056,7 @@ async function renderForecastDetail(id) {
     }).join('');
 
     view.innerHTML = `<div class="rv-nav">
-      <span class="rv-nav-brand">JNL変換ツール</span>
+      <span class="rv-nav-brand">Journal Report</span>
       <span class="rv-nav-page">予測詳細・MAPE</span>
       <button class="rv-btn rv-btn-secondary" id="forecastDetailBack">履歴一覧</button>
       <button class="rv-btn rv-btn-ghost" id="forecastDetailClose">閉じる</button>
@@ -4591,7 +4535,7 @@ function renderReport({
   const mealMeta=Number.isFinite(lunchTotal)&&Number.isFinite(dinnerTotal)
     ?`　/　ランチ ${yen(lunchTotal)}　/　ディナー ${yen(dinnerTotal)}`:'';
   const countLabel=Number.isFinite(Number(salesCount))?`${salesCount}件`:'—件';
-  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">${esc(title)} プレビュー</span><button class="rv-btn rv-btn-primary" id="rHtml" ${stale?'disabled':''}>${stale?'再作成が必要':'HTMLで保存'}</button><button class="rv-btn rv-btn-secondary" id="rPrint" ${stale?'disabled':''}>${stale?'':'印刷／PDF'}</button><button class="rv-btn rv-btn-primary ai-btn" id="rAiAnalyze">AI分析</button><button class="rv-btn rv-btn-secondary" id="rAiChat">AIチャット</button><button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button><button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button></div><div id="aiAnalysisArea" class="ai-analysis" hidden></div><div class="report"><h1 class="r-title">${esc(title)}</h1><p class="r-meta">対象期間 ${esc(period)}　/　${countLabel}　/　総売上 ${yen(total)}${categoryMeta}${mealMeta}　/　${esc(formatReportCreatedAt(createdAt))}</p>${staleNotice}${body}</div>`;
+  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">Journal Report</span><span class="rv-nav-page">${esc(title)} プレビュー</span><button class="rv-btn rv-btn-primary" id="rHtml" ${stale?'disabled':''}>${stale?'再作成が必要':'HTMLで保存'}</button><button class="rv-btn rv-btn-secondary" id="rPrint" ${stale?'disabled':''}>${stale?'':'印刷／PDF'}</button><button class="rv-btn rv-btn-primary ai-btn" id="rAiAnalyze">AI分析</button><button class="rv-btn rv-btn-secondary" id="rAiChat">AIチャット</button><button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button><button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button></div><div id="aiAnalysisArea" class="ai-analysis" hidden></div><div class="report"><h1 class="r-title">${esc(title)}</h1><p class="r-meta">対象期間 ${esc(period)}　/　${countLabel}　/　総売上 ${yen(total)}${categoryMeta}${mealMeta}　/　${esc(formatReportCreatedAt(createdAt))}</p>${staleNotice}${body}</div>`;
   view.hidden=false; document.body.classList.add('report-open');
   if(sales?.length) bindClassificationEditor();
   if(!stale){
@@ -5154,7 +5098,7 @@ async function renderSavedReports(filter='all'){
     </div>`;
   }).join(''):'<p class="empty">保存済みレポートはありません。</p>';
   
-  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">JNL変換ツール</span><span class="rv-nav-page">保存済みレポート</span><button class="rv-btn rv-btn-ghost" id="savedClose">閉じる</button></div>
+  view.innerHTML=`<div class="rv-nav"><span class="rv-nav-brand">Journal Report</span><span class="rv-nav-page">保存済みレポート</span><button class="rv-btn rv-btn-ghost" id="savedClose">閉じる</button></div>
     <div class="saved-wrap">
       <h1 class="r-title">保存済みレポート</h1>
       <p class="r-meta">レポートはクラウドのみに保存されます（端末には残しません。管理トークン接続が必要です）。</p>
@@ -5443,9 +5387,11 @@ function render(){
   pdfBtn.disabled=!hasConvertible;
   monthlyBtn.disabled=!hasConvertible;
   dlAllBtn.disabled=clearBtn.disabled=!has;
+  const fileCountTag=document.getElementById('fileCountTag');
+  if(fileCountTag) fileCountTag.textContent=items.length+' 件';
   filesEl.innerHTML='';
   items.forEach((it,index)=>{
-    const card=document.createElement('div'); card.className='card';
+    const card=document.createElement('div'); card.className='card card-flush';
     const head=document.createElement('div'); head.className='chead';
     const removeBtn=document.createElement('button'); removeBtn.className='btn-small danger'; removeBtn.textContent='削除';
     removeBtn.onclick=()=>{ items.splice(index,1); render(); };
@@ -6337,7 +6283,7 @@ function openAiHistoryReportView(item) {
   }
   
   view.innerHTML = `<div class="rv-nav">
-    <span class="rv-nav-brand">JNL変換ツール</span>
+    <span class="rv-nav-brand">Journal Report</span>
     <span class="rv-nav-page">🤖 ${esc(item.report_title)} プレビュー</span>
     <button class="rv-btn rv-btn-secondary" onclick="window.print()">📄 PDFで保存 / 印刷</button>
     <button class="rv-btn rv-btn-secondary" onclick="downloadAiAnalysisText()">💾 テキスト保存</button>
@@ -6382,7 +6328,7 @@ async function renderAiHistory() {
     }).join('') : '<p class="empty">過去に保存されたAI分析レポートはありません。</p>';
 
     view.innerHTML = `<div class="rv-nav">
-      <span class="rv-nav-brand">JNL変換ツール</span>
+      <span class="rv-nav-brand">Journal Report</span>
       <span class="rv-nav-page">🤖 AI分析履歴</span>
       <button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button>
       <button class="rv-btn rv-btn-ghost" id="aiHistoryClose">閉じる</button>
