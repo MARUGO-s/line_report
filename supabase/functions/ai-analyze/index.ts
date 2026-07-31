@@ -1,6 +1,6 @@
 // Supabase Edge Function: AI Analyze / Chat
 // 数値検証は Kimi。戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから Kimi が統合。
-// deploy retry marker: supabase API 502 recovery
+// deploy retry marker: supabase API 502/409 recovery #055618
 
 import {
   formatExternalBriefsForPrompt,
