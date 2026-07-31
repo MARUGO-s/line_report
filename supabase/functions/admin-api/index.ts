@@ -8195,8 +8195,10 @@ async function fetchSavedReportsList(
     .select("id, title, period, created_at, data")
     .eq("store_partition_key", storeKey)
   if (kind === "monthly") {
-    // 月間／月別。日別レポートは除外する
-    query = query.or("title.ilike.%月間%,title.ilike.%月別%")
+    // 月間／月別／合算（日別合算は後段フィルタで除外）
+    query = query.or(
+      "title.ilike.%月間%,title.ilike.%月別%,title.ilike.%合算売上レポート%",
+    )
   } else if (kind === "daily") {
     query = query.ilike("title", "%日別%")
   }
