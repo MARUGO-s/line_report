@@ -43,6 +43,12 @@
 
 New records are appended below.
 
+### 2026-07-31 - Journal Report light-mode text contrast
+
+- Request: ライトモードの文字視認性を上げ、濃くする。
+- Change: `public/jnm` のライトテーマで `--text-2`/`--text-3`・本文色・アクセント・レポート内 opacity を濃く調整（ダークは変更なし）。
+- Files: `jnl2txt.html` / `index.html`、運用記録。
+
 ### 2026-07-31 - Journal Report multi-store select and isolation
 
 - Request: 店舗選択UI、店舗ごとの独立保存、非管理者の横断禁止、管理者の横断閲覧・分析。
