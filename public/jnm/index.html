@@ -1114,8 +1114,8 @@
 <nav class="hd">
   <div class="mark"><i></i></div>
   <div class="title nav-brand">Journal Report</div>
-  <div class="pill-live">オフライン動作</div>
-  <div class="cap">レジ電子ジャーナルの変換・端末内処理のみ</div>
+  <div class="pill-live">クラウド連携</div>
+  <div class="cap">ジャーナル変換・店舗別クラウド保存・AI分析</div>
   <div style="display:flex; align-items:center; gap:10px; margin-left:auto;">
     <div class="store-select-wrap" title="店舗ごとにジャーナル・分析データは独立して保存されます">
       <label for="storeSelect">店舗</label>
@@ -1161,13 +1161,13 @@
     <li>改行を整えてレコード単位に整理</li>
     <li>抽出条件に合うレコードのみを .txt として保存</li>
   </ol>
-  <h2>プライバシー</h2>
-  <p>読み込んだファイルはこの端末内でのみ処理され、外部サーバーへ送信されることはありません。</p>
+  <h2>データの扱い</h2>
+  <p>ジャーナルの読み込み・変換は端末内で行います。作成したレポート・AI分析・チャットPDF履歴は、選択した店舗ごとにクラウドへ保存されます（管理トークンまたはLINEログインが必要）。店舗用ログインでは自店データのみ、管理者は店舗を切り替えて横断閲覧できます。公開ページから業務テーブルへ直接アクセスすることはありません。</p>
 </section>
 
 <!-- 変換 -->
 <section id="convert" class="conv">
-  <p class="intro">レジの電子ジャーナル（.jnl）や、それを圧縮した書庫（.lzh）から制御コードを除いてテキストに変換します。.lzh はアプリ内で自動解凍します。ファイルを読み込むと、<b>レポート作成〜クラウド保存まで自動実行</b>されます（管理トークン接続が必要です）。解析処理はこの端末内で行われます。</p>
+  <p class="intro">レジの電子ジャーナル（.jnl / .lzh）を変換し、店舗ごとの売上レポートとしてクラウド保存します。.lzh はアプリ内で自動解凍します。ファイル読込後は<strong>レポート作成〜クラウド保存</strong>まで自動実行されます（認証が必要）。解析は端末内、保存・AI分析は店舗スコープのクラウドAPI経由です。</p>
 
   <div class="layout-grid">
     <div class="col-left">
