@@ -8179,14 +8179,30 @@ async function fetchSavedReportsList(
   const storeKey = normalizePosJournalStoreKey(
     url.searchParams.get("store_key") || url.searchParams.get("store"),
   )
-  const rawLimit = Number(url.searchParams.get("limit") ?? "200")
+  // kind=monthly|daily|all
+  // AI分析・推移はカテゴリ分け済みの「月間」レポートを正本にする。
+  // 日別+月間が混在すると created_at 降順の limit で古い月間が落ちるため、kind で絞り込めるようにする。
+  const kindRaw = toSafeString(url.searchParams.get("kind")).toLowerCase()
+  const kind = kindRaw === "monthly" || kindRaw === "daily" ? kindRaw : "all"
+  const defaultLimit = kind === "monthly" ? 500 : 200
+  const maxLimit = kind === "monthly" ? 2000 : 1000
+  const rawLimit = Number(url.searchParams.get("limit") ?? String(defaultLimit))
   const limit = Number.isFinite(rawLimit)
-    ? Math.max(1, Math.min(500, Math.trunc(rawLimit)))
-    : 200
-  const { data, error } = await supabase
+    ? Math.max(1, Math.min(maxLimit, Math.trunc(rawLimit)))
+    : defaultLimit
+  let query = supabase
     .from("saved_reports")
     .select("id, title, period, created_at, data")
     .eq("store_partition_key", storeKey)
+  if (kind === "monthly") {
+    // 月間／月別／合算（日別合算は後段フィルタで除外）
+    query = query.or(
+      "title.ilike.%月間%,title.ilike.%月別%,title.ilike.%合算売上レポート%",
+    )
+  } else if (kind === "daily") {
+    query = query.ilike("title", "%日別%")
+  }
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) {
@@ -8195,12 +8211,24 @@ async function fetchSavedReportsList(
       message: `保存済みレポートの取得に失敗しました: ${error.message}`,
     } satisfies AppError
   }
+  let items = (Array.isArray(data) ? data : [])
+    .map(normalizeSavedReportListRow)
+    .filter((item): item is SavedReportListRow => item !== null)
+  // PostgREST の or 条件だけでは「日別」を含む合算タイトル等が混ざる場合があるため、monthly はクライアント同等で再フィルタ
+  if (kind === "monthly") {
+    items = items.filter((item) => {
+      const t = item.title || ""
+      if (/日別/.test(t)) return false
+      return /月間|月別|^合算売上レポート/.test(t)
+    })
+  } else if (kind === "daily") {
+    items = items.filter((item) => /日別/.test(item.title || ""))
+  }
   return {
     ok: true,
     store_key: storeKey,
-    items: (Array.isArray(data) ? data : [])
-      .map(normalizeSavedReportListRow)
-      .filter((item): item is SavedReportListRow => item !== null),
+    kind,
+    items,
   }
 }
 
