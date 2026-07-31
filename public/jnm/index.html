@@ -6477,6 +6477,18 @@ function wantsItemBreakdown(msg) {
   return /(アイテム|商品|メニュー|品目|売れ筋|ランキング|何が売|売れたもの|売れた商品|点数|個数)/.test(String(msg || ''));
 }
 
+function wantsTrend(msg) {
+  return /(推移|トレンド|月別|月ごと|月次|どう推移|変化|伸び|落ち|季節)/.test(String(msg || ''));
+}
+
+/** 確定集計の月次内訳をプロンプト／ローカル回答用テキストにする */
+function formatMonthlyBreakdownLines(monthlyBreakdown, indent = '') {
+  if (!Array.isArray(monthlyBreakdown) || monthlyBreakdown.length === 0) return '';
+  return monthlyBreakdown.map(m =>
+    `${indent}- ${m.label}: 総売上 ${yen(m.totalSales)}（🍖 ${yen(m.foodTotal)} / 🍹 ${yen(m.drinkTotal)}、客数 ${m.totalCustomers}名、客単価 ${yen(m.avgSpend)}）`
+  ).join('\n');
+}
+
 function collectProductsFromReport(r) {
   const map = new Map();
   const add = (name, qty, amt, category) => {
@@ -6718,26 +6730,94 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     const monthly = hydrated.filter(r => String(r.title || '').includes('月間'));
     const use = monthly.length ? monthly : hydrated;
 
-    let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
-    use.forEach(r => {
-      totSales += reportSummaryTotal(r);
-      fTot += Number(r.foodTotal) || 0;
-      dTot += Number(r.drinkTotal) || 0;
-      cust += reportSummaryCustomers(r);
-      count += Number(r.salesCount) || 0;
-    });
-
-    if (totSales === 0 && fTot === 0 && dTot === 0) {
-      use.forEach(r => {
-        const sales = Array.isArray(r.sales) ? r.sales : [];
-        sales.forEach(s => {
-          totSales += Number(s.total) || 0;
-          fTot += Number(s.foodTotal) || 0;
-          dTot += Number(s.drinkTotal) || 0;
-          cust += Number(s.customers) || Number(s.guestCount) || 0;
-          count += 1;
-        });
+    // 月次内訳（推移回答用）。同一年月が currentReport とクラウドで二重にある場合は
+    // 「月間」タイトル優先→売上の大きい方を代表値にし、合算で二重計上しない。
+    const monthMap = new Map();
+    for (const r of use) {
+      const ym = extractYearMonthFromText(r.period || r.title || '');
+      if (!ym) continue;
+      const key = `${ym.year}-${String(ym.month).padStart(2, '0')}`;
+      const isMonthlyTitle = String(r.title || '').includes('月間');
+      let sales = reportSummaryTotal(r);
+      let food = Number(r.foodTotal) || 0;
+      let drink = Number(r.drinkTotal) || 0;
+      let customers = reportSummaryCustomers(r);
+      let salesCount = Number(r.salesCount) || 0;
+      if (sales === 0 && food === 0 && drink === 0 && Array.isArray(r.sales)) {
+        for (const s of r.sales) {
+          sales += Number(s.total) || 0;
+          food += Number(s.foodTotal) || 0;
+          drink += Number(s.drinkTotal) || 0;
+          customers += Number(s.customers) || Number(s.guestCount) || 0;
+          salesCount += 1;
+        }
+      }
+      const row = {
+        year: ym.year,
+        month: ym.month,
+        key,
+        label: `${ym.year}年${ym.month}月`,
+        totalSales: sales,
+        foodTotal: food,
+        drinkTotal: drink,
+        totalCustomers: customers,
+        salesCount,
+        sourceCount: 1,
+        _isMonthlyTitle: isMonthlyTitle
+      };
+      const prev = monthMap.get(key);
+      if (!prev) {
+        monthMap.set(key, row);
+      } else if (prev._isMonthlyTitle && !isMonthlyTitle) {
+        // keep prev
+      } else if (!prev._isMonthlyTitle && isMonthlyTitle) {
+        monthMap.set(key, row);
+      } else if (sales > prev.totalSales) {
+        monthMap.set(key, row);
+      }
+    }
+    const monthlyBreakdown = Array.from(monthMap.values())
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .map(({ _isMonthlyTitle, ...rest }) => {
+        const cat = (rest.foodTotal + rest.drinkTotal) || 1;
+        return {
+          ...rest,
+          foodPct: Math.round((rest.foodTotal / cat) * 100),
+          drinkPct: Math.round((rest.drinkTotal / cat) * 100),
+          avgSpend: rest.totalCustomers ? Math.round(rest.totalSales / rest.totalCustomers) : 0
+        };
       });
+
+    // 期間合計は月次代表値の合算を優先（二重計上を避ける）。月が取れない場合のみ従来の合算へフォールバック。
+    let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
+    if (monthlyBreakdown.length > 0) {
+      monthlyBreakdown.forEach(m => {
+        totSales += m.totalSales;
+        fTot += m.foodTotal;
+        dTot += m.drinkTotal;
+        cust += m.totalCustomers;
+        count += m.salesCount;
+      });
+    } else {
+      use.forEach(r => {
+        totSales += reportSummaryTotal(r);
+        fTot += Number(r.foodTotal) || 0;
+        dTot += Number(r.drinkTotal) || 0;
+        cust += reportSummaryCustomers(r);
+        count += Number(r.salesCount) || 0;
+      });
+      if (totSales === 0 && fTot === 0 && dTot === 0) {
+        use.forEach(r => {
+          const sales = Array.isArray(r.sales) ? r.sales : [];
+          sales.forEach(s => {
+            totSales += Number(s.total) || 0;
+            fTot += Number(s.foodTotal) || 0;
+            dTot += Number(s.drinkTotal) || 0;
+            cust += Number(s.customers) || Number(s.guestCount) || 0;
+            count += 1;
+          });
+        });
+      }
     }
 
     const topProducts = mergeProductLists(use.map(collectProductsFromReport)).slice(0, 40);
@@ -6752,7 +6832,8 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
       totalCustomers: cust,
       avgSpend: cust ? Math.round(totSales / cust) : 0,
       salesCount: count,
-      sourceCount: use.length,
+      sourceCount: monthlyBreakdown.length || use.length,
+      monthlyBreakdown,
       topProducts
     };
   }
@@ -6884,6 +6965,11 @@ ${diffLine}
       return formatItemBreakdownReply(queryResult, msg);
     }
 
+    const monthLines = formatMonthlyBreakdownLines(queryResult.monthlyBreakdown);
+    const monthSection = monthLines
+      ? `\n\n**📅 月次推移（保存済み月間レポート）**\n${monthLines}\n`
+      : (wantsTrend(msg) ? '\n\n※月次内訳を組み立てられる保存レポートが見つかりませんでした。年月付きの月間レポートが保存されているかご確認ください。\n' : '');
+
     return `### 📊 ${queryResult.label} の集計結果（保存済みレポート参照）
 
 保存済みレポートより、ご指定の **【${queryResult.label}】** を正確に抽出・集計いたしました:
@@ -6891,11 +6977,12 @@ ${diffLine}
 - **総売上高**: **${yen(queryResult.totalSales)}**
 - **🍖 フード売上**: ${yen(queryResult.foodTotal)} (**${queryResult.foodPct}%**)
 - **🍹 ドリンク売上**: ${yen(queryResult.drinkTotal)} (**${queryResult.drinkPct}%**)
-${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustomers}名 (平均客単価: ${yen(queryResult.avgSpend)})` : ''}
+${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustomers}名 (平均客単価: ${yen(queryResult.avgSpend)})` : ''}${monthSection}
 ${(queryResult.topProducts && queryResult.topProducts.length) ? `\n**売れ筋商品 TOP5**\n` + queryResult.topProducts.slice(0, 5).map((p, i) => `${i + 1}. ${p.name}（${p.qty}点 / ${yen(p.amt)}）`).join('\n') : ''}
 
 **💡 分析メモ**:
 保存済みレポート（カテゴリ別集計）から引用した正確な数値です。推測やWeb情報は含まれておりません。商品の詳細内訳が必要な場合は「アイテムの内訳は？」と聞いてください。`;
+
   }
 
   // 開いているレポートから商品内訳
@@ -6989,15 +7076,16 @@ async function sendAiChat() {
   const verifiedData = (queryResult && !queryResult.notMatchedLabel) ? queryResult : null;
 
   function formatVerifiedPeriodBlock(p) {
+    const monthLines = formatMonthlyBreakdownLines(p.monthlyBreakdown, '  ');
+    const monthBlock = monthLines ? `\n  - 月次推移:\n${monthLines}` : '';
     return `- ${p.label}
   - 総売上高: ${yen(p.totalSales)}
   - フード売上: ${yen(p.foodTotal)} (${p.foodPct}%)
   - ドリンク売上: ${yen(p.drinkTotal)} (${p.drinkPct}%)
   - 総来店客数: ${p.totalCustomers}名 (平均客単価: ${yen(p.avgSpend)})
-  - 対象レポート件数: ${p.sourceCount}件
+  - 対象レポート件数: ${p.sourceCount}件${monthBlock}
 ${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5: ' + p.topProducts.slice(0, 5).map(x => `${x.name}(${x.qty}点/${yen(x.amt)})`).join('、') : ''}`;
   }
-
   let verifiedDataBlock = '';
   if (verifiedData && verifiedData.multiPeriod) {
     // 比較依頼：複数期間それぞれの確定数値を提示し、AIにはこれらの間での比較・差分の言及を許可する
@@ -7006,8 +7094,12 @@ ${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5: ' + p.topP
 【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 
-回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
   } else if (verifiedData) {
+    const monthLines = formatMonthlyBreakdownLines(verifiedData.monthlyBreakdown);
+    const monthBlock = monthLines
+      ? `\n- 月次推移（保存済み月間レポートから作成。推移・増減の言及に使用可）:\n${monthLines}`
+      : '';
     verifiedDataBlock = `
 
 【確定済み集計データ（${verifiedData.label} / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
@@ -7015,12 +7107,11 @@ ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 - フード売上: ${yen(verifiedData.foodTotal)} (${verifiedData.foodPct}%)
 - ドリンク売上: ${yen(verifiedData.drinkTotal)} (${verifiedData.drinkPct}%)
 - 総来店客数: ${verifiedData.totalCustomers}名 (平均客単価: ${yen(verifiedData.avgSpend)})
-- 対象レポート件数: ${verifiedData.sourceCount}件
+- 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5: ' + verifiedData.topProducts.slice(0, 5).map(p => `${p.name}(${p.qty}点/${yen(p.amt)})`).join('、') : ''}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
   }
-
   const strictSystemInstruction = `${MARUGO_AI_COMPANY_CONTEXT}
 
 【絶対遵守プロンプト規約】
