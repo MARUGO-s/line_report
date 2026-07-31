@@ -6555,21 +6555,129 @@ function extractAllMonthRefs(q) {
   return results;
 }
 
+/** メッセージ中の「NNNN年」（月を伴わない年単位）の参照をすべて（重複除く）抽出する。
+ * 年単位の比較依頼（例: 2026年と2025年を比較して）の検知に使う。誤検出を避けるため「年」付きのみ対象。 */
+function extractAllYearRefs(q) {
+  const results = [];
+  const seen = new Set();
+  const re = /(\d{4})\s*年/g;
+  let m;
+  while ((m = re.exec(q))) {
+    const year = m[1];
+    if (!seen.has(year)) { seen.add(year); results.push(year); }
+  }
+  return results;
+}
+
+/** 「先月」「今年」「3ヶ月前」等の相対的な時間表現を、実行時点（now）を基準に絶対年月へ置換する。
+ * これにより「先月と今月を比較して」のような自然な言い回しも、既存の年月抽出ロジックがそのまま扱える。 */
+function resolveRelativeTimeRefs(q) {
+  const now = new Date();
+  const thisYear = now.getFullYear();
+  const thisMonth = now.getMonth() + 1; // 1-12
+
+  function monthsAgo(n) {
+    const d = new Date(thisYear, thisMonth - 1 - n, 1);
+    return { y: d.getFullYear(), m: d.getMonth() + 1 };
+  }
+
+  let out = q;
+
+  // 「Nヶ月前/Nか月前/Nカ月前」→ 絶対年月
+  out = out.replace(/(\d{1,2})\s*(?:ヶ|ヵ|か|カ)\s*月\s*前/g, (_, n) => {
+    const { y, m } = monthsAgo(parseInt(n, 10));
+    return `${y}年${m}月`;
+  });
+  // 「N年前」→ 絶対年
+  out = out.replace(/(\d{1,2})\s*年前/g, (_, n) => `${thisYear - parseInt(n, 10)}年`);
+
+  // 固定の相対表現（長い語を先に置換し、「先月」が「先々月」の一部に誤って一致しないようにする）
+  const prevM = monthsAgo(1), prev2M = monthsAgo(2), nextM = monthsAgo(-1);
+  out = out
+    .replace(/先々月/g, `${prev2M.y}年${prev2M.m}月`)
+    .replace(/来月/g, `${nextM.y}年${nextM.m}月`)
+    .replace(/先月/g, `${prevM.y}年${prevM.m}月`)
+    .replace(/今月/g, `${thisYear}年${thisMonth}月`)
+    .replace(/一昨年|おととし/g, `${thisYear - 2}年`)
+    .replace(/去年|昨年/g, `${thisYear - 1}年`)
+    .replace(/今年/g, `${thisYear}年`);
+
+  return out;
+}
+
+/** 自由記述の期間文字列（"2026年7月"「2026-07-01〜2026-07-31」等）から年月を1件抽出する */
+function extractYearMonthFromText(text) {
+  const s = String(text || '');
+  const m = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/)
+    || s.match(/(\d{4})-(\d{2})/)
+    || s.match(/(\d{4})(0[1-9]|1[0-2])(?!\d)/);
+  if (!m) return null;
+  return { year: parseInt(m[1], 10), month: parseInt(m[2], 10) };
+}
+
+/** 「2025年4月から2026年3月まで」「2025年〜2026年」等の期間範囲指定を検出する（比較「AとB」とは別扱い） */
+function extractRangeRef(q) {
+  const monthToMonth = q.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:から|〜|~|-)\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:まで)?/);
+  if (monthToMonth) {
+    return {
+      fromYear: parseInt(monthToMonth[1], 10), fromMonth: parseInt(monthToMonth[2], 10),
+      toYear: parseInt(monthToMonth[3], 10), toMonth: parseInt(monthToMonth[4], 10),
+      wasYearOnly: false
+    };
+  }
+  const yearToYear = q.match(/(\d{4})\s*年\s*(?:から|〜|~|-)\s*(\d{4})\s*年\s*(?:まで)?/);
+  if (yearToYear) {
+    return {
+      fromYear: parseInt(yearToYear[1], 10), fromMonth: 1,
+      toYear: parseInt(yearToYear[2], 10), toMonth: 12,
+      wasYearOnly: true
+    };
+  }
+  return null;
+}
+
 async function searchSavedReportsByQuery(query, chatHistory = []) {
   let q = String(query || '').trim().toLowerCase();
+  q = resolveRelativeTimeRefs(q);
 
-  // 続きの質問では直近のユーザー発話から年月を引き継ぐ
+  // 続きの質問では直近のユーザー発話から年月を引き継ぐ（相対表現も絶対年月へ解決してから判定）
   const hasPeriodHint = /(\d{4})/.test(q);
   if (!hasPeriodHint && Array.isArray(chatHistory)) {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const item = chatHistory[i];
       if (!item || item.role !== 'user') continue;
-      const prev = String(item.content || '');
-      if (/(\d{4})\s*年\s*\d{1,2}\s*月|(\d{4})[\/_.-](0?[1-9]|1[0-2])|(\d{4})(0[1-9]|1[0-2])|(\d{4})年?/.test(prev)) {
-        q = `${prev} ${q}`.trim().toLowerCase();
+      const prev = resolveRelativeTimeRefs(String(item.content || '').toLowerCase());
+      if (/(\d{4})/.test(prev)) {
+        q = `${prev} ${q}`.trim();
         break;
       }
     }
+  }
+
+  const reports = await readSavedReports();
+  const allReports = currentReport ? [currentReport, ...reports] : reports;
+  if (allReports.length === 0) return null;
+
+  // 期間範囲クエリ（例:「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
+  // 比較（と/、で結ぶ）とは異なり、範囲内の全期間を1つの合算データとして返す。
+  const rangeRef = extractRangeRef(q);
+  if (rangeRef) {
+    const fromKey = rangeRef.fromYear * 12 + rangeRef.fromMonth;
+    const toKey = rangeRef.toYear * 12 + rangeRef.toMonth;
+    const [lo, hi] = fromKey <= toKey ? [fromKey, toKey] : [toKey, fromKey];
+    const matched = allReports.filter(r => {
+      const ym = extractYearMonthFromText(r.period || r.title || '');
+      if (!ym) return false;
+      const key = ym.year * 12 + ym.month;
+      return key >= lo && key <= hi;
+    });
+    const rangeLabel = (rangeRef.fromMonth === 1 && rangeRef.toMonth === 12 && rangeRef.wasYearOnly)
+      ? `${rangeRef.fromYear}年〜${rangeRef.toYear}年`
+      : `${rangeRef.fromYear}年${rangeRef.fromMonth}月〜${rangeRef.toYear}年${rangeRef.toMonth}月`;
+    if (matched.length > 0) {
+      return await summarizeMatched(matched, `${rangeLabel}の売上データ`);
+    }
+    return { notMatchedLabel: rangeLabel };
   }
 
   // 年月抽出（「2026年 5月」「2026/05」「202605」を優先）
@@ -6578,10 +6686,6 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     || q.match(/(\d{4})(0[1-9]|1[0-2])(?!\d)/);
   const beforeYearMatch = q.match(/(\d{4})\s*年?\s*(?:より前|以前|前)/);
   const yearOnlyMatch = !monthMatch && !beforeYearMatch ? q.match(/(\d{4})\s*年?/) : null;
-
-  const reports = await readSavedReports();
-  const allReports = currentReport ? [currentReport, ...reports] : reports;
-  if (allReports.length === 0) return null;
 
   async function summarizeMatched(matched, label) {
     const hydrated = [];
@@ -6647,6 +6751,25 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     }
     if (periods.length >= 2) return { multiPeriod: true, periods };
     // 実データが1件以下しか見つからなかった場合は、単一期間ロジックへフォールスルーする
+  }
+
+  // 月単位の複数参照が無かった場合、年単位の比較依頼（例:「2026年と2025年を比較して」）を検知する
+  if (allMonthRefs.length < 2) {
+    const allYearRefs = extractAllYearRefs(q);
+    if (allYearRefs.length >= 2) {
+      const yearPeriods = [];
+      for (const year of allYearRefs.slice(0, 4)) {
+        const matched = allReports.filter(r => {
+          const p = String(r.period || r.title || '');
+          return p.includes(year) || p.includes(`${year}年`);
+        });
+        if (matched.length > 0) {
+          yearPeriods.push(await summarizeMatched(matched, `${year}年の売上データ`));
+        }
+      }
+      if (yearPeriods.length >= 2) return { multiPeriod: true, periods: yearPeriods };
+      // 実データが1件以下しか見つからなかった場合は、単一期間ロジックへフォールスルーする
+    }
   }
 
   if (monthMatch) {
@@ -6875,11 +6998,11 @@ ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋�
   }
 
   const strictSystemInstruction = `【絶対遵守プロンプト規約】
-1. あなたは店舗の保存済み売上データ専用の厳密なアナリストAIです。
-2. 質問の答えや数字に関しては、必ず提示された保存データ・資料（salesData）のみから厳密に引用・計算して回答してください。
-3. 推測やWeb情報、一般的な曖昧な推量で数字を答えることは【完全禁止】です。
+1. あなたは店舗の保存済み売上データ専用の厳密なアナリストAIです。営業・売上に関するあらゆる種類の質問（実績照会、期間比較、トレンド、客単価、商品構成、原因分析、改善提案、今後の見通しなど）に幅広く対応してください。
+2. 数値（金額・件数・客数・比率など）は、必ず提示された保存データ・資料（salesDataや確定済み集計データ）のみから厳密に引用・計算してください。数値についての推測・Web情報・一般的な相場観での代用は【完全禁止】です。
+3. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せずに一般的な飲食店経営の知見に基づいた見解を述べて構いません。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。
 4. チャットパネルを閉じるまでの過去の会話履歴（chatHistory）をすべて踏まえ、前後の文脈を完璧に引き継いで会話・回答してください。
-5. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください。
+5. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください（このデータが無い旨の説明自体は推測ではないため、上記3の表記は不要です）。
 6. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。${verifiedDataBlock}`;
 
   try {
