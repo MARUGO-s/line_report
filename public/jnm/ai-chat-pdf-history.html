@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIチャットPDF履歴 | Journal Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@600;700&display=swap" rel="stylesheet">
+<script>
+(function() {
+  const KEY = 'line_reservation_calendar_theme';
+  function current() {
+    try { return (localStorage.getItem(KEY) || '').toLowerCase() === 'light' ? 'light' : 'dark'; } catch(_) { return 'dark'; }
+  }
+  function apply(theme) {
+    const t = theme === 'light' ? 'light' : 'dark';
+    try { localStorage.setItem(KEY, t); } catch(_) {}
+    try { document.documentElement.setAttribute('data-theme', t); } catch(_) {}
+    try { if (document.body) document.body.setAttribute('data-theme', t); } catch(_) {}
+  }
+  window.toggleAppTheme = function() {
+    apply(current() === 'light' ? 'dark' : 'light');
+  };
+  try { document.documentElement.setAttribute('data-theme', current()); } catch(_) {}
+  document.addEventListener('DOMContentLoaded', function() { apply(current()); });
+})();
+</script>
+<script src="../pages-config.js"></script>
+<script src="pages-config.js"></script>
+<script src="../auth-session.js"></script>
+<script src="auth-session.js"></script>
+<style>
+  :root {
+    --bg: #f3f2f2;
+    --surface: #fff;
+    --surface-2: #eae9e9;
+    --text: #201f1d;
+    --text-2: #5c5854;
+    --border: color-mix(in srgb, #201f1d 14%, transparent);
+    --accent: #b68235;
+    --danger: #c2410c;
+    --shadow: 0 10px 30px rgba(32, 31, 29, 0.06);
+    color-scheme: light;
+  }
+  html[data-theme='dark'] {
+    --bg: #171614;
+    --surface: #221f1c;
+    --surface-2: #2b2723;
+    --text: #f3f0ea;
+    --text-2: #b7b0a6;
+    --border: color-mix(in srgb, #f3f0ea 14%, transparent);
+    --accent: #d4a45a;
+    --danger: #fb923c;
+    --shadow: 0 12px 34px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background:
+      radial-gradient(1200px 500px at 10% -10%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%),
+      linear-gradient(180deg, var(--bg), color-mix(in srgb, var(--bg) 88%, #000 12%));
+    color: var(--text);
+    font-family: "Noto Sans JP", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .hd {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(8px);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+  .brand {
+    font-family: "Noto Serif JP", serif;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .hd-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .btn:hover { filter: brightness(1.03); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: transparent; }
+  .btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 28px 16px 64px; }
+  h1 {
+    font-family: "Noto Serif JP", serif;
+    font-size: clamp(24px, 4vw, 34px);
+    margin: 0 0 8px;
+    letter-spacing: 0.02em;
+  }
+  .lead { color: var(--text-2); margin: 0 0 24px; max-width: 46em; }
+  .auth-card, .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .auth-card label { display: block; font-weight: 600; margin-bottom: 8px; }
+  .auth-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .input {
+    flex: 1;
+    min-width: 220px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+  }
+  .auth-msg { color: var(--danger); font-size: 12px; margin-top: 8px; min-height: 1.2em; }
+  .item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 16px 18px;
+    margin-bottom: 12px;
+  }
+  .item-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .q-label, .a-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text-2);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .question {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .meta { font-size: 12px; color: var(--text-2); margin-top: 6px; }
+  .actions { display: flex; gap: 8px; flex-shrink: 0; }
+  details.answer {
+    margin-top: 14px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  details.answer summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--accent);
+    list-style: none;
+  }
+  details.answer summary::-webkit-details-marker { display: none; }
+  .answer-body {
+    margin-top: 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.7;
+  }
+  .empty { color: var(--text-2); padding: 28px 8px; text-align: center; }
+  .status { font-size: 12px; color: var(--text-2); margin-bottom: 12px; min-height: 1.2em; }
+  @media (max-width: 640px) {
+    .item-top { flex-direction: column; }
+    .actions { width: 100%; }
+    .actions .btn { flex: 1; }
+  }
+  @media print {
+    .hd, .auth-card, .actions, .no-print { display: none !important; }
+    details.answer { display: block; }
+    details.answer summary { display: none; }
+    .answer-body { display: block !important; }
+    body { background: #fff; color: #000; }
+    .item { box-shadow: none; break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+  <nav class="hd">
+    <div class="brand">Journal Report</div>
+    <div class="hd-actions">
+      <span id="authState" class="tag">未接続</span>
+      <a class="btn" href="./jnl2txt.html">レポートへ戻る</a>
+      <button type="button" class="btn" onclick="toggleAppTheme()">テーマ切替</button>
+      <button type="button" class="btn" id="reloadBtn">再読み込み</button>
+    </div>
+  </nav>
+
+  <main class="wrap">
+    <h1>AIチャットPDF履歴</h1>
+    <p class="lead">AIチャットで「PDFにする」を押したときの質問と回答を一覧表示します。どの質問から導いた回答かも、ここから確認できます。</p>
+
+    <section id="authCard" class="auth-card" hidden>
+      <label for="tokenInput">管理トークンで接続してください（または LINE の最新リンクから開いてください）</label>
+      <div class="auth-row">
+        <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off">
+        <button class="btn btn-primary" id="saveTokenBtn" type="button">接続</button>
+      </div>
+      <div id="authMsg" class="auth-msg"></div>
+    </section>
+
+    <div id="status" class="status no-print"></div>
+    <div id="list"></div>
+  </main>
+
+  <div id="detailView" hidden style="position:fixed;inset:0;background:var(--bg);z-index:40;overflow:auto;">
+    <div class="hd">
+      <div class="brand">AIチャット分析結果</div>
+      <div class="hd-actions">
+        <button type="button" class="btn" onclick="window.print()">PDFで保存 / 印刷</button>
+        <button type="button" class="btn" id="detailClose">閉じる</button>
+      </div>
+    </div>
+    <div class="wrap" id="detailBody"></div>
+  </div>
+
+<script>
+const PAGES = window.LINE_REPORT_PAGES || {};
+const AUTH = window.LINE_REPORT_AUTH || null;
+const STORE_KEY = 'bistrocavacava';
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function getAdminToken() { return AUTH ? AUTH.getToken() : ''; }
+
+function setAuthUiState(ok) {
+  const stateEl = document.getElementById('authState');
+  const cardEl = document.getElementById('authCard');
+  if (stateEl) stateEl.textContent = ok ? 'ログイン済み' : '未接続';
+  if (cardEl) cardEl.hidden = !!ok;
+}
+
+async function saveAdminToken() {
+  const input = document.getElementById('tokenInput');
+  const msgEl = document.getElementById('authMsg');
+  const btn = document.getElementById('saveTokenBtn');
+  const token = input ? input.value.trim() : '';
+  if (!token) return;
+  if (!AUTH || !AUTH.loginWithToken) {
+    if (msgEl) msgEl.textContent = '認証モジュールを読み込めません。';
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    await AUTH.loginWithToken(token, {
+      sessionUrl: PAGES.adminApiUrl ? PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL) : '',
+      adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+    });
+    if (input) input.value = '';
+    if (msgEl) msgEl.textContent = '';
+    setAuthUiState(true);
+    await loadHistory();
+  } catch (err) {
+    if (msgEl) msgEl.textContent = err && err.message ? err.message : '接続に失敗しました。';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function adminApiFetch(path, options) {
+  const url = PAGES.adminApiUrl ? PAGES.adminApiUrl(path) : '';
+  if (!url) throw new Error('API設定を読み込めません。');
+  const token = getAdminToken();
+  if (!token) throw new Error('認証が必要です。管理トークンを入力するか、LINEの最新リンクから開いてください。');
+  const opts = options || {};
+  const headers = Object.assign({
+    'x-admin-token': token,
+    'x-admin-surface': PAGES.ADMIN_SURFACE || 'line_report'
+  }, opts.headers || {});
+  if (!(opts.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json; charset=utf-8';
+  }
+  let response;
+  try {
+    response = await fetch(url, Object.assign({}, opts, { headers }));
+  } catch (_) {
+    throw new Error('通信に失敗しました。ネットワークをご確認ください。');
+  }
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 401 || response.status === 403) setAuthUiState(false);
+  if (!response.ok || body.error) throw new Error(body.error || ('HTTP ' + response.status));
+  return body;
+}
+
+function setStatus(text) {
+  const el = document.getElementById('status');
+  if (el) el.textContent = text || '';
+}
+
+function openDetail(item) {
+  const view = document.getElementById('detailView');
+  const body = document.getElementById('detailBody');
+  const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '';
+  body.innerHTML = `
+    <h1>AIチャット分析結果</h1>
+    <p class="lead">保存日時 ${esc(dateStr)}${item.mode ? ' / モード: ' + esc(item.mode) : ''}${item.provider ? ' / ' + esc(item.provider) : ''}</p>
+    <div class="panel">
+      <div class="q-label">質問</div>
+      <div class="question">${esc(item.question || '')}</div>
+    </div>
+    <div class="panel">
+      <div class="a-label">回答</div>
+      <div class="answer-body">${esc(item.answer || '')}</div>
+    </div>`;
+  view.hidden = false;
+}
+
+async function deleteItem(id) {
+  if (!confirm('このAIチャットPDF履歴を削除しますか？')) return;
+  setStatus('削除中…');
+  try {
+    await adminApiFetch('/pos-journals/chat-pdf-history/item', {
+      method: 'DELETE',
+      body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
+    });
+    setStatus('削除しました');
+    await loadHistory();
+  } catch (err) {
+    setStatus(err && err.message ? err.message : '削除に失敗しました');
+  }
+}
+
+function renderList(items) {
+  const list = document.getElementById('list');
+  if (!items.length) {
+    list.innerHTML = '<p class="empty">「📄 PDFにする」で保存したAIチャット履歴はまだありません。</p>';
+    return;
+  }
+  list.innerHTML = items.map((item) => {
+    const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '';
+    const modeLabel = item.mode ? ` / モード: ${item.mode}` : '';
+    const providerLabel = item.provider ? ` / ${item.provider}` : '';
+    return `<article class="item" data-id="${esc(item.id)}">
+      <div class="item-top">
+        <div style="min-width:0;flex:1;">
+          <div class="q-label">質問</div>
+          <div class="question">${esc(item.question || '(質問なし)')}</div>
+          <div class="meta">保存日時: ${esc(dateStr)}${esc(modeLabel)}${esc(providerLabel)}</div>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-open>開く</button>
+          <button type="button" class="btn btn-danger" data-delete>削除</button>
+        </div>
+      </div>
+      <details class="answer">
+        <summary>回答を表示</summary>
+        <div class="answer-body">${esc(item.answer || '')}</div>
+      </details>
+    </article>`;
+  }).join('');
+
+  list.querySelectorAll('[data-open]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.closest('[data-id]')?.getAttribute('data-id');
+      const item = items.find((x) => String(x.id) === String(id));
+      if (item) openDetail(item);
+    });
+  });
+  list.querySelectorAll('[data-delete]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.closest('[data-id]')?.getAttribute('data-id');
+      if (id) deleteItem(id);
+    });
+  });
+}
+
+async function loadHistory() {
+  const list = document.getElementById('list');
+  if (!getAdminToken()) {
+    setAuthUiState(false);
+    list.innerHTML = '<p class="empty">ログイン後に履歴を表示します。</p>';
+    setStatus('');
+    return;
+  }
+  setAuthUiState(true);
+  setStatus('読み込み中…');
+  try {
+    const body = await adminApiFetch(
+      '/pos-journals/chat-pdf-history?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=100',
+      { method: 'GET' }
+    );
+    const items = Array.isArray(body.items) ? body.items : [];
+    setStatus(`${items.length} 件`);
+    renderList(items);
+  } catch (err) {
+    list.innerHTML = '';
+    setStatus(err && err.message ? err.message : '読み込みに失敗しました');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async function () {
+  if (AUTH && AUTH.consumeUrlAuthParams) {
+    try {
+      await AUTH.consumeUrlAuthParams({
+        exchangeUrl: PAGES.adminApiUrl ? PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL) : '',
+        adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+      });
+    } catch (_) {}
+  }
+  setAuthUiState(!!getAdminToken());
+  document.getElementById('saveTokenBtn')?.addEventListener('click', saveAdminToken);
+  document.getElementById('tokenInput')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') saveAdminToken();
+  });
+  document.getElementById('reloadBtn')?.addEventListener('click', loadHistory);
+  document.getElementById('detailClose')?.addEventListener('click', () => {
+    document.getElementById('detailView').hidden = true;
+  });
+  await loadHistory();
+});
+</script>
+</body>
+</html>

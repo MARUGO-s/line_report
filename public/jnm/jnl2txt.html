@@ -1190,6 +1190,7 @@
           <button id="forecastBtn" class="btn btn-secondary tool-btn">売上予測</button>
           <button id="forecastHistoryMainBtn" class="btn btn-secondary tool-btn">予測履歴・MAPE</button>
           <button id="aiHistoryBtn" class="btn btn-secondary tool-btn">🤖 AI分析履歴</button>
+          <button id="aiChatPdfHistoryBtn" class="btn btn-secondary tool-btn">💬 AIチャットPDF履歴</button>
         </div>
         <button id="mainAiChatBtn" onclick="toggleAiChat()" class="btn btn-secondary btn-block">💬 AIチャット</button>
       </div>
@@ -1248,7 +1249,7 @@ window.onunhandledrejection = function(event) {
 const SUPABASE_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvY2JuaWZ1YWN0YnZteWpyYXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNzQ2OTgsImV4cCI6MjA4Mjk1MDY5OH0.q33wfcASsQf0Fec3S6fa5CVG2KC9m5Q912Szu7KIyN0';
 
-// 保存済みレポート/AI分析履歴は admin-api 経由（x-admin-token 認証）でのみアクセスする。
+// 保存済みレポート/AI分析履歴/AIチャットPDF履歴は admin-api 経由（x-admin-token 認証）でのみアクセスする。
 // SUPABASE_ANON_KEY はこれらのテーブルに対しては使用しない（RLSで anon/authenticated からの直接アクセスは遮断済み）。
 const PAGES = window.LINE_REPORT_PAGES || {};
 const AUTH = window.LINE_REPORT_AUTH || null;
@@ -5778,6 +5779,10 @@ const aiHistoryBtn = document.getElementById('aiHistoryBtn');
 if (aiHistoryBtn) {
   aiHistoryBtn.addEventListener('click', () => renderAiHistory());
 }
+const aiChatPdfHistoryBtn = document.getElementById('aiChatPdfHistoryBtn');
+if (aiChatPdfHistoryBtn) {
+  aiChatPdfHistoryBtn.addEventListener('click', () => renderAiChatPdfHistory());
+}
 dlAllBtn.addEventListener('click',()=> items.filter(it=>!it.error).forEach((it,i)=> setTimeout(()=>download(txtName(it.name),it.preview), i*300)));
 clearBtn.addEventListener('click',()=>{ 
   items=[]; 
@@ -7195,7 +7200,7 @@ async function sendAiChat() {
     // 期間は認識できたが該当データが無い、という結果は確定事実なのでローカルでそのまま返す
     removeAiChatLoading(loadingId);
     const reply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
-    appendAiChatMessage('ai', reply);
+    appendAiChatMessage('ai', reply, { question: msg, provider: 'local' });
     aiChatHistory.push({ role: 'assistant', content: reply });
     input.disabled = false;
     sendBtn.disabled = false;
@@ -7283,14 +7288,18 @@ ${buildStoreLocationBlockForAi()}
       // Kimi 応答成功（戦略系は Perplexity/Grok をオーケストレーション済み）
       const modeNote = result.note || (result.mode ? `モード: ${result.mode}` : '');
       const displayReply = modeNote ? `${reply}\n\n---\n_${modeNote}_` : reply;
-      appendAiChatMessage('ai', displayReply);
+      appendAiChatMessage('ai', displayReply, {
+        question: msg,
+        mode: result.mode || '',
+        provider: result.provider || result.orchestration?.synthesizer || 'kimi'
+      });
       aiChatHistory.push({ role: 'assistant', content: reply });
     } else {
       // Kimi呼び出し失敗。エラー内容を明記した上で、ローカル集計ロジックの回答にフォールバックする。
       const errDetail = result.error || `HTTP ${res.status}`;
       const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
       const displayReply = `⚠️ **AI接続エラー**: ${errDetail}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
-      appendAiChatMessage('ai', displayReply);
+      appendAiChatMessage('ai', displayReply, { question: msg, provider: 'local' });
       aiChatHistory.push({ role: 'assistant', content: localReply });
     }
   } catch(err) {
@@ -7298,7 +7307,7 @@ ${buildStoreLocationBlockForAi()}
     removeAiChatLoading(loadingId);
     const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
     const displayReply = `⚠️ **AI接続エラー**: ${err && err.message ? err.message : String(err)}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
-    appendAiChatMessage('ai', displayReply);
+    appendAiChatMessage('ai', displayReply, { question: msg, provider: 'local' });
     aiChatHistory.push({ role: 'assistant', content: localReply });
   } finally {
     input.disabled = false;
@@ -7307,27 +7316,80 @@ ${buildStoreLocationBlockForAi()}
   }
 }
 
-function appendAiChatMessage(role, text) {
+function findLastAiChatQuestion() {
+  for (let i = aiChatHistory.length - 1; i >= 0; i--) {
+    if (aiChatHistory[i] && aiChatHistory[i].role === 'user') {
+      return String(aiChatHistory[i].content || '');
+    }
+  }
+  return '';
+}
+
+function appendAiChatMessage(role, text, meta) {
   const container = document.getElementById('aiChatMessages');
   const div = document.createElement('div');
   div.className = role === 'user' ? 'ai-msg-user' : 'ai-msg-ai';
   div.innerHTML = simpleMarkdown(text);
   if (role !== 'user') {
+    const pdfMeta = Object.assign({
+      question: findLastAiChatQuestion(),
+      mode: '',
+      provider: ''
+    }, meta || {});
     const pdfBtn = document.createElement('button');
     pdfBtn.type = 'button';
     pdfBtn.className = 'ai-msg-pdf-btn';
     pdfBtn.textContent = '📄 PDFにする';
-    pdfBtn.onclick = () => openAiChatMessagePdfView(text);
+    pdfBtn.onclick = () => saveAndOpenAiChatMessagePdf(pdfMeta.question, text, pdfMeta);
     div.appendChild(pdfBtn);
   }
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
 
+async function saveAiChatPdfHistory(question, answer, meta) {
+  const q = String(question || '').trim() || '(質問未記録)';
+  const a = String(answer || '').trim();
+  if (!a) throw new Error('回答が空のため保存できません');
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  await adminApiFetch('/pos-journals/chat-pdf-history', {
+    method: 'POST',
+    body: JSON.stringify({
+      id,
+      store_key: STORE_KEY,
+      question: q,
+      answer: a,
+      mode: meta && meta.mode ? String(meta.mode) : '',
+      provider: meta && meta.provider ? String(meta.provider) : ''
+    })
+  });
+  return id;
+}
+
+async function saveAndOpenAiChatMessagePdf(question, answer, meta) {
+  try {
+    showSaveStatus('AIチャット回答をクラウド保存中…');
+    await saveAiChatPdfHistory(question, answer, meta || {});
+    finishSaveStatus('PDF用にクラウド保存しました');
+  } catch (err) {
+    console.warn('saveAiChatPdfHistory error:', err);
+    finishSaveStatus('クラウド保存に失敗しました（PDF表示は続行）', true);
+  }
+  openAiChatMessagePdfView(answer, question);
+}
+
 /** チャットの1回答をそのまま #reportView に印刷用レイアウトで開く（window.print()でPDF保存可能） */
-function openAiChatMessagePdfView(text) {
+function openAiChatMessagePdfView(text, question) {
   const view = document.getElementById('reportView');
   const now = new Date();
+  const q = String(question || '').trim();
+  const questionBlock = q
+    ? `<div class="ai-chat-pdf-question" style="margin:16px 0 24px;padding:14px 16px;border:1px solid var(--border);border-radius:8px;background:var(--surface);">
+        <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:6px;">質問</div>
+        <div style="white-space:pre-wrap;line-height:1.6;">${esc(q)}</div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;">回答</div>`
+    : '';
   view.innerHTML = `<div class="rv-nav">
     <span class="rv-nav-brand">Journal Report</span>
     <span class="rv-nav-page">AIチャット分析結果</span>
@@ -7338,6 +7400,7 @@ function openAiChatMessagePdfView(text) {
   <div class="report">
     <h1 class="r-title">AIチャット分析結果</h1>
     <p class="r-meta">出力日時 ${esc(now.toLocaleString('ja-JP'))}</p>
+    ${questionBlock}
     ${simpleMarkdown(text)}
   </div>`;
   view.hidden = false;
@@ -7346,6 +7409,107 @@ function openAiChatMessagePdfView(text) {
     view.hidden = true;
     document.body.classList.remove('report-open');
   };
+}
+
+async function fetchAiChatPdfHistory() {
+  try {
+    const body = await adminApiFetch(
+      '/pos-journals/chat-pdf-history?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=100',
+      { method: 'GET' }
+    );
+    return Array.isArray(body.items) ? body.items : [];
+  } catch (err) {
+    console.warn('fetchAiChatPdfHistory remote fetch error:', err);
+    return [];
+  }
+}
+
+async function deleteAiChatPdfHistory(id) {
+  try {
+    await adminApiFetch('/pos-journals/chat-pdf-history/item', {
+      method: 'DELETE',
+      body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
+    });
+    return true;
+  } catch (e) {
+    console.error('deleteAiChatPdfHistory error:', e);
+    return false;
+  }
+}
+
+function openAiChatPdfHistoryItem(item) {
+  openAiChatMessagePdfView(item.answer || '', item.question || '');
+}
+
+async function renderAiChatPdfHistory() {
+  const view = document.getElementById('reportView');
+  showAppLoading('AIチャットPDF履歴を読み込み中...', 'クラウドデータと同期しています');
+  try {
+    const historyList = await fetchAiChatPdfHistory();
+    const rows = historyList.length ? historyList.map(item => {
+      const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '';
+      const qPreview = String(item.question || '').replace(/\s+/g, ' ').slice(0, 120);
+      const modeLabel = item.mode ? ` / モード: ${item.mode}` : '';
+      const providerLabel = item.provider ? ` / ${item.provider}` : '';
+      return `<div class="saved-item" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;background:var(--surface);">
+        <div class="saved-meta" style="flex:1;min-width:0;">
+          <div class="saved-title" style="font-size:15px;font-weight:700;line-height:1.45;">💬 ${esc(qPreview || '(質問なし)')}${String(item.question || '').length > 120 ? '…' : ''}</div>
+          <div class="saved-sub" style="font-size:12px;color:var(--text-2);margin-top:6px;">保存日時: ${esc(dateStr)}${esc(modeLabel)}${esc(providerLabel)}</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;">
+          <button class="rv-btn rv-btn-primary" data-open-chat-pdf="${esc(item.id)}" style="cursor:pointer;padding:8px 14px;font-size:13px;">開く</button>
+          <button class="rv-btn rv-btn-secondary" data-delete-chat-pdf="${esc(item.id)}" style="cursor:pointer;padding:8px 14px;font-size:13px;color:#ef4444;border-color:rgba(239,68,68,0.4);">🗑️ 削除</button>
+        </div>
+      </div>`;
+    }).join('') : '<p class="empty">「📄 PDFにする」で保存したAIチャット履歴はまだありません。</p>';
+
+    view.innerHTML = `<div class="rv-nav">
+      <span class="rv-nav-brand">Journal Report</span>
+      <span class="rv-nav-page">💬 AIチャットPDF履歴</span>
+      <a class="rv-btn rv-btn-secondary" href="./ai-chat-pdf-history.html" style="text-decoration:none;">別ページで開く</a>
+      <button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button>
+      <button class="rv-btn rv-btn-ghost" id="aiChatPdfHistoryClose">閉じる</button>
+    </div>
+    <div class="saved-wrap" style="max-width:920px;margin:24px auto;padding:0 16px;">
+      <h1 class="r-title" style="font-size:22px;font-weight:700;margin-bottom:8px;">💬 AIチャットPDF履歴</h1>
+      <p class="r-meta" style="color:var(--text-2);margin-bottom:24px;">AIチャットで「PDFにする」を押したときの<strong>質問と回答</strong>の一覧です。どの質問から導いた回答かもここから確認できます。</p>
+      <div class="saved-list">${rows}</div>
+    </div>`;
+
+    view.hidden = false;
+    document.body.classList.add('report-open');
+
+    view.querySelector('#aiChatPdfHistoryClose').onclick = () => {
+      view.hidden = true;
+      document.body.classList.remove('report-open');
+    };
+
+    view.querySelectorAll('[data-open-chat-pdf]').forEach(b => {
+      b.onclick = (e) => {
+        e.preventDefault();
+        const targetId = b.getAttribute('data-open-chat-pdf');
+        const item = historyList.find(x => String(x.id) === String(targetId));
+        if (item) openAiChatPdfHistoryItem(item);
+        else alert('指定された履歴が見つかりません');
+      };
+    });
+
+    view.querySelectorAll('[data-delete-chat-pdf]').forEach(b => {
+      b.onclick = async (e) => {
+        e.preventDefault();
+        const targetId = b.getAttribute('data-delete-chat-pdf');
+        if (!confirm('このAIチャットPDF履歴を削除しますか？')) return;
+        showSaveStatus('削除中…');
+        const ok = await deleteAiChatPdfHistory(targetId);
+        if (ok) finishSaveStatus('削除しました'); else finishSaveStatus('削除失敗', true);
+        renderAiChatPdfHistory();
+      };
+    });
+  } catch (err) {
+    alert('AIチャットPDF履歴の読み込み中にエラーが発生しました: ' + (err && err.message ? err.message : String(err)));
+  } finally {
+    hideAppLoading();
+  }
 }
 
 function appendAiChatLoading() {

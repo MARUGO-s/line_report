@@ -1139,6 +1139,8 @@ Deno.serve(async (req, info) => {
       "/pos-journals/saved-reports/item",
       "/pos-journals/report-ai-history",
       "/pos-journals/report-ai-history/item",
+      "/pos-journals/chat-pdf-history",
+      "/pos-journals/chat-pdf-history/item",
       "/pos-journals/sales-forecasts",
       "/pos-journals/sales-forecasts/item",
       "/foodcourt/reports",
@@ -1429,6 +1431,26 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await deleteReportAiHistoryItem(supabase, body, storeScope), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/chat-pdf-history") {
+      return json(await fetchChatPdfHistoryList(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/chat-pdf-history/item") {
+      return json(await fetchChatPdfHistoryItem(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/chat-pdf-history") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await saveChatPdfHistory(supabase, body, storeScope), 200)
+    }
+    if (req.method === "DELETE" && path === "/pos-journals/chat-pdf-history/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await deleteChatPdfHistoryItem(supabase, body, storeScope), 200)
     }
 
     if (req.method === "GET" && path === "/reservations/calendar") {
@@ -8650,6 +8672,154 @@ async function deleteReportAiHistoryItem(
   }
   if (!data) {
     throw { status: 404, message: "AI分析履歴が見つかりません。" } satisfies AppError
+  }
+  return { ok: true, deleted: { id: String(data.id) } }
+}
+
+// ===== jnl2txt.html AIチャットPDF履歴 (ai_chat_pdf_history) =====
+// 「PDFにする」押下時に質問＋回答を保存し、一覧ページ／パネルから質問起点で再表示する。
+
+async function fetchChatPdfHistoryList(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(300, Math.trunc(rawLimit)))
+    : 100
+  const { data, error } = await supabase
+    .from("ai_chat_pdf_history")
+    .select("id, question, answer, mode, provider, created_at")
+    .eq("store_partition_key", storeKey)
+    .order("created_at", { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw {
+      status: 500,
+      message: `AIチャットPDF履歴の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return { ok: true, store_key: storeKey, items: Array.isArray(data) ? data : [] }
+}
+
+async function fetchChatPdfHistoryItem(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const id = toSafeString(url.searchParams.get("id"))
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("ai_chat_pdf_history")
+    .select("id, question, answer, mode, provider, created_at")
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `AIチャットPDF履歴の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "AIチャットPDF履歴が見つかりません。" } satisfies AppError
+  }
+  return { ok: true, store_key: storeKey, item: data }
+}
+
+async function saveChatPdfHistory(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const question = toSafeString(body.question)
+  const answer = toSafeString(body.answer)
+  if (!question) {
+    throw { status: 400, message: "question is required." } satisfies AppError
+  }
+  if (!answer) {
+    throw { status: 400, message: "answer is required." } satisfies AppError
+  }
+  const id = toSafeString(body.id) || `${Date.now()}_${crypto.randomUUID().slice(0, 8)}`
+  const { error } = await supabase
+    .from("ai_chat_pdf_history")
+    .insert({
+      id,
+      store_partition_key: storeKey,
+      question,
+      answer,
+      mode: toSafeString(body.mode) || null,
+      provider: toSafeString(body.provider) || null,
+      updated_at: new Date().toISOString(),
+    })
+  if (error) {
+    throw {
+      status: 500,
+      message: `AIチャットPDF履歴の保存に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return { ok: true, id }
+}
+
+async function deleteChatPdfHistoryItem(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  if (String(body.confirmation ?? "") !== "delete") {
+    throw {
+      status: 400,
+      message: "削除確認欄へ半角小文字で delete と入力してください。",
+    } satisfies AppError
+  }
+  const id = toSafeString(body.id)
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("ai_chat_pdf_history")
+    .delete()
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .select("id")
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `AIチャットPDF履歴の削除に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "AIチャットPDF履歴が見つかりません。" } satisfies AppError
   }
   return { ok: true, deleted: { id: String(data.id) } }
 }
