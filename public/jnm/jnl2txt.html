@@ -1203,6 +1203,22 @@
   <div class="layout-grid">
     <div class="col-left">
 
+      <button id="pdfBtn" class="btn btn-primary btn-cta btn-block" disabled>レポートを作成</button>
+      <button id="monthlyBtn" class="btn btn-secondary btn-block" style="display:none" disabled>月間レポートを作成</button>
+
+      <div class="card">
+        <div class="card-kicker">分析ツール</div>
+        <div class="tool-grid">
+          <button id="savedBtn" class="btn btn-secondary tool-btn">保存済みレポート</button>
+          <button id="forecastBtn" class="btn btn-secondary tool-btn">売上予測</button>
+          <button id="forecastHistoryMainBtn" class="btn btn-secondary tool-btn">予測履歴・MAPE</button>
+          <button id="aiHistoryBtn" class="btn btn-secondary tool-btn">🤖 AI分析履歴</button>
+          <button id="aiChatPdfHistoryBtn" class="btn btn-secondary tool-btn">💬 AIチャットPDF履歴</button>
+          <button id="crossStoreSummaryBtn" class="btn btn-secondary tool-btn" hidden>📊 店舗横断サマリー（管理者）</button>
+        </div>
+        <button id="mainAiChatBtn" onclick="toggleAiChat()" class="btn btn-secondary btn-block">💬 AIチャット</button>
+      </div>
+
       <div class="card">
         <div class="card-kicker">取り込み</div>
         <label class="drop" id="drop">
@@ -1262,22 +1278,6 @@
             <input type="date" id="endDate" class="input">
           </div>
         </div>
-      </div>
-
-      <button id="pdfBtn" class="btn btn-primary btn-cta btn-block" disabled>レポートを作成</button>
-      <button id="monthlyBtn" class="btn btn-secondary btn-block" style="display:none" disabled>月間レポートを作成</button>
-
-      <div class="card">
-        <div class="card-kicker">分析ツール</div>
-        <div class="tool-grid">
-          <button id="savedBtn" class="btn btn-secondary tool-btn">保存済みレポート</button>
-          <button id="forecastBtn" class="btn btn-secondary tool-btn">売上予測</button>
-          <button id="forecastHistoryMainBtn" class="btn btn-secondary tool-btn">予測履歴・MAPE</button>
-          <button id="aiHistoryBtn" class="btn btn-secondary tool-btn">🤖 AI分析履歴</button>
-          <button id="aiChatPdfHistoryBtn" class="btn btn-secondary tool-btn">💬 AIチャットPDF履歴</button>
-          <button id="crossStoreSummaryBtn" class="btn btn-secondary tool-btn" hidden>📊 店舗横断サマリー（管理者）</button>
-        </div>
-        <button id="mainAiChatBtn" onclick="toggleAiChat()" class="btn btn-secondary btn-block">💬 AIチャット</button>
       </div>
 
     </div>
