@@ -206,6 +206,14 @@ New records are appended below.
 - Remaining:
   - 認証済み本番全体管理者で4表示を切り替える最終操作確認。
 
+### 2026-07-31 - Journal AI 意図ルーティング＋Perplexity/Grok
+
+- Request: 数値は Kimi、戦略・対策は Perplexity/Grok を自動オーケストレーション。
+- Changes: `journal_ai_orchestrate.ts` + `ai-analyze` chat 分岐、クライアント `orchestrationMode: auto`、モード注記表示。
+- Secrets: `PERPLEXITY_API_KEY`（任意）、既存 Moonshot / xAI。
+- Verify: `npm run test:journal-ai`。
+- Deploy: `ai-analyze` + Pages。
+
 ### 2026-07-31 - AI参照を保存済み月間レポート優先に
 
 - Request: ジャーナル検索より、カテゴリ分け済みの保存済みレポート（2023-07〜）を正本にしたい。

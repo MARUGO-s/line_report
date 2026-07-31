@@ -1,5 +1,13 @@
 // Supabase Edge Function: AI Analyze / Chat
-// Kimi (Moonshot AI, K3) を使用して売上データの分析・チャットを行うプロキシ
+// 数値検証は Kimi。戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから Kimi が統合。
+
+import {
+  formatExternalBriefsForPrompt,
+  gatherExternalBriefs,
+  normalizeJournalChatIntent,
+  orchestrationNote,
+  type JournalChatIntent,
+} from "../_shared/journal_ai_orchestrate.ts";
 
 const KIMI_MODEL_DEFAULT = "kimi-k3";
 const KIMI_ENDPOINT = "https://api.moonshot.ai/v1/chat/completions";
@@ -69,6 +77,7 @@ const SYSTEM_PROMPT_CHAT = `${MARUGO_COMPANY_CONTEXT}
 あなたはマルゴグループ各店舗の売上データ分析アシスタントです。営業・売上に関するあらゆる種類の質問（実績照会、期間比較、トレンド、客単価、商品構成、ワイン／ドリンク比率、原因分析、改善提案、今後の見通しなど）に幅広く対応してください。
 - 数値（金額・件数・客数・比率など）は、必ず提供された売上データのみから具体的に回答してください。数値についての推測・一般論での代用は禁止です。計算が必要な場合は計算過程も簡潔に示してください。
 - 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」等の文言を付け、データに基づく事実と明確に区別してください。
+- 外部知見ブリーフが付与されている場合のみ、Web／トレンド知見を施策提案に使ってよい。その箇所は「※これは外部知見です」と明示し、店舗数値と混同しないこと。
 - データにない情報は「このデータからは判断できません」と回答してください。
 - 回答は丁寧な日本語で`;
 
@@ -80,7 +89,6 @@ const corsHeaders = {
 
 type ChatContent = { role: string; parts: { text: string }[] };
 
-/** role/parts形式をOpenAI互換のmessages（role/content）へ変換 */
 function contentsToOpenAiMessages(contents: ChatContent[]) {
   return contents.map((c) => ({
     role: c.role === "model" ? "assistant" : "user",
@@ -88,7 +96,6 @@ function contentsToOpenAiMessages(contents: ChatContent[]) {
   }));
 }
 
-/** Kimi K3等の推論モデルが出力に含める<think>...</think>ブロックを除去する（foodcourt_loop_utils.tsの実装を移植） */
 function stripThinkingBlocks(text: string): string {
   let s = String(text ?? "");
   s = s.replace(/<think>[\s\S]*?<\/think>/gi, " ");
@@ -109,7 +116,7 @@ function stripThinkingBlocks(text: string): string {
 }
 
 async function callKimi(
-  contents: ChatContent[]
+  contents: ChatContent[],
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const apiKey = Deno.env.get("MOONSHOT_API_KEY") || Deno.env.get("KIMI_API_KEY");
   if (!apiKey) return { ok: false, error: "MOONSHOT_API_KEY not configured" };
@@ -125,7 +132,6 @@ async function callKimi(
       body: JSON.stringify({
         model,
         messages: contentsToOpenAiMessages(contents),
-        // Kimi K3 は temperature=1 のみ許可
         temperature: 1,
         reasoning_effort: "low",
         max_tokens: 10192,
@@ -148,7 +154,6 @@ async function callKimi(
 }
 
 Deno.serve(async (req: Request) => {
-  // CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -166,13 +171,21 @@ Deno.serve(async (req: Request) => {
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      },
     );
   }
 
   try {
     const body = await req.json();
-    const { action, salesData, message, chatHistory, systemInstruction } = body;
+    const {
+      action,
+      salesData,
+      message,
+      chatHistory,
+      systemInstruction,
+      orchestrationMode,
+      intent: intentOverride,
+    } = body;
 
     if (!action || !salesData) {
       return new Response(
@@ -180,29 +193,30 @@ Deno.serve(async (req: Request) => {
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
-    // 売上データをテキスト化（トークン節約のため要約形式）
     const salesContext = typeof salesData === "string"
       ? salesData
       : JSON.stringify(salesData);
 
-    // トークン上限チェック（約100KB = 概算25Kトークンに制限）
     if (salesContext.length > 100000) {
       return new Response(
         JSON.stringify({ error: "データが大きすぎます。期間を絞ってください。" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
     let contents: ChatContent[];
+    let intent: JournalChatIntent = "data";
+    let briefs: Awaited<ReturnType<typeof gatherExternalBriefs>> = [];
 
     if (action === "analyze") {
+      // 一括分析レポートは従来どおり Kimi のみ（コスト・レイテンシ優先）
       contents = [
         {
           role: "user",
@@ -220,18 +234,32 @@ Deno.serve(async (req: Request) => {
           {
             status: 400,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
+          },
         );
       }
-      // チャット履歴を構築（クライアントは各項目を {role, content} で送る。
-      // 後方互換のため text も見る）
+
+      intent = normalizeJournalChatIntent(
+        intentOverride ?? orchestrationMode,
+        String(message),
+      );
+
+      if (intent === "strategy" || intent === "mixed") {
+        briefs = await gatherExternalBriefs(
+          String(message),
+          "MARUGO GROUP / https://05-marugo-group.com / wine-focused restaurants",
+          intent,
+        );
+      }
+
+      const externalBlock = formatExternalBriefsForPrompt(briefs);
       const history = chatHistory || [];
       contents = [
         {
           role: "user",
           parts: [
             {
-              text: `${systemInstruction || SYSTEM_PROMPT_CHAT}\n\n参照する売上データ：\n${salesContext}`,
+              text:
+                `${systemInstruction || SYSTEM_PROMPT_CHAT}\n\n参照する売上データ：\n${salesContext}${externalBlock}`,
             },
           ],
         },
@@ -248,7 +276,9 @@ Deno.serve(async (req: Request) => {
             role: h.role === "user" ? "user" : "model",
             parts: [{ text: String(h.content ?? h.text ?? "").trim() }],
           }))
-          .filter((h: { parts: { text: string }[] }) => h.parts[0].text.length > 0),
+          .filter((h: { parts: { text: string }[] }) =>
+            h.parts[0].text.length > 0
+          ),
         {
           role: "user",
           parts: [{ text: message }],
@@ -260,22 +290,44 @@ Deno.serve(async (req: Request) => {
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
     const kimiResult = await callKimi(contents);
 
     if (kimiResult.ok) {
+      const note = action === "chat"
+        ? orchestrationNote(intent, briefs)
+        : "モード: 分析レポート（Kimi）";
+      const providers = ["kimi", ...briefs.filter((b) => b.ok).map((b) => b.provider)];
       return new Response(
-        JSON.stringify({ text: kimiResult.text, provider: "kimi" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          text: kimiResult.text,
+          provider: providers.length > 1 ? "orchestrated" : "kimi",
+          providers,
+          mode: action === "chat" ? intent : "analyze",
+          note,
+          orchestration: briefs.map((b) => ({
+            provider: b.provider,
+            ok: b.ok,
+            error: b.error || null,
+          })),
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
       );
     }
 
     let friendlyError = "Kimi (Moonshot AI) の呼び出しに失敗しました。";
-    if (kimiResult.error.includes("401") || kimiResult.error.toLowerCase().includes("invalid")) {
-      friendlyError = "KimiのAPIキーが無効です。SupabaseのMOONSHOT_API_KEYをご確認ください。";
+    if (
+      kimiResult.error.includes("401") ||
+      kimiResult.error.toLowerCase().includes("invalid")
+    ) {
+      friendlyError =
+        "KimiのAPIキーが無効です。SupabaseのMOONSHOT_API_KEYをご確認ください。";
     } else if (kimiResult.error.includes("429")) {
       friendlyError = "Kimi APIの利用クォータ上限に達しました。";
     }
@@ -283,11 +335,17 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         error: friendlyError,
         detail: kimiResult.error,
+        mode: action === "chat" ? intent : "analyze",
+        orchestration: briefs.map((b) => ({
+          provider: b.provider,
+          ok: b.ok,
+          error: b.error || null,
+        })),
       }),
       {
         status: 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      },
     );
   } catch (e) {
     console.error("Edge Function error:", e);
@@ -296,7 +354,7 @@ Deno.serve(async (req: Request) => {
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      },
     );
   }
 });
