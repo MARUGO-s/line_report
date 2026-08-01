@@ -1,6 +1,7 @@
 // Supabase Edge Function: AI Analyze / Chat
-// 数値検証は Kimi。戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから Kimi が統合。
-// deploy retry marker: per-function deploy 2026-07-31T06:00:17.906069+00:00
+// 数値検証・統合の既定は OpenAI gpt-5.6-luna。
+// 戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから Luna が統合。
+// deploy retry marker: journal default gpt-5.6-luna 2026-08-01
 
 import {
   formatExternalBriefsForPrompt,
@@ -11,8 +12,8 @@ import {
 } from "../_shared/journal_ai_orchestrate.ts";
 import { buildStoreLocationPromptBlock } from "../_shared/marugo_group_stores.ts";
 
-const KIMI_MODEL_DEFAULT = "kimi-k3";
-const KIMI_ENDPOINT = "https://api.moonshot.ai/v1/chat/completions";
+const OPENAI_MODEL_DEFAULT = "gpt-5.6-luna";
+const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 
 /** マルゴグループ（株式会社ワルツ）専用の分析前提。一般飲食/Barの定石ではなく、ワイン推し企業として解釈する。 */
 const MARUGO_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常に適用）】
@@ -118,15 +119,42 @@ function stripThinkingBlocks(text: string): string {
   return s.trim();
 }
 
-async function callKimi(
+function resolveOpenAiApiKey(): string {
+  return String(
+    Deno.env.get("OPENAI_API_KEY") ||
+      Deno.env.get("FOODCOURT_OPENAI_API_KEY") ||
+      "",
+  ).trim();
+}
+
+function resolveOpenAiModel(): string {
+  return String(
+    Deno.env.get("JOURNAL_OPENAI_MODEL") ||
+      Deno.env.get("OPENAI_MODEL") ||
+      Deno.env.get("FOODCOURT_OPENAI_MODEL") ||
+      "",
+  ).trim() || OPENAI_MODEL_DEFAULT;
+}
+
+async function callOpenAiLuna(
   contents: ChatContent[],
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
-  const apiKey = Deno.env.get("MOONSHOT_API_KEY") || Deno.env.get("KIMI_API_KEY");
-  if (!apiKey) return { ok: false, error: "MOONSHOT_API_KEY not configured" };
-  const model = Deno.env.get("KIMI_MODEL") || KIMI_MODEL_DEFAULT;
+): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string; model: string }> {
+  const apiKey = resolveOpenAiApiKey();
+  const model = resolveOpenAiModel();
+  if (!apiKey) return { ok: false, error: "OPENAI_API_KEY not configured", model };
+
+  // gpt-5 系は max_tokens を拒否し max_completion_tokens を要求。
+  // 思考トークンも同枠を消費するため余裕を足し、reasoning_effort:'low' で抑える。
+  const isReasoning = /^o\d/.test(model) || /^gpt-5/.test(model);
+  const messages = contentsToOpenAiMessages(contents).map((m) =>
+    isReasoning && m.role === "system" ? { ...m, role: "developer" } : m
+  );
+  const tokenParam = isReasoning
+    ? { max_completion_tokens: 10192 + 4000, reasoning_effort: "low" }
+    : { max_tokens: 10192, temperature: 0.3 };
 
   try {
-    const res = await fetch(KIMI_ENDPOINT, {
+    const res = await fetch(OPENAI_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -134,25 +162,23 @@ async function callKimi(
       },
       body: JSON.stringify({
         model,
-        messages: contentsToOpenAiMessages(contents),
-        temperature: 1,
-        reasoning_effort: "low",
-        max_tokens: 10192,
+        messages,
+        ...tokenParam,
       }),
     });
     if (!res.ok) {
       const errText = await res.text();
-      console.error("Kimi API error:", res.status, errText);
-      return { ok: false, error: errText };
+      console.error("OpenAI API error:", model, res.status, errText);
+      return { ok: false, error: errText, model };
     }
     const data = await res.json();
     const rawText = data?.choices?.[0]?.message?.content || "";
     const text = stripThinkingBlocks(rawText);
-    if (!text) return { ok: false, error: "Kimi returned an empty response" };
-    return { ok: true, text };
+    if (!text) return { ok: false, error: "OpenAI returned an empty response", model };
+    return { ok: true, text, model };
   } catch (e) {
-    console.error("Kimi API fetch error:", e);
-    return { ok: false, error: String(e) };
+    console.error("OpenAI API fetch error:", e);
+    return { ok: false, error: String(e), model };
   }
 }
 
@@ -168,9 +194,9 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  if (!Deno.env.get("MOONSHOT_API_KEY") && !Deno.env.get("KIMI_API_KEY")) {
+  if (!resolveOpenAiApiKey()) {
     return new Response(
-      JSON.stringify({ error: "MOONSHOT_API_KEY が未設定です" }),
+      JSON.stringify({ error: "OPENAI_API_KEY が未設定です" }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -224,7 +250,7 @@ Deno.serve(async (req: Request) => {
     let briefs: Awaited<ReturnType<typeof gatherExternalBriefs>> = [];
 
     if (action === "analyze") {
-      // 一括分析レポートは従来どおり Kimi のみ（コスト・レイテンシ優先）
+      // 一括分析レポートは Luna のみ（外部オーケストレーションなし）
       contents = [
         {
           role: "user",
@@ -303,25 +329,30 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const kimiResult = await callKimi(contents);
+    const lunaResult = await callOpenAiLuna(contents);
 
-    if (kimiResult.ok) {
+    if (lunaResult.ok) {
       const note = action === "chat"
         ? orchestrationNote(intent, briefs)
-        : "モード: 分析レポート（Kimi）";
-      const providers = ["kimi", ...briefs.filter((b) => b.ok).map((b) => b.provider)];
+        : `モード: 分析レポート（${lunaResult.model}）`;
+      const providers = ["openai", ...briefs.filter((b) => b.ok).map((b) => b.provider)];
       return new Response(
         JSON.stringify({
-          text: kimiResult.text,
-          provider: providers.length > 1 ? "orchestrated" : "kimi",
+          text: lunaResult.text,
+          provider: providers.length > 1 ? "orchestrated" : "openai",
+          model: lunaResult.model,
           providers,
           mode: action === "chat" ? intent : "analyze",
           note,
-          orchestration: briefs.map((b) => ({
-            provider: b.provider,
-            ok: b.ok,
-            error: b.error || null,
-          })),
+          orchestration: {
+            synthesizer: "openai",
+            model: lunaResult.model,
+            externals: briefs.map((b) => ({
+              provider: b.provider,
+              ok: b.ok,
+              error: b.error || null,
+            })),
+          },
         }),
         {
           status: 200,
@@ -330,20 +361,21 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    let friendlyError = "Kimi (Moonshot AI) の呼び出しに失敗しました。";
+    let friendlyError = `OpenAI (${lunaResult.model}) の呼び出しに失敗しました。`;
     if (
-      kimiResult.error.includes("401") ||
-      kimiResult.error.toLowerCase().includes("invalid")
+      lunaResult.error.includes("401") ||
+      lunaResult.error.toLowerCase().includes("invalid")
     ) {
       friendlyError =
-        "KimiのAPIキーが無効です。SupabaseのMOONSHOT_API_KEYをご確認ください。";
-    } else if (kimiResult.error.includes("429")) {
-      friendlyError = "Kimi APIの利用クォータ上限に達しました。";
+        "OpenAIのAPIキーが無効です。SupabaseのOPENAI_API_KEYをご確認ください。";
+    } else if (lunaResult.error.includes("429")) {
+      friendlyError = "OpenAI APIの利用クォータ上限に達しました。";
     }
     return new Response(
       JSON.stringify({
         error: friendlyError,
-        detail: kimiResult.error,
+        detail: lunaResult.error,
+        model: lunaResult.model,
         mode: action === "chat" ? intent : "analyze",
         orchestration: briefs.map((b) => ({
           provider: b.provider,
