@@ -43,6 +43,11 @@
 
 New records are appended below.
 
+### 2026-08-01 - Journal AI Luna + Kimi K3 fallback
+
+- Request: 既定 gpt-5.6-luna のフォールバックに Kimi K3 を指定。
+- Change: `ai-analyze` で Luna 失敗時に `kimi-k3` へ自動退避。応答 note にフォールバック表示。
+
 ### 2026-08-01 - Journal AI default → gpt-5.6-luna
 
 - Request: Journal Report AIの既定を Kimi K3 から GPT Luna へ変更。
