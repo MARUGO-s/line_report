@@ -1,7 +1,7 @@
 // Supabase Edge Function: AI Analyze / Chat
-// 数値検証・統合の既定は OpenAI gpt-5.6-luna。
-// 戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから Luna が統合。
-// deploy retry marker: journal default gpt-5.6-luna 2026-08-01
+// 数値検証・統合の既定は OpenAI gpt-5.6-luna。失敗時は Kimi K3 へフォールバック。
+// 戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから統合。
+// deploy retry marker: journal luna + kimi-k3 fallback 2026-08-01
 
 import {
   formatExternalBriefsForPrompt,
@@ -14,6 +14,25 @@ import { buildStoreLocationPromptBlock } from "../_shared/marugo_group_stores.ts
 
 const OPENAI_MODEL_DEFAULT = "gpt-5.6-luna";
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
+const KIMI_MODEL_DEFAULT = "kimi-k3";
+const KIMI_ENDPOINT = "https://api.moonshot.ai/v1/chat/completions";
+
+type SynthesizerResult =
+  | {
+    ok: true;
+    text: string;
+    provider: "openai" | "kimi";
+    model: string;
+    fallbackFrom?: { provider: "openai"; model: string; error: string };
+  }
+  | {
+    ok: false;
+    provider: "openai" | "kimi";
+    model: string;
+    error: string;
+    openaiError?: string;
+    kimiError?: string;
+  };
 
 /** マルゴグループ（株式会社ワルツ）専用の分析前提。一般飲食/Barの定石ではなく、ワイン推し企業として解釈する。 */
 const MARUGO_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常に適用）】
@@ -136,6 +155,23 @@ function resolveOpenAiModel(): string {
   ).trim() || OPENAI_MODEL_DEFAULT;
 }
 
+function resolveKimiApiKey(): string {
+  return String(
+    Deno.env.get("MOONSHOT_API_KEY") ||
+      Deno.env.get("KIMI_API_KEY") ||
+      "",
+  ).trim();
+}
+
+function resolveKimiModel(): string {
+  return String(
+    Deno.env.get("JOURNAL_KIMI_MODEL") ||
+      Deno.env.get("KIMI_MODEL") ||
+      Deno.env.get("FOODCOURT_MOONSHOT_MODEL") ||
+      "",
+  ).trim() || KIMI_MODEL_DEFAULT;
+}
+
 async function callOpenAiLuna(
   contents: ChatContent[],
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string; model: string }> {
@@ -182,6 +218,86 @@ async function callOpenAiLuna(
   }
 }
 
+async function callKimi(
+  contents: ChatContent[],
+): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string; model: string }> {
+  const apiKey = resolveKimiApiKey();
+  const model = resolveKimiModel();
+  if (!apiKey) return { ok: false, error: "MOONSHOT_API_KEY not configured", model };
+
+  try {
+    const res = await fetch(KIMI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: contentsToOpenAiMessages(contents),
+        temperature: 1,
+        reasoning_effort: "low",
+        max_tokens: 10192,
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("Kimi API error:", model, res.status, errText);
+      return { ok: false, error: errText, model };
+    }
+    const data = await res.json();
+    const rawText = data?.choices?.[0]?.message?.content || "";
+    const text = stripThinkingBlocks(rawText);
+    if (!text) return { ok: false, error: "Kimi returned an empty response", model };
+    return { ok: true, text, model };
+  } catch (e) {
+    console.error("Kimi API fetch error:", e);
+    return { ok: false, error: String(e), model };
+  }
+}
+
+/** 既定: gpt-5.6-luna → 失敗時 kimi-k3 */
+async function synthesizeWithFallback(contents: ChatContent[]): Promise<SynthesizerResult> {
+  const lunaResult = await callOpenAiLuna(contents);
+  if (lunaResult.ok) {
+    return {
+      ok: true,
+      text: lunaResult.text,
+      provider: "openai",
+      model: lunaResult.model,
+    };
+  }
+
+  console.warn(
+    "OpenAI Luna failed; falling back to Kimi K3:",
+    lunaResult.model,
+    lunaResult.error.slice(0, 240),
+  );
+  const kimiResult = await callKimi(contents);
+  if (kimiResult.ok) {
+    return {
+      ok: true,
+      text: kimiResult.text,
+      provider: "kimi",
+      model: kimiResult.model,
+      fallbackFrom: {
+        provider: "openai",
+        model: lunaResult.model,
+        error: lunaResult.error,
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    provider: "kimi",
+    model: kimiResult.model,
+    error: kimiResult.error,
+    openaiError: lunaResult.error,
+    kimiError: kimiResult.error,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -194,9 +310,11 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  if (!resolveOpenAiApiKey()) {
+  if (!resolveOpenAiApiKey() && !resolveKimiApiKey()) {
     return new Response(
-      JSON.stringify({ error: "OPENAI_API_KEY が未設定です" }),
+      JSON.stringify({
+        error: "OPENAI_API_KEY または MOONSHOT_API_KEY が未設定です",
+      }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -329,24 +447,32 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const lunaResult = await callOpenAiLuna(contents);
+    const synth = await synthesizeWithFallback(contents);
 
-    if (lunaResult.ok) {
-      const note = action === "chat"
+    if (synth.ok) {
+      const fallbackNote = synth.fallbackFrom
+        ? `（フォールバック: ${synth.fallbackFrom.model} → ${synth.model}）`
+        : "";
+      const baseNote = action === "chat"
         ? orchestrationNote(intent, briefs)
-        : `モード: 分析レポート（${lunaResult.model}）`;
-      const providers = ["openai", ...briefs.filter((b) => b.ok).map((b) => b.provider)];
+        : `モード: 分析レポート（${synth.model}）`;
+      const note = `${baseNote}${fallbackNote}`;
+      const providers = [
+        synth.provider,
+        ...briefs.filter((b) => b.ok).map((b) => b.provider),
+      ];
       return new Response(
         JSON.stringify({
-          text: lunaResult.text,
-          provider: providers.length > 1 ? "orchestrated" : "openai",
-          model: lunaResult.model,
+          text: synth.text,
+          provider: providers.length > 1 ? "orchestrated" : synth.provider,
+          model: synth.model,
           providers,
           mode: action === "chat" ? intent : "analyze",
           note,
           orchestration: {
-            synthesizer: "openai",
-            model: lunaResult.model,
+            synthesizer: synth.provider,
+            model: synth.model,
+            fallbackFrom: synth.fallbackFrom || null,
             externals: briefs.map((b) => ({
               provider: b.provider,
               ok: b.ok,
@@ -361,21 +487,24 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    let friendlyError = `OpenAI (${lunaResult.model}) の呼び出しに失敗しました。`;
-    if (
-      lunaResult.error.includes("401") ||
-      lunaResult.error.toLowerCase().includes("invalid")
-    ) {
+    const combinedDetail = [
+      synth.openaiError ? `openai: ${synth.openaiError}` : "",
+      synth.kimiError ? `kimi: ${synth.kimiError}` : "",
+      synth.error,
+    ].filter(Boolean).join(" | ");
+    let friendlyError =
+      `AI呼び出しに失敗しました（gpt-5.6-luna → kimi-k3 とも不可）。`;
+    if (combinedDetail.includes("401") || combinedDetail.toLowerCase().includes("invalid")) {
       friendlyError =
-        "OpenAIのAPIキーが無効です。SupabaseのOPENAI_API_KEYをご確認ください。";
-    } else if (lunaResult.error.includes("429")) {
-      friendlyError = "OpenAI APIの利用クォータ上限に達しました。";
+        "AIのAPIキーが無効です。SupabaseのOPENAI_API_KEY / MOONSHOT_API_KEYをご確認ください。";
+    } else if (combinedDetail.includes("429")) {
+      friendlyError = "AI APIの利用クォータ上限に達しました。";
     }
     return new Response(
       JSON.stringify({
         error: friendlyError,
-        detail: lunaResult.error,
-        model: lunaResult.model,
+        detail: combinedDetail,
+        model: synth.model,
         mode: action === "chat" ? intent : "analyze",
         orchestration: briefs.map((b) => ({
           provider: b.provider,
