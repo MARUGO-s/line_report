@@ -43,6 +43,11 @@
 
 New records are appended below.
 
+### 2026-08-01 - Journal AI default → gpt-5.6-luna
+
+- Request: Journal Report AIの既定を Kimi K3 から GPT Luna へ変更。
+- Change: `ai-analyze` を OpenAI `gpt-5.6-luna` 既定に切替。戦略系の外部ブリーフ統合先も Luna。
+
 ### 2026-07-31 - Receipt correction multi-field edits
 
 - Request: 「この結果を修正」で複数箇所を直せるようにする。

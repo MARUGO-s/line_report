@@ -17,7 +17,7 @@ function classifyJournalChatIntent(message) {
   return 'data';
 }
 
-test('intent router: data-only questions stay on Kimi path', () => {
+test('intent router: data-only questions stay on synthesizer-only path', () => {
   assert.equal(classifyJournalChatIntent('2026年の売上推移は？'), 'data');
   assert.equal(classifyJournalChatIntent('7月の客単価とドリンク比率'), 'data');
   assert.equal(classifyJournalChatIntent('売れ筋TOP5は？'), 'data');

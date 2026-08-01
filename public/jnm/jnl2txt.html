@@ -7598,17 +7598,17 @@ ${buildStoreLocationBlockForAi()}
     const reply = (res.ok && result.text) ? result.text : null;
 
     if (reply) {
-      // Kimi 応答成功（戦略系は Perplexity/Grok をオーケストレーション済み）
+      // OpenAI Luna 応答成功（戦略系は Perplexity/Grok をオーケストレーション済み）
       const modeNote = result.note || (result.mode ? `モード: ${result.mode}` : '');
       const displayReply = modeNote ? `${reply}\n\n---\n_${modeNote}_` : reply;
       appendAiChatMessage('ai', displayReply, {
         question: msg,
         mode: result.mode || '',
-        provider: result.provider || result.orchestration?.synthesizer || 'kimi'
+        provider: result.provider || result.orchestration?.synthesizer || result.model || 'openai'
       });
       aiChatHistory.push({ role: 'assistant', content: reply });
     } else {
-      // Kimi呼び出し失敗。エラー内容を明記した上で、ローカル集計ロジックの回答にフォールバックする。
+      // OpenAI呼び出し失敗。エラー内容を明記した上で、ローカル集計ロジックの回答にフォールバックする。
       const errDetail = result.error || `HTTP ${res.status}`;
       const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
       const displayReply = `⚠️ **AI接続エラー**: ${errDetail}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
