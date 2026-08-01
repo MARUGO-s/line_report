@@ -65,4 +65,7 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /journal_ai_orchestrate/);
   assert.match(ai, /gatherExternalBriefs/);
   assert.match(ai, /orchestrationMode/);
+  assert.match(ai, /gpt-5\.6-luna/);
+  assert.match(ai, /callOpenAiLuna/);
+  assert.doesNotMatch(ai, /callKimi|kimi-k3|api\.moonshot\.ai/);
 });
