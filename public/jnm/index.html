@@ -9373,11 +9373,18 @@ function detectJournalComparisonSpecs(query, productHints) {
       ? Math.round((Math.min(...units) + Math.max(...units)) / 2)
       : (hints.unit != null ? hints.unit : 7000);
     if (hints.q || hints.needsFamilyInventory || /コース/.test(s)) {
+      // 境界値の由来をラベルに明記する（レポート上で「なぜこの金額か」が分かるように）
+      const splitReason = units.length >= 2
+        ? `境界${yen(split)}は質問で言及された${yen(Math.min(...units))}と${yen(Math.max(...units))}の中間値（自動設定）`
+        : (hints.unit != null
+          ? `境界${yen(split)}は質問で言及された単価（自動設定）`
+          : `境界${yen(split)}は既定値（自動設定）`);
       add({
         id: 'unit_band',
         axis: 'unit_band_among',
         item: { q: 'コース' },
-        unit_split: split
+        unit_split: split,
+        label: `コース単価 ${yen(split)}未満 vs ${yen(split)}以上／${splitReason}`
       });
     }
   }
