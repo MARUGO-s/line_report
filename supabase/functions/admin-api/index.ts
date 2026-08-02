@@ -7639,17 +7639,22 @@ function itemMatchesPosProductFilter(
     const joinedOk = filter.joinedQ.length >= 2
       ? nameNorm.includes(filter.joinedQ)
       : false
-    const wantsSp =
-      filter.tokens.some((t) =>
-        t === "sp" || t.startsWith("sp") || t.includes("スペシャル")
-      ) || /sp/.test(filter.joinedQ)
     const wantsCourse =
       filter.tokens.some((t) => t.includes("コ-ス") || t.includes("course")) ||
       /コ-ス|course/.test(filter.joinedQ)
-    const looseSpCourse = wantsSp && wantsCourse &&
-      (nameNorm.includes("sp") || nameNorm.includes("スペシャル")) &&
+    // 短い別名トークン＋コース語幹（店舗ごとの SP/季節/限定 等）を緩く許容
+    const aliasTokens = filter.tokens.filter((t) =>
+      t.length >= 1 &&
+      t.length <= 8 &&
+      !t.includes("コ-ス") &&
+      t !== "course" &&
+      !/^\d+$/.test(t)
+    )
+    const looseAliasCourse = wantsCourse && aliasTokens.some((t) =>
+      nameNorm.includes(t) &&
       (nameNorm.includes("コ-ス") || nameNorm.includes("course"))
-    if (!tokenOk && !joinedOk && !looseSpCourse) return false
+    )
+    if (!tokenOk && !joinedOk && !looseAliasCourse) return false
   }
   return true
 }
