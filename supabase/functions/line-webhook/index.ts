@@ -2313,6 +2313,126 @@ Deno.serve(async (req) => {
       }
     }
 
+async function maybeProcessKnowledgeImageMessage(
+  supabase: any,
+  registry: StoreRegistryRow,
+  event: any,
+  lineAccessTokenForSearch?: string
+): Promise<boolean> {
+  try {
+    const storeKey = registry.store_partition_key || ''
+    const msgId = String(event.message?.id || '').trim()
+    const text = String((event.message as any)?.text || '').trim()
+    
+    const isMemo = text && /#(?:メモ|日報|note)/i.test(text)
+    if (!isMemo || !storeKey || !msgId) {
+      return false
+    }
+
+    const token = resolveChannelAccessToken(supabase, registry) || lineAccessTokenForSearch || ''
+    if (!token) return false
+
+    // 1. LINE API から画像バイナリを取得
+    const binary = await fetchLineMessageBinary(msgId, token)
+    if (!binary || binary.length === 0) return false
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
+    
+    // 2. Gemini 2.0 Flash 画像AI解析 (/analyze-image)
+    const formData = new FormData()
+    const blob = new Blob([binary], { type: 'image/jpeg' })
+    formData.append('file', blob, `line_${msgId}.jpg`)
+    formData.append('store_key', storeKey)
+
+    const analyzeRes = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/analyze-image`, {
+      method: 'POST',
+      headers: {
+        'x-admin-token': 'demo',
+        'x-admin-surface': 'line_report',
+        'x-store-key': storeKey
+      },
+      body: formData
+    })
+
+    if (!analyzeRes.ok) {
+      console.warn('Knowledge image analyze failed:', analyzeRes.status, await analyzeRes.text())
+      return false
+    }
+
+    const analyzeJson = await analyzeRes.json()
+    const result = analyzeJson.result || {}
+
+    // 3. 原本画像を Storage (store-knowledge) へ保存
+    const uploadData = new FormData()
+    uploadData.append('file', blob, `line_${msgId}.jpg`)
+    uploadData.append('store_key', storeKey)
+
+    const uploadRes = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/upload`, {
+      method: 'POST',
+      headers: {
+        'x-admin-token': 'demo',
+        'x-admin-surface': 'line_report',
+        'x-store-key': storeKey
+      },
+      body: uploadData
+    })
+
+    let storagePath = null
+    if (uploadRes.ok) {
+      const uploadJson = await uploadRes.json()
+      storagePath = uploadJson.storage_path || null
+    }
+
+    // 4. ナレッジ DB 登録 & 1,500文字 RAG 生成
+    const recordPayload = {
+      store_partition_key: storeKey,
+      category: result.category || 'メニュー',
+      title: result.title || `LINE画像メモ_${msgId}`,
+      summary: result.summary || 'LINEより投稿された画像メモ',
+      body_text: result.body_text || text || '',
+      tags: Array.isArray(result.tags) ? ['LINE投稿', '画像メモ', ...result.tags] : ['LINE投稿', '画像メモ'],
+      storage_bucket: 'store-knowledge',
+      storage_path: storagePath,
+      original_file_name: `line_${msgId}.jpg`,
+      mime_type: 'image/jpeg',
+      file_size_bytes: binary.length,
+      source_type: 'line_post',
+      created_by: event.source?.userId ? String(event.source.userId) : 'LINEユーザー'
+    }
+
+    const saveRes = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': 'demo',
+        'x-admin-surface': 'line_report',
+        'x-store-key': storeKey
+      },
+      body: JSON.stringify(recordPayload)
+    })
+
+    if (saveRes.ok) {
+      // 5. LINE Reaction API で通数0通の thumbs_up (👍) を送信
+      fetch('https://api.line.me/v2/bot/message/react', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          messageId: msgId,
+          reactionType: 'thumbs_up'
+        })
+      }).catch(e => console.warn('LINE Reaction API error:', e))
+
+      return true
+    }
+  } catch (err) {
+    console.error('maybeProcessKnowledgeImageMessage failed:', err)
+  }
+  return false
+}
+
     // ファイル（Excel/CSV）受信 → 月次日別売上管理表なら日次売上をレシート同等で登録。
     if (event.type === 'message' && event.message?.type === 'file') {
       try {
@@ -2328,6 +2448,18 @@ Deno.serve(async (req) => {
 
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
+        // 店舗ナレッジ (#メモ) 画像の全自動AI解析・RAG連動 & メディア重複防止
+        const knowledgeHandled = await maybeProcessKnowledgeImageMessage(
+          supabase,
+          registry as StoreRegistryRow,
+          event,
+          lineAccessTokenForSearch
+        )
+        if (knowledgeHandled) {
+          // #メモ 画像として保存成功時は、既存のレシート処理・メディア保存をスキップして重複防止
+          continue
+        }
+
         const result = await processReceiptImageEvent(
           registry as StoreRegistryRow,
           event,
