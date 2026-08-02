@@ -8141,6 +8141,8 @@ function formatVerifiedDetailLines(p, indent = '') {
       lines.push(`${indent}    フード ${yen(dinnerFood)}（${Math.round(dinnerFood / dTot * 100)}%） / ドリンク ${yen(dinnerDrink)}（${Math.round(dinnerDrink / dTot * 100)}%）`);
     }
   }
+  const mealFdTrend = formatMonthlyMealFdTrendLines(p?.monthlyBreakdown, indent);
+  if (mealFdTrend) lines.push(mealFdTrend);
   // 期間に12月が含まれる場合の注記
   const hasDecember = (Array.isArray(p?.monthlyBreakdown) && p.monthlyBreakdown.some(m => Number(m?.month) === 12))
     || /12\s*月|クリスマス/.test(String(p?.label || ''));
@@ -8564,6 +8566,70 @@ async function loadMonthSalesForDrilldown(monthKey, sources) {
     }
   }
   return { sales, source };
+}
+
+/**
+ * 月次のランチ／ディナー別フード・ドリンクが欠けている月を、
+ * 保存レポート伝票→ジャーナルから補完する（全店共通）。
+ */
+async function enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKey) {
+  const rows = Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [];
+  if (!rows.length) return rows;
+  // 通信量上限: 直近18か月を優先して補完
+  const targets = rows.length <= 18 ? rows : rows.slice(-18);
+  for (const m of targets) {
+    const hasSplit = (
+      (Number(m.lunchFoodTotal) || 0) +
+      (Number(m.lunchDrinkTotal) || 0) +
+      (Number(m.dinnerFoodTotal) || 0) +
+      (Number(m.dinnerDrinkTotal) || 0)
+    ) > 0;
+    if (hasSplit) continue;
+    if (!m.key) continue;
+    try {
+      const loaded = await loadMonthSalesForDrilldown(m.key, monthSourcesByKey?.get?.(m.key) || []);
+      if (!loaded.sales.length) continue;
+      const agg = aggregateSalesRows(loaded.sales);
+      m.lunchFoodTotal = agg.lunchFoodTotal || 0;
+      m.lunchDrinkTotal = agg.lunchDrinkTotal || 0;
+      m.dinnerFoodTotal = agg.dinnerFoodTotal || 0;
+      m.dinnerDrinkTotal = agg.dinnerDrinkTotal || 0;
+      if (!(Number(m.lunchTotal) > 0)) m.lunchTotal = agg.lunchTotal || 0;
+      if (!(Number(m.dinnerTotal) > 0)) m.dinnerTotal = agg.dinnerTotal || 0;
+      if (!(Number(m.lunchCustomers) > 0)) m.lunchCustomers = agg.lunchCustomers || 0;
+      if (!(Number(m.dinnerCustomers) > 0)) m.dinnerCustomers = agg.dinnerCustomers || 0;
+      m.mealFdSource = loaded.source;
+    } catch (err) {
+      console.warn('enrichMonthlyMealCategorySplit failed:', m.key, err);
+    }
+  }
+  return rows;
+}
+
+/** 月次のディナー／ランチ内 F/D 比率を確定集計テキストにする */
+function formatMonthlyMealFdTrendLines(monthlyBreakdown, indent = '') {
+  const rows = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : []).filter((m) => (
+    (Number(m.lunchFoodTotal) || 0) + (Number(m.lunchDrinkTotal) || 0) +
+    (Number(m.dinnerFoodTotal) || 0) + (Number(m.dinnerDrinkTotal) || 0)
+  ) > 0);
+  if (!rows.length) return '';
+  const lines = [`${indent}- ランチ／ディナー別フード・ドリンク比率（月次・伝票またはジャーナル補完）:`];
+  rows.forEach((m) => {
+    const lf = Number(m.lunchFoodTotal) || 0;
+    const ld = Number(m.lunchDrinkTotal) || 0;
+    const df = Number(m.dinnerFoodTotal) || 0;
+    const dd = Number(m.dinnerDrinkTotal) || 0;
+    const lTot = lf + ld;
+    const dTot = df + dd;
+    const lunchBit = lTot > 0
+      ? `ランチ F${yen(lf)}(${Math.round(lf / lTot * 100)}%)/D${yen(ld)}(${Math.round(ld / lTot * 100)}%)`
+      : 'ランチ F/Dなし';
+    const dinnerBit = dTot > 0
+      ? `ディナー F${yen(df)}(${Math.round(df / dTot * 100)}%)/D${yen(dd)}(${Math.round(dd / dTot * 100)}%)`
+      : 'ディナー F/Dなし';
+    lines.push(`${indent}  - ${m.label}: ${lunchBit}　／　${dinnerBit}`);
+  });
+  return lines.join('\n');
 }
 
 /**
@@ -10636,7 +10702,9 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
           avgSpend: rest.totalCustomers ? Math.round(rest.totalSales / rest.totalCustomers) : 0
         };
       });
-    // 客単価が突出した月は、レポート伝票→ジャーナルの順で内訳を確定集計へ載せる
+    // 昼夜別F/Dが欠けている月はレポート／ジャーナルから補完（ドリンク比率の月次追跡用）
+    await enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKey);
+    // 客単価・売上が突出した月は、レポート伝票→ジャーナルの順で内訳を確定集計へ載せる
     const anomalyItemFacts = await enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey);
 
     // 期間合計は月次代表値の合算を優先（二重計上を避ける）。月が取れない場合のみ従来の合算へフォールバック。
