@@ -77,6 +77,111 @@ serve(async (req: Request) => {
     const url = new URL(req.url);
     const path = url.pathname.replace(/\/$/, "");
 
+    function isMonthlyReportTitle(title?: string): boolean {
+      if (!title) return false;
+      return /月次|月別|月間|全体売上|\d{4}年\d{1,2}月/.test(title);
+    }
+
+    // ==========================================
+    // 1. Saved POS Reports (/pos-journals/saved-reports)
+    // ==========================================
+    if (path.includes("/pos-journals/saved-reports")) {
+      const isItem = path.endsWith("/saved-reports/item");
+
+      // A. GET /pos-journals/saved-reports (一覧取得)
+      if (req.method === "GET" && !isItem) {
+        const storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
+        const kind = url.searchParams.get("kind");
+        const limitParam = parseInt(url.searchParams.get("limit") || "500", 10);
+
+        let query = supabase.from("saved_reports").select("*").order("created_at", { ascending: false }).limit(limitParam);
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        let reports = (data || []).map((row: any) => {
+          if (row.data && typeof row.data === "object") {
+            return { id: row.id, title: row.title, period: row.period, created_at: row.created_at, ...row.data };
+          }
+          return row;
+        });
+
+        if (storeKey) {
+          reports = reports.filter((r: any) => !r.store_partition_key || r.store_partition_key === storeKey);
+        }
+
+        if (kind === "monthly") {
+          reports = reports.filter((r: any) => isMonthlyReportTitle(r.title));
+        } else if (kind === "daily") {
+          reports = reports.filter((r: any) => !isMonthlyReportTitle(r.title));
+        }
+
+        return new Response(JSON.stringify({ reports, items: reports }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // B. GET /pos-journals/saved-reports/item (単一詳細取得)
+      if (req.method === "GET" && isItem) {
+        const id = url.searchParams.get("id");
+        if (!id) {
+          return new Response(JSON.stringify({ error: "Missing id" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        const { data, error } = await supabase.from("saved_reports").select("*").eq("id", id).single();
+        if (error) throw error;
+
+        let report = data;
+        if (data?.data && typeof data.data === "object") {
+          report = { id: data.id, title: data.title, period: data.period, created_at: data.created_at, ...data.data };
+        }
+
+        return new Response(JSON.stringify({ report, item: report }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // C. POST /pos-journals/saved-reports (保存・更新)
+      if (req.method === "POST" && !isItem) {
+        const body = await req.json();
+        const records = Array.isArray(body) ? body : (body.reports || body.items || [body]);
+        const storeKey = normalizeStoreKey(body.store_key || body.store_partition_key || req.headers.get("x-store-key"));
+
+        const upsertRows = records.map((rec: any) => {
+          const recId = String(rec.id || rec.report_id || `rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+          const title = rec.title || rec.report_title || "売上レポート";
+          const period = rec.period || rec.period_label || "";
+          const payload = { ...rec, store_partition_key: rec.store_partition_key || storeKey };
+          return {
+            id: recId,
+            title: title,
+            period: period,
+            data: payload,
+            updated_at: new Date().toISOString()
+          };
+        });
+
+        const { data, error } = await supabase.from("saved_reports").upsert(upsertRows).select();
+        if (error) throw error;
+
+        return new Response(JSON.stringify({ success: true, count: data?.length || 0 }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // D. DELETE /pos-journals/saved-reports/item (削除)
+      if (req.method === "DELETE" && isItem) {
+        const id = url.searchParams.get("id");
+        if (!id) {
+          return new Response(JSON.stringify({ error: "Missing id" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        const { error } = await supabase.from("saved_reports").delete().eq("id", id);
+        if (error) throw error;
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     if (path.includes("/pos-journals/knowledge")) {
       const isItem = path.endsWith("/knowledge/item");
       const isUpload = path.endsWith("/knowledge/upload");
@@ -204,7 +309,7 @@ ${cleanText}
 
         let record: Record<string, any> = {
           store_partition_key: storeKey,
-          category: "その他", // ハードコードでその他を強制指定
+          category: safeCategory,
           title: String(categorizedResult.title || "LINEメモ").trim(),
           summary: String(categorizedResult.summary || cleanText).trim(),
           body_text: cleanText,
