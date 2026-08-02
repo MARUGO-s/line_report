@@ -1,6 +1,6 @@
 # 🌐 システム全体アーキテクチャ & 運用ワークフロー仕様書 (SYSTEM_ARCHITECTURE_OVERVIEW.md)
 
-本ドキュメントは、電子ジャーナル（`.jnl` / `.lzh`）全自動デコード・集計機能、Gemini 2.0 Flash を活用した店舗ナレッジ（メニュー画像等）のマルチモーダルAI解析、全自動 RAG チャンク生成、および売上データと施策・導入商品の「クロス効果測定・売上貢献度分析」を行うシステム全体の処理の流れとアーキテクチャを解説する包括仕様書です。
+本ドキュメントは、電子ジャーナル（`.jnl` / `.lzh`）全自動デコード・集計機能、Gemini 2.0 Flash を活用した店舗ナレッジ（メニュー画像等）のマルチモーダルAI解析、LINEグループ投稿（`#メモ`）の全自動識別・ナレッジ連動、通数0通のLINEメッセージリアクション（👍）、1,500文字の全自動 RAG チャンク生成、および売上データと施策・現場メモの「クロス効果測定・売上貢献度分析」を行うシステム全体の処理の流れとアーキテクチャを解説する包括仕様書です。
 
 ---
 
@@ -12,26 +12,34 @@ flowchart TD
         UI_JNL["電子ジャーナル (.jnl/.lzh)\n一括ドラッグ＆ドロップ"]
         UI_KNOWLEDGE["店舗ナレッジ (施策/メニュー画像)\nドラッグ＆ドロップ / Paste / 参照"]
         UI_MODAL["✨ Gemini 2.0 Flash 解析結果\n確認・手入力修正モーダル"]
+        UI_RAG_MODAL["📑 RAGチャンク一覧閲覧 &\nテキスト/JSON ダウンロード機能"]
         UI_CHAT["対話型 AI チャット & \n売上分析ダッシュボード"]
     end
 
-    subgraph バックエンド ["Supabase Edge Functions (admin-api / ai-analyze)"]
+    subgraph 現場LINE ["店舗LINEグループ"]
+        LINE_MSG["現場つぶやき・日報投稿\n(例: #メモ 今日は大雨で客足落ちると思ったが...)"]
+        LINE_REACTION["📱 通数0通のリアクション付与\n(投稿メッセージ右下に 👍 マークが自動付与)"]
+    end
+
+    subgraph バックエンド ["Supabase Edge Functions (admin-api / line-webhook / ai-analyze)"]
         API_PARSER["JNL / LZH ブラウザ内高速デコーダー\n(100%厳密演算・誤差ゼロ)"]
+        API_LINE_WEBHOOK["line-webhook\n(#メモ 高速検知 & リアクションAPI制御)"]
+        API_LINE_POST["/process-line-post\n(Gemini 2.0 Flash 全自動カテゴリ/タイトル/タグ分類)"]
         API_VISION["/analyze-image\n(Gemini 2.0 Flash 画像マルチモーダル解析)"]
-        API_RAG["/process\n(全自動 RAG チャンク分割・検索用インデックス化)"]
+        API_RAG["/process\n(1,500文字 RAG チャンク分割・検索インデックス化)"]
         API_INSIGHT["/generate-insight\n(施策前後・新商品の売上貢献度自動比較)"]
         API_AI_CHAIN["ai-analyze マルチAIチェーン\n(OpenAI GPT / Perplexity / Grok / Moonshot)"]
     end
 
     subgraph データベース ["Supabase PostgreSQL & Storage"]
-        DB_DOCS["public.store_knowledge_documents\n(資料メタデータ・要約・本文)"]
-        DB_CHUNKS["public.store_knowledge_chunks\n(RAG分割テキスト・pgvector/trgm)"]
+        DB_DOCS["public.store_knowledge_documents\n(資料メタデータ・要約・本文・source_type)"]
+        DB_CHUNKS["public.store_knowledge_chunks\n(1,500文字 RAG分割テキスト・pgvector/trgm)"]
         DB_REPORTS["public.reports\n(売上レポート・単品販売明細)"]
         STORAGE_BUCKET["Storage: store-knowledge\n(非公開原本画像・PDF保管)"]
     end
 
     subgraph 外部AI ["マルチAIエンジン (役割分担)"]
-        GEMINI_VISION["Gemini 2.0 Flash\n(画像文字起こし・OCR担当)"]
+        GEMINI_VISION["Gemini 2.0 Flash\n(画像文字起こし & LINE投稿の全自動識別・分類)"]
         MAIN_AI_CHAIN["OpenAI (GPT) / Perplexity / Grok\n(売上コンサル・分析回答担当)"]
     end
 
@@ -39,7 +47,14 @@ flowchart TD
     UI_JNL --> API_PARSER --> DB_REPORTS
     UI_KNOWLEDGE --> API_VISION --> GEMINI_VISION
     GEMINI_VISION --> UI_MODAL --> DB_DOCS & STORAGE_BUCKET
+    
+    LINE_MSG --> API_LINE_WEBHOOK
+    API_LINE_WEBHOOK -->|プログラム高速判定| API_LINE_POST --> GEMINI_VISION
+    GEMINI_VISION -->|解析・自動メタデータ付与| DB_DOCS
+    API_LINE_POST -->|保存完了レスポンス| API_LINE_WEBHOOK -->|通数カウント 0 通| LINE_REACTION
+
     DB_DOCS --> API_RAG --> DB_CHUNKS
+    DB_CHUNKS --> UI_RAG_MODAL
     DB_REPORTS & DB_CHUNKS --> API_AI_CHAIN --> MAIN_AI_CHAIN
     MAIN_AI_CHAIN --> UI_CHAT
     DB_REPORTS & DB_DOCS --> API_INSIGHT --> DB_DOCS
@@ -64,15 +79,31 @@ flowchart TD
 
 ---
 
-### 3. 全自動 RAG チャンク生成 & ベクトル検索基盤
-1. **自動テキストチャンク化 (`/process`)**: 保存された資料テキスト（要約＋本文）を約600文字ごとの最適な文脈単位に自動分割。
-2. **RAGデータベース (`store_knowledge_chunks`) へ格納**: 分割されたチャンクは `store_knowledge_chunks` テーブルに保存され、`pg_trgm` 部分一致および将来の `pgvector` 1536次元埋め込みベクトルインデックスが自動付与。
-3. **ハイブリッド検索**: 質問や売上分析の実行時に、対象期間やキーワードに合致するRAGチャンクを瞬時にピンポイント抽出。
+### 3. 現場LINE投稿（`#メモ`）の全自動識別・即時RAG連動 & 通数0通リアクション（👍）
+1. **100%プログラム判定（高速スルー）**: 
+   店舗LINEグループで投稿されたメッセージ内に `#メモ`（または `#日報` / `#note`）が含まれているかを `line-webhook` 内の JavaScript 条件文で判定。タグのない日常会話はAIの呼び出しを行わずに一瞬で即時スルー（AIコスト0円）。
+2. **Gemini 2.0 Flash による全自動識別 (`/process-line-post`)**:
+   `#メモ` が含まれているメッセージのみを解析し、以下のメタデータを全自動で判定・生成して DB (`store_knowledge_documents`) へ保存：
+   - `title`: 15文字前後の分かりやすいタイトル（例: `「大雨での赤ワイン煮込み好評」`）
+   - `category`: `施策` / `メニュー` / `価格改定` / `イベント` / `マニュアル` / `その他`
+   - `summary`: 1〜3行の簡潔な要約
+   - `tags`: 関連タグ配列（例: `["LINE投稿", "現場日報", "天候", "売上傾向", "赤ワイン煮込み"]`）
+3. **通数 0 通のメッセージリアクション（👍）付与**:
+   保存成功後、LINE Messaging API の Message Reaction API (`POST /v2/bot/message/react`) を使用して、LINE公式アカウントの月間送信通数枠を**1通たりとも消費せずに（カウント0通）** 投稿メッセージの右下に **👍 (thumbs_up)** マークを自動付与。現場スタッフは会話の邪魔になる返信テキストなしで一目で登録完了を確認可能。
 
 ---
 
-### 4. 売上データ × 店舗ナレッジの「売上貢献度・効果測定クロス分析」
-1. **クロスマッチング**: 新メニューボトルや施策の導入日（ナレッジデータ）と、ジャーナルの単品売上・カテゴリ売上（レポートデータ）を同期。
+### 4. 1,500文字 RAG チャンク全自動生成 & ベクトル検索基盤
+1. **最適化されたテキストチャンク化 (`/process`)**: 保存された資料テキストおよびLINE現場ログを **1,500文字単位（前後200文字の重複オーバーラップ）** で分割。分割の際は文字数による切断ではなく「2連改行 (段落)」➔「1連改行」➔「句点 (。)」の優先度で文章の自然な切れ目を考慮。
+2. **RAGデータベース (`store_knowledge_chunks`) へ格納**: 分割されたチャンクは `store_knowledge_chunks` テーブルに保存され、`pg_trgm` 部分一致および将来の `pgvector` 1536次元埋め込みベクトルインデックスが自動付与。
+3. **画面での RAG 閲覧 & ダウンロード機能**:
+   - 各資料カードの **「📑 RAG表示」** ボタンを押すと、AIが作成・分割した実際の RAG チャンク一覧（文字数・テキスト）をモーダルでプレビュー閲覧可能。
+   - **「💾 RAGをDL (.txt / .json)」** ボタンを押すと、AI解読全文およびチャンクデータを手元のPCへテキストファイルとしてワンクリック保存可能。
+
+---
+
+### 5. 売上データ × 店舗ナレッジの「売上貢献度・効果測定クロス分析」
+1. **クロスマッチング**: 新メニューボトルや施策の導入日（ナレッジデータ）および現場LINE投稿の定性情報と、ジャーナルの単品売上・カテゴリ売上（レポートデータ）を同期。
 2. **売上貢献度の自動算出**:
    - 該当ボトルの「販売本数」「売上金額」「ドリンク全体に占める売上構成比」「客単価への影響額」を自動集計。
 3. **AIアナリストによる多角レポート**:
@@ -84,10 +115,10 @@ flowchart TD
 ## ⚙️ 3. 信頼性を担保する重要設計仕様（AI役割分担・スマートマッチング・正確性）
 
 ### ① AIエンジンの明確な役割分担
-- **画像OCR・文字起こし担当 (Gemini 2.0 Flash)**:
-  画像内のレイアウト・メニュー名・価格・フォントを認識し、人間が扱いやすい構造化日本語テキストへ変換する専門エンジン。
+- **画像OCR & LINE投稿全自動識別担当 (Gemini 2.0 Flash)**:
+  画像内のレイアウト・メニュー名・価格の読み取り、およびLINEの `#メモ` 投稿からタイトル・要約・カテゴリ・タグを自動生成して構造化日本語テキストへ変換する専門エンジン。
 - **売上分析・コンサルティング担当 (OpenAI GPT / Perplexity / Grok / Moonshot)**:
-  Gemini によって文字起こしされたナレッジテキストと売上数値を読み合わせ、経営コンサルティング回答や外部動向検索を担うメインAIパイプライン。
+  Gemini によって文字起こしされたナレッジテキスト・現場LINEログと売上数値を読み合わせ、経営コンサルティング回答や外部動向検索を担うメインAIパイプライン。
 
 ### ② あいまい紐付け（スマートマッチング）と表記ゆれ吸収
 - **完全一致不要の紐付け**:
@@ -114,14 +145,16 @@ flowchart TD
 | `public.store_knowledge_chunks` | RAG検索用分割チャンク（`document_id`, `chunk_index`, `chunk_text`, `search_text`, `embedding`） |
 | `storage.buckets ('store-knowledge')` | 非公開原本画像・PDF等の保管先（上限 20MB） |
 
-### バックエンド API ルート (`supabase/functions/admin-api`)
+### バックエンド API ルート
 
 - `POST /pos-journals/knowledge/analyze-image`: Gemini 2.0 Flash マルチモーダル画像解析
-- `POST /pos-journals/knowledge`: ナレッジ新規保存・更新 & 自動RAGチャンク化
+- `POST /pos-journals/knowledge/process-line-post`: LINE `#メモ` のプログラム高速判別 & AI全自動カテゴリ・タイトル・タグ分類
+- `POST /pos-journals/knowledge`: ナレッジ新規保存・更新 & 1,500文字自動RAGチャンク化
 - `POST /pos-journals/knowledge/upload`: 添付ファイルアップロード (Storage + SHA-256)
-- `POST /pos-journals/knowledge/process`: ドキュメントのRAGチャンク再生成
+- `POST /pos-journals/knowledge/process`: ドキュメントのRAGチャンク再生成 (1,500文字)
 - `POST /pos-journals/knowledge/generate-insight`: 施策効果測定インサイト自動生成
 - `GET /pos-journals/knowledge`: ナレッジ＆合致RAGチャンクのハイブリッド検索
+- `GET /pos-journals/knowledge/item`: 単一ドキュメント & RAG チャンク一覧の全詳細取得
 - `GET /pos-journals/knowledge/download`: 署名付きURL発行
 - `DELETE /pos-journals/knowledge/item`: 論理削除 / 物理削除
 
@@ -134,4 +167,4 @@ flowchart TD
 - **店舗分離セキュリティ**: `store_partition_key` により22店舗のデータアクセスを完全隔離。
 
 ---
-*本ドキュメントにより、後続のAIアシスタントや開発チームがシステム全体のデータフロー、画像AI解析、RAGチャンク生成、マルチAIの役割分担、表記ゆれ吸収、および誤差ゼロの売上数値計算設計を正確に把握できます。*
+*本ドキュメントにより、後続のAIアシスタントや開発チームがシステム全体のデータフロー、画像AI解析、LINE投稿連動、通数0通リアクション、1,500文字RAGチャンク生成、マルチAIの役割分担、表記ゆれ吸収、および誤差ゼロの売上数値計算設計を正確に把握できます。*
