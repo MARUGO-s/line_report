@@ -544,7 +544,8 @@ ${cleanText}
       }
 
       // 7. Create or Update Knowledge (POST /pos-journals/knowledge)
-      if (req.method === "POST") {
+      const isExactKnowledgePost = path.endsWith("/knowledge") || path.endsWith("/knowledge/");
+      if (req.method === "POST" && isExactKnowledgePost) {
         const body = await req.json();
         const storeKey = normalizeStoreKey(body.store_partition_key || body.store_key || req.headers.get("x-store-key"));
 
