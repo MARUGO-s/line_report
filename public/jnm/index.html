@@ -12950,6 +12950,64 @@ function findLastAiChatQuestion() {
   return '';
 }
 
+function isAiClarificationHistoryItem(item) {
+  if (!item || item.role !== 'assistant') return false;
+  if (item.clarification) return true;
+  const content = String(item.content || '');
+  return content.includes(SAVED_DATA_CLARIFICATION_MARKER)
+    || content.includes(AI_INTENT_CLARIFICATION_MARKER);
+}
+
+/**
+ * PDF・履歴保存用の「質問」を組み立てる。
+ * AIが確認質問（期間・意図）を挟んだ場合、最後の返信だけでなく
+ * 「元の質問 → AIの確認 → 回答 → …」のやり取り全体を質問として記録する。
+ */
+function buildAiChatQuestionThread() {
+  let lastUserIdx = -1;
+  for (let i = aiChatHistory.length - 1; i >= 0; i--) {
+    if (aiChatHistory[i] && aiChatHistory[i].role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx < 0) return '';
+
+  // 直前のAI発言が確認質問である間、さかのぼって元の質問を探す
+  let startUserIdx = lastUserIdx;
+  let i = startUserIdx - 1;
+  while (i >= 0) {
+    while (i >= 0 && aiChatHistory[i]?.role !== 'assistant') i--;
+    if (i < 0) break;
+    if (!isAiClarificationHistoryItem(aiChatHistory[i])) break;
+    let j = i - 1;
+    while (j >= 0 && aiChatHistory[j]?.role !== 'user') j--;
+    if (j < 0) break;
+    startUserIdx = j;
+    i = j - 1;
+  }
+
+  if (startUserIdx === lastUserIdx) {
+    return String(aiChatHistory[lastUserIdx].content || '').trim();
+  }
+
+  const lines = [String(aiChatHistory[startUserIdx].content || '').trim()];
+  let round = 0;
+  for (let k = startUserIdx + 1; k <= lastUserIdx; k++) {
+    const item = aiChatHistory[k];
+    if (!item) continue;
+    const content = String(item.content || '').trim();
+    if (!content) continue;
+    if (item.role === 'assistant') {
+      round++;
+      lines.push(`【AIからの確認${round}】${content}`);
+    } else if (item.role === 'user') {
+      lines.push(`【回答${round}】${content}`);
+    }
+  }
+  return lines.join('\n\n');
+}
+
 function appendAiChatMessage(role, text, meta) {
   const container = document.getElementById('aiChatMessages');
   const div = document.createElement('div');
@@ -12961,6 +13019,9 @@ function appendAiChatMessage(role, text, meta) {
       mode: '',
       provider: ''
     }, meta || {});
+    // 確認質問を挟んだ場合は、元の質問＋確認のやり取り全体を質問として記録する
+    const questionThread = buildAiChatQuestionThread();
+    if (questionThread) pdfMeta.question = questionThread;
     const pdfBtn = document.createElement('button');
     pdfBtn.type = 'button';
     pdfBtn.className = 'ai-msg-pdf-btn';
