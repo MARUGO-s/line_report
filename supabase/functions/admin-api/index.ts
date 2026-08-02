@@ -185,6 +185,98 @@ serve(async (req: Request) => {
       }
     }
 
+    // ==========================================
+    // 2. AI Chat PDF History (/pos-journals/chat-pdf-history)
+    // ==========================================
+    if (path.includes("/pos-journals/chat-pdf-history")) {
+      const isItem = path.endsWith("/chat-pdf-history/item");
+
+      // A. POST /pos-journals/chat-pdf-history (PDF保存)
+      if (req.method === "POST" && !isItem) {
+        const body = await req.json();
+        const storeKey = normalizeStoreKey(body.store_key || req.headers.get("x-store-key"));
+        const id = String(body.id || `pdf_${Date.now()}`);
+        const question = String(body.question || "").trim();
+        const answer = String(body.answer || "").trim();
+
+        if (!storeKey || !answer) {
+          return new Response(JSON.stringify({ error: "Missing store_key or answer" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        const reportId = `pdf_hist_${id}`;
+        const payload = {
+          id,
+          type: "chat_pdf_history",
+          store_partition_key: storeKey,
+          question,
+          answer,
+          mode: body.mode || "",
+          provider: body.provider || "",
+          created_at: new Date().toISOString()
+        };
+
+        const { error } = await supabase.from("saved_reports").upsert({
+          id: reportId,
+          title: question ? `[PDF履歴] ${question.substring(0, 50)}` : "AIチャットPDF履歴",
+          period: "AIチャット",
+          data: payload,
+          updated_at: new Date().toISOString()
+        });
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify({ success: true, id }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // B. GET /pos-journals/chat-pdf-history (一覧取得)
+      if (req.method === "GET" && !isItem) {
+        const storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
+        const limitParam = parseInt(url.searchParams.get("limit") || "100", 10);
+
+        const { data, error } = await supabase.from("saved_reports").select("*").order("created_at", { ascending: false }).limit(limitParam);
+        if (error) throw error;
+
+        const items = (data || []).filter((row: any) => {
+          const rowData = row.data && typeof row.data === "object" ? row.data : {};
+          return rowData.type === "chat_pdf_history" && (!storeKey || rowData.store_partition_key === storeKey || !rowData.store_partition_key);
+        }).map((row: any) => {
+          return {
+            id: row.data?.id || row.id,
+            question: row.data?.question || row.title,
+            answer: row.data?.answer || "",
+            createdAt: row.created_at,
+            mode: row.data?.mode || "",
+            provider: row.data?.provider || ""
+          };
+        });
+
+        return new Response(JSON.stringify({ items }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // C. DELETE /pos-journals/chat-pdf-history/item (削除)
+      if (req.method === "DELETE" && isItem) {
+        let storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
+        let id = url.searchParams.get("id");
+        if (!id) {
+          try {
+            const body = await req.json();
+            if (body.id) id = String(body.id);
+          } catch (_) {}
+        }
+        if (id) {
+          await supabase.from("saved_reports").delete().eq("id", `pdf_hist_${id}`);
+          await supabase.from("saved_reports").delete().eq("id", id);
+        }
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     if (path.includes("/pos-journals/knowledge")) {
       const isItem = path.endsWith("/knowledge/item");
       const isUpload = path.endsWith("/knowledge/upload");
