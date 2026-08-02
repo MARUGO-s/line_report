@@ -993,8 +993,9 @@
   }
   .ai-msg-user {
     align-self: flex-end;
-    background: var(--accent);
-    color: var(--page);
+    background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+    color: var(--text);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-bottom-right-radius: 4px;
   }
   .ai-msg-ai {
@@ -1008,7 +1009,7 @@
     color: inherit;
   }
   .ai-msg-user * {
-    color: var(--page);
+    color: inherit;
   }
   .ai-msg-pdf-btn{
     display:block;margin-top:8px;font-size:11px;font-weight:600;
