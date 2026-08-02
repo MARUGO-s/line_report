@@ -1,0 +1,57 @@
+---
+description: AI売上分析の確定集計レイヤは追加のみ。既存機能を消して置き換えない
+globs: jnl2txt.html,index.html,supabase/functions/admin-api/**/*.ts,public/jnm/**/*
+alwaysApply: true
+---
+
+# AI確定集計は「追加」で積み上げる
+
+このプロジェクトの AI チャットは、保存レポート＋ジャーナルから **確定集計** を組み立ててプロンプトへ載せる。
+新機能を足すときは既存レイヤを消したり、1つのフィールドに無理に統合したりしない。
+
+## 必須原則
+
+1. **Additive only**  
+   新機能は新しい関数・新しい戻り値フィールド・新しいプロンプト節として追加する。  
+   既存の `enrich*` / `format*` / API ルートを「これで足りるから削除」しない。
+
+2. **既存を壊さない**  
+   あるレイヤが別レイヤの入力配列を破壊的に書き換えない。  
+   比較用に月を足す必要がある場合は **コピー配列** を使う（本体の `monthlyBreakdown` は質問対象期間のまま）。
+
+3. **競合したら併用・役割分担**  
+   似た目的でも置き換えない。例:
+   - 異常月ドリルダウン → `anomalyItemFacts`
+   - 商品初出・導入月 → `productTimelineFacts`
+   - 昼夜別 F/D → 月次の `lunchFoodTotal` 等 + `formatMonthlyMealFdTrendLines`
+   - 売れ筋 → `rankProductsForAiDisplay`（★大分類除外・コース合算）  
+   プロンプト指示も「A があれば A を使え。B があれば B も使え」と併記する。
+
+4. **パイプライン順序（summarizeMatched 内）**  
+   現状の追加順を保ち、差し替えない:
+   1. `enrichMonthlyMealCategorySplit`
+   2. `enrichMonthlyAnomalyItemFacts`
+   3. `enrichProductTimelineFacts`
+   4. （商品ランキング）`rankProductsForAiDisplay` / `selectRequestedProductsForQuery`  
+   新レイヤを足すときは末尾（または明確な依存の直後）に挿入し、コメントの一覧も更新する。
+
+5. **プロンプト規約も追加**  
+   `strictSystemInstruction` や会社コンテキストに新ルールを足すとき、既存の「表示されていませんで止めない」系の条文を削除しない。条件付きで追記する。
+
+6. **API も追加**  
+   `admin-api` の新エンドポイントは既存パスを変更・統合しない。`STORE_SCOPED_ALLOWED_PATHS` に追記する。
+
+7. **変更前チェック**  
+   実装・デプロイ前に、少なくとも次が残っていることを確認する:
+   - 昼夜別 F/D の月次行
+   - 異常月の詳細解析
+   - 商品初出・導入月（ジャーナル横断）
+   - コース合算の売れ筋（★ドリンク単独最大の禁止）
+   - HTML オフロード／軽量一覧（容量分離）が意図せず巻き戻っていないこと
+
+## やってはいけないこと
+
+- 「新検索があるから異常月ドリルダウンは不要」と削除する
+- 商品初出のために質問対象外の月を `monthlyBreakdown` 本体へ混ぜ、期間合計や月次推移を歪める
+- 複数の確定事実を1つの曖昧な文章ブロックに潰して、片方の数値がプロンプトから消える
+- 既存の `formatJournalSpecificFactsForAi` 出力を新フォーマッタだけで置き換える

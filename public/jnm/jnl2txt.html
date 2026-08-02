@@ -8968,6 +8968,8 @@ async function appendMissingMonthsToBreakdown(monthlyBreakdown, monthSourcesByKe
 
 /**
  * ジャーナル全件から商品初出を特定し、導入月の前後で売上構成を確定集計へ載せる。
+ * 注意: 質問対象の月次推移（monthlyBreakdown）本体は変更しない。
+ * 前後比較用の月は別配列に補完し、既存の F/D・異常月レイヤと共存させる。
  */
 async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesByKey, allReports) {
   if (!wantsProductTimelineSearch(query)) return null;
@@ -9001,20 +9003,23 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
 
   const first = timeline?.first_seen || null;
   const pivot = first?.year_month || '';
+  // 本体の月次系列は壊さず、前後比較用のコピーだけを拡張する
+  const compareRows = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
+    .map((r) => ({ ...r }));
+  const compareSources = new Map(monthSourcesByKey instanceof Map ? monthSourcesByKey : []);
   if (pivot) {
     const needKeys = [];
     for (let i = 6; i >= 1; i--) {
       const k = shiftYearMonth(pivot, -i);
       if (k) needKeys.push(k);
     }
-    await appendMissingMonthsToBreakdown(monthlyBreakdown, monthSourcesByKey, allReports, needKeys);
+    await appendMissingMonthsToBreakdown(compareRows, compareSources, allReports, needKeys);
   }
 
-  const rows = Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [];
-  const beforeRows = pivot ? rows.filter((r) => r.key && r.key < pivot) : [];
-  const introRows = pivot ? rows.filter((r) => r.key === pivot) : [];
-  const afterRows = pivot ? rows.filter((r) => r.key && r.key > pivot) : [];
-  const onAfterRows = pivot ? rows.filter((r) => r.key && r.key >= pivot) : [];
+  const beforeRows = pivot ? compareRows.filter((r) => r.key && r.key < pivot) : [];
+  const introRows = pivot ? compareRows.filter((r) => r.key === pivot) : [];
+  const afterRows = pivot ? compareRows.filter((r) => r.key && r.key > pivot) : [];
+  const onAfterRows = pivot ? compareRows.filter((r) => r.key && r.key >= pivot) : [];
 
   const productByMonth = Array.isArray(timeline?.by_month) ? timeline.by_month : [];
   const productBefore = productByMonth.filter((m) => m.year_month < pivot);
@@ -11137,11 +11142,18 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
           avgSpend: rest.totalCustomers ? Math.round(rest.totalSales / rest.totalCustomers) : 0
         };
       });
-    // 昼夜別F/Dが欠けている月はレポート／ジャーナルから補完（ドリンク比率の月次追跡用）
+    // ── AI確定集計の追加レイヤ（置換禁止・併用必須）────────────────────────
+    // 新しい enrich を足すときは「差し替え」ではなく、ここに段階を足す。
+    // 各レイヤは独立したフィールドへ結果を載せ、既存フィールドを消さないこと。
+    // 1) enrichMonthlyMealCategorySplit … 昼夜別 F/D（月次に lunchFood 等を補完）
+    // 2) enrichMonthlyAnomalyItemFacts … 異常月 → anomalyItemFacts
+    // 3) enrichProductTimelineFacts   … 商品初出 → productTimelineFacts
+    //    （前後比較用月の補完は比較専用。monthlyBreakdown 本体は変更しない）
+    // 4) rankProductsForAiDisplay     … 売れ筋（★大分類除外・コース合算）
+    // プロンプト側も formatVerifiedDetailLines / formatJournalSpecificFactsForAi に
+    // 各セクションを併記し、片方を消して他方に統合しないこと。
     await enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKey);
-    // 客単価・売上が突出した月は、レポート伝票→ジャーナルの順で内訳を確定集計へ載せる
     const anomalyItemFacts = await enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey);
-    // 商品の導入・初出質問は、全ジャーナルを横断して開始月を特定し前後の売上構成を載せる
     const productTimelineFacts = await enrichProductTimelineFacts(
       q,
       monthlyBreakdown,
