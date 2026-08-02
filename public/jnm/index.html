@@ -7190,6 +7190,7 @@ function extractRangeRef(q) {
 }
 
 const SAVED_DATA_CLARIFICATION_MARKER = '保存データの分析対象を選んでください';
+const AI_INTENT_CLARIFICATION_MARKER = '知りたい内容を具体化してください';
 
 function resolveSavedDataClarificationReply(query, chatHistory) {
   const raw = String(query || '').trim();
@@ -7207,6 +7208,75 @@ function resolveSavedDataClarificationReply(query, chatHistory) {
   if (/^3(?:$|[.、)\s])/.test(raw)) return `直近12か月 ${raw}`;
   if (/^4(?:$|[.、)\s])/.test(raw)) return `全期間 ${raw}`;
   return raw;
+}
+
+function resolveAiIntentClarificationReply(query, chatHistory) {
+  const raw = String(query || '').trim();
+  if (!raw || !Array.isArray(chatHistory)) return raw;
+  let asked = false;
+  for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const item = chatHistory[i];
+    if (!item || item.role !== 'assistant') continue;
+    asked = String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER);
+    break;
+  }
+  if (!asked) return raw;
+
+  let original = '';
+  for (let i = chatHistory.length - 2; i >= 0; i--) {
+    const item = chatHistory[i];
+    if (item && item.role === 'user' && String(item.content || '').trim()) {
+      original = String(item.content).trim();
+      break;
+    }
+  }
+  if (!original) return raw;
+
+  const options = {
+    1: '総売上・売上推移',
+    2: 'フード／ドリンク／ワインの構成・比率',
+    3: '客数・客単価',
+    4: '売れ筋商品・アイテム内訳',
+    5: '原因分析・課題・改善策'
+  };
+  const selected = Object.entries(options).find(([number]) =>
+    new RegExp(`^${number}(?:$|[.、)\\s])`).test(raw)
+  );
+  return `${original} ${selected ? selected[1] : raw}`.trim();
+}
+
+function resolveAiChatQuery(query, chatHistory) {
+  return resolveAiIntentClarificationReply(
+    resolveSavedDataClarificationReply(query, chatHistory),
+    chatHistory
+  );
+}
+
+function needsAiIntentClarification(query) {
+  const q = String(query || '').toLowerCase().trim();
+  if (!q) return true;
+  return ![
+    /総売上|売上高|売上額|売上金額|売上合計|売上推移|売上実績|実績|増減|前月比|前年比|比較|トレンド|日別|日ごと|月別|月ごと|曜日別/,
+    /フード|ドリンク|ワイン|アルコール|構成比|比率|割合/,
+    /客数|来店客|来店人数|客単価|組数|人数/,
+    /商品|アイテム|メニュー|売れ筋|注文|明細|内訳|何が売れ|売れたもの|人気/,
+    /予測|見通し|予想|将来|来月|翌月/,
+    /原因|理由|課題|改善|施策|対策|提案|戦略|どうすれば|何をすべき/
+  ].some(pattern => pattern.test(q));
+}
+
+function buildAiIntentClarificationReply() {
+  return `### 🎯 ${AI_INTENT_CLARIFICATION_MARKER}
+
+ご質問の方向性が広いため、必要なデータと分析方法を正確に選びたいです。次のどれを知りたいですか？
+
+1. **総売上・売上推移**
+2. **フード／ドリンク／ワインの構成・比率**
+3. **客数・客単価**
+4. **売れ筋商品・アイテム内訳**
+5. **原因分析・課題・改善策**
+
+番号、または知りたい内容を一言で入力してください。期間の指定がある場合は、そのまま続けて入力できます。`;
 }
 
 function buildSavedReportCoverage(reports) {
@@ -7287,7 +7357,7 @@ function currentReportHasUsableSales() {
 }
 
 async function searchSavedReportsByQuery(query, chatHistory = []) {
-  let q = resolveSavedDataClarificationReply(query, chatHistory).toLowerCase();
+  let q = resolveAiChatQuery(query, chatHistory).toLowerCase();
   q = resolveRelativeTimeRefs(q);
 
   if (!getAdminToken() && !currentReportHasUsableSales()) {
@@ -7313,6 +7383,10 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
   if (allReports.length === 0) {
     if (savedReportsLoadError) return { loadError: savedReportsLoadError.message || '保存データの取得に失敗しました。' };
     return null;
+  }
+
+  if (needsAiIntentClarification(q)) {
+    return { needsIntentClarification: true };
   }
 
   // 期間範囲クエリ（例:「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
@@ -7570,6 +7644,10 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
 クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
     }
 
+    if (queryResult.needsIntentClarification) {
+      return buildAiIntentClarificationReply();
+    }
+
     if (queryResult.needsClarification) {
       return buildSavedDataClarificationReply(queryResult.coverage);
     }
@@ -7706,13 +7784,16 @@ async function sendAiChat() {
   // 保存ジャーナルへの事実照会はまずローカル集計で正確な数値を確定する（一覧APIが金額を持たないため）。
   // ただし確定した数値を固定テンプレートでそのまま返すのではなく、AIへ「検算済みの正解」として
   // 渡し、AIに文章化させることで、数字の正確性と会話の自然さ・柔軟な追加指示への対応を両立する。
+  const resolvedChatQuery = resolveAiChatQuery(msg, aiChatHistory);
   const queryResult = await searchSavedReportsByQuery(msg, aiChatHistory);
-  if (queryResult && (queryResult.loadError || queryResult.needsClarification)) {
+  if (queryResult && (queryResult.loadError || queryResult.needsIntentClarification || queryResult.needsClarification)) {
     removeAiChatLoading(loadingId);
     const reply = queryResult.loadError
       ? `### ⚠️ 保存データを確認できませんでした
 
 クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`
+      : queryResult.needsIntentClarification
+        ? buildAiIntentClarificationReply()
       : buildSavedDataClarificationReply(queryResult.coverage);
     appendAiChatMessage('ai', reply, { question: msg, provider: 'local-query-planner' });
     aiChatHistory.push({ role: 'assistant', content: reply });
@@ -7793,7 +7874,7 @@ ${buildStoreLocationBlockForAi()}
       },
       body: JSON.stringify({
         action: 'chat',
-        message: msg,
+        message: resolvedChatQuery,
         systemInstruction: strictSystemInstruction,
         salesData: compactData,
         chatHistory: aiChatHistory,

@@ -27,6 +27,7 @@ function extractFunction(source, name) {
 
 const context = {
   SAVED_DATA_CLARIFICATION_MARKER: '保存データの分析対象を選んでください',
+  AI_INTENT_CLARIFICATION_MARKER: '知りたい内容を具体化してください',
   monthKeyFromReport(report) {
     const text = String(report?.period || report?.title || '');
     const iso = text.match(/(20\d{2})-(\d{2})/);
@@ -38,6 +39,9 @@ const context = {
 vm.createContext(context);
 for (const name of [
   'resolveSavedDataClarificationReply',
+  'resolveAiIntentClarificationReply',
+  'needsAiIntentClarification',
+  'buildAiIntentClarificationReply',
   'buildSavedReportCoverage',
   'formatCoverageMonth',
   'resolveIndexedSavedRangeIntent',
@@ -86,9 +90,29 @@ test('a numeric reply to the clarification question becomes a searchable range i
   assert.match(context.resolveSavedDataClarificationReply('4', history), /^全期間/);
 });
 
+test('ambiguous questions ask for an analysis focus before loading detailed data', () => {
+  assert.equal(context.needsAiIntentClarification('2026年5月の売上を分析して'), true);
+  assert.equal(context.needsAiIntentClarification('2026年5月の売上推移を見せて'), false);
+  assert.equal(context.needsAiIntentClarification('2026年5月の客単価は？'), false);
+  assert.match(context.buildAiIntentClarificationReply(), /知りたい内容を具体化してください/);
+  assert.match(context.buildAiIntentClarificationReply(), /売れ筋商品・アイテム内訳/);
+});
+
+test('a numeric intent reply keeps the original question and adds the selected focus', () => {
+  const history = [
+    { role: 'user', content: '2026年5月の売上を分析して' },
+    { role: 'assistant', content: context.buildAiIntentClarificationReply() },
+    { role: 'user', content: '4' },
+  ];
+  const resolved = context.resolveAiIntentClarificationReply('4', history);
+  assert.match(resolved, /^2026年5月の売上を分析して 売れ筋商品・アイテム内訳$/);
+});
+
 test('both Journal Report entry files keep the planner and error distinction in sync', () => {
   assert.equal(indexHtml, html);
   assert.match(html, /needsClarification/);
+  assert.match(html, /needsIntentClarification/);
+  assert.match(html, /AI_INTENT_CLARIFICATION_MARKER/);
   assert.match(html, /データが無いとは判断していません/);
   assert.match(html, /local-query-planner/);
 });

@@ -43,6 +43,13 @@
 
 New records are appended below.
 
+### 2026-08-02 - Journal AI conversational intent clarification
+
+- Request: 質問が少しでも曖昧な場合、AIが質問の目的を聞き返し、知りたい内容を具体化してから分析する。
+- Change: 保存データ検索前に、総売上・推移、フード／ドリンク／ワイン比率、客数／客単価、商品内訳、原因分析／改善策の5分類を判定。焦点が無い質問には選択肢を返し、番号回答を元の質問へ結合して検索・AIへ渡す。
+- Behavior: 明確な指標・比較・期間質問は即時処理し、曖昧な質問だけ対話を1往復追加。質問内容は会話履歴から引き継ぐ。
+- Scope: `public/jnm/jnl2txt.html` / `index.html` とフロント回帰テストのみ。DB・Edge Function変更なし。
+
 ### 2026-08-02 - Journal AI mobile keyboard-safe composer
 
 - Request: スマートフォン／タブレットでソフトウェアキーボード表示時も、AIチャットの入力欄と入力中の文字を見える状態にする。
