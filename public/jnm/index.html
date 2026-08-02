@@ -4188,6 +4188,39 @@ function isMonthlyReportTitle(title){
   if(/日別/.test(t)) return false;
   return /月間|月別|^合算売上レポート/.test(t);
 }
+
+/** 複数月にまたがる合算レポートか（単月の月次系列には使わない） */
+function isCrossMonthAggregateReport(r){
+  const title=String(r?.title||'');
+  if(/合算/.test(title)) return true;
+  const period=String(r?.period||'');
+  const range=period.match(/(20\d{2})-(\d{2})(?:-\d{2})?\s*[〜～~\-]+\s*(20\d{2})-(\d{2})/);
+  if(range){
+    const start=`${range[1]}-${range[2]}`;
+    const end=`${range[3]}-${range[4]}`;
+    if(start!==end) return true;
+  }
+  // タイトル「2025年2月〜12月」形式
+  if(/(20\d{2})年\s*(\d{1,2})月\s*[〜～~\-]+\s*(?:(20\d{2})年\s*)?(\d{1,2})月/.test(title)){
+    const m=title.match(/(20\d{2})年\s*(\d{1,2})月\s*[〜～~\-]+\s*(?:(20\d{2})年\s*)?(\d{1,2})月/);
+    if(m){
+      const sy=m[1], sm=String(m[2]).padStart(2,'0');
+      const ey=m[3]||m[1], em=String(m[4]).padStart(2,'0');
+      if(`${sy}-${sm}`!==`${ey}-${em}`) return true;
+    }
+  }
+  const months=Array.isArray(r?.sourceMonths)?r.sourceMonths.filter(x=>/^\d{4}-\d{2}$/.test(String(x||''))):[];
+  if(months.length>1) return true;
+  return false;
+}
+
+/** 単月の「月間」正本か（合算・日別は除外） */
+function isSingleMonthCanonicalReport(r){
+  if(isCrossMonthAggregateReport(r)) return false;
+  const t=String(r?.title||'');
+  if(/日別/.test(t)) return false;
+  return /月間|月別/.test(t);
+}
 function reportListTitle(title,period){
   const t=String(title||'');
   const periodStr=String(period||'');
@@ -4251,11 +4284,13 @@ async function collectMonthlyHistoryForForecast() {
   const byMonth = new Map();
 
   // カテゴリ合計が無い月間は詳細取得を試す（一覧メタだけだとフード/ドリンクが欠ける）
-  const candidates = reports.filter(r => monthKeyFromReport(r));
+  // 合算（複数月）レポートは開始月に紐づくため、月次系列から除外する。
+  // 例: 「合算（2025年2月〜12月）」を2025-02の単月として採ると売上が約10倍・客数1000超になる。
+  const candidates = reports.filter(r => monthKeyFromReport(r) && !isCrossMonthAggregateReport(r));
   for (const raw of candidates) {
     const key = monthKeyFromReport(raw);
     if (!key) continue;
-    const isMonthly = isMonthlyReportTitle(raw.title);
+    const isMonthly = isSingleMonthCanonicalReport(raw);
     let r = raw;
     const needsHydrate = !reportHasSalesSummary(r)
       || (isMonthly && !(Number.isFinite(Number(r.foodTotal)) && Number.isFinite(Number(r.drinkTotal))));
@@ -9209,12 +9244,15 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
 
     // 月次内訳（推移回答用）。同一年月が currentReport とクラウドで二重にある場合は
     // 「月間」タイトル優先→売上の大きい方を代表値にし、合算で二重計上しない。
+    // 複数月の合算レポートは開始月に紐づくため月次系列から除外する
+    // （例: 合算2月〜12月を「2025年2月」として採ると約10倍・客数1000超になる）。
     const monthMap = new Map();
     for (const r of use) {
+      if (isCrossMonthAggregateReport(r)) continue;
       const ym = extractYearMonthFromText(r.period || r.title || '');
       if (!ym) continue;
       const key = `${ym.year}-${String(ym.month).padStart(2, '0')}`;
-      const isMonthlyTitle = isMonthlyReportTitle(r.title);
+      const isMonthlyTitle = isSingleMonthCanonicalReport(r);
       let sales = reportSummaryTotal(r);
       let food = Number(r.foodTotal) || 0;
       let drink = Number(r.drinkTotal) || 0;
