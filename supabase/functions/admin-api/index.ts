@@ -7756,6 +7756,18 @@ async function searchPosJournalProducts(
     first_date: string
     last_date: string
   }>()
+  const variantMap = new Map<string, {
+    name: string
+    code: string
+    unit: number
+    qty: number
+    amount: number
+    first_month: string
+    last_month: string
+    first_date: string
+    last_date: string
+    days: Set<string>
+  }>()
 
   for (const hit of hits) {
     let month = byMonthMap.get(hit.year_month)
@@ -7802,6 +7814,35 @@ async function searchPosJournalProducts(
     if (hit.business_date > band.last_date) {
       band.last_date = hit.business_date
       band.last_month = hit.year_month
+    }
+
+    const variantKey = `${hit.name}|${hit.unit}|${hit.code}`
+    let variant = variantMap.get(variantKey)
+    if (!variant) {
+      variant = {
+        name: hit.name,
+        code: hit.code,
+        unit: hit.unit,
+        qty: 0,
+        amount: 0,
+        first_month: hit.year_month,
+        last_month: hit.year_month,
+        first_date: hit.business_date,
+        last_date: hit.business_date,
+        days: new Set(),
+      }
+      variantMap.set(variantKey, variant)
+    }
+    variant.qty += hit.qty
+    variant.amount += hit.amount
+    variant.days.add(hit.business_date)
+    if (hit.business_date < variant.first_date) {
+      variant.first_date = hit.business_date
+      variant.first_month = hit.year_month
+    }
+    if (hit.business_date > variant.last_date) {
+      variant.last_date = hit.business_date
+      variant.last_month = hit.year_month
     }
   }
 
@@ -7867,6 +7908,21 @@ async function searchPosJournalProducts(
       : null,
     name_variants: nameVariants,
     unit_bands: unitBands,
+    variants: [...variantMap.values()]
+      .sort((a, b) => b.amount - a.amount || b.qty - a.qty)
+      .slice(0, 40)
+      .map((v) => ({
+        name: v.name,
+        code: v.code,
+        unit: v.unit,
+        qty: v.qty,
+        amount: v.amount,
+        day_count: v.days.size,
+        first_month: v.first_month,
+        last_month: v.last_month,
+        first_date: v.first_date,
+        last_date: v.last_date,
+      })),
     by_month: byMonth,
   }
 }
