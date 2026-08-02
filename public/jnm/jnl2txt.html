@@ -6830,8 +6830,8 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 12月を含む分析では、売上増・客単価上昇の要因としてクリスマスディナーを必ず考慮し、単なる客数増だけで説明しきらない。
 - 【異常月の詳細解析】に高単価コース寄与・単価上昇コースが載っている場合は、その金額・点数・商品名を根拠に述べ、「単体売上が不明／表示されていません」で止めない。
 - 【商品初出・導入月】が載っている場合は、ジャーナル全件横断検索で特定した初出月・単価帯・前後比較を根拠に述べ、「開始月は表示されていません」で止めない。
-- 【コースラインナップ】が載っている場合は、コース6品=8,000円・コース8品=10,000円・SPコースを区別して述べる。SPコース明細だけを全コースと誤解し「1万円コースが無い」と言ってはいけない。
-- 【コースラインナップ】の「例外・単発特別」は存在を短く触れるに留め、客単価低下などの主因分析には積極的に使わない。
+- 【コースラインナップ】が載っている場合は、単価帯の主力行（名称×単価）を正本にする。店舗ごとにコース商品名は異なる。SPなど一部名称の単価帯だけを全コースと誤解し「〇〇円コースが無い」と言ってはいけない。
+- 【コースラインナップ】の「例外・単発特別」は存在を短く触れるに留め、客単価低下などの主因分析には積極的に使わない。「漏れ検知」がある場合は主軸の取りこぼしとして必ず確認する。
 - 【商品利用会計 vs 非利用会計】が載っている場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加の比較が必要」「利用/非利用の比較ができない」で止めない。
 - 【ジャーナル会計比較（汎用）】が載っている場合は、昼夜・平日週末・ボトル/グラス・人数帯・商品A vs B など提示された軸の数値を使い、「比較できない」で止めない。
 - 解析欄にも金額が無い場合のみ、数値を捏造せず「※これは推測です」として季節要因に含めてよい。
@@ -8247,8 +8247,194 @@ function collectProductsFromReport(r) {
 }
 
 function isCourseProductName(name) {
-  const value = String(name || '').normalize('NFKC').toLowerCase();
-  return /コース|sp\s*コ[-ー]?ス|おまかせ\s*\d+\s*皿/.test(value);
+  const value = String(name || '').normalize('NFKC').toLowerCase()
+    .replace(/[ーｰ‐‑–—−]/g, '-');
+  // 半角ｶﾅの SPｺ-ｽ や コースN品 / おまかせN皿 を店舗共通でコース扱い
+  return /コース|sp\s*コ-?ス|スペシャル\s*コ-?ス|おまかせ\s*\d+\s*皿|course/.test(value);
+}
+
+/**
+ * コース漏れの根本原因メモ（再発防止）:
+ * - ユーザーが「SPコース」「5000円」「8000円」「1万円」を同時に話すと、
+ *   旧ロジックは名称ヒントを「SPコース」に狭め、通常コース（例: コース8品@10000）を検索対象外にしていた。
+ * - POSでは同一「コース」概念が商品名違いで並ぶ（SP / N品 / おまかせ等）。店舗ごとに名称が違う。
+ * - 対策: コース分析では必ず名称「コース」で広く引き、単価帯×名称の主軸を点数で決め、
+ *   SPに閉じた結果だけを全コースとみなさない。質問の単価帯が主軸に無い場合は警告を出す。
+ */
+function wantsCourseLineupAnalysis(msg) {
+  const s = String(msg || '');
+  if (!/コース|おまかせ\s*\d+\s*皿|course/i.test(s)) return false;
+  return /(単価|帯|品|皿|8000|8,000|10000|1\s*万|5000|5,000|構成|分析|比較|導入|SP|スペシャル|客単価|動き|ラインナップ)/i.test(s);
+}
+
+/** 質問文からジャーナル商品検索のヒント（名称・単価帯・コード）を抽出する */
+function extractProductSearchHints(query) {
+  const raw = String(query || '');
+  const q = raw.normalize('NFKC');
+  const amounts = [];
+  const yenRe = /(\d{1,3}(?:,\d{3})+|\d{3,6})\s*円/g;
+  let m;
+  while ((m = yenRe.exec(q))) {
+    const n = Number(String(m[1]).replace(/,/g, ''));
+    if (Number.isFinite(n) && n >= 100) amounts.push(n);
+  }
+  if (/1\s*万\s*円|一万\s*円/.test(q)) amounts.push(10000);
+  if (/8\s*千\s*円|八千\s*円/.test(q)) amounts.push(8000);
+  if (/5\s*千\s*円|五千\s*円/.test(q)) amounts.push(5000);
+  const uniqueAmounts = [...new Set(amounts)].sort((a, b) => a - b);
+
+  const mentionsSp = /SP|スペシャル/i.test(q);
+  const mentionsCourse = /コース|おまかせ|course/i.test(q);
+  // SP単独導入の話でも、他単価・通常コース・品数コースに触れていれば全体検索にする（漏れ防止）
+  const courseWide = mentionsCourse && (
+    /[0-9０-９]+\s*品|[0-9０-９]+\s*皿/.test(q) ||
+    uniqueAmounts.includes(8000) ||
+    uniqueAmounts.includes(10000) ||
+    /(単価帯|帯の動き|コース構成|コース分析|通常コース|ラインナップ)/.test(q) ||
+    (uniqueAmounts.length >= 2) ||
+    (mentionsSp && uniqueAmounts.some((u) => u >= 8000)) ||
+    (mentionsSp && /(8\s*千|1\s*万|八千|一万)/.test(q))
+  );
+  // SP導入インパクトだけの質問（他帯・通常コースに触れていない）のときだけ SP に絞ってよい
+  const spExclusive = mentionsSp && mentionsCourse && !courseWide &&
+    (uniqueAmounts.length === 0 || (uniqueAmounts.length === 1 && uniqueAmounts[0] === 5000));
+
+  let focusUnit = null;
+  if (!courseWide) {
+    if (/5\s*[,，]?\s*000|五千|5\s*千/.test(q) && (uniqueAmounts.includes(5000) || /5/.test(q))) {
+      focusUnit = 5000;
+    } else if (uniqueAmounts.length === 1) {
+      focusUnit = uniqueAmounts[0];
+    } else if (uniqueAmounts.length > 1 && /(導入|始ま|開始|追加)/.test(q)) {
+      focusUnit = Math.min(...uniqueAmounts);
+    }
+  }
+
+  let nameQ = q
+    .replace(/(\d{1,3}(?:,\d{3})+|\d{3,6})\s*円/g, ' ')
+    .replace(/1\s*万\s*円|一万\s*円|8\s*千\s*円|八千\s*円|5\s*千\s*円|五千\s*円/g, ' ')
+    .replace(/\d{4}\s*年|\d{1,2}\s*月|\d{1,2}\s*日/g, ' ')
+    .replace(/客単価|売上|構成|比較|前後|全データ|ジャーナル|検索|調べ|導入|開始|始ま|いつから|もしかすると|対し|につなが|低下|上が|下が/g, ' ')
+    .replace(/[、。！？!?\(\)（）「」『』]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (courseWide) {
+    // 重要: SPを優先して通常コースを落とさない（他店舗でも同型の漏れを防ぐ）
+    nameQ = 'コース';
+  } else if (spExclusive) {
+    nameQ = /スペシャル/.test(q) ? 'スペシャルコース' : 'SPコース';
+  } else if (nameQ.length > 40) {
+    const keep = [];
+    if (mentionsCourse) keep.push('コース');
+    else if (mentionsSp) keep.push('SPコース');
+    nameQ = keep.join(' ') || nameQ.slice(0, 40);
+  }
+  if (!nameQ && mentionsCourse) nameQ = 'コース';
+  if (!nameQ && mentionsSp) nameQ = 'SPコース';
+
+  const codeMatch = q.match(/(?:商品)?コード\s*[:：]?\s*(\d{4,})/);
+  const unitTol = focusUnit != null && focusUnit >= 1000 ? Math.max(50, Math.round(focusUnit * 0.02)) : 0;
+
+  return {
+    q: nameQ,
+    code: codeMatch ? codeMatch[1] : '',
+    unit: focusUnit,
+    unitMin: focusUnit != null ? focusUnit - unitTol : null,
+    unitMax: focusUnit != null ? focusUnit + unitTol : null,
+    allUnits: uniqueAmounts,
+    courseWide,
+    spExclusive,
+    raw
+  };
+}
+
+/**
+ * 店舗非依存: コース系バリアントに役割を付ける。
+ * 特定店の「6品/8品」固定に頼らず、品数パターン・SP・単価帯の主力を一般化する。
+ */
+function describeCourseVariantRole(name, unit, qty = 0) {
+  const n = String(name || '').normalize('NFKC');
+  const u = Number(unit) || 0;
+  const qn = Number(qty) || 0;
+  const dish = n.match(/コース\s*([0-9０-９]+)\s*品/);
+  const omakase = n.match(/おまかせ\s*([0-9０-９]+)\s*皿/);
+  const dishCount = dish ? Number(String(dish[1]).normalize('NFKC')) : (omakase ? Number(String(omakase[1]).normalize('NFKC')) : null);
+  const isSp = /(^|[^a-z0-9])sp|スペシャル/i.test(n) && /コ[-ー]?ス|コース|course/i.test(n);
+
+  if (dishCount != null && Number.isFinite(dishCount)) {
+    return {
+      role: `course_${dishCount}`,
+      label: `${yen(u)}帯・標準（コース${dishCount}品）`,
+      core: qn >= 5 || u >= 5000,
+      dishCount,
+      family: 'named_course'
+    };
+  }
+  if (omakase && dishCount != null) {
+    return {
+      role: `omakase_${dishCount}`,
+      label: `${yen(u)}帯・標準（おまかせ${dishCount}皿）`,
+      core: qn >= 5 || u >= 5000,
+      dishCount,
+      family: 'omakase'
+    };
+  }
+  if (isSp) {
+    if (u >= 4800 && u <= 5200) {
+      return { role: 'sp_mid', label: `${yen(u)}帯（SP/スペシャルコース）`, core: true, family: 'sp' };
+    }
+    if (qn >= 10) {
+      return { role: 'sp_volume', label: `${yen(u)}帯（SP/スペシャルコース・主力）`, core: true, family: 'sp' };
+    }
+    return { role: 'sp_other', label: `SP/スペシャルコース ${yen(u)}`, core: false, family: 'sp' };
+  }
+  if (/パン/.test(n) && /sp|スペシャル/i.test(n)) {
+    return { role: 'addon', label: `${n} ${yen(u)}（付帯）`, core: false, family: 'addon' };
+  }
+  if (isCourseProductName(n)) {
+    return {
+      role: 'course_unit',
+      label: `${yen(u)}帯「${n}」`,
+      core: qn >= 10,
+      family: 'course'
+    };
+  }
+  return { role: 'other', label: `${n} ${yen(u)}`, core: false, family: 'other' };
+}
+
+function isCourseLineupException(variant, totalCourseQty) {
+  const qty = Number(variant.qty) || 0;
+  const days = Number(variant.day_count) || 0;
+  const role = describeCourseVariantRole(variant.name, variant.unit, qty);
+  if (role.core && qty >= 10) return false;
+  if (role.family === 'addon') return true;
+  if (days <= 1 && qty <= 5) return true;
+  if (qty <= 2) return true;
+  if (totalCourseQty > 0 && qty / totalCourseQty < 0.015 && !role.core) return true;
+  return false;
+}
+
+/** 質問で触れた単価帯が、主軸コースに近いか（漏れ検知） */
+function findCourseCoverageGaps(mentionedUnits, coreRows) {
+  const gaps = [];
+  const cores = Array.isArray(coreRows) ? coreRows : [];
+  for (const u of (mentionedUnits || [])) {
+    if (!(u >= 3000)) continue;
+    const hit = cores.find((c) => Math.abs((Number(c.unit) || 0) - u) <= Math.max(300, u * 0.05));
+    if (!hit) {
+      const nearest = [...cores]
+        .map((c) => ({ c, d: Math.abs((Number(c.unit) || 0) - u) }))
+        .sort((a, b) => a.d - b.d)[0];
+      gaps.push({
+        requestedUnit: u,
+        nearest: nearest
+          ? { name: nearest.c.name, unit: nearest.c.unit, qty: nearest.c.qty, label: nearest.c.label }
+          : null
+      });
+    }
+  }
+  return gaps;
 }
 
 /** POSの大分類行（★ドリンク等）。個別商品ランキングには混ぜない */
@@ -8802,122 +8988,6 @@ async function enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey
     });
   }
   return facts;
-}
-
-/** 質問文からジャーナル商品検索のヒント（名称・単価帯・コード）を抽出する */
-function extractProductSearchHints(query) {
-  const raw = String(query || '');
-  const q = raw.normalize('NFKC');
-  const amounts = [];
-  const yenRe = /(\d{1,3}(?:,\d{3})+|\d{3,6})\s*円/g;
-  let m;
-  while ((m = yenRe.exec(q))) {
-    const n = Number(String(m[1]).replace(/,/g, ''));
-    if (Number.isFinite(n) && n >= 100) amounts.push(n);
-  }
-  if (/1\s*万\s*円|一万\s*円/.test(q)) amounts.push(10000);
-  if (/8\s*千\s*円|八千\s*円/.test(q)) amounts.push(8000);
-  if (/5\s*千\s*円|五千\s*円/.test(q)) amounts.push(5000);
-  const uniqueAmounts = [...new Set(amounts)].sort((a, b) => a - b);
-
-  // コース全体の単価帯・6品/8品の話なら SP に閉じず「コース」で広く取る
-  const courseWide = /コース/.test(q) && (
-    /[68６８]\s*品/.test(q) ||
-    uniqueAmounts.includes(8000) ||
-    uniqueAmounts.includes(10000) ||
-    /(単価帯|帯の動き|コース構成|コース分析|通常コース)/.test(q) ||
-    (uniqueAmounts.length >= 2 && uniqueAmounts.some((u) => u >= 8000))
-  );
-
-  let focusUnit = null;
-  if (!courseWide) {
-    if (/5\s*[,，]?\s*000|五千|5\s*千/.test(q) && (uniqueAmounts.includes(5000) || /5/.test(q))) {
-      focusUnit = 5000;
-    } else if (uniqueAmounts.length === 1) {
-      focusUnit = uniqueAmounts[0];
-    } else if (uniqueAmounts.length > 1 && /(導入|始ま|開始|追加)/.test(q) && !courseWide) {
-      focusUnit = Math.min(...uniqueAmounts);
-    }
-  }
-
-  let nameQ = q
-    .replace(/(\d{1,3}(?:,\d{3})+|\d{3,6})\s*円/g, ' ')
-    .replace(/1\s*万\s*円|一万\s*円|8\s*千\s*円|八千\s*円|5\s*千\s*円|五千\s*円/g, ' ')
-    .replace(/\d{4}\s*年|\d{1,2}\s*月|\d{1,2}\s*日/g, ' ')
-    .replace(/客単価|売上|構成|比較|前後|全データ|ジャーナル|検索|調べ|導入|開始|始ま|いつから|もしかすると|対し|につなが|低下|上が|下が/g, ' ')
-    .replace(/[、。！？!?\(\)（）「」『』]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (courseWide) {
-    nameQ = 'コース';
-  } else if (nameQ.length > 40) {
-    const keep = [];
-    if (/SP|スペシャル/i.test(q)) keep.push(/スペシャル/.test(q) ? 'スペシャルコース' : 'SPコース');
-    else if (/コース/.test(q)) keep.push('コース');
-    nameQ = keep.join(' ') || nameQ.slice(0, 40);
-  }
-  if (!nameQ && /SP|スペシャル/i.test(q) && /コース/.test(q) && !courseWide) nameQ = 'SPコース';
-  if (!nameQ && /コース/.test(q)) nameQ = 'コース';
-
-  const codeMatch = q.match(/(?:商品)?コード\s*[:：]?\s*(\d{4,})/);
-  const unitTol = focusUnit != null && focusUnit >= 1000 ? Math.max(50, Math.round(focusUnit * 0.02)) : 0;
-
-  return {
-    q: nameQ,
-    code: codeMatch ? codeMatch[1] : '',
-    unit: focusUnit,
-    unitMin: focusUnit != null ? focusUnit - unitTol : null,
-    unitMax: focusUnit != null ? focusUnit + unitTol : null,
-    allUnits: uniqueAmounts,
-    courseWide,
-    raw
-  };
-}
-
-/** コース単価帯・品数コースを含むラインナップ分析が必要か */
-function wantsCourseLineupAnalysis(msg) {
-  const s = String(msg || '');
-  if (!/コース/.test(s)) return false;
-  return /(単価|帯|6\s*品|8\s*品|六品|八品|8000|8,000|10000|1\s*万|構成|分析|比較|導入|SP|スペシャル|客単価|動き)/.test(s);
-}
-
-function describeCourseVariantRole(name, unit) {
-  const n = String(name || '').normalize('NFKC');
-  const u = Number(unit) || 0;
-  if (/コース\s*[8８]品|コース８品/.test(n) && u >= 9000 && u <= 11000) {
-    return { role: 'standard_10000', label: '1万円帯・標準（コース8品）', core: true };
-  }
-  if (/コース\s*[6６]品|コース６品/.test(n) && u >= 7000 && u <= 9000) {
-    return { role: 'standard_8000', label: '8,000円帯・標準（コース6品）', core: true };
-  }
-  if (/(^|[^\w])sp|スペシャル/i.test(n) && /コ[-ー]?ス|コース/.test(n)) {
-    if (u >= 4800 && u <= 5200) return { role: 'sp_5000', label: '5,000円帯（SPコース）', core: true };
-    if (u >= 7800 && u <= 8200) return { role: 'sp_8000', label: 'SPコース 8,000円', core: true };
-    if (u >= 10000 && u <= 12000) return { role: 'sp_special', label: `SPコース特別単価 ${yen(u)}`, core: false };
-    return { role: 'sp_other', label: `SPコース ${yen(u)}`, core: false };
-  }
-  if (/パン/.test(n) && /sp|スペシャル/i.test(n)) {
-    return { role: 'addon', label: `${n} ${yen(u)}（付帯）`, core: false };
-  }
-  if (isCourseProductName(n)) {
-    return { role: 'other_course', label: `${n} ${yen(u)}`, core: u === 8000 || u === 10000 || u === 5000 };
-  }
-  return { role: 'other', label: `${n} ${yen(u)}`, core: false };
-}
-
-function isCourseLineupException(variant, totalCourseQty) {
-  const qty = Number(variant.qty) || 0;
-  const days = Number(variant.day_count) || 0;
-  const unit = Number(variant.unit) || 0;
-  const role = describeCourseVariantRole(variant.name, unit);
-  if (role.core && qty >= 10) return false;
-  if (role.role === 'addon') return true;
-  // 単日のみ・極少点数はバースデープレート等の特別扱い
-  if (days <= 1 && qty <= 5) return true;
-  if (qty <= 2) return true;
-  if (totalCourseQty > 0 && qty / totalCourseQty < 0.015 && !role.core) return true;
-  if (role.role === 'sp_special') return true;
-  return false;
 }
 
 async function searchCloudJournalProducts(hints) {
@@ -9529,6 +9599,7 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
 
   return {
     hints,
+    searchNarrowedToSp: !!(hints.spExclusive || (/sp|スペシャル/i.test(String(hints.q || '')) && !hints.courseWide)),
     scannedFiles: timeline?.scanned_files || 0,
     matchCount: timeline?.match_count || 0,
     totalQty: timeline?.total_qty || 0,
@@ -9576,7 +9647,10 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
     lines.push(`${indent}  - 名称バリエーション: ${facts.nameVariants.slice(0, 8).join('、')}`);
   }
   if ((facts.unitBands || []).length) {
-    lines.push(`${indent}  - 単価帯別（全期間・ジャーナル）:`);
+    const scope = facts.searchNarrowedToSp
+      ? '※この単価帯は検索がSP等に寄っている可能性あり。通常コースは「コースラインナップ」節を正本にすること'
+      : '単価帯別（当該検索条件・ジャーナル）';
+    lines.push(`${indent}  - ${scope}:`);
     facts.unitBands.slice(0, 8).forEach((b) => {
       lines.push(
         `${indent}    - ${yen(b.unit)}: ${b.qty}点 / ${yen(b.amount)}（初出 ${b.first_month}〜${b.last_month}）`
@@ -9610,32 +9684,38 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
 }
 
 /**
- * コース全体（コース6品=8千円・コース8品=1万円・SPコース等）をジャーナルから抽出。
- * SPだけに閉じず、単発の特別単価は例外として分離する。
+ * コース全体をジャーナルから抽出（店舗非依存）。
+ * 再発防止: SPなど一部名称に閉じず、必ず「コース」で広く引き、単価帯×名称の主力を点数で決める。
+ * 単発特別単価は例外に分離。質問の単価帯が主軸に無い場合は coverageGaps で警告する。
  */
-async function enrichCourseLineupFacts(query) {
-  if (!wantsCourseLineupAnalysis(query)) return null;
+async function enrichCourseLineupFacts(query, productTimelineFacts = null) {
+  const hints = extractProductSearchHints(query);
+  // SP単独タイムラインでも、コース話ならラインナップを必ず取る（他店でも同型漏れを防ぐ）
+  const forceBySpNarrow = !!(productTimelineFacts?.hints?.spExclusive || /SP|スペシャル/i.test(String(query || '')))
+    && /コース/.test(String(query || ''));
+  if (!wantsCourseLineupAnalysis(query) && !forceBySpNarrow && !hints.courseWide) return null;
+
   let raw;
   try {
+    // 常に広義「コース」で検索（SPに閉じないのが再発防止の核心）
     raw = await searchCloudJournalProducts({ q: 'コース' });
   } catch (err) {
     console.warn('course lineup search failed:', err);
     return { error: err?.message || String(err) };
   }
   const variants = Array.isArray(raw?.variants) ? raw.variants : [];
-  // SPパン等の付帯はコース本体集計から外す
   const courseLike = variants.filter((v) => {
     const n = String(v.name || '').normalize('NFKC');
     if (/パン/.test(n) && /sp|スペシャル/i.test(n)) return false;
     if (/lunch/i.test(n) && /sp/i.test(n) && Number(v.unit) < 4000) return false;
-    return isCourseProductName(v.name) || /コ[-ー]?ス|コース|おまかせ/i.test(n);
+    return isCourseProductName(v.name) || /コ[-ー]?ス|コース|おまかせ|course/i.test(n);
   });
   const totalQty = courseLike.reduce((s, v) => s + (Number(v.qty) || 0), 0);
   const totalAmount = courseLike.reduce((s, v) => s + (Number(v.amount) || 0), 0);
   const core = [];
   const exceptions = [];
   for (const v of courseLike) {
-    const role = describeCourseVariantRole(v.name, v.unit);
+    const role = describeCourseVariantRole(v.name, v.unit, v.qty);
     const row = {
       name: v.name,
       code: v.code,
@@ -9652,50 +9732,57 @@ async function enrichCourseLineupFacts(query) {
     if (isCourseLineupException(v, totalQty)) exceptions.push(row);
     else core.push(row);
   }
+  // 単価帯ごとの主力（店舗ごとに商品名が違っても点数最大を主軸にする）
+  const byUnit = new Map();
+  for (const r of core) {
+    const prev = byUnit.get(r.unit);
+    if (!prev || r.qty > prev.qty) byUnit.set(r.unit, r);
+  }
+  const unitLeaders = [...byUnit.values()].sort((a, b) => b.amount - a.amount);
   core.sort((a, b) => b.amount - a.amount);
   exceptions.sort((a, b) => b.amount - a.amount);
 
-  const findCore = (role) => core.find((r) => r.role === role) || null;
+  const mentioned = hints.allUnits || [];
+  const coverageGaps = findCourseCoverageGaps(mentioned, core);
+
   return {
     scannedFiles: raw?.scanned_files || 0,
     totalQty,
     totalAmount,
     core,
     exceptions,
-    standard8000: findCore('standard_8000'),
-    standard10000: findCore('standard_10000'),
-    sp5000: findCore('sp_5000'),
-    note: '標準: コース6品=8,000円、コース8品=10,000円。SPコースは別メニュー。単日・極少の高単価は例外（例: バースデープレート加算）'
+    unitLeaders,
+    coverageGaps,
+    searchScope: 'q=コース（SP限定ではない・店舗共通）',
+    rootCauseGuard:
+      '過去の不具合: SPなど一部名称だけを検索すると通常コース（店ごとの商品名）が落ちる。本節は必ずコース全体から構築する。',
+    note: '主軸は店舗のジャーナル上で点数の多いコース名称×単価。SP/スペシャルは別メニューとして区別。単日・極少は例外。'
   };
 }
 
 function formatCourseLineupFactsForAi(facts, indent = '') {
   if (!facts) return '';
-  const lines = [`${indent}- コースラインナップ（ジャーナル全件・名称×単価。SP以外の通常コースも含む）:`];
+  const lines = [`${indent}- コースラインナップ（ジャーナル全件・名称×単価／店舗共通・SP以外も含む）:`];
   if (facts.error) {
     lines.push(`${indent}  - 検索エラー: ${facts.error}`);
     return lines.join('\n');
   }
+  lines.push(`${indent}  - ${facts.rootCauseGuard}`);
   lines.push(`${indent}  - ${facts.note}`);
-  lines.push(`${indent}  - 走査 ${facts.scannedFiles || 0}ファイル／コース本体 合計 ${facts.totalQty || 0}点 / ${yen(facts.totalAmount || 0)}`);
-  lines.push(`${indent}  - 主軸コース（分析の中心）:`);
-  const mains = [
-    facts.standard10000,
-    facts.standard8000,
-    facts.sp5000,
-    ...(facts.core || []).filter((r) => !['standard_10000', 'standard_8000', 'sp_5000'].includes(r.role))
-  ].filter(Boolean);
-  const seen = new Set();
-  for (const r of mains) {
-    const key = `${r.name}|${r.unit}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+  lines.push(`${indent}  - 検索範囲: ${facts.searchScope}／走査 ${facts.scannedFiles || 0}ファイル／合計 ${facts.totalQty || 0}点 / ${yen(facts.totalAmount || 0)}`);
+  lines.push(`${indent}  - 単価帯の主力（各単価で点数最大のコース名）:`);
+  (facts.unitLeaders || []).slice(0, 10).forEach((r) => {
     lines.push(
-      `${indent}    - ${r.label}: 「${r.name}」 ${r.qty}点 / ${yen(r.amount)}（${r.firstMonth}〜${r.lastMonth}）`
+      `${indent}    - ${yen(r.unit)}: 「${r.name}」 ${r.qty}点 / ${yen(r.amount)}（${r.firstMonth}〜${r.lastMonth}）${r.dishCount ? `／${r.dishCount}品` : ''}`
     );
-  }
-  if (!mains.length) {
-    lines.push(`${indent}    - （主軸コースなし）`);
+  });
+  if ((facts.core || []).length) {
+    lines.push(`${indent}  - 主軸コース明細:`);
+    facts.core.slice(0, 12).forEach((r) => {
+      lines.push(
+        `${indent}    - ${r.label}: 「${r.name}」 ${r.qty}点 / ${yen(r.amount)}（${r.firstMonth}〜${r.lastMonth}）`
+      );
+    });
   }
   if ((facts.exceptions || []).length) {
     lines.push(`${indent}  - 例外・単発特別（分析の主因にしない。存在のみ記載）:`);
@@ -9705,7 +9792,16 @@ function formatCourseLineupFactsForAi(facts, indent = '') {
       );
     });
   }
-  lines.push(`${indent}  - ※「1万円コースが出ていない」と判断する前に、コース8品の行を必ず確認すること。SPコース明細だけを全コースと誤解しないこと`);
+  if ((facts.coverageGaps || []).length) {
+    lines.push(`${indent}  - 漏れ検知（質問の単価帯が主軸に無い）:`);
+    facts.coverageGaps.forEach((g) => {
+      const near = g.nearest
+        ? `最寄り主軸「${g.nearest.name}」${yen(g.nearest.unit)}（${g.nearest.qty}点）`
+        : '近傍主軸なし';
+      lines.push(`${indent}    - 質問の ${yen(g.requestedUnit)} → ${near}`);
+    });
+  }
+  lines.push(`${indent}  - ※SPコースの単価帯表だけを見て「〇〇円コースが無い」と断定しない。必ず本節の主力行を確認すること`);
   return lines.join('\n');
 }
 
@@ -11764,7 +11860,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       monthSourcesByKey,
       allReports
     );
-    const courseLineupFacts = await enrichCourseLineupFacts(q);
+    const courseLineupFacts = await enrichCourseLineupFacts(q, productTimelineFacts);
     const cohortPacked = await enrichJournalCohortComparisons(
       q,
       productTimelineFacts,
@@ -12448,7 +12544,7 @@ ${buildStoreLocationBlockForAi()}
 4. 【12月・クリスマスディナー・必須】12月を含む分析では、宴会需要・客数増に加え、毎年実施するクリスマスディナー（通常コースより高単価）を必ず考慮する。【異常月の詳細解析】に高単価コース寄与・単価上昇コースが載っている場合は、その金額・点数・商品名を根拠に述べ「クリスマスディナー単体の売上は不明／表示されていません」で止めない。金額が解析欄にも無い場合のみ数値を捏造せず「※これは推測です」として季節要因に含める。
 5. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
 6. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
-7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。ただし「異常月の詳細解析」が載っている場合は、ジャーナル／伝票に基づく高単価会計・コース単価比較・寄与金額を必ず使い、「内訳が表示されていません」「寄与は不明」で止めないでください。「商品初出・導入月」が載っている場合は、ジャーナル全件横断検索の初出日・単価帯・導入前後比較を必ず使い、「開始月は表示されていません」で止めないでください。「コースラインナップ」が載っている場合は、コース6品（8,000円）・コース8品（10,000円）・SPコースを区別し、SP明細だけ見て「1万円コースが無い」と書かないでください。例外・単発特別は短く記載し主因にしないでください。「商品利用会計 vs 非利用会計」や「ジャーナル会計比較（汎用）」が載っている場合は、客単価・ドリンク客あたり・差分を必ず使い、「追加の比較が必要」「比較できない」で止めないでください。売れ筋TOPに「コース系（合算）」がある場合は、コースを分割したままドリンク大分類を単独最大商品と書かないでください（★ドリンク等は商品ではなく大分類）。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
+7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。ただし「異常月の詳細解析」が載っている場合は、ジャーナル／伝票に基づく高単価会計・コース単価比較・寄与金額を必ず使い、「内訳が表示されていません」「寄与は不明」で止めないでください。「商品初出・導入月」が載っている場合は、ジャーナル全件横断検索の初出日・単価帯・導入前後比較を必ず使い、「開始月は表示されていません」で止めないでください。「コースラインナップ」が載っている場合は、単価帯の主力（名称×単価）を正本にし、SPなど一部検索結果だけで「〇〇円コースが無い」と書かないでください。例外・単発特別は短く記載し主因にしないでください。漏れ検知がある場合は取りこぼしとして必ず確認してください。「商品利用会計 vs 非利用会計」や「ジャーナル会計比較（汎用）」が載っている場合は、客単価・ドリンク客あたり・差分を必ず使い、「追加の比較が必要」「比較できない」で止めないでください。売れ筋TOPに「コース系（合算）」がある場合は、コースを分割したままドリンク大分類を単独最大商品と書かないでください（★ドリンク等は商品ではなく大分類）。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
 8. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
 9. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
 10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。資料が「なし」と明示されている場合のみ資料なしで進めてください。

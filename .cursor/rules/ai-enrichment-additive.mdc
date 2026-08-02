@@ -23,7 +23,7 @@ alwaysApply: true
    似た目的でも置き換えない。例:
    - 異常月ドリルダウン → `anomalyItemFacts`
    - 商品初出・導入月 → `productTimelineFacts`
-   - コースラインナップ（6品/8品/SP・例外分離）→ `courseLineupFacts`
+   - コースラインナップ（店舗共通・名称×単価主力・例外分離・漏れ検知）→ `courseLineupFacts`
    - 利用/非利用会計比較 → `productCohortFacts`（後方互換）
    - 汎用ジャーナル会計比較 → `journalCohortComparisons`（meal / weekday / item_class / item_vs_item / guest_size 等）
    - 昼夜別 F/D → 月次の `lunchFoodTotal` 等 + `formatMonthlyMealFdTrendLines`
@@ -35,7 +35,7 @@ alwaysApply: true
    1. `enrichMonthlyMealCategorySplit`
    2. `enrichMonthlyAnomalyItemFacts`
    3. `enrichProductTimelineFacts`
-   3b. `enrichCourseLineupFacts`（コース6品=8千円・8品=1万円を含む。単発特別は例外）
+   3b. `enrichCourseLineupFacts`（必ず q=コース。単価帯主力は点数で決定。単発は例外。coverageGaps）
    4. `enrichJournalCohortComparisons`（汎用会計比較。商品利用/非利用は `productCohortFacts` にも投影）
    5. （商品ランキング）`rankProductsForAiDisplay` / `selectRequestedProductsForQuery`  
    新レイヤを足すときは末尾（または明確な依存の直後）に挿入し、コメントの一覧も更新する。
@@ -54,10 +54,23 @@ alwaysApply: true
    - 昼夜別 F/D の月次行
    - 異常月の詳細解析
    - 商品初出・導入月（ジャーナル横断）
+   - コースラインナップ（q=コース必須・漏れ検知）
    - 商品利用/非利用会計コホート（客単価・ドリンク）
    - 汎用ジャーナル会計比較（複数軸）
    - コース合算の売れ筋（★ドリンク単独最大の禁止）
    - HTML オフロード／軽量一覧（容量分離）が意図せず巻き戻っていないこと
+
+## コース検索の再発防止（必須）
+
+### 根本原因
+ユーザーが「SPコース」と「8000円／1万円の通常コース」を同時に話すと、旧ロジックが名称ヒントを **SPコースに狭め**、店ごとの通常コース商品（例: コース8品@10000）を検索対象外にしていた。AIは SP の単価帯表だけを見て「1万円が無い」と誤答した。
+
+### 再発防止ルール
+1. コース分析・単価帯比較では、検索名称を SP に閉じず **必ず `q=コース` のラインナップ節**（`courseLineupFacts`）を載せる。
+2. 主軸は店舗固定マスタではなく、ジャーナル上の **名称×単価の点数** で決める（他店舗の別名にも耐える）。
+3. 質問で触れた単価帯が主軸に無い場合は `coverageGaps`（漏れ検知）を出し、黙って「無い」としない。
+4. 単日・極少点数は例外。主因分析に使わないが、存在は短く記載する。
+5. `extractProductSearchHints` で SP を優先して通常コースを落とす変更を戻さない。
 
 ## やってはいけないこと
 
@@ -67,3 +80,5 @@ alwaysApply: true
 - 既存の `formatJournalSpecificFactsForAi` 出力を新フォーマッタだけで置き換える
 - コホート比較があるのに「追加の比較が必要」とだけ答えて数値を使わない
 - 汎用比較APIを商品利用/非利用専用に戻して他軸を捨てる
+- コース分析で SP など一部名称だけを検索し、通常コースを落とす
+- 特定店舗の商品名（例: コース8品）を全店共通の唯一の正解としてハードコードし、他店の別名を無視する
