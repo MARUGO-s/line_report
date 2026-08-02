@@ -1531,6 +1531,27 @@
     </div>
   </div>
 
+  <!-- RAGチャンク閲覧 & テキストダウンロード モーダル -->
+  <div id="knRagModal" class="kn-modal-backdrop" hidden>
+    <div class="kn-modal-dialog">
+      <div class="kn-modal-header">
+        <span class="kn-modal-title" id="knRagModalTitle">📑 RAGチャンク一覧 & テキストダウンロード</span>
+        <button type="button" class="kn-modal-close" onclick="closeKnRagModal()">✕</button>
+      </div>
+      <div class="kn-modal-body">
+        <p class="kn-modal-intro">AIが約600文字ごとに自動分割・構造化したRAG（ラグ）データチャンクです。AIチャットや売上分析時に自動参照されます。</p>
+        <div id="knRagModalBody" class="kn-rag-list">
+          <!-- JSでチャンクカードが挿入されます -->
+        </div>
+      </div>
+      <div class="kn-modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeKnRagModal()">閉じる</button>
+        <button type="button" class="btn btn-primary" id="knRagDownloadTxtBtn">RAGテキスト (.txt) をダウンロード</button>
+        <button type="button" class="btn btn-primary" id="knRagDownloadJsonBtn">RAGデータ (.json) をダウンロード</button>
+      </div>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-kicker">登録済みの資料</div>
     <div class="kn-filters">
@@ -7950,12 +7971,121 @@ function renderKnowledgeList(items) {
       ${tags.length ? `<div class="kn-item-period">タグ: ${esc(tags.join(' / '))}</div>` : ''}
       <div class="kn-item-actions">
         <button onclick="editKnowledgeItem(${Number(item.id)})">編集</button>
-        ${item.has_attachment ? `<button onclick="downloadKnowledgeAttachment(${Number(item.id)})">添付を開く</button>` : ''}
+        <button onclick="viewKnowledgeRagChunks(${Number(item.id)})">📑 RAG表示</button>
+        <button onclick="downloadKnowledgeRagText(${Number(item.id)}, 'txt')">💾 RAGをDL (.txt)</button>
+        ${item.has_attachment ? `<button onclick="downloadKnowledgeAttachment(${Number(item.id)})">原本を開く</button>` : ''}
         ${inactive ? '' : `<button onclick="deactivateKnowledgeItem(${Number(item.id)})">無効にする</button>`}
         <button onclick="deleteKnowledgeItem(${Number(item.id)})">完全に削除</button>
       </div>
     </div>`;
   }).join('');
+}
+
+let activeRagItemData = null;
+
+async function viewKnowledgeRagChunks(id) {
+  try {
+    const params = new URLSearchParams({ store_key: STORE_KEY, id: String(id) });
+    const body = await adminApiFetch(`${KNOWLEDGE_API}/item?${params.toString()}`, { method: 'GET' });
+    const item = body.item || {};
+    activeRagItemData = item;
+
+    const modal = knowledgeEl('knRagModal');
+    const titleEl = knowledgeEl('knRagModalTitle');
+    const bodyEl = knowledgeEl('knRagModalBody');
+
+    if (titleEl) titleEl.textContent = `📑 RAGチャンク一覧 - ${item.title || ''}`;
+
+    const chunks = Array.isArray(item.chunks) ? item.chunks : [];
+    if (!chunks.length) {
+      bodyEl.innerHTML = `<div class="empty">
+        <p><strong>現在チャンク化されたRAGデータはありません。</strong></p>
+        <p style="font-size:13px;color:#94a3b8;">概要: ${esc(item.summary || '')}</p>
+        <p style="font-size:12px;color:#cbd5e1;">※本文が保存されている場合、次回保存時に自動分割・チャンク化されます。</p>
+      </div>`;
+    } else {
+      bodyEl.innerHTML = chunks.map((chunk, idx) => `
+        <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:10px;">
+          <div style="font-size:12px;font-weight:700;color:#38bdf8;margin-bottom:6px;display:flex;justify-content:space-between;">
+            <span>チャンク #${idx + 1}</span>
+            <span>${chunk.token_count || chunk.chunk_text?.length || 0} 文字</span>
+          </div>
+          <div style="font-size:13px;color:#e2e8f0;white-space:pre-wrap;word-break:break-word;line-height:1.5;">${esc(chunk.chunk_text || '')}</div>
+        </div>
+      `).join('');
+    }
+
+    const txtBtn = knowledgeEl('knRagDownloadTxtBtn');
+    const jsonBtn = knowledgeEl('knRagDownloadJsonBtn');
+    if (txtBtn) txtBtn.onclick = () => downloadKnowledgeRagText(id, 'txt');
+    if (jsonBtn) jsonBtn.onclick = () => downloadKnowledgeRagText(id, 'json');
+
+    if (modal) modal.hidden = false;
+  } catch (err) {
+    setKnowledgeStatus(`RAGデータの読み込みに失敗しました: ${err.message || err}`, true);
+  }
+}
+
+function closeKnRagModal() {
+  const modal = knowledgeEl('knRagModal');
+  if (modal) modal.hidden = true;
+}
+
+async function downloadKnowledgeRagText(id, format = 'txt') {
+  try {
+    let item = activeRagItemData;
+    if (!item || Number(item.id) !== Number(id)) {
+      const params = new URLSearchParams({ store_key: STORE_KEY, id: String(id) });
+      const body = await adminApiFetch(`${KNOWLEDGE_API}/item?${params.toString()}`, { method: 'GET' });
+      item = body.item || {};
+    }
+
+    const title = item.title || 'RAGデータ';
+    const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+
+    let blob, filename;
+
+    if (format === 'json') {
+      const jsonData = JSON.stringify(item, null, 2);
+      blob = new Blob([jsonData], { type: 'application/json;charset=utf-8' });
+      filename = `${safeTitle}_RAGデータ.json`;
+    } else {
+      const chunks = Array.isArray(item.chunks) ? item.chunks : [];
+      let textContent = `==================================================\n`;
+      textContent += `資料タイトル: ${item.title || ''}\n`;
+      textContent += `カテゴリ: ${item.category || 'その他'}\n`;
+      textContent += `実施期間: ${knowledgePeriodLabel(item)}\n`;
+      textContent += `タグ: ${(Array.isArray(item.tags) ? item.tags : []).join(', ')}\n`;
+      textContent += `作成日時: ${item.created_at || ''}\n`;
+      textContent += `==================================================\n\n`;
+      textContent += `【概要 (AIサマリー)】\n${item.summary || ''}\n\n`;
+      textContent += `【本文 (文字起こし全文)】\n${item.body_text || ''}\n\n`;
+      
+      if (chunks.length > 0) {
+        textContent += `==================================================\n`;
+        textContent += `【分割 RAG チャンクデータ (全 ${chunks.length} チャンク)】\n`;
+        textContent += `==================================================\n\n`;
+        chunks.forEach((c, idx) => {
+          textContent += `--- チャンク #${idx + 1} (${c.token_count || c.chunk_text?.length || 0} 文字) ---\n`;
+          textContent += `${c.chunk_text || ''}\n\n`;
+        });
+      }
+
+      blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+      filename = `${safeTitle}_RAGデータ.txt`;
+    }
+
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    setKnowledgeStatus(`「${filename}」のダウンロードが完了しました。`);
+  } catch (err) {
+    setKnowledgeStatus(`ダウンロードに失敗しました: ${err.message || err}`, true);
+  }
 }
 
 async function editKnowledgeItem(id) {
