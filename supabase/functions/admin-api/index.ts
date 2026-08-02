@@ -188,14 +188,14 @@ ${cleanText}
         }
 
         // ③ Supabase store_knowledge_documents テーブルへ自動保存
-        // DB CHECK制約 (施策, メニュー, 価格改定, イベント, マニュアル, その他) への絶対安全な変換
+        // DB CHECK制約 ('施策','メニュー','価格改定','イベント','マニュアル','その他') に100%合致させる
         const validCategories = ["施策", "メニュー", "価格改定", "イベント", "マニュアル", "その他"];
         const rawCategory = String(categorizedResult.category || "その他").trim();
-        const dbCategory = validCategories.includes(rawCategory) ? rawCategory : "その他";
-        const subCategoryTag = validCategories.includes(rawCategory) ? "" : rawCategory;
+        const safeCategory = validCategories.includes(rawCategory) ? rawCategory : "その他";
+        const extraTag = validCategories.includes(rawCategory) ? "" : rawCategory;
 
         const finalTags = ["LINE投稿"];
-        if (subCategoryTag) finalTags.push(subCategoryTag);
+        if (extraTag && extraTag !== "その他") finalTags.push(extraTag);
         if (Array.isArray(categorizedResult.tags)) {
           categorizedResult.tags.forEach((t: string) => { if (!finalTags.includes(t)) finalTags.push(t); });
         }
@@ -206,13 +206,13 @@ ${cleanText}
 
         let record: Record<string, any> = {
           store_partition_key: storeKey,
-          category: dbCategory,
-          title: categorizedResult.title,
-          summary: categorizedResult.summary,
+          category: safeCategory,
+          title: String(categorizedResult.title || "LINEメモ").trim(),
+          summary: String(categorizedResult.summary || cleanText).trim(),
           body_text: cleanText,
           search_text: searchText,
           tags: finalTags,
-          source_type: "line_post",
+          source_type: "manual",
           created_by: senderName,
           is_active: true,
         };
