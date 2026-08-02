@@ -188,15 +188,18 @@ ${cleanText}
         }
 
         // ③ Supabase store_knowledge_documents テーブルへ自動保存
-        // DB CHECK制約 (施策, メニュー, 価格改定, イベント, マニュアル, その他) へのマッピング
+        // DB CHECK制約 (施策, メニュー, 価格改定, イベント, マニュアル, その他) への絶対安全なクレンジング
         const validCategories = ["施策", "メニュー", "価格改定", "イベント", "マニュアル", "その他"];
-        let dbCategory = categorizedResult.category || "その他";
+        let rawCategory = String(categorizedResult.category || "その他").trim();
+        let dbCategory = "その他";
         let subCategoryTag = "";
 
-        if (!validCategories.includes(dbCategory)) {
-          subCategoryTag = dbCategory;
-          if (dbCategory === "現場日報") dbCategory = "その他";
-          else if (dbCategory === "周辺情報") dbCategory = "イベント";
+        if (validCategories.includes(rawCategory)) {
+          dbCategory = rawCategory;
+        } else {
+          subCategoryTag = rawCategory;
+          if (rawCategory.includes("日報") || rawCategory.includes("メモ")) dbCategory = "その他";
+          else if (rawCategory.includes("周辺") || rawCategory.includes("他店") || rawCategory.includes("競合")) dbCategory = "イベント";
           else dbCategory = "その他";
         }
 
