@@ -2664,7 +2664,8 @@ async function maybeProcessKnowledgeImageMessage(
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-admin-token': 'demo',
+              // 関数間の内部ブリッジ認証。admin-api 側で service_role キー一致を検証する
+              'x-internal-key': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
               'x-admin-surface': 'line_report',
               'x-store-key': storeKey
             },
