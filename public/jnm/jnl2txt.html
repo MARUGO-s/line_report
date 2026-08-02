@@ -6714,7 +6714,8 @@ const MARUGO_AI_ANALYZE_INSTRUCTION = `${MARUGO_AI_COMPANY_CONTEXT}
 与えられた売上データに基づき、経営陣や店長が使える「マルゴグループ店舗経営・売上多角分析＆ワイン営業戦略レポート」をMarkdownで作成してください。
 一般的な居酒屋・Barのテンプレではなく、ワイン提案・ペアリング・ドリンク構成・姉妹店連携を軸に、数値根拠付きで弱点抽出と具体策まで書いてください。
 
-【レポート必須】多角分析の章ではランチとディナーを必ず分け、客単価・フード／ドリンク比率を昼夜別で示すこと。期間に12月が含まれる場合はクリスマスディナー要因を必ず言及すること。`;
+【レポート必須】多角分析の章ではランチとディナーを必ず分け、客単価・フード／ドリンク比率を昼夜別で示すこと。期間に12月が含まれる場合はクリスマスディナー要因を必ず言及すること。
+【3系統統合・必須】毎回①店舗営業情報（定休等）②売上ジャーナル数値③登録資料（施策・メニュー）を読んでから書くこと。店舗営業情報を読まずに曜日弱点を語ってはいけない。`;
 
 /** 店舗立地（AI分析用）。全店を新宿三丁目前提にしない。 */
 const STORE_AI_LOCATIONS = {
@@ -6930,11 +6931,16 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
   const p = normalizeStoreOpsProfile(profile);
   const hasContent = p.closedWeekdays.length || p.notes || p.specialOpenPolicy
     || p.lunchOffered !== 'yes' || p.dinnerOffered !== 'yes' || p.overflowRule;
-  if (!hasContent) return '';
 
   const lines = [];
-  lines.push('【店舗営業情報（この店舗の登録前提・必須）】');
+  lines.push('【店舗営業情報（この店舗の登録前提・必須・必ず参照）】');
   lines.push(`店舗キー: ${STORE_KEY}`);
+  if (!hasContent) {
+    lines.push('状態: 未登録（定休・ランチ前提は未設定。曜日の低売上を定休と決め打ちしない）');
+    lines.push('分析ルール: 店舗営業情報が未登録のため、定休前提での免責は適用しない。他店ルールも転用しない。');
+    return '\n\n' + lines.join('\n');
+  }
+
   lines.push(`定休日: ${p.closedWeekdays.length ? p.closedWeekdays.map(d => d + '曜').join('・') : 'なし（全日営業想定）'}`);
   lines.push(`ランチ: ${mealOfferLabel(p.lunchOffered)} / ディナー: ${mealOfferLabel(p.dinnerOffered)}`);
   if (p.overflowRule) {
@@ -6953,6 +6959,81 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
     analysisNotes.forEach(n => lines.push(`- ${n}`));
   }
   return '\n\n' + lines.join('\n');
+}
+
+/**
+ * AI分析の直前に店舗営業情報を必ずクラウド→ローカル→初期値の順で確定する。
+ * タブを開いていなくても、分析時に最新の店舗情報を読む。
+ */
+async function ensureStoreOpsProfileForAi(storeKey = STORE_KEY) {
+  let profile = readStoreOpsProfile(storeKey);
+  const cloud = await loadStoreOpsProfileFromCloud(storeKey);
+  if (cloud) {
+    profile = writeStoreOpsProfileLocal(cloud, storeKey);
+  } else if (!localStorage.getItem(storeOpsStorageKey(storeKey))) {
+    // 未保存なら店舗初期値（サヴァサヴァ定休など）をローカルへ確定
+    profile = writeStoreOpsProfileLocal(defaultStoreOpsProfile(storeKey), storeKey);
+  }
+  return normalizeStoreOpsProfile(profile);
+}
+
+/**
+ * ジャーナル（確定集計）・資料（ナレッジ）・店舗情報の3系統をAIへ渡す統合ブロックを組み立てる。
+ * いずれも経路を明示し、欠けていても「未取得／未登録」と書いて読み飛ばしを防ぐ。
+ */
+async function buildIntegratedAnalysisContext({
+  verifiedData = null,
+  queryText = '',
+  periodRange = null,
+  forReport = false
+} = {}) {
+  const profile = await ensureStoreOpsProfileForAi();
+  const storeOpsBlock = formatStoreOpsBlockForAi(profile, verifiedData);
+
+  let knowledgeBlock = '';
+  let knowledgeCount = 0;
+  let knowledgeError = '';
+  try {
+    const items = await loadStoreKnowledgeForAi();
+    knowledgeCount = items.length;
+    let range = periodRange || resolveKnowledgePeriodRange(verifiedData);
+    let query = queryText || '売上分析 施策 メニュー';
+    if (forReport) {
+      const period = String(currentReport?.period || '');
+      const iso = period.match(/(\d{4}-\d{2}-\d{2})[^\d]*(\d{4}-\d{2}-\d{2})?/);
+      range = iso ? { from: iso[1], to: iso[2] || iso[1] } : range;
+      query = `${currentReport?.title || ''} ${period} 売上分析 施策 メニュー`;
+    }
+    knowledgeBlock = formatStoreKnowledgeBlock(selectStoreKnowledgeForQuery(query, range, items));
+  } catch (err) {
+    knowledgeError = String(err?.message || err || 'unknown');
+    console.warn('店舗ナレッジの付与をスキップしました:', err);
+  }
+
+  const hasJournal = !!(verifiedData || (forReport && currentReport && (currentReport.total || currentReport.totalSales || currentReport.salesCount)));
+  const hasKnowledge = !!(knowledgeBlock && knowledgeBlock.trim());
+  const hasStoreOps = !!(storeOpsBlock && storeOpsBlock.trim());
+
+  const checklist = `
+
+【データ統合チェック（必須・3系統）】
+1. ジャーナル／保存レポート（数値の正本）: ${hasJournal ? '添付あり → 金額・客数・比率はここだけを使う' : '今回は確定集計ブロックなし（画面上のsalesDataまたは未照会）'}
+2. 店舗資料（施策・メニュー）: ${hasKnowledge ? `添付あり（登録${knowledgeCount}件から期間照合）` : (knowledgeError ? `取得失敗（${knowledgeError}）→ 資料なしとして扱い推測で補わない` : (knowledgeCount ? '期間に合う資料なし' : '登録資料なし'))}
+3. 店舗営業情報（定休・ランチ等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析に反映' : '添付なし（異常）'}
+統合ルール: 数値は①、背景・施策は②、定休／特別営業の解釈は③。③を読まずに日曜・月曜の低売上を弱点としないこと。`;
+
+  return {
+    profile,
+    storeOpsBlock,
+    knowledgeBlock: knowledgeBlock || (knowledgeError
+      ? `\n\n【店舗ナレッジ】取得に失敗したため今回は資料なしとして分析してください（失敗理由: ${knowledgeError}）。`
+      : '\n\n【店舗ナレッジ】この店舗に参照できる登録資料はありません（資料なしとして分析。推測で補わない）。'),
+    checklist,
+    hasJournal,
+    hasKnowledge,
+    hasStoreOps,
+    knowledgeCount
+  };
 }
 
 function readStoreOpsForm() {
@@ -7308,9 +7389,13 @@ async function aiAnalyze() {
   
   try {
     const data = buildSalesDataForAI();
-    // このレポート期間に実施していた施策・メニューを分析レポートにも反映する
-    const knowledgeBlock = await buildStoreKnowledgeBlockForReport();
-    const storeOpsBlock = formatStoreOpsBlockForAi(readStoreOpsProfile(), data);
+    showAppLoading('🤖 AIが売上データを高度分析中...', 'ジャーナル・店舗情報・資料を統合しています');
+    // ①ジャーナル数値 ②店舗営業情報（クラウド必須読込） ③資料 を必ず揃えてからAIへ渡す
+    const integrated = await buildIntegratedAnalysisContext({
+      verifiedData: data,
+      forReport: true,
+      queryText: `${data.title || ''} ${data.period || ''} 売上分析`
+    });
     const res = await fetch(AI_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -7320,7 +7405,12 @@ async function aiAnalyze() {
       body: JSON.stringify({
         action: 'analyze',
         salesData: data,
-        systemInstruction: MARUGO_AI_ANALYZE_INSTRUCTION + '\n\n' + buildStoreLocationBlockForAi() + storeOpsBlock + knowledgeBlock,
+        systemInstruction: MARUGO_AI_ANALYZE_INSTRUCTION
+          + '\n\n' + buildStoreLocationBlockForAi()
+          + integrated.checklist
+          + integrated.storeOpsBlock
+          + integrated.knowledgeBlock
+          + '\n\n【統合分析の指示】必ず①店舗営業情報→②確定売上数値→③登録資料の順で読み、3つを突き合わせてレポートを書いてください。店舗営業情報を読まずに曜日弱点を語ってはいけません。',
         storeKey: STORE_KEY,
         storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
         storeLocationBlock: buildStoreLocationBlockForAi()
@@ -10508,20 +10598,21 @@ ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分�
 
 回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
-  // 店舗ナレッジ（施策・メニュー）を、確定集計の対象期間と突き合わせて添付する。
-  // 期間が重なる資料は類似度に関係なく必ず入れる（施策の取りこぼしを防ぐ）。
-  let knowledgeBlock = '';
+  // 店舗営業情報（クラウド）と店舗ナレッジを、確定集計と必ずセットで添付する。
+  let integrated;
   try {
-    const knowledgeItems = await loadStoreKnowledgeForAi();
-    if (knowledgeItems.length) {
-      knowledgeBlock = formatStoreKnowledgeBlock(selectStoreKnowledgeForQuery(
-        resolvedChatQuery,
-        resolveKnowledgePeriodRange(verifiedData),
-        knowledgeItems
-      ));
-    }
+    integrated = await buildIntegratedAnalysisContext({
+      verifiedData,
+      queryText: resolvedChatQuery,
+      periodRange: resolveKnowledgePeriodRange(verifiedData)
+    });
   } catch (err) {
-    console.warn('店舗ナレッジの付与をスキップしました:', err);
+    console.warn('統合コンテキストの構築に失敗:', err);
+    integrated = {
+      storeOpsBlock: formatStoreOpsBlockForAi(readStoreOpsProfile(), verifiedData),
+      knowledgeBlock: '\n\n【店舗ナレッジ】取得に失敗したため今回は資料なしとして分析してください。',
+      checklist: '\n\n【データ統合チェック】店舗情報／資料の取得でエラーが発生しました。数値は確定集計のみを使い、定休前提はローカル店舗情報があれば参照してください。'
+    };
   }
 
   const strictSystemInstruction = `${MARUGO_AI_COMPANY_CONTEXT}
@@ -10538,8 +10629,9 @@ ${buildStoreLocationBlockForAi()}
 7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
 8. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
 9. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
-10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。
-11. 【店舗営業情報】が提示されている場合、定休曜日の売上ゼロ／低下を弱点や機会損失としないでください。定休曜日に売上が立っている日は特別営業（または例外営業）として区別してください。他店の定休ルールを転用しないでください。${verifiedDataBlock}${formatStoreOpsBlockForAi(readStoreOpsProfile(), verifiedData)}${knowledgeBlock}`;
+10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。資料が「なし」と明示されている場合のみ資料なしで進めてください。
+11. 【店舗営業情報・必須】毎回必ず添付されます。分析の最初に読み、定休曜日の売上ゼロ／低下を弱点や機会損失としないでください。定休曜日に売上が立っている日は特別営業（または例外営業）として区別してください。他店の定休ルールを転用しないでください。
+12. 【3系統統合・必須】①ジャーナル確定集計（数値）②店舗営業情報（定休・ランチ等）③店舗資料（施策・メニュー）を必ず突き合わせて回答してください。どれか欠ける場合はチェック欄の状態に従い、欠けた系統を推測で埋めないでください。${integrated.checklist}${integrated.storeOpsBlock}${verifiedDataBlock}${integrated.knowledgeBlock}`;
 
   try {
     const res = await fetch(AI_ENDPOINT, {
