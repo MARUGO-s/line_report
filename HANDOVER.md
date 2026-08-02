@@ -1,0 +1,105 @@
+# 📋 JNL → TXT 変換ツール & 売上分析AI アプリケーション 引き継ぎドキュメント (HANDOVER.md)
+
+本ドキュメントは、本プロジェクトの技術スタック、現状のシステム構造、実装済み機能、および開発上の絶対遵守ルールを他のAIやエンジニアへ引き継ぐための仕様書です。
+
+---
+
+## 🌐 1. プロジェクト基本情報
+
+- **アプリケーション概要**: レジの電子ジャーナルファイル（`.jnl` / `.lzh`）をブラウザ内でデコード・集計し、店舗経営レポートの作成・AIコンサルティング分析・保存データに基づく対話型AIチャットを提供するWebアプリケーション。
+- **公開WebアプリURL**: [https://marugo-s.github.io/line_report/jnm/jnl2txt.html](https://marugo-s.github.io/line_report/jnm/jnl2txt.html)
+- **GitHubリポジトリ**: `MARUGO-s/line_report` (`main` ブランチ)
+- **主要ソースファイル**: `/jnl2txt.html`
+- **デプロイパス**: `public/jnm/jnl2txt.html` および `public/jnm/index.html`
+
+---
+
+## 🛠️ 2. 技術スタック & アーキテクチャ
+
+- **フロントエンド**: HTML5, Vanilla JavaScript (ES6+), Vanilla CSS (デザインシステム変数活用)
+- **ライブラリ**: `fflate.min.js`（ブラウザ内 `.lzh` / `.zip` アーカイブ全自動高速解凍）
+- **バックエンド / データベース**: Supabase (PostgreSQL / REST API / Edge Functions)
+  - **Supabase URL**: `https://hocbnifuactbvmyjraxy.supabase.co`
+  - **テーブル**: `reports` (売上レポート保存), `ai_analysis_history` (AIコンサル分析履歴)
+  - **Edge Function**: `ai-analyze` (`https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/ai-analyze`)
+- **ローカルストレージ**: `jnl2txt_reports_v2`, `jnl2txt_ai_history_v1` (デュアル永続化)
+- **運用形態**: **純粋なWebアプリケーション**（※かつて存在した Electron / macOS / Windows ネイティブアプリ資産は完全に全削除済み）。
+
+---
+
+## ✨ 3. 実装済み主要機能
+
+1. **電子ジャーナル (.jnl / .lzh) 全自動解凍・パース・CSV/TXT出力**
+   - Shift-JIS / UTF-8 / EUC-JP 対応。ドラッグ＆ドロップでフォルダ・ファイルを一括読み込み。
+   - 完了した売上のみ、取消・エラーのみ、全データ抽出の切り替え。
+   - レジ商品コードマッピング設定（店舗別カスタマイズ）。
+
+2. **売上レポート自動生成 (日別・月別・期間集計)**
+   - 総売上高、取引件数、組数、総客数、平均客単価、ランチ/ディナー客単価。
+   - フード/ドリンク/室料/その他/チャージの売上金額および構成比率。
+   - 曜日別売上バランス、時間帯別売上推移、売上高 TOP 5 メニューの自動計算。
+
+3. **ビジュアルAI分析ダッシュボード & コンサルティングレポート**
+   - KPIカード（総売上、客単価、フード売上、ドリンク売上）。
+   - フード vs ドリンク比率 / ランチ vs ディナー比率のプログレスバー表示。
+   - 曜日別売上バランスバー、時間帯別推移バー、売上高 TOP 5 メニューグラフ。
+   - AIによる強み・弱み・売上アップの具体的改善施策レポート出力。
+
+4. **デュアル保存・同期エンジン (Supabase & LocalStorage)**
+   - クラウドDBとローカルストレージの同時自動保存。
+   - 保存済みレポート一覧（「すべて」「日別レポート」「月間レポート」のフィルター切替機能）。
+   - 複数レポートを選択して合算分析する機能。
+   - AI分析履歴一覧、プレビュー閲覧機能、削除機能。
+
+5. **対話型 AI チャット (メイン画面 & レポート画面常時対応)**
+   - 右側スライドイン方式のチャットパネル（`#aiChatPanel`）。
+   - パネルを閉じるまで**会話履歴（`aiChatHistory`）を100%全件記憶・文脈保持**。
+
+---
+
+## 🔒 4. AIチャットにおける【絶対遵守ルール】
+
+AIチャット処理 (`sendAiChat`, `generateLocalConsultantReply`, `searchSavedReportsByQuery`) には以下のプロンプト制約および検索ロジックが組み込まれています。今後の開発・改修でもこの規約を絶対に崩さないでください。
+
+> **【絶対遵守プロンプト規約】**
+> 1. AIは店舗の保存済み売上データ専用の厳密なアナリストAIとして動作すること。
+> 2. 質問に対する回答や数値・金額に関しては、**必ず提示・保存されたデータ・資料のみから厳密に引用・計算して回答**すること。
+> 3. **推測やWeb情報、外部の一般的な曖昧な推量で数字を答えることは【完全禁止】**。
+> 4. チャットパネルを閉じるまでの過去の会話履歴（`chatHistory`）をすべて踏まえ、前後の文脈を完璧に引き継いで会話すること。
+> 5. 提供されたデータ内に存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答すること。
+
+---
+
+## 🔍 5. 重要コード構造 & 直近の修正知見
+
+1. **保存ジャーナル横断検索エンジン (`searchSavedReportsByQuery`)**:
+   - ユーザーのチャット入力から `202606`, `2026年6月`, `2026-06`, `2025年より前` などの年月・期間表現を正規表現で自動判別。
+   - `readSavedReports()` 内の全保存データおよび `currentReport` から該当データを動的抽出し、**総売上高・フード売上・ドリンク売上・構成比・客数・客単価** を計算して即答。
+
+2. **ダッシュボード描画の「¥0 / 白紙バグ」予防措置 (`buildAiVisualDashboardHTML`)**:
+   - レポート保存時や履歴閲覧時に伝票明細配列 `d.sales` が除外されている場合でも、`currentReport` 自身に格納された事前計算サマリー属性（`totalSales`, `foodTotal`, `drinkTotal`, `weekdayBreakdown`, `hourlyBreakdown`, `topProducts` 等）を直接参照して描画するため、グラフや数値が空っぽになりません。
+
+3. **アクティブタブのCSSスタイリング規則**:
+   - 選択中のタブボタンには `.active` クラスが付与され、`.rv-btn.active`, `button[data-filter].active` に対する最高優先度のCSS（背景色 `#2563eb` / `#3b82f6` ＋ 太字白文字 `#ffffff` ＋ ドロップシャドウ）によって視認性が保たれます。
+
+---
+
+## 🚀 6. 開発・デプロイの手順
+
+### リポジトリ更新と GitHub Pages 反映コマンド
+コードを変更した際は、必ず構文チェックを行った上で以下を実行してデプロイします：
+
+```bash
+# 1. public ディレクトリへコピー
+cp /Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/jnl2txt.html /tmp/line_report_repo/public/jnm/jnl2txt.html
+cp /Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/jnl2txt.html /tmp/line_report_repo/public/jnm/index.html
+
+# 2. Git コミット & プッシュ
+cd /tmp/line_report_repo
+git add public/jnm/jnl2txt.html public/jnm/index.html
+git commit -m "Update application logic and documentation"
+git push origin main
+```
+
+---
+*本ドキュメントにより、後続のAIアシスタントやエンジニアがプロジェクトの全仕様・制約を正確に把握して開発を継続できます。*

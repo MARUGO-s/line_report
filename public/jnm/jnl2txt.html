@@ -518,6 +518,37 @@
     opacity:1;color:var(--rv-neutral-600);background:color-mix(in srgb, var(--rv-text) 8%, transparent);border-color:var(--rv-neutral-700);
     box-shadow:none;cursor:default;
   }
+
+  /* 店舗ナレッジ 画像AI解析モーダル */
+  .kn-modal-backdrop {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9999; padding: 16px;
+  }
+  .kn-modal-backdrop[hidden] { display: none !important; }
+  .kn-modal-dialog {
+    background: #1e293b; color: #f8fafc; border: 1px solid #334155;
+    border-radius: 12px; max-width: 900px; width: 100%; max-height: 90vh;
+    display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5);
+  }
+  .kn-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid #334155;
+  }
+  .kn-modal-title { font-size: 16px; font-weight: 700; color: #38bdf8; }
+  .kn-modal-close { background: none; border: none; color: #94a3b8; font-size: 20px; cursor: pointer; }
+  .kn-modal-close:hover { color: #fff; }
+  .kn-modal-body { padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .kn-modal-intro { font-size: 13px; color: #cbd5e1; margin: 0; }
+  .kn-modal-content { display: flex; gap: 20px; flex-wrap: wrap; }
+  .kn-modal-left { flex: 1 1 250px; display: flex; justify-content: center; align-items: flex-start; }
+  .kn-modal-img { max-width: 100%; max-height: 350px; border-radius: 8px; border: 1px solid #475569; object-fit: contain; }
+  .kn-modal-right { flex: 2 1 400px; display: flex; flex-direction: column; gap: 10px; }
+  .kn-modal-footer {
+    display: flex; justify-content: flex-end; gap: 12px;
+    padding: 16px 20px; border-top: 1px solid #334155;
+  }
   .report{max-width:820px;margin:0 auto;padding:var(--rv-space-8) var(--rv-space-4) var(--rv-space-8);
     font-family:var(--rv-font-body);color:var(--rv-text)}
   .r-title{font-family:var(--rv-font-heading);font-size:32px;font-weight:600;
@@ -1430,6 +1461,52 @@
       <button id="knSaveBtn" class="btn btn-primary">保存</button>
       <button id="knResetBtn" class="btn btn-secondary">クリア</button>
       <span id="knFormStatus" class="kn-status"></span>
+    </div>
+  </div>
+
+  <!-- 画像AI解析 結果確認・修正モーダル -->
+  <div id="knImageModal" class="kn-modal-backdrop" hidden>
+    <div class="kn-modal-dialog">
+      <div class="kn-modal-header">
+        <span class="kn-modal-title">✨ Gemini 2.0 Flash による画像解析結果</span>
+        <button type="button" class="kn-modal-close" onclick="closeKnImageModal()">✕</button>
+      </div>
+      <div class="kn-modal-body">
+        <p class="kn-modal-intro">AIが画像（メニュー表・資料）から抽出した内容です。間違えがある場合は直接手入力で修正してください。</p>
+        <div class="kn-modal-content">
+          <div class="kn-modal-left">
+            <img id="knModalPreview" src="" alt="プレビュー" class="kn-modal-img" />
+          </div>
+          <div class="kn-modal-right">
+            <label class="kn-field kn-full">種別
+              <select id="knModalCategory">
+                <option value="メニュー">メニュー</option>
+                <option value="施策">施策</option>
+                <option value="価格改定">価格改定</option>
+                <option value="イベント">イベント</option>
+                <option value="マニュアル">マニュアル</option>
+                <option value="その他">その他</option>
+              </select>
+            </label>
+            <label class="kn-field kn-full">タイトル（手動修正可）
+              <input id="knModalTitle" type="text">
+            </label>
+            <label class="kn-field kn-full">概要（手動修正可）
+              <textarea id="knModalSummary" rows="3"></textarea>
+            </label>
+            <label class="kn-field kn-full">抽出された詳細内容（手動修正可）
+              <textarea id="knModalBody" rows="7"></textarea>
+            </label>
+            <label class="kn-field kn-full">タグ（カンマ区切り）
+              <input id="knModalTags" type="text">
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="kn-modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeKnImageModal()">キャンセル</button>
+        <button type="button" class="btn btn-primary" onclick="applyImageAnalysisToForm()">この内容で確定・フォームに反映</button>
+      </div>
     </div>
   </div>
 
@@ -8149,6 +8226,86 @@ async function buildStoreKnowledgeBlockForReport() {
   return formatStoreKnowledgeBlock(selected);
 }
 
+/** テキストまたは画像ファイルを添付した際の全自動判定処理 */
+async function handleKnowledgeFileChange(file) {
+  if (!file) return;
+  const name = String(file.name || '').toLowerCase();
+  const isImage = /^(image\/)/.test(String(file.type || '')) || /\.(png|jpg|jpeg|webp)$/.test(name);
+  const isText = /^(text\/|application\/csv)/.test(String(file.type || '')) || /\.(txt|csv|md|markdown)$/.test(name);
+
+  if (isImage) {
+    await analyzeImageFileWithGemini(file);
+  } else if (isText) {
+    await importKnowledgeTextFile(file);
+  }
+}
+
+/** Gemini 2.0 Flash を使用して画像ファイルを全自動解析 */
+async function analyzeImageFileWithGemini(file) {
+  if (!file || !getAdminToken()) {
+    setKnowledgeStatus('画像解析には管理トークンの接続が必要です。', true);
+    return;
+  }
+  setKnowledgeStatus('✨ Gemini 2.0 Flash で画像を解析中…（メニュー名や価格を自動抽出しています）');
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('store_key', STORE_KEY);
+    const response = await adminApiFetch(`${KNOWLEDGE_API}/analyze-image`, {
+      method: 'POST',
+      body: form
+    });
+
+    const result = response.result || {};
+    const previewUrl = URL.createObjectURL(file);
+    showKnImageModal(result, previewUrl);
+    setKnowledgeStatus('画像解析が完了しました。ポップアップで抽出内容をご確認・手入力修正してください。');
+  } catch (err) {
+    setKnowledgeStatus(`画像解析に失敗しました: ${err.message || err}（概要・内容へ手動でご記入ください）`, true);
+  }
+}
+
+function showKnImageModal(result, previewUrl) {
+  const modal = knowledgeEl('knImageModal');
+  const img = knowledgeEl('knModalPreview');
+  if (!modal) return;
+
+  if (img && previewUrl) img.src = previewUrl;
+  const set = (id, val) => { const el = knowledgeEl(id); if (el) el.value = val ?? ''; };
+
+  set('knModalCategory', result.category || 'メニュー');
+  set('knModalTitle', result.title || '');
+  set('knModalSummary', result.summary || '');
+  set('knModalBody', result.body_text || '');
+  set('knModalTags', Array.isArray(result.tags) ? result.tags.join(', ') : (result.tags || ''));
+
+  modal.hidden = false;
+}
+
+function closeKnImageModal() {
+  const modal = knowledgeEl('knImageModal');
+  if (modal) modal.hidden = true;
+}
+
+function applyImageAnalysisToForm() {
+  const getVal = (id) => knowledgeEl(id)?.value || '';
+  const category = getVal('knModalCategory');
+  const title = getVal('knModalTitle');
+  const summary = getVal('knModalSummary');
+  const body = getVal('knModalBody');
+  const tags = getVal('knModalTags');
+
+  const setVal = (id, val) => { const el = knowledgeEl(id); if (el) el.value = val; };
+  setVal('knCategory', category);
+  setVal('knTitle', title);
+  setVal('knSummary', summary);
+  setVal('knBody', body);
+  setVal('knTags', tags);
+
+  closeKnImageModal();
+  setKnowledgeStatus('AI解析内容（手動修正反映済み）をフォームへ設定しました。「保存」を押すとRAGログへ保存されます。');
+}
+
 knowledgeEl('knSaveBtn')?.addEventListener('click', saveKnowledgeForm);
 knowledgeEl('knResetBtn')?.addEventListener('click', resetKnowledgeForm);
 knowledgeEl('knReloadBtn')?.addEventListener('click', loadKnowledgeList);
@@ -8157,7 +8314,7 @@ knowledgeEl('knFilterActive')?.addEventListener('change', loadKnowledgeList);
 knowledgeEl('knFilterQuery')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing) loadKnowledgeList();
 });
-knowledgeEl('knFile')?.addEventListener('change', (e) => importKnowledgeTextFile(e.target.files?.[0]));
+knowledgeEl('knFile')?.addEventListener('change', (e) => handleKnowledgeFileChange(e.target.files?.[0]));
 
 const SAVED_DATA_CLARIFICATION_MARKER = '保存データの分析対象を選んでください';
 const AI_INTENT_CLARIFICATION_MARKER = '知りたい内容を具体化してください';
