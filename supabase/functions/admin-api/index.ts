@@ -88,22 +88,25 @@ serve(async (req: Request) => {
     if (path.includes("/pos-journals/saved-reports")) {
       const isItem = path.endsWith("/saved-reports/item");
 
-      // A. GET /pos-journals/saved-reports (一覧取得)
+      // A. GET /pos-journals/saved-reports (一覧取得: サマリー軽量化で高速・完結化)
       if (req.method === "GET" && !isItem) {
         const storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
         const kind = url.searchParams.get("kind");
         const limitParam = parseInt(url.searchParams.get("limit") || "500", 10);
 
-        let query = supabase.from("saved_reports").select("*").order("created_at", { ascending: false }).limit(limitParam);
+        let query = supabase.from("saved_reports").select("id, title, period, created_at, updated_at").order("created_at", { ascending: false }).limit(limitParam);
 
         const { data, error } = await query;
         if (error) throw error;
 
         let reports = (data || []).map((row: any) => {
-          if (row.data && typeof row.data === "object") {
-            return { id: row.id, title: row.title, period: row.period, created_at: row.created_at, ...row.data };
-          }
-          return row;
+          return {
+            id: row.id,
+            title: row.title || "売上レポート",
+            period: row.period || "",
+            created_at: row.created_at,
+            store_partition_key: storeKey
+          };
         });
 
         if (storeKey) {
