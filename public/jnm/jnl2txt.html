@@ -380,6 +380,10 @@
   .kn-item-actions button{font:inherit;font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-2);cursor:pointer}
   .kn-item-actions button:hover{background:color-mix(in srgb, var(--text) 7%, transparent)}
   @media (max-width:760px){.kn-form{grid-template-columns:repeat(2,minmax(0,1fr))}.kn-wide{grid-column:1 / -1}}
+  /* 店舗営業情報（定休・ランチ有無など） */
+  .ops-weekday-grid{display:flex;flex-wrap:wrap;gap:8px 14px;padding:4px 0}
+  .ops-weekday-grid label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text);cursor:pointer}
+  .ops-preview{font-size:12px;line-height:1.7;color:var(--text-2);background:color-mix(in srgb, var(--text) 4%, transparent);border:1px solid var(--border);border-radius:8px;padding:10px 12px;white-space:pre-wrap}
   select{font-size:13px;padding:7px 10px;border-radius:7px;border:1px solid var(--border-input);
     background:var(--surface);color:var(--text);font-family:inherit;cursor:pointer}
   .controls input[type=date]{font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--border-input);
@@ -1276,6 +1280,7 @@
   <div class="tabs">
     <div class="tab" data-tab="guide">使い方</div>
     <div class="tab active" data-tab="convert">変換</div>
+    <div class="tab" data-tab="storeops">店舗情報</div>
     <div class="tab" data-tab="knowledge">資料</div>
   </div>
 </div>
@@ -1314,6 +1319,7 @@
     <li>レポート画面の「AI分析」でコンサルティングレポートを生成できます（自動で履歴保存）。</li>
     <li>「AIチャット」では保存済みレポートを根拠に質問できます（期間比較・推移・改善案など）。</li>
     <li>回答下の「📄 PDFにする」で印刷用表示を開き、同時に質問と回答をクラウドへ保存します。</li>
+    <li>「店舗情報」タブで定休日・ランチ有無・特別営業ルールを登録すると、AIが定休曜日の低売上を弱点扱いしません（店舗ごとに独立）。</li>
   </ol>
 
   <h2>5. .jnl / .lzh について</h2>
@@ -1430,6 +1436,79 @@
 
       <div class="foot">制御コード（ESC/FS）を除去 → 指定の文字コードでデコード → 改行を整えて出力します。</div>
     </div>
+  </div>
+</section>
+
+<!-- 店舗営業情報（定休・ランチ有無・特別営業ルール） -->
+<section id="storeops" class="conv" hidden>
+  <p class="intro">この店舗の<strong>定休日・ランチ／ディナーの有無・特別営業ルール</strong>を登録します。AI分析はここに書いた前提を必ず踏まえ、定休曜日の売上ゼロ／低下を弱点扱いしません。店舗ごとに独立保存されます。</p>
+
+  <div class="card">
+    <div class="card-kicker">営業カレンダー前提（選択中の店舗）</div>
+    <div class="kn-form">
+      <div class="kn-field kn-full">定休日（該当する曜日にチェック）
+        <div class="ops-weekday-grid" id="opsClosedWeekdays">
+          <label><input type="checkbox" value="日"> 日曜</label>
+          <label><input type="checkbox" value="月"> 月曜</label>
+          <label><input type="checkbox" value="火"> 火曜</label>
+          <label><input type="checkbox" value="水"> 水曜</label>
+          <label><input type="checkbox" value="木"> 木曜</label>
+          <label><input type="checkbox" value="金"> 金曜</label>
+          <label><input type="checkbox" value="土"> 土曜</label>
+        </div>
+      </div>
+      <label class="kn-field kn-narrow">ランチ
+        <select id="opsLunchOffered">
+          <option value="yes">あり</option>
+          <option value="limited">限定／少ない</option>
+          <option value="no">なし（ディナーのみ等）</option>
+        </select>
+      </label>
+      <label class="kn-field kn-narrow">ディナー
+        <select id="opsDinnerOffered">
+          <option value="yes">あり</option>
+          <option value="limited">限定／少ない</option>
+          <option value="no">なし</option>
+        </select>
+      </label>
+      <label class="kn-field kn-wide">定休曜日が月に多いときの扱い
+        <select id="opsOverflowRule">
+          <option value="off">特になし</option>
+          <option value="on">定休曜日の合計が閾値超なら、指定曜日の一部が営業</option>
+        </select>
+      </label>
+      <label class="kn-field kn-narrow">閾値（日数）
+        <input id="opsOverflowThreshold" type="number" min="1" max="20" value="8">
+      </label>
+      <label class="kn-field kn-narrow">そのとき営業しやすい曜日
+        <select id="opsOverflowOpenWeekday">
+          <option value="月">月曜</option>
+          <option value="火">火曜</option>
+          <option value="水">水曜</option>
+          <option value="木">木曜</option>
+          <option value="金">金曜</option>
+          <option value="土">土曜</option>
+          <option value="日">日曜</option>
+        </select>
+      </label>
+      <label class="kn-field kn-full">特別営業の扱い
+        <textarea id="opsSpecialOpenPolicy" rows="2" maxlength="2000" placeholder="例: 定休の日曜に売上が立っている日は特別営業として扱う"></textarea>
+      </label>
+      <label class="kn-field kn-full">補足メモ（AIが前提として読む）
+        <textarea id="opsNotes" rows="3" maxlength="4000" placeholder="例: 荒木町ビストロ。基本は日月定休。宴会・クリスマス等で日曜営業あり"></textarea>
+      </label>
+    </div>
+    <p class="kn-note">ビストロ サヴァサヴァには初期値として「日曜・月曜定休／日曜＋月曜が月9日以上なら月曜の一部が営業／日曜売上＝特別営業」が入っています。他店は空のままか、その店の実態に合わせて入力してください。</p>
+    <div class="kn-actions">
+      <button id="opsSaveBtn" class="btn btn-primary" type="button">保存</button>
+      <button id="opsResetBtn" class="btn btn-secondary" type="button">店舗の初期値に戻す</button>
+      <span id="opsFormStatus" class="kn-status"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px;">
+    <div class="card-kicker">AIに渡る前提テキスト（プレビュー）</div>
+    <div id="opsPreview" class="ops-preview">（保存するとここに表示されます）</div>
   </div>
 </section>
 
@@ -1769,6 +1848,7 @@ async function applySelectedStore(nextKey, opts) {
     productCategoryOverridesLoaded = false;
     productCategoryOverridesSyncedFingerprint = null;
     try { categorySettings = readCategorySettings(); } catch (_) {}
+    try { fillStoreOpsForm(readStoreOpsProfile(key)); } catch (_) {}
     currentReport = null;
     if (typeof aiChatHistory !== 'undefined') aiChatHistory = [];
     const chat = document.getElementById('aiChatMessages');
@@ -1778,6 +1858,7 @@ async function applySelectedStore(nextKey, opts) {
     }
     if (getAdminToken() && options.skipOverrides !== true) {
       try { await loadProductCategoryOverridesFromCloud(); } catch (_) {}
+      try { await refreshStoreOpsForm(); } catch (_) {}
     }
   }
   updateStoreScopeBadge();
@@ -6444,8 +6525,10 @@ document.querySelectorAll('.tab').forEach(t=>{
     const tab=t.dataset.tab;
     document.getElementById('guide').hidden = tab!=='guide';
     document.getElementById('convert').hidden = tab!=='convert';
+    document.getElementById('storeops').hidden = tab!=='storeops';
     document.getElementById('knowledge').hidden = tab!=='knowledge';
     if (tab === 'knowledge') loadKnowledgeList();
+    if (tab === 'storeops') refreshStoreOpsForm();
   });
 });
 
@@ -6649,7 +6732,7 @@ const STORE_AI_LOCATIONS = {
   donaiya: { name: '元祖どないや 新宿三丁目店', area: '新宿三丁目', address: '東京都新宿区新宿3-9-3', notes: 'たこ焼き。ワイン前提を無理に押し付けない。' },
   marugoyotsuya: { name: 'マルゴ 四谷', area: '四谷', address: '東京都新宿区四谷1-6-1', notes: '四谷ビストロ&ワインショップ。新宿三丁目前提禁止。' },
   sushikoruri: { name: '鮨こるり', area: '四谷', address: '東京都新宿区四谷1-6-1', notes: '四谷の鮨。新宿三丁目ワインバー前提にしない。' },
-  bistrocavacava: { name: 'ビストロ サヴァサヴァ', area: '荒木町（四谷エリア）', address: '東京都新宿区荒木町9-7', notes: '荒木町ビストロ。新宿三丁目立ち飲み密集地ではない。路地裏・ディナー・ペアリング中心。' },
+  bistrocavacava: { name: 'ビストロ サヴァサヴァ', area: '荒木町（四谷エリア）', address: '東京都新宿区荒木町9-7', notes: '荒木町ビストロ。新宿三丁目立ち飲み密集地ではない。路地裏・ディナー・ペアリング中心。基本は日曜・月曜定休（店舗営業情報を正本とする）。' },
   marugoS: { name: 'マルゴエス', area: '水道橋・東京ドームシティ', address: '東京都文京区後楽1-3-61', notes: 'ドームシティ内フードホール。イベント影響大。新宿三丁目前提禁止。' },
   marugoshinbashi: { name: 'マルゴ 新橋', area: '新橋', address: '東京都港区新橋3-13-4', notes: '新橋ビジネス街のワインバル。新宿三丁目前提禁止。' },
   marugomarunouchi: { name: 'マルゴ丸の内', area: '丸の内', address: '東京都千代田区丸の内2-6-1', notes: '丸の内オフィス需要。新宿三丁目前提禁止。' },
@@ -6677,7 +6760,300 @@ function buildStoreLocationBlockForAi() {
 - 四谷・荒木町・新橋・丸の内・水道橋・刈谷など店舗ごとに客層・時間帯・競合が異なる。`;
 }
 
+// ===== 店舗営業情報（定休・ランチ有無・特別営業） =====
+const STORE_OPS_WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+const STORE_OPS_DEFAULTS = {
+  bistrocavacava: {
+    closedWeekdays: ['日', '月'],
+    overflowRule: true,
+    overflowThreshold: 8,
+    overflowOpenWeekday: '月',
+    lunchOffered: 'yes',
+    dinnerOffered: 'yes',
+    specialOpenPolicy: '定休の日曜に売上が立っている日は特別営業として扱う。月曜の売上は、その月の日曜＋月曜が9日以上のときの通常営業（いずれかの月曜営業）、または特別営業のいずれか。',
+    notes: 'ビストロ サヴァサヴァは基本的に日曜・月曜定休。その月の日曜と月曜の合計が8日を超える（9日以上）場合は、いずれかの月曜日が営業する。定休曜日の売上ゼロ／低下は弱点ではない。'
+  }
+};
 
+function emptyStoreOpsProfile() {
+  return {
+    closedWeekdays: [],
+    overflowRule: false,
+    overflowThreshold: 8,
+    overflowOpenWeekday: '月',
+    lunchOffered: 'yes',
+    dinnerOffered: 'yes',
+    specialOpenPolicy: '',
+    notes: ''
+  };
+}
+
+function defaultStoreOpsProfile(storeKey = STORE_KEY) {
+  const key = String(storeKey || '').toLowerCase();
+  const base = emptyStoreOpsProfile();
+  const preset = STORE_OPS_DEFAULTS[key];
+  return preset ? { ...base, ...preset, closedWeekdays: [...(preset.closedWeekdays || [])] } : base;
+}
+
+function storeOpsStorageKey(storeKey = STORE_KEY) {
+  return 'jnl2txt_store_ops_v1__' + String(storeKey || 'bistrocavacava').toLowerCase();
+}
+
+function normalizeStoreOpsProfile(raw) {
+  const base = emptyStoreOpsProfile();
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const closed = Array.isArray(src.closedWeekdays)
+    ? src.closedWeekdays.map(String).filter(d => STORE_OPS_WEEKDAYS.includes(d))
+    : [];
+  const lunch = ['yes', 'no', 'limited'].includes(src.lunchOffered) ? src.lunchOffered : 'yes';
+  const dinner = ['yes', 'no', 'limited'].includes(src.dinnerOffered) ? src.dinnerOffered : 'yes';
+  const overflowOpen = STORE_OPS_WEEKDAYS.includes(src.overflowOpenWeekday) ? src.overflowOpenWeekday : '月';
+  const threshold = Math.max(1, Math.min(20, Number(src.overflowThreshold) || 8));
+  return {
+    ...base,
+    closedWeekdays: [...new Set(closed)],
+    overflowRule: !!(src.overflowRule === true || src.overflowRule === 'on' || src.overflowRule === 'true'),
+    overflowThreshold: threshold,
+    overflowOpenWeekday: overflowOpen,
+    lunchOffered: lunch,
+    dinnerOffered: dinner,
+    specialOpenPolicy: String(src.specialOpenPolicy || '').slice(0, 2000),
+    notes: String(src.notes || '').slice(0, 4000)
+  };
+}
+
+function readStoreOpsProfile(storeKey = STORE_KEY) {
+  const def = defaultStoreOpsProfile(storeKey);
+  try {
+    const raw = localStorage.getItem(storeOpsStorageKey(storeKey));
+    if (!raw) return def;
+    return normalizeStoreOpsProfile({ ...def, ...JSON.parse(raw) });
+  } catch (_) {
+    return def;
+  }
+}
+
+function writeStoreOpsProfileLocal(profile, storeKey = STORE_KEY) {
+  const normalized = normalizeStoreOpsProfile(profile);
+  try {
+    localStorage.setItem(storeOpsStorageKey(storeKey), JSON.stringify(normalized));
+  } catch (_) {}
+  return normalized;
+}
+
+function mealOfferLabel(v) {
+  if (v === 'no') return 'なし';
+  if (v === 'limited') return '限定／少ない';
+  return 'あり';
+}
+
+function countWeekdaysInCalendarMonth(year, month) {
+  const counts = Object.fromEntries(STORE_OPS_WEEKDAYS.map(d => [d, 0]));
+  const last = new Date(year, month, 0).getDate();
+  for (let day = 1; day <= last; day++) {
+    const wd = STORE_OPS_WEEKDAYS[new Date(year, month - 1, day).getDay()];
+    counts[wd] += 1;
+  }
+  return counts;
+}
+
+function weekdayFromIsoDate(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return '';
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return '';
+  return STORE_OPS_WEEKDAYS[d.getDay()] || '';
+}
+
+/** 確定集計の日別／曜日別から、定休・特別営業の読み取りを作る */
+function buildStoreOpsAnalysisNotes(profile, verifiedData) {
+  const p = normalizeStoreOpsProfile(profile);
+  if (!p.closedWeekdays.length) return [];
+  const notes = [];
+  const daily = Array.isArray(verifiedData?.dailyBreakdown) ? verifiedData.dailyBreakdown
+    : (Array.isArray(verifiedData?.periods)
+      ? verifiedData.periods.flatMap(x => Array.isArray(x?.dailyBreakdown) ? x.dailyBreakdown : [])
+      : []);
+  const closedSales = {};
+  for (const wd of p.closedWeekdays) closedSales[wd] = [];
+  for (const row of daily) {
+    const wd = String(row?.weekday || weekdayFromIsoDate(row?.date) || '');
+    if (!p.closedWeekdays.includes(wd)) continue;
+    const sales = Number(row?.totalSales) || 0;
+    if (sales > 0) closedSales[wd].push({ date: row.date, sales, customers: Number(row.customers) || 0 });
+  }
+  for (const wd of p.closedWeekdays) {
+    const opens = closedSales[wd] || [];
+    if (opens.length) {
+      const sample = opens.slice(0, 8).map(x => `${x.date}（${yen(x.sales)}）`).join('、');
+      const more = opens.length > 8 ? ` ほか${opens.length - 8}日` : '';
+      notes.push(`${wd}曜日は定休想定だが売上あり → 特別営業（または例外営業）として扱う: ${sample}${more}`);
+    } else {
+      notes.push(`${wd}曜日に売上なし／低いのは定休のため正常。弱点・ボトルネックとしない`);
+    }
+  }
+
+  // 月次がある場合、日曜+月曜の日数とオーバーフロー規則を注記
+  const months = Array.isArray(verifiedData?.monthlyBreakdown) ? verifiedData.monthlyBreakdown
+    : (verifiedData?.year && verifiedData?.month ? [{ year: verifiedData.year, month: verifiedData.month }] : []);
+  const monthKeys = new Set();
+  for (const m of months) {
+    const y = Number(m?.year), mo = Number(m?.month);
+    if (!y || !mo) continue;
+    const key = `${y}-${mo}`;
+    if (monthKeys.has(key)) continue;
+    monthKeys.add(key);
+    if (!p.overflowRule) continue;
+    const counts = countWeekdaysInCalendarMonth(y, mo);
+    const closedCount = p.closedWeekdays.reduce((n, wd) => n + (counts[wd] || 0), 0);
+    if (closedCount > p.overflowThreshold) {
+      notes.push(`${y}年${mo}月は定休曜日合計${closedCount}日（閾値${p.overflowThreshold}超）→ ${p.overflowOpenWeekday}曜の一部が通常営業になり得る`);
+    } else {
+      notes.push(`${y}年${mo}月は定休曜日合計${closedCount}日（閾値${p.overflowThreshold}以下）→ 定休どおりで解釈`);
+    }
+  }
+
+  // 曜日別合計がある場合の注意
+  const weekdayRows = Array.isArray(verifiedData?.weekdayBreakdown) ? verifiedData.weekdayBreakdown : [];
+  for (const row of weekdayRows) {
+    const wd = String(row?.weekday || '');
+    if (!p.closedWeekdays.includes(wd)) continue;
+    const sales = Number(row?.totalSales) || 0;
+    if (sales <= 0) {
+      notes.push(`曜日別合計の${wd}曜売上 ${yen(sales)} は定休反映であり、改善対象にしない`);
+    }
+  }
+  return notes;
+}
+
+function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData = null) {
+  const p = normalizeStoreOpsProfile(profile);
+  const hasContent = p.closedWeekdays.length || p.notes || p.specialOpenPolicy
+    || p.lunchOffered !== 'yes' || p.dinnerOffered !== 'yes' || p.overflowRule;
+  if (!hasContent) return '';
+
+  const lines = [];
+  lines.push('【店舗営業情報（この店舗の登録前提・必須）】');
+  lines.push(`店舗キー: ${STORE_KEY}`);
+  lines.push(`定休日: ${p.closedWeekdays.length ? p.closedWeekdays.map(d => d + '曜').join('・') : 'なし（全日営業想定）'}`);
+  lines.push(`ランチ: ${mealOfferLabel(p.lunchOffered)} / ディナー: ${mealOfferLabel(p.dinnerOffered)}`);
+  if (p.overflowRule) {
+    lines.push(`定休曜日が月に${p.overflowThreshold}日を超える場合: ${p.overflowOpenWeekday}曜の一部が営業するルールあり`);
+  }
+  if (p.specialOpenPolicy) lines.push(`特別営業: ${p.specialOpenPolicy}`);
+  if (p.notes) lines.push(`補足: ${p.notes}`);
+  lines.push('分析ルール:');
+  lines.push('- 定休曜日の売上ゼロ／極端な低さは「弱点」「機会損失」と断定しない');
+  lines.push('- 定休曜日に売上が立っている日は特別営業（または例外営業）として区別して説明する');
+  lines.push('- 他店舗の定休ルールをこの店舗に転用しない');
+
+  const analysisNotes = buildStoreOpsAnalysisNotes(p, verifiedData);
+  if (analysisNotes.length) {
+    lines.push('今回の確定集計との突合:');
+    analysisNotes.forEach(n => lines.push(`- ${n}`));
+  }
+  return '\n\n' + lines.join('\n');
+}
+
+function readStoreOpsForm() {
+  const closed = [...document.querySelectorAll('#opsClosedWeekdays input[type=checkbox]:checked')]
+    .map(el => el.value)
+    .filter(d => STORE_OPS_WEEKDAYS.includes(d));
+  return normalizeStoreOpsProfile({
+    closedWeekdays: closed,
+    overflowRule: document.getElementById('opsOverflowRule')?.value === 'on',
+    overflowThreshold: document.getElementById('opsOverflowThreshold')?.value,
+    overflowOpenWeekday: document.getElementById('opsOverflowOpenWeekday')?.value,
+    lunchOffered: document.getElementById('opsLunchOffered')?.value,
+    dinnerOffered: document.getElementById('opsDinnerOffered')?.value,
+    specialOpenPolicy: document.getElementById('opsSpecialOpenPolicy')?.value,
+    notes: document.getElementById('opsNotes')?.value
+  });
+}
+
+function fillStoreOpsForm(profile) {
+  const p = normalizeStoreOpsProfile(profile);
+  document.querySelectorAll('#opsClosedWeekdays input[type=checkbox]').forEach(el => {
+    el.checked = p.closedWeekdays.includes(el.value);
+  });
+  const lunch = document.getElementById('opsLunchOffered');
+  const dinner = document.getElementById('opsDinnerOffered');
+  const overflow = document.getElementById('opsOverflowRule');
+  const threshold = document.getElementById('opsOverflowThreshold');
+  const openWd = document.getElementById('opsOverflowOpenWeekday');
+  const special = document.getElementById('opsSpecialOpenPolicy');
+  const notes = document.getElementById('opsNotes');
+  if (lunch) lunch.value = p.lunchOffered;
+  if (dinner) dinner.value = p.dinnerOffered;
+  if (overflow) overflow.value = p.overflowRule ? 'on' : 'off';
+  if (threshold) threshold.value = String(p.overflowThreshold);
+  if (openWd) openWd.value = p.overflowOpenWeekday;
+  if (special) special.value = p.specialOpenPolicy;
+  if (notes) notes.value = p.notes;
+  const preview = document.getElementById('opsPreview');
+  if (preview) preview.textContent = formatStoreOpsBlockForAi(p).trim() || '（未設定）';
+}
+
+async function loadStoreOpsProfileFromCloud(storeKey = STORE_KEY) {
+  if (!getAdminToken()) return null;
+  try {
+    const body = await adminApiFetch(
+      '/pos-journals/store-ops?store_key=' + encodeURIComponent(storeKey),
+      { method: 'GET' }
+    );
+    if (body?.profile && typeof body.profile === 'object') {
+      return normalizeStoreOpsProfile(body.profile);
+    }
+  } catch (err) {
+    console.warn('店舗営業情報のクラウド取得をスキップ:', err);
+  }
+  return null;
+}
+
+async function saveStoreOpsProfileToCloud(profile, storeKey = STORE_KEY) {
+  if (!getAdminToken()) return { ok: false, skipped: true };
+  const body = await adminApiFetch('/pos-journals/store-ops', {
+    method: 'POST',
+    body: JSON.stringify({ store_key: storeKey, profile: normalizeStoreOpsProfile(profile) })
+  });
+  return body;
+}
+
+async function refreshStoreOpsForm() {
+  let profile = readStoreOpsProfile();
+  const cloud = await loadStoreOpsProfileFromCloud();
+  if (cloud) {
+    profile = writeStoreOpsProfileLocal(cloud);
+  }
+  fillStoreOpsForm(profile);
+}
+
+async function saveStoreOpsForm() {
+  const status = document.getElementById('opsFormStatus');
+  const profile = writeStoreOpsProfileLocal(readStoreOpsForm());
+  fillStoreOpsForm(profile);
+  if (status) status.textContent = 'ローカル保存しました…';
+  try {
+    await saveStoreOpsProfileToCloud(profile);
+    if (status) status.textContent = '保存しました（クラウド同期済み）';
+  } catch (err) {
+    if (status) status.textContent = 'ローカル保存済み（クラウド同期失敗: ' + (err.message || err) + '）';
+  }
+}
+
+function resetStoreOpsForm() {
+  const profile = writeStoreOpsProfileLocal(defaultStoreOpsProfile());
+  fillStoreOpsForm(profile);
+  const status = document.getElementById('opsFormStatus');
+  if (status) status.textContent = '店舗の初期値に戻しました（未同期。必要なら保存を押してください）';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const saveBtn = document.getElementById('opsSaveBtn');
+  const resetBtn = document.getElementById('opsResetBtn');
+  if (saveBtn) saveBtn.addEventListener('click', () => { saveStoreOpsForm(); });
+  if (resetBtn) resetBtn.addEventListener('click', () => { resetStoreOpsForm(); });
+});
 
 let aiChatHistory = [];
 
@@ -6934,6 +7310,7 @@ async function aiAnalyze() {
     const data = buildSalesDataForAI();
     // このレポート期間に実施していた施策・メニューを分析レポートにも反映する
     const knowledgeBlock = await buildStoreKnowledgeBlockForReport();
+    const storeOpsBlock = formatStoreOpsBlockForAi(readStoreOpsProfile(), data);
     const res = await fetch(AI_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -6943,7 +7320,7 @@ async function aiAnalyze() {
       body: JSON.stringify({
         action: 'analyze',
         salesData: data,
-        systemInstruction: MARUGO_AI_ANALYZE_INSTRUCTION + '\n\n' + buildStoreLocationBlockForAi() + knowledgeBlock,
+        systemInstruction: MARUGO_AI_ANALYZE_INSTRUCTION + '\n\n' + buildStoreLocationBlockForAi() + storeOpsBlock + knowledgeBlock,
         storeKey: STORE_KEY,
         storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
         storeLocationBlock: buildStoreLocationBlockForAi()
@@ -10161,7 +10538,8 @@ ${buildStoreLocationBlockForAi()}
 7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
 8. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
 9. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
-10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。${verifiedDataBlock}${knowledgeBlock}`;
+10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。
+11. 【店舗営業情報】が提示されている場合、定休曜日の売上ゼロ／低下を弱点や機会損失としないでください。定休曜日に売上が立っている日は特別営業（または例外営業）として区別してください。他店の定休ルールを転用しないでください。${verifiedDataBlock}${formatStoreOpsBlockForAi(readStoreOpsProfile(), verifiedData)}${knowledgeBlock}`;
 
   try {
     const res = await fetch(AI_ENDPOINT, {

@@ -1171,6 +1171,7 @@ Deno.serve(async (req, info) => {
       "/pos-journals/knowledge/analyze-image",
       "/pos-journals/knowledge/process",
       "/pos-journals/knowledge/generate-insight",
+      "/pos-journals/store-ops",
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
@@ -1504,6 +1505,16 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await processLinePostKnowledge(supabase, body, storeScope), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/store-ops") {
+      return json(await fetchStoreOperationProfile(supabase, url, storeScope), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/store-ops") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await saveStoreOperationProfile(supabase, body, storeScope), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/report-ai-history") {
       return json(await fetchReportAiHistoryList(supabase, url), 200)
@@ -8737,6 +8748,88 @@ async function deleteSalesForecastItem(
     throw { status: 404, message: "売上予測が見つかりません。" } satisfies AppError
   }
   return { ok: true, deleted: { id: String(data.id) } }
+}
+
+// ===== Journal Report 店舗営業情報 (store_operation_profiles) =====
+
+function normalizeStoreOperationProfile(raw: unknown): Record<string, unknown> {
+  const src = isRecord(raw) ? raw : {}
+  const weekdays = new Set(["日", "月", "火", "水", "木", "金", "土"])
+  const closed = Array.isArray(src.closedWeekdays)
+    ? [...new Set(src.closedWeekdays.map((x) => toSafeString(x)).filter((d) => weekdays.has(d)))]
+    : []
+  const lunch = ["yes", "no", "limited"].includes(toSafeString(src.lunchOffered))
+    ? toSafeString(src.lunchOffered)
+    : "yes"
+  const dinner = ["yes", "no", "limited"].includes(toSafeString(src.dinnerOffered))
+    ? toSafeString(src.dinnerOffered)
+    : "yes"
+  const overflowOpen = weekdays.has(toSafeString(src.overflowOpenWeekday))
+    ? toSafeString(src.overflowOpenWeekday)
+    : "月"
+  const thresholdRaw = Number(src.overflowThreshold)
+  const overflowThreshold = Number.isFinite(thresholdRaw)
+    ? Math.max(1, Math.min(20, Math.round(thresholdRaw)))
+    : 8
+  return {
+    closedWeekdays: closed,
+    overflowRule: src.overflowRule === true || src.overflowRule === "on" || src.overflowRule === "true",
+    overflowThreshold,
+    overflowOpenWeekday: overflowOpen,
+    lunchOffered: lunch,
+    dinnerOffered: dinner,
+    specialOpenPolicy: toSafeString(src.specialOpenPolicy).slice(0, 2000),
+    notes: toSafeString(src.notes).slice(0, 4000),
+  }
+}
+
+async function fetchStoreOperationProfile(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+  _storeScope: string | null,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const { data, error } = await supabase
+    .from("store_operation_profiles")
+    .select("store_partition_key, profile, updated_at")
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) throw { status: 500, message: `店舗営業情報の取得に失敗しました: ${error.message}` } satisfies AppError
+  return {
+    ok: true,
+    store_key: storeKey,
+    profile: data?.profile && isRecord(data.profile) ? normalizeStoreOperationProfile(data.profile) : null,
+    updated_at: data?.updated_at ?? null,
+  }
+}
+
+async function saveStoreOperationProfile(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  _storeScope: string | null,
+) {
+  const storeKey = normalizePosJournalStoreKey(body.store_key ?? body.store)
+  const profile = normalizeStoreOperationProfile(body.profile ?? body)
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from("store_operation_profiles")
+    .upsert({
+      store_partition_key: storeKey,
+      profile,
+      updated_at: now,
+      updated_by: "journal-report",
+    }, { onConflict: "store_partition_key" })
+    .select("store_partition_key, profile, updated_at")
+    .single()
+  if (error) throw { status: 500, message: `店舗営業情報の保存に失敗しました: ${error.message}` } satisfies AppError
+  return {
+    ok: true,
+    store_key: storeKey,
+    profile: normalizeStoreOperationProfile(data.profile),
+    updated_at: data.updated_at,
+  }
 }
 
 // ===== Journal Report 店舗ナレッジ (store_knowledge_documents) =====
