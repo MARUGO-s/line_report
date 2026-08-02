@@ -1445,6 +1445,8 @@
           <option value="メニュー">メニュー</option>
           <option value="価格改定">価格改定</option>
           <option value="イベント">イベント</option>
+          <option value="現場日報">現場日報</option>
+          <option value="周辺情報">周辺情報</option>
           <option value="マニュアル">マニュアル</option>
           <option value="その他">その他</option>
         </select>
@@ -1561,6 +1563,8 @@
         <option value="メニュー">メニュー</option>
         <option value="価格改定">価格改定</option>
         <option value="イベント">イベント</option>
+        <option value="現場日報">現場日報</option>
+        <option value="周辺情報">周辺情報</option>
         <option value="マニュアル">マニュアル</option>
         <option value="その他">その他</option>
       </select>
@@ -7961,6 +7965,7 @@ function renderKnowledgeList(items) {
     return `<div class="kn-item${inactive ? ' is-inactive' : ''}">
       <div class="kn-item-head">
         <span class="kn-badge">${esc(item.category || 'その他')}</span>
+        ${item.source_type === 'line_post' ? '<span class="kn-badge" style="background:#059669;color:#fff;">LINE投稿</span>' : ''}
         ${current ? '<span class="kn-badge is-current">実施中</span>' : ''}
         ${inactive ? '<span class="kn-badge">無効</span>' : ''}
         ${item.has_attachment ? '<span class="kn-badge">添付あり</span>' : ''}

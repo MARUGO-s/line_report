@@ -39,7 +39,6 @@ function splitTextIntoChunks(fullText: string, chunkSize = 1500, overlap = 200):
   while (start < text.length) {
     let end = start + chunkSize;
     if (end < text.length) {
-      // 2連改行(段落)、1連改行、句点「。」の優先順で自然に区切る
       const paragraphBreak = text.lastIndexOf("\n\n", end);
       const lineBreak = text.lastIndexOf("\n", end);
       const sentenceBreak = text.lastIndexOf("。", end);
@@ -85,8 +84,160 @@ serve(async (req: Request) => {
       const isProcess = path.endsWith("/knowledge/process");
       const isInsight = path.endsWith("/knowledge/generate-insight");
       const isAnalyzeImage = path.endsWith("/knowledge/analyze-image");
+      const isProcessLinePost = path.endsWith("/knowledge/process-line-post");
 
-      // 1. Analyze Image with Gemini 2.0 Flash (POST /pos-journals/knowledge/analyze-image)
+      // 1. Process LINE #メモ Post (POST /pos-journals/knowledge/process-line-post) - NEW
+      if (req.method === "POST" && isProcessLinePost) {
+        const body = await req.json();
+        const rawText = String(body.text || "").trim();
+        const storeKey = normalizeStoreKey(body.store_key || body.store_partition_key || req.headers.get("x-store-key"));
+        const senderName = body.sender_name || "LINEスタッフ";
+
+        if (!storeKey || !rawText) {
+          return new Response(JSON.stringify({ error: "Missing store_key or text" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ① 100% プログラム判定: #メモ / #日報 / #note が含まれているかチェック
+        const tagMatch = rawText.match(/#(?:メモ|日報|note)/i);
+        if (!tagMatch) {
+          // タグが含まれていない場合は即時スルー（AIコスト0円）
+          return new Response(JSON.stringify({ processed: false, reason: "No #メモ tag found. Skipped." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // #メモ タグを取り除いた本文
+        const cleanText = rawText.replace(/#(?:メモ|日報|note)/gi, "").trim();
+        if (!cleanText) {
+          return new Response(JSON.stringify({ processed: false, reason: "Empty text after tag removal" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ② Gemini 2.0 Flash によるカテゴリ・タイトル・タグの自動識別
+        let categorizedResult = {
+          title: cleanText.substring(0, 15),
+          category: "現場日報",
+          summary: cleanText.substring(0, 150),
+          body_text: cleanText,
+          tags: ["LINE投稿", "現場メモ"],
+        };
+
+        if (geminiApiKey) {
+          const promptText = `あなたは飲食店の現場LINE投稿を解読・整理するプロアナリストAIです。
+以下のLINE投稿（投稿者: ${senderName}）を解析し、カテゴリー分類・タイトル生成・要約・タグ付けを行ってください。
+
+【投稿文】
+${cleanText}
+
+【分類ルール】
+- category: 以下から最も適切なものを1つだけ選択してください。
+  ('現場日報', '周辺情報', 'メニュー', '施策', 'イベント', 'その他')
+  ※「天候」「売れ筋」「客足」「本日の出来事」に関する内容は '現場日報'
+  ※「近隣他店」「競合」「周辺フェア」に関する内容は '周辺情報'
+  ※「新メニュー」「ワイン」「料理」「価格」に関する内容は 'メニュー' または '価格改定'
+
+【出力フォーマット】
+以下のJSONフォーマット**のみ**を出力してください（Markdownのコードブロック \`\`\`json ... \`\`\` で囲んでください）：
+
+{
+  "title": "15文字前後のわかりやすいタイトル（例: 大雨時の赤ワイン煮込み出足好調、近隣店ワインフェア開始など）",
+  "category": "選択したカテゴリー",
+  "summary": "1〜3行の簡潔な要約",
+  "body_text": "原文テキスト",
+  "tags": ["タグ1", "タグ2", "タグ3"]
+}`;
+
+          const payload = {
+            contents: [{ role: "user", parts: [{ text: promptText }] }],
+            generationConfig: { temperature: 0.2 },
+          };
+
+          for (const model of GEMINI_MODELS) {
+            try {
+              const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+              const res = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+
+              if (res.ok) {
+                const resJson = await res.json();
+                const aiText = resJson.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                if (aiText) {
+                  const jsonMatch = aiText.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, aiText];
+                  const parsed = JSON.parse((jsonMatch[1] || aiText).trim());
+                  categorizedResult = {
+                    title: parsed.title || categorizedResult.title,
+                    category: parsed.category || categorizedResult.category,
+                    summary: parsed.summary || categorizedResult.summary,
+                    body_text: cleanText,
+                    tags: Array.isArray(parsed.tags) ? ["LINE投稿", ...parsed.tags] : categorizedResult.tags,
+                  };
+                  break;
+                }
+              }
+            } catch (e) {
+              console.warn(`Model ${model} failed for LINE post categorization:`, e);
+            }
+          }
+        }
+
+        // ③ Supabase store_knowledge_documents テーブルへ自動保存
+        const searchText = normalizeSearchText(
+          `${categorizedResult.title} ${categorizedResult.summary} ${cleanText} ${(categorizedResult.tags || []).join(" ")}`
+        );
+
+        const record = {
+          store_partition_key: storeKey,
+          category: categorizedResult.category || "現場日報",
+          title: categorizedResult.title,
+          summary: categorizedResult.summary,
+          body_text: cleanText,
+          search_text: searchText,
+          tags: categorizedResult.tags || ["LINE投稿"],
+          source_type: "line_post",
+          created_by: senderName,
+          is_active: true,
+        };
+
+        const { data: docData, error: docError } = await supabase
+          .from("store_knowledge_documents")
+          .insert(record)
+          .select()
+          .single();
+
+        if (docError) throw docError;
+
+        // ④ 1,500文字の RAG チャンクへ全自動変換
+        const chunkTexts = splitTextIntoChunks(`${categorizedResult.summary}\n\n${cleanText}`);
+        if (chunkTexts.length > 0) {
+          const chunkRecords = chunkTexts.map((text, idx) => ({
+            document_id: docData.id,
+            store_partition_key: storeKey,
+            chunk_index: idx,
+            chunk_text: text,
+            search_text: normalizeSearchText(text),
+            token_count: text.length,
+          }));
+          await supabase.from("store_knowledge_chunks").insert(chunkRecords);
+        }
+
+        return new Response(
+          JSON.stringify({
+            processed: true,
+            item: docData,
+            chunks_created: chunkTexts.length,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 2. Analyze Image with Gemini 2.0 Flash (POST /pos-journals/knowledge/analyze-image)
       if (req.method === "POST" && isAnalyzeImage) {
         if (!geminiApiKey) {
           return new Response(JSON.stringify({ error: "GEMINI_API_KEY is not configured" }), {
@@ -146,7 +297,6 @@ serve(async (req: Request) => {
         let geminiResponseText = "";
         let lastError = "";
 
-        // Gemini 2.0 Flash 優先・フォールバック ループ
         for (const model of GEMINI_MODELS) {
           try {
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
@@ -175,7 +325,6 @@ serve(async (req: Request) => {
           throw new Error(lastError || "Failed to analyze image with Gemini models");
         }
 
-        // JSON 部分のパース抽出
         let extractedData = {
           title: file.name.replace(/\.[^/.]+$/, ""),
           category: "メニュー",
@@ -194,16 +343,14 @@ serve(async (req: Request) => {
             body_text: parsed.body_text || extractedData.body_text,
             tags: Array.isArray(parsed.tags) ? parsed.tags : extractedData.tags,
           };
-        } catch (_) {
-          // JSONパースに失敗した場合は生のテキストを body_text にセット
-        }
+        } catch (_) {}
 
         return new Response(JSON.stringify({ success: true, result: extractedData }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // 2. Upload Attachment (POST /pos-journals/knowledge/upload)
+      // 3. Upload Attachment (POST /pos-journals/knowledge/upload)
       if (req.method === "POST" && isUpload) {
         const formData = await req.formData();
         const file = formData.get("file") as File;
@@ -248,7 +395,7 @@ serve(async (req: Request) => {
         );
       }
 
-      // 3. Process & Chunk Document (POST /pos-journals/knowledge/process) - Phase 2 RAG Chunking
+      // 4. Process & Chunk Document (POST /pos-journals/knowledge/process)
       if (req.method === "POST" && isProcess) {
         const body = await req.json();
         const documentId = body.document_id;
@@ -310,7 +457,7 @@ serve(async (req: Request) => {
         );
       }
 
-      // 4. Generate Effectiveness Insight (POST /pos-journals/knowledge/generate-insight)
+      // 5. Generate Effectiveness Insight (POST /pos-journals/knowledge/generate-insight)
       if (req.method === "POST" && isInsight) {
         const body = await req.json();
         const storeKey = normalizeStoreKey(body.store_key || req.headers.get("x-store-key"));
@@ -354,7 +501,7 @@ serve(async (req: Request) => {
         });
       }
 
-      // 5. Download Signed URL (GET /pos-journals/knowledge/download)
+      // 6. Download Signed URL (GET /pos-journals/knowledge/download)
       if (req.method === "GET" && isDownload) {
         const storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
         const storagePath = url.searchParams.get("path") || "";
@@ -396,7 +543,7 @@ serve(async (req: Request) => {
         });
       }
 
-      // 6. Create or Update Knowledge (POST /pos-journals/knowledge)
+      // 7. Create or Update Knowledge (POST /pos-journals/knowledge)
       if (req.method === "POST") {
         const body = await req.json();
         const storeKey = normalizeStoreKey(body.store_partition_key || body.store_key || req.headers.get("x-store-key"));
@@ -456,7 +603,6 @@ serve(async (req: Request) => {
 
         if (resultError) throw resultError;
 
-        // 保存時に自動 RAG チャンク化
         const fullText = [resultData.summary, resultData.body_text].filter(Boolean).join("\n\n");
         const chunkTexts = splitTextIntoChunks(fullText);
         if (chunkTexts.length > 0) {
@@ -488,7 +634,7 @@ serve(async (req: Request) => {
         });
       }
 
-      // 7. Delete or Deactivate Knowledge (DELETE /pos-journals/knowledge/item)
+      // 8. Delete or Deactivate Knowledge (DELETE /pos-journals/knowledge/item)
       if (req.method === "DELETE" && isItem) {
         let storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
         let id = url.searchParams.get("id");
@@ -550,7 +696,7 @@ serve(async (req: Request) => {
         }
       }
 
-      // 8. Single Item Full Detail (GET /pos-journals/knowledge/item?id=...)
+      // 9. Single Item Full Detail (GET /pos-journals/knowledge/item?id=...)
       if (req.method === "GET" && isItem) {
         const storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
         const id = url.searchParams.get("id");
@@ -589,7 +735,7 @@ serve(async (req: Request) => {
         });
       }
 
-      // 9. List Knowledge (GET /pos-journals/knowledge?store_key=...)
+      // 10. List Knowledge (GET /pos-journals/knowledge?store_key=...)
       if (req.method === "GET") {
         const storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
         const category = url.searchParams.get("category");
