@@ -15,10 +15,10 @@
   var KEY = 'line_reservation_calendar_theme';
 
   function normalize(v) {
-    return String(v || '').trim().toLowerCase() === 'light' ? 'light' : 'dark';
+    return String(v || 'light').trim().toLowerCase() === 'dark' ? 'dark' : 'light';
   }
   function current() {
-    try { return normalize(localStorage.getItem(KEY)); } catch (_) { return 'dark'; }
+    try { return normalize(localStorage.getItem(KEY)); } catch (_) { return 'light'; }
   }
   function apply(theme) {
     var t = normalize(theme);

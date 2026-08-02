@@ -5,8 +5,12 @@ import vm from 'node:vm';
 
 const htmlPath = new URL('../public/jnm/jnl2txt.html', import.meta.url);
 const indexPath = new URL('../public/jnm/index.html', import.meta.url);
+const historyPath = new URL('../public/jnm/ai-chat-pdf-history.html', import.meta.url);
+const appThemePath = new URL('../public/jnm/app-theme.js', import.meta.url);
 const html = await readFile(htmlPath, 'utf8');
 const indexHtml = await readFile(indexPath, 'utf8');
+const historyHtml = await readFile(historyPath, 'utf8');
+const appThemeJs = await readFile(appThemePath, 'utf8');
 
 function extractFunction(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -87,4 +91,12 @@ test('both Journal Report entry files keep the planner and error distinction in 
   assert.match(html, /needsClarification/);
   assert.match(html, /データが無いとは判断していません/);
   assert.match(html, /local-query-planner/);
+});
+
+test('Journal Report pages default to light while preserving an explicit dark choice', () => {
+  assert.match(historyHtml, /localStorage\.getItem\(KEY\) \|\| 'light'/);
+  assert.match(historyHtml, /=== 'dark' \? 'dark' : 'light'/);
+  assert.match(historyHtml, /catch\(_\) \{ return 'light'; \}/);
+  assert.match(appThemeJs, /String\(v \|\| 'light'\)/);
+  assert.match(appThemeJs, /catch \(_\) \{ return 'light'; \}/);
 });
