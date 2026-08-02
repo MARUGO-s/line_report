@@ -7038,7 +7038,7 @@ function buildCompactSalesDataForAI() {
 }
 
 function wantsItemBreakdown(msg) {
-  return /(アイテム|商品|メニュー|品目|売れ筋|ランキング|何が売|売れたもの|売れた商品|点数|個数)/.test(String(msg || ''));
+  return /(アイテム|商品|メニュー|品目|売れ筋|ランキング|何が売|売れたもの|売れた商品|点数|個数|ボトル|本数|コース|杯数|銘柄)/i.test(String(msg || ''));
 }
 
 function wantsTrend(msg) {
@@ -7065,15 +7065,105 @@ function collectProductsFromReport(r) {
     map.set(key, row);
   };
 
-  if (Array.isArray(r?.topProducts)) {
-    r.topProducts.forEach(p => add(p.name || p.product || p.title, p.qty || p.quantity, p.amt || p.amount || p.total, p.category));
-  }
-  if (Array.isArray(r?.sales)) {
+  // topProducts は sales.items から作られた要約なので、両方を足すと上位商品だけ二重計上になる。
+  // 伝票明細がある場合は明細を正本にし、巨大レポート等で明細が省略された場合だけ topProducts を使う。
+  const hasSalesItems = Array.isArray(r?.sales)
+    && r.sales.some(s => Array.isArray(s?.items) && s.items.length > 0);
+  if (hasSalesItems) {
     r.sales.forEach(s => {
       (s.items || []).forEach(i => add(i.name, i.qty, i.amount, i.category));
     });
+  } else if (Array.isArray(r?.topProducts)) {
+    r.topProducts.forEach(p => add(p.name || p.product || p.title, p.qty || p.quantity, p.amt || p.amount || p.total, p.category));
   }
   return [...map.values()].sort((a, b) => b.amt - a.amt);
+}
+
+function isCourseProductName(name) {
+  const value = String(name || '').normalize('NFKC').toLowerCase();
+  return /コース|sp\s*コ[-ー]?ス|おまかせ\s*\d+\s*皿/.test(value);
+}
+
+function productMatchesRequestedIntent(name, query) {
+  const product = String(name || '').normalize('NFKC').toLowerCase();
+  const q = String(query || '').normalize('NFKC').toLowerCase();
+  let constrained = false;
+  let matched = false;
+  if (/ボトル|bottle/.test(q)) {
+    constrained = true;
+    matched = matched || /ボトル|bottle/.test(product);
+  }
+  if (/コース/.test(q)) {
+    constrained = true;
+    matched = matched || isCourseProductName(product);
+  }
+  if (/グラス|glass|杯数/.test(q)) {
+    constrained = true;
+    matched = matched || /グラス|glass/.test(product);
+  }
+  if (/銘柄/.test(q)) {
+    constrained = true;
+    matched = matched || /ワイン|wine|シャンパ|champagne|ボトル|bottle|グラス|glass/.test(product);
+  }
+  // 「ワイン全体」の質問だけはボトル／グラス／ペアリング等を横断する。
+  if (/ワイン|wine/.test(q) && !/ボトル|bottle|グラス|glass/.test(q)) {
+    constrained = true;
+    matched = matched || /ワイン|wine|シャンパ|champagne|ペアリング/.test(product);
+  }
+  return constrained ? matched : true;
+}
+
+function selectRequestedProductsForQuery(products, query, limit = 20) {
+  const list = Array.isArray(products) ? products : [];
+  return list
+    .filter(product => productMatchesRequestedIntent(product?.name, query))
+    .slice(0, Math.max(1, Number(limit) || 20));
+}
+
+function summarizeCourseTransactionsFromReports(reports) {
+  let groupCount = 0;
+  let customerCount = 0;
+  let transactionCount = 0;
+  let hasDetailedSales = false;
+  for (const report of (Array.isArray(reports) ? reports : [])) {
+    for (const sale of (Array.isArray(report?.sales) ? report.sales : [])) {
+      const items = Array.isArray(sale?.items) ? sale.items : [];
+      if (items.length) hasDetailedSales = true;
+      if (!items.some(item => isCourseProductName(item?.name))) continue;
+      transactionCount += 1;
+      groupCount += Number(sale?.groups) || 0;
+      customerCount += Number(sale?.customers) || 0;
+    }
+  }
+  return { transactionCount, groupCount, customerCount, hasDetailedSales };
+}
+
+function formatJournalSpecificFactsForAi(period, query, indent = '') {
+  const q = String(query || '');
+  const lines = [];
+  if (wantsItemBreakdown(q)) {
+    const products = selectRequestedProductsForQuery(period?.topProducts, q, 30);
+    if (products.length) {
+      lines.push(`${indent}- 質問に該当する保存商品明細（商品名 / 数量 / 売上）:`);
+      products.forEach(product => {
+        lines.push(`${indent}  - ${product.name}: ${Number(product.qty) || 0}点 / ${yen(Number(product.amt) || 0)}${product.category ? `（${product.category}）` : ''}`);
+      });
+    } else if (period?.itemDetailComplete) {
+      lines.push(`${indent}- 質問に該当する商品明細: 0件（対象期間の全伝票明細を確認済み）`);
+    } else {
+      lines.push(`${indent}- 商品明細の確認範囲: 一部期間は上位商品要約のみ。該当なしを保存DB全体の不存在と断定しないこと`);
+    }
+  }
+  if (/予約/.test(q)) {
+    lines.push(`${indent}- 予約人数の専用項目: なし。総来店客数は実来店客数であり、予約人数とは区別する`);
+  }
+  if (/宴会/.test(q)) {
+    lines.push(`${indent}- 宴会件数の専用項目: なし。会計組数やコース商品を含む会計は参考値であり、宴会確定件数とは区別する`);
+  }
+  if (/コース/.test(q) && period?.courseTransactions?.hasDetailedSales) {
+    lines.push(`${indent}- コース商品を含む会計明細: ${period.courseTransactions.transactionCount}件 / 会計組数 ${period.courseTransactions.groupCount}組 / その会計の実来店客数 ${period.courseTransactions.customerCount}名（予約・宴会の確定値ではない）`);
+  }
+  return lines.length ? `\n${lines.join('\n')}` : '';
 }
 
 function mergeProductLists(lists) {
@@ -7092,44 +7182,46 @@ function mergeProductLists(lists) {
 
 function formatItemBreakdownReply(queryResult, userMsg) {
   const products = Array.isArray(queryResult.topProducts) ? queryResult.topProducts : [];
-  if (!products.length) {
+  const selectedProducts = selectRequestedProductsForQuery(products, userMsg, 20);
+  const reservationNotes = [];
+  if (/予約/.test(String(userMsg || ''))) {
+    reservationNotes.push('- **予約人数**: 保存形式に専用項目はありません。総来店客数は実際の来店客数で、予約人数とは別です。');
+  }
+  if (/宴会/.test(String(userMsg || ''))) {
+    reservationNotes.push('- **宴会件数**: 保存形式に専用項目はありません。会計組数やコース商品を含む会計件数は参考値で、宴会の確定件数とは別です。');
+  }
+  if (/コース/.test(String(userMsg || '')) && queryResult.courseTransactions?.hasDetailedSales) {
+    reservationNotes.push(`- **参考値**: コース商品を含む会計明細 ${queryResult.courseTransactions.transactionCount}件 / 会計組数 ${queryResult.courseTransactions.groupCount}組 / その会計の実来店客数 ${queryResult.courseTransactions.customerCount}名（予約・宴会の確定値ではありません）`);
+  }
+  const reservationBlock = reservationNotes.length
+    ? `\n\n**項目の区別**\n${reservationNotes.join('\n')}`
+    : '';
+
+  if (!selectedProducts.length) {
+    const detailStatus = queryResult.itemDetailComplete
+      ? '対象期間の全伝票明細を確認しましたが、ご質問に該当する商品明細は0件でした。'
+      : '対象期間の商品明細を完全には確認できていないため、該当商品が保存データに存在しないとは断定できません。期間を月単位に分けて質問してください。';
     return `### 🧾 ${queryResult.label} の商品内訳
 
-ご質問「${userMsg}」について、該当期間の保存データには **商品別の明細（商品名・個数）がまだ含まれていません**。
+ご質問「${userMsg}」について、${detailStatus}${reservationBlock}
 
-現在参照できたのはカテゴリ集計のみです:
+**参考（カテゴリ合計）**
 - **総売上高**: **${yen(queryResult.totalSales)}**
 - **フード**: ${yen(queryResult.foodTotal)} (${queryResult.foodPct}%)
-- **ドリンク**: ${yen(queryResult.drinkTotal)} (${queryResult.drinkPct}%)
-
-商品内訳を答えるには、該当月の .jnl / .lzh を読み込んでレポートを作成し直してください（新しい保存形式では商品別個数も保持します）。`;
+- **ドリンク**: ${yen(queryResult.drinkTotal)} (${queryResult.drinkPct}%)`;
   }
 
-  const food = products.filter(p => /フード|食品|料理/.test(String(p.category || '')) || p.category === 'フード');
-  const drink = products.filter(p => /ドリンク|飲料|飲/.test(String(p.category || '')) || p.category === 'ドリンク' || p.category === '飲料');
-  const other = products.filter(p => !food.includes(p) && !drink.includes(p));
-  const top = products.slice(0, 20);
+  const top = selectedProducts;
   const lines = top.map((p, i) => `${i + 1}. **${p.name}** — ${p.qty}点 / ${yen(p.amt)}${p.category ? `（${p.category}）` : ''}`).join('\n');
-
-  let catBlocks = '';
-  if (food.length) {
-    catBlocks += '\n\n**🍖 フード上位**\n' + food.slice(0, 8).map(p => `- ${p.name}: ${p.qty}点 / ${yen(p.amt)}`).join('\n');
-  }
-  if (drink.length) {
-    catBlocks += '\n\n**🍹 ドリンク上位**\n' + drink.slice(0, 8).map(p => `- ${p.name}: ${p.qty}点 / ${yen(p.amt)}`).join('\n');
-  }
-  if (other.length && other.length !== products.length) {
-    catBlocks += '\n\n**その他**\n' + other.slice(0, 5).map(p => `- ${p.name}: ${p.qty}点 / ${yen(p.amt)}`).join('\n');
-  }
   const detailLimitNote = queryResult.detailRangeLimited
     ? '\n\n※商品明細は通信量を抑えるため、保存済みの新しい36か月分を対象に集計しています。全期間が必要な場合は期間を分けて質問してください。'
     : '';
 
   return `### 🧾 ${queryResult.label} の商品内訳 (保存ジャーナル参照)
 
-ご質問の **売れた商品の内容・個数** を、保存データから集計しました（売上金額順・上位${top.length}件）:
+ご質問に該当する **商品名・数量・売上** を、保存された伝票明細から集計しました（売上金額順・${top.length}件）:
 
-${lines}${catBlocks}${detailLimitNote}
+${lines}${reservationBlock}${detailLimitNote}
 
 **参考（カテゴリ合計）**
 - 総売上 ${yen(queryResult.totalSales)} / フード ${yen(queryResult.foodTotal)} (${queryResult.foodPct}%) / ドリンク ${yen(queryResult.drinkTotal)} (${queryResult.drinkPct}%)
@@ -7901,7 +7993,19 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     }
 
     const productSources = needsItemDetails ? detailHydrated : use;
-    const topProducts = mergeProductLists(productSources.map(collectProductsFromReport)).slice(0, 40);
+    const mergedProducts = mergeProductLists(productSources.map(collectProductsFromReport));
+    // 売上上位40件を先に切ると、少額のボトル／コース銘柄が質問対象でも落ちる。
+    // 質問対象で絞ってから上限を適用し、一般の商品質問だけ売上上位を返す。
+    const topProducts = needsItemDetails
+      ? selectRequestedProductsForQuery(mergedProducts, q, 40)
+      : mergedProducts.slice(0, 40);
+    const itemDetailComplete = needsItemDetails
+      && !detailRangeLimited
+      && productSources.length > 0
+      && productSources.every(report => Array.isArray(report?.sales));
+    const courseTransactions = needsItemDetails
+      ? summarizeCourseTransactionsFromReports(productSources)
+      : { transactionCount: 0, groupCount: 0, customerCount: 0, hasDetailedSales: false };
     const catTot = fTot + dTot || 1;
     return {
       label,
@@ -7916,7 +8020,9 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       sourceCount: use.length,
       monthlyBreakdown,
       topProducts,
-      detailRangeLimited
+      detailRangeLimited,
+      itemDetailComplete,
+      courseTransactions
     };
   }
 
@@ -8336,7 +8442,7 @@ async function sendAiChat() {
   - 総来店客数: ${p.totalCustomers}名 (平均客単価: ${yen(p.avgSpend)})
   - 対象レポート件数: ${p.sourceCount}件${monthBlock}
 ${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5: ' + p.topProducts.slice(0, 5).map(x => `${x.name}(${x.qty}点/${yen(x.amt)})`).join('、') : ''}
-${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信量上限）' : ''}`;
+${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信量上限）' : ''}${formatJournalSpecificFactsForAi(p, resolvedChatQuery, '  ')}`;
   }
   let verifiedDataBlock = '';
   if (verifiedData && verifiedData.multiPeriod) {
@@ -8346,7 +8452,7 @@ ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信�
 【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 
-回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   } else if (verifiedData) {
     const monthLines = formatMonthlyBreakdownLines(verifiedData.monthlyBreakdown);
     const monthBlock = monthLines
@@ -8361,9 +8467,9 @@ ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 - 総来店客数: ${verifiedData.totalCustomers}名 (平均客単価: ${yen(verifiedData.avgSpend)})
 - 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5: ' + verifiedData.topProducts.slice(0, 5).map(p => `${p.name}(${p.qty}点/${yen(p.amt)})`).join('、') : ''}
-${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}
+${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
   const strictSystemInstruction = `${MARUGO_AI_COMPANY_CONTEXT}
 
@@ -8374,7 +8480,7 @@ ${buildStoreLocationBlockForAi()}
 2. 数値（金額・件数・客数・比率など）は、必ず提示された保存データ・資料（salesDataや確定済み集計データ）のみから厳密に引用・計算してください。数値についての推測・Web情報・一般的な相場観での代用は【完全禁止】です。
 3. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
 4. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
-5. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください（このデータが無い旨の説明自体は推測ではないため、上記3の表記は不要です）。
+5. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
 6. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
 7. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。${verifiedDataBlock}`;
 

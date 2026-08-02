@@ -56,6 +56,12 @@ for (const name of [
   'buildAiIntentClarificationReply',
   'buildSavedDataNaturalClarificationReply',
   'normalizeAiClarificationText',
+  'wantsItemBreakdown',
+  'collectProductsFromReport',
+  'isCourseProductName',
+  'productMatchesRequestedIntent',
+  'selectRequestedProductsForQuery',
+  'summarizeCourseTransactionsFromReports',
   'buildSavedReportCoverage',
   'formatCoverageMonth',
   'isMonthlyReportTitle',
@@ -345,7 +351,54 @@ test('item-detail limits keep full-period totals and propagate detail hydration 
     'only detail hydration may be limited to the newest 36 months',
   );
   assert.match(savedReportSearchSource, /productSources\s*=\s*needsItemDetails\s*\?\s*detailHydrated\s*:\s*use/);
+  assert.match(
+    savedReportSearchSource,
+    /selectRequestedProductsForQuery\(mergedProducts, q, 40\)/,
+    'specific low-selling bottle/course items must be filtered before applying the result limit',
+  );
   assert.match(savedReportSearchSource, /if \(hydrationFailed\) return unavailableCloudResult\(\)/);
+});
+
+test('bottle and course questions load exact journal items without double counting summaries', () => {
+  assert.equal(context.wantsItemBreakdown('2026年7月のボトル本数を教えて'), true);
+  assert.equal(context.wantsItemBreakdown('コース別売上を見たい'), true);
+  assert.equal(context.wantsItemBreakdown('ワインの杯数は？'), true);
+  assert.equal(context.wantsItemBreakdown('2026年7月の総売上は？'), false);
+
+  const report = {
+    topProducts: [{ name: 'Bottle Wine', qty: 8, amt: 96000, category: 'ドリンク' }],
+    sales: [{
+      customers: 4,
+      groups: 2,
+      items: [
+        { name: 'Bottle Wine', qty: 8, amount: 96000, category: 'ドリンク' },
+        { name: 'コース６品', qty: 4, amount: 32000, category: 'フード' },
+        { name: 'Glass Wine', qty: 3, amount: 3600, category: 'ドリンク' },
+      ],
+    }],
+  };
+  const products = context.collectProductsFromReport(report);
+  const bottle = products.find(row => row.name === 'Bottle Wine');
+  assert.deepEqual({ qty: bottle.qty, amt: bottle.amt }, { qty: 8, amt: 96000 });
+
+  const selected = context.selectRequestedProductsForQuery(products, 'ボトル本数とコース別売上', 20);
+  assert.deepEqual([...selected].map(row => row.name).sort(), ['Bottle Wine', 'コース６品']);
+
+  const courseTransactions = context.summarizeCourseTransactionsFromReports([report]);
+  assert.deepEqual(
+    { ...courseTransactions },
+    { transactionCount: 1, groupCount: 2, customerCount: 4, hasDetailedSales: true },
+  );
+
+  const summaryOnly = context.collectProductsFromReport({ topProducts: report.topProducts });
+  assert.deepEqual(
+    { qty: summaryOnly[0].qty, amt: summaryOnly[0].amt },
+    { qty: 8, amt: 96000 },
+  );
+  assert.match(html, /予約人数の専用項目: なし/);
+  assert.match(html, /宴会件数の専用項目: なし/);
+  assert.match(html, /保存DB全体に存在しないとは断定しない/);
+  assert.doesNotMatch(html, /該当期間の保存データには \*\*商品別の明細/);
 });
 
 test('intent clarification stops after two consecutive rounds to avoid a question loop', () => {

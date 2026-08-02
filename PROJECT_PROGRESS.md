@@ -43,6 +43,14 @@
 
 New records are appended below.
 
+### 2026-08-02 - Journal AI bottle/course fact grounding
+
+- Request: ジャーナル明細にボトル・コース販売があるのに、AIレポートが「保存データには含まれていない」と注記する誤判定を修正する。
+- Cause: ボトル／本数／コースを商品明細検索の対象語として扱っておらず、一覧サマリーだけをAIへ渡していた。また詳細取得時は、同じ明細から生成された`topProducts`と`sales.items`を足して上位商品を二重計上していた。
+- Change: 対象語を商品明細検索へ追加し、質問に該当する商品だけを伝票明細から集計。明細がある場合は`sales.items`を正本、無い場合だけ`topProducts`をフォールバックにする。明細取得が不完全なら保存DB全体の不存在を断定しない。
+- Field semantics: ボトル／コースの商品名・数量・売上は確定値として回答する。予約人数と宴会件数は専用項目が無いため、実来店客数・会計組数・コース商品を含む会計件数と明確に区別して参考表示する。
+- Verification: Journal AIテスト24件、全体テスト114件。HTML 2入口同期、インラインJavaScript構文、実画面、本番Pagesを確認する。フロント／文書のみでDB・Edge Function変更なし。
+
 ### 2026-08-02 - Journal AI conversational intent clarification
 
 - Request: 固定選択式ではなく、曖昧な質問の意図を自然な会話で引き出し、必要な保存データだけを使って正確に回答する。
