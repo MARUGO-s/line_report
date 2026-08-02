@@ -3753,7 +3753,12 @@ async function fetchSupabaseReportById(id) {
 }
 
 async function hydrateSavedReport(r) {
-  if (reportHasSalesSummary(r) && (isDetailedReportHtml(r.body) || isDetailedReportHtml(r.previewHtml) || (Array.isArray(r.sales) && r.sales.length))) {
+  if (reportHasSalesSummary(r) && (
+    isDetailedReportHtml(r.body) ||
+    isDetailedReportHtml(r.previewHtml) ||
+    (Array.isArray(r.sales) && r.sales.length) ||
+    !!String(r.htmlStoragePath || '').trim()
+  )) {
     return r;
   }
   if (!r?.id) return r;
@@ -3874,30 +3879,27 @@ async function writeSavedReports(reports, newRecords) {
     for (const r of toUpload) {
       const id = String(r.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       try {
+        let htmlStoragePath = String(r.htmlStoragePath || '').trim();
+        let htmlBytes = Number(r.htmlBytes) || 0;
+        const fullHtml = isDetailedReportHtml(r.body) ? String(r.body)
+          : (isDetailedReportHtml(r.previewHtml) ? String(r.previewHtml) : '');
+        if (fullHtml) {
+          const uploaded = await uploadSavedReportHtmlToCloud(id, fullHtml);
+          if (uploaded?.storage_path) {
+            htmlStoragePath = uploaded.storage_path;
+            htmlBytes = Number(uploaded.file_size_bytes) || fullHtml.length;
+          }
+        }
         await adminApiFetch('/pos-journals/saved-reports', {
           method: 'POST',
           body: JSON.stringify({
             id,
             title: String(r.title || '売上レポート'),
             period: String(r.period || ''),
-            data: buildCloudReportData({ ...r, id }, { includeBody: false }),
+            data: buildCloudReportData({ ...r, id, htmlStoragePath, htmlBytes }),
             store_key: STORE_KEY
           })
         });
-        if (isDetailedReportHtml(r.body)) {
-          try {
-            await adminApiFetch('/pos-journals/saved-reports', {
-              method: 'POST',
-              body: JSON.stringify({
-                id,
-                title: String(r.title || '売上レポート'),
-                period: String(r.period || ''),
-                data: buildCloudReportData({ ...r, id }, { includeBody: true }),
-                store_key: STORE_KEY
-              })
-            });
-          } catch (_) {}
-        }
         uploaded++;
       } catch (err) {
         failed++;
@@ -3975,7 +3977,7 @@ function formatReportCreatedAt(v) {
   return s;
 }
 
-function buildCloudReportData(r, { includeBody = false } = {}) {
+function buildCloudReportData(r) {
   let sales = Array.isArray(r.sales) ? r.sales.map(serializeSaleForCloud) : [];
   const sourceMonths = Array.isArray(r.sourceMonths) && r.sourceMonths.length
     ? r.sourceMonths
@@ -3985,6 +3987,15 @@ function buildCloudReportData(r, { includeBody = false } = {}) {
     if (JSON.stringify(sales).length > 1400000) sales = [];
   } catch (_) {
     sales = [];
+  }
+  // 表示用HTMLは Storage へ分離。JSONB には短い preview とパスだけ残す。
+  let previewHtml = r.previewHtml;
+  if (isDetailedReportHtml(previewHtml) || String(previewHtml || '').length > 8000) {
+    previewHtml = buildSavedReportPreviewHtml(r, {
+      topProducts: Array.isArray(r.topProducts) ? r.topProducts : [],
+      weekdayBreakdown: r.weekdayBreakdown || [],
+      hourlyBreakdown: r.hourlyBreakdown || []
+    });
   }
   const data = {
     id: r.id,
@@ -4011,16 +4022,91 @@ function buildCloudReportData(r, { includeBody = false } = {}) {
     verificationVersion: r.verificationVersion || VERIFICATION_VERSION,
     categoryVersion: r.categoryVersion || CATEGORY_VERSION,
     mealPeriodVersion: r.mealPeriodVersion || MEAL_PERIOD_VERSION,
-    previewHtml: r.previewHtml,
+    previewHtml,
     sourceMonths,
     journalIds: Array.isArray(r.journalIds) ? r.journalIds : [],
     weatherByDate: (r.weatherByDate && typeof r.weatherByDate === 'object') ? r.weatherByDate : {},
     sales
   };
-  if (includeBody && isDetailedReportHtml(r.body) && String(r.body).length < 350000) {
-    data.body = r.body;
-  }
+  const htmlStoragePath = String(r.htmlStoragePath || '').trim();
+  if (htmlStoragePath) data.htmlStoragePath = htmlStoragePath;
+  const htmlBytes = Number(r.htmlBytes) || 0;
+  if (htmlBytes > 0) data.htmlBytes = htmlBytes;
   return data;
+}
+
+/** 表示用レポートHTMLを Storage（pos-report-html）へ保存 */
+async function uploadSavedReportHtmlToCloud(reportId, html) {
+  if (!getAdminToken() || !reportId || !html) return null;
+  const form = new FormData();
+  form.append('file', new File([html], `${reportId}.html`, { type: 'text/html; charset=utf-8' }));
+  form.append('store_key', STORE_KEY);
+  form.append('report_id', String(reportId));
+  return await adminApiFetch('/pos-journals/saved-reports/html', { method: 'POST', body: form });
+}
+
+/** Storage 上のレポートHTMLを取得（無ければ null） */
+async function fetchSavedReportHtmlFromStorage(report) {
+  const id = String(report?.id || '').trim();
+  if (!id || !getAdminToken()) return null;
+  if (!report?.htmlStoragePath && !isDetailedReportHtml(report?.body) && !isDetailedReportHtml(report?.previewHtml)) {
+    // パスが無く、レガシーHTMLも無い場合でもデフォルトパスを試す
+  }
+  try {
+    const meta = await adminApiFetch(
+      '/pos-journals/saved-reports/html?store_key=' + encodeURIComponent(STORE_KEY) +
+      '&id=' + encodeURIComponent(id),
+      { method: 'GET' }
+    );
+    const signed = String(meta?.signed_url || '').trim();
+    if (!signed) return null;
+    const res = await fetch(signed);
+    if (!res.ok) return null;
+    const text = await res.text();
+    return isDetailedReportHtml(text) ? text : (text && text.length > 200 ? text : null);
+  } catch (err) {
+    console.warn('fetchSavedReportHtmlFromStorage:', err);
+    return null;
+  }
+}
+
+/**
+ * 既存行に巨大 body/previewHtml が残っていれば Storage へ退避（数値は触らない）。
+ * 開いたときの遅延移行用。
+ */
+async function maybeOffloadSavedReportHtml(report) {
+  const id = String(report?.id || '').trim();
+  if (!id || !getAdminToken()) return report;
+  const hasLegacyHtml = isDetailedReportHtml(report?.body) || isDetailedReportHtml(report?.previewHtml);
+  if (!hasLegacyHtml) return report;
+  try {
+    const result = await adminApiFetch('/pos-journals/saved-reports/html-offload', {
+      method: 'POST',
+      body: JSON.stringify({ id, store_key: STORE_KEY })
+    });
+    const row = Array.isArray(result?.results) ? result.results.find(x => x && x.ok && x.id === id) : null;
+    if (row?.storage_path) {
+      const next = {
+        ...report,
+        htmlStoragePath: row.storage_path,
+        htmlBytes: Number(row.html_bytes) || report.htmlBytes || 0
+      };
+      delete next.body;
+      if (isDetailedReportHtml(next.previewHtml)) {
+        next.previewHtml = buildSavedReportPreviewHtml(next, {
+          topProducts: next.topProducts || [],
+          weekdayBreakdown: next.weekdayBreakdown || [],
+          hourlyBreakdown: next.hourlyBreakdown || []
+        });
+      }
+      const cacheKey = `${STORE_KEY}|${id}`;
+      savedReportDetailCache.set(cacheKey, { time: Date.now(), report: next });
+      return next;
+    }
+  } catch (err) {
+    console.warn('maybeOffloadSavedReportHtml:', err);
+  }
+  return report;
 }
 
 /** 合算分析用に伝票をJSON化（Mapを普通のオブジェクトへ） */
@@ -5742,7 +5828,7 @@ async function saveCurrentReport(options = {}){
       totalCustomers: aiSnap.totalCustomers || report.totalCustomers || ((report.lunchCustomers || 0) + (report.dinnerCustomers || 0)) || 0,
       weekdayBreakdown: aiSnap.weekdayBreakdown || report.weekdayBreakdown || [],
       hourlyBreakdown: (aiSnap.hourlyBreakdown || report.hourlyBreakdown || []).slice(0, 24),
-      previewHtml: isDetailedReportHtml(fullBody) ? fullBody : buildSavedReportPreviewHtml(report, aiSnap),
+      previewHtml: buildSavedReportPreviewHtml(report, aiSnap),
       sourceMonths,
       journalIds: journalIdsForReport.length ? journalIdsForReport : (Array.isArray(withoutBundle.journalIds) ? withoutBundle.journalIds : allJournalIds)
     };
@@ -5778,8 +5864,7 @@ function isDetailedReportHtml(html) {
 }
 
 function buildSavedReportPreviewHtml(report, aiSnap) {
-  // 詳細HTMLがある場合はそれを使う（要約だけの表示に落とさない）
-  if (isDetailedReportHtml(report?.body)) return report.body;
+  // 短いサマリーのみ。全文HTMLは Storage（htmlStoragePath）側。
   const products = (aiSnap?.topProducts || report.topProducts || []).slice(0, 15);
   const productRows = products.length
     ? products.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.name)}</td><td style="text-align:right">${p.qty}点</td><td style="text-align:right">${yen(p.amt)}</td></tr>`).join('')
@@ -5793,14 +5878,16 @@ function buildSavedReportPreviewHtml(report, aiSnap) {
     </div>
     <h3>売れ筋商品</h3>
     <table class="month-table"><thead><tr><th>#</th><th>商品</th><th>点数</th><th>金額</th></tr></thead><tbody>${productRows}</tbody></table>
-    <p class="empty" style="margin-top:12px">※この表示は要約です。詳細レポートを見るには、ジャーナルを再読み込みして保存し直してください。</p>
+    <p class="empty" style="margin-top:12px">※この表示は要約です。詳細は Storage 上のHTML、または伝票から再生成します。</p>
   </div>`;
 }
 
-/** 保存済みレポートを開くとき、詳細HTMLを優先。無ければ伝票から再生成 */
-function resolveSavedReportBody(r) {
+/** 保存済みレポートを開くとき、詳細HTMLを優先。無ければ Storage → 伝票から再生成 */
+async function resolveSavedReportBody(r) {
   if (isDetailedReportHtml(r?.body)) return r.body;
   if (isDetailedReportHtml(r?.previewHtml)) return r.previewHtml;
+  const fromStorage = await fetchSavedReportHtmlFromStorage(r);
+  if (fromStorage) return fromStorage;
   if (Array.isArray(r?.sales) && r.sales.length) {
     try {
       restorePaymentsMap(r.sales);
@@ -6028,8 +6115,10 @@ async function renderSavedReports(filter='all'){
         id: targetId,
         title: remote.title || listItem.title,
         period: remote.period || listItem.period,
-        body: remote.body || remote.previewHtml || '',
-        previewHtml: remote.previewHtml || remote.body || '',
+        body: remote.body || '',
+        previewHtml: remote.previewHtml || '',
+        htmlStoragePath: remote.htmlStoragePath || listItem.htmlStoragePath || '',
+        htmlBytes: remote.htmlBytes || listItem.htmlBytes || 0,
         createdAt: remote.createdAt || listItem.createdAt,
         sales: remote.sales || listItem.sales
       } : listItem;
@@ -6037,6 +6126,8 @@ async function renderSavedReports(filter='all'){
         alert('レポートを開けませんでした。');
         return;
       }
+      // 既存の巨大 body を JSONB から Storage へ遅延退避（数値は維持）
+      r = await maybeOffloadSavedReportHtml(r);
       let sales = reviveSalesList(r.sales);
       if (!sales.length) {
         // 合算レポートなどで伝票が落ちている場合は月別から復元
@@ -6059,6 +6150,8 @@ async function renderSavedReports(filter='all'){
           rebuilt.id = r.id;
           rebuilt.sourceMonths = r.sourceMonths || sourceMonthsFromReport(r);
           rebuilt.journalIds = r.journalIds || [];
+          rebuilt.htmlStoragePath = r.htmlStoragePath || '';
+          rebuilt.htmlBytes = r.htmlBytes || 0;
           if (r.createdAt) rebuilt.createdAt = r.createdAt;
           // 既存の weatherByDate もマージして欠落を防ぐ
           rebuilt.weatherByDate = {
@@ -6066,13 +6159,13 @@ async function renderSavedReports(filter='all'){
             ...(rebuilt.weatherByDate || {})
           };
           r = rebuilt;
-          // 天候・客数・分類を反映した最新HTMLをクラウドへも残す
+          // 天候・客数・分類を反映した最新HTMLをクラウドへも残す（HTMLはStorage、数値はJSONB）
           try { await writeSavedReports([r], [r]); } catch (_) {}
         } else {
           r = { ...r, sales };
         }
       }
-      const body = resolveSavedReportBody(r);
+      const body = await resolveSavedReportBody(r);
       renderReport({ ...r, body, sales: r.sales || sales, saved: true });
     } finally {
       hideAppLoading();
