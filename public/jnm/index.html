@@ -561,9 +561,9 @@
     border-color: #0ea5e9; background: rgba(56, 189, 248, 0.15); transform: scale(1.005);
   }
   .kn-drop-icon { font-size: 24px; margin-bottom: 6px; }
-  .kn-drop-text { font-size: 14px; font-weight: 600; color: #f8fafc; }
-  .kn-drop-sub { font-size: 12px; color: #94a3b8; margin-top: 4px; }
-  .kn-drop-file-name { font-size: 13px; font-weight: 700; color: #38bdf8; margin-top: 8px; }
+  .kn-drop-text { font-size: 14px; font-weight: 700; color: #0f172a; }
+  .kn-drop-sub { font-size: 12px; color: #334155; margin-top: 4px; font-weight: 500; }
+  .kn-drop-file-name { font-size: 13px; font-weight: 700; color: #0284c7; margin-top: 8px; }
   .report{max-width:820px;margin:0 auto;padding:var(--rv-space-8) var(--rv-space-4) var(--rv-space-8);
     font-family:var(--rv-font-body);color:var(--rv-text)}
   .r-title{font-family:var(--rv-font-heading);font-size:32px;font-weight:600;
@@ -1479,7 +1479,7 @@
         </label>
       </div>
     </div>
-    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の質問に添付されます（グランドメニュー・マニュアル向け）。テキスト・CSV・Markdownを添付すると、その場で読み取って「内容」へ取り込みます。PDF・画像は保管のみのため、要点は概要へ記入してください。</p>
+    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の売上分析に参照されます（グランドメニュー・マニュアル向け）。画像・PDF・テキスト・CSV・Markdownを添付すると、Gemini 2.0 Flash が全自動でAI解析し、メニュー名・価格・要約・文字起こし本文・タグを抽出し取り込みます。解析結果は確認ポップアップで手動修正・追記も可能です。</p>
     <div class="kn-actions">
       <button id="knSaveBtn" class="btn btn-primary">保存</button>
       <button id="knResetBtn" class="btn btn-secondary">クリア</button>
