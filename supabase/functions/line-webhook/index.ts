@@ -2521,11 +2521,13 @@ Deno.serve(async (req) => {
       const text = String(event.message?.text ?? '').trim()
       const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
 
-      // 店舗ナレッジ (#メモ / #日報 / #note) の Journal Report 自動転送ブリッジ
+      // 店舗ナレッジ (#メモ / #日報 / #note) の Journal Report 自動転送ブリッジ & 通数0リアクション
       if (text && /#(?:メモ|日報|note)/i.test(text) && storeKey) {
         try {
           const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
           const adminApiUrl = `${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/process-line-post`
+          const msgId = event.message?.id ? String(event.message.id) : ''
+
           fetch(adminApiUrl, {
             method: 'POST',
             headers: {
@@ -2539,6 +2541,27 @@ Deno.serve(async (req) => {
               text: text,
               sender_name: eventUserId || 'LINEユーザー'
             })
+          }).then(async res => {
+            if (res.ok) {
+              const resJson = await res.json()
+              if (resJson.processed && msgId) {
+                // 通数0通のメッセージリアクション (thumbs_up 👍) を付与
+                const token = resolveChannelAccessToken(supabase, registry as StoreRegistryRow) || lineAccessTokenForSearch
+                if (token) {
+                  fetch('https://api.line.me/v2/bot/message/react', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                      messageId: msgId,
+                      reactionType: 'thumbs_up'
+                    })
+                  }).catch(e => console.warn('Reaction API error:', e))
+                }
+              }
+            }
           }).catch(err => console.error('Failed to forward #メモ to admin-api:', err))
         } catch (e) {
           console.error('Error forwarding #メモ post:', e)
