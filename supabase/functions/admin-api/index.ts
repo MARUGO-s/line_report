@@ -187,8 +187,6 @@ ${cleanText}
           }
         }
 
-        // ③ Supabase store_knowledge_documents テーブルへ自動保存
-        // DB CHECK制約 ('施策','メニュー','価格改定','イベント','マニュアル','その他') に100%合致させる
         const validCategories = ["施策", "メニュー", "価格改定", "イベント", "マニュアル", "その他"];
         const rawCategory = String(categorizedResult.category || "その他").trim();
         const safeCategory = validCategories.includes(rawCategory) ? rawCategory : "その他";
@@ -206,7 +204,7 @@ ${cleanText}
 
         let record: Record<string, any> = {
           store_partition_key: storeKey,
-          category: safeCategory,
+          category: "その他", // ハードコードでその他を強制指定
           title: String(categorizedResult.title || "LINEメモ").trim(),
           summary: String(categorizedResult.summary || cleanText).trim(),
           body_text: cleanText,
