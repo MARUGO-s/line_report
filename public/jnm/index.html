@@ -3753,17 +3753,48 @@ async function fetchSupabaseReportById(id) {
 }
 
 async function hydrateSavedReport(r) {
-  if (reportHasSalesSummary(r) && (
-    isDetailedReportHtml(r.body) ||
-    isDetailedReportHtml(r.previewHtml) ||
-    (Array.isArray(r.sales) && r.sales.length) ||
-    !!String(r.htmlStoragePath || '').trim()
-  )) {
+  const hasMealFdSplit = (
+    (Number(r?.lunchFoodTotal) || 0) +
+    (Number(r?.lunchDrinkTotal) || 0) +
+    (Number(r?.dinnerFoodTotal) || 0) +
+    (Number(r?.dinnerDrinkTotal) || 0)
+  ) > 0;
+  if (
+    reportHasSalesSummary(r) &&
+    hasMealFdSplit &&
+    (isDetailedReportHtml(r.body) ||
+      isDetailedReportHtml(r.previewHtml) ||
+      (Array.isArray(r.sales) && r.sales.length) ||
+      !!String(r.htmlStoragePath || '').trim())
+  ) {
     return r;
   }
   if (!r?.id) return r;
   const full = await fetchSupabaseReportById(r.id);
-  return full ? { ...r, ...full, id: r.id } : { ...r, _hydrateFailed: true };
+  if (!full) return { ...r, _hydrateFailed: true };
+  let merged = { ...r, ...full, id: r.id };
+  // 旧保存で昼夜別F/DがJSONBに無い場合は伝票から補完
+  const stillMissingMealFd = (
+    (Number(merged.lunchFoodTotal) || 0) +
+    (Number(merged.lunchDrinkTotal) || 0) +
+    (Number(merged.dinnerFoodTotal) || 0) +
+    (Number(merged.dinnerDrinkTotal) || 0)
+  ) === 0;
+  if (stillMissingMealFd && Array.isArray(merged.sales) && merged.sales.length) {
+    const agg = aggregateSalesRows(merged.sales);
+    merged = {
+      ...merged,
+      lunchFoodTotal: agg.lunchFoodTotal || 0,
+      lunchDrinkTotal: agg.lunchDrinkTotal || 0,
+      dinnerFoodTotal: agg.dinnerFoodTotal || 0,
+      dinnerDrinkTotal: agg.dinnerDrinkTotal || 0,
+      lunchTotal: Number(merged.lunchTotal) || agg.lunchTotal || 0,
+      dinnerTotal: Number(merged.dinnerTotal) || agg.dinnerTotal || 0,
+      lunchCustomers: Number(merged.lunchCustomers) || agg.lunchCustomers || 0,
+      dinnerCustomers: Number(merged.dinnerCustomers) || agg.dinnerCustomers || 0
+    };
+  }
+  return merged;
 }
 
 function mergeMonthlyAndDailyReportIndex(monthlyReports, dailyReports) {
@@ -4014,6 +4045,10 @@ function buildCloudReportData(r) {
     dinnerTotal: r.dinnerTotal,
     lunchCustomers: r.lunchCustomers,
     dinnerCustomers: r.dinnerCustomers,
+    lunchFoodTotal: r.lunchFoodTotal,
+    lunchDrinkTotal: r.lunchDrinkTotal,
+    dinnerFoodTotal: r.dinnerFoodTotal,
+    dinnerDrinkTotal: r.dinnerDrinkTotal,
     totalCustomers: r.totalCustomers,
     topProducts: Array.isArray(r.topProducts) ? r.topProducts.slice(0, 30) : [],
     weekdayBreakdown: r.weekdayBreakdown || [],
@@ -10061,7 +10096,16 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       const hasCoreSummary = Number.isFinite(Number(r?.total ?? r?.totalSales))
         && Number.isFinite(Number(r?.foodTotal))
         && Number.isFinite(Number(r?.drinkTotal));
-      const full = (detailTargets.has(r) || !hasCoreSummary) ? await hydrateSavedReport(r) : r;
+      const hasMealFdSplit = (
+        (Number(r?.lunchFoodTotal) || 0) +
+        (Number(r?.lunchDrinkTotal) || 0) +
+        (Number(r?.dinnerFoodTotal) || 0) +
+        (Number(r?.dinnerDrinkTotal) || 0)
+      ) > 0;
+      // 一覧に昼夜別F/Dが無い旧行は詳細取得して伝票から補完する
+      const full = (detailTargets.has(r) || !hasCoreSummary || !hasMealFdSplit)
+        ? await hydrateSavedReport(r)
+        : r;
       if (full?._hydrateFailed) hydrationFailed = true;
       hydrated.push(full);
       if (detailTargets.has(r)) detailHydrated.push(full);
