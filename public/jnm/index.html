@@ -6832,6 +6832,7 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 【商品初出・導入月】が載っている場合は、ジャーナル全件横断検索で特定した各ターゲットの初出月・単価帯・前後比較を根拠に述べ、「開始月は表示されていません」で止めない。複数ターゲットがあるときは固有名称の初出と単価帯の初出を混同しない。ファミリー最古で固有商品の開始月を置き換えない。
 - 【コースラインナップ】が載っている場合は、単価帯の主力行（名称×単価）を正本にする。店舗ごとにコース商品名は異なる。一部別名の単価帯だけを全コースと誤解し「〇〇円コースが無い」と言ってはいけない。別名トークン群があれば併記する。
 - 【コースラインナップ】の「例外・単発特別」は存在を短く触れるに留め、客単価低下などの主因分析には積極的に使わない。「漏れ検知」がある場合は主軸の取りこぼしとして必ず確認する。
+- 【商品初出・導入月】の対象商品の合計点数・売上と、【コースラインナップ】の「主軸コース明細」だけの同一商品合計が一致しない場合は、必ず「例外・単発特別」行を加算して両節の数値を突き合わせ、食い違ったまま両方を並べて出さない。
 - 商品初出節またはコースラインナップ節が載っているのに「ジャーナルを再読できない」「該当コースが確定集計に無い」と書いてはいけない。
 - 【商品利用会計 vs 非利用会計】が載っている場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加の比較が必要」「利用/非利用の比較ができない」で止めない。
 - 【ジャーナル会計比較（汎用）】が載っている場合は、昼夜・平日週末・ボトル/グラス・人数帯・商品A vs B など提示された軸の数値を使い、「比較できない」で止めない。
@@ -8320,7 +8321,11 @@ function extractNamedProductMentions(query) {
   }
 
   // 「〇〇コース」（ファミリー語だけの「コース」「通常コース」は固有名にしない）
-  const namedCourseRe = /([A-Za-z0-9ぁ-んァ-ヶ一-龥Ａ-Ｚａ-ｚ]{1,16})\s*コース/g;
+  // 重要: ひらがな・漢字を含めると自然文の助詞・前後文脈まで「商品名」に誤抽出する
+  // （例: 「知りたいのはSPコース」の「知りたいのは」まで商品名扱いになり、0件の架空商品として報告される）。
+  // ブランド名・別名は英数字またはカタカナの短い連続語に限定し、直前が同種の文字なら
+  // マッチ開始位置にしない（否定後読み）ことで文中の断片化を防ぐ。
+  const namedCourseRe = /(?<![0-9A-Za-zＡ-Ｚａ-ｚァ-ヶー])([A-Za-z0-9]{1,10}|[ァ-ヶー]{2,10})\s*コース/g;
   while ((m = namedCourseRe.exec(q))) {
     const prefix = String(m[1]).normalize('NFKC').trim();
     if (!prefix) continue;
@@ -10059,6 +10064,16 @@ function formatCourseLineupFactsForAi(facts, indent = '') {
   lines.push(`${indent}  - ${facts.rootCauseGuard}`);
   lines.push(`${indent}  - ${facts.note}`);
   lines.push(`${indent}  - 検索範囲: ${facts.searchScope}／走査 ${facts.scannedFiles || 0}ファイル／合計 ${facts.totalQty || 0}点 / ${yen(facts.totalAmount || 0)}`);
+  const coreQty = (facts.core || []).reduce((s, r) => s + (Number(r.qty) || 0), 0);
+  const coreAmt = (facts.core || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const exQty = (facts.exceptions || []).reduce((s, r) => s + (Number(r.qty) || 0), 0);
+  const exAmt = (facts.exceptions || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  if (exQty > 0 || exAmt > 0) {
+    lines.push(
+      `${indent}  - ※内訳: 主軸コース明細 ${coreQty}点 / ${yen(coreAmt)} ＋ 例外・単発特別 ${exQty}点 / ${yen(exAmt)} ＝ 合計 ${facts.totalQty || 0}点 / ${yen(facts.totalAmount || 0)}`
+    );
+    lines.push(`${indent}  - ※他節（商品初出等）の合計点数・売上と本節の「主軸コース明細」だけの合計が一致しない場合、例外行を必ず加算して突き合わせること。無視して数値差を放置しない`);
+  }
   lines.push(`${indent}  - 単価帯の主力（各単価で点数最大のコース名）:`);
   (facts.unitLeaders || []).slice(0, 10).forEach((r) => {
     lines.push(
