@@ -353,6 +353,33 @@
   .classification-item.pending-move{outline:1px dashed var(--rv-accent,#b68235);outline-offset:1px}
   .classification-item small{font-family:var(--rv-font-sans,inherit);opacity:.6;white-space:nowrap}
   @media (max-width:760px){.category-grid{grid-template-columns:1fr}.classification-board{grid-template-columns:1fr 1fr}}
+  /* 店舗ナレッジ（施策・メニュー資料） */
+  .kn-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .kn-field{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--text-2)}
+  .kn-field input,.kn-field select,.kn-field textarea{font:inherit;font-size:12px;padding:7px 8px;border:1px solid var(--border-input);border-radius:6px;color:var(--text);background:var(--page)}
+  .kn-field textarea{resize:vertical;line-height:1.6}
+  .kn-narrow{grid-column:span 1}
+  .kn-wide{grid-column:span 2}
+  .kn-full{grid-column:1 / -1}
+  .kn-note{font-size:11px;color:var(--text-2);line-height:1.6;margin:10px 0 12px}
+  .kn-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .kn-status{font-size:12px;color:var(--text-2)}
+  .kn-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .kn-filters select,.kn-filters input{font:inherit;font-size:12px;padding:7px 8px;border:1px solid var(--border-input);border-radius:6px;color:var(--text);background:var(--page)}
+  .kn-filters input{flex:1;min-width:140px}
+  .kn-list{display:flex;flex-direction:column;gap:8px}
+  .kn-item{border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--page)}
+  .kn-item.is-inactive{opacity:.55}
+  .kn-item-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .kn-badge{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--border);color:var(--text-2)}
+  .kn-badge.is-current{border-color:var(--accent);color:var(--accent)}
+  .kn-item-title{font-size:13px;font-weight:600;color:var(--text)}
+  .kn-item-period{font-size:11px;color:var(--text-2)}
+  .kn-item-summary{font-size:12px;color:var(--text-2);line-height:1.6;margin-top:6px;white-space:pre-wrap}
+  .kn-item-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .kn-item-actions button{font:inherit;font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-2);cursor:pointer}
+  .kn-item-actions button:hover{background:color-mix(in srgb, var(--text) 7%, transparent)}
+  @media (max-width:760px){.kn-form{grid-template-columns:repeat(2,minmax(0,1fr))}.kn-wide{grid-column:1 / -1}}
   select{font-size:13px;padding:7px 10px;border-radius:7px;border:1px solid var(--border-input);
     background:var(--surface);color:var(--text);font-family:inherit;cursor:pointer}
   .controls input[type=date]{font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--border-input);
@@ -1202,6 +1229,7 @@
   <div class="tabs">
     <div class="tab" data-tab="guide">使い方</div>
     <div class="tab active" data-tab="convert">変換</div>
+    <div class="tab" data-tab="knowledge">資料</div>
   </div>
 </div>
 
@@ -1355,6 +1383,77 @@
 
       <div class="foot">制御コード（ESC/FS）を除去 → 指定の文字コードでデコード → 改行を整えて出力します。</div>
     </div>
+  </div>
+</section>
+
+<!-- 店舗ナレッジ（施策・メニュー資料）-->
+<section id="knowledge" class="conv" hidden>
+  <p class="intro">実施した施策やメニュー・価格改定を登録しておくと、AIが「その期間に店舗が何をしていたか」を踏まえて売上を分析します。<strong>売上の数値は保存済みレポートが正本</strong>で、ここに登録した資料は背景の説明にのみ使われます。</p>
+
+  <div class="card">
+    <div class="card-kicker">資料を登録</div>
+    <div class="kn-form">
+      <label class="kn-field kn-narrow">種別
+        <select id="knCategory">
+          <option value="施策">施策</option>
+          <option value="メニュー">メニュー</option>
+          <option value="価格改定">価格改定</option>
+          <option value="イベント">イベント</option>
+          <option value="マニュアル">マニュアル</option>
+          <option value="その他">その他</option>
+        </select>
+      </label>
+      <label class="kn-field kn-wide">タイトル
+        <input id="knTitle" type="text" maxlength="200" placeholder="例: 7月ワインフェア（グラス3種入替）">
+      </label>
+      <label class="kn-field kn-narrow">開始日
+        <input id="knPeriodStart" type="date">
+      </label>
+      <label class="kn-field kn-narrow">終了日
+        <input id="knPeriodEnd" type="date">
+      </label>
+      <label class="kn-field kn-full">概要（AIが最初に読みます）
+        <textarea id="knSummary" rows="2" maxlength="2000" placeholder="例: グラスワインを3種入替、ペアリングを常時2種提示。ディナーの客単価アップが狙い"></textarea>
+      </label>
+      <label class="kn-field kn-full">内容（任意・貼り付け可）
+        <textarea id="knBody" rows="6" maxlength="60000" placeholder="メニュー表や施策の詳細をそのまま貼り付けられます"></textarea>
+      </label>
+      <label class="kn-field kn-wide">タグ（カンマ区切り・任意）
+        <input id="knTags" type="text" placeholder="ワイン, ペアリング, ランチ">
+      </label>
+      <label class="kn-field kn-wide">添付ファイル（任意・20MBまで）
+        <input id="knFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.md,.xlsx,.docx">
+      </label>
+    </div>
+    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の質問に添付されます（グランドメニュー・マニュアル向け）。テキスト・CSV・Markdownを添付すると、その場で読み取って「内容」へ取り込みます。PDF・画像は保管のみのため、要点は概要へ記入してください。</p>
+    <div class="kn-actions">
+      <button id="knSaveBtn" class="btn btn-primary">保存</button>
+      <button id="knResetBtn" class="btn btn-secondary">クリア</button>
+      <span id="knFormStatus" class="kn-status"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-kicker">登録済みの資料</div>
+    <div class="kn-filters">
+      <select id="knFilterCategory">
+        <option value="">すべての種別</option>
+        <option value="施策">施策</option>
+        <option value="メニュー">メニュー</option>
+        <option value="価格改定">価格改定</option>
+        <option value="イベント">イベント</option>
+        <option value="マニュアル">マニュアル</option>
+        <option value="その他">その他</option>
+      </select>
+      <select id="knFilterActive">
+        <option value="true">有効のみ</option>
+        <option value="">すべて</option>
+        <option value="false">無効のみ</option>
+      </select>
+      <input id="knFilterQuery" type="search" placeholder="キーワード検索">
+      <button id="knReloadBtn" class="btn btn-secondary">再読込</button>
+    </div>
+    <div id="knList" class="kn-list"><div class="empty">読み込んでいません。</div></div>
   </div>
 </section>
 
@@ -6105,6 +6204,8 @@ document.querySelectorAll('.tab').forEach(t=>{
     const tab=t.dataset.tab;
     document.getElementById('guide').hidden = tab!=='guide';
     document.getElementById('convert').hidden = tab!=='convert';
+    document.getElementById('knowledge').hidden = tab!=='knowledge';
+    if (tab === 'knowledge') loadKnowledgeList();
   });
 });
 
@@ -6544,6 +6645,8 @@ async function aiAnalyze() {
   
   try {
     const data = buildSalesDataForAI();
+    // このレポート期間に実施していた施策・メニューを分析レポートにも反映する
+    const knowledgeBlock = await buildStoreKnowledgeBlockForReport();
     const res = await fetch(AI_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -6553,7 +6656,7 @@ async function aiAnalyze() {
       body: JSON.stringify({
         action: 'analyze',
         salesData: data,
-        systemInstruction: MARUGO_AI_ANALYZE_INSTRUCTION + '\n\n' + buildStoreLocationBlockForAi(),
+        systemInstruction: MARUGO_AI_ANALYZE_INSTRUCTION + '\n\n' + buildStoreLocationBlockForAi() + knowledgeBlock,
         storeKey: STORE_KEY,
         storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
         storeLocationBlock: buildStoreLocationBlockForAi()
@@ -7645,6 +7748,416 @@ function mergeHourlyBreakdowns(reports) {
   }
   return [...map.values()].sort((a, b) => a.hour - b.hour);
 }
+
+// ===== 店舗ナレッジ（施策・メニュー資料） =====
+// 施策やメニューを登録しておき、AIが「その期間に何をしていたか」を踏まえて回答できるようにする。
+// 数値の正本はあくまで保存済みレポートの確定集計で、ここは背景説明にのみ使う。
+
+const KNOWLEDGE_API = '/pos-journals/knowledge';
+const KNOWLEDGE_CACHE_TTL_MS = 3 * 60 * 1000;
+const AI_KNOWLEDGE_MAX_ITEMS = 5;
+const AI_KNOWLEDGE_MAX_CHARS = 6000;
+let knowledgeEditingId = null;
+let knowledgeCache = { storeKey: '', loadedAt: 0, items: [] };
+
+function knowledgeEl(id) { return document.getElementById(id); }
+
+function setKnowledgeStatus(text, isError = false) {
+  const el = knowledgeEl('knFormStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = isError ? '#a33a2b' : 'var(--text-2)';
+}
+
+function resetKnowledgeForm() {
+  knowledgeEditingId = null;
+  ['knTitle', 'knPeriodStart', 'knPeriodEnd', 'knSummary', 'knBody', 'knTags'].forEach(id => {
+    const el = knowledgeEl(id);
+    if (el) el.value = '';
+  });
+  const category = knowledgeEl('knCategory');
+  if (category) category.value = '施策';
+  const file = knowledgeEl('knFile');
+  if (file) file.value = '';
+  const btn = knowledgeEl('knSaveBtn');
+  if (btn) btn.textContent = '保存';
+  setKnowledgeStatus('');
+}
+
+function knowledgePeriodLabel(item) {
+  const start = String(item?.period_start || '');
+  const end = String(item?.period_end || '');
+  if (!start && !end) return '常時有効';
+  if (start && end) return start === end ? start : `${start} 〜 ${end}`;
+  return start ? `${start} 〜` : `〜 ${end}`;
+}
+
+function isKnowledgeCurrent(item) {
+  const today = new Date().toISOString().slice(0, 10);
+  const start = String(item?.period_start || '');
+  const end = String(item?.period_end || '');
+  if (!start && !end) return false;
+  return (!start || start <= today) && (!end || end >= today);
+}
+
+async function loadKnowledgeList() {
+  const listEl = knowledgeEl('knList');
+  if (!listEl) return;
+  if (!getAdminToken()) {
+    listEl.innerHTML = '<div class="empty">資料の閲覧には接続が必要です。上部の管理トークンを接続してください。</div>';
+    return;
+  }
+  listEl.innerHTML = '<div class="empty">読み込み中…</div>';
+  try {
+    const params = new URLSearchParams({ store_key: STORE_KEY, limit: '300' });
+    const category = knowledgeEl('knFilterCategory')?.value || '';
+    const active = knowledgeEl('knFilterActive')?.value ?? 'true';
+    const q = knowledgeEl('knFilterQuery')?.value || '';
+    if (category) params.set('category', category);
+    if (active) params.set('active', active);
+    if (q.trim()) params.set('q', q.trim());
+    const body = await adminApiFetch(`${KNOWLEDGE_API}?${params.toString()}`, { method: 'GET' });
+    renderKnowledgeList(Array.isArray(body.items) ? body.items : []);
+    // AI用キャッシュも同時に更新（有効なものだけ）
+    if (!category && active === 'true' && !q.trim()) {
+      knowledgeCache = { storeKey: STORE_KEY, loadedAt: Date.now(), items: (body.items || []) };
+    }
+  } catch (err) {
+    listEl.innerHTML = `<div class="empty">読み込みに失敗しました: ${esc(err.message || String(err))}</div>`;
+  }
+}
+
+function renderKnowledgeList(items) {
+  const listEl = knowledgeEl('knList');
+  if (!listEl) return;
+  if (!items.length) {
+    listEl.innerHTML = '<div class="empty">該当する資料はありません。上のフォームから登録できます。</div>';
+    return;
+  }
+  listEl.innerHTML = items.map(item => {
+    const inactive = item.is_active === false;
+    const current = isKnowledgeCurrent(item);
+    const tags = Array.isArray(item.tags) ? item.tags : [];
+    const summary = String(item.summary || item.body_text || '');
+    return `<div class="kn-item${inactive ? ' is-inactive' : ''}">
+      <div class="kn-item-head">
+        <span class="kn-badge">${esc(item.category || 'その他')}</span>
+        ${current ? '<span class="kn-badge is-current">実施中</span>' : ''}
+        ${inactive ? '<span class="kn-badge">無効</span>' : ''}
+        ${item.has_attachment ? '<span class="kn-badge">添付あり</span>' : ''}
+        <span class="kn-item-title">${esc(item.title || '')}</span>
+        <span class="kn-item-period">${esc(knowledgePeriodLabel(item))}</span>
+      </div>
+      ${summary ? `<div class="kn-item-summary">${esc(summary)}${item.body_truncated ? '…' : ''}</div>` : ''}
+      ${tags.length ? `<div class="kn-item-period">タグ: ${esc(tags.join(' / '))}</div>` : ''}
+      <div class="kn-item-actions">
+        <button onclick="editKnowledgeItem(${Number(item.id)})">編集</button>
+        ${item.has_attachment ? `<button onclick="downloadKnowledgeAttachment(${Number(item.id)})">添付を開く</button>` : ''}
+        ${inactive ? '' : `<button onclick="deactivateKnowledgeItem(${Number(item.id)})">無効にする</button>`}
+        <button onclick="deleteKnowledgeItem(${Number(item.id)})">完全に削除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function editKnowledgeItem(id) {
+  try {
+    const params = new URLSearchParams({ store_key: STORE_KEY, id: String(id) });
+    const body = await adminApiFetch(`${KNOWLEDGE_API}/item?${params.toString()}`, { method: 'GET' });
+    const item = body.item || {};
+    knowledgeEditingId = Number(item.id) || null;
+    const set = (elId, value) => { const el = knowledgeEl(elId); if (el) el.value = value ?? ''; };
+    set('knCategory', item.category || 'その他');
+    set('knTitle', item.title);
+    set('knPeriodStart', item.period_start);
+    set('knPeriodEnd', item.period_end);
+    set('knSummary', item.summary);
+    set('knBody', item.body_text);
+    set('knTags', Array.isArray(item.tags) ? item.tags.join(', ') : '');
+    const btn = knowledgeEl('knSaveBtn');
+    if (btn) btn.textContent = '更新';
+    setKnowledgeStatus(`「${item.title || ''}」を編集中です。添付を差し替える場合のみファイルを選び直してください。`);
+    knowledgeEl('knTitle')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (err) {
+    setKnowledgeStatus(`読み込みに失敗しました: ${err.message || err}`, true);
+  }
+}
+
+async function saveKnowledgeForm() {
+  const btn = knowledgeEl('knSaveBtn');
+  const title = (knowledgeEl('knTitle')?.value || '').trim();
+  const summary = (knowledgeEl('knSummary')?.value || '').trim();
+  const bodyText = (knowledgeEl('knBody')?.value || '').trim();
+  if (!title) { setKnowledgeStatus('タイトルを入力してください。', true); return; }
+  if (!summary && !bodyText) { setKnowledgeStatus('概要または内容を入力してください。', true); return; }
+  const start = knowledgeEl('knPeriodStart')?.value || '';
+  const end = knowledgeEl('knPeriodEnd')?.value || '';
+  if (start && end && start > end) { setKnowledgeStatus('開始日が終了日より後になっています。', true); return; }
+  if (btn) btn.disabled = true;
+  setKnowledgeStatus('保存中…');
+  try {
+    let attachment = null;
+    const file = knowledgeEl('knFile')?.files?.[0];
+    if (file) {
+      setKnowledgeStatus('添付ファイルをアップロード中…');
+      const form = new FormData();
+      form.append('file', file);
+      form.append('store_key', STORE_KEY);
+      attachment = await adminApiFetch(`${KNOWLEDGE_API}/upload`, { method: 'POST', body: form });
+    }
+    const payload = {
+      store_key: STORE_KEY,
+      category: knowledgeEl('knCategory')?.value || 'その他',
+      title,
+      summary,
+      body_text: bodyText,
+      period_start: start,
+      period_end: end,
+      tags: (knowledgeEl('knTags')?.value || '').split(/[,、]/).map(s => s.trim()).filter(Boolean),
+      is_active: true
+    };
+    if (knowledgeEditingId) payload.id = knowledgeEditingId;
+    if (attachment) {
+      payload.storage_path = attachment.storage_path;
+      payload.original_file_name = attachment.original_file_name;
+      payload.mime_type = attachment.mime_type;
+      payload.file_size_bytes = attachment.file_size_bytes;
+      payload.sha256_hex = attachment.sha256_hex;
+    }
+    await adminApiFetch(KNOWLEDGE_API, { method: 'POST', body: JSON.stringify(payload) });
+    setKnowledgeStatus(knowledgeEditingId ? '更新しました。' : '保存しました。AIチャットからも参照できます。');
+    resetKnowledgeForm();
+    knowledgeCache = { storeKey: '', loadedAt: 0, items: [] };
+    await loadKnowledgeList();
+  } catch (err) {
+    setKnowledgeStatus(`保存に失敗しました: ${err.message || err}`, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function deactivateKnowledgeItem(id) {
+  if (!confirm('この資料を無効にしますか？\n（過去期間の質問では引き続き参照されます）')) return;
+  try {
+    await adminApiFetch(`${KNOWLEDGE_API}/item`, {
+      method: 'DELETE',
+      body: JSON.stringify({ store_key: STORE_KEY, id })
+    });
+    knowledgeCache = { storeKey: '', loadedAt: 0, items: [] };
+    await loadKnowledgeList();
+  } catch (err) {
+    setKnowledgeStatus(`無効化に失敗しました: ${err.message || err}`, true);
+  }
+}
+
+async function deleteKnowledgeItem(id) {
+  if (!confirm('この資料を完全に削除しますか？\n添付ファイルも消去され、元に戻せません。')) return;
+  try {
+    await adminApiFetch(`${KNOWLEDGE_API}/item`, {
+      method: 'DELETE',
+      body: JSON.stringify({ store_key: STORE_KEY, id, purge: true, confirmation: 'delete' })
+    });
+    knowledgeCache = { storeKey: '', loadedAt: 0, items: [] };
+    await loadKnowledgeList();
+  } catch (err) {
+    setKnowledgeStatus(`削除に失敗しました: ${err.message || err}`, true);
+  }
+}
+
+async function downloadKnowledgeAttachment(id) {
+  try {
+    const params = new URLSearchParams({ store_key: STORE_KEY, id: String(id) });
+    const body = await adminApiFetch(`${KNOWLEDGE_API}/download?${params.toString()}`, { method: 'GET' });
+    if (body.url) window.open(body.url, '_blank', 'noopener');
+  } catch (err) {
+    setKnowledgeStatus(`ダウンロードに失敗しました: ${err.message || err}`, true);
+  }
+}
+
+/** テキスト系の添付は、その場で読み取って「内容」へ取り込む（PDF・画像は保管のみ） */
+async function importKnowledgeTextFile(file) {
+  if (!file) return;
+  const name = String(file.name || '').toLowerCase();
+  const isText = /^(text\/|application\/csv)/.test(String(file.type || ''))
+    || /\.(txt|csv|md|markdown)$/.test(name);
+  if (!isText || file.size > 1024 * 1024) return;
+  try {
+    const text = await file.text();
+    const bodyEl = knowledgeEl('knBody');
+    if (bodyEl && !bodyEl.value.trim()) {
+      bodyEl.value = text.slice(0, 60000);
+      setKnowledgeStatus('添付ファイルの本文を「内容」へ取り込みました。');
+    }
+  } catch (_) { /* 読み取れない場合は保管のみ */ }
+}
+
+// ---- AI へ渡すための取得・選定 ----
+
+/** 有効な資料を取得してキャッシュする。失敗してもチャットは止めない */
+async function loadStoreKnowledgeForAi() {
+  if (!getAdminToken()) return [];
+  const fresh = knowledgeCache.storeKey === STORE_KEY
+    && (Date.now() - knowledgeCache.loadedAt) < KNOWLEDGE_CACHE_TTL_MS;
+  if (fresh) return knowledgeCache.items;
+  try {
+    const params = new URLSearchParams({ store_key: STORE_KEY, active: 'true', limit: '300' });
+    const body = await adminApiFetch(`${KNOWLEDGE_API}?${params.toString()}`, { method: 'GET' });
+    knowledgeCache = {
+      storeKey: STORE_KEY,
+      loadedAt: Date.now(),
+      items: Array.isArray(body.items) ? body.items : []
+    };
+    return knowledgeCache.items;
+  } catch (err) {
+    console.warn('店舗ナレッジの取得に失敗しました（分析は継続します）:', err);
+    return [];
+  }
+}
+
+/** 確定集計から、資料を突き合わせる対象期間（ISO日付）を求める */
+function resolveKnowledgePeriodRange(verifiedData) {
+  if (!verifiedData) return null;
+  const periods = verifiedData.multiPeriod && Array.isArray(verifiedData.periods)
+    ? verifiedData.periods
+    : [verifiedData];
+  const dates = [];
+  for (const period of periods) {
+    if (Array.isArray(period?.dailyBreakdown) && period.dailyBreakdown.length) {
+      dates.push(period.dailyBreakdown[0].date, period.dailyBreakdown[period.dailyBreakdown.length - 1].date);
+      continue;
+    }
+    const months = Array.isArray(period?.monthlyBreakdown) ? period.monthlyBreakdown : [];
+    if (months.length) {
+      const first = months[0];
+      const last = months[months.length - 1];
+      dates.push(`${first.key}-01`, monthEndIso(last.key));
+      continue;
+    }
+    const ym = extractYearMonthFromText(period?.label || '');
+    if (ym) {
+      const key = `${ym.year}-${String(ym.month).padStart(2, '0')}`;
+      dates.push(`${key}-01`, monthEndIso(key));
+    }
+  }
+  const valid = dates.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))).sort();
+  if (!valid.length) return null;
+  return { from: valid[0], to: valid[valid.length - 1] };
+}
+
+function monthEndIso(key) {
+  const [year, month] = String(key || '').split('-').map(Number);
+  if (!year || !month) return '';
+  const last = new Date(year, month, 0).getDate();
+  return `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+}
+
+function knowledgeOverlapsPeriod(item, range) {
+  const start = String(item?.period_start || '');
+  const end = String(item?.period_end || '');
+  if (!start && !end) return true;   // 期間指定なし＝常時有効
+  if (!range) return true;           // 対象期間が特定できない質問には全件を候補にする
+  return (start || '0000-01-01') <= range.to && (end || '9999-12-31') >= range.from;
+}
+
+/** 2文字組の共通率。既存のフードコートAIと同じ考え方の軽量類似度 */
+function knowledgeTextSimilarity(a, b) {
+  const grams = (text) => {
+    const s = String(text || '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+    const set = new Set();
+    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+    return set;
+  };
+  const aa = grams(a);
+  const bb = grams(b);
+  if (!aa.size || !bb.size) return 0;
+  let shared = 0;
+  for (const gram of aa) if (bb.has(gram)) shared++;
+  return shared / Math.max(aa.size, bb.size);
+}
+
+function knowledgeSearchableText(item) {
+  return [item?.title, item?.summary, item?.body_text, (item?.tags || []).join(' ')].join(' ');
+}
+
+/** 対象期間と重なる資料は類似度に関係なく必ず添付し、残りを類似度で補う */
+function selectStoreKnowledgeForQuery(query, range, items) {
+  const list = (Array.isArray(items) ? items : []).filter(item => item && item.is_active !== false);
+  if (!list.length) return [];
+  const scored = list.map(item => ({
+    item,
+    overlaps: knowledgeOverlapsPeriod(item, range),
+    similarity: knowledgeTextSimilarity(query, knowledgeSearchableText(item))
+  }));
+  const byRelevance = (a, b) => b.similarity - a.similarity
+    || String(b.item.period_start || '').localeCompare(String(a.item.period_start || ''));
+  const picked = [];
+  scored.filter(s => s.overlaps).sort(byRelevance).forEach(s => picked.push(s.item));
+  scored.filter(s => !s.overlaps && s.similarity >= 0.03).sort(byRelevance).forEach(s => {
+    if (!picked.includes(s.item)) picked.push(s.item);
+  });
+  return picked.slice(0, AI_KNOWLEDGE_MAX_ITEMS);
+}
+
+/** プロンプトへ差し込む店舗ナレッジのブロック（数値の出典にしないことを明記する） */
+function formatStoreKnowledgeBlock(items) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return '';
+  const lines = [];
+  let used = 0;
+  for (const item of list) {
+    const head = `- [${item.category || 'その他'}] ${item.title || ''}（${knowledgePeriodLabel(item)}）`;
+    const summary = String(item.summary || '').trim();
+    const body = String(item.body_text || '').trim();
+    const remaining = AI_KNOWLEDGE_MAX_CHARS - used;
+    if (remaining <= head.length) break;
+    const parts = [head];
+    if (summary) parts.push(`  概要: ${summary.slice(0, Math.max(0, remaining - head.length))}`);
+    const bodyRoom = AI_KNOWLEDGE_MAX_CHARS - used - parts.join('\n').length;
+    if (body && bodyRoom > 80) parts.push(`  内容: ${body.slice(0, bodyRoom)}${body.length > bodyRoom ? '…' : ''}`);
+    const tags = Array.isArray(item.tags) ? item.tags.filter(Boolean) : [];
+    if (tags.length) parts.push(`  タグ: ${tags.join(' / ')}`);
+    const chunk = parts.join('\n');
+    used += chunk.length;
+    lines.push(chunk);
+    if (used >= AI_KNOWLEDGE_MAX_CHARS) break;
+  }
+  if (!lines.length) return '';
+  return `
+
+【店舗ナレッジ（この店舗が登録した施策・メニュー資料）】
+${lines.join('\n')}
+
+このナレッジの扱い:
+- 売上・客数・金額などの数値は必ず【確定済み集計データ】から引用してください。本ナレッジを数値の出典にしてはいけません。
+- 施策・メニュー・価格の内容や背景を説明するときにのみ使い、その場合は「登録資料によると」と明示してください。
+- 資料に書かれていないことを推測で補わないでください。
+- 施策と数値を結びつけた考察は歓迎しますが、因果の断定は避け「※これは推測です」を付けてください。`;
+}
+
+/** 現在開いているレポートの期間から、AI分析レポート用のナレッジを選ぶ */
+async function buildStoreKnowledgeBlockForReport() {
+  const items = await loadStoreKnowledgeForAi();
+  if (!items.length) return '';
+  const period = String(currentReport?.period || '');
+  const iso = period.match(/(\d{4}-\d{2}-\d{2})[^\d]*(\d{4}-\d{2}-\d{2})?/);
+  const range = iso ? { from: iso[1], to: iso[2] || iso[1] } : null;
+  const selected = selectStoreKnowledgeForQuery(
+    `${currentReport?.title || ''} ${period} 売上分析 施策 メニュー`,
+    range,
+    items
+  );
+  return formatStoreKnowledgeBlock(selected);
+}
+
+knowledgeEl('knSaveBtn')?.addEventListener('click', saveKnowledgeForm);
+knowledgeEl('knResetBtn')?.addEventListener('click', resetKnowledgeForm);
+knowledgeEl('knReloadBtn')?.addEventListener('click', loadKnowledgeList);
+knowledgeEl('knFilterCategory')?.addEventListener('change', loadKnowledgeList);
+knowledgeEl('knFilterActive')?.addEventListener('change', loadKnowledgeList);
+knowledgeEl('knFilterQuery')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) loadKnowledgeList();
+});
+knowledgeEl('knFile')?.addEventListener('change', (e) => importKnowledgeTextFile(e.target.files?.[0]));
 
 const SAVED_DATA_CLARIFICATION_MARKER = '保存データの分析対象を選んでください';
 const AI_INTENT_CLARIFICATION_MARKER = '知りたい内容を具体化してください';
@@ -8970,6 +9483,22 @@ ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分�
 
 回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
+  // 店舗ナレッジ（施策・メニュー）を、確定集計の対象期間と突き合わせて添付する。
+  // 期間が重なる資料は類似度に関係なく必ず入れる（施策の取りこぼしを防ぐ）。
+  let knowledgeBlock = '';
+  try {
+    const knowledgeItems = await loadStoreKnowledgeForAi();
+    if (knowledgeItems.length) {
+      knowledgeBlock = formatStoreKnowledgeBlock(selectStoreKnowledgeForQuery(
+        resolvedChatQuery,
+        resolveKnowledgePeriodRange(verifiedData),
+        knowledgeItems
+      ));
+    }
+  } catch (err) {
+    console.warn('店舗ナレッジの付与をスキップしました:', err);
+  }
+
   const strictSystemInstruction = `${MARUGO_AI_COMPANY_CONTEXT}
 
 ${buildStoreLocationBlockForAi()}
@@ -8981,7 +9510,8 @@ ${buildStoreLocationBlockForAi()}
 4. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
 5. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
 6. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
-7. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。${verifiedDataBlock}`;
+7. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
+8. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。${verifiedDataBlock}${knowledgeBlock}`;
 
   try {
     const res = await fetch(AI_ENDPOINT, {

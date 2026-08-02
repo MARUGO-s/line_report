@@ -33,6 +33,8 @@ const context = {
   SAVED_DATA_CLARIFICATION_MARKER: '保存データの分析対象を選んでください',
   AI_INTENT_CLARIFICATION_MARKER: '知りたい内容を具体化してください',
   WEEKDAY_ORDER: ['月', '火', '水', '木', '金', '土', '日'],
+  AI_KNOWLEDGE_MAX_ITEMS: 5,
+  AI_KNOWLEDGE_MAX_CHARS: 6000,
   yen: (n) => `¥${Number(n || 0).toLocaleString('ja-JP')}`,
   monthKeyFromReport(report) {
     const text = String(report?.period || report?.title || '');
@@ -83,6 +85,14 @@ for (const name of [
   'mergeWeekdayBreakdowns',
   'mergeHourlyBreakdowns',
   'formatVerifiedDetailLines',
+  'monthEndIso',
+  'knowledgePeriodLabel',
+  'knowledgeOverlapsPeriod',
+  'knowledgeTextSimilarity',
+  'knowledgeSearchableText',
+  'selectStoreKnowledgeForQuery',
+  'formatStoreKnowledgeBlock',
+  'resolveKnowledgePeriodRange',
 ]) {
   vm.runInContext(`${extractFunction(html, name)}; this.${name} = ${name};`, context);
 }
@@ -692,4 +702,117 @@ test('a comparison with only one stored side still returns the stored numbers', 
   );
   assert.match(savedReportSearchSource, /return \{ multiPeriod: true, periods, missingPeriods \};/);
   assert.match(html, /queryResult\.missingPeriods\.join\('・'\)/);
+});
+
+test('store knowledge is attached by period overlap, not only by similarity', () => {
+  const items = [
+    { id: 1, category: '施策', title: '7月ワインフェア', summary: 'グラス3種入替', body_text: 'ボトルアップセル強化', tags: ['ワイン'], period_start: '2026-07-01', period_end: '2026-07-31', is_active: true },
+    { id: 2, category: 'メニュー', title: '夏グランドメニュー', summary: '前菜4品入替', body_text: '', tags: [], period_start: '2026-06-01', period_end: null, is_active: true },
+    { id: 3, category: 'マニュアル', title: '接客マニュアル', summary: 'ペアリング提案トーク', body_text: '', tags: [], period_start: null, period_end: null, is_active: true },
+    { id: 4, category: '施策', title: '3月ランチ強化', summary: 'ランチセット導入', body_text: '', tags: [], period_start: '2026-03-01', period_end: '2026-03-31', is_active: true },
+    { id: 5, category: '施策', title: '終了した企画', summary: '無効化済み', body_text: '', tags: [], period_start: '2026-07-01', period_end: '2026-07-31', is_active: false },
+  ];
+  assert.equal(context.monthEndIso('2026-07'), '2026-07-31');
+  assert.equal(context.monthEndIso('2024-02'), '2024-02-29', 'うるう年');
+  assert.equal(context.knowledgePeriodLabel(items[2]), '常時有効');
+  assert.equal(context.knowledgePeriodLabel(items[1]), '2026-06-01 〜');
+
+  // 期間は確定集計（月次・日別）から求める
+  const julyRange = context.resolveKnowledgePeriodRange({
+    label: '2026年7月の売上データ',
+    monthlyBreakdown: [{ key: '2026-07', label: '2026年7月' }],
+  });
+  assert.deepEqual({ ...julyRange }, { from: '2026-07-01', to: '2026-07-31' });
+  const dayRange = context.resolveKnowledgePeriodRange({
+    label: '2026年7月15日の売上データ',
+    dailyBreakdown: [{ date: '2026-07-15' }],
+  });
+  assert.deepEqual({ ...dayRange }, { from: '2026-07-15', to: '2026-07-15' });
+  const compareRange = context.resolveKnowledgePeriodRange({
+    multiPeriod: true,
+    periods: [
+      { monthlyBreakdown: [{ key: '2026-03' }] },
+      { monthlyBreakdown: [{ key: '2026-07' }] },
+    ],
+  });
+  assert.deepEqual({ ...compareRange }, { from: '2026-03-01', to: '2026-07-31' });
+  assert.equal(context.resolveKnowledgePeriodRange(null), null);
+
+  // 期間が重なる資料は、質問文との類似度に関係なく必ず添付する
+  assert.equal(context.knowledgeOverlapsPeriod(items[0], julyRange), true);
+  assert.equal(context.knowledgeOverlapsPeriod(items[3], julyRange), false);
+  assert.equal(context.knowledgeOverlapsPeriod(items[2], julyRange), true, '期間なしは常時有効');
+  assert.equal(context.knowledgeOverlapsPeriod(items[0], null), true, '期間不明の質問では候補に残す');
+
+  const july = [...context.selectStoreKnowledgeForQuery('2026年7月の売上が伸びた要因は？', julyRange, items)]
+    .map(row => row.title);
+  assert.deepEqual(july, ['7月ワインフェア', '夏グランドメニュー', '接客マニュアル']);
+  assert.equal(july.includes('終了した企画'), false, '無効化した資料は使わない');
+
+  const march = [...context.selectStoreKnowledgeForQuery('2026年3月の客単価は？', context.resolveKnowledgePeriodRange({ monthlyBreakdown: [{ key: '2026-03' }] }), items)]
+    .map(row => row.title);
+  assert.deepEqual(march, ['3月ランチ強化', '接客マニュアル'], '対象外の月の施策は混ぜない');
+
+  assert.deepEqual([...context.selectStoreKnowledgeForQuery('質問', julyRange, [])], []);
+});
+
+test('the knowledge prompt block never becomes the source of numbers', () => {
+  const items = [
+    { category: '施策', title: '7月ワインフェア', summary: 'グラス3種入替', body_text: 'ボトルアップセル強化', tags: ['ワイン'], period_start: '2026-07-01', period_end: '2026-07-31', is_active: true },
+  ];
+  assert.equal(context.formatStoreKnowledgeBlock([]), '');
+  const block = context.formatStoreKnowledgeBlock(items);
+  assert.match(block, /【店舗ナレッジ（この店舗が登録した施策・メニュー資料）】/);
+  assert.match(block, /\[施策\] 7月ワインフェア（2026-07-01 〜 2026-07-31）/);
+  assert.match(block, /概要: グラス3種入替/);
+  assert.match(block, /本ナレッジを数値の出典にしてはいけません/);
+  assert.match(block, /登録資料によると/);
+  assert.match(block, /※これは推測です/);
+
+  // 長文でも上限を超えない
+  const huge = context.formatStoreKnowledgeBlock([
+    { category: 'メニュー', title: '長文', summary: 'あ'.repeat(3000), body_text: 'い'.repeat(9000), tags: [], period_start: null, period_end: null, is_active: true },
+  ]);
+  assert.ok(huge.length < 7000, `block too long: ${huge.length}`);
+
+  // チャット・分析レポートの双方へ注入され、数値の正本は確定集計のままであること
+  assert.match(html, /8\. 【店舗ナレッジ】が提示されている場合は/);
+  assert.match(html, /\$\{verifiedDataBlock\}\$\{knowledgeBlock\}/);
+  assert.match(html, /buildStoreLocationBlockForAi\(\) \+ knowledgeBlock/);
+  assert.match(html, /loadStoreKnowledgeForAi/);
+});
+
+test('store knowledge API and storage stay behind the admin API', async () => {
+  const adminApi = await readFile(
+    new URL('../supabase/functions/admin-api/index.ts', import.meta.url),
+    'utf8',
+  );
+  for (const route of [
+    '"/pos-journals/knowledge"',
+    '"/pos-journals/knowledge/item"',
+    '"/pos-journals/knowledge/upload"',
+    '"/pos-journals/knowledge/download"',
+  ]) {
+    assert.ok(adminApi.includes(route), `${route} must be registered for store-scoped logins`);
+  }
+  // 他店アクセスの拒否が全ハンドラに入っていること
+  const handlers = ['saveStoreKnowledge', 'deleteStoreKnowledgeItem', 'uploadStoreKnowledgeFile'];
+  for (const name of handlers) {
+    const start = adminApi.indexOf(`async function ${name}(`);
+    assert.notEqual(start, -1, `${name} must exist`);
+    const body = adminApi.slice(start, start + 4000);
+    assert.match(body, /他店舗のデータにはアクセスできません/, name);
+  }
+  // 既定は論理削除（過去期間の回答に必要なため残す）
+  const deleteBody = adminApi.slice(adminApi.indexOf('async function deleteStoreKnowledgeItem('));
+  assert.match(deleteBody.slice(0, 3000), /is_active: false/);
+
+  const migration = await readFile(
+    new URL('../supabase/migrations/20260802220000_store_knowledge_documents.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(migration, /enable row level security/);
+  assert.match(migration, /revoke all on table public\.store_knowledge_documents from anon, authenticated/);
+  assert.match(migration, /grant select, insert, update, delete on public\.store_knowledge_documents to service_role/);
+  assert.match(migration, /'store-knowledge',\s*\n\s*'store-knowledge',\s*\n\s*false/, 'bucket must stay private');
 });

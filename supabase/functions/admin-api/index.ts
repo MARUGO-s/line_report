@@ -1143,6 +1143,10 @@ Deno.serve(async (req, info) => {
       "/pos-journals/chat-pdf-history/item",
       "/pos-journals/sales-forecasts",
       "/pos-journals/sales-forecasts/item",
+      "/pos-journals/knowledge",
+      "/pos-journals/knowledge/item",
+      "/pos-journals/knowledge/upload",
+      "/pos-journals/knowledge/download",
       "/foodcourt/reports",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
@@ -1418,6 +1422,36 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await deleteSalesForecastItem(supabase, body, storeScope), 200)
+    }
+
+    // ── 店舗ナレッジ（施策・メニュー資料）──
+    // AIが「その期間に店舗が何をしていたか」を踏まえて回答するための資料置き場。
+    // 数値の正本ではないため、売上集計とは独立したテーブルで管理する。
+    if (req.method === "GET" && path === "/pos-journals/knowledge") {
+      return json(await fetchStoreKnowledgeList(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/knowledge/item") {
+      return json(await fetchStoreKnowledgeItem(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/knowledge/download") {
+      return json(await createStoreKnowledgeDownloadUrl(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/knowledge") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await saveStoreKnowledge(supabase, body, storeScope), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/knowledge/upload") {
+      return json(await uploadStoreKnowledgeFile(workReq, supabase, storeScope), 200)
+    }
+    if (req.method === "DELETE" && path === "/pos-journals/knowledge/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await deleteStoreKnowledgeItem(supabase, body, storeScope), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/report-ai-history") {
       return json(await fetchReportAiHistoryList(supabase, url), 200)
@@ -8616,6 +8650,430 @@ async function deleteSalesForecastItem(
     throw { status: 404, message: "売上予測が見つかりません。" } satisfies AppError
   }
   return { ok: true, deleted: { id: String(data.id) } }
+}
+
+// ===== Journal Report 店舗ナレッジ (store_knowledge_documents) =====
+// 施策・メニュー等の資料を店舗ごとに登録し、AIチャット／AI分析の「文脈」として渡す。
+// 数値の正本はあくまで saved_reports 由来の確定集計であり、ここは背景説明にのみ使う。
+
+const STORE_KNOWLEDGE_BUCKET = "store-knowledge"
+const STORE_KNOWLEDGE_MAX_FILE_BYTES = 20 * 1024 * 1024
+const STORE_KNOWLEDGE_CATEGORIES = new Set<string>([
+  "施策",
+  "メニュー",
+  "価格改定",
+  "イベント",
+  "マニュアル",
+  "その他",
+])
+/** 一覧では本文を丸ごと返さず、この長さの抜粋だけ返して通信量を抑える */
+const STORE_KNOWLEDGE_LIST_BODY_PREVIEW = 200
+
+function normalizeStoreKnowledgeCategory(value: unknown): string {
+  const category = toSafeString(value)
+  return STORE_KNOWLEDGE_CATEGORIES.has(category) ? category : "その他"
+}
+
+/** 'YYYY-MM-DD' だけを受け付ける（空文字は null＝期間指定なし） */
+function toNullableDate(value: unknown): string | null {
+  const raw = toSafeString(value)
+  if (!raw) return null
+  const matched = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!matched) return null
+  const iso = `${matched[1]}-${matched[2]}-${matched[3]}`
+  const parsed = new Date(`${iso}T00:00:00Z`)
+  return Number.isNaN(parsed.getTime()) ? null : iso
+}
+
+function normalizeStoreKnowledgeTags(value: unknown): string[] {
+  const raw = Array.isArray(value)
+    ? value
+    : toSafeString(value).split(/[,、\s]+/)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of raw) {
+    const tag = toSafeString(item).slice(0, 40)
+    if (!tag || seen.has(tag)) continue
+    seen.add(tag)
+    out.push(tag)
+    if (out.length >= 20) break
+  }
+  return out
+}
+
+/** 検索用テキスト。タイトル・概要・本文・タグを小文字へ寄せて連結する */
+function buildStoreKnowledgeSearchText(parts: {
+  title: string
+  summary: string
+  bodyText: string
+  tags: string[]
+}): string {
+  return [parts.title, parts.summary, parts.bodyText, parts.tags.join(" ")]
+    .join(" ")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 20000)
+}
+
+async function fetchStoreKnowledgeList(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const rawLimit = Number(url.searchParams.get("limit") ?? "200")
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(500, Math.trunc(rawLimit)))
+    : 200
+  const category = toSafeString(url.searchParams.get("category"))
+  const keyword = toSafeString(url.searchParams.get("q"))
+  const activeParam = toSafeString(url.searchParams.get("active"))
+  let query = supabase
+    .from("store_knowledge_documents")
+    .select(
+      "id, category, title, summary, body_text, period_start, period_end, tags, storage_path, original_file_name, mime_type, file_size_bytes, source_type, is_active, created_by, created_at, updated_at",
+    )
+    .eq("store_partition_key", storeKey)
+  if (activeParam === "true") query = query.eq("is_active", true)
+  if (activeParam === "false") query = query.eq("is_active", false)
+  if (category && STORE_KNOWLEDGE_CATEGORIES.has(category)) {
+    query = query.eq("category", category)
+  }
+  if (keyword) {
+    // search_text は NFKC+小文字で保存しているため、検索語も同じ形へ寄せる
+    const needle = keyword.normalize("NFKC").toLowerCase().replace(/[%_,]/g, " ").trim()
+    if (needle) query = query.ilike("search_text", `%${needle}%`)
+  }
+  const { data, error } = await query
+    .order("period_start", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw {
+      status: 500,
+      message: `店舗ナレッジの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  const items = (Array.isArray(data) ? data : []).map((row) => {
+    const record: Record<string, unknown> = isRecord(row) ? row : {}
+    const bodyText = toSafeString(record.body_text)
+    return {
+      ...record,
+      body_text: bodyText.slice(0, STORE_KNOWLEDGE_LIST_BODY_PREVIEW),
+      body_truncated: bodyText.length > STORE_KNOWLEDGE_LIST_BODY_PREVIEW,
+      has_attachment: !!toSafeString(record.storage_path),
+    }
+  })
+  return { ok: true, store_key: storeKey, items }
+}
+
+async function fetchStoreKnowledgeItem(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const id = toSafeString(url.searchParams.get("id"))
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("store_knowledge_documents")
+    .select("*")
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `店舗ナレッジの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "資料が見つかりません。" } satisfies AppError
+  }
+  return { ok: true, item: data }
+}
+
+async function saveStoreKnowledge(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const title = toSafeString(body.title).slice(0, 200)
+  if (!title) {
+    throw { status: 400, message: "タイトルを入力してください。" } satisfies AppError
+  }
+  const summary = toSafeString(body.summary).slice(0, 2000)
+  const bodyText = toSafeString(body.body_text).slice(0, 60000)
+  if (!summary && !bodyText) {
+    throw {
+      status: 400,
+      message: "概要または内容のどちらかを入力してください（AIが読む本文になります）。",
+    } satisfies AppError
+  }
+  const periodStart = toNullableDate(body.period_start)
+  const periodEnd = toNullableDate(body.period_end)
+  if (periodStart && periodEnd && periodStart > periodEnd) {
+    throw {
+      status: 400,
+      message: "開始日が終了日より後になっています。",
+    } satisfies AppError
+  }
+  const tags = normalizeStoreKnowledgeTags(body.tags)
+  const now = new Date().toISOString()
+  const storagePath = toSafeString(body.storage_path) || null
+  const payload: Record<string, unknown> = {
+    store_partition_key: storeKey,
+    category: normalizeStoreKnowledgeCategory(body.category),
+    title,
+    summary,
+    body_text: bodyText,
+    search_text: buildStoreKnowledgeSearchText({ title, summary, bodyText, tags }),
+    period_start: periodStart,
+    period_end: periodEnd,
+    tags,
+    storage_bucket: STORE_KNOWLEDGE_BUCKET,
+    storage_path: storagePath,
+    original_file_name: toSafeString(body.original_file_name).slice(0, 300) || null,
+    mime_type: toSafeString(body.mime_type).slice(0, 200) || null,
+    file_size_bytes: toNonNegativeInteger(body.file_size_bytes) || null,
+    sha256_hex: toSafeString(body.sha256_hex).toLowerCase().match(/^[0-9a-f]{64}$/)
+      ? toSafeString(body.sha256_hex).toLowerCase()
+      : null,
+    source_type: storagePath ? "upload" : "manual",
+    is_active: body.is_active === undefined ? true : !!body.is_active,
+    created_by: toSafeString(body.created_by).slice(0, 120),
+    updated_at: now,
+  }
+  const id = toNonNegativeInteger(body.id)
+  if (id) {
+    const { data, error } = await supabase
+      .from("store_knowledge_documents")
+      .update(payload)
+      .eq("id", id)
+      .eq("store_partition_key", storeKey)
+      .select("id")
+      .maybeSingle()
+    if (error) {
+      throw {
+        status: 500,
+        message: `資料の更新に失敗しました: ${error.message}`,
+      } satisfies AppError
+    }
+    if (!data) {
+      throw { status: 404, message: "資料が見つかりません。" } satisfies AppError
+    }
+    return { ok: true, id: Number(data.id), updated: true }
+  }
+  const { data, error } = await supabase
+    .from("store_knowledge_documents")
+    .insert({ ...payload, created_at: now })
+    .select("id")
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `資料の保存に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  return { ok: true, id: Number(data?.id ?? 0), updated: false }
+}
+
+async function deleteStoreKnowledgeItem(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const id = toNonNegativeInteger(body.id)
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  // 既定は論理削除。終了した施策も「去年の同月は何をしていたか」の回答に必要なため残す。
+  const purge = body.purge === true && String(body.confirmation ?? "") === "delete"
+  if (!purge) {
+    const { data, error } = await supabase
+      .from("store_knowledge_documents")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("store_partition_key", storeKey)
+      .select("id")
+      .maybeSingle()
+    if (error) {
+      throw {
+        status: 500,
+        message: `資料の無効化に失敗しました: ${error.message}`,
+      } satisfies AppError
+    }
+    if (!data) {
+      throw { status: 404, message: "資料が見つかりません。" } satisfies AppError
+    }
+    return { ok: true, deactivated: { id: Number(data.id) } }
+  }
+  const { data, error } = await supabase
+    .from("store_knowledge_documents")
+    .delete()
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .select("id, storage_path")
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `資料の削除に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "資料が見つかりません。" } satisfies AppError
+  }
+  const storagePath = toSafeString(data.storage_path)
+  if (storagePath) {
+    try {
+      await supabase.storage.from(STORE_KNOWLEDGE_BUCKET).remove([storagePath])
+    } catch (removeError) {
+      console.error("store-knowledge storage remove failed:", removeError)
+    }
+  }
+  return { ok: true, deleted: { id: Number(data.id) } }
+}
+
+async function uploadStoreKnowledgeFile(
+  req: Request,
+  supabase: ReturnType<typeof createClient>,
+  storeScope: string | null,
+) {
+  let formData: FormData
+  try {
+    formData = await req.formData()
+  } catch {
+    throw {
+      status: 400,
+      message: "Upload request must be multipart/form-data.",
+    } satisfies AppError
+  }
+  const file = formData.get("file")
+  if (!(file instanceof File)) {
+    throw { status: 400, message: "ファイルを選択してください。" } satisfies AppError
+  }
+  if (file.size <= 0 || file.size > STORE_KNOWLEDGE_MAX_FILE_BYTES) {
+    throw {
+      status: 400,
+      message: `ファイルサイズは1件${Math.floor(STORE_KNOWLEDGE_MAX_FILE_BYTES / 1024 / 1024)}MBまでです。`,
+    } satisfies AppError
+  }
+  const requestedStore = toSafeString(formData.get("store_key"))
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "店舗を選択してください。" } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const digest = await crypto.subtle.digest("SHA-256", bytes)
+  const sha256Hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+  const safeName = (file.name || "attachment")
+    .replace(/[^\w.\-]+/g, "_")
+    .slice(-80)
+  const storagePath = `${storeKey}/${sha256Hex.slice(0, 12)}_${Date.now()}_${safeName}`
+  const { error: uploadError } = await supabase.storage
+    .from(STORE_KNOWLEDGE_BUCKET)
+    .upload(storagePath, bytes, {
+      contentType: file.type || "application/octet-stream",
+      upsert: false,
+    })
+  if (uploadError) {
+    throw {
+      status: 500,
+      message: `ファイルの保存に失敗しました: ${uploadError.message}`,
+    } satisfies AppError
+  }
+  return {
+    ok: true,
+    store_key: storeKey,
+    storage_bucket: STORE_KNOWLEDGE_BUCKET,
+    storage_path: storagePath,
+    original_file_name: file.name || safeName,
+    mime_type: file.type || "application/octet-stream",
+    file_size_bytes: file.size,
+    sha256_hex: sha256Hex,
+  }
+}
+
+async function createStoreKnowledgeDownloadUrl(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const id = toSafeString(url.searchParams.get("id"))
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("store_knowledge_documents")
+    .select("storage_bucket, storage_path, original_file_name")
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `資料の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  const storagePath = toSafeString(data?.storage_path)
+  if (!data || !storagePath) {
+    throw { status: 404, message: "添付ファイルがありません。" } satisfies AppError
+  }
+  const signedUrl = await createSignedMediaUrl(
+    supabase,
+    toSafeString(data.storage_bucket) || STORE_KNOWLEDGE_BUCKET,
+    storagePath,
+  )
+  if (!signedUrl) {
+    throw {
+      status: 500,
+      message: "ダウンロードURLの発行に失敗しました。",
+    } satisfies AppError
+  }
+  return {
+    ok: true,
+    url: signedUrl,
+    original_file_name: toSafeString(data.original_file_name),
+  }
 }
 
 // ===== jnl2txt.html AI分析履歴 (ai_analysis_history) =====
