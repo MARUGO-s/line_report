@@ -28,8 +28,8 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** テキストを RAG 用のチャンク配列に自動分割する (約 500〜800 文字単位) */
-function splitTextIntoChunks(fullText: string, chunkSize = 600, overlap = 100): string[] {
+/** テキストを RAG 用のチャンク配列に自動分割する (約 1,500 文字単位・文脈保持に最適化) */
+function splitTextIntoChunks(fullText: string, chunkSize = 1500, overlap = 200): string[] {
   const text = fullText.trim();
   if (!text) return [];
   if (text.length <= chunkSize) return [text];
@@ -39,9 +39,19 @@ function splitTextIntoChunks(fullText: string, chunkSize = 600, overlap = 100): 
   while (start < text.length) {
     let end = start + chunkSize;
     if (end < text.length) {
-      const lastBreak = Math.max(text.lastIndexOf("\n", end), text.lastIndexOf("。", end));
-      if (lastBreak > start + 200) {
-        end = lastBreak + 1;
+      // 2連改行(段落)、1連改行、句点「。」の優先順で自然に区切る
+      const paragraphBreak = text.lastIndexOf("\n\n", end);
+      const lineBreak = text.lastIndexOf("\n", end);
+      const sentenceBreak = text.lastIndexOf("。", end);
+      
+      const bestBreak = Math.max(
+        paragraphBreak > start + 500 ? paragraphBreak : -1,
+        lineBreak > start + 500 ? lineBreak : -1,
+        sentenceBreak > start + 500 ? sentenceBreak : -1
+      );
+
+      if (bestBreak > start + 300) {
+        end = bestBreak + 1;
       }
     } else {
       end = text.length;
