@@ -2521,6 +2521,30 @@ Deno.serve(async (req) => {
       const text = String(event.message?.text ?? '').trim()
       const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
 
+      // 店舗ナレッジ (#メモ / #日報 / #note) の Journal Report 自動転送ブリッジ
+      if (text && /#(?:メモ|日報|note)/i.test(text) && storeKey) {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
+          const adminApiUrl = `${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/process-line-post`
+          fetch(adminApiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-admin-token': 'demo',
+              'x-admin-surface': 'line_report',
+              'x-store-key': storeKey
+            },
+            body: JSON.stringify({
+              store_key: storeKey,
+              text: text,
+              sender_name: eventUserId || 'LINEユーザー'
+            })
+          }).catch(err => console.error('Failed to forward #メモ to admin-api:', err))
+        } catch (e) {
+          console.error('Error forwarding #メモ post:', e)
+        }
+      }
+
       let dailySalesTemplateHandled = false
       if (!roomHardMuted && text && isDailySalesTemplateRequestText(text) && lineAccessTokenForSearch) {
         dailySalesTemplateHandled = true
