@@ -194,13 +194,13 @@ ${cleanText}
         let dbCategory = "その他";
         let subCategoryTag = "";
 
-        if (validCategories.includes(rawCategory)) {
-          dbCategory = rawCategory;
-        } else {
-          subCategoryTag = rawCategory;
-          if (rawCategory.includes("日報") || rawCategory.includes("メモ")) dbCategory = "その他";
-          else if (rawCategory.includes("周辺") || rawCategory.includes("他店") || rawCategory.includes("競合")) dbCategory = "イベント";
+        if (!validCategories.includes(dbCategory)) {
+          subCategoryTag = dbCategory;
+          if (rawCategory.includes("周辺") || rawCategory.includes("他店") || rawCategory.includes("競合")) dbCategory = "イベント";
           else dbCategory = "その他";
+        }
+        if (!validCategories.includes(dbCategory)) {
+          dbCategory = "その他";
         }
 
         const finalTags = ["LINE投稿"];
