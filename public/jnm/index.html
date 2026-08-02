@@ -7478,10 +7478,11 @@ function buildSalesDataForAI() {
     customers: hourly[h].customers
   }));
   
-  const topProducts = Object.entries(products)
-    .sort((a,b) => b[1].amt - a[1].amt)
-    .slice(0, 20)
-    .map(e => ({ name: e[0], category: e[1].category, qty: e[1].qty, amt: e[1].amt }));
+  const topProducts = rankProductsForAiDisplay(
+    Object.entries(products)
+      .map(e => ({ name: e[0], category: e[1].category, qty: e[1].qty, amt: e[1].amt })),
+    20
+  );
 
   const weekdaySummary = Object.keys(weekdays).map(w => ({
     weekday: w,
@@ -8204,6 +8205,74 @@ function isCourseProductName(name) {
   return /コース|sp\s*コ[-ー]?ス|おまかせ\s*\d+\s*皿/.test(value);
 }
 
+/** POSの大分類行（★ドリンク等）。個別商品ランキングには混ぜない */
+function isPosCategoryRollupName(name) {
+  const v = String(name || '').normalize('NFKC').trim();
+  if (!v) return true;
+  if (/^[★☆＊*･・]\s*(ドリンク|飲料|フード|料理|アラカルト|その他|チャージ)/.test(v)) return true;
+  if (/^(ドリンク|飲料|フード|料理|アラカルト|その他)$/.test(v)) return true;
+  return false;
+}
+
+/**
+ * AI／画面向け売れ筋ランキング。
+ * - ★ドリンク等の親カテゴリ行は除外
+ * - コース／おまかせ系は「コース系（合算）」にまとめて順位付け
+ */
+function rankProductsForAiDisplay(products, limit = 10) {
+  const list = Array.isArray(products) ? products : [];
+  let courseQty = 0;
+  let courseAmt = 0;
+  const courseMembers = [];
+  const others = [];
+  for (const p of list) {
+    const name = String(p?.name || '').trim();
+    if (!name || isPosCategoryRollupName(name)) continue;
+    const qty = Number(p.qty) || 0;
+    const amt = Number(p.amt) || 0;
+    if (isCourseProductName(name)) {
+      courseQty += qty;
+      courseAmt += amt;
+      courseMembers.push({ name, qty, amt, category: p.category || 'フード' });
+      continue;
+    }
+    others.push({
+      name,
+      qty,
+      amt,
+      category: p.category || 'その他'
+    });
+  }
+  courseMembers.sort((a, b) => b.amt - a.amt);
+  const ranked = [...others];
+  if (courseAmt > 0) {
+    ranked.push({
+      name: 'コース系（合算）',
+      qty: courseQty,
+      amt: courseAmt,
+      category: 'フード',
+      isCourseAggregate: true,
+      members: courseMembers.slice(0, 10)
+    });
+  }
+  ranked.sort((a, b) => b.amt - a.amt);
+  return ranked.slice(0, Math.max(1, Number(limit) || 10));
+}
+
+function formatTopProductsLinesForAi(products, limit = 5, bullet = false) {
+  const ranked = rankProductsForAiDisplay(products, limit);
+  return ranked.map((p, i) => {
+    const head = bullet
+      ? `- ${p.name}: ${p.qty}点 / ${yen(p.amt)}`
+      : `${i + 1}. ${p.name}（${p.qty}点 / ${yen(p.amt)}）`;
+    if (p.isCourseAggregate && Array.isArray(p.members) && p.members.length) {
+      const detail = p.members.slice(0, 5).map((m) => `${m.name} ${yen(m.amt)}`).join('、');
+      return `${head}（内訳: ${detail}）`;
+    }
+    return head;
+  }).join(bullet ? '\n' : '\n');
+}
+
 function productMatchesRequestedIntent(name, query) {
   const product = String(name || '').normalize('NFKC').toLowerCase();
   const q = String(query || '').normalize('NFKC').toLowerCase();
@@ -8764,7 +8833,15 @@ function mergeProductLists(lists) {
 
 function formatItemBreakdownReply(queryResult, userMsg) {
   const products = Array.isArray(queryResult.topProducts) ? queryResult.topProducts : [];
-  const selectedProducts = selectRequestedProductsForQuery(products, userMsg, 20);
+  // 特定商品の質問はそのまま。一般の売れ筋はコース合算ランキングを使う。
+  const selectedProducts = /コース|ボトル|銘柄|ワイン|グラス|杯|本数|おまかせ/.test(String(userMsg || ''))
+    ? selectRequestedProductsForQuery(products, userMsg, 20)
+    : rankProductsForAiDisplay(
+      selectRequestedProductsForQuery(products, userMsg, 80).length
+        ? selectRequestedProductsForQuery(products, userMsg, 80)
+        : products,
+      20
+    );
   const reservationNotes = [];
   if (/予約/.test(String(userMsg || ''))) {
     reservationNotes.push('- **予約人数**: 保存形式に専用項目はありません。総来店客数は実際の来店客数で、予約人数とは別です。');
@@ -8794,7 +8871,13 @@ function formatItemBreakdownReply(queryResult, userMsg) {
   }
 
   const top = selectedProducts;
-  const lines = top.map((p, i) => `${i + 1}. **${p.name}** — ${p.qty}点 / ${yen(p.amt)}${p.category ? `（${p.category}）` : ''}`).join('\n');
+  const lines = top.map((p, i) => {
+    let line = `${i + 1}. **${p.name}** — ${p.qty}点 / ${yen(p.amt)}${p.category ? `（${p.category}）` : ''}`;
+    if (p.isCourseAggregate && Array.isArray(p.members) && p.members.length) {
+      line += `\n   - 内訳: ` + p.members.slice(0, 6).map((m) => `${m.name} ${m.qty}点/${yen(m.amt)}`).join('、');
+    }
+    return line;
+  }).join('\n');
   const detailLimitNote = queryResult.detailRangeLimited
     ? '\n\n※商品明細は通信量を抑えるため、保存済みの新しい36か月分を対象に集計しています。全期間が必要な場合は期間を分けて質問してください。'
     : '';
@@ -10785,10 +10868,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const productSources = wantsDetail ? detailHydrated : use;
     const mergedProducts = mergeProductLists(productSources.map(collectProductsFromReport));
     // 売上上位40件を先に切ると、少額のボトル／コース銘柄が質問対象でも落ちる。
-    // 質問対象で絞ってから上限を適用し、一般の商品質問だけ売上上位を返す。
+    // 質問対象で絞ってから上限を適用し、一般の商品質問だけ表示用ランキング（コース合算）を返す。
     const topProducts = needsItemDetails
       ? selectRequestedProductsForQuery(mergedProducts, q, 40)
-      : mergedProducts.slice(0, 40);
+      : rankProductsForAiDisplay(mergedProducts, 40);
     const itemDetailComplete = needsItemDetails
       && !detailRangeLimited
       && productSources.length > 0
@@ -10892,7 +10975,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       hourlyBreakdown: agg.hourlyBreakdown,
       topProducts: wantsItemBreakdown(q)
         ? selectRequestedProductsForQuery(agg.topProducts, q, 40)
-        : agg.topProducts.slice(0, 40),
+        : rankProductsForAiDisplay(agg.topProducts, 40),
       detailRangeLimited: false,
       itemDetailComplete: true,
       courseTransactions: summarizeCourseTransactionsFromReports([{ sales: rows }])
@@ -11106,7 +11189,7 @@ ${diffLine}${missingNote}
 - **🍖 フード売上**: ${yen(queryResult.foodTotal)} (**${queryResult.foodPct}%**)
 - **🍹 ドリンク売上**: ${yen(queryResult.drinkTotal)} (**${queryResult.drinkPct}%**)
 ${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustomers}名 (平均客単価: ${yen(queryResult.avgSpend)})` : ''}${formatVerifiedDetailLines(queryResult)}${monthSection}
-${(queryResult.topProducts && queryResult.topProducts.length) ? `\n**売れ筋商品 TOP5**\n` + queryResult.topProducts.slice(0, 5).map((p, i) => `${i + 1}. ${p.name}（${p.qty}点 / ${yen(p.amt)}）`).join('\n') : ''}
+${(queryResult.topProducts && queryResult.topProducts.length) ? `\n**売れ筋商品 TOP5**\n` + formatTopProductsLinesForAi(queryResult.topProducts, 5) : ''}
 
 **💡 分析メモ**:
 保存済みレポート（カテゴリ別集計）から引用した正確な数値です。推測やWeb情報は含まれておりません。商品の詳細内訳が必要な場合は「アイテムの内訳は？」と聞いてください。`;
@@ -11320,7 +11403,7 @@ async function sendAiChat() {
   - ドリンク売上: ${yen(p.drinkTotal)} (${p.drinkPct}%)
   - 総来店客数: ${p.totalCustomers}名 (平均客単価: ${yen(p.avgSpend)})
   - 対象レポート件数: ${p.sourceCount}件${monthBlock}${formatVerifiedDetailLines(p, '  ')}
-${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5: ' + p.topProducts.slice(0, 5).map(x => `${x.name}(${x.qty}点/${yen(x.amt)})`).join('、') : ''}
+${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5:\n' + formatTopProductsLinesForAi(p.topProducts, 5, true).split('\n').map((line) => `    ${line}`).join('\n') : ''}
 ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信量上限）' : ''}${formatJournalSpecificFactsForAi(p, resolvedChatQuery, '  ')}`;
   }
   let verifiedDataBlock = '';
@@ -11345,7 +11428,7 @@ ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 - ドリンク売上: ${yen(verifiedData.drinkTotal)} (${verifiedData.drinkPct}%)
 - 総来店客数: ${verifiedData.totalCustomers}名 (平均客単価: ${yen(verifiedData.avgSpend)})
 - 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}${formatVerifiedDetailLines(verifiedData)}
-${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5: ' + verifiedData.topProducts.slice(0, 5).map(p => `${p.name}(${p.qty}点/${yen(p.amt)})`).join('、') : ''}
+${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5（★大分類除外・コースは合算）:\n' + formatTopProductsLinesForAi(verifiedData.topProducts, 5) : ''}
 ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 
 回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
@@ -11374,7 +11457,7 @@ ${buildStoreLocationBlockForAi()}
 【絶対遵守プロンプト規約】
 1. あなたはマルゴグループ各店舗の保存済み売上データ専用の厳密なアナリストAIです。営業・売上に関するあらゆる種類の質問（実績照会、期間比較、トレンド、客単価、商品構成、ワイン／ドリンク比率、原因分析、改善提案、今後の見通しなど）に幅広く対応してください。
 2. 数値（金額・件数・客数・比率など）は、必ず提示された保存データ・資料（salesDataや確定済み集計データ）のみから厳密に引用・計算してください。数値についての推測・Web情報・一般的な相場観での代用は【完全禁止】です。
-3. 【ランチ／ディナー分離・必須】会計時刻16:00未満＝ランチ、16:00以降＝ディナー。客単価・客数・フード割合・ドリンク割合・商品構成の内部分析は必ずランチとディナーを分けて行う。合算の総売上は最終サマリーに使ってよいが、合算のフード／ドリンク比率をディナー（またはランチ）の比率として述べてはならない。昼夜別のフード／ドリンク内訳が無い場合は「昼夜合算の構成比」と明示する。
+3. 【ランチ／ディナー分離・必須】会計時刻16:00未満＝ランチ、16:00以降＝ディナー。客単価・客数・フード割合・ドリンク割合・商品構成の内部分析は必ずランチとディナーを分けて行う。合算の総売上は最終サマリーに使ってよいが、合算のフード／ドリンク比率をディナー（またはランチ）の比率として述べてはならない。確定集計に「ランチ／ディナー別フード・ドリンク比率（月次）」または各月のランチ内／ディナー内 F:D% がある場合は、それを正本にしてドリンク比率の推移・時期を述べよ。「ディナー単体のフード／ドリンク比率が表示されていない」と言ってはいけない。昼夜別の数値が無い場合のみ「昼夜合算の構成比」と明示する。
 4. 【12月・クリスマスディナー・必須】12月を含む分析では、宴会需要・客数増に加え、毎年実施するクリスマスディナー（通常コースより高単価）を必ず考慮する。【異常月の詳細解析】に高単価コース寄与・単価上昇コースが載っている場合は、その金額・点数・商品名を根拠に述べ「クリスマスディナー単体の売上は不明／表示されていません」で止めない。金額が解析欄にも無い場合のみ数値を捏造せず「※これは推測です」として季節要因に含める。
 5. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
 6. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
