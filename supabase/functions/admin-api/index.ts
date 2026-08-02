@@ -1153,6 +1153,7 @@ Deno.serve(async (req, info) => {
       "/petty-cash/receipt-media",
       "/pos-journals",
       "/pos-journals/product-search",
+      "/pos-journals/product-cohort",
       "/pos-journals/upload",
       "/pos-journals/file",
       "/pos-journals/download",
@@ -1377,6 +1378,9 @@ Deno.serve(async (req, info) => {
     }
     if (req.method === "GET" && path === "/pos-journals/product-search") {
       return json(await searchPosJournalProducts(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/product-cohort") {
+      return json(await comparePosJournalProductCohorts(supabase, url), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/download") {
       return json(await fetchPosJournalDownloadUrl(supabase, url), 200)
@@ -7559,6 +7563,104 @@ function parseOptionalNonNegativeInt(value: unknown): number | null {
   return Math.round(n)
 }
 
+type PosProductSearchFilter = {
+  rawQ: string
+  codeQ: string
+  tokens: string[]
+  joinedQ: string
+  codeNorm: string
+  unitMin: number | null
+  unitMax: number | null
+}
+
+function parsePosProductSearchFilter(url: URL): PosProductSearchFilter {
+  const rawQ = String(url.searchParams.get("q") ?? "").trim()
+  const codeQ = String(url.searchParams.get("code") ?? "").trim()
+  const unitMin = parseOptionalNonNegativeInt(url.searchParams.get("unit_min"))
+  const unitMax = parseOptionalNonNegativeInt(url.searchParams.get("unit_max"))
+  const unitExact = parseOptionalNonNegativeInt(url.searchParams.get("unit"))
+  const effectiveMin = unitExact != null ? unitExact : unitMin
+  const effectiveMax = unitExact != null ? unitExact : unitMax
+  const tokens = rawQ
+    .split(/[\s　,、/|]+/)
+    .map((t) => normalizePosProductSearchText(t))
+    .filter((t) => t.length >= 1 && !/^\d+$/.test(t))
+  const joinedQ = normalizePosProductSearchText(rawQ).replace(/\d+/g, "")
+  if (
+    !tokens.length && !joinedQ && !codeQ &&
+    effectiveMin == null && effectiveMax == null
+  ) {
+    throw {
+      status: 400,
+      message: "q（商品名）・code・unit のいずれかを指定してください。",
+    } satisfies AppError
+  }
+  return {
+    rawQ,
+    codeQ,
+    tokens,
+    joinedQ,
+    codeNorm: codeQ.replace(/\D/g, ""),
+    unitMin: effectiveMin,
+    unitMax: effectiveMax,
+  }
+}
+
+function itemMatchesPosProductFilter(
+  name: string,
+  code: string,
+  unit: number,
+  filter: PosProductSearchFilter,
+): boolean {
+  const nameNorm = normalizePosProductSearchText(name)
+  if (filter.codeNorm) {
+    const itemCodeDigits = code.replace(/\D/g, "")
+    if (
+      !itemCodeDigits.endsWith(filter.codeNorm) &&
+      itemCodeDigits !== filter.codeNorm
+    ) {
+      return false
+    }
+  }
+  if (filter.unitMin != null && unit < filter.unitMin) return false
+  if (filter.unitMax != null && unit > filter.unitMax) return false
+  if (filter.tokens.length || filter.joinedQ) {
+    const tokenOk = filter.tokens.length
+      ? filter.tokens.every((t) => nameNorm.includes(t))
+      : false
+    const joinedOk = filter.joinedQ.length >= 2
+      ? nameNorm.includes(filter.joinedQ)
+      : false
+    const wantsSp =
+      filter.tokens.some((t) =>
+        t === "sp" || t.startsWith("sp") || t.includes("スペシャル")
+      ) || /sp/.test(filter.joinedQ)
+    const wantsCourse =
+      filter.tokens.some((t) => t.includes("コ-ス") || t.includes("course")) ||
+      /コ-ス|course/.test(filter.joinedQ)
+    const looseSpCourse = wantsSp && wantsCourse &&
+      (nameNorm.includes("sp") || nameNorm.includes("スペシャル")) &&
+      (nameNorm.includes("コ-ス") || nameNorm.includes("course"))
+    if (!tokenOk && !joinedOk && !looseSpCourse) return false
+  }
+  return true
+}
+
+function parseOptionalYearMonthParam(
+  value: unknown,
+  label: string,
+): string | null {
+  const raw = String(value ?? "").trim()
+  if (!raw) return null
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) {
+    throw {
+      status: 400,
+      message: `${label} must be YYYY-MM.`,
+    } satisfies AppError
+  }
+  return raw
+}
+
 /**
  * 店舗の全電子ジャーナル（parsed_data）を横断し、商品名・コード・単価帯の初出月を返す。
  * 「いつから売れたか／導入月」は保存レポートに無くてもジャーナルから逆算できる。
@@ -7570,26 +7672,7 @@ async function searchPosJournalProducts(
   const storeKey = normalizePosJournalStoreKey(
     url.searchParams.get("store_key") || url.searchParams.get("store"),
   )
-  const rawQ = String(url.searchParams.get("q") ?? "").trim()
-  const codeQ = String(url.searchParams.get("code") ?? "").trim()
-  const unitMin = parseOptionalNonNegativeInt(url.searchParams.get("unit_min"))
-  const unitMax = parseOptionalNonNegativeInt(url.searchParams.get("unit_max"))
-  const unitExact = parseOptionalNonNegativeInt(url.searchParams.get("unit"))
-  const effectiveMin = unitExact != null ? unitExact : unitMin
-  const effectiveMax = unitExact != null ? unitExact : unitMax
-
-  const tokens = rawQ
-    .split(/[\s　,、/|]+/)
-    .map((t) => normalizePosProductSearchText(t))
-    .filter((t) => t.length >= 1 && !/^\d+$/.test(t))
-  // 「SPコース」「スペシャルコース」など連結語は部分一致用にも残す
-  const joinedQ = normalizePosProductSearchText(rawQ).replace(/\d+/g, "")
-  if (!tokens.length && !joinedQ && !codeQ && effectiveMin == null && effectiveMax == null) {
-    throw {
-      status: 400,
-      message: "q（商品名）・code・unit のいずれかを指定してください。",
-    } satisfies AppError
-  }
+  const filter = parsePosProductSearchFilter(url)
 
   const { data, error } = await supabase
     .from("pos_journal_files")
@@ -7616,7 +7699,6 @@ async function searchPosJournalProducts(
     amount: number
   }
   const hits: Hit[] = []
-  const codeNorm = codeQ.replace(/\D/g, "")
 
   for (const row of Array.isArray(data) ? data : []) {
     if (!isRecord(row)) continue
@@ -7634,32 +7716,7 @@ async function searchPosJournalProducts(
         const unit = toNonNegativeInteger(item.unit)
         const qty = Math.max(1, toNonNegativeInteger(item.qty) || 1)
         const amount = toNonNegativeInteger(item.amount) || unit * qty
-        const nameNorm = normalizePosProductSearchText(name)
-
-        if (codeNorm) {
-          const itemCodeDigits = code.replace(/\D/g, "")
-          if (!itemCodeDigits.endsWith(codeNorm) && itemCodeDigits !== codeNorm) {
-            continue
-          }
-        }
-        if (effectiveMin != null && unit < effectiveMin) continue
-        if (effectiveMax != null && unit > effectiveMax) continue
-        if (tokens.length || joinedQ) {
-          const tokenOk = tokens.length
-            ? tokens.every((t) => nameNorm.includes(t))
-            : false
-          const joinedOk = joinedQ.length >= 2 ? nameNorm.includes(joinedQ) : false
-          // SP系 + コース を別トークンで聞かれた場合
-          const wantsSp = tokens.some((t) => t === "sp" || t.startsWith("sp") || t.includes("スペシャル")) ||
-            /sp/.test(joinedQ)
-          const wantsCourse = tokens.some((t) => t.includes("コ-ス") || t.includes("course")) ||
-            /コ-ス|course/.test(joinedQ)
-          const looseSpCourse = wantsSp && wantsCourse &&
-            (nameNorm.includes("sp") || nameNorm.includes("スペシャル")) &&
-            (nameNorm.includes("コ-ス") || nameNorm.includes("course"))
-          if (!tokenOk && !joinedOk && !looseSpCourse) continue
-        }
-
+        if (!itemMatchesPosProductFilter(name, code, unit, filter)) continue
         hits.push({
           business_date: businessDate,
           year_month: yearMonth,
@@ -7771,10 +7828,10 @@ async function searchPosJournalProducts(
     ok: true,
     store_key: storeKey,
     query: {
-      q: rawQ,
-      code: codeQ,
-      unit_min: effectiveMin,
-      unit_max: effectiveMax,
+      q: filter.rawQ,
+      code: filter.codeQ,
+      unit_min: filter.unitMin,
+      unit_max: filter.unitMax,
     },
     scanned_files: Array.isArray(data) ? data.length : 0,
     match_count: hits.length,
@@ -7803,6 +7860,218 @@ async function searchPosJournalProducts(
     name_variants: nameVariants,
     unit_bands: unitBands,
     by_month: byMonth,
+  }
+}
+
+type CohortBucket = {
+  receipt_count: number
+  guests: number
+  total_sales: number
+  lunch_receipts: number
+  dinner_receipts: number
+  lunch_guests: number
+  dinner_guests: number
+  lunch_sales: number
+  dinner_sales: number
+  items: Map<string, { name: string; code: string; qty: number; amount: number }>
+}
+
+function emptyCohortBucket(): CohortBucket {
+  return {
+    receipt_count: 0,
+    guests: 0,
+    total_sales: 0,
+    lunch_receipts: 0,
+    dinner_receipts: 0,
+    lunch_guests: 0,
+    dinner_guests: 0,
+    lunch_sales: 0,
+    dinner_sales: 0,
+    items: new Map(),
+  }
+}
+
+function addReceiptToCohort(
+  bucket: CohortBucket,
+  receipt: Record<string, unknown>,
+  businessDate: string,
+) {
+  const guests = Math.max(0, toNonNegativeInteger(receipt.guests))
+  const total = toNonNegativeInteger(receipt.total)
+  const time = String(receipt.time ?? "")
+  const hourMatch = time.match(/(\d{1,2})/)
+  const hour = hourMatch ? Number(hourMatch[1]) : 18
+  const isLunch = Number.isFinite(hour) && hour < 16
+  bucket.receipt_count += 1
+  bucket.guests += guests
+  bucket.total_sales += total
+  if (isLunch) {
+    bucket.lunch_receipts += 1
+    bucket.lunch_guests += guests
+    bucket.lunch_sales += total
+  } else {
+    bucket.dinner_receipts += 1
+    bucket.dinner_guests += guests
+    bucket.dinner_sales += total
+  }
+  for (const item of Array.isArray(receipt.items) ? receipt.items : []) {
+    if (!isRecord(item)) continue
+    const name = String(item.name ?? "").trim()
+    if (!name) continue
+    const code = String(item.code ?? "").trim()
+    const unit = toNonNegativeInteger(item.unit)
+    const qty = Math.max(1, toNonNegativeInteger(item.qty) || 1)
+    const amount = toNonNegativeInteger(item.amount) || unit * qty
+    const key = `${code}|${name}`
+    const prev = bucket.items.get(key) || { name, code, qty: 0, amount: 0 }
+    prev.qty += qty
+    prev.amount += amount
+    bucket.items.set(key, prev)
+  }
+  void businessDate
+}
+
+function serializeCohortBucket(bucket: CohortBucket) {
+  const items = [...bucket.items.values()]
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 40)
+  return {
+    receipt_count: bucket.receipt_count,
+    guests: bucket.guests,
+    total_sales: bucket.total_sales,
+    avg_spend: bucket.guests > 0
+      ? Math.round(bucket.total_sales / bucket.guests)
+      : 0,
+    lunch_receipts: bucket.lunch_receipts,
+    dinner_receipts: bucket.dinner_receipts,
+    lunch_guests: bucket.lunch_guests,
+    dinner_guests: bucket.dinner_guests,
+    lunch_sales: bucket.lunch_sales,
+    dinner_sales: bucket.dinner_sales,
+    lunch_avg_spend: bucket.lunch_guests > 0
+      ? Math.round(bucket.lunch_sales / bucket.lunch_guests)
+      : 0,
+    dinner_avg_spend: bucket.dinner_guests > 0
+      ? Math.round(bucket.dinner_sales / bucket.dinner_guests)
+      : 0,
+    items,
+  }
+}
+
+/**
+ * 対象商品を含む会計 vs 含まない会計をジャーナル全件から分割集計する。
+ * ドリンク／フード金額は明細の name+code を返し、クライアントの商品マスタで分類する。
+ */
+async function comparePosJournalProductCohorts(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const filter = parsePosProductSearchFilter(url)
+  const monthFrom = parseOptionalYearMonthParam(
+    url.searchParams.get("month_from"),
+    "month_from",
+  )
+  const monthTo = parseOptionalYearMonthParam(
+    url.searchParams.get("month_to"),
+    "month_to",
+  )
+
+  const { data, error } = await supabase
+    .from("pos_journal_files")
+    .select("id, business_date, year_month, parsed_data")
+    .eq("store_partition_key", storeKey)
+    .is("storage_deleted_at", null)
+    .not("parsed_data", "is", null)
+    .order("business_date", { ascending: true })
+    .order("id", { ascending: true })
+  if (error) {
+    throw {
+      status: 500,
+      message: `会計コホート用ジャーナルの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+
+  const withAll = emptyCohortBucket()
+  const withoutAll = emptyCohortBucket()
+  const byMonth = new Map<string, { with: CohortBucket; without: CohortBucket }>()
+  let scannedFiles = 0
+  let scannedReceipts = 0
+
+  for (const row of Array.isArray(data) ? data : []) {
+    if (!isRecord(row)) continue
+    const businessDate = String(row.business_date ?? "").slice(0, 10)
+    const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
+    if (monthFrom && yearMonth < monthFrom) continue
+    if (monthTo && yearMonth > monthTo) continue
+    scannedFiles += 1
+    const parsed = row.parsed_data
+    if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
+    let monthBuckets = byMonth.get(yearMonth)
+    if (!monthBuckets) {
+      monthBuckets = { with: emptyCohortBucket(), without: emptyCohortBucket() }
+      byMonth.set(yearMonth, monthBuckets)
+    }
+    for (const receipt of parsed.receipts) {
+      if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
+      scannedReceipts += 1
+      let matched = false
+      for (const item of receipt.items) {
+        if (!isRecord(item)) continue
+        const name = String(item.name ?? "").trim()
+        if (!name) continue
+        const code = String(item.code ?? "").trim()
+        const unit = toNonNegativeInteger(item.unit)
+        if (itemMatchesPosProductFilter(name, code, unit, filter)) {
+          matched = true
+          break
+        }
+      }
+      const target = matched ? withAll : withoutAll
+      const monthTarget = matched ? monthBuckets.with : monthBuckets.without
+      addReceiptToCohort(target, receipt, businessDate)
+      addReceiptToCohort(monthTarget, receipt, businessDate)
+    }
+  }
+
+  return {
+    ok: true,
+    store_key: storeKey,
+    query: {
+      q: filter.rawQ,
+      code: filter.codeQ,
+      unit_min: filter.unitMin,
+      unit_max: filter.unitMax,
+      month_from: monthFrom,
+      month_to: monthTo,
+    },
+    scanned_files: scannedFiles,
+    scanned_receipts: scannedReceipts,
+    with_product: serializeCohortBucket(withAll),
+    without_product: serializeCohortBucket(withoutAll),
+    by_month: [...byMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([year_month, buckets]) => ({
+        year_month,
+        with_product: {
+          receipt_count: buckets.with.receipt_count,
+          guests: buckets.with.guests,
+          total_sales: buckets.with.total_sales,
+          avg_spend: buckets.with.guests > 0
+            ? Math.round(buckets.with.total_sales / buckets.with.guests)
+            : 0,
+        },
+        without_product: {
+          receipt_count: buckets.without.receipt_count,
+          guests: buckets.without.guests,
+          total_sales: buckets.without.total_sales,
+          avg_spend: buckets.without.guests > 0
+            ? Math.round(buckets.without.total_sales / buckets.without.guests)
+            : 0,
+        },
+      })),
   }
 }
 

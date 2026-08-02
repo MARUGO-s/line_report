@@ -23,6 +23,7 @@ alwaysApply: true
    似た目的でも置き換えない。例:
    - 異常月ドリルダウン → `anomalyItemFacts`
    - 商品初出・導入月 → `productTimelineFacts`
+   - 利用/非利用会計比較 → `productCohortFacts`
    - 昼夜別 F/D → 月次の `lunchFoodTotal` 等 + `formatMonthlyMealFdTrendLines`
    - 売れ筋 → `rankProductsForAiDisplay`（★大分類除外・コース合算）  
    プロンプト指示も「A があれば A を使え。B があれば B も使え」と併記する。
@@ -32,7 +33,8 @@ alwaysApply: true
    1. `enrichMonthlyMealCategorySplit`
    2. `enrichMonthlyAnomalyItemFacts`
    3. `enrichProductTimelineFacts`
-   4. （商品ランキング）`rankProductsForAiDisplay` / `selectRequestedProductsForQuery`  
+   4. `enrichProductCohortFacts`（利用/非利用会計の客単価・ドリンク比較）
+   5. （商品ランキング）`rankProductsForAiDisplay` / `selectRequestedProductsForQuery`  
    新レイヤを足すときは末尾（または明確な依存の直後）に挿入し、コメントの一覧も更新する。
 
 5. **プロンプト規約も追加**  
@@ -46,6 +48,7 @@ alwaysApply: true
    - 昼夜別 F/D の月次行
    - 異常月の詳細解析
    - 商品初出・導入月（ジャーナル横断）
+   - 商品利用/非利用会計コホート（客単価・ドリンク）
    - コース合算の売れ筋（★ドリンク単独最大の禁止）
    - HTML オフロード／軽量一覧（容量分離）が意図せず巻き戻っていないこと
 
@@ -55,3 +58,4 @@ alwaysApply: true
 - 商品初出のために質問対象外の月を `monthlyBreakdown` 本体へ混ぜ、期間合計や月次推移を歪める
 - 複数の確定事実を1つの曖昧な文章ブロックに潰して、片方の数値がプロンプトから消える
 - 既存の `formatJournalSpecificFactsForAi` 出力を新フォーマッタだけで置き換える
+- コホート比較があるのに「追加の比較が必要」とだけ答えて数値を使わない
