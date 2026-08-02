@@ -7038,7 +7038,17 @@ function buildCompactSalesDataForAI() {
 }
 
 function wantsItemBreakdown(msg) {
-  return /(アイテム|商品|メニュー|品目|売れ筋|ランキング|何が売|売れたもの|売れた商品|点数|個数|ボトル|本数|コース|杯数|銘柄)/i.test(String(msg || ''));
+  return /(アイテム|商品|メニュー|品目|売れ筋|ランキング|何が売|売れたもの|売れた商品|点数|個数|ボトル|本数|コース|杯数|銘柄|ワイン|シャンパ|スパークリング|ペアリング|グラス|ビール|日本酒|焼酎|ハイボール|カクテル|ウイスキー)/i.test(String(msg || ''));
+}
+
+/** 曜日別・時間帯別・ランチ／ディナーなど、月内の切り口を聞かれているか */
+function wantsSegmentBreakdown(msg) {
+  return /(曜日|時間帯|時間別|何時|ピーク|混雑|ランチ|ディナー|昼|夜|昼夜|平日|週末|土日)/.test(String(msg || ''));
+}
+
+/** 日単位（◯月◯日・今日・昨日・日別）の質問か */
+function wantsDailyBreakdown(msg) {
+  return /(\d{1,2}\s*日|日別|日ごと|日次|今日|本日|昨日|一昨日|今週|先週)/.test(String(msg || ''));
 }
 
 function wantsTrend(msg) {
@@ -7051,6 +7061,56 @@ function formatMonthlyBreakdownLines(monthlyBreakdown, indent = '') {
   return monthlyBreakdown.map(m =>
     `${indent}- ${m.label}: 総売上 ${yen(m.totalSales)}（🍖 ${yen(m.foodTotal)} / 🍹 ${yen(m.drinkTotal)}、客数 ${m.totalCustomers}名、客単価 ${yen(m.avgSpend)}）`
   ).join('\n');
+}
+
+/** 確定済み集計の補助内訳（カテゴリ／昼夜／曜日／時間帯／日別／欠損期間）を行テキストにする。
+ * AIへ渡すプロンプトとローカル回答の両方で同じ内容を使い、片方だけ数値が欠けることを防ぐ。 */
+function formatVerifiedDetailLines(p, indent = '') {
+  const lines = [];
+  const total = Number(p?.totalSales) || 0;
+  const food = Number(p?.foodTotal) || 0;
+  const drink = Number(p?.drinkTotal) || 0;
+  const room = Number(p?.roomTotal) || 0;
+  const other = Number(p?.otherTotal) || 0;
+  const charge = Number(p?.chargeTotal) || 0;
+  if (total > 0 && (food > 0 || drink > 0)) {
+    const chargeNote = charge > 0 ? `（うちチャージ ${yen(charge)}）` : '';
+    lines.push(`${indent}- カテゴリ内訳（総売上の完全な内訳）: フード ${yen(food)}${chargeNote} / 飲料 ${yen(drink)} / 室料 ${yen(room)} / その他 ${yen(other)}`);
+    if (room > 0 || other > 0) {
+      lines.push(`${indent}  ※フード＋ドリンクの比率は飲食2カテゴリ内の構成比です。総売上には室料・その他 ${yen(room + other)} が含まれます`);
+    }
+  }
+  const lunch = Number(p?.lunchTotal) || 0;
+  const dinner = Number(p?.dinnerTotal) || 0;
+  const lunchCust = Number(p?.lunchCustomers) || 0;
+  const dinnerCust = Number(p?.dinnerCustomers) || 0;
+  if (lunch > 0 || dinner > 0) {
+    const lunchAvg = lunchCust ? `／客単価 ${yen(Math.round(lunch / lunchCust))}` : '';
+    const dinnerAvg = dinnerCust ? `／客単価 ${yen(Math.round(dinner / dinnerCust))}` : '';
+    lines.push(`${indent}- ランチ／ディナー: ランチ ${yen(lunch)}（${lunchCust}名${lunchAvg}） / ディナー ${yen(dinner)}（${dinnerCust}名${dinnerAvg}）`);
+  }
+  if (Array.isArray(p?.weekdayBreakdown) && p.weekdayBreakdown.length) {
+    lines.push(`${indent}- 曜日別売上: ` + p.weekdayBreakdown
+      .map(w => `${w.weekday} ${yen(w.totalSales)}（${w.customerCount}名/${w.transactionCount}件）`).join(' / '));
+  }
+  if (Array.isArray(p?.hourlyBreakdown) && p.hourlyBreakdown.length) {
+    lines.push(`${indent}- 時間帯別売上: ` + p.hourlyBreakdown
+      .map(h => `${h.hour}時 ${yen(h.totalSales)}（${h.customers}名/${h.count}件）`).join(' / '));
+  }
+  if (Array.isArray(p?.dailyBreakdown) && p.dailyBreakdown.length) {
+    const rows = p.dailyBreakdown.slice(0, 40);
+    lines.push(`${indent}- 日別売上:`);
+    rows.forEach(d => lines.push(
+      `${indent}  - ${d.date}${d.weekday ? `（${d.weekday}）` : ''}: ${yen(d.totalSales)} / ${d.customers}名 / ${d.count}件${d.avgSpend ? `（客単価 ${yen(d.avgSpend)}）` : ''}`
+    ));
+    if (p.dailyBreakdown.length > rows.length) {
+      lines.push(`${indent}  - …ほか${p.dailyBreakdown.length - rows.length}日分`);
+    }
+  }
+  if (Array.isArray(p?.missingPeriods) && p.missingPeriods.length) {
+    lines.push(`${indent}- 保存データが無い期間: ${p.missingPeriods.join('・')}（比較対象として指定されたが未保存のため比較できない）`);
+  }
+  return lines.length ? `\n${lines.join('\n')}` : '';
 }
 
 function collectProductsFromReport(r) {
@@ -7229,23 +7289,34 @@ ${lines}${reservationBlock}${detailLimitNote}
 **💡 分析メモ**: 保存データから引用した正確な数値です。推測は含みません。`;
 }
 
-/** メッセージ中の「年月」参照をすべて（重複除く）抽出する。比較依頼（例: 202606と202607を比較して）の検知に使う */
+/** メッセージ中の「年月」参照をすべて（重複除く・出現順）抽出する。比較依頼（例: 202606と202607を比較して）の検知に使う。
+ * 「2026年5月と6月を比較して」のように年を一度しか書かない自然な言い方でも、直前に現れた年を引き継いで2件として扱う。 */
 function extractAllMonthRefs(q) {
+  const s = String(q || '');
   const results = [];
   const seen = new Set();
-  const patterns = [
-    /(\d{4})\s*年\s*(\d{1,2})\s*月/g,
-    /(\d{4})[\/_.-](0?[1-9]|1[0-2])(?!\d)/g,
-    /(\d{4})(0[1-9]|1[0-2])(?!\d)/g
-  ];
-  for (const re of patterns) {
-    let m;
-    while ((m = re.exec(q))) {
-      const year = m[1];
-      const month = String(parseInt(m[2], 10)).padStart(2, '0');
-      const key = `${year}-${month}`;
-      if (!seen.has(key)) { seen.add(key); results.push({ year, month, key }); }
+  let lastYear = '';
+  // 1: YYYY年M月 / 3: YYYY-MM / 5: YYYYMM / 7: YYYY年(単独) / 8: M月(年なし)
+  const re = /(\d{4})\s*年\s*(\d{1,2})\s*月|(\d{4})[\/_.-](0?[1-9]|1[0-2])(?!\d)|(\d{4})(0[1-9]|1[0-2])(?!\d)|(\d{4})\s*年|(?:^|[^\d])(\d{1,2})\s*月/g;
+  let m;
+  while ((m = re.exec(s))) {
+    let year = '';
+    let monthRaw = '';
+    if (m[1]) { year = m[1]; monthRaw = m[2]; }
+    else if (m[3]) { year = m[3]; monthRaw = m[4]; }
+    else if (m[5]) { year = m[5]; monthRaw = m[6]; }
+    else if (m[7]) { lastYear = m[7]; continue; }
+    else if (m[8]) {
+      if (!lastYear) continue; // 年の手がかりが無い裸の「◯月」は拾わない
+      year = lastYear;
+      monthRaw = m[8];
     }
+    const monthNum = parseInt(monthRaw, 10);
+    if (!year || !Number.isFinite(monthNum) || monthNum < 1 || monthNum > 12) continue;
+    lastYear = year;
+    const month = String(monthNum).padStart(2, '0');
+    const key = `${year}-${month}`;
+    if (!seen.has(key)) { seen.add(key); results.push({ year, month, key }); }
   }
   return results;
 }
@@ -7276,6 +7347,26 @@ function resolveRelativeTimeRefs(q) {
     return { y: d.getFullYear(), m: d.getMonth() + 1 };
   }
 
+  function dayLabel(d) {
+    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  }
+  function daysAgo(n) {
+    const d = new Date(thisYear, thisMonth - 1, now.getDate() - n);
+    return d;
+  }
+  /** 月曜始まりの週の開始日 */
+  function weekStart(offsetWeeks) {
+    const d = new Date(thisYear, thisMonth - 1, now.getDate());
+    const dow = (d.getDay() + 6) % 7; // 月=0
+    d.setDate(d.getDate() - dow - offsetWeeks * 7);
+    return d;
+  }
+  function weekRange(offsetWeeks) {
+    const start = weekStart(offsetWeeks);
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+    return `${dayLabel(start)}〜${dayLabel(end)}`;
+  }
+
   let out = q;
 
   // 「Nヶ月前/Nか月前/Nカ月前」→ 絶対年月
@@ -7283,6 +7374,16 @@ function resolveRelativeTimeRefs(q) {
     const { y, m } = monthsAgo(parseInt(n, 10));
     return `${y}年${m}月`;
   });
+  // 「N日前」→ 絶対日付
+  out = out.replace(/(\d{1,2})\s*日\s*前/g, (_, n) => dayLabel(daysAgo(parseInt(n, 10))));
+  // 日・週の相対表現（長い語を先に置換する）
+  out = out
+    .replace(/一昨日|おととい/g, dayLabel(daysAgo(2)))
+    .replace(/今日|本日/g, dayLabel(daysAgo(0)))
+    .replace(/昨日/g, dayLabel(daysAgo(1)))
+    .replace(/先々週/g, weekRange(2))
+    .replace(/先週|前週/g, weekRange(1))
+    .replace(/今週/g, weekRange(0));
   // 「N年前」→ 絶対年
   out = out.replace(/(\d{1,2})\s*年前/g, (_, n) => `${thisYear - parseInt(n, 10)}年`);
 
@@ -7360,6 +7461,189 @@ function extractRangeRef(q) {
     };
   }
   return null;
+}
+
+/** 文中の日付参照（2026年7月15日 / 2026-07-15 / 7月15日 / 15日）を出現順に抽出する。
+ * 年・月は文中で直前に現れたものを引き継ぐため「2026年7月の15日」「2026年7月1日〜7日」も解決できる。 */
+function extractAllDayRefs(q) {
+  const s = String(q || '');
+  const results = [];
+  const seen = new Set();
+  let lastYear = '';
+  let lastMonth = '';
+  // 1:YYYY年M月D日 / 4:YYYY-MM-DD / 7:YYYY年M月（年月の記憶のみ） / 9:M月D日 / 11:D日
+  // 「◯日間」「◯日前」「直近◯日」は日付ではなく期間の長さなので拾わない
+  const re = /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?!間)|(\d{4})-(\d{2})-(\d{2})|(\d{4})\s*年\s*(\d{1,2})\s*月|(\d{1,2})\s*月\s*(\d{1,2})\s*日(?!間)|(?:^|[^\d])(\d{1,2})\s*日(?!間|前|以)/g;
+  let m;
+  while ((m = re.exec(s))) {
+    if (m[11] && /直近|過去|ここ|最近|あと|残り|平均/.test(s.slice(Math.max(0, m.index - 4), m.index + 1))) continue;
+    let year = '';
+    let month = '';
+    let day = '';
+    if (m[1]) { year = m[1]; month = m[2]; day = m[3]; }
+    else if (m[4]) { year = m[4]; month = m[5]; day = m[6]; }
+    else if (m[7]) { lastYear = m[7]; lastMonth = m[8]; continue; }
+    else if (m[9]) { if (!lastYear) continue; year = lastYear; month = m[9]; day = m[10]; }
+    else if (m[11]) { if (!lastYear || !lastMonth) continue; year = lastYear; month = lastMonth; day = m[11]; }
+    const y = parseInt(year, 10);
+    const mo = parseInt(month, 10);
+    const d = parseInt(day, 10);
+    if (!Number.isFinite(y) || !(mo >= 1 && mo <= 12) || !(d >= 1 && d <= 31)) continue;
+    lastYear = String(y);
+    lastMonth = String(mo);
+    const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (seen.has(iso)) continue;
+    seen.add(iso);
+    results.push({ year: y, month: mo, day: d, iso, label: `${y}年${mo}月${d}日` });
+  }
+  return results;
+}
+
+/** 単一日／日付範囲の質問を判定する（日付が特定できない場合は null） */
+function extractDayScope(q) {
+  const days = extractAllDayRefs(q);
+  if (!days.length) return null;
+  const hasRangeMarker = /[〜~～]|から|まで/.test(String(q || ''));
+  if (days.length >= 2 && hasRangeMarker) {
+    const sorted = [...days].sort((a, b) => a.iso.localeCompare(b.iso));
+    const from = sorted[0];
+    const to = sorted[sorted.length - 1];
+    return { from, to, label: from.iso === to.iso ? from.label : `${from.label}〜${to.label}` };
+  }
+  return { from: days[0], to: days[0], label: days[0].label };
+}
+
+/** 保存済み伝票（sales行）から日別・曜日別・時間帯別・カテゴリ別・商品別をまとめて集計する。
+ * カテゴリ名はレポート作成時と同じ「フード / 飲料 / 室料 / その他」を正本にする。 */
+function aggregateSalesRows(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const byCategory = new Map();
+  const byDay = new Map();
+  const byWeekday = new Map();
+  const byHour = new Map();
+  const byMealPeriod = new Map();
+  const products = new Map();
+  let totalSales = 0;
+  let totalCustomers = 0;
+  let groups = 0;
+  let chargeTotal = 0;
+  for (const s of list) {
+    const saleTotal = Number(s?.total) || 0;
+    const saleCustomers = Number(s?.customers) || Number(s?.guestCount) || 0;
+    totalSales += saleTotal;
+    totalCustomers += saleCustomers;
+    groups += Number(s?.groups) || 0;
+    const date = String(s?.date || '').slice(0, 10);
+    if (date) {
+      const row = byDay.get(date) || { date, weekday: String(s?.weekday || ''), totalSales: 0, customers: 0, count: 0 };
+      row.totalSales += saleTotal; row.customers += saleCustomers; row.count += 1;
+      if (!row.weekday && s?.weekday) row.weekday = String(s.weekday);
+      byDay.set(date, row);
+    }
+    const weekday = String(s?.weekday || '');
+    if (weekday) {
+      const row = byWeekday.get(weekday) || { weekday, totalSales: 0, customerCount: 0, transactionCount: 0 };
+      row.totalSales += saleTotal; row.customerCount += saleCustomers; row.transactionCount += 1;
+      byWeekday.set(weekday, row);
+    }
+    const hour = Number(s?.hour);
+    if (Number.isFinite(hour)) {
+      const row = byHour.get(hour) || { hour, totalSales: 0, customers: 0, count: 0 };
+      row.totalSales += saleTotal; row.customers += saleCustomers; row.count += 1;
+      byHour.set(hour, row);
+    }
+    const meal = String(s?.mealPeriod || '');
+    if (meal) {
+      const row = byMealPeriod.get(meal) || { label: meal, totalSales: 0, customers: 0, count: 0 };
+      row.totalSales += saleTotal; row.customers += saleCustomers; row.count += 1;
+      byMealPeriod.set(meal, row);
+    }
+    for (const it of (Array.isArray(s?.items) ? s.items : [])) {
+      const amount = Number(it?.amount) || 0;
+      const qty = Number(it?.qty) || 0;
+      const category = String(it?.category || 'その他');
+      byCategory.set(category, (byCategory.get(category) || 0) + amount);
+      if (it?.isCharge) chargeTotal += amount;
+      const name = String(it?.name || '');
+      if (!name) continue;
+      const p = products.get(name) || { name, qty: 0, amt: 0, category };
+      p.qty += qty;
+      p.amt += amount;
+      if (category) p.category = category;
+      products.set(name, p);
+    }
+  }
+  const lunch = byMealPeriod.get('ランチ') || { totalSales: 0, customers: 0 };
+  const dinner = byMealPeriod.get('ディナー') || { totalSales: 0, customers: 0 };
+  return {
+    totalSales,
+    totalCustomers,
+    groups,
+    salesCount: list.length,
+    foodTotal: byCategory.get('フード') || 0,
+    drinkTotal: byCategory.get('飲料') || 0,
+    roomTotal: byCategory.get('室料') || 0,
+    otherTotal: byCategory.get('その他') || 0,
+    chargeTotal,
+    lunchTotal: lunch.totalSales || 0,
+    dinnerTotal: dinner.totalSales || 0,
+    lunchCustomers: lunch.customers || 0,
+    dinnerCustomers: dinner.customers || 0,
+    dailyBreakdown: [...byDay.values()]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(r => ({ ...r, avgSpend: r.customers ? Math.round(r.totalSales / r.customers) : 0 })),
+    weekdayBreakdown: sortWeekdayRows([...byWeekday.values()]),
+    hourlyBreakdown: [...byHour.values()].sort((a, b) => a.hour - b.hour),
+    topProducts: [...products.values()].sort((a, b) => b.amt - a.amt)
+  };
+}
+
+const WEEKDAY_ORDER = ['月', '火', '水', '木', '金', '土', '日'];
+function sortWeekdayRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .slice()
+    .sort((a, b) => WEEKDAY_ORDER.indexOf(String(a?.weekday)) - WEEKDAY_ORDER.indexOf(String(b?.weekday)))
+    .map(r => ({
+      weekday: String(r?.weekday || ''),
+      totalSales: Number(r?.totalSales) || 0,
+      customerCount: Number(r?.customerCount) || 0,
+      transactionCount: Number(r?.transactionCount) || 0,
+      avgSpend: Number(r?.customerCount) ? Math.round((Number(r?.totalSales) || 0) / Number(r.customerCount)) : 0
+    }));
+}
+
+/** 複数レポートの曜日別内訳を合算する（保存済みの weekdayBreakdown をそのまま足す） */
+function mergeWeekdayBreakdowns(reports) {
+  const map = new Map();
+  for (const r of (Array.isArray(reports) ? reports : [])) {
+    for (const row of (Array.isArray(r?.weekdayBreakdown) ? r.weekdayBreakdown : [])) {
+      const key = String(row?.weekday || '');
+      if (!key) continue;
+      const cur = map.get(key) || { weekday: key, totalSales: 0, customerCount: 0, transactionCount: 0 };
+      cur.totalSales += Number(row?.totalSales) || 0;
+      cur.customerCount += Number(row?.customerCount) || 0;
+      cur.transactionCount += Number(row?.transactionCount) || 0;
+      map.set(key, cur);
+    }
+  }
+  return sortWeekdayRows([...map.values()]);
+}
+
+/** 複数レポートの時間帯別内訳を合算する */
+function mergeHourlyBreakdowns(reports) {
+  const map = new Map();
+  for (const r of (Array.isArray(reports) ? reports : [])) {
+    for (const row of (Array.isArray(r?.hourlyBreakdown) ? r.hourlyBreakdown : [])) {
+      const hour = Number(row?.hour);
+      if (!Number.isFinite(hour)) continue;
+      const cur = map.get(hour) || { hour, totalSales: 0, customers: 0, count: 0 };
+      cur.totalSales += Number(row?.totalSales) || 0;
+      cur.customers += Number(row?.customers) || 0;
+      cur.count += Number(row?.count) || 0;
+      map.set(hour, cur);
+    }
+  }
+  return [...map.values()].sort((a, b) => a.hour - b.hour);
 }
 
 const SAVED_DATA_CLARIFICATION_MARKER = '保存データの分析対象を選んでください';
@@ -7526,14 +7810,22 @@ function needsAiIntentClarification(query) {
     const explicitComparison = /前月|前年|去年|先月|直近|対比|\d{4}\s*年.*\d{4}\s*年|\d{4}\D{0,3}\d{1,2}\s*月.*(?:\d{4}\D{0,3})?\d{1,2}\s*月/.test(q);
     if (!explicitComparison) return true;
   }
-  return ![
-    /総売上|売上高|売上額|売上金額|売上合計|売上推移|売上実績|実績|増減|前月比|前年比|比較|トレンド|日別|日ごと|月別|月ごと|曜日別/,
-    /フード|ドリンク|ワイン|アルコール|構成比|比率|割合/,
-    /客数|来店客|来店人数|客単価|組数|人数/,
-    /商品|アイテム|メニュー|売れ筋|注文|明細|内訳|何が売れ|売れたもの|人気/,
+  // 見たい対象がはっきりしている言い回し
+  const hasConcreteFocus = [
+    /総売上|売上高|売上額|売上金額|売上合計|売上推移|売上実績|実績|増減|前月比|前年比|比較|トレンド|日別|日ごと|日次|月別|月ごと|曜日|時間帯|時間別|何時|ピーク|ランチ|ディナー|昼|夜|平日|週末|土日/,
+    /フード|ドリンク|ワイン|シャンパ|スパークリング|ペアリング|ビール|日本酒|焼酎|ハイボール|カクテル|ウイスキー|アルコール|飲料|構成比|比率|割合|室料|個室|チャージ|席料/,
+    /客数|来店客|来店人数|客単価|組数|人数|回転/,
+    // wantsItemBreakdown と語彙を揃える（ボトル・コース・杯数などで聞き返さない）
+    /商品|アイテム|メニュー|品目|売れ筋|ランキング|注文|明細|内訳|何が売れ|売れたもの|人気|ボトル|本数|杯数|銘柄|コース|点数|個数/,
     /予測|見通し|予想|将来|来月|翌月/,
     /原因|理由|課題|改善|施策|対策|提案|戦略|どうすれば|何をすべき/
   ].some(pattern => pattern.test(q));
+  if (hasConcreteFocus) return false;
+  // 「◯月の売上は？」「いくら？」のような数値照会は、聞き返さずそのまま集計して答える。
+  // 一方「売上を分析して」「どうなってる？」のような開いた依頼は、従来どおり目的を一つだけ確認する。
+  const asksForNumber = /売上|売り上げ|いくら|何円|金額|数字|合計/.test(q);
+  const isOpenEndedRequest = /分析|考察|評価|診断|レビュー|見て|見たい|どうなって|状況|傾向|全体的|ざっくり/.test(q);
+  return !(asksForNumber && !isOpenEndedRequest);
 }
 
 function countRecentClarificationsByKind(chatHistory, kind = '') {
@@ -7558,9 +7850,33 @@ function countRecentIntentClarifications(chatHistory) {
   return countRecentClarificationsByKind(chatHistory, 'intent');
 }
 
-function shouldAskAiIntentClarification(query, chatHistory) {
-  return needsAiIntentClarification(query)
-    && countRecentIntentClarifications(chatHistory) < 2;
+/** 直前のアシスタント発言が「聞き返し」ではなく回答なら、分析の話題はすでに確定しているとみなす */
+function hasAnsweredDataContext(chatHistory) {
+  if (!Array.isArray(chatHistory)) return false;
+  for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const item = chatHistory[i];
+    if (!item || item.role !== 'assistant') continue;
+    const isClarification = item.clarification === 'intent'
+      || item.clarification === 'period'
+      || String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER)
+      || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
+    return !isClarification;
+  }
+  return false;
+}
+
+/** 発話そのものが期間（年・月・日・最新・直近など）を指しているか */
+function mentionsExplicitPeriod(query) {
+  return /(\d{4}\s*年|\d{1,2}\s*月|\d{1,2}\s*日|最新|直近|過去|全期間|今年|去年|昨年|一昨年|今月|先月|前月|前年同月|今日|本日|昨日|一昨日|今週|先週)/
+    .test(String(query || ''));
+}
+
+function shouldAskAiIntentClarification(query, chatHistory, ownQuery = query) {
+  if (!needsAiIntentClarification(query)) return false;
+  // 一度回答が成立したあとに「6月は？」「15日はどうだった？」と期間だけ言い換えた発話は、
+  // 同じ話題の続きとして扱い、目的を聞き直さない。
+  if (mentionsExplicitPeriod(ownQuery) && hasAnsweredDataContext(chatHistory)) return false;
+  return countRecentIntentClarifications(chatHistory) < 2;
 }
 
 function buildAiIntentClarificationReply(userMsg = '') {
@@ -7783,22 +8099,36 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     return { loadError: 'クラウド接続が必要です。' };
   }
 
-  // 続きの質問では直近のユーザー発話から年月を引き継ぐ（相対表現も絶対年月へ解決してから判定）
+  // 続きの質問では直近のユーザー発話から年月を引き継ぐ（相対表現も絶対年月へ解決してから判定）。
+  // ただし今回の発話が「6月は？」のように月・日を自分で指定している場合は、
+  // 前の発話を丸ごと前置すると古い年月を先に拾ってしまうため、不足している年（と月）だけを補う。
+  const ownQuery = q; // 文脈で年月を補う前の、今回の発話そのもの
   const hasPeriodHint = /(\d{4})/.test(q);
   if (!hasPeriodHint && Array.isArray(chatHistory)) {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const item = chatHistory[i];
       if (!item || item.role !== 'user') continue;
       const prev = resolveRelativeTimeRefs(String(item.content || '').toLowerCase());
-      if (/(\d{4})/.test(prev)) {
+      if (!/(\d{4})/.test(prev)) continue;
+      const prevYear = (prev.match(/(\d{4})\s*年/) || prev.match(/(\d{4})/))[1];
+      const prevMonth = (prev.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/) || prev.match(/(\d{4})[\/_.-](\d{1,2})/) || [])[2];
+      const hasOwnMonth = /(?:^|[^\d])\d{1,2}\s*月/.test(q);
+      const hasOwnDay = /(?:^|[^\d])\d{1,2}\s*日/.test(q);
+      if (hasOwnMonth) {
+        // 月は今回の発話のものを使い、年だけ引き継ぐ
+        q = `${prevYear}年 ${q}`.trim();
+      } else if (hasOwnDay && prevMonth) {
+        // 日だけ言われた場合は年月を引き継ぐ
+        q = `${prevYear}年${parseInt(prevMonth, 10)}月 ${q}`.trim();
+      } else {
         q = `${prev} ${q}`.trim();
-        break;
       }
+      break;
     }
   }
 
   // 分析目的そのものが曖昧なら、保存一覧を取得する前に聞き返す。
-  if (shouldAskAiIntentClarification(q, chatHistory)) {
+  if (shouldAskAiIntentClarification(q, chatHistory, ownQuery)) {
     return { needsIntentClarification: true };
   }
 
@@ -7816,6 +8146,31 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   }
   const savedCoverage = buildSavedReportCoverage(allReports);
   q = resolveComparisonTimeRefs(q, savedCoverage.last);
+
+  // 日単位クエリ（例:「2026年7月15日の売上」「今日」「先週」「7月1日〜7日」）を先に処理する。
+  // 月単位へ丸めると「7月15日」の質問に7月全体の数字を返してしまうため、日付が特定できる場合はここで確定させる。
+  const dayScope = extractDayScope(q);
+  if (dayScope) {
+    if (cloudLookupUnavailable) return unavailableCloudResult();
+    const monthKeys = new Set();
+    const from = new Date(dayScope.from.year, dayScope.from.month - 1, 1);
+    const last = new Date(dayScope.to.year, dayScope.to.month - 1, 1);
+    for (let d = from; d <= last; d.setMonth(d.getMonth() + 1)) {
+      monthKeys.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    const matchedDayReports = allReports.filter(r => monthKeys.has(monthKeyFromReport(r)));
+    if (matchedDayReports.length > 0) {
+      const daily = await summarizeDayScope(
+        matchedDayReports,
+        dayScope.from.iso,
+        dayScope.to.iso,
+        `${dayScope.label}の売上データ`
+      );
+      if (daily?.loadError) return daily;
+      if (daily) return daily;
+    }
+    return { notMatchedLabel: dayScope.label };
+  }
 
   // 期間範囲クエリ（例:「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
   // 比較（と/、で結ぶ）とは異なり、範囲内の全期間を1つの合算データとして返す。
@@ -7852,6 +8207,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const detailHydrated = [];
     let hydrationFailed = false;
     const needsItemDetails = wantsItemBreakdown(q);
+    const needsSegmentDetails = wantsSegmentBreakdown(q) || wantsDailyBreakdown(q);
     const monthGroups = new Map();
     const withoutMonth = [];
     for (const report of matched) {
@@ -7865,7 +8221,11 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     }
     const monthEntries = Array.from(monthGroups.entries())
       .sort(([a], [b]) => b.localeCompare(a));
-    const detailRangeLimited = needsItemDetails && monthEntries.length > 36;
+    // 一覧APIは商品明細・曜日別・時間帯別を返さないため、必要なときは詳細を取り直す。
+    // 対象が数か月なら通信も軽いので、一般の質問でも売れ筋・曜日別を欠かさないよう詳細を取る。
+    const detailLimit = needsItemDetails ? 36 : 12;
+    const wantsDetail = needsItemDetails || needsSegmentDetails || monthEntries.length <= 3;
+    const detailRangeLimited = wantsDetail && monthEntries.length > detailLimit;
     const summaryReports = [];
     for (const [, group] of monthEntries) {
       // 月間が無い月は1日分だけにせず、選択ヘルパーが返す全日別を合算対象にする。
@@ -7874,8 +8234,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     summaryReports.push(...withoutMonth);
 
     const detailReports = [];
-    if (needsItemDetails) {
-      const detailEntries = detailRangeLimited ? monthEntries.slice(0, 36) : monthEntries;
+    if (wantsDetail) {
+      const detailEntries = detailRangeLimited ? monthEntries.slice(0, detailLimit) : monthEntries;
       for (const [, group] of detailEntries) {
         detailReports.push(...selectReportsForSavedMonthGroup(group));
       }
@@ -7908,14 +8268,28 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       let drink = Number(r.drinkTotal) || 0;
       let customers = reportSummaryCustomers(r);
       let salesCount = Number(r.salesCount) || 0;
+      let room = Number(r.roomTotal) || 0;
+      let other = Number(r.otherTotal) || 0;
+      let charge = Number(r.chargeTotal) || 0;
+      let lunch = Number(r.lunchTotal) || 0;
+      let dinner = Number(r.dinnerTotal) || 0;
+      let lunchCust = Number(r.lunchCustomers) || 0;
+      let dinnerCust = Number(r.dinnerCustomers) || 0;
       if (sales === 0 && food === 0 && drink === 0 && Array.isArray(r.sales)) {
-        for (const s of r.sales) {
-          sales += Number(s.total) || 0;
-          food += Number(s.foodTotal) || 0;
-          drink += Number(s.drinkTotal) || 0;
-          customers += Number(s.customers) || Number(s.guestCount) || 0;
-          salesCount += 1;
-        }
+        // 保存済み伝票にはカテゴリ別合計が無いため、明細のカテゴリ（フード/飲料/室料/その他）から集計する
+        const agg = aggregateSalesRows(r.sales);
+        sales += agg.totalSales;
+        food += agg.foodTotal;
+        drink += agg.drinkTotal;
+        customers += agg.totalCustomers;
+        salesCount += agg.salesCount;
+        room = room || agg.roomTotal;
+        other = other || agg.otherTotal;
+        charge = charge || agg.chargeTotal;
+        lunch = lunch || agg.lunchTotal;
+        dinner = dinner || agg.dinnerTotal;
+        lunchCust = lunchCust || agg.lunchCustomers;
+        dinnerCust = dinnerCust || agg.dinnerCustomers;
       }
       const row = {
         year: ym.year,
@@ -7925,10 +8299,18 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         totalSales: sales,
         foodTotal: food,
         drinkTotal: drink,
+        roomTotal: room,
+        otherTotal: other,
+        chargeTotal: charge,
+        lunchTotal: lunch,
+        dinnerTotal: dinner,
+        lunchCustomers: lunchCust,
+        dinnerCustomers: dinnerCust,
         totalCustomers: customers,
         salesCount,
         sourceCount: 1,
-        _isMonthlyTitle: isMonthlyTitle
+        _isMonthlyTitle: isMonthlyTitle,
+        _sources: [r]
       };
       const prev = monthMap.get(key);
       if (!prev) {
@@ -7941,16 +8323,28 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         prev.totalSales += row.totalSales;
         prev.foodTotal += row.foodTotal;
         prev.drinkTotal += row.drinkTotal;
+        prev.roomTotal += row.roomTotal;
+        prev.otherTotal += row.otherTotal;
+        prev.chargeTotal += row.chargeTotal;
+        prev.lunchTotal += row.lunchTotal;
+        prev.dinnerTotal += row.dinnerTotal;
+        prev.lunchCustomers += row.lunchCustomers;
+        prev.dinnerCustomers += row.dinnerCustomers;
         prev.totalCustomers += row.totalCustomers;
         prev.salesCount += row.salesCount;
         prev.sourceCount += 1;
+        prev._sources.push(r);
       } else if (sales > prev.totalSales) {
         monthMap.set(key, row);
       }
     }
-    const monthlyBreakdown = Array.from(monthMap.values())
-      .sort((a, b) => a.key.localeCompare(b.key))
-      .map(({ _isMonthlyTitle, ...rest }) => {
+    const monthRows = Array.from(monthMap.values()).sort((a, b) => a.key.localeCompare(b.key));
+    // 曜日別・時間帯別は「二重計上を避けて選ばれた代表レポート」からだけ合算する
+    const representativeReports = monthRows.length
+      ? monthRows.flatMap(r => r._sources || [])
+      : use;
+    const monthlyBreakdown = monthRows
+      .map(({ _isMonthlyTitle, _sources, ...rest }) => {
         const cat = (rest.foodTotal + rest.drinkTotal) || 1;
         return {
           ...rest,
@@ -7962,6 +8356,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
 
     // 期間合計は月次代表値の合算を優先（二重計上を避ける）。月が取れない場合のみ従来の合算へフォールバック。
     let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
+    let roomTot = 0, otherTot = 0, chargeTot = 0;
+    let lunchTot = 0, dinnerTot = 0, lunchCustTot = 0, dinnerCustTot = 0;
     if (monthlyBreakdown.length > 0) {
       monthlyBreakdown.forEach(m => {
         totSales += m.totalSales;
@@ -7969,6 +8365,13 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         dTot += m.drinkTotal;
         cust += m.totalCustomers;
         count += m.salesCount;
+        roomTot += m.roomTotal || 0;
+        otherTot += m.otherTotal || 0;
+        chargeTot += m.chargeTotal || 0;
+        lunchTot += m.lunchTotal || 0;
+        dinnerTot += m.dinnerTotal || 0;
+        lunchCustTot += m.lunchCustomers || 0;
+        dinnerCustTot += m.dinnerCustomers || 0;
       });
     } else {
       use.forEach(r => {
@@ -7977,22 +8380,34 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         dTot += Number(r.drinkTotal) || 0;
         cust += reportSummaryCustomers(r);
         count += Number(r.salesCount) || 0;
+        roomTot += Number(r.roomTotal) || 0;
+        otherTot += Number(r.otherTotal) || 0;
+        chargeTot += Number(r.chargeTotal) || 0;
+        lunchTot += Number(r.lunchTotal) || 0;
+        dinnerTot += Number(r.dinnerTotal) || 0;
+        lunchCustTot += Number(r.lunchCustomers) || 0;
+        dinnerCustTot += Number(r.dinnerCustomers) || 0;
       });
       if (totSales === 0 && fTot === 0 && dTot === 0) {
         use.forEach(r => {
-          const sales = Array.isArray(r.sales) ? r.sales : [];
-          sales.forEach(s => {
-            totSales += Number(s.total) || 0;
-            fTot += Number(s.foodTotal) || 0;
-            dTot += Number(s.drinkTotal) || 0;
-            cust += Number(s.customers) || Number(s.guestCount) || 0;
-            count += 1;
-          });
+          const agg = aggregateSalesRows(r.sales);
+          totSales += agg.totalSales;
+          fTot += agg.foodTotal;
+          dTot += agg.drinkTotal;
+          cust += agg.totalCustomers;
+          count += agg.salesCount;
+          roomTot += agg.roomTotal;
+          otherTot += agg.otherTotal;
+          chargeTot += agg.chargeTotal;
+          lunchTot += agg.lunchTotal;
+          dinnerTot += agg.dinnerTotal;
+          lunchCustTot += agg.lunchCustomers;
+          dinnerCustTot += agg.dinnerCustomers;
         });
       }
     }
 
-    const productSources = needsItemDetails ? detailHydrated : use;
+    const productSources = wantsDetail ? detailHydrated : use;
     const mergedProducts = mergeProductLists(productSources.map(collectProductsFromReport));
     // 売上上位40件を先に切ると、少額のボトル／コース銘柄が質問対象でも落ちる。
     // 質問対象で絞ってから上限を適用し、一般の商品質問だけ売上上位を返す。
@@ -8006,12 +8421,34 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const courseTransactions = needsItemDetails
       ? summarizeCourseTransactionsFromReports(productSources)
       : { transactionCount: 0, groupCount: 0, customerCount: 0, hasDetailedSales: false };
+
+    // 曜日別・時間帯別は保存済みの内訳を合算し、無い場合だけ伝票明細から作り直す
+    let weekdayBreakdown = mergeWeekdayBreakdowns(representativeReports);
+    let hourlyBreakdown = mergeHourlyBreakdowns(representativeReports);
+    if (!weekdayBreakdown.length || !hourlyBreakdown.length) {
+      const detailRows = representativeReports
+        .filter(r => Array.isArray(r?.sales))
+        .flatMap(r => r.sales);
+      if (detailRows.length) {
+        const agg = aggregateSalesRows(detailRows);
+        if (!weekdayBreakdown.length) weekdayBreakdown = agg.weekdayBreakdown;
+        if (!hourlyBreakdown.length) hourlyBreakdown = agg.hourlyBreakdown;
+      }
+    }
+
     const catTot = fTot + dTot || 1;
     return {
       label,
       totalSales: totSales,
       foodTotal: fTot,
       drinkTotal: dTot,
+      roomTotal: roomTot,
+      otherTotal: otherTot,
+      chargeTotal: chargeTot,
+      lunchTotal: lunchTot,
+      dinnerTotal: dinnerTot,
+      lunchCustomers: lunchCustTot,
+      dinnerCustomers: dinnerCustTot,
       foodPct: Math.round((fTot / catTot) * 100),
       drinkPct: Math.round((dTot / catTot) * 100),
       totalCustomers: cust,
@@ -8019,10 +8456,66 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       salesCount: count,
       sourceCount: use.length,
       monthlyBreakdown,
+      weekdayBreakdown,
+      hourlyBreakdown,
       topProducts,
       detailRangeLimited,
       itemDetailComplete,
       courseTransactions
+    };
+  }
+
+  /** 日単位（単日・日付範囲）の集計。対象月の保存レポートから伝票明細を取り直して日付で絞り込む。 */
+  async function summarizeDayScope(matched, fromIso, toIso, label) {
+    const monthGroups = new Map();
+    for (const report of matched) {
+      const key = monthKeyFromReport(report) || '';
+      if (!monthGroups.has(key)) monthGroups.set(key, []);
+      monthGroups.get(key).push(report);
+    }
+    const targets = [];
+    for (const [, group] of monthGroups) targets.push(...selectReportsForSavedMonthGroup(group));
+    const rows = [];
+    for (const r of targets) {
+      const full = await hydrateSavedReport(r);
+      if (full?._hydrateFailed) return unavailableCloudResult();
+      for (const s of (Array.isArray(full?.sales) ? full.sales : [])) {
+        const date = String(s?.date || '').slice(0, 10);
+        if (!date || date < fromIso || date > toIso) continue;
+        rows.push(s);
+      }
+    }
+    if (!rows.length) return null;
+    const agg = aggregateSalesRows(rows);
+    const catTot = agg.foodTotal + agg.drinkTotal || 1;
+    return {
+      label,
+      totalSales: agg.totalSales,
+      foodTotal: agg.foodTotal,
+      drinkTotal: agg.drinkTotal,
+      roomTotal: agg.roomTotal,
+      otherTotal: agg.otherTotal,
+      chargeTotal: agg.chargeTotal,
+      lunchTotal: agg.lunchTotal,
+      dinnerTotal: agg.dinnerTotal,
+      lunchCustomers: agg.lunchCustomers,
+      dinnerCustomers: agg.dinnerCustomers,
+      foodPct: Math.round((agg.foodTotal / catTot) * 100),
+      drinkPct: Math.round((agg.drinkTotal / catTot) * 100),
+      totalCustomers: agg.totalCustomers,
+      avgSpend: agg.totalCustomers ? Math.round(agg.totalSales / agg.totalCustomers) : 0,
+      salesCount: agg.salesCount,
+      sourceCount: targets.length,
+      monthlyBreakdown: [],
+      dailyBreakdown: agg.dailyBreakdown,
+      weekdayBreakdown: agg.weekdayBreakdown,
+      hourlyBreakdown: agg.hourlyBreakdown,
+      topProducts: wantsItemBreakdown(q)
+        ? selectRequestedProductsForQuery(agg.topProducts, q, 40)
+        : agg.topProducts.slice(0, 40),
+      detailRangeLimited: false,
+      itemDetailComplete: true,
+      courseTransactions: summarizeCourseTransactionsFromReports([{ sales: rows }])
     };
   }
 
@@ -8056,7 +8549,9 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         missingPeriods.push(targetJa);
       }
     }
-    if (periods.length >= 2) return { multiPeriod: true, periods };
+    if (periods.length >= 2) return { multiPeriod: true, periods, missingPeriods };
+    // 片方だけ保存されている場合は、取れた期間の確定数値を返したうえで欠けている期間を伝える
+    if (periods.length === 1) return { ...periods[0], missingPeriods };
     return {
       notMatchedLabel: `${missingPeriods.length ? missingPeriods.join('・') : '比較対象期間'}（比較に必要な保存データ）`
     };
@@ -8082,7 +8577,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
           missingYears.push(`${year}年`);
         }
       }
-      if (yearPeriods.length >= 2) return { multiPeriod: true, periods: yearPeriods };
+      if (yearPeriods.length >= 2) return { multiPeriod: true, periods: yearPeriods, missingPeriods: missingYears };
+      if (yearPeriods.length === 1) return { ...yearPeriods[0], missingPeriods: missingYears };
       return {
         notMatchedLabel: `${missingYears.length ? missingYears.join('・') : '比較対象年'}（比較に必要な保存データ）`
       };
@@ -8191,8 +8687,11 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
 
     if (queryResult.multiPeriod) {
       const rows = queryResult.periods.map(p =>
-        `- **${p.label}**: 総売上 ${yen(p.totalSales)}（🍖フード ${yen(p.foodTotal)} / 🍹ドリンク ${yen(p.drinkTotal)}、客数 ${p.totalCustomers}名、客単価 ${yen(p.avgSpend)}）`
+        `- **${p.label}**: 総売上 ${yen(p.totalSales)}（🍖フード ${yen(p.foodTotal)} / 🍹ドリンク ${yen(p.drinkTotal)}、客数 ${p.totalCustomers}名、客単価 ${yen(p.avgSpend)}）${formatVerifiedDetailLines(p, '  ')}`
       ).join('\n');
+      const missingNote = (queryResult.missingPeriods && queryResult.missingPeriods.length)
+        ? `\n\n※ **${queryResult.missingPeriods.join('・')}** は保存データが無いため比較に含めていません。`
+        : '';
       const [a, b] = queryResult.periods;
       const diff = (a && b) ? b.totalSales - a.totalSales : 0;
       const diffPct = (a && b && a.totalSales) ? Math.round(diff / a.totalSales * 100) : 0;
@@ -8204,7 +8703,7 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
 保存済みレポートより、ご指定の複数期間を正確に抽出・集計いたしました:
 
 ${rows}
-${diffLine}
+${diffLine}${missingNote}
 
 **💡 分析メモ**:
 保存済みレポート（カテゴリ別集計）から引用した正確な数値です。推測やWeb情報は含まれておりません。`;
@@ -8226,7 +8725,7 @@ ${diffLine}
 - **総売上高**: **${yen(queryResult.totalSales)}**
 - **🍖 フード売上**: ${yen(queryResult.foodTotal)} (**${queryResult.foodPct}%**)
 - **🍹 ドリンク売上**: ${yen(queryResult.drinkTotal)} (**${queryResult.drinkPct}%**)
-${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustomers}名 (平均客単価: ${yen(queryResult.avgSpend)})` : ''}${monthSection}
+${queryResult.totalCustomers ? `- **総来店客数**: ${queryResult.totalCustomers}名 (平均客単価: ${yen(queryResult.avgSpend)})` : ''}${formatVerifiedDetailLines(queryResult)}${monthSection}
 ${(queryResult.topProducts && queryResult.topProducts.length) ? `\n**売れ筋商品 TOP5**\n` + queryResult.topProducts.slice(0, 5).map((p, i) => `${i + 1}. ${p.name}（${p.qty}点 / ${yen(p.amt)}）`).join('\n') : ''}
 
 **💡 分析メモ**:
@@ -8440,7 +8939,7 @@ async function sendAiChat() {
   - フード売上: ${yen(p.foodTotal)} (${p.foodPct}%)
   - ドリンク売上: ${yen(p.drinkTotal)} (${p.drinkPct}%)
   - 総来店客数: ${p.totalCustomers}名 (平均客単価: ${yen(p.avgSpend)})
-  - 対象レポート件数: ${p.sourceCount}件${monthBlock}
+  - 対象レポート件数: ${p.sourceCount}件${monthBlock}${formatVerifiedDetailLines(p, '  ')}
 ${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5: ' + p.topProducts.slice(0, 5).map(x => `${x.name}(${x.qty}点/${yen(x.amt)})`).join('、') : ''}
 ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信量上限）' : ''}${formatJournalSpecificFactsForAi(p, resolvedChatQuery, '  ')}`;
   }
@@ -8452,7 +8951,7 @@ ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信�
 【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 
-回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   } else if (verifiedData) {
     const monthLines = formatMonthlyBreakdownLines(verifiedData.monthlyBreakdown);
     const monthBlock = monthLines
@@ -8465,11 +8964,11 @@ ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 - フード売上: ${yen(verifiedData.foodTotal)} (${verifiedData.foodPct}%)
 - ドリンク売上: ${yen(verifiedData.drinkTotal)} (${verifiedData.drinkPct}%)
 - 総来店客数: ${verifiedData.totalCustomers}名 (平均客単価: ${yen(verifiedData.avgSpend)})
-- 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}
+- 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}${formatVerifiedDetailLines(verifiedData)}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5: ' + verifiedData.topProducts.slice(0, 5).map(p => `${p.name}(${p.qty}点/${yen(p.amt)})`).join('、') : ''}
 ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
   const strictSystemInstruction = `${MARUGO_AI_COMPANY_CONTEXT}
 

@@ -32,6 +32,8 @@ function extractFunction(source, name) {
 const context = {
   SAVED_DATA_CLARIFICATION_MARKER: '保存データの分析対象を選んでください',
   AI_INTENT_CLARIFICATION_MARKER: '知りたい内容を具体化してください',
+  WEEKDAY_ORDER: ['月', '火', '水', '木', '金', '土', '日'],
+  yen: (n) => `¥${Number(n || 0).toLocaleString('ja-JP')}`,
   monthKeyFromReport(report) {
     const text = String(report?.period || report?.title || '');
     const iso = text.match(/(20\d{2})-(\d{2})/);
@@ -69,6 +71,18 @@ for (const name of [
   'selectReportsForSavedMonthGroup',
   'resolveIndexedSavedRangeIntent',
   'buildSavedDataClarificationReply',
+  'hasAnsweredDataContext',
+  'mentionsExplicitPeriod',
+  'wantsSegmentBreakdown',
+  'wantsDailyBreakdown',
+  'resolveRelativeTimeRefs',
+  'extractAllDayRefs',
+  'extractDayScope',
+  'aggregateSalesRows',
+  'sortWeekdayRows',
+  'mergeWeekdayBreakdowns',
+  'mergeHourlyBreakdowns',
+  'formatVerifiedDetailLines',
 ]) {
   vm.runInContext(`${extractFunction(html, name)}; this.${name} = ${name};`, context);
 }
@@ -172,6 +186,22 @@ test('ambiguous questions ask for an analysis focus before loading detailed data
   assert.equal(context.needsAiIntentClarification('2026年5月の売上推移を見せて'), false);
   assert.equal(context.needsAiIntentClarification('2026年5月の客単価は？'), false);
   assert.equal(context.needsAiIntentClarification('2026年5月と6月の売上を比較して'), false);
+  // 素の「売上」だけの数値照会は聞き返さずに答える（最も自然で最も多い言い回し）
+  assert.equal(context.needsAiIntentClarification('2026年6月の売上は？'), false);
+  assert.equal(context.needsAiIntentClarification('6月の売上を教えて'), false);
+  assert.equal(context.needsAiIntentClarification('売上はいくら？'), false);
+  assert.equal(context.needsAiIntentClarification('2026年6月はいくら？'), false);
+  // wantsItemBreakdown が明細を取りに行く語彙は、意図確認で止めない
+  for (const q of ['ボトルは何本？', 'コースは何件？', '室料はいくら？', 'シャンパンは何本？', 'ビールは何杯？']) {
+    assert.equal(context.needsAiIntentClarification(q), false, q);
+    assert.equal(context.wantsItemBreakdown(q) || /室料/.test(q), true, q);
+  }
+  assert.equal(context.needsAiIntentClarification('2026年7月の曜日別売上は？'), false);
+  assert.equal(context.needsAiIntentClarification('ランチの客単価は？'), false);
+  // 目的が本当に分からない発話は従来どおり確認する
+  for (const q of ['最近どう？', 'どうなってる？', 'ざっくり見て']) {
+    assert.equal(context.needsAiIntentClarification(q), true, q);
+  }
   const reply = context.buildAiIntentClarificationReply('2026年5月の売上を分析して');
   assert.match(reply, /2026年5月/);
   assert.match(reply, /売上|推移/);
@@ -347,10 +377,15 @@ test('item-detail limits keep full-period totals and propagate detail hydration 
   );
   assert.match(
     savedReportSearchSource,
-    /detailEntries\s*=\s*detailRangeLimited\s*\?\s*monthEntries\.slice\(0,\s*36\)\s*:\s*monthEntries/,
-    'only detail hydration may be limited to the newest 36 months',
+    /detailEntries\s*=\s*detailRangeLimited\s*\?\s*monthEntries\.slice\(0,\s*detailLimit\)\s*:\s*monthEntries/,
+    'only detail hydration may be limited by the month cap',
   );
-  assert.match(savedReportSearchSource, /productSources\s*=\s*needsItemDetails\s*\?\s*detailHydrated\s*:\s*use/);
+  assert.match(
+    savedReportSearchSource,
+    /detailLimit\s*=\s*needsItemDetails\s*\?\s*36\s*:\s*12/,
+    'item questions may hydrate up to 36 months, other detail lookups up to 12',
+  );
+  assert.match(savedReportSearchSource, /productSources\s*=\s*wantsDetail\s*\?\s*detailHydrated\s*:\s*use/);
   assert.match(
     savedReportSearchSource,
     /selectRequestedProductsForQuery\(mergedProducts, q, 40\)/,
@@ -478,4 +513,183 @@ test('mobile AI chat follows the visual viewport and keeps its composer visible'
   assert.match(html, /input\.scrollIntoView\(\{ block: 'nearest'/);
   assert.match(html, /font-size: 16px;/);
   assert.match(html, /!e\.isComposing/);
+});
+
+test('follow-up questions keep the new month instead of reusing the previous one', () => {
+  // 「2026年5月」→「6月の売上は？」で、前の発話を丸ごと前置して古い月を拾わないこと
+  assert.match(
+    savedReportSearchSource,
+    /const ownQuery = q;/,
+    'the raw utterance must be kept before the context back-fill',
+  );
+  assert.match(
+    savedReportSearchSource,
+    /hasOwnMonth[\s\S]{0,200}\$\{prevYear\}年 \$\{q\}/,
+    'when the new utterance names a month, only the year may be inherited',
+  );
+  assert.match(
+    savedReportSearchSource,
+    /hasOwnDay && prevMonth[\s\S]{0,160}\$\{prevYear\}年\$\{parseInt\(prevMonth, 10\)\}月/,
+    'a bare day must inherit both year and month',
+  );
+  // 年を一度しか書かない比較も2期間として扱う
+  assert.deepEqual(
+    [...context.extractAllMonthRefs('2026年5月と6月を比較して')].map(ref => ref.key),
+    ['2026-05', '2026-06'],
+  );
+  assert.deepEqual(
+    [...context.extractAllMonthRefs('202606と202607を比較して')].map(ref => ref.key),
+    ['2026-06', '2026-07'],
+  );
+  assert.deepEqual([...context.extractAllMonthRefs('直近3か月の売上')], []);
+  assert.deepEqual(
+    [...context.extractAllMonthRefs('2026年7月の売上')].map(ref => ref.key),
+    ['2026-07'],
+  );
+});
+
+test('answered conversations do not re-ask the purpose when only the period changes', () => {
+  const answered = [
+    { role: 'user', content: '2026年5月の総売上は？' },
+    { role: 'assistant', content: '2026年5月の総売上は¥1,120,850です。' },
+  ];
+  const asked = [
+    { role: 'user', content: '売上を分析して' },
+    { role: 'assistant', content: '何を優先しますか？', clarification: 'intent' },
+  ];
+  assert.equal(context.hasAnsweredDataContext(answered), true);
+  assert.equal(context.hasAnsweredDataContext(asked), false);
+  assert.equal(context.hasAnsweredDataContext([]), false);
+  assert.equal(context.mentionsExplicitPeriod('15日はどうだった？'), true);
+  assert.equal(context.mentionsExplicitPeriod('どうかな'), false);
+  // 回答済みの流れで期間だけ言い換えた発話は聞き返さない
+  assert.equal(context.shouldAskAiIntentClarification('15日はどうだった？', answered, '15日はどうだった？'), false);
+  // 会話の頭から曖昧なままなら従来どおり確認する
+  assert.equal(context.shouldAskAiIntentClarification('どうかな', answered, 'どうかな'), true);
+  assert.equal(context.shouldAskAiIntentClarification('15日はどうだった？', [], '15日はどうだった？'), true);
+});
+
+test('day-level questions are answered per day instead of rolling up to the month', () => {
+  assert.deepEqual(
+    [...context.extractAllDayRefs('2026年7月15日の売上')].map(ref => ref.iso),
+    ['2026-07-15'],
+  );
+  assert.deepEqual(
+    [...context.extractAllDayRefs('2026年7月1日〜7日の売上')].map(ref => ref.iso),
+    ['2026-07-01', '2026-07-07'],
+  );
+  assert.equal(context.extractDayScope('2026年7月の売上'), null);
+  assert.equal(context.extractDayScope('直近7日の売上'), null, '期間の長さを日付と誤認しない');
+  assert.equal(context.extractDayScope('2026年7月の3日間'), null);
+  const single = context.extractDayScope('2026年7月15日の売上');
+  assert.deepEqual([single.from.iso, single.to.iso, single.label], ['2026-07-15', '2026-07-15', '2026年7月15日']);
+  const range = context.extractDayScope('2026年7月1日から2026年7月7日までの売上');
+  assert.deepEqual([range.from.iso, range.to.iso], ['2026-07-01', '2026-07-07']);
+  // 相対日付
+  assert.match(context.resolveRelativeTimeRefs('昨日の売上'), /\d{4}年\d{1,2}月\d{1,2}日の売上/);
+  assert.match(context.resolveRelativeTimeRefs('先週の売上'), /\d{4}年\d{1,2}月\d{1,2}日〜\d{4}年\d{1,2}月\d{1,2}日/);
+  assert.match(context.resolveRelativeTimeRefs('今月の売上'), /\d{4}年\d{1,2}月の売上/);
+  // 日付が特定できた場合は月へ丸めず日単位の集計へ入る
+  assert.match(savedReportSearchSource, /const dayScope = extractDayScope\(q\);/);
+  assert.match(savedReportSearchSource, /await summarizeDayScope\(/);
+  assert.match(
+    savedReportSearchSource,
+    /const dayScope[\s\S]*const rangeRef = extractRangeRef\(q\)/,
+    'day scope must be resolved before the month-range branch',
+  );
+});
+
+test('verified aggregates carry every stored breakdown so the AI never has to say it is missing', () => {
+  const sales = [
+    {
+      date: '2026-07-01', hour: 19, weekday: '水', mealPeriod: 'ディナー', total: 60000, customers: 4, groups: 1,
+      items: [
+        { name: 'コース８品', qty: 4, amount: 40000, category: 'フード', isCharge: false },
+        { name: 'ボトルワイン', qty: 1, amount: 15000, category: '飲料', isCharge: false },
+        { name: '個室料金', qty: 1, amount: 5000, category: '室料', isCharge: false },
+      ],
+    },
+    {
+      date: '2026-07-02', hour: 12, weekday: '木', mealPeriod: 'ランチ', total: 8000, customers: 2, groups: 1,
+      items: [
+        { name: 'ランチセット', qty: 2, amount: 7000, category: 'フード', isCharge: false },
+        { name: 'チャージ料', qty: 2, amount: 1000, category: 'フード', isCharge: true },
+      ],
+    },
+  ];
+  const agg = context.aggregateSalesRows(sales);
+  assert.equal(agg.totalSales, 68000);
+  assert.equal(agg.foodTotal + agg.drinkTotal + agg.roomTotal + agg.otherTotal, agg.totalSales);
+  assert.equal(agg.roomTotal, 5000);
+  assert.equal(agg.chargeTotal, 1000);
+  assert.deepEqual([agg.lunchTotal, agg.dinnerTotal], [8000, 60000]);
+  assert.deepEqual([agg.lunchCustomers, agg.dinnerCustomers], [2, 4]);
+  assert.deepEqual([...agg.dailyBreakdown].map(row => row.date), ['2026-07-01', '2026-07-02']);
+  assert.deepEqual([...agg.weekdayBreakdown].map(row => row.weekday), ['水', '木'], '曜日は月→日の順に並べる');
+  assert.deepEqual([...agg.hourlyBreakdown].map(row => row.hour), [12, 19]);
+
+  const merged = context.mergeWeekdayBreakdowns([
+    { weekdayBreakdown: [{ weekday: '月', totalSales: 100, customerCount: 2, transactionCount: 1 }] },
+    { weekdayBreakdown: [{ weekday: '月', totalSales: 50, customerCount: 1, transactionCount: 1 }] },
+  ]);
+  assert.deepEqual(
+    { weekday: merged[0].weekday, totalSales: merged[0].totalSales, customerCount: merged[0].customerCount },
+    { weekday: '月', totalSales: 150, customerCount: 3 },
+  );
+  const hourly = context.mergeHourlyBreakdowns([
+    { hourlyBreakdown: [{ hour: 19, totalSales: 100, customers: 2, count: 1 }] },
+    { hourlyBreakdown: [{ hour: 19, totalSales: 20, customers: 1, count: 1 }] },
+  ]);
+  assert.deepEqual({ hour: hourly[0].hour, totalSales: hourly[0].totalSales }, { hour: 19, totalSales: 120 });
+
+  const text = context.formatVerifiedDetailLines({
+    totalSales: 68000, foodTotal: 48000, drinkTotal: 15000, roomTotal: 5000, otherTotal: 0, chargeTotal: 1000,
+    lunchTotal: 8000, dinnerTotal: 60000, lunchCustomers: 2, dinnerCustomers: 4,
+    weekdayBreakdown: agg.weekdayBreakdown,
+    hourlyBreakdown: agg.hourlyBreakdown,
+    dailyBreakdown: agg.dailyBreakdown,
+    missingPeriods: ['2025年7月'],
+  });
+  assert.match(text, /カテゴリ内訳/);
+  assert.match(text, /室料/);
+  assert.match(text, /うちチャージ/);
+  assert.match(text, /ランチ／ディナー/);
+  assert.match(text, /曜日別売上/);
+  assert.match(text, /時間帯別売上/);
+  assert.match(text, /日別売上/);
+  assert.match(text, /保存データが無い期間: 2025年7月/);
+  assert.equal(context.formatVerifiedDetailLines({}), '');
+
+  // 集計結果と AI プロンプトの双方に載ること
+  assert.match(html, /weekdayBreakdown,\s*\n\s*hourlyBreakdown,/);
+  assert.match(html, /\$\{formatVerifiedDetailLines\(verifiedData\)\}/);
+  assert.match(html, /\$\{formatVerifiedDetailLines\(p, '  '\)\}/);
+  assert.match(html, /記載があるのに「その内訳はありません」と答えないでください/);
+});
+
+test('drink and segment questions reach the stored journal items', () => {
+  for (const q of ['ワインはいくら売れた？', 'シャンパンは何本？', 'ビールは何杯？', '日本酒の売上は？']) {
+    assert.equal(context.wantsItemBreakdown(q), true, q);
+  }
+  for (const q of ['曜日別の売上は？', '時間帯別の推移は？', 'ランチとディナーの内訳は？', 'ピークは何時？']) {
+    assert.equal(context.wantsSegmentBreakdown(q), true, q);
+  }
+  assert.equal(context.wantsDailyBreakdown('2026年7月15日の売上'), true);
+  assert.equal(context.wantsDailyBreakdown('日別の推移は？'), true);
+  assert.equal(context.wantsDailyBreakdown('2026年7月の総売上は？'), false);
+  assert.equal(context.wantsSegmentBreakdown('2026年7月の総売上は？'), false);
+});
+
+test('a comparison with only one stored side still returns the stored numbers', () => {
+  assert.match(
+    savedReportSearchSource,
+    /if \(periods\.length === 1\) return \{ \.\.\.periods\[0\], missingPeriods \};/,
+    'the available month must be returned instead of a bare "not found"',
+  );
+  assert.match(
+    savedReportSearchSource,
+    /if \(yearPeriods\.length === 1\) return \{ \.\.\.yearPeriods\[0\], missingPeriods: missingYears \};/,
+  );
+  assert.match(savedReportSearchSource, /return \{ multiPeriod: true, periods, missingPeriods \};/);
+  assert.match(html, /queryResult\.missingPeriods\.join\('・'\)/);
 });
