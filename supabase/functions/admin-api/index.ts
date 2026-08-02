@@ -94,18 +94,22 @@ serve(async (req: Request) => {
         const kind = url.searchParams.get("kind");
         const limitParam = parseInt(url.searchParams.get("limit") || "500", 10);
 
-        let query = supabase.from("saved_reports").select("id, title, period, created_at, updated_at").order("created_at", { ascending: false }).limit(limitParam);
+        let query = supabase.from("saved_reports").select("id, title, period, created_at, updated_at, data").order("created_at", { ascending: false }).limit(limitParam);
 
         const { data, error } = await query;
         if (error) throw error;
 
         let reports = (data || []).map((row: any) => {
+          const rowData = row.data && typeof row.data === "object" ? row.data : {};
+          // 巨大な個別明細配列(daily_sales, items_sales, product_sales)のみを除外し、売上・客数サマリー数値は保持
+          const { daily_sales, items_sales, product_sales, raw_text, journal_lines, ...summaryData } = rowData;
           return {
             id: row.id,
-            title: row.title || "売上レポート",
-            period: row.period || "",
+            title: row.title || summaryData.title || "売上レポート",
+            period: row.period || summaryData.period || "",
             created_at: row.created_at,
-            store_partition_key: storeKey
+            store_partition_key: summaryData.store_partition_key || rowData.store_partition_key || storeKey,
+            ...summaryData
           };
         });
 
