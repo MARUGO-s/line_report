@@ -380,6 +380,9 @@ const PETTY_CASH_RECEIPT_IMAGE_MAX_BYTES = GROQ_VISION_BASE64_MAX_BYTES
 const POS_JOURNAL_BUCKET = "pos-journals"
 const POS_JOURNAL_UPLOAD_MAX_BYTES = 8 * 1024 * 1024
 const POS_JOURNAL_UPLOAD_MAX_FILES = 62
+/** 売上レポート表示用HTML（PDF元）。数値正本ではない。 */
+const POS_REPORT_HTML_BUCKET = "pos-report-html"
+const POS_REPORT_HTML_MAX_BYTES = 5 * 1024 * 1024
 const AZURE_RECEIPT_MODEL = AZURE_FOUNDRY_VISION_MODEL
 const PDFJS_MODULE_URL = "https://esm.sh/pdfjs-dist@4.10.38/build/pdf.mjs"
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -1158,6 +1161,8 @@ Deno.serve(async (req, info) => {
       "/pos-journals/ai-history/item",
       "/pos-journals/saved-reports",
       "/pos-journals/saved-reports/item",
+      "/pos-journals/saved-reports/html",
+      "/pos-journals/saved-reports/html-offload",
       "/pos-journals/report-ai-history",
       "/pos-journals/report-ai-history/item",
       "/pos-journals/chat-pdf-history",
@@ -1427,6 +1432,19 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await deleteSavedReportItem(supabase, body, storeScope), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/saved-reports/html") {
+      return json(await uploadSavedReportHtml(workReq, supabase, storeScope), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/saved-reports/html") {
+      return json(await createSavedReportHtmlSignedUrl(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/saved-reports/html-offload") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await offloadSavedReportHtml(supabase, body, storeScope), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/sales-forecasts") {
       return json(await fetchSalesForecastsList(supabase, url), 200)
@@ -8473,6 +8491,8 @@ async function saveSavedReport(
     throw { status: 400, message: "data is required." } satisfies AppError
   }
   const id = toSafeString(body.id) || `${Date.now()}_${crypto.randomUUID().slice(0, 8)}`
+  // 表示用HTMLは Storage へ分離する。JSONB に巨大 body/previewHtml を同居させない。
+  const sanitizedData = sanitizeSavedReportDataForStorage(body.data, id)
   const { data: existing, error: existingError } = await supabase
     .from("saved_reports")
     .select("id, store_partition_key")
@@ -8499,7 +8519,7 @@ async function saveSavedReport(
       id,
       title: toSafeString(body.title) || "売上レポート",
       period: toSafeString(body.period),
-      data: body.data,
+      data: sanitizedData,
       store_partition_key: storeKey,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" })
@@ -8543,7 +8563,7 @@ async function deleteSavedReportItem(
     .delete()
     .eq("id", id)
     .eq("store_partition_key", storeKey)
-    .select("id")
+    .select("id, data")
     .maybeSingle()
   if (error) {
     throw {
@@ -8554,7 +8574,292 @@ async function deleteSavedReportItem(
   if (!data) {
     throw { status: 404, message: "保存済みレポートが見つかりません。" } satisfies AppError
   }
+  const reportData = isRecord(data.data) ? data.data : {}
+  const htmlPath = toSafeString(reportData.htmlStoragePath) ||
+    buildSavedReportHtmlStoragePath(storeKey, String(data.id))
+  try {
+    await supabase.storage.from(POS_REPORT_HTML_BUCKET).remove([htmlPath])
+  } catch (_) {
+    // 削除本体は成功しているため、Storage 掃除失敗は握りつぶす
+  }
   return { ok: true, deleted: { id: String(data.id) } }
+}
+
+function buildSavedReportHtmlStoragePath(storeKey: string, reportId: string): string {
+  const safeStore = storeKey.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "store"
+  const safeId = reportId.replace(/[^\w.\-]+/g, "_").slice(0, 120) || "report"
+  return `${safeStore}/${safeId}.html`
+}
+
+function isDetailedSavedReportHtml(html: unknown): boolean {
+  const s = String(html || "")
+  return s.length > 400 && /day-section|月間サマリー|会計明細|ランチ・ディナー/.test(s)
+}
+
+/** JSONB から巨大表示HTMLを外し、短い preview / Storage パスだけ残す */
+function sanitizeSavedReportDataForStorage(
+  data: Record<string, unknown>,
+  reportId: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...data, id: toSafeString(data.id) || reportId }
+  delete out.body
+  const preview = out.previewHtml
+  if (isDetailedSavedReportHtml(preview) || String(preview || "").length > 8000) {
+    delete out.previewHtml
+  }
+  const path = toSafeString(out.htmlStoragePath)
+  if (path) out.htmlStoragePath = path
+  const htmlBytes = toNonNegativeInteger(out.htmlBytes)
+  if (htmlBytes) out.htmlBytes = htmlBytes
+  return out
+}
+
+async function uploadSavedReportHtml(
+  req: Request,
+  supabase: ReturnType<typeof createClient>,
+  storeScope: string | null,
+) {
+  let formData: FormData
+  try {
+    formData = await req.formData()
+  } catch {
+    throw {
+      status: 400,
+      message: "Upload request must be multipart/form-data.",
+    } satisfies AppError
+  }
+  const file = formData.get("file")
+  if (!(file instanceof File)) {
+    throw { status: 400, message: "HTMLファイルを選択してください。" } satisfies AppError
+  }
+  if (file.size <= 0 || file.size > POS_REPORT_HTML_MAX_BYTES) {
+    throw {
+      status: 400,
+      message: `HTMLサイズは1件${Math.floor(POS_REPORT_HTML_MAX_BYTES / 1024 / 1024)}MBまでです。`,
+    } satisfies AppError
+  }
+  const requestedStore = toSafeString(formData.get("store_key"))
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const reportId = toSafeString(formData.get("report_id") || formData.get("id"))
+  if (!reportId) {
+    throw { status: 400, message: "report_id is required." } satisfies AppError
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const storagePath = buildSavedReportHtmlStoragePath(storeKey, reportId)
+  const { error: uploadError } = await supabase.storage
+    .from(POS_REPORT_HTML_BUCKET)
+    .upload(storagePath, bytes, {
+      contentType: file.type || "text/html; charset=utf-8",
+      upsert: true,
+    })
+  if (uploadError) {
+    throw {
+      status: 500,
+      message: `レポートHTMLの保存に失敗しました: ${uploadError.message}`,
+    } satisfies AppError
+  }
+  return {
+    ok: true,
+    store_key: storeKey,
+    report_id: reportId,
+    storage_bucket: POS_REPORT_HTML_BUCKET,
+    storage_path: storagePath,
+    file_size_bytes: file.size,
+  }
+}
+
+async function createSavedReportHtmlSignedUrl(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const id = toSafeString(url.searchParams.get("id") || url.searchParams.get("report_id"))
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from("saved_reports")
+    .select("id, data")
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    throw {
+      status: 500,
+      message: `保存済みレポートの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  if (!data) {
+    throw { status: 404, message: "保存済みレポートが見つかりません。" } satisfies AppError
+  }
+  const reportData = isRecord(data.data) ? data.data : {}
+  const storagePath = toSafeString(reportData.htmlStoragePath) ||
+    buildSavedReportHtmlStoragePath(storeKey, id)
+  const signedUrl = await createSignedMediaUrl(
+    supabase,
+    POS_REPORT_HTML_BUCKET,
+    storagePath,
+  )
+  if (!signedUrl) {
+    throw { status: 404, message: "レポートHTMLが見つかりません。" } satisfies AppError
+  }
+  return {
+    ok: true,
+    id,
+    storage_bucket: POS_REPORT_HTML_BUCKET,
+    storage_path: storagePath,
+    signed_url: signedUrl,
+  }
+}
+
+/**
+ * 既存 saved_reports の巨大 body/previewHtml を Storage へ退避し JSONB から外す。
+ * 数値フィールドは触らない。id 指定 or limit 件のバッチ。
+ */
+async function offloadSavedReportHtml(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  const singleId = toSafeString(body.id)
+  const rawLimit = Number(body.limit ?? 30)
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, Math.trunc(rawLimit))) : 30
+
+  let rows: Array<{ id: string; data: unknown }> = []
+  if (singleId) {
+    const { data, error } = await supabase
+      .from("saved_reports")
+      .select("id, data")
+      .eq("id", singleId)
+      .eq("store_partition_key", storeKey)
+      .maybeSingle()
+    if (error) {
+      throw {
+        status: 500,
+        message: `保存済みレポートの取得に失敗しました: ${error.message}`,
+      } satisfies AppError
+    }
+    if (data) rows = [{ id: String(data.id), data: data.data }]
+  } else {
+    const { data, error } = await supabase
+      .from("saved_reports")
+      .select("id, data")
+      .eq("store_partition_key", storeKey)
+      .order("updated_at", { ascending: false })
+      .limit(Math.min(500, limit * 8))
+    if (error) {
+      throw {
+        status: 500,
+        message: `保存済みレポートの取得に失敗しました: ${error.message}`,
+      } satisfies AppError
+    }
+    rows = (Array.isArray(data) ? data : []).map((row) => ({
+      id: String((row as { id?: unknown }).id ?? ""),
+      data: (row as { data?: unknown }).data,
+    })).filter((row) => !!row.id)
+  }
+
+  let scanned = 0
+  let offloaded = 0
+  let skipped = 0
+  let failed = 0
+  const results: Array<Record<string, unknown>> = []
+
+  for (const row of rows) {
+    if (!singleId && offloaded >= limit) break
+    scanned++
+    const reportData = isRecord(row.data) ? { ...row.data } : null
+    if (!reportData) {
+      skipped++
+      continue
+    }
+    const bodyHtml = String(reportData.body || "")
+    const previewHtml = String(reportData.previewHtml || "")
+    const candidate = isDetailedSavedReportHtml(bodyHtml)
+      ? bodyHtml
+      : (isDetailedSavedReportHtml(previewHtml) ? previewHtml : "")
+    const existingPath = toSafeString(reportData.htmlStoragePath)
+    // 既に Storage 分離済み（巨大HTMLなし）
+    if (!candidate) {
+      skipped++
+      continue
+    }
+    if (new TextEncoder().encode(candidate).length > POS_REPORT_HTML_MAX_BYTES) {
+      failed++
+      results.push({ id: row.id, ok: false, error: "HTML too large" })
+      continue
+    }
+    const storagePath = existingPath || buildSavedReportHtmlStoragePath(storeKey, row.id)
+    const bytes = new TextEncoder().encode(candidate)
+    const { error: uploadError } = await supabase.storage
+      .from(POS_REPORT_HTML_BUCKET)
+      .upload(storagePath, bytes, {
+        contentType: "text/html; charset=utf-8",
+        upsert: true,
+      })
+    if (uploadError) {
+      failed++
+      results.push({ id: row.id, ok: false, error: uploadError.message })
+      continue
+    }
+    const nextData = sanitizeSavedReportDataForStorage({
+      ...reportData,
+      htmlStoragePath: storagePath,
+      htmlBytes: bytes.length,
+    }, row.id)
+    const { error: updateError } = await supabase
+      .from("saved_reports")
+      .update({
+        data: nextData,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id)
+      .eq("store_partition_key", storeKey)
+    if (updateError) {
+      failed++
+      results.push({ id: row.id, ok: false, error: updateError.message })
+      continue
+    }
+    offloaded++
+    results.push({
+      id: row.id,
+      ok: true,
+      storage_path: storagePath,
+      html_bytes: bytes.length,
+    })
+  }
+
+  return {
+    ok: failed === 0,
+    store_key: storeKey,
+    scanned,
+    offloaded,
+    skipped,
+    failed,
+    results: singleId || results.length <= 40 ? results : results.slice(0, 40),
+  }
 }
 
 // ===== jnl2txt.html 売上予測スナップショット (sales_forecasts) =====
