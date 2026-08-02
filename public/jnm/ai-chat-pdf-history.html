@@ -444,18 +444,58 @@ async function deleteItem(id) {
   }
 }
 
+async function deleteItemSilently(id) {
+  try {
+    await adminApiFetch('/pos-journals/chat-pdf-history/item', {
+      method: 'DELETE',
+      body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function bulkDeleteItems(ids) {
+  if (!ids.length) return;
+  if (!confirm(`選択した ${ids.length} 件のAIチャットPDF履歴を削除しますか？\nこの操作は取り消せません。`)) return;
+  let done = 0;
+  let failed = 0;
+  const CHUNK = 5;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    setStatus(`一括削除中… ${Math.min(i + chunk.length, ids.length)}/${ids.length}`);
+    const results = await Promise.all(chunk.map((id) => deleteItemSilently(id)));
+    for (const ok of results) { if (ok) done++; else failed++; }
+  }
+  setStatus(failed === 0 ? `${done}件を削除しました` : `${done}件削除・${failed}件失敗しました`);
+  await loadHistory();
+}
+
 function renderList(items) {
   const list = document.getElementById('list');
   if (!items.length) {
     list.innerHTML = '<p class="empty">「📄 PDFにする」で保存したAIチャット履歴はまだありません。</p>';
     return;
   }
-  list.innerHTML = items.map((item) => {
+  const toolbar = `<div class="panel no-print" id="bulkToolbar" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 18px;">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+      <input type="checkbox" id="bulkSelectAll" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent);">
+      すべて選択
+    </label>
+    <span id="bulkSelectedCount" style="font-size:12px;color:var(--text-2);">0件選択中</span>
+    <button type="button" class="btn btn-danger" id="bulkDeleteBtn" disabled style="margin-left:auto;">🗑️ 選択した項目を削除</button>
+  </div>`;
+
+  list.innerHTML = toolbar + items.map((item) => {
     const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '';
     const modeLabel = item.mode ? ` / モード: ${item.mode}` : '';
     const providerLabel = item.provider ? ` / ${item.provider}` : '';
     return `<article class="item" data-id="${esc(item.id)}">
       <div class="item-top">
+        <label class="no-print" style="display:flex;align-items:flex-start;padding-top:4px;cursor:pointer;flex-shrink:0;">
+          <input type="checkbox" data-select style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent);">
+        </label>
         <div style="min-width:0;flex:1;">
           <div class="q-label">質問</div>
           <div class="question">${esc(item.question || '(質問なし)')}</div>
@@ -486,6 +526,38 @@ function renderList(items) {
       if (id) deleteItem(id);
     });
   });
+
+  // 一括削除: チェックボックス選択 → まとめて削除
+  const selectAllEl = list.querySelector('#bulkSelectAll');
+  const bulkDeleteBtn = list.querySelector('#bulkDeleteBtn');
+  const selectedCountEl = list.querySelector('#bulkSelectedCount');
+  const itemCheckboxes = () => Array.from(list.querySelectorAll('[data-select]'));
+  const selectedIds = () => itemCheckboxes()
+    .filter((cb) => cb.checked)
+    .map((cb) => cb.closest('[data-id]')?.getAttribute('data-id'))
+    .filter(Boolean);
+
+  function updateBulkUiState() {
+    const ids = selectedIds();
+    if (selectedCountEl) selectedCountEl.textContent = `${ids.length}件選択中`;
+    if (bulkDeleteBtn) {
+      bulkDeleteBtn.disabled = ids.length === 0;
+      bulkDeleteBtn.style.opacity = ids.length === 0 ? '0.5' : '1';
+    }
+    if (selectAllEl) {
+      const all = itemCheckboxes();
+      selectAllEl.checked = all.length > 0 && ids.length === all.length;
+      selectAllEl.indeterminate = ids.length > 0 && ids.length < all.length;
+    }
+  }
+
+  itemCheckboxes().forEach((cb) => cb.addEventListener('change', updateBulkUiState));
+  selectAllEl?.addEventListener('change', () => {
+    itemCheckboxes().forEach((cb) => { cb.checked = selectAllEl.checked; });
+    updateBulkUiState();
+  });
+  bulkDeleteBtn?.addEventListener('click', () => bulkDeleteItems(selectedIds()));
+  updateBulkUiState();
 }
 
 async function loadHistory() {
