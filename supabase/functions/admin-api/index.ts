@@ -92,36 +92,71 @@ serve(async (req: Request) => {
       if (req.method === "GET" && !isItem) {
         const storeKey = normalizeStoreKey(url.searchParams.get("store_key") || req.headers.get("x-store-key"));
         const kind = url.searchParams.get("kind");
-        const limitParam = parseInt(url.searchParams.get("limit") || "500", 10);
+        const limitParam = Math.max(1, Math.min(5000, parseInt(url.searchParams.get("limit") || "500", 10) || 500));
+        // kind は title で後段フィルタするため、limit で対象が切り捨てられないよう多めに読む（行は軽量）
+        const fetchLimit = kind ? Math.min(5000, Math.max(limitParam * 4, 2000)) : limitParam;
 
-        let query = supabase.from("saved_reports").select("id, title, period, created_at, updated_at, data").order("created_at", { ascending: false }).limit(limitParam);
+        // 伝票明細・HTML本文を含む data JSONB 全体は読まず、サマリー数値のみを JSON パス指定で取得する。
+        // 保存件数が増えてもレスポンスが肥大せず、タイムアウトで AI がデータ参照不能になることを防ぐ。
+        const summarySelect = [
+          "id", "title", "period", "created_at", "updated_at",
+          "store_partition_key:data->>store_partition_key",
+          "total:data->total",
+          "totalSales:data->totalSales",
+          "foodTotal:data->foodTotal",
+          "drinkTotal:data->drinkTotal",
+          "roomTotal:data->roomTotal",
+          "otherTotal:data->otherTotal",
+          "chargeTotal:data->chargeTotal",
+          "lunchTotal:data->lunchTotal",
+          "dinnerTotal:data->dinnerTotal",
+          "lunchCustomers:data->lunchCustomers",
+          "dinnerCustomers:data->dinnerCustomers",
+          "totalCustomers:data->totalCustomers",
+          "salesCount:data->salesCount",
+          "topProducts:data->topProducts",
+          "weekdayBreakdown:data->weekdayBreakdown",
+          "hourlyBreakdown:data->hourlyBreakdown",
+          "sourceMonths:data->sourceMonths",
+          "parserVersion:data->parserVersion",
+          "verificationVersion:data->verificationVersion",
+          "categoryVersion:data->categoryVersion",
+          "mealPeriodVersion:data->mealPeriodVersion",
+        ].join(", ");
+
+        let query = supabase.from("saved_reports")
+          .select(summarySelect)
+          .order("created_at", { ascending: false })
+          .limit(fetchLimit);
+        if (storeKey) {
+          // 店舗キーは DB 側で絞り込む（キー導入前の旧データは null のため許容する）
+          query = query.or(`data->>store_partition_key.eq.${storeKey},data->>store_partition_key.is.null`);
+        }
 
         const { data, error } = await query;
         if (error) throw error;
 
         let reports = (data || []).map((row: any) => {
-          const rowData = row.data && typeof row.data === "object" ? row.data : {};
-          // 巨大な個別明細配列(daily_sales, items_sales, product_sales)のみを除外し、売上・客数サマリー数値は保持
-          const { daily_sales, items_sales, product_sales, raw_text, journal_lines, ...summaryData } = rowData;
-          return {
-            id: row.id,
-            title: row.title || summaryData.title || "売上レポート",
-            period: row.period || summaryData.period || "",
-            created_at: row.created_at,
-            store_partition_key: summaryData.store_partition_key || rowData.store_partition_key || storeKey,
-            ...summaryData
-          };
+          // JSON パス選択で存在しないキーは null になる。null をそのまま返すと
+          // クライアントが「売上 0 のサマリーあり」と誤認するため、値のあるキーだけ返す。
+          const out: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(row)) {
+            if (value !== null && value !== undefined) out[key] = value;
+          }
+          out.id = row.id;
+          out.title = row.title || "売上レポート";
+          out.period = row.period || "";
+          out.created_at = row.created_at;
+          if (!out.store_partition_key && storeKey) out.store_partition_key = storeKey;
+          return out;
         });
-
-        if (storeKey) {
-          reports = reports.filter((r: any) => !r.store_partition_key || r.store_partition_key === storeKey);
-        }
 
         if (kind === "monthly") {
           reports = reports.filter((r: any) => isMonthlyReportTitle(r.title));
         } else if (kind === "daily") {
           reports = reports.filter((r: any) => !isMonthlyReportTitle(r.title));
         }
+        reports = reports.slice(0, limitParam);
 
         return new Response(JSON.stringify({ reports, items: reports }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

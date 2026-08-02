@@ -1764,6 +1764,7 @@ async function applySelectedStore(nextKey, opts) {
   if (sel && sel.value !== key) sel.value = key;
   if (changed || options.forceReload) {
     purgeLocalCloudDataCaches();
+    invalidateSavedReportsCache();
     productCategoryOverridesCache = {};
     productCategoryOverridesLoaded = false;
     productCategoryOverridesSyncedFingerprint = null;
@@ -1884,16 +1885,38 @@ async function adminApiFetch(path, options) {
   if (!(opts.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json; charset=utf-8';
   }
-  let response;
-  try {
-    response = await fetch(url, Object.assign({}, opts, { headers }));
-  } catch (_) {
-    throw new Error('通信に失敗しました。ネットワークをご確認ください。');
+  // GET はタイムアウト付きで自動リトライする。一時的な通信断・サーバー混雑（5xx/429）で
+  // AI チャットの保存データ参照が即エラーにならないようにする。書き込み系は二重実行を避けるため1回のみ。
+  const method = String(opts.method || 'GET').toUpperCase();
+  const maxAttempts = method === 'GET' ? 3 : 1;
+  const timeoutMs = 45000;
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    let retriable = false;
+    try {
+      let response;
+      try {
+        response = await fetch(url, Object.assign({}, opts, { headers, signal: controller ? controller.signal : undefined }));
+      } catch (_) {
+        retriable = true;
+        throw new Error('通信に失敗しました。ネットワークをご確認ください。');
+      }
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 401 || response.status === 403) setAuthUiState(false);
+      if (response.status >= 500 || response.status === 429) retriable = true;
+      if (!response.ok || body.error) throw new Error(body.error || ('HTTP ' + response.status));
+      return body;
+    } catch (err) {
+      lastError = err;
+      if (!retriable || attempt === maxAttempts) throw err;
+      await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
-  const body = await response.json().catch(() => ({}));
-  if (response.status === 401 || response.status === 403) setAuthUiState(false);
-  if (!response.ok || body.error) throw new Error(body.error || ('HTTP ' + response.status));
-  return body;
+  throw lastError;
 }
 
 // Global Drag & Drop prevent default to allow drop zone handling
@@ -3531,13 +3554,25 @@ function reportSummaryCustomers(r) {
 function pickDefinedSummary(r) {
   if (!r || typeof r !== 'object') return {};
   const out = {};
-  for (const k of ['total','totalSales','foodTotal','drinkTotal','salesCount','topProducts','totalCustomers','lunchTotal','dinnerTotal','lunchCustomers','dinnerCustomers','weekdayBreakdown','hourlyBreakdown','createdAt','parserVersion','verificationVersion','categoryVersion','mealPeriodVersion']) {
-    if (r[k] !== undefined) out[k] = r[k];
+  for (const k of ['total','totalSales','foodTotal','drinkTotal','roomTotal','otherTotal','chargeTotal','salesCount','topProducts','totalCustomers','lunchTotal','dinnerTotal','lunchCustomers','dinnerCustomers','weekdayBreakdown','hourlyBreakdown','sourceMonths','createdAt','parserVersion','verificationVersion','categoryVersion','mealPeriodVersion']) {
+    if (r[k] !== undefined && r[k] !== null) out[k] = r[k];
   }
   return out;
 }
 
 let savedReportsLoadError = null;
+
+// 保存レポート一覧・詳細のセッション内キャッシュ（正本はクラウドのまま）。
+// 直近に成功した取得結果を保持し、瞬間的な通信断やサーバー混雑の間も
+// AI チャットが「最後に確認できた全データ」で回答を継続できるようにする。
+const savedReportsIndexCache = new Map();   // key: STORE_KEY|kind|limit -> { time, rows }
+const savedReportDetailCache = new Map();   // key: STORE_KEY|id -> { time, report }
+const SAVED_REPORTS_INDEX_TTL_MS = 90 * 1000;
+const SAVED_REPORT_DETAIL_TTL_MS = 10 * 60 * 1000;
+function invalidateSavedReportsCache() {
+  savedReportsIndexCache.clear();
+  savedReportDetailCache.clear();
+}
 
 async function fetchSupabaseReports(options = {}) {
   try {
@@ -3557,13 +3592,28 @@ async function fetchSupabaseReports(options = {}) {
     }).filter(r => r.id && !isCategoryOverridesReportId(r.id) && r.title !== '商品分類ルール');
 
     const fetchKind = async (k, lim) => {
-      const qs = new URLSearchParams({
-        store_key: STORE_KEY,
-        limit: String(lim),
-        kind: k
-      });
-      const body = await adminApiFetch('/pos-journals/saved-reports?' + qs.toString(), { method: 'GET' });
-      return mapRows(body.items);
+      const cacheKey = `${STORE_KEY}|${k}|${lim}`;
+      const cached = savedReportsIndexCache.get(cacheKey);
+      if (cached && (Date.now() - cached.time) < SAVED_REPORTS_INDEX_TTL_MS) return cached.rows;
+      try {
+        const qs = new URLSearchParams({
+          store_key: STORE_KEY,
+          limit: String(lim),
+          kind: k
+        });
+        const body = await adminApiFetch('/pos-journals/saved-reports?' + qs.toString(), { method: 'GET' });
+        const rows = mapRows(body.items);
+        savedReportsIndexCache.set(cacheKey, { time: Date.now(), rows });
+        return rows;
+      } catch (err) {
+        // 取得失敗時は、期限切れでも直近に成功した一覧で回答を継続する。
+        // （保存・削除時はキャッシュを無効化するため、古い一覧で上書きされる心配はない）
+        if (cached) {
+          console.warn('saved-reports fetch failed; using last successful index:', err);
+          return cached.rows;
+        }
+        throw err;
+      }
     };
 
     if (kind === 'all') {
@@ -3589,6 +3639,9 @@ async function fetchSupabaseReports(options = {}) {
 }
 
 async function fetchSupabaseReportById(id) {
+  const cacheKey = `${STORE_KEY}|${id}`;
+  const cached = savedReportDetailCache.get(cacheKey);
+  if (cached && (Date.now() - cached.time) < SAVED_REPORT_DETAIL_TTL_MS) return { ...cached.report };
   try {
     const body = await adminApiFetch('/pos-journals/saved-reports/item?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id), { method: 'GET' });
     const row = body.item;
@@ -3597,14 +3650,21 @@ async function fetchSupabaseReportById(id) {
       return null;
     }
     const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
-    return {
+    const report = {
       id: row.id,
       title: row.title || d.title,
       period: row.period || d.period,
       createdAt: row.created_at || d.createdAt,
       ...d
     };
+    savedReportDetailCache.set(cacheKey, { time: Date.now(), report });
+    return { ...report };
   } catch (e) {
+    // 詳細取得の一時失敗時も、直近に成功した内容があればそれで回答を継続する。
+    if (cached) {
+      console.warn('fetchSupabaseReportById failed; using cached detail:', e);
+      return { ...cached.report };
+    }
     console.error('fetchSupabaseReportById error:', e);
     savedReportsLoadError = e instanceof Error ? e : new Error(String(e));
     return null;
@@ -3751,6 +3811,7 @@ async function writeSavedReports(reports, newRecords) {
     }
 
     purgeLocalCloudDataCaches();
+    invalidateSavedReportsCache();
     if (uploaded < toUpload.length || failed > 0) {
       return {
         ok: false,
@@ -3783,6 +3844,7 @@ async function deleteSavedReport(id) {
       body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
     });
     purgeLocalCloudDataCaches();
+    invalidateSavedReportsCache();
     return true;
   } catch (e) {
     console.error('deleteSavedReport error:', e);
