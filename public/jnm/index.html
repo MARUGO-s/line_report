@@ -3707,9 +3707,24 @@ function selectReportsForSavedMonthGroup(group, activeReport = currentReport) {
     if (!existing || (existing === activeReport && report !== activeReport)) byId.set(id, report);
   }
   const reports = [...byId.values(), ...withoutId];
+
+  // 単月の「月間」を最優先。合算（複数月）を月の代表にすると、後段で除外されて
+  // その月が月次一覧から消える（2025年2月・11月で実際に発生）。
+  const singleMonthly = reports.filter((report) => isSingleMonthCanonicalReport(report));
+  if (singleMonthly.length) {
+    let best = singleMonthly.find((report) => report !== activeReport) || singleMonthly[0];
+    for (const report of singleMonthly) {
+      if (reportSummaryTotal(report) > reportSummaryTotal(best)) best = report;
+    }
+    return [best];
+  }
+
+  // 月間が無い月は日別を全日分返す（合算は月次代表に使わない）
+  const nonAggregate = reports.filter((report) => !isCrossMonthAggregateReport(report));
+  if (nonAggregate.length) return nonAggregate;
+
   const monthlyReports = reports.filter(report => isMonthlyReportTitle(report?.title));
   if (!monthlyReports.length) return reports;
-  // 検索時はクラウド保存済み月間を正本にする。画面上の途中集計が同月でも上書きしない。
   const savedMonthly = monthlyReports.find(report => report !== activeReport);
   return [savedMonthly || monthlyReports[0]];
 }
@@ -9168,6 +9183,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const toKey = rangeRef.toYear * 12 + rangeRef.toMonth;
     const [lo, hi] = fromKey <= toKey ? [fromKey, toKey] : [toKey, fromKey];
     const matched = allReports.filter(r => {
+      // 合算は開始月だけにぶら下がり月次穴を作るため、範囲集計の候補から除外する
+      if (isCrossMonthAggregateReport(r)) return false;
       const ym = extractYearMonthFromText(r.period || r.title || '');
       if (!ym) return false;
       const key = ym.year * 12 + ym.month;
