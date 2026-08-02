@@ -188,18 +188,36 @@ ${cleanText}
         }
 
         // ③ Supabase store_knowledge_documents テーブルへ自動保存
+        // DB CHECK制約 (施策, メニュー, 価格改定, イベント, マニュアル, その他) へのマッピング
+        const validCategories = ["施策", "メニュー", "価格改定", "イベント", "マニュアル", "その他"];
+        let dbCategory = categorizedResult.category || "その他";
+        let subCategoryTag = "";
+
+        if (!validCategories.includes(dbCategory)) {
+          subCategoryTag = dbCategory;
+          if (dbCategory === "現場日報") dbCategory = "その他";
+          else if (dbCategory === "周辺情報") dbCategory = "イベント";
+          else dbCategory = "その他";
+        }
+
+        const finalTags = ["LINE投稿"];
+        if (subCategoryTag) finalTags.push(subCategoryTag);
+        if (Array.isArray(categorizedResult.tags)) {
+          categorizedResult.tags.forEach((t: string) => { if (!finalTags.includes(t)) finalTags.push(t); });
+        }
+
         const searchText = normalizeSearchText(
-          `${categorizedResult.title} ${categorizedResult.summary} ${cleanText} ${(categorizedResult.tags || []).join(" ")}`
+          `${categorizedResult.title} ${categorizedResult.summary} ${cleanText} ${finalTags.join(" ")}`
         );
 
         const record = {
           store_partition_key: storeKey,
-          category: categorizedResult.category || "現場日報",
+          category: dbCategory,
           title: categorizedResult.title,
           summary: categorizedResult.summary,
           body_text: cleanText,
           search_text: searchText,
-          tags: categorizedResult.tags || ["LINE投稿"],
+          tags: finalTags,
           source_type: "line_post",
           created_by: senderName,
           is_active: true,
