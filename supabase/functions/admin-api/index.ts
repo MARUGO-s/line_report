@@ -210,7 +210,7 @@ ${cleanText}
           `${categorizedResult.title} ${categorizedResult.summary} ${cleanText} ${finalTags.join(" ")}`
         );
 
-        const record = {
+        let record: Record<string, any> = {
           store_partition_key: storeKey,
           category: dbCategory,
           title: categorizedResult.title,
@@ -223,11 +223,21 @@ ${cleanText}
           is_active: true,
         };
 
-        const { data: docData, error: docError } = await supabase
+        let docData, docError;
+        ({ data: docData, error: docError } = await supabase
           .from("store_knowledge_documents")
           .insert(record)
           .select()
-          .single();
+          .single());
+
+        if (docError && docError.message?.includes("source_type")) {
+          record.source_type = "manual";
+          ({ data: docData, error: docError } = await supabase
+            .from("store_knowledge_documents")
+            .insert(record)
+            .select()
+            .single());
+        }
 
         if (docError) throw docError;
 
