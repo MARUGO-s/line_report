@@ -1154,6 +1154,7 @@ Deno.serve(async (req, info) => {
       "/pos-journals",
       "/pos-journals/product-search",
       "/pos-journals/product-cohort",
+      "/pos-journals/cohort-compare",
       "/pos-journals/upload",
       "/pos-journals/file",
       "/pos-journals/download",
@@ -1381,6 +1382,13 @@ Deno.serve(async (req, info) => {
     }
     if (req.method === "GET" && path === "/pos-journals/product-cohort") {
       return json(await comparePosJournalProductCohorts(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/cohort-compare") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await comparePosJournalCohortsGeneral(supabase, body, storeScope), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/download") {
       return json(await fetchPosJournalDownloadUrl(supabase, url), 200)
@@ -7958,9 +7966,488 @@ function serializeCohortBucket(bucket: CohortBucket) {
   }
 }
 
+function filterFromProductSearchObject(value: unknown): PosProductSearchFilter {
+  if (!isRecord(value)) {
+    throw {
+      status: 400,
+      message: "item / item_a / item_b はオブジェクトで指定してください。",
+    } satisfies AppError
+  }
+  const rawQ = String(value.q ?? value.name ?? "").trim()
+  const codeQ = String(value.code ?? "").trim()
+  const unitMin = parseOptionalNonNegativeInt(value.unit_min ?? value.unitMin)
+  const unitMax = parseOptionalNonNegativeInt(value.unit_max ?? value.unitMax)
+  const unitExact = parseOptionalNonNegativeInt(value.unit)
+  const effectiveMin = unitExact != null ? unitExact : unitMin
+  const effectiveMax = unitExact != null ? unitExact : unitMax
+  const tokens = rawQ
+    .split(/[\s　,、/|]+/)
+    .map((t) => normalizePosProductSearchText(t))
+    .filter((t) => t.length >= 1 && !/^\d+$/.test(t))
+  const joinedQ = normalizePosProductSearchText(rawQ).replace(/\d+/g, "")
+  if (
+    !tokens.length && !joinedQ && !codeQ &&
+    effectiveMin == null && effectiveMax == null
+  ) {
+    throw {
+      status: 400,
+      message: "商品条件に q / code / unit のいずれかを指定してください。",
+    } satisfies AppError
+  }
+  return {
+    rawQ,
+    codeQ,
+    tokens,
+    joinedQ,
+    codeNorm: codeQ.replace(/\D/g, ""),
+    unitMin: effectiveMin,
+    unitMax: effectiveMax,
+  }
+}
+
+function receiptHasMatchingItem(
+  receipt: Record<string, unknown>,
+  filter: PosProductSearchFilter,
+): boolean {
+  for (const item of Array.isArray(receipt.items) ? receipt.items : []) {
+    if (!isRecord(item)) continue
+    const name = String(item.name ?? "").trim()
+    if (!name) continue
+    const code = String(item.code ?? "").trim()
+    const unit = toNonNegativeInteger(item.unit)
+    if (itemMatchesPosProductFilter(name, code, unit, filter)) return true
+  }
+  return false
+}
+
+function receiptHasItemClass(
+  receipt: Record<string, unknown>,
+  itemClass: string,
+): boolean {
+  const cls = String(itemClass || "").trim().toLowerCase()
+  for (const item of Array.isArray(receipt.items) ? receipt.items : []) {
+    if (!isRecord(item)) continue
+    const name = String(item.name ?? "").trim()
+    if (!name) continue
+    const n = normalizePosProductSearchText(name)
+    if (cls === "course") {
+      if (
+        n.includes("コ-ス") || n.includes("course") ||
+        /おまかせ\d*皿/.test(n) ||
+        (n.includes("sp") && n.includes("コ-ス"))
+      ) return true
+    } else if (cls === "bottle_wine" || cls === "bottle") {
+      if (
+        (n.includes("ボトル") || n.includes("bottle")) &&
+        (n.includes("ワイン") || n.includes("wine") || n.includes("シャンパ") ||
+          n.includes("スパーク"))
+      ) return true
+      if (n.includes("bottlewine") || n.includes("ボトルワイン")) return true
+    } else if (cls === "glass_wine" || cls === "glass") {
+      if (
+        (n.includes("グラス") || n.includes("glass")) &&
+        (n.includes("ワイン") || n.includes("wine"))
+      ) return true
+      if (n.includes("glasswine") || n.includes("グラスワイン")) return true
+    } else if (cls === "pairing") {
+      if (n.includes("ペアリング") || n.includes("pairing")) return true
+    } else if (cls === "drink_name") {
+      if (
+        /ワイン|wine|ドリンク|drink|ビール|beer|カクテル|cocktail|whisky|ウィスキー|ハイボール|ソフト|ジュース|コーヒー|お茶|シャンパ|スパーク|ペアリング/
+          .test(n)
+      ) return true
+    } else {
+      throw {
+        status: 400,
+        message:
+          `未対応の item_class: ${itemClass}（course / bottle_wine / glass_wine / pairing / drink_name）`,
+      } satisfies AppError
+    }
+  }
+  return false
+}
+
+function receiptMealSide(receipt: Record<string, unknown>): "lunch" | "dinner" {
+  const time = String(receipt.time ?? "")
+  const hourMatch = time.match(/(\d{1,2})/)
+  const hour = hourMatch ? Number(hourMatch[1]) : 18
+  return Number.isFinite(hour) && hour < 16 ? "lunch" : "dinner"
+}
+
+function isWeekendBusinessDate(businessDate: string): boolean {
+  const d = new Date(`${businessDate}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return false
+  const dow = d.getDay()
+  return dow === 0 || dow === 6
+}
+
+type CohortSideChoice = "left" | "right" | "skip"
+
+type NormalizedCohortComparison = {
+  id: string
+  label: string
+  axis: string
+  partition: boolean
+  leftLabel: string
+  rightLabel: string
+  decide: (
+    receipt: Record<string, unknown>,
+    businessDate: string,
+  ) => CohortSideChoice
+}
+
+function normalizeCohortComparisonSpec(
+  value: unknown,
+  index: number,
+): NormalizedCohortComparison {
+  if (!isRecord(value)) {
+    throw {
+      status: 400,
+      message: `comparisons[${index}] はオブジェクトである必要があります。`,
+    } satisfies AppError
+  }
+  const axis = String(value.axis ?? value.type ?? "").trim().toLowerCase()
+  const id = String(value.id ?? `cmp_${index + 1}`).trim() || `cmp_${index + 1}`
+  const label = String(value.label ?? "").trim()
+
+  if (axis === "item_presence" || axis === "product_with_without") {
+    const filter = filterFromProductSearchObject(value.item ?? value)
+    const unitBit = filter.unitMin != null
+      ? `${filter.unitMin}${
+        filter.unitMax != null && filter.unitMax !== filter.unitMin
+          ? `〜${filter.unitMax}`
+          : ""
+      }円`
+      : ""
+    const nameBit = filter.rawQ || filter.codeQ || "対象商品"
+    return {
+      id,
+      label: label || `${nameBit}${unitBit ? `（${unitBit}）` : ""} 利用 vs 非利用`,
+      axis: "item_presence",
+      partition: true,
+      leftLabel: "利用あり",
+      rightLabel: "利用なし",
+      decide: (receipt) =>
+        receiptHasMatchingItem(receipt, filter) ? "left" : "right",
+    }
+  }
+
+  if (axis === "item_class") {
+    const itemClass = String(value.item_class ?? value.itemClass ?? "").trim()
+    const classLabels: Record<string, string> = {
+      course: "コース",
+      bottle_wine: "ボトルワイン",
+      bottle: "ボトルワイン",
+      glass_wine: "グラスワイン",
+      glass: "グラスワイン",
+      pairing: "ペアリング",
+      drink_name: "ドリンク系商品",
+    }
+    const nice = classLabels[itemClass.toLowerCase()] || itemClass
+    return {
+      id,
+      label: label || `${nice}利用 vs 非利用`,
+      axis: "item_class",
+      partition: true,
+      leftLabel: `${nice}利用あり`,
+      rightLabel: `${nice}利用なし`,
+      decide: (receipt) =>
+        receiptHasItemClass(receipt, itemClass) ? "left" : "right",
+    }
+  }
+
+  if (axis === "item_vs_item" || axis === "product_vs_product") {
+    const filterA = filterFromProductSearchObject(value.item_a ?? value.a)
+    const filterB = filterFromProductSearchObject(value.item_b ?? value.b)
+    const exclusive = value.exclusive !== false
+    return {
+      id,
+      label: label ||
+        `${filterA.rawQ || "商品A"} vs ${filterB.rawQ || "商品B"}`,
+      axis: "item_vs_item",
+      partition: false,
+      leftLabel: filterA.rawQ || "商品A",
+      rightLabel: filterB.rawQ || "商品B",
+      decide: (receipt) => {
+        const hasA = receiptHasMatchingItem(receipt, filterA)
+        const hasB = receiptHasMatchingItem(receipt, filterB)
+        if (exclusive) {
+          if (hasA && !hasB) return "left"
+          if (hasB && !hasA) return "right"
+          return "skip"
+        }
+        if (hasA && hasB) return "skip"
+        if (hasA) return "left"
+        if (hasB) return "right"
+        return "skip"
+      },
+    }
+  }
+
+  if (axis === "item_class_vs_class" || axis === "class_vs_class") {
+    const classA = String(value.item_class_a ?? value.class_a ?? "").trim()
+    const classB = String(value.item_class_b ?? value.class_b ?? "").trim()
+    if (!classA || !classB) {
+      throw {
+        status: 400,
+        message: "item_class_vs_class には item_class_a と item_class_b が必要です。",
+      } satisfies AppError
+    }
+    const classLabels: Record<string, string> = {
+      course: "コース",
+      bottle_wine: "ボトルワイン",
+      bottle: "ボトルワイン",
+      glass_wine: "グラスワイン",
+      glass: "グラスワイン",
+      pairing: "ペアリング",
+      drink_name: "ドリンク系商品",
+    }
+    const niceA = classLabels[classA.toLowerCase()] || classA
+    const niceB = classLabels[classB.toLowerCase()] || classB
+    const exclusive = value.exclusive !== false
+    return {
+      id,
+      label: label || `${niceA} vs ${niceB}`,
+      axis: "item_class_vs_class",
+      partition: false,
+      leftLabel: niceA,
+      rightLabel: niceB,
+      decide: (receipt) => {
+        const hasA = receiptHasItemClass(receipt, classA)
+        const hasB = receiptHasItemClass(receipt, classB)
+        if (exclusive) {
+          if (hasA && !hasB) return "left"
+          if (hasB && !hasA) return "right"
+          return "skip"
+        }
+        if (hasA && hasB) return "skip"
+        if (hasA) return "left"
+        if (hasB) return "right"
+        return "skip"
+      },
+    }
+  }
+
+  if (axis === "meal") {
+    return {
+      id,
+      label: label || "ランチ vs ディナー",
+      axis: "meal",
+      partition: true,
+      leftLabel: "ランチ",
+      rightLabel: "ディナー",
+      decide: (receipt) =>
+        receiptMealSide(receipt) === "lunch" ? "left" : "right",
+    }
+  }
+
+  if (axis === "weekday_weekend" || axis === "weekend") {
+    return {
+      id,
+      label: label || "平日 vs 週末",
+      axis: "weekday_weekend",
+      partition: true,
+      leftLabel: "平日",
+      rightLabel: "週末",
+      decide: (_receipt, businessDate) =>
+        isWeekendBusinessDate(businessDate) ? "right" : "left",
+    }
+  }
+
+  if (axis === "guest_size" || axis === "party_size") {
+    const threshold = parseOptionalNonNegativeInt(
+      value.guest_threshold ?? value.threshold ?? 4,
+    ) || 4
+    return {
+      id,
+      label: label || `少人数（〜${threshold - 1}名） vs 多人数（${threshold}名〜）`,
+      axis: "guest_size",
+      partition: true,
+      leftLabel: `${threshold - 1}名以下`,
+      rightLabel: `${threshold}名以上`,
+      decide: (receipt) => {
+        const guests = toNonNegativeInteger(receipt.guests)
+        if (guests <= 0) return "skip"
+        return guests < threshold ? "left" : "right"
+      },
+    }
+  }
+
+  if (axis === "unit_band_among") {
+    const filter = filterFromProductSearchObject(value.item ?? value)
+    const split = parseOptionalNonNegativeInt(
+      value.unit_split ?? value.split ?? 7000,
+    ) || 7000
+    return {
+      id,
+      label: label ||
+        `${filter.rawQ || "対象"} 単価${split}円未満 vs ${split}円以上`,
+      axis: "unit_band_among",
+      partition: false,
+      leftLabel: `${split}円未満`,
+      rightLabel: `${split}円以上`,
+      decide: (receipt) => {
+        let low = false
+        let high = false
+        for (const item of Array.isArray(receipt.items) ? receipt.items : []) {
+          if (!isRecord(item)) continue
+          const name = String(item.name ?? "").trim()
+          if (!name) continue
+          const code = String(item.code ?? "").trim()
+          const unit = toNonNegativeInteger(item.unit)
+          if (!itemMatchesPosProductFilter(name, code, unit, filter)) continue
+          if (unit < split) low = true
+          else high = true
+        }
+        if (low && !high) return "left"
+        if (high && !low) return "right"
+        return "skip"
+      },
+    }
+  }
+
+  throw {
+    status: 400,
+    message:
+      `未対応の比較軸 comparisons[${index}].axis=${axis || "(空)"}。対応: item_presence / item_class / item_vs_item / item_class_vs_class / meal / weekday_weekend / guest_size / unit_band_among`,
+  } satisfies AppError
+}
+
+function slimCohortMonthSide(bucket: CohortBucket) {
+  return {
+    receipt_count: bucket.receipt_count,
+    guests: bucket.guests,
+    total_sales: bucket.total_sales,
+    avg_spend: bucket.guests > 0
+      ? Math.round(bucket.total_sales / bucket.guests)
+      : 0,
+  }
+}
+
 /**
- * 対象商品を含む会計 vs 含まない会計をジャーナル全件から分割集計する。
- * ドリンク／フード金額は明細の name+code を返し、クライアントの商品マスタで分類する。
+ * 汎用: 複数の比較軸をジャーナル1回走査で集計する。
+ * 利用/非利用・昼夜・平日週末・人数帯・商品A vs B などに対応。
+ */
+async function comparePosJournalCohortsGeneral(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    body.store_key || body.store || storeScope,
+  )
+  if (storeScope && storeKey.toLowerCase() !== storeScope.toLowerCase()) {
+    throw {
+      status: 403,
+      message: "他店舗のデータにはアクセスできません。",
+    } satisfies AppError
+  }
+  const monthFrom = parseOptionalYearMonthParam(body.month_from, "month_from")
+  const monthTo = parseOptionalYearMonthParam(body.month_to, "month_to")
+  const rawList = Array.isArray(body.comparisons)
+    ? body.comparisons
+    : (isRecord(body.comparison) ? [body.comparison] : [])
+  if (!rawList.length) {
+    throw {
+      status: 400,
+      message: "comparisons 配列（または comparison）を指定してください。",
+    } satisfies AppError
+  }
+  if (rawList.length > 6) {
+    throw {
+      status: 400,
+      message: "comparisons は最大6件までです。",
+    } satisfies AppError
+  }
+  const specs = rawList.map((item, i) => normalizeCohortComparisonSpec(item, i))
+
+  const { data, error } = await supabase
+    .from("pos_journal_files")
+    .select("id, business_date, year_month, parsed_data")
+    .eq("store_partition_key", storeKey)
+    .is("storage_deleted_at", null)
+    .not("parsed_data", "is", null)
+    .order("business_date", { ascending: true })
+    .order("id", { ascending: true })
+  if (error) {
+    throw {
+      status: 500,
+      message: `汎用コホート用ジャーナルの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+
+  const states = specs.map((spec) => ({
+    spec,
+    left: emptyCohortBucket(),
+    right: emptyCohortBucket(),
+    byMonth: new Map<string, { left: CohortBucket; right: CohortBucket }>(),
+  }))
+  let scannedFiles = 0
+  let scannedReceipts = 0
+
+  for (const row of Array.isArray(data) ? data : []) {
+    if (!isRecord(row)) continue
+    const businessDate = String(row.business_date ?? "").slice(0, 10)
+    const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
+    if (monthFrom && yearMonth < monthFrom) continue
+    if (monthTo && yearMonth > monthTo) continue
+    scannedFiles += 1
+    const parsed = row.parsed_data
+    if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
+    for (const receipt of parsed.receipts) {
+      if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
+      scannedReceipts += 1
+      for (const state of states) {
+        const side = state.spec.decide(receipt, businessDate)
+        if (side === "skip") continue
+        let monthBuckets = state.byMonth.get(yearMonth)
+        if (!monthBuckets) {
+          monthBuckets = {
+            left: emptyCohortBucket(),
+            right: emptyCohortBucket(),
+          }
+          state.byMonth.set(yearMonth, monthBuckets)
+        }
+        const target = side === "left" ? state.left : state.right
+        const monthTarget = side === "left"
+          ? monthBuckets.left
+          : monthBuckets.right
+        addReceiptToCohort(target, receipt, businessDate)
+        addReceiptToCohort(monthTarget, receipt, businessDate)
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    store_key: storeKey,
+    month_from: monthFrom,
+    month_to: monthTo,
+    scanned_files: scannedFiles,
+    scanned_receipts: scannedReceipts,
+    comparisons: states.map((state) => ({
+      id: state.spec.id,
+      label: state.spec.label,
+      axis: state.spec.axis,
+      partition: state.spec.partition,
+      left_label: state.spec.leftLabel,
+      right_label: state.spec.rightLabel,
+      left: serializeCohortBucket(state.left),
+      right: serializeCohortBucket(state.right),
+      by_month: [...state.byMonth.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([year_month, buckets]) => ({
+          year_month,
+          left: slimCohortMonthSide(buckets.left),
+          right: slimCohortMonthSide(buckets.right),
+        })),
+    })),
+  }
+}
+
+/**
+ * 対象商品を含む会計 vs 含まない会計（後方互換の専用エンドポイント）。
+ * 内部は汎用コホート比較エンジンを使う。
  */
 async function comparePosJournalProductCohorts(
   supabase: ReturnType<typeof createClient>,
@@ -7978,64 +8465,22 @@ async function comparePosJournalProductCohorts(
     url.searchParams.get("month_to"),
     "month_to",
   )
-
-  const { data, error } = await supabase
-    .from("pos_journal_files")
-    .select("id, business_date, year_month, parsed_data")
-    .eq("store_partition_key", storeKey)
-    .is("storage_deleted_at", null)
-    .not("parsed_data", "is", null)
-    .order("business_date", { ascending: true })
-    .order("id", { ascending: true })
-  if (error) {
-    throw {
-      status: 500,
-      message: `会計コホート用ジャーナルの取得に失敗しました: ${error.message}`,
-    } satisfies AppError
-  }
-
-  const withAll = emptyCohortBucket()
-  const withoutAll = emptyCohortBucket()
-  const byMonth = new Map<string, { with: CohortBucket; without: CohortBucket }>()
-  let scannedFiles = 0
-  let scannedReceipts = 0
-
-  for (const row of Array.isArray(data) ? data : []) {
-    if (!isRecord(row)) continue
-    const businessDate = String(row.business_date ?? "").slice(0, 10)
-    const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
-    if (monthFrom && yearMonth < monthFrom) continue
-    if (monthTo && yearMonth > monthTo) continue
-    scannedFiles += 1
-    const parsed = row.parsed_data
-    if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
-    let monthBuckets = byMonth.get(yearMonth)
-    if (!monthBuckets) {
-      monthBuckets = { with: emptyCohortBucket(), without: emptyCohortBucket() }
-      byMonth.set(yearMonth, monthBuckets)
-    }
-    for (const receipt of parsed.receipts) {
-      if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
-      scannedReceipts += 1
-      let matched = false
-      for (const item of receipt.items) {
-        if (!isRecord(item)) continue
-        const name = String(item.name ?? "").trim()
-        if (!name) continue
-        const code = String(item.code ?? "").trim()
-        const unit = toNonNegativeInteger(item.unit)
-        if (itemMatchesPosProductFilter(name, code, unit, filter)) {
-          matched = true
-          break
-        }
-      }
-      const target = matched ? withAll : withoutAll
-      const monthTarget = matched ? monthBuckets.with : monthBuckets.without
-      addReceiptToCohort(target, receipt, businessDate)
-      addReceiptToCohort(monthTarget, receipt, businessDate)
-    }
-  }
-
+  const general = await comparePosJournalCohortsGeneral(supabase, {
+    store_key: storeKey,
+    month_from: monthFrom,
+    month_to: monthTo,
+    comparisons: [{
+      id: "product_with_without",
+      axis: "item_presence",
+      item: {
+        q: filter.rawQ,
+        code: filter.codeQ,
+        unit_min: filter.unitMin,
+        unit_max: filter.unitMax,
+      },
+    }],
+  }, null)
+  const cmp = Array.isArray(general.comparisons) ? general.comparisons[0] : null
   return {
     ok: true,
     store_key: storeKey,
@@ -8047,33 +8492,22 @@ async function comparePosJournalProductCohorts(
       month_from: monthFrom,
       month_to: monthTo,
     },
-    scanned_files: scannedFiles,
-    scanned_receipts: scannedReceipts,
-    with_product: serializeCohortBucket(withAll),
-    without_product: serializeCohortBucket(withoutAll),
-    by_month: [...byMonth.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([year_month, buckets]) => ({
-        year_month,
-        with_product: {
-          receipt_count: buckets.with.receipt_count,
-          guests: buckets.with.guests,
-          total_sales: buckets.with.total_sales,
-          avg_spend: buckets.with.guests > 0
-            ? Math.round(buckets.with.total_sales / buckets.with.guests)
-            : 0,
-        },
-        without_product: {
-          receipt_count: buckets.without.receipt_count,
-          guests: buckets.without.guests,
-          total_sales: buckets.without.total_sales,
-          avg_spend: buckets.without.guests > 0
-            ? Math.round(buckets.without.total_sales / buckets.without.guests)
-            : 0,
-        },
-      })),
+    scanned_files: general.scanned_files,
+    scanned_receipts: general.scanned_receipts,
+    with_product: cmp?.left || serializeCohortBucket(emptyCohortBucket()),
+    without_product: cmp?.right || serializeCohortBucket(emptyCohortBucket()),
+    by_month: (cmp?.by_month || []).map((m: {
+      year_month: string
+      left: ReturnType<typeof slimCohortMonthSide>
+      right: ReturnType<typeof slimCohortMonthSide>
+    }) => ({
+      year_month: m.year_month,
+      with_product: m.left,
+      without_product: m.right,
+    })),
   }
 }
+
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const stableBytes = new Uint8Array(bytes.byteLength)

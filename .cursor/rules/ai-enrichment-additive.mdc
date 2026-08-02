@@ -23,7 +23,8 @@ alwaysApply: true
    似た目的でも置き換えない。例:
    - 異常月ドリルダウン → `anomalyItemFacts`
    - 商品初出・導入月 → `productTimelineFacts`
-   - 利用/非利用会計比較 → `productCohortFacts`
+   - 利用/非利用会計比較 → `productCohortFacts`（後方互換）
+   - 汎用ジャーナル会計比較 → `journalCohortComparisons`（meal / weekday / item_class / item_vs_item / guest_size 等）
    - 昼夜別 F/D → 月次の `lunchFoodTotal` 等 + `formatMonthlyMealFdTrendLines`
    - 売れ筋 → `rankProductsForAiDisplay`（★大分類除外・コース合算）  
    プロンプト指示も「A があれば A を使え。B があれば B も使え」と併記する。
@@ -33,7 +34,7 @@ alwaysApply: true
    1. `enrichMonthlyMealCategorySplit`
    2. `enrichMonthlyAnomalyItemFacts`
    3. `enrichProductTimelineFacts`
-   4. `enrichProductCohortFacts`（利用/非利用会計の客単価・ドリンク比較）
+   4. `enrichJournalCohortComparisons`（汎用会計比較。商品利用/非利用は `productCohortFacts` にも投影）
    5. （商品ランキング）`rankProductsForAiDisplay` / `selectRequestedProductsForQuery`  
    新レイヤを足すときは末尾（または明確な依存の直後）に挿入し、コメントの一覧も更新する。
 
@@ -42,6 +43,9 @@ alwaysApply: true
 
 6. **API も追加**  
    `admin-api` の新エンドポイントは既存パスを変更・統合しない。`STORE_SCOPED_ALLOWED_PATHS` に追記する。
+   - 商品初出: `GET /pos-journals/product-search`
+   - 商品利用/非利用（互換）: `GET /pos-journals/product-cohort`
+   - 汎用比較: `POST /pos-journals/cohort-compare`（comparisons 配列）
 
 7. **変更前チェック**  
    実装・デプロイ前に、少なくとも次が残っていることを確認する:
@@ -49,6 +53,7 @@ alwaysApply: true
    - 異常月の詳細解析
    - 商品初出・導入月（ジャーナル横断）
    - 商品利用/非利用会計コホート（客単価・ドリンク）
+   - 汎用ジャーナル会計比較（複数軸）
    - コース合算の売れ筋（★ドリンク単独最大の禁止）
    - HTML オフロード／軽量一覧（容量分離）が意図せず巻き戻っていないこと
 
@@ -59,3 +64,4 @@ alwaysApply: true
 - 複数の確定事実を1つの曖昧な文章ブロックに潰して、片方の数値がプロンプトから消える
 - 既存の `formatJournalSpecificFactsForAi` 出力を新フォーマッタだけで置き換える
 - コホート比較があるのに「追加の比較が必要」とだけ答えて数値を使わない
+- 汎用比較APIを商品利用/非利用専用に戻して他軸を捨てる

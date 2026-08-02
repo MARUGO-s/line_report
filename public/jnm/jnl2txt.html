@@ -6831,6 +6831,7 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 【異常月の詳細解析】に高単価コース寄与・単価上昇コースが載っている場合は、その金額・点数・商品名を根拠に述べ、「単体売上が不明／表示されていません」で止めない。
 - 【商品初出・導入月】が載っている場合は、ジャーナル全件横断検索で特定した初出月・単価帯・前後比較を根拠に述べ、「開始月は表示されていません」で止めない。
 - 【商品利用会計 vs 非利用会計】が載っている場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加の比較が必要」「利用/非利用の比較ができない」で止めない。
+- 【ジャーナル会計比較（汎用）】が載っている場合は、昼夜・平日週末・ボトル/グラス・人数帯・商品A vs B など提示された軸の数値を使い、「比較できない」で止めない。
 - 解析欄にも金額が無い場合のみ、数値を捏造せず「※これは推測です」として季節要因に含めてよい。
 
 分析・アドバイスの優先視点:
@@ -8078,9 +8079,28 @@ function wantsProductCohortCompare(msg) {
   const productish = /(コース|商品|メニュー|品目|アイテム|SP|スペシャル)/i.test(s);
   const cohortLang = /(利用会計|非利用|利用と非|有りと無し|ありとなし|付けた会計|注文した会計|含む会計|含まない会計)/.test(s);
   const impactLang = /(客単価|ドリンク|一因|主因|低下|押し下|比較).*(コース|SP|スペシャル)|(コース|SP|スペシャル).*(客単価|ドリンク|一因|主因|低下)/i.test(s);
-  // 導入・初出の文脈で客単価やドリンクへの影響を聞いているときも自動でコホート比較する
   if (wantsProductTimelineSearch(s) && /(客単価|ドリンク|低下|一因|主因|構成)/.test(s)) return true;
   return productish && (cohortLang || impactLang);
+}
+
+/** ジャーナル会計単位の軸比較（商品以外含む）が必要か。年月どうしの期間比較は対象外 */
+function wantsJournalAxisCompare(msg) {
+  const s = String(msg || '');
+  if (wantsProductCohortCompare(s)) return true;
+  if (/(ランチ).*(ディナー)|(ディナー).*(ランチ)|昼夜/.test(s) && /(比較|対比|違い|客単価|ドリンク|どちら)/.test(s)) return true;
+  if (/(平日|週末|土日).*(比較|対比|違い|客単価)|(比較|対比).*(平日|週末|土日)/.test(s)) return true;
+  if (/(ボトル|グラス|ペアリング).*(比較|対比|利用|客単価|違い)|(比較|対比).*(ボトル|グラス|ペアリング)/.test(s)) return true;
+  if (/(コース利用|コースを注文|コースあり|コースなし)/.test(s)) return true;
+  if (/(人数|組|団体|大人数|少人数).*(比較|対比|客単価|違い)/.test(s)) return true;
+  if (/(単価|円).*(コース|SP).*(比較|対比|違い)|(高いコース|安いコース)/.test(s)) return true;
+  if (/と.*を比較|vs\.?|versus/i.test(s) && /(コース|ワイン|ボトル|グラス|ペアリング|SP|ランチ|ディナー|平日|週末)/.test(s)) {
+    // 「2025年と2026年を比較」は期間比較なので除外
+    if (/(\d{4})\s*年.*(\d{4})\s*年/.test(s) && !/(コース|ワイン|ボトル|グラス|ペアリング|SP|ランチ|ディナー|平日|週末|利用)/.test(s.replace(/\d{4}\s*年/g, ''))) {
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 /** 曜日別・時間帯別・ランチ／ディナーなど、月内の切り口を聞かれているか */
@@ -8382,6 +8402,8 @@ function formatJournalSpecificFactsForAi(period, query, indent = '') {
   if (productTimelineLines) lines.push(...productTimelineLines.split('\n').filter(Boolean));
   const productCohortLines = formatProductCohortFactsForAi(period?.productCohortFacts, indent);
   if (productCohortLines) lines.push(...productCohortLines.split('\n').filter(Boolean));
+  const journalCohortLines = formatJournalCohortComparisonsForAi(period?.journalCohortComparisons, indent);
+  if (journalCohortLines) lines.push(...journalCohortLines.split('\n').filter(Boolean));
   return lines.length ? `\n${lines.join('\n')}` : '';
 }
 
@@ -8864,6 +8886,18 @@ async function searchCloudJournalProductCohort(hints) {
   return await adminApiFetch('/pos-journals/product-cohort?' + params.toString(), { method: 'GET' });
 }
 
+async function searchCloudJournalCohortCompare(comparisons, monthFrom, monthTo) {
+  return await adminApiFetch('/pos-journals/cohort-compare', {
+    method: 'POST',
+    body: JSON.stringify({
+      store_key: STORE_KEY,
+      month_from: monthFrom || undefined,
+      month_to: monthTo || undefined,
+      comparisons: Array.isArray(comparisons) ? comparisons.slice(0, 6) : []
+    })
+  });
+}
+
 /** APIが返した明細を店舗マスタでフード／飲料に分類し、客単価・ドリンク指標を確定する */
 function classifyCohortSide(rawSide) {
   const side = rawSide && typeof rawSide === 'object' ? rawSide : {};
@@ -8921,17 +8955,7 @@ function classifyCohortSide(rawSide) {
   };
 }
 
-/**
- * 対象商品の利用会計 vs 非利用会計をジャーナル全件から比較する（追加レイヤ）。
- * 既存の初出・異常月・F/Dレイヤは変更しない。
- */
-async function enrichProductCohortFacts(query, productTimelineFacts, monthlyBreakdown) {
-  if (!wantsProductCohortCompare(query)) return null;
-
-  const hints = productTimelineFacts?.hints || extractProductSearchHints(query);
-  if (!hints.q && !hints.code && hints.unit == null) return null;
-
-  // 導入後〜質問対象期間に絞ると「導入の影響」比較が明確になる
+function resolveCohortMonthRange(productTimelineFacts, monthlyBreakdown) {
   const months = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
     .map((m) => m.key)
     .filter(Boolean)
@@ -8940,41 +8964,229 @@ async function enrichProductCohortFacts(query, productTimelineFacts, monthlyBrea
   let monthFrom = firstMonth || (months[0] || '');
   let monthTo = months.length ? months[months.length - 1] : '';
   if (firstMonth && months.length) {
-    // 初出月以降かつ質問対象月と交差
     const inScope = months.filter((k) => k >= firstMonth);
     if (inScope.length) {
       monthFrom = inScope[0];
       monthTo = inScope[inScope.length - 1];
     }
   }
+  return { monthFrom, monthTo };
+}
 
-  let raw;
-  try {
-    raw = await searchCloudJournalProductCohort({
-      ...hints,
-      monthFrom: monthFrom || undefined,
-      monthTo: monthTo || undefined
+/**
+ * 質問文から汎用ジャーナル比較スペックを組み立てる（最大6件）。
+ * 商品利用/非利用・昼夜・平日週末・ボトル/グラス・人数帯・単価帯などに対応。
+ */
+function detectJournalComparisonSpecs(query, productHints) {
+  const s = String(query || '');
+  const specs = [];
+  const seen = new Set();
+  const add = (spec) => {
+    if (!spec || !spec.axis) return;
+    const key = spec.id || `${spec.axis}:${JSON.stringify(spec.item || spec.item_class || spec.item_a || '')}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    specs.push(spec);
+  };
+
+  const hints = productHints || extractProductSearchHints(s);
+  if (wantsProductCohortCompare(s) && (hints.q || hints.code || hints.unit != null)) {
+    add({
+      id: 'product_with_without',
+      axis: 'item_presence',
+      item: {
+        q: hints.q || '',
+        code: hints.code || '',
+        unit_min: hints.unitMin,
+        unit_max: hints.unitMax
+      }
     });
-  } catch (err) {
-    console.warn('product cohort search failed:', err);
-    return { error: err?.message || String(err), hints };
   }
 
-  const withSide = classifyCohortSide(raw?.with_product);
-  const withoutSide = classifyCohortSide(raw?.without_product);
+  if (/(ランチ).*(ディナー)|(ディナー).*(ランチ)|昼夜/.test(s) && /(比較|対比|違い|客単価|ドリンク|どちら)/.test(s)) {
+    add({ id: 'meal', axis: 'meal', label: 'ランチ vs ディナー' });
+  }
+  if (/(平日|週末|土日).*(比較|対比|違い|客単価)|(比較|対比).*(平日|週末|土日)/.test(s)) {
+    add({ id: 'weekday_weekend', axis: 'weekday_weekend', label: '平日 vs 週末' });
+  }
+  if (/(コース利用|コースを注文|コースあり|コースなし)/.test(s) ||
+    (/(コース).*(利用|非利用|比較)/.test(s) && !/SP|スペシャル/.test(s))) {
+    add({ id: 'course_class', axis: 'item_class', item_class: 'course' });
+  }
+  if (/ボトル/.test(s) && /(比較|対比|利用|客単価|グラス)/.test(s)) {
+    add({ id: 'bottle_wine', axis: 'item_class', item_class: 'bottle_wine' });
+  }
+  if (/グラス/.test(s) && /(比較|対比|利用|客単価|ボトル)/.test(s)) {
+    add({ id: 'glass_wine', axis: 'item_class', item_class: 'glass_wine' });
+  }
+  if (/ボトル/.test(s) && /グラス/.test(s) && /(比較|対比|違い|どちら)/.test(s)) {
+    add({
+      id: 'bottle_vs_glass',
+      axis: 'item_class_vs_class',
+      exclusive: true,
+      item_class_a: 'bottle_wine',
+      item_class_b: 'glass_wine',
+      label: 'ボトルワイン会計 vs グラスワイン会計'
+    });
+  }
+  if (/ペアリング/.test(s) && /(比較|対比|利用|客単価|違い)/.test(s)) {
+    add({ id: 'pairing', axis: 'item_class', item_class: 'pairing' });
+  }
+  if (/(人数|組|団体|大人数|少人数).*(比較|対比|客単価|違い)/.test(s)) {
+    const th = (s.match(/(\d{1,2})\s*名/) || [])[1];
+    add({
+      id: 'guest_size',
+      axis: 'guest_size',
+      guest_threshold: th ? Number(th) : 4
+    });
+  }
+  if ((hints.allUnits && hints.allUnits.length >= 2) || /(高いコース|安いコース|単価帯)/.test(s)) {
+    const units = hints.allUnits || [];
+    const split = units.length >= 2
+      ? Math.round((Math.min(...units) + Math.max(...units)) / 2)
+      : (hints.unit != null ? hints.unit : 7000);
+    if (hints.q || /コース|SP|スペシャル/.test(s)) {
+      add({
+        id: 'unit_band',
+        axis: 'unit_band_among',
+        item: { q: hints.q || 'コース' },
+        unit_split: split
+      });
+    }
+  }
+
+  // 「AとBを比較」で商品っぽい2語
+  const vsMatch = s.match(/([^\s、。]{2,20}?)\s*(?:と|／|\/|vs\.?|versus)\s*([^\s、。]{2,20}?)\s*(?:を)?(?:比較|対比)/i);
+  if (vsMatch) {
+    const a = vsMatch[1].replace(/の会計|会計|の客単価|客単価/g, '').trim();
+    const b = vsMatch[2].replace(/の会計|会計|の客単価|客単価/g, '').trim();
+    if (a && b && !/^\d{4}/.test(a) && !/^\d{4}/.test(b) &&
+      /(コース|ワイン|ボトル|グラス|ペアリング|SP|ランチ|ディナー|平日|週末)/.test(a + b)) {
+      if (/ランチ|ディナー/.test(a + b)) add({ id: 'meal', axis: 'meal' });
+      else if (/平日|週末|土日/.test(a + b)) add({ id: 'weekday_weekend', axis: 'weekday_weekend' });
+      else {
+        add({
+          id: 'item_vs_item',
+          axis: 'item_vs_item',
+          exclusive: true,
+          item_a: { q: a },
+          item_b: { q: b },
+          label: `${a} vs ${b}`
+        });
+      }
+    }
+  }
+
+  return specs.slice(0, 6);
+}
+
+function hydrateJournalComparisonResult(rawCmp) {
+  const left = classifyCohortSide(rawCmp?.left);
+  const right = classifyCohortSide(rawCmp?.right);
   return {
-    hints,
-    monthFrom: raw?.query?.month_from || monthFrom,
-    monthTo: raw?.query?.month_to || monthTo,
-    scannedFiles: raw?.scanned_files || 0,
-    scannedReceipts: raw?.scanned_receipts || 0,
-    withProduct: withSide,
-    withoutProduct: withoutSide,
-    avgSpendDiff: withSide.avgSpend - withoutSide.avgSpend,
-    drinkPerGuestDiff: withSide.drinkPerGuest - withoutSide.drinkPerGuest,
-    drinkTotalDiff: withSide.drinkTotal - withoutSide.drinkTotal,
-    byMonth: Array.isArray(raw?.by_month) ? raw.by_month.slice(-18) : []
+    id: rawCmp?.id || '',
+    label: rawCmp?.label || '',
+    axis: rawCmp?.axis || '',
+    partition: !!rawCmp?.partition,
+    leftLabel: rawCmp?.left_label || '左側',
+    rightLabel: rawCmp?.right_label || '右側',
+    left,
+    right,
+    avgSpendDiff: left.avgSpend - right.avgSpend,
+    drinkPerGuestDiff: left.drinkPerGuest - right.drinkPerGuest,
+    byMonth: Array.isArray(rawCmp?.by_month) ? rawCmp.by_month.slice(-18) : []
   };
+}
+
+/**
+ * 汎用ジャーナル比較（複数軸）。商品利用/非利用は従来の productCohortFacts にも投影する。
+ */
+async function enrichJournalCohortComparisons(query, productTimelineFacts, monthlyBreakdown) {
+  if (!wantsJournalAxisCompare(query)) {
+    return { comparisons: [], productCohortFacts: null };
+  }
+  const hints = productTimelineFacts?.hints || extractProductSearchHints(query);
+  const specs = detectJournalComparisonSpecs(query, hints);
+  if (!specs.length) {
+    return { comparisons: [], productCohortFacts: null };
+  }
+  const { monthFrom, monthTo } = resolveCohortMonthRange(productTimelineFacts, monthlyBreakdown);
+  let raw;
+  try {
+    raw = await searchCloudJournalCohortCompare(specs, monthFrom || undefined, monthTo || undefined);
+  } catch (err) {
+    console.warn('journal cohort-compare failed:', err);
+    return {
+      comparisons: [{ error: err?.message || String(err), label: 'ジャーナル比較' }],
+      productCohortFacts: null
+    };
+  }
+  const comparisons = (Array.isArray(raw?.comparisons) ? raw.comparisons : [])
+    .map(hydrateJournalComparisonResult);
+  const meta = {
+    monthFrom: raw?.month_from || monthFrom,
+    monthTo: raw?.month_to || monthTo,
+    scannedFiles: raw?.scanned_files || 0,
+    scannedReceipts: raw?.scanned_receipts || 0
+  };
+  const comparisonsWithMeta = comparisons.map((c) => ({ ...c, ...meta }));
+
+  // 後方互換: 商品利用/非利用を従来フィールドにも載せる
+  let productCohortFacts = null;
+  const productCmp = comparisonsWithMeta.find((c) => c.axis === 'item_presence' || c.id === 'product_with_without');
+  if (productCmp) {
+    productCohortFacts = {
+      hints,
+      monthFrom: meta.monthFrom,
+      monthTo: meta.monthTo,
+      scannedFiles: meta.scannedFiles,
+      scannedReceipts: meta.scannedReceipts,
+      withProduct: productCmp.left,
+      withoutProduct: productCmp.right,
+      avgSpendDiff: productCmp.avgSpendDiff,
+      drinkPerGuestDiff: productCmp.drinkPerGuestDiff,
+      drinkTotalDiff: (productCmp.left.drinkTotal || 0) - (productCmp.right.drinkTotal || 0),
+      byMonth: (productCmp.byMonth || []).map((m) => ({
+        year_month: m.year_month,
+        with_product: m.left,
+        without_product: m.right
+      }))
+    };
+  }
+
+  return { comparisons: comparisonsWithMeta, productCohortFacts };
+}
+
+/** @deprecated 汎用 enrichJournalCohortComparisons へ委譲（既存呼び出し互換） */
+async function enrichProductCohortFacts(query, productTimelineFacts, monthlyBreakdown) {
+  const packed = await enrichJournalCohortComparisons(query, productTimelineFacts, monthlyBreakdown);
+  return packed.productCohortFacts;
+}
+
+function formatCohortSideLines(indent, label, side) {
+  const lines = [];
+  if (!side || !(side.receiptCount > 0)) {
+    lines.push(`${indent}  - ${label}: 該当会計なし`);
+    return lines;
+  }
+  lines.push(
+    `${indent}  - ${label}: ${side.receiptCount}会計 / ${side.guests}名 / 売上 ${yen(side.totalSales)} / 客単価 ${yen(side.avgSpend)}`
+  );
+  lines.push(
+    `${indent}    フード ${yen(side.foodTotal)}（客単価相当 ${yen(side.foodPerGuest)}） / ドリンク ${yen(side.drinkTotal)}（客あたり ${yen(side.drinkPerGuest)}） / F${side.foodPctOfFd}%:D${side.drinkPctOfFd}%（飲食内）`
+  );
+  if (side.lunchGuests || side.dinnerGuests) {
+    lines.push(
+      `${indent}    ランチ客単価 ${yen(side.lunchAvgSpend)}（${side.lunchGuests}名） / ディナー客単価 ${yen(side.dinnerAvgSpend)}（${side.dinnerGuests}名）`
+    );
+  }
+  if ((side.topDrinkItems || []).length) {
+    lines.push(
+      `${indent}    ドリンク上位: ` +
+      side.topDrinkItems.slice(0, 5).map((d) => `${d.name} ${yen(d.amt)}`).join('、')
+    );
+  }
+  return lines;
 }
 
 function formatProductCohortFactsForAi(facts, indent = '') {
@@ -8994,32 +9206,8 @@ function formatProductCohortFactsForAi(facts, indent = '') {
   lines.push(
     `${indent}  - 条件: ${hintBits.join(' / ') || '（条件なし）'}／期間 ${period}／走査 ${facts.scannedFiles || 0}ファイル・${facts.scannedReceipts || 0}会計`
   );
-
-  const fmt = (label, side) => {
-    if (!side || !(side.receiptCount > 0)) {
-      lines.push(`${indent}  - ${label}: 該当会計なし`);
-      return;
-    }
-    lines.push(
-      `${indent}  - ${label}: ${side.receiptCount}会計 / ${side.guests}名 / 売上 ${yen(side.totalSales)} / 客単価 ${yen(side.avgSpend)}`
-    );
-    lines.push(
-      `${indent}    フード ${yen(side.foodTotal)}（客単価相当 ${yen(side.foodPerGuest)}） / ドリンク ${yen(side.drinkTotal)}（客あたり ${yen(side.drinkPerGuest)}） / F${side.foodPctOfFd}%:D${side.drinkPctOfFd}%（飲食内）`
-    );
-    if (side.lunchGuests || side.dinnerGuests) {
-      lines.push(
-        `${indent}    ランチ客単価 ${yen(side.lunchAvgSpend)}（${side.lunchGuests}名） / ディナー客単価 ${yen(side.dinnerAvgSpend)}（${side.dinnerGuests}名）`
-      );
-    }
-    if ((side.topDrinkItems || []).length) {
-      lines.push(
-        `${indent}    ドリンク上位: ` +
-        side.topDrinkItems.slice(0, 5).map((d) => `${d.name} ${yen(d.amt)}`).join('、')
-      );
-    }
-  };
-  fmt('利用あり（対象商品を含む会計）', facts.withProduct);
-  fmt('利用なし（対象商品を含まない会計）', facts.withoutProduct);
+  lines.push(...formatCohortSideLines(indent, '利用あり（対象商品を含む会計）', facts.withProduct));
+  lines.push(...formatCohortSideLines(indent, '利用なし（対象商品を含まない会計）', facts.withoutProduct));
   if (facts.withProduct?.receiptCount && facts.withoutProduct?.receiptCount) {
     const sign = (n) => (n > 0 ? '+' : '') + yen(n);
     lines.push(
@@ -9041,6 +9229,48 @@ function formatProductCohortFactsForAi(facts, indent = '') {
   }
   return lines.join('\n');
 }
+
+function formatJournalCohortComparisonsForAi(comparisons, indent = '') {
+  const list = Array.isArray(comparisons) ? comparisons : [];
+  if (!list.length) return '';
+  const lines = [`${indent}- ジャーナル会計比較（汎用コホート・複数軸可）:`];
+  for (const cmp of list) {
+    if (cmp.error) {
+      lines.push(`${indent}  - エラー: ${cmp.error}`);
+      continue;
+    }
+    // 商品利用/非利用は専用セクションと重複するため、汎用欄では軸ラベルだけ簡潔に
+    if (cmp.axis === 'item_presence') {
+      lines.push(`${indent}  - ${cmp.label || '商品利用 vs 非利用'}: 詳細は「商品利用会計 vs 非利用会計」節を参照`);
+      continue;
+    }
+    const period = (cmp.monthFrom || cmp.monthTo)
+      ? `${cmp.monthFrom || '開始'}〜${cmp.monthTo || '最新'}`
+      : '';
+    lines.push(
+      `${indent}  - ${cmp.label || cmp.id}（軸:${cmp.axis}${period ? `／${period}` : ''}／走査 ${cmp.scannedFiles || 0}ファイル）`
+    );
+    lines.push(...formatCohortSideLines(indent + '  ', cmp.leftLabel || '左', cmp.left));
+    lines.push(...formatCohortSideLines(indent + '  ', cmp.rightLabel || '右', cmp.right));
+    if (cmp.left?.receiptCount && cmp.right?.receiptCount) {
+      const sign = (n) => (n > 0 ? '+' : '') + yen(n);
+      lines.push(
+        `${indent}    差分（${cmp.leftLabel} − ${cmp.rightLabel}）: 客単価 ${sign(cmp.avgSpendDiff || 0)} / 客あたりドリンク ${sign(cmp.drinkPerGuestDiff || 0)}`
+      );
+    }
+    if ((cmp.byMonth || []).length) {
+      lines.push(`${indent}    月次客単価:`);
+      cmp.byMonth.slice(-8).forEach((m) => {
+        lines.push(
+          `${indent}      - ${m.year_month}: ${cmp.leftLabel} ${yen(m.left?.avg_spend || 0)} / ${cmp.rightLabel} ${yen(m.right?.avg_spend || 0)}`
+        );
+      });
+    }
+  }
+  lines.push(`${indent}  - ※上記はジャーナル会計明細の確定集計。「比較できない／追加比較が必要」で止めないこと`);
+  return lines.join('\n');
+}
+
 
 function shiftYearMonth(ym, deltaMonths) {
   const m = String(ym || '').match(/^(\d{4})-(\d{2})$/);
@@ -10777,7 +11007,7 @@ function needsAiIntentClarification(query) {
     /フード|ドリンク|ワイン|シャンパ|スパークリング|ペアリング|ビール|日本酒|焼酎|ハイボール|カクテル|ウイスキー|アルコール|飲料|構成比|比率|割合|室料|個室|チャージ|席料/,
     /客数|来店客|来店人数|客単価|組数|人数|回転/,
     // wantsItemBreakdown と語彙を揃える（ボトル・コース・杯数などで聞き返さない）
-    /商品|アイテム|メニュー|品目|売れ筋|ランキング|注文|明細|内訳|何が売れ|売れたもの|人気|ボトル|本数|杯数|銘柄|コース|点数|個数|導入|開始|初出|いつから|SP|スペシャル/,
+    /商品|アイテム|メニュー|品目|売れ筋|ランキング|注文|明細|内訳|何が売れ|売れたもの|人気|ボトル|本数|杯数|銘柄|コース|点数|個数|導入|開始|初出|いつから|SP|スペシャル|利用|非利用|平日|週末|人数|ペアリング|グラス/,
     /予測|見通し|予想|将来|来月|翌月/,
     /原因|理由|課題|改善|施策|対策|提案|戦略|どうすれば|何をすべき/
   ].some(pattern => pattern.test(q));
@@ -11357,7 +11587,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     // 2) enrichMonthlyAnomalyItemFacts … 異常月 → anomalyItemFacts
     // 3) enrichProductTimelineFacts   … 商品初出 → productTimelineFacts
     //    （前後比較用月の補完は比較専用。monthlyBreakdown 本体は変更しない）
-    // 4) enrichProductCohortFacts     … 利用/非利用会計 → productCohortFacts
+    // 4) enrichJournalCohortComparisons … 汎用会計比較 → journalCohortComparisons
+    //    （商品利用/非利用は productCohortFacts にも投影・後方互換）
     // 5) rankProductsForAiDisplay     … 売れ筋（★大分類除外・コース合算）
     // プロンプト側も formatVerifiedDetailLines / formatJournalSpecificFactsForAi に
     // 各セクションを併記し、片方を消して他方に統合しないこと。
@@ -11369,11 +11600,13 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       monthSourcesByKey,
       allReports
     );
-    const productCohortFacts = await enrichProductCohortFacts(
+    const cohortPacked = await enrichJournalCohortComparisons(
       q,
       productTimelineFacts,
       monthlyBreakdown
     );
+    const productCohortFacts = cohortPacked?.productCohortFacts || null;
+    const journalCohortComparisons = cohortPacked?.comparisons || [];
 
     // 期間合計は月次代表値の合算を優先（二重計上を避ける）。月が取れない場合のみ従来の合算へフォールバック。
     let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
@@ -11511,7 +11744,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       courseTransactions,
       anomalyItemFacts,
       productTimelineFacts,
-      productCohortFacts
+      productCohortFacts,
+      journalCohortComparisons
     };
   }
 
@@ -12001,7 +12235,7 @@ ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信�
 【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 
-回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   } else if (verifiedData) {
     const monthLines = formatMonthlyBreakdownLines(verifiedData.monthlyBreakdown);
     const monthBlock = monthLines
@@ -12018,7 +12252,7 @@ ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5（★大分類除外・コースは合算）:\n' + formatTopProductsLinesForAi(verifiedData.topProducts, 5) : ''}
 ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
   // 店舗営業情報（クラウド）と店舗ナレッジを、確定集計と必ずセットで添付する。
   let integrated;
@@ -12048,7 +12282,7 @@ ${buildStoreLocationBlockForAi()}
 4. 【12月・クリスマスディナー・必須】12月を含む分析では、宴会需要・客数増に加え、毎年実施するクリスマスディナー（通常コースより高単価）を必ず考慮する。【異常月の詳細解析】に高単価コース寄与・単価上昇コースが載っている場合は、その金額・点数・商品名を根拠に述べ「クリスマスディナー単体の売上は不明／表示されていません」で止めない。金額が解析欄にも無い場合のみ数値を捏造せず「※これは推測です」として季節要因に含める。
 5. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
 6. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
-7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。ただし「異常月の詳細解析」が載っている場合は、ジャーナル／伝票に基づく高単価会計・コース単価比較・寄与金額を必ず使い、「内訳が表示されていません」「寄与は不明」で止めないでください。「商品初出・導入月」が載っている場合は、ジャーナル全件横断検索の初出日・単価帯・導入前後比較を必ず使い、「開始月は表示されていません」で止めないでください。「商品利用会計 vs 非利用会計」が載っている場合は、客単価・ドリンク客あたり・差分を必ず使い、「追加の比較が必要」「比較できない」で止めないでください。売れ筋TOPに「コース系（合算）」がある場合は、コースを分割したままドリンク大分類を単独最大商品と書かないでください（★ドリンク等は商品ではなく大分類）。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
+7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。ただし「異常月の詳細解析」が載っている場合は、ジャーナル／伝票に基づく高単価会計・コース単価比較・寄与金額を必ず使い、「内訳が表示されていません」「寄与は不明」で止めないでください。「商品初出・導入月」が載っている場合は、ジャーナル全件横断検索の初出日・単価帯・導入前後比較を必ず使い、「開始月は表示されていません」で止めないでください。「商品利用会計 vs 非利用会計」や「ジャーナル会計比較（汎用）」が載っている場合は、客単価・ドリンク客あたり・差分を必ず使い、「追加の比較が必要」「比較できない」で止めないでください。売れ筋TOPに「コース系（合算）」がある場合は、コースを分割したままドリンク大分類を単独最大商品と書かないでください（★ドリンク等は商品ではなく大分類）。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
 8. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
 9. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
 10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。資料が「なし」と明示されている場合のみ資料なしで進めてください。
