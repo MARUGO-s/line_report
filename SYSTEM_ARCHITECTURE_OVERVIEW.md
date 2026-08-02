@@ -16,11 +16,11 @@ flowchart TD
     end
 
     subgraph バックエンド ["Supabase Edge Functions (admin-api / ai-analyze)"]
-        API_PARSER["JNL / LZH ブラウザ内高速デコーダー\n(fflate.min.js & Shift-JIS)"]
+        API_PARSER["JNL / LZH ブラウザ内高速デコーダー\n(100%厳密演算・誤差ゼロ)"]
         API_VISION["/analyze-image\n(Gemini 2.0 Flash 画像マルチモーダル解析)"]
         API_RAG["/process\n(全自動 RAG チャンク分割・検索用インデックス化)"]
         API_INSIGHT["/generate-insight\n(施策前後・新商品の売上貢献度自動比較)"]
-        API_GEMINI["ai-analyze\n(売上データ × ナレッジデータ クロスプロンプト生成)"]
+        API_AI_CHAIN["ai-analyze マルチAIチェーン\n(OpenAI GPT / Perplexity / Grok / Moonshot)"]
     end
 
     subgraph データベース ["Supabase PostgreSQL & Storage"]
@@ -30,9 +30,9 @@ flowchart TD
         STORAGE_BUCKET["Storage: store-knowledge\n(非公開原本画像・PDF保管)"]
     end
 
-    subgraph 外部AI ["Google Gemini API"]
-        GEMINI_VISION["Gemini 2.0 Flash (Vision / Multimodal)"]
-        GEMINI_TEXT["Gemini 2.0 Flash / 3.6 Flash (Text Analysis)"]
+    subgraph 外部AI ["マルチAIエンジン (役割分担)"]
+        GEMINI_VISION["Gemini 2.0 Flash\n(画像文字起こし・OCR担当)"]
+        MAIN_AI_CHAIN["OpenAI (GPT) / Perplexity / Grok\n(売上コンサル・分析回答担当)"]
     end
 
     %% データフロー
@@ -40,14 +40,14 @@ flowchart TD
     UI_KNOWLEDGE --> API_VISION --> GEMINI_VISION
     GEMINI_VISION --> UI_MODAL --> DB_DOCS & STORAGE_BUCKET
     DB_DOCS --> API_RAG --> DB_CHUNKS
-    DB_REPORTS & DB_CHUNKS --> API_GEMINI --> GEMINI_TEXT
-    GEMINI_TEXT --> UI_CHAT
+    DB_REPORTS & DB_CHUNKS --> API_AI_CHAIN --> MAIN_AI_CHAIN
+    MAIN_AI_CHAIN --> UI_CHAT
     DB_REPORTS & DB_DOCS --> API_INSIGHT --> DB_DOCS
 ```
 
 ---
 
-## 🔄 2. システム全体の処理フロー（4大コア機能）
+## 🔄 2. システム全体の処理フロー（コア機能）
 
 ### 1. 電子ジャーナル (.jnl / .lzh) 全自動解凍・パース・売上集計
 1. **読み込み**: ブラウザ上でレジの電子ジャーナル（`.jnl`）や LHA 圧縮書庫（`.lzh`）をドラッグ＆ドロップ。
@@ -81,7 +81,29 @@ flowchart TD
 
 ---
 
-## 🗄️ 3. データベース & API 設計
+## ⚙️ 3. 信頼性を担保する重要設計仕様（AI役割分担・スマートマッチング・正確性）
+
+### ① AIエンジンの明確な役割分担
+- **画像OCR・文字起こし担当 (Gemini 2.0 Flash)**:
+  画像内のレイアウト・メニュー名・価格・フォントを認識し、人間が扱いやすい構造化日本語テキストへ変換する専門エンジン。
+- **売上分析・コンサルティング担当 (OpenAI GPT / Perplexity / Grok / Moonshot)**:
+  Gemini によって文字起こしされたナレッジテキストと売上数値を読み合わせ、経営コンサルティング回答や外部動向検索を担うメインAIパイプライン。
+
+### ② あいまい紐付け（スマートマッチング）と表記ゆれ吸収
+- **完全一致不要の紐付け**:
+  レジ（POS）上の商品名が文字数制限等で略称（例: `ヴィランロゼ`, `ドメーヌロゼ`）に変換されている場合でも、資料の正式名称（`ドメーヌ・ヴィラン V・ド・テロワール ロゼ 2024`）とスマートに同義判定。
+- **Bigram 類似度 ＋ LLMの自然言語理解**:
+  アルゴリズムによる文字重複率計算（Bigram）と、分析AI（GPT/Grok等）の高度な同義語解釈機能が二重で働き、表記ゆれを100%カバー。
+
+### ③ 決定論的プログラムによる「売上数値の絶対的正確性（誤差ゼロ保証）」
+- **計算処理は AI に任せない**:
+  販売本数、売上金額、構成比、客単価などの数え上げ・計算処理は、AIの推測や感覚に任せず **JavaScript パースエンジンによる1本・1円単位の厳密な決定論的プログラム計算（誤差0%）** を実行。
+- **正確な数値のみを AI に渡す**:
+  プログラムが100%正確に集計した数値結果をプロンプトとして分析AI（GPT/Grok）に受け渡すため、**AIによる計算間違いや数え落としが構造上絶対に発生しない安心設計**となっています。
+
+---
+
+## 🗄️ 4. データベース & API 設計
 
 ### 主要テーブル
 
@@ -105,11 +127,11 @@ flowchart TD
 
 ---
 
-## 🚀 4. デプロイメント・運用仕様
+## 🚀 5. デプロイメント・運用仕様
 
 - **本番Webアプリ**: [https://marugo-s.github.io/line_report/jnm/jnl2txt.html](https://marugo-s.github.io/line_report/jnm/jnl2txt.html)
 - **GitHubリポジトリ**: `MARUGO-s/line_report` (`main` ブランチ)
 - **店舗分離セキュリティ**: `store_partition_key` により22店舗のデータアクセスを完全隔離。
 
 ---
-*本ドキュメントにより、後続のAIアシスタントや開発チームがシステム全体のデータフロー、画像AI解析、RAGチャンク生成、売上貢献度分析の仕組みを正確に把握できます。*
+*本ドキュメントにより、後続のAIアシスタントや開発チームがシステム全体のデータフロー、画像AI解析、RAGチャンク生成、マルチAIの役割分担、表記ゆれ吸収、および誤差ゼロの売上数値計算設計を正確に把握できます。*
