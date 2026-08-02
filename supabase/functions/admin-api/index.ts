@@ -1152,6 +1152,7 @@ Deno.serve(async (req, info) => {
       "/petty-cash/receipt-image",
       "/petty-cash/receipt-media",
       "/pos-journals",
+      "/pos-journals/product-search",
       "/pos-journals/upload",
       "/pos-journals/file",
       "/pos-journals/download",
@@ -1373,6 +1374,9 @@ Deno.serve(async (req, info) => {
     }
     if (req.method === "GET" && path === "/pos-journals") {
       return json(await fetchPosJournalState(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/product-search") {
+      return json(await searchPosJournalProducts(supabase, url), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/download") {
       return json(await fetchPosJournalDownloadUrl(supabase, url), 200)
@@ -7533,6 +7537,272 @@ async function fetchPosJournalState(
     month,
     files: rows.map(({ parsed_data: _parsedData, ...row }) => row),
     summary,
+  }
+}
+
+/** POS商品名を半角カナ混在でも照合できるよう正規化する */
+function normalizePosProductSearchText(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[ーｰ‐‑–—−]/g, "-")
+    .replace(/コース/g, "コ-ス")
+    .replace(/スペシャル/g, "sp")
+    .replace(/[\s　]+/g, "")
+    .replace(/[ﾞﾟ]/g, "")
+}
+
+function parseOptionalNonNegativeInt(value: unknown): number | null {
+  if (value == null || value === "") return null
+  const n = Number(String(value).replace(/[,，]/g, "").trim())
+  if (!Number.isFinite(n) || n < 0) return null
+  return Math.round(n)
+}
+
+/**
+ * 店舗の全電子ジャーナル（parsed_data）を横断し、商品名・コード・単価帯の初出月を返す。
+ * 「いつから売れたか／導入月」は保存レポートに無くてもジャーナルから逆算できる。
+ */
+async function searchPosJournalProducts(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const rawQ = String(url.searchParams.get("q") ?? "").trim()
+  const codeQ = String(url.searchParams.get("code") ?? "").trim()
+  const unitMin = parseOptionalNonNegativeInt(url.searchParams.get("unit_min"))
+  const unitMax = parseOptionalNonNegativeInt(url.searchParams.get("unit_max"))
+  const unitExact = parseOptionalNonNegativeInt(url.searchParams.get("unit"))
+  const effectiveMin = unitExact != null ? unitExact : unitMin
+  const effectiveMax = unitExact != null ? unitExact : unitMax
+
+  const tokens = rawQ
+    .split(/[\s　,、/|]+/)
+    .map((t) => normalizePosProductSearchText(t))
+    .filter((t) => t.length >= 1 && !/^\d+$/.test(t))
+  // 「SPコース」「スペシャルコース」など連結語は部分一致用にも残す
+  const joinedQ = normalizePosProductSearchText(rawQ).replace(/\d+/g, "")
+  if (!tokens.length && !joinedQ && !codeQ && effectiveMin == null && effectiveMax == null) {
+    throw {
+      status: 400,
+      message: "q（商品名）・code・unit のいずれかを指定してください。",
+    } satisfies AppError
+  }
+
+  const { data, error } = await supabase
+    .from("pos_journal_files")
+    .select("id, business_date, year_month, parsed_data")
+    .eq("store_partition_key", storeKey)
+    .is("storage_deleted_at", null)
+    .not("parsed_data", "is", null)
+    .order("business_date", { ascending: true })
+    .order("id", { ascending: true })
+  if (error) {
+    throw {
+      status: 500,
+      message: `商品検索用ジャーナルの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+
+  type Hit = {
+    business_date: string
+    year_month: string
+    name: string
+    code: string
+    unit: number
+    qty: number
+    amount: number
+  }
+  const hits: Hit[] = []
+  const codeNorm = codeQ.replace(/\D/g, "")
+
+  for (const row of Array.isArray(data) ? data : []) {
+    if (!isRecord(row)) continue
+    const businessDate = String(row.business_date ?? "").slice(0, 10)
+    const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
+    const parsed = row.parsed_data
+    if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
+    for (const receipt of parsed.receipts) {
+      if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
+      for (const item of receipt.items) {
+        if (!isRecord(item)) continue
+        const name = String(item.name ?? "").trim()
+        if (!name) continue
+        const code = String(item.code ?? "").trim()
+        const unit = toNonNegativeInteger(item.unit)
+        const qty = Math.max(1, toNonNegativeInteger(item.qty) || 1)
+        const amount = toNonNegativeInteger(item.amount) || unit * qty
+        const nameNorm = normalizePosProductSearchText(name)
+
+        if (codeNorm) {
+          const itemCodeDigits = code.replace(/\D/g, "")
+          if (!itemCodeDigits.endsWith(codeNorm) && itemCodeDigits !== codeNorm) {
+            continue
+          }
+        }
+        if (effectiveMin != null && unit < effectiveMin) continue
+        if (effectiveMax != null && unit > effectiveMax) continue
+        if (tokens.length || joinedQ) {
+          const tokenOk = tokens.length
+            ? tokens.every((t) => nameNorm.includes(t))
+            : false
+          const joinedOk = joinedQ.length >= 2 ? nameNorm.includes(joinedQ) : false
+          // SP系 + コース を別トークンで聞かれた場合
+          const wantsSp = tokens.some((t) => t === "sp" || t.startsWith("sp") || t.includes("スペシャル")) ||
+            /sp/.test(joinedQ)
+          const wantsCourse = tokens.some((t) => t.includes("コ-ス") || t.includes("course")) ||
+            /コ-ス|course/.test(joinedQ)
+          const looseSpCourse = wantsSp && wantsCourse &&
+            (nameNorm.includes("sp") || nameNorm.includes("スペシャル")) &&
+            (nameNorm.includes("コ-ス") || nameNorm.includes("course"))
+          if (!tokenOk && !joinedOk && !looseSpCourse) continue
+        }
+
+        hits.push({
+          business_date: businessDate,
+          year_month: yearMonth,
+          name,
+          code,
+          unit,
+          qty,
+          amount,
+        })
+      }
+    }
+  }
+
+  const byMonthMap = new Map<string, {
+    year_month: string
+    qty: number
+    amount: number
+    receipt_days: Set<string>
+    names: Map<string, number>
+    codes: Map<string, number>
+    units: Map<number, number>
+  }>()
+  const unitBandMap = new Map<number, {
+    unit: number
+    qty: number
+    amount: number
+    first_month: string
+    last_month: string
+    first_date: string
+    last_date: string
+  }>()
+
+  for (const hit of hits) {
+    let month = byMonthMap.get(hit.year_month)
+    if (!month) {
+      month = {
+        year_month: hit.year_month,
+        qty: 0,
+        amount: 0,
+        receipt_days: new Set(),
+        names: new Map(),
+        codes: new Map(),
+        units: new Map(),
+      }
+      byMonthMap.set(hit.year_month, month)
+    }
+    month.qty += hit.qty
+    month.amount += hit.amount
+    month.receipt_days.add(hit.business_date)
+    month.names.set(hit.name, (month.names.get(hit.name) || 0) + hit.qty)
+    if (hit.code) {
+      month.codes.set(hit.code, (month.codes.get(hit.code) || 0) + hit.qty)
+    }
+    month.units.set(hit.unit, (month.units.get(hit.unit) || 0) + hit.qty)
+
+    let band = unitBandMap.get(hit.unit)
+    if (!band) {
+      band = {
+        unit: hit.unit,
+        qty: 0,
+        amount: 0,
+        first_month: hit.year_month,
+        last_month: hit.year_month,
+        first_date: hit.business_date,
+        last_date: hit.business_date,
+      }
+      unitBandMap.set(hit.unit, band)
+    }
+    band.qty += hit.qty
+    band.amount += hit.amount
+    if (hit.business_date < band.first_date) {
+      band.first_date = hit.business_date
+      band.first_month = hit.year_month
+    }
+    if (hit.business_date > band.last_date) {
+      band.last_date = hit.business_date
+      band.last_month = hit.year_month
+    }
+  }
+
+  const byMonth = [...byMonthMap.values()]
+    .sort((a, b) => a.year_month.localeCompare(b.year_month))
+    .map((m) => ({
+      year_month: m.year_month,
+      qty: m.qty,
+      amount: m.amount,
+      day_count: m.receipt_days.size,
+      names: [...m.names.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([name, qty]) => ({ name, qty })),
+      codes: [...m.codes.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([code, qty]) => ({ code, qty })),
+      units: [...m.units.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([unit, qty]) => ({ unit, qty })),
+    }))
+
+  const unitBands = [...unitBandMap.values()]
+    .sort((a, b) => b.qty - a.qty || a.unit - b.unit)
+
+  const first = hits[0] || null
+  const last = hits.length ? hits[hits.length - 1] : null
+  const nameVariants = [...new Set(hits.map((h) => h.name))].slice(0, 20)
+
+  return {
+    ok: true,
+    store_key: storeKey,
+    query: {
+      q: rawQ,
+      code: codeQ,
+      unit_min: effectiveMin,
+      unit_max: effectiveMax,
+    },
+    scanned_files: Array.isArray(data) ? data.length : 0,
+    match_count: hits.length,
+    total_qty: hits.reduce((s, h) => s + h.qty, 0),
+    total_amount: hits.reduce((s, h) => s + h.amount, 0),
+    first_seen: first
+      ? {
+        business_date: first.business_date,
+        year_month: first.year_month,
+        name: first.name,
+        code: first.code,
+        unit: first.unit,
+        amount: first.amount,
+      }
+      : null,
+    last_seen: last
+      ? {
+        business_date: last.business_date,
+        year_month: last.year_month,
+        name: last.name,
+        code: last.code,
+        unit: last.unit,
+        amount: last.amount,
+      }
+      : null,
+    name_variants: nameVariants,
+    unit_bands: unitBands,
+    by_month: byMonth,
   }
 }
 
