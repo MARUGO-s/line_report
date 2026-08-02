@@ -100,3 +100,13 @@ test('Journal Report pages default to light while preserving an explicit dark ch
   assert.match(appThemeJs, /String\(v \|\| 'light'\)/);
   assert.match(appThemeJs, /catch \(_\) \{ return 'light'; \}/);
 });
+
+test('mobile AI chat follows the visual viewport and keeps its composer visible', () => {
+  assert.match(html, /height: var\(--ai-viewport-height, 100dvh\)/);
+  assert.match(html, /top: var\(--ai-viewport-top, 0px\)/);
+  assert.match(html, /window\.visualViewport\.addEventListener\('resize'/);
+  assert.match(html, /window\.visualViewport\.addEventListener\('scroll'/);
+  assert.match(html, /input\.scrollIntoView\(\{ block: 'nearest'/);
+  assert.match(html, /font-size: 16px;/);
+  assert.match(html, /!e\.isComposing/);
+});

@@ -43,6 +43,13 @@
 
 New records are appended below.
 
+### 2026-08-02 - Journal AI mobile keyboard-safe composer
+
+- Request: スマートフォン／タブレットでソフトウェアキーボード表示時も、AIチャットの入力欄と入力中の文字を見える状態にする。
+- Change: 固定`100vh`をVisual Viewport追従の高さ・上端へ変更。入力欄を縮小対象外にし、フォーカス時の表示位置・最下部スクロールを同期。モバイルは全幅、入力文字16px、44pxタップ領域、safe-area対応。
+- Input: 日本語IME変換中のEnterでは送信しない。
+- Scope: `public/jnm/jnl2txt.html` / `index.html` とフロント回帰テストのみ。DB・Edge Function変更なし。
+
 ### 2026-08-02 - Journal AI conversational saved-data query planner
 
 - Request: 保存済みレポートがあるのに曖昧な質問で「データなし／0」と返さず、必要範囲を対話で確認し、AIトークン量も抑える。
