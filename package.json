@@ -18,7 +18,7 @@
     "test:foodcourt": "node --test tests/foodcourt_*.test.ts",
     "test:reservation": "node --test tests/reservation_*.test.ts",
     "test:receipt": "node --test tests/receipt_*.test.ts",
-    "test:journal-ai": "node --test tests/journal_ai_orchestrate.test.mjs"
+    "test:journal-ai": "node --test tests/journal_ai_orchestrate.test.mjs tests/journal_chat_query_planner.test.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",

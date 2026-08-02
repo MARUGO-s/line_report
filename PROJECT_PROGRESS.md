@@ -2,7 +2,7 @@
 
 ## Document information
 
-- Current date: 2026-07-27
+- Current date: 2026-08-02
 - Repository: `https://github.com/MARUGO-s/line_report`
 - Branch: `main`
 - Work-start HEAD: `e58715f0e8b4a62d9c0622b21ff730060e3e1c4c`
@@ -42,6 +42,13 @@
 ## Continuation log
 
 New records are appended below.
+
+### 2026-08-02 - Journal AI conversational saved-data query planner
+
+- Request: 保存済みレポートがあるのに曖昧な質問で「データなし／0」と返さず、必要範囲を対話で確認し、AIトークン量も抑える。
+- Change: 保存レポートの軽量月次索引を先に確認。「最新月」「直近3/12か月」「全期間」は必要月だけ集約し、期間が曖昧なら保存範囲を示して4択で聞き返す。取得・認証エラーはデータ不存在と区別。
+- UI: Journal Reportのテーマ未設定時はライトモードで起動し、明示的に保存されたダーク設定は維持。
+- Scope: `public/jnm/jnl2txt.html` / `index.html` とフロント回帰テストのみ。DB・Edge Function変更なし。
 
 ### 2026-08-01 - Journal AI Luna + Kimi K3 fallback
 

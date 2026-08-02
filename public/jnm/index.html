@@ -11,7 +11,7 @@
 (function() {
   const KEY = 'line_reservation_calendar_theme';
   function current() {
-    try { return (localStorage.getItem(KEY) || '').toLowerCase() === 'light' ? 'light' : 'dark'; } catch(_) { return 'dark'; }
+    try { return (localStorage.getItem(KEY) || 'light').toLowerCase() === 'dark' ? 'dark' : 'light'; } catch(_) { return 'light'; }
   }
   function apply(theme) {
     const t = theme === 'light' ? 'light' : 'dark';
@@ -3288,6 +3288,8 @@ function pickDefinedSummary(r) {
   return out;
 }
 
+let savedReportsLoadError = null;
+
 async function fetchSupabaseReports(options = {}) {
   try {
     // kind: 'monthly' | 'daily' | 'all'
@@ -3332,6 +3334,7 @@ async function fetchSupabaseReports(options = {}) {
     return await fetchKind(kind, limit);
   } catch (err) {
     console.warn('admin-api fetch error:', err);
+    savedReportsLoadError = err instanceof Error ? err : new Error(String(err));
     return null;
   }
 }
@@ -3366,6 +3369,7 @@ async function hydrateSavedReport(r) {
 
 async function readSavedReports(options = {}) {
   purgeLocalCloudDataCaches();
+  savedReportsLoadError = null;
   try {
     if (!getAdminToken()) return [];
     // 既定: 月間レポートを優先取得し、月間が無い月だけ日別で補完する。
@@ -3414,6 +3418,7 @@ async function readSavedReports(options = {}) {
     return merged.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   } catch (e) {
     console.error('readSavedReports error:', e);
+    savedReportsLoadError = e instanceof Error ? e : new Error(String(e));
     return [];
   }
 }
@@ -7120,9 +7125,110 @@ function extractRangeRef(q) {
   return null;
 }
 
+const SAVED_DATA_CLARIFICATION_MARKER = '保存データの分析対象を選んでください';
+
+function resolveSavedDataClarificationReply(query, chatHistory) {
+  const raw = String(query || '').trim();
+  if (!raw || !Array.isArray(chatHistory)) return raw;
+  let asked = false;
+  for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const item = chatHistory[i];
+    if (!item || item.role !== 'assistant') continue;
+    asked = String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
+    break;
+  }
+  if (!asked) return raw;
+  if (/^1(?:$|[.、)\s])/.test(raw)) return `最新月 ${raw}`;
+  if (/^2(?:$|[.、)\s])/.test(raw)) return `直近3か月 ${raw}`;
+  if (/^3(?:$|[.、)\s])/.test(raw)) return `直近12か月 ${raw}`;
+  if (/^4(?:$|[.、)\s])/.test(raw)) return `全期間 ${raw}`;
+  return raw;
+}
+
+function buildSavedReportCoverage(reports) {
+  const keys = Array.from(new Set((Array.isArray(reports) ? reports : [])
+    .map(monthKeyFromReport)
+    .filter(Boolean))).sort();
+  return {
+    keys,
+    first: keys[0] || '',
+    last: keys[keys.length - 1] || '',
+    monthCount: keys.length
+  };
+}
+
+function formatCoverageMonth(key) {
+  if (!key) return '';
+  const [year, month] = String(key).split('-');
+  return `${year}年${Number(month)}月`;
+}
+
+function resolveIndexedSavedRangeIntent(query, reports) {
+  const q = String(query || '').toLowerCase();
+  const coverage = buildSavedReportCoverage(reports);
+  if (!coverage.keys.length) return null;
+  let selectedKeys = null;
+  let label = '';
+
+  if (/(全期間|全データ|すべての期間|これまで|登録(?:済み)?(?:の)?全|保存(?:済み)?(?:の)?全)/.test(q)) {
+    selectedKeys = coverage.keys;
+    label = `${formatCoverageMonth(coverage.first)}〜${formatCoverageMonth(coverage.last)}（保存済み全期間）`;
+  } else {
+    let count = null;
+    const recent = q.match(/(?:直近|過去)\s*(\d{1,2})\s*(?:か月|ヶ月|ケ月|カ月)/);
+    if (recent) count = Math.max(1, Math.min(36, parseInt(recent[1], 10)));
+    else if (/(直近|過去)\s*(?:半年|6か月|6ヶ月)/.test(q)) count = 6;
+    else if (/(直近|過去)\s*(?:1年|一年|12か月|12ヶ月)/.test(q)) count = 12;
+    if (count) {
+      selectedKeys = coverage.keys.slice(-count);
+      const first = selectedKeys[0];
+      const last = selectedKeys[selectedKeys.length - 1];
+      label = selectedKeys.length === 1
+        ? `${formatCoverageMonth(last)}（最新の保存月）`
+        : `${formatCoverageMonth(first)}〜${formatCoverageMonth(last)}（直近${selectedKeys.length}か月）`;
+    } else if (/(最新|一番新しい|直近の?月|最後の月)/.test(q)) {
+      selectedKeys = [coverage.last];
+      label = `${formatCoverageMonth(coverage.last)}（最新の保存月）`;
+    }
+  }
+
+  if (!selectedKeys || !selectedKeys.length) return null;
+  const selected = new Set(selectedKeys);
+  const matched = reports.filter(r => selected.has(monthKeyFromReport(r)));
+  return matched.length ? { matched, label, coverage } : null;
+}
+
+function buildSavedDataClarificationReply(coverage) {
+  const range = coverage && coverage.monthCount
+    ? `${formatCoverageMonth(coverage.first)}〜${formatCoverageMonth(coverage.last)}（${coverage.monthCount}か月分）`
+    : '保存済み期間を確認できませんでした';
+  return `### 🔎 ${SAVED_DATA_CLARIFICATION_MARKER}
+
+保存済みレポートには **${range}** があります。必要な範囲だけを読み込んで分析するため、次のどれかを選んでください。
+
+1. **最新月**
+2. **直近3か月**
+3. **直近12か月**
+4. **保存済み全期間**
+
+または「2025年」「2025年4月〜2026年3月」のように期間を指定してください。続けて、売上推移・フード／ドリンク比率・客単価・売れ筋・改善策など、知りたい内容も入力できます。`;
+}
+
+function currentReportHasUsableSales() {
+  if (!currentReport) return false;
+  return reportSummaryTotal(currentReport) > 0
+    || Number(currentReport.foodTotal) > 0
+    || Number(currentReport.drinkTotal) > 0
+    || (Array.isArray(currentReport.sales) && currentReport.sales.length > 0);
+}
+
 async function searchSavedReportsByQuery(query, chatHistory = []) {
-  let q = String(query || '').trim().toLowerCase();
+  let q = resolveSavedDataClarificationReply(query, chatHistory).toLowerCase();
   q = resolveRelativeTimeRefs(q);
+
+  if (!getAdminToken() && !currentReportHasUsableSales()) {
+    return { loadError: 'クラウド接続が必要です。' };
+  }
 
   // 続きの質問では直近のユーザー発話から年月を引き継ぐ（相対表現も絶対年月へ解決してから判定）
   const hasPeriodHint = /(\d{4})/.test(q);
@@ -7140,7 +7246,10 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
 
   const reports = await readSavedReports();
   const allReports = currentReport ? [currentReport, ...reports] : reports;
-  if (allReports.length === 0) return null;
+  if (allReports.length === 0) {
+    if (savedReportsLoadError) return { loadError: savedReportsLoadError.message || '保存データの取得に失敗しました。' };
+    return null;
+  }
 
   // 期間範囲クエリ（例:「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
   // 比較（と/、で結ぶ）とは異なり、範囲内の全期間を1つの合算データとして返す。
@@ -7173,7 +7282,13 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
 
   async function summarizeMatched(matched, label) {
     const hydrated = [];
-    for (const r of matched) hydrated.push(await hydrateSavedReport(r));
+    const needsItemDetails = wantsItemBreakdown(q);
+    for (const r of matched) {
+      const hasCoreSummary = Number.isFinite(Number(r?.total ?? r?.totalSales))
+        && Number.isFinite(Number(r?.foodTotal))
+        && Number.isFinite(Number(r?.drinkTotal));
+      hydrated.push((needsItemDetails || !hasCoreSummary) ? await hydrateSavedReport(r) : r);
+    }
 
     const monthly = hydrated.filter(r => String(r.title || '').includes('月間'));
     const use = monthly.length ? monthly : hydrated;
@@ -7286,6 +7401,11 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     };
   }
 
+  // 「最新」「直近Nか月」「全期間」は、保存レポートの軽量索引から必要な月だけ選ぶ。
+  // 全明細をAIへ送らず、月次サマリーへ集約してから渡すためトークン量を抑えられる。
+  const indexedRange = resolveIndexedSavedRangeIntent(q, allReports);
+  if (indexedRange) return await summarizeMatched(indexedRange.matched, `${indexedRange.label}の売上データ`);
+
   // 複数期間の比較依頼（例:「202606と202607の営業比較分析をして」）を検知。
   // 単一期間ロジックだと最初の月だけを拾って確定扱いにしてしまい、AIに「これ以外の数字は禁止」と
   // 指示してしまうため比較ができなくなる。2件以上の年月が見つかった場合はそれぞれ個別に集計して返す。
@@ -7360,6 +7480,10 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     return { notMatchedLabel: `${targetYear}年` };
   }
 
+  if (!currentReportHasUsableSales() && reports.length > 0) {
+    return { needsClarification: true, coverage: buildSavedReportCoverage(reports) };
+  }
+
   return null;
 }
 
@@ -7376,6 +7500,16 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
   const queryResult = await searchSavedReportsByQuery(msg, chatHistory);
 
   if (queryResult) {
+    if (queryResult.loadError) {
+      return `### ⚠️ 保存データを確認できませんでした
+
+クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
+    }
+
+    if (queryResult.needsClarification) {
+      return buildSavedDataClarificationReply(queryResult.coverage);
+    }
+
     if (queryResult.notMatchedLabel) {
       const savedList = await readSavedReports();
       const periods = savedList.map(r => r.period || r.title).filter(Boolean).slice(0, 5).join('、');
@@ -7509,6 +7643,20 @@ async function sendAiChat() {
   // ただし確定した数値を固定テンプレートでそのまま返すのではなく、AIへ「検算済みの正解」として
   // 渡し、AIに文章化させることで、数字の正確性と会話の自然さ・柔軟な追加指示への対応を両立する。
   const queryResult = await searchSavedReportsByQuery(msg, aiChatHistory);
+  if (queryResult && (queryResult.loadError || queryResult.needsClarification)) {
+    removeAiChatLoading(loadingId);
+    const reply = queryResult.loadError
+      ? `### ⚠️ 保存データを確認できませんでした
+
+クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`
+      : buildSavedDataClarificationReply(queryResult.coverage);
+    appendAiChatMessage('ai', reply, { question: msg, provider: 'local-query-planner' });
+    aiChatHistory.push({ role: 'assistant', content: reply });
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+    return;
+  }
   if (queryResult && queryResult.notMatchedLabel) {
     // 期間は認識できたが該当データが無い、という結果は確定事実なのでローカルでそのまま返す
     removeAiChatLoading(loadingId);
