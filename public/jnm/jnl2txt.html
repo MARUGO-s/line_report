@@ -3554,7 +3554,7 @@ function reportSummaryCustomers(r) {
 function pickDefinedSummary(r) {
   if (!r || typeof r !== 'object') return {};
   const out = {};
-  for (const k of ['total','totalSales','foodTotal','drinkTotal','roomTotal','otherTotal','chargeTotal','salesCount','topProducts','totalCustomers','lunchTotal','dinnerTotal','lunchCustomers','dinnerCustomers','weekdayBreakdown','hourlyBreakdown','sourceMonths','createdAt','parserVersion','verificationVersion','categoryVersion','mealPeriodVersion']) {
+  for (const k of ['total','totalSales','foodTotal','drinkTotal','roomTotal','otherTotal','chargeTotal','salesCount','topProducts','totalCustomers','lunchTotal','dinnerTotal','lunchCustomers','dinnerCustomers','lunchFoodTotal','lunchDrinkTotal','dinnerFoodTotal','dinnerDrinkTotal','weekdayBreakdown','hourlyBreakdown','sourceMonths','createdAt','parserVersion','verificationVersion','categoryVersion','mealPeriodVersion']) {
     if (r[k] !== undefined && r[k] !== null) out[k] = r[k];
   }
   return out;
@@ -5494,6 +5494,10 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
     dinnerTotal: dinner.total,
     lunchCustomers: lunch.customers,
     dinnerCustomers: dinner.customers,
+    lunchFoodTotal: lunch.byCategory.get('フード') || 0,
+    lunchDrinkTotal: lunch.byCategory.get('飲料') || 0,
+    dinnerFoodTotal: dinner.byCategory.get('フード') || 0,
+    dinnerDrinkTotal: dinner.byCategory.get('飲料') || 0,
     weatherByDate,
     parserVersion: PARSER_VERSION,
     verificationVersion: VERIFICATION_VERSION,
@@ -6604,17 +6608,30 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - グラスワインの品揃え・ペアリング・ワイン業者とのパートナーシップ（約70社）が競争優位。
 - 【最重要】分析対象ジャーナルの店舗は分かっている。必ずその店舗の住所・エリアを基準に分析し、全店を新宿三丁目基準にしてはいけない。
 
+【ランチ／ディナー分離分析（必須・全分析に常時適用）】
+- 会計時刻の分類規則: 16:00未満＝ランチ、16:00以降＝ディナー（この境界を変更・推測で書き換えない）。
+- 内部分析（客単価・客数・フード割合・ドリンク割合・商品構成・改善提案）は、必ずランチとディナーを分けて計算・記述する。
+- 合算の総売上・総客数は最終サマリーとして使ってよいが、「ディナーのフード／ドリンク比率」「ランチの客単価」などを合算比率や合算客単価で代用してはならない。
+- ランチとディナーのフード／ドリンク内訳がデータにある場合はそれを正本にする。無い場合は合算のフード／ドリンク比率をディナー（またはランチ）の比率だと断定せず、「昼夜合算の構成比」と明示する。
+
+【12月・クリスマスディナー（必須・全分析に常時適用）】
+- 12月は宴会需要・客数増に加え、レストラン固有のクリスマスディナー（通常コースより高単価）が毎年必ず発生する。
+- 12月を含む分析では、売上増・客単価上昇の要因としてクリスマスディナーを必ず考慮し、単なる客数増だけで説明しきらない。
+- クリスマスディナーの正確な売上金額がデータに無い場合でも、「※これは推測です」として季節要因として明記してよい（数値の捏造は禁止）。
+
 分析・アドバイスの優先視点:
 1. 対象店舗の立地（住所・商圏・客層・時間帯）に合った施策
-2. ドリンク（特にワイン）比率・グラス／ボトル・売れ筋
-3. フード×ワインのペアリング・客単価向上
+2. ランチ／ディナーを分けたうえで、ドリンク（特にワイン）比率・グラス／ボトル・売れ筋
+3. フード×ワインのペアリング・客単価向上（昼夜別）
 4. 同エリア姉妹店連携は妥当な場合のみ（新宿三丁目話の他エリア転用禁止）
 5. 提供データに無い原価・在庫・利益は捏造しない`;
 
 const MARUGO_AI_ANALYZE_INSTRUCTION = `${MARUGO_AI_COMPANY_CONTEXT}
 
 与えられた売上データに基づき、経営陣や店長が使える「マルゴグループ店舗経営・売上多角分析＆ワイン営業戦略レポート」をMarkdownで作成してください。
-一般的な居酒屋・Barのテンプレではなく、ワイン提案・ペアリング・ドリンク構成・姉妹店連携を軸に、数値根拠付きで弱点抽出と具体策まで書いてください。`;
+一般的な居酒屋・Barのテンプレではなく、ワイン提案・ペアリング・ドリンク構成・姉妹店連携を軸に、数値根拠付きで弱点抽出と具体策まで書いてください。
+
+【レポート必須】多角分析の章ではランチとディナーを必ず分け、客単価・フード／ドリンク比率を昼夜別で示すこと。期間に12月が含まれる場合はクリスマスディナー要因を必ず言及すること。`;
 
 /** 店舗立地（AI分析用）。全店を新宿三丁目前提にしない。 */
 const STORE_AI_LOCATIONS = {
@@ -6716,6 +6733,29 @@ function simpleMarkdown(text) {
   return out.join('').replace(/<p><\/p>/g, '');
 }
 
+function mealCategoryTotalsFromSales(sales) {
+  const out = {
+    lunchFoodTotal: 0, lunchDrinkTotal: 0,
+    dinnerFoodTotal: 0, dinnerDrinkTotal: 0
+  };
+  for (const s of (Array.isArray(sales) ? sales : [])) {
+    const meal = String(s?.mealPeriod || '');
+    if (meal !== 'ランチ' && meal !== 'ディナー') continue;
+    for (const it of (Array.isArray(s?.items) ? s.items : [])) {
+      const amount = Number(it?.amount) || 0;
+      const category = String(it?.category || '');
+      if (meal === 'ランチ') {
+        if (category === 'フード') out.lunchFoodTotal += amount;
+        else if (category === '飲料') out.lunchDrinkTotal += amount;
+      } else {
+        if (category === 'フード') out.dinnerFoodTotal += amount;
+        else if (category === '飲料') out.dinnerDrinkTotal += amount;
+      }
+    }
+  }
+  return out;
+}
+
 function buildSalesDataForAI() {
   if (!currentReport) return {};
   const d = currentReport;
@@ -6744,6 +6784,11 @@ function buildSalesDataForAI() {
       dinnerTotal: d.dinnerTotal || 0,
       dinnerCustomers: d.dinnerCustomers || 0,
       dinnerAvgSpend: d.dinnerCustomers ? Math.round((d.dinnerTotal || 0) / d.dinnerCustomers) : 0,
+      lunchFoodTotal: d.lunchFoodTotal || 0,
+      lunchDrinkTotal: d.lunchDrinkTotal || 0,
+      dinnerFoodTotal: d.dinnerFoodTotal || 0,
+      dinnerDrinkTotal: d.dinnerDrinkTotal || 0,
+      mealPeriodRule: '会計時刻16:00未満=ランチ / 16:00以降=ディナー',
       weekdayBreakdown: d.weekdayBreakdown || [],
       hourlyBreakdown: d.hourlyBreakdown || [],
       topProducts: d.topProducts || [],
@@ -6831,6 +6876,7 @@ function buildSalesDataForAI() {
     avgSpend: weekdays[w].customers ? Math.round(weekdays[w].total / weekdays[w].customers) : 0
   }));
     
+  const mealCats = mealCategoryTotalsFromSales(sales);
   return {
     title: d.title,
     period: d.period,
@@ -6850,6 +6896,11 @@ function buildSalesDataForAI() {
     dinnerTotal: d.dinnerTotal,
     dinnerCustomers: d.dinnerCustomers,
     dinnerAvgSpend: d.dinnerCustomers ? Math.round(d.dinnerTotal / d.dinnerCustomers) : 0,
+    lunchFoodTotal: mealCats.lunchFoodTotal || d.lunchFoodTotal || 0,
+    lunchDrinkTotal: mealCats.lunchDrinkTotal || d.lunchDrinkTotal || 0,
+    dinnerFoodTotal: mealCats.dinnerFoodTotal || d.dinnerFoodTotal || 0,
+    dinnerDrinkTotal: mealCats.dinnerDrinkTotal || d.dinnerDrinkTotal || 0,
+    mealPeriodRule: '会計時刻16:00未満=ランチ / 16:00以降=ディナー',
     weekdayBreakdown: weekdaySummary,
     hourlyBreakdown: hourlySummary,
     topProducts: topProducts,
@@ -7397,9 +7448,29 @@ function wantsTrend(msg) {
 /** 確定集計の月次内訳をプロンプト／ローカル回答用テキストにする */
 function formatMonthlyBreakdownLines(monthlyBreakdown, indent = '') {
   if (!Array.isArray(monthlyBreakdown) || monthlyBreakdown.length === 0) return '';
-  return monthlyBreakdown.map(m =>
-    `${indent}- ${m.label}: 総売上 ${yen(m.totalSales)}（🍖 ${yen(m.foodTotal)} / 🍹 ${yen(m.drinkTotal)}、客数 ${m.totalCustomers}名、客単価 ${yen(m.avgSpend)}）`
-  ).join('\n');
+  return monthlyBreakdown.map(m => {
+    const lunch = Number(m.lunchTotal) || 0;
+    const dinner = Number(m.dinnerTotal) || 0;
+    const lunchCust = Number(m.lunchCustomers) || 0;
+    const dinnerCust = Number(m.dinnerCustomers) || 0;
+    const lunchAvg = lunchCust ? `／客単価 ${yen(Math.round(lunch / lunchCust))}` : '';
+    const dinnerAvg = dinnerCust ? `／客単価 ${yen(Math.round(dinner / dinnerCust))}` : '';
+    const mealNote = (lunch > 0 || dinner > 0)
+      ? `／ランチ ${yen(lunch)}（${lunchCust}名${lunchAvg}）・ディナー ${yen(dinner)}（${dinnerCust}名${dinnerAvg}）`
+      : '';
+    const lunchFood = Number(m.lunchFoodTotal) || 0;
+    const lunchDrink = Number(m.lunchDrinkTotal) || 0;
+    const dinnerFood = Number(m.dinnerFoodTotal) || 0;
+    const dinnerDrink = Number(m.dinnerDrinkTotal) || 0;
+    let mealCat = '';
+    if (lunchFood + lunchDrink > 0 || dinnerFood + dinnerDrink > 0) {
+      const lTot = lunchFood + lunchDrink || 1;
+      const dTot = dinnerFood + dinnerDrink || 1;
+      mealCat = `／ランチ内 F${Math.round(lunchFood / lTot * 100)}%:D${Math.round(lunchDrink / lTot * 100)}%・ディナー内 F${Math.round(dinnerFood / dTot * 100)}%:D${Math.round(dinnerDrink / dTot * 100)}%`;
+    }
+    const xmas = (Number(m.month) === 12) ? ' ※12月はクリスマスディナー要因を必ず考慮' : '';
+    return `${indent}- ${m.label}: 総売上 ${yen(m.totalSales)}（🍖 ${yen(m.foodTotal)} / 🍹 ${yen(m.drinkTotal)}、客数 ${m.totalCustomers}名、客単価 ${yen(m.avgSpend)}${mealNote}${mealCat}）${xmas}`;
+  }).join('\n');
 }
 
 /** 確定済み集計の補助内訳（カテゴリ／昼夜／曜日／時間帯／日別／欠損期間）を行テキストにする。
@@ -7414,19 +7485,40 @@ function formatVerifiedDetailLines(p, indent = '') {
   const charge = Number(p?.chargeTotal) || 0;
   if (total > 0 && (food > 0 || drink > 0)) {
     const chargeNote = charge > 0 ? `（うちチャージ ${yen(charge)}）` : '';
-    lines.push(`${indent}- カテゴリ内訳（総売上の完全な内訳）: フード ${yen(food)}${chargeNote} / 飲料 ${yen(drink)} / 室料 ${yen(room)} / その他 ${yen(other)}`);
+    lines.push(`${indent}- カテゴリ内訳（総売上の昼夜合算）: フード ${yen(food)}${chargeNote} / 飲料 ${yen(drink)} / 室料 ${yen(room)} / その他 ${yen(other)}`);
     if (room > 0 || other > 0) {
-      lines.push(`${indent}  ※フード＋ドリンクの比率は飲食2カテゴリ内の構成比です。総売上には室料・その他 ${yen(room + other)} が含まれます`);
+      lines.push(`${indent}  ※フード＋ドリンクの合算比率は飲食2カテゴリ内の構成比です。総売上には室料・その他 ${yen(room + other)} が含まれます`);
     }
+    lines.push(`${indent}  ※この合算のフード／ドリンク比率をディナー（またはランチ）単体の比率として使ってはいけません`);
   }
   const lunch = Number(p?.lunchTotal) || 0;
   const dinner = Number(p?.dinnerTotal) || 0;
   const lunchCust = Number(p?.lunchCustomers) || 0;
   const dinnerCust = Number(p?.dinnerCustomers) || 0;
+  const lunchFood = Number(p?.lunchFoodTotal) || 0;
+  const lunchDrink = Number(p?.lunchDrinkTotal) || 0;
+  const dinnerFood = Number(p?.dinnerFoodTotal) || 0;
+  const dinnerDrink = Number(p?.dinnerDrinkTotal) || 0;
   if (lunch > 0 || dinner > 0) {
     const lunchAvg = lunchCust ? `／客単価 ${yen(Math.round(lunch / lunchCust))}` : '';
     const dinnerAvg = dinnerCust ? `／客単価 ${yen(Math.round(dinner / dinnerCust))}` : '';
-    lines.push(`${indent}- ランチ／ディナー: ランチ ${yen(lunch)}（${lunchCust}名${lunchAvg}） / ディナー ${yen(dinner)}（${dinnerCust}名${dinnerAvg}）`);
+    lines.push(`${indent}- ランチ／ディナー分離（会計時刻16:00境界・分析必須）:`);
+    lines.push(`${indent}  - ランチ（16:00未満）: 売上 ${yen(lunch)}（${lunchCust}名${lunchAvg}）`);
+    if (lunchFood + lunchDrink > 0) {
+      const lTot = lunchFood + lunchDrink || 1;
+      lines.push(`${indent}    フード ${yen(lunchFood)}（${Math.round(lunchFood / lTot * 100)}%） / ドリンク ${yen(lunchDrink)}（${Math.round(lunchDrink / lTot * 100)}%）`);
+    }
+    lines.push(`${indent}  - ディナー（16:00以降）: 売上 ${yen(dinner)}（${dinnerCust}名${dinnerAvg}）`);
+    if (dinnerFood + dinnerDrink > 0) {
+      const dTot = dinnerFood + dinnerDrink || 1;
+      lines.push(`${indent}    フード ${yen(dinnerFood)}（${Math.round(dinnerFood / dTot * 100)}%） / ドリンク ${yen(dinnerDrink)}（${Math.round(dinnerDrink / dTot * 100)}%）`);
+    }
+  }
+  // 期間に12月が含まれる場合の注記
+  const hasDecember = (Array.isArray(p?.monthlyBreakdown) && p.monthlyBreakdown.some(m => Number(m?.month) === 12))
+    || /12\s*月|クリスマス/.test(String(p?.label || ''));
+  if (hasDecember) {
+    lines.push(`${indent}- 12月注記: クリスマスディナー（通常コースより高単価・毎年実施）を必ず考慮して分析すること`);
   }
   if (Array.isArray(p?.weekdayBreakdown) && p.weekdayBreakdown.length) {
     lines.push(`${indent}- 曜日別売上: ` + p.weekdayBreakdown
@@ -7893,7 +7985,10 @@ function aggregateSalesRows(rows) {
     }
     const meal = String(s?.mealPeriod || '');
     if (meal) {
-      const row = byMealPeriod.get(meal) || { label: meal, totalSales: 0, customers: 0, count: 0 };
+      const row = byMealPeriod.get(meal) || {
+        label: meal, totalSales: 0, customers: 0, count: 0,
+        foodTotal: 0, drinkTotal: 0, roomTotal: 0, otherTotal: 0, chargeTotal: 0
+      };
       row.totalSales += saleTotal; row.customers += saleCustomers; row.count += 1;
       byMealPeriod.set(meal, row);
     }
@@ -7903,6 +7998,16 @@ function aggregateSalesRows(rows) {
       const category = String(it?.category || 'その他');
       byCategory.set(category, (byCategory.get(category) || 0) + amount);
       if (it?.isCharge) chargeTotal += amount;
+      if (meal) {
+        const mealRow = byMealPeriod.get(meal);
+        if (mealRow) {
+          if (category === 'フード') mealRow.foodTotal += amount;
+          else if (category === '飲料') mealRow.drinkTotal += amount;
+          else if (category === '室料') mealRow.roomTotal += amount;
+          else mealRow.otherTotal += amount;
+          if (it?.isCharge) mealRow.chargeTotal += amount;
+        }
+      }
       const name = String(it?.name || '');
       if (!name) continue;
       const p = products.get(name) || { name, qty: 0, amt: 0, category };
@@ -7912,8 +8017,8 @@ function aggregateSalesRows(rows) {
       products.set(name, p);
     }
   }
-  const lunch = byMealPeriod.get('ランチ') || { totalSales: 0, customers: 0 };
-  const dinner = byMealPeriod.get('ディナー') || { totalSales: 0, customers: 0 };
+  const lunch = byMealPeriod.get('ランチ') || { totalSales: 0, customers: 0, foodTotal: 0, drinkTotal: 0 };
+  const dinner = byMealPeriod.get('ディナー') || { totalSales: 0, customers: 0, foodTotal: 0, drinkTotal: 0 };
   return {
     totalSales,
     totalCustomers,
@@ -7928,6 +8033,10 @@ function aggregateSalesRows(rows) {
     dinnerTotal: dinner.totalSales || 0,
     lunchCustomers: lunch.customers || 0,
     dinnerCustomers: dinner.customers || 0,
+    lunchFoodTotal: lunch.foodTotal || 0,
+    lunchDrinkTotal: lunch.drinkTotal || 0,
+    dinnerFoodTotal: dinner.foodTotal || 0,
+    dinnerDrinkTotal: dinner.drinkTotal || 0,
     dailyBreakdown: [...byDay.values()]
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(r => ({ ...r, avgSpend: r.customers ? Math.round(r.totalSales / r.customers) : 0 })),
@@ -9282,21 +9391,32 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       let dinner = Number(r.dinnerTotal) || 0;
       let lunchCust = Number(r.lunchCustomers) || 0;
       let dinnerCust = Number(r.dinnerCustomers) || 0;
-      if (sales === 0 && food === 0 && drink === 0 && Array.isArray(r.sales)) {
-        // 保存済み伝票にはカテゴリ別合計が無いため、明細のカテゴリ（フード/飲料/室料/その他）から集計する
+      let lunchFood = Number(r.lunchFoodTotal) || 0;
+      let lunchDrink = Number(r.lunchDrinkTotal) || 0;
+      let dinnerFood = Number(r.dinnerFoodTotal) || 0;
+      let dinnerDrink = Number(r.dinnerDrinkTotal) || 0;
+      if ((sales === 0 && food === 0 && drink === 0 && Array.isArray(r.sales))
+        || (Array.isArray(r.sales) && lunchFood + lunchDrink + dinnerFood + dinnerDrink === 0)) {
+        // 保存済み伝票の明細からカテゴリ／昼夜別フード・ドリンクを補完する
         const agg = aggregateSalesRows(r.sales);
-        sales += agg.totalSales;
-        food += agg.foodTotal;
-        drink += agg.drinkTotal;
-        customers += agg.totalCustomers;
-        salesCount += agg.salesCount;
-        room = room || agg.roomTotal;
-        other = other || agg.otherTotal;
-        charge = charge || agg.chargeTotal;
-        lunch = lunch || agg.lunchTotal;
-        dinner = dinner || agg.dinnerTotal;
-        lunchCust = lunchCust || agg.lunchCustomers;
-        dinnerCust = dinnerCust || agg.dinnerCustomers;
+        if (sales === 0 && food === 0 && drink === 0) {
+          sales += agg.totalSales;
+          food += agg.foodTotal;
+          drink += agg.drinkTotal;
+          customers += agg.totalCustomers;
+          salesCount += agg.salesCount;
+          room = room || agg.roomTotal;
+          other = other || agg.otherTotal;
+          charge = charge || agg.chargeTotal;
+          lunch = lunch || agg.lunchTotal;
+          dinner = dinner || agg.dinnerTotal;
+          lunchCust = lunchCust || agg.lunchCustomers;
+          dinnerCust = dinnerCust || agg.dinnerCustomers;
+        }
+        lunchFood = lunchFood || agg.lunchFoodTotal;
+        lunchDrink = lunchDrink || agg.lunchDrinkTotal;
+        dinnerFood = dinnerFood || agg.dinnerFoodTotal;
+        dinnerDrink = dinnerDrink || agg.dinnerDrinkTotal;
       }
       const row = {
         year: ym.year,
@@ -9313,6 +9433,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         dinnerTotal: dinner,
         lunchCustomers: lunchCust,
         dinnerCustomers: dinnerCust,
+        lunchFoodTotal: lunchFood,
+        lunchDrinkTotal: lunchDrink,
+        dinnerFoodTotal: dinnerFood,
+        dinnerDrinkTotal: dinnerDrink,
         totalCustomers: customers,
         salesCount,
         sourceCount: 1,
@@ -9337,6 +9461,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         prev.dinnerTotal += row.dinnerTotal;
         prev.lunchCustomers += row.lunchCustomers;
         prev.dinnerCustomers += row.dinnerCustomers;
+        prev.lunchFoodTotal = (prev.lunchFoodTotal || 0) + (row.lunchFoodTotal || 0);
+        prev.lunchDrinkTotal = (prev.lunchDrinkTotal || 0) + (row.lunchDrinkTotal || 0);
+        prev.dinnerFoodTotal = (prev.dinnerFoodTotal || 0) + (row.dinnerFoodTotal || 0);
+        prev.dinnerDrinkTotal = (prev.dinnerDrinkTotal || 0) + (row.dinnerDrinkTotal || 0);
         prev.totalCustomers += row.totalCustomers;
         prev.salesCount += row.salesCount;
         prev.sourceCount += 1;
@@ -9365,6 +9493,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
     let roomTot = 0, otherTot = 0, chargeTot = 0;
     let lunchTot = 0, dinnerTot = 0, lunchCustTot = 0, dinnerCustTot = 0;
+    let lunchFoodTot = 0, lunchDrinkTot = 0, dinnerFoodTot = 0, dinnerDrinkTot = 0;
     if (monthlyBreakdown.length > 0) {
       monthlyBreakdown.forEach(m => {
         totSales += m.totalSales;
@@ -9379,6 +9508,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         dinnerTot += m.dinnerTotal || 0;
         lunchCustTot += m.lunchCustomers || 0;
         dinnerCustTot += m.dinnerCustomers || 0;
+        lunchFoodTot += m.lunchFoodTotal || 0;
+        lunchDrinkTot += m.lunchDrinkTotal || 0;
+        dinnerFoodTot += m.dinnerFoodTotal || 0;
+        dinnerDrinkTot += m.dinnerDrinkTotal || 0;
       });
     } else {
       use.forEach(r => {
@@ -9394,6 +9527,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         dinnerTot += Number(r.dinnerTotal) || 0;
         lunchCustTot += Number(r.lunchCustomers) || 0;
         dinnerCustTot += Number(r.dinnerCustomers) || 0;
+        lunchFoodTot += Number(r.lunchFoodTotal) || 0;
+        lunchDrinkTot += Number(r.lunchDrinkTotal) || 0;
+        dinnerFoodTot += Number(r.dinnerFoodTotal) || 0;
+        dinnerDrinkTot += Number(r.dinnerDrinkTotal) || 0;
       });
       if (totSales === 0 && fTot === 0 && dTot === 0) {
         use.forEach(r => {
@@ -9410,6 +9547,19 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
           dinnerTot += agg.dinnerTotal;
           lunchCustTot += agg.lunchCustomers;
           dinnerCustTot += agg.dinnerCustomers;
+          lunchFoodTot += agg.lunchFoodTotal;
+          lunchDrinkTot += agg.lunchDrinkTotal;
+          dinnerFoodTot += agg.dinnerFoodTotal;
+          dinnerDrinkTot += agg.dinnerDrinkTotal;
+        });
+      } else if (lunchFoodTot + lunchDrinkTot + dinnerFoodTot + dinnerDrinkTot === 0) {
+        use.forEach(r => {
+          if (!Array.isArray(r?.sales)) return;
+          const agg = aggregateSalesRows(r.sales);
+          lunchFoodTot += agg.lunchFoodTotal;
+          lunchDrinkTot += agg.lunchDrinkTotal;
+          dinnerFoodTot += agg.dinnerFoodTotal;
+          dinnerDrinkTot += agg.dinnerDrinkTotal;
         });
       }
     }
@@ -9456,6 +9606,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       dinnerTotal: dinnerTot,
       lunchCustomers: lunchCustTot,
       dinnerCustomers: dinnerCustTot,
+      lunchFoodTotal: lunchFoodTot,
+      lunchDrinkTotal: lunchDrinkTot,
+      dinnerFoodTotal: dinnerFoodTot,
+      dinnerDrinkTotal: dinnerDrinkTot,
       foodPct: Math.round((fTot / catTot) * 100),
       drinkPct: Math.round((dTot / catTot) * 100),
       totalCustomers: cust,
@@ -10000,12 +10154,14 @@ ${buildStoreLocationBlockForAi()}
 【絶対遵守プロンプト規約】
 1. あなたはマルゴグループ各店舗の保存済み売上データ専用の厳密なアナリストAIです。営業・売上に関するあらゆる種類の質問（実績照会、期間比較、トレンド、客単価、商品構成、ワイン／ドリンク比率、原因分析、改善提案、今後の見通しなど）に幅広く対応してください。
 2. 数値（金額・件数・客数・比率など）は、必ず提示された保存データ・資料（salesDataや確定済み集計データ）のみから厳密に引用・計算してください。数値についての推測・Web情報・一般的な相場観での代用は【完全禁止】です。
-3. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
-4. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
-5. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
-6. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
-7. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
-8. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。${verifiedDataBlock}${knowledgeBlock}`;
+3. 【ランチ／ディナー分離・必須】会計時刻16:00未満＝ランチ、16:00以降＝ディナー。客単価・客数・フード割合・ドリンク割合・商品構成の内部分析は必ずランチとディナーを分けて行う。合算の総売上は最終サマリーに使ってよいが、合算のフード／ドリンク比率をディナー（またはランチ）の比率として述べてはならない。昼夜別のフード／ドリンク内訳が無い場合は「昼夜合算の構成比」と明示する。
+4. 【12月・クリスマスディナー・必須】12月を含む分析では、宴会需要・客数増に加え、毎年実施するクリスマスディナー（通常コースより高単価）を必ず考慮する。金額がデータに無い場合は数値を捏造せず「※これは推測です」として季節要因に含める。
+5. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
+6. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
+7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください。データの収録状況は事実なので「※これは推測です」を付けないでください。
+8. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
+9. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
+10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。${verifiedDataBlock}${knowledgeBlock}`;
 
   try {
     const res = await fetch(AI_ENDPOINT, {
