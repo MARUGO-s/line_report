@@ -7004,21 +7004,30 @@ async function buildIntegratedAnalysisContext({
       range = iso ? { from: iso[1], to: iso[2] || iso[1] } : range;
       query = `${currentReport?.title || ''} ${period} 売上分析 施策 メニュー`;
     }
-    knowledgeBlock = formatStoreKnowledgeBlock(selectStoreKnowledgeForQuery(query, range, items));
+    knowledgeBlock = formatStoreKnowledgeBlock(
+      await hydrateKnowledgeItemsForAi(selectStoreKnowledgeForQuery(query, range, items))
+    );
   } catch (err) {
     knowledgeError = String(err?.message || err || 'unknown');
     console.warn('店舗ナレッジの付与をスキップしました:', err);
   }
 
-  const hasJournal = !!(verifiedData || (forReport && currentReport && (currentReport.total || currentReport.totalSales || currentReport.salesCount)));
-  const hasKnowledge = !!(knowledgeBlock && knowledgeBlock.trim());
-  const hasStoreOps = !!(storeOpsBlock && storeOpsBlock.trim());
+  const journalSales = Number(verifiedData?.totalSales) || 0;
+  const journalMonths = Array.isArray(verifiedData?.monthlyBreakdown) ? verifiedData.monthlyBreakdown.length : 0;
+  const journalMulti = !!(verifiedData?.multiPeriod && Array.isArray(verifiedData?.periods) && verifiedData.periods.length);
+  const reportSales = Number(currentReport?.total || currentReport?.totalSales) || 0;
+  const hasJournal = journalMulti
+    || journalSales > 0
+    || journalMonths > 0
+    || (forReport && (reportSales > 0 || Number(currentReport?.salesCount) > 0));
+  const hasKnowledge = !!(knowledgeBlock && /【店舗ナレッジ/.test(knowledgeBlock));
+  const hasStoreOps = !!(storeOpsBlock && /【店舗営業情報/.test(storeOpsBlock));
 
   const checklist = `
 
 【データ統合チェック（必須・3系統）】
 1. ジャーナル／保存レポート（数値の正本）: ${hasJournal ? '添付あり → 金額・客数・比率はここだけを使う' : '今回は確定集計ブロックなし（画面上のsalesDataまたは未照会）'}
-2. 店舗資料（施策・メニュー）: ${hasKnowledge ? `添付あり（登録${knowledgeCount}件から期間照合）` : (knowledgeError ? `取得失敗（${knowledgeError}）→ 資料なしとして扱い推測で補わない` : (knowledgeCount ? '期間に合う資料なし' : '登録資料なし'))}
+2. 店舗資料（施策・メニュー）: ${hasKnowledge ? `添付あり（登録${knowledgeCount}件から期間照合・本文は全文再取得）` : (knowledgeError ? `取得失敗（${knowledgeError}）→ 資料なしとして扱い推測で補わない` : (knowledgeCount ? '期間に合う資料なし' : (!getAdminToken() ? '未ログインのため資料API未取得' : '登録資料なし')))}
 3. 店舗営業情報（定休・ランチ等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析に反映' : '添付なし（異常）'}
 統合ルール: 数値は①、背景・施策は②、定休／特別営業の解釈は③。③を読まずに日曜・月曜の低売上を弱点としないこと。`;
 
@@ -7034,6 +7043,24 @@ async function buildIntegratedAnalysisContext({
     hasStoreOps,
     knowledgeCount
   };
+}
+
+/** ai-analyze は systemInstruction 40000字上限。超過時は資料本文から削る（数値・店舗情報は残す） */
+function clampAiSystemInstruction(text, maxLen = 39000) {
+  let s = String(text || '');
+  if (s.length <= maxLen) return s;
+  // ナレッジ本文ブロックを優先的に短縮
+  const knStart = s.indexOf('【店舗ナレッジ');
+  if (knStart >= 0) {
+    const head = s.slice(0, knStart);
+    const room = Math.max(500, maxLen - head.length - 120);
+    s = head
+      + '【店舗ナレッジ】文字数上限のため本文を省略しました。概要とタイトルのみを参照し、詳細本文は「今回は省略」として扱ってください。\n'
+      + s.slice(knStart, knStart + room)
+      + '\n…（省略）';
+  }
+  if (s.length > maxLen) s = s.slice(0, maxLen - 40) + '\n…（systemInstruction省略）';
+  return s;
 }
 
 function readStoreOpsForm() {
@@ -7396,6 +7423,13 @@ async function aiAnalyze() {
       forReport: true,
       queryText: `${data.title || ''} ${data.period || ''} 売上分析`
     });
+    let systemInstruction = MARUGO_AI_ANALYZE_INSTRUCTION
+      + '\n\n' + buildStoreLocationBlockForAi()
+      + integrated.checklist
+      + integrated.storeOpsBlock
+      + integrated.knowledgeBlock
+      + '\n\n【統合分析の指示】必ず①店舗営業情報→②この後に続く売上データ(salesData)→③登録資料の順で読み、3つを突き合わせてレポートを書いてください。店舗営業情報を読まずに曜日弱点を語ってはいけません。';
+    systemInstruction = clampAiSystemInstruction(systemInstruction);
     const res = await fetch(AI_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -7405,12 +7439,7 @@ async function aiAnalyze() {
       body: JSON.stringify({
         action: 'analyze',
         salesData: data,
-        systemInstruction: MARUGO_AI_ANALYZE_INSTRUCTION
-          + '\n\n' + buildStoreLocationBlockForAi()
-          + integrated.checklist
-          + integrated.storeOpsBlock
-          + integrated.knowledgeBlock
-          + '\n\n【統合分析の指示】必ず①店舗営業情報→②確定売上数値→③登録資料の順で読み、3つを突き合わせてレポートを書いてください。店舗営業情報を読まずに曜日弱点を語ってはいけません。',
+        systemInstruction,
         storeKey: STORE_KEY,
         storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
         storeLocationBlock: buildStoreLocationBlockForAi()
@@ -9018,6 +9047,42 @@ function selectStoreKnowledgeForQuery(query, range, items) {
     if (!picked.includes(s.item)) picked.push(s.item);
   });
   return picked.slice(0, AI_KNOWLEDGE_MAX_ITEMS);
+}
+
+/** 一覧APIは本文を200字に切るため、AI添付前に選択資料だけ全文を取り直す */
+async function hydrateKnowledgeItemsForAi(items) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length || !getAdminToken()) return list;
+  const out = [];
+  for (const item of list) {
+    const id = item?.id;
+    const truncated = item?.body_truncated === true
+      || (String(item?.body_text || '').length >= 180 && item?._hydrated !== true);
+    if (!id || !truncated) {
+      out.push(item);
+      continue;
+    }
+    try {
+      const params = new URLSearchParams({ store_key: STORE_KEY, id: String(id) });
+      const body = await adminApiFetch(`${KNOWLEDGE_API}/item?${params.toString()}`, { method: 'GET' });
+      const full = body?.item && typeof body.item === 'object' ? body.item : body;
+      if (full && (full.body_text || full.summary || full.title)) {
+        out.push({
+          ...item,
+          ...full,
+          body_text: full.body_text != null ? full.body_text : item.body_text,
+          summary: full.summary != null ? full.summary : item.summary,
+          body_truncated: false,
+          _hydrated: true
+        });
+        continue;
+      }
+    } catch (err) {
+      console.warn('資料本文の再取得に失敗:', id, err);
+    }
+    out.push(item);
+  }
+  return out;
 }
 
 /** プロンプトへ差し込む店舗ナレッジのブロック（数値の出典にしないことを明記する） */
@@ -10633,6 +10698,8 @@ ${buildStoreLocationBlockForAi()}
 11. 【店舗営業情報・必須】毎回必ず添付されます。分析の最初に読み、定休曜日の売上ゼロ／低下を弱点や機会損失としないでください。定休曜日に売上が立っている日は特別営業（または例外営業）として区別してください。他店の定休ルールを転用しないでください。
 12. 【3系統統合・必須】①ジャーナル確定集計（数値）②店舗営業情報（定休・ランチ等）③店舗資料（施策・メニュー）を必ず突き合わせて回答してください。どれか欠ける場合はチェック欄の状態に従い、欠けた系統を推測で埋めないでください。${integrated.checklist}${integrated.storeOpsBlock}${verifiedDataBlock}${integrated.knowledgeBlock}`;
 
+  const strictSystemInstructionClamped = clampAiSystemInstruction(strictSystemInstruction);
+
   try {
     const res = await fetch(AI_ENDPOINT, {
       method: 'POST',
@@ -10643,7 +10710,7 @@ ${buildStoreLocationBlockForAi()}
       body: JSON.stringify({
         action: 'chat',
         message: resolvedChatQuery,
-        systemInstruction: strictSystemInstruction,
+        systemInstruction: strictSystemInstructionClamped,
         salesData: salesDataForAi,
         // 現在の発言は message で別送するため重複させず、直近12発話だけに制限する。
         chatHistory: aiChatHistory.slice(0, -1).slice(-12).map(item => ({
