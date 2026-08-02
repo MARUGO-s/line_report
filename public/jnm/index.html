@@ -3369,7 +3369,10 @@ async function fetchSupabaseReportById(id) {
   try {
     const body = await adminApiFetch('/pos-journals/saved-reports/item?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id), { method: 'GET' });
     const row = body.item;
-    if (!row) return null;
+    if (!row) {
+      savedReportsLoadError = new Error('保存レポート詳細を取得できませんでした。');
+      return null;
+    }
     const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
     return {
       id: row.id,
@@ -3380,6 +3383,7 @@ async function fetchSupabaseReportById(id) {
     };
   } catch (e) {
     console.error('fetchSupabaseReportById error:', e);
+    savedReportsLoadError = e instanceof Error ? e : new Error(String(e));
     return null;
   }
 }
@@ -3390,7 +3394,41 @@ async function hydrateSavedReport(r) {
   }
   if (!r?.id) return r;
   const full = await fetchSupabaseReportById(r.id);
-  return full ? { ...r, ...full, id: r.id } : r;
+  return full ? { ...r, ...full, id: r.id } : { ...r, _hydrateFailed: true };
+}
+
+function mergeMonthlyAndDailyReportIndex(monthlyReports, dailyReports) {
+  const monthly = Array.isArray(monthlyReports) ? monthlyReports : [];
+  const daily = Array.isArray(dailyReports) ? dailyReports : [];
+  const monthlyKeys = new Set(monthly.map(monthKeyFromReport).filter(Boolean));
+  return [
+    ...monthly,
+    ...daily.filter(report => {
+      const key = monthKeyFromReport(report);
+      return key && !monthlyKeys.has(key);
+    })
+  ];
+}
+
+function selectReportsForSavedMonthGroup(group, activeReport = currentReport) {
+  const byId = new Map();
+  const withoutId = [];
+  for (const report of (Array.isArray(group) ? group : [])) {
+    const id = String(report?.id || '').trim();
+    if (!id) {
+      withoutId.push(report);
+      continue;
+    }
+    const existing = byId.get(id);
+    // currentReportとクラウド一覧が同じ保存IDなら、クラウド側を1件だけ残す。
+    if (!existing || (existing === activeReport && report !== activeReport)) byId.set(id, report);
+  }
+  const reports = [...byId.values(), ...withoutId];
+  const monthlyReports = reports.filter(report => isMonthlyReportTitle(report?.title));
+  if (!monthlyReports.length) return reports;
+  // 検索時はクラウド保存済み月間を正本にする。画面上の途中集計が同月でも上書きしない。
+  const savedMonthly = monthlyReports.find(report => report !== activeReport);
+  return [savedMonthly || monthlyReports[0]];
 }
 
 async function readSavedReports(options = {}) {
@@ -3412,34 +3450,15 @@ async function readSavedReports(options = {}) {
 
     const monthly = await fetchSupabaseReports({ kind: 'monthly', limit: options.monthlyLimit || 500 });
     if (monthly === null) return [];
-    const byMonth = new Map();
-    for (const r of monthly) {
-      const key = monthKeyFromReport(r);
-      if (!key) continue;
-      if (!byMonth.has(key)) byMonth.set(key, r);
-    }
-
-    // 月間が少ない／欠ける月がある場合のみ日別を追加取得して補完
+    // 月間が無い月の日別は、その月の全日分を残して月次集計時に合算する。
     let daily = [];
     const needDailyFill = options.includeDailyFill !== false;
     if (needDailyFill) {
-      daily = await fetchSupabaseReports({ kind: 'daily', limit: options.dailyLimit || 500 }) || [];
-      for (const r of daily) {
-        const key = monthKeyFromReport(r);
-        if (!key) continue;
-        if (byMonth.has(key)) continue; // 月間がある月は日別を使わない
-        byMonth.set(key, r);
-      }
+      daily = await fetchSupabaseReports({ kind: 'daily', limit: options.dailyLimit || 1000 }) || [];
     }
 
-    // 一覧表示用に、取得した月間＋補完日別を返す（作成日新しい順）
-    const merged = [...monthly];
-    const monthlyIds = new Set(monthly.map(r => r.id));
-    for (const r of daily) {
-      if (!monthlyIds.has(r.id) && byMonth.get(monthKeyFromReport(r))?.id === r.id) {
-        merged.push(r);
-      }
-    }
+    // 月間がある月は月間を正本にし、月間が無い月だけ全日別レポートで補完する。
+    const merged = mergeMonthlyAndDailyReportIndex(monthly, daily);
     // AI検索は title/period でマッチするため、月間を全て含めた配列を返す
     return merged.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   } catch (e) {
@@ -3934,7 +3953,16 @@ function currentMonthKey() {
 
 async function collectMonthlyHistoryForForecast() {
   // 分析・予測の主データは「保存済みレポート」（カテゴリ別済み）
+  const unavailable = (message) => ({
+    history: [],
+    reportCount: 0,
+    monthCount: 0,
+    sourceLabel: '保存済みレポート',
+    loadError: message || 'クラウドの保存レポートを完全に確認できませんでした。'
+  });
+  if (!getAdminToken()) return unavailable('クラウド接続が必要です。');
   const reports = await readSavedReports();
+  if (savedReportsLoadError) return unavailable(savedReportsLoadError.message);
   const byMonth = new Map();
 
   // カテゴリ合計が無い月間は詳細取得を試す（一覧メタだけだとフード/ドリンクが欠ける）
@@ -3942,12 +3970,15 @@ async function collectMonthlyHistoryForForecast() {
   for (const raw of candidates) {
     const key = monthKeyFromReport(raw);
     if (!key) continue;
-    const isMonthly = /月間|月別/.test(String(raw.title || ''));
+    const isMonthly = isMonthlyReportTitle(raw.title);
     let r = raw;
     const needsHydrate = !reportHasSalesSummary(r)
       || (isMonthly && !(Number.isFinite(Number(r.foodTotal)) && Number.isFinite(Number(r.drinkTotal))));
     if (needsHydrate) {
       try { r = await hydrateSavedReport(r); } catch (_) {}
+    }
+    if (r?._hydrateFailed || savedReportsLoadError) {
+      return unavailable(savedReportsLoadError?.message || '保存レポート詳細を取得できませんでした。');
     }
     const total = reportSummaryTotal(r);
     if (!total) continue;
@@ -3976,6 +4007,20 @@ async function collectMonthlyHistoryForForecast() {
     const prev = byMonth.get(key);
     if (!prev) {
       byMonth.set(key, row);
+      continue;
+    }
+    if (!row.isMonthly && !prev.isMonthly) {
+      // 月間が無い月は、取得できた日別レポートを全日分合算して月次系列へ入れる。
+      prev.total += row.total;
+      prev.foodTotal += row.foodTotal;
+      prev.drinkTotal += row.drinkTotal;
+      prev.lunchTotal += row.lunchTotal;
+      prev.dinnerTotal += row.dinnerTotal;
+      prev.customers += row.customers;
+      prev.salesCount += row.salesCount;
+      prev.hasCategories = prev.hasCategories || row.hasCategories;
+      prev.sourceCount = (prev.sourceCount || 1) + 1;
+      prev.title = '日別レポート月次合算';
       continue;
     }
     const betterMonthly = row.isMonthly && !prev.isMonthly;
@@ -4234,6 +4279,7 @@ async function fetchSalesForecastById(id) {
 async function compareForecastToActuals(forecastItem) {
   const forecasts = Array.isArray(forecastItem?.forecasts) ? forecastItem.forecasts : [];
   const bundle = await collectMonthlyHistoryForForecast();
+  if (bundle.loadError) throw new Error(bundle.loadError);
   const actualByMonth = new Map((bundle.history || []).map(h => [h.month, h]));
   const rows = forecasts.map(f => {
     const month = String(f.month || '');
@@ -4278,6 +4324,7 @@ async function renderSalesForecast(horizon = 3) {
   showAppLoading('売上予測を作成中...', '保存済みレポートのカテゴリ別実績を集計しています');
   try {
     const bundle = await collectMonthlyHistoryForForecast();
+    if (bundle.loadError) throw new Error(bundle.loadError);
     const result = buildSalesForecast(bundle, horizon);
     const maxAmount = Math.max(
       1,
@@ -7074,12 +7121,15 @@ function formatItemBreakdownReply(queryResult, userMsg) {
   if (other.length && other.length !== products.length) {
     catBlocks += '\n\n**その他**\n' + other.slice(0, 5).map(p => `- ${p.name}: ${p.qty}点 / ${yen(p.amt)}`).join('\n');
   }
+  const detailLimitNote = queryResult.detailRangeLimited
+    ? '\n\n※商品明細は通信量を抑えるため、保存済みの新しい36か月分を対象に集計しています。全期間が必要な場合は期間を分けて質問してください。'
+    : '';
 
   return `### 🧾 ${queryResult.label} の商品内訳 (保存ジャーナル参照)
 
 ご質問の **売れた商品の内容・個数** を、保存データから集計しました（売上金額順・上位${top.length}件）:
 
-${lines}${catBlocks}
+${lines}${catBlocks}${detailLimitNote}
 
 **参考（カテゴリ合計）**
 - 総売上 ${yen(queryResult.totalSales)} / フード ${yen(queryResult.foodTotal)} (${queryResult.foodPct}%) / ドリンク ${yen(queryResult.drinkTotal)} (${queryResult.drinkPct}%)
@@ -7158,6 +7208,37 @@ function resolveRelativeTimeRefs(q) {
   return out;
 }
 
+/** 明示月または保存済み最新月を基準に「前月」「前年同月」を絶対年月へ展開する。 */
+function resolveComparisonTimeRefs(q, fallbackLatestKey = '') {
+  let out = String(q || '');
+  let anchor = extractAllMonthRefs(out)[0] || null;
+  const hasRelativeComparison = /前月|前年同月|前年比/.test(out);
+  if (!anchor && hasRelativeComparison && /^\d{4}-\d{2}$/.test(String(fallbackLatestKey || ''))) {
+    const [year, month] = String(fallbackLatestKey).split('-').map(Number);
+    anchor = {
+      year: String(year),
+      month: String(month).padStart(2, '0'),
+      key: `${year}-${String(month).padStart(2, '0')}`
+    };
+    const anchorLabel = `${year}年${month}月`;
+    if (/保存済み最新月|最新の保存月|一番新しい月|最新月/.test(out)) {
+      out = out.replace(/保存済み最新月|最新の保存月|一番新しい月|最新月/g, anchorLabel);
+    } else {
+      out = `${anchorLabel} ${out}`;
+    }
+  }
+  if (!anchor) return out;
+
+  const anchorDate = new Date(Number(anchor.year), Number(anchor.month) - 1, 1);
+  const previousMonth = new Date(anchorDate.getFullYear(), anchorDate.getMonth() - 1, 1);
+  const previousMonthLabel = `${previousMonth.getFullYear()}年${previousMonth.getMonth() + 1}月`;
+  const previousYearLabel = `${anchorDate.getFullYear() - 1}年${anchorDate.getMonth() + 1}月`;
+  return out
+    .replace(/前年同月/g, previousYearLabel)
+    .replace(/前年比/g, `${previousYearLabel}比`)
+    .replace(/前月/g, previousMonthLabel);
+}
+
 /** 自由記述の期間文字列（"2026年7月"「2026-07-01〜2026-07-31」等）から年月を1件抽出する */
 function extractYearMonthFromText(text) {
   const s = String(text || '');
@@ -7192,45 +7273,133 @@ function extractRangeRef(q) {
 const SAVED_DATA_CLARIFICATION_MARKER = '保存データの分析対象を選んでください';
 const AI_INTENT_CLARIFICATION_MARKER = '知りたい内容を具体化してください';
 
+function isSelfContainedAiQuestion(text) {
+  const q = String(text || '').trim();
+  const hasPeriod = /\d{4}\s*年(?:\s*\d{1,2}\s*月)?|\d{4}[\/_\.-]\d{1,2}|今年|去年|昨年|今月|先月|前月|前年同月|最新|直近\s*\d+\s*(?:か月|ヶ月)|全期間/.test(q);
+  const hasFocus = /売上|推移|比較|フード|ドリンク|ワイン|客数|客単価|商品|アイテム|原因|理由|課題|改善|施策|対策|提案|戦略|構成|比率/.test(q);
+  return hasPeriod && hasFocus;
+}
+
+function applyAiClarificationCorrection(original, reply) {
+  const raw = String(reply || '').trim();
+  if (!/^(?:違う|訂正|いや|やっぱり|それではなく|ではなく|じゃなく)/.test(raw)) return '';
+  const fullMonth = raw.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/)
+    || raw.match(/(\d{4})[\/_\.-](\d{1,2})/);
+  const shortMonth = raw.match(/(?:^|[^\d])(\d{1,2})\s*月/);
+  const focusRemainder = raw
+    .replace(/^(?:違う|訂正|いや|やっぱり|それではなく|ではなく|じゃなく)[、,\s]*/, '')
+    .replace(/\d{4}\s*年\s*\d{1,2}\s*月|\d{4}[\/_\.-]\d{1,2}|\d{1,2}\s*月/, '')
+    .replace(/^[のをはに、,\s]+/, '')
+    .trim();
+  if (fullMonth) {
+    if (focusRemainder) {
+      return `${fullMonth[1]}年${Number(fullMonth[2])}月 ${focusRemainder}`.trim();
+    }
+    const replaced = String(original || '')
+      .replace(/\d{4}\s*年\s*\d{1,2}\s*月|\d{4}[\/_\.-]\d{1,2}/, `${fullMonth[1]}年${Number(fullMonth[2])}月`);
+    const base = replaced === original
+      ? `${fullMonth[1]}年${Number(fullMonth[2])}月 ${original}`
+      : replaced;
+    return `${base} ${focusRemainder}`.trim();
+  }
+  const originalMonth = String(original || '').match(/(\d{4})\s*年\s*(\d{1,2})\s*月/)
+    || String(original || '').match(/(\d{4})[\/_\.-](\d{1,2})/);
+  if (shortMonth && originalMonth) {
+    if (focusRemainder) {
+      return `${originalMonth[1]}年${Number(shortMonth[1])}月 ${focusRemainder}`.trim();
+    }
+    const replaced = String(original || '').replace(
+      /\d{4}\s*年\s*\d{1,2}\s*月|\d{4}[\/_\.-]\d{1,2}/,
+      `${originalMonth[1]}年${Number(shortMonth[1])}月`
+    );
+    return `${replaced} ${focusRemainder}`.trim();
+  }
+  return '';
+}
+
+function resolveNaturalClarificationChoice(reply, assistantItem) {
+  const raw = String(reply || '').trim();
+  const choices = Array.isArray(assistantItem?.clarificationChoices)
+    ? assistantItem.clarificationChoices.map(x => String(x || '').trim()).filter(Boolean).slice(0, 3)
+    : [];
+  if (!choices.length) return '';
+  if (/^(?:1|前者|最初|一つ目|ひとつ目)(?:$|[.、)\s])/.test(raw)) return choices[0] || '';
+  if (/^(?:2|二つ目|ふたつ目)(?:$|[.、)\s])/.test(raw)) return choices[1] || '';
+  if (/^(?:3|三つ目|みっつ目)(?:$|[.、)\s])/.test(raw)) return choices[2] || '';
+  if (/^(?:後者|最後)(?:$|[.、)\s])/.test(raw)) return choices[choices.length - 1] || '';
+  return '';
+}
+
 function resolveSavedDataClarificationReply(query, chatHistory) {
   const raw = String(query || '').trim();
   if (!raw || !Array.isArray(chatHistory)) return raw;
-  let asked = false;
+  let askedIndex = -1;
   for (let i = chatHistory.length - 1; i >= 0; i--) {
     const item = chatHistory[i];
     if (!item || item.role !== 'assistant') continue;
-    asked = String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
+    const asked = item.clarification === 'period'
+      || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
+    if (asked) askedIndex = i;
     break;
   }
-  if (!asked) return raw;
-  if (/^1(?:$|[.、)\s])/.test(raw)) return `最新月 ${raw}`;
-  if (/^2(?:$|[.、)\s])/.test(raw)) return `直近3か月 ${raw}`;
-  if (/^3(?:$|[.、)\s])/.test(raw)) return `直近12か月 ${raw}`;
-  if (/^4(?:$|[.、)\s])/.test(raw)) return `全期間 ${raw}`;
-  return raw;
+  if (askedIndex < 0) return raw;
+  const assistantItem = chatHistory[askedIndex];
+  let original = String(assistantItem?.originalQuery || '').trim();
+  if (!original) {
+    for (let i = askedIndex - 1; i >= 0; i--) {
+      const item = chatHistory[i];
+      if (item && item.role === 'user' && String(item.content || '').trim()) {
+        original = String(item.content).trim();
+        break;
+      }
+    }
+  }
+  if (isSelfContainedAiQuestion(raw)) return raw;
+  const corrected = applyAiClarificationCorrection(original, raw);
+  if (corrected) return corrected;
+  let selected = resolveNaturalClarificationChoice(raw, assistantItem) || raw;
+  if (/^1(?:$|[.、)\s])/.test(raw)) selected = `最新月 ${raw}`;
+  if (/^2(?:$|[.、)\s])/.test(raw)) selected = `直近3か月 ${raw}`;
+  if (/^3(?:$|[.、)\s])/.test(raw)) selected = `直近12か月 ${raw}`;
+  if (/^4(?:$|[.、)\s])/.test(raw)) selected = `全期間 ${raw}`;
+  if (/^(?:半年|1年|一年|\d{1,2}\s*(?:か月|ヶ月|ケ月|カ月))(?:$|[.、)\s])/.test(raw)) {
+    selected = `直近${raw}`;
+  }
+  if (/おまかせ|任せる/.test(raw)) selected = '保存済み最新月を対象に全体分析';
+  if (/^(?:全部|すべて|全期間)(?:$|[.、)\s])/.test(raw)) selected = '保存済み全期間';
+  return original ? `${original} ${selected}`.trim() : selected;
 }
 
 function resolveAiIntentClarificationReply(query, chatHistory) {
   const raw = String(query || '').trim();
   if (!raw || !Array.isArray(chatHistory)) return raw;
-  let asked = false;
+  let askedIndex = -1;
   for (let i = chatHistory.length - 1; i >= 0; i--) {
     const item = chatHistory[i];
     if (!item || item.role !== 'assistant') continue;
-    asked = String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER);
+    const asked = item.clarification === 'intent'
+      || String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER);
+    if (asked) askedIndex = i;
     break;
   }
-  if (!asked) return raw;
+  if (askedIndex < 0) return raw;
 
-  let original = '';
-  for (let i = chatHistory.length - 2; i >= 0; i--) {
-    const item = chatHistory[i];
-    if (item && item.role === 'user' && String(item.content || '').trim()) {
-      original = String(item.content).trim();
-      break;
+  const assistantItem = chatHistory[askedIndex];
+  let original = String(assistantItem?.originalQuery || '').trim();
+  if (!original) {
+    for (let i = askedIndex - 1; i >= 0; i--) {
+      const item = chatHistory[i];
+      if (item && item.role === 'user' && String(item.content || '').trim()) {
+        original = String(item.content).trim();
+        break;
+      }
     }
   }
   if (!original) return raw;
+
+  if (isSelfContainedAiQuestion(raw)) return raw;
+  const corrected = applyAiClarificationCorrection(original, raw);
+  if (corrected) return corrected;
 
   const options = {
     1: '総売上・売上推移',
@@ -7239,10 +7408,15 @@ function resolveAiIntentClarificationReply(query, chatHistory) {
     4: '売れ筋商品・アイテム内訳',
     5: '原因分析・課題・改善策'
   };
-  const selected = Object.entries(options).find(([number]) =>
+  const legacySelected = Object.entries(options).find(([number]) =>
     new RegExp(`^${number}(?:$|[.、)\\s])`).test(raw)
   );
-  return `${original} ${selected ? selected[1] : raw}`.trim();
+  let selected = resolveNaturalClarificationChoice(raw, assistantItem)
+    || (legacySelected ? legacySelected[1] : raw);
+  if (/おまかせ|任せる|全部|全体|一通り/.test(raw)) {
+    selected = '総売上・売上推移、構成比、客数・客単価、商品内訳、原因・改善策を全体分析';
+  }
+  return `${original} ${selected}`.trim();
 }
 
 function resolveAiChatQuery(query, chatHistory) {
@@ -7255,6 +7429,11 @@ function resolveAiChatQuery(query, chatHistory) {
 function needsAiIntentClarification(query) {
   const q = String(query || '').toLowerCase().trim();
   if (!q) return true;
+  if (/おまかせ|任せる|全部|全体を|全般|一通り/.test(q)) return false;
+  if (/(?:比較|比べ)/.test(q)) {
+    const explicitComparison = /前月|前年|去年|先月|直近|対比|\d{4}\s*年.*\d{4}\s*年|\d{4}\D{0,3}\d{1,2}\s*月.*(?:\d{4}\D{0,3})?\d{1,2}\s*月/.test(q);
+    if (!explicitComparison) return true;
+  }
   return ![
     /総売上|売上高|売上額|売上金額|売上合計|売上推移|売上実績|実績|増減|前月比|前年比|比較|トレンド|日別|日ごと|月別|月ごと|曜日別/,
     /フード|ドリンク|ワイン|アルコール|構成比|比率|割合/,
@@ -7265,18 +7444,165 @@ function needsAiIntentClarification(query) {
   ].some(pattern => pattern.test(q));
 }
 
-function buildAiIntentClarificationReply() {
-  return `### 🎯 ${AI_INTENT_CLARIFICATION_MARKER}
+function countRecentClarificationsByKind(chatHistory, kind = '') {
+  if (!Array.isArray(chatHistory)) return 0;
+  let count = 0;
+  for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const item = chatHistory[i];
+    if (!item || item.role !== 'assistant') continue;
+    const isClarification = item.clarification === 'intent'
+      || item.clarification === 'period'
+      || String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER)
+      || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
+    if (!isClarification) break;
+    const itemKind = item.clarification
+      || (String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER) ? 'period' : 'intent');
+    if (!kind || itemKind === kind) count += 1;
+  }
+  return count;
+}
 
-ご質問の方向性が広いため、必要なデータと分析方法を正確に選びたいです。次のどれを知りたいですか？
+function countRecentIntentClarifications(chatHistory) {
+  return countRecentClarificationsByKind(chatHistory, 'intent');
+}
 
-1. **総売上・売上推移**
-2. **フード／ドリンク／ワインの構成・比率**
-3. **客数・客単価**
-4. **売れ筋商品・アイテム内訳**
-5. **原因分析・課題・改善策**
+function shouldAskAiIntentClarification(query, chatHistory) {
+  return needsAiIntentClarification(query)
+    && countRecentIntentClarifications(chatHistory) < 2;
+}
 
-番号、または知りたい内容を一言で入力してください。期間の指定がある場合は、そのまま続けて入力できます。`;
+function buildAiIntentClarificationReply(userMsg = '') {
+  const q = String(userMsg || '').trim();
+  const period = q.match(/\d{4}\s*年\s*\d{1,2}\s*月/)?.[0]
+    || q.match(/\d{4}[\/_\.-]\d{1,2}/)?.[0]
+    || '';
+  const prefix = period ? `${period}について、` : '';
+  if (/比較|比べ/.test(q)) {
+    return `${prefix}何と何を比べたいですか？ 前月との比較と前年同月との比較では、どちらが知りたい内容に近いでしょうか？`;
+  }
+  if (/売上|売り上げ|実績/.test(q)) {
+    return `${prefix}まず全体の売上や推移を見たいですか？ それとも、客数・客単価や商品構成まで掘り下げて、変化の理由を知りたいですか？`;
+  }
+  if (/分析|状況|どう|見て|教えて/.test(q)) {
+    return `${prefix}いちばん知りたいのは、数字の現状、変化した理由、それとも次に取るべき改善策のどれに近いですか？`;
+  }
+  return `${prefix}もう少しだけ方向を合わせたいです。今回の質問で、最終的にどんな判断や行動につなげたいですか？`;
+}
+
+function buildSavedDataNaturalClarificationReply(userMsg = '', coverage) {
+  const q = String(userMsg || '').trim();
+  const range = coverage && coverage.monthCount
+    ? `${formatCoverageMonth(coverage.first)}から${formatCoverageMonth(coverage.last)}`
+    : '保存済みの期間';
+  if (/比較|推移|変化|トレンド/.test(q)) {
+    return `${range}まで確認できます。直近の変化を見たいですか、それとも比べたい月や期間が決まっていますか？`;
+  }
+  return `${range}まで保存されています。最新月を見るか、直近数か月の流れを見るか、特定の月を指定するか、どれがいちばん近いですか？`;
+}
+
+function normalizeAiClarificationText(text) {
+  let value = String(text || '').replace(/^#{1,6}\s*/gm, '').trim();
+  if (!value || value.length > 240 || /(?:^|\n)\s*[1-9][.、)]\s*/.test(value)) return '';
+  if (!/[？?]\s*$/.test(value)) {
+    value = `${value.replace(/[。！!\s]+$/, '')}？`;
+  }
+  return value;
+}
+
+async function requestNaturalIntentClarification(userMsg, chatHistory, coverage, missingKind = 'intent') {
+  const fallback = missingKind === 'period'
+    ? buildSavedDataNaturalClarificationReply(userMsg, coverage)
+    : buildAiIntentClarificationReply(userMsg);
+  const fallbackChoices = missingKind === 'period'
+    ? ['最新月', '直近3か月', '特定の月']
+    : /比較|比べ/.test(String(userMsg || ''))
+      ? ['前月との比較', '前年同月との比較']
+      : /売上|売り上げ|実績/.test(String(userMsg || ''))
+        ? ['総売上・売上推移', '客数・客単価や商品構成、変化の理由']
+        : ['数字の現状', '変化した理由', '改善策'];
+  const range = coverage && coverage.monthCount
+    ? `${formatCoverageMonth(coverage.first)}〜${formatCoverageMonth(coverage.last)}`
+    : '未確認';
+  const history = (Array.isArray(chatHistory) ? chatHistory.slice(0, -1) : [])
+    .slice(-6)
+    .map(item => ({
+      role: item && item.role === 'user' ? 'user' : 'assistant',
+      content: String(item?.content || '').slice(0, 600)
+    }));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12500);
+  try {
+    const res = await fetch(AI_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        action: 'clarify',
+        message: String(userMsg || '').slice(0, 500),
+        chatHistory: history,
+        clarificationContext: {
+          purpose: 'clarification_only',
+          missingKind,
+          availableSavedPeriod: range,
+          currentReportPeriod: currentReportHasUsableSales()
+            ? String(currentReport?.period || currentReport?.title || '').slice(0, 80)
+            : ''
+        },
+        storeKey: STORE_KEY
+      })
+    });
+    const result = await res.json().catch(() => ({}));
+    const resolvedQuery = res.ok && result.status === 'ready'
+      ? String(result.resolvedQuery || '').trim().slice(0, 600)
+      : '';
+    const hasExistingClarification = countRecentClarificationsByKind(chatHistory) > 0;
+    const acceptsDefault = /おまかせ|任せる|全部|すべて/.test(String(userMsg || ''));
+    const userContext = [
+      ...(Array.isArray(chatHistory) ? chatHistory : [])
+        .filter(item => item?.role === 'user')
+        .slice(-4)
+        .map(item => String(item.content || '')),
+      String(userMsg || '')
+    ].join(' ');
+    const scopeIsSafe = (!/全期間|全データ|すべての期間/.test(resolvedQuery)
+        || /全期間|全データ|すべて|全部|おまかせ/.test(userContext))
+      && (!/商品|アイテム|明細|内訳|売れ筋/.test(resolvedQuery)
+        || /商品|アイテム|明細|内訳|売れ筋|全部|おまかせ/.test(userContext));
+    const userHasPeriodEvidence = /(?:\d{4}\s*年(?:\s*\d{1,2}\s*月)?|\d{4}[\/_\.-]\d{1,2}|\d{6}|今年|去年|昨年|一昨年|前年|前月|先月|今月|来月|最新|直近|過去|全期間|全データ|すべての期間|\d{1,2}\s*(?:か月|ヶ月|ケ月|カ月)|\d{1,2}\s*月)/.test(userContext);
+    const periodIsSafe = missingKind !== 'period' || acceptsDefault || userHasPeriodEvidence;
+    if (resolvedQuery && (hasExistingClarification || acceptsDefault) && scopeIsSafe && periodIsSafe) {
+      return {
+        status: 'ready',
+        resolvedQuery,
+        provider: result.provider || result.model || 'ai-intent-clarifier'
+      };
+    }
+    const natural = res.ok ? normalizeAiClarificationText(result.question || result.text) : '';
+    if (natural) {
+      const choices = Array.isArray(result.choices)
+        ? result.choices.map(x => String(x || '').trim().slice(0, 80)).filter(Boolean).slice(0, 3)
+        : [];
+      return {
+        status: 'clarify',
+        text: natural,
+        provider: result.provider || result.model || 'ai-intent-clarifier',
+        choices
+      };
+    }
+  } catch (err) {
+    console.warn('Natural intent clarification failed; using contextual fallback:', err);
+  } finally {
+    clearTimeout(timer);
+  }
+  return {
+    status: 'clarify',
+    text: fallback,
+    provider: 'local-intent-clarifier',
+    choices: fallbackChoices
+  };
 }
 
 function buildSavedReportCoverage(reports) {
@@ -7356,11 +7682,12 @@ function currentReportHasUsableSales() {
     || (Array.isArray(currentReport.sales) && currentReport.sales.length > 0);
 }
 
-async function searchSavedReportsByQuery(query, chatHistory = []) {
+async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedReports = null) {
   let q = resolveAiChatQuery(query, chatHistory).toLowerCase();
   q = resolveRelativeTimeRefs(q);
+  const hasCloudSession = !!getAdminToken();
 
-  if (!getAdminToken() && !currentReportHasUsableSales()) {
+  if (!hasCloudSession && !currentReportHasUsableSales()) {
     return { loadError: 'クラウド接続が必要です。' };
   }
 
@@ -7378,21 +7705,31 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     }
   }
 
-  const reports = await readSavedReports();
-  const allReports = currentReport ? [currentReport, ...reports] : reports;
-  if (allReports.length === 0) {
-    if (savedReportsLoadError) return { loadError: savedReportsLoadError.message || '保存データの取得に失敗しました。' };
-    return null;
-  }
-
-  if (needsAiIntentClarification(q)) {
+  // 分析目的そのものが曖昧なら、保存一覧を取得する前に聞き返す。
+  if (shouldAskAiIntentClarification(q, chatHistory)) {
     return { needsIntentClarification: true };
   }
+
+  const reports = Array.isArray(prefetchedReports) ? prefetchedReports : await readSavedReports();
+  const allReports = currentReport ? [currentReport, ...reports] : reports;
+  const cloudLookupUnavailable = Array.isArray(prefetchedReports)
+    ? false
+    : !hasCloudSession || !!savedReportsLoadError;
+  const unavailableCloudResult = () => ({
+    loadError: savedReportsLoadError?.message || 'クラウドの保存レポートを完全に確認できませんでした。'
+  });
+  if (allReports.length === 0) {
+    if (cloudLookupUnavailable) return unavailableCloudResult();
+    return null;
+  }
+  const savedCoverage = buildSavedReportCoverage(allReports);
+  q = resolveComparisonTimeRefs(q, savedCoverage.last);
 
   // 期間範囲クエリ（例:「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
   // 比較（と/、で結ぶ）とは異なり、範囲内の全期間を1つの合算データとして返す。
   const rangeRef = extractRangeRef(q);
   if (rangeRef) {
+    if (cloudLookupUnavailable) return unavailableCloudResult();
     const fromKey = rangeRef.fromYear * 12 + rangeRef.fromMonth;
     const toKey = rangeRef.toYear * 12 + rangeRef.toMonth;
     const [lo, hi] = fromKey <= toKey ? [fromKey, toKey] : [toKey, fromKey];
@@ -7420,16 +7757,51 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
 
   async function summarizeMatched(matched, label) {
     const hydrated = [];
+    const detailHydrated = [];
+    let hydrationFailed = false;
     const needsItemDetails = wantsItemBreakdown(q);
-    for (const r of matched) {
+    const monthGroups = new Map();
+    const withoutMonth = [];
+    for (const report of matched) {
+      const key = monthKeyFromReport(report);
+      if (!key) {
+        withoutMonth.push(report);
+        continue;
+      }
+      if (!monthGroups.has(key)) monthGroups.set(key, []);
+      monthGroups.get(key).push(report);
+    }
+    const monthEntries = Array.from(monthGroups.entries())
+      .sort(([a], [b]) => b.localeCompare(a));
+    const detailRangeLimited = needsItemDetails && monthEntries.length > 36;
+    const summaryReports = [];
+    for (const [, group] of monthEntries) {
+      // 月間が無い月は1日分だけにせず、選択ヘルパーが返す全日別を合算対象にする。
+      summaryReports.push(...selectReportsForSavedMonthGroup(group));
+    }
+    summaryReports.push(...withoutMonth);
+
+    const detailReports = [];
+    if (needsItemDetails) {
+      const detailEntries = detailRangeLimited ? monthEntries.slice(0, 36) : monthEntries;
+      for (const [, group] of detailEntries) {
+        detailReports.push(...selectReportsForSavedMonthGroup(group));
+      }
+      if (!detailRangeLimited) detailReports.push(...withoutMonth);
+    }
+    const detailTargets = new Set(detailReports);
+    for (const r of summaryReports) {
       const hasCoreSummary = Number.isFinite(Number(r?.total ?? r?.totalSales))
         && Number.isFinite(Number(r?.foodTotal))
         && Number.isFinite(Number(r?.drinkTotal));
-      hydrated.push((needsItemDetails || !hasCoreSummary) ? await hydrateSavedReport(r) : r);
+      const full = (detailTargets.has(r) || !hasCoreSummary) ? await hydrateSavedReport(r) : r;
+      if (full?._hydrateFailed) hydrationFailed = true;
+      hydrated.push(full);
+      if (detailTargets.has(r)) detailHydrated.push(full);
     }
+    if (hydrationFailed) return unavailableCloudResult();
 
-    const monthly = hydrated.filter(r => String(r.title || '').includes('月間'));
-    const use = monthly.length ? monthly : hydrated;
+    const use = hydrated;
 
     // 月次内訳（推移回答用）。同一年月が currentReport とクラウドで二重にある場合は
     // 「月間」タイトル優先→売上の大きい方を代表値にし、合算で二重計上しない。
@@ -7438,7 +7810,7 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
       const ym = extractYearMonthFromText(r.period || r.title || '');
       if (!ym) continue;
       const key = `${ym.year}-${String(ym.month).padStart(2, '0')}`;
-      const isMonthlyTitle = String(r.title || '').includes('月間');
+      const isMonthlyTitle = isMonthlyReportTitle(r.title);
       let sales = reportSummaryTotal(r);
       let food = Number(r.foodTotal) || 0;
       let drink = Number(r.drinkTotal) || 0;
@@ -7473,6 +7845,13 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
         // keep prev
       } else if (!prev._isMonthlyTitle && isMonthlyTitle) {
         monthMap.set(key, row);
+      } else if (!prev._isMonthlyTitle && !isMonthlyTitle) {
+        prev.totalSales += row.totalSales;
+        prev.foodTotal += row.foodTotal;
+        prev.drinkTotal += row.drinkTotal;
+        prev.totalCustomers += row.totalCustomers;
+        prev.salesCount += row.salesCount;
+        prev.sourceCount += 1;
       } else if (sales > prev.totalSales) {
         monthMap.set(key, row);
       }
@@ -7521,7 +7900,8 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
       }
     }
 
-    const topProducts = mergeProductLists(use.map(collectProductsFromReport)).slice(0, 40);
+    const productSources = needsItemDetails ? detailHydrated : use;
+    const topProducts = mergeProductLists(productSources.map(collectProductsFromReport)).slice(0, 40);
     const catTot = fTot + dTot || 1;
     return {
       label,
@@ -7533,23 +7913,29 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
       totalCustomers: cust,
       avgSpend: cust ? Math.round(totSales / cust) : 0,
       salesCount: count,
-      sourceCount: monthlyBreakdown.length || use.length,
+      sourceCount: use.length,
       monthlyBreakdown,
-      topProducts
+      topProducts,
+      detailRangeLimited
     };
   }
 
   // 「最新」「直近Nか月」「全期間」は、保存レポートの軽量索引から必要な月だけ選ぶ。
   // 全明細をAIへ送らず、月次サマリーへ集約してから渡すためトークン量を抑えられる。
   const indexedRange = resolveIndexedSavedRangeIntent(q, allReports);
-  if (indexedRange) return await summarizeMatched(indexedRange.matched, `${indexedRange.label}の売上データ`);
+  if (indexedRange) {
+    if (cloudLookupUnavailable) return unavailableCloudResult();
+    return await summarizeMatched(indexedRange.matched, `${indexedRange.label}の売上データ`);
+  }
 
   // 複数期間の比較依頼（例:「202606と202607の営業比較分析をして」）を検知。
   // 単一期間ロジックだと最初の月だけを拾って確定扱いにしてしまい、AIに「これ以外の数字は禁止」と
   // 指示してしまうため比較ができなくなる。2件以上の年月が見つかった場合はそれぞれ個別に集計して返す。
   const allMonthRefs = extractAllMonthRefs(q);
   if (allMonthRefs.length >= 2) {
+    if (cloudLookupUnavailable) return unavailableCloudResult();
     const periods = [];
+    const missingPeriods = [];
     for (const ref of allMonthRefs.slice(0, 4)) {
       const targetJa = `${ref.year}年${parseInt(ref.month, 10)}月`;
       const matched = allReports.filter(r => {
@@ -7557,29 +7943,43 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
         return p.includes(ref.key) || p.includes(targetJa) || (p.includes(ref.year) && p.includes(`${parseInt(ref.month, 10)}月`));
       });
       if (matched.length > 0) {
-        periods.push(await summarizeMatched(matched, `${targetJa}の売上データ`));
+        const summary = await summarizeMatched(matched, `${targetJa}の売上データ`);
+        if (summary?.loadError) return summary;
+        periods.push(summary);
+      } else {
+        missingPeriods.push(targetJa);
       }
     }
     if (periods.length >= 2) return { multiPeriod: true, periods };
-    // 実データが1件以下しか見つからなかった場合は、単一期間ロジックへフォールスルーする
+    return {
+      notMatchedLabel: `${missingPeriods.length ? missingPeriods.join('・') : '比較対象期間'}（比較に必要な保存データ）`
+    };
   }
 
   // 月単位の複数参照が無かった場合、年単位の比較依頼（例:「2026年と2025年を比較して」）を検知する
   if (allMonthRefs.length < 2) {
     const allYearRefs = extractAllYearRefs(q);
     if (allYearRefs.length >= 2) {
+      if (cloudLookupUnavailable) return unavailableCloudResult();
       const yearPeriods = [];
+      const missingYears = [];
       for (const year of allYearRefs.slice(0, 4)) {
         const matched = allReports.filter(r => {
           const p = String(r.period || r.title || '');
           return p.includes(year) || p.includes(`${year}年`);
         });
         if (matched.length > 0) {
-          yearPeriods.push(await summarizeMatched(matched, `${year}年の売上データ`));
+          const summary = await summarizeMatched(matched, `${year}年の売上データ`);
+          if (summary?.loadError) return summary;
+          yearPeriods.push(summary);
+        } else {
+          missingYears.push(`${year}年`);
         }
       }
       if (yearPeriods.length >= 2) return { multiPeriod: true, periods: yearPeriods };
-      // 実データが1件以下しか見つからなかった場合は、単一期間ロジックへフォールスルーする
+      return {
+        notMatchedLabel: `${missingYears.length ? missingYears.join('・') : '比較対象年'}（比較に必要な保存データ）`
+      };
     }
   }
 
@@ -7592,11 +7992,18 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
       const p = String(r.period || r.title || '');
       return p.includes(targetKey) || p.includes(targetJa) || (p.includes(year) && p.includes(`${parseInt(month, 10)}月`));
     });
+    if (cloudLookupUnavailable) {
+      const currentMatches = currentReport && matched.includes(currentReport);
+      return currentMatches
+        ? await summarizeMatched([currentReport], `${targetJa}の売上データ`)
+        : unavailableCloudResult();
+    }
     if (matched.length > 0) return await summarizeMatched(matched, `${targetJa}の売上データ`);
     return { notMatchedLabel: targetJa };
   }
 
   if (beforeYearMatch) {
+    if (cloudLookupUnavailable) return unavailableCloudResult();
     const targetYear = parseInt(beforeYearMatch[1], 10);
     const matched = allReports.filter(r => {
       const p = String(r.period || r.title || '');
@@ -7606,9 +8013,11 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
     if (matched.length > 0) {
       return await summarizeMatched(matched, `${targetYear}年より前 (${targetYear - 1}年以前) の全保存データ`);
     }
+    return { notMatchedLabel: `${targetYear}年より前` };
   }
 
   if (yearOnlyMatch) {
+    if (cloudLookupUnavailable) return unavailableCloudResult();
     const targetYear = yearOnlyMatch[1];
     const matched = allReports.filter(r => {
       const p = String(r.period || r.title || '');
@@ -7619,7 +8028,12 @@ async function searchSavedReportsByQuery(query, chatHistory = []) {
   }
 
   if (!currentReportHasUsableSales() && reports.length > 0) {
-    return { needsClarification: true, coverage: buildSavedReportCoverage(reports) };
+    if (cloudLookupUnavailable) return unavailableCloudResult();
+    return {
+      needsClarification: true,
+      coverage: buildSavedReportCoverage(reports),
+      reportIndex: reports
+    };
   }
 
   return null;
@@ -7630,6 +8044,11 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
 
   if (wantsSalesForecast(msg)) {
     const bundle = await collectMonthlyHistoryForForecast();
+    if (bundle.loadError) {
+      return `### ⚠️ 保存データを確認できませんでした
+
+クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
+    }
     const horizon = /6\s*か?月|半年/.test(msg) ? 6 : 3;
     const result = buildSalesForecast(bundle, horizon);
     return formatForecastChatReply(result);
@@ -7645,11 +8064,11 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
     }
 
     if (queryResult.needsIntentClarification) {
-      return buildAiIntentClarificationReply();
+      return buildAiIntentClarificationReply(msg);
     }
 
     if (queryResult.needsClarification) {
-      return buildSavedDataClarificationReply(queryResult.coverage);
+      return buildSavedDataNaturalClarificationReply(msg, queryResult.coverage);
     }
 
     if (queryResult.notMatchedLabel) {
@@ -7784,19 +8203,101 @@ async function sendAiChat() {
   // 保存ジャーナルへの事実照会はまずローカル集計で正確な数値を確定する（一覧APIが金額を持たないため）。
   // ただし確定した数値を固定テンプレートでそのまま返すのではなく、AIへ「検算済みの正解」として
   // 渡し、AIに文章化させることで、数字の正確性と会話の自然さ・柔軟な追加指示への対応を両立する。
-  const resolvedChatQuery = resolveAiChatQuery(msg, aiChatHistory);
-  const queryResult = await searchSavedReportsByQuery(msg, aiChatHistory);
-  if (queryResult && (queryResult.loadError || queryResult.needsIntentClarification || queryResult.needsClarification)) {
+  let resolvedChatQuery = resolveAiChatQuery(msg, aiChatHistory);
+  let queryResult = await searchSavedReportsByQuery(msg, aiChatHistory);
+  if (queryResult && queryResult.loadError) {
     removeAiChatLoading(loadingId);
-    const reply = queryResult.loadError
-      ? `### ⚠️ 保存データを確認できませんでした
+    const reply = `### ⚠️ 保存データを確認できませんでした
 
-クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`
-      : queryResult.needsIntentClarification
-        ? buildAiIntentClarificationReply()
-      : buildSavedDataClarificationReply(queryResult.coverage);
+クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
     appendAiChatMessage('ai', reply, { question: msg, provider: 'local-query-planner' });
     aiChatHistory.push({ role: 'assistant', content: reply });
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+    return;
+  }
+
+  // 確認の往復が続きすぎる場合は保存済み最新月を安全な既定値として進める。
+  if (queryResult && queryResult.needsClarification && countRecentClarificationsByKind(aiChatHistory, 'period') >= 2) {
+    const reportIndex = queryResult.reportIndex;
+    resolvedChatQuery = `${resolvedChatQuery} 保存済み最新月を対象に全体を分析`;
+    queryResult = await searchSavedReportsByQuery(resolvedChatQuery, [], reportIndex);
+  }
+  if (queryResult && queryResult.loadError) {
+    removeAiChatLoading(loadingId);
+    const reply = `### ⚠️ 保存データを確認できませんでした
+
+クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
+    appendAiChatMessage('ai', reply, { question: msg, provider: 'local-query-planner' });
+    aiChatHistory.push({ role: 'assistant', content: reply });
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+    return;
+  }
+
+  if (queryResult && (queryResult.needsIntentClarification || queryResult.needsClarification)) {
+    const missingKind = queryResult.needsIntentClarification ? 'intent' : 'period';
+    const generated = await requestNaturalIntentClarification(
+      msg,
+      aiChatHistory,
+      queryResult.coverage,
+      missingKind
+    );
+    if (generated.status === 'ready' && generated.resolvedQuery) {
+      const reportIndex = queryResult.reportIndex;
+      resolvedChatQuery = generated.resolvedQuery;
+      queryResult = await searchSavedReportsByQuery(resolvedChatQuery, [], reportIndex);
+      if (queryResult && queryResult.loadError) {
+        removeAiChatLoading(loadingId);
+        const reply = `### ⚠️ 保存データを確認できませんでした
+
+クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
+        appendAiChatMessage('ai', reply, { question: msg, provider: 'local-query-planner' });
+        aiChatHistory.push({ role: 'assistant', content: reply });
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+        return;
+      }
+    } else {
+      removeAiChatLoading(loadingId);
+      appendAiChatMessage('ai', generated.text, { question: msg, provider: generated.provider });
+      aiChatHistory.push({
+        role: 'assistant',
+        content: generated.text,
+        clarification: missingKind,
+        originalQuery: resolvedChatQuery,
+        clarificationChoices: generated.choices || []
+      });
+      input.disabled = false;
+      sendBtn.disabled = false;
+      input.focus();
+      return;
+    }
+  }
+
+  // AIがreadyと判定してもローカル検索に必要な条件が残った場合は、固定文ではなく文脈付きの一問へ退避する。
+  if (queryResult && (queryResult.needsIntentClarification || queryResult.needsClarification)) {
+    const missingKind = queryResult.needsIntentClarification ? 'intent' : 'period';
+    const reply = missingKind === 'period'
+      ? buildSavedDataNaturalClarificationReply(resolvedChatQuery, queryResult.coverage)
+      : buildAiIntentClarificationReply(resolvedChatQuery);
+    const clarificationChoices = missingKind === 'period'
+      ? ['最新月', '直近3か月', '特定の月']
+      : /比較|比べ/.test(resolvedChatQuery)
+        ? ['前月との比較', '前年同月との比較']
+        : ['数字の現状', '変化した理由', '改善策'];
+    removeAiChatLoading(loadingId);
+    appendAiChatMessage('ai', reply, { question: msg, provider: 'local-intent-clarifier' });
+    aiChatHistory.push({
+      role: 'assistant',
+      content: reply,
+      clarification: missingKind,
+      originalQuery: resolvedChatQuery,
+      clarificationChoices
+    });
     input.disabled = false;
     sendBtn.disabled = false;
     input.focus();
@@ -7815,6 +8316,15 @@ async function sendAiChat() {
   }
 
   const verifiedData = (queryResult && !queryResult.notMatchedLabel) ? queryResult : null;
+  const salesDataForAi = verifiedData
+    ? {
+        title: '保存済みレポート検索結果',
+        period: verifiedData.multiPeriod
+          ? verifiedData.periods.map(period => period.label).join(' / ')
+          : verifiedData.label,
+        note: '数値はsystemInstruction内の確定済み集計データを参照'
+      }
+    : compactData;
 
   function formatVerifiedPeriodBlock(p) {
     const monthLines = formatMonthlyBreakdownLines(p.monthlyBreakdown, '  ');
@@ -7825,7 +8335,8 @@ async function sendAiChat() {
   - ドリンク売上: ${yen(p.drinkTotal)} (${p.drinkPct}%)
   - 総来店客数: ${p.totalCustomers}名 (平均客単価: ${yen(p.avgSpend)})
   - 対象レポート件数: ${p.sourceCount}件${monthBlock}
-${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5: ' + p.topProducts.slice(0, 5).map(x => `${x.name}(${x.qty}点/${yen(x.amt)})`).join('、') : ''}`;
+${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5: ' + p.topProducts.slice(0, 5).map(x => `${x.name}(${x.qty}点/${yen(x.amt)})`).join('、') : ''}
+${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信量上限）' : ''}`;
   }
   let verifiedDataBlock = '';
   if (verifiedData && verifiedData.multiPeriod) {
@@ -7850,6 +8361,7 @@ ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 - 総来店客数: ${verifiedData.totalCustomers}名 (平均客単価: ${yen(verifiedData.avgSpend)})
 - 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5: ' + verifiedData.topProducts.slice(0, 5).map(p => `${p.name}(${p.qty}点/${yen(p.amt)})`).join('、') : ''}
+${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}
 
 回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目を聞かれた場合は「ご提示のデータには含まれておりません」と正直に答えてください。`;
   }
@@ -7861,9 +8373,10 @@ ${buildStoreLocationBlockForAi()}
 1. あなたはマルゴグループ各店舗の保存済み売上データ専用の厳密なアナリストAIです。営業・売上に関するあらゆる種類の質問（実績照会、期間比較、トレンド、客単価、商品構成、ワイン／ドリンク比率、原因分析、改善提案、今後の見通しなど）に幅広く対応してください。
 2. 数値（金額・件数・客数・比率など）は、必ず提示された保存データ・資料（salesDataや確定済み集計データ）のみから厳密に引用・計算してください。数値についての推測・Web情報・一般的な相場観での代用は【完全禁止】です。
 3. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
-4. チャットパネルを閉じるまでの過去の会話履歴（chatHistory）をすべて踏まえ、前後の文脈を完璧に引き継いで会話・回答してください。
+4. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
 5. 提供されたデータに存在しない期間や項目について質問された場合は、「ご提示いただいた保存データ内には〇〇のデータが含まれておりません」と正確・正直に回答してください（このデータが無い旨の説明自体は推測ではないため、上記3の表記は不要です）。
-6. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。${verifiedDataBlock}`;
+6. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
+7. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。${verifiedDataBlock}`;
 
   try {
     const res = await fetch(AI_ENDPOINT, {
@@ -7876,8 +8389,12 @@ ${buildStoreLocationBlockForAi()}
         action: 'chat',
         message: resolvedChatQuery,
         systemInstruction: strictSystemInstruction,
-        salesData: compactData,
-        chatHistory: aiChatHistory,
+        salesData: salesDataForAi,
+        // 現在の発言は message で別送するため重複させず、直近12発話だけに制限する。
+        chatHistory: aiChatHistory.slice(0, -1).slice(-12).map(item => ({
+          role: item.role === 'user' ? 'user' : 'assistant',
+          content: String(item.content || '').slice(0, 1600)
+        })),
         orchestrationMode: 'auto',
         storeKey: STORE_KEY,
         storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
