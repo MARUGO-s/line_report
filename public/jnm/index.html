@@ -4079,7 +4079,8 @@ function buildCloudReportData(r) {
 async function uploadSavedReportHtmlToCloud(reportId, html) {
   if (!getAdminToken() || !reportId || !html) return null;
   const form = new FormData();
-  form.append('file', new File([html], `${reportId}.html`, { type: 'text/html; charset=utf-8' }));
+  // Storage は mime exact match。charset 付きだと 415 になりクラウド保存全体が失敗する。
+  form.append('file', new File([html], `${reportId}.html`, { type: 'text/html' }));
   form.append('store_key', STORE_KEY);
   form.append('report_id', String(reportId));
   return await adminApiFetch('/pos-journals/saved-reports/html', { method: 'POST', body: form });
@@ -6861,6 +6862,10 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 【予約確定事実】が載っていない場合（予約取り込み未導入の店舗・対象期間0件）は、予約・飛び込み・新規予約要因に触れず、通常の売上分析だけを行う。無理に「予約データが無い」と強調しない。
 - 新規予約や飛び込みが前月より増減した月は、【店舗ナレッジ】の同月・前後の施策・メニュー・価格改定を必ず照合し、見つかれば「登録資料によると」と明示して要因に使う。資料にめぼしい記述が無い場合のみ「※これは推測です」と前置きしたうえで仮説を述べる。「予約専用項目なし」と併記されていても本節があれば後者を優先し、「表示されていません」で止めない。
 - 解析欄にも金額が無い場合のみ、数値を捏造せず「※これは推測です」として季節要因に含めてよい。
+
+【期間表現（必須・全分析に常時適用）】
+- 「2026年1月から7月まで」「2026年1月〜7月」「1月〜7月」は、端点の2か月だけではない。開始月〜終了月のあいだの全月（例: 1・2・3・4・5・6・7月）を含む連続期間として扱う。
+- 確定済み集計のラベルや月次推移にその範囲の月がある場合は、端点だけを抜き出して「1月と7月だけ」と答えない。途中月が集計に無いときだけ、その月は「今回の確定済み集計には表示されていません」と月単位で述べる。
 
 分析・アドバイスの優先視点:
 1. 対象店舗の立地（住所・商圏・客層・時間帯）に合った施策
@@ -10706,11 +10711,11 @@ function extractYearMonthFromText(text) {
   return { year: parseInt(m[1], 10), month: parseInt(m[2], 10) };
 }
 
-/** 「2025年4月から2026年3月まで」「2026年1月〜7月」「2025年〜2026年」等の期間範囲指定を検出する（比較「AとB」とは別扱い） */
+/** 「2025年4月から2026年3月まで」「2026年1月〜7月」「2026年の1月から7月まで」「2025年〜2026年」等の期間範囲指定を検出する（比較「AとB」とは別扱い） */
 function extractRangeRef(q) {
   const s = String(q || '');
-  // 年またぎ: 2025年4月〜2026年3月 / 2025年4月から2026年3月まで
-  const monthToMonth = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:まで)?/);
+  // 年またぎ: 2025年4月〜2026年3月 / 2025年の4月から2026年の3月まで
+  const monthToMonth = s.match(/(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:まで)?/);
   if (monthToMonth) {
     return {
       fromYear: parseInt(monthToMonth[1], 10), fromMonth: parseInt(monthToMonth[2], 10),
@@ -10718,10 +10723,10 @@ function extractRangeRef(q) {
       wasYearOnly: false
     };
   }
-  // 同年省略: 2026年1月〜7月 / 2026年1月から7月まで
+  // 同年省略: 2026年1月〜7月 / 2026年1月から7月まで / 2026年の1月から7月まで
   // （UIの formatMonthSpanLabel も「2026年1月〜6月」形式。両端に年が無いと従来は範囲未検出になり、
   //  後段の extractAllMonthRefs が端点の1月と7月だけを拾って比較扱いになっていた）
-  const sameYearMonthToMonth = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{1,2})\s*月\s*(?:まで)?/);
+  const sameYearMonthToMonth = s.match(/(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{1,2})\s*月\s*(?:まで)?/);
   if (sameYearMonthToMonth) {
     const year = parseInt(sameYearMonthToMonth[1], 10);
     const fromMonth = parseInt(sameYearMonthToMonth[2], 10);
@@ -12232,8 +12237,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     return { notMatchedLabel: dayScope.label };
   }
 
-  // 期間範囲クエリ（例:「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
-  // 比較（と/、で結ぶ）とは異なり、範囲内の全期間を1つの合算データとして返す。
+  // 期間範囲クエリ（例:「2026年1月から7月まで」「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
+  // 「から／〜／まで」は端点2か月ではなく、あいだの全月を含む連続期間。比較（と/、）とは別扱い。
   const rangeRef = extractRangeRef(q);
   if (rangeRef) {
     if (cloudLookupUnavailable) return unavailableCloudResult();
@@ -13164,7 +13169,8 @@ ${buildStoreLocationBlockForAi()}
 9. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
 10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。予約／飛び込みの増減要因を述べるときも、まずナレッジを照合し、無い場合のみ「※これは推測です」で仮説を述べてください。ナレッジに無いことを推測で事実のように書いてはいけません。資料が「なし」と明示されている場合のみ資料なしで進めてください。
 11. 【店舗営業情報・必須】毎回必ず添付されます。分析の最初に読み、定休曜日の売上ゼロ／低下を弱点や機会損失としないでください。定休曜日に売上が立っている日は特別営業（または例外営業）として区別してください。他店の定休ルールを転用しないでください。
-12. 【3系統統合・必須】①ジャーナル確定集計（数値・予約vs飛び込み含む）②店舗営業情報（定休・ランチ等）③店舗資料（施策・メニュー）を必ず突き合わせて回答してください。どれか欠ける場合はチェック欄の状態に従い、欠けた系統を推測で埋めないでください。${integrated.checklist}${integrated.storeOpsBlock}${verifiedDataBlock}${integrated.knowledgeBlock}`;
+12. 【3系統統合・必須】①ジャーナル確定集計（数値・予約vs飛び込み含む）②店舗営業情報（定休・ランチ等）③店舗資料（施策・メニュー）を必ず突き合わせて回答してください。どれか欠ける場合はチェック欄の状態に従い、欠けた系統を推測で埋めないでください。
+13. 【期間の読み方・必須】「2026年1月から7月まで」「2026年1月〜7月」などは1月と7月の2点比較ではない。1〜7月の全月を含む連続期間として扱い、確定済み集計の月次推移がある月はすべて述べる。端点だけを抜き出して途中月を無視してはいけない。${integrated.checklist}${integrated.storeOpsBlock}${verifiedDataBlock}${integrated.knowledgeBlock}`;
 
   const strictSystemInstructionClamped = clampAiSystemInstruction(strictSystemInstruction);
 

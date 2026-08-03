@@ -10097,10 +10097,11 @@ async function uploadSavedReportHtml(
   }
   const bytes = new Uint8Array(await file.arrayBuffer())
   const storagePath = buildSavedReportHtmlStoragePath(storeKey, reportId)
+  // Storage の allowed_mime_types は exact match。charset 付きは 415 になる。
   const { error: uploadError } = await supabase.storage
     .from(POS_REPORT_HTML_BUCKET)
     .upload(storagePath, bytes, {
-      contentType: file.type || "text/html; charset=utf-8",
+      contentType: "text/html",
       upsert: true,
     })
   if (uploadError) {
@@ -10261,7 +10262,7 @@ async function offloadSavedReportHtml(
     const { error: uploadError } = await supabase.storage
       .from(POS_REPORT_HTML_BUCKET)
       .upload(storagePath, bytes, {
-        contentType: "text/html; charset=utf-8",
+        contentType: "text/html",
         upsert: true,
       })
     if (uploadError) {

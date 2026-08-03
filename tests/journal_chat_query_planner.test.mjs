@@ -644,6 +644,12 @@ test('same-year month ranges like 2026年1月〜7月 expand to the full inclusiv
   assert.deepEqual(asJson(context.extractRangeRef('2026年1月から7月までの売上')), {
     fromYear: 2026, fromMonth: 1, toYear: 2026, toMonth: 7, wasYearOnly: false,
   });
+  assert.deepEqual(asJson(context.extractRangeRef('2026年1月から7月までの売り上げデータをまとめて表示して')), {
+    fromYear: 2026, fromMonth: 1, toYear: 2026, toMonth: 7, wasYearOnly: false,
+  });
+  assert.deepEqual(asJson(context.extractRangeRef('2026年の1月から7月まで')), {
+    fromYear: 2026, fromMonth: 1, toYear: 2026, toMonth: 7, wasYearOnly: false,
+  });
   // 両端に年がある従来形式も維持
   assert.deepEqual(asJson(context.extractRangeRef('2025年11月〜2026年2月')), {
     fromYear: 2025, fromMonth: 11, toYear: 2026, toMonth: 2, wasYearOnly: false,
