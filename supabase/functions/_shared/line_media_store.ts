@@ -205,6 +205,60 @@ export async function saveRoomMediaToLibrary(
   return { saved: true }
 }
 
+/**
+ * 指定 LINE メッセージのメディア保存を取り消す（ストレージ実体＋DB行）。
+ *
+ * `#メモ` の引用返信でジャーナルレポート側（店舗ナレッジ）へ登録した添付は、
+ * メディアライブラリには残さない方針のため、登録成功後にこれで取り消す。
+ * メディア保存は添付を受信した時点で先に走るので、`#メモ` が後から来る
+ * 引用返信方式では「保存しない」ではなく「登録できたら消す」で実現する。
+ *
+ * @returns 実際に削除した行があれば true（元から無い・上限超過で自動削除済みなら false）
+ */
+export async function removeRoomMediaByMessageId(
+  supabase: SupabaseClientLike,
+  lineMessageId: string,
+): Promise<boolean> {
+  const messageId = String(lineMessageId || '').trim()
+  if (!messageId) return false
+  try {
+    const { data: rows, error } = await supabase
+      .from('line_message_media')
+      .select('id, storage_bucket, storage_path')
+      .eq('line_message_id', messageId)
+    if (error || !Array.isArray(rows) || rows.length === 0) return false
+
+    const ids: number[] = []
+    const pathsByBucket = new Map<string, string[]>()
+    for (const r of rows) {
+      const id = Number(r.id)
+      if (!Number.isFinite(id)) continue
+      ids.push(id)
+      const bucket = String(r.storage_bucket || MEDIA_LIBRARY_BUCKET)
+      const path = String(r.storage_path || '')
+      if (!path) continue
+      if (!pathsByBucket.has(bucket)) pathsByBucket.set(bucket, [])
+      pathsByBucket.get(bucket)!.push(path)
+    }
+    if (ids.length === 0) return false
+
+    for (const [bucket, paths] of pathsByBucket) {
+      if (paths.length === 0) continue
+      // ストレージ実体の削除に失敗しても、DB行は消して一覧から見えないようにする
+      try { await supabase.storage.from(bucket).remove(paths) } catch (_) { /* ignore */ }
+    }
+    const deleted = await supabase.from('line_message_media').delete().in('id', ids)
+    if (deleted?.error) {
+      console.error('removeRoomMediaByMessageId delete failed:', deleted.error.message)
+      return false
+    }
+    return true
+  } catch (err) {
+    console.error('removeRoomMediaByMessageId failed:', err)
+    return false
+  }
+}
+
 /** 1ルーム20MB上限を超えた分を、古い順（created_at 昇順）にストレージ＋行ごと削除する。 */
 async function enforceRoomMediaCap(supabase: SupabaseClientLike, roomId: string): Promise<void> {
   const { data: rows, error } = await supabase
