@@ -64,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if DENO_DIR="$RUNNER_TEMP/line-report-deno-check" deno check --no-lock supabase/functions/ai-analyze/index.ts; then
+            if DENO_DIR="$RUNNER_TEMP/line-report-deno-check" deno check --no-lock --node-modules-dir=auto supabase/functions/ai-analyze/index.ts; then
               exit 0
             fi
             echo "::warning::deno check attempt ${attempt} failed; retrying after $((attempt * 5)) seconds"
