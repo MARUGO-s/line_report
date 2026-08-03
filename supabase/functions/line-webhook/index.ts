@@ -2027,28 +2027,41 @@ async function processReceiptTextEvent(
   return { handled: true, replied: !!replyToken }
 }
 
-// #メモ 画像を Gemini で解析し、店舗ナレッジとして登録する。
-// 注意: この関数は必ずトップレベルに置くこと。Deno.serve 内のイベントループ本体に
-// 置くと、同じブロックで後から const 宣言される変数を巻き込んで TDZ エラーになる。
-async function maybeProcessKnowledgeImageMessage(
+/**
+ * 引用返信（リプライ）で指定された画像を Gemini で解析し、店舗ナレッジとして登録する。
+ *
+ * LINE の画像メッセージ自体には text フィールドが無く、キャプションを付けて送る手段が
+ * 無い。そのため画像は「画像を送る → その画像に引用返信で #メモ と書く」という2手で
+ * 指定する。引用返信のテキストイベントには quotedMessageId（引用元＝画像のID）が入る。
+ *
+ * 通数について: 引用返信は店舗からの受信メッセージなので PUSH 無料枠を消費しない。
+ * 完了通知も Reaction API（0通）で行い、返信メッセージは送らない。
+ *
+ * 注意: この関数は必ずトップレベルに置くこと。Deno.serve 内のイベントループ本体に
+ * 置くと、同じブロックで後から const 宣言される変数を巻き込んで TDZ エラーになる。
+ *
+ * @param imageMessageId 引用元の画像メッセージID（quotedMessageId）
+ * @param memoText 引用返信の本文（#メモ を含む）。ナレッジの本文に使う
+ */
+async function registerQuotedImageAsKnowledge(
   registry: StoreRegistryRow,
-  event: any,
+  imageMessageId: string,
+  memoText: string,
+  createdBy: string,
   lineAccessTokenForSearch?: string
 ): Promise<boolean> {
   try {
     const storeKey = registry.store_partition_key || ''
-    const msgId = String(event.message?.id || '').trim()
-    const text = String((event.message as any)?.text || '').trim()
+    const msgId = String(imageMessageId || '').trim()
+    const text = String(memoText || '').trim()
 
-    const isMemo = text && /#(?:メモ|日報|note)/i.test(text)
-    if (!isMemo || !storeKey || !msgId) {
-      return false
-    }
+    if (!storeKey || !msgId) return false
 
     const token = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch || ''
     if (!token) return false
 
     // 1. LINE API から画像バイナリを取得
+    //    引用元がテキスト等で画像でない場合や、保存期間切れの場合はここで ok:false になる
     const fetched = await fetchLineMessageBinary(msgId, token)
     if (!fetched.ok) {
       console.warn('Knowledge image fetch failed:', fetched.error)
@@ -2119,38 +2132,38 @@ async function maybeProcessKnowledgeImageMessage(
       mime_type: 'image/jpeg',
       file_size_bytes: binary.length,
       source_type: 'line_post',
-      created_by: event.source?.userId ? String(event.source.userId) : 'LINEユーザー'
+      created_by: createdBy || 'LINEユーザー'
     }
 
-    const saveRes = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-admin-token': 'demo',
-        'x-admin-surface': 'line_report',
-        'x-store-key': storeKey
-      },
-      body: JSON.stringify(recordPayload)
-    })
-
-    if (saveRes.ok) {
-      // 5. LINE Reaction API で通数0通の thumbs_up (👍) を送信
-      fetch('https://api.line.me/v2/bot/message/react', {
+    const postKnowledge = (payload: Record<string, unknown>) =>
+      fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'x-admin-token': 'demo',
+          'x-admin-surface': 'line_report',
+          'x-store-key': storeKey
         },
-        body: JSON.stringify({
-          messageId: msgId,
-          reactionType: 'thumbs_up'
-        })
-      }).catch(e => console.warn('LINE Reaction API error:', e))
+        body: JSON.stringify(payload)
+      })
 
-      return true
+    let saveRes = await postKnowledge(recordPayload)
+
+    // 本番DBの CHECK 制約に 'line_post' がまだ入っていない環境では source_type で弾かれる。
+    // admin-api 側の process-line-post と同じ考え方で 'upload' にフォールバックして再試行する。
+    if (!saveRes.ok) {
+      const errText = await saveRes.text().catch(() => '')
+      if (/source_type/.test(errText)) {
+        console.warn('knowledge insert rejected by source_type constraint; retrying as upload')
+        saveRes = await postKnowledge({ ...recordPayload, source_type: 'upload' })
+      } else {
+        console.warn('knowledge insert failed:', saveRes.status, errText.slice(0, 200))
+      }
     }
+
+    return saveRes.ok
   } catch (err) {
-    console.error('maybeProcessKnowledgeImageMessage failed:', err)
+    console.error('registerQuotedImageAsKnowledge failed:', err)
   }
   return false
 }
@@ -2459,17 +2472,10 @@ Deno.serve(async (req) => {
 
     if (event.type === 'message' && event.message?.type === 'image') {
       try {
-        // 店舗ナレッジ (#メモ) 画像の全自動AI解析・RAG連動 & メディア重複防止
-        const knowledgeHandled = await maybeProcessKnowledgeImageMessage(
-          registry as StoreRegistryRow,
-          event,
-          lineAccessTokenForSearch
-        )
-        if (knowledgeHandled) {
-          // #メモ 画像として保存成功時は、既存のレシート処理・メディア保存をスキップして重複防止
-          continue
-        }
-
+        // 注意: ここで #メモ 判定はしない。LINE の画像メッセージには text フィールドが
+        // 無いため、画像単体で #メモ かどうかは判別できない。ナレッジ登録は
+        // 「画像への引用返信で #メモ」を受けた text イベント側で行う
+        // （registerQuotedImageAsKnowledge を参照）。
         const result = await processReceiptImageEvent(
           registry as StoreRegistryRow,
           event,
@@ -2663,49 +2669,87 @@ Deno.serve(async (req) => {
 
       // 店舗ナレッジ (#メモ / #日報 / #note) の Journal Report 自動転送ブリッジ & 通数0リアクション
       if (text && /#(?:メモ|日報|note)/i.test(text) && storeKey) {
-        try {
-          const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
-          const adminApiUrl = `${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/process-line-post`
-          const msgId = event.message?.id ? String(event.message.id) : ''
+        const msgId = event.message?.id ? String(event.message.id) : ''
+        const quotedMessageId = String((event.message as any)?.quotedMessageId ?? '').trim()
+        let quotedImageHandled = false
 
-          fetch(adminApiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              // 関数間の内部ブリッジ認証。admin-api 側で service_role キー一致を検証する
-              'x-internal-key': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
-              'x-admin-surface': 'line_report',
-              'x-store-key': storeKey
-            },
-            body: JSON.stringify({
-              store_key: storeKey,
-              text: text,
-              sender_name: eventUserId || 'LINEユーザー'
-            })
-          }).then(async res => {
-            if (res.ok) {
-              const resJson = await res.json()
-              if (resJson.processed && msgId) {
-                // 通数0通のメッセージリアクション (thumbs_up 👍) を付与
-                const token = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch
-                if (token) {
-                  fetch('https://api.line.me/v2/bot/message/react', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({
-                      messageId: msgId,
-                      reactionType: 'thumbs_up'
-                    })
-                  }).catch(e => console.warn('Reaction API error:', e))
+        // 画像への引用返信で #メモ を送った場合は、引用元の画像をナレッジとして登録する。
+        // LINE の画像メッセージ自体には text が付かないため、これが画像を指定する唯一の手段。
+        if (quotedMessageId) {
+          try {
+            quotedImageHandled = await registerQuotedImageAsKnowledge(
+              registry as StoreRegistryRow,
+              quotedMessageId,
+              text,
+              eventUserId,
+              lineAccessTokenForSearch,
+            )
+          } catch (e) {
+            console.error('registerQuotedImageAsKnowledge error:', e)
+          }
+
+          if (quotedImageHandled && msgId) {
+            // 完了通知は通数0通の thumbs_up (👍)。返信メッセージは送らない。
+            const token = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch
+            if (token) {
+              fetch('https://api.line.me/v2/bot/message/react', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ messageId: msgId, reactionType: 'thumbs_up' })
+              }).catch(e => console.warn('Reaction API error:', e))
+            }
+          }
+        }
+
+        // 画像として登録できた場合はテキスト単体の転送を行わない（二重登録の防止）。
+        // 引用元が画像でない／取得できなかった場合は、従来どおりテキストとして登録する。
+        if (!quotedImageHandled) {
+          try {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
+            const adminApiUrl = `${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/process-line-post`
+
+            fetch(adminApiUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                // 関数間の内部ブリッジ認証。admin-api 側で service_role キー一致を検証する
+                'x-internal-key': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
+                'x-admin-surface': 'line_report',
+                'x-store-key': storeKey
+              },
+              body: JSON.stringify({
+                store_key: storeKey,
+                text: text,
+                sender_name: eventUserId || 'LINEユーザー'
+              })
+            }).then(async res => {
+              if (res.ok) {
+                const resJson = await res.json()
+                if (resJson.processed && msgId) {
+                  // 通数0通のメッセージリアクション (thumbs_up 👍) を付与
+                  const token = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch
+                  if (token) {
+                    fetch('https://api.line.me/v2/bot/message/react', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                      },
+                      body: JSON.stringify({
+                        messageId: msgId,
+                        reactionType: 'thumbs_up'
+                      })
+                    }).catch(e => console.warn('Reaction API error:', e))
+                  }
                 }
               }
-            }
-          }).catch(err => console.error('Failed to forward #メモ to admin-api:', err))
-        } catch (e) {
-          console.error('Error forwarding #メモ post:', e)
+            }).catch(err => console.error('Failed to forward #メモ to admin-api:', err))
+          } catch (e) {
+            console.error('Error forwarding #メモ post:', e)
+          }
         }
       }
 
