@@ -102,4 +102,44 @@ git push origin main
 ```
 
 ---
+
+## ⚠️ 7. スタンドアロン作業フォルダとの同期に関する絶対注意事項
+
+`/Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/`（以下「作業フォルダ」）は、`jnl2txt.html` を編集するための非git作業コピーです。セクション6のコピー運用を行う際は、以下を必ず守ってください。
+
+### 7-1. 作業フォルダの `supabase/` 配下からリポジトリへコピーしないこと
+
+作業フォルダには `supabase/functions/`（`line-webhook` / `admin-api` / `ai-analyze`）も置かれていますが、これは**本リポジトリの内容を写しただけの参照専用ミラー**です。正本は常に本リポジトリ側であり、作業フォルダ側は放置すると古くなります。
+
+> **絶対にやってはいけないこと**
+> `cp .../解凍変換ソフト/supabase/functions/... → 本リポジトリ/supabase/functions/...`
+> セクション6のデプロイ手順は **`jnl2txt.html` と `index.html` のみ**が対象です。`supabase/` 配下は決してコピー対象に含めないでください。
+
+**実際に起きた事故（2026-08-03）**
+
+`supabase/functions/line-webhook/index.ts` で、`#メモ` 画像処理の関数 `maybeProcessKnowledgeImageMessage` が `Deno.serve` 内のイベントループ本体に宣言され、その呼び出しが同一ブロックで後から `const` 宣言される `lineAccessTokenForSearch` を引数に渡していたため、**TDZ（Temporal Dead Zone）エラー**が発生しました。
+
+```
+ReferenceError: Cannot access 'lineAccessTokenForSearch' before initialization
+```
+
+これが画像メッセージ処理の `try` 冒頭で投げられ、`processReceiptImageEvent` に到達する前に `catch` へ落ちたため、全店舗で「レシート処理中にエラーが発生しました」を返し続けました（`line-webhook` v751 / 05:57 JST 〜 v752 / 13:27 JST の約7時間半、レシート登録が完全停止）。修正は PR #38。
+
+このとき作業フォルダ側の `line-webhook/index.ts` は**修正前の状態のまま残っていた**ため、そこからコピーしていれば同じ障害が再発していました。
+
+### 7-2. 更新の向きは「本リポジトリ → 作業フォルダ」の一方向
+
+`supabase/` 配下を変更する必要がある場合は、**本リポジトリ側**で `origin/main` から切ったブランチに修正 → PR → `main` マージ（GitHub Actions が Edge Function を自動デプロイ）を行ってください。作業フォルダ側を編集して持ち込む運用は禁止です。
+
+### 7-3. `#メモ` 機能の対応範囲（混同しやすい点）
+
+| 経路 | 画像 | 状態 |
+|---|---|---|
+| Web「資料」タブに **Ctrl+V / Cmd+V で貼り付け** | ✅ 動作する | `handleKnowledgeFileChange()` → `analyze-image`（Gemini解析）→ `upload`（原本保存）→ ナレッジ登録 |
+| LINE に **テキスト**で `#メモ` を送る | — | ✅ 動作する（テキストのみ登録。`source_type` は `manual` にフォールバック） |
+| LINE に **画像**を送る | ❌ 動作しない | LINE の画像メッセージには `text` フィールドが無く（実データのキーは `contentProvider, id, markAsReadToken, quoteToken, type`）、`#メモ` 判定が成立しない。加えて本番DBの CHECK 制約が `source_type='line_post'` を許可していない |
+
+「画像貼り付けで `#メモ` が動く」のは表の1行目（Web「資料」タブ）です。LINE に画像を送る経路は一度も成功しておらず、`store_knowledge_documents` に `storage_path` を持つ行は存在しません。LINE 画像経由を実装する場合は、画像に対する**リプライで `#メモ` と返す**方式が推奨です（画像イベントに `quoteToken` が含まれることを実データで確認済み）。
+
+---
 *本ドキュメントにより、後続のAIアシスタントやエンジニアがプロジェクトの全仕様・制約を正確に把握して開発を継続できます。*
