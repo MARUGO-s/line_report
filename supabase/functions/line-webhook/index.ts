@@ -18,7 +18,7 @@ import { maybeHandleFoodCourtReport, handleFoodCourtReportPostback } from '../_s
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { extractExpenseFromReceipt, handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
-import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
+import { removeRoomMediaByMessageId, saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import { classifyKnowledgeFile, extensionForKind } from '../_shared/knowledge_file_extract.ts'
 import {
   countExistingReceiptsForDates,
@@ -2723,6 +2723,13 @@ Deno.serve(async (req) => {
           }
 
           if (quotedImageHandled) {
+            // #メモ の添付はジャーナルレポート（資料）へ蓄積するものなので、
+            // 受信時に先行保存されたメディアライブラリ側の複製は取り消す。
+            try {
+              await removeRoomMediaByMessageId(supabase, quotedMessageId)
+            } catch (e) {
+              console.warn('removeRoomMediaByMessageId failed:', e)
+            }
             await memoFeedback('✅ 引用元のファイルを店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。')
           } else if (!memoCleanText) {
             // 引用返信の作法は正しいのに登録できなかった（保存期間切れ・非対応形式・引用元がテキスト等）
