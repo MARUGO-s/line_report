@@ -84,6 +84,7 @@ for (const name of [
   'resolveRelativeTimeRefs',
   'extractAllDayRefs',
   'extractDayScope',
+  'extractRangeRef',
   'aggregateSalesRows',
   'sortWeekdayRows',
   'mergeWeekdayBreakdowns',
@@ -631,6 +632,24 @@ test('day-level questions are answered per day instead of rolling up to the mont
     /const dayScope[\s\S]*const rangeRef = extractRangeRef\(q\)/,
     'day scope must be resolved before the month-range branch',
   );
+});
+
+test('same-year month ranges like 2026年1月〜7月 expand to the full inclusive span', () => {
+  // vm 文脈のオブジェクトは deepEqual でホスト側リテラルと比較できないことがあるため JSON 経由で見る
+  const asJson = (v) => JSON.parse(JSON.stringify(v));
+  // 年を片側だけ書いた自然な範囲。従来は null → 端点の1月と7月だけ比較扱いになっていた。
+  assert.deepEqual(asJson(context.extractRangeRef('2026年1月〜7月の売上推移を分析して')), {
+    fromYear: 2026, fromMonth: 1, toYear: 2026, toMonth: 7, wasYearOnly: false,
+  });
+  assert.deepEqual(asJson(context.extractRangeRef('2026年1月から7月までの売上')), {
+    fromYear: 2026, fromMonth: 1, toYear: 2026, toMonth: 7, wasYearOnly: false,
+  });
+  // 両端に年がある従来形式も維持
+  assert.deepEqual(asJson(context.extractRangeRef('2025年11月〜2026年2月')), {
+    fromYear: 2025, fromMonth: 11, toYear: 2026, toMonth: 2, wasYearOnly: false,
+  });
+  // 比較「と」は範囲ではない
+  assert.equal(context.extractRangeRef('2026年1月と7月を比較して'), null);
 });
 
 test('verified aggregates carry every stored breakdown so the AI never has to say it is missing', () => {

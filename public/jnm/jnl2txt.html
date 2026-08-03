@@ -10706,9 +10706,11 @@ function extractYearMonthFromText(text) {
   return { year: parseInt(m[1], 10), month: parseInt(m[2], 10) };
 }
 
-/** 「2025年4月から2026年3月まで」「2025年〜2026年」等の期間範囲指定を検出する（比較「AとB」とは別扱い） */
+/** 「2025年4月から2026年3月まで」「2026年1月〜7月」「2025年〜2026年」等の期間範囲指定を検出する（比較「AとB」とは別扱い） */
 function extractRangeRef(q) {
-  const monthToMonth = q.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:から|〜|~|-)\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:まで)?/);
+  const s = String(q || '');
+  // 年またぎ: 2025年4月〜2026年3月 / 2025年4月から2026年3月まで
+  const monthToMonth = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:まで)?/);
   if (monthToMonth) {
     return {
       fromYear: parseInt(monthToMonth[1], 10), fromMonth: parseInt(monthToMonth[2], 10),
@@ -10716,7 +10718,25 @@ function extractRangeRef(q) {
       wasYearOnly: false
     };
   }
-  const yearToYear = q.match(/(\d{4})\s*年\s*(?:から|〜|~|-)\s*(\d{4})\s*年\s*(?:まで)?/);
+  // 同年省略: 2026年1月〜7月 / 2026年1月から7月まで
+  // （UIの formatMonthSpanLabel も「2026年1月〜6月」形式。両端に年が無いと従来は範囲未検出になり、
+  //  後段の extractAllMonthRefs が端点の1月と7月だけを拾って比較扱いになっていた）
+  const sameYearMonthToMonth = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{1,2})\s*月\s*(?:まで)?/);
+  if (sameYearMonthToMonth) {
+    const year = parseInt(sameYearMonthToMonth[1], 10);
+    const fromMonth = parseInt(sameYearMonthToMonth[2], 10);
+    const toMonth = parseInt(sameYearMonthToMonth[3], 10);
+    if (fromMonth >= 1 && fromMonth <= 12 && toMonth >= 1 && toMonth <= 12) {
+      return {
+        fromYear: year,
+        fromMonth,
+        toYear: year,
+        toMonth,
+        wasYearOnly: false
+      };
+    }
+  }
+  const yearToYear = s.match(/(\d{4})\s*年\s*(?:から|〜|~|-|－|—)\s*(\d{4})\s*年\s*(?:まで)?/);
   if (yearToYear) {
     return {
       fromYear: parseInt(yearToYear[1], 10), fromMonth: 1,
