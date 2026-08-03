@@ -5264,10 +5264,15 @@ async function fetchReservationAiFacts(
   let repeatCount = 0
   let unknownCount = 0
   let allergyNotedCount = 0
+  // 予約人数の合計。AI 側に「2名」「3」を数えさせるとキャンセル・件数上限で狂うため、
+  // サーバで数値化して合計まで出す（ウォークイン推定＝POS客数−予約人数 に使う）。
+  let guestTotal = 0
+  let guestUnknownCount = 0
 
   const mapped = rawItems.map((item) => {
     const source = String(item.source ?? "") as "tabelog" | "ikyu" | "manual"
     const isCancelled = item._is_cancelled === true
+    const partySize = parseReservationPartySize(item.party_size_label)
     // visit_count 欠落は 0 になるので unknown。1回目=new、2回以上=repeat。
     const visitCount = toNonNegativeInteger(item.visit_count)
     let guestType: "new" | "repeat" | "unknown" = "unknown"
@@ -5288,6 +5293,8 @@ async function fetchReservationAiFacts(
       else if (guestType === "repeat") repeatCount += 1
       else unknownCount += 1
       if (toSafeString(item.allergy_label)) allergyNotedCount += 1
+      if (partySize === null) guestUnknownCount += 1
+      else guestTotal += partySize
     }
 
     return {
@@ -5296,6 +5303,7 @@ async function fetchReservationAiFacts(
       visit_at: toSafeString(item.visit_at),
       customer_name: toSafeString(item.customer_name_label) || toSafeString(item.customer_name),
       party_size_label: toSafeString(item.party_size_label) || null,
+      party_size: partySize,
       plan_label: toSafeString(item.plan_label) || null,
       allergy_label: toSafeString(item.allergy_label) || null,
       channel: toSafeString(item.route_label) || source,
@@ -5320,6 +5328,9 @@ async function fetchReservationAiFacts(
       unknown_count: unknownCount,
       by_channel: byChannel,
       allergy_noted_count: allergyNotedCount,
+      // 予約人数の合計（キャンセル除外）。組数は reservation_count と同じ。
+      guest_total: guestTotal,
+      guest_unknown_count: guestUnknownCount,
     },
     items: mapped.slice(0, limit),
     truncated,
@@ -5329,8 +5340,25 @@ async function fetchReservationAiFacts(
       "予約人数 ≠ 会計客数。ウォークインは含まれない",
       "電話番号は確定集計に含めない（氏名のみ）",
       "by_channel・新規/リピート/回数不明・アレルギー記載はキャンセルを除いた件数。合計は reservation_count と一致する",
+      "guest_total は予約人数の合計（キャンセル除外）。予約組数は reservation_count と同じ。guest_unknown_count は人数が読み取れなかった予約件数で、その分 guest_total は少なめに出る",
+      "ウォークイン（飛び込み）は POS客数 − guest_total ／ POS会計組数 − reservation_count で推定できる。ただし一致はしないので必ず『推定』と述べること",
+      "推定がずれる要因: ノーショー（予約は残るが会計が無い＝ウォークインを過少に見せる）、予約人数と実来店人数の相違、1予約が複数会計に分かれる、未捕捉の予約チャネル（電話・他サイト等＝ウォークインを過大に見せる）、予約は visit_at・売上は営業日付のため深夜会計が前日扱いになる月境界のズレ",
     ],
   }
+}
+
+/**
+ * 予約人数ラベルを数値へ。実データは "2名" / "3" / null が混在する。
+ * 「4〜6名」のような幅表記は先頭の数値（下限）を採る。数値が無ければ null。
+ */
+function parseReservationPartySize(label: unknown): number | null {
+  const raw = toSafeString(label)
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+  const matched = raw.match(/\d+/)
+  if (!matched) return null
+  const n = Number(matched[0])
+  if (!Number.isFinite(n) || n <= 0 || n > 999) return null
+  return Math.floor(n)
 }
 
 function listCalendarMonthsInclusive(
