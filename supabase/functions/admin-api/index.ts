@@ -10796,6 +10796,41 @@ async function callKnowledgeGemini(
 }
 
 /** GeminiのJSON回答（```json ... ``` 含む）をオブジェクトへ */
+/**
+ * `body_text` が取れなかったときに本文として使うテキストを組み立てる。
+ *
+ * 以前は Gemini の生応答をそのまま本文へ入れていたため、JSON が返ってきて
+ * `body_text` キーだけ欠けている場合に ```json … ``` のコードフェンスごと
+ * 本文に保存されてしまい、資料タブでもAIへの受け渡しでも読みにくかった。
+ *
+ * - JSON として解釈できた場合: 取れた項目を「見出し: 値」の行に組み直す
+ * - 解釈できない場合: コードフェンスだけ落とした素のテキストにする
+ */
+function buildKnowledgeBodyFallback(
+  geminiText: string,
+  parsed: Record<string, unknown> | null,
+): string {
+  if (parsed) {
+    const lines: string[] = []
+    const push = (label: string, value: unknown) => {
+      const s = toSafeString(value).trim()
+      if (s) lines.push(`${label}: ${s}`)
+    }
+    push("タイトル", parsed.title)
+    push("カテゴリ", parsed.category)
+    push("要約", parsed.summary)
+    const tags = Array.isArray(parsed.tags)
+      ? parsed.tags.map((t) => toSafeString(t).trim()).filter(Boolean)
+      : []
+    if (tags.length > 0) lines.push(`タグ: ${tags.join(", ")}`)
+    if (lines.length > 0) return lines.join("\n")
+  }
+  return String(geminiText ?? "")
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .trim()
+}
+
 function parseGeminiJson(text: string): Record<string, unknown> | null {
   try {
     const matched = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
@@ -10890,15 +10925,19 @@ async function analyzeStoreKnowledgeImage(req: Request) {
       message: `${sourceLabel}のAI解析に失敗しました。しばらくして再試行してください。`,
     } satisfies AppError
   }
+  const parsed = parseGeminiJson(geminiText)
+  // JSON 抽出に失敗した場合、テキスト系は元のテキストを残したほうが情報量が多い。
+  // 画像・PDF は元テキストが無いので、生応答をそのままではなく読める形に整えて使う。
+  const fallbackBody = inlineKinds
+    ? buildKnowledgeBodyFallback(geminiText, parsed)
+    : (extractedText || buildKnowledgeBodyFallback(geminiText, parsed))
   let result = {
     title: (file.name || "資料").replace(/\.[^/.]+$/, ""),
     category: "メニュー",
     summary: `${sourceLabel}からテキストを抽出しました。`,
-    // JSON 抽出に失敗した場合、テキスト系は元のテキストを残したほうが情報量が多い
-    body_text: inlineKinds ? geminiText : (extractedText || geminiText),
+    body_text: fallbackBody,
     tags: [`${sourceLabel}解析`, "メニュー"] as unknown[],
   }
-  const parsed = parseGeminiJson(geminiText)
   if (parsed) {
     result = {
       title: toSafeString(parsed.title) || result.title,
