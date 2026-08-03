@@ -1136,6 +1136,39 @@ Deno.serve(async (req, info) => {
     // 内部キーが無い/不一致の場合は通常の管理者認証へフォールスルー
   }
 
+  // line-webhook からの引用返信 #メモ（画像・PDF・Excel・Word・テキスト）登録ブリッジ（内部呼び出し）。
+  // process-line-post と同じ service_role キー検証で、ナレッジのAI解析・原本保存・登録の3手順のみ許可する。
+  // （旧実装は x-admin-token:'demo' で呼んでいたため管理者認証で全て 401 になり、引用返信登録が機能していなかった）
+  if (
+    req.method === "POST" && (
+      path === "/pos-journals/knowledge/analyze-image" ||
+      path === "/pos-journals/knowledge/upload" ||
+      path === "/pos-journals/knowledge"
+    )
+  ) {
+    const internalKey = req.headers.get("x-internal-key") ?? ""
+    const expectedInternalKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    if (internalKey && expectedInternalKey && internalKey === expectedInternalKey) {
+      try {
+        if (path === "/pos-journals/knowledge/analyze-image") {
+          return json(await analyzeStoreKnowledgeImage(req), 200)
+        }
+        if (path === "/pos-journals/knowledge/upload") {
+          return json(await uploadStoreKnowledgeFile(req, supabase, null), 200)
+        }
+        const body = await parseJson(req)
+        if (!isRecord(body)) {
+          throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+        }
+        return json(await saveStoreKnowledge(supabase, body, null), 200)
+      } catch (e) {
+        const err = asAppError(e)
+        return json({ error: err.message }, err.status)
+      }
+    }
+    // 内部キーが無い/不一致の場合は通常の管理者認証へフォールスルー
+  }
+
   const fallbackAdminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
   const authResult = await authenticate(req, supabase, fallbackAdminToken)
   if (!authResult.ok) {

@@ -136,10 +136,13 @@ ReferenceError: Cannot access 'lineAccessTokenForSearch' before initialization
 | 経路 | 画像 | 状態 |
 |---|---|---|
 | Web「資料」タブに **Ctrl+V / Cmd+V で貼り付け** | ✅ 動作する | `handleKnowledgeFileChange()` → `analyze-image`（Gemini解析）→ `upload`（原本保存）→ ナレッジ登録 |
-| LINE に **テキスト**で `#メモ` を送る | — | ✅ 動作する（テキストのみ登録。`source_type` は `manual` にフォールバック） |
-| LINE に **画像**を送る | ❌ 動作しない | LINE の画像メッセージには `text` フィールドが無く（実データのキーは `contentProvider, id, markAsReadToken, quoteToken, type`）、`#メモ` 判定が成立しない。加えて本番DBの CHECK 制約が `source_type='line_post'` を許可していない |
+| LINE に **テキスト**で `#メモ 本文` を送る | — | ✅ 動作する（テキストのみ登録。`source_type` は `manual` にフォールバック。登録成功時は返信メッセージで通知） |
+| LINE の **画像・ファイルに「リプライ」で `#メモ`** と返信する | ✅ 動作する | 引用元の添付を `analyze-image` → `upload` → ナレッジ登録。admin-api への認証は `x-internal-key`（service_role キー）ブリッジを使用 |
+| LINE に **画像だけ**を送る／`#メモ` 単体を送る | ❌ 登録されない | LINE の画像メッセージには `text` フィールドが無く `#メモ` 判定が成立しない。`#メモ` 単体（本文なし・引用なし）は使い方の案内を返信する |
 
-「画像貼り付けで `#メモ` が動く」のは表の1行目（Web「資料」タブ）です。LINE に画像を送る経路は一度も成功しておらず、`store_knowledge_documents` に `storage_path` を持つ行は存在しません。LINE 画像経由を実装する場合は、画像に対する**リプライで `#メモ` と返す**方式が推奨です（画像イベントに `quoteToken` が含まれることを実データで確認済み）。
+**過去の障害（2026-08-03 修正済み）**: 引用返信 `#メモ` の初期実装（PR #41）には2つの欠陥があった。
+1. admin-api の `analyze-image` / `upload` / `knowledge` を `x-admin-token: 'demo'` で呼んでいたため全て 401 になり、登録が一度も成功しなかった → `x-internal-key`（service_role）ブリッジに変更し、admin-api 側もこの3パスで内部キーを受理するよう拡張。
+2. 完了通知に使っていた `POST https://api.line.me/v2/bot/message/react` は **LINE Messaging API に存在しないエンドポイント**で、通知が一度も届かなかった → replyToken による返信メッセージ（通数無料）に変更。成功・失敗・使い方をすべて返信で知らせる。
 
 ---
 *本ドキュメントにより、後続のAIアシスタントやエンジニアがプロジェクトの全仕様・制約を正確に把握して開発を継続できます。*

@@ -2087,6 +2087,15 @@ async function registerQuotedImageAsKnowledge(
       `line_${msgId}.${extensionForKind(kind, contentType)}`
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
+    // admin-api への関数間ブリッジ認証。process-line-post と同じく service_role キーを
+    // x-internal-key として渡す（旧実装の x-admin-token:'demo' は管理者認証を通らず、
+    // 全リクエストが 401 になって画像登録が一度も成功していなかった）。
+    const internalKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+    const bridgeHeaders = {
+      'x-internal-key': internalKey,
+      'x-admin-surface': 'line_report',
+      'x-store-key': storeKey
+    }
 
     // 2. Gemini 2.0 Flash によるAI解析（Excel/Word はサーバ側でテキスト化して解析）
     const formData = new FormData()
@@ -2096,11 +2105,7 @@ async function registerQuotedImageAsKnowledge(
 
     const analyzeRes = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/analyze-image`, {
       method: 'POST',
-      headers: {
-        'x-admin-token': 'demo',
-        'x-admin-surface': 'line_report',
-        'x-store-key': storeKey
-      },
+      headers: bridgeHeaders,
       body: formData
     })
 
@@ -2119,11 +2124,7 @@ async function registerQuotedImageAsKnowledge(
 
     const uploadRes = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/upload`, {
       method: 'POST',
-      headers: {
-        'x-admin-token': 'demo',
-        'x-admin-surface': 'line_report',
-        'x-store-key': storeKey
-      },
+      headers: bridgeHeaders,
       body: uploadData
     })
 
@@ -2155,9 +2156,7 @@ async function registerQuotedImageAsKnowledge(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': 'demo',
-          'x-admin-surface': 'line_report',
-          'x-store-key': storeKey
+          ...bridgeHeaders
         },
         body: JSON.stringify(payload)
       })
@@ -2687,9 +2686,29 @@ Deno.serve(async (req) => {
         const msgId = event.message?.id ? String(event.message.id) : ''
         const quotedMessageId = String((event.message as any)?.quotedMessageId ?? '').trim()
         let quotedImageHandled = false
+        const memoCleanText = text.replace(/#(?:メモ|日報|note)/gi, '').trim()
+        const memoReplyToken = String(event.replyToken ?? '').trim()
+        const memoAccessToken = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch
 
-        // 画像への引用返信で #メモ を送った場合は、引用元の画像をナレッジとして登録する。
-        // LINE の画像メッセージ自体には text が付かないため、これが画像を指定する唯一の手段。
+        // 完了・失敗の通知は返信メッセージで行う（replyToken 消費・通数無料）。
+        // 旧実装の https://api.line.me/v2/bot/message/react は LINE Messaging API に
+        // 存在しないエンドポイントで、登録成否にかかわらず一度も通知が届いていなかった。
+        const memoFeedback = async (message: string) => {
+          if (!memoReplyToken || !memoAccessToken) return
+          try {
+            await replyLineText(
+              memoReplyToken,
+              message,
+              memoAccessToken,
+              webhookReplyLog(registry as StoreRegistryRow, eventRoomId, 'knowledge_memo_feedback'),
+            )
+          } catch (e) {
+            console.warn('knowledge memo feedback reply failed:', e)
+          }
+        }
+
+        // 画像・ファイルへの引用返信で #メモ を送った場合は、引用元をナレッジとして登録する。
+        // LINE の画像・ファイルメッセージ自体には text が付かないため、これが添付を指定する唯一の手段。
         if (quotedMessageId) {
           try {
             quotedImageHandled = await registerQuotedImageAsKnowledge(
@@ -2703,67 +2722,52 @@ Deno.serve(async (req) => {
             console.error('registerQuotedImageAsKnowledge error:', e)
           }
 
-          if (quotedImageHandled && msgId) {
-            // 完了通知は通数0通の thumbs_up (👍)。返信メッセージは送らない。
-            const token = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch
-            if (token) {
-              fetch('https://api.line.me/v2/bot/message/react', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ messageId: msgId, reactionType: 'thumbs_up' })
-              }).catch(e => console.warn('Reaction API error:', e))
-            }
+          if (quotedImageHandled) {
+            await memoFeedback('✅ 引用元のファイルを店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。')
+          } else if (!memoCleanText) {
+            // 引用返信の作法は正しいのに登録できなかった（保存期間切れ・非対応形式・引用元がテキスト等）
+            await memoFeedback('⚠️ 引用元のファイルを登録できませんでした。画像の保存期間切れか、対応していない形式の可能性があります。登録したい画像をもう一度送り、その画像に「リプライ」で #メモ と返信してください。')
           }
         }
 
         // 画像として登録できた場合はテキスト単体の転送を行わない（二重登録の防止）。
         // 引用元が画像でない／取得できなかった場合は、従来どおりテキストとして登録する。
         if (!quotedImageHandled) {
-          try {
-            const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
-            const adminApiUrl = `${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/process-line-post`
+          if (!quotedMessageId && !memoCleanText) {
+            // 「#メモ」単体（引用返信なし・本文なし）。旧実装は無言でスキップしていたため、
+            // 画像を登録したい利用者には「反応なし」に見えていた。使い方を案内する。
+            await memoFeedback('📝 #メモ の使い方\n・画像やファイルを登録する場合: 登録したい画像を長押し（PCでは右クリック）→「リプライ」を選び、#メモ と返信してください。\n・テキストメモの場合: #メモ に続けて本文を書いて送信してください。\n※画像を送っただけ、#メモ 単体を送っただけでは登録されません。')
+          } else if (memoCleanText) {
+            try {
+              const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
+              const adminApiUrl = `${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/process-line-post`
 
-            fetch(adminApiUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                // 関数間の内部ブリッジ認証。admin-api 側で service_role キー一致を検証する
-                'x-internal-key': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
-                'x-admin-surface': 'line_report',
-                'x-store-key': storeKey
-              },
-              body: JSON.stringify({
-                store_key: storeKey,
-                text: text,
-                sender_name: eventUserId || 'LINEユーザー'
+              const res = await fetch(adminApiUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  // 関数間の内部ブリッジ認証。admin-api 側で service_role キー一致を検証する
+                  'x-internal-key': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
+                  'x-admin-surface': 'line_report',
+                  'x-store-key': storeKey
+                },
+                body: JSON.stringify({
+                  store_key: storeKey,
+                  text: text,
+                  sender_name: eventUserId || 'LINEユーザー'
+                })
               })
-            }).then(async res => {
               if (res.ok) {
                 const resJson = await res.json()
-                if (resJson.processed && msgId) {
-                  // 通数0通のメッセージリアクション (thumbs_up 👍) を付与
-                  const token = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch
-                  if (token) {
-                    fetch('https://api.line.me/v2/bot/message/react', {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                      },
-                      body: JSON.stringify({
-                        messageId: msgId,
-                        reactionType: 'thumbs_up'
-                      })
-                    }).catch(e => console.warn('Reaction API error:', e))
-                  }
+                if (resJson.processed) {
+                  await memoFeedback('✅ メモを店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。')
                 }
+              } else {
+                console.warn('Failed to forward #メモ to admin-api:', res.status)
               }
-            }).catch(err => console.error('Failed to forward #メモ to admin-api:', err))
-          } catch (e) {
-            console.error('Error forwarding #メモ post:', e)
+            } catch (e) {
+              console.error('Error forwarding #メモ post:', e)
+            }
           }
         }
       }
