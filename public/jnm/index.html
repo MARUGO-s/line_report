@@ -1553,13 +1553,13 @@
         <label class="kn-drop-zone" id="knDropZone">
           <input id="knFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.md,.xlsx,.docx" style="display:none;">
           <div class="kn-drop-icon">📂 📸</div>
-          <div class="kn-drop-text">ここに画像をドラッグ＆ドロップ、または貼り付け (Ctrl+V / Cmd+V)、またはクリックして選択</div>
-          <div class="kn-drop-sub">（Gemini 2.0 Flash が全自動で画像をAI解析します・20MBまで対応）</div>
+          <div class="kn-drop-text">ここに画像・PDF・Excel・Word・テキストをドラッグ＆ドロップ、または貼り付け (Ctrl+V / Cmd+V)、またはクリックして選択</div>
+          <div class="kn-drop-sub">（Gemini 2.0 Flash が全自動でAI解析します・20MBまで対応）</div>
           <div id="knDropFileName" class="kn-drop-file-name"></div>
         </label>
       </div>
     </div>
-    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の売上分析に参照されます（グランドメニュー・マニュアル向け）。画像・PDF・テキスト・CSV・Markdownを添付すると、Gemini 2.0 Flash が全自動でAI解析し、メニュー名・価格・要約・文字起こし本文・タグを抽出し取り込みます。解析結果は確認ポップアップで手動修正・追記も可能です。</p>
+    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の売上分析に参照されます（グランドメニュー・マニュアル向け）。画像・PDF・Excel・Word・テキスト・CSV・Markdownを添付すると、Gemini 2.0 Flash が全自動でAI解析し、メニュー名・価格・要約・文字起こし本文・タグを抽出し取り込みます。解析結果は確認ポップアップで手動修正・追記も可能です。</p>
     <div class="kn-actions">
       <button id="knSaveBtn" class="btn btn-primary">保存</button>
       <button id="knResetBtn" class="btn btn-secondary">クリア</button>
@@ -10986,22 +10986,6 @@ async function downloadKnowledgeAttachment(id) {
 }
 
 /** テキスト系の添付は、その場で読み取って「内容」へ取り込む（PDF・画像は保管のみ） */
-async function importKnowledgeTextFile(file) {
-  if (!file) return;
-  const name = String(file.name || '').toLowerCase();
-  const isText = /^(text\/|application\/csv)/.test(String(file.type || ''))
-    || /\.(txt|csv|md|markdown)$/.test(name);
-  if (!isText || file.size > 1024 * 1024) return;
-  try {
-    const text = await file.text();
-    const bodyEl = knowledgeEl('knBody');
-    if (bodyEl && !bodyEl.value.trim()) {
-      bodyEl.value = text.slice(0, 60000);
-      setKnowledgeStatus('添付ファイルの本文を「内容」へ取り込みました。');
-    }
-  } catch (_) { /* 読み取れない場合は保管のみ */ }
-}
-
 // ---- AI へ渡すための取得・選定 ----
 
 /** 有効な資料を取得してキャッシュする。失敗してもチャットは止めない */
@@ -11276,23 +11260,27 @@ async function handleKnowledgeFileChange(file) {
   if (fileNameEl) fileNameEl.textContent = `選択中: ${file.name} (${Math.round(file.size / 1024)} KB)`;
 
   const name = String(file.name || '').toLowerCase();
-  const isImage = /^(image\/)/.test(String(file.type || '')) || /\.(png|jpg|jpeg|webp)$/.test(name);
-  const isText = /^(text\/|application\/csv)/.test(String(file.type || '')) || /\.(txt|csv|md|markdown)$/.test(name);
+  const type = String(file.type || '');
+  // 画像・PDF は Gemini がそのまま読み取り、Excel / Word / テキストはサーバ側で
+  // テキスト化してから解析する（いずれも /knowledge/analyze-image が処理する）。
+  const isImage = /^(image\/)/.test(type) || /\.(png|jpg|jpeg|webp)$/.test(name);
+  const isPdf = type === 'application/pdf' || /\.pdf$/.test(name);
+  const isSheet = /spreadsheetml|ms-excel/.test(type) || /\.(xlsx|xlsm|xls)$/.test(name);
+  const isDoc = /wordprocessingml/.test(type) || /\.docx$/.test(name);
+  const isText = /^(text\/|application\/csv)/.test(type) || /\.(txt|csv|md|markdown)$/.test(name);
 
-  if (isImage) {
-    await analyzeImageFileWithGemini(file);
-  } else if (isText) {
-    await importKnowledgeTextFile(file);
+  if (isImage || isPdf || isSheet || isDoc || isText) {
+    await analyzeKnowledgeFileWithGemini(file);
   }
 }
 
-/** Gemini 2.0 Flash を使用して画像ファイルを全自動解析 */
-async function analyzeImageFileWithGemini(file) {
+/** Gemini 2.0 Flash を使用して添付ファイル（画像・PDF・Excel・Word・テキスト）を全自動解析 */
+async function analyzeKnowledgeFileWithGemini(file) {
   if (!file || !getAdminToken()) {
-    setKnowledgeStatus('画像解析には管理トークンの接続が必要です。', true);
+    setKnowledgeStatus('AI解析には管理トークンの接続が必要です。', true);
     return;
   }
-  setKnowledgeStatus('✨ Gemini 2.0 Flash で画像を解析中…（メニュー名や価格を自動抽出しています）');
+  setKnowledgeStatus('✨ Gemini 2.0 Flash で解析中…（メニュー名や価格を自動抽出しています）');
   try {
     const form = new FormData();
     form.append('file', file);

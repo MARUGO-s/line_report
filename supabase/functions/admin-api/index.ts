@@ -10,6 +10,11 @@ import {
   type DailySalesImportEntry,
   type ManualMonthImportEntry,
 } from "../_shared/daily_sales_import.ts"
+import {
+  classifyKnowledgeFile,
+  extractKnowledgeText,
+  isBlankExtract,
+} from "../_shared/knowledge_file_extract.ts"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
 import {
   isMarugoGroupStoreLabel,
@@ -10795,10 +10800,38 @@ async function analyzeStoreKnowledgeImage(req: Request) {
       message: `ファイルサイズは1件${Math.floor(STORE_KNOWLEDGE_MAX_FILE_BYTES / 1024 / 1024)}MBまでです。`,
     } satisfies AppError
   }
-  const base64Data = knowledgeUint8ToBase64(new Uint8Array(await file.arrayBuffer()))
+  const bytes = new Uint8Array(await file.arrayBuffer())
   const mimeType = file.type || "image/jpeg"
+  const kind = classifyKnowledgeFile(file.name || "", mimeType)
+  if (kind === "unsupported") {
+    throw {
+      status: 400,
+      message: "対応していないファイル形式です。画像・PDF・Excel・Word・テキストをご利用ください。",
+    } satisfies AppError
+  }
+
+  // Gemini が inlineData で直接読めるのは画像と PDF のみ。
+  // Excel / Word / テキストはサーバ側でテキスト化してから text パートとして渡す。
+  const inlineKinds = kind === "image" || kind === "pdf"
+  const extractedText = inlineKinds ? "" : extractKnowledgeText(kind, bytes)
+  if (!inlineKinds && isBlankExtract(extractedText)) {
+    throw {
+      status: 422,
+      message: "ファイルから文字を取り出せませんでした。内容をご確認ください。",
+    } satisfies AppError
+  }
+
+  const sourceLabel = kind === "pdf"
+    ? "PDF"
+    : kind === "spreadsheet"
+    ? "Excel表"
+    : kind === "document"
+    ? "Word文書"
+    : kind === "text"
+    ? "テキスト"
+    : "画像"
   const promptText = `あなたは飲食店の店舗資料・メニュー分析プロAIです。
-提供された画像（メニュー表、チラシ、イベント案内、価格改定、マニュアル等）を解析し、以下の項目を正確に抽出・構造化してください。
+提供された${sourceLabel}（メニュー表、チラシ、イベント案内、価格改定、マニュアル等）を解析し、以下の項目を正確に抽出・構造化してください。
 
 【出力フォーマット】
 以下のJSONフォーマット**のみ**を出力してください（Markdownのコードブロック \`\`\`json ... \`\`\` で囲んでください）：
@@ -10807,25 +10840,29 @@ async function analyzeStoreKnowledgeImage(req: Request) {
   "title": "ドキュメント・メニューのタイトル（例: 7月夏限定メニュー、価格改定のお知らせなど）",
   "category": "施策 / メニュー / 価格改定 / イベント / マニュアル / その他 から最も適切なものを1つ選択",
   "summary": "AIが最初に参照するための1〜3行の簡潔な要約",
-  "body_text": "画像から読み取った詳細テキスト（メニュー名、価格、説明、注意事項などを構造化して文字起こし）",
+  "body_text": "${sourceLabel}から読み取った詳細テキスト（メニュー名、価格、説明、注意事項などを構造化して文字起こし）",
   "tags": ["関連タグ1", "関連タグ2", "関連タグ3"]
 }`
+  const contentPart = inlineKinds
+    ? { inlineData: { mimeType, data: knowledgeUint8ToBase64(bytes) } }
+    : { text: `【${sourceLabel}「${file.name || "資料"}」の内容】\n${extractedText}` }
   const geminiText = await callKnowledgeGemini([
     { text: promptText },
-    { inlineData: { mimeType, data: base64Data } },
+    contentPart,
   ])
   if (!geminiText) {
     throw {
       status: 502,
-      message: "画像のAI解析に失敗しました。しばらくして再試行してください。",
+      message: `${sourceLabel}のAI解析に失敗しました。しばらくして再試行してください。`,
     } satisfies AppError
   }
   let result = {
     title: (file.name || "資料").replace(/\.[^/.]+$/, ""),
     category: "メニュー",
-    summary: "画像からテキストを抽出しました。",
-    body_text: geminiText,
-    tags: ["画像解析", "メニュー"] as unknown[],
+    summary: `${sourceLabel}からテキストを抽出しました。`,
+    // JSON 抽出に失敗した場合、テキスト系は元のテキストを残したほうが情報量が多い
+    body_text: inlineKinds ? geminiText : (extractedText || geminiText),
+    tags: [`${sourceLabel}解析`, "メニュー"] as unknown[],
   }
   const parsed = parseGeminiJson(geminiText)
   if (parsed) {
