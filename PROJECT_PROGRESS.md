@@ -43,6 +43,14 @@
 
 New records are appended below.
 
+### 2026-08-03 - Journal Report AI data-flow verification
+
+- Request: 月次・日別・ジャーナル原本・店舗施策／LINE投稿等がAI分析へ統合されているか、コードから全経路を再検証する。
+- Added: `scripts/verify-journal-ai-data-flow.mjs` と `npm run journal:integration:check`。中核経路が切れると失敗し、条件付き接続と通常AI未統合系統を明示する。
+- Verified core: 月次優先＋月次欠損の日別補完、単日検索、原本保存・必要時再読、Web資料、LINEテキスト／引用添付、RAG、店舗営業情報、商品分類ルール、店舗立地、会話履歴、AI分析レポート、AIチャット。
+- Conditional: 原本再読は質問に応じて実行、外部知見は戦略系のみ、資料は最大5件／8チャンク／3500字、詳細明細は通常12か月・商品質問36か月・昼夜F/D補完18か月。
+- Gaps: 通常Journal AIへ天候・気温を明示投入していない、過去予測/MAPEと過去AI文章は通常AIの入力外、`generate-insight`はAPIのみで自動呼び出しなし。
+
 ### 2026-08-03 - Journal Report security, recoverability, CI, and ownership hardening
 
 - `ai-analyze`: 公開anonキーだけでは実行できないよう、`lrst_`管理セッション検証、店舗スコープ照合、DB共有レート制限を追加。Journalの分析・確認質問・チャットは共通`journal-ai-client.js`から管理セッションを送る。
