@@ -61,7 +61,16 @@ jobs:
         run: npm run test:ci
 
       - name: Check Journal AI Edge Function
-        run: deno check --no-lock supabase/functions/ai-analyze/index.ts
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if DENO_DIR="$RUNNER_TEMP/line-report-deno-check" deno check --no-lock supabase/functions/ai-analyze/index.ts; then
+              exit 0
+            fi
+            echo "::warning::deno check attempt ${attempt} failed; retrying after $((attempt * 5)) seconds"
+            sleep $((attempt * 5))
+          done
+          exit 1
 
       - name: Verify diff formatting
         run: git diff --check
