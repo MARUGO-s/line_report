@@ -5,7 +5,7 @@ Journal Report（`public/jnm/jnl2txt.html`）のAIが、売上数値だけでな
 
 - 対象: 22店舗すべて（`store_partition_key` で分離）
 - 画面: Journal Report の「資料」タブ
-- 状態: **フェーズ1 実装済み**（2026-08-02）
+- 状態: **フェーズ1・2・3 実装完了**（2026-08-02：全自動テキスト抽出・RAGチャンク分割・効果測定インサイト機能）
 
 ---
 
@@ -145,6 +145,86 @@ Journal Report（`public/jnm/jnl2txt.html`）のAIが、売上数値だけでな
 
 ---
 
+## 6-2. LINE から資料を登録する（引用返信 `#メモ`）— 2026-08-03 稼働
+
+Web の「資料」タブと同じ登録を、LINE からも行える。**画像・PDF・Excel・Word・テキスト**に対応。
+
+### 使い方
+
+1. ルームに**ファイルを送る**（画像でもPDFでもよい）
+2. **その送信メッセージにリプライ（引用返信）して `#メモ` と送る**（`＃メモ` の全角シャープも可。`#日報` / `#note` も同義）
+3. Bot が「✅ 引用元のファイルを店舗ナレッジ（資料）に登録しました」と返信
+
+本文を足すと（例: `#メモ 8月のグラスワイン`）、AI解析が空振りしたときの本文として使われる。
+
+### なぜ「引用返信」なのか
+
+**LINE の画像・ファイルメッセージには `text` フィールドが無い。** キャプションを付けて送る手段が
+Messaging API に存在しないため、「画像に `#メモ` と書いて送る」ことは原理的にできない。
+実データのキーは `contentProvider, id, markAsReadToken, quoteToken, type` のみ。
+
+引用返信のテキストイベントには `quotedMessageId`（引用元のID）が入るので、これを唯一の
+指定手段として使う。**将来ここを「画像メッセージの text を見る」実装に戻してはいけない。**
+一度その実装が入り、まったく発火しないまま放置されていた。
+
+### 通数（PUSH無料枠）について
+
+- **引用返信は店舗からの受信メッセージ**なので無料枠を消費しない
+- 完了・失敗の通知は `replyToken` による**返信メッセージ**で、これも無料枠の対象外
+  （枠を消費するのは PUSH のみ。Webhookログの「返信◯回＝枠外」表示と同じ考え方）
+- `POST /v2/bot/message/react`（リアクション付与）は **LINE Messaging API に存在しない**。
+  一時期これで通知しようとしていたが、成功しても利用者には何も見えなかった
+
+### 処理の流れ
+
+```
+添付を受信 → line_message_media へ先行保存（メディア閲覧用）
+   ↓ その添付に引用返信で #メモ
+LINE content API から本体を取得（Content-Type で種別判定）
+   ↓
+POST /pos-journals/knowledge/analyze-image   … Gemini 解析
+   ↓  画像・PDF は inlineData でそのまま／Excel・Word はサーバでテキスト化
+POST /pos-journals/knowledge/upload          … 原本を store-knowledge へ
+   ↓
+POST /pos-journals/knowledge                 … 登録（source_type='line_post'）
+   ↓  rebuildStoreKnowledgeChunks が RAG チャンクを生成
+line_message_media から取り消し（資料側へ移したので複製を残さない）
+```
+
+メディア保存は**受信時点**で走るため「保存しない」ことはできない。登録に**成功したときだけ**
+`removeRoomMediaByMessageId` で取り消す。失敗時は残すので、添付が両方から消える事故は起きない。
+
+### 実装の要点（踏んだ地雷）
+
+| 箇所 | 注意 |
+|---|---|
+| タグ判定 | `_shared/knowledge_memo_tag.ts` に集約。**半角 `#` だけを見ると全角 `＃` が素通りする**（日本語入力では全角になりやすい）。同じ正規表現を各所へコピーしない |
+| 店舗キー | 登録APIへ送るのは **`store_key`**。DB列名の `store_partition_key` で送ると 400 `store_key is required.` になる。`x-store-key` ヘッダは内部ブリッジ経路では `storeScope=null` のため効かない |
+| 関数間認証 | `x-internal-key`（service_role）。**`x-admin-token: 'demo'` は管理者認証を通らず全て 401** |
+| 関数の位置 | `registerQuotedImageAsKnowledge` は**必ずトップレベル**に置く。`Deno.serve` 内のイベントループ本体に置くと、同ブロックで後から `const` 宣言される変数を巻き込み TDZ エラーになる（レシート登録が全店で7時間半停止した実績あり） |
+
+### 検証結果（2026-08-03）
+
+実際に LINE からワイン紹介画像を引用返信で登録し、以下を確認。
+
+| 項目 | 結果 |
+|---|---|
+| `store_knowledge_documents` | id=21 / `source_type='line_post'` / marugogrande |
+| タイトル | 「ロレンツォン プロセッコ・スプマンテ・ブリュット ミレジマート D.O.C. トレヴィーゾ」（画像から自動抽出） |
+| カテゴリ | メニュー |
+| タグ | 13件（ワイン・プロセッコ・イタリアワイン・ペアリング 等を自動付与） |
+| 原本 | `store-knowledge` に 413,623 バイト保存 |
+| **RAGチャンク** | **2件生成** |
+| `line_message_media` | 取り消し済み |
+
+### 既知の課題
+
+`body_text` に Gemini の生レスポンス（```json … ``` のコードフェンス込み）がそのまま
+入る場合がある。`parsed.body_text` が空のときのフォールバックが生テキストを使うため。
+検索・RAG は機能するが本文としては読みにくいので、整形が望ましい。
+
+---
+
 ## 7. 運用上の注意
 
 - **資料の鮮度管理** — 終了した施策や廃止メニューが残っていると誤解の元になる。
@@ -152,7 +232,9 @@ Journal Report（`public/jnm/jnl2txt.html`）のAIが、売上数値だけでな
 - **数値は書かない** — 「7月は売上◯◯円だった」のような数値を資料に書くと、AIが
   確定集計と混同しかねない。施策の内容・狙い・対象商品を書く
 - **他店の資料は見えない** — 店舗スコープのログインは自店固定。フル管理者は店舗切替で参照
-- **PDFの中身はまだ読まない** — フェーズ1では保管のみ。要点は概要へ
+- **PDF・Excel・Word の中身は読める（2026-08-03〜）** — Web の「資料」タブでも LINE の
+  引用返信 `#メモ` でも、Gemini が中身を解析して本文・タグを自動抽出する。
+  以前は「保管のみ」だったため、説明文と実装が食い違っていた時期がある
 
 ---
 
@@ -160,8 +242,8 @@ Journal Report（`public/jnm/jnl2txt.html`）のAIが、売上数値だけでな
 
 | フェーズ | 内容 | 接続点 |
 |---|---|---|
-| 2 | PDF・画像・ExcelのAI自動テキスト抽出と要約、チャンク分割 | `store_knowledge_chunks` を追加するだけ。本テーブルは変更不要 |
-| 3 | 施策の効果測定を自動生成（施策期間の売上 vs 前期間）し `source_type='ai_insight'` として蓄積、👍👎学習、pgvector 埋め込み検索 | `vector` 拡張は利用可能（未インストール）。`embedding` 列は nullable で後付け可能 |
+| 2 | PDF・画像・ExcelのAI自動テキスト抽出と要約、チャンク分割 | **完了（2026-08-03）**。Word も対応。`store_knowledge_chunks` 作成済み |
+| 3 | 施策の効果測定を自動生成（施策期間の売上 vs 前期間）し `source_type='ai_insight'` として蓄積、👍👎学習、pgvector 埋め込み検索 | `vector` 拡張は **2026-08-03 に導入済み**（`extensions` スキーマ）。`embedding` 列は nullable のままで、埋め込み生成は未実装 |
 
 フェーズ3の循環は、フードコートAI側で稼働している
 `foodcourt_ai_loop_runs` → `foodcourt_ai_feedback` → `foodcourt_ai_rag_documents`
