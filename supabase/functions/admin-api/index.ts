@@ -422,6 +422,9 @@ const RESERVATION_SEARCH_DEFAULT_LIMIT = 100
 const RESERVATION_SEARCH_MAX_LIMIT = 200
 const RESERVATION_SEARCH_SOURCE_FETCH_CAP = 240
 const RESERVATION_CUSTOMER_HISTORY_FETCH_CAP = 10000
+const RESERVATION_AI_FACTS_DEFAULT_LIMIT = 300
+const RESERVATION_AI_FACTS_MAX_LIMIT = 500
+const RESERVATION_AI_FACTS_MAX_MONTHS = 24
 const RESERVATION_CANCELLATION_RE = /(キャンセル|取消|取り消し|cancel(?:led|ed)?)/i
 
 type LineUserPermissionSortable = {
@@ -1185,6 +1188,7 @@ Deno.serve(async (req, info) => {
       "/auth/logout",
       "/reservations/calendar",
       "/reservations/search",
+      "/reservations/ai-facts",
       "/reservations/event",
       "/reservations/customer-suggest",
       "/petty-cash",
@@ -1662,6 +1666,11 @@ Deno.serve(async (req, info) => {
     if (req.method === "GET" && path === "/reservations/search") {
       const reservationSearchState = await fetchReservationSearchState(supabase, url)
       return json(reservationSearchState, 200)
+    }
+    // Journal Report AI チャット用の予約確定事実（氏名あり・電話なし・新規/リピート付き）
+    if (req.method === "GET" && path === "/reservations/ai-facts") {
+      const reservationAiFacts = await fetchReservationAiFacts(supabase, url)
+      return json(reservationAiFacts, 200)
     }
     // 予約表の手動編集: 新規作成（手入力）/ 編集・非表示(ソフト削除)・復元 / 氏名・電話サジェスト。
     if (req.method === "POST" && path === "/reservations/event") {
@@ -5123,6 +5132,237 @@ async function fetchReservationSearchState(
   }
 }
 
+/**
+ * Journal Report AI チャット向け予約確定事実。
+ * - 氏名は載せる / 電話はレスポンスに含めない
+ * - visit_count はチャネル別ネット予約回数（POS来店回数ではない）
+ * - 手入力も summary lookup を付けて新規/リピートを返す（カレンダー経路は従来どおり）
+ */
+async function fetchReservationAiFacts(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeScope = normalizeReservationStoreScope(
+    url.searchParams.get("store_key") ?? url.searchParams.get("store"),
+  )
+  if (!storeScope) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  // normalizeCalendarMonthParam は未指定だと「現在月」を返す。黙って現在月にすると
+  // 呼び出し側の指定漏れに気付けないため、生の値が空かどうかで必須チェックを行う。
+  const rawMonthFrom = String(
+    url.searchParams.get("month_from") ?? url.searchParams.get("month") ?? "",
+  ).trim()
+  if (!rawMonthFrom) {
+    throw { status: 400, message: "month_from is required." } satisfies AppError
+  }
+  const rawMonthTo = String(url.searchParams.get("month_to") ?? "").trim() || rawMonthFrom
+  const monthFrom = normalizeCalendarMonthParam(rawMonthFrom)
+  const monthTo = normalizeCalendarMonthParam(rawMonthTo)
+  const months = listCalendarMonthsInclusive(monthFrom, monthTo, RESERVATION_AI_FACTS_MAX_MONTHS)
+  if (months.length === 0) {
+    throw { status: 400, message: "month_from / month_to is invalid." } satisfies AppError
+  }
+  const sourceFilter = normalizeReservationSourceFilter(url.searchParams.get("source"))
+  const limit = clampInt(
+    url.searchParams.get("limit"),
+    RESERVATION_AI_FACTS_DEFAULT_LIMIT,
+    1,
+    RESERVATION_AI_FACTS_MAX_LIMIT,
+  )
+  const includeHidden = url.searchParams.get("include_hidden") === "1"
+  const baseSources: Array<"tabelog" | "ikyu"> = sourceFilter === "all"
+    ? ["tabelog", "ikyu"]
+    : (sourceFilter === "tabelog" || sourceFilter === "ikyu" ? [sourceFilter] : [])
+  const includeManual = sourceFilter === "all" || sourceFilter === "manual"
+
+  const rawItems: Array<Record<string, unknown>> = []
+  let monthCapHit = false
+
+  // 走査対象チャネル。tabelog / ikyu は共通ヘルパ、manual は専用テーブル。
+  const scanTargets: Array<{
+    source: "tabelog" | "ikyu" | "manual"
+    eventTable:
+      | "tabelog_reservation_visit_events"
+      | "ikyu_reservation_visit_events"
+      | "manual_reservation_visit_events"
+    summaryTable: string
+    selectColumns: string
+  }> = []
+  for (const source of baseSources) {
+    const { eventTable, summaryTable } = getReservationSourceTables(source)
+    scanTargets.push({ source, eventTable, summaryTable, selectColumns: RESERVATION_EVENT_SELECT_COLUMNS })
+  }
+  if (includeManual) {
+    scanTargets.push({
+      source: "manual",
+      eventTable: "manual_reservation_visit_events",
+      summaryTable: "manual_reservation_visit_summaries",
+      selectColumns: MANUAL_RESERVATION_SELECT_COLUMNS,
+    })
+  }
+
+  // サマリ（顧客の累計来店回数）は月に依存しないので、チャネルごとに1回だけ引く。
+  // 月ループの内側に置くと 24 か月 × 3 チャネルぶん同じクエリを繰り返すことになる。
+  for (const target of scanTargets) {
+    const monthEvents: Array<Record<string, unknown>> = []
+    for (const month of months) {
+      const range = buildJstMonthRange(month)
+      const eventsRes = await supabase
+        .from(target.eventTable)
+        .select(target.selectColumns)
+        .gte("visit_at", range.startIso)
+        .lt("visit_at", range.endIso)
+        .order("visit_at", { ascending: true })
+        .limit(2000)
+      if (eventsRes.error) {
+        throw {
+          status: 500,
+          message: `Failed to fetch ${target.source} reservation events: ${eventsRes.error.message}`,
+        } satisfies AppError
+      }
+      // selectColumns がリテラルでないため行の型は推論されない。isRecord で絞ってから使う。
+      const rows = (eventsRes.data ?? []) as unknown[]
+      if (rows.length >= 2000) monthCapHit = true
+      for (const row of rows) {
+        if (isRecord(row)) monthEvents.push(row)
+      }
+    }
+    if (monthEvents.length === 0) continue
+
+    const summariesRes = await supabase
+      .from(target.summaryTable)
+      .select("customer_name, customer_phone, visit_count, last_visit_at")
+      .limit(5000)
+    if (summariesRes.error) {
+      throw {
+        status: 500,
+        message: `Failed to fetch ${target.source} reservation summaries: ${summariesRes.error.message}`,
+      } satisfies AppError
+    }
+    const summaryByCustomer = await buildReservationEffectiveSummaryLookup(
+      supabase,
+      target.eventTable,
+      monthEvents,
+      summariesRes.data,
+    )
+    for (const record of monthEvents) {
+      if (!includeHidden && record.manual_hidden === true) continue
+      const item = buildReservationCalendarItem(target.source, record, summaryByCustomer)
+      if (!item) continue
+      if (!reservationCalendarItemMatchesStoreScope(item, storeScope)) continue
+      rawItems.push({ ...item, _is_cancelled: isReservationCancellationRow(record) })
+    }
+  }
+
+  rawItems.sort((a, b) => String(a.visit_at ?? "").localeCompare(String(b.visit_at ?? "")))
+
+  const byChannel = { tabelog: 0, ikyu: 0, manual: 0 }
+  let reservationCount = 0
+  let cancelledCount = 0
+  let newCount = 0
+  let repeatCount = 0
+  let unknownCount = 0
+  let allergyNotedCount = 0
+
+  const mapped = rawItems.map((item) => {
+    const source = String(item.source ?? "") as "tabelog" | "ikyu" | "manual"
+    const isCancelled = item._is_cancelled === true
+    // visit_count 欠落は 0 になるので unknown。1回目=new、2回以上=repeat。
+    const visitCount = toNonNegativeInteger(item.visit_count)
+    let guestType: "new" | "repeat" | "unknown" = "unknown"
+    if (visitCount > 1) guestType = "repeat"
+    else if (visitCount === 1) guestType = "new"
+
+    // 集計の分母は「キャンセルを除いた予約」で統一する。
+    // by_channel や new/repeat だけがキャンセルを含むと、
+    // 「予約10件」なのに内訳合計が13件、という食い違いがそのままAIの回答に出る。
+    if (isCancelled) {
+      cancelledCount += 1
+    } else {
+      reservationCount += 1
+      if (source === "tabelog" || source === "ikyu" || source === "manual") {
+        byChannel[source] += 1
+      }
+      if (guestType === "new") newCount += 1
+      else if (guestType === "repeat") repeatCount += 1
+      else unknownCount += 1
+      if (toSafeString(item.allergy_label)) allergyNotedCount += 1
+    }
+
+    return {
+      source,
+      id: Number(item.id ?? 0),
+      visit_at: toSafeString(item.visit_at),
+      customer_name: toSafeString(item.customer_name_label) || toSafeString(item.customer_name),
+      party_size_label: toSafeString(item.party_size_label) || null,
+      plan_label: toSafeString(item.plan_label) || null,
+      allergy_label: toSafeString(item.allergy_label) || null,
+      channel: toSafeString(item.route_label) || source,
+      store_name: toSafeString(item.store_name) || null,
+      visit_count: visitCount,
+      last_visit_at: toSafeString(item.last_visit_at) || null,
+      guest_type: guestType,
+      is_cancelled: isCancelled,
+    }
+  })
+
+  const truncated = mapped.length > limit || monthCapHit
+  return {
+    store_key: storeScope,
+    period: { month_from: months[0], month_to: months[months.length - 1] },
+    source_filter: sourceFilter,
+    totals: {
+      reservation_count: reservationCount,
+      cancelled_count: cancelledCount,
+      new_count: newCount,
+      repeat_count: repeatCount,
+      unknown_count: unknownCount,
+      by_channel: byChannel,
+      allergy_noted_count: allergyNotedCount,
+    },
+    items: mapped.slice(0, limit),
+    truncated,
+    generated_at: new Date().toISOString(),
+    notes: [
+      "visit_count はチャネル別の予約ネット回数（POS来店回数ではない）",
+      "予約人数 ≠ 会計客数。ウォークインは含まれない",
+      "電話番号は確定集計に含めない（氏名のみ）",
+      "by_channel・新規/リピート/回数不明・アレルギー記載はキャンセルを除いた件数。合計は reservation_count と一致する",
+    ],
+  }
+}
+
+function listCalendarMonthsInclusive(
+  monthFrom: string,
+  monthTo: string,
+  maxMonths: number,
+): string[] {
+  const start = normalizeCalendarMonthParam(monthFrom)
+  const end = normalizeCalendarMonthParam(monthTo)
+  const from = start <= end ? start : end
+  const to = start <= end ? end : start
+  const matchedFrom = from.match(/^(\d{4})-(\d{2})$/)
+  const matchedTo = to.match(/^(\d{4})-(\d{2})$/)
+  if (!matchedFrom || !matchedTo) return []
+  let y = Number(matchedFrom[1])
+  let m = Number(matchedFrom[2])
+  const endY = Number(matchedTo[1])
+  const endM = Number(matchedTo[2])
+  const out: string[] = []
+  while (out.length < maxMonths) {
+    out.push(`${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`)
+    if (y === endY && m === endM) break
+    m += 1
+    if (m > 12) {
+      m = 1
+      y += 1
+    }
+    if (y > endY || (y === endY && m > endM)) break
+  }
+  return out
+}
+
 // 手入力（新規）予約を作成。reservation_detail はフロントが組み立てたJSON文字列をそのまま保存する。
 async function createManualReservationEvent(
   supabase: ReturnType<typeof createClient>,
@@ -6710,7 +6950,10 @@ function buildReservationCountDedupeKey(
 
 async function buildReservationEffectiveSummaryLookup(
   supabase: ReturnType<typeof createClient>,
-  eventTable: "tabelog_reservation_visit_events" | "ikyu_reservation_visit_events",
+  eventTable:
+    | "tabelog_reservation_visit_events"
+    | "ikyu_reservation_visit_events"
+    | "manual_reservation_visit_events",
   seedRows: unknown,
   fallbackRows: unknown,
 ): Promise<Map<string, Record<string, unknown>>> {
