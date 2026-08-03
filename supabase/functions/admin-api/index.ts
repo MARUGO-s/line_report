@@ -15,6 +15,7 @@ import {
   extractKnowledgeText,
   isBlankExtract,
 } from "../_shared/knowledge_file_extract.ts"
+import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from "../_shared/knowledge_memo_tag.ts"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
 import {
   isMarugoGroupStoreLabel,
@@ -10932,10 +10933,11 @@ async function processLinePostKnowledge(
   const senderName = toSafeString(body.sender_name).slice(0, 120) || "LINEスタッフ"
 
   // ① 100% プログラム判定: #メモ / #日報 / #note を含まない投稿はAIを起動せず即スルー
-  if (!/#(?:メモ|日報|note)/i.test(rawText)) {
+  //    判定は _shared/knowledge_memo_tag.ts に集約（全角'＃'対応。コピーを増やさない）
+  if (!hasKnowledgeMemoTag(rawText)) {
     return { ok: true, processed: false, reason: "No #メモ tag found. Skipped." }
   }
-  const cleanText = rawText.replace(/#(?:メモ|日報|note)/gi, "").trim().slice(0, 60000)
+  const cleanText = stripKnowledgeMemoTag(rawText).slice(0, 60000)
   if (!cleanText) {
     return { ok: true, processed: false, reason: "Empty text after tag removal." }
   }

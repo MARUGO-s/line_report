@@ -19,6 +19,7 @@ import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { extractExpenseFromReceipt, handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
 import { removeRoomMediaByMessageId, saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
+import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from '../_shared/knowledge_memo_tag.ts'
 import { classifyKnowledgeFile, extensionForKind } from '../_shared/knowledge_file_extract.ts'
 import {
   countExistingReceiptsForDates,
@@ -2135,8 +2136,11 @@ async function registerQuotedImageAsKnowledge(
     }
 
     // 4. ナレッジ DB 登録 & 1,500文字 RAG 生成
+    //    店舗の指定キーは `store_key`。admin-api の saveStoreKnowledge は body.store_key しか
+    //    読まないため、DB列名の `store_partition_key` で送ると 400 "store_key is required."
+    //    になり登録できない（x-store-key ヘッダも内部ブリッジでは storeScope=null で無視される）。
     const recordPayload = {
-      store_partition_key: storeKey,
+      store_key: storeKey,
       category: result.category || 'メニュー',
       title: result.title || `LINEメモ_${msgId}`,
       summary: result.summary || 'LINEより投稿された資料メモ',
@@ -2682,11 +2686,12 @@ Deno.serve(async (req) => {
       const eventUserId = event.source?.userId ? String(event.source.userId).trim() : ''
 
       // 店舗ナレッジ (#メモ / #日報 / #note) の Journal Report 自動転送ブリッジ & 通数0リアクション
-      if (text && /#(?:メモ|日報|note)/i.test(text) && storeKey) {
+      // タグ判定は _shared/knowledge_memo_tag.ts に集約（全角'＃'対応。コピーを増やさない）
+      if (text && hasKnowledgeMemoTag(text) && storeKey) {
         const msgId = event.message?.id ? String(event.message.id) : ''
         const quotedMessageId = String((event.message as any)?.quotedMessageId ?? '').trim()
         let quotedImageHandled = false
-        const memoCleanText = text.replace(/#(?:メモ|日報|note)/gi, '').trim()
+        const memoCleanText = stripKnowledgeMemoTag(text)
         const memoReplyToken = String(event.replyToken ?? '').trim()
         const memoAccessToken = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch
 
