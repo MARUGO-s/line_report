@@ -1488,6 +1488,13 @@ Deno.serve(async (req, info) => {
       }
       return json(await deleteSavedReportItem(supabase, body, storeScope), 200)
     }
+    if (req.method === "PATCH" && path === "/pos-journals/saved-reports/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await restoreJournalHistoryItem(supabase, "saved_reports", "保存済みレポート", body, storeScope), 200)
+    }
     if (req.method === "POST" && path === "/pos-journals/saved-reports/html") {
       return json(await uploadSavedReportHtml(workReq, supabase, storeScope), 200)
     }
@@ -1520,6 +1527,13 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await deleteSalesForecastItem(supabase, body, storeScope), 200)
+    }
+    if (req.method === "PATCH" && path === "/pos-journals/sales-forecasts/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await restoreJournalHistoryItem(supabase, "sales_forecasts", "売上予測", body, storeScope), 200)
     }
 
     // ── 店舗ナレッジ（施策・メニュー資料）──
@@ -1606,6 +1620,13 @@ Deno.serve(async (req, info) => {
       }
       return json(await deleteReportAiHistoryItem(supabase, body, storeScope), 200)
     }
+    if (req.method === "PATCH" && path === "/pos-journals/report-ai-history/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await restoreJournalHistoryItem(supabase, "ai_analysis_history", "AI分析履歴", body, storeScope), 200)
+    }
     if (req.method === "GET" && path === "/pos-journals/chat-pdf-history") {
       return json(await fetchChatPdfHistoryList(supabase, url), 200)
     }
@@ -1625,6 +1646,13 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await deleteChatPdfHistoryItem(supabase, body, storeScope), 200)
+    }
+    if (req.method === "PATCH" && path === "/pos-journals/chat-pdf-history/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await restoreJournalHistoryItem(supabase, "ai_chat_pdf_history", "AIチャットPDF履歴", body, storeScope), 200)
     }
 
     if (req.method === "GET" && path === "/reservations/calendar") {
@@ -9405,6 +9433,7 @@ async function fetchSavedReportsList(
   // 日別+月間が混在すると created_at 降順の limit で古い月間が落ちるため、kind で絞り込めるようにする。
   const kindRaw = toSafeString(url.searchParams.get("kind")).toLowerCase()
   const kind = kindRaw === "monthly" || kindRaw === "daily" ? kindRaw : "all"
+  const trash = url.searchParams.get("trash") === "true"
   const defaultLimit = kind === "monthly" ? 500 : 200
   const maxLimit = kind === "monthly" ? 2000 : 1000
   const rawLimit = Number(url.searchParams.get("limit") ?? String(defaultLimit))
@@ -9417,7 +9446,7 @@ async function fetchSavedReportsList(
   // 伝票明細・HTML本文を含む data JSONB 全体は読まず、サマリー数値のみ JSON パス指定で取得する。
   // 保存件数が増えてもレスポンスが肥大せず、タイムアウトで AI がデータ参照不能になることを防ぐ。
   const summarySelect = [
-    "id", "title", "period", "created_at",
+    "id", "title", "period", "created_at", "deleted_at",
     "total:data->total",
     "totalSales:data->totalSales",
     "foodTotal:data->foodTotal",
@@ -9445,10 +9474,14 @@ async function fetchSavedReportsList(
     "mealPeriodVersion:data->mealPeriodVersion",
   ].join(", ")
 
-  const { data, error } = await supabase
+  let reportQuery = supabase
     .from("saved_reports")
     .select(summarySelect)
     .eq("store_partition_key", storeKey)
+  reportQuery = trash
+    ? reportQuery.not("deleted_at", "is", null)
+    : reportQuery.is("deleted_at", null)
+  const { data, error } = await reportQuery
     .order("created_at", { ascending: false })
     .limit(fetchLimit)
   if (error) {
@@ -9481,6 +9514,7 @@ async function fetchSavedReportsList(
     ok: true,
     store_key: storeKey,
     kind,
+    trash,
     items,
   }
 }
@@ -9499,6 +9533,7 @@ async function fetchSavedReportsCrossStoreSummary(
   const { data, error } = await supabase
     .from("saved_reports")
     .select("store_partition_key")
+    .is("deleted_at", null)
     .limit(20000)
   if (error) {
     throw {
@@ -9535,6 +9570,7 @@ async function fetchSavedReportItem(
     .select("id, title, period, data, created_at, updated_at")
     .eq("id", id)
     .eq("store_partition_key", storeKey)
+    .is("deleted_at", null)
     .maybeSingle()
   if (error) {
     throw {
@@ -9598,6 +9634,7 @@ async function saveSavedReport(
       period: toSafeString(body.period),
       data: sanitizedData,
       store_partition_key: storeKey,
+      deleted_at: null,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" })
   if (error) {
@@ -9637,10 +9674,11 @@ async function deleteSavedReportItem(
   }
   const { data, error } = await supabase
     .from("saved_reports")
-    .delete()
+    .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("store_partition_key", storeKey)
-    .select("id, data")
+    .is("deleted_at", null)
+    .select("id")
     .maybeSingle()
   if (error) {
     throw {
@@ -9650,14 +9688,6 @@ async function deleteSavedReportItem(
   }
   if (!data) {
     throw { status: 404, message: "保存済みレポートが見つかりません。" } satisfies AppError
-  }
-  const reportData = isRecord(data.data) ? data.data : {}
-  const htmlPath = toSafeString(reportData.htmlStoragePath) ||
-    buildSavedReportHtmlStoragePath(storeKey, String(data.id))
-  try {
-    await supabase.storage.from(POS_REPORT_HTML_BUCKET).remove([htmlPath])
-  } catch (_) {
-    // 削除本体は成功しているため、Storage 掃除失敗は握りつぶす
   }
   return { ok: true, deleted: { id: String(data.id) } }
 }
@@ -9770,6 +9800,7 @@ async function createSavedReportHtmlSignedUrl(
     .select("id, data")
     .eq("id", id)
     .eq("store_partition_key", storeKey)
+    .is("deleted_at", null)
     .maybeSingle()
   if (error) {
     throw {
@@ -9831,6 +9862,7 @@ async function offloadSavedReportHtml(
       .select("id, data")
       .eq("id", singleId)
       .eq("store_partition_key", storeKey)
+      .is("deleted_at", null)
       .maybeSingle()
     if (error) {
       throw {
@@ -9844,6 +9876,7 @@ async function offloadSavedReportHtml(
       .from("saved_reports")
       .select("id, data")
       .eq("store_partition_key", storeKey)
+      .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .limit(Math.min(500, limit * 8))
     if (error) {
@@ -9949,6 +9982,7 @@ type SalesForecastListRow = {
   method: string
   confidence: string
   created_at: string
+  deleted_at?: string
   forecast_months: string[]
 }
 
@@ -9968,6 +10002,7 @@ function normalizeSalesForecastListRow(value: unknown): SalesForecastListRow | n
     method: toSafeString(value.method),
     confidence: toSafeString(value.confidence),
     created_at: String(value.created_at ?? ""),
+    deleted_at: value.deleted_at == null ? undefined : String(value.deleted_at),
     forecast_months: forecastMonths,
   }
 }
@@ -9980,15 +10015,20 @@ async function fetchSalesForecastsList(
     url.searchParams.get("store_key") || url.searchParams.get("store"),
   )
   const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+  const trash = url.searchParams.get("trash") === "true"
   const limit = Number.isFinite(rawLimit)
     ? Math.max(1, Math.min(300, Math.trunc(rawLimit)))
     : 100
-  const { data, error } = await supabase
+  let forecastQuery = supabase
     .from("sales_forecasts")
     .select(
-      "id, title, horizon_months, forecasted_at, method, confidence, forecasts, created_at",
+      "id, title, horizon_months, forecasted_at, method, confidence, forecasts, created_at, deleted_at",
     )
     .eq("store_partition_key", storeKey)
+  forecastQuery = trash
+    ? forecastQuery.not("deleted_at", "is", null)
+    : forecastQuery.is("deleted_at", null)
+  const { data, error } = await forecastQuery
     .order("forecasted_at", { ascending: false })
     .limit(limit)
   if (error) {
@@ -10000,6 +10040,7 @@ async function fetchSalesForecastsList(
   return {
     ok: true,
     store_key: storeKey,
+    trash,
     items: (Array.isArray(data) ? data : [])
       .map(normalizeSalesForecastListRow)
       .filter((item): item is SalesForecastListRow => item !== null),
@@ -10024,6 +10065,7 @@ async function fetchSalesForecastItem(
     )
     .eq("id", id)
     .eq("store_partition_key", storeKey)
+    .is("deleted_at", null)
     .maybeSingle()
   if (error) {
     throw {
@@ -10076,6 +10118,7 @@ async function saveSalesForecast(
       forecasts: body.forecasts,
       meta: isRecord(body.meta) ? body.meta : {},
       store_partition_key: storeKey,
+      deleted_at: null,
       updated_at: now,
     }, { onConflict: "id" })
   if (error) {
@@ -10115,9 +10158,10 @@ async function deleteSalesForecastItem(
   }
   const { data, error } = await supabase
     .from("sales_forecasts")
-    .delete()
+    .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("store_partition_key", storeKey)
+    .is("deleted_at", null)
     .select("id")
     .maybeSingle()
   if (error) {
@@ -11188,13 +11232,18 @@ async function fetchReportAiHistoryList(
     url.searchParams.get("store_key") || url.searchParams.get("store"),
   )
   const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+  const trash = url.searchParams.get("trash") === "true"
   const limit = Number.isFinite(rawLimit)
     ? Math.max(1, Math.min(300, Math.trunc(rawLimit)))
     : 100
-  const { data, error } = await supabase
+  let aiHistoryQuery = supabase
     .from("ai_analysis_history")
-    .select("id, report_title, report_period, analysis_result, sales_data, created_at")
+    .select("id, report_title, report_period, analysis_result, sales_data, created_at, deleted_at")
     .eq("store_partition_key", storeKey)
+  aiHistoryQuery = trash
+    ? aiHistoryQuery.not("deleted_at", "is", null)
+    : aiHistoryQuery.is("deleted_at", null)
+  const { data, error } = await aiHistoryQuery
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) {
@@ -11203,7 +11252,7 @@ async function fetchReportAiHistoryList(
       message: `AI分析履歴の取得に失敗しました: ${error.message}`,
     } satisfies AppError
   }
-  return { ok: true, store_key: storeKey, items: Array.isArray(data) ? data : [] }
+  return { ok: true, store_key: storeKey, trash, items: Array.isArray(data) ? data : [] }
 }
 
 async function saveReportAiHistory(
@@ -11275,9 +11324,10 @@ async function deleteReportAiHistoryItem(
   }
   const { data, error } = await supabase
     .from("ai_analysis_history")
-    .delete()
+    .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("store_partition_key", storeKey)
+    .is("deleted_at", null)
     .select("id")
     .maybeSingle()
   if (error) {
@@ -11303,13 +11353,18 @@ async function fetchChatPdfHistoryList(
     url.searchParams.get("store_key") || url.searchParams.get("store"),
   )
   const rawLimit = Number(url.searchParams.get("limit") ?? "100")
+  const trash = url.searchParams.get("trash") === "true"
   const limit = Number.isFinite(rawLimit)
     ? Math.max(1, Math.min(300, Math.trunc(rawLimit)))
     : 100
-  const { data, error } = await supabase
+  let chatHistoryQuery = supabase
     .from("ai_chat_pdf_history")
-    .select("id, question, answer, mode, provider, created_at")
+    .select("id, question, answer, mode, provider, created_at, deleted_at")
     .eq("store_partition_key", storeKey)
+  chatHistoryQuery = trash
+    ? chatHistoryQuery.not("deleted_at", "is", null)
+    : chatHistoryQuery.is("deleted_at", null)
+  const { data, error } = await chatHistoryQuery
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) {
@@ -11318,7 +11373,7 @@ async function fetchChatPdfHistoryList(
       message: `AIチャットPDF履歴の取得に失敗しました: ${error.message}`,
     } satisfies AppError
   }
-  return { ok: true, store_key: storeKey, items: Array.isArray(data) ? data : [] }
+  return { ok: true, store_key: storeKey, trash, items: Array.isArray(data) ? data : [] }
 }
 
 async function fetchChatPdfHistoryItem(
@@ -11337,6 +11392,7 @@ async function fetchChatPdfHistoryItem(
     .select("id, question, answer, mode, provider, created_at")
     .eq("id", id)
     .eq("store_partition_key", storeKey)
+    .is("deleted_at", null)
     .maybeSingle()
   if (error) {
     throw {
@@ -11423,9 +11479,10 @@ async function deleteChatPdfHistoryItem(
   }
   const { data, error } = await supabase
     .from("ai_chat_pdf_history")
-    .delete()
+    .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("store_partition_key", storeKey)
+    .is("deleted_at", null)
     .select("id")
     .maybeSingle()
   if (error) {
@@ -11438,6 +11495,48 @@ async function deleteChatPdfHistoryItem(
     throw { status: 404, message: "AIチャットPDF履歴が見つかりません。" } satisfies AppError
   }
   return { ok: true, deleted: { id: String(data.id) } }
+}
+
+type JournalHistoryTable =
+  | "saved_reports"
+  | "sales_forecasts"
+  | "ai_analysis_history"
+  | "ai_chat_pdf_history"
+
+async function restoreJournalHistoryItem(
+  supabase: ReturnType<typeof createClient>,
+  table: JournalHistoryTable,
+  label: string,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const id = toSafeString(body.id)
+  if (!id) throw { status: 400, message: "id is required." } satisfies AppError
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) throw { status: 400, message: "store_key is required." } satisfies AppError
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+  if (String(body.action ?? "") !== "restore") {
+    throw { status: 400, message: "action must be restore." } satisfies AppError
+  }
+  const { data, error } = await supabase
+    .from(table)
+    .update({ deleted_at: null, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("store_partition_key", storeKey)
+    .not("deleted_at", "is", null)
+    .select("id")
+    .maybeSingle()
+  if (error) {
+    throw { status: 500, message: `${label}の復元に失敗しました: ${error.message}` } satisfies AppError
+  }
+  if (!data) throw { status: 404, message: `${label}がゴミ箱に見つかりません。` } satisfies AppError
+  return { ok: true, restored: { id: String(data.id) } }
 }
 
 async function deletePosJournalFile(

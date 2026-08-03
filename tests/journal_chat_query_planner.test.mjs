@@ -35,6 +35,7 @@ const context = {
   WEEKDAY_ORDER: ['月', '火', '水', '木', '金', '土', '日'],
   AI_KNOWLEDGE_MAX_ITEMS: 5,
   AI_KNOWLEDGE_MAX_CHARS: 6000,
+  AI_KNOWLEDGE_MAX_CHUNKS: 12,
   yen: (n) => `¥${Number(n || 0).toLocaleString('ja-JP')}`,
   monthKeyFromReport(report) {
     const text = String(report?.period || report?.title || '');
@@ -69,6 +70,9 @@ for (const name of [
   'buildSavedReportCoverage',
   'formatCoverageMonth',
   'isMonthlyReportTitle',
+  'isCrossMonthAggregateReport',
+  'isSingleMonthCanonicalReport',
+  'reportSummaryTotal',
   'mergeMonthlyAndDailyReportIndex',
   'selectReportsForSavedMonthGroup',
   'resolveIndexedSavedRangeIntent',
@@ -85,12 +89,14 @@ for (const name of [
   'mergeWeekdayBreakdowns',
   'mergeHourlyBreakdowns',
   'formatVerifiedDetailLines',
+  'formatMonthlyMealFdTrendLines',
   'monthEndIso',
   'knowledgePeriodLabel',
   'knowledgeOverlapsPeriod',
   'knowledgeTextSimilarity',
   'knowledgeSearchableText',
   'selectStoreKnowledgeForQuery',
+  'selectKnowledgeChunksForQuery',
   'formatStoreKnowledgeBlock',
   'resolveKnowledgePeriodRange',
 ]) {
@@ -507,6 +513,24 @@ test('both Journal Report entry files keep the planner and error distinction in 
   );
 });
 
+test('uploaded file names and parser errors are rendered as text, never executable HTML', () => {
+  for (const source of [html, indexHtml]) {
+    assert.doesNotMatch(source, /head\.innerHTML\s*=\s*`<div class="fname">/);
+    assert.match(source, /fileName\.textContent=String\(it\.name\|\|''\)/);
+    assert.match(source, /errorText\.textContent=String\(it\.error\|\|''\)/);
+    assert.match(source, /fileName\.textContent=txtName\(String\(it\.name\|\|''\)\)/);
+  }
+});
+
+test('Journal history deletion is recoverable through the trash UI', () => {
+  assert.match(html, /id="journalTrashBtn"/);
+  assert.match(html, /function renderJournalTrash\(/);
+  assert.match(html, /method:\s*'PATCH'/);
+  assert.match(html, /action:\s*'restore'/);
+  assert.match(html, /ゴミ箱へ移動しました/);
+  assert.match(historyHtml, /Journal Report本体の「ゴミ箱・復元」から戻せます/);
+});
+
 test('Journal Report pages default to light while preserving an explicit dark choice', () => {
   assert.match(historyHtml, /localStorage\.getItem\(KEY\) \|\| 'light'/);
   assert.match(historyHtml, /=== 'dark' \? 'dark' : 'light'/);
@@ -762,7 +786,7 @@ test('the knowledge prompt block never becomes the source of numbers', () => {
   ];
   assert.equal(context.formatStoreKnowledgeBlock([]), '');
   const block = context.formatStoreKnowledgeBlock(items);
-  assert.match(block, /【店舗ナレッジ（この店舗が登録した施策・メニュー資料）】/);
+  assert.match(block, /【店舗ナレッジ（この店舗が登録した施策・メニュー資料／/);
   assert.match(block, /\[施策\] 7月ワインフェア（2026-07-01 〜 2026-07-31）/);
   assert.match(block, /概要: グラス3種入替/);
   assert.match(block, /本ナレッジを数値の出典にしてはいけません/);
@@ -776,9 +800,12 @@ test('the knowledge prompt block never becomes the source of numbers', () => {
   assert.ok(huge.length < 7000, `block too long: ${huge.length}`);
 
   // チャット・分析レポートの双方へ注入され、数値の正本は確定集計のままであること
-  assert.match(html, /8\. 【店舗ナレッジ】が提示されている場合は/);
-  assert.match(html, /\$\{verifiedDataBlock\}\$\{knowledgeBlock\}/);
-  assert.match(html, /buildStoreLocationBlockForAi\(\) \+ knowledgeBlock/);
+  assert.match(html, /\d+\. 【店舗ナレッジ】が提示されている場合は/);
+  assert.match(
+    html,
+    /\$\{integrated\.storeOpsBlock\}\$\{verifiedDataBlock\}\$\{integrated\.knowledgeBlock\}/,
+  );
+  assert.match(html, /integrated\.knowledgeBlock/);
   assert.match(html, /loadStoreKnowledgeForAi/);
 });
 

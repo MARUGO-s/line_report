@@ -18,7 +18,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.8.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Static checks
+        run: npm run check
+
+      - name: Test
+        run: npm run test:ci
+
+      - name: Verify diff formatting
+        run: git diff --check
+
   deploy:
+    needs: validate
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

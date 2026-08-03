@@ -1,0 +1,45 @@
+{
+  "projectRef": "hocbnifuactbvmyjraxy",
+  "owner": "MARUGO-s/line_report",
+  "policy": "This repository deploys only the Edge Functions listed under ownedFunctions. Other functions in the same Supabase project belong to separate applications and must not be modified or undeployed from this repository.",
+  "ownedFunctions": [
+    "admin-api",
+    "ai-analyze",
+    "foodcourt-forecast-cron",
+    "gmail-alert-cron",
+    "line-admin-webhook",
+    "line-webhook",
+    "pv-japan-alert-cron",
+    "receipt-midreport-cron",
+    "receipt-sheets-sync-cron",
+    "reservation-today-cron",
+    "review-alert-cron",
+    "room-messages-retention-cron",
+    "tokyo-dome-events-cron",
+    "tokyo-dome-weekly-cron",
+    "weather-daily-cron"
+  ],
+  "journalReportTables": [
+    "saved_reports",
+    "ai_analysis_history",
+    "ai_chat_pdf_history",
+    "sales_forecasts",
+    "pos_journal_files",
+    "pos_journal_ai_analyses",
+    "store_knowledge_documents",
+    "store_knowledge_chunks",
+    "store_operation_profiles"
+  ],
+  "journalReportStorageBuckets": [
+    "pos-journals",
+    "pos-report-html",
+    "store-knowledge"
+  ],
+  "sharedRiskBoundary": [
+    "Edge Function quotas and deployment namespace",
+    "Database connections and performance",
+    "Storage and project billing",
+    "Project-level secrets and service-role access",
+    "Project outage and configuration changes"
+  ]
+}

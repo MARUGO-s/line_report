@@ -43,6 +43,17 @@
 
 New records are appended below.
 
+### 2026-08-03 - Journal Report security, recoverability, CI, and ownership hardening
+
+- `ai-analyze`: 公開anonキーだけでは実行できないよう、`lrst_`管理セッション検証、店舗スコープ照合、DB共有レート制限を追加。Journalの分析・確認質問・チャットは共通`journal-ai-client.js`から管理セッションを送る。
+- Frontend security: ドロップしたファイル名・解凍エラーを`innerHTML`ではなく`textContent`で描画し、`public/jnm`本体とPDF履歴ページへCSP/referrer policyを追加。
+- Accuracy: `コース６品`のNFKC＋長音正規化後もコース商品として認識し、ボトル＋コースの複合質問からコースが脱落しないよう修正。
+- Recoverability: `saved_reports` / `sales_forecasts` / `ai_analysis_history` / `ai_chat_pdf_history`へ`deleted_at`を追加。DELETEはゴミ箱移動、通常一覧・AI検索から除外。復元PATCH APIと「ゴミ箱・復元」UIを追加し、レポートHTML Storageも復元用に保持。
+- CI: Pages/Edge Functionsデプロイ前にNode/Deno、静的チェック、全CIテストを必須化。DB migration失敗時はFunctionだけを先行公開せず停止する。
+- Supabase ownership: `knowledge/supabase-ownership.json`を正本に、LINE Report所有15 Functionsを検査・デプロイ対象化。共有プロジェクト内の別アプリFunctionは触らない。
+- Legacy native: 非Git作業コピーの旧macOS/Windows資産を非破壊で隔離し、通常ビルドを停止。現行正本は`line_report-main/public/jnm/`。
+- Knowledge: Graphify/SQL coverageと公開システムマップを更新。Journal回帰テスト、POS Journal Denoテスト、知識検査を拡充。
+
 ### 2026-08-02 - Journal Report store knowledge folder (phase 1)
 
 - Request: 店舗がやってきた施策やメニュー資料を登録するフォルダを作り、そこに蓄積した資料をもとにAIが分析する循環にする。

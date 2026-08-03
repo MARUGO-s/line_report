@@ -28,3 +28,20 @@ test('POS journal page exposes PDF and history actions', () => {
   assert.match(page, /data-analysis-pdf/);
   assert.match(page, /data-analysis-delete/);
 });
+
+test('Journal Report history tables use deleted_at trash and restore instead of physical delete', async () => {
+  const softDeleteMigration = await readFile(
+    new URL('supabase/migrations/20260803152607_journal_history_soft_delete.sql', root),
+    'utf8',
+  );
+  for (const table of ['saved_reports', 'sales_forecasts', 'ai_analysis_history', 'ai_chat_pdf_history']) {
+    assert.match(softDeleteMigration, new RegExp(`alter table public\\.${table}[\\s\\S]*deleted_at`));
+  }
+  assert.match(adminApi, /async function restoreJournalHistoryItem/);
+  assert.match(adminApi, /\.update\(\{ deleted_at: new Date\(\)\.toISOString\(\)/);
+  assert.match(adminApi, /\.update\(\{ deleted_at: null, updated_at:/);
+  assert.doesNotMatch(
+    adminApi,
+    /\.from\("(?:saved_reports|sales_forecasts|ai_analysis_history|ai_chat_pdf_history)"\)\s*\n\s*\.delete\(\)/,
+  );
+});

@@ -10,7 +10,9 @@ import {
   orchestrationNote,
   type JournalChatIntent,
 } from "../_shared/journal_ai_orchestrate.ts";
+import { authenticateAdminDashboardSessionToken } from "../_shared/admin_dashboard_link_auth.ts";
 import { buildStoreLocationPromptBlock } from "../_shared/marugo_group_stores.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
 
 const OPENAI_MODEL_DEFAULT = "gpt-5.6-luna";
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
@@ -162,10 +164,96 @@ const SYSTEM_PROMPT_CHAT = `${MARUGO_COMPANY_CONTEXT}
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-admin-token, x-admin-surface",
 };
 
 type ChatContent = { role: string; parts: { text: string }[] };
+type AiAction = "analyze" | "chat" | "clarify";
+
+const AI_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const AI_RATE_LIMITS: Record<AiAction, number> = {
+  analyze: 8,
+  chat: 30,
+  clarify: 30,
+};
+
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function isPublicIp(ip: string): boolean {
+  if (!ip || ip === "unknown") return false;
+  if (/^127\./.test(ip) || /^10\./.test(ip) || /^192\.168\./.test(ip)) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip) || /^169\.254\./.test(ip) || /^0\./.test(ip)) return false;
+  if (ip === "::1" || /^fe80:/i.test(ip) || /^f[cd][0-9a-f]{2}:/i.test(ip)) return false;
+  return true;
+}
+
+function extractClientIp(
+  headers: Headers,
+  info?: { remoteAddr?: { hostname?: string } },
+): string {
+  const remote = String(info?.remoteAddr?.hostname ?? "").trim();
+  if (isPublicIp(remote)) return remote;
+  const cf = String(headers.get("cf-connecting-ip") ?? "").trim();
+  if (cf) return cf;
+  const xreal = String(headers.get("x-real-ip") ?? "").trim();
+  if (xreal) return xreal;
+  const xff = String(headers.get("x-forwarded-for") ?? "").trim();
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return "unknown";
+}
+
+async function hashRateLimitKey(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function consumeAiRateLimit(
+  supabase: {
+    rpc: (
+      name: string,
+      params: Record<string, unknown>,
+    ) => PromiseLike<{ data: unknown; error: { message?: string } | null }>;
+  },
+  bucket: string,
+  action: AiAction,
+): Promise<{ allowed: boolean; retryAfterMs: number }> {
+  const windowSeconds = Math.floor(AI_RATE_LIMIT_WINDOW_MS / 1000);
+  try {
+    const { data, error } = await supabase.rpc("consume_security_rate_limit", {
+      rate_bucket: bucket,
+      window_seconds: windowSeconds,
+      max_hits: AI_RATE_LIMITS[action],
+    });
+    if (error) {
+      console.error("Rate limit RPC failed (ai-analyze):", error.message);
+      return { allowed: false, retryAfterMs: AI_RATE_LIMIT_WINDOW_MS };
+    }
+    const row = Array.isArray(data) ? data[0] : null;
+    return {
+      allowed: row?.allowed !== false,
+      retryAfterMs: Math.max(
+        1000,
+        Number(row?.retry_after_seconds ?? windowSeconds) * 1000,
+      ),
+    };
+  } catch (error) {
+    console.error("Unexpected rate limit error (ai-analyze):", error);
+    return { allowed: false, retryAfterMs: AI_RATE_LIMIT_WINDOW_MS };
+  }
+}
 
 function contentsToOpenAiMessages(contents: ChatContent[]) {
   return contents.map((c) => ({
@@ -556,28 +644,29 @@ async function synthesizeWithFallback(contents: ChatContent[]): Promise<Synthesi
   };
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(async (req: Request, info) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
-  if (!resolveOpenAiApiKey() && !resolveKimiApiKey()) {
-    return new Response(
-      JSON.stringify({
-        error: "OPENAI_API_KEY または MOONSHOT_API_KEY が未設定です",
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
+  const supabaseUrl = String(Deno.env.get("SUPABASE_URL") ?? "").trim();
+  const serviceRoleKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    return jsonResponse({ error: "AI service configuration is missing." }, 500);
+  }
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const adminToken = String(req.headers.get("x-admin-token") ?? "").trim();
+  if (!adminToken) {
+    return jsonResponse({ error: "Unauthorized." }, 401);
+  }
+  const authResult = await authenticateAdminDashboardSessionToken(supabase, adminToken);
+  if (!authResult.ok || authResult.scopeKind === "room_config") {
+    return jsonResponse({ error: "Unauthorized." }, 401);
   }
 
   try {
@@ -592,31 +681,50 @@ Deno.serve(async (req: Request) => {
       intent: intentOverride,
       storeKey,
       storeName,
-      storeLocationBlock,
       clarificationContext,
     } = body;
-    const locationBlock = String(storeLocationBlock || "").trim()
-      || buildStoreLocationPromptBlock(storeKey, storeName);
+    const requestedStore = String(storeKey || "").trim().toLowerCase();
+    const scopedStore = String(authResult.storeScope || "").trim().toLowerCase();
+    if (scopedStore && requestedStore && requestedStore !== scopedStore) {
+      return jsonResponse({ error: "他店舗のデータにはアクセスできません。" }, 403);
+    }
+    const effectiveStoreKey = scopedStore || requestedStore;
 
     if (!action) {
-      return new Response(
-        JSON.stringify({ error: "action is required" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
+      return jsonResponse({ error: "action is required" }, 400);
+    }
+    if (!["analyze", "chat", "clarify"].includes(action)) {
+      return jsonResponse(
+        { error: "action must be 'analyze', 'chat', or 'clarify'" },
+        400,
       );
+    }
+    const aiAction = action as AiAction;
+    const tokenHash = await hashRateLimitKey(adminToken);
+    const clientIp = extractClientIp(req.headers, info);
+    const rateLimit = await consumeAiRateLimit(
+      supabase,
+      `ai-analyze:${aiAction}:${tokenHash}:${clientIp}`,
+      aiAction,
+    );
+    if (!rateLimit.allowed) {
+      return jsonResponse({
+        error: "AIリクエストが集中しています。少し待ってから再試行してください。",
+        code: "rate_limited",
+        retry_after_ms: rateLimit.retryAfterMs,
+      }, 429);
     }
 
-    if (!["analyze", "chat", "clarify"].includes(action)) {
-      return new Response(
-        JSON.stringify({ error: "action must be 'analyze', 'chat', or 'clarify'" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
+    if (!resolveOpenAiApiKey() && !resolveKimiApiKey()) {
+      return jsonResponse({
+        error: "OPENAI_API_KEY または MOONSHOT_API_KEY が未設定です",
+      }, 500);
     }
+
+    // 店舗スコープ検証後のサーバー側マスターだけを立地の正本にする。
+    // クライアント supplied の立地ブロックを採用すると、店舗用セッションでも
+    // 別店舗の住所・商圏をAIへ注入できるため使用しない。
+    const locationBlock = buildStoreLocationPromptBlock(effectiveStoreKey, storeName);
 
     if (action === "clarify") {
       const boundedMessage = String(message || "").trim();

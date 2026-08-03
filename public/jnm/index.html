@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+<meta name="referrer" content="same-origin">
 <title>Journal Report</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -37,6 +39,7 @@
 <script src="pages-config.js"></script>
 <script src="../auth-session.js"></script>
 <script src="auth-session.js"></script>
+<script src="journal-ai-client.js"></script>
 <style>
   :root {
     /* ===== Classical design system — light (default) ===== */
@@ -1348,6 +1351,7 @@
           <button id="forecastHistoryMainBtn" class="btn btn-secondary tool-btn">予測履歴・MAPE</button>
           <button id="aiHistoryBtn" class="btn btn-secondary tool-btn">🤖 AI分析履歴</button>
           <button id="aiChatPdfHistoryBtn" class="btn btn-secondary tool-btn">💬 AIチャットPDF履歴</button>
+          <button id="journalTrashBtn" class="btn btn-secondary tool-btn">🗑️ ゴミ箱・復元</button>
           <button id="crossStoreSummaryBtn" class="btn btn-secondary tool-btn" hidden>📊 店舗横断サマリー（管理者）</button>
         </div>
         <button id="mainAiChatBtn" onclick="toggleAiChat()" class="btn btn-secondary btn-block">💬 AIチャット</button>
@@ -1696,6 +1700,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // SUPABASE_ANON_KEY はこれらのテーブルに対しては使用しない（RLSで anon/authenticated からの直接アクセスは遮断済み）。
 const PAGES = window.LINE_REPORT_PAGES || {};
 const AUTH = window.LINE_REPORT_AUTH || null;
+const AI_CLIENT = window.JOURNAL_AI_CLIENT || null;
 const JOURNAL_STORE_STORAGE_KEY = 'jnl2txt_selected_store_v1';
 /** 選択中店舗。クラウド保存はすべてこの store_partition_key に紐づく */
 let STORE_KEY = 'bistrocavacava';
@@ -4973,7 +4978,7 @@ async function renderForecastHistory() {
           <div class="saved-sub">${esc(formatReportCreatedAt(item.forecasted_at || item.created_at))}　/　対象 ${esc(months)}　/　信頼度 ${esc(item.confidence || '—')}</div>
         </div>
         <button data-forecast-open="${esc(item.id)}">開く・MAPE</button>
-        <button data-forecast-delete="${esc(item.id)}">削除</button>
+        <button data-forecast-delete="${esc(item.id)}">ゴミ箱へ</button>
       </div>`;
     }).join('') : '<p class="empty">保存された売上予測はまだありません。「売上予測」で作成するとここに残ります。</p>';
 
@@ -5000,7 +5005,7 @@ async function renderForecastHistory() {
     });
     view.querySelectorAll('[data-forecast-delete]').forEach(b => {
       b.onclick = async () => {
-        if (!confirm('この予測履歴を削除しますか？')) return;
+        if (!confirm('この予測履歴をゴミ箱へ移動しますか？\n後から復元できます。')) return;
         try {
           await adminApiFetch('/pos-journals/sales-forecasts/item', {
             method: 'DELETE',
@@ -5010,7 +5015,7 @@ async function renderForecastHistory() {
               confirmation: 'delete'
             })
           });
-          finishSaveStatus('削除しました');
+          finishSaveStatus('ゴミ箱へ移動しました');
           renderForecastHistory();
         } catch (err) {
           finishSaveStatus('削除に失敗しました', true);
@@ -6108,7 +6113,7 @@ async function renderSavedReports(filter='all'){
         <div class="saved-sub">${esc(r.period)}　/　${formatReportCount(r)}${categorySummary}${mealSummary}　/　${esc(formatReportCreatedAt(r.createdAt))}${stale?'　/　元データから再作成してください':''}</div>
       </div>
       <button data-open="${esc(r.id)}">開く</button>
-      <button data-delete="${esc(r.id)}">削除</button>
+      <button data-delete="${esc(r.id)}">ゴミ箱へ</button>
     </div>`;
   }).join(''):'<p class="empty">保存済みレポートはありません。</p>';
   
@@ -6207,10 +6212,10 @@ async function renderSavedReports(filter='all'){
     }
   });
   view.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{
-    if(!confirm('この保存済みレポートを削除しますか？')) return;
+    if(!confirm('この保存済みレポートをゴミ箱へ移動しますか？\n後から復元できます。')) return;
     showSaveStatus('削除中…');
     const ok=await deleteSavedReport(b.dataset.delete);
-    if(ok) finishSaveStatus('削除しました'); else finishSaveStatus('削除に失敗しました',true);
+    if(ok) finishSaveStatus('ゴミ箱へ移動しました'); else finishSaveStatus('移動に失敗しました',true);
     renderSavedReports();
   });
   view.querySelectorAll('[data-filter]').forEach(b => {
@@ -6416,15 +6421,27 @@ function render(){
     const removeBtn=document.createElement('button'); removeBtn.className='btn-small danger'; removeBtn.textContent='削除';
     removeBtn.onclick=()=>{ items.splice(index,1); render(); };
     if(it.error){
-      head.innerHTML=`<div class="fname">${it.name}</div><div class="count err">${it.error}</div>`;
+      const fileName=document.createElement('div');
+      fileName.className='fname';
+      fileName.textContent=String(it.name||'');
+      const errorText=document.createElement('div');
+      errorText.className='count err';
+      errorText.textContent=String(it.error||'');
+      head.appendChild(fileName);
+      head.appendChild(errorText);
       head.appendChild(removeBtn);
       card.appendChild(head);
       filesEl.appendChild(card);
       return;
     }
-    head.innerHTML=
-      `<div class="fname">${txtName(it.name)}</div>`+
-      `<div class="count">${it.extracted} 件抽出 / 全${it.total}レコード</div>`;
+    const fileName=document.createElement('div');
+    fileName.className='fname';
+    fileName.textContent=txtName(String(it.name||''));
+    const countText=document.createElement('div');
+    countText.className='count';
+    countText.textContent=`${Number(it.extracted)||0} 件抽出 / 全${Number(it.total)||0}レコード`;
+    head.appendChild(fileName);
+    head.appendChild(countText);
     const btn=document.createElement('button'); btn.className='btn-small'; btn.textContent='保存';
     btn.onclick=()=>download(txtName(it.name), it.preview);
     head.appendChild(btn); head.appendChild(removeBtn);
@@ -6721,6 +6738,10 @@ if (aiHistoryBtn) {
 const aiChatPdfHistoryBtn = document.getElementById('aiChatPdfHistoryBtn');
 if (aiChatPdfHistoryBtn) {
   aiChatPdfHistoryBtn.addEventListener('click', () => renderAiChatPdfHistory());
+}
+const journalTrashBtn = document.getElementById('journalTrashBtn');
+if (journalTrashBtn) {
+  journalTrashBtn.addEventListener('click', () => renderJournalTrash());
 }
 const crossStoreSummaryBtn = document.getElementById('crossStoreSummaryBtn');
 if (crossStoreSummaryBtn) {
@@ -7570,23 +7591,19 @@ async function aiAnalyze() {
       + integrated.knowledgeBlock
       + '\n\n【統合分析の指示】必ず①店舗営業情報→②この後に続く売上データ(salesData)→③登録資料の順で読み、3つを突き合わせてレポートを書いてください。店舗営業情報を読まずに曜日弱点を語ってはいけません。';
     systemInstruction = clampAiSystemInstruction(systemInstruction);
-    const res = await fetch(AI_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-      },
-      body: JSON.stringify({
+    if (!AI_CLIENT) throw new Error('AI通信モジュールを読み込めません。');
+    const aiResponse = await AI_CLIENT.request(AI_ENDPOINT, {
         action: 'analyze',
         salesData: data,
         systemInstruction,
         storeKey: STORE_KEY,
         storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
         storeLocationBlock: buildStoreLocationBlockForAi()
-      })
+      }, {
+        anonKey: SUPABASE_ANON_KEY
     });
-    
-    const result = await res.json();
+    const res = aiResponse.response;
+    const result = aiResponse.body;
     if (!res.ok) throw new Error(result.error || ('AI analysis failed: ' + res.status));
     
     const replyText = result.reply || result.text || result.message || '結果がありません';
@@ -7937,7 +7954,7 @@ async function renderAiHistory() {
         </div>
         <div style="display:flex;gap:8px;">
           <button class="rv-btn rv-btn-primary" data-open-ai="${esc(item.id)}" style="cursor:pointer;padding:8px 16px;font-size:13px;">レポートを開く</button>
-          <button class="rv-btn rv-btn-secondary" data-delete-ai="${esc(item.id)}" style="cursor:pointer;padding:8px 16px;font-size:13px;color:#ef4444;border-color:rgba(239,68,68,0.4);">🗑️ 削除</button>
+          <button class="rv-btn rv-btn-secondary" data-delete-ai="${esc(item.id)}" style="cursor:pointer;padding:8px 16px;font-size:13px;color:#ef4444;border-color:rgba(239,68,68,0.4);">🗑️ ゴミ箱へ</button>
         </div>
       </div>`;
     }).join('') : '<p class="empty">過去に保存されたAI分析レポートはありません。</p>';
@@ -7979,10 +7996,10 @@ async function renderAiHistory() {
       b.onclick = async (e) => {
         e.preventDefault();
         const targetId = b.getAttribute('data-delete-ai');
-        if (!confirm('このAI分析レポート履歴を削除しますか？')) return;
+        if (!confirm('このAI分析レポート履歴をゴミ箱へ移動しますか？\n後から復元できます。')) return;
         showSaveStatus('削除中…');
         const ok = await deleteAiHistory(targetId);
-        if (ok) finishSaveStatus('削除しました'); else finishSaveStatus('削除失敗', true);
+        if (ok) finishSaveStatus('ゴミ箱へ移動しました'); else finishSaveStatus('移動失敗', true);
         renderAiHistory();
       };
     });
@@ -8257,7 +8274,7 @@ function isCourseProductName(name) {
   const value = String(name || '').normalize('NFKC').toLowerCase()
     .replace(/[ーｰ‐‑–—−]/g, '-');
   // 半角ｶﾅの SPｺ-ｽ や コースN品 / おまかせN皿 を店舗共通でコース扱い
-  return /コース|sp\s*コ-?ス|スペシャル\s*コ-?ス|おまかせ\s*\d+\s*皿|course/.test(value);
+  return /コ[-]?ス|sp\s*コ-?ス|スペシャル\s*コ-?ス|おまかせ\s*\d+\s*皿|course/.test(value);
 }
 
 /**
@@ -11704,14 +11721,8 @@ async function requestNaturalIntentClarification(userMsg, chatHistory, coverage,
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12500);
   try {
-    const res = await fetch(AI_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
+    if (!AI_CLIENT) throw new Error('AI通信モジュールを読み込めません。');
+    const aiResponse = await AI_CLIENT.request(AI_ENDPOINT, {
         action: 'clarify',
         message: String(userMsg || '').slice(0, 500),
         chatHistory: history,
@@ -11724,9 +11735,12 @@ async function requestNaturalIntentClarification(userMsg, chatHistory, coverage,
             : ''
         },
         storeKey: STORE_KEY
-      })
+      }, {
+      anonKey: SUPABASE_ANON_KEY,
+      signal: controller.signal,
     });
-    const result = await res.json().catch(() => ({}));
+    const res = aiResponse.response;
+    const result = aiResponse.body;
     const resolvedQuery = res.ok && result.status === 'ready'
       ? String(result.resolvedQuery || '').trim().slice(0, 600)
       : '';
@@ -12869,13 +12883,8 @@ ${buildStoreLocationBlockForAi()}
   const strictSystemInstructionClamped = clampAiSystemInstruction(strictSystemInstruction);
 
   try {
-    const res = await fetch(AI_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-      },
-      body: JSON.stringify({
+    if (!AI_CLIENT) throw new Error('AI通信モジュールを読み込めません。');
+    const aiResponse = await AI_CLIENT.request(AI_ENDPOINT, {
         action: 'chat',
         message: resolvedChatQuery,
         systemInstruction: strictSystemInstructionClamped,
@@ -12889,12 +12898,14 @@ ${buildStoreLocationBlockForAi()}
         storeKey: STORE_KEY,
         storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
         storeLocationBlock: buildStoreLocationBlockForAi()
-      })
+      }, {
+        anonKey: SUPABASE_ANON_KEY
     });
 
     removeAiChatLoading(loadingId);
 
-    const result = await res.json().catch(() => ({}));
+    const res = aiResponse.response;
+    const result = aiResponse.body;
     const reply = (res.ok && result.text) ? result.text : null;
 
     if (reply) {
@@ -13135,7 +13146,7 @@ async function renderAiChatPdfHistory() {
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0;">
           <button class="rv-btn rv-btn-primary" data-open-chat-pdf="${esc(item.id)}" style="cursor:pointer;padding:8px 14px;font-size:13px;">開く</button>
-          <button class="rv-btn rv-btn-secondary" data-delete-chat-pdf="${esc(item.id)}" style="cursor:pointer;padding:8px 14px;font-size:13px;color:#ef4444;border-color:rgba(239,68,68,0.4);">🗑️ 削除</button>
+          <button class="rv-btn rv-btn-secondary" data-delete-chat-pdf="${esc(item.id)}" style="cursor:pointer;padding:8px 14px;font-size:13px;color:#ef4444;border-color:rgba(239,68,68,0.4);">🗑️ ゴミ箱へ</button>
         </div>
       </div>`;
     }).join('') : '<p class="empty">「📄 PDFにする」で保存したAIチャット履歴はまだありません。</p>';
@@ -13146,7 +13157,7 @@ async function renderAiChatPdfHistory() {
         すべて選択
       </label>
       <span id="chatPdfSelectedCount" style="font-size:13px;color:var(--text-2);">0件選択中</span>
-      <button class="rv-btn rv-btn-secondary" id="chatPdfBulkDeleteBtn" disabled style="margin-left:auto;cursor:pointer;padding:8px 14px;font-size:13px;color:#ef4444;border-color:rgba(239,68,68,0.4);">🗑️ 選択した項目を削除</button>
+      <button class="rv-btn rv-btn-secondary" id="chatPdfBulkDeleteBtn" disabled style="margin-left:auto;cursor:pointer;padding:8px 14px;font-size:13px;color:#ef4444;border-color:rgba(239,68,68,0.4);">🗑️ 選択した項目をゴミ箱へ</button>
     </div>` : '';
 
     view.innerHTML = `<div class="rv-nav">
@@ -13185,10 +13196,10 @@ async function renderAiChatPdfHistory() {
       b.onclick = async (e) => {
         e.preventDefault();
         const targetId = b.getAttribute('data-delete-chat-pdf');
-        if (!confirm('このAIチャットPDF履歴を削除しますか？')) return;
+        if (!confirm('このAIチャットPDF履歴をゴミ箱へ移動しますか？\n後から復元できます。')) return;
         showSaveStatus('削除中…');
         const ok = await deleteAiChatPdfHistory(targetId);
-        if (ok) finishSaveStatus('削除しました'); else finishSaveStatus('削除失敗', true);
+        if (ok) finishSaveStatus('ゴミ箱へ移動しました'); else finishSaveStatus('移動失敗', true);
         renderAiChatPdfHistory();
       };
     });
@@ -13225,7 +13236,7 @@ async function renderAiChatPdfHistory() {
       bulkDeleteBtn.onclick = async () => {
         const ids = selectedIds();
         if (!ids.length) return;
-        if (!confirm(`選択した ${ids.length} 件のAIチャットPDF履歴を削除しますか？\nこの操作は取り消せません。`)) return;
+        if (!confirm(`選択した ${ids.length} 件のAIチャットPDF履歴をゴミ箱へ移動しますか？\n後から復元できます。`)) return;
         bulkDeleteBtn.disabled = true;
         let done = 0;
         let failed = 0;
@@ -13236,8 +13247,8 @@ async function renderAiChatPdfHistory() {
           const results = await Promise.all(chunk.map(id => deleteAiChatPdfHistory(id)));
           for (const ok of results) { if (ok) done++; else failed++; }
         }
-        if (failed === 0) finishSaveStatus(`${done}件を削除しました`);
-        else finishSaveStatus(`${done}件削除・${failed}件失敗しました`, true);
+        if (failed === 0) finishSaveStatus(`${done}件をゴミ箱へ移動しました`);
+        else finishSaveStatus(`${done}件移動・${failed}件失敗しました`, true);
         renderAiChatPdfHistory();
       };
     }
@@ -13264,6 +13275,119 @@ function appendAiChatLoading() {
 function removeAiChatLoading(id) {
   const el = document.getElementById(id);
   if(el) el.remove();
+}
+
+const JOURNAL_TRASH_TYPES = [
+  {
+    key: 'saved_reports',
+    title: '保存済みレポート',
+    listPath: '/pos-journals/saved-reports?store_key={store}&kind=all&limit=500&trash=true',
+    itemPath: '/pos-journals/saved-reports/item',
+    label: item => `${item.title || '売上レポート'} / ${item.period || ''}`
+  },
+  {
+    key: 'sales_forecasts',
+    title: '売上予測',
+    listPath: '/pos-journals/sales-forecasts?store_key={store}&limit=300&trash=true',
+    itemPath: '/pos-journals/sales-forecasts/item',
+    label: item => `${item.title || '売上予測'} / ${formatReportCreatedAt(item.forecasted_at || item.created_at)}`
+  },
+  {
+    key: 'ai_analysis_history',
+    title: 'AI分析履歴',
+    listPath: '/pos-journals/report-ai-history?store_key={store}&limit=300&trash=true',
+    itemPath: '/pos-journals/report-ai-history/item',
+    label: item => `${item.report_title || 'AI分析'} / ${item.report_period || ''}`
+  },
+  {
+    key: 'ai_chat_pdf_history',
+    title: 'AIチャットPDF履歴',
+    listPath: '/pos-journals/chat-pdf-history?store_key={store}&limit=300&trash=true',
+    itemPath: '/pos-journals/chat-pdf-history/item',
+    label: item => String(item.question || '(質問なし)').replace(/\s+/g, ' ').slice(0, 120)
+  }
+];
+
+async function restoreJournalTrashItem(typeKey, id) {
+  const type = JOURNAL_TRASH_TYPES.find(row => row.key === typeKey);
+  if (!type) return false;
+  try {
+    await adminApiFetch(type.itemPath, {
+      method: 'PATCH',
+      body: JSON.stringify({ id, store_key: STORE_KEY, action: 'restore' })
+    });
+    purgeLocalCloudDataCaches();
+    invalidateSavedReportsCache();
+    return true;
+  } catch (err) {
+    console.error('restoreJournalTrashItem error:', err);
+    return false;
+  }
+}
+
+async function renderJournalTrash() {
+  const view = document.getElementById('reportView');
+  showAppLoading('ゴミ箱を読み込み中...', '復元できる履歴を確認しています');
+  try {
+    const results = await Promise.all(JOURNAL_TRASH_TYPES.map(async type => {
+      const path = type.listPath.replace('{store}', encodeURIComponent(STORE_KEY));
+      const body = await adminApiFetch(path, { method: 'GET' });
+      return { type, items: Array.isArray(body.items) ? body.items : [] };
+    }));
+    const total = results.reduce((sum, row) => sum + row.items.length, 0);
+    const sections = results.map(({ type, items }) => {
+      const rows = items.length ? items.map(item => `
+        <div class="saved-item" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+          <div class="saved-meta" style="min-width:0;">
+            <div class="saved-title">${esc(type.label(item))}</div>
+            <div class="saved-sub">ゴミ箱へ移動: ${esc(formatReportCreatedAt(item.deleted_at || ''))}</div>
+          </div>
+          <button class="rv-btn rv-btn-primary" data-trash-type="${esc(type.key)}" data-trash-id="${esc(item.id)}">復元</button>
+        </div>`).join('') : '<p class="empty">ゴミ箱にありません。</p>';
+      return `<section style="margin:0 0 28px;">
+        <h2 class="table-h">${esc(type.title)}（${items.length}件）</h2>
+        <div class="saved-list">${rows}</div>
+      </section>`;
+    }).join('');
+
+    view.innerHTML = `<div class="rv-nav">
+      <span class="rv-nav-brand">Journal Report</span>
+      <span class="rv-nav-page">🗑️ ゴミ箱・復元</span>
+      <button class="rv-btn rv-btn-ghost" id="journalTrashClose">閉じる</button>
+    </div>
+    <div class="saved-wrap" style="max-width:960px;margin:24px auto;padding:0 16px;">
+      <h1 class="r-title">ゴミ箱・復元</h1>
+      <p class="r-meta">ゴミ箱内 ${total}件。ここから元の一覧へ復元できます。</p>
+      ${sections}
+    </div>`;
+    view.hidden = false;
+    document.body.classList.add('report-open');
+    view.querySelector('#journalTrashClose').onclick = () => {
+      view.hidden = true;
+      document.body.classList.remove('report-open');
+    };
+    view.querySelectorAll('[data-trash-type]').forEach(button => {
+      button.onclick = async () => {
+        const typeKey = button.getAttribute('data-trash-type');
+        const id = button.getAttribute('data-trash-id');
+        if (!confirm('この項目を元の一覧へ復元しますか？')) return;
+        button.disabled = true;
+        const ok = await restoreJournalTrashItem(typeKey, id);
+        if (ok) {
+          finishSaveStatus('復元しました');
+          await renderJournalTrash();
+        } else {
+          button.disabled = false;
+          finishSaveStatus('復元に失敗しました', true);
+        }
+      };
+    });
+  } catch (err) {
+    console.error('renderJournalTrash error:', err);
+    alert('ゴミ箱の読み込みに失敗しました: ' + (err?.message || err));
+  } finally {
+    hideAppLoading();
+  }
 }
 
 async function renderCrossStoreSummary() {

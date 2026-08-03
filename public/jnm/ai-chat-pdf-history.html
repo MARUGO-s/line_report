@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+<meta name="referrer" content="same-origin">
 <title>AIチャットPDF履歴 | Journal Report</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@600;700&display=swap" rel="stylesheet">
@@ -430,14 +432,14 @@ function openDetail(item) {
 }
 
 async function deleteItem(id) {
-  if (!confirm('このAIチャットPDF履歴を削除しますか？')) return;
-  setStatus('削除中…');
+  if (!confirm('このAIチャットPDF履歴をゴミ箱へ移動しますか？\nJournal Report本体の「ゴミ箱・復元」から戻せます。')) return;
+  setStatus('ゴミ箱へ移動中…');
   try {
     await adminApiFetch('/pos-journals/chat-pdf-history/item', {
       method: 'DELETE',
       body: JSON.stringify({ id, store_key: STORE_KEY, confirmation: 'delete' })
     });
-    setStatus('削除しました');
+    setStatus('ゴミ箱へ移動しました');
     await loadHistory();
   } catch (err) {
     setStatus(err && err.message ? err.message : '削除に失敗しました');
@@ -458,17 +460,17 @@ async function deleteItemSilently(id) {
 
 async function bulkDeleteItems(ids) {
   if (!ids.length) return;
-  if (!confirm(`選択した ${ids.length} 件のAIチャットPDF履歴を削除しますか？\nこの操作は取り消せません。`)) return;
+  if (!confirm(`選択した ${ids.length} 件のAIチャットPDF履歴をゴミ箱へ移動しますか？\nJournal Report本体から復元できます。`)) return;
   let done = 0;
   let failed = 0;
   const CHUNK = 5;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
-    setStatus(`一括削除中… ${Math.min(i + chunk.length, ids.length)}/${ids.length}`);
+    setStatus(`ゴミ箱へ移動中… ${Math.min(i + chunk.length, ids.length)}/${ids.length}`);
     const results = await Promise.all(chunk.map((id) => deleteItemSilently(id)));
     for (const ok of results) { if (ok) done++; else failed++; }
   }
-  setStatus(failed === 0 ? `${done}件を削除しました` : `${done}件削除・${failed}件失敗しました`);
+  setStatus(failed === 0 ? `${done}件をゴミ箱へ移動しました` : `${done}件移動・${failed}件失敗しました`);
   await loadHistory();
 }
 
@@ -484,7 +486,7 @@ function renderList(items) {
       すべて選択
     </label>
     <span id="bulkSelectedCount" style="font-size:12px;color:var(--text-2);">0件選択中</span>
-    <button type="button" class="btn btn-danger" id="bulkDeleteBtn" disabled style="margin-left:auto;">🗑️ 選択した項目を削除</button>
+    <button type="button" class="btn btn-danger" id="bulkDeleteBtn" disabled style="margin-left:auto;">🗑️ 選択した項目をゴミ箱へ</button>
   </div>`;
 
   list.innerHTML = toolbar + items.map((item) => {
@@ -503,7 +505,7 @@ function renderList(items) {
         </div>
         <div class="actions">
           <button type="button" class="btn btn-primary" data-open>開く</button>
-          <button type="button" class="btn btn-danger" data-delete>削除</button>
+          <button type="button" class="btn btn-danger" data-delete>ゴミ箱へ</button>
         </div>
       </div>
       <details class="answer">

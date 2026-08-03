@@ -34,7 +34,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.8.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Static checks
+        run: npm run check
+
+      - name: Test
+        run: npm run test:ci
+
+      - name: Check Journal AI Edge Function
+        run: deno check --no-lock supabase/functions/ai-analyze/index.ts
+
+      - name: Verify diff formatting
+        run: git diff --check
+
   deploy:
+    needs: validate
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -50,23 +83,16 @@ jobs:
           version: 2.106.0   # ローカル CLI と同一。必要なら更新可
 
       - name: Link project and apply DB migrations
-        # SUPABASE_DB_PASSWORD が未設定の場合はスキップし、Edge Functions のデプロイだけは
-        # 継続する（シークレット未設定でワークフロー全体を落とさないための保険）。
-        # continue-on-error: マイグレーション履歴の不整合など db push 側の問題で
-        # このステップが失敗しても、Edge Functions のデプロイ自体は止めない
-        # （関数コードのデプロイはDBスキーマ変更と独立して価値があるため）。
-        # ただし失敗時はジョブサマリーに warning を残すので、Actions タブで気づける。
-        continue-on-error: true
+        # DB変更と関数コードの不整合を防ぐため、パスワード未設定・link失敗・db push失敗は
+        # すべてデプロイ停止とする。Edge Functionsだけを先行公開しない。
         run: |
+          set -euo pipefail
           if [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "::warning::SUPABASE_DB_PASSWORD が未設定のため、DBマイグレーションの自動適用をスキップします。リポジトリSecretsに追加してください。"
-            exit 0
-          fi
-          supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-          if ! supabase db push; then
-            echo "::warning::supabase db push が失敗しました。マイグレーション履歴の不整合の可能性があります。Edge Functionsのデプロイは続行します。"
+            echo "::error::SUPABASE_DB_PASSWORD が未設定です。DBと関数の不整合を防ぐためデプロイを停止します。"
             exit 1
           fi
+          supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push
 
       - name: Deploy all functions
         # 関数を1つずつデプロイする。一括 deploy は Supabase API の 502/409
@@ -76,7 +102,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t FUNCS < <(
-            find supabase/functions -mindepth 1 -maxdepth 1 -type d ! -name '_shared' -printf '%f\n' | sort
+            node -e "const m=require('./knowledge/supabase-ownership.json'); for (const f of [...m.ownedFunctions].sort()) console.log(f)"
           )
           # 変更の多い入口を先にデプロイ
           PRIORITY=(ai-analyze admin-api line-webhook)

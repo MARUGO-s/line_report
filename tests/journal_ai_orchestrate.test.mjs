@@ -71,4 +71,37 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /kimi-k3/);
   assert.match(ai, /synthesizeWithFallback/);
   assert.match(ai, /api\.moonshot\.ai/);
+  assert.match(ai, /authenticateAdminDashboardSessionToken/);
+  assert.match(ai, /x-admin-token/);
+  assert.match(ai, /consume_security_rate_limit/);
+  assert.match(ai, /AI_RATE_LIMITS/);
+  assert.match(ai, /他店舗のデータにはアクセスできません/);
+  assert.match(ai, /const locationBlock = buildStoreLocationPromptBlock\(effectiveStoreKey, storeName\)/);
+  assert.doesNotMatch(ai, /String\(storeLocationBlock \|\| ""\)/);
+});
+
+test('Journal Report sends its scoped admin session to every ai-analyze request', async () => {
+  const html = await readFile(
+    new URL('../public/jnm/jnl2txt.html', import.meta.url),
+    'utf8',
+  );
+  const indexHtml = await readFile(
+    new URL('../public/jnm/index.html', import.meta.url),
+    'utf8',
+  );
+  const client = await readFile(
+    new URL('../public/jnm/journal-ai-client.js', import.meta.url),
+    'utf8',
+  );
+  for (const source of [html, indexHtml]) {
+    assert.match(source, /src="journal-ai-client\.js"/);
+    assert.equal(
+      [...source.matchAll(/AI_CLIENT\.request\(AI_ENDPOINT,/g)].length,
+      3,
+      'analyze, clarify, and chat must use the shared AI client',
+    );
+  }
+  assert.match(client, /'x-admin-token': token/);
+  assert.match(client, /LINE_REPORT_AUTH/);
+  assert.match(client, /ログインが必要です/);
 });
