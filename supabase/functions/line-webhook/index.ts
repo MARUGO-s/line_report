@@ -19,6 +19,7 @@ import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { extractExpenseFromReceipt, handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
 import { saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
+import { classifyKnowledgeFile, extensionForKind } from '../_shared/knowledge_file_extract.ts'
 import {
   countExistingReceiptsForDates,
   importDailyReceiptsOverwrite,
@@ -2028,11 +2029,12 @@ async function processReceiptTextEvent(
 }
 
 /**
- * 引用返信（リプライ）で指定された画像を Gemini で解析し、店舗ナレッジとして登録する。
+ * 引用返信（リプライ）で指定された添付ファイルを Gemini で解析し、店舗ナレッジとして登録する。
+ * 対応形式は Web の「資料」タブと同じ（画像 / PDF / Excel / Word / テキスト）。
  *
- * LINE の画像メッセージ自体には text フィールドが無く、キャプションを付けて送る手段が
- * 無い。そのため画像は「画像を送る → その画像に引用返信で #メモ と書く」という2手で
- * 指定する。引用返信のテキストイベントには quotedMessageId（引用元＝画像のID）が入る。
+ * LINE の画像・ファイルメッセージ自体には text フィールドが無く、キャプションを付けて
+ * 送る手段が無い。そのため添付は「ファイルを送る → それに引用返信で #メモ と書く」という
+ * 2手で指定する。引用返信のテキストイベントには quotedMessageId（引用元のID）が入る。
  *
  * 通数について: 引用返信は店舗からの受信メッセージなので PUSH 無料枠を消費しない。
  * 完了通知も Reaction API（0通）で行い、返信メッセージは送らない。
@@ -2040,19 +2042,21 @@ async function processReceiptTextEvent(
  * 注意: この関数は必ずトップレベルに置くこと。Deno.serve 内のイベントループ本体に
  * 置くと、同じブロックで後から const 宣言される変数を巻き込んで TDZ エラーになる。
  *
- * @param imageMessageId 引用元の画像メッセージID（quotedMessageId）
+ * @param quotedMessageId 引用元メッセージID（画像またはファイル）
  * @param memoText 引用返信の本文（#メモ を含む）。ナレッジの本文に使う
+ * @param quotedFileName 引用元がファイルメッセージの場合の元ファイル名（分かる場合のみ）
  */
 async function registerQuotedImageAsKnowledge(
   registry: StoreRegistryRow,
-  imageMessageId: string,
+  quotedMessageId: string,
   memoText: string,
   createdBy: string,
-  lineAccessTokenForSearch?: string
+  lineAccessTokenForSearch?: string,
+  quotedFileName = ''
 ): Promise<boolean> {
   try {
     const storeKey = registry.store_partition_key || ''
-    const msgId = String(imageMessageId || '').trim()
+    const msgId = String(quotedMessageId || '').trim()
     const text = String(memoText || '').trim()
 
     if (!storeKey || !msgId) return false
@@ -2060,23 +2064,34 @@ async function registerQuotedImageAsKnowledge(
     const token = resolveChannelAccessToken(storeKey) || lineAccessTokenForSearch || ''
     if (!token) return false
 
-    // 1. LINE API から画像バイナリを取得
-    //    引用元がテキスト等で画像でない場合や、保存期間切れの場合はここで ok:false になる
+    // 1. LINE API から添付バイナリを取得
+    //    引用元がテキストメッセージだった場合や、保存期間切れの場合はここで ok:false になる
     const fetched = await fetchLineMessageBinary(msgId, token)
     if (!fetched.ok) {
-      console.warn('Knowledge image fetch failed:', fetched.error)
+      console.warn('Knowledge file fetch failed:', fetched.error)
       return false
     }
     // BlobPart として渡すため、ArrayBuffer 実体を持つ Uint8Array に整えておく。
     const binary = new Uint8Array(fetched.bytes)
     if (binary.length === 0) return false
 
+    // 画像・PDF・Excel・Word・テキストを区別する。LINE の content API が返す
+    // Content-Type を正とし、拡張子は保存名の組み立てに使う。
+    const contentType = String(fetched.contentType || '').trim() || 'image/jpeg'
+    const kind = classifyKnowledgeFile(quotedFileName, contentType)
+    if (kind === 'unsupported') {
+      console.warn('Knowledge file unsupported:', contentType, quotedFileName)
+      return false
+    }
+    const fileName = quotedFileName ||
+      `line_${msgId}.${extensionForKind(kind, contentType)}`
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
 
-    // 2. Gemini 2.0 Flash 画像AI解析 (/analyze-image)
+    // 2. Gemini 2.0 Flash によるAI解析（Excel/Word はサーバ側でテキスト化して解析）
     const formData = new FormData()
-    const blob = new Blob([binary], { type: 'image/jpeg' })
-    formData.append('file', blob, `line_${msgId}.jpg`)
+    const blob = new Blob([binary], { type: contentType })
+    formData.append('file', blob, fileName)
     formData.append('store_key', storeKey)
 
     const analyzeRes = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/analyze-image`, {
@@ -2090,16 +2105,16 @@ async function registerQuotedImageAsKnowledge(
     })
 
     if (!analyzeRes.ok) {
-      console.warn('Knowledge image analyze failed:', analyzeRes.status, await analyzeRes.text())
+      console.warn('Knowledge file analyze failed:', analyzeRes.status, await analyzeRes.text())
       return false
     }
 
     const analyzeJson = await analyzeRes.json()
     const result = analyzeJson.result || {}
 
-    // 3. 原本画像を Storage (store-knowledge) へ保存
+    // 3. 原本ファイルを Storage (store-knowledge) へ保存
     const uploadData = new FormData()
-    uploadData.append('file', blob, `line_${msgId}.jpg`)
+    uploadData.append('file', blob, fileName)
     uploadData.append('store_key', storeKey)
 
     const uploadRes = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/knowledge/upload`, {
@@ -2122,14 +2137,14 @@ async function registerQuotedImageAsKnowledge(
     const recordPayload = {
       store_partition_key: storeKey,
       category: result.category || 'メニュー',
-      title: result.title || `LINE画像メモ_${msgId}`,
-      summary: result.summary || 'LINEより投稿された画像メモ',
+      title: result.title || `LINEメモ_${msgId}`,
+      summary: result.summary || 'LINEより投稿された資料メモ',
       body_text: result.body_text || text || '',
-      tags: Array.isArray(result.tags) ? ['LINE投稿', '画像メモ', ...result.tags] : ['LINE投稿', '画像メモ'],
+      tags: Array.isArray(result.tags) ? ['LINE投稿', '資料メモ', ...result.tags] : ['LINE投稿', '資料メモ'],
       storage_bucket: 'store-knowledge',
       storage_path: storagePath,
-      original_file_name: `line_${msgId}.jpg`,
-      mime_type: 'image/jpeg',
+      original_file_name: fileName,
+      mime_type: contentType,
       file_size_bytes: binary.length,
       source_type: 'line_post',
       created_by: createdBy || 'LINEユーザー'
