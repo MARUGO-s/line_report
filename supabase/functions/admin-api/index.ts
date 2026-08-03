@@ -5268,6 +5268,19 @@ async function fetchReservationAiFacts(
   // サーバで数値化して合計まで出す（ウォークイン推定＝POS客数−予約人数 に使う）。
   let guestTotal = 0
   let guestUnknownCount = 0
+  // 月次予約集計（明細上限で切れても totals / by_month は全件ベース）。
+  // クライアントが POS 月次と突き合わせて飛び込み推定表を作る。
+  const byMonthMap = new Map<string, {
+    year_month: string
+    reservation_count: number
+    cancelled_count: number
+    guest_total: number
+    guest_unknown_count: number
+    new_count: number
+    repeat_count: number
+    unknown_count: number
+    by_channel: { tabelog: number; ikyu: number; manual: number }
+  }>()
 
   const mapped = rawItems.map((item) => {
     const source = String(item.source ?? "") as "tabelog" | "ikyu" | "manual"
@@ -5278,12 +5291,30 @@ async function fetchReservationAiFacts(
     let guestType: "new" | "repeat" | "unknown" = "unknown"
     if (visitCount > 1) guestType = "repeat"
     else if (visitCount === 1) guestType = "new"
+    const yearMonth = toSafeString(item.visit_month) ||
+      buildCalendarVisitMonthLabel(toSafeString(item.visit_at)) ||
+      ""
 
     // 集計の分母は「キャンセルを除いた予約」で統一する。
     // by_channel や new/repeat だけがキャンセルを含むと、
     // 「予約10件」なのに内訳合計が13件、という食い違いがそのままAIの回答に出る。
     if (isCancelled) {
       cancelledCount += 1
+      if (yearMonth) {
+        const m = byMonthMap.get(yearMonth) || {
+          year_month: yearMonth,
+          reservation_count: 0,
+          cancelled_count: 0,
+          guest_total: 0,
+          guest_unknown_count: 0,
+          new_count: 0,
+          repeat_count: 0,
+          unknown_count: 0,
+          by_channel: { tabelog: 0, ikyu: 0, manual: 0 },
+        }
+        m.cancelled_count += 1
+        byMonthMap.set(yearMonth, m)
+      }
     } else {
       reservationCount += 1
       if (source === "tabelog" || source === "ikyu" || source === "manual") {
@@ -5295,6 +5326,30 @@ async function fetchReservationAiFacts(
       if (toSafeString(item.allergy_label)) allergyNotedCount += 1
       if (partySize === null) guestUnknownCount += 1
       else guestTotal += partySize
+
+      if (yearMonth) {
+        const m = byMonthMap.get(yearMonth) || {
+          year_month: yearMonth,
+          reservation_count: 0,
+          cancelled_count: 0,
+          guest_total: 0,
+          guest_unknown_count: 0,
+          new_count: 0,
+          repeat_count: 0,
+          unknown_count: 0,
+          by_channel: { tabelog: 0, ikyu: 0, manual: 0 },
+        }
+        m.reservation_count += 1
+        if (source === "tabelog" || source === "ikyu" || source === "manual") {
+          m.by_channel[source] += 1
+        }
+        if (guestType === "new") m.new_count += 1
+        else if (guestType === "repeat") m.repeat_count += 1
+        else m.unknown_count += 1
+        if (partySize === null) m.guest_unknown_count += 1
+        else m.guest_total += partySize
+        byMonthMap.set(yearMonth, m)
+      }
     }
 
     return {
@@ -5315,6 +5370,10 @@ async function fetchReservationAiFacts(
     }
   })
 
+  const byMonth = [...byMonthMap.values()].sort((a, b) =>
+    a.year_month.localeCompare(b.year_month)
+  )
+
   const truncated = mapped.length > limit || monthCapHit
   return {
     store_key: storeScope,
@@ -5332,6 +5391,7 @@ async function fetchReservationAiFacts(
       guest_total: guestTotal,
       guest_unknown_count: guestUnknownCount,
     },
+    by_month: byMonth,
     items: mapped.slice(0, limit),
     truncated,
     generated_at: new Date().toISOString(),
@@ -5341,6 +5401,7 @@ async function fetchReservationAiFacts(
       "電話番号は確定集計に含めない（氏名のみ）",
       "by_channel・新規/リピート/回数不明・アレルギー記載はキャンセルを除いた件数。合計は reservation_count と一致する",
       "guest_total は予約人数の合計（キャンセル除外）。予約組数は reservation_count と同じ。guest_unknown_count は人数が読み取れなかった予約件数で、その分 guest_total は少なめに出る",
+      "by_month は明細上限の影響を受けない月次予約集計。POS月次と突き合わせて飛び込み推定に使う",
       "ウォークイン（飛び込み）は POS客数 − guest_total ／ POS会計組数 − reservation_count で推定できる。ただし一致はしないので必ず『推定』と述べること",
       "取り込み経路: 食べログ・一休は予約通知メールからの自動取り込み。それ以外（電話・直接来店の予約など）は LINE に送られた予約スクショを AI が読み取って登録した分だけが manual に入る",
       "したがって、スクショを送り忘れた予約・通知メールが届かなかった予約は丸ごと欠落し、その分はウォークイン側に計上される（ウォークインが過大に出る）",
@@ -10036,10 +10097,11 @@ async function uploadSavedReportHtml(
   }
   const bytes = new Uint8Array(await file.arrayBuffer())
   const storagePath = buildSavedReportHtmlStoragePath(storeKey, reportId)
+  // Storage の allowed_mime_types は exact match。charset 付きは 415 になる。
   const { error: uploadError } = await supabase.storage
     .from(POS_REPORT_HTML_BUCKET)
     .upload(storagePath, bytes, {
-      contentType: file.type || "text/html; charset=utf-8",
+      contentType: "text/html",
       upsert: true,
     })
   if (uploadError) {
@@ -10200,7 +10262,7 @@ async function offloadSavedReportHtml(
     const { error: uploadError } = await supabase.storage
       .from(POS_REPORT_HTML_BUCKET)
       .upload(storagePath, bytes, {
-        contentType: "text/html; charset=utf-8",
+        contentType: "text/html",
         upsert: true,
       })
     if (uploadError) {

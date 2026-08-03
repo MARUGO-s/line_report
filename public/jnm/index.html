@@ -4079,7 +4079,8 @@ function buildCloudReportData(r) {
 async function uploadSavedReportHtmlToCloud(reportId, html) {
   if (!getAdminToken() || !reportId || !html) return null;
   const form = new FormData();
-  form.append('file', new File([html], `${reportId}.html`, { type: 'text/html; charset=utf-8' }));
+  // Storage は mime exact match。charset 付きだと 415 になりクラウド保存全体が失敗する。
+  form.append('file', new File([html], `${reportId}.html`, { type: 'text/html' }));
   form.append('store_key', STORE_KEY);
   form.append('report_id', String(reportId));
   return await adminApiFetch('/pos-journals/saved-reports/html', { method: 'POST', body: form });
@@ -6857,16 +6858,23 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 商品初出節またはコースラインナップ節が載っているのに「ジャーナルを再読できない」「該当コースが確定集計に無い」と書いてはいけない。
 - 【商品利用会計 vs 非利用会計】が載っている場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加の比較が必要」「利用/非利用の比較ができない」で止めない。
 - 【ジャーナル会計比較（汎用）】が載っている場合は、昼夜・平日週末・ボトル/グラス・人数帯・商品A vs B など提示された軸の数値を使い、「比較できない」で止めない。
-- 【予約確定事実】が載っている場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容を根拠に述べてよい。電話は確定集計に含まれない（推測しない）。予約人数・予約組数と POS 客数／会計組数／コース点数は別物で、予約人数をそのまま客数として報告してはいけない。ただし POS客数−予約人数・POS会計組数−予約組数でウォークイン（飛び込み）を推定するのは可（必ず「推定」と明示し、ノーショー・予約スクショの送り忘れや通知未達による欠落・営業日付のズレで一致しない旨を添える）。「予約専用項目なし」と併記されていても本節があれば後者を優先し、「表示されていません」で止めない。
+- 【予約確定事実】が載っている場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず使う。電話は確定集計に含まれない（推測しない）。予約人数をそのまま客数として報告してはいけない。飛び込みは推定であり必ず「推定」と明示する（ノーショー・スクショ送り忘れ／通知未達・営業日付ズレで一致しない）。
+- 【予約確定事実】が載っていない場合（予約取り込み未導入の店舗・対象期間0件）は、予約・飛び込み・新規予約要因に触れず、通常の売上分析だけを行う。無理に「予約データが無い」と強調しない。
+- 新規予約や飛び込みが前月より増減した月は、【店舗ナレッジ】の同月・前後の施策・メニュー・価格改定を必ず照合し、見つかれば「登録資料によると」と明示して要因に使う。資料にめぼしい記述が無い場合のみ「※これは推測です」と前置きしたうえで仮説を述べる。「予約専用項目なし」と併記されていても本節があれば後者を優先し、「表示されていません」で止めない。
 - 解析欄にも金額が無い場合のみ、数値を捏造せず「※これは推測です」として季節要因に含めてよい。
+
+【期間表現（必須・全分析に常時適用）】
+- 「2026年1月から7月まで」「2026年1月〜7月」「1月〜7月」は、端点の2か月だけではない。開始月〜終了月のあいだの全月（例: 1・2・3・4・5・6・7月）を含む連続期間として扱う。
+- 確定済み集計のラベルや月次推移にその範囲の月がある場合は、端点だけを抜き出して「1月と7月だけ」と答えない。途中月が集計に無いときだけ、その月は「今回の確定済み集計には表示されていません」と月単位で述べる。
 
 分析・アドバイスの優先視点:
 1. 対象店舗の立地（住所・商圏・客層・時間帯）に合った施策
 2. ランチ／ディナーを分けたうえで、ドリンク（特にワイン）比率・グラス／ボトル・売れ筋
 3. フード×ワインのペアリング・客単価向上（昼夜別）
-4. 同エリア姉妹店連携は妥当な場合のみ（新宿三丁目話の他エリア転用禁止）
-5. 提供データに無い原価・在庫・利益は捏造しない
-6. 売れ筋商品: 「★ドリンク」「★アラカルト」等のPOS大分類行は単独商品ではない。確定集計の売れ筋TOPで「コース系（合算）」がある場合は、コース分割を無視してドリンクを単独最大商品と断定しない。カテゴリ合計（フード売上 vs ドリンク売上）と商品ランキングを混同しない`;
+4. 予約組数 vs 飛び込み組数の推移（集客経路の変化）と、その要因（資料照合→無ければ推測前置き）
+5. 同エリア姉妹店連携は妥当な場合のみ（新宿三丁目話の他エリア転用禁止）
+6. 提供データに無い原価・在庫・利益は捏造しない
+7. 売れ筋商品: 「★ドリンク」「★アラカルト」等のPOS大分類行は単独商品ではない。確定集計の売れ筋TOPで「コース系（合算）」がある場合は、コース分割を無視してドリンクを単独最大商品と断定しない。カテゴリ合計（フード売上 vs ドリンク売上）と商品ランキングを混同しない`;
 
 const MARUGO_AI_ANALYZE_INSTRUCTION = `${MARUGO_AI_COMPANY_CONTEXT}
 
@@ -9244,8 +9252,97 @@ async function fetchReservationAiFacts(monthFrom, monthTo) {
 }
 
 /**
+ * POS 月次 × 予約月次から、予約組数/人数 vs 飛び込み（推定）の対比表を作る。
+ * 飛び込み組数 = max(0, POS会計組数 − 予約組数)、人数も同様。負値は 0 に切り上げ（ノーショー等）。
+ */
+function buildReservationWalkInMonthlyFlow(monthlyBreakdown, reservationByMonth) {
+  const posMonths = Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [];
+  const resByKey = new Map(
+    (Array.isArray(reservationByMonth) ? reservationByMonth : [])
+      .filter((m) => m && m.year_month)
+      .map((m) => [String(m.year_month), m])
+  );
+  const keys = new Set([
+    ...posMonths.map((m) => m.key).filter(Boolean),
+    ...resByKey.keys()
+  ]);
+  const sorted = [...keys].sort();
+  const rows = sorted.map((key) => {
+    const pos = posMonths.find((m) => m.key === key) || {};
+    const res = resByKey.get(key) || {};
+    const posGroups = Number(pos.salesCount) || 0;
+    const posGuests = Number(pos.totalCustomers) || 0;
+    const reservationGroups = Number(res.reservation_count) || 0;
+    const reservationGuests = Number(res.guest_total) || 0;
+    const walkInGroupsEst = Math.max(0, posGroups - reservationGroups);
+    const walkInGuestsEst = Math.max(0, posGuests - reservationGuests);
+    const denomGroups = posGroups || 0;
+    const denomGuests = posGuests || 0;
+    return {
+      key,
+      posGroups,
+      posGuests,
+      posSales: Number(pos.totalSales) || 0,
+      avgSpend: Number(pos.avgSpend) || (posGuests ? Math.round((Number(pos.totalSales) || 0) / posGuests) : 0),
+      reservationGroups,
+      reservationGuests,
+      reservationNew: Number(res.new_count) || 0,
+      reservationRepeat: Number(res.repeat_count) || 0,
+      reservationUnknown: Number(res.unknown_count) || 0,
+      guestUnknownCount: Number(res.guest_unknown_count) || 0,
+      byChannel: res.by_channel || { tabelog: 0, ikyu: 0, manual: 0 },
+      walkInGroupsEst,
+      walkInGuestsEst,
+      reservationShareGroupsPct: denomGroups
+        ? Math.round((reservationGroups / denomGroups) * 1000) / 10
+        : null,
+      walkInShareGroupsPct: denomGroups
+        ? Math.round((walkInGroupsEst / denomGroups) * 1000) / 10
+        : null,
+      reservationShareGuestsPct: denomGuests
+        ? Math.round((reservationGuests / denomGuests) * 1000) / 10
+        : null,
+      walkInShareGuestsPct: denomGuests
+        ? Math.round((walkInGuestsEst / denomGuests) * 1000) / 10
+        : null
+    };
+  });
+  // 前月比（組数）を付与。売上分析の「変化」の正本にする。
+  for (let i = 0; i < rows.length; i++) {
+    const prev = i > 0 ? rows[i - 1] : null;
+    rows[i].mom = prev
+      ? {
+          reservationGroupsDelta: rows[i].reservationGroups - prev.reservationGroups,
+          walkInGroupsDelta: rows[i].walkInGroupsEst - prev.walkInGroupsEst,
+          reservationGuestsDelta: rows[i].reservationGuests - prev.reservationGuests,
+          walkInGuestsDelta: rows[i].walkInGuestsEst - prev.walkInGuestsEst,
+          reservationNewDelta: rows[i].reservationNew - prev.reservationNew
+        }
+      : null;
+  }
+  return rows;
+}
+
+/**
+ * 対象期間に分析可能な予約があるか。
+ * 予約取り込み未導入の店舗（現状 Cava Cava 以外など）や期間内0件は false。
+ * このとき節ごと載せない（売上分析は従来どおりスルー）。
+ */
+function hasUsableReservationAiFacts(raw) {
+  if (!raw || typeof raw !== 'object') return false;
+  const t = raw.totals || {};
+  if ((Number(t.reservation_count) || 0) > 0) return true;
+  if ((Number(t.guest_total) || 0) > 0) return true;
+  const byMonth = Array.isArray(raw.by_month) ? raw.by_month : [];
+  if (byMonth.some((m) => (Number(m?.reservation_count) || 0) > 0)) return true;
+  const items = Array.isArray(raw.items) ? raw.items : [];
+  if (items.some((it) => it && !it.is_cancelled)) return true;
+  return false;
+}
+
+/**
  * 食べログ／一休／手入力の予約・顧客リピートを AI 確定集計へ追加する。
- * monthlyBreakdown の期間に合わせる。失敗時は null（他レイヤは壊さない）。
+ * monthlyBreakdown の期間に合わせる。失敗時・予約0件時は null（他レイヤは壊さない）。
  */
 async function enrichReservationFacts(monthlyBreakdown) {
   const months = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
@@ -9258,10 +9355,16 @@ async function enrichReservationFacts(monthlyBreakdown) {
   try {
     const raw = await fetchReservationAiFacts(monthFrom, monthTo);
     if (!raw || typeof raw !== 'object') return null;
+    // 予約取り込みが無い店舗／期間内0件は節を出さない（飛込=POS全体のような誤解を防ぐ）
+    if (!hasUsableReservationAiFacts(raw)) return null;
+    const byMonth = Array.isArray(raw.by_month) ? raw.by_month : [];
+    const walkInMonthly = buildReservationWalkInMonthlyFlow(monthlyBreakdown, byMonth);
     return {
       monthFrom: raw.period?.month_from || monthFrom,
       monthTo: raw.period?.month_to || monthTo,
       totals: raw.totals || null,
+      byMonth,
+      walkInMonthly,
       items: Array.isArray(raw.items) ? raw.items : [],
       truncated: !!raw.truncated,
       notes: Array.isArray(raw.notes) ? raw.notes : [],
@@ -9275,8 +9378,20 @@ async function enrichReservationFacts(monthlyBreakdown) {
   }
 }
 
+function formatSignedDelta(n) {
+  const v = Number(n) || 0;
+  if (v > 0) return `+${v}`;
+  return String(v);
+}
+
 function formatReservationFactsForAi(facts, indent = '') {
   if (!facts) return '';
+  // 予約0件・未導入店舗は enrich 側で null にするが、念のためここでも空節を出さない
+  if (!hasUsableReservationAiFacts({
+    totals: facts.totals,
+    by_month: facts.byMonth,
+    items: facts.items
+  })) return '';
   const lines = [`${indent}- 【予約確定事実】（食べログ／一休／手入力・氏名あり・電話なし）:`];
   const period = (facts.monthFrom || facts.monthTo)
     ? `${facts.monthFrom || '開始'}〜${facts.monthTo || '最新'}`
@@ -9298,13 +9413,48 @@ function formatReservationFactsForAi(facts, indent = '') {
     `新規=1回・リピート=2回以上。チャネル別・新規/リピート・アレルギー記載はキャンセルを除いた件数で、` +
     `合計は予約件数と一致する。予約人数≠会計客数。ウォークインは含まれない。電話は含めない。`
   );
+
+  const flow = Array.isArray(facts.walkInMonthly) ? facts.walkInMonthly : [];
+  if (flow.length) {
+    lines.push(
+      `${indent}  - 【予約 vs 飛び込み（月次・売上指標）】` +
+      `POS会計組数/客数と予約組数/人数の対比。飛び込み＝POS−予約（負は0、推定）:`
+    );
+    flow.forEach((row) => {
+      const mom = row.mom;
+      const momBits = mom
+        ? `／前月比 予約組 ${formatSignedDelta(mom.reservationGroupsDelta)}` +
+          `・飛込組 ${formatSignedDelta(mom.walkInGroupsDelta)}` +
+          `・予約新規 ${formatSignedDelta(mom.reservationNewDelta)}`
+        : '';
+      lines.push(
+        `${indent}    - ${row.key}: POS ${row.posGroups}組/${row.posGuests}名` +
+        `・予約 ${row.reservationGroups}組/${row.reservationGuests}名` +
+        `（新規${row.reservationNew}/リピ${row.reservationRepeat}）` +
+        `・飛込推定 ${row.walkInGroupsEst}組/${row.walkInGuestsEst}名` +
+        `・予約比率(組) ${row.reservationShareGroupsPct == null ? '—' : row.reservationShareGroupsPct + '%'}` +
+        `・飛込比率(組) ${row.walkInShareGroupsPct == null ? '—' : row.walkInShareGroupsPct + '%'}` +
+        `・売上 ${yen(row.posSales)}・客単 ${yen(row.avgSpend)}` +
+        momBits
+      );
+    });
+    lines.push(
+      `${indent}  - 売上分析での使い方（必須）: 上記の予約組数・飛び込み組数の推移を売上の流れ指標として述べよ。` +
+      `新規予約や飛び込みが前月より増えた月は、【店舗ナレッジ】の同月・前後の施策・メニュー・価格改定を必ず照合し、` +
+      `見つかれば「登録資料によると」と明示して要因に使う。資料にめぼしい記述が無い場合のみ` +
+      `「※これは推測です」と前置きしたうえでメニュー変化・販促・季節要因などの仮説を述べよ。` +
+      `予約人数をそのまま客数として報告してはいけない。飛び込みは必ず「推定」と明示する。`
+    );
+  } else {
+    lines.push(
+      `${indent}  - ウォークイン（飛び込み）推定: 同じ期間の POS客数 − 上記の予約人数、` +
+      `POS会計組数 − 上記の予約組数 で概算してよい。ただし必ず「推定」と明示すること。`
+    );
+  }
   lines.push(
-    `${indent}  - ウォークイン（飛び込み）推定: 同じ期間の POS客数 − 上記の予約人数、` +
-    `POS会計組数 − 上記の予約組数 で概算してよい。ただし必ず「推定」と明示すること。` +
-    `ノーショー・予約人数と実来店人数の相違・1予約が複数会計に分かれる場合は過少に出る。` +
-    `食べログ・一休は予約通知メールからの自動取り込み、それ以外は LINE に送った予約スクショを` +
-    `AIが読み取った分だけなので、送り忘れ・通知未達の予約は丸ごと欠落しウォークインが過大に出る。` +
-    `スクショ経由は画像認識のため人数・氏名・日時の読み違いも混じりうる。営業日付と予約日時のズレも月境界で影響する。`
+    `${indent}  - 注意: ノーショー・予約人数と実来店人数の相違・1予約が複数会計に分かれる場合は飛込が過少に出る。` +
+    `食べログ・一休は予約通知メール自動取込、それ以外は LINE 予約スクショの AI 読取分だけが manual。` +
+    `送り忘れ・通知未達の予約は欠落し飛込が過大に出る。スクショは人数・氏名・日時の読み違いがありうる。月境界の日付ズレにも注意。`
   );
   const items = Array.isArray(facts.items) ? facts.items : [];
   if (items.length) {
@@ -9337,13 +9487,13 @@ function formatReservationFactsForAi(facts, indent = '') {
     lines.push(`${indent}  - 明細: 0件（対象期間・店舗スコープ内）`);
   }
   if (facts.truncated) {
-    lines.push(`${indent}  - ※件数上限により明細は途中まで。集計 totals を正本にし、残りは「表示上限」と述べよ`);
+    lines.push(`${indent}  - ※件数上限により明細は途中まで。集計 totals / by_month / 予約vs飛び込み表を正本にし、残りは「表示上限」と述べよ`);
   }
   (facts.notes || []).forEach((n) => {
     if (n) lines.push(`${indent}  - ※${n}`);
   });
   lines.push(
-    `${indent}  - ※この節があるときは予約・新規/リピート・氏名・前回来店を根拠に述べてよい。` +
+    `${indent}  - ※この節があるときは予約・新規/リピート・氏名・前回来店・予約vs飛び込み月次を根拠に述べてよい。` +
     `「予約専用項目なし」「表示されていません」で止めない（POS客数との混同は禁止）`
   );
   return lines.join('\n');
@@ -10561,9 +10711,11 @@ function extractYearMonthFromText(text) {
   return { year: parseInt(m[1], 10), month: parseInt(m[2], 10) };
 }
 
-/** 「2025年4月から2026年3月まで」「2025年〜2026年」等の期間範囲指定を検出する（比較「AとB」とは別扱い） */
+/** 「2025年4月から2026年3月まで」「2026年1月〜7月」「2026年の1月から7月まで」「2025年〜2026年」等の期間範囲指定を検出する（比較「AとB」とは別扱い） */
 function extractRangeRef(q) {
-  const monthToMonth = q.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:から|〜|~|-)\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:まで)?/);
+  const s = String(q || '');
+  // 年またぎ: 2025年4月〜2026年3月 / 2025年の4月から2026年の3月まで
+  const monthToMonth = s.match(/(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:まで)?/);
   if (monthToMonth) {
     return {
       fromYear: parseInt(monthToMonth[1], 10), fromMonth: parseInt(monthToMonth[2], 10),
@@ -10571,7 +10723,25 @@ function extractRangeRef(q) {
       wasYearOnly: false
     };
   }
-  const yearToYear = q.match(/(\d{4})\s*年\s*(?:から|〜|~|-)\s*(\d{4})\s*年\s*(?:まで)?/);
+  // 同年省略: 2026年1月〜7月 / 2026年1月から7月まで / 2026年の1月から7月まで
+  // （UIの formatMonthSpanLabel も「2026年1月〜6月」形式。両端に年が無いと従来は範囲未検出になり、
+  //  後段の extractAllMonthRefs が端点の1月と7月だけを拾って比較扱いになっていた）
+  const sameYearMonthToMonth = s.match(/(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{1,2})\s*月\s*(?:まで)?/);
+  if (sameYearMonthToMonth) {
+    const year = parseInt(sameYearMonthToMonth[1], 10);
+    const fromMonth = parseInt(sameYearMonthToMonth[2], 10);
+    const toMonth = parseInt(sameYearMonthToMonth[3], 10);
+    if (fromMonth >= 1 && fromMonth <= 12 && toMonth >= 1 && toMonth <= 12) {
+      return {
+        fromYear: year,
+        fromMonth,
+        toYear: year,
+        toMonth,
+        wasYearOnly: false
+      };
+    }
+  }
+  const yearToYear = s.match(/(\d{4})\s*年\s*(?:から|〜|~|-|－|—)\s*(\d{4})\s*年\s*(?:まで)?/);
   if (yearToYear) {
     return {
       fromYear: parseInt(yearToYear[1], 10), fromMonth: 1,
@@ -12067,8 +12237,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     return { notMatchedLabel: dayScope.label };
   }
 
-  // 期間範囲クエリ（例:「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
-  // 比較（と/、で結ぶ）とは異なり、範囲内の全期間を1つの合算データとして返す。
+  // 期間範囲クエリ（例:「2026年1月から7月まで」「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
+  // 「から／〜／まで」は端点2か月ではなく、あいだの全月を含む連続期間。比較（と/、）とは別扱い。
   const rangeRef = extractRangeRef(q);
   if (rangeRef) {
     if (cloudLookupUnavailable) return unavailableCloudResult();
@@ -12297,7 +12467,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     //    （商品利用/非利用は productCohortFacts にも投影・後方互換）
     // 5) rankProductsForAiDisplay     … 売れ筋（★大分類除外・コース合算）
     // 6) enrichReservationFacts       … 予約・顧客リピート（氏名あり・電話なし）→ reservationFacts
-    //    （食べログ／一休／手入力。POS客数とは別物として併用）
+    //    （食べログ／一休／手入力。POS月次と突合した予約vs飛び込み月次表も同梱）
     // プロンプト側も formatVerifiedDetailLines / formatJournalSpecificFactsForAi に
     // 各セクションを併記し、片方を消して他方に統合しないこと。
     await enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKey);
@@ -12947,7 +13117,7 @@ ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信�
 【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 
-回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品も述べてください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容を根拠に述べてください（電話は含まれない。予約人数をそのまま客数として報告しない）。POS客数−予約人数・POS会計組数−予約組数でウォークイン（飛び込み）を推定するのは可（必ず「推定」と明示し、ノーショー・予約スクショの送り忘れや通知未達による欠落・営業日付のズレで一致しない旨を添える）。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品も述べてください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   } else if (verifiedData) {
     const monthLines = formatMonthlyBreakdownLines(verifiedData.monthlyBreakdown);
     const monthBlock = monthLines
@@ -12964,7 +13134,7 @@ ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5（★大分類除外・コースは合算）:\n' + formatTopProductsLinesForAi(verifiedData.topProducts, 5) : ''}
 ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品も述べてください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容を根拠に述べてください（電話は含まれない。予約人数をそのまま客数として報告しない）。POS客数−予約人数・POS会計組数−予約組数でウォークイン（飛び込み）を推定するのは可（必ず「推定」と明示し、ノーショー・予約スクショの送り忘れや通知未達による欠落・営業日付のズレで一致しない旨を添える）。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品も述べてください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
   // 店舗営業情報（クラウド）と店舗ナレッジを、確定集計と必ずセットで添付する。
   let integrated;
@@ -12994,12 +13164,13 @@ ${buildStoreLocationBlockForAi()}
 4. 【12月・クリスマスディナー・必須】12月を含む分析では、宴会需要・客数増に加え、毎年実施するクリスマスディナー（通常コースより高単価）を必ず考慮する。【異常月の詳細解析】に高単価コース寄与・単価上昇コースが載っている場合は、その金額・点数・商品名を根拠に述べ「クリスマスディナー単体の売上は不明／表示されていません」で止めない。金額が解析欄にも無い場合のみ数値を捏造せず「※これは推測です」として季節要因に含める。
 5. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
 6. 提供された直近の会話履歴（chatHistory）を踏まえ、前後の文脈を引き継いで会話・回答してください。
-7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。ただし「異常月の詳細解析」が載っている場合は、ジャーナル／伝票に基づく高単価会計・コース単価比較・寄与金額を必ず使い、「内訳が表示されていません」「寄与は不明」で止めないでください。「商品初出・導入月」が載っている場合は、ジャーナル全件横断検索の各ターゲット初出日・単価帯・導入前後比較を必ず使い、「開始月は表示されていません」で止めないでください。複数ターゲットを混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」が載っている場合は、単価帯の主力（名称×単価）を正本にし、一部別名の検索結果だけで「〇〇円コースが無い」と書かないでください。例外・単発特別は短く記載し主因にしないでください。漏れ検知がある場合は取りこぼしとして必ず確認してください。「商品利用会計 vs 非利用会計」や「ジャーナル会計比較（汎用）」が載っている場合は、客単価・ドリンク客あたり・差分を必ず使い、「追加の比較が必要」「比較できない」で止めないでください。「予約確定事実」が載っている場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容を必ず使い、「予約専用項目なし」「表示されていません」で止めないでください（電話は含まれない。予約人数をそのまま客数として報告しない）。POS客数−予約人数・POS会計組数−予約組数でウォークイン（飛び込み）を推定するのは可（必ず「推定」と明示し、ノーショー・予約スクショの送り忘れや通知未達による欠落・営業日付のズレで一致しない旨を添える）。売れ筋TOPに「コース系（合算）」がある場合は、コースを分割したままドリンク大分類を単独最大商品と書かないでください（★ドリンク等は商品ではなく大分類）。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください（【予約確定事実】がある場合はその数値を優先）。データの収録状況は事実なので「※これは推測です」を付けないでください。
+7. 今回提示された確定済み集計に項目が見当たらない場合は、「今回の確定済み集計には表示されていません」と回答し、保存DB全体に存在しないとは断定しないでください。ただし「異常月の詳細解析」が載っている場合は、ジャーナル／伝票に基づく高単価会計・コース単価比較・寄与金額を必ず使い、「内訳が表示されていません」「寄与は不明」で止めないでください。「商品初出・導入月」が載っている場合は、ジャーナル全件横断検索の各ターゲット初出日・単価帯・導入前後比較を必ず使い、「開始月は表示されていません」で止めないでください。複数ターゲットを混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」が載っている場合は、単価帯の主力（名称×単価）を正本にし、一部別名の検索結果だけで「〇〇円コースが無い」と書かないでください。例外・単発特別は短く記載し主因にしないでください。漏れ検知がある場合は取りこぼしとして必ず確認してください。「商品利用会計 vs 非利用会計」や「ジャーナル会計比較（汎用）」が載っている場合は、客単価・ドリンク客あたり・差分を必ず使い、「追加の比較が必要」「比較できない」で止めないでください。「予約確定事実」が載っている場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず使い、「予約専用項目なし」「表示されていません」で止めないでください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。本節が無い場合（予約取り込み未導入・期間内0件）は予約・飛び込みに触れず通常の売上分析のみ行ってください。売れ筋TOPに「コース系（合算）」がある場合は、コースを分割したままドリンク大分類を単独最大商品と書かないでください（★ドリンク等は商品ではなく大分類）。専用項目がないと明記された予約人数・宴会件数は、実来店客数・会計組数・コース商品明細との違いを正確に説明してください（【予約確定事実】がある場合はその数値を優先）。データの収録状況は事実なので「※これは推測です」を付けないでください。
 8. 質問に複数の解釈が残り、答えを決め打ちすると目的を外す場合は、分析を始めず、直前の会話を踏まえた自然な確認質問を一つだけ返してください。既に分かっている内容は聞き直さず、固定の番号付き一覧は避けてください。
 9. ユーザーの発言に「PDFにして」「保存して」等のファイル操作依頼が含まれる場合、あなたにファイルを生成する機能はありません。回答の下に表示される「📄 PDFにする」ボタンから保存できる旨を案内してください。
-10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。ナレッジに無いことを推測で補ってはいけません。資料が「なし」と明示されている場合のみ資料なしで進めてください。
+10. 【店舗ナレッジ】が提示されている場合は、その期間に店舗が実施していた施策・メニューとして必ず考慮してください。数値は【確定済み集計データ】のみを出典とし、ナレッジは背景説明に使い「登録資料によると」と明示してください。予約／飛び込みの増減要因を述べるときも、まずナレッジを照合し、無い場合のみ「※これは推測です」で仮説を述べてください。ナレッジに無いことを推測で事実のように書いてはいけません。資料が「なし」と明示されている場合のみ資料なしで進めてください。
 11. 【店舗営業情報・必須】毎回必ず添付されます。分析の最初に読み、定休曜日の売上ゼロ／低下を弱点や機会損失としないでください。定休曜日に売上が立っている日は特別営業（または例外営業）として区別してください。他店の定休ルールを転用しないでください。
-12. 【3系統統合・必須】①ジャーナル確定集計（数値）②店舗営業情報（定休・ランチ等）③店舗資料（施策・メニュー）を必ず突き合わせて回答してください。どれか欠ける場合はチェック欄の状態に従い、欠けた系統を推測で埋めないでください。${integrated.checklist}${integrated.storeOpsBlock}${verifiedDataBlock}${integrated.knowledgeBlock}`;
+12. 【3系統統合・必須】①ジャーナル確定集計（数値・予約vs飛び込み含む）②店舗営業情報（定休・ランチ等）③店舗資料（施策・メニュー）を必ず突き合わせて回答してください。どれか欠ける場合はチェック欄の状態に従い、欠けた系統を推測で埋めないでください。
+13. 【期間の読み方・必須】「2026年1月から7月まで」「2026年1月〜7月」などは1月と7月の2点比較ではない。1〜7月の全月を含む連続期間として扱い、確定済み集計の月次推移がある月はすべて述べる。端点だけを抜き出して途中月を無視してはいけない。${integrated.checklist}${integrated.storeOpsBlock}${verifiedDataBlock}${integrated.knowledgeBlock}`;
 
   const strictSystemInstructionClamped = clampAiSystemInstruction(strictSystemInstruction);
 
