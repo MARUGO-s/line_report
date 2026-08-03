@@ -2136,8 +2136,11 @@ async function registerQuotedImageAsKnowledge(
     }
 
     // 4. ナレッジ DB 登録 & 1,500文字 RAG 生成
+    //    店舗の指定キーは `store_key`。admin-api の saveStoreKnowledge は body.store_key しか
+    //    読まないため、DB列名の `store_partition_key` で送ると 400 "store_key is required."
+    //    になり登録できない（x-store-key ヘッダも内部ブリッジでは storeScope=null で無視される）。
     const recordPayload = {
-      store_partition_key: storeKey,
+      store_key: storeKey,
       category: result.category || 'メニュー',
       title: result.title || `LINEメモ_${msgId}`,
       summary: result.summary || 'LINEより投稿された資料メモ',
