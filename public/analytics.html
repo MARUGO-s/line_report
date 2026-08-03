@@ -1290,11 +1290,12 @@ function getEffectiveDayWeightJs(isoDate, W, holidaySet) {
   const dowW = W[classifySalesBudgetDayJs(isoDate)] ?? 1;
   if (!holidaySet) return dowW;
   if (W.holiday != null && holidaySet.has(isoDate)) return W.holiday;
+  // 「翌日が国民の祝日」の日のみ。土曜（翌日が日曜）は含めない＝土曜の上乗せは土曜の重みで行う。
   if (W.pre_holiday != null && !holidaySet.has(isoDate)) {
     const dt = new Date(`${isoDate}T12:00:00+09:00`);
     const nextDt = new Date(dt.getTime() + 86400000);
     const nextIso = nextDt.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
-    if (nextDt.getDay() === 0 || holidaySet.has(nextIso)) return W.pre_holiday;
+    if (holidaySet.has(nextIso)) return W.pre_holiday;
   }
   return dowW;
 }
@@ -2410,9 +2411,10 @@ function renderBudgetPreview() {
     if (!isClosed && holidaySetPreview) {
       if (wHoliday != null && holidaySetPreview.has(d)) { kind = 'holiday'; }
       else if (wPreHoliday != null && !holidaySetPreview.has(d)) {
+        // getEffectiveDayWeightJs と同じ判定：翌日が国民の祝日の日のみ（土曜は含めない）
         const nextDt = new Date(new Date(`${d}T12:00:00+09:00`).getTime() + 86400000);
         const nextIso = nextDt.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
-        if (nextDt.getDay() === 0 || holidaySetPreview.has(nextIso)) kind = 'pre_holiday';
+        if (holidaySetPreview.has(nextIso)) kind = 'pre_holiday';
       }
     }
     const label = isClosed ? '店舗休日' : kindLabelJa(kind);

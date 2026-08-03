@@ -148,6 +148,9 @@ function weightForDayKind(kind: DayKind, w: SalesBudgetAllocationWeights): numbe
  * 祝日・前日重みを考慮した実効重みを返す。
  * 優先順: 店休(0) > 国民の祝日→holiday > 前日→pre_holiday > DOW
  * holidaySet が null なら DOW 重みのみ使用。
+ *
+ * pre_holiday は「翌日が国民の祝日」の日のみ。土曜（翌日が日曜）は含めない
+ * ——土曜の上乗せは土曜の重みで表現するものであり、ここで上書きすると二重指定になる。
  */
 export function getEffectiveDayWeight(
   isoDate: string,
@@ -159,8 +162,7 @@ export function getEffectiveDayWeight(
   if (weights.holiday != null && holidaySet.has(isoDate)) return weights.holiday
   if (weights.pre_holiday != null && !holidaySet.has(isoDate)) {
     const nextDay = addCalendarDaysIso(isoDate, 1)
-    const nextDow = new Date(`${nextDay}T12:00:00+09:00`).getDay()
-    if (nextDow === 0 || holidaySet.has(nextDay)) return weights.pre_holiday
+    if (holidaySet.has(nextDay)) return weights.pre_holiday
   }
   return dowWeight
 }
