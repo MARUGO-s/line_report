@@ -644,7 +644,26 @@ Xトレンドブリーフだけはフォールバック先を持たない。他�
 
 ※ Groqから Grok 3 miniへの変更により、コストは微減（約$0.06/月の削減）。
 
-※ **Xトレンドブリーフの費用について（要実測）**: `grok-4.5` は list 価格で入力$2.00／出力$6.00 per 1M（`grok-3-mini` の約7〜12倍）。上の約$0.5 は「日付＋トピック単位の6時間キャッシュが効いて月30〜40回検索」を前提としたトークン費のみの概算で、**xAI が別建てで課金する `x_search` のツール実行料は含んでいない**。実運用の初月は `ai_usage_events` の `provider='grok'` と xAI 側の請求で必ず実測すること。高い場合は `FOODCOURT_X_SEARCH_CACHE_TTL_MS` を延ばす（検索回数を減らす）か `FOODCOURT_X_SEARCH_ENABLED=false` で停止できる。
+※ **Xトレンドブリーフの費用内訳**: `grok-4.5` は入力$2.00／出力$6.00 per 1M（`grok-3-mini` の約7〜12倍）。さらに **`x_search` はトークンとは別に $5 / 1,000回（$0.005/回）** が課金される。1回のブリーフで最大4検索（`GROK_X_SEARCH_MAX_TOOL_CALLS`）なので、**ツール実行料が費用の主成分**（最大$0.020 vs トークン約$0.019）。トークンを削るより検索回数を減らすほうが効く。
+
+**実費の算出（ツール実行料込み）**: ブリーフのトークンは `ai_usage_events` に記録され、`model` が `grok-4.5 x_search*2` の形になっている（ツール回数の列が無いため model 名に残している）。次のSQLで実費が出る:
+
+```sql
+select
+  count(*) as briefs,
+  sum((regexp_match(model, 'x_search\*(\d+)'))[1]::int) as x_search_calls,
+  round(sum(input_tokens) * 2.00 / 1e6 + sum(output_tokens) * 6.00 / 1e6, 4) as token_usd,
+  round(sum((regexp_match(model, 'x_search\*(\d+)'))[1]::int) * 0.005, 4) as tool_usd,
+  round(sum(input_tokens) * 2.00 / 1e6 + sum(output_tokens) * 6.00 / 1e6
+        + sum((regexp_match(model, 'x_search\*(\d+)'))[1]::int) * 0.005, 4) as total_usd
+from ai_usage_events
+where provider = 'grok' and model like '%x_search%'
+  and created_at >= date_trunc('month', now());
+```
+
+AI使用料ページ（`/usage/ai-cost`）はトークン費のみを表示する（`grok-4.5` 用の単価を別枠で持たせてあるので、`grok-3-mini` 単価で過小表示されることはない）。**ツール実行料はページに含まれない**ため、総額は上のSQLで確認する。
+
+事前見積もり（実測 67回/30日ベース）は月 **$0.2〜$2.6**、中心 **約$1**。高い場合は `FOODCOURT_X_SEARCH_CACHE_TTL_MS` を延ばす、`GROK_X_SEARCH_MAX_TOOL_CALLS` を減らす、`FOODCOURT_X_SEARCH_ENABLED=false` で停止、の順に効く。
 
 ---
 

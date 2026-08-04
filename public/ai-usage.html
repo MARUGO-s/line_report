@@ -607,6 +607,16 @@
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="grok_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Grok / xAI（Xトレンドブリーフ・grok-4.5 + x_search）</span></div>
+              <div class="rate-grid">
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="grok_xsearch_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="grok_xsearch_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              </div>
+              <p class="muted" style="margin:8px 0 0;font-size:12px">
+                ここはトークン費のみ。x_search は別途 <b>$5 / 1,000回</b> の実行料がかかり、この画面には含まれません。
+                実行回数はモデル名の <code>x_search*N</code> に記録しています。
+              </p>
+
               <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini Pro（専門解析・再確認）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="gemini_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -660,6 +670,9 @@
       azure:    { inUsd: 0.20, outUsd: 1.25 },   // Azure Foundry GPT-5.4 nano（レシート・画像抽出）
       openai:   { inUsd: 1.00, outUsd: 6.00 },   // GPT-5.6 Luna（フードコート最終統合）
       grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
+      // Xトレンドブリーフは Responses API + x_search のため別モデル・別単価（grok-4.5）。
+      // 注意: トークンとは別に x_search 実行料 $5/1k calls がかかる。ここには含まれない。
+      grok_xsearch: { inUsd: 2.00, outUsd: 6.00 },
       gemini:   { inUsd: 0.25, outUsd: 1.50 },
       claude:   { inUsd: 1.00, outUsd: 5.00 },
       moonshot: { inUsd: 3.00, outUsd: 15.00 },  // Kimi K3（フードコート反証AI。入力はキャッシュミス単価。ヒット時は$0.30）
@@ -669,7 +682,11 @@
     function rateKeyForModel(provider, model) {
       if (provider === 'azure_openai' || provider === 'azure') return 'azure';
       if (provider === 'openai') return 'openai';
-      if (provider === 'grok' || provider === 'xai') return 'grok';
+      // 同じ provider=grok でも、Xトレンドブリーフ(grok-4.5)は運営改善(grok-3-mini)より
+      // 単価が桁違いに高い。model 名の x_search マーカーで単価を切り替える。
+      if (provider === 'grok' || provider === 'xai') {
+        return /x_search/i.test(String(model || '')) ? 'grok_xsearch' : 'grok';
+      }
       if (provider === 'gemini') return 'gemini';
       if (provider === 'claude') return 'claude';
       if (provider === 'moonshot' || provider === 'kimi') return 'moonshot';
@@ -716,7 +733,7 @@
         if (!raw) return cloneRates(DEFAULT_RATES);
         const parsed = JSON.parse(raw);
         const out = cloneRates(DEFAULT_RATES);
-        ['azure', 'openai', 'grok', 'gemini', 'claude', 'moonshot'].forEach(function (p) {
+        ['azure', 'openai', 'grok', 'grok_xsearch', 'gemini', 'claude', 'moonshot'].forEach(function (p) {
           if (parsed && parsed[p]) {
             ['inUsd', 'outUsd'].forEach(function (k) {
               const v = Number(parsed[p][k]);
@@ -734,6 +751,7 @@
         azure: Object.assign({}, r.azure),
         openai: Object.assign({}, r.openai),
         grok: Object.assign({}, r.grok),
+        grok_xsearch: Object.assign({}, r.grok_xsearch),
         gemini: Object.assign({}, r.gemini),
         claude: Object.assign({}, r.claude),
         moonshot: Object.assign({}, r.moonshot),
@@ -751,6 +769,8 @@
       document.getElementById('openai_outUsd').value = r.openai.outUsd;
       document.getElementById('grok_inUsd').value = r.grok.inUsd;
       document.getElementById('grok_outUsd').value = r.grok.outUsd;
+      document.getElementById('grok_xsearch_inUsd').value = r.grok_xsearch.inUsd;
+      document.getElementById('grok_xsearch_outUsd').value = r.grok_xsearch.outUsd;
       document.getElementById('gemini_inUsd').value = r.gemini.inUsd;
       document.getElementById('gemini_outUsd').value = r.gemini.outUsd;
       document.getElementById('claude_inUsd').value = r.claude.inUsd;
@@ -775,6 +795,10 @@
         grok: {
           inUsd: num('grok_inUsd', d.grok.inUsd),
           outUsd: num('grok_outUsd', d.grok.outUsd),
+        },
+        grok_xsearch: {
+          inUsd: num('grok_xsearch_inUsd', d.grok_xsearch.inUsd),
+          outUsd: num('grok_xsearch_outUsd', d.grok_xsearch.outUsd),
         },
         gemini: {
           inUsd: num('gemini_inUsd', d.gemini.inUsd),
@@ -993,7 +1017,7 @@
       const rateKey = rateKeyForModel(provider, model);
       if (rateKey === 'azure') return '';
       if (rateKey === 'openai') return 'openai';
-      if (rateKey === 'grok') return 'grok';
+      if (rateKey === 'grok' || rateKey === 'grok_xsearch') return 'grok';
       if (rateKey === 'gemini') return 'gemini';
       if (rateKey === 'claude') return 'claude';
       return '';

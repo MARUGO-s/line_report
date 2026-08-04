@@ -17,7 +17,7 @@ test('X search goes through the Responses API, never chat completions', () => {
   // 検索経路は Responses API のみ。フードコート側は journal の実装を再利用する。
   assert.match(journalSource, /https:\/\/api\.x\.ai\/v1\/responses/)
   assert.match(journalSource, /type:\s*"x_search"/)
-  assert.match(source, /import \{ callGrokTrendBrief \} from '\.\/journal_ai_orchestrate\.ts'/)
+  assert.match(source, /import \{ callGrokTrendBrief[^}]*\} from '\.\/journal_ai_orchestrate\.ts'/)
 
   // 専門AI③ 本体は従来どおり chat/completions のまま（検索はしない役割分担）。
   const chatCompletions = source.match(/https:\/\/api\.x\.ai\/v1\/chat\/completions/g) ?? []
@@ -77,6 +77,30 @@ test('scheduled summaries share one cached search per day', () => {
   const scheduled = source.match(/FOODCOURT_X_TREND_SCHEDULED_TOPIC/g) ?? []
   assert.equal(scheduled.length, 4) // 定義1 + 3サーフェス
   // Q&A(ask) だけは質問文で検索して的を絞る。
-  assert.match(source, /fetchFoodCourtXTrendBrief\(q, foodCourtXTrendSoftTimeoutMs\(deadlineAt\)\)/)
+  assert.match(source, /fetchFoodCourtXTrendBrief\(q, foodCourtXTrendSoftTimeoutMs\(deadlineAt\), supabase, storeKey\)/)
   assert.match(source, /foodCourtJstDate\(\)/)
+})
+
+test('brief cost is recorded so the estimate can be checked against reality', () => {
+  // x_search はトークンとは別に $5/1k calls で課金される。トークンだけ記録しても実費は出ない。
+  assert.match(journalSource, /xSearchCalls/)
+  assert.match(journalSource, /function extractGrokUsage\(/)
+
+  // 破棄した応答(x_search_not_used / missing_x_citations)でも xAI は課金済みなので usage を返す。
+  const usageReturns = journalSource.match(/usage: extractGrokUsage\(json, model, parsed\.xSearchCalls\)/g) ?? []
+  assert.equal(usageReturns.length, 3) // 成功 + 破棄2種
+
+  // ツール回数の列が無いため model 名に残し、SQLで復元できるようにする。
+  assert.match(source, /model: `\$\{usage\.model\} x_search\*\$\{usage\.xSearchCalls\}`/)
+  assert.match(source, /await recordFoodCourtXTrendUsage\(supabase, storeKey, brief\.usage\)/)
+})
+
+test('x_search tokens are not priced at the cheap grok-3-mini rate', () => {
+  const usagePagePath = fileURLToPath(new URL('../public/ai-usage.html', import.meta.url))
+  const page = readFileSync(usagePagePath, 'utf8')
+  // 同じ provider=grok でも単価が桁違い。model 名で単価を切り替えないと実費を過小表示する。
+  assert.match(page, /grok_xsearch:\s*\{\s*inUsd:\s*2\.00,\s*outUsd:\s*6\.00\s*\}/)
+  assert.match(page, /x_search\/i\.test\(String\(model \|\| ''\)\) \? 'grok_xsearch' : 'grok'/)
+  // ツール実行料はトークン計算に載らないので、画面上で明示する。
+  assert.match(page, /\$5 \/ 1,000回/)
 })
