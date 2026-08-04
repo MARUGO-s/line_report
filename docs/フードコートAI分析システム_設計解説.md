@@ -590,6 +590,7 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | `JOURNAL_GROK_X_SEARCH_MODEL` | `x_search` に使うモデル（journal と共用） | 未設定（デフォルト: `grok-4.5`） |
 | `GROK_X_SEARCH_LOOKBACK_DAYS` | X を遡って検索する日数（journal と共用） | 未設定 |
 | `GROK_X_SEARCH_MAX_TOOL_CALLS` | 1回のブリーフで許す検索回数（journal と共用） | 未設定（デフォルト: `4`、上限8） |
+| `GROK_X_SEARCH_MAX_OUTPUT_TOKENS` | ブリーフの出力上限。grok-4.5 は reasoning も算入されるため小さすぎると本文が出ない | 未設定（デフォルト: `3000`、下限600/上限8000） |
 | `claude_haiku` | Claude API認証（日次反証・Kimiフォールバック・評価AI⑥） | 設定済み |
 | `FOODCOURT_CLAUDE_MODEL` | 日次反証/フォールバック/評価AI⑥のClaudeモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
 | `OPENAI_API_KEY` | OpenAI API認証（統合AI⑤） | 設定済み |
@@ -644,7 +645,18 @@ Xトレンドブリーフだけはフォールバック先を持たない。他�
 
 ※ Groqから Grok 3 miniへの変更により、コストは微減（約$0.06/月の削減）。
 
-※ **Xトレンドブリーフの費用内訳**: `grok-4.5` は入力$2.00／出力$6.00 per 1M（`grok-3-mini` の約7〜12倍）。さらに **`x_search` はトークンとは別に $5 / 1,000回（$0.005/回）** が課金される。1回のブリーフで最大4検索（`GROK_X_SEARCH_MAX_TOOL_CALLS`）なので、**ツール実行料が費用の主成分**（最大$0.020 vs トークン約$0.019）。トークンを削るより検索回数を減らすほうが効く。
+※ **Xトレンドブリーフの費用内訳（2026-08-04 本番実測）**: `grok-4.5` は入力$2.00／出力$6.00 per 1M（`grok-3-mini` の約7〜12倍）。さらに **`x_search` はトークンとは別に $5 / 1,000回（$0.005/回）** が課金される。
+
+初回実測（検索1回）:
+
+| 内訳 | 実測 | 割合 |
+|---|---|---|
+| 入力 31,728 tok × $2.00/1M | $0.0635 | **83%** |
+| 出力 1,339 tok × $6.00/1M | $0.0080 | 10% |
+| x_search 1回 × $0.005 | $0.0050 | 7% |
+| **合計** | **$0.0765/回** | |
+
+**費用の主成分はツール実行料ではなく入力トークン**。x_search が取得したX投稿の本文が丸ごとコンテキストに入るため、1検索あたり3万トークン規模で膨らむ。したがって効くレバーは検索回数（`GROK_X_SEARCH_MAX_TOOL_CALLS`）とキャッシュヒット率であり、いずれも「取り込む投稿量」を通じて入力トークンを左右する。
 
 **実費の算出（ツール実行料込み）**: ブリーフのトークンは `ai_usage_events` に記録され、`model` が `grok-4.5 x_search*2` の形になっている（ツール回数の列が無いため model 名に残している）。次のSQLで実費が出る:
 
@@ -663,7 +675,19 @@ where provider = 'grok' and model like '%x_search%'
 
 AI使用料ページ（`/usage/ai-cost`）はトークン費のみを表示する（`grok-4.5` 用の単価を別枠で持たせてあるので、`grok-3-mini` 単価で過小表示されることはない）。**ツール実行料はページに含まれない**ため、総額は上のSQLで確認する。
 
-事前見積もり（実測 67回/30日ベース）は月 **$0.2〜$2.6**、中心 **約$1**。高い場合は `FOODCOURT_X_SEARCH_CACHE_TTL_MS` を延ばす、`GROK_X_SEARCH_MAX_TOOL_CALLS` を減らす、`FOODCOURT_X_SEARCH_ENABLED=false` で停止、の順に効く。
+月額は $0.0765 × 検索回数。全サーフェスが同じ固定トピックを共有するため、キャッシュが効けば **1日1検索 = 月24〜30回 ≒ 月$1.8〜2.3**。キャッシュはisolate内メモリなので、コールドスタートが多いと回数は増える。高い場合は `FOODCOURT_X_SEARCH_CACHE_TTL_MS` を延ばす、`GROK_X_SEARCH_MAX_TOOL_CALLS` を減らす、`FOODCOURT_X_SEARCH_ENABLED=false` で停止、の順に効く。
+
+**「検索したのに使われなかった率」の測定**: ブリーフが破棄された場合、model に `drop:<理由>` が付く（例 `grok-4.5 x_search*1 drop:missing_x_citations`）。課金は発生しているので、この比率が高いままなら設定を見直すか停止する。
+
+```sql
+select case when model like '%drop:%' then split_part(model, 'drop:', 2) else '(used)' end as outcome,
+       count(*) as n,
+       round(sum(input_tokens) * 2.00 / 1e6 + sum(output_tokens) * 6.00 / 1e6
+             + sum((regexp_match(model, 'x_search\*(\d+)'))[1]::int) * 0.005, 4) as usd
+from ai_usage_events
+where provider = 'grok' and model like '%x_search%'
+group by 1 order by n desc;
+```
 
 ---
 
