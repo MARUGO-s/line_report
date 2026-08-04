@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-05 - Journal Report 全期間コース導入前後分析の根本修正
+
+- Request: SPコース初出を起点に全期間を分析すると、初回だけ2026年1月以前の既存コースが落ち、指摘後には読める問題を再発防止。
+- Root cause: 「全ての月」が全期間語彙に無く、2回目の期間確認上限で最新月へ強制縮小。加えて商品初出の「SP導入前0点」とコース全体を区別する保存全期間月次表がAIへ無かった。
+- Change: 全期間表現を共通判定し、明示範囲を確認上限でも保持。`q=コース`のジャーナル全件`by_month`を導入前を含め全件プロンプト化し、固有商品0点と既存コース全体を分離。
+- Tests: 実会話型の期間解決、全期間選択、導入前後コース月次・集計の回帰テストを追加。
+
 ## Current application boundary
 
 - Static GitHub Pages management application for 22 stores.

@@ -49,6 +49,8 @@ vm.createContext(context);
 for (const name of [
   'extractAllMonthRefs',
   'resolveComparisonTimeRefs',
+  'hasAllSavedPeriodIntent',
+  'resolveExhaustedPeriodClarificationScope',
   'isSelfContainedAiQuestion',
   'applyAiClarificationCorrection',
   'resolveNaturalClarificationChoice',
@@ -95,6 +97,8 @@ for (const name of [
   'mergeHourlyBreakdowns',
   'formatVerifiedDetailLines',
   'formatMonthlyMealFdTrendLines',
+  'summarizeCourseMonthlyFacts',
+  'formatCourseLineupFactsForAi',
   'monthEndIso',
   'knowledgePeriodLabel',
   'knowledgeOverlapsPeriod',
@@ -189,6 +193,14 @@ test('latest, recent, and all-period intents select only the required reports', 
     [...context.resolveIndexedSavedRangeIntent('保存済み全期間を分析', reports).matched].map(x => x.id),
     ['202405', '202605', '202606', '202607'],
   );
+  assert.deepEqual(
+    [...context.resolveIndexedSavedRangeIntent('全ての月を対象にしてください', reports).matched].map(x => x.id),
+    ['202405', '202605', '202606', '202607'],
+  );
+  assert.deepEqual(
+    [...context.resolveIndexedSavedRangeIntent('全部の期間でコースを比較', reports).matched].map(x => x.id),
+    ['202405', '202605', '202606', '202607'],
+  );
 });
 
 test('a numeric reply to the clarification question becomes a searchable range intent', () => {
@@ -199,6 +211,7 @@ test('a numeric reply to the clarification question becomes a searchable range i
   assert.match(context.resolveSavedDataClarificationReply('1', history), /^最新月/);
   assert.match(context.resolveSavedDataClarificationReply('2 売上推移', history), /^直近3か月/);
   assert.match(context.resolveSavedDataClarificationReply('4', history), /^全期間/);
+  assert.match(context.resolveSavedDataClarificationReply('全ての月を対象にしてください', history), /保存済み全期間$/);
 });
 
 test('ambiguous questions ask for an analysis focus before loading detailed data', () => {
@@ -289,6 +302,10 @@ test('period clarification keeps the analysis focus and a complete new request r
     'ワインの実績はどう？ 保存済み全期間',
   );
   assert.equal(
+    context.resolveSavedDataClarificationReply('全ての月を対象にしてください', history),
+    'ワインの実績はどう？ 保存済み全期間',
+  );
+  assert.equal(
     context.resolveSavedDataClarificationReply('半年', history),
     'ワインの実績はどう？ 直近半年',
   );
@@ -308,6 +325,47 @@ test('period clarification keeps the analysis focus and a complete new request r
   assert.match(natural, /2026年7月/);
   assert.match(natural, /[？?]$/);
   assert.doesNotMatch(natural, /(?:^|\n)\s*[1-9][.、)]/);
+});
+
+test('all-month wording survives the clarification retry guard instead of shrinking to latest month', () => {
+  assert.equal(context.hasAllSavedPeriodIntent('全ての月を対象にしてください'), true);
+  assert.equal(context.hasAllSavedPeriodIntent('全部の期間を読み込んで'), true);
+  assert.equal(context.hasAllSavedPeriodIntent('全体像を見たい'), false);
+  assert.equal(context.hasAllSavedPeriodIntent('全て', true), true);
+  assert.equal(context.resolveExhaustedPeriodClarificationScope('全ての月を対象にしてください'), '保存済み全期間');
+  assert.equal(context.resolveExhaustedPeriodClarificationScope('期間は任せます'), '保存済み最新月');
+  const exactHistory = [
+    {
+      role: 'assistant',
+      content: 'SPコースを導入した年月を教えてください？',
+      clarification: 'period',
+      originalQuery: 'SPコース導入前後のコース点数と客単価を分析してください',
+    },
+    { role: 'user', content: 'Journal Reportから初出を起点にしてください' },
+    {
+      role: 'assistant',
+      content: '最新月、直近数か月、特定月のどれですか？',
+      clarification: 'period',
+      originalQuery: 'SPコース導入前後のコース点数と客単価を分析してください Journal Reportから初出を起点にしてください',
+    },
+  ];
+  const resolved = context.resolveSavedDataClarificationReply('全ての月を対象にしてください', exactHistory);
+  assert.match(resolved, /保存済み全期間$/);
+  assert.equal(context.countRecentClarificationsByKind(exactHistory, 'period'), 2);
+  assert.deepEqual(
+    [...context.resolveIndexedSavedRangeIntent(resolved, reports).matched].map((row) => row.id),
+    ['202405', '202605', '202606', '202607'],
+  );
+  assert.match(
+    html,
+    /resolveExhaustedPeriodClarificationScope\(resolvedChatQuery\)/,
+    'the retry guard must derive its scope from the user-confirmed query',
+  );
+  assert.doesNotMatch(
+    html,
+    /countRecentClarificationsByKind\(aiChatHistory, 'period'\) >= 2\)[\s\S]{0,260}保存済み最新月を対象に全体を分析/,
+    'an explicit all-period answer must not be overwritten with the latest month',
+  );
 });
 
 test('a correction replaces the old month instead of adding a conflicting period', () => {
@@ -711,6 +769,55 @@ test('multiple continuous ranges are kept as separate comparison periods', () =>
   );
   assert.match(html, /monthlyAvgCustomers: monthlyBreakdown\.length \? Math\.round\(cust \/ monthlyBreakdown\.length\) : 0/);
   assert.match(html, /月間平均来客数: \$\{p\.monthlyAvgCustomers \|\| 0\}名/);
+});
+
+test('course lineup keeps the full journal monthly series on both sides of a product introduction', () => {
+  const rows = [
+    { year_month: '2024-11', qty: 20, amount: 160000 },
+    { year_month: '2025-12', qty: 30, amount: 240000 },
+    { year_month: '2026-01', qty: 12, amount: 96000 },
+    { year_month: '2026-07', qty: 88, amount: 615000 },
+  ];
+  assert.deepEqual(
+    { ...context.summarizeCourseMonthlyFacts(rows.slice(0, 2)) },
+    {
+      monthCount: 2,
+      qty: 50,
+      amount: 400000,
+      firstMonth: '2024-11',
+      lastMonth: '2025-12',
+    },
+  );
+  assert.match(html, /月次コース販売（ジャーナル原本の保存全期間・導入前を含む）/);
+  assert.match(html, /固有商品の導入月 \$\{facts\.pivotMonth\} を境にしたコース全体比較/);
+  assert.match(html, /固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止/);
+  assert.match(html, /facts\.byMonth\.forEach/);
+  assert.doesNotMatch(
+    extractFunction(html, 'formatCourseLineupFactsForAi'),
+    /facts\.byMonth\.slice\(-\d+\)/,
+    'the authoritative course monthly series must not silently discard pre-introduction months',
+  );
+  const formatted = context.formatCourseLineupFactsForAi({
+    rootCauseGuard: 'guard',
+    note: 'note',
+    searchScope: 'q=コース',
+    scannedFiles: 40,
+    totalQty: 150,
+    totalAmount: 1200000,
+    pivotMonth: '2026-01',
+    beforePivot: context.summarizeCourseMonthlyFacts(rows.slice(0, 2)),
+    onAfterPivot: context.summarizeCourseMonthlyFacts(rows.slice(2)),
+    byMonth: rows.map((row) => ({ ...row, names: [], units: [] })),
+    unitLeaders: [],
+    core: [],
+    exceptions: [],
+    aliasClusters: [],
+    coverageGaps: [],
+  });
+  assert.match(formatted, /2024-11: コース全体 20点/);
+  assert.match(formatted, /2025-12: コース全体 30点/);
+  assert.match(formatted, /導入月より前: 2か月 \/ コース全体 50点/);
+  assert.match(formatted, /導入月以降: 2か月 \/ コース全体 100点/);
 });
 
 test('verified aggregates carry every stored breakdown so the AI never has to say it is missing', () => {

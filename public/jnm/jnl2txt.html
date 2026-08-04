@@ -6909,7 +6909,7 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 12月を含む分析では、売上増・客単価上昇の要因としてクリスマスディナーを必ず考慮し、単なる客数増だけで説明しきらない。
 - 【異常月の詳細解析】に高単価コース寄与・単価上昇コースが載っている場合は、その金額・点数・商品名を根拠に述べ、「単体売上が不明／表示されていません」で止めない。
 - 【商品初出・導入月】が載っている場合は、ジャーナル全件横断検索で特定した各ターゲットの初出月・単価帯・前後比較を根拠に述べ、「開始月は表示されていません」で止めない。複数ターゲットがあるときは固有名称の初出と単価帯の初出を混同しない。ファミリー最古で固有商品の開始月を置き換えない。
-- 【コースラインナップ】が載っている場合は、単価帯の主力行（名称×単価）を正本にする。店舗ごとにコース商品名は異なる。一部別名の単価帯だけを全コースと誤解し「〇〇円コースが無い」と言ってはいけない。別名トークン群があれば併記する。
+- 【コースラインナップ】が載っている場合は、単価帯の主力行（名称×単価）と「月次コース販売」を正本にする。店舗ごとにコース商品名は異なる。一部別名の単価帯だけを全コースと誤解し「〇〇円コースが無い」と言ってはいけない。別名トークン群があれば併記する。固有商品の導入前にその固有商品が0点でも、月次コース販売に既存コースがあれば「導入前の対象コース0点」「コースなし」と書いてはいけない。
 - 【コースラインナップ】の「例外・単発特別」は存在を短く触れるに留め、客単価低下などの主因分析には積極的に使わない。「漏れ検知」がある場合は主軸の取りこぼしとして必ず確認する。
 - 【商品初出・導入月】の対象商品の合計点数・売上と、【コースラインナップ】の「主軸コース明細」だけの同一商品合計が一致しない場合は、必ず「例外・単発特別」行を加算して両節の数値を突き合わせ、食い違ったまま両方を並べて出さない。
 - 商品初出節またはコースラインナップ節が載っているのに「ジャーナルを再読できない」「該当コースが確定集計に無い」と書いてはいけない。
@@ -10074,6 +10074,18 @@ function summarizeMonthsForProductCompare(rows) {
   };
 }
 
+/** コース全体の月次行を、導入前後比較用の確定値へ集約する。 */
+function summarizeCourseMonthlyFacts(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  return {
+    monthCount: list.length,
+    qty: list.reduce((sum, row) => sum + (Number(row?.qty) || 0), 0),
+    amount: list.reduce((sum, row) => sum + (Number(row?.amount) || 0), 0),
+    firstMonth: list[0]?.year_month || '',
+    lastMonth: list[list.length - 1]?.year_month || ''
+  };
+}
+
 /** 月次内訳に足りない月を allReports から補完する（商品初出の「前」期間用） */
 async function appendMissingMonthsToBreakdown(monthlyBreakdown, monthSourcesByKey, allReports, needKeys) {
   const rows = Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [];
@@ -10443,6 +10455,16 @@ async function enrichCourseLineupFacts(query, productTimelineFacts = null) {
 
   const mentioned = hints.allUnits || [];
   const coverageGaps = findCourseCoverageGaps(mentioned, core);
+  const byMonth = Array.isArray(raw?.by_month)
+    ? raw.by_month.slice().sort((a, b) => String(a?.year_month || '').localeCompare(String(b?.year_month || '')))
+    : [];
+  const pivotMonth = String(productTimelineFacts?.firstSeen?.year_month || '');
+  const beforePivot = pivotMonth
+    ? summarizeCourseMonthlyFacts(byMonth.filter((row) => String(row?.year_month || '') < pivotMonth))
+    : null;
+  const onAfterPivot = pivotMonth
+    ? summarizeCourseMonthlyFacts(byMonth.filter((row) => String(row?.year_month || '') >= pivotMonth))
+    : null;
 
   // 別名トークン群（店舗ごとの SP/季節/限定 等）をファミリー横断でクラスタ
   const aliasClusters = new Map();
@@ -10472,11 +10494,15 @@ async function enrichCourseLineupFacts(query, productTimelineFacts = null) {
     exceptions,
     unitLeaders,
     coverageGaps,
+    byMonth,
+    pivotMonth,
+    beforePivot,
+    onAfterPivot,
     aliasClusters: [...aliasClusters.values()].sort((a, b) => b.qty - a.qty),
     searchScope: 'q=コース（ファミリー広域・店舗共通。固有別名に閉じない）',
     rootCauseGuard:
       '過去の不具合: 固有別名だけを検索すると他コースが落ちる／逆にファミリー検索の初出で固有商品開始月が潰れる。本節は在庫一覧、初出はターゲット別節。',
-    note: '主軸は店舗ジャーナル上で点数の多いコース名称×単価。別名トークン群は別メニューとして併記。単日・極少は例外。'
+    note: '主軸は店舗ジャーナル上で点数の多いコース名称×単価。別名トークン群は別メニューとして併記。単日・極少は例外。月次は保存レポート詳細の36か月上限とは別に、ジャーナル原本の全件横断結果を使う。'
   };
 }
 
@@ -10490,6 +10516,29 @@ function formatCourseLineupFactsForAi(facts, indent = '') {
   lines.push(`${indent}  - ${facts.rootCauseGuard}`);
   lines.push(`${indent}  - ${facts.note}`);
   lines.push(`${indent}  - 検索範囲: ${facts.searchScope}／走査 ${facts.scannedFiles || 0}ファイル／合計 ${facts.totalQty || 0}点 / ${yen(facts.totalAmount || 0)}`);
+  if (facts.pivotMonth) {
+    const before = facts.beforePivot || {};
+    const after = facts.onAfterPivot || {};
+    lines.push(`${indent}  - 固有商品の導入月 ${facts.pivotMonth} を境にしたコース全体比較（固有商品だけの0点と混同禁止）:`);
+    lines.push(`${indent}    - 導入月より前: ${before.monthCount || 0}か月 / コース全体 ${before.qty || 0}点 / ${yen(before.amount || 0)}（${before.firstMonth || '—'}〜${before.lastMonth || '—'}）`);
+    lines.push(`${indent}    - 導入月以降: ${after.monthCount || 0}か月 / コース全体 ${after.qty || 0}点 / ${yen(after.amount || 0)}（${after.firstMonth || '—'}〜${after.lastMonth || '—'}）`);
+  }
+  if ((facts.byMonth || []).length) {
+    lines.push(`${indent}  - 月次コース販売（ジャーナル原本の保存全期間・導入前を含む）:`);
+    facts.byMonth.forEach((m) => {
+      const names = (m.names || []).slice(0, 4)
+        .map((row) => `「${row.name}」${row.qty}点`)
+        .join('、');
+      const units = (m.units || []).slice(0, 6)
+        .map((row) => `${yen(row.unit)}×${row.qty}`)
+        .join('、');
+      lines.push(
+        `${indent}    - ${m.year_month}: コース全体 ${m.qty || 0}点 / ${yen(m.amount || 0)}`
+        + `${names ? `／主な名称 ${names}` : ''}${units ? `／単価別 ${units}` : ''}`
+      );
+    });
+    lines.push(`${indent}    - ※「SPコース導入前のSPコースは0点」は固有商品の事実にすぎない。上記に既存コースがある月を「対象コース0点」「コースなし」と要約しない`);
+  }
   const coreQty = (facts.core || []).reduce((s, r) => s + (Number(r.qty) || 0), 0);
   const coreAmt = (facts.core || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const exQty = (facts.exceptions || []).reduce((s, r) => s + (Number(r.qty) || 0), 0);
@@ -11871,9 +11920,28 @@ knowledgeEl('knFile')?.addEventListener('change', (e) => handleKnowledgeFileChan
 const SAVED_DATA_CLARIFICATION_MARKER = '保存データの分析対象を選んでください';
 const AI_INTENT_CLARIFICATION_MARKER = '知りたい内容を具体化してください';
 
+/**
+ * 保存済みの全期間を求める表現を共通判定する。
+ * 「すべて」だけでなく、実際の会話で使われる「全ての月」「全部の期間」も同じ意図として扱う。
+ * allowBare=true は、期間確認への短い返答（「全部」「全て」）を解決するときだけ使う。
+ */
+function hasAllSavedPeriodIntent(text, allowBare = false) {
+  const q = String(text || '').normalize('NFKC').trim();
+  if (!q) return false;
+  const explicit = /(?:保存|登録)(?:済み)?(?:の)?(?:全期間|全データ|全月)|全期間|全データ|全月|(?:すべて|全て|全部)の(?:月|期間|データ)|すべての期間|これまでの(?:全期間|全データ)/;
+  if (explicit.test(q)) return true;
+  return allowBare && /^(?:全部|全て|すべて)(?:$|[。．.!！?？、,\s])/.test(q);
+}
+
+/** 確認上限に達した場合も、明示された全期間を勝手に最新月へ縮小しない。 */
+function resolveExhaustedPeriodClarificationScope(query) {
+  return hasAllSavedPeriodIntent(query) ? '保存済み全期間' : '保存済み最新月';
+}
+
 function isSelfContainedAiQuestion(text) {
   const q = String(text || '').trim();
-  const hasPeriod = /\d{4}\s*年(?:\s*\d{1,2}\s*月)?|\d{4}[\/_\.-]\d{1,2}|今年|去年|昨年|今月|先月|前月|前年同月|最新|直近\s*\d+\s*(?:か月|ヶ月)|全期間/.test(q);
+  const hasPeriod = hasAllSavedPeriodIntent(q)
+    || /\d{4}\s*年(?:\s*\d{1,2}\s*月)?|\d{4}[\/_\.-]\d{1,2}|今年|去年|昨年|今月|先月|前月|前年同月|最新|直近\s*\d+\s*(?:か月|ヶ月)/.test(q);
   const hasFocus = /売上|推移|比較|フード|ドリンク|ワイン|客数|客単価|商品|アイテム|原因|理由|課題|改善|施策|対策|提案|戦略|構成|比率/.test(q);
   return hasPeriod && hasFocus;
 }
@@ -11964,7 +12032,7 @@ function resolveSavedDataClarificationReply(query, chatHistory) {
     selected = `直近${raw}`;
   }
   if (/おまかせ|任せる/.test(raw)) selected = '保存済み最新月を対象に全体分析';
-  if (/^(?:全部|すべて|全期間)(?:$|[.、)\s])/.test(raw)) selected = '保存済み全期間';
+  if (hasAllSavedPeriodIntent(raw, true)) selected = '保存済み全期間';
   return original ? `${original} ${selected}`.trim() : selected;
 }
 
@@ -12089,8 +12157,9 @@ function hasAnsweredDataContext(chatHistory) {
 
 /** 発話そのものが期間（年・月・日・最新・直近など）を指しているか */
 function mentionsExplicitPeriod(query) {
-  return /(\d{4}\s*年|\d{1,2}\s*月|\d{1,2}\s*日|最新|直近|過去|全期間|今年|去年|昨年|一昨年|今月|先月|前月|前年同月|今日|本日|昨日|一昨日|今週|先週)/
-    .test(String(query || ''));
+  return hasAllSavedPeriodIntent(query)
+    || /(\d{4}\s*年|\d{1,2}\s*月|\d{1,2}\s*日|最新|直近|過去|今年|去年|昨年|一昨年|今月|先月|前月|前年同月|今日|本日|昨日|一昨日|今週|先週)/
+      .test(String(query || ''));
 }
 
 function shouldAskAiIntentClarification(query, chatHistory, ownQuery = query) {
@@ -12194,11 +12263,12 @@ async function requestNaturalIntentClarification(userMsg, chatHistory, coverage,
         .map(item => String(item.content || '')),
       String(userMsg || '')
     ].join(' ');
-    const scopeIsSafe = (!/全期間|全データ|すべての期間/.test(resolvedQuery)
-        || /全期間|全データ|すべて|全部|おまかせ/.test(userContext))
+    const scopeIsSafe = (!hasAllSavedPeriodIntent(resolvedQuery)
+        || hasAllSavedPeriodIntent(userContext, true) || /おまかせ/.test(userContext))
       && (!/商品|アイテム|明細|内訳|売れ筋/.test(resolvedQuery)
         || /商品|アイテム|明細|内訳|売れ筋|全部|おまかせ/.test(userContext));
-    const userHasPeriodEvidence = /(?:\d{4}\s*年(?:\s*\d{1,2}\s*月)?|\d{4}[\/_\.-]\d{1,2}|\d{6}|今年|去年|昨年|一昨年|前年|前月|先月|今月|来月|最新|直近|過去|全期間|全データ|すべての期間|\d{1,2}\s*(?:か月|ヶ月|ケ月|カ月)|\d{1,2}\s*月)/.test(userContext);
+    const userHasPeriodEvidence = hasAllSavedPeriodIntent(userContext, true)
+      || /(?:\d{4}\s*年(?:\s*\d{1,2}\s*月)?|\d{4}[\/_\.-]\d{1,2}|\d{6}|今年|去年|昨年|一昨年|前年|前月|先月|今月|来月|最新|直近|過去|\d{1,2}\s*(?:か月|ヶ月|ケ月|カ月)|\d{1,2}\s*月)/.test(userContext);
     const periodIsSafe = missingKind !== 'period' || acceptsDefault || userHasPeriodEvidence;
     if (resolvedQuery && (hasExistingClarification || acceptsDefault) && scopeIsSafe && periodIsSafe) {
       return {
@@ -12257,7 +12327,7 @@ function resolveIndexedSavedRangeIntent(query, reports) {
   let selectedKeys = null;
   let label = '';
 
-  if (/(全期間|全データ|すべての期間|これまで|登録(?:済み)?(?:の)?全|保存(?:済み)?(?:の)?全)/.test(q)) {
+  if (hasAllSavedPeriodIntent(q) || /これまで|登録(?:済み)?(?:の)?全|保存(?:済み)?(?:の)?全/.test(q)) {
     selectedKeys = coverage.keys;
     label = `${formatCoverageMonth(coverage.first)}〜${formatCoverageMonth(coverage.last)}（保存済み全期間）`;
   } else {
@@ -13229,10 +13299,11 @@ async function sendAiChat() {
     return;
   }
 
-  // 確認の往復が続きすぎる場合は保存済み最新月を安全な既定値として進める。
+  // 確認の往復が続きすぎる場合は既定範囲で進める。
+  // ただしユーザーが「全ての月」等を明示した場合は、勝手に最新月へ縮小しない。
   if (queryResult && queryResult.needsClarification && countRecentClarificationsByKind(aiChatHistory, 'period') >= 2) {
     const reportIndex = queryResult.reportIndex;
-    resolvedChatQuery = `${resolvedChatQuery} 保存済み最新月を対象に全体を分析`;
+    resolvedChatQuery = `${resolvedChatQuery} ${resolveExhaustedPeriodClarificationScope(resolvedChatQuery)}を対象に全体を分析`;
     queryResult = await searchSavedReportsByQuery(resolvedChatQuery, [], reportIndex);
   }
   if (queryResult && queryResult.loadError) {
@@ -13361,7 +13432,7 @@ ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信�
 【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 
-回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品も述べてください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   } else if (verifiedData && verifiedData.reservationOnly) {
     verifiedDataBlock = `
 
@@ -13386,7 +13457,7 @@ ${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5（★大分類除外・コースは合算）:\n' + formatTopProductsLinesForAi(verifiedData.topProducts, 5) : ''}
 ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品も述べてください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
   // 店舗営業情報（クラウド）と店舗ナレッジを、確定集計と必ずセットで添付する。
   let integrated;
