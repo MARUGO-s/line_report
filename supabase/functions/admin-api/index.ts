@@ -553,7 +553,7 @@ const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," 
 
 // 予約メール通知(gmail-alert-cron)の配信間隔（分）として許可する値。
 // 1(既定・null扱い)=毎分チェック(リアルタイム)。それ以外は「N分おきにまとめて配信」。
-const GMAIL_ALERT_INTERVAL_MINUTES_ALLOWED = new Set([1, 15, 30, 60, 120, 180, 360, 720, 1440])
+const GMAIL_ALERT_INTERVAL_MINUTES_ALLOWED = new Set([1, 15, 30, 60, 120, 180, 360, 480, 720, 1440])
 
 function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
