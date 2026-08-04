@@ -591,6 +591,9 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | `GROK_X_SEARCH_LOOKBACK_DAYS` | X を遡って検索する日数（journal と共用） | 未設定 |
 | `GROK_X_SEARCH_MAX_TOOL_CALLS` | 1回のブリーフで許す検索回数（journal と共用） | 未設定（デフォルト: `4`、上限8） |
 | `GROK_X_SEARCH_MAX_OUTPUT_TOKENS` | ブリーフの出力上限。grok-4.5 は reasoning も算入されるため小さすぎると本文が出ない | 未設定（デフォルト: `3000`、下限600/上限8000） |
+| `FOODCOURT_X_SEARCH_TOPIC` | **Xで何を検索するか**。デプロイせずに調整できる | 未設定（デフォルト: 下記の食トレンド4観点） |
+
+**検索対象の考え方（2026-08-04 変更）**: 当初は「東京ドーム／東京ドームシティの来場者の話題」に絞っていたが、**この範囲はX上の投稿数が足りず拾える話題が痩せる**。会場のイベント・客層は専門AI②が `tokyo_dome_events` から取得しており、Xで補う必要がない。Xにしか無いのは「いま何が食べられ、どう見せられ、どう語られているか」なので、地域を東京〜全国に広げ、**メニュー・商品の方向性に効く食トレンド**を主対象にしている（①スパイスカレー・カレー全般 ②ワインの飲まれ方 ③フードコート/商業施設内飲食の人気メニュー ④SNSでの見せ方・季節需要）。`max_tool_calls` の範囲で観点ごとに複数回検索する。
 | `claude_haiku` | Claude API認証（日次反証・Kimiフォールバック・評価AI⑥） | 設定済み |
 | `FOODCOURT_CLAUDE_MODEL` | 日次反証/フォールバック/評価AI⑥のClaudeモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
 | `OPENAI_API_KEY` | OpenAI API認証（統合AI⑤） | 設定済み |
