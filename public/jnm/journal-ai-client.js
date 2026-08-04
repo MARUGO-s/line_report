@@ -13,6 +13,10 @@
     if (!token) {
       throw new Error('AI機能にはログインが必要です。管理トークンで接続するか、LINEの最新リンクから開いてください。');
     }
+    var privacy = global.JOURNAL_AI_PRIVACY || null;
+    var safePayload = privacy && typeof privacy.sanitizePayload === 'function'
+      ? privacy.sanitizePayload(payload || {})
+      : (payload || {});
     var response = await fetch(String(endpoint || ''), {
       method: 'POST',
       headers: {
@@ -22,7 +26,7 @@
         'x-admin-surface': pages.ADMIN_SURFACE || 'line_report'
       },
       signal: opts.signal,
-      body: JSON.stringify(payload || {})
+      body: JSON.stringify(safePayload)
     });
     var body = await response.json().catch(function () { return {}; });
     return { response: response, body: body };

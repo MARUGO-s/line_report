@@ -1,39 +1,40 @@
 // Supabase Edge Function: AI Analyze / Chat
-// 数値検証・統合の既定は OpenAI gpt-5.6-luna。失敗時は Kimi K3 へフォールバック。
+// 数値検証・統合の既定は OpenAI gpt-5.6-luna。失敗時は Claude Haiku へフォールバック。
 // 戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから統合。
-// deploy retry marker: journal luna + kimi-k3 fallback 2026-08-01
+// 外部AIへ送る直前に、予約氏名・連絡先・アレルギー詳細を最小化する。
 
 import {
   formatExternalBriefsForPrompt,
   gatherExternalBriefs,
+  type JournalChatIntent,
   normalizeJournalChatIntent,
   orchestrationNote,
-  type JournalChatIntent,
 } from "../_shared/journal_ai_orchestrate.ts";
 import { authenticateAdminDashboardSessionToken } from "../_shared/admin_dashboard_link_auth.ts";
+import { sanitizeJournalAiPayload } from "../_shared/journal_ai_privacy.ts";
 import { buildStoreLocationPromptBlock } from "../_shared/marugo_group_stores.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
 
 const OPENAI_MODEL_DEFAULT = "gpt-5.6-luna";
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
-const KIMI_MODEL_DEFAULT = "kimi-k3";
-const KIMI_ENDPOINT = "https://api.moonshot.ai/v1/chat/completions";
+const CLAUDE_MODEL_DEFAULT = "claude-haiku-4-5";
+const CLAUDE_ENDPOINT = "https://api.anthropic.com/v1/messages";
 
 type SynthesizerResult =
   | {
     ok: true;
     text: string;
-    provider: "openai" | "kimi";
+    provider: "openai" | "claude";
     model: string;
     fallbackFrom?: { provider: "openai"; model: string; error: string };
   }
   | {
     ok: false;
-    provider: "openai" | "kimi";
+    provider: "openai" | "claude";
     model: string;
     error: string;
     openaiError?: string;
-    kimiError?: string;
+    claudeError?: string;
   };
 
 type ClarificationPlan =
@@ -52,10 +53,11 @@ type ClarificationPlan =
   };
 
 type ClarifierProviderResult =
-  | { ok: true; text: string; provider: "openai" | "kimi"; model: string }
-  | { ok: false; error: string; provider: "openai" | "kimi"; model: string };
+  | { ok: true; text: string; provider: "openai" | "claude"; model: string }
+  | { ok: false; error: string; provider: "openai" | "claude"; model: string };
 
-const CLARIFICATION_PROMPT = `あなたは店舗売上分析チャットの意図整理だけを担当します。分析や数値回答は行わず、必要なデータを選ぶ前に、ユーザーが本当に知りたいことを自然な会話で特定してください。
+const CLARIFICATION_PROMPT =
+  `あなたは店舗売上分析チャットの意図整理だけを担当します。分析や数値回答は行わず、必要なデータを選ぶ前に、ユーザーが本当に知りたいことを自然な会話で特定してください。
 
 必ず次のJSONだけを返してください。
 - 意図がまだ曖昧: {"status":"clarify","understood":"既に分かった内容","missing":["不足している要素"],"question":"確認質問","choices":["会話中の第一候補","会話中の第二候補"]}
@@ -164,7 +166,8 @@ const SYSTEM_PROMPT_CHAT = `${MARUGO_COMPANY_CONTEXT}
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-admin-token, x-admin-surface",
+  "Access-Control-Allow-Headers":
+    "Content-Type, Authorization, apikey, x-admin-token, x-admin-surface",
 };
 
 type ChatContent = { role: string; parts: { text: string }[] };
@@ -186,9 +189,16 @@ function jsonResponse(body: unknown, status: number): Response {
 
 function isPublicIp(ip: string): boolean {
   if (!ip || ip === "unknown") return false;
-  if (/^127\./.test(ip) || /^10\./.test(ip) || /^192\.168\./.test(ip)) return false;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip) || /^169\.254\./.test(ip) || /^0\./.test(ip)) return false;
-  if (ip === "::1" || /^fe80:/i.test(ip) || /^f[cd][0-9a-f]{2}:/i.test(ip)) return false;
+  if (/^127\./.test(ip) || /^10\./.test(ip) || /^192\.168\./.test(ip)) {
+    return false;
+  }
+  if (
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) || /^169\.254\./.test(ip) ||
+    /^0\./.test(ip)
+  ) return false;
+  if (ip === "::1" || /^fe80:/i.test(ip) || /^f[cd][0-9a-f]{2}:/i.test(ip)) {
+    return false;
+  }
   return true;
 }
 
@@ -299,7 +309,8 @@ function normalizeClarificationPlan(text: string): ClarificationPlan | null {
 
   const understood = String(value?.understood || "").trim().slice(0, 240);
   const missing = Array.isArray(value?.missing)
-    ? value.missing.map((item) => String(item || "").trim().slice(0, 60)).filter(Boolean).slice(0, 4)
+    ? value.missing.map((item) => String(item || "").trim().slice(0, 60))
+      .filter(Boolean).slice(0, 4)
     : [];
   if (value?.status === "ready") {
     const resolvedQuery = String(value.resolvedQuery || "").trim();
@@ -308,16 +319,20 @@ function normalizeClarificationPlan(text: string): ClarificationPlan | null {
     }
   }
   if (value?.status === "clarify") {
-    let question = String(value.question || "").replace(/^#{1,6}\s*/gm, "").trim();
+    let question = String(value.question || "").replace(/^#{1,6}\s*/gm, "")
+      .trim();
     const choices = Array.isArray(value.choices)
-      ? value.choices.map((item) => String(item || "").trim().slice(0, 80)).filter(Boolean).slice(0, 3)
+      ? value.choices.map((item) => String(item || "").trim().slice(0, 80))
+        .filter(Boolean).slice(0, 3)
       : [];
     if (
       question &&
       question.length <= 240 &&
       !/(?:^|\n)\s*[1-9][.、)]\s*/.test(question)
     ) {
-      if (!/[？?]\s*$/.test(question)) question = `${question.replace(/[。！!\s]+$/, "")}？`;
+      if (!/[？?]\s*$/.test(question)) {
+        question = `${question.replace(/[。！!\s]+$/, "")}？`;
+      }
       return { status: "clarify", question, choices, understood, missing };
     }
   }
@@ -345,14 +360,19 @@ function buildClarificationMessages(
   chatHistory: unknown,
   clarificationContext: unknown,
 ): Array<{ role: "system" | "user" | "assistant"; content: string }> {
-  const rawContext = clarificationContext && typeof clarificationContext === "object"
-    ? clarificationContext as Record<string, unknown>
-    : {};
+  const rawContext =
+    clarificationContext && typeof clarificationContext === "object"
+      ? clarificationContext as Record<string, unknown>
+      : {};
   const safeContext = {
     purpose: "clarification_only",
     missingKind: String(rawContext.missingKind || "intent").slice(0, 30),
-    availableSavedPeriod: String(rawContext.availableSavedPeriod || "未確認").slice(0, 80),
-    currentReportPeriod: String(rawContext.currentReportPeriod || "").slice(0, 80),
+    availableSavedPeriod: String(rawContext.availableSavedPeriod || "未確認")
+      .slice(0, 80),
+    currentReportPeriod: String(rawContext.currentReportPeriod || "").slice(
+      0,
+      80,
+    ),
     availableMetrics: [
       "総売上・推移",
       "フード・ドリンク・ワイン構成",
@@ -364,7 +384,9 @@ function buildClarificationMessages(
   const history = (Array.isArray(chatHistory) ? chatHistory : [])
     .slice(-6)
     .map((item: unknown) => {
-      const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      const row = item && typeof item === "object"
+        ? item as Record<string, unknown>
+        : {};
       return {
         role: row.role === "assistant" ? "assistant" as const : "user" as const,
         content: String(row.content || row.text || "").trim().slice(0, 600),
@@ -379,7 +401,10 @@ function buildClarificationMessages(
   return [
     {
       role: "system",
-      content: `${CLARIFICATION_PROMPT}\n\n利用可能な範囲と項目（数値データではありません）:\n${JSON.stringify(safeContext)}`,
+      content:
+        `${CLARIFICATION_PROMPT}\n\n利用可能な範囲と項目（数値データではありません）:\n${
+          JSON.stringify(safeContext)
+        }`,
     },
     ...history,
     { role: "user", content: current },
@@ -403,21 +428,23 @@ function resolveOpenAiModel(): string {
   ).trim() || OPENAI_MODEL_DEFAULT;
 }
 
-function resolveKimiApiKey(): string {
+function resolveClaudeApiKey(): string {
   return String(
-    Deno.env.get("MOONSHOT_API_KEY") ||
-      Deno.env.get("KIMI_API_KEY") ||
+    Deno.env.get("JOURNAL_CLAUDE_API_KEY") ||
+      Deno.env.get("claude_haiku") ||
+      Deno.env.get("CLAUDE_HAIKU") ||
+      Deno.env.get("ANTHROPIC_API_KEY") ||
       "",
   ).trim();
 }
 
-function resolveKimiModel(): string {
+function resolveClaudeModel(): string {
   return String(
-    Deno.env.get("JOURNAL_KIMI_MODEL") ||
-      Deno.env.get("KIMI_MODEL") ||
-      Deno.env.get("FOODCOURT_MOONSHOT_MODEL") ||
+    Deno.env.get("JOURNAL_CLAUDE_MODEL") ||
+      Deno.env.get("FOODCOURT_CLAUDE_MODEL") ||
+      Deno.env.get("CLAUDE_MODEL") ||
       "",
-  ).trim() || KIMI_MODEL_DEFAULT;
+  ).trim() || CLAUDE_MODEL_DEFAULT;
 }
 
 async function callOpenAiClarifier(
@@ -425,10 +452,19 @@ async function callOpenAiClarifier(
 ): Promise<ClarifierProviderResult> {
   const apiKey = resolveOpenAiApiKey();
   const model = resolveOpenAiModel();
-  if (!apiKey) return { ok: false, error: "OPENAI_API_KEY not configured", provider: "openai", model };
+  if (!apiKey) {
+    return {
+      ok: false,
+      error: "OPENAI_API_KEY not configured",
+      provider: "openai",
+      model,
+    };
+  }
   const isReasoning = /^o\d/.test(model) || /^gpt-5/.test(model);
   const providerMessages = messages.map((item) =>
-    isReasoning && item.role === "system" ? { ...item, role: "developer" } : item
+    isReasoning && item.role === "system"
+      ? { ...item, role: "developer" }
+      : item
   );
   const tokenParam = isReasoning
     ? { max_completion_tokens: 800, reasoning_effort: "low" }
@@ -442,88 +478,180 @@ async function callOpenAiClarifier(
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ model, messages: providerMessages, ...tokenParam }),
+        body: JSON.stringify({
+          model,
+          messages: providerMessages,
+          ...tokenParam,
+        }),
       },
       7000,
     );
     if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}: ${res.text}`, provider: "openai", model };
+      return {
+        ok: false,
+        error: `HTTP ${res.status}: ${res.text}`,
+        provider: "openai",
+        model,
+      };
     }
     const data = JSON.parse(res.text);
-    const text = stripThinkingBlocks(data?.choices?.[0]?.message?.content || "");
-    return text
-      ? { ok: true, text, provider: "openai", model }
-      : { ok: false, error: "OpenAI returned an empty clarification", provider: "openai", model };
+    const text = stripThinkingBlocks(
+      data?.choices?.[0]?.message?.content || "",
+    );
+    return text ? { ok: true, text, provider: "openai", model } : {
+      ok: false,
+      error: "OpenAI returned an empty clarification",
+      provider: "openai",
+      model,
+    };
   } catch (e) {
     return { ok: false, error: String(e), provider: "openai", model };
   }
 }
 
-async function callKimiClarifier(
+function extractClaudeText(data: unknown): string {
+  const content = data && typeof data === "object"
+    ? (data as { content?: unknown }).content
+    : null;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) => {
+      const row = block && typeof block === "object"
+        ? block as Record<string, unknown>
+        : {};
+      return row.type === "text" ? String(row.text || "") : "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function openAiMessagesToClaude(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+): {
+  system: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+} {
+  const system = messages
+    .filter((item) => item.role === "system")
+    .map((item) => item.content)
+    .join("\n\n")
+    .trim();
+  const converted = messages
+    .filter((item) => item.role !== "system" && item.content.trim())
+    .map((item) => ({
+      role: item.role === "assistant" ? "assistant" as const : "user" as const,
+      content: item.content,
+    }));
+  return { system, messages: converted };
+}
+
+async function callClaudeClarifier(
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
 ): Promise<ClarifierProviderResult> {
-  const apiKey = resolveKimiApiKey();
-  const model = resolveKimiModel();
-  if (!apiKey) return { ok: false, error: "MOONSHOT_API_KEY not configured", provider: "kimi", model };
+  const apiKey = resolveClaudeApiKey();
+  const model = resolveClaudeModel();
+  if (!apiKey) {
+    return {
+      ok: false,
+      error: "Anthropic API key not configured",
+      provider: "claude",
+      model,
+    };
+  }
+  const converted = openAiMessagesToClaude(messages);
   try {
     const res = await fetchTextWithTimeout(
-      KIMI_ENDPOINT,
+      CLAUDE_ENDPOINT,
       {
         method: "POST",
         headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model,
-          messages,
-          temperature: 0.3,
-          reasoning_effort: "low",
-          max_tokens: 350,
+          max_tokens: 500,
+          temperature: 0.2,
+          ...(converted.system ? { system: converted.system } : {}),
+          messages: converted.messages,
         }),
       },
-      4000,
+      7000,
     );
     if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}: ${res.text}`, provider: "kimi", model };
+      return {
+        ok: false,
+        error: `HTTP ${res.status}: ${res.text}`,
+        provider: "claude",
+        model,
+      };
     }
     const data = JSON.parse(res.text);
-    const text = stripThinkingBlocks(data?.choices?.[0]?.message?.content || "");
-    return text
-      ? { ok: true, text, provider: "kimi", model }
-      : { ok: false, error: "Kimi returned an empty clarification", provider: "kimi", model };
+    const text = stripThinkingBlocks(extractClaudeText(data));
+    return text ? { ok: true, text, provider: "claude", model } : {
+      ok: false,
+      error: "Claude returned an empty clarification",
+      provider: "claude",
+      model,
+    };
   } catch (e) {
-    return { ok: false, error: String(e), provider: "kimi", model };
+    return { ok: false, error: String(e), provider: "claude", model };
   }
 }
 
 async function clarifyWithFallback(
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
 ): Promise<
-  | { ok: true; plan: ClarificationPlan; provider: "openai" | "kimi"; model: string }
+  | {
+    ok: true;
+    plan: ClarificationPlan;
+    provider: "openai" | "claude";
+    model: string;
+  }
   | { ok: false; error: string }
 > {
   const openai = await callOpenAiClarifier(messages);
   if (openai.ok) {
     const plan = normalizeClarificationPlan(openai.text);
-    if (plan) return { ok: true, plan, provider: openai.provider, model: openai.model };
+    if (plan) {
+      return { ok: true, plan, provider: openai.provider, model: openai.model };
+    }
   }
-  const kimi = await callKimiClarifier(messages);
-  if (kimi.ok) {
-    const plan = normalizeClarificationPlan(kimi.text);
-    if (plan) return { ok: true, plan, provider: kimi.provider, model: kimi.model };
+  const claude = await callClaudeClarifier(messages);
+  if (claude.ok) {
+    const plan = normalizeClarificationPlan(claude.text);
+    if (plan) {
+      return { ok: true, plan, provider: claude.provider, model: claude.model };
+    }
   }
-  const openaiError = openai.ok ? "OpenAI returned invalid clarification JSON" : openai.error;
-  const kimiError = kimi.ok ? "Kimi returned invalid clarification JSON" : kimi.error;
-  return { ok: false, error: `openai: ${openaiError} | kimi: ${kimiError}` };
+  const openaiError = openai.ok
+    ? "OpenAI returned invalid clarification JSON"
+    : openai.error;
+  const claudeError = claude.ok
+    ? "Claude returned invalid clarification JSON"
+    : claude.error;
+  return {
+    ok: false,
+    error: `openai: ${openaiError} | claude: ${claudeError}`,
+  };
 }
 
 async function callOpenAiLuna(
   contents: ChatContent[],
-): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string; model: string }> {
+): Promise<
+  { ok: true; text: string; model: string } | {
+    ok: false;
+    error: string;
+    model: string;
+  }
+> {
   const apiKey = resolveOpenAiApiKey();
   const model = resolveOpenAiModel();
-  if (!apiKey) return { ok: false, error: "OPENAI_API_KEY not configured", model };
+  if (!apiKey) {
+    return { ok: false, error: "OPENAI_API_KEY not configured", model };
+  }
 
   // gpt-5 系は max_tokens を拒否し max_completion_tokens を要求。
   // 思考トークンも同枠を消費するため余裕を足し、reasoning_effort:'low' で抑える。
@@ -556,7 +684,9 @@ async function callOpenAiLuna(
     const data = await res.json();
     const rawText = data?.choices?.[0]?.message?.content || "";
     const text = stripThinkingBlocks(rawText);
-    if (!text) return { ok: false, error: "OpenAI returned an empty response", model };
+    if (!text) {
+      return { ok: false, error: "OpenAI returned an empty response", model };
+    }
     return { ok: true, text, model };
   } catch (e) {
     console.error("OpenAI API fetch error:", e);
@@ -564,46 +694,64 @@ async function callOpenAiLuna(
   }
 }
 
-async function callKimi(
+async function callClaude(
   contents: ChatContent[],
-): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string; model: string }> {
-  const apiKey = resolveKimiApiKey();
-  const model = resolveKimiModel();
-  if (!apiKey) return { ok: false, error: "MOONSHOT_API_KEY not configured", model };
+): Promise<
+  { ok: true; text: string; model: string } | {
+    ok: false;
+    error: string;
+    model: string;
+  }
+> {
+  const apiKey = resolveClaudeApiKey();
+  const model = resolveClaudeModel();
+  if (!apiKey) {
+    return { ok: false, error: "Anthropic API key not configured", model };
+  }
+  const converted = openAiMessagesToClaude(
+    contentsToOpenAiMessages(contents) as Array<{
+      role: "system" | "user" | "assistant";
+      content: string;
+    }>,
+  );
 
   try {
-    const res = await fetch(KIMI_ENDPOINT, {
+    const res = await fetch(CLAUDE_ENDPOINT, {
       method: "POST",
       headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model,
-        messages: contentsToOpenAiMessages(contents),
-        temperature: 1,
-        reasoning_effort: "low",
         max_tokens: 10192,
+        temperature: 0.2,
+        ...(converted.system ? { system: converted.system } : {}),
+        messages: converted.messages,
       }),
     });
     if (!res.ok) {
       const errText = await res.text();
-      console.error("Kimi API error:", model, res.status, errText);
+      console.error("Claude API error:", model, res.status, errText);
       return { ok: false, error: errText, model };
     }
     const data = await res.json();
-    const rawText = data?.choices?.[0]?.message?.content || "";
-    const text = stripThinkingBlocks(rawText);
-    if (!text) return { ok: false, error: "Kimi returned an empty response", model };
+    const text = stripThinkingBlocks(extractClaudeText(data));
+    if (!text) {
+      return { ok: false, error: "Claude returned an empty response", model };
+    }
     return { ok: true, text, model };
   } catch (e) {
-    console.error("Kimi API fetch error:", e);
+    console.error("Claude API fetch error:", e);
     return { ok: false, error: String(e), model };
   }
 }
 
-/** 既定: gpt-5.6-luna → 失敗時 kimi-k3 */
-async function synthesizeWithFallback(contents: ChatContent[]): Promise<SynthesizerResult> {
+/** 既定: gpt-5.6-luna → 失敗時 Claude Haiku */
+async function synthesizeWithFallback(
+  contents: ChatContent[],
+): Promise<SynthesizerResult> {
   const lunaResult = await callOpenAiLuna(contents);
   if (lunaResult.ok) {
     return {
@@ -615,17 +763,17 @@ async function synthesizeWithFallback(contents: ChatContent[]): Promise<Synthesi
   }
 
   console.warn(
-    "OpenAI Luna failed; falling back to Kimi K3:",
+    "OpenAI Luna failed; falling back to Claude Haiku:",
     lunaResult.model,
     lunaResult.error.slice(0, 240),
   );
-  const kimiResult = await callKimi(contents);
-  if (kimiResult.ok) {
+  const claudeResult = await callClaude(contents);
+  if (claudeResult.ok) {
     return {
       ok: true,
-      text: kimiResult.text,
-      provider: "kimi",
-      model: kimiResult.model,
+      text: claudeResult.text,
+      provider: "claude",
+      model: claudeResult.model,
       fallbackFrom: {
         provider: "openai",
         model: lunaResult.model,
@@ -636,11 +784,11 @@ async function synthesizeWithFallback(contents: ChatContent[]): Promise<Synthesi
 
   return {
     ok: false,
-    provider: "kimi",
-    model: kimiResult.model,
-    error: kimiResult.error,
+    provider: "claude",
+    model: claudeResult.model,
+    error: claudeResult.error,
     openaiError: lunaResult.error,
-    kimiError: kimiResult.error,
+    claudeError: claudeResult.error,
   };
 }
 
@@ -654,7 +802,8 @@ Deno.serve(async (req: Request, info) => {
   }
 
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") ?? "").trim();
-  const serviceRoleKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+  const serviceRoleKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "")
+    .trim();
   if (!supabaseUrl || !serviceRoleKey) {
     return jsonResponse({ error: "AI service configuration is missing." }, 500);
   }
@@ -664,7 +813,10 @@ Deno.serve(async (req: Request, info) => {
   if (!adminToken) {
     return jsonResponse({ error: "Unauthorized." }, 401);
   }
-  const authResult = await authenticateAdminDashboardSessionToken(supabase, adminToken);
+  const authResult = await authenticateAdminDashboardSessionToken(
+    supabase,
+    adminToken,
+  );
   if (!authResult.ok || authResult.scopeKind === "room_config") {
     return jsonResponse({ error: "Unauthorized." }, 401);
   }
@@ -683,10 +835,26 @@ Deno.serve(async (req: Request, info) => {
       storeName,
       clarificationContext,
     } = body;
+    const privacySafe = sanitizeJournalAiPayload({
+      message,
+      chatHistory,
+      systemInstruction,
+      salesData,
+      clarificationContext,
+    });
+    const safeMessage = privacySafe.message;
+    const safeChatHistory = privacySafe.chatHistory;
+    const safeSystemInstruction = privacySafe.systemInstruction;
+    const safeSalesData = privacySafe.salesData;
+    const safeClarificationContext = privacySafe.clarificationContext;
     const requestedStore = String(storeKey || "").trim().toLowerCase();
-    const scopedStore = String(authResult.storeScope || "").trim().toLowerCase();
+    const scopedStore = String(authResult.storeScope || "").trim()
+      .toLowerCase();
     if (scopedStore && requestedStore && requestedStore !== scopedStore) {
-      return jsonResponse({ error: "他店舗のデータにはアクセスできません。" }, 403);
+      return jsonResponse(
+        { error: "他店舗のデータにはアクセスできません。" },
+        403,
+      );
     }
     const effectiveStoreKey = scopedStore || requestedStore;
 
@@ -709,28 +877,34 @@ Deno.serve(async (req: Request, info) => {
     );
     if (!rateLimit.allowed) {
       return jsonResponse({
-        error: "AIリクエストが集中しています。少し待ってから再試行してください。",
+        error:
+          "AIリクエストが集中しています。少し待ってから再試行してください。",
         code: "rate_limited",
         retry_after_ms: rateLimit.retryAfterMs,
       }, 429);
     }
 
-    if (!resolveOpenAiApiKey() && !resolveKimiApiKey()) {
+    if (!resolveOpenAiApiKey() && !resolveClaudeApiKey()) {
       return jsonResponse({
-        error: "OPENAI_API_KEY または MOONSHOT_API_KEY が未設定です",
+        error: "OPENAI_API_KEY または Anthropic APIキーが未設定です",
       }, 500);
     }
 
     // 店舗スコープ検証後のサーバー側マスターだけを立地の正本にする。
     // クライアント supplied の立地ブロックを採用すると、店舗用セッションでも
     // 別店舗の住所・商圏をAIへ注入できるため使用しない。
-    const locationBlock = buildStoreLocationPromptBlock(effectiveStoreKey, storeName);
+    const locationBlock = buildStoreLocationPromptBlock(
+      effectiveStoreKey,
+      storeName,
+    );
 
     if (action === "clarify") {
-      const boundedMessage = String(message || "").trim();
+      const boundedMessage = String(safeMessage || "").trim();
       if (!boundedMessage || boundedMessage.length > 500) {
         return new Response(
-          JSON.stringify({ error: "message must be 1-500 characters for clarify" }),
+          JSON.stringify({
+            error: "message must be 1-500 characters for clarify",
+          }),
           {
             status: 400,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -739,13 +913,16 @@ Deno.serve(async (req: Request, info) => {
       }
       const messages = buildClarificationMessages(
         boundedMessage,
-        chatHistory,
-        clarificationContext,
+        safeChatHistory,
+        safeClarificationContext,
       );
       const clarified = await clarifyWithFallback(messages);
       if (!clarified.ok) {
         return new Response(
-          JSON.stringify({ error: "確認質問の生成に失敗しました", detail: clarified.error }),
+          JSON.stringify({
+            error: "確認質問の生成に失敗しました",
+            detail: clarified.error,
+          }),
           {
             status: 502,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -755,7 +932,9 @@ Deno.serve(async (req: Request, info) => {
       return new Response(
         JSON.stringify({
           ...clarified.plan,
-          text: clarified.plan.status === "clarify" ? clarified.plan.question : "",
+          text: clarified.plan.status === "clarify"
+            ? clarified.plan.question
+            : "",
           provider: clarified.provider,
           model: clarified.model,
           mode: "clarify",
@@ -767,7 +946,7 @@ Deno.serve(async (req: Request, info) => {
       );
     }
 
-    if (!salesData) {
+    if (!safeSalesData) {
       return new Response(
         JSON.stringify({ error: "salesData is required for analyze and chat" }),
         {
@@ -777,7 +956,7 @@ Deno.serve(async (req: Request, info) => {
       );
     }
 
-    if (String(systemInstruction || "").length > 40000) {
+    if (String(safeSystemInstruction || "").length > 40000) {
       return new Response(
         JSON.stringify({ error: "systemInstruction is too large" }),
         {
@@ -787,13 +966,15 @@ Deno.serve(async (req: Request, info) => {
       );
     }
 
-    const salesContext = typeof salesData === "string"
-      ? salesData
-      : JSON.stringify(salesData);
+    const salesContext = typeof safeSalesData === "string"
+      ? safeSalesData
+      : JSON.stringify(safeSalesData);
 
     if (salesContext.length > 100000) {
       return new Response(
-        JSON.stringify({ error: "データが大きすぎます。期間を絞ってください。" }),
+        JSON.stringify({
+          error: "データが大きすぎます。期間を絞ってください。",
+        }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -812,16 +993,20 @@ Deno.serve(async (req: Request, info) => {
           role: "user",
           parts: [
             {
-              text: `${systemInstruction || SYSTEM_PROMPT_ANALYZE}\n\n${locationBlock}\n\n以下の売上データを分析してください：\n\n${salesContext}`,
+              text: `${
+                safeSystemInstruction || SYSTEM_PROMPT_ANALYZE
+              }\n\n${locationBlock}\n\n以下の売上データを分析してください：\n\n${salesContext}`,
             },
           ],
         },
       ];
     } else if (action === "chat") {
-      const chatMessage = String(message || "").trim();
+      const chatMessage = String(safeMessage || "").trim();
       if (!chatMessage || chatMessage.length > 2000) {
         return new Response(
-          JSON.stringify({ error: "message must be 1-2000 characters for chat" }),
+          JSON.stringify({
+            error: "message must be 1-2000 characters for chat",
+          }),
           {
             status: 400,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -844,17 +1029,25 @@ Deno.serve(async (req: Request, info) => {
       }
 
       const externalBlock = formatExternalBriefsForPrompt(briefs);
-      const history = (Array.isArray(chatHistory) ? chatHistory : [])
+      const history = (Array.isArray(safeChatHistory) ? safeChatHistory : [])
         .slice(-12)
         .map((item: unknown) => {
-          const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
+          const row = item && typeof item === "object"
+            ? item as Record<string, unknown>
+            : {};
           return {
             role: row.role === "user" ? "user" : "assistant",
-            content: String(row.content || row.text || "").trim().slice(0, 1600),
+            content: String(row.content || row.text || "").trim().slice(
+              0,
+              1600,
+            ),
           };
         })
         .filter((item) => item.content.length > 0);
-      if (history.at(-1)?.role === "user" && history.at(-1)?.content === chatMessage) {
+      if (
+        history.at(-1)?.role === "user" &&
+        history.at(-1)?.content === chatMessage
+      ) {
         history.pop();
       }
       contents = [
@@ -862,8 +1055,9 @@ Deno.serve(async (req: Request, info) => {
           role: "user",
           parts: [
             {
-              text:
-                `${systemInstruction || SYSTEM_PROMPT_CHAT}\n\n${locationBlock}\n\n参照する売上データ：\n${salesContext}${externalBlock}`,
+              text: `${
+                safeSystemInstruction || SYSTEM_PROMPT_CHAT
+              }\n\n${locationBlock}\n\n参照する売上データ：\n${salesContext}${externalBlock}`,
             },
           ],
         },
@@ -932,14 +1126,17 @@ Deno.serve(async (req: Request, info) => {
 
     const combinedDetail = [
       synth.openaiError ? `openai: ${synth.openaiError}` : "",
-      synth.kimiError ? `kimi: ${synth.kimiError}` : "",
+      synth.claudeError ? `claude: ${synth.claudeError}` : "",
       synth.error,
     ].filter(Boolean).join(" | ");
     let friendlyError =
-      `AI呼び出しに失敗しました（gpt-5.6-luna → kimi-k3 とも不可）。`;
-    if (combinedDetail.includes("401") || combinedDetail.toLowerCase().includes("invalid")) {
+      `AI呼び出しに失敗しました（gpt-5.6-luna → Claude Haiku とも不可）。`;
+    if (
+      combinedDetail.includes("401") ||
+      combinedDetail.toLowerCase().includes("invalid")
+    ) {
       friendlyError =
-        "AIのAPIキーが無効です。SupabaseのOPENAI_API_KEY / MOONSHOT_API_KEYをご確認ください。";
+        "AIのAPIキーが無効です。SupabaseのOPENAI_API_KEY / JOURNAL_CLAUDE_API_KEY（または claude_haiku）をご確認ください。";
     } else if (combinedDetail.includes("429")) {
       friendlyError = "AI APIの利用クォータ上限に達しました。";
     }
