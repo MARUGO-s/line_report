@@ -54,6 +54,9 @@ test('every integrator is told how to use (and not use) the X trend block', () =
   assert.doesNotMatch(source, /打ち手の着想には使ってよい/)
   const mandatory = source.match(/最低1つは、必ずそのトレンドを踏まえたものにすること/g) ?? []
   assert.equal(mandatory.length, 4)
+  // メニュー・商品の方向性への反映が主目的なので、その用途を必ず示す。
+  const menuUse = source.match(/メニューや商品の方向性/g) ?? []
+  assert.equal(menuUse.length, 4)
   // ガードレール: 出所明示・売上根拠への流用禁止・不在時は言及禁止。
   assert.match(source, /出所を必ず明示する/)
   assert.match(source, /売上・客数の根拠には使わない/)
@@ -85,13 +88,21 @@ test('the user question is never used as the X search query', () => {
   // 実際に無関係な投稿を31,728トークン取り込んで課金だけ発生し、引用が成立せず破棄された。
   assert.doesNotMatch(source, /fetchFoodCourtXTrendBrief\(\s*q\s*,/)
 
-  // 4サーフェスとも会場・外食トレンドの固定トピックを使う。
-  const calls = source.match(/fetchFoodCourtXTrendBrief\(FOODCOURT_X_TREND_TOPIC,/g) ?? []
+  // 4サーフェスとも同じ固定トピックを使う = 同じキャッシュキー = 1日1検索。
+  const calls = source.match(/fetchFoodCourtXTrendBrief\(foodCourtXTrendTopic\(\),/g) ?? []
   assert.equal(calls.length, 4)
-  // 定義1 + 4サーフェス。全店舗・全サーフェスで同じキャッシュキー = 1日1検索。
-  const topicRefs = source.match(/FOODCOURT_X_TREND_TOPIC/g) ?? []
-  assert.equal(topicRefs.length, 5)
   assert.match(source, /foodCourtJstDate\(\)/)
+})
+
+test('the X search looks at food trends broadly, not just the venue', () => {
+  // 東京ドーム周辺に絞ると投稿数が足りず話題が痩せる。会場のイベント・客層は
+  // 専門AI②が tokyo_dome_events から取っているので、Xで補う必要がない。
+  // Xにしか無いのは「いま何が食べられ、どう見せられ、どう語られているか」。
+  assert.match(source, /東京中心。話題が薄ければ全国まで広げてよい/)
+  assert.match(source, /スパイスカレー・カレー全般の流行/)
+  assert.match(source, /ワインの飲まれ方/)
+  // デプロイせずに検索対象を調整できること。
+  assert.match(source, /FOODCOURT_X_SEARCH_TOPIC/)
 })
 
 test('reasoning tokens cannot starve the brief text', () => {

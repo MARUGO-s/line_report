@@ -676,10 +676,27 @@ function foodCourtEnvInt(name: string, fallback: number, min: number, max: numbe
 // このシステムへの質問は「売上を伸ばすための提案を3つ」のように自店の数字についてのもので、
 // Xには存在しない。実際にその質問文で検索した結果、無関係な投稿を31,728トークン取り込んで
 // 課金だけ発生し、X投稿の引用が成立せずブロックごと破棄された。
-// 検索すべきは常に「会場とその客層・外食トレンド」という外の世界の話題で、質問では変わらない。
+// 検索すべきは常に「外の世界の食トレンド」で、質問によって変わらない。
 // 固定トピックにすることで全店舗・全サーフェスがキャッシュを共有し、1日1検索に集約される。
-const FOODCOURT_X_TREND_TOPIC =
-  '東京ドーム／東京ドームシティの来場者の話題（イベント・客層・混雑）と、外食・ワイン・スパイス料理まわりの直近トレンド'
+//
+// 【範囲について】東京ドーム周辺に絞るとX上の投稿数が足りず、拾える話題が痩せる。
+// 会場のイベント・客層は専門AI②が tokyo_dome_events から取っており、Xで補う必要はない。
+// Xに投稿量があり、かつ他のどのデータソースにも無いのは「いま何が食べられ、どう見せられ、
+// どう語られているか」なので、地域は東京〜全国まで広げ、メニュー・商品の方向性に効く
+// 食トレンドを主対象にする。
+const FOODCOURT_X_TREND_TOPIC_DEFAULT = [
+  '外食・グルメの直近トレンド（東京中心。話題が薄ければ全国まで広げてよい）。次の観点で複数回検索すること:',
+  '(1) スパイスカレー・カレー全般の流行 — 新しい味/スパイス使い、トッピング、提供スタイル、話題の店の何が支持されているか',
+  '(2) ワインの飲まれ方 — ペアリング、グラス売り、カジュアル層や若年層の関心、food+wineの組み合わせで話題のもの',
+  '(3) フードコート/フードホール/商業施設内飲食で人気・行列になっているメニューと、その理由',
+  '(4) SNSで話題の食の見せ方（盛り付け・器・写真映え）と、季節・時期特有の需要（猛暑/夏メニュー等）',
+  '各観点で「実際に何が話題か」を具体名で挙げること。一般論ではなく、投稿で確認できた個別の事象を書く。',
+].join('\n')
+
+/** 検索トピック。デプロイせずに調整できるよう env で上書き可能にする。 */
+function foodCourtXTrendTopic(): string {
+  return String(Deno.env.get('FOODCOURT_X_SEARCH_TOPIC') || '').trim() || FOODCOURT_X_TREND_TOPIC_DEFAULT
+}
 
 /** キャッシュキー用の JST 日付（トレンドは日単位で十分） */
 function foodCourtJstDate(now: Date = new Date()): string {
@@ -714,8 +731,11 @@ async function fetchFoodCourtXTrendBrief(
     try {
       const brief = await callGrokTrendBrief(
         topic,
-        'MARUGO S / 東京ドーム内フードホール「FOOD STADIUM TOKYO」内のワイン×スパイス業態（高単価・大人向け）。'
-          + '来店動機は野球・ライブ観戦の前後、待ち時間の軽食、デート/接待、インバウンド。',
+        'MARUGO S / 東京ドーム内フードホール「FOOD STADIUM TOKYO」内の店舗。'
+          + '主力はスパイスカレーとワイン（高単価・大人向け）。来店動機は野球・ライブ観戦の前後、'
+          + '待ち時間の軽食、デート/接待、インバウンド。'
+          + '知りたいのは「メニュー・商品・見せ方をどの方向に振るべきか」の材料。'
+          + 'この店の売上や東京ドームの話題そのものではなく、外の世界で今何が食べられ・話題になっているかを集めてほしい。',
       )
       result = brief.ok && brief.text
         ? { text: brief.text, citations: Array.isArray(brief.citations) ? brief.citations : [] }
@@ -3133,7 +3153,7 @@ export async function answerFoodCourtQuestion(
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ops' } }),
-    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
+    fetchFoodCourtXTrendBrief(foodCourtXTrendTopic(), foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
   const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
@@ -3179,7 +3199,7 @@ export async function answerFoodCourtQuestion(
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈＋日報施策）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
     `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
     `【専門AIメモの統合】以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。メモが矛盾する場合や誇張がある場合は、必ず生データ・事前計算ブロック・日報×実績対照の数値で裏取りしてから採否を判断し、1つの一貫した最終回答にまとめること。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱めること。`,
-    `【X最新トレンドの扱い・使用は必須】「X（旧Twitter）最新トレンド」ブロックがある場合、打ち手または客層の見立てのうち最低1つは、必ずそのトレンドを踏まえたものにすること。一般論だけで書いて無視してはならない（実際にXを検索して取得した当日の情報であり、他のどのAIも持っていない材料である）。ただし外部知見であって売上データではないため、次を守る: (a)「X上で〇〇が話題」のように出所を必ず明示する、(b) 参照URLがあれば添える、(c) 売上・客数の根拠には使わない、(d) 投稿の話題を市場全体の事実として断定せず「仮説」と書く。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
+    `【X最新トレンドの扱い・使用は必須】「X（旧Twitter）最新トレンド」ブロックがある場合、打ち手・メニューや商品の方向性・客層の見立てのうち最低1つは、必ずそのトレンドを踏まえたものにすること。一般論だけで書いて無視してはならない（実際にXを検索して取得した当日の情報であり、他のどのAIも持っていない材料である）。ただし外部知見であって売上データではないため、次を守る: (a)「X上で〇〇が話題」のように出所を必ず明示する、(b) 参照URLがあれば添える、(c) 売上・客数の根拠には使わない、(d) 投稿の話題を市場全体の事実として断定せず「仮説」と書く。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。来客予測モデルの学習係数(自己採点済み)であれば、来客予測の自己採点(誤差%)と矛盾しない範囲で解釈する。対象日/対象期間に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【回答品質】最後に必ず、実行すべき次の一手または次に確認すべきKPIを1つ以上入れる。数字の羅列だけで終えない。日報があるときは次の一手を日報の学びと接続する。`,
     FOODCOURT_ACTION_FORMAT_RULE,
@@ -3323,7 +3343,7 @@ export async function generateFoodCourtDailySummary(
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ops' } }),
-    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
+    fetchFoodCourtXTrendBrief(foodCourtXTrendTopic(), foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
   const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
@@ -3352,7 +3372,7 @@ export async function generateFoodCourtDailySummary(
     `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象日の事実」および「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
     `【前回分析の自己検証】「前回の分析」が与えられている場合、そこで語った見立て（好調/不調の理由・客数要因か客単価要因か・イベント/天気の影響など）が今回の対象日の実績でも裏付けられたか、変わったかを必ずどこかの見出し（主に【この日の評価（条件別）】か【直近の勢い】）で一言検証すること。同じ結論・同じ言い回しを毎日繰り返さない。前回との継続性がある分析にする。`,
     `【比較可能性】前回分析と対象日の曜日・イベント規模・天気など主要条件が違う場合は、前回仮説が支持/否定されたと断定せず「条件が異なるため直接比較できない」と書く。`,
-    `【X最新トレンドの扱い・使用は必須】「X（旧Twitter）最新トレンド」ブロックがある場合、打ち手または客層の見立てのうち最低1つは、必ずそのトレンドを踏まえたものにすること。一般論だけで書いて無視してはならない（実際にXを検索して取得した当日の情報であり、他のどのAIも持っていない材料である）。ただし外部知見であって売上データではないため、次を守る: (a)「X上で〇〇が話題」のように出所を必ず明示する、(b) 参照URLがあれば添える、(c) 売上・客数の根拠には使わない、(d) 投稿の話題を市場全体の事実として断定せず「仮説」と書く。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
+    `【X最新トレンドの扱い・使用は必須】「X（旧Twitter）最新トレンド」ブロックがある場合、打ち手・メニューや商品の方向性・客層の見立てのうち最低1つは、必ずそのトレンドを踏まえたものにすること。一般論だけで書いて無視してはならない（実際にXを検索して取得した当日の情報であり、他のどのAIも持っていない材料である）。ただし外部知見であって売上データではないため、次を守る: (a)「X上で〇〇が話題」のように出所を必ず明示する、(b) 参照URLがあれば添える、(c) 売上・客数の根拠には使わない、(d) 投稿の話題を市場全体の事実として断定せず「仮説」と書く。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象日に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、それぞれの確度を踏まえながら「複数の条件が重なってどう効いたか」を多角的に判断し、【この日の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【不足データの扱い】入力に無い他店のイベント捕捉率・時間帯別実績・統計的有意差は作らない。日報ブロックが無い場合は「施策なし」ではなく「日報記録を確認できない」と書く。`,
     `【打ち手】根拠のない客数+○%・客単価+○円などの目標を作らない。基準値がある場合だけ数値化し、無い場合は「次回記録する観測可能なKPI」を1つ示す。`,
@@ -3487,7 +3507,7 @@ export async function generateFoodCourtPeriodSummary(
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ops' } }),
-    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
+    fetchFoodCourtXTrendBrief(foodCourtXTrendTopic(), foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
   const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
@@ -3514,7 +3534,7 @@ export async function generateFoodCourtPeriodSummary(
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリストです。`,
     `目的は対象期間(${startDate}〜${endDate})の実績について、表の値の言い換えではなく「だから何を意味するか」まで踏み込んだ期間サマリーを作ることです。期間中の日報は施策レポートとして必ずリンクする。`,
     `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象期間の事実」および「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
-    `【X最新トレンドの扱い・使用は必須】「X（旧Twitter）最新トレンド」ブロックがある場合、打ち手または客層の見立てのうち最低1つは、必ずそのトレンドを踏まえたものにすること。一般論だけで書いて無視してはならない（実際にXを検索して取得した当日の情報であり、他のどのAIも持っていない材料である）。ただし外部知見であって売上データではないため、次を守る: (a)「X上で〇〇が話題」のように出所を必ず明示する、(b) 参照URLがあれば添える、(c) 売上・客数の根拠には使わない、(d) 投稿の話題を市場全体の事実として断定せず「仮説」と書く。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
+    `【X最新トレンドの扱い・使用は必須】「X（旧Twitter）最新トレンド」ブロックがある場合、打ち手・メニューや商品の方向性・客層の見立てのうち最低1つは、必ずそのトレンドを踏まえたものにすること。一般論だけで書いて無視してはならない（実際にXを検索して取得した当日の情報であり、他のどのAIも持っていない材料である）。ただし外部知見であって売上データではないため、次を守る: (a)「X上で〇〇が話題」のように出所を必ず明示する、(b) 参照URLがあれば添える、(c) 売上・客数の根拠には使わない、(d) 投稿の話題を市場全体の事実として断定せず「仮説」と書く。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象期間に含まれる複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断し、【この期間の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     FOODCOURT_ACTION_FORMAT_RULE,
     nippouRules,
@@ -3987,7 +4007,7 @@ export async function generateFoodCourtWeeklyReport(
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ops' } }),
-    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
+    fetchFoodCourtXTrendBrief(foodCourtXTrendTopic(), foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
   const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   for (const u of [quantRes.usage, extRes.usage, opsRes.usage]) {
@@ -4007,7 +4027,7 @@ export async function generateFoodCourtWeeklyReport(
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）の経営アドバイザーです。`,
     `目的は先週（${weekStart}〜${weekEnd}）の実績について、経営者に週次で届ける「経営レポート」を作ることです。日報がある週は日報リンクの施策効果レポートとしても書く。`,
     `以下の専門AIメモを参考意見として使い、「対象週の事実」と「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わない。`,
-    `【X最新トレンドの扱い・使用は必須】「X（旧Twitter）最新トレンド」ブロックがある場合、「来週の重点施策」または客層の見立てのうち最低1つは、必ずそのトレンドを踏まえたものにすること。一般論だけで書いて無視してはならない。ただし外部知見であって売上データではないため、次を守る: (a)「X上で〇〇が話題」のように出所を必ず明示する、(b) 参照URLがあれば添える、(c) 売上・客数の根拠には使わない、(d) 投稿の話題を市場全体の事実として断定せず「仮説」と書く。ブロックが無い場合はトレンドに言及しないこと。`,
+    `【X最新トレンドの扱い・使用は必須】「X（旧Twitter）最新トレンド」ブロックがある場合、「来週の重点施策」・メニューや商品の方向性・客層の見立てのうち最低1つは、必ずそのトレンドを踏まえたものにすること。一般論だけで書いて無視してはならない。ただし外部知見であって売上データではないため、次を守る: (a)「X上で〇〇が話題」のように出所を必ず明示する、(b) 参照URLがあれば添える、(c) 売上・客数の根拠には使わない、(d) 投稿の話題を市場全体の事実として断定せず「仮説」と書く。ブロックが無い場合はトレンドに言及しないこと。`,
     FOODCOURT_ACTION_FORMAT_RULE,
     nippouRules,
     `【出力フォーマット・厳守】必ず次の5つの見出しを、この順番・この表記（##で始める）で出力すること。`,
