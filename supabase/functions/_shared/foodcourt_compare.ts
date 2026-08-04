@@ -670,9 +670,15 @@ function foodCourtEnvInt(name: string, fallback: number, min: number, max: numbe
   return Math.min(max, Math.max(min, Math.trunc(n)))
 }
 
-// 定期サマリー（日次/期間/週次）にはユーザーの質問文が無いため、会場文脈の固定トピックで検索する。
-// 全店舗・全サーフェスで同じキーになるので、1日1回の検索を使い回せる。
-const FOODCOURT_X_TREND_SCHEDULED_TOPIC =
+// 全サーフェス共通の検索トピック。Q&Aでもユーザーの質問文は検索クエリに使わない。
+//
+// 【重要・2026-08-04の実測で判明】Q&Aだけ質問文を渡していたが、これは誤りだった。
+// このシステムへの質問は「売上を伸ばすための提案を3つ」のように自店の数字についてのもので、
+// Xには存在しない。実際にその質問文で検索した結果、無関係な投稿を31,728トークン取り込んで
+// 課金だけ発生し、X投稿の引用が成立せずブロックごと破棄された。
+// 検索すべきは常に「会場とその客層・外食トレンド」という外の世界の話題で、質問では変わらない。
+// 固定トピックにすることで全店舗・全サーフェスがキャッシュを共有し、1日1検索に集約される。
+const FOODCOURT_X_TREND_TOPIC =
   '東京ドーム／東京ドームシティの来場者の話題（イベント・客層・混雑）と、外食・ワイン・スパイス料理まわりの直近トレンド'
 
 /** キャッシュキー用の JST 日付（トレンドは日単位で十分） */
@@ -720,7 +726,8 @@ async function fetchFoodCourtXTrendBrief(
       // 実費の可視化。破棄した応答でも xAI は課金済みなので、成否にかかわらず記録する。
       // x_search はトークンとは別に $5/1k calls で課金されるため、実行回数を model 名に残す
       // （ai_usage_events にツール回数の列が無いため。集計は docs のSQLを参照）。
-      await recordFoodCourtXTrendUsage(supabase, storeKey, brief.usage)
+      // 破棄時は理由も残し、「検索したのに使われなかった率」を後から測れるようにする。
+      await recordFoodCourtXTrendUsage(supabase, storeKey, brief.usage, result ? null : (brief.error ?? 'unknown'))
     } catch (e) {
       console.error('foodcourt x_search brief threw:', (e instanceof Error ? e.message : String(e)).slice(0, 200))
     }
@@ -742,12 +749,14 @@ async function recordFoodCourtXTrendUsage(
   supabase: SupabaseClient | null | undefined,
   storeKey: string | null | undefined,
   usage: GrokXSearchUsage | undefined,
+  dropReason: string | null,
 ): Promise<void> {
   if (!supabase || !storeKey || !usage) return
   if (!usage.inputTokens && !usage.outputTokens) return
+  const dropTag = dropReason ? ` drop:${String(dropReason).slice(0, 40)}` : ''
   await recordFoodCourtAiUsage(supabase, String(storeKey), null, {
     provider: 'grok',
-    model: `${usage.model} x_search*${usage.xSearchCalls}`,
+    model: `${usage.model} x_search*${usage.xSearchCalls}${dropTag}`,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     thinkingTokens: null,
@@ -3124,7 +3133,7 @@ export async function answerFoodCourtQuestion(
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ops' } }),
-    fetchFoodCourtXTrendBrief(q, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
+    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
   const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
@@ -3314,7 +3323,7 @@ export async function generateFoodCourtDailySummary(
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ops' } }),
-    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_SCHEDULED_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
+    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
   const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
@@ -3478,7 +3487,7 @@ export async function generateFoodCourtPeriodSummary(
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ops' } }),
-    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_SCHEDULED_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
+    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
   const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
@@ -3978,7 +3987,7 @@ export async function generateFoodCourtWeeklyReport(
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ops' } }),
-    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_SCHEDULED_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
+    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
   const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   for (const u of [quantRes.usage, extRes.usage, opsRes.usage]) {

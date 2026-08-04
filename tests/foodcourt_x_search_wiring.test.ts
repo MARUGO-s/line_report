@@ -72,13 +72,35 @@ test('brief is cost-bounded by an on/off switch, a cache and a soft timeout', ()
   assert.match(source, /Math\.min\(cap, Math\.floor\(remaining \/ 2\)\)/)
 })
 
-test('scheduled summaries share one cached search per day', () => {
-  // 日次/期間/週次は質問文が無いので固定トピック = 全店舗で同じキャッシュキーになる。
-  const scheduled = source.match(/FOODCOURT_X_TREND_SCHEDULED_TOPIC/g) ?? []
-  assert.equal(scheduled.length, 4) // 定義1 + 3サーフェス
-  // Q&A(ask) だけは質問文で検索して的を絞る。
-  assert.match(source, /fetchFoodCourtXTrendBrief\(q, foodCourtXTrendSoftTimeoutMs\(deadlineAt\), supabase, storeKey\)/)
+test('the user question is never used as the X search query', () => {
+  // 回帰防止(2026-08-04): Q&Aだけ質問文を検索クエリに渡していたが、このシステムへの質問は
+  // 「売上を伸ばすための提案を3つ」のように自店の数字の話で、Xには存在しない。
+  // 実際に無関係な投稿を31,728トークン取り込んで課金だけ発生し、引用が成立せず破棄された。
+  assert.doesNotMatch(source, /fetchFoodCourtXTrendBrief\(\s*q\s*,/)
+
+  // 4サーフェスとも会場・外食トレンドの固定トピックを使う。
+  const calls = source.match(/fetchFoodCourtXTrendBrief\(FOODCOURT_X_TREND_TOPIC,/g) ?? []
+  assert.equal(calls.length, 4)
+  // 定義1 + 4サーフェス。全店舗・全サーフェスで同じキャッシュキー = 1日1検索。
+  const topicRefs = source.match(/FOODCOURT_X_TREND_TOPIC/g) ?? []
+  assert.equal(topicRefs.length, 5)
   assert.match(source, /foodCourtJstDate\(\)/)
+})
+
+test('reasoning tokens cannot starve the brief text', () => {
+  // grok-4.5 は reasoning も output に算入される。1400では推論で枠を使い切って
+  // 本文が出ず empty_content になりうる（実測 1339/1400）。
+  assert.doesNotMatch(journalSource, /max_output_tokens:\s*1400/)
+  assert.match(journalSource, /GROK_X_SEARCH_MAX_OUTPUT_TOKENS/)
+  // env読み取りは呼び出し側に置く。組み立て関数を純粋に保たないと
+  // --allow-env なしのテストから呼べなくなる。
+  assert.match(journalSource, /max_output_tokens: maxOutputTokens/)
+})
+
+test('dropped briefs are recorded with their reason', () => {
+  // 検索は走った＝課金済みなのに使われなかったケースを後から数えられるようにする。
+  assert.match(source, /const dropTag = dropReason \? ` drop:\$\{String\(dropReason\)\.slice\(0, 40\)\}` : ''/)
+  assert.match(source, /recordFoodCourtXTrendUsage\(supabase, storeKey, brief\.usage, result \? null : \(brief\.error \?\? 'unknown'\)\)/)
 })
 
 test('brief cost is recorded so the estimate can be checked against reality', () => {
@@ -91,8 +113,8 @@ test('brief cost is recorded so the estimate can be checked against reality', ()
   assert.equal(usageReturns.length, 3) // 成功 + 破棄2種
 
   // ツール回数の列が無いため model 名に残し、SQLで復元できるようにする。
-  assert.match(source, /model: `\$\{usage\.model\} x_search\*\$\{usage\.xSearchCalls\}`/)
-  assert.match(source, /await recordFoodCourtXTrendUsage\(supabase, storeKey, brief\.usage\)/)
+  assert.match(source, /model: `\$\{usage\.model\} x_search\*\$\{usage\.xSearchCalls\}\$\{dropTag\}`/)
+  assert.match(source, /await recordFoodCourtXTrendUsage\(supabase, storeKey, brief\.usage,/)
 })
 
 test('x_search tokens are not priced at the cheap grok-3-mini rate', () => {

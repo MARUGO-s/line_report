@@ -42,11 +42,14 @@ Deno.test("Grok request requires x_search with an explicit date range", () => {
     fromDate: "2026-07-06",
     toDate: "2026-08-04",
     maxToolCalls: 4,
+    maxOutputTokens: 3000,
   });
   assert(request.model === "grok-4.5", "model mismatch");
   assert(request.tool_choice === "required", "x_search must be required");
   assert(request.store === false, "search prompt should not be stored");
   assert(request.max_tool_calls === 4, "max tool calls mismatch");
+  // reasoning も output に算入されるため、本文が出る前に枠切れしない値を渡す。
+  assert(request.max_output_tokens === 3000, "max output tokens mismatch");
   const tools = request.tools as Array<Record<string, unknown>>;
   assert(tools.length === 1, "only x_search should be available");
   assert(tools[0].type === "x_search", "tool should be x_search");

@@ -38,6 +38,11 @@ export type GrokXSearchRequestOptions = {
   fromDate: string;
   toDate: string;
   maxToolCalls: number;
+  /**
+   * grok-4.5 は reasoning トークンも output に算入される。小さすぎると推論で枠を使い切り、
+   * 本文が出ないまま empty_content になる（2026-08-04 の実測は 1339/1400 でほぼ上限）。
+   */
+  maxOutputTokens: number;
 };
 
 export type ParsedGrokXSearchResponse = {
@@ -148,6 +153,7 @@ export function buildGrokXSearchRequest(
     fromDate,
     toDate,
     maxToolCalls,
+    maxOutputTokens,
   } = options;
   const userPrompt =
     `マルゴグループ（ワイン推しの飲食店グループ）向けに、指定期間のX（旧Twitter）を実際に検索し、質問の対策に使える最新トレンドを日本語でまとめてください。
@@ -185,7 +191,7 @@ export function buildGrokXSearchRequest(
     ],
     tool_choice: "required",
     max_tool_calls: maxToolCalls,
-    max_output_tokens: 1400,
+    max_output_tokens: maxOutputTokens,
     reasoning: { effort: "low" },
     store: false,
   };
@@ -462,6 +468,12 @@ export async function callGrokTrendBrief(
     new Date(),
     Deno.env.get("GROK_X_SEARCH_LOOKBACK_DAYS"),
   );
+  const maxOutputTokens = clampInteger(
+    Deno.env.get("GROK_X_SEARCH_MAX_OUTPUT_TOKENS"),
+    3000,
+    600,
+    8000,
+  );
   const requestBody = buildGrokXSearchRequest({
     model,
     question,
@@ -469,6 +481,7 @@ export async function callGrokTrendBrief(
     fromDate: searchWindow.from,
     toDate: searchWindow.to,
     maxToolCalls,
+    maxOutputTokens,
   });
   try {
     const res = await fetchWithTimeout(
