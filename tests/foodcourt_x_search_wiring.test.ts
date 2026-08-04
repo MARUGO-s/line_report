@@ -57,10 +57,22 @@ test('every integrator is told how to use (and not use) the X trend block', () =
   // メニュー・商品の方向性への反映が主目的なので、その用途を必ず示す。
   const menuUse = source.match(/メニューや商品の方向性/g) ?? []
   assert.equal(menuUse.length, 4)
-  // ガードレール: 出所明示・売上根拠への流用禁止・不在時は言及禁止。
-  assert.match(source, /出所を必ず明示する/)
+  // 回帰防止(2026-08-04): 使用を必須にしただけでは「X上で話題の季節の食材」のような
+  // 一般語への言い換えが起き、検索した意味が消える。具体名の引用を明示的に要求する。
+  const verbatim = source.match(/一般語に言い換えてはならない/g) ?? []
+  assert.equal(verbatim.length, 4)
+  // ガードレール: 売上根拠への流用禁止・不在時は言及禁止。
   assert.match(source, /売上・客数の根拠には使わない/)
   assert.match(source, /ブロックが無い場合はトレンドに言及しないこと/)
+})
+
+test('the brief text is persisted so its quality can be judged directly', () => {
+  // 統合AIが圧縮した後の answer しか残らないと、「Xの情報が薄い」のか
+  // 「統合AIが潰した」のかを切り分けられない。
+  assert.match(source, /xTrendBrief: xTrendBrief \? xTrendBrief\.text : null/)
+  const apiPath = fileURLToPath(new URL('../supabase/functions/admin-api/index.ts', import.meta.url))
+  const api = readFileSync(apiPath, 'utf8')
+  assert.match(api, /x_trend_brief: qaResult\.xTrendBrief \?\? null/)
 })
 
 test('the brief has no substitute provider and degrades to silence', () => {
