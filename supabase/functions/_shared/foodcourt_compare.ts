@@ -27,6 +27,7 @@ import {
   stripFoodCourtThinkingBlocks,
 } from './foodcourt_loop_utils.ts'
 import { GROQ_TEXT_FALLBACK_MODEL, GROQ_TEXT_FOODCOURT_MODEL, resolveGroqTextModel } from './groq_model.ts'
+import { callGrokTrendBrief, type GrokXSearchUsage } from './journal_ai_orchestrate.ts'
 
 // LINE通知から開くフードコート分析ページ（本番）。小口現金と同方式: from=line＋store_key＋ワンタイム lt。
 const FOODCOURT_PAGE_BASE = 'https://marugo-s.github.io/line_report/foodcourt.html'
@@ -640,6 +641,139 @@ function resolveFoodCourtGrokApiKey(): string {
 
 function resolveFoodCourtGrokModel(): string {
   return String(Deno.env.get('FOODCOURT_GROK_MODEL') || '').trim() || 'grok-3-mini'
+}
+
+// ===== X（旧Twitter）最新トレンドブリーフ =====
+// 専門AI③は Chat Completions (/v1/chat/completions) 経由で Grok を呼ぶが、この経路は
+// 関数ツールしか受け付けず x_search が使えない。つまり専門AI③は「Xを検索している」のではなく
+// 学習済み知識で答えているだけになる。実際にXを検索できるのは Responses API + x_search だけなので、
+// journal 側で実装済みの callGrokTrendBrief を再利用し、その結果を分析の材料として渡す。
+// 参照: docs/フードコートAI分析システム_設計解説.md（専門AI③の設計意図）
+
+type FoodCourtXTrendBrief = { text: string; citations: string[] }
+
+// 同日・同トピックの再質問で毎回課金しないための isolate 内キャッシュ。
+// 成功は長め、失敗は短めに保持する（一時的な失敗で半日ブラインドにならないように）。
+const FOODCOURT_X_TREND_CACHE = new Map<string, { at: number; ttlMs: number; brief: FoodCourtXTrendBrief | null }>()
+
+function foodCourtEnvFlag(name: string, fallback: boolean): boolean {
+  const raw = String(Deno.env.get(name) ?? '').trim().toLowerCase()
+  if (!raw) return fallback
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false
+  return fallback
+}
+
+function foodCourtEnvInt(name: string, fallback: number, min: number, max: number): number {
+  const n = Number(Deno.env.get(name))
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, Math.trunc(n)))
+}
+
+// 定期サマリー（日次/期間/週次）にはユーザーの質問文が無いため、会場文脈の固定トピックで検索する。
+// 全店舗・全サーフェスで同じキーになるので、1日1回の検索を使い回せる。
+const FOODCOURT_X_TREND_SCHEDULED_TOPIC =
+  '東京ドーム／東京ドームシティの来場者の話題（イベント・客層・混雑）と、外食・ワイン・スパイス料理まわりの直近トレンド'
+
+/** キャッシュキー用の JST 日付（トレンドは日単位で十分） */
+function foodCourtJstDate(now: Date = new Date()): string {
+  return new Date(now.getTime() + 9 * 3600_000).toISOString().slice(0, 10)
+}
+
+/**
+ * X の最新トレンドブリーフを取得する。取得できなければ null（分析はブリーフ無しで続行）。
+ * softTimeoutMs を超えたら待たずに諦める。専門AIの応答待ち時間の中に収めるための保険で、
+ * 裏の fetch は完走してキャッシュに載るため、次の質問では即座に使える。
+ */
+async function fetchFoodCourtXTrendBrief(
+  topic: string,
+  softTimeoutMs: number,
+  supabase?: SupabaseClient | null,
+  storeKey?: string | null,
+): Promise<FoodCourtXTrendBrief | null> {
+  if (!foodCourtEnvFlag('FOODCOURT_X_SEARCH_ENABLED', true)) return null
+  if (!resolveFoodCourtGrokApiKey()) return null
+
+  const key = `${foodCourtJstDate()}|${topic.trim().slice(0, 200)}`
+  const cached = FOODCOURT_X_TREND_CACHE.get(key)
+  if (cached && Date.now() - cached.at < cached.ttlMs) return cached.brief
+
+  const okTtlMs = foodCourtEnvInt('FOODCOURT_X_SEARCH_CACHE_TTL_MS', 6 * 3600_000, 60_000, 24 * 3600_000)
+  const ngTtlMs = Math.min(okTtlMs, 10 * 60_000)
+
+  // softTimeoutMs 側が先に解決した後もこの promise は走り続けるため、
+  // 例外は必ずここで握る（未処理拒否にしない）。
+  const load = (async (): Promise<FoodCourtXTrendBrief | null> => {
+    let result: FoodCourtXTrendBrief | null = null
+    try {
+      const brief = await callGrokTrendBrief(
+        topic,
+        'MARUGO S / 東京ドーム内フードホール「FOOD STADIUM TOKYO」内のワイン×スパイス業態（高単価・大人向け）。'
+          + '来店動機は野球・ライブ観戦の前後、待ち時間の軽食、デート/接待、インバウンド。',
+      )
+      result = brief.ok && brief.text
+        ? { text: brief.text, citations: Array.isArray(brief.citations) ? brief.citations : [] }
+        : null
+      if (!result) {
+        console.error('foodcourt x_search brief unavailable:', brief.error ?? 'unknown')
+      }
+      // 実費の可視化。破棄した応答でも xAI は課金済みなので、成否にかかわらず記録する。
+      // x_search はトークンとは別に $5/1k calls で課金されるため、実行回数を model 名に残す
+      // （ai_usage_events にツール回数の列が無いため。集計は docs のSQLを参照）。
+      await recordFoodCourtXTrendUsage(supabase, storeKey, brief.usage)
+    } catch (e) {
+      console.error('foodcourt x_search brief threw:', (e instanceof Error ? e.message : String(e)).slice(0, 200))
+    }
+    FOODCOURT_X_TREND_CACHE.set(key, { at: Date.now(), ttlMs: result ? okTtlMs : ngTtlMs, brief: result })
+    return result
+  })()
+
+  // callGrokTrendBrief は内部で必ず catch するため reject しない（未処理拒否にならない）。
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.max(1000, softTimeoutMs)))
+  return await Promise.race([load, timeout])
+}
+
+/**
+ * Xトレンドブリーフの実測トークンを ai_usage_events に記録する。
+ * model は `grok-4.5 x_search*2` の形にして、トークンとは別建ての x_search 実行料
+ * （$5/1k calls）を後から SQL で復元できるようにする。
+ */
+async function recordFoodCourtXTrendUsage(
+  supabase: SupabaseClient | null | undefined,
+  storeKey: string | null | undefined,
+  usage: GrokXSearchUsage | undefined,
+): Promise<void> {
+  if (!supabase || !storeKey || !usage) return
+  if (!usage.inputTokens && !usage.outputTokens) return
+  await recordFoodCourtAiUsage(supabase, String(storeKey), null, {
+    provider: 'grok',
+    model: `${usage.model} x_search*${usage.xSearchCalls}`,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    thinkingTokens: null,
+    totalTokens: usage.totalTokens,
+  })
+}
+
+/**
+ * トレンドブリーフに割ける待ち時間。専門AI3本と並列に走らせるので、
+ * 全体の締切（統合AI・反証AIの取り分）を食い潰さない範囲に収める。
+ */
+function foodCourtXTrendSoftTimeoutMs(deadlineAt?: number): number {
+  const cap = foodCourtEnvInt('FOODCOURT_X_SEARCH_SOFT_TIMEOUT_MS', 18_000, 1_000, 60_000)
+  if (deadlineAt == null) return cap
+  const remaining = deadlineAt - Date.now()
+  return Math.max(1_000, Math.min(cap, Math.floor(remaining / 2)))
+}
+
+/** トレンドブリーフを専門AI/統合AI向けのプロンプトブロックに整形する */
+function formatFoodCourtXTrendBlock(brief: FoodCourtXTrendBrief | null): string {
+  if (!brief) return ''
+  const sources = brief.citations.slice(0, 5)
+  return `# X（旧Twitter）最新トレンド（Grok x_search による外部知見）\n`
+    + `※これは店舗の保存済み売上データではなく外部知見です。売上・客数の根拠には使わず、`
+    + `客層・話題・来店動機の仮説としてのみ使うこと。数値と混ぜて断定しないこと。\n`
+    + `${brief.text}${sources.length ? `\n\n参照: ${sources.join(' / ')}` : ''}`
 }
 
 function resolveFoodCourtClaudeApiKey(): string {
@@ -2986,11 +3120,13 @@ export async function answerFoodCourtQuestion(
   ].join('\n')
   const opsUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 競合プロファイル\n${competitors}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
 
-  const [quantRes, extRes, opsRes] = await Promise.all([
+  const [quantRes, extRes, opsRes, xTrendBrief] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 700, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_ops' } }),
+    fetchFoodCourtXTrendBrief(q, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
+  const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
   if (opsRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, opsRes.usage)
@@ -3034,12 +3170,13 @@ export async function answerFoodCourtQuestion(
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈＋日報施策）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
     `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
     `【専門AIメモの統合】以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。メモが矛盾する場合や誇張がある場合は、必ず生データ・事前計算ブロック・日報×実績対照の数値で裏取りしてから採否を判断し、1つの一貫した最終回答にまとめること。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱めること。`,
+    `【X最新トレンドの扱い】「X（旧Twitter）最新トレンド」ブロックがある場合、それは Grok が実際にXを検索して得た外部知見であり、店舗の売上データではない。客層・話題・来店動機の仮説や打ち手の着想には使ってよいが、売上・客数の根拠に使ってはならず、投稿の話題を市場全体の事実として断定してもいけない。使う場合は「X上で話題」等と出所が分かる形で書き、参照URLがあれば添える。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。来客予測モデルの学習係数(自己採点済み)であれば、来客予測の自己採点(誤差%)と矛盾しない範囲で解釈する。対象日/対象期間に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【回答品質】最後に必ず、実行すべき次の一手または次に確認すべきKPIを1つ以上入れる。数字の羅列だけで終えない。日報があるときは次の一手を日報の学びと接続する。`,
     FOODCOURT_ACTION_FORMAT_RULE,
   ].join('\n')
   const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'ask', q)
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の”前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${learningMemory ? '\n\n' + learningMemory : ''}\n\n# 日次生データ（全テナント）\n${data}`
+  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の”前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${learningMemory ? '\n\n' + learningMemory : ''}${xTrendBlock ? '\n\n' + xTrendBlock : ''}\n\n# 日次生データ（全テナント）\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
@@ -3173,11 +3310,13 @@ export async function generateFoodCourtDailySummary(
   ].join('\n')
   const opsUser = `対象日の運営改善メモを書いてください。\n\n# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${dailyLogsBlock}${priorBlock ? '\n\n' + priorBlock : ''}`
 
-  const [quantRes, extRes, opsRes] = await Promise.all([
+  const [quantRes, extRes, opsRes, xTrendBrief] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'specialist_ops' } }),
+    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_SCHEDULED_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
+  const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
   if (opsRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, opsRes.usage)
@@ -3204,6 +3343,7 @@ export async function generateFoodCourtDailySummary(
     `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象日の事実」および「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
     `【前回分析の自己検証】「前回の分析」が与えられている場合、そこで語った見立て（好調/不調の理由・客数要因か客単価要因か・イベント/天気の影響など）が今回の対象日の実績でも裏付けられたか、変わったかを必ずどこかの見出し（主に【この日の評価（条件別）】か【直近の勢い】）で一言検証すること。同じ結論・同じ言い回しを毎日繰り返さない。前回との継続性がある分析にする。`,
     `【比較可能性】前回分析と対象日の曜日・イベント規模・天気など主要条件が違う場合は、前回仮説が支持/否定されたと断定せず「条件が異なるため直接比較できない」と書く。`,
+    `【X最新トレンドの扱い】「X（旧Twitter）最新トレンド」ブロックがある場合、それは Grok が実際にXを検索して得た外部知見であり、店舗の売上データではない。客層・話題・来店動機の仮説や打ち手の着想には使ってよいが、売上・客数の根拠に使ってはならず、投稿の話題を市場全体の事実として断定してもいけない。使う場合は「X上で話題」等と出所が分かる形で書き、参照URLがあれば添える。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象日に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、それぞれの確度を踏まえながら「複数の条件が重なってどう効いたか」を多角的に判断し、【この日の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     `【不足データの扱い】入力に無い他店のイベント捕捉率・時間帯別実績・統計的有意差は作らない。日報ブロックが無い場合は「施策なし」ではなく「日報記録を確認できない」と書く。`,
     `【打ち手】根拠のない客数+○%・客単価+○円などの目標を作らない。基準値がある場合だけ数値化し、無い場合は「次回記録する観測可能なKPI」を1つ示す。`,
@@ -3221,7 +3361,7 @@ export async function generateFoodCourtDailySummary(
     `各見出しの本文は短い文を2〜4行程度。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。客単価の順位は業態由来なので単価の高低そのものを優劣にしない。`,
   ].join('\n')
   const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'daily_summary', targetFacts)
-  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}${monthlyBlock ? '\n\n' + monthlyBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}`
+  const contextBlock = `# 対象日の事実\n${targetFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${priorBlock ? '\n\n' + priorBlock : ''}${monthlyBlock ? '\n\n' + monthlyBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}${xTrendBlock ? '\n\n' + xTrendBlock : ''}`
   const baseMessages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象日の日次サマリーを作成してください。` },
@@ -3334,11 +3474,13 @@ export async function generateFoodCourtPeriodSummary(
   ].join('\n')
   const opsUser = `対象期間の運営改善メモを書いてください。\n\n# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${dailyLogsBlock}`
 
-  const [quantRes, extRes, opsRes] = await Promise.all([
+  const [quantRes, extRes, opsRes, xTrendBrief] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 600, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'specialist_ops' } }),
+    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_SCHEDULED_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
+  const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   if (quantRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, quantRes.usage)
   if (extRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, extRes.usage)
   if (opsRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, opsRes.usage)
@@ -3363,6 +3505,7 @@ export async function generateFoodCourtPeriodSummary(
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリストです。`,
     `目的は対象期間(${startDate}〜${endDate})の実績について、表の値の言い換えではなく「だから何を意味するか」まで踏み込んだ期間サマリーを作ることです。期間中の日報は施策レポートとして必ずリンクする。`,
     `以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。矛盾や誇張がある場合は「対象期間の事実」および「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱める。`,
+    `【X最新トレンドの扱い】「X（旧Twitter）最新トレンド」ブロックがある場合、それは Grok が実際にXを検索して得た外部知見であり、店舗の売上データではない。客層・話題・来店動機の仮説や打ち手の着想には使ってよいが、売上・客数の根拠に使ってはならず、投稿の話題を市場全体の事実として断定してもいけない。使う場合は「X上で話題」等と出所が分かる形で書き、参照URLがあれば添える。ブロックが無い場合はトレンドに言及しないこと（憶測で補わない）。`,
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。対象期間に含まれる複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断し、【この期間の評価（条件別）】で言及する。nが少ない条件は「参考程度」と明示し、断定しない。`,
     FOODCOURT_ACTION_FORMAT_RULE,
     nippouRules,
@@ -3377,7 +3520,7 @@ export async function generateFoodCourtPeriodSummary(
     `各見出しの本文は短い文を2〜4行程度。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。客単価の順位は業態由来なので単価の高低そのものを優劣にしない。`,
   ].join('\n')
   const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'period_summary', `${startDate} ${endDate} ${periodFacts}`)
-  const contextBlock = `# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}`
+  const contextBlock = `# 対象期間の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${dailyLogsBlock}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}${xTrendBlock ? '\n\n' + xTrendBlock : ''}`
   const baseMessages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、対象期間の日次サマリーを作成してください。` },
@@ -3831,11 +3974,13 @@ export async function generateFoodCourtWeeklyReport(
     `採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（250字程度）。`,
   ].join('\n')
 
-  const [quantRes, extRes, opsRes] = await Promise.all([
+  const [quantRes, extRes, opsRes, xTrendBrief] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 600, 'groq', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_quant' } }),
     foodCourtAiChat([{ role: 'system', content: extSystem }, { role: 'user', content: extUser }], groqApiKey, primary, 600, 'gemini', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ext' } }),
     foodCourtAiChat([{ role: 'system', content: opsSystem }, { role: 'user', content: opsUser }], groqApiKey, primary, 700, 'grok', fallbackModel, { deadlineAt, perProviderMs: 15000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'specialist_ops' } }),
+    fetchFoodCourtXTrendBrief(FOODCOURT_X_TREND_SCHEDULED_TOPIC, foodCourtXTrendSoftTimeoutMs(deadlineAt), supabase, storeKey),
   ])
+  const xTrendBlock = formatFoodCourtXTrendBlock(xTrendBrief)
   for (const u of [quantRes.usage, extRes.usage, opsRes.usage]) {
     if (u) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, u)
   }
@@ -3853,6 +3998,7 @@ export async function generateFoodCourtWeeklyReport(
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）の経営アドバイザーです。`,
     `目的は先週（${weekStart}〜${weekEnd}）の実績について、経営者に週次で届ける「経営レポート」を作ることです。日報がある週は日報リンクの施策効果レポートとしても書く。`,
     `以下の専門AIメモを参考意見として使い、「対象週の事実」と「日報×実績 効果対照」の数値で裏取りしてから採否を判断する。反証メモで禁止された断定は使わない。`,
+    `【X最新トレンドの扱い】「X（旧Twitter）最新トレンド」ブロックがある場合、それは Grok が実際にXを検索して得た外部知見であり、店舗の売上データではない。来週の重点施策の着想や客層仮説には使ってよいが、売上・客数の根拠に使ってはならず、投稿の話題を市場全体の事実として断定してもいけない。使う場合は「X上で話題」等と出所が分かる形で書く。ブロックが無い場合はトレンドに言及しないこと。`,
     FOODCOURT_ACTION_FORMAT_RULE,
     nippouRules,
     `【出力フォーマット・厳守】必ず次の5つの見出しを、この順番・この表記（##で始める）で出力すること。`,
@@ -3869,7 +4015,7 @@ export async function generateFoodCourtWeeklyReport(
     `各見出しの本文は経営者が読む想定で、プロフェッショナルかつ具体的に書く。断定できないことは「仮説」と明示する。`,
   ].join('\n')
   const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'weekly_report', `${weekStart} ${weekEnd} ${periodFacts}`)
-  const contextBlock = `# 対象週の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${logsBlock ? logsBlock + '\n\n' : ''}# 他店舗・過去データ分析メモ\n${quantNote}\n\n# イベント・天気分析メモ\n${extNote}\n\n# 経営改善・施策効果メモ\n${opsNote}\n\n# 反証メモ\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}`
+  const contextBlock = `# 対象週の事実\n${periodFacts}\n\n# 競合プロファイル\n${competitors}\n\n${logsBlock ? logsBlock + '\n\n' : ''}# 他店舗・過去データ分析メモ\n${quantNote}\n\n# イベント・天気分析メモ\n${extNote}\n\n# 経営改善・施策効果メモ\n${opsNote}\n\n# 反証メモ\n${criticNote}${patternBlock ? '\n\n' + patternBlock : ''}${learningMemory ? '\n\n' + learningMemory : ''}${xTrendBlock ? '\n\n' + xTrendBlock : ''}`
   const baseMessages = [
     { role: 'system', content: system },
     { role: 'user', content: `# 分析の材料\n${contextBlock}\n\n上記フォーマット厳守で、${weekStart}〜${weekEnd}の週次経営レポートを作成してください。` },

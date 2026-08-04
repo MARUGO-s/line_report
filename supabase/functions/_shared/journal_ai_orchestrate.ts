@@ -5,6 +5,19 @@
 
 export type JournalChatIntent = "data" | "strategy" | "mixed";
 
+/**
+ * x_search 1回分の実測コスト材料。
+ * xAI はトークンとは別に「ツール実行回数」で課金する（x_search: $5 / 1k calls）ため、
+ * トークンだけでは実費が出ない。xSearchCalls を必ず一緒に持ち回る。
+ */
+export type GrokXSearchUsage = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  xSearchCalls: number;
+};
+
 export type ExternalBrief = {
   provider: "perplexity" | "grok";
   ok: boolean;
@@ -13,6 +26,7 @@ export type ExternalBrief = {
   searchedAt?: string;
   searchRange?: { from: string; to: string };
   citations?: string[];
+  usage?: GrokXSearchUsage;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -31,6 +45,8 @@ export type ParsedGrokXSearchResponse = {
   citations: string[];
   usedXSearch: boolean;
   evidence: "tool_call" | "server_usage" | "structured_x_citation" | "none";
+  /** 実際に走った x_search の回数（課金単位）。数えられない場合は検索実施なら 1、未実施なら 0。 */
+  xSearchCalls: number;
 };
 
 const XAI_RESPONSES_ENDPOINT = "https://api.x.ai/v1/responses";
@@ -212,12 +228,19 @@ export function parseGrokXSearchResponse(
   json: unknown,
 ): ParsedGrokXSearchResponse {
   if (!isRecord(json)) {
-    return { text: "", citations: [], usedXSearch: false, evidence: "none" };
+    return {
+      text: "",
+      citations: [],
+      usedXSearch: false,
+      evidence: "none",
+      xSearchCalls: 0,
+    };
   }
   let text = "";
   const citations: string[] = [];
   const structuredUrls: string[] = [];
   let toolCallUsed = false;
+  let xSearchCalls = 0;
 
   if (Array.isArray(json.citations)) {
     for (const citation of json.citations) {
@@ -229,7 +252,10 @@ export function parseGrokXSearchResponse(
   const output = Array.isArray(json.output) ? json.output : [];
   for (const item of output) {
     if (!isRecord(item)) continue;
-    if (item.type === "x_search_call") toolCallUsed = true;
+    if (item.type === "x_search_call") {
+      toolCallUsed = true;
+      xSearchCalls += 1;
+    }
     if (item.type !== "message" || !Array.isArray(item.content)) continue;
     for (const content of item.content) {
       if (!isRecord(content) || content.type !== "output_text") continue;
@@ -254,12 +280,30 @@ export function parseGrokXSearchResponse(
     ? "structured_x_citation"
     : "none";
 
+  const usedXSearch = evidence !== "none";
   return {
     text: String(json.output_text || "").trim() || text,
     citations,
-    usedXSearch: evidence !== "none",
+    usedXSearch,
     evidence,
+    // x_search_call を数えられない応答形（server_usage / citation からの推定）でも、
+    // 検索が走った以上は最低1回分は課金されているので 0 とは扱わない。
+    xSearchCalls: xSearchCalls > 0 ? xSearchCalls : (usedXSearch ? 1 : 0),
   };
+}
+
+/** xAI Responses API の usage（input_tokens / output_tokens / total_tokens）を取り出す。 */
+function extractGrokUsage(
+  json: unknown,
+  model: string,
+  xSearchCalls: number,
+): GrokXSearchUsage {
+  const root = isRecord(json) ? json : {};
+  const u = isRecord(root.usage) ? root.usage : {};
+  const inputTokens = Number(u.input_tokens ?? 0) || 0;
+  const outputTokens = Number(u.output_tokens ?? 0) || 0;
+  const totalTokens = Number(u.total_tokens ?? 0) || (inputTokens + outputTokens);
+  return { model, inputTokens, outputTokens, totalTokens, xSearchCalls };
 }
 
 function isXSourceUrl(url: string): boolean {
@@ -472,6 +516,8 @@ export async function callGrokTrendBrief(
         error: "x_search_not_used",
         searchedAt: searchWindow.to,
         searchRange: { from: searchWindow.from, to: searchWindow.to },
+        // 破棄する応答でも xAI は課金済み。実費を取りこぼさないため usage は返す。
+        usage: extractGrokUsage(json, model, parsed.xSearchCalls),
       };
     }
     const xCitations = parsed.citations.filter(isXSourceUrl);
@@ -484,6 +530,8 @@ export async function callGrokTrendBrief(
         error: "missing_x_citations",
         searchedAt: searchWindow.to,
         searchRange: { from: searchWindow.from, to: searchWindow.to },
+        // 検索は走っている＝課金済みなので、破棄しても usage は返す。
+        usage: extractGrokUsage(json, model, parsed.xSearchCalls),
       };
     }
     const text = formatGrokXSearchBrief(
@@ -500,6 +548,7 @@ export async function callGrokTrendBrief(
       searchedAt: searchWindow.to,
       searchRange: { from: searchWindow.from, to: searchWindow.to },
       citations: xCitations.slice(0, 10),
+      usage: extractGrokUsage(json, model, parsed.xSearchCalls),
     };
   } catch (e) {
     console.error("Grok fetch failed:", e);
