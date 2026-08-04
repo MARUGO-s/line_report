@@ -9314,6 +9314,22 @@ function wantsReservationAiDetail(query) {
   return /予約者|予約一覧|予約明細|予約内容|予約名|氏名|名前|誰|前回来店|来店履歴|顧客|アレルギー|プラン|コース予約|新規.*(?:人|客|予約)|リピート.*(?:人|客|予約)/.test(q);
 }
 
+function isReservationFocusedQuery(query) {
+  return /予約|飛び込み|ウォークイン|新規客|リピート客|来店履歴|アレルギー/.test(String(query || ''));
+}
+
+function monthKeyFromIsoDate(dateIso) {
+  const matched = String(dateIso || '').match(/^(\d{4})-(\d{2})/);
+  return matched ? `${matched[1]}-${matched[2]}` : '';
+}
+
+function reservationJstDateKeyForClient(value) {
+  const date = new Date(String(value || ''));
+  if (Number.isNaN(date.getTime())) return '';
+  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, '0')}-${String(jst.getUTCDate()).padStart(2, '0')}`;
+}
+
 /**
  * POS 月次 × 予約月次から、予約組数/人数 vs 飛び込み（推定）の対比表を作る。
  * 飛び込み組数 = max(0, POS会計組数 − 予約組数)、人数も同様。負値は 0 に切り上げ（ノーショー等）。
@@ -9403,11 +9419,63 @@ function hasUsableReservationAiFacts(raw) {
   return false;
 }
 
+function aggregateReservationAiFactsFromItems(items) {
+  const totals = {
+    reservation_count: 0, cancelled_count: 0, new_count: 0, repeat_count: 0,
+    unknown_count: 0, by_channel: { tabelog: 0, ikyu: 0, manual: 0 },
+    allergy_noted_count: 0, guest_total: 0, guest_unknown_count: 0
+  };
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    if (item?.is_cancelled) {
+      totals.cancelled_count += 1;
+      return;
+    }
+    totals.reservation_count += 1;
+    if (item?.source && Object.prototype.hasOwnProperty.call(totals.by_channel, item.source)) {
+      totals.by_channel[item.source] += 1;
+    }
+    if (item?.guest_type === 'new') totals.new_count += 1;
+    else if (item?.guest_type === 'repeat') totals.repeat_count += 1;
+    else totals.unknown_count += 1;
+    if (item?.allergy_label) totals.allergy_noted_count += 1;
+    const partySize = Number(item?.party_size);
+    if (Number.isFinite(partySize) && partySize > 0) totals.guest_total += Math.floor(partySize);
+    else totals.guest_unknown_count += 1;
+  });
+  return totals;
+}
+
+function aggregateReservationAiFactsByMonth(items) {
+  const grouped = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const key = String(item?.visit_at || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(key)) return;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  });
+  return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b))
+    .map(([year_month, rows]) => ({ year_month, ...aggregateReservationAiFactsFromItems(rows) }));
+}
+
+function buildReservationOnlyQueryResult(reservationFacts, label) {
+  return {
+    label,
+    totalSales: 0, foodTotal: 0, drinkTotal: 0, roomTotal: 0, otherTotal: 0, chargeTotal: 0,
+    lunchTotal: 0, dinnerTotal: 0, lunchCustomers: 0, dinnerCustomers: 0,
+    foodPct: 0, drinkPct: 0, totalCustomers: 0, avgSpend: 0, salesCount: 0, sourceCount: 0,
+    monthlyBreakdown: [], weekdayBreakdown: [], hourlyBreakdown: [], topProducts: [],
+    detailRangeLimited: false, itemDetailComplete: false,
+    courseTransactions: { transactionCount: 0, groupCount: 0, customerCount: 0, hasDetailedSales: false },
+    reservationFacts,
+    reservationOnly: true
+  };
+}
+
 /**
  * 食べログ／一休／手入力の予約・顧客リピートを AI 確定集計へ追加する。
  * monthlyBreakdown の期間に合わせる。失敗時・予約0件時は null（他レイヤは壊さない）。
  */
-async function enrichReservationFacts(monthlyBreakdown, query) {
+async function enrichReservationFacts(monthlyBreakdown, query, forceItems = false) {
   const months = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
     .map((m) => m.key)
     .filter(Boolean)
@@ -9416,7 +9484,7 @@ async function enrichReservationFacts(monthlyBreakdown, query) {
   const monthFrom = months[0];
   const monthTo = months[months.length - 1];
   try {
-    const includeItems = wantsReservationAiDetail(query);
+    const includeItems = forceItems || wantsReservationAiDetail(query);
     const raw = await fetchReservationAiFacts(monthFrom, monthTo, includeItems);
     if (!raw || typeof raw !== 'object') return null;
     // 予約取り込みが無い店舗／期間内0件は節を出さない（飛込=POS全体のような誤解を防ぐ）
@@ -10715,10 +10783,13 @@ function resolveRelativeTimeRefs(q) {
   // 日・週の相対表現（長い語を先に置換する）
   out = out
     .replace(/一昨日|おととい/g, dayLabel(daysAgo(2)))
+    .replace(/明後日|あさって/g, dayLabel(daysAgo(-2)))
+    .replace(/明日/g, dayLabel(daysAgo(-1)))
     .replace(/今日|本日/g, dayLabel(daysAgo(0)))
     .replace(/昨日/g, dayLabel(daysAgo(1)))
     .replace(/先々週/g, weekRange(2))
     .replace(/先週|前週/g, weekRange(1))
+    .replace(/来週/g, weekRange(-1))
     .replace(/今週/g, weekRange(0));
   // 「N年前」→ 絶対年
   out = out.replace(/(\d{1,2})\s*年前/g, (_, n) => `${thisYear - parseInt(n, 10)}年`);
@@ -12272,7 +12343,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   const unavailableCloudResult = () => ({
     loadError: savedReportsLoadError?.message || 'クラウドの保存レポートを完全に確認できませんでした。'
   });
-  if (allReports.length === 0) {
+  if (allReports.length === 0 && !isReservationFocusedQuery(q)) {
     if (cloudLookupUnavailable) return unavailableCloudResult();
     return null;
   }
@@ -12283,7 +12354,6 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   // 月単位へ丸めると「7月15日」の質問に7月全体の数字を返してしまうため、日付が特定できる場合はここで確定させる。
   const dayScope = extractDayScope(q);
   if (dayScope) {
-    if (cloudLookupUnavailable) return unavailableCloudResult();
     const monthKeys = new Set();
     const from = new Date(dayScope.from.year, dayScope.from.month - 1, 1);
     const last = new Date(dayScope.to.year, dayScope.to.month - 1, 1);
@@ -12291,24 +12361,74 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       monthKeys.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
     }
     const matchedDayReports = allReports.filter(r => monthKeys.has(monthKeyFromReport(r)));
+    let daily = null;
     if (matchedDayReports.length > 0) {
-      const daily = await summarizeDayScope(
+      if (cloudLookupUnavailable) return unavailableCloudResult();
+      daily = await summarizeDayScope(
         matchedDayReports,
         dayScope.from.iso,
         dayScope.to.iso,
         `${dayScope.label}の売上データ`
       );
       if (daily?.loadError) return daily;
-      if (daily) return daily;
     }
+    if (isReservationFocusedQuery(q)) {
+      const reservationFacts = await enrichReservationFacts(
+        [{ key: monthKeyFromIsoDate(dayScope.from.iso) }, { key: monthKeyFromIsoDate(dayScope.to.iso) }],
+        q,
+        true
+      );
+      if (reservationFacts) {
+        const filteredItems = (reservationFacts.items || []).filter((item) => {
+          const date = reservationJstDateKeyForClient(item?.visit_at);
+          return date >= dayScope.from.iso && date <= dayScope.to.iso;
+        });
+        const totals = aggregateReservationAiFactsFromItems(filteredItems);
+        const scopedFacts = {
+          ...reservationFacts,
+          totals,
+          byMonth: aggregateReservationAiFactsByMonth(filteredItems),
+          walkInMonthly: [],
+          items: reservationFacts.itemsIncluded ? filteredItems : [],
+          monthFrom: monthKeyFromIsoDate(dayScope.from.iso),
+          monthTo: monthKeyFromIsoDate(dayScope.to.iso)
+        };
+        if (daily) return { ...daily, reservationFacts: scopedFacts };
+        return buildReservationOnlyQueryResult(scopedFacts, `${dayScope.label}の予約データ`);
+      }
+    }
+    if (daily) return daily;
     return { notMatchedLabel: dayScope.label };
+  }
+
+  async function tryReservationOnlyMonthRange(monthFrom, monthTo, label) {
+    if (!isReservationFocusedQuery(q)) return null;
+    try {
+      const includeItems = wantsReservationAiDetail(q);
+      const raw = await fetchReservationAiFacts(monthFrom, monthTo, includeItems);
+      if (!hasUsableReservationAiFacts(raw)) return { notMatchedLabel: label };
+      return buildReservationOnlyQueryResult({
+        monthFrom: raw.period?.month_from || monthFrom,
+        monthTo: raw.period?.month_to || monthTo,
+        totals: raw.totals || null,
+        byMonth: Array.isArray(raw.by_month) ? raw.by_month : [],
+        walkInMonthly: [],
+        items: Array.isArray(raw.items) ? raw.items : [],
+        itemsIncluded: includeItems,
+        truncated: !!raw.truncated,
+        notes: Array.isArray(raw.notes) ? raw.notes : [],
+        generatedAt: raw.generated_at || ''
+      }, label);
+    } catch (err) {
+      console.warn('reservation-only query failed:', err);
+      return { loadError: '予約データを確認できませんでした。' };
+    }
   }
 
   // 期間範囲クエリ（例:「2026年1月から7月まで」「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
   // 「から／〜／まで」は端点2か月ではなく、あいだの全月を含む連続期間。比較（と/、）とは別扱い。
   const rangeRef = extractRangeRef(q);
   if (rangeRef) {
-    if (cloudLookupUnavailable) return unavailableCloudResult();
     const fromKey = rangeRef.fromYear * 12 + rangeRef.fromMonth;
     const toKey = rangeRef.toYear * 12 + rangeRef.toMonth;
     const [lo, hi] = fromKey <= toKey ? [fromKey, toKey] : [toKey, fromKey];
@@ -12324,8 +12444,15 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       ? `${rangeRef.fromYear}年〜${rangeRef.toYear}年`
       : `${rangeRef.fromYear}年${rangeRef.fromMonth}月〜${rangeRef.toYear}年${rangeRef.toMonth}月`;
     if (matched.length > 0) {
+      if (cloudLookupUnavailable) return unavailableCloudResult();
       return await summarizeMatched(matched, `${rangeLabel}の売上データ`);
     }
+    const reservationOnly = await tryReservationOnlyMonthRange(
+      `${rangeRef.fromYear}-${String(rangeRef.fromMonth).padStart(2, '0')}`,
+      `${rangeRef.toYear}-${String(rangeRef.toMonth).padStart(2, '0')}`,
+      `${rangeLabel}の予約データ`
+    );
+    if (reservationOnly) return reservationOnly;
     return { notMatchedLabel: rangeLabel };
   }
 
@@ -12827,13 +12954,15 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       const p = String(r.period || r.title || '');
       return p.includes(targetKey) || p.includes(targetJa) || (p.includes(year) && p.includes(`${parseInt(month, 10)}月`));
     });
-    if (cloudLookupUnavailable) {
+    if (cloudLookupUnavailable && matched.length > 0) {
       const currentMatches = currentReport && matched.includes(currentReport);
       return currentMatches
         ? await summarizeMatched([currentReport], `${targetJa}の売上データ`)
         : unavailableCloudResult();
     }
     if (matched.length > 0) return await summarizeMatched(matched, `${targetJa}の売上データ`);
+    const reservationOnly = await tryReservationOnlyMonthRange(targetKey, targetKey, `${targetJa}の予約データ`);
+    if (reservationOnly) return reservationOnly;
     return { notMatchedLabel: targetJa };
   }
 
@@ -13165,6 +13294,9 @@ async function sendAiChat() {
     : compactData;
 
   function formatVerifiedPeriodBlock(p) {
+    if (p.reservationOnly) {
+      return `- ${p.label}${formatJournalSpecificFactsForAi(p, resolvedChatQuery, '  ')}`;
+    }
     const monthLines = formatMonthlyBreakdownLines(p.monthlyBreakdown, '  ');
     const monthBlock = monthLines ? `\n  - 月次推移:\n${monthLines}` : '';
     return `- ${p.label}
@@ -13185,6 +13317,13 @@ ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信�
 ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 
 回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品も述べてください。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+  } else if (verifiedData && verifiedData.reservationOnly) {
+    verifiedDataBlock = `
+
+【予約確定事実（${verifiedData.label} / 予約DB・日次キャッシュから取得）】
+${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
+
+回答は上記の予約確定事実だけを根拠にしてください。売上データは今回提示されていないため、売上・客単価・商品構成は推測しないでください。`;
   } else if (verifiedData) {
     const monthLines = formatMonthlyBreakdownLines(verifiedData.monthlyBreakdown);
     const monthBlock = monthLines

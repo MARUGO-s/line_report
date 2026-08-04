@@ -31,7 +31,9 @@
     "store_knowledge_chunks",
     "store_operation_profiles",
     "reservation_ai_store_cache",
-    "reservation_ai_cache_dirty_dates"
+    "reservation_ai_cache_dirty_dates",
+    "reservation_ai_cache_runs",
+    "reservation_ai_cache_coverage"
   ],
   "journalReportStorageBuckets": [
     "pos-journals",

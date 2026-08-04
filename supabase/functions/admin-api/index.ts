@@ -25,14 +25,17 @@ import {
   listReceiptSheetsStores,
 } from "../_shared/receipt_sheets_store_catalog.ts"
 import {
+  annotateReservationChronology,
   aggregateReservationAiItems,
   aggregateReservationAiItemsByMonth,
   buildReservationDailyRagText,
+  emptyReservationAiTotals,
   enumerateReservationDateKeys,
   mergeReservationAiFactsPayloads,
   reservationJstDateKey,
   type ReservationAiFactItem,
   type ReservationAiFactsPayload,
+  type ReservationChronologyItem,
 } from "../_shared/reservation_ai_cache.ts"
 import {
   allocateDailyBudgetsForMonth,
@@ -438,9 +441,17 @@ const RESERVATION_CUSTOMER_HISTORY_FETCH_CAP = 10000
 const RESERVATION_AI_FACTS_DEFAULT_LIMIT = 300
 const RESERVATION_AI_FACTS_MAX_LIMIT = 500
 const RESERVATION_AI_FACTS_MAX_MONTHS = 24
+const RESERVATION_EVENT_PAGE_SIZE = 1000
+const RESERVATION_EVENT_FETCH_MAX_ROWS = 100000
 const RESERVATION_AI_CACHE_MONTHS = 24
 const RESERVATION_AI_CACHE_TABLE = "reservation_ai_store_cache"
+const RESERVATION_AI_CACHE_STALE_MS = 36 * 60 * 60 * 1000
 const RESERVATION_CANCELLATION_RE = /(キャンセル|取消|取り消し|cancel(?:led|ed)?)/i
+
+type ReservationEventTable =
+  | "tabelog_reservation_visit_events"
+  | "ikyu_reservation_visit_events"
+  | "manual_reservation_visit_events"
 
 type LineUserPermissionSortable = {
   display_name?: string | null
@@ -5210,7 +5221,7 @@ async function fetchReservationAiFactsLive(
   const includeManual = sourceFilter === "all" || sourceFilter === "manual"
 
   const rawItems: Array<Record<string, unknown>> = []
-  let monthCapHit = false
+  const chronologyRows: ReservationChronologyItem[] = []
 
   // 走査対象チャネル。tabelog / ikyu は共通ヘルパ、manual は専用テーブル。
   const scanTargets: Array<{
@@ -5234,9 +5245,27 @@ async function fetchReservationAiFactsLive(
       selectColumns: MANUAL_RESERVATION_SELECT_COLUMNS,
     })
   }
+  const chronologyTargets: typeof scanTargets = [
+    {
+      source: "tabelog",
+      eventTable: "tabelog_reservation_visit_events",
+      summaryTable: "tabelog_reservation_visit_summaries",
+      selectColumns: RESERVATION_EVENT_SELECT_COLUMNS,
+    },
+    {
+      source: "ikyu",
+      eventTable: "ikyu_reservation_visit_events",
+      summaryTable: "ikyu_reservation_visit_summaries",
+      selectColumns: RESERVATION_EVENT_SELECT_COLUMNS,
+    },
+    {
+      source: "manual",
+      eventTable: "manual_reservation_visit_events",
+      summaryTable: "manual_reservation_visit_summaries",
+      selectColumns: MANUAL_RESERVATION_SELECT_COLUMNS,
+    },
+  ]
 
-  // サマリ（顧客の累計来店回数）は月に依存しないので、チャネルごとに1回だけ引く。
-  // 月ループの内側に置くと 24 か月 × 3 チャネルぶん同じクエリを繰り返すことになる。
   for (const target of scanTargets) {
     const monthEvents: Array<Record<string, unknown>> = []
     for (const month of months) {
@@ -5248,25 +5277,12 @@ async function fetchReservationAiFactsLive(
         ? requestedDateToExclusive
         : range.endIso
       if (rangeStartIso >= rangeEndIso) continue
-      const eventsRes = await supabase
-        .from(target.eventTable)
-        .select(target.selectColumns)
-        .gte("visit_at", rangeStartIso)
-        .lt("visit_at", rangeEndIso)
-        .order("visit_at", { ascending: true })
-        .limit(2000)
-      if (eventsRes.error) {
-        throw {
-          status: 500,
-          message: `Failed to fetch ${target.source} reservation events: ${eventsRes.error.message}`,
-        } satisfies AppError
-      }
-      // selectColumns がリテラルでないため行の型は推論されない。isRecord で絞ってから使う。
-      const rows = (eventsRes.data ?? []) as unknown[]
-      if (rows.length >= 2000) monthCapHit = true
-      for (const row of rows) {
-        if (isRecord(row)) monthEvents.push(row)
-      }
+      monthEvents.push(...await fetchReservationEventRowsPaged(
+        supabase,
+        target.eventTable,
+        target.selectColumns,
+        { fromIso: rangeStartIso, toIsoExclusive: rangeEndIso },
+      ))
     }
     if (monthEvents.length === 0) continue
 
@@ -5292,6 +5308,39 @@ async function fetchReservationAiFactsLive(
       if (!item) continue
       if (!allStores && !reservationCalendarItemMatchesStoreScope(item, storeScope)) continue
       rawItems.push({ ...item, _is_cancelled: isReservationCancellationRow(record) })
+    }
+  }
+
+  // 対象予約より前の履歴も含め、3チャネル横断で「予約時点の店舗別回数」を算出する。
+  if (rawItems.length) {
+    for (const target of chronologyTargets) {
+      const historyRows = await fetchReservationEventRowsPaged(
+        supabase,
+        target.eventTable,
+        target.selectColumns,
+        {
+          toIsoExclusive: requestedDateToExclusive || buildJstMonthRange(months[months.length - 1]).endIso,
+        },
+      )
+      for (const record of historyRows) {
+        const item = buildReservationCalendarItem(target.source, record, null)
+        if (!item) continue
+        const resolvedStoreKey = resolveReservationCalendarItemStoreKey(item)
+        if (!resolvedStoreKey) continue
+        chronologyRows.push({
+          source: target.source,
+          id: Number(record.id ?? 0),
+          store_key: resolvedStoreKey,
+          customer_name: toSafeString(record.customer_name),
+          customer_phone: toSafeString(record.customer_phone),
+          visit_at: toSafeString(record.visit_at) || toSafeString(record.created_at),
+          is_cancelled: isReservationCancellationRow(record),
+          is_hidden: record.manual_hidden === true,
+          reservation_key: extractReservationNoFromReservationRow(record) ||
+            toSafeString(record.gmail_message_id) ||
+            `${target.source}:${Number(record.id ?? 0)}`,
+        })
+      }
     }
   }
 
@@ -5322,15 +5371,15 @@ async function fetchReservationAiFactsLive(
     by_channel: { tabelog: number; ikyu: number; manual: number }
   }>()
 
+  const chronologyByEvent = annotateReservationChronology(chronologyRows)
   const mapped = rawItems.map((item) => {
     const source = String(item.source ?? "") as "tabelog" | "ikyu" | "manual"
     const isCancelled = item._is_cancelled === true
     const partySize = parseReservationPartySize(item.party_size_label)
-    // visit_count 欠落は 0 になるので unknown。1回目=new、2回以上=repeat。
-    const visitCount = toNonNegativeInteger(item.visit_count)
-    let guestType: "new" | "repeat" | "unknown" = "unknown"
-    if (visitCount > 1) guestType = "repeat"
-    else if (visitCount === 1) guestType = "new"
+    const chronology = chronologyByEvent.get(`${source}:${Number(item.id ?? 0)}`)
+    // AI用は「この予約時点・この店舗・全チャネル横断」の予約回数を正本にする。
+    const visitCount = chronology?.visit_count ?? 0
+    const guestType = chronology?.guest_type ?? "unknown"
     const yearMonth = toSafeString(item.visit_month) ||
       buildCalendarVisitMonthLabel(toSafeString(item.visit_at)) ||
       ""
@@ -5405,7 +5454,7 @@ async function fetchReservationAiFactsLive(
       store_name: toSafeString(item.store_name) || null,
       store_key: resolveReservationCalendarItemStoreKey(item),
       visit_count: visitCount,
-      last_visit_at: toSafeString(item.last_visit_at) || null,
+      last_visit_at: chronology?.last_visit_at || null,
       guest_type: guestType,
       is_cancelled: isCancelled,
     }
@@ -5415,7 +5464,7 @@ async function fetchReservationAiFactsLive(
     a.year_month.localeCompare(b.year_month)
   )
 
-  const truncated = mapped.length > limit || monthCapHit
+  const truncated = mapped.length > limit
   return {
     store_key: allStores ? null : storeScope,
     period: { month_from: months[0], month_to: months[months.length - 1] },
@@ -5434,7 +5483,7 @@ async function fetchReservationAiFactsLive(
     },
     by_month: byMonth,
     items: internalUnbounded ? mapped : mapped.slice(0, limit),
-    truncated: internalUnbounded ? monthCapHit : truncated,
+    truncated: internalUnbounded ? false : truncated,
     generated_at: new Date().toISOString(),
     notes: [
       "visit_count はチャネル別の予約ネット回数（POS来店回数ではない）",
@@ -5511,6 +5560,45 @@ function reservationAiBaseNotes(): string[] {
   ]
 }
 
+async function fetchReservationEventRowsPaged(
+  supabase: ReturnType<typeof createClient>,
+  table: ReservationEventTable,
+  selectColumns: string,
+  options: {
+    fromIso?: string
+    toIsoExclusive?: string
+  } = {},
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = []
+  for (let offset = 0; offset < RESERVATION_EVENT_FETCH_MAX_ROWS; offset += RESERVATION_EVENT_PAGE_SIZE) {
+    let query = supabase
+      .from(table)
+      .select(selectColumns)
+      .order("visit_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + RESERVATION_EVENT_PAGE_SIZE - 1)
+    if (options.fromIso) query = query.gte("visit_at", options.fromIso)
+    if (options.toIsoExclusive) query = query.lt("visit_at", options.toIsoExclusive)
+    const { data, error } = await query
+    if (error) {
+      throw {
+        status: 500,
+        message: `Failed to fetch reservation rows from ${table}: ${error.message}`,
+      } satisfies AppError
+    }
+    const rows: Record<string, unknown>[] = []
+    for (const row of (Array.isArray(data) ? data as unknown[] : [])) {
+      if (isRecord(row)) rows.push(row)
+    }
+    out.push(...rows)
+    if (rows.length < RESERVATION_EVENT_PAGE_SIZE) return out
+  }
+  throw {
+    status: 500,
+    message: `Reservation history exceeds the safe fetch cap for ${table}.`,
+  } satisfies AppError
+}
+
 function buildReservationLiveUrl(
   storeKey: string,
   monthFrom: string,
@@ -5566,6 +5654,23 @@ async function fetchReservationAiFacts(
     return await fetchReservationAiFactsLive(supabase, url)
   }
   const includeItems = url.searchParams.get("include_items") !== "0"
+  const { data: lastRunRows, error: lastRunError } = await supabase
+    .from("reservation_ai_cache_runs")
+    .select("finished_at")
+    .eq("status", "success")
+    .order("finished_at", { ascending: false })
+    .limit(1)
+  if (lastRunError) {
+    console.error("reservation cache run status load failed:", lastRunError.message)
+  }
+  const lastSuccessAt = toSafeString(
+    Array.isArray(lastRunRows) && lastRunRows[0]
+      ? (lastRunRows[0] as Record<string, unknown>).finished_at
+      : "",
+  )
+  const lastSuccessMs = Date.parse(lastSuccessAt)
+  const cacheStale = !Number.isFinite(lastSuccessMs) ||
+    Date.now() - lastSuccessMs > RESERVATION_AI_CACHE_STALE_MS
 
   const today = jstTodayDateKey()
   const requestStartDate = `${months[0]}-01`
@@ -5584,9 +5689,17 @@ async function fetchReservationAiFacts(
   let futureLive = false
 
   const pastEndExclusive = requestEndDateExclusive < today ? requestEndDateExclusive : today
-  if (requestStartDate < pastEndExclusive) {
+  if (requestStartDate < pastEndExclusive && !cacheStale) {
     const pastDateKeys = enumerateReservationDateKeys(requestStartDate, pastEndExclusive)
     expectedPastDays = pastDateKeys.length
+    const { data: coverageRow, error: coverageError } = await supabase
+      .from("reservation_ai_cache_coverage")
+      .select("covered_from, covered_to")
+      .eq("store_partition_key", storeKey)
+      .maybeSingle()
+    if (coverageError) console.error("reservation cache coverage load failed:", coverageError.message)
+    const coveredFrom = toSafeString((coverageRow as Record<string, unknown> | null)?.covered_from)
+    const coveredTo = toSafeString((coverageRow as Record<string, unknown> | null)?.covered_to)
     const { data: cachedRows, error: cacheError } = await supabase
       .from(RESERVATION_AI_CACHE_TABLE)
       .select(includeItems ? "fact_date, facts" : "fact_date, summary_facts")
@@ -5610,6 +5723,10 @@ async function fetchReservationAiFacts(
       const payload = cachedByDate.get(dateKey)
       if (payload) {
         payloads.push(payload)
+        cacheDays += 1
+      } else if (coveredFrom && coveredTo && dateKey >= coveredFrom && dateKey <= coveredTo) {
+        // coverage内で行が無い日は「予約0件」。空行を物理保存しない。
+        payloads.push({ totals: emptyReservationAiTotals(), by_month: [], items: [], truncated: false, notes: [] })
         cacheDays += 1
       } else {
         missingDates.push(dateKey)
@@ -5641,6 +5758,23 @@ async function fetchReservationAiFacts(
       })
       liveFallbackDays = missingDates.length
     }
+  }
+  if (requestStartDate < pastEndExclusive && cacheStale) {
+    const livePast = await fetchReservationAiFactsLive(
+      supabase,
+      buildReservationLiveUrl(
+        storeKey,
+        reservationMonthFromDateKey(requestStartDate),
+        reservationMonthFromDateKey(addReservationDateDays(pastEndExclusive, -1)),
+        reservationDateStartIso(requestStartDate),
+        reservationDateStartIso(pastEndExclusive),
+      ),
+    )
+    payloads.push({
+      ...(livePast as ReservationAiFactsPayload),
+      items: includeItems && Array.isArray(livePast.items) ? livePast.items : [],
+    })
+    liveFallbackDays = enumerateReservationDateKeys(requestStartDate, pastEndExclusive).length
   }
 
   const futureStartDate = requestStartDate > today ? requestStartDate : today
@@ -5687,6 +5821,8 @@ async function fetchReservationAiFacts(
       live_fallback_days: liveFallbackDays,
       future_live: futureLive,
       cutoff_date_jst: today,
+      stale: cacheStale,
+      last_success_at: lastSuccessAt || null,
     },
   }
 }
@@ -5695,6 +5831,17 @@ async function rebuildReservationAiDailyCache(
   supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
 ) {
+  const startedAtMs = Date.now()
+  const { data: runRow, error: runInsertError } = await supabase
+    .from("reservation_ai_cache_runs")
+    .insert({ status: "running", started_at: new Date(startedAtMs).toISOString() })
+    .select("id")
+    .single()
+  if (runInsertError) {
+    throw { status: 500, message: `Failed to start reservation cache run: ${runInsertError.message}` } satisfies AppError
+  }
+  const runId = Number((runRow as Record<string, unknown> | null)?.id ?? 0)
+  try {
   const today = jstTodayDateKey()
   const defaultFrom = reservationCacheWindowStart(today, RESERVATION_AI_CACHE_MONTHS)
   const requestedStore = normalizeReservationStoreScope(body.store_key)
@@ -5788,19 +5935,42 @@ async function rebuildReservationAiDailyCache(
         source_max_updated_at: generatedAt,
       }
     })
-    if (rows.length) {
+    const nonEmptyRows = rows.filter((row) => Number(row.source_row_count) > 0)
+    if (nonEmptyRows.length) {
       const { error: upsertError } = await supabase
         .from(RESERVATION_AI_CACHE_TABLE)
-        .upsert(rows, { onConflict: "store_partition_key,fact_date" })
+        .upsert(nonEmptyRows, { onConflict: "store_partition_key,fact_date" })
       if (upsertError) {
         throw { status: 500, message: `Failed to upsert reservation cache (${storeKey}): ${upsertError.message}` } satisfies AppError
       }
+    }
+    const { error: clearEmptyError } = await supabase
+      .from(RESERVATION_AI_CACHE_TABLE)
+      .delete()
+      .eq("store_partition_key", storeKey)
+      .gte("fact_date", fromDate)
+      .lt("fact_date", today)
+      .eq("source_row_count", 0)
+    if (clearEmptyError) {
+      throw { status: 500, message: `Failed to compact reservation cache (${storeKey}): ${clearEmptyError.message}` } satisfies AppError
+    }
+    const { error: coverageUpsertError } = await supabase
+      .from("reservation_ai_cache_coverage")
+      .upsert({
+        store_partition_key: storeKey,
+        covered_from: defaultFrom,
+        covered_to: addReservationDateDays(today, -1),
+        last_success_at: generatedAt,
+        updated_at: generatedAt,
+      }, { onConflict: "store_partition_key" })
+    if (coverageUpsertError) {
+      throw { status: 500, message: `Failed to save reservation cache coverage (${storeKey}): ${coverageUpsertError.message}` } satisfies AppError
     }
     results.push({
       store_key: storeKey,
       from_date: fromDate,
       to_date_exclusive: today,
-      cached_days: rows.length,
+      cached_days: nonEmptyRows.length,
       reservation_rows: rows.reduce((sum, row) => sum + Number(row.source_row_count || 0), 0),
       truncated: globalLive.truncated === true,
       dirty_dates_rebuilt: dirtyDateSet.size,
@@ -5817,11 +5987,47 @@ async function rebuildReservationAiDailyCache(
     }
   }
 
-  return {
+  const response = {
     ok: true,
     cutoff_date_jst: today,
     generated_at: generatedAt,
     stores: results,
+  }
+  const cachedDayCount = results.reduce((sum, row) => sum + Number(row.cached_days ?? 0), 0)
+  const reservationRowCount = results.reduce((sum, row) => sum + Number(row.reservation_rows ?? 0), 0)
+  const finishedAt = new Date().toISOString()
+  const { error: runSuccessError } = await supabase
+    .from("reservation_ai_cache_runs")
+    .update({
+      status: "success",
+      finished_at: finishedAt,
+      cutoff_date_jst: today,
+      store_count: results.length,
+      cached_day_count: cachedDayCount,
+      reservation_row_count: reservationRowCount,
+      duration_ms: Date.now() - startedAtMs,
+      details: response,
+    })
+    .eq("id", runId)
+  if (runSuccessError) {
+    throw { status: 500, message: `Failed to finish reservation cache run: ${runSuccessError.message}` } satisfies AppError
+  }
+  return response
+  } catch (error) {
+    const err = asAppError(error)
+    if (runId > 0) {
+      const { error: runFailureError } = await supabase
+        .from("reservation_ai_cache_runs")
+        .update({
+          status: "failed",
+          finished_at: new Date().toISOString(),
+          duration_ms: Date.now() - startedAtMs,
+          error_message: err.message.slice(0, 2000),
+        })
+        .eq("id", runId)
+      if (runFailureError) console.error("Failed to record reservation cache failure:", runFailureError.message)
+    }
+    throw error
   }
 }
 

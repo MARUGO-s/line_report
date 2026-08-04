@@ -2,11 +2,101 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 import {
+  annotateReservationChronology,
   aggregateReservationAiItems,
   enumerateReservationDateKeys,
   mergeReservationAiFactsPayloads,
   reservationJstDateKey,
 } from "../supabase/functions/_shared/reservation_ai_cache.ts"
+
+test("reservation chronology is store-scoped, cross-channel, and time-relative", () => {
+  const annotations = annotateReservationChronology([
+    {
+      source: "tabelog",
+      id: 1,
+      store_key: "store-a",
+      customer_name: "山田 太郎",
+      customer_phone: "090-1111-2222",
+      visit_at: "2026-01-10T09:00:00Z",
+      reservation_key: "A-1",
+    },
+    {
+      source: "ikyu",
+      id: 2,
+      store_key: "store-a",
+      customer_name: "山田太郎",
+      customer_phone: "09011112222",
+      visit_at: "2026-02-10T09:00:00Z",
+      reservation_key: "I-1",
+    },
+    {
+      source: "tabelog",
+      id: 3,
+      store_key: "store-b",
+      customer_name: "山田太郎",
+      customer_phone: "09011112222",
+      visit_at: "2026-03-10T09:00:00Z",
+      reservation_key: "B-1",
+    },
+    {
+      source: "manual",
+      id: 4,
+      store_key: "store-a",
+      customer_name: "山田太郎",
+      customer_phone: "09011112222",
+      visit_at: "2026-04-10T09:00:00Z",
+      reservation_key: "M-1",
+    },
+  ])
+
+  assert.deepEqual(annotations.get("tabelog:1"), {
+    visit_count: 1,
+    last_visit_at: null,
+    guest_type: "new",
+  })
+  assert.deepEqual(annotations.get("ikyu:2"), {
+    visit_count: 2,
+    last_visit_at: "2026-01-10T09:00:00Z",
+    guest_type: "repeat",
+  })
+  assert.deepEqual(annotations.get("tabelog:3"), {
+    visit_count: 1,
+    last_visit_at: null,
+    guest_type: "new",
+  })
+  assert.deepEqual(annotations.get("manual:4"), {
+    visit_count: 3,
+    last_visit_at: "2026-02-10T09:00:00Z",
+    guest_type: "repeat",
+  })
+})
+
+test("reservation chronology excludes cancelled and hidden rows and de-duplicates a reservation", () => {
+  const annotations = annotateReservationChronology([
+    {
+      source: "tabelog", id: 1, store_key: "store-a", customer_name: "A",
+      customer_phone: "0901", visit_at: "2026-01-01T00:00:00Z", reservation_key: "R-1",
+    },
+    {
+      source: "tabelog", id: 2, store_key: "store-a", customer_name: "A",
+      customer_phone: "0901", visit_at: "2026-01-02T00:00:00Z", reservation_key: "R-1",
+    },
+    {
+      source: "ikyu", id: 3, store_key: "store-a", customer_name: "A",
+      customer_phone: "0901", visit_at: "2026-01-03T00:00:00Z", reservation_key: "R-2",
+      is_cancelled: true,
+    },
+    {
+      source: "manual", id: 4, store_key: "store-a", customer_name: "A",
+      customer_phone: "0901", visit_at: "2026-01-04T00:00:00Z", reservation_key: "R-3",
+      is_hidden: true,
+    },
+  ])
+  assert.equal(annotations.get("tabelog:1")?.visit_count, 1)
+  assert.equal(annotations.get("tabelog:2")?.visit_count, 1)
+  assert.equal(annotations.has("ikyu:3"), false)
+  assert.equal(annotations.has("manual:4"), false)
+})
 
 test("reservation cache aggregates cancelled, guests, channels, and customer types", () => {
   const totals = aggregateReservationAiItems([
@@ -79,9 +169,11 @@ test("JST date keys and cache date ranges keep midnight boundaries stable", () =
 })
 
 test("reservation cache schema, cron time, and protected hybrid route are wired", async () => {
-  const [migration, summaryMigration, config, ownership, admin, cron, html] = await Promise.all([
+  const [migration, summaryMigration, runsMigration, compactMigration, config, ownership, admin, cron, html] = await Promise.all([
     readFile(new URL("../supabase/migrations/20260804035330_reservation_ai_daily_cache.sql", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260804040905_reservation_ai_cache_summary.sql", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260804115447_reservation_ai_cache_runs.sql", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260804115934_reservation_ai_cache_compact.sql", import.meta.url), "utf8"),
     readFile(new URL("../supabase/config.toml", import.meta.url), "utf8"),
     readFile(new URL("../knowledge/supabase-ownership.json", import.meta.url), "utf8"),
     readFile(new URL("../supabase/functions/admin-api/index.ts", import.meta.url), "utf8"),
@@ -93,11 +185,21 @@ test("reservation cache schema, cron time, and protected hybrid route are wired"
   assert.match(migration, /create table if not exists public\.reservation_ai_cache_dirty_dates/)
   assert.match(migration, /'37 20 \* \* \*'/)
   assert.match(summaryMigration, /add column if not exists summary_facts jsonb/)
+  assert.match(runsMigration, /create table if not exists public\.reservation_ai_cache_runs/)
+  assert.match(compactMigration, /create table if not exists public\.reservation_ai_cache_coverage/)
+  assert.match(compactMigration, /timeout_milliseconds := 300000/)
   assert.match(config, /\[functions\.reservation-ai-cache-cron\][\s\S]*verify_jwt = false/)
   assert.match(ownership, /"reservation-ai-cache-cron"/)
   assert.match(admin, /past_cache_plus_live_future/)
   assert.match(admin, /キャッシュ未作成の過去.*DBを直接参照/)
   assert.match(admin, /本日以降の予約は最新DBを直接参照/)
+  assert.match(admin, /RESERVATION_AI_CACHE_STALE_MS/)
+  assert.match(admin, /reservation_ai_cache_runs/)
+  assert.match(admin, /fetchReservationEventRowsPaged/)
+  const aiFactsStart = admin.indexOf("async function fetchReservationAiFactsLive(")
+  const aiFactsEnd = admin.indexOf("function jstTodayDateKey(", aiFactsStart)
+  assert.ok(aiFactsStart >= 0 && aiFactsEnd > aiFactsStart)
+  assert.doesNotMatch(admin.slice(aiFactsStart, aiFactsEnd), /\.limit\(2000\)/)
   assert.match(admin, /select\(includeItems \? "fact_date, facts" : "fact_date, summary_facts"\)/)
   assert.match(admin, /path === "\/reservations\/ai-cache\/rebuild"/)
   assert.match(admin, /authResult\.scopeKind !== "cron"/)

@@ -10,6 +10,24 @@ export type ReservationAiFactItem = {
   [key: string]: unknown
 }
 
+export type ReservationChronologyItem = {
+  source: string
+  id: number
+  store_key?: string | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  visit_at?: string | null
+  is_cancelled?: boolean | null
+  is_hidden?: boolean | null
+  reservation_key?: string | null
+}
+
+export type ReservationChronologyAnnotation = {
+  visit_count: number
+  last_visit_at: string | null
+  guest_type: "new" | "repeat" | "unknown"
+}
+
 export type ReservationAiTotals = {
   reservation_count: number
   cancelled_count: number
@@ -28,11 +46,17 @@ export type ReservationAiFactsPayload = {
   items?: ReservationAiFactItem[] | null
   truncated?: boolean
   notes?: string[] | null
+  cache_status?: {
+    stale?: boolean
+    last_success_at?: string | null
+    [key: string]: unknown
+  } | null
   [key: string]: unknown
 }
 
-export type ReservationAiMonthFact = ReservationAiTotals & {
+export type ReservationAiMonthFact = Omit<ReservationAiTotals, "allergy_noted_count"> & {
   year_month: string
+  allergy_noted_count?: number
 }
 
 export function emptyReservationAiTotals(): ReservationAiTotals {
@@ -52,6 +76,75 @@ export function emptyReservationAiTotals(): ReservationAiTotals {
 function nonNegativeInt(value: unknown): number {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
+}
+
+function normalizeReservationCustomerName(value: unknown): string {
+  return String(value ?? "").normalize("NFKC").replace(/[\s　]+/g, "").trim().toLowerCase()
+}
+
+function normalizeReservationCustomerPhone(value: unknown): string {
+  return String(value ?? "").replace(/[^\d]/g, "")
+}
+
+/**
+ * 予約時点の店舗別・全チャネル横断回数を計算する。
+ * 氏名と電話の両方がある有効予約だけを時系列で数え、キャンセル/非表示は母集団から除外する。
+ */
+export function annotateReservationChronology(
+  items: ReservationChronologyItem[],
+): Map<string, ReservationChronologyAnnotation> {
+  const sorted = (Array.isArray(items) ? items : [])
+    .filter((item) => item && item.is_cancelled !== true && item.is_hidden !== true)
+    .slice()
+    .sort((a, b) => {
+      const time = String(a.visit_at ?? "").localeCompare(String(b.visit_at ?? ""))
+      if (time !== 0) return time
+      const source = String(a.source ?? "").localeCompare(String(b.source ?? ""))
+      if (source !== 0) return source
+      return Number(a.id ?? 0) - Number(b.id ?? 0)
+    })
+
+  const state = new Map<string, { count: number; last_visit_at: string | null }>()
+  const seenReservations = new Set<string>()
+  const out = new Map<string, ReservationChronologyAnnotation>()
+
+  for (const item of sorted) {
+    const eventKey = `${String(item.source ?? "")}:${Number(item.id ?? 0)}`
+    const storeKey = String(item.store_key ?? "").trim().toLowerCase()
+    const name = normalizeReservationCustomerName(item.customer_name)
+    const phone = normalizeReservationCustomerPhone(item.customer_phone)
+    const visitAt = String(item.visit_at ?? "").trim()
+    if (!storeKey || !name || !phone || !visitAt) {
+      out.set(eventKey, { visit_count: 0, last_visit_at: null, guest_type: "unknown" })
+      continue
+    }
+
+    const customerKey = `${storeKey}__${name}__${phone}`
+    const reservationKeyRaw = String(item.reservation_key ?? "").trim()
+    const reservationKey = reservationKeyRaw
+      ? `${customerKey}__${String(item.source ?? "")}__${reservationKeyRaw}`
+      : `${customerKey}__${eventKey}`
+    const current = state.get(customerKey) ?? { count: 0, last_visit_at: null }
+
+    if (seenReservations.has(reservationKey)) {
+      out.set(eventKey, {
+        visit_count: current.count,
+        last_visit_at: current.last_visit_at,
+        guest_type: current.count > 1 ? "repeat" : current.count === 1 ? "new" : "unknown",
+      })
+      continue
+    }
+
+    seenReservations.add(reservationKey)
+    const nextCount = current.count + 1
+    out.set(eventKey, {
+      visit_count: nextCount,
+      last_visit_at: current.last_visit_at,
+      guest_type: nextCount === 1 ? "new" : "repeat",
+    })
+    state.set(customerKey, { count: nextCount, last_visit_at: visitAt })
+  }
+  return out
 }
 
 export function aggregateReservationAiItems(items: ReservationAiFactItem[]): ReservationAiTotals {

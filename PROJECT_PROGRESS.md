@@ -43,6 +43,15 @@
 
 New records are appended below.
 
+### 2026-08-04 - Reservation AI chronology, monitoring, paging, direct queries, and compact cache
+
+- Accuracy: 新規/リピートを「その予約時点・店舗別・食べログ/一休/manual横断」で再計算。キャンセル/非表示を除外し、`last_visit_at`は対象予約より前の同店舗直前予約へ変更。
+- Paging: 予約イベント取得の月2,000件固定上限を廃止し、1,000件ページング＋安全上限100,000件へ変更。上限超過は途中集計せずエラーにする。
+- Monitoring: `reservation_ai_cache_runs`へ実行開始/終了・成功失敗・店舗数・更新日数・予約件数・所要時間・エラーを保存。最終成功から36時間超の場合はキャッシュを使わずDB直接参照へ退避。
+- Direct queries: 「明日/来週の予約」「特定日の予約」「売上レポート未保存月の予約」へ予約DBだけで回答可能。単日・日付範囲は売上があれば予約と統合する。
+- Compact cache: `reservation_ai_cache_coverage`で生成済み期間を管理し、予約0件の日次行を削除。coverage内の行なしを0件と解釈する。
+- Cron: pg_net待機時間を5分へ延長し、長い全再生成をHTTPタイムアウトに見せない。
+
 ### 2026-08-04 - Reservation AI daily cache and live-future split
 
 - Request: 予約日が過ぎた確定データをAIチャットのたびに予約イベント表から再読せず、店舗別のRAG風確定データとして毎朝作成し、未来予約だけ最新DBを読む。

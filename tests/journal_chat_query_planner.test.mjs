@@ -622,7 +622,9 @@ test('day-level questions are answered per day instead of rolling up to the mont
   assert.deepEqual([range.from.iso, range.to.iso], ['2026-07-01', '2026-07-07']);
   // 相対日付
   assert.match(context.resolveRelativeTimeRefs('昨日の売上'), /\d{4}年\d{1,2}月\d{1,2}日の売上/);
+  assert.match(context.resolveRelativeTimeRefs('明日の予約'), /\d{4}年\d{1,2}月\d{1,2}日の予約/);
   assert.match(context.resolveRelativeTimeRefs('先週の売上'), /\d{4}年\d{1,2}月\d{1,2}日〜\d{4}年\d{1,2}月\d{1,2}日/);
+  assert.match(context.resolveRelativeTimeRefs('来週の予約'), /\d{4}年\d{1,2}月\d{1,2}日〜\d{4}年\d{1,2}月\d{1,2}日/);
   assert.match(context.resolveRelativeTimeRefs('今月の売上'), /\d{4}年\d{1,2}月の売上/);
   // 日付が特定できた場合は月へ丸めず日単位の集計へ入る
   assert.match(savedReportSearchSource, /const dayScope = extractDayScope\(q\);/);
@@ -632,6 +634,17 @@ test('day-level questions are answered per day instead of rolling up to the mont
     /const dayScope[\s\S]*const rangeRef = extractRangeRef\(q\)/,
     'day scope must be resolved before the month-range branch',
   );
+});
+
+test('reservation-only and day-scope queries do not require a saved sales report', () => {
+  assert.match(html, /function isReservationFocusedQuery\(query\)/);
+  assert.match(savedReportSearchSource, /async function tryReservationOnlyMonthRange/);
+  assert.match(savedReportSearchSource, /buildReservationOnlyQueryResult/);
+  assert.match(savedReportSearchSource, /reservationFacts:\s*scopedFacts/);
+  assert.match(savedReportSearchSource, /tryReservationOnlyMonthRange\(targetKey, targetKey/);
+  assert.match(savedReportSearchSource, /allReports\.length === 0 && !isReservationFocusedQuery\(q\)/);
+  assert.match(html, /function reservationJstDateKeyForClient\(value\)/);
+  assert.match(savedReportSearchSource, /enrichReservationFacts\([\s\S]*q,\s*true/);
 });
 
 test('same-year month ranges like 2026年1月〜7月 expand to the full inclusive span', () => {
