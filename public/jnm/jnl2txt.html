@@ -9243,12 +9243,18 @@ async function searchCloudJournalCohortCompare(comparisons, monthFrom, monthTo) 
   });
 }
 
-/** 予約確定事実 API（氏名あり・電話なし）。期間マッチ分析で毎回呼ぶ。 */
-async function fetchReservationAiFacts(monthFrom, monthTo) {
+/** 予約確定事実 API。通常は軽量集計のみ、予約者・顧客質問だけ氏名入り明細を取得する。 */
+async function fetchReservationAiFacts(monthFrom, monthTo, includeItems = false) {
   const params = new URLSearchParams({ store_key: STORE_KEY });
   if (monthFrom) params.set('month_from', monthFrom);
   if (monthTo) params.set('month_to', monthTo);
+  params.set('include_items', includeItems ? '1' : '0');
   return await adminApiFetch('/reservations/ai-facts?' + params.toString(), { method: 'GET' });
+}
+
+function wantsReservationAiDetail(query) {
+  const q = String(query || '');
+  return /予約者|予約一覧|予約明細|予約内容|予約名|氏名|名前|誰|前回来店|来店履歴|顧客|アレルギー|プラン|コース予約|新規.*(?:人|客|予約)|リピート.*(?:人|客|予約)/.test(q);
 }
 
 /**
@@ -9344,7 +9350,7 @@ function hasUsableReservationAiFacts(raw) {
  * 食べログ／一休／手入力の予約・顧客リピートを AI 確定集計へ追加する。
  * monthlyBreakdown の期間に合わせる。失敗時・予約0件時は null（他レイヤは壊さない）。
  */
-async function enrichReservationFacts(monthlyBreakdown) {
+async function enrichReservationFacts(monthlyBreakdown, query) {
   const months = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
     .map((m) => m.key)
     .filter(Boolean)
@@ -9353,7 +9359,8 @@ async function enrichReservationFacts(monthlyBreakdown) {
   const monthFrom = months[0];
   const monthTo = months[months.length - 1];
   try {
-    const raw = await fetchReservationAiFacts(monthFrom, monthTo);
+    const includeItems = wantsReservationAiDetail(query);
+    const raw = await fetchReservationAiFacts(monthFrom, monthTo, includeItems);
     if (!raw || typeof raw !== 'object') return null;
     // 予約取り込みが無い店舗／期間内0件は節を出さない（飛込=POS全体のような誤解を防ぐ）
     if (!hasUsableReservationAiFacts(raw)) return null;
@@ -9366,6 +9373,7 @@ async function enrichReservationFacts(monthlyBreakdown) {
       byMonth,
       walkInMonthly,
       items: Array.isArray(raw.items) ? raw.items : [],
+      itemsIncluded: includeItems,
       truncated: !!raw.truncated,
       notes: Array.isArray(raw.notes) ? raw.notes : [],
       generatedAt: raw.generated_at || ''
@@ -9457,7 +9465,7 @@ function formatReservationFactsForAi(facts, indent = '') {
     `送り忘れ・通知未達の予約は欠落し飛込が過大に出る。スクショは人数・氏名・日時の読み違いがありうる。月境界の日付ズレにも注意。`
   );
   const items = Array.isArray(facts.items) ? facts.items : [];
-  if (items.length) {
+  if (facts.itemsIncluded && items.length) {
     lines.push(`${indent}  - 明細（氏名・来店日時・回数・内容）:`);
     items.forEach((it) => {
       const guest =
@@ -9483,8 +9491,10 @@ function formatReservationFactsForAi(facts, indent = '') {
       if (it.is_cancelled) bits.push('キャンセル');
       lines.push(`${indent}    - ${bits.join(' / ')}`);
     });
-  } else {
+  } else if (facts.itemsIncluded) {
     lines.push(`${indent}  - 明細: 0件（対象期間・店舗スコープ内）`);
+  } else {
+    lines.push(`${indent}  - 明細: 通常分析では省略（予約者名・予約一覧・前回来店等の質問時だけ取得）`);
   }
   if (facts.truncated) {
     lines.push(`${indent}  - ※件数上限により明細は途中まで。集計 totals / by_month / 予約vs飛び込み表を正本にし、残りは「表示上限」と述べよ`);
@@ -12486,7 +12496,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     );
     const productCohortFacts = cohortPacked?.productCohortFacts || null;
     const journalCohortComparisons = cohortPacked?.comparisons || [];
-    const reservationFacts = await enrichReservationFacts(monthlyBreakdown);
+    const reservationFacts = await enrichReservationFacts(monthlyBreakdown, q);
 
     // 期間合計は月次代表値の合算を優先（二重計上を避ける）。月が取れない場合のみ従来の合算へフォールバック。
     let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;

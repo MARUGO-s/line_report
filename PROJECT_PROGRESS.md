@@ -50,6 +50,7 @@ New records are appended below.
 - Change tracking: `reservation_ai_cache_dirty_dates`と3予約イベント表のtriggerを追加。過去予約の後日編集・削除があった日を記録し、翌cronで安全に再作成する。
 - Cron: `reservation-ai-cache-cron`を追加。既存の日次処理（04:10、04:20、05:00 JST）と重ならない**毎朝05:37 JST**に実行。初回は過去24か月、通常は昨日分＋dirty日以降を再計算。
 - API: `/reservations/ai-facts`は過去日を日次キャッシュから取得し、本日以降を予約イベントDBから直接取得して結合。キャッシュ欠損日はライブDBへフォールバックし、既存API応答形を維持。
+- Token/latency: 日次キャッシュを`summary_facts`（集計のみ）と`facts.items`（氏名入り明細）に分離。通常分析は集計だけを取得し、予約者名・予約一覧・前回来店・顧客等の質問時だけ明細を取得する。
 - Security: キャッシュ再構築 `/reservations/ai-cache/rebuild` はcron認証専用。公開Pagesから予約テーブル/キャッシュを直接読まない。
 - Verification: 予約キャッシュ新規テスト4件を含む予約テスト8件、Journal AIテスト36件、`npm run check`、共有helper/cronのDeno check、`git diff --check`成功。
 

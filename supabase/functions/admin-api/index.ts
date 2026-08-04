@@ -5565,6 +5565,7 @@ async function fetchReservationAiFacts(
   ) {
     return await fetchReservationAiFactsLive(supabase, url)
   }
+  const includeItems = url.searchParams.get("include_items") !== "0"
 
   const today = jstTodayDateKey()
   const requestStartDate = `${months[0]}-01`
@@ -5588,7 +5589,7 @@ async function fetchReservationAiFacts(
     expectedPastDays = pastDateKeys.length
     const { data: cachedRows, error: cacheError } = await supabase
       .from(RESERVATION_AI_CACHE_TABLE)
-      .select("fact_date, facts")
+      .select(includeItems ? "fact_date, facts" : "fact_date, summary_facts")
       .eq("store_partition_key", storeKey)
       .gte("fact_date", requestStartDate)
       .lt("fact_date", pastEndExclusive)
@@ -5599,7 +5600,9 @@ async function fetchReservationAiFacts(
     const cachedByDate = new Map<string, ReservationAiFactsPayload>()
     for (const row of (Array.isArray(cachedRows) ? cachedRows : [])) {
       const dateKey = toSafeString((row as Record<string, unknown>).fact_date)
-      const facts = (row as Record<string, unknown>).facts
+      const facts = includeItems
+        ? (row as Record<string, unknown>).facts
+        : (row as Record<string, unknown>).summary_facts
       if (dateKey && isRecord(facts)) cachedByDate.set(dateKey, facts as ReservationAiFactsPayload)
     }
     const missingDates: string[] = []
@@ -5632,7 +5635,7 @@ async function fetchReservationAiFacts(
       payloads.push({
         totals: aggregateReservationAiItems(items),
         by_month: aggregateReservationAiItemsByMonth(items),
-        items,
+        items: includeItems ? items : [],
         truncated: livePast.truncated === true,
         notes: Array.isArray(livePast.notes) ? livePast.notes : [],
       })
@@ -5663,7 +5666,7 @@ async function fetchReservationAiFacts(
     source_filter: "all",
     totals: merged.totals,
     by_month: merged.by_month,
-    items: merged.items,
+    items: includeItems ? merged.items : [],
     truncated: merged.truncated,
     generated_at: new Date().toISOString(),
     notes: [
@@ -5673,6 +5676,9 @@ async function fetchReservationAiFacts(
         ? `キャッシュ未作成の過去${liveFallbackDays}日分はDBを直接参照`
         : "過去予約は日次確定キャッシュを参照",
       futureLive ? "本日以降の予約は最新DBを直接参照" : "未来予約のDB直接参照なし",
+      includeItems
+        ? "氏名入り予約明細を取得"
+        : "通常分析のため氏名入り明細を省略し、集計のみ取得",
     ],
     cache: {
       mode: futureLive ? "past_cache_plus_live_future" : "past_cache",
@@ -5767,6 +5773,12 @@ async function rebuildReservationAiDailyCache(
           totals,
           by_month: aggregateReservationAiItemsByMonth(items),
           items,
+          truncated: globalLive.truncated === true,
+          notes: reservationAiBaseNotes(),
+        },
+        summary_facts: {
+          totals,
+          by_month: aggregateReservationAiItemsByMonth(items),
           truncated: globalLive.truncated === true,
           notes: reservationAiBaseNotes(),
         },
