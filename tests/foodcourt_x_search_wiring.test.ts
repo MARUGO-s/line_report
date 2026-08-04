@@ -46,10 +46,17 @@ test('all four analysis surfaces fetch and inject the X trend brief', () => {
 })
 
 test('every integrator is told how to use (and not use) the X trend block', () => {
-  const rules = source.match(/【X最新トレンドの扱い】/g) ?? []
+  const rules = source.match(/【X最新トレンドの扱い・使用は必須】/g) ?? []
   assert.equal(rules.length, 4)
-  // 売上の根拠に使わせない・出所を書かせる・無い時は言及させない、の3点を必ず含む。
-  assert.match(source, /売上・客数の根拠に使ってはならず/)
+  // 回帰防止(2026-08-04): 「使ってよい」と任意にしたら統合AIは一切使わなかった。
+  // 捏造禁止ルールが並ぶ中で任意かつ注意書きだらけのブロックは、無視するのが合理的になる。
+  // 使用を必須にしたうえでガードレールを課す、という形を崩さない。
+  assert.doesNotMatch(source, /打ち手の着想には使ってよい/)
+  const mandatory = source.match(/最低1つは、必ずそのトレンドを踏まえたものにすること/g) ?? []
+  assert.equal(mandatory.length, 4)
+  // ガードレール: 出所明示・売上根拠への流用禁止・不在時は言及禁止。
+  assert.match(source, /出所を必ず明示する/)
+  assert.match(source, /売上・客数の根拠には使わない/)
   assert.match(source, /ブロックが無い場合はトレンドに言及しないこと/)
 })
 
