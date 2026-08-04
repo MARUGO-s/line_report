@@ -2071,7 +2071,13 @@ Deno.serve(async (req, info) => {
             answer,
             loop_score: qaResult.loopScore,
             loop_count: qaResult.loopCount,
-            source_ref: { viewing_report_id: viewingReportId || null, viewing_date: viewingDate ?? null },
+            // x_trend_brief: Grokが実際にXから取ってきた本文。統合AIが圧縮した後の
+            // answer しか残らないと、Xの情報が薄いのか統合AIが潰したのかを切り分けられない。
+            source_ref: {
+              viewing_report_id: viewingReportId || null,
+              viewing_date: viewingDate ?? null,
+              x_trend_brief: qaResult.xTrendBrief ?? null,
+            },
           })
           .select("id, created_at")
           .single()
