@@ -80,6 +80,10 @@ Deno.test("Grok response parser keeps text, X-search proof, and deduplicated sou
     ],
   });
   assert(parsed.usedXSearch, "x_search execution should be detected");
+  assert(
+    parsed.evidence === "tool_call",
+    "tool call should be primary evidence",
+  );
   assert(parsed.text === "投稿文脈付きのトレンド要約", "text mismatch");
   assert(parsed.citations.length === 2, "citations should be deduplicated");
   assert(
@@ -107,6 +111,54 @@ Deno.test("Grok response parser prefers the SDK-style top-level output_text", ()
   });
   assert(parsed.usedXSearch, "x_search execution should be detected");
   assert(parsed.text === "正規化済みの最終回答", "output_text should win");
+});
+
+Deno.test("structured X citations prove X search when tool-call items are omitted", () => {
+  const parsed = parseGrokXSearchResponse({
+    output_text: "X検索結果",
+    citations: ["https://x.com/example/status/4"],
+    output: [
+      {
+        type: "message",
+        content: [{ type: "output_text", text: "X検索結果" }],
+      },
+    ],
+  });
+  assert(parsed.usedXSearch, "structured X citation should prove X search");
+  assert(
+    parsed.evidence === "structured_x_citation",
+    "citation evidence should be reported",
+  );
+});
+
+Deno.test("plain-text X URLs alone do not prove that X search ran", () => {
+  const parsed = parseGrokXSearchResponse({
+    output: [
+      {
+        type: "message",
+        content: [
+          {
+            type: "output_text",
+            text: "検索したと主張 https://x.com/example/status/5",
+          },
+        ],
+      },
+    ],
+  });
+  assert(!parsed.usedXSearch, "unstructured model text is not search proof");
+  assert(parsed.evidence === "none", "there should be no verified evidence");
+});
+
+Deno.test("server-side usage metadata can prove X search", () => {
+  const parsed = parseGrokXSearchResponse({
+    output_text: "X検索結果",
+    server_side_tool_usage: {
+      x_search: 2,
+    },
+    citations: ["https://x.com/example/status/6"],
+  });
+  assert(parsed.usedXSearch, "server usage should prove X search");
+  assert(parsed.evidence === "server_usage", "server usage evidence expected");
 });
 
 Deno.test("Grok response parser rejects legacy chat-completions-shaped data", () => {

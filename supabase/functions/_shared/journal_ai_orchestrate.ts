@@ -30,6 +30,7 @@ export type ParsedGrokXSearchResponse = {
   text: string;
   citations: string[];
   usedXSearch: boolean;
+  evidence: "tool_call" | "server_usage" | "structured_x_citation" | "none";
 };
 
 const XAI_RESPONSES_ENDPOINT = "https://api.x.ai/v1/responses";
@@ -180,14 +181,30 @@ function addCitationUrl(urls: string[], raw: unknown): void {
   if (!urls.includes(url)) urls.push(url);
 }
 
-function collectAnnotationUrls(content: JsonRecord, urls: string[]): void {
+function collectAnnotationUrls(
+  content: JsonRecord,
+  urls: string[],
+  structuredUrls: string[],
+): void {
   const annotations = Array.isArray(content.annotations)
     ? content.annotations
     : [];
   for (const annotation of annotations) {
     if (!isRecord(annotation)) continue;
     addCitationUrl(urls, annotation.url);
+    addCitationUrl(structuredUrls, annotation.url);
   }
+}
+
+function containsXSearchUsage(value: unknown): boolean {
+  if (typeof value === "string") {
+    return /(^|[^a-z])(?:server_side_tool_)?x_search(?:[^a-z]|$)/i.test(value);
+  }
+  if (Array.isArray(value)) return value.some(containsXSearchUsage);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([key, nested]) =>
+    containsXSearchUsage(key) || containsXSearchUsage(nested)
+  );
 }
 
 /** xAI Responses APIの typed output と citations を安全に正規化する。 */
@@ -195,20 +212,24 @@ export function parseGrokXSearchResponse(
   json: unknown,
 ): ParsedGrokXSearchResponse {
   if (!isRecord(json)) {
-    return { text: "", citations: [], usedXSearch: false };
+    return { text: "", citations: [], usedXSearch: false, evidence: "none" };
   }
   let text = "";
   const citations: string[] = [];
-  let usedXSearch = false;
+  const structuredUrls: string[] = [];
+  let toolCallUsed = false;
 
   if (Array.isArray(json.citations)) {
-    for (const citation of json.citations) addCitationUrl(citations, citation);
+    for (const citation of json.citations) {
+      addCitationUrl(citations, citation);
+      addCitationUrl(structuredUrls, citation);
+    }
   }
 
   const output = Array.isArray(json.output) ? json.output : [];
   for (const item of output) {
     if (!isRecord(item)) continue;
-    if (item.type === "x_search_call") usedXSearch = true;
+    if (item.type === "x_search_call") toolCallUsed = true;
     if (item.type !== "message" || !Array.isArray(item.content)) continue;
     for (const content of item.content) {
       if (!isRecord(content) || content.type !== "output_text") continue;
@@ -219,14 +240,25 @@ export function parseGrokXSearchResponse(
           addCitationUrl(citations, match[0]);
         }
       }
-      collectAnnotationUrls(content, citations);
+      collectAnnotationUrls(content, citations, structuredUrls);
     }
   }
+
+  const serverUsageUsed = containsXSearchUsage(json.server_side_tool_usage);
+  const structuredXSourceUsed = structuredUrls.some(isXSourceUrl);
+  const evidence = toolCallUsed
+    ? "tool_call"
+    : serverUsageUsed
+    ? "server_usage"
+    : structuredXSourceUsed
+    ? "structured_x_citation"
+    : "none";
 
   return {
     text: String(json.output_text || "").trim() || text,
     citations,
-    usedXSearch,
+    usedXSearch: evidence !== "none",
+    evidence,
   };
 }
 
@@ -420,7 +452,19 @@ export async function callGrokTrendBrief(
     const json = await res.json().catch(() => null);
     const parsed = parseGrokXSearchResponse(json);
     if (!parsed.usedXSearch) {
-      console.error("Grok response did not execute x_search");
+      const responseRecord = isRecord(json) ? json : {};
+      const outputTypes = Array.isArray(responseRecord.output)
+        ? responseRecord.output
+          .filter(isRecord)
+          .map((item) => String(item.type || "unknown"))
+        : [];
+      console.error("Grok response did not prove x_search", {
+        outputTypes,
+        citationCount: Array.isArray(responseRecord.citations)
+          ? responseRecord.citations.length
+          : 0,
+        hasServerSideToolUsage: "server_side_tool_usage" in responseRecord,
+      });
       return {
         provider: "grok",
         ok: false,
