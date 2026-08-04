@@ -45,25 +45,43 @@ test('all four analysis surfaces fetch and inject the X trend brief', () => {
   assert.equal(injected.length, 4)
 })
 
-test('every integrator is told how to use (and not use) the X trend block', () => {
-  const rules = source.match(/【X最新トレンドの扱い・使用は必須】/g) ?? []
-  assert.equal(rules.length, 4)
-  // 回帰防止(2026-08-04): 「使ってよい」と任意にしたら統合AIは一切使わなかった。
-  // 捏造禁止ルールが並ぶ中で任意かつ注意書きだらけのブロックは、無視するのが合理的になる。
-  // 使用を必須にしたうえでガードレールを課す、という形を崩さない。
+test('the mandatory-use rule is injected ONLY when a brief actually exists', () => {
+  // 回帰防止(2026-08-04・最重要): 「ブロックがある場合は必ず使え」を常時出しておき
+  // 末尾に「無い場合は言及するな」と添える書き方は破綻した。ブリーフがタイムアウトで
+  // 届かなかった回に、統合AIが会話履歴の前回のX記述をなぞって
+  // 「Xの最新トレンドでは『低アルコール』『無添加』が話題」と実データ無しに創作した。
+  // 強い必須指示は弱い例外条項に勝つ。ブロックが無い回は必須指示自体を載せない。
+  assert.match(source, /function foodCourtXTrendRule\(xTrendBlock: string, targets: string\): string\[\]/)
+  assert.match(source, /if \(!xTrendBlock\) \{/)
+  // ブロック不在時は「再利用するな」を明示する（履歴からの再掲が捏造経路だった）。
+  assert.match(source, /過去のやり取りにX由来の記述があっても、それを再利用・再掲してはならない/)
+  // 必須指示は1箇所（ヘルパー内）にしか無く、4サーフェスはそこを経由する。
+  const mandatory = source.match(/【X最新トレンドの扱い・使用は必須】/g) ?? []
+  assert.equal(mandatory.length, 1)
+  const callSites = source.match(/\.\.\.foodCourtXTrendRule\(xTrendBlock, /g) ?? []
+  assert.equal(callSites.length, 4)
+})
+
+test('the integrator must quote specifics, not generic paraphrases', () => {
+  // 「使ってよい」と任意にしたら一切使われず、必須にしたら「X上で話題の季節の食材」の
+  // ような一般語への言い換えが起きた。具体名の逐語引用を明示的に要求する。
   assert.doesNotMatch(source, /打ち手の着想には使ってよい/)
-  const mandatory = source.match(/最低1つは、必ずそのトレンドを踏まえたものにすること/g) ?? []
-  assert.equal(mandatory.length, 4)
-  // メニュー・商品の方向性への反映が主目的なので、その用途を必ず示す。
+  assert.match(source, /一般語に言い換えてはならない/)
+  // メニュー・商品の方向性への反映が主目的なので、4サーフェスとも用途に含める。
   const menuUse = source.match(/メニューや商品の方向性/g) ?? []
   assert.equal(menuUse.length, 4)
-  // 回帰防止(2026-08-04): 使用を必須にしただけでは「X上で話題の季節の食材」のような
-  // 一般語への言い換えが起き、検索した意味が消える。具体名の引用を明示的に要求する。
-  const verbatim = source.match(/一般語に言い換えてはならない/g) ?? []
-  assert.equal(verbatim.length, 4)
-  // ガードレール: 売上根拠への流用禁止・不在時は言及禁止。
   assert.match(source, /売上・客数の根拠には使わない/)
-  assert.match(source, /ブロックが無い場合はトレンドに言及しないこと/)
+})
+
+test('trend-irrelevant questions skip the search entirely', () => {
+  // 1回$0.09かかるので「一番売れた日は？」のような事実照会では走らせない。
+  // 判定は journal 側で実装・テスト済みの意図分類を流用する。
+  assert.match(source, /import \{ callGrokTrendBrief, classifyJournalChatIntent/)
+  assert.match(source, /classifyJournalChatIntent\(question\) === 'data' \? '' : foodCourtXTrendTopic\(\)/)
+  // Q&Aだけが質問で切り替わる。定期サマリーは質問が無いので常に固定トピック。
+  assert.match(source, /fetchFoodCourtXTrendBrief\(foodCourtXTrendTopicForQuestion\(q\),/)
+  // 空トピックは検索そのものを行わない（課金ゼロ）。
+  assert.match(source, /if \(!topic\) return null/)
 })
 
 test('the brief text is persisted so its quality can be judged directly', () => {
@@ -85,7 +103,7 @@ test('the brief has no substitute provider and degrades to silence', () => {
 test('brief is cost-bounded by an on/off switch, a cache and a soft timeout', () => {
   assert.match(source, /FOODCOURT_X_SEARCH_ENABLED/)
   assert.match(source, /FOODCOURT_X_SEARCH_CACHE_TTL_MS/)
-  assert.match(source, /FOODCOURT_X_SEARCH_SOFT_TIMEOUT_MS/)
+  assert.match(source, /FOODCOURT_X_SEARCH_SOFT_TIMEOUT_MS', 40_000/)
 
   // 失敗結果を成功と同じだけ保持すると、一時障害で半日ブラインドになる。
   assert.match(source, /const ngTtlMs = Math\.min\(okTtlMs, 10 \* 60_000\)/)
@@ -101,7 +119,7 @@ test('the user question is never used as the X search query', () => {
   assert.doesNotMatch(source, /fetchFoodCourtXTrendBrief\(\s*q\s*,/)
 
   // 4サーフェスとも同じ固定トピックを使う = 同じキャッシュキー = 1日1検索。
-  const calls = source.match(/fetchFoodCourtXTrendBrief\(foodCourtXTrendTopic\(\),/g) ?? []
+  const calls = source.match(/fetchFoodCourtXTrendBrief\(foodCourtXTrendTopic(?:ForQuestion\(q\))?\(?\)?,/g) ?? []
   assert.equal(calls.length, 4)
   assert.match(source, /foodCourtJstDate\(\)/)
 })
