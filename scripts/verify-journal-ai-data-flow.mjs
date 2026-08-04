@@ -8,6 +8,10 @@ const [html, adminApi, lineWebhook, aiAnalyze, reservationCacheCron] = await Pro
   readFile(new URL("supabase/functions/ai-analyze/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/reservation-ai-cache-cron/index.ts", root), "utf8"),
 ]);
+const pagedRowScan = await readFile(
+  new URL("supabase/functions/_shared/paged_row_scan.ts", root),
+  "utf8",
+);
 
 function containsAll(source, patterns) {
   return patterns.every((pattern) =>
@@ -104,6 +108,26 @@ conditional(
   ]),
   "保存伝票 → 不足時は原本ジャーナル → 質問別の確定事実",
   "全質問で全原本を読むのではなく、商品明細や異常月など必要な質問で再読します。",
+);
+
+core(
+  "raw_journal_pagination",
+  "原本ジャーナル全件ページ分割",
+  containsAll(adminApi, [
+    "scanPosJournalParsedRows",
+    "scanRowsByAscendingId",
+    ".gt(\"id\", afterId)",
+    ".order(\"id\", { ascending: true })",
+    "searchPosJournalProducts",
+    "comparePosJournalCohortsGeneral",
+  ]) && containsAll(pagedRowScan, [
+    "while (true)",
+    "if (rawRows.length === 0)",
+    "maxReceivedId <= cursor",
+    "safe row cap",
+  ]),
+  "pos_journal_files → IDカーソルで複数ページ取得 → 商品初出/コース全期間/コホート比較",
+  "PostgRESTの1レスポンス行数上限を超えても空ページまで取得し、短いページ・重複境界・進捗停止を安全に扱います。",
 );
 
 core(

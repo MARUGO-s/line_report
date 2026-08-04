@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-05 - Journal Report 原本ジャーナル全件ページ分割
+
+- Request: Supabase/PostgRESTの1レスポンス行数上限で、長期保存した原本ジャーナルの古い月が落ちる構造的弱点を解消。
+- Change: `scanRowsByAscendingId`を追加し、IDカーソルで空ページまで取得。商品初出・コース全期間・商品利用比較・汎用コホート比較を共通スキャナへ移行。短いページをEOFにせず、重複を除外し、進捗停止・不正ID・100,000行超・途中失敗は部分成功にしない。
+- Tests: 2,505行、短縮ページ、境界重複、順不同、空ページ、進捗停止、安全上限、取得/処理失敗と、`admin-api`の配線回帰テストを追加。
+- Deploy: `admin-api` Edge Functionの再デプロイが必要。DB migrationとPages変更は不要。
+
 ### 2026-08-05 - Journal Report 全期間コース導入前後分析の根本修正
 
 - Request: SPコース初出を起点に全期間を分析すると、初回だけ2026年1月以前の既存コースが落ち、指摘後には読める問題を再発防止。

@@ -144,6 +144,10 @@ import {
   normalizePosJournalAiSummary,
   type PosJournalAiUsage,
 } from "../_shared/pos_journal_ai.ts"
+import {
+  scanRowsByAscendingId,
+  type AscendingIdScanResult,
+} from "../_shared/paged_row_scan.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
 
@@ -8696,6 +8700,73 @@ function parseOptionalYearMonthParam(
   return raw
 }
 
+const POS_JOURNAL_SCAN_PAGE_SIZE = 500
+const POS_JOURNAL_SCAN_MAX_ROWS = 100_000
+
+type PosJournalParsedRow = {
+  id: unknown
+  business_date: unknown
+  year_month: unknown
+  parsed_data: unknown
+}
+
+async function scanPosJournalParsedRows(
+  supabase: ReturnType<typeof createClient>,
+  options: {
+    storeKey: string
+    monthFrom?: string | null
+    monthTo?: string | null
+    errorLabel: string
+  },
+  visitPage: (rows: readonly PosJournalParsedRow[]) => void | Promise<void>,
+): Promise<AscendingIdScanResult> {
+  const { storeKey, monthFrom, monthTo, errorLabel } = options
+  try {
+    return await scanRowsByAscendingId<PosJournalParsedRow>(
+      async (afterId, pageSize) => {
+        let query = supabase
+          .from("pos_journal_files")
+          .select("id, business_date, year_month, parsed_data")
+          .eq("store_partition_key", storeKey)
+          .is("storage_deleted_at", null)
+          .not("parsed_data", "is", null)
+          .gt("id", afterId)
+          .order("id", { ascending: true })
+          .limit(pageSize)
+        if (monthFrom) query = query.gte("year_month", monthFrom)
+        if (monthTo) query = query.lte("year_month", monthTo)
+        const { data, error } = await query
+        if (error) {
+          throw {
+            status: 500,
+            message: `${errorLabel}: ${error.message}`,
+          } satisfies AppError
+        }
+        return Array.isArray(data) ? data as PosJournalParsedRow[] : []
+      },
+      visitPage,
+      {
+        pageSize: POS_JOURNAL_SCAN_PAGE_SIZE,
+        maxRows: POS_JOURNAL_SCAN_MAX_ROWS,
+      },
+    )
+  } catch (error) {
+    if (
+      isRecord(error) &&
+      Number.isInteger(Number(error.status)) &&
+      String(error.message ?? "").trim()
+    ) {
+      throw error
+    }
+    throw {
+      status: 500,
+      message: `${errorLabel}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    } satisfies AppError
+  }
+}
+
 /**
  * 店舗の全電子ジャーナル（parsed_data）を横断し、商品名・コード・単価帯の初出月を返す。
  * 「いつから売れたか／導入月」は保存レポートに無くてもジャーナルから逆算できる。
@@ -8709,22 +8780,9 @@ async function searchPosJournalProducts(
   )
   const filter = parsePosProductSearchFilter(url)
 
-  const { data, error } = await supabase
-    .from("pos_journal_files")
-    .select("id, business_date, year_month, parsed_data")
-    .eq("store_partition_key", storeKey)
-    .is("storage_deleted_at", null)
-    .not("parsed_data", "is", null)
-    .order("business_date", { ascending: true })
-    .order("id", { ascending: true })
-  if (error) {
-    throw {
-      status: 500,
-      message: `商品検索用ジャーナルの取得に失敗しました: ${error.message}`,
-    } satisfies AppError
-  }
-
   type Hit = {
+    file_id: number
+    item_order: number
     business_date: string
     year_month: string
     name: string
@@ -8734,36 +8792,53 @@ async function searchPosJournalProducts(
     amount: number
   }
   const hits: Hit[] = []
-
-  for (const row of Array.isArray(data) ? data : []) {
-    if (!isRecord(row)) continue
-    const businessDate = String(row.business_date ?? "").slice(0, 10)
-    const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
-    const parsed = row.parsed_data
-    if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
-    for (const receipt of parsed.receipts) {
-      if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
-      for (const item of receipt.items) {
-        if (!isRecord(item)) continue
-        const name = String(item.name ?? "").trim()
-        if (!name) continue
-        const code = String(item.code ?? "").trim()
-        const unit = toNonNegativeInteger(item.unit)
-        const qty = Math.max(1, toNonNegativeInteger(item.qty) || 1)
-        const amount = toNonNegativeInteger(item.amount) || unit * qty
-        if (!itemMatchesPosProductFilter(name, code, unit, filter)) continue
-        hits.push({
-          business_date: businessDate,
-          year_month: yearMonth,
-          name,
-          code,
-          unit,
-          qty,
-          amount,
-        })
+  let itemOrder = 0
+  const scan = await scanPosJournalParsedRows(
+    supabase,
+    {
+      storeKey,
+      errorLabel: "商品検索用ジャーナルの取得に失敗しました",
+    },
+    (rows) => {
+      for (const row of rows) {
+        if (!isRecord(row)) continue
+        const fileId = toNonNegativeInteger(row.id)
+        const businessDate = String(row.business_date ?? "").slice(0, 10)
+        const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
+        const parsed = row.parsed_data
+        if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
+        for (const receipt of parsed.receipts) {
+          if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
+          for (const item of receipt.items) {
+            if (!isRecord(item)) continue
+            const name = String(item.name ?? "").trim()
+            if (!name) continue
+            const code = String(item.code ?? "").trim()
+            const unit = toNonNegativeInteger(item.unit)
+            const qty = Math.max(1, toNonNegativeInteger(item.qty) || 1)
+            const amount = toNonNegativeInteger(item.amount) || unit * qty
+            if (!itemMatchesPosProductFilter(name, code, unit, filter)) continue
+            hits.push({
+              file_id: fileId,
+              item_order: itemOrder++,
+              business_date: businessDate,
+              year_month: yearMonth,
+              name,
+              code,
+              unit,
+              qty,
+              amount,
+            })
+          }
+        }
       }
-    }
-  }
+    },
+  )
+  hits.sort((a, b) =>
+    a.business_date.localeCompare(b.business_date) ||
+    a.file_id - b.file_id ||
+    a.item_order - b.item_order
+  )
 
   const byMonthMap = new Map<string, {
     year_month: string
@@ -8909,7 +8984,7 @@ async function searchPosJournalProducts(
       unit_min: filter.unitMin,
       unit_max: filter.unitMax,
     },
-    scanned_files: Array.isArray(data) ? data.length : 0,
+    scanned_files: scan.scannedRows,
     match_count: hits.length,
     total_qty: hits.reduce((s, h) => s + h.qty, 0),
     total_amount: hits.reduce((s, h) => s + h.amount, 0),
@@ -9444,69 +9519,61 @@ async function comparePosJournalCohortsGeneral(
   }
   const specs = rawList.map((item, i) => normalizeCohortComparisonSpec(item, i))
 
-  const { data, error } = await supabase
-    .from("pos_journal_files")
-    .select("id, business_date, year_month, parsed_data")
-    .eq("store_partition_key", storeKey)
-    .is("storage_deleted_at", null)
-    .not("parsed_data", "is", null)
-    .order("business_date", { ascending: true })
-    .order("id", { ascending: true })
-  if (error) {
-    throw {
-      status: 500,
-      message: `汎用コホート用ジャーナルの取得に失敗しました: ${error.message}`,
-    } satisfies AppError
-  }
-
   const states = specs.map((spec) => ({
     spec,
     left: emptyCohortBucket(),
     right: emptyCohortBucket(),
     byMonth: new Map<string, { left: CohortBucket; right: CohortBucket }>(),
   }))
-  let scannedFiles = 0
   let scannedReceipts = 0
 
-  for (const row of Array.isArray(data) ? data : []) {
-    if (!isRecord(row)) continue
-    const businessDate = String(row.business_date ?? "").slice(0, 10)
-    const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
-    if (monthFrom && yearMonth < monthFrom) continue
-    if (monthTo && yearMonth > monthTo) continue
-    scannedFiles += 1
-    const parsed = row.parsed_data
-    if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
-    for (const receipt of parsed.receipts) {
-      if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
-      scannedReceipts += 1
-      for (const state of states) {
-        const side = state.spec.decide(receipt, businessDate)
-        if (side === "skip") continue
-        let monthBuckets = state.byMonth.get(yearMonth)
-        if (!monthBuckets) {
-          monthBuckets = {
-            left: emptyCohortBucket(),
-            right: emptyCohortBucket(),
+  const scan = await scanPosJournalParsedRows(
+    supabase,
+    {
+      storeKey,
+      monthFrom,
+      monthTo,
+      errorLabel: "汎用コホート用ジャーナルの取得に失敗しました",
+    },
+    (rows) => {
+      for (const row of rows) {
+        if (!isRecord(row)) continue
+        const businessDate = String(row.business_date ?? "").slice(0, 10)
+        const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
+        const parsed = row.parsed_data
+        if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
+        for (const receipt of parsed.receipts) {
+          if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
+          scannedReceipts += 1
+          for (const state of states) {
+            const side = state.spec.decide(receipt, businessDate)
+            if (side === "skip") continue
+            let monthBuckets = state.byMonth.get(yearMonth)
+            if (!monthBuckets) {
+              monthBuckets = {
+                left: emptyCohortBucket(),
+                right: emptyCohortBucket(),
+              }
+              state.byMonth.set(yearMonth, monthBuckets)
+            }
+            const target = side === "left" ? state.left : state.right
+            const monthTarget = side === "left"
+              ? monthBuckets.left
+              : monthBuckets.right
+            addReceiptToCohort(target, receipt, businessDate)
+            addReceiptToCohort(monthTarget, receipt, businessDate)
           }
-          state.byMonth.set(yearMonth, monthBuckets)
         }
-        const target = side === "left" ? state.left : state.right
-        const monthTarget = side === "left"
-          ? monthBuckets.left
-          : monthBuckets.right
-        addReceiptToCohort(target, receipt, businessDate)
-        addReceiptToCohort(monthTarget, receipt, businessDate)
       }
-    }
-  }
+    },
+  )
 
   return {
     ok: true,
     store_key: storeKey,
     month_from: monthFrom,
     month_to: monthTo,
-    scanned_files: scannedFiles,
+    scanned_files: scan.scannedRows,
     scanned_receipts: scannedReceipts,
     comparisons: states.map((state) => ({
       id: state.spec.id,
