@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
-const [html, adminApi, lineWebhook, aiAnalyze] = await Promise.all([
+const [html, adminApi, lineWebhook, aiAnalyze, reservationCacheCron] = await Promise.all([
   readFile(new URL("public/jnm/jnl2txt.html", root), "utf8"),
   readFile(new URL("supabase/functions/admin-api/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/line-webhook/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/ai-analyze/index.ts", root), "utf8"),
+  readFile(new URL("supabase/functions/reservation-ai-cache-cron/index.ts", root), "utf8"),
 ]);
 
 function containsAll(source, patterns) {
@@ -216,6 +217,26 @@ core(
   ]),
   "質問の期間/意図 → 月次・日別・原本補完 → 営業情報＋資料 → ai-analyze",
   "必要範囲を検索・検算してからAIへ渡す、最も広い統合経路です。",
+);
+
+core(
+  "reservation_ai_cache",
+  "予約確定事実（過去キャッシュ＋未来ライブ）",
+  containsAll(html, [
+    "fetchReservationAiFacts",
+    "formatReservationFactsForAi",
+    "reservationFacts",
+  ]) && containsAll(adminApi, [
+    "reservation_ai_store_cache",
+    "past_cache_plus_live_future",
+    "rebuildReservationAiDailyCache",
+    'path === "/reservations/ai-cache/rebuild"',
+  ]) && containsAll(reservationCacheCron, [
+    "resolve_edge_cron_auth_token",
+    "/reservations/ai-cache/rebuild",
+  ]),
+  "予約イベントDB → 毎朝の店舗×日キャッシュ（過去）＋イベントDB直接取得（本日以降）→ 予約確定事実 → AI",
+  "過去予約は日次確定キャッシュを優先し、未来予約とキャッシュ欠損日だけDBを直接参照します。",
 );
 
 conditional(

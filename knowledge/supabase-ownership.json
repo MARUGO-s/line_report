@@ -12,6 +12,7 @@
     "pv-japan-alert-cron",
     "receipt-midreport-cron",
     "receipt-sheets-sync-cron",
+    "reservation-ai-cache-cron",
     "reservation-today-cron",
     "review-alert-cron",
     "room-messages-retention-cron",
@@ -28,7 +29,9 @@
     "pos_journal_ai_analyses",
     "store_knowledge_documents",
     "store_knowledge_chunks",
-    "store_operation_profiles"
+    "store_operation_profiles",
+    "reservation_ai_store_cache",
+    "reservation_ai_cache_dirty_dates"
   ],
   "journalReportStorageBuckets": [
     "pos-journals",

@@ -79,6 +79,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 ## 5. cron セキュリティ
 
 - `gmail-alert-cron` / `receipt-midreport-cron` の**本処理（定期実行パス）に `CRON_AUTH_TOKEN` 一致ゲート**を追加（フェイルクローズ・定数時間比較）。未認証での乱用＝コスト/クォータ増幅 DoS を防ぐ。
+- `reservation-ai-cache-cron` は毎朝05:37 JSTに過去予約の内部キャッシュを更新する。関数内で `CRON_AUTH_TOKEN` / Vault値を定数時間比較し、`admin-api /reservations/ai-cache/rebuild` もcron scope以外を403にする。
 - pg_cron は `Authorization: Bearer <resolve_edge_cron_auth_token()>` で各関数を呼ぶ。`resolve_edge_cron_auth_token()` は vault の `CRON_AUTH_TOKEN`→無ければ anon キーへフォールバック。
 - ⚠️ **ゲートを有効化するには `CRON_AUTH_TOKEN` を「vault（pg_cron 送信用）」と「Edge Secret（関数の検証用）」の両方に同値で設定**する必要がある。**未設定の現状はゲートが無効（＝従来どおり通す＝無停止）**。設定するまで cron 本処理は実質無認証（ただし冪等性で多重送信は防止）。
 - `receipt-sheets-sync-cron` は191行に全体の `isAuthorized` フェイルクローズ・ゲートあり（pg_cron 非スケジュール・GAS/admin から呼ばれる）。

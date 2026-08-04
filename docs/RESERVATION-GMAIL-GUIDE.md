@@ -1,5 +1,19 @@
 # Gmail 予約 → LINE 通知・予約表 運用ガイド
 
+## Journal Report AI向け日次予約キャッシュ（2026-08-04）
+
+Journal Report AIの予約回答は、過去予約を毎回イベント表から全件読み直しません。
+
+- 過去日（JSTで昨日以前）: `reservation_ai_store_cache` の店舗×予約日キャッシュ
+- 本日以降: `tabelog/ikyu/manual_reservation_visit_events` を直接参照
+- 実行: 毎朝 **05:37 JST** の `reservation-ai-cache-cron`
+- 初回: 過去24か月を作成
+- 通常: 昨日分と、後日変更されたdirty日以降を再作成
+- キャッシュ欠損: AI回答を止めず、該当過去期間だけイベントDBへフォールバック
+
+顧客名を含むため、キャッシュは公開ブラウザや公開Storageに置かず、RLSで閉じた内部テーブルとして
+`admin-api`（service_role）だけが利用します。電話番号はAI用facts・RAGテキストへ含めません。
+
 Gmail で届く食べログ／一休の予約メールを取り込み、**LINE グループへ通知**し、**予約表**（`reservation.html`）で参照するための仕様・DB・デプロイ手順です。
 
 **関連ドキュメント**

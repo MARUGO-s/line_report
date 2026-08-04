@@ -22,6 +22,19 @@ import {
   MARUGO_GROUP_STORE_OPTIONS,
 } from "../_shared/marugo_group_stores.ts"
 import {
+  listReceiptSheetsStores,
+} from "../_shared/receipt_sheets_store_catalog.ts"
+import {
+  aggregateReservationAiItems,
+  aggregateReservationAiItemsByMonth,
+  buildReservationDailyRagText,
+  enumerateReservationDateKeys,
+  mergeReservationAiFactsPayloads,
+  reservationJstDateKey,
+  type ReservationAiFactItem,
+  type ReservationAiFactsPayload,
+} from "../_shared/reservation_ai_cache.ts"
+import {
   allocateDailyBudgetsForMonth,
   enumerateMonthDates,
   mergeStoreClosedDateLists,
@@ -425,6 +438,8 @@ const RESERVATION_CUSTOMER_HISTORY_FETCH_CAP = 10000
 const RESERVATION_AI_FACTS_DEFAULT_LIMIT = 300
 const RESERVATION_AI_FACTS_MAX_LIMIT = 500
 const RESERVATION_AI_FACTS_MAX_MONTHS = 24
+const RESERVATION_AI_CACHE_MONTHS = 24
+const RESERVATION_AI_CACHE_TABLE = "reservation_ai_store_cache"
 const RESERVATION_CANCELLATION_RE = /(キャンセル|取消|取り消し|cancel(?:led|ed)?)/i
 
 type LineUserPermissionSortable = {
@@ -1695,6 +1710,19 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       const result = await suggestReservationCustomers(supabase, body, storeScope)
+      return json(result, 200)
+    }
+    // 日次cron用: 過去予約を店舗別・日別のAI確定キャッシュへ保存する。
+    // 顧客名を含む内部一括処理なので、cron認証以外からの実行は許可しない。
+    if (req.method === "POST" && path === "/reservations/ai-cache/rebuild") {
+      if (authResult.scopeKind !== "cron") {
+        return json({ error: "Forbidden." }, 403)
+      }
+      const parsedBody = await parseJson(workReq).catch(() => ({}))
+      const result = await rebuildReservationAiDailyCache(
+        supabase,
+        isRecord(parsedBody) ? parsedBody : {},
+      )
       return json(result, 200)
     }
     // 完全削除（ハードデリート）: キャンセル(非表示)と異なり行を物理削除し履歴も残さない。
@@ -5138,14 +5166,16 @@ async function fetchReservationSearchState(
  * - visit_count はチャネル別ネット予約回数（POS来店回数ではない）
  * - 手入力も summary lookup を付けて新規/リピートを返す（カレンダー経路は従来どおり）
  */
-async function fetchReservationAiFacts(
+async function fetchReservationAiFactsLive(
   supabase: ReturnType<typeof createClient>,
   url: URL,
+  options: { allStores?: boolean } = {},
 ) {
   const storeScope = normalizeReservationStoreScope(
     url.searchParams.get("store_key") ?? url.searchParams.get("store"),
   )
-  if (!storeScope) {
+  const allStores = options.allStores === true
+  if (!storeScope && !allStores) {
     throw { status: 400, message: "store_key is required." } satisfies AppError
   }
   // normalizeCalendarMonthParam は未指定だと「現在月」を返す。黙って現在月にすると
@@ -5171,6 +5201,9 @@ async function fetchReservationAiFacts(
     RESERVATION_AI_FACTS_MAX_LIMIT,
   )
   const includeHidden = url.searchParams.get("include_hidden") === "1"
+  const internalUnbounded = url.searchParams.get("internal_unbounded") === "1"
+  const requestedDateFrom = toSafeString(url.searchParams.get("date_from"))
+  const requestedDateToExclusive = toSafeString(url.searchParams.get("date_to_exclusive"))
   const baseSources: Array<"tabelog" | "ikyu"> = sourceFilter === "all"
     ? ["tabelog", "ikyu"]
     : (sourceFilter === "tabelog" || sourceFilter === "ikyu" ? [sourceFilter] : [])
@@ -5208,11 +5241,18 @@ async function fetchReservationAiFacts(
     const monthEvents: Array<Record<string, unknown>> = []
     for (const month of months) {
       const range = buildJstMonthRange(month)
+      const rangeStartIso = requestedDateFrom && requestedDateFrom > range.startIso
+        ? requestedDateFrom
+        : range.startIso
+      const rangeEndIso = requestedDateToExclusive && requestedDateToExclusive < range.endIso
+        ? requestedDateToExclusive
+        : range.endIso
+      if (rangeStartIso >= rangeEndIso) continue
       const eventsRes = await supabase
         .from(target.eventTable)
         .select(target.selectColumns)
-        .gte("visit_at", range.startIso)
-        .lt("visit_at", range.endIso)
+        .gte("visit_at", rangeStartIso)
+        .lt("visit_at", rangeEndIso)
         .order("visit_at", { ascending: true })
         .limit(2000)
       if (eventsRes.error) {
@@ -5250,7 +5290,7 @@ async function fetchReservationAiFacts(
       if (!includeHidden && record.manual_hidden === true) continue
       const item = buildReservationCalendarItem(target.source, record, summaryByCustomer)
       if (!item) continue
-      if (!reservationCalendarItemMatchesStoreScope(item, storeScope)) continue
+      if (!allStores && !reservationCalendarItemMatchesStoreScope(item, storeScope)) continue
       rawItems.push({ ...item, _is_cancelled: isReservationCancellationRow(record) })
     }
   }
@@ -5363,6 +5403,7 @@ async function fetchReservationAiFacts(
       allergy_label: toSafeString(item.allergy_label) || null,
       channel: toSafeString(item.route_label) || source,
       store_name: toSafeString(item.store_name) || null,
+      store_key: resolveReservationCalendarItemStoreKey(item),
       visit_count: visitCount,
       last_visit_at: toSafeString(item.last_visit_at) || null,
       guest_type: guestType,
@@ -5376,7 +5417,7 @@ async function fetchReservationAiFacts(
 
   const truncated = mapped.length > limit || monthCapHit
   return {
-    store_key: storeScope,
+    store_key: allStores ? null : storeScope,
     period: { month_from: months[0], month_to: months[months.length - 1] },
     source_filter: sourceFilter,
     totals: {
@@ -5392,8 +5433,8 @@ async function fetchReservationAiFacts(
       guest_unknown_count: guestUnknownCount,
     },
     by_month: byMonth,
-    items: mapped.slice(0, limit),
-    truncated,
+    items: internalUnbounded ? mapped : mapped.slice(0, limit),
+    truncated: internalUnbounded ? monthCapHit : truncated,
     generated_at: new Date().toISOString(),
     notes: [
       "visit_count はチャネル別の予約ネット回数（POS来店回数ではない）",
@@ -5408,6 +5449,367 @@ async function fetchReservationAiFacts(
       "スクショ経由は画像認識のため、人数・氏名・日時の読み違いが混じることがある",
       "推定がずれるその他の要因: ノーショー（予約は残るが会計が無い＝ウォークインを過少に見せる）、予約人数と実来店人数の相違、1予約が複数会計に分かれる、予約は visit_at・売上は営業日付のため深夜会計が前日扱いになる月境界のズレ",
     ],
+  }
+}
+
+function jstTodayDateKey(base = new Date()): string {
+  const jst = new Date(base.getTime() + 9 * 60 * 60 * 1000)
+  return `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, "0")}-${String(jst.getUTCDate()).padStart(2, "0")}`
+}
+
+function addReservationDateDays(dateKey: string, days: number): string {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey)
+  if (!matched) return dateKey
+  const shifted = new Date(Date.UTC(
+    Number(matched[1]),
+    Number(matched[2]) - 1,
+    Number(matched[3]) + days,
+  ))
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`
+}
+
+function reservationDateStartIso(dateKey: string): string {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey)
+  if (!matched) return ""
+  return new Date(Date.UTC(
+    Number(matched[1]),
+    Number(matched[2]) - 1,
+    Number(matched[3]),
+    -9,
+    0,
+    0,
+  )).toISOString()
+}
+
+function reservationMonthFromDateKey(dateKey: string): string {
+  return /^\d{4}-\d{2}/.test(dateKey) ? dateKey.slice(0, 7) : ""
+}
+
+function reservationCacheWindowStart(today: string, months: number): string {
+  const matched = /^(\d{4})-(\d{2})-\d{2}$/.exec(today)
+  if (!matched) return today
+  const shifted = new Date(Date.UTC(
+    Number(matched[1]),
+    Number(matched[2]) - 1 - Math.max(0, Math.floor(months) - 1),
+    1,
+  ))
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-01`
+}
+
+function reservationAiBaseNotes(): string[] {
+  return [
+    "visit_count はチャネル別の予約ネット回数（POS来店回数ではない）",
+    "予約人数 ≠ 会計客数。ウォークインは含まれない",
+    "電話番号は確定集計に含めない（氏名のみ）",
+    "by_channel・新規/リピート/回数不明・アレルギー記載はキャンセルを除いた件数。合計は reservation_count と一致する",
+    "guest_total は予約人数の合計（キャンセル除外）。予約組数は reservation_count と同じ。guest_unknown_count は人数が読み取れなかった予約件数で、その分 guest_total は少なめに出る",
+    "ウォークイン（飛び込み）は POS客数 − guest_total ／ POS会計組数 − reservation_count で推定できる。ただし一致はしないので必ず『推定』と述べること",
+    "取り込み経路: 食べログ・一休は予約通知メールからの自動取り込み。それ以外（電話・直接来店の予約など）は LINE に送られた予約スクショを AI が読み取って登録した分だけが manual に入る",
+    "したがって、スクショを送り忘れた予約・通知メールが届かなかった予約は丸ごと欠落し、その分はウォークイン側に計上される（ウォークインが過大に出る）",
+    "スクショ経由は画像認識のため、人数・氏名・日時の読み違いが混じることがある",
+    "推定がずれるその他の要因: ノーショー（予約は残るが会計が無い＝ウォークインを過少に見せる）、予約人数と実来店人数の相違、1予約が複数会計に分かれる、予約は visit_at・売上は営業日付のため深夜会計が前日扱いになる月境界のズレ",
+  ]
+}
+
+function buildReservationLiveUrl(
+  storeKey: string,
+  monthFrom: string,
+  monthTo: string,
+  dateFromIso?: string,
+  dateToExclusiveIso?: string,
+): URL {
+  const url = new URL("https://internal.invalid/reservations/ai-facts")
+  url.searchParams.set("store_key", storeKey)
+  url.searchParams.set("month_from", monthFrom)
+  url.searchParams.set("month_to", monthTo)
+  url.searchParams.set("limit", String(RESERVATION_AI_FACTS_MAX_LIMIT))
+  url.searchParams.set("internal_unbounded", "1")
+  if (dateFromIso) url.searchParams.set("date_from", dateFromIso)
+  if (dateToExclusiveIso) url.searchParams.set("date_to_exclusive", dateToExclusiveIso)
+  return url
+}
+
+async function fetchReservationAiFacts(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizeReservationStoreScope(
+    url.searchParams.get("store_key") ?? url.searchParams.get("store"),
+  )
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  const rawMonthFrom = toSafeString(url.searchParams.get("month_from") ?? url.searchParams.get("month"))
+  if (!rawMonthFrom) {
+    throw { status: 400, message: "month_from is required." } satisfies AppError
+  }
+  const monthFrom = normalizeCalendarMonthParam(rawMonthFrom)
+  const monthTo = normalizeCalendarMonthParam(
+    toSafeString(url.searchParams.get("month_to")) || monthFrom,
+  )
+  const months = listCalendarMonthsInclusive(monthFrom, monthTo, RESERVATION_AI_FACTS_MAX_MONTHS)
+  if (months.length === 0) {
+    throw { status: 400, message: "month_from / month_to is invalid." } satisfies AppError
+  }
+  const limit = clampInt(
+    url.searchParams.get("limit"),
+    RESERVATION_AI_FACTS_DEFAULT_LIMIT,
+    1,
+    RESERVATION_AI_FACTS_MAX_LIMIT,
+  )
+  // 日次キャッシュは全チャネル・非表示除外の標準形だけを保持する。
+  // 管理用のチャネル指定/非表示確認は従来どおりDBを直接読み、API互換を維持する。
+  if (
+    normalizeReservationSourceFilter(url.searchParams.get("source")) !== "all" ||
+    url.searchParams.get("include_hidden") === "1"
+  ) {
+    return await fetchReservationAiFactsLive(supabase, url)
+  }
+
+  const today = jstTodayDateKey()
+  const requestStartDate = `${months[0]}-01`
+  const requestEndDateExclusive = addReservationDateDays(
+    `${months[months.length - 1]}-01`,
+    new Date(Date.UTC(
+      Number(months[months.length - 1].slice(0, 4)),
+      Number(months[months.length - 1].slice(5, 7)),
+      0,
+    )).getUTCDate(),
+  )
+  const payloads: ReservationAiFactsPayload[] = []
+  let cacheDays = 0
+  let expectedPastDays = 0
+  let liveFallbackDays = 0
+  let futureLive = false
+
+  const pastEndExclusive = requestEndDateExclusive < today ? requestEndDateExclusive : today
+  if (requestStartDate < pastEndExclusive) {
+    const pastDateKeys = enumerateReservationDateKeys(requestStartDate, pastEndExclusive)
+    expectedPastDays = pastDateKeys.length
+    const { data: cachedRows, error: cacheError } = await supabase
+      .from(RESERVATION_AI_CACHE_TABLE)
+      .select("fact_date, facts")
+      .eq("store_partition_key", storeKey)
+      .gte("fact_date", requestStartDate)
+      .lt("fact_date", pastEndExclusive)
+      .order("fact_date", { ascending: true })
+    if (cacheError) {
+      console.error("reservation AI cache load failed:", cacheError.message)
+    }
+    const cachedByDate = new Map<string, ReservationAiFactsPayload>()
+    for (const row of (Array.isArray(cachedRows) ? cachedRows : [])) {
+      const dateKey = toSafeString((row as Record<string, unknown>).fact_date)
+      const facts = (row as Record<string, unknown>).facts
+      if (dateKey && isRecord(facts)) cachedByDate.set(dateKey, facts as ReservationAiFactsPayload)
+    }
+    const missingDates: string[] = []
+    for (const dateKey of pastDateKeys) {
+      const payload = cachedByDate.get(dateKey)
+      if (payload) {
+        payloads.push(payload)
+        cacheDays += 1
+      } else {
+        missingDates.push(dateKey)
+      }
+    }
+    if (missingDates.length) {
+      const livePast = await fetchReservationAiFactsLive(
+        supabase,
+        buildReservationLiveUrl(
+          storeKey,
+          reservationMonthFromDateKey(requestStartDate),
+          reservationMonthFromDateKey(addReservationDateDays(pastEndExclusive, -1)),
+          reservationDateStartIso(missingDates[0]),
+          reservationDateStartIso(addReservationDateDays(missingDates[missingDates.length - 1], 1)),
+        ),
+      )
+      const missingSet = new Set(missingDates)
+      const items = (Array.isArray(livePast.items) ? livePast.items : [])
+        .filter((item: ReservationAiFactItem) => {
+          const dateKey = reservationJstDateKey(item.visit_at)
+          return !!dateKey && missingSet.has(dateKey)
+        })
+      payloads.push({
+        totals: aggregateReservationAiItems(items),
+        by_month: aggregateReservationAiItemsByMonth(items),
+        items,
+        truncated: livePast.truncated === true,
+        notes: Array.isArray(livePast.notes) ? livePast.notes : [],
+      })
+      liveFallbackDays = missingDates.length
+    }
+  }
+
+  const futureStartDate = requestStartDate > today ? requestStartDate : today
+  if (futureStartDate < requestEndDateExclusive) {
+    const futurePayload = await fetchReservationAiFactsLive(
+      supabase,
+      buildReservationLiveUrl(
+        storeKey,
+        reservationMonthFromDateKey(futureStartDate),
+        reservationMonthFromDateKey(addReservationDateDays(requestEndDateExclusive, -1)),
+        reservationDateStartIso(futureStartDate),
+        reservationDateStartIso(requestEndDateExclusive),
+      ),
+    )
+    payloads.push(futurePayload as ReservationAiFactsPayload)
+    futureLive = true
+  }
+
+  const merged = mergeReservationAiFactsPayloads(payloads, limit)
+  return {
+    store_key: storeKey,
+    period: { month_from: months[0], month_to: months[months.length - 1] },
+    source_filter: "all",
+    totals: merged.totals,
+    by_month: merged.by_month,
+    items: merged.items,
+    truncated: merged.truncated,
+    generated_at: new Date().toISOString(),
+    notes: [
+      ...reservationAiBaseNotes(),
+      `過去予約キャッシュ: ${cacheDays}/${expectedPastDays}日`,
+      liveFallbackDays
+        ? `キャッシュ未作成の過去${liveFallbackDays}日分はDBを直接参照`
+        : "過去予約は日次確定キャッシュを参照",
+      futureLive ? "本日以降の予約は最新DBを直接参照" : "未来予約のDB直接参照なし",
+    ],
+    cache: {
+      mode: futureLive ? "past_cache_plus_live_future" : "past_cache",
+      cached_days: cacheDays,
+      expected_past_days: expectedPastDays,
+      live_fallback_days: liveFallbackDays,
+      future_live: futureLive,
+      cutoff_date_jst: today,
+    },
+  }
+}
+
+async function rebuildReservationAiDailyCache(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+) {
+  const today = jstTodayDateKey()
+  const defaultFrom = reservationCacheWindowStart(today, RESERVATION_AI_CACHE_MONTHS)
+  const requestedStore = normalizeReservationStoreScope(body.store_key)
+  const forceFull = body.force_full === true
+  const storeKeys = requestedStore
+    ? [requestedStore]
+    : listReceiptSheetsStores().map((store) => store.storePartitionKey.toLowerCase())
+  const generatedAt = new Date().toISOString()
+  const results: Array<Record<string, unknown>> = []
+  const dirtyDateSet = new Set<string>()
+  if (!forceFull) {
+    const { data: dirtyRows, error: dirtyError } = await supabase
+      .from("reservation_ai_cache_dirty_dates")
+      .select("fact_date")
+      .lt("fact_date", today)
+      .gte("fact_date", defaultFrom)
+      .order("fact_date", { ascending: true })
+    if (dirtyError) {
+      throw { status: 500, message: `Failed to inspect dirty reservation dates: ${dirtyError.message}` } satisfies AppError
+    }
+    for (const row of (Array.isArray(dirtyRows) ? dirtyRows : [])) {
+      const dateKey = toSafeString((row as Record<string, unknown>).fact_date)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) dirtyDateSet.add(dateKey)
+    }
+  }
+
+  let globalFromDate = forceFull ? defaultFrom : addReservationDateDays(today, -1)
+  if (dirtyDateSet.size) globalFromDate = [...dirtyDateSet].sort()[0]
+  if (!forceFull) {
+    const { data: cacheStoreRows, error: cacheStoreError } = await supabase
+      .from(RESERVATION_AI_CACHE_TABLE)
+      .select("store_partition_key")
+      .in("store_partition_key", storeKeys)
+    if (cacheStoreError) {
+      throw { status: 500, message: `Failed to inspect reservation cache: ${cacheStoreError.message}` } satisfies AppError
+    }
+    const cachedStores = new Set(
+      (Array.isArray(cacheStoreRows) ? cacheStoreRows : [])
+        .map((row) => normalizeReservationStoreScope((row as Record<string, unknown>).store_partition_key))
+        .filter(Boolean),
+    )
+    if (storeKeys.some((storeKey) => !cachedStores.has(storeKey))) globalFromDate = defaultFrom
+  }
+
+  const globalLiveUrl = buildReservationLiveUrl(
+    storeKeys[0] || "all",
+    reservationMonthFromDateKey(globalFromDate),
+    reservationMonthFromDateKey(addReservationDateDays(today, -1)),
+    reservationDateStartIso(globalFromDate),
+    reservationDateStartIso(today),
+  )
+  globalLiveUrl.searchParams.delete("store_key")
+  const globalLive = await fetchReservationAiFactsLive(supabase, globalLiveUrl, { allStores: true })
+  const groupedByStoreDate = new Map<string, ReservationAiFactItem[]>()
+  for (const item of (Array.isArray(globalLive.items) ? globalLive.items : [])) {
+    const itemStoreKey = normalizeReservationStoreScope(item.store_key)
+    const dateKey = reservationJstDateKey(item.visit_at)
+    if (!itemStoreKey || !dateKey || dateKey < globalFromDate || dateKey >= today) continue
+    const mapKey = `${itemStoreKey}__${dateKey}`
+    const list = groupedByStoreDate.get(mapKey) ?? []
+    list.push(item)
+    groupedByStoreDate.set(mapKey, list)
+  }
+
+  for (const storeKey of storeKeys) {
+    let fromDate = globalFromDate
+
+    const dateKeys = enumerateReservationDateKeys(fromDate, today)
+    const rows = dateKeys.map((dateKey) => {
+      const items = groupedByStoreDate.get(`${storeKey}__${dateKey}`) ?? []
+      const totals = aggregateReservationAiItems(items)
+      return {
+        store_partition_key: storeKey,
+        fact_date: dateKey,
+        facts: {
+          totals,
+          by_month: aggregateReservationAiItemsByMonth(items),
+          items,
+          truncated: globalLive.truncated === true,
+          notes: reservationAiBaseNotes(),
+        },
+        rag_text: buildReservationDailyRagText(storeKey, dateKey, totals, items),
+        source_row_count: items.length,
+        generated_at: generatedAt,
+        source_max_updated_at: generatedAt,
+      }
+    })
+    if (rows.length) {
+      const { error: upsertError } = await supabase
+        .from(RESERVATION_AI_CACHE_TABLE)
+        .upsert(rows, { onConflict: "store_partition_key,fact_date" })
+      if (upsertError) {
+        throw { status: 500, message: `Failed to upsert reservation cache (${storeKey}): ${upsertError.message}` } satisfies AppError
+      }
+    }
+    results.push({
+      store_key: storeKey,
+      from_date: fromDate,
+      to_date_exclusive: today,
+      cached_days: rows.length,
+      reservation_rows: rows.reduce((sum, row) => sum + Number(row.source_row_count || 0), 0),
+      truncated: globalLive.truncated === true,
+      dirty_dates_rebuilt: dirtyDateSet.size,
+    })
+  }
+
+  if (!requestedStore && dirtyDateSet.size) {
+    const { error: clearDirtyError } = await supabase
+      .from("reservation_ai_cache_dirty_dates")
+      .delete()
+      .in("fact_date", [...dirtyDateSet])
+    if (clearDirtyError) {
+      throw { status: 500, message: `Failed to clear dirty reservation dates: ${clearDirtyError.message}` } satisfies AppError
+    }
+  }
+
+  return {
+    ok: true,
+    cutoff_date_jst: today,
+    generated_at: generatedAt,
+    stores: results,
   }
 }
 
