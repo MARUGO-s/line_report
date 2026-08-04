@@ -279,8 +279,11 @@
   var fcWeekly = { dow:1, hour:9, minute:0 };
   // 口コミの新着通知の配信時刻（毎日・曜日なし。NULL=既定 8時/10分）。
   var reviewAlert = { hour:8, minute:10 };
-  // Gmail予約通知の配信間隔（分）。NULL/1=リアルタイム（毎分チェック）。
-  var gmailAlertInterval = { minutes:1 };
+  // Gmail予約通知の配信間隔（分）と基準時刻。NULL/1=リアルタイム（毎分チェック）。
+  // 基準時刻は「まとめ配信の起点」。gmail-alert-cron は
+  // (その日の経過分 - 基準時刻) % 配信間隔 === 0 のときだけ送るので、
+  // 例: 基準0:00・8時間ごと → 0:00/8:00/16:00。NULL=既定 10時/0分（PC版と同じ）。
+  var gmailAlertInterval = { minutes:1, anchorHour:10, anchorMinute:0 };
   var GMAIL_ALERT_INTERVAL_OPTIONS = [
     [1,'1分ごと（リアルタイム）'], [15,'15分ごとにまとめる'], [30,'30分ごとにまとめる'],
     [60,'1時間ごとにまとめる'], [120,'2時間ごとにまとめる'], [180,'3時間ごとにまとめる'],
@@ -357,6 +360,8 @@
         reviewAlert.hour   = (cfg.review_alert_hour   != null) ? Number(cfg.review_alert_hour)   : 8;
         reviewAlert.minute = (cfg.review_alert_minute != null) ? Number(cfg.review_alert_minute) : 10;
         gmailAlertInterval.minutes = (cfg.gmail_alert_interval_minutes != null) ? Number(cfg.gmail_alert_interval_minutes) : 1;
+        gmailAlertInterval.anchorHour   = (cfg.gmail_alert_anchor_hour   != null) ? Number(cfg.gmail_alert_anchor_hour)   : 10;
+        gmailAlertInterval.anchorMinute = (cfg.gmail_alert_anchor_minute != null) ? Number(cfg.gmail_alert_anchor_minute) : 0;
         var roomName = (cfg.room_name && String(cfg.room_name).trim()) || roomId || 'このルーム';
         el('loginScreen').hidden = true; el('appScreen').hidden = false;
         el('roomChipId').textContent = roomName;
@@ -415,15 +420,33 @@
 
   // Gmail予約通知の「配信間隔」セレクタ（トグルの直下に表示）。グループ宛Pushは参加人数分
   // 課金されるため、細切れに届くより間隔を空けてまとめた方が送信回数（コスト）を抑えられる。
+  function pad2(n){ return (n<10?'0':'')+n; }
+
+  // 基準時刻は「まとめ配信」のときだけ意味を持つ（1分ごと＝リアルタイムは起点を使わない）。
+  // リアルタイム選択中に出したままだと、設定しても効かない欄を触らせることになるので隠す。
+  function gmailAlertAnchorApplies(){ return Number(gmailAlertInterval.minutes) > 1; }
+
   function gmailAlertIntervalControlHtml(){
     var opt = GMAIL_ALERT_INTERVAL_OPTIONS.map(function(o){
       return '<option value="'+o[0]+'"'+(o[0]===gmailAlertInterval.minutes?' selected':'')+'>'+esc(o[1])+'</option>';
     }).join('');
     var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
+    var anchorVal = pad2(gmailAlertInterval.anchorHour)+':'+pad2(gmailAlertInterval.anchorMinute);
     return '<div class="gmail-alert-interval-when" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px 14px;">'
       + '<span style="font-size:12px;color:#8a94a6;font-weight:700;width:100%">⏱ 配信間隔（1分ごとのリアルタイム、または間隔を空けてまとめて配信）</span>'
       + '<select class="gmail-alert-interval-sel" data-gmailalertinterval="minutes" style="'+ss+'width:100%;">'+opt+'</select>'
+      + '<div class="gmail-alert-anchor-row" style="'+(gmailAlertAnchorApplies()?'':'display:none;')+'width:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">'
+      +   '<span style="font-size:12px;color:#8a94a6;font-weight:700;width:100%">🕐 基準時刻（まとめ配信はこの時刻を起点に送信）</span>'
+      +   '<input type="time" class="gmail-alert-anchor-inp" value="'+anchorVal+'" aria-label="Gmail予約通知の基準時刻" style="'+ss+'">'
+      + '</div>'
       + '</div>';
+  }
+
+  // 配信間隔を変えたときに基準時刻欄の表示だけを差し替える。
+  // render() を呼ぶと開いているセクションが全部閉じてしまうため、ここでは DOM を直接触る。
+  function syncGmailAlertAnchorVisibility(){
+    var rows = document.querySelectorAll('.gmail-alert-anchor-row');
+    for (var i=0;i<rows.length;i++) rows[i].style.display = gmailAlertAnchorApplies() ? 'flex' : 'none';
   }
 
 
@@ -470,6 +493,20 @@
   }
 
   /* ── トグル → その場で自動保存（楽観更新＋失敗時ロールバック）── */
+  // 「時」と「分」のように複数列を1回の操作で決めるものは、1リクエストにまとめて送る。
+  // 分けて送るとトーストが二重に出るうえ、片方だけ失敗したときに時刻が半端に保存される。
+  function savePatch(patch){
+    var body = { room_id: roomId }, k;
+    for (k in patch) { if (Object.prototype.hasOwnProperty.call(patch, k)) body[k] = patch[k]; }
+    fetch(apiUrl('/room-config'), { method:'PUT', headers:authHeaders(true), body:JSON.stringify(body) })
+      .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } if(!r.ok) throw new Error('save'); return r.json(); })
+      .then(function(){ showToast('保存しました'); })
+      .catch(function(e){
+        if (String(e&&e.message)==='auth') return;
+        showToast('保存に失敗しました', true);
+      });
+  }
+
   function saveField(key, value, inp, item){
     var body = { room_id: roomId }; body[key] = value;
     fetch(apiUrl('/room-config'), { method:'PUT', headers:authHeaders(true), body:JSON.stringify(body) })
@@ -513,7 +550,27 @@
     var gaiSel = e.target.closest('select.gmail-alert-interval-sel');
     if (gaiSel){
       var val = parseInt(gaiSel.value, 10);
-      if (!isNaN(val)){ gmailAlertInterval.minutes = val; saveField('gmail_alert_interval_minutes', val); }
+      if (!isNaN(val)){
+        gmailAlertInterval.minutes = val;
+        saveField('gmail_alert_interval_minutes', val);
+        // リアルタイム⇄まとめ配信の切替で基準時刻欄の要否が変わる。
+        syncGmailAlertAnchorVisibility();
+      }
+      return;
+    }
+    var gaaInp = e.target.closest('input.gmail-alert-anchor-inp');
+    if (gaaInp){
+      // <input type=time> は "HH:MM"。空欄にされた場合は保存済みの値を維持し、表示だけ戻す。
+      var mt = /^(\d{1,2}):(\d{2})$/.exec(String(gaaInp.value||''));
+      if (!mt){
+        gaaInp.value = pad2(gmailAlertInterval.anchorHour)+':'+pad2(gmailAlertInterval.anchorMinute);
+        return;
+      }
+      var ah = Math.min(23, Math.max(0, parseInt(mt[1], 10)));
+      var am = Math.min(59, Math.max(0, parseInt(mt[2], 10)));
+      gmailAlertInterval.anchorHour = ah;
+      gmailAlertInterval.anchorMinute = am;
+      savePatch({ gmail_alert_anchor_hour: ah, gmail_alert_anchor_minute: am });
       return;
     }
     var inp = e.target.closest('input[type=checkbox]');
