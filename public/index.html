@@ -7795,7 +7795,23 @@
       // ルーム個別モードでは対象ルームを切替えると編集対象そのものが変わるため、
       // 権限トグルも"そのルーム自身"の値に読み込み直す（古い値を別ルームに保存する事故を防ぐ）。
       if (activeRoomIndividualSave && tr) {
+        // applyRoomConfigPermissionToggles はセルフ設定のパスワード入力欄を空に戻す。
+        // 入力途中で対象ルームを切り替えると黙って消え、そのまま保存すると
+        // 「保存しました」と出るのに何も変わらない（サーバーは空欄＝変更なしとして扱う）。
+        // 別ルームへ入力を持ち越すのは事故のもとなので破棄はそのまま、ただし必ず知らせる。
+        const discardedPw = !!(dom.roomConfigSelfPassword && dom.roomConfigSelfPassword.value);
         applyRoomConfigPermissionToggles(mergeGlobalIntoConfig(getRoomConfigStateFromRow(tr)));
+        if (discardedPw) {
+          showAppNotice({
+            title: '入力中のパスワードを破棄しました',
+            subtitle: getRoomLabelFromRow(tr),
+            lines: [
+              '対象ルームを切り替えたため、入力途中のアクセスパスワードは破棄しました。',
+              'パスワードはルームごとに保存されます。切り替え後のルームに設定する場合は入力し直してください。',
+            ],
+            tone: 'warn',
+          });
+        }
         dom.roomConfigModalMeta.textContent =
           '対象ルーム（個別保存・順位:ルーム）: ' + getRoomLabelFromRow(tr);
       }
@@ -11454,6 +11470,10 @@
         receipt_monthend_hour: parseDatasetScheduleInt(tr.dataset.receiptMonthendHour),
         receipt_monthend_minute: parseDatasetScheduleInt(tr.dataset.receiptMonthendMinute),
         receipt_report_store_partition_key: String(tr.dataset.roomReceiptReportStoreKey || '').trim(),
+        // セルフ設定はルームごとの値。行に持たせないと、モーダルは localStorage の全体設定から
+        // 拾ってしまい「設定済み/未設定」が常に未設定表示になる（保存は効いているのに未保存に見える）。
+        room_config_access_enabled: parseDatasetBoolean(tr.dataset.roomConfigAccessEnabled, false),
+        room_config_password_set: parseDatasetBoolean(tr.dataset.roomConfigPasswordSet, false),
       };
       return {
         ...featureConfig,
@@ -11501,6 +11521,18 @@
       tr.dataset.roomReceiptMidreportEnabled = String(config.receipt_midreport_enabled !== false);
       tr.dataset.roomReceiptMonthendReportEnabled = String(config.receipt_monthend_report_enabled !== false);
       tr.dataset.roomReceiptReportStoreKey = String(config.receipt_report_store_partition_key || '');
+      // セルフ設定。config に含まれるときだけ更新する（含まない一括適用で他ルームの値を消さない）。
+      if ('room_config_access_enabled' in config) {
+        tr.dataset.roomConfigAccessEnabled = String(!!config.room_config_access_enabled);
+      }
+      // パスワードは平文を行に残さない。新パスワードを入力した保存なら「設定済み」に上げ、
+      // 未入力（＝サーバー側もハッシュを触らない）ならこの行の既存状態を保つ。
+      // ここで無条件に上書きすると、保存のたびに設定済みが未設定へ戻って見える。
+      if (config.room_config_password) {
+        tr.dataset.roomConfigPasswordSet = 'true';
+      } else if ('room_config_password_set' in config) {
+        tr.dataset.roomConfigPasswordSet = String(!!config.room_config_password_set);
+      }
       // 送信時刻（スケジュール）は config に含まれるときだけ更新（一括フラグ適用で他ルームの時刻を消さない）
       if ('receipt_schedule_override' in config) {
         const schedOverride = !!config.receipt_schedule_override;
@@ -11608,19 +11640,29 @@
       } catch (_) {}
     }
 
+    // セルフ設定のアクセスパスワードは平文なので、ブラウザ保存（全体/店舗デフォルトのキャッシュ）へ
+    // 絶対に書かない。サーバーは受け取ったらSHA-256にして保存し、平文はどこにも残さない設計のため、
+    // ここで残すとクライアント側だけが平文を持つことになる。書き込み時と読み出し時の両方で落とし、
+    // 過去バージョンが保存済みの平文も読んだ時点で消える（room_config_password_set は真偽値なので残す）。
+    function stripRoomConfigPasswordField(config) {
+      const out = Object.assign({}, config || {});
+      delete out.room_config_password;
+      return out;
+    }
+
     function loadGlobalPermissionConfig() {
       try {
         const raw = csGet(GLOBAL_PERMISSION_CONFIG_KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed : null;
+        return parsed && typeof parsed === 'object' ? stripRoomConfigPasswordField(parsed) : null;
       } catch (_) {
         return null;
       }
     }
 
     function saveGlobalPermissionConfig(config) {
-      csSet(GLOBAL_PERMISSION_CONFIG_KEY, JSON.stringify(config || {}));
+      csSet(GLOBAL_PERMISSION_CONFIG_KEY, JSON.stringify(stripRoomConfigPasswordField(config)));
     }
 
     function mergeGlobalIntoConfig(config) {
@@ -11650,14 +11692,14 @@
         const raw = csGet(webhookDefaultConfigStorageKey(storeKey));
         if (!raw) return null;
         const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed : null;
+        return parsed && typeof parsed === 'object' ? stripRoomConfigPasswordField(parsed) : null;
       } catch (_) {
         return null;
       }
     }
 
     function saveWebhookDefaultConfig(storeKey, config) {
-      csSet(webhookDefaultConfigStorageKey(storeKey), JSON.stringify(config));
+      csSet(webhookDefaultConfigStorageKey(storeKey), JSON.stringify(stripRoomConfigPasswordField(config)));
     }
 
     function buildNewRoomDefaultFeatureConfig() {
@@ -12552,6 +12594,10 @@
         tr.dataset.receiptMonthendHour = roomFeatureConfig.receipt_monthend_hour != null ? String(roomFeatureConfig.receipt_monthend_hour) : '';
         tr.dataset.receiptMonthendMinute = roomFeatureConfig.receipt_monthend_minute != null ? String(roomFeatureConfig.receipt_monthend_minute) : '';
         tr.dataset.roomReceiptReportStoreKey = String(roomFeatureConfig.receipt_report_store_partition_key || '');
+        // セルフ設定（ルーム専用）。password_set は admin-api が平文ハッシュの有無から立てる真偽値で、
+        // ハッシュそのものは返らない（stripRoomConfigSecret）。
+        tr.dataset.roomConfigAccessEnabled = String(!!(setting && setting.room_config_access_enabled));
+        tr.dataset.roomConfigPasswordSet = String(!!(setting && setting.room_config_password_set));
         tr.dataset.messageCleanupTiming = String((setting && setting.message_cleanup_timing) || '');
         tr.innerHTML =
           '<td><span class="room-id-tools"><button class="button room-show-id" type="button">ID</button></span></td>' +
@@ -12949,7 +12995,10 @@
         persistCalendarGmailDraftForRoom(scheduleRoomId);
       }
       const built = buildRoomConfigPayloadFromModal();
-      let nextConfig = built.nextConfig;
+      // セルフ設定のアクセスパスワードは「このルーム専用」。全体一括では絶対に配らない。
+      // （2026-08-05: 一括伝播で同一パスワードが62ルームへ広がり、管理者が個別に設定し直しても
+      //   スタッフ側は古い共通パスワードのままで「パスワードが正しくありません」になっていた）
+      let nextConfig = stripRoomConfigPasswordField(built.nextConfig);
       nextConfig.receipt_report_store_partition_key = '';
       saveGlobalPermissionConfig(nextConfig);
       // カレンダー/予約のバルク値は既定キー（getBulkCalendarGmailSettings が読む所）にも保存。
@@ -13004,6 +13053,10 @@
         '全店舗・全ルームへ一括反映しました（' + updated + ' 件）。',
         '優先順位は「全体」に更新しました。',
       ];
+      // 一括ではパスワードを配らない。入力されていたら黙って捨てずに必ず伝える。
+      if (built.nextConfig.room_config_password) {
+        globalLines.push('⚠ アクセスパスワードは一括では保存していません（ルームごとの設定のため）。設定したいルームを「個別設定」で開いて保存してください。');
+      }
       if (scheduleRoomId) {
         const scheduleLine = buildScheduleSavedNoticeLine(scheduleRoomId);
         if (scheduleLine) globalLines.push(scheduleLine);
@@ -13090,7 +13143,8 @@
         persistCalendarGmailDraftForRoom(scheduleRoomId);
       }
       const built = buildRoomConfigPayloadFromModal();
-      let nextConfig = built.nextConfig;
+      // セルフ設定のアクセスパスワードは「このルーム専用」。店舗一括では配らない（上の全体一括と同じ理由）。
+      let nextConfig = stripRoomConfigPasswordField(built.nextConfig);
       nextConfig.receipt_report_store_partition_key = storeKey;
       saveWebhookDefaultConfig(storeKey, nextConfig);
       if (built.permissionMode) {
@@ -13130,6 +13184,10 @@
       }
       const scheduleLine = buildScheduleSavedNoticeLine(scheduleRoomId);
       if (scheduleLine) noticeLines.push(scheduleLine);
+      // 一括ではパスワードを配らない。入力されていたら黙って捨てずに必ず伝える。
+      if (built.nextConfig.room_config_password) {
+        noticeLines.push('⚠ アクセスパスワードは一括では保存していません（ルームごとの設定のため）。設定したいルームを「個別設定」で開いて保存してください。');
+      }
       appendSkippedRoomsNoticeLines(noticeLines, skippedRoomLabels);
       roundTripNoticeLines(checkRoomConfigRoundTrip(savedList)).forEach(function(l) { noticeLines.push(l); });
       closeRoomConfigModal();
