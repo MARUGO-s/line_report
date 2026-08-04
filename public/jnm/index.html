@@ -39,6 +39,7 @@
 <script src="pages-config.js"></script>
 <script src="../auth-session.js"></script>
 <script src="auth-session.js"></script>
+<script src="journal-ai-privacy.js"></script>
 <script src="journal-ai-client.js"></script>
 <style>
   :root {
@@ -6915,7 +6916,7 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 商品初出節またはコースラインナップ節が載っているのに「ジャーナルを再読できない」「該当コースが確定集計に無い」と書いてはいけない。
 - 【商品利用会計 vs 非利用会計】が載っている場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加の比較が必要」「利用/非利用の比較ができない」で止めない。
 - 【ジャーナル会計比較（汎用）】が載っている場合は、昼夜・平日週末・ボトル/グラス・人数帯・商品A vs B など提示された軸の数値を使い、「比較できない」で止めない。
-- 【予約確定事実】が載っている場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず使う。電話は確定集計に含まれない（推測しない）。予約人数をそのまま客数として報告してはいけない。飛び込みは推定であり必ず「推定」と明示する（ノーショー・スクショ送り忘れ／通知未達・営業日付ズレで一致しない）。
+- 【予約確定事実】が載っている場合は、チャネル別件数・新規／リピート・予約客A等の仮名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず使う。電話・メール・本名・アレルギー詳細はAI送信に含まれない（推測しない）。予約人数をそのまま客数として報告してはいけない。飛び込みは推定であり必ず「推定」と明示する（ノーショー・スクショ送り忘れ／通知未達・営業日付ズレで一致しない）。
 - 【予約確定事実】が載っていない場合（予約取り込み未導入の店舗・対象期間0件）は、予約・飛び込み・新規予約要因に触れず、通常の売上分析だけを行う。無理に「予約データが無い」と強調しない。
 - 新規予約や飛び込みが前月より増減した月は、【店舗ナレッジ】の同月・前後の施策・メニュー・価格改定を必ず照合し、見つかれば「登録資料によると」と明示して要因に使う。資料にめぼしい記述が無い場合のみ「※これは推測です」と前置きしたうえで仮説を述べる。「予約専用項目なし」と併記されていても本節があれば後者を優先し、「表示されていません」で止めない。
 - 解析欄にも金額が無い場合のみ、数値を捏造せず「※これは推測です」として季節要因に含めてよい。
@@ -9300,7 +9301,7 @@ async function searchCloudJournalCohortCompare(comparisons, monthFrom, monthTo) 
   });
 }
 
-/** 予約確定事実 API。通常は軽量集計のみ、予約者・顧客質問だけ氏名入り明細を取得する。 */
+/** 予約確定事実 API。通常は軽量集計のみ、予約者・顧客質問だけ明細を取得し、AI送信時は仮名化する。 */
 async function fetchReservationAiFacts(monthFrom, monthTo, includeItems = false) {
   const params = new URLSearchParams({ store_key: STORE_KEY });
   if (monthFrom) params.set('month_from', monthFrom);
@@ -9525,7 +9526,7 @@ function formatReservationFactsForAi(facts, indent = '') {
     by_month: facts.byMonth,
     items: facts.items
   })) return '';
-  const lines = [`${indent}- 【予約確定事実】（食べログ／一休／手入力・氏名あり・電話なし）:`];
+  const lines = [`${indent}- 【予約確定事実】（食べログ／一休／手入力・予約客A等の仮名・連絡先なし・アレルギー詳細なし）:`];
   const period = (facts.monthFrom || facts.monthTo)
     ? `${facts.monthFrom || '開始'}〜${facts.monthTo || '最新'}`
     : '期間不明';
@@ -9591,7 +9592,7 @@ function formatReservationFactsForAi(facts, indent = '') {
   );
   const items = Array.isArray(facts.items) ? facts.items : [];
   if (facts.itemsIncluded && items.length) {
-    lines.push(`${indent}  - 明細（氏名・来店日時・回数・内容）:`);
+    lines.push(`${indent}  - 明細（AI送信時は仮名・来店日時・回数・内容）:`);
     items.forEach((it) => {
       const guest =
         it.guest_type === 'repeat' ? 'リピート' :
@@ -9611,7 +9612,7 @@ function formatReservationFactsForAi(facts, indent = '') {
       }
       if (it.party_size_label) bits.push(`人数 ${it.party_size_label}`);
       if (it.plan_label) bits.push(`プラン ${it.plan_label}`);
-      if (it.allergy_label) bits.push(`アレルギー ${it.allergy_label}`);
+      if (it.allergy_label) bits.push('アレルギーあり');
       if (it.channel && it.channel !== src) bits.push(`経路 ${it.channel}`);
       if (it.is_cancelled) bits.push('キャンセル');
       lines.push(`${indent}    - ${bits.join(' / ')}`);
@@ -9628,7 +9629,7 @@ function formatReservationFactsForAi(facts, indent = '') {
     if (n) lines.push(`${indent}  - ※${n}`);
   });
   lines.push(
-    `${indent}  - ※この節があるときは予約・新規/リピート・氏名・前回来店・予約vs飛び込み月次を根拠に述べてよい。` +
+    `${indent}  - ※この節があるときは予約・新規/リピート・仮名・前回来店・予約vs飛び込み月次を根拠に述べてよい。` +
     `「予約専用項目なし」「表示されていません」で止めない（POS客数との混同は禁止）`
   );
   return lines.join('\n');
@@ -12772,7 +12773,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     // 4) enrichJournalCohortComparisons … 汎用会計比較 → journalCohortComparisons
     //    （商品利用/非利用は productCohortFacts にも投影・後方互換）
     // 5) rankProductsForAiDisplay     … 売れ筋（★大分類除外・コース合算）
-    // 6) enrichReservationFacts       … 予約・顧客リピート（氏名あり・電話なし）→ reservationFacts
+    // 6) enrichReservationFacts       … 予約・顧客リピート（AI送信時は仮名・連絡先なし）→ reservationFacts
     //    （食べログ／一休／手入力。POS月次と突合した予約vs飛び込み月次表も同梱）
     // プロンプト側も formatVerifiedDetailLines / formatJournalSpecificFactsForAi に
     // 各セクションを併記し、片方を消して他方に統合しないこと。

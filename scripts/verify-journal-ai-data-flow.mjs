@@ -1,12 +1,13 @@
 import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
-const [html, adminApi, lineWebhook, aiAnalyze, reservationCacheCron] = await Promise.all([
+const [html, adminApi, lineWebhook, aiAnalyze, reservationCacheCron, journalAiClient] = await Promise.all([
   readFile(new URL("public/jnm/jnl2txt.html", root), "utf8"),
   readFile(new URL("supabase/functions/admin-api/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/line-webhook/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/ai-analyze/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/reservation-ai-cache-cron/index.ts", root), "utf8"),
+  readFile(new URL("public/jnm/journal-ai-client.js", root), "utf8"),
 ]);
 const pagedRowScan = await readFile(
   new URL("supabase/functions/_shared/paged_row_scan.ts", root),
@@ -195,10 +196,8 @@ core(
 core(
   "store_location",
   "店舗立地マスター",
-  containsAll(aiAnalyze, [
-    "buildStoreLocationPromptBlock(effectiveStoreKey, storeName)",
-    "店舗スコープ検証後のサーバー側マスター",
-  ]),
+  /buildStoreLocationPromptBlock\(\s*effectiveStoreKey,\s*storeName,\s*\)/.test(aiAnalyze) &&
+    aiAnalyze.includes("店舗スコープ検証後のサーバー側マスター"),
   "認証済みstoreKey → サーバー側店舗住所/エリア → AI",
   "全店舗を新宿三丁目扱いせず、サーバー側マスターを立地の正本にします。",
 );
@@ -209,10 +208,8 @@ core(
   containsAll(html, [
     "aiChatHistory.slice(0, -1).slice(-12)",
     "String(item.content || '').slice(0, 1600)",
-  ]) && containsAll(aiAnalyze, [
-    ".slice(-12)",
-    ".slice(0, 1600)",
-  ]),
+  ]) && /\.slice\(-12\)/.test(aiAnalyze) &&
+    /\.slice\(\s*0,\s*1600,\s*\)/.test(aiAnalyze),
   "直近会話 → クライアントで制限 → ai-analyzeで再制限 → AI",
   "直近12発話・各1600文字までを文脈として引き継ぎます。",
 );
@@ -271,8 +268,25 @@ conditional(
     'intent === "strategy"',
     'intent === "mixed"',
   ]),
-  "戦略・改善質問 → Perplexity/Grok brief → Luna/Kimi統合",
+  "戦略・改善質問 → Perplexity/Grok brief → Luna/Claude統合",
   "数値照会だけでは外部情報を呼ばず、戦略系の質問だけで追加します。",
+);
+
+core(
+  "ai_privacy",
+  "AI送信前の予約個人情報最小化",
+  containsAll(html, [
+    "journal-ai-privacy.js",
+  ]) && containsAll(journalAiClient, [
+    "JOURNAL_AI_PRIVACY",
+    "privacy.sanitizePayload",
+  ]) && containsAll(aiAnalyze, [
+    "sanitizeJournalAiPayload",
+    "callClaude",
+    "claude-haiku-4-5",
+  ]),
+  "予約DB/画面原本 → 予約客A等へ仮名化・連絡先削除・アレルギー有無化 → Luna/Claude",
+  "DBと管理画面の本名は維持し、外部AIへの送信直前だけ最小化します。Luna失敗時はKimiではなくClaude Haikuへ退避します。",
 );
 
 const weatherStored = containsAll(html, [

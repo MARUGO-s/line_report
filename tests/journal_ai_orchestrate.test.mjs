@@ -81,16 +81,22 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /orchestrationMode/);
   assert.match(ai, /gpt-5\.6-luna/);
   assert.match(ai, /callOpenAiLuna/);
-  assert.match(ai, /callKimi/);
-  assert.match(ai, /kimi-k3/);
+  assert.match(ai, /callClaude/);
+  assert.match(ai, /claude-haiku-4-5/);
   assert.match(ai, /synthesizeWithFallback/);
-  assert.match(ai, /api\.moonshot\.ai/);
+  assert.match(ai, /api\.anthropic\.com/);
+  assert.match(ai, /sanitizeJournalAiPayload/);
+  assert.doesNotMatch(ai, /api\.moonshot\.ai/);
+  assert.doesNotMatch(ai, /callKimi/);
   assert.match(ai, /authenticateAdminDashboardSessionToken/);
   assert.match(ai, /x-admin-token/);
   assert.match(ai, /consume_security_rate_limit/);
   assert.match(ai, /AI_RATE_LIMITS/);
   assert.match(ai, /他店舗のデータにはアクセスできません/);
-  assert.match(ai, /const locationBlock = buildStoreLocationPromptBlock\(effectiveStoreKey, storeName\)/);
+  assert.match(
+    ai,
+    /const locationBlock = buildStoreLocationPromptBlock\(\s*effectiveStoreKey,\s*storeName,\s*\)/,
+  );
   assert.doesNotMatch(ai, /String\(storeLocationBlock \|\| ""\)/);
 });
 
@@ -108,6 +114,7 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
     'utf8',
   );
   for (const source of [html, indexHtml]) {
+    assert.match(source, /src="journal-ai-privacy\.js"/);
     assert.match(source, /src="journal-ai-client\.js"/);
     assert.equal(
       [...source.matchAll(/AI_CLIENT\.request\(AI_ENDPOINT,/g)].length,
@@ -118,4 +125,16 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
   assert.match(client, /'x-admin-token': token/);
   assert.match(client, /LINE_REPORT_AUTH/);
   assert.match(client, /ログインが必要です/);
+  assert.match(client, /privacy\.sanitizePayload/);
+});
+
+test('Journal AI privacy layer is loaded before the network client', async () => {
+  const indexHtml = await readFile(
+    new URL('../public/jnm/index.html', import.meta.url),
+    'utf8',
+  );
+  const privacyIndex = indexHtml.indexOf('src="journal-ai-privacy.js"');
+  const clientIndex = indexHtml.indexOf('src="journal-ai-client.js"');
+  assert.ok(privacyIndex >= 0);
+  assert.ok(clientIndex > privacyIndex);
 });

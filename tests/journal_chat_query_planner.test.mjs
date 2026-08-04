@@ -566,7 +566,7 @@ test('both Journal Report entry files keep the planner and error distinction in 
   assert.match(aiAnalyzeSource, /max_tokens: 350/);
   assert.match(aiAnalyzeSource, /fetchTextWithTimeout/);
   assert.match(aiAnalyzeSource, /\.slice\(-12\)/);
-  assert.match(aiAnalyzeSource, /slice\(0, 1600\)/);
+  assert.match(aiAnalyzeSource, /slice\(\s*0,\s*1600,\s*\)/);
   assert.match(html, /aiChatHistory\.slice\(0, -1\)\.slice\(-12\)/);
   assert.match(html, /originalQuery:\s*resolvedChatQuery/);
   assert.match(html, /salesData:\s*salesDataForAi/);
