@@ -10,7 +10,32 @@ export type ExternalBrief = {
   ok: boolean;
   text: string;
   error?: string;
+  searchedAt?: string;
+  searchRange?: { from: string; to: string };
+  citations?: string[];
 };
+
+type JsonRecord = Record<string, unknown>;
+
+export type GrokXSearchRequestOptions = {
+  model: string;
+  question: string;
+  companyHint: string;
+  fromDate: string;
+  toDate: string;
+  maxToolCalls: number;
+};
+
+export type ParsedGrokXSearchResponse = {
+  text: string;
+  citations: string[];
+  usedXSearch: boolean;
+};
+
+const XAI_RESPONSES_ENDPOINT = "https://api.x.ai/v1/responses";
+const GROK_X_SEARCH_MODEL_DEFAULT = "grok-4.5";
+const GROK_X_SEARCH_LOOKBACK_DAYS_DEFAULT = 30;
+const GROK_X_SEARCH_LOOKBACK_DAYS_MAX = 90;
 
 const DATA_RE =
   /(売上|売り上げ|客数|客単価|比率|構成比|何円|いくら|合計|推移|比較|何が売|売れ筋|ランキング|点数|件数|フード|ドリンク|飲料|グラス|ボトル|月間|日別|\d{4}\s*年|\d{4}-?\d{2}|TOP\s*\d+)/i;
@@ -45,6 +70,195 @@ function truncate(s: string, max: number): string {
   return `${t.slice(0, max)}…`;
 }
 
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function clampInteger(
+  raw: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
+function toJstDateString(now: Date): string {
+  return new Date(now.getTime() + 9 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function shiftIsoDate(isoDate: string, deltaDays: number): string {
+  const base = new Date(`${isoDate}T00:00:00.000Z`);
+  base.setUTCDate(base.getUTCDate() + deltaDays);
+  return base.toISOString().slice(0, 10);
+}
+
+/** 「最新トレンド」のX検索対象期間。JST基準で当日を含む。 */
+export function resolveGrokXSearchWindow(
+  now: Date = new Date(),
+  lookbackDaysRaw: unknown = GROK_X_SEARCH_LOOKBACK_DAYS_DEFAULT,
+): { from: string; to: string; lookbackDays: number } {
+  const lookbackDays = clampInteger(
+    lookbackDaysRaw,
+    GROK_X_SEARCH_LOOKBACK_DAYS_DEFAULT,
+    1,
+    GROK_X_SEARCH_LOOKBACK_DAYS_MAX,
+  );
+  const to = toJstDateString(now);
+  return {
+    from: shiftIsoDate(to, -(lookbackDays - 1)),
+    to,
+    lookbackDays,
+  };
+}
+
+/**
+ * xAI Responses API用のリクエストを構築する。
+ * tool_choice=required かつ利用可能ツールを x_search のみにすることで、
+ * 「学習済み知識だけでトレンドを回答する」経路を残さない。
+ */
+export function buildGrokXSearchRequest(
+  options: GrokXSearchRequestOptions,
+): JsonRecord {
+  const {
+    model,
+    question,
+    companyHint,
+    fromDate,
+    toDate,
+    maxToolCalls,
+  } = options;
+  const userPrompt =
+    `マルゴグループ（ワイン推しの飲食店グループ）向けに、指定期間のX（旧Twitter）を実際に検索し、質問の対策に使える最新トレンドを日本語でまとめてください。
+
+検索対象期間: ${fromDate}〜${toDate}（両端を含む）
+前提: ${companyHint}
+質問: ${question}
+
+必須条件:
+1. X検索を実行し、複数の検索語・観点で確認する。
+2. 主要な示唆を3〜5件に絞り、各項目に「投稿日」「投稿アカウント」「何が話題か」「マルゴへの意味」を含める。
+3. 単発投稿を市場全体の事実と断定せず、複数投稿で確認できた傾向と個別の話題を区別する。
+4. 店舗固有の売上数値は作らない。人気度・反応数が確認できない場合は推測しない。
+5. 引用したX投稿またはスレッドのURLを各示唆に付ける。
+6. 最後に、ジャーナルの保存済み数値とは別の「外部知見」であることを明記する。
+
+400〜700字程度で、日付と投稿文脈が分かる実務向けブリーフにしてください。`;
+
+  return {
+    model,
+    input: [
+      {
+        role: "system",
+        content:
+          "You are an X trend researcher for a wine-focused restaurant group in Japan. You must use X Search before answering. Reply in Japanese, preserve source URLs, and never fabricate store metrics or social engagement.",
+      },
+      { role: "user", content: userPrompt },
+    ],
+    tools: [
+      {
+        type: "x_search",
+        from_date: fromDate,
+        to_date: toDate,
+      },
+    ],
+    tool_choice: "required",
+    max_tool_calls: maxToolCalls,
+    max_output_tokens: 1400,
+    reasoning: { effort: "low" },
+    store: false,
+  };
+}
+
+function addCitationUrl(urls: string[], raw: unknown): void {
+  const url = String(raw || "").trim();
+  if (!/^https?:\/\//i.test(url)) return;
+  if (!urls.includes(url)) urls.push(url);
+}
+
+function collectAnnotationUrls(content: JsonRecord, urls: string[]): void {
+  const annotations = Array.isArray(content.annotations)
+    ? content.annotations
+    : [];
+  for (const annotation of annotations) {
+    if (!isRecord(annotation)) continue;
+    addCitationUrl(urls, annotation.url);
+  }
+}
+
+/** xAI Responses APIの typed output と citations を安全に正規化する。 */
+export function parseGrokXSearchResponse(
+  json: unknown,
+): ParsedGrokXSearchResponse {
+  if (!isRecord(json)) {
+    return { text: "", citations: [], usedXSearch: false };
+  }
+  let text = "";
+  const citations: string[] = [];
+  let usedXSearch = false;
+
+  if (Array.isArray(json.citations)) {
+    for (const citation of json.citations) addCitationUrl(citations, citation);
+  }
+
+  const output = Array.isArray(json.output) ? json.output : [];
+  for (const item of output) {
+    if (!isRecord(item)) continue;
+    if (item.type === "x_search_call") usedXSearch = true;
+    if (item.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const content of item.content) {
+      if (!isRecord(content) || content.type !== "output_text") continue;
+      const outputText = String(content.text || "").trim();
+      if (outputText) {
+        text = outputText;
+        for (const match of outputText.matchAll(/https?:\/\/[^\s)\]]+/gi)) {
+          addCitationUrl(citations, match[0]);
+        }
+      }
+      collectAnnotationUrls(content, citations);
+    }
+  }
+
+  return {
+    text: String(json.output_text || "").trim() || text,
+    citations,
+    usedXSearch,
+  };
+}
+
+function isXSourceUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "x.com" || host.endsWith(".x.com") ||
+      host === "twitter.com" || host.endsWith(".twitter.com");
+  } catch {
+    return false;
+  }
+}
+
+function formatGrokXSearchBrief(
+  text: string,
+  searchedAt: string,
+  searchRange: { from: string; to: string },
+  citations: string[],
+): string {
+  const sourceUrls = citations.filter(isXSourceUrl).slice(0, 10);
+  const sourceBlock = sourceUrls.length
+    ? `\n\nX参照元:\n${sourceUrls.map((url) => `- ${url}`).join("\n")}`
+    : "";
+  return truncate(
+    `X検索実施日（JST）: ${searchedAt}
+X検索対象期間: ${searchRange.from}〜${searchRange.to}
+
+${text}${sourceBlock}`,
+    4200,
+  );
+}
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -68,7 +282,12 @@ export async function callPerplexityBrief(
     Deno.env.get("PERPLEXITY_API_KEY") || Deno.env.get("PPLX_API_KEY") || "",
   ).trim();
   if (!apiKey) {
-    return { provider: "perplexity", ok: false, text: "", error: "missing_key" };
+    return {
+      provider: "perplexity",
+      ok: false,
+      text: "",
+      error: "missing_key",
+    };
   }
   const model = String(Deno.env.get("PERPLEXITY_MODEL") || "").trim() ||
     "sonar";
@@ -114,7 +333,10 @@ export async function callPerplexityBrief(
     const json = await res.json().catch(() => null) as {
       choices?: Array<{ message?: { content?: string } }>;
     } | null;
-    const text = truncate(String(json?.choices?.[0]?.message?.content || ""), 2400);
+    const text = truncate(
+      String(json?.choices?.[0]?.message?.content || ""),
+      2400,
+    );
     return {
       provider: "perplexity",
       ok: !!text,
@@ -132,7 +354,7 @@ export async function callPerplexityBrief(
   }
 }
 
-/** Grok (xAI) で X / 外食トレンドの短い補助見解を取得 */
+/** Grok (xAI Responses API + x_search) でXの最新トレンドを取得 */
 export async function callGrokTrendBrief(
   question: string,
   companyHint: string,
@@ -143,33 +365,45 @@ export async function callGrokTrendBrief(
   if (!apiKey) {
     return { provider: "grok", ok: false, text: "", error: "missing_key" };
   }
-  const model = String(Deno.env.get("JOURNAL_GROK_MODEL") || Deno.env.get("FOODCOURT_GROK_MODEL") || "")
-    .trim() || "grok-3-mini";
-  const timeoutMs = Number(Deno.env.get("GROK_TIMEOUT_MS") || 12000) || 12000;
-  const userPrompt =
-    `マルゴグループ（ワイン推しの飲食店グループ）向けに、X（Twitter）や外食・ワイン周りの近時トレンドで、次の質問の対策に使えそうな示唆を日本語で200〜400字にまとめてください。店舗固有の売上数値は作らないでください。\n\n前提: ${companyHint}\n質問: ${question}`;
+  // 旧 JOURNAL_GROK_MODEL / FOODCOURT_GROK_MODEL は Chat Completions 用だったため、
+  // X Search経路では専用設定だけを採用し、未設定時は公式の現行ツール対応モデルにする。
+  const model = String(Deno.env.get("JOURNAL_GROK_X_SEARCH_MODEL") || "")
+    .trim() || GROK_X_SEARCH_MODEL_DEFAULT;
+  const timeoutMs = clampInteger(
+    Deno.env.get("GROK_X_SEARCH_TIMEOUT_MS") ||
+      Deno.env.get("GROK_TIMEOUT_MS"),
+    45000,
+    5000,
+    120000,
+  );
+  const maxToolCalls = clampInteger(
+    Deno.env.get("GROK_X_SEARCH_MAX_TOOL_CALLS"),
+    4,
+    1,
+    8,
+  );
+  const searchWindow = resolveGrokXSearchWindow(
+    new Date(),
+    Deno.env.get("GROK_X_SEARCH_LOOKBACK_DAYS"),
+  );
+  const requestBody = buildGrokXSearchRequest({
+    model,
+    question,
+    companyHint,
+    fromDate: searchWindow.from,
+    toDate: searchWindow.to,
+    maxToolCalls,
+  });
   try {
     const res = await fetchWithTimeout(
-      "https://api.x.ai/v1/chat/completions",
+      XAI_RESPONSES_ENDPOINT,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a trend scout for a wine-focused restaurant group in Japan. Reply in Japanese. No fabricated store metrics.",
-            },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 700,
-          temperature: 0.4,
-        }),
+        body: JSON.stringify(requestBody),
       },
       timeoutMs,
     );
@@ -183,15 +417,45 @@ export async function callGrokTrendBrief(
         error: `http_${res.status}`,
       };
     }
-    const json = await res.json().catch(() => null) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    } | null;
-    const text = truncate(String(json?.choices?.[0]?.message?.content || ""), 1600);
+    const json = await res.json().catch(() => null);
+    const parsed = parseGrokXSearchResponse(json);
+    if (!parsed.usedXSearch) {
+      console.error("Grok response did not execute x_search");
+      return {
+        provider: "grok",
+        ok: false,
+        text: "",
+        error: "x_search_not_used",
+        searchedAt: searchWindow.to,
+        searchRange: { from: searchWindow.from, to: searchWindow.to },
+      };
+    }
+    const xCitations = parsed.citations.filter(isXSourceUrl);
+    if (!xCitations.length) {
+      console.error("Grok x_search returned no X citation URLs");
+      return {
+        provider: "grok",
+        ok: false,
+        text: "",
+        error: "missing_x_citations",
+        searchedAt: searchWindow.to,
+        searchRange: { from: searchWindow.from, to: searchWindow.to },
+      };
+    }
+    const text = formatGrokXSearchBrief(
+      parsed.text,
+      searchWindow.to,
+      { from: searchWindow.from, to: searchWindow.to },
+      xCitations,
+    );
     return {
       provider: "grok",
       ok: !!text,
       text,
       error: text ? undefined : "empty_content",
+      searchedAt: searchWindow.to,
+      searchRange: { from: searchWindow.from, to: searchWindow.to },
+      citations: xCitations.slice(0, 10),
     };
   } catch (e) {
     console.error("Grok fetch failed:", e);
@@ -200,6 +464,8 @@ export async function callGrokTrendBrief(
       ok: false,
       text: "",
       error: e instanceof Error ? e.message : String(e),
+      searchedAt: searchWindow.to,
+      searchRange: { from: searchWindow.from, to: searchWindow.to },
     };
   }
 }
@@ -211,7 +477,9 @@ export async function gatherExternalBriefs(
   intent: JournalChatIntent,
 ): Promise<ExternalBrief[]> {
   if (intent === "data") return [];
-  const tasks: Promise<ExternalBrief>[] = [callPerplexityBrief(question, companyHint)];
+  const tasks: Promise<ExternalBrief>[] = [
+    callPerplexityBrief(question, companyHint),
+  ];
   // 戦略・混合では Grok も試す（キー無ければ missing_key で終わる）
   tasks.push(callGrokTrendBrief(question, companyHint));
   return await Promise.all(tasks);
@@ -223,7 +491,7 @@ export function formatExternalBriefsForPrompt(briefs: ExternalBrief[]): string {
   const blocks = ok.map((b) => {
     const label = b.provider === "perplexity"
       ? "Perplexity（Web検索）"
-      : "Grok（トレンド補助）";
+      : "Grok（X検索・投稿文脈付き最新トレンド）";
     return `### ${label}\n${b.text}`;
   });
   return `
@@ -241,7 +509,11 @@ export function orchestrationNote(
   if (intent === "data") return "モード: 数値検証（gpt-5.6-luna）";
   const used = briefs.filter((b) => b.ok).map((b) => b.provider);
   if (!used.length) {
-    return `モード: ${intent === "mixed" ? "数値+戦略" : "戦略"}（外部AIキー未設定または取得失敗のため gpt-5.6-luna のみ）`;
+    return `モード: ${
+      intent === "mixed" ? "数値+戦略" : "戦略"
+    }（外部AIキー未設定または取得失敗のため gpt-5.6-luna のみ）`;
   }
-  return `モード: ${intent === "mixed" ? "数値+戦略" : "戦略"}（gpt-5.6-luna + ${used.join(" + ")}）`;
+  return `モード: ${
+    intent === "mixed" ? "数値+戦略" : "戦略"
+  }（gpt-5.6-luna + ${used.join(" + ")}）`;
 }

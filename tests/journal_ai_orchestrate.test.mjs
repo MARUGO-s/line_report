@@ -62,6 +62,20 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(shared, /classifyJournalChatIntent/);
   assert.match(shared, /callPerplexityBrief/);
   assert.match(shared, /callGrokTrendBrief/);
+  assert.match(shared, /https:\/\/api\.x\.ai\/v1\/responses/);
+  assert.match(shared, /type:\s*"x_search"/);
+  assert.match(shared, /tool_choice:\s*"required"/);
+  assert.match(shared, /from_date:\s*fromDate/);
+  assert.match(shared, /to_date:\s*toDate/);
+  assert.match(shared, /item\.type === "x_search_call"/);
+  assert.match(shared, /missing_x_citations/);
+  assert.doesNotMatch(
+    shared.slice(
+      shared.indexOf('export async function callGrokTrendBrief'),
+      shared.indexOf('/** 戦略／混合モード用'),
+    ),
+    /\/chat\/completions/,
+  );
   assert.match(ai, /journal_ai_orchestrate/);
   assert.match(ai, /gatherExternalBriefs/);
   assert.match(ai, /orchestrationMode/);
