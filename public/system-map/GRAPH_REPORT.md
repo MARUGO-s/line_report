@@ -4,12 +4,12 @@
 - cluster-only mode — file stats not available
 
 ## Summary
-- 4142 nodes · 9708 edges · 345 communities (210 shown, 135 thin omitted)
+- 4144 nodes · 9716 edges · 342 communities (208 shown, 134 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 197 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `cdcc157a`
+- Built from commit: `2ecc04e3`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -117,7 +117,6 @@
 - Community 100
 - Community 101
 - Community 102
-- Community 103
 - Community 104
 - Community 105
 - Community 106
@@ -166,7 +165,7 @@
 - Community 149
 - Community 150
 - Community 151
-- Community 152
+- Community 153
 - Community 154
 - Community 155
 - Community 156
@@ -176,20 +175,20 @@
 - Community 160
 - Community 161
 - Community 162
-- Community 163
+- Community 165
 - Community 166
 - Community 167
-- Community 168
+- Community 170
 - Community 171
 - Community 172
 - Community 173
-- Community 174
+- Community 175
 - Community 176
 - Community 177
 - Community 178
 - Community 179
 - Community 180
-- Community 181
+- Community 182
 - Community 183
 - Community 184
 - Community 185
@@ -198,7 +197,7 @@
 - Community 188
 - Community 189
 - Community 190
-- Community 191
+- Community 192
 - Community 193
 - Community 194
 - Community 195
@@ -209,21 +208,21 @@
 - Community 200
 - Community 201
 - Community 202
-- Community 203
+- Community 204
 - Community 205
 - Community 206
 - Community 207
 - Community 208
-- Community 209
+- Community 212
 - Community 213
 - Community 214
 - Community 215
 - Community 216
 - Community 217
 - Community 218
-- Community 219
-- Community 221
-- Community 223
+- Community 220
+- Community 222
+- Community 224
 - Community 225
 - Community 226
 - Community 227
@@ -240,16 +239,16 @@
 - Community 238
 - Community 239
 - Community 240
-- Community 241
-- Community 243
-- Community 247
+- Community 242
+- Community 246
+- Community 248
 - Community 249
 - Community 250
 - Community 251
 - Community 252
 - Community 253
 - Community 254
-- Community 255
+- Community 257
 - Community 258
 - Community 259
 - Community 260
@@ -258,11 +257,11 @@
 - Community 263
 - Community 264
 - Community 265
-- Community 266
+- Community 268
 - Community 269
 - Community 270
 - Community 271
-- Community 272
+- Community 274
 - Community 275
 - Community 276
 - Community 277
@@ -272,9 +271,9 @@
 - Community 281
 - Community 282
 - Community 283
-- Community 284
+- Community 285
 - Community 286
-- Community 287
+- Community 288
 - Community 289
 - Community 290
 - Community 291
@@ -287,9 +286,7 @@
 - Community 298
 - Community 299
 - Community 300
-- Community 301
-- Community 303
-- Community 344
+- Community 302
 
 ## God Nodes (most connected - your core abstractions)
 1. `toSafeString()` - 91 edges
@@ -318,363 +315,367 @@
 ## Import Cycles
 - 3-file cycle: `supabase/functions/_shared/receipt_parse.ts -> supabase/functions/_shared/store_receipt_phones.ts -> supabase/functions/_shared/store_receipt.ts -> supabase/functions/_shared/receipt_parse.ts`
 
-## Communities (345 total, 135 thin omitted)
+## Communities (342 total, 134 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.03
-Nodes (49): As(), average(), beforeDatasetDraw(), buildTicks(), d(), destroy(), determineDataLimits(), Di() (+41 more)
+Nodes (55): As(), average(), d(), dataset(), destroy(), Di(), es(), fe() (+47 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.02
-Nodes (96): addDaysIso(), AI_USAGE_CLAUDE_STORE_KEYS, AiUsageProviderBucket, AiUsageStoreRow, AppError, authenticate(), authenticateRawAdminToken(), backfillLineUserPermissionsFromMessages() (+88 more)
+Nodes (94): addDaysIso(), AI_USAGE_CLAUDE_STORE_KEYS, AiUsageProviderBucket, AiUsageStoreRow, AppError, authenticate(), authenticateRawAdminToken(), backfillLineUserPermissionsFromMessages() (+86 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.02
 Nodes (106): addIngestionError(), attachAliases(), buildProductWritePayload(), completeIngestionFile(), countIngestionErrorsByFileStmt, countIngestionProductSnapshotsByFileStmt, countPriceHistoryByIngestionFileStmt, createIngestionFile() (+98 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.03
-Nodes (90): adjustProductStockQty(), adjustProductStockQtyTx, backupDatabaseTo(), findCurrentPricesByQuery(), getActiveReplyTemplateByKey(), getAdminTokenOverride(), renderTemplate(), saveOcrResult() (+82 more)
+Cohesion: 0.04
+Nodes (84): adjustProductStockQty(), adjustProductStockQtyTx, findCurrentPricesByQuery(), getActiveReplyTemplateByKey(), getAdminTokenOverride(), renderTemplate(), saveOcrResult(), app (+76 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.05
-Nodes (14): beforeUpdate(), bn(), go(), ii(), initialize(), labelColor(), labelPointStyle(), ns() (+6 more)
+Cohesion: 0.04
+Nodes (22): beforeUpdate(), bn(), buildTicks(), ei(), go(), ii(), initialize(), je() (+14 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.07
-Nodes (12): afterDatasetsUpdate(), an(), ca(), generateLabels(), getBasePixel(), Ie(), ke(), kn() (+4 more)
+Nodes (19): Ae(), afterDraw(), afterEvent(), afterUpdate(), ba, f(), g(), ki() (+11 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.07
-Nodes (64): applySheetMissingMonthDeletions(), BudgetComparable, budgetComparableEqual(), budgetComparableFromRow(), budgetComparableFromSheetRow(), BudgetRow, buildBudgetOperatingDaysSheetUpdates(), buildBudgetSheetRowUpdatesFromDb() (+56 more)
+Nodes (69): applySheetMissingMonthDeletions(), BudgetComparable, budgetComparableEqual(), budgetComparableFromRow(), budgetComparableFromSheetRow(), BudgetRow, buildBudgetOperatingDaysSheetUpdates(), buildBudgetSheetRowUpdatesFromDb() (+61 more)
 
 ### Community 7 - "Community 7"
 Cohesion: 0.07
-Nodes (20): Ae(), afterEvent(), Bi(), bo, _calculateBarIndexPixels(), _calculateBarValuePixels(), f(), getPixelForValue() (+12 more)
+Nodes (54): a(), aa(), ai(), ao(), at(), b(), beforeDatasetDraw(), beforeDatasetsDraw() (+46 more)
 
 ### Community 8 - "Community 8"
+Cohesion: 0.06
+Nodes (14): addBox(), addElements(), afterDatasetsUpdate(), an(), configure(), generateLabels(), ke(), Mn() (+6 more)
+
+### Community 9 - "Community 9"
 Cohesion: 0.09
 Nodes (60): asJson(), buildRedirectUrl(), buildResumeImmediateAckText(), buildResumeLineAcceptedText(), callLineBotInfo(), callLineMessageQuota(), callLineWebhookEndpointInfo(), callLineWebhookTest() (+52 more)
 
-### Community 9 - "Community 9"
-Cohesion: 0.06
-Nodes (57): a(), aa(), ai(), ao(), beforeDatasetsDraw(), beforeDraw(), cn(), da() (+49 more)
-
 ### Community 10 - "Community 10"
-Cohesion: 0.08
-Nodes (61): buildAllFeaturesGuideFlex(), buildGroupSalesDatePromptFlex(), buildGroupSalesSearchGuideFlex(), buildGroupSalesSearchGuideText(), buildKindPromptFlex(), buildSearchEntryReply(), buildSearchMenuFlex(), buildSearchMenuFooter() (+53 more)
+Cohesion: 0.07
+Nodes (58): replyLineFlex(), buildFlexInfoCard(), buildLineFlexBlueHeader(), flexButton(), FlexButtonAction, FlexButtonSpec, lineSafeFlexText(), ADMIN_MENU_POSTBACK (+50 more)
 
 ### Community 11 - "Community 11"
 Cohesion: 0.05
 Nodes (44): AdvancedStats, avg(), BackRow, BIG_EVTYPES, CiEntry, cohensD(), computeAdvancedStats(), dayOfYear() (+36 more)
 
 ### Community 12 - "Community 12"
-Cohesion: 0.08
-Nodes (57): replyLineFlex(), fetchLineDisplayNameByUserId(), buildFlexInfoCard(), buildLineFlexBlueHeader(), flexButton(), FlexButtonAction, FlexButtonSpec, lineSafeFlexText() (+49 more)
+Cohesion: 0.09
+Nodes (58): buildAllFeaturesGuideFlex(), buildGroupSalesDatePromptFlex(), buildGroupSalesSearchGuideFlex(), buildGroupSalesSearchGuideText(), buildKindPromptFlex(), buildSearchEntryReply(), buildSearchMenuFlex(), buildSearchMenuFooter() (+50 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.09
-Nodes (19): afterDraw(), afterUpdate(), at(), b(), ba, g(), init(), ki() (+11 more)
+Cohesion: 0.06
+Nodes (53): analyzeStoreKnowledgeImage(), buildKnowledgeBodyFallback(), buildSavedReportHtmlStoragePath(), buildStoreKnowledgeSearchText(), callKnowledgeGemini(), chunkArray(), createSavedReportHtmlSignedUrl(), createSignedMediaUrl() (+45 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.07
-Nodes (56): assertReservationEventMatchesStoreScope(), buildCalendarVisitMonthLabel(), buildCalendarVisitTimeLabel(), buildJstMonthRange(), buildReservationCalendarItem(), buildReservationCountDedupeKey(), buildReservationEffectiveSummaryLookup(), buildReservationNameSearchPatterns() (+48 more)
+Cohesion: 0.09
+Nodes (51): addDaysIsoUtc(), fetchAnalyticsMonthly(), fetchDistinctRoomIdsFromRawTable(), fetchManualMonthsForYearState(), fetchReceiptDailyAggForRange(), fetchReceiptSalesState(), fetchReceiptStoreOptions(), fetchReceiptWebhookStatus() (+43 more)
 
 ### Community 15 - "Community 15"
 Cohesion: 0.06
-Nodes (58): addReceiptToCohort(), asAppError(), buildLineUserPermissionPayload(), comparePosJournalCohortsGeneral(), comparePosJournalProductCohorts(), deleteStoreKnowledgeItem(), emptyCohortBucket(), fetchChatPdfHistoryItem() (+50 more)
+Nodes (21): bo, ca(), _calculateBarIndexPixels(), _calculateBarValuePixels(), determineDataLimits(), getBasePixel(), getLabelAndValue(), getLabelForValue() (+13 more)
 
 ### Community 16 - "Community 16"
-Cohesion: 0.11
-Nodes (51): isRecord(), applyProfileDictionaryClassification(), buildReviewExcerpt(), buildStoreReviewProfilePayload(), classifyNearbyWithAI(), compactGoogleRaw(), CompetitorPlaceRow, CompetitorSnapshotRow (+43 more)
+Cohesion: 0.10
+Nodes (52): clamp01(), coerceMaybeJsonObject(), isSingleDayPeriodSettlementReport(), looksLikeSalesDateDigits(), mergeReceiptConfidence(), normalizeInlineText(), normalizeLineImageAnalysisResult(), normalizeLineImageReservationAnalysis() (+44 more)
 
 ### Community 17 - "Community 17"
 Cohesion: 0.11
-Nodes (43): addDaysIsoUtc(), fetchAnalyticsMonthly(), fetchDistinctRoomIdsFromRawTable(), fetchManualMonthsForYearState(), fetchReceiptDailyAggForRange(), fetchReceiptSalesState(), fetchReceiptStoreOptions(), fetchReceiptWebhookStatus() (+35 more)
+Nodes (52): isRecord(), toSafeString(), applyProfileDictionaryClassification(), buildReviewExcerpt(), buildStoreReviewProfilePayload(), classifyNearbyWithAI(), compactGoogleRaw(), CompetitorPlaceRow (+44 more)
 
 ### Community 18 - "Community 18"
-Cohesion: 0.06
-Nodes (47): buildDailyLogsContext(), buildFoodCourtCompareFlex(), buildFoodCourtDashboardLink(), buildFoodCourtPageUrl(), buildLoopFeedback(), EXTRACT_PROMPT, FC_CODE_TO_NAME, FC_DOW (+39 more)
+Cohesion: 0.08
+Nodes (43): buildDailySalesConfirmFlex(), buildDailySalesImportedFlex(), buildDailySalesSummaryRows(), buildDailySalesTemplateDownloadFlex(), buildReservationConfirmFlex(), buildReservationImportDetailJson(), buildReservationRegisteredFlex(), buildReservationUpdatedFlex() (+35 more)
 
 ### Community 19 - "Community 19"
 Cohesion: 0.06
-Nodes (15): beforeLayout(), buildLookupTable(), En, Fo(), _generate(), getDecimalForValue(), _getTimestampsForTable(), In() (+7 more)
+Nodes (47): buildDailyLogsContext(), buildFoodCourtCompareFlex(), buildFoodCourtDashboardLink(), buildFoodCourtPageUrl(), buildLoopFeedback(), EXTRACT_PROMPT, FC_CODE_TO_NAME, FC_DOW (+39 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.09
-Nodes (41): buildDailySalesConfirmFlex(), buildDailySalesImportedFlex(), buildDailySalesSummaryRows(), buildDailySalesTemplateDownloadFlex(), buildReservationConfirmFlex(), buildReservationImportDetailJson(), buildReservationRegisteredFlex(), buildReservationUpdatedFlex() (+33 more)
+Cohesion: 0.11
+Nodes (7): Be(), jn, n(), ne(), numeric(), pi(), resolveDataElementOptions()
 
 ### Community 21 - "Community 21"
-Cohesion: 0.17
-Nodes (44): answerFoodCourtQuestion(), appendLoopFeedback(), buildAnomalyDays(), buildBaseInsights(), buildCompetitorContext(), buildConditionPatternStats(), buildContributionDecomposition(), buildDailyLogImpactContext() (+36 more)
+Cohesion: 0.07
+Nodes (13): beforeLayout(), buildLookupTable(), En, Fo(), _generate(), getDecimalForValue(), _getTimestampsForTable(), init() (+5 more)
 
 ### Community 22 - "Community 22"
-Cohesion: 0.12
-Nodes (42): applyCorrectionFieldValue(), buildCorrectionFlexHeader(), buildFieldSelectionPrompt(), buildReceiptCorrectionCancelOnlyFooter(), buildReceiptCorrectionConfirmCancelFooter(), buildUpdatedReceiptFlexReply(), buildValueInputPrompt(), clearPendingCorrection() (+34 more)
+Cohesion: 0.06
+Nodes (67): addReceiptToCohort(), analyzePosJournalWithAi(), asAppError(), askPosJournalAi(), buildLineUserPermissionPayload(), comparePosJournalCohortsGeneral(), comparePosJournalProductCohorts(), deleteStoreKnowledgeItem() (+59 more)
+
+### Community 23 - "Community 23"
+Cohesion: 0.08
+Nodes (44): assertReservationEventMatchesStoreScope(), buildCalendarVisitMonthLabel(), buildCalendarVisitTimeLabel(), buildJstMonthRange(), buildReservationCalendarItem(), buildReservationCountDedupeKey(), buildReservationEffectiveSummaryLookup(), buildReservationNameSearchPatterns() (+36 more)
 
 ### Community 24 - "Community 24"
-Cohesion: 0.14
-Nodes (40): coerceMaybeJsonObject(), normalizeInlineText(), normalizeLineImageAnalysisResult(), parseFirstJsonObject(), salvageLineImageAnalysisResultFromText(), buildReceiptVisionSystemPrompt(), analyzeExpenseReceiptWithAzureFoundry(), analyzeExpenseReceiptWithGroqScout() (+32 more)
+Cohesion: 0.17
+Nodes (43): answerFoodCourtQuestion(), appendLoopFeedback(), buildAnomalyDays(), buildBaseInsights(), buildCompetitorContext(), buildConditionPatternStats(), buildContributionDecomposition(), buildDailyLogImpactContext() (+35 more)
 
 ### Community 25 - "Community 25"
+Cohesion: 0.12
+Nodes (41): applyCorrectionFieldValue(), buildCorrectionFlexHeader(), buildFieldSelectionPrompt(), buildReceiptCorrectionCancelOnlyFooter(), buildReceiptCorrectionConfirmCancelFooter(), buildUpdatedReceiptFlexReply(), buildValueInputPrompt(), clearPendingCorrection() (+33 more)
+
+### Community 26 - "Community 26"
+Cohesion: 0.10
+Nodes (27): buildAlertMessage(), DbClient, dowOf(), PvEvent, resolveStoreLineToken(), sanitizeLineToken(), sendLinePush(), SPORT_ICON (+19 more)
+
+### Community 27 - "Community 27"
+Cohesion: 0.11
+Nodes (39): indexLineRoomReceiptSearch(), applySauvageNetSalesAsGrossSales(), buildReceiptSummaryText(), computeReceiptHeuristicConfidence(), decodeEscapedUnicodeSequences(), extractPartyGuestCountsFromText(), extractReceiptPrintedHour(), formatJapaneseReceiptDateFromIso() (+31 more)
+
+### Community 28 - "Community 28"
 Cohesion: 0.07
 Nodes (40): appendChunkWithinLimit(), appendWordXmlNodeText(), buildDocumentSnippet(), collectTextNodes(), columnNameToIndex(), compareWordXmlEntry(), compareXlsxWorksheetEntry(), createSignedMediaDownloadUrl() (+32 more)
 
-### Community 26 - "Community 26"
+### Community 29 - "Community 29"
 Cohesion: 0.09
 Nodes (34): AI_RATE_LIMITS, AiAction, callKimi(), callKimiClarifier(), callOpenAiClarifier(), callOpenAiLuna(), ChatContent, ClarificationPlan (+26 more)
 
-### Community 27 - "Community 27"
+### Community 30 - "Community 30"
 Cohesion: 0.10
 Nodes (38): buildAwardsFromHints(), buildDrinkingWindowFromHints(), buildRatingPointsFromHints(), buildSourceUrlLines(), buildWebSummaryContext(), buildWineryHistoryFromHints(), collectAwardHintsFromText(), collectDrinkingWindowHintsFromText() (+30 more)
 
-### Community 28 - "Community 28"
-Cohesion: 0.09
-Nodes (31): buildAlertMessage(), DbClient, dowOf(), PvEvent, resolveStoreLineToken(), sanitizeLineToken(), sendLinePush(), SPORT_ICON (+23 more)
-
-### Community 29 - "Community 29"
+### Community 31 - "Community 31"
 Cohesion: 0.12
 Nodes (33): bearerToken(), constantTimeEqual(), CORS_HEADERS, isAuthorized(), isServiceRoleAuthorized(), clearBistrocavacavaSheetDataRowsAndPushFromDb(), canonicalKeepStoreKey(), clearSpreadsheetTabsExceptStores() (+25 more)
 
-### Community 30 - "Community 30"
+### Community 32 - "Community 32"
 Cohesion: 0.08
 Nodes (36): asNullableWineField(), asSourceDisplayName(), buildGrapeCompositionFromEvidence(), buildJpyPriceRangeInfo(), buildLineWineReplyFallback(), buildMarketPriceFromHints(), buildSourceSummary(), buildWineAnalysisFallback() (+28 more)
 
-### Community 31 - "Community 31"
+### Community 33 - "Community 33"
 Cohesion: 0.12
 Nodes (32): getJapaneseHolidayDateSet(), JAPANESE_HOLIDAY_ISO_DATES, buildReceiptBudgetComparisonRows(), computeReceiptDailyDiffTotalLikeAnalyticsFooter(), fetchSalesBudgetRow(), formatYenAmount(), formatYenSignedDiff(), loadStoreDayGrossSumForDate() (+24 more)
 
-### Community 32 - "Community 32"
+### Community 34 - "Community 34"
 Cohesion: 0.11
 Nodes (35): buildPettyCashDashboardLink(), buildPettyCashPageUrl(), CANCEL_WORDS, classifyPettyAcct(), clearPending(), confirmFlex(), conversationKey(), defaultPettyRate() (+27 more)
 
-### Community 33 - "Community 33"
+### Community 35 - "Community 35"
 Cohesion: 0.09
 Nodes (34): buildDisplayWidthIndent(), buildReservationHistoryParagraphs(), collectGmailBodyParts(), constantTimeEqual(), countReservationCoreFields(), decodeBase64UrlUtf8(), formatAlignedReservationLine(), formatReservationCountLine() (+26 more)
 
-### Community 34 - "Community 34"
+### Community 36 - "Community 36"
 Cohesion: 0.13
 Nodes (35): buildSeatNameFromMail(), buildVisitDateTimeFromMail(), captureFirstMatch(), extractLineAfterLabel(), extractQaAnswer(), extractReservationAllergy(), extractReservationHistory(), extractReservationMailDetails() (+27 more)
-
-### Community 35 - "Community 35"
-Cohesion: 0.06
-Nodes (33): better-sqlite3, dotenv, express, dependencies, better-sqlite3, dotenv, express, xlsx (+25 more)
-
-### Community 36 - "Community 36"
-Cohesion: 0.10
-Nodes (13): ce(), ct(), de, dt(), fs(), ge(), gs(), he() (+5 more)
 
 ### Community 37 - "Community 37"
 Cohesion: 0.12
 Nodes (31): allergyLabel(), buildReservationRow(), buildTodayReservationCalendarUrl(), buildTodayReservationFlex(), DbClient, formatReservationCustomerName(), formatTargetMonth(), handleTestSend() (+23 more)
 
 ### Community 38 - "Community 38"
-Cohesion: 0.10
-Nodes (5): Cs, nn(), os(), sn, xt
-
-### Community 39 - "Community 39"
 Cohesion: 0.08
 Nodes (16): Bt(), color(), Ee(), Ft(), Gt(), It(), jt(), kt() (+8 more)
 
+### Community 39 - "Community 39"
+Cohesion: 0.13
+Nodes (30): buildReceiptDuplicateConfirmationFlexReply(), capText(), clearPendingReceiptDuplicate(), completePendingDuplicateAndReply(), conversationKey(), formatJapaneseReceiptDateFromIso(), loadPendingReceiptDuplicate(), markPendingReceiptDuplicateAwaitingDateChange() (+22 more)
+
 ### Community 40 - "Community 40"
-Cohesion: 0.11
-Nodes (5): Ci(), Do(), eo(), ls, Oe()
+Cohesion: 0.06
+Nodes (31): better-sqlite3, dotenv, express, dependencies, better-sqlite3, dotenv, express, name (+23 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.09
-Nodes (31): analyzePosJournalWithAi(), askPosJournalAi(), buildDocumentStoragePath(), buildPosJournalStoragePath(), createPettyCashEntry(), createPettyCashEntryFromReceiptImage(), extractFileExt(), fetchPosJournalAiHistory() (+23 more)
+Cohesion: 0.10
+Nodes (5): Cs, nn(), os(), sn, xt
 
 ### Community 42 - "Community 42"
-Cohesion: 0.14
-Nodes (29): buildReceiptDuplicateConfirmationFlexReply(), capText(), clearPendingReceiptDuplicate(), completePendingDuplicateAndReply(), conversationKey(), formatJapaneseReceiptDateFromIso(), loadPendingReceiptDuplicate(), markPendingReceiptDuplicateAwaitingDateChange() (+21 more)
+Cohesion: 0.10
+Nodes (31): evaluateFoodCourtAnswer(), loadFoodCourtLearningMemory(), parseLoopEvaluationJson(), recordFoodCourtFallbackEvent(), recordFoodCourtFallbackIfNeeded(), assessFoodCourtEvolutionReadiness(), auditFoodCourtAnswerNumbers(), buildFoodCourtFallbackEvent() (+23 more)
 
 ### Community 43 - "Community 43"
-Cohesion: 0.12
-Nodes (28): evaluateFoodCourtAnswer(), parseLoopEvaluationJson(), assessFoodCourtEvolutionReadiness(), auditFoodCourtAnswerNumbers(), buildFoodCourtFallbackEvent(), buildFoodCourtNumberAuditFeedback(), buildFoodCourtRevisionMessages(), compactFoodCourtEvaluationContext() (+20 more)
+Cohesion: 0.16
+Nodes (27): base64UrlEncodeBytes(), base64UrlEncodeText(), fetchGoogleServiceAccountAccessToken(), pemToArrayBuffer(), signRs256(), addSpreadsheetSheet(), appendSpreadsheetValues(), batchUpdateSpreadsheetValues() (+19 more)
 
 ### Community 44 - "Community 44"
-Cohesion: 0.14
-Nodes (30): base64UrlEncodeBytes(), base64UrlEncodeText(), fetchGoogleServiceAccountAccessToken(), pemToArrayBuffer(), signRs256(), addSpreadsheetSheet(), appendSpreadsheetValues(), batchUpdateSpreadsheetValues() (+22 more)
+Cohesion: 0.16
+Nodes (24): bindRememberCheckbox(), clearToken(), clearTokenStorage(), consumeUrlAuthParams(), consumeUrlLoginTicketParam(), consumeUrlTokenParam(), currentAppScope(), exchangeAdminTokenForSession() (+16 more)
 
 ### Community 45 - "Community 45"
 Cohesion: 0.16
 Nodes (24): bindRememberCheckbox(), clearToken(), clearTokenStorage(), consumeUrlAuthParams(), consumeUrlLoginTicketParam(), consumeUrlTokenParam(), currentAppScope(), exchangeAdminTokenForSession() (+16 more)
 
 ### Community 46 - "Community 46"
-Cohesion: 0.16
-Nodes (24): bindRememberCheckbox(), clearToken(), clearTokenStorage(), consumeUrlAuthParams(), consumeUrlLoginTicketParam(), consumeUrlTokenParam(), currentAppScope(), exchangeAdminTokenForSession() (+16 more)
+Cohesion: 0.14
+Nodes (26): dedupeSalesSearchRows(), executeSalesSearch(), buildReceiptFlexMessage(), formatCountOrDash(), formatDecimalOrDash(), formatReceiptDateJa(), formatYenOrDash(), kvRow() (+18 more)
 
 ### Community 47 - "Community 47"
-Cohesion: 0.11
-Nodes (24): buildHardcodedHolidayMap(), fetchCaoHolidayMap(), fetchJapaneseHolidayMap(), fetchJapaneseHolidaySet(), getJapaneseHolidayDateSet(), HolidayLiveCache, JAPANESE_HOLIDAY_ISO_DATES, JapaneseHolidaySource (+16 more)
-
-### Community 48 - "Community 48"
 Cohesion: 0.16
 Nodes (27): aggregateGroups(), aggregatePeriod(), boundedInteger(), boundedText(), buildPosJournalAiFacts(), callGroq(), ChatHistoryItem, groqUsage() (+19 more)
 
+### Community 48 - "Community 48"
+Cohesion: 0.11
+Nodes (13): ce(), ct(), de, dt(), fs(), ge(), gs(), he() (+5 more)
+
 ### Community 49 - "Community 49"
-Cohesion: 0.16
-Nodes (24): executeSalesSearch(), buildReceiptFlexMessage(), formatCountOrDash(), formatDecimalOrDash(), formatReceiptDateJa(), formatYenOrDash(), kvRow(), sectionTitle() (+16 more)
-
-### Community 50 - "Community 50"
-Cohesion: 0.17
-Nodes (24): normalizeReceiptFieldText(), RECEIPT_SHEETS_STORE_CATALOG, alignReceiptStoreNameToRegistry(), findRegistryEntryForParsedStoreName(), normalizeStoreCompareKey(), receiptStoreNameMatchesRegistry(), resolveParsedStoreNameForDisplay(), StoreRegistryMatchCandidate (+16 more)
-
-### Community 51 - "Community 51"
 Cohesion: 0.09
 Nodes (23): architectureHash, colors, docsDir, edgeColors, escapeHtml(), escapeXml(), generatedAt, graph (+15 more)
 
-### Community 52 - "Community 52"
+### Community 50 - "Community 50"
 Cohesion: 0.15
 Nodes (22): LABEL_SET, MARUGO_GROUP_STORE_OPTIONS, STORE_COORDINATES, buildReceiptReportAggregateFromRows(), buildReceiptReportAggregateWithDailyOverrides(), loadReceiptReportAggregateForRoom(), loadReceiptReportAggregateForStoreByReceiptDate(), loadReceiptRowsFromStoreTable() (+14 more)
 
-### Community 53 - "Community 53"
-Cohesion: 0.18
-Nodes (22): clamp01(), computeReceiptHeuristicConfidence(), decodeEscapedUnicodeSequences(), extractPartyGuestCountsFromText(), extractReceiptPrintedHour(), formatJapaneseReceiptDateFromIso(), getJstBusinessDateForReceiptBudget(), isSingleDayPeriodSettlementReport() (+14 more)
+### Community 51 - "Community 51"
+Cohesion: 0.19
+Nodes (22): normalizeReceiptFieldText(), alignReceiptStoreNameToRegistry(), findRegistryEntryForParsedStoreName(), normalizeStoreCompareKey(), receiptStoreNameMatchesRegistry(), resolveParsedStoreNameForDisplay(), StoreRegistryMatchCandidate, sanitizeReceiptOcrStoreName() (+14 more)
 
-### Community 54 - "Community 54"
-Cohesion: 0.16
-Nodes (25): applySauvageNetSalesAsGrossSales(), buildReceiptSummaryText(), isPlausibleReceiptCount(), looksLikeOcrLatinStoreLabel(), parseCurrencyAmount(), resolveCanonicalStoreDisplayName(), countFromRawOrDb(), currencyFromRawOrDb() (+17 more)
-
-### Community 55 - "Community 55"
+### Community 52 - "Community 52"
 Cohesion: 0.17
 Nodes (24): buildCacheKey(), enumerateDates(), fetchArchiveRange(), fetchForecastPastDaysWindow(), fetchForecastRange(), fetchOpenMeteoDaily(), fetchOpenMeteoExternal(), fetchOpenMeteoJson() (+16 more)
 
-### Community 56 - "Community 56"
+### Community 53 - "Community 53"
 Cohesion: 0.18
 Nodes (23): isFullCalendarMonthPeriod(), shiftIsoDateByYears(), appendReceiptReportYoySection(), buildReceiptYoyCompactKvRows(), buildReceiptYoyKvRows(), calendarDaysInMonth(), countInclusiveCalendarDays(), flexBaselineRow() (+15 more)
 
-### Community 57 - "Community 57"
+### Community 54 - "Community 54"
+Cohesion: 0.18
+Nodes (21): addReservationDateDays(), buildReservationLiveUrl(), fetchReservationAiFacts(), jstTodayDateKey(), rebuildReservationAiDailyCache(), reservationAiBaseNotes(), reservationCacheWindowStart(), reservationDateStartIso() (+13 more)
+
+### Community 55 - "Community 55"
 Cohesion: 0.15
 Nodes (23): claudeChat(), claudeUsageFrom(), exceptionReason(), extractClaudeText(), extractGeminiText(), foodCourtAiChat(), geminiChat(), grokChat() (+15 more)
 
+### Community 56 - "Community 56"
+Cohesion: 0.18
+Nodes (23): budgetRowStoreKeyIndex(), buildClosedDatesSheetUpdates(), buildSheetDeletionMergeContext(), collectBudgetMonthsOnSheet(), collectDailyDatesOnSheet(), collectPastMonthsOnSheet(), compressClosedDaysToSegments(), exportClosedDatesFromDbToBudgetSheet() (+15 more)
+
 ### Community 58 - "Community 58"
-Cohesion: 0.17
-Nodes (22): buildFoodcourtReportUri(), buildComparableEndDateForMonth(), buildReceiptAnalyticsDashboardUrlForLine(), computeBudgetDiffs(), computeComparableMonthProgressRatio(), DayAgg, dayOfMonthFromIso(), daysInMonth() (+14 more)
-
-### Community 59 - "Community 59"
-Cohesion: 0.16
-Nodes (25): budgetRowStoreKeyIndex(), buildClosedDatesSheetUpdates(), buildSheetDeletionMergeContext(), collectBudgetMonthsOnSheet(), collectDailyDatesOnSheet(), collectPastMonthsOnSheet(), dailyExportRowDiffersFromSheet(), fetchSheetTabMetaWatermark() (+17 more)
-
-### Community 60 - "Community 60"
-Cohesion: 0.12
-Nodes (23): analyzeStoreKnowledgeImage(), buildKnowledgeBodyFallback(), buildStoreKnowledgeSearchText(), callKnowledgeGemini(), deletePosJournalFile(), fetchLineDisplayNameByUrl(), fetchStoreKnowledgeList(), generateStoreKnowledgeInsight() (+15 more)
-
-### Community 61 - "Community 61"
-Cohesion: 0.12
-Nodes (20): buildGlobalSettingsPayload(), buildRoomConfigSafePayload(), buildRoomSettingsPayload(), fetchLineMediaUsageStats(), fetchMediaCountByStore(), fetchMediaState(), fetchMediaUploadMaxMb(), fetchSenderNameMapForUserIds() (+12 more)
-
-### Community 62 - "Community 62"
 Cohesion: 0.17
 Nodes (21): fetchManualMonthSales(), fetchManualMonthSalesMapForStore(), manualMonthSalesFromRow(), ManualMonthSalesRecord, ManualMonthSalesUpsertEntry, normalizeSheetIntegerInput(), normalizeUpdatedAtInput(), parseManualMonthOperatingDays() (+13 more)
 
-### Community 63 - "Community 63"
+### Community 59 - "Community 59"
 Cohesion: 0.21
 Nodes (19): ascii(), BitReader, crc16(), decodeBitLengthDecoder(), decodeDistanceLengths(), decodeLh5(), decodeLiteralLengths(), decodeUnary7() (+11 more)
 
-### Community 64 - "Community 64"
+### Community 60 - "Community 60"
+Cohesion: 0.17
+Nodes (21): buildFoodcourtReportUri(), buildComparableEndDateForMonth(), buildReceiptAnalyticsDashboardUrlForLine(), computeBudgetDiffs(), computeComparableMonthProgressRatio(), DayAgg, dayOfMonthFromIso(), daysInMonth() (+13 more)
+
+### Community 61 - "Community 61"
 Cohesion: 0.14
 Nodes (16): ExtractedTokyoDomeEvent, isWeekdayLabel(), markerCategory(), parseTokyoDomeSchedule(), DbClient, DOME_CITY_HALLS, DomeAiUsage, domeUsageFrom() (+8 more)
 
+### Community 62 - "Community 62"
+Cohesion: 0.14
+Nodes (19): azureFoundryUsageFrom(), buildFoodCourtAckFlex(), buildFoodCourtDateConfirmFlex(), checkFoodCourtReceiptConsistency(), computeFoodCourtComparison(), extractFoodCourtTenants(), extractFoodCourtTenantsAzureFoundry(), fcMedian() (+11 more)
+
+### Community 63 - "Community 63"
+Cohesion: 0.15
+Nodes (20): buildDocumentStoragePath(), buildPosJournalStoragePath(), createPettyCashEntry(), createPettyCashEntryFromReceiptImage(), extractFileExt(), normalizePettyCashReceiptImageMime(), normalizePettyItems(), normalizePettyTaxMode() (+12 more)
+
+### Community 64 - "Community 64"
+Cohesion: 0.19
+Nodes (18): ensureLineRoomDisplayNameFromWebhook(), ensureLineUserDisplayNameFromWebhook(), fetchLineConversationNameByRoomId(), fetchLineConversationNameByUrl(), fetchLineDisplayNameByUrl(), fetchLineDisplayNameByUserId(), isAutoDisplayNamesEnabled(), runWebhookDisplayNameSync() (+10 more)
+
 ### Community 65 - "Community 65"
-Cohesion: 0.16
-Nodes (22): addReservationDateDays(), buildReservationLiveUrl(), fetchManualMonthGross(), fetchReservationAiFacts(), jstTodayDateKey(), listCalendarMonthsInclusive(), normalizeCalendarMonthParam(), rebuildReservationAiDailyCache() (+14 more)
-
-### Community 66 - "Community 66"
-Cohesion: 0.12
-Nodes (21): azureFoundryUsageFrom(), buildFoodCourtAckFlex(), buildFoodCourtDateConfirmFlex(), checkFoodCourtReceiptConsistency(), computeFoodCourtComparison(), extractFoodCourtTenants(), extractFoodCourtTenantsAzureFoundry(), fcMedian() (+13 more)
-
-### Community 67 - "Community 67"
 Cohesion: 0.19
 Nodes (19): amount(), firstInt(), FULLWIDTH_MAP, JournalRecord, normalizeWide(), parsePosJournalLzh(), parsePosJournalText(), parsePosJournalTexts() (+11 more)
 
-### Community 69 - "Community 69"
+### Community 66 - "Community 66"
+Cohesion: 0.12
+Nodes (19): clampInt(), fetchGlobalSettings(), fetchLineMediaUsageStats(), fetchLineUserPermissions(), fetchMediaCountByStore(), fetchMediaState(), fetchMonthlyPushUsageSummary(), fetchSenderNameMapForUserIds() (+11 more)
+
+### Community 67 - "Community 67"
 Cohesion: 0.13
 Nodes (19): appendReservationHonorific(), buildGmailReservationAlertLinePayload(), buildGmailReservationAlertMessage(), buildGmailReservationFlexAltText(), buildGmailReservationFlexBubble(), buildGmailReservationFlexMessage(), buildGmailReservationFlexMessages(), buildGmailReservationFlexParagraphRow() (+11 more)
 
-### Community 70 - "Community 70"
+### Community 68 - "Community 68"
 Cohesion: 0.12
 Nodes (19): buildRelaxedGmailAlertQuery(), cleanupTestReservationSeed(), filterUnnotifiedGmailMessageIds(), loadGmailAlertEnv(), markGmailAlertRoomSent(), maybeSendGmailReservationAlerts(), mergeUniqueGmailMessageLists(), parseBooleanEnv() (+11 more)
 
-### Community 71 - "Community 71"
+### Community 69 - "Community 69"
 Cohesion: 0.22
 Nodes (18): buildReceiptReportFlexMessages(), formatYenAmount(), receiptCountMatchesOperatingDays(), buildJstDateStartUtcIso(), buildReceiptReportTestSchedule(), buildScheduleSliceForKind(), constantTimeEqual(), dispatchReceiptReport() (+10 more)
 
-### Community 72 - "Community 72"
-Cohesion: 0.12
-Nodes (13): buildMarugoGroupBuiltinPrompt(), buildMarugoSBuiltinPrompt(), combineStoreReceiptPromptAdditions(), EXPENSE_RECEIPT_PROMPT_ADDITION, EXPENSE_RECEIPT_PROMPT_CORE, EXPENSE_VENDOR_PROMPT_BLOCKS, ExpenseVendorPromptBlock, fetchStoreReceiptAnalysisPromptAddition() (+5 more)
-
-### Community 73 - "Community 73"
+### Community 70 - "Community 70"
 Cohesion: 0.14
 Nodes (15): addDaysUtc(), buildWeeklyFlex(), DbClient, dowOf(), EVT_ICON, nextWeekWindow(), pad2(), resolveStoreLineToken() (+7 more)
 
-### Community 74 - "Community 74"
-Cohesion: 0.22
-Nodes (10): buildSavedReportHtmlStoragePath(), createSavedReportHtmlSignedUrl(), createSignedMediaUrl(), createStoreKnowledgeDownloadUrl(), fetchPettyCashReceiptMedia(), isDetailedSavedReportHtml(), offloadSavedReportHtml(), sanitizeSavedReportDataForStorage() (+2 more)
-
-### Community 75 - "Community 75"
+### Community 71 - "Community 71"
 Cohesion: 0.26
 Nodes (17): catalogPartitionKeyForDisplayName(), collectLabelMatchTokens(), collectNameMatchTokens(), extractLatinLettersLower(), findBestStoreNameInText(), levenshtein(), normalizeStoreToken(), normalizeTrailingRomanNumeral() (+9 more)
 
-### Community 76 - "Community 76"
+### Community 72 - "Community 72"
 Cohesion: 0.24
 Nodes (16): adminApiPath(), adminApiUrl(), getPreferredStoreDisplayLabel(), gmailSharedAdminApiUrl(), lineWebhookLegacyUrl(), lineWebhookPath(), lineWebhookUrl(), listStores() (+8 more)
 
-### Community 77 - "Community 77"
+### Community 73 - "Community 73"
 Cohesion: 0.24
 Nodes (16): adminApiPath(), adminApiUrl(), getPreferredStoreDisplayLabel(), gmailSharedAdminApiUrl(), lineWebhookLegacyUrl(), lineWebhookPath(), lineWebhookUrl(), listStores() (+8 more)
 
-### Community 78 - "Community 78"
+### Community 74 - "Community 74"
+Cohesion: 0.11
+Nodes (7): Bi(), Ci(), Do(), eo(), Fi(), ls, Oe()
+
+### Community 75 - "Community 75"
 Cohesion: 0.27
 Nodes (16): authenticateAdminDashboardSessionToken(), base64UrlEncode(), constantTimeEqualHex(), exchangeAdminDashboardLoginLinkToken(), exchangeRoomConfigLoginLink(), generateOpaqueToken(), hashRoomConfigPassword(), hashToken() (+8 more)
 
-### Community 79 - "Community 79"
+### Community 76 - "Community 76"
+Cohesion: 0.18
+Nodes (14): addCalendarDaysIso(), allocateDailyBudgetsForMonth(), classifySalesBudgetDay(), coerceStoreClosedDatesItems(), DayKind, DOW_TO_KIND, getDailyBudgetForDateFromAllocation(), getDowJst() (+6 more)
+
+### Community 77 - "Community 77"
 Cohesion: 0.18
 Nodes (16): asGroqVisionContentType(), extractSuggestionsFromGroqText(), extractTextFromGeminiResponse(), isLikelyNoiseLine(), isWineFlowEnabledForProvider(), normalizeSummaryField(), parseJsonObjectFromText(), renderLineWineReplyWithGroq() (+8 more)
 
-### Community 80 - "Community 80"
+### Community 78 - "Community 78"
 Cohesion: 0.16
 Nodes (16): extractGmailBodyText(), extractGmailHeader(), extractReservationMailDetailsWithGroq(), fetchGmailAccessTokenByRefreshToken(), fetchGmailMessageAlert(), hasAnyReservationMailDetails(), inferReservationEventLabel(), isSupportedReservationRoute() (+8 more)
 
-### Community 81 - "Community 81"
-Cohesion: 0.18
-Nodes (13): buildAlertFlexMessage(), checkCompetitorReviewAndAlert(), checkStoreReviewAndAlert(), CompetitorPlaceRow, DbClient, flexSafeText(), logReviewAlertCheck(), PlaceCheckResult (+5 more)
+### Community 79 - "Community 79"
+Cohesion: 0.14
+Nodes (10): buildMarugoGroupBuiltinPrompt(), buildMarugoSBuiltinPrompt(), combineStoreReceiptPromptAdditions(), EXPENSE_RECEIPT_PROMPT_CORE, EXPENSE_VENDOR_PROMPT_BLOCKS, ExpenseVendorPromptBlock, fetchStoreReceiptAnalysisPromptAddition(), RECEIPT_VISION_SYSTEM_PROMPT_BASE (+2 more)
 
-### Community 82 - "Community 82"
+### Community 80 - "Community 80"
 Cohesion: 0.21
 Nodes (15): ensureStoreSheetTabExists(), findFuzzyStoreTab(), getSpreadsheetTitleSet(), hasAnyStorePrefixedTabOfKind(), headerRowForNewTab(), listKnownStoreReceiptSheetsTabCandidates(), RECEIPT_SHEETS_LEGACY_TAB_ALIASES, ReceiptSheetsTabKind (+7 more)
 
-### Community 83 - "Community 83"
+### Community 81 - "Community 81"
 Cohesion: 0.31
 Nodes (14): amount(), decode_lzh(), first_int(), main(), parse_file(), parse_sale(), parse_settlement(), parse_weather() (+6 more)
 
-### Community 84 - "Community 84"
+### Community 82 - "Community 82"
 Cohesion: 0.30
 Nodes (14): bulkDeleteNonKeepSalesRows(), canonicalKey(), clearStoreSales(), clearStoreSheetTabs(), countTable(), del(), deleteDummySeedData(), dryRun (+6 more)
 
-### Community 85 - "Community 85"
-Cohesion: 0.25
-Nodes (14): BUDGET_NOTICE_LINES, budgetConfirmFlex(), budgetDoneFlex(), budgetFlex(), CANCEL_WORDS, clearPending(), commitBudgetAndReply(), conversationKey() (+6 more)
+### Community 83 - "Community 83"
+Cohesion: 0.17
+Nodes (21): BUDGET_NOTICE_LINES, budgetConfirmFlex(), budgetDoneFlex(), budgetFlex(), CANCEL_WORDS, clearPending(), commitBudgetAndReply(), conversationKey() (+13 more)
 
-### Community 86 - "Community 86"
+### Community 84 - "Community 84"
 Cohesion: 0.25
 Nodes (14): clearDailyReceiptsForMonth(), countExistingReceiptsForDates(), DailySalesImportEntry, DailySalesParseResult, enumerateImportMonthDates(), importDailyReceiptsOverwrite(), importLooksLikeCsv(), importManualMonthSalesOverwrite() (+6 more)
 
-### Community 87 - "Community 87"
+### Community 85 - "Community 85"
+Cohesion: 0.20
+Nodes (11): buildAlertFlexMessage(), checkCompetitorReviewAndAlert(), checkStoreReviewAndAlert(), CompetitorPlaceRow, DbClient, flexSafeText(), logReviewAlertCheck(), PlaceCheckResult (+3 more)
+
+### Community 86 - "Community 86"
 Cohesion: 0.26
 Nodes (11): buildJstMonthCreatedAtRange(), buildReceiptReportAggregateFromRows(), loadReceiptReportAggregateForRoom(), loadReceiptReportAggregateForStoreByReceiptDate(), loadReceiptRowsAnalyticsAligned(), normalizeConfiguredStorePartitionKey(), receiptDateIsoFromValue(), ReceiptReportAggregate (+3 more)
 
-### Community 88 - "Community 88"
+### Community 87 - "Community 87"
 Cohesion: 0.29
 Nodes (13): buildReceiptStoreMismatchFlexReply(), buildStoreMismatchGuidance(), buildStoreMismatchGuidanceText(), capText(), clearPendingStoreNameMismatch(), conversationKey(), formatJapaneseReceiptDateFromIso(), kvRow() (+5 more)
 
-### Community 89 - "Community 89"
+### Community 88 - "Community 88"
 Cohesion: 0.19
 Nodes (6): public.get_room_overview(), public.%I, public.line_room_calendar_events, public.line_room_message_tables, public.line_room_messages_search, public.search_line_room_messages()
 
-### Community 90 - "Community 90"
+### Community 89 - "Community 89"
 Cohesion: 0.19
 Nodes (7): public.insert_line_room_media_search(), public.line_room_calendar_search, public.line_room_document_search, public.line_room_media_search, public.line_room_receipt_search, public.search_line_room_calendar_events(), public.search_line_room_document_search()
+
+### Community 90 - "Community 90"
+Cohesion: 0.24
+Nodes (12): xlsx, registerQuotedImageAsKnowledge(), classifyKnowledgeFile(), clip(), extensionForKind(), extractDocxText(), extractKnowledgeText(), extractPlainText() (+4 more)
 
 ### Community 91 - "Community 91"
 Cohesion: 0.17
@@ -724,185 +725,173 @@ Nodes (10): devDependencies, wrangler, name, private, scripts, deploy, dev, type
 Cohesion: 0.33
 Nodes (10): get, health(), infer_suffix(), ocr(), parse_confidence(), require_auth(), run_ndlocr(), Path (+2 more)
 
-### Community 103 - "Community 103"
-Cohesion: 0.31
-Nodes (10): registerQuotedImageAsKnowledge(), classifyKnowledgeFile(), clip(), extensionForKind(), extractDocxText(), extractKnowledgeText(), extractPlainText(), extractSpreadsheetText() (+2 more)
-
 ### Community 104 - "Community 104"
-Cohesion: 0.35
-Nodes (10): fetchLineMessageBinary(), downscaleRgba(), enforceRoomMediaCap(), extensionForContentType(), isJpegContentType(), recompressJpegForLibrary(), removeRoomMediaByMessageId(), sanitizePathSegment() (+2 more)
+Cohesion: 0.27
+Nodes (10): buildHardcodedHolidayMap(), fetchCaoHolidayMap(), fetchJapaneseHolidayMap(), fetchJapaneseHolidaySet(), getJapaneseHolidayDateSet(), HolidayLiveCache, JAPANESE_HOLIDAY_ISO_DATES, JapaneseHolidaySource (+2 more)
 
 ### Community 105 - "Community 105"
-Cohesion: 0.31
-Nodes (8): extractLineMessageTextContent(), isLineRoomMessageRecordingEnabled(), LINE_ROOM_MESSAGE_RECORDING, LineMessageEvent, persistLineRoomMessageFromWebhook(), indexLineRoomReceiptSearch(), MEDIA_TYPES, persistLineRoomSearchArchivesFromWebhook()
-
-### Community 106 - "Community 106"
 Cohesion: 0.20
 Nodes (6): buildDeterministicPosJournalAnalysis(), buildDeterministicPosJournalAnswer(), normalizePosJournalAiQuestion(), pct(), yen(), expected
 
-### Community 107 - "Community 107"
+### Community 106 - "Community 106"
 Cohesion: 0.18
 Nodes (9): appThemePath, context, forecastHistorySource, historyPath, htmlPath, indexPath, naturalClarificationRequestSource, reports (+1 more)
 
-### Community 108 - "Community 108"
+### Community 107 - "Community 107"
 Cohesion: 0.36
 Nodes (8): activeStorage(), buildEntryKey(), hashString(), normalizeEntryKey(), pruneStore(), readStore(), storageKey(), writeStore()
 
-### Community 109 - "Community 109"
+### Community 108 - "Community 108"
 Cohesion: 0.44
 Nodes (9): fetchManualMonthSales(), fetchManualMonthSalesMapForStore(), manualMonthSalesFromRow(), normalizeSheetIntegerInput(), parseManualMonthOperatingDays(), parseManualMonthPartyGuestFromUnknown(), parseOptionalNonNegativeInt(), parsePastSalesSheetRow() (+1 more)
 
-### Community 110 - "Community 110"
-Cohesion: 0.40
-Nodes (9): fetchManualDayBudgetMapForStore(), fetchManualDaySalesMapForStore(), manualDaySalesFromRow(), ManualDaySalesRecord, ManualDaySalesUpsertEntry, normalizeDateInput(), parseOptionalNonNegativeInt(), upsertManualDayBudgetEntries() (+1 more)
+### Community 109 - "Community 109"
+Cohesion: 0.36
+Nodes (7): extractLineMessageTextContent(), isLineRoomMessageRecordingEnabled(), LINE_ROOM_MESSAGE_RECORDING, LineMessageEvent, persistLineRoomMessageFromWebhook(), MEDIA_TYPES, persistLineRoomSearchArchivesFromWebhook()
 
-### Community 111 - "Community 111"
+### Community 110 - "Community 110"
 Cohesion: 0.29
 Nodes (8): ikyu_reservation_ai_cache_dirty_trg, manual_reservation_ai_cache_dirty_trg, public.mark_reservation_ai_cache_dirty_date(), public.reservation_ai_cache_dirty_dates, public.reservation_ai_store_cache, public.set_reservation_ai_store_cache_updated_at(), reservation_ai_store_cache_updated_at_trg, tabelog_reservation_ai_cache_dirty_trg
 
-### Community 113 - "Community 113"
+### Community 112 - "Community 112"
 Cohesion: 0.53
 Nodes (8): apply_all_functions(), apply_budget_functions(), apply_sales_functions(), delete_budgets(), delete_sales(), seed_budgets(), seed_sales(), dummy-sales-seed.sh script
 
-### Community 114 - "Community 114"
+### Community 113 - "Community 113"
 Cohesion: 0.22
 Nodes (4): checks, coreFailures, root, weatherStored
 
-### Community 115 - "Community 115"
-Cohesion: 0.36
-Nodes (8): ensureLineRoomDisplayNameFromWebhook(), ensureLineUserDisplayNameFromWebhook(), fetchLineConversationNameByRoomId(), fetchLineConversationNameByUrl(), fetchLineDisplayNameByUrl(), isAutoDisplayNamesEnabled(), runWebhookDisplayNameSync(), WebhookDisplayNameSyncSummary
-
-### Community 116 - "Community 116"
+### Community 114 - "Community 114"
 Cohesion: 0.25
 Nodes (6): buildPosJournalSummary(), detectPosJournalStoreCode(), resolvePosJournalStore(), sumDays(), crc16(), wrapLevel2Lh0()
 
-### Community 117 - "Community 117"
+### Community 115 - "Community 115"
 Cohesion: 0.57
 Nodes (7): buildReceiptDailyOverrideKey(), deleteReceiptDailyOverrides(), fetchReceiptDailyOverrideMap(), toNonNegativeInt(), toSafeOverrideStoreKey(), toSafeReceiptDate(), upsertReceiptDailyOverrides()
 
-### Community 118 - "Community 118"
+### Community 116 - "Community 116"
 Cohesion: 0.29
 Nodes (6): buildFoodCourtDistillationRecords(), FoodCourtDistillationRecord, UnknownRow, acceptedRows, iterations, runs
 
-### Community 119 - "Community 119"
+### Community 117 - "Community 117"
 Cohesion: 0.29
 Nodes (3): keepReceipts, key, STORE
 
-### Community 120 - "Community 120"
+### Community 118 - "Community 118"
 Cohesion: 0.38
 Nodes (7): buildCustomHeaderMap(), detectCsvDelimiter(), normalizeCsvHeaders(), normalizeHeaderLookupKey(), parseCsvLine(), parseCsvText(), parseExcelBuffer()
 
-### Community 121 - "Community 121"
+### Community 119 - "Community 119"
 Cohesion: 0.52
 Nodes (7): extractGoogleApiErrorMessage(), fetchGmailAccessTokenByRefreshToken(), fetchGmailLinkedAccountState(), fetchGmailProfile(), parseBooleanEnv(), parseJsonObjectSafe(), sanitizeSingleLine()
 
-### Community 122 - "Community 122"
+### Community 120 - "Community 120"
 Cohesion: 0.48
 Nodes (5): jsonResponse(), LineEvent, resolveAdminChannelSecret(), serveAdminApprovalWebhook(), verifyLineSignature()
 
-### Community 126 - "Community 126"
+### Community 124 - "Community 124"
 Cohesion: 0.43
 Nodes (6): public.foodcourt_daily_facts, public.foodcourt_daily_features, public.forecast_predictions, public.sync_foodcourt_daily_facts(), public.tokyo_dome_events, trg_sync_foodcourt_daily_facts
 
-### Community 127 - "Community 127"
+### Community 125 - "Community 125"
 Cohesion: 0.38
 Nodes (5): foodcourt_ai_rag_from_feedback, foodcourt_ai_rag_from_run, public.foodcourt_ai_rag_documents, public.trg_sync_foodcourt_ai_rag_from_feedback(), public.trg_sync_foodcourt_ai_rag_from_run()
 
-### Community 128 - "Community 128"
+### Community 126 - "Community 126"
 Cohesion: 0.29
 Nodes (5): ADMIN_API_BASE, ADMIN_TOKEN, LIMIT, LOOPS, STORE_KEY
 
-### Community 129 - "Community 129"
+### Community 127 - "Community 127"
 Cohesion: 0.29
 Nodes (5): forbiddenTrackedEntries, ignoredLocalPatterns, localOnlyRootEntries, publicSiteFiles, root
 
+### Community 128 - "Community 128"
+Cohesion: 0.73
+Nodes (5): apply(), current(), normalize(), set(), wire()
+
+### Community 129 - "Community 129"
+Cohesion: 0.73
+Nodes (5): apply(), current(), normalize(), set(), wire()
+
 ### Community 130 - "Community 130"
-Cohesion: 0.73
-Nodes (5): apply(), current(), normalize(), set(), wire()
-
-### Community 131 - "Community 131"
-Cohesion: 0.73
-Nodes (5): apply(), current(), normalize(), set(), wire()
-
-### Community 132 - "Community 132"
 Cohesion: 0.33
 Nodes (4): graph, migrations, missing, sources
 
-### Community 133 - "Community 133"
+### Community 131 - "Community 131"
 Cohesion: 0.53
 Nodes (5): countManual(), doPush, hocbnKey, main(), rest()
 
-### Community 135 - "Community 135"
+### Community 132 - "Community 132"
+Cohesion: 0.40
+Nodes (6): backupDatabaseTo(), asBackupTimestamp(), createBackup(), ensureBackupDirectory(), listBackupFiles(), pruneBackupFiles()
+
+### Community 134 - "Community 134"
 Cohesion: 0.40
 Nodes (5): isJobTitleLabel(), JOB_TITLE_OPTIONS, jobTitleSortRank(), LABEL_SET, RANK_BY_LABEL
 
-### Community 136 - "Community 136"
+### Community 135 - "Community 135"
 Cohesion: 0.40
 Nodes (4): dependencies, exceptionLogging, runtimeVersion, timeZone
 
-### Community 137 - "Community 137"
+### Community 136 - "Community 136"
 Cohesion: 0.70
 Nodes (4): doLogout(), inject(), injectStyle(), resolveLogoutUrl()
 
-### Community 138 - "Community 138"
+### Community 137 - "Community 137"
 Cohesion: 0.40
 Nodes (4): localFunctions, manifest, ownedFunctions, root
 
-### Community 140 - "Community 140"
+### Community 139 - "Community 139"
 Cohesion: 0.40
 Nodes (3): public.competitor_places, public.room_summary_settings, public.store_review_places
 
-### Community 141 - "Community 141"
+### Community 140 - "Community 140"
 Cohesion: 0.50
 Nodes (4): public.foodcourt_ai_feedback, public.foodcourt_ai_loop_runs, public.foodcourt_forecast_factors, public.foodcourt_forecast_history
 
-### Community 142 - "Community 142"
+### Community 141 - "Community 141"
 Cohesion: 0.40
 Nodes (4): public.ai_analysis_history, public.ai_chat_pdf_history, public.sales_forecasts, public.saved_reports
 
-### Community 144 - "Community 144"
+### Community 143 - "Community 143"
 Cohesion: 0.50
 Nodes (3): KNOWLEDGE_VAULT_APP_DIR, KNOWLEDGE_VAULT_GRAPHIFY_DIR, update-knowledge-vault.sh script
 
-### Community 147 - "Community 147"
+### Community 146 - "Community 146"
 Cohesion: 0.50
 Nodes (3): public.line_sales_manual_month_gross, public.line_sales_month_budgets, public.line_sales_month_store_closed_days
 
-### Community 149 - "Community 149"
+### Community 148 - "Community 148"
 Cohesion: 0.50
 Nodes (3): public.ikyu_reservation_visit_events, public.manual_reservation_visit_events, public.tabelog_reservation_visit_events
 
-### Community 151 - "Community 151"
+### Community 150 - "Community 150"
 Cohesion: 0.50
 Nodes (3): public.receipt_sheets_past_sales_export_snapshot, public.security_rate_limits, public.store_webhook_tables
 
-### Community 154 - "Community 154"
+### Community 153 - "Community 153"
 Cohesion: 0.83
 Nodes (3): ikyu_hide_cancelled_reservation_event, public.hide_cancelled_partner_reservation_events(), tabelog_hide_cancelled_reservation_event
 
-### Community 344 - "Community 344"
-Cohesion: 0.06
-Nodes (19): addBox(), Be(), configure(), ei(), H(), j(), je(), ko (+11 more)
-
 ## Knowledge Gaps
-- **649 isolated node(s):** `name`, `version`, `private`, `type`, `dev` (+644 more)
+- **650 isolated node(s):** `name`, `version`, `private`, `type`, `dev` (+645 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **135 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **134 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `xlsx` connect `Community 35` to `Community 120`, `Community 86`, `Community 103`?**
-  _High betweenness centrality (0.279) - this node is a cross-community bridge._
-- **Why does `parseMonthlyDailySalesWorkbook()` connect `Community 86` to `Community 1`, `Community 35`, `Community 20`?**
-  _High betweenness centrality (0.274) - this node is a cross-community bridge._
-- **Why does `parseExcelBuffer()` connect `Community 120` to `Community 35`, `Community 3`?**
-  _High betweenness centrality (0.270) - this node is a cross-community bridge._
+- **Why does `xlsx` connect `Community 90` to `Community 40`, `Community 84`, `Community 118`?**
+  _High betweenness centrality (0.269) - this node is a cross-community bridge._
+- **Why does `parseMonthlyDailySalesWorkbook()` connect `Community 84` to `Community 1`, `Community 18`, `Community 90`?**
+  _High betweenness centrality (0.266) - this node is a cross-community bridge._
+- **Why does `parseExcelBuffer()` connect `Community 118` to `Community 90`, `Community 3`?**
+  _High betweenness centrality (0.265) - this node is a cross-community bridge._
 - **Are the 24 inferred relationships involving `s()` (e.g. with `chart.umd.min.js` and `._updateHiddenIndices()`) actually correct?**
   _`s()` has 24 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `name`, `version`, `private` to the rest of the system?**
-  _649 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _650 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
-  _Cohesion score 0.02772224443555911 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.029121359830021246 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**
-  _Cohesion score 0.021161290322580645 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.021724643475942957 - nodes in this community are weakly interconnected._
