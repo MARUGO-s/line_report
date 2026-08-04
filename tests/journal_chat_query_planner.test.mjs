@@ -84,7 +84,11 @@ for (const name of [
   'resolveRelativeTimeRefs',
   'extractAllDayRefs',
   'extractDayScope',
+  'extractAllRangeRefs',
   'extractRangeRef',
+  'extractYearMonthFromText',
+  'rangeRefLabel',
+  'reportMatchesRangeRef',
   'aggregateSalesRows',
   'sortWeekdayRows',
   'mergeWeekdayBreakdowns',
@@ -669,6 +673,44 @@ test('same-year month ranges like 2026年1月〜7月 expand to the full inclusiv
   });
   // 比較「と」は範囲ではない
   assert.equal(context.extractRangeRef('2026年1月と7月を比較して'), null);
+});
+
+test('multiple continuous ranges are kept as separate comparison periods', () => {
+  const asJson = (v) => JSON.parse(JSON.stringify(v));
+  const question = '2025年の3月から7月までと、2026年3月から7月までの、それぞれの平均来客数と平均客単価を教えて';
+  assert.deepEqual(asJson(context.extractAllRangeRefs(question)), [
+    { fromYear: 2025, fromMonth: 3, toYear: 2025, toMonth: 7, wasYearOnly: false },
+    { fromYear: 2026, fromMonth: 3, toYear: 2026, toMonth: 7, wasYearOnly: false },
+  ]);
+  assert.deepEqual(asJson(context.extractRangeRef(question)), {
+    fromYear: 2025, fromMonth: 3, toYear: 2025, toMonth: 7, wasYearOnly: false,
+  });
+  assert.match(savedReportSearchSource, /const rangeRefs = extractAllRangeRefs\(q\);/);
+  assert.match(savedReportSearchSource, /if \(rangeRefs\.length >= 2\)/);
+  assert.match(
+    savedReportSearchSource,
+    /const rangeRefs[\s\S]*const rangeRef = extractRangeRef\(q\)/,
+    'multiple range comparison must run before the single-range early return',
+  );
+  assert.equal(context.rangeRefLabel(context.extractAllRangeRefs(question)[0]), '2025年3月〜7月');
+  const reportsForComparison = [
+    { title: '月間売上レポート（2025年3月）', period: '2025-03-01〜2025-03-31' },
+    { title: '月間売上レポート（2025年7月）', period: '2025-07-01〜2025-07-31' },
+    { title: '月間売上レポート（2026年3月）', period: '2026-03-01〜2026-03-31' },
+    { title: '合算売上レポート（2025年11月〜2026年6月）', period: '2025-11-01〜2026-06-30' },
+  ];
+  const [first, second] = context.extractAllRangeRefs(question);
+  assert.deepEqual(
+    reportsForComparison.filter((r) => context.reportMatchesRangeRef(r, first)).map((r) => context.monthKeyFromReport(r)),
+    ['2025-03', '2025-07'],
+  );
+  assert.deepEqual(
+    reportsForComparison.filter((r) => context.reportMatchesRangeRef(r, second)).map((r) => context.monthKeyFromReport(r)),
+    ['2026-03'],
+    'cross-month aggregate reports must stay excluded',
+  );
+  assert.match(html, /monthlyAvgCustomers: monthlyBreakdown\.length \? Math\.round\(cust \/ monthlyBreakdown\.length\) : 0/);
+  assert.match(html, /月間平均来客数: \$\{p\.monthlyAvgCustomers \|\| 0\}名/);
 });
 
 test('verified aggregates carry every stored breakdown so the AI never has to say it is missing', () => {

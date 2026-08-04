@@ -43,6 +43,14 @@
 
 New records are appended below.
 
+### 2026-08-04 - Journal AI multiple continuous range comparison fix
+
+- Symptom: 「2025年3月〜7月と2026年3月〜7月」の比較で、2025年側だけ回答し2026年側を「表示されていません」とした。
+- Cause: `extractRangeRef`が質問中の最初の連続期間だけを返し、`searchSavedReportsByQuery`が単一範囲として早期returnしていた。DBには2026年3〜7月の月間データが存在。
+- Change: `extractAllRangeRefs`で複数の連続期間を抽出し、単一範囲分岐より先に各期間を個別集計して`multiPeriod`へ渡す。合算レポートは従来どおり除外。
+- Accuracy: `monthCount`と`monthlyAvgCustomers`をローカル確定集計で計算し、AIへ明示する。
+- Verified facts (Bistro CAVACAVA): 2025年3〜7月=580名/5か月→116名/月、客単価¥11,532。2026年3〜7月=640名/5か月→128名/月、客単価¥10,218。
+
 ### 2026-08-04 - Reservation AI chronology, monitoring, paging, direct queries, and compact cache
 
 - Accuracy: 新規/リピートを「その予約時点・店舗別・食べログ/一休/manual横断」で再計算。キャンセル/非表示を除外し、`last_visit_at`は対象予約より前の同店舗直前予約へ変更。

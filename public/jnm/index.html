@@ -10849,36 +10849,34 @@ function extractYearMonthFromText(text) {
   return { year: parseInt(m[1], 10), month: parseInt(m[2], 10) };
 }
 
-/** 「2025年4月から2026年3月まで」「2026年1月〜7月」「2026年の1月から7月まで」「2025年〜2026年」等の期間範囲指定を検出する（比較「AとB」とは別扱い） */
-function extractRangeRef(q) {
+/** 文中にある月範囲をすべて出現順に抽出する。
+ * 「2025年3月〜7月と2026年3月〜7月」のような複数の連続期間比較を、
+ * 最初の1期間だけで早期returnしないために使用する。 */
+function extractAllRangeRefs(q) {
   const s = String(q || '');
-  // 年またぎ: 2025年4月〜2026年3月 / 2025年の4月から2026年の3月まで
-  const monthToMonth = s.match(/(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:まで)?/);
-  if (monthToMonth) {
-    return {
-      fromYear: parseInt(monthToMonth[1], 10), fromMonth: parseInt(monthToMonth[2], 10),
-      toYear: parseInt(monthToMonth[3], 10), toMonth: parseInt(monthToMonth[4], 10),
-      wasYearOnly: false
-    };
-  }
-  // 同年省略: 2026年1月〜7月 / 2026年1月から7月まで / 2026年の1月から7月まで
-  // （UIの formatMonthSpanLabel も「2026年1月〜6月」形式。両端に年が無いと従来は範囲未検出になり、
-  //  後段の extractAllMonthRefs が端点の1月と7月だけを拾って比較扱いになっていた）
-  const sameYearMonthToMonth = s.match(/(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(\d{1,2})\s*月\s*(?:まで)?/);
-  if (sameYearMonthToMonth) {
-    const year = parseInt(sameYearMonthToMonth[1], 10);
-    const fromMonth = parseInt(sameYearMonthToMonth[2], 10);
-    const toMonth = parseInt(sameYearMonthToMonth[3], 10);
-    if (fromMonth >= 1 && fromMonth <= 12 && toMonth >= 1 && toMonth <= 12) {
-      return {
-        fromYear: year,
-        fromMonth,
-        toYear: year,
-        toMonth,
-        wasYearOnly: false
-      };
+  const refs = [];
+  const re = /(\d{4})\s*年\s*(?:の\s*)?(\d{1,2})\s*月\s*(?:から|〜|~|-|－|—)\s*(?:(\d{4})\s*年\s*(?:の\s*)?)?(\d{1,2})\s*月\s*(?:まで)?/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const fromYear = parseInt(m[1], 10);
+    const fromMonth = parseInt(m[2], 10);
+    const toYear = m[3] ? parseInt(m[3], 10) : fromYear;
+    const toMonth = parseInt(m[4], 10);
+    if (
+      fromMonth >= 1 && fromMonth <= 12 &&
+      toMonth >= 1 && toMonth <= 12
+    ) {
+      refs.push({ fromYear, fromMonth, toYear, toMonth, wasYearOnly: false });
     }
   }
+  return refs;
+}
+
+/** 「2025年4月から2026年3月まで」「2026年1月〜7月」「2025年〜2026年」等の期間範囲指定を1件検出する。 */
+function extractRangeRef(q) {
+  const s = String(q || '');
+  const monthRanges = extractAllRangeRefs(s);
+  if (monthRanges.length) return monthRanges[0];
   const yearToYear = s.match(/(\d{4})\s*年\s*(?:から|〜|~|-|－|—)\s*(\d{4})\s*年\s*(?:まで)?/);
   if (yearToYear) {
     return {
@@ -10888,6 +10886,24 @@ function extractRangeRef(q) {
     };
   }
   return null;
+}
+
+function rangeRefLabel(ref) {
+  if (!ref) return '';
+  return ref.fromYear === ref.toYear
+    ? `${ref.fromYear}年${ref.fromMonth}月〜${ref.toMonth}月`
+    : `${ref.fromYear}年${ref.fromMonth}月〜${ref.toYear}年${ref.toMonth}月`;
+}
+
+function reportMatchesRangeRef(report, ref) {
+  if (!ref || isCrossMonthAggregateReport(report)) return false;
+  const ym = extractYearMonthFromText(report?.period || report?.title || '');
+  if (!ym) return false;
+  const fromKey = ref.fromYear * 12 + ref.fromMonth;
+  const toKey = ref.toYear * 12 + ref.toMonth;
+  const [lo, hi] = fromKey <= toKey ? [fromKey, toKey] : [toKey, fromKey];
+  const key = ym.year * 12 + ym.month;
+  return key >= lo && key <= hi;
 }
 
 /** 文中の日付参照（2026年7月15日 / 2026-07-15 / 7月15日 / 15日）を出現順に抽出する。
@@ -12425,6 +12441,32 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     }
   }
 
+  // 複数の連続期間を比較する質問
+  // 例:「2025年3月〜7月と2026年3月〜7月」。
+  // 単一rangeRefより先に処理し、最初の期間だけで早期returnしない。
+  const rangeRefs = extractAllRangeRefs(q);
+  if (rangeRefs.length >= 2) {
+    if (cloudLookupUnavailable) return unavailableCloudResult();
+    const periods = [];
+    const missingPeriods = [];
+    for (const ref of rangeRefs.slice(0, 4)) {
+      const label = rangeRefLabel(ref);
+      const matched = allReports.filter((report) => reportMatchesRangeRef(report, ref));
+      if (matched.length) {
+        const summary = await summarizeMatched(matched, `${label}の売上データ`);
+        if (summary?.loadError) return summary;
+        periods.push(summary);
+      } else {
+        missingPeriods.push(label);
+      }
+    }
+    if (periods.length >= 2) return { multiPeriod: true, periods, missingPeriods };
+    if (periods.length === 1) return { ...periods[0], missingPeriods };
+    return {
+      notMatchedLabel: `${missingPeriods.length ? missingPeriods.join('・') : '比較対象期間'}（比較に必要な保存データ）`
+    };
+  }
+
   // 期間範囲クエリ（例:「2026年1月から7月まで」「2025年4月から2026年3月まで」「2025年から2026年まで」）を検知。
   // 「から／〜／まで」は端点2か月ではなく、あいだの全月を含む連続期間。比較（と/、）とは別扱い。
   const rangeRef = extractRangeRef(q);
@@ -12807,6 +12849,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       drinkPct: Math.round((dTot / catTot) * 100),
       totalCustomers: cust,
       avgSpend: cust ? Math.round(totSales / cust) : 0,
+      monthCount: monthlyBreakdown.length,
+      monthlyAvgCustomers: monthlyBreakdown.length ? Math.round(cust / monthlyBreakdown.length) : 0,
       salesCount: count,
       sourceCount: use.length,
       monthlyBreakdown,
@@ -13304,6 +13348,7 @@ async function sendAiChat() {
   - フード売上: ${yen(p.foodTotal)} (${p.foodPct}%)
   - ドリンク売上: ${yen(p.drinkTotal)} (${p.drinkPct}%)
   - 総来店客数: ${p.totalCustomers}名 (平均客単価: ${yen(p.avgSpend)})
+  - 対象月数: ${p.monthCount || 0}か月 (月間平均来客数: ${p.monthlyAvgCustomers || 0}名)
   - 対象レポート件数: ${p.sourceCount}件${monthBlock}${formatVerifiedDetailLines(p, '  ')}
 ${(p.topProducts && p.topProducts.length) ? '  - 売れ筋商品TOP5:\n' + formatTopProductsLinesForAi(p.topProducts, 5, true).split('\n').map((line) => `    ${line}`).join('\n') : ''}
 ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信量上限）' : ''}${formatJournalSpecificFactsForAi(p, resolvedChatQuery, '  ')}`;
@@ -13336,6 +13381,7 @@ ${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 - フード売上: ${yen(verifiedData.foodTotal)} (${verifiedData.foodPct}%)
 - ドリンク売上: ${yen(verifiedData.drinkTotal)} (${verifiedData.drinkPct}%)
 - 総来店客数: ${verifiedData.totalCustomers}名 (平均客単価: ${yen(verifiedData.avgSpend)})
+- 対象月数: ${verifiedData.monthCount || 0}か月 (月間平均来客数: ${verifiedData.monthlyAvgCustomers || 0}名)
 - 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}${formatVerifiedDetailLines(verifiedData)}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? '- 売れ筋商品TOP5（★大分類除外・コースは合算）:\n' + formatTopProductsLinesForAi(verifiedData.topProducts, 5) : ''}
 ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
