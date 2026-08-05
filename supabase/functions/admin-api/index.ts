@@ -8634,8 +8634,24 @@ function parsePosProductSearchFilter(url: URL): PosProductSearchFilter {
     .map((t) => normalizePosProductSearchText(t))
     .filter((t) => t.length >= 1 && !/^\d+$/.test(t))
   const joinedQ = normalizePosProductSearchText(rawQ).replace(/\d+/g, "")
+  // code 未指定でも q が数字だけなら商品コード（下4桁）として扱う
+  let codeNorm = codeQ.replace(/\D/g, "")
+  if (!codeNorm) {
+    const qDigits = rawQ.replace(/\D/g, "")
+    if (
+      qDigits.length >= 4 &&
+      qDigits.length <= 13 &&
+      !/^20[0-3]\d$/.test(qDigits) &&
+      /^\d+$/.test(rawQ.replace(/[\s　]/g, ""))
+    ) {
+      codeNorm = qDigits.length > 4 ? qDigits.slice(-4) : qDigits
+    }
+  } else if (codeNorm.length > 4) {
+    // ゼロ埋めフルコードは下4桁でも照合できるよう末尾4桁を正本にする
+    codeNorm = codeNorm.slice(-4)
+  }
   if (
-    !tokens.length && !joinedQ && !codeQ &&
+    !tokens.length && !joinedQ && !codeNorm &&
     effectiveMin == null && effectiveMax == null
   ) {
     throw {
@@ -8645,10 +8661,10 @@ function parsePosProductSearchFilter(url: URL): PosProductSearchFilter {
   }
   return {
     rawQ,
-    codeQ,
+    codeQ: codeQ || codeNorm,
     tokens,
     joinedQ,
-    codeNorm: codeQ.replace(/\D/g, ""),
+    codeNorm,
     unitMin: effectiveMin,
     unitMax: effectiveMax,
   }
@@ -9679,8 +9695,22 @@ function filterFromProductSearchObject(value: unknown): PosProductSearchFilter {
     .map((t) => normalizePosProductSearchText(t))
     .filter((t) => t.length >= 1 && !/^\d+$/.test(t))
   const joinedQ = normalizePosProductSearchText(rawQ).replace(/\d+/g, "")
+  let codeNorm = codeQ.replace(/\D/g, "")
+  if (!codeNorm) {
+    const qDigits = rawQ.replace(/\D/g, "")
+    if (
+      qDigits.length >= 4 &&
+      qDigits.length <= 13 &&
+      !/^20[0-3]\d$/.test(qDigits) &&
+      /^\d+$/.test(rawQ.replace(/[\s　]/g, ""))
+    ) {
+      codeNorm = qDigits.length > 4 ? qDigits.slice(-4) : qDigits
+    }
+  } else if (codeNorm.length > 4) {
+    codeNorm = codeNorm.slice(-4)
+  }
   if (
-    !tokens.length && !joinedQ && !codeQ &&
+    !tokens.length && !joinedQ && !codeNorm &&
     effectiveMin == null && effectiveMax == null
   ) {
     throw {
@@ -9690,10 +9720,10 @@ function filterFromProductSearchObject(value: unknown): PosProductSearchFilter {
   }
   return {
     rawQ,
-    codeQ,
+    codeQ: codeQ || codeNorm,
     tokens,
     joinedQ,
-    codeNorm: codeQ.replace(/\D/g, ""),
+    codeNorm,
     unitMin: effectiveMin,
     unitMax: effectiveMax,
   }

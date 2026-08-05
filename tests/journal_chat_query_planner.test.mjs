@@ -66,6 +66,7 @@ for (const name of [
   'wantsItemBreakdown',
   'extractYenAmountsFromQuery',
   'extractNamedProductMentions',
+  'extractProductCodeHints',
   'extractProductSearchHints',
   'wantsProductTimelineSearch',
   'listTimelineSearchTargets',
@@ -503,6 +504,20 @@ test('brand monthly sales questions extract named products and trigger journal t
   assert.equal(context.wantsProductTimelineSearch(kinobi), true);
   assert.equal(
     context.extractNamedProductMentions('「季の美」の売れ行き').some((m) => m.q === '季の美'),
+    true,
+  );
+
+  // 商品コード下4桁でもジャーナル横断検索する
+  // vm コンテキストの配列は realm が違うため deepEqual せず中身を比較する
+  assert.deepEqual([...context.extractProductCodeHints('2103の売れ行きを月ごとに')], ['2103']);
+  assert.deepEqual([...context.extractProductCodeHints('コード下4桁 2103 の売上')], ['2103']);
+  assert.deepEqual([...context.extractProductCodeHints('商品コード:0000000002103の分析')], ['2103']);
+  assert.equal(context.extractProductCodeHints('2026年の売上').length, 0);
+  assert.equal(context.extractProductCodeHints('5500円コースの売れ行き').includes('5500'), false);
+  assert.equal(context.wantsProductTimelineSearch('2103の売れ行きを月ごとにまとめて'), true);
+  assert.equal(
+    context.listTimelineSearchTargets(context.extractProductSearchHints('下4桁2103の売上'))
+      .some((t) => t.code === '2103' && t.kind === 'code'),
     true,
   );
 });
