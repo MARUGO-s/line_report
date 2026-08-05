@@ -540,7 +540,16 @@ test('item-detail limits keep full-period totals and propagate detail hydration 
     /detailLimit\s*=\s*needsItemDetails\s*\?\s*36\s*:\s*12/,
     'item questions may hydrate up to 36 months, other detail lookups up to 12',
   );
-  assert.match(savedReportSearchSource, /productSources\s*=\s*wantsDetail\s*\?\s*detailHydrated\s*:\s*use/);
+  assert.match(
+    savedReportSearchSource,
+    /productSources\s*=\s*representativeReports\.length\s*\?\s*representativeReports\s*:\s*\(wantsDetail\s*\?\s*detailHydrated\s*:\s*use\)\.filter/,
+    'top products must use the same deduped representative reports as totals (exclude cross-month aggregates)',
+  );
+  assert.match(
+    savedReportSearchSource,
+    /if \(isCrossMonthAggregateReport\(r\)\) return false;[\s\S]{0,180}p\.includes\(ref\.key\)/,
+    'multi-month comparison must not match cross-month aggregate reports into a single month',
+  );
   assert.match(
     savedReportSearchSource,
     /resolveProductsForQuery\(mergedProducts, q, productLimit\)/,

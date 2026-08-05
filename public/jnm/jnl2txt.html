@@ -13566,7 +13566,12 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       }
     }
 
-    const productSources = wantsDetail ? detailHydrated : use;
+    // 売れ筋も合計・曜日別と同じく代表レポートだけから作る。
+    // use / detailHydrated には複数月合算が残ることがあり、2026-06 比較などで
+    // 総売上は単月なのに商品点数だけ合算分まで乗って桁違いになる。
+    const productSources = representativeReports.length
+      ? representativeReports
+      : (wantsDetail ? detailHydrated : use).filter((r) => !isCrossMonthAggregateReport(r));
     const mergedProducts = mergeProductLists(productSources.map(collectProductsFromReport));
     // 売上上位だけ先に切ると少額銘柄が落ちる。質問意図で絞ってから上限を適用する。
     // 「コース以外」はコース合算を入れない。ランキング要求件数も反映する。
@@ -13710,6 +13715,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     for (const ref of allMonthRefs.slice(0, 4)) {
       const targetJa = `${ref.year}年${parseInt(ref.month, 10)}月`;
       const matched = allReports.filter(r => {
+        // 範囲クエリと同様、合算は月指定比較の候補から除外する
+        if (isCrossMonthAggregateReport(r)) return false;
         const p = String(r.period || r.title || '');
         return p.includes(ref.key) || p.includes(targetJa) || (p.includes(ref.year) && p.includes(`${parseInt(ref.month, 10)}月`));
       });
@@ -13763,6 +13770,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const targetKey = `${year}-${month}`;
     const targetJa = `${year}年${parseInt(month, 10)}月`;
     const matched = allReports.filter(r => {
+      if (isCrossMonthAggregateReport(r)) return false;
       const p = String(r.period || r.title || '');
       return p.includes(targetKey) || p.includes(targetJa) || (p.includes(year) && p.includes(`${parseInt(month, 10)}月`));
     });
