@@ -63,6 +63,8 @@ for (const name of [
   'countRecentClarificationsByKind',
   'countRecentIntentClarifications',
   'shouldAskAiIntentClarification',
+  'shouldAskPeriodClarification',
+  'stripInventedPeriodScopeFromQuery',
   'buildAiIntentClarificationReply',
   'buildSavedDataNaturalClarificationReply',
   'normalizeAiClarificationText',
@@ -205,6 +207,10 @@ test('latest, recent, and all-period intents select only the required reports', 
     ['202605', '202606', '202607'],
   );
   assert.deepEqual(
+    [...context.resolveIndexedSavedRangeIntent('直近数か月の推移', reports).matched].map(x => x.id),
+    ['202605', '202606', '202607'],
+  );
+  assert.deepEqual(
     [...context.resolveIndexedSavedRangeIntent('保存済み全期間を分析', reports).matched].map(x => x.id),
     ['202405', '202605', '202606', '202607'],
   );
@@ -224,9 +230,37 @@ test('a numeric reply to the clarification question becomes a searchable range i
     content: context.buildSavedDataClarificationReply(context.buildSavedReportCoverage(reports)),
   }];
   assert.match(context.resolveSavedDataClarificationReply('1', history), /^最新月/);
-  assert.match(context.resolveSavedDataClarificationReply('2 売上推移', history), /^直近3か月/);
+  assert.match(context.resolveSavedDataClarificationReply('2 売上推移', history), /^直近数か月/);
+  assert.match(context.resolveSavedDataClarificationReply('3', history), /^全期間/);
   assert.match(context.resolveSavedDataClarificationReply('4', history), /^全期間/);
   assert.match(context.resolveSavedDataClarificationReply('全ての月を対象にしてください', history), /保存済み全期間$/);
+});
+
+test('period clarification is required when no period is specified', () => {
+  assert.equal(context.shouldAskPeriodClarification('全体の売り上げを伸ばす成長戦略を提案して', []), true);
+  assert.equal(context.shouldAskPeriodClarification('客単価の推移を教えて', []), true);
+  assert.equal(context.shouldAskPeriodClarification('最新月の売上推移を見せて', []), false);
+  assert.equal(context.shouldAskPeriodClarification('直近数か月の売上を分析して', []), false);
+  assert.equal(context.shouldAskPeriodClarification('保存済み全期間で分析して', []), false);
+  assert.equal(context.shouldAskPeriodClarification('2026年7月の売上は？', []), false);
+  assert.equal(context.shouldAskPeriodClarification('サッポロ赤星はいつから？', []), false);
+  const afterAnswer = [
+    { role: 'user', content: '最新月の売上推移を見せて' },
+    { role: 'assistant', content: '### 総評\n7月の売上は…' },
+  ];
+  assert.equal(context.shouldAskPeriodClarification('ではドリンク比率は？', afterAnswer), false);
+  const stripped = context.stripInventedPeriodScopeFromQuery(
+    '全体の売り上げを伸ばす成長戦略を提案して 保存済み最新月を対象に全体分析',
+  );
+  assert.equal(context.mentionsExplicitPeriod(stripped), false);
+  assert.match(stripped, /成長戦略/);
+  assert.match(
+    context.buildSavedDataNaturalClarificationReply('戦略を提案して', context.buildSavedReportCoverage(reports)),
+    /最新月、直近数か月、全期間/,
+  );
+  assert.match(html, /\['最新月',\s*'直近数か月',\s*'全期間'\]/);
+  assert.match(html, /shouldAskPeriodClarification\(/);
+  assert.match(aiAnalyzeSource, /最新月／直近数か月／全期間/);
 });
 
 test('ambiguous questions ask for an analysis focus before loading detailed data', () => {

@@ -12441,8 +12441,9 @@ function resolveSavedDataClarificationReply(query, chatHistory) {
   if (corrected) return corrected;
   let selected = resolveNaturalClarificationChoice(raw, assistantItem) || raw;
   if (/^1(?:$|[.、)\s])/.test(raw)) selected = `最新月 ${raw}`;
-  if (/^2(?:$|[.、)\s])/.test(raw)) selected = `直近3か月 ${raw}`;
-  if (/^3(?:$|[.、)\s])/.test(raw)) selected = `直近12か月 ${raw}`;
+  if (/^2(?:$|[.、)\s])/.test(raw)) selected = `直近数か月 ${raw}`;
+  if (/^3(?:$|[.、)\s])/.test(raw)) selected = `全期間 ${raw}`;
+  // 旧4択UI互換（直近12か月 / 全期間）
   if (/^4(?:$|[.、)\s])/.test(raw)) selected = `全期間 ${raw}`;
   if (/^(?:半年|1年|一年|\d{1,2}\s*(?:か月|ヶ月|ケ月|カ月))(?:$|[.、)\s])/.test(raw)) {
     selected = `直近${raw}`;
@@ -12580,6 +12581,39 @@ function mentionsExplicitPeriod(query) {
       .test(String(query || ''));
 }
 
+/** AIが intent ready で勝手に足した期間表現を除去し、期間確認へ回す */
+function stripInventedPeriodScopeFromQuery(query) {
+  return String(query || '')
+    .replace(/保存済み(?:最新月|全期間|直近\s*\d{1,2}\s*(?:か月|ヶ月|ケ月|カ月))/g, ' ')
+    .replace(/(?:最新|一番新しい|直近の?月|最後の月)/g, ' ')
+    .replace(/(?:直近|過去)\s*(?:\d{1,2}|数)?\s*(?:か月|ヶ月|ケ月|カ月)/g, ' ')
+    .replace(/(?:直近|過去)\s*(?:半年|6か月|6ヶ月|1年|一年|12か月|12ヶ月)/g, ' ')
+    .replace(/(?:保存|登録)(?:済み)?(?:の)?(?:全期間|全データ|全月)|全期間|全データ|全月/g, ' ')
+    .replace(/\d{4}\s*年(?:\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)?|\d{4}[\/_\.-]\d{1,2}(?:[\/_\.-]\d{1,2})?/g, ' ')
+    .replace(/(?:今年|去年|昨年|一昨年|今月|先月|前月|前年同月|来月)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 期間未指定なら最新月／直近数か月／全期間を必ず確認する。
+ * 銘柄初出など期間不要の照会、および回答成立後の続き質問は対象外。
+ */
+function shouldAskPeriodClarification(query, chatHistory, ownQuery = query) {
+  // 銘柄・コードの導入／初出照会はジャーナル横断のため期間確認しない
+  if (
+    wantsProductTimelineSearch(query)
+    && /(導入|開始|いつから|初出|出始め|登場|入れ始め|追加した|追加され|発売|運用開始)/.test(String(query || ''))
+  ) {
+    return false;
+  }
+  if (mentionsExplicitPeriod(query) || mentionsExplicitPeriod(ownQuery)) return false;
+  if (countRecentClarificationsByKind(chatHistory, 'period') >= 2) return false;
+  // 一度データ回答が成立したあとの続き（「ではドリンクは？」）は期間を引き継ぐ
+  if (hasAnsweredDataContext(chatHistory)) return false;
+  return true;
+}
+
 function shouldAskAiIntentClarification(query, chatHistory, ownQuery = query) {
   if (!needsAiIntentClarification(query)) return false;
   // 一度回答が成立したあとに「6月は？」「15日はどうだった？」と期間だけ言い換えた発話は、
@@ -12612,9 +12646,9 @@ function buildSavedDataNaturalClarificationReply(userMsg = '', coverage) {
     ? `${formatCoverageMonth(coverage.first)}から${formatCoverageMonth(coverage.last)}`
     : '保存済みの期間';
   if (/比較|推移|変化|トレンド/.test(q)) {
-    return `${range}まで確認できます。直近の変化を見たいですか、それとも比べたい月や期間が決まっていますか？`;
+    return `${range}まで確認できます。最新月、直近数か月、全期間のどれで見ますか？`;
   }
-  return `${range}まで保存されています。最新月を見るか、直近数か月の流れを見るか、特定の月を指定するか、どれがいちばん近いですか？`;
+  return `${range}まで保存されています。最新月、直近数か月、全期間のどれで分析しますか？`;
 }
 
 function normalizeAiClarificationText(text) {
@@ -12631,7 +12665,7 @@ async function requestNaturalIntentClarification(userMsg, chatHistory, coverage,
     ? buildSavedDataNaturalClarificationReply(userMsg, coverage)
     : buildAiIntentClarificationReply(userMsg);
   const fallbackChoices = missingKind === 'period'
-    ? ['最新月', '直近3か月', '特定の月']
+    ? ['最新月', '直近数か月', '全期間']
     : /比較|比べ/.test(String(userMsg || ''))
       ? ['前月との比較', '前年同月との比較']
       : /売上|売り上げ|実績/.test(String(userMsg || ''))
@@ -12688,23 +12722,36 @@ async function requestNaturalIntentClarification(userMsg, chatHistory, coverage,
     const userHasPeriodEvidence = hasAllSavedPeriodIntent(userContext, true)
       || /(?:\d{4}\s*年(?:\s*\d{1,2}\s*月)?|\d{4}[\/_\.-]\d{1,2}|\d{6}|今年|去年|昨年|一昨年|前年|前月|先月|今月|来月|最新|直近|過去|\d{1,2}\s*(?:か月|ヶ月|ケ月|カ月)|\d{1,2}\s*月)/.test(userContext);
     const periodIsSafe = missingKind !== 'period' || acceptsDefault || userHasPeriodEvidence;
-    if (resolvedQuery && (hasExistingClarification || acceptsDefault) && scopeIsSafe && periodIsSafe) {
+    // intent ready で AI が期間を捏造した場合は落とす（次段で最新月／直近数か月／全期間を必ず聞く）
+    let safeResolvedQuery = resolvedQuery;
+    if (
+      missingKind === 'intent'
+      && safeResolvedQuery
+      && mentionsExplicitPeriod(safeResolvedQuery)
+      && !userHasPeriodEvidence
+      && !acceptsDefault
+    ) {
+      safeResolvedQuery = stripInventedPeriodScopeFromQuery(safeResolvedQuery);
+    }
+    if (safeResolvedQuery && (hasExistingClarification || acceptsDefault) && scopeIsSafe && periodIsSafe) {
       return {
         status: 'ready',
-        resolvedQuery,
+        resolvedQuery: safeResolvedQuery,
         provider: result.provider || result.model || 'ai-intent-clarifier'
       };
     }
     const natural = res.ok ? normalizeAiClarificationText(result.question || result.text) : '';
     if (natural) {
-      const choices = Array.isArray(result.choices)
-        ? result.choices.map(x => String(x || '').trim().slice(0, 80)).filter(Boolean).slice(0, 3)
-        : [];
+      const choices = missingKind === 'period'
+        ? fallbackChoices
+        : (Array.isArray(result.choices)
+          ? result.choices.map(x => String(x || '').trim().slice(0, 80)).filter(Boolean).slice(0, 3)
+          : []);
       return {
         status: 'clarify',
         text: natural,
         provider: result.provider || result.model || 'ai-intent-clarifier',
-        choices
+        choices: choices.length ? choices : fallbackChoices
       };
     }
   } catch (err) {
@@ -12754,6 +12801,7 @@ function resolveIndexedSavedRangeIntent(query, reports) {
     if (recent) count = Math.max(1, Math.min(36, parseInt(recent[1], 10)));
     else if (/(直近|過去)\s*(?:半年|6か月|6ヶ月)/.test(q)) count = 6;
     else if (/(直近|過去)\s*(?:1年|一年|12か月|12ヶ月)/.test(q)) count = 12;
+    if (!count && /直近数(?:か|ヶ|ケ|カ)?月/.test(q)) count = 3;
     if (count) {
       selectedKeys = coverage.keys.slice(-count);
       const first = selectedKeys[0];
@@ -12782,9 +12830,8 @@ function buildSavedDataClarificationReply(coverage) {
 保存済みレポートには **${range}** があります。必要な範囲だけを読み込んで分析するため、次のどれかを選んでください。
 
 1. **最新月**
-2. **直近3か月**
-3. **直近12か月**
-4. **保存済み全期間**
+2. **直近数か月**
+3. **保存済み全期間**
 
 または「2025年」「2025年4月〜2026年3月」のように期間を指定してください。続けて、売上推移・フード／ドリンク比率・客単価・売れ筋・改善策など、知りたい内容も入力できます。`;
 }
@@ -12853,6 +12900,18 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   }
   const savedCoverage = buildSavedReportCoverage(allReports);
   q = resolveComparisonTimeRefs(q, savedCoverage.last);
+
+  // 期間未指定なら最新月／直近数か月／全期間を必ず確認（現行レポートがあっても黙って最新月にしない）
+  if (
+    shouldAskPeriodClarification(q, chatHistory, ownQuery)
+    && (reports.length > 0 || currentReportHasUsableSales())
+  ) {
+    return {
+      needsClarification: true,
+      coverage: savedCoverage,
+      reportIndex: allReports
+    };
+  }
 
   // 日単位クエリ（例:「2026年7月15日の売上」「今日」「先週」「7月1日〜7日」）を先に処理する。
   // 月単位へ丸めると「7月15日」の質問に7月全体の数字を返してしまうため、日付が特定できる場合はここで確定させる。
@@ -13867,7 +13926,7 @@ async function sendAiChat() {
       ? buildSavedDataNaturalClarificationReply(resolvedChatQuery, queryResult.coverage)
       : buildAiIntentClarificationReply(resolvedChatQuery);
     const clarificationChoices = missingKind === 'period'
-      ? ['最新月', '直近3か月', '特定の月']
+      ? ['最新月', '直近数か月', '全期間']
       : /比較|比べ/.test(resolvedChatQuery)
         ? ['前月との比較', '前年同月との比較']
         : ['数字の現状', '変化した理由', '改善策'];
