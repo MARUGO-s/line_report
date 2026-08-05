@@ -148,6 +148,13 @@ import {
   scanRowsByAscendingId,
   type AscendingIdScanResult,
 } from "../_shared/paged_row_scan.ts"
+import {
+  aggregateJournalProductMonthlyRows,
+  extractProductLinesFromParsedDay,
+  indexRowMatchesProductFilter,
+  normalizePosProductSearchText as normalizePosProductSearchTextShared,
+  type JournalProductLineItem,
+} from "../_shared/journal_product_index.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
 
@@ -1228,6 +1235,7 @@ Deno.serve(async (req, info) => {
       "/pos-journals/product-search",
       "/pos-journals/product-cohort",
       "/pos-journals/cohort-compare",
+      "/pos-journals/product-index/rebuild",
       "/pos-journals/upload",
       "/pos-journals/file",
       "/pos-journals/download",
@@ -1452,6 +1460,13 @@ Deno.serve(async (req, info) => {
     }
     if (req.method === "GET" && path === "/pos-journals/product-search") {
       return json(await searchPosJournalProducts(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/product-index/rebuild") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await rebuildJournalProductMonthlyIndex(supabase, body, storeScope), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/product-cohort") {
       return json(await comparePosJournalProductCohorts(supabase, url), 200)
@@ -8586,14 +8601,7 @@ async function fetchPosJournalState(
 
 /** POS商品名を半角カナ混在でも照合できるよう正規化する */
 function normalizePosProductSearchText(value: unknown): string {
-  return String(value ?? "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[ーｰ‐‑–—−]/g, "-")
-    .replace(/コース/g, "コ-ス")
-    .replace(/スペシャル/g, "sp")
-    .replace(/[\s　]+/g, "")
-    .replace(/[ﾞﾟ]/g, "")
+  return normalizePosProductSearchTextShared(value)
 }
 
 function parseOptionalNonNegativeInt(value: unknown): number | null {
@@ -8773,9 +8781,435 @@ async function scanPosJournalParsedRows(
   }
 }
 
+async function rebuildJournalProductIndexMonth(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  yearMonth: string,
+): Promise<{ year_month: string; rows: number }> {
+  const month = String(yearMonth || "").trim()
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw { status: 400, message: "year_month must be YYYY-MM." } satisfies AppError
+  }
+  const lines: JournalProductLineItem[] = []
+  await scanPosJournalParsedRows(
+    supabase,
+    {
+      storeKey,
+      monthFrom: month,
+      monthTo: month,
+      errorLabel: "商品インデックス再構築用ジャーナルの取得に失敗しました",
+    },
+    (rows) => {
+      for (const row of rows) {
+        if (!isRecord(row)) continue
+        const businessDate = String(row.business_date ?? "").slice(0, 10)
+        const ym = String(row.year_month ?? businessDate.slice(0, 7))
+        lines.push(
+          ...extractProductLinesFromParsedDay(row.parsed_data, businessDate, ym),
+        )
+      }
+    },
+  )
+  const aggregated = aggregateJournalProductMonthlyRows(storeKey, lines)
+  const { error: deleteError } = await supabase
+    .from("journal_product_monthly_index")
+    .delete()
+    .eq("store_partition_key", storeKey)
+    .eq("year_month", month)
+  if (deleteError) {
+    throw {
+      status: 500,
+      message: `商品インデックスのクリアに失敗しました: ${deleteError.message}`,
+    } satisfies AppError
+  }
+  if (aggregated.length) {
+    const { error: upsertError } = await supabase
+      .from("journal_product_monthly_index")
+      .upsert(aggregated, {
+        onConflict: "store_partition_key,year_month,product_name_norm,unit_price",
+      })
+    if (upsertError) {
+      throw {
+        status: 500,
+        message: `商品インデックスの保存に失敗しました: ${upsertError.message}`,
+      } satisfies AppError
+    }
+  }
+  await supabase
+    .from("journal_product_index_dirty_months")
+    .delete()
+    .eq("store_partition_key", storeKey)
+    .eq("year_month", month)
+  return { year_month: month, rows: aggregated.length }
+}
+
+async function rebuildJournalProductMonthlyIndex(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key || body.store)
+  const storeKey = normalizePosJournalStoreKey(storeScope || requestedStore)
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw {
+      status: 403,
+      message: "他店舗のデータにはアクセスできません。",
+    } satisfies AppError
+  }
+
+  const forceFull = body.force_full === true || body.force_full === "true"
+  const months = new Set<string>()
+  const explicitMonth = parseOptionalYearMonthParam(body.year_month || body.month, "year_month")
+  if (explicitMonth) months.add(explicitMonth)
+
+  if (!months.size && !forceFull) {
+    const { data: dirty, error: dirtyError } = await supabase
+      .from("journal_product_index_dirty_months")
+      .select("year_month")
+      .eq("store_partition_key", storeKey)
+      .order("year_month", { ascending: true })
+      .limit(120)
+    if (dirtyError) {
+      throw {
+        status: 500,
+        message: `dirty月の取得に失敗しました: ${dirtyError.message}`,
+      } satisfies AppError
+    }
+    for (const row of dirty || []) {
+      const ym = String((row as { year_month?: string }).year_month || "")
+      if (/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) months.add(ym)
+    }
+  }
+
+  if (!months.size || forceFull) {
+    await scanPosJournalParsedRows(
+      supabase,
+      {
+        storeKey,
+        errorLabel: "商品インデックス対象月の列挙に失敗しました",
+      },
+      (rows) => {
+        for (const row of rows) {
+          const businessDate = String(row.business_date ?? "").slice(0, 10)
+          const ym = String(row.year_month ?? businessDate.slice(0, 7))
+          if (/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) months.add(ym)
+        }
+      },
+    )
+  }
+
+  const rebuilt: Array<{ year_month: string; rows: number }> = []
+  for (const month of [...months].sort()) {
+    rebuilt.push(await rebuildJournalProductIndexMonth(supabase, storeKey, month))
+  }
+  return {
+    ok: true,
+    store_key: storeKey,
+    force_full: forceFull,
+    rebuilt_months: rebuilt.length,
+    results: rebuilt,
+  }
+}
+
+async function ensureJournalProductIndexMonths(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  yearMonths: Iterable<string>,
+): Promise<void> {
+  const targets = [...new Set(
+    [...yearMonths].filter((ym) => /^\d{4}-(0[1-9]|1[0-2])$/.test(ym)),
+  )]
+  for (const month of targets) {
+    try {
+      await rebuildJournalProductIndexMonth(supabase, storeKey, month)
+    } catch (err) {
+      console.warn("journal product index rebuild failed:", storeKey, month, err)
+    }
+  }
+}
+
+async function storeHasJournalProductIndex(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("journal_product_monthly_index")
+    .select("id", { count: "exact", head: true })
+    .eq("store_partition_key", storeKey)
+  if (error) {
+    console.warn("journal product index count failed:", error.message)
+    return false
+  }
+  return (count || 0) > 0
+}
+
+async function searchPosJournalProductsFromIndex(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  filter: PosProductSearchFilter,
+) {
+  type IndexHit = {
+    year_month: string
+    display_name: string
+    product_code: string
+    unit_price: number
+    qty: number
+    amount: number
+    day_count: number
+    first_date: string | null
+    last_date: string | null
+    product_name_norm: string
+  }
+  const hits: IndexHit[] = []
+  const primaryToken = [...filter.tokens]
+    .sort((a, b) => b.length - a.length)[0] || filter.joinedQ
+
+  let afterId = 0
+  for (let page = 0; page < 200; page++) {
+    let query = supabase
+      .from("journal_product_monthly_index")
+      .select(
+        "id, year_month, product_name_norm, display_name, product_code, unit_price, qty, amount, day_count, first_date, last_date",
+      )
+      .eq("store_partition_key", storeKey)
+      .gt("id", afterId)
+      .order("id", { ascending: true })
+      .limit(500)
+    if (filter.unitMin != null) query = query.gte("unit_price", filter.unitMin)
+    if (filter.unitMax != null) query = query.lte("unit_price", filter.unitMax)
+    if (filter.codeNorm) {
+      query = query.ilike("product_code", `%${filter.codeNorm}%`)
+    }
+    if (primaryToken) {
+      query = query.ilike("product_name_norm", `%${primaryToken}%`)
+    }
+    const { data, error } = await query
+    if (error) {
+      throw {
+        status: 500,
+        message: `商品インデックス検索に失敗しました: ${error.message}`,
+      } satisfies AppError
+    }
+    const rows = Array.isArray(data) ? data : []
+    if (!rows.length) break
+    for (const row of rows) {
+      if (!isRecord(row)) continue
+      afterId = Math.max(afterId, toNonNegativeInteger(row.id))
+      const candidate = {
+        product_name_norm: String(row.product_name_norm || ""),
+        product_code: String(row.product_code || ""),
+        unit_price: toNonNegativeInteger(row.unit_price),
+      }
+      if (!indexRowMatchesProductFilter(candidate, filter)) continue
+      hits.push({
+        year_month: String(row.year_month || ""),
+        display_name: String(row.display_name || ""),
+        product_code: candidate.product_code,
+        unit_price: candidate.unit_price,
+        qty: toNonNegativeInteger(row.qty),
+        amount: toNonNegativeInteger(row.amount),
+        day_count: toNonNegativeInteger(row.day_count),
+        first_date: row.first_date == null ? null : String(row.first_date).slice(0, 10),
+        last_date: row.last_date == null ? null : String(row.last_date).slice(0, 10),
+        product_name_norm: candidate.product_name_norm,
+      })
+    }
+    if (rows.length < 500) break
+  }
+
+  hits.sort((a, b) =>
+    String(a.first_date || a.year_month).localeCompare(String(b.first_date || b.year_month)) ||
+    a.year_month.localeCompare(b.year_month) ||
+    a.unit_price - b.unit_price
+  )
+
+  const byMonthMap = new Map<string, {
+    year_month: string
+    qty: number
+    amount: number
+    day_count: number
+    names: Map<string, number>
+    codes: Map<string, number>
+    units: Map<number, number>
+  }>()
+  const unitBandMap = new Map<number, {
+    unit: number
+    qty: number
+    amount: number
+    first_month: string
+    last_month: string
+    first_date: string
+    last_date: string
+  }>()
+  const variantMap = new Map<string, {
+    name: string
+    code: string
+    unit: number
+    qty: number
+    amount: number
+    first_month: string
+    last_month: string
+    first_date: string
+    last_date: string
+    day_count: number
+  }>()
+
+  for (const hit of hits) {
+    let month = byMonthMap.get(hit.year_month)
+    if (!month) {
+      month = {
+        year_month: hit.year_month,
+        qty: 0,
+        amount: 0,
+        day_count: 0,
+        names: new Map(),
+        codes: new Map(),
+        units: new Map(),
+      }
+      byMonthMap.set(hit.year_month, month)
+    }
+    month.qty += hit.qty
+    month.amount += hit.amount
+    month.day_count += hit.day_count
+    month.names.set(hit.display_name, (month.names.get(hit.display_name) || 0) + hit.qty)
+    if (hit.product_code) {
+      month.codes.set(hit.product_code, (month.codes.get(hit.product_code) || 0) + hit.qty)
+    }
+    month.units.set(hit.unit_price, (month.units.get(hit.unit_price) || 0) + hit.qty)
+
+    const firstDate = hit.first_date || `${hit.year_month}-01`
+    const lastDate = hit.last_date || firstDate
+    let band = unitBandMap.get(hit.unit_price)
+    if (!band) {
+      band = {
+        unit: hit.unit_price,
+        qty: 0,
+        amount: 0,
+        first_month: hit.year_month,
+        last_month: hit.year_month,
+        first_date: firstDate,
+        last_date: lastDate,
+      }
+      unitBandMap.set(hit.unit_price, band)
+    }
+    band.qty += hit.qty
+    band.amount += hit.amount
+    if (firstDate < band.first_date) {
+      band.first_date = firstDate
+      band.first_month = hit.year_month
+    }
+    if (lastDate > band.last_date) {
+      band.last_date = lastDate
+      band.last_month = hit.year_month
+    }
+
+    const variantKey = `${hit.display_name}|${hit.unit_price}|${hit.product_code}`
+    let variant = variantMap.get(variantKey)
+    if (!variant) {
+      variant = {
+        name: hit.display_name,
+        code: hit.product_code,
+        unit: hit.unit_price,
+        qty: 0,
+        amount: 0,
+        first_month: hit.year_month,
+        last_month: hit.year_month,
+        first_date: firstDate,
+        last_date: lastDate,
+        day_count: 0,
+      }
+      variantMap.set(variantKey, variant)
+    }
+    variant.qty += hit.qty
+    variant.amount += hit.amount
+    variant.day_count += hit.day_count
+    if (firstDate < variant.first_date) {
+      variant.first_date = firstDate
+      variant.first_month = hit.year_month
+    }
+    if (lastDate > variant.last_date) {
+      variant.last_date = lastDate
+      variant.last_month = hit.year_month
+    }
+  }
+
+  const byMonth = [...byMonthMap.values()]
+    .sort((a, b) => a.year_month.localeCompare(b.year_month))
+    .map((m) => ({
+      year_month: m.year_month,
+      qty: m.qty,
+      amount: m.amount,
+      day_count: m.day_count,
+      names: [...m.names.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([name, qty]) => ({ name, qty })),
+      codes: [...m.codes.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([code, qty]) => ({ code, qty })),
+      units: [...m.units.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([unit, qty]) => ({ unit, qty })),
+    }))
+
+  const first = hits[0] || null
+  const last = hits.length ? hits[hits.length - 1] : null
+  const nameVariants = [...new Set(hits.map((h) => h.display_name))].slice(0, 20)
+
+  return {
+    ok: true,
+    store_key: storeKey,
+    source: "monthly_index" as const,
+    query: {
+      q: filter.rawQ,
+      code: filter.codeQ,
+      unit_min: filter.unitMin,
+      unit_max: filter.unitMax,
+    },
+    scanned_files: 0,
+    match_count: hits.reduce((s, h) => s + h.day_count, 0) || hits.length,
+    total_qty: hits.reduce((s, h) => s + h.qty, 0),
+    total_amount: hits.reduce((s, h) => s + h.amount, 0),
+    first_seen: first
+      ? {
+        business_date: first.first_date || `${first.year_month}-01`,
+        year_month: first.year_month,
+        name: first.display_name,
+        code: first.product_code,
+        unit: first.unit_price,
+        amount: first.amount,
+      }
+      : null,
+    last_seen: last
+      ? {
+        business_date: last.last_date || last.first_date || `${last.year_month}-01`,
+        year_month: last.year_month,
+        name: last.display_name,
+        code: last.product_code,
+        unit: last.unit_price,
+        amount: last.amount,
+      }
+      : null,
+    name_variants: nameVariants,
+    unit_bands: [...unitBandMap.values()]
+      .sort((a, b) => b.qty - a.qty || a.unit - b.unit),
+    variants: [...variantMap.values()]
+      .sort((a, b) => b.amount - a.amount || b.qty - a.qty)
+      .slice(0, 40),
+    by_month: byMonth,
+  }
+}
+
 /**
  * 店舗の全電子ジャーナル（parsed_data）を横断し、商品名・コード・単価帯の初出月を返す。
- * 「いつから売れたか／導入月」は保存レポートに無くてもジャーナルから逆算できる。
+ * 月次インデックスがあればそれを使い、未構築時のみフルスキャンへフォールバックする。
  */
 async function searchPosJournalProducts(
   supabase: ReturnType<typeof createClient>,
@@ -8785,6 +9219,12 @@ async function searchPosJournalProducts(
     url.searchParams.get("store_key") || url.searchParams.get("store"),
   )
   const filter = parsePosProductSearchFilter(url)
+  const forceLive = url.searchParams.get("live") === "1" ||
+    url.searchParams.get("source") === "live"
+
+  if (!forceLive && await storeHasJournalProductIndex(supabase, storeKey)) {
+    return await searchPosJournalProductsFromIndex(supabase, storeKey, filter)
+  }
 
   type Hit = {
     file_id: number
@@ -8984,6 +9424,7 @@ async function searchPosJournalProducts(
   return {
     ok: true,
     store_key: storeKey,
+    source: "live_scan" as const,
     query: {
       q: filter.rawQ,
       code: filter.codeQ,
@@ -9892,6 +10333,13 @@ async function uploadPosJournalFiles(
         error: error instanceof Error ? error.message : String(error),
       })
     }
+  }
+  // 保存成功分の年月を商品インデックスへ即反映（dirty トリガーのバックフィルも兼ねる）
+  if (successes.length) {
+    const months = successes.map((row) =>
+      String(row.year_month || String(row.business_date || "").slice(0, 7))
+    )
+    await ensureJournalProductIndexMonths(supabase, storeKey, months)
   }
   return {
     ok: failures.length === 0,
@@ -12687,6 +13135,10 @@ async function deletePosJournalFile(
       message:
         `原本は削除済みです。保管テーブルの行削除に失敗しましたが、画面と集計からは除外されています: ${deleteError.message}`,
     } satisfies AppError
+  }
+  const deletedMonth = String(row.business_date ?? "").slice(0, 7)
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(deletedMonth)) {
+    await ensureJournalProductIndexMonths(supabase, storeKey, [deletedMonth])
   }
   return {
     ok: true,

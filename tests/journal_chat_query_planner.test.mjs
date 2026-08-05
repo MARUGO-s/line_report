@@ -64,6 +64,11 @@ for (const name of [
   'buildSavedDataNaturalClarificationReply',
   'normalizeAiClarificationText',
   'wantsItemBreakdown',
+  'extractYenAmountsFromQuery',
+  'extractNamedProductMentions',
+  'extractProductSearchHints',
+  'wantsProductTimelineSearch',
+  'listTimelineSearchTargets',
   'collectProductsFromReport',
   'isCourseProductName',
   'productMatchesRequestedIntent',
@@ -471,6 +476,26 @@ test('item-detail limits keep full-period totals and propagate detail hydration 
     'specific low-selling bottle/course items must be filtered before applying the result limit',
   );
   assert.match(savedReportSearchSource, /if \(hydrationFailed\) return unavailableCloudResult\(\)/);
+});
+
+test('brand monthly sales questions extract named products and trigger journal timeline search', () => {
+  const q = '2026年のサッポロ赤星の売れ行きを月ごとにまとめて';
+  const named = context.extractNamedProductMentions(q);
+  assert.equal(named.some((m) => m.q === 'サッポロ赤星'), true);
+  assert.equal(context.wantsProductTimelineSearch(q), true);
+  assert.equal(context.wantsItemBreakdown(q), true);
+  const targets = context.listTimelineSearchTargets(context.extractProductSearchHints(q));
+  assert.equal(targets.some((t) => t.q === 'サッポロ赤星' && t.role === 'mentioned'), true);
+
+  // 店舗固有名ではなく、カタカナ銘柄＋売れ行き語なら同様に拾う（ドライゼロ等）
+  const dry = 'ドライゼロは何本売れた？';
+  assert.equal(context.extractNamedProductMentions(dry).some((m) => m.q === 'ドライゼロ'), true);
+  assert.equal(context.wantsProductTimelineSearch(dry), true);
+  assert.equal(
+    context.listTimelineSearchTargets(context.extractProductSearchHints('ドライゼロの月別売上'))
+      .some((t) => t.q === 'ドライゼロ'),
+    true,
+  );
 });
 
 test('bottle and course questions load exact journal items without double counting summaries', () => {
