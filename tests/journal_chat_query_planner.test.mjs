@@ -609,14 +609,14 @@ test('bottle and course questions load exact journal items without double counti
   assert.deepEqual([...selected].map(row => row.name).sort(), ['Bottle Wine', 'コース６品']);
 
   const excludeCourse = context.resolveProductsForQuery(products, 'コース以外のメニューのランキング１０位まで', 10);
-  assert.deepEqual(excludeCourse.map(row => row.name), ['Bottle Wine', 'Glass Wine']);
+  assert.deepEqual([...excludeCourse].map(row => row.name), ['Bottle Wine', 'Glass Wine']);
   assert.equal(context.wantsExcludeCourseProducts('コース以外のメニューのランキング１０位まで'), true);
   assert.equal(context.requestedRankingLimit('ランキング１０位まで'), 10);
   assert.equal(context.productMatchesRequestedIntent('コース６品', 'コース以外のメニュー'), false);
   assert.equal(context.productMatchesRequestedIntent('Bottle Wine', 'コース以外のメニュー'), true);
   // 「コース」単独はコース商品のみ。除外語が無い場合の従来動作を維持する。
   assert.deepEqual(
-    context.selectRequestedProductsForQuery(products, 'コースの売上', 20).map(row => row.name),
+    [...context.selectRequestedProductsForQuery(products, 'コースの売上', 20)].map(row => row.name),
     ['コース６品'],
   );
   const withCourseAggregate = context.rankProductsForAiDisplay(products, 10);
