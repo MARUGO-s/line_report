@@ -43,6 +43,7 @@
 | [ROOM-PERMISSION-TEST-CHECKLIST.md](./ROOM-PERMISSION-TEST-CHECKLIST.md) | QA | 権限・Webhook 設定の動作確認 |
 | [LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md) | 運用・開発 | レシート OCR・店舗 Webhook・保存フロー |
 | [JOURNAL-STORE-KNOWLEDGE.md](./JOURNAL-STORE-KNOWLEDGE.md) | 運用・開発 | Journal Report「資料」タブ — 施策・メニュー資料の登録とAI分析への注入（期間一致で必ず添付／数値の正本は確定集計） |
+| [JOURNAL-AI-CHAT-RULES.md](./JOURNAL-AI-CHAT-RULES.md) | 運用・開発・AI | Journal Report AIチャットの決まりごと — 確定集計の追加原則、銘柄／商品コード下4桁、西暦誤認禁止、プロンプト規約、API |
 | [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md) | 運用・開発 | Gmail 予約 → LINE（**会話検索とは別**） |
 | [スプレッドシート売上バックアップ-GAS.md](./スプレッドシート売上バックアップ-GAS.md) | 運用・開発 | 全店舗売上スプレッドシートの毎日バックアップ（GAS・6時同期後に日付名コピー）。コード＋トリガー手順＋確定構成 |
 | [フードコートAI学習・自己進化システム_完全設計書.md](./フードコートAI学習・自己進化システム_完全設計書.md) | **説明・開発・運用** | **2026-07-16時点の正本** — データ収集、売上分析セグメント、予測モデル、複数AI、品質ループ、RAG・蒸留、必要データ量、完全自己進化までのロードマップ |
@@ -84,6 +85,7 @@
 | ルーム自動連携 | `supabase/functions/_shared/auto_link_room.ts` |
 | 店舗 Webhook 本体 | `supabase/functions/line-webhook/index.ts` |
 | 管理 Bot Webhook | `supabase/functions/line-admin-webhook/index.ts` |
+| Journal AIチャット規約 | [JOURNAL-AI-CHAT-RULES.md](./JOURNAL-AI-CHAT-RULES.md) / `public/jnm/jnl2txt.html` / `.cursor/rules/ai-enrichment-additive.mdc` |
 
 ---
 
@@ -100,4 +102,4 @@
 
 ---
 
-*最終更新: 2026-07-26（Graphify・Obsidian・AI知識循環、SQL coverage、システム環境図を追加。2026-07-19: LINE-RECEIPT-ANALYSIS.mdを現行ルーティングへ更新。）*
+*最終更新: 2026-08-05（JOURNAL-AI-CHAT-RULES.md を追加。2026-07-26: Graphify・Obsidian・AI知識循環。2026-07-19: LINE-RECEIPT-ANALYSIS.md を現行ルーティングへ更新。）*
