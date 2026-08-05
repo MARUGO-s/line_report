@@ -33,7 +33,9 @@
     "reservation_ai_store_cache",
     "reservation_ai_cache_dirty_dates",
     "reservation_ai_cache_runs",
-    "reservation_ai_cache_coverage"
+    "reservation_ai_cache_coverage",
+    "journal_product_monthly_index",
+    "journal_product_index_dirty_months"
   ],
   "journalReportStorageBuckets": [
     "pos-journals",
