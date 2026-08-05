@@ -14,10 +14,10 @@ test('Moonshot Kimi K3 chat uses the verified API constraints', () => {
   assert.match(source, /\|\|\s*'kimi-k3'/)
 })
 
-test('ask/period/weekly critic④ use Moonshot Kimi with Claude Haiku fallback', () => {
+test('ask/period/weekly critic④ use Moonshot Kimi with Claude Haiku then Groq fallback', () => {
   assert.match(
     source,
-    /preferred === 'moonshot'[\s\S]{0,180}\?\s*\[preferred,\s*'claude'\]/,
+    /preferred === 'moonshot'[\s\S]{0,120}return \['moonshot',\s*'claude',\s*'groq'\]/,
   )
   // Deep-context surfaces (ask=650, period=550, weekly=500) route to Moonshot.
   const kimiCritics = source.match(
@@ -66,9 +66,19 @@ test('specialists and integrators have production-safe timeout budgets', () => {
   // 25秒に上げても Promise.all の上限は変わらず、待ち時間は増えない。
   const specialists = source.match(/perProviderMs:\s*25000,\s*fallbackLog:\s*\{[^}]*role:\s*'specialist_/g) ?? []
   assert.equal(specialists.length, 12) // 3 specialists × 4 surfaces
-  const integrators = source.match(/perProviderMs:\s*25000,\s*fallbackLog:\s*\{[^}]*role:\s*'integrator'/g) ?? []
+  // 統合AI⑤: Luna が 25秒で繰り返し timeout → 35秒へ。後続 gemini 用に foodCourtAiChat が予約する。
+  const integrators = source.match(/perProviderMs:\s*35000,\s*fallbackLog:\s*\{[^}]*role:\s*'integrator'/g) ?? []
   assert.equal(integrators.length, 4)
   // 日次の反証AI(Claude Haiku)は定型処理なので15秒のまま。
   const dailyCritic = source.match(/perProviderMs:\s*15000,\s*fallbackLog:\s*\{[^}]*role:\s*'critic'/g) ?? []
   assert.equal(dailyCritic.length, 1)
+})
+
+test('evaluator avoids all-failed by keeping a dedicated deadline and Claude→Gemini→Groq order', () => {
+  assert.match(source, /export function buildFoodCourtProviderOrder/)
+  assert.match(source, /export function foodCourtEvalDeadlineAt/)
+  assert.match(source, /preferred === 'claude'[\s\S]{0,80}return \['claude',\s*'gemini',\s*'groq'\]/)
+  assert.match(source, /deadlineAt:\s*foodCourtEvalDeadlineAt\(params\.deadlineAt\)/)
+  assert.match(source, /perProviderMs:\s*18000/)
+  assert.match(source, /FALLBACK_SLOT_MS\s*=\s*10_000/)
 })

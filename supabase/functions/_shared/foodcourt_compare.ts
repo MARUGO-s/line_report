@@ -869,6 +869,28 @@ function resolveFoodCourtOpenAiModel(): string {
   return String(Deno.env.get('FOODCOURT_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || '').trim() || 'gpt-5.6-luna'
 }
 
+/** preferred から順に試すプロバイダ列。全滅を避けるため、重い希望のあとに必ず gemini/groq を残す。 */
+export function buildFoodCourtProviderOrder(preferred: FoodCourtChatProvider): FoodCourtChatProvider[] {
+  if (preferred === 'openai') return ['openai', 'gemini', 'groq']
+  if (preferred === 'moonshot') return ['moonshot', 'claude', 'groq']
+  if (preferred === 'claude') return ['claude', 'gemini', 'groq']
+  if (preferred === 'gemini') return ['gemini', 'groq']
+  if (preferred === 'grok') return ['grok', 'gemini', 'groq']
+  return [preferred, 'groq']
+}
+
+/**
+ * 評価AI専用の期限。共有 deadline が専門AI/統合AIで尽きていると Claude 1発 timeout のまま
+ * Groq まで届かず「全滅」になるため、評価フェーズは最低でも約30秒の壁時計を確保する。
+ */
+export function foodCourtEvalDeadlineAt(sharedDeadlineAt?: number | null): number {
+  const now = Date.now()
+  const minBudget = now + 30_000
+  const maxBudget = now + 45_000
+  if (sharedDeadlineAt == null || !Number.isFinite(sharedDeadlineAt)) return maxBudget
+  return Math.min(maxBudget, Math.max(minBudget, sharedDeadlineAt))
+}
+
 function extractGeminiText(json: unknown): string {
   const candidates = (json && typeof json === 'object') ? (json as { candidates?: unknown }).candidates : null
   const first = Array.isArray(candidates) ? candidates[0] : null
@@ -1137,17 +1159,17 @@ async function foodCourtAiChat(
     fallbackLog?: { supabase?: SupabaseClient | null; storeKey?: string | null; surface: string; role: string }
   },
 ): Promise<{ content: string | null; usage: FoodCourtAiUsage | null }> {
-  const order = Array.from(new Set<FoodCourtChatProvider>(
-    preferred === 'openai'
-      ? [preferred, 'gemini', 'groq']
-      : preferred === 'moonshot'
-        ? [preferred, 'claude'] // 反証AI④: Kimi K3 → Claude Haiku
-        : [preferred, 'groq'],
-  ))
-  const nextSignal = (): AbortSignal | undefined => {
+  const order = Array.from(new Set<FoodCourtChatProvider>(buildFoodCourtProviderOrder(preferred)))
+  // 希望プロバイダが残り時間を食い潰すと gemini/groq に届かず全滅する。
+  // 後続1本あたり約10秒を予約し、希望側は早めに切って退避できるようにする。
+  const FALLBACK_SLOT_MS = 10_000
+  const nextSignal = (providerIndex: number): AbortSignal | undefined => {
     const remaining = options?.deadlineAt != null ? options.deadlineAt - Date.now() : null
-    if (remaining != null && remaining <= 0) return AbortSignal.abort('foodcourt_ai_deadline')
-    const timeoutMs = Math.max(250, Math.min(options?.perProviderMs ?? 12000, remaining ?? Number.MAX_SAFE_INTEGER))
+    if (remaining != null && remaining <= 400) return AbortSignal.abort('foodcourt_ai_deadline')
+    const remainingProviders = Math.max(0, order.length - providerIndex - 1)
+    const reserve = remainingProviders > 0 ? Math.min(20_000, remainingProviders * FALLBACK_SLOT_MS) : 0
+    const usable = remaining != null ? Math.max(250, remaining - reserve) : null
+    const timeoutMs = Math.max(250, Math.min(options?.perProviderMs ?? 12000, usable ?? Number.MAX_SAFE_INTEGER))
     return Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined
   }
   // 各プロバイダ/モデルの試行ログ。フォールバックが起きたか（希望どおり応答したか）の判定に使う。
@@ -1157,48 +1179,49 @@ async function foodCourtAiChat(
     await recordFoodCourtFallbackIfNeeded(preferred, attempts, options?.fallbackLog)
     return { content: result.content, usage: result.usage }
   }
-  for (const provider of order) {
+  for (let providerIndex = 0; providerIndex < order.length; providerIndex++) {
+    const provider = order[providerIndex]
     if (options?.deadlineAt != null && Date.now() >= options.deadlineAt) break
     if (provider === 'openai') {
       const model = resolveFoodCourtOpenAiModel()
-      const res = await openaiChat(messages, resolveFoodCourtOpenAiApiKey(), model, maxTokens, nextSignal())
+      const res = await openaiChat(messages, resolveFoodCourtOpenAiApiKey(), model, maxTokens, nextSignal(providerIndex))
       attempts.push({ provider, model, ok: !!res.content, reason: res.content ? null : (res.reason ?? 'empty_content') })
       if (res.content) return await finish(res)
       continue
     }
     if (provider === 'gemini') {
       const model = resolveFoodCourtGeminiModel()
-      const res = await geminiChat(messages, resolveFoodCourtGeminiApiKey(), model, maxTokens, nextSignal())
+      const res = await geminiChat(messages, resolveFoodCourtGeminiApiKey(), model, maxTokens, nextSignal(providerIndex))
       attempts.push({ provider, model, ok: !!res.content, reason: res.content ? null : (res.reason ?? 'empty_content') })
       if (res.content) return await finish(res)
       continue
     }
     if (provider === 'claude') {
       const model = resolveFoodCourtClaudeModel()
-      const res = await claudeChat(messages, resolveFoodCourtClaudeApiKey(), model, maxTokens, nextSignal())
+      const res = await claudeChat(messages, resolveFoodCourtClaudeApiKey(), model, maxTokens, nextSignal(providerIndex))
       attempts.push({ provider, model, ok: !!res.content, reason: res.content ? null : (res.reason ?? 'empty_content') })
       if (res.content) return await finish(res)
       continue
     }
     if (provider === 'moonshot') {
       const model = resolveFoodCourtMoonshotModel()
-      const res = await moonshotChat(messages, resolveFoodCourtMoonshotApiKey(), model, maxTokens, nextSignal())
+      const res = await moonshotChat(messages, resolveFoodCourtMoonshotApiKey(), model, maxTokens, nextSignal(providerIndex))
       attempts.push({ provider, model, ok: !!res.content, reason: res.content ? null : (res.reason ?? 'empty_content') })
       if (res.content) return await finish(res)
       continue
     }
     if (provider === 'grok') {
       const model = resolveFoodCourtGrokModel()
-      const res = await grokChat(messages, resolveFoodCourtGrokApiKey(), model, maxTokens, nextSignal())
+      const res = await grokChat(messages, resolveFoodCourtGrokApiKey(), model, maxTokens, nextSignal(providerIndex))
       attempts.push({ provider, model, ok: !!res.content, reason: res.content ? null : (res.reason ?? 'empty_content') })
       if (res.content) return await finish(res)
       continue
     }
-    const first = await groqChat(messages, groqApiKey, primaryGroqModel, maxTokens, nextSignal())
+    const first = await groqChat(messages, groqApiKey, primaryGroqModel, maxTokens, nextSignal(providerIndex))
     attempts.push({ provider: 'groq', model: primaryGroqModel, ok: !!first.content, reason: first.content ? null : (first.reason ?? 'empty_content') })
     if (first.content) return await finish(first)
     if (fallbackGroqModel && fallbackGroqModel !== primaryGroqModel) {
-      const second = await groqChat(messages, groqApiKey, fallbackGroqModel, maxTokens, nextSignal())
+      const second = await groqChat(messages, groqApiKey, fallbackGroqModel, maxTokens, nextSignal(providerIndex))
       attempts.push({ provider: 'groq', model: fallbackGroqModel, ok: !!second.content, reason: second.content ? null : (second.reason ?? 'empty_content') })
       if (second.content) return await finish(second)
     }
@@ -1441,7 +1464,12 @@ async function evaluateFoodCourtAnswer(params: {
   const res = await foodCourtAiChat(
     [{ role: 'system', content: evalSystem }, { role: 'user', content: evalUser }],
     params.groqApiKey, params.primary, params.config.evaluatorMaxTokens, params.config.evaluatorProvider, params.fallbackModel,
-    { deadlineAt: params.deadlineAt, perProviderMs: 12000, fallbackLog: { supabase: params.supabase, storeKey: params.storeKey, surface: params.surface, role: 'evaluator' } },
+    {
+      // 共有 deadline が尽きていても評価専用の壁時計を確保（Claude→Gemini→Groq まで届かせる）
+      deadlineAt: foodCourtEvalDeadlineAt(params.deadlineAt),
+      perProviderMs: 18000,
+      fallbackLog: { supabase: params.supabase, storeKey: params.storeKey, surface: params.surface, role: 'evaluator' },
+    },
   )
   return { evaluation: parseLoopEvaluationJson(res.content), usage: res.usage }
 }
@@ -3259,7 +3287,7 @@ export async function answerFoodCourtQuestion(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       // 改稿を廉価モデルに落とすと1周目より品質が下がり点数が伸びないため、両周ともOpenAI系で統一する。
       groqApiKey, primary, 1800, 'openai', fallbackModel,
-      { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'integrator' } },
+      { deadlineAt, perProviderMs: 35000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'integrator' } },
     ),
     evaluationContext: contextBlock,
     numberAuditFacts: `# コード計算・生データのみ\n${insights || ''}\n${decomposition || ''}\n${storeCorr || ''}\n${eventCorr || ''}\n${weatherCorr || ''}\n${anomalies || ''}\n${forecastCtx || ''}\n${patternBlock || ''}\n${nippou.block}\n${data}`,
@@ -3447,7 +3475,7 @@ export async function generateFoodCourtDailySummary(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       // 改稿だけ廉価モデルへ切り替えると、1周目より品質が下がる実績があったため同じOpenAI系で統一する。
       groqApiKey, primary, 1400, 'openai', fallbackModel,
-      { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'integrator' } },
+      { deadlineAt, perProviderMs: 35000, fallbackLog: { supabase, storeKey, surface: 'daily_summary', role: 'integrator' } },
     ),
     evaluationContext: contextBlock,
     numberAuditFacts: `# コード計算・日報原文のみ\n${targetFacts}\n${dailyLogsBlock}\n${patternBlock || ''}`,
@@ -3605,7 +3633,7 @@ export async function generateFoodCourtPeriodSummary(
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       groqApiKey, primary, 1400, 'openai', fallbackModel,
-      { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'integrator' } },
+      { deadlineAt, perProviderMs: 35000, fallbackLog: { supabase, storeKey, surface: 'period_summary', role: 'integrator' } },
     ),
     evaluationContext: contextBlock,
     numberAuditFacts: `# コード計算・日報原文のみ\n${periodFacts}\n${dailyLogsBlock}\n${patternBlock || ''}`,
@@ -4098,7 +4126,7 @@ export async function generateFoodCourtWeeklyReport(
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       groqApiKey, primary, 1800, 'openai', fallbackModel,
-      { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'integrator' } },
+      { deadlineAt, perProviderMs: 35000, fallbackLog: { supabase, storeKey, surface: 'weekly_report', role: 'integrator' } },
     ),
     evaluationContext: contextBlock,
     numberAuditFacts: `# コード計算・日報原文のみ\n${periodFacts}\n${logsBlock || ''}\n${patternBlock || ''}`,
