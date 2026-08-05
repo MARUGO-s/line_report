@@ -10865,18 +10865,40 @@ function extractAllMonthRefs(q) {
   return results;
 }
 
+/** 期間解析の前に商品コード数字を伏せ、西暦と誤認しないようにする。 */
+function maskProductCodesInQueryForPeriodParse(q) {
+  return String(q || '')
+    .normalize('NFKC')
+    .replace(/(?:商品)?コード\s*[:：#]?\s*\d{3,13}/g, '［商品コード］')
+    .replace(/下\s*[4４]?\s*桁\s*[:：]?\s*\d{3,13}/g, '［商品コード］');
+}
+
 /** メッセージ中の「NNNN年」（月を伴わない年単位）の参照をすべて（重複除く）抽出する。
- * 年単位の比較依頼（例: 2026年と2025年を比較して）の検知に使う。誤検出を避けるため「年」付きのみ対象。 */
+ * 年単位の比較依頼（例: 2026年と2025年を比較して）の検知に使う。
+ * 商品コードの4桁（例: 0023）を年にしない。現実的な西暦 20xx のみ。 */
 function extractAllYearRefs(q) {
   const results = [];
   const seen = new Set();
-  const re = /(\d{4})\s*年/g;
+  const re = /(20\d{2})\s*年/g;
+  const s = maskProductCodesInQueryForPeriodParse(q);
   let m;
-  while ((m = re.exec(q))) {
+  while ((m = re.exec(s))) {
     const year = m[1];
     if (!seen.has(year)) { seen.add(year); results.push(year); }
   }
   return results;
+}
+
+/** 単一年の照会用。商品コード0023を「0023年」と誤認しない。 */
+function extractPrimaryYearOnlyRef(q) {
+  const raw = String(q || '');
+  const s = maskProductCodesInQueryForPeriodParse(raw);
+  const withNen = s.match(/(20\d{2})\s*年/);
+  if (withNen) return withNen[1];
+  // 「2026の売上」など年なしは、商品コード文脈が無いときだけ 20xx を許可
+  if (/(?:商品)?コード|下\s*[4４]?\s*桁|下桁/.test(raw)) return null;
+  const bare = s.match(/(?<![0-9])(20\d{2})(?![0-9])/);
+  return bare ? bare[1] : null;
 }
 
 /** 「先月」「今年」「3ヶ月前」等の相対的な時間表現を、実行時点（now）を基準に絶対年月へ置換する。
@@ -12660,11 +12682,14 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   }
 
   // 年月抽出（「2026年 5月」「2026/05」「202605」を優先）
-  const monthMatch = q.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/)
-    || q.match(/(\d{4})[\/_.-](0?[1-9]|1[0-2])(?!\d)/)
-    || q.match(/(\d{4})(0[1-9]|1[0-2])(?!\d)/);
-  const beforeYearMatch = q.match(/(\d{4})\s*年?\s*(?:より前|以前|前)/);
-  const yearOnlyMatch = !monthMatch && !beforeYearMatch ? q.match(/(\d{4})\s*年?/) : null;
+  // 商品コードの数字列は伏せてから解析（「商品コード0023の2026年」→0023を年扱いしない）
+  const periodQ = maskProductCodesInQueryForPeriodParse(q);
+  const monthMatch = periodQ.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/)
+    || periodQ.match(/(\d{4})[\/_.-](0?[1-9]|1[0-2])(?!\d)/)
+    || periodQ.match(/(\d{4})(0[1-9]|1[0-2])(?!\d)/);
+  const beforeYearMatch = periodQ.match(/(20\d{2})\s*年?\s*(?:より前|以前|前)/);
+  const yearOnlyYear = (!monthMatch && !beforeYearMatch) ? extractPrimaryYearOnlyRef(q) : null;
+  const yearOnlyMatch = yearOnlyYear ? [yearOnlyYear, yearOnlyYear] : null;
 
   async function summarizeMatched(matched, label) {
     const hydrated = [];

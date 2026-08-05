@@ -48,6 +48,9 @@ const context = {
 vm.createContext(context);
 for (const name of [
   'extractAllMonthRefs',
+  'maskProductCodesInQueryForPeriodParse',
+  'extractAllYearRefs',
+  'extractPrimaryYearOnlyRef',
   'resolveComparisonTimeRefs',
   'hasAllSavedPeriodIntent',
   'resolveExhaustedPeriodClarificationScope',
@@ -520,6 +523,13 @@ test('brand monthly sales questions extract named products and trigger journal t
       .some((t) => t.code === '2103' && t.kind === 'code'),
     true,
   );
+
+  // 商品コード0023を「0023年」と誤認しない（本命の2026年を取る）
+  const codeYearQ = '商品コード0023の2026年の売れ行きを月ごとにまとめて下さい';
+  assert.deepEqual([...context.extractProductCodeHints(codeYearQ)], ['0023']);
+  assert.deepEqual([...context.extractAllYearRefs(codeYearQ)], ['2026']);
+  assert.equal(context.extractPrimaryYearOnlyRef(codeYearQ), '2026');
+  assert.equal(context.extractPrimaryYearOnlyRef('商品コード0023の売れ行き'), null);
 });
 
 test('bottle and course questions load exact journal items without double counting summaries', () => {
