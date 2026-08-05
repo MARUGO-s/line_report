@@ -383,7 +383,7 @@
       <div class="ms-content">
         <div class="ms-inner">
           <h1 class="ms-h1">AI使用料（実測トークン）</h1>
-          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、モデルごとの<strong>公式単価</strong>を掛けて算出します。通常の精算レシートは Gemini Flash Lite、Azure は障害時の退避先です。旧Groqの履歴はこの画面の集計対象から除外しています。</p>
+          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、モデルごとの<strong>公式単価</strong>を掛けて算出します。表示・合算は<strong>現行本番モデルのみ</strong>（過去の未使用モデルのログは除外）。通常の精算レシートは Gemini Flash Lite、Azure は障害時の退避先です。</p>
 
           <!-- 集計期間アコーディオン -->
           <details class="assump" id="periodBox">
@@ -415,7 +415,7 @@
               AI使用トークン・費用の時系列推移
             </summary>
             <div class="assump-body" style="padding-top: 12px;">
-              <p class="ms-sub" style="margin-top:0">すべてのAIモデルの合計トークン使用量と概算費用の推移です。タブで月毎・日毎の集計を切り替えることができます。</p>
+              <p class="ms-sub" style="margin-top:0">現行本番モデルのみの合計トークンと概算費用の推移です。タブで月毎・日毎の集計を切り替えられます。</p>
               
               <div class="ts-tab-bar" style="margin-top:14px; margin-bottom: 14px;">
                 <button class="ts-tab" data-mode="month">月毎に集計</button>
@@ -483,7 +483,7 @@
           <details class="assump" id="geminiBox">
             <summary>
               <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-              Gemini Pro（専門解析・再確認 / <span id="geminiStoreCount" class="mono">— 店舗</span>）
+              Gemini（レシート・フードコート / <span id="geminiStoreCount" class="mono">— 店舗</span>）
             </summary>
             <div class="assump-body" style="padding-top: 12px;">
               <div class="kpis">
@@ -520,7 +520,7 @@
           <details class="assump" id="claudeBox">
             <summary>
               <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-              Claude / Haiku（クラウディア2の売上＋全店の経費 / <span id="claudeStoreCount" class="mono">— 店舗</span>）
+              Claude / Haiku（反証・評価・経費 / <span id="claudeStoreCount" class="mono">— 店舗</span>）
             </summary>
             <div class="assump-body" style="padding-top: 12px;">
               <div class="kpis">
@@ -613,17 +613,25 @@
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="grok_xsearch_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
               <p class="muted" style="margin:8px 0 0;font-size:12px">
-                ここはトークン費のみ。x_search は別途 <b>$5 / 1,000回</b> の実行料がかかり、この画面には含まれません。
-                実行回数はモデル名の <code>x_search*N</code> に記録しています。
+                トークン費に加え、<b>x_search 実行料 $5 / 1,000回</b>をモデル名の <code>x_search*N</code> × ログ件数から加算します。
               </p>
 
-              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini Pro（専門解析・再確認）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Groq（フードコート専門AI①・GPT-OSS 120B）</span></div>
               <div class="rate-grid">
-                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="gemini_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
-                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="gemini_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>入力単価 USD / 100万トークン</label><input id="groq_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>出力単価 USD / 100万トークン</label><input id="groq_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
               </div>
 
-              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Claude / Haiku（クラウディア2・経費）</span><span class="ch-tag mono" id="claudeModelLabel"></span></div>
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Gemini（レシート Flash Lite / Flash / Pro・フードコート専門②）</span><span class="ch-tag mono" id="geminiModelLabel"></span></div>
+              <div class="rate-grid">
+                <div class="field"><label>既定（Flash Lite）入力 USD / 100万</label><input id="gemini_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                <div class="field"><label>既定（Flash Lite）出力 USD / 100万</label><input id="gemini_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              </div>
+              <p class="muted" style="margin:8px 0 0;font-size:12px">
+                Flash Lite はこの入力値で計算します。Flash（preview / 3.5）は $0.50 / $3.00、Pro は $2.00 / $12.00（USD / 100万トークン・固定）を使います。
+              </p>
+
+              <div class="card-h" style="margin-top:22px"><span class="ch-t" style="font-size:14px">Claude / Haiku（反証・評価・経費レシート）</span><span class="ch-tag mono" id="claudeModelLabel"></span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="claude_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="claude_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -658,38 +666,70 @@
 
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
-    // モデル別単価へ移行。旧のプロバイダ一括単価の保存値を引き継がない。
-    const RATES_KEY = 'line_report_ai_usage_rates_v6';
+    // モデル別単価へ移行。v7: 現行本番モデルのみ表示・Groq GPT-OSS を含む・未使用(moonshot等)を除外。
+    const RATES_KEY = 'line_report_ai_usage_rates_v7';
     const FIXED_PROJECT_URL = (window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.PROJECT_URL) || 'https://hocbnifuactbvmyjraxy.supabase.co';
 
-    // 単価は各社の公式単価（USD / 100万トークン）。通常の精算レシートは Flash Lite $0.25/$1.50。
-    // Gemini 3.1 Pro は ≤20万トークンで $2/$12、Gemini 3 Flash は $0.50/$3。
-    // Grok / xAI は grok-3-mini の目安 $0.30/$0.50。モデル差し替え時は画面上で上書きする。
-    // トークン数は実測値を使うため、ここには持たない。モデルごとに正確な単価を当てて誤差をなくす。
+    // 単価は各社の公式単価（USD / 100万トークン）。モデル差し替え時は画面上で上書きする。
     const DEFAULT_RATES = {
-      azure:    { inUsd: 0.20, outUsd: 1.25 },   // Azure Foundry GPT-5.4 nano（レシート・画像抽出）
-      openai:   { inUsd: 1.00, outUsd: 6.00 },   // GPT-5.6 Luna（フードコート最終統合）
-      grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini（フードコート運営改善）
-      // Xトレンドブリーフは Responses API + x_search のため別モデル・別単価（grok-4.5）。
-      // 注意: トークンとは別に x_search 実行料 $5/1k calls がかかる。ここには含まれない。
-      grok_xsearch: { inUsd: 2.00, outUsd: 6.00 },
-      gemini:   { inUsd: 0.25, outUsd: 1.50 },
-      claude:   { inUsd: 1.00, outUsd: 5.00 },
-      moonshot: { inUsd: 3.00, outUsd: 15.00 },  // Kimi K3（フードコート反証AI。入力はキャッシュミス単価。ヒット時は$0.30）
+      azure:    { inUsd: 0.20, outUsd: 1.25 },   // Azure Foundry GPT-5.4 nano
+      openai:   { inUsd: 1.00, outUsd: 6.00 },   // GPT-5.6 Luna
+      grok:     { inUsd: 0.30, outUsd: 0.50 },   // grok-3-mini
+      grok_xsearch: { inUsd: 2.00, outUsd: 6.00 }, // grok-4.5 + x_search（トークン）
+      groq:     { inUsd: 0.15, outUsd: 0.60 },   // openai/gpt-oss-120b
+      gemini:   { inUsd: 0.25, outUsd: 1.50 },   // Flash Lite 既定
+      claude:   { inUsd: 1.00, outUsd: 5.00 },   // claude-haiku-4-5
       jpyPerUsd: 155,
     };
+    const RATE_PROVIDER_KEYS = ['azure', 'openai', 'grok', 'grok_xsearch', 'groq', 'gemini', 'claude'];
+    // x_search 実行料（トークンとは別建て）。$5 / 1,000 calls。
+    const X_SEARCH_FEE_PER_CALL_USD = 0.005;
+
+    // 現行本番で使うモデルだけを表示・合算する（過去ログの未使用モデルは除外）。
+    const ACTIVE_PRODUCTION_MODELS = new Set([
+      'gpt-5.4-nano',
+      'gemini-3.1-flash-lite',
+      'gemini-3-flash-preview',
+      'gemini-3.1-pro-preview',
+      'gemini-3.5-flash',
+      'claude-haiku-4-5',
+      'gpt-5.6-luna',
+      'grok-3-mini',
+      'grok-4.5',
+      'openai/gpt-oss-120b',
+    ]);
+    function normalizeModelId(model) {
+      return String(model || '')
+        .toLowerCase()
+        .replace(/\s+x_search\*\d+/ig, '')
+        .replace(/\s+drop:[^\s]*/ig, '')
+        .trim();
+    }
+    function isActiveProductionModel(provider, model) {
+      const p = String(provider || '').toLowerCase();
+      if (p === 'moonshot' || p === 'kimi') return false;
+      return ACTIVE_PRODUCTION_MODELS.has(normalizeModelId(model));
+    }
+    function filterActiveModels(list) {
+      return (Array.isArray(list) ? list : []).filter(function (m) {
+        return isActiveProductionModel(m.provider, m.model);
+      });
+    }
+    function xSearchCallsFromModel(model) {
+      const match = String(model || '').match(/x_search\*(\d+)/i);
+      return match ? Math.max(0, Number(match[1]) || 0) : 0;
+    }
+
     // 実測ログの provider / model 名 → 単価キーの対応。
     function rateKeyForModel(provider, model) {
       if (provider === 'azure_openai' || provider === 'azure') return 'azure';
       if (provider === 'openai') return 'openai';
-      // 同じ provider=grok でも、Xトレンドブリーフ(grok-4.5)は運営改善(grok-3-mini)より
-      // 単価が桁違いに高い。model 名の x_search マーカーで単価を切り替える。
+      if (provider === 'groq') return 'groq';
       if (provider === 'grok' || provider === 'xai') {
         return /x_search/i.test(String(model || '')) ? 'grok_xsearch' : 'grok';
       }
       if (provider === 'gemini') return 'gemini';
       if (provider === 'claude') return 'claude';
-      if (provider === 'moonshot' || provider === 'kimi') return 'moonshot';
       return 'azure';
     }
 
@@ -733,7 +773,7 @@
         if (!raw) return cloneRates(DEFAULT_RATES);
         const parsed = JSON.parse(raw);
         const out = cloneRates(DEFAULT_RATES);
-        ['azure', 'openai', 'grok', 'grok_xsearch', 'gemini', 'claude', 'moonshot'].forEach(function (p) {
+        RATE_PROVIDER_KEYS.forEach(function (p) {
           if (parsed && parsed[p]) {
             ['inUsd', 'outUsd'].forEach(function (k) {
               const v = Number(parsed[p][k]);
@@ -747,16 +787,11 @@
       } catch (_) { return cloneRates(DEFAULT_RATES); }
     }
     function cloneRates(r) {
-      return {
-        azure: Object.assign({}, r.azure),
-        openai: Object.assign({}, r.openai),
-        grok: Object.assign({}, r.grok),
-        grok_xsearch: Object.assign({}, r.grok_xsearch),
-        gemini: Object.assign({}, r.gemini),
-        claude: Object.assign({}, r.claude),
-        moonshot: Object.assign({}, r.moonshot),
-        jpyPerUsd: r.jpyPerUsd,
-      };
+      const out = { jpyPerUsd: r.jpyPerUsd };
+      RATE_PROVIDER_KEYS.forEach(function (p) {
+        out[p] = Object.assign({}, r[p]);
+      });
+      return out;
     }
     function saveRates(r) {
       try { localStorage.setItem(RATES_KEY, JSON.stringify(r)); } catch (_) {}
@@ -771,6 +806,8 @@
       document.getElementById('grok_outUsd').value = r.grok.outUsd;
       document.getElementById('grok_xsearch_inUsd').value = r.grok_xsearch.inUsd;
       document.getElementById('grok_xsearch_outUsd').value = r.grok_xsearch.outUsd;
+      document.getElementById('groq_inUsd').value = r.groq.inUsd;
+      document.getElementById('groq_outUsd').value = r.groq.outUsd;
       document.getElementById('gemini_inUsd').value = r.gemini.inUsd;
       document.getElementById('gemini_outUsd').value = r.gemini.outUsd;
       document.getElementById('claude_inUsd').value = r.claude.inUsd;
@@ -800,6 +837,10 @@
           inUsd: num('grok_xsearch_inUsd', d.grok_xsearch.inUsd),
           outUsd: num('grok_xsearch_outUsd', d.grok_xsearch.outUsd),
         },
+        groq: {
+          inUsd: num('groq_inUsd', d.groq.inUsd),
+          outUsd: num('groq_outUsd', d.groq.outUsd),
+        },
         gemini: {
           inUsd: num('gemini_inUsd', d.gemini.inUsd),
           outUsd: num('gemini_outUsd', d.gemini.outUsd),
@@ -808,8 +849,6 @@
           inUsd: num('claude_inUsd', d.claude.inUsd),
           outUsd: num('claude_outUsd', d.claude.outUsd),
         },
-        // UI入力欄はまだ設けず、Kimi K3の公式単価を固定使用する。
-        moonshot: Object.assign({}, d.moonshot),
         jpyPerUsd: (function () { const v = Number(document.getElementById('jpyPerUsd').value); return Number.isFinite(v) && v > 0 ? v : d.jpyPerUsd; })(),
       };
     }
@@ -872,43 +911,65 @@
     const GEMINI_FLASH_LITE_RATE = { inUsd: 0.25, outUsd: 1.50 };
     const GEMINI_FLASH_RATE = { inUsd: 0.50, outUsd: 3.00 };
     const GEMINI_PRO_RATE = { inUsd: 2.00, outUsd: 12.00 };
-    const OPENAI_O4_MINI_RATE = { inUsd: 1.10, outUsd: 4.40 };
     const OPENAI_GPT_5_6_LUNA_RATE = { inUsd: 1.00, outUsd: 6.00 };
-    // Groq上のフードコート専門AI①系。Qwen は非OpenAI系（Alibaba Cloud）でプロバイダ多様性確保用。
     const GROQ_GPT_OSS_RATE = { inUsd: 0.15, outUsd: 0.60 };
-    const GROQ_QWEN_3_6_27B_RATE = { inUsd: 0.29, outUsd: 0.59 };
     function rateForModel(provider, model) {
-      const m = String(model || '').toLowerCase();
-      if (provider === 'gemini' && m === 'gemini-3.1-flash-lite') return GEMINI_FLASH_LITE_RATE;
-      if (provider === 'gemini' && m === 'gemini-3-flash-preview') return GEMINI_FLASH_RATE;
+      const m = normalizeModelId(model);
+      // Gemini はモデル帯ごとに単価が違う。Flash Lite は画面の編集値、Flash/Pro は公式帯の固定。
+      if (provider === 'gemini' && m === 'gemini-3.1-flash-lite') {
+        return state.rates.gemini || GEMINI_FLASH_LITE_RATE;
+      }
+      if (provider === 'gemini' && (m === 'gemini-3-flash-preview' || m === 'gemini-3.5-flash')) {
+        return GEMINI_FLASH_RATE;
+      }
       if (provider === 'gemini' && m === 'gemini-3.1-pro-preview') return GEMINI_PRO_RATE;
-      if (provider === 'openai' && m === 'o4-mini') return OPENAI_O4_MINI_RATE;
-      if (provider === 'openai' && m === 'gpt-5.6-luna') return OPENAI_GPT_5_6_LUNA_RATE;
-      if (provider === 'groq' && m === 'openai/gpt-oss-120b') return GROQ_GPT_OSS_RATE;
-      if (provider === 'groq' && m === 'qwen/qwen3.6-27b') return GROQ_QWEN_3_6_27B_RATE;
+      if (provider === 'openai' && m === 'gpt-5.6-luna') {
+        return state.rates.openai || OPENAI_GPT_5_6_LUNA_RATE;
+      }
+      if (provider === 'groq' && (m === 'openai/gpt-oss-120b' || m.indexOf('gpt-oss') >= 0)) {
+        return state.rates.groq || GROQ_GPT_OSS_RATE;
+      }
       return state.rates[rateKeyForModel(provider, model)] || DEFAULT_RATES.azure;
+    }
+    function activeModelsForProvider(provider) {
+      const targetProvider = provider === 'azure' ? 'azure_openai' : provider;
+      return filterActiveModels(
+        (state.data && Array.isArray(state.data.models))
+          ? state.data.models.filter(function (m) { return m.provider === targetProvider; })
+          : null,
+      );
+    }
+    function sumActiveTokens(provider) {
+      const models = activeModelsForProvider(provider);
+      return models.reduce(function (acc, m) {
+        acc.input_tokens += Number(m.input_tokens || 0);
+        acc.output_tokens += Number(m.output_tokens || 0);
+        acc.thinking_tokens += Number(m.thinking_tokens || 0);
+        acc.event_count += Number(m.event_count || 0);
+        return acc;
+      }, { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, event_count: 0 });
     }
     // API記録の output_tokens は思考を含む課金対象出力。thinking_tokens は内訳表示だけに使う。
     function modelUsd(m) {
       const rate = rateForModel(m.provider, m.model);
       const inTok = Number(m.input_tokens || 0);
       const outTok = Number(m.output_tokens || 0);
-      // Kimi K3はcompletion_tokensからreasoningを分離保存しているため、課金計算時だけ本文+推論へ戻す。
-      const billableOutTok = (m.provider === 'moonshot' || m.provider === 'kimi')
-        ? outTok + Number(m.thinking_tokens || 0)
-        : outTok;
-      return (inTok * rate.inUsd + billableOutTok * rate.outUsd) / 1e6;
+      const tokenUsd = (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
+      const xCalls = xSearchCallsFromModel(m.model);
+      const toolUsd = xCalls > 0
+        ? xCalls * Math.max(1, Number(m.event_count || 1)) * X_SEARCH_FEE_PER_CALL_USD
+        : 0;
+      return tokenUsd + toolUsd;
     }
     // provider の合計USD＝そのproviderの各モデルをモデル別単価で合算（最も正確）。
     // models が無い旧レスポンスのときだけ従来のprovider一括計算にフォールバック。
     function providerUsdAccurate(provider, fallbackBucket) {
-      const targetProvider = provider === 'azure' ? 'azure_openai' : provider;
-      const models = (state.data && Array.isArray(state.data.models))
-        ? state.data.models.filter(function (m) { return m.provider === targetProvider; })
-        : null;
+      const models = activeModelsForProvider(provider);
       if (models && models.length) {
         return models.reduce(function (s, m) { return s + modelUsd(m); }, 0);
       }
+      // models が無い旧レスポンス時のみ。現行フィルタ後にゼロならゼロ。
+      if (state.data && Array.isArray(state.data.models)) return 0;
       const b = fallbackBucket || EMPTY_BUCKET;
       return providerUsd(b.input_tokens, b.output_tokens, state.rates[provider] || DEFAULT_RATES[provider]);
     }
@@ -942,9 +1003,11 @@
 
     function renderProvider(prefix, bucket, rate, jpyPerUsd, modelText) {
       const b = bucket || EMPTY_BUCKET;
+      const tok = sumActiveTokens(prefix);
       const usd = providerUsdAccurate(prefix, b);
       const jpy = usd * jpyPerUsd;
-      const perCall = b.event_count ? jpy / b.event_count : 0;
+      const eventCount = tok.event_count;
+      const perCall = eventCount ? jpy / eventCount : 0;
 
       // モデル名（総計カード＋前提条件ラベル）
       const modelEl = document.getElementById(prefix + 'Model');
@@ -958,15 +1021,15 @@
       if (usdEl) usdEl.textContent = fmtUsd(usd);
       if (jpyEl) jpyEl.textContent = fmtJpy(jpy);
 
-      // KPI（実測）
+      // KPI（現行モデルの実測のみ）
       document.getElementById(prefix + 'StoreCount').textContent = fmtInt(b.store_count) + ' 店舗';
       document.getElementById(prefix + 'Jpy2').textContent = fmtJpy(jpy);
       document.getElementById(prefix + 'Usd2').textContent = fmtUsd(usd);
-      document.getElementById(prefix + 'InTok').textContent = fmtInt(b.input_tokens);
-      document.getElementById(prefix + 'OutTok').textContent = fmtInt(b.output_tokens);
-      document.getElementById(prefix + 'Events').textContent = '実測ログ ' + fmtInt(b.event_count) + ' 件';
+      document.getElementById(prefix + 'InTok').textContent = fmtInt(tok.input_tokens);
+      document.getElementById(prefix + 'OutTok').textContent = fmtInt(tok.output_tokens);
+      document.getElementById(prefix + 'Events').textContent = '実測ログ ' + fmtInt(eventCount) + ' 件';
       document.getElementById(prefix + 'PerImage').textContent =
-        b.event_count ? '1解析あたり ' + fmtJpy(perCall) : '実測ログなし';
+        eventCount ? '1解析あたり ' + fmtJpy(perCall) : '実測ログなし';
       document.getElementById(prefix + 'RefLine').textContent =
         '受信画像 ' + fmtInt(b.image_count) + ' 枚 ／ 登録レシート ' + fmtInt(b.receipt_count) + ' 件';
 
@@ -984,9 +1047,9 @@
       renderProvider('gemini', data.gemini, r.gemini, jpy, data.gemini && data.gemini.model);
       renderProvider('claude', data.claude, r.claude, jpy, data.claude && data.claude.model);
 
-      // Gemini 固有: 思考トークンの内訳サブ
-      const m = data.gemini || EMPTY_BUCKET;
-      document.getElementById('geminiThinking').textContent = 'うち思考 ' + fmtInt(m.thinking_tokens) + ' トークン';
+      // Gemini 固有: 思考トークンの内訳サブ（現行モデルのみ）
+      const gemTok = sumActiveTokens('gemini');
+      document.getElementById('geminiThinking').textContent = 'うち思考 ' + fmtInt(gemTok.thinking_tokens) + ' トークン';
 
       renderModelBreakdown();
       renderFoodcourtCard();
@@ -994,14 +1057,20 @@
     }
 
     const KNOWN_AI_MODELS = [
+      { provider: 'azure_openai', model: 'gpt-5.4-nano', title: 'Azure Foundry / GPT-5.4 nano', className: '' },
       { provider: 'gemini', model: 'gemini-3.1-flash-lite', title: 'Gemini / Flash Lite', className: 'gemini' },
       { provider: 'gemini', model: 'gemini-3-flash-preview', title: 'Gemini / Flash', className: 'gemini' },
-      { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini', className: 'gemini' },
+      { provider: 'gemini', model: 'gemini-3.5-flash', title: 'Gemini / 3.5 Flash', className: 'gemini' },
+      { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini / Pro', className: 'gemini' },
       { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
+      { provider: 'openai', model: 'gpt-5.6-luna', title: 'OpenAI / Luna', className: 'openai' },
+      { provider: 'grok', model: 'grok-3-mini', title: 'Grok / 運営改善', className: 'grok' },
+      { provider: 'grok', model: 'grok-4.5', title: 'Grok / Xトレンド', className: 'grok' },
+      { provider: 'groq', model: 'openai/gpt-oss-120b', title: 'Groq / GPT-OSS', className: '' },
     ];
     function modelKey(provider, model) {
       const p = String(provider || '').toLowerCase();
-      return (p === 'xai' ? 'grok' : p) + '::' + String(model || '').toLowerCase();
+      return (p === 'xai' ? 'grok' : p) + '::' + normalizeModelId(model);
     }
     function displayProvider(provider) {
       const p = String(provider || '').toLowerCase();
@@ -1010,12 +1079,12 @@
       if (p === 'gemini') return 'Gemini';
       if (p === 'claude') return 'Claude';
       if (p === 'azure_openai' || p === 'azure') return 'Azure Foundry';
-      if (p === 'moonshot' || p === 'kimi') return 'Moonshot / Kimi';
+      if (p === 'groq') return 'Groq';
       return provider || 'AI';
     }
     function cardClassForModel(provider, model) {
       const rateKey = rateKeyForModel(provider, model);
-      if (rateKey === 'azure') return '';
+      if (rateKey === 'azure' || rateKey === 'groq') return '';
       if (rateKey === 'openai') return 'openai';
       if (rateKey === 'grok' || rateKey === 'grok_xsearch') return 'grok';
       if (rateKey === 'gemini') return 'gemini';
@@ -1034,18 +1103,17 @@
           known: true,
         }, known));
       });
-      const actual = (state.data && Array.isArray(state.data.models))
-        ? state.data.models.filter(function (m) { return m.provider !== 'groq'; })
-        : [];
+      const actual = filterActiveModels(state.data && state.data.models);
       actual.forEach(function (m) {
         const key = modelKey(m.provider, m.model);
         const base = byKey.get(key) || {
           provider: m.provider,
-          model: m.model,
+          model: normalizeModelId(m.model) || m.model,
           title: displayProvider(m.provider),
           className: cardClassForModel(m.provider, m.model),
           known: false,
         };
+        // x_search 付きの実モデル名は料金計算用に保持する。
         byKey.set(key, Object.assign({}, base, {
           provider: m.provider || base.provider,
           model: m.model || base.model,
@@ -1076,7 +1144,7 @@
         const jpy = usd * jpyPerUsd;
         const title = m.title || displayProvider(m.provider);
         const cls = m.className || cardClassForModel(m.provider, m.model);
-        const usage = MODEL_LABELS[m.model] || '';
+        const usage = modelLabelFor(m.model);
         const outTok = Number(m.output_tokens || 0);
         return '<div class="total-card ' + escapeHtml(cls) + '">' +
           '<div class="tc-prov">' + escapeHtml(title) + '</div>' +
@@ -1095,9 +1163,7 @@
       const totalEl = document.getElementById('foodcourtTotal');
       if (!el) return;
       const fc = (state.data && state.data.foodcourt) || null;
-      const models = (fc && Array.isArray(fc.models))
-        ? fc.models.filter(function (m) { return m.provider !== 'groq'; }).slice()
-        : [];
+      const models = filterActiveModels(fc && fc.models).slice();
       const jpyPerUsd = state.rates.jpyPerUsd;
       if (!models.length) {
         if (totalEl) totalEl.textContent = '¥0';
@@ -1109,7 +1175,7 @@
       const rows = models.map(function (mm) {
         const jpy = modelUsd(mm) * jpyPerUsd;
         totalJpy += jpy;
-        const use = MODEL_LABELS[mm.model] || '';
+        const use = modelLabelFor(mm.model);
         return '<tr>' +
           '<td style="text-align:left"><span class="mono">' + escapeHtml(mm.model) + '</span>' +
           (use ? '<br><span class="ms-sub" style="font-size:11px">' + escapeHtml(use) + '</span>' : '') + '</td>' +
@@ -1127,28 +1193,33 @@
         '</table>';
     }
 
-    // モデル別の正確な内訳（実測トークン × モデル別単価）。旧Groq履歴は除外する。
+    // モデル別の正確な内訳（実測トークン × モデル別単価）。現行本番モデルのみ。
     const MODEL_LABELS = {
       'gpt-5.4-nano': 'レシート・小口経費の画像抽出（Azure Foundry）',
-      'gpt-5.6-luna': 'フードコート分析の最終統合（現行）',
-      'o4-mini': 'フードコート分析の最終統合（旧モデル）',
-      'gpt-5.5': 'フードコート分析の最終統合（旧モデル）',
-      'grok-3-mini': 'フードコート運営改善AI',
-      'kimi-k3': 'フードコート反証AI（旧・Moonshot Kimi K3 / 現在は未使用）',
-      'qwen/qwen3.6-27b': 'フードコート専門AI①（旧・Alibaba Cloud Qwen / 現在は未使用）',
-      'openai/gpt-oss-120b': 'フードコート専門AI①（数値・他店比較 / Groq GPT-OSS）',
-      'claude-haiku-4-5': 'フードコート反証AI④・評価AI⑥／経費レシート解析（Anthropic Claude Haiku）',
-      'gemini-3-flash-preview': '小口レシートの通常解析（低コスト）',
-      'gemini-3.1-pro-preview': 'レシート解析・フードコート専門AI',
+      'gpt-5.6-luna': 'フードコート分析の最終統合',
+      'grok-3-mini': 'フードコート運営改善AI（専門③）',
+      'grok-4.5': 'Xトレンドブリーフ（Responses + x_search）',
+      'openai/gpt-oss-120b': 'フードコート専門AI①（数値・他店比較 / Groq）',
+      'claude-haiku-4-5': 'フードコート反証・評価／経費レシート解析（Claude Haiku）',
+      'gemini-3.1-flash-lite': 'レシート通常解析（Flash Lite）',
+      'gemini-3-flash-preview': 'レシート解析（Flash）',
+      'gemini-3.5-flash': 'フードコート専門AI②（イベント・天気）',
+      'gemini-3.1-pro-preview': 'レシート再確認・フードコート専門AI②',
     };
+    function modelLabelFor(model) {
+      const raw = String(model || '');
+      const base = normalizeModelId(raw);
+      const label = MODEL_LABELS[base] || MODEL_LABELS[raw] || '';
+      const xCalls = xSearchCallsFromModel(raw);
+      if (xCalls > 0 && label) return label + '（x_search×' + xCalls + '/件）';
+      return label;
+    }
     function renderModelBreakdown() {
       const el = document.getElementById('modelBrkBody');
       if (!el) return;
-      const models = (state.data && Array.isArray(state.data.models))
-        ? state.data.models.filter(function (m) { return m.provider !== 'groq'; }).slice()
-        : [];
+      const models = filterActiveModels(state.data && state.data.models).slice();
       if (!models.length) {
-        el.innerHTML = '<p class="statusline">モデル別の実測ログがまだありません。</p>';
+        el.innerHTML = '<p class="statusline">現行モデルの実測ログがまだありません。</p>';
         return;
       }
       const jpyPerUsd = state.rates.jpyPerUsd;
@@ -1158,11 +1229,11 @@
         const rate = rateForModel(mm.provider, mm.model);
         const jpy = modelUsd(mm) * jpyPerUsd;
         totalJpy += jpy;
-        const use = MODEL_LABELS[mm.model] || '';
+        const use = modelLabelFor(mm.model);
         return '<tr>' +
           '<td style="text-align:left"><span class="mono">' + escapeHtml(mm.model) + '</span>' +
           (use ? '<br><span class="ms-sub" style="font-size:11px">' + escapeHtml(use) + '</span>' : '') + '</td>' +
-          '<td>' + escapeHtml(mm.provider) + '</td>' +
+          '<td>' + escapeHtml(displayProvider(mm.provider)) + '</td>' +
           '<td>' + fmtInt(mm.input_tokens) + '</td>' +
           '<td>' + fmtInt(Number(mm.output_tokens || 0)) + '</td>' +
           '<td class="mono">$' + rate.inUsd + ' / $' + rate.outUsd + '</td>' +
@@ -1174,7 +1245,7 @@
         '<tbody>' + rows + '</tbody>' +
         '<tfoot><tr><td colspan="5" style="text-align:right;font-weight:700">合計</td><td style="font-weight:700">' + fmtJpy(totalJpy) + '</td></tr></tfoot>' +
         '</table>' +
-        '<p class="ms-sub" style="margin:8px 2px 0;font-size:12px">※ 出力Tokは課金対象の思考トークンを含む。モデルごとに公式単価を当てて合算（プロバイダ一括より正確）。</p>';
+        '<p class="ms-sub" style="margin:8px 2px 0;font-size:12px">※ 現行本番モデルのみ表示。出力Tokは課金対象の思考トークンを含む。X検索はトークン＋実行料を合算。</p>';
     }
 
     function renderTimeSeries() {
@@ -1193,7 +1264,7 @@
 
       // 日付ごとにグループ化
       const groups = {};
-      totals.filter(function (row) { return row.provider !== 'groq'; }).forEach(function (row) {
+      totals.filter(function (row) { return isActiveProductionModel(row.provider, row.model); }).forEach(function (row) {
         const d = row.period_date;
         if (!groups[d]) {
           groups[d] = {

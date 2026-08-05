@@ -311,15 +311,15 @@ GLMはカウントデータ、動員の連続値、時間トレンドを扱え�
 
 | AI | 役割 | 優先プロバイダ/既定モデル | 主な入力 |
 |---|---|---|---|
-| 専門AI 1 | 他店比較、時系列、要因分解、相関、異常値 | Groq / `qwen/qwen3.6-27b` | 数値統計、競合業態、予測、日報効果対照 |
+| 専門AI 1 | 他店比較、時系列、要因分解、相関、異常値 | Groq / `openai/gpt-oss-120b` | 数値統計、競合業態、予測、日報効果対照 |
 | 専門AI 2 | イベント、会場、動員、天気 | Gemini / `gemini-3.1-pro-preview` | イベント相関、予定、天気相関、日別実績 |
 | 専門AI 3 | 現場施策、運営改善 | xAI / `grok-3-mini` | 日報、実績、予測、次のイベント |
-| 反証AI | 捏造、因果断定、日付ずれ、根拠不足の監査 | Q&A/期間/週次: Moonshot `kimi-k3` → Claude、日次: Claude `claude-haiku-4-5` | 3専門メモと計算済み根拠 |
+| 反証AI | 捏造、因果断定、日付ずれ、根拠不足の監査 | Claude / `claude-haiku-4-5`（全 surface） | 3専門メモと計算済み根拠 |
 | 統合AI | 最終回答の構成と矛盾解消 | OpenAI / `gpt-5.6-luna` | 全専門メモ、反証、統計、RAG |
 | 改善再生成 | 評価指摘を反映した改稿 | OpenAI / `gpt-5.6-luna` | 前回答全文と改善指示 |
 | 評価AI | 5軸採点 | Claude既定 | 実データ、専門メモ、最終回答 |
 
-専門AI①②③は失敗時にGroqへフォールバックする。Q&A・期間・週次の反証AIはKimi K3からClaude Haikuへフォールバックし、日次反証は最初からClaude Haikuを使う。OpenAI経路のみ、OpenAI、Gemini、Groqの順で試す。評価AIはClaude既定を維持する。
+専門AI①は失敗時に Gemini へ、②③は失敗時に Gemini / Groq へフォールバックする。反証AI④は全 surface で Claude Haiku（→ Gemini → Groq）。統合AI⑤は OpenAI → Gemini → Groq の順。評価AI⑥は Claude 既定を維持する。
 
 ## 9. 回答品質ループ
 

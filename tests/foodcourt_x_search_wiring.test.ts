@@ -165,12 +165,17 @@ test('brief cost is recorded so the estimate can be checked against reality', ()
   assert.match(source, /await recordFoodCourtXTrendUsage\(supabase, storeKey, brief\.usage,/)
 })
 
-test('x_search tokens are not priced at the cheap grok-3-mini rate', () => {
+test('x_search tokens use grok-4.5 rate and include tool call fee', () => {
   const usagePagePath = fileURLToPath(new URL('../public/ai-usage.html', import.meta.url))
   const page = readFileSync(usagePagePath, 'utf8')
   // 同じ provider=grok でも単価が桁違い。model 名で単価を切り替えないと実費を過小表示する。
   assert.match(page, /grok_xsearch:\s*\{\s*inUsd:\s*2\.00,\s*outUsd:\s*6\.00\s*\}/)
   assert.match(page, /x_search\/i\.test\(String\(model \|\| ''\)\) \? 'grok_xsearch' : 'grok'/)
-  // ツール実行料はトークン計算に載らないので、画面上で明示する。
+  // ツール実行料も概算へ加算する。
+  assert.match(page, /X_SEARCH_FEE_PER_CALL_USD\s*=\s*0\.005/)
   assert.match(page, /\$5 \/ 1,000回/)
+  // 現行本番の専門AI①（GPT-OSS）を表示対象に含める。
+  assert.match(page, /openai\/gpt-oss-120b/)
+  assert.doesNotMatch(page, /moonshot:\s*\{\s*inUsd/)
+  assert.doesNotMatch(page, /qwen\/qwen3\.6-27b/)
 })

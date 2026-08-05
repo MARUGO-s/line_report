@@ -44,21 +44,21 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 ├─────────────────┬───────────────────┬──────────────────────────────────┤
 │ 専門AI①         │ 専門AI②           │ 専門AI③                         │
 │ Groq             │ Gemini            │ Grok (xAI)                       │
-│ Qwen 3.6 27B         │ gemini-3.5-flash  │ grok-3-mini                      │
+│ gpt-oss-120b     │ gemini-3.5-flash  │ grok-3-mini                      │
 ├─────────────────┼───────────────────┼──────────────────────────────────┤
 │ 【強みの知識】   │ 【強みの知識】     │ 【強みの知識】                   │
 │                  │                   │                                  │
-│ 数値・統計的     │ 世界の出来事・      │ X（旧Twitter）のリアルタイム      │
-│ パターン分析     │ エンタメ・人物      │ 投稿から学習したトレンド情報      │
+│ 数値・統計的     │ 世界の出来事・      │ 現場で明日打てる打ち手の具体化    │
+│ パターン分析     │ エンタメ・人物      │ （Chat Completions。X検索なし）  │
 │                  │ に関する広範な      │                                  │
-│ 「この数字は     │ 知識               │ 「今この瞬間、世の中で何が        │
-│ 統計的に         │                   │ 流行っているか」                  │
-│ 何を意味するか」 │ 「NiziUとは        │                                  │
-│ を推論           │ どんな客層が       │ 「阪神ファンはどんな人たちか」    │
-│                  │ 来るアーティスト   │ 「今夏の食トレンドは何か」        │
-│ ← 数値分析・    │ か」を知っている   │ を現在進行形で知っている         │
+│ 「この数字は     │ 知識               │ ※最新のX話題は別経路の            │
+│ 統計的に         │                   │  Xトレンドブリーフ（x_search）    │
+│ 何を意味するか」 │ 「NiziUとは        │  が担当する                       │
+│ を推論           │ どんな客層が       │                                  │
+│                  │ 来るアーティスト   │                                  │
+│ ← 数値分析・    │ か」を知っている   │ ← 運営改善（打ち手提案）に最適   │
 │ 他店舗比較に最適 │                   │                                  │
-│                  │ ← イベント・天気   │ ← 運営改善（打ち手提案）に最適   │
+│                  │ ← イベント・天気   │                                  │
 │                  │ 分析に最適         │                                  │
 └─────────────────┴───────────────────┴──────────────────────────────────┘
 ```
@@ -98,10 +98,12 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
   [専門AI①]               [専門AI②]                [専門AI③]
   数値分析・他店舗比較      イベント・天気              運営改善
   Groq                     Gemini                     Grok (xAI)
-  Qwen 3.6 27B (Alibaba Cloud)       gemini-3.5-flash           grok-3-mini
-  統計的パターン知識         エンタメ・世界知識          リアルタイムトレンド知識
+  openai/gpt-oss-120b      gemini-3.5-flash           grok-3-mini
+  統計的パターン知識         エンタメ・世界知識          現場打ち手の具体化
   最大700トークン出力        最大700トークン出力         最大700トークン出力
          │                       │                          │
+         │                       │                   (+ 並列) Xトレンドブリーフ
+         │                       │                   grok-4.5 + x_search
          └──────────┬────────────┘                          │
                      ▼                                       │
            [反証AI④]                                        │
@@ -199,15 +201,16 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
 | 項目 | 内容 |
 |---|---|
 | プロバイダー | Groq |
-| モデル | `qwen/qwen3.6-27b`（Alibaba Cloud Qwen 3.6 27B。`FOODCOURT_GROQ_MODEL`環境変数で変更可） |
-| フォールバック | `openai/gpt-oss-120b` |
+| モデル | `openai/gpt-oss-120b`（`FOODCOURT_GROQ_MODEL`環境変数で変更可。未設定時も同モデル） |
+| フォールバック | Gemini（`buildFoodCourtProviderOrder('groq')`） |
 | 最大出力 | 600〜700トークン |
 | 出力用途 | 統合AIへの「分析メモ（下書き）」 |
 
-**Groq/Qwenを使う理由:**
-- Qwen 3.6 27BはGroqアカウントで利用可能な非OpenAI系モデルで、数値・統計の推論タスクと長い入力コンテキストに適する
+**Groq / GPT-OSS を使う理由:**
+- GPT-OSS 120B は数値・統計の推論と長い入力コンテキストに適する本番安定枠
 - Groqの専用ハードウェア（LPU）による超高速推論（他の2専門AIと並列実行するため速度が重要）
 - **「数字と数字の関係性から意味を引き出す」という分析的思考が強み**
+- 失敗時は Gemini へ退避し、専門AI①だけが全滅しないようにする
 
 **担当する分析タスク:**
 1. 客単価・順位が業態（競合プロファイル）から見て妥当か想定外かを判定
@@ -288,22 +291,21 @@ X の最新トレンドは後者が担当し、その結果を統合AIの材料�
 
 ---
 
-### 反証AI④ ── 品質管理・反証専門（surface別）
+### 反証AI④ ── 品質管理・反証専門（Claude）
 
 | 項目 | 内容 |
 |---|---|
-| Q&A・期間・週次 | Moonshot `kimi-k3` → Claude `claude-haiku-4-5` |
-| 日次 | Claude `claude-haiku-4-5` → Groq |
-| Kimiモデル設定 | `FOODCOURT_MOONSHOT_MODEL`環境変数（既定 `kimi-k3`） |
-| APIキー変数 | `MOONSHOT_API_KEY` |
-| 最大出力 | 550〜650トークン |
+| 全 surface（Q&A・日次・期間・週次） | Claude `claude-haiku-4-5` → Gemini → Groq |
+| モデル設定 | `FOODCOURT_CLAUDE_MODEL` / `CLAUDE_MODEL`（既定 `claude-haiku-4-5`） |
+| APIキー変数 | `claude_haiku` / `CLAUDE_HAIKU` / `ANTHROPIC_API_KEY` |
+| 最大出力 | 550〜650トークン（日次は timeout 15秒、他 surface は 25秒） |
 | 出力用途 | 統合AIへの「反証メモ」 |
 
-**Kimi K3を優先し、Claude Haikuをフォールバックにする理由:**
-- Q&A・期間・週次は入力コンテキストが大きく、複数の論点や期間横断の因果候補を監査する必要があるため、Kimi K3の長文脈・推論能力を使う。`temperature=1`（モデル制約）・`reasoning_effort=low`で運用する。
-- 日次は対象日が限定され変化も小さいため、深い推論より速度・安定性・コストを優先してClaude Haikuを使う。
-- Kimiがタイムアウト・残高不足・API障害・空本文になった場合は、実績のあるClaude Haikuへ自動退避する。
-- 評価AI⑥は引き続きClaude Haikuのため、採点基準の安定性は維持する。
+**Claude Haiku を全 surface で使う理由:**
+- 言い過ぎ・因果断定・日付ずれの検出に、Anthropic API の Claude Haiku を統一する。
+- 日次は定型の単日サマリーのため timeout を短めに、Q&A・期間・週次はコンテキストが厚いため timeout を長めにする。
+- 評価AI⑥も Claude Haiku のため、反証と採点の基準が揃う。
+- 反証メモは統合AIへの編集指示であり、最終回答そのものではない。
 
 **担当する分析タスク:**
 専門AI①②③のメモに含まれる以下の問題を検出する:
@@ -350,12 +352,13 @@ X の最新トレンドは後者が担当し、その結果を統合AIの材料�
 
 | エージェント | プロバイダー | モデル | 選定の核心理由 |
 |---|---|---|---|
-| 専門AI① 数値分析 | Groq | qwen/qwen3.6-27b | 数学・推論に強い非OpenAI系（Alibaba Cloud）。プロバイダ多様性を確保しつつ数値統計パターン推論に適合 |
+| 専門AI① 数値分析 | Groq | openai/gpt-oss-120b | 数値統計パターン推論に適合。高速推論。失敗時は Gemini へ |
 | 専門AI② イベント・天気 | Google | gemini-3.5-flash | アーティスト・スポーツ等の世界知識が最も豊富 |
 | **専門AI③ 運営改善** | **xAI** | **grok-3-mini** | 現場で明日打てる施策の具体化。Chat Completions 経由のため **X検索は行わない**（学習済み知識のみ） |
 | **③' Xトレンドブリーフ** | **xAI** | **grok-4.5** (`x_search`) | **Responses API で X を実際に検索**。指定期間の話題を引用URL付きで取得し統合AIへ渡す。検索証跡が無い応答は破棄 |
-| 反証AI④ 品質管理 | surface別 | Q&A/期間/週次: kimi-k3 → Haiku、日次: Haiku | 深いコンテキストだけKimiを使い、定型日次は速度・コストを優先 |
+| 反証AI④ 品質管理 | Anthropic | claude-haiku-4-5 | 全 surface で統一。言い過ぎ・因果断定の監査 |
 | 統合AI⑤ 最終生成 | OpenAI | gpt-5.6-luna | 複数AIメモの矛盾解消・統合整形を担当 |
+| 評価AI⑥ 品質採点 | Anthropic | claude-haiku-4-5 | 5軸JSON採点。合否はコード側で再判定 |
 
 ---
 
@@ -579,10 +582,10 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | 変数名 | 用途 | 現在の設定 |
 |---|---|---|
 | `GROQ_API_KEY` | Groq API認証（専門AI①） | 設定済み |
-| `FOODCOURT_GROQ_MODEL` | 専門AI①のモデル名（フードコート専用） | 未設定（デフォルト: `qwen/qwen3.6-27b`） |
-| `GEMINI_API_KEY` | Gemini API認証（専門AI②） | 設定済み |
+| `FOODCOURT_GROQ_MODEL` | 専門AI①のモデル名（フードコート専用） | 未設定（デフォルト: `openai/gpt-oss-120b`） |
+| `GEMINI_API_KEY` | Gemini API認証（専門AI②） | 設定済み（有料API想定） |
 | `FOODCOURT_GEMINI_MODEL` | 専門AI②のモデル名 | `gemini-3.5-flash` |
-| `XAI_API_KEY` | xAI API認証（専門AI③） | **設定済み** |
+| `XAI_API_KEY` | xAI API認証（専門AI③・Xトレンド） | **設定済み** |
 | `FOODCOURT_GROK_MODEL` | 専門AI③のモデル名 | 未設定（デフォルト: `grok-3-mini`） |
 | `FOODCOURT_X_SEARCH_ENABLED` | Xトレンドブリーフの有効/無効 | 未設定（デフォルト: **有効**）。`false` で停止 |
 | `FOODCOURT_X_SEARCH_SOFT_TIMEOUT_MS` | ブリーフを待つ上限。超えたら無しで分析続行 | 未設定（デフォルト: `18000`、上限60000） |
@@ -593,6 +596,10 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 | `GROK_X_SEARCH_MAX_OUTPUT_TOKENS` | ブリーフの出力上限。grok-4.5 は reasoning も算入されるため小さすぎると本文が出ない | 未設定（デフォルト: `3000`、下限600/上限8000） |
 | `FOODCOURT_X_SEARCH_TOPIC` | **Xで何を検索するか**。デプロイせずに調整できる | 未設定（デフォルト: 下記の食トレンド4観点） |
 | `FOODCOURT_X_SEARCH_ASK_INTENT_GATE` | Q&Aで、トレンドと無関係な質問はX検索を省く | 未設定（デフォルト: **有効**） |
+| `claude_haiku` | Claude API認証（反証AI④・評価AI⑥） | 設定済み |
+| `FOODCOURT_CLAUDE_MODEL` | 反証AI④／評価AI⑥のClaudeモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
+| `OPENAI_API_KEY` | OpenAI API認証（統合AI⑤） | 設定済み |
+| `FOODCOURT_OPENAI_MODEL` | 統合AI⑤のモデル名 | `gpt-5.6-luna` |
 
 **質問による切り替え（2026-08-04 追加）**: Q&Aは1回$0.09かかるため、全質問で検索すると無駄が大きい。journal 側で実装・テスト済みの意図分類（`classifyJournalChatIntent`）を流用し、`data`（事実照会）と判定された質問では**検索そのものを行わない（課金ゼロ）**。`strategy` / `mixed` のときだけ走る。
 
@@ -605,24 +612,16 @@ https://marugo-s.github.io/line_report/foodcourt-evolution.html
 定期サマリー（日次/期間/週次）は質問が無いので、常に固定トピックで走る（キャッシュ共有で1日1検索）。
 
 **検索対象の考え方（2026-08-04 変更）**: 当初は「東京ドーム／東京ドームシティの来場者の話題」に絞っていたが、**この範囲はX上の投稿数が足りず拾える話題が痩せる**。会場のイベント・客層は専門AI②が `tokyo_dome_events` から取得しており、Xで補う必要がない。Xにしか無いのは「いま何が食べられ、どう見せられ、どう語られているか」なので、地域を東京〜全国に広げ、**メニュー・商品の方向性に効く食トレンド**を主対象にしている（①スパイスカレー・カレー全般 ②ワインの飲まれ方 ③フードコート/商業施設内飲食の人気メニュー ④SNSでの見せ方・季節需要）。`max_tool_calls` の範囲で観点ごとに複数回検索する。
-| `claude_haiku` | Claude API認証（日次反証・Kimiフォールバック・評価AI⑥） | 設定済み |
-| `FOODCOURT_CLAUDE_MODEL` | 日次反証/フォールバック/評価AI⑥のClaudeモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
-| `OPENAI_API_KEY` | OpenAI API認証（統合AI⑤） | 設定済み |
-| `FOODCOURT_OPENAI_MODEL` | 統合AI⑤のモデル名 | `gpt-5.6-luna` |
-| `MOONSHOT_API_KEY` | Moonshot(Kimi) API認証（Q&A・期間・週次の反証AI④） | **設定済み・稼働確認済み** |
-| `FOODCOURT_MOONSHOT_MODEL` | Q&A・期間・週次の反証AI④モデル | `kimi-k3` |
-
-> **Kimi K3実測仕様**: 国際版 `https://api.moonshot.ai/v1` を使用。`temperature=1`のみ許可。推論強度は `reasoning_effort=low`。コンテキストは1,048,576トークン。Q&A・期間・週次の反証で使用し、失敗時はClaude Haikuへフォールバックする。日次反証は最初からClaude Haiku。
 
 ### フォールバック優先順位
 
 ```
 統合AI⑤（openai preferred）: openai → gemini → groq
 専門AI②（gemini preferred）: gemini → groq
-反証AI④（Q&A・期間・週次）: moonshot(kimi-k3) → claude(claude-haiku-4-5)
-反証AI④（日次）          : claude(claude-haiku-4-5) → groq
-専門AI③（grok preferred）  : grok → groq
-専門AI①（groq preferred）  : groq(qwen/qwen3.6-27b) → groq(openai/gpt-oss-120b)
+反証AI④（claude preferred）: claude(claude-haiku-4-5) → gemini → groq
+専門AI③（grok preferred）  : grok → gemini → groq
+専門AI①（groq preferred）  : groq(openai/gpt-oss-120b) → gemini
+評価AI⑥（claude preferred）: claude → gemini → groq（評価専用 deadline あり）
 Xトレンドブリーフ③'        : grok(x_search) → フォールバック無し（取得できなければブロックごと省略）
 ```
 
@@ -638,12 +637,12 @@ Xトレンドブリーフだけはフォールバック先を持たない。他�
 
 | AI | プロバイダー | モデル | 入力/1M | 出力/1M |
 |---|---|---|---|---|
-| 専門AI① | Groq | qwen/qwen3.6-27b | $0.29 | $0.59 |
+| 専門AI① | Groq | openai/gpt-oss-120b | （Groq GPT-OSS 単価。`ai-usage.html` 参照） | 同左 |
 | 専門AI② | Google | gemini-3.5-flash | $1.50 | $9.00 |
 | **専門AI③** | **xAI** | **grok-3-mini** | **$0.30** | **$0.50** |
-| 反証AI④（Q&A・期間・週次） | Moonshot | kimi-k3 | $3.00（キャッシュヒット$0.30） | $15.00 |
-| 反証AI④（日次）/ Kimiフォールバック / 評価AI⑥ | Anthropic | claude-haiku-4-5 | $1.00 | $5.00 |
+| 反証AI④ / 評価AI⑥ | Anthropic | claude-haiku-4-5 | $1.00 | $5.00 |
 | 統合AI⑤ | OpenAI | gpt-5.6-luna | $1.00 | $6.00 |
+| Xトレンド③' | xAI | grok-4.5 + x_search | トークン課金＋ x_search 実行料（別建て） | — |
 
 ### 月額試算（約55回/月のパイプライン実行）
 
@@ -657,7 +656,7 @@ Xトレンドブリーフだけはフォールバック先を持たない。他�
 | OpenAI 統合AI⑤ | 約$0.97 |
 | **合計** | **約$2.5〜（約380円〜）** |
 
-※ Groqから Grok 3 miniへの変更により、コストは微減（約$0.06/月の削減）。
+※ 単価は変動するため、実測の集計は `ai-usage.html` を正とする。
 
 ※ **Xトレンドブリーフの費用内訳（2026-08-04 本番実測）**: `grok-4.5` は入力$2.00／出力$6.00 per 1M（`grok-3-mini` の約7〜12倍）。さらに **`x_search` はトークンとは別に $5 / 1,000回（$0.005/回）** が課金される。
 
