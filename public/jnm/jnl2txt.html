@@ -1269,6 +1269,113 @@
   .ai-btn:hover {
     background: linear-gradient(135deg, var(--rv-accent-700, #7d5411), var(--rv-accent-700, #7d5411));
   }
+  .ai-loading-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 28px;
+    color: var(--text-2, #9aa3ad);
+  }
+  .ai-loading-mark {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--rv-accent, #b68235) 8%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--rv-accent, #b68235) 22%, var(--border-sub));
+  }
+  .ai-loading-spinner {
+    display: block;
+    width: 16px;
+    height: 16px;
+    border: 2.5px solid color-mix(in srgb, var(--rv-accent, #b68235) 22%, transparent);
+    border-radius: 50%;
+    border-top-color: var(--rv-accent, #b68235);
+    animation: ai-loading-spin .85s linear infinite;
+  }
+  .ai-loading-label {
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    color: var(--text-2, #9aa3ad);
+    white-space: nowrap;
+  }
+  .ai-loading-dots {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 2px;
+    vertical-align: baseline;
+  }
+  .ai-loading-dots i {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: .25;
+    animation: ai-loading-dot 1.2s ease-in-out infinite;
+  }
+  .ai-loading-dots i:nth-child(2) { animation-delay: .15s; }
+  .ai-loading-dots i:nth-child(3) { animation-delay: .3s; }
+  .ai-loading-dots i:nth-child(4) { animation-delay: .45s; }
+  .ai-loading-wrap.is-multi {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 2px 0;
+  }
+  .ai-loading-agents {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ai-loading-agent {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px 6px 7px;
+    border-radius: 10px;
+    border: 1px solid var(--border-sub);
+    background: color-mix(in srgb, var(--rv-text) 3%, var(--surface));
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text-2);
+    animation: ai-loading-agent-pulse 1.8s ease-in-out infinite;
+  }
+  .ai-loading-agent:nth-child(2) { animation-delay: .2s; }
+  .ai-loading-agent:nth-child(3) { animation-delay: .4s; }
+  .ai-loading-agent .ai-loading-spinner {
+    width: 14px;
+    height: 14px;
+    border-width: 2px;
+  }
+  .ai-loading-agent[data-role='data'] .ai-loading-spinner {
+    border-color: color-mix(in srgb, #5b8def 25%, transparent);
+    border-top-color: #5b8def;
+  }
+  .ai-loading-agent[data-role='web'] .ai-loading-spinner {
+    border-color: color-mix(in srgb, #3db88a 25%, transparent);
+    border-top-color: #3db88a;
+    animation-duration: 1.05s;
+  }
+  .ai-loading-agent[data-role='x'] .ai-loading-spinner {
+    border-color: color-mix(in srgb, #c28d41 25%, transparent);
+    border-top-color: #c28d41;
+    animation-duration: 1.25s;
+    animation-direction: reverse;
+  }
+  .ai-loading-agent[data-role='synth'] .ai-loading-spinner {
+    border-color: color-mix(in srgb, #a78bfa 25%, transparent);
+    border-top-color: #a78bfa;
+    animation-duration: .7s;
+  }
+  .ai-loading-wrap.is-multi .ai-loading-label {
+    font-size: 12.5px;
+  }
+  /* 後方互換: 旧クラスが残っていても動く */
   .ai-loading {
     display: inline-block;
     width: 20px;
@@ -1276,7 +1383,18 @@
     border: 3px solid rgba(182,130,53,0.2);
     border-radius: 50%;
     border-top-color: var(--rv-accent, #b68235);
-    animation: spin 1s ease-in-out infinite;
+    animation: ai-loading-spin 1s ease-in-out infinite;
+  }
+  @keyframes ai-loading-spin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes ai-loading-dot {
+    0%, 80%, 100% { opacity: .22; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-1px); }
+  }
+  @keyframes ai-loading-agent-pulse {
+    0%, 100% { opacity: .72; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(-1px); }
   }
   @keyframes spin {
     to { transform: rotate(360deg); }
@@ -13843,6 +13961,9 @@ ${buildStoreLocationBlockForAi()}
 
   try {
     if (!AI_CLIENT) throw new Error('AI通信モジュールを読み込めません。');
+    // 戦略・混合は Perplexity / Grok が並列で走るので、待ち表示も複数AI向けに切り替える。
+    const chatIntent = classifyJournalChatIntentClient(resolvedChatQuery);
+    setAiChatLoadingMode(loadingId, chatIntent === 'strategy' || chatIntent === 'mixed');
     const aiResponse = await AI_CLIENT.request(AI_ENDPOINT, {
         action: 'chat',
         message: resolvedChatQuery,
@@ -14219,16 +14340,56 @@ async function renderAiChatPdfHistory() {
   }
 }
 
-function appendAiChatLoading() {
+function classifyJournalChatIntentClient(message) {
+  // server journal_ai_orchestrate.ts と同じ判定。戦略・混合時だけ外部AIが並列で走る。
+  const q = String(message || '').trim();
+  if (!q) return 'data';
+  const hasData = /(売上|売り上げ|客数|客単価|比率|構成比|何円|いくら|合計|推移|比較|何が売|売れ筋|ランキング|点数|件数|フード|ドリンク|飲料|グラス|ボトル|月間|日別|\d{4}\s*年|\d{4}-?\d{2}|TOP\s*\d+)/i.test(q);
+  const hasStrategy = /(対策|戦略|施策|改善|打開|どうすれば|どうしたら|アドバイス|提案|おすすめ|経営|トレンド|流行|他店|業界|事例|ペアリング|アップセル|クロスセル|集客|プロモ|SNS|X\b|ツイート|Twitter|検索|調べて|外部|市場)/i.test(q);
+  if (hasData && hasStrategy) return 'mixed';
+  if (hasStrategy) return 'strategy';
+  return 'data';
+}
+
+function buildAiChatLoadingHtml(multi) {
+  if (multi) {
+    return '<div class="ai-loading-wrap is-multi" role="status" aria-live="polite" aria-label="複数AIで考察中">' +
+      '<div class="ai-loading-agents">' +
+        '<div class="ai-loading-agent" data-role="data"><span class="ai-loading-spinner" aria-hidden="true"></span><span>数値AI</span></div>' +
+        '<div class="ai-loading-agent" data-role="web"><span class="ai-loading-spinner" aria-hidden="true"></span><span>Web知見</span></div>' +
+        '<div class="ai-loading-agent" data-role="x"><span class="ai-loading-spinner" aria-hidden="true"></span><span>X検索</span></div>' +
+        '<div class="ai-loading-agent" data-role="synth"><span class="ai-loading-spinner" aria-hidden="true"></span><span>統合</span></div>' +
+      '</div>' +
+      '<div class="ai-loading-label">複数AIで考察中<span class="ai-loading-dots" aria-hidden="true"></span></div>' +
+    '</div>';
+  }
+  return '<div class="ai-loading-wrap" role="status" aria-live="polite" aria-label="考察中">' +
+    '<div class="ai-loading-mark"><span class="ai-loading-spinner" aria-hidden="true"></span></div>' +
+    '<div class="ai-loading-label">考察中<span class="ai-loading-dots" aria-hidden="true"></span></div>' +
+  '</div>';
+}
+
+function appendAiChatLoading(opts) {
   const container = document.getElementById('aiChatMessages');
   const div = document.createElement('div');
   const id = 'ai-loading-' + Date.now();
+  const multi = !!(opts && opts.multi);
   div.id = id;
   div.className = 'ai-msg-ai';
-  div.innerHTML = '<div class="ai-loading"></div>';
+  div.dataset.loadingMode = multi ? 'multi' : 'single';
+  div.innerHTML = buildAiChatLoadingHtml(multi);
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return id;
+}
+
+function setAiChatLoadingMode(id, multi) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const next = multi ? 'multi' : 'single';
+  if (el.dataset.loadingMode === next) return;
+  el.dataset.loadingMode = next;
+  el.innerHTML = buildAiChatLoadingHtml(multi);
 }
 
 function removeAiChatLoading(id) {
