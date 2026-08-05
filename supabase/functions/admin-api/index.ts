@@ -9163,6 +9163,94 @@ async function searchPosJournalProductsFromIndex(
   const last = hits.length ? hits[hits.length - 1] : null
   const nameVariants = [...new Set(hits.map((h) => h.display_name))].slice(0, 20)
 
+  // 同一商品コードで名称が変わった過去行（例: 2103=八つ星→季の美）。
+  // 質問名称の by_month には混ぜず、別フィールドで返す。
+  const matchedNorms = new Set(hits.map((h) => h.product_name_norm).filter(Boolean))
+  const codes = [...new Set(
+    hits.map((h) => String(h.product_code || "").trim()).filter((c) => c.length >= 4),
+  )].slice(0, 8)
+  type CodeLinkedAlias = {
+    name: string
+    code: string
+    unit: number
+    total_qty: number
+    total_amount: number
+    first_month: string
+    last_month: string
+    by_month: Array<{ year_month: string; qty: number; amount: number }>
+  }
+  const codeLinkedMap = new Map<string, CodeLinkedAlias>()
+  for (const code of codes) {
+    const codeDigits = code.replace(/\D/g, "")
+    if (codeDigits.length < 4) continue
+    const { data: linkedRows, error: linkedError } = await supabase
+      .from("journal_product_monthly_index")
+      .select(
+        "year_month, product_name_norm, display_name, product_code, unit_price, qty, amount",
+      )
+      .eq("store_partition_key", storeKey)
+      .ilike("product_code", `%${codeDigits.slice(-6)}%`)
+      .order("year_month", { ascending: true })
+      .limit(200)
+    if (linkedError) {
+      console.warn("code-linked alias lookup failed:", linkedError.message)
+      continue
+    }
+    for (const row of linkedRows || []) {
+      if (!isRecord(row)) continue
+      const norm = String(row.product_name_norm || "")
+      const display = String(row.display_name || "")
+      const rowCode = String(row.product_code || "")
+      const rowDigits = rowCode.replace(/\D/g, "")
+      if (
+        !rowDigits.endsWith(codeDigits) &&
+        rowDigits !== codeDigits &&
+        !codeDigits.endsWith(rowDigits)
+      ) {
+        continue
+      }
+      if (matchedNorms.has(norm)) continue
+      if (filter.joinedQ && norm.includes(filter.joinedQ)) continue
+      const unit = toNonNegativeInteger(row.unit_price)
+      const key = `${display}|${rowCode}|${unit}`
+      let alias = codeLinkedMap.get(key)
+      if (!alias) {
+        alias = {
+          name: display || norm,
+          code: rowCode,
+          unit,
+          total_qty: 0,
+          total_amount: 0,
+          first_month: String(row.year_month || ""),
+          last_month: String(row.year_month || ""),
+          by_month: [],
+        }
+        codeLinkedMap.set(key, alias)
+      }
+      const ym = String(row.year_month || "")
+      const qty = toNonNegativeInteger(row.qty)
+      const amount = toNonNegativeInteger(row.amount)
+      alias.total_qty += qty
+      alias.total_amount += amount
+      if (ym && ym < alias.first_month) alias.first_month = ym
+      if (ym && ym > alias.last_month) alias.last_month = ym
+      const monthRow = alias.by_month.find((m) => m.year_month === ym)
+      if (monthRow) {
+        monthRow.qty += qty
+        monthRow.amount += amount
+      } else if (ym) {
+        alias.by_month.push({ year_month: ym, qty, amount })
+      }
+    }
+  }
+  const codeLinkedAliases = [...codeLinkedMap.values()]
+    .map((a) => ({
+      ...a,
+      by_month: a.by_month.sort((x, y) => x.year_month.localeCompare(y.year_month)),
+    }))
+    .sort((a, b) => b.total_qty - a.total_qty)
+    .slice(0, 12)
+
   return {
     ok: true,
     store_key: storeKey,
@@ -9204,6 +9292,7 @@ async function searchPosJournalProductsFromIndex(
       .sort((a, b) => b.amount - a.amount || b.qty - a.qty)
       .slice(0, 40),
     by_month: byMonth,
+    code_linked_aliases: codeLinkedAliases,
   }
 }
 

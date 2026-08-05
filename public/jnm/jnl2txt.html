@@ -6911,6 +6911,7 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 【異常月の詳細解析】に高単価コース寄与・単価上昇コースが載っている場合は、その金額・点数・商品名を根拠に述べ、「単体売上が不明／表示されていません」で止めない。
 - 【商品初出・導入月】が載っている場合は、ジャーナル全件横断検索で特定した各ターゲットの初出月・単価帯・前後比較を根拠に述べ、「開始月は表示されていません」で止めない。複数ターゲットがあるときは固有名称の初出と単価帯の初出を混同しない。ファミリー最古で固有商品の開始月を置き換えない。
 - 【商品初出・導入月】に月次の点数・金額が載っている場合は、銘柄・単品の月別売れ行きをその数値で述べよ。売れ筋TOPに無いことや保存レポート商品明細に無いことを理由に「表示されていません／確定できない」で止めない。
+- 【商品初出・導入月】の「同一商品コードの過去・別名」は、質問商品そのものの販売ではない。別名の点数を質問商品の月次へ合算しない。ただし「同じPOSコードで以前は別名称だった」事実として、該当月があれば併記する。
 - 【コースラインナップ】が載っている場合は、単価帯の主力行（名称×単価）と「月次コース販売」を正本にする。店舗ごとにコース商品名は異なる。一部別名の単価帯だけを全コースと誤解し「〇〇円コースが無い」と言ってはいけない。別名トークン群があれば併記する。固有商品の導入前にその固有商品が0点でも、月次コース販売に既存コースがあれば「導入前の対象コース0点」「コースなし」と書いてはいけない。
 - 【コースラインナップ】の「例外・単発特別」は存在を短く触れるに留め、客単価低下などの主因分析には積極的に使わない。「漏れ検知」がある場合は主軸の取りこぼしとして必ず確認する。
 - 【商品初出・導入月】の対象商品の合計点数・売上と、【コースラインナップ】の「主軸コース明細」だけの同一商品合計が一致しない場合は、必ず「例外・単発特別」行を加算して両節の数値を突き合わせ、食い違ったまま両方を並べて出さない。
@@ -10244,7 +10245,10 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
         lastSeen: timeline?.last_seen || null,
         nameVariants: timeline?.name_variants || [],
         unitBands: timeline?.unit_bands || [],
-        byMonth: Array.isArray(timeline?.by_month) ? timeline.by_month : []
+        byMonth: Array.isArray(timeline?.by_month) ? timeline.by_month : [],
+        codeLinkedAliases: Array.isArray(timeline?.code_linked_aliases)
+          ? timeline.code_linked_aliases
+          : []
       };
     } catch (err) {
       return { target, searchHints, error: err?.message || String(err), firstSeen: null };
@@ -10389,11 +10393,23 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
       });
     }
     if ((tf.byMonth || []).length) {
-      lines.push(`${indent}    - 月次:`);
+      lines.push(`${indent}    - 月次（質問名称に一致した行のみ）:`);
       tf.byMonth.slice(-12).forEach((m) => {
         const units = (m.units || []).map((u) => `${yen(u.unit)}×${u.qty}`).join('、');
         lines.push(`${indent}      - ${m.year_month}: ${m.qty}点 / ${yen(m.amount)}${units ? `（${units}）` : ''}`);
       });
+    }
+    if ((tf.codeLinkedAliases || []).length) {
+      lines.push(`${indent}    - 同一商品コードの過去・別名（質問名称そのものの販売ではない）:`);
+      tf.codeLinkedAliases.slice(0, 6).forEach((alias) => {
+        lines.push(
+          `${indent}      - 「${alias.name}」コード ${alias.code || '—'} 単価 ${yen(alias.unit)}: 合計 ${alias.total_qty || 0}点 / ${yen(alias.total_amount || 0)}（${alias.first_month || '—'}〜${alias.last_month || '—'}）`
+        );
+        (alias.by_month || []).slice(-12).forEach((m) => {
+          lines.push(`${indent}        - ${m.year_month}: ${m.qty}点 / ${yen(m.amount)}`);
+        });
+      });
+      lines.push(`${indent}    - ※上記別名はPOSコード再利用の可能性がある。質問商品の月次に合算しないこと`);
     }
   });
 
