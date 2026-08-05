@@ -60,8 +60,15 @@ test('Groq Qwen3.6 fallback disables visible reasoning', () => {
 })
 
 test('specialists and integrators have production-safe timeout budgets', () => {
-  const specialists = source.match(/perProviderMs:\s*15000,\s*fallbackLog:\s*\{[^}]*role:\s*'specialist_/g) ?? []
+  // 2026-08-05: 専門AIを15秒→25秒に延長。15秒では ask のプロンプトが厚い回に
+  // Gemini(specialist_ext)が毎回 timeout し、Groq へ落ちていた（実測5件すべて同一パターン）。
+  // 専門AI3本はXトレンドブリーフと同じ Promise.all にあり、ブリーフが最大40秒待つため
+  // 25秒に上げても Promise.all の上限は変わらず、待ち時間は増えない。
+  const specialists = source.match(/perProviderMs:\s*25000,\s*fallbackLog:\s*\{[^}]*role:\s*'specialist_/g) ?? []
   assert.equal(specialists.length, 12) // 3 specialists × 4 surfaces
   const integrators = source.match(/perProviderMs:\s*25000,\s*fallbackLog:\s*\{[^}]*role:\s*'integrator'/g) ?? []
   assert.equal(integrators.length, 4)
+  // 日次の反証AI(Claude Haiku)は定型処理なので15秒のまま。
+  const dailyCritic = source.match(/perProviderMs:\s*15000,\s*fallbackLog:\s*\{[^}]*role:\s*'critic'/g) ?? []
+  assert.equal(dailyCritic.length, 1)
 })
