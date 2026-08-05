@@ -6,40 +6,39 @@ import { fileURLToPath } from 'node:url'
 const sourcePath = fileURLToPath(new URL('../supabase/functions/_shared/foodcourt_compare.ts', import.meta.url))
 const source = readFileSync(sourcePath, 'utf8')
 
-test('Moonshot Kimi K3 chat uses the verified API constraints', () => {
+test('Moonshot client remains available but is not the preferred critic', () => {
+  // 旧クライアントは残すが、反証AI④の希望先には使わない（社内データの送信回避）。
   assert.match(source, /https:\/\/api\.moonshot\.ai\/v1\/chat\/completions/)
-  assert.match(source, /temperature:\s*1/)
-  assert.match(source, /reasoning_effort:\s*'low'/)
   assert.match(source, /FOODCOURT_MOONSHOT_MODEL/)
-  assert.match(source, /\|\|\s*'kimi-k3'/)
+  assert.doesNotMatch(
+    source,
+    /criticRes = await foodCourtAiChat\([^\n]*,\s*(?:650|550|500),\s*'moonshot'/,
+  )
 })
 
-test('ask/period/weekly critic④ use Moonshot Kimi with Claude Haiku then Groq fallback', () => {
+test('all four surfaces use Claude Haiku for critic④', () => {
   assert.match(
     source,
-    /preferred === 'moonshot'[\s\S]{0,120}return \['moonshot',\s*'claude',\s*'groq'\]/,
+    /preferred === 'claude'[\s\S]{0,80}return \['claude',\s*'gemini',\s*'groq'\]/,
   )
-  // Deep-context surfaces (ask=650, period=550, weekly=500) route to Moonshot.
-  const kimiCritics = source.match(
-    /criticRes = await foodCourtAiChat\([^\n]*,\s*(?:650|550|500),\s*'moonshot',[^\n]*perProviderMs:\s*25000/g,
+  const deepCritics = source.match(
+    /criticRes = await foodCourtAiChat\([^\n]*,\s*(?:650|550|500),\s*'claude',[^\n]*perProviderMs:\s*25000/g,
   ) ?? []
-  assert.equal(kimiCritics.length, 3)
-})
-
-test('daily critic④ stays Claude Haiku (routine summary)', () => {
-  const claudeCritics = source.match(
-    /criticRes = await foodCourtAiChat\([^\n]*,\s*550,\s*'claude',[^\n]*perProviderMs:\s*15000[^\n]*\)/g,
+  assert.equal(deepCritics.length, 3) // ask / period / weekly
+  const dailyCritics = source.match(
+    /criticRes = await foodCourtAiChat\([^\n]*,\s*550,\s*'claude',[^\n]*perProviderMs:\s*15000/g,
   ) ?? []
-  assert.equal(claudeCritics.length, 1)
+  assert.equal(dailyCritics.length, 1)
 })
 
 test('quality evaluator⑥ remains Claude by default', () => {
   assert.match(source, /evaluatorProvider[\s\S]{0,250}:\s*'claude'/)
-  // model_version records Claude only for daily; ask/period/weekly record Kimi->Claude.
-  assert.match(source, /params\.surface === 'daily_summary'\s*\?\s*resolveFoodCourtClaudeModel\(\)\s*:\s*`\$\{resolveFoodCourtMoonshotModel\(\)\}->\$\{resolveFoodCourtClaudeModel\(\)\}`/)
+  // model_version は全 surface で Claude のみを記録する。
+  assert.match(source, /const criticLabel = resolveFoodCourtClaudeModel\(\)/)
+  assert.doesNotMatch(source, /resolveFoodCourtMoonshotModel\(\)\}->\$\{resolveFoodCourtClaudeModel/)
 })
 
-test('Moonshot usage is recorded under its own provider and separates reasoning tokens', () => {
+test('Moonshot usage helpers remain for historical logs', () => {
   assert.match(source, /provider:\s*'moonshot'/)
   assert.match(source, /completion_tokens_details/)
   assert.match(source, /reasoning_tokens/)
@@ -53,7 +52,7 @@ test('all four final integrators share the fixed action format rule', () => {
   assert.match(source, /判定・中止ライン/)
 })
 
-test('Groq Qwen3.6 fallback disables visible reasoning', () => {
+test('Groq Qwen3.6 fallback disables visible reasoning when that model is used', () => {
   assert.match(source, /isQwen36/)
   assert.match(source, /reasoning_effort:\s*'none'/)
   assert.match(source, /reasoning_format:\s*'hidden'/)
@@ -78,6 +77,7 @@ test('evaluator avoids all-failed by keeping a dedicated deadline and Claude→G
   assert.match(source, /export function buildFoodCourtProviderOrder/)
   assert.match(source, /export function foodCourtEvalDeadlineAt/)
   assert.match(source, /preferred === 'claude'[\s\S]{0,80}return \['claude',\s*'gemini',\s*'groq'\]/)
+  assert.match(source, /preferred === 'groq'[\s\S]{0,80}return \['groq',\s*'gemini'\]/)
   assert.match(source, /deadlineAt:\s*foodCourtEvalDeadlineAt\(params\.deadlineAt\)/)
   assert.match(source, /perProviderMs:\s*18000/)
   assert.match(source, /FALLBACK_SLOT_MS\s*=\s*10_000/)

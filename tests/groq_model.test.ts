@@ -15,6 +15,7 @@ test('Groq text model defaults to GPT-OSS 120B', () => {
 test('retired Groq model values cannot be re-enabled through environment variables', () => {
   assert.equal(resolveGroqTextModel('llama-3.3-70b-versatile'), GROQ_TEXT_PRIMARY_MODEL)
   assert.equal(resolveGroqTextModel('META-LLAMA/LLAMA-4-SCOUT-17B-16E-INSTRUCT'), GROQ_TEXT_PRIMARY_MODEL)
+  assert.equal(resolveGroqTextModel('qwen/qwen3.6-27b'), GROQ_TEXT_PRIMARY_MODEL)
 })
 
 test('an explicitly configured supported model is preserved', () => {
@@ -26,13 +27,11 @@ test('Groq text fallback is pinned to a production-tier model', () => {
   assert.equal(GROQ_TEXT_FALLBACK_MODEL, 'openai/gpt-oss-120b')
 })
 
-test('foodcourt specialist①: Qwen default is used when FOODCOURT_GROQ_MODEL is unset', () => {
-  assert.equal(GROQ_TEXT_FOODCOURT_MODEL, 'qwen/qwen3.6-27b')
-  // Empty/unset env → falls back to the provided Qwen default (provider diversity).
+test('foodcourt specialist① defaults to GPT-OSS 120B (not Qwen)', () => {
+  assert.equal(GROQ_TEXT_FOODCOURT_MODEL, 'openai/gpt-oss-120b')
   assert.equal(resolveGroqTextModel(undefined, GROQ_TEXT_FOODCOURT_MODEL), GROQ_TEXT_FOODCOURT_MODEL)
   assert.equal(resolveGroqTextModel('', GROQ_TEXT_FOODCOURT_MODEL), GROQ_TEXT_FOODCOURT_MODEL)
-  // Retired values also fall back to Qwen when it is the provided default.
+  // 旧 Qwen 既定が env に残っていても GPT-OSS へ強制退避する。
+  assert.equal(resolveGroqTextModel('qwen/qwen3.6-27b', GROQ_TEXT_FOODCOURT_MODEL), GROQ_TEXT_FOODCOURT_MODEL)
   assert.equal(resolveGroqTextModel('llama-3.3-70b-versatile', GROQ_TEXT_FOODCOURT_MODEL), GROQ_TEXT_FOODCOURT_MODEL)
-  // An explicit valid override still wins.
-  assert.equal(resolveGroqTextModel('openai/gpt-oss-120b', GROQ_TEXT_FOODCOURT_MODEL), 'openai/gpt-oss-120b')
 })
