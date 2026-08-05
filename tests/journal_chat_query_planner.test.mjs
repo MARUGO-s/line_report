@@ -721,14 +721,21 @@ test('both Journal Report entry files keep the planner and error distinction in 
   assert.match(html, /データが無いとは判断していません/);
   assert.match(html, /local-query-planner/);
   assert.match(html, /href="\.\/ai-usage\.html"/);
-  assert.match(html, /AI使用量/);
-  assert.match(aiUsageHtml, /AI使用量/);
+  assert.match(html, /AI使用量（管理者）/);
+  assert.match(html, /updateAdminOnlyToolButtons/);
+  assert.match(aiUsageHtml, /AI使用量（管理者）/);
+  assert.match(aiUsageHtml, /isFullAdminSession/);
   assert.match(aiUsageHtml, /\/usage\/ai-cost/);
   assert.match(aiUsageHtml, /journal/);
   assert.match(aiAnalyzeSource, /surface:\s*['"]journal['"]/);
   assert.match(aiAnalyzeSource, /recordJournalAiUsage/);
   assert.match(adminApiSource, /journal:\s*\{/);
-  assert.match(adminApiSource, /["']\/usage\/ai-cost["']/);
+  assert.match(adminApiSource, /path === ["']\/usage\/ai-cost["']/);
+  assert.doesNotMatch(
+    adminApiSource,
+    /STORE_SCOPED_ALLOWED_PATHS[\s\S]{0,2500}\/usage\/ai-cost/,
+    'store-scoped sessions must not be able to read AI usage',
+  );
   assert.match(naturalClarificationRequestSource, /action:\s*['"]clarify['"]/);
   assert.match(naturalClarificationRequestSource, /purpose:\s*['"]clarification_only['"]/);
   assert.doesNotMatch(naturalClarificationRequestSource, /salesData\s*:/);

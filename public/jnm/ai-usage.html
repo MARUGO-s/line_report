@@ -157,8 +157,12 @@
   </nav>
 
   <main class="wrap">
-    <h1>AI使用量</h1>
-    <p class="lead">Journal Report の AI分析・AIチャット・確認質問などで使った<strong>実測トークン</strong>と概算費用です。管理画面の全体 AI使用料とは別に、ジャーナル用途（surface: journal / pos_journal）だけを集計します。</p>
+    <h1>AI使用量（管理者）</h1>
+    <p class="lead">Journal Report の AI分析・AIチャット・確認質問などで使った<strong>実測トークン</strong>と概算費用です。閲覧は<strong>フル管理者のみ</strong>です。管理画面の全体 AI使用料とは別に、ジャーナル用途（surface: journal / pos_journal）だけを集計します。</p>
+
+    <section id="adminOnlyNotice" class="panel" hidden>
+      <p class="note" style="margin:0;font-size:14px;color:var(--danger);font-weight:600;">このページはフル管理者のみ閲覧できます。店舗用ログインでは AI使用量を表示しません。</p>
+    </section>
 
     <section id="authCard" class="auth-card" hidden>
       <label for="tokenInput">管理トークンで接続してください（または LINE の最新リンクから開いてください）</label>
@@ -169,41 +173,43 @@
       <div id="authMsg" class="auth-msg"></div>
     </section>
 
-    <div class="toolbar">
-      <div class="tabs" id="periodTabs" role="tablist">
-        <button type="button" class="tab active" data-period="this-month">当月</button>
-        <button type="button" class="tab" data-period="last-month">先月</button>
-        <button type="button" class="tab" data-period="all">全期間</button>
+    <div id="usageMain">
+      <div class="toolbar">
+        <div class="tabs" id="periodTabs" role="tablist">
+          <button type="button" class="tab active" data-period="this-month">当月</button>
+          <button type="button" class="tab" data-period="last-month">先月</button>
+          <button type="button" class="tab" data-period="all">全期間</button>
+        </div>
+        <span class="tag mono" id="periodTag">—</span>
+        <a class="btn" href="../ai-usage.html" style="margin-left:auto;">全体のAI使用料</a>
       </div>
-      <span class="tag mono" id="periodTag">—</span>
-      <a class="btn" href="../ai-usage.html" style="margin-left:auto;">全体のAI使用料</a>
+
+      <div id="status" class="status">トークンを確認しています…</div>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="l">概算費用（円）</div>
+          <div class="v" id="kpiJpy">¥0</div>
+          <div class="s" id="kpiUsd">$0.00</div>
+        </div>
+        <div class="kpi">
+          <div class="l">実測ログ</div>
+          <div class="v" id="kpiEvents">0</div>
+          <div class="s">件</div>
+        </div>
+        <div class="kpi">
+          <div class="l">合計トークン</div>
+          <div class="v" id="kpiTokens">0</div>
+          <div class="s" id="kpiTokDetail">入力 0 / 出力 0</div>
+        </div>
+      </div>
+
+      <section class="panel">
+        <h2 style="margin:0 0 12px;font-size:16px;">モデル別内訳</h2>
+        <div id="modelBody"><p class="empty">読み込み中…</p></div>
+        <p class="note" style="margin-top:14px;">※ 概算は実測トークン×公式単価（為替 155 円/USD）。記録開始前の利用は含まれません。全体のレシート／フードコート用途は「全体のAI使用料」を参照してください。</p>
+      </section>
     </div>
-
-    <div id="status" class="status">トークンを確認しています…</div>
-
-    <div class="kpis">
-      <div class="kpi">
-        <div class="l">概算費用（円）</div>
-        <div class="v" id="kpiJpy">¥0</div>
-        <div class="s" id="kpiUsd">$0.00</div>
-      </div>
-      <div class="kpi">
-        <div class="l">実測ログ</div>
-        <div class="v" id="kpiEvents">0</div>
-        <div class="s">件</div>
-      </div>
-      <div class="kpi">
-        <div class="l">合計トークン</div>
-        <div class="v" id="kpiTokens">0</div>
-        <div class="s" id="kpiTokDetail">入力 0 / 出力 0</div>
-      </div>
-    </div>
-
-    <section class="panel">
-      <h2 style="margin:0 0 12px;font-size:16px;">モデル別内訳</h2>
-      <div id="modelBody"><p class="empty">読み込み中…</p></div>
-      <p class="note" style="margin-top:14px;">※ 概算は実測トークン×公式単価（為替 155 円/USD）。記録開始前の利用は含まれません。全体のレシート／フードコート用途は「全体のAI使用料」を参照してください。</p>
-    </section>
   </main>
 
 <script>
@@ -229,6 +235,17 @@ const X_SEARCH_FEE_PER_CALL_USD = 0.005;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function getAdminToken() { return AUTH ? AUTH.getToken() : ''; }
+function isFullAdminSession() { return !!getAdminToken() && !authStoreScope; }
+function setUsageAccessUi() {
+  const notice = document.getElementById('adminOnlyNotice');
+  const main = document.getElementById('usageMain');
+  const allowed = isFullAdminSession();
+  if (notice) notice.hidden = allowed || !getAdminToken();
+  if (main) main.hidden = !allowed;
+  if (getAdminToken() && !allowed) {
+    setStatus('店舗用ログインでは AI使用量を閲覧できません（管理者のみ）。', true);
+  }
+}
 function resolveStoreDisplayName(key) {
   const k = String(key || '').trim();
   if (!k) return '';
@@ -359,6 +376,7 @@ async function saveAdminToken() {
     await refreshAuthScope();
     fillStoreSelectOptions(authStoreScope || readPersistedStoreKey() || STORE_KEY);
     await applySelectedStore(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+    setUsageAccessUi();
     await load();
   } catch (err) {
     if (msgEl) msgEl.textContent = err && err.message ? err.message : '接続に失敗しました。';
@@ -466,8 +484,14 @@ function render(data) {
 async function load() {
   if (!getAdminToken()) {
     setStatus('先に管理トークンで接続してください。', true);
+    setUsageAccessUi();
     return;
   }
+  if (!isFullAdminSession()) {
+    setUsageAccessUi();
+    return;
+  }
+  setUsageAccessUi();
   const range = periodRange(period);
   document.getElementById('periodTag').textContent = range.label;
   const reloadBtn = document.getElementById('reloadBtn');
@@ -533,6 +557,7 @@ document.getElementById('storeSelect').addEventListener('change', async (ev) => 
   await refreshAuthScope();
   fillStoreSelectOptions(authStoreScope || readPersistedStoreKey() || STORE_KEY);
   await applySelectedStore(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+  setUsageAccessUi();
   if (ok) await load();
   else setStatus('先に管理トークンで接続してください。', true);
 })();

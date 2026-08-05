@@ -1300,7 +1300,6 @@ Deno.serve(async (req, info) => {
       "/receipts/store-reviews/profile/ensure",
       "/receipts/store-reviews/refresh",
       "/receipts/store-reviews/search",
-      "/usage/ai-cost",
     ])
     if (!STORE_SCOPED_ALLOWED_PATHS.has(path)) {
       return json({ error: "この店舗用ログインからはこの操作はできません。" }, 403)
