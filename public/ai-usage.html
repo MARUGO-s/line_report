@@ -383,7 +383,7 @@
       <div class="ms-content">
         <div class="ms-inner">
           <h1 class="ms-h1">AI使用料（実測トークン）</h1>
-          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、モデルごとの<strong>公式単価</strong>を掛けて算出します。表示・合算は<strong>現行本番モデルのみ</strong>（過去の未使用モデルのログは除外）。通常の精算レシートは Gemini Flash Lite、Azure は障害時の退避先です。</p>
+          <p class="ms-sub">レシート画像・小口経費・フードコート分析でAPIが返した<strong>実測トークン数</strong>に、モデルごとの<strong>公式単価</strong>を掛けて算出します。表示・合算は<strong>現行本番モデルのみ</strong>（過去の未使用モデルのログは除外）。通常の精算レシートは Gemini Flash Lite が本線。Azure はフードコート表抽出の本線、およびレシート障害時の退避です。</p>
 
           <!-- 集計期間アコーディオン -->
           <details class="assump" id="periodBox">
@@ -446,7 +446,7 @@
           <details class="assump" id="azureBox">
             <summary>
               <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-              Azure Foundry（レシート解析 / <span id="azureStoreCount" class="mono">— 店舗</span>）
+              Azure Foundry（表抽出・レシート退避 / <span id="azureStoreCount" class="mono">— 店舗</span>）
             </summary>
             <div class="assump-body" style="padding-top: 12px;">
               <div class="kpis">
@@ -573,7 +573,7 @@
               モデル別コスト内訳（最も正確）
             </summary>
             <div class="assump-body">
-              <p class="ms-sub" style="margin-top:4px">同じプロバイダでもモデルごとに単価が違うため、実測トークンをモデル別の公式単価で合算した内訳です。Azure Foundry のレシート解析は GPT-5.4 nano の単価で計算します。</p>
+              <p class="ms-sub" style="margin-top:4px">同じプロバイダでもモデルごとに単価が違うため、実測トークンをモデル別の公式単価で合算した内訳です。Azure Foundry（フードコート表抽出／レシート退避）は GPT-5.4 nano の単価で計算します。</p>
               <div id="modelBrkBody"></div>
             </div>
           </details>
@@ -589,7 +589,7 @@
             <div class="assump-body">
               <p class="ms-sub" style="margin-top:4px">トークン数はAPIの実測値を使うため入力不要です。ここでは100万トークンあたりの<strong>公式単価（USD）</strong>と為替レートのみ設定します。値はこのブラウザに保存され、次回も使われます。</p>
 
-              <div class="card-h" style="margin-top:18px"><span class="ch-t" style="font-size:14px">Azure Foundry（レシート/画像抽出・GPT-5.4 nano）</span><span class="ch-tag mono" id="azureModelLabel"></span></div>
+              <div class="card-h" style="margin-top:18px"><span class="ch-t" style="font-size:14px">Azure Foundry（フードコート表抽出本線・レシート退避・GPT-5.4 nano）</span><span class="ch-tag mono" id="azureModelLabel"></span></div>
               <div class="rate-grid">
                 <div class="field"><label>入力単価 USD / 100万トークン</label><input id="azure_inUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
                 <div class="field"><label>出力単価 USD / 100万トークン</label><input id="azure_outUsd" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -1195,7 +1195,7 @@
 
     // モデル別の正確な内訳（実測トークン × モデル別単価）。現行本番モデルのみ。
     const MODEL_LABELS = {
-      'gpt-5.4-nano': 'レシート・小口経費の画像抽出（Azure Foundry）',
+      'gpt-5.4-nano': 'フードコート表抽出（本線）／レシート障害時の退避（Azure Foundry）',
       'gpt-5.6-luna': 'フードコート分析の最終統合',
       'grok-3-mini': 'フードコート運営改善AI（専門③）',
       'grok-4.5': 'Xトレンドブリーフ（Responses + x_search）',
