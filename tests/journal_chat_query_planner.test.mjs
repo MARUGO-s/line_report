@@ -72,6 +72,7 @@ for (const name of [
   'extractProductCodeHints',
   'extractProductSearchHints',
   'wantsProductTimelineSearch',
+  'hasUsableProductTimelineFacts',
   'listTimelineSearchTargets',
   'collectProductsFromReport',
   'isCourseProductName',
@@ -530,6 +531,51 @@ test('brand monthly sales questions extract named products and trigger journal t
   assert.deepEqual([...context.extractAllYearRefs(codeYearQ)], ['2026']);
   assert.equal(context.extractPrimaryYearOnlyRef(codeYearQ), '2026');
   assert.equal(context.extractPrimaryYearOnlyRef('商品コード0023の売れ行き'), null);
+
+  // 裸の「0023の2026年…」もコード＋年として分離できる
+  const bareCodeYearQ = '0023の2026年の売れ行きを月ごとにまとめて';
+  assert.deepEqual([...context.extractProductCodeHints(bareCodeYearQ)], ['0023']);
+  assert.equal(context.extractPrimaryYearOnlyRef(bareCodeYearQ), '2026');
+  assert.equal(context.wantsProductTimelineSearch(bareCodeYearQ), true);
+
+  // 意図確認で銘柄の何本／売れたを止めない
+  assert.equal(context.needsAiIntentClarification('ドライゼロは何本売れた？'), false);
+  assert.equal(context.needsAiIntentClarification('季の美の初出はいつ？'), false);
+  assert.equal(context.needsAiIntentClarification('2103の売れ行きを教えて'), false);
+  assert.equal(context.wantsItemBreakdown('ドライゼロは何本売れた？'), true);
+
+  // 導入・初出語でも銘柄を抽出し、日付接頭辞を剥がす
+  assert.equal(context.extractNamedProductMentions('季の美の初出月は？').some((m) => m.q === '季の美'), true);
+  assert.equal(
+    context.extractNamedProductMentions('7月5日の季の美の売れ行き').some((m) => m.q === '季の美'),
+    true,
+  );
+  assert.equal(
+    context.extractNamedProductMentions('Glass Wineの売れ行き').some((m) => m.q === 'Glass Wine'),
+    true,
+  );
+  assert.equal(
+    context.extractNamedProductMentions('「ドライゼロ」について教えて').some((m) => m.q === 'ドライゼロ'),
+    true,
+  );
+
+  // コード文脈の3桁も下4桁ゼロ埋めで拾う
+  assert.deepEqual([...context.extractProductCodeHints('商品コード123の売上')], ['0123']);
+
+  assert.equal(
+    context.hasUsableProductTimelineFacts({
+      firstSeen: null,
+      targets: [{ firstSeen: null, totalQty: 0, byMonth: [] }],
+    }),
+    false,
+  );
+  assert.equal(
+    context.hasUsableProductTimelineFacts({
+      firstSeen: null,
+      targets: [{ firstSeen: { year_month: '2026-07' }, totalQty: 5, byMonth: [{ year_month: '2026-07', qty: 5 }] }],
+    }),
+    true,
+  );
 });
 
 test('bottle and course questions load exact journal items without double counting summaries', () => {
@@ -763,9 +809,16 @@ test('reservation-only and day-scope queries do not require a saved sales report
   assert.match(savedReportSearchSource, /buildReservationOnlyQueryResult/);
   assert.match(savedReportSearchSource, /reservationFacts:\s*scopedFacts/);
   assert.match(savedReportSearchSource, /tryReservationOnlyMonthRange\(targetKey, targetKey/);
-  assert.match(savedReportSearchSource, /allReports\.length === 0 && !isReservationFocusedQuery\(q\)/);
+  assert.match(
+    savedReportSearchSource,
+    /allReports\.length === 0 && !isReservationFocusedQuery\(q\) && !wantsProductTimelineSearch\(q\)/,
+    'empty saved reports must still allow journal product-timeline questions',
+  );
   assert.match(html, /function reservationJstDateKeyForClient\(value\)/);
   assert.match(savedReportSearchSource, /enrichReservationFacts\([\s\S]*q,\s*true/);
+  assert.match(savedReportSearchSource, /async function tryProductTimelineFallback/);
+  assert.match(savedReportSearchSource, /journalProductSearchOnly:\s*true/);
+  assert.match(html, /verifiedData\.journalProductSearchOnly/);
 });
 
 test('same-year month ranges like 2026年1月〜7月 expand to the full inclusive span', () => {

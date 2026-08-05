@@ -8234,7 +8234,7 @@ function buildCompactSalesDataForAI() {
 }
 
 function wantsItemBreakdown(msg) {
-  return /(アイテム|商品|メニュー|品目|売れ筋|売れ行き|ランキング|何が売|売れたもの|売れた商品|点数|個数|ボトル|本数|コース|杯数|銘柄|ワイン|シャンパ|スパークリング|ペアリング|グラス|ビール|日本酒|焼酎|ハイボール|カクテル|ウイスキー|SP\s*コ|スペシャル|月ごと|月別|月次|商品コード|下桁|下\s*[4４]\s*桁)/i.test(String(msg || ''));
+  return /(アイテム|商品|メニュー|品目|売れ筋|売れ行き|ランキング|何が売|売れたもの|売れた商品|点数|個数|ボトル|本数|何本|いくつ|売れた|コース|杯数|銘柄|ワイン|シャンパ|スパークリング|ペアリング|グラス|ビール|日本酒|焼酎|ハイボール|カクテル|ウイスキー|SP\s*コ|スペシャル|月ごと|月別|月次|商品コード|下桁|下\s*[4４]\s*桁)/i.test(String(msg || ''));
 }
 
 /** 質問文から商品コード（下4桁中心）を拾う。年号や「5500円」は除外。 */
@@ -8242,13 +8242,15 @@ function extractProductCodeHints(query) {
   const q = String(query || '').normalize('NFKC');
   const out = [];
   const seen = new Set();
-  const add = (raw) => {
+  const add = (raw, { allowShort = false } = {}) => {
     const digits = String(raw || '').replace(/\D/g, '');
-    if (digits.length < 4 || digits.length > 13) return;
+    const minLen = allowShort ? 3 : 4;
+    if (digits.length < minLen || digits.length > 13) return;
     // 西暦4桁は商品コードにしない
     if (/^20[0-3]\d$/.test(digits)) return;
-    // 検索は下4桁で endsWith 照合（ゼロ埋めフルコードにも耐える）
-    const code = digits.length > 4 ? digits.slice(-4) : digits;
+    // 検索は下4桁で endsWith 照合（ゼロ埋めフルコードにも耐える）。3桁明示はゼロ埋め
+    let code = digits.length > 4 ? digits.slice(-4) : digits;
+    if (code.length === 3) code = `0${code}`;
     if (seen.has(code)) return;
     seen.add(code);
     out.push(code);
@@ -8256,23 +8258,30 @@ function extractProductCodeHints(query) {
 
   let m;
   const explicitRe =
-    /(?:商品)?コード\s*[:：#]?\s*(\d{4,13})|下\s*[4４]\s*桁\s*[:：]?\s*(\d{4,13})|下桁\s*[:：]?\s*(\d{4,13})/g;
+    /(?:商品)?コード\s*[:：#]?\s*(\d{3,13})|下\s*[4４]\s*桁\s*[:：]?\s*(\d{3,13})|下桁\s*[:：]?\s*(\d{3,13})/g;
   while ((m = explicitRe.exec(q))) {
-    add(m[1] || m[2] || m[3]);
+    add(m[1] || m[2] || m[3], { allowShort: true });
   }
 
   // 「2103の売れ行き」「2103は何本」— 直後が円・品・皿・人なら単価/数量なので除外
   const codeSalesRe =
-    /(?<![0-9])(\d{4,13})(?![0-9])(?!\s*円)(?!\s*品)(?!\s*皿)(?!\s*人)\s*(?:の|は|が|番|のコード)?\s*(?:売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|いくつ|何本|売れた|分析|まとめて)/g;
+    /(?<![0-9])(\d{4,13})(?![0-9])(?!\s*円)(?!\s*品)(?!\s*皿)(?!\s*人)\s*(?:の|は|が|を|番|のコード|について)?\s*(?:売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|いくつ|何本|売れた|分析|まとめて|教えて|調べて)/g;
   while ((m = codeSalesRe.exec(q))) {
     add(m[1]);
   }
 
-  // 「コードで2103」「下4桁2103」など、コード文脈があれば裸の4桁も採用
+  // 「0023の2026年の売れ行き」— 年が挟まってもコードとして拾う
+  const codeBeforeYearRe =
+    /(?<![0-9])(\d{4,13})(?![0-9])(?!\s*円)の?(?=20\d{2}\s*年)/g;
+  while ((m = codeBeforeYearRe.exec(q))) {
+    add(m[1]);
+  }
+
+  // 「コードで2103」「下4桁2103」など、コード文脈があれば裸の3〜4桁も採用
   if (/(?:商品)?コード|下\s*[4４]?\s*桁|下桁/.test(q)) {
-    const bareRe = /(?<![0-9])(\d{4,13})(?![0-9])(?!\s*円)/g;
+    const bareRe = /(?<![0-9])(\d{3,13})(?![0-9])(?!\s*円)/g;
     while ((m = bareRe.exec(q))) {
-      add(m[1]);
+      add(m[1], { allowShort: true });
     }
   }
 
@@ -8282,22 +8291,35 @@ function extractProductCodeHints(query) {
 /** 商品の初出月・導入時期・単価帯の前後比較／銘柄の月次売れ行きをジャーナル横断検索すべき質問か */
 function wantsProductTimelineSearch(msg) {
   const s = String(msg || '');
-  const salesWords = /(コース|単価|点数|売上|売れ行き|販売|本数|杯数|何本|売れた|月ごと|月別|月次|導入|開始|いつ|初出|比較|客単価|構成|分析|まとめて)/.test(s);
+  const salesWords = /(コース|単価|点数|売上|売れ行き|販売|本数|杯数|何本|売れた|いくつ|月ごと|月別|月次|導入|開始|いつ|初出|比較|客単価|構成|分析|まとめて|教えて|調べて|について)/.test(s);
   // 固有名称のコース／商品が質問に出ていれば、導入語が無くても横断検索（店舗ごとの別名に耐える）
   const named = extractNamedProductMentions(s);
   if (named.length && salesWords) {
     return true;
   }
-  // 商品コード下4桁での照会
-  if (extractProductCodeHints(s).length && salesWords) {
+  // 商品コード下4桁での照会（売上語が無くてもコード明示なら横断）
+  const codeHints = extractProductCodeHints(s);
+  if (codeHints.length && (salesWords || /(?:商品)?コード|下\s*[4４]?\s*桁|下桁/.test(s))) {
     return true;
   }
   const productish = /(コース|商品|メニュー|品目|アイテム|コード|単価|銘柄|下桁|下\s*[4４]\s*桁)/i.test(s);
   const intro = /(始ま|開始|導入|いつから|初出|出始め|登場|入れ始め|追加した|追加され|発売|運用開始)/.test(s);
   const beforeAfter = /(前後|比較).*(構成|売上|客単価)|(構成|売上|客単価).*(前後|比較)/.test(s);
   const scanAll = /(全データ|ジャーナル).*(検索|探|調べ)|(検索|探|調べ).*(ジャーナル|全データ|全月)/.test(s);
-  const monthlySales = /(売れ行き|販売|点数|本数).*(月|推移)|(月ごと|月別|月次).*(売|点|本)/.test(s);
+  const monthlySales = /(売れ行き|販売|点数|本数|何本|売れた).*(月|推移)|(月ごと|月別|月次).*(売|点|本)/.test(s);
   return productish && (intro || beforeAfter || scanAll || monthlySales);
+}
+
+/** ジャーナル横断の商品タイムラインが回答に使えるか */
+function hasUsableProductTimelineFacts(facts) {
+  if (!facts) return false;
+  if (facts.firstSeen) return true;
+  const targets = Array.isArray(facts.targets) ? facts.targets : [];
+  return targets.some((t) =>
+    t?.firstSeen
+    || (Number(t?.totalQty) || 0) > 0
+    || (Array.isArray(t?.byMonth) && t.byMonth.length > 0)
+  );
 }
 
 /** 対象商品の利用会計 vs 非利用会計の客単価・ドリンク比較が必要か */
@@ -8554,8 +8576,8 @@ function extractNamedProductMentions(query) {
     add(`${prefix}コース`, `${prefix}コース`, 'named_course');
   }
 
-  // 引用符内の商品名（売れ行き質問ならカテゴリ語が無くても採用）
-  const salesCtx = /(売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|何本|売れた)/.test(q);
+  // 引用符内の商品名（売れ行き・導入・照会質問ならカテゴリ語が無くても採用）
+  const salesCtx = /(売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|何本|売れた|いくつ|初出|導入|いつから|開始|教えて|調べて|分析)/.test(q);
   const quotedRe = /[「『"]([^」』"]{2,40})[」』"]/g;
   while ((m = quotedRe.exec(q))) {
     const name = String(m[1]).trim();
@@ -8567,14 +8589,30 @@ function extractNamedProductMentions(query) {
     }
   }
 
+  // 英字スペース区切り銘柄（Glass Wine の売れ行き）
+  const latinBrandRe =
+    /([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*){1,3})\s*(?:の|は|が|を|について)\s*(?:売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|いくつ|何本|売れた|初出|導入|いつから|開始|教えて|調べて|分析)/g;
+  while ((m = latinBrandRe.exec(q))) {
+    const name = String(m[1]).normalize('NFKC').replace(/\s+/g, ' ').trim();
+    if (name.length >= 3) add(name, name, 'brand_or_item');
+  }
+
   // 「サッポロ赤星の売れ行き」「季の美の月別」「ドライゼロは何本」など。
   // 漢字銘柄（名称中の「の」含む）も拾う。数字は商品名に入れず、年号を飲み込まない。
-  // 「2026年の季の美の売れ行き」は後処理で年の／月の以降だけ残す。
+  // 「2026年の季の美の売れ行き」「7月5日の季の美」は後処理で日付接頭辞を剥がす。
   const brandSalesRe =
-    /([ァ-ヶー一-龥A-Za-z・･の]{2,24}?)(?:の|は|が)\s*(?:売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|いくつ|何本|売れた)/g;
+    /([ァ-ヶー一-龥A-Za-z・･の]{2,24}?)(?:の|は|が|を|について)\s*(?:売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|いくつ|何本|売れた|初出|導入|いつから|開始|教えて|調べて|分析)/g;
   while ((m = brandSalesRe.exec(q))) {
     let name = String(m[1]).normalize('NFKC').trim();
-    const afterPeriod = name.match(/(?:年の|月の)(.+)$/);
+    // 日付・年月接頭辞を繰り返し除去（日の季の美 / 2026年7月の季の美）
+    for (let i = 0; i < 4; i++) {
+      const stripped = name
+        .replace(/^(?:20\d{2}\s*年)?\s*(?:\d{1,2}\s*月)?\s*(?:\d{1,2}\s*日)?の?/, '')
+        .replace(/^(?:年の|月の|日の)/, '');
+      if (stripped === name) break;
+      name = stripped.trim();
+    }
+    const afterPeriod = name.match(/(?:年の|月の|日の)(.+)$/);
     if (afterPeriod) name = afterPeriod[1];
     name = name.replace(/^年の?/, '');
     name = name.replace(/^[のはがをにでと]+/, '').replace(/[のはがをにでと]+$/, '');
@@ -8987,7 +9025,7 @@ function summarizeCourseTransactionsFromReports(reports) {
 function formatJournalSpecificFactsForAi(period, query, indent = '') {
   const q = String(query || '');
   const lines = [];
-  if (wantsItemBreakdown(q)) {
+  if (wantsItemBreakdown(q) && !period?.journalProductSearchOnly) {
     const products = selectRequestedProductsForQuery(period?.topProducts, q, 30);
     if (products.length) {
       lines.push(`${indent}- 質問に該当する保存商品明細（商品名 / 数量 / 売上）:`);
@@ -8995,7 +9033,11 @@ function formatJournalSpecificFactsForAi(period, query, indent = '') {
         lines.push(`${indent}  - ${product.name}: ${Number(product.qty) || 0}点 / ${yen(Number(product.amt) || 0)}${product.category ? `（${product.category}）` : ''}`);
       });
     } else if (period?.itemDetailComplete) {
-      lines.push(`${indent}- 質問に該当する商品明細: 0件（対象期間の全伝票明細を確認済み）`);
+      if (hasUsableProductTimelineFacts(period?.productTimelineFacts)) {
+        lines.push(`${indent}- 質問に該当する保存商品明細: 期間内の売れ筋/明細合算では0件。ジャーナル横断の「商品初出・導入月」節を正本にする`);
+      } else {
+        lines.push(`${indent}- 質問に該当する商品明細: 0件（対象期間の全伝票明細を確認済み）`);
+      }
     } else {
       lines.push(`${indent}- 商品明細の確認範囲: 一部期間は上位商品要約のみ。該当なしを保存DB全体の不存在と断定しないこと`);
     }
@@ -10879,6 +10921,19 @@ function formatItemBreakdownReply(queryResult, userMsg) {
     : '';
 
   if (!selectedProducts.length) {
+    const timelineText = formatProductTimelineFactsForAi(queryResult.productTimelineFacts);
+    if (timelineText) {
+      return `### 🧾 ${queryResult.label} の商品内訳
+
+ご質問「${userMsg}」について、保存レポートの売れ筋一覧だけでは足りないため、ジャーナル横断の確定事実を使います。
+
+${timelineText}${reservationBlock}
+
+**参考（カテゴリ合計）**
+- **総売上高**: **${yen(queryResult.totalSales)}**
+- **フード**: ${yen(queryResult.foodTotal)} (${queryResult.foodPct}%)
+- **ドリンク**: ${yen(queryResult.drinkTotal)} (${queryResult.drinkPct}%)`;
+    }
     const detailStatus = queryResult.itemDetailComplete
       ? '対象期間の全伝票明細を確認しましたが、ご質問に該当する商品明細は0件でした。'
       : '対象期間の商品明細を完全には確認できていないため、該当商品が保存データに存在しないとは断定できません。期間を月単位に分けて質問してください。';
@@ -10953,7 +11008,9 @@ function maskProductCodesInQueryForPeriodParse(q) {
   return String(q || '')
     .normalize('NFKC')
     .replace(/(?:商品)?コード\s*[:：#]?\s*\d{3,13}/g, '［商品コード］')
-    .replace(/下\s*[4４]?\s*桁\s*[:：]?\s*\d{3,13}/g, '［商品コード］');
+    .replace(/下\s*[4４]?\s*桁\s*[:：]?\s*\d{3,13}/g, '［商品コード］')
+    // 「0023の2026年」の 0023 を年扱いしない
+    .replace(/(?<![0-9])\d{4,13}(?![0-9])(?!\s*円)の?(?=20\d{2}\s*年)/g, '［商品コード］');
 }
 
 /** メッセージ中の「NNNN年」（月を伴わない年単位）の参照をすべて（重複除く）抽出する。
@@ -12292,6 +12349,8 @@ function needsAiIntentClarification(query) {
   const q = String(query || '').toLowerCase().trim();
   if (!q) return true;
   if (/おまかせ|任せる|全部|全体を|全般|一通り/.test(q)) return false;
+  // 銘柄・商品コードの売れ行き／導入照会は目的が明確。聞き返してジャーナル検索を止めない
+  if (wantsProductTimelineSearch(query)) return false;
   if (/(?:比較|比べ)/.test(q)) {
     const explicitComparison = /前月|前年|去年|先月|直近|対比|\d{4}\s*年.*\d{4}\s*年|\d{4}\D{0,3}\d{1,2}\s*月.*(?:\d{4}\D{0,3})?\d{1,2}\s*月/.test(q);
     if (!explicitComparison) return true;
@@ -12302,7 +12361,7 @@ function needsAiIntentClarification(query) {
     /フード|ドリンク|ワイン|シャンパ|スパークリング|ペアリング|ビール|日本酒|焼酎|ハイボール|カクテル|ウイスキー|アルコール|飲料|構成比|比率|割合|室料|個室|チャージ|席料/,
     /客数|来店客|来店人数|客単価|組数|人数|回転/,
     // wantsItemBreakdown と語彙を揃える（ボトル・コース・杯数などで聞き返さない）
-    /商品|アイテム|メニュー|品目|売れ筋|売れ行き|ランキング|注文|明細|内訳|何が売れ|売れたもの|人気|ボトル|本数|杯数|銘柄|コース|点数|個数|導入|開始|初出|いつから|SP|スペシャル|利用|非利用|平日|週末|人数|ペアリング|グラス|月ごと|月別|月次|コード|下桁|下\s*[4４]\s*桁/,
+    /商品|アイテム|メニュー|品目|売れ筋|売れ行き|ランキング|注文|明細|内訳|何が売れ|売れたもの|人気|ボトル|本数|何本|いくつ|売れた|杯数|銘柄|コース|点数|個数|導入|開始|初出|いつから|SP|スペシャル|利用|非利用|平日|週末|人数|ペアリング|グラス|月ごと|月別|月次|コード|下桁|下\s*[4４]\s*桁/,
     /予測|見通し|予想|将来|来月|翌月/,
     /原因|理由|課題|改善|施策|対策|提案|戦略|どうすれば|何をすべき/
   ].some(pattern => pattern.test(q));
@@ -12625,7 +12684,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   const unavailableCloudResult = () => ({
     loadError: savedReportsLoadError?.message || 'クラウドの保存レポートを完全に確認できませんでした。'
   });
-  if (allReports.length === 0 && !isReservationFocusedQuery(q)) {
+  if (allReports.length === 0 && !isReservationFocusedQuery(q) && !wantsProductTimelineSearch(q)) {
     if (cloudLookupUnavailable) return unavailableCloudResult();
     return null;
   }
@@ -12679,8 +12738,59 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         return buildReservationOnlyQueryResult(scopedFacts, `${dayScope.label}の予約データ`);
       }
     }
-    if (daily) return daily;
+    if (daily) {
+      // 日次集計にも商品ジャーナル横断を追加（銘柄・コード照会が日スコープで落ちないように）
+      if (wantsProductTimelineSearch(q)) {
+        const productTimelineFacts = await enrichProductTimelineFacts(q, [], new Map(), allReports);
+        if (productTimelineFacts) {
+          const courseLineupFacts = await enrichCourseLineupFacts(q, productTimelineFacts);
+          return { ...daily, productTimelineFacts, courseLineupFacts };
+        }
+      }
+      return daily;
+    }
+    const dayProductFallback = await tryProductTimelineFallback(dayScope.label);
+    if (dayProductFallback) return dayProductFallback;
     return { notMatchedLabel: dayScope.label };
+  }
+
+  function buildProductSearchOnlyResult(label, productTimelineFacts, extras = {}) {
+    return {
+      label: `${label}（保存レポート期間は未一致・ジャーナル商品検索）`,
+      journalProductSearchOnly: true,
+      totalSales: 0,
+      foodTotal: 0,
+      drinkTotal: 0,
+      foodPct: 0,
+      drinkPct: 0,
+      totalCustomers: 0,
+      avgSpend: 0,
+      sourceCount: 0,
+      monthCount: 0,
+      monthlyBreakdown: [],
+      topProducts: [],
+      itemDetailComplete: false,
+      productTimelineFacts,
+      ...extras
+    };
+  }
+
+  /** 保存レポート期間が無い／未一致でも、商品インデックスがあれば回答できる */
+  async function tryProductTimelineFallback(label) {
+    if (!wantsProductTimelineSearch(q)) return null;
+    if (cloudLookupUnavailable) return unavailableCloudResult();
+    try {
+      const facts = await enrichProductTimelineFacts(q, [], new Map(), allReports);
+      if (!facts) return null;
+      // ヒットあり、またはターゲット抽出済み（0件も「無い」と答えられる確定事実）
+      if (hasUsableProductTimelineFacts(facts) || (Array.isArray(facts.targets) && facts.targets.length)) {
+        const courseLineupFacts = await enrichCourseLineupFacts(q, facts);
+        return buildProductSearchOnlyResult(label, facts, { courseLineupFacts });
+      }
+    } catch (err) {
+      console.warn('product timeline fallback failed:', err);
+    }
+    return null;
   }
 
   async function tryReservationOnlyMonthRange(monthFrom, monthTo, label) {
@@ -12761,6 +12871,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       `${rangeLabel}の予約データ`
     );
     if (reservationOnly) return reservationOnly;
+    {
+      const productFallback = await tryProductTimelineFallback(rangeLabel);
+      if (productFallback) return productFallback;
+    }
     return { notMatchedLabel: rangeLabel };
   }
 
@@ -13276,6 +13390,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     if (matched.length > 0) return await summarizeMatched(matched, `${targetJa}の売上データ`);
     const reservationOnly = await tryReservationOnlyMonthRange(targetKey, targetKey, `${targetJa}の予約データ`);
     if (reservationOnly) return reservationOnly;
+    {
+      const productFallback = await tryProductTimelineFallback(targetJa);
+      if (productFallback) return productFallback;
+    }
     return { notMatchedLabel: targetJa };
   }
 
@@ -13290,6 +13408,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     if (matched.length > 0) {
       return await summarizeMatched(matched, `${targetYear}年より前 (${targetYear - 1}年以前) の全保存データ`);
     }
+    {
+      const productFallback = await tryProductTimelineFallback(`${targetYear}年より前`);
+      if (productFallback) return productFallback;
+    }
     return { notMatchedLabel: `${targetYear}年より前` };
   }
 
@@ -13301,16 +13423,31 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       return p.includes(targetYear) || p.includes(`${targetYear}年`);
     });
     if (matched.length > 0) return await summarizeMatched(matched, `${targetYear}年の売上データ`);
+    {
+      const productFallback = await tryProductTimelineFallback(`${targetYear}年`);
+      if (productFallback) return productFallback;
+    }
     return { notMatchedLabel: `${targetYear}年` };
   }
 
   if (!currentReportHasUsableSales() && reports.length > 0) {
     if (cloudLookupUnavailable) return unavailableCloudResult();
+    // 期間未指定でも銘柄・コード照会ならジャーナル商品検索へ（聞き返しで止めない）
+    {
+      const productFallback = await tryProductTimelineFallback('期間未指定');
+      if (productFallback) return productFallback;
+    }
     return {
       needsClarification: true,
       coverage: buildSavedReportCoverage(reports),
       reportIndex: reports
     };
+  }
+
+  // 保存レポートが無くても、商品インデックスがあれば銘柄照会に答える
+  if (wantsProductTimelineSearch(q)) {
+    const productFallback = await tryProductTimelineFallback('期間未指定');
+    if (productFallback) return productFallback;
   }
 
   return null;
@@ -13639,6 +13776,14 @@ ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
 ${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 
 回答は上記の予約確定事実だけを根拠にしてください。売上データは今回提示されていないため、売上・客単価・商品構成は推測しないでください。`;
+  } else if (verifiedData && verifiedData.journalProductSearchOnly) {
+    verifiedDataBlock = `
+
+【ジャーナル商品検索の確定事実（${verifiedData.label}）】
+※保存レポートの期間一致が無い／未指定のため、期間合計の総売上・客数は載せていません（0と書いても店舗全体が無売上という意味ではない）。商品の点数・月次・初出は下記のジャーナル横断結果を正本にしてください。
+${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
+
+「商品初出・導入月」がある場合は各ターゲットの初出日・月次点数を根拠に述べ、「開始月は表示されていません」「データがありません」で止めないでください。0件と書いてあるターゲットだけ未検出です。「コースラインナップ」がある場合はそれも併用してください。ご自身で月次を捏造したり、別名を質問商品の月次へ合算したりすることは禁止です。`;
   } else if (verifiedData) {
     const monthLines = formatMonthlyBreakdownLines(verifiedData.monthlyBreakdown);
     const monthBlock = monthLines
