@@ -203,8 +203,18 @@
     details.answer { display: block; }
     details.answer summary { display: none; }
     .answer-body { display: block !important; }
-    body { background: #fff; color: #000; }
-    .item { box-shadow: none; break-inside: avoid; }
+    html, body, #detailView, .wrap, .panel, .item {
+      background: #fff !important;
+      color: #1a1a1a !important;
+      box-shadow: none !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    h1, .lead, .question, .answer-body, .q-label, .a-label, .meta {
+      color: #1a1a1a !important;
+      opacity: 1 !important;
+    }
+    .item { break-inside: avoid; }
   }
 </style>
 </head>

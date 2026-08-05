@@ -885,9 +885,71 @@
     margin: 0 0 24px 0 !important;
   }
 
+  /* 印刷／PDF: ダークテーマの薄い文字が白背景に乗って消えるのを防ぐ */
+  html.pdf-export #reportView,
+  html.pdf-export #reportView .report,
+  html.pdf-export #reportView .ai-analysis,
+  html.pdf-export #reportView .ai-chat-pdf-doc {
+    color: #1a1a1a !important;
+    background: #fff !important;
+    --rv-text: #1a1a1a;
+    --rv-text-2: #444;
+    --text: #1a1a1a;
+    --text-2: #444;
+    --border: #c8c8c8;
+    --surface: #fff;
+    --rv-bg: #fff;
+    --rv-neutral-700: #c8c8c8;
+    --rv-divider: #ddd;
+    --rv-accent: #7d5411;
+    --rv-accent-700: #5c3d0c;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  html.pdf-export #reportView .r-title,
+  html.pdf-export #reportView .r-meta,
+  html.pdf-export #reportView h1,
+  html.pdf-export #reportView h2,
+  html.pdf-export #reportView h3,
+  html.pdf-export #reportView p,
+  html.pdf-export #reportView li,
+  html.pdf-export #reportView td,
+  html.pdf-export #reportView th,
+  html.pdf-export #reportView strong {
+    color: #1a1a1a !important;
+    opacity: 1 !important;
+  }
+  html.pdf-export #reportView .r-meta,
+  html.pdf-export #reportView .ai-chat-pdf-label { color: #444 !important; }
+  html.pdf-export #reportView .month-table,
+  html.pdf-export #reportView .md-table-wrap table {
+    border: 1px solid #333 !important;
+    background: #fff !important;
+  }
+  html.pdf-export #reportView .month-table th,
+  html.pdf-export #reportView .month-table td,
+  html.pdf-export #reportView .md-table-wrap th,
+  html.pdf-export #reportView .md-table-wrap td {
+    color: #1a1a1a !important;
+    border-color: #bbb !important;
+    background: #fff !important;
+  }
+  html.pdf-export #reportView .month-table th,
+  html.pdf-export #reportView .md-table-wrap th {
+    background: #f0f0f0 !important;
+    font-weight: 700 !important;
+  }
+  html.pdf-export #reportView .md-table-wrap { overflow: visible !important; }
+  html.pdf-export #reportView .ai-chat-pdf-question {
+    background: #f7f7f7 !important;
+    border: 1px solid #bbb !important;
+    color: #1a1a1a !important;
+  }
+  html.pdf-export #reportView hr { border-top-color: #bbb !important; }
+
   @media print{
     body>*:not(#reportView){display:none!important}
-    #reportView{position:static;overflow:visible;background:#fff}
+    #reportView{position:static;overflow:visible;background:#fff!important;color:#1a1a1a!important}
     .rv-nav{display:none!important}
     .ai-analysis-header, .ai-analysis-close, .ai-analysis-pdf-btn { display: none !important; }
     .ai-analysis {
@@ -898,7 +960,64 @@
       page-break-inside: auto !important;
     }
     .report-export-note{display:none!important}
-    .report{max-width:none;padding:0}
+    .report{max-width:none;padding:0;color:#1a1a1a!important;background:#fff!important}
+    #reportView, #reportView .report, #reportView .ai-analysis, #reportView .ai-chat-pdf-doc {
+      color: #1a1a1a !important;
+      background: #fff !important;
+      --rv-text: #1a1a1a;
+      --rv-text-2: #444;
+      --text: #1a1a1a;
+      --text-2: #444;
+      --border: #c8c8c8;
+      --surface: #fff;
+      --rv-bg: #fff;
+      --rv-neutral-700: #c8c8c8;
+      --rv-divider: #ddd;
+      --rv-accent: #7d5411;
+      --rv-accent-700: #5c3d0c;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    #reportView .r-title,
+    #reportView .r-meta,
+    #reportView h1,
+    #reportView h2,
+    #reportView h3,
+    #reportView p,
+    #reportView li,
+    #reportView td,
+    #reportView th,
+    #reportView strong {
+      color: #1a1a1a !important;
+      opacity: 1 !important;
+    }
+    #reportView .r-meta,
+    #reportView .ai-chat-pdf-label { color: #444 !important; }
+    #reportView .month-table,
+    #reportView .md-table-wrap table {
+      border: 1px solid #333 !important;
+      background: #fff !important;
+    }
+    #reportView .month-table th,
+    #reportView .month-table td,
+    #reportView .md-table-wrap th,
+    #reportView .md-table-wrap td {
+      color: #1a1a1a !important;
+      border-color: #bbb !important;
+      background: #fff !important;
+    }
+    #reportView .month-table th,
+    #reportView .md-table-wrap th {
+      background: #f0f0f0 !important;
+      font-weight: 700 !important;
+    }
+    #reportView .md-table-wrap { overflow: visible !important; }
+    #reportView .ai-chat-pdf-question {
+      background: #f7f7f7 !important;
+      border: 1px solid #bbb !important;
+      color: #1a1a1a !important;
+    }
+    #reportView hr { border-top-color: #bbb !important; }
     .day-section{page-break-inside:auto}
     .day-h,.kpis,.rv-hero,.rv-stat-row-grid{page-break-inside:avoid;break-inside:avoid}
     .chart,.rc,.meal-table,.rv-card{page-break-inside:avoid;break-inside:avoid}
@@ -907,6 +1026,7 @@
     .rv-hero-total,.rv-stat-value,.r-title{color:#000!important}
     .rv-sw{background:#999!important}
     .month-table thead{display:table-header-group}
+    .month-table{page-break-inside:auto;break-inside:auto}
     .month-table tr{page-break-inside:avoid;break-inside:avoid}
     .report-tabs{display:none!important}
     .msec-tabs{display:none!important}
@@ -7590,7 +7710,7 @@ function simpleMarkdown(text) {
       if (trimmed.includes('---')) continue; // Skip table header separator
       const cells = trimmed.split('|').slice(1, -1).map(c => c.trim());
       if (!inTable) {
-        out.push('<div style="overflow-x:auto;margin:16px 0;"><table class="month-table" style="width:100%;">');
+        out.push('<div class="md-table-wrap" style="overflow-x:auto;margin:16px 0;"><table class="month-table" style="width:100%;">');
         inTable = true;
         tableHeader = true;
       }
@@ -14261,11 +14381,11 @@ function openAiChatMessagePdfView(text, question) {
   const now = new Date();
   const q = String(question || '').trim();
   const questionBlock = q
-    ? `<div class="ai-chat-pdf-question" style="margin:16px 0 24px;padding:14px 16px;border:1px solid var(--border);border-radius:8px;background:var(--surface);">
-        <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:6px;">質問</div>
-        <div style="white-space:pre-wrap;line-height:1.6;">${esc(q)}</div>
+    ? `<div class="ai-chat-pdf-question" style="margin:16px 0 24px;padding:14px 16px;border:1px solid #c8c8c8;border-radius:8px;background:#f7f7f7;color:#1a1a1a;">
+        <div class="ai-chat-pdf-label" style="font-size:12px;font-weight:700;color:#444;margin-bottom:6px;">質問</div>
+        <div style="white-space:pre-wrap;line-height:1.65;color:#1a1a1a;">${esc(q)}</div>
       </div>
-      <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;">回答</div>`
+      <div class="ai-chat-pdf-label" style="font-size:12px;font-weight:700;color:#444;margin:0 0 8px;">回答</div>`
     : '';
   view.innerHTML = `<div class="rv-nav">
     <span class="rv-nav-brand">Journal Report</span>
@@ -14274,11 +14394,11 @@ function openAiChatMessagePdfView(text, question) {
     <button class="rv-btn rv-btn-secondary theme-toggle-btn" onclick="toggleAppTheme()">テーマ切替</button>
     <button class="rv-btn rv-btn-ghost" id="rClose">閉じる</button>
   </div>
-  <div class="report">
-    <h1 class="r-title">AIチャット分析結果</h1>
-    <p class="r-meta">出力日時 ${esc(now.toLocaleString('ja-JP'))}</p>
+  <div class="report ai-chat-pdf-doc" style="color:#1a1a1a;background:#fff;">
+    <h1 class="r-title" style="color:#111;">AIチャット分析結果</h1>
+    <p class="r-meta" style="color:#444;opacity:1;">出力日時 ${esc(now.toLocaleString('ja-JP'))}</p>
     ${questionBlock}
-    ${simpleMarkdown(text)}
+    <div class="ai-chat-pdf-answer" style="color:#1a1a1a;">${simpleMarkdown(text)}</div>
   </div>`;
   view.hidden = false;
   document.body.classList.add('report-open');

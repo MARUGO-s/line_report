@@ -723,6 +723,13 @@ test('both Journal Report entry files keep the planner and error distinction in 
   assert.match(html, /href="\.\/ai-usage\.html"/);
   assert.match(html, /AI使用量（管理者）/);
   assert.match(html, /updateAdminOnlyToolButtons/);
+  assert.match(html, /md-table-wrap/);
+  assert.match(html, /ai-chat-pdf-doc/);
+  assert.match(
+    html,
+    /@media print\{[\s\S]*#reportView[\s\S]*color:\s*#1a1a1a\s*!important/,
+    'print CSS must force dark text on white for readable PDFs',
+  );
   assert.match(aiUsageHtml, /AI使用量（管理者）/);
   assert.match(aiUsageHtml, /isFullAdminSession/);
   assert.match(aiUsageHtml, /\/usage\/ai-cost/);
