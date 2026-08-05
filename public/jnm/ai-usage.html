@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+<meta name="referrer" content="same-origin">
+<title>AI使用量 | Journal Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@600;700&display=swap" rel="stylesheet">
+<script>
+(function() {
+  const KEY = 'line_reservation_calendar_theme';
+  function current() {
+    try { return (localStorage.getItem(KEY) || 'light').toLowerCase() === 'dark' ? 'dark' : 'light'; } catch(_) { return 'light'; }
+  }
+  function apply(theme) {
+    const t = theme === 'light' ? 'light' : 'dark';
+    try { localStorage.setItem(KEY, t); } catch(_) {}
+    try { document.documentElement.setAttribute('data-theme', t); } catch(_) {}
+    try { if (document.body) document.body.setAttribute('data-theme', t); } catch(_) {}
+  }
+  window.toggleAppTheme = function() {
+    apply(current() === 'light' ? 'dark' : 'light');
+  };
+  try { document.documentElement.setAttribute('data-theme', current()); } catch(_) {}
+  document.addEventListener('DOMContentLoaded', function() { apply(current()); });
+})();
+</script>
+<script src="../pages-config.js"></script>
+<script src="pages-config.js"></script>
+<script src="../auth-session.js"></script>
+<script src="auth-session.js"></script>
+<style>
+  :root {
+    --bg: #f3f2f2;
+    --surface: #fff;
+    --surface-2: #eae9e9;
+    --text: #201f1d;
+    --text-2: #5c5854;
+    --border: color-mix(in srgb, #201f1d 14%, transparent);
+    --accent: #b68235;
+    --ok: #1f7a4d;
+    --danger: #c2410c;
+    --shadow: 0 10px 30px rgba(32, 31, 29, 0.06);
+    color-scheme: light;
+  }
+  html[data-theme='dark'] {
+    --bg: #171614;
+    --surface: #221f1c;
+    --surface-2: #2b2723;
+    --text: #f3f0ea;
+    --text-2: #b7b0a6;
+    --border: color-mix(in srgb, #f3f0ea 14%, transparent);
+    --accent: #d4a45a;
+    --ok: #4ade80;
+    --danger: #fb923c;
+    --shadow: 0 12px 34px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background:
+      radial-gradient(1200px 500px at 10% -10%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%),
+      linear-gradient(180deg, var(--bg), color-mix(in srgb, var(--bg) 88%, #000 12%));
+    color: var(--text);
+    font-family: "Noto Sans JP", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .hd {
+    display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 20;
+  }
+  .brand { font-family: "Noto Serif JP", serif; font-size: 18px; font-weight: 700; }
+  .hd-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .tag {
+    display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); font-size: 12px; color: var(--text-2);
+  }
+  .tag.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600;
+    cursor: pointer; text-decoration: none; font: inherit;
+  }
+  .btn:hover { filter: brightness(1.03); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: transparent; }
+  .btn:disabled { opacity: 0.55; cursor: default; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 16px 64px; }
+  h1 {
+    font-family: "Noto Serif JP", serif; font-size: clamp(24px, 4vw, 34px);
+    margin: 0 0 8px; letter-spacing: 0.02em;
+  }
+  .lead { color: var(--text-2); margin: 0 0 24px; max-width: 48em; }
+  .auth-card, .panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: var(--shadow); padding: 18px; margin-bottom: 16px;
+  }
+  .auth-card label { display: block; font-weight: 600; margin-bottom: 8px; }
+  .auth-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .input {
+    flex: 1; min-width: 180px; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; background: var(--bg); color: var(--text); font: inherit;
+  }
+  .auth-msg { color: var(--danger); font-size: 12px; margin-top: 8px; min-height: 1.2em; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+  .tabs {
+    display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .tab {
+    border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 13px;
+    font-weight: 600; padding: 8px 14px; border-radius: 7px; cursor: pointer;
+  }
+  .tab.active { background: var(--accent); color: #fff; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  @media (max-width: 720px) { .kpis { grid-template-columns: 1fr; } }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: var(--shadow); padding: 16px 18px;
+  }
+  .kpi .l { font-size: 12px; color: var(--text-2); font-weight: 600; }
+  .kpi .v { font-size: 26px; font-weight: 800; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .kpi .s { font-size: 12px; color: var(--text-2); margin-top: 4px; }
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.tbl th, table.tbl td {
+    text-align: right; padding: 10px 8px; border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  table.tbl th:first-child, table.tbl td:first-child { text-align: left; }
+  table.tbl th { color: var(--text-2); font-weight: 600; }
+  .status { font-size: 12px; color: var(--text-2); margin-bottom: 12px; min-height: 1.2em; }
+  .status.error { color: var(--danger); }
+  .note { font-size: 12px; color: var(--text-2); margin: 0; line-height: 1.55; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .empty { color: var(--text-2); padding: 20px 4px; text-align: center; }
+</style>
+</head>
+<body>
+  <nav class="hd">
+    <div class="brand">Journal Report</div>
+    <div class="hd-actions">
+      <label for="storeSelect" style="font-size:12px;font-weight:700;color:var(--text-2);">店舗</label>
+      <select id="storeSelect" class="input" style="min-width:160px;padding:6px 10px;"></select>
+      <span id="storeScopeBadge" class="tag" style="display:none;"></span>
+      <span id="authState" class="tag">未接続</span>
+      <a class="btn" href="./jnl2txt.html">レポートへ戻る</a>
+      <button type="button" class="btn" onclick="toggleAppTheme()">テーマ切替</button>
+      <button type="button" class="btn" id="reloadBtn">再読み込み</button>
+    </div>
+  </nav>
+
+  <main class="wrap">
+    <h1>AI使用量</h1>
+    <p class="lead">Journal Report の AI分析・AIチャット・確認質問などで使った<strong>実測トークン</strong>と概算費用です。管理画面の全体 AI使用料とは別に、ジャーナル用途（surface: journal / pos_journal）だけを集計します。</p>
+
+    <section id="authCard" class="auth-card" hidden>
+      <label for="tokenInput">管理トークンで接続してください（または LINE の最新リンクから開いてください）</label>
+      <div class="auth-row">
+        <input id="tokenInput" class="input" type="password" placeholder="ADMIN_DASHBOARD_TOKEN" autocomplete="off">
+        <button class="btn btn-primary" id="saveTokenBtn" type="button">接続</button>
+      </div>
+      <div id="authMsg" class="auth-msg"></div>
+    </section>
+
+    <div class="toolbar">
+      <div class="tabs" id="periodTabs" role="tablist">
+        <button type="button" class="tab active" data-period="this-month">当月</button>
+        <button type="button" class="tab" data-period="last-month">先月</button>
+        <button type="button" class="tab" data-period="all">全期間</button>
+      </div>
+      <span class="tag mono" id="periodTag">—</span>
+      <a class="btn" href="../ai-usage.html" style="margin-left:auto;">全体のAI使用料</a>
+    </div>
+
+    <div id="status" class="status">トークンを確認しています…</div>
+
+    <div class="kpis">
+      <div class="kpi">
+        <div class="l">概算費用（円）</div>
+        <div class="v" id="kpiJpy">¥0</div>
+        <div class="s" id="kpiUsd">$0.00</div>
+      </div>
+      <div class="kpi">
+        <div class="l">実測ログ</div>
+        <div class="v" id="kpiEvents">0</div>
+        <div class="s">件</div>
+      </div>
+      <div class="kpi">
+        <div class="l">合計トークン</div>
+        <div class="v" id="kpiTokens">0</div>
+        <div class="s" id="kpiTokDetail">入力 0 / 出力 0</div>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h2 style="margin:0 0 12px;font-size:16px;">モデル別内訳</h2>
+      <div id="modelBody"><p class="empty">読み込み中…</p></div>
+      <p class="note" style="margin-top:14px;">※ 概算は実測トークン×公式単価（為替 155 円/USD）。記録開始前の利用は含まれません。全体のレシート／フードコート用途は「全体のAI使用料」を参照してください。</p>
+    </section>
+  </main>
+
+<script>
+const PAGES = window.LINE_REPORT_PAGES || {};
+const AUTH = window.LINE_REPORT_AUTH || null;
+const JOURNAL_STORE_STORAGE_KEY = 'jnl2txt_selected_store_v1';
+const JPY_PER_USD = 155;
+let STORE_KEY = 'bistrocavacava';
+let authStoreScope = null;
+let period = 'this-month';
+let lastData = null;
+
+const RATE_BY_PROVIDER = {
+  openai: { inUsd: 1.00, outUsd: 6.00 },
+  claude: { inUsd: 1.00, outUsd: 5.00 },
+  grok: { inUsd: 0.30, outUsd: 0.50 },
+  grok_xsearch: { inUsd: 2.00, outUsd: 6.00 },
+  groq: { inUsd: 0.15, outUsd: 0.60 },
+  gemini: { inUsd: 0.25, outUsd: 1.50 },
+  azure_openai: { inUsd: 0.20, outUsd: 1.25 },
+};
+const X_SEARCH_FEE_PER_CALL_USD = 0.005;
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function getAdminToken() { return AUTH ? AUTH.getToken() : ''; }
+function resolveStoreDisplayName(key) {
+  const k = String(key || '').trim();
+  if (!k) return '';
+  if (PAGES.STORE_NAMES && PAGES.STORE_NAMES[k]) return PAGES.STORE_NAMES[k];
+  if (PAGES.resolveStoreName) return PAGES.resolveStoreName(k, k);
+  return k;
+}
+function listJournalStores() {
+  if (typeof PAGES.listStores === 'function') {
+    try {
+      return (PAGES.listStores() || []).map((s) => ({
+        store_key: String(s.store_key || '').trim(),
+        store_name: String(s.store_name || s.store_key || '').trim()
+      })).filter((s) => s.store_key);
+    } catch (_) {}
+  }
+  const names = PAGES.STORE_NAMES || {};
+  return Object.keys(names).map((k) => ({ store_key: k, store_name: names[k] }));
+}
+function readPersistedStoreKey() {
+  try { return String(sessionStorage.getItem(JOURNAL_STORE_STORAGE_KEY) || localStorage.getItem(JOURNAL_STORE_STORAGE_KEY) || '').trim(); }
+  catch (_) { return ''; }
+}
+function persistStoreKey(key) {
+  try { sessionStorage.setItem(JOURNAL_STORE_STORAGE_KEY, key); } catch (_) {}
+  try { localStorage.setItem(JOURNAL_STORE_STORAGE_KEY, key); } catch (_) {}
+}
+function updateStoreScopeBadge() {
+  const badge = document.getElementById('storeScopeBadge');
+  if (!badge) return;
+  if (!getAdminToken()) { badge.style.display = 'none'; return; }
+  badge.style.display = 'inline-flex';
+  if (authStoreScope) {
+    badge.textContent = '店舗限定';
+    badge.title = resolveStoreDisplayName(authStoreScope) + ' のみ';
+  } else {
+    badge.textContent = '管理者・横断可';
+    badge.title = '店舗を切り替えて横断閲覧できます';
+  }
+}
+function setAuthUiState(ok) {
+  const stateEl = document.getElementById('authState');
+  const cardEl = document.getElementById('authCard');
+  if (stateEl) {
+    stateEl.textContent = ok ? 'ログイン済み' : '未接続';
+    stateEl.className = ok ? 'tag ok' : 'tag';
+  }
+  if (cardEl) cardEl.hidden = !!ok;
+  updateStoreScopeBadge();
+}
+async function refreshAuthScope() {
+  authStoreScope = null;
+  if (!getAdminToken() || !PAGES.adminApiUrl) { updateStoreScopeBadge(); return; }
+  try {
+    const res = await fetch(PAGES.adminApiUrl('/auth/verify', PAGES.PROJECT_URL), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'x-admin-token': getAdminToken(),
+        'x-admin-surface': PAGES.ADMIN_SURFACE || 'line_report'
+      },
+      body: '{}'
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok && !body.error) authStoreScope = body.storeScope ? String(body.storeScope).trim() : null;
+  } catch (_) {}
+  updateStoreScopeBadge();
+}
+function fillStoreSelectOptions(selectedKey) {
+  const sel = document.getElementById('storeSelect');
+  if (!sel) return;
+  const stores = listJournalStores();
+  const prev = selectedKey || sel.value || STORE_KEY;
+  sel.innerHTML = '';
+  if (!authStoreScope) {
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = '全店舗（ジャーナル用途）';
+    sel.appendChild(all);
+  }
+  for (const s of stores) {
+    const opt = document.createElement('option');
+    opt.value = s.store_key;
+    opt.textContent = s.store_name;
+    sel.appendChild(opt);
+  }
+  const keys = stores.map((s) => s.store_key);
+  if (authStoreScope) {
+    sel.value = authStoreScope;
+    sel.disabled = true;
+  } else {
+    sel.disabled = false;
+    if (prev && keys.includes(prev)) sel.value = prev;
+    else sel.value = '';
+  }
+}
+async function applySelectedStore(nextKey) {
+  if (authStoreScope) {
+    STORE_KEY = String(authStoreScope).toLowerCase();
+  } else {
+    STORE_KEY = String(nextKey || '').trim().toLowerCase();
+  }
+  if (STORE_KEY) persistStoreKey(STORE_KEY);
+  const sel = document.getElementById('storeSelect');
+  if (sel && !authStoreScope) sel.value = STORE_KEY;
+  updateStoreScopeBadge();
+}
+
+async function saveAdminToken() {
+  const input = document.getElementById('tokenInput');
+  const msgEl = document.getElementById('authMsg');
+  const btn = document.getElementById('saveTokenBtn');
+  const token = input ? input.value.trim() : '';
+  if (!token) return;
+  if (!AUTH || !AUTH.loginWithToken) {
+    if (msgEl) msgEl.textContent = '認証モジュールを読み込めません。';
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    await AUTH.loginWithToken(token, {
+      sessionUrl: PAGES.adminApiUrl ? PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL) : '',
+      adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+    });
+    if (input) input.value = '';
+    if (msgEl) msgEl.textContent = '';
+    setAuthUiState(true);
+    await refreshAuthScope();
+    fillStoreSelectOptions(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+    await applySelectedStore(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+    await load();
+  } catch (err) {
+    if (msgEl) msgEl.textContent = err && err.message ? err.message : '接続に失敗しました。';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function setStatus(text, isError) {
+  const el = document.getElementById('status');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = isError ? 'status error' : 'status';
+}
+
+function jstMonthBoundaryIso(monthOffset) {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 3600 * 1000);
+  const y = jst.getUTCFullYear();
+  const m = jst.getUTCMonth();
+  const utcMs = Date.UTC(y, m + monthOffset, 1, 0, 0, 0) - 9 * 3600 * 1000;
+  return new Date(utcMs).toISOString();
+}
+function periodRange(p) {
+  if (p === 'all') return { from: null, to: null, label: '全期間' };
+  if (p === 'last-month') return { from: jstMonthBoundaryIso(-1), to: jstMonthBoundaryIso(0), label: '先月（JST）' };
+  return { from: jstMonthBoundaryIso(0), to: null, label: '当月（JST・現在まで）' };
+}
+function fmtInt(n) { return Number(n || 0).toLocaleString('ja-JP'); }
+function fmtUsd(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtJpy(n) { return '¥' + Math.round(Number(n || 0)).toLocaleString('ja-JP'); }
+function normalizeModelId(model) {
+  return String(model || '').toLowerCase().replace(/\s+x_search\*\d+/ig, '').replace(/\s+drop:[^\s]*/ig, '').trim();
+}
+function xSearchCallsFromModel(model) {
+  const match = String(model || '').match(/x_search\*(\d+)/i);
+  return match ? Math.max(0, Number(match[1]) || 0) : 0;
+}
+function rateForModel(provider, model) {
+  const p = String(provider || '').toLowerCase();
+  const m = normalizeModelId(model);
+  if (p === 'gemini' && (m === 'gemini-3-flash-preview' || m === 'gemini-3.5-flash')) {
+    return { inUsd: 0.50, outUsd: 3.00 };
+  }
+  if (p === 'gemini' && m === 'gemini-3.1-pro-preview') return { inUsd: 2.00, outUsd: 12.00 };
+  if ((p === 'grok' || p === 'xai') && /x_search/i.test(String(model || ''))) return RATE_BY_PROVIDER.grok_xsearch;
+  if (p === 'azure' || p === 'azure_openai') return RATE_BY_PROVIDER.azure_openai;
+  return RATE_BY_PROVIDER[p] || RATE_BY_PROVIDER.openai;
+}
+function modelUsd(m) {
+  const rate = rateForModel(m.provider, m.model);
+  const inTok = Number(m.input_tokens || 0);
+  const outTok = Number(m.output_tokens || 0);
+  const tokenUsd = (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
+  const xCalls = xSearchCallsFromModel(m.model);
+  const toolUsd = xCalls > 0
+    ? xCalls * Math.max(1, Number(m.event_count || 1)) * X_SEARCH_FEE_PER_CALL_USD
+    : 0;
+  return tokenUsd + toolUsd;
+}
+
+function render(data) {
+  lastData = data;
+  const models = Array.isArray(data && data.journal && data.journal.models) ? data.journal.models : [];
+  let events = 0, inTok = 0, outTok = 0, usd = 0;
+  for (const m of models) {
+    events += Number(m.event_count || 0);
+    inTok += Number(m.input_tokens || 0);
+    outTok += Number(m.output_tokens || 0);
+    usd += modelUsd(m);
+  }
+  const jpy = usd * JPY_PER_USD;
+  document.getElementById('kpiJpy').textContent = fmtJpy(jpy);
+  document.getElementById('kpiUsd').textContent = fmtUsd(usd);
+  document.getElementById('kpiEvents').textContent = fmtInt(events);
+  document.getElementById('kpiTokens').textContent = fmtInt(inTok + outTok);
+  document.getElementById('kpiTokDetail').textContent = '入力 ' + fmtInt(inTok) + ' / 出力 ' + fmtInt(outTok);
+
+  const body = document.getElementById('modelBody');
+  if (!models.length) {
+    body.innerHTML = '<p class="empty">この期間・店舗の Journal Report AI 利用ログはまだありません。<br>AI分析・AIチャットを使うと、以降ここに集計されます。</p>';
+    return;
+  }
+  const rows = models
+    .slice()
+    .sort((a, b) => modelUsd(b) - modelUsd(a))
+    .map((m) => {
+      const u = modelUsd(m);
+      return '<tr>' +
+        '<td>' + esc(m.provider) + ' / ' + esc(m.model) + '</td>' +
+        '<td>' + fmtInt(m.event_count) + '</td>' +
+        '<td>' + fmtInt(m.input_tokens) + '</td>' +
+        '<td>' + fmtInt(m.output_tokens) + '</td>' +
+        '<td>' + fmtUsd(u) + '</td>' +
+        '<td>' + fmtJpy(u * JPY_PER_USD) + '</td>' +
+        '</tr>';
+    }).join('');
+  body.innerHTML = '<table class="tbl"><thead><tr>' +
+    '<th>プロバイダ / モデル</th><th>件数</th><th>入力</th><th>出力</th><th>USD</th><th>円</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+async function load() {
+  if (!getAdminToken()) {
+    setStatus('先に管理トークンで接続してください。', true);
+    return;
+  }
+  const range = periodRange(period);
+  document.getElementById('periodTag').textContent = range.label;
+  const reloadBtn = document.getElementById('reloadBtn');
+  if (reloadBtn) reloadBtn.disabled = true;
+  setStatus('集計中…', false);
+  try {
+    const qs = [];
+    if (range.from) qs.push('from=' + encodeURIComponent(range.from));
+    if (range.to) qs.push('to=' + encodeURIComponent(range.to));
+    const store = authStoreScope || STORE_KEY || '';
+    if (store) qs.push('store_key=' + encodeURIComponent(store));
+    const path = '/usage/ai-cost' + (qs.length ? ('?' + qs.join('&')) : '');
+    const url = PAGES.adminApiUrl(path, PAGES.PROJECT_URL);
+    const res = await fetch(url, {
+      headers: {
+        'x-admin-token': getAdminToken(),
+        'x-admin-surface': PAGES.ADMIN_SURFACE || 'line_report'
+      },
+      cache: 'no-store'
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) setAuthUiState(false);
+    if (!res.ok || body.error) throw new Error(body.error || ('HTTP ' + res.status));
+    render(body);
+    const storeLabel = store ? resolveStoreDisplayName(store) : '全店舗';
+    setStatus('対象: ' + storeLabel + ' ／ ' + range.label + '（ジャーナル用途のみ・為替 ' + JPY_PER_USD + ' 円/USD）', false);
+  } catch (err) {
+    setStatus(err && err.message ? err.message : String(err), true);
+  } finally {
+    if (reloadBtn) reloadBtn.disabled = false;
+  }
+}
+
+document.getElementById('periodTabs').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.tab');
+  if (!btn) return;
+  const next = btn.dataset.period || 'this-month';
+  if (next === period) return;
+  period = next;
+  Array.from(document.querySelectorAll('#periodTabs .tab')).forEach((t) => t.classList.toggle('active', t === btn));
+  load();
+});
+document.getElementById('reloadBtn').addEventListener('click', load);
+document.getElementById('saveTokenBtn').addEventListener('click', saveAdminToken);
+document.getElementById('storeSelect').addEventListener('change', async (ev) => {
+  await applySelectedStore(ev.target.value);
+  await load();
+});
+
+(async function init() {
+  if (AUTH && AUTH.consumeUrlAuthParams) {
+    try {
+      await AUTH.consumeUrlAuthParams({
+        exchangeUrl: PAGES.adminApiUrl ? PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL) : '',
+        adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
+      });
+    } catch (err) {
+      console.error('consumeUrlAuthParams failed:', err);
+    }
+  }
+  const ok = !!getAdminToken();
+  setAuthUiState(ok);
+  await refreshAuthScope();
+  fillStoreSelectOptions(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+  await applySelectedStore(authStoreScope || readPersistedStoreKey() || STORE_KEY);
+  if (ok) await load();
+  else setStatus('先に管理トークンで接続してください。', true);
+})();
+</script>
+</body>
+</html>

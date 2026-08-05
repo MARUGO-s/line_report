@@ -20,12 +20,22 @@ const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const CLAUDE_MODEL_DEFAULT = "claude-haiku-4-5";
 const CLAUDE_ENDPOINT = "https://api.anthropic.com/v1/messages";
 
+type JournalAiUsage = {
+  provider: "openai" | "claude";
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  thinkingTokens: number | null;
+  totalTokens: number;
+};
+
 type SynthesizerResult =
   | {
     ok: true;
     text: string;
     provider: "openai" | "claude";
     model: string;
+    usage: JournalAiUsage | null;
     fallbackFrom?: { provider: "openai"; model: string; error: string };
   }
   | {
@@ -36,6 +46,84 @@ type SynthesizerResult =
     openaiError?: string;
     claudeError?: string;
   };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function extractOpenAiUsage(
+  data: unknown,
+  model: string,
+): JournalAiUsage | null {
+  const usage = isRecord(data) && isRecord(data.usage) ? data.usage : null;
+  if (!usage) return null;
+  const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0) ||
+    0;
+  const outputTokens =
+    Number(usage.completion_tokens ?? usage.output_tokens ?? 0) || 0;
+  const totalTokens = Number(usage.total_tokens ?? 0) ||
+    (inputTokens + outputTokens);
+  if (!inputTokens && !outputTokens && !totalTokens) return null;
+  return {
+    provider: "openai",
+    model,
+    inputTokens,
+    outputTokens,
+    thinkingTokens: null,
+    totalTokens,
+  };
+}
+
+function extractClaudeUsage(
+  data: unknown,
+  model: string,
+): JournalAiUsage | null {
+  const usage = isRecord(data) && isRecord(data.usage) ? data.usage : null;
+  if (!usage) return null;
+  const inputTokens = Number(usage.input_tokens ?? 0) || 0;
+  const outputTokens = Number(usage.output_tokens ?? 0) || 0;
+  const totalTokens = inputTokens + outputTokens;
+  if (!inputTokens && !outputTokens) return null;
+  return {
+    provider: "claude",
+    model,
+    inputTokens,
+    outputTokens,
+    thinkingTokens: null,
+    totalTokens,
+  };
+}
+
+async function recordJournalAiUsage(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  usage: JournalAiUsage | null,
+): Promise<void> {
+  if (!usage) return;
+  const key = String(storeKey || "").trim();
+  if (!key) return;
+  try {
+    const { error } = await supabase.from("ai_usage_events").insert({
+      store_partition_key: key,
+      provider: usage.provider,
+      model: usage.model,
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      thinking_tokens: usage.thinkingTokens,
+      total_tokens: usage.totalTokens,
+      line_message_id: null,
+      surface: "journal",
+    });
+    if (error) {
+      console.error("journal ai_usage_events insert failed:", error.message);
+    }
+  } catch (error) {
+    console.error(
+      "journal ai_usage_events insert threw:",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
 
 type ClarificationPlan =
   | {
@@ -53,7 +141,13 @@ type ClarificationPlan =
   };
 
 type ClarifierProviderResult =
-  | { ok: true; text: string; provider: "openai" | "claude"; model: string }
+  | {
+    ok: true;
+    text: string;
+    provider: "openai" | "claude";
+    model: string;
+    usage: JournalAiUsage | null;
+  }
   | { ok: false; error: string; provider: "openai" | "claude"; model: string };
 
 const CLARIFICATION_PROMPT =
@@ -500,12 +594,15 @@ async function callOpenAiClarifier(
     const text = stripThinkingBlocks(
       data?.choices?.[0]?.message?.content || "",
     );
-    return text ? { ok: true, text, provider: "openai", model } : {
-      ok: false,
-      error: "OpenAI returned an empty clarification",
-      provider: "openai",
-      model,
-    };
+    const usage = extractOpenAiUsage(data, model);
+    return text
+      ? { ok: true, text, provider: "openai", model, usage }
+      : {
+        ok: false,
+        error: "OpenAI returned an empty clarification",
+        provider: "openai",
+        model,
+      };
   } catch (e) {
     return { ok: false, error: String(e), provider: "openai", model };
   }
@@ -592,12 +689,15 @@ async function callClaudeClarifier(
     }
     const data = JSON.parse(res.text);
     const text = stripThinkingBlocks(extractClaudeText(data));
-    return text ? { ok: true, text, provider: "claude", model } : {
-      ok: false,
-      error: "Claude returned an empty clarification",
-      provider: "claude",
-      model,
-    };
+    const usage = extractClaudeUsage(data, model);
+    return text
+      ? { ok: true, text, provider: "claude", model, usage }
+      : {
+        ok: false,
+        error: "Claude returned an empty clarification",
+        provider: "claude",
+        model,
+      };
   } catch (e) {
     return { ok: false, error: String(e), provider: "claude", model };
   }
@@ -611,6 +711,7 @@ async function clarifyWithFallback(
     plan: ClarificationPlan;
     provider: "openai" | "claude";
     model: string;
+    usage: JournalAiUsage | null;
   }
   | { ok: false; error: string }
 > {
@@ -618,14 +719,26 @@ async function clarifyWithFallback(
   if (openai.ok) {
     const plan = normalizeClarificationPlan(openai.text);
     if (plan) {
-      return { ok: true, plan, provider: openai.provider, model: openai.model };
+      return {
+        ok: true,
+        plan,
+        provider: openai.provider,
+        model: openai.model,
+        usage: openai.usage,
+      };
     }
   }
   const claude = await callClaudeClarifier(messages);
   if (claude.ok) {
     const plan = normalizeClarificationPlan(claude.text);
     if (plan) {
-      return { ok: true, plan, provider: claude.provider, model: claude.model };
+      return {
+        ok: true,
+        plan,
+        provider: claude.provider,
+        model: claude.model,
+        usage: claude.usage,
+      };
     }
   }
   const openaiError = openai.ok
@@ -643,7 +756,8 @@ async function clarifyWithFallback(
 async function callOpenAiLuna(
   contents: ChatContent[],
 ): Promise<
-  { ok: true; text: string; model: string } | {
+  | { ok: true; text: string; model: string; usage: JournalAiUsage | null }
+  | {
     ok: false;
     error: string;
     model: string;
@@ -689,7 +803,7 @@ async function callOpenAiLuna(
     if (!text) {
       return { ok: false, error: "OpenAI returned an empty response", model };
     }
-    return { ok: true, text, model };
+    return { ok: true, text, model, usage: extractOpenAiUsage(data, model) };
   } catch (e) {
     console.error("OpenAI API fetch error:", e);
     return { ok: false, error: String(e), model };
@@ -699,7 +813,8 @@ async function callOpenAiLuna(
 async function callClaude(
   contents: ChatContent[],
 ): Promise<
-  { ok: true; text: string; model: string } | {
+  | { ok: true; text: string; model: string; usage: JournalAiUsage | null }
+  | {
     ok: false;
     error: string;
     model: string;
@@ -743,7 +858,7 @@ async function callClaude(
     if (!text) {
       return { ok: false, error: "Claude returned an empty response", model };
     }
-    return { ok: true, text, model };
+    return { ok: true, text, model, usage: extractClaudeUsage(data, model) };
   } catch (e) {
     console.error("Claude API fetch error:", e);
     return { ok: false, error: String(e), model };
@@ -761,6 +876,7 @@ async function synthesizeWithFallback(
       text: lunaResult.text,
       provider: "openai",
       model: lunaResult.model,
+      usage: lunaResult.usage,
     };
   }
 
@@ -776,6 +892,7 @@ async function synthesizeWithFallback(
       text: claudeResult.text,
       provider: "claude",
       model: claudeResult.model,
+      usage: claudeResult.usage,
       fallbackFrom: {
         provider: "openai",
         model: lunaResult.model,
@@ -931,6 +1048,7 @@ Deno.serve(async (req: Request, info) => {
           },
         );
       }
+      await recordJournalAiUsage(supabase, effectiveStoreKey, clarified.usage);
       return new Response(
         JSON.stringify({
           ...clarified.plan,
@@ -1089,6 +1207,7 @@ Deno.serve(async (req: Request, info) => {
     const synth = await synthesizeWithFallback(contents);
 
     if (synth.ok) {
+      await recordJournalAiUsage(supabase, effectiveStoreKey, synth.usage);
       const fallbackNote = synth.fallbackFrom
         ? `（フォールバック: ${synth.fallbackFrom.model} → ${synth.model}）`
         : "";

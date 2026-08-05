@@ -1300,6 +1300,7 @@ Deno.serve(async (req, info) => {
       "/receipts/store-reviews/profile/ensure",
       "/receipts/store-reviews/refresh",
       "/receipts/store-reviews/search",
+      "/usage/ai-cost",
     ])
     if (!STORE_SCOPED_ALLOWED_PATHS.has(path)) {
       return json({ error: "この店舗用ログインからはこの操作はできません。" }, 403)
@@ -15733,6 +15734,63 @@ async function fetchAiUsageCostState(
     }).filter((row) => row.provider !== "groq")
   }
 
+  // Journal Report 用途（AI分析・チャット・確認質問 / 旧 pos_journal）。
+  // store_key|store クエリがあればその店舗のみ。無ければ全店舗のジャーナル用途。
+  const journalStoreParam = String(
+    url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "",
+  ).trim() || null
+  const mapSurfaceRow = (raw: unknown) => {
+    const r = raw as Record<string, unknown>
+    return {
+      provider: String(r.provider ?? ""),
+      model: String(r.model ?? "(unknown)"),
+      event_count: Number(r.event_count ?? 0) || 0,
+      input_tokens: Number(r.input_tokens ?? 0) || 0,
+      output_tokens: Number(r.output_tokens ?? 0) || 0,
+      thinking_tokens: Number(r.thinking_tokens ?? 0) || 0,
+      total_tokens: Number(r.total_tokens ?? 0) || 0,
+    }
+  }
+  const mergeModelTotals = (
+    rows: Array<ReturnType<typeof mapSurfaceRow>>,
+  ) => {
+    const merged = new Map<string, ReturnType<typeof mapSurfaceRow>>()
+    for (const row of rows) {
+      if (row.provider === "groq") continue
+      const key = `${row.provider}\0${row.model}`
+      const prev = merged.get(key)
+      if (!prev) {
+        merged.set(key, { ...row })
+        continue
+      }
+      prev.event_count += row.event_count
+      prev.input_tokens += row.input_tokens
+      prev.output_tokens += row.output_tokens
+      prev.thinking_tokens += row.thinking_tokens
+      prev.total_tokens += row.total_tokens
+    }
+    return [...merged.values()]
+  }
+  let journalModels: Array<ReturnType<typeof mapSurfaceRow>> = []
+  const journalSurfaceRows: Array<ReturnType<typeof mapSurfaceRow>> = []
+  for (const surface of ["journal", "pos_journal"] as const) {
+    const { data: jData, error: jError } = await supabase.rpc(
+      "ai_usage_surface_model_totals",
+      { p_from, p_to, p_store: journalStoreParam, p_surface: surface },
+    )
+    if (jError) {
+      console.error(
+        `ai_usage_surface_model_totals(${surface}) failed:`,
+        jError.message,
+      )
+      continue
+    }
+    for (const raw of (Array.isArray(jData) ? jData : [])) {
+      journalSurfaceRows.push(mapSurfaceRow(raw))
+    }
+  }
+  journalModels = mergeModelTotals(journalSurfaceRows)
+
   // 時系列データ（日次）
   let dailyTotals: Array<Record<string, unknown>> = []
   const { data: dailyData, error: dailyError } = await supabase.rpc("ai_usage_time_series", {
@@ -15788,6 +15846,11 @@ async function fetchAiUsageCostState(
     grok,
     models,
     foodcourt: { store: FOODCOURT_STORE_KEY, models: foodcourtModels },
+    journal: {
+      store: journalStoreParam,
+      surfaces: ["journal", "pos_journal"],
+      models: journalModels,
+    },
     daily_totals: dailyTotals,
     monthly_totals: monthlyTotals,
     generated_at: new Date().toISOString(),

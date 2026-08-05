@@ -6,13 +6,19 @@ import vm from 'node:vm';
 const htmlPath = new URL('../public/jnm/jnl2txt.html', import.meta.url);
 const indexPath = new URL('../public/jnm/index.html', import.meta.url);
 const historyPath = new URL('../public/jnm/ai-chat-pdf-history.html', import.meta.url);
+const aiUsagePath = new URL('../public/jnm/ai-usage.html', import.meta.url);
 const appThemePath = new URL('../public/jnm/app-theme.js', import.meta.url);
 const html = await readFile(htmlPath, 'utf8');
 const indexHtml = await readFile(indexPath, 'utf8');
 const historyHtml = await readFile(historyPath, 'utf8');
+const aiUsageHtml = await readFile(aiUsagePath, 'utf8');
 const appThemeJs = await readFile(appThemePath, 'utf8');
 const aiAnalyzeSource = await readFile(
   new URL('../supabase/functions/ai-analyze/index.ts', import.meta.url),
+  'utf8',
+);
+const adminApiSource = await readFile(
+  new URL('../supabase/functions/admin-api/index.ts', import.meta.url),
   'utf8',
 );
 
@@ -714,6 +720,15 @@ test('both Journal Report entry files keep the planner and error distinction in 
   assert.match(html, /AI_INTENT_CLARIFICATION_MARKER/);
   assert.match(html, /データが無いとは判断していません/);
   assert.match(html, /local-query-planner/);
+  assert.match(html, /href="\.\/ai-usage\.html"/);
+  assert.match(html, /AI使用量/);
+  assert.match(aiUsageHtml, /AI使用量/);
+  assert.match(aiUsageHtml, /\/usage\/ai-cost/);
+  assert.match(aiUsageHtml, /journal/);
+  assert.match(aiAnalyzeSource, /surface:\s*['"]journal['"]/);
+  assert.match(aiAnalyzeSource, /recordJournalAiUsage/);
+  assert.match(adminApiSource, /journal:\s*\{/);
+  assert.match(adminApiSource, /["']\/usage\/ai-cost["']/);
   assert.match(naturalClarificationRequestSource, /action:\s*['"]clarify['"]/);
   assert.match(naturalClarificationRequestSource, /purpose:\s*['"]clarification_only['"]/);
   assert.doesNotMatch(naturalClarificationRequestSource, /salesData\s*:/);
