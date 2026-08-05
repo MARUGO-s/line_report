@@ -571,20 +571,42 @@ function simpleNoticeFlex(text: string): Record<string, unknown> {
   }
 }
 
-// 小口現金ページのURLを組み立てる（store_key で店舗指定、from=line でロック、lt はワンタイムログイン）。
-function buildPettyCashPageUrl(storeKey: string, loginToken?: string | null): string {
+/** 出金日 YYYY-MM-DD から対象月 YYYY-MM を取る（ページの月フィルタ用）。 */
+export function pettyCashMonthFromSpentOn(spentOn: string | null | undefined): string {
+  const s = String(spentOn ?? '').trim()
+  const m = s.match(/^(\d{4})-(\d{2})/)
+  return m ? `${m[1]}-${m[2]}` : ''
+}
+
+// 小口現金ページのURLを組み立てる（store_key で店舗指定、from=line でロック、lt はワンタイムログイン、
+// month で記録した出金月を開く＝前回閲覧月の localStorage に張り付いて「無い」と誤認しない）。
+export function buildPettyCashPageUrl(
+  storeKey: string,
+  loginToken?: string | null,
+  spentOnOrMonth?: string | null,
+): string {
   const key = String(storeKey || '').trim()
   const lt = String(loginToken ?? '').trim()
+  const month = pettyCashMonthFromSpentOn(spentOnOrMonth)
+    || (/^\d{4}-\d{2}$/.test(String(spentOnOrMonth ?? '').trim()) ? String(spentOnOrMonth).trim() : '')
+  const params = new URLSearchParams({ store_key: key, from: 'line' })
+  if (month) params.set('month', month)
   if (lt) {
-    const withToken = `${PETTY_CASH_PAGE_BASE}?${new URLSearchParams({ store_key: key, from: 'line', lt }).toString()}`
+    params.set('lt', lt)
+    const withToken = `${PETTY_CASH_PAGE_BASE}?${params.toString()}`
     if (withToken.length <= LINE_PETTY_URI_MAX_LEN) return withToken
+    params.delete('lt')
   }
-  return `${PETTY_CASH_PAGE_BASE}?${new URLSearchParams({ store_key: key, from: 'line' }).toString()}`
+  return `${PETTY_CASH_PAGE_BASE}?${params.toString()}`
 }
 
 // 売上分析（レシート）と同じ仕組み: ワンタイムのログインリンク(lt)を発行し、
 // 店舗を限定（その店舗のみ閲覧）した小口現金ページのURLを返す。発行失敗時はトークン無しURL。
-async function buildPettyCashDashboardLink(supabase: SupabaseClient, storeKey: string): Promise<string> {
+async function buildPettyCashDashboardLink(
+  supabase: SupabaseClient,
+  storeKey: string,
+  spentOn?: string | null,
+): Promise<string> {
   const key = String(storeKey || '').trim()
   if (!key) return ''
   try {
@@ -592,10 +614,10 @@ async function buildPettyCashDashboardLink(supabase: SupabaseClient, storeKey: s
       source: 'line_petty_cash',
       store_partition_key: key,
     })
-    return buildPettyCashPageUrl(key, issued.token)
+    return buildPettyCashPageUrl(key, issued.token, spentOn)
   } catch (e) {
     console.error('buildPettyCashDashboardLink failed:', e instanceof Error ? e.message : String(e))
-    return buildPettyCashPageUrl(key, null)
+    return buildPettyCashPageUrl(key, null, spentOn)
   }
 }
 
@@ -968,13 +990,22 @@ export async function handlePettyCashPostback(
     line_message_id: p.line_message_id,
   })
   if (insErr) {
-    // line_message_id 一意制約などの重複は「記録済み」とみなす。
     console.error('petty_cash insert failed:', insErr.message)
-    await supabase.from(PENDING_TABLE).update({ status: 'recorded', updated_at: new Date().toISOString() }).eq('id', id)
-    return simpleNoticeFlex('この経費はすでに記録済みのようです。小口現金ページをご確認ください。')
+    // line_message_id 一意制約の重複だけ「記録済み」。それ以外は未記録のままリトライ可能にする。
+    const isDup = /duplicate|unique|line_message_id/i.test(String(insErr.message || ''))
+    if (isDup) {
+      await supabase.from(PENDING_TABLE).update({ status: 'recorded', updated_at: new Date().toISOString() }).eq('id', id)
+      // 重複でも出金月付きリンクを返し、別月フィルタで「無い」と誤認しない
+      const pageUrl = await buildPettyCashDashboardLink(supabase, String(p.store_partition_key ?? ''), p.spent_on)
+      return pageUrl
+        ? doneFlex(p, pageUrl)
+        : simpleNoticeFlex('この経費はすでに記録済みです。小口現金ページで出金日の月を選んでご確認ください。')
+    }
+    return simpleNoticeFlex('記録に失敗しました。しばらくしてからもう一度「この内容で記録」を押すか、小口現金ページから手入力してください。')
   }
   await supabase.from(PENDING_TABLE).update({ status: 'recorded', updated_at: new Date().toISOString() }).eq('id', id)
   // 売上分析と同じ仕組みで、その店舗のみ閲覧できる小口現金ページへのワンタイムログインリンクを付ける。
-  const pageUrl = await buildPettyCashDashboardLink(supabase, String(p.store_partition_key ?? ''))
+  // spent_on の月を URL に載せ、前回閲覧の別月（例: 7月）で開いて「無い」と誤認しない。
+  const pageUrl = await buildPettyCashDashboardLink(supabase, String(p.store_partition_key ?? ''), p.spent_on)
   return doneFlex(p, pageUrl)
 }

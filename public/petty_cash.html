@@ -1439,8 +1439,18 @@
       captureLockedStoreFromUrl(); // populateStores より前
       populateStores();
       applyLockedChrome();         // LINEロック時はサイドバー等を非表示（小口現金のみ表示）
+      // 月の優先順位: URL ?month=（LINE記録完了リンク）→ LINE経由なら当月 → localStorage → 当月
+      // ※前回7月を見ていた人が8月レシート記録後に開くと、旧仕様では7月のまま「記録が無い」と誤認していた。
       let savedMonth = ''; try { savedMonth = localStorage.getItem(LS_MONTH) || ''; } catch (_) {}
-      dom.monthF.value = savedMonth || currentMonth();
+      let urlMonth = '';
+      let fromLine = false;
+      try {
+        const params = new URLSearchParams(location.search);
+        const m = String(params.get('month') || '').trim();
+        if (/^\d{4}-\d{2}$/.test(m)) urlMonth = m;
+        fromLine = params.get('from') === 'line';
+      } catch (_) {}
+      dom.monthF.value = urlMonth || (fromLine ? currentMonth() : (savedMonth || currentMonth()));
       if (AUTH && AUTH.consumeUrlAuthParams) {
         try {
           await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });

@@ -1,8 +1,22 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { looksLikeSalesSettlementReceipt, normalizeLineImageReceiptAnalysis } from "../supabase/functions/_shared/receipt_parse.ts";
 import { receiptStoreNameMatchesRegistry } from "../supabase/functions/_shared/receipt_store_name_match.ts";
 import { resolveBuiltinStoreReceiptPrompt } from "../supabase/functions/_shared/receipt_prompt.ts";
+
+test("LINE petty cash page link opens the spent-on month, not a stale localStorage month", async () => {
+  // Deno esm imports を Node で引かないため、ソース規約で担保する。
+  const flow = await readFile(new URL("../supabase/functions/_shared/petty_cash_flow.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../public/petty_cash.html", import.meta.url), "utf8");
+  assert.match(flow, /export function pettyCashMonthFromSpentOn/);
+  assert.match(flow, /params\.set\('month', month\)/);
+  assert.match(flow, /buildPettyCashDashboardLink\(supabase, String\(p\.store_partition_key[^)]*\), p\.spent_on\)/);
+  assert.match(flow, /const isDup = \/duplicate\|unique\|line_message_id\/i/);
+  assert.match(page, /params\.get\('month'\)/);
+  assert.match(page, /fromLine \? currentMonth\(\)/);
+  assert.match(page, /urlMonth \|\| \(fromLine \? currentMonth/);
+});
 
 test("recognises a daily sales settlement report as sales, never as an expense", () => {
   // 実害: 2026-07-20 クラウディア2。「経費」先打ちの画像待ち中に日計精算レポートを送ったため、
