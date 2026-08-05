@@ -95,7 +95,8 @@ function extractClaudeUsage(
 }
 
 async function recordJournalAiUsage(
-  supabase: ReturnType<typeof createClient>,
+  // createClient の戻り型は Deno check で呼び出し側と合わないため緩く受ける
+  supabase: { from: (table: string) => { insert: (row: Record<string, unknown>) => PromiseLike<{ error: { message: string } | null }> } },
   storeKey: string,
   usage: JournalAiUsage | null,
 ): Promise<void> {
