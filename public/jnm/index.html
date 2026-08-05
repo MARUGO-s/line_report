@@ -765,9 +765,24 @@
     background: color-mix(in srgb, var(--rv-text) 5%, transparent);
     font-weight: bold;
   }
+  .md-table-wrap{overflow-x:auto;margin:16px 0;max-width:100%}
+  .md-hr{border:0;border-top:1px solid #c8c8c8;margin:16px 0}
   .month-table{width:100%;border-collapse:collapse;background:transparent;border:1px solid var(--rv-neutral-700);border-radius:var(--rv-radius-md);overflow:hidden;font-size:12px;margin-bottom:var(--rv-space-4)}
-  .month-table th,.month-table td{padding:8px 10px;border-bottom:1px solid var(--rv-divider);text-align:right;font-family:var(--rv-font-sans);font-variant-numeric:tabular-nums}
+  .month-table th,.month-table td{padding:8px 10px;border-bottom:1px solid var(--rv-divider);text-align:right;font-family:var(--rv-font-sans);font-variant-numeric:tabular-nums;vertical-align:top}
   .month-table th:first-child,.month-table td:first-child{text-align:left;font-family:var(--rv-font-body)}
+  .month-table.md-table tr:last-child td{font-weight:inherit;border-top:0}
+  #reportView .ai-chat-pdf-doc .month-table,
+  #reportView .ai-chat-pdf-doc .md-table {
+    color:#1a1a1a;background:#fff;border-color:#bbb;
+  }
+  #reportView .ai-chat-pdf-doc .month-table th,
+  #reportView .ai-chat-pdf-doc .md-table th {
+    background:#f0f0f0;color:#1a1a1a;
+  }
+  #reportView .ai-chat-pdf-doc .month-table td,
+  #reportView .ai-chat-pdf-doc .md-table td {
+    color:#1a1a1a;background:#fff;
+  }
   .month-table th{font-family:var(--rv-font-body);font-weight:700;background:color-mix(in srgb, var(--rv-text) 4%, transparent);
     font-size:11px;letter-spacing:.04em;text-transform:uppercase;opacity:.7}
   .month-table tr:last-child td{border-bottom:0;font-weight:700;border-top:1px solid var(--rv-neutral-700)}
@@ -7688,6 +7703,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let aiChatHistory = [];
 
+function isMarkdownTableSeparator(line) {
+  const trimmed = String(line || '').trim();
+  if (!trimmed.includes('|')) return false;
+  const cells = trimmed.split('|').map((c) => c.trim()).filter((c, i, arr) => {
+    // 先頭・末尾の空セル（|...| の両端）を除く
+    if ((i === 0 || i === arr.length - 1) && !c) return false;
+    return true;
+  });
+  if (cells.length < 2) return false;
+  return cells.every((c) => /^:?-{3,}:?$/.test(c));
+}
+
 function simpleMarkdown(text) {
   if (!text) return '';
   let html = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -7695,7 +7722,8 @@ function simpleMarkdown(text) {
   html = html.replace(/### (.*?)\n/g, '<h3>$1</h3>\n');
   html = html.replace(/## (.*?)\n/g, '<h2>$1</h2>\n');
   html = html.replace(/# (.*?)\n/g, '<h1>$1</h1>\n');
-  html = html.replace(/---/g, '<hr style="border:0;border-top:1px solid #e2e8f0;margin:24px 0;">');
+  // 単独行の区切り線だけ HR にする（表の |---|---| を壊さない）
+  html = html.replace(/^(?:---|\*\*\*|___)\s*$/gm, '<hr class="md-hr">');
 
   const lines = html.split('\n');
   let inList = false;
@@ -7705,12 +7733,18 @@ function simpleMarkdown(text) {
 
   for (let line of lines) {
     const trimmed = line.trim();
-    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+    const looksLikeTableRow = trimmed.startsWith('|') && trimmed.includes('|', 1);
+    if (looksLikeTableRow || isMarkdownTableSeparator(trimmed)) {
       if (inList) { out.push('</ul>'); inList = false; }
-      if (trimmed.includes('---')) continue; // Skip table header separator
-      const cells = trimmed.split('|').slice(1, -1).map(c => c.trim());
+      if (isMarkdownTableSeparator(trimmed) || /^[\s|:-]+$/.test(trimmed)) {
+        // ヘッダ直後の区切り行はスキップ（既に HR 化されていてもここに来ない）
+        if (inTable) tableHeader = false;
+        continue;
+      }
+      const cells = trimmed.split('|').slice(1, trimmed.endsWith('|') ? -1 : undefined).map(c => c.trim());
+      if (!cells.length) continue;
       if (!inTable) {
-        out.push('<div class="md-table-wrap" style="overflow-x:auto;margin:16px 0;"><table class="month-table" style="width:100%;">');
+        out.push('<div class="md-table-wrap"><table class="month-table md-table">');
         inTable = true;
         tableHeader = true;
       }
@@ -7732,6 +7766,7 @@ function simpleMarkdown(text) {
     } else {
       if (inList) { out.push('</ul>'); inList = false; }
       if (trimmed === '') out.push('<br>');
+      else if (trimmed === '<hr class="md-hr">') out.push('<hr class="md-hr">');
       else out.push(`<p style="margin-bottom:8px;line-height:1.7;">${line}</p>`);
     }
   }

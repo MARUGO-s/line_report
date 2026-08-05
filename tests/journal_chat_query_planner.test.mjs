@@ -131,6 +131,8 @@ for (const name of [
   'selectKnowledgeChunksForQuery',
   'formatStoreKnowledgeBlock',
   'resolveKnowledgePeriodRange',
+  'isMarkdownTableSeparator',
+  'simpleMarkdown',
 ]) {
   vm.runInContext(`${extractFunction(html, name)}; this.${name} = ${name};`, context);
 }
@@ -151,6 +153,25 @@ test('saved report coverage uses the actual oldest and latest stored months', ()
   assert.equal(coverage.first, '2024-05');
   assert.equal(coverage.last, '2026-07');
   assert.equal(coverage.monthCount, 4);
+});
+
+test('simpleMarkdown keeps GFM tables intact (does not turn |---| into hr cells)', () => {
+  assert.equal(context.isMarkdownTableSeparator('|---|---|---|'), true);
+  assert.equal(context.isMarkdownTableSeparator('| :--- | ---: | --- |'), true);
+  assert.equal(context.isMarkdownTableSeparator('| 総売上高 | ¥1 |'), false);
+
+  const htmlOut = context.simpleMarkdown(`| 項目 | 2024年6月 | 2025年6月 |
+|---|---|---|
+| 総売上高 | ¥1,936,400 | ¥1,165,900 |
+
+---
+
+補足`);
+  assert.equal((htmlOut.match(/<tr>/g) || []).length, 2);
+  assert.match(htmlOut, /総売上高/);
+  assert.match(htmlOut, /¥1,936,400/);
+  assert.doesNotMatch(htmlOut, /<td[^>]*>\s*<hr/);
+  assert.equal((htmlOut.match(/<hr class="md-hr">/g) || []).length, 1);
 });
 
 test('monthly report index excludes same-month daily rows and preserves every daily row for missing months', () => {
