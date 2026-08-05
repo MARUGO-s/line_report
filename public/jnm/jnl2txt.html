@@ -948,6 +948,13 @@
   }
 
   /* AI Panel Styles（グローバルトークンで統一。#reportView外なので --rv-* は使わない） */
+  .ai-panel-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 9998;
+  }
+  .ai-panel-backdrop[hidden] { display: none !important; }
   .ai-panel {
     position: fixed;
     top: var(--ai-viewport-top, 0px);
@@ -975,11 +982,33 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     padding: 16px 20px;
     background: var(--surface);
     border-bottom: 1px solid var(--border-sub);
     color: var(--text);
     font-weight: 700;
+  }
+  .ai-panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+  .ai-panel-reset {
+    background: transparent;
+    border: 1px solid var(--border-sub);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-3);
+    line-height: 1.2;
+  }
+  .ai-panel-reset:hover {
+    color: var(--text);
+    border-color: var(--border);
   }
   .ai-panel-close {
     background: transparent;
@@ -987,7 +1016,10 @@
     font-size: 18px;
     cursor: pointer;
     color: var(--text-3);
+    line-height: 1;
+    padding: 2px 4px;
   }
+  .ai-panel-close:hover { color: var(--text); }
   .ai-chat-messages {
     flex: 1;
     min-height: 0;
@@ -1724,10 +1756,14 @@
 
 <div id="reportView" hidden></div>
 
+<div id="aiChatBackdrop" class="ai-panel-backdrop" hidden></div>
 <div id="aiChatPanel" class="ai-panel" hidden>
   <div class="ai-panel-header">
     <span>💬 AI チャット</span>
-    <button onclick="toggleAiChat()" class="ai-panel-close">✕</button>
+    <div class="ai-panel-header-actions">
+      <button type="button" id="aiChatResetBtn" class="ai-panel-reset" onclick="resetAiChat()" title="会話履歴をクリア">リセット</button>
+      <button type="button" class="ai-panel-close" onclick="closeAiChat()" aria-label="閉じる">✕</button>
+    </div>
   </div>
   <div id="aiChatMessages" class="ai-chat-messages"></div>
   <div class="ai-chat-input">
@@ -1913,9 +1949,13 @@ async function applySelectedStore(nextKey, opts) {
     try { categorySettings = readCategorySettings(); } catch (_) {}
     try { fillStoreOpsForm(readStoreOpsProfile(key)); } catch (_) {}
     currentReport = null;
-    if (typeof aiChatHistory !== 'undefined') aiChatHistory = [];
-    const chat = document.getElementById('aiChatMessages');
-    if (chat) chat.innerHTML = '';
+    if (typeof resetAiChat === 'function') resetAiChat();
+    else {
+      if (typeof aiChatHistory !== 'undefined') aiChatHistory = [];
+      const chat = document.getElementById('aiChatMessages');
+      if (chat) chat.innerHTML = '';
+    }
+    if (typeof closeAiChat === 'function') closeAiChat();
     if (options.silent !== true) {
       finishSaveStatus('店舗を切り替えました: ' + resolveStoreDisplayName(key));
     }
@@ -6852,6 +6892,13 @@ if(aiChatInput) {
     if(e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) sendAiChat();
   });
 }
+const aiChatBackdropEl = document.getElementById('aiChatBackdrop');
+if (aiChatBackdropEl) {
+  aiChatBackdropEl.addEventListener('click', () => closeAiChat());
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isAiChatOpen()) closeAiChat();
+});
 syncAiChatViewport();
 
 ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.add('over'); }));
@@ -8086,16 +8133,52 @@ function downloadAiAnalysisText() {
   download(`AI分析レポート_${period}.txt`, currentReport.aiAnalysisText);
 }
 
-function toggleAiChat() {
+function isAiChatOpen() {
   const panel = document.getElementById('aiChatPanel');
-  panel.hidden = !panel.hidden;
-  if(!panel.hidden) {
-    syncAiChatViewport();
-    setTimeout(() => {
-      const input = document.getElementById('aiChatInput');
-      try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); }
-      syncAiChatViewport(true);
-    }, 100);
+  return !!(panel && !panel.hidden);
+}
+
+function openAiChat() {
+  const panel = document.getElementById('aiChatPanel');
+  const backdrop = document.getElementById('aiChatBackdrop');
+  if (!panel) return;
+  panel.hidden = false;
+  if (backdrop) backdrop.hidden = false;
+  syncAiChatViewport();
+  setTimeout(() => {
+    const input = document.getElementById('aiChatInput');
+    if (!input) return;
+    try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); }
+    syncAiChatViewport(true);
+  }, 100);
+}
+
+function closeAiChat() {
+  const panel = document.getElementById('aiChatPanel');
+  const backdrop = document.getElementById('aiChatBackdrop');
+  if (panel) panel.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+}
+
+function toggleAiChat() {
+  if (isAiChatOpen()) closeAiChat();
+  else openAiChat();
+}
+
+/** 会話履歴と表示をクリア（パネルは開いたまま） */
+function resetAiChat() {
+  aiChatHistory = [];
+  const chat = document.getElementById('aiChatMessages');
+  if (chat) chat.innerHTML = '';
+  const input = document.getElementById('aiChatInput');
+  if (input) {
+    input.value = '';
+    input.disabled = false;
+  }
+  const sendBtn = document.getElementById('aiChatSend');
+  if (sendBtn) sendBtn.disabled = false;
+  if (isAiChatOpen() && input) {
+    try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); }
   }
 }
 
