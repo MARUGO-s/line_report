@@ -3351,6 +3351,11 @@ Deno.serve(async (req, info) => {
           receipt_monthend_hour: payload.receipt_monthend_hour,
           receipt_monthend_minute: payload.receipt_monthend_minute,
           receipt_report_store_partition_key: payload.receipt_report_store_partition_key,
+          // 管理画面で店舗へ連携・保存した招待ルームは Bot 利用も許可する。
+          // （auto_link は bot_access_approved=false のまま作るため、連携済みなのに「承認待ち」と返る事故を防ぐ）
+          ...(payload.receipt_report_store_partition_key
+            ? { bot_access_approved: true }
+            : {}),
           room_sort_order: payload.room_sort_order,
           delivery_hours: payload.delivery_hours,
           message_cleanup_timing: payload.message_cleanup_timing,
