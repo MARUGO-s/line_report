@@ -8422,23 +8422,33 @@ function extractNamedProductMentions(query) {
     add(`${prefix}コース`, `${prefix}コース`, 'named_course');
   }
 
-  // 引用符内の商品名
+  // 引用符内の商品名（売れ行き質問ならカテゴリ語が無くても採用）
+  const salesCtx = /(売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|何本|売れた)/.test(q);
   const quotedRe = /[「『"]([^」』"]{2,40})[」』"]/g;
   while ((m = quotedRe.exec(q))) {
     const name = String(m[1]).trim();
-    if (/コース|おまかせ|ワイン|ボトル|グラス|ビール|焼酎|日本酒/.test(name)) add(name, name, 'quoted');
+    if (
+      salesCtx ||
+      /コース|おまかせ|ワイン|ボトル|グラス|ビール|焼酎|日本酒|ジン|ウイスキー/.test(name)
+    ) {
+      add(name, name, 'quoted');
+    }
   }
 
-  // 「サッポロ赤星の売れ行き」「ドライゼロは何本」など、カタカナ起点の銘柄・単品名。
-  // コース系は上で拾済み。助詞だけの断片や年号は除外する。
+  // 「サッポロ赤星の売れ行き」「季の美の月別」「ドライゼロは何本」など。
+  // 漢字銘柄（名称中の「の」含む）も拾う。数字は商品名に入れず、年号を飲み込まない。
+  // 「2026年の季の美の売れ行き」は後処理で年の／月の以降だけ残す。
   const brandSalesRe =
-    /([ァ-ヶー]{2,}[ァ-ヶー一-龥A-Za-z0-9・･]{0,16})\s*(?:の|は|が)?\s*(?:売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|いくつ|何本|売れた)/g;
+    /([ァ-ヶー一-龥A-Za-z・･の]{2,24}?)(?:の|は|が)\s*(?:売れ行き|売上|販売|点数|本数|杯数|月別|月ごと|月次|いくつ|何本|売れた)/g;
   while ((m = brandSalesRe.exec(q))) {
     let name = String(m[1]).normalize('NFKC').trim();
+    const afterPeriod = name.match(/(?:年の|月の)(.+)$/);
+    if (afterPeriod) name = afterPeriod[1];
+    name = name.replace(/^年の?/, '');
     name = name.replace(/^[のはがをにでと]+/, '').replace(/[のはがをにでと]+$/, '');
     if (name.length < 2) continue;
-    if (/^\d/.test(name) || /年$/.test(name)) continue;
-    if (/^(今回|確定|集計|月次|売上|商品|メニュー|全体|推移|データ|対象|期間)$/.test(name)) continue;
+    if (/[年月]$/.test(name)) continue;
+    if (/^(今回|確定|集計|月次|売上|商品|メニュー|全体|推移|データ|対象|期間|今月|先月|前年|昨年|今年|店舗|合計|内訳)$/.test(name)) continue;
     if (/コース|おまかせ/.test(name)) continue;
     add(name, name, 'brand_or_item');
   }

@@ -496,6 +496,15 @@ test('brand monthly sales questions extract named products and trigger journal t
       .some((t) => t.q === 'ドライゼロ'),
     true,
   );
+
+  // 漢字銘柄（名称中に「の」を含む）も拾う
+  const kinobi = '2026年の季の美の売れ行きを教えて';
+  assert.equal(context.extractNamedProductMentions(kinobi).some((m) => m.q === '季の美'), true);
+  assert.equal(context.wantsProductTimelineSearch(kinobi), true);
+  assert.equal(
+    context.extractNamedProductMentions('「季の美」の売れ行き').some((m) => m.q === '季の美'),
+    true,
+  );
 });
 
 test('bottle and course questions load exact journal items without double counting summaries', () => {
