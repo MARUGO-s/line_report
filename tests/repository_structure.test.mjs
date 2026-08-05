@@ -118,6 +118,15 @@ test('repository layout documentation explains root compatibility and local stat
   assert.match(guide, /\.local\/sqlite/);
 });
 
+test('LINE room settings can edit today-reservation alert time like the site Webhook panel', async () => {
+  const html = await readFile(new URL('public/room_settings.html', root), 'utf8');
+  assert.match(html, /extra:'todayReservationAlert'/);
+  assert.match(html, /today-reservation-alert-inp/);
+  assert.match(html, /today_reservation_alert_hour/);
+  assert.match(html, /today_reservation_alert_minute/);
+  assert.match(html, /サイト設定と連動/);
+});
+
 test('Pages workflow deploys only the public directory', async () => {
   const workflow = await readFile(new URL('.github/workflows/deploy-pages.yml', root), 'utf8');
   assert.match(workflow, /actions\/configure-pages@v5/);

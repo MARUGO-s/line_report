@@ -264,7 +264,7 @@
     ]},
     { id:'calendar', title:'予約・カレンダー', icon:'calendar', caption:'予約通知・カレンダー連携', items:[
       {key:'gmail_reservation_alert_enabled', t:'Gmail予約通知', d:'Gmailで受信した予約をLINEに通知します', extra:'gmailAlertInterval'},
-      {key:'today_reservation_alert_enabled', t:'本日の予約状況を配信', d:'当日の予約一覧を毎朝配信します'},
+      {key:'today_reservation_alert_enabled', t:'本日の予約状況配信', d:'毎日決まった時刻に、当日の予約一覧を1通で配信します（サイトのWebhook設定と同じ）', extra:'todayReservationAlert'},
       {key:'calendar_tomorrow_reminder_enabled', t:'明日の予定を配信', d:'翌日の予定を配信します'},
       {key:'calendar_ai_auto_create_enabled', t:'予定の自動登録', d:'予定をカレンダーに自動登録します'},
       {key:'calendar_silent_auto_register_enabled', t:'無返信で自動登録', d:'返信せずに自動登録します'},
@@ -284,6 +284,8 @@
   // (その日の経過分 - 基準時刻) % 配信間隔 === 0 のときだけ送るので、
   // 例: 基準0:00・8時間ごと → 0:00/8:00/16:00。NULL=既定 10時/0分（PC版と同じ）。
   var gmailAlertInterval = { minutes:1, anchorHour:10, anchorMinute:0 };
+  // 本日の予約状況配信の時刻（サイト index.html と同じ既定 18:00）。
+  var todayReservationAlert = { hour:18, minute:0 };
   var GMAIL_ALERT_INTERVAL_OPTIONS = [
     [1,'1分ごと（リアルタイム）'], [15,'15分ごとにまとめる'], [30,'30分ごとにまとめる'],
     [60,'1時間ごとにまとめる'], [120,'2時間ごとにまとめる'], [180,'3時間ごとにまとめる'],
@@ -362,6 +364,8 @@
         gmailAlertInterval.minutes = (cfg.gmail_alert_interval_minutes != null) ? Number(cfg.gmail_alert_interval_minutes) : 1;
         gmailAlertInterval.anchorHour   = (cfg.gmail_alert_anchor_hour   != null) ? Number(cfg.gmail_alert_anchor_hour)   : 10;
         gmailAlertInterval.anchorMinute = (cfg.gmail_alert_anchor_minute != null) ? Number(cfg.gmail_alert_anchor_minute) : 0;
+        todayReservationAlert.hour   = (cfg.today_reservation_alert_hour   != null) ? Number(cfg.today_reservation_alert_hour)   : 18;
+        todayReservationAlert.minute = (cfg.today_reservation_alert_minute != null) ? Number(cfg.today_reservation_alert_minute) : 0;
         var roomName = (cfg.room_name && String(cfg.room_name).trim()) || roomId || 'このルーム';
         el('loginScreen').hidden = true; el('appScreen').hidden = false;
         el('roomChipId').textContent = roomName;
@@ -442,6 +446,17 @@
       + '</div>';
   }
 
+  // 本日の予約状況配信の時刻（サイトの type=time と同じ。同じ DB 列を読む／書く）。
+  function todayReservationAlertControlHtml(){
+    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
+    var timeVal = pad2(todayReservationAlert.hour)+':'+pad2(todayReservationAlert.minute);
+    return '<div class="today-reservation-alert-when" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px 14px;">'
+      + '<span style="font-size:12px;color:#8a94a6;font-weight:700;width:100%">🕐 配信時刻（毎日この時刻に送信・サイト設定と連動）</span>'
+      + '<input type="time" class="today-reservation-alert-inp" value="'+timeVal+'" aria-label="本日の予約状況配信の時刻" style="'+ss+'">'
+      + '<span style="font-size:12px;color:#8a94a6;">毎日この時刻に送信</span>'
+      + '</div>';
+  }
+
   // 配信間隔を変えたときに基準時刻欄の表示だけを差し替える。
   // render() を呼ぶと開いているセクションが全部閉じてしまうため、ここでは DOM を直接触る。
   function syncGmailAlertAnchorVisibility(){
@@ -464,6 +479,7 @@
         if (it.extra === 'fcWeekly') r += fcWeeklyControlHtml();
         if (it.extra === 'reviewAlert') r += reviewAlertControlHtml();
         if (it.extra === 'gmailAlertInterval') r += gmailAlertIntervalControlHtml();
+        if (it.extra === 'todayReservationAlert') r += todayReservationAlertControlHtml();
         return r;
       }).join('');
       return '<section class="sec" data-sec="'+sec.id+'">'+
@@ -571,6 +587,21 @@
       gmailAlertInterval.anchorHour = ah;
       gmailAlertInterval.anchorMinute = am;
       savePatch({ gmail_alert_anchor_hour: ah, gmail_alert_anchor_minute: am });
+      return;
+    }
+    var traInp = e.target.closest('input.today-reservation-alert-inp');
+    if (traInp){
+      var trmt = /^(\d{1,2}):(\d{2})$/.exec(String(traInp.value||''));
+      if (!trmt){
+        traInp.value = pad2(todayReservationAlert.hour)+':'+pad2(todayReservationAlert.minute);
+        return;
+      }
+      var th = Math.min(23, Math.max(0, parseInt(trmt[1], 10)));
+      var tm = Math.min(59, Math.max(0, parseInt(trmt[2], 10)));
+      todayReservationAlert.hour = th;
+      todayReservationAlert.minute = tm;
+      // 時・分は1リクエストにまとめ、サイトの Webhook 設定と同じ列へ保存する。
+      savePatch({ today_reservation_alert_hour: th, today_reservation_alert_minute: tm });
       return;
     }
     var inp = e.target.closest('input[type=checkbox]');
