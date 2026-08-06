@@ -1,12 +1,20 @@
 name: Deploy GitHub Pages
 
+# main の public/ 更新を GitHub Pages へ配信する。
+# validate と deploy を同一ジョブにし、runner 枯渇で二段目だけ落ちるのを防ぐ。
+
 on:
   push:
     branches: [main]
     paths:
       - "public/**"
       - ".github/workflows/deploy-pages.yml"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "検証をスキップして Pages デプロイのみ（緊急用）"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -18,44 +26,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SKIP_TESTS: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_tests }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: env.SKIP_TESTS != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
       - name: Setup Deno
+        if: env.SKIP_TESTS != 'true'
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.8.1
 
       - name: Install dependencies
+        if: env.SKIP_TESTS != 'true'
         run: npm ci
 
       - name: Static checks
+        if: env.SKIP_TESTS != 'true'
         run: npm run check
 
       - name: Test
+        if: env.SKIP_TESTS != 'true'
         run: npm run test:ci
 
       - name: Verify diff formatting
+        if: env.SKIP_TESTS != 'true'
         run: git diff --check
-
-  deploy:
-    needs: validate
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

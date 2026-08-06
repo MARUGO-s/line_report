@@ -133,6 +133,23 @@ test('Pages workflow deploys only the public directory', async () => {
   assert.match(workflow, /actions\/upload-pages-artifact@v4/);
   assert.match(workflow, /path:\s*public/);
   assert.match(workflow, /actions\/deploy-pages@v4/);
+  // validate と deploy を分けず同一ジョブにし、runner 枯渇で二段目だけ落ちるのを防ぐ
+  assert.match(workflow, /jobs:\s*\n\s*deploy:/);
+  assert.doesNotMatch(workflow, /^\s*validate:\s*$/m);
+});
+
+test('Edge Functions workflow deploys from a single job on main push', async () => {
+  const workflow = await readFile(
+    new URL('.github/workflows/deploy-edge-functions.yml', root),
+    'utf8',
+  );
+  assert.match(workflow, /supabase functions deploy/);
+  assert.match(workflow, /--use-api/);
+  assert.match(workflow, /SUPABASE_ACCESS_TOKEN/);
+  assert.match(workflow, /jobs:\s*\n\s*deploy:/);
+  assert.doesNotMatch(workflow, /^\s*validate:\s*$/m);
+  assert.match(workflow, /continue-on-error:\s*true/);
+  assert.match(workflow, /Fail if DB migration push failed/);
 });
 
 test('top-level markdown links from docs still resolve after moving the frontend', async () => {
