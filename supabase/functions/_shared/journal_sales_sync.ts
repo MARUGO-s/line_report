@@ -94,6 +94,39 @@ export async function isJournalSalesSyncEnabled(
   return profile.journalSalesSync === true
 }
 
+/**
+ * 日次行から月次集計を作る。営業日は総売上 > 0 の日だけ。
+ * 出所が混在する月は source=mixed（単一ならその値）。
+ */
+export function summarizeMonthFromDayRows(
+  rows: Record<string, unknown>[],
+): {
+  gross: number
+  tax: number
+  guests: number
+  groups: number
+  operatingDays: number
+  source: string
+} {
+  let gross = 0, tax = 0, guests = 0, groups = 0, operatingDays = 0
+  const sources = new Set<string>()
+  for (const row of rows) {
+    const dayGross = toFiniteNumber(row.gross_sales_yen)
+    gross += dayGross
+    tax += toFiniteNumber(row.tax_amount_yen)
+    guests += toFiniteNumber(row.guest_count)
+    groups += toFiniteNumber(row.party_count)
+    // 休業日（0円）や客数のみの行を営業日に数えない
+    if (dayGross > 0) operatingDays += 1
+    const source = row.source == null ? "" : String(row.source).trim()
+    if (source) sources.add(source)
+  }
+  let source = "journal"
+  if (sources.size === 1) source = [...sources][0]!
+  else if (sources.size > 1) source = "mixed"
+  return { gross, tax, guests, groups, operatingDays, source }
+}
+
 /** 影響した月を日次テーブル全体から再集計して月次へ書き戻す。 */
 async function rebuildMonthsFromDays(
   supabase: SupabaseClient,
@@ -110,7 +143,7 @@ async function rebuildMonthsFromDays(
 
     const { data, error } = await supabase
       .from("line_sales_manual_day")
-      .select("gross_sales_yen, tax_amount_yen, guest_count, party_count")
+      .select("gross_sales_yen, tax_amount_yen, guest_count, party_count, source")
       .eq("store_partition_key", key)
       .gte("sales_date", from)
       .lte("sales_date", to)
@@ -119,29 +152,20 @@ async function rebuildMonthsFromDays(
     const rows = (data ?? []) as Record<string, unknown>[]
     if (!rows.length) continue
 
-    let gross = 0, tax = 0, guests = 0, groups = 0, days = 0
-    for (const row of rows) {
-      gross += toFiniteNumber(row.gross_sales_yen)
-      tax += toFiniteNumber(row.tax_amount_yen)
-      guests += toFiniteNumber(row.guest_count)
-      groups += toFiniteNumber(row.party_count)
-      // 営業日数は売上が入っている日だけ数える。
-      // 客数のみ登録された行（レシート経由等）を営業日として計上しない。
-      if (row.gross_sales_yen != null) days += 1
-    }
+    const summary = summarizeMonthFromDayRows(rows)
 
     const { error: upsertError } = await supabase
       .from("line_sales_manual_month_gross")
       .upsert({
         store_partition_key: key,
         sales_month: month,
-        gross_sales_yen: Math.round(gross),
-        net_sales_yen: Math.round(gross - tax),
-        tax_amount_yen: Math.round(tax),
-        guest_count: Math.round(guests),
-        party_count: Math.round(groups),
-        operating_days_count: days,
-        source: "journal",
+        gross_sales_yen: Math.round(summary.gross),
+        net_sales_yen: Math.round(summary.gross - summary.tax),
+        tax_amount_yen: Math.round(summary.tax),
+        guest_count: Math.round(summary.guests),
+        party_count: Math.round(summary.groups),
+        operating_days_count: summary.operatingDays,
+        source: summary.source,
         updated_at: new Date().toISOString(),
       }, { onConflict: "store_partition_key,sales_month" })
     if (upsertError) throw new Error(upsertError.message)

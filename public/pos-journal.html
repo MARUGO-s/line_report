@@ -350,6 +350,9 @@
     .wx { display:inline-flex; align-items:center; gap:4px; }
     .chip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-weight:600; }
     .chip.gray { background: var(--surface-2); color: var(--text-3); }
+    .chip.warn { background: var(--warn-soft); color: var(--warn); }
+    .pj-file-name { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .pj-file-card h2 .c-note.warn-count { color: var(--warn); }
     .rk-bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; min-width: 60px; }
     .rk-bar > span { display:block; height:100%; background: var(--accent); border-radius:999px; }
     .receipts-cell { background: var(--surface-2); }
@@ -542,7 +545,7 @@
             <div class="pj-upload-head">
               <div>
                 <div class="pj-upload-title">LZHジャーナルをアップロード</div>
-                <div class="pj-upload-note">複数ファイルを一括選択できます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。同じ内容・同じ営業日は重複登録しません。</div>
+                <div class="pj-upload-note">複数ファイルを一括選択できます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。</div>
               </div>
               <span class="chip gray">非公開Storage保管</span>
             </div>
@@ -558,7 +561,7 @@
           </section>
 
           <section class="pj-card pj-file-card">
-            <h2>保管ファイル <span class="c-note">原本ダウンロード・削除</span></h2>
+            <h2>保管ファイル <span class="c-note" id="fileListNote">原本ダウンロード・削除</span></h2>
             <div class="table-scroll">
               <table class="pj-table">
                 <thead><tr><th class="l">営業日</th><th class="l">ファイル名</th><th>サイズ</th><th>総売上</th><th>会計</th><th>アップロード</th><th>操作</th></tr></thead>
@@ -780,18 +783,39 @@
       if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
       return (n/(1024*1024)).toFixed(1) + ' MB';
     }
+    function isIncompleteJournalFile(file) {
+      if (!file) return false;
+      if ((Number(file.receipts_count) || 0) <= 0) return true;
+      var parsed = file.parsed_data;
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.receipts)) {
+        return parsed.receipts.length === 0;
+      }
+      return false;
+    }
     function renderFiles(files) {
       currentFiles = Array.isArray(files) ? files : [];
+      var incomplete = currentFiles.filter(isIncompleteJournalFile).length;
+      var note = el('fileListNote');
+      if (note) {
+        note.textContent = incomplete
+          ? ('要修復 ' + incomplete + '件 · 原本ダウンロード・削除')
+          : '原本ダウンロード・削除';
+        note.className = incomplete ? 'c-note warn-count' : 'c-note';
+      }
       el('fileEmpty').hidden = currentFiles.length > 0;
       el('fileBody').innerHTML = currentFiles.map(function (file) {
-        return '<tr>'
+        var bad = isIncompleteJournalFile(file);
+        var nameHtml = '<span class="pj-file-name">' + esc(file.original_file_name)
+          + (bad ? '<span class="chip warn">要修復</span>' : '')
+          + '</span>';
+        return '<tr' + (bad ? ' style="background:var(--warn-soft)"' : '') + '>'
           + '<td class="l">' + esc(file.business_date) + '</td>'
-          + '<td class="l">' + esc(file.original_file_name) + '</td>'
+          + '<td class="l">' + nameHtml + '</td>'
           + '<td>' + formatSize(file.file_size_bytes) + '</td>'
           + '<td>' + yen(file.gross_sales) + '</td>'
           + '<td>' + num(file.receipts_count) + '</td>'
           + '<td>' + esc(String(file.uploaded_at||'').replace('T',' ').slice(0,16)) + '</td>'
-          + '<td><span class="file-action"><button class="btn" data-download="' + file.id + '">DL</button><button class="btn btn-danger" data-delete="' + file.id + '">削除</button></span></td>'
+          + '<td><span class="file-action"><button class="btn" data-download="' + file.id + '"' + (bad && !(Number(file.file_size_bytes)||0) ? ' disabled title="原本未保管"' : '') + '>DL</button><button class="btn btn-danger" data-delete="' + file.id + '">削除</button></span></td>'
           + '</tr>';
       }).join('');
     }

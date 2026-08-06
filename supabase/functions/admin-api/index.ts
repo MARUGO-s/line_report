@@ -10256,14 +10256,80 @@ function buildPosJournalStoragePath(
   }-${crypto.randomUUID()}-${safeName}`
 }
 
-/** 電子ジャーナルの不完全行（会計明細なし／売上未設定）＝再アップロードで修復可能 */
+/** 電子ジャーナルの不完全行（会計明細なし）＝再アップロードで修復可能 */
 function isPosJournalPlaceholderRow(row: Record<string, unknown>): boolean {
   const receiptsCount = toNonNegativeInteger(row.receipts_count)
-  const grossSales = toNonNegativeInteger(row.gross_sales)
   const parsed = isRecord(row.parsed_data) ? row.parsed_data : {}
   const receipts = Array.isArray(parsed.receipts) ? parsed.receipts : []
-  return receiptsCount <= 0 || receipts.length === 0 ||
-    (grossSales <= 0 && receipts.length === 0)
+  return receiptsCount <= 0 || receipts.length === 0
+}
+
+function buildPosJournalRepairPayload(
+  day: {
+    net_sales?: unknown
+    tax?: unknown
+    gross_sales?: unknown
+    groups?: unknown
+    guests?: unknown
+    receipts?: unknown
+  },
+  originalFileName: string,
+  extras: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const now = new Date().toISOString()
+  return {
+    original_file_name: originalFileName,
+    inner_file_name: originalFileName.replace(/\.lzh$/i, ".jnl"),
+    parsed_data: day,
+    net_sales: Number(day.net_sales) || 0,
+    tax_yen: Number(day.tax) || 0,
+    gross_sales: Number(day.gross_sales) || 0,
+    groups_count: Number(day.groups) || 0,
+    guests_count: Number(day.guests) || 0,
+    receipts_count: Array.isArray(day.receipts) ? day.receipts.length : 0,
+    // 修復後に一覧で「最新」として並ぶよう、アップロード時刻も更新する
+    uploaded_at: now,
+    updated_at: now,
+    ...extras,
+  }
+}
+
+/** 修復時: パス未保管、または中身ハッシュが変わった場合は新しい LZH を保存する */
+async function ensurePosJournalStorageForRepair(
+  supabase: ReturnType<typeof createClient>,
+  args: {
+    storeKey: string
+    businessDate: string
+    hash: string
+    originalFileName: string
+    bytes: Uint8Array
+    existingStoragePath: string
+    existingShaHex: string
+  },
+): Promise<{ storagePath: string; previousPath: string }> {
+  const existingPath = toSafeString(args.existingStoragePath)
+  const existingSha = toSafeString(args.existingShaHex)
+  if (existingPath && existingSha && existingSha === args.hash) {
+    return { storagePath: existingPath, previousPath: "" }
+  }
+  const storagePath = buildPosJournalStoragePath(
+    args.storeKey,
+    args.businessDate,
+    args.hash,
+    args.originalFileName,
+  )
+  const { error: uploadError } = await supabase.storage.from(POS_JOURNAL_BUCKET)
+    .upload(storagePath, args.bytes, {
+      contentType: "application/x-lzh-compressed",
+      upsert: false,
+    })
+  if (uploadError) {
+    throw new Error(`原本の保存に失敗しました: ${uploadError.message}`)
+  }
+  return {
+    storagePath,
+    previousPath: existingPath && existingPath !== storagePath ? existingPath : "",
+  }
 }
 
 async function uploadPosJournalFiles(
@@ -10376,7 +10442,9 @@ async function uploadPosJournalFiles(
       const hash = await sha256Hex(bytes)
       const { data: existingHash, error: existingHashError } = await supabase
         .from("pos_journal_files")
-        .select("id, business_date, original_file_name, receipts_count, gross_sales, parsed_data")
+        .select(
+          "id, business_date, original_file_name, receipts_count, gross_sales, parsed_data, storage_path, storage_bucket, sha256_hex",
+        )
         .eq("store_partition_key", storeKey)
         .eq("sha256_hex", hash)
         .is("storage_deleted_at", null)
@@ -10385,23 +10453,31 @@ async function uploadPosJournalFiles(
         throw new Error(`重複確認に失敗しました: ${existingHashError.message}`)
       }
       if (existingHash) {
-        // 同一ハッシュでもプレースホルダなら解析結果だけ修復する（原本Storageは維持）
+        // 同一ハッシュでもプレースホルダなら解析結果を修復（Storage未保管なら埋める）
         if (isPosJournalPlaceholderRow(existingHash as Record<string, unknown>)) {
           const repairTargetId = Number(existingHash.id)
           if (!Number.isInteger(repairTargetId) || repairTargetId <= 0) {
             throw new Error("修復対象の電子ジャーナルIDが不正です。")
           }
-          const repairPayload = {
-            parsed_data: day,
-            net_sales: Number(day.net_sales) || 0,
-            tax_yen: Number(day.tax) || 0,
-            gross_sales: Number(day.gross_sales) || 0,
-            groups_count: Number(day.groups) || 0,
-            guests_count: Number(day.guests) || 0,
-            receipts_count: Array.isArray(day.receipts) ? day.receipts.length : 0,
-            original_file_name: originalFileName,
-            inner_file_name: originalFileName.replace(/\.lzh$/i, ".jnl"),
+          const stored = await ensurePosJournalStorageForRepair(supabase, {
+            storeKey,
+            businessDate,
+            hash,
+            originalFileName,
+            bytes,
+            existingStoragePath: toSafeString(existingHash.storage_path),
+            existingShaHex: toSafeString(existingHash.sha256_hex),
+          })
+          if (stored.previousPath || stored.storagePath !== toSafeString(existingHash.storage_path)) {
+            storagePath = stored.storagePath
           }
+          const repairPayload = buildPosJournalRepairPayload(day, originalFileName, {
+            storage_bucket: POS_JOURNAL_BUCKET,
+            storage_path: stored.storagePath,
+            mime_type: "application/x-lzh-compressed",
+            file_size_bytes: bytes.byteLength,
+            sha256_hex: hash,
+          })
           const { data: repairedRow, error: repairError } = await supabase
             .from("pos_journal_files")
             .update(repairPayload)
@@ -10410,11 +10486,25 @@ async function uploadPosJournalFiles(
             .select(journalSelectCols)
             .single()
           if (repairError) {
+            if (storagePath) {
+              await supabase.storage.from(POS_JOURNAL_BUCKET).remove([storagePath])
+              storagePath = ""
+            }
             throw new Error(`プレースホルダの修復に失敗しました: ${repairError.message}`)
+          }
+          if (stored.previousPath) {
+            try {
+              await supabase.storage.from(POS_JOURNAL_BUCKET).remove([
+                stored.previousPath,
+              ])
+            } catch (_) {
+              // 旧パス削除はベストエフォート。DBは新パスを正とする。
+            }
           }
           const normalizedRepair = posJournalFileRow(repairedRow)
           if (!normalizedRepair) throw new Error("修復した電子ジャーナル行が不正です。")
           repaired.push({ ...normalizedRepair, repaired: true })
+          storagePath = ""
           continue
         }
         duplicates.push({
@@ -10428,7 +10518,7 @@ async function uploadPosJournalFiles(
       const { data: existingDate, error: existingDateError } = await supabase
         .from("pos_journal_files")
         .select(
-          "id, original_file_name, receipts_count, gross_sales, parsed_data, storage_path, storage_bucket",
+          "id, original_file_name, receipts_count, gross_sales, parsed_data, storage_path, storage_bucket, sha256_hex",
         )
         .eq("store_partition_key", storeKey)
         .eq("business_date", businessDate)
@@ -10445,47 +10535,32 @@ async function uploadPosJournalFiles(
             `営業日${businessDate}は既に保管済みです。既存ファイルを削除してから再アップロードしてください。`,
           )
         }
-        // プレースホルダ行: 解析・集計を上書き。原本Storageパスは維持（未保管なら新規保存）。
+        // プレースホルダ行: 解析・集計を上書き。ハッシュが変われば原本も差し替える。
         const repairTargetId = Number(existingDate.id)
         if (!Number.isInteger(repairTargetId) || repairTargetId <= 0) {
           throw new Error("修復対象の電子ジャーナルIDが不正です。")
         }
-        const existingStoragePath = toSafeString(existingDate.storage_path)
-        const repairPayload: Record<string, unknown> = {
+        const stored = await ensurePosJournalStorageForRepair(supabase, {
+          storeKey,
+          businessDate,
+          hash,
+          originalFileName,
+          bytes,
+          existingStoragePath: toSafeString(existingDate.storage_path),
+          existingShaHex: toSafeString(existingDate.sha256_hex),
+        })
+        storagePath = stored.storagePath !== toSafeString(existingDate.storage_path)
+          ? stored.storagePath
+          : ""
+        const repairPayload = buildPosJournalRepairPayload(day, originalFileName, {
           store_code: storeCode,
           year_month: businessDate.slice(0, 7),
-          original_file_name: originalFileName,
-          inner_file_name: originalFileName.replace(/\.lzh$/i, ".jnl"),
           mime_type: "application/x-lzh-compressed",
           file_size_bytes: bytes.byteLength,
           sha256_hex: hash,
-          parsed_data: day,
-          net_sales: Number(day.net_sales) || 0,
-          tax_yen: Number(day.tax) || 0,
-          gross_sales: Number(day.gross_sales) || 0,
-          groups_count: Number(day.groups) || 0,
-          guests_count: Number(day.guests) || 0,
-          receipts_count: Array.isArray(day.receipts) ? day.receipts.length : 0,
-        }
-        if (!existingStoragePath) {
-          storagePath = buildPosJournalStoragePath(
-            storeKey,
-            businessDate,
-            hash,
-            originalFileName,
-          )
-          const { error: uploadError } = await supabase.storage.from(
-            POS_JOURNAL_BUCKET,
-          ).upload(storagePath, bytes, {
-            contentType: "application/x-lzh-compressed",
-            upsert: false,
-          })
-          if (uploadError) {
-            throw new Error(`原本の保存に失敗しました: ${uploadError.message}`)
-          }
-          repairPayload.storage_bucket = POS_JOURNAL_BUCKET
-          repairPayload.storage_path = storagePath
-        }
+          storage_bucket: POS_JOURNAL_BUCKET,
+          storage_path: stored.storagePath,
+        })
         const { data: repairedRow, error: repairError } = await supabase
           .from("pos_journal_files")
           .update(repairPayload)
@@ -10499,6 +10574,15 @@ async function uploadPosJournalFiles(
             storagePath = ""
           }
           throw new Error(`プレースホルダの修復に失敗しました: ${repairError.message}`)
+        }
+        if (stored.previousPath) {
+          try {
+            await supabase.storage.from(POS_JOURNAL_BUCKET).remove([
+              stored.previousPath,
+            ])
+          } catch (_) {
+            // 旧パス削除はベストエフォート。DBは新パスを正とする。
+          }
         }
         const normalizedRepair = posJournalFileRow(repairedRow)
         if (!normalizedRepair) throw new Error("修復した電子ジャーナル行が不正です。")
@@ -13316,16 +13400,19 @@ async function deletePosJournalFile(
       message: "削除対象の電子ジャーナルが見つかりません。",
     } satisfies AppError
   }
-  const bucket = toSafeString(row.storage_bucket)
+  const bucket = toSafeString(row.storage_bucket) || POS_JOURNAL_BUCKET
   const storagePath = toSafeString(row.storage_path)
-  const { error: removeError } = await supabase.storage.from(bucket).remove([
-    storagePath,
-  ])
-  if (removeError) {
-    throw {
-      status: 500,
-      message: `原本ファイルの削除に失敗しました: ${removeError.message}`,
-    } satisfies AppError
+  // Storage 未保管のプレースホルダ行でも DB 行は削除できるようにする
+  if (storagePath) {
+    const { error: removeError } = await supabase.storage.from(bucket).remove([
+      storagePath,
+    ])
+    if (removeError) {
+      throw {
+        status: 500,
+        message: `原本ファイルの削除に失敗しました: ${removeError.message}`,
+      } satisfies AppError
+    }
   }
   const deletedAt = new Date().toISOString()
   const deleteSnapshot = {
