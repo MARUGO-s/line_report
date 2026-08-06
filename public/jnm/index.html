@@ -4638,10 +4638,10 @@ async function uploadJournalsToCloud(itemList) {
     const payload = resolveLzhUploadPayload(it);
     return payload ? { ...it, _upload: payload } : null;
   }).filter(Boolean);
-  if (!lzhItems.length) return { ok: true, uploaded: 0, duplicates: 0, failed: 0, journals: [], skipped: true };
+  if (!lzhItems.length) return { ok: true, uploaded: 0, repaired: 0, duplicates: 0, failed: 0, journals: [], skipped: true };
 
   const journals = [];
-  let uploaded = 0, duplicates = 0, failed = 0;
+  let uploaded = 0, repaired = 0, duplicates = 0, failed = 0;
   const batchSize = 40;
   for (let i = 0; i < lzhItems.length; i += batchSize) {
     const batch = lzhItems.slice(i, i + batchSize);
@@ -4654,6 +4654,7 @@ async function uploadJournalsToCloud(itemList) {
     try {
       const result = await adminApiFetch('/pos-journals/upload', { method: 'POST', body: form });
       uploaded += Number(result.uploaded_count) || 0;
+      repaired += Number(result.repaired_count) || 0;
       duplicates += Number(result.duplicate_count) || 0;
       failed += Number(result.failed_count) || 0;
       (result.uploaded || []).forEach(row => {
@@ -4661,6 +4662,14 @@ async function uploadJournalsToCloud(itemList) {
           id: Number(row.id),
           business_date: String(row.business_date || ''),
           original_file_name: String(row.original_file_name || '')
+        });
+      });
+      (result.repaired || []).forEach(row => {
+        if (row?.id) journals.push({
+          id: Number(row.id),
+          business_date: String(row.business_date || ''),
+          original_file_name: String(row.original_file_name || ''),
+          repaired: true
         });
       });
       (result.duplicates || []).forEach(row => {
@@ -4676,7 +4685,7 @@ async function uploadJournalsToCloud(itemList) {
       failed += batch.length;
     }
   }
-  return { ok: failed === 0 || journals.length > 0, uploaded, duplicates, failed, journals };
+  return { ok: failed === 0 || journals.length > 0, uploaded, repaired, duplicates, failed, journals };
 }
 
 async function fetchJournalFilesForMonth(month) {
@@ -6236,11 +6245,15 @@ async function saveCurrentReport(options = {}){
   reports.unshift(...records);
   const result = await writeSavedReports(reports.slice(0, 100), records);
   if (result && result.ok) {
-    const jUploaded = Number(journalUpload.uploaded || 0) + Number(journalUpload.duplicates || 0);
+    const jUploaded = Number(journalUpload.uploaded || 0) + Number(journalUpload.duplicates || 0) + Number(journalUpload.repaired || 0);
+    const jRepaired = Number(journalUpload.repaired || 0);
     const jFailed = Number(journalUpload.failed || 0);
     let jNote = '';
-    if (jUploaded) jNote = `（ジャーナル ${jUploaded}件）`;
-    else if (jFailed) jNote = `（ジャーナル原本の保管に失敗 ${jFailed}件）`;
+    if (jUploaded) {
+      jNote = jRepaired
+        ? `（ジャーナル ${jUploaded}件・うち修復 ${jRepaired}件）`
+        : `（ジャーナル ${jUploaded}件）`;
+    } else if (jFailed) jNote = `（ジャーナル原本の保管に失敗 ${jFailed}件）`;
     else if (journalUpload.skipped) jNote = '（ジャーナル原本なし＝天候はレポート内に保存）';
     finishSaveStatus(`クラウドに${records.length}件保存しました${jNote}`);
     if (openList) await renderSavedReports();

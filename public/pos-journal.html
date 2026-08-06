@@ -1152,7 +1152,7 @@
       if(!getToken()){setAuth(false);setMessage(el('uploadMsg'),'先に管理トークンで接続してください。','err');return;}
       var form=new FormData();files.forEach(function(file){form.append('files',file,file.name);});form.append('store_key',STORE_KEY);form.append('month',el('monthSel').value);
       el('uploadDrop').classList.add('busy');el('uploadPickBtn').disabled=true;setMessage(el('uploadMsg'),files.length+'件を解析・保存しています…','');
-      try {var result=await apiFetch('/pos-journals/upload',{method:'POST',body:form});var parts=[];if(result.uploaded_count)parts.push(result.uploaded_count+'件を保存');if(result.duplicate_count)parts.push(result.duplicate_count+'件は重複のためスキップ');if(result.failed_count)parts.push(result.failed_count+'件失敗');var failure=(result.failures||[]).map(function(f){return f.original_file_name+': '+f.error;}).join('\n');setMessage(el('uploadMsg'),parts.join(' / ')+(failure?'\n'+failure:''),result.failed_count?'warn':'ok');await loadCurrent();}
+      try {var result=await apiFetch('/pos-journals/upload',{method:'POST',body:form});var parts=[];if(result.uploaded_count)parts.push(result.uploaded_count+'件を保存');if(result.repaired_count)parts.push(result.repaired_count+'件を修復');if(result.duplicate_count)parts.push(result.duplicate_count+'件は重複のためスキップ');if(result.failed_count)parts.push(result.failed_count+'件失敗');var failure=(result.failures||[]).map(function(f){return f.original_file_name+': '+f.error;}).join('\n');setMessage(el('uploadMsg'),parts.join(' / ')+(failure?'\n'+failure:''),result.failed_count?'warn':'ok');await loadCurrent();}
       catch(error){setMessage(el('uploadMsg'),error.message,'err');}
       finally{el('uploadDrop').classList.remove('busy');el('uploadPickBtn').disabled=false;el('uploadInput').value='';}
     }
