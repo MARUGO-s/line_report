@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-06 - POSジャーナル upload のプレースホルダ複数修復
+
+- Request: 不完全な電子ジャーナル行（会計0件／売上未設定）へ同じ営業日の LZH を再アップロードしたとき、削除せずに解析結果を上書き修復できるようにする。
+- Change: `admin-api` の `/pos-journals/upload` でプレースホルダ判定後に `parsed_data` と集計を UPDATE。既存 `storage_path` は維持し、未保管時のみ Storage 保存。応答に `repaired_count` / `repaired` を追加。Journal Report / POS Journal UI に「うち修復 M件」を表示。
+- Deploy: `admin-api` 再デプロイと Pages（`public/jnm/*`, `pos-journal.html`）が必要。
+- Post-deploy check: KIOXIA 202502 / 202511 の再アップロードで修復件数と月次合計を確認。
+
 ### 2026-08-05 - Journal Report 原本ジャーナル全件ページ分割
 
 - Request: Supabase/PostgRESTの1レスポンス行数上限で、長期保存した原本ジャーナルの古い月が落ちる構造的弱点を解消。
