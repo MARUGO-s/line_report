@@ -22,7 +22,7 @@
     "test:reservation": "node --test tests/reservation_*.test.ts",
     "test:receipt": "node --test tests/receipt_*.test.ts",
     "test:journal-ai": "deno test --no-lock --allow-read tests/journal_grok_x_search.test.ts tests/journal_ai_privacy.test.ts && node --test tests/journal_ai_orchestrate.test.mjs tests/journal_chat_query_planner.test.mjs",
-    "test:pos-journal": "deno test --no-lock --allow-read tests/paged_row_scan.test.ts tests/pos_journal_lha.test.ts tests/pos_journal_ai.test.ts tests/journal_product_index.test.ts && node --test tests/admin_api_pos_journal_pagination.test.mjs tests/pos_journal_ai_history.test.mjs"
+    "test:pos-journal": "deno test --no-lock --allow-read tests/paged_row_scan.test.ts tests/pos_journal_lha.test.ts tests/pos_journal_ai.test.ts tests/journal_product_index.test.ts && node --test tests/admin_api_pos_journal_pagination.test.mjs tests/admin_api_pos_journal_repair.test.mjs tests/journal_sales_sync.test.mjs tests/pos_journal_ai_history.test.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",

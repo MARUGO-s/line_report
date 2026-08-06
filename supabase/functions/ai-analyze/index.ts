@@ -788,12 +788,25 @@ async function clarifyWithFallback(
     provider: "openai" | "claude";
     model: string;
     usage: JournalAiUsage | null;
+    attempts: SynthesisAttempt[];
+    fallbackFrom?: { provider: "openai"; model: string; error: string };
   }
-  | { ok: false; error: string }
+  | { ok: false; error: string; attempts: SynthesisAttempt[] }
 > {
+  const attempts: SynthesisAttempt[] = [];
+  const openaiStarted = Date.now();
   const openai = await callOpenAiClarifier(messages);
   if (openai.ok) {
     const plan = normalizeClarificationPlan(openai.text);
+    attempts.push({
+      ok: !!plan,
+      provider: "openai",
+      model: openai.model,
+      reason: plan ? null : "invalid_json",
+      error: plan ? null : "OpenAI returned invalid clarification JSON",
+      max_completion_tokens: null,
+      elapsed_ms: Date.now() - openaiStarted,
+    });
     if (plan) {
       return {
         ok: true,
@@ -801,12 +814,33 @@ async function clarifyWithFallback(
         provider: openai.provider,
         model: openai.model,
         usage: openai.usage,
+        attempts,
       };
     }
+  } else {
+    attempts.push({
+      ok: false,
+      provider: "openai",
+      model: openai.model,
+      reason: classifyOpenAiFailure(openai.error),
+      error: openai.error.slice(0, 500),
+      max_completion_tokens: null,
+      elapsed_ms: Date.now() - openaiStarted,
+    });
   }
+  const claudeStarted = Date.now();
   const claude = await callClaudeClarifier(messages);
   if (claude.ok) {
     const plan = normalizeClarificationPlan(claude.text);
+    attempts.push({
+      ok: !!plan,
+      provider: "claude",
+      model: claude.model,
+      reason: plan ? null : "invalid_json",
+      error: plan ? null : "Claude returned invalid clarification JSON",
+      max_completion_tokens: null,
+      elapsed_ms: Date.now() - claudeStarted,
+    });
     if (plan) {
       return {
         ok: true,
@@ -814,8 +848,26 @@ async function clarifyWithFallback(
         provider: claude.provider,
         model: claude.model,
         usage: claude.usage,
+        attempts,
+        fallbackFrom: {
+          provider: "openai",
+          model: openai.model,
+          error: openai.ok
+            ? "OpenAI returned invalid clarification JSON"
+            : openai.error,
+        },
       };
     }
+  } else {
+    attempts.push({
+      ok: false,
+      provider: "claude",
+      model: claude.model,
+      reason: classifyOpenAiFailure(claude.error),
+      error: claude.error.slice(0, 500),
+      max_completion_tokens: null,
+      elapsed_ms: Date.now() - claudeStarted,
+    });
   }
   const openaiError = openai.ok
     ? "OpenAI returned invalid clarification JSON"
@@ -826,6 +878,7 @@ async function clarifyWithFallback(
   return {
     ok: false,
     error: `openai: ${openaiError} | claude: ${claudeError}`,
+    attempts,
   };
 }
 
@@ -972,12 +1025,30 @@ async function synthesizeWithFallback(
 
   let lunaResult = await tryLuna(OPENAI_COMPLETION_BUDGET_PRIMARY);
   if (!lunaResult.ok) {
-    console.warn(
-      "OpenAI Luna failed; retrying with a smaller completion budget:",
-      lunaResult.model,
-      lunaResult.error.slice(0, 240),
-    );
-    lunaResult = await tryLuna(OPENAI_COMPLETION_BUDGET_RETRY);
+    const failReason = classifyOpenAiFailure(lunaResult.error);
+    // キー不正・レート制限・クォータ不足は縮小枠でも同じ結果なので再試行しない
+    const shouldRetryBudget = ![
+      "auth_error",
+      "rate_limit",
+      "missing_key",
+      "quota",
+    ].includes(failReason);
+    if (shouldRetryBudget) {
+      console.warn(
+        "OpenAI Luna failed; retrying with a smaller completion budget:",
+        lunaResult.model,
+        failReason,
+        lunaResult.error.slice(0, 240),
+      );
+      lunaResult = await tryLuna(OPENAI_COMPLETION_BUDGET_RETRY);
+    } else {
+      console.warn(
+        "OpenAI Luna failed; skipping budget retry:",
+        lunaResult.model,
+        failReason,
+        lunaResult.error.slice(0, 240),
+      );
+    }
   }
   if (lunaResult.ok) {
     return {
@@ -1158,6 +1229,30 @@ Deno.serve(async (req: Request, info) => {
         safeClarificationContext,
       );
       const clarified = await clarifyWithFallback(messages);
+      await recordJournalAiFallback(
+        supabase,
+        effectiveStoreKey,
+        "clarifier",
+        clarified.ok
+          ? {
+            ok: true,
+            text: clarified.plan.status === "clarify"
+              ? clarified.plan.question
+              : "",
+            provider: clarified.provider,
+            model: clarified.model,
+            usage: clarified.usage,
+            fallbackFrom: clarified.fallbackFrom,
+            attempts: clarified.attempts,
+          }
+          : {
+            ok: false,
+            provider: "claude",
+            model: "",
+            error: clarified.error,
+            attempts: clarified.attempts,
+          },
+      );
       if (!clarified.ok) {
         return new Response(
           JSON.stringify({

@@ -84,6 +84,10 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /callClaude/);
   assert.match(ai, /claude-haiku-4-5/);
   assert.match(ai, /synthesizeWithFallback/);
+  assert.match(ai, /shouldRetryBudget/);
+  assert.match(ai, /auth_error/);
+  assert.match(ai, /recordJournalAiFallback/);
+  assert.match(ai, /"clarifier"/);
   assert.match(ai, /api\.anthropic\.com/);
   assert.match(ai, /sanitizeJournalAiPayload/);
   assert.doesNotMatch(ai, /api\.moonshot\.ai/);

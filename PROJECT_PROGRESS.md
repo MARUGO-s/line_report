@@ -10,12 +10,18 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-06 - POSジャーナル修復の周辺不具合
+
+- Request: 複数修復に続き、最新ファイル表示・原本整合・不完全行可視化・売上同期営業日・Luna退避記録も直す。
+- Change: 修復で `uploaded_at` 更新、ハッシュ変更時は Storage 差し替え、Storage 無し行の削除許容、POS一覧に要修復表示、月次営業日は総売上>0、月次 source は mixed、Luna は auth/rate/quota で縮小再試行せず、clarifier も fallback 記録。
+- Deploy: `admin-api` / `ai-analyze` / Pages。GitHub Actions・Pages は 2026-08-06 時点で major outage。
+
 ### 2026-08-06 - POSジャーナル upload のプレースホルダ複数修復
 
 - Request: 不完全な電子ジャーナル行（会計0件／売上未設定）へ同じ営業日の LZH を再アップロードしたとき、削除せずに解析結果を上書き修復できるようにする。
 - Change: `admin-api` の `/pos-journals/upload` でプレースホルダ判定後に `parsed_data` と集計を UPDATE。既存 `storage_path` は維持し、未保管時のみ Storage 保存。応答に `repaired_count` / `repaired` を追加。Journal Report / POS Journal UI に「うち修復 M件」を表示。
 - Merged: `main` `be5dfcd`（#61）。
-- Deploy: `admin-api` 再デプロイと Pages（`public/jnm/*`, `pos-journal.html`）が必要。GitHub Actions hosted runner 取得失敗のため未デプロイ（手動 `supabase functions deploy admin-api` と Pages 再実行が必要）。
+- Deploy: `admin-api` 再デプロイと Pages（`public/jnm/*`, `pos-journal.html`）が必要。GitHub Actions/Pages major outage のため未デプロイの場合あり。
 - Post-deploy check: KIOXIA 202502 / 202511 の再アップロードで修復件数と月次合計を確認。
 
 ### 2026-08-05 - Journal Report 原本ジャーナル全件ページ分割
