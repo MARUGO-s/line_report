@@ -45,6 +45,10 @@ import {
   type SalesBudgetAllocationWeights,
 } from "../_shared/sales_budget_allocation.ts"
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
+import {
+  type JournalSalesSyncResult,
+  syncJournalSalesFromReport,
+} from "../_shared/journal_sales_sync.ts"
 import { EXPENSE_RECEIPT_PROMPT_ADDITION, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_RECEIPT_PROMPT_MAX_CHARS } from "../_shared/receipt_prompt.ts"
 import { GROQ_VISION_BASE64_MAX_BYTES } from "../_shared/receipt_types.ts"
 import { analyzeExpenseReceiptWithAzureFoundry, analyzeLineImageWithGemini, AZURE_FOUNDRY_VISION_MODEL, needsGeminiProPettyCashReview, shouldFallbackLineImageVisionFailure, type LineImageVisionUsage } from "../_shared/receipt_vision.ts"
@@ -11243,7 +11247,15 @@ async function saveSavedReport(
       message: `保存済みレポートの保存に失敗しました: ${error.message}`,
     } satisfies AppError
   }
-  return { ok: true, id }
+  // ジャーナルを正として過去売上へ同期する。店舗プロフィールで有効化した店舗のみ。
+  // 同期の失敗でレポート保存自体を失敗させない（レポートは既に保存済み）。
+  let salesSync: JournalSalesSyncResult | null = null
+  try {
+    salesSync = await syncJournalSalesFromReport(supabase, storeKey, sanitizedData)
+  } catch (e) {
+    console.error("journal sales sync failed:", storeKey, id, String(e))
+  }
+  return { ok: true, id, salesSync }
 }
 
 async function deleteSavedReportItem(
