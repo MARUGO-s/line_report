@@ -29,6 +29,17 @@ type JournalAiUsage = {
   totalTokens: number;
 };
 
+/** 1試行の記録。journal_ai_fallback_events.attempts へそのまま入る。 */
+type SynthesisAttempt = {
+  ok: boolean;
+  provider: "openai" | "claude";
+  model: string;
+  reason: string | null;
+  error: string | null;
+  max_completion_tokens: number | null;
+  elapsed_ms: number;
+};
+
 type SynthesizerResult =
   | {
     ok: true;
@@ -37,6 +48,7 @@ type SynthesizerResult =
     model: string;
     usage: JournalAiUsage | null;
     fallbackFrom?: { provider: "openai"; model: string; error: string };
+    attempts: SynthesisAttempt[];
   }
   | {
     ok: false;
@@ -45,7 +57,29 @@ type SynthesizerResult =
     error: string;
     openaiError?: string;
     claudeError?: string;
+    attempts: SynthesisAttempt[];
   };
+
+/** 既定の完了トークン枠。入力が大きい場合に備え、縮小して再試行する段階も持つ。 */
+const OPENAI_COMPLETION_BUDGET_PRIMARY = 10192 + 4000;
+/** 縮小再試行の枠。foodcourt 側（1200+4000）で実績のある水準に合わせる。 */
+const OPENAI_COMPLETION_BUDGET_RETRY = 5200;
+
+/** HTTPステータスやエラー本文から、集計しやすい短い理由コードを作る。 */
+function classifyOpenAiFailure(error: string): string {
+  const text = error.toLowerCase();
+  if (text.includes("context") && text.includes("length")) return "context_length";
+  if (text.includes("max_completion_tokens") || text.includes("max_tokens")) {
+    return "token_limit";
+  }
+  if (text.includes("empty response")) return "empty_content";
+  if (text.includes("rate limit") || text.includes("429")) return "rate_limit";
+  if (text.includes("timeout") || text.includes("aborted")) return "timeout";
+  if (text.includes("insufficient_quota") || text.includes("quota")) return "quota";
+  if (text.includes("invalid_api_key") || text.includes("401")) return "auth_error";
+  if (text.includes("not configured")) return "missing_key";
+  return "error";
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -92,6 +126,47 @@ function extractClaudeUsage(
     thinkingTokens: null,
     totalTokens,
   };
+}
+
+/**
+ * 既定モデルから退避したときだけ記録する。全試行成功時は書かない。
+ * 記録が無いまま原因を追えなかった 2026-08-05 の再発防止。
+ */
+async function recordJournalAiFallback(
+  // createClient の戻り型は Deno check で呼び出し側と合わないため緩く受ける
+  supabase: { from: (table: string) => { insert: (row: Record<string, unknown>) => PromiseLike<{ error: { message: string } | null }> } },
+  storeKey: string,
+  role: string,
+  result: SynthesizerResult,
+): Promise<void> {
+  const attempts = result.attempts ?? [];
+  if (!attempts.some((a) => !a.ok)) return;
+  const key = String(storeKey || "").trim();
+  if (!key) return;
+  const first = attempts[0];
+  try {
+    const { error } = await supabase.from("journal_ai_fallback_events").insert({
+      store_partition_key: key,
+      role,
+      preferred_provider: first?.provider ?? null,
+      preferred_model: first?.model ?? null,
+      used_provider: result.ok ? result.provider : null,
+      used_model: result.ok ? result.model : null,
+      outcome: result.ok ? "fallback_success" : "all_failed",
+      attempts,
+    });
+    if (error) {
+      console.error(
+        "journal_ai_fallback_events insert failed:",
+        error.message,
+      );
+    }
+  } catch (error) {
+    console.error(
+      "journal_ai_fallback_events insert threw:",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 async function recordJournalAiUsage(
@@ -756,6 +831,7 @@ async function clarifyWithFallback(
 
 async function callOpenAiLuna(
   contents: ChatContent[],
+  completionBudget: number = OPENAI_COMPLETION_BUDGET_PRIMARY,
 ): Promise<
   | { ok: true; text: string; model: string; usage: JournalAiUsage | null }
   | {
@@ -777,8 +853,8 @@ async function callOpenAiLuna(
     isReasoning && m.role === "system" ? { ...m, role: "developer" } : m
   );
   const tokenParam = isReasoning
-    ? { max_completion_tokens: 10192 + 4000, reasoning_effort: "low" }
-    : { max_tokens: 10192, temperature: 0.3 };
+    ? { max_completion_tokens: completionBudget, reasoning_effort: "low" }
+    : { max_tokens: Math.max(1024, completionBudget - 4000), temperature: 0.3 };
 
   try {
     const res = await fetch(OPENAI_ENDPOINT, {
@@ -866,11 +942,43 @@ async function callClaude(
   }
 }
 
-/** 既定: gpt-5.6-luna → 失敗時 Claude Haiku */
+/**
+ * 既定: gpt-5.6-luna（通常枠）→ gpt-5.6-luna（縮小枠）→ Claude Haiku。
+ *
+ * 縮小枠での再試行を挟むのは、入力が大きいときに「入力＋完了枠」が
+ * モデル上限を圧迫して弾かれる形の失敗を、Haiku へ落とさず救うため。
+ * 恒久的な障害（キー不正・レート制限）なら再試行も同じ理由で即failし、
+ * 従来どおり Haiku へ退避する。各試行は attempts に残して原因追跡に使う。
+ */
 async function synthesizeWithFallback(
   contents: ChatContent[],
 ): Promise<SynthesizerResult> {
-  const lunaResult = await callOpenAiLuna(contents);
+  const attempts: SynthesisAttempt[] = [];
+
+  const tryLuna = async (budget: number) => {
+    const startedAt = Date.now();
+    const result = await callOpenAiLuna(contents, budget);
+    attempts.push({
+      ok: result.ok,
+      provider: "openai",
+      model: result.model,
+      reason: result.ok ? null : classifyOpenAiFailure(result.error),
+      error: result.ok ? null : result.error.slice(0, 500),
+      max_completion_tokens: budget,
+      elapsed_ms: Date.now() - startedAt,
+    });
+    return result;
+  };
+
+  let lunaResult = await tryLuna(OPENAI_COMPLETION_BUDGET_PRIMARY);
+  if (!lunaResult.ok) {
+    console.warn(
+      "OpenAI Luna failed; retrying with a smaller completion budget:",
+      lunaResult.model,
+      lunaResult.error.slice(0, 240),
+    );
+    lunaResult = await tryLuna(OPENAI_COMPLETION_BUDGET_RETRY);
+  }
   if (lunaResult.ok) {
     return {
       ok: true,
@@ -878,6 +986,7 @@ async function synthesizeWithFallback(
       provider: "openai",
       model: lunaResult.model,
       usage: lunaResult.usage,
+      attempts,
     };
   }
 
@@ -886,7 +995,17 @@ async function synthesizeWithFallback(
     lunaResult.model,
     lunaResult.error.slice(0, 240),
   );
+  const claudeStartedAt = Date.now();
   const claudeResult = await callClaude(contents);
+  attempts.push({
+    ok: claudeResult.ok,
+    provider: "claude",
+    model: claudeResult.model,
+    reason: claudeResult.ok ? null : classifyOpenAiFailure(claudeResult.error),
+    error: claudeResult.ok ? null : claudeResult.error.slice(0, 500),
+    max_completion_tokens: null,
+    elapsed_ms: Date.now() - claudeStartedAt,
+  });
   if (claudeResult.ok) {
     return {
       ok: true,
@@ -899,6 +1018,7 @@ async function synthesizeWithFallback(
         model: lunaResult.model,
         error: lunaResult.error,
       },
+      attempts,
     };
   }
 
@@ -909,6 +1029,7 @@ async function synthesizeWithFallback(
     error: claudeResult.error,
     openaiError: lunaResult.error,
     claudeError: claudeResult.error,
+    attempts,
   };
 }
 
@@ -1206,6 +1327,12 @@ Deno.serve(async (req: Request, info) => {
     }
 
     const synth = await synthesizeWithFallback(contents);
+    await recordJournalAiFallback(
+      supabase,
+      effectiveStoreKey,
+      "synthesizer",
+      synth,
+    );
 
     if (synth.ok) {
       await recordJournalAiUsage(supabase, effectiveStoreKey, synth.usage);
