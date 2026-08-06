@@ -1,66 +1,82 @@
 name: Deploy Edge Functions
 
-# main にマージされたら DB マイグレーションと Edge Functions を本番へ自動デプロイする。
+# main への push で DB マイグレーションと Edge Functions を本番へ自動デプロイする。
 #
-# ※ 当初は「Supabase の GitHub 統合（Dashboard の Integrations）が DB マイグレーションだけは
-#    自動適用してくれる」前提でこのワークフローは Edge Functions のみを担当していたが、
-#    2026-07-12 に実際は複数のマイグレーションが未適用のまま放置されていたことが判明した
-#    （Dashboard 連携が機能していなかった/設定されていなかった）。そのため、マイグレーション
-#    適用もこのワークフロー自身で確実に行うようにした。
-#    これにより「シークレット変更時のマーカー行ハック」や「config.toml の
-#    verify_jwt 設定漏れによる 401」を防ぎ、関数コード・DBスキーマを常に git と同期させる。
+# 設計:
+# - validate と deploy を同一ジョブにする。GitHub-hosted runner 枯渇時に
+#   「validate 成功 → deploy ジョブが runner 取得失敗」で止まるのを防ぐ。
+# - db push が履歴ズレで失敗しても関数デプロイは続行する（警告を出し、
+#   最終的に db 失敗なら job を fail にして気づけるようにする）。
+# - 関数は1つずつ + リトライ（一括 deploy の 502/409 回避）。
 #
-# 必要な事前設定（1回だけ・人手）:
-#   GitHub リポジトリ → Settings → Secrets and variables → Actions →
-#   "New repository secret" で以下を登録する:
-#     - SUPABASE_ACCESS_TOKEN: Supabase ダッシュボード → Account → Access Tokens で発行
-#     - SUPABASE_DB_PASSWORD:  Supabase ダッシュボード → Project Settings → Database の
-#                              データベースパスワード（`supabase link` の非対話認証に使う）
-#   （値はこのファイルやコードには絶対に書かない）
+# 必要な Repo Secrets:
+#   - SUPABASE_ACCESS_TOKEN
+#   - SUPABASE_DB_PASSWORD
 
 on:
   push:
     branches: [main]
     paths:
-      - 'supabase/functions/**'
-      - 'supabase/config.toml'
-      - 'supabase/migrations/**'
-      - '.github/workflows/deploy-edge-functions.yml'
-  workflow_dispatch: {}   # 手動実行（Actions タブの Run workflow）も可能
+      - "supabase/functions/**"
+      - "supabase/config.toml"
+      - "supabase/migrations/**"
+      - ".github/workflows/deploy-edge-functions.yml"
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "検証をスキップしてデプロイのみ（緊急用）"
+        type: boolean
+        default: false
+      skip_db_push:
+        description: "DB migration push をスキップ"
+        type: boolean
+        default: false
 
-# 連続 push 時は古い実行を打ち切り、最新だけをデプロイする
 concurrency:
   group: deploy-edge-functions
   cancel-in-progress: true
 
 jobs:
-  validate:
+  deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: hocbnifuactbvmyjraxy
+      SKIP_TESTS: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_tests }}
+      SKIP_DB_PUSH: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_db_push }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: env.SKIP_TESTS != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
       - name: Setup Deno
+        if: env.SKIP_TESTS != 'true'
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.8.1
 
       - name: Install dependencies
+        if: env.SKIP_TESTS != 'true'
         run: npm ci
 
       - name: Static checks
+        if: env.SKIP_TESTS != 'true'
         run: npm run check
 
       - name: Test
+        if: env.SKIP_TESTS != 'true'
         run: npm run test:ci
 
       - name: Check Journal AI Edge Function
+        if: env.SKIP_TESTS != 'true'
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
@@ -73,47 +89,51 @@ jobs:
           exit 1
 
       - name: Verify diff formatting
+        if: env.SKIP_TESTS != 'true'
         run: git diff --check
 
-  deploy:
-    needs: validate
-    runs-on: ubuntu-latest
-    env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      PROJECT_REF: hocbnifuactbvmyjraxy   # 公開情報（URL に出る）。秘密ではない
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6   # Node24 ランタイム（旧 v4 は Node20 deprecation 対象）
+      - name: Setup Node.js for deploy helpers
+        if: env.SKIP_TESTS == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v2   # composite 方式・Node ランタイム非依存
+        uses: supabase/setup-cli@v2
         with:
-          version: 2.106.0   # ローカル CLI と同一。必要なら更新可
+          version: 2.106.0
 
       - name: Link project and apply DB migrations
-        # DB変更と関数コードの不整合を防ぐため、パスワード未設定・link失敗・db push失敗は
-        # すべてデプロイ停止とする。Edge Functionsだけを先行公開しない。
+        id: db
+        continue-on-error: true
         run: |
           set -euo pipefail
-          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "::error::SUPABASE_DB_PASSWORD が未設定です。DBと関数の不整合を防ぐためデプロイを停止します。"
+          if [ "${SKIP_DB_PUSH}" = "true" ]; then
+            echo "::warning::skip_db_push=true のため DB migration push をスキップします。"
+            exit 0
+          fi
+          if [ -z "${SUPABASE_DB_PASSWORD:-}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD が未設定です。"
+            exit 1
+          fi
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN が未設定です。"
             exit 1
           fi
           supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
           supabase db push
 
       - name: Deploy all functions
-        # 関数を1つずつデプロイする。一括 deploy は Supabase API の 502/409
-        # （deployment already exists）で全体が落ちることがあるため、個別+リトライにする。
-        # config.toml の [functions.X] verify_jwt も各デプロイで反映される。
-        # --use-api: Docker 不要のサーバー側バンドル。_shared への共通 import も取り込む。
+        id: functions
         run: |
           set -euo pipefail
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN が未設定です。"
+            exit 1
+          fi
           mapfile -t FUNCS < <(
             node -e "const m=require('./knowledge/supabase-ownership.json'); for (const f of [...m.ownedFunctions].sort()) console.log(f)"
           )
-          # 変更の多い入口を先にデプロイ
           PRIORITY=(ai-analyze admin-api line-webhook)
           ORDER=()
           for p in "${PRIORITY[@]}"; do
@@ -153,3 +173,9 @@ jobs:
             exit 1
           fi
           echo "Deployed functions: ${ORDER[*]}"
+
+      - name: Fail if DB migration push failed
+        if: steps.db.outcome == 'failure'
+        run: |
+          echo "::error::DB migration push に失敗しました。関数デプロイは完了していますが、スキーマとコードの不整合がないか確認してください。"
+          exit 1

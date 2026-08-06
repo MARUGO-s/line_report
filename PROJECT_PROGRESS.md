@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-06 - git push デプロイの単一ジョブ化
+
+- Request: `main` への git push / マージで Edge Functions と GitHub Pages が確実にデプロイされるようにする。
+- Cause: validate と deploy が別ジョブのため、hosted runner 枯渇時に二段目だけ取得失敗して未デプロイが残った。加えて Actions/Pages major outage。
+- Change: 両 workflow を単一 `deploy` ジョブへ統合。Edge は db push 失敗後も関数デプロイを続行し、最後に DB 失敗を通知。緊急用 `skip_tests` / `skip_db_push` を追加。
+- Note: GitHub Actions 自体が outage の間はキューイングされない。復旧後、この workflow 変更の push が未反映分の再デプロイを起動する。
+
 ### 2026-08-06 - POSジャーナル修復の周辺不具合
 
 - Request: 複数修復に続き、最新ファイル表示・原本整合・不完全行可視化・売上同期営業日・Luna退避記録も直す。
