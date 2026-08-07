@@ -12457,6 +12457,44 @@ function knowledgePeriodLabel(item) {
   return start ? `${start} 〜` : `〜 ${end}`;
 }
 
+/** LINE #メモ 等の送信／登録日時を JST 表示。分析の時間軸ラベルに使う。 */
+function knowledgePostedAtLabel(item) {
+  const raw = String(item?.created_at || '').trim();
+  if (!raw) return '';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('ja-JP', {
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date).replace(/\//g, '-');
+  } catch (_) {
+    return raw.slice(0, 16).replace('T', ' ');
+  }
+}
+
+function knowledgeTimelineLabel(item) {
+  const period = knowledgePeriodLabel(item);
+  const posted = knowledgePostedAtLabel(item);
+  if (item?.source_type === 'line_post' && posted) {
+    // 期間が送信日と同じ／常時有効でも、時刻まで見えるようにする
+    if (!item?.period_start && !item?.period_end) return `送信 ${posted}`;
+    if (item.period_start && item.period_start === item.period_end) {
+      return `送信 ${posted}`;
+    }
+    return `${period}／送信 ${posted}`;
+  }
+  if (posted && (item?.source_type === 'line_post' || item?.tags?.includes?.('LINE投稿') || item?.tags?.includes?.('現場メモ'))) {
+    return `${period}／送信 ${posted}`;
+  }
+  return period;
+}
+
 function isKnowledgeCurrent(item) {
   const today = new Date().toISOString().slice(0, 10);
   const start = String(item?.period_start || '');
@@ -12512,7 +12550,7 @@ function renderKnowledgeList(items) {
         ${inactive ? '<span class="kn-badge">無効</span>' : ''}
         ${item.has_attachment ? '<span class="kn-badge">添付あり</span>' : ''}
         <span class="kn-item-title">${esc(item.title || '')}</span>
-        <span class="kn-item-period">${esc(knowledgePeriodLabel(item))}</span>
+        <span class="kn-item-period">${esc(knowledgeTimelineLabel(item))}</span>
       </div>
       ${summary ? `<div class="kn-item-summary">${esc(summary)}${item.body_truncated ? '…' : ''}</div>` : ''}
       ${tags.length ? `<div class="kn-item-period">タグ: ${esc(tags.join(' / '))}</div>` : ''}
@@ -12601,9 +12639,9 @@ async function downloadKnowledgeRagText(id, format = 'txt') {
       let textContent = `==================================================\n`;
       textContent += `資料タイトル: ${item.title || ''}\n`;
       textContent += `カテゴリ: ${item.category || 'その他'}\n`;
-      textContent += `実施期間: ${knowledgePeriodLabel(item)}\n`;
+      textContent += `実施期間: ${knowledgeTimelineLabel(item)}\n`;
       textContent += `タグ: ${(Array.isArray(item.tags) ? item.tags : []).join(', ')}\n`;
-      textContent += `作成日時: ${item.created_at || ''}\n`;
+      textContent += `送信/登録日時: ${item.created_at || ''}\n`;
       textContent += `==================================================\n\n`;
       textContent += `【概要 (AIサマリー)】\n${item.summary || ''}\n\n`;
       textContent += `【本文 (文字起こし全文)】\n${item.body_text || ''}\n\n`;
@@ -12852,6 +12890,10 @@ function selectStoreKnowledgeForQuery(query, range, items) {
   const picked = [];
   scored.filter(s => s.overlaps).sort(byRelevance).forEach(s => picked.push(s.item));
   scored.filter(s => !s.overlaps && s.similarity >= 0.03).sort(byRelevance).forEach(s => {
+    // LINE #メモ は送信日で時間軸を固定する。類似度だけで他月の現場メモを混ぜない。
+    if (range && (s.item?.source_type === 'line_post' || (Array.isArray(s.item?.tags) && s.item.tags.includes('LINE投稿')))) {
+      return;
+    }
     if (!picked.includes(s.item)) picked.push(s.item);
   });
   return picked.slice(0, AI_KNOWLEDGE_MAX_ITEMS);
@@ -12959,7 +13001,7 @@ function formatStoreKnowledgeBlock(items, query = '') {
   const usedRag = ragChunks.length > 0;
 
   for (const item of list) {
-    const head = `- [${item.category || 'その他'}] ${item.title || ''}（${knowledgePeriodLabel(item)}）`;
+    const head = `- [${item.category || 'その他'}] ${item.title || ''}（${knowledgeTimelineLabel(item)}）`;
     if (!pushLine(head)) break;
     const summary = String(item.summary || '').trim();
     if (summary) {
@@ -13001,6 +13043,7 @@ ${lines.join('\n')}
 このナレッジの扱い:
 - 売上・客数・金額などの数値は必ず【確定済み集計データ】から引用してください。本ナレッジを数値の出典にしてはいけません。
 - 施策・メニュー・価格の内容や背景を説明するときにのみ使い、その場合は「登録資料によると」と明示してください。
+- LINE投稿・現場メモの「送信 ○○」は出来事の時点です。分析対象期間と照合し、期間外のメモを当該月の主因にしないでください。
 - 資料に書かれていないことを推測で補わないでください。
 - 施策と数値を結びつけた考察は歓迎しますが、因果の断定は避け「※これは推測です」を付けてください。`;
 }

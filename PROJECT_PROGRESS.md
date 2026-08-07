@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - LINE `#メモ` 送信日時を分析時間軸へ
+
+- Request: `#メモ` を分析の糧にするとき送信日時も読み、時間軸をずらさない。
+- Change: webhook が `line_timestamp` を転送。`created_at`＝送信時刻、`period`＝JST送信日。AIブロックに送信ラベル。他月 LINE投稿は類似度補完から除外。
+- Deploy: `line-webhook` / `admin-api` + Pages `public/jnm/*`。
+
 ### 2026-08-07 - ドキュメント: Qwen/Kimi を現行AI構成から除外して記載更新
 
 - Request: 情報流出対策で構成外にした Qwen／Kimi が MD に残っているので書き直す。

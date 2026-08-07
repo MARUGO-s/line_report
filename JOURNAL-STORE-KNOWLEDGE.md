@@ -196,6 +196,21 @@ line_message_media から取り消し（資料側へ移したので複製を残�
 メディア保存は**受信時点**で走るため「保存しない」ことはできない。登録に**成功したときだけ**
 `removeRoomMediaByMessageId` で取り消す。失敗時は残すので、添付が両方から消える事故は起きない。
 
+### 送信日時と分析の時間軸（2026-08-07）
+
+LINE `#メモ` / `#日報` / `#note` は **Messaging API の `event.timestamp`（送信時刻）** を保存する。
+
+| 保存先 | 内容 |
+|---|---|
+| `created_at` | LINE 送信時刻（ISO）。処理遅延で「受信日」にずれない |
+| `period_start` / `period_end` | 送信日の **JST 暦日**（同日）。常時有効にはしない |
+
+これにより、7月の分析には7月に送ったメモだけが期間一致で必ず添付され、他月の現場メモは類似度だけで混ざらない。
+AI プロンプトには `送信 YYYY-MM-DD HH:MM`（JST）を載せ、期間外メモを当該月の主因にしない指示を付ける。
+
+テキスト経路: `line-webhook` → `process-line-post`（`line_timestamp`）。
+引用添付経路: 同じく `line_timestamp` を `POST /knowledge` へ渡し、`saveStoreKnowledge` が period／created_at を埋める。
+
 ### 実装の要点（踏んだ地雷）
 
 | 箇所 | 注意 |
