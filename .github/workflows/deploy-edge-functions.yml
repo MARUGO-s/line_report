@@ -179,3 +179,5 @@ jobs:
         run: |
           echo "::error::DB migration push に失敗しました。関数デプロイは完了していますが、スキーマとコードの不整合がないか確認してください。"
           exit 1
+
+# Redeploy trigger after Actions outage recovery (2026-08-07)
