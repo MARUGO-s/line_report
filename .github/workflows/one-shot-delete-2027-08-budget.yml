@@ -1,0 +1,44 @@
+name: One-shot delete wrong 2027-08 budgets
+
+# 誤登録された 2027-08 予算を本番から削除する一時ワークフロー。
+# 実行後にこのファイル自体を削除してよい。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/one-shot-delete-2027-08-budget.yml"
+      - "scripts/delete-wrong-month-budget.sh"
+  workflow_dispatch: {}
+
+concurrency:
+  group: one-shot-delete-2027-08-budget
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: hocbnifuactbvmyjraxy
+      TARGET_MONTH: "2027-08"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v2
+        with:
+          version: 2.106.0
+
+      - name: Link and delete 2027-08 budgets
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ] || [ -z "${SUPABASE_DB_PASSWORD:-}" ]; then
+            echo "::error::Supabase secrets missing"
+            exit 1
+          fi
+          supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          bash scripts/delete-wrong-month-budget.sh
