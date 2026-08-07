@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - ワイン提供量(ml)を標準AI分析フローへ
+
+- Request: ml換算分析を標準分析フローに入れる。
+- Change: レポート章立て必須節、salesData.wineVolumeAnalysis 常時添付、ダッシュボードKPI、`ai-analyze` フォールバック章立て。
+- Deploy: Pages `public/jnm/*` + Edge `ai-analyze`。
+
 ### 2026-08-07 - ワインmlの Bottle 0 取りこぼし対策
 
 - Request: 2024年のボトルワイン0点がおかしい。
