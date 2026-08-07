@@ -1238,6 +1238,9 @@
   .ai-chat-input input:focus {
     border-color: var(--accent);
   }
+  .ai-clarify-choices{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+  .ai-clarify-choice-btn{font:inherit;font-size:12px;font-weight:600;padding:7px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-ctl);background:var(--surface);color:var(--text);cursor:pointer;transition:background .12s ease,transform .12s ease}
+  .ai-clarify-choice-btn:hover{background:color-mix(in srgb, var(--text) 7%, transparent);transform:translateY(-1px)}
   .ai-chat-input button {
     background: var(--accent);
     color: var(--page);
@@ -13333,9 +13336,166 @@ function resolveAiIntentClarificationReply(query, chatHistory) {
   return `${original} ${selected}`.trim();
 }
 
+function wantsWineVolumeQuestion(query) {
+  const q = String(query || '');
+  if (!/ワイン|wine|glass\s*wine|bottle\s*wine|ペアリング|シャンパ|スパークリング|提供量/i.test(q)) {
+    return false;
+  }
+  // 構成比・客単価だけの質問は単位確認しない
+  if (/構成比|比率|客単価|総売上|売上高|売上金額/.test(q)
+    && !/どれくらい|どれだけ|どのくらい|何点|何本|何杯|点数|本数|杯数|提供量|総?\s*ml|ミリ|リットル/.test(q)) {
+    return false;
+  }
+  const volumeCue = /どれくらい|どれだけ|どのくらい|何点|何本|何杯|点数|本数|杯数|提供量|出た量|ボリューム|(?:ワイン|ペアリング|glass|bottle).{0,16}(?:出た|売れた)|(?:出た|売れた).{0,16}(?:ワイン|ペアリング)/i.test(q);
+  let yearCount = 0;
+  try {
+    yearCount = typeof extractAllYearRefs === 'function' ? extractAllYearRefs(q).length : 0;
+  } catch (_) {
+    yearCount = 0;
+  }
+  const comparativeYears = yearCount >= 2;
+  const comparative = /比較|比べ|vs\.?|対比|前年|去年|昨年|増減|差/.test(q);
+  if (volumeCue) return true;
+  if (comparativeYears && /ワイン|wine|ペアリング|glass|bottle/i.test(q)) return true;
+  if (comparative && /ワイン|wine|ペアリング|glass|bottle/i.test(q)) return true;
+  return false;
+}
+
+function hasExplicitWineMetricUnit(query) {
+  const q = String(query || '');
+  return /表示単位\s*[:：]?\s*(?:点数|総ml|両方)/i.test(q)
+    || /総\s*ml|ミリリットル|(?:^|[^\w])ml(?:で|表示|換算)/i.test(q)
+    || /両方(?:で|とも)?(?:答|表示|教えて|見)/.test(q)
+    || /(?:点数|本数|杯数)(?:で|表示|換算)/.test(q)
+    || /何点|何本|何杯|点数|本数|杯数/.test(q)
+    || /リットルで/.test(q);
+}
+
+function needsWineMetricClarification(query) {
+  return wantsWineVolumeQuestion(query) && !hasExplicitWineMetricUnit(query);
+}
+
+function shouldAskWineMetricClarification(query, chatHistory) {
+  if (!needsWineMetricClarification(query)) return false;
+  if (countRecentClarificationsByKind(chatHistory, 'wineMetric') >= 2) return false;
+  return true;
+}
+
+function buildWineMetricClarificationReply(userMsg = '') {
+  const q = String(userMsg || '').trim();
+  let wineMl = { glassMl: 100, bottleMl: 750, pairingMl: 300 };
+  try {
+    wineMl = normalizeStoreOpsWineMl(readStoreOpsProfile().wineMl);
+  } catch (_) {}
+  const topic = q
+    ? `「${q.length > 60 ? `${q.slice(0, 60)}…` : q}」について、`
+    : '';
+  return `${topic}ワインの出し方をどう表しますか？ **点数**・**総ml**・**両方**のどれがよいですか？\n\n総mlは店舗情報の換算（Glass Wine ${wineMl.glassMl}ml／Bottle Wine ${wineMl.bottleMl}ml固定／ペアリング ${wineMl.pairingMl}ml）で計算します。`;
+}
+
+function normalizeWineMetricChoice(selected) {
+  const s = String(selected || '').trim();
+  if (/両方/.test(s)) return '両方';
+  if (/総?\s*ml|ミリ|リットル|提供量/.test(s) && !/点数|本数|杯数/.test(s)) return '総ml';
+  if (/点数|本数|杯数|数量/.test(s)) return '点数';
+  if (s === '総ml' || s === '点数' || s === '両方') return s;
+  return '';
+}
+
+function resolveWineMetricMode(query) {
+  const q = String(query || '');
+  const marked = q.match(/表示単位\s*[:：]?\s*(点数|総ml|両方)/i);
+  if (marked) {
+    const mode = normalizeWineMetricChoice(marked[1]);
+    if (mode === '両方') return 'both';
+    if (mode === '総ml') return 'ml';
+    if (mode === '点数') return 'qty';
+  }
+  if (/両方/.test(q)) return 'both';
+  if (/総\s*ml|ミリリットル|(?:^|[^\w])ml(?:で|表示|換算)|リットルで/i.test(q) && !/点数で|本数で|杯数で/.test(q)) {
+    return 'ml';
+  }
+  if (/(?:点数|本数|杯数)(?:で|表示|換算)/.test(q)) return 'qty';
+  return '';
+}
+
+function resolveWineMetricClarificationReply(query, chatHistory) {
+  const raw = String(query || '').trim();
+  if (!raw || !Array.isArray(chatHistory)) return raw;
+  let askedIndex = -1;
+  for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const item = chatHistory[i];
+    if (!item || item.role !== 'assistant') continue;
+    if (item.clarification === 'wineMetric') askedIndex = i;
+    break;
+  }
+  if (askedIndex < 0) return raw;
+  const assistantItem = chatHistory[askedIndex];
+  let original = String(assistantItem?.originalQuery || '').trim();
+  if (!original) {
+    for (let i = askedIndex - 1; i >= 0; i--) {
+      const item = chatHistory[i];
+      if (item && item.role === 'user' && String(item.content || '').trim()) {
+        original = String(item.content).trim();
+        break;
+      }
+    }
+  }
+  if (!original) return raw;
+  if (isSelfContainedAiQuestion(raw) && !normalizeWineMetricChoice(raw) && !resolveNaturalClarificationChoice(raw, assistantItem)) {
+    return raw;
+  }
+  let selected = resolveNaturalClarificationChoice(raw, assistantItem) || normalizeWineMetricChoice(raw) || raw;
+  selected = normalizeWineMetricChoice(selected) || selected;
+  if (!normalizeWineMetricChoice(selected)) {
+    // 選択肢以外の自由文でも、元質問へ足して再解釈させる
+    return `${original} ${raw}`.trim();
+  }
+  return `${original} 表示単位:${selected}`.trim();
+}
+
+function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
+  const mode = resolveWineMetricMode(query);
+  if (!mode || mode === 'qty') return '';
+  if (!verifiedData || verifiedData.reservationOnly || verifiedData.journalProductSearchOnly) return '';
+  let wineMl = emptyStoreOpsWineMl();
+  try {
+    wineMl = normalizeStoreOpsWineMl(readStoreOpsProfile().wineMl);
+  } catch (_) {}
+  const periods = verifiedData.multiPeriod && Array.isArray(verifiedData.periods)
+    ? verifiedData.periods
+    : [verifiedData];
+  const lines = [];
+  lines.push(`${indent}【ワイン提供量の確定換算（店舗設定×商品点数）】`);
+  lines.push(`${indent}- 換算設定: Glass Wine ${wineMl.glassMl}ml/点 / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点`);
+  lines.push(`${indent}- 表示モード: ${mode === 'both' ? '点数と総mlの両方' : '総ml'}`);
+  for (const period of periods) {
+    if (!period || period.reservationOnly) continue;
+    const products = typeof resolveProductsForQuery === 'function'
+      ? resolveProductsForQuery(period.topProducts || [], query, 80)
+      : (period.topProducts || []);
+    const analysis = computeWineMlVolumeAnalysis(
+      products.length ? products : (period.topProducts || []),
+      wineMl
+    );
+    const label = period.label || verifiedData.label || '対象期間';
+    lines.push(
+      `${indent}- ${label}: Glass ${analysis.glass.qty}点=${analysis.glass.ml}ml`
+      + ` / ペアリング ${analysis.pairing.qty}点=${analysis.pairing.ml}ml`
+      + ` / Bottle ${analysis.bottle.qty}点=${analysis.bottle.ml}ml`
+      + ` / 合計 ${analysis.totalMl}ml（約 ${analysis.totalLiters}L）`
+    );
+  }
+  lines.push(`${indent}- 分析ルール: 上記mlは店舗換算設定と確定点数のみを使う。換算率の捏造禁止。${mode === 'ml' ? '回答の主表示は総ml（必要なら点数を括弧書き）。' : '点数と総mlを併記する。'}`);
+  return `\n${lines.join('\n')}`;
+}
+
 function resolveAiChatQuery(query, chatHistory) {
-  return resolveAiIntentClarificationReply(
-    resolveSavedDataClarificationReply(query, chatHistory),
+  return resolveWineMetricClarificationReply(
+    resolveAiIntentClarificationReply(
+      resolveSavedDataClarificationReply(query, chatHistory),
+      chatHistory
+    ),
     chatHistory
   );
 }
@@ -13376,6 +13536,7 @@ function countRecentClarificationsByKind(chatHistory, kind = '') {
     if (!item || item.role !== 'assistant') continue;
     const isClarification = item.clarification === 'intent'
       || item.clarification === 'period'
+      || item.clarification === 'wineMetric'
       || String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER)
       || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
     if (!isClarification) break;
@@ -13398,6 +13559,7 @@ function hasAnsweredDataContext(chatHistory) {
     if (!item || item.role !== 'assistant') continue;
     const isClarification = item.clarification === 'intent'
       || item.clarification === 'period'
+      || item.clarification === 'wineMetric'
       || String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER)
       || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
     return !isClarification;
@@ -14795,6 +14957,33 @@ async function sendAiChat() {
     return;
   }
 
+  // ワイン量の質問で単位が未指定なら、点数／総ml／両方を確認してから回答する
+  if (
+    queryResult
+    && !queryResult.notMatchedLabel
+    && shouldAskWineMetricClarification(resolvedChatQuery, aiChatHistory)
+  ) {
+    const reply = buildWineMetricClarificationReply(resolvedChatQuery);
+    const clarificationChoices = ['点数', '総ml', '両方'];
+    removeAiChatLoading(loadingId);
+    appendAiChatMessage('ai', reply, {
+      question: msg,
+      provider: 'local-wine-metric-clarifier',
+      clarificationChoices
+    });
+    aiChatHistory.push({
+      role: 'assistant',
+      content: reply,
+      clarification: 'wineMetric',
+      originalQuery: resolvedChatQuery,
+      clarificationChoices
+    });
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+    return;
+  }
+
   const verifiedData = (queryResult && !queryResult.notMatchedLabel) ? queryResult : null;
   const salesDataForAi = verifiedData
     ? {
@@ -14822,15 +15011,26 @@ async function sendAiChat() {
 ${(p.topProducts && p.topProducts.length) ? `  - 売れ筋商品TOP${Math.min(p.topProducts.length, requestedRankingLimit(resolvedChatQuery, 10))}:\n` + formatTopProductsLinesForAi(p.topProducts, requestedRankingLimit(resolvedChatQuery, 10), true).split('\n').map((line) => `    ${line}`).join('\n') : ''}
 ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信量上限）' : ''}${formatJournalSpecificFactsForAi(p, resolvedChatQuery, '  ')}`;
   }
+  const wineVolumeFactsBlock = verifiedData
+    ? formatWineVolumeFactsForAi(verifiedData, resolvedChatQuery)
+    : '';
+  const wineMetricMode = resolveWineMetricMode(resolvedChatQuery);
+  const wineMetricAnswerRule = wineMetricMode === 'ml'
+    ? 'ワイン量の主表示は総ml（店舗換算設定ベース）。必要なら点数を括弧で補足する。'
+    : wineMetricMode === 'both'
+      ? 'ワイン量は点数と総mlを必ず併記する（総mlは店舗換算設定ベース）。'
+      : wineMetricMode === 'qty'
+        ? 'ワイン量は点数（または本数・杯数）で答える。総mlへ勝手に換算しない。'
+        : '';
   let verifiedDataBlock = '';
   if (verifiedData && verifiedData.multiPeriod) {
     // 比較依頼：複数期間それぞれの確定数値を提示し、AIにはこれらの間での比較・差分の言及を許可する
     verifiedDataBlock = `
 
 【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
-${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}
+${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}${wineVolumeFactsBlock}
 
-回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。${wineMetricAnswerRule}各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   } else if (verifiedData && verifiedData.reservationOnly) {
     verifiedDataBlock = `
 
@@ -14861,9 +15061,9 @@ ${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 - 対象月数: ${verifiedData.monthCount || 0}か月 (月間平均来客数: ${verifiedData.monthlyAvgCustomers || 0}名)
 - 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}${formatVerifiedDetailLines(verifiedData)}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? `- 売れ筋商品TOP${Math.min(verifiedData.topProducts.length, requestedRankingLimit(resolvedChatQuery, 10))}（★大分類除外${wantsExcludeCourseProducts(resolvedChatQuery) ? '・コース除外' : '・コースは合算'}）:\n` + formatTopProductsLinesForAi(verifiedData.topProducts, requestedRankingLimit(resolvedChatQuery, 10)) : ''}
-${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
+${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}${wineVolumeFactsBlock}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。${wineMetricAnswerRule}月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
   // 店舗営業情報（クラウド）と店舗ナレッジを、確定集計と必ずセットで添付する。
   let integrated;
@@ -15037,6 +15237,26 @@ function appendAiChatMessage(role, text, meta) {
   div.className = role === 'user' ? 'ai-msg-user' : 'ai-msg-ai';
   div.innerHTML = simpleMarkdown(text);
   if (role !== 'user') {
+    const choices = Array.isArray(meta?.clarificationChoices)
+      ? meta.clarificationChoices.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 3)
+      : [];
+    if (choices.length) {
+      const row = document.createElement('div');
+      row.className = 'ai-clarify-choices';
+      choices.forEach((choice) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ai-clarify-choice-btn';
+        btn.textContent = choice;
+        btn.onclick = () => {
+          const chatInput = document.getElementById('aiChatInput');
+          if (chatInput) chatInput.value = choice;
+          if (typeof sendAiChat === 'function') sendAiChat();
+        };
+        row.appendChild(btn);
+      });
+      div.appendChild(row);
+    }
     const pdfMeta = Object.assign({
       question: findLastAiChatQuestion(),
       mode: '',

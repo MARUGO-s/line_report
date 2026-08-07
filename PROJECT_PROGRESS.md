@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - AIチャットのワイン量 点数/ml 確認経路
+
+- Request: 年比較などでワイン量を聞かれたとき、点数／総ml／両方をユーザーに確認し、mlは店舗換算で計算。
+- Change: `wineMetric` clarifier + choice buttons + `formatWineVolumeFactsForAi` を verifiedData に注入。
+- Deploy: Pages `public/jnm/*`。
+
 ### 2026-08-07 - ワイン提供量(ml)換算を店舗情報＋AI分析へ
 
 - Request: 店舗情報でグラスワインmlを店舗別に設定（ボトル750固定）。分析の1項目にする。
