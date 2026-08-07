@@ -393,7 +393,7 @@ FOODCOURT_LOOP_APPLY_TO_WEEKLY=true
 FOODCOURT_AI_REQUEST_BUDGET_MS=110000
 ```
 
-2026-07-22時点の本番はQ&A・日次・期間・週次の全surfaceをONにしている。管理画面の合格ライン設定が存在する場合は、環境変数より優先する。反証AI④は日次=Claude Haiku、Q&A/期間/週次=Kimi K3→Claude Haikuフォールバックで運用し、評価AI⑥はClaude Haikuのまま維持する。
+2026-08-07時点の本番はQ&A・日次・期間・週次の全surfaceをONにしている。管理画面の合格ライン設定が存在する場合は、環境変数より優先する。反証AI④は**全 surface で Claude Haiku**（→ Gemini → Groq）を使い、評価AI⑥も Claude Haiku を維持する。専門AI①は Groq `openai/gpt-oss-120b`（失敗時 Gemini）。**Qwen／Kimi（Moonshot）は情報流出対策で構成外**（旧 env に残っていても GPT-OSS／Claude へ強制退避）。
 
 ## 10. 評価AIプロンプト設計
 

@@ -260,7 +260,7 @@ LINE 上だけでは一覧閲覧できない。蓄積先は常にこの資料一
 |------|------|
 | Edge | `ai-analyze`（`action: analyze`） |
 | 入力 | `salesData`（クライアント組立）＋ systemInstruction（立地・店舗情報・資料チェックリスト含む） |
-| 役割分担 | 画像／`#メモ`分類は Gemini。売上分析の合成は GPT 系等。外部知見は任意 |
+| 役割分担 | 画像／`#メモ`分類は Gemini。売上分析の合成は **OpenAI（Luna）→ Claude Haiku**。外部知見は Perplexity／Grok（任意）。**Qwen／Kimi は情報流出対策で構成外** |
 | 出力 | Markdown の経営・売上多角分析＆ワイン営業戦略レポート |
 | 履歴 | `ai_analysis_history` に自動保存 |
 
