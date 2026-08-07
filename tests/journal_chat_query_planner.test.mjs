@@ -43,6 +43,9 @@ const context = {
   AI_KNOWLEDGE_MAX_CHARS: 6000,
   AI_KNOWLEDGE_MAX_CHUNKS: 12,
   yen: (n) => `¥${Number(n || 0).toLocaleString('ja-JP')}`,
+  isPosCategoryRollupName: () => false,
+  readStoreOpsProfile: () => ({ wineMl: { glassMl: 100, bottleMl: 750, pairingMl: 300 } }),
+  resolveProductsForQuery: (products) => (Array.isArray(products) ? products : []),
   monthKeyFromReport(report) {
     const text = String(report?.period || report?.title || '');
     const iso = text.match(/(20\d{2})-(\d{2})/);
@@ -65,7 +68,23 @@ for (const name of [
   'resolveNaturalClarificationChoice',
   'resolveSavedDataClarificationReply',
   'resolveAiIntentClarificationReply',
+  'resolveWineMetricClarificationReply',
+  'resolveAiChatQuery',
   'needsAiIntentClarification',
+  'needsWineMetricClarification',
+  'shouldAskWineMetricClarification',
+  'hasExplicitWineMetricUnit',
+  'wantsWineVolumeQuestion',
+  'resolveWineMetricMode',
+  'normalizeWineMetricChoice',
+  'buildWineMetricClarificationReply',
+  'formatWineVolumeFactsForAi',
+  'computeWineMlVolumeAnalysis',
+  'normalizeStoreOpsWineMl',
+  'emptyStoreOpsWineMl',
+  'normalizeWineProductSearchText',
+  'classifyWineProductForMl',
+  'collectProductsForWineMl',
   'countRecentClarificationsByKind',
   'countRecentIntentClarifications',
   'shouldAskAiIntentClarification',
@@ -1256,3 +1275,57 @@ test('store knowledge API and storage stay behind the admin API', async () => {
   assert.match(migration, /grant select, insert, update, delete on public\.store_knowledge_documents to service_role/);
   assert.match(migration, /'store-knowledge',\s*\n\s*'store-knowledge',\s*\n\s*false/, 'bucket must stay private');
 });
+
+test('wine volume questions ask 点数 / 総ml / 両方 before answering', () => {
+  assert.equal(context.needsWineMetricClarification('2025年と2026年ではどれくらいワインが出たか'), true);
+  assert.equal(context.needsWineMetricClarification('2025年と2026年のワイン提供量を比較して'), true);
+  assert.equal(context.shouldAskWineMetricClarification('2025年と2026年ではどれくらいワインが出たか', []), true);
+  assert.equal(context.needsWineMetricClarification('2025年と2026年のワイン 表示単位:総ml'), false);
+  assert.equal(context.needsWineMetricClarification('Glass Wineは何点？'), false);
+  assert.equal(context.needsWineMetricClarification('ワインの構成比は？'), false);
+  assert.equal(context.hasExplicitWineMetricUnit('表示単位:両方'), true);
+  assert.equal(context.resolveWineMetricMode('… 表示単位:総ml'), 'ml');
+  assert.equal(context.resolveWineMetricMode('… 表示単位:両方'), 'both');
+  assert.equal(context.normalizeWineMetricChoice('総ml'), '総ml');
+
+  const history = [{
+    role: 'assistant',
+    clarification: 'wineMetric',
+    originalQuery: '2025年と2026年ではどれくらいワインが出たか',
+    clarificationChoices: ['点数', '総ml', '両方'],
+    content: context.buildWineMetricClarificationReply('2025年と2026年ではどれくらいワインが出たか'),
+  }];
+  assert.match(context.resolveWineMetricClarificationReply('総ml', history), /表示単位:総ml$/);
+  assert.match(context.resolveAiChatQuery('両方', history), /表示単位:両方$/);
+  assert.match(context.buildWineMetricClarificationReply('ワイン'), /点数/);
+  assert.match(context.buildWineMetricClarificationReply('ワイン'), /総ml/);
+  assert.match(html, /clarification:\s*'wineMetric'/);
+  assert.match(html, /formatWineVolumeFactsForAi/);
+  assert.match(html, /local-wine-metric-clarifier/);
+  assert.match(html, /ai-clarify-choice-btn/);
+});
+
+test('wine ml conversion uses store settings for chat facts', () => {
+  const products = [
+    { name: 'Glass Wine', qty: 942, amt: 1412300 },
+    { name: 'ペアリング', qty: 181, amt: 905000 },
+    { name: 'Bottle Wine', qty: 65, amt: 759300 },
+  ];
+  const analysis = context.computeWineMlVolumeAnalysis(products, { glassMl: 100, pairingMl: 300 });
+  assert.equal(analysis.glass.ml, 94200);
+  assert.equal(analysis.pairing.ml, 54300);
+  assert.equal(analysis.bottle.ml, 48750);
+  assert.equal(analysis.totalMl, 197250);
+
+  const facts = context.formatWineVolumeFactsForAi({
+    multiPeriod: true,
+    periods: [
+      { label: '2025年の売上データ', topProducts: products },
+      { label: '2026年の売上データ', topProducts: products },
+    ],
+  }, '2025年と2026年ではどれくらいワインが出たか 表示単位:総ml');
+  assert.match(facts, /ワイン提供量の確定換算/);
+  assert.match(facts, /合計 197250ml/);
+  assert.match(facts, /表示モード: 総ml/);
+});
+
