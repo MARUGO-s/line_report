@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - ワインmlの Bottle 0 取りこぼし対策
+
+- Request: 2024年のボトルワイン0点がおかしい。
+- Change: `wineMlProducts` 全件抽出、商品コード照合、飲料売上対比の注記。
+- Deploy: Pages `public/jnm/*`。
+
 ### 2026-08-07 - AIチャットのワイン量 点数/ml 確認経路
 
 - Request: 年比較などでワイン量を聞かれたとき、点数／総ml／両方をユーザーに確認し、mlは店舗換算で計算。
