@@ -12043,6 +12043,21 @@ function normalizeStoreOpsCalendarEvents(raw: unknown): Array<Record<string, unk
   return out
 }
 
+/** ワイン提供量(ml)換算。ボトルは店舗差が小さいため 750 固定。グラス／ペアリングは店舗設定。 */
+function normalizeStoreOpsWineMl(raw: unknown): Record<string, number> {
+  const src = isRecord(raw) ? raw : {}
+  const clampMl = (value: unknown, fallback: number) => {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return fallback
+    return Math.max(1, Math.min(5000, Math.round(n)))
+  }
+  return {
+    glassMl: clampMl(src.glassMl ?? src.glass, 100),
+    bottleMl: 750,
+    pairingMl: clampMl(src.pairingMl ?? src.pairing, 300),
+  }
+}
+
 function normalizeStoreOperationProfile(raw: unknown): Record<string, unknown> {
   const src = isRecord(raw) ? raw : {}
   const weekdays = new Set(["日", "月", "火", "水", "木", "金", "土"])
@@ -12078,6 +12093,7 @@ function normalizeStoreOperationProfile(raw: unknown): Record<string, unknown> {
       src.journalSalesSync === "true",
     // 店舗情報カレンダー（施策・イベント等）。古いクライアント未送信時は save 側で既存を維持
     calendarEvents: normalizeStoreOpsCalendarEvents(src.calendarEvents ?? src.events),
+    wineMl: normalizeStoreOpsWineMl(src.wineMl),
   }
 }
 
@@ -12114,8 +12130,9 @@ async function saveStoreOperationProfile(
   const omitSync = !Object.prototype.hasOwnProperty.call(rawProfile, "journalSalesSync")
   const omitEvents = !Object.prototype.hasOwnProperty.call(rawProfile, "calendarEvents") &&
     !Object.prototype.hasOwnProperty.call(rawProfile, "events")
-  // 古いクライアントがキー未送信のとき、既存の同期ON／カレンダー登録を誤って消さない
-  if (omitSync || omitEvents) {
+  const omitWineMl = !Object.prototype.hasOwnProperty.call(rawProfile, "wineMl")
+  // 古いクライアントがキー未送信のとき、既存の同期ON／カレンダー／ワインml設定を誤って消さない
+  if (omitSync || omitEvents || omitWineMl) {
     const { data: existing, error: existingError } = await supabase
       .from("store_operation_profiles")
       .select("profile")
@@ -12135,6 +12152,9 @@ async function saveStoreOperationProfile(
       profile.calendarEvents = normalizeStoreOpsCalendarEvents(
         existingProfile.calendarEvents ?? existingProfile.events,
       )
+    }
+    if (omitWineMl && existingProfile) {
+      profile.wineMl = normalizeStoreOpsWineMl(existingProfile.wineMl)
     }
   }
   const now = new Date().toISOString()

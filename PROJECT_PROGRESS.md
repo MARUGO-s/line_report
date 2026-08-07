@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - ワイン提供量(ml)換算を店舗情報＋AI分析へ
+
+- Request: 店舗情報でグラスワインmlを店舗別に設定（ボトル750固定）。分析の1項目にする。
+- Change: `profile.wineMl` + UI。`wineVolumeAnalysis` を salesData／店舗営業情報ブロックへ。AI指示に必須節を追加。
+- Deploy: `admin-api` + Pages `public/jnm/*`。
+
 ### 2026-08-07 - 店舗情報カレンダー（施策・イベント）
 
 - Request: 店舗情報入力時にカレンダーでイベント／施策を開始日〜終了日登録し、AIとプレビューへ自動反映。
