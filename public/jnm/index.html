@@ -8145,10 +8145,12 @@ async function saveStoreOpsForm() {
 function resetStoreOpsForm() {
   // 定休などの初期値に戻しても、同期フラグとカレンダー登録は誤消去しない
   const current = readStoreOpsForm();
+  const keepSync = !!current.journalSalesSync;
+  const keepCalendarEvents = normalizeStoreOpsCalendarEvents(current.calendarEvents);
   const profile = writeStoreOpsProfileLocal({
     ...defaultStoreOpsProfile(),
-    journalSalesSync: !!current.journalSalesSync,
-    calendarEvents: normalizeStoreOpsCalendarEvents(current.calendarEvents)
+    journalSalesSync: keepSync,
+    calendarEvents: keepCalendarEvents
   });
   fillStoreOpsForm(profile);
   const status = document.getElementById('opsFormStatus');
