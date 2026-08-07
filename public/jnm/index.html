@@ -278,6 +278,44 @@
   .guide p{margin:0 0 20px}
   .guide ol,.guide ul{margin:0 0 20px;padding-left:20px}
   .guide li{margin-bottom:6px}
+  /* 使い方タブ：章ごとのアコーディオン。details/summary なのでJS不要でキーボードも効く */
+  .guide>.g-sec,.guide>.g-lead,.guide>.g-toc{max-width:860px}
+  .g-lead{background:color-mix(in srgb, var(--text) 4%, transparent);border:1px solid var(--border);
+    border-radius:var(--radius-card);padding:14px 18px;margin:0 0 20px}
+  .g-lead p{margin:0 0 10px}
+  .g-lead p:last-child{margin:0}
+  .g-flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0;padding:0;list-style:none}
+  .g-flow li{margin:0;font-size:12px;padding:3px 9px;border:1px solid var(--border-strong);border-radius:999px;color:var(--text)}
+  .g-flow li::after{content:"→";margin-left:9px;color:var(--text-2)}
+  .g-flow li:last-child::after{content:""}
+  .g-sec{border:1px solid var(--border);border-radius:var(--radius-card);margin:0 0 10px;background:var(--surface, transparent)}
+  .g-sec>summary{cursor:pointer;list-style:none;padding:13px 16px;display:flex;align-items:center;gap:10px;
+    font-family:var(--font-heading);font-size:16px;color:var(--text);border-radius:var(--radius-card)}
+  .g-sec>summary::-webkit-details-marker{display:none}
+  .g-sec>summary::after{content:"＋";margin-left:auto;color:var(--text-2);font-size:14px}
+  .g-sec[open]>summary::after{content:"−"}
+  .g-sec>summary:hover{background:color-mix(in srgb, var(--text) 5%, transparent)}
+  .g-sec[open]>summary{border-bottom:1px solid var(--border)}
+  .g-num{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;
+    border-radius:6px;background:color-mix(in srgb, var(--accent) 20%, transparent);
+    border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);font-size:11px;font-family:var(--font-heading)}
+  .g-body{padding:14px 18px 4px}
+  .g-body h3{font-size:14px;margin:18px 0 8px;color:var(--text);font-weight:600}
+  .g-body h3:first-child{margin-top:0}
+  .g-body table{width:100%;border-collapse:collapse;margin:0 0 18px;font-size:13px}
+  .g-body th,.g-body td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+  .g-body th{background:color-mix(in srgb, var(--text) 6%, transparent);color:var(--text);font-weight:600;white-space:nowrap}
+  .g-note{border-left:3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    background:color-mix(in srgb, var(--accent) 8%, transparent);padding:9px 13px;margin:0 0 18px;border-radius:0 6px 6px 0}
+  .g-note strong{color:var(--text)}
+  .g-warn{border-left:3px solid #b4553f;background:color-mix(in srgb, #b4553f 10%, transparent);
+    padding:9px 13px;margin:0 0 18px;border-radius:0 6px 6px 0}
+  .g-body code{font-size:12px;padding:1px 5px;border-radius:4px;background:color-mix(in srgb, var(--text) 9%, transparent)}
+  .g-toc{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 18px;padding:0;list-style:none}
+  .g-toc li{margin:0}
+  .g-toc button{font:inherit;font-size:12px;padding:4px 10px;border:1px solid var(--border-strong);
+    border-radius:999px;background:transparent;color:var(--text-2);cursor:pointer}
+  .g-toc button:hover{background:color-mix(in srgb, var(--text) 7%, transparent);color:var(--text)}
 
   /* Converter */
   .conv{max-width:1280px;width:100%;margin:0 auto;padding:8px 24px 40px;box-sizing:border-box}
@@ -1698,55 +1736,269 @@
   <h1>Journal Report の使い方</h1>
   <p>POS電子ジャーナル（.jnl / .lzh）から売上レポートを作り、<strong>店舗ごとにクラウドへ保存</strong>し、AI分析・チャットで振り返るためのアプリです。変換そのものは端末内で行い、保存とAIは認証付きのクラウドAPI経由です。</p>
 
-  <h2>1. ログインと店舗選択</h2>
-  <ol>
-    <li>画面上部で管理トークンを接続するか、LINEの最新リンクから開きます。</li>
-    <li>右上の<strong>店舗</strong>ドロップダウンで対象店舗を選びます。</li>
-    <li><strong>店舗用ログイン</strong>は自店のみ（他店は選べません）。</li>
-    <li><strong>管理者</strong>は店舗を切り替えて横断閲覧・分析できます（「店舗横断サマリー」も利用可）。</li>
-  </ol>
+  <div class="g-lead">
+    <p>レジの電子ジャーナルを読み込むと、確定した売上レポートが自動で作られ、クラウドに保存されます。その保存データだけを根拠に、AIが分析や質問応答を行います。</p>
+    <p><strong>AIに計算はさせません。</strong> 数値はすべてジャーナルから機械的に集計した確定値で、AIはその解釈だけを担当します。</p>
+    <ul class="g-flow">
+      <li>ジャーナルを入れる</li><li>レポートが出来る</li><li>AIに聞く</li>
+    </ul>
+  </div>
 
-  <h2>2. ジャーナルの取り込み</h2>
-  <ol>
-    <li>「変換」タブで .lzh / .jnl（または月フォルダ）をドラッグ＆ドロップ、または選択します。</li>
-    <li>.lzh は自動解凍し、制御コード除去・文字コード変換のうえ売上を集計します。</li>
-    <li>読込後は<strong>レポート作成〜クラウド保存</strong>まで自動実行されます（未ログイン時は保存できません）。</li>
-    <li>必要に応じて商品コード分類（フード／ドリンク等）を店舗別に調整できます。</li>
-  </ol>
-
-  <h2>3. レポート・履歴</h2>
-  <ul>
-    <li><strong>保存済みレポート</strong> … 日別・月間レポートを店舗スコープで一覧・再表示・削除</li>
-    <li><strong>売上予測 / 予測履歴</strong> … 保存データに基づく予測と実績比較</li>
-    <li><strong>AI分析履歴</strong> … レポートに対するAI分析結果の履歴</li>
-    <li><strong>AIチャットPDF履歴</strong> … チャット回答を「PDFにする」したときの<strong>質問＋回答</strong>一覧</li>
-    <li><strong>AI使用量（管理者）</strong> … Journal Report の AI分析・チャット等の実測トークンと概算費用（フル管理者のみ）</li>
+  <ul class="g-toc" id="guideToc">
+    <li><button type="button" data-g="g1">ログイン</button></li>
+    <li><button type="button" data-g="g2">取り込み</button></li>
+    <li><button type="button" data-g="g3">レポート</button></li>
+    <li><button type="button" data-g="g4">店舗情報</button></li>
+    <li><button type="button" data-g="g5">資料・#メモ</button></li>
+    <li><button type="button" data-g="g6">AI分析</button></li>
+    <li><button type="button" data-g="g7">AIチャット</button></li>
+    <li><button type="button" data-g="g8">予約・予測</button></li>
+    <li><button type="button" data-g="g9">履歴・管理者</button></li>
+    <li><button type="button" data-g="g10">仕組みと注意</button></li>
+    <li><button type="button" data-g="g11">困ったとき</button></li>
   </ul>
 
-  <h2>4. AI分析・AIチャット</h2>
-  <ol>
-    <li>レポート画面の「AI分析」でコンサルティングレポートを生成できます（自動で履歴保存）。</li>
-    <li>「AIチャット」では保存済みレポートを根拠に質問できます（期間比較・推移・改善案など）。</li>
-    <li>回答下の「📄 PDFにする」で印刷用表示を開き、同時に質問と回答をクラウドへ保存します。</li>
-    <li>「店舗情報」タブで定休日・ランチ有無・特別営業・カレンダー・ワイン提供量(ml)換算を登録すると、AI分析・チャットに反映されます（定休曜日の低売上は弱点扱いしません）。</li>
-  </ol>
+  <details class="g-sec" id="g1" open>
+    <summary><span class="g-num">1</span>ログインと店舗選択</summary>
+    <div class="g-body">
+      <h3>入り方は2通り</h3>
+      <table>
+        <tr><th>管理トークン</th><td>画面上部でトークンを接続します。管理者はこの経路です。</td></tr>
+        <tr><th>LINEのリンク</th><td>LINEに届く最新のログインリンクから開きます。店舗スタッフはこちらが基本です。</td></tr>
+      </table>
+      <h3>店舗の切り替え</h3>
+      <p>右上の<strong>店舗</strong>ドロップダウンで対象を選びます。表示中の店舗のデータだけが読み書きされます。</p>
+      <table>
+        <tr><th>店舗用ログイン</th><td>自店のみ。他店は選べません（指定してもサーバー側で拒否されます）</td></tr>
+        <tr><th>管理者</th><td>全店を切り替えて閲覧・分析できます。店舗横断サマリーとAI使用量も使えます</td></tr>
+      </table>
+      <div class="g-note"><strong>接続していないと保存できません。</strong> ジャーナルの読み込み自体は動きますが、レポートはクラウドに残らず、AIも使えません。</div>
+    </div>
+  </details>
 
-  <h2>5. 資料と LINE #メモ</h2>
-  <ul>
-    <li><strong>資料</strong>タブで施策・メニュー・現場メモを登録・閲覧できます。売上の数値正本は保存済みレポートのまま、資料は背景説明に使われます。</li>
-    <li>LINE で <code>#メモ</code> / <code>#日報</code> / <code>#note</code>（全角＃可）を送ると、同じ資料へ自動登録されます。テキストは本文付き、画像・PDFは<strong>引用返信で #メモ</strong>。</li>
-    <li>登録内容の確認・編集は、このアプリの<strong>資料</strong>タブの一覧から行います。</li>
-  </ul>
+  <details class="g-sec" id="g2">
+    <summary><span class="g-num">2</span>ジャーナルの取り込み（変換タブ）</summary>
+    <div class="g-body">
+      <h3>入れ方</h3>
+      <p>「変換」タブの枠に <code>.lzh</code> / <code>.jnl</code> をドラッグ＆ドロップするか、クリックして選びます。<strong>月フォルダごと</strong>放り込めば中を再帰的に読みます。</p>
+      <h3>読み込んだ後に自動で起きること</h3>
+      <ol>
+        <li>.lzh を解凍し、制御コードを除去して文字コードを変換</li>
+        <li>伝票を1件ずつ集計して売上レポートを作成</li>
+        <li>クラウドへ保存（レポート・詳細HTML・ジャーナル原本）</li>
+      </ol>
+      <p>ここまで自動です。ボタン操作は要りません。</p>
+      <h3>集計のルール</h3>
+      <table>
+        <tr><th>ランチ／ディナー</th><td>会計時刻 <strong>16:00より前がランチ</strong>、以降がディナー</td></tr>
+        <tr><th>カテゴリ</th><td>フード／飲料／室料。チャージはフードの内数として扱います</td></tr>
+        <tr><th>商品コード分類</th><td>店舗ごとに調整できます。分類を変えると以後の集計に反映されます</td></tr>
+      </table>
+      <div class="g-note"><strong>同じファイルの二重取り込みは自動で防ぎます。</strong> 内容が同一のファイルは「保管済み」として重複集計されません。集計値が空のまま保存された過去の行は、同じファイルを入れ直すと<strong>削除せずに修復</strong>されます。</div>
+      <div class="g-warn">パーサーやカテゴリ定義が更新されると、古いレポートは「旧解析版」と表示されます。<strong>AI分析や印刷の前に作り直してください。</strong>古い基準のまま比較すると数字がずれます。</div>
+    </div>
+  </details>
 
-  <h2>6. .jnl / .lzh について</h2>
-  <p>POSが出す電子ジャーナル（.jnl）は制御コード付きのバイナリログです。.lzh はその圧縮書庫で、本アプリが自動解凍します。変換の内部手順は「解凍 → 制御コード除去 → デコード → レコード整理 → 売上集計／レポート化」です。</p>
+  <details class="g-sec" id="g3">
+    <summary><span class="g-num">3</span>レポートと分析ツール</summary>
+    <div class="g-body">
+      <h3>変換タブのボタン</h3>
+      <table>
+        <tr><th>保存済みレポート</th><td>日別・月間レポートの一覧、再表示、ゴミ箱へ移動</td></tr>
+        <tr><th>売上予測</th><td>保存済みの月間レポートから予測を作成して保存</td></tr>
+        <tr><th>予測履歴・MAPE</th><td>過去の予測と実績の差を確認</td></tr>
+        <tr><th>AI分析履歴</th><td>レポートに対するAI分析の履歴</td></tr>
+        <tr><th>AIチャットPDF履歴</th><td>「PDFにする」で残した質問と回答の一覧</td></tr>
+        <tr><th>ゴミ箱・復元</th><td>削除した4種類（レポート／予測／AI分析／チャットPDF）を戻せます</td></tr>
+        <tr><th>店舗横断サマリー</th><td>管理者のみ。店舗ごとの保存件数など</td></tr>
+        <tr><th>AI使用量</th><td>管理者のみ。AIのトークン数と概算費用</td></tr>
+      </table>
+      <h3>レポートを開いてできること</h3>
+      <ul>
+        <li>HTMLで保存、印刷・PDF出力</li>
+        <li><strong>AI分析</strong>（コンサルレポートを生成。履歴は自動保存）</li>
+        <li><strong>AIチャット</strong>を開く</li>
+        <li>ライト／ダークのテーマ切替</li>
+      </ul>
+    </div>
+  </details>
 
-  <h2>7. データの扱い（重要）</h2>
-  <ul>
-    <li>解析処理は端末内。レポート・AI分析・チャットPDF履歴・予測・資料は<strong>選択店舗のクラウド領域</strong>（<code>store_partition_key</code>）に保存されます。</li>
-    <li>店舗用ログインでは他店データにアクセスできません。管理者のみ横断できます。</li>
-    <li>公開ページから業務テーブルへ直接アクセスはしません（admin-api＋認証経由）。</li>
-  </ul>
+  <details class="g-sec" id="g4">
+    <summary><span class="g-num">4</span>店舗情報タブ</summary>
+    <div class="g-body">
+      <p>ここに入れた内容は、<strong>AI分析とAIチャットのたびに読み込まれます</strong>。店舗の前提を伝えるための場所です。</p>
+      <h3>営業の前提</h3>
+      <table>
+        <tr><th>定休日</th><td>曜日で指定。<strong>定休日の売上ゼロを「弱点」と誤診しなくなります</strong></td></tr>
+        <tr><th>ランチ／ディナー</th><td>あり／限定／なし</td></tr>
+        <tr><th>溢日ルール</th><td>定休曜日が月に多いとき、指定曜日の一部を営業にする設定</td></tr>
+        <tr><th>特別営業・メモ</th><td>自由記述。定休日に売上がある日の解釈に使われます</td></tr>
+      </table>
+      <h3>施策・イベントカレンダー</h3>
+      <p>日付をクリックして開始日→終了日を選び、施策やイベントを登録します。AIは分析期間と重なる登録を優先して読みます。</p>
+      <p>LINEから <code>#メモ</code> を送った日には <strong>💬</strong> が付きます。クリックするとその日の投稿内容を確認できます。施策と現場の記録を同じ時間軸で見返せます。</p>
+      <h3>ワイン提供量（ml）換算</h3>
+      <table>
+        <tr><th>グラスワイン</th><td>既定 100ml／点（変更可）</td></tr>
+        <tr><th>ボトルワイン</th><td>750ml／点（固定）</td></tr>
+        <tr><th>ペアリング</th><td>既定 300ml／点（変更可）</td></tr>
+      </table>
+      <div class="g-warn"><strong>銘柄名だけのボトルは換算に入りません。</strong> 対象は「グラスワイン」「ボトルワイン」「ペアリング」に相当する商品だけです。</div>
+      <h3>過去売上への同期</h3>
+      <p>ジャーナルを正として、過去売上（手入力の日次・月次）へ自動反映する設定です。<strong>既定はオフ</strong>で、店舗ごとに明示的に有効化します。</p>
+      <div class="g-note">初期値に戻しても、同期設定・カレンダー・ワインml設定は消えません。</div>
+    </div>
+  </details>
+
+  <details class="g-sec" id="g5">
+    <summary><span class="g-num">5</span>資料タブと LINE #メモ</summary>
+    <div class="g-body">
+      <p>施策・メニュー・価格改定・現場メモを貯める場所です。AIが「その期間に店舗が何をしていたか」を踏まえて分析できるようになります。</p>
+      <div class="g-warn"><strong>資料は数字の出典にしません。</strong> 売上の正本はあくまでジャーナルの確定集計です。資料は背景や要因の説明に使われ、AIは資料由来のとき「登録資料によると」、推測のとき「※これは推測です」と明示します。</div>
+      <h3>LINEから送る</h3>
+      <table>
+        <tr><th>文章のメモ</th><td><code>#メモ</code> に続けて本文を送信</td></tr>
+        <tr><th>写真・PDF</th><td>先に送ってから、<strong>それを引用返信して <code>#メモ</code></strong></td></tr>
+        <tr><th>タグ</th><td><code>#メモ</code> / <code>#日報</code> / <code>#note</code> は同じ扱い。全角の <code>＃</code> も使えます</td></tr>
+      </table>
+      <div class="g-warn"><strong>写真を送っただけでは登録されません。</strong> LINEの画像メッセージには文字が付かないため、引用返信で <code>#メモ</code> を付ける必要があります。</div>
+      <h3>送信日時が分析の時間軸になります</h3>
+      <p>LINEの送信時刻をそのまま記録し、その日（日本時間）を資料の期間として保存します。<strong>深夜0時前後の投稿でも日付がずれません。</strong></p>
+      <p>分析では、対象期間と重なるメモが必ず参照されます。逆に<strong>他の月のメモは、文章が似ていても混ざりません</strong>。6月の分析に8月の出来事が紛れ込まないようにするためです。</p>
+      <h3>Webから登録する</h3>
+      <table>
+        <tr><th>種別</th><td>施策／メニュー／価格改定／イベント／マニュアル／その他</td></tr>
+        <tr><th>期間</th><td>開始日・終了日。<strong>空欄＝常時有効</strong>（グランドメニューやマニュアル向け）</td></tr>
+        <tr><th>添付</th><td>画像・PDF・Excel・Word・テキスト等。画像はAIが自動で読み取り、確認画面で修正できます</td></tr>
+      </table>
+      <h3>探す</h3>
+      <p>種別・有効／無効・キーワードに加え、<strong>期間で絞り込めます</strong>。期間を指定すると、その期間に重なる資料だけが表示されます（常時有効の資料は非表示になります）。</p>
+      <div class="g-note">LINE上では一覧を見られません。確認・編集・削除はすべてこの資料タブから行います。削除は既定で論理削除なので、過去の分析結果との整合は保たれます。</div>
+    </div>
+  </details>
+
+  <details class="g-sec" id="g6">
+    <summary><span class="g-num">6</span>AI分析（標準レポート）</summary>
+    <div class="g-body">
+      <p>レポートを開いて「AI分析」を押すと、経営・売上の多角分析とワイン営業戦略のレポートが生成されます。履歴は自動保存されます。</p>
+      <h3>AIが必ず突き合わせる3つ</h3>
+      <ol>
+        <li><strong>ジャーナルの確定集計</strong>（売上・客数・商品・予約など）</li>
+        <li><strong>店舗情報</strong>（定休・カレンダー・ワインml）</li>
+        <li><strong>資料と #メモ</strong>（期間が重なるもの）</li>
+      </ol>
+      <h3>分析で重視される視点</h3>
+      <ul>
+        <li>店舗ごとの立地（新宿三丁目を全店の前提にしません）</li>
+        <li>ランチとディナーを分けた客単価・フード／ドリンク比率</li>
+        <li>ワイン構成、グラスとボトル、提供量(ml)換算</li>
+        <li>12月のクリスマス要因</li>
+        <li>定休日を機会損失と誤診しないこと</li>
+      </ul>
+      <div class="g-note">資料が無い期間は「資料なし」として扱われ、推測で埋めません。分析の質を上げたいときは、その期間の施策やメモを登録してください。</div>
+    </div>
+  </details>
+
+  <details class="g-sec" id="g7">
+    <summary><span class="g-num">7</span>AIチャット</summary>
+    <div class="g-body">
+      <p>保存済みレポートとジャーナル全件検索を根拠に質問できます。期間比較、月次推移、商品の点数と売上、客単価、曜日・時間帯、コース、予約と飛び込み、改善案などです。</p>
+      <h3>聞き方の例</h3>
+      <ul>
+        <li>2026年6月の売上をまとめて</li>
+        <li>2024年6月と2025年6月と2026年6月を比較して</li>
+        <li>コース以外のメニューのランキングを10位まで</li>
+        <li>この商品はいつから出している？</li>
+      </ul>
+      <h3>聞き返されることがあります</h3>
+      <table>
+        <tr><th>期間</th><td>対象の年月が分からない、または広すぎるとき</td></tr>
+        <tr><th>意図</th><td>何を知りたいか曖昧なとき</td></tr>
+        <tr><th>ワインの単位</th><td>「どれくらい出た？」→ <strong>点数／総ml／両方</strong> を確認します</td></tr>
+      </table>
+      <p>選択肢のボタンで答えられます。答えると、その条件で確定集計を取り直してから回答します。</p>
+      <h3>期間の読み方</h3>
+      <p>「2026年1月から7月まで」は<strong>1月〜7月の全月</strong>として扱います。両端の2か月だけを見ることはありません。データが無い月だけ「今回の確定集計には表示されていません」と答えます。</p>
+      <h3>回答を残す</h3>
+      <p>回答の下の「📄 PDFにする」で印刷用の表示が開き、同時に質問と回答がクラウドへ保存されます。後から「AIチャットPDF履歴」で見返せます。</p>
+    </div>
+  </details>
+
+  <details class="g-sec" id="g8">
+    <summary><span class="g-num">8</span>予約・飛び込みと売上予測</summary>
+    <div class="g-body">
+      <h3>予約と飛び込み</h3>
+      <table>
+        <tr><th>チャネル</th><td>食べログ／一休／手入力</td></tr>
+        <tr><th>分かること</th><td>件数・人数・キャンセル・新規／リピート・月次推移・予約内容</td></tr>
+        <tr><th>飛び込み</th><td>POSの組数・客数から予約分を引いた<strong>推定値</strong></td></tr>
+      </table>
+      <div class="g-warn">飛び込みは必ず「推定」です。ノーショー、スクショの送り忘れ、営業日付のズレで実数と一致しません。<strong>予約人数をそのまま来店客数として読まないでください。</strong>電話予約は集計に含まれません。</div>
+      <p>予約を取り込んでいない店舗では、この項目自体が出ません。</p>
+      <h3>売上予測とMAPE</h3>
+      <p>カテゴリ分けされた月間レポートの系列から、前年・季節性・直近平均を組み合わせて予測を作ります。後から実績と比べて<strong>MAPE（平均絶対パーセント誤差）</strong>で精度を確認できます。</p>
+    </div>
+  </details>
+
+  <details class="g-sec" id="g9">
+    <summary><span class="g-num">9</span>履歴・ゴミ箱・管理者機能</summary>
+    <div class="g-body">
+      <h3>削除は取り消せます</h3>
+      <p>次の4種類はすべて論理削除で、ゴミ箱から復元できます。添付やHTMLもゴミ箱の間は保持されます。</p>
+      <ul>
+        <li>保存済みレポート</li>
+        <li>売上予測</li>
+        <li>AI分析履歴</li>
+        <li>AIチャットPDF履歴</li>
+      </ul>
+      <h3>管理者だけの機能</h3>
+      <table>
+        <tr><th>店舗横断サマリー</th><td>店舗ごとの保存件数などを一覧</td></tr>
+        <tr><th>AI使用量</th><td>AIのトークン数と概算費用</td></tr>
+        <tr><th>全店切替</th><td>ドロップダウンで店舗を移動</td></tr>
+      </table>
+      <p>店舗用ログインでは、これらは表示されません。</p>
+    </div>
+  </details>
+
+  <details class="g-sec" id="g10">
+    <summary><span class="g-num">10</span>仕組みとデータの扱い</summary>
+    <div class="g-body">
+      <h3>.jnl と .lzh</h3>
+      <p>POSが出す電子ジャーナル（<code>.jnl</code>）は制御コード付きのバイナリログです。<code>.lzh</code> はその圧縮書庫で、アプリが自動で解凍します。</p>
+      <p>処理の流れは「解凍 → 制御コード除去 → 文字コード変換 → レコード整理 → 売上集計」です。</p>
+      <h3>どこで処理され、どこに残るか</h3>
+      <table>
+        <tr><th>解析</th><td><strong>お使いの端末内</strong>で完結します</td></tr>
+        <tr><th>保存</th><td>レポート・AI履歴・予測・資料は、選択中の<strong>店舗専用のクラウド領域</strong>に保存されます</td></tr>
+        <tr><th>ジャーナル原本</th><td>非公開のクラウドストレージ。取得は都度発行の署名付きURL経由</td></tr>
+      </table>
+      <h3>店舗の分離</h3>
+      <ul>
+        <li>店舗用ログインでは他店のデータに一切アクセスできません</li>
+        <li>横断できるのは管理者だけです</li>
+        <li>公開ページから業務データへ直接つなぐことはなく、必ず認証付きAPIを通ります</li>
+      </ul>
+      <h3>AIへ送る個人情報</h3>
+      <p>予約者の氏名は仮名に置き換えて送信します。電話番号は送りません。アレルギーは有無だけを伝え、内容は送りません。</p>
+    </div>
+  </details>
+
+  <details class="g-sec" id="g11">
+    <summary><span class="g-num">11</span>困ったときは</summary>
+    <div class="g-body">
+      <table>
+        <tr><th>保存されない</th><td>接続が切れています。上部の管理トークンを接続し直すか、LINEの最新リンクから開き直してください</td></tr>
+        <tr><th>他店が選べない</th><td>店舗用ログインの仕様です。横断には管理者権限が必要です</td></tr>
+        <tr><th>「旧解析版」と出る</th><td>集計基準が更新されています。レポートを作り直してからAI分析・印刷してください</td></tr>
+        <tr><th>#メモが登録されない</th><td>写真だけ送っていませんか。画像は<strong>引用返信で <code>#メモ</code></strong> が必要です。本文も引用も無い <code>#メモ</code> だけの場合は、使い方の案内が返信されます</td></tr>
+        <tr><th>定休日を弱点と書かれる</th><td>店舗情報タブの定休日が未設定です。設定すると以後の分析に反映されます</td></tr>
+        <tr><th>ワインのmlが合わない</th><td>銘柄名だけのボトルは換算対象外です。グラス／ボトル／ペアリングに相当する商品のみ集計されます</td></tr>
+        <tr><th>同じファイルが取り込めない</th><td>重複防止が働いています。集計値が空だった行なら、同じファイルの再アップロードで修復されます</td></tr>
+        <tr><th>AIが期間を聞き返す</th><td>対象年月が特定できていません。「2026年6月の」のように月を明示すると確認を省けます</td></tr>
+      </table>
+    </div>
+  </details>
 </section>
 
 <!-- 変換 -->
@@ -13379,6 +13631,19 @@ knowledgeEl('knFilterActive')?.addEventListener('change', loadKnowledgeList);
 knowledgeEl('knFilterQuery')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing) loadKnowledgeList();
 });
+// 使い方タブの目次: 該当の章だけを開いてそこへ移動する
+document.getElementById('guideToc')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-g]');
+  if (!btn) return;
+  const target = document.getElementById(btn.getAttribute('data-g') || '');
+  if (!target) return;
+  document.querySelectorAll('.guide .g-sec[open]').forEach((sec) => {
+    if (sec !== target) sec.open = false;
+  });
+  target.open = true;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
 knowledgeEl('knFilterFrom')?.addEventListener('change', loadKnowledgeList);
 knowledgeEl('knFilterTo')?.addEventListener('change', loadKnowledgeList);
 knowledgeEl('knFilterClearDates')?.addEventListener('click', () => {
