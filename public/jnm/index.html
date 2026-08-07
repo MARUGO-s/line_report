@@ -447,7 +447,17 @@
   .ops-cal-chip[data-kind="価格改定"]{background:color-mix(in srgb, #8a6a3a 16%, transparent);border-color:color-mix(in srgb, #8a6a3a 30%, transparent)}
   .ops-cal-chip[data-kind="特別営業"]{background:color-mix(in srgb, #3d6b5a 16%, transparent);border-color:color-mix(in srgb, #3d6b5a 30%, transparent)}
   .ops-cal-chip[data-kind="その他"]{background:color-mix(in srgb, var(--text) 6%, transparent);border-color:var(--border)}
+  /* LINE投稿(#メモ)の印。日付選択と競合しないよう、セル内の独立クリック領域にする */
+  .ops-cal-post{align-self:flex-start;display:inline-flex;align-items:center;gap:2px;font-size:9px;line-height:1.25;padding:1px 4px;border-radius:999px;cursor:pointer;background:color-mix(in srgb, #06c755 22%, transparent);border:1px solid color-mix(in srgb, #06c755 45%, transparent);color:var(--text)}
+  .ops-cal-post:hover{background:color-mix(in srgb, #06c755 38%, transparent)}
+  .ops-cal-post-count{font-family:var(--font-heading)}
   .ops-cal-hint{font-size:11px;color:var(--text-2);line-height:1.6;margin:8px 0 0}
+  /* 投稿詳細ポップアップ */
+  .ops-post-item{border:1px solid var(--border);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+  .ops-post-meta{font-size:11px;color:var(--text-2);display:flex;gap:8px;flex-wrap:wrap}
+  .ops-post-title{font-size:13px;font-weight:600;color:var(--text)}
+  .ops-post-body{font-size:12px;line-height:1.7;color:var(--text);white-space:pre-wrap;word-break:break-word}
+  .ops-post-thumb{max-width:100%;max-height:260px;border-radius:6px;border:1px solid var(--border);align-self:flex-start}
   .ops-cal-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
   .ops-cal-item{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:color-mix(in srgb, var(--text) 3%, transparent)}
   .ops-cal-item-main{min-width:0;flex:1}
@@ -1930,7 +1940,7 @@
       <div class="ops-cal-dow">土</div>
     </div>
     <div class="ops-cal-grid" id="opsCalGrid" role="grid" aria-label="店舗カレンダー"></div>
-    <p class="ops-cal-hint">日付をクリックして開始日→終了日を選び、下のフォームで施策やイベントを登録してください。長い資料や添付は「資料」タブを使います。</p>
+    <p class="ops-cal-hint">日付をクリックして開始日→終了日を選び、下のフォームで施策やイベントを登録してください。長い資料や添付は「資料」タブを使います。<br>LINEから <strong>#メモ</strong> を送った日には 💬 が付きます。クリックするとその日の投稿内容を確認できます。</p>
     <div class="kn-form" style="margin-top:12px;">
       <label class="kn-field kn-narrow">種別
         <select id="opsEvKind">
@@ -2103,6 +2113,24 @@
   </div>
 
   <!-- RAGチャンク閲覧 & テキストダウンロード モーダル -->
+  <div id="opsCalPostModal" class="kn-modal-backdrop" hidden>
+    <div class="kn-modal-dialog">
+      <div class="kn-modal-header">
+        <span class="kn-modal-title" id="opsCalPostModalTitle">LINE投稿</span>
+        <button type="button" class="kn-modal-close" onclick="closeOpsCalPostModal()">✕</button>
+      </div>
+      <div class="kn-modal-body">
+        <p class="kn-modal-intro">この日にLINEから投稿された #メモ です。売上分析では、この日を含む期間の分析にだけ参照されます。</p>
+        <div id="opsCalPostModalBody" style="display:flex;flex-direction:column;gap:10px;">
+          <!-- JSで投稿カードが挿入されます -->
+        </div>
+      </div>
+      <div class="kn-modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeOpsCalPostModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+
   <div id="knRagModal" class="kn-modal-backdrop" hidden>
     <div class="kn-modal-dialog">
       <div class="kn-modal-header">
@@ -8005,6 +8033,90 @@ function eventsOnOpsCalDay(iso) {
   return opsCalendarEvents.filter((ev) => ev.start <= iso && ev.end >= iso);
 }
 
+/* ── カレンダー上の LINE投稿(#メモ) 表示 ───────────────────────────
+   資料タブと同じ store_knowledge_documents を読み、source_type=line_post だけを
+   日付ごとに並べる。日付は period_start（= LINE送信日のJST暦日）を正とし、
+   未設定の古い投稿だけ created_at から補う。 */
+let opsCalLinePosts = [];
+
+/** UTCのISO文字列をJSTの暦日(YYYY-MM-DD)にする。深夜投稿で日付がずれないように。 */
+function toJstDayKey(value) {
+  const t = Date.parse(String(value || ''));
+  if (!Number.isFinite(t)) return '';
+  return new Date(t + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function opsCalPostDayKey(item) {
+  return normalizeStoreOpsIsoDate(item?.period_start) || toJstDayKey(item?.created_at);
+}
+
+function isLinePostKnowledgeItem(item) {
+  if (!item) return false;
+  if (item.source_type === 'line_post') return true;
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  return tags.includes('LINE投稿') || tags.includes('現場メモ');
+}
+
+function linePostsOnOpsCalDay(iso) {
+  return opsCalLinePosts.filter((item) => opsCalPostDayKey(item) === iso);
+}
+
+/** 資料一覧を取り込んでカレンダーへ反映する。未接続・失敗時は印を出さないだけで動作は止めない。 */
+async function refreshOpsCalLinePosts() {
+  if (!getAdminToken()) { opsCalLinePosts = []; return; }
+  try {
+    const items = await loadStoreKnowledgeForAi();
+    opsCalLinePosts = (Array.isArray(items) ? items : [])
+      .filter((item) => isLinePostKnowledgeItem(item) && opsCalPostDayKey(item));
+  } catch (err) {
+    console.warn('カレンダー用のLINE投稿取得をスキップ:', err);
+    opsCalLinePosts = [];
+  }
+  renderOpsCalendarGrid();
+}
+
+function opsCalPostTimeLabel(item) {
+  const t = Date.parse(String(item?.created_at || ''));
+  if (!Number.isFinite(t)) return '';
+  const jst = new Date(t + 9 * 60 * 60 * 1000);
+  return `${String(jst.getUTCHours()).padStart(2, '0')}:${String(jst.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+function openOpsCalPostModal(iso) {
+  const modal = document.getElementById('opsCalPostModal');
+  const body = document.getElementById('opsCalPostModalBody');
+  const title = document.getElementById('opsCalPostModalTitle');
+  if (!modal || !body) return;
+  const posts = linePostsOnOpsCalDay(iso);
+  if (title) title.textContent = `${iso} のLINE投稿（${posts.length}件）`;
+  body.innerHTML = posts.length
+    ? posts.map((item) => {
+        const time = opsCalPostTimeLabel(item);
+        const meta = [
+          time ? `${time} 送信` : '送信時刻不明',
+          item.created_by ? esc(item.created_by) : '',
+          item.category ? esc(item.category) : ''
+        ].filter(Boolean).join(' ・ ');
+        const text = String(item.body_text || item.summary || '').trim();
+        const img = item.storage_path && /^image\//.test(String(item.mime_type || ''))
+          ? `<div class="ops-post-meta">画像添付: ${esc(item.original_file_name || '')}</div>`
+          : '';
+        return `<div class="ops-post-item">`
+          + `<div class="ops-post-meta">${meta}</div>`
+          + `<div class="ops-post-title">${esc(item.title || '（無題）')}</div>`
+          + (text ? `<div class="ops-post-body">${esc(text)}</div>` : '')
+          + img
+          + `</div>`;
+      }).join('')
+    : '<p class="kn-modal-intro">この日の投稿はありません。</p>';
+  modal.hidden = false;
+}
+
+function closeOpsCalPostModal() {
+  const modal = document.getElementById('opsCalPostModal');
+  if (modal) modal.hidden = true;
+}
+
 function renderOpsCalendarGrid() {
   const grid = document.getElementById('opsCalGrid');
   if (!grid) return;
@@ -8029,13 +8141,31 @@ function renderOpsCalendarGrid() {
     const chips = marks.map((ev) =>
       `<span class="ops-cal-chip" data-kind="${esc(ev.kind)}" title="${esc(ev.title)}">${esc(ev.title)}</span>`
     ).join('') + (more ? `<span class="ops-cal-chip" data-kind="その他">+${more}</span>` : '');
+    // LINE投稿の印。クリックで内容を表示する（日付選択とは別扱い）
+    const postCount = linePostsOnOpsCalDay(iso).length;
+    const postMark = postCount
+      ? `<span class="ops-cal-post" data-post-date="${iso}" role="button" tabindex="0"`
+        + ` title="LINE投稿 ${postCount}件（クリックで表示）">💬<span class="ops-cal-post-count">${postCount}</span></span>`
+      : '';
     html += `<button type="button" class="${cls.join(' ')}" data-date="${iso}" aria-label="${iso}">`
       + `<span class="ops-cal-day-num">${day}</span>`
-      + `<span class="ops-cal-marks">${chips}</span></button>`;
+      + `<span class="ops-cal-marks">${chips}</span>${postMark}</button>`;
   }
   grid.innerHTML = html;
   grid.querySelectorAll('.ops-cal-day[data-date]').forEach((btn) => {
     btn.addEventListener('click', () => onOpsCalDayClick(btn.getAttribute('data-date') || ''));
+  });
+  // 印のクリックは日付選択へ伝播させない（開始日→終了日の選択を壊さないため）
+  grid.querySelectorAll('.ops-cal-post[data-post-date]').forEach((mark) => {
+    const openPosts = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      openOpsCalPostModal(mark.getAttribute('data-post-date') || '');
+    };
+    mark.addEventListener('click', openPosts);
+    mark.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') openPosts(e);
+    });
   });
 }
 
@@ -8288,6 +8418,8 @@ async function refreshStoreOpsForm() {
     profile = writeStoreOpsProfileLocal(cloud);
   }
   fillStoreOpsForm(profile);
+  // カレンダーのLINE投稿マークを更新する。失敗しても本体の表示は止めない。
+  refreshOpsCalLinePosts().catch(() => {});
 }
 
 async function saveStoreOpsForm() {
