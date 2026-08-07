@@ -53,7 +53,21 @@ test("Journal Report UI and AI analysis wire wine ml settings", () => {
   assert.match(html, /ワイン提供量の換算/);
   assert.match(html, /function computeWineMlVolumeAnalysis/);
   assert.match(html, /wineVolumeAnalysis/);
+  assert.match(html, /wineMlProducts/);
   assert.match(html, /分析アイテム・ワイン提供量\(ml\)/);
+  assert.match(html, /ワイン提供量\(ml\)・必須/);
+  assert.match(html, /レポート構成と必須フォーマット/);
+  assert.match(html, /ワイン提供量（店舗換算ml）/);
   assert.match(html, /keepWineMl/);
   assert.equal(html, indexHtml, "jnl2txt.html and index.html must stay in sync");
+});
+
+test("standard AI analyze prompt requires wine ml chapter", async () => {
+  const aiAnalyze = await readFile(
+    new URL("../supabase/functions/ai-analyze/index.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(aiAnalyze, /ワイン提供量\(ml\)・必須/);
+  assert.match(aiAnalyze, /salesData\.wineVolumeAnalysis/);
+  assert.match(aiAnalyze, /標準分析の必須節/);
 });

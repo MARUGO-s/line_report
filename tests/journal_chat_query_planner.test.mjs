@@ -84,6 +84,8 @@ for (const name of [
   'emptyStoreOpsWineMl',
   'normalizeWineProductSearchText',
   'classifyWineProductForMl',
+  'wineMlClassFromProductCode',
+  'collectWineMlProducts',
   'collectProductsForWineMl',
   'countRecentClarificationsByKind',
   'countRecentIntentClarifications',
@@ -1327,5 +1329,57 @@ test('wine ml conversion uses store settings for chat facts', () => {
   assert.match(facts, /ワイン提供量の確定換算/);
   assert.match(facts, /合計 197250ml/);
   assert.match(facts, /表示モード: 総ml/);
+});
+
+test('wine ml classification uses product codes and does not drop bottle via topProducts limit', () => {
+  assert.equal(context.wineMlClassFromProductCode('0000000002100'), 'bottle');
+  assert.equal(context.wineMlClassFromProductCode('0000000008102'), 'glass');
+  assert.equal(context.wineMlClassFromProductCode('0000000002101'), 'pairing');
+  assert.equal(context.classifyWineProductForMl('Bottle Wine'), 'bottle');
+  assert.equal(context.classifyWineProductForMl('名称不明', '0000000002100'), 'bottle');
+  assert.equal(context.classifyWineProductForMl('SPﾍﾟｱﾘﾝｸﾞ'), 'pairing');
+
+  const crowded = [];
+  for (let i = 0; i < 50; i++) {
+    crowded.push({ name: `その他ワイン${i}`, qty: 1, amt: 900000 - i });
+  }
+  crowded.push({ name: 'Bottle Wine', code: '0000000002100', qty: 12, amt: 120000 });
+  crowded.push({ name: 'Glass Wine', code: '0000000008102', qty: 30, amt: 45000 });
+  // 売れ筋TOPだけ見ると Bottle が埋もれても、専用抽出では残る
+  const topOnly = crowded.slice(0, 40);
+  assert.equal(topOnly.some((p) => p.name === 'Bottle Wine'), false);
+  const wineOnly = context.collectWineMlProducts(crowded);
+  assert.equal(wineOnly.some((p) => p.name === 'Bottle Wine'), true);
+  const analysis = context.computeWineMlVolumeAnalysis(crowded, { glassMl: 100, bottleMl: 750, pairingMl: 300 });
+  assert.equal(analysis.bottle.qty, 12);
+  assert.equal(analysis.bottle.ml, 9000);
+
+  const facts = context.formatWineVolumeFactsForAi({
+    multiPeriod: true,
+    periods: [{
+      label: '2024年の売上データ',
+      drinkTotal: 5000000,
+      wineMlProducts: wineOnly,
+      topProducts: topOnly,
+    }],
+  }, '2024年のワイン 表示単位:総ml');
+  assert.match(facts, /Bottle 12点=9000ml/);
+  assert.match(facts, /対象SKU/);
+});
+
+test('wine ml facts warn when bottle is zero despite drink sales', () => {
+  const facts = context.formatWineVolumeFactsForAi({
+    multiPeriod: true,
+    periods: [{
+      label: '2024年の売上データ',
+      drinkTotal: 8000000,
+      wineMlProducts: [{ name: 'ペアリング', qty: 11, amt: 55000, wineClass: 'pairing' }],
+      topProducts: [{ name: 'ペアリング', qty: 11, amt: 55000 }],
+    }],
+  }, '2024年のワイン提供量 表示単位:両方');
+  assert.match(facts, /Bottle 0点=0ml/);
+  assert.match(facts, /ペアリング 11点=3300ml/);
+  assert.match(facts, /飲料売上は/);
+  assert.match(facts, /0本と断定せず/);
 });
 

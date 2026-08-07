@@ -1957,7 +1957,7 @@
 
   <div class="card" style="margin-top:14px;">
     <div class="card-kicker">ワイン提供量の換算（ml・分析用）</div>
-    <p class="kn-note" style="margin-top:0;">Glass Wine / Bottle Wine / ペアリングの点数を ml に換算し、AI分析の1項目として使います。ボトルはほぼ750mlのため固定です。グラスは店舗ごとに設定してください。</p>
+    <p class="kn-note" style="margin-top:0;">Glass Wine / Bottle Wine / ペアリングの点数を ml に換算し、<strong>標準AI分析フローの必須項目</strong>およびAIチャットで使います。ボトルはほぼ750mlのため固定です。グラスは店舗ごとに設定してください。</p>
     <div class="kn-form">
       <label class="kn-field kn-narrow">グラスワイン（ml／点）
         <input id="opsWineGlassMl" type="number" min="1" max="5000" step="1" value="100">
@@ -1969,7 +1969,7 @@
         <input id="opsWinePairingMl" type="number" min="1" max="5000" step="1" value="300">
       </label>
     </div>
-    <p class="kn-note">商品名に Glass Wine / Bottle Wine / ペアリング を含む点数×上記 ml で合計します。保存後、プレビューとAI分析に反映されます。</p>
+    <p class="kn-note">商品名（Glass Wine / Bottle Wine / ペアリング）またはコード末尾（8102 / 2100 / 2101・2102・0028）の点数×上記 ml で合計します。銘柄名だけのボトルは含みません。保存後、プレビューとAI分析に反映されます。</p>
   </div>
 
   <div class="card" style="margin-top:14px;">
@@ -7384,16 +7384,38 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 分析・アドバイスの優先視点:
 1. 対象店舗の立地（住所・商圏・客層・時間帯）に合った施策
 2. ランチ／ディナーを分けたうえで、ドリンク（特にワイン）比率・グラス／ボトル・売れ筋
-3. フード×ワインのペアリング・客単価向上（昼夜別）
-4. 予約組数 vs 飛び込み組数の推移（集客経路の変化）と、その要因（資料照合→無ければ推測前置き）
-5. 同エリア姉妹店連携は妥当な場合のみ（新宿三丁目話の他エリア転用禁止）
-6. 提供データに無い原価・在庫・利益は捏造しない
-7. 売れ筋商品: 「★ドリンク」「★アラカルト」等のPOS大分類行は単独商品ではない。確定集計の売れ筋TOPで「コース系（合算）」がある場合は、コース分割を無視してドリンクを単独最大商品と断定しない。カテゴリ合計（フード売上 vs ドリンク売上）と商品ランキングを混同しない。質問が「コース以外」のときはコース／おまかせとコース系（合算）をランキングから除外し、確定済みの「質問に該当する保存商品明細」または売れ筋TOPをそのまま位数どおり述べる（「TOP形式ではない」「表示されていません」で止めない。順位は売上金額順）`;
+3. ワイン提供量(ml): 店舗換算（Glass／Bottle 750固定／ペアリング）×確定点数で Glass・Bottle・ペアリング・合計mlを必ず示す（換算率捏造禁止。銘柄名のみのボトルは対象外）
+4. フード×ワインのペアリング・客単価向上（昼夜別）
+5. 予約組数 vs 飛び込み組数の推移（集客経路の変化）と、その要因（資料照合→無ければ推測前置き）
+6. 同エリア姉妹店連携は妥当な場合のみ（新宿三丁目話の他エリア転用禁止）
+7. 提供データに無い原価・在庫・利益は捏造しない
+8. 売れ筋商品: 「★ドリンク」「★アラカルト」等のPOS大分類行は単独商品ではない。確定集計の売れ筋TOPで「コース系（合算）」がある場合は、コース分割を無視してドリンクを単独最大商品と断定しない。カテゴリ合計（フード売上 vs ドリンク売上）と商品ランキングを混同しない。質問が「コース以外」のときはコース／おまかせとコース系（合算）をランキングから除外し、確定済みの「質問に該当する保存商品明細」または売れ筋TOPをそのまま位数どおり述べる（「TOP形式ではない」「表示されていません」で止めない。順位は売上金額順）`;
 
 const MARUGO_AI_ANALYZE_INSTRUCTION = `${MARUGO_AI_COMPANY_CONTEXT}
 
 与えられた売上データに基づき、経営陣や店長が使える「マルゴグループ店舗経営・売上多角分析＆ワイン営業戦略レポート」をMarkdownで作成してください。
 一般的な居酒屋・Barのテンプレではなく、ワイン提案・ペアリング・ドリンク構成・姉妹店連携を軸に、数値根拠付きで弱点抽出と具体策まで書いてください。
+
+【レポート構成と必須フォーマット】
+# 📊 マルゴグループ 店舗経営・売上多角分析＆ワイン営業戦略レポート
+
+## 1. エグゼクティブ・サマリー（全体総括）
+- 総売上・客数・客単価（合算可）と、ランチ／ディナーそれぞれの要約
+- ワイン提供量(ml)の要点（Glass／Bottle／ペアリングの合計mlまたは主要内訳）を必ず一言含める
+
+## 2. 多角的なデータ分析（ワイン軸を含む・昼夜分離必須）
+- **客単価・客数構造分析**: ランチとディナーを分けて比較
+- **フード／ドリンク比率（昼夜別）**: 合算比率をディナー比率として使わない
+- **ワイン提供量(ml)・必須**: salesData.wineVolumeAnalysis（または店舗営業情報のワインml節）の換算設定・Glass／Bottle／ペアリングの点数とml・合計mlを独立した小見出しで必ず示す。換算率や点数は与えられた数値のみ。銘柄名のみのボトルは対象外と明示してよい
+- **時間軸・曜日別傾向分析**
+- **商品・カテゴリ構造分析**: ワイン／飲料の売れ筋
+- **12月がある場合**: クリスマスディナー要因を必ず言及
+
+## 3. 店舗の「弱点」と「ボトルネック」の抽出
+- 閑散日・時間帯、ドリンク／ワイン注文率、グラス止まりでボトルへ繋がっていない可能性（ml内訳を根拠に使える場合は使う）
+
+## 4. 売上最大化のための具体的営業アドバイス＆アクションプラン
+- グラス追加・ペアリング・ボトルアップセルなど、ml／点数の事実に紐づく施策
 
 【レポート必須】多角分析の章ではランチとディナーを必ず分け、客単価・フード／ドリンク比率を昼夜別で示すこと。期間に12月が含まれる場合はクリスマスディナー要因を必ず言及すること。
 【分析アイテム・ワイン提供量(ml)・必須】店舗営業情報の換算設定と、salesData.wineVolumeAnalysis（または店舗営業情報ブロックのワインml節）を使い、Glass Wine / Bottle Wine / ペアリングの提供量(ml)と合計mlを必ず1節で示すこと。換算率や点数は与えられた数値のみを使い、捏造しない。
@@ -7708,23 +7730,61 @@ function normalizeWineProductSearchText(name) {
     .replace(/\s+/g, '');
 }
 
-function classifyWineProductForMl(name) {
+/** POSコード末尾（Bottle 2100 / Glass 8102 / ペアリング 2101・2102・0028 など） */
+function wineMlClassFromProductCode(code) {
+  const digits = String(code || '').replace(/\D/g, '');
+  if (!digits) return '';
+  const tail4 = digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
+  if (tail4 === '2100') return 'bottle';
+  if (tail4 === '8102') return 'glass';
+  if (tail4 === '2101' || tail4 === '2102' || tail4 === '0028') return 'pairing';
+  return '';
+}
+
+function classifyWineProductForMl(name, code = '') {
   const n = normalizeWineProductSearchText(name);
   if (!n || isPosCategoryRollupName?.(name)) return '';
   // ペアリングを先に判定（「ペアリング＋ワイン」名でもペアリング扱い）
-  if (n.includes('ペアリング') || n.includes('pairing')) return 'pairing';
+  if (n.includes('ペアリング') || n.includes('pairing') || n.includes('ﾍﾟｱﾘﾝｸﾞ')) return 'pairing';
   if (
-    ((n.includes('ボトル') || n.includes('bottle')) &&
-      (n.includes('ワイン') || n.includes('wine') || n.includes('シャンパ') || n.includes('スパーク'))) ||
+    ((n.includes('ボトル') || n.includes('bottle') || n.includes('ﾎﾞﾄﾙ')) &&
+      (n.includes('ワイン') || n.includes('wine') || n.includes('シャンパ') || n.includes('スパーク') || n.includes('champagne'))) ||
     n.includes('bottlewine') ||
     n.includes('ボトルワイン')
   ) return 'bottle';
   if (
-    ((n.includes('グラス') || n.includes('glass')) && (n.includes('ワイン') || n.includes('wine'))) ||
+    ((n.includes('グラス') || n.includes('glass') || n.includes('ｸﾞﾗｽ')) && (n.includes('ワイン') || n.includes('wine'))) ||
     n.includes('glasswine') ||
     n.includes('グラスワイン')
   ) return 'glass';
-  return '';
+  // 商品名がカテゴリ表記でも、同一コード（2100=Bottle Wine 等）なら換算対象にする
+  return wineMlClassFromProductCode(code);
+}
+
+/** 売れ筋TOP制限をかけず、換算対象のワイン系商品だけを全件抽出する */
+function collectWineMlProducts(products) {
+  const map = new Map();
+  for (const p of (Array.isArray(products) ? products : [])) {
+    const name = p?.name || p?.product || p?.title || '';
+    const code = p?.code || '';
+    const cls = classifyWineProductForMl(name, code);
+    if (!cls) continue;
+    const key = `${cls}|${String(name)}|${String(code || '')}`;
+    const row = map.get(key) || {
+      name: String(name),
+      code: String(code || ''),
+      qty: 0,
+      amt: 0,
+      category: p?.category || '飲料',
+      wineClass: cls
+    };
+    row.qty += Number(p?.qty ?? p?.quantity) || 0;
+    row.amt += Number(p?.amt ?? p?.amount ?? p?.total) || 0;
+    if (p?.category) row.category = p.category;
+    if (!row.code && code) row.code = String(code);
+    map.set(key, row);
+  }
+  return [...map.values()].sort((a, b) => b.amt - a.amt);
 }
 
 function collectProductsForWineMl(verifiedData = null) {
@@ -7751,17 +7811,19 @@ function collectProductsForWineMl(verifiedData = null) {
 function computeWineMlVolumeAnalysis(products, wineMl) {
   const rates = normalizeStoreOpsWineMl(wineMl);
   const buckets = {
-    glass: { key: 'glass', label: 'Glass Wine', qty: 0, amt: 0, mlPerUnit: rates.glassMl, ml: 0 },
-    bottle: { key: 'bottle', label: 'Bottle Wine', qty: 0, amt: 0, mlPerUnit: rates.bottleMl, ml: 0 },
-    pairing: { key: 'pairing', label: 'ペアリング', qty: 0, amt: 0, mlPerUnit: rates.pairingMl, ml: 0 }
+    glass: { key: 'glass', label: 'Glass Wine', qty: 0, amt: 0, mlPerUnit: rates.glassMl, ml: 0, names: [] },
+    bottle: { key: 'bottle', label: 'Bottle Wine', qty: 0, amt: 0, mlPerUnit: rates.bottleMl, ml: 0, names: [] },
+    pairing: { key: 'pairing', label: 'ペアリング', qty: 0, amt: 0, mlPerUnit: rates.pairingMl, ml: 0, names: [] }
   };
-  for (const p of (Array.isArray(products) ? products : [])) {
-    const cls = classifyWineProductForMl(p?.name || p?.product || p?.title);
+  const wineProducts = collectWineMlProducts(products);
+  for (const p of wineProducts) {
+    const cls = p.wineClass || classifyWineProductForMl(p?.name, p?.code);
     if (!cls || !buckets[cls]) continue;
     const qty = Number(p?.qty ?? p?.quantity) || 0;
     const amt = Number(p?.amt ?? p?.amount ?? p?.total) || 0;
     buckets[cls].qty += qty;
     buckets[cls].amt += amt;
+    if (p?.name && !buckets[cls].names.includes(p.name)) buckets[cls].names.push(p.name);
   }
   for (const b of Object.values(buckets)) {
     b.ml = Math.round(b.qty * b.mlPerUnit);
@@ -7773,6 +7835,7 @@ function computeWineMlVolumeAnalysis(products, wineMl) {
     glass: buckets.glass,
     bottle: buckets.bottle,
     pairing: buckets.pairing,
+    matchedProducts: wineProducts,
     totalMl,
     totalQty,
     totalLiters: Math.round((totalMl / 1000) * 10) / 10
@@ -7782,19 +7845,33 @@ function computeWineMlVolumeAnalysis(products, wineMl) {
 function formatWineMlAnalysisLines(profile, verifiedData = null) {
   const wineMl = normalizeStoreOpsWineMl(profile?.wineMl);
   const lines = [];
-  lines.push('【分析アイテム・ワイン提供量(ml)】');
+  lines.push('【分析アイテム・ワイン提供量(ml)・標準分析必須】');
   lines.push(`換算設定: Glass Wine ${wineMl.glassMl}ml/点（店舗設定） / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点（店舗設定）`);
-  const products = collectProductsForWineMl(verifiedData);
-  const analysis = computeWineMlVolumeAnalysis(products, wineMl);
-  if (!products.length || analysis.totalQty <= 0) {
+  lines.push('対象SKU: 商品名 Glass Wine / Bottle Wine / ペアリング（半角ｶﾅ含む）、またはコード末尾 8102 / 2100 / 2101・2102・0028。銘柄名のみのボトルは含まない');
+  let analysis = verifiedData?.wineVolumeAnalysis && typeof verifiedData.wineVolumeAnalysis === 'object'
+    ? verifiedData.wineVolumeAnalysis
+    : null;
+  if (!analysis) {
+    const products = Array.isArray(verifiedData?.wineMlProducts) && verifiedData.wineMlProducts.length
+      ? verifiedData.wineMlProducts
+      : collectProductsForWineMl(verifiedData);
+    analysis = computeWineMlVolumeAnalysis(products, wineMl);
+  }
+  if (!analysis || analysis.totalQty <= 0) {
     lines.push('今回の確定集計: ワイン系商品点数が未取得、または0点（換算設定のみ有効。数値捏造禁止）');
+    lines.push('標準分析ルール: レポートの多角分析章で「ワイン提供量(ml)」小見出しを立て、0点である旨と対象SKU範囲を必ず書く');
     return lines;
   }
   lines.push(`Glass Wine: ${analysis.glass.qty}点 × ${analysis.glass.mlPerUnit}ml = ${analysis.glass.ml}ml（売上 ${yen(analysis.glass.amt)}）`);
   lines.push(`ペアリング: ${analysis.pairing.qty}点 × ${analysis.pairing.mlPerUnit}ml = ${analysis.pairing.ml}ml（売上 ${yen(analysis.pairing.amt)}）`);
   lines.push(`Bottle Wine: ${analysis.bottle.qty}点 × ${analysis.bottle.mlPerUnit}ml = ${analysis.bottle.ml}ml（売上 ${yen(analysis.bottle.amt)}）`);
   lines.push(`合計提供量: ${analysis.totalMl}ml（約 ${analysis.totalLiters}L）`);
-  lines.push('分析ルール: 上記mlは店舗換算設定×ジャーナル商品点数の推計。原価・在庫・ロスは含めない。');
+  const nameBits = [];
+  if (analysis.glass?.names?.length) nameBits.push(`Glass「${analysis.glass.names.slice(0, 3).join('」「')}」`);
+  if (analysis.pairing?.names?.length) nameBits.push(`ペアリング「${analysis.pairing.names.slice(0, 3).join('」「')}」`);
+  if (analysis.bottle?.names?.length) nameBits.push(`Bottle「${analysis.bottle.names.slice(0, 3).join('」「')}」`);
+  if (nameBits.length) lines.push(`照合商品: ${nameBits.join(' / ')}`);
+  lines.push('分析ルール: 上記mlは店舗換算設定×ジャーナル商品点数の推計。原価・在庫・ロスは含めない。標準分析レポートの必須節として必ず引用する。');
   return lines;
 }
 
@@ -7942,7 +8019,7 @@ async function buildIntegratedAnalysisContext({
 1. ジャーナル／保存レポート（数値の正本）: ${hasJournal ? '添付あり → 金額・客数・比率はここだけを使う' : '今回は確定集計ブロックなし（画面上のsalesDataまたは未照会）'}
 2. 店舗資料（施策・メニュー）: ${hasKnowledge ? `添付あり（登録${knowledgeCount}件から期間照合／${usedRag ? 'RAGチャンク抜粋で軽量添付' : '概要＋短い抜粋'}）` : (knowledgeError ? `取得失敗（${knowledgeError}）→ 資料なしとして扱い推測で補わない` : (knowledgeCount ? '期間に合う資料なし' : (!getAdminToken() ? '未ログインのため資料API未取得' : '登録資料なし')))}
 3. 店舗営業情報（定休・ランチ・カレンダー施策・ワインml換算等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析・カレンダー背景・ワイン提供量(ml)に反映' : '添付なし（異常）'}
-統合ルール: 数値は①、詳細資料は②、定休／特別営業／カレンダー施策／ワインml換算の解釈は③。③を読まずに日曜・月曜の低売上を弱点としないこと。`;
+統合ルール: 数値は①、詳細資料は②、定休／特別営業／カレンダー施策／ワインml換算の解釈は③。③を読まずに日曜・月曜の低売上を弱点としないこと。標準分析では wineVolumeAnalysis（Glass／Bottle／ペアリングの点数×店舗換算ml）を多角分析の必須節とする。`;
 
   return {
     profile,
@@ -8471,8 +8548,9 @@ function buildSalesDataForAI() {
     const totSales = d.total || d.totalSales || 0;
     const totCust = d.totalCustomers || ((d.lunchCustomers || 0) + (d.dinnerCustomers || 0)) || 0;
     const topProductsFallback = d.topProducts || [];
+    const wineMlProducts = collectWineMlProducts(topProductsFallback);
     const wineVolumeAnalysis = computeWineMlVolumeAnalysis(
-      topProductsFallback,
+      wineMlProducts.length ? wineMlProducts : topProductsFallback,
       readStoreOpsProfile().wineMl
     );
     return {
@@ -8503,6 +8581,7 @@ function buildSalesDataForAI() {
       hourlyBreakdown: d.hourlyBreakdown || [],
       topProducts: topProductsFallback,
       dailyBreakdown: d.dailyBreakdown || [],
+      wineMlProducts,
       wineVolumeAnalysis
     };
   }
@@ -8555,9 +8634,20 @@ function buildSalesDataForAI() {
     
     if (s.items) {
       s.items.forEach(i => {
-        if (!products[i.name]) products[i.name] = { qty: 0, amt: 0, category: i.category || 'その他' };
-        products[i.name].qty += i.qty || 1;
-        products[i.name].amt += i.amount || 0;
+        const name = i.name || '';
+        if (!name) return;
+        if (!products[name]) {
+          products[name] = {
+            qty: 0,
+            amt: 0,
+            category: i.category || 'その他',
+            code: String(i.code || '')
+          };
+        }
+        products[name].qty += i.qty || 1;
+        products[name].amt += i.amount || 0;
+        if (i.category) products[name].category = i.category;
+        if (i.code && !products[name].code) products[name].code = String(i.code);
       });
     }
   });
@@ -8575,10 +8665,17 @@ function buildSalesDataForAI() {
   }));
   
   const allProducts = Object.entries(products)
-    .map(e => ({ name: e[0], category: e[1].category, qty: e[1].qty, amt: e[1].amt }));
+    .map(e => ({
+      name: e[0],
+      category: e[1].category,
+      qty: e[1].qty,
+      amt: e[1].amt,
+      code: e[1].code || ''
+    }));
   const topProducts = rankProductsForAiDisplay(allProducts, 20);
+  const wineMlProducts = collectWineMlProducts(allProducts);
   const wineVolumeAnalysis = computeWineMlVolumeAnalysis(
-    allProducts,
+    wineMlProducts.length ? wineMlProducts : allProducts,
     readStoreOpsProfile().wineMl
   );
 
@@ -8619,6 +8716,7 @@ function buildSalesDataForAI() {
     hourlyBreakdown: hourlySummary,
     topProducts: topProducts,
     dailyBreakdown: dailyArr,
+    wineMlProducts,
     wineVolumeAnalysis
   };
 }
@@ -8635,6 +8733,7 @@ async function aiAnalyze() {
   let step = 0;
   const messages = [
     '曜日別・時間帯別のボトルネックを計算中... 📊',
+    'ワイン提供量(ml)を店舗換算で集計中... 🍷',
     'メニュー構成比と客単価の改善点を抽出中... 💡',
     '店舗の弱点と営業アドバイスレポートを執筆中... ✍️',
     'コンサルティング分析の仕上げを行っています... ✨'
@@ -8756,6 +8855,31 @@ function buildAiVisualDashboardHTML() {
       </div>`;
     }).join('');
 
+    const wine = sales.wineVolumeAnalysis || null;
+    const wineMlHTML = wine && Number(wine.totalQty) > 0 ? `
+          <div class="ai-chart-section" style="margin-bottom:0;">
+            <div class="ai-chart-title">ワイン提供量（店舗換算ml）</div>
+            <div class="ai-bar-row">
+              <span class="ai-bar-label" style="width:110px;">Glass</span>
+              <div class="ai-bar-track"><div class="ai-bar-fill" style="width:${Math.max(4, Math.round(((wine.glass?.ml || 0) / (wine.totalMl || 1)) * 100))}%;background:linear-gradient(90deg,#9f1239,#e11d48)"></div></div>
+              <span class="ai-bar-val">${Number(wine.glass?.ml || 0).toLocaleString('ja-JP')}ml（${wine.glass?.qty || 0}点）</span>
+            </div>
+            <div class="ai-bar-row">
+              <span class="ai-bar-label" style="width:110px;">ペアリング</span>
+              <div class="ai-bar-track"><div class="ai-bar-fill" style="width:${Math.max(4, Math.round(((wine.pairing?.ml || 0) / (wine.totalMl || 1)) * 100))}%;background:linear-gradient(90deg,#db2777,#f472b6)"></div></div>
+              <span class="ai-bar-val">${Number(wine.pairing?.ml || 0).toLocaleString('ja-JP')}ml（${wine.pairing?.qty || 0}点）</span>
+            </div>
+            <div class="ai-bar-row">
+              <span class="ai-bar-label" style="width:110px;">Bottle</span>
+              <div class="ai-bar-track"><div class="ai-bar-fill" style="width:${Math.max(4, Math.round(((wine.bottle?.ml || 0) / (wine.totalMl || 1)) * 100))}%;background:linear-gradient(90deg,#b45309,#f59e0b)"></div></div>
+              <span class="ai-bar-val">${Number(wine.bottle?.ml || 0).toLocaleString('ja-JP')}ml（${wine.bottle?.qty || 0}点）</span>
+            </div>
+            <div style="margin-top:8px;font-size:12px;font-weight:700;color:var(--text);">
+              合計 ${Number(wine.totalMl || 0).toLocaleString('ja-JP')}ml（約 ${wine.totalLiters || 0}L）
+              <span style="font-weight:500;color:var(--text-2);">／ Glass ${wine.rates?.glassMl || 100}・Bottle ${wine.rates?.bottleMl || 750}・ペアリング ${wine.rates?.pairingMl || 300} ml/点</span>
+            </div>
+          </div>` : '';
+
     return `
       <div class="ai-visual-divider" style="border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:24px;">
         <h2 class="ai-visual-heading" style="font-size:18px;font-weight:700;margin:0 0 12px 0;display:flex;align-items:center;gap:8px;">
@@ -8784,6 +8908,12 @@ function buildAiVisualDashboardHTML() {
             <span class="ai-kpi-value">${yen(drinkTot)}</span>
             <span class="ai-kpi-sub">構成比: ${drinkPct}%</span>
           </div>
+          ${wine && Number(wine.totalQty) > 0 ? `
+          <div class="ai-kpi-card">
+            <span class="ai-kpi-label">ワイン提供量</span>
+            <span class="ai-kpi-value">${Number(wine.totalMl || 0).toLocaleString('ja-JP')}ml</span>
+            <span class="ai-kpi-sub">約 ${wine.totalLiters || 0}L / ${wine.totalQty || 0}点</span>
+          </div>` : ''}
         </div>
 
         <!-- Food vs Drink & Lunch vs Dinner Progress Bars -->
@@ -8830,6 +8960,8 @@ function buildAiVisualDashboardHTML() {
             <div class="ai-chart-title">🏆 売上高 TOP 5 メニュー</div>
             ${prodChartHTML}
           </div>` : ''}
+
+          ${wineMlHTML}
         </div>
       </div>
     `;
@@ -9422,13 +9554,20 @@ function formatVerifiedDetailLines(p, indent = '') {
 
 function collectProductsFromReport(r) {
   const map = new Map();
-  const add = (name, qty, amt, category) => {
+  const add = (name, qty, amt, category, code = '') => {
     if (!name) return;
     const key = String(name);
-    const row = map.get(key) || { name: key, qty: 0, amt: 0, category: category || 'その他' };
+    const row = map.get(key) || {
+      name: key,
+      qty: 0,
+      amt: 0,
+      category: category || 'その他',
+      code: String(code || '')
+    };
     row.qty += Number(qty) || 0;
     row.amt += Number(amt) || 0;
     if (category) row.category = category;
+    if (code && !row.code) row.code = String(code);
     map.set(key, row);
   };
 
@@ -9438,10 +9577,16 @@ function collectProductsFromReport(r) {
     && r.sales.some(s => Array.isArray(s?.items) && s.items.length > 0);
   if (hasSalesItems) {
     r.sales.forEach(s => {
-      (s.items || []).forEach(i => add(i.name, i.qty, i.amount, i.category));
+      (s.items || []).forEach(i => add(i.name, i.qty, i.amount, i.category, i.code));
     });
   } else if (Array.isArray(r?.topProducts)) {
-    r.topProducts.forEach(p => add(p.name || p.product || p.title, p.qty || p.quantity, p.amt || p.amount || p.total, p.category));
+    r.topProducts.forEach(p => add(
+      p.name || p.product || p.title,
+      p.qty || p.quantity,
+      p.amt || p.amount || p.total,
+      p.category,
+      p.code
+    ));
   }
   return [...map.values()].sort((a, b) => b.amt - a.amt);
 }
@@ -11887,10 +12032,17 @@ function mergeProductLists(lists) {
   lists.flat().forEach(p => {
     const key = String(p.name || '');
     if (!key) return;
-    const row = map.get(key) || { name: key, qty: 0, amt: 0, category: p.category || 'その他' };
+    const row = map.get(key) || {
+      name: key,
+      qty: 0,
+      amt: 0,
+      category: p.category || 'その他',
+      code: String(p.code || '')
+    };
     row.qty += Number(p.qty) || 0;
     row.amt += Number(p.amt) || 0;
     if (p.category) row.category = p.category;
+    if (p.code && !row.code) row.code = String(p.code);
     map.set(key, row);
   });
   return [...map.values()].sort((a, b) => b.amt - a.amt);
@@ -13468,25 +13620,39 @@ function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
   const lines = [];
   lines.push(`${indent}【ワイン提供量の確定換算（店舗設定×商品点数）】`);
   lines.push(`${indent}- 換算設定: Glass Wine ${wineMl.glassMl}ml/点 / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点`);
+  lines.push(`${indent}- 対象SKU: 商品名が Glass Wine / Bottle Wine / ペアリング（半角ｶﾅ含む）に一致するもの、またはコード末尾 8102 / 2100 / 2101・2102・0028。銘柄名のみのボトルは含まない`);
   lines.push(`${indent}- 表示モード: ${mode === 'both' ? '点数と総mlの両方' : '総ml'}`);
   for (const period of periods) {
     if (!period || period.reservationOnly) continue;
-    const products = typeof resolveProductsForQuery === 'function'
-      ? resolveProductsForQuery(period.topProducts || [], query, 80)
-      : (period.topProducts || []);
-    const analysis = computeWineMlVolumeAnalysis(
-      products.length ? products : (period.topProducts || []),
-      wineMl
-    );
+    // 売れ筋TOP制限で Bottle/Glass が落ちないよう、専用リストまたは全商品から換算対象だけを取る
+    const sourceProducts = Array.isArray(period.wineMlProducts) && period.wineMlProducts.length
+      ? period.wineMlProducts
+      : (Array.isArray(period.allProducts) && period.allProducts.length
+        ? period.allProducts
+        : (period.topProducts || []));
+    const analysis = computeWineMlVolumeAnalysis(sourceProducts, wineMl);
     const label = period.label || verifiedData.label || '対象期間';
+    const drinkTotal = Number(period.drinkTotal) || 0;
     lines.push(
       `${indent}- ${label}: Glass ${analysis.glass.qty}点=${analysis.glass.ml}ml`
       + ` / ペアリング ${analysis.pairing.qty}点=${analysis.pairing.ml}ml`
       + ` / Bottle ${analysis.bottle.qty}点=${analysis.bottle.ml}ml`
       + ` / 合計 ${analysis.totalMl}ml（約 ${analysis.totalLiters}L）`
     );
+    const nameBits = [];
+    if (analysis.glass.names?.length) nameBits.push(`Glass「${analysis.glass.names.slice(0, 3).join('」「')}」`);
+    if (analysis.pairing.names?.length) nameBits.push(`ペアリング「${analysis.pairing.names.slice(0, 3).join('」「')}」`);
+    if (analysis.bottle.names?.length) nameBits.push(`Bottle「${analysis.bottle.names.slice(0, 3).join('」「')}」`);
+    if (nameBits.length) {
+      lines.push(`${indent}  照合商品: ${nameBits.join(' / ')}`);
+    } else {
+      lines.push(`${indent}  照合商品: なし（対象SKU名またはコードの明細がこの期間の集計に無い）`);
+    }
+    if (analysis.bottle.qty === 0 && drinkTotal >= 100000) {
+      lines.push(`${indent}  ※注意: 飲料売上は ${yen(drinkTotal)} あるが Bottle Wine(2100) は0点。銘柄名だけのボトルや明細未取得の可能性。0本と断定せず、対象SKUのみ0と述べること`);
+    }
   }
-  lines.push(`${indent}- 分析ルール: 上記mlは店舗換算設定と確定点数のみを使う。換算率の捏造禁止。${mode === 'ml' ? '回答の主表示は総ml（必要なら点数を括弧書き）。' : '点数と総mlを併記する。'}`);
+  lines.push(`${indent}- 分析ルール: 上記mlは店舗換算設定と確定点数のみを使う。換算率の捏造禁止。${mode === 'ml' ? '回答の主表示は総ml（必要なら点数を括弧書き）。' : '点数と総mlを併記する。'} Bottleが0の年は飲料売上と比較して異常なら注記する。`);
   return `\n${lines.join('\n')}`;
 }
 
@@ -14410,6 +14576,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const topProducts = needsItemDetails
       ? resolveProductsForQuery(mergedProducts, q, productLimit)
       : rankProductsForAiDisplay(mergedProducts, productLimit);
+    // ワインml換算は売れ筋TOP制限の影響を受けない専用リスト（全照合商品）
+    const wineMlProducts = collectWineMlProducts(mergedProducts);
     const itemDetailComplete = needsItemDetails
       && !detailRangeLimited
       && productSources.length > 0
@@ -14461,6 +14629,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       weekdayBreakdown,
       hourlyBreakdown,
       topProducts,
+      wineMlProducts,
       detailRangeLimited,
       itemDetailComplete,
       courseTransactions,
@@ -14521,6 +14690,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       topProducts: wantsItemBreakdown(q)
         ? resolveProductsForQuery(agg.topProducts, q, Math.max(40, requestedRankingLimit(q, 10)))
         : rankProductsForAiDisplay(agg.topProducts, 40),
+      wineMlProducts: collectWineMlProducts(agg.topProducts || []),
       detailRangeLimited: false,
       itemDetailComplete: true,
       courseTransactions: summarizeCourseTransactionsFromReports([{ sales: rows }])
