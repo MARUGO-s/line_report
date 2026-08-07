@@ -148,8 +148,18 @@ test('Edge Functions workflow deploys from a single job on main push', async () 
   assert.match(workflow, /SUPABASE_ACCESS_TOKEN/);
   assert.match(workflow, /jobs:\s*\n\s*deploy:/);
   assert.doesNotMatch(workflow, /^\s*validate:\s*$/m);
-  assert.match(workflow, /continue-on-error:\s*true/);
-  assert.match(workflow, /Fail if DB migration push failed/);
+  assert.match(workflow, /supabase-db-push-reconcile\.sh/);
+});
+
+test('db push reconcile repairs remote-only migration history', async () => {
+  const script = await readFile(
+    new URL('scripts/supabase-db-push-reconcile.sh', root),
+    'utf8',
+  );
+  assert.match(script, /migration repair --status reverted/);
+  assert.match(script, /20260806185129/);
+  assert.match(script, /Remote migration versions not found/);
+  assert.match(script, /Retrying supabase db push/);
 });
 
 test('top-level markdown links from docs still resolve after moving the frontend', async () => {

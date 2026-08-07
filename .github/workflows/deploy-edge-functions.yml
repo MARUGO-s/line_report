@@ -105,7 +105,6 @@ jobs:
 
       - name: Link project and apply DB migrations
         id: db
-        continue-on-error: true
         run: |
           set -euo pipefail
           if [ "${SKIP_DB_PUSH}" = "true" ]; then
@@ -121,7 +120,8 @@ jobs:
             exit 1
           fi
           supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-          supabase db push
+          # remote-only 履歴ズレは repair してから push（×の原因を消す）
+          bash scripts/supabase-db-push-reconcile.sh
 
       - name: Deploy all functions
         id: functions
@@ -173,11 +173,3 @@ jobs:
             exit 1
           fi
           echo "Deployed functions: ${ORDER[*]}"
-
-      - name: Fail if DB migration push failed
-        if: steps.db.outcome == 'failure'
-        run: |
-          echo "::error::DB migration push に失敗しました。関数デプロイは完了していますが、スキーマとコードの不整合がないか確認してください。"
-          exit 1
-
-# Redeploy trigger after Actions outage recovery (2026-08-07)
