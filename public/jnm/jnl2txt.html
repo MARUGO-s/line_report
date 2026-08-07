@@ -1953,6 +1953,23 @@
   </div>
 
   <div class="card" style="margin-top:14px;">
+    <div class="card-kicker">ワイン提供量の換算（ml・分析用）</div>
+    <p class="kn-note" style="margin-top:0;">Glass Wine / Bottle Wine / ペアリングの点数を ml に換算し、AI分析の1項目として使います。ボトルはほぼ750mlのため固定です。グラスは店舗ごとに設定してください。</p>
+    <div class="kn-form">
+      <label class="kn-field kn-narrow">グラスワイン（ml／点）
+        <input id="opsWineGlassMl" type="number" min="1" max="5000" step="1" value="100">
+      </label>
+      <label class="kn-field kn-narrow">ボトルワイン（ml／点）
+        <input id="opsWineBottleMl" type="number" value="750" readonly disabled title="ボトルは750ml固定">
+      </label>
+      <label class="kn-field kn-narrow">ペアリング（ml／点）
+        <input id="opsWinePairingMl" type="number" min="1" max="5000" step="1" value="300">
+      </label>
+    </div>
+    <p class="kn-note">商品名に Glass Wine / Bottle Wine / ペアリング を含む点数×上記 ml で合計します。保存後、プレビューとAI分析に反映されます。</p>
+  </div>
+
+  <div class="card" style="margin-top:14px;">
     <div class="card-kicker">過去売上への同期（ジャーナルを正とする）</div>
     <div class="ops-sync-row">
       <div class="ops-sync-copy">
@@ -7376,7 +7393,8 @@ const MARUGO_AI_ANALYZE_INSTRUCTION = `${MARUGO_AI_COMPANY_CONTEXT}
 一般的な居酒屋・Barのテンプレではなく、ワイン提案・ペアリング・ドリンク構成・姉妹店連携を軸に、数値根拠付きで弱点抽出と具体策まで書いてください。
 
 【レポート必須】多角分析の章ではランチとディナーを必ず分け、客単価・フード／ドリンク比率を昼夜別で示すこと。期間に12月が含まれる場合はクリスマスディナー要因を必ず言及すること。
-【3系統統合・必須】毎回①店舗営業情報（定休等）②売上ジャーナル数値③登録資料（施策・メニュー）を読んでから書くこと。店舗営業情報を読まずに曜日弱点を語ってはいけない。`;
+【分析アイテム・ワイン提供量(ml)・必須】店舗営業情報の換算設定と、salesData.wineVolumeAnalysis（または店舗営業情報ブロックのワインml節）を使い、Glass Wine / Bottle Wine / ペアリングの提供量(ml)と合計mlを必ず1節で示すこと。換算率や点数は与えられた数値のみを使い、捏造しない。
+【3系統統合・必須】毎回①店舗営業情報（定休等・ワインml換算）②売上ジャーナル数値③登録資料（施策・メニュー）を読んでから書くこと。店舗営業情報を読まずに曜日弱点を語ってはいけない。`;
 
 /** 店舗立地（AI分析用）。全店を新宿三丁目前提にしない。 */
 const STORE_AI_LOCATIONS = {
@@ -7445,6 +7463,24 @@ let opsCalViewMonth = new Date().getMonth() + 1;
 let opsCalRangeAnchor = '';
 let opsCalEditingId = '';
 
+function emptyStoreOpsWineMl() {
+  return { glassMl: 100, bottleMl: 750, pairingMl: 300 };
+}
+
+function normalizeStoreOpsWineMl(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const clampMl = (value, fallback) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(1, Math.min(5000, Math.round(n)));
+  };
+  return {
+    glassMl: clampMl(src.glassMl ?? src.glass, 100),
+    bottleMl: 750,
+    pairingMl: clampMl(src.pairingMl ?? src.pairing, 300)
+  };
+}
+
 function emptyStoreOpsProfile() {
   return {
     closedWeekdays: [],
@@ -7456,7 +7492,8 @@ function emptyStoreOpsProfile() {
     specialOpenPolicy: '',
     notes: '',
     journalSalesSync: false,
-    calendarEvents: []
+    calendarEvents: [],
+    wineMl: emptyStoreOpsWineMl()
   };
 }
 
@@ -7469,7 +7506,8 @@ function defaultStoreOpsProfile(storeKey = STORE_KEY) {
     ...base,
     ...preset,
     closedWeekdays: [...(preset.closedWeekdays || [])],
-    calendarEvents: normalizeStoreOpsCalendarEvents(preset.calendarEvents || [])
+    calendarEvents: normalizeStoreOpsCalendarEvents(preset.calendarEvents || []),
+    wineMl: normalizeStoreOpsWineMl(preset.wineMl || base.wineMl)
   };
 }
 
@@ -7550,7 +7588,8 @@ function normalizeStoreOpsProfile(raw) {
     specialOpenPolicy: String(src.specialOpenPolicy || '').slice(0, 2000),
     notes: String(src.notes || '').slice(0, 4000),
     journalSalesSync: !!(src.journalSalesSync === true || src.journalSalesSync === 'on' || src.journalSalesSync === 'true'),
-    calendarEvents: normalizeStoreOpsCalendarEvents(src.calendarEvents || src.events)
+    calendarEvents: normalizeStoreOpsCalendarEvents(src.calendarEvents || src.events),
+    wineMl: normalizeStoreOpsWineMl(src.wineMl)
   };
 }
 
@@ -7658,6 +7697,104 @@ function buildStoreOpsAnalysisNotes(profile, verifiedData) {
   return notes;
 }
 
+function normalizeWineProductSearchText(name) {
+  return String(name || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[ーｰ‐‑–—−]/g, '-')
+    .replace(/\s+/g, '');
+}
+
+function classifyWineProductForMl(name) {
+  const n = normalizeWineProductSearchText(name);
+  if (!n || isPosCategoryRollupName?.(name)) return '';
+  // ペアリングを先に判定（「ペアリング＋ワイン」名でもペアリング扱い）
+  if (n.includes('ペアリング') || n.includes('pairing')) return 'pairing';
+  if (
+    ((n.includes('ボトル') || n.includes('bottle')) &&
+      (n.includes('ワイン') || n.includes('wine') || n.includes('シャンパ') || n.includes('スパーク'))) ||
+    n.includes('bottlewine') ||
+    n.includes('ボトルワイン')
+  ) return 'bottle';
+  if (
+    ((n.includes('グラス') || n.includes('glass')) && (n.includes('ワイン') || n.includes('wine'))) ||
+    n.includes('glasswine') ||
+    n.includes('グラスワイン')
+  ) return 'glass';
+  return '';
+}
+
+function collectProductsForWineMl(verifiedData = null) {
+  try {
+    if (typeof currentReport !== 'undefined' && currentReport && typeof collectProductsFromReport === 'function') {
+      const fromReport = collectProductsFromReport(currentReport);
+      if (Array.isArray(fromReport) && fromReport.length) return fromReport;
+    }
+  } catch (_) {}
+  if (!verifiedData || typeof verifiedData !== 'object') return [];
+  if (Array.isArray(verifiedData.topProducts) && verifiedData.topProducts.length) {
+    return verifiedData.topProducts;
+  }
+  if (Array.isArray(verifiedData.periods)) {
+    const merged = [];
+    for (const p of verifiedData.periods) {
+      if (Array.isArray(p?.topProducts)) merged.push(...p.topProducts);
+    }
+    return merged;
+  }
+  return [];
+}
+
+function computeWineMlVolumeAnalysis(products, wineMl) {
+  const rates = normalizeStoreOpsWineMl(wineMl);
+  const buckets = {
+    glass: { key: 'glass', label: 'Glass Wine', qty: 0, amt: 0, mlPerUnit: rates.glassMl, ml: 0 },
+    bottle: { key: 'bottle', label: 'Bottle Wine', qty: 0, amt: 0, mlPerUnit: rates.bottleMl, ml: 0 },
+    pairing: { key: 'pairing', label: 'ペアリング', qty: 0, amt: 0, mlPerUnit: rates.pairingMl, ml: 0 }
+  };
+  for (const p of (Array.isArray(products) ? products : [])) {
+    const cls = classifyWineProductForMl(p?.name || p?.product || p?.title);
+    if (!cls || !buckets[cls]) continue;
+    const qty = Number(p?.qty ?? p?.quantity) || 0;
+    const amt = Number(p?.amt ?? p?.amount ?? p?.total) || 0;
+    buckets[cls].qty += qty;
+    buckets[cls].amt += amt;
+  }
+  for (const b of Object.values(buckets)) {
+    b.ml = Math.round(b.qty * b.mlPerUnit);
+  }
+  const totalMl = buckets.glass.ml + buckets.bottle.ml + buckets.pairing.ml;
+  const totalQty = buckets.glass.qty + buckets.bottle.qty + buckets.pairing.qty;
+  return {
+    rates,
+    glass: buckets.glass,
+    bottle: buckets.bottle,
+    pairing: buckets.pairing,
+    totalMl,
+    totalQty,
+    totalLiters: Math.round((totalMl / 1000) * 10) / 10
+  };
+}
+
+function formatWineMlAnalysisLines(profile, verifiedData = null) {
+  const wineMl = normalizeStoreOpsWineMl(profile?.wineMl);
+  const lines = [];
+  lines.push('【分析アイテム・ワイン提供量(ml)】');
+  lines.push(`換算設定: Glass Wine ${wineMl.glassMl}ml/点（店舗設定） / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点（店舗設定）`);
+  const products = collectProductsForWineMl(verifiedData);
+  const analysis = computeWineMlVolumeAnalysis(products, wineMl);
+  if (!products.length || analysis.totalQty <= 0) {
+    lines.push('今回の確定集計: ワイン系商品点数が未取得、または0点（換算設定のみ有効。数値捏造禁止）');
+    return lines;
+  }
+  lines.push(`Glass Wine: ${analysis.glass.qty}点 × ${analysis.glass.mlPerUnit}ml = ${analysis.glass.ml}ml（売上 ${yen(analysis.glass.amt)}）`);
+  lines.push(`ペアリング: ${analysis.pairing.qty}点 × ${analysis.pairing.mlPerUnit}ml = ${analysis.pairing.ml}ml（売上 ${yen(analysis.pairing.amt)}）`);
+  lines.push(`Bottle Wine: ${analysis.bottle.qty}点 × ${analysis.bottle.mlPerUnit}ml = ${analysis.bottle.ml}ml（売上 ${yen(analysis.bottle.amt)}）`);
+  lines.push(`合計提供量: ${analysis.totalMl}ml（約 ${analysis.totalLiters}L）`);
+  lines.push('分析ルール: 上記mlは店舗換算設定×ジャーナル商品点数の推計。原価・在庫・ロスは含めない。');
+  return lines;
+}
+
 function formatStoreOpsCalendarEventsForAi(events, verifiedData = null) {
   const all = normalizeStoreOpsCalendarEvents(events);
   if (!all.length) return ['登録カレンダー: なし'];
@@ -7704,6 +7841,7 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
     lines.push('状態: 未登録（定休・ランチ前提は未設定。曜日の低売上を定休と決め打ちしない）');
     lines.push('分析ルール: 店舗営業情報が未登録のため、定休前提での免責は適用しない。他店ルールも転用しない。');
     lines.push(...formatStoreOpsCalendarEventsForAi([], verifiedData));
+    lines.push(...formatWineMlAnalysisLines(p, verifiedData));
     return '\n\n' + lines.join('\n');
   }
 
@@ -7715,11 +7853,13 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
   if (p.specialOpenPolicy) lines.push(`特別営業: ${p.specialOpenPolicy}`);
   if (p.notes) lines.push(`補足: ${p.notes}`);
   lines.push(...formatStoreOpsCalendarEventsForAi(p.calendarEvents, verifiedData));
+  lines.push(...formatWineMlAnalysisLines(p, verifiedData));
   lines.push('分析ルール:');
   lines.push('- 定休曜日の売上ゼロ／極端な低さは「弱点」「機会損失」と断定しない');
   lines.push('- 定休曜日に売上が立っている日は特別営業（または例外営業）として区別して説明する');
   lines.push('- 他店舗の定休ルールをこの店舗に転用しない');
   lines.push('- カレンダーの施策・イベントは該当期間の背景として必ず踏まえる（資料タブの詳細本文と矛盾する場合は両方を併記）');
+  lines.push('- ワイン提供量(ml)は換算設定と商品点数から計算し、必ず分析の1項目として扱う');
 
   const analysisNotes = buildStoreOpsAnalysisNotes(p, verifiedData);
   if (analysisNotes.length) {
@@ -7798,8 +7938,8 @@ async function buildIntegratedAnalysisContext({
 【データ統合チェック（必須・3系統）】
 1. ジャーナル／保存レポート（数値の正本）: ${hasJournal ? '添付あり → 金額・客数・比率はここだけを使う' : '今回は確定集計ブロックなし（画面上のsalesDataまたは未照会）'}
 2. 店舗資料（施策・メニュー）: ${hasKnowledge ? `添付あり（登録${knowledgeCount}件から期間照合／${usedRag ? 'RAGチャンク抜粋で軽量添付' : '概要＋短い抜粋'}）` : (knowledgeError ? `取得失敗（${knowledgeError}）→ 資料なしとして扱い推測で補わない` : (knowledgeCount ? '期間に合う資料なし' : (!getAdminToken() ? '未ログインのため資料API未取得' : '登録資料なし')))}
-3. 店舗営業情報（定休・ランチ・カレンダー施策等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析とカレンダー背景に反映' : '添付なし（異常）'}
-統合ルール: 数値は①、詳細資料は②、定休／特別営業／カレンダー施策の解釈は③。③を読まずに日曜・月曜の低売上を弱点としないこと。`;
+3. 店舗営業情報（定休・ランチ・カレンダー施策・ワインml換算等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析・カレンダー背景・ワイン提供量(ml)に反映' : '添付なし（異常）'}
+統合ルール: 数値は①、詳細資料は②、定休／特別営業／カレンダー施策／ワインml換算の解釈は③。③を読まずに日曜・月曜の低売上を弱点としないこと。`;
 
   return {
     profile,
@@ -8061,7 +8201,12 @@ function readStoreOpsForm() {
     specialOpenPolicy: document.getElementById('opsSpecialOpenPolicy')?.value,
     notes: document.getElementById('opsNotes')?.value,
     journalSalesSync: !!document.getElementById('opsJournalSalesSync')?.checked,
-    calendarEvents: opsCalendarEvents
+    calendarEvents: opsCalendarEvents,
+    wineMl: {
+      glassMl: document.getElementById('opsWineGlassMl')?.value,
+      bottleMl: 750,
+      pairingMl: document.getElementById('opsWinePairingMl')?.value
+    }
   });
 }
 
@@ -8078,6 +8223,9 @@ function fillStoreOpsForm(profile) {
   const special = document.getElementById('opsSpecialOpenPolicy');
   const notes = document.getElementById('opsNotes');
   const sync = document.getElementById('opsJournalSalesSync');
+  const glassMl = document.getElementById('opsWineGlassMl');
+  const bottleMl = document.getElementById('opsWineBottleMl');
+  const pairingMl = document.getElementById('opsWinePairingMl');
   if (lunch) lunch.value = p.lunchOffered;
   if (dinner) dinner.value = p.dinnerOffered;
   if (overflow) overflow.value = p.overflowRule ? 'on' : 'off';
@@ -8087,6 +8235,9 @@ function fillStoreOpsForm(profile) {
   if (notes) notes.value = p.notes;
   if (sync) sync.checked = !!p.journalSalesSync;
   updateJournalSalesSyncSwitchLabel(!!p.journalSalesSync);
+  if (glassMl) glassMl.value = String(p.wineMl.glassMl);
+  if (bottleMl) bottleMl.value = '750';
+  if (pairingMl) pairingMl.value = String(p.wineMl.pairingMl);
   opsCalendarEvents = normalizeStoreOpsCalendarEvents(p.calendarEvents);
   opsCalEditingId = '';
   opsCalRangeAnchor = '';
@@ -8143,18 +8294,20 @@ async function saveStoreOpsForm() {
 }
 
 function resetStoreOpsForm() {
-  // 定休などの初期値に戻しても、同期フラグとカレンダー登録は誤消去しない
+  // 定休などの初期値に戻しても、同期フラグ・カレンダー・ワインml設定は誤消去しない
   const current = readStoreOpsForm();
   const keepSync = !!current.journalSalesSync;
   const keepCalendarEvents = normalizeStoreOpsCalendarEvents(current.calendarEvents);
+  const keepWineMl = normalizeStoreOpsWineMl(current.wineMl);
   const profile = writeStoreOpsProfileLocal({
     ...defaultStoreOpsProfile(),
     journalSalesSync: keepSync,
-    calendarEvents: keepCalendarEvents
+    calendarEvents: keepCalendarEvents,
+    wineMl: keepWineMl
   });
   fillStoreOpsForm(profile);
   const status = document.getElementById('opsFormStatus');
-  if (status) status.textContent = '店舗の初期値に戻しました（過去売上同期・カレンダーは維持。未同期。必要なら保存を押してください）';
+  if (status) status.textContent = '店舗の初期値に戻しました（過去売上同期・カレンダー・ワインmlは維持。未同期。必要なら保存を押してください）';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -8201,6 +8354,10 @@ document.addEventListener('DOMContentLoaded', () => {
   ['opsEvStart', 'opsEvEnd'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', () => { opsCalRangeAnchor = ''; renderOpsCalendarGrid(); });
+  });
+  ['opsWineGlassMl', 'opsWinePairingMl'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => { refreshStoreOpsPreview(); });
   });
 });
 
@@ -8310,6 +8467,11 @@ function buildSalesDataForAI() {
   if (sales.length === 0 && (d.total || d.totalSales || d.foodTotal || d.drinkTotal)) {
     const totSales = d.total || d.totalSales || 0;
     const totCust = d.totalCustomers || ((d.lunchCustomers || 0) + (d.dinnerCustomers || 0)) || 0;
+    const topProductsFallback = d.topProducts || [];
+    const wineVolumeAnalysis = computeWineMlVolumeAnalysis(
+      topProductsFallback,
+      readStoreOpsProfile().wineMl
+    );
     return {
       title: d.title || '売上レポート',
       period: d.period || '',
@@ -8336,8 +8498,9 @@ function buildSalesDataForAI() {
       mealPeriodRule: '会計時刻16:00未満=ランチ / 16:00以降=ディナー',
       weekdayBreakdown: d.weekdayBreakdown || [],
       hourlyBreakdown: d.hourlyBreakdown || [],
-      topProducts: d.topProducts || [],
-      dailyBreakdown: d.dailyBreakdown || []
+      topProducts: topProductsFallback,
+      dailyBreakdown: d.dailyBreakdown || [],
+      wineVolumeAnalysis
     };
   }
 
@@ -8408,10 +8571,12 @@ function buildSalesDataForAI() {
     customers: hourly[h].customers
   }));
   
-  const topProducts = rankProductsForAiDisplay(
-    Object.entries(products)
-      .map(e => ({ name: e[0], category: e[1].category, qty: e[1].qty, amt: e[1].amt })),
-    20
+  const allProducts = Object.entries(products)
+    .map(e => ({ name: e[0], category: e[1].category, qty: e[1].qty, amt: e[1].amt }));
+  const topProducts = rankProductsForAiDisplay(allProducts, 20);
+  const wineVolumeAnalysis = computeWineMlVolumeAnalysis(
+    allProducts,
+    readStoreOpsProfile().wineMl
   );
 
   const weekdaySummary = Object.keys(weekdays).map(w => ({
@@ -8450,7 +8615,8 @@ function buildSalesDataForAI() {
     weekdayBreakdown: weekdaySummary,
     hourlyBreakdown: hourlySummary,
     topProducts: topProducts,
-    dailyBreakdown: dailyArr
+    dailyBreakdown: dailyArr,
+    wineVolumeAnalysis
   };
 }
 

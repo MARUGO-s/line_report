@@ -336,9 +336,10 @@ flowchart TB
 |---|---|
 | テーブル | `store_operation_profiles`（PK: `store_partition_key`） |
 | API | `GET/POST /pos-journals/store-ops` |
-| 主なフィールド | `closedWeekdays`, `lunchOffered`, `dinnerOffered`, overflow 規則, `specialOpenPolicy`, `notes`, `journalSalesSync`（既定 OFF）, `calendarEvents[]` |
-| UI | 「店舗情報」タブ。保存／リセット、プレビュー、過去売上同期 ON/OFF、施策・イベントカレンダー（開始日〜終了日） |
-| AI効果 | 定休ゼロ売上を機会損失と誤診しない。特別営業を区別。カレンダー登録を期間背景として注入 |
+| 主なフィールド | `closedWeekdays`, `lunchOffered`, `dinnerOffered`, overflow 規則, `specialOpenPolicy`, `notes`, `journalSalesSync`（既定 OFF）, `calendarEvents[]`, `wineMl` |
+| UI | 「店舗情報」タブ。保存／リセット、プレビュー、過去売上同期 ON/OFF、施策・イベントカレンダー、ワインml換算 |
+| AI効果 | 定休ゼロ売上を機会損失と誤診しない。特別営業を区別。カレンダー登録を期間背景として注入。ワイン提供量(ml)を分析項目に |
+| ワインml | `wineMl: { glassMl, bottleMl:750固定, pairingMl }`。Glass/Bottle/ペアリング点数×ml → `wineVolumeAnalysis` |
 | 過去売上同期 | `journalSalesSync===true` のとき journal → `line_sales_manual_day` / `_month_gross`（ジャーナル店舗向け） |
 | カレンダー | `calendarEvents: [{ id, title, kind, start, end, note }]`。プレビュー／AI に自動反映。詳細資料は店舗ナレッジ側 |
 
