@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - 店舗情報カレンダー（施策・イベント）
+
+- Request: 店舗情報入力時にカレンダーでイベント／施策を開始日〜終了日登録し、AIとプレビューへ自動反映。
+- Change: `profile.calendarEvents` + 月次カレンダーUI。`formatStoreOpsBlockForAi` / `#opsPreview` に反映。API はキー省略時に既存イベントを維持。
+- Deploy: `admin-api` + Pages `public/jnm/*`。
+
 ### 2026-08-07 - 過去売上同期トグルの本番動作テスト
 
 - Result: PASS (Actions run 31146495132)

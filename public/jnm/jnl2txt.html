@@ -427,6 +427,41 @@
   .ops-switch input:checked + .ops-switch-track::after{transform:translateX(20px);border-color:transparent}
   .ops-switch input:focus-visible + .ops-switch-track{outline:2px solid var(--accent);outline-offset:2px}
   .ops-switch-label{font-size:12px;font-weight:600;color:var(--text);min-width:2.5em}
+  .ops-cal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .ops-cal-title{font-size:15px;font-family:var(--font-heading);font-weight:600;color:var(--text);letter-spacing:.02em}
+  .ops-cal-nav{display:flex;gap:6px}
+  .ops-cal-nav button{font:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--border-strong);border-radius:var(--radius-ctl);background:transparent;color:var(--text);cursor:pointer}
+  .ops-cal-nav button:hover{background:color-mix(in srgb, var(--text) 7%, transparent)}
+  .ops-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+  .ops-cal-dow{font-size:10px;text-align:center;color:var(--text-2);padding:2px 0 4px}
+  .ops-cal-day{min-height:54px;border:1px solid var(--border);border-radius:8px;padding:4px;background:color-mix(in srgb, var(--text) 2%, var(--page));cursor:pointer;display:flex;flex-direction:column;gap:2px;transition:background .12s ease,border-color .12s ease,transform .12s ease}
+  .ops-cal-day:hover{background:color-mix(in srgb, var(--text) 6%, var(--page));transform:translateY(-1px)}
+  .ops-cal-day.is-muted{opacity:.38;cursor:default;transform:none}
+  .ops-cal-day.is-today{border-color:var(--accent)}
+  .ops-cal-day.is-range,.ops-cal-day.is-selected{border-color:var(--text);background:color-mix(in srgb, var(--text) 8%, var(--page))}
+  .ops-cal-day-num{font-size:11px;font-family:var(--font-heading);color:var(--text);line-height:1.2}
+  .ops-cal-marks{display:flex;flex-direction:column;gap:2px;min-height:0}
+  .ops-cal-chip{font-size:9px;line-height:1.25;padding:1px 3px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid transparent;color:var(--text)}
+  .ops-cal-chip[data-kind="施策"]{background:color-mix(in srgb, var(--accent) 18%, transparent);border-color:color-mix(in srgb, var(--accent) 35%, transparent)}
+  .ops-cal-chip[data-kind="イベント"]{background:color-mix(in srgb, var(--text) 10%, transparent);border-color:color-mix(in srgb, var(--text) 18%, transparent)}
+  .ops-cal-chip[data-kind="価格改定"]{background:color-mix(in srgb, #8a6a3a 16%, transparent);border-color:color-mix(in srgb, #8a6a3a 30%, transparent)}
+  .ops-cal-chip[data-kind="特別営業"]{background:color-mix(in srgb, #3d6b5a 16%, transparent);border-color:color-mix(in srgb, #3d6b5a 30%, transparent)}
+  .ops-cal-chip[data-kind="その他"]{background:color-mix(in srgb, var(--text) 6%, transparent);border-color:var(--border)}
+  .ops-cal-hint{font-size:11px;color:var(--text-2);line-height:1.6;margin:8px 0 0}
+  .ops-cal-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+  .ops-cal-item{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:color-mix(in srgb, var(--text) 3%, transparent)}
+  .ops-cal-item-main{min-width:0;flex:1}
+  .ops-cal-item-title{font-size:13px;font-weight:600;color:var(--text)}
+  .ops-cal-item-meta{font-size:11px;color:var(--text-2);margin-top:2px}
+  .ops-cal-item-note{font-size:11px;color:var(--text-2);margin-top:4px;line-height:1.5;white-space:pre-wrap}
+  .ops-cal-item-actions{display:flex;gap:6px;flex-shrink:0}
+  .ops-cal-item-actions button{font:inherit;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-2);cursor:pointer}
+  .ops-cal-item-actions button:hover{background:color-mix(in srgb, var(--text) 7%, transparent);color:var(--text)}
+  .ops-cal-empty{font-size:12px;color:var(--text-2);padding:6px 0}
+  @media (max-width:760px){
+    .ops-cal-day{min-height:46px;padding:3px}
+    .ops-cal-chip{font-size:8px}
+  }
   select{font-size:13px;padding:7px 10px;border-radius:var(--radius-ctl);border:1px solid var(--border-strong);
     background:var(--surface);color:var(--text);font-family:inherit;cursor:pointer}
   .controls input[type=date]{font-size:13px;padding:6px 10px;border-radius:var(--radius-ctl);border:1px solid var(--border-strong);
@@ -1804,7 +1839,7 @@
 
 <!-- 店舗営業情報（定休・ランチ有無・特別営業ルール） -->
 <section id="storeops" class="conv" hidden>
-  <p class="intro">この店舗の<strong>定休日・ランチ／ディナーの有無・特別営業ルール</strong>を登録します。AI分析はここに書いた前提を必ず踏まえ、定休曜日の売上ゼロ／低下を弱点扱いしません。店舗ごとに独立保存されます。</p>
+  <p class="intro">この店舗の<strong>定休日・ランチ／ディナーの有無・特別営業ルール</strong>と、<strong>施策・イベントのカレンダー</strong>（開始日〜終了日）を登録します。AI分析と下のプレビューに自動反映され、定休曜日の売上ゼロ／低下を弱点扱いしません。店舗ごとに独立保存されます。</p>
 
   <div class="card">
     <div class="card-kicker">営業カレンダー前提（選択中の店舗）</div>
@@ -1867,6 +1902,54 @@
       <button id="opsResetBtn" class="btn btn-secondary" type="button">店舗の初期値に戻す</button>
       <span id="opsFormStatus" class="kn-status"></span>
     </div>
+  </div>
+
+  <div class="card" style="margin-top:14px;">
+    <div class="card-kicker">施策・イベントカレンダー</div>
+    <div class="ops-cal-head">
+      <div class="ops-cal-title" id="opsCalMonthLabel">—</div>
+      <div class="ops-cal-nav">
+        <button type="button" id="opsCalPrevBtn">前月</button>
+        <button type="button" id="opsCalTodayBtn">今月</button>
+        <button type="button" id="opsCalNextBtn">翌月</button>
+      </div>
+    </div>
+    <div class="ops-cal-grid" id="opsCalDow" aria-hidden="true">
+      <div class="ops-cal-dow">日</div><div class="ops-cal-dow">月</div><div class="ops-cal-dow">火</div>
+      <div class="ops-cal-dow">水</div><div class="ops-cal-dow">木</div><div class="ops-cal-dow">金</div>
+      <div class="ops-cal-dow">土</div>
+    </div>
+    <div class="ops-cal-grid" id="opsCalGrid" role="grid" aria-label="店舗カレンダー"></div>
+    <p class="ops-cal-hint">日付をクリックして開始日→終了日を選び、下のフォームで施策やイベントを登録してください。長い資料や添付は「資料」タブを使います。</p>
+    <div class="kn-form" style="margin-top:12px;">
+      <label class="kn-field kn-narrow">種別
+        <select id="opsEvKind">
+          <option value="施策">施策</option>
+          <option value="イベント">イベント</option>
+          <option value="価格改定">価格改定</option>
+          <option value="特別営業">特別営業</option>
+          <option value="その他">その他</option>
+        </select>
+      </label>
+      <label class="kn-field kn-wide">タイトル
+        <input id="opsEvTitle" type="text" maxlength="120" placeholder="例: 7月ワインフェア">
+      </label>
+      <label class="kn-field kn-narrow">開始日
+        <input id="opsEvStart" type="date">
+      </label>
+      <label class="kn-field kn-narrow">終了日
+        <input id="opsEvEnd" type="date">
+      </label>
+      <label class="kn-field kn-full">メモ（任意・AIが前提として読む）
+        <textarea id="opsEvNote" rows="2" maxlength="500" placeholder="例: グラス3種入替。平日夜の客単価施策"></textarea>
+      </label>
+    </div>
+    <div class="kn-actions" style="margin-top:10px;">
+      <button id="opsEvAddBtn" class="btn btn-primary" type="button">カレンダーに追加</button>
+      <button id="opsEvClearBtn" class="btn btn-secondary" type="button">入力クリア</button>
+      <span id="opsEvStatus" class="kn-status"></span>
+    </div>
+    <div class="ops-cal-list" id="opsCalEventList"></div>
   </div>
 
   <div class="card" style="margin-top:14px;">
@@ -7354,6 +7437,14 @@ const STORE_OPS_DEFAULTS = {
   }
 };
 
+const STORE_OPS_CALENDAR_KINDS = ['施策', 'イベント', '価格改定', '特別営業', 'その他'];
+const STORE_OPS_CALENDAR_EVENTS_MAX = 100;
+let opsCalendarEvents = [];
+let opsCalViewYear = new Date().getFullYear();
+let opsCalViewMonth = new Date().getMonth() + 1;
+let opsCalRangeAnchor = '';
+let opsCalEditingId = '';
+
 function emptyStoreOpsProfile() {
   return {
     closedWeekdays: [],
@@ -7364,7 +7455,8 @@ function emptyStoreOpsProfile() {
     dinnerOffered: 'yes',
     specialOpenPolicy: '',
     notes: '',
-    journalSalesSync: false
+    journalSalesSync: false,
+    calendarEvents: []
   };
 }
 
@@ -7372,7 +7464,65 @@ function defaultStoreOpsProfile(storeKey = STORE_KEY) {
   const key = String(storeKey || '').toLowerCase();
   const base = emptyStoreOpsProfile();
   const preset = STORE_OPS_DEFAULTS[key];
-  return preset ? { ...base, ...preset, closedWeekdays: [...(preset.closedWeekdays || [])] } : base;
+  if (!preset) return base;
+  return {
+    ...base,
+    ...preset,
+    closedWeekdays: [...(preset.closedWeekdays || [])],
+    calendarEvents: normalizeStoreOpsCalendarEvents(preset.calendarEvents || [])
+  };
+}
+
+function normalizeStoreOpsIsoDate(value) {
+  const s = String(value || '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
+
+function normalizeStoreOpsCalendarEvents(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    if (out.length >= STORE_OPS_CALENDAR_EVENTS_MAX) break;
+    if (!item || typeof item !== 'object') continue;
+    let start = normalizeStoreOpsIsoDate(item.start || item.period_start || item.from);
+    let end = normalizeStoreOpsIsoDate(item.end || item.period_end || item.to);
+    if (!start && end) start = end;
+    if (!end && start) end = start;
+    if (!start || !end) continue;
+    if (start > end) { const t = start; start = end; end = t; }
+    const title = String(item.title || '').trim().slice(0, 120);
+    if (!title) continue;
+    const kindRaw = String(item.kind || item.category || '').trim();
+    const kind = STORE_OPS_CALENDAR_KINDS.includes(kindRaw) ? kindRaw : 'その他';
+    let id = String(item.id || '').trim().slice(0, 64);
+    if (!id || seen.has(id)) id = 'ev_' + start.replace(/-/g, '') + '_' + (out.length + 1);
+    seen.add(id);
+    out.push({
+      id,
+      title,
+      kind,
+      start,
+      end,
+      note: String(item.note || item.notes || '').trim().slice(0, 500)
+    });
+  }
+  out.sort((a, b) => (a.start === b.start ? a.title.localeCompare(b.title, 'ja') : (a.start < b.start ? -1 : 1)));
+  return out;
+}
+
+function newStoreOpsCalendarEventId() {
+  return 'ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function storeOpsCalendarEventOverlaps(ev, range) {
+  if (!range || (!range.from && !range.to)) return true;
+  const from = normalizeStoreOpsIsoDate(range.from) || '0000-01-01';
+  const to = normalizeStoreOpsIsoDate(range.to) || '9999-12-31';
+  const start = normalizeStoreOpsIsoDate(ev.start);
+  const end = normalizeStoreOpsIsoDate(ev.end) || start;
+  if (!start) return false;
+  return start <= to && end >= from;
 }
 
 function storeOpsStorageKey(storeKey = STORE_KEY) {
@@ -7399,7 +7549,8 @@ function normalizeStoreOpsProfile(raw) {
     dinnerOffered: dinner,
     specialOpenPolicy: String(src.specialOpenPolicy || '').slice(0, 2000),
     notes: String(src.notes || '').slice(0, 4000),
-    journalSalesSync: !!(src.journalSalesSync === true || src.journalSalesSync === 'on' || src.journalSalesSync === 'true')
+    journalSalesSync: !!(src.journalSalesSync === true || src.journalSalesSync === 'on' || src.journalSalesSync === 'true'),
+    calendarEvents: normalizeStoreOpsCalendarEvents(src.calendarEvents || src.events)
   };
 }
 
@@ -7507,10 +7658,44 @@ function buildStoreOpsAnalysisNotes(profile, verifiedData) {
   return notes;
 }
 
+function formatStoreOpsCalendarEventsForAi(events, verifiedData = null) {
+  const all = normalizeStoreOpsCalendarEvents(events);
+  if (!all.length) return ['登録カレンダー: なし'];
+  let range = null;
+  try {
+    range = typeof resolveKnowledgePeriodRange === 'function'
+      ? resolveKnowledgePeriodRange(verifiedData)
+      : null;
+  } catch (_) {
+    range = null;
+  }
+  const matched = all.filter((ev) => storeOpsCalendarEventOverlaps(ev, range));
+  const lines = [];
+  if (range && (range.from || range.to)) {
+    lines.push(`登録カレンダー（分析期間 ${range.from || '—'}〜${range.to || '—'} に重なるもの / 全${all.length}件中${matched.length}件）:`);
+  } else {
+    lines.push(`登録カレンダー（全${all.length}件）:`);
+  }
+  const show = (matched.length ? matched : all).slice(0, 40);
+  if (!matched.length && range && (range.from || range.to)) {
+    lines.push('- 分析期間に重なる登録なし（期間外の登録は参考にしない）');
+  }
+  for (const ev of show) {
+    const note = ev.note ? ` / ${ev.note}` : '';
+    lines.push(`- ${ev.start}〜${ev.end} [${ev.kind}] ${ev.title}${note}`);
+  }
+  if ((matched.length ? matched : all).length > show.length) {
+    lines.push(`- …ほか ${(matched.length ? matched : all).length - show.length} 件`);
+  }
+  lines.push('分析ルール: カレンダー登録は背景・施策の事実として使う。数値の正本はジャーナル／保存レポートのみ。');
+  return lines;
+}
+
 function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData = null) {
   const p = normalizeStoreOpsProfile(profile);
+  const hasCalendar = Array.isArray(p.calendarEvents) && p.calendarEvents.length > 0;
   const hasContent = p.closedWeekdays.length || p.notes || p.specialOpenPolicy
-    || p.lunchOffered !== 'yes' || p.dinnerOffered !== 'yes' || p.overflowRule;
+    || p.lunchOffered !== 'yes' || p.dinnerOffered !== 'yes' || p.overflowRule || hasCalendar;
 
   const lines = [];
   lines.push('【店舗営業情報（この店舗の登録前提・必須・必ず参照）】');
@@ -7518,6 +7703,7 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
   if (!hasContent) {
     lines.push('状態: 未登録（定休・ランチ前提は未設定。曜日の低売上を定休と決め打ちしない）');
     lines.push('分析ルール: 店舗営業情報が未登録のため、定休前提での免責は適用しない。他店ルールも転用しない。');
+    lines.push(...formatStoreOpsCalendarEventsForAi([], verifiedData));
     return '\n\n' + lines.join('\n');
   }
 
@@ -7528,10 +7714,12 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
   }
   if (p.specialOpenPolicy) lines.push(`特別営業: ${p.specialOpenPolicy}`);
   if (p.notes) lines.push(`補足: ${p.notes}`);
+  lines.push(...formatStoreOpsCalendarEventsForAi(p.calendarEvents, verifiedData));
   lines.push('分析ルール:');
   lines.push('- 定休曜日の売上ゼロ／極端な低さは「弱点」「機会損失」と断定しない');
   lines.push('- 定休曜日に売上が立っている日は特別営業（または例外営業）として区別して説明する');
   lines.push('- 他店舗の定休ルールをこの店舗に転用しない');
+  lines.push('- カレンダーの施策・イベントは該当期間の背景として必ず踏まえる（資料タブの詳細本文と矛盾する場合は両方を併記）');
 
   const analysisNotes = buildStoreOpsAnalysisNotes(p, verifiedData);
   if (analysisNotes.length) {
@@ -7610,8 +7798,8 @@ async function buildIntegratedAnalysisContext({
 【データ統合チェック（必須・3系統）】
 1. ジャーナル／保存レポート（数値の正本）: ${hasJournal ? '添付あり → 金額・客数・比率はここだけを使う' : '今回は確定集計ブロックなし（画面上のsalesDataまたは未照会）'}
 2. 店舗資料（施策・メニュー）: ${hasKnowledge ? `添付あり（登録${knowledgeCount}件から期間照合／${usedRag ? 'RAGチャンク抜粋で軽量添付' : '概要＋短い抜粋'}）` : (knowledgeError ? `取得失敗（${knowledgeError}）→ 資料なしとして扱い推測で補わない` : (knowledgeCount ? '期間に合う資料なし' : (!getAdminToken() ? '未ログインのため資料API未取得' : '登録資料なし')))}
-3. 店舗営業情報（定休・ランチ等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析に反映' : '添付なし（異常）'}
-統合ルール: 数値は①、背景・施策は②、定休／特別営業の解釈は③。③を読まずに日曜・月曜の低売上を弱点としないこと。`;
+3. 店舗営業情報（定休・ランチ・カレンダー施策等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析とカレンダー背景に反映' : '添付なし（異常）'}
+統合ルール: 数値は①、詳細資料は②、定休／特別営業／カレンダー施策の解釈は③。③を読まずに日曜・月曜の低売上を弱点としないこと。`;
 
   return {
     profile,
@@ -7652,6 +7840,213 @@ function updateJournalSalesSyncSwitchLabel(on) {
   if (input) input.setAttribute('aria-checked', on ? 'true' : 'false');
 }
 
+function refreshStoreOpsPreview() {
+  const preview = document.getElementById('opsPreview');
+  if (!preview) return;
+  preview.textContent = formatStoreOpsBlockForAi(readStoreOpsForm()).trim() || '（未設定）';
+}
+
+function setOpsCalMonthLabel() {
+  const el = document.getElementById('opsCalMonthLabel');
+  if (el) el.textContent = `${opsCalViewYear}年${opsCalViewMonth}月`;
+}
+
+function eventsOnOpsCalDay(iso) {
+  return opsCalendarEvents.filter((ev) => ev.start <= iso && ev.end >= iso);
+}
+
+function renderOpsCalendarGrid() {
+  const grid = document.getElementById('opsCalGrid');
+  if (!grid) return;
+  setOpsCalMonthLabel();
+  const first = new Date(opsCalViewYear, opsCalViewMonth - 1, 1);
+  const startPad = first.getDay();
+  const daysInMonth = new Date(opsCalViewYear, opsCalViewMonth, 0).getDate();
+  const today = normalizeStoreOpsIsoDate(new Date().toISOString().slice(0, 10));
+  const formStart = normalizeStoreOpsIsoDate(document.getElementById('opsEvStart')?.value);
+  const formEnd = normalizeStoreOpsIsoDate(document.getElementById('opsEvEnd')?.value) || formStart;
+  let html = '';
+  for (let i = 0; i < startPad; i++) html += '<div class="ops-cal-day is-muted" aria-hidden="true"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = `${opsCalViewYear}-${String(opsCalViewMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const marks = eventsOnOpsCalDay(iso).slice(0, 3);
+    const more = Math.max(0, eventsOnOpsCalDay(iso).length - marks.length);
+    const cls = ['ops-cal-day'];
+    if (iso === today) cls.push('is-today');
+    if (formStart && iso === formStart) cls.push('is-selected');
+    if (formStart && formEnd && iso >= formStart && iso <= formEnd) cls.push('is-range');
+    if (opsCalRangeAnchor && iso === opsCalRangeAnchor) cls.push('is-selected');
+    const chips = marks.map((ev) =>
+      `<span class="ops-cal-chip" data-kind="${esc(ev.kind)}" title="${esc(ev.title)}">${esc(ev.title)}</span>`
+    ).join('') + (more ? `<span class="ops-cal-chip" data-kind="その他">+${more}</span>` : '');
+    html += `<button type="button" class="${cls.join(' ')}" data-date="${iso}" aria-label="${iso}">`
+      + `<span class="ops-cal-day-num">${day}</span>`
+      + `<span class="ops-cal-marks">${chips}</span></button>`;
+  }
+  grid.innerHTML = html;
+  grid.querySelectorAll('.ops-cal-day[data-date]').forEach((btn) => {
+    btn.addEventListener('click', () => onOpsCalDayClick(btn.getAttribute('data-date') || ''));
+  });
+}
+
+function renderOpsCalendarEventList() {
+  const list = document.getElementById('opsCalEventList');
+  if (!list) return;
+  const events = normalizeStoreOpsCalendarEvents(opsCalendarEvents).slice().reverse();
+  if (!events.length) {
+    list.innerHTML = '<div class="ops-cal-empty">まだカレンダー登録はありません。日付を選んで追加してください。</div>';
+    return;
+  }
+  list.innerHTML = events.map((ev) => `
+    <div class="ops-cal-item" data-id="${esc(ev.id)}">
+      <div class="ops-cal-item-main">
+        <div class="ops-cal-item-title">[${esc(ev.kind)}] ${esc(ev.title)}</div>
+        <div class="ops-cal-item-meta">${esc(ev.start)} 〜 ${esc(ev.end)}</div>
+        ${ev.note ? `<div class="ops-cal-item-note">${esc(ev.note)}</div>` : ''}
+      </div>
+      <div class="ops-cal-item-actions">
+        <button type="button" data-edit="${esc(ev.id)}">編集</button>
+        <button type="button" data-del="${esc(ev.id)}">削除</button>
+      </div>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => beginEditOpsCalendarEvent(btn.getAttribute('data-edit') || ''));
+  });
+  list.querySelectorAll('[data-del]').forEach((btn) => {
+    btn.addEventListener('click', () => deleteOpsCalendarEvent(btn.getAttribute('data-del') || ''));
+  });
+}
+
+function renderOpsCalendarUi() {
+  opsCalendarEvents = normalizeStoreOpsCalendarEvents(opsCalendarEvents);
+  renderOpsCalendarGrid();
+  renderOpsCalendarEventList();
+}
+
+function onOpsCalDayClick(iso) {
+  const date = normalizeStoreOpsIsoDate(iso);
+  if (!date) return;
+  const startEl = document.getElementById('opsEvStart');
+  const endEl = document.getElementById('opsEvEnd');
+  if (!opsCalRangeAnchor) {
+    opsCalRangeAnchor = date;
+    if (startEl) startEl.value = date;
+    if (endEl) endEl.value = date;
+  } else if (date < opsCalRangeAnchor) {
+    if (startEl) startEl.value = date;
+    if (endEl) endEl.value = opsCalRangeAnchor;
+    opsCalRangeAnchor = '';
+  } else {
+    if (startEl) startEl.value = opsCalRangeAnchor;
+    if (endEl) endEl.value = date;
+    opsCalRangeAnchor = '';
+  }
+  renderOpsCalendarGrid();
+  const status = document.getElementById('opsEvStatus');
+  if (status) {
+    status.textContent = opsCalRangeAnchor
+      ? `開始日 ${date}。終了日をクリックしてください`
+      : `期間 ${(startEl?.value) || ''}〜${(endEl?.value) || ''} を選択中`;
+  }
+}
+
+function clearOpsCalendarEventForm() {
+  opsCalEditingId = '';
+  opsCalRangeAnchor = '';
+  const kind = document.getElementById('opsEvKind');
+  const title = document.getElementById('opsEvTitle');
+  const start = document.getElementById('opsEvStart');
+  const end = document.getElementById('opsEvEnd');
+  const note = document.getElementById('opsEvNote');
+  const addBtn = document.getElementById('opsEvAddBtn');
+  const status = document.getElementById('opsEvStatus');
+  if (kind) kind.value = '施策';
+  if (title) title.value = '';
+  if (start) start.value = '';
+  if (end) end.value = '';
+  if (note) note.value = '';
+  if (addBtn) addBtn.textContent = 'カレンダーに追加';
+  if (status) status.textContent = '';
+  renderOpsCalendarGrid();
+}
+
+function beginEditOpsCalendarEvent(id) {
+  const ev = opsCalendarEvents.find((x) => x.id === id);
+  if (!ev) return;
+  opsCalEditingId = ev.id;
+  opsCalRangeAnchor = '';
+  const kind = document.getElementById('opsEvKind');
+  const title = document.getElementById('opsEvTitle');
+  const start = document.getElementById('opsEvStart');
+  const end = document.getElementById('opsEvEnd');
+  const note = document.getElementById('opsEvNote');
+  const addBtn = document.getElementById('opsEvAddBtn');
+  const status = document.getElementById('opsEvStatus');
+  if (kind) kind.value = ev.kind;
+  if (title) title.value = ev.title;
+  if (start) start.value = ev.start;
+  if (end) end.value = ev.end;
+  if (note) note.value = ev.note || '';
+  if (addBtn) addBtn.textContent = 'カレンダーを更新';
+  if (status) status.textContent = '編集中（更新後、上部の保存でクラウド同期）';
+  const [y, m] = ev.start.split('-').map(Number);
+  if (y && m) { opsCalViewYear = y; opsCalViewMonth = m; }
+  renderOpsCalendarUi();
+}
+
+function deleteOpsCalendarEvent(id) {
+  opsCalendarEvents = opsCalendarEvents.filter((x) => x.id !== id);
+  if (opsCalEditingId === id) clearOpsCalendarEventForm();
+  renderOpsCalendarUi();
+  refreshStoreOpsPreview();
+  const status = document.getElementById('opsEvStatus');
+  if (status) status.textContent = '削除しました（上部の保存でクラウド同期）';
+}
+
+function upsertOpsCalendarEventFromForm() {
+  const status = document.getElementById('opsEvStatus');
+  let start = normalizeStoreOpsIsoDate(document.getElementById('opsEvStart')?.value);
+  let end = normalizeStoreOpsIsoDate(document.getElementById('opsEvEnd')?.value);
+  const title = String(document.getElementById('opsEvTitle')?.value || '').trim().slice(0, 120);
+  const kindRaw = String(document.getElementById('opsEvKind')?.value || '').trim();
+  const kind = STORE_OPS_CALENDAR_KINDS.includes(kindRaw) ? kindRaw : 'その他';
+  const note = String(document.getElementById('opsEvNote')?.value || '').trim().slice(0, 500);
+  if (!start && end) start = end;
+  if (!end && start) end = start;
+  if (!title) {
+    if (status) status.textContent = 'タイトルを入力してください';
+    return;
+  }
+  if (!start || !end) {
+    if (status) status.textContent = '開始日と終了日を選択してください';
+    return;
+  }
+  if (start > end) { const t = start; start = end; end = t; }
+  if (!opsCalEditingId && opsCalendarEvents.length >= STORE_OPS_CALENDAR_EVENTS_MAX) {
+    if (status) status.textContent = `登録上限（${STORE_OPS_CALENDAR_EVENTS_MAX}件）です`;
+    return;
+  }
+  const next = {
+    id: opsCalEditingId || newStoreOpsCalendarEventId(),
+    title,
+    kind,
+    start,
+    end,
+    note
+  };
+  if (opsCalEditingId) {
+    opsCalendarEvents = opsCalendarEvents.map((ev) => (ev.id === opsCalEditingId ? next : ev));
+  } else {
+    opsCalendarEvents = [...opsCalendarEvents, next];
+  }
+  opsCalendarEvents = normalizeStoreOpsCalendarEvents(opsCalendarEvents);
+  clearOpsCalendarEventForm();
+  renderOpsCalendarUi();
+  refreshStoreOpsPreview();
+  if (status) status.textContent = '反映しました（上部の保存でクラウド同期）';
+}
+
 function readStoreOpsForm() {
   const closed = [...document.querySelectorAll('#opsClosedWeekdays input[type=checkbox]:checked')]
     .map(el => el.value)
@@ -7665,7 +8060,8 @@ function readStoreOpsForm() {
     dinnerOffered: document.getElementById('opsDinnerOffered')?.value,
     specialOpenPolicy: document.getElementById('opsSpecialOpenPolicy')?.value,
     notes: document.getElementById('opsNotes')?.value,
-    journalSalesSync: !!document.getElementById('opsJournalSalesSync')?.checked
+    journalSalesSync: !!document.getElementById('opsJournalSalesSync')?.checked,
+    calendarEvents: opsCalendarEvents
   });
 }
 
@@ -7691,6 +8087,10 @@ function fillStoreOpsForm(profile) {
   if (notes) notes.value = p.notes;
   if (sync) sync.checked = !!p.journalSalesSync;
   updateJournalSalesSyncSwitchLabel(!!p.journalSalesSync);
+  opsCalendarEvents = normalizeStoreOpsCalendarEvents(p.calendarEvents);
+  opsCalEditingId = '';
+  opsCalRangeAnchor = '';
+  renderOpsCalendarUi();
   const preview = document.getElementById('opsPreview');
   if (preview) preview.textContent = formatStoreOpsBlockForAi(p).trim() || '（未設定）';
 }
@@ -7743,28 +8143,63 @@ async function saveStoreOpsForm() {
 }
 
 function resetStoreOpsForm() {
-  // カレンダー初期値に戻しても、過去売上同期フラグは誤消灯しない
-  const keepSync = !!readStoreOpsForm().journalSalesSync;
+  // 定休などの初期値に戻しても、同期フラグとカレンダー登録は誤消去しない
+  const current = readStoreOpsForm();
   const profile = writeStoreOpsProfileLocal({
     ...defaultStoreOpsProfile(),
-    journalSalesSync: keepSync
+    journalSalesSync: !!current.journalSalesSync,
+    calendarEvents: normalizeStoreOpsCalendarEvents(current.calendarEvents)
   });
   fillStoreOpsForm(profile);
   const status = document.getElementById('opsFormStatus');
-  if (status) status.textContent = '店舗の初期値に戻しました（過去売上同期は維持。未同期。必要なら保存を押してください）';
+  if (status) status.textContent = '店舗の初期値に戻しました（過去売上同期・カレンダーは維持。未同期。必要なら保存を押してください）';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   const saveBtn = document.getElementById('opsSaveBtn');
   const resetBtn = document.getElementById('opsResetBtn');
   const sync = document.getElementById('opsJournalSalesSync');
+  const calPrev = document.getElementById('opsCalPrevBtn');
+  const calNext = document.getElementById('opsCalNextBtn');
+  const calToday = document.getElementById('opsCalTodayBtn');
+  const evAdd = document.getElementById('opsEvAddBtn');
+  const evClear = document.getElementById('opsEvClearBtn');
   if (saveBtn) saveBtn.addEventListener('click', () => { saveStoreOpsForm(); });
   if (resetBtn) resetBtn.addEventListener('click', () => { resetStoreOpsForm(); });
   if (sync) {
     sync.addEventListener('change', () => {
       updateJournalSalesSyncSwitchLabel(!!sync.checked);
+      refreshStoreOpsPreview();
     });
   }
+  if (calPrev) {
+    calPrev.addEventListener('click', () => {
+      opsCalViewMonth -= 1;
+      if (opsCalViewMonth < 1) { opsCalViewMonth = 12; opsCalViewYear -= 1; }
+      renderOpsCalendarGrid();
+    });
+  }
+  if (calNext) {
+    calNext.addEventListener('click', () => {
+      opsCalViewMonth += 1;
+      if (opsCalViewMonth > 12) { opsCalViewMonth = 1; opsCalViewYear += 1; }
+      renderOpsCalendarGrid();
+    });
+  }
+  if (calToday) {
+    calToday.addEventListener('click', () => {
+      const now = new Date();
+      opsCalViewYear = now.getFullYear();
+      opsCalViewMonth = now.getMonth() + 1;
+      renderOpsCalendarGrid();
+    });
+  }
+  if (evAdd) evAdd.addEventListener('click', () => { upsertOpsCalendarEventFromForm(); });
+  if (evClear) evClear.addEventListener('click', () => { clearOpsCalendarEventForm(); });
+  ['opsEvStart', 'opsEvEnd'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => { opsCalRangeAnchor = ''; renderOpsCalendarGrid(); });
+  });
 });
 
 let aiChatHistory = [];
