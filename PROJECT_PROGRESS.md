@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - 過去売上同期 ON/OFF を店舗情報へ
+
+- Request: おすすめの場所に journalSalesSync の on/off スイッチを作る。
+- Place: Journal Report「店舗情報」タブ、営業カレンダーカードの下に独立カード。
+- Change: UI トグル＋`normalizeStoreOperationProfile` で boolean 保持。キー未送信時は既存 ON を維持。初期値リセットでも同期フラグは維持。
+- Deploy: `admin-api` + Pages（`public/jnm/*`）。
+
 ### 2026-08-07 - 誤登録2027-08予算の削除
 
 - Store: Sauvage (`sauvage`)

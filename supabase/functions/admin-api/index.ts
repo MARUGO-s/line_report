@@ -12013,6 +12013,11 @@ function normalizeStoreOperationProfile(raw: unknown): Record<string, unknown> {
     dinnerOffered: dinner,
     specialOpenPolicy: toSafeString(src.specialOpenPolicy).slice(0, 2000),
     notes: toSafeString(src.notes).slice(0, 4000),
+    // POSジャーナル → 過去売上の自動同期。未指定は OFF（明示 true のみ有効）
+    journalSalesSync:
+      src.journalSalesSync === true ||
+      src.journalSalesSync === "on" ||
+      src.journalSalesSync === "true",
   }
 }
 
@@ -12044,7 +12049,26 @@ async function saveStoreOperationProfile(
   _storeScope: string | null,
 ) {
   const storeKey = normalizePosJournalStoreKey(body.store_key ?? body.store)
-  const profile = normalizeStoreOperationProfile(body.profile ?? body)
+  const rawProfile = isRecord(body.profile) ? body.profile : body
+  const profile = normalizeStoreOperationProfile(rawProfile)
+  // 古いクライアントがキー未送信のとき、既存の同期ONを誤って消さない
+  if (!Object.prototype.hasOwnProperty.call(rawProfile, "journalSalesSync")) {
+    const { data: existing, error: existingError } = await supabase
+      .from("store_operation_profiles")
+      .select("profile")
+      .eq("store_partition_key", storeKey)
+      .maybeSingle()
+    if (existingError) {
+      throw {
+        status: 500,
+        message: `店舗営業情報の取得に失敗しました: ${existingError.message}`,
+      } satisfies AppError
+    }
+    const existingProfile = isRecord(existing?.profile) ? existing.profile : null
+    if (existingProfile?.journalSalesSync === true) {
+      profile.journalSalesSync = true
+    }
+  }
   const now = new Date().toISOString()
   const { data, error } = await supabase
     .from("store_operation_profiles")
