@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - migration 履歴ズレ修復で Edge デプロイを緑に
+
+- Request: Deploy Edge Functions の ×（db push 履歴ズレ）を消し、git push デプロイを成功扱いにする。
+- Cause: 本番だけに残る orphan migration `20260806185129`（local git にファイル無し）。
+- Change: `scripts/supabase-db-push-reconcile.sh` で remote-only を `migration repair --status reverted` 後に再 `db push`。workflow から呼び出す。
+- Expected: 未適用の `20260806133001` / `20260807030000` もこの成功時に適用される。
+
 ### 2026-08-06 - git push デプロイの単一ジョブ化
 
 - Request: `main` への git push / マージで Edge Functions と GitHub Pages が確実にデプロイされるようにする。
