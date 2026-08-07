@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - 過去売上同期トグルの本番動作テスト
+
+- Result: PASS (Actions run 31146495132)
+- Covered: Pages wiring, DB ON store = bistrocavacava only, admin-api ON/OFF/omit-key preserve on sauvage (restored), CAVACAVA stayed ON
+- Script kept: `scripts/verify-journal-sales-sync-toggle.sh`
+
 ### 2026-08-07 - 過去売上同期 ON/OFF を店舗情報へ
 
 - Request: おすすめの場所に journalSalesSync の on/off スイッチを作る。
