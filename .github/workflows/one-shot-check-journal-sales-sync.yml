@@ -1,0 +1,60 @@
+name: One-shot check journal sales sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/one-shot-check-journal-sales-sync.yml"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: hocbnifuactbvmyjraxy
+    steps:
+      - uses: actions/checkout@v6
+      - uses: supabase/setup-cli@v2
+        with:
+          version: 2.106.0
+      - name: Check sync readiness
+        run: |
+          set -euo pipefail
+          supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          echo '=== migrations ==='
+          supabase db query --linked --output table "
+            select version
+            from supabase_migrations.schema_migrations
+            where version in ('20260806133001','20260807030000')
+            order by version;
+          "
+          echo '=== source/tax columns ==='
+          supabase db query --linked --output table "
+            select table_name, column_name
+            from information_schema.columns
+            where table_schema='public'
+              and table_name in ('line_sales_manual_day','line_sales_manual_month_gross')
+              and column_name in ('source','tax_amount_yen')
+            order by 1,2;
+          "
+          echo '=== journalSalesSync=true stores ==='
+          supabase db query --linked --output table "
+            select store_partition_key,
+                   profile->>'journalSalesSync' as journal_sales_sync,
+                   updated_at
+            from public.store_operation_profiles
+            where coalesce(profile->>'journalSalesSync','') = 'true'
+            order by 1;
+          "
+          echo '=== journal-sourced day counts ==='
+          supabase db query --linked --output table "
+            select store_partition_key, count(*)::int as day_rows,
+                   min(sales_date)::text as from_d, max(sales_date)::text as to_d
+            from public.line_sales_manual_day
+            where source = 'journal'
+            group by 1
+            order by 1
+            limit 40;
+          "
