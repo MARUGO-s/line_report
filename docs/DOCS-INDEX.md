@@ -43,6 +43,7 @@
 | [ROOM-PERMISSION-TEST-CHECKLIST.md](./ROOM-PERMISSION-TEST-CHECKLIST.md) | QA | 権限・Webhook 設定の動作確認 |
 | [LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md) | 運用・開発 | レシート OCR・店舗 Webhook・保存フロー |
 | [JOURNAL-STORE-KNOWLEDGE.md](./JOURNAL-STORE-KNOWLEDGE.md) | 運用・開発 | Journal Report「資料」タブ — 施策・メニュー資料の登録とAI分析への注入（期間一致で必ず添付／数値の正本は確定集計） |
+| [JOURNAL-REPORT-FEATURES.md](./JOURNAL-REPORT-FEATURES.md) | 運用・開発・説明 | **Journal Report 機能の詳細正本** — タブ／取込／店舗情報／資料・LINE `#メモ`／AI分析・チャット／予測／履歴 |
 | [JOURNAL-AI-CHAT-RULES.md](./JOURNAL-AI-CHAT-RULES.md) | 運用・開発・AI | Journal Report AIチャットの決まりごと — 確定集計の追加原則、銘柄／商品コード下4桁、西暦誤認禁止、プロンプト規約、API |
 | [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md) | 運用・開発 | Gmail 予約 → LINE（**会話検索とは別**） |
 | [スプレッドシート売上バックアップ-GAS.md](./スプレッドシート売上バックアップ-GAS.md) | 運用・開発 | 全店舗売上スプレッドシートの毎日バックアップ（GAS・6時同期後に日付名コピー）。コード＋トリガー手順＋確定構成 |
