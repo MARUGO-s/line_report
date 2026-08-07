@@ -6,13 +6,15 @@
 - **本番URL**: https://marugo-s.github.io/line_report/jnm/jnl2txt.html
 - **GitHub**: `MARUGO-s/line_report`（`main`）
 - **Supabase プロジェクト**: `hocbnifuactbvmyjraxy`
-- **最終更新**: 2026-08-04（コード正本に同期して全面改稿）
+- **最終更新**: 2026-08-07（機能一覧の正本を `docs/JOURNAL-REPORT-FEATURES.md` に分離・同期）
 
 関連ドキュメント（詳細の深掘り用）:
 
 | 文書 | 内容 |
 |---|---|
+| `docs/JOURNAL-REPORT-FEATURES.md` | **機能カタログの正本**（タブ／`#メモ`／店舗情報／AI／予測） |
 | `JOURNAL-STORE-KNOWLEDGE.md` / `docs/JOURNAL-STORE-KNOWLEDGE.md` | 店舗ナレッジ詳細 |
+| `docs/JOURNAL-AI-CHAT-RULES.md` | AIチャット確定集計・プロンプト規約 |
 | `HANDOVER.md` | 運用・デプロイ注意（特に Dropbox ミラーを supabase に戻さないこと） |
 | `docs/RESERVATION-GMAIL-GUIDE.md` | 予約（Gmail）取り込み |
 | `.cursor/rules/ai-enrichment-additive.mdc` | AI確定集計の Additive 原則 |
@@ -339,7 +341,7 @@ flowchart TB
 | 主なフィールド | `closedWeekdays`, `lunchOffered`, `dinnerOffered`, overflow 規則, `specialOpenPolicy`, `notes`, `journalSalesSync`（既定 OFF）, `calendarEvents[]`, `wineMl` |
 | UI | 「店舗情報」タブ。保存／リセット、プレビュー、過去売上同期 ON/OFF、施策・イベントカレンダー、ワインml換算 |
 | AI効果 | 定休ゼロ売上を機会損失と誤診しない。特別営業を区別。カレンダー登録を期間背景として注入。ワイン提供量(ml)を分析項目に |
-| ワインml | `wineMl: { glassMl, bottleMl:750固定, pairingMl }`。Glass/Bottle/ペアリング点数×ml → `wineVolumeAnalysis` |
+| ワインml | `wineMl: { glassMl, bottleMl:750固定, pairingMl }`。Glass/Bottle/ペアリング点数×ml → `wineVolumeAnalysis`。AIチャットは点数／総ml／両方を確認可 |
 | 過去売上同期 | `journalSalesSync===true` のとき journal → `line_sales_manual_day` / `_month_gross`（ジャーナル店舗向け） |
 | カレンダー | `calendarEvents: [{ id, title, kind, start, end, note }]`。プレビュー／AI に自動反映。詳細資料は店舗ナレッジ側 |
 
@@ -359,6 +361,8 @@ flowchart TB
 | 検索 | 期間重なり＋ trgm 類似。embedding 列はあるが生成パイプラインは未配線 |
 | 効果測定 | `POST .../generate-insight` → `source_type='ai_insight'` |
 | 削除 | 既定は論理削除（過去分析のため）。`purge` で完全削除 |
+| 閲覧 | **資料タブの一覧が正本**（LINE `#メモ` もここに蓄積。LINE上だけでは一覧不可） |
+| 詳細 | `docs/JOURNAL-REPORT-FEATURES.md` §6、`docs/JOURNAL-STORE-KNOWLEDGE.md` |
 
 ---
 
@@ -553,10 +557,11 @@ Webhook 側: `registerQuotedImageAsKnowledge`, `#メモ` 判定（`knowledge_mem
 - [x] 旧解析版検出と再作成誘導  
 - [x] 店舗切替・管理者横断・店舗スコープ制限  
 - [x] 店舗情報（定休等）→ AI毎ターン注入  
+- [x] 施策・イベントカレンダー／過去売上同期／ワインml換算  
 - [x] 資料タブ・Gemini画像解析・確認モーダル  
 - [x] RAGチャンク生成・プレビュー・DL  
-- [x] LINE `#メモ`（テキスト／画像引用）→ 資料  
-- [x] AIチャット（期間範囲の全月展開含む）  
+- [x] LINE `#メモ`（テキスト／画像引用）→ 資料（閲覧は資料タブ）  
+- [x] AIチャット（期間範囲の全月展開・ワイン点数/ml確認含む）  
 - [x] Additive 確定集計（昼夜F/D・異常月・初出・コース・コホート・予約）  
 - [x] 売上予測と MAPE 履歴  
 - [x] AI分析履歴 / チャットPDF履歴  
@@ -564,6 +569,7 @@ Webhook 側: `registerQuotedImageAsKnowledge`, `#メモ` 判定（`knowledge_mem
 - [x] 店舗横断サマリー（管理者）  
 - [x] テーマ（ライト／ダーク）  
 
+機能カタログの読み物正本: `docs/JOURNAL-REPORT-FEATURES.md`。
 ---
 
 *本ファイルは Journal Report の全体像の正本です。個別機能の細部は関連ドキュメントと `admin-api` / `jnl2txt.html` の実装を優先してください。旧版は同名ファイルの `.backup-*` に保管しています。*

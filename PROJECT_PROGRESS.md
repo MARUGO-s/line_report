@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - Journal Report 機能仕様MDを整備
+
+- Request: `#メモ` を含む Journal Report の機能を詳細に正確な MD へまとめる。
+- Change: `docs/JOURNAL-REPORT-FEATURES.md` を新設。DOCS-INDEX・アーキテクチャ・資料仕様・使い方タブを同期。
+- Deploy: Pages `public/jnm/*`（使い方文言）＋ docs。
+
 ### 2026-08-07 - AIチャットのワイン量 点数/ml 確認経路
 
 - Request: 年比較などでワイン量を聞かれたとき、点数／総ml／両方をユーザーに確認し、mlは店舗換算で計算。
