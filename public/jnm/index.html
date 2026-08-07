@@ -2171,8 +2171,13 @@
         <option value="false">無効のみ</option>
       </select>
       <input id="knFilterQuery" type="search" placeholder="キーワード検索">
+      <input id="knFilterFrom" type="date" title="この日以降の資料に絞り込む" aria-label="期間の開始日">
+      <span style="color:var(--text-2);font-size:12px;">〜</span>
+      <input id="knFilterTo" type="date" title="この日までの資料に絞り込む" aria-label="期間の終了日">
+      <button id="knFilterClearDates" class="btn btn-secondary" type="button">期間クリア</button>
       <button id="knReloadBtn" class="btn btn-secondary">再読込</button>
     </div>
+    <p class="kn-note" id="knFilterDateNote" hidden>期間を指定すると、その期間に重なる資料だけを表示します。日付を空欄にした「常時有効」の資料（グランドメニュー・マニュアル等）は、期間指定中は非表示になります。</p>
     <div id="knList" class="kn-list"><div class="empty">読み込んでいません。</div></div>
   </div>
 </section>
@@ -12652,14 +12657,41 @@ async function loadKnowledgeList() {
     if (active) params.set('active', active);
     if (q.trim()) params.set('q', q.trim());
     const body = await adminApiFetch(`${KNOWLEDGE_API}?${params.toString()}`, { method: 'GET' });
-    renderKnowledgeList(Array.isArray(body.items) ? body.items : []);
-    // AI用キャッシュも同時に更新（有効なものだけ）
+    const fetched = Array.isArray(body.items) ? body.items : [];
+    // 期間の絞り込みはクライアント側で行う（APIは日付条件を持たないため）
+    renderKnowledgeList(filterKnowledgeByDateRange(fetched));
+    // AI用キャッシュは全件（絞り込み前）で更新する。表示用の絞り込みを分析へ持ち込まない。
     if (!category && active === 'true' && !q.trim()) {
-      knowledgeCache = { storeKey: STORE_KEY, loadedAt: Date.now(), items: (body.items || []) };
+      knowledgeCache = { storeKey: STORE_KEY, loadedAt: Date.now(), items: fetched };
     }
   } catch (err) {
     listEl.innerHTML = `<div class="empty">読み込みに失敗しました: ${esc(err.message || String(err))}</div>`;
   }
+}
+
+/**
+ * 資料一覧の期間絞り込み。資料自身の期間（period_start/end）を優先し、
+ * 未設定の資料は登録日（created_at のJST暦日）で判定する。
+ * 期間を指定した時点で「その期間に何があったか」を見たい意図なので、
+ * 日付を持たない常時有効の資料は除外する（クリアすれば元に戻る）。
+ */
+function filterKnowledgeByDateRange(items) {
+  const from = normalizeStoreOpsIsoDate(knowledgeEl('knFilterFrom')?.value);
+  const to = normalizeStoreOpsIsoDate(knowledgeEl('knFilterTo')?.value);
+  const note = knowledgeEl('knFilterDateNote');
+  if (note) note.hidden = !(from || to);
+  if (!from && !to) return items;
+  const lo = from || '0000-01-01';
+  const hi = to || '9999-12-31';
+  return (items || []).filter((item) => {
+    const start = normalizeStoreOpsIsoDate(item?.period_start);
+    const end = normalizeStoreOpsIsoDate(item?.period_end);
+    if (start || end) {
+      return (start || '0000-01-01') <= hi && (end || '9999-12-31') >= lo;
+    }
+    const created = toJstDayKey(item?.created_at);
+    return created ? (created >= lo && created <= hi) : false;
+  });
 }
 
 function renderKnowledgeList(items) {
@@ -13346,6 +13378,15 @@ knowledgeEl('knFilterCategory')?.addEventListener('change', loadKnowledgeList);
 knowledgeEl('knFilterActive')?.addEventListener('change', loadKnowledgeList);
 knowledgeEl('knFilterQuery')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing) loadKnowledgeList();
+});
+knowledgeEl('knFilterFrom')?.addEventListener('change', loadKnowledgeList);
+knowledgeEl('knFilterTo')?.addEventListener('change', loadKnowledgeList);
+knowledgeEl('knFilterClearDates')?.addEventListener('click', () => {
+  const from = knowledgeEl('knFilterFrom');
+  const to = knowledgeEl('knFilterTo');
+  if (from) from.value = '';
+  if (to) to.value = '';
+  loadKnowledgeList();
 });
 knowledgeEl('knFile')?.addEventListener('change', (e) => handleKnowledgeFileChange(e.target.files?.[0]));
 
