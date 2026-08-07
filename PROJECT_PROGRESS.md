@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - 誤登録2027-08予算の削除
+
+- Store: Sauvage (`sauvage`)
+- Deleted: month budget ¥2,300,000 and 4 closed days for `2027-08`
+- Verified empty afterward. One-shot workflow removed after run.
+
 ### 2026-08-07 - migration 履歴ズレ修復で Edge デプロイを緑に
 
 - Request: Deploy Edge Functions の ×（db push 履歴ズレ）を消し、git push デプロイを成功扱いにする。
