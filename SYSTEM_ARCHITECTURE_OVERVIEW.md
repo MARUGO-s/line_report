@@ -336,10 +336,11 @@ flowchart TB
 |---|---|
 | テーブル | `store_operation_profiles`（PK: `store_partition_key`） |
 | API | `GET/POST /pos-journals/store-ops` |
-| 主なフィールド | `closedWeekdays`, `lunchOffered`, `dinnerOffered`, overflow 規則, `specialOpenPolicy`, `notes`, `journalSalesSync`（既定 OFF） |
-| UI | 「店舗情報」タブ。保存／リセット、プレビュー、過去売上同期 ON/OFF |
-| AI効果 | 定休ゼロ売上を機会損失と誤診しない。特別営業を区別 |
+| 主なフィールド | `closedWeekdays`, `lunchOffered`, `dinnerOffered`, overflow 規則, `specialOpenPolicy`, `notes`, `journalSalesSync`（既定 OFF）, `calendarEvents[]` |
+| UI | 「店舗情報」タブ。保存／リセット、プレビュー、過去売上同期 ON/OFF、施策・イベントカレンダー（開始日〜終了日） |
+| AI効果 | 定休ゼロ売上を機会損失と誤診しない。特別営業を区別。カレンダー登録を期間背景として注入 |
 | 過去売上同期 | `journalSalesSync===true` のとき journal → `line_sales_manual_day` / `_month_gross`（ジャーナル店舗向け） |
+| カレンダー | `calendarEvents: [{ id, title, kind, start, end, note }]`。プレビュー／AI に自動反映。詳細資料は店舗ナレッジ側 |
 
 ---
 

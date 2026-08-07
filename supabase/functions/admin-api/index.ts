@@ -11985,6 +11985,64 @@ async function deleteSalesForecastItem(
 
 // ===== Journal Report 店舗営業情報 (store_operation_profiles) =====
 
+const STORE_OPS_CALENDAR_KINDS = new Set([
+  "施策",
+  "イベント",
+  "価格改定",
+  "特別営業",
+  "その他",
+])
+const STORE_OPS_CALENDAR_EVENTS_MAX = 100
+
+function normalizeStoreOpsIsoDate(value: unknown): string {
+  const s = toSafeString(value).slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ""
+}
+
+function normalizeStoreOpsCalendarEvents(raw: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(raw)) return []
+  const out: Array<Record<string, unknown>> = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (out.length >= STORE_OPS_CALENDAR_EVENTS_MAX) break
+    if (!isRecord(item)) continue
+    let start = normalizeStoreOpsIsoDate(item.start ?? item.period_start ?? item.from)
+    let end = normalizeStoreOpsIsoDate(item.end ?? item.period_end ?? item.to)
+    if (!start && end) start = end
+    if (!end && start) end = start
+    if (!start || !end) continue
+    if (start > end) {
+      const tmp = start
+      start = end
+      end = tmp
+    }
+    const title = toSafeString(item.title).slice(0, 120)
+    if (!title) continue
+    const kindRaw = toSafeString(item.kind ?? item.category)
+    const kind = STORE_OPS_CALENDAR_KINDS.has(kindRaw) ? kindRaw : "その他"
+    let id = toSafeString(item.id).slice(0, 64)
+    if (!id || seen.has(id)) {
+      id = `ev_${start.replace(/-/g, "")}_${out.length + 1}`
+    }
+    seen.add(id)
+    out.push({
+      id,
+      title,
+      kind,
+      start,
+      end,
+      note: toSafeString(item.note ?? item.notes).slice(0, 500),
+    })
+  }
+  out.sort((a, b) => {
+    const as = String(a.start)
+    const bs = String(b.start)
+    if (as !== bs) return as < bs ? -1 : 1
+    return String(a.title).localeCompare(String(b.title), "ja")
+  })
+  return out
+}
+
 function normalizeStoreOperationProfile(raw: unknown): Record<string, unknown> {
   const src = isRecord(raw) ? raw : {}
   const weekdays = new Set(["日", "月", "火", "水", "木", "金", "土"])
@@ -12018,6 +12076,8 @@ function normalizeStoreOperationProfile(raw: unknown): Record<string, unknown> {
       src.journalSalesSync === true ||
       src.journalSalesSync === "on" ||
       src.journalSalesSync === "true",
+    // 店舗情報カレンダー（施策・イベント等）。古いクライアント未送信時は save 側で既存を維持
+    calendarEvents: normalizeStoreOpsCalendarEvents(src.calendarEvents ?? src.events),
   }
 }
 
@@ -12051,8 +12111,11 @@ async function saveStoreOperationProfile(
   const storeKey = normalizePosJournalStoreKey(body.store_key ?? body.store)
   const rawProfile = isRecord(body.profile) ? body.profile : body
   const profile = normalizeStoreOperationProfile(rawProfile)
-  // 古いクライアントがキー未送信のとき、既存の同期ONを誤って消さない
-  if (!Object.prototype.hasOwnProperty.call(rawProfile, "journalSalesSync")) {
+  const omitSync = !Object.prototype.hasOwnProperty.call(rawProfile, "journalSalesSync")
+  const omitEvents = !Object.prototype.hasOwnProperty.call(rawProfile, "calendarEvents") &&
+    !Object.prototype.hasOwnProperty.call(rawProfile, "events")
+  // 古いクライアントがキー未送信のとき、既存の同期ON／カレンダー登録を誤って消さない
+  if (omitSync || omitEvents) {
     const { data: existing, error: existingError } = await supabase
       .from("store_operation_profiles")
       .select("profile")
@@ -12065,8 +12128,13 @@ async function saveStoreOperationProfile(
       } satisfies AppError
     }
     const existingProfile = isRecord(existing?.profile) ? existing.profile : null
-    if (existingProfile?.journalSalesSync === true) {
+    if (omitSync && existingProfile?.journalSalesSync === true) {
       profile.journalSalesSync = true
+    }
+    if (omitEvents && existingProfile) {
+      profile.calendarEvents = normalizeStoreOpsCalendarEvents(
+        existingProfile.calendarEvents ?? existingProfile.events,
+      )
     }
   }
   const now = new Date().toISOString()
