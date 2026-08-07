@@ -6,7 +6,7 @@
 - **本番URL**: https://marugo-s.github.io/line_report/jnm/jnl2txt.html
 - **GitHub**: `MARUGO-s/line_report`（`main`）
 - **Supabase プロジェクト**: `hocbnifuactbvmyjraxy`
-- **最終更新**: 2026-08-07（機能一覧の正本を `docs/JOURNAL-REPORT-FEATURES.md` に分離・同期）
+- **最終更新**: 2026-08-07（AI構成から Qwen／Kimi を除外して記載同期。機能正本は `docs/JOURNAL-REPORT-FEATURES.md`）
 
 関連ドキュメント（詳細の深掘り用）:
 
