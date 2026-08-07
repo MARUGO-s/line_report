@@ -78,3 +78,5 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+# Redeploy trigger after Actions outage recovery (2026-08-07)
