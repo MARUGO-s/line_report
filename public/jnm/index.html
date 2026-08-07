@@ -414,6 +414,19 @@
   .ops-weekday-grid{display:flex;flex-wrap:wrap;gap:8px 14px;padding:4px 0}
   .ops-weekday-grid label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text);cursor:pointer}
   .ops-preview{font-size:12px;line-height:1.7;color:var(--text-2);background:color-mix(in srgb, var(--text) 4%, transparent);border:1px solid var(--border);border-radius:8px;padding:10px 12px;white-space:pre-wrap}
+  .ops-sync-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .ops-sync-copy{flex:1;min-width:220px}
+  .ops-sync-copy h3{margin:0 0 6px;font-size:14px;font-family:var(--font-heading);font-weight:600;color:var(--text)}
+  .ops-sync-copy p{margin:0;font-size:12px;line-height:1.65;color:var(--text-2)}
+  .ops-sync-warn{margin:10px 0 0;padding:8px 10px;border:1px solid color-mix(in srgb, var(--text) 18%, transparent);border-radius:8px;background:color-mix(in srgb, var(--text) 4%, transparent);font-size:11px;line-height:1.6;color:var(--text-2)}
+  .ops-switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;flex-shrink:0}
+  .ops-switch input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+  .ops-switch-track{position:relative;width:46px;height:26px;border-radius:999px;border:1px solid var(--border-strong);background:color-mix(in srgb, var(--text) 12%, var(--surface));transition:background .15s ease,border-color .15s ease}
+  .ops-switch-track::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--page);border:1px solid var(--border);box-shadow:var(--shadow-sm);transition:transform .15s ease}
+  .ops-switch input:checked + .ops-switch-track{background:var(--text);border-color:var(--text)}
+  .ops-switch input:checked + .ops-switch-track::after{transform:translateX(20px);border-color:transparent}
+  .ops-switch input:focus-visible + .ops-switch-track{outline:2px solid var(--accent);outline-offset:2px}
+  .ops-switch-label{font-size:12px;font-weight:600;color:var(--text);min-width:2.5em}
   select{font-size:13px;padding:7px 10px;border-radius:var(--radius-ctl);border:1px solid var(--border-strong);
     background:var(--surface);color:var(--text);font-family:inherit;cursor:pointer}
   .controls input[type=date]{font-size:13px;padding:6px 10px;border-radius:var(--radius-ctl);border:1px solid var(--border-strong);
@@ -1853,6 +1866,22 @@
       <button id="opsSaveBtn" class="btn btn-primary" type="button">保存</button>
       <button id="opsResetBtn" class="btn btn-secondary" type="button">店舗の初期値に戻す</button>
       <span id="opsFormStatus" class="kn-status"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px;">
+    <div class="card-kicker">過去売上への同期（ジャーナルを正とする）</div>
+    <div class="ops-sync-row">
+      <div class="ops-sync-copy">
+        <h3>電子ジャーナルの確定集計を過去売上へ反映</h3>
+        <p>ON にすると、この店舗でジャーナルレポートを保存したとき、日次・月次の過去売上をジャーナル集計で更新します。既定は OFF です。</p>
+        <p class="ops-sync-warn">レシート運用の店舗では通常 OFF のままにしてください。ジャーナル店舗だけが対象です。ON にすると、同じ日付の手入力／他出所の過去売上が上書きされます。</p>
+      </div>
+      <label class="ops-switch" for="opsJournalSalesSync">
+        <input type="checkbox" id="opsJournalSalesSync" role="switch" aria-checked="false">
+        <span class="ops-switch-track" aria-hidden="true"></span>
+        <span class="ops-switch-label" id="opsJournalSalesSyncLabel">OFF</span>
+      </label>
     </div>
   </div>
 
@@ -7334,7 +7363,8 @@ function emptyStoreOpsProfile() {
     lunchOffered: 'yes',
     dinnerOffered: 'yes',
     specialOpenPolicy: '',
-    notes: ''
+    notes: '',
+    journalSalesSync: false
   };
 }
 
@@ -7368,7 +7398,8 @@ function normalizeStoreOpsProfile(raw) {
     lunchOffered: lunch,
     dinnerOffered: dinner,
     specialOpenPolicy: String(src.specialOpenPolicy || '').slice(0, 2000),
-    notes: String(src.notes || '').slice(0, 4000)
+    notes: String(src.notes || '').slice(0, 4000),
+    journalSalesSync: !!(src.journalSalesSync === true || src.journalSalesSync === 'on' || src.journalSalesSync === 'true')
   };
 }
 
@@ -7614,6 +7645,13 @@ function clampAiSystemInstruction(text, maxLen = 39000) {
   return s;
 }
 
+function updateJournalSalesSyncSwitchLabel(on) {
+  const label = document.getElementById('opsJournalSalesSyncLabel');
+  const input = document.getElementById('opsJournalSalesSync');
+  if (label) label.textContent = on ? 'ON' : 'OFF';
+  if (input) input.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+
 function readStoreOpsForm() {
   const closed = [...document.querySelectorAll('#opsClosedWeekdays input[type=checkbox]:checked')]
     .map(el => el.value)
@@ -7626,7 +7664,8 @@ function readStoreOpsForm() {
     lunchOffered: document.getElementById('opsLunchOffered')?.value,
     dinnerOffered: document.getElementById('opsDinnerOffered')?.value,
     specialOpenPolicy: document.getElementById('opsSpecialOpenPolicy')?.value,
-    notes: document.getElementById('opsNotes')?.value
+    notes: document.getElementById('opsNotes')?.value,
+    journalSalesSync: !!document.getElementById('opsJournalSalesSync')?.checked
   });
 }
 
@@ -7642,6 +7681,7 @@ function fillStoreOpsForm(profile) {
   const openWd = document.getElementById('opsOverflowOpenWeekday');
   const special = document.getElementById('opsSpecialOpenPolicy');
   const notes = document.getElementById('opsNotes');
+  const sync = document.getElementById('opsJournalSalesSync');
   if (lunch) lunch.value = p.lunchOffered;
   if (dinner) dinner.value = p.dinnerOffered;
   if (overflow) overflow.value = p.overflowRule ? 'on' : 'off';
@@ -7649,6 +7689,8 @@ function fillStoreOpsForm(profile) {
   if (openWd) openWd.value = p.overflowOpenWeekday;
   if (special) special.value = p.specialOpenPolicy;
   if (notes) notes.value = p.notes;
+  if (sync) sync.checked = !!p.journalSalesSync;
+  updateJournalSalesSyncSwitchLabel(!!p.journalSalesSync);
   const preview = document.getElementById('opsPreview');
   if (preview) preview.textContent = formatStoreOpsBlockForAi(p).trim() || '（未設定）';
 }
@@ -7701,17 +7743,28 @@ async function saveStoreOpsForm() {
 }
 
 function resetStoreOpsForm() {
-  const profile = writeStoreOpsProfileLocal(defaultStoreOpsProfile());
+  // カレンダー初期値に戻しても、過去売上同期フラグは誤消灯しない
+  const keepSync = !!readStoreOpsForm().journalSalesSync;
+  const profile = writeStoreOpsProfileLocal({
+    ...defaultStoreOpsProfile(),
+    journalSalesSync: keepSync
+  });
   fillStoreOpsForm(profile);
   const status = document.getElementById('opsFormStatus');
-  if (status) status.textContent = '店舗の初期値に戻しました（未同期。必要なら保存を押してください）';
+  if (status) status.textContent = '店舗の初期値に戻しました（過去売上同期は維持。未同期。必要なら保存を押してください）';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   const saveBtn = document.getElementById('opsSaveBtn');
   const resetBtn = document.getElementById('opsResetBtn');
+  const sync = document.getElementById('opsJournalSalesSync');
   if (saveBtn) saveBtn.addEventListener('click', () => { saveStoreOpsForm(); });
   if (resetBtn) resetBtn.addEventListener('click', () => { resetStoreOpsForm(); });
+  if (sync) {
+    sync.addEventListener('change', () => {
+      updateJournalSalesSyncSwitchLabel(!!sync.checked);
+    });
+  }
 });
 
 let aiChatHistory = [];
