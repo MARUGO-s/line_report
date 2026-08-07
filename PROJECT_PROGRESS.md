@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-07 - ドキュメント: Qwen/Kimi を現行AI構成から除外して記載更新
+
+- Request: 情報流出対策で構成外にした Qwen／Kimi が MD に残っているので書き直す。
+- Change: アーキテクチャ／機能仕様／AIループ設計／運用記録の「現行」記述を OpenAI・Claude・Groq GPT-OSS・Gemini・Grok に合わせる。履歴項目は当時の記録として残し、冒頭に現行表を追加。
+
 ### 2026-08-07 - Journal Report 機能仕様MDを整備
 
 - Request: `#メモ` を含む Journal Report の機能を詳細に正確な MD へまとめる。

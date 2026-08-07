@@ -60,7 +60,7 @@ flowchart TB
 
   subgraph AIENG["AI 役割分担"]
     GEM["Gemini<br>画像OCR / #メモ分類"]
-    GPT["OpenAI / Moonshot<br>分析合成"]
+    GPT["OpenAI / Claude<br>分析合成"]
     EXT["Perplexity / Grok<br>外部知見（任意）"]
   end
 
@@ -288,9 +288,10 @@ flowchart TB
 - エンドポイント: `.../functions/v1/ai-analyze`  
 - `action`: `analyze` | `chat` | `clarify`  
 - 店舗スコープ検証・レート制限あり  
-- 売上合成: OpenAI（既定）→ Moonshot/Kimi フォールバック  
+- 売上合成: OpenAI（既定 `gpt-5.6-luna`）→ Anthropic Claude Haiku フォールバック  
 - 外部知見: Perplexity / Grok（オーケストレーション時）。数値出典にはしない  
 - **Gemini は売上アナリストではない**（画像・#メモ分類専用）  
+- **情報流出対策**: Journal／フードコートの業務データ経路から **Qwen（通義）／Kimi（Moonshot）は構成外**。旧キーやコード残骸があっても現行経路では呼び出さない  
 
 ### 8.2 `summarizeMatched` 内の Additive レイヤ（順序固定）
 
@@ -526,9 +527,10 @@ AI:
 | テーブル名 `public.reports` | **`saved_reports`** |
 | LINE 👍 Reaction API で通数0フィードバック | **API非存在。replyToken 返信に変更** |
 | LocalStorage 二重保存が正本 | **クラウド必須。ローカルはキャッシュ扱い** |
-| AI＝Gemini が分析担当 | **Geminiは画像/#メモ。分析は GPT 系＋外部知見** |
+| AI＝Gemini が分析担当 | **Geminiは画像/#メモ。分析は OpenAI Luna → Claude Haiku** |
 | 機能はジャーナル＋簡易AIのみ | **店舗情報・資料・LINE・予約・予測・コホート・HTML分離・ゴミ箱等が追加済み** |
 | RAG「600文字」 | **サーバ実装は約1500文字**（UIコピーが古い場合あり） |
+| 売上合成の退避が Moonshot/Kimi | **Claude Haiku へ変更（情報流出対策で Qwen/Kimi は構成外）** |
 
 ---
 
