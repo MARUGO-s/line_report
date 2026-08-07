@@ -143,6 +143,8 @@ for (const name of [
   'formatCourseLineupFactsForAi',
   'monthEndIso',
   'knowledgePeriodLabel',
+  'knowledgePostedAtLabel',
+  'knowledgeTimelineLabel',
   'knowledgeOverlapsPeriod',
   'knowledgeTextSimilarity',
   'knowledgeSearchableText',
@@ -1212,6 +1214,61 @@ test('store knowledge is attached by period overlap, not only by similarity', ()
   assert.deepEqual([...context.selectStoreKnowledgeForQuery('質問', julyRange, [])], []);
 });
 
+test('LINE #メモ uses send date for analysis timeline, not always-on', () => {
+  const julyMemo = {
+    id: 11,
+    category: 'その他',
+    title: '大雨で赤ワイン好調',
+    summary: '現場メモ',
+    body_text: '大雨の日は赤が伸びた',
+    tags: ['LINE投稿', '現場メモ'],
+    source_type: 'line_post',
+    period_start: '2026-07-15',
+    period_end: '2026-07-15',
+    created_at: '2026-07-15T05:30:00.000Z',
+    is_active: true,
+  };
+  const marchMemo = {
+    id: 12,
+    category: 'その他',
+    title: '3月のランチ所感',
+    summary: '現場メモ',
+    body_text: 'ランチが伸びた',
+    tags: ['LINE投稿'],
+    source_type: 'line_post',
+    period_start: '2026-03-10',
+    period_end: '2026-03-10',
+    created_at: '2026-03-10T02:00:00.000Z',
+    is_active: true,
+  };
+  const alwaysOnManual = {
+    id: 13,
+    category: 'マニュアル',
+    title: '接客マニュアル',
+    summary: '常時',
+    body_text: '',
+    tags: [],
+    period_start: null,
+    period_end: null,
+    is_active: true,
+  };
+  const julyRange = { from: '2026-07-01', to: '2026-07-31' };
+  assert.equal(context.knowledgeOverlapsPeriod(julyMemo, julyRange), true);
+  assert.equal(context.knowledgeOverlapsPeriod(marchMemo, julyRange), false);
+  const picked = [...context.selectStoreKnowledgeForQuery('7月の要因は？', julyRange, [julyMemo, marchMemo, alwaysOnManual])]
+    .map((row) => row.title);
+  assert.deepEqual(picked, ['大雨で赤ワイン好調', '接客マニュアル']);
+  assert.equal(picked.includes('3月のランチ所感'), false, '他月のLINEメモを当該月分析に混ぜない');
+
+  const label = context.knowledgeTimelineLabel(julyMemo);
+  assert.match(label, /送信/);
+  assert.match(label, /2026/);
+  const block = context.formatStoreKnowledgeBlock([julyMemo]);
+  assert.match(block, /送信/);
+  assert.match(block, /大雨で赤ワイン好調/);
+  assert.match(block, /期間外のメモを当該月の主因にしない/);
+});
+
 test('the knowledge prompt block never becomes the source of numbers', () => {
   const items = [
     { category: '施策', title: '7月ワインフェア', summary: 'グラス3種入替', body_text: 'ボトルアップセル強化', tags: ['ワイン'], period_start: '2026-07-01', period_end: '2026-07-31', is_active: true },
@@ -1224,6 +1281,7 @@ test('the knowledge prompt block never becomes the source of numbers', () => {
   assert.match(block, /本ナレッジを数値の出典にしてはいけません/);
   assert.match(block, /登録資料によると/);
   assert.match(block, /※これは推測です/);
+  assert.match(block, /期間外のメモを当該月の主因にしない/);
 
   // 長文でも上限を超えない
   const huge = context.formatStoreKnowledgeBlock([
@@ -1274,6 +1332,22 @@ test('store knowledge API and storage stay behind the admin API', async () => {
   assert.match(migration, /revoke all on table public\.store_knowledge_documents from anon, authenticated/);
   assert.match(migration, /grant select, insert, update, delete on public\.store_knowledge_documents to service_role/);
   assert.match(migration, /'store-knowledge',\s*\n\s*'store-knowledge',\s*\n\s*false/, 'bucket must stay private');
+
+  assert.match(adminApi, /function resolveLineKnowledgePostedAt/);
+  assert.match(adminApi, /period_start: periodDate/);
+  assert.match(adminApi, /line_timestamp/);
+  const processStart = adminApi.indexOf('async function processLinePostKnowledge(');
+  assert.notEqual(processStart, -1);
+  const processBody = adminApi.slice(processStart, processStart + 9000);
+  assert.match(processBody, /resolveLineKnowledgePostedAt/);
+  assert.match(processBody, /period_start: periodDate/);
+  assert.match(processBody, /created_at: createdAt/);
+
+  const webhook = await readFile(
+    new URL('../supabase/functions/line-webhook/index.ts', import.meta.url),
+    'utf8',
+  );
+  assert.match(webhook, /line_timestamp:\s*typeof event\.timestamp === 'number' \? event\.timestamp : null/);
 });
 
 test('wine volume questions ask 点数 / 総ml / 両方 before answering', () => {

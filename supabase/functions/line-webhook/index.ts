@@ -2053,7 +2053,8 @@ async function registerQuotedImageAsKnowledge(
   memoText: string,
   createdBy: string,
   lineAccessTokenForSearch?: string,
-  quotedFileName = ''
+  quotedFileName = '',
+  lineTimestamp?: number | null,
 ): Promise<boolean> {
   try {
     const storeKey = registry.store_partition_key || ''
@@ -2139,7 +2140,8 @@ async function registerQuotedImageAsKnowledge(
     //    店舗の指定キーは `store_key`。admin-api の saveStoreKnowledge は body.store_key しか
     //    読まないため、DB列名の `store_partition_key` で送ると 400 "store_key is required."
     //    になり登録できない（x-store-key ヘッダも内部ブリッジでは storeScope=null で無視される）。
-    const recordPayload = {
+    //    line_timestamp は #メモ 送信イベントの時刻。分析の期間照合用に period/created_at へ載せる。
+    const recordPayload: Record<string, unknown> = {
       store_key: storeKey,
       category: result.category || 'メニュー',
       title: result.title || `LINEメモ_${msgId}`,
@@ -2152,7 +2154,8 @@ async function registerQuotedImageAsKnowledge(
       mime_type: contentType,
       file_size_bytes: binary.length,
       source_type: 'line_post',
-      created_by: createdBy || 'LINEユーザー'
+      created_by: createdBy || 'LINEユーザー',
+      line_timestamp: lineTimestamp ?? null,
     }
 
     const postKnowledge = (payload: Record<string, unknown>) =>
@@ -2722,6 +2725,8 @@ Deno.serve(async (req) => {
               text,
               eventUserId,
               lineAccessTokenForSearch,
+              '',
+              typeof event.timestamp === 'number' ? event.timestamp : null,
             )
           } catch (e) {
             console.error('registerQuotedImageAsKnowledge error:', e)
@@ -2766,7 +2771,9 @@ Deno.serve(async (req) => {
                 body: JSON.stringify({
                   store_key: storeKey,
                   text: text,
-                  sender_name: eventUserId || 'LINEユーザー'
+                  sender_name: eventUserId || 'LINEユーザー',
+                  // LINE Messaging API の event.timestamp（ms）。分析の時間軸用に保存する。
+                  line_timestamp: typeof event.timestamp === 'number' ? event.timestamp : null,
                 })
               })
               if (res.ok) {

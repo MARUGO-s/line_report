@@ -12222,6 +12222,36 @@ function toNullableDate(value: unknown): string | null {
   return Number.isNaN(parsed.getTime()) ? null : iso
 }
 
+/**
+ * LINE #メモ の送信日時。
+ * webhook の event.timestamp（ms）または ISO を受け取り、保存用 ISO と JST 暦日を返す。
+ * 分析の期間照合は JST 日付を period_start/end に載せる（UTCずれで月がずれないように）。
+ */
+function resolveLineKnowledgePostedAt(body: Record<string, unknown>): {
+  iso: string
+  jstDate: string
+} | null {
+  const fromIso = toSafeString(body.posted_at || body.sent_at)
+  let ms = NaN
+  if (fromIso) {
+    ms = Date.parse(fromIso)
+  }
+  if (!Number.isFinite(ms)) {
+    const rawTs = body.line_timestamp ?? body.timestamp ?? body.event_timestamp
+    const n = typeof rawTs === "number" ? rawTs : Number(toSafeString(rawTs))
+    if (Number.isFinite(n) && n > 0) {
+      // LINE は通常ミリ秒。秒しか来ない場合は 10^12 未満なので補正する。
+      ms = n < 1e12 ? n * 1000 : n
+    }
+  }
+  if (!Number.isFinite(ms) || ms <= 0) return null
+  const date = new Date(ms)
+  if (Number.isNaN(date.getTime())) return null
+  const jstDate = toJstDateKeyFromIso(date.toISOString())
+  if (!jstDate) return null
+  return { iso: date.toISOString(), jstDate }
+}
+
 function normalizeStoreKnowledgeTags(value: unknown): string[] {
   const raw = Array.isArray(value)
     ? value
@@ -12376,8 +12406,17 @@ async function saveStoreKnowledge(
       message: "概要または内容のどちらかを入力してください（AIが読む本文になります）。",
     } satisfies AppError
   }
-  const periodStart = toNullableDate(body.period_start)
-  const periodEnd = toNullableDate(body.period_end)
+  const postedAt = resolveLineKnowledgePostedAt(body)
+  let periodStart = toNullableDate(body.period_start)
+  let periodEnd = toNullableDate(body.period_end)
+  const requestedSource = STORE_KNOWLEDGE_SOURCE_TYPES.has(toSafeString(body.source_type))
+    ? toSafeString(body.source_type)
+    : ""
+  // LINE #メモ は送信日を実施期間に載せて分析の時間軸をずらさない（未指定時のみ）。
+  if (requestedSource === "line_post" && postedAt) {
+    if (!periodStart) periodStart = postedAt.jstDate
+    if (!periodEnd) periodEnd = postedAt.jstDate
+  }
   if (periodStart && periodEnd && periodStart > periodEnd) {
     throw {
       status: 400,
@@ -12405,9 +12444,7 @@ async function saveStoreKnowledge(
     sha256_hex: toSafeString(body.sha256_hex).toLowerCase().match(/^[0-9a-f]{64}$/)
       ? toSafeString(body.sha256_hex).toLowerCase()
       : null,
-    source_type: STORE_KNOWLEDGE_SOURCE_TYPES.has(toSafeString(body.source_type))
-      ? toSafeString(body.source_type)
-      : (storagePath ? "upload" : "manual"),
+    source_type: requestedSource || (storagePath ? "upload" : "manual"),
     is_active: body.is_active === undefined ? true : !!body.is_active,
     created_by: toSafeString(body.created_by).slice(0, 120),
     updated_at: now,
@@ -12439,9 +12476,10 @@ async function saveStoreKnowledge(
     )
     return { ok: true, id: Number(data.id), updated: true, chunks_created: chunksCreated }
   }
+  const createdAt = postedAt?.iso || now
   const { data, error } = await supabase
     .from("store_knowledge_documents")
-    .insert({ ...payload, created_at: now })
+    .insert({ ...payload, created_at: createdAt })
     .select("id")
     .maybeSingle()
   if (error) {
@@ -12933,6 +12971,10 @@ async function processLinePostKnowledge(
     throw { status: 400, message: "store_key and text are required." } satisfies AppError
   }
   const senderName = toSafeString(body.sender_name).slice(0, 120) || "LINEスタッフ"
+  const postedAt = resolveLineKnowledgePostedAt(body)
+  const postedLabel = postedAt
+    ? `${postedAt.jstDate}（JST・LINE送信）`
+    : "送信日時不明（受信処理時刻で代替）"
 
   // ① 100% プログラム判定: #メモ / #日報 / #note を含まない投稿はAIを起動せず即スルー
   //    判定は _shared/knowledge_memo_tag.ts に集約（全角'＃'対応。コピーを増やさない）
@@ -12951,7 +12993,8 @@ async function processLinePostKnowledge(
   let tags: string[] = ["LINE投稿", "現場メモ"]
   const aiText = await callKnowledgeGemini([{
     text: `あなたは飲食店の現場LINE投稿を解読・整理するプロアナリストAIです。
-以下のLINE投稿（投稿者: ${senderName}）を解析し、カテゴリー分類・タイトル生成・要約・タグ付けを行ってください。
+以下のLINE投稿（投稿者: ${senderName}／送信日時: ${postedLabel}）を解析し、カテゴリー分類・タイトル生成・要約・タグ付けを行ってください。
+送信日時は出来事の時点として扱い、タイトルや要約の時間軸をずらさないでください。
 
 【投稿文】
 ${cleanText}
@@ -12989,6 +13032,9 @@ ${cleanText}
   }
 
   const now = new Date().toISOString()
+  // 送信日時を created_at と period（当日）に載せる。常時有効だと全期間の分析に混ざり時間軸がずれる。
+  const createdAt = postedAt?.iso || now
+  const periodDate = postedAt?.jstDate || toJstDateKeyFromIso(createdAt)
   const record: Record<string, unknown> = {
     store_partition_key: storeKey,
     category,
@@ -12996,11 +13042,13 @@ ${cleanText}
     summary,
     body_text: cleanText,
     search_text: buildStoreKnowledgeSearchText({ title, summary, bodyText: cleanText, tags }),
+    period_start: periodDate,
+    period_end: periodDate,
     tags,
     source_type: "line_post",
     is_active: true,
     created_by: senderName,
-    created_at: now,
+    created_at: createdAt,
     updated_at: now,
   }
   let { data, error } = await supabase
@@ -13030,7 +13078,16 @@ ${cleanText}
   return {
     ok: true,
     processed: true,
-    item: { id: documentId, title, category, summary, tags },
+    item: {
+      id: documentId,
+      title,
+      category,
+      summary,
+      tags,
+      period_start: periodDate,
+      period_end: periodDate,
+      created_at: createdAt,
+    },
     chunks_created: chunksCreated,
   }
 }
