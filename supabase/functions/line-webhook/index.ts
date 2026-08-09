@@ -2038,7 +2038,7 @@ async function processReceiptTextEvent(
  * 2手で指定する。引用返信のテキストイベントには quotedMessageId（引用元のID）が入る。
  *
  * 通数について: 引用返信は店舗からの受信メッセージなので PUSH 無料枠を消費しない。
- * 完了通知も Reaction API（0通）で行い、返信メッセージは送らない。
+ * 完了・失敗通知は replyToken による返信で、PUSH無料枠の対象外。
  *
  * 注意: この関数は必ずトップレベルに置くこと。Deno.serve 内のイベントループ本体に
  * 置くと、同じブロックで後から const 宣言される変数を巻き込んで TDZ エラーになる。
@@ -2056,8 +2056,10 @@ async function registerQuotedImageAsKnowledge(
   quotedFileName = '',
   lineTimestamp?: number | null,
 ): Promise<boolean> {
+  let uploadedStoragePath = ''
   try {
-    const storeKey = registry.store_partition_key || ''
+    // Web 登録と同じナレッジ partition / Storage prefix へ必ず寄せる。
+    const storeKey = String(registry.store_partition_key || '').trim().toLowerCase()
     const msgId = String(quotedMessageId || '').trim()
     const text = String(memoText || '').trim()
 
@@ -2130,11 +2132,17 @@ async function registerQuotedImageAsKnowledge(
       body: uploadData
     })
 
-    let storagePath = null
-    if (uploadRes.ok) {
-      const uploadJson = await uploadRes.json()
-      storagePath = uploadJson.storage_path || null
+    if (!uploadRes.ok) {
+      console.warn('Knowledge file upload failed:', uploadRes.status)
+      return false
     }
+    const uploadJson = await uploadRes.json()
+    const storagePath = String(uploadJson.storage_path || '').trim()
+    if (!storagePath || !storagePath.toLowerCase().startsWith(`${storeKey}/`)) {
+      console.warn('Knowledge file upload returned an invalid store path')
+      return false
+    }
+    uploadedStoragePath = storagePath
 
     // 4. ナレッジ DB 登録 & 1,500文字 RAG 生成
     //    店舗の指定キーは `store_key`。admin-api の saveStoreKnowledge は body.store_key しか
@@ -2182,11 +2190,33 @@ async function registerQuotedImageAsKnowledge(
       }
     }
 
-    return saveRes.ok
+    if (!saveRes.ok) {
+      // DB登録に失敗した原本を orphan にしない。引用元の line_message_media は成功時しか消さない。
+      await cleanupUploadedKnowledgeFile(storagePath)
+      uploadedStoragePath = ''
+      return false
+    }
+    uploadedStoragePath = ''
+    return true
   } catch (err) {
     console.error('registerQuotedImageAsKnowledge failed:', err)
+    if (uploadedStoragePath) await cleanupUploadedKnowledgeFile(uploadedStoragePath)
   }
   return false
+}
+
+/** upload成功後にDB登録できなかった原本だけをbest-effortで回収する。 */
+async function cleanupUploadedKnowledgeFile(storagePath: string): Promise<void> {
+  try {
+    const cleanupClient = createServiceClient()
+    if (!cleanupClient) return
+    const { error } = await cleanupClient.storage
+      .from('store-knowledge')
+      .remove([storagePath])
+    if (error) console.warn('orphan knowledge file cleanup failed:', error.message)
+  } catch (error) {
+    console.warn('orphan knowledge file cleanup failed:', error)
+  }
 }
 
 Deno.serve(async (req) => {
@@ -2741,16 +2771,17 @@ Deno.serve(async (req) => {
               console.warn('removeRoomMediaByMessageId failed:', e)
             }
             await memoFeedback('✅ 引用元のファイルを店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。')
-          } else if (!memoCleanText) {
-            // 引用返信の作法は正しいのに登録できなかった（保存期間切れ・非対応形式・引用元がテキスト等）
-            await memoFeedback('⚠️ 引用元のファイルを登録できませんでした。画像の保存期間切れか、対応していない形式の可能性があります。登録したい画像をもう一度送り、その画像に「リプライ」で #メモ と返信してください。')
+          } else {
+            // 引用返信の作法は正しいのに登録できなかった（取得・解析・Storage・DB のいずれかが失敗）。
+            // 引用付き投稿をテキストメモとして代替保存すると「添付も保存できた」と誤認されるため行わない。
+            await memoFeedback('⚠️ 引用元のファイルを登録できませんでした。取得・解析・保存のいずれかで失敗した可能性があります。少し時間をおいて、登録したいファイルをもう一度送り、そのファイルに「リプライ」で #メモ と返信してください。')
           }
         }
 
-        // 画像として登録できた場合はテキスト単体の転送を行わない（二重登録の防止）。
-        // 引用元が画像でない／取得できなかった場合は、従来どおりテキストとして登録する。
-        if (!quotedImageHandled) {
-          if (!quotedMessageId && !memoCleanText) {
+        // 引用返信は添付登録だけを試み、失敗時もテキスト単体へフォールバックしない。
+        // 通常のテキスト #メモ だけを process-line-post へ転送する。
+        if (!quotedImageHandled && !quotedMessageId) {
+          if (!memoCleanText) {
             // 「#メモ」単体（引用返信なし・本文なし）。旧実装は無言でスキップしていたため、
             // 画像を登録したい利用者には「反応なし」に見えていた。使い方を案内する。
             await memoFeedback('📝 #メモ の使い方\n・画像やファイルを登録する場合: 登録したい画像を長押し（PCでは右クリック）→「リプライ」を選び、#メモ と返信してください。\n・テキストメモの場合: #メモ に続けて本文を書いて送信してください。\n※画像を送っただけ、#メモ 単体を送っただけでは登録されません。')
@@ -2780,12 +2811,17 @@ Deno.serve(async (req) => {
                 const resJson = await res.json()
                 if (resJson.processed) {
                   await memoFeedback('✅ メモを店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。')
+                } else {
+                  console.warn('admin-api did not process #メモ')
+                  await memoFeedback('⚠️ メモを登録できませんでした。本文を確認して、少し時間をおいてからもう一度送信してください。')
                 }
               } else {
                 console.warn('Failed to forward #メモ to admin-api:', res.status)
+                await memoFeedback('⚠️ メモを登録できませんでした。少し時間をおいてからもう一度送信してください。')
               }
             } catch (e) {
               console.error('Error forwarding #メモ post:', e)
+              await memoFeedback('⚠️ メモを登録できませんでした。少し時間をおいてからもう一度送信してください。')
             }
           }
         }

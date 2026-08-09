@@ -2,13 +2,24 @@
 
 ## Document information
 
-- Current date: 2026-08-02
+- Current date: 2026-08-10
 - Repository: `https://github.com/MARUGO-s/line_report`
 - Branch: `main`
-- Work-start HEAD: `e58715f0e8b4a62d9c0622b21ff730060e3e1c4c`
+- Work-start HEAD: `74b44e6876ceaa226578426ab323e31b5d3dd356`
 - Production: `https://marugo-s.github.io/line_report/`
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
+
+### 2026-08-10 - 店舗資料A+B複合案の全経路監査・信頼境界・LINE失敗通知
+
+- Request: A案（詳細候補拡張）＋B案（全資料目次）の実装、LINE連絡経路、AI判断経路を再監査し、バグと改善点を修正して再デプロイする。
+- A+B: 詳細は最大20資料・全体12000字、目次は最大4000字。証拠を先、目次を後に分離し、目次は存在確認専用で因果・引用の根拠にしない。RAG上限8件に入らない資料は資料別本文へフォールバック。
+- Accuracy: 離れた比較期間を別区間のまま照合。無効資料は期間付きの過去明示分析だけ参照。日本語期間も解析。取得失敗・未接続・stale・上限到達・詳細部分失敗と、正常な0件を区別。
+- Performance: 一覧をページングし本文を取得しない。選定最大20件は一括詳細APIで取得し、更新日時が同じ詳細をキャッシュ。AI実行時は一覧を再検証して直前のLINEメモを反映。
+- AI safety: サーバー固定規約をOpenAI developer/system・Claude systemへ置き、ブラウザ文脈、店舗資料、集計、外部知見を非信頼userデータへ分離。埋め込み命令・区切り偽装を無視し、目次と証拠、確定数値と背景資料を分離。
+- Prompt: 39000字超過時は実資料マーカー内だけを縮め、前方の確定集計・店舗情報と後方の統合指示を保持。全店一律のクリスマス実施断定を廃止し、確定商品または選定資料がある場合だけ事実、無ければ仮説とする。
+- Backend/LINE: 編集時の添付・由来保持、店舗キー正規化、Storageパス店舗境界、引用添付のStorage失敗時ロールバック、テキスト`#メモ`失敗返信を追加。
+- Verification/Deploy: 回帰・統合・Deno・全体チェック、2入口HTML同期、知識ミラー更新、本番Functions/Pages/APIを確認して記録する。
 
 ### 2026-08-07 - LINE `#メモ` 送信日時を分析時間軸へ
 
