@@ -1,7 +1,18 @@
 # 引き継ぎ: Journal Report 店舗資料 A+B 複合案・全経路監査・デプロイ
 
 更新日: 2026-08-10  
-状態: **実装と主要検証は完了、commit / push / 本番デプロイは未完了**
+状態: **完了**（commit `d7d18bb` を push、Pages / Edge Functions ともデプロイ成功、本番確認済み）
+
+## 0. 完了記録（後続セッションが最初に読む要約）
+
+- commit `d7d18bb`（16ファイル・+1,735/−503行）を `main` へ push。作業開始HEAD `74b44e6` の続き。
+- 検証: `npm run check` / `test:ci` / `journal:integration:check`（21 OK / 0 NG）すべて exit 0。`deno check` ai-analyze 0エラー。`git diff --check` clean。2入口HTMLは byte一致。
+- デプロイ: GitHub Actions の `Deploy GitHub Pages` と `Deploy Edge Functions` が両方 success。**push で全 Edge Function が自動デプロイされるため、§7-6 の手動 `npx supabase functions deploy` は不要だった**（`supabase` CLI もこの環境に無い）。
+- 本番確認: Pages 2入口とも HTTP 200・824,895 bytes・ローカルと byte一致。公開HTMLに `AI_KNOWLEDGE_MAX_ITEMS = 20` / `MAX_CHARS = 12000` / `CATALOG_MAX_CHARS = 4000`。未認証で `admin-api/pos-journals/knowledge`・`.../knowledge/items`・`ai-analyze` はいずれも HTTP 401。
+- §7-10 の非gitコピー同期も完了。`解凍変換ソフト/` の HTML/JS 9ファイルと `supabase/functions` が本番と一致。同期前に差分方向を確認し、作業フォルダ側の独自行は旧版のみ（廃止した「12月はクリスマスディナーが必ず発生する」断定を含む）で、失うものが無いことを確認した。
+- 残件は §6 の Graphify CLI 不在による stale のみ。製品動作・デプロイへの影響なし。
+
+**補足（リポジトリ構成の誤解を防ぐため）**: `~/Library/CloudStorage/Dropbox/web/line_report` は `line_report-main` へのシンボリックリンクで、実体は1つ。クローンが二重化しているわけではない。
 
 ## 1. ユーザーの依頼
 

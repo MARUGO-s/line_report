@@ -19,7 +19,10 @@
 - AI safety: サーバー固定規約をOpenAI developer/system・Claude systemへ置き、ブラウザ文脈、店舗資料、集計、外部知見を非信頼userデータへ分離。埋め込み命令・区切り偽装を無視し、目次と証拠、確定数値と背景資料を分離。
 - Prompt: 39000字超過時は実資料マーカー内だけを縮め、前方の確定集計・店舗情報と後方の統合指示を保持。全店一律のクリスマス実施断定を廃止し、確定商品または選定資料がある場合だけ事実、無ければ仮説とする。
 - Backend/LINE: 編集時の添付・由来保持、店舗キー正規化、Storageパス店舗境界、引用添付のStorage失敗時ロールバック、テキスト`#メモ`失敗返信を追加。
-- Verification/Deploy: 回帰・統合・Deno・全体チェック、2入口HTML同期、知識ミラー更新、本番Functions/Pages/APIを確認して記録する。
+- Verification: `npm run check` / `test:ci` / `journal:integration:check`（21 OK / 0 NG）すべて exit 0。`deno check` ai-analyze 0エラー。`git diff --check` clean。`public/jnm/index.html` と `jnl2txt.html` は byte一致。
+- Deploy: commit `d7d18bb` を `main` へ push。GitHub Actions の `Deploy GitHub Pages` / `Deploy Edge Functions` が両方 success（push 時に全 Edge Function を自動デプロイするため手動 deploy 不要）。
+- Production check: Pages 2入口とも HTTP 200・824,895 bytes・ローカルと byte一致。`AI_KNOWLEDGE_MAX_ITEMS = 20` / `MAX_CHARS = 12000` / `CATALOG_MAX_CHARS = 4000` を公開HTMLで確認。未認証の `admin-api/pos-journals/knowledge`・`.../knowledge/items`・`ai-analyze` はいずれも HTTP 401。
+- Known gap: `npm run knowledge:check` は `graphify` CLI 不在で fail。生成ミラーは同期済み、Graphify抽出のみ stale。製品影響なし。
 
 ### 2026-08-07 - LINE `#メモ` 送信日時を分析時間軸へ
 
