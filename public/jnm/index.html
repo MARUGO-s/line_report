@@ -8254,7 +8254,8 @@ async function buildIntegratedAnalysisContext({
     }
     knowledgeBlock = formatStoreKnowledgeBlock(
       await hydrateKnowledgeItemsForAi(selectStoreKnowledgeForQuery(query, range, items)),
-      query
+      query,
+      items
     );
   } catch (err) {
     knowledgeError = String(err?.message || err || 'unknown');
@@ -12852,9 +12853,11 @@ function mergeHourlyBreakdowns(reports) {
 
 const KNOWLEDGE_API = '/pos-journals/knowledge';
 const KNOWLEDGE_CACHE_TTL_MS = 3 * 60 * 1000;
-const AI_KNOWLEDGE_MAX_ITEMS = 5;       // 候補資料の上限
+// A案: 一度にAIへ渡す候補を増やす。現状の資料量なら本文・RAGを含めても
+// プロンプト上限内に収まるため、期間一致資料を取りこぼさない。
+const AI_KNOWLEDGE_MAX_ITEMS = 20;
 const AI_KNOWLEDGE_MAX_CHUNKS = 8;      // AIへ渡すチャンク数上限（軽量化）
-const AI_KNOWLEDGE_MAX_CHARS = 3500;    // プロンプト内ナレッジ総量
+const AI_KNOWLEDGE_MAX_CHARS = 12000;   // プロンプト内ナレッジ総量
 const AI_KNOWLEDGE_CHUNK_CHARS = 420;   // 1チャンクあたりの上限
 let knowledgeEditingId = null;
 let knowledgeCache = { storeKey: '', loadedAt: 0, items: [] };
@@ -13458,12 +13461,15 @@ function selectKnowledgeChunksForQuery(query, items, maxChunks = AI_KNOWLEDGE_MA
 }
 
 /**
- * プロンプトへ差し込む店舗ナレッジ（軽量版）。
- * 原則: タイトル＋概要＋関連RAGチャンクのみ。全文は載せない。
+ * プロンプトへ差し込む店舗ナレッジ。
+ * B案: 選定外も含む全資料の目次を常時渡し、「資料が存在しない」という
+ * 誤認を防ぐ。本文・RAGはA案で選定した最大20資料だけに限定する。
  */
-function formatStoreKnowledgeBlock(items, query = '') {
+function formatStoreKnowledgeBlock(items, query = '', catalogItems = items) {
   const list = Array.isArray(items) ? items : [];
-  if (!list.length) return '';
+  const catalog = (Array.isArray(catalogItems) ? catalogItems : [])
+    .filter(item => item && item.is_active !== false);
+  if (!list.length && !catalog.length) return '';
   const lines = [];
   let used = 0;
   const pushLine = (text) => {
@@ -13474,6 +13480,19 @@ function formatStoreKnowledgeBlock(items, query = '') {
     used += t.length;
     return true;
   };
+
+  // 全資料の目次は本文を含めず、タイトル・期間・タグだけをコンパクトに提示する。
+  // 質問と直接一致しない資料も「存在する」とAIが認識できる。
+  if (catalog.length) {
+    pushLine(`資料目次（有効 ${catalog.length}件・以下の資料は登録済み）:`);
+    for (const item of catalog) {
+      const tags = Array.isArray(item.tags) ? item.tags.filter(Boolean).slice(0, 8) : [];
+      const tagLabel = tags.length ? `／タグ: ${tags.join(' / ')}` : '';
+      if (!pushLine(`- [${item.category || 'その他'}] ${item.title || '無題'}（${knowledgeTimelineLabel(item)}）${tagLabel}`)) break;
+    }
+  }
+
+  if (list.length) pushLine(`\n今回の質問で参照する資料（最大${AI_KNOWLEDGE_MAX_ITEMS}件）:`);
 
   const ragChunks = selectKnowledgeChunksForQuery(query, list, AI_KNOWLEDGE_MAX_CHUNKS);
   const usedRag = ragChunks.length > 0;
@@ -13515,7 +13534,7 @@ function formatStoreKnowledgeBlock(items, query = '') {
   if (!lines.length) return '';
   return `
 
-【店舗ナレッジ（この店舗が登録した施策・メニュー資料／${usedRag ? 'RAGチャンク抜粋・軽量' : '概要＋短い抜粋'}）】
+【店舗ナレッジ（この店舗が登録した施策・メニュー資料／全資料目次＋${usedRag ? 'RAGチャンク抜粋' : '概要＋短い抜粋'}）】
 ${lines.join('\n')}
 
 このナレッジの扱い:
@@ -13535,7 +13554,7 @@ async function buildStoreKnowledgeBlockForReport() {
   const range = iso ? { from: iso[1], to: iso[2] || iso[1] } : null;
   const query = `${currentReport?.title || ''} ${period} 売上分析 施策 メニュー`;
   const selected = selectStoreKnowledgeForQuery(query, range, items);
-  return formatStoreKnowledgeBlock(await hydrateKnowledgeItemsForAi(selected), query);
+  return formatStoreKnowledgeBlock(await hydrateKnowledgeItemsForAi(selected), query, items);
 }
 
 /** テキストまたは画像ファイルを添付した際の全自動判定処理 */
