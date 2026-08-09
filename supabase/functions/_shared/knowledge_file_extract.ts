@@ -3,9 +3,15 @@
 // Gemini 2.0 Flash が inlineData で直接受け取れるのは画像と PDF のみ。
 // Excel(.xlsx/.xls) と Word(.docx) はバイナリのまま渡しても解釈できないため、
 // ここでプレーンテキストへ変換してから text パートとして渡す。
+//
+// PDF も Gemini に直接読ませられるが、ページ数が多いと全文の文字起こしが出力上限に
+// 当たり、body_text が空のまま返ってくる（18ページのメニュー集で実際に発生した）。
+// 埋め込みテキストを持つ PDF はここで取り出し、確実に全文を渡す。
+// 文字を持たないスキャン画像PDFだけを Gemini の inlineData へ回す。
 
 import * as XLSX from "https://esm.sh/xlsx@0.18.5"
 import { strFromU8, unzipSync } from "https://esm.sh/fflate@0.8.2"
+import { extractText, getDocumentProxy } from "https://esm.sh/unpdf@1.3.2"
 
 export type KnowledgeFileKind =
   | "image" // Gemini に inlineData でそのまま渡す
@@ -93,6 +99,26 @@ export function extractDocxText(bytes: Uint8Array): string {
   }
 }
 
+/** PDF の埋め込みテキストをページ単位で取り出す。
+ * ページ見出しを付けるのは、月ごとにページが分かれた資料で境界を保つため。
+ * スキャン画像だけの PDF では空文字を返し、呼び出し側が Gemini の画像解析へ回す。 */
+export async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  try {
+    const pdf = await getDocumentProxy(bytes)
+    const { text } = await extractText(pdf, { mergePages: false })
+    const pages = Array.isArray(text) ? text : [String(text ?? "")]
+    const parts: string[] = []
+    pages.forEach((raw, index) => {
+      const page = String(raw ?? "").trim()
+      if (page) parts.push(`【${index + 1}ページ】\n${page}`)
+    })
+    return clip(parts.join("\n\n"))
+  } catch (err) {
+    console.error("extractPdfText failed:", err)
+    return ""
+  }
+}
+
 /** テキスト系ファイルを UTF-8 として読む。 */
 export function extractPlainText(bytes: Uint8Array): string {
   try {
@@ -105,9 +131,14 @@ export function extractPlainText(bytes: Uint8Array): string {
 
 /**
  * ファイル種別に応じて Gemini へ渡せるテキストを取り出す。
- * image / pdf は inlineData で直接渡すため、ここでは空文字を返す（呼び出し側で分岐）。
+ * image は inlineData で直接渡すため空文字を返す（呼び出し側で分岐）。
+ * pdf はテキストを持つなら返し、持たない（スキャン画像）なら空文字を返す。
  */
-export function extractKnowledgeText(kind: KnowledgeFileKind, bytes: Uint8Array): string {
+export async function extractKnowledgeText(
+  kind: KnowledgeFileKind,
+  bytes: Uint8Array,
+): Promise<string> {
+  if (kind === "pdf") return await extractPdfText(bytes)
   if (kind === "spreadsheet") return extractSpreadsheetText(bytes)
   if (kind === "document") return extractDocxText(bytes)
   if (kind === "text") return extractPlainText(bytes)

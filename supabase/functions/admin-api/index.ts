@@ -12897,10 +12897,12 @@ async function analyzeStoreKnowledgeImage(req: Request) {
     } satisfies AppError
   }
 
-  // Gemini が inlineData で直接読めるのは画像と PDF のみ。
-  // Excel / Word / テキストはサーバ側でテキスト化してから text パートとして渡す。
-  const inlineKinds = kind === "image" || kind === "pdf"
-  const extractedText = inlineKinds ? "" : extractKnowledgeText(kind, bytes)
+  // Excel / Word / テキスト / PDF はサーバ側でテキスト化してから text パートとして渡す。
+  // PDF を Gemini に丸ごと読ませると、ページ数が多いとき全文の文字起こしが出力上限に
+  // 当たって body_text が空で返る。埋め込みテキストがあるならそちらを正とする。
+  // 画像と、文字を持たないスキャンPDFだけ inlineData で Gemini に読ませる。
+  const extractedText = kind === "image" ? "" : await extractKnowledgeText(kind, bytes)
+  const inlineKinds = kind === "image" || (kind === "pdf" && isBlankExtract(extractedText))
   if (!inlineKinds && isBlankExtract(extractedText)) {
     throw {
       status: 422,
@@ -12957,11 +12959,17 @@ async function analyzeStoreKnowledgeImage(req: Request) {
     tags: [`${sourceLabel}解析`, "メニュー"] as unknown[],
   }
   if (parsed) {
+    // 長い資料では Gemini が body_text を要約で済ませたり空で返したりする。
+    // 抽出済みテキストがある場合は情報量の多い方を採用し、資料の中身を落とさない。
+    const parsedBody = toSafeString(parsed.body_text)
+    const body = (!inlineKinds && extractedText.length > parsedBody.length)
+      ? extractedText
+      : (parsedBody || result.body_text)
     result = {
       title: toSafeString(parsed.title) || result.title,
       category: normalizeStoreKnowledgeCategory(parsed.category),
       summary: toSafeString(parsed.summary) || result.summary,
-      body_text: toSafeString(parsed.body_text) || result.body_text,
+      body_text: body,
       tags: Array.isArray(parsed.tags) ? parsed.tags : result.tags,
     }
   }
