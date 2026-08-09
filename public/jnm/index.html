@@ -443,6 +443,25 @@
   .kn-note{font-size:11px;color:var(--text-2);line-height:1.6;margin:10px 0 12px}
   .kn-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .kn-status{font-size:12px;color:var(--text-2)}
+  /* AI解析・保存など待ち時間のある処理中は、止まっていないことが一目で分かるように
+     アクセント色のピルへ切り替え、スピナーの回転と全体の明滅で動きを出す。 */
+  .kn-status.is-busy{display:inline-flex;align-items:center;gap:8px;
+    font-weight:700;color:var(--accent);
+    padding:5px 12px;border-radius:999px;
+    border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    background:color-mix(in srgb, var(--accent) 12%, transparent);
+    animation:kn-status-pulse 1.5s ease-in-out infinite}
+  .kn-status-spinner{width:12px;height:12px;border-radius:50%;flex-shrink:0;
+    border:2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-top-color:var(--accent);
+    animation:kn-status-spin .7s linear infinite}
+  @keyframes kn-status-spin{to{transform:rotate(360deg)}}
+  @keyframes kn-status-pulse{0%,100%{opacity:1}50%{opacity:.6}}
+  /* 動きを抑える設定の環境では明滅を止め、回転だけゆっくり残して進行中を伝える */
+  @media (prefers-reduced-motion: reduce){
+    .kn-status.is-busy{animation:none}
+    .kn-status-spinner{animation-duration:2.4s}
+  }
   .kn-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   .kn-filters select,.kn-filters input{font:inherit;font-size:12px;padding:7px 8px;border:1px solid var(--border-input);border-radius:6px;color:var(--text);background:var(--page)}
   .kn-filters input{flex:1;min-width:140px}
@@ -12842,9 +12861,26 @@ let knowledgeCache = { storeKey: '', loadedAt: 0, items: [] };
 
 function knowledgeEl(id) { return document.getElementById(id); }
 
-function setKnowledgeStatus(text, isError = false) {
+function setKnowledgeStatus(text, isError = false, busy = false) {
   const el = knowledgeEl('knFormStatus');
   if (!el) return;
+  // 完了・失敗のメッセージも読み上げ対象にしたいので、状態表示として常に宣言しておく
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', 'polite');
+  const isBusy = !!busy && !isError;
+  el.classList.toggle('is-busy', isBusy);
+  if (isBusy) {
+    // 進行中はスピナーを添えて動かす。色はクラス側で決めるのでインラインの色は外す。
+    el.textContent = '';
+    const spinner = document.createElement('span');
+    spinner.className = 'kn-status-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.textContent = text || '';
+    el.append(spinner, label);
+    el.style.color = '';
+    return;
+  }
   el.textContent = text || '';
   el.style.color = isError ? '#a33a2b' : 'var(--text-2)';
 }
@@ -13149,12 +13185,12 @@ async function saveKnowledgeForm() {
   const end = knowledgeEl('knPeriodEnd')?.value || '';
   if (start && end && start > end) { setKnowledgeStatus('開始日が終了日より後になっています。', true); return; }
   if (btn) btn.disabled = true;
-  setKnowledgeStatus('保存中…');
+  setKnowledgeStatus('保存中…', false, true);
   try {
     let attachment = null;
     const file = knowledgeEl('knFile')?.files?.[0];
     if (file) {
-      setKnowledgeStatus('添付ファイルをアップロード中…');
+      setKnowledgeStatus('添付ファイルをアップロード中…', false, true);
       const form = new FormData();
       form.append('file', file);
       form.append('store_key', STORE_KEY);
@@ -13529,7 +13565,7 @@ async function analyzeKnowledgeFileWithGemini(file) {
     setKnowledgeStatus('AI解析には管理トークンの接続が必要です。', true);
     return;
   }
-  setKnowledgeStatus('✨ Gemini 2.0 Flash で解析中…（メニュー名や価格を自動抽出しています。ページ数の多いPDFは1〜2分かかります）');
+  setKnowledgeStatus('AI解析中… ✨ Gemini 2.0 Flash がメニュー名や価格を自動抽出しています（ページ数の多いPDFは1〜2分かかります）', false, true);
   try {
     const form = new FormData();
     form.append('file', file);
