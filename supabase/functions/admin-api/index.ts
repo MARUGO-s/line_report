@@ -12203,6 +12203,12 @@ const STORE_KNOWLEDGE_GEMINI_MODELS = [
   "gemini-1.5-flash",
   "gemini-2.5-flash",
 ]
+/** Gemini 1回あたりの上限。応答が返らないモデルに引きずられて
+ *  フォールバック先を試す時間が無くなるのを防ぐ。 */
+const STORE_KNOWLEDGE_GEMINI_CALL_TIMEOUT_MS = 100_000
+/** 全モデル合計の上限。Edge Function の実行時間上限より内側で必ず打ち切り、
+ *  クライアントには「解析失敗」を正しいHTTPエラーとして返せるようにする。 */
+const STORE_KNOWLEDGE_GEMINI_TOTAL_BUDGET_MS = 140_000
 /** 一覧では本文を丸ごと返さず、この長さの抜粋だけ返して通信量を抑える */
 const STORE_KNOWLEDGE_LIST_BODY_PREVIEW = 200
 
@@ -12771,7 +12777,17 @@ async function callKnowledgeGemini(
     contents: [{ role: "user", parts }],
     generationConfig: { temperature: 0.2 },
   }
+  const startedAt = Date.now()
   for (const model of STORE_KNOWLEDGE_GEMINI_MODELS) {
+    const elapsed = Date.now() - startedAt
+    const remainingMs = Math.min(
+      STORE_KNOWLEDGE_GEMINI_CALL_TIMEOUT_MS,
+      STORE_KNOWLEDGE_GEMINI_TOTAL_BUDGET_MS - elapsed,
+    )
+    if (remainingMs <= 0) {
+      console.warn("Gemini fallback budget exhausted; stopping model retries")
+      break
+    }
     try {
       const endpoint =
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`
@@ -12779,6 +12795,7 @@ async function callKnowledgeGemini(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(remainingMs),
       })
       if (res.ok) {
         const resJson = await res.json()

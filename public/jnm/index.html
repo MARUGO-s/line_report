@@ -2777,11 +2777,14 @@ async function adminApiFetch(path, options) {
   // AI チャットの保存データ参照が即エラーにならないようにする。書き込み系は二重実行を避けるため1回のみ。
   const method = String(opts.method || 'GET').toUpperCase();
   const maxAttempts = method === 'GET' ? 3 : 1;
-  const timeoutMs = 45000;
+  // 既定は45秒。ページ数の多いPDF/WordのAI解析など、45秒では終わらない処理は
+  // 呼び出し側が opts.timeoutMs で個別に延長する。
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 45000;
   let lastError = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    let timedOut = false;
+    const timer = controller ? setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs) : null;
     let retriable = false;
     try {
       let response;
@@ -2789,7 +2792,11 @@ async function adminApiFetch(path, options) {
         response = await fetch(url, Object.assign({}, opts, { headers, signal: controller ? controller.signal : undefined }));
       } catch (_) {
         retriable = true;
-        throw new Error('通信に失敗しました。ネットワークをご確認ください。');
+        // タイムアウトと本当の通信断は原因も対処も別。同じ文言にすると
+        // 「ネットワークを確認」しても直らず原因追跡ができないので分ける。
+        throw new Error(timedOut
+          ? `処理が${Math.round(timeoutMs / 1000)}秒以内に終わりませんでした。時間をおいて再試行してください。`
+          : '通信に失敗しました。ネットワークをご確認ください。');
       }
       const body = await response.json().catch(() => ({}));
       if (response.status === 401 || response.status === 403) setAuthUiState(false);
@@ -13522,14 +13529,17 @@ async function analyzeKnowledgeFileWithGemini(file) {
     setKnowledgeStatus('AI解析には管理トークンの接続が必要です。', true);
     return;
   }
-  setKnowledgeStatus('✨ Gemini 2.0 Flash で解析中…（メニュー名や価格を自動抽出しています）');
+  setKnowledgeStatus('✨ Gemini 2.0 Flash で解析中…（メニュー名や価格を自動抽出しています。ページ数の多いPDFは1〜2分かかります）');
   try {
     const form = new FormData();
     form.append('file', file);
     form.append('store_key', STORE_KEY);
     const response = await adminApiFetch(`${KNOWLEDGE_API}/analyze-image`, {
       method: 'POST',
-      body: form
+      body: form,
+      // 画像1枚なら数秒だが、十数ページのPDF/Wordは全文の文字起こしに1〜2分かかる。
+      // 既定の45秒だとブラウザ側が先に中断してしまい、解析結果を受け取れない。
+      timeoutMs: 180000
     });
 
     const result = response.result || {};
