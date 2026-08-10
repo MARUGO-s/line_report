@@ -78,3 +78,42 @@ Deno.test("unknown objects redact PII fields without mutating the input", () => 
   assert(sanitized.customer_phone === null, "phone was not removed");
   assert(sanitized.allergy === "アレルギーあり", "allergy was not minimized");
 });
+
+Deno.test("reservation-name masking does not corrupt product names that merely contain the surname", () => {
+  const result = sanitizeJournalAiPayload({
+    message: "山田さんの予約を確認",
+    systemInstruction: `- 2026-08-04 19:00 / 山田 / リピート（2回） / 食べログ
+- 売れ筋商品: 山田錦 ¥12,000
+- customer_name: 山田`,
+  });
+  assert(result.message.includes("予約客Aさん"), "honorific name was not masked");
+  assert(
+    result.systemInstruction.includes("/ 予約客A /"),
+    "reservation detail name was not masked",
+  );
+  assert(
+    result.systemInstruction.includes("customer_name: 予約客A"),
+    "labeled name was not masked",
+  );
+  assert(
+    result.systemInstruction.includes("山田錦 ¥12,000"),
+    "product name containing the surname was corrupted",
+  );
+  assert(
+    !result.systemInstruction.includes("予約客A錦"),
+    "surname replacement leaked into a product name",
+  );
+});
+
+Deno.test("single-character names are not collected from free text", () => {
+  const result = sanitizeJournalAiPayload({
+    message: "李さんの予約を確認",
+    systemInstruction: "- 売れ筋商品: 李白 ¥8,000",
+  });
+  assert(result.aliasCount === 0, "single-character free-text name should be ignored");
+  assert(result.message === "李さんの予約を確認", "single-character name was replaced");
+  assert(
+    result.systemInstruction === "- 売れ筋商品: 李白 ¥8,000",
+    "unrelated product name was changed",
+  );
+});

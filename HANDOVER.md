@@ -87,25 +87,35 @@ AIチャット処理 (`sendAiChat`, `generateLocalConsultantReply`, `searchSaved
 ## 🚀 6. 開発・デプロイの手順
 
 ### リポジトリ更新と GitHub Pages 反映コマンド
-コードを変更した際は、必ず構文チェックを行った上で以下を実行してデプロイします：
+コードの正本は `line_report-main/public/jnm/` です。作業コピーから正本へ戻す旧手順は使わず、
+正本で編集・検証・コミットした後に、表示確認用の作業コピーへ一方向同期します。
 
 ```bash
-# 1. public ディレクトリへコピー
-# index.html は転送スタブなのでコピー対象に含めない（アプリ本体を書き戻さないこと）
-cp /Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/jnl2txt.html /tmp/line_report_repo/public/jnm/jnl2txt.html
+# 1. 正本を検証
+cd /Users/yoshito/Library/CloudStorage/Dropbox/web/line_report-main
+npm run test:journal-ai
+npm run check
+git diff --check
 
-# 2. Git コミット & プッシュ
-cd /tmp/line_report_repo
+# 2. Git コミット & プッシュ（意図したファイルだけ add する）
 git add public/jnm/jnl2txt.html
 git commit -m "Update application logic and documentation"
 git push origin main
+
+# 3. 本番確認後、表示確認用コピーへ一方向同期
+for f in index.html jnl2txt.html ai-chat-pdf-history.html ai-usage.html app-theme.js auth-session.js pages-config.js journal-ai-client.js journal-ai-privacy.js; do
+  cp "public/jnm/$f" "/Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/$f"
+done
 ```
 
 ---
 
 ## ⚠️ 7. スタンドアロン作業フォルダとの同期に関する絶対注意事項
 
-`/Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/`（以下「作業フォルダ」）は、`jnl2txt.html` を編集するための非git作業コピーです。セクション6のコピー運用を行う際は、以下を必ず守ってください。
+`/Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/`（以下「作業フォルダ」）は、
+現行Webファイルを表示確認するための非gitコピーです。自動同期・シンボリックリンクではありません。
+編集・コミットする正本は `line_report-main/public/jnm/` であり、同期方向は必ず
+**本リポジトリ → 作業フォルダ** とします。
 
 ### 7-1. 作業フォルダの `supabase/` 配下からリポジトリへコピーしないこと
 

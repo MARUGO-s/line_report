@@ -10,6 +10,20 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-10 - チャージ欠落データの復旧と保存レポートの重複整理
+
+- Request: 前日修正した `isCharge` 欠落の影響を受けた保存レポートを実データごと直し、増えすぎた重複レポートを整理する。
+- Root cause (確定): 保存レポート `jnl2txt_category_overrides_v1__bistrocavacava`（2026-07-31 更新）に分類上書き `0000000000001|チャージ料 → その他` が登録されていた。修正前の `classifyProduct` は上書き経路で `isCharge:false` を固定で返すため、**2026-07-31 以降に解析した月だけ `chargeTotal` が 0** になっていた。7/31 以前に解析済みの月は、後から上書きを再適用しても `applyCategoryOverrideToSales` が `category` しか書き換えないため `isCharge:true` が保持されており、無傷だった。チャージが「その他」に入っているのは誤りではなく、この上書き設定どおりの意図的な分類。
+- Impact (実測): 月間レポート16か月分でチャージ合計 **¥941,500** が `chargeTotal:0` として欠落（2026年7月、2025年6月・8月・9月・11月、2024年1〜6月、2023年8〜12月）。総売上・客数・カテゴリ4項目合計はいずれも正しく、欠落はチャージ内訳のみ。
+- Recovery: 対象16か月のジャーナルを再取り込み。全月で `isCharge` が復活し `chargeTotal` が明細と一致。**総売上・客数・伝票数は再取り込み前後で全月一致**（各月の全コピーで `total` が単一値であることを検算）。
+- Incident: 2026年7月の初回再取り込みで、7/25 までしか含まないジャーナルを投入し、総売上が ¥1,300,000 → ¥1,120,850（124名→108名、21営業日→17営業日）へ減少。新しいレポートが優先して読まれる並びのため、チャージ ¥13,000 の復旧と引き換えに売上 ¥179,150 を失う状態だった。保存前後の突合で検知し、当該2件をゴミ箱へ戻したうえで 7/1〜7/31 の23ファイルで取り直し、¥1,300,000 / 124名 / チャージ ¥13,000 で確定。**再取り込み時は総売上・客数・期間を必ず突合すること。**
+- Cleanup: 重複・不要レポート計172件をゴミ箱へ移動（`deleted_at` を立てるソフト削除。アプリのゴミ箱から復元可能）。内訳は、8/6の一括取り込みで生じた壊れた日別の複製39件（18か月分）、誤って取り込んだ2025年7月の重複4件、7/25までの2026年7月2件、`chargeTotal:0` の旧2026年7月2件、再取り込み後の重複124件（16か月分・月間62/日別62）、タイトルと中身が食い違う「日別売上レポート（2026年6月）」1件（中身は2026-01-06〜06-30の半年分。総売上・伝票数・チャージが1〜6月各月の合計と1円まで一致するため固有データなしを確認のうえ削除）。
+- Delete criteria: 各（種別×月）で「チャージが正しく入っている最新の1件」を残し、**総売上・客数・伝票数が残す1件と完全一致する行だけ**を削除対象にした。内容が異なる行は自動削除の対象から除外している。
+- Final state: `saved_reports` の有効行は **81件**。内訳は売上レポート **77件**（月間34／日別36／合算7）＋システム管理行4件（分類ルール2／PDF履歴2）。売上レポートのチャージ欠落 **0件**、同一（種別×月）の重複 **0件**、カテゴリ4項目合計と総売上の不一致 **0件**。ゴミ箱 220件。
+- Known gap: 合算レポート7件は期間の切り方が任意のため自動整理の対象外。うち「合算売上レポート（2026年1月〜7月）」と「合算日別売上レポート（2026年1月〜7月）」は内容が同一（¥9,115,800・437伝票）。
+- Operational note: 分類上書きを追加・変更すると保存済み明細の `category` は反映されるが、既存の `isCharge` と集計サマリーは再計算されない。チャージ判定に影響する変更後は対象月を再取り込みすること。取り込み時にチャージ対象商品があるのに集計0件なら警告が出る。
+- Final recheck: 16か月のチャージ内訳を再加算して **¥941,500**、整理内訳を再加算して **172件** と一致。2026年7月は原本23ファイル、¥1,300,000／124名／57伝票／21営業日／チャージ¥13,000。`npm run test:ci` は現行 **215 tests / 0 fail**、`npm run check` は `journal:integration:check` **21 OK / 0 NG** を含めて成功。確定数値の切断・予約名による商品名破壊・チャージ上書き経路に回帰テストを追加した。
+
 ### 2026-08-10 - 確定数値のAI受け渡し監査と4件の修正／`jnm/index.html` の重複解消
 
 - Request: 確定数値の確定の仕方・渡し方・AI側の扱い・連携が正しく動いているかを全経路で調べ、見つかった問題を修正する。
@@ -22,6 +36,8 @@
 - Refactor: `public/jnm/index.html` を `jnl2txt.html` と byte一致の825KB複製から、1.2KBの転送スタブへ変更。クエリ・ハッシュを保って本体へ転送し、JS無効時も meta refresh とリンクで到達できる。byte一致を強制していた3テストのアサーションを外し、アプリ本体として `index.html` を読んでいた2テストを `jnl2txt.html` 基準へ移し、代わりに「`index.html` は小さな転送スタブのままであること」を `repository_structure` テストで守る。デプロイ手順（HANDOVER.md）・構成図・作業コピーREADMEを新しい前提へ更新。
 - Regression caught in review: `formatVerifiedDetailLines` を外部定数 `SALES_CATEGORIES` に依存させたところ、この関数をVMサンドボックスへ切り出す既存テストが `ReferenceError` を検出。依存を外し、注記を出したかどうかをフラグで判定する形へ修正（不正な `chargeCategory` が入ってもチャージが表示から消えない）。
 - Verification: `npm run test:ci` 178 tests / 0 fail。`npm run check` exit 0（`journal:integration:check` 21 OK / 0 NG、`supabase:ownership:check` 通過）。`deno check` ai-analyze 0エラー。`git diff --check` clean。`node --check` / `new Function()` によるHTML内スクリプト構文検証も通過。作業コピー9ファイルは正本と同期済み。
+- Deploy: `fix/verified-numbers-handoff` を `main` へ fast-forward マージし、`19c95a1..a925917` を push（commit `fe6ef27` 修正4件 / `b110441` index.html転送スタブ化 / `a925917` 記録）。GitHub Actions の `Deploy GitHub Pages` / `Deploy Edge Functions` が両方 success。
+- Production check: `/jnm/jnl2txt.html` は HTTP 200・832,308 bytes・ローカルと byte一致。`/jnm/`（転送スタブ）は HTTP 200・1,262 bytes で `location.replace('jnl2txt.html' …)` を確認。公開HTMLに `AI_TRUNCATION_TAIL` / `resolveChargeCategoryFromSales` / `dominantChargeCategory` が反映済み。未認証の `ai-analyze` は HTTP 401。
 - Note: 本エントリ以降、`public/jnm/index.html` と `jnl2txt.html` の byte一致は成立しない（意図的な仕様変更）。過去エントリの byte一致記述は当時の記録として残す。
 
 ### 2026-08-10 - 店舗資料A+B複合案の全経路監査・信頼境界・LINE失敗通知

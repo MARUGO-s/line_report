@@ -5,7 +5,7 @@ Journal Report（`public/jnm/`）の**現行機能を一冊にまとめた正本
 | 項目 | 内容 |
 |------|------|
 | 対象アプリ | Journal Report |
-| 画面ソース | `public/jnm/jnl2txt.html`（`index.html` と同一内容を維持） |
+| 画面ソース | `public/jnm/jnl2txt.html`（`index.html` はクエリ・ハッシュを保持して本体へ送る転送スタブ） |
 | 本番URL | https://marugo-s.github.io/line_report/jnm/jnl2txt.html |
 | リポジトリ | `MARUGO-s/line_report`（`main`） |
 | Supabase | `hocbnifuactbvmyjraxy`（hocbn） |
@@ -442,7 +442,7 @@ AI:
 
 | 注意 | 理由 |
 |------|------|
-| `jnl2txt.html` と `index.html` を常に同一に保つ | テストと本番URL互換のため |
+| アプリ本体は `jnl2txt.html` の1本だけにする | `index.html` はクエリ・ハッシュを保って本体へ送る小さな転送スタブ。825KBの二重管理へ戻さない |
 | `#メモ` は引用返信が必須（画像） | LINE 画像に text が無い |
 | 資料の数字を売上正本にしない | 二重計上・幻覚の温床 |
 | 定休を弱点扱いしない | 店舗情報を読まずに曜日分析しない |

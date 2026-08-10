@@ -7,10 +7,12 @@ const htmlPath = new URL('../public/jnm/jnl2txt.html', import.meta.url);
 const historyPath = new URL('../public/jnm/ai-chat-pdf-history.html', import.meta.url);
 const aiUsagePath = new URL('../public/jnm/ai-usage.html', import.meta.url);
 const appThemePath = new URL('../public/jnm/app-theme.js', import.meta.url);
+const privacyPath = new URL('../public/jnm/journal-ai-privacy.js', import.meta.url);
 const html = await readFile(htmlPath, 'utf8');
 const historyHtml = await readFile(historyPath, 'utf8');
 const aiUsageHtml = await readFile(aiUsagePath, 'utf8');
 const appThemeJs = await readFile(appThemePath, 'utf8');
+const privacyJs = await readFile(privacyPath, 'utf8');
 const aiAnalyzeSource = await readFile(
   new URL('../supabase/functions/ai-analyze/index.ts', import.meta.url),
   'utf8',
@@ -84,7 +86,15 @@ const context = {
     return ja ? `${ja[1]}-${String(Number(ja[2])).padStart(2, '0')}` : null;
   },
 };
+const aiTruncationTailMatch = html.match(
+  /const AI_TRUNCATION_TAIL\s*=\s*([\s\S]*?);\n\n\/\*\* ai-analyze/,
+);
+assert.ok(aiTruncationTailMatch, 'AI_TRUNCATION_TAIL must exist');
+context.AI_TRUNCATION_TAIL = vm.runInNewContext(aiTruncationTailMatch[1]);
 vm.createContext(context);
+const privacyContext = { globalThis: {} };
+vm.createContext(privacyContext);
+vm.runInContext(privacyJs, privacyContext);
 for (const name of [
   'extractAllMonthRefs',
   'maskProductCodesInQueryForPeriodParse',
@@ -1535,6 +1545,62 @@ test('system-instruction clamp preserves fixed rules, verified totals, and trail
   assert.match(clamped, /VERIFIED_TOTAL_KEEP/);
   assert.match(clamped, /TRAILING_FIXED_RULE_KEEP/);
   assert.match(clamped, /店舗資料データを省略/);
+});
+
+test('system-instruction clamp truncates verified data on line boundaries and restores numeric safety rules', () => {
+  const maxLen = 420;
+  const source = [
+    'PREFIX_FIXED_RULE_KEEP',
+    '【確定済み集計データ】',
+    `- 長い確定数値行: ${'9'.repeat(1000)}`,
+    '- この行は途中で残してはいけない',
+    '回答で使う数字は確定済み集計だけを使用する',
+  ].join('\n');
+  const clamped = context.clampAiSystemInstruction(source, maxLen);
+  assert.ok(clamped.length <= maxLen, `clamped length: ${clamped.length}`);
+  assert.match(clamped, /【重要・省略後も有効】/);
+  assert.match(clamped, /省略部分の数値を推測・補完してはいけません/);
+  assert.match(clamped, /再計算したり他のデータから数字を持ち出すことは【完全禁止】/);
+  assert.doesNotMatch(clamped, /この行は途中で残してはいけない/);
+  assert.ok(
+    clamped.slice(0, clamped.indexOf('【重要・省略後も有効】')).endsWith('\n\n'),
+    'truncated verified data must end at a newline before the fixed safety tail',
+  );
+});
+
+test('browser privacy sanitizer keeps product names intact while masking reservation-name contexts', () => {
+  const sanitizePayload = privacyContext.globalThis.JOURNAL_AI_PRIVACY?.sanitizePayload;
+  assert.equal(typeof sanitizePayload, 'function');
+  const sanitized = sanitizePayload({
+    message: '山田さんの予約を確認',
+    systemInstruction: [
+      '- 2026-08-04 19:00 / 山田 / リピート（2回） / 食べログ',
+      '- 売れ筋商品: 山田錦 ¥12,000',
+      '- customer_name: 山田',
+    ].join('\n'),
+  });
+  assert.match(sanitized.message, /予約客Aさん/);
+  assert.match(sanitized.systemInstruction, /\/ 予約客A \//);
+  assert.match(sanitized.systemInstruction, /customer_name: 予約客A/);
+  assert.match(sanitized.systemInstruction, /山田錦 ¥12,000/);
+  assert.doesNotMatch(sanitized.systemInstruction, /予約客A錦/);
+});
+
+test('charge category override preserves charge classification in source and display paths', () => {
+  const classifySource = extractFunction(html, 'classifyProduct');
+  const applySource = extractFunction(html, 'applyCategoryOverrideToSales');
+  assert.match(
+    classifySource,
+    /isCharge:\s*categorySpecMatches\(code,\s*categorySettings\.charge\)/,
+    'manual category overrides must preserve charge classification',
+  );
+  assert.doesNotMatch(
+    applySource,
+    /isCharge\s*:/,
+    'reapplying a category override to saved sales must not overwrite the existing charge flag',
+  );
+  assert.match(html, /チャージ対象の商品コードが\$\{chargeCandidates\.size\}種あるのにチャージ集計が0件/);
+  assert.match(html, /chargeCategory:\s*resolveChargeCategoryFromSales\(rows\)/);
 });
 
 test('knowledge load failure is not reported as a successful zero-item result', () => {
