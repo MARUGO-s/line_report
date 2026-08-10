@@ -42,7 +42,8 @@ function normalizeCandidateName(value: unknown): string {
     .replace(/\s+/g, " ")
     .replace(/(?:様|さん)$/u, "")
     .trim();
-  if (!name || name.length > 80) return "";
+  // 1文字の名前は本文や商品名へ巻き込みやすく、仮名化の実益もないため対象外にする。
+  if (!name || name.length < 2 || name.length > 80) return "";
   if (/^(?:氏名不明|予約客[A-Z]+|不明|null|undefined)$/i.test(name)) return "";
   return name;
 }
@@ -103,12 +104,30 @@ function collectNames(value: unknown, names: string[]): void {
   }
 }
 
-function replaceAllLiteral(
+/**
+ * 予約者名は、名前が実際に現れる文脈だけを置換する。
+ * 単純な全置換にすると、確定済み集計データの商品名まで巻き込んで壊す
+ * （予約者「山田」で商品「山田錦」が「予約客A錦」になる）。
+ * 対象は収集規則と対になる3か所: 予約明細の「/ 氏名 /」、「氏名様・氏名さん」、
+ * 「customer_name: 氏名」などのラベル付き。
+ */
+function replaceNameOccurrences(
   text: string,
-  needle: string,
-  replacement: string,
+  name: string,
+  alias: string,
 ): string {
-  return needle ? text.split(needle).join(replacement) : text;
+  if (!name || name.length < 2) return text;
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`(/\\s*)${esc}(\\s*/)`, "gu"), `$1${alias}$2`)
+    .replace(new RegExp(`${esc}(?=\\s*(?:様|さん))`, "gu"), alias)
+    .replace(
+      new RegExp(
+        `(["']?(?:customer_name|customerName|reservation_name|guest_name|予約者|予約名|氏名)["']?\\s*[:：=]\\s*["']?)${esc}`,
+        "gu",
+      ),
+      `$1${alias}`,
+    );
 }
 
 function sanitizeText(
@@ -118,7 +137,7 @@ function sanitizeText(
   let text = String(raw ?? "");
   const names = [...aliases.keys()].sort((a, b) => b.length - a.length);
   for (const name of names) {
-    text = replaceAllLiteral(text, name, aliases.get(name) || "予約客");
+    text = replaceNameOccurrences(text, name, aliases.get(name) || "予約客");
   }
 
   // メールと電話は予約API側で除外済みだが、多層防御として自由入力からも落とす。

@@ -24,7 +24,8 @@
       .replace(/\s+/g, ' ')
       .replace(/(?:様|さん)$/u, '')
       .trim();
-    if (!name || name.length > 80) return '';
+    // 1文字の名前は本文や商品名へ巻き込みやすく、仮名化の実益もないため対象外にする。
+    if (!name || name.length < 2 || name.length > 80) return '';
     if (/^(?:氏名不明|予約客[A-Z]+|不明|null|undefined)$/i.test(name)) return '';
     return name;
   }
@@ -59,10 +60,24 @@
     });
   }
 
+  // 予約者名は、名前が実際に現れる文脈だけを置換する。単純な全置換にすると
+  // 確定済み集計データの商品名まで巻き込んで壊す（予約者「山田」で商品「山田錦」が壊れる）。
+  function replaceNameOccurrences(text, name, alias) {
+    if (!name || name.length < 2) return text;
+    var esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return text
+      .replace(new RegExp('(/\\s*)' + esc + '(\\s*/)', 'gu'), '$1' + alias + '$2')
+      .replace(new RegExp(esc + '(?=\\s*(?:様|さん))', 'gu'), alias)
+      .replace(
+        new RegExp('(["\']?(?:customer_name|customerName|reservation_name|guest_name|予約者|予約名|氏名)["\']?\\s*[:：=]\\s*["\']?)' + esc, 'gu'),
+        '$1' + alias
+      );
+  }
+
   function sanitizeText(value, aliases) {
     var text = String(value == null ? '' : value);
     Object.keys(aliases).sort(function (a, b) { return b.length - a.length; })
-      .forEach(function (name) { text = text.split(name).join(aliases[name]); });
+      .forEach(function (name) { text = replaceNameOccurrences(text, name, aliases[name] || '予約客'); });
     text = text.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[メール非送信]');
     text = text.replace(/(?<!\d)(?:\+?81[-\s]?)?(?:0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4})(?!\d)/g, '[電話非送信]');
     text = text.replace(/([/／]\s*)アレルギー\s+(?!記載|あり|なし)[^/／\n]+/gu, '$1アレルギーあり');

@@ -1825,7 +1825,7 @@
       <h4>集計のルール</h4>
       <table class="jr-table"><tbody>
         <tr><td>ランチ／ディナー</td><td>会計時刻 <strong>16:00より前がランチ</strong>、以降がディナー</td></tr>
-        <tr><td>カテゴリ</td><td>フード／飲料／室料。チャージはフードの内数として扱います</td></tr>
+        <tr><td>カテゴリ</td><td>フード／飲料／室料／その他。チャージは独立カテゴリではなく、実データ上いずれかのカテゴリの内数です（合計に足し戻さないでください）</td></tr>
         <tr><td>商品コード分類</td><td>店舗ごとに調整できます。分類を変えると以後の集計に反映されます</td></tr>
       </tbody></table>
       <div class="jr-note"><strong>同じファイルの二重取り込みは自動で防ぎます。</strong> 内容が同一のファイルは「保管済み」として重複集計されません。集計値が空のまま保存された過去の行は、同じファイルを入れ直すと<strong>削除せずに修復</strong>されます。</div>
@@ -2085,7 +2085,7 @@
             <label class="category-field">その他（個室料金等）の商品コード・範囲
               <textarea id="otherCodes" autocomplete="off" spellcheck="false" placeholder="例: 0900-0949"></textarea>
             </label>
-            <label class="category-field">チャージの商品コード・範囲（フード内数）
+            <label class="category-field">チャージの商品コード・範囲（いずれかのカテゴリの内数）
               <textarea id="chargeCodes" autocomplete="off" spellcheck="false" placeholder="例: 0150"></textarea>
             </label>
           </div>
@@ -3082,7 +3082,8 @@ function completedRecords(recs){
 // POSの商品グループ「料理 / ドリンク」に合わせた明示マスタ。
 // 商品コードは年月をまたいで再利用されるため、コード単独ではなく
 // NFKC正規化した「コード＋商品名」で照合する。未知の商品は推測しない。
-// POS公式ではチャージ料も料理に含まれるため、画面ではフードの内数として表示する。
+// POS公式ではチャージ料も料理に含まれる建て付けだが、実際の分類は店舗のカテゴリ設定に依存し
+// フード以外（その他など）へ入ることがある。画面・AIとも実データの所属カテゴリを正として表示する。
 const PRODUCT_GROUP_MASTER=[
   ['0000000000001','チャージ料','フード',true],
   ['0000000000027','SPコ-ス','フード'],
@@ -3238,7 +3239,9 @@ function classifyByConfiguredCode(code){
 }
 function classifyProduct(code,name){
   const override=readProductCategoryOverrides()[productGroupKey(code,name)];
-  if(override&&SALES_CATEGORIES.includes(override)) return {category:override,isCharge:false,known:true,byCode:false,byOverride:true};
+  // カテゴリの手動上書きは分類だけを変える。ここで isCharge を落とすと、
+  // 同じ商品なのに月によってチャージ集計から消え、月次比較が狂う。
+  if(override&&SALES_CATEGORIES.includes(override)) return {category:override,isCharge:categorySpecMatches(code,categorySettings.charge),known:true,byCode:false,byOverride:true};
   const configured=classifyByConfiguredCode(code);
   if(configured) return configured;
   // ① コード＋商品名の完全一致（従来どおり最優先）
@@ -3528,6 +3531,15 @@ const DINNER_START_MINUTES=16*60;
 const MEAL_PERIODS=['ランチ','ディナー'];
 // 売上カテゴリ。フード・飲料に加え、個室料金（室料）を独立集計する。
 const SALES_CATEGORIES=['フード','飲料','室料','その他'];
+/** チャージ額をカテゴリ別に集めたMapから、内数として属するカテゴリを決める。
+ *  マスタ定義（チャージ＝フード内数）と実データの分類は食い違うことがあるため、
+ *  画面・AIとも「定義」ではなく「実データ」を正とする。特定できなければ ''。 */
+function dominantChargeCategory(byCategory){
+  if(!(byCategory instanceof Map)) return '';
+  let best='',bestAmt=0;
+  byCategory.forEach((amt,category)=>{ if(amt>bestAmt){ best=category; bestAmt=amt; } });
+  return SALES_CATEGORIES.includes(best)?best:'';
+}
 const newCategoryMap=()=>new Map(SALES_CATEGORIES.map(c=>[c,0]));
 const newCategoryProductMap=()=>new Map(SALES_CATEGORIES.map(c=>[c,new Map()]));
 function classifyMealPeriod(hour,minute){
@@ -4068,6 +4080,21 @@ function collectSalesAudit(itemList=null){
     });
   });
   if(duplicateCount) warnings.push(`重複伝票${duplicateCount}件を自動除外`);
+  // チャージ設定に該当する商品があるのに isCharge が一つも立っていない月は、
+  // チャージ集計が丸ごと欠落する（月次比較で「チャージ0」と誤読される）。
+  {
+    const chargeCandidates=new Set();
+    let chargeFlagged=false;
+    for(const p of sales){
+      for(const it of p.items){
+        if(it.isCharge){ chargeFlagged=true; }
+        else if(categorySpecMatches(it.code,categorySettings.charge)) chargeCandidates.add(`${it.code} ${it.name}`);
+      }
+    }
+    if(!chargeFlagged&&chargeCandidates.size){
+      warnings.push(`チャージ対象の商品コードが${chargeCandidates.size}種あるのにチャージ集計が0件です（カテゴリ設定・分類上書きを確認してください）: ${[...chargeCandidates].slice(0,5).join(' / ')}`);
+    }
+  }
   sales.sort((a,b)=> a.date!==b.date ? (a.date<b.date?-1:1) : (a.no-b.no));
   // クラウド分類ルールを必ず再適用（解析直後の取りこぼし防止）
   const overridden=applyAllCategoryOverridesToSales(sales);
@@ -4176,7 +4203,7 @@ function groupByDate(sales){
       byCategoryQty:newCategoryMap(),
       productByCategory:newCategoryProductMap(),
       byMealPeriod:newMealPeriodMap(),
-      chargeTotal:0,chargeQty:0,
+      chargeTotal:0,chargeQty:0,chargeByCategory:new Map(),
       weather:'', tempC:null, hasDaySummary:false});
     const g=days.get(s.date);
     g.receipts.push(s); g.total+=s.total; g.tax+=s.tax;
@@ -4196,7 +4223,10 @@ function groupByDate(sales){
       const categoryProducts=g.productByCategory.get(it.category);
       const prev2=categoryProducts.get(it.name)||{amount:0,qty:0};
       categoryProducts.set(it.name,{amount:prev2.amount+it.amount,qty:prev2.qty+it.qty});
-      if(it.isCharge){ g.chargeTotal+=it.amount; g.chargeQty+=it.qty; }
+      if(it.isCharge){
+        g.chargeTotal+=it.amount; g.chargeQty+=it.qty;
+        g.chargeByCategory.set(it.category,(g.chargeByCategory.get(it.category)||0)+it.amount);
+      }
     }
   }
   const seenSummarySources=new Set();
@@ -4385,12 +4415,15 @@ function dayHtml(g){
   const heading=`${+Y}年${+M}月${+D}日${g.weekday?'（'+g.weekday+'）':''} の売上${weatherNote}`;
   const food=g.byCategory.get('フード')||0, drinks=g.byCategory.get('飲料')||0, room=g.byCategory.get('室料')||0;
   const foodQty=g.byCategoryQty.get('フード')||0, drinkQty=g.byCategoryQty.get('飲料')||0, roomQty=g.byCategoryQty.get('室料')||0;
-  const foodSub=`${foodQty}点${g.chargeTotal?`・うちチャージ ${yen(g.chargeTotal)}`:''}`;
+  // チャージはフード固定ではない。所属カテゴリは実データから判定し、独立タイルで示す。
+  const chargeCat=dominantChargeCategory(g.chargeByCategory);
+  const foodSub=`${foodQty}点`;
   const kpis=`<div class="kpis">
     ${kpiTile('総売上', yen(g.total))}
     ${kpiTile('フード売上', yen(food), foodSub)}
     ${kpiTile('飲料売上', yen(drinks), `${drinkQty}点`)}
     ${room?kpiTile('室料', yen(room), `${roomQty}件`):''}
+    ${g.chargeTotal?kpiTile('うちチャージ', yen(g.chargeTotal), chargeCat?`${chargeCat}の内数`:'カテゴリ内訳の内数'):''}
     ${kpiTile('取引件数', n+'件')}
     ${kpiTile('組数', g.peopleComplete?g.groups+'組':'—')}
     ${kpiTile('客数', g.peopleComplete?g.customers+'名':'—')}
@@ -4402,11 +4435,11 @@ function dayHtml(g){
   const charts=`<div class="charts">
     <div class="chart"><h4>ランチのフード・飲料（16:00未満）</h4>${mealCategoryChart(g.byMealPeriod.get('ランチ'))}</div>
     <div class="chart"><h4>ディナーのフード・飲料（16:00以降）</h4>${mealCategoryChart(g.byMealPeriod.get('ディナー'))}</div>
-    <div class="chart"><h4>当日のカテゴリ別合計（チャージはフードに含む${room?'／室料は独立集計':''}）</h4>${donutChart([['フード',food],['飲料',drinks],...(room?[['室料',room]]:[])])}</div>
+    <div class="chart"><h4>当日のカテゴリ別合計（チャージは該当カテゴリの内数${room?'／室料は独立集計':''}）</h4>${donutChart([['フード',food],['飲料',drinks],...(room?[['室料',room]]:[])])}</div>
     <div class="chart"><h4>支払方法別の内訳</h4>${donutChart([...g.byMethod])}</div>
     <div class="chart wide"><h4>時間帯別の売上</h4>${barsV([...g.byHour])}</div>
     ${g.byTable.size?`<div class="chart wide"><h4>テーブル別の売上</h4>${barsH(tableStatsPairs(g.byTable))}</div>`:''}
-    <div class="chart wide"><h4>フードの商品別売上（純額・チャージ含む）</h4>${barsH([...g.productByCategory.get('フード')])}</div>
+    <div class="chart wide"><h4>フードの商品別売上（純額）</h4>${barsH([...g.productByCategory.get('フード')])}</div>
     <div class="chart wide"><h4>飲料の商品別売上（純額）</h4>${barsH([...g.productByCategory.get('飲料')])}</div>
   </div>`;
   const tableBlock=g.byTable.size
@@ -6203,6 +6236,8 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
   const byCategoryQty=newCategoryMap();
   const productByCategory=newCategoryProductMap();
   let chargeTotal=0;
+  // 月内のチャージ所属カテゴリ（日別集計の実データから判定。フード固定にしない）
+  const monthChargeByCategory=new Map();
   days.forEach(d=>{
     d.byMethod.forEach((v,k)=>byMethod.set(k,(byMethod.get(k)||0)+v));
     d.byHour.forEach((v,k)=>byHour.set(k,(byHour.get(k)||0)+v));
@@ -6226,6 +6261,9 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
       });
     });
     chargeTotal+=d.chargeTotal;
+    if(d.chargeByCategory instanceof Map){
+      d.chargeByCategory.forEach((amt,cat)=>monthChargeByCategory.set(cat,(monthChargeByCategory.get(cat)||0)+amt));
+    }
   });
   const peopleComplete=days.every(d=>d.peopleComplete);
   // 日計JNLサマリーが揃っている場合はその値を使い、揃っていない場合はレシートから集計した
@@ -6242,6 +6280,7 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
   const food=byCategory.get('フード')||0, drinks=byCategory.get('飲料')||0, room=byCategory.get('室料')||0;
   const foodQty=byCategoryQty.get('フード')||0, drinkQty=byCategoryQty.get('飲料')||0, roomQty=byCategoryQty.get('室料')||0;
   const roomCol=room>0;
+  const monthChargeCat=dominantChargeCategory(monthChargeByCategory);
   const rows=days.map(d=>`<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${esc(formatDayWeather(d))}</td><td>${esc(formatDayTemp(d))}</td><td>${d.receipts.length}件</td><td>${d.peopleComplete?d.groups+'組':'—'}</td><td>${d.peopleComplete?d.customers+'名':'—'}</td><td>${yen(d.total)}</td><td>${yen(d.tax)}</td><td>${d.peopleComplete?averageCustomerPrice(d.total,d.customers):'—'}</td></tr>`).join('');
   const other=byCategory.get('その他')||0;
   const categoryRows=days.map(d=>`<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${yen(d.byCategory.get('フード')||0)}</td><td>${yen(d.byCategory.get('飲料')||0)}</td>${roomCol?`<td>${yen(d.byCategory.get('室料')||0)}</td>`:''}<td>${yen(d.byCategory.get('その他')||0)}</td><td>${yen(d.total)}</td></tr>`).join('');
@@ -6261,9 +6300,11 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
     <div id="reportTabContent" ${showReport ? '' : 'hidden'}>
       <h3 class="day-h">月間サマリー</h3>
       ${heroCard(totalAll,[
-        ['フード売上',yen(food),`${foodQty}点${chargeTotal?`・うちチャージ ${yen(chargeTotal)}`:''}`],
+        ['フード売上',yen(food),`${foodQty}点${chargeTotal&&monthChargeCat==='フード'?`・うちチャージ ${yen(chargeTotal)}`:''}`],
         ['飲料売上',yen(drinks),`${drinkQty}点`],
-        roomCol?['室料',yen(room),`${roomQty}件`]:['その他',yen(other),'']
+        roomCol
+          ?['室料',yen(room),`${roomQty}件${chargeTotal&&monthChargeCat==='室料'?`・うちチャージ ${yen(chargeTotal)}`:''}`]
+          :['その他',yen(other),chargeTotal&&monthChargeCat!=='フード'?`うちチャージ ${yen(chargeTotal)}${monthChargeCat?'':'（所属カテゴリ不明）'}`:'']
       ])}
       <div class="rv-stat-row-grid">
         ${statCard('客数・件数',[['取引件数',salesCount+'件'],['組数',effectivePeopleComplete?groups+'組':'—'],['客数',effectivePeopleComplete?customers+'名':'—']])}
@@ -6305,11 +6346,11 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
           </div>
           <div class="charts"><div class="chart"><h4>ランチのフード・飲料（16:00未満）</h4>${mealCategoryChart(lunch)}</div><div class="chart"><h4>ディナーのフード・飲料（16:00以降）</h4>${mealCategoryChart(dinner)}</div><div class="chart wide"><h4>月間の時間帯別売上</h4>${barsV([...byHour])}</div>${byTable.size?`<div class="chart wide"><h4>月間のテーブル別売上</h4>${barsH(tableStatsPairs(byTable))}</div>`:''}</div>
           ${byTable.size?`<h4 class="table-h">月間のテーブル別集計</h4>${tableStatsTable(byTable)}<p class="rv-note">ジャーナルの「テーブルNo.」から集計しています。</p>`:''}
-          <h4 class="table-h">日別のフード・飲料売上（チャージはフードに含む${roomCol?'／室料は独立集計':''}）</h4>
+          <h4 class="table-h">日別のフード・飲料売上（チャージは該当カテゴリの内数${roomCol?'／室料は独立集計':''}）</h4>
           <table class="month-table category-table"><thead><tr><th>日付</th><th>フード</th><th>飲料</th>${roomCol?'<th>室料</th>':''}<th>その他</th><th>合計</th></tr></thead><tbody>${categoryRows}<tr><td>月間合計</td><td>${yen(food)}</td><td>${yen(drinks)}</td>${roomCol?`<td>${yen(room)}</td>`:''}<td>${yen(other)}</td><td>${yen(totalAll)}</td></tr></tbody></table>
         </div>
         <div class="msec-pane" hidden>
-          <div class="charts"><div class="chart wide"><h4>ランチのフード商品別売上（純額・チャージ含む）</h4>${barsH([...lunch.productByCategory.get('フード')])}</div><div class="chart wide"><h4>ランチの飲料商品別売上（純額）</h4>${barsH([...lunch.productByCategory.get('飲料')])}</div><div class="chart wide"><h4>ディナーのフード商品別売上（純額・チャージ含む）</h4>${barsH([...dinner.productByCategory.get('フード')])}</div><div class="chart wide"><h4>ディナーの飲料商品別売上（純額）</h4>${barsH([...dinner.productByCategory.get('飲料')])}</div></div>
+          <div class="charts"><div class="chart wide"><h4>ランチのフード商品別売上（純額）</h4>${barsH([...lunch.productByCategory.get('フード')])}</div><div class="chart wide"><h4>ランチの飲料商品別売上（純額）</h4>${barsH([...lunch.productByCategory.get('飲料')])}</div><div class="chart wide"><h4>ディナーのフード商品別売上（純額）</h4>${barsH([...dinner.productByCategory.get('フード')])}</div><div class="chart wide"><h4>ディナーの飲料商品別売上（純額）</h4>${barsH([...dinner.productByCategory.get('飲料')])}</div></div>
         </div>
       </div>
     </div>
@@ -8333,6 +8374,14 @@ async function buildIntegratedAnalysisContext({
   };
 }
 
+/** 文字数上限で確定数値を削らざるを得ないときに、末尾へ必ず付け直す規約。
+ *  確定済み集計データの直後にある「再計算禁止」規約が切り落とされると、
+ *  AIが自前で数字を作り直す余地が生まれるため、省略時も必ず残す。 */
+const AI_TRUNCATION_TAIL = '\n\n【重要・省略後も有効】上記の確定済み集計データは文字数上限のため一部を省略しています。'
+  + '省略部分の数値を推測・補完してはいけません。回答で使う数字は残っている確定済み集計データの値のみを出典とし、'
+  + 'ご自身で再計算したり他のデータから数字を持ち出すことは【完全禁止】です。'
+  + '省略された項目は「今回の確定済み集計には表示されていません」と答えてください。';
+
 /** ai-analyze は systemInstruction 40000字上限。超過時は資料本文から削る（数値・店舗情報は残す） */
 function clampAiSystemInstruction(text, maxLen = 39000) {
   let s = String(text || '');
@@ -8351,7 +8400,16 @@ function clampAiSystemInstruction(text, maxLen = 39000) {
     const originalData = s.slice(knStart + startMarker.length, knEnd).trim();
     s = head + notice + originalData.slice(0, room) + closing + tail;
   }
-  if (s.length > maxLen) s = s.slice(0, maxLen - 40) + '\n…（systemInstruction省略）';
+  if (s.length > maxLen) {
+    // 文字数だけで末尾を落とすと、確定数値が行の途中で切れたうえ、
+    // ブロック末尾にある「この確定済み集計データの値のみを使う／再計算は完全禁止」まで失われる。
+    // 行単位で削り、規約は必ず付け直す。
+    const room = Math.max(0, maxLen - AI_TRUNCATION_TAIL.length);
+    let cut = s.slice(0, room);
+    const lastBreak = cut.lastIndexOf('\n');
+    if (lastBreak > 0) cut = cut.slice(0, lastBreak);
+    s = cut + AI_TRUNCATION_TAIL;
+  }
   return s;
 }
 
@@ -9832,6 +9890,25 @@ function formatMonthlyBreakdownLines(monthlyBreakdown, indent = '') {
 
 /** 確定済み集計の補助内訳（カテゴリ／昼夜／曜日／時間帯／日別／欠損期間）を行テキストにする。
  * AIへ渡すプロンプトとローカル回答の両方で同じ内容を使い、片方だけ数値が欠けることを防ぐ。 */
+/**
+ * チャージがどのカテゴリの内数かを、保存済み伝票明細の実データから決める。
+ * マスタ定義（チャージ＝フード内数）と実データの分類は一致しない場合があり、
+ * 定義を信じて「フードの内数」と書くとAIが誤った内訳説明をするため、実データを正とする。
+ * 明細が無い保存レポートでは '' を返し、呼び出し側で断定を避ける。
+ */
+function resolveChargeCategoryFromSales(sales) {
+  if (!Array.isArray(sales)) return '';
+  const byCategory = new Map();
+  for (const s of sales) {
+    for (const it of (Array.isArray(s?.items) ? s.items : [])) {
+      if (!it?.isCharge) continue;
+      const category = String(it?.category || 'その他');
+      byCategory.set(category, (byCategory.get(category) || 0) + (Number(it?.amount) || 0));
+    }
+  }
+  return dominantChargeCategory(byCategory);
+}
+
 function formatVerifiedDetailLines(p, indent = '') {
   const lines = [];
   const total = Number(p?.totalSales) || 0;
@@ -9841,8 +9918,14 @@ function formatVerifiedDetailLines(p, indent = '') {
   const other = Number(p?.otherTotal) || 0;
   const charge = Number(p?.chargeTotal) || 0;
   if (total > 0 && (food > 0 || drink > 0)) {
-    const chargeNote = charge > 0 ? `（うちチャージ ${yen(charge)}）` : '';
-    lines.push(`${indent}- カテゴリ内訳（総売上の昼夜合算）: フード ${yen(food)}${chargeNote} / 飲料 ${yen(drink)} / 室料 ${yen(room)} / その他 ${yen(other)}`);
+    // チャージは4カテゴリのいずれかの内数。所属をマスタ定義で決め打ちすると実データと食い違うため、
+    // 判明している場合だけそのカテゴリへ注記し、不明なら別行で「いずれかの内数」と明示する。
+    const chargeCat = String(p?.chargeCategory || '');
+    const chargeNote = (cat) => (charge > 0 && chargeCat === cat) ? `（うちチャージ ${yen(charge)}）` : '';
+    lines.push(`${indent}- カテゴリ内訳（総売上の昼夜合算）: フード ${yen(food)}${chargeNote('フード')} / 飲料 ${yen(drink)}${chargeNote('飲料')} / 室料 ${yen(room)}${chargeNote('室料')} / その他 ${yen(other)}${chargeNote('その他')}`);
+    if (charge > 0 && !SALES_CATEGORIES.includes(chargeCat)) {
+      lines.push(`${indent}  ※チャージ ${yen(charge)} は上記4カテゴリのいずれかの内数です（この保存レポートには所属分類が記録されておらず特定できません）。4カテゴリの合計へ足し戻さないこと`);
+    }
     if (room > 0 || other > 0) {
       lines.push(`${indent}  ※フード＋ドリンクの合算比率は飲食2カテゴリ内の構成比です。総売上には室料・その他 ${yen(room + other)} が含まれます`);
     }
@@ -15011,6 +15094,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       let room = Number(r.roomTotal) || 0;
       let other = Number(r.otherTotal) || 0;
       let charge = Number(r.chargeTotal) || 0;
+      // チャージの所属カテゴリは保存済み明細から判定する（保存サマリには持っていない）
+      const chargeCategory = resolveChargeCategoryFromSales(r.sales);
       let lunch = Number(r.lunchTotal) || 0;
       let dinner = Number(r.dinnerTotal) || 0;
       let lunchCust = Number(r.lunchCustomers) || 0;
@@ -15053,6 +15138,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         roomTotal: room,
         otherTotal: other,
         chargeTotal: charge,
+        chargeCategory,
         lunchTotal: lunch,
         dinnerTotal: dinner,
         lunchCustomers: lunchCust,
@@ -15081,6 +15167,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         prev.roomTotal += row.roomTotal;
         prev.otherTotal += row.otherTotal;
         prev.chargeTotal += row.chargeTotal;
+        if (!prev.chargeCategory) prev.chargeCategory = row.chargeCategory;
         prev.lunchTotal += row.lunchTotal;
         prev.dinnerTotal += row.dinnerTotal;
         prev.lunchCustomers += row.lunchCustomers;
@@ -15152,6 +15239,13 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     // 期間合計は月次代表値の合算を優先（二重計上を避ける）。月が取れない場合のみ従来の合算へフォールバック。
     let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
     let roomTot = 0, otherTot = 0, chargeTot = 0;
+    // チャージの所属カテゴリ。期間内で分類が割れている場合は断定せず空にする。
+    let chargeCat = '', chargeCatConflict = false;
+    const noteChargeCat = (cat) => {
+      if (!cat) return;
+      if (!chargeCat) chargeCat = cat;
+      else if (chargeCat !== cat) chargeCatConflict = true;
+    };
     let lunchTot = 0, dinnerTot = 0, lunchCustTot = 0, dinnerCustTot = 0;
     let lunchFoodTot = 0, lunchDrinkTot = 0, dinnerFoodTot = 0, dinnerDrinkTot = 0;
     if (monthlyBreakdown.length > 0) {
@@ -15164,6 +15258,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         roomTot += m.roomTotal || 0;
         otherTot += m.otherTotal || 0;
         chargeTot += m.chargeTotal || 0;
+        noteChargeCat(m.chargeCategory);
         lunchTot += m.lunchTotal || 0;
         dinnerTot += m.dinnerTotal || 0;
         lunchCustTot += m.lunchCustomers || 0;
@@ -15183,6 +15278,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         roomTot += Number(r.roomTotal) || 0;
         otherTot += Number(r.otherTotal) || 0;
         chargeTot += Number(r.chargeTotal) || 0;
+        noteChargeCat(resolveChargeCategoryFromSales(r.sales));
         lunchTot += Number(r.lunchTotal) || 0;
         dinnerTot += Number(r.dinnerTotal) || 0;
         lunchCustTot += Number(r.lunchCustomers) || 0;
@@ -15203,6 +15299,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
           roomTot += agg.roomTotal;
           otherTot += agg.otherTotal;
           chargeTot += agg.chargeTotal;
+          noteChargeCat(resolveChargeCategoryFromSales(r.sales));
           lunchTot += agg.lunchTotal;
           dinnerTot += agg.dinnerTotal;
           lunchCustTot += agg.lunchCustomers;
@@ -15268,6 +15365,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       roomTotal: roomTot,
       otherTotal: otherTot,
       chargeTotal: chargeTot,
+      chargeCategory: chargeCatConflict ? '' : chargeCat,
       lunchTotal: lunchTot,
       dinnerTotal: dinnerTot,
       lunchCustomers: lunchCustTot,
@@ -15331,6 +15429,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       roomTotal: agg.roomTotal,
       otherTotal: agg.otherTotal,
       chargeTotal: agg.chargeTotal,
+      chargeCategory: resolveChargeCategoryFromSales(rows),
       lunchTotal: agg.lunchTotal,
       dinnerTotal: agg.dinnerTotal,
       lunchCustomers: agg.lunchCustomers,
@@ -15857,7 +15956,7 @@ ${p.detailRangeLimited ? '  - 商品明細範囲: 新しい36か月分（通信�
 【確定済み集計データ（複数期間 / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 ${verifiedData.periods.map(formatVerifiedPeriodBlock).join('\n')}${wineVolumeFactsBlock}
 
-回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。${wineMetricAnswerRule}各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ず上記の確定済み集計データの値のみを使用してください（期間間の比較・増減・割合の言及は歓迎します）。${wineMetricAnswerRule}各期間に月次推移がある場合は、それを根拠に月ごとの推移も説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他。チャージはこの4カテゴリのいずれかの内数であり、独立した5番目のカテゴリではありません。4カテゴリの合計へ足し戻さないでください）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で新たに数値を計算したり、上記に無いデータを持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   } else if (verifiedData && verifiedData.reservationOnly) {
     verifiedDataBlock = `
 
@@ -15890,7 +15989,7 @@ ${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 ${(verifiedData.topProducts && verifiedData.topProducts.length) ? `- 売れ筋商品TOP${Math.min(verifiedData.topProducts.length, requestedRankingLimit(resolvedChatQuery, 10))}（★大分類除外${wantsExcludeCourseProducts(resolvedChatQuery) ? '・コース除外' : '・コースは合算'}）:\n` + formatTopProductsLinesForAi(verifiedData.topProducts, requestedRankingLimit(resolvedChatQuery, 10)) : ''}
 ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分（通信量上限。全期間は期間を分けて再質問してください）' : ''}${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}${wineVolumeFactsBlock}
 
-回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。${wineMetricAnswerRule}月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他・チャージ）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
+回答で使う数字は必ずこの確定済み集計データの値のみを使用してください。${wineMetricAnswerRule}月次推移が上記にある場合は、それを根拠に月ごとの売上推移・増減を説明してください（「月次データが無い」と答えないでください）。カテゴリ内訳（フード／飲料／室料／その他。チャージはこの4カテゴリのいずれかの内数であり、独立した5番目のカテゴリではありません。4カテゴリの合計へ足し戻さないでください）、ランチ／ディナー、曜日別、時間帯別、日別が記載されている場合も同様に、それを根拠に答えてください（記載があるのに「その内訳はありません」と答えないでください）。「異常月の詳細解析」がある場合は、高単価会計・コース単価比較・季節メニュー寄与金額を根拠に原因を述べてください（「内訳が表示されていません」「寄与は不明」で止めない）。「商品初出・導入月」がある場合は、ジャーナル全件検索で特定した各ターゲットの初出日・単価帯・導入前後の客単価／構成を根拠に述べ、「開始月は表示されていません」で止めないでください。複数ターゲットがあるときは混同せず、「ジャーナル再読不可／該当商品が集計に無い」と書かないでください。「コースラインナップ」がある場合は単価帯主力の兄弟商品と「月次コース販売」を必ず使ってください。固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止です。「商品利用会計 vs 非利用会計」がある場合は、客単価・ドリンク客あたり・差分を根拠に述べ、「追加比較が必要」「比較できない」で止めないでください。「ジャーナル会計比較（汎用）」がある場合は、提示された各軸（昼夜・平日週末・ボトル/グラス・人数帯・商品同士など）の数値を根拠に述べてください。「予約確定事実」がある場合は、チャネル別件数・新規／リピート・氏名・前回来店・予約内容に加え、【予約 vs 飛び込み（月次）】の組数・人数・前月比を売上の流れ指標として必ず述べてください（電話は含まれない。予約人数をそのまま客数として報告しない。飛び込みは必ず「推定」）。新規予約や飛び込みが増減した月は【店舗ナレッジ】を照合し、資料があれば「登録資料によると」、無ければ「※これは推測です」と前置きして要因を述べてください。「予約専用項目なし」と併記されていても本節があればそちらを優先し、「表示されていません」で止めないでください。本節が無い場合は予約・飛び込みに触れず通常の売上分析のみ行ってください。ご自身で再計算したり、他のデータから数字を持ち出したりすることは【完全禁止】です。上記に無い項目は「今回の確定済み集計には表示されていません」と答え、保存DB自体に存在しないとは断定しないでください。専用項目なしと明記された予約・宴会は、その区別を正確に説明してください。`;
   }
   // 店舗営業情報（クラウド）と店舗ナレッジを、確定集計と必ずセットで添付する。
   let integrated;
