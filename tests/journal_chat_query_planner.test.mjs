@@ -4,12 +4,10 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const htmlPath = new URL('../public/jnm/jnl2txt.html', import.meta.url);
-const indexPath = new URL('../public/jnm/index.html', import.meta.url);
 const historyPath = new URL('../public/jnm/ai-chat-pdf-history.html', import.meta.url);
 const aiUsagePath = new URL('../public/jnm/ai-usage.html', import.meta.url);
 const appThemePath = new URL('../public/jnm/app-theme.js', import.meta.url);
 const html = await readFile(htmlPath, 'utf8');
-const indexHtml = await readFile(indexPath, 'utf8');
 const historyHtml = await readFile(historyPath, 'utf8');
 const aiUsageHtml = await readFile(aiUsagePath, 'utf8');
 const appThemeJs = await readFile(appThemePath, 'utf8');
@@ -804,7 +802,6 @@ test('intent clarification stops after two consecutive rounds to avoid a questio
 });
 
 test('both Journal Report entry files keep the planner and error distinction in sync', () => {
-  assert.equal(indexHtml, html);
   assert.match(html, /needsClarification/);
   assert.match(html, /needsIntentClarification/);
   assert.match(html, /AI_INTENT_CLARIFICATION_MARKER/);
@@ -856,7 +853,7 @@ test('both Journal Report entry files keep the planner and error distinction in 
 });
 
 test('uploaded file names and parser errors are rendered as text, never executable HTML', () => {
-  for (const source of [html, indexHtml]) {
+  for (const source of [html]) {
     assert.doesNotMatch(source, /head\.innerHTML\s*=\s*`<div class="fname">/);
     assert.match(source, /fileName\.textContent=String\(it\.name\|\|''\)/);
     assert.match(source, /errorText\.textContent=String\(it\.error\|\|''\)/);
@@ -1159,13 +1156,26 @@ test('verified aggregates carry every stored breakdown so the AI never has to sa
   });
   assert.match(text, /カテゴリ内訳/);
   assert.match(text, /室料/);
-  assert.match(text, /うちチャージ/);
+  // チャージは4カテゴリのいずれかの内数。所属が保存されていない古いレポートでは
+  // フードの内数と決め打ちせず、特定できない旨を明示する。
+  assert.match(text, /※チャージ ¥1,000 は上記4カテゴリのいずれかの内数です/);
+  assert.doesNotMatch(text, /フード ¥48,000（うちチャージ/);
   assert.match(text, /ランチ／ディナー/);
   assert.match(text, /曜日別売上/);
   assert.match(text, /時間帯別売上/);
   assert.match(text, /日別売上/);
   assert.match(text, /保存データが無い期間: 2025年7月/);
   assert.equal(context.formatVerifiedDetailLines({}), '');
+
+  // 所属カテゴリが判明している場合は、そのカテゴリの内数として示す（フード固定にしない）
+  const withCategory = context.formatVerifiedDetailLines({
+    totalSales: 68000, foodTotal: 48000, drinkTotal: 15000, roomTotal: 4000, otherTotal: 1000,
+    chargeTotal: 1000, chargeCategory: 'その他',
+    lunchTotal: 8000, dinnerTotal: 60000, lunchCustomers: 2, dinnerCustomers: 4,
+  });
+  assert.match(withCategory, /その他 ¥1,000（うちチャージ ¥1,000）/);
+  assert.doesNotMatch(withCategory, /フード ¥48,000（うちチャージ/);
+  assert.doesNotMatch(withCategory, /いずれかの内数です/);
 
   // 集計結果と AI プロンプトの双方に載ること
   assert.match(html, /weekdayBreakdown,\s*\n\s*hourlyBreakdown,/);

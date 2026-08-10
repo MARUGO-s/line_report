@@ -10,10 +10,6 @@ const html = await readFile(
   new URL("../public/jnm/jnl2txt.html", import.meta.url),
   "utf8",
 );
-const indexHtml = await readFile(
-  new URL("../public/jnm/index.html", import.meta.url),
-  "utf8",
-);
 
 function sectionBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -53,5 +49,4 @@ test("Journal Report 店舗情報 tab has past-sales sync switch", () => {
   assert.match(html, /過去売上への同期（ジャーナルを正とする）/);
   assert.match(html, /journalSalesSync:\s*!!document\.getElementById\('opsJournalSalesSync'\)\?\.checked/);
   assert.match(html, /keepSync/);
-  assert.equal(html, indexHtml, "jnl2txt.html and index.html must stay in sync");
 });

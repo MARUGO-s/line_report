@@ -10,10 +10,6 @@ const html = await readFile(
   new URL("../public/jnm/jnl2txt.html", import.meta.url),
   "utf8",
 );
-const indexHtml = await readFile(
-  new URL("../public/jnm/index.html", import.meta.url),
-  "utf8",
-);
 
 function sectionBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -55,5 +51,4 @@ test("Journal Report UI and AI analysis wire wine ml settings", () => {
   assert.match(html, /wineVolumeAnalysis/);
   assert.match(html, /分析アイテム・ワイン提供量\(ml\)/);
   assert.match(html, /keepWineMl/);
-  assert.equal(html, indexHtml, "jnl2txt.html and index.html must stay in sync");
 });

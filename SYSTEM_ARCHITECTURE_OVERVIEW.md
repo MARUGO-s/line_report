@@ -2,7 +2,7 @@
 
 本ドキュメントは、POS電子ジャーナル（`.jnl` / `.lzh`）の取り込み・厳密集計・クラウド保存から、店舗情報・店舗ナレッジ・LINE `#メモ` 連携、予約事実、売上予測、AIチャット／分析まで、**現行 Journal Report の全機能とデータフローを1本にまとめた正本仕様**です。
 
-- **対象アプリ**: Journal Report（`public/jnm/jnl2txt.html` / 同一内容の `index.html`）
+- **対象アプリ**: Journal Report（`public/jnm/jnl2txt.html`。`public/jnm/index.html` は `/jnm/` を本体へ転送するスタブ）
 - **本番URL**: https://marugo-s.github.io/line_report/jnm/jnl2txt.html
 - **GitHub**: `MARUGO-s/line_report`（`main`）
 - **Supabase プロジェクト**: `hocbnifuactbvmyjraxy`

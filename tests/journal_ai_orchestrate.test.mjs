@@ -109,15 +109,11 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
     new URL('../public/jnm/jnl2txt.html', import.meta.url),
     'utf8',
   );
-  const indexHtml = await readFile(
-    new URL('../public/jnm/index.html', import.meta.url),
-    'utf8',
-  );
   const client = await readFile(
     new URL('../public/jnm/journal-ai-client.js', import.meta.url),
     'utf8',
   );
-  for (const source of [html, indexHtml]) {
+  for (const source of [html]) {
     assert.match(source, /src="journal-ai-privacy\.js"/);
     assert.match(source, /src="journal-ai-client\.js"/);
     assert.equal(
@@ -133,12 +129,12 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
 });
 
 test('Journal AI privacy layer is loaded before the network client', async () => {
-  const indexHtml = await readFile(
-    new URL('../public/jnm/index.html', import.meta.url),
+  const appHtml = await readFile(
+    new URL('../public/jnm/jnl2txt.html', import.meta.url),
     'utf8',
   );
-  const privacyIndex = indexHtml.indexOf('src="journal-ai-privacy.js"');
-  const clientIndex = indexHtml.indexOf('src="journal-ai-client.js"');
+  const privacyIndex = appHtml.indexOf('src="journal-ai-privacy.js"');
+  const clientIndex = appHtml.indexOf('src="journal-ai-client.js"');
   assert.ok(privacyIndex >= 0);
   assert.ok(clientIndex > privacyIndex);
 });

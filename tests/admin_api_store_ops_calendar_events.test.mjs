@@ -10,10 +10,6 @@ const html = await readFile(
   new URL("../public/jnm/jnl2txt.html", import.meta.url),
   "utf8",
 );
-const indexHtml = await readFile(
-  new URL("../public/jnm/index.html", import.meta.url),
-  "utf8",
-);
 
 function sectionBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -54,5 +50,4 @@ test("Journal Report 店舗情報 has calendar event UI wired to AI preview", ()
   assert.match(html, /function formatStoreOpsCalendarEventsForAi/);
   assert.match(html, /calendarEvents:\s*opsCalendarEvents/);
   assert.match(html, /登録カレンダー/);
-  assert.equal(html, indexHtml, "jnl2txt.html and index.html must stay in sync");
 });

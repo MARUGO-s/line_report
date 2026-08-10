@@ -9921,9 +9921,13 @@ function formatVerifiedDetailLines(p, indent = '') {
     // チャージは4カテゴリのいずれかの内数。所属をマスタ定義で決め打ちすると実データと食い違うため、
     // 判明している場合だけそのカテゴリへ注記し、不明なら別行で「いずれかの内数」と明示する。
     const chargeCat = String(p?.chargeCategory || '');
-    const chargeNote = (cat) => (charge > 0 && chargeCat === cat) ? `（うちチャージ ${yen(charge)}）` : '';
+    let chargeShown = false;
+    const chargeNote = (cat) => {
+      if (charge > 0 && chargeCat === cat) { chargeShown = true; return `（うちチャージ ${yen(charge)}）`; }
+      return '';
+    };
     lines.push(`${indent}- カテゴリ内訳（総売上の昼夜合算）: フード ${yen(food)}${chargeNote('フード')} / 飲料 ${yen(drink)}${chargeNote('飲料')} / 室料 ${yen(room)}${chargeNote('室料')} / その他 ${yen(other)}${chargeNote('その他')}`);
-    if (charge > 0 && !SALES_CATEGORIES.includes(chargeCat)) {
+    if (charge > 0 && !chargeShown) {
       lines.push(`${indent}  ※チャージ ${yen(charge)} は上記4カテゴリのいずれかの内数です（この保存レポートには所属分類が記録されておらず特定できません）。4カテゴリの合計へ足し戻さないこと`);
     }
     if (room > 0 || other > 0) {

@@ -10,7 +10,7 @@
 - **公開WebアプリURL**: [https://marugo-s.github.io/line_report/jnm/jnl2txt.html](https://marugo-s.github.io/line_report/jnm/jnl2txt.html)
 - **GitHubリポジトリ**: `MARUGO-s/line_report` (`main` ブランチ)
 - **主要ソースファイル**: `/jnl2txt.html`
-- **デプロイパス**: `public/jnm/jnl2txt.html` および `public/jnm/index.html`
+- **デプロイパス**: `public/jnm/jnl2txt.html`（アプリ本体は1本のみ。`public/jnm/index.html` は `/jnm/` を本体へ転送するだけのスタブで、複製ではありません）
 
 ---
 
@@ -91,12 +91,12 @@ AIチャット処理 (`sendAiChat`, `generateLocalConsultantReply`, `searchSaved
 
 ```bash
 # 1. public ディレクトリへコピー
+# index.html は転送スタブなのでコピー対象に含めない（アプリ本体を書き戻さないこと）
 cp /Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/jnl2txt.html /tmp/line_report_repo/public/jnm/jnl2txt.html
-cp /Users/yoshito/Library/CloudStorage/Dropbox/web/解凍変換ソフト/jnl2txt.html /tmp/line_report_repo/public/jnm/index.html
 
 # 2. Git コミット & プッシュ
 cd /tmp/line_report_repo
-git add public/jnm/jnl2txt.html public/jnm/index.html
+git add public/jnm/jnl2txt.html
 git commit -m "Update application logic and documentation"
 git push origin main
 ```
@@ -113,7 +113,7 @@ git push origin main
 
 > **絶対にやってはいけないこと**
 > `cp .../解凍変換ソフト/supabase/functions/... → 本リポジトリ/supabase/functions/...`
-> セクション6のデプロイ手順は **`jnl2txt.html` と `index.html` のみ**が対象です。`supabase/` 配下は決してコピー対象に含めないでください。
+> セクション6のデプロイ手順は **`jnl2txt.html` のみ**が対象です。`index.html` は転送スタブなので上書きしないでください。`supabase/` 配下は決してコピー対象に含めないでください。
 
 **実際に起きた事故（2026-08-03）**
 

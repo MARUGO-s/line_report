@@ -178,3 +178,20 @@ test('top-level markdown links from docs still resolve after moving the frontend
     }
   }
 });
+
+test('public/jnm/index.html stays a redirect stub, not a copy of the app', async () => {
+  // アプリ本体は jnl2txt.html の1本だけ。かつては index.html にも同じ825KBを複製し
+  // byte一致をテストで強制していたが、片方だけ更新する事故が起きたため転送に切り替えた。
+  const indexHtml = await readFile(new URL('public/jnm/index.html', root), 'utf8');
+  const appHtml = await readFile(new URL('public/jnm/jnl2txt.html', root), 'utf8');
+  assert.ok(
+    indexHtml.length < 4000,
+    `public/jnm/index.html must stay a small redirect stub (got ${indexHtml.length} bytes). アプリ本体を書き戻さないこと`,
+  );
+  assert.match(indexHtml, /http-equiv="refresh"[^>]*jnl2txt\.html/);
+  assert.match(indexHtml, /location\.replace\('jnl2txt\.html'/);
+  assert.ok(
+    appHtml.length > 100000,
+    'public/jnm/jnl2txt.html must remain the application source',
+  );
+});
