@@ -172,6 +172,7 @@ for (const name of [
   'extractAllDayRefs',
   'extractDayScope',
   'sanitizeHistoryTextForAi',
+  'wantsChatHistoryListing',
   'pickRelevantChatPdfHistory',
   'buildChatPdfHistoryBlockForAi',
   'normalizeQueryForPeriod',
@@ -1928,4 +1929,41 @@ test('relative comparisons resolve to both periods instead of silently keeping o
   assert.equal(context.extractComparisonRefs('一昨年', TODAY).length, 0);
   assert.equal(context.extractComparisonRefs('おととし', TODAY).length, 0);
   assert.equal(pair('一昨年と今年'), '2024/1-2024/12 / 2026/1-2026/12');
+});
+
+test('asking to see the saved records lists them instead of using them silently as background', () => {
+  const items = [
+    { created_at: '2026-08-10T23:45:26Z', question: '履歴を見て\n\n【AIからの確認1】いちばん知りたいのは', answer: 'A' },
+    { created_at: '2026-08-10T23:43:02Z', question: 'さっきの各月から平均を', answer: 'B' },
+    { created_at: '2026-08-10T23:39:21Z', question: '2024年12月までと比べて', answer: 'C' },
+  ];
+
+  // 一覧を求める言い方
+  for (const q of [
+    '履歴に保存されている3つを見て', '保存した記録を見せて', '過去の質問を一覧で',
+    'PDF履歴を確認したい', '前に何を聞いたっけ', 'これまでどんな質問をした？',
+  ]) {
+    assert.ok(context.wantsChatHistoryListing(q), `一覧要求と判定されない: ${q}`);
+  }
+  // 売上データの話であって履歴要求ではない言い方
+  for (const q of [
+    'フード売上の履歴的な推移', '記録的な猛暑の影響は', '保存レポートの売上を教えて',
+    '保存済みデータから平均を', '2026年7月の売上を見せて',
+  ]) {
+    assert.ok(!context.wantsChatHistoryListing(q), `履歴要求と誤判定した: ${q}`);
+  }
+
+  const listing = context.buildChatPdfHistoryBlockForAi({ status: 'ok', items }, '履歴に保存されている3つを見て');
+  assert.match(listing, /保存件数: 全3件/, '件数を伝えること');
+  assert.match(listing, /漏れなく列挙/, '列挙を指示すること');
+  assert.match(listing, /列挙は可/, '見出しが列挙を許すこと');
+  assert.ok(!listing.includes('【AIからの確認'), '保存時に連結された確認Q&Aは除くこと');
+  assert.match(listing, /1\. 2026-08-10 質問: 履歴を見て/);
+  // 列挙モードでも再計算は禁止のまま
+  assert.match(listing, /【完全禁止】/);
+
+  // 通常の質問では従来どおり背景情報として渡す
+  const background = context.buildChatPdfHistoryBlockForAi({ status: 'ok', items }, 'フード売上の推移を教えて');
+  assert.match(background, /背景情報であり/);
+  assert.ok(!background.includes('保存件数: 全'), '背景モードでは件数の列挙指示を出さない');
 });

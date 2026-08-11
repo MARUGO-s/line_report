@@ -16570,7 +16570,7 @@ async function fetchAiChatPdfHistoryForAi() {
   if (!getAdminToken()) return { status: 'no-session', items: [] };
   try {
     const body = await adminApiFetch(
-      '/pos-journals/chat-pdf-history?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=30',
+      '/pos-journals/chat-pdf-history?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=50',
       { method: 'GET' }
     );
     return { status: 'ok', items: Array.isArray(body.items) ? body.items : [] };
@@ -16597,6 +16597,20 @@ function sanitizeHistoryTextForAi(text) {
     .trim();
 }
 
+/**
+ * 「履歴を見せて」のように、保存記録そのものの提示を求めているか。
+ * 背景情報として黙って使うのではなく、一覧として列挙させるための判定。
+ */
+function wantsChatHistoryListing(query) {
+  const q = String(query || '').normalize('NFKC');
+  // 「前に何を聞いたっけ」のように対象語が無くても過去の質問を尋ねている形
+  if (/(前|以前|過去|これまで|今まで|さっき|昨日)[^。]{0,8}(何|なに|どんな)を?(聞|訊|質問|尋ね)/.test(q)) return true;
+  // 「保存レポート」「保存済みデータ」は売上データを指す語なので履歴要求ではない
+  if (/保存(済み)?(レポート|データ|集計|売上)/.test(q)) return false;
+  if (!/(履歴|記録|保存|ログ|やり取り|やりとり|過去の質問|前の質問|pdf)/i.test(q)) return false;
+  return /(見せ|見て|見る|表示|一覧|教えて|確認|振り返|何を(聞|質問|尋ね)|どんな(質問|こと)|リスト)/.test(q);
+}
+
 /** 今回の質問と語が重なる記録を優先して選ぶ。無ければ新しい順。 */
 function pickRelevantChatPdfHistory(items, query, limit = 5) {
   const q = String(query || '').normalize('NFKC').toLowerCase();
@@ -16620,20 +16634,40 @@ function pickRelevantChatPdfHistory(items, query, limit = 5) {
 function buildChatPdfHistoryBlockForAi(result, query) {
   const status = result && result.status;
   if (status === 'no-session') return '';
-  const header = '\n\n【過去のAIチャット記録（利用者が保存した質問と回答。背景情報であり、数値の出典にしてはいけません）】';
+  // 一覧を求められている場合は「背景情報」と書くと列挙を躊躇させるため見出しを変える。
+  const header = wantsChatHistoryListing(query)
+    ? '\n\n【過去のAIチャット記録（利用者が保存した質問と回答。列挙は可。数値の出典にはしないこと）】'
+    : '\n\n【過去のAIチャット記録（利用者が保存した質問と回答。背景情報であり、数値の出典にしてはいけません）】';
   if (status === 'error') {
     return `${header}\n※記録を取得できませんでした（通信または権限）。記録が存在しないとは断定しないでください。`;
   }
-  const picked = pickRelevantChatPdfHistory(result.items, query, 5);
-  if (!picked.length) {
+  const active = (Array.isArray(result.items) ? result.items : []).filter((item) => item && !item.deleted_at);
+  if (!active.length) {
     return `${header}\n※保存された記録はありません（0件）。取得は成功しています。`;
   }
-  const lines = picked.map((item) => {
+  // 「履歴を見せて」と聞かれた場合は背景利用ではなく一覧の提示を求められている。
+  const listing = wantsChatHistoryListing(query);
+  const picked = listing
+    ? [...active].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 20)
+    : pickRelevantChatPdfHistory(active, query, 5);
+  const lines = picked.map((item, index) => {
     const when = String(item.created_at || '').slice(0, 10);
-    const question = sanitizeHistoryTextForAi(item.question).slice(0, 200);
-    const answer = sanitizeHistoryTextForAi(item.answer).slice(0, 400);
-    return `- ${when} 質問: ${question}\n  回答（抜粋）: ${answer}`;
+    // 保存時の質問には確認のやり取りが連結されていることがあるため、本来の質問だけを見せる
+    const rawQuestion = String(item.question || '').split('【AIからの確認')[0];
+    const question = sanitizeHistoryTextForAi(rawQuestion).slice(0, listing ? 300 : 200);
+    const answer = sanitizeHistoryTextForAi(item.answer).slice(0, listing ? 300 : 400);
+    return listing
+      ? `${index + 1}. ${when} 質問: ${question}\n   回答の要点: ${answer}`
+      : `- ${when} 質問: ${question}\n  回答（抜粋）: ${answer}`;
   });
+  if (listing) {
+    const more = active.length > picked.length ? `（うち新しい${picked.length}件を掲載）` : '';
+    return `${header}
+※利用者は保存記録そのものの提示を求めています。下記を日付・質問・回答の要点の形で漏れなく列挙し、件数も述べてください。
+※ここに現れる数値は過去の回答の写しであり確定値ではありません。列挙は構いませんが、これらを出典に新たな平均・合計・増減を計算することは【完全禁止】です。
+保存件数: 全${active.length}件${more}
+${lines.join('\n')}`;
+  }
   // 注意書きの中でも「確定済み集計データ」という語は使わない。
   // サーバー信頼境界がこの語を数値の正本判定に使うため、この枠内に出すと
   // 履歴の数値まで正本と誤認されうる。
