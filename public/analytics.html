@@ -813,7 +813,7 @@
             <span id="weatherStatus" style="color:var(--sub)"></span>
             <span id="weatherAddress" style="color:var(--sub)"></span>
           </div>
-          <button type="button" class="chart-tab" id="dailyCsvBtn" title="表示中の日次売上推移（総売上・降水量・最高気温）をCSVで保存します" disabled>⬇ CSV</button>
+          <button type="button" class="chart-tab" id="dailyCsvBtn" title="表示中の日次売上推移（総売上・組数・客数・予算・差額・天候）をCSVで保存します" disabled>⬇ CSV</button>
         </div>
       </div>
       <div class="chart-wrap tall" style="position:relative">
@@ -1354,6 +1354,9 @@ const state = {
   dailySeries: [],    // [{date, gross_sales_yen, net_sales_yen, party_count, guest_count, receipt_count}]
   monthlySeries: [],  // [{month, gross_sales_yen, ...}]
   weather: {},        // date → {temp, rain}
+  /** グラフ表示中の全月ぶんの日別予算・休業日（CSV 書き出しで複数月でも予算/差額を出すため） */
+  chartBudgetByDate: {},
+  chartStoreClosedDates: [],
   charts: {},
   weekdayMetric: 'gross',
   lastGrossYen: null,
@@ -1577,45 +1580,43 @@ function rdEditableCell(dateKey, field, rawVal, display, isManual) {
   );
 }
 
-function receiptDailyCellsForDay(r, budgetByDate, storeClosedSet, asOfJst, nowRef) {
-  const empty6 = '<td></td><td></td><td></td><td></td><td></td><td></td>';
-  if (!r) return empty6;
+/**
+ * 1日分の「予算」「差額」の値を求める（null は表の「-」に相当）。
+ * 表示用セルと CSV 書き出しで共用し、画面と書き出しの値がズレないようにする。
+ */
+function receiptDailyBudgetDiffForDay(r, budgetByDate, storeClosedSet, asOfJst, nowRef) {
+  if (!r) return { budget: null, diff: null };
   const closed =
     storeClosedSet instanceof Set ? storeClosedSet : new Set(storeClosedSet || []);
   const dateKey = receiptDailyDateKey(r.date);
-  const storeClosed = dateKey && closed.has(dateKey);
   const gross = Number(r.gross_sales_yen);
-  let budgetCell = '-';
-  let diffCell = '-';
-  let diffClass = '';
-  if (storeClosed) {
-    budgetCell = formatYenReceiptInt(0);
-    if (Number.isFinite(gross) && gross !== 0) {
-      const d = Math.round(gross);
-      diffCell = formatYenSignedReceiptDiff(d);
-      diffClass = d < 0 ? 'receipt-daily-diff-neg' : d > 0 ? 'receipt-daily-diff-pos' : '';
-    }
-  } else if (budgetByDate && typeof budgetByDate === 'object' && r.date != null) {
-    const b = receiptDailyBudgetLookup(budgetByDate, r);
-    if (b != null && Number.isFinite(b) && b >= 0) {
-      if (receiptDailyDeferDailyBudgetJs(dateKey, r, storeClosedSet, nowRef)) {
-        budgetCell = formatYenReceiptInt(b);
-        diffCell = formatYenSignedReceiptDiff(0);
-        diffClass = '';
-      } else {
-        budgetCell = formatYenReceiptInt(b);
-        if (receiptDailyIsAfterProgressDay(dateKey, asOfJst)) {
-          diffCell = formatYenSignedReceiptDiff(0);
-          diffClass = '';
-        } else {
-          const gOp = Number.isFinite(gross) ? gross : 0;
-          const d = Math.round(gOp - b);
-          diffCell = formatYenSignedReceiptDiff(d);
-          diffClass = d < 0 ? 'receipt-daily-diff-neg' : d > 0 ? 'receipt-daily-diff-pos' : '';
-        }
-      }
-    }
+  if (dateKey && closed.has(dateKey)) {
+    // 休業日：予算は ¥0。売上が立っていればその分がまるごと差額になる。
+    if (Number.isFinite(gross) && gross !== 0) return { budget: 0, diff: Math.round(gross) };
+    return { budget: 0, diff: null };
   }
+  if (!budgetByDate || typeof budgetByDate !== 'object' || r.date == null) {
+    return { budget: null, diff: null };
+  }
+  const b = receiptDailyBudgetLookup(budgetByDate, r);
+  if (b == null || !Number.isFinite(b) || b < 0) return { budget: null, diff: null };
+  // 暦当日 5:00 前は差のみ ¥0（予算は按分表示）／進行日より後も差は ¥0
+  if (receiptDailyDeferDailyBudgetJs(dateKey, r, closed, nowRef)) return { budget: b, diff: 0 };
+  if (receiptDailyIsAfterProgressDay(dateKey, asOfJst)) return { budget: b, diff: 0 };
+  const gOp = Number.isFinite(gross) ? gross : 0;
+  return { budget: b, diff: Math.round(gOp - b) };
+}
+
+function receiptDailyCellsForDay(r, budgetByDate, storeClosedSet, asOfJst, nowRef) {
+  const empty6 = '<td></td><td></td><td></td><td></td><td></td><td></td>';
+  if (!r) return empty6;
+  const dateKey = receiptDailyDateKey(r.date);
+  const { budget, diff } = receiptDailyBudgetDiffForDay(r, budgetByDate, storeClosedSet, asOfJst, nowRef);
+  const budgetCell = budget == null ? '-' : formatYenReceiptInt(budget);
+  const diffCell = diff == null ? '-' : formatYenSignedReceiptDiff(diff);
+  const diffClass = diff == null || diff === 0
+    ? ''
+    : diff < 0 ? 'receipt-daily-diff-neg' : 'receipt-daily-diff-pos';
   const diffAttr = diffClass ? ` class="${diffClass}"` : '';
   return (
     `<td>${receiptDailyDateCellInnerHtml(r.date)}</td>` +
@@ -3408,6 +3409,8 @@ function clearAnalyticsAwaitingStore() {
   state.dailySeries = [];
   state.monthlySeries = [];
   state.weather = {};
+  state.chartBudgetByDate = {};
+  state.chartStoreClosedDates = [];
   lastReceiptDailyData = null;
   resetBudgetKpis({ clearInput: true });
   Object.keys(state.charts).forEach((k) => destroyChart(k));
@@ -3856,6 +3859,23 @@ async function loadAll() {
 
     state.dailySeries = dailySeries;
 
+    // 取得済みの各月レスポンスから日別予算・休業日をまとめておく（追加リクエストなし）。
+    // 表は最終月だけを描くが、グラフ／CSV は複数月にまたがるため全月ぶん必要になる。
+    {
+      const budgetAll = {};
+      const closedAll = [];
+      for (const m of sortedMonths) {
+        const r = byMonth.get(m);
+        if (!r) continue;
+        if (r.daily_budget_yen_by_date && typeof r.daily_budget_yen_by_date === 'object') {
+          Object.assign(budgetAll, r.daily_budget_yen_by_date);
+        }
+        if (Array.isArray(r.store_closed_dates)) closedAll.push(...r.store_closed_dates.map(String));
+      }
+      state.chartBudgetByDate = budgetAll;
+      state.chartStoreClosedDates = closedAll;
+    }
+
     const selectOptions = storeOptionsForSelect ?? salesData.store_options;
     if (selectOptions?.length) {
       updateStoreSelect(selectOptions, state.storeKey);
@@ -4274,22 +4294,39 @@ function dailyCsvStoreLabel() {
   return String(state.storeKey || '全店舗');
 }
 
+/** 数値は整数で、値が無いときは空欄（Excel 側で 0 と区別できるようにする） */
+function dailyCsvInt(v) {
+  if (v == null) return '';
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : '';
+}
+
 /** 日次売上推移グラフの行データ（CSV とボタン活性判定で共用） */
 function buildDailyChartCsvRows() {
   const series = state.dailySeries || [];
   if (!series.length) return [];
   const salesMap = {};
   series.forEach((d) => { salesMap[d.date] = d; });
+  // 表と同じく、1回の書き出し中は進行日を固定する（行ループ中に日付を跨がせない）
+  const nowRef = new Date();
+  const asOfJst = getJstBusinessDateStringForReceiptBudgetJs(nowRef);
+  const budgetByDate = state.chartBudgetByDate;
+  const closedSet = new Set(state.chartStoreClosedDates || []);
   return buildDailyChartDates(series, state.weather).map((date) => {
     const w = state.weather[date] || {};
-    const gross = salesMap[date]?.gross_sales_yen;
+    const row = salesMap[date];
     const rain = w.rain ?? null;
     const temp = w.temp ?? null;
+    const { budget, diff } = receiptDailyBudgetDiffForDay(row, budgetByDate, closedSet, asOfJst, nowRef);
     return {
       date,
       dow: DAILY_CSV_DOW[dayOfWeek(date)],
       holiday: JAPANESE_HOLIDAYS.get(date) || '',
-      gross: gross == null ? '' : Math.round(Number(gross)),
+      gross: dailyCsvInt(row?.gross_sales_yen),
+      party: dailyCsvInt(row?.party_count),
+      guest: dailyCsvInt(row?.guest_count),
+      budget: dailyCsvInt(budget),
+      diff: dailyCsvInt(diff),
       rain: rain == null ? '' : rain,
       temp: temp == null ? '' : temp,
       icon: weatherIcon(rain, temp, w.code ?? null),
@@ -4298,8 +4335,14 @@ function buildDailyChartCsvRows() {
 }
 
 function buildDailyChartCsv(rows) {
-  const headers = ['日付', '曜日', '祝日', '総売上', '降水量(mm)', '最高気温(℃)', '天気'];
-  const body = rows.map((r) => [r.date, r.dow, r.holiday, r.gross, r.rain, r.temp, r.icon]);
+  const headers = [
+    '日付', '曜日', '祝日', '総売上', '組数', '客数', '予算', '差額',
+    '降水量(mm)', '最高気温(℃)', '天気',
+  ];
+  const body = rows.map((r) => [
+    r.date, r.dow, r.holiday, r.gross, r.party, r.guest, r.budget, r.diff,
+    r.rain, r.temp, r.icon,
+  ]);
   return [headers, ...body].map((cols) => cols.map(csvEscapeAnalytics).join(',')).join('\r\n');
 }
 
