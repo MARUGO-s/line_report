@@ -10,6 +10,15 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-12 - 電子ジャーナル画面のLZH登録から保存済み日別・月間レポートを自動生成
+
+- Request: LINE Reportの電子ジャーナル画面へLZHをドロップした場合も、Journal Reportの「保存済みレポート」に日別・月間を自動作成する。
+- Behavior: `/pos-journals/upload` の保存・修復・重複確認後、影響月の有効な `pos_journal_files` 全件を読み直して、月単位の日別／月間レポート2件をサーバー側で再構築する。今回投入したファイルだけで月全体を縮めず、既存原本と合算した完全月を正本にする。
+- Idempotency: 同じ月を再アップロードしても新しい重複レポートを増やさない。既存の単月日別・月間レポートがあればそのIDと作成日時を維持して更新し、無い場合だけ決定的ID `pos_journal_auto_<store>_<YYYYMM>_daily|monthly` で作成する。重複LZHだけの再送でも不足していた保存レポートを修復できる。
+- Data: 保存データには伝票、商品明細、日計客数・組数・税、決済、天候、昼夜、カテゴリ集計、商品ランキング、曜日／時間帯、原本IDを含む。店舗別の商品分類上書きを適用し、未知コードは「その他（要確認）」、LZH原本の `posJournalDays` も保持する。
+- Failure handling: 原本保存は成功したがレポート生成が失敗した場合は、API応答を `ok=false` にして月別エラーを返し、画面に「保存済みレポートで失敗」と表示する。既存レポートを部分的に削除せず、再アップロードで再生成可能。
+- Verification: 新規5テスト（決定的な日別・月間生成、既存ID更新配線、分類上書き、日計客数／組数／税、支払変更控え重複、空／別月）を追加。`npm run test:ci` 232 tests / 0 fail、`npm run check`、変更共有モジュールの`deno check`、HTMLインラインJS構文検査に成功。本番原本3日を生成器へ読み取り投入し、日計総売上¥196,900・客数23名・組数12・会計12件・重複控え除外後の会計合計¥196,900を確認。
+
 ### 2026-08-12 - Journal Report登録データを電子ジャーナル画面へ共有参照
 
 - Request: `解凍変換ソフト`（正本 `public/jnm/jnl2txt.html`）で登録したジャーナルを、LINE Reportの `pos-journal.html` でも表示する。

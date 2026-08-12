@@ -551,7 +551,7 @@
             <div class="pj-upload-head">
               <div>
                 <div class="pj-upload-title">LZHジャーナルをアップロード</div>
-                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。Journal Reportで登録した同店舗・同月のデータも自動で共有参照します。</div>
+                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。登録・修復後は、Journal Reportの保存済みレポート（日別・月間）も同じ月の全原本から自動作成・更新します。</div>
               </div>
               <span class="chip gray">非公開Storage保管</span>
             </div>
@@ -1279,6 +1279,7 @@
       });
       var months=Array.from(groups.keys()).sort();
       var totals={uploaded:0,repaired:0,duplicate:0,failed:0};
+      var reportTotals={created:0,updated:0,failed:0};
       var failures=[];
       var monthsWithData=[];
       var done=0;
@@ -1300,7 +1301,12 @@
             totals.repaired+=Number(result.repaired_count||0);
             totals.duplicate+=Number(result.duplicate_count||0);
             totals.failed+=Number(result.failed_count||0);
+            var autoReports=result.saved_reports||{};
+            reportTotals.created+=Number(autoReports.created_count||0);
+            reportTotals.updated+=Number(autoReports.updated_count||0);
+            reportTotals.failed+=Array.isArray(autoReports.failures)?autoReports.failures.length:0;
             (result.failures||[]).forEach(function(f){failures.push(f.original_file_name+': '+f.error);});
+            (autoReports.failures||[]).forEach(function(f){failures.push((f.month||month)+' 保存済みレポート: '+f.error);});
             if((Number(result.uploaded_count||0)+Number(result.repaired_count||0)+Number(result.duplicate_count||0))>0&&monthsWithData.indexOf(month)<0)monthsWithData.push(month);
             done+=chunk.length;
           }
@@ -1310,12 +1316,15 @@
         if(totals.repaired)parts.push(totals.repaired+'件を修復');
         if(totals.duplicate)parts.push(totals.duplicate+'件は重複のためスキップ');
         if(totals.failed)parts.push(totals.failed+'件失敗');
+        if(reportTotals.created)parts.push('保存済みレポート '+reportTotals.created+'件を自動作成');
+        if(reportTotals.updated)parts.push('保存済みレポート '+reportTotals.updated+'件を更新');
+        if(reportTotals.failed)parts.push('保存済みレポート '+reportTotals.failed+'か月で失敗');
         if(!parts.length)parts.push('取り込む対象がありませんでした');
         if(months.length>1)parts.push('対象月 '+months.join('・'));
         // 取り込んだ月が表示中の月に無いときは、結果が見えるようその月へ切り替える
         var jumpTo=monthsWithData.indexOf(selectedMonth)>=0?selectedMonth:monthsWithData[0];
         if(jumpTo&&jumpTo!==el('monthSel').value){el('monthSel').value=jumpTo;parts.push('表示を'+jumpTo+'に切り替えました');}
-        setMessage(el('uploadMsg'),parts.join(' / ')+(failures.length?'\n'+failures.join('\n'):''),totals.failed?'warn':'ok');
+        setMessage(el('uploadMsg'),parts.join(' / ')+(failures.length?'\n'+failures.join('\n'):''),(totals.failed||reportTotals.failed)?'warn':'ok');
         await loadCurrent();
       }
       catch(error){setMessage(el('uploadMsg'),error.message,'err');}
