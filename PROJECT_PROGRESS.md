@@ -10,6 +10,17 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-12 - Journal Report登録データを電子ジャーナル画面へ共有参照
+
+- Request: `解凍変換ソフト`（正本 `public/jnm/jnl2txt.html`）で登録したジャーナルを、LINE Reportの `pos-journal.html` でも表示する。
+- Root cause: 両画面は同じSupabaseを使っていたが、Journal Reportは主に`saved_reports`へ保存し、電子ジャーナル画面は`pos_journal_files`だけを取得していたため、`.jnl`のみの登録や原本未保存の月が見えなかった。
+- Shared read behavior: `GET /pos-journals`が同じ`store_partition_key`・同じ年月の`saved_reports`を認証済み`admin-api`内で参照し、保存された`data.sales`（大容量時は`posJournalDays`）をPOS日次形式へ変換する。公開PagesからDBを直接読ませず、既存の管理セッション・店舗スコープを維持。
+- Ordering / de-duplication: 単月の月間レポートを優先し、総売上・伝票数が大きい完全期間候補を選ぶ。月間が無い旧データは日別をまとめる。同じ営業日がLZH原本と保存レポートの両方にある場合は`pos_journal_files`を正本にし、保存レポートは原本に無い日だけ補完する。
+- UI: 原本なしで共有参照だけの月もKPI・日別・決済・商品・会計明細を表示する。「保管ファイル」はLZH原本だけを表示したまま、共有参照中／補完日数／原本優先を専用通知で説明する。
+- AI: POS電子ジャーナルの月次分析・質問も画面と同じ共有マージを使い、表示とAIの対象日がずれないようにした。
+- Future saves: Journal Reportは通常`data.sales`を保存し、サイズ上限で`data.sales`を省略するときだけ共有用`posJournalDays`を残す。
+- Verification: 本番DB（読み取りのみ）で2026年1月の単月月間レポートが21営業日・64会計・総売上¥1,087,600を保持し、LZH原本3営業日と重複3日、共有補完後21営業日になることを確認。共有形式変換、別月除外、最新日付優先、大容量スナップショット、LZH優先、AI配線、共有月UIを新規テストで固定。`npm run test:ci` 217 tests / 0 fail、`npm run check`、`pos_journal.ts`の`deno check`、両HTMLのインラインJS構文検査に成功。
+
 ### 2026-08-12 - ゴミ箱の選択式一括完全削除を追加
 
 - Request: ゴミ箱を選択して一括削除できる機能をつけてほしい。

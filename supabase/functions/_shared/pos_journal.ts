@@ -44,6 +44,35 @@ export type PosJournalSummary = {
   days: PosJournalDay[];
 };
 
+type JournalReportSaleLike = Record<string, unknown> & {
+  date?: unknown;
+  no?: unknown;
+  time?: unknown;
+  total?: unknown;
+  tax?: unknown;
+  groups?: unknown;
+  customers?: unknown;
+  guests?: unknown;
+  isSplitFragment?: unknown;
+  tableNo?: unknown;
+  table_no?: unknown;
+  method?: unknown;
+  pay?: unknown;
+  payments?: unknown;
+  items?: unknown;
+  weather?: unknown;
+  tempC?: unknown;
+  temp_c?: unknown;
+};
+
+type JournalReportDataLike = Record<string, unknown> & {
+  sales?: unknown;
+  posJournalDays?: unknown;
+  sourceMonths?: unknown;
+  weatherByDate?: unknown;
+  createdAt?: unknown;
+};
+
 const HEADER_RE =
   /^\s*(\d{4}-\d{2})\s+No\.(\d+)\s+(\d{4})年\s*(\d+)月\s*(\d+)日\((.)\)\s*(\d+)時(\d+)分/;
 const ITEM_CODE_RE = /^\s{2}(\d{13})\s+(\S.*?)\s*$/;
@@ -362,6 +391,227 @@ export function resolvePosJournalStore(
 
 function sumDays(days: PosJournalDay[], key: string): number {
   return days.reduce((sum, day) => sum + (Number(day[key]) || 0), 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function safeText(value: unknown, maxLength = 180): string {
+  return String(value ?? "").normalize("NFKC").replace(
+    /[\u0000-\u001f\u007f]/g,
+    " ",
+  ).replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function paymentNameFromJournalReportSale(sale: JournalReportSaleLike): string {
+  const byMethod = isRecord(sale.payments) && isRecord(sale.payments.byMethod)
+    ? sale.payments.byMethod
+    : {};
+  const positive = Object.entries(byMethod)
+    .filter(([, amount]) => safeNumber(amount) > 0)
+    .sort((a, b) => safeNumber(b[1]) - safeNumber(a[1]));
+  if (positive.length === 1) return safeText(positive[0][0], 30) || "不明";
+  if (positive.length > 1) return "併用";
+  return safeText(sale.method ?? sale.pay, 30) || "不明";
+}
+
+function journalReportReceipt(
+  value: unknown,
+  index: number,
+): PosJournalReceipt | null {
+  if (!isRecord(value)) return null;
+  const sale = value as JournalReportSaleLike;
+  const items = (Array.isArray(sale.items) ? sale.items : [])
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const name = safeText(item.name, 120);
+      if (!name) return null;
+      return {
+        code: safeText(item.code, 24),
+        name,
+        unit: safeNumber(item.unit) ||
+          (safeNumber(item.qty) ? Math.round(safeNumber(item.amount) / safeNumber(item.qty)) : 0),
+        qty: safeNumber(item.qty),
+        amount: safeNumber(item.amount),
+      };
+    })
+    .filter((item): item is PosJournalReceiptItem => item !== null);
+  const rawTotal = Number(sale.total);
+  const rawGuests = Number(sale.customers ?? sale.guests);
+  const tableNo = safeText(sale.tableNo ?? sale.table_no, 50);
+  return {
+    no: safeText(sale.no, 30) || `shared-${index + 1}`,
+    time: safeText(sale.time, 8),
+    pay: paymentNameFromJournalReportSale(sale),
+    total: Number.isFinite(rawTotal) ? rawTotal : null,
+    guests: Number.isFinite(rawGuests) ? rawGuests : null,
+    ...(tableNo ? { table_no: tableNo } : {}),
+    items,
+  };
+}
+
+/**
+ * Journal Report の保存済みレポート（saved_reports.data）を
+ * POS電子ジャーナル画面が扱う日次形式へ変換する。
+ *
+ * 原本LZHを複製せず、認証済み admin-api 内で共有参照するための変換。
+ * 月間レポートは同じ月の全伝票を持つため、新しい保存行から日付ごとに
+ * 初出の伝票だけを採用し、日別・月間の重複を二重計上しない。
+ */
+export function buildPosJournalDaysFromSavedReports(
+  reports: Array<{ id?: unknown; data?: unknown; created_at?: unknown }>,
+  month: string,
+): PosJournalDay[] {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return [];
+  const dayMap = new Map<string, PosJournalDay>();
+  const rows = [...(Array.isArray(reports) ? reports : [])].sort((a, b) =>
+    String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))
+  );
+  for (const row of rows) {
+    const data = isRecord(row.data) ? row.data as JournalReportDataLike : {};
+    const sharedDays = Array.isArray(data.posJournalDays)
+      ? data.posJournalDays
+      : [];
+    for (const value of sharedDays) {
+      if (!isRecord(value)) continue;
+      const date = String(value.business_date ?? "").slice(0, 10);
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        date.slice(0, 7) !== month ||
+        dayMap.has(date)
+      ) {
+        continue;
+      }
+      const receipts = (Array.isArray(value.receipts) ? value.receipts : [])
+        .map(journalReportReceipt)
+        .filter((receipt): receipt is PosJournalReceipt => receipt !== null);
+      const paymentBlock = (
+        key: string,
+      ): { count: number; amount: number } => {
+        const block = isRecord(value[key]) ? value[key] : {};
+        return {
+          count: safeNumber(block.count),
+          amount: safeNumber(block.amount),
+        };
+      };
+      dayMap.set(date, {
+        business_date: date,
+        source: safeText(value.source, 180) ||
+          `saved_report:${safeText(row.id, 120) || "shared"}`,
+        net_sales: safeNumber(value.net_sales),
+        tax: safeNumber(value.tax),
+        gross_sales: safeNumber(value.gross_sales),
+        groups: safeNumber(value.groups),
+        guests: safeNumber(value.guests),
+        avg_spend: safeNumber(value.avg_spend),
+        pay_cash: paymentBlock("pay_cash"),
+        pay_credit: paymentBlock("pay_credit"),
+        pay_tabelog: paymentBlock("pay_tabelog"),
+        pay_ikyu: paymentBlock("pay_ikyu"),
+        pay_gurunavi: paymentBlock("pay_gurunavi"),
+        weather: safeText(value.weather, 30),
+        temp_c: Number.isFinite(Number(value.temp_c ?? value.tempC))
+          ? Number(value.temp_c ?? value.tempC)
+          : null,
+        receipts,
+      });
+    }
+    const sales = Array.isArray(data.sales) ? data.sales : [];
+    if (!sales.length) continue;
+    const byDate = new Map<string, JournalReportSaleLike[]>();
+    for (const sale of sales) {
+      if (!isRecord(sale)) continue;
+      const date = String(sale.date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0, 7) !== month) {
+        continue;
+      }
+      const list = byDate.get(date) ?? [];
+      list.push(sale as JournalReportSaleLike);
+      byDate.set(date, list);
+    }
+    const weatherByDate = isRecord(data.weatherByDate) ? data.weatherByDate : {};
+    for (const [date, daySales] of byDate) {
+      if (dayMap.has(date)) continue;
+      const receipts = daySales.map(journalReportReceipt).filter(
+        (receipt): receipt is PosJournalReceipt => receipt !== null,
+      );
+      const gross = daySales.reduce((sum, sale) => sum + safeNumber(sale.total), 0);
+      const tax = daySales.reduce((sum, sale) => sum + safeNumber(sale.tax), 0);
+      const guests = daySales.reduce(
+        (sum, sale) => sum + safeNumber(sale.customers ?? sale.guests),
+        0,
+      );
+      const groups = daySales.reduce(
+        (sum, sale) =>
+          sum +
+          (sale.groups != null
+            ? safeNumber(sale.groups)
+            : sale.isSplitFragment === true
+            ? 0
+            : 1),
+        0,
+      );
+      const paymentTotals = new Map<string, { count: number; amount: number }>();
+      for (const sale of daySales) {
+        const payments = isRecord(sale.payments) && isRecord(sale.payments.byMethod)
+          ? sale.payments.byMethod
+          : null;
+        if (payments) {
+          for (const [name, value] of Object.entries(payments)) {
+            const amount = safeNumber(value);
+            if (!amount) continue;
+            const current = paymentTotals.get(name) ?? { count: 0, amount: 0 };
+            current.count += 1;
+            current.amount += amount;
+            paymentTotals.set(name, current);
+          }
+        } else {
+          const name = paymentNameFromJournalReportSale(sale);
+          const current = paymentTotals.get(name) ?? { count: 0, amount: 0 };
+          current.count += 1;
+          current.amount += safeNumber(sale.total);
+          paymentTotals.set(name, current);
+        }
+      }
+      const weatherRow = isRecord(weatherByDate[date]) ? weatherByDate[date] : {};
+      const saleWeather = daySales.find((sale) => safeText(sale.weather, 30));
+      const saleTemp = daySales.find((sale) =>
+        Number.isFinite(Number(sale.tempC ?? sale.temp_c))
+      );
+      const day: PosJournalDay = {
+        business_date: date,
+        source: `saved_report:${safeText(row.id, 120) || "shared"}`,
+        net_sales: Math.max(0, gross - tax),
+        tax,
+        gross_sales: gross,
+        groups,
+        guests,
+        avg_spend: guests ? Math.round(gross / guests) : 0,
+        pay_cash: paymentTotals.get("現金") ?? { count: 0, amount: 0 },
+        pay_credit: paymentTotals.get("クレジット") ?? { count: 0, amount: 0 },
+        pay_tabelog: paymentTotals.get("食べログ") ?? { count: 0, amount: 0 },
+        pay_ikyu: paymentTotals.get("一休") ?? { count: 0, amount: 0 },
+        pay_gurunavi: paymentTotals.get("ぐるなび") ?? { count: 0, amount: 0 },
+        weather: safeText(weatherRow.weather ?? saleWeather?.weather, 30),
+        temp_c: Number.isFinite(Number(weatherRow.tempC ?? weatherRow.temp_c))
+          ? Number(weatherRow.tempC ?? weatherRow.temp_c)
+          : Number.isFinite(Number(saleTemp?.tempC ?? saleTemp?.temp_c))
+          ? Number(saleTemp?.tempC ?? saleTemp?.temp_c)
+          : null,
+        receipts,
+      };
+      dayMap.set(date, day);
+    }
+  }
+  return [...dayMap.values()].sort((a, b) =>
+    a.business_date.localeCompare(b.business_date)
+  );
 }
 
 export function buildPosJournalSummary(params: {

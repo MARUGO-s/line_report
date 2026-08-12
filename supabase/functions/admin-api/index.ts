@@ -134,6 +134,7 @@ import {
 } from "../_shared/line_room_message_search.ts"
 import {
   buildPosJournalSummary,
+  buildPosJournalDaysFromSavedReports,
   detectPosJournalStoreCode,
   parsePosJournalLzh,
   resolvePosJournalStore,
@@ -8574,6 +8575,163 @@ async function fetchPosJournalRows(
     .filter((row): row is Record<string, unknown> => row !== null)
 }
 
+type SharedJournalReportState = {
+  days: PosJournalDay[]
+  reportCount: number
+  error: string | null
+}
+
+function savedReportCandidateMatchesMonth(
+  row: Record<string, unknown>,
+  month: string,
+): boolean {
+  const sourceMonths = Array.isArray(row.sourceMonths)
+    ? row.sourceMonths.map((value) => toSafeString(value)).filter(Boolean)
+    : []
+  if (sourceMonths.includes(month)) return true
+  const [year, monthText] = month.split("-")
+  const monthNumber = Number(monthText)
+  if (!year || !Number.isInteger(monthNumber)) return false
+  const text = `${toSafeString(row.title)} ${toSafeString(row.period)}`
+    .normalize("NFKC")
+  return text.includes(month) ||
+    text.includes(`${year}/${monthNumber}`) ||
+    new RegExp(`${year}\\s*年\\s*0?${monthNumber}\\s*月`).test(text)
+}
+
+/**
+ * Journal Report（public/jnm）が保存したレポートを、同店舗・同月の
+ * 電子ジャーナル画面から共有参照する。
+ *
+ * 一覧では JSONB 全体を読まず候補だけ選び、最大8件の詳細を順番に確認して
+ * sales を持つ最良の1件を採用する。複数月の合算レポートより単月を優先し、
+ * 不完全な再取込より総売上・伝票数が大きい候補を優先する。
+ */
+async function fetchSharedJournalReportState(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  month: string,
+): Promise<SharedJournalReportState> {
+  const summarySelect = [
+    "id",
+    "title",
+    "period",
+    "created_at",
+    "sourceMonths:data->sourceMonths",
+    "salesCount:data->salesCount",
+    "total:data->total",
+    "totalSales:data->totalSales",
+  ].join(", ")
+  const { data: candidatesData, error: candidatesError } = await supabase
+    .from("saved_reports")
+    .select(summarySelect)
+    .eq("store_partition_key", storeKey)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(2000)
+  if (candidatesError) {
+    console.error(
+      "Journal Report shared reference list failed:",
+      storeKey,
+      month,
+      candidatesError.message,
+    )
+    return { days: [], reportCount: 0, error: candidatesError.message }
+  }
+  const candidates = (Array.isArray(candidatesData) ? candidatesData : [])
+    .map((value) => isRecord(value) ? value as Record<string, unknown> : null)
+    .filter((row): row is Record<string, unknown> => row !== null)
+    .filter((row) => savedReportCandidateMatchesMonth(row, month))
+    .map((row) => {
+      const sourceMonths = Array.isArray(row.sourceMonths)
+        ? row.sourceMonths.map((value) => toSafeString(value)).filter(Boolean)
+        : []
+      return {
+        id: toSafeString(row.id),
+        title: toSafeString(row.title),
+        createdAt: String(row.created_at ?? ""),
+        sourceMonths,
+        singleMonth: sourceMonths.length === 1 && sourceMonths[0] === month,
+        monthly: isMonthlyReportTitleForList(toSafeString(row.title)),
+        salesCount: toNonNegativeInteger(row.salesCount),
+        total: Math.max(
+          toNonNegativeInteger(row.total),
+          toNonNegativeInteger(row.totalSales),
+        ),
+      }
+    })
+    .filter((row) => !!row.id)
+    .sort((a, b) =>
+      Number(b.singleMonth) - Number(a.singleMonth) ||
+      b.total - a.total ||
+      b.salesCount - a.salesCount ||
+      Number(b.monthly) - Number(a.monthly) ||
+      b.createdAt.localeCompare(a.createdAt)
+    )
+
+  let lastError: string | null = null
+  const canonicalCandidates = candidates.filter((candidate) =>
+    candidate.singleMonth && candidate.monthly
+  )
+  for (const candidate of canonicalCandidates.slice(0, 8)) {
+    const { data, error } = await supabase
+      .from("saved_reports")
+      .select("id, data, created_at")
+      .eq("id", candidate.id)
+      .eq("store_partition_key", storeKey)
+      .is("deleted_at", null)
+      .maybeSingle()
+    if (error) {
+      lastError = error.message
+      continue
+    }
+    if (!data) continue
+    const days = buildPosJournalDaysFromSavedReports([data], month)
+    if (days.length) {
+      return { days, reportCount: 1, error: null }
+    }
+  }
+  // 月間レポートが無い旧データでは、日別レポートを最大62営業日分まとめる。
+  // 1件だけ返すと最初の営業日しか共有されないため、一括取得して日付ごとに統合する。
+  const canonicalIds = new Set(canonicalCandidates.map((candidate) => candidate.id))
+  const fallbackIds = candidates
+    .filter((candidate) => !canonicalIds.has(candidate.id))
+    .slice(0, 80)
+    .map((candidate) => candidate.id)
+  if (fallbackIds.length) {
+    const { data, error } = await supabase
+      .from("saved_reports")
+      .select("id, data, created_at")
+      .eq("store_partition_key", storeKey)
+      .is("deleted_at", null)
+      .in("id", fallbackIds)
+    if (error) {
+      lastError = error.message
+    } else {
+      const reports = (Array.isArray(data) ? data : [])
+        .map((value) => isRecord(value) ? value as Record<string, unknown> : null)
+        .filter((row): row is Record<string, unknown> => row !== null)
+      const days = buildPosJournalDaysFromSavedReports(reports, month)
+      if (days.length) {
+        return { days, reportCount: reports.length, error: null }
+      }
+    }
+  }
+  if (lastError) {
+    console.error(
+      "Journal Report shared reference detail failed:",
+      storeKey,
+      month,
+      lastError,
+    )
+  }
+  return {
+    days: [],
+    reportCount: 0,
+    error: lastError,
+  }
+}
+
 async function fetchPosJournalState(
   supabase: ReturnType<typeof createClient>,
   url: URL,
@@ -8583,7 +8741,7 @@ async function fetchPosJournalState(
   )
   const month = normalizeYearMonth(url.searchParams.get("month"))
   const rows = await fetchPosJournalRows(supabase, storeKey, month)
-  const days = rows
+  const storedDays = rows
     .map((row) =>
       isRecord(row.parsed_data) ? row.parsed_data as PosJournalDay : null
     )
@@ -8591,6 +8749,14 @@ async function fetchPosJournalState(
       day !== null && typeof day.business_date === "string" &&
       Array.isArray(day.receipts)
     )
+  const shared = await fetchSharedJournalReportState(supabase, storeKey, month)
+  const storedDateSet = new Set(storedDays.map((day) => day.business_date))
+  const sharedOnlyDays = shared.days.filter((day) =>
+    !storedDateSet.has(day.business_date)
+  )
+  // 同じ営業日は原本LZH（pos_journal_files）を正本とし、
+  // 原本が無い日だけ Journal Report の保存済みレポートで補完する。
+  const days = [...sharedOnlyDays, ...storedDays]
   const storeCode = toSafeString(rows[0]?.store_code)
   const knownStore = resolvePosJournalStore(storeCode) ??
     (storeKey.toLowerCase() === "bistrocavacava"
@@ -8604,14 +8770,33 @@ async function fetchPosJournalState(
     storeCode: resolvedStoreCode,
     month,
     days,
-    fileCount: rows.length,
+    fileCount: rows.length + shared.reportCount,
   })
+  summary.meta.storage_file_count = rows.length
+  summary.meta.storage_day_count = storedDays.length
+  summary.meta.shared_report_count = shared.reportCount
+  summary.meta.shared_day_count = shared.days.length
+  summary.meta.shared_only_day_count = sharedOnlyDays.length
+  summary.meta.shared_reference_error = shared.error
+  summary.meta.storage_mode = rows.length && sharedOnlyDays.length
+    ? "storage_and_shared"
+    : rows.length
+    ? "storage"
+    : shared.days.length
+    ? "shared_reports"
+    : "empty"
   return {
     ok: true,
     store_key: storeKey,
     store_name: storeName,
     month,
     files: rows.map(({ parsed_data: _parsedData, ...row }) => row),
+    shared_reference: {
+      report_count: shared.reportCount,
+      day_count: shared.days.length,
+      added_day_count: sharedOnlyDays.length,
+      error: shared.error,
+    },
     summary,
   }
 }
@@ -10804,14 +10989,24 @@ async function resolvePosJournalAiSummary(
       day !== null && typeof day.business_date === "string" &&
       Array.isArray(day.receipts)
     )
-  if (storedDays.length) {
+  const shared = await fetchSharedJournalReportState(
+    supabase,
+    expected.storeKey,
+    expected.month,
+  )
+  const storedDateSet = new Set(storedDays.map((day) => day.business_date))
+  const combinedDays = [
+    ...shared.days.filter((day) => !storedDateSet.has(day.business_date)),
+    ...storedDays,
+  ]
+  if (combinedDays.length) {
     return buildPosJournalSummary({
       storeKey: expected.storeKey,
       storeName: expected.storeName,
       storeCode: expected.storeCode,
       month: expected.month,
-      days: storedDays,
-      fileCount: rows.length,
+      days: combinedDays,
+      fileCount: rows.length + shared.reportCount,
     })
   }
   return normalizePosJournalAiSummary(body.summary, expected)

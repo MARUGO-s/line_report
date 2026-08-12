@@ -9,7 +9,7 @@ Journal Report（`public/jnm/`）の**現行機能を一冊にまとめた正本
 | 本番URL | https://marugo-s.github.io/line_report/jnm/jnl2txt.html |
 | リポジトリ | `MARUGO-s/line_report`（`main`） |
 | Supabase | `hocbnifuactbvmyjraxy`（hocbn） |
-| 最終同期 | 2026-08-07（コード・運用記録に合わせて作成） |
+| 最終同期 | 2026-08-12（電子ジャーナル共有参照を追記） |
 
 **設計の一言:** 数値はプログラムが確定する。AIは解釈する。資料・`#メモ` は背景である。
 
@@ -124,6 +124,12 @@ Journal Report はマルゴグループ各店舗向けの **POS電子ジャー�
 | `.lzh` 原本 | Storage `pos-journals`（メタは `pos_journal_files`） |
 
 プレースホルダ行（不完全ジャーナル）への再アップロードでは、削除せず解析結果を **修復更新** できる経路がある（運用記録参照）。
+
+LINE Reportの `pos-journal.html` は、同店舗・同月の `saved_reports` も
+`admin-api` 内で共有参照する。LZH原本がある営業日は `pos_journal_files` を優先し、
+原本が無い営業日だけ保存レポートで補完するため、同じ売上を二重計上しない。
+共有レポートだけの月もKPI・日別・決済・商品・会計明細を表示するが、
+「保管ファイル」一覧とダウンロード／削除は実在するLZH原本だけを対象にする。
 
 ### 4.4 旧解析版・再作成
 
@@ -413,6 +419,9 @@ Storage 上の HTML／添付はゴミ箱でも保持し、復元後に再利用�
 /pos-journals/store-ops
 /reservations/ai-facts
 ```
+
+`GET /pos-journals` は原本一覧に加え、Journal Report保存レポートの共有参照状態
+（参照レポート数・共有日数・原本に無い補完日数）を返す。
 
 内部（Webhook → admin-api）:
 

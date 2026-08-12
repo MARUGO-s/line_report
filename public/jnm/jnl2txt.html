@@ -4876,13 +4876,19 @@ function formatReportCreatedAt(v) {
 
 function buildCloudReportData(r) {
   let sales = Array.isArray(r.sales) ? r.sales.map(serializeSaleForCloud) : [];
+  let posJournalDays = [];
   const sourceMonths = Array.isArray(r.sourceMonths) && r.sourceMonths.length
     ? r.sourceMonths
     : [...new Set(sales.map(s => String(s.date || '').slice(0, 7)).filter(m => /^\d{4}-\d{2}$/.test(m)))];
   // 伝票が大きすぎる場合はジャーナル原本側に任せ、要約＋メタだけ残す
   try {
-    if (JSON.stringify(sales).length > 1400000) sales = [];
+    if (JSON.stringify(sales).length > 1400000) {
+      // salesを省略してもLINE Report側から共有参照できるよう、日次形式だけ残す。
+      posJournalDays = buildSharedPosJournalDays(r);
+      sales = [];
+    }
   } catch (_) {
+    posJournalDays = buildSharedPosJournalDays(r);
     sales = [];
   }
   // 表示用HTMLは Storage へ分離。JSONB には短い preview とパスだけ残す。
@@ -4929,11 +4935,109 @@ function buildCloudReportData(r) {
     weatherByDate: (r.weatherByDate && typeof r.weatherByDate === 'object') ? r.weatherByDate : {},
     sales
   };
+  if (posJournalDays.length) data.posJournalDays = posJournalDays;
   const htmlStoragePath = String(r.htmlStoragePath || '').trim();
   if (htmlStoragePath) data.htmlStoragePath = htmlStoragePath;
   const htmlBytes = Number(r.htmlBytes) || 0;
   if (htmlBytes > 0) data.htmlBytes = htmlBytes;
   return data;
+}
+
+/**
+ * LINE Report「電子ジャーナル」から共有参照する日次スナップショット。
+ * sales がJSONBサイズ上限で省略されても、日計・会計・商品明細を月単位で参照できる。
+ */
+function buildSharedPosJournalDays(report) {
+  const sales = Array.isArray(report?.sales) ? report.sales : [];
+  if (!sales.length) return [];
+  const weatherByDate = report?.weatherByDate && typeof report.weatherByDate === 'object'
+    ? report.weatherByDate
+    : {};
+  const dayMap = new Map();
+  sales.forEach(sale => {
+    const date = String(sale?.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    if (!dayMap.has(date)) {
+      dayMap.set(date, {
+        date,
+        total: 0,
+        tax: 0,
+        groups: 0,
+        guests: 0,
+        payments: new Map(),
+        paymentCounts: new Map(),
+        weather: '',
+        tempC: null,
+        receipts: []
+      });
+    }
+    const day = dayMap.get(date);
+    day.total += Number(sale.total) || 0;
+    day.tax += Number(sale.tax) || 0;
+    day.groups += Number.isFinite(Number(sale.groups))
+      ? Number(sale.groups)
+      : (sale.isSplitFragment ? 0 : 1);
+    day.guests += Number(sale.customers) || 0;
+    if (sale.weather) day.weather = sale.weather;
+    if (Number.isFinite(Number(sale.tempC))) day.tempC = Number(sale.tempC);
+    const byMethod = sale?.payments?.byMethod;
+    const paymentEntries = byMethod instanceof Map
+      ? [...byMethod.entries()]
+      : (byMethod && typeof byMethod === 'object' ? Object.entries(byMethod) : []);
+    if (paymentEntries.length) {
+      paymentEntries.forEach(([name, amount]) => {
+        const value = Number(amount) || 0;
+        if (!value) return;
+        day.payments.set(name, (day.payments.get(name) || 0) + value);
+        day.paymentCounts.set(name, (day.paymentCounts.get(name) || 0) + 1);
+      });
+    } else {
+      const name = sale.method || 'その他';
+      day.payments.set(name, (day.payments.get(name) || 0) + (Number(sale.total) || 0));
+      day.paymentCounts.set(name, (day.paymentCounts.get(name) || 0) + 1);
+    }
+    day.receipts.push(sale);
+  });
+  return [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date)).map(day => {
+    const w = weatherByDate[day.date] || {};
+    const payBlock = (name) => ({
+      count: Number(day.paymentCounts.get(name)) || 0,
+      amount: Number(day.payments.get(name)) || 0
+    });
+    return {
+      business_date: day.date,
+      source: 'journal_report_saved',
+      net_sales: Math.max(0, Number(day.total || 0) - Number(day.tax || 0)),
+      tax: Number(day.tax) || 0,
+      gross_sales: Number(day.total) || 0,
+      groups: Number(day.groups) || 0,
+      guests: Number(day.guests) || 0,
+      avg_spend: day.guests ? Math.round(day.total / day.guests) : 0,
+      pay_cash: payBlock('現金'),
+      pay_credit: payBlock('クレジット'),
+      pay_tabelog: payBlock('食べログ'),
+      pay_ikyu: payBlock('一休'),
+      pay_gurunavi: payBlock('ぐるなび'),
+      weather: day.weather || w.weather || '',
+      temp_c: Number.isFinite(day.tempC) ? day.tempC
+        : (Number.isFinite(Number(w.tempC ?? w.temp_c)) ? Number(w.tempC ?? w.temp_c) : null),
+      receipts: day.receipts.map(receipt => ({
+        no: String(receipt.no || ''),
+        time: receipt.time || '',
+        pay: receipt.method || 'その他',
+        total: Number(receipt.total) || 0,
+        guests: Number(receipt.customers) || 0,
+        table_no: receipt.tableNo || '',
+        items: (receipt.items || []).map(item => ({
+          code: item.code || '',
+          name: item.name || '',
+          unit: Number(item.qty) ? Math.round((Number(item.amount) || 0) / Number(item.qty)) : 0,
+          qty: Number(item.qty) || 0,
+          amount: Number(item.amount) || 0
+        }))
+      }))
+    };
+  });
 }
 
 /** 表示用レポートHTMLを Storage（pos-report-html）へ保存 */

@@ -322,6 +322,10 @@
     .pj-field label { font-size: 11px; font-weight: 600; color: var(--text-3); letter-spacing: .04em; }
     .pj-field select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 8px 12px; font-size: 13.5px; }
     .pj-badge { margin-left: auto; font-size: 12px; color: var(--text-2); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; }
+    .pj-shared-ref { display:flex; gap:9px; align-items:flex-start; margin:-8px 0 18px; padding:10px 12px; border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border)); border-radius:10px; background:color-mix(in srgb,var(--accent-soft) 50%,var(--surface)); color:var(--text-2); font-size:12px; line-height:1.65; }
+    .pj-shared-ref::before { content:"↔"; flex:0 0 auto; color:var(--accent); font-weight:800; }
+    .pj-shared-ref.warn { border-color:color-mix(in srgb,var(--warn) 45%,var(--border)); background:var(--warn-soft); color:var(--warn); }
+    .pj-shared-ref.warn::before { content:"!"; color:var(--warn); }
     .pj-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; margin-bottom: 22px; }
     .pj-kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 15px 16px; box-shadow: var(--shadow); }
     .pj-kpi .k-l { font-size: 11.5px; color: var(--text-3); font-weight: 600; letter-spacing: .03em; }
@@ -541,12 +545,13 @@
             <button class="btn sm" id="reloadBtn" type="button">再読込</button>
             <span class="pj-badge" id="rangeBadge"></span>
           </div>
+          <div class="pj-shared-ref" id="sharedRefNotice" hidden></div>
 
           <section class="pj-card pj-upload">
             <div class="pj-upload-head">
               <div>
                 <div class="pj-upload-title">LZHジャーナルをアップロード</div>
-                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。</div>
+                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。Journal Reportで登録した同店舗・同月のデータも自動で共有参照します。</div>
               </div>
               <span class="chip gray">非公開Storage保管</span>
             </div>
@@ -736,6 +741,33 @@
     function setMessage(node, message, kind) {
       node.textContent = message || '';
       node.className = 'pj-message' + (kind ? ' ' + kind : '');
+    }
+    function renderSharedReference(state) {
+      var notice = el('sharedRefNotice');
+      if (!notice) return;
+      notice.hidden = true;
+      notice.className = 'pj-shared-ref';
+      notice.textContent = '';
+      var ref = state && state.shared_reference ? state.shared_reference : null;
+      if (!ref) return;
+      if (ref.error) {
+        notice.hidden = false;
+        notice.className = 'pj-shared-ref warn';
+        notice.textContent = 'Journal Reportの共有データを確認できませんでした。現在はLZH原本または既存互換データだけを表示しています。再読込しても続く場合は管理者へ連絡してください。';
+        return;
+      }
+      var sharedDays = Number(ref.day_count)||0;
+      var addedDays = Number(ref.added_day_count)||0;
+      var files = state && Array.isArray(state.files) ? state.files.length : 0;
+      if (!sharedDays) return;
+      notice.hidden = false;
+      if (!files) {
+        notice.textContent = 'Journal Reportで登録した同店舗・同月の保存済みレポートを共有参照し、' + sharedDays + '営業日分を表示しています。LZH原本がないため、上の「保管ファイル」にはダウンロード・削除対象は表示されません。';
+      } else if (addedDays) {
+        notice.textContent = 'Journal Reportの保存済みレポートを共有参照し、LZH原本にない' + addedDays + '営業日を補完しています。同じ営業日はLZH原本を優先し、二重計上しません。';
+      } else {
+        notice.textContent = 'Journal Reportの保存済みレポートも確認済みです。この月はLZH原本と営業日が重なるため、原本側を優先して表示しています。';
+      }
     }
     async function apiFetch(path, options) {
       var url = PAGES.receiptAdminApiUrl ? PAGES.receiptAdminApiUrl(path) : '';
@@ -1127,7 +1159,18 @@
       el('emptyState').hidden = true;
       var t = data.totals || {}, m = data.meta || {}, days = data.days || [];
       var openDays = days.filter(function (d) { return (d.gross_sales||0) > 0; });
-      el('srcInfo').textContent = m.storage_mode === 'legacy_static' ? (STORE_NAME + '（店舗コード' + STORE_CODE + '） / 既存取込データ ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分 / 原本は未保管のため上のアップロードから保存してください') : (STORE_NAME + '（店舗コード' + STORE_CODE + '） / Storage保管ファイル ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分');
+      var storageFiles = Number(m.storage_file_count != null ? m.storage_file_count : m.file_count)||0;
+      var sharedDays = Number(m.shared_day_count)||0;
+      var sharedAdded = Number(m.shared_only_day_count)||0;
+      if (m.storage_mode === 'legacy_static') {
+        el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / 既存取込データ ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分 / 原本は未保管のため上のアップロードから保存してください';
+      } else if (m.storage_mode === 'shared_reports') {
+        el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / Journal Report共有参照 ' + sharedDays + '日分 / LZH原本 0件';
+      } else if (m.storage_mode === 'storage_and_shared') {
+        el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / Storage保管 ' + storageFiles + '件 + Journal Report補完 ' + sharedAdded + '日 / 解析 ' + (m.day_count||0) + '日分';
+      } else {
+        el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / Storage保管ファイル ' + storageFiles + '件 / 解析 ' + (m.day_count||0) + '日分';
+      }
       el('rangeBadge').textContent = '営業日 ' + openDays.length + '日（記録 ' + days.length + '日）';
       var kpis = [
         { l:'総売上',v:yen(t.gross_sales),s:'純売上 '+yen(t.net_sales),accent:true },
@@ -1155,19 +1198,25 @@
     async function loadCurrent() {
       var month=el('monthSel').value||savedMonth();
       try { localStorage.setItem('pos_journal_month',month); } catch (_) {}
-      if (!getToken()) { setAuth(false); renderFiles([]); await loadLegacy(month); return; }
+      if (!getToken()) { setAuth(false); renderFiles([]); renderSharedReference(null); await loadLegacy(month); return; }
       setAuth(true);
       try {
         var state=await apiFetch('/pos-journals?store_key='+encodeURIComponent(STORE_KEY)+'&month='+encodeURIComponent(month),{method:'GET'});
         renderFiles(state.files||[]);
-        if ((state.files||[]).length) render(state.summary||{});
-        else await loadLegacy(month,true);
+        renderSharedReference(state);
+        var sharedError=state.shared_reference&&state.shared_reference.error;
+        var sharedDays=state.summary&&Array.isArray(state.summary.days)?state.summary.days.length:0;
+        if ((state.files||[]).length || sharedDays) render(state.summary||{});
+        else if (sharedError) {
+          render({meta:{month:month,file_count:0,day_count:0,storage_mode:'empty'},totals:{},days:[],item_ranking:[]});
+          setMessage(el('uploadMsg'),'Journal Reportの共有データ取得に失敗したため、この月を空と断定していません。上の再読込をお試しください。','warn');
+        } else await loadLegacy(month,true);
         await loadAnalysisHistory();
       } catch(error) {
         if (/認証|ログイン|トークン|Unauthorized|Forbidden/i.test(String(error.message||''))) {
-          renderFiles([]); await loadLegacy(month,true); return;
+          renderFiles([]); renderSharedReference(null); await loadLegacy(month,true); return;
         }
-        renderFiles([]); setMessage(el('uploadMsg'),error.message,'err'); await loadLegacy(month,true);
+        renderFiles([]); renderSharedReference(null); setMessage(el('uploadMsg'),error.message,'err'); await loadLegacy(month,true);
       }
     }
     async function loadLegacy(month, preserveFiles) {
