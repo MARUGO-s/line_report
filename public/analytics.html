@@ -262,6 +262,8 @@
       color: var(--sub); cursor: pointer; font: inherit;
     }
     .chart-tab.active { background: rgba(87,216,255,0.18); border-color: var(--accent); color: var(--accent); }
+    .chart-tab[disabled] { opacity: 0.45; cursor: default; }
+    .chart-head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
     /* weather badge */
     .weather-badge { font-size: 0.78rem; color: var(--sub); display: flex; gap: 8px; flex-wrap: wrap; }
@@ -804,11 +806,14 @@
     <div class="chart-card">
       <div class="chart-head">
         <span class="chart-title">日次売上推移</span>
-        <div class="weather-badge">
-          <span><span class="weather-dot" style="background:var(--c-rain)"></span>降水量</span>
-          <span><span class="weather-dot" style="background:var(--c-temp)"></span>最高気温</span>
-          <span id="weatherStatus" style="color:var(--sub)"></span>
-          <span id="weatherAddress" style="color:var(--sub)"></span>
+        <div class="chart-head-right">
+          <div class="weather-badge">
+            <span><span class="weather-dot" style="background:var(--c-rain)"></span>降水量</span>
+            <span><span class="weather-dot" style="background:var(--c-temp)"></span>最高気温</span>
+            <span id="weatherStatus" style="color:var(--sub)"></span>
+            <span id="weatherAddress" style="color:var(--sub)"></span>
+          </div>
+          <button type="button" class="chart-tab" id="dailyCsvBtn" title="表示中の日次売上推移（総売上・降水量・最高気温）をCSVで保存します" disabled>⬇ CSV</button>
         </div>
       </div>
       <div class="chart-wrap tall" style="position:relative">
@@ -1424,6 +1429,7 @@ const dom = {
   kpiBadgeUnitMom: $('kpiBadgeUnitMom'), kpiBadgeUnitYoy: $('kpiBadgeUnitYoy'),
   weatherStatus: $('weatherStatus'),
   weatherAddress: $('weatherAddress'),
+  dailyCsvBtn: $('dailyCsvBtn'),
   loadingDaily: $('loadingDaily'), loadingMonthly: $('loadingMonthly'),
   receiptDailyMeta: $('receiptDailyMeta'),
   receiptDailyTable: $('receiptDailyTable'),
@@ -3417,6 +3423,7 @@ function clearAnalyticsAwaitingStore() {
   dom.filterMeta.textContent = '店舗をリストから選ぶとデータを表示します。';
   dom.weatherAddress.textContent = '';
   dom.weatherStatus.textContent = '';
+  syncDailyCsvBtn();
   if (dom.receiptDailyMeta) dom.receiptDailyMeta.textContent = '店舗を選択してください。';
   receiptDailySyncLayoutChrome();
   if (dom.receiptDailyTableBody) {
@@ -4082,6 +4089,7 @@ function weatherIcon(rain, temp, code) {
 function renderDailyChart() {
   destroyChart('daily');
   const series = state.dailySeries;
+  syncDailyCsvBtn();
   if (!series.length) return;
   const { gridColor, tickColor, legendColor } = chartDefaults();
   const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
@@ -4247,6 +4255,77 @@ function buildDailyChartDates(series, weatherMap) {
   }
   return dates;
 }
+
+/* ── Chart 1: CSV 書き出し（グラフに描かれている値をそのまま出す） ── */
+const DAILY_CSV_DOW = ['日', '月', '火', '水', '木', '金', '土'];
+
+function csvEscapeAnalytics(v) {
+  const s = String(v == null ? '' : v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/** グラフの表示店舗名（取得済みデータ → プルダウン表記 → store_key の順で解決） */
+function dailyCsvStoreLabel() {
+  const fromData = lastReceiptDailyData?.selected_store_name;
+  if (fromData) return String(fromData);
+  const opt = dom.storeSelect?.selectedOptions?.[0];
+  const fromSelect = opt && opt.value ? String(opt.textContent || '').trim() : '';
+  if (fromSelect) return fromSelect;
+  return String(state.storeKey || '全店舗');
+}
+
+/** 日次売上推移グラフの行データ（CSV とボタン活性判定で共用） */
+function buildDailyChartCsvRows() {
+  const series = state.dailySeries || [];
+  if (!series.length) return [];
+  const salesMap = {};
+  series.forEach((d) => { salesMap[d.date] = d; });
+  return buildDailyChartDates(series, state.weather).map((date) => {
+    const w = state.weather[date] || {};
+    const gross = salesMap[date]?.gross_sales_yen;
+    const rain = w.rain ?? null;
+    const temp = w.temp ?? null;
+    return {
+      date,
+      dow: DAILY_CSV_DOW[dayOfWeek(date)],
+      holiday: JAPANESE_HOLIDAYS.get(date) || '',
+      gross: gross == null ? '' : Math.round(Number(gross)),
+      rain: rain == null ? '' : rain,
+      temp: temp == null ? '' : temp,
+      icon: weatherIcon(rain, temp, w.code ?? null),
+    };
+  });
+}
+
+function buildDailyChartCsv(rows) {
+  const headers = ['日付', '曜日', '祝日', '総売上', '降水量(mm)', '最高気温(℃)', '天気'];
+  const body = rows.map((r) => [r.date, r.dow, r.holiday, r.gross, r.rain, r.temp, r.icon]);
+  return [headers, ...body].map((cols) => cols.map(csvEscapeAnalytics).join(',')).join('\r\n');
+}
+
+function downloadDailyChartCsv() {
+  const rows = buildDailyChartCsvRows();
+  if (!rows.length) return;
+  const csv = '﻿' + buildDailyChartCsv(rows); // 先頭BOM＝Excelで日本語が文字化けしない
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const from = rows[0].date;
+  const to = rows[rows.length - 1].date;
+  const range = from === to ? from : `${from}_${to}`;
+  a.href = url;
+  a.download = `日次売上推移_${dailyCsvStoreLabel()}_${range}.csv`.replace(/[\\/:*?"<>|]/g, '_');
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 1500);
+}
+
+/** データが無いときは押せないようにする */
+function syncDailyCsvBtn() {
+  if (!dom.dailyCsvBtn) return;
+  dom.dailyCsvBtn.disabled = !(state.dailySeries || []).length;
+}
+
+if (dom.dailyCsvBtn) dom.dailyCsvBtn.addEventListener('click', downloadDailyChartCsv);
 
 /* ── Chart 2: weekday avg ── */
 function renderWeekdayChart() {
