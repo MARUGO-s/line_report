@@ -16945,6 +16945,32 @@ async function restoreJournalTrashItem(typeKey, id) {
   }
 }
 
+/**
+ * ゴミ箱の項目を完全削除する。復元できないため、サーバー側でも
+ * 「ゴミ箱にある行だけ」「店舗スコープ内」「confirmation=delete」を検査している。
+ */
+async function purgeJournalTrashItems(typeKey, ids) {
+  const type = JOURNAL_TRASH_TYPES.find(row => row.key === typeKey);
+  if (!type || !Array.isArray(ids) || !ids.length) return { ok: false, purged: 0 };
+  try {
+    const body = await adminApiFetch(type.itemPath, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ids,
+        store_key: STORE_KEY,
+        action: 'purge',
+        confirmation: 'delete'
+      })
+    });
+    purgeLocalCloudDataCaches();
+    invalidateSavedReportsCache();
+    return { ok: true, purged: Number(body?.purged) || 0 };
+  } catch (err) {
+    console.error('purgeJournalTrashItems error:', err);
+    return { ok: false, purged: 0, error: err };
+  }
+}
+
 async function renderJournalTrash() {
   const view = document.getElementById('reportView');
   showAppLoading('ゴミ箱を読み込み中...', '復元できる履歴を確認しています');
@@ -16958,14 +16984,28 @@ async function renderJournalTrash() {
     const sections = results.map(({ type, items }) => {
       const rows = items.length ? items.map(item => `
         <div class="saved-item" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-          <div class="saved-meta" style="min-width:0;">
-            <div class="saved-title">${esc(type.label(item))}</div>
-            <div class="saved-sub">ゴミ箱へ移動: ${esc(formatReportCreatedAt(item.deleted_at || ''))}</div>
-          </div>
+          <label style="display:flex;align-items:center;gap:10px;min-width:0;flex:1;cursor:pointer;">
+            <input type="checkbox" class="trash-pick" data-pick-type="${esc(type.key)}" data-pick-id="${esc(item.id)}" style="width:18px;height:18px;flex:none;">
+            <span class="saved-meta" style="min-width:0;">
+              <span class="saved-title" style="display:block;">${esc(type.label(item))}</span>
+              <span class="saved-sub" style="display:block;">ゴミ箱へ移動: ${esc(formatReportCreatedAt(item.deleted_at || ''))}</span>
+            </span>
+          </label>
           <button class="rv-btn rv-btn-primary" data-trash-type="${esc(type.key)}" data-trash-id="${esc(item.id)}">復元</button>
         </div>`).join('') : '<p class="empty">ゴミ箱にありません。</p>';
+      const tools = items.length ? `
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 10px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" class="trash-pick-all" data-pick-all="${esc(type.key)}" style="width:18px;height:18px;">
+            <span>すべて選択</span>
+          </label>
+          <span class="saved-sub" data-pick-count="${esc(type.key)}">0件を選択中</span>
+          <button class="rv-btn rv-btn-danger" data-purge-type="${esc(type.key)}" disabled
+            style="background:#dc2626;color:#fff;border-color:#dc2626;">選択した項目を完全に削除</button>
+        </div>` : '';
       return `<section style="margin:0 0 28px;">
         <h2 class="table-h">${esc(type.title)}（${items.length}件）</h2>
+        ${tools}
         <div class="saved-list">${rows}</div>
       </section>`;
     }).join('');
@@ -16977,7 +17017,7 @@ async function renderJournalTrash() {
     </div>
     <div class="saved-wrap" style="max-width:960px;margin:24px auto;padding:0 16px;">
       <h1 class="r-title">ゴミ箱・復元</h1>
-      <p class="r-meta">ゴミ箱内 ${total}件。ここから元の一覧へ復元できます。</p>
+      <p class="r-meta">ゴミ箱内 ${total}件。ここから元の一覧へ復元できます。完全削除すると元に戻せません。</p>
       ${sections}
     </div>`;
     view.hidden = false;
@@ -16986,6 +17026,64 @@ async function renderJournalTrash() {
       view.hidden = true;
       document.body.classList.remove('report-open');
     };
+    // 選択状態の更新（件数表示と削除ボタンの活性、全選択チェックの同期）
+    const pickedIds = (typeKey) => [...view.querySelectorAll(`.trash-pick[data-pick-type="${typeKey}"]`)]
+      .filter(box => box.checked).map(box => box.getAttribute('data-pick-id'));
+    const refreshPickState = (typeKey) => {
+      const boxes = [...view.querySelectorAll(`.trash-pick[data-pick-type="${typeKey}"]`)];
+      const picked = boxes.filter(box => box.checked).length;
+      const counter = view.querySelector(`[data-pick-count="${typeKey}"]`);
+      if (counter) counter.textContent = `${picked}件を選択中`;
+      const purgeButton = view.querySelector(`[data-purge-type="${typeKey}"]`);
+      if (purgeButton) purgeButton.disabled = picked === 0;
+      const all = view.querySelector(`[data-pick-all="${typeKey}"]`);
+      if (all) {
+        all.checked = picked > 0 && picked === boxes.length;
+        all.indeterminate = picked > 0 && picked < boxes.length;
+      }
+    };
+    view.querySelectorAll('.trash-pick').forEach(box => {
+      box.onchange = () => refreshPickState(box.getAttribute('data-pick-type'));
+    });
+    view.querySelectorAll('[data-pick-all]').forEach(all => {
+      all.onchange = () => {
+        const typeKey = all.getAttribute('data-pick-all');
+        view.querySelectorAll(`.trash-pick[data-pick-type="${typeKey}"]`)
+          .forEach(box => { box.checked = all.checked; });
+        refreshPickState(typeKey);
+      };
+    });
+    view.querySelectorAll('[data-purge-type]').forEach(button => {
+      button.onclick = async () => {
+        const typeKey = button.getAttribute('data-purge-type');
+        const type = JOURNAL_TRASH_TYPES.find(row => row.key === typeKey);
+        const ids = pickedIds(typeKey);
+        if (!ids.length) return;
+        // サーバー側の上限と同じ値で先に止める（送ってから400を返されるより分かりやすい）
+        if (ids.length > 500) {
+          alert(`一度に完全削除できるのは500件までです。\n選択中: ${ids.length}件\n\n分けて実行してください。`);
+          return;
+        }
+        // 復元できない操作なので、件数の確認と文字入力の二段で確かめる
+        if (!confirm(`${type?.title || ''} を ${ids.length}件、完全に削除します。\nこの操作は取り消せません。復元もできなくなります。\n\n続けますか？`)) return;
+        const typed = prompt(`確認のため delete と入力してください（${ids.length}件を完全削除）`);
+        if (String(typed || '').trim() !== 'delete') {
+          finishSaveStatus('完全削除を中止しました');
+          return;
+        }
+        button.disabled = true;
+        showAppLoading('完全に削除しています...', `${ids.length}件を処理中`);
+        const result = await purgeJournalTrashItems(typeKey, ids);
+        hideAppLoading();
+        if (result.ok) {
+          finishSaveStatus(`${result.purged}件を完全に削除しました`);
+          await renderJournalTrash();
+        } else {
+          button.disabled = false;
+          finishSaveStatus('完全削除に失敗しました: ' + (result.error?.message || ''), true);
+        }
+      };
+    });
     view.querySelectorAll('[data-trash-type]').forEach(button => {
       button.onclick = async () => {
         const typeKey = button.getAttribute('data-trash-type');

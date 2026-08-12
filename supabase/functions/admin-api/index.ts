@@ -13719,6 +13719,87 @@ type JournalHistoryTable =
   | "ai_analysis_history"
   | "ai_chat_pdf_history"
 
+/**
+ * ゴミ箱の完全削除。復元不可のため次の条件をすべて満たすものだけを消す。
+ * - すでに deleted_at が入っている（＝ゴミ箱にある）行だけ
+ * - 呼び出し元の店舗スコープ内だけ
+ * - confirmation に "delete" が入っている（他の破壊的操作と同じ作法）
+ * 保存済みレポートは本文HTMLをStorageへ逃がしている場合があるため、
+ * 行を消す前にそのオブジェクトも片付ける（失敗しても行の削除は続行する）。
+ */
+async function purgeJournalHistoryItems(
+  supabase: ReturnType<typeof createClient>,
+  table: JournalHistoryTable,
+  label: string,
+  body: Record<string, unknown>,
+  storeKey: string,
+) {
+  if (String(body.confirmation ?? "") !== "delete") {
+    throw {
+      status: 400,
+      message: "完全削除には confirmation に delete を指定してください。",
+    } satisfies AppError
+  }
+  const rawIds = Array.isArray(body.ids) ? body.ids : (body.id ? [body.id] : [])
+  const ids = [...new Set(rawIds.map((value) => toSafeString(value)).filter(Boolean))]
+  if (!ids.length) throw { status: 400, message: "ids is required." } satisfies AppError
+  if (ids.length > 500) {
+    throw { status: 400, message: "一度に完全削除できるのは500件までです。" } satisfies AppError
+  }
+
+  // 対象がすべてゴミ箱にあることを先に確認する（有効な行が混ざっていたら中止）
+  const { data: targets, error: findError } = await supabase
+    .from(table)
+    .select("id, deleted_at")
+    .eq("store_partition_key", storeKey)
+    .in("id", ids)
+  if (findError) {
+    throw { status: 500, message: `${label}の確認に失敗しました: ${findError.message}` } satisfies AppError
+  }
+  const rows = Array.isArray(targets) ? targets : []
+  const live = rows.filter((row) => !(row as Record<string, unknown>).deleted_at)
+  if (live.length) {
+    throw {
+      status: 409,
+      message: `${label}にゴミ箱以外の項目が含まれています（${live.length}件）。完全削除はゴミ箱の項目だけが対象です。`,
+    } satisfies AppError
+  }
+  const deletableIds = rows.map((row) => String((row as Record<string, unknown>).id))
+  if (!deletableIds.length) {
+    return { ok: true, purged: 0, skipped: ids.length }
+  }
+
+  if (table === "saved_reports") {
+    // data 列は伝票明細を丸ごと含み1件で数百KBになる。パスだけを取り出す。
+    const { data: withHtml } = await supabase
+      .from(table)
+      .select("html_path:data->>htmlStoragePath")
+      .eq("store_partition_key", storeKey)
+      .in("id", deletableIds)
+    const paths = (Array.isArray(withHtml) ? withHtml : [])
+      .map((row) => toSafeString((row as Record<string, unknown>).html_path))
+      .filter(Boolean)
+    // 一度に大量のオブジェクトを渡すと失敗しうるため分割して消す。
+    // Storage側が失敗しても行の削除は続ける（残るのは参照されないHTMLだけ）。
+    for (let i = 0; i < paths.length; i += 50) {
+      try {
+        await supabase.storage.from(POS_REPORT_HTML_BUCKET).remove(paths.slice(i, i + 50))
+      } catch (_) { /* 続行 */ }
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from(table)
+    .delete()
+    .eq("store_partition_key", storeKey)
+    .in("id", deletableIds)
+    .not("deleted_at", "is", null)
+  if (deleteError) {
+    throw { status: 500, message: `${label}の完全削除に失敗しました: ${deleteError.message}` } satisfies AppError
+  }
+  return { ok: true, purged: deletableIds.length, skipped: ids.length - deletableIds.length }
+}
+
 async function restoreJournalHistoryItem(
   supabase: ReturnType<typeof createClient>,
   table: JournalHistoryTable,
@@ -13726,8 +13807,6 @@ async function restoreJournalHistoryItem(
   body: Record<string, unknown>,
   storeScope: string | null,
 ) {
-  const id = toSafeString(body.id)
-  if (!id) throw { status: 400, message: "id is required." } satisfies AppError
   const requestedStore = toSafeString(body.store_key)
   const storeKey = storeScope || requestedStore
   if (!storeKey) throw { status: 400, message: "store_key is required." } satisfies AppError
@@ -13737,8 +13816,16 @@ async function restoreJournalHistoryItem(
   ) {
     throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
   }
+  // ゴミ箱の完全削除。復元と同じ口で受けるが、対象は「すでにゴミ箱にある行」だけに限定し、
+  // 店舗スコープと確認文字列で二重に守る。有効な行は絶対に消さない。
+  // 複数IDを受けるため、単一idの必須チェックより前に分岐する。
+  if (String(body.action ?? "") === "purge") {
+    return await purgeJournalHistoryItems(supabase, table, label, body, storeKey)
+  }
+  const id = toSafeString(body.id)
+  if (!id) throw { status: 400, message: "id is required." } satisfies AppError
   if (String(body.action ?? "") !== "restore") {
-    throw { status: 400, message: "action must be restore." } satisfies AppError
+    throw { status: 400, message: "action must be restore or purge." } satisfies AppError
   }
   const { data, error } = await supabase
     .from(table)

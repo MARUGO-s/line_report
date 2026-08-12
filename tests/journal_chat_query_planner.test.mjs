@@ -1967,3 +1967,45 @@ test('asking to see the saved records lists them instead of using them silently 
   assert.match(background, /背景情報であり/);
   assert.ok(!background.includes('保存件数: 全'), '背景モードでは件数の列挙指示を出さない');
 });
+
+test('trash purge is guarded on both server and client because it cannot be undone', async () => {
+  const adminApi = await readFile(
+    new URL('../supabase/functions/admin-api/index.ts', import.meta.url),
+    'utf8',
+  );
+  const purge = adminApi.slice(
+    adminApi.indexOf('async function purgeJournalHistoryItems'),
+    adminApi.indexOf('async function restoreJournalHistoryItem'),
+  );
+  assert.ok(purge.length > 0, 'purgeJournalHistoryItems must exist');
+
+  // 有効な行を巻き込まないこと
+  assert.match(purge, /confirmation \?\? ""\) !== "delete"/, '確認文字列を必須にすること');
+  assert.match(purge, /\.not\("deleted_at", "is", null\)/, '削除はゴミ箱の行に限定すること');
+  assert.match(purge, /live\.length/, '有効な行が混ざっていたら中止すること');
+  assert.match(purge, /status: 409/, '混在時は409で止めること');
+  assert.match(purge, /\.eq\("store_partition_key", storeKey\)/, '店舗スコープを削除クエリにも掛けること');
+  assert.match(purge, /ids\.length > 500/, '一度の件数に上限を設けること');
+  // data 列は伝票明細を含み全件取得すると数十MBになる
+  assert.match(purge, /select\("html_path:data->>htmlStoragePath"\)/, 'HTMLパスだけを取得すること');
+  assert.ok(!/\.select\("data"\)/.test(purge), 'data列を丸ごと取得しないこと');
+  // Storage削除は分割し、失敗しても行削除を止めない
+  assert.match(purge, /paths\.slice\(i, i \+ 50\)/, 'Storage削除を分割すること');
+
+  // 単一idの必須チェックより前に purge へ分岐すること（複数id削除が弾かれないため）
+  const restore = adminApi.slice(
+    adminApi.indexOf('async function restoreJournalHistoryItem'),
+    adminApi.indexOf('async function deletePosJournalFile'),
+  );
+  assert.ok(
+    restore.indexOf('=== "purge"') < restore.indexOf('id is required'),
+    'purge分岐は id 必須チェックより前に置くこと',
+  );
+
+  // クライアント側も二段確認と上限チェックを持つこと
+  assert.match(html, /action: 'purge'/);
+  assert.match(html, /confirmation: 'delete'/);
+  assert.match(html, /ids\.length > 500/, '画面側でも上限で止めること');
+  assert.match(html, /prompt\(`確認のため delete と入力してください/, '文字入力の確認を求めること');
+  assert.match(html, /この操作は取り消せません/, '取り消せない旨を明示すること');
+});

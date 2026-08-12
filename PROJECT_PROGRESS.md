@@ -2,13 +2,21 @@
 
 ## Document information
 
-- Current date: 2026-08-11
+- Current date: 2026-08-12
 - Repository: `https://github.com/MARUGO-s/line_report`
 - Branch: `main`
 - Work-start HEAD: `74b44e6876ceaa226578426ab323e31b5d3dd356`
 - Production: `https://marugo-s.github.io/line_report/`
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
+
+### 2026-08-12 - ゴミ箱の選択式一括完全削除を追加
+
+- Request: ゴミ箱を選択して一括削除できる機能をつけてほしい。
+- Design: 復元不可の破壊的操作のため多重に守る。サーバー `purgeJournalHistoryItems`（admin-api）は (1) `deleted_at` が入っている行だけを対象にし、有効な行が1件でも混ざっていたら409で中止 (2) 削除クエリにも `store_partition_key` を掛ける（URL・JSONボディの店舗強制上書きに加えた二重ガード） (3) `confirmation: "delete"` 必須（`deletePosJournalFile` と同じ作法） (4) 一度に500件まで (5) 実削除にも `.not("deleted_at","is",null)` を付け、事前チェックと実削除の間に復元されても巻き込まない。対象は保存済みレポート／売上予測／AI分析履歴／AIチャットPDF履歴の4種類。
+- UI: 各セクションにチェックボックスと「すべて選択」、選択件数表示、赤い完全削除ボタンを追加。確認は件数入り `confirm` と `delete` の入力の二段。復元ボタンは行ごと、完全削除はセクション見出しに置いて誤操作を避けた。
+- Self-review findings (レビュー用ワークフローが利用上限で全滅したため自分で実施し、実データで裏を取った): ①**HTMLパス取得のため `data` 列を丸ごと select しており、ゴミ箱219件では25MB（最大単体2MB）をEdge Functionへ読み込む実装だった**。`select("html_path:data->>htmlStoragePath")` へ変更し約8KBに削減。一括削除でのタイムアウト/OOMを回避。②Storage削除を50件ずつに分割（181件が実体を持つ）。③画面側に500件上限のチェックが無く、超過時はサーバー400のみだったため事前に止めるようにした。④単一 `id` 必須チェックが `purge` 分岐より前にあり、複数ID削除が400で弾かれていたため順序を入れ替えた。
+- Verification: 外部キー参照なし（4テーブルとも被参照0）を確認。`npm run test:ci` 189 tests / 0 fail（purgeのガード9項目をテストで固定）。`deno check` admin-api は既存173件のまま増減なし。実際の削除操作は利用者が画面から行う。
 
 ### 2026-08-11 - 期間表現の解決を全面刷新／自己撤回の防止／過去チャット記録の参照経路
 
