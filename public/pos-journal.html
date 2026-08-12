@@ -379,6 +379,7 @@
     .pj-upload-box.busy { opacity:.65; pointer-events:none; }
     .pj-upload-copy b { display:block; font-size:14px; }
     .pj-upload-copy span { color:var(--text-3); font-size:12px; }
+    .pj-upload-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
     .pj-message { min-height:18px; margin-top:10px; font-size:12.5px; white-space:pre-line; }
     .pj-message.ok { color:var(--ok); } .pj-message.err { color:var(--err); } .pj-message.warn { color:var(--warn); }
     .pj-ai-card { margin-bottom: 22px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent-soft) 35%, var(--surface)), var(--surface)); }
@@ -545,17 +546,21 @@
             <div class="pj-upload-head">
               <div>
                 <div class="pj-upload-title">LZHジャーナルをアップロード</div>
-                <div class="pj-upload-note">複数ファイルを一括選択できます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。</div>
+                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。</div>
               </div>
               <span class="chip gray">非公開Storage保管</span>
             </div>
             <div class="pj-upload-box" id="uploadDrop" role="button" tabindex="0" aria-label="LZHファイルを選択">
               <div class="pj-upload-copy">
-                <b>ここへLZHファイルをドロップ</b>
-                <span>または「ファイルを選択」から複数選択（1件8MB以下・最大62件）</span>
+                <b>ここへLZHファイル／フォルダをドロップ</b>
+                <span>月をまたいでいても、ファイル名の日付で自動的に振り分けます（1件8MB以下）</span>
               </div>
-              <button class="btn btn-primary" id="uploadPickBtn" type="button">ファイルを選択</button>
+              <span class="pj-upload-actions">
+                <button class="btn btn-primary" id="uploadPickBtn" type="button">ファイルを選択</button>
+                <button class="btn" id="uploadFolderBtn" type="button">フォルダを選択</button>
+              </span>
               <input id="uploadInput" type="file" accept=".lzh,application/x-lzh-compressed,application/octet-stream" multiple hidden />
+              <input id="uploadFolderInput" type="file" multiple hidden webkitdirectory directory />
             </div>
             <div class="pj-message" id="uploadMsg"></div>
           </section>
@@ -1170,15 +1175,102 @@
       try { var response=await fetch(LEGACY_DATA_URL,{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);var data=await response.json();data.meta=data.meta||{};data.meta.store_key=STORE_KEY;data.meta.store_name=STORE_NAME;data.meta.storage_mode='legacy_static';render(data);if(!preserveFiles)renderFiles([]);await loadAnalysisHistory(); }
       catch(error){el('mainWrap').hidden=true;el('emptyState').hidden=false;el('emptyState').textContent='データ読込エラー: '+error.message;}
     }
+    /** サーバ側の1リクエスト上限（admin-api の POS_JOURNAL_UPLOAD_MAX_FILES と揃える） */
+    var UPLOAD_MAX_FILES_PER_REQUEST=62;
+    /** ファイル名「店舗コード4桁+YYYYMMDD+…」から対象月(YYYY-MM)を読む。読めなければ null */
+    function monthFromJournalFileName(name){
+      var m=/^\d{4}(\d{4})(\d{2})\d{2}/.exec(String(name||''));
+      if(!m)return null;
+      var mo=Number(m[2]);
+      if(!(mo>=1&&mo<=12))return null;
+      return m[1]+'-'+m[2];
+    }
+    /** ドロップされた項目をフォルダごと再帰的に辿って File を集める（非対応ブラウザは従来どおり files を使う） */
+    async function collectDroppedFiles(dataTransfer){
+      var items=dataTransfer&&dataTransfer.items?Array.from(dataTransfer.items):[];
+      var entries=items.map(function(it){return it.webkitGetAsEntry?it.webkitGetAsEntry():null;}).filter(Boolean);
+      if(!entries.length)return Array.from((dataTransfer&&dataTransfer.files)||[]);
+      var out=[];
+      async function walk(entry,depth){
+        if(!entry||depth>8)return;
+        if(entry.isFile){
+          var file=await new Promise(function(res){entry.file(res,function(){res(null);});});
+          if(file)out.push(file);
+          return;
+        }
+        if(!entry.isDirectory)return;
+        var reader=entry.createReader();
+        // readEntries は1回に最大100件しか返さないので、空になるまで読み続ける
+        for(;;){
+          var batch=await new Promise(function(res){reader.readEntries(res,function(){res([]);});});
+          if(!batch.length)break;
+          for(var i=0;i<batch.length;i++)await walk(batch[i],depth+1);
+        }
+      }
+      for(var i=0;i<entries.length;i++)await walk(entries[i],0);
+      return out;
+    }
+    function setUploadBusy(busy){
+      el('uploadDrop').classList.toggle('busy',!!busy);
+      el('uploadPickBtn').disabled=!!busy;
+      if(el('uploadFolderBtn'))el('uploadFolderBtn').disabled=!!busy;
+    }
     async function uploadFiles(fileList) {
-      var files=Array.from(fileList||[]).filter(function(f){return /\.lzh$/i.test(f.name);});
-      if(!files.length){setMessage(el('uploadMsg'),'LZHファイルを選択してください。','err');return;}
+      var all=Array.from(fileList||[]);
+      var files=all.filter(function(f){return /\.lzh$/i.test(f.name);});
+      if(!files.length){setMessage(el('uploadMsg'),all.length?'LZHファイルが見つかりませんでした（'+all.length+'件中0件）。':'LZHファイルを選択してください。','err');return;}
       if(!getToken()){setAuth(false);setMessage(el('uploadMsg'),'先に管理トークンで接続してください。','err');return;}
-      var form=new FormData();files.forEach(function(file){form.append('files',file,file.name);});form.append('store_key',STORE_KEY);form.append('month',el('monthSel').value);
-      el('uploadDrop').classList.add('busy');el('uploadPickBtn').disabled=true;setMessage(el('uploadMsg'),files.length+'件を解析・保存しています…','');
-      try {var result=await apiFetch('/pos-journals/upload',{method:'POST',body:form});var parts=[];if(result.uploaded_count)parts.push(result.uploaded_count+'件を保存');if(result.repaired_count)parts.push(result.repaired_count+'件を修復');if(result.duplicate_count)parts.push(result.duplicate_count+'件は重複のためスキップ');if(result.failed_count)parts.push(result.failed_count+'件失敗');var failure=(result.failures||[]).map(function(f){return f.original_file_name+': '+f.error;}).join('\n');setMessage(el('uploadMsg'),parts.join(' / ')+(failure?'\n'+failure:''),result.failed_count?'warn':'ok');await loadCurrent();}
+      // 取り込み先の月はファイル名の日付で決める。対象月プルダウンと違う月でも弾かずに、その月として取り込む。
+      var selectedMonth=el('monthSel').value||savedMonth();
+      var groups=new Map();
+      files.forEach(function(file){
+        var month=monthFromJournalFileName(file.name)||selectedMonth;
+        if(!groups.has(month))groups.set(month,[]);
+        groups.get(month).push(file);
+      });
+      var months=Array.from(groups.keys()).sort();
+      var totals={uploaded:0,repaired:0,duplicate:0,failed:0};
+      var failures=[];
+      var monthsWithData=[];
+      var done=0;
+      setUploadBusy(true);
+      setMessage(el('uploadMsg'),files.length+'件を解析・保存しています…','');
+      try {
+        for(var mi=0;mi<months.length;mi++){
+          var month=months[mi];
+          var groupFiles=groups.get(month);
+          for(var start=0;start<groupFiles.length;start+=UPLOAD_MAX_FILES_PER_REQUEST){
+            var chunk=groupFiles.slice(start,start+UPLOAD_MAX_FILES_PER_REQUEST);
+            setMessage(el('uploadMsg'),files.length+'件中 '+done+'件を処理…（'+month+'）','');
+            var form=new FormData();
+            chunk.forEach(function(file){form.append('files',file,file.name);});
+            form.append('store_key',STORE_KEY);
+            form.append('month',month);
+            var result=await apiFetch('/pos-journals/upload',{method:'POST',body:form});
+            totals.uploaded+=Number(result.uploaded_count||0);
+            totals.repaired+=Number(result.repaired_count||0);
+            totals.duplicate+=Number(result.duplicate_count||0);
+            totals.failed+=Number(result.failed_count||0);
+            (result.failures||[]).forEach(function(f){failures.push(f.original_file_name+': '+f.error);});
+            if((Number(result.uploaded_count||0)+Number(result.repaired_count||0)+Number(result.duplicate_count||0))>0&&monthsWithData.indexOf(month)<0)monthsWithData.push(month);
+            done+=chunk.length;
+          }
+        }
+        var parts=[];
+        if(totals.uploaded)parts.push(totals.uploaded+'件を保存');
+        if(totals.repaired)parts.push(totals.repaired+'件を修復');
+        if(totals.duplicate)parts.push(totals.duplicate+'件は重複のためスキップ');
+        if(totals.failed)parts.push(totals.failed+'件失敗');
+        if(!parts.length)parts.push('取り込む対象がありませんでした');
+        if(months.length>1)parts.push('対象月 '+months.join('・'));
+        // 取り込んだ月が表示中の月に無いときは、結果が見えるようその月へ切り替える
+        var jumpTo=monthsWithData.indexOf(selectedMonth)>=0?selectedMonth:monthsWithData[0];
+        if(jumpTo&&jumpTo!==el('monthSel').value){el('monthSel').value=jumpTo;parts.push('表示を'+jumpTo+'に切り替えました');}
+        setMessage(el('uploadMsg'),parts.join(' / ')+(failures.length?'\n'+failures.join('\n'):''),totals.failed?'warn':'ok');
+        await loadCurrent();
+      }
       catch(error){setMessage(el('uploadMsg'),error.message,'err');}
-      finally{el('uploadDrop').classList.remove('busy');el('uploadPickBtn').disabled=false;el('uploadInput').value='';}
+      finally{setUploadBusy(false);el('uploadInput').value='';if(el('uploadFolderInput'))el('uploadFolderInput').value='';}
     }
     async function downloadFile(id) {try{var body=await apiFetch('/pos-journals/download?store_key='+encodeURIComponent(STORE_KEY)+'&id='+encodeURIComponent(id),{method:'GET'});window.open(body.signed_url,'_blank','noopener,noreferrer');}catch(error){setMessage(el('uploadMsg'),error.message,'err');}}
     function openDelete(id){deleteTarget=currentFiles.find(function(f){return String(f.id)===String(id);})||null;if(!deleteTarget)return;el('deleteFileName').textContent=deleteTarget.business_date+' / '+deleteTarget.original_file_name;el('deleteConfirmInput').value='';el('deleteSubmitBtn').disabled=true;setMessage(el('deleteMsg'),'','');el('deleteModal').hidden=false;setTimeout(function(){el('deleteConfirmInput').focus();},30);}
@@ -1186,7 +1278,7 @@
     async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
 
     var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
-    document.addEventListener('DOMContentLoaded',async function(){populateControls();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadDrop').addEventListener('drop',function(e){uploadFiles(e.dataTransfer.files);});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
+    document.addEventListener('DOMContentLoaded',async function(){populateControls();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
   })();
   </script>
 
