@@ -2801,15 +2801,15 @@ async function buildDailySeriesForStoreMonth(
   storePartitionKey: string,
   month: string,
 ): Promise<DailySeriesRow[]> {
-  const range = buildJstMonthRange(month)
   const dayKeys = buildJstDateKeysForMonth(month)
   const dayKeySet = new Set(dayKeys)
 
+  // 抽出は receipt_date（売上の日付）で行う。created_at（登録時刻）で月を切ると、
+  // 閉店後 0 時をまたいで登録された月末日のレシートが当月にも翌月にも入らず消える。
   const rows = await queryStoreReceiptRows(supabase, {
     storeKey: storePartitionKey,
-    createdFrom: range.startIso,
-    createdTo: range.endIso,
-    orderByCreatedAt: true,
+    receiptFrom: dayKeys[0],
+    receiptTo: buildNextMonthFirstDateKey(month),
     limit: 20000,
   })
 
@@ -3299,20 +3299,6 @@ function parsePositiveWeight(raw: unknown, fallback: number): number {
   return n
 }
 
-function buildJstMonthRange(month: string): { startIso: string; endIso: string } {
-  const matched = month.match(/^(\d{4})-(\d{2})$/)
-  if (!matched) {
-    const fallbackStart = new Date()
-    const fallbackEnd = new Date(fallbackStart.getTime() + 31 * 24 * 60 * 60 * 1000)
-    return { startIso: fallbackStart.toISOString(), endIso: fallbackEnd.toISOString() }
-  }
-  const year = Number(matched[1])
-  const monthNumber = Number(matched[2])
-  const startUtc = Date.UTC(year, monthNumber - 1, 1, -9, 0, 0)
-  const endUtc = Date.UTC(year, monthNumber, 1, -9, 0, 0)
-  return { startIso: new Date(startUtc).toISOString(), endIso: new Date(endUtc).toISOString() }
-}
-
 function buildJstDateKeysForMonth(month: string): string[] {
   const matched = month.match(/^(\d{4})-(\d{2})$/)
   if (!matched) return []
@@ -3324,6 +3310,18 @@ function buildJstDateKeysForMonth(month: string): string[] {
     keys.push(`${String(year).padStart(4, "0")}-${String(monthNum).padStart(2, "0")}-${String(day).padStart(2, "0")}`)
   }
   return keys
+}
+
+/** 翌月1日の日付キー（receipt_date の上限・未満比較用） */
+function buildNextMonthFirstDateKey(month: string): string {
+  const matched = month.match(/^(\d{4})-(\d{2})$/)
+  if (!matched) return ""
+  const year = Number(matched[1])
+  const monthNum = Number(matched[2])
+  const next = new Date(Date.UTC(year, monthNum, 1))
+  return `${String(next.getUTCFullYear()).padStart(4, "0")}-${
+    String(next.getUTCMonth() + 1).padStart(2, "0")
+  }-01`
 }
 
 function resolveReceiptEntryDateKeyForMonth(receiptDateValue: unknown, month: string): string | null {
