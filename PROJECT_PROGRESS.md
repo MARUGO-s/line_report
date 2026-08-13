@@ -2,7 +2,7 @@
 
 ## Document information
 
-- Current date: 2026-08-12
+- Current date: 2026-08-13
 - Repository: `https://github.com/MARUGO-s/line_report`
 - Branch: `main`
 - Work-start HEAD: `74b44e6876ceaa226578426ab323e31b5d3dd356`
@@ -10,14 +10,14 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
-### 2026-08-12 - 電子ジャーナル画面のLZH登録から保存済み日別・月間レポートを自動生成
+### 2026-08-13 - 電子ジャーナル画面のLZH登録から保存済み日別・月間レポートを自動生成
 
 - Request: LINE Reportの電子ジャーナル画面へLZHをドロップした場合も、Journal Reportの「保存済みレポート」に日別・月間を自動作成する。
-- Behavior: `/pos-journals/upload` の保存・修復・重複確認後、影響月の有効な `pos_journal_files` 全件を読み直して、月単位の日別／月間レポート2件をサーバー側で再構築する。今回投入したファイルだけで月全体を縮めず、既存原本と合算した完全月を正本にする。
+- Behavior: `/pos-journals/upload` の保存・修復・重複確認後、影響月の有効な `pos_journal_files` を読み直す。既存保存レポートが原本より広い期間を持つ場合は最も広い月データを土台にし、LZH原本がある営業日だけ原本で差し替えて、月単位の日別／月間レポート2件を再構築する。今回投入したファイルだけで完全月を縮めない。
 - Idempotency: 同じ月を再アップロードしても新しい重複レポートを増やさない。既存の単月日別・月間レポートがあればそのIDと作成日時を維持して更新し、無い場合だけ決定的ID `pos_journal_auto_<store>_<YYYYMM>_daily|monthly` で作成する。重複LZHだけの再送でも不足していた保存レポートを修復できる。
 - Data: 保存データには伝票、商品明細、日計客数・組数・税、決済、天候、昼夜、カテゴリ集計、商品ランキング、曜日／時間帯、原本IDを含む。店舗別の商品分類上書きを適用し、未知コードは「その他（要確認）」、LZH原本の `posJournalDays` も保持する。
 - Failure handling: 原本保存は成功したがレポート生成が失敗した場合は、API応答を `ok=false` にして月別エラーを返し、画面に「保存済みレポートで失敗」と表示する。既存レポートを部分的に削除せず、再アップロードで再生成可能。
-- Verification: 新規5テスト（決定的な日別・月間生成、既存ID更新配線、分類上書き、日計客数／組数／税、支払変更控え重複、空／別月）を追加。`npm run test:ci` 232 tests / 0 fail、`npm run check`、変更共有モジュールの`deno check`、HTMLインラインJS構文検査に成功。本番原本3日を生成器へ読み取り投入し、日計総売上¥196,900・客数23名・組数12・会計12件・重複控え除外後の会計合計¥196,900を確認。
+- Verification: 部分原本マージ、旧日別断片の統合、取消明細の負数保持、不整合な旧原本明細の安全維持、自己完結HTML保存、API/UI配線を回帰テストで固定。対象テスト24件、`npm run test:ci` 243 tests / 0 fail、`npm run check`、変更共有モジュールの`deno check`、`git diff --check`に成功。`admin-api`全体の`deno check`は既存173エラーから増加なし。本番原本3日だけの再生成で月が3日に縮む問題をE2E中に検知し、既存21営業日＋原本3日差し替えへ修正。修正版を本番読み取りデータへ通し、2026年1月が21営業日・2026-01-06〜01-31・総売上¥1,087,600・128名・64組のまま維持されることを確認。
 
 ### 2026-08-12 - Journal Report登録データを電子ジャーナル画面へ共有参照
 

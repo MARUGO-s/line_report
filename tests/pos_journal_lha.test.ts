@@ -165,3 +165,47 @@ Deno.test("journal parser reads completed sale with a fullwidth payment digit", 
   assertEquals(day.receipts[0].pay, "クレジット");
   assertEquals(day.receipts[0].items[0].name, "コース６品");
 });
+
+Deno.test("journal parser preserves negative cancellation item rows", () => {
+  const text = [
+    "0001-01   No.1001  2026年 6月 2日(火) 20時32分",
+    "  0000000000101   コース６品",
+    "                      @8,000x   2     \\16,000",
+    "  0000000000101   コース６品",
+    "                      @8,000x  -1     \\-8,000",
+    "合 計                         \\8,000",
+    "        計１       クレジット         \\8,000",
+    "                               1名",
+    "0001-01   No.1002  2026年 6月 2日(火) 22時19分",
+    "★★   日計精算レポート   ★★",
+    "  営業日付：                    2026年 6月 2日",
+    "純 売 上                           \\7,273",
+    "消 費 税                             \\727",
+    "総 売 上                           \\8,000",
+    " 会計組数・客数",
+    "                  1組                    1名",
+    " クレジット計",
+    "                  1回               \\8,000",
+  ].join("\r\n");
+  const day = parsePosJournalText(text, "101520260602221907580001.lzh");
+  assertEquals(day.receipts[0].items, [
+    {
+      code: "0000000000101",
+      name: "コース６品",
+      unit: 8000,
+      qty: 2,
+      amount: 16000,
+    },
+    {
+      code: "0000000000101",
+      name: "コース６品",
+      unit: 8000,
+      qty: -1,
+      amount: -8000,
+    },
+  ]);
+  assertEquals(
+    day.receipts[0].items.reduce((sum, item) => sum + item.amount, 0),
+    8000,
+  );
+});

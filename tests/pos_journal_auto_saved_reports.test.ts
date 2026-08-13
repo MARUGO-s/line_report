@@ -1,6 +1,9 @@
 import {
   buildJournalSavedReportsFromPosDays,
+  buildJournalSavedReportHtml,
   classifyPosJournalReportItem,
+  mergePosJournalDaysPreferPrimary,
+  pickBestJournalSavedReportDays,
   type PosJournalDay,
 } from "../supabase/functions/_shared/pos_journal.ts";
 
@@ -227,6 +230,204 @@ Deno.test("duplicate payment-change receipt copies keep only the latest copy", (
     daily.data.sales.reduce((sum, sale) => sum + sale.total, 0),
     64_000,
   );
+});
+
+Deno.test("partial LZH days replace matching dates without shrinking a full saved month", () => {
+  const existingReports = [
+    {
+      id: "older-wide",
+      created_at: "2026-08-01T00:00:00Z",
+      data: {
+        sales: [
+          {
+            no: "1",
+            date: "2026-01-01",
+            time: "18:00",
+            total: 10_000,
+            tax: 900,
+            customers: 2,
+            groups: 1,
+            method: "現金",
+            payments: { byMethod: { 現金: 10_000 } },
+            items: [{ code: "0000000000101", name: "コース6品", qty: 1, amount: 10_000 }],
+          },
+          {
+            no: "2",
+            date: "2026-01-02",
+            time: "18:00",
+            total: 20_000,
+            tax: 1_800,
+            customers: 3,
+            groups: 1,
+            method: "現金",
+            payments: { byMethod: { 現金: 20_000 } },
+            items: [{ code: "0000000000101", name: "コース6品", qty: 2, amount: 20_000 }],
+          },
+          {
+            no: "3",
+            date: "2026-01-03",
+            time: "18:00",
+            total: 30_000,
+            tax: 2_700,
+            customers: 4,
+            groups: 1,
+            method: "現金",
+            payments: { byMethod: { 現金: 30_000 } },
+            items: [{ code: "0000000000101", name: "コース6品", qty: 3, amount: 30_000 }],
+          },
+        ],
+      },
+    },
+    {
+      id: "newer-short",
+      created_at: "2026-08-02T00:00:00Z",
+      data: {
+        sales: [{
+          no: "x",
+          date: "2026-01-03",
+          time: "18:00",
+          total: 1_000,
+          tax: 90,
+          customers: 1,
+          groups: 1,
+          method: "現金",
+          payments: { byMethod: { 現金: 1_000 } },
+          items: [{ code: "0000000000101", name: "コース6品", qty: 1, amount: 1_000 }],
+        }],
+      },
+    },
+  ];
+  const savedDays = pickBestJournalSavedReportDays(existingReports, "2026-01");
+  const primary = [sampleDay("2026-01-03", 40_000, "new.lzh")];
+  const merged = mergePosJournalDaysPreferPrimary(primary, savedDays);
+  const [daily] = buildJournalSavedReportsFromPosDays({
+    storeKey: "bistrocavacava",
+    storeName: "Bistro CAVACAVA",
+    storeCode: "1015",
+    month: "2026-01",
+    days: merged,
+  });
+
+  assertEquals(savedDays.map((day) => day.business_date), [
+    "2026-01-01",
+    "2026-01-02",
+    "2026-01-03",
+  ]);
+  assertEquals(merged.map((day) => day.business_date), [
+    "2026-01-01",
+    "2026-01-02",
+    "2026-01-03",
+  ]);
+  assertEquals(merged[2].gross_sales, 40_000);
+  assertEquals(daily.data.total, 70_000);
+  assertEquals(daily.period, "2026-01-01 〜 2026-01-03");
+});
+
+Deno.test("unreliable raw LZH items keep the existing saved-report detail for that date", () => {
+  const fallback = [{
+    business_date: "2026-01-31",
+    source: "saved-report",
+    gross_sales: 19_100,
+    net_sales: 17_364,
+    tax: 1_736,
+    groups: 4,
+    guests: 5,
+    receipts: [{
+      no: "saved",
+      time: "22:20",
+      pay: "クレジット",
+      total: 19_100,
+      guests: 5,
+      items: [{
+        code: "0000000000101",
+        name: "保存済み純額",
+        unit: 19_100,
+        qty: 1,
+        amount: 19_100,
+      }],
+    }],
+  }] as PosJournalDay[];
+  const raw = [{
+    ...fallback[0],
+    source: "raw-lzh",
+    receipts: [{
+      no: "raw",
+      time: "22:20",
+      pay: "クレジット",
+      total: 19_100,
+      guests: 5,
+      items: [{
+        code: "0000000000101",
+        name: "取消行欠落で過大",
+        unit: 19_700,
+        qty: 1,
+        amount: 19_700,
+      }],
+    }],
+  }] as PosJournalDay[];
+  const merged = mergePosJournalDaysPreferPrimary(raw, fallback);
+  assertEquals(merged[0].source, "raw-lzh");
+  assertEquals(merged[0].gross_sales, 19_100);
+  assertEquals(merged[0].receipts[0].items[0].name, "保存済み純額");
+  assertEquals(merged[0].receipts[0].items[0].amount, 19_100);
+});
+
+Deno.test("fragmented legacy daily reports combine into the widest month baseline", () => {
+  const fragments = [
+    {
+      created_at: "2026-08-02T00:00:00Z",
+      data: {
+        sales: [{
+          no: "2",
+          date: "2026-01-02",
+          time: "18:00",
+          total: 20_000,
+          customers: 2,
+          groups: 1,
+          method: "現金",
+          payments: { byMethod: { 現金: 20_000 } },
+          items: [],
+        }],
+      },
+    },
+    {
+      created_at: "2026-08-01T00:00:00Z",
+      data: {
+        sales: [{
+          no: "1",
+          date: "2026-01-01",
+          time: "18:00",
+          total: 10_000,
+          customers: 1,
+          groups: 1,
+          method: "現金",
+          payments: { byMethod: { 現金: 10_000 } },
+          items: [],
+        }],
+      },
+    },
+  ];
+  const days = pickBestJournalSavedReportDays(fragments, "2026-01");
+  assertEquals(days.map((day) => day.business_date), [
+    "2026-01-01",
+    "2026-01-02",
+  ]);
+  assertEquals(days.reduce((sum, day) => sum + Number(day.gross_sales), 0), 30_000);
+});
+
+Deno.test("auto generated report HTML is self-contained and has rebuild markers", () => {
+  const [report] = buildJournalSavedReportsFromPosDays({
+    storeKey: "bistrocavacava",
+    storeName: "Bistro CAVACAVA",
+    storeCode: "1015",
+    month: "2026-01",
+    days: [sampleDay("2026-01-29", 20_000)],
+  });
+  const html = buildJournalSavedReportHtml(report);
+  if (!html.includes("<!doctype html>")) throw new Error("doctype missing");
+  if (!html.includes("day-section")) throw new Error("day-section missing");
+  if (!html.includes("month-table")) throw new Error("month-table missing");
+  if (!html.includes("日別集計")) throw new Error("daily table missing");
 });
 
 Deno.test("empty or mismatched month data does not create empty reports", () => {

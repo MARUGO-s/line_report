@@ -182,7 +182,8 @@ type JournalReportDataLike = Record<string, unknown> & {
 const HEADER_RE =
   /^\s*(\d{4}-\d{2})\s+No\.(\d+)\s+(\d{4})年\s*(\d+)月\s*(\d+)日\((.)\)\s*(\d+)時(\d+)分/;
 const ITEM_CODE_RE = /^\s{2}(\d{13})\s+(\S.*?)\s*$/;
-const ITEM_PRICE_RE = /@\s*([\d,]+)\s*x\s*([\d,]+)\s+\\\s*([\d,]+)/;
+const ITEM_PRICE_RE =
+  /@\s*([\d,]+)\s*x\s*(-?[\d,]+)\s+\\\s*(-?[\d,]+)/;
 export const POS_JOURNAL_REPORT_PARSER_VERSION = "2026-07-31-v19";
 export const POS_JOURNAL_REPORT_VERIFICATION_VERSION =
   "split-bill-reconcile-v3";
@@ -1521,6 +1522,134 @@ export function buildPosJournalDaysFromSavedReports(
   return [...dayMap.values()].sort((a, b) =>
     a.business_date.localeCompare(b.business_date)
   );
+}
+
+export function pickBestJournalSavedReportDays(
+  reports: Array<{ id?: unknown; data?: unknown; created_at?: unknown }>,
+  month: string,
+): PosJournalDay[] {
+  const reportList = Array.isArray(reports) ? reports : [];
+  const candidates = reportList.map((report, index) => {
+    const days = buildPosJournalDaysFromSavedReports([report], month);
+    return {
+      days,
+      dayCount: days.length,
+      gross: days.reduce((sum, day) => sum + safeNumber(day.gross_sales), 0),
+      receipts: days.reduce(
+        (sum, day) => sum + (Array.isArray(day.receipts) ? day.receipts.length : 0),
+        0,
+      ),
+      index,
+    };
+  });
+  // 月間レポートが無く、日別レポートが複数行に分かれている旧データも
+  // 営業日単位で統合して候補に含める。新しい行を同一日の正本にする。
+  const mergedDays = buildPosJournalDaysFromSavedReports(reportList, month);
+  candidates.push({
+    days: mergedDays,
+    dayCount: mergedDays.length,
+    gross: mergedDays.reduce(
+      (sum, day) => sum + safeNumber(day.gross_sales),
+      0,
+    ),
+    receipts: mergedDays.reduce(
+      (sum, day) =>
+        sum + (Array.isArray(day.receipts) ? day.receipts.length : 0),
+      0,
+    ),
+    index: reportList.length,
+  });
+  return candidates.filter((candidate) => candidate.dayCount > 0).sort((a, b) =>
+    b.dayCount - a.dayCount ||
+    b.gross - a.gross ||
+    b.receipts - a.receipts ||
+    a.index - b.index
+  )[0]?.days ?? [];
+}
+
+/** primary（LZH原本）を同一営業日の正本として fallback（保存レポート）へ重ねる。 */
+export function mergePosJournalDaysPreferPrimary(
+  primary: PosJournalDay[],
+  fallback: PosJournalDay[],
+): PosJournalDay[] {
+  const byDate = new Map<string, PosJournalDay>();
+  for (const day of Array.isArray(fallback) ? fallback : []) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day.business_date)) {
+      byDate.set(day.business_date, day);
+    }
+  }
+  for (const day of Array.isArray(primary) ? primary : []) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day.business_date)) {
+      const existing = byDate.get(day.business_date);
+      const reconciled = reconcilePosJournalReceipts(day);
+      const receiptsReliable = reconciled.length > 0 &&
+        reconciled.reduce(
+            (sum, receipt) => sum + safeNumber(receipt.total),
+            0,
+          ) === safeNumber(day.gross_sales) &&
+        reconciled.every((receipt) =>
+          (receipt.items || []).reduce(
+            (sum, item) => sum + safeNumber(item.amount),
+            0,
+          ) === safeNumber(receipt.total)
+        );
+      // 古いサーバー解析で取消行を落として商品明細だけ過大な場合、
+      // 日計・決済・天候は原本を正とし、明細だけ既存保存レポートを維持する。
+      byDate.set(
+        day.business_date,
+        existing && !receiptsReliable
+          ? { ...existing, ...day, receipts: existing.receipts }
+          : { ...day, receipts: reconciled.length ? reconciled : day.receipts },
+      );
+    }
+  }
+  return [...byDate.values()].sort((a, b) =>
+    a.business_date.localeCompare(b.business_date)
+  );
+}
+
+export function buildJournalSavedReportHtml(
+  report: { title: string; period: string; data: JournalSavedReportData },
+): string {
+  const escape = (value: unknown) =>
+    String(value ?? "").replace(/[&<>"']/g, (char) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[char] ?? char
+    );
+  const yen = (value: unknown) =>
+    `¥${Math.round(safeNumber(value)).toLocaleString("ja-JP")}`;
+  const dayRows = report.data.dailyBreakdown.map((day) =>
+    `<tr><td>${escape(day.date)}</td><td>${yen(day.total)}</td><td>${
+      escape(day.groups)
+    }組</td><td>${escape(day.customers)}名</td></tr>`
+  ).join("");
+  const productRows = report.data.topProducts.slice(0, 30).map((product) =>
+    `<tr><td>${escape(product.name)}</td><td>${escape(product.category)}</td><td>${
+      escape(product.qty)
+    }</td><td>${yen(product.amt)}</td></tr>`
+  ).join("");
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${
+    escape(report.title)
+  }</title><style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;color:#172033;background:#f5f7fa;margin:0;padding:28px}.report{max-width:1000px;margin:auto;background:#fff;border:1px solid #dce3eb;border-radius:14px;padding:28px}.r-title{margin:0 0 8px;font-size:26px}.r-meta{color:#637083}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:20px 0}.kpi{border:1px solid #dce3eb;border-radius:10px;padding:12px}.k-l{font-size:12px;color:#637083}.k-v{font-size:20px;font-weight:700;margin-top:4px}.day-section{margin-top:24px}.month-table{width:100%;border-collapse:collapse;margin:10px 0 22px}.month-table th,.month-table td{border-bottom:1px solid #e4e9ef;padding:8px;text-align:right}.month-table th:first-child,.month-table td:first-child{text-align:left}.rv-note{color:#637083;font-size:12px}
+</style></head><body><div class="report"><h1 class="r-title">${
+    escape(report.title)
+  }</h1><p class="r-meta">対象期間 ${
+    escape(report.period)
+  } / ${report.data.salesCount}件 / 総売上 ${yen(report.data.total)}</p><div class="kpis"><div class="kpi"><div class="k-l">総売上</div><div class="k-v">${
+    yen(report.data.total)
+  }</div></div><div class="kpi"><div class="k-l">フード</div><div class="k-v">${
+    yen(report.data.foodTotal)
+  }</div></div><div class="kpi"><div class="k-l">飲料</div><div class="k-v">${
+    yen(report.data.drinkTotal)
+  }</div></div><div class="kpi"><div class="k-l">客数</div><div class="k-v">${
+    escape(report.data.totalCustomers)
+  }名</div></div></div><section class="day-section"><h2>日別集計</h2><table class="month-table"><thead><tr><th>日付</th><th>売上</th><th>組数</th><th>客数</th></tr></thead><tbody>${dayRows}</tbody></table><h2>商品別集計</h2><table class="month-table"><thead><tr><th>商品</th><th>カテゴリ</th><th>点数</th><th>売上</th></tr></thead><tbody>${productRows}</tbody></table><p class="rv-note">電子ジャーナル画面へのLZH登録から自動作成された保存済みレポートです。数値・伝票・商品明細は保存データにも保持されています。</p></section></div></body></html>`;
 }
 
 export function buildPosJournalSummary(params: {
