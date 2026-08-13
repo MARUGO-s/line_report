@@ -287,6 +287,66 @@ Deno.test("identical legitimate receipts remain when day totals already match", 
   );
 });
 
+Deno.test("matching day total preserves split receipts when receipt count differs from groups", () => {
+  const day = sampleDay("2026-01-07", 1_400);
+  const splitItems = [{
+    code: "0000000000031",
+    name: "SPパン",
+    unit: 350,
+    qty: 2,
+    amount: 700,
+  }];
+  day.receipts = [
+    {
+      no: "split-1",
+      time: "21:54",
+      table_no: "1",
+      pay: "クレジット",
+      total: 700,
+      guests: 1,
+      items: splitItems,
+    },
+    {
+      no: "split-2",
+      time: "21:54",
+      table_no: "1",
+      pay: "クレジット",
+      total: 700,
+      guests: 1,
+      items: splitItems,
+    },
+  ];
+  day.groups = 1;
+  day.guests = 2;
+  day.gross_sales = 1_400;
+  day.net_sales = 1_273;
+  day.tax = 127;
+
+  const [daily] = buildJournalSavedReportsFromPosDays({
+    storeKey: "bistrocavacava",
+    storeName: "Bistro CAVACAVA",
+    storeCode: "1015",
+    month: "2026-01",
+    days: [day],
+  });
+
+  assertEquals(daily.data.sales.map((sale) => sale.no), [
+    "split-1",
+    "split-2",
+  ]);
+  assertEquals(daily.data.salesCount, 2);
+  assertEquals(
+    daily.data.sales.reduce((sum, sale) => sum + sale.groups, 0),
+    1,
+  );
+  assertEquals(daily.data.totalGroups, 1);
+  assertEquals(daily.data.totalCustomers, 2);
+  assertEquals(
+    daily.data.sales.reduce((sum, sale) => sum + sale.total, 0),
+    1_400,
+  );
+});
+
 Deno.test("partial LZH days replace matching dates without shrinking a full saved month", () => {
   const existingReports = [
     {
@@ -376,6 +436,56 @@ Deno.test("partial LZH days replace matching dates without shrinking a full save
   assertEquals(merged[2].gross_sales, 40_000);
   assertEquals(daily.data.total, 70_000);
   assertEquals(daily.period, "2026-01-01 〜 2026-01-03");
+});
+
+Deno.test("a newer high-value fragment does not override an equally wide baseline", () => {
+  const reports = [
+    {
+      id: "older-wide",
+      created_at: "2026-08-01T00:00:00Z",
+      data: {
+        sales: [
+          {
+            no: "1",
+            date: "2026-01-01",
+            total: 10_000,
+            customers: 1,
+            groups: 1,
+            items: [],
+          },
+          {
+            no: "2",
+            date: "2026-01-02",
+            total: 20_000,
+            customers: 1,
+            groups: 1,
+            items: [],
+          },
+        ],
+      },
+    },
+    {
+      id: "newer-fragment",
+      created_at: "2026-08-02T00:00:00Z",
+      data: {
+        sales: [{
+          no: "bad",
+          date: "2026-01-02",
+          total: 999_999,
+          customers: 1,
+          groups: 1,
+          items: [],
+        }],
+      },
+    },
+  ];
+
+  const days = pickBestJournalSavedReportDays(reports, "2026-01");
+  assertEquals(days.map((day) => day.business_date), [
+    "2026-01-01",
+    "2026-01-02",
+  ]);
+  assertEquals(days.map((day) => day.gross_sales), [10_000, 20_000]);
 });
 
 Deno.test("unreliable raw LZH items keep the existing saved-report detail for that date", () => {

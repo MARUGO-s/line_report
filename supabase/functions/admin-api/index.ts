@@ -10550,16 +10550,42 @@ function savedReportSourceMonths(value: unknown): string[] {
   )
 }
 
+function legacySavedReportIsSingleMonth(
+  row: Record<string, unknown>,
+  month: string,
+): boolean {
+  const period = toSafeString(row.period)
+  const periodDates = period.match(/\d{4}-\d{2}-\d{2}/g) ?? []
+  if (periodDates.length) {
+    return periodDates.every((date) => date.slice(0, 7) === month)
+  }
+  const title = toSafeString(row.title).normalize("NFKC")
+  const text = `${title} ${period}`.normalize("NFKC")
+  if (/合算|〜|～|から|まで/.test(text)) return false
+  const [year, monthText] = month.split("-")
+  const monthNumber = Number(monthText)
+  return text.includes(month) ||
+    text.includes(`${year}/${monthNumber}`) ||
+    new RegExp(`${year}\\s*年\\s*0?${monthNumber}\\s*月`).test(text)
+}
+
 function isCanonicalSavedReportForMonth(
   row: Record<string, unknown>,
   month: string,
   kind: "daily" | "monthly",
 ): boolean {
   const title = toSafeString(row.title)
+  if (/合算/.test(title)) return false
   const sourceMonths = savedReportSourceMonths(row.sourceMonths)
-  if (sourceMonths.length !== 1 || sourceMonths[0] !== month) return false
-  if (kind === "daily") return /日別/.test(title)
-  return isMonthlyReportTitleForList(title)
+  const kindMatches = kind === "daily"
+    ? /日別/.test(title)
+    : isMonthlyReportTitleForList(title)
+  if (!kindMatches) return false
+  if (sourceMonths.length) {
+    return sourceMonths.length === 1 && sourceMonths[0] === month
+  }
+  return savedReportCandidateMatchesMonth(row, month) &&
+    legacySavedReportIsSingleMonth(row, month)
 }
 
 async function fetchSavedReportCandidatesForAutoBuild(
@@ -10567,23 +10593,51 @@ async function fetchSavedReportCandidatesForAutoBuild(
   storeKey: string,
   month: string,
 ): Promise<Array<Record<string, unknown>>> {
-  const { data, error } = await supabase
+  // まず軽量一覧で絞る。sourceMonthsを持たない旧レポートも
+  // タイトル／periodから拾い、巨大dataは該当ID分だけ取得する。
+  const { data: summaryData, error: summaryError } = await supabase
     .from("saved_reports")
     .select(
-      "id, title, created_at, updated_at, data, sourceMonths:data->sourceMonths",
+      "id, title, period, created_at, updated_at, sourceMonths:data->sourceMonths",
     )
     .eq("store_partition_key", storeKey)
     .is("deleted_at", null)
-    .contains("data", { sourceMonths: [month] })
     .order("created_at", { ascending: false })
     .limit(5000)
-  if (error) {
-    throw new Error(`既存レポート確認に失敗しました: ${error.message}`)
+  if (summaryError) {
+    throw new Error(`既存レポート確認に失敗しました: ${summaryError.message}`)
+  }
+  const summaries: Record<string, unknown>[] = []
+  for (const row of Array.isArray(summaryData) ? summaryData : []) {
+    if (!isRecord(row)) continue
+    if (savedReportCandidateMatchesMonth(row, month)) summaries.push(row)
+  }
+  const ids = summaries.map((row) => toSafeString(row.id)).filter(Boolean)
+  if (!ids.length) return []
+
+  const detailsById = new Map<string, Record<string, unknown>>()
+  for (let offset = 0; offset < ids.length; offset += 50) {
+    const idChunk = ids.slice(offset, offset + 50)
+    const { data: detailData, error: detailError } = await supabase
+      .from("saved_reports")
+      .select("id, data")
+      .eq("store_partition_key", storeKey)
+      .is("deleted_at", null)
+      .in("id", idChunk)
+    if (detailError) {
+      throw new Error(`既存レポート詳細の取得に失敗しました: ${detailError.message}`)
+    }
+    for (const row of Array.isArray(detailData) ? detailData : []) {
+      if (!isRecord(row)) continue
+      const id = toSafeString(row.id)
+      if (id) detailsById.set(id, row)
+    }
   }
   const rows: Record<string, unknown>[] = []
-  for (const row of Array.isArray(data) ? data : []) {
-    if (!isRecord(row)) continue
-    if (savedReportCandidateMatchesMonth(row, month)) rows.push(row)
+  for (const summary of summaries) {
+    const id = toSafeString(summary.id)
+    const detail = detailsById.get(id)
+    if (detail) rows.push({ ...summary, data: detail.data })
   }
   return rows
 }

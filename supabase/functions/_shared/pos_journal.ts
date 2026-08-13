@@ -673,6 +673,7 @@ function posReceiptSignature(receipt: PosJournalReceipt): string {
   return [
     receipt.total == null ? 0 : safeNumber(receipt.total),
     receipt.guests == null ? 0 : safeNumber(receipt.guests),
+    safeText(receipt.table_no, 50),
     items.join("|"),
   ].join(";");
 }
@@ -699,14 +700,77 @@ function reconcilePosJournalReceipts(
     (total, receipt) => total + safeNumber(receipt.total),
     0,
   );
-  // 日計の組数・総売上と元明細が既に一致する日は、同時刻・同額・同商品でも
-  // 正常な別会計として扱う。支払変更控えの除外は不一致がある日にだけ行う。
-  if (
-    targetGroups > 0 &&
-    sorted.length === targetGroups &&
-    originalTotal === targetTotal
-  ) {
+  // 日計総売上と元明細合計が既に一致する日は、同時刻・同額・同商品でも
+  // 正常な別会計として扱う。割勘では明細行数と組数が異なることもあるため、
+  // 支払変更控えの除外は総売上が不一致のときだけ行う。
+  if (originalTotal === targetTotal) {
     return sorted;
+  }
+  // 不一致がある小規模日は、元明細を先に消さず総売上へ一致する部分集合を探す。
+  // 組数との差が小さいもの、明細を多く保持するもの、同内容なら新しい控えを優先。
+  if (sorted.length <= 12) {
+    let best: {
+      receipts: PosJournalReceipt[];
+      groupDistance: number;
+      duplicatePairs: number;
+      count: number;
+      recency: number;
+    } | null = null;
+    const combinations = 1 << sorted.length;
+    for (let mask = 1; mask < combinations; mask += 1) {
+      const picked: PosJournalReceipt[] = [];
+      let pickedTotal = 0;
+      let recency = 0;
+      for (let index = 0; index < sorted.length; index += 1) {
+        if (!(mask & (1 << index))) continue;
+        picked.push(sorted[index]);
+        pickedTotal += safeNumber(sorted[index].total);
+        recency += index;
+      }
+      if (pickedTotal !== targetTotal) continue;
+      let duplicatePairs = 0;
+      for (let left = 0; left < picked.length; left += 1) {
+        for (let right = left + 1; right < picked.length; right += 1) {
+          if (posReceiptSignature(picked[left]) !== posReceiptSignature(picked[right])) {
+            continue;
+          }
+          const leftMinute = receiptMinuteOfDay(picked[left]);
+          const rightMinute = receiptMinuteOfDay(picked[right]);
+          if (
+            leftMinute != null &&
+            rightMinute != null &&
+            Math.abs(rightMinute - leftMinute) <= 15
+          ) {
+            duplicatePairs += 1;
+          }
+        }
+      }
+      const candidate = {
+        receipts: picked,
+        groupDistance: targetGroups > 0
+          ? Math.abs(picked.length - targetGroups)
+          : 0,
+        duplicatePairs,
+        count: picked.length,
+        recency,
+      };
+      if (
+        !best ||
+        candidate.groupDistance < best.groupDistance ||
+        (candidate.groupDistance === best.groupDistance &&
+          candidate.duplicatePairs < best.duplicatePairs) ||
+        (candidate.groupDistance === best.groupDistance &&
+          candidate.duplicatePairs === best.duplicatePairs &&
+          candidate.count > best.count) ||
+        (candidate.groupDistance === best.groupDistance &&
+          candidate.duplicatePairs === best.duplicatePairs &&
+          candidate.count === best.count &&
+          candidate.recency > best.recency)
+      ) {
+        best = candidate;
+      }
+    }
+    if (best) return best.receipts;
   }
   const deduped = sorted.filter((receipt, index, all) => {
       const sig = posReceiptSignature(receipt);
@@ -733,32 +797,6 @@ function reconcilePosJournalReceipts(
     (!targetGroups || deduped.length === targetGroups)
   ) {
     return deduped;
-  }
-  // 同一内容以外の控え混在では組数・総売上の両方に一致する組合せを探す。
-  // 1日上限200会計のうち差分が小さい運用を前提に、12件以下だけ総当たりする。
-  if (deduped.length <= 12 && targetGroups > 0) {
-    let best: PosJournalReceipt[] | null = null;
-    const walk = (
-      index: number,
-      picked: PosJournalReceipt[],
-      pickedTotal: number,
-    ) => {
-      if (best) return;
-      if (picked.length === targetGroups) {
-        if (pickedTotal === targetTotal) best = [...picked];
-        return;
-      }
-      if (index >= deduped.length) return;
-      if (picked.length + (deduped.length - index) < targetGroups) return;
-      walk(
-        index + 1,
-        [...picked, deduped[index]],
-        pickedTotal + safeNumber(deduped[index].total),
-      );
-      walk(index + 1, picked, pickedTotal);
-    };
-    walk(0, [], 0);
-    if (best) return best;
   }
   return deduped;
 }
@@ -1554,23 +1592,34 @@ export function pickBestJournalSavedReportDays(
       index,
     };
   });
+  const bestIndividual = candidates
+    .filter((candidate) => candidate.dayCount > 0)
+    .sort((a, b) =>
+      b.dayCount - a.dayCount ||
+      b.gross - a.gross ||
+      b.receipts - a.receipts ||
+      a.index - b.index
+    )[0];
   // 月間レポートが無く、日別レポートが複数行に分かれている旧データも
-  // 営業日単位で統合して候補に含める。新しい行を同一日の正本にする。
+  // 営業日単位で統合する。ただし既存の最広レポートと同じ日数なら、
+  // 新しい部分断片で完全月の同一日を上書きしない。
   const mergedDays = buildPosJournalDaysFromSavedReports(reportList, month);
-  candidates.push({
-    days: mergedDays,
-    dayCount: mergedDays.length,
-    gross: mergedDays.reduce(
-      (sum, day) => sum + safeNumber(day.gross_sales),
-      0,
-    ),
-    receipts: mergedDays.reduce(
-      (sum, day) =>
-        sum + (Array.isArray(day.receipts) ? day.receipts.length : 0),
-      0,
-    ),
-    index: reportList.length,
-  });
+  if (mergedDays.length > (bestIndividual?.dayCount ?? 0)) {
+    candidates.push({
+      days: mergedDays,
+      dayCount: mergedDays.length,
+      gross: mergedDays.reduce(
+        (sum, day) => sum + safeNumber(day.gross_sales),
+        0,
+      ),
+      receipts: mergedDays.reduce(
+        (sum, day) =>
+          sum + (Array.isArray(day.receipts) ? day.receipts.length : 0),
+        0,
+      ),
+      index: reportList.length,
+    });
+  }
   return candidates.filter((candidate) => candidate.dayCount > 0).sort((a, b) =>
     b.dayCount - a.dayCount ||
     b.gross - a.gross ||
