@@ -10,6 +10,15 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-13 - ヤマト宅急便コレクト横長領収証の小口解析ブロックを追加
+
+- Request: LINE小口登録で、従来のヤマト送り状とは異なる横長の宅急便コレクト領収証を解析し、伝票内の発送元・品名と右上の金額を読み取れるようにする。
+- Format: 左上に「領収証／宅急便コレクト」、左端に縦書きの「お届け先／発送元／品名」、右上に枠付き「代金引換額（税込）」がある横長形式。従来の「左下ご依頼主・品名欄なし」形式とは別ブロックとして扱う。
+- Extraction: `store_name`は「発送元」欄の会社名、`line_items[0].name`は「品名」欄の具体的な商品名、`gross_sales`と明細価格は右上の「代金引換額（税込）」を正本にする。宛先の自店名、下部のヤマト運輸株式会社、併写のレジ出金伝票は店名・品名に使用しない。
+- Example verified from the provided image: 仕入先=`木次乳業有限会社`、品名=`木次パスチャライズ牛乳 1000ml`、税込金額=`¥5,670`、飲食料品のため8%。下流の小口変換は出金¥5,670・内税¥420・税抜¥5,250・食材として整合する。
+- Compatibility: 横長形式に一致した場合は旧ヤマトブロックの「品名＝発送元」を適用しない。従来の左下「ご依頼主」型は既存ブロックをそのまま利用する。
+- Verification: `receipt_prompt.ts`の`deno check`、専用プロンプト配線テスト、下流小口変換テスト、`npm run test:receipt` 31件、`npm run check`、`npm run test:ci` 248 tests / 0 fail、`git diff --check`に成功。合成プロンプトは21,101 / 22,000字で末尾ブロックまで保持。
+
 ### 2026-08-13 - 電子ジャーナル画面のLZH登録から保存済み日別・月間レポートを自動生成
 
 - Request: LINE Reportの電子ジャーナル画面へLZHをドロップした場合も、Journal Reportの「保存済みレポート」に日別・月間を自動作成する。

@@ -29,6 +29,41 @@ test("expense prompt keeps the SEIYU supplier rule within the configured limit",
   assert.ok(EXPENSE_RECEIPT_PROMPT_ADDITION.length <= STORE_RECEIPT_PROMPT_MAX_CHARS);
 });
 
+test("expense prompt reads the horizontal Yamato Collect sender item and top-right amount", () => {
+  assert.match(
+    EXPENSE_RECEIPT_PROMPT_ADDITION,
+    /横長領収証・発送元欄＋品名欄＋右上金額/,
+  );
+  assert.match(
+    EXPENSE_RECEIPT_PROMPT_ADDITION,
+    /後続の一般ヤマトブロックの「品名＝発送元」規則は適用しない/,
+  );
+  assert.match(
+    EXPENSE_RECEIPT_PROMPT_ADDITION,
+    /store_name="木次乳業有限会社"/,
+  );
+  assert.match(
+    EXPENSE_RECEIPT_PROMPT_ADDITION,
+    /木次パスチャライズ牛乳 1000ml/,
+  );
+  assert.match(
+    EXPENSE_RECEIPT_PROMPT_ADDITION,
+    /右上の「代金引換額（税込）」枠内の金額/,
+  );
+  assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /5,670円→"¥5,670"/);
+  assert.match(
+    EXPENSE_RECEIPT_PROMPT_ADDITION,
+    /下部のヤマト運輸株式会社.*store_name にしない/,
+  );
+  assert.match(
+    EXPENSE_RECEIPT_PROMPT_ADDITION,
+    /横長形式は直前の専用ブロックだけを適用し、本ブロックは適用しない/,
+  );
+  assert.ok(
+    EXPENSE_RECEIPT_PROMPT_ADDITION.length <= STORE_RECEIPT_PROMPT_MAX_CHARS,
+  );
+});
+
 test("classifies provider failures that should use a fallback", () => {
   assert.equal(
     isTransientLineImageVisionFailure({
