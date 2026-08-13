@@ -1346,7 +1346,7 @@
     function setJournalTab(name, focus) {
       var tabs=Array.from(document.querySelectorAll('[data-pj-tab]'));
       var valid=tabs.some(function(tab){return tab.dataset.pjTab===name;});
-      if(!valid)name='upload';
+      if(!valid)name='summary';
       tabs.forEach(function(tab){
         var selected=tab.dataset.pjTab===name;
         tab.setAttribute('aria-selected',selected?'true':'false');
@@ -1355,7 +1355,6 @@
         if(panel)panel.hidden=!selected;
         if(selected&&focus)tab.focus();
       });
-      try { localStorage.setItem('pos_journal_active_tab',name); } catch (_) {}
     }
     function setupJournalTabs() {
       var tabs=Array.from(document.querySelectorAll('[data-pj-tab]'));
@@ -1372,9 +1371,7 @@
           setJournalTab(tabs[next].dataset.pjTab,true);
         });
       });
-      var saved='summary';
-      try { saved=localStorage.getItem('pos_journal_active_tab')||saved; } catch (_) {}
-      setJournalTab(saved,false);
+      setJournalTab('summary',false);
     }
     async function uploadFiles(fileList) {
       var all=Array.from(fileList||[]);
