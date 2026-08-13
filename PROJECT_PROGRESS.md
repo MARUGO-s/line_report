@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-13 - AI学習・進化ページを5タブ構成へ整理
+
+- Request: 提供された高精細デザイン設計に合わせて、AI学習 進化トラッキング画面の長い縦積みレイアウトを整理する。
+- Implementation: `概要`／`学習曲線`／`全記録`／`判定基準`／`自己進化`の5タブへ既存の実データブロックを再配置し、初期表示を概要に固定。全記録は直近12件を既定表示として全件切替を追加し、判定基準は説明との2カラム、自己進化は準備状況・RAG・品質ループ・モデル選択をまとめた。既存の認証、API取得、合格基準保存、評価セット作成、候補下書き、書き出し、回答評価は維持する。
+
 ### 2026-08-13 - AI学習をプロンプト候補比較の準備段階へ移行
 
 - Request: 自己進化の次段階へ移行する。
