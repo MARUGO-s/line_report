@@ -364,6 +364,10 @@
     .pj-file-card h2 .c-note.warn-count { color: var(--warn); }
     .rk-bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; min-width: 60px; }
     .rk-bar > span { display:block; height:100%; background: var(--accent); border-radius:999px; }
+    .pj-rank-tabs { display:flex; gap:7px; flex-wrap:wrap; margin:-2px 0 13px; }
+    .pj-rank-tab { appearance:none; border:1px solid var(--border); border-radius:999px; background:var(--surface); color:var(--text-2); cursor:pointer; font:inherit; font-size:12px; font-weight:700; padding:6px 12px; }
+    .pj-rank-tab:hover { border-color:var(--accent); color:var(--accent); }
+    .pj-rank-tab[aria-selected="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
     .receipts-cell { background: var(--surface-2); }
     .receipts-box { padding: 8px 6px 12px; }
     .rc { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--surface); }
@@ -672,8 +676,13 @@
 
             <div class="pj-tab-panel" id="pjPanelRanking" role="tabpanel" aria-labelledby="pjTabRanking" tabindex="0" hidden>
             <div class="pj-card">
-              <h2>商品別ランキング <span class="c-note">会計明細ベース・金額順</span></h2>
-              <div class="table-scroll">
+              <h2>商品別ランキング <span class="c-note" id="rankNote">全商品・会計明細ベース・金額順</span></h2>
+              <div class="pj-rank-tabs" role="tablist" aria-label="商品ランキングの表示">
+                <button class="pj-rank-tab" type="button" role="tab" aria-selected="true" aria-controls="rankPanel" data-rank-view="all">合計</button>
+                <button class="pj-rank-tab" type="button" role="tab" aria-selected="false" aria-controls="rankPanel" data-rank-view="food" tabindex="-1">フード</button>
+                <button class="pj-rank-tab" type="button" role="tab" aria-selected="false" aria-controls="rankPanel" data-rank-view="drink" tabindex="-1">ドリンク</button>
+              </div>
+              <div class="table-scroll" id="rankPanel" role="tabpanel" aria-label="商品ランキング">
               <table class="pj-table" id="rankTable">
                 <thead><tr><th style="width:36px">#</th><th class="l">商品名</th><th>数量</th><th>売上金額</th><th class="l" style="width:220px">構成</th></tr></thead>
                 <tbody id="rankBody"></tbody>
@@ -743,6 +752,8 @@
     var currentAnalysis = null;
     var analysisHistory = [];
     var analysisDeleteTarget = null;
+    var currentRanking = [];
+    var activeRankingView = 'all';
     var AI_SUGGESTIONS = ['一番売れた日は？','客単価を上げるには？','雨の日の傾向は？','売れ筋商品を教えて','決済方法の比率は？'];
 
     var el = function (id) { return document.getElementById(id); };
@@ -1209,9 +1220,52 @@
       el('payBox').innerHTML=pays.map(function(p){var pct=Math.round(p.v/paySum*100);return '<div class="pay-row"><div class="pay-name">'+p.n+'</div><div class="pay-bar"><span style="width:'+pct+'%;background:'+p.c+'"></span></div><div class="pay-val">'+yen(p.v)+' <small>'+pct+'%</small></div></div>';}).join('')||'<div class="pj-empty">決済データなし</div>';
       el('dayBody').innerHTML=days.map(function(d,idx){var dt=d.business_date||'',wd=dt?WD[new Date(dt+'T00:00:00').getDay()]:'',cash=(d.pay_cash||{}).amount||0,cr=(d.pay_credit||{}).amount||0,rc=(d.receipts||[]).length,wx=d.weather?'<span class="wx">'+weatherIcon(d.weather)+esc(d.weather)+'</span>':'—';return '<tr class="day-row '+((d.gross_sales||0)===0?'closed':'')+'" data-idx="'+idx+'"><td class="l">'+esc(dt)+(rc?' <span class="chip">'+rc+'会計</span>':'')+'</td><td class="l">'+wd+'</td><td class="l">'+wx+'</td><td>'+(d.temp_c!=null?d.temp_c+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td>'+(cash?yen(cash):'—')+'</td><td>'+(cr?yen(cr):'—')+'</td></tr><tr class="receipts-cell" data-detail="'+idx+'" hidden><td colspan="12" class="l"><div class="receipts-box">'+receiptsHTML(d)+'</div></td></tr>';}).join('');
       el('dayBody').querySelectorAll('tr.day-row').forEach(function(tr){tr.addEventListener('click',function(){var det=el('dayBody').querySelector('tr[data-detail="'+tr.getAttribute('data-idx')+'"]');if(det)det.hidden=!det.hidden;});});
-      var rank=(data.item_ranking||[]).slice(0,40),maxAmt=rank.length?rank[0].amount:1;
-      el('rankBody').innerHTML=rank.map(function(r,i){return '<tr><td>'+(i+1)+'</td><td class="l">'+esc(r.name)+'</td><td>'+num(r.qty)+'</td><td>'+yen(r.amount)+'</td><td class="l"><div class="rk-bar"><span style="width:'+Math.round(r.amount/maxAmt*100)+'%"></span></div></td></tr>';}).join('');
+      currentRanking=Array.isArray(data.item_ranking)?data.item_ranking:[];
+      renderProductRanking();
       drawTrend(openDays);
+    }
+    function productRankingCategory(item) {
+      var category=String(item&&item.category||'').normalize('NFKC');
+      if(category==='フード')return 'food';
+      if(category==='飲料'||category==='ドリンク')return 'drink';
+      var digits=String(item&&item.code||'').normalize('NFKC').replace(/\D/g,'');
+      var code=digits?Number(digits):NaN;
+      if(code===1||(code>=100&&code<=199))return 'food';
+      if((code>=23&&code<=29)||(code>=2100&&code<=2199)||(code>=8100&&code<=8199)||(code>=9000&&code<=9399))return 'drink';
+      return 'other';
+    }
+    function renderProductRanking() {
+      var labels={all:'全商品',food:'フード',drink:'ドリンク'};
+      var rank=currentRanking.filter(function(item){return activeRankingView==='all'||productRankingCategory(item)===activeRankingView;}).slice(0,40);
+      var maxAmt=rank.length?Number(rank[0].amount)||1:1;
+      el('rankNote').textContent=labels[activeRankingView]+'・会計明細ベース・金額順';
+      el('rankBody').innerHTML=rank.length?rank.map(function(r,i){return '<tr><td>'+(i+1)+'</td><td class="l">'+esc(r.name)+'</td><td>'+num(r.qty)+'</td><td>'+yen(r.amount)+'</td><td class="l"><div class="rk-bar"><span style="width:'+Math.round((Number(r.amount)||0)/maxAmt*100)+'%"></span></div></td></tr>';}).join(''):'<tr><td colspan="5" class="pj-empty">'+labels[activeRankingView]+'の商品はありません。</td></tr>';
+    }
+    function setupProductRankingTabs() {
+      var tabs=Array.from(document.querySelectorAll('[data-rank-view]'));
+      function select(view,focus) {
+        activeRankingView=view;
+        tabs.forEach(function(tab){
+          var selected=tab.dataset.rankView===view;
+          tab.setAttribute('aria-selected',selected?'true':'false');
+          tab.tabIndex=selected?0:-1;
+          if(selected&&focus)tab.focus();
+        });
+        renderProductRanking();
+      }
+      tabs.forEach(function(tab,index){
+        tab.addEventListener('click',function(){select(tab.dataset.rankView,false);});
+        tab.addEventListener('keydown',function(event){
+          if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;
+          event.preventDefault();
+          var next=index;
+          if(event.key==='ArrowRight')next=(index+1)%tabs.length;
+          else if(event.key==='ArrowLeft')next=(index-1+tabs.length)%tabs.length;
+          else if(event.key==='Home')next=0;
+          else next=tabs.length-1;
+          select(tabs[next].dataset.rankView,true);
+        });
+      });
     }
     function receiptsHTML(d) {
       var rs=d.receipts||[]; if(!rs.length)return '<div style="color:var(--text-3);padding:6px 4px">この日の会計明細はありません。</div>';
@@ -1394,7 +1448,7 @@
     async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
 
     var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
-    document.addEventListener('DOMContentLoaded',async function(){populateControls();setupJournalTabs();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
+    document.addEventListener('DOMContentLoaded',async function(){populateControls();setupJournalTabs();setupProductRankingTabs();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
   })();
   </script>
 
