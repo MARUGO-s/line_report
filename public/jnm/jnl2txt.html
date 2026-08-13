@@ -251,6 +251,7 @@
     overflow:hidden;text-overflow:ellipsis}
   .hd-actions{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap;row-gap:var(--space-2)}
   .hd-actions .btn-icon{flex-shrink:0}
+  .hd-actions a.btn{text-decoration:none;white-space:nowrap}
   .hd-actions .tag{white-space:nowrap}
 
   /* Tabs — Classicalの .seg / .seg-opt 相当（div+clickの既存方式は維持、見た目のみ segmented control 化） */
@@ -1730,6 +1731,7 @@
       <select id="storeSelect" aria-label="対象店舗"></select>
       <span id="storeScopeBadge"></span>
     </div>
+    <a class="btn btn-ghost" href="../pos-journal.html" title="LINE Reportの電子ジャーナル画面を開く">LINE Reportへ</a>
     <span id="authState" class="tag tag-outline">未接続</span>
     <button type="button" onclick="toggleAppTheme()" class="btn btn-ghost btn-icon" title="表示設定（ダーク/ライト切替）" aria-label="表示設定">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
