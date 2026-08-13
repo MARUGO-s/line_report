@@ -555,6 +555,7 @@
           <div class="pj-tabs" role="tablist" aria-label="電子ジャーナルの機能">
             <button class="pj-tab" id="pjTabUpload" type="button" role="tab" aria-selected="true" aria-controls="pjPanelUpload" data-pj-tab="upload">ジャーナルアップロード</button>
             <button class="pj-tab" id="pjTabFiles" type="button" role="tab" aria-selected="false" aria-controls="pjPanelFiles" data-pj-tab="files" tabindex="-1">保管ファイル</button>
+            <button class="pj-tab" id="pjTabSummary" type="button" role="tab" aria-selected="false" aria-controls="pjPanelSummary" data-pj-tab="summary" tabindex="-1">売上サマリー</button>
             <button class="pj-tab" id="pjTabAnalysis" type="button" role="tab" aria-selected="false" aria-controls="pjPanelAnalysis" data-pj-tab="analysis" tabindex="-1">AI売上分析</button>
             <button class="pj-tab" id="pjTabRanking" type="button" role="tab" aria-selected="false" aria-controls="pjPanelRanking" data-pj-tab="ranking" tabindex="-1">商品ランキング</button>
           </div>
@@ -598,43 +599,8 @@
           </div>
 
           <div id="mainWrap" hidden>
-            <div class="pj-tab-panel" id="pjPanelAnalysis" role="tabpanel" aria-labelledby="pjTabAnalysis" tabindex="0" hidden>
+            <div class="pj-tab-panel" id="pjPanelSummary" role="tabpanel" aria-labelledby="pjTabSummary" tabindex="0" hidden>
             <div class="pj-kpis" id="kpis"></div>
-
-            <section class="pj-card pj-ai-card">
-              <div class="pj-ai-head">
-                <div>
-                  <div class="pj-ai-title">🤖 AI売上分析 <span class="chip" id="aiBadge">未実行</span></div>
-                  <div class="pj-ai-sub">対象月の日別売上・客数・客単価・曜日・天候・決済方法・商品構成を根拠に、強み・変動要因・注目日・改善案を分析します。AIが利用できない場合も、画面の基本分析へ自動で切り替わります。</div>
-                </div>
-                <div class="pj-ai-actions">
-                  <span class="pj-ai-status" id="aiStatus"></span>
-                  <button class="btn" id="aiPdfBtn" type="button" disabled>PDFで保存</button>
-                  <button class="btn btn-primary" id="aiAnalyzeBtn" type="button">AIで月次分析</button>
-                </div>
-              </div>
-              <div class="pj-ai-empty" id="aiEmpty">「AIで月次分析」を押すと、この月の分析を表示します。</div>
-              <div class="pj-ai-output" id="aiOutput" hidden></div>
-              <div class="pj-ai-warning" id="aiWarning"></div>
-              <div class="pj-qa">
-                <div class="pj-qa-title">データに質問</div>
-                <div class="pj-qa-suggest" id="qaSuggest"></div>
-                <div class="pj-qa-form">
-                  <input class="input" id="qaInput" type="text" maxlength="500" placeholder="例: 一番売れた日は？ 客単価を上げるには？ 雨の日の傾向は？" />
-                  <button class="btn btn-primary" id="qaAskBtn" type="button">質問する</button>
-                  <button class="btn qa-clear" id="qaClearBtn" type="button">会話をクリア</button>
-                </div>
-                <div class="pj-qa-thread" id="qaThread"></div>
-              </div>
-              <div class="pj-ai-history">
-                <div class="pj-ai-history-head">
-                  <div class="pj-ai-history-title">AI分析履歴</div>
-                  <button class="btn sm" id="aiHistoryReloadBtn" type="button">履歴を再読込</button>
-                </div>
-                <div class="pj-ai-history-list" id="aiHistoryList"></div>
-                <div class="pj-ai-history-empty" id="aiHistoryEmpty">保存された分析はありません。</div>
-              </div>
-            </section>
 
             <div class="pj-grid2">
               <div class="pj-card">
@@ -663,6 +629,43 @@
               </table>
               </div>
             </div>
+            </div>
+
+            <div class="pj-tab-panel" id="pjPanelAnalysis" role="tabpanel" aria-labelledby="pjTabAnalysis" tabindex="0" hidden>
+              <section class="pj-card pj-ai-card">
+                <div class="pj-ai-head">
+                  <div>
+                    <div class="pj-ai-title">🤖 AI売上分析 <span class="chip" id="aiBadge">未実行</span></div>
+                    <div class="pj-ai-sub">対象月の日別売上・客数・客単価・曜日・天候・決済方法・商品構成を根拠に、強み・変動要因・注目日・改善案を分析します。AIが利用できない場合も、画面の基本分析へ自動で切り替わります。</div>
+                  </div>
+                  <div class="pj-ai-actions">
+                    <span class="pj-ai-status" id="aiStatus"></span>
+                    <button class="btn" id="aiPdfBtn" type="button" disabled>PDFで保存</button>
+                    <button class="btn btn-primary" id="aiAnalyzeBtn" type="button">AIで月次分析</button>
+                  </div>
+                </div>
+                <div class="pj-ai-empty" id="aiEmpty">「AIで月次分析」を押すと、この月の分析を表示します。</div>
+                <div class="pj-ai-output" id="aiOutput" hidden></div>
+                <div class="pj-ai-warning" id="aiWarning"></div>
+                <div class="pj-qa">
+                  <div class="pj-qa-title">データに質問</div>
+                  <div class="pj-qa-suggest" id="qaSuggest"></div>
+                  <div class="pj-qa-form">
+                    <input class="input" id="qaInput" type="text" maxlength="500" placeholder="例: 一番売れた日は？ 客単価を上げるには？ 雨の日の傾向は？" />
+                    <button class="btn btn-primary" id="qaAskBtn" type="button">質問する</button>
+                    <button class="btn qa-clear" id="qaClearBtn" type="button">会話をクリア</button>
+                  </div>
+                  <div class="pj-qa-thread" id="qaThread"></div>
+                </div>
+                <div class="pj-ai-history">
+                  <div class="pj-ai-history-head">
+                    <div class="pj-ai-history-title">AI分析履歴</div>
+                    <button class="btn sm" id="aiHistoryReloadBtn" type="button">履歴を再読込</button>
+                  </div>
+                  <div class="pj-ai-history-list" id="aiHistoryList"></div>
+                  <div class="pj-ai-history-empty" id="aiHistoryEmpty">保存された分析はありません。</div>
+                </div>
+              </section>
             </div>
 
             <div class="pj-tab-panel" id="pjPanelRanking" role="tabpanel" aria-labelledby="pjTabRanking" tabindex="0" hidden>
