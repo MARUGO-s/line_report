@@ -326,6 +326,11 @@
     .pj-shared-ref::before { content:"↔"; flex:0 0 auto; color:var(--accent); font-weight:800; }
     .pj-shared-ref.warn { border-color:color-mix(in srgb,var(--warn) 45%,var(--border)); background:var(--warn-soft); color:var(--warn); }
     .pj-shared-ref.warn::before { content:"!"; color:var(--warn); }
+    .pj-tabs { display:flex; gap:4px; flex-wrap:wrap; margin:0 0 16px; padding:5px; border:1px solid var(--border); border-radius:12px; background:var(--surface); box-shadow:var(--shadow); }
+    .pj-tab { appearance:none; border:0; border-radius:8px; background:transparent; color:var(--text-2); cursor:pointer; font:inherit; font-size:13px; font-weight:700; padding:9px 13px; transition:background .15s,color .15s; }
+    .pj-tab:hover { background:var(--surface-2); color:var(--text); }
+    .pj-tab[aria-selected="true"] { background:var(--accent); color:#fff; }
+    .pj-tab-panel:focus { outline:0; }
     .pj-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; margin-bottom: 22px; }
     .pj-kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 15px 16px; box-shadow: var(--shadow); }
     .pj-kpi .k-l { font-size: 11.5px; color: var(--text-3); font-weight: 600; letter-spacing: .03em; }
@@ -547,6 +552,14 @@
           </div>
           <div class="pj-shared-ref" id="sharedRefNotice" hidden></div>
 
+          <div class="pj-tabs" role="tablist" aria-label="電子ジャーナルの機能">
+            <button class="pj-tab" id="pjTabUpload" type="button" role="tab" aria-selected="true" aria-controls="pjPanelUpload" data-pj-tab="upload">ジャーナルアップロード</button>
+            <button class="pj-tab" id="pjTabFiles" type="button" role="tab" aria-selected="false" aria-controls="pjPanelFiles" data-pj-tab="files" tabindex="-1">保管ファイル</button>
+            <button class="pj-tab" id="pjTabAnalysis" type="button" role="tab" aria-selected="false" aria-controls="pjPanelAnalysis" data-pj-tab="analysis" tabindex="-1">AI売上分析</button>
+            <button class="pj-tab" id="pjTabRanking" type="button" role="tab" aria-selected="false" aria-controls="pjPanelRanking" data-pj-tab="ranking" tabindex="-1">商品ランキング</button>
+          </div>
+
+          <div class="pj-tab-panel" id="pjPanelUpload" role="tabpanel" aria-labelledby="pjTabUpload" tabindex="0">
           <section class="pj-card pj-upload">
             <div class="pj-upload-head">
               <div>
@@ -569,7 +582,9 @@
             </div>
             <div class="pj-message" id="uploadMsg"></div>
           </section>
+          </div>
 
+          <div class="pj-tab-panel" id="pjPanelFiles" role="tabpanel" aria-labelledby="pjTabFiles" tabindex="0" hidden>
           <section class="pj-card pj-file-card">
             <h2>保管ファイル <span class="c-note" id="fileListNote">原本ダウンロード・削除</span></h2>
             <div class="table-scroll">
@@ -580,8 +595,10 @@
             </div>
             <div class="pj-empty" id="fileEmpty">保管ファイルはありません。</div>
           </section>
+          </div>
 
           <div id="mainWrap" hidden>
+            <div class="pj-tab-panel" id="pjPanelAnalysis" role="tabpanel" aria-labelledby="pjTabAnalysis" tabindex="0" hidden>
             <div class="pj-kpis" id="kpis"></div>
 
             <section class="pj-card pj-ai-card">
@@ -646,7 +663,9 @@
               </table>
               </div>
             </div>
+            </div>
 
+            <div class="pj-tab-panel" id="pjPanelRanking" role="tabpanel" aria-labelledby="pjTabRanking" tabindex="0" hidden>
             <div class="pj-card">
               <h2>商品別ランキング <span class="c-note">会計明細ベース・金額順</span></h2>
               <div class="table-scroll">
@@ -655,6 +674,7 @@
                 <tbody id="rankBody"></tbody>
               </table>
               </div>
+            </div>
             </div>
           </div>
 
@@ -1264,6 +1284,39 @@
       el('uploadPickBtn').disabled=!!busy;
       if(el('uploadFolderBtn'))el('uploadFolderBtn').disabled=!!busy;
     }
+    function setJournalTab(name, focus) {
+      var tabs=Array.from(document.querySelectorAll('[data-pj-tab]'));
+      var valid=tabs.some(function(tab){return tab.dataset.pjTab===name;});
+      if(!valid)name='upload';
+      tabs.forEach(function(tab){
+        var selected=tab.dataset.pjTab===name;
+        tab.setAttribute('aria-selected',selected?'true':'false');
+        tab.tabIndex=selected?0:-1;
+        var panel=el('pjPanel'+tab.dataset.pjTab.charAt(0).toUpperCase()+tab.dataset.pjTab.slice(1));
+        if(panel)panel.hidden=!selected;
+        if(selected&&focus)tab.focus();
+      });
+      try { localStorage.setItem('pos_journal_active_tab',name); } catch (_) {}
+    }
+    function setupJournalTabs() {
+      var tabs=Array.from(document.querySelectorAll('[data-pj-tab]'));
+      tabs.forEach(function(tab,index){
+        tab.addEventListener('click',function(){setJournalTab(tab.dataset.pjTab,false);});
+        tab.addEventListener('keydown',function(event){
+          if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;
+          event.preventDefault();
+          var next=index;
+          if(event.key==='ArrowRight')next=(index+1)%tabs.length;
+          else if(event.key==='ArrowLeft')next=(index-1+tabs.length)%tabs.length;
+          else if(event.key==='Home')next=0;
+          else next=tabs.length-1;
+          setJournalTab(tabs[next].dataset.pjTab,true);
+        });
+      });
+      var saved='upload';
+      try { saved=localStorage.getItem('pos_journal_active_tab')||saved; } catch (_) {}
+      setJournalTab(saved,false);
+    }
     async function uploadFiles(fileList) {
       var all=Array.from(fileList||[]);
       var files=all.filter(function(f){return /\.lzh$/i.test(f.name);});
@@ -1336,7 +1389,7 @@
     async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
 
     var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
-    document.addEventListener('DOMContentLoaded',async function(){populateControls();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
+    document.addEventListener('DOMContentLoaded',async function(){populateControls();setupJournalTabs();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
   })();
   </script>
 

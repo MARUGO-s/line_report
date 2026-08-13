@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-13 - 電子ジャーナル画面を4タブへ再編
+
+- Request: 電子ジャーナルの「ジャーナルアップロード」「保管ファイル」「AI売上分析」「商品ランキング」をタブ化してブロックを整理する。
+- Implementation: `public/pos-journal.html`に4タブを追加。AI売上分析には従来同じ画面内にあったKPI・日別推移・決済内訳・日別サマリーもまとめ、商品ランキングは独立タブとした。既存のアップロード、保管原本のダウンロード／削除、AI分析・質問・PDF・履歴のID・イベント・APIは維持。タブ選択はlocalStorageに保存し、左右矢印／Home／Endのキーボード操作にも対応。
+- Verification: `npm run test:pos-journal` 57件成功、`git diff --check`成功。ローカルPagesで4タブの初期表示と各タブ切替を確認。390px幅では横スクロールなし（タブは2行）。
+
 ### 2026-08-13 - レシート無反応の原因究明とWebhook消失対策（Edge 502／CPU Time exceeded）
 
 - Symptom: 2026-08-13 14:10 JST、クラウディア2ルームのレシート画像が完全に無反応。確認カード・解析通知・`line_webhook_delivery_logs` のいずれも無し。
