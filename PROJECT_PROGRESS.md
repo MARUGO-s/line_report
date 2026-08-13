@@ -18,6 +18,7 @@
 - Example verified from the provided image: 仕入先=`木次乳業有限会社`、品名=`木次パスチャライズ牛乳 1000ml`、税込金額=`¥5,670`、飲食料品のため8%。下流の小口変換は出金¥5,670・内税¥420・税抜¥5,250・食材として整合する。
 - Compatibility: 横長形式に一致した場合は旧ヤマトブロックの「品名＝発送元」を適用しない。従来の左下「ご依頼主」型は既存ブロックをそのまま利用する。
 - Verification: `receipt_prompt.ts`の`deno check`、専用プロンプト配線テスト、下流小口変換テスト、`npm run test:receipt` 31件、`npm run check`、`npm run test:ci` 248 tests / 0 fail、`git diff --check`に成功。合成プロンプトは21,101 / 22,000字で末尾ブロックまで保持。
+- Deploy: commit `017fade`をmainへpush。`line-webhook` version 864、`admin-api` version 854（ともにACTIVE）へ反映し、GitHub Actions Edge run `31668740838` / Pages run `31668740834`はsuccess。未認証`admin-api /petty-cash/receipt-image`は401、署名なし`line-webhook/claudia2`は403。実画像を本番解析APIへ送ると小口行が実登録されるため、自動E2Eは非破壊のプロンプト・下流変換・配線確認までとし、次回LINEから同画像を再送して確認カードの仕入先／品名／金額を確認する。
 
 ### 2026-08-13 - 電子ジャーナル画面のLZH登録から保存済み日別・月間レポートを自動生成
 
