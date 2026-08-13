@@ -10,6 +10,18 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-13 - レシート無反応の原因究明とWebhook消失対策（Edge 502／CPU Time exceeded）
+
+- Symptom: 2026-08-13 14:10 JST、クラウディア2ルームのレシート画像が完全に無反応。確認カード・解析通知・`line_webhook_delivery_logs` のいずれも無し。
+- Root cause: LINE の `POST /line-webhook/claudia2` に対し Supabase Edge Functions が **9ms で 502**（`05:10:20.952Z`）。アクセスログに `function_id` / `version` / `x-served-by` が無く、同時刻の boot ログも無いため、**関数コードは一度も実行されていない**（ワーカー起動前のゲートウェイ障害）。LINE の webhook 再送は既定OFFのため、このイベントは raw 保存も返信もされず恒久消失した。
+- Related failures: 同日 `02:57:16Z` にマルゴ四谷が 503 `SUPABASE_EDGE_RUNTIME_SERVICE_DEGRADED`（7ms）、その30秒後と前日 `08-12 12:26:19Z` に `line-webhook` ワーカーが `CPU Time exceeded` で強制終了。いずれも同じ「無反応」に見える。
+- Platform context: 当リポジトリの Edge デプロイ run `31668740838` は 05:00:01Z 完了。`line-webhook` v865 の `updated_at` は 05:04:15.876Z で、`/app/` 系13関数が同ミリ秒に一斉更新されているため Supabase 側の一括ロールアウト。その6分後の初回コールドスタートが 502 を踏んだ。
+- Fix 1 (requires LINE console): 各チャネルで **Webhook 再送を ON**。`webhook_event_id` による冪等化が既にあるため二重返信・二重登録は起きない。これが 502/503 を踏んだレシートを救う唯一の自動復旧経路。
+- Fix 2 (repo): `deploy-edge-functions.yml` に **Warm up webhook-facing functions** を追加。デプロイ後に `line-webhook` / `line-admin-webhook` / `admin-api` を GET で起こし（405 / 405 / 401 の軽い経路、DB書き込みもLINE送信も無し）、5回リトライしても 5xx ならジョブを fail。新バージョンの初回起動を店舗のレシートに踏ませない。
+- Fix 3 (repo): 1画像を最大7回のモデル呼び出しへ渡すたびに base64 をフル再エンコードしていた箇所を、同一 `Uint8Array` を WeakMap で使い回す `encodeVisionImageBase64` に統一。`foodcourt_compare.ts` も同様。`CPU Time exceeded` の発生確率を下げる。
+- Verification: `npm run test:receipt` 32件（新規2件）、`npm run test:ci` 250 tests / 0 fail、`npm run check`、`git diff --check` 成功。`deno check line-webhook/index.ts` は変更前後とも16 errors（既存のみ）で新規増加なし。warm-up は `bash -n` と本番実行で `405 / 405 / 401`・exit 0 を確認。
+- Outstanding: 14:10 のレシートは復旧不能のため**同じ画像の再送が必要**。再送時は横長ヤマト対応（`017fade`）により「木次乳業有限会社／木次パスチャライズ牛乳 1000ml／¥5,670」となる想定。
+
 ### 2026-08-13 - ヤマト宅急便コレクト横長領収証の小口解析ブロックを追加
 
 - Request: LINE小口登録で、従来のヤマト送り状とは異なる横長の宅急便コレクト領収証を解析し、伝票内の発送元・品名と右上の金額を読み取れるようにする。

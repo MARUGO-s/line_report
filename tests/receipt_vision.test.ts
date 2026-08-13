@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   analyzeLineImageWithAzureFoundry,
   analyzeLineImageWithGroqScout,
+  encodeVisionImageBase64,
   isTransientLineImageVisionFailure,
   needsGeminiProPettyCashReview,
   shouldFallbackLineImageVisionFailure,
@@ -405,4 +406,27 @@ test("leaves 消費税 alone on tax-inclusive receipts where net equals gross", 
     gross_sales: "¥10,000",
   });
   assert.equal(receipt?.taxAmount, "¥909");
+});
+
+test("encodes image bytes to base64 and reuses the result for the same array", () => {
+  // 1枚のレシートは Gemini→Pro再判定→Azure→Claude と同じ Uint8Array を何度も渡す。
+  // 数MBの再エンコードを繰り返すと worker が「CPU Time exceeded」で落ち、
+  // 返信されないまま無反応になる（2026-08-12〜13 実発生）ため使い回す。
+  const bytes = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
+  assert.equal(encodeVisionImageBase64(bytes), "SGVsbG8=");
+  assert.equal(encodeVisionImageBase64(bytes), "SGVsbG8=");
+
+  // 別インスタンスは別途エンコードされる（キャッシュが値を取り違えない）。
+  assert.equal(encodeVisionImageBase64(new Uint8Array([87, 111, 114, 108, 100])), "V29ybGQ=");
+  assert.equal(encodeVisionImageBase64(new Uint8Array()), "");
+});
+
+test("encodes images larger than the 32KB chunk boundary", () => {
+  // チャンク境界（0x8000）をまたぐ実サイズでも欠落・重複が出ないこと。
+  const size = 0x8000 * 2 + 5;
+  const bytes = new Uint8Array(size);
+  for (let i = 0; i < size; i += 1) bytes[i] = i % 256;
+  const encoded = encodeVisionImageBase64(bytes);
+  assert.equal(encoded, Buffer.from(bytes).toString("base64"));
+  assert.equal(encodeVisionImageBase64(bytes), encoded);
 });

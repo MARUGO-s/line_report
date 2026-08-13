@@ -16,13 +16,30 @@ function isVisionAnalyzableImageMime(contentType: string | null): boolean {
   return VISION_IMAGE_MIME_TYPES.has(String(contentType ?? '').trim().toLowerCase())
 }
 
-function toBase64(bytes: Uint8Array): string {
+/** 同じ画像バイト列の base64 を1リクエスト内で使い回すキャッシュ。 */
+const visionImageBase64Cache = new WeakMap<Uint8Array, string>()
+
+/**
+ * 画像バイト列を base64 化する（同一 Uint8Array なら再エンコードしない）。
+ *
+ * 1枚のレシートは Gemini Flash → Pro再判定 → Azure → Claude → 各種リトライと
+ * 最大7回まで同じ画像を渡すため、数MBの中間文字列を毎回作ると worker の CPU を
+ * 食い潰す。Edge Runtime が「CPU Time exceeded」で worker を落とすと処理途中の
+ * レシートは返信されず、LINE から見て無反応になる（2026-08-12〜13 に実発生）。
+ *
+ * ※ 呼び出し側は渡した配列を書き換えないこと（書き換えてもキャッシュは更新されない）。
+ */
+export function encodeVisionImageBase64(bytes: Uint8Array): string {
+  const cached = visionImageBase64Cache.get(bytes)
+  if (cached !== undefined) return cached
   let binary = ''
   const chunkSize = 0x8000
   for (let i = 0; i < bytes.length; i += chunkSize) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
   }
-  return btoa(binary)
+  const encoded = btoa(binary)
+  visionImageBase64Cache.set(bytes, encoded)
+  return encoded
 }
 
 /** AI解析1回の実測トークン使用量（課金推定用）。output は思考トークン込みの課金対象出力。 */
@@ -150,7 +167,7 @@ export async function analyzeLineImageWithGroqScout(
     }
   }
 
-  const imageDataUrl = `data:${mime};base64,${toBase64(bytes)}`
+  const imageDataUrl = `data:${mime};base64,${encodeVisionImageBase64(bytes)}`
   const requestBody = JSON.stringify({
     model: GROQ_VISION_MODEL,
     response_format: { type: 'json_object' },
@@ -317,7 +334,7 @@ export async function analyzeLineImageWithAzureFoundry(
       role: 'user',
       content: [
         { type: 'input_text', text: `この画像を解析し、結果は必ず有効な JSON オブジェクトのみで返してください。ファイル名: ${fileName || '(unknown)'}` },
-        { type: 'input_image', image_url: `data:${mime};base64,${toBase64(bytes)}`, detail: 'high' },
+        { type: 'input_image', image_url: `data:${mime};base64,${encodeVisionImageBase64(bytes)}`, detail: 'high' },
       ],
     }],
     text: { format: { type: 'json_object' } },
@@ -831,7 +848,7 @@ export async function analyzeLineImageWithGemini(
         role: 'user',
         parts: [
           { text: `この画像を解析してください。ファイル名: ${fileName || '(unknown)'}` },
-          { inline_data: { mime_type: mime, data: toBase64(bytes) } },
+          { inline_data: { mime_type: mime, data: encodeVisionImageBase64(bytes) } },
         ],
       },
     ],
@@ -980,7 +997,7 @@ export async function analyzeLineImageWithClaude(
           {
             role: 'user',
             content: [
-              { type: 'image', source: { type: 'base64', media_type: mime, data: toBase64(bytes) } },
+              { type: 'image', source: { type: 'base64', media_type: mime, data: encodeVisionImageBase64(bytes) } },
               { type: 'text', text: `この画像を解析し、指定のJSONだけを返してください（前後に文章やコードブロックを付けない）。ファイル名: ${fileName || '(unknown)'}` },
             ],
           },

@@ -155,13 +155,21 @@ export function looksLikeFoodCourtReport(text: string): boolean {
   return FOODCOURT_MARKERS.test(String(text ?? ''))
 }
 
+/** 同じ画像バイト列の base64 を使い回すキャッシュ（Gemini→Azure退避で二重エンコードしない）。 */
+const reportImageBase64Cache = new WeakMap<Uint8Array, string>()
+
+/** 数MBの中間文字列を作り直すと worker の CPU を食うため、同一 Uint8Array なら再エンコードしない。 */
 function toBase64(bytes: Uint8Array): string {
+  const cached = reportImageBase64Cache.get(bytes)
+  if (cached !== undefined) return cached
   let binary = ''
   const chunk = 0x8000
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
   }
-  return btoa(binary)
+  const encoded = btoa(binary)
+  reportImageBase64Cache.set(bytes, encoded)
+  return encoded
 }
 
 function parseFirstJson(text: string): Record<string, unknown> | null {
