@@ -396,6 +396,7 @@
     .pj-ai-title { display:flex; align-items:center; gap:9px; font-size:16px; font-weight:800; }
     .pj-ai-sub { color:var(--text-3); font-size:12px; line-height:1.65; margin-top:5px; max-width:780px; }
     .pj-ai-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pj-ai-actions a.btn { text-decoration:none; }
     .pj-ai-status { font-size:11px; color:var(--text-3); }
     .pj-ai-output { margin-top:14px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .pj-ai-section { background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:13px 14px; }
@@ -553,14 +554,14 @@
           <div class="pj-shared-ref" id="sharedRefNotice" hidden></div>
 
           <div class="pj-tabs" role="tablist" aria-label="電子ジャーナルの機能">
-            <button class="pj-tab" id="pjTabUpload" type="button" role="tab" aria-selected="true" aria-controls="pjPanelUpload" data-pj-tab="upload">ジャーナルアップロード</button>
-            <button class="pj-tab" id="pjTabFiles" type="button" role="tab" aria-selected="false" aria-controls="pjPanelFiles" data-pj-tab="files" tabindex="-1">保管ファイル</button>
-            <button class="pj-tab" id="pjTabSummary" type="button" role="tab" aria-selected="false" aria-controls="pjPanelSummary" data-pj-tab="summary" tabindex="-1">売上サマリー</button>
-            <button class="pj-tab" id="pjTabAnalysis" type="button" role="tab" aria-selected="false" aria-controls="pjPanelAnalysis" data-pj-tab="analysis" tabindex="-1">AI売上分析</button>
+            <button class="pj-tab" id="pjTabSummary" type="button" role="tab" aria-selected="true" aria-controls="pjPanelSummary" data-pj-tab="summary">売上サマリー</button>
             <button class="pj-tab" id="pjTabRanking" type="button" role="tab" aria-selected="false" aria-controls="pjPanelRanking" data-pj-tab="ranking" tabindex="-1">商品ランキング</button>
+            <button class="pj-tab" id="pjTabUpload" type="button" role="tab" aria-selected="false" aria-controls="pjPanelUpload" data-pj-tab="upload" tabindex="-1">ジャーナルアップロード</button>
+            <button class="pj-tab" id="pjTabFiles" type="button" role="tab" aria-selected="false" aria-controls="pjPanelFiles" data-pj-tab="files" tabindex="-1">保管ファイル</button>
+            <button class="pj-tab" id="pjTabAnalysis" type="button" role="tab" aria-selected="false" aria-controls="pjPanelAnalysis" data-pj-tab="analysis" tabindex="-1">AI売上分析</button>
           </div>
 
-          <div class="pj-tab-panel" id="pjPanelUpload" role="tabpanel" aria-labelledby="pjTabUpload" tabindex="0">
+          <div class="pj-tab-panel" id="pjPanelUpload" role="tabpanel" aria-labelledby="pjTabUpload" tabindex="0" hidden>
           <section class="pj-card pj-upload">
             <div class="pj-upload-head">
               <div>
@@ -599,7 +600,7 @@
           </div>
 
           <div id="mainWrap" hidden>
-            <div class="pj-tab-panel" id="pjPanelSummary" role="tabpanel" aria-labelledby="pjTabSummary" tabindex="0" hidden>
+            <div class="pj-tab-panel" id="pjPanelSummary" role="tabpanel" aria-labelledby="pjTabSummary" tabindex="0">
             <div class="pj-kpis" id="kpis"></div>
 
             <div class="pj-grid2">
@@ -641,6 +642,7 @@
                   <div class="pj-ai-actions">
                     <span class="pj-ai-status" id="aiStatus"></span>
                     <button class="btn" id="aiPdfBtn" type="button" disabled>PDFで保存</button>
+                    <a class="btn" href="https://marugo-s.github.io/line_report/jnm/jnl2txt.html" target="_blank" rel="noopener noreferrer">詳しく分析する</a>
                     <button class="btn btn-primary" id="aiAnalyzeBtn" type="button">AIで月次分析</button>
                   </div>
                 </div>
@@ -1316,7 +1318,7 @@
           setJournalTab(tabs[next].dataset.pjTab,true);
         });
       });
-      var saved='upload';
+      var saved='summary';
       try { saved=localStorage.getItem('pos_journal_active_tab')||saved; } catch (_) {}
       setJournalTab(saved,false);
     }
