@@ -232,6 +232,61 @@ Deno.test("duplicate payment-change receipt copies keep only the latest copy", (
   );
 });
 
+Deno.test("identical legitimate receipts remain when day totals already match", () => {
+  const duplicatedItems = [
+    {
+      code: "0000000000031",
+      name: "SPパン",
+      unit: 350,
+      qty: 2,
+      amount: 700,
+    },
+  ];
+  const day = sampleDay("2026-01-06", 1_400);
+  day.receipts = [
+    {
+      no: "6322",
+      time: "21:54",
+      table_no: "2",
+      pay: "クレジット",
+      total: 700,
+      guests: 1,
+      items: duplicatedItems,
+    },
+    {
+      no: "6323",
+      time: "21:54",
+      table_no: "1",
+      pay: "クレジット",
+      total: 700,
+      guests: 1,
+      items: duplicatedItems,
+    },
+  ];
+  day.groups = 2;
+  day.guests = 2;
+  day.gross_sales = 1_400;
+  day.net_sales = 1_273;
+  day.tax = 127;
+
+  const [daily] = buildJournalSavedReportsFromPosDays({
+    storeKey: "bistrocavacava",
+    storeName: "Bistro CAVACAVA",
+    storeCode: "1015",
+    month: "2026-01",
+    days: [day],
+  });
+
+  assertEquals(daily.data.sales.map((sale) => sale.no), ["6322", "6323"]);
+  assertEquals(daily.data.salesCount, 2);
+  assertEquals(daily.data.totalGroups, 2);
+  assertEquals(daily.data.totalCustomers, 2);
+  assertEquals(
+    daily.data.sales.reduce((sum, sale) => sum + sale.total, 0),
+    1_400,
+  );
+});
+
 Deno.test("partial LZH days replace matching dates without shrinking a full saved month", () => {
   const existingReports = [
     {

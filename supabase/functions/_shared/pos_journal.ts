@@ -691,12 +691,24 @@ function reconcilePosJournalReceipts(
   const targetTotal = safeNumber(day.gross_sales);
   const targetGroups = Math.max(0, Math.round(safeNumber(day.groups)));
   if (!receipts.length) return []
-  const deduped = [...receipts]
-    .sort((a, b) =>
+  const sorted = [...receipts].sort((a, b) =>
       safeText(a.time, 8).localeCompare(safeText(b.time, 8)) ||
       safeText(a.no, 30).localeCompare(safeText(b.no, 30))
-    )
-    .filter((receipt, index, all) => {
+    );
+  const originalTotal = sorted.reduce(
+    (total, receipt) => total + safeNumber(receipt.total),
+    0,
+  );
+  // 日計の組数・総売上と元明細が既に一致する日は、同時刻・同額・同商品でも
+  // 正常な別会計として扱う。支払変更控えの除外は不一致がある日にだけ行う。
+  if (
+    targetGroups > 0 &&
+    sorted.length === targetGroups &&
+    originalTotal === targetTotal
+  ) {
+    return sorted;
+  }
+  const deduped = sorted.filter((receipt, index, all) => {
       const sig = posReceiptSignature(receipt);
       // 同一内容が支払変更・個別割勘等で複数控えとして残る場合、
       // 既存Journal Reportと同じく最後（最新時刻）の控えを正本にする。
