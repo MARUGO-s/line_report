@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-13 - 予約を加味した集客構造の利用可能期間を固定
+
+- Request: 予約を加味した集客構造は、Bistro CAVACAVAが2026年7月から予約取り込みを始めた分だけを使う。他店舗は未開始であり、将来店舗を増やすまで予約要因を使わないことを明記・常時参照する。
+- Implementation: `public/jnm/jnl2txt.html`に予約取り込み開始月の正本を追加し、CAVACAVAは2026-07以降だけ予約 vs 飛び込み（月次）を生成するよう制限。開始前を予約0件／飛び込み100%として扱わない。予約未開始の他店は予約分析を生成しない。さらに`ai-analyze`のサーバー固定ポリシーにも同じ店舗・期間制約を入れ、クライアント文脈が欠けてもAIが常に参照する。正本は`docs/RESERVATION-AI-COVERAGE.md`。
+
 ### 2026-08-13 - 電子ジャーナル画面を5タブへ再編
 
 - Request: 電子ジャーナルのブロックをタブ化し、AI分析・質問・履歴カードは単独タブへ分離。タブ順は売上サマリー、商品ランキング、ジャーナルアップロード、保管ファイル、AI売上分析にする。

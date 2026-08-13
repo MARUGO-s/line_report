@@ -265,6 +265,9 @@ core(
     "fetchReservationAiFacts",
     "formatReservationFactsForAi",
     "reservationFacts",
+    "RESERVATION_IMPORT_COVERAGE",
+    "formatReservationImportCoverageForAi",
+    "coveredMonthlyBreakdown",
   ]) && containsAll(adminApi, [
     "reservation_ai_store_cache",
     "past_cache_plus_live_future",
@@ -273,9 +276,13 @@ core(
   ]) && containsAll(reservationCacheCron, [
     "resolve_edge_cron_auth_token",
     "/reservations/ai-cache/rebuild",
+  ]) && containsAll(aiAnalyze, [
+    "buildReservationImportCoveragePolicy",
+    "Bistro CAVACAVAだけが予約取り込み済み",
+    "2026-07",
   ]),
   "予約イベントDB → 毎朝の店舗×日キャッシュ（過去）＋イベントDB直接取得（本日以降）→ 予約確定事実 → AI",
-  "過去予約は日次確定キャッシュを優先し、未来予約とキャッシュ欠損日だけDBを直接参照します。",
+  "過去予約は日次確定キャッシュを優先し、未来予約とキャッシュ欠損日だけDBを直接参照します。集客構造はCAVACAVAの2026-07以降だけで、他店は予約取り込み未開始として固定します。",
 );
 
 conditional(

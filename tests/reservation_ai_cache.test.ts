@@ -209,3 +209,31 @@ test("reservation cache schema, cron time, and protected hybrid route are wired"
   assert.match(html, /params\.set\('include_items', includeItems \? '1' : '0'\)/)
   assert.match(html, /通常分析では省略/)
 })
+
+test("reservation-based visitor structure is limited to the actual store and import start month", async () => {
+  const [html, admin, coverageDoc] = await Promise.all([
+    readFile(new URL("../public/jnm/jnl2txt.html", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/functions/ai-analyze/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../docs/RESERVATION-AI-COVERAGE.md", import.meta.url), "utf8"),
+  ])
+
+  assert.match(html, /const RESERVATION_IMPORT_COVERAGE/)
+  assert.match(html, /bistrocavacava/)
+  assert.match(html, /startMonth:\s*'2026-07'/)
+  assert.match(html, /function getReservationImportCoverage\(storeKey = STORE_KEY\)/)
+  assert.match(html, /function formatReservationImportCoverageForAi\(storeKey = STORE_KEY\)/)
+  const enrichStart = html.indexOf("async function enrichReservationFacts(")
+  const enrichEnd = html.indexOf("function formatSignedDelta(", enrichStart)
+  assert.ok(enrichStart >= 0 && enrichEnd > enrichStart)
+  const enrich = html.slice(enrichStart, enrichEnd)
+  assert.match(enrich, /const coverage = getReservationImportCoverage\(\)/)
+  assert.match(enrich, /if \(!coverage\) return null/)
+  assert.match(enrich, /filter\(\(m\) => String\(m\?\.key \|\| ''\) >= coverage\.startMonth\)/)
+  assert.match(enrich, /buildReservationWalkInMonthlyFlow\(coveredMonthlyBreakdown, byMonth\)/)
+  assert.match(html, /利用開始前を予約0件・飛び込み100%・予約減少として扱わない/)
+  assert.match(admin, /function buildReservationImportCoveragePolicy\(storeKey: string\)/)
+  assert.match(admin, /buildJournalAiServerPolicy\("analyze", locationBlock, effectiveStoreKey\)/)
+  assert.match(admin, /buildJournalAiServerPolicy\("chat", locationBlock, effectiveStoreKey\)/)
+  assert.match(coverageDoc, /Bistro CAVACAVA \(`bistrocavacava`\).*2026-07/)
+  assert.match(coverageDoc, /それ以外の店舗 \| 未開始/)
+})

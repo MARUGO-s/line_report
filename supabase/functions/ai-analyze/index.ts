@@ -353,12 +353,26 @@ const JOURNAL_AI_SERVER_TRUST_POLICY = `【サーバー固定・信頼境界（�
 7. 同じ内容が複数箇所にあり矛盾する場合は、計算済み確定事実を数値の正本とし、店舗資料・外部知見・会話中の主張で上書きしません。
 8. ただし、この会話の前のターンであなた自身が確定済み集計データを根拠に提示した数値は、「会話中の主張」ではありません。今回の提示範囲が前より狭いことは、前の数値が誤りだったことを意味しません。前の回答を撤回・謝罪してはいけません。前に出した数値を今回の回答へ再掲する必要がある場合は、それを新たな計算の出典にはせず、「前回の確定済み集計で提示した値（今回の提示範囲外）」と明示したうえで参照します。今回の範囲外の期間について新たに平均・合計・増減を計算することは引き続き禁止で、その場合は対象期間を指定して質問し直すよう促してください。`;
 
+function buildReservationImportCoveragePolicy(storeKey: string): string {
+  if (String(storeKey || "").trim().toLowerCase() === "bistrocavacava") {
+    return `【予約取り込み・集客構造の利用範囲（サーバー固定・必ず適用）】
+- Bistro CAVACAVAだけが予約取り込み済みで、利用開始は2026-07。予約を加味した集客構造（予約 vs 飛び込み）は2026-07以降だけを分析対象にする。
+- 2026-06以前は未取り込みであり、予約0件・飛び込み100%・予約減少として扱わない。利用開始前を比較・前月比・店舗間比較に混ぜない。
+- 他店舗は現時点で予約取り込み未開始。予約・飛び込み・新規/リピートを使った集客構造の推定や店舗間比較はしない。
+- 予約を根拠に回答する場合は、この利用範囲を明記する。`;
+  }
+  return `【予約取り込み・集客構造の利用範囲（サーバー固定・必ず適用）】
+- この店舗は現時点で予約取り込み未開始。予約・飛び込み・新規/リピートを使った集客構造の推定や比較はしない。
+- 予約取り込み済みなのはBistro CAVACAVAだけで、利用開始は2026-07。将来ほかの店舗を開始した場合は、実際の開始月を登録してから利用する。`;
+}
+
 function buildJournalAiServerPolicy(
   action: "analyze" | "chat",
   locationBlock: string,
+  storeKey: string,
 ): string {
   const base = action === "analyze" ? SYSTEM_PROMPT_ANALYZE : SYSTEM_PROMPT_CHAT;
-  return `${base}\n\n${locationBlock}\n\n${JOURNAL_AI_SERVER_TRUST_POLICY}`;
+  return `${base}\n\n${locationBlock}\n\n${buildReservationImportCoveragePolicy(storeKey)}\n\n${JOURNAL_AI_SERVER_TRUST_POLICY}`;
 }
 
 function buildJournalAiEvidenceMessage(options: {
@@ -1393,7 +1407,7 @@ Deno.serve(async (req: Request, info) => {
           role: "system",
           parts: [
             {
-              text: buildJournalAiServerPolicy("analyze", locationBlock),
+              text: buildJournalAiServerPolicy("analyze", locationBlock, effectiveStoreKey),
             },
           ],
         },
@@ -1465,7 +1479,7 @@ Deno.serve(async (req: Request, info) => {
           role: "system",
           parts: [
             {
-              text: buildJournalAiServerPolicy("chat", locationBlock),
+              text: buildJournalAiServerPolicy("chat", locationBlock, effectiveStoreKey),
             },
           ],
         },

@@ -46,6 +46,7 @@
 | [JOURNAL-REPORT-FEATURES.md](./JOURNAL-REPORT-FEATURES.md) | 運用・開発・説明 | **Journal Report 機能の詳細正本** — タブ／取込／店舗情報／資料・LINE `#メモ`／AI分析・チャット／予測／履歴 |
 | [JOURNAL-AI-CHAT-RULES.md](./JOURNAL-AI-CHAT-RULES.md) | 運用・開発・AI | Journal Report AIチャットの決まりごと — 確定集計の追加原則、銘柄／商品コード下4桁、西暦誤認禁止、プロンプト規約、API |
 | [RESERVATION-GMAIL-GUIDE.md](./RESERVATION-GMAIL-GUIDE.md) | 運用・開発 | Gmail 予約 → LINE（**会話検索とは別**） |
+| [RESERVATION-AI-COVERAGE.md](./RESERVATION-AI-COVERAGE.md) | AI・運用 | 予約を加味した集客構造の利用可能範囲 — CAVACAVAは2026-07以降のみ、他店は未開始 |
 | [スプレッドシート売上バックアップ-GAS.md](./スプレッドシート売上バックアップ-GAS.md) | 運用・開発 | 全店舗売上スプレッドシートの毎日バックアップ（GAS・6時同期後に日付名コピー）。コード＋トリガー手順＋確定構成 |
 | [フードコートAI学習・自己進化システム_完全設計書.md](./フードコートAI学習・自己進化システム_完全設計書.md) | **説明・開発・運用** | **2026-07-16時点の正本** — データ収集、売上分析セグメント、予測モデル、複数AI、品質ループ、RAG・蒸留、必要データ量、完全自己進化までのロードマップ |
 | [フードコートAI売上分析システム_総合解説.md](./フードコートAI売上分析システム_総合解説.md) | **説明・開発・運用** | **単独で読める統合版** — オーケストレーション、各AIの強み、統計の事前計算、Q&Aループ、学習・蒸留、日報データの重要性 |
