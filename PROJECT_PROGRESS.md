@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-13 - AI学習・進化の信頼度スター表示をカード内へ修正
+
+- Request: 概要タブの「予測の信頼度」で星がカード右端からはみ出す。
+- Fix: OS依存で横幅が大きくなる絵文字星を文字星へ変更し、信頼度表示だけ26px・改行なし・カード内クリップに固定。1280px表示で星幅144px、カード幅183px、カード越境なしを確認した。
+
 ### 2026-08-13 - AI学習・進化ページを5タブ構成へ整理
 
 - Request: 提供された高精細デザイン設計に合わせて、AI学習 進化トラッキング画面の長い縦積みレイアウトを整理する。

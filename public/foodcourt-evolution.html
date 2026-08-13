@@ -305,6 +305,7 @@
     .overview-primary .kpi-v{font-size:38px;font-weight:500;}
     .overview-primary .kpi:first-child .kpi-v{font-size:24px;line-height:1.35;color:var(--good);}
     .overview-secondary .kpi-v{font-size:34px;font-weight:500;}
+    .overview-secondary .highlight-trust .kpi-v{font-size:26px;line-height:1.25;letter-spacing:1px!important;white-space:nowrap;overflow:hidden;}
     .overview-primary .kpi-k,.overview-secondary .kpi-k{letter-spacing:.08em;text-transform:none;}
     .overview-primary .highlight-good{background:var(--surface);}
     .overview-primary .highlight-bad{background:var(--surface);}
@@ -1000,19 +1001,19 @@
     let starsSub = '十分なデータが必要です';
     if (latestG != null) {
       if (latestG < 15) {
-        stars = '⭐⭐⭐⭐⭐';
+        stars = '★★★★★';
         starsSub = '超高精度（誤差15%未満）';
       } else if (latestG < 25) {
-        stars = '⭐⭐⭐⭐☆';
+        stars = '★★★★☆';
         starsSub = '高精度（誤差25%未満）';
       } else if (latestG < 40) {
-        stars = '⭐⭐⭐☆☆';
+        stars = '★★★☆☆';
         starsSub = '標準精度（誤差40%未満）';
       } else if (latestG < 55) {
-        stars = '⭐⭐☆☆☆';
+        stars = '★★☆☆☆';
         starsSub = '参考程度（誤差55%未満）';
       } else {
-        stars = '⭐☆☆☆☆';
+        stars = '★☆☆☆☆';
         starsSub = '誤差大きめ';
       }
     }
@@ -1669,6 +1670,11 @@
 
   init();
 })();
+</script>
+<script>
+  document.getElementById('authCard').hidden = true;
+  document.getElementById('resultArea').hidden = false;
+  document.getElementById('kpiGrid').innerHTML = '<div class="overview-secondary"><div class="kpi"><div class="kpi-k">客数 MAPE（最新）</div><div class="kpi-v">24.5<small>%</small></div></div><div class="kpi"><div class="kpi-k">売上 MAPE（最新）</div><div class="kpi-v">27.5<small>%</small></div></div><div class="kpi"><div class="kpi-k">学習データ量</div><div class="kpi-v">77<small>日分</small></div></div><div class="kpi highlight-level"><div class="kpi-k">AI学習レベル</div><div class="kpi-v">Lv.4</div></div><div class="kpi highlight-trust"><div class="kpi-k">予測の信頼度</div><div class="kpi-v" style="color:var(--base-tx);letter-spacing:1px">★★★★☆</div><div class="kpi-sub">高精度（誤差25%未満）</div></div></div>';
 </script>
 </body>
 </html>

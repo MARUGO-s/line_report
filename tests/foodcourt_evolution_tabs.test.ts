@@ -30,6 +30,12 @@ test('records default to twelve rows and can expand to all rows', () => {
   assert.match(page, /直近12件だけ表示/)
 })
 
+test('prediction confidence stars stay inside their KPI card', () => {
+  assert.match(page, /\.overview-secondary \.highlight-trust \.kpi-v\{[^}]*font-size:26px[^}]*white-space:nowrap[^}]*overflow:hidden/)
+  assert.match(page, /stars = '★★★★☆'/)
+  assert.doesNotMatch(page, /⭐⭐⭐⭐☆/)
+})
+
 test('page ids remain unique after the layout reorganization', () => {
   const ids = [...page.matchAll(/\sid="([^"]+)"/g)].map(match => match[1])
   assert.equal(new Set(ids).size, ids.length)
