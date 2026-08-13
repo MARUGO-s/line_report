@@ -3,7 +3,7 @@
 ## Journal Report AI向け日次予約キャッシュ（2026-08-04）
 
 > **分析対象範囲（2026-08-13時点）:** 予約を加味した集客構造（予約 vs 飛び込み）は、
-> Bistro CAVACAVAの**2026年7月以降**だけが対象です。CAVACAVAの6月以前は未取り込みであり、
+> Bistro CAVACAVAの**2026年5月以降**だけが対象です。CAVACAVAの4月以前は未取り込みであり、
 > 他店舗は予約取り込み未開始です。詳細と将来の追加手順は
 > [RESERVATION-AI-COVERAGE.md](./RESERVATION-AI-COVERAGE.md) を正本にしてください。
 

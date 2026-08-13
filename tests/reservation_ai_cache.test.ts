@@ -219,7 +219,7 @@ test("reservation-based visitor structure is limited to the actual store and imp
 
   assert.match(html, /const RESERVATION_IMPORT_COVERAGE/)
   assert.match(html, /bistrocavacava/)
-  assert.match(html, /startMonth:\s*'2026-07'/)
+  assert.match(html, /startMonth:\s*'2026-05'/)
   assert.match(html, /function getReservationImportCoverage\(storeKey = STORE_KEY\)/)
   assert.match(html, /function formatReservationImportCoverageForAi\(storeKey = STORE_KEY\)/)
   const enrichStart = html.indexOf("async function enrichReservationFacts(")
@@ -234,6 +234,6 @@ test("reservation-based visitor structure is limited to the actual store and imp
   assert.match(admin, /function buildReservationImportCoveragePolicy\(storeKey: string\)/)
   assert.match(admin, /buildJournalAiServerPolicy\("analyze", locationBlock, effectiveStoreKey\)/)
   assert.match(admin, /buildJournalAiServerPolicy\("chat", locationBlock, effectiveStoreKey\)/)
-  assert.match(coverageDoc, /Bistro CAVACAVA \(`bistrocavacava`\).*2026-07/)
+  assert.match(coverageDoc, /Bistro CAVACAVA \(`bistrocavacava`\).*2026-05/)
   assert.match(coverageDoc, /それ以外の店舗 \| 未開始/)
 })
