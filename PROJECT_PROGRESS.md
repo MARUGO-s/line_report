@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-13 - AI学習をプロンプト候補比較の準備段階へ移行
+
+- Request: 自己進化の次段階へ移行する。
+- Decision: 画面の実績（承認済み23件・人の承認7件・日次教材12件）により「プロンプト候補の比較評価」の開始条件は満たす。一方、モデル蒸留は承認済み100件・人の承認20件・日次教材30件・3surface以上が必要なため、開始しない。
+- Implementation: `foodcourt_prompt_evaluation_sets`／`foodcourt_prompt_evaluation_cases`で承認済み回答の固定評価セットを作成し、`foodcourt_prompt_candidates`へ手動の候補指示を下書き登録できるようにした。評価セットは現在のベースライン回答を固定するだけで、本番プロンプト・モデル・自動昇格を変更しない。RLSと`anon`/`authenticated`からの権限剥奪を適用し、操作は認証済み`admin-api`に限定する。
+
 ### 2026-08-13 - 予約を加味した集客構造の利用可能期間を固定
 
 - Request: 予約を加味した集客構造は、Bistro CAVACAVAが2026年5月から予約取り込みを始めた分だけを使う。他店舗は未開始であり、将来店舗を増やすまで予約要因を使わないことを明記・常時参照する。

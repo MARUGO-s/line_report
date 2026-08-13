@@ -436,6 +436,22 @@
       <div id="readinessStatus"></div>
       <div class="loop-kpi-row" id="readinessKpiRow"></div>
       <div class="readiness-list" id="readinessGates"></div>
+      <div id="promptEvaluationPanel" style="display:none;margin-top:16px;padding:14px;border:1px solid var(--line-soft);border-radius:10px;background:var(--bg)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div><strong style="font-size:13px">固定評価セット</strong><div id="promptEvaluationSummary" style="font-size:12px;color:var(--tx-3);margin-top:4px"></div></div>
+          <button class="btn primary" id="promptEvaluationBootstrapBtn" type="button" style="font-size:12px;padding:7px 12px">固定評価セットを作成</button>
+        </div>
+        <div id="promptCandidateForm" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)">
+          <div style="font-size:12px;font-weight:700;margin-bottom:8px">比較用プロンプト候補（下書き）</div>
+          <div class="qbar" style="align-items:flex-start;flex-wrap:wrap">
+            <input id="promptCandidateName" maxlength="80" placeholder="候補名（例: 根拠明示を強化）" style="flex:1;min-width:180px">
+            <select id="promptCandidateSurface" style="min-width:150px"><option value="all">全分析種別</option><option value="ask">Q&amp;A</option><option value="daily_summary">日次分析</option><option value="period_summary">期間分析</option><option value="weekly_report">週次報告</option></select>
+          </div>
+          <textarea id="promptCandidateInstructions" rows="4" maxlength="8000" placeholder="現行プロンプトへ追加する候補指示を入力します。登録しても本番回答には適用されません。"></textarea>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap"><button class="btn ghost" id="promptCandidateSaveBtn" type="button" style="font-size:12px;padding:7px 12px">候補を下書き登録</button><span id="promptCandidateMsg" class="msg" style="margin:0"></span></div>
+          <div id="promptCandidateList" style="font-size:11.5px;color:var(--tx-3);margin-top:10px"></div>
+        </div>
+      </div>
       <div class="card-note">品質合格または人が「役に立った」と承認した回答だけを教材候補にします。「改善が必要」は除外します。JSONLは学習用データの書き出しであり、モデルへの自動学習・自動昇格は行いません。</div>
     </div>
 
@@ -511,6 +527,16 @@
     readinessStatus: $('readinessStatus'),
     readinessKpiRow: $('readinessKpiRow'),
     readinessGates: $('readinessGates'),
+    promptEvaluationPanel: $('promptEvaluationPanel'),
+    promptEvaluationSummary: $('promptEvaluationSummary'),
+    promptEvaluationBootstrapBtn: $('promptEvaluationBootstrapBtn'),
+    promptCandidateForm: $('promptCandidateForm'),
+    promptCandidateName: $('promptCandidateName'),
+    promptCandidateSurface: $('promptCandidateSurface'),
+    promptCandidateInstructions: $('promptCandidateInstructions'),
+    promptCandidateSaveBtn: $('promptCandidateSaveBtn'),
+    promptCandidateMsg: $('promptCandidateMsg'),
+    promptCandidateList: $('promptCandidateList'),
   };
 
   // ===== theme =====
@@ -601,11 +627,12 @@
   // tryConnect と loadData を統合: 認証確認と同時にデータも取得し、二重APIコールを防ぐ。
   async function tryConnectAndLoad(){
     try{
-      const [histBody, loopBody, ragBody, readinessBody] = await Promise.all([
+      const [histBody, loopBody, ragBody, readinessBody, promptEvaluationBody] = await Promise.all([
         apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
         apiFetch('/foodcourt/ai-loop-runs?limit=30&store_key=marugoS').catch(()=>({ runs: [] })),
         apiFetch('/foodcourt/ai-rag?limit=100&store_key=marugoS').catch(()=>({ count:0, documents:[] })),
         apiFetch('/foodcourt/evolution-readiness?store_key=marugoS').catch(()=>null),
+        apiFetch('/foodcourt/prompt-evaluation-sets?store_key=marugoS').catch(()=>null),
       ]);
       setAuthBadge(true);
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
@@ -614,6 +641,7 @@
       ragDocuments = Array.isArray(ragBody.documents) ? ragBody.documents : [];
       ragCount = Number(ragBody.count || ragDocuments.length || 0);
       evolutionReadiness = readinessBody;
+      promptEvaluation = promptEvaluationBody;
       if (histBody.passing_score != null) {
         passingScore = Number(histBody.passing_score);
         syncPassingScoreUI();
@@ -675,17 +703,19 @@
   let ragDocuments = [];
   let ragCount = 0;
   let evolutionReadiness = null;
+  let promptEvaluation = null;
   let modelSelectionData = null;
 
   async function loadData(){
     dom.loadMsg.textContent = '読み込み中…'; dom.loadMsg.className='msg';
     dom.resultArea.hidden = true;
     try{
-      const [histBody, loopBody, ragBody, readinessBody] = await Promise.all([
+      const [histBody, loopBody, ragBody, readinessBody, promptEvaluationBody] = await Promise.all([
         apiFetch('/foodcourt/evolution-history?store_key=marugoS'),
         apiFetch('/foodcourt/ai-loop-runs?limit=30&store_key=marugoS').catch(()=>({ runs: [] })),
         apiFetch('/foodcourt/ai-rag?limit=100&store_key=marugoS').catch(()=>({ count:0, documents:[] })),
         apiFetch('/foodcourt/evolution-readiness?store_key=marugoS').catch(()=>null),
+        apiFetch('/foodcourt/prompt-evaluation-sets?store_key=marugoS').catch(()=>null),
       ]);
       historyRows = Array.isArray(histBody.rows) ? histBody.rows : [];
       modelSelectionData = histBody.model_selection ?? null;
@@ -693,6 +723,7 @@
       ragDocuments = Array.isArray(ragBody.documents) ? ragBody.documents : [];
       ragCount = Number(ragBody.count || ragDocuments.length || 0);
       evolutionReadiness = readinessBody;
+      promptEvaluation = promptEvaluationBody;
       if (histBody.passing_score != null) {
         passingScore = Number(histBody.passing_score);
         syncPassingScoreUI();
@@ -716,6 +747,7 @@
     renderTable();
     renderLoopRuns();
     renderEvolutionReadiness();
+    renderPromptEvaluation();
     renderRagDocuments();
     renderModelSelection();
   }
@@ -1231,6 +1263,87 @@
     }
   }
   dom.datasetDownloadBtn.addEventListener('click', downloadDistillationDataset);
+
+  async function refreshPromptEvaluation(){
+    promptEvaluation = await apiFetch('/foodcourt/prompt-evaluation-sets?store_key=marugoS').catch(()=>promptEvaluation);
+    renderPromptEvaluation();
+  }
+
+  async function bootstrapPromptEvaluation(){
+    const button = dom.promptEvaluationBootstrapBtn;
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = '作成中…';
+    try{
+      promptEvaluation = await apiPost('/foodcourt/prompt-evaluation-sets/bootstrap', {store_key:'marugoS'});
+      if(promptEvaluation && !promptEvaluation.active_set) await refreshPromptEvaluation();
+      renderPromptEvaluation();
+    }catch(e){
+      alert((e&&e.message)||'固定評価セットを作成できませんでした。');
+    }finally{
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
+  dom.promptEvaluationBootstrapBtn.addEventListener('click', bootstrapPromptEvaluation);
+
+  async function savePromptCandidate(){
+    const name = dom.promptCandidateName.value.trim();
+    const instructions = dom.promptCandidateInstructions.value.trim();
+    if(!name || !instructions){
+      dom.promptCandidateMsg.textContent = '候補名と候補プロンプトを入力してください。';
+      dom.promptCandidateMsg.className = 'msg err';
+      return;
+    }
+    const button = dom.promptCandidateSaveBtn;
+    button.disabled = true;
+    dom.promptCandidateMsg.textContent = '保存中…';
+    dom.promptCandidateMsg.className = 'msg';
+    try{
+      await apiPost('/foodcourt/prompt-candidates', {
+        store_key:'marugoS',
+        name,
+        surface:dom.promptCandidateSurface.value,
+        instructions,
+      });
+      dom.promptCandidateName.value = '';
+      dom.promptCandidateInstructions.value = '';
+      dom.promptCandidateMsg.textContent = '下書き候補を保存しました。本番回答には適用されていません。';
+      dom.promptCandidateMsg.className = 'msg ok';
+      await refreshPromptEvaluation();
+    }catch(e){
+      dom.promptCandidateMsg.textContent = (e&&e.message)||'候補を保存できませんでした。';
+      dom.promptCandidateMsg.className = 'msg err';
+    }finally{
+      button.disabled = false;
+    }
+  }
+  dom.promptCandidateSaveBtn.addEventListener('click', savePromptCandidate);
+
+  function renderPromptEvaluation(){
+    const promptReady = evolutionReadiness?.gates?.promptCandidate?.ready === true;
+    const data = promptEvaluation;
+    const activeSet = data?.active_set || null;
+    if(!promptReady && !activeSet){
+      dom.promptEvaluationPanel.style.display = 'none';
+      return;
+    }
+    dom.promptEvaluationPanel.style.display = '';
+    if(!activeSet){
+      dom.promptEvaluationSummary.textContent = '承認済み教材を、現在の回答を基準として固定します。作成後も本番プロンプト・モデル・自動昇格は変更されません。';
+      dom.promptEvaluationBootstrapBtn.hidden = false;
+      dom.promptCandidateForm.style.display = 'none';
+      return;
+    }
+    dom.promptEvaluationSummary.textContent = `${activeSet.name || '固定評価セット'}：${nf.format(Number(activeSet.case_count||0))}件のベースライン回答を固定済み。本番変更なし。`;
+    dom.promptEvaluationBootstrapBtn.hidden = true;
+    dom.promptCandidateForm.style.display = '';
+    const surfaceLabels = {all:'全分析種別',ask:'Q&A',daily_summary:'日次分析',period_summary:'期間分析',weekly_report:'週次報告'};
+    const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+    dom.promptCandidateList.textContent = candidates.length
+      ? `下書き候補: ${candidates.map(candidate=>`${candidate.name}（${surfaceLabels[candidate.surface]||candidate.surface}）`).join(' ・ ')}`
+      : '下書き候補はまだありません。候補は登録後も、固定評価セットでの比較と手動承認を終えるまで本番へ適用されません。';
+  }
 
   function renderEvolutionReadiness(){
     const data = evolutionReadiness;

@@ -1284,6 +1284,9 @@ Deno.serve(async (req, info) => {
       "/foodcourt/ai-rag",
       "/foodcourt/ai-distillation-dataset",
       "/foodcourt/evolution-readiness",
+      "/foodcourt/prompt-evaluation-sets",
+      "/foodcourt/prompt-evaluation-sets/bootstrap",
+      "/foodcourt/prompt-candidates",
       "/foodcourt/daily-logs",
       "/foodcourt/daily-summary",
       "/foodcourt/daily-summary/list",
@@ -2372,6 +2375,186 @@ Deno.serve(async (req, info) => {
         store_key: requestedStore || null,
         ...readiness,
       }, 200)
+    }
+    // 自己進化 Phase 2: 本番に影響しない固定評価セットと手動候補の管理。
+    // 評価セットは承認済みRAG教材の回答をスナップショットするだけで、AIモデル/本番プロンプトは変更しない。
+    if (req.method === "GET" && path === "/foodcourt/prompt-evaluation-sets") {
+      const requestedStore = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? storeScope ?? "").trim()
+      let setQuery = supabase
+        .from("foodcourt_prompt_evaluation_sets")
+        .select("id,store_partition_key,name,status,source,baseline_model_version,case_count,created_at,updated_at")
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1)
+      let candidatesQuery = supabase
+        .from("foodcourt_prompt_candidates")
+        .select("id,name,surface,status,created_at,updated_at")
+        .eq("status", "draft")
+        .order("updated_at", { ascending: false })
+        .limit(20)
+      if (requestedStore) {
+        setQuery = setQuery.ilike("store_partition_key", requestedStore)
+        candidatesQuery = candidatesQuery.ilike("store_partition_key", requestedStore)
+      }
+      const [{ data: sets, error: setsError }, { data: candidates, error: candidatesError }] = await Promise.all([setQuery, candidatesQuery])
+      const promptEvaluationError = setsError ?? candidatesError
+      if (promptEvaluationError) return json({ error: promptEvaluationError.message }, 500)
+      return json({
+        store_key: requestedStore || null,
+        active_set: sets?.[0] ?? null,
+        candidates: candidates ?? [],
+      }, 200)
+    }
+    if (req.method === "POST" && path === "/foodcourt/prompt-evaluation-sets/bootstrap") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) return json({ error: "Invalid JSON body." }, 400)
+      const requestedStore = String(body.store_key ?? body.store ?? storeScope ?? "").trim()
+      if (!requestedStore) return json({ error: "store_key is required." }, 400)
+      if (storeScope && requestedStore.toLowerCase() !== storeScope.toLowerCase()) {
+        return json({ error: "Forbidden for this store." }, 403)
+      }
+      const { data: existingSet, error: existingError } = await supabase
+        .from("foodcourt_prompt_evaluation_sets")
+        .select("id,store_partition_key,name,status,source,baseline_model_version,case_count,created_at,updated_at")
+        .ilike("store_partition_key", requestedStore)
+        .eq("status", "active")
+        .maybeSingle()
+      if (existingError) return json({ error: existingError.message }, 500)
+      if (existingSet) return json({ ok: true, created: false, active_set: existingSet }, 200)
+
+      const [acceptedResult, humanResult, dailyResult, totalResult, completedResult] = await Promise.all([
+        supabase.from("foodcourt_ai_rag_documents")
+          .select("source_run_id,surface,source_type,final_score,updated_at")
+          .ilike("store_partition_key", requestedStore)
+          .eq("is_active", true)
+          .order("updated_at", { ascending: false })
+          .limit(200),
+        supabase.from("foodcourt_ai_rag_documents")
+          .select("source_run_id", { count: "exact", head: true })
+          .ilike("store_partition_key", requestedStore)
+          .eq("is_active", true)
+          .eq("source_type", "human_helpful"),
+        supabase.from("foodcourt_ai_rag_documents")
+          .select("source_run_id", { count: "exact", head: true })
+          .ilike("store_partition_key", requestedStore)
+          .eq("is_active", true)
+          .eq("surface", "daily_summary"),
+        supabase.from("foodcourt_ai_loop_runs")
+          .select("id", { count: "exact", head: true })
+          .ilike("store_partition_key", requestedStore),
+        supabase.from("foodcourt_ai_loop_runs")
+          .select("id", { count: "exact", head: true })
+          .ilike("store_partition_key", requestedStore)
+          .eq("status", "completed"),
+      ])
+      const bootstrapError = acceptedResult.error ?? humanResult.error ?? dailyResult.error ?? totalResult.error ?? completedResult.error
+      if (bootstrapError) return json({ error: bootstrapError.message }, 500)
+      const acceptedRows = (acceptedResult.data ?? []) as Record<string, unknown>[]
+      const readiness = assessFoodCourtEvolutionReadiness({
+        totalRuns: totalResult.count ?? 0,
+        completedRuns: completedResult.count ?? 0,
+        acceptedExamples: acceptedRows.length,
+        humanHelpfulExamples: humanResult.count ?? 0,
+        dailyAcceptedExamples: dailyResult.count ?? 0,
+        acceptedSurfaces: new Set(acceptedRows.map((row) => String(row.surface ?? "")).filter(Boolean)).size,
+      })
+      if (!readiness.gates.promptCandidate.ready) {
+        return json({ error: "プロンプト候補の比較評価を開始するための教材条件を満たしていません。", readiness }, 409)
+      }
+      const runIds = acceptedRows.map((row) => String(row.source_run_id ?? "")).filter(Boolean)
+      const { data: runs, error: runsError } = await supabase
+        .from("foodcourt_ai_loop_runs")
+        .select("id,store_partition_key,surface,source_ref,user_input,model_version,final_score,final_answer,created_at")
+        .in("id", runIds)
+      if (runsError) return json({ error: runsError.message }, 500)
+      const acceptedIds = new Set(runIds)
+      const usableRuns = ((runs ?? []) as Record<string, unknown>[]).filter((run) =>
+        acceptedIds.has(String(run.id ?? "")) &&
+        String(run.store_partition_key ?? "").toLowerCase() === requestedStore.toLowerCase() &&
+        String(run.final_answer ?? "").trim().length > 0,
+      )
+      if (usableRuns.length < 20) {
+        return json({ error: "固定評価セットに必要な20件のベースライン回答を作成できません。" }, 409)
+      }
+      const jstDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date())
+      const baselineVersions = [...new Set(usableRuns.map((run) => String(run.model_version ?? "")).filter(Boolean))]
+      const { data: createdSet, error: createSetError } = await supabase
+        .from("foodcourt_prompt_evaluation_sets")
+        .insert({
+          store_partition_key: requestedStore,
+          name: `固定評価セット v1（${jstDate}）`,
+          baseline_model_version: baselineVersions.length === 1 ? baselineVersions[0] : "mixed",
+          case_count: 0,
+        })
+        .select("id,store_partition_key,name,status,source,baseline_model_version,case_count,created_at,updated_at")
+        .single()
+      if (createSetError) {
+        if (createSetError.code === "23505") {
+          const { data: racedSet } = await supabase
+            .from("foodcourt_prompt_evaluation_sets")
+            .select("id,store_partition_key,name,status,source,baseline_model_version,case_count,created_at,updated_at")
+            .ilike("store_partition_key", requestedStore)
+            .eq("status", "active")
+            .maybeSingle()
+          if (racedSet) return json({ ok: true, created: false, active_set: racedSet }, 200)
+        }
+        return json({ error: createSetError.message }, 500)
+      }
+      const caseRows = usableRuns.map((run) => ({
+        evaluation_set_id: createdSet.id,
+        source_run_id: String(run.id),
+        surface: String(run.surface),
+        source_ref: isRecord(run.source_ref) ? run.source_ref : {},
+        user_input: typeof run.user_input === "string" ? run.user_input : null,
+        baseline_answer: String(run.final_answer),
+        baseline_score: run.final_score == null ? null : Number(run.final_score),
+        baseline_model_version: String(run.model_version ?? "") || null,
+        source_created_at: run.created_at ?? null,
+      }))
+      const { error: insertCasesError } = await supabase.from("foodcourt_prompt_evaluation_cases").insert(caseRows)
+      if (insertCasesError) {
+        await supabase.from("foodcourt_prompt_evaluation_sets").delete().eq("id", createdSet.id)
+        return json({ error: insertCasesError.message }, 500)
+      }
+      const { data: activeSet, error: updateSetError } = await supabase
+        .from("foodcourt_prompt_evaluation_sets")
+        .update({ case_count: caseRows.length, updated_at: new Date().toISOString() })
+        .eq("id", createdSet.id)
+        .select("id,store_partition_key,name,status,source,baseline_model_version,case_count,created_at,updated_at")
+        .single()
+      if (updateSetError) return json({ error: updateSetError.message }, 500)
+      return json({ ok: true, created: true, active_set: activeSet, readiness }, 201)
+    }
+    if (req.method === "POST" && path === "/foodcourt/prompt-candidates") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) return json({ error: "Invalid JSON body." }, 400)
+      const requestedStore = String(body.store_key ?? body.store ?? storeScope ?? "").trim()
+      if (!requestedStore) return json({ error: "store_key is required." }, 400)
+      if (storeScope && requestedStore.toLowerCase() !== storeScope.toLowerCase()) {
+        return json({ error: "Forbidden for this store." }, 403)
+      }
+      const name = String(body.name ?? "").trim().slice(0, 80)
+      const surface = String(body.surface ?? "all").trim()
+      const instructions = String(body.instructions ?? "").trim().slice(0, 8000)
+      if (!name || !instructions) return json({ error: "候補名と候補プロンプトを入力してください。" }, 400)
+      if (!new Set(["all", "ask", "daily_summary", "period_summary", "weekly_report"]).has(surface)) {
+        return json({ error: "Invalid surface." }, 400)
+      }
+      const { data: activeSet, error: activeSetError } = await supabase
+        .from("foodcourt_prompt_evaluation_sets")
+        .select("id")
+        .ilike("store_partition_key", requestedStore)
+        .eq("status", "active")
+        .maybeSingle()
+      if (activeSetError) return json({ error: activeSetError.message }, 500)
+      if (!activeSet) return json({ error: "先に固定評価セットを作成してください。" }, 409)
+      const { data: candidate, error: candidateError } = await supabase
+        .from("foodcourt_prompt_candidates")
+        .insert({ store_partition_key: requestedStore, name, surface, instructions, status: "draft" })
+        .select("id,name,surface,status,created_at,updated_at")
+        .single()
+      if (candidateError) return json({ error: candidateError.message }, 500)
+      return json({ ok: true, candidate }, 201)
     }
     if (req.method === "GET" && path === "/foodcourt/ai-distillation-dataset") {
       const requestedStore = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? storeScope ?? "").trim()
