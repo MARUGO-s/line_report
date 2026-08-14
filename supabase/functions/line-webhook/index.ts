@@ -18,6 +18,7 @@ import { maybeHandleFoodCourtReport, handleFoodCourtReportPostback } from '../_s
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { extractExpenseFromReceipt, handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
+import { handleReservationCalendarLinkTextMessage } from '../_shared/reservation_calendar_link_request.ts'
 import { removeRoomMediaByMessageId, saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from '../_shared/knowledge_memo_tag.ts'
 import { classifyKnowledgeFile, extensionForKind } from '../_shared/knowledge_file_extract.ts'
@@ -2865,10 +2866,30 @@ Deno.serve(async (req) => {
         }
       }
 
+      // 予約カレンダー再ログイン。「予約確認」の完全一致だけで、このWebhook店舗に固定した
+      // 新しい一回限りログインリンクを返す。期限切れ・使用済みの予約通知リンクを再利用しない。
+      let reservationCalendarLinkHandled = false
+      if (!dailySalesTemplateHandled && !roomConfigHandled && text && eventRoomId) {
+        try {
+          const reservationLinkResult = await handleReservationCalendarLinkTextMessage(supabase, registry as StoreRegistryRow, {
+            roomId: eventRoomId,
+            replyToken: String(event.replyToken ?? ''),
+            text,
+          })
+          if (reservationLinkResult.handled) {
+            reservationCalendarLinkHandled = true
+            textHandled += 1
+            if (reservationLinkResult.replied) receiptReplies += 1
+          }
+        } catch (err) {
+          console.error('reservation_calendar_link_request failed:', err instanceof Error ? err.message : String(err))
+        }
+      }
+
       // 予算登録フロー（独立・他に干渉しない）。トリガー「予算登録」or 予算pending中のみ作動し、
       // 処理した時だけ後続のレシート/検索処理をスキップする（部屋メッセージ記録は通常どおり）。
       let budgetEntryHandled = false
-      if (!dailySalesTemplateHandled && !roomConfigHandled && budgetEntryAllowed && text && eventRoomId && eventUserId) {
+      if (!dailySalesTemplateHandled && !roomConfigHandled && !reservationCalendarLinkHandled && budgetEntryAllowed && text && eventRoomId && eventUserId) {
         try {
           const budgetResult = await handleBudgetEntryTextMessage(supabase, registry as StoreRegistryRow, {
             roomId: eventRoomId,
@@ -2889,7 +2910,7 @@ Deno.serve(async (req) => {
       // 小口現金（経費）取込フロー（独立・他に干渉しない）。「経費」or 経費pending中の「キャンセル」のみ作動。
       // 権限「小口レシートの解析をする」(petty_receipt_analysis_enabled) OFF のルームでは作動しない。
       let pettyCashHandled = false
-      if (!dailySalesTemplateHandled && !roomConfigHandled && !budgetEntryHandled && pettyAnalysisAllowed && text && eventRoomId && eventUserId) {
+      if (!dailySalesTemplateHandled && !roomConfigHandled && !reservationCalendarLinkHandled && !budgetEntryHandled && pettyAnalysisAllowed && text && eventRoomId && eventUserId) {
         try {
           const pettyResult = await handlePettyCashTextMessage(supabase, registry as StoreRegistryRow, {
             roomId: eventRoomId,
@@ -2932,7 +2953,7 @@ Deno.serve(async (req) => {
       }
 
       let receiptHandled = false
-      if (!dailySalesTemplateHandled && !roomConfigHandled && !budgetEntryHandled && !pettyCashHandled) try {
+      if (!dailySalesTemplateHandled && !roomConfigHandled && !reservationCalendarLinkHandled && !budgetEntryHandled && !pettyCashHandled) try {
         // レシート操作の返信（重複確認 加算/中止/置き換え・修正・削除の結果）は AI返信完全無しの対象外。
         // 「レシートの解析結果を送信」または「レシート修正の返信を許可」の両方OFFのときだけ抑止する。
         const result = await processReceiptTextEvent(
@@ -2951,7 +2972,7 @@ Deno.serve(async (req) => {
         errors.push(msg.slice(0, 160))
       }
 
-      if (!dailySalesTemplateHandled && !roomConfigHandled && !budgetEntryHandled && !pettyCashHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
+      if (!dailySalesTemplateHandled && !roomConfigHandled && !reservationCalendarLinkHandled && !budgetEntryHandled && !pettyCashHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
         try {
           const searchResult = await handleLineSearchTextMessage(
             supabase,
