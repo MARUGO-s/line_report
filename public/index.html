@@ -5416,7 +5416,7 @@
           </section>
           <section class="card logs">
             <h2>アクセス履歴</h2>
-            <p class="muted" style="margin:0 0 8px 0;">ログイン・画面表示・アップロード／削除／AI実行などの操作をサーバー側に記録します。本部トークンは「本部」、店舗リンクは店舗名で残ります。</p>
+            <p class="muted" style="margin:0 0 8px 0;">ログイン・画面表示・アップロード／削除／AI実行などの操作をサーバー側に記録します。最新50件だけ残し、古い行は自動削除します。本部トークンは「本部」、店舗リンクは店舗名で残ります。</p>
             <div class="controls" style="margin:0 0 8px 0;">
               <button id="reloadAccessHistoryBtn" class="button" type="button">再読込</button>
             </div>
@@ -10509,7 +10509,7 @@
         return;
       }
       try {
-        var data = await api('/access/events?limit=80');
+        var data = await api('/access/events?limit=50');
         var events = Array.isArray(data.events) ? data.events : [];
         if (!events.length) {
           bodyEl.innerHTML = '<tr><td class="empty" colspan="5">まだアクセス履歴はありません。この導入以降の操作から記録されます。</td></tr>';

@@ -129,6 +129,7 @@ import {
   ROOM_CONFIG_SCOPE,
 } from "../_shared/admin_dashboard_link_auth.ts"
 import {
+  ADMIN_ACCESS_HISTORY_KEEP,
   actorFromAuth,
   classifyAdminAccess,
   insertAdminAccessEvent,
@@ -15207,10 +15208,10 @@ async function fetchAdminAccessEvents(
   url: URL,
   storeScope: string | null,
 ) {
-  const limitRaw = Number(url.searchParams.get("limit") || 80)
+  const limitRaw = Number(url.searchParams.get("limit") || ADMIN_ACCESS_HISTORY_KEEP)
   const limit = Number.isFinite(limitRaw)
-    ? Math.min(200, Math.max(1, Math.trunc(limitRaw)))
-    : 80
+    ? Math.min(ADMIN_ACCESS_HISTORY_KEEP, Math.max(1, Math.trunc(limitRaw)))
+    : ADMIN_ACCESS_HISTORY_KEEP
   let query = supabase
     .from("admin_access_events")
     .select(

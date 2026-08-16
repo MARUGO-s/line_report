@@ -1,3 +1,5 @@
+export const ADMIN_ACCESS_HISTORY_KEEP = 50
+
 export type AdminAccessClassification = {
   skip: boolean
   eventKind: "login" | "page_view" | "action"
@@ -146,5 +148,40 @@ export async function insertAdminAccessEvent(
   })
   if (error) {
     console.error("admin_access_events insert failed:", error.message)
+    return
+  }
+  await pruneAdminAccessEvents(supabase)
+}
+
+export async function pruneAdminAccessEvents(
+  supabase: { from: (table: string) => any },
+): Promise<void> {
+  try {
+    const { data, error } = await supabase
+      .from("admin_access_events")
+      .select("id")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(ADMIN_ACCESS_HISTORY_KEEP, ADMIN_ACCESS_HISTORY_KEEP + 499)
+    if (error) {
+      console.error("admin_access_events prune select failed:", error.message)
+      return
+    }
+    const ids = (Array.isArray(data) ? data : [])
+      .map((row) => Number((row as { id?: unknown }).id))
+      .filter((id) => Number.isSafeInteger(id) && id > 0)
+    if (!ids.length) return
+    const { error: deleteError } = await supabase
+      .from("admin_access_events")
+      .delete()
+      .in("id", ids)
+    if (deleteError) {
+      console.error("admin_access_events prune delete failed:", deleteError.message)
+    }
+  } catch (error) {
+    console.error(
+      "admin_access_events prune threw:",
+      error instanceof Error ? error.message : String(error),
+    )
   }
 }

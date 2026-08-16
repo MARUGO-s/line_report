@@ -11,6 +11,10 @@ const migration = await readFile(
   new URL("supabase/migrations/20260817090000_admin_access_events.sql", root),
   "utf8",
 );
+const pruneMigration = await readFile(
+  new URL("supabase/migrations/20260817120000_admin_access_events_keep_50.sql", root),
+  "utf8",
+);
 const indexPage = await readFile(new URL("public/index.html", root), "utf8");
 const journalPage = await readFile(
   new URL("public/pos-journal.html", root),
@@ -35,5 +39,12 @@ test("admin logs tab shows access history and pages send a view beacon", () => {
   assert.match(indexPage, /id="accessHistoryBody"/);
   assert.match(indexPage, /function loadAdminAccessHistory\(/);
   assert.match(indexPage, /access-log\.js/);
+  assert.match(indexPage, /limit=50/);
   assert.match(journalPage, /access-log\.js/);
+});
+
+test("access history keeps only the newest 50 rows", () => {
+  assert.match(pruneMigration, /offset 50/);
+  assert.match(pruneMigration, /admin_access_events_prune/);
+  assert.match(adminApi, /ADMIN_ACCESS_HISTORY_KEEP/);
 });
