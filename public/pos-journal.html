@@ -151,6 +151,8 @@
     .btn:hover { background: var(--surface); }
     .btn.btn-primary { background: var(--accent); border-color: transparent; color: #fff; }
     .btn.btn-primary:hover { filter: brightness(1.08); }
+    .btn.btn-warn { background: var(--warn); border-color: transparent; color: #fff; }
+    .btn.btn-warn:hover { filter: brightness(1.08); }
     .btn.btn-danger { background: var(--err); border-color: transparent; color: #fff; }
     .btn.btn-danger:hover { filter: brightness(1.08); }
     .btn:disabled { opacity: 0.55; cursor: default; }
@@ -649,7 +651,7 @@
                   <div class="pj-ai-actions">
                     <span class="pj-ai-status" id="aiStatus"></span>
                     <button class="btn" id="aiPdfBtn" type="button" disabled>PDFで保存</button>
-                    <a class="btn" href="https://marugo-s.github.io/line_report/jnm/jnl2txt.html" target="_blank" rel="noopener noreferrer">詳しく分析する</a>
+                    <a class="btn btn-warn" href="https://marugo-s.github.io/line_report/jnm/jnl2txt.html" target="_blank" rel="noopener noreferrer">詳しく分析する</a>
                     <button class="btn btn-primary" id="aiAnalyzeBtn" type="button">AIで月次分析</button>
                   </div>
                 </div>
