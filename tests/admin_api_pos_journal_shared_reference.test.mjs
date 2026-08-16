@@ -46,7 +46,7 @@ test("POS journal summary shows food/drink mix and daily majority icons", () => 
   assert.match(page, /function renderChargeGuestMix\(/);
   assert.match(page, /function dayChargeGuestCompare\(/);
   assert.match(page, /チャージ\/客数/);
-  assert.match(page, /colspan="14"/);
+  assert.match(page, /colspan="12"/);
 });
 
 test("POS journal state applies Journal Report category overrides", () => {
