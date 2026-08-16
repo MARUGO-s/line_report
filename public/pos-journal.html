@@ -367,6 +367,8 @@
     .fd-compare-txt { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--text-2); }
     .fd-compare-txt .food { color: #e0922a; }
     .fd-compare-txt .drink { color: var(--accent); }
+    .fd-compare-bar.ch .charge { background: var(--warn); }
+    .fd-compare-txt .charge { color: var(--warn); }
     .fd-compare-empty { color: var(--text-3); font-weight: 500; }
     table.pj-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     table.pj-table th, table.pj-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
@@ -629,7 +631,7 @@
                 <thead>
                   <tr>
                     <th class="l">営業日</th><th class="l">曜</th><th class="l">天候</th><th>気温</th>
-                    <th>組数</th><th>客数</th><th>客単価</th>
+                    <th>組数</th><th>客数</th><th class="l">チャージ/客数</th><th>客単価</th>
                     <th>純売上</th><th>消費税</th><th>総売上</th>
                     <th class="l">フード/ドリンク</th>
                     <th>現金</th><th>クレジット</th>
@@ -1225,9 +1227,12 @@
         el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / Storage保管ファイル ' + storageFiles + '件 / 解析 ' + (m.day_count||0) + '日分';
       }
       el('rangeBadge').textContent = '営業日 ' + openDays.length + '日（記録 ' + days.length + '日）';
+      var chargeGuest=monthChargeGuest(days,data.item_ranking,t);
+      var chargePct=chargeGuest.guests?Math.round(chargeGuest.chargeQty/chargeGuest.guests*100):null;
       var kpis = [
         { l:'総売上',v:yen(t.gross_sales),s:'純売上 '+yen(t.net_sales),accent:true },
         { l:'消費税',v:yen(t.tax),s:'内税' }, { l:'客数',v:num(t.guests)+' 名',s:(t.groups||0)+' 組' },
+        { l:'チャージ取得',v:chargePct!=null?chargePct+'%':'—',s:'チャージ '+num(chargeGuest.chargeQty)+'名 / 客数 '+num(chargeGuest.guests)+'名' },
         { l:'客単価',v:yen(t.avg_spend),s:'総売上 ÷ 客数' }, { l:'営業日数',v:openDays.length+' 日',s:'記録 '+days.length+' 日' },
         { l:'1日平均',v:yen(openDays.length?Math.round((t.gross_sales||0)/openDays.length):0),s:'営業日あたり' }
       ];
@@ -1235,8 +1240,8 @@
       var pays=[{n:'現金',v:t.cash_amount||0,c:'var(--ok)'},{n:'クレジット',v:t.credit_amount||0,c:'var(--accent)'},{n:'食べログ',v:t.tabelog_amount||0,c:'#d8961f'},{n:'一休',v:t.ikyu_amount||0,c:'#9b6dd8'},{n:'ぐるなび',v:t.gurunavi_amount||0,c:'#e05656'}].filter(function(p){return p.v>0;});
       var paySum=pays.reduce(function(a,p){return a+p.v;},0)||1;
       var payHtml=pays.map(function(p){var pct=Math.round(p.v/paySum*100);return '<div class="pay-row"><div class="pay-name">'+p.n+'</div><div class="pay-bar"><span style="width:'+pct+'%;background:'+p.c+'"></span></div><div class="pay-val">'+yen(p.v)+' <small>'+pct+'%</small></div></div>';}).join('')||'<div class="pj-empty">決済データなし</div>';
-      el('payBox').innerHTML=payHtml+renderFoodDrinkMix(days,data.item_ranking,t);
-      el('dayBody').innerHTML=days.map(function(d,idx){var dt=d.business_date||'',wd=dt?WD[new Date(dt+'T00:00:00').getDay()]:'',cash=(d.pay_cash||{}).amount||0,cr=(d.pay_credit||{}).amount||0,rc=(d.receipts||[]).length,wxLabel=dayWeatherLabel(d),tempC=dayTempC(d),wx=wxLabel?'<span class="wx">'+weatherIcon(wxLabel)+esc(wxLabel)+'</span>':'—',fdMark=dayFoodDrinkMark(d);return '<tr class="day-row '+((d.gross_sales||0)===0?'closed':'')+'" data-idx="'+idx+'"><td class="l">'+esc(dt)+fdMark+(rc?' <span class="chip">'+rc+'会計</span>':'')+'</td><td class="l">'+wd+'</td><td class="l">'+wx+'</td><td>'+(tempC!=null?tempC+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td class="l">'+dayFoodDrinkCompare(d)+'</td><td>'+(cash?yen(cash):'—')+'</td><td>'+(cr?yen(cr):'—')+'</td></tr><tr class="receipts-cell" data-detail="'+idx+'" hidden><td colspan="13" class="l"><div class="receipts-box">'+receiptsHTML(d)+'</div></td></tr>';}).join('');
+      el('payBox').innerHTML=payHtml+renderFoodDrinkMix(days,data.item_ranking,t)+renderChargeGuestMix(days,data.item_ranking,t);
+      el('dayBody').innerHTML=days.map(function(d,idx){var dt=d.business_date||'',wd=dt?WD[new Date(dt+'T00:00:00').getDay()]:'',cash=(d.pay_cash||{}).amount||0,cr=(d.pay_credit||{}).amount||0,rc=(d.receipts||[]).length,wxLabel=dayWeatherLabel(d),tempC=dayTempC(d),wx=wxLabel?'<span class="wx">'+weatherIcon(wxLabel)+esc(wxLabel)+'</span>':'—',fdMark=dayFoodDrinkMark(d);return '<tr class="day-row '+((d.gross_sales||0)===0?'closed':'')+'" data-idx="'+idx+'"><td class="l">'+esc(dt)+fdMark+(rc?' <span class="chip">'+rc+'会計</span>':'')+'</td><td class="l">'+wd+'</td><td class="l">'+wx+'</td><td>'+(tempC!=null?tempC+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td class="l">'+dayChargeGuestCompare(d)+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td class="l">'+dayFoodDrinkCompare(d)+'</td><td>'+(cash?yen(cash):'—')+'</td><td>'+(cr?yen(cr):'—')+'</td></tr><tr class="receipts-cell" data-detail="'+idx+'" hidden><td colspan="14" class="l"><div class="receipts-box">'+receiptsHTML(d)+'</div></td></tr>';}).join('');
       el('dayBody').querySelectorAll('tr.day-row').forEach(function(tr){tr.addEventListener('click',function(){var det=el('dayBody').querySelector('tr[data-detail="'+tr.getAttribute('data-idx')+'"]');if(det)det.hidden=!det.hidden;});});
       currentRanking=Array.isArray(data.item_ranking)?data.item_ranking:[];
       renderProductRanking();
@@ -1255,8 +1260,15 @@
       if(code===2)return 'room';
       return 'other';
     }
+    function isChargeItem(item) {
+      if(!item)return false;
+      if(item.isCharge)return true;
+      var digits=String(item.code||'').normalize('NFKC').replace(/\D/g,'');
+      if(Number(digits)===1)return true;
+      return /チャージ料/.test(String(item.name||'').normalize('NFKC'));
+    }
     function foodDrinkAmountsFromItems(items) {
-      var food=0,drink=0,room=0,other=0,charge=0;
+      var food=0,drink=0,room=0,other=0,charge=0,chargeQty=0;
       (Array.isArray(items)?items:[]).forEach(function(item){
         var cat=productRankingCategory(item);
         var amount=Number(item&&item.amount)||0;
@@ -1264,16 +1276,15 @@
         else if(cat==='drink')drink+=amount;
         else if(cat==='room')room+=amount;
         else other+=amount;
-        if(item&&item.isCharge)charge+=amount;
-        else {
-          var digits=String(item&&item.code||'').normalize('NFKC').replace(/\D/g,'');
-          if(Number(digits)===1)charge+=amount;
+        if(isChargeItem(item)){
+          charge+=amount;
+          chargeQty+=Number(item.qty)||0;
         }
       });
-      return {food:food,drink:drink,room:room,other:other,charge:charge};
+      return {food:food,drink:drink,room:room,other:other,charge:charge,chargeQty:chargeQty};
     }
     function dayFoodDrink(day) {
-      var totals={food:0,drink:0,room:0,other:0,charge:0};
+      var totals={food:0,drink:0,room:0,other:0,charge:0,chargeQty:0};
       (day&&Array.isArray(day.receipts)?day.receipts:[]).forEach(function(receipt){
         var part=foodDrinkAmountsFromItems(receipt&&receipt.items);
         totals.food+=part.food;
@@ -1281,8 +1292,39 @@
         totals.room+=part.room;
         totals.other+=part.other;
         totals.charge+=part.charge;
+        totals.chargeQty+=part.chargeQty;
       });
       return totals;
+    }
+    function monthChargeGuest(days,ranking,serverTotals) {
+      var chargeQty=0,guests=0;
+      (Array.isArray(days)?days:[]).forEach(function(day){
+        chargeQty+=dayFoodDrink(day).chargeQty;
+        guests+=Number(day&&day.guests)||0;
+      });
+      if(!chargeQty)chargeQty=foodDrinkAmountsFromItems(ranking).chargeQty;
+      if(serverTotals&&serverTotals.guests!=null)guests=Number(serverTotals.guests)||guests;
+      return {chargeQty:chargeQty,guests:guests};
+    }
+    function renderChargeGuestMix(days,ranking,serverTotals) {
+      var stat=monthChargeGuest(days,ranking,serverTotals);
+      if(!stat.chargeQty&&!stat.guests)return '';
+      var pct=stat.guests?Math.min(100,Math.round(stat.chargeQty/stat.guests*100)):0;
+      var miss=Math.max(0,stat.guests-stat.chargeQty);
+      var extra=stat.chargeQty>stat.guests?stat.chargeQty-stat.guests:0;
+      var note=extra
+        ? 'チャージ請求 '+num(stat.chargeQty)+'名が来客 '+num(stat.guests)+'名を上回っています。請求数はチャージ料の数量。'
+        : 'チャージ請求 '+num(stat.chargeQty)+'名 / 来客 '+num(stat.guests)+'名（未取得 '+num(miss)+'名）。請求数はチャージ料の数量。';
+      return '<div class="pj-pay-mix"><div class="pj-pay-mix-title">来客とチャージ</div>'
+        +'<div class="pay-row"><div class="pay-name">取得率</div><div class="pay-bar"><span style="width:'+pct+'%;background:var(--warn)"></span></div><div class="pay-val">'+pct+'% <small>'+num(stat.chargeQty)+'/'+num(stat.guests)+'名</small></div></div>'
+        +'<div class="pj-pay-mix-note">'+note+'</div></div>';
+    }
+    function dayChargeGuestCompare(day) {
+      var charge=dayFoodDrink(day).chargeQty;
+      var guests=Number(day&&day.guests)||0;
+      if(!charge&&!guests)return '<span class="fd-compare-empty">—</span>';
+      var pct=guests?Math.min(100,Math.round(charge/guests*100)):0;
+      return '<div class="fd-compare ch" title="チャージ '+charge+'名 / 客数 '+guests+'名"><div class="fd-compare-bar ch"><span class="charge" style="width:'+pct+'%"></span></div><div class="fd-compare-txt"><span class="charge">C '+charge+'</span><span>客 '+guests+'</span></div></div>';
     }
     function foodDrinkShare(food,drink) {
       var sum=(Number(food)||0)+(Number(drink)||0);
