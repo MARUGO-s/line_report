@@ -5414,6 +5414,27 @@
               </table>
             </div>
           </section>
+          <section class="card logs">
+            <h2>アクセス履歴</h2>
+            <p class="muted" style="margin:0 0 8px 0;">ログイン・画面表示・アップロード／削除／AI実行などの操作をサーバー側に記録します。本部トークンは「本部」、店舗リンクは店舗名で残ります。</p>
+            <div class="controls" style="margin:0 0 8px 0;">
+              <button id="reloadAccessHistoryBtn" class="button" type="button">再読込</button>
+            </div>
+            <div class="table-wrap log-table-wrap">
+              <table class="log-table" id="accessHistoryTable">
+                <thead>
+                  <tr>
+                    <th>日時</th>
+                    <th>操作</th>
+                    <th>画面</th>
+                    <th>店舗</th>
+                    <th>実行者</th>
+                  </tr>
+                </thead>
+                <tbody id="accessHistoryBody"></tbody>
+              </table>
+            </div>
+          </section>
         </main>
       </div>
     </div>
@@ -5907,6 +5928,9 @@
           if (panel) panel.classList.toggle('active', id === name);
         });
         try { sessionStorage.setItem(TAB_STORE_KEY, name); } catch(_) {}
+        if (name === 'logs' && typeof window.loadAdminAccessHistory === 'function') {
+          window.loadAdminAccessHistory();
+        }
       };
 
       // Restore last active tab on page load
@@ -5921,6 +5945,7 @@
 
   <script src="pages-config.js"></script>
   <script src="auth-session.js?v=20260624"></script>
+  <script src="access-log.js?v=20260817"></script>
   <script src="site-cache.js"></script>
   <script>
     if (!window.LINE_REPORT_PAGES) {
@@ -10441,6 +10466,69 @@
       return body;
     }
 
+    function accessActionLabel(action) {
+      var labels = {
+        login: 'ログイン',
+        logout: 'ログアウト',
+        page_view: '画面表示',
+        read: '再読込',
+        upload: 'アップロード',
+        delete: '削除',
+        download: 'ダウンロード',
+        ai: 'AI実行',
+        save: '保存',
+      };
+      return labels[action] || action || '操作';
+    }
+
+    function accessPageLabel(page) {
+      var labels = {
+        admin: '管理画面',
+        index: '管理画面',
+        'pos-journal': '電子ジャーナル',
+        jnl2txt: 'Journal Report',
+        analytics: '売上分析',
+        reservation: '予約表',
+        'petty-cash': '小口現金',
+        foodcourt: 'フードコート',
+        reviews: '口コミ・競合',
+        media: 'メディア',
+        'message-search': '会話検索',
+        'ai-usage': 'AI使用料',
+        'foodcourt-report': 'フードコート日報',
+        'foodcourt-evolution': 'AI学習 進化',
+      };
+      return labels[page] || page || '—';
+    }
+
+    async function loadAdminAccessHistory() {
+      var bodyEl = document.getElementById('accessHistoryBody');
+      if (!bodyEl) return;
+      if (!getToken()) {
+        bodyEl.innerHTML = '<tr><td class="empty" colspan="5">先に管理トークンで接続してください。</td></tr>';
+        return;
+      }
+      try {
+        var data = await api('/access/events?limit=80');
+        var events = Array.isArray(data.events) ? data.events : [];
+        if (!events.length) {
+          bodyEl.innerHTML = '<tr><td class="empty" colspan="5">まだアクセス履歴はありません。この導入以降の操作から記録されます。</td></tr>';
+          return;
+        }
+        bodyEl.innerHTML = events.map(function (row) {
+          var when = row.created_at ? new Date(row.created_at).toLocaleString('ja-JP') : '—';
+          return '<tr><td>' + escapeHtml(when) + '</td><td>' + escapeHtml(accessActionLabel(row.action)) +
+            '</td><td>' + escapeHtml(accessPageLabel(row.page)) + '</td><td>' +
+            escapeHtml(row.store_partition_key || '全店') + '</td><td>' +
+            escapeHtml(row.actor_label || '不明') + '</td></tr>';
+        }).join('');
+      } catch (error) {
+        bodyEl.innerHTML = '<tr><td class="empty" colspan="5">' +
+          escapeHtml(error && error.message ? error.message : String(error)) + '</td></tr>';
+      }
+    }
+    window.loadAdminAccessHistory = loadAdminAccessHistory;
+
     function nextAutoRefreshMs() {
       return document.visibilityState === 'visible' ? AUTO_REFRESH_MS_VISIBLE : AUTO_REFRESH_MS_HIDDEN;
     }
@@ -13849,6 +13937,15 @@
     dom.themeToggleBtn.addEventListener('click', function() {
       toggleTheme();
     });
+
+    var reloadAccessHistoryBtn = document.getElementById('reloadAccessHistoryBtn');
+    if (reloadAccessHistoryBtn) {
+      reloadAccessHistoryBtn.addEventListener('click', function () {
+        loadAdminAccessHistory().catch(function (error) {
+          alert(error && error.message ? error.message : String(error));
+        });
+      });
+    }
 
     dom.reloadUserPermissionsBtn.addEventListener('click', async function() {
       try { await safeLoadState(); } catch (e) { alert(e.message || String(e)); }

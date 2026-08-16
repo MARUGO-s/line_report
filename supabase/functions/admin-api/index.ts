@@ -129,6 +129,11 @@ import {
   ROOM_CONFIG_SCOPE,
 } from "../_shared/admin_dashboard_link_auth.ts"
 import {
+  actorFromAuth,
+  classifyAdminAccess,
+  insertAdminAccessEvent,
+} from "../_shared/admin_access_log.ts"
+import {
   fetchWeatherDailyRange,
   fetchWeatherDailyState,
 } from "../_shared/weather_daily.ts"
@@ -1092,6 +1097,18 @@ Deno.serve(async (req, info) => {
           exchanged_via: "admin_api",
         },
       })
+      void recordCurrentAdminAccess({
+        supabase,
+        req,
+        path,
+        method: req.method,
+        ip: clientIp,
+        action: "login",
+        eventKind: "login",
+        page: "admin",
+        actorKind: "store_link",
+        actorLabel: "ログインリンク",
+      })
       return json({
         ok: true,
         session_token: session.token,
@@ -1125,6 +1142,18 @@ Deno.serve(async (req, info) => {
       const session = await exchangeRoomConfigLoginLink(supabase, loginToken, password, {
         rememberLogin,
         metadata: { admin_surface: adminSurface, exchanged_via: "admin_api" },
+      })
+      void recordCurrentAdminAccess({
+        supabase,
+        req,
+        path,
+        method: req.method,
+        ip: clientIp,
+        action: "login",
+        eventKind: "login",
+        page: "admin",
+        actorKind: "store_link",
+        actorLabel: "ルーム設定リンク",
       })
       return json({ ok: true, session_token: session.token, expires_at: session.expires_at }, 200)
     } catch (e) {
@@ -1160,6 +1189,18 @@ Deno.serve(async (req, info) => {
           admin_surface: adminSurface,
           exchanged_via: "admin_api_manual_login",
         },
+      })
+      void recordCurrentAdminAccess({
+        supabase,
+        req,
+        path,
+        method: req.method,
+        ip: clientIp,
+        action: "login",
+        eventKind: "login",
+        page: "admin",
+        actorKind: "admin_token",
+        actorLabel: "本部",
       })
       return json({
         ok: true,
@@ -1303,6 +1344,7 @@ Deno.serve(async (req, info) => {
       "/foodcourt/events/attendance",
       "/analytics/holidays",
       "/analytics/monthly",
+      "/access/events",
       "/weather/daily",
       "/receipts/sales",
       "/receipts/sheets-pilot-link",
@@ -1402,6 +1444,46 @@ Deno.serve(async (req, info) => {
   }
 
   try {
+    if (authResult.scopeKind !== "cron") {
+      void recordCurrentAdminAccess({
+        supabase,
+        req,
+        path,
+        method: req.method,
+        ip: clientIp,
+        auth: authResult,
+      })
+    }
+
+    if (req.method === "GET" && path === "/access/events") {
+      return json(await fetchAdminAccessEvents(supabase, url, storeScope), 200)
+    }
+    if (req.method === "POST" && path === "/access/events") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      const actor = actorFromAuth(authResult)
+      const page = String(body.page ?? "").trim() || "unknown"
+      const storeKey = storeScope ||
+        String(body.store_key ?? body.store ?? "").trim() || null
+      await insertAdminAccessEvent(supabase, {
+        eventKind: "page_view",
+        action: "page_view",
+        page,
+        method: "POST",
+        apiPath: path,
+        storeKey,
+        actorKind: actor.actorKind,
+        actorLabel: actor.actorLabel,
+        lineUserId: actor.lineUserId,
+        ip: clientIp,
+        userAgent: req.headers.get("user-agent"),
+        detail: { path: String(body.path ?? "").slice(0, 240) },
+      })
+      return json({ ok: true }, 200)
+    }
+
     if (req.method === "POST" && path === "/auth/logout") {
       const provided = req.headers.get("x-admin-token") ?? ""
       const revoked = await revokeAdminDashboardSessionToken(supabase, provided)
@@ -15081,6 +15163,101 @@ function isPublicIp(ip: string): boolean {
 
 // レート制限のキーに使うクライアントIP。攻撃者が自由に詐称してキーを変えられないよう、
 // 「詐称できない情報源」を優先する。
+async function recordCurrentAdminAccess(params: {
+  supabase: ReturnType<typeof createClient>
+  req: Request
+  path: string
+  method: string
+  ip: string
+  auth?: { storeScope?: string | null; scopeKind?: string | null }
+  storeKey?: string | null
+  eventKind?: string
+  action?: string
+  page?: string
+  actorKind?: string
+  actorLabel?: string
+}): Promise<void> {
+  try {
+    const classified = classifyAdminAccess(params.method, params.path)
+    if (classified.skip && !params.action) return
+    const actor = actorFromAuth(params.auth || {})
+    await insertAdminAccessEvent(params.supabase, {
+      eventKind: params.eventKind || classified.eventKind,
+      action: params.action || classified.action,
+      page: params.page || classified.page,
+      method: params.method,
+      apiPath: params.path,
+      storeKey: params.storeKey ?? params.auth?.storeScope ?? null,
+      actorKind: params.actorKind || actor.actorKind,
+      actorLabel: params.actorLabel || actor.actorLabel,
+      lineUserId: actor.lineUserId,
+      ip: params.ip,
+      userAgent: params.req.headers.get("user-agent"),
+    })
+  } catch (error) {
+    console.error(
+      "recordCurrentAdminAccess failed:",
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+}
+
+async function fetchAdminAccessEvents(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+  storeScope: string | null,
+) {
+  const limitRaw = Number(url.searchParams.get("limit") || 80)
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(200, Math.max(1, Math.trunc(limitRaw)))
+    : 80
+  let query = supabase
+    .from("admin_access_events")
+    .select(
+      "id, created_at, event_kind, action, page, method, api_path, store_partition_key, actor_kind, actor_label, line_user_id, ip",
+    )
+    .order("created_at", { ascending: false })
+    .limit(limit)
+  if (storeScope) query = query.eq("store_partition_key", storeScope)
+  const { data, error } = await query
+  if (error) {
+    throw {
+      status: 500,
+      message: `Failed to fetch access events: ${error.message}`,
+    } satisfies AppError
+  }
+  const rows = Array.isArray(data) ? data : []
+  const lineIds = [
+    ...new Set(
+      rows.map((row) => String((row as { line_user_id?: unknown }).line_user_id || "").trim())
+        .filter(Boolean),
+    ),
+  ]
+  const nameById = new Map<string, string>()
+  if (lineIds.length) {
+    const { data: users } = await supabase
+      .from("line_user_permissions")
+      .select("line_user_id, display_name")
+      .in("line_user_id", lineIds)
+    for (const user of users || []) {
+      const id = String((user as { line_user_id?: unknown }).line_user_id || "").trim()
+      const name = String((user as { display_name?: unknown }).display_name || "").trim()
+      if (id && name) nameById.set(id, name)
+    }
+  }
+  return {
+    ok: true,
+    events: rows.map((row) => {
+      const lineUserId = String((row as { line_user_id?: unknown }).line_user_id || "").trim()
+      const actorLabel = String((row as { actor_label?: unknown }).actor_label || "").trim()
+      return {
+        ...row,
+        actor_label: (lineUserId && nameById.get(lineUserId)) || actorLabel || "不明",
+      }
+    }),
+  }
+}
+
 function extractClientIp(headers: Headers, info?: { remoteAddr?: { hostname?: string } }): string {
   // 1) プラットフォームが付与する実接続元（クライアントが詐称不可）。公開IPのときのみ採用。
   const remote = String(info?.remoteAddr?.hostname ?? "").trim()
