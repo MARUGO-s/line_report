@@ -1,7 +1,11 @@
 import {
+  applyCachedWeatherToPosJournalDays,
   applyPosJournalCategoryOverrides,
   buildPosJournalDaysFromSavedReports,
   buildPosJournalSummary,
+  parsePosJournalTempC,
+  posJournalDayNeedsWeather,
+  posJournalWeatherLabelFromCache,
 } from "../supabase/functions/_shared/pos_journal.ts";
 
 function assertEquals(actual: unknown, expected: unknown): void {
@@ -11,6 +15,65 @@ function assertEquals(actual: unknown, expected: unknown): void {
     throw new Error(`assertEquals failed\nactual: ${a}\nexpected: ${e}`);
   }
 }
+
+Deno.test("missing POS weather is filled from analytics weather cache", () => {
+  assertEquals(parsePosJournalTempC(null), null);
+  assertEquals(parsePosJournalTempC(""), null);
+  assertEquals(parsePosJournalTempC(0), null);
+  assertEquals(parsePosJournalTempC(0, "雪"), 0);
+  assertEquals(parsePosJournalTempC(28, ""), 28);
+  assertEquals(posJournalWeatherLabelFromCache({ temp: 27.6, rain: 0, code: 1 }), "晴れ");
+  assertEquals(posJournalWeatherLabelFromCache({ temp: 24, rain: 8.2, code: 63 }), "雨");
+
+  const days = applyCachedWeatherToPosJournalDays([
+    {
+      business_date: "2025-07-16",
+      source: "saved_report:test",
+      weather: "",
+      temp_c: 0,
+      receipts: [],
+    },
+    {
+      business_date: "2025-07-17",
+      source: "saved_report:test",
+      weather: "晴れ",
+      temp_c: 28,
+      receipts: [],
+    },
+  ], {
+    "2025-07-16": { temp: 26.4, rain: 0.2, code: 2 },
+  });
+
+  assertEquals(posJournalDayNeedsWeather({ weather: "", temp_c: 0 }), true);
+  assertEquals(days[0].weather, "晴れ");
+  assertEquals(days[0].temp_c, 26);
+  assertEquals(days[1].weather, "晴れ");
+  assertEquals(days[1].temp_c, 28);
+});
+
+Deno.test("null temperature on saved sales does not become 0℃", () => {
+  const days = buildPosJournalDaysFromSavedReports([
+    {
+      id: "null-temp",
+      data: {
+        sourceMonths: ["2025-07"],
+        sales: [
+          {
+            no: "1",
+            date: "2025-07-16",
+            total: 10_000,
+            customers: 1,
+            weather: "",
+            tempC: null,
+            items: [],
+          },
+        ],
+      },
+    },
+  ], "2025-07");
+  assertEquals(days[0].weather, "");
+  assertEquals(days[0].temp_c, null);
+});
 
 Deno.test("Journal Report saved sales convert to POS journal days", () => {
   const days = buildPosJournalDaysFromSavedReports([

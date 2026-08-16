@@ -471,3 +471,27 @@ export async function fetchWeatherDailyState(
     fetched_new: fetchedNew,
   }
 }
+
+export type WeatherDailyRangeQuery = {
+  lat: number
+  lon: number
+  from: string
+  to: string
+  storeKey?: string
+  includeForecast?: boolean
+}
+
+/** analytics と同じ Open-Meteo / line_weather_daily 経路を店舗座標で呼ぶ。 */
+export async function fetchWeatherDailyRange(
+  supabase: SupabaseClient,
+  query: WeatherDailyRangeQuery,
+): Promise<WeatherDailyResult> {
+  const url = new URL('https://weather.local/daily')
+  url.searchParams.set('lat', String(query.lat))
+  url.searchParams.set('lon', String(query.lon))
+  url.searchParams.set('from', query.from)
+  url.searchParams.set('to', query.to)
+  if (query.storeKey) url.searchParams.set('store_key', query.storeKey)
+  if (query.includeForecast === false) url.searchParams.set('include_forecast', '0')
+  return fetchWeatherDailyState(supabase, url)
+}

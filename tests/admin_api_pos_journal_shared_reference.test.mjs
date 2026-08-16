@@ -28,7 +28,7 @@ test("POS journal AI uses the same shared report merge as the screen", () => {
   assert.notEqual(start, -1);
   const body = adminApi.slice(start, start + 2500);
   assert.match(body, /fetchSharedJournalReportState/);
-  assert.match(body, /const combinedDays = \[/);
+  assert.match(body, /const combinedDays = await fillPosJournalDaysWeather\(/);
   assert.match(body, /!storedDateSet\.has\(day\.business_date\)/);
   assert.match(body, /days: combinedDays/);
 });
@@ -49,6 +49,15 @@ test("POS journal summary shows food/drink mix and daily majority icons", () => 
 test("POS journal state applies Journal Report category overrides", () => {
   assert.match(adminApi, /const categoryOverrides = await fetchPosJournalCategoryOverrides/);
   assert.match(adminApi, /categoryOverrides,/);
+});
+
+test("POS journal fills missing weather from analytics cache", () => {
+  assert.match(adminApi, /async function fillPosJournalDaysWeather\(/);
+  assert.match(adminApi, /fetchWeatherDailyRange/);
+  assert.match(adminApi, /STORE_COORDINATES/);
+  assert.match(adminApi, /applyCachedWeatherToPosJournalDays/);
+  assert.match(page, /function dayTempC\(/);
+  assert.match(page, /n === 0 && !weather/);
 });
 
 test("POS journal page renders shared-only months and explains the source", () => {

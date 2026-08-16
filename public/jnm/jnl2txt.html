@@ -5008,7 +5008,9 @@ function buildSharedPosJournalDays(report) {
       : (sale.isSplitFragment ? 0 : 1);
     day.guests += Number(sale.customers) || 0;
     if (sale.weather) day.weather = sale.weather;
-    if (Number.isFinite(Number(sale.tempC))) day.tempC = Number(sale.tempC);
+    if (sale.tempC != null && sale.tempC !== '' && Number.isFinite(Number(sale.tempC))) {
+      if (!(Number(sale.tempC) === 0 && !sale.weather)) day.tempC = Number(sale.tempC);
+    }
     const byMethod = sale?.payments?.byMethod;
     const paymentEntries = byMethod instanceof Map
       ? [...byMethod.entries()]

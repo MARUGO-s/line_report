@@ -864,7 +864,19 @@
       if (!w) return '';
       if (/雨/.test(w)) return '🌧'; if (/雪/.test(w)) return '❄️';
       if (/曇|くもり|ｸﾓﾘ/.test(w)) return '☁️'; if (/晴/.test(w)) return '☀️';
+      if (/霧/.test(w)) return '🌫'; if (/雷/.test(w)) return '⛈';
       return '•';
+    }
+    function dayWeatherLabel(day) {
+      return String(day && day.weather || '').trim();
+    }
+    function dayTempC(day) {
+      var weather = dayWeatherLabel(day);
+      if (day == null || day.temp_c == null || day.temp_c === '') return null;
+      var n = Number(day.temp_c);
+      if (!isFinite(n)) return null;
+      if (n === 0 && !weather) return null;
+      return n;
     }
     function formatSize(bytes) {
       var n = Number(bytes)||0;
@@ -1235,7 +1247,7 @@
       var paySum=pays.reduce(function(a,p){return a+p.v;},0)||1;
       var payHtml=pays.map(function(p){var pct=Math.round(p.v/paySum*100);return '<div class="pay-row"><div class="pay-name">'+p.n+'</div><div class="pay-bar"><span style="width:'+pct+'%;background:'+p.c+'"></span></div><div class="pay-val">'+yen(p.v)+' <small>'+pct+'%</small></div></div>';}).join('')||'<div class="pj-empty">決済データなし</div>';
       el('payBox').innerHTML=payHtml+renderFoodDrinkMix(days,data.item_ranking,t);
-      el('dayBody').innerHTML=days.map(function(d,idx){var dt=d.business_date||'',wd=dt?WD[new Date(dt+'T00:00:00').getDay()]:'',cash=(d.pay_cash||{}).amount||0,cr=(d.pay_credit||{}).amount||0,rc=(d.receipts||[]).length,wx=d.weather?'<span class="wx">'+weatherIcon(d.weather)+esc(d.weather)+'</span>':'—',fdMark=dayFoodDrinkMark(d);return '<tr class="day-row '+((d.gross_sales||0)===0?'closed':'')+'" data-idx="'+idx+'"><td class="l">'+esc(dt)+fdMark+(rc?' <span class="chip">'+rc+'会計</span>':'')+'</td><td class="l">'+wd+'</td><td class="l">'+wx+'</td><td>'+(d.temp_c!=null?d.temp_c+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td class="l">'+dayFoodDrinkCompare(d)+'</td><td>'+(cash?yen(cash):'—')+'</td><td>'+(cr?yen(cr):'—')+'</td></tr><tr class="receipts-cell" data-detail="'+idx+'" hidden><td colspan="13" class="l"><div class="receipts-box">'+receiptsHTML(d)+'</div></td></tr>';}).join('');
+      el('dayBody').innerHTML=days.map(function(d,idx){var dt=d.business_date||'',wd=dt?WD[new Date(dt+'T00:00:00').getDay()]:'',cash=(d.pay_cash||{}).amount||0,cr=(d.pay_credit||{}).amount||0,rc=(d.receipts||[]).length,wxLabel=dayWeatherLabel(d),tempC=dayTempC(d),wx=wxLabel?'<span class="wx">'+weatherIcon(wxLabel)+esc(wxLabel)+'</span>':'—',fdMark=dayFoodDrinkMark(d);return '<tr class="day-row '+((d.gross_sales||0)===0?'closed':'')+'" data-idx="'+idx+'"><td class="l">'+esc(dt)+fdMark+(rc?' <span class="chip">'+rc+'会計</span>':'')+'</td><td class="l">'+wd+'</td><td class="l">'+wx+'</td><td>'+(tempC!=null?tempC+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td class="l">'+dayFoodDrinkCompare(d)+'</td><td>'+(cash?yen(cash):'—')+'</td><td>'+(cr?yen(cr):'—')+'</td></tr><tr class="receipts-cell" data-detail="'+idx+'" hidden><td colspan="13" class="l"><div class="receipts-box">'+receiptsHTML(d)+'</div></td></tr>';}).join('');
       el('dayBody').querySelectorAll('tr.day-row').forEach(function(tr){tr.addEventListener('click',function(){var det=el('dayBody').querySelector('tr[data-detail="'+tr.getAttribute('data-idx')+'"]');if(det)det.hidden=!det.hidden;});});
       currentRanking=Array.isArray(data.item_ranking)?data.item_ranking:[];
       renderProductRanking();

@@ -20,6 +20,7 @@ import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared
 import {
   isMarugoGroupStoreLabel,
   MARUGO_GROUP_STORE_OPTIONS,
+  STORE_COORDINATES,
 } from "../_shared/marugo_group_stores.ts"
 import {
   listReceiptSheetsStores,
@@ -127,12 +128,16 @@ import {
   revokeAllAdminDashboardAuthTokens,
   ROOM_CONFIG_SCOPE,
 } from "../_shared/admin_dashboard_link_auth.ts"
-import { fetchWeatherDailyState } from "../_shared/weather_daily.ts"
+import {
+  fetchWeatherDailyRange,
+  fetchWeatherDailyState,
+} from "../_shared/weather_daily.ts"
 import {
   fetchLineRoomCalendarSearchState,
   fetchLineRoomMessageSearchState,
 } from "../_shared/line_room_message_search.ts"
 import {
+  applyCachedWeatherToPosJournalDays,
   buildJournalSavedReportsFromPosDays,
   buildJournalSavedReportHtml,
   buildPosJournalSummary,
@@ -141,6 +146,7 @@ import {
   parsePosJournalLzh,
   mergePosJournalDaysPreferPrimary,
   pickBestJournalSavedReportDays,
+  posJournalDayNeedsWeather,
   resolvePosJournalStore,
   type PosJournalDay,
 } from "../_shared/pos_journal.ts"
@@ -8920,6 +8926,44 @@ async function fetchSharedJournalReportState(
   }
 }
 
+function posJournalMonthBounds(month: string): { from: string; to: string } {
+  const [year, mon] = String(month).split("-").map(Number)
+  const last = new Date(Date.UTC(year, mon, 0)).getUTCDate()
+  return {
+    from: `${month}-01`,
+    to: `${month}-${String(last).padStart(2, "0")}`,
+  }
+}
+
+/** POS天候入力が無い日だけ、売上分析と同じ line_weather_daily / Open-Meteo で補完する。 */
+async function fillPosJournalDaysWeather(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  month: string,
+  days: PosJournalDay[],
+): Promise<PosJournalDay[]> {
+  const list = Array.isArray(days) ? days : []
+  if (!list.length) return list
+  if (!list.some((day) => posJournalDayNeedsWeather(day))) return list
+  const coords = STORE_COORDINATES[storeKey]
+  if (!coords) return applyCachedWeatherToPosJournalDays(list, {})
+  const { from, to } = posJournalMonthBounds(month)
+  try {
+    const result = await fetchWeatherDailyRange(supabase, {
+      storeKey,
+      lat: coords.lat,
+      lon: coords.lon,
+      from,
+      to,
+      includeForecast: false,
+    })
+    return applyCachedWeatherToPosJournalDays(list, result.map)
+  } catch (error) {
+    console.error("pos journal weather fill failed:", error)
+    return applyCachedWeatherToPosJournalDays(list, {})
+  }
+}
+
 async function fetchPosJournalState(
   supabase: ReturnType<typeof createClient>,
   url: URL,
@@ -8944,7 +8988,12 @@ async function fetchPosJournalState(
   )
   // 同じ営業日は原本LZH（pos_journal_files）を正本とし、
   // 原本が無い日だけ Journal Report の保存済みレポートで補完する。
-  const days = [...sharedOnlyDays, ...storedDays]
+  const days = await fillPosJournalDaysWeather(
+    supabase,
+    storeKey,
+    month,
+    [...sharedOnlyDays, ...storedDays],
+  )
   const storeCode = toSafeString(rows[0]?.store_code)
   const knownStore = resolvePosJournalStore(storeCode) ??
     (storeKey.toLowerCase() === "bistrocavacava"
@@ -11581,10 +11630,15 @@ async function resolvePosJournalAiSummary(
     expected.month,
   )
   const storedDateSet = new Set(storedDays.map((day) => day.business_date))
-  const combinedDays = [
-    ...shared.days.filter((day) => !storedDateSet.has(day.business_date)),
-    ...storedDays,
-  ]
+  const combinedDays = await fillPosJournalDaysWeather(
+    supabase,
+    expected.storeKey,
+    expected.month,
+    [
+      ...shared.days.filter((day) => !storedDateSet.has(day.business_date)),
+      ...storedDays,
+    ],
+  )
   if (combinedDays.length) {
     const categoryOverrides = await fetchPosJournalCategoryOverrides(
       supabase,

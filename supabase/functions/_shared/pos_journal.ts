@@ -209,6 +209,85 @@ const POS_JOURNAL_DRINK_RANGES: ReadonlyArray<[number, number]> = [
 ];
 const POS_JOURNAL_ROOM_CODES = new Set([2]);
 const POS_JOURNAL_CHARGE_CODES = new Set([1]);
+
+export type PosJournalWeatherCacheDay = {
+  temp: number | null;
+  rain?: number | null;
+  code?: number | null;
+};
+
+export function posJournalWeatherText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+/** 未入力・空文字・天候なしの 0℃ は欠落とみなす（Number(null) === 0 の化け防止）。 */
+export function parsePosJournalTempC(
+  value: unknown,
+  weather: unknown = "",
+): number | null {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  if (n === 0 && !posJournalWeatherText(weather)) return null;
+  return n;
+}
+
+export function posJournalDayNeedsWeather(day: {
+  weather?: unknown;
+  temp_c?: unknown;
+  tempC?: unknown;
+}): boolean {
+  const weather = posJournalWeatherText(day?.weather);
+  const temp = parsePosJournalTempC(day?.temp_c ?? day?.tempC, weather);
+  return !weather || temp == null;
+}
+
+export function posJournalWeatherLabelFromCache(
+  day: PosJournalWeatherCacheDay | null | undefined,
+): string {
+  if (!day) return "";
+  const code = day.code == null ? NaN : Number(day.code);
+  if (Number.isFinite(code)) {
+    if (code === 0 || code === 1 || code === 2) return "晴れ";
+    if (code === 3) return "曇り";
+    if (code >= 45 && code <= 48) return "霧";
+    if (code >= 51 && code <= 57) return "霧雨";
+    if (code >= 61 && code <= 67) return code >= 65 ? "大雨" : "雨";
+    if (code >= 71 && code <= 77) return "雪";
+    if (code >= 80 && code <= 82) return "にわか雨";
+    if (code >= 85 && code <= 86) return "雪";
+    if (code >= 95) return "雷雨";
+  }
+  if (day.rain != null && Number(day.rain) > 0.5) return "雨";
+  if (day.temp != null && Number.isFinite(Number(day.temp))) return "晴れ";
+  return "";
+}
+
+export function applyCachedWeatherToPosJournalDays(
+  days: PosJournalDay[],
+  weatherByDate: Record<string, PosJournalWeatherCacheDay>,
+): PosJournalDay[] {
+  const cache = weatherByDate && typeof weatherByDate === "object"
+    ? weatherByDate
+    : {};
+  return (Array.isArray(days) ? days : []).map((day) => {
+    const weather = posJournalWeatherText(day.weather);
+    const temp = parsePosJournalTempC(day.temp_c ?? day.tempC, weather);
+    if (weather && temp != null) return day;
+    const cached = cache[day.business_date];
+    const filledWeather = weather || posJournalWeatherLabelFromCache(cached);
+    const filledTemp = temp != null
+      ? temp
+      : (cached && cached.temp != null && Number.isFinite(Number(cached.temp))
+        ? Math.round(Number(cached.temp))
+        : null);
+    if (filledWeather === weather && filledTemp === temp) {
+      return { ...day, weather, temp_c: temp };
+    }
+    return { ...day, weather: filledWeather, temp_c: filledTemp };
+  });
+}
 const FULLWIDTH_MAP: Readonly<Record<string, string>> = {
   "０": "0",
   "１": "1",
@@ -954,11 +1033,11 @@ export function buildJournalSavedReportsFromPosDays(params: {
   for (const day of days) {
     const daySaleStart = sales.length;
     const weather = safeText(day.weather, 30);
-    const temperature = Number(day.temp_c);
-    if (weather || Number.isFinite(temperature)) {
+    const temperature = parsePosJournalTempC(day.temp_c, weather);
+    if (weather || temperature != null) {
       weatherByDate[day.business_date] = {
         weather,
-        tempC: Number.isFinite(temperature) ? temperature : null,
+        tempC: temperature,
       };
     }
     const dayPayments = paymentMethodRecord(day);
@@ -1529,9 +1608,10 @@ export function buildPosJournalDaysFromSavedReports(
         pay_ikyu: paymentBlock("pay_ikyu"),
         pay_gurunavi: paymentBlock("pay_gurunavi"),
         weather: safeText(value.weather, 30),
-        temp_c: Number.isFinite(Number(value.temp_c ?? value.tempC))
-          ? Number(value.temp_c ?? value.tempC)
-          : null,
+        temp_c: parsePosJournalTempC(
+          value.temp_c ?? value.tempC,
+          value.weather,
+        ),
         receipts,
       });
     }
@@ -1595,7 +1675,7 @@ export function buildPosJournalDaysFromSavedReports(
       const weatherRow = isRecord(weatherByDate[date]) ? weatherByDate[date] : {};
       const saleWeather = daySales.find((sale) => safeText(sale.weather, 30));
       const saleTemp = daySales.find((sale) =>
-        Number.isFinite(Number(sale.tempC ?? sale.temp_c))
+        parsePosJournalTempC(sale.tempC ?? sale.temp_c, sale.weather) != null
       );
       const day: PosJournalDay = {
         business_date: date,
@@ -1612,11 +1692,13 @@ export function buildPosJournalDaysFromSavedReports(
         pay_ikyu: paymentTotals.get("一休") ?? { count: 0, amount: 0 },
         pay_gurunavi: paymentTotals.get("ぐるなび") ?? { count: 0, amount: 0 },
         weather: safeText(weatherRow.weather ?? saleWeather?.weather, 30),
-        temp_c: Number.isFinite(Number(weatherRow.tempC ?? weatherRow.temp_c))
-          ? Number(weatherRow.tempC ?? weatherRow.temp_c)
-          : Number.isFinite(Number(saleTemp?.tempC ?? saleTemp?.temp_c))
-          ? Number(saleTemp?.tempC ?? saleTemp?.temp_c)
-          : null,
+        temp_c: parsePosJournalTempC(
+          weatherRow.tempC ?? weatherRow.temp_c,
+          weatherRow.weather ?? saleWeather?.weather,
+        ) ?? parsePosJournalTempC(
+          saleTemp?.tempC ?? saleTemp?.temp_c,
+          saleTemp?.weather,
+        ),
         receipts,
       };
       dayMap.set(date, day);
