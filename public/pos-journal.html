@@ -355,6 +355,15 @@
     .fd-mark { display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; width: 20px; height: 20px; border-radius: 999px; font-size: 12px; line-height: 1; vertical-align: middle; }
     .fd-mark.food { background: color-mix(in srgb, #e0922a 22%, var(--surface-2)); }
     .fd-mark.drink { background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); }
+    .fd-compare { min-width: 132px; }
+    .fd-compare-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--surface-2); }
+    .fd-compare-bar > span { display: block; height: 100%; }
+    .fd-compare-bar .food { background: #e0922a; }
+    .fd-compare-bar .drink { background: var(--accent); }
+    .fd-compare-txt { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--text-2); }
+    .fd-compare-txt .food { color: #e0922a; }
+    .fd-compare-txt .drink { color: var(--accent); }
+    .fd-compare-empty { color: var(--text-3); font-weight: 500; }
     table.pj-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     table.pj-table th, table.pj-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
     table.pj-table th { color: var(--text-3); font-weight: 600; font-size: 11.5px; letter-spacing: .03em; position: sticky; top: 0; background: var(--surface); }
@@ -633,6 +642,7 @@
                     <th class="l">営業日</th><th class="l">曜</th><th class="l">天候</th><th>気温</th>
                     <th>組数</th><th>客数</th><th>客単価</th>
                     <th>純売上</th><th>消費税</th><th>総売上</th>
+                    <th class="l">フード/ドリンク</th>
                     <th>現金</th><th>クレジット</th>
                   </tr>
                 </thead>
@@ -1225,7 +1235,7 @@
       var paySum=pays.reduce(function(a,p){return a+p.v;},0)||1;
       var payHtml=pays.map(function(p){var pct=Math.round(p.v/paySum*100);return '<div class="pay-row"><div class="pay-name">'+p.n+'</div><div class="pay-bar"><span style="width:'+pct+'%;background:'+p.c+'"></span></div><div class="pay-val">'+yen(p.v)+' <small>'+pct+'%</small></div></div>';}).join('')||'<div class="pj-empty">決済データなし</div>';
       el('payBox').innerHTML=payHtml+renderFoodDrinkMix(days,data.item_ranking,t);
-      el('dayBody').innerHTML=days.map(function(d,idx){var dt=d.business_date||'',wd=dt?WD[new Date(dt+'T00:00:00').getDay()]:'',cash=(d.pay_cash||{}).amount||0,cr=(d.pay_credit||{}).amount||0,rc=(d.receipts||[]).length,wx=d.weather?'<span class="wx">'+weatherIcon(d.weather)+esc(d.weather)+'</span>':'—',fdMark=dayFoodDrinkMark(d);return '<tr class="day-row '+((d.gross_sales||0)===0?'closed':'')+'" data-idx="'+idx+'"><td class="l">'+esc(dt)+fdMark+(rc?' <span class="chip">'+rc+'会計</span>':'')+'</td><td class="l">'+wd+'</td><td class="l">'+wx+'</td><td>'+(d.temp_c!=null?d.temp_c+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td>'+(cash?yen(cash):'—')+'</td><td>'+(cr?yen(cr):'—')+'</td></tr><tr class="receipts-cell" data-detail="'+idx+'" hidden><td colspan="12" class="l"><div class="receipts-box">'+receiptsHTML(d)+'</div></td></tr>';}).join('');
+      el('dayBody').innerHTML=days.map(function(d,idx){var dt=d.business_date||'',wd=dt?WD[new Date(dt+'T00:00:00').getDay()]:'',cash=(d.pay_cash||{}).amount||0,cr=(d.pay_credit||{}).amount||0,rc=(d.receipts||[]).length,wx=d.weather?'<span class="wx">'+weatherIcon(d.weather)+esc(d.weather)+'</span>':'—',fdMark=dayFoodDrinkMark(d);return '<tr class="day-row '+((d.gross_sales||0)===0?'closed':'')+'" data-idx="'+idx+'"><td class="l">'+esc(dt)+fdMark+(rc?' <span class="chip">'+rc+'会計</span>':'')+'</td><td class="l">'+wd+'</td><td class="l">'+wx+'</td><td>'+(d.temp_c!=null?d.temp_c+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td class="l">'+dayFoodDrinkCompare(d)+'</td><td>'+(cash?yen(cash):'—')+'</td><td>'+(cr?yen(cr):'—')+'</td></tr><tr class="receipts-cell" data-detail="'+idx+'" hidden><td colspan="13" class="l"><div class="receipts-box">'+receiptsHTML(d)+'</div></td></tr>';}).join('');
       el('dayBody').querySelectorAll('tr.day-row').forEach(function(tr){tr.addEventListener('click',function(){var det=el('dayBody').querySelector('tr[data-detail="'+tr.getAttribute('data-idx')+'"]');if(det)det.hidden=!det.hidden;});});
       currentRanking=Array.isArray(data.item_ranking)?data.item_ranking:[];
       renderProductRanking();
@@ -1324,6 +1334,14 @@
       if(share.foodPct>0.5)return '<span class="fd-mark food" title="フード '+Math.round(share.foodPct*100)+'%">🍽</span>';
       if(share.drinkPct>0.5)return '<span class="fd-mark drink" title="ドリンク '+Math.round(share.drinkPct*100)+'%">🥤</span>';
       return '';
+    }
+    function dayFoodDrinkCompare(day) {
+      var part=dayFoodDrink(day);
+      var share=foodDrinkShare(part.food,part.drink);
+      if(!share.sum)return '<span class="fd-compare-empty">—</span>';
+      var foodPct=Math.round((share.foodPct||0)*100);
+      var drinkPct=Math.max(0,100-foodPct);
+      return '<div class="fd-compare" title="フード '+yen(part.food)+' / ドリンク '+yen(part.drink)+'"><div class="fd-compare-bar"><span class="food" style="width:'+foodPct+'%"></span><span class="drink" style="width:'+drinkPct+'%"></span></div><div class="fd-compare-txt"><span class="food">F '+foodPct+'%</span><span class="drink">D '+drinkPct+'%</span></div></div>';
     }
     function renderProductRanking() {
       var labels={all:'全商品',food:'フード',drink:'ドリンク'};
