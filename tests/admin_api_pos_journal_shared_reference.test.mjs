@@ -33,6 +33,16 @@ test("POS journal AI uses the same shared report merge as the screen", () => {
   assert.match(body, /days: combinedDays/);
 });
 
+test("POS journal summary shows food/drink mix and daily majority icons", () => {
+  assert.match(page, /function renderFoodDrinkMix\(/);
+  assert.match(page, /function dayFoodDrinkMark\(/);
+  assert.match(page, /フード \/ ドリンク/);
+  assert.match(page, /share\.foodPct>0\.5/);
+  assert.match(page, /share\.drinkPct>0\.5/);
+  assert.match(page, /class="fd-mark food"/);
+  assert.match(page, /class="fd-mark drink"/);
+});
+
 test("POS journal page renders shared-only months and explains the source", () => {
   assert.match(page, /id="sharedRefNotice"/);
   assert.match(page, /function renderSharedReference\(state\)/);

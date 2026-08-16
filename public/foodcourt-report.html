@@ -249,11 +249,7 @@
     .lsa-side-foot .conn b { display: block; color: var(--tx-1); font-size: 12.5px; font-weight: 600; }
     .lsa-side-foot .conn .dt { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; box-shadow: 0 0 0 3px var(--good-soft); }
     
-    html[data-entry="line"] .lsa-navitem:not([href="analytics.html"]):not([href="foodcourt.html"]):not([href="foodcourt-evolution.html"]):not([href="foodcourt-report.html"]):not(.is-active),
-    html[data-entry="line"] .lsa-navlabel,
-    html[data-entry="line"] #salesSheetNavLink {
-      display: none !important;
-    }
+    /* サイドバーは常にフルメニューを出す。LINE経由でも項目は隠さない。 */
     .lsa-navtoggle {
       display: none; position: fixed; top: 10px; left: 10px; z-index: 680;
       width: 42px; height: 42px; padding: 0; border-radius: 10px;
@@ -287,7 +283,11 @@
     <div class="lsa-side-brand"><span class="mk">LS</span><span>LINE Summary<small>Admin Console</small></span></div>
     <nav class="lsa-nav">
       <p class="lsa-navlabel">メニュー</p>
-      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_locked_store','')}catch(_){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>接続設定</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_locked_store','');sessionStorage.setItem('line_admin_v2_active_tab','auth')}catch(_){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>接続設定</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','global')}catch(_){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>利用状況</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','webhook')}catch(_){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg>Webhook設定</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','logs')}catch(_){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>ログ</a>
+      <a class="lsa-navitem" href="index.html" onclick="try{sessionStorage.setItem('line_admin_v2_active_tab','permissions')}catch(_){}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg>ユーザー権限</a>
       <p class="lsa-navlabel">ページ</p>
       <a class="lsa-navitem" href="media.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>メディア閲覧</a>
       <a class="lsa-navitem" href="message-search.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>会話検索</a>
@@ -299,6 +299,7 @@
       <a class="lsa-navitem" href="foodcourt.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M4 12h16M4 18h8"/><circle cx="19" cy="18" r="2"/></svg>フードコート分析</a>
       <a class="lsa-navitem" href="foodcourt-evolution.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h2M20 12h2M12 2v2M12 20v2"/><circle cx="12" cy="12" r="4"/><path d="M6 6l1.5 1.5M16.5 16.5L18 18M18 6l-1.5 1.5M7.5 16.5L6 18"/></svg>AI学習 進化</a>
       <a class="lsa-navitem is-active" href="foodcourt-report.html" aria-current="page"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="18" rx="1"/><path d="M7 8h6M7 12h6M7 16h3"/><path d="M19 11v6l-2-1-2 1v-6"/><path d="M17 3v8"/></svg>フードコート日報</a>
+      <a class="lsa-navitem" href="pos-journal.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l3 3v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>電子ジャーナル</a>
       <a class="lsa-navitem" id="salesSheetNavLink" href="#" target="_blank" rel="noopener noreferrer" hidden aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>売上シート</a>
     </nav>
     <div class="lsa-side-foot"><div class="conn"><span class="dt" id="lsaSidebarConnDot"></span><span id="lsaSidebarConnText"><b>接続済み</b>hocbnifuactbvmyjraxy</span></div></div>
