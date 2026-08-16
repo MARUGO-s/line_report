@@ -60,6 +60,19 @@ test("POS journal fills missing weather from analytics cache", () => {
   assert.match(page, /n === 0 && !weather/);
 });
 
+test("POS journal uses the shared left admin menu with phone hamburger", () => {
+  assert.match(page, /class="lsa-side"/);
+  assert.match(page, /id="lsaNavToggle"/);
+  assert.match(page, /max-width: 920px/);
+  assert.match(page, /サイドバーは常にフルメニューを出す/);
+  assert.doesNotMatch(page, /body\.line-locked \.ms-side/);
+  assert.doesNotMatch(page, /body\.line-locked \.lsa-side/);
+  assert.match(page, /接続設定/);
+  assert.match(page, /売上分析/);
+  assert.match(page, /フードコート分析/);
+  assert.match(page, /lsa-navitem is-active" href="pos-journal.html"/);
+});
+
 test("POS journal page renders shared-only months and explains the source", () => {
   assert.match(page, /id="sharedRefNotice"/);
   assert.match(page, /function renderSharedReference\(state\)/);
