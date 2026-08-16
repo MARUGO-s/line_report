@@ -8952,6 +8952,10 @@ async function fetchPosJournalState(
       : null)
   const resolvedStoreCode = storeCode || (knownStore ? "1015" : "")
   const storeName = knownStore?.storeName || storeKey
+  const categoryOverrides = await fetchPosJournalCategoryOverrides(
+    supabase,
+    storeKey,
+  )
   const summary = buildPosJournalSummary({
     storeKey,
     storeName,
@@ -8959,6 +8963,7 @@ async function fetchPosJournalState(
     month,
     days,
     fileCount: rows.length + shared.reportCount,
+    categoryOverrides,
   })
   summary.meta.storage_file_count = rows.length
   summary.meta.storage_day_count = storedDays.length
@@ -11581,6 +11586,10 @@ async function resolvePosJournalAiSummary(
     ...storedDays,
   ]
   if (combinedDays.length) {
+    const categoryOverrides = await fetchPosJournalCategoryOverrides(
+      supabase,
+      expected.storeKey,
+    )
     return buildPosJournalSummary({
       storeKey: expected.storeKey,
       storeName: expected.storeName,
@@ -11588,6 +11597,7 @@ async function resolvePosJournalAiSummary(
       month: expected.month,
       days: combinedDays,
       fileCount: rows.length + shared.reportCount,
+      categoryOverrides,
     })
   }
   return normalizePosJournalAiSummary(body.summary, expected)

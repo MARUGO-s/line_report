@@ -16,6 +16,8 @@ export type PosJournalReceiptItem = {
   unit: number;
   qty: number;
   amount: number;
+  category?: "フード" | "飲料" | "室料" | "その他";
+  isCharge?: boolean;
 };
 
 export type PosJournalReceipt = {
@@ -256,6 +258,7 @@ export function classifyPosJournalReportItem(
   isCharge: boolean;
   known: boolean;
   byCode: boolean;
+  byOverride: boolean;
   needsReview: boolean;
 } {
   const codeText = String(code ?? "").normalize("NFKC").trim();
@@ -273,6 +276,7 @@ export function classifyPosJournalReportItem(
       isCharge,
       known: true,
       byCode: false,
+      byOverride: true,
       needsReview: false,
     };
   }
@@ -282,6 +286,7 @@ export function classifyPosJournalReportItem(
       isCharge,
       known: true,
       byCode: true,
+      byOverride: false,
       needsReview: false,
     };
   }
@@ -291,6 +296,7 @@ export function classifyPosJournalReportItem(
       isCharge: false,
       known: true,
       byCode: true,
+      byOverride: false,
       needsReview: false,
     };
   }
@@ -300,6 +306,7 @@ export function classifyPosJournalReportItem(
       isCharge: false,
       known: true,
       byCode: true,
+      byOverride: false,
       needsReview: false,
     };
   }
@@ -308,8 +315,45 @@ export function classifyPosJournalReportItem(
     isCharge: false,
     known: true,
     byCode: false,
+    byOverride: false,
     needsReview: true,
   };
+}
+
+export function applyPosJournalCategoryOverrides(
+  days: PosJournalDay[],
+  overrides: Record<string, unknown> = {},
+): PosJournalDay[] {
+  return (Array.isArray(days) ? days : []).map((day) => ({
+    ...day,
+    receipts: (Array.isArray(day.receipts) ? day.receipts : []).map(
+      (receipt) => ({
+        ...receipt,
+        items: (Array.isArray(receipt.items) ? receipt.items : []).map(
+          (item) => {
+            const classified = classifyPosJournalReportItem(
+              item.code,
+              overrides,
+              item.name,
+            );
+            const existing = String(item.category ?? "").trim();
+            const keepExisting =
+              !classified.byOverride &&
+              (POS_JOURNAL_REPORT_CATEGORIES as readonly string[]).includes(
+                existing,
+              );
+            return {
+              ...item,
+              category: keepExisting
+                ? existing as PosJournalReportCategory
+                : classified.category,
+              isCharge: classified.isCharge || item.isCharge === true,
+            };
+          },
+        ),
+      }),
+    ),
+  }));
 }
 
 function stripEscPos(raw: Uint8Array): string {
@@ -1392,6 +1436,13 @@ function journalReportReceipt(
       if (!isRecord(item)) return null;
       const name = safeText(item.name, 120);
       if (!name) return null;
+      const categoryText = safeText(item.category, 20);
+      const category =
+        (POS_JOURNAL_REPORT_CATEGORIES as readonly string[]).includes(
+            categoryText,
+          )
+          ? categoryText as PosJournalReportCategory
+          : undefined;
       return {
         code: safeText(item.code, 24),
         name,
@@ -1399,6 +1450,8 @@ function journalReportReceipt(
           (safeNumber(item.qty) ? Math.round(safeNumber(item.amount) / safeNumber(item.qty)) : 0),
         qty: safeNumber(item.qty),
         amount: safeNumber(item.amount),
+        ...(category ? { category } : {}),
+        ...(item.isCharge === true ? { isCharge: true } : {}),
       };
     })
     .filter((item): item is PosJournalReceiptItem => item !== null);
@@ -1721,18 +1774,28 @@ export function buildPosJournalSummary(params: {
   days: PosJournalDay[];
   fileCount: number;
   generatedAt?: string;
+  categoryOverrides?: Record<string, unknown>;
 }): PosJournalSummary {
   const dayMap = new Map<string, PosJournalDay>();
   for (const day of params.days) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day.business_date)) continue;
     dayMap.set(day.business_date, day);
   }
-  const days = Array.from(dayMap.values()).sort((a, b) =>
-    a.business_date.localeCompare(b.business_date)
+  const days = applyPosJournalCategoryOverrides(
+    Array.from(dayMap.values()).sort((a, b) =>
+      a.business_date.localeCompare(b.business_date)
+    ),
+    params.categoryOverrides ?? {},
   );
   const itemMap = new Map<
     string,
-    { code: string; name: string; qty: number; amount: number }
+    {
+      code: string;
+      name: string;
+      qty: number;
+      amount: number;
+      category?: PosJournalReceiptItem["category"];
+    }
   >();
   const paymentBreakdown: Record<string, { count: number; amount: number }> =
     {};
@@ -1744,16 +1807,39 @@ export function buildPosJournalSummary(params: {
       paymentBreakdown[receipt.pay] = payment;
       for (const item of receipt.items || []) {
         const key = `${item.code}\u0000${item.name}`;
-        const current = itemMap.get(key) ??
-          { code: item.code, name: item.name, qty: 0, amount: 0 };
+        const current = itemMap.get(key) ?? {
+          code: item.code,
+          name: item.name,
+          qty: 0,
+          amount: 0,
+          category: item.category,
+        };
         current.qty += Number(item.qty) || 0;
         current.amount += Number(item.amount) || 0;
+        if (item.category) current.category = item.category;
         itemMap.set(key, current);
       }
     }
   }
   const gross = sumDays(days, "gross_sales");
   const guests = sumDays(days, "guests");
+  let foodAmount = 0;
+  let drinkAmount = 0;
+  let roomAmount = 0;
+  let otherAmount = 0;
+  let chargeAmount = 0;
+  for (const day of days) {
+    for (const receipt of day.receipts || []) {
+      for (const item of receipt.items || []) {
+        const amount = Number(item.amount) || 0;
+        if (item.category === "フード") foodAmount += amount;
+        else if (item.category === "飲料") drinkAmount += amount;
+        else if (item.category === "室料") roomAmount += amount;
+        else if (item.category === "その他") otherAmount += amount;
+        if (item.isCharge) chargeAmount += amount;
+      }
+    }
+  }
   return {
     meta: {
       store_key: params.storeKey,
@@ -1809,6 +1895,11 @@ export function buildPosJournalSummary(params: {
           ) || 0),
         0,
       ),
+      food_amount: foodAmount,
+      drink_amount: drinkAmount,
+      room_amount: roomAmount,
+      other_amount: otherAmount,
+      charge_amount: chargeAmount,
     },
     payment_breakdown: paymentBreakdown,
     item_ranking: Array.from(itemMap.values()).sort((a, b) =>

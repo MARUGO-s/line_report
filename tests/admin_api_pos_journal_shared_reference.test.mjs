@@ -36,11 +36,16 @@ test("POS journal AI uses the same shared report merge as the screen", () => {
 test("POS journal summary shows food/drink mix and daily majority icons", () => {
   assert.match(page, /function renderFoodDrinkMix\(/);
   assert.match(page, /function dayFoodDrinkMark\(/);
-  assert.match(page, /フード \/ ドリンク/);
+  assert.match(page, /フード \/ ドリンク \/ 室料 \/ その他/);
   assert.match(page, /share\.foodPct>0\.5/);
   assert.match(page, /share\.drinkPct>0\.5/);
   assert.match(page, /class="fd-mark food"/);
   assert.match(page, /class="fd-mark drink"/);
+});
+
+test("POS journal state applies Journal Report category overrides", () => {
+  assert.match(adminApi, /const categoryOverrides = await fetchPosJournalCategoryOverrides/);
+  assert.match(adminApi, /categoryOverrides,/);
 });
 
 test("POS journal page renders shared-only months and explains the source", () => {

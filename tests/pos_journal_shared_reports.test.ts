@@ -1,4 +1,5 @@
 import {
+  applyPosJournalCategoryOverrides,
   buildPosJournalDaysFromSavedReports,
   buildPosJournalSummary,
 } from "../supabase/functions/_shared/pos_journal.ts";
@@ -38,6 +39,7 @@ Deno.test("Journal Report saved sales convert to POS journal days", () => {
                 name: "コース",
                 qty: 2,
                 amount: 12_100,
+                category: "フード",
               },
             ],
           },
@@ -62,7 +64,55 @@ Deno.test("Journal Report saved sales convert to POS journal days", () => {
     unit: 6_050,
     qty: 2,
     amount: 12_100,
+    category: "フード",
   });
+});
+
+Deno.test("POS journal days keep saved categories and apply later overrides", () => {
+  const days = buildPosJournalDaysFromSavedReports([
+    {
+      id: "monthly",
+      data: {
+        sales: [
+          {
+            no: "1",
+            date: "2026-01-29",
+            total: 10_000,
+            customers: 1,
+            items: [
+              { code: "0000000000101", name: "コース6品", qty: 1, amount: 8_000, category: "フード" },
+              { code: "0000000002100", name: "赤ワイン", qty: 1, amount: 2_000, category: "飲料" },
+            ],
+          },
+        ],
+      },
+    },
+  ], "2026-01");
+  assertEquals(days[0].receipts[0].items.map((item) => item.category), [
+    "フード",
+    "飲料",
+  ]);
+
+  const overridden = applyPosJournalCategoryOverrides(days, {
+    "0000000000101|コース6品": "飲料",
+  });
+  assertEquals(overridden[0].receipts[0].items.map((item) => item.category), [
+    "飲料",
+    "飲料",
+  ]);
+
+  const summary = buildPosJournalSummary({
+    storeKey: "bistrocavacava",
+    storeName: "Bistro CAVACAVA",
+    storeCode: "1015",
+    month: "2026-01",
+    days,
+    fileCount: 1,
+    categoryOverrides: { "0000000000101|コース6品": "飲料" },
+  });
+  assertEquals(summary.totals.food_amount, 0);
+  assertEquals(summary.totals.drink_amount, 10_000);
+  assertEquals(summary.days[0].receipts[0].items[0].category, "飲料");
 });
 
 Deno.test("newest saved report wins per business day and other months are ignored", () => {

@@ -125,6 +125,7 @@ Deno.test("auto saved report item categories honor shared overrides and safe def
       isCharge: false,
       known: true,
       byCode: false,
+      byOverride: true,
       needsReview: false,
     },
   );
@@ -133,6 +134,7 @@ Deno.test("auto saved report item categories honor shared overrides and safe def
     isCharge: true,
     known: true,
     byCode: true,
+    byOverride: false,
     needsReview: false,
   });
   assertEquals(classifyPosJournalReportItem("9999999999999", {}, "未知商品"), {
@@ -140,6 +142,7 @@ Deno.test("auto saved report item categories honor shared overrides and safe def
     isCharge: false,
     known: true,
     byCode: false,
+    byOverride: false,
     needsReview: true,
   });
 });
