@@ -341,8 +341,8 @@
     .pj-kpis { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin-bottom: 22px; }
     .pj-kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 13px 12px; box-shadow: var(--shadow); min-width: 0; }
     .pj-kpi .k-l { font-size: 11.5px; color: var(--text-3); font-weight: 600; letter-spacing: .03em; }
-    .pj-kpi .k-v { font-size: clamp(15px, 1.35vw, 22px); font-weight: 700; margin-top: 5px; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .pj-kpi .k-s { font-size: 11px; color: var(--text-2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pj-kpi .k-v { font-size: clamp(12px, 1.05vw, 20px); font-weight: 700; margin-top: 5px; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .pj-kpi .k-s { font-size: 10.5px; color: var(--text-2); margin-top: 3px; white-space: nowrap; }
     .pj-kpi.accent .k-v { color: var(--accent); }
     .pj-grid2 { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; margin-bottom: 22px; }
     @media (max-width: 900px){ .pj-grid2 { grid-template-columns: 1fr; } }
