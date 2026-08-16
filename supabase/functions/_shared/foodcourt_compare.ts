@@ -591,17 +591,24 @@ async function groqChat(
 ): Promise<FoodCourtChatResult> {
   if (!apiKey) return { content: null, usage: null, reason: 'missing_key' }
   try {
-    const isQwen36 = String(model).toLowerCase() === 'qwen/qwen3.6-27b'
+    const modelId = String(model).toLowerCase()
+    const isQwen36 = modelId === 'qwen/qwen3.6-27b'
+    const isGptOss = modelId.includes('gpt-oss')
+    // gpt-oss は reasoning モデル。max_tokens=600 だと思考で枠を使い切り content が空になる。
+    // Groq は gpt-oss に none を受け付けないので low + hidden、出力枠も確保する。
+    const completionTokens = isGptOss ? Math.max(maxTokens, 2000) : maxTokens
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
         temperature: 0.2,
-        max_tokens: maxTokens,
+        max_tokens: completionTokens,
+        max_completion_tokens: completionTokens,
         messages,
         // Qwen3.6は非思考モード＋reasoning非表示で、<think>漏出・思考だけで出力上限消費を防ぐ。
         ...(isQwen36 ? { reasoning_effort: 'none', reasoning_format: 'hidden' } : {}),
+        ...(isGptOss ? { reasoning_effort: 'low', reasoning_format: 'hidden' } : {}),
       }),
       signal,
     })
@@ -3816,15 +3823,14 @@ export async function maybeHandleFoodCourtReport(
   if (!cfg) return { handled: false }
   if (!looksLikeFoodCourtReport(params.detectText) && !params.forceAttempt) return { handled: false }
 
-  // Azure で十分とみなす最小テナント数（想定数-1。読み落とし時だけ Gemini へ退避する）。
-  const minOk = cfg.expectedTenants ? Math.max(5, cfg.expectedTenants - 1) : 5
   const valid = (ts: FoodCourtTenant[] | null) =>
     (ts && ts.length >= 3 && computeFoodCourtComparison(ts, cfg.baseTenantName)) ? ts : null
 
   // 画像抽出で消費したトークンを記録（成立有無に関わらず・AI使用料に反映）。
   const aiUsages: FoodCourtAiUsage[] = []
   const onUsage = (u: FoodCourtAiUsage) => { aiUsages.push(u) }
-  // 1) まず Azure Foundry で抽出する。
+  // 1) まず Azure Foundry で抽出する。比較表として成立すれば採用する。
+  // 想定11店中6〜9店でも分析は可能なので、件数不足だけで Gemini に逃げない。
   let tenants = valid(await extractFoodCourtTenantsAzureFoundry(
     params.bytes,
     params.contentType,
@@ -3837,11 +3843,11 @@ export async function maybeHandleFoodCourtReport(
   const tenantExtractAttempts: FoodCourtAiAttempt[] = [{
     provider: 'azure',
     model: params.azureFoundryDeployment ?? 'gpt-5.4-nano',
-    ok: !!tenants && tenants.length >= minOk,
-    reason: tenants && tenants.length >= minOk ? null : 'invalid_or_insufficient_tenants',
+    ok: !!tenants,
+    reason: tenants ? null : 'invalid_or_insufficient_tenants',
   }]
-  // 2) Azure が表として成立しない、またはテナント数が想定より少ないときだけ Gemini に退避する。
-  if ((!tenants || tenants.length < minOk) && params.geminiApiKey) {
+  // 2) Azure が表として成立しないときだけ Gemini に退避する。
+  if (!tenants && params.geminiApiKey) {
     const g = valid(await extractFoodCourtTenants(params.bytes, params.contentType, params.geminiApiKey, params.geminiModel, 30000, onUsage))
     tenantExtractAttempts.push({
       provider: 'gemini',

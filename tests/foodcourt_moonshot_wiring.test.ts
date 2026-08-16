@@ -58,6 +58,19 @@ test('Groq Qwen3.6 fallback disables visible reasoning when that model is used',
   assert.match(source, /reasoning_format:\s*'hidden'/)
 })
 
+test('Groq gpt-oss keeps reasoning low so specialist① does not empty-out', () => {
+  assert.match(source, /isGptOss/)
+  assert.match(source, /reasoning_effort:\s*'low'/)
+  assert.match(source, /Math\.max\(maxTokens,\s*2000\)/)
+  assert.match(source, /max_completion_tokens:\s*completionTokens/)
+})
+
+test('tenant extract falls back to Gemini only when Azure table is unusable', () => {
+  assert.match(source, /Azure が表として成立しないときだけ Gemini/)
+  assert.match(source, /ok: !!tenants/)
+  assert.doesNotMatch(source, /tenants\.length >= minOk/)
+})
+
 test('specialists and integrators have production-safe timeout budgets', () => {
   // 2026-08-05: 専門AIを15秒→25秒に延長。15秒では ask のプロンプトが厚い回に
   // Gemini(specialist_ext)が毎回 timeout し、Groq へ落ちていた（実測5件すべて同一パターン）。
