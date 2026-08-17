@@ -462,7 +462,7 @@
     .pj-ai-history-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
     .pj-ai-history-actions .btn { padding:5px 8px; font-size:11px; border-radius:7px; }
     .pj-ai-history-empty { color:var(--text-3); font-size:12px; padding:10px 0; }
-    #analysisPrintReport { display:none; }
+    #analysisPrintReport, #pagePrintReport { display:none; }
     .print-report { color:#1f2937; background:#fff; font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif; font-size:9.5pt; line-height:1.48; }
     .print-report-header { border-bottom:3px double #1f3b5b; padding-bottom:10px; margin-bottom:12px; }
     .print-report-kicker { color:#60748a; font-size:8.5pt; }
@@ -477,12 +477,34 @@
     .print-section p { margin:2px 0; white-space:pre-wrap; }
     .print-warning { break-inside:avoid; color:#8a5a00; background:#fff8e6; border:1px solid #f0d08a; padding:6px 8px; margin-top:9px; border-radius:6px; }
     .print-footer { break-inside:avoid; border-top:1px solid #cbd5e1; color:#64748b; font-size:7.8pt; margin-top:12px; padding-top:6px; display:flex; justify-content:space-between; }
+    .print-page-kpis { grid-template-columns:repeat(7,1fr); }
+    .print-page-grid { display:grid; grid-template-columns:1.35fr 1fr; gap:8px 12px; align-items:start; }
+    .print-page-chart { display:block; width:100%; height:auto; max-height:168px; object-fit:contain; background:#fff; }
+    .print-page-table { width:100%; border-collapse:collapse; font-size:7.3pt; }
+    .print-page-table th, .print-page-table td { border-bottom:0.4pt solid #d8e1ea; padding:2px 4px; text-align:right; white-space:nowrap; }
+    .print-page-table th { color:#536273; font-weight:700; }
+    .print-page-table th.l, .print-page-table td.l { text-align:left; }
+    .print-page-table td b { color:#102a43; }
+    .print-page-ranks { display:grid; grid-template-columns:1fr 1fr; gap:2px 16px; }
+    .print-page-pay .pay-row { display:flex; align-items:center; gap:8px; margin-bottom:5px; font-size:8pt; }
+    .print-page-pay .pay-name { width:72px; font-weight:700; }
+    .print-page-pay .pay-bar { flex:1; height:7px; border-radius:999px; background:#e8eef5; overflow:hidden; }
+    .print-page-pay .pay-bar > span { display:block; height:100%; border-radius:999px; }
+    .print-page-pay .pay-val { width:118px; text-align:right; }
+    .print-page-pay .pay-val small { color:#64748b; }
+    .print-page-mix { margin-top:8px; padding-top:7px; border-top:1px solid #d8e1ea; }
+    .print-page-mix-title { font-size:8pt; font-weight:700; color:#1f3b5b; margin-bottom:5px; }
+    .print-page-mix-note { font-size:7pt; color:#64748b; margin:2px 0 0; }
     @media print {
       @page { size:A4; margin:10mm 11mm; }
-      body.print-analysis-report { background:#fff !important; }
+      body.print-analysis-report,
+      body.print-page-report { background:#fff !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
       body.print-analysis-report > *:not(#analysisPrintReport) { display:none !important; }
       body.print-analysis-report #analysisPrintReport { display:block !important; }
-      .print-kpis { grid-template-columns:repeat(2,1fr); }
+      body.print-page-report > *:not(#pagePrintReport) { display:none !important; }
+      body.print-page-report #pagePrintReport { display:block !important; }
+      body.print-analysis-report .print-kpis { grid-template-columns:repeat(2,1fr); }
+      body.print-page-report .print-page-kpis { grid-template-columns:repeat(7,1fr); }
     }
     @media (max-width:760px) { .pj-ai-output { grid-template-columns:1fr; } .pj-qa-form { grid-template-columns:1fr auto; } .pj-qa-form .qa-clear { grid-column:1/-1; justify-self:start; } .pj-qa-msg { max-width:96%; } }
     .pj-file-card { margin-bottom:22px; }
@@ -569,6 +591,7 @@
               <input class="input mono" id="monthSel" type="month" min="2020-01" max="2099-12" />
             </div>
             <button class="btn sm" id="reloadBtn" type="button">再読込</button>
+            <button class="btn sm" id="pagePdfBtn" type="button" disabled>PDFにまとめる</button>
             <span class="pj-badge" id="rangeBadge"></span>
           </div>
           <div class="pj-shared-ref" id="sharedRefNotice" hidden></div>
@@ -743,6 +766,7 @@
   </div>
 
   <div id="analysisPrintReport" class="print-report" aria-hidden="true"></div>
+  <div id="pagePrintReport" class="print-report" aria-hidden="true"></div>
 
   <script src="pages-config.js?v=20260610"></script>
   <script src="auth-session.js?v=20260624"></script>
@@ -1172,6 +1196,139 @@
       window.addEventListener('afterprint',cleanup);
       setTimeout(function(){window.print();setTimeout(cleanup,1500);},50);
     }
+    function pageReportHtml() {
+      var data = lastSummary || {};
+      var t = data.totals || {};
+      var m = data.meta || {};
+      var days = Array.isArray(data.days) ? data.days : [];
+      var openDays = days.filter(function(d){ return (d.gross_sales||0) > 0; });
+      var month = (el('monthSel') && el('monthSel').value) || m.month || '';
+      var chargeGuest = monthChargeGuest(days, data.item_ranking, t);
+      var chargePct = chargeGuest.guests ? Math.round(chargeGuest.chargeQty / chargeGuest.guests * 100) : null;
+      var src = el('srcInfo') ? el('srcInfo').textContent : '';
+      var chartSrc = '';
+      try {
+        var canvas = el('trendChart');
+        if (canvas && canvas.toDataURL && openDays.length) chartSrc = canvas.toDataURL('image/png');
+      } catch (_) {}
+      var kpis = [
+        {l:'総売上', v:yen(t.gross_sales), s:'純売上 '+yen(t.net_sales)},
+        {l:'消費税', v:yen(t.tax), s:'内税'},
+        {l:'客数', v:num(t.guests)+' 名', s:(t.groups||0)+' 組'},
+        {l:'チャージ取得', v:chargePct!=null?chargePct+'%':'—', s:num(chargeGuest.chargeQty)+' / '+num(chargeGuest.guests)+'名'},
+        {l:'客単価', v:yen(t.avg_spend), s:'総売上 ÷ 客数'},
+        {l:'営業日数', v:openDays.length+' 日', s:'記録 '+days.length+' 日'},
+        {l:'1日平均', v:yen(openDays.length?Math.round((t.gross_sales||0)/openDays.length):0), s:'営業日あたり'}
+      ];
+      var pays = [
+        {n:'現金', v:t.cash_amount||0, c:'#3f9b6e'},
+        {n:'クレジット', v:t.credit_amount||0, c:'#3f7bea'},
+        {n:'食べログ', v:t.tabelog_amount||0, c:'#d8961f'},
+        {n:'一休', v:t.ikyu_amount||0, c:'#9b6dd8'},
+        {n:'ぐるなび', v:t.gurunavi_amount||0, c:'#e05656'}
+      ].filter(function(p){ return p.v>0; });
+      var paySum = pays.reduce(function(a,p){ return a+p.v; }, 0) || 1;
+      var payHtml = pays.length ? pays.map(function(p){
+        var pct = Math.round(p.v / paySum * 100);
+        return '<div class="pay-row"><div class="pay-name">'+esc(p.n)+'</div><div class="pay-bar"><span style="width:'+pct+'%;background:'+p.c+'"></span></div><div class="pay-val">'+yen(p.v)+' <small>'+pct+'%</small></div></div>';
+      }).join('') : '<div>決済データなし</div>';
+      var fdTotals = {food:0,drink:0,room:0,other:0,charge:0};
+      days.forEach(function(day){
+        var part = dayFoodDrink(day);
+        fdTotals.food += part.food;
+        fdTotals.drink += part.drink;
+        fdTotals.room += part.room;
+        fdTotals.other += part.other;
+        fdTotals.charge += part.charge;
+      });
+      if (!fdTotals.food && !fdTotals.drink && !fdTotals.room && !fdTotals.other) fdTotals = foodDrinkAmountsFromItems(data.item_ranking);
+      if (t.food_amount || t.drink_amount || t.room_amount || t.other_amount) {
+        fdTotals = {
+          food: Number(t.food_amount)||0,
+          drink: Number(t.drink_amount)||0,
+          room: Number(t.room_amount)||0,
+          other: Number(t.other_amount)||0,
+          charge: Number(t.charge_amount)||fdTotals.charge
+        };
+      }
+      var catSum = fdTotals.food + fdTotals.drink + fdTotals.room + fdTotals.other;
+      var fdShare = foodDrinkShare(fdTotals.food, fdTotals.drink);
+      var fdRows = [
+        {n:'フード', v:fdTotals.food, c:'#e0922a'},
+        {n:'ドリンク', v:fdTotals.drink, c:'#3f7bea'},
+        {n:'室料', v:fdTotals.room, c:'#9b6dd8'},
+        {n:'その他', v:fdTotals.other, c:'#64748b'}
+      ].filter(function(p){ return p.v>0; });
+      var fdHtml = fdRows.length ? fdRows.map(function(p){
+        var pct = catSum ? Math.round(p.v / catSum * 100) : 0;
+        return '<div class="pay-row"><div class="pay-name">'+esc(p.n)+'</div><div class="pay-bar"><span style="width:'+pct+'%;background:'+p.c+'"></span></div><div class="pay-val">'+yen(p.v)+' <small>'+pct+'%</small></div></div>';
+      }).join('') : '<div>カテゴリ明細がありません</div>';
+      var dayRows = days.map(function(d){
+        var dt = d.business_date || '';
+        var wd = dt ? WD[new Date(dt+'T00:00:00').getDay()] : '';
+        var rc = (d.receipts||[]).length;
+        var wxLabel = dayWeatherLabel(d);
+        var tempC = dayTempC(d);
+        var fd = dayFoodDrink(d);
+        var share = foodDrinkShare(fd.food, fd.drink);
+        var fdTxt = share.sum ? ('F '+Math.round((share.foodPct||0)*100)+'% / D '+Math.round((share.drinkPct||0)*100)+'%') : '—';
+        var charge = fd.chargeQty;
+        var guests = Number(d.guests)||0;
+        var chTxt = (charge || guests) ? (charge+' / '+guests) : '—';
+        return '<tr><td class="l">'+esc(dt)+(rc?' ('+rc+'会計)':'')+'</td><td class="l">'+wd+'</td><td class="l">'+(wxLabel?esc(wxLabel):'—')+'</td><td>'+(tempC!=null?tempC+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+chTxt+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td class="l">'+fdTxt+'</td></tr>';
+      }).join('');
+      var rank = (Array.isArray(data.item_ranking) ? data.item_ranking : currentRanking).slice(0, 24);
+      var rankHtml = rank.length ? rank.map(function(r, i){
+        return '<tr><td>'+(i+1)+'</td><td class="l">'+esc(r.name)+'</td><td>'+num(r.qty)+'</td><td>'+yen(r.amount)+'</td></tr>';
+      }).join('') : '<tr><td colspan="4" class="l">商品ランキングはありません。</td></tr>';
+      return '<div class="print-report-header"><div class="print-report-kicker">LINE Report / POS電子ジャーナル</div>'
+        + '<h1>電子ジャーナル月次レポート</h1>'
+        + '<div class="print-report-meta"><span>店舗: '+esc(STORE_NAME)+'（'+esc(STORE_CODE)+'）</span><span>対象月: '+esc(month)+'</span><span>営業日: '+openDays.length+'日（記録 '+days.length+'日）</span><span>出力: '+esc(new Date().toLocaleString('ja-JP'))+'</span></div>'
+        + (src ? '<div class="print-report-meta"><span>'+esc(src)+'</span></div>' : '')
+        + '</div>'
+        + '<div class="print-kpis print-page-kpis">'+kpis.map(function(k){return '<div class="print-kpi"><span>'+esc(k.l)+'</span><b>'+esc(k.v)+'</b><span>'+esc(k.s)+'</span></div>';}).join('')+'</div>'
+        + '<div class="print-page-grid">'
+        + '<section class="print-section"><h2>日別 総売上の推移</h2>'+(chartSrc?'<img class="print-page-chart" src="'+chartSrc+'" alt="日別総売上と客数">':'<p>グラフを表示できる営業日がありません。</p>')+'</section>'
+        + '<section class="print-section print-page-pay"><h2>決済・構成</h2>'+payHtml
+        + '<div class="print-page-mix"><div class="print-page-mix-title">フード / ドリンク / 室料 / その他</div>'+fdHtml
+        + '<div class="print-page-mix-note">構成比はフード・ドリンク・室料・その他の合計。チャージは所属カテゴリの内数（'+yen(fdTotals.charge)+'）'
+        + (fdShare.sum ? ' / フード対ドリンク: フード '+Math.round((fdShare.foodPct||0)*100)+'% / ドリンク '+Math.round((fdShare.drinkPct||0)*100)+'%' : '')
+        + '</div></div>'
+        + '<div class="print-page-mix"><div class="print-page-mix-title">来客とチャージ</div><p>取得率 '+(chargePct!=null?chargePct+'%':'—')+'（チャージ '+num(chargeGuest.chargeQty)+'名 / 客数 '+num(chargeGuest.guests)+'名）</p></div>'
+        + '</section></div>'
+        + '<section class="print-section"><h2>日別サマリー</h2><table class="print-page-table"><thead><tr><th class="l">営業日</th><th class="l">曜</th><th class="l">天候</th><th>気温</th><th>組数</th><th>客数</th><th>チャージ/客</th><th>客単価</th><th>純売上</th><th>消費税</th><th>総売上</th><th class="l">F/D</th></tr></thead><tbody>'+(dayRows||'<tr><td colspan="12" class="l">日別データがありません。</td></tr>')+'</tbody></table></section>'
+        + '<section class="print-section"><h2>商品ランキング（金額順・上位'+rank.length+'件）</h2><table class="print-page-table"><thead><tr><th>#</th><th class="l">商品名</th><th>数量</th><th>売上金額</th></tr></thead><tbody>'+rankHtml+'</tbody></table></section>'
+        + '<div class="print-footer"><span>Bistro CAVACAVA POS Journal</span><span>画面の売上サマリーと商品ランキングを1つのPDFにまとめています。アップロード・保管原本・会計明細は含みません。</span></div>';
+    }
+    function savePagePdf() {
+      if (!lastSummary || !Array.isArray(lastSummary.days) || !lastSummary.days.length) {
+        el('rangeBadge').textContent = 'PDFにできる月次データがありません。';
+        return;
+      }
+      var report = el('pagePrintReport');
+      report.innerHTML = pageReportHtml();
+      report.setAttribute('aria-hidden', 'false');
+      var previousTitle = document.title;
+      var month = (el('monthSel') && el('monthSel').value) || '';
+      document.title = '電子ジャーナル_'+STORE_NAME+'_'+(month||'月次');
+      var pageStyle = document.getElementById('pagePrintPageSize');
+      if (!pageStyle) {
+        pageStyle = document.createElement('style');
+        pageStyle.id = 'pagePrintPageSize';
+        document.head.appendChild(pageStyle);
+      }
+      pageStyle.textContent = '@media print { @page { size:A4 landscape; margin:7mm; } }';
+      document.body.classList.add('print-page-report');
+      var cleanup = function() {
+        document.body.classList.remove('print-page-report');
+        document.title = previousTitle;
+        report.setAttribute('aria-hidden', 'true');
+        if (pageStyle && pageStyle.parentNode) pageStyle.parentNode.removeChild(pageStyle);
+        window.removeEventListener('afterprint', cleanup);
+      };
+      window.addEventListener('afterprint', cleanup);
+      setTimeout(function(){ window.print(); setTimeout(cleanup, 1500); }, 50);
+    }
     async function saveHistoryPdf(id) {
       try {
         var item = await fetchAnalysisHistoryItem(id);
@@ -1222,6 +1379,7 @@
       if (previousSignature !== nextSignature) resetAiForDataChange();
       el('mainWrap').hidden = false;
       el('emptyState').hidden = true;
+      if (el('pagePdfBtn')) el('pagePdfBtn').disabled = !(data && Array.isArray(data.days) && data.days.length);
       var t = data.totals || {}, m = data.meta || {}, days = data.days || [];
       var openDays = days.filter(function (d) { return (d.gross_sales||0) > 0; });
       var storageFiles = Number(m.storage_file_count != null ? m.storage_file_count : m.file_count)||0;
@@ -1463,7 +1621,7 @@
     async function loadLegacy(month, preserveFiles) {
       if (month!=='2026-06') { if(!preserveFiles)renderFiles([]); render({meta:{file_count:0,day_count:0},totals:{},days:[],item_ranking:[]});await loadAnalysisHistory();return; }
       try { var response=await fetch(LEGACY_DATA_URL,{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);var data=await response.json();data.meta=data.meta||{};data.meta.store_key=STORE_KEY;data.meta.store_name=STORE_NAME;data.meta.storage_mode='legacy_static';render(data);if(!preserveFiles)renderFiles([]);await loadAnalysisHistory(); }
-      catch(error){el('mainWrap').hidden=true;el('emptyState').hidden=false;el('emptyState').textContent='データ読込エラー: '+error.message;}
+      catch(error){el('mainWrap').hidden=true;el('emptyState').hidden=false;el('emptyState').textContent='データ読込エラー: '+error.message;if(el('pagePdfBtn'))el('pagePdfBtn').disabled=true;}
     }
     /** サーバ側の1リクエスト上限（admin-api の POS_JOURNAL_UPLOAD_MAX_FILES と揃える） */
     var UPLOAD_MAX_FILES_PER_REQUEST=62;
@@ -1607,7 +1765,7 @@
     async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
 
     var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
-    document.addEventListener('DOMContentLoaded',async function(){populateControls();setupJournalTabs();setupProductRankingTabs();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
+    document.addEventListener('DOMContentLoaded',async function(){populateControls();setupJournalTabs();setupProductRankingTabs();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('pagePdfBtn').addEventListener('click',savePagePdf);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
   })();
   </script>
 

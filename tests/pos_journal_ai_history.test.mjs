@@ -29,6 +29,18 @@ test('POS journal page exposes PDF and history actions', () => {
   assert.match(page, /data-analysis-delete/);
 });
 
+test('POS journal page can export the monthly dashboard as one PDF', () => {
+  assert.match(page, /id="pagePdfBtn"/);
+  assert.match(page, /PDFにまとめる/);
+  assert.match(page, /id="pagePrintReport"/);
+  assert.match(page, /function pageReportHtml\(/);
+  assert.match(page, /function savePagePdf\(/);
+  assert.match(page, /print-page-report/);
+  assert.match(page, /size:A4 landscape/);
+  assert.match(page, /商品ランキング（金額順・上位/);
+  assert.doesNotMatch(page, /pageReportHtml[\s\S]{0,400}pjPanelUpload/);
+});
+
 test('Journal Report history tables use deleted_at trash and restore instead of physical delete', async () => {
   const softDeleteMigration = await readFile(
     new URL('supabase/migrations/20260803152607_journal_history_soft_delete.sql', root),
