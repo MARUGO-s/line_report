@@ -38,6 +38,8 @@ test('POS journal page can export the monthly dashboard as one PDF', () => {
   assert.match(page, /print-page-report/);
   assert.match(page, /size:A4 landscape/);
   assert.match(page, /商品ランキング（金額順・上位/);
+  assert.match(page, /print-page-break/);
+  assert.match(page, /break-before:page/);
   assert.doesNotMatch(page, /pageReportHtml[\s\S]{0,400}pjPanelUpload/);
 });
 

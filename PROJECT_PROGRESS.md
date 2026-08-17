@@ -13,7 +13,7 @@
 ### 2026-08-17 - 電子ジャーナル画面を1つのPDFにまとめて出力
 
 - Request: 電子ジャーナル（POS取込）の画面を1枚のPDFにまとめて出力できるボタンを作る。
-- Implementation: `public/pos-journal.html` の店舗・対象月ツールバーへ「PDFにまとめる」を追加。表示中の月のKPI、日別推移、決済・構成、日別サマリー、商品ランキング上位24件を横向きA4の印刷用レポートにし、既存のAI分析PDFと同じ `window.print()` で保存する。アップロード・保管原本・会計明細は含めない。
+- Implementation: `public/pos-journal.html` の店舗・対象月ツールバーへ「PDFにまとめる」を追加。1ページ目はKPI・日別推移・決済・日別サマリー、2ページ目は商品ランキング。既存のAI分析PDFと同じ `window.print()` で保存する。アップロード・保管原本・会計明細は含めない。
 - Verification: `tests/pos_journal_ai_history.test.mjs` に画面ボタンと印刷経路の検査を追加。
 
 ### 2026-08-13 - AI学習・進化の信頼度スター表示をカード内へ修正

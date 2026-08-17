@@ -495,6 +495,9 @@
     .print-page-mix { margin-top:8px; padding-top:7px; border-top:1px solid #d8e1ea; }
     .print-page-mix-title { font-size:8pt; font-weight:700; color:#1f3b5b; margin-bottom:5px; }
     .print-page-mix-note { font-size:7pt; color:#64748b; margin:2px 0 0; }
+    .print-page-break { break-before:page; page-break-before:always; }
+    .print-page-table thead { display:table-header-group; }
+    .print-page-table tr { break-inside:avoid; page-break-inside:avoid; }
     @media print {
       @page { size:A4; margin:10mm 11mm; }
       body.print-analysis-report,
@@ -1277,7 +1280,7 @@
         var chTxt = (charge || guests) ? (charge+' / '+guests) : '—';
         return '<tr><td class="l">'+esc(dt)+(rc?' ('+rc+'会計)':'')+'</td><td class="l">'+wd+'</td><td class="l">'+(wxLabel?esc(wxLabel):'—')+'</td><td>'+(tempC!=null?tempC+'℃':'—')+'</td><td>'+(d.groups!=null?d.groups:'—')+'</td><td>'+(d.guests!=null?d.guests:'—')+'</td><td>'+chTxt+'</td><td>'+(d.guests?yen(Math.round((d.gross_sales||0)/d.guests)):'—')+'</td><td>'+yen(d.net_sales)+'</td><td>'+yen(d.tax)+'</td><td><b>'+yen(d.gross_sales)+'</b></td><td class="l">'+fdTxt+'</td></tr>';
       }).join('');
-      var rank = (Array.isArray(data.item_ranking) ? data.item_ranking : currentRanking).slice(0, 24);
+      var rank = (Array.isArray(data.item_ranking) ? data.item_ranking : currentRanking).slice(0, 40);
       var rankHtml = rank.length ? rank.map(function(r, i){
         return '<tr><td>'+(i+1)+'</td><td class="l">'+esc(r.name)+'</td><td>'+num(r.qty)+'</td><td>'+yen(r.amount)+'</td></tr>';
       }).join('') : '<tr><td colspan="4" class="l">商品ランキングはありません。</td></tr>';
@@ -1297,8 +1300,8 @@
         + '<div class="print-page-mix"><div class="print-page-mix-title">来客とチャージ</div><p>取得率 '+(chargePct!=null?chargePct+'%':'—')+'（チャージ '+num(chargeGuest.chargeQty)+'名 / 客数 '+num(chargeGuest.guests)+'名）</p></div>'
         + '</section></div>'
         + '<section class="print-section"><h2>日別サマリー</h2><table class="print-page-table"><thead><tr><th class="l">営業日</th><th class="l">曜</th><th class="l">天候</th><th>気温</th><th>組数</th><th>客数</th><th>チャージ/客</th><th>客単価</th><th>純売上</th><th>消費税</th><th>総売上</th><th class="l">F/D</th></tr></thead><tbody>'+(dayRows||'<tr><td colspan="12" class="l">日別データがありません。</td></tr>')+'</tbody></table></section>'
-        + '<section class="print-section"><h2>商品ランキング（金額順・上位'+rank.length+'件）</h2><table class="print-page-table"><thead><tr><th>#</th><th class="l">商品名</th><th>数量</th><th>売上金額</th></tr></thead><tbody>'+rankHtml+'</tbody></table></section>'
-        + '<div class="print-footer"><span>Bistro CAVACAVA POS Journal</span><span>画面の売上サマリーと商品ランキングを1つのPDFにまとめています。アップロード・保管原本・会計明細は含みません。</span></div>';
+        + '<section class="print-section print-page-break"><div class="print-report-kicker">LINE Report / POS電子ジャーナル / '+esc(STORE_NAME)+' / '+esc(month)+'</div><h2>商品ランキング（金額順・上位'+rank.length+'件）</h2><table class="print-page-table"><thead><tr><th>#</th><th class="l">商品名</th><th>数量</th><th>売上金額</th></tr></thead><tbody>'+rankHtml+'</tbody></table></section>'
+        + '<div class="print-footer"><span>Bistro CAVACAVA POS Journal</span><span>1ページ目は売上サマリー、2ページ目は商品ランキングです。アップロード・保管原本・会計明細は含みません。</span></div>';
     }
     function savePagePdf() {
       if (!lastSummary || !Array.isArray(lastSummary.days) || !lastSummary.days.length) {
