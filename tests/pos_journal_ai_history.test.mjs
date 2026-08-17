@@ -41,6 +41,8 @@ test('POS journal page can export the monthly dashboard as one PDF', () => {
   assert.match(page, /print-page-1/);
   assert.match(page, /print-page-2/);
   assert.match(page, /margin:18mm 12mm 16mm 12mm/);
+  assert.match(page, /print-page-chart-wrap/);
+  assert.match(page, /height:62mm/);
   assert.doesNotMatch(page, /pageReportHtml[\s\S]{0,400}pjPanelUpload/);
 });
 

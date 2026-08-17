@@ -478,8 +478,10 @@
     .print-warning { break-inside:avoid; color:#8a5a00; background:#fff8e6; border:1px solid #f0d08a; padding:6px 8px; margin-top:9px; border-radius:6px; }
     .print-footer { break-inside:avoid; border-top:1px solid #cbd5e1; color:#64748b; font-size:7.8pt; margin-top:12px; padding-top:6px; display:flex; justify-content:space-between; }
     .print-page-kpis { grid-template-columns:repeat(7,1fr); }
-    .print-page-grid { display:grid; grid-template-columns:1.35fr 1fr; gap:8px 12px; align-items:start; }
-    .print-page-chart { display:block; width:100%; height:auto; max-height:168px; object-fit:contain; background:#fff; }
+    .print-page-grid { display:grid; grid-template-columns:1.35fr 1fr; gap:8px 12px; align-items:stretch; }
+    .print-page-chart-wrap { display:flex; flex-direction:column; min-height:0; }
+    .print-page-chart-wrap h2 { flex:none; }
+    .print-page-chart { display:block; width:100%; flex:1 1 auto; height:62mm; max-height:none; object-fit:contain; object-position:left center; background:#fff; }
     .print-page-table { width:100%; border-collapse:collapse; font-size:7.3pt; }
     .print-page-table th, .print-page-table td { border-bottom:0.4pt solid #d8e1ea; padding:2px 4px; text-align:right; white-space:nowrap; }
     .print-page-table th { color:#536273; font-weight:700; }
@@ -1296,7 +1298,7 @@
         + '</div>'
         + '<div class="print-kpis print-page-kpis">'+kpis.map(function(k){return '<div class="print-kpi"><span>'+esc(k.l)+'</span><b>'+esc(k.v)+'</b><span>'+esc(k.s)+'</span></div>';}).join('')+'</div>'
         + '<div class="print-page-grid">'
-        + '<section class="print-section"><h2>日別 総売上の推移</h2>'+(chartSrc?'<img class="print-page-chart" src="'+chartSrc+'" alt="日別総売上と客数">':'<p>グラフを表示できる営業日がありません。</p>')+'</section>'
+        + '<section class="print-section print-page-chart-wrap"><h2>日別 総売上の推移</h2>'+(chartSrc?'<img class="print-page-chart" src="'+chartSrc+'" alt="日別総売上と客数">':'<p>グラフを表示できる営業日がありません。</p>')+'</section>'
         + '<section class="print-section print-page-pay"><h2>決済・構成</h2>'+payHtml
         + '<div class="print-page-mix"><div class="print-page-mix-title">フード / ドリンク / 室料 / その他</div>'+fdHtml
         + '<div class="print-page-mix-note">構成比はフード・ドリンク・室料・その他の合計。チャージは所属カテゴリの内数（'+yen(fdTotals.charge)+'）'
