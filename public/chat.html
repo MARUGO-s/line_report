@@ -406,7 +406,7 @@
         </label>
         <button onclick="signup()" id="signupBtn">登録する</button>
         <p class="login-note">
-          あらかじめ管理者に登録されたメールアドレスのみ利用できます。<br>
+          メールアドレスとパスワードで新規登録できます。<br>
           <a href="#" onclick="showLogin(event)">ログインに戻る</a>
         </p>
       </div>
@@ -489,8 +489,7 @@
       $('emailInput').focus();
     }
 
-    // セルフ登録。利用可否は chat_allowed_emails で決まるため、
-    // ここで登録できても許可リストに無ければチャットは使えない。
+    // セルフ登録。許可リストは必須にしない。
     async function signup() {
       const email = $('signupEmailInput').value.trim();
       const password = $('signupPasswordInput').value;
@@ -571,7 +570,6 @@
     }
 
     // ログイン済みでもプロフィールが無ければチャットは使えない。
-    // 許可リスト外のメールは、ここで DB のトリガに弾かれる。
     async function afterSignIn() {
       // 保存されたセッションが失効・削除済みのことがあるためサーバー側で検証する。
       // これを省くと、消えたアカウントのまま初回登録画面に進んでしまう。
