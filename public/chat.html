@@ -787,7 +787,7 @@
       <input type="text" id="newGroupInput" placeholder="新しいグループ名" maxlength="100">
       <button onclick="createGroup()">作成</button>
     </div>
-    <button class="fab" onclick="toggleNewGroup()" title="新規トーク" aria-label="新規トーク">＋</button>
+    <button class="fab" id="fab" onclick="toggleNewGroup()" title="新規トーク" aria-label="新規トーク">＋</button>
   </div>
 
   <div class="main-content hidden" id="mainContent">
@@ -856,7 +856,7 @@
           <input type="checkbox" id="rememberInput">
           <span>この端末にメールとパスワードを保存する</span>
         </label>
-        <button onclick="login()" id="loginBtn">ログイン</button>
+        <button type="button" onclick="login()" id="loginBtn">ログイン</button>
         <p class="login-note">
           アカウントをお持ちでない方は
           <a href="#" onclick="showSignup(event)">新規登録</a>
@@ -1056,6 +1056,7 @@
       const { data, error } = await sb
         .from('chat_users')
         .select('id, username, icon_url')
+        .eq('id', userData.user.id)
         .maybeSingle();
 
       if (error) {
