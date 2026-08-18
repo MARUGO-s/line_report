@@ -3225,9 +3225,12 @@
   }
   function renderDomeList(){
     const guestsByDate=new Map(); (lastSeries||[]).forEach(p=>{ const d=ymdJst(p.when); if(d&&p.guests!=null) guestsByDate.set(d,p.guests); });
-    const resolveEventAttendance = e => {
+    const actualEventAttendance = e => {
       const n = e.expected_attendance;
       if (n != null && isFinite(n) && n >= 0) return Math.round(n);
+      return null;
+    };
+    const estimatedVenueAttendance = e => {
       const v = venueOf(e);
       if (v === 'kanadevia') return 3000;
       if (v === 'korakuen') return 2000;
@@ -3253,14 +3256,19 @@
       // 東京ドーム本体は最大集客＝小ホール(カナデビア等)と混在しても目立つ塗りバッジ＋太字。
       const dome=venueOf(e)==='tokyo-dome';
       const vTag=dome?'<span class="ld-dome-badge">🏟 東京ドーム</span>':venueTag(e);
-      // 予想動員数（手入力）: 登録済みの値か、無ければキャパに基づく推定値を初期挿入する
-      const resolvedAtt = resolveEventAttendance(e);
-      const attVal=resolvedAtt!=null?String(resolvedAtt):'';
+      // 予想動員数（手入力）: 実測/手入力だけを入力値にする。会場収容の推定は参考表示のみ。
+      const actualAtt = actualEventAttendance(e);
+      const attVal = actualAtt != null ? String(actualAtt) : '';
+      const estAtt = actualAtt == null ? estimatedVenueAttendance(e) : null;
+      const estHint = estAtt != null
+        ? '<span class="ld-att-hint" title="会場収容の参考値。学習・保存には使いません" style="font-size:10px;color:var(--tx-2)">参考'+nf.format(estAtt)+'人</span>'
+        : '';
       const attHtml='<span class="ld-att" data-date="'+escapeHtml(dOf(e))+'" data-venue="'+escapeHtml(venueOf(e))+'" data-title="'+escapeHtml(e.title||'')+'" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;vertical-align:middle">'
         +'<span style="font-size:11px;color:var(--tx-2)">👥予想</span>'
         +'<input type="number" min="0" step="1" class="ld-att-input" value="'+escapeHtml(attVal)+'" placeholder="人数" style="width:64px;font-size:11px;padding:1px 4px;border:1px solid var(--bd,#ccc);border-radius:4px">'
         +'<button type="button" class="ld-att-save" style="font-size:11px;padding:1px 6px;border:1px solid var(--bd,#ccc);border-radius:4px;background:var(--bg-2,#f2f2f2);cursor:pointer">保存</button>'
         +'<span class="ld-att-state" style="font-size:10px;color:var(--tx-2)"></span>'
+        +estHint
         +'</span>';
       return '<div class="ld-ev-row'+(past?' past':'')+(dome?' dome':'')+'" data-d="'+dOf(e)+'"><span class="ld-g '+catSlug(e.category)+'">'+(EVT_ICON[e.category]||'🎫')+'</span>'+vTag+jpTag(e)+'<span class="ld-ev-t">'+escapeHtml(e.title||'')+'</span>'+noteHtml+attHtml+'</div>'; };
     const dayHtml=(g)=>{ const d=g.d; const past=d<todayJ; const has=guestsByDate.has(d); const n=g.evs.length;
@@ -3270,13 +3278,13 @@
       const nev='<span class="ld-nev">'+n+'件</span>';
       let maxAtt = null;
       for (const ev of g.evs) {
-        const att = resolveEventAttendance(ev);
+        const att = actualEventAttendance(ev);
         if (att !== null) {
           if (maxAtt === null || att > maxAtt) maxAtt = att;
         }
       }
       const attBadge = (maxAtt !== null)
-        ? '<span class="ld-cntb" title="イベントの動員人数（自動取得または予想値）" style="color:var(--blue,#3b82f6)">📋 '+nf.format(maxAtt)+'人</span>'
+        ? '<span class="ld-cntb" title="実測または手入力の動員人数" style="color:var(--blue,#3b82f6)">📋 '+nf.format(maxAtt)+'人</span>'
         : '';
       return '<div class="ld-day'+(past?' past':'')+(d===todayJ?' today':'')+'" data-d="'+d+'"><span class="ld-d mono">'+fmtDay(d)+'</span><span class="ld-w">'+wdayJp(d)+'</span>'+nev+cnt+attBadge+'</div>'
         + g.evs.map(e=>evRowHtml(e,past)).join('');

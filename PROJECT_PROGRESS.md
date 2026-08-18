@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-18 - 推定動員を実測として扱わない
+
+- Request: FOOD STADIUM改善案のうち、予測・AIを正確にする最小変更だけ入れる。
+- Implementation: 会場収容の推定はラベル専用。入力欄の初期値、日次バッジ、規模帯、最大動員、期間ランキングは `expected_attendance` だけを使う。AIキャッシュを v18 に更新。
+- Skipped: テーブル再設計、7日人員予測、欠損フラグ付きGLM、例示スプレッドシートの取り込み。
+
 ### 2026-08-18 - 公開画面のスマホ切れと空の売上シートリンクを修正
 
 - Request: 2026-08-18 UX監査の高優先度。売上シートが空リンク、メディアが横にはみ出す、売上分析・口コミの上部ナビとシステムマップ／AI学習タブが390pxで切れる。
