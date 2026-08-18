@@ -799,7 +799,7 @@
         <h1 id="chatGroupName"></h1>
       </div>
       <div class="chat-header-right">
-        <button class="header-icon-btn" type="button" title="招待" aria-label="招待" onclick="openInvite()">
+        <button class="header-icon-btn" id="inviteHeaderBtn" type="button" title="招待" aria-label="招待" onclick="openInvite()">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
             <circle cx="9" cy="7" r="4"/>
@@ -1202,10 +1202,10 @@
       try {
         const [mineRes, allRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('chat_groups(id, group_name, created_at, icon_url)')
+            .select('chat_groups(id, group_name, created_at, icon_url, is_direct, direct_key)')
             .eq('user_id', currentUser.id),
           sb.from('chat_groups')
-            .select('id, group_name, created_at, icon_url')
+            .select('id, group_name, created_at, icon_url, is_direct, direct_key')
             .order('created_at', { ascending: false })
         ]);
 
@@ -1218,12 +1218,58 @@
         const mineIds = new Set(mine.map((g) => g.id));
 
         myGroups = mine;
-        otherGroups = (allRes.data || []).filter((g) => !mineIds.has(g.id));
+        otherGroups = (allRes.data || []).filter((g) => !mineIds.has(g.id) && !g.is_direct);
+        await attachDirectPeers(myGroups);
         await loadLastMessages();
         renderGroups();
         loadUnread();
       } catch (error) {
         console.error('Load groups error:', error);
+      }
+    }
+
+    async function attachDirectPeers(groups) {
+      const dms = (groups || []).filter((g) => g.is_direct);
+      if (!dms.length) return;
+      try {
+        const { data, error } = await sb
+          .from('chat_group_members')
+          .select('group_id, user_id, chat_users(id, username, icon_url)')
+          .in('group_id', dms.map((g) => g.id));
+        if (error) throw error;
+        const peers = {};
+        (data || []).forEach((row) => {
+          if (row.user_id === currentUser.id || !row.chat_users) return;
+          peers[row.group_id] = row.chat_users;
+        });
+        groups.forEach((g) => {
+          if (g.is_direct) g.peer = peers[g.id] || null;
+        });
+      } catch (error) {
+        console.error('Direct peer error:', error);
+      }
+    }
+
+    function roomTitle(group) {
+      if (group && group.is_direct && group.peer) return group.peer.username;
+      return (group && group.group_name) || 'トーク';
+    }
+
+    function roomIcon(group) {
+      if (group && group.is_direct && group.peer) return group.peer.icon_url;
+      return group && group.icon_url;
+    }
+
+    async function registerDirectFriend(user) {
+      if (!user || user.id === currentUser.id) return;
+      try {
+        const { data, error } = await sb.rpc('chat_open_direct', { p_other: user.id });
+        if (error) throw error;
+        await loadGroups();
+        const group = myGroups.find((g) => Number(g.id) === Number(data));
+        if (group) selectGroup(group);
+      } catch (error) {
+        alert(error.message || '友だちの登録に失敗しました');
       }
     }
 
@@ -1299,6 +1345,10 @@
         search.placeholder = '登録ユーザーを検索';
         $('fab').classList.add('hidden');
         loadRegisteredUsers();
+      } else if (tab === 'friends') {
+        search.placeholder = '友だちを検索';
+        $('fab').classList.add('hidden');
+        loadRegisteredUsers();
       } else {
         search.placeholder = 'トークルームとメッセージ検索';
         $('fab').classList.remove('hidden');
@@ -1363,10 +1413,10 @@
       if (!selectedUserIds.size) return;
       const list = $('userInviteGroupList');
       list.innerHTML = '';
-      if (!myGroups.length) {
+      if (!myGroups.filter((group) => !group.is_direct).length) {
         list.innerHTML = '<div class="empty-note">先にグループを作るか、下から新しいグループを作って招待してください</div>';
       } else {
-        myGroups.forEach((group) => {
+        myGroups.filter((group) => !group.is_direct).forEach((group) => {
           const button = document.createElement('button');
           button.type = 'button';
           button.className = 'target-group';
@@ -1384,6 +1434,10 @@
 
     async function inviteSelectedToGroup(group) {
       if (!group || !selectedUserIds.size) return;
+      if (group.is_direct) {
+        alert('1対1トークには招待できません');
+        return;
+      }
       try {
         const rows = [...selectedUserIds].map((user_id) => ({ group_id: group.id, user_id }));
         const { error } = await sb.from('chat_group_members').upsert(rows, { onConflict: 'group_id,user_id' });
@@ -1470,6 +1524,11 @@
 
     async function openInvite() {
       if (!currentGroupId) return;
+      const current = myGroups.find((g) => g.id === currentGroupId);
+      if (current && current.is_direct) {
+        alert('1対1トークには招待できません');
+        return;
+      }
       $('inviteOverlay').classList.remove('hidden');
       $('inviteUrl').value = '作成中...';
       $('inviteSearch').value = '';
@@ -1715,6 +1774,8 @@
 
     function pickGroupIcon() {
       if (!currentGroupId) return;
+      const group = myGroups.find((g) => g.id === currentGroupId);
+      if (group && group.is_direct) return;
       $('groupIconInput').click();
     }
 
@@ -1759,23 +1820,26 @@
     function matchesQuery(group, preview) {
       const q = ($('talkSearch').value || '').trim().toLowerCase();
       if (!q) return true;
-      return group.group_name.toLowerCase().includes(q) || String(preview || '').toLowerCase().includes(q);
+      const title = roomTitle(group).toLowerCase();
+      return title.includes(q) || String(preview || '').toLowerCase().includes(q);
     }
 
     function renderTalkRow(group, options) {
       const item = document.createElement('div');
       item.className = 'group-item' + (currentGroupId === group.id ? ' active' : '');
       const last = lastMessages[group.id];
+      const title = roomTitle(group);
+      const icon = roomIcon(group);
       const preview = last
         ? ((last.username && last.user_id !== currentUser.id ? last.username + ': ' : '') + last.content)
         : (options.preview || '');
       const when = last ? last.created_at : group.created_at;
       const count = unread[group.id] || 0;
       item.innerHTML = `
-        <div class="talk-avatar" style="background:${group.icon_url ? '#2c2c2e' : avatarStyle(group.group_name)}">${avatarHtml(group.group_name, group.icon_url)}</div>
+        <div class="talk-avatar" style="background:${icon ? '#2c2c2e' : avatarStyle(title)}">${avatarHtml(title, icon)}</div>
         <div class="talk-body">
           <div class="talk-row">
-            <div class="group-item-name">${escapeHtml(group.group_name)}</div>
+            <div class="group-item-name">${escapeHtml(title)}</div>
             <div class="talk-time">${formatTalkTime(when)}</div>
           </div>
           <div class="talk-preview-row">
@@ -1813,12 +1877,15 @@
       const mineList = $('myGroupsList');
       mineList.innerHTML = '';
 
-      const showMine = talkTab === 'all' || talkTab === 'groups';
+      const showMine = talkTab === 'all' || talkTab === 'groups' || talkTab === 'friends';
       const showOther = talkTab === 'all';
-      const showEmptyTab = talkTab === 'friends';
 
       const mineVisible = showMine
-        ? myGroups.filter((g) => matchesQuery(g, lastMessages[g.id] && lastMessages[g.id].content))
+        ? myGroups.filter((g) => {
+            if (talkTab === 'friends' && !g.is_direct) return false;
+            if (talkTab === 'groups' && g.is_direct) return false;
+            return matchesQuery(g, lastMessages[g.id] && lastMessages[g.id].content);
+          })
         : [];
 
       mineVisible.sort((a, b) => {
@@ -1827,12 +1894,49 @@
         return new Date(bt) - new Date(at);
       });
 
-      if (showEmptyTab) {
-        mineList.innerHTML = '<div class="empty-note">友だちトークはまだありません</div>';
-      } else if (showMine && mineVisible.length === 0) {
+      if (showMine && mineVisible.length === 0 && talkTab !== 'friends') {
         mineList.innerHTML = '<div class="empty-note">トークはまだありません</div>';
       } else {
         mineVisible.forEach((group) => mineList.appendChild(renderTalkRow(group, {})));
+      }
+
+      if (talkTab === 'friends') {
+        const peerIds = new Set(
+          myGroups.filter((g) => g.is_direct && g.peer).map((g) => g.peer.id)
+        );
+        const q = ($('talkSearch').value || '').trim().toLowerCase();
+        const candidates = registeredUsers.filter((u) => (
+          u.id !== currentUser.id
+          && !peerIds.has(u.id)
+          && (!q || u.username.toLowerCase().includes(q))
+        ));
+        const section = document.createElement('div');
+        section.className = 'section-label';
+        section.textContent = '登録ユーザーから友だちにする';
+        mineList.appendChild(section);
+        if (!candidates.length && !mineVisible.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty-note';
+          empty.textContent = '登録できるユーザーはいません';
+          mineList.appendChild(empty);
+        }
+        candidates.forEach((user) => {
+          const row = document.createElement('div');
+          row.className = 'user-row';
+          row.innerHTML = `
+            <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+            <div class="talk-body">
+              <div class="group-item-name">${escapeHtml(user.username)}</div>
+              <div class="group-item-info">1対1トークを始める</div>
+            </div>
+          `;
+          const button = document.createElement('button');
+          button.className = 'join-btn';
+          button.textContent = '登録';
+          button.onclick = (e) => { e.stopPropagation(); registerDirectFriend(user); };
+          row.appendChild(button);
+          mineList.appendChild(row);
+        });
       }
 
       const otherWrap = $('otherGroupsWrap');
@@ -1908,8 +2012,9 @@
       $('chatHeader').classList.remove('hidden');
       $('messages').classList.remove('hidden');
       $('inputArea').classList.remove('hidden');
-      $('chatGroupName').textContent = group.group_name;
-      paintAvatar($('chatGroupAvatar'), group.group_name, group.icon_url);
+      $('chatGroupName').textContent = roomTitle(group);
+      paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
+      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
       $('messages').innerHTML = '';
 
       try {
