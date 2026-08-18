@@ -491,6 +491,59 @@
       cursor: pointer;
     }
 
+    .user-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      cursor: pointer;
+      min-height: 64px;
+    }
+    .user-row:hover { background: var(--list-hover); }
+    .user-row.selected { background: #16321f; }
+    .user-check {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid #6e6e73;
+      flex-shrink: 0;
+    }
+    .user-row.selected .user-check {
+      border-color: var(--line-green);
+      background: var(--line-green);
+      box-shadow: inset 0 0 0 4px #16321f;
+    }
+    .user-invite-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 16px 14px;
+      background: #111;
+      border-top: 1px solid #2c2c2e;
+    }
+    .user-invite-bar button {
+      border: 0;
+      background: var(--line-green);
+      color: #fff;
+      border-radius: 18px;
+      padding: 8px 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .target-group {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: #f4f4f4;
+      color: #111;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 8px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+
     .connection-status {
       width: 8px; height: 8px;
       border-radius: 50%;
@@ -709,11 +762,11 @@
       <button class="talk-tab active" data-tab="all" onclick="setTalkTab('all')">すべて</button>
       <button class="talk-tab" data-tab="friends" onclick="setTalkTab('friends')">友だち</button>
       <button class="talk-tab" data-tab="groups" onclick="setTalkTab('groups')">グループ</button>
-      <button class="talk-tab" data-tab="official" onclick="setTalkTab('official')">公式アカウント</button>
+      <button class="talk-tab" data-tab="users" onclick="setTalkTab('users')">登録ユーザー</button>
       <button class="rail-avatar mobile-user-avatar" id="mobileUserAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
     </div>
     <div class="talk-search-wrap">
-      <input class="talk-search" id="talkSearch" type="search" placeholder="トークルームとメッセージ検索" oninput="renderGroups()">
+      <input class="talk-search" id="talkSearch" type="search" placeholder="トークルームとメッセージ検索" oninput="talkTab === 'users' ? renderRegisteredUsers() : renderGroups()">
     </div>
     <div class="groups-scroll">
       <div id="myGroupsList"></div>
@@ -721,6 +774,13 @@
         <div class="section-label">参加できるグループ</div>
         <div id="otherGroupsList"></div>
       </div>
+      <div id="registeredUsersWrap" class="hidden">
+        <div id="registeredUsersList"></div>
+      </div>
+    </div>
+    <div class="user-invite-bar hidden" id="userInviteBar">
+      <span id="userInviteCount">0人を選択</span>
+      <button type="button" onclick="openUserInviteTarget()">招待する</button>
     </div>
     <div class="new-group-pop hidden" id="newGroupPop">
       <button class="icon-preview" id="newGroupIconPreview" type="button" onclick="$('newGroupIconInput').click()" title="アイコンを選ぶ">＋</button>
@@ -753,6 +813,15 @@
     <div class="input-area hidden" id="inputArea">
       <input type="text" id="messageInput" placeholder="メッセージ" onkeypress="handleKeyPress(event)">
       <button onclick="sendMessage()" aria-label="送信">➤</button>
+    </div>
+  </div>
+
+  <div class="invite-overlay hidden" id="userInviteTarget" onclick="if (event.target === this) closeUserInviteTarget()">
+    <div class="invite-sheet" role="dialog" aria-label="招待先">
+      <h2>招待先のグループ</h2>
+      <div id="userInviteGroupList"></div>
+      <button class="invite-reset" type="button" onclick="inviteSelectedToNewGroup()">新しいグループを作って招待</button>
+      <button class="invite-close" type="button" onclick="closeUserInviteTarget()">キャンセル</button>
     </div>
   </div>
 
@@ -849,6 +918,8 @@
     let inviteToken = '';
     let inviteMembers = [];
     let invitePeople = [];
+    let registeredUsers = [];
+    let selectedUserIds = new Set();
     const INVITE_KEY = 'chat_pending_invite';
 
     const $ = (id) => document.getElementById(id);
@@ -1222,7 +1293,129 @@
       document.querySelectorAll('.talk-tab').forEach((el) => {
         el.classList.toggle('active', el.dataset.tab === tab);
       });
+      const search = $('talkSearch');
+      if (tab === 'users') {
+        search.placeholder = '登録ユーザーを検索';
+        $('fab').classList.add('hidden');
+        loadRegisteredUsers();
+      } else {
+        search.placeholder = 'トークルームとメッセージ検索';
+        $('fab').classList.remove('hidden');
+        renderGroups();
+      }
+    }
+
+    async function loadRegisteredUsers() {
+      if (!currentUser) return;
+      try {
+        const { data, error } = await sb
+          .from('chat_users')
+          .select('id, username, icon_url')
+          .order('username');
+        if (error) throw error;
+        registeredUsers = data || [];
+      } catch (error) {
+        console.error('Load users error:', error);
+        registeredUsers = [];
+      }
       renderGroups();
+    }
+
+    function toggleUserSelect(userId) {
+      if (userId === currentUser.id) return;
+      if (selectedUserIds.has(userId)) selectedUserIds.delete(userId);
+      else selectedUserIds.add(userId);
+      renderRegisteredUsers();
+    }
+
+    function renderRegisteredUsers() {
+      const list = $('registeredUsersList');
+      list.innerHTML = '';
+      const q = ($('talkSearch').value || '').trim().toLowerCase();
+      const users = registeredUsers.filter((u) => !q || u.username.toLowerCase().includes(q));
+      if (!users.length) {
+        list.innerHTML = '<div class="empty-note">登録ユーザーはいません</div>';
+      } else {
+        users.forEach((user) => {
+          const mine = user.id === currentUser.id;
+          const selected = selectedUserIds.has(user.id);
+          const row = document.createElement('div');
+          row.className = 'user-row' + (selected ? ' selected' : '');
+          row.innerHTML = `
+            ${mine ? '' : '<div class="user-check"></div>'}
+            <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+            <div class="talk-body">
+              <div class="group-item-name">${escapeHtml(user.username)}${mine ? '（自分）' : ''}</div>
+            </div>
+          `;
+          if (!mine) row.onclick = () => toggleUserSelect(user.id);
+          list.appendChild(row);
+        });
+      }
+
+      const count = selectedUserIds.size;
+      $('userInviteCount').textContent = count + '人を選択';
+      $('userInviteBar').classList.toggle('hidden', count === 0);
+    }
+
+    function openUserInviteTarget() {
+      if (!selectedUserIds.size) return;
+      const list = $('userInviteGroupList');
+      list.innerHTML = '';
+      if (!myGroups.length) {
+        list.innerHTML = '<div class="empty-note">先にグループを作るか、下から新しいグループを作って招待してください</div>';
+      } else {
+        myGroups.forEach((group) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'target-group';
+          button.textContent = group.group_name;
+          button.onclick = () => inviteSelectedToGroup(group);
+          list.appendChild(button);
+        });
+      }
+      $('userInviteTarget').classList.remove('hidden');
+    }
+
+    function closeUserInviteTarget() {
+      $('userInviteTarget').classList.add('hidden');
+    }
+
+    async function inviteSelectedToGroup(group) {
+      if (!group || !selectedUserIds.size) return;
+      try {
+        const rows = [...selectedUserIds].map((user_id) => ({ group_id: group.id, user_id }));
+        const { error } = await sb.from('chat_group_members').upsert(rows, { onConflict: 'group_id,user_id' });
+        if (error) throw error;
+        selectedUserIds = new Set();
+        closeUserInviteTarget();
+        renderRegisteredUsers();
+        await loadGroups();
+        selectGroup(group);
+        alert(group.group_name + ' に招待しました');
+      } catch (error) {
+        alert(error.message || '招待に失敗しました');
+      }
+    }
+
+    async function inviteSelectedToNewGroup() {
+      if (!selectedUserIds.size) return;
+      const name = prompt('新しいグループ名');
+      if (!name || !name.trim()) return;
+      try {
+        const { data, error } = await sb
+          .from('chat_groups')
+          .insert({ group_name: name.trim(), created_by: currentUser.id })
+          .select()
+          .single();
+        if (error) throw error;
+        await sb.from('chat_group_members')
+          .upsert({ group_id: data.id, user_id: currentUser.id }, { onConflict: 'group_id,user_id' });
+        closeUserInviteTarget();
+        await inviteSelectedToGroup(data);
+      } catch (error) {
+        alert(error.message || 'グループ作成に失敗しました');
+      }
     }
 
     function toggleNewGroup() {
@@ -1604,12 +1797,24 @@
     }
 
     function renderGroups() {
+      const usersWrap = $('registeredUsersWrap');
+      const inviteBar = $('userInviteBar');
+      const showUsers = talkTab === 'users';
+      usersWrap.classList.toggle('hidden', !showUsers);
+      if (!showUsers) inviteBar.classList.add('hidden');
+      if (showUsers) {
+        $('myGroupsList').innerHTML = '';
+        $('otherGroupsWrap').classList.add('hidden');
+        renderRegisteredUsers();
+        return;
+      }
+
       const mineList = $('myGroupsList');
       mineList.innerHTML = '';
 
       const showMine = talkTab === 'all' || talkTab === 'groups';
       const showOther = talkTab === 'all';
-      const showEmptyTab = talkTab === 'friends' || talkTab === 'official';
+      const showEmptyTab = talkTab === 'friends';
 
       const mineVisible = showMine
         ? myGroups.filter((g) => matchesQuery(g, lastMessages[g.id] && lastMessages[g.id].content))
@@ -1622,7 +1827,7 @@
       });
 
       if (showEmptyTab) {
-        mineList.innerHTML = `<div class="empty-note">${talkTab === 'friends' ? '友だちトークはまだありません' : '公式アカウントはありません'}</div>`;
+        mineList.innerHTML = '<div class="empty-note">友だちトークはまだありません</div>';
       } else if (showMine && mineVisible.length === 0) {
         mineList.innerHTML = '<div class="empty-note">トークはまだありません</div>';
       } else {
@@ -1804,6 +2009,8 @@
       otherGroups = [];
       unread = {};
       lastMessages = {};
+      registeredUsers = [];
+      selectedUserIds = new Set();
       seenMessageIds = new Set();
       pendingCredentials = null;
       pendingUserIconFile = null;
