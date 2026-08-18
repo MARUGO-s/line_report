@@ -586,9 +586,9 @@
   </style>
 </head>
 <body>
-  <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
-  <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
-  <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+  <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
+  <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
+  <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
 
   <nav class="nav-rail hidden" id="navRail">
     <button class="rail-avatar" id="userAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
@@ -1134,26 +1134,34 @@
 
     function fileExt(file) {
       const type = String(file && file.type || '');
-      if (type === 'image/png') return 'png';
-      if (type === 'image/webp') return 'webp';
-      if (type === 'image/gif') return 'gif';
+      const name = String(file && file.name || '').toLowerCase();
+      if (type === 'image/png' || name.endsWith('.png')) return 'png';
+      if (type === 'image/webp' || name.endsWith('.webp')) return 'webp';
+      if (type === 'image/gif' || name.endsWith('.gif')) return 'gif';
+      if (type === 'image/svg+xml' || name.endsWith('.svg')) return 'svg';
       return 'jpg';
     }
 
     function assertIconFile(file) {
       if (!file) throw new Error('ファイルを選んでください');
-      if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
-        throw new Error('JPEG / PNG / WebP / GIF を選んでください');
+      const type = String(file.type || '');
+      const name = String(file.name || '').toLowerCase();
+      const okType = /^image\/(jpeg|png|webp|gif|svg\+xml)$/.test(type);
+      const okName = /\.(jpe?g|png|webp|gif|svg)$/.test(name);
+      if (!okType && !okName) {
+        throw new Error('JPEG / PNG / WebP / GIF / SVG を選んでください');
       }
       if (file.size > 2 * 1024 * 1024) throw new Error('画像は 2MB 以下にしてください');
     }
 
     async function uploadIcon(folder, file) {
       assertIconFile(file);
-      const path = `${folder}/icon.${fileExt(file)}`;
+      const ext = fileExt(file);
+      const path = `${folder}/icon.${ext}`;
+      const contentType = ext === 'svg' ? 'image/svg+xml' : (file.type || 'image/jpeg');
       const { error } = await sb.storage.from('chat-icons').upload(path, file, {
         upsert: true,
-        contentType: file.type,
+        contentType,
         cacheControl: '3600'
       });
       if (error) throw error;
