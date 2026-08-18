@@ -385,6 +385,111 @@
       padding: 0 6px 0 0;
     }
     .chat-header h1 { font-size: 16px; font-weight: 600; word-break: break-word; }
+    .chat-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .header-icon-btn {
+      border: 0;
+      background: transparent;
+      width: 36px;
+      height: 36px;
+      border-radius: 18px;
+      color: #333;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .header-icon-btn:hover { background: #ececec; }
+
+    .invite-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 20;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .invite-sheet {
+      width: 100%;
+      max-width: 520px;
+      max-height: 86vh;
+      overflow: auto;
+      background: #fff;
+      color: #111;
+      border-radius: 18px 18px 0 0;
+      padding: 16px 16px 24px;
+    }
+    .invite-sheet h2 { font-size: 17px; margin-bottom: 12px; }
+    .invite-actions { display: flex; gap: 8px; margin-bottom: 14px; }
+    .invite-actions button,
+    .invite-reset {
+      flex: 1;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .invite-copy { background: #06c755; color: #fff; }
+    .invite-share { background: #111; color: #fff; }
+    .invite-reset {
+      width: 100%;
+      background: #f2f2f2;
+      color: #333;
+      margin: 8px 0 0;
+    }
+    .invite-url {
+      width: 100%;
+      border: 0;
+      background: #f4f4f4;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12px;
+      margin-bottom: 14px;
+      color: #333;
+    }
+    .invite-label {
+      font-size: 12px;
+      color: #888;
+      margin: 12px 0 8px;
+    }
+    .invite-search {
+      width: 100%;
+      border: 0;
+      background: #f4f4f4;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+    .invite-person {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+    }
+    .invite-person button {
+      margin-left: auto;
+      border: 0;
+      background: #e8f8ee;
+      color: #06c755;
+      border-radius: 14px;
+      padding: 5px 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .invite-close {
+      width: 100%;
+      margin-top: 14px;
+      border: 0;
+      background: #111;
+      color: #fff;
+      border-radius: 10px;
+      padding: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
 
     .connection-status {
       width: 8px; height: 8px;
@@ -633,12 +738,39 @@
         <button class="header-avatar" id="chatGroupAvatar" type="button" title="グループアイコンを変更" onclick="pickGroupIcon()"></button>
         <h1 id="chatGroupName"></h1>
       </div>
-      <div class="connection-status disconnected" id="connectionStatus"></div>
+      <div class="chat-header-right">
+        <button class="header-icon-btn" type="button" title="招待" aria-label="招待" onclick="openInvite()">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M19 8v6M22 11h-6"/>
+          </svg>
+        </button>
+        <div class="connection-status disconnected" id="connectionStatus"></div>
+      </div>
     </div>
     <div class="messages hidden" id="messages"></div>
     <div class="input-area hidden" id="inputArea">
       <input type="text" id="messageInput" placeholder="メッセージ" onkeypress="handleKeyPress(event)">
       <button onclick="sendMessage()" aria-label="送信">➤</button>
+    </div>
+  </div>
+
+  <div class="invite-overlay hidden" id="inviteOverlay" onclick="if (event.target === this) closeInvite()">
+    <div class="invite-sheet" role="dialog" aria-label="招待">
+      <h2>招待</h2>
+      <input class="invite-url" id="inviteUrl" readonly>
+      <div class="invite-actions">
+        <button class="invite-copy" type="button" onclick="copyInvite()">リンクをコピー</button>
+        <button class="invite-share" type="button" onclick="shareInvite()">共有</button>
+      </div>
+      <div class="invite-label">メンバー</div>
+      <div id="inviteMemberList"></div>
+      <div class="invite-label">友だちを招待</div>
+      <input class="invite-search" id="inviteSearch" type="search" placeholder="名前で検索" oninput="renderInvitePeople()">
+      <div id="invitePeopleList"></div>
+      <button class="invite-reset" type="button" onclick="rotateInvite()">招待リンクを再発行</button>
+      <button class="invite-close" type="button" onclick="closeInvite()">閉じる</button>
     </div>
   </div>
 
@@ -714,6 +846,10 @@
     let pendingCredentials = null;
     let pendingUserIconFile = null;
     let pendingGroupIconFile = null;
+    let inviteToken = '';
+    let inviteMembers = [];
+    let invitePeople = [];
+    const INVITE_KEY = 'chat_pending_invite';
 
     const $ = (id) => document.getElementById(id);
     const CREDENTIAL_KEY = 'chat_saved_credentials';
@@ -929,7 +1065,7 @@
       $('sidebar').classList.remove('hidden');
       $('mainContent').classList.remove('hidden');
       subscribeRealtime();
-      loadGroups();
+      loadGroups().then(() => consumeInvite());
     }
 
     function showLoginError(message) {
@@ -1093,6 +1229,184 @@
       $('newGroupPop').classList.toggle('hidden');
       if (!$('newGroupPop').classList.contains('hidden')) {
         $('newGroupInput').focus();
+      }
+    }
+
+    function inviteLink(token) {
+      const url = new URL(location.href);
+      url.search = '';
+      url.hash = '';
+      url.searchParams.set('invite', token);
+      return url.toString();
+    }
+
+    function captureInviteFromUrl() {
+      try {
+        const token = new URLSearchParams(location.search).get('invite');
+        if (token) {
+          sessionStorage.setItem(INVITE_KEY, token);
+          const clean = new URL(location.href);
+          clean.searchParams.delete('invite');
+          history.replaceState(null, '', clean.pathname + clean.search + clean.hash);
+        }
+      } catch (error) {
+        console.error('Invite URL error:', error);
+      }
+    }
+
+    async function consumeInvite() {
+      let token = '';
+      try { token = sessionStorage.getItem(INVITE_KEY) || ''; } catch (_) {}
+      if (!token || !currentUser) return;
+      try { sessionStorage.removeItem(INVITE_KEY); } catch (_) {}
+
+      const { data, error } = await sb.rpc('chat_join_by_invite', { p_token: token });
+      if (error) {
+        alert(error.message || '招待リンクが無効です');
+        return;
+      }
+      await loadGroups();
+      const group = myGroups.find((g) => Number(g.id) === Number(data));
+      if (group) selectGroup(group);
+    }
+
+    function closeInvite() {
+      $('inviteOverlay').classList.add('hidden');
+    }
+
+    async function openInvite() {
+      if (!currentGroupId) return;
+      $('inviteOverlay').classList.remove('hidden');
+      $('inviteUrl').value = '作成中...';
+      $('inviteSearch').value = '';
+      try {
+        const { data, error } = await sb.rpc('chat_ensure_invite', { p_group_id: currentGroupId });
+        if (error) throw error;
+        inviteToken = data;
+        $('inviteUrl').value = inviteLink(inviteToken);
+      } catch (error) {
+        $('inviteUrl').value = '';
+        alert(error.message || '招待リンクを作れませんでした');
+        return;
+      }
+      await loadInviteLists();
+    }
+
+    async function loadInviteLists() {
+      if (!currentGroupId) return;
+      try {
+        const [memberRes, userRes] = await Promise.all([
+          sb.from('chat_group_members')
+            .select('user_id, chat_users(id, username, icon_url)')
+            .eq('group_id', currentGroupId),
+          sb.from('chat_users').select('id, username, icon_url').order('username')
+        ]);
+        if (memberRes.error) throw memberRes.error;
+        if (userRes.error) throw userRes.error;
+        inviteMembers = (memberRes.data || []).map((row) => row.chat_users).filter(Boolean);
+        const memberIds = new Set(inviteMembers.map((u) => u.id));
+        invitePeople = (userRes.data || []).filter((u) => u.id !== currentUser.id && !memberIds.has(u.id));
+        renderInviteLists();
+      } catch (error) {
+        console.error('Invite list error:', error);
+      }
+    }
+
+    function renderInviteLists() {
+      const members = $('inviteMemberList');
+      members.innerHTML = '';
+      if (!inviteMembers.length) {
+        members.innerHTML = '<div class="empty-note">メンバーはいません</div>';
+      } else {
+        inviteMembers.forEach((user) => {
+          const row = document.createElement('div');
+          row.className = 'invite-person';
+          row.innerHTML = `
+            <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+            <div>${escapeHtml(user.username)}${user.id === currentUser.id ? '（自分）' : ''}</div>
+          `;
+          members.appendChild(row);
+        });
+      }
+      renderInvitePeople();
+    }
+
+    function renderInvitePeople() {
+      const q = ($('inviteSearch').value || '').trim().toLowerCase();
+      const list = $('invitePeopleList');
+      list.innerHTML = '';
+      const people = invitePeople.filter((u) => !q || u.username.toLowerCase().includes(q));
+      if (!people.length) {
+        list.innerHTML = '<div class="empty-note">招待できる友だちはいません</div>';
+        return;
+      }
+      people.forEach((user) => {
+        const row = document.createElement('div');
+        row.className = 'invite-person';
+        row.innerHTML = `
+          <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+          <div>${escapeHtml(user.username)}</div>
+        `;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = '招待';
+        button.onclick = () => inviteUser(user);
+        row.appendChild(button);
+        list.appendChild(row);
+      });
+    }
+
+    async function inviteUser(user) {
+      if (!currentGroupId || !user) return;
+      try {
+        const { error } = await sb.from('chat_group_members')
+          .upsert({ group_id: currentGroupId, user_id: user.id }, { onConflict: 'group_id,user_id' });
+        if (error) throw error;
+        await loadInviteLists();
+      } catch (error) {
+        alert(error.message || '招待に失敗しました');
+      }
+    }
+
+    async function copyInvite() {
+      const value = $('inviteUrl').value.trim();
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        alert('招待リンクをコピーしました');
+      } catch (_) {
+        $('inviteUrl').select();
+        document.execCommand('copy');
+        alert('招待リンクをコピーしました');
+      }
+    }
+
+    async function shareInvite() {
+      const value = $('inviteUrl').value.trim();
+      if (!value) return;
+      const name = $('chatGroupName').textContent || 'トーク';
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: name, text: name + ' に招待します', url: value });
+          return;
+        } catch (error) {
+          if (error && error.name === 'AbortError') return;
+        }
+      }
+      copyInvite();
+    }
+
+    async function rotateInvite() {
+      if (!currentGroupId) return;
+      if (!confirm('今の招待リンクは使えなくなります。再発行しますか？')) return;
+      try {
+        const { data, error } = await sb.rpc('chat_rotate_invite', { p_group_id: currentGroupId });
+        if (error) throw error;
+        inviteToken = data;
+        $('inviteUrl').value = inviteLink(inviteToken);
+        alert('新しい招待リンクを発行しました');
+      } catch (error) {
+        alert(error.message || '再発行に失敗しました');
       }
     }
 
@@ -1617,12 +1931,19 @@
       }
     });
 
+    captureInviteFromUrl();
+
     (async () => {
       const { data } = await sb.auth.getSession();
       if (data?.session) {
         await afterSignIn();
       } else {
         applySavedCredentials();
+        try {
+          if (sessionStorage.getItem(INVITE_KEY)) {
+            showNotice('ログインまたは新規登録すると、招待されたトークに参加できます。');
+          }
+        } catch (_) {}
       }
     })();
   </script>
