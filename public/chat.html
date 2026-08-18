@@ -1132,15 +1132,8 @@
       paintAvatar($('profileIconPreview'), name || '?', pendingUserIconFile ? null : icon);
     }
 
-    function fileExt(file) {
-      const type = String(file && file.type || '');
-      const name = String(file && file.name || '').toLowerCase();
-      if (type === 'image/png' || name.endsWith('.png')) return 'png';
-      if (type === 'image/webp' || name.endsWith('.webp')) return 'webp';
-      if (type === 'image/gif' || name.endsWith('.gif')) return 'gif';
-      if (type === 'image/svg+xml' || name.endsWith('.svg')) return 'svg';
-      return 'jpg';
-    }
+    const ICON_SIZE = 256;
+    const ICON_SOURCE_MAX_BYTES = 15 * 1024 * 1024;
 
     function assertIconFile(file) {
       if (!file) throw new Error('ファイルを選んでください');
@@ -1151,17 +1144,56 @@
       if (!okType && !okName) {
         throw new Error('JPEG / PNG / WebP / GIF / SVG を選んでください');
       }
-      if (file.size > 2 * 1024 * 1024) throw new Error('画像は 2MB 以下にしてください');
+      if (file.size > ICON_SOURCE_MAX_BYTES) throw new Error('画像は 15MB 以下にしてください');
+    }
+
+    function loadIconImage(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          resolve(img);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error('画像を読み込めませんでした'));
+        };
+        img.src = url;
+      });
+    }
+
+    async function resizeIconFile(file) {
+      const img = await loadIconImage(file);
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
+      if (!width || !height) throw new Error('画像サイズを取得できませんでした');
+
+      const canvas = document.createElement('canvas');
+      canvas.width = ICON_SIZE;
+      canvas.height = ICON_SIZE;
+      const ctx = canvas.getContext('2d');
+      const src = Math.min(width, height);
+      const sx = (width - src) / 2;
+      const sy = (height - src) / 2;
+      ctx.drawImage(img, sx, sy, src, src, 0, 0, ICON_SIZE, ICON_SIZE);
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('画像の変換に失敗しました');
+      return new File([blob], 'icon.png', { type: 'image/png' });
+    }
+
+    async function prepareIconFile(file) {
+      assertIconFile(file);
+      return resizeIconFile(file);
     }
 
     async function uploadIcon(folder, file) {
-      assertIconFile(file);
-      const ext = fileExt(file);
-      const path = `${folder}/icon.${ext}`;
-      const contentType = ext === 'svg' ? 'image/svg+xml' : (file.type || 'image/jpeg');
-      const { error } = await sb.storage.from('chat-icons').upload(path, file, {
+      const prepared = await prepareIconFile(file);
+      const path = `${folder}/icon.png`;
+      const { error } = await sb.storage.from('chat-icons').upload(path, prepared, {
         upsert: true,
-        contentType,
+        contentType: 'image/png',
         cacheControl: '3600'
       });
       if (error) throw error;
@@ -1535,12 +1567,12 @@
       e.target.value = '';
       if (!file) return;
       try {
-        assertIconFile(file);
+        const prepared = await prepareIconFile(file);
         if (currentUser) {
-          await saveUserIcon(file);
+          await saveUserIcon(prepared);
         } else {
-          pendingUserIconFile = file;
-          previewLocalIcon($('profileIconPreview'), file, 'icon');
+          pendingUserIconFile = prepared;
+          previewLocalIcon($('profileIconPreview'), prepared, 'icon');
         }
       } catch (error) {
         alert(error.message || error);
@@ -1563,9 +1595,9 @@
       e.target.value = '';
       if (!file) return;
       try {
-        assertIconFile(file);
-        pendingGroupIconFile = file;
-        previewLocalIcon($('newGroupIconPreview'), file, 'icon');
+        const prepared = await prepareIconFile(file);
+        pendingGroupIconFile = prepared;
+        previewLocalIcon($('newGroupIconPreview'), prepared, 'icon');
       } catch (error) {
         alert(error.message || error);
       }
