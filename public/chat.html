@@ -1590,7 +1590,7 @@
       }
     });
 
-    $('newGroupIconInput').addEventListener('change', (e) => {
+    $('newGroupIconInput').addEventListener('change', async (e) => {
       const file = e.target.files && e.target.files[0];
       e.target.value = '';
       if (!file) return;
