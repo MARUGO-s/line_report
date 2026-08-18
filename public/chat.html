@@ -303,6 +303,34 @@
       color: #888;
       text-align: center;
       margin-top: 12px;
+      line-height: 1.8;
+    }
+
+    .login-note a { color: #667eea; }
+
+    .remember {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #555;
+      margin: -4px 0 14px;
+      cursor: pointer;
+    }
+
+    .remember input {
+      width: auto;
+      margin: 0;
+      accent-color: #667eea;
+    }
+
+    .notice {
+      color: #1d4ed8;
+      background: #eff6ff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 13px;
       line-height: 1.6;
     }
 
@@ -352,12 +380,31 @@
     <div class="login-container">
       <h1>💬 Group Chat</h1>
       <div id="loginError" class="error hidden"></div>
+      <div id="loginNotice" class="notice hidden"></div>
 
       <div id="loginForm">
         <input type="email" id="emailInput" placeholder="メールアドレス" autocomplete="username">
         <input type="password" id="passwordInput" placeholder="パスワード" autocomplete="current-password">
+        <label class="remember">
+          <input type="checkbox" id="rememberInput">
+          <span>この端末にメールとパスワードを保存する</span>
+        </label>
         <button onclick="login()" id="loginBtn">ログイン</button>
-        <p class="login-note">アカウントは管理者が発行します。</p>
+        <p class="login-note">
+          アカウントをお持ちでない方は
+          <a href="#" onclick="showSignup(event)">新規登録</a>
+        </p>
+      </div>
+
+      <div id="signupForm" class="hidden">
+        <input type="email" id="signupEmailInput" placeholder="メールアドレス" autocomplete="username">
+        <input type="password" id="signupPasswordInput" placeholder="パスワード（8文字以上）" autocomplete="new-password">
+        <input type="password" id="signupPasswordConfirm" placeholder="パスワード（確認）" autocomplete="new-password">
+        <button onclick="signup()" id="signupBtn">登録する</button>
+        <p class="login-note">
+          あらかじめ管理者に登録されたメールアドレスのみ利用できます。<br>
+          <a href="#" onclick="showLogin(event)">ログインに戻る</a>
+        </p>
       </div>
 
       <div id="profileForm" class="hidden">
@@ -389,10 +436,100 @@
     let unread = {};
     let seenMessageIds = new Set();
     let channel = null;
+    // 新規登録直後、プロフィール作成まで完了したら保存する候補。
+    let pendingCredentials = null;
 
     const $ = (id) => document.getElementById(id);
 
-    // ログイン。アカウントは管理者が Supabase 側で発行する（セルフ登録は無い）。
+    // 「この端末に保存する」の保存先。共用端末では有効にしないこと。
+    const CREDENTIAL_KEY = 'chat_saved_credentials';
+
+    function loadSavedCredentials() {
+      try {
+        const raw = localStorage.getItem(CREDENTIAL_KEY);
+        if (!raw) return null;
+        const saved = JSON.parse(raw);
+        return saved && saved.email ? saved : null;
+      } catch (_) {
+        localStorage.removeItem(CREDENTIAL_KEY);
+        return null;
+      }
+    }
+
+    function saveCredentials(email, password) {
+      try {
+        localStorage.setItem(CREDENTIAL_KEY, JSON.stringify({ email, password }));
+      } catch (error) {
+        console.error('Credential save error:', error);
+      }
+    }
+
+    function clearCredentials() {
+      localStorage.removeItem(CREDENTIAL_KEY);
+    }
+
+    function showSignup(e) {
+      if (e) e.preventDefault();
+      $('loginForm').classList.add('hidden');
+      $('signupForm').classList.remove('hidden');
+      hideNotice();
+      $('signupEmailInput').value = $('emailInput').value.trim();
+      $('signupEmailInput').focus();
+    }
+
+    function showLogin(e) {
+      if (e) e.preventDefault();
+      $('signupForm').classList.add('hidden');
+      $('loginForm').classList.remove('hidden');
+      $('emailInput').focus();
+    }
+
+    // セルフ登録。利用可否は chat_allowed_emails で決まるため、
+    // ここで登録できても許可リストに無ければチャットは使えない。
+    async function signup() {
+      const email = $('signupEmailInput').value.trim();
+      const password = $('signupPasswordInput').value;
+      const confirm = $('signupPasswordConfirm').value;
+
+      if (!email || !password) return showLoginError('メールアドレスとパスワードを入力してください');
+      if (password.length < 8) return showLoginError('パスワードは8文字以上にしてください');
+      if (password !== confirm) return showLoginError('確認用のパスワードが一致しません');
+
+      $('signupBtn').disabled = true;
+      try {
+        const { data, error } = await sb.auth.signUp({ email, password });
+
+        if (error) {
+          if (/already registered|already been registered/i.test(error.message)) {
+            showLoginError('このメールアドレスは登録済みです。ログインしてください');
+          } else if (/confirmation email|sending email/i.test(error.message)) {
+            showLoginError('確認メールを送信できませんでした。管理者にご連絡ください');
+          } else {
+            showLoginError(`登録に失敗しました: ${error.message}`);
+          }
+          return;
+        }
+
+        // メール確認が有効な場合はここでセッションが返らない。
+        if (!data.session) {
+          showLogin();
+          showNotice('確認メールを送信しました。メール内のリンクを開いてからログインしてください。');
+          $('emailInput').value = email;
+          return;
+        }
+
+        $('signupPasswordInput').value = '';
+        $('signupPasswordConfirm').value = '';
+        pendingCredentials = { email, password };
+        await afterSignIn();
+      } catch (error) {
+        console.error('Signup error:', error);
+        showLoginError(`登録に失敗しました: ${error.message || error}`);
+      } finally {
+        $('signupBtn').disabled = false;
+      }
+    }
+
     async function login() {
       const email = $('emailInput').value.trim();
       const password = $('passwordInput').value;
@@ -405,10 +542,19 @@
           showLoginError(
             /invalid login/i.test(error.message)
               ? 'メールアドレスまたはパスワードが違います'
-              : `ログインに失敗しました: ${error.message}`
+              : /email not confirmed/i.test(error.message)
+                ? 'メールアドレスの確認が完了していません。確認メールのリンクを開いてください'
+                : `ログインに失敗しました: ${error.message}`
           );
           return;
         }
+
+        if ($('rememberInput').checked) {
+          saveCredentials(email, password);
+        } else {
+          clearCredentials();
+        }
+
         $('passwordInput').value = '';
         await afterSignIn();
       } catch (error) {
@@ -422,6 +568,15 @@
     // ログイン済みでもプロフィールが無ければチャットは使えない。
     // 許可リスト外のメールは、ここで DB のトリガに弾かれる。
     async function afterSignIn() {
+      // 保存されたセッションが失効・削除済みのことがあるためサーバー側で検証する。
+      // これを省くと、消えたアカウントのまま初回登録画面に進んでしまう。
+      const { data: userData, error: userError } = await sb.auth.getUser();
+      if (userError || !userData?.user) {
+        await sb.auth.signOut();
+        resetToLogin();
+        return;
+      }
+
       const { data, error } = await sb
         .from('chat_users')
         .select('id, username')
@@ -435,6 +590,7 @@
 
       if (!data) {
         $('loginForm').classList.add('hidden');
+        $('signupForm').classList.add('hidden');
         $('profileForm').classList.remove('hidden');
         $('usernameInput').focus();
         return;
@@ -475,6 +631,13 @@
         }
 
         currentUser = data;
+
+        // 新規登録から来た場合、チェックが入っていればここで保存する。
+        if (pendingCredentials && $('rememberInput').checked) {
+          saveCredentials(pendingCredentials.email, pendingCredentials.password);
+        }
+        pendingCredentials = null;
+
         $('profileForm').classList.add('hidden');
         $('loginForm').classList.remove('hidden');
         startSession();
@@ -498,6 +661,16 @@
       error.textContent = message;
       error.classList.remove('hidden');
       setTimeout(() => error.classList.add('hidden'), 6000);
+    }
+
+    function showNotice(message) {
+      const notice = $('loginNotice');
+      notice.textContent = message;
+      notice.classList.remove('hidden');
+    }
+
+    function hideNotice() {
+      $('loginNotice').classList.add('hidden');
     }
 
     // Realtime は1本のチャンネルに集約する。
@@ -810,15 +983,32 @@
       otherGroups = [];
       unread = {};
       seenMessageIds = new Set();
+      pendingCredentials = null;
       $('loginScreen').classList.remove('hidden');
       $('profileForm').classList.add('hidden');
+      $('signupForm').classList.add('hidden');
       $('loginForm').classList.remove('hidden');
       $('sidebar').classList.add('hidden');
       $('mainContent').classList.add('hidden');
-      $('passwordInput').value = '';
       $('usernameInput').value = '';
-      $('emailInput').focus();
+      hideNotice();
+      applySavedCredentials();
       updateTitle();
+    }
+
+    // 保存済みならログイン欄に差し込み、チェックも入れた状態にする。
+    function applySavedCredentials() {
+      const saved = loadSavedCredentials();
+      if (saved) {
+        $('emailInput').value = saved.email;
+        $('passwordInput').value = saved.password || '';
+        $('rememberInput').checked = true;
+        $('loginBtn').focus();
+      } else {
+        $('passwordInput').value = '';
+        $('rememberInput').checked = false;
+        $('emailInput').focus();
+      }
     }
 
     document.addEventListener('visibilitychange', () => {
@@ -842,8 +1032,16 @@
 
     $('emailInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') $('passwordInput').focus(); });
     $('passwordInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') login(); });
+    $('signupEmailInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') $('signupPasswordInput').focus(); });
+    $('signupPasswordInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') $('signupPasswordConfirm').focus(); });
+    $('signupPasswordConfirm').addEventListener('keypress', (e) => { if (e.key === 'Enter') signup(); });
     $('usernameInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createProfile(); });
     $('newGroupInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createGroup(); });
+
+    // チェックを外したら、保存済みのパスワードもその場で消す。
+    $('rememberInput').addEventListener('change', (e) => {
+      if (!e.target.checked) clearCredentials();
+    });
 
     sb.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
@@ -853,12 +1051,13 @@
     });
 
     // 既存セッションがあれば復帰する（トークンは supabase-js が自動更新する）。
+    // 無ければ、保存済みの認証情報をログイン欄に差し込む。
     (async () => {
       const { data } = await sb.auth.getSession();
       if (data?.session) {
         await afterSignIn();
       } else {
-        $('emailInput').focus();
+        applySavedCredentials();
       }
     })();
   </script>
