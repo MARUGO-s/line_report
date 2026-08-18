@@ -53,6 +53,19 @@
       font-size: 14px;
       font-weight: 600;
       margin-bottom: 22px;
+      overflow: hidden;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+    }
+    .rail-avatar img,
+    .talk-avatar img,
+    .header-avatar img,
+    .icon-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
     }
 
     .rail-btn {
@@ -173,6 +186,58 @@
       font-size: 18px;
       flex-shrink: 0;
       overflow: hidden;
+    }
+
+    .header-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .icon-picker {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .icon-preview {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: #3a3a3c;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 700;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .icon-picker-btn {
+      font-size: 13px;
+      color: #5ac8fa;
+      background: none;
+      border: 0;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .mobile-user-avatar {
+      display: none;
     }
 
     .talk-body { min-width: 0; flex: 1; }
@@ -511,12 +576,22 @@
       body.chat-open .talk-list { display: none; }
       body.chat-open .main-content { display: flex; width: 100%; }
       .back-btn { display: inline-flex; }
+      .mobile-user-avatar {
+        display: flex;
+        width: 32px;
+        height: 32px;
+        margin-left: auto;
+      }
     }
   </style>
 </head>
 <body>
+  <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+  <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+  <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+
   <nav class="nav-rail hidden" id="navRail">
-    <div class="rail-avatar" id="userAvatar"></div>
+    <button class="rail-avatar" id="userAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
     <button class="rail-btn active" title="トーク" aria-label="トーク">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/></svg>
     </button>
@@ -530,6 +605,7 @@
       <button class="talk-tab" data-tab="friends" onclick="setTalkTab('friends')">友だち</button>
       <button class="talk-tab" data-tab="groups" onclick="setTalkTab('groups')">グループ</button>
       <button class="talk-tab" data-tab="official" onclick="setTalkTab('official')">公式アカウント</button>
+      <button class="rail-avatar mobile-user-avatar" id="mobileUserAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
     </div>
     <div class="talk-search-wrap">
       <input class="talk-search" id="talkSearch" type="search" placeholder="トークルームとメッセージ検索" oninput="renderGroups()">
@@ -542,6 +618,7 @@
       </div>
     </div>
     <div class="new-group-pop hidden" id="newGroupPop">
+      <button class="icon-preview" id="newGroupIconPreview" type="button" onclick="$('newGroupIconInput').click()" title="アイコンを選ぶ">＋</button>
       <input type="text" id="newGroupInput" placeholder="新しいグループ名" maxlength="100">
       <button onclick="createGroup()">作成</button>
     </div>
@@ -553,6 +630,7 @@
     <div class="chat-header hidden" id="chatHeader">
       <div class="chat-header-left">
         <button class="back-btn" onclick="closeChat()" aria-label="戻る">‹</button>
+        <button class="header-avatar" id="chatGroupAvatar" type="button" title="グループアイコンを変更" onclick="pickGroupIcon()"></button>
         <h1 id="chatGroupName"></h1>
       </div>
       <div class="connection-status disconnected" id="connectionStatus"></div>
@@ -600,7 +678,11 @@
       </div>
 
       <div id="profileForm" class="hidden">
-        <p class="login-note" style="margin-bottom:14px;">初回のみ、チャットで表示される名前を決めてください。</p>
+        <p class="login-note" style="margin-bottom:14px;">初回のみ、表示名とアイコンを決めてください。</p>
+        <div class="icon-picker">
+          <div class="icon-preview" id="profileIconPreview">?</div>
+          <button type="button" class="icon-picker-btn" onclick="pickUserIcon()">アイコンを選ぶ</button>
+        </div>
         <input type="text" id="usernameInput" placeholder="表示名" maxlength="50">
         <button onclick="createProfile()" id="profileBtn">はじめる</button>
       </div>
@@ -630,6 +712,8 @@
     let seenMessageIds = new Set();
     let channel = null;
     let pendingCredentials = null;
+    let pendingUserIconFile = null;
+    let pendingGroupIconFile = null;
 
     const $ = (id) => document.getElementById(id);
     const CREDENTIAL_KEY = 'chat_saved_credentials';
@@ -764,7 +848,7 @@
 
       const { data, error } = await sb
         .from('chat_users')
-        .select('id, username')
+        .select('id, username, icon_url')
         .maybeSingle();
 
       if (error) {
@@ -801,7 +885,7 @@
         const { data, error } = await sb
           .from('chat_users')
           .insert({ id: uid, username })
-          .select()
+          .select('id, username, icon_url')
           .single();
 
         if (error) {
@@ -816,6 +900,14 @@
         }
 
         currentUser = data;
+        if (pendingUserIconFile) {
+          try {
+            await saveUserIcon(pendingUserIconFile);
+          } catch (iconError) {
+            console.error('Profile icon error:', iconError);
+          }
+          pendingUserIconFile = null;
+        }
 
         if (pendingCredentials && pendingCredentials.remember) {
           saveCredentials(pendingCredentials.email, pendingCredentials.password);
@@ -831,7 +923,7 @@
     }
 
     function startSession() {
-      $('userAvatar').textContent = currentUser.username.slice(0, 1).toUpperCase();
+      renderUserAvatars();
       $('loginScreen').classList.add('hidden');
       $('navRail').classList.remove('hidden');
       $('sidebar').classList.remove('hidden');
@@ -902,10 +994,10 @@
       try {
         const [mineRes, allRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('chat_groups(id, group_name, created_at)')
+            .select('chat_groups(id, group_name, created_at, icon_url)')
             .eq('user_id', currentUser.id),
           sb.from('chat_groups')
-            .select('id, group_name, created_at')
+            .select('id, group_name, created_at, icon_url')
             .order('created_at', { ascending: false })
         ]);
 
@@ -1020,6 +1112,102 @@
       return AVATAR_COLORS[hash % AVATAR_COLORS.length];
     }
 
+    function avatarHtml(name, iconUrl) {
+      const letter = escapeHtml((name || '?').trim().slice(0, 1) || '?');
+      if (iconUrl) return `<img src="${escapeHtml(iconUrl)}" alt="">`;
+      return letter;
+    }
+
+    function paintAvatar(el, name, iconUrl) {
+      if (!el) return;
+      el.style.background = iconUrl ? '#2c2c2e' : avatarStyle(name || '?');
+      el.innerHTML = avatarHtml(name, iconUrl);
+    }
+
+    function renderUserAvatars() {
+      const name = currentUser ? currentUser.username : '?';
+      const icon = currentUser && currentUser.icon_url;
+      paintAvatar($('userAvatar'), name, icon);
+      paintAvatar($('mobileUserAvatar'), name, icon);
+      paintAvatar($('profileIconPreview'), name || '?', pendingUserIconFile ? null : icon);
+    }
+
+    function fileExt(file) {
+      const type = String(file && file.type || '');
+      if (type === 'image/png') return 'png';
+      if (type === 'image/webp') return 'webp';
+      if (type === 'image/gif') return 'gif';
+      return 'jpg';
+    }
+
+    function assertIconFile(file) {
+      if (!file) throw new Error('ファイルを選んでください');
+      if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+        throw new Error('JPEG / PNG / WebP / GIF を選んでください');
+      }
+      if (file.size > 2 * 1024 * 1024) throw new Error('画像は 2MB 以下にしてください');
+    }
+
+    async function uploadIcon(folder, file) {
+      assertIconFile(file);
+      const path = `${folder}/icon.${fileExt(file)}`;
+      const { error } = await sb.storage.from('chat-icons').upload(path, file, {
+        upsert: true,
+        contentType: file.type,
+        cacheControl: '3600'
+      });
+      if (error) throw error;
+      const { data } = sb.storage.from('chat-icons').getPublicUrl(path);
+      return `${data.publicUrl}?t=${Date.now()}`;
+    }
+
+    function pickUserIcon() {
+      $('userIconInput').click();
+    }
+
+    function pickGroupIcon() {
+      if (!currentGroupId) return;
+      $('groupIconInput').click();
+    }
+
+    async function saveUserIcon(file) {
+      if (!currentUser) return;
+      const url = await uploadIcon(`users/${currentUser.id}`, file);
+      const { error } = await sb.from('chat_users').update({ icon_url: url }).eq('id', currentUser.id);
+      if (error) throw error;
+      currentUser.icon_url = url;
+      renderUserAvatars();
+    }
+
+    async function saveGroupIcon(groupId, file) {
+      const url = await uploadIcon(`groups/${groupId}`, file);
+      const { error } = await sb.from('chat_groups').update({ icon_url: url }).eq('id', groupId);
+      if (error) throw error;
+      const apply = (list) => {
+        const found = list.find((g) => g.id === groupId);
+        if (found) found.icon_url = url;
+      };
+      apply(myGroups);
+      apply(otherGroups);
+      renderGroups();
+      if (currentGroupId === groupId) {
+        const group = myGroups.find((g) => g.id === groupId) || { group_name: $('chatGroupName').textContent, icon_url: url };
+        paintAvatar($('chatGroupAvatar'), group.group_name, url);
+      }
+      return url;
+    }
+
+    function previewLocalIcon(el, file, fallbackName) {
+      if (!el || !file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        el.style.background = '#2c2c2e';
+        el.innerHTML = `<img src="${reader.result}" alt="">`;
+      };
+      reader.readAsDataURL(file);
+      if (fallbackName) el.title = fallbackName;
+    }
+
     function matchesQuery(group, preview) {
       const q = ($('talkSearch').value || '').trim().toLowerCase();
       if (!q) return true;
@@ -1035,10 +1223,8 @@
         : (options.preview || '');
       const when = last ? last.created_at : group.created_at;
       const count = unread[group.id] || 0;
-      const letter = (group.group_name || '?').trim().slice(0, 1);
-
       item.innerHTML = `
-        <div class="talk-avatar" style="background:${avatarStyle(group.group_name)}">${escapeHtml(letter)}</div>
+        <div class="talk-avatar" style="background:${group.icon_url ? '#2c2c2e' : avatarStyle(group.group_name)}">${avatarHtml(group.group_name, group.icon_url)}</div>
         <div class="talk-body">
           <div class="talk-row">
             <div class="group-item-name">${escapeHtml(group.group_name)}</div>
@@ -1116,6 +1302,17 @@
         await sb.from('chat_group_members')
           .upsert({ group_id: data.id, user_id: currentUser.id }, { onConflict: 'group_id,user_id' });
 
+        if (pendingGroupIconFile) {
+          try {
+            data.icon_url = await saveGroupIcon(data.id, pendingGroupIconFile);
+          } catch (iconError) {
+            console.error('Group icon error:', iconError);
+          }
+          pendingGroupIconFile = null;
+          paintAvatar($('newGroupIconPreview'), '＋', null);
+          $('newGroupIconPreview').textContent = '＋';
+        }
+
         $('newGroupInput').value = '';
         $('newGroupPop').classList.add('hidden');
         await loadGroups();
@@ -1152,6 +1349,7 @@
       $('messages').classList.remove('hidden');
       $('inputArea').classList.remove('hidden');
       $('chatGroupName').textContent = group.group_name;
+      paintAvatar($('chatGroupAvatar'), group.group_name, group.icon_url);
       $('messages').innerHTML = '';
 
       try {
@@ -1254,6 +1452,8 @@
       lastMessages = {};
       seenMessageIds = new Set();
       pendingCredentials = null;
+      pendingUserIconFile = null;
+      pendingGroupIconFile = null;
       document.body.classList.remove('chat-open');
       $('loginScreen').classList.remove('hidden');
       $('profileForm').classList.add('hidden');
@@ -1321,6 +1521,47 @@
     $('signupPasswordConfirm').addEventListener('keypress', (e) => { if (e.key === 'Enter') signup(); });
     $('usernameInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createProfile(); });
     $('newGroupInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createGroup(); });
+
+    $('userIconInput').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      try {
+        assertIconFile(file);
+        if (currentUser) {
+          await saveUserIcon(file);
+        } else {
+          pendingUserIconFile = file;
+          previewLocalIcon($('profileIconPreview'), file, 'icon');
+        }
+      } catch (error) {
+        alert(error.message || error);
+      }
+    });
+
+    $('groupIconInput').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file || !currentGroupId) return;
+      try {
+        await saveGroupIcon(currentGroupId, file);
+      } catch (error) {
+        alert(error.message || `アイコンの保存に失敗しました: ${error.message || error}`);
+      }
+    });
+
+    $('newGroupIconInput').addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      try {
+        assertIconFile(file);
+        pendingGroupIconFile = file;
+        previewLocalIcon($('newGroupIconPreview'), file, 'icon');
+      } catch (error) {
+        alert(error.message || error);
+      }
+    });
 
     $('rememberInput').addEventListener('change', (e) => {
       if (!e.target.checked) clearCredentials();
