@@ -298,6 +298,14 @@
       word-break: break-word;
     }
 
+    .login-note {
+      font-size: 12px;
+      color: #888;
+      text-align: center;
+      margin-top: 12px;
+      line-height: 1.6;
+    }
+
     .hidden { display: none !important; }
 
     @media (max-width: 640px) {
@@ -344,8 +352,19 @@
     <div class="login-container">
       <h1>💬 Group Chat</h1>
       <div id="loginError" class="error hidden"></div>
-      <input type="text" id="usernameInput" placeholder="ユーザー名" maxlength="50">
-      <button onclick="login()">ログイン</button>
+
+      <div id="loginForm">
+        <input type="email" id="emailInput" placeholder="メールアドレス" autocomplete="username">
+        <input type="password" id="passwordInput" placeholder="パスワード" autocomplete="current-password">
+        <button onclick="login()" id="loginBtn">ログイン</button>
+        <p class="login-note">アカウントは管理者が発行します。</p>
+      </div>
+
+      <div id="profileForm" class="hidden">
+        <p class="login-note" style="margin-bottom:14px;">初回のみ、チャットで表示される名前を決めてください。</p>
+        <input type="text" id="usernameInput" placeholder="表示名" maxlength="50">
+        <button onclick="createProfile()" id="profileBtn">はじめる</button>
+      </div>
     </div>
   </div>
 
@@ -360,7 +379,7 @@
     const SUPABASE_ANON_KEY = CONFIG.RECEIPT_ADMIN_ANON_KEY || '';
 
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false }
+      auth: { persistSession: true, autoRefreshToken: true }
     });
 
     let currentUser = null;
@@ -373,25 +392,94 @@
 
     const $ = (id) => document.getElementById(id);
 
+    // ログイン。アカウントは管理者が Supabase 側で発行する（セルフ登録は無い）。
     async function login() {
-      const username = $('usernameInput').value.trim();
-      if (!username) return showLoginError('ユーザー名を入力してください');
+      const email = $('emailInput').value.trim();
+      const password = $('passwordInput').value;
+      if (!email || !password) return showLoginError('メールアドレスとパスワードを入力してください');
 
+      $('loginBtn').disabled = true;
       try {
-        const { data, error } = await sb
-          .from('chat_users')
-          .upsert({ username }, { onConflict: 'username' })
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        currentUser = data;
-        sessionStorage.setItem('chatUser', JSON.stringify(currentUser));
-        startSession();
+        const { error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) {
+          showLoginError(
+            /invalid login/i.test(error.message)
+              ? 'メールアドレスまたはパスワードが違います'
+              : `ログインに失敗しました: ${error.message}`
+          );
+          return;
+        }
+        $('passwordInput').value = '';
+        await afterSignIn();
       } catch (error) {
         console.error('Login error:', error);
         showLoginError(`ログインに失敗しました: ${error.message || error}`);
+      } finally {
+        $('loginBtn').disabled = false;
+      }
+    }
+
+    // ログイン済みでもプロフィールが無ければチャットは使えない。
+    // 許可リスト外のメールは、ここで DB のトリガに弾かれる。
+    async function afterSignIn() {
+      const { data, error } = await sb
+        .from('chat_users')
+        .select('id, username')
+        .maybeSingle();
+
+      if (error) {
+        console.error('Profile load error:', error);
+        showLoginError(`プロフィールの取得に失敗しました: ${error.message}`);
+        return;
+      }
+
+      if (!data) {
+        $('loginForm').classList.add('hidden');
+        $('profileForm').classList.remove('hidden');
+        $('usernameInput').focus();
+        return;
+      }
+
+      currentUser = data;
+      startSession();
+    }
+
+    async function createProfile() {
+      const username = $('usernameInput').value.trim();
+      if (!username) return showLoginError('表示名を入力してください');
+
+      $('profileBtn').disabled = true;
+      try {
+        const { data: sessionData } = await sb.auth.getSession();
+        const uid = sessionData?.session?.user?.id;
+        if (!uid) {
+          showLoginError('セッションが切れました。もう一度ログインしてください');
+          return;
+        }
+
+        const { data, error } = await sb
+          .from('chat_users')
+          .insert({ id: uid, username })
+          .select()
+          .single();
+
+        if (error) {
+          if (/許可されていません/.test(error.message)) {
+            showLoginError('このアカウントはチャットの利用を許可されていません。管理者にご連絡ください');
+          } else if (/duplicate|unique/i.test(error.message)) {
+            showLoginError('その表示名は既に使われています');
+          } else {
+            showLoginError(`登録に失敗しました: ${error.message}`);
+          }
+          return;
+        }
+
+        currentUser = data;
+        $('profileForm').classList.add('hidden');
+        $('loginForm').classList.remove('hidden');
+        startSession();
+      } finally {
+        $('profileBtn').disabled = false;
       }
     }
 
@@ -414,8 +502,17 @@
 
     // Realtime は1本のチャンネルに集約する。
     // 開いている部屋の発言は即描画し、それ以外は未読バッジに回す。
-    function subscribeRealtime() {
+    async function subscribeRealtime() {
       if (channel) sb.removeChannel(channel);
+
+      // Realtime にも JWT を渡す。これにより配信内容も RLS に従い、
+      // 参加していないグループの発言はそもそも届かない。
+      try {
+        const { data } = await sb.auth.getSession();
+        if (data?.session?.access_token) sb.realtime.setAuth(data.session.access_token);
+      } catch (error) {
+        console.error('Realtime auth error:', error);
+      }
 
       channel = sb
         .channel('chat-global')
@@ -428,7 +525,7 @@
         .on('postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'chat_group_members' },
           (payload) => {
-            if (Number(payload.new.user_id) === currentUser.id) loadGroups();
+            if (payload.new.user_id === currentUser.id) loadGroups();
           })
         .subscribe((status) => {
           const ok = status === 'SUBSCRIBED';
@@ -439,7 +536,7 @@
     function handleIncomingMessage(msg) {
       if (Number(msg.group_id) === currentGroupId) {
         addMessageToUI(msg);
-        if (Number(msg.user_id) !== currentUser.id) markGroupRead(currentGroupId);
+        if (msg.user_id !== currentUser.id) markGroupRead(currentGroupId);
       } else {
         loadUnread();
       }
@@ -478,7 +575,7 @@
     async function loadUnread() {
       if (!currentUser) return;
       try {
-        const { data, error } = await sb.rpc('chat_unread_counts', { p_user_id: currentUser.id });
+        const { data, error } = await sb.rpc('chat_unread_counts');
         if (error) throw error;
 
         const counts = {};
@@ -567,12 +664,14 @@
       if (!groupName || !currentUser) return;
 
       try {
+        // created_by はサーバー側のトリガが auth.uid() で埋める。
         const { data, error } = await sb
           .from('chat_groups')
           .insert({ group_name: groupName, created_by: currentUser.id })
           .select()
           .single();
         if (error) throw error;
+
 
         await sb.from('chat_group_members')
           .upsert({ group_id: data.id, user_id: currentUser.id }, { onConflict: 'group_id,user_id' });
@@ -637,7 +736,7 @@
 
       const messages = $('messages');
       const div = document.createElement('div');
-      const isOwn = Number(msg.user_id) === currentUser.id;
+      const isOwn = msg.user_id === currentUser.id;
       div.className = `message ${isOwn ? 'own' : ''}`;
 
       div.innerHTML = `
@@ -665,6 +764,8 @@
 
       try {
         // 送信結果もそのまま描画する（Realtime が届く前に表示。ID で重複排除）。
+        // user_id / username はサーバー側のトリガが auth.uid() から確定させるため、
+        // ここで何を送っても偽装はできない。
         const { data, error } = await sb
           .from('chat_messages')
           .insert({
@@ -692,9 +793,17 @@
       }
     }
 
-    function logout() {
+    async function logout() {
       if (channel) { sb.removeChannel(channel); channel = null; }
-      sessionStorage.removeItem('chatUser');
+      try {
+        await sb.auth.signOut();
+      } catch (error) {
+        console.error('Sign out error:', error);
+      }
+      resetToLogin();
+    }
+
+    function resetToLogin() {
       currentUser = null;
       currentGroupId = null;
       myGroups = [];
@@ -702,10 +811,13 @@
       unread = {};
       seenMessageIds = new Set();
       $('loginScreen').classList.remove('hidden');
+      $('profileForm').classList.add('hidden');
+      $('loginForm').classList.remove('hidden');
       $('sidebar').classList.add('hidden');
       $('mainContent').classList.add('hidden');
+      $('passwordInput').value = '';
       $('usernameInput').value = '';
-      $('usernameInput').focus();
+      $('emailInput').focus();
       updateTitle();
     }
 
@@ -728,20 +840,27 @@
       return String(text).replace(/[&<>"']/g, (m) => map[m]);
     }
 
-    $('usernameInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') login(); });
+    $('emailInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') $('passwordInput').focus(); });
+    $('passwordInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') login(); });
+    $('usernameInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createProfile(); });
     $('newGroupInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createGroup(); });
 
-    const saved = sessionStorage.getItem('chatUser');
-    if (saved) {
-      try {
-        currentUser = JSON.parse(saved);
-        startSession();
-      } catch (_) {
-        sessionStorage.removeItem('chatUser');
+    sb.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        if (channel) { sb.removeChannel(channel); channel = null; }
+        resetToLogin();
       }
-    } else {
-      $('usernameInput').focus();
-    }
+    });
+
+    // 既存セッションがあれば復帰する（トークンは supabase-js が自動更新する）。
+    (async () => {
+      const { data } = await sb.auth.getSession();
+      if (data?.session) {
+        await afterSignIn();
+      } else {
+        $('emailInput').focus();
+      }
+    })();
   </script>
 </body>
 </html>
