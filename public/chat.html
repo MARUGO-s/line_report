@@ -400,6 +400,10 @@
         <input type="email" id="signupEmailInput" placeholder="メールアドレス" autocomplete="username">
         <input type="password" id="signupPasswordInput" placeholder="パスワード（8文字以上）" autocomplete="new-password">
         <input type="password" id="signupPasswordConfirm" placeholder="パスワード（確認）" autocomplete="new-password">
+        <label class="remember">
+          <input type="checkbox" id="signupRememberInput">
+          <span>この端末にメールとパスワードを保存する</span>
+        </label>
         <button onclick="signup()" id="signupBtn">登録する</button>
         <p class="login-note">
           あらかじめ管理者に登録されたメールアドレスのみ利用できます。<br>
@@ -474,6 +478,7 @@
       $('signupForm').classList.remove('hidden');
       hideNotice();
       $('signupEmailInput').value = $('emailInput').value.trim();
+      $('signupRememberInput').checked = $('rememberInput').checked;
       $('signupEmailInput').focus();
     }
 
@@ -520,7 +525,7 @@
 
         $('signupPasswordInput').value = '';
         $('signupPasswordConfirm').value = '';
-        pendingCredentials = { email, password };
+        pendingCredentials = { email, password, remember: $('signupRememberInput').checked };
         await afterSignIn();
       } catch (error) {
         console.error('Signup error:', error);
@@ -632,8 +637,8 @@
 
         currentUser = data;
 
-        // 新規登録から来た場合、チェックが入っていればここで保存する。
-        if (pendingCredentials && $('rememberInput').checked) {
+        // 新規登録から来た場合、登録画面のチェック状態に従ってここで保存する。
+        if (pendingCredentials && pendingCredentials.remember) {
           saveCredentials(pendingCredentials.email, pendingCredentials.password);
         }
         pendingCredentials = null;
@@ -1040,6 +1045,9 @@
 
     // チェックを外したら、保存済みのパスワードもその場で消す。
     $('rememberInput').addEventListener('change', (e) => {
+      if (!e.target.checked) clearCredentials();
+    });
+    $('signupRememberInput').addEventListener('change', (e) => {
       if (!e.target.checked) clearCredentials();
     });
 
