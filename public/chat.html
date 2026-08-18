@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Group Chat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      width: 300px;
+      background: white;
+      border-right: 1px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .sidebar-header { padding: 16px; border-bottom: 1px solid #e0e0e0; }
+    .sidebar-header h2 { font-size: 16px; margin-bottom: 12px; }
+
+    .user-info {
+      font-size: 13px;
+      color: #444;
+      padding: 8px 10px;
+      background: #f2f3f7;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .avatar {
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      background: #667eea;
+      color: white;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .new-group-form { display: flex; gap: 8px; }
+
+    .new-group-form input {
+      flex: 1; min-width: 0;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .new-group-form button {
+      padding: 8px 14px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .groups-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+
+    .section-label {
+      font-size: 11px;
+      color: #999;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 10px 8px 6px;
+      text-transform: uppercase;
+    }
+
+    .group-item {
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      background: #fafafa;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+      border-left: 3px solid transparent;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .group-item:hover { background: #f0f0f0; }
+    .group-item.active { background: #e8eaf6; border-left-color: #667eea; }
+
+    .group-item-name { font-size: 14px; font-weight: 500; margin-bottom: 2px; word-break: break-word; }
+    .group-item-info { font-size: 11px; color: #999; }
+
+    .badge {
+      background: #ef4444;
+      color: white;
+      font-size: 11px;
+      min-width: 20px; height: 20px;
+      padding: 0 6px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .join-btn {
+      padding: 5px 10px;
+      background: white;
+      color: #667eea;
+      border: 1px solid #667eea;
+      border-radius: 14px;
+      font-size: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .join-btn:hover { background: #667eea; color: white; }
+
+    .empty-note { padding: 10px 12px; color: #aaa; font-size: 12px; }
+
+    .logout-btn {
+      padding: 10px;
+      margin: 8px;
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #555;
+    }
+
+    .main-content { flex: 1; display: flex; flex-direction: column; background: white; min-width: 0; }
+
+    .chat-header {
+      padding: 16px;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .chat-header h1 { font-size: 17px; word-break: break-word; }
+
+    .connection-status {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #4ade80;
+      flex-shrink: 0;
+    }
+
+    .connection-status.disconnected { background: #ef4444; }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: #eef1f6;
+    }
+
+    .message { display: flex; animation: slideIn 0.2s ease-out; }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.own { justify-content: flex-end; }
+
+    .message-content { display: flex; flex-direction: column; gap: 3px; max-width: 70%; }
+    .message.own .message-content { align-items: flex-end; }
+
+    .message-bubble {
+      padding: 10px 14px;
+      border-radius: 16px;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .message.own .message-bubble { background: #667eea; color: white; border-bottom-right-radius: 4px; }
+    .message:not(.own) .message-bubble { background: white; color: #333; border-bottom-left-radius: 4px; }
+
+    .message-meta { font-size: 11px; color: #888; display: flex; gap: 6px; }
+    .username { font-weight: 500; color: #666; }
+
+    .input-area {
+      padding: 14px 16px;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      gap: 8px;
+      background: white;
+    }
+
+    .input-area input {
+      flex: 1; min-width: 0;
+      padding: 11px 16px;
+      border: 1px solid #ddd;
+      border-radius: 22px;
+      font-size: 14px;
+      outline: none;
+    }
+
+    .input-area input:focus { border-color: #667eea; }
+
+    .input-area button {
+      padding: 11px 22px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 22px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .placeholder {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #aaa;
+      font-size: 14px;
+      background: #eef1f6;
+    }
+
+    .login-screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      z-index: 10;
+      padding: 20px;
+    }
+
+    .login-container {
+      background: white;
+      padding: 36px;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      width: 100%;
+      max-width: 380px;
+    }
+
+    .login-container h1 { margin-bottom: 20px; text-align: center; font-size: 22px; }
+
+    .login-container input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      margin-bottom: 14px;
+    }
+
+    .login-container button {
+      width: 100%;
+      padding: 12px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .error {
+      color: #ef4444;
+      background: #fef2f2;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      word-break: break-word;
+    }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 640px) {
+      .sidebar { width: 42vw; min-width: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar hidden" id="sidebar">
+    <div class="sidebar-header">
+      <h2>トーク</h2>
+      <div class="user-info">
+        <span class="avatar" id="userAvatar"></span>
+        <span id="userInfo"></span>
+      </div>
+      <div class="new-group-form">
+        <input type="text" id="newGroupInput" placeholder="新しいグループ名" maxlength="100">
+        <button onclick="createGroup()">作成</button>
+      </div>
+    </div>
+    <div class="groups-scroll">
+      <div class="section-label">参加中</div>
+      <div id="myGroupsList"></div>
+      <div class="section-label">参加できるグループ</div>
+      <div id="otherGroupsList"></div>
+    </div>
+    <button class="logout-btn" onclick="logout()">ログアウト</button>
+  </div>
+
+  <div class="main-content hidden" id="mainContent">
+    <div class="placeholder" id="placeholder">左のリストからトークを選んでください</div>
+    <div class="chat-header hidden" id="chatHeader">
+      <h1 id="chatGroupName"></h1>
+      <div class="connection-status disconnected" id="connectionStatus"></div>
+    </div>
+    <div class="messages hidden" id="messages"></div>
+    <div class="input-area hidden" id="inputArea">
+      <input type="text" id="messageInput" placeholder="メッセージを入力..." onkeypress="handleKeyPress(event)">
+      <button onclick="sendMessage()">送信</button>
+    </div>
+  </div>
+
+  <div class="login-screen" id="loginScreen">
+    <div class="login-container">
+      <h1>💬 Group Chat</h1>
+      <div id="loginError" class="error hidden"></div>
+      <input type="text" id="usernameInput" placeholder="ユーザー名" maxlength="50">
+      <button onclick="login()">ログイン</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="pages-config.js"></script>
+  <script>
+    'use strict';
+
+    // 接続先は pages-config.js（他ページと共通）から取る。
+    const CONFIG = window.LINE_REPORT_PAGES || {};
+    const SUPABASE_URL = CONFIG.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co';
+    const SUPABASE_ANON_KEY = CONFIG.RECEIPT_ADMIN_ANON_KEY || '';
+
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false }
+    });
+
+    let currentUser = null;
+    let currentGroupId = null;
+    let myGroups = [];
+    let otherGroups = [];
+    let unread = {};
+    let seenMessageIds = new Set();
+    let channel = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    async function login() {
+      const username = $('usernameInput').value.trim();
+      if (!username) return showLoginError('ユーザー名を入力してください');
+
+      try {
+        const { data, error } = await sb
+          .from('chat_users')
+          .upsert({ username }, { onConflict: 'username' })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        currentUser = data;
+        sessionStorage.setItem('chatUser', JSON.stringify(currentUser));
+        startSession();
+      } catch (error) {
+        console.error('Login error:', error);
+        showLoginError(`ログインに失敗しました: ${error.message || error}`);
+      }
+    }
+
+    function startSession() {
+      $('userInfo').textContent = currentUser.username;
+      $('userAvatar').textContent = currentUser.username.slice(0, 1).toUpperCase();
+      $('loginScreen').classList.add('hidden');
+      $('sidebar').classList.remove('hidden');
+      $('mainContent').classList.remove('hidden');
+      subscribeRealtime();
+      loadGroups();
+    }
+
+    function showLoginError(message) {
+      const error = $('loginError');
+      error.textContent = message;
+      error.classList.remove('hidden');
+      setTimeout(() => error.classList.add('hidden'), 6000);
+    }
+
+    // Realtime は1本のチャンネルに集約する。
+    // 開いている部屋の発言は即描画し、それ以外は未読バッジに回す。
+    function subscribeRealtime() {
+      if (channel) sb.removeChannel(channel);
+
+      channel = sb
+        .channel('chat-global')
+        .on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+          (payload) => handleIncomingMessage(payload.new))
+        .on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'chat_groups' },
+          () => loadGroups())
+        .on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'chat_group_members' },
+          (payload) => {
+            if (Number(payload.new.user_id) === currentUser.id) loadGroups();
+          })
+        .subscribe((status) => {
+          const ok = status === 'SUBSCRIBED';
+          $('connectionStatus').classList.toggle('disconnected', !ok);
+        });
+    }
+
+    function handleIncomingMessage(msg) {
+      if (Number(msg.group_id) === currentGroupId) {
+        addMessageToUI(msg);
+        if (Number(msg.user_id) !== currentUser.id) markGroupRead(currentGroupId);
+      } else {
+        loadUnread();
+      }
+    }
+
+    async function loadGroups() {
+      if (!currentUser) return;
+      try {
+        const [mineRes, allRes] = await Promise.all([
+          sb.from('chat_group_members')
+            .select('chat_groups(id, group_name, created_at)')
+            .eq('user_id', currentUser.id),
+          sb.from('chat_groups')
+            .select('id, group_name, created_at')
+            .order('created_at', { ascending: false })
+        ]);
+
+        if (mineRes.error) throw mineRes.error;
+        if (allRes.error) throw allRes.error;
+
+        const mine = (mineRes.data || [])
+          .map((row) => row.chat_groups)
+          .filter(Boolean)
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const mineIds = new Set(mine.map((g) => g.id));
+
+        myGroups = mine;
+        otherGroups = (allRes.data || []).filter((g) => !mineIds.has(g.id));
+        renderGroups();
+        loadUnread();
+      } catch (error) {
+        console.error('Load groups error:', error);
+      }
+    }
+
+    async function loadUnread() {
+      if (!currentUser) return;
+      try {
+        const { data, error } = await sb.rpc('chat_unread_counts', { p_user_id: currentUser.id });
+        if (error) throw error;
+
+        const counts = {};
+        (data || []).forEach((row) => { counts[row.group_id] = Number(row.unread_count) || 0; });
+        if (currentGroupId) delete counts[currentGroupId];
+        unread = counts;
+        renderGroups();
+        updateTitle();
+      } catch (error) {
+        console.error('Load unread error:', error);
+      }
+    }
+
+    async function markGroupRead(groupId) {
+      if (!currentUser || !groupId) return;
+      delete unread[groupId];
+      renderGroups();
+      updateTitle();
+      try {
+        await sb.from('chat_read_states').upsert({
+          group_id: groupId,
+          user_id: currentUser.id,
+          last_read_at: new Date().toISOString()
+        }, { onConflict: 'group_id,user_id' });
+      } catch (error) {
+        console.error('Mark read error:', error);
+      }
+    }
+
+    function updateTitle() {
+      const total = Object.values(unread).reduce((sum, n) => sum + n, 0);
+      document.title = total > 0 ? `(${total}) Group Chat` : 'Group Chat';
+    }
+
+    function renderGroups() {
+      const mineList = $('myGroupsList');
+      mineList.innerHTML = '';
+
+      if (myGroups.length === 0) {
+        mineList.innerHTML = '<div class="empty-note">まだグループがありません</div>';
+      } else {
+        myGroups.forEach((group) => {
+          const item = document.createElement('div');
+          item.className = 'group-item' + (currentGroupId === group.id ? ' active' : '');
+          item.onclick = () => selectGroup(group);
+
+          const count = unread[group.id] || 0;
+          item.innerHTML = `
+            <div>
+              <div class="group-item-name">${escapeHtml(group.group_name)}</div>
+              <div class="group-item-info">${formatDate(group.created_at)}</div>
+            </div>
+            ${count > 0 ? `<span class="badge">${count > 99 ? '99+' : count}</span>` : ''}
+          `;
+          mineList.appendChild(item);
+        });
+      }
+
+      const otherList = $('otherGroupsList');
+      otherList.innerHTML = '';
+
+      if (otherGroups.length === 0) {
+        otherList.innerHTML = '<div class="empty-note">参加できるグループはありません</div>';
+      } else {
+        otherGroups.forEach((group) => {
+          const item = document.createElement('div');
+          item.className = 'group-item';
+          item.innerHTML = `
+            <div>
+              <div class="group-item-name">${escapeHtml(group.group_name)}</div>
+              <div class="group-item-info">${formatDate(group.created_at)}</div>
+            </div>
+          `;
+          const button = document.createElement('button');
+          button.className = 'join-btn';
+          button.textContent = '参加';
+          button.onclick = (e) => { e.stopPropagation(); joinGroup(group.id); };
+          item.appendChild(button);
+          otherList.appendChild(item);
+        });
+      }
+    }
+
+    async function createGroup() {
+      const groupName = $('newGroupInput').value.trim();
+      if (!groupName || !currentUser) return;
+
+      try {
+        const { data, error } = await sb
+          .from('chat_groups')
+          .insert({ group_name: groupName, created_by: currentUser.id })
+          .select()
+          .single();
+        if (error) throw error;
+
+        await sb.from('chat_group_members')
+          .upsert({ group_id: data.id, user_id: currentUser.id }, { onConflict: 'group_id,user_id' });
+
+        $('newGroupInput').value = '';
+        await loadGroups();
+        selectGroup(data);
+      } catch (error) {
+        console.error('Create group error:', error);
+        alert(`グループ作成に失敗しました: ${error.message || error}`);
+      }
+    }
+
+    async function joinGroup(groupId) {
+      if (!currentUser) return;
+      try {
+        const { error } = await sb.from('chat_group_members')
+          .upsert({ group_id: groupId, user_id: currentUser.id }, { onConflict: 'group_id,user_id' });
+        if (error) throw error;
+
+        await loadGroups();
+        const group = myGroups.find((g) => g.id === groupId);
+        if (group) selectGroup(group);
+      } catch (error) {
+        console.error('Join group error:', error);
+      }
+    }
+
+    async function selectGroup(group) {
+      currentGroupId = group.id;
+      seenMessageIds = new Set();
+      markGroupRead(group.id);
+
+      $('placeholder').classList.add('hidden');
+      $('chatHeader').classList.remove('hidden');
+      $('messages').classList.remove('hidden');
+      $('inputArea').classList.remove('hidden');
+      $('chatGroupName').textContent = group.group_name;
+      $('messages').innerHTML = '';
+
+      try {
+        const { data, error } = await sb
+          .from('chat_messages')
+          .select('id, group_id, user_id, username, content, created_at')
+          .eq('group_id', group.id)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (error) throw error;
+
+        (data || []).reverse().forEach(addMessageToUI);
+      } catch (error) {
+        console.error('Load messages error:', error);
+      }
+
+      $('messageInput').focus();
+    }
+
+    function addMessageToUI(msg) {
+      if (Number(msg.group_id) !== currentGroupId) return;
+      if (seenMessageIds.has(msg.id)) return;
+      seenMessageIds.add(msg.id);
+
+      const messages = $('messages');
+      const div = document.createElement('div');
+      const isOwn = Number(msg.user_id) === currentUser.id;
+      div.className = `message ${isOwn ? 'own' : ''}`;
+
+      div.innerHTML = `
+        <div class="message-content">
+          <div class="message-bubble">${escapeHtml(msg.content)}</div>
+          <div class="message-meta">
+            ${isOwn ? '' : `<span class="username">${escapeHtml(msg.username)}</span>`}
+            <span>${formatTime(msg.created_at)}</span>
+          </div>
+        </div>
+      `;
+
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    async function sendMessage() {
+      if (!currentGroupId || !currentUser) return;
+      const input = $('messageInput');
+      const content = input.value.trim();
+      if (!content) return;
+
+      input.value = '';
+      input.focus();
+
+      try {
+        // 送信結果もそのまま描画する（Realtime が届く前に表示。ID で重複排除）。
+        const { data, error } = await sb
+          .from('chat_messages')
+          .insert({
+            group_id: currentGroupId,
+            user_id: currentUser.id,
+            username: currentUser.username,
+            content
+          })
+          .select()
+          .single();
+        if (error) throw error;
+
+        addMessageToUI(data);
+      } catch (error) {
+        console.error('Send error:', error);
+        input.value = content;
+        alert(`送信に失敗しました: ${error.message || error}`);
+      }
+    }
+
+    function handleKeyPress(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+
+    function logout() {
+      if (channel) { sb.removeChannel(channel); channel = null; }
+      sessionStorage.removeItem('chatUser');
+      currentUser = null;
+      currentGroupId = null;
+      myGroups = [];
+      otherGroups = [];
+      unread = {};
+      seenMessageIds = new Set();
+      $('loginScreen').classList.remove('hidden');
+      $('sidebar').classList.add('hidden');
+      $('mainContent').classList.add('hidden');
+      $('usernameInput').value = '';
+      $('usernameInput').focus();
+      updateTitle();
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && currentUser) loadUnread();
+    });
+
+    function formatDate(value) {
+      const d = new Date(value);
+      return isNaN(d) ? '' : d.toLocaleDateString('ja-JP');
+    }
+
+    function formatTime(value) {
+      const d = new Date(value);
+      return isNaN(d) ? '' : d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function escapeHtml(text) {
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+      return String(text).replace(/[&<>"']/g, (m) => map[m]);
+    }
+
+    $('usernameInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') login(); });
+    $('newGroupInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createGroup(); });
+
+    const saved = sessionStorage.getItem('chatUser');
+    if (saved) {
+      try {
+        currentUser = JSON.parse(saved);
+        startSession();
+      } catch (_) {
+        sessionStorage.removeItem('chatUser');
+      }
+    } else {
+      $('usernameInput').focus();
+    }
+  </script>
+</body>
+</html>
