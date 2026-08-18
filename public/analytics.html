@@ -586,9 +586,7 @@
       .hero p { display: none; }
       .status { gap: 6px; font-size: 0.8rem; }
       .pill { padding: 3px 8px; }
-      /* ナビリンクをスクロール可能な1行に */
-      .status { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-      .status::-webkit-scrollbar { display: none; }
+      .status { flex-wrap: wrap; overflow: visible; }
 
       /* cards */
       .card { padding: 12px; }
@@ -1027,7 +1025,7 @@
   .import-preview-table thead th { position: sticky; top: 0; background: var(--surface, #13202e); z-index: 1; }
 </style>
 
-<script src="pages-config.js?v=20260524"></script>
+<script src="pages-config.js?v=20260818"></script>
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
 <script src="menu-logout.js?v=20260702"></script>
@@ -3378,7 +3376,8 @@ function setReceiptSheetsPilotLinkElement(el, visible, url, title) {
 function setSalesSheetNavLink(visible, url) {
   const el = dom.salesSheetNavLink;
   if (!el) return;
-  if (visible && url && !isLineEntryAnalytics()) {
+  const usable = !!(LINE_REPORT_PAGES.isUsableSalesSheetUrl && LINE_REPORT_PAGES.isUsableSalesSheetUrl(url));
+  if (visible && usable && !isLineEntryAnalytics()) {
     el.href = url;
     el.hidden = false;
     el.removeAttribute('aria-hidden');
@@ -3475,7 +3474,7 @@ function updateReceiptSheetsPilotUi() {
 
   const r = receiptSheetsPilotLinkCache;
   const url = r && r.spreadsheet_url ? String(r.spreadsheet_url) : '';
-  if (!url) {
+  if (!url || !(LINE_REPORT_PAGES.isUsableSalesSheetUrl && LINE_REPORT_PAGES.isUsableSalesSheetUrl(url))) {
     setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotLink, false);
     setReceiptSheetsPilotLinkElement(dom.receiptSheetsPilotHeaderLink, false);
     setSalesSheetNavLink(false);

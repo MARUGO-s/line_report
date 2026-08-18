@@ -9672,7 +9672,7 @@
       ];
       links.forEach(function(el) {
         if (!el) return;
-        if (visible && url) {
+        if (visible && url && LINE_REPORT_PAGES.isUsableSalesSheetUrl && LINE_REPORT_PAGES.isUsableSalesSheetUrl(url)) {
           el.href = url;
           el.title = title || '';
           el.hidden = false;
@@ -9699,7 +9699,7 @@
       try {
         const r = await api('/receipts/sheets-pilot-link');
         const url = r && r.configured && r.spreadsheet_url ? String(r.spreadsheet_url) : '';
-        if (!url) {
+        if (!url || !(LINE_REPORT_PAGES.isUsableSalesSheetUrl && LINE_REPORT_PAGES.isUsableSalesSheetUrl(url))) {
           setReceiptSheetsPilotLinkVisible(false);
           return;
         }

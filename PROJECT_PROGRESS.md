@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-18 - 公開画面のスマホ切れと空の売上シートリンクを修正
+
+- Request: 2026-08-18 UX監査の高優先度。売上シートが空リンク、メディアが横にはみ出す、売上分析・口コミの上部ナビとシステムマップ／AI学習タブが390pxで切れる。
+- Implementation: 売上シートは http(s) URL があるときだけ表示し、`#` はクリック無効。売上分析・口コミのヘッダーpillを折り返す。メディアのフィルタを縦積み。システムマップとAI学習タブを折り返す。
+- Skipped: 言葉の整理、502再試行UI、空状態の長文改善は今回対象外。
+
 ### 2026-08-17 - 電子ジャーナル画面を1つのPDFにまとめて出力
 
 - Request: 電子ジャーナル（POS取込）の画面を1枚のPDFにまとめて出力できるボタンを作る。

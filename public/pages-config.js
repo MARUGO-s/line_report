@@ -243,5 +243,28 @@
     resolveStoreKey: resolveStoreKey,
     resolveStoreName: resolveStoreName,
     getPreferredStoreDisplayLabel: getPreferredStoreDisplayLabel,
+    isUsableSalesSheetUrl: isUsableSalesSheetUrl,
   };
+
+  function isUsableSalesSheetUrl(url) {
+    return /^https?:\/\/\S+$/i.test(String(url || '').trim());
+  }
+
+  function bindDeadSalesSheetClicks() {
+    document.addEventListener('click', function (event) {
+      var target = event.target && event.target.closest
+        ? event.target.closest('#salesSheetNavLink, #receiptSheetsPilotActionLink, #receiptSheetsPilotHeaderLink, #receiptSheetsPilotLink')
+        : null;
+      if (!target) return;
+      if (!isUsableSalesSheetUrl(target.getAttribute('href'))) {
+        event.preventDefault();
+      }
+    }, true);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindDeadSalesSheetClicks);
+  } else {
+    bindDeadSalesSheetClicks();
+  }
 })(typeof globalThis !== 'undefined' ? globalThis : window);

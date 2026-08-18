@@ -878,7 +878,7 @@
       try {
         var r = await api('/receipts/sheets-pilot-link');
         var url = r && r.configured && r.spreadsheet_url ? String(r.spreadsheet_url) : '';
-        if (url) { el.href = url; el.hidden = false; el.removeAttribute('aria-hidden'); }
+        if (url && LINE_REPORT_PAGES.isUsableSalesSheetUrl && LINE_REPORT_PAGES.isUsableSalesSheetUrl(url)) { el.href = url; el.hidden = false; el.removeAttribute('aria-hidden'); }
         else { el.hidden = true; el.setAttribute('aria-hidden', 'true'); }
       } catch (_) { el.hidden = true; el.setAttribute('aria-hidden', 'true'); }
     }
