@@ -695,6 +695,21 @@
       font-weight: 700;
       cursor: pointer;
     }
+    .invite-person .kick-btn {
+      background: #fde8e8;
+      color: #c62828;
+    }
+    .invite-leave {
+      width: 100%;
+      margin-top: 10px;
+      border: 1px solid #f0b4b4;
+      background: #fff;
+      color: #c62828;
+      border-radius: 10px;
+      padding: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
 
     .user-row {
       display: flex;
@@ -1567,7 +1582,7 @@
       <button type="button" role="menuitem" id="talkCtxPin"></button>
       <button type="button" role="menuitem" id="talkCtxMute"></button>
       <button type="button" role="menuitem" id="talkCtxHide">非表示</button>
-      <button type="button" role="menuitem" id="talkCtxDelete" class="talk-ctx-delete">削除</button>
+      <button type="button" role="menuitem" id="talkCtxDelete" class="talk-ctx-delete">退出</button>
     </div>
   </div>
 
@@ -1613,6 +1628,7 @@
       <input class="invite-search" id="inviteSearch" type="search" placeholder="名前で検索" oninput="renderInvitePeople()">
       <div id="invitePeopleList"></div>
       <button class="invite-reset" type="button" onclick="rotateInvite()">招待リンクを再発行</button>
+      <button class="invite-leave" type="button" onclick="leaveCurrentRoom()">ルームを退出</button>
       <button class="invite-close" type="button" onclick="closeInvite()">閉じる</button>
     </div>
   </div>
@@ -2038,6 +2054,9 @@
             else if (Number(payload.new.group_id) === currentGroupId) loadGroupContext(currentGroupId);
           })
         .on('postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'chat_group_members' },
+          (payload) => handleMemberRemoved(payload.old))
+        .on('postgres_changes',
           { event: '*', schema: 'public', table: 'chat_message_reactions' },
           (payload) => handleReactionChange(payload))
         .on('postgres_changes',
@@ -2075,6 +2094,28 @@
       refreshReadMarks();
     }
 
+    function handleMemberRemoved(row) {
+      if (!row || !currentUser) return;
+      const groupId = Number(row.group_id);
+      if (String(row.user_id) === String(currentUser.id)) {
+        const wasMine = myGroups.some((g) => Number(g.id) === groupId);
+        myGroups = myGroups.filter((g) => Number(g.id) !== groupId);
+        if (Number(currentGroupId) === groupId) {
+          closeInvite();
+          closeChat();
+        }
+        if (wasMine) showNotice('ルームから退出しました');
+        renderGroups();
+        return;
+      }
+      if (Number(currentGroupId) === groupId) {
+        loadGroupContext(currentGroupId);
+        if ($('inviteOverlay') && !$('inviteOverlay').classList.contains('hidden')) {
+          loadInviteLists();
+        }
+      }
+    }
+
     function handleDeletedMessage(row) {
       const id = Number(row && row.id);
       if (!Number.isSafeInteger(id)) return;
@@ -2108,10 +2149,10 @@
       try {
         const [mineRes, allRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('pinned_at, muted_at, hidden_at, chat_groups(id, group_name, created_at, icon_url, is_direct, direct_key)')
+            .select('pinned_at, muted_at, hidden_at, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key)')
             .eq('user_id', currentUser.id),
           sb.from('chat_groups')
-            .select('id, group_name, created_at, icon_url, is_direct, direct_key')
+            .select('id, group_name, created_at, created_by, icon_url, is_direct, direct_key')
             .order('created_at', { ascending: false })
         ]);
 
@@ -2746,13 +2787,25 @@
       if (!inviteMembers.length) {
         members.innerHTML = '<div class="empty-note">メンバーはいません</div>';
       } else {
+        const current = myGroups.find((g) => Number(g.id) === Number(currentGroupId));
+        const canKick = current && !current.is_direct && String(current.created_by) === String(currentUser.id);
         inviteMembers.forEach((user) => {
           const row = document.createElement('div');
           row.className = 'invite-person';
+          const mine = String(user.id) === String(currentUser.id);
+          const bot = String(user.id) === CHAT_BOT_USER_ID || user.username === '予約通知';
           row.innerHTML = `
             <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
-            <div>${escapeHtml(user.username)}${user.id === currentUser.id ? '（自分）' : ''}</div>
+            <div>${escapeHtml(user.username)}${mine ? '（自分）' : ''}</div>
           `;
+          if (canKick && !mine && !bot) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'kick-btn';
+            button.textContent = '退出させる';
+            button.onclick = () => kickMember(user);
+            row.appendChild(button);
+          }
           members.appendChild(row);
         });
       }
@@ -2782,6 +2835,34 @@
         row.appendChild(button);
         list.appendChild(row);
       });
+    }
+
+    async function kickMember(user) {
+      if (!currentGroupId || !user) return;
+      if (!confirm(`${user.username} をルームから退出させますか？`)) return;
+      try {
+        const { error } = await sb.rpc('chat_kick_member', {
+          p_group_id: currentGroupId,
+          p_user_id: user.id
+        });
+        if (error) throw error;
+        await loadInviteLists();
+        await loadGroupContext(currentGroupId);
+        showNotice(`${user.username} を退出しました`);
+      } catch (error) {
+        alert(error.message || '退出させられませんでした');
+      }
+    }
+
+    async function leaveCurrentRoom() {
+      const group = myGroups.find((g) => Number(g.id) === Number(currentGroupId));
+      if (!group) return;
+      closeInvite();
+      try {
+        await leaveTalk(group);
+      } catch (error) {
+        alert(error.message || '退出に失敗しました');
+      }
     }
 
     async function inviteUser(user) {
@@ -3340,15 +3421,16 @@
       patchMineGroup(group.id, { hidden_at: group.hidden_at });
     }
 
-    async function deleteTalk(group) {
-      if (!confirm('このトークを削除しますか？')) return;
-      if (Number(currentGroupId) === Number(group.id)) closeChat();
-      const { error } = await sb.from('chat_group_members')
-        .delete()
-        .eq('group_id', group.id)
-        .eq('user_id', currentUser.id);
+    async function leaveTalk(group) {
+      if (!confirm('このルームから退出しますか？')) return;
+      const { error } = await sb.rpc('chat_leave_group', { p_group_id: group.id });
       if (error) throw error;
       myGroups = myGroups.filter((g) => Number(g.id) !== Number(group.id));
+      if (Number(currentGroupId) === Number(group.id)) {
+        closeInvite();
+        closeChat();
+      }
+      showNotice('ルームから退出しました');
     }
 
     function renderTalkRow(group, options) {
@@ -3404,7 +3486,7 @@
         </div>
         <div class="swipe-actions swipe-actions-right">
           <button class="swipe-btn swipe-hide" type="button">非表示</button>
-          <button class="swipe-btn swipe-delete" type="button">削除</button>
+          <button class="swipe-btn swipe-delete" type="button">退出</button>
         </div>
       `;
       wrap.appendChild(front);
@@ -3423,7 +3505,7 @@
       };
       wrap.querySelector('.swipe-delete').onclick = (e) => {
         e.stopPropagation();
-        runTalkAction(() => deleteTalk(group));
+        runTalkAction(() => leaveTalk(group));
       };
       bindTalkSwipe(wrap, group);
       return wrap;
@@ -4865,7 +4947,7 @@
     $('talkCtxDelete').onclick = () => {
       if (!talkMenuGroup) return;
       const group = talkMenuGroup;
-      runTalkAction(() => deleteTalk(group));
+      runTalkAction(() => leaveTalk(group));
     };
 
     $('rememberInput').addEventListener('change', (e) => {
