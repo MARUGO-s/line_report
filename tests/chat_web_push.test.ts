@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v12/)
+  assert.match(serviceWorker, /line-report-chat-v13/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -101,6 +101,17 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /data-action="delete"/)
   assert.match(html, /function openForward/)
   assert.match(html, /function copyMessage/)
+  assert.match(html, /chat_leave_group/)
+  assert.match(html, /chat_kick_member/)
+  assert.match(html, /退出させる/)
+  assert.match(html, /ルームを退出/)
+})
+
+test("chat members can leave a room and owners can kick others", async () => {
+  const migration = await read("supabase/migrations/20260819223000_chat_leave_and_kick.sql")
+  assert.match(migration, /create or replace function public\.chat_leave_group/)
+  assert.match(migration, /create or replace function public\.chat_kick_member/)
+  assert.match(migration, /このアカウントは退出させられません/)
 })
 
 test("chat messages can be deleted by their author", async () => {
