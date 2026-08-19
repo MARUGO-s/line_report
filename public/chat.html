@@ -1421,6 +1421,24 @@
       font-weight: 700;
       cursor: pointer;
     }
+    .send-mode-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .send-mode-now,
+    .send-mode-later {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      padding: 14px 12px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .send-mode-now { background: var(--line-green); color: #fff; }
+    .send-mode-later { background: #1f2d3d; color: #fff; }
 
     .chat-toast {
       position: fixed;
@@ -1794,13 +1812,25 @@
         </svg>
       </button>
       <textarea id="messageInput" rows="1" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
-      <button class="schedule-btn" type="button" onclick="openScheduleSend()" title="予約配信" aria-label="予約配信">予約配信</button>
+      <button class="schedule-btn" type="button" onclick="openTextScheduleSend()" title="予約配信" aria-label="予約配信">予約配信</button>
       <button class="send-btn" type="button" onclick="sendMessage()" aria-label="送信">➤</button>
     </div>
     <div class="chat-drop-overlay hidden" id="chatDropOverlay" aria-hidden="true">
       <div class="chat-drop-card">画像をドロップして送信</div>
     </div>
     <div class="chat-toast hidden" id="chatToast"></div>
+  </div>
+
+  <div class="invite-overlay hidden" id="sendModeOverlay" onclick="if (event.target === this) closeSendMode()">
+    <div class="invite-sheet" role="dialog" aria-label="送信方法">
+      <h2>送信方法</h2>
+      <p class="schedule-hint" id="sendModeHint">この画像を今すぐ送りますか？ 予約配信も選べます。</p>
+      <div class="send-mode-actions">
+        <button class="send-mode-now" type="button" onclick="chooseSendNow()">今すぐ送る</button>
+        <button class="send-mode-later" type="button" onclick="chooseSendLater()">予約配信</button>
+      </div>
+      <button class="invite-close" type="button" onclick="closeSendMode()">キャンセル</button>
+    </div>
   </div>
 
   <div class="invite-overlay hidden" id="scheduleOverlay" onclick="if (event.target === this) closeScheduleSend()">
@@ -1937,6 +1967,8 @@
     let currentUser = null;
     let currentGroupId = null;
     let scheduledMessages = [];
+    let pendingSendFiles = [];
+    let scheduleTarget = 'text';
     let myGroups = [];
     let otherGroups = [];
     let unread = {};
@@ -3180,6 +3212,7 @@
       $('inputArea').classList.add('hidden');
       if ($('scheduleBar')) $('scheduleBar').classList.add('hidden');
       closeScheduleSend();
+      closeSendMode();
       if ($('storeRoomHint')) $('storeRoomHint').classList.add('hidden');
       resetMessageView();
       renderGroups();
@@ -4886,6 +4919,16 @@
       return { blob, width, height };
     }
 
+    async function uploadChatImage(file, groupId) {
+      const { blob, width, height } = await prepareChatImage(file);
+      const path = `groups/${groupId}/${crypto.randomUUID()}.jpg`;
+      const { error: uploadError } = await sb.storage
+        .from('chat-images')
+        .upload(path, blob, { contentType: 'image/jpeg', cacheControl: '3600' });
+      if (uploadError) throw uploadError;
+      return { path, width, height };
+    }
+
     async function sendChatImage(file) {
       if (!currentGroupId || !currentUser || uploadingImage) return;
       uploadingImage = true;
@@ -4893,14 +4936,7 @@
       const groupId = currentGroupId;
 
       try {
-        const { blob, width, height } = await prepareChatImage(file);
-        const path = `groups/${groupId}/${crypto.randomUUID()}.jpg`;
-
-        const { error: uploadError } = await sb.storage
-          .from('chat-images')
-          .upload(path, blob, { contentType: 'image/jpeg', cacheControl: '3600' });
-        if (uploadError) throw uploadError;
-
+        const image = await uploadChatImage(file, groupId);
         const { data, error } = await sb
           .from('chat_messages')
           .insert({
@@ -4909,7 +4945,7 @@
             username: currentUser.username,
             content: '[画像]',
             kind: 'image',
-            payload: { v: 1, kind: 'image', image: { path, w: width, h: height } }
+            payload: { v: 1, kind: 'image', image: { path: image.path, w: image.width, h: image.height } }
           })
           .select(MESSAGE_COLUMNS)
           .single();
@@ -4929,6 +4965,43 @@
         $('chatImageInput').disabled = false;
         $('chatImageInput').value = '';
       }
+    }
+
+    function askSendModeForFiles(files) {
+      const list = Array.from(files || []).filter(Boolean);
+      if (!list.length || !currentGroupId || !currentUser) return;
+      pendingSendFiles = list;
+      const hint = $('sendModeHint');
+      if (hint) {
+        hint.textContent = list.length > 1
+          ? `この画像 ${list.length} 件を今すぐ送りますか？ 予約配信も選べます。`
+          : 'この画像を今すぐ送りますか？ 予約配信も選べます。';
+      }
+      $('sendModeOverlay').classList.remove('hidden');
+    }
+
+    function closeSendMode() {
+      const overlay = $('sendModeOverlay');
+      if (overlay) overlay.classList.add('hidden');
+      if (!$('scheduleOverlay') || $('scheduleOverlay').classList.contains('hidden')) {
+        pendingSendFiles = [];
+        scheduleTarget = 'text';
+      }
+    }
+
+    async function chooseSendNow() {
+      const files = pendingSendFiles.slice();
+      pendingSendFiles = [];
+      scheduleTarget = 'text';
+      $('sendModeOverlay').classList.add('hidden');
+      for (const file of files) await sendChatImage(file);
+    }
+
+    function chooseSendLater() {
+      if (!pendingSendFiles.length) return;
+      scheduleTarget = 'files';
+      $('sendModeOverlay').classList.add('hidden');
+      openScheduleSend();
     }
 
     function openImageViewer(src) {
@@ -5086,7 +5159,7 @@
       try {
         const { data, error } = await sb
           .from('chat_scheduled_messages')
-          .select('id, content, send_at')
+          .select('id, content, send_at, kind')
           .eq('group_id', currentGroupId)
           .eq('user_id', currentUser.id)
           .is('sent_at', null)
@@ -5115,7 +5188,7 @@
       const more = scheduledMessages.length > 1 ? ` ほか${scheduledMessages.length - 1}件` : '';
       bar.innerHTML = `
         <span>予約 ${escapeHtml(formatScheduleAt(next.send_at))}${more}</span>
-        <button type="button" onclick="openScheduleSend()">管理</button>
+        <button type="button" onclick="openTextScheduleSend()">管理</button>
       `;
       bar.classList.remove('hidden');
     }
@@ -5131,11 +5204,17 @@
         <div class="schedule-pending-item">
           <div>
             <div>${escapeHtml(formatScheduleAt(row.send_at))}</div>
-            <div class="schedule-hint">${escapeHtml(String(row.content || '').slice(0, 80))}</div>
+            <div class="schedule-hint">${escapeHtml(row.kind === 'image' ? '[画像]' : String(row.content || '').slice(0, 80))}</div>
           </div>
           <button type="button" onclick="cancelScheduledMessage(${Number(row.id)})">取消</button>
         </div>
       `).join('');
+    }
+
+    function openTextScheduleSend() {
+      pendingSendFiles = [];
+      scheduleTarget = 'text';
+      openScheduleSend();
     }
 
     function openScheduleSend() {
@@ -5146,6 +5225,12 @@
         input.value = toDateTimeLocalValue(next);
         input.min = toDateTimeLocalValue(new Date(Date.now() + 30 * 1000));
       }
+      const hint = document.querySelector('#scheduleOverlay .schedule-hint');
+      if (hint) {
+        hint.textContent = scheduleTarget === 'files'
+          ? '指定した日時になると、この画像が自動で送信されます。'
+          : '指定した日時になると、このルームへ自動で送信されます。';
+      }
       renderSchedulePendingList();
       $('scheduleOverlay').classList.remove('hidden');
     }
@@ -5153,15 +5238,12 @@
     function closeScheduleSend() {
       const overlay = $('scheduleOverlay');
       if (overlay) overlay.classList.add('hidden');
+      pendingSendFiles = [];
+      scheduleTarget = 'text';
     }
 
     async function confirmScheduleSend() {
       if (!currentGroupId || !currentUser) return;
-      const content = ($('messageInput').value || '').trim();
-      if (!content) {
-        alert('先にメッセージを入力してください');
-        return;
-      }
       const raw = $('scheduleAtInput').value;
       const sendAt = raw ? new Date(raw) : null;
       if (!sendAt || isNaN(sendAt)) {
@@ -5170,6 +5252,44 @@
       }
       if (sendAt.getTime() < Date.now() + 30 * 1000) {
         alert('送信日時は現在より後にしてください');
+        return;
+      }
+
+      if (scheduleTarget === 'files') {
+        const files = pendingSendFiles.slice();
+        if (!files.length) {
+          alert('予約する画像がありません');
+          return;
+        }
+        try {
+          for (const file of files) {
+            const image = await uploadChatImage(file, currentGroupId);
+            const { error } = await sb.rpc('chat_schedule_message', {
+              p_group_id: currentGroupId,
+              p_content: '[画像]',
+              p_send_at: sendAt.toISOString(),
+              p_reply_to_id: replyTarget ? replyTarget.id : null,
+              p_mentions: [],
+              p_kind: 'image',
+              p_payload: { v: 1, kind: 'image', image: { path: image.path, w: image.width, h: image.height } }
+            });
+            if (error) throw error;
+          }
+          pendingSendFiles = [];
+          scheduleTarget = 'text';
+          closeScheduleSend();
+          await loadScheduledMessages();
+          showChatToast(`${formatScheduleAt(sendAt)} に画像を予約しました`);
+        } catch (error) {
+          console.error('Schedule image error:', error);
+          alert(error.message || '予約に失敗しました');
+        }
+        return;
+      }
+
+      const content = ($('messageInput').value || '').trim();
+      if (!content) {
+        alert('先にメッセージを入力してください');
         return;
       }
       try {
@@ -5432,7 +5552,8 @@
 
     $('chatImageInput').addEventListener('change', (e) => {
       const file = e.target.files && e.target.files[0];
-      if (file) sendChatImage(file);
+      e.target.value = '';
+      if (file) askSendModeForFiles([file]);
     });
 
     document.addEventListener('dragenter', (e) => {
@@ -5460,7 +5581,7 @@
         showNotice('画像（JPEG / PNG / WebP / GIF）をドロップしてください');
         return;
       }
-      for (const file of files) await sendChatImage(file);
+      askSendModeForFiles(files);
     });
     document.addEventListener('dragend', () => setChatDropActive(false));
 
@@ -5471,7 +5592,7 @@
       const file = imageItem.getAsFile();
       if (!file || !currentGroupId) return;
       e.preventDefault();
-      sendChatImage(file);
+      askSendModeForFiles([file]);
     });
 
     $('messages').addEventListener('scroll', handleMessagesScroll, { passive: true });
@@ -5523,6 +5644,7 @@
       closeForward();
       closeOpenSwipe();
       closeScheduleSend();
+      closeSendMode();
     });
     document.querySelector('.groups-scroll').addEventListener('scroll', () => {
       closeTalkContextMenu();

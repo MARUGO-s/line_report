@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v20/)
+  assert.match(serviceWorker, /line-report-chat-v21/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -121,7 +121,10 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /chat_schedule_message/)
   assert.match(html, /予約配信/)
   assert.match(html, /type="datetime-local"/)
-  assert.match(serviceWorker, /line-report-chat-v20/)
+  assert.match(html, /function askSendModeForFiles/)
+  assert.match(html, /今すぐ送る/)
+  assert.match(html, /p_kind: 'image'/)
+  assert.match(serviceWorker, /line-report-chat-v21/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -132,6 +135,10 @@ test("chat messages can be scheduled for later delivery", async () => {
   assert.match(migration, /create or replace function public\.chat_dispatch_scheduled_messages/)
   assert.match(migration, /chat-scheduled-messages-job/)
   assert.match(migration, /送信日時は現在より後にしてください/)
+  const imageMigration = await read("supabase/migrations/20260820120000_chat_schedule_image.sql")
+  assert.match(imageMigration, /p_kind text default 'text'/)
+  assert.match(imageMigration, /p_payload jsonb default null/)
+  assert.match(imageMigration, /画像の保存先が不正です/)
 })
 
 test("chat store rooms are locked and forward #メモ to Journal Report", async () => {

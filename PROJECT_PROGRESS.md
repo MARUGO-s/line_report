@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 画像添付でも即送信か予約配信かを選ぶ
+
+- Request: 画像やファイルをドロップ・添付したときも、即配信か予約配信かを聞いてその通り動かす。
+- Implementation: 添付・ドロップ・貼り付け後に選択ポップアップを出す。予約なら既存の日時指定へ進み、画像は先に `chat-images` へ置いて `chat_schedule_message` で予約する。
+- Operation: 画像を付ける → 「今すぐ送る」または「予約配信」。
+
 ### 2026-08-20 - M-talk に予約配信を追加
 
 - Request: メッセージを即送信せず、日時を指定して送りたい。入力欄に予約配信ボタンを置く。
