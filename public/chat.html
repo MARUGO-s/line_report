@@ -1334,20 +1334,29 @@
     }
 
     .schedule-btn {
-      width: 38px;
-      height: 38px;
       flex-shrink: 0;
-      border: 0;
-      border-radius: 50%;
-      background: transparent;
-      color: #666;
+      height: 38px;
+      padding: 0 10px;
+      border: 1px solid #c8c8c8;
+      border-radius: 19px;
+      background: #fff;
+      color: #222;
       cursor: pointer;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
     }
-    .schedule-btn:hover { color: #111; background: rgba(0, 0, 0, 0.06); }
-    .schedule-btn.active { color: var(--line-green); }
+    .schedule-btn:hover { background: #f4f4f4; }
+    .schedule-btn.active {
+      color: #0b6b2e;
+      border-color: #8ced4a;
+      background: #e8f8d8;
+    }
 
     .schedule-bar {
       padding: 6px 12px;
@@ -1637,8 +1646,8 @@
       .messages { padding: 14px 10px 16px; }
       .input-area { padding: 8px 8px 12px; flex-shrink: 0; }
       .input-area .send-btn,
-      .input-area .schedule-btn,
       .input-area .attach-btn { width: 44px; height: 44px; }
+      .input-area .schedule-btn { height: 36px; padding: 0 8px; font-size: 11px; }
       .fab { right: 16px; bottom: 16px; }
       .new-group-pop { right: 8px; bottom: 80px; width: calc(100% - 16px); }
       .login-screen {
@@ -1785,12 +1794,7 @@
         </svg>
       </button>
       <textarea id="messageInput" rows="1" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
-      <button class="schedule-btn" type="button" onclick="openScheduleSend()" title="予約配信" aria-label="予約配信">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9"/>
-          <path d="M12 7v5l3 2"/>
-        </svg>
-      </button>
+      <button class="schedule-btn" type="button" onclick="openScheduleSend()" title="予約配信" aria-label="予約配信">予約配信</button>
       <button class="send-btn" type="button" onclick="sendMessage()" aria-label="送信">➤</button>
     </div>
     <div class="chat-drop-overlay hidden" id="chatDropOverlay" aria-hidden="true">
