@@ -5,7 +5,13 @@
  */
 import { resolveGeminiApiKey, resolveReceiptGeminiFlashLiteModel } from './line_client.ts'
 import { removeRoomMediaByMessageId, saveMediaBytesToLibrary } from './line_media_store.ts'
-import { analyzeLineImageWithGemini } from './receipt_vision.ts'
+import {
+  analyzeLineImageWithAzureFoundry,
+  analyzeLineImageWithClaude,
+  analyzeLineImageWithGemini,
+  AZURE_FOUNDRY_VISION_MODEL,
+  shouldFallbackLineImageVisionFailure,
+} from './receipt_vision.ts'
 import {
   applySauvageNetSalesAsGrossSales,
   computeReceiptHeuristicConfidence,
@@ -19,6 +25,9 @@ import {
 } from './receipt_store_name_match.ts'
 import { attemptReceiptRegistration } from './receipt_save_flow.ts'
 import { fetchStoreReceiptAnalysisPromptAddition, resolveBuiltinStoreReceiptPrompt, combineStoreReceiptPromptAdditions } from './receipt_prompt.ts'
+import { loadReceiptReplyContext } from './receipt_reply_context.ts'
+import { buildReceiptChatCard } from './receipt_flex_reply.ts'
+import { handleStoreReceiptTextMessage } from './receipt_correction.ts'
 import type { StoreRegistryRow } from './store_receipt.ts'
 import { postChatCard, type ChatCard } from './chat_bridge.ts'
 
@@ -98,30 +107,8 @@ export async function removeStoreRoomMediaForChatMessage(
   return await removeRoomMediaByMessageId(supabase, mtalkMediaMessageId(chatMessageId))
 }
 
-function receiptCardFromRegistration(
-  storeName: string,
-  dateIso: string,
-  receipt: { taxAmount?: string | null; grossSales?: string | null; partyCount?: string | null; guestCount?: string | null },
-  analyticsUrl?: string | null,
-): ChatCard {
-  return {
-    header: {
-      eyebrow: 'レシート',
-      title: `${storeName} ${dateIso} 売上レポート`,
-    },
-    sections: [{
-      type: 'fields',
-      rows: [
-        { label: '店名', value: storeName },
-        { label: '日付', value: dateIso },
-        { label: '消費税', value: String(receipt.taxAmount || '-') },
-        { label: '総売上（税込）', value: String(receipt.grossSales || '-') },
-        { label: '会計組数', value: receipt.partyCount ? `${receipt.partyCount} 組` : '-' },
-        { label: '客数', value: receipt.guestCount ? `${receipt.guestCount} 人` : '-' },
-      ],
-    }],
-    action: analyticsUrl ? { label: '売上推移を見る', url: analyticsUrl } : null,
-  }
+function resolveClaudeApiKey(): string {
+  return String(Deno.env.get('ANTHROPIC_API_KEY') ?? Deno.env.get('CLAUDE_API_KEY') ?? '').trim()
 }
 
 export async function processStoreRoomImageLikeLine(
@@ -163,7 +150,7 @@ export async function processStoreRoomImageLikeLine(
     resolveBuiltinStoreReceiptPrompt(registry.store_partition_key),
     await fetchStoreReceiptAnalysisPromptAddition(supabase, registry.store_partition_key),
   )
-  const analyzed = await analyzeLineImageWithGemini(
+  let analyzed = await analyzeLineImageWithGemini(
     params.bytes,
     params.contentType || 'image/jpeg',
     media.lineMessageId,
@@ -171,6 +158,34 @@ export async function processStoreRoomImageLikeLine(
     prompt,
     resolveReceiptGeminiFlashLiteModel(),
   )
+  if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(analyzed.failure)) {
+    const azureEndpoint = String(Deno.env.get('AZURE_FOUNDRY_PROJECT_ENDPOINT') ?? '').trim()
+    const azureKey = String(Deno.env.get('AZURE_FOUNDRY_API_KEY') ?? '').trim()
+    const azureDeployment = String(Deno.env.get('AZURE_FOUNDRY_VISION_DEPLOYMENT') ?? '').trim() || AZURE_FOUNDRY_VISION_MODEL
+    if (azureEndpoint && azureKey) {
+      const fallback = await analyzeLineImageWithAzureFoundry(
+        params.bytes,
+        params.contentType || 'image/jpeg',
+        media.lineMessageId,
+        azureEndpoint,
+        azureKey,
+        azureDeployment,
+        prompt,
+      )
+      if (fallback.analysis || fallback.failure) analyzed = fallback
+    }
+    if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(analyzed.failure) && resolveClaudeApiKey()) {
+      const claude = await analyzeLineImageWithClaude(
+        params.bytes,
+        params.contentType || 'image/jpeg',
+        media.lineMessageId,
+        resolveClaudeApiKey(),
+        prompt,
+        'claude-haiku-4-5',
+      )
+      if (claude.analysis || claude.failure) analyzed = claude
+    }
+  }
 
   if (analyzed.failure) {
     return {
@@ -231,13 +246,53 @@ export async function processStoreRoomImageLikeLine(
     sender_display_name: params.senderName,
   })
 
-  if (typeof result.reply === 'string') {
-    return { text: result.reply, kind: result.saved ? 'receipt' : 'error' }
+  if (typeof result.reply === 'string' && !result.saved) {
+    return { text: result.reply, kind: 'error' }
   }
 
-  const card = receiptCardFromRegistration(storeDisplayName, receiptDateIso, receipt)
+  const replyContext = await loadReceiptReplyContext(supabase, {
+    storePartitionKey: registry.store_partition_key,
+    storeDisplayName,
+    receiptTable: registry.receipt_table,
+    receipt,
+    receiptDateIso,
+    lineMessageId: media.lineMessageId,
+  })
+  const card = buildReceiptChatCard(replyContext)
   const text = `${storeDisplayName} ${receiptDateIso} 売上レポート\n総売上: ${receipt.grossSales || '-'}\n組数: ${receipt.partyCount || '-'}／客数: ${receipt.guestCount || '-'}`
   return { text, card, kind: result.saved ? 'receipt' : 'media' }
+}
+
+export async function handleStoreRoomReceiptCommand(
+  supabase: DbClient,
+  params: {
+    storeKey: string
+    groupId: number
+    senderUserId?: string | null
+    text: string
+  },
+): Promise<boolean> {
+  const text = String(params.text || '').trim()
+  if (!/レシート(修正|解析削除)/.test(text)) return false
+  const registry = await loadStoreRegistryRow(supabase, params.storeKey)
+  if (!registry) return false
+  const roomId = (await resolveStoreLineRoomId(supabase, params.storeKey)) || `mtalk-group-${params.groupId}`
+  const reply = await handleStoreReceiptTextMessage(
+    supabase,
+    registry,
+    roomId,
+    params.senderUserId || null,
+    text,
+  )
+  if (!reply) return false
+  if (typeof reply === 'string') {
+    await postStoreRoomLineStyleReply(supabase, params.groupId, { text: reply })
+    return true
+  }
+  await postStoreRoomLineStyleReply(supabase, params.groupId, {
+    text: text.includes('削除') ? '解析結果を削除しました。' : '修正を受け付けました。',
+  })
+  return true
 }
 
 export async function postStoreRoomLineStyleReply(

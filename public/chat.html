@@ -1290,6 +1290,24 @@
       font-size: 14px;
       font-weight: 600;
       text-decoration: none;
+      border: 0;
+      width: calc(100% - 28px);
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .msg-card-line .msg-card-header { display: none; }
+    .msg-card-line .msg-card-body { gap: 2px; padding: 16px 16px 10px; }
+    .msg-card-line .msg-card-field { gap: 8px; font-size: 13px; line-height: 1.55; }
+    .msg-card-line .msg-card-field dt { flex: 0 0 42%; color: #666; }
+    .msg-card-line .msg-card-field dd { color: #111; }
+    .msg-card-sep { border: 0; border-top: 1px solid #eceff3; margin: 10px 0 8px; }
+    .msg-card-heading { font-size: 13px; font-weight: 700; color: #111; margin: 8px 0 4px; }
+    .msg-card-actions { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+    .msg-card-action.secondary {
+      margin: 0;
+      width: 100%;
+      background: #eee;
+      color: #333;
     }
 
     .input-area {
@@ -5030,7 +5048,8 @@
           const paragraphs = Array.isArray(row.paragraphs) && row.paragraphs.length
             ? row.paragraphs.map((p) => `<div class="msg-card-para">${escapeHtml(p)}</div>`).join('')
             : escapeHtml(row.value ?? '');
-          return `<dl class="msg-card-field"><dt>${escapeHtml(row.label ?? '')}</dt><dd>${paragraphs}</dd></dl>`;
+          const color = row.color ? ` style="color:${escapeHtml(row.color)}"` : '';
+          return `<dl class="msg-card-field"><dt>${escapeHtml(row.label ?? '')}</dt><dd${color}>${paragraphs}</dd></dl>`;
         }).join('');
       }
 
@@ -5052,8 +5071,24 @@
       if (section.type === 'note') {
         return `<div class="msg-card-empty">${escapeHtml(section.text ?? '')}</div>`;
       }
+      if (section.type === 'separator') return '<hr class="msg-card-sep">';
+      if (section.type === 'heading') {
+        return `<div class="msg-card-heading">${escapeHtml(section.text ?? '')}</div>`;
+      }
 
       return '';
+    }
+
+    function renderCardAction(action) {
+      if (!action || typeof action !== 'object') return '';
+      const label = escapeHtml(action.label || '開く');
+      const command = String(action.command || '').trim();
+      if (command) {
+        return `<button type="button" class="msg-card-action secondary" data-card-command="${escapeHtml(command)}">${label}</button>`;
+      }
+      const url = safeHttpUrl(action.url);
+      if (!url) return '';
+      return `<a class="msg-card-action secondary" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
     }
 
     function renderCard(card) {
@@ -5062,19 +5097,48 @@
       const sections = (Array.isArray(card.sections) ? card.sections : [])
         .map(renderCardSection)
         .join('');
-      const actionUrl = card.action ? safeHttpUrl(card.action.url) : '';
-
-      return `<div class="msg-card">
-        <div class="msg-card-header">
+      const actions = Array.isArray(card.actions) && card.actions.length
+        ? card.actions
+        : (card.action ? [card.action] : []);
+      const actionHtml = actions.map(renderCardAction).filter(Boolean).join('');
+      const lineLike = card.variant === 'line';
+      const title = String(header.title || '');
+      return `<div class="msg-card${lineLike ? ' msg-card-line' : ''}">
+        ${!lineLike && title ? `<div class="msg-card-header">
           ${header.eyebrow ? `<div class="msg-card-eyebrow">${escapeHtml(header.eyebrow)}</div>` : ''}
-          <div class="msg-card-title">${escapeHtml(header.title ?? '')}</div>
+          <div class="msg-card-title">${escapeHtml(title)}</div>
           ${header.subtitle ? `<div class="msg-card-subtitle">${escapeHtml(header.subtitle)}</div>` : ''}
-        </div>
+        </div>` : ''}
         <div class="msg-card-body">${sections}</div>
-        ${actionUrl
-          ? `<a class="msg-card-action" href="${escapeHtml(actionUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(card.action.label || '開く')}</a>`
-          : ''}
+        ${actionHtml ? `<div class="msg-card-actions">${actionHtml}</div>` : ''}
       </div>`;
+    }
+
+    async function sendCardCommand(text) {
+      const content = String(text || '').trim();
+      if (!content || !currentGroupId || !currentUser) return;
+      try {
+        const { data, error } = await sb
+          .from('chat_messages')
+          .insert({
+            group_id: currentGroupId,
+            user_id: currentUser.id,
+            username: currentUser.username,
+            content
+          })
+          .select(MESSAGE_COLUMNS)
+          .single();
+        if (error) throw error;
+        lastMessages[data.group_id] = data;
+        followNewMessages = true;
+        if (viewHasLatest) addMessageToUI(data);
+        else await jumpToLatest();
+        renderGroups();
+        dispatchPushForMessage(data.id);
+      } catch (error) {
+        console.error('Card command error:', error);
+        alert(error.message || '操作に失敗しました');
+      }
     }
 
     async function sendMessage() {
@@ -5601,6 +5665,12 @@
       if (!e.target.closest) return;
 
       // 画像はクリックで拡大。署名URLは hydrate 済みの src をそのまま使う。
+      const commandBtn = e.target.closest('[data-card-command]');
+      if (commandBtn) {
+        sendCardCommand(commandBtn.getAttribute('data-card-command'));
+        return;
+      }
+
       const img = e.target.closest('img.msg-image');
       if (img && img.src) { openImageViewer(img.src); return; }
 

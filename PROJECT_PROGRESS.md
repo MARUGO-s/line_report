@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - M-talk のレシート返信を LINE と同じにする
+
+- Request: レシート画像を送ったとき、LINE と同じ解析方法・同じ返信形式にする。
+- Implementation: `buildReceiptChatCard` が LINE Flex と同じ項目・赤字・ボタンを出す。解析は Gemini Flash Lite → Azure → Claude。カードの修正／削除は LINE と同じコマンドを投稿して処理する。
+- Operation: 店舗ルームへレシート画像を送ると、LINE と同じ売上レポートが返る。
+
 ### 2026-08-20 - 画像添付でも即送信か予約配信かを選ぶ
 
 - Request: 画像やファイルをドロップ・添付したときも、即配信か予約配信かを聞いてその通り動かす。
