@@ -261,9 +261,39 @@
       display: none;
     }
 
-    .mobile-account-bar,
-    .mobile-header-logout {
-      display: none;
+    .account-menu-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      background: rgba(0, 0, 0, 0.4);
+    }
+    .account-menu {
+      position: absolute;
+      top: max(12px, env(safe-area-inset-top, 0px));
+      right: max(10px, env(safe-area-inset-right, 0px));
+      min-width: 220px;
+      background: #2c2c2e;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    }
+    .account-menu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: #fff;
+      font-size: 15px;
+      padding: 14px 16px;
+      cursor: pointer;
+    }
+    .account-menu button + button {
+      border-top: 1px solid #3a3a3c;
+    }
+    .account-menu-logout {
+      color: #ff6b6b;
+      font-weight: 700;
     }
 
     .talk-body { min-width: 0; flex: 1; }
@@ -1235,46 +1265,6 @@
         height: 40px;
         margin: 0;
       }
-      .mobile-account-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 8px 10px 4px;
-        flex-shrink: 0;
-      }
-      .mobile-account-hint {
-        font-size: 11px;
-        color: var(--muted);
-        text-align: right;
-        flex: 1;
-      }
-      .mobile-logout-btn {
-        border: 0;
-        background: #3a3a3c;
-        color: #fff;
-        font-size: 14px;
-        font-weight: 700;
-        min-height: 40px;
-        padding: 0 14px;
-        border-radius: 20px;
-        cursor: pointer;
-      }
-      .mobile-header-logout {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border: 0;
-        background: #eee;
-        color: #111;
-        font-size: 12px;
-        font-weight: 700;
-        min-height: 36px;
-        padding: 0 10px;
-        border-radius: 18px;
-        cursor: pointer;
-        white-space: nowrap;
-      }
       .mobile-notification-btn {
         display: inline-flex;
         align-items: center;
@@ -1329,7 +1319,7 @@
   <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
 
   <nav class="nav-rail hidden" id="navRail">
-    <button class="rail-avatar" id="userAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
+    <button class="rail-avatar" id="userAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
     <button class="rail-btn active" title="トーク" aria-label="トーク">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/></svg>
     </button>
@@ -1337,14 +1327,10 @@
       <span class="notification-icon" aria-hidden="true">🔕</span>
     </button>
     <div class="rail-spacer"></div>
-    <button class="rail-btn logout" onclick="logout()" title="ログアウト">ログアウト</button>
+    <button class="rail-btn logout" onclick="openAccountMenu()" title="メニュー">メニュー</button>
   </nav>
 
   <div class="talk-list hidden" id="sidebar">
-    <div class="mobile-account-bar">
-      <button type="button" class="mobile-logout-btn" onclick="logout()">ログアウト</button>
-      <span class="mobile-account-hint">自分のアイコンは右の丸</span>
-    </div>
     <div class="talk-tabs" id="talkTabs">
       <button class="talk-tab active" data-tab="all" onclick="setTalkTab('all')">すべて</button>
       <button class="talk-tab" data-tab="friends" onclick="setTalkTab('friends')">友だち</button>
@@ -1353,7 +1339,7 @@
       <button class="mobile-notification-btn notification-btn" type="button" data-notification-toggle title="新着通知をオンにする" aria-label="新着通知をオンにする" onclick="togglePushNotifications()">
         <span class="notification-icon" aria-hidden="true">🔕</span>
       </button>
-      <button class="rail-avatar mobile-user-avatar" id="mobileUserAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
+      <button class="rail-avatar mobile-user-avatar" id="mobileUserAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
     </div>
     <div class="talk-search-wrap">
       <input class="talk-search" id="talkSearch" type="search" placeholder="トークルームとメッセージ検索" oninput="handleTalkSearchInput()">
@@ -1393,7 +1379,6 @@
         <h1 id="chatGroupName"></h1>
       </div>
       <div class="chat-header-right">
-        <button type="button" class="mobile-header-logout" onclick="logout()">ログアウト</button>
         <button class="header-icon-btn" id="inviteHeaderBtn" type="button" title="招待" aria-label="招待" onclick="openInvite()">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
@@ -1427,6 +1412,13 @@
       </button>
       <input type="text" id="messageInput" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off">
       <button onclick="sendMessage()" aria-label="送信">➤</button>
+    </div>
+  </div>
+
+  <div class="account-menu-overlay hidden" id="accountMenu" onclick="if (event.target === this) closeAccountMenu()">
+    <div class="account-menu" role="menu" aria-label="アカウントメニュー">
+      <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
+      <button type="button" role="menuitem" class="account-menu-logout" onclick="logout()">ログアウト</button>
     </div>
   </div>
 
@@ -2750,6 +2742,14 @@
       return `${data.publicUrl}?t=${Date.now()}`;
     }
 
+    function openAccountMenu() {
+      $('accountMenu').classList.remove('hidden');
+    }
+
+    function closeAccountMenu() {
+      $('accountMenu').classList.add('hidden');
+    }
+
     function pickUserIcon() {
       $('userIconInput').click();
     }
@@ -3998,6 +3998,7 @@
     }
 
     async function logout() {
+      closeAccountMenu();
       if (channel) { sb.removeChannel(channel); channel = null; }
       if (pushPreferenceChannel) { sb.removeChannel(pushPreferenceChannel); pushPreferenceChannel = null; }
       if (pushSubscription) {
