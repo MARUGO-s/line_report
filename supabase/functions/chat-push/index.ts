@@ -371,12 +371,15 @@ async function handleDispatch(
 
   const { data: memberRows, error: memberError } = await supabase
     .from("chat_group_members")
-    .select("user_id")
+    .select("user_id, muted_at")
     .eq("group_id", message.group_id)
     .neq("user_id", message.user_id)
   if (memberError) throw new Error(`member load failed: ${memberError.message}`)
   const recipientIds: string[] = [...new Set<string>(
-    (memberRows || []).map((row: { user_id?: unknown }) => String(row.user_id ?? "").trim()).filter(Boolean),
+    (memberRows || [])
+      .filter((row: { muted_at?: unknown }) => !row.muted_at)
+      .map((row: { user_id?: unknown }) => String(row.user_id ?? "").trim())
+      .filter(Boolean),
   )]
   if (!recipientIds.length) {
     await supabase.from("chat_push_dispatches").update({
