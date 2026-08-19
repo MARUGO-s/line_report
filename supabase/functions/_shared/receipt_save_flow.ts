@@ -30,6 +30,7 @@ export type ReceiptRegistrationPayload = {
 export type ReceiptRegistrationResult = {
   saved: boolean
   reply: LineReplyPayload
+  receiptRowId?: number | null
 }
 
 export async function attemptReceiptRegistration(
@@ -60,6 +61,7 @@ export async function attemptReceiptRegistration(
       return {
         saved: false,
         reply: '確認状態の保存に失敗しました。少し時間を置いて同じ画像を再送してください。',
+        receiptRowId: null,
       }
     }
     return {
@@ -68,6 +70,7 @@ export async function attemptReceiptRegistration(
         payload.receipt_payload,
         payload.receipt_date,
       ),
+      receiptRowId: null,
     }
   }
 
@@ -82,10 +85,10 @@ export async function attemptReceiptRegistration(
     summary: payload.summary_text ?? '',
   })
   if (saveResult.duplicate) {
-    return { saved: false, reply: 'このレシートは既に登録済みです。' }
+    return { saved: false, reply: 'このレシートは既に登録済みです。', receiptRowId: null }
   }
   if (!saveResult.ok) {
-    return { saved: false, reply: 'レシートの保存に失敗しました。' }
+    return { saved: false, reply: 'レシートの保存に失敗しました。', receiptRowId: null }
   }
 
   // 通常保存できたら、この会話に残っている重複確認の保留をクリア（残骸の持ち越し防止）
@@ -99,5 +102,12 @@ export async function attemptReceiptRegistration(
     receiptDateIso: payload.receipt_date,
     lineMessageId: payload.line_message_id,
   })
-  return { saved: true, reply: buildReceiptFlexMessage(replyContext, replyVisibility) }
+  return {
+    saved: true,
+    reply: buildReceiptFlexMessage(replyContext, {
+      ...replyVisibility,
+      receiptRowId: saveResult.receiptRowId ?? null,
+    }),
+    receiptRowId: saveResult.receiptRowId ?? null,
+  }
 }

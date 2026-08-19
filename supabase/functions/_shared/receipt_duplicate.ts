@@ -8,7 +8,6 @@ import { loadReceiptReplyContext } from './receipt_reply_context.ts'
 import { normalizeInlineText, parseReceiptDateToIso } from './receipt_parse.ts'
 import {
   deleteReceiptsForDateExcludingLineMessageId,
-  deleteReceiptsForDateByLineMessageIds,
   getLineMessageIdsForDate,
   hasExistingReceiptForDate,
   saveStoreReceiptEntry,
@@ -304,7 +303,10 @@ async function completePendingDuplicateAndReply(
     receiptDateIso: pending.receipt_date,
     lineMessageId: pending.line_message_id,
   })
-  return buildReceiptFlexMessage(replyContext, replyVisibility)
+  return buildReceiptFlexMessage(replyContext, {
+    ...replyVisibility,
+    receiptRowId: saveResult.receiptRowId ?? null,
+  })
 }
 
 async function markPendingReceiptDuplicateAwaitingDateChange(
@@ -377,10 +379,14 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
     return '新しい日付を入力してください（例: 2026年7月10日 / 2026-07-10 / 7/10）'
   }
   if (choice === 'replace') {
-    await deleteReceiptsForDateByLineMessageIds(
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(pending.receipt_date)) {
+      return '置き換え対象の日付が確定できないため、他のデータを消さないよう中止しました。'
+    }
+    await deleteReceiptsForDateExcludingLineMessageId(
       supabase,
       pending.receipt_table,
-      pending.existing_line_message_ids,
+      pending.receipt_date,
+      pending.line_message_id,
     )
   }
   await clearPendingReceiptDuplicate(supabase, roomId, userId)

@@ -648,6 +648,7 @@ async function buildUpdatedReceiptFlexReply(
   receiptDateIso: string,
   lineMessageId: string,
   replyVisibility: ReceiptReplyVisibilityOptions = {},
+  receiptRowId?: number | null,
 ): Promise<Record<string, unknown>> {
   const storeDisplayName = registry.display_name || registry.store_partition_key
   const replyContext = await loadReceiptReplyContext(supabase, {
@@ -658,7 +659,10 @@ async function buildUpdatedReceiptFlexReply(
     receiptDateIso,
     lineMessageId,
   })
-  return buildReceiptFlexMessage(replyContext, replyVisibility)
+  return buildReceiptFlexMessage(replyContext, {
+    ...replyVisibility,
+    receiptRowId: receiptRowId ?? replyVisibility.receiptRowId ?? null,
+  })
 }
 
 async function startCorrectionSession(
@@ -753,6 +757,7 @@ async function finishCorrectionFromPending(
     persisted.receiptDateIso,
     pending.line_message_id,
     replyVisibility,
+    pending.receipt_row_id,
   )
 }
 
