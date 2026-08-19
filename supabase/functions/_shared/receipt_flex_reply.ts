@@ -10,6 +10,7 @@ import {
   clampLineMessageActionText,
 } from './receipt_line_actions.ts'
 import { formatYenAmount } from './receipt_parse.ts'
+import type { ChatCard, ChatCardFieldRow, ChatCardSection } from './chat_bridge.ts'
 
 const NEGATIVE_COLOR = '#E53935'
 const LABEL_COLOR = '#666666'
@@ -275,4 +276,130 @@ export function buildReceiptFlexMessage(
       },
     },
   }
+}
+
+/** LINE の売上レポート Flex と同じ項目・色・ボタンを M-talk カードへ写す。 */
+export function buildReceiptChatCard(
+  context: ReceiptReplyContext,
+  options: ReceiptReplyVisibilityOptions = {},
+): ChatCard {
+  const showExecutiveDetail = options.showExecutiveDetail !== false
+  const dateText = formatReceiptDateJa(context.receiptDateText, context.receiptDateIso)
+  const unitPrice = context.unitPriceYen ?? (
+    context.grossSalesYen != null && context.guestCount != null && context.guestCount > 0
+      ? Math.round(context.grossSalesYen / context.guestCount)
+      : null
+  )
+  const monthActualText = context.monthBudgetAchievementPct != null && context.monthGrossSalesYen != null
+    ? `${formatYenAmount(context.monthGrossSalesYen)} (${context.monthBudgetAchievementPct.toFixed(1)}%)`
+    : formatYenOrDash(context.monthGrossSalesYen)
+
+  const sections: ChatCardSection[] = [{
+    type: 'fields',
+    rows: [
+      field('店名', context.storeDisplayName),
+      field('日付', dateText),
+      field('消費税', formatYenOrDash(context.taxAmountYen)),
+      field('総売上（税込）', formatYenOrDash(context.grossSalesYen)),
+      field('会計組数', formatCountOrDash(context.partyCount, ' 組')),
+      field('客数', formatCountOrDash(context.guestCount, ' 人')),
+      field('客単価', formatYenOrDash(unitPrice)),
+    ],
+  }]
+
+  if (showExecutiveDetail) {
+    sections.push(
+      { type: 'separator' },
+      {
+        type: 'fields',
+        rows: [
+          field('営業日数', formatCountOrDash(context.businessDays, ' 日')),
+          field('月間総売上', formatYenOrDash(context.monthGrossSalesYen)),
+          field('1日平均', formatYenOrDash(context.monthDailyAvgGross)),
+          field('月間会計組数', formatCountOrDash(context.monthPartyCount, ' 組')),
+          field('1日平均', formatDecimalOrDash(context.monthDailyAvgParty, ' 組')),
+          field('月間客数', formatCountOrDash(context.monthGuestCount, ' 人')),
+          field('1日平均', formatDecimalOrDash(context.monthDailyAvgGuest, ' 名')),
+        ],
+      },
+    )
+  }
+
+  if (showExecutiveDetail && context.monthBudgetYen != null) {
+    sections.push(
+      { type: 'separator' },
+      { type: 'heading', text: '【予算】' },
+      {
+        type: 'fields',
+        rows: [
+          field('月次目標', formatYenOrDash(context.monthBudgetYen)),
+          field('月次実績', monthActualText, valueColorForAchievementPct(context.monthBudgetAchievementPct)),
+          field('当日目標', formatYenOrDash(context.dailyBudgetYen)),
+          field('日次予算差', formatSignedYen(context.dailyBudgetDiffYen), valueColorForSigned(context.dailyBudgetDiffYen)),
+          field('日次予算累計', formatSignedYen(context.cumulativeBudgetDiffYen), valueColorForSigned(context.cumulativeBudgetDiffYen)),
+        ],
+      },
+    )
+  }
+
+  if (showExecutiveDetail && context.yoyPeriodLabel) {
+    const yoySalesDiffLabel = context.yoySalesDiffYen != null
+      ? formatSignedYen(context.yoySalesDiffYen).replace(/^\+/, '')
+      : '-'
+    const yoyPartyDiffLabel = context.yoyPartyDiff != null
+      ? formatSignedCount(context.yoyPartyDiff, '組').replace(/^\+/, '')
+      : '-'
+    const yoyGuestDiffLabel = context.yoyGuestDiff != null
+      ? formatSignedCount(context.yoyGuestDiff, '名').replace(/^\+/, '')
+      : '-'
+    const yoyDaysDiffLabel = context.yoyBusinessDaysDiff != null
+      ? formatSignedCount(context.yoyBusinessDaysDiff, '日').replace(/^\+/, '±')
+      : '-'
+    sections.push(
+      { type: 'separator' },
+      { type: 'heading', text: '【前年同月比】' },
+      {
+        type: 'fields',
+        rows: [
+          field('昨年差異日', context.yoyPeriodLabel),
+          field('売上', formatSignedPctWithDiff(context.yoySalesPct, yoySalesDiffLabel), valueColorForSignedOrNegativePct(context.yoySalesDiffYen, context.yoySalesPct)),
+          field('組数', formatSignedPctWithDiff(context.yoyPartyPct, yoyPartyDiffLabel), valueColorForSignedOrNegativePct(context.yoyPartyDiff, context.yoyPartyPct)),
+          field('客数', formatSignedPctWithDiff(context.yoyGuestPct, yoyGuestDiffLabel), valueColorForSignedOrNegativePct(context.yoyGuestDiff, context.yoyGuestPct)),
+          field('営業日数', formatSignedPctWithDiff(context.yoyBusinessDaysPct, yoyDaysDiffLabel), valueColorForSignedOrNegativePct(context.yoyBusinessDaysDiff, context.yoyBusinessDaysPct)),
+        ],
+      },
+    )
+  }
+
+  const actions = [
+    {
+      label: 'この結果を修正',
+      command: clampLineMessageActionText(
+        buildReceiptCorrectionCommandTextForLineMessageId(context.lineMessageId),
+      ),
+    },
+    {
+      label: 'この解析結果を削除',
+      command: clampLineMessageActionText(
+        buildReceiptAnalysisDeletionCommandTextForLineMessageId(context.lineMessageId),
+      ),
+    },
+    ...(showExecutiveDetail && context.analyticsDashboardUrl
+      ? [{ label: '売上推移を見る', url: context.analyticsDashboardUrl }]
+      : []),
+    ...(context.foodcourtReportUrl
+      ? [{ label: '📋 日報を記入する', url: context.foodcourtReportUrl }]
+      : []),
+  ]
+
+  return {
+    variant: 'line',
+    header: { title: `${context.storeDisplayName} ${dateText} 売上レポート` },
+    sections,
+    actions,
+  }
+}
+
+function field(label: string, value: string, color?: string): ChatCardFieldRow {
+  return { label, value, color: color && color !== '#111111' ? color : null }
 }

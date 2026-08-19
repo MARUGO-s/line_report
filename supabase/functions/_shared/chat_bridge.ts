@@ -23,6 +23,8 @@ export type ChatCardFieldRow = {
   value: string
   /** 履歴・予約回数欄のように1要素=1段落で縦に積むもの。 */
   paragraphs?: string[]
+  /** LINE Flex と同じ赤字など。 */
+  color?: string | null
 }
 
 /** 予約1件分の行。Flex の buildReservationRow 相当。 */
@@ -39,15 +41,26 @@ export type ChatCardSection =
   | { type: 'fields'; rows: ChatCardFieldRow[] }
   | { type: 'list'; items: ChatCardListItem[] }
   | { type: 'note'; text: string }
+  | { type: 'separator' }
+  | { type: 'heading'; text: string }
+
+export type ChatCardAction = {
+  label: string
+  url?: string | null
+  command?: string | null
+}
 
 export type ChatCard = {
-  header: {
+  header?: {
     eyebrow?: string | null
-    title: string
+    title?: string
     subtitle?: string | null
-  }
+  } | null
+  /** LINE のレシート Flex と同じ白カード。 */
+  variant?: 'line' | null
   sections: ChatCardSection[]
-  action?: { label: string; url: string } | null
+  action?: ChatCardAction | null
+  actions?: ChatCardAction[] | null
 }
 
 export type ChatCardPayload = {

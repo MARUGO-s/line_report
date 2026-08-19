@@ -4,6 +4,7 @@ import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from "../_shared/knowledge
 import {
   processStoreRoomImageLikeLine,
   postStoreRoomLineStyleReply,
+  handleStoreRoomReceiptCommand,
   removeStoreRoomMediaForChatMessage,
 } from "../_shared/chat_store_file_bridge.ts"
 
@@ -214,6 +215,13 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   }
 
   if (!hasKnowledgeMemoTag(text)) {
+    const handled = await handleStoreRoomReceiptCommand(supabase, {
+      storeKey,
+      groupId,
+      senderUserId: String(message.user_id || ""),
+      text,
+    })
+    if (handled) return json({ ok: true, processed: true, kind: "receipt-command" }, 200)
     return json({ ok: true, skipped: true, reason: "no memo tag" }, 200)
   }
 

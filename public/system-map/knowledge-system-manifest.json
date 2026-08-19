@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-08-19T23:18:59.625Z",
+  "generatedAt": "2026-08-19T23:32:00.965Z",
   "architectureHash": "b8389d8e0c5605bb002acc7a91498024d576b6526609ebbebcfb0d729f45dd76",
   "graph": {
-    "nodes": 4594,
-    "edges": 9502,
-    "communities": 531,
-    "builtAtCommit": "cd5f7e937eb048e38c072947e971ded2de4d4c5e",
+    "nodes": 4598,
+    "edges": 9525,
+    "communities": 520,
+    "builtAtCommit": "ce84624fbfcc9e90d6990481f1b8ad965844145c",
     "sqlNodes": 520,
     "sqlFiles": 231
   },
