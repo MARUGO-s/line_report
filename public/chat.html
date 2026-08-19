@@ -596,6 +596,14 @@
     }
     .connection-status.disconnected { background: #ef4444; }
 
+    .messages-wrap {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
     .messages {
       flex: 1;
       overflow-y: auto;
@@ -605,6 +613,126 @@
       gap: 8px;
       background: var(--chat-bg);
     }
+
+    .jump-latest {
+      position: absolute;
+      right: 16px;
+      bottom: 14px;
+      padding: 8px 14px;
+      border: 0;
+      border-radius: 18px;
+      background: rgba(17, 17, 17, 0.82);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    /* 日付の区切り */
+    .day-divider {
+      align-self: center;
+      margin: 6px 0;
+      padding: 3px 12px;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.22);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* スクロール内に置くと読み込み後の位置復元がずれるので、外に浮かせる。 */
+    .history-spinner {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 12px;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.45);
+      color: #fff;
+      font-size: 11px;
+      pointer-events: none;
+    }
+
+    /* 画像メッセージ */
+    .message.image .message-content { max-width: min(80%, 300px); }
+
+    .msg-image {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 360px;
+      object-fit: cover;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.35);
+      cursor: pointer;
+    }
+
+    .image-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 300;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .image-viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+    /* メッセージ検索の結果行 */
+    .search-hit {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 10px 16px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+    }
+    .search-hit:hover { background: var(--list-hover); }
+    .search-hit-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      color: #fff;
+    }
+    .search-hit-room { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .search-hit-time { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+    .search-hit-text {
+      font-size: 12px;
+      color: var(--muted);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .search-hit-text mark { background: rgba(6, 199, 85, 0.35); color: #fff; border-radius: 2px; }
+
+    .message.flash .message-bubble,
+    .message.flash .msg-image,
+    .message.flash .msg-card { animation: flash-hit 1.6s ease-out; }
+    @keyframes flash-hit {
+      0%, 45% { box-shadow: 0 0 0 3px var(--line-green); }
+      100% { box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08); }
+    }
+
+    .attach-btn {
+      width: 38px;
+      height: 38px;
+      flex-shrink: 0;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: #666;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .attach-btn:hover { color: #111; background: rgba(0, 0, 0, 0.06); }
+    .attach-btn:disabled { opacity: 0.4; cursor: default; }
 
     .message { display: flex; }
     .message.own { justify-content: flex-end; }
@@ -980,6 +1108,7 @@
   <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
   <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
   <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
+  <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
 
   <nav class="nav-rail hidden" id="navRail">
     <button class="rail-avatar" id="userAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
@@ -1005,13 +1134,17 @@
       <button class="rail-avatar mobile-user-avatar" id="mobileUserAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
     </div>
     <div class="talk-search-wrap">
-      <input class="talk-search" id="talkSearch" type="search" placeholder="トークルームとメッセージ検索" oninput="talkTab === 'users' ? renderRegisteredUsers() : renderGroups()">
+      <input class="talk-search" id="talkSearch" type="search" placeholder="トークルームとメッセージ検索" oninput="handleTalkSearchInput()">
     </div>
     <div class="groups-scroll">
       <div id="myGroupsList"></div>
       <div id="otherGroupsWrap">
         <div class="section-label">参加できるグループ</div>
         <div id="otherGroupsList"></div>
+      </div>
+      <div id="messageSearchWrap" class="hidden">
+        <div class="section-label" id="messageSearchLabel">メッセージ</div>
+        <div id="messageSearchList"></div>
       </div>
       <div id="registeredUsersWrap" class="hidden">
         <div id="registeredUsersList"></div>
@@ -1048,8 +1181,19 @@
         <div class="connection-status disconnected" id="connectionStatus"></div>
       </div>
     </div>
-    <div class="messages hidden" id="messages"></div>
+    <div class="messages-wrap hidden" id="messagesWrap">
+      <div class="messages" id="messages"></div>
+      <div class="history-spinner hidden" id="historySpinner">過去のメッセージを読み込み中…</div>
+      <button class="jump-latest hidden" id="jumpLatestBtn" type="button" onclick="jumpToLatest()">最新へ ↓</button>
+    </div>
     <div class="input-area hidden" id="inputArea">
+      <button class="attach-btn" type="button" onclick="pickChatImage()" title="画像を送る" aria-label="画像を送る">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <path d="M21 15l-5-5L5 21"/>
+        </svg>
+      </button>
       <input type="text" id="messageInput" placeholder="メッセージ" onkeypress="handleKeyPress(event)">
       <button onclick="sendMessage()" aria-label="送信">➤</button>
     </div>
@@ -1166,6 +1310,22 @@
     let pushNotificationsEnabled = false;
     let pendingOpenGroupId = null;
     let chatViewportFrame = 0;
+    // 開いているトークの読み込み済みメッセージ（created_at 昇順）。
+    let currentMessages = [];
+    let historyExhausted = false;
+    let loadingHistory = false;
+    // 読み込み済みの範囲が最新の発言まで届いているか。
+    // 検索から途中へジャンプすると false になり、そのまま新着を継ぎ足すと
+    // 間が抜けた並びになるので、その場合は追記せず「最新へ」で読み直す。
+    let viewHasLatest = true;
+    // 下端に張り付いているか（新着で自動スクロールするかの判断）。
+    let followNewMessages = true;
+    let messageSearchSeq = 0;
+    let messageSearchHits = [];
+    let uploadingImage = false;
+    const signedImageUrls = new Map();
+    const MESSAGE_PAGE_SIZE = 50;
+    const MESSAGE_COLUMNS = 'id, group_id, user_id, username, content, kind, payload, created_at';
     const INVITE_KEY = 'chat_pending_invite';
     const CHAT_PUSH_PUBLIC_KEY = 'BBUr0ob7hbB-k5JguWO1LgACXgpSjwPYkeoGRwNhDBE88ynjbEyRlY02LA3RZXr_oQrOcu86djYWsEncbTKiLtE';
 
@@ -1896,6 +2056,10 @@
         $('fab').classList.remove('hidden');
         renderGroups();
       }
+      // タブを移ると検索の対象が変わるので、本文ヒットは出し直す。
+      const query = (search.value || '').trim();
+      if (tab === 'users') renderMessageSearch('');
+      else runMessageSearch(query);
     }
 
     async function loadRegisteredUsers() {
@@ -2210,8 +2374,9 @@
       document.body.classList.remove('chat-open');
       $('placeholder').classList.remove('hidden');
       $('chatHeader').classList.add('hidden');
-      $('messages').classList.add('hidden');
+      $('messagesWrap').classList.add('hidden');
       $('inputArea').classList.add('hidden');
+      resetMessageView();
       renderGroups();
     }
 
@@ -2357,6 +2522,152 @@
       };
       reader.readAsDataURL(file);
       if (fallbackName) el.title = fallbackName;
+    }
+
+    let talkSearchTimer = 0;
+
+    function handleTalkSearchInput() {
+      if (talkTab === 'users') {
+        renderRegisteredUsers();
+        return;
+      }
+      renderGroups();
+      // 1文字打つごとに検索を投げない。
+      clearTimeout(talkSearchTimer);
+      const query = ($('talkSearch').value || '').trim();
+      talkSearchTimer = setTimeout(() => runMessageSearch(query), 250);
+    }
+
+    // --- メッセージ本文の検索 ---
+
+    // ILIKE のワイルドカードを打ち消す。検索語の % や _ は文字として扱う。
+    function escapeLikePattern(value) {
+      return String(value).replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    }
+
+    // 検索語の前後だけを切り出し、ヒット箇所を <mark> で囲む。
+    function buildSearchSnippet(content, query) {
+      const text = String(content ?? '').replace(/\s+/g, ' ').trim();
+      const index = text.toLowerCase().indexOf(query.toLowerCase());
+      if (index < 0) return escapeHtml(text.slice(0, 80));
+      const start = Math.max(0, index - 24);
+      const head = start > 0 ? '…' : '';
+      const before = text.slice(start, index);
+      const hit = text.slice(index, index + query.length);
+      const after = text.slice(index + query.length, index + query.length + 56);
+      return `${escapeHtml(head + before)}<mark>${escapeHtml(hit)}</mark>${escapeHtml(after)}`;
+    }
+
+    async function runMessageSearch(query) {
+      const seq = ++messageSearchSeq;
+      const ids = myGroups.map((g) => g.id);
+      if (!query || query.length < 2 || !ids.length) {
+        messageSearchHits = [];
+        renderMessageSearch(query);
+        return;
+      }
+
+      try {
+        const { data, error } = await sb
+          .from('chat_messages')
+          .select('id, group_id, content, username, created_at')
+          .in('group_id', ids)
+          .ilike('content', `%${escapeLikePattern(query)}%`)
+          .order('created_at', { ascending: false })
+          .limit(30);
+        if (error) throw error;
+        // 入力が進んで別の検索が始まっていたら、古い結果は捨てる。
+        if (seq !== messageSearchSeq) return;
+        messageSearchHits = data || [];
+      } catch (error) {
+        console.error('Message search error:', error);
+        messageSearchHits = [];
+      }
+      renderMessageSearch(query);
+    }
+
+    function renderMessageSearch(query) {
+      const wrap = $('messageSearchWrap');
+      const list = $('messageSearchList');
+      const show = talkTab !== 'users' && !!query && query.length >= 2;
+      wrap.classList.toggle('hidden', !show);
+      if (!show) {
+        list.innerHTML = '';
+        return;
+      }
+
+      $('messageSearchLabel').textContent = `メッセージ（${messageSearchHits.length}件）`;
+      list.innerHTML = '';
+      if (!messageSearchHits.length) {
+        list.innerHTML = '<div class="empty-note">一致するメッセージはありません</div>';
+        return;
+      }
+
+      messageSearchHits.forEach((hit) => {
+        const group = myGroups.find((g) => g.id === hit.group_id);
+        const row = document.createElement('div');
+        row.className = 'search-hit';
+        row.innerHTML = `
+          <div class="search-hit-top">
+            <span class="search-hit-room">${escapeHtml(group ? roomTitle(group) : 'トーク')}</span>
+            <span class="search-hit-time">${formatTalkTime(hit.created_at)}</span>
+          </div>
+          <div class="search-hit-text">${escapeHtml(hit.username)}: ${buildSearchSnippet(hit.content, query)}</div>
+        `;
+        row.onclick = () => openMessageAt(hit.group_id, hit.created_at, hit.id);
+        list.appendChild(row);
+      });
+    }
+
+    // 検索結果をタップしたとき、その発言の前後を読み込んで該当位置まで飛ぶ。
+    async function openMessageAt(groupId, createdAt, messageId) {
+      const group = myGroups.find((g) => g.id === groupId);
+      if (!group) return;
+
+      currentGroupId = groupId;
+      markGroupRead(groupId);
+      document.body.classList.add('chat-open');
+      $('placeholder').classList.add('hidden');
+      $('chatHeader').classList.remove('hidden');
+      $('messagesWrap').classList.remove('hidden');
+      $('inputArea').classList.remove('hidden');
+      $('chatGroupName').textContent = roomTitle(group);
+      paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
+      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
+      resetMessageView();
+
+      try {
+        const [olderRes, newerRes] = await Promise.all([
+          sb.from('chat_messages').select(MESSAGE_COLUMNS)
+            .eq('group_id', groupId).lte('created_at', createdAt)
+            .order('created_at', { ascending: false }).limit(25),
+          sb.from('chat_messages').select(MESSAGE_COLUMNS)
+            .eq('group_id', groupId).gt('created_at', createdAt)
+            .order('created_at', { ascending: true }).limit(25)
+        ]);
+        if (olderRes.error) throw olderRes.error;
+        if (newerRes.error) throw newerRes.error;
+
+        const older = (olderRes.data || []).reverse();
+        if (older.length < 25) historyExhausted = true;
+        setMessages(older.concat(newerRes.data || []));
+        // 新しい側を取り切れていなければ、この画面は最新まで届いていない。
+        viewHasLatest = (newerRes.data || []).length < 25;
+        followNewMessages = viewHasLatest;
+        updateJumpLatestButton();
+
+        const target = $('messages').querySelector(`[data-message-id="${messageId}"]`);
+        if (target) {
+          target.scrollIntoView({ block: 'center' });
+          target.classList.add('flash');
+        } else {
+          scrollMessagesToBottom();
+        }
+      } catch (error) {
+        console.error('Open message error:', error);
+      }
+
+      renderGroups();
     }
 
     function matchesQuery(group, preview) {
@@ -2546,35 +2857,215 @@
 
     async function selectGroup(group) {
       currentGroupId = group.id;
-      seenMessageIds = new Set();
       markGroupRead(group.id);
       document.body.classList.add('chat-open');
 
       $('placeholder').classList.add('hidden');
       $('chatHeader').classList.remove('hidden');
-      $('messages').classList.remove('hidden');
+      $('messagesWrap').classList.remove('hidden');
       $('inputArea').classList.remove('hidden');
       $('chatGroupName').textContent = roomTitle(group);
       paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
-      $('messages').innerHTML = '';
+      resetMessageView();
 
       try {
         const { data, error } = await sb
           .from('chat_messages')
-          .select('id, group_id, user_id, username, content, kind, payload, created_at')
+          .select(MESSAGE_COLUMNS)
           .eq('group_id', group.id)
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(MESSAGE_PAGE_SIZE);
         if (error) throw error;
 
-        (data || []).reverse().forEach(addMessageToUI);
+        const loaded = (data || []).reverse();
+        if (loaded.length < MESSAGE_PAGE_SIZE) historyExhausted = true;
+        setMessages(loaded);
+        scrollMessagesToBottom();
       } catch (error) {
         console.error('Load messages error:', error);
       }
 
       renderGroups();
-      $('messageInput').focus();
+      if (!isMobileLayout()) $('messageInput').focus();
+    }
+
+    function isMobileLayout() {
+      return window.matchMedia('(max-width: 768px), (max-height: 600px) and (pointer: coarse)').matches;
+    }
+
+    function resetMessageView() {
+      currentMessages = [];
+      seenMessageIds = new Set();
+      historyExhausted = false;
+      loadingHistory = false;
+      viewHasLatest = true;
+      followNewMessages = true;
+      $('messages').innerHTML = '';
+      $('jumpLatestBtn').classList.add('hidden');
+    }
+
+    function updateJumpLatestButton() {
+      $('jumpLatestBtn').classList.toggle('hidden', viewHasLatest && followNewMessages);
+    }
+
+    function setMessages(list) {
+      currentMessages = list.slice();
+      seenMessageIds = new Set(currentMessages.map((m) => m.id));
+      renderMessageList();
+    }
+
+    function scrollMessagesToBottom() {
+      const el = $('messages');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // --- 日付の区切り ---
+
+    function dayKey(iso) {
+      const d = new Date(iso);
+      if (isNaN(d)) return '';
+      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    }
+
+    function formatDayLabel(iso) {
+      const d = new Date(iso);
+      if (isNaN(d)) return '';
+      const today = new Date();
+      const yesterday = new Date(today.getTime() - 86400000);
+      if (dayKey(iso) === dayKey(today.toISOString())) return '今日';
+      if (dayKey(iso) === dayKey(yesterday.toISOString())) return '昨日';
+      const weekday = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+      return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日(${weekday})`;
+    }
+
+    // --- 1件分の DOM ---
+
+    function buildMessageNode(msg) {
+      const div = document.createElement('div');
+      const isOwn = msg.user_id === currentUser.id;
+      const cards = cardsFromMessage(msg);
+      const image = imageFromMessage(msg);
+      div.className = `message ${isOwn ? 'own' : ''} ${cards ? 'card' : ''} ${image ? 'image' : ''}`;
+      div.dataset.messageId = String(msg.id);
+
+      let bodyHtml;
+      if (cards) {
+        bodyHtml = cards.map(renderCard).join('');
+      } else if (image) {
+        const ratio = (image.w && image.h) ? ` style="aspect-ratio:${image.w}/${image.h}"` : '';
+        bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像"${ratio} loading="lazy">`;
+      } else {
+        bodyHtml = `<div class="message-bubble">${escapeHtml(msg.content)}</div>`;
+      }
+
+      div.innerHTML = `
+        <div class="message-content">
+          ${bodyHtml}
+          <div class="message-meta">
+            ${isOwn ? '' : `<span class="username">${escapeHtml(msg.username)}</span>`}
+            <span>${formatTime(msg.created_at)}</span>
+          </div>
+        </div>
+      `;
+      return div;
+    }
+
+    function buildDayDivider(iso) {
+      const div = document.createElement('div');
+      div.className = 'day-divider';
+      div.dataset.dayKey = dayKey(iso);
+      div.textContent = formatDayLabel(iso);
+      return div;
+    }
+
+    function renderMessageList() {
+      const el = $('messages');
+      el.innerHTML = '';
+      let lastDay = '';
+      currentMessages.forEach((msg) => {
+        const key = dayKey(msg.created_at);
+        if (key !== lastDay) {
+          el.appendChild(buildDayDivider(msg.created_at));
+          lastDay = key;
+        }
+        el.appendChild(buildMessageNode(msg));
+      });
+      hydrateMessageImages();
+    }
+
+    // 新着1件だけを末尾に足す（全体を描き直さずスクロール位置を保つ）。
+    function addMessageToUI(msg) {
+      if (Number(msg.group_id) !== currentGroupId) return;
+      if (seenMessageIds.has(msg.id)) return;
+      // 途中へジャンプしている間は継ぎ足さない。間の発言を読み込んでいないため、
+      // ここで足すと並びに穴が空く。「最新へ」で読み直してもらう。
+      if (!viewHasLatest) {
+        updateJumpLatestButton();
+        return;
+      }
+      seenMessageIds.add(msg.id);
+      currentMessages.push(msg);
+
+      const el = $('messages');
+      const dividers = el.querySelectorAll('.day-divider');
+      const lastDay = dividers.length ? dividers[dividers.length - 1].dataset.dayKey : '';
+      if (dayKey(msg.created_at) !== lastDay) el.appendChild(buildDayDivider(msg.created_at));
+      el.appendChild(buildMessageNode(msg));
+
+      hydrateMessageImages();
+      if (followNewMessages) scrollMessagesToBottom();
+    }
+
+    // --- 過去メッセージの読み込み（上端まで遡ったとき） ---
+
+    async function loadOlderMessages() {
+      if (loadingHistory || historyExhausted || !currentGroupId || !currentMessages.length) return;
+      loadingHistory = true;
+
+      const el = $('messages');
+      $('historySpinner').classList.remove('hidden');
+      const prevHeight = el.scrollHeight;
+      const prevTop = el.scrollTop;
+
+      try {
+        const { data, error } = await sb
+          .from('chat_messages')
+          .select(MESSAGE_COLUMNS)
+          .eq('group_id', currentGroupId)
+          .lt('created_at', currentMessages[0].created_at)
+          .order('created_at', { ascending: false })
+          .limit(MESSAGE_PAGE_SIZE);
+        if (error) throw error;
+
+        const older = (data || []).reverse();
+        if (older.length < MESSAGE_PAGE_SIZE) historyExhausted = true;
+        if (older.length) {
+          currentMessages = older.concat(currentMessages);
+          older.forEach((m) => seenMessageIds.add(m.id));
+          renderMessageList();
+          // 読み込み前に見ていた位置を保つ。
+          el.scrollTop = el.scrollHeight - prevHeight + prevTop;
+        }
+      } catch (error) {
+        console.error('Load older messages error:', error);
+      } finally {
+        $('historySpinner').classList.add('hidden');
+        loadingHistory = false;
+      }
+    }
+
+    function handleMessagesScroll() {
+      const el = $('messages');
+      if (el.scrollTop < 120) loadOlderMessages();
+      // 下端付近にいるかどうかで、新着を自動追尾するか決める。
+      followNewMessages = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      updateJumpLatestButton();
+    }
+
+    async function jumpToLatest() {
+      const group = myGroups.find((g) => g.id === currentGroupId);
+      if (group) await selectGroup(group);
     }
 
     // 通知カードは Bot（service_role）だけが作れる。payload が壊れていたら
@@ -2588,6 +3079,126 @@
 
     function safeParseJson(text) {
       try { return JSON.parse(text); } catch (_) { return null; }
+    }
+
+    function imageFromMessage(msg) {
+      if (msg.kind !== 'image') return null;
+      const payload = typeof msg.payload === 'string' ? safeParseJson(msg.payload) : msg.payload;
+      const image = payload && payload.image;
+      return image && image.path ? image : null;
+    }
+
+    // chat-images は非公開バケット。表示のたびに署名URLを作り、期限まで使い回す。
+    async function hydrateMessageImages() {
+      const nodes = Array.from($('messages').querySelectorAll('img.msg-image[data-path]'));
+      if (!nodes.length) return;
+
+      const now = Date.now();
+      const wanted = [...new Set(nodes.map((n) => n.dataset.path))];
+      const missing = wanted.filter((p) => {
+        const cached = signedImageUrls.get(p);
+        return !cached || cached.expiresAt < now + 60000;
+      });
+
+      if (missing.length) {
+        try {
+          const { data, error } = await sb.storage
+            .from('chat-images')
+            .createSignedUrls(missing, 3600);
+          if (error) throw error;
+          (data || []).forEach((row) => {
+            if (row.signedUrl && row.path) {
+              signedImageUrls.set(row.path, { url: row.signedUrl, expiresAt: now + 3600000 });
+            }
+          });
+        } catch (error) {
+          console.error('Sign image url error:', error);
+        }
+      }
+
+      nodes.forEach((node) => {
+        const cached = signedImageUrls.get(node.dataset.path);
+        if (cached && node.src !== cached.url) node.src = cached.url;
+      });
+    }
+
+    function pickChatImage() {
+      if (!currentGroupId || uploadingImage) return;
+      $('chatImageInput').click();
+    }
+
+    // 送信前に長辺1600pxへ縮小する。現場のスマホ写真をそのまま送ると重すぎるため。
+    async function prepareChatImage(file) {
+      assertIconFile(file);
+      const image = await loadIconImage(file);
+      const sourceWidth = image.naturalWidth || image.width;
+      const sourceHeight = image.naturalHeight || image.height;
+      const maxEdge = 1600;
+      const scale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
+      const width = Math.max(1, Math.round(sourceWidth * scale));
+      const height = Math.max(1, Math.round(sourceHeight * scale));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(image, 0, 0, width, height);
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+      if (!blob) throw new Error('画像の変換に失敗しました');
+      return { blob, width, height };
+    }
+
+    async function sendChatImage(file) {
+      if (!currentGroupId || !currentUser || uploadingImage) return;
+      uploadingImage = true;
+      $('chatImageInput').disabled = true;
+      const groupId = currentGroupId;
+
+      try {
+        const { blob, width, height } = await prepareChatImage(file);
+        const path = `groups/${groupId}/${crypto.randomUUID()}.jpg`;
+
+        const { error: uploadError } = await sb.storage
+          .from('chat-images')
+          .upload(path, blob, { contentType: 'image/jpeg', cacheControl: '3600' });
+        if (uploadError) throw uploadError;
+
+        const { data, error } = await sb
+          .from('chat_messages')
+          .insert({
+            group_id: groupId,
+            user_id: currentUser.id,
+            username: currentUser.username,
+            content: '[画像]',
+            kind: 'image',
+            payload: { v: 1, kind: 'image', image: { path, w: width, h: height } }
+          })
+          .select(MESSAGE_COLUMNS)
+          .single();
+        if (error) throw error;
+
+        lastMessages[data.group_id] = data;
+        followNewMessages = true;
+        if (viewHasLatest) addMessageToUI(data);
+        else await jumpToLatest();
+        renderGroups();
+        dispatchPushForMessage(data.id);
+      } catch (error) {
+        console.error('Send image error:', error);
+        alert(`画像の送信に失敗しました: ${error.message || error}`);
+      } finally {
+        uploadingImage = false;
+        $('chatImageInput').disabled = false;
+        $('chatImageInput').value = '';
+      }
+    }
+
+    function openImageViewer(src) {
+      const overlay = document.createElement('div');
+      overlay.className = 'image-viewer';
+      overlay.innerHTML = `<img src="${escapeHtml(src)}" alt="画像">`;
+      overlay.onclick = () => overlay.remove();
+      document.body.appendChild(overlay);
     }
 
     // javascript: 等を踏まないよう、リンクは http(s) のみ通す。
@@ -2655,35 +3266,6 @@
       </div>`;
     }
 
-    function addMessageToUI(msg) {
-      if (Number(msg.group_id) !== currentGroupId) return;
-      if (seenMessageIds.has(msg.id)) return;
-      seenMessageIds.add(msg.id);
-
-      const messages = $('messages');
-      const div = document.createElement('div');
-      const isOwn = msg.user_id === currentUser.id;
-      const cards = cardsFromMessage(msg);
-      div.className = `message ${isOwn ? 'own' : ''} ${cards ? 'card' : ''}`;
-
-      const bodyHtml = cards
-        ? cards.map(renderCard).join('')
-        : `<div class="message-bubble">${escapeHtml(msg.content)}</div>`;
-
-      div.innerHTML = `
-        <div class="message-content">
-          ${bodyHtml}
-          <div class="message-meta">
-            ${isOwn ? '' : `<span class="username">${escapeHtml(msg.username)}</span>`}
-            <span>${formatTime(msg.created_at)}</span>
-          </div>
-        </div>
-      `;
-
-      messages.appendChild(div);
-      messages.scrollTop = messages.scrollHeight;
-    }
-
     async function sendMessage() {
       if (!currentGroupId || !currentUser) return;
       const input = $('messageInput');
@@ -2702,12 +3284,15 @@
             username: currentUser.username,
             content
           })
-          .select()
+          .select(MESSAGE_COLUMNS)
           .single();
         if (error) throw error;
 
         lastMessages[data.group_id] = data;
-        addMessageToUI(data);
+        // 自分が送ったときは必ず最新が見えている状態にする。
+        followNewMessages = true;
+        if (viewHasLatest) addMessageToUI(data);
+        else await jumpToLatest();
         renderGroups();
         dispatchPushForMessage(data.id);
       } catch (error) {
@@ -2899,6 +3484,19 @@
       } catch (error) {
         alert(error.message || error);
       }
+    });
+
+    $('chatImageInput').addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (file) sendChatImage(file);
+    });
+
+    $('messages').addEventListener('scroll', handleMessagesScroll, { passive: true });
+
+    // 画像はクリックで拡大。署名URLは hydrate 済みの src をそのまま使う。
+    $('messages').addEventListener('click', (e) => {
+      const img = e.target.closest && e.target.closest('img.msg-image');
+      if (img && img.src) openImageViewer(img.src);
     });
 
     $('rememberInput').addEventListener('change', (e) => {
