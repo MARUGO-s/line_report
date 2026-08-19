@@ -10,8 +10,9 @@ const root = new URL("..", import.meta.url)
 const read = (relative: string) => readFile(new URL(relative, root), "utf8")
 
 test("chat PWA registers a service worker and lets the signed-in user enable notifications", async () => {
-  const [html, manifest, serviceWorker] = await Promise.all([
+  const [html, indexHtml, manifest, serviceWorker] = await Promise.all([
     read("public/chat.html"),
+    read("public/index.html"),
     read("public/chat.webmanifest"),
     read("public/chat-sw.js"),
   ])
@@ -20,6 +21,13 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.equal(parsedManifest.start_url, "/line_report/chat.html")
   assert.equal(parsedManifest.display, "standalone")
   assert.match(html, /rel="manifest" href="chat\.webmanifest"/)
+  assert.match(html, /rel="icon" href="icons\/favicon\.ico" sizes="any"/)
+  assert.match(html, /rel="icon" type="image\/png" sizes="32x32" href="icons\/favicon-32x32\.png"/)
+  assert.match(html, /rel="icon" type="image\/png" sizes="16x16" href="icons\/favicon-16x16\.png"/)
+  assert.match(html, /rel="apple-touch-icon" sizes="180x180" href="icons\/apple-touch-icon\.png"/)
+  assert.doesNotMatch(html, /line-report-favicon/)
+  assert.match(indexHtml, /icons\/line-report-favicon\.ico/)
+  assert.doesNotMatch(indexHtml, /href="icons\/favicon\.ico"/)
   assert.match(html, /vendor\/supabase\/supabase-2\.110\.9\.min\.js/)
   assert.doesNotMatch(html, /cdn\.jsdelivr\.net\/npm\/@supabase/)
   assert.match(html, /navigator\.serviceWorker\.register\('chat-sw\.js'/)
