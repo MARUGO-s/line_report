@@ -14,6 +14,7 @@
 - Current state: `PROJECT_PROGRESS.md`
 - Security source: `docs/SECURITY.md`
 - Documentation index: `docs/DOCS-INDEX.md`
+- Talk (chat.html) guide: `docs/CHAT-TALK-GUIDE.md`
 - Repository layout: `docs/REPOSITORY_STRUCTURE.md`
 - Architecture model: `knowledge/system-architecture.json`
 - Public system page source: `public/system-map.html`
@@ -51,6 +52,8 @@ npm run knowledge:update
 - Public Pages never read business tables directly; use protected Edge Functions.
 - `docs/SECURITY.md` invariants remain mandatory.
 - Own-store reviews (`store_review_*`) and competitor reviews remain separate.
+- Talk cards (`chat_messages.kind='card'`) are service-role only; browser inserts are forced to `text`/`image` by trigger.
+- Talk images live in the private `chat-images` bucket and are read through signed URLs, unlike the public `chat-icons`.
 - `line_receipt__*` source rows and `line_room_receipt_search` index are separate.
 - Graphify excludes vendor/node_modules/generated/secret paths but includes SQL migrations.
 - GitHub Actions publishes `public/` to GitHub Pages at the existing `/line_report/*` URLs. Local DBs and backups belong under `.local/`.

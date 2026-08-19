@@ -35,6 +35,7 @@
 | [REPOSITORY_STRUCTURE.md](./REPOSITORY_STRUCTURE.md) | 開発・AI | ルート公開ファイルを残す理由、各ディレクトリの役割、`.local/`の配置ルール |
 | [AI_KNOWLEDGE_SYSTEM.md](./AI_KNOWLEDGE_SYSTEM.md) | AI・開発 | Graphify（コード/SQL）・Obsidian（手書き/既存文書ミラー）・AI作業循環・環境図・更新/検査コマンド |
 | [AI_CONTEXT.md](./AI_CONTEXT.md) | AI | `knowledge:update`で生成する短縮コンテキスト。作業開始時の情報源順位・必須フロー |
+| [CHAT-TALK-GUIDE.md](./CHAT-TALK-GUIDE.md) | 運用・開発 | **トーク（chat.html）** — 許可リスト、発言種別（text/card/image）、予約通知の複製、画像の非公開バケット、検索、既読・リアクション・返信・メンション |
 | [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | 運用・説明 | 利用許可・ルーム承認・管理 Bot・管理画面連携 |
 | [ROOM-SELF-CONFIG-GUIDE.md](./ROOM-SELF-CONFIG-GUIDE.md) | 運用・開発 | **ルーム・セルフ設定**（LINEワンパス＋ルーム個別パスワード）— フロー・データモデル・API・設定項目・運用・トラブルシュート |
 | [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md) | **必読** | グループは Bot **1体のみ**（LINE 仕様）／退出の誤解 |

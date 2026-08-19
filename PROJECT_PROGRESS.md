@@ -2,13 +2,37 @@
 
 ## Document information
 
-- Current date: 2026-08-13
+- Current date: 2026-08-19
 - Repository: `https://github.com/MARUGO-s/line_report`
 - Branch: `main`
 - Work-start HEAD: `74b44e6876ceaa226578426ab323e31b5d3dd356`
 - Production: `https://marugo-s.github.io/line_report/`
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
+
+### 2026-08-19 - トークに既読・リアクション・返信引用・メンションを追加
+
+- Request: LINEにあってトークに無い便利機能のうち、必要なものを実装する。
+- Implementation: `chat_read_states`は自分の行しか見えず他人の既読を知れなかったため、同じグループの参加者どうしは互いの既読時刻を参照できるようにした（書き込みは自分の分のみ）。自分の発言へ「既読 N」を出し、1対1では人数を出さず「既読」だけにする。`chat_message_reactions`を追加し6種の絵文字を付け外しできる（発言と違い自分の分は取り消せる）。`chat_messages.reply_to_id`で返信引用を持ち、返信先が同じトークルームの発言であることをトリガで強制する。`chat_messages.mentions uuid[]`はクライアントの申告を信用せず、トリガでそのグループの参加者だけへ絞り込む。入力欄の`@`で候補を出し、名指しされた人のWeb Push本文の先頭へ「@あなた宛」を付ける。
+- Fix: 吹き出しの`white-space: pre-wrap`を`.bubble-text`へ移した。吹き出し全体がpre-wrapのままだと、引用ブロックを組み立てるテンプレート文字列の改行とインデントが表示され、引用が縦に間延びする。
+- Security: 返信先とメンションはサーバー側で検証する。リアクションは自分の分しか付けられず、他人の分は消せない。
+- Operation: リアクションと返信はメッセージの`⋯`ボタンから。リアクション取り消しは付いているチップを再タップ。
+
+### 2026-08-19 - トークに過去メッセージの遡り・日付区切り・画像送信・本文検索を追加
+
+- Request: LINEにあってトークに無い便利機能のうち、影響の大きいものを実装する。
+- Implementation: 直近50件で打ち切りだった読み込みを、上端まで遡ったら50件ずつ追加取得し、読み込み後も見ていた位置を保つようにした。日が変わる位置へ「今日／昨日／日付」を挟む。画像は非公開バケット`chat-images`へ置き、表示のたびに署名URL（1時間）を作る。送信前に長辺1600px・JPEG品質0.82へ縮小する。検索ボックスは「トークルームとメッセージ検索」と表示しながら実際はルーム名と最後の1件しか見ていなかったため、参加中の全トークを`ILIKE`で引き、ヒット箇所を強調し、タップで前後25件を読み込んでその発言へ飛ぶようにした。
+- Note: 日本語は`to_tsvector`が効かないため全文検索ではなくpg_trgmのGINインデックスを使う。このプロジェクトのpg_trgmは`extensions`ではなく`public`スキーマにあるので、演算子クラスのスキーマを決め打ちせず実際の場所を引いて索引を張る。
+- Security: レシートや予約表など顧客名の写った写真が流れる前提のため、アイコン用`chat-icons`と違い`chat-images`は非公開にする。読み書きはそのグループの参加者だけ。update/deleteのポリシーは作らない（発言と同じく追記のみ）。`kind='image'`のpayloadはトリガで作り直し、保存先が必ず送信先グループ配下であることを強制する。
+- Known limit: 検索から途中へジャンプしている間は新着を継ぎ足さない。並びに穴が空くため「最新へ」で読み直す。
+
+### 2026-08-19 - LINEの予約通知をトークへカードで複製
+
+- Request: LINE「マルゴ予約」ルームへ送っている予約通知を、トークの「マルゴセカンド予約」にも同じように送る。
+- Implementation: `chat_messages`へ`kind`と`payload`を足し、Flex Messageに対応するカードを描画できるようにした。`room_summary_settings.chat_group_id`でLINEルーム→トークルームを対応付け、未設定のルームは従来どおりLINEのみとする。`gmail-alert-cron`（新規予約・変更・キャンセル）と`reservation-today-cron`（本日の予約まとめ）は、LINE送信が成功した分だけ複製する。`reservation-today-cron`は送信失敗時にログ行を消して再送するため、成功時のみ複製することで二重投稿を避ける。投稿後に`chat-push`の内部dispatch経路を叩いてWeb Pushまで配信する。
+- Security: `card`はservice_roleからしか作れない。ブラウザからのinsertは`chat_set_message_author`トリガで必ず`text`へ落とす。送信者用Botは`banned_until=infinity`と受信不能な`.invalid`メールでログインを封じる。
+- Note: `content`には従来どおりプレーンテキスト版を入れる。トーク一覧のプレビューとWeb Push本文はここを見るため、payloadが読めなくても表示が壊れない。
+- Operation: 通知を受け取る人は対象トークルームへの招待と、トーク画面での通知ONが必要。
 
 ### 2026-08-19 - トークをPWA化し、新着をスマホへWeb Push通知
 
