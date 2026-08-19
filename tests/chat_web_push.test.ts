@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v11/)
+  assert.match(serviceWorker, /line-report-chat-v12/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -94,6 +94,19 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /ピン留めは5件までです/)
   assert.match(html, /swipe-hide/)
   assert.match(html, /swipe-delete/)
+  assert.match(html, /↩ リプライ/)
+  assert.doesNotMatch(html, /返信する/)
+  assert.match(html, /data-action="copy"/)
+  assert.match(html, /data-action="forward"/)
+  assert.match(html, /data-action="delete"/)
+  assert.match(html, /function openForward/)
+  assert.match(html, /function copyMessage/)
+})
+
+test("chat messages can be deleted by their author", async () => {
+  const migration = await read("supabase/migrations/20260819220000_chat_message_delete.sql")
+  assert.match(migration, /create policy chat_messages_delete_own on public.chat_messages/)
+  assert.match(migration, /using \(user_id = auth.uid\(\)\)/)
 })
 
 test("chat swipe prefs store mute and hide per user", async () => {

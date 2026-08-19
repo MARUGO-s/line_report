@@ -618,6 +618,13 @@
       padding: 16px 16px 24px;
     }
     .invite-sheet h2 { font-size: 17px; margin-bottom: 12px; }
+    .invite-sheet .user-row {
+      padding: 8px 0;
+      min-height: 56px;
+    }
+    .invite-sheet .user-row:hover { background: #f4f4f4; }
+    .invite-sheet .group-item-name { color: #111; }
+    #forwardOverlay { z-index: 70; }
     .invite-actions { display: flex; gap: 8px; margin-bottom: 14px; }
     .invite-actions button,
     .invite-reset {
@@ -1037,6 +1044,7 @@
       cursor: pointer;
     }
     .msg-menu-reply:hover { background: #3a3a3c; }
+    .msg-menu-delete { color: #ff6b6b; font-weight: 700; }
 
     .attach-btn {
       width: 38px;
@@ -1538,7 +1546,7 @@
         <div class="reply-bar-name" id="replyBarName"></div>
         <div class="reply-bar-text" id="replyBarText"></div>
       </div>
-      <button class="reply-bar-close" type="button" onclick="clearReplyTarget()" aria-label="返信をやめる">×</button>
+      <button class="reply-bar-close" type="button" onclick="clearReplyTarget()" aria-label="リプライをやめる">×</button>
     </div>
     <div class="input-area hidden" id="inputArea" style="position:relative;">
       <div class="mention-pop hidden" id="mentionPop"></div>
@@ -1570,6 +1578,15 @@
         <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
         <button type="button" role="menuitem" class="account-menu-logout" onclick="logout()">ログアウト</button>
       </div>
+    </div>
+  </div>
+
+  <div class="invite-overlay hidden" id="forwardOverlay" onclick="if (event.target === this) closeForward()">
+    <div class="invite-sheet" role="dialog" aria-label="転送">
+      <h2>転送</h2>
+      <input class="invite-search" id="forwardSearch" type="search" placeholder="名前で検索" oninput="renderForwardUsers()">
+      <div id="forwardUserList"></div>
+      <button class="invite-close" type="button" onclick="closeForward()">キャンセル</button>
     </div>
   </div>
 
@@ -1707,6 +1724,7 @@
     const MESSAGE_PAGE_SIZE = 50;
     const MESSAGE_COLUMNS =
       'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, created_at';
+    const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
     // 開いているトークの参加者・既読時刻・リアクション。
     let groupMembers = [];
     let groupReadStates = [];
@@ -1714,6 +1732,7 @@
     // 引用元の本文（返信の表示用）。読み込み済みに無いものだけ後から取りに行く。
     let quotedMessages = new Map();
     let replyTarget = null;
+    let forwardMessage = null;
     let mentionCandidates = [];
     let mentionActiveIndex = 0;
     const REACTION_CHOICES = ['👍', '✅', '🙏', '😂', '❤️', '😮'];
@@ -2007,6 +2026,9 @@
           { event: 'INSERT', schema: 'public', table: 'chat_messages' },
           (payload) => handleIncomingMessage(payload.new))
         .on('postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'chat_messages' },
+          (payload) => handleDeletedMessage(payload.old))
+        .on('postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'chat_groups' },
           () => loadGroups())
         .on('postgres_changes',
@@ -2051,6 +2073,16 @@
         .filter((entry) => entry.user_id !== row.user_id)
         .concat([{ user_id: row.user_id, last_read_at: row.last_read_at }]);
       refreshReadMarks();
+    }
+
+    function handleDeletedMessage(row) {
+      const id = Number(row && row.id);
+      if (!Number.isSafeInteger(id)) return;
+      currentMessages = currentMessages.filter((m) => Number(m.id) !== id);
+      quotedMessages.delete(id);
+      const node = $('messages') && $('messages').querySelector(`.message[data-message-id="${id}"]`);
+      if (node) node.remove();
+      loadLastMessages().then(() => renderGroups());
     }
 
     function handleIncomingMessage(msg) {
@@ -3908,11 +3940,15 @@
 
       const menu = document.createElement('div');
       menu.className = 'msg-menu';
+      const canDelete = currentUser && String(msg.user_id) === String(currentUser.id);
       menu.innerHTML = `
         <div class="msg-menu-emojis">
           ${REACTION_CHOICES.map((e) => `<button type="button" data-emoji="${escapeHtml(e)}">${escapeHtml(e)}</button>`).join('')}
         </div>
-        <button class="msg-menu-reply" type="button" data-action="reply">↩ 返信する</button>
+        <button class="msg-menu-reply" type="button" data-action="reply">↩ リプライ</button>
+        <button class="msg-menu-reply" type="button" data-action="copy">コピー</button>
+        <button class="msg-menu-reply" type="button" data-action="forward">転送</button>
+        ${canDelete ? '<button class="msg-menu-reply msg-menu-delete" type="button" data-action="delete">削除</button>' : ''}
       `;
       document.body.appendChild(menu);
 
@@ -3939,6 +3975,21 @@
         if (e.target.closest('[data-action="reply"]')) {
           setReplyTarget(msg);
           closeMessageMenu();
+          return;
+        }
+        if (e.target.closest('[data-action="copy"]')) {
+          copyMessage(msg);
+          closeMessageMenu();
+          return;
+        }
+        if (e.target.closest('[data-action="forward"]')) {
+          closeMessageMenu();
+          openForward(msg);
+          return;
+        }
+        if (e.target.closest('[data-action="delete"]')) {
+          closeMessageMenu();
+          deleteMessage(msg);
         }
       });
     }
@@ -4003,7 +4054,7 @@
     function setReplyTarget(msg) {
       replyTarget = msg;
       $('replyBar').classList.remove('hidden');
-      $('replyBarName').textContent = `${msg.username} に返信`;
+      $('replyBarName').textContent = `${msg.username} にリプライ`;
       $('replyBarText').textContent = quotePreviewText(msg);
       $('messageInput').focus();
     }
@@ -4011,6 +4062,145 @@
     function clearReplyTarget() {
       replyTarget = null;
       $('replyBar').classList.add('hidden');
+    }
+
+    function messageCopyText(msg) {
+      if (!msg) return '';
+      if (msg.kind === 'image') return '[画像]';
+      return String(msg.content || '');
+    }
+
+    async function copyMessage(msg) {
+      const text = messageCopyText(msg);
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        showNotice('コピーしました');
+      } catch (error) {
+        console.error('Copy error:', error);
+        alert('コピーに失敗しました');
+      }
+    }
+
+    async function deleteMessage(msg) {
+      if (!msg || !currentUser || String(msg.user_id) !== String(currentUser.id)) return;
+      if (!confirm('このメッセージを削除しますか？')) return;
+      try {
+        const { error } = await sb.from('chat_messages')
+          .delete()
+          .eq('id', msg.id)
+          .eq('user_id', currentUser.id);
+        if (error) throw error;
+        handleDeletedMessage({ id: msg.id, group_id: msg.group_id });
+      } catch (error) {
+        console.error('Delete message error:', error);
+        alert(error.message || '削除に失敗しました');
+      }
+    }
+
+    async function openForward(msg) {
+      if (!msg || !currentUser) return;
+      forwardMessage = msg;
+      if (!registeredUsers.length) await loadRegisteredUsers();
+      $('forwardSearch').value = '';
+      $('forwardOverlay').classList.remove('hidden');
+      renderForwardUsers();
+    }
+
+    function closeForward() {
+      $('forwardOverlay').classList.add('hidden');
+      forwardMessage = null;
+    }
+
+    function renderForwardUsers() {
+      const list = $('forwardUserList');
+      if (!list) return;
+      list.innerHTML = '';
+      const q = ($('forwardSearch').value || '').trim().toLowerCase();
+      const users = registeredUsers.filter((u) => (
+        u.id !== currentUser.id
+        && String(u.id) !== CHAT_BOT_USER_ID
+        && u.username !== '予約通知'
+        && (!q || String(u.username || '').toLowerCase().includes(q))
+      ));
+      if (!users.length) {
+        list.innerHTML = '<div class="empty-note">転送できるユーザーはいません</div>';
+        return;
+      }
+      users.forEach((user) => {
+        const row = document.createElement('div');
+        row.className = 'user-row';
+        row.innerHTML = `
+          <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+          <div class="talk-body">
+            <div class="group-item-name"><span>${escapeHtml(user.username)}</span></div>
+          </div>
+        `;
+        row.onclick = () => forwardToUser(user);
+        list.appendChild(row);
+      });
+    }
+
+    async function insertForwardedMessage(msg, groupId) {
+      const image = imageFromMessage(msg);
+      if (image && image.path) {
+        const { data: signed, error: signedError } = await sb.storage
+          .from('chat-images')
+          .createSignedUrl(image.path, 60);
+        if (signedError) throw signedError;
+        const res = await fetch(signed.signedUrl);
+        if (!res.ok) throw new Error('画像の取得に失敗しました');
+        const blob = await res.blob();
+        const path = `groups/${groupId}/${crypto.randomUUID()}.jpg`;
+        const { error: uploadError } = await sb.storage
+          .from('chat-images')
+          .upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '3600' });
+        if (uploadError) throw uploadError;
+        const { data, error } = await sb.from('chat_messages').insert({
+          group_id: groupId,
+          user_id: currentUser.id,
+          username: currentUser.username,
+          content: '[画像]',
+          kind: 'image',
+          payload: { v: 1, kind: 'image', image: { path, w: image.w, h: image.h } }
+        }).select('id').single();
+        if (error) throw error;
+        return data;
+      }
+      const content = messageCopyText(msg).slice(0, 2000) || '[メッセージ]';
+      const { data, error } = await sb.from('chat_messages').insert({
+        group_id: groupId,
+        user_id: currentUser.id,
+        username: currentUser.username,
+        content
+      }).select('id').single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function forwardToUser(user) {
+      const msg = forwardMessage;
+      if (!msg || !user) return;
+      closeForward();
+      try {
+        const { data: groupId, error } = await sb.rpc('chat_open_direct', { p_other: user.id });
+        if (error) throw error;
+        const inserted = await insertForwardedMessage(msg, groupId);
+        await loadGroups();
+        if (inserted && inserted.id) dispatchPushForMessage(inserted.id);
+        showNotice(`${user.username} に転送しました`);
+      } catch (error) {
+        console.error('Forward error:', error);
+        alert(error.message || '転送に失敗しました');
+      }
     }
 
     function jumpToLoadedMessage(messageId) {
@@ -4423,6 +4613,7 @@
     async function logout() {
       closeAccountMenu();
       closeTalkContextMenu();
+      closeForward();
       closeOpenSwipe();
       if (channel) { sb.removeChannel(channel); channel = null; }
       if (pushPreferenceChannel) { sb.removeChannel(pushPreferenceChannel); pushPreferenceChannel = null; }
@@ -4648,6 +4839,7 @@
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       closeTalkContextMenu();
+      closeForward();
       closeOpenSwipe();
     });
     document.querySelector('.groups-scroll').addEventListener('scroll', () => {
