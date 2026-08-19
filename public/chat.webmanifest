@@ -1,7 +1,7 @@
 {
   "id": "/line_report/chat.html",
-  "name": "Talk",
-  "short_name": "Talk",
+  "name": "M-talk",
+  "short_name": "M-talk",
   "description": "マルゴのリアルタイムトーク",
   "start_url": "/line_report/chat.html",
   "scope": "/line_report/",

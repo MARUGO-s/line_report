@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#4B0B1A">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Talk">
+  <meta name="apple-mobile-web-app-title" content="M-talk">
   <link rel="manifest" href="chat.webmanifest">
   <link rel="icon" type="image/svg+xml" href="icons/chat-logo-v3.svg">
   <link rel="icon" href="icons/chat-favicon-v3.ico" sizes="any">
@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="icons/chat-favicon-32x32-v3.png">
   <link rel="icon" type="image/png" sizes="16x16" href="icons/chat-favicon-16x16-v3.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icons/chat-apple-touch-icon-v3.png">
-  <title>Talk</title>
+  <title>M-talk</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -1361,7 +1361,7 @@
 
   <nav class="nav-rail hidden" id="navRail">
     <button class="rail-avatar" id="userAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
-    <button class="rail-btn active" title="Talk" aria-label="Talk">
+    <button class="rail-btn active" title="M-talk" aria-label="M-talk">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/></svg>
     </button>
     <button class="rail-btn notification-btn" type="button" data-notification-toggle title="新着通知をオンにする" aria-label="新着通知をオンにする" onclick="togglePushNotifications()">
@@ -1372,7 +1372,7 @@
 
   <div class="talk-list hidden" id="sidebar">
     <div class="talk-list-header">
-      <h1>Talk</h1>
+      <h1>M-talk</h1>
       <button class="rail-avatar talk-user-avatar" id="talkUserAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
     </div>
     <div class="talk-tabs" id="talkTabs">
@@ -1499,7 +1499,7 @@
   <div class="login-screen" id="loginScreen">
     <div class="login-container">
       <img class="login-logo" src="icons/chat-logo-v3.svg" width="88" height="88" alt="">
-      <h1>Talk</h1>
+      <h1>M-talk</h1>
       <div id="loginError" class="error hidden"></div>
       <div id="loginNotice" class="notice hidden"></div>
 
@@ -2166,7 +2166,7 @@
         return;
       }
       if (isIosDevice() && !isStandaloneApp()) {
-        alert('iPhone／iPadでは、先に共有メニューから「ホーム画面に追加」し、ホーム画面のTalkから開いてください。');
+        alert('iPhone／iPadでは、先に共有メニューから「ホーム画面に追加」し、ホーム画面のM-talkから開いてください。');
         return;
       }
       renderNotificationStatus('working');
@@ -2267,7 +2267,7 @@
 
     function roomTitle(group) {
       if (group && group.is_direct && group.peer) return group.peer.username;
-      return (group && group.group_name) || 'Talk';
+      return (group && group.group_name) || 'M-talk';
     }
 
     function roomIcon(group) {
@@ -2349,7 +2349,7 @@
 
     function updateTitle() {
       const total = unreadTotal();
-      document.title = total > 0 ? `(${total}) Talk` : 'Talk';
+      document.title = total > 0 ? `(${total}) M-talk` : 'M-talk';
     }
 
     function setTalkTab(tab) {
@@ -2658,7 +2658,7 @@
     async function shareInvite() {
       const value = $('inviteUrl').value.trim();
       if (!value) return;
-      const name = $('chatGroupName').textContent || 'Talk';
+      const name = $('chatGroupName').textContent || 'M-talk';
       if (navigator.share) {
         try {
           await navigator.share({ title: name, text: name + ' に招待します', url: value });
@@ -2935,7 +2935,7 @@
         row.className = 'search-hit';
         row.innerHTML = `
           <div class="search-hit-top">
-            <span class="search-hit-room">${escapeHtml(group ? roomTitle(group) : 'Talk')}</span>
+            <span class="search-hit-room">${escapeHtml(group ? roomTitle(group) : 'M-talk')}</span>
             <span class="search-hit-time">${formatTalkTime(hit.created_at)}</span>
           </div>
           <div class="search-hit-text">${escapeHtml(hit.username)}: ${buildSearchSnippet(hit.content, query)}</div>
