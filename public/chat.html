@@ -1662,7 +1662,7 @@
       </div>
       <div class="member-strip hidden" id="memberStrip"></div>
     </div>
-    <div class="store-room-hint hidden" id="storeRoomHint">このルームは店舗固定です。画像や #メモ は Journal Report の資料に保存されます。ドラッグ＆ドロップでも送れます。</div>
+    <div class="store-room-hint hidden" id="storeRoomHint">このルームは店舗固定です。画像はメディア閲覧へ、#メモ は Journal Report の資料へ保存されます。ドラッグ＆ドロップでも送れます。</div>
     <div class="messages-wrap hidden" id="messagesWrap">
       <div class="messages" id="messages"></div>
       <div class="history-spinner hidden" id="historySpinner">過去のメッセージを読み込み中…</div>
@@ -3083,8 +3083,8 @@
       if ($('storeRoomHint')) $('storeRoomHint').classList.toggle('hidden', !group.is_store_room);
       if ($('messageInput') && group.is_store_room) {
         $('messageInput').placeholder = isMobileLayout()
-          ? 'メッセージ（#メモ / 画像で資料保存）'
-          : 'メッセージ（#メモ / 画像で資料保存・Shift+Enterで改行）';
+          ? 'メッセージ（#メモ で資料保存）'
+          : 'メッセージ（#メモ で資料保存・Shift+Enterで改行）';
       } else if ($('messageInput')) {
         $('messageInput').placeholder = isMobileLayout()
           ? 'メッセージ'
@@ -4730,7 +4730,7 @@
       if (card) {
         const store = myGroups.find((g) => g.id === currentGroupId);
         card.textContent = store && store.is_store_room
-          ? '画像をドロップして資料として送信'
+          ? '画像をドロップして送信（メディア閲覧へ保存）'
           : '画像をドロップして送信';
       }
     }
