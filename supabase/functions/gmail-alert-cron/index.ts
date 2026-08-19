@@ -12,6 +12,7 @@ import {
   type ChatCard,
   postChatCard,
   resolveChatGroupId,
+  resolveChatGroupIdByStore,
 } from "../_shared/chat_bridge.ts";
 import {
   isLikelyReservationNotificationMail,
@@ -653,6 +654,7 @@ async function maybeSendGmailReservationAlerts(params: {
 
   const successfulTargetRoomIds = new Set<string>();
   const successfullyLoggedAlertIds = new Set<string>();
+  const postedChatGroupIds = new Set<number>();
 
   for (const batch of deliveryBatches) {
     const linePayload = await buildGmailReservationAlertLinePayload(
@@ -703,9 +705,11 @@ async function maybeSendGmailReservationAlerts(params: {
 
       batchSuccessfulRoomIds.push(targetRoomId);
       successfulTargetRoomIds.add(targetRoomId);
-      // 同じ内容を chat.html のトークルームにもカードとして流す（対応付けがある場合のみ）。
-      const chatGroupId = await resolveChatGroupId(supabase, targetRoomId);
-      if (chatGroupId) {
+      // 同じ内容を chat.html のトークルームにもカードとして流す。
+      // ルーム直指定が無ければ、同じ店舗キーのトーク（マルゴセカンド予約など）へ落とす。
+      const chatGroupId = await resolveChatGroupId(supabase, targetRoomId)
+        ?? await resolveChatGroupIdByStore(supabase, batch.storeKey ?? target.storeKey);
+      if (chatGroupId && !postedChatGroupIds.has(chatGroupId)) {
         const chatResult = await postChatCard(supabase, {
           groupId: chatGroupId,
           kind: "reservation_alert",
@@ -717,6 +721,8 @@ async function maybeSendGmailReservationAlerts(params: {
             `chat card post failed for ${targetRoomId}:`,
             chatResult.error,
           );
+        } else {
+          postedChatGroupIds.add(chatGroupId);
         }
       }
       // 配信間隔スロットリングの起点を更新（このルームの次回対象タイミングをここから数える）。

@@ -82,6 +82,39 @@ export async function resolveChatGroupId(
 }
 
 /**
+ * ルーム直指定が無いとき、同じ店舗キーで chat_group_id がある設定を使う。
+ * 個人LINE（pingus 等）へ流した予約通知も、店舗のトークルームへ複製するため。
+ */
+export async function resolveChatGroupIdByStore(
+  supabase: DbClient,
+  storeKey: string | null | undefined,
+): Promise<number | null> {
+  const key = String(storeKey ?? '').trim()
+  if (!key) return null
+  try {
+    const { data, error } = await supabase
+      .from('room_summary_settings')
+      .select('chat_group_id')
+      .eq('receipt_report_store_partition_key', key)
+      .not('chat_group_id', 'is', null)
+      .limit(1)
+      .maybeSingle()
+    if (error) {
+      console.error('resolveChatGroupIdByStore failed:', error.message)
+      return null
+    }
+    const groupId = Number(data?.chat_group_id)
+    return Number.isSafeInteger(groupId) && groupId > 0 ? groupId : null
+  } catch (err) {
+    console.error(
+      'resolveChatGroupIdByStore threw:',
+      err instanceof Error ? err.message : String(err),
+    )
+    return null
+  }
+}
+
+/**
  * カードを1件投稿し、続けて Web Push を配信する。
  * LINE 送信の成否とは独立に扱いたいので、失敗しても例外を投げず結果を返すだけにする。
  */
