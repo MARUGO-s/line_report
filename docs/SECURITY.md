@@ -56,9 +56,10 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - **レート制限**（2026-06-14 堅牢化）: キーに使うクライアントIPを**詐称不可の情報源優先**で解決（`Deno.serve` の `info.remoteAddr`(公開IP時)→`cf-connecting-ip`→`x-real-ip`→`x-forwarded-for` の**末尾**）。`/auth/session` は **20回/分**、アップロードは 12回/分、既定 180回/分。`consume_security_rate_limit`(SECURITY DEFINER, service_role)で集計。
 
 ### 3.2 verify_jwt=false の Edge Function
-`line-webhook` / `line-admin-webhook` / `admin-api` / 各 cron は `config.toml` で `verify_jwt=false`（Supabaseゲートウェイ認証なし）。**認可は関数側で実施**する:
+`line-webhook` / `line-admin-webhook` / `admin-api` / 各 cron / `chat-push` / `chat-knowledge` は `config.toml` で `verify_jwt=false`（Supabaseゲートウェイ認証なし）。**認可は関数側で実施**する:
 - LINE Webhook → 署名検証（§4）
 - cron → `CRON_AUTH_TOKEN` ゲート（§5）／テスト経路は `X-*-Test-Key`
+- `chat-push` / `chat-knowledge` → `chat_push_internal_config.dispatch_secret` の定数時間比較（pg_net の Bearer は JWT ではない）
 - いずれもシークレット照合は**定数時間比較**（タイミング攻撃対策）。
 
 > 新しく `verify_jwt=false` の関数を足すときは、関数側で必ず認可を実装すること。`config.toml` への `verify_jwt=false` 追記を忘れると新形式キーで毎分401になり**サイレント停止**する（過去に gmail-alert-cron で発生）。

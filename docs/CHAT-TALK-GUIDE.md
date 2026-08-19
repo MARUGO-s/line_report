@@ -28,7 +28,7 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 | `chat_push_subscriptions` | Web Push の購読 |
 | `chat_push_user_preferences` | 通知ON-OFFとプレビュー可否 |
 | `chat_push_dispatches` | 同一メッセージの重複送信防止 |
-| `chat_push_internal_config` | cron から `chat-push` を叩くための内部シークレット |
+| `chat_push_internal_config` | cron／pg_net から `chat-push` と `chat-knowledge` を叩くための内部シークレット |
 
 ## 発言の種別
 
@@ -57,6 +57,17 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 - 共通処理: `supabase/functions/_shared/chat_bridge.ts`
 
 投稿後は `chat-push?action=dispatch` を内部シークレットで叩き、Web Push まで配信する。
+
+## 店舗固定ルームと #メモ
+
+全店舗に `is_store_room` の固定ルームがある。退出・削除はできない。
+店舗ルームへ `#メモ` / `#日報` / `#note`（全角シャープ可）を送ると、
+`chat-knowledge` が Journal Report の「資料」へ登録し、Bot が結果を返す。
+
+- テキスト: `#メモ 本文` でそのまま資料になる
+- 画像: 先に画像を送り、その画像へリプライして `#メモ` と送る
+- `chat-knowledge` は pg_net の内部シークレットで認可する。ゲートウェイ JWT 検証は
+  `verify_jwt=false`。設定を忘れると `UNAUTHORIZED_INVALID_JWT_FORMAT` で無反応になる
 
 ## 画像
 

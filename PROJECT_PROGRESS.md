@@ -10,6 +10,14 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-19 - 店舗ルームの #メモ が無反応だった原因を直す
+
+- Request: Bistro CAVACAVA 店舗ルームへ `#メモ` を送っても Bot も Journal 資料も動かない。
+- Cause: `chat-knowledge` だけ `verify_jwt` が既定の true のまま。pg_net の内部シークレットは JWT ではないためゲートウェイが 401。
+- Fix: `config.toml` に `[functions.chat-knowledge] verify_jwt = false` を足し、関数側の `dispatch_secret` 照合はそのまま。
+- Security: ゲートウェイ JWT は切るが、関数内で DB 生成シークレットを定数時間比較する。公開ページから呼べない。
+- Operation: 店舗固定ルームで `#メモ 本文`、または画像へリプライして `#メモ`。成功すると予約通知 Bot が資料登録の結果を返す。
+
 ### 2026-08-19 - トークに既読・リアクション・返信引用・メンションを追加
 
 - Request: LINEにあってトークに無い便利機能のうち、必要なものを実装する。

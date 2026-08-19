@@ -123,6 +123,10 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   const fn = await read("supabase/functions/chat-knowledge/index.ts")
   assert.match(fn, /hasKnowledgeMemoTag/)
   assert.match(fn, /process-line-post/)
+  const config = await read("supabase/config.toml")
+  assert.match(config, /\[functions\.chat-knowledge\][\s\S]*verify_jwt = false/)
+  const timeoutMigration = await read("supabase/migrations/20260819240000_chat_knowledge_dispatch_timeout.sql")
+  assert.match(timeoutMigration, /timeout_milliseconds := 60000/)
 })
 
 test("chat members can leave a room and owners can kick others", async () => {
