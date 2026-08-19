@@ -362,6 +362,39 @@
       font-weight: 700;
     }
 
+    .talk-ctx-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      background: transparent;
+    }
+    .talk-ctx {
+      position: absolute;
+      min-width: 200px;
+      background: #2c2c2e;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    }
+    .talk-ctx button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: #fff;
+      font-size: 15px;
+      padding: 12px 16px;
+      cursor: pointer;
+    }
+    .talk-ctx button + button {
+      border-top: 1px solid #3a3a3c;
+    }
+    .talk-ctx-delete {
+      color: #ff6b6b;
+      font-weight: 700;
+    }
+
     .talk-body { min-width: 0; flex: 1; }
     .talk-row {
       display: flex;
@@ -1521,6 +1554,15 @@
     </div>
   </div>
 
+  <div class="talk-ctx-overlay hidden" id="talkContextMenu" onclick="if (event.target === this) closeTalkContextMenu()">
+    <div class="talk-ctx" id="talkContextPanel" role="menu" aria-label="トークの設定">
+      <button type="button" role="menuitem" id="talkCtxPin"></button>
+      <button type="button" role="menuitem" id="talkCtxMute"></button>
+      <button type="button" role="menuitem" id="talkCtxHide">非表示</button>
+      <button type="button" role="menuitem" id="talkCtxDelete" class="talk-ctx-delete">削除</button>
+    </div>
+  </div>
+
   <div class="account-menu-overlay hidden" id="accountMenu" onclick="if (event.target === this) closeAccountMenu()">
     <div class="account-menu" role="menu" aria-label="アカウントメニュー">
       <div class="account-menu-user" id="accountMenuUser"></div>
@@ -1630,6 +1672,7 @@
     const SWIPE_BTN_W = 72;
     const SWIPE_OPEN = SWIPE_BTN_W * 2;
     let openSwipeWrap = null;
+    let talkMenuGroup = null;
     let seenMessageIds = new Set();
     let channel = null;
     let pendingCredentials = null;
@@ -3111,6 +3154,43 @@
       openSwipeWrap = null;
     }
 
+    function isPcPointer() {
+      return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    }
+
+    function closeTalkContextMenu() {
+      $('talkContextMenu').classList.add('hidden');
+      talkMenuGroup = null;
+    }
+
+    function openTalkContextMenu(group, x, y) {
+      if (!group || !currentUser) return;
+      closeOpenSwipe();
+      talkMenuGroup = group;
+      $('talkCtxPin').textContent = group.pinned_at ? 'ピン留めを解除' : 'ピン留め';
+      $('talkCtxMute').textContent = group.muted_at ? '通知する' : '非通知';
+      const overlay = $('talkContextMenu');
+      const panel = $('talkContextPanel');
+      overlay.classList.remove('hidden');
+      const pad = 8;
+      const left = Math.min(Math.max(pad, x), window.innerWidth - panel.offsetWidth - pad);
+      const top = Math.min(Math.max(pad, y), window.innerHeight - panel.offsetHeight - pad);
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+    }
+
+    async function runTalkAction(fn) {
+      closeTalkContextMenu();
+      closeOpenSwipe();
+      try {
+        await fn();
+        renderGroups();
+      } catch (error) {
+        console.error('Talk action error:', error);
+        alert(error.message || '操作に失敗しました');
+      }
+    }
+
     function setSwipeX(wrap, x, animate) {
       const front = wrap.querySelector('.swipe-front');
       if (!front) return;
@@ -3180,6 +3260,11 @@
       front.addEventListener('pointermove', onMove, { passive: false });
       front.addEventListener('pointerup', onUp);
       front.addEventListener('pointercancel', onUp);
+      front.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (!isPcPointer()) return;
+        openTalkContextMenu(group, e.clientX, e.clientY);
+      });
       front.addEventListener('click', (e) => {
         if (wrap._ignoreClick) {
           e.preventDefault();
@@ -3292,31 +3377,21 @@
       `;
       wrap.appendChild(front);
 
-      const run = async (fn) => {
-        closeOpenSwipe();
-        try {
-          await fn();
-          renderGroups();
-        } catch (error) {
-          console.error('Talk swipe error:', error);
-          alert(error.message || '操作に失敗しました');
-        }
-      };
       wrap.querySelector('.swipe-pin').onclick = (e) => {
         e.stopPropagation();
-        run(() => setTalkPinned(group, !group.pinned_at));
+        runTalkAction(() => setTalkPinned(group, !group.pinned_at));
       };
       wrap.querySelector('.swipe-mute').onclick = (e) => {
         e.stopPropagation();
-        run(() => setTalkMuted(group, !group.muted_at));
+        runTalkAction(() => setTalkMuted(group, !group.muted_at));
       };
       wrap.querySelector('.swipe-hide').onclick = (e) => {
         e.stopPropagation();
-        run(() => setTalkHidden(group, true));
+        runTalkAction(() => setTalkHidden(group, true));
       };
       wrap.querySelector('.swipe-delete').onclick = (e) => {
         e.stopPropagation();
-        run(() => deleteTalk(group));
+        runTalkAction(() => deleteTalk(group));
       };
       bindTalkSwipe(wrap, group);
       return wrap;
@@ -4347,6 +4422,7 @@
 
     async function logout() {
       closeAccountMenu();
+      closeTalkContextMenu();
       closeOpenSwipe();
       if (channel) { sb.removeChannel(channel); channel = null; }
       if (pushPreferenceChannel) { sb.removeChannel(pushPreferenceChannel); pushPreferenceChannel = null; }
@@ -4570,9 +4646,35 @@
     });
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeOpenSwipe();
+      if (e.key !== 'Escape') return;
+      closeTalkContextMenu();
+      closeOpenSwipe();
     });
-    document.querySelector('.groups-scroll').addEventListener('scroll', closeOpenSwipe, { passive: true });
+    document.querySelector('.groups-scroll').addEventListener('scroll', () => {
+      closeTalkContextMenu();
+      closeOpenSwipe();
+    }, { passive: true });
+
+    $('talkCtxPin').onclick = () => {
+      if (!talkMenuGroup) return;
+      const group = talkMenuGroup;
+      runTalkAction(() => setTalkPinned(group, !group.pinned_at));
+    };
+    $('talkCtxMute').onclick = () => {
+      if (!talkMenuGroup) return;
+      const group = talkMenuGroup;
+      runTalkAction(() => setTalkMuted(group, !group.muted_at));
+    };
+    $('talkCtxHide').onclick = () => {
+      if (!talkMenuGroup) return;
+      const group = talkMenuGroup;
+      runTalkAction(() => setTalkHidden(group, true));
+    };
+    $('talkCtxDelete').onclick = () => {
+      if (!talkMenuGroup) return;
+      const group = talkMenuGroup;
+      runTalkAction(() => deleteTalk(group));
+    };
 
     $('rememberInput').addEventListener('change', (e) => {
       if (!e.target.checked) clearCredentials();
