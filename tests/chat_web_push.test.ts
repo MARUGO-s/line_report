@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v8/)
+  assert.match(serviceWorker, /line-report-chat-v9/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -85,6 +85,17 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /syncAppBadge\(0\)/)
   assert.match(html, /event\.data\?\.type === 'REFRESH_APP_BADGE'/)
   assert.match(html, /if \(pushNotificationsEnabled\) \{\s+loadUnread\(\)/)
+  assert.match(html, /function openTalkMenu/)
+  assert.match(html, /chat_set_pin/)
+  assert.match(html, /ピン留めは5件までです/)
+})
+
+test("chat pin schema stores a per-user pin and caps at five rooms", async () => {
+  const migration = await read("supabase/migrations/20260819203000_chat_pins.sql")
+  assert.match(migration, /add column if not exists pinned_at timestamptz/)
+  assert.match(migration, /create or replace function public\.chat_set_pin/)
+  assert.match(migration, /ピン留めは5件までです/)
+  assert.match(migration, /grant execute on function public\.chat_set_pin\(bigint, boolean\) to authenticated/)
 })
 
 test("chat push schema protects device subscriptions and deduplicates dispatch", async () => {
