@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v6';
+const CHAT_CACHE = 'line-report-chat-v7';
 const CHAT_SHELL = [
   './chat.html',
   './chat.webmanifest',
@@ -115,7 +115,7 @@ self.addEventListener('push', (event) => {
     data = { body: event.data ? event.data.text() : '新しいメッセージがあります' };
   }
 
-  const title = String(data.title || 'Talk');
+  const title = String(data.title || 'M-talk');
   const options = {
     body: String(data.body || '新しいメッセージがあります'),
     icon: data.icon || './icons/chat-android-192x192-v3.png',
