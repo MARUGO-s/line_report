@@ -339,6 +339,35 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .group-item-name span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pin-mark {
+      flex-shrink: 0;
+      color: #8e8e93;
+      display: inline-flex;
+    }
+    .talk-pin-split {
+      height: 1px;
+      margin: 4px 16px;
+      background: #2c2c2e;
+    }
+    .talk-sheet-action {
+      width: 100%;
+      border: 0;
+      background: #f2f2f2;
+      color: #111;
+      border-radius: 10px;
+      padding: 14px 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
     }
     .talk-time {
       font-size: 12px;
@@ -1464,6 +1493,13 @@
     </div>
   </div>
 
+  <div class="invite-overlay hidden" id="talkActionSheet" onclick="if (event.target === this) closeTalkMenu()">
+    <div class="invite-sheet" role="menu" aria-label="トーク操作">
+      <button class="talk-sheet-action" type="button" id="talkPinBtn" onclick="toggleTalkPin()"></button>
+      <button class="invite-close" type="button" onclick="closeTalkMenu()">キャンセル</button>
+    </div>
+  </div>
+
   <div class="account-menu-overlay hidden" id="accountMenu" onclick="if (event.target === this) closeAccountMenu()">
     <div class="account-menu" role="menu" aria-label="アカウントメニュー">
       <div class="account-menu-user" id="accountMenuUser"></div>
@@ -1569,6 +1605,10 @@
     let unread = {};
     let lastMessages = {};
     let talkTab = 'all';
+    let talkMenuGroup = null;
+    let talkPressTimer = null;
+    let talkPressOpenedMenu = false;
+    const TALK_PIN_LIMIT = 5;
     let seenMessageIds = new Set();
     let channel = null;
     let pendingCredentials = null;
@@ -1965,7 +2005,7 @@
       try {
         const [mineRes, allRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('chat_groups(id, group_name, created_at, icon_url, is_direct, direct_key)')
+            .select('pinned_at, chat_groups(id, group_name, created_at, icon_url, is_direct, direct_key)')
             .eq('user_id', currentUser.id),
           sb.from('chat_groups')
             .select('id, group_name, created_at, icon_url, is_direct, direct_key')
@@ -1976,7 +2016,9 @@
         if (allRes.error) throw allRes.error;
 
         const mine = (mineRes.data || [])
-          .map((row) => row.chat_groups)
+          .map((row) => row.chat_groups
+            ? Object.assign({}, row.chat_groups, { pinned_at: row.pinned_at || null })
+            : null)
           .filter(Boolean);
         const mineIds = new Set(mine.map((g) => g.id));
 
@@ -3009,6 +3051,87 @@
       return title.includes(q) || String(preview || '').toLowerCase().includes(q);
     }
 
+    function pinMarkHtml() {
+      return `<span class="pin-mark" title="ピン留め" aria-hidden="true">`
+        + `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">`
+        + `<path d="M16 3h-2V2h-4v1H8v2h1.1l1.2 8.1A3 3 0 0 0 12 16.9V22h2v-5.1a3 3 0 0 0 2.7-2.8L17.9 5H19V3h-3z"/></svg></span>`;
+    }
+
+    function lastTalkAt(group) {
+      return lastMessages[group.id] ? lastMessages[group.id].created_at : group.created_at;
+    }
+
+    function bindTalkRowGestures(item, group) {
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        openTalkMenu(group);
+      });
+      item.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        talkPressOpenedMenu = false;
+        clearTimeout(talkPressTimer);
+        talkPressTimer = setTimeout(() => {
+          talkPressOpenedMenu = true;
+          openTalkMenu(group);
+        }, 500);
+      }, { passive: true });
+      const cancelPress = () => {
+        clearTimeout(talkPressTimer);
+        talkPressTimer = null;
+      };
+      item.addEventListener('touchend', cancelPress);
+      item.addEventListener('touchmove', cancelPress);
+      item.addEventListener('touchcancel', cancelPress);
+      item.onclick = () => {
+        if (talkPressOpenedMenu) {
+          talkPressOpenedMenu = false;
+          return;
+        }
+        selectGroup(group);
+      };
+    }
+
+    function openTalkMenu(group) {
+      if (!group || !currentUser) return;
+      talkMenuGroup = group;
+      const btn = $('talkPinBtn');
+      btn.textContent = group.pinned_at ? 'ピン留めを解除' : 'ピン留め';
+      $('talkActionSheet').classList.remove('hidden');
+    }
+
+    function closeTalkMenu() {
+      $('talkActionSheet').classList.add('hidden');
+      talkMenuGroup = null;
+    }
+
+    async function toggleTalkPin() {
+      const group = talkMenuGroup;
+      if (!group || !currentUser) return;
+      const nextPinned = !group.pinned_at;
+      if (nextPinned) {
+        const pinnedCount = myGroups.filter((g) => g.pinned_at && g.id !== group.id).length;
+        if (pinnedCount >= TALK_PIN_LIMIT) {
+          alert('ピン留めは5件までです');
+          return;
+        }
+      }
+      closeTalkMenu();
+      try {
+        const { error } = await sb.rpc('chat_set_pin', {
+          p_group_id: group.id,
+          p_pinned: nextPinned
+        });
+        if (error) throw error;
+        group.pinned_at = nextPinned ? new Date().toISOString() : null;
+        const mine = myGroups.find((g) => g.id === group.id);
+        if (mine) mine.pinned_at = group.pinned_at;
+        renderGroups();
+      } catch (error) {
+        console.error('Pin error:', error);
+        alert(error.message || 'ピン留めに失敗しました');
+      }
+    }
+
     function renderTalkRow(group, options) {
       const item = document.createElement('div');
       item.className = 'group-item' + (currentGroupId === group.id ? ' active' : '');
@@ -3020,11 +3143,12 @@
         : (options.preview || '');
       const when = last ? last.created_at : group.created_at;
       const count = unread[group.id] || 0;
+      const pinned = !options.joinable && group.pinned_at;
       item.innerHTML = `
         <div class="talk-avatar" style="background:${icon ? '#2c2c2e' : avatarStyle(title)}">${avatarHtml(title, icon)}</div>
         <div class="talk-body">
           <div class="talk-row">
-            <div class="group-item-name">${escapeHtml(title)}</div>
+            <div class="group-item-name">${pinned ? pinMarkHtml() : ''}<span>${escapeHtml(title)}</span></div>
             <div class="talk-time">${formatTalkTime(when)}</div>
           </div>
           <div class="talk-preview-row">
@@ -3041,7 +3165,7 @@
         button.onclick = (e) => { e.stopPropagation(); joinGroup(group.id); };
         item.appendChild(button);
       } else {
-        item.onclick = () => selectGroup(group);
+        bindTalkRowGestures(item, group);
       }
       return item;
     }
@@ -3074,15 +3198,25 @@
         : [];
 
       mineVisible.sort((a, b) => {
-        const at = lastMessages[a.id] ? lastMessages[a.id].created_at : a.created_at;
-        const bt = lastMessages[b.id] ? lastMessages[b.id].created_at : b.created_at;
-        return new Date(bt) - new Date(at);
+        const ap = a.pinned_at ? 1 : 0;
+        const bp = b.pinned_at ? 1 : 0;
+        if (ap !== bp) return bp - ap;
+        return new Date(lastTalkAt(b)) - new Date(lastTalkAt(a));
       });
 
       if (showMine && mineVisible.length === 0 && talkTab !== 'friends') {
         mineList.innerHTML = '<div class="empty-note">トークはまだありません</div>';
       } else {
-        mineVisible.forEach((group) => mineList.appendChild(renderTalkRow(group, {})));
+        let splitDone = false;
+        mineVisible.forEach((group, index) => {
+          if (!splitDone && index > 0 && !group.pinned_at && mineVisible[0].pinned_at) {
+            const split = document.createElement('div');
+            split.className = 'talk-pin-split';
+            mineList.appendChild(split);
+            splitDone = true;
+          }
+          mineList.appendChild(renderTalkRow(group, {}));
+        });
       }
 
       if (talkTab === 'friends') {
@@ -4055,6 +4189,7 @@
 
     async function logout() {
       closeAccountMenu();
+      closeTalkMenu();
       if (channel) { sb.removeChannel(channel); channel = null; }
       if (pushPreferenceChannel) { sb.removeChannel(pushPreferenceChannel); pushPreferenceChannel = null; }
       if (pushSubscription) {
@@ -4274,6 +4409,12 @@
       if (!row) return;
       e.preventDefault();
       applyMention(Number(row.dataset.index));
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('talkActionSheet').classList.contains('hidden')) {
+        closeTalkMenu();
+      }
     });
 
     $('rememberInput').addEventListener('change', (e) => {
