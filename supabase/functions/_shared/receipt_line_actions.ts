@@ -108,11 +108,15 @@ export function parseReceiptCorrectionStartDirective(
       return { matched: true, targetLineMessageId: null, targetReceiptRowId: Math.round(rowId) }
     }
   }
-  const idTagged = normalized.match(/^レシート(?:修正|訂正)\s*(?:id[:：]|#)\s*([A-Za-z0-9_-]{8,128})$/iu)
+  const mtalkTagged = normalized.match(/^レシート(?:修正|訂正)\s*(?:id[:：]|#)\s*(mtalk-\d{1,12})$/iu)
+  if (mtalkTagged?.[1]) {
+    return { matched: true, targetLineMessageId: String(mtalkTagged[1]).trim(), targetReceiptRowId: null }
+  }
+  const idTagged = normalized.match(/^レシート(?:修正|訂正)\s*(?:id[:：]|#)\s*([A-Za-z0-9_-]{6,128})$/iu)
   if (idTagged?.[1]) {
     return { matched: true, targetLineMessageId: String(idTagged[1]).trim(), targetReceiptRowId: null }
   }
-  const idPlain = normalized.match(/^レシート(?:修正|訂正)\s+([A-Za-z0-9_-]{8,128})$/iu)
+  const idPlain = normalized.match(/^レシート(?:修正|訂正)\s+([A-Za-z0-9_-]{6,128})$/iu)
   if (idPlain?.[1]) {
     return { matched: true, targetLineMessageId: String(idPlain[1]).trim(), targetReceiptRowId: null }
   }
@@ -138,8 +142,14 @@ export function parseReceiptAnalysisDeleteDirective(
       return { matched: true, targetLineMessageId: null, targetReceiptRowId: Math.round(rowId) }
     }
   }
+  const mtalkTagged = normalized.match(
+    /^レシート(?:画像)?解析削除\s*(?:id[:：]|#)\s*(mtalk-\d{1,12})$/iu,
+  )
+  if (mtalkTagged?.[1]) {
+    return { matched: true, targetLineMessageId: String(mtalkTagged[1]).trim(), targetReceiptRowId: null }
+  }
   const idTagged = normalized.match(
-    /^レシート(?:画像)?解析削除\s*(?:id[:：]|#)\s*([A-Za-z0-9_-]{8,128})$/iu,
+    /^レシート(?:画像)?解析削除\s*(?:id[:：]|#)\s*([A-Za-z0-9_-]{6,128})$/iu,
   )
   if (idTagged?.[1]) {
     return { matched: true, targetLineMessageId: String(idTagged[1]).trim(), targetReceiptRowId: null }

@@ -6,7 +6,9 @@ import {
 } from './receipt_reply_context.ts'
 import {
   buildReceiptAnalysisDeletionCommandTextForLineMessageId,
+  buildReceiptAnalysisDeletionCommandTextForReceiptRowId,
   buildReceiptCorrectionCommandTextForLineMessageId,
+  buildReceiptCorrectionCommandTextForReceiptRowId,
   clampLineMessageActionText,
 } from './receipt_line_actions.ts'
 import { formatYenAmount } from './receipt_parse.ts'
@@ -101,6 +103,8 @@ function sectionTitle(text: string) {
 
 export type ReceiptReplyVisibilityOptions = {
   showExecutiveDetail?: boolean
+  /** 保存済み行ID。あるときは修正・削除を RID 指定にして本体を確実に引く。 */
+  receiptRowId?: number | null
 }
 
 export function buildReceiptFlexMessage(
@@ -208,6 +212,14 @@ export function buildReceiptFlexMessage(
   }
 
   const trendUrl = context.analyticsDashboardUrl
+  const rowId = Number(options.receiptRowId)
+  const useRid = Number.isFinite(rowId) && rowId > 0
+  const correctionCommand = useRid
+    ? buildReceiptCorrectionCommandTextForReceiptRowId(rowId)
+    : buildReceiptCorrectionCommandTextForLineMessageId(context.lineMessageId)
+  const deletionCommand = useRid
+    ? buildReceiptAnalysisDeletionCommandTextForReceiptRowId(rowId)
+    : buildReceiptAnalysisDeletionCommandTextForLineMessageId(context.lineMessageId)
 
   return {
     type: 'flex',
@@ -233,9 +245,7 @@ export function buildReceiptFlexMessage(
             action: {
               type: 'message',
               label: 'この結果を修正',
-              text: clampLineMessageActionText(
-                buildReceiptCorrectionCommandTextForLineMessageId(context.lineMessageId),
-              ),
+              text: clampLineMessageActionText(correctionCommand),
             },
           },
           {
@@ -245,9 +255,7 @@ export function buildReceiptFlexMessage(
             action: {
               type: 'message',
               label: 'この解析結果を削除',
-              text: clampLineMessageActionText(
-                buildReceiptAnalysisDeletionCommandTextForLineMessageId(context.lineMessageId),
-              ),
+              text: clampLineMessageActionText(deletionCommand),
             },
           },
           ...(showExecutiveDetail ? [{
@@ -371,17 +379,23 @@ export function buildReceiptChatCard(
     )
   }
 
+  const rowId = Number(options.receiptRowId)
+  const useRid = Number.isFinite(rowId) && rowId > 0
   const actions = [
     {
       label: 'この結果を修正',
       command: clampLineMessageActionText(
-        buildReceiptCorrectionCommandTextForLineMessageId(context.lineMessageId),
+        useRid
+          ? buildReceiptCorrectionCommandTextForReceiptRowId(rowId)
+          : buildReceiptCorrectionCommandTextForLineMessageId(context.lineMessageId),
       ),
     },
     {
       label: 'この解析結果を削除',
       command: clampLineMessageActionText(
-        buildReceiptAnalysisDeletionCommandTextForLineMessageId(context.lineMessageId),
+        useRid
+          ? buildReceiptAnalysisDeletionCommandTextForReceiptRowId(rowId)
+          : buildReceiptAnalysisDeletionCommandTextForLineMessageId(context.lineMessageId),
       ),
     },
     ...(showExecutiveDetail && context.analyticsDashboardUrl

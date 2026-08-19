@@ -46,14 +46,15 @@ export async function resolveStoreLineRoomId(supabase: DbClient, storeKey: strin
     .select('room_id')
     .eq('receipt_report_store_partition_key', key)
     .not('room_id', 'is', null)
-    .limit(1)
-    .maybeSingle()
+    .limit(20)
   if (error) {
     console.warn('resolveStoreLineRoomId failed:', error.message)
     return null
   }
-  const roomId = String(data?.room_id ?? '').trim()
-  return roomId || null
+  const rooms = (Array.isArray(data) ? data : [])
+    .map((row) => String((row as { room_id?: string }).room_id ?? '').trim())
+    .filter(Boolean)
+  return rooms.find((id) => id.startsWith('C')) || rooms[0] || null
 }
 
 export async function loadStoreRegistryRow(supabase: DbClient, storeKey: string): Promise<StoreRegistryRow | null> {
@@ -246,8 +247,13 @@ export async function processStoreRoomImageLikeLine(
     sender_display_name: params.senderName,
   })
 
-  if (typeof result.reply === 'string' && !result.saved) {
-    return { text: result.reply, kind: 'error' }
+  if (!result.saved) {
+    const converted = mtalkCardFromLineReply(result.reply)
+    return {
+      text: converted.text,
+      card: converted.card,
+      kind: 'error',
+    }
   }
 
   const replyContext = await loadReceiptReplyContext(supabase, {
@@ -258,9 +264,9 @@ export async function processStoreRoomImageLikeLine(
     receiptDateIso,
     lineMessageId: media.lineMessageId,
   })
-  const card = buildReceiptChatCard(replyContext)
+  const card = buildReceiptChatCard(replyContext, { receiptRowId: result.receiptRowId ?? null })
   const text = `${storeDisplayName} ${receiptDateIso} 売上レポート\n総売上: ${receipt.grossSales || '-'}\n組数: ${receipt.partyCount || '-'}／客数: ${receipt.guestCount || '-'}`
-  return { text, card, kind: result.saved ? 'receipt' : 'media' }
+  return { text, card, kind: 'receipt' }
 }
 
 export async function handleStoreRoomReceiptCommand(
@@ -273,7 +279,7 @@ export async function handleStoreRoomReceiptCommand(
   },
 ): Promise<boolean> {
   const text = String(params.text || '').trim()
-  if (!/レシート(修正|解析削除)/.test(text)) return false
+  if (!text) return false
   const registry = await loadStoreRegistryRow(supabase, params.storeKey)
   if (!registry) return false
   const roomId = (await resolveStoreLineRoomId(supabase, params.storeKey)) || `mtalk-group-${params.groupId}`
@@ -285,14 +291,89 @@ export async function handleStoreRoomReceiptCommand(
     text,
   )
   if (!reply) return false
-  if (typeof reply === 'string') {
-    await postStoreRoomLineStyleReply(supabase, params.groupId, { text: reply })
-    return true
-  }
-  await postStoreRoomLineStyleReply(supabase, params.groupId, {
-    text: text.includes('削除') ? '解析結果を削除しました。' : '修正を受け付けました。',
-  })
+  const converted = mtalkCardFromLineReply(reply)
+  await postStoreRoomLineStyleReply(supabase, params.groupId, converted)
   return true
+}
+
+function mtalkCardFromLineReply(reply: unknown): { text: string; card?: ChatCard } {
+  if (typeof reply === 'string') return { text: reply }
+  if (Array.isArray(reply)) {
+    const first = reply.find((item) => item != null)
+    return mtalkCardFromLineReply(first)
+  }
+  if (!reply || typeof reply !== 'object') return { text: '操作を受け付けました。' }
+  const rec = reply as Record<string, unknown>
+  const collected = {
+    texts: [] as string[],
+    fields: [] as { label: string; value: string }[],
+    headings: [] as string[],
+    actions: [] as NonNullable<ChatCard['actions']>,
+  }
+  walkLineFlex(rec, collected)
+  const alt = String(rec.altText ?? '').trim()
+  const text = alt || collected.texts[0] || '操作を受け付けました。'
+  const used = new Set<string>([alt, ...collected.fields.flatMap((field) => [field.label, field.value])])
+  const notes = collected.texts.filter((item) => item && !used.has(item))
+  const sections: NonNullable<ChatCard['sections']> = []
+  if (collected.fields.length) sections.push({ type: 'fields', rows: collected.fields })
+  for (const heading of collected.headings) sections.push({ type: 'heading', text: heading })
+  if (notes.length) sections.push({ type: 'note', text: notes.join('\n') })
+  return {
+    text,
+    card: {
+      variant: 'line',
+      header: { title: alt || 'レシート' },
+      sections,
+      actions: collected.actions.length ? collected.actions : null,
+    },
+  }
+}
+
+function walkLineFlex(
+  node: unknown,
+  out: {
+    texts: string[]
+    fields: { label: string; value: string }[]
+    headings: string[]
+    actions: NonNullable<ChatCard['actions']>
+  },
+  ctx?: { inHeader?: boolean },
+): void {
+  if (!node || typeof node !== 'object') return
+  const rec = node as Record<string, unknown>
+  if (rec.layout === 'horizontal' && Array.isArray(rec.contents) && rec.contents.length === 2) {
+    const left = rec.contents[0] as Record<string, unknown> | undefined
+    const right = rec.contents[1] as Record<string, unknown> | undefined
+    if (left?.type === 'text' && right?.type === 'text') {
+      const label = String(left.text ?? '').trim()
+      const value = String(right.text ?? '').trim()
+      if (label && value) {
+        out.fields.push({ label, value })
+        return
+      }
+    }
+  }
+  if (rec.type === 'text' && rec.text) {
+    const text = String(rec.text)
+    if (ctx?.inHeader || (rec.weight === 'bold' && (text.startsWith('【') || text.startsWith('対象:')))) {
+      out.headings.push(text)
+    } else {
+      out.texts.push(text)
+    }
+  }
+  if (rec.type === 'button' && rec.action && typeof rec.action === 'object') {
+    const action = rec.action as Record<string, unknown>
+    const label = String(action.label || rec.label || '').trim()
+    const command = String(action.text || action.displayText || '').trim()
+    const url = action.type === 'uri' ? String(action.uri || '') : ''
+    if (url) out.actions.push({ label: label || '開く', url })
+    else if (command) out.actions.push({ label: label || command, command })
+  }
+  if (Array.isArray(rec.contents)) rec.contents.forEach((child) => walkLineFlex(child, out, ctx))
+  if (rec.body) walkLineFlex(rec.body, out, ctx)
+  if (rec.footer) walkLineFlex(rec.footer, out, ctx)
+  if (rec.header) walkLineFlex(rec.header, out, { inHeader: true })
 }
 
 export async function postStoreRoomLineStyleReply(

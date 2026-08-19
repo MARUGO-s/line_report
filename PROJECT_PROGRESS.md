@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - レシート修正・削除を保存済み行だけに限定する
+
+- Request: 操作と登録の構造を LINE と同じにする。削除は同じ日付だけ。他データは絶対に消さない。
+- Cause: 同日登録済みでもカードを出し、存在しない `mtalk-*` ID で修正していた。
+- Fix: 保存できた行の RID で修正・削除する。同日重複は LINE と同じ確認カード。削除は `id` と `receipt_date` の両方一致の1行だけ。置き換えも同じ日付だけ。見つからない行は消さない。
+- Operation: 新しい日付ならレポートの修正／削除。同じ日付の再送なら加算／中止／置き換え／日付変更。番号入力も LINE と同じ修正フロー。
+
 ### 2026-08-20 - M-talk のレシート返信を LINE と同じにする
 
 - Request: レシート画像を送ったとき、LINE と同じ解析方法・同じ返信形式にする。

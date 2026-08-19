@@ -218,24 +218,30 @@ export async function loadLatestStoreReceiptForRoom(
 async function deleteReceiptSearchIndexEntries(
   supabase: SupabaseClient,
   receiptTable: string,
-  opts: { receiptRowId?: number | null; lineMessageId?: string | null },
+  opts: { receiptRowId?: number | null; lineMessageId?: string | null; receiptDate?: string | null },
 ): Promise<void> {
+  const receiptDate = String(opts.receiptDate ?? '').slice(0, 10)
+  const hasDate = /^\d{4}-\d{2}-\d{2}$/.test(receiptDate)
   const rowId = opts.receiptRowId == null ? null : Math.round(Number(opts.receiptRowId))
   if (rowId != null && Number.isFinite(rowId) && rowId > 0) {
-    const { error } = await supabase
+    let query = supabase
       .from('line_room_receipt_search')
       .delete()
       .eq('receipt_table', receiptTable)
       .eq('receipt_row_id', rowId)
+    if (hasDate) query = query.eq('receipt_date', receiptDate)
+    const { error } = await query
     if (error) console.error('line_room_receipt_search delete by row id failed:', error.message)
   }
   const lmid = String(opts.lineMessageId ?? '').trim()
   if (lmid) {
-    const { error } = await supabase
+    let query = supabase
       .from('line_room_receipt_search')
       .delete()
       .eq('receipt_table', receiptTable)
       .eq('line_message_id', lmid)
+    if (hasDate) query = query.eq('receipt_date', receiptDate)
+    const { error } = await query
     if (error) console.error('line_room_receipt_search delete by lmid failed:', error.message)
   }
 }
@@ -269,21 +275,35 @@ export async function deleteStoreReceiptById(
   }
   const existing = await loadStoreReceiptById(supabase, receiptTable, id)
   if (!existing) {
-    // 本体に無い＝検索インデックスの幽霊。インデックス側を消して検索から除去し、成功扱いにする。
-    await deleteReceiptSearchIndexEntries(supabase, receiptTable, { receiptRowId: id })
-    return { ok: true }
+    return {
+      ok: false,
+      message: '指定されたレシートをこの店舗のデータで見つけられませんでした。他の日付のデータは消していません。',
+    }
   }
-  const { error: deleteError } = await supabase
+  const receiptDate = String(existing.receipt_date ?? '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receiptDate)) {
+    return { ok: false, message: 'このレシートの日付が確定できないため削除しません。' }
+  }
+  const { data: deleted, error: deleteError } = await supabase
     .from(receiptTable)
     .delete()
     .eq('id', id)
+    .eq('receipt_date', receiptDate)
+    .select('id')
   if (deleteError) {
     console.error('deleteStoreReceiptById delete failed:', deleteError.message)
     return { ok: false, message: '解析結果の削除に失敗しました。少し時間を置いてお試しください。' }
   }
+  if (!Array.isArray(deleted) || deleted.length === 0) {
+    return {
+      ok: false,
+      message: 'このレシートは同じ日付の登録が見つからないため削除しませんでした。他の日付のデータは消していません。',
+    }
+  }
   await deleteReceiptSearchIndexEntries(supabase, receiptTable, {
     receiptRowId: id,
     lineMessageId: existing.line_message_id ?? null,
+    receiptDate,
   })
   return { ok: true }
 }
@@ -314,23 +334,12 @@ export async function deleteStoreReceiptByLineMessageId(
     rowId = storeWide?.id ?? null
   }
   if (!rowId || !Number.isFinite(rowId)) {
-    // 本体に無い＝検索インデックスの幽霊。インデックス側を lmid で消して検索から除去し、成功扱いにする。
-    await deleteReceiptSearchIndexEntries(supabase, receiptTable, { lineMessageId: lmid })
-    return { ok: true }
+    return {
+      ok: false,
+      message: '指定されたレシートをこの店舗のデータで見つけられませんでした。他の日付のデータは消していません。',
+    }
   }
-  const { error: deleteError } = await supabase
-    .from(receiptTable)
-    .delete()
-    .eq('id', Math.round(rowId))
-  if (deleteError) {
-    console.error('deleteStoreReceiptByLineMessageId delete failed:', deleteError.message)
-    return { ok: false, message: '解析結果の削除に失敗しました。少し時間を置いてお試しください。' }
-  }
-  await deleteReceiptSearchIndexEntries(supabase, receiptTable, {
-    receiptRowId: Math.round(rowId),
-    lineMessageId: lmid,
-  })
-  return { ok: true }
+  return await deleteStoreReceiptById(supabase, receiptTable, Math.round(rowId))
 }
 
 function sanitizeDraftForPersist(
@@ -486,20 +495,27 @@ export async function deleteReceiptsForDateExcludingLineMessageId(
 export async function deleteReceiptsForDateByLineMessageIds(
   supabase: SupabaseClient,
   receiptTable: string,
+  receiptDateIso: string,
   lineMessageIds: string[],
 ): Promise<void> {
+  const receiptDate = String(receiptDateIso ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receiptDate)) return
   if (!Array.isArray(lineMessageIds) || lineMessageIds.length === 0) return
   const ids = lineMessageIds.map(id => String(id ?? '').trim()).filter(Boolean)
   if (ids.length === 0) return
   const { error } = await supabase
     .from(receiptTable)
     .delete()
+    .eq('receipt_date', receiptDate)
     .in('line_message_id', ids)
   if (error) {
     console.error('deleteReceiptsForDateByLineMessageIds failed:', error.message)
   }
   for (const id of ids) {
-    await deleteReceiptSearchIndexEntries(supabase, receiptTable, { lineMessageId: id })
+    await deleteReceiptSearchIndexEntries(supabase, receiptTable, {
+      lineMessageId: id,
+      receiptDate,
+    })
   }
 }
 
