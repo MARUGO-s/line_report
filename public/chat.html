@@ -636,6 +636,84 @@
     .message-meta { font-size: 11px; color: rgba(255, 255, 255, 0.85); display: flex; gap: 6px; }
     .username { font-weight: 600; }
 
+    /* Bot が送る予約通知カード（LINE の Flex Message に対応する表示） */
+    .message.card .message-content { max-width: min(92%, 380px); width: 100%; }
+
+    .msg-card {
+      background: #fff;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+      color: #111;
+    }
+    .msg-card + .msg-card { margin-top: 8px; }
+
+    .msg-card-header {
+      background: #1f2d3d;
+      color: #fff;
+      padding: 12px 14px;
+    }
+    .msg-card-eyebrow { font-size: 11px; color: rgba(255, 255, 255, 0.7); }
+    .msg-card-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-top: 2px;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .msg-card-subtitle {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.8);
+      margin-top: 4px;
+      word-break: break-word;
+    }
+
+    .msg-card-body {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .msg-card-field { display: flex; gap: 10px; font-size: 13px; line-height: 1.55; margin: 0; }
+    .msg-card-field dt { flex: 0 0 68px; color: #6b7280; }
+    .msg-card-field dd {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      color: #111827;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .msg-card-para + .msg-card-para { margin-top: 6px; }
+
+    .msg-card-item { display: flex; flex-direction: column; gap: 2px; }
+    .msg-card-item + .msg-card-item {
+      border-top: 1px solid #eceff3;
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+    .msg-card-item-top { display: flex; gap: 8px; align-items: baseline; font-size: 14px; }
+    .msg-card-time { font-weight: 700; color: #1f2d3d; flex: 0 0 auto; }
+    .msg-card-name { flex: 1; min-width: 0; color: #333; word-break: break-word; }
+    .msg-card-size { color: #5b6b7b; font-size: 13px; flex: 0 0 auto; }
+    .msg-card-note { font-size: 12px; color: #8a94a6; word-break: break-word; }
+    .msg-card-warn { font-size: 12px; color: #c0392b; word-break: break-word; }
+    .msg-card-empty { font-size: 13px; color: #8a94a6; text-align: center; }
+
+    .msg-card-action {
+      display: block;
+      margin: 0 14px 14px;
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--line-green);
+      color: #fff;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
     .input-area {
       padding: 8px 10px 12px;
       background: #eee;
@@ -2484,7 +2562,7 @@
       try {
         const { data, error } = await sb
           .from('chat_messages')
-          .select('id, group_id, user_id, username, content, created_at')
+          .select('id, group_id, user_id, username, content, kind, payload, created_at')
           .eq('group_id', group.id)
           .order('created_at', { ascending: false })
           .limit(50);
@@ -2499,6 +2577,84 @@
       $('messageInput').focus();
     }
 
+    // 通知カードは Bot（service_role）だけが作れる。payload が壊れていたら
+    // content のテキスト版へ黙って落とす（表示が消えるより読めた方がよい）。
+    function cardsFromMessage(msg) {
+      if (msg.kind !== 'card') return null;
+      const payload = typeof msg.payload === 'string' ? safeParseJson(msg.payload) : msg.payload;
+      const cards = payload && Array.isArray(payload.cards) ? payload.cards : null;
+      return cards && cards.length ? cards : null;
+    }
+
+    function safeParseJson(text) {
+      try { return JSON.parse(text); } catch (_) { return null; }
+    }
+
+    // javascript: 等を踏まないよう、リンクは http(s) のみ通す。
+    function safeHttpUrl(value) {
+      try {
+        const url = new URL(String(value ?? ''), window.location.href);
+        return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function renderCardSection(section) {
+      if (!section || typeof section !== 'object') return '';
+
+      if (section.type === 'fields') {
+        return (Array.isArray(section.rows) ? section.rows : []).map((row) => {
+          const paragraphs = Array.isArray(row.paragraphs) && row.paragraphs.length
+            ? row.paragraphs.map((p) => `<div class="msg-card-para">${escapeHtml(p)}</div>`).join('')
+            : escapeHtml(row.value ?? '');
+          return `<dl class="msg-card-field"><dt>${escapeHtml(row.label ?? '')}</dt><dd>${paragraphs}</dd></dl>`;
+        }).join('');
+      }
+
+      if (section.type === 'list') {
+        return (Array.isArray(section.items) ? section.items : []).map((item) => {
+          const top = [
+            `<span class="msg-card-time">${escapeHtml(item.time ?? '--:--')}</span>`,
+            `<span class="msg-card-name">${escapeHtml(item.name ?? '')}</span>`,
+            item.size ? `<span class="msg-card-size">${escapeHtml(item.size)}</span>` : ''
+          ].join('');
+          return `<div class="msg-card-item">
+            <div class="msg-card-item-top">${top}</div>
+            ${item.note ? `<div class="msg-card-note">${escapeHtml(item.note)}</div>` : ''}
+            ${item.warn ? `<div class="msg-card-warn">${escapeHtml(item.warn)}</div>` : ''}
+          </div>`;
+        }).join('');
+      }
+
+      if (section.type === 'note') {
+        return `<div class="msg-card-empty">${escapeHtml(section.text ?? '')}</div>`;
+      }
+
+      return '';
+    }
+
+    function renderCard(card) {
+      if (!card || typeof card !== 'object') return '';
+      const header = card.header || {};
+      const sections = (Array.isArray(card.sections) ? card.sections : [])
+        .map(renderCardSection)
+        .join('');
+      const actionUrl = card.action ? safeHttpUrl(card.action.url) : '';
+
+      return `<div class="msg-card">
+        <div class="msg-card-header">
+          ${header.eyebrow ? `<div class="msg-card-eyebrow">${escapeHtml(header.eyebrow)}</div>` : ''}
+          <div class="msg-card-title">${escapeHtml(header.title ?? '')}</div>
+          ${header.subtitle ? `<div class="msg-card-subtitle">${escapeHtml(header.subtitle)}</div>` : ''}
+        </div>
+        <div class="msg-card-body">${sections}</div>
+        ${actionUrl
+          ? `<a class="msg-card-action" href="${escapeHtml(actionUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(card.action.label || '開く')}</a>`
+          : ''}
+      </div>`;
+    }
+
     function addMessageToUI(msg) {
       if (Number(msg.group_id) !== currentGroupId) return;
       if (seenMessageIds.has(msg.id)) return;
@@ -2507,11 +2663,16 @@
       const messages = $('messages');
       const div = document.createElement('div');
       const isOwn = msg.user_id === currentUser.id;
-      div.className = `message ${isOwn ? 'own' : ''}`;
+      const cards = cardsFromMessage(msg);
+      div.className = `message ${isOwn ? 'own' : ''} ${cards ? 'card' : ''}`;
+
+      const bodyHtml = cards
+        ? cards.map(renderCard).join('')
+        : `<div class="message-bubble">${escapeHtml(msg.content)}</div>`;
 
       div.innerHTML = `
         <div class="message-content">
-          <div class="message-bubble">${escapeHtml(msg.content)}</div>
+          ${bodyHtml}
           <div class="message-meta">
             ${isOwn ? '' : `<span class="username">${escapeHtml(msg.username)}</span>`}
             <span>${formatTime(msg.created_at)}</span>

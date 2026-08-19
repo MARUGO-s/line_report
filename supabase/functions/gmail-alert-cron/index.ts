@@ -9,6 +9,11 @@ import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_l
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";
 import { resolveGroqTextModel } from "../_shared/groq_model.ts";
 import {
+  type ChatCard,
+  postChatCard,
+  resolveChatGroupId,
+} from "../_shared/chat_bridge.ts";
+import {
   isLikelyReservationNotificationMail,
   resolveReservationYear,
 } from "../_shared/reservation_mail_rules.ts";
@@ -66,6 +71,8 @@ type ReservationEventLabel = "新規予約" | "予約変更" | "予約キャン�
 type LineMessagePayload = {
   text: string;
   richMessages: Array<Record<string, unknown>>;
+  /** chat.html へ複製するときのカード。LINE 送信では使わない。 */
+  chatCards: ChatCard[];
 };
 
 type GmailAlertDeliveryBatch = {
@@ -696,6 +703,22 @@ async function maybeSendGmailReservationAlerts(params: {
 
       batchSuccessfulRoomIds.push(targetRoomId);
       successfulTargetRoomIds.add(targetRoomId);
+      // 同じ内容を chat.html のトークルームにもカードとして流す（対応付けがある場合のみ）。
+      const chatGroupId = await resolveChatGroupId(supabase, targetRoomId);
+      if (chatGroupId) {
+        const chatResult = await postChatCard(supabase, {
+          groupId: chatGroupId,
+          kind: "reservation_alert",
+          text: linePayload.text,
+          cards: linePayload.chatCards,
+        });
+        if (!chatResult.ok) {
+          console.error(
+            `chat card post failed for ${targetRoomId}:`,
+            chatResult.error,
+          );
+        }
+      }
       // 配信間隔スロットリングの起点を更新（このルームの次回対象タイミングをここから数える）。
       await markGmailAlertRoomSent(supabase, targetRoomId, now.toISOString());
       await writeDeliveryLog(supabase, {
@@ -1832,7 +1855,42 @@ async function buildGmailReservationAlertLinePayload(
   return {
     text,
     richMessages: buildGmailReservationFlexMessages(alerts, calendarUrls),
+    chatCards: buildGmailReservationChatCards(alerts, calendarUrls),
   };
+}
+
+/**
+ * Flex のバブル1つ = カード1枚として組み直す。
+ * カルーセルは chat.html 側で縦に積むので、1通のメッセージにまとめて入れる。
+ */
+function buildGmailReservationChatCards(
+  alerts: GmailMessageAlert[],
+  calendarUrls?: Map<string, string>,
+): ChatCard[] {
+  const list = Array.isArray(alerts) ? alerts : [];
+  if (list.length === 0) return [];
+
+  const total = list.length;
+  return list.slice(0, GMAIL_ALERT_FLEX_MAX_BUBBLES).map((alert, index) => {
+    const template = buildReservationTemplateData(alert);
+    const calendarUrl = calendarUrls?.get(alert.id) ?? null;
+    return {
+      header: {
+        eyebrow: total > 1 ? `${index + 1}/${total}` : "予約通知",
+        title: `【${template.eventLabel}】`,
+        subtitle: template.fields.find((f) => f.label === "店舗")?.value ?? null,
+      },
+      sections: [{
+        type: "fields" as const,
+        rows: template.fields.map((field) => ({
+          label: field.label,
+          value: field.value,
+          paragraphs: field.valueParagraphs?.length ? field.valueParagraphs : undefined,
+        })),
+      }],
+      action: calendarUrl ? { label: "予約カレンダーを開く", url: calendarUrl } : null,
+    };
+  });
 }
 
 function buildGmailReservationAlertMessage(

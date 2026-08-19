@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
+import { type ChatCard, postChatCard, resolveChatGroupId } from "../_shared/chat_bridge.ts"
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
 import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_link_auth.ts"
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts"
@@ -94,6 +95,8 @@ Deno.serve(async (req) => {
   const sent: string[] = []
   const skipped: Array<{ room_id: string; reason: string }> = []
   const errors: string[] = []
+  const chatPosted: string[] = []
+  const chatErrors: string[] = []
 
   for (const target of targetRooms) {
     let storeKey = target.storeKey
@@ -154,6 +157,24 @@ Deno.serve(async (req) => {
       continue
     }
     sent.push(target.roomId)
+
+    // 同じ内容を chat.html のトークルームにもカードとして流す（対応付けがある場合のみ）。
+    // LINE 送信が成功した分だけ複製するので、再送時に二重投稿にならない。
+    const chatGroupId = await resolveChatGroupId(supabase, target.roomId)
+    if (chatGroupId) {
+      const chatResult = await postChatCard(supabase, {
+        groupId: chatGroupId,
+        kind: "reservation_today",
+        text: buildTodayReservationChatText(storeDisplayName, today, matched),
+        cards: [buildTodayReservationChatCard(storeDisplayName, today, matched, calendarUrl)],
+      })
+      if (!chatResult.ok) {
+        console.error(`chat card post failed for ${target.roomId}:`, chatResult.error)
+        chatErrors.push(`${target.roomId}: ${chatResult.error}`)
+      } else {
+        chatPosted.push(target.roomId)
+      }
+    }
   }
 
   return json({
@@ -166,6 +187,8 @@ Deno.serve(async (req) => {
     skipped_room_count: skipped.length,
     error_count: errors.length,
     sent_room_ids: sent,
+    chat_posted_room_ids: chatPosted,
+    chat_errors: chatErrors,
     skipped,
     errors,
   }, 200)
@@ -396,6 +419,71 @@ function buildTodayReservationFlex(
     altText: truncate(altParts.join(" / "), 380),
     contents: bubble,
   }
+}
+
+/** Flex と同じ内容を chat.html のカード用ペイロードに組み直す。 */
+function buildTodayReservationChatCard(
+  storeDisplayName: string | null,
+  today: { year: number; month: number; day: number },
+  reservations: NormalizedReservation[],
+  calendarUrl?: string | null,
+): ChatCard {
+  const dateLabel = jstDateLabel(today.year, today.month, today.day)
+  const count = reservations.length
+  const shown = reservations.slice(0, MAX_FLEX_ITEMS)
+
+  const sections: ChatCard["sections"] = count === 0
+    ? [{ type: "note", text: "本日のご予約はありません。" }]
+    : [{
+      type: "list",
+      items: shown.map((r) => ({
+        time: r.timeLabel ?? "--:--",
+        name: formatReservationCustomerName(r.customerName),
+        size: r.partySizeLabel ?? null,
+        note: [r.routeLabel, r.planLabel].filter(Boolean).join(" ・ ") || null,
+        warn: r.allergyLabel ? `⚠ アレルギー: ${r.allergyLabel}` : null,
+      })),
+    }]
+
+  if (count > MAX_FLEX_ITEMS) {
+    sections.push({ type: "note", text: `ほか ${count - MAX_FLEX_ITEMS} 件` })
+  }
+
+  return {
+    header: {
+      eyebrow: "本日のご予約",
+      title: storeDisplayName ?? "本日のご予約",
+      subtitle: count > 0 ? `${dateLabel} ・ ${count}件` : dateLabel,
+    },
+    sections,
+    action: calendarUrl ? { label: "予約カレンダーを開く", url: calendarUrl } : null,
+  }
+}
+
+/** トーク一覧のプレビューと Web Push 本文に使うテキスト版。 */
+function buildTodayReservationChatText(
+  storeDisplayName: string | null,
+  today: { year: number; month: number; day: number },
+  reservations: NormalizedReservation[],
+): string {
+  const dateLabel = jstDateLabel(today.year, today.month, today.day)
+  const header = [storeDisplayName, `本日のご予約 ${reservations.length}件`, dateLabel]
+    .filter(Boolean)
+    .join(" / ")
+  if (reservations.length === 0) return `${header}\n本日のご予約はありません。`
+
+  const lines = reservations.slice(0, MAX_FLEX_ITEMS).map((r) => {
+    const parts = [
+      r.timeLabel ?? "--:--",
+      formatReservationCustomerName(r.customerName),
+      r.partySizeLabel,
+    ].filter(Boolean)
+    return `・${parts.join(" ")}`
+  })
+  if (reservations.length > MAX_FLEX_ITEMS) {
+    lines.push(`ほか ${reservations.length - MAX_FLEX_ITEMS} 件`)
+  }
+  return [header, ...lines].join("\n")
 }
 
 // お客様名に敬称「様」を付与する。空・不明は「（お名前なし）」。既存の「様」は重複させない。
