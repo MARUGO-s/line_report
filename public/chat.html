@@ -539,17 +539,62 @@
     }
 
     .chat-header {
-      padding: 12px 16px;
+      padding: 0;
       background: #f6f6f6;
       border-bottom: 1px solid #d8d8d8;
+      display: flex;
+      flex-direction: column;
+      color: #111;
+    }
+    .chat-header-main {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 12px;
-      color: #111;
+      padding: 12px 16px;
     }
 
-    .chat-header-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .chat-header-left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+    .chat-title-btn {
+      border: 0;
+      background: transparent;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      min-width: 0;
+      padding: 0;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .chat-title-btn:disabled { cursor: default; }
+    .chat-member-count {
+      color: #888;
+      font-size: 15px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .member-strip {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding: 0 16px 12px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .member-strip-item {
+      flex-shrink: 0;
+      width: 48px;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      cursor: default;
+    }
+    .member-strip-item .talk-avatar {
+      width: 44px;
+      height: 44px;
+      font-size: 16px;
+      margin: 0 auto;
+    }
     .back-btn {
       display: none;
       border: 0;
@@ -559,7 +604,13 @@
       color: #333;
       padding: 0 6px 0 0;
     }
-    .chat-header h1 { font-size: 16px; font-weight: 600; word-break: break-word; }
+    .chat-header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .chat-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .header-icon-btn {
       border: 0;
@@ -1404,7 +1455,8 @@
       }
       body.chat-open .talk-list { display: none; }
       body.chat-open .main-content { display: flex; width: 100%; }
-      .chat-header { padding: 8px 10px; min-height: 56px; }
+      .chat-header { padding: 0; }
+      .chat-header-main { padding: 8px 10px; min-height: 56px; }
       .back-btn {
         display: inline-flex;
         width: 44px;
@@ -1534,22 +1586,28 @@
   <div class="main-content hidden" id="mainContent">
     <div class="placeholder" id="placeholder">トークを選んでください</div>
     <div class="chat-header hidden" id="chatHeader">
-      <div class="chat-header-left">
-        <button class="back-btn" onclick="closeChat()" aria-label="戻る">‹</button>
-        <button class="header-avatar" id="chatGroupAvatar" type="button" title="グループアイコンを変更" onclick="pickGroupIcon()"></button>
-        <h1 id="chatGroupName"></h1>
+      <div class="chat-header-main">
+        <div class="chat-header-left">
+          <button class="back-btn" onclick="closeChat()" aria-label="戻る">‹</button>
+          <button class="header-avatar" id="chatGroupAvatar" type="button" title="グループアイコンを変更" onclick="pickGroupIcon()"></button>
+          <button class="chat-title-btn" id="chatTitleBtn" type="button" onclick="toggleMemberStrip()" disabled>
+            <h1 id="chatGroupName"></h1>
+            <span class="chat-member-count hidden" id="chatMemberCount"></span>
+          </button>
+        </div>
+        <div class="chat-header-right">
+          <button class="header-icon-btn" id="inviteHeaderBtn" type="button" title="招待" aria-label="招待" onclick="openInvite()">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M19 8v6M22 11h-6"/>
+            </svg>
+          </button>
+          <div class="connection-status disconnected" id="connectionStatus"></div>
+          <button class="rail-avatar header-user-avatar" id="headerUserAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
+        </div>
       </div>
-      <div class="chat-header-right">
-        <button class="header-icon-btn" id="inviteHeaderBtn" type="button" title="招待" aria-label="招待" onclick="openInvite()">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M19 8v6M22 11h-6"/>
-          </svg>
-        </button>
-        <div class="connection-status disconnected" id="connectionStatus"></div>
-        <button class="rail-avatar header-user-avatar" id="headerUserAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
-      </div>
+      <div class="member-strip hidden" id="memberStrip"></div>
     </div>
     <div class="messages-wrap hidden" id="messagesWrap">
       <div class="messages" id="messages"></div>
@@ -1743,6 +1801,7 @@
     const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
     // 開いているトークの参加者・既読時刻・リアクション。
     let groupMembers = [];
+    let memberStripOpen = false;
     let groupReadStates = [];
     let reactionsByMessage = new Map();
     // 引用元の本文（返信の表示用）。読み込み済みに無いものだけ後から取りに行く。
@@ -2872,6 +2931,7 @@
           .upsert({ group_id: currentGroupId, user_id: user.id }, { onConflict: 'group_id,user_id' });
         if (error) throw error;
         await loadInviteLists();
+        await loadGroupContext(currentGroupId);
       } catch (error) {
         alert(error.message || '招待に失敗しました');
       }
@@ -2921,6 +2981,7 @@
 
     function closeChat() {
       currentGroupId = null;
+      hideMemberStrip();
       document.body.classList.remove('chat-open');
       $('placeholder').classList.remove('hidden');
       $('chatHeader').classList.add('hidden');
@@ -2946,6 +3007,59 @@
       if (!el) return;
       el.style.background = iconUrl ? '#2c2c2e' : avatarStyle(name || '?');
       el.innerHTML = avatarHtml(name, iconUrl);
+    }
+
+    function paintChatHeader(group) {
+      if (!group) return;
+      $('chatGroupName').textContent = roomTitle(group);
+      paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
+      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
+      updateChatHeaderMeta();
+    }
+
+    function isMultiMemberGroup(group) {
+      return !!(group && !group.is_direct && groupMembers.length >= 2);
+    }
+
+    function hideMemberStrip() {
+      memberStripOpen = false;
+      const strip = $('memberStrip');
+      if (strip) strip.classList.add('hidden');
+    }
+
+    function toggleMemberStrip() {
+      const group = myGroups.find((g) => Number(g.id) === Number(currentGroupId));
+      if (!isMultiMemberGroup(group)) return;
+      memberStripOpen = !memberStripOpen;
+      $('memberStrip').classList.toggle('hidden', !memberStripOpen);
+    }
+
+    function renderMemberStrip() {
+      const strip = $('memberStrip');
+      if (!strip) return;
+      strip.innerHTML = '';
+      groupMembers.forEach((user) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'member-strip-item';
+        item.title = user.username || '';
+        item.innerHTML = `<div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>`;
+        strip.appendChild(item);
+      });
+    }
+
+    function updateChatHeaderMeta() {
+      const group = myGroups.find((g) => Number(g.id) === Number(currentGroupId));
+      const countEl = $('chatMemberCount');
+      const titleBtn = $('chatTitleBtn');
+      const show = isMultiMemberGroup(group);
+      if (countEl) {
+        countEl.textContent = show ? `(${groupMembers.length})` : '';
+        countEl.classList.toggle('hidden', !show);
+      }
+      if (titleBtn) titleBtn.disabled = !show;
+      if (show) renderMemberStrip();
+      else hideMemberStrip();
     }
 
     function renderUserAvatars() {
@@ -3192,9 +3306,8 @@
       $('chatHeader').classList.remove('hidden');
       $('messagesWrap').classList.remove('hidden');
       $('inputArea').classList.remove('hidden');
-      $('chatGroupName').textContent = roomTitle(group);
-      paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
-      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
+      hideMemberStrip();
+      paintChatHeader(group);
       resetMessageView();
       await loadGroupContext(groupId);
 
@@ -3677,9 +3790,8 @@
       $('chatHeader').classList.remove('hidden');
       $('messagesWrap').classList.remove('hidden');
       $('inputArea').classList.remove('hidden');
-      $('chatGroupName').textContent = roomTitle(group);
-      paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
-      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
+      hideMemberStrip();
+      paintChatHeader(group);
       resetMessageView();
       await loadGroupContext(group.id);
 
@@ -3725,6 +3837,7 @@
       } catch (error) {
         console.error('Load group context error:', error);
       }
+      updateChatHeaderMeta();
     }
 
     async function loadReactions(messageIds) {

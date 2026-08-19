@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v13/)
+  assert.match(serviceWorker, /line-report-chat-v14/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -105,6 +105,9 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /chat_kick_member/)
   assert.match(html, /退出させる/)
   assert.match(html, /ルームを退出/)
+  assert.match(html, /function toggleMemberStrip/)
+  assert.match(html, /chatMemberCount/)
+  assert.match(html, /memberStrip/)
 })
 
 test("chat members can leave a room and owners can kick others", async () => {
