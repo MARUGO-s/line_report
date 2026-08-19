@@ -1,8 +1,8 @@
 {
   "id": "/line_report/chat.html",
-  "name": "LINE Report トーク",
-  "short_name": "トーク",
-  "description": "LINE Report のリアルタイムトーク",
+  "name": "Talk",
+  "short_name": "Talk",
+  "description": "マルゴのリアルタイムトーク",
   "start_url": "/line_report/chat.html",
   "scope": "/line_report/",
   "display": "standalone",

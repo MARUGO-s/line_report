@@ -450,8 +450,8 @@ async function handleDispatch(
       ? messagePreview(message.content)
       : "新しいメッセージがあります"
     const title = group?.is_direct
-      ? String(message.username || "トーク")
-      : String(group?.group_name || "トーク")
+      ? String(message.username || "Talk")
+      : String(group?.group_name || "Talk")
     // 名指しされた人には、通知本文の頭でそれと分かるようにする。
     const mentioned = Array.isArray(message.mentions) && message.mentions.includes(row.user_id)
     const mentionPrefix = mentioned ? "@あなた宛 " : ""
