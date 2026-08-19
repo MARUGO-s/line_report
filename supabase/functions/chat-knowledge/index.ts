@@ -179,14 +179,29 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   }
 
   const text = String(message.content ?? "").trim()
+  const groupId = Number(message.group_id)
+  const senderName = String(message.username || "M-talk")
+  const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()
+  const memoText = text === "[画像]" ? "" : text
+
+  // 店舗ルームの画像はそのまま資料へ。#メモ のリプライは不要。
+  if (message.kind === "image" || imagePathFromPayload(message.payload)) {
+    const ok = await registerQuotedImage(supabase, storeKey, message, memoText, senderName, lineTimestamp)
+    await replyInRoom(
+      supabase,
+      groupId,
+      ok
+        ? "✅ 画像を店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。"
+        : "⚠️ 画像を資料に登録できませんでした。少し時間をおいてから、もう一度送ってください。",
+    )
+    return json({ ok, processed: ok, kind: "image" }, 200)
+  }
+
   if (!hasKnowledgeMemoTag(text)) {
     return json({ ok: true, skipped: true, reason: "no memo tag" }, 200)
   }
 
   const clean = stripKnowledgeMemoTag(text)
-  const groupId = Number(message.group_id)
-  const senderName = String(message.username || "M-talk")
-  const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()
 
   if (message.reply_to_id) {
     const { data: quoted } = await supabase
@@ -211,7 +226,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     await replyInRoom(
       supabase,
       groupId,
-      "📝 #メモ の使い方\n・画像を登録する場合: 画像を送り、その画像にリプライして #メモ と送ってください。\n・テキストメモの場合: #メモ に続けて本文を書いて送信してください。",
+      "📝 #メモ の使い方\n・テキスト: #メモ に続けて本文を書いて送信してください。\n・画像: このルームに画像を送るか、ドラッグ＆ドロップしてください。資料として保存されます。",
     )
     return json({ ok: true, processed: false, reason: "usage" }, 200)
   }

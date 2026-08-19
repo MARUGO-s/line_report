@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-19 - 店舗ルームの画像を資料にし、改行とドラッグ＆ドロップを足す
+
+- Request: 店舗ルームへ送ったレシート画像にも `#メモ` と同じ登録結果を返す。資料はドラッグ＆ドロップで入れたい。PCは Shift+Enter で改行、スマホでも改行したい。
+- Implementation: `chat-knowledge` は店舗ルームの画像メッセージをそのまま Journal 資料へ送る。トーク画面は画像のドロップ／貼り付けに対応し、入力欄を textarea にした。PCは Enter 送信、スマホは送信ボタンで送り Enter は改行。
+- Security: 画像は従来どおり参加者が `chat-images` へ置くだけ。資料登録は内部 dispatch のまま。
+- Operation: 店舗ルームで画像を送るかドロップする。成功すると予約通知 Bot が資料登録の結果を返す。
+
 ### 2026-08-19 - 店舗ルームの #メモ が無反応だった原因を直す
 
 - Request: Bistro CAVACAVA 店舗ルームへ `#メモ` を送っても Bot も Journal 資料も動かない。

@@ -557,6 +557,29 @@
       flex-direction: column;
       background: var(--chat-bg);
       min-width: 0;
+      position: relative;
+    }
+
+    .chat-drop-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(31, 45, 61, 0.72);
+      pointer-events: none;
+    }
+    .chat-drop-overlay.hidden { display: none; }
+    .chat-drop-card {
+      border: 2px dashed #fff;
+      color: #fff;
+      border-radius: 16px;
+      padding: 28px 32px;
+      font-size: 16px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 1.5;
     }
 
     .chat-header {
@@ -1274,10 +1297,11 @@
       background: #eee;
       display: flex;
       gap: 8px;
-      align-items: center;
+      align-items: flex-end;
     }
 
-    .input-area input {
+    .input-area input,
+    .input-area textarea {
       flex: 1; min-width: 0;
       padding: 10px 14px;
       border: 0;
@@ -1286,6 +1310,14 @@
       outline: none;
       background: #fff;
       color: #111;
+      font-family: inherit;
+    }
+    .input-area textarea {
+      min-height: 40px;
+      max-height: 120px;
+      line-height: 1.4;
+      resize: none;
+      overflow-y: auto;
     }
 
     .input-area button {
@@ -1630,7 +1662,7 @@
       </div>
       <div class="member-strip hidden" id="memberStrip"></div>
     </div>
-    <div class="store-room-hint hidden" id="storeRoomHint">このルームは店舗固定です。#メモ / #日報 で Journal Report の資料に保存されます。</div>
+    <div class="store-room-hint hidden" id="storeRoomHint">このルームは店舗固定です。画像や #メモ は Journal Report の資料に保存されます。ドラッグ＆ドロップでも送れます。</div>
     <div class="messages-wrap hidden" id="messagesWrap">
       <div class="messages" id="messages"></div>
       <div class="history-spinner hidden" id="historySpinner">過去のメッセージを読み込み中…</div>
@@ -1652,8 +1684,11 @@
           <path d="M21 15l-5-5L5 21"/>
         </svg>
       </button>
-      <input type="text" id="messageInput" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off">
+      <textarea id="messageInput" rows="1" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
       <button onclick="sendMessage()" aria-label="送信">➤</button>
+    </div>
+    <div class="chat-drop-overlay hidden" id="chatDropOverlay" aria-hidden="true">
+      <div class="chat-drop-card">画像をドロップして送信</div>
     </div>
   </div>
 
@@ -3047,9 +3082,13 @@
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
       if ($('storeRoomHint')) $('storeRoomHint').classList.toggle('hidden', !group.is_store_room);
       if ($('messageInput') && group.is_store_room) {
-        $('messageInput').placeholder = 'メッセージ（#メモ で資料保存）';
+        $('messageInput').placeholder = isMobileLayout()
+          ? 'メッセージ（#メモ / 画像で資料保存）'
+          : 'メッセージ（#メモ / 画像で資料保存・Shift+Enterで改行）';
       } else if ($('messageInput')) {
-        $('messageInput').placeholder = 'メッセージ';
+        $('messageInput').placeholder = isMobileLayout()
+          ? 'メッセージ'
+          : 'メッセージ（Shift+Enterで改行）';
       }
       updateChatHeaderMeta();
     }
@@ -4667,6 +4706,35 @@
       $('chatImageInput').click();
     }
 
+    function isImageFile(file) {
+      if (!file) return false;
+      const type = String(file.type || '');
+      const name = String(file.name || '').toLowerCase();
+      return /^image\/(jpeg|png|webp|gif)$/.test(type) || /\.(jpe?g|png|webp|gif)$/.test(name);
+    }
+
+    function imageFilesFromList(list) {
+      return Array.from(list || []).filter(isImageFile);
+    }
+
+    function isFileDrag(event) {
+      return Array.from(event.dataTransfer?.types || []).includes('Files');
+    }
+
+    function setChatDropActive(on) {
+      const overlay = $('chatDropOverlay');
+      if (!overlay) return;
+      overlay.classList.toggle('hidden', !on);
+      overlay.setAttribute('aria-hidden', on ? 'false' : 'true');
+      const card = overlay.querySelector('.chat-drop-card');
+      if (card) {
+        const store = myGroups.find((g) => g.id === currentGroupId);
+        card.textContent = store && store.is_store_room
+          ? '画像をドロップして資料として送信'
+          : '画像をドロップして送信';
+      }
+    }
+
     // 送信前に長辺1600pxへ縮小する。現場のスマホ写真をそのまま送ると重すぎるため。
     async function prepareChatImage(file) {
       assertIconFile(file);
@@ -4813,6 +4881,7 @@
       if (!content) return;
 
       input.value = '';
+      resizeComposer();
       input.focus();
 
       try {
@@ -4838,11 +4907,24 @@
         else await jumpToLatest();
         renderGroups();
         dispatchPushForMessage(data.id);
+        resizeComposer();
       } catch (error) {
         console.error('Send error:', error);
         input.value = content;
+        resizeComposer();
         alert(`送信に失敗しました: ${error.message || error}`);
       }
+    }
+
+    function resizeComposer() {
+      const input = $('messageInput');
+      if (!input) return;
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(120, Math.max(40, input.scrollHeight))}px`;
+    }
+
+    function composingKey(e) {
+      return !!(e.isComposing || e.keyCode === 229);
     }
 
     function handleKeyPress(e) {
@@ -4870,7 +4952,8 @@
         clearReplyTarget();
         return;
       }
-      if (e.key === 'Enter' && !e.shiftKey) {
+      // PC: Enter で送信、Shift+Enter で改行。スマホは送信ボタンがあるので Enter は改行。
+      if (e.key === 'Enter' && !e.shiftKey && !composingKey(e) && !isMobileLayout()) {
         e.preventDefault();
         sendMessage();
       }
@@ -5062,6 +5145,45 @@
       if (file) sendChatImage(file);
     });
 
+    document.addEventListener('dragenter', (e) => {
+      if (!currentGroupId || !isFileDrag(e)) return;
+      e.preventDefault();
+      setChatDropActive(true);
+    });
+    document.addEventListener('dragover', (e) => {
+      if (!currentGroupId || !isFileDrag(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      setChatDropActive(true);
+    });
+    document.addEventListener('dragleave', (e) => {
+      if (e.relatedTarget && document.body.contains(e.relatedTarget)) return;
+      setChatDropActive(false);
+    });
+    document.addEventListener('drop', async (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      setChatDropActive(false);
+      if (!currentGroupId) return;
+      const files = imageFilesFromList(e.dataTransfer && e.dataTransfer.files);
+      if (!files.length) {
+        showNotice('画像（JPEG / PNG / WebP / GIF）をドロップしてください');
+        return;
+      }
+      for (const file of files) await sendChatImage(file);
+    });
+    document.addEventListener('dragend', () => setChatDropActive(false));
+
+    $('messageInput').addEventListener('paste', (e) => {
+      const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
+      const imageItem = items.find((item) => item.type && item.type.startsWith('image/'));
+      if (!imageItem) return;
+      const file = imageItem.getAsFile();
+      if (!file || !currentGroupId) return;
+      e.preventDefault();
+      sendChatImage(file);
+    });
+
     $('messages').addEventListener('scroll', handleMessagesScroll, { passive: true });
 
     $('messages').addEventListener('click', (e) => {
@@ -5090,7 +5212,10 @@
     $('messages').addEventListener('scroll', closeMessageMenu, { passive: true });
 
     // メンション候補
-    $('messageInput').addEventListener('input', updateMentionPicker);
+    $('messageInput').addEventListener('input', () => {
+      updateMentionPicker();
+      resizeComposer();
+    });
     $('messageInput').addEventListener('blur', () => {
       // 候補のクリックが先に走るよう、閉じるのを少し遅らせる。
       setTimeout(() => $('mentionPop').classList.add('hidden'), 150);
