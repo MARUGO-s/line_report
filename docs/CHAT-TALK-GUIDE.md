@@ -29,6 +29,7 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 | `chat_push_user_preferences` | 通知ON-OFFとプレビュー可否 |
 | `chat_push_dispatches` | 同一メッセージの重複送信防止 |
 | `chat_push_internal_config` | cron／pg_net から `chat-push` と `chat-knowledge` を叩くための内部シークレット |
+| `chat_scheduled_messages` | 予約送信。本人だけが見て取り消せる。時刻到来で `chat_messages` へ投稿 |
 
 ## 発言の種別
 
@@ -67,6 +68,7 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 - テキスト: `#メモ 本文` でそのまま資料になる
 - 画像・ファイル: LINE と同じ。`#メモ` が無ければメディア閲覧へ保存し、レシートなら解析して返す。資料にするときは画像にリプライして `#メモ`
 - 入力: PC は Enter で送信・Shift+Enter で改行。スマホは送信ボタンで送り、Enter は改行
+- 予約配信: 入力欄の時計ボタンから送信日時を指定する。毎分の cron が到来分を本人として投稿する。本人だけ取消できる
 - `chat-knowledge` は pg_net の内部シークレットで認可する。ゲートウェイ JWT 検証は
   `verify_jwt=false`。設定を忘れると `UNAUTHORIZED_INVALID_JWT_FORMAT` で無反応になる
 

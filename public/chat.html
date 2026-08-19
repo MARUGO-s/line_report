@@ -1320,7 +1320,7 @@
       overflow-y: auto;
     }
 
-    .input-area button {
+    .input-area .send-btn {
       width: 40px;
       height: 40px;
       border: 0;
@@ -1330,6 +1330,103 @@
       font-size: 16px;
       font-weight: 700;
       cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .schedule-btn {
+      width: 38px;
+      height: 38px;
+      flex-shrink: 0;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: #666;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .schedule-btn:hover { color: #111; background: rgba(0, 0, 0, 0.06); }
+    .schedule-btn.active { color: var(--line-green); }
+
+    .schedule-bar {
+      padding: 6px 12px;
+      background: #eef6ff;
+      color: #1f2d3d;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .schedule-bar button {
+      border: 0;
+      background: transparent;
+      color: #1a6fa8;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .schedule-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .schedule-field label { font-size: 13px; font-weight: 700; }
+    .schedule-field input[type="datetime-local"] {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #d8d8d8;
+      border-radius: 10px;
+      font-size: 16px;
+    }
+    .schedule-hint { font-size: 12px; color: #666; margin-bottom: 14px; line-height: 1.5; }
+    .schedule-pending { margin-top: 8px; }
+    .schedule-pending-item {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid #eee;
+      font-size: 13px;
+    }
+    .schedule-pending-item button {
+      border: 0;
+      background: transparent;
+      color: #c0392b;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .schedule-confirm {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      padding: 12px;
+      background: var(--line-green);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .chat-toast {
+      position: fixed;
+      left: 50%;
+      bottom: 96px;
+      transform: translateX(-50%);
+      z-index: 90;
+      max-width: min(92vw, 360px);
+      padding: 10px 16px;
+      border-radius: 12px;
+      background: rgba(17, 17, 17, 0.88);
+      color: #fff;
+      font-size: 13px;
+      line-height: 1.45;
+      text-align: center;
     }
 
     .placeholder {
@@ -1539,7 +1636,9 @@
       }
       .messages { padding: 14px 10px 16px; }
       .input-area { padding: 8px 8px 12px; flex-shrink: 0; }
-      .input-area button { width: 44px; height: 44px; }
+      .input-area .send-btn,
+      .input-area .schedule-btn,
+      .input-area .attach-btn { width: 44px; height: 44px; }
       .fab { right: 16px; bottom: 16px; }
       .new-group-pop { right: 8px; bottom: 80px; width: calc(100% - 16px); }
       .login-screen {
@@ -1675,6 +1774,7 @@
       </div>
       <button class="reply-bar-close" type="button" onclick="clearReplyTarget()" aria-label="リプライをやめる">×</button>
     </div>
+    <div class="schedule-bar hidden" id="scheduleBar"></div>
     <div class="input-area hidden" id="inputArea" style="position:relative;">
       <div class="mention-pop hidden" id="mentionPop"></div>
       <button class="attach-btn" type="button" onclick="pickChatImage()" title="画像を送る" aria-label="画像を送る">
@@ -1685,10 +1785,31 @@
         </svg>
       </button>
       <textarea id="messageInput" rows="1" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
-      <button onclick="sendMessage()" aria-label="送信">➤</button>
+      <button class="schedule-btn" type="button" onclick="openScheduleSend()" title="予約配信" aria-label="予約配信">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 7v5l3 2"/>
+        </svg>
+      </button>
+      <button class="send-btn" type="button" onclick="sendMessage()" aria-label="送信">➤</button>
     </div>
     <div class="chat-drop-overlay hidden" id="chatDropOverlay" aria-hidden="true">
       <div class="chat-drop-card">画像をドロップして送信</div>
+    </div>
+    <div class="chat-toast hidden" id="chatToast"></div>
+  </div>
+
+  <div class="invite-overlay hidden" id="scheduleOverlay" onclick="if (event.target === this) closeScheduleSend()">
+    <div class="invite-sheet" role="dialog" aria-label="予約配信">
+      <h2>予約配信</h2>
+      <p class="schedule-hint">指定した日時になると、このルームへ自動で送信されます。</p>
+      <div class="schedule-field">
+        <label for="scheduleAtInput">送信日時</label>
+        <input id="scheduleAtInput" type="datetime-local" step="60">
+      </div>
+      <button class="schedule-confirm" type="button" onclick="confirmScheduleSend()">この日時で予約する</button>
+      <div class="schedule-pending" id="schedulePendingList"></div>
+      <button class="invite-close" type="button" onclick="closeScheduleSend()">閉じる</button>
     </div>
   </div>
 
@@ -1811,6 +1932,7 @@
 
     let currentUser = null;
     let currentGroupId = null;
+    let scheduledMessages = [];
     let myGroups = [];
     let otherGroups = [];
     let unread = {};
@@ -3052,6 +3174,8 @@
       $('chatHeader').classList.add('hidden');
       $('messagesWrap').classList.add('hidden');
       $('inputArea').classList.add('hidden');
+      if ($('scheduleBar')) $('scheduleBar').classList.add('hidden');
+      closeScheduleSend();
       if ($('storeRoomHint')) $('storeRoomHint').classList.add('hidden');
       resetMessageView();
       renderGroups();
@@ -3386,6 +3510,7 @@
       paintChatHeader(group);
       resetMessageView();
       await loadGroupContext(groupId);
+      loadScheduledMessages();
 
       try {
         const [olderRes, newerRes] = await Promise.all([
@@ -3904,6 +4029,7 @@
       paintChatHeader(group);
       resetMessageView();
       await loadGroupContext(group.id);
+      loadScheduledMessages();
 
       try {
         const { data, error } = await sb
@@ -4916,6 +5042,166 @@
       }
     }
 
+    function pad2(n) {
+      return String(n).padStart(2, '0');
+    }
+
+    function toDateTimeLocalValue(date) {
+      return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    }
+
+    function defaultScheduleAt() {
+      const date = new Date(Date.now() + 60 * 60 * 1000);
+      date.setSeconds(0, 0);
+      date.setMinutes(Math.ceil(date.getMinutes() / 5) * 5);
+      return date;
+    }
+
+    function formatScheduleAt(value) {
+      const date = new Date(value);
+      if (isNaN(date)) return '';
+      return `${date.getMonth() + 1}月${date.getDate()}日 ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    }
+
+    function showChatToast(message) {
+      const toast = $('chatToast');
+      if (!toast) return;
+      toast.textContent = message;
+      toast.classList.remove('hidden');
+      clearTimeout(showChatToast.timer);
+      showChatToast.timer = setTimeout(() => toast.classList.add('hidden'), 3200);
+    }
+
+    async function loadScheduledMessages() {
+      const bar = $('scheduleBar');
+      if (!currentGroupId || !currentUser) {
+        scheduledMessages = [];
+        if (bar) bar.classList.add('hidden');
+        return;
+      }
+      try {
+        const { data, error } = await sb
+          .from('chat_scheduled_messages')
+          .select('id, content, send_at')
+          .eq('group_id', currentGroupId)
+          .eq('user_id', currentUser.id)
+          .is('sent_at', null)
+          .is('cancelled_at', null)
+          .order('send_at', { ascending: true });
+        if (error) throw error;
+        scheduledMessages = data || [];
+      } catch (error) {
+        console.error('Load scheduled error:', error);
+        scheduledMessages = [];
+      }
+      renderScheduleBar();
+      renderSchedulePendingList();
+    }
+
+    function renderScheduleBar() {
+      const bar = $('scheduleBar');
+      const btn = document.querySelector('.schedule-btn');
+      if (btn) btn.classList.toggle('active', scheduledMessages.length > 0);
+      if (!bar) return;
+      if (!scheduledMessages.length) {
+        bar.classList.add('hidden');
+        return;
+      }
+      const next = scheduledMessages[0];
+      const more = scheduledMessages.length > 1 ? ` ほか${scheduledMessages.length - 1}件` : '';
+      bar.innerHTML = `
+        <span>予約 ${escapeHtml(formatScheduleAt(next.send_at))}${more}</span>
+        <button type="button" onclick="openScheduleSend()">管理</button>
+      `;
+      bar.classList.remove('hidden');
+    }
+
+    function renderSchedulePendingList() {
+      const list = $('schedulePendingList');
+      if (!list) return;
+      if (!scheduledMessages.length) {
+        list.innerHTML = '';
+        return;
+      }
+      list.innerHTML = `<div class="invite-label">このルームの予約</div>` + scheduledMessages.map((row) => `
+        <div class="schedule-pending-item">
+          <div>
+            <div>${escapeHtml(formatScheduleAt(row.send_at))}</div>
+            <div class="schedule-hint">${escapeHtml(String(row.content || '').slice(0, 80))}</div>
+          </div>
+          <button type="button" onclick="cancelScheduledMessage(${Number(row.id)})">取消</button>
+        </div>
+      `).join('');
+    }
+
+    function openScheduleSend() {
+      if (!currentGroupId || !currentUser) return;
+      const input = $('scheduleAtInput');
+      if (input) {
+        const next = defaultScheduleAt();
+        input.value = toDateTimeLocalValue(next);
+        input.min = toDateTimeLocalValue(new Date(Date.now() + 30 * 1000));
+      }
+      renderSchedulePendingList();
+      $('scheduleOverlay').classList.remove('hidden');
+    }
+
+    function closeScheduleSend() {
+      const overlay = $('scheduleOverlay');
+      if (overlay) overlay.classList.add('hidden');
+    }
+
+    async function confirmScheduleSend() {
+      if (!currentGroupId || !currentUser) return;
+      const content = ($('messageInput').value || '').trim();
+      if (!content) {
+        alert('先にメッセージを入力してください');
+        return;
+      }
+      const raw = $('scheduleAtInput').value;
+      const sendAt = raw ? new Date(raw) : null;
+      if (!sendAt || isNaN(sendAt)) {
+        alert('送信日時を指定してください');
+        return;
+      }
+      if (sendAt.getTime() < Date.now() + 30 * 1000) {
+        alert('送信日時は現在より後にしてください');
+        return;
+      }
+      try {
+        const { error } = await sb.rpc('chat_schedule_message', {
+          p_group_id: currentGroupId,
+          p_content: content.slice(0, 2000),
+          p_send_at: sendAt.toISOString(),
+          p_reply_to_id: replyTarget ? replyTarget.id : null,
+          p_mentions: collectMentions(content)
+        });
+        if (error) throw error;
+        $('messageInput').value = '';
+        resizeComposer();
+        clearReplyTarget();
+        closeScheduleSend();
+        await loadScheduledMessages();
+        showChatToast(`${formatScheduleAt(sendAt)} に予約しました`);
+      } catch (error) {
+        console.error('Schedule send error:', error);
+        alert(error.message || '予約に失敗しました');
+      }
+    }
+
+    async function cancelScheduledMessage(id) {
+      if (!confirm('この予約送信を取り消しますか？')) return;
+      try {
+        const { error } = await sb.rpc('chat_cancel_scheduled_message', { p_id: id });
+        if (error) throw error;
+        await loadScheduledMessages();
+        showChatToast('予約を取り消しました');
+      } catch (error) {
+        console.error('Cancel scheduled error:', error);
+        alert(error.message || '取消に失敗しました');
+      }
+    }
+
     function resizeComposer() {
       const input = $('messageInput');
       if (!input) return;
@@ -5232,6 +5518,7 @@
       closeTalkContextMenu();
       closeForward();
       closeOpenSwipe();
+      closeScheduleSend();
     });
     document.querySelector('.groups-scroll').addEventListener('scroll', () => {
       closeTalkContextMenu();
