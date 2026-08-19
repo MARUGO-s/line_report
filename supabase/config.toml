@@ -84,3 +84,10 @@ verify_jwt = false
 # gatewayのJWT検証に依存せず、購読登録・解除・送信者本人のdispatchを明示的に認可する。
 [functions.chat-push]
 verify_jwt = false
+
+# chat-knowledge は pg_net が chat_push_internal_config.dispatch_secret を Bearer で渡す内部dispatch。
+# 自前シークレットは JWT ではないため、ゲートウェイの verify_jwt が
+# UNAUTHORIZED_INVALID_JWT_FORMAT で弾き、店舗ルームの #メモ が無反応になる。
+# 認可は関数側で定数時間比較する。
+[functions.chat-knowledge]
+verify_jwt = false
