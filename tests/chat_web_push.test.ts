@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v15/)
+  assert.match(serviceWorker, /line-report-chat-v16/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -110,6 +110,19 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /memberStrip/)
   assert.match(html, /function talkListCountLabel/)
   assert.match(html, /talk-list-count/)
+  assert.match(html, /is_store_room/)
+  assert.match(html, /店舗固定ルームは退出・削除できません/)
+})
+
+test("chat store rooms are locked and forward #メモ to Journal Report", async () => {
+  const migration = await read("supabase/migrations/20260819230000_chat_store_rooms.sql")
+  assert.match(migration, /is_store_room boolean not null default false/)
+  assert.match(migration, /chat_groups_store_room_uidx/)
+  assert.match(migration, /店舗固定ルームは退出できません/)
+  assert.match(migration, /chat-knowledge\?action=dispatch/)
+  const fn = await read("supabase/functions/chat-knowledge/index.ts")
+  assert.match(fn, /hasKnowledgeMemoTag/)
+  assert.match(fn, /process-line-post/)
 })
 
 test("chat members can leave a room and owners can kick others", async () => {

@@ -423,6 +423,22 @@
       color: #8e8e93;
       font-weight: 600;
     }
+    .store-room-mark {
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 700;
+      color: #16321f;
+      background: #8ee08a;
+      border-radius: 8px;
+      padding: 1px 6px;
+    }
+    .store-room-hint {
+      padding: 7px 14px;
+      font-size: 12px;
+      line-height: 1.45;
+      background: #1f2d3d;
+      color: #fff;
+    }
     .pin-mark,
     .mute-mark {
       flex-shrink: 0;
@@ -1614,6 +1630,7 @@
       </div>
       <div class="member-strip hidden" id="memberStrip"></div>
     </div>
+    <div class="store-room-hint hidden" id="storeRoomHint">このルームは店舗固定です。#メモ / #日報 で Journal Report の資料に保存されます。</div>
     <div class="messages-wrap hidden" id="messagesWrap">
       <div class="messages" id="messages"></div>
       <div class="history-spinner hidden" id="historySpinner">過去のメッセージを読み込み中…</div>
@@ -2218,10 +2235,10 @@
       try {
         const [mineRes, allRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('pinned_at, muted_at, hidden_at, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key)')
+            .select('pinned_at, muted_at, hidden_at, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room)')
             .eq('user_id', currentUser.id),
           sb.from('chat_groups')
-            .select('id, group_name, created_at, created_by, icon_url, is_direct, direct_key')
+            .select('id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room')
             .order('created_at', { ascending: false })
         ]);
 
@@ -2816,6 +2833,8 @@
         return;
       }
       $('inviteOverlay').classList.remove('hidden');
+      const leaveBtn = document.querySelector('.invite-leave');
+      if (leaveBtn) leaveBtn.classList.toggle('hidden', !!(current && current.is_store_room));
       $('inviteUrl').value = '作成中...';
       $('inviteSearch').value = '';
       try {
@@ -2998,6 +3017,7 @@
       $('chatHeader').classList.add('hidden');
       $('messagesWrap').classList.add('hidden');
       $('inputArea').classList.add('hidden');
+      if ($('storeRoomHint')) $('storeRoomHint').classList.add('hidden');
       resetMessageView();
       renderGroups();
     }
@@ -3025,6 +3045,12 @@
       $('chatGroupName').textContent = roomTitle(group);
       paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
+      if ($('storeRoomHint')) $('storeRoomHint').classList.toggle('hidden', !group.is_store_room);
+      if ($('messageInput') && group.is_store_room) {
+        $('messageInput').placeholder = 'メッセージ（#メモ で資料保存）';
+      } else if ($('messageInput')) {
+        $('messageInput').placeholder = 'メッセージ';
+      }
       updateChatHeaderMeta();
     }
 
@@ -3435,6 +3461,7 @@
       talkMenuGroup = group;
       $('talkCtxPin').textContent = group.pinned_at ? 'ピン留めを解除' : 'ピン留め';
       $('talkCtxMute').textContent = group.muted_at ? '通知する' : '非通知';
+      if ($('talkCtxDelete')) $('talkCtxDelete').classList.toggle('hidden', !!group.is_store_room);
       const overlay = $('talkContextMenu');
       const panel = $('talkContextPanel');
       overlay.classList.remove('hidden');
@@ -3575,6 +3602,10 @@
     }
 
     async function leaveTalk(group) {
+      if (group && group.is_store_room) {
+        alert('店舗固定ルームは退出・削除できません');
+        return;
+      }
       if (!confirm('このルームから退出しますか？')) return;
       const { error } = await sb.rpc('chat_leave_group', { p_group_id: group.id });
       if (error) throw error;
@@ -3604,7 +3635,7 @@
         <div class="talk-avatar" style="background:${icon ? '#2c2c2e' : avatarStyle(title)}">${avatarHtml(title, icon)}</div>
         <div class="talk-body">
           <div class="talk-row">
-            <div class="group-item-name">${pinned ? pinMarkHtml() : ''}${muted ? muteMarkHtml() : ''}<span>${escapeHtml(title)}</span>${talkListCountLabel(group) ? `<span class="talk-list-count">${escapeHtml(talkListCountLabel(group))}</span>` : ''}</div>
+            <div class="group-item-name">${pinned ? pinMarkHtml() : ''}${muted ? muteMarkHtml() : ''}${group.is_store_room ? '<span class="store-room-mark">店舗</span>' : ''}<span>${escapeHtml(title)}</span>${talkListCountLabel(group) ? `<span class="talk-list-count">${escapeHtml(talkListCountLabel(group))}</span>` : ''}</div>
             <div class="talk-time">${formatTalkTime(when)}</div>
           </div>
           <div class="talk-preview-row">
