@@ -895,10 +895,7 @@
     }
     .message:hover .msg-actions { opacity: 1; }
     @media (pointer: coarse) { .msg-actions { opacity: 0.55; } }
-    /* 操作ボタンを吹き出しの外側に置く。own は左右を反転するので、
-       右端に寄せる指定は flex-start 側になる。 */
-    .message.own { flex-direction: row-reverse; justify-content: flex-start; }
-    .message.own .message-content { align-items: flex-end; }
+    /* 操作ボタンを吹き出しの外側に置く。own は左右を反転して右端へ寄せる。 */
 
     .msg-actions-btn {
       width: 28px;
@@ -967,8 +964,16 @@
     .attach-btn:hover { color: #111; background: rgba(0, 0, 0, 0.06); }
     .attach-btn:disabled { opacity: 0.4; cursor: default; }
 
-    .message { display: flex; }
-    .message.own { justify-content: flex-end; }
+    .message {
+      display: flex;
+      width: 100%;
+      justify-content: flex-start;
+      align-items: flex-end;
+    }
+    .message.own {
+      flex-direction: row-reverse;
+      justify-content: flex-start;
+    }
 
     .message-content { display: flex; flex-direction: column; gap: 3px; max-width: 74%; }
     .message.own .message-content { align-items: flex-end; }
@@ -3422,7 +3427,7 @@
 
     function buildMessageNode(msg) {
       const div = document.createElement('div');
-      const isOwn = msg.user_id === currentUser.id;
+      const isOwn = currentUser && String(msg.user_id) === String(currentUser.id);
       const cards = cardsFromMessage(msg);
       const image = imageFromMessage(msg);
       div.className = `message ${isOwn ? 'own' : ''} ${cards ? 'card' : ''} ${image ? 'image' : ''}`;
