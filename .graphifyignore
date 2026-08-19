@@ -1,5 +1,6 @@
 node_modules/**
 vendor/**
+public/vendor/**
 graphify-out/**
 public/system-map/**
 knowledge/**
