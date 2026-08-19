@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - M-talk に予約配信を追加
+
+- Request: メッセージを即送信せず、日時を指定して送りたい。入力欄に予約配信ボタンを置く。
+- Implementation: `chat_scheduled_messages` に本人の予約を保存し、毎分 `chat_dispatch_scheduled_messages` が到来分を `chat_messages` へ入れる。入力欄の時計ボタンから日時を選び、予約の取消もできる。
+- Security: 予約の作成・閲覧・取消は本人のみ。送信時にルーム非参加なら送らない。
+- Operation: 本文を書いて時計ボタン → 送信日時 → 「この日時で予約する」。
+
 ### 2026-08-19 - 店舗ルームの画像は LINE と同じくメディア閲覧へ
 
 - Request: `#メモ` が付いていない画像・ファイルは資料ではなく、LINE と同じくメディアライブラリへ保存し、同じ反応を返す。
