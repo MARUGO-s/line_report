@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-19 - 店舗ルームの画像は LINE と同じくメディア閲覧へ
+
+- Request: `#メモ` が付いていない画像・ファイルは資料ではなく、LINE と同じくメディアライブラリへ保存し、同じ反応を返す。
+- Implementation: 店舗ルームの画像は `line_message_media` へ保存する。レシートなら既存の解析・売上登録を使い、トークへレポートを返す。`#メモ` のリプライだけ資料へ移し、そのときメディア閲覧の複製は消す。
+- Security: メディアは従来どおり非公開 `line-media`。内部 dispatch の認可は変えない。
+- Operation: 画像を送る＝メディア閲覧。資料にしたいときだけ画像へリプライして `#メモ`。
+
 ### 2026-08-19 - 店舗ルームの画像を資料にし、改行とドラッグ＆ドロップを足す
 
 - Request: 店舗ルームへ送ったレシート画像にも `#メモ` と同じ登録結果を返す。資料はドラッグ＆ドロップで入れたい。PCは Shift+Enter で改行、スマホでも改行したい。

@@ -1,6 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from "../_shared/knowledge_memo_tag.ts"
+import {
+  processStoreRoomImageLikeLine,
+  postStoreRoomLineStyleReply,
+  removeStoreRoomMediaForChatMessage,
+} from "../_shared/chat_store_file_bridge.ts"
 
 const CHAT_BOT_USER_ID = "00000000-0000-4000-8000-00000000b071"
 const CHAT_BOT_USERNAME = "予約通知"
@@ -182,19 +187,30 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   const groupId = Number(message.group_id)
   const senderName = String(message.username || "M-talk")
   const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()
-  const memoText = text === "[画像]" ? "" : text
 
-  // 店舗ルームの画像はそのまま資料へ。#メモ のリプライは不要。
+  // LINE と同じ: #メモ が無い画像はメディア閲覧へ保存し、レシートなら解析して返す。
   if (message.kind === "image" || imagePathFromPayload(message.payload)) {
-    const ok = await registerQuotedImage(supabase, storeKey, message, memoText, senderName, lineTimestamp)
-    await replyInRoom(
-      supabase,
+    const image = imagePathFromPayload(message.payload)
+    if (!image) {
+      return json({ ok: true, skipped: true, reason: "no image path" }, 200)
+    }
+    const { data: file, error: downloadError } = await supabase.storage.from("chat-images").download(image.path)
+    if (downloadError || !file) {
+      console.warn("chat-knowledge image download failed:", downloadError?.message)
+      return json({ ok: false, error: "image download failed" }, 500)
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const result = await processStoreRoomImageLikeLine(supabase, {
+      storeKey,
       groupId,
-      ok
-        ? "✅ 画像を店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。"
-        : "⚠️ 画像を資料に登録できませんでした。少し時間をおいてから、もう一度送ってください。",
-    )
-    return json({ ok, processed: ok, kind: "image" }, 200)
+      chatMessageId: messageId,
+      senderName,
+      senderUserId: String(message.user_id || ""),
+      contentType: file.type || "image/jpeg",
+      bytes,
+    })
+    await postStoreRoomLineStyleReply(supabase, groupId, result)
+    return json({ ok: true, processed: true, kind: result.kind }, 200)
   }
 
   if (!hasKnowledgeMemoTag(text)) {
@@ -211,6 +227,9 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
       .maybeSingle()
     if (quoted && (quoted.kind === "image" || imagePathFromPayload(quoted.payload))) {
       const ok = await registerQuotedImage(supabase, storeKey, quoted, text, senderName, lineTimestamp)
+      if (ok) {
+        try { await removeStoreRoomMediaForChatMessage(supabase, Number(quoted.id)) } catch (_) { /* ignore */ }
+      }
       await replyInRoom(
         supabase,
         groupId,
@@ -226,7 +245,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     await replyInRoom(
       supabase,
       groupId,
-      "📝 #メモ の使い方\n・テキスト: #メモ に続けて本文を書いて送信してください。\n・画像: このルームに画像を送るか、ドラッグ＆ドロップしてください。資料として保存されます。",
+      "📝 #メモ の使い方\n・画像やファイルを登録する場合: 登録したい画像を長押し（PCでは右クリック）→「リプライ」を選び、#メモ と返信してください。\n・テキストメモの場合: #メモ に続けて本文を書いて送信してください。\n※画像を送っただけ、#メモ 単体を送っただけでは登録されません。",
     )
     return json({ ok: true, processed: false, reason: "usage" }, 200)
   }

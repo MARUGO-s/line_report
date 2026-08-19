@@ -65,7 +65,7 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 `chat-knowledge` が Journal Report の「資料」へ登録し、Bot が結果を返す。
 
 - テキスト: `#メモ 本文` でそのまま資料になる
-- 画像: 店舗ルームに画像を送る（添付ボタン／ドラッグ＆ドロップ／貼り付け）とそのまま資料になる。古い画像はリプライで `#メモ` でも登録できる
+- 画像・ファイル: LINE と同じ。`#メモ` が無ければメディア閲覧へ保存し、レシートなら解析して返す。資料にするときは画像にリプライして `#メモ`
 - 入力: PC は Enter で送信・Shift+Enter で改行。スマホは送信ボタンで送り、Enter は改行
 - `chat-knowledge` は pg_net の内部シークレットで認可する。ゲートウェイ JWT 検証は
   `verify_jwt=false`。設定を忘れると `UNAUTHORIZED_INVALID_JWT_FORMAT` で無反応になる

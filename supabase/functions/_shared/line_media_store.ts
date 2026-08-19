@@ -134,15 +134,74 @@ export async function saveRoomMediaToLibrary(
   // LINE から本体を取得（20MB上限）
   const content = await fetchLineMessageBinary(lineMessageId, accessToken, MAX_SINGLE_MEDIA_BYTES)
   if (!content.ok) return { saved: false, reason: content.error }
-  let bytes = content.bytes
+
+  // 投稿者名を解決（LINE API: グループ/ルームのメンバー名→プロフィール名）。
+  // 取得できない場合は null のまま（メディア一覧は user_id から補完表示する）。
+  const senderUserId = params.userId ? String(params.userId).trim() : ''
+  let senderDisplayName: string | null = null
+  if (senderUserId) {
+    try {
+      senderDisplayName = await fetchLineDisplayNameByUserId(senderUserId, roomId, accessToken)
+    } catch (_) {
+      senderDisplayName = null
+    }
+  }
+
+  return await saveMediaBytesToLibrary(supabase, {
+    roomId,
+    lineMessageId,
+    userId: senderUserId || null,
+    senderDisplayName,
+    mediaType,
+    storeKey: params.storeKey,
+    fileName: params.fileName,
+    contentType: content.contentType,
+    bytes: content.bytes,
+  })
+}
+
+/**
+ * 既に手元にあるバイト列をメディア閲覧へ保存する（M-talk 店舗ルームなど）。
+ * LINE から取り直す saveRoomMediaToLibrary と同じテーブル・バケット・20MB FIFO。
+ */
+export async function saveMediaBytesToLibrary(
+  supabase: SupabaseClientLike,
+  params: {
+    roomId: string
+    lineMessageId: string
+    userId?: string | null
+    senderDisplayName?: string | null
+    mediaType: string
+    storeKey?: string | null
+    fileName?: string | null
+    contentType?: string | null
+    bytes: Uint8Array
+  },
+): Promise<{ saved: boolean; reason?: string }> {
+  const roomId = String(params.roomId || '').trim()
+  const lineMessageId = String(params.lineMessageId || '').trim()
+  const mediaType = String(params.mediaType || '').trim()
+  if (!roomId || !lineMessageId || !mediaType) {
+    return { saved: false, reason: 'missing_params' }
+  }
+  if (!['image', 'video', 'audio', 'file'].includes(mediaType)) {
+    return { saved: false, reason: 'unsupported_media_type' }
+  }
+
+  const existing = await supabase
+    .from('line_message_media')
+    .select('id')
+    .eq('line_message_id', lineMessageId)
+    .limit(1)
+    .maybeSingle()
+  if (existing && existing.data) return { saved: false, reason: 'already_saved' }
+
+  let bytes = params.bytes
   let size = bytes.byteLength
   if (size <= 0) return { saved: false, reason: 'empty_content' }
   if (size > ROOM_MEDIA_CAP_BYTES) return { saved: false, reason: 'exceeds_room_cap' }
 
-  // 画像は「メディア閲覧」用に縮小＋再圧縮して保存容量を抑える（バランス重視: 長辺1280px・JPEG画質75）。
-  // ・OCR/レシート解析には影響しない（解析は別ルートで元画像を取得しているため）。
-  // ・JPEG のみ対象。再圧縮で逆に大きくなる/失敗した場合は元データのまま保存する（安全側）。
-  let contentType = String(content.contentType || '').trim()
+  let contentType = String(params.contentType || '').trim()
   if (
     mediaType === 'image' && isJpegContentType(contentType) &&
     size >= COMPRESS_MIN_INPUT_BYTES && size <= COMPRESS_MAX_INPUT_BYTES
@@ -167,24 +226,12 @@ export async function saveRoomMediaToLibrary(
     return { saved: false, reason: `upload_failed: ${uploaded.error.message}` }
   }
 
-  // 投稿者名を解決（LINE API: グループ/ルームのメンバー名→プロフィール名）。
-  // 取得できない場合は null のまま（メディア一覧は user_id から補完表示する）。
-  const senderUserId = params.userId ? String(params.userId).trim() : ''
-  let senderDisplayName: string | null = null
-  if (senderUserId) {
-    try {
-      senderDisplayName = await fetchLineDisplayNameByUserId(senderUserId, roomId, accessToken)
-    } catch (_) {
-      senderDisplayName = null
-    }
-  }
-
   const inserted = await supabase.from('line_message_media').insert({
     message_id: null,
     line_message_id: lineMessageId,
     room_id: roomId,
-    user_id: senderUserId || null,
-    sender_display_name: senderDisplayName,
+    user_id: params.userId ? String(params.userId).trim() || null : null,
+    sender_display_name: params.senderDisplayName ? String(params.senderDisplayName).slice(0, 120) : null,
     media_type: mediaType,
     store_partition_key: params.storeKey ? String(params.storeKey).trim() : null,
     storage_bucket: MEDIA_LIBRARY_BUCKET,
@@ -196,7 +243,6 @@ export async function saveRoomMediaToLibrary(
     created_at: new Date().toISOString(),
   })
   if (inserted && inserted.error) {
-    // 行挿入に失敗したらアップロード済みファイルを掃除（孤児防止）
     try { await supabase.storage.from(MEDIA_LIBRARY_BUCKET).remove([storagePath]) } catch (_) { /* ignore */ }
     return { saved: false, reason: `insert_failed: ${inserted.error.message}` }
   }
