@@ -106,7 +106,6 @@
     .rail-btn.active { color: #fff; background: #2c2c2e; }
     .rail-btn:hover { color: #fff; }
     .rail-spacer { flex: 1; }
-    .rail-btn.logout { color: #8e8e93; font-size: 11px; }
 
     .talk-list {
       width: 380px;
@@ -257,8 +256,26 @@
       padding: 0;
     }
 
-    .mobile-user-avatar {
-      display: none;
+    .talk-list-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px 6px;
+      flex-shrink: 0;
+    }
+    .talk-list-header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .talk-user-avatar,
+    .header-user-avatar {
+      margin-bottom: 0;
+    }
+    .header-user-avatar {
+      width: 32px;
+      height: 32px;
     }
 
     .account-menu-overlay {
@@ -276,6 +293,17 @@
       border-radius: 12px;
       overflow: hidden;
       box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    }
+    .account-menu-user {
+      padding: 14px 16px 10px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      border-bottom: 1px solid #3a3a3c;
+    }
+    .account-menu-list {
+      display: flex;
+      flex-direction: column;
     }
     .account-menu button {
       display: block;
@@ -1259,7 +1287,11 @@
         padding: 0;
       }
       .header-icon-btn { width: 44px; height: 44px; border-radius: 22px; }
-      .mobile-user-avatar {
+      .talk-list-header {
+        padding: 4px 8px 2px;
+      }
+      .talk-user-avatar,
+      .header-user-avatar {
         display: flex;
         width: 40px;
         height: 40px;
@@ -1327,10 +1359,13 @@
       <span class="notification-icon" aria-hidden="true">🔕</span>
     </button>
     <div class="rail-spacer"></div>
-    <button class="rail-btn logout" onclick="openAccountMenu()" title="メニュー">メニュー</button>
   </nav>
 
   <div class="talk-list hidden" id="sidebar">
+    <div class="talk-list-header">
+      <h1>トーク</h1>
+      <button class="rail-avatar talk-user-avatar" id="talkUserAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
+    </div>
     <div class="talk-tabs" id="talkTabs">
       <button class="talk-tab active" data-tab="all" onclick="setTalkTab('all')">すべて</button>
       <button class="talk-tab" data-tab="friends" onclick="setTalkTab('friends')">友だち</button>
@@ -1339,7 +1374,6 @@
       <button class="mobile-notification-btn notification-btn" type="button" data-notification-toggle title="新着通知をオンにする" aria-label="新着通知をオンにする" onclick="togglePushNotifications()">
         <span class="notification-icon" aria-hidden="true">🔕</span>
       </button>
-      <button class="rail-avatar mobile-user-avatar" id="mobileUserAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
     </div>
     <div class="talk-search-wrap">
       <input class="talk-search" id="talkSearch" type="search" placeholder="トークルームとメッセージ検索" oninput="handleTalkSearchInput()">
@@ -1387,6 +1421,7 @@
           </svg>
         </button>
         <div class="connection-status disconnected" id="connectionStatus"></div>
+        <button class="rail-avatar header-user-avatar" id="headerUserAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
       </div>
     </div>
     <div class="messages-wrap hidden" id="messagesWrap">
@@ -1417,8 +1452,11 @@
 
   <div class="account-menu-overlay hidden" id="accountMenu" onclick="if (event.target === this) closeAccountMenu()">
     <div class="account-menu" role="menu" aria-label="アカウントメニュー">
-      <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
-      <button type="button" role="menuitem" class="account-menu-logout" onclick="logout()">ログアウト</button>
+      <div class="account-menu-user" id="accountMenuUser"></div>
+      <div class="account-menu-list">
+        <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
+        <button type="button" role="menuitem" class="account-menu-logout" onclick="logout()">ログアウト</button>
+      </div>
     </div>
   </div>
 
@@ -2669,7 +2707,8 @@
       const name = currentUser ? currentUser.username : '?';
       const icon = currentUser && currentUser.icon_url;
       paintAvatar($('userAvatar'), name, icon);
-      paintAvatar($('mobileUserAvatar'), name, icon);
+      paintAvatar($('talkUserAvatar'), name, icon);
+      paintAvatar($('headerUserAvatar'), name, icon);
       paintAvatar($('profileIconPreview'), name || '?', pendingUserIconFile ? null : icon);
     }
 
@@ -2743,6 +2782,8 @@
     }
 
     function openAccountMenu() {
+      const nameEl = $('accountMenuUser');
+      if (nameEl) nameEl.textContent = (currentUser && currentUser.username) || 'アカウント';
       $('accountMenu').classList.remove('hidden');
     }
 
