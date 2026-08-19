@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#4B0B1A">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="トーク">
   <link rel="manifest" href="chat.webmanifest">
-  <link rel="icon" href="icons/chat-favicon-v2.ico" sizes="any">
-  <link rel="icon" type="image/png" sizes="48x48" href="icons/chat-favicon-48x48.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="icons/chat-favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="icons/chat-favicon-16x16.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="icons/chat-apple-touch-icon-v2.png">
+  <link rel="icon" type="image/svg+xml" href="icons/chat-logo-v3.svg">
+  <link rel="icon" href="icons/chat-favicon-v3.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="48x48" href="icons/chat-favicon-48x48-v3.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/chat-favicon-32x32-v3.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/chat-favicon-16x16-v3.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/chat-apple-touch-icon-v3.png">
   <title>トーク</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1139,6 +1140,14 @@
       color: #fff;
     }
 
+    .login-logo {
+      display: block;
+      width: 88px;
+      height: 88px;
+      margin: 0 auto 16px;
+      border-radius: 20px;
+    }
+
     .login-container h1 { margin-bottom: 20px; text-align: center; font-size: 22px; }
 
     .login-container input {
@@ -1489,6 +1498,7 @@
 
   <div class="login-screen" id="loginScreen">
     <div class="login-container">
+      <img class="login-logo" src="icons/chat-logo-v3.svg" width="88" height="88" alt="">
       <h1>トーク</h1>
       <div id="loginError" class="error hidden"></div>
       <div id="loginNotice" class="notice hidden"></div>

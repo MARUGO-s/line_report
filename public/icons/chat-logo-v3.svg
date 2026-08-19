@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#7B1730"/>
+      <stop offset="55%" stop-color="#651126"/>
+      <stop offset="100%" stop-color="#4B0B1A"/>
+    </radialGradient>
+    <linearGradient id="goldGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E8C77C"/>
+      <stop offset="45%" stop-color="#C89D49"/>
+      <stop offset="100%" stop-color="#F0D78E"/>
+    </linearGradient>
+    <linearGradient id="ivoryGrad" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#FFFDF8"/>
+      <stop offset="100%" stop-color="#F2E7D1"/>
+    </linearGradient>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#1D0710" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- App icon background -->
+  <rect x="26" y="26" width="972" height="972" rx="205" fill="url(#bgGrad)"/>
+  <rect x="34" y="34" width="956" height="956" rx="197" fill="none" stroke="url(#goldGrad)" stroke-width="10"/>
+
+  <!-- Rear speech bubble -->
+  <path d="
+    M 665 356
+    C 748 378, 815 445, 832 530
+    C 846 598, 827 667, 783 716
+    L 801 790
+    L 729 758
+    C 701 770, 672 779, 640 782
+    C 626 783, 613 783, 600 782"
+    fill="none"
+    stroke="url(#goldGrad)"
+    stroke-width="16"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.98"/>
+
+  <!-- Main speech bubble -->
+  <path d="
+    M 451 245
+    C 321 245, 216 347, 216 473
+    C 216 570, 279 655, 371 689
+    L 368 783
+    L 436 729
+    C 441 725, 446 721, 451 718
+    C 585 718, 692 617, 692 483
+    C 692 350, 585 245, 451 245
+    Z"
+    fill="url(#ivoryGrad)"
+    stroke="url(#goldGrad)"
+    stroke-width="12"
+    stroke-linejoin="round"
+    filter="url(#softShadow)"/>
+
+  <!-- Ellipsis -->
+  <circle cx="368" cy="487" r="20" fill="#5B0D21"/>
+  <circle cx="451" cy="487" r="20" fill="#5B0D21"/>
+  <circle cx="534" cy="487" r="20" fill="#5B0D21"/>
+</svg>

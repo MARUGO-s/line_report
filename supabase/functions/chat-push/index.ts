@@ -466,8 +466,8 @@ async function handleDispatch(
         body: group?.is_direct
           ? `${mentionPrefix}${preview}`
           : `${mentionPrefix}${message.username}: ${preview}`,
-        icon: "/line_report/icons/chat-android-192x192-v2.png",
-        badge: "/line_report/icons/chat-favicon-48x48.png",
+        icon: "/line_report/icons/chat-android-192x192-v3.png",
+        badge: "/line_report/icons/chat-favicon-48x48-v3.png",
         tag: `chat-group-${message.group_id}`,
         renotify: true,
         timestamp: Date.parse(message.created_at) || Date.now(),
