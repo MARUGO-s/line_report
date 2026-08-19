@@ -316,14 +316,17 @@ function mtalkCardFromLineReply(reply: unknown): { text: string; card?: ChatCard
   const used = new Set<string>([alt, ...collected.fields.flatMap((field) => [field.label, field.value])])
   const notes = collected.texts.filter((item) => item && !used.has(item))
   const sections: NonNullable<ChatCard['sections']> = []
-  if (collected.fields.length) sections.push({ type: 'fields', rows: collected.fields })
   for (const heading of collected.headings) sections.push({ type: 'heading', text: heading })
+  if (collected.fields.length) sections.push({ type: 'fields', rows: collected.fields })
   if (notes.length) sections.push({ type: 'note', text: notes.join('\n') })
+  if (!sections.length && !collected.actions.length) return { text }
+  const looksLikeSalesReport = /売上レポート/.test(alt)
+  const title = (alt.split(' / ')[0] || alt || 'レシート').trim()
   return {
     text,
     card: {
-      variant: 'line',
-      header: { title: alt || 'レシート' },
+      variant: looksLikeSalesReport ? 'line' : undefined,
+      header: { title },
       sections,
       actions: collected.actions.length ? collected.actions : null,
     },
@@ -371,6 +374,7 @@ function walkLineFlex(
     else if (command) out.actions.push({ label: label || command, command })
   }
   if (Array.isArray(rec.contents)) rec.contents.forEach((child) => walkLineFlex(child, out, ctx))
+  else if (rec.contents) walkLineFlex(rec.contents, out, ctx)
   if (rec.body) walkLineFlex(rec.body, out, ctx)
   if (rec.footer) walkLineFlex(rec.footer, out, ctx)
   if (rec.header) walkLineFlex(rec.header, out, { inHeader: true })
@@ -381,7 +385,12 @@ export async function postStoreRoomLineStyleReply(
   groupId: number,
   result: { text: string; card?: ChatCard },
 ): Promise<void> {
-  if (result.card) {
+  const cardHasBody = !!(result.card && (
+    (Array.isArray(result.card.sections) && result.card.sections.length > 0)
+    || (Array.isArray(result.card.actions) && result.card.actions.length > 0)
+    || result.card.action
+  ))
+  if (cardHasBody && result.card) {
     const posted = await postChatCard(supabase, {
       groupId,
       text: result.text,

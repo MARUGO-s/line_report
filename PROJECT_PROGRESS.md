@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 同日レシートの返信カードが空になる
+
+- Request: レシート送信後の返信が空の白いカードになっていた。
+- Cause: LINE Flex の `contents` はバブルオブジェクトなのに、配列のときだけ中を見ていた。
+- Fix: オブジェクトの `contents` も辿る。中身のないカードは出さず本文を出す。
+- Operation: 同じ日付の再送なら加算／中止／置き換え／日付変更のカードが出る。
+
 ### 2026-08-20 - レシート修正・削除を保存済み行だけに限定する
 
 - Request: 操作と登録の構造を LINE と同じにする。削除は同じ日付だけ。他データは絶対に消さない。
