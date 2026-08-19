@@ -131,17 +131,36 @@ Deno.serve(async (req) => {
       continue
     }
 
-    // 予約0件の日は「本日のご予約はありません」だけのPushを送らない（グループ宛は人数分課金されるため）。
-    // 重複防止ログ自体はこの分は既に確保済みなので、同日中の再実行では二重送信されない。
-    if (matched.length === 0) {
-      skipped.push({ room_id: target.roomId, reason: "zero_reservations" })
-      continue
-    }
-
     const storeDisplayName = resolveReceiptSheetsStoreDisplayName(storeKey)
       ?? matched.find((r) => r.storeName)?.storeName
       ?? null
     const calendarUrl = await buildTodayReservationCalendarUrl(supabase, storeKey, today)
+
+    // LINE は 0 件だとグループ人数分課金されるので送らない。
+    // トークは無料なので、0 件でも「本日のご予約はありません」を残す。
+    const postTodayChatCard = async () => {
+      const chatGroupId = await resolveChatGroupId(supabase, target.roomId)
+      if (!chatGroupId) return
+      const chatResult = await postChatCard(supabase, {
+        groupId: chatGroupId,
+        kind: "reservation_today",
+        text: buildTodayReservationChatText(storeDisplayName, today, matched),
+        cards: [buildTodayReservationChatCard(storeDisplayName, today, matched, calendarUrl)],
+      })
+      if (!chatResult.ok) {
+        console.error(`chat card post failed for ${target.roomId}:`, chatResult.error)
+        chatErrors.push(`${target.roomId}: ${chatResult.error}`)
+      } else {
+        chatPosted.push(target.roomId)
+      }
+    }
+
+    if (matched.length === 0) {
+      skipped.push({ room_id: target.roomId, reason: "zero_reservations" })
+      await postTodayChatCard()
+      continue
+    }
+
     const flex = buildTodayReservationFlex(storeDisplayName, today, matched, calendarUrl)
     const sendResult = await sendLinePushMessages(target.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
     if (!sendResult.ok) {
@@ -158,23 +177,8 @@ Deno.serve(async (req) => {
     }
     sent.push(target.roomId)
 
-    // 同じ内容を chat.html のトークルームにもカードとして流す（対応付けがある場合のみ）。
     // LINE 送信が成功した分だけ複製するので、再送時に二重投稿にならない。
-    const chatGroupId = await resolveChatGroupId(supabase, target.roomId)
-    if (chatGroupId) {
-      const chatResult = await postChatCard(supabase, {
-        groupId: chatGroupId,
-        kind: "reservation_today",
-        text: buildTodayReservationChatText(storeDisplayName, today, matched),
-        cards: [buildTodayReservationChatCard(storeDisplayName, today, matched, calendarUrl)],
-      })
-      if (!chatResult.ok) {
-        console.error(`chat card post failed for ${target.roomId}:`, chatResult.error)
-        chatErrors.push(`${target.roomId}: ${chatResult.error}`)
-      } else {
-        chatPosted.push(target.roomId)
-      }
-    }
+    await postTodayChatCard()
   }
 
   return json({
