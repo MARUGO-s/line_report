@@ -44,6 +44,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - ブラウザの購読登録／解除／設定変更はSupabase Auth access tokenを関数内で検証する。
 - `chat_messages` INSERT後の内部dispatchはDB生成シークレットを定数時間比較し、VAPID秘密鍵はSupabase Vault（またはEdge Secret）だけに置く。
 - 自分の送信は除外、メッセージID単位で重複防止、Pushサービスが404/410を返した購読は自動停止する。
+- アイコン用未読合計は`chat_push_unread_totals(uuid[])`で計算する。このSECURITY DEFINER関数は`service_role`だけにEXECUTEを許可し、メッセージ本文や購読鍵を返さない。
 
 ---
 

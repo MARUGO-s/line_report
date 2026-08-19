@@ -1376,6 +1376,34 @@
       });
     }
 
+    function unreadTotal() {
+      return Object.values(unread).reduce((sum, value) => {
+        const count = Number(value);
+        return sum + (Number.isSafeInteger(count) && count > 0 ? count : 0);
+      }, 0);
+    }
+
+    async function syncAppBadge(total = pushNotificationsEnabled ? unreadTotal() : 0) {
+      const count = Number(total);
+      const badgeCount = Number.isSafeInteger(count) && count > 0 ? count : 0;
+      try {
+        if (badgeCount > 0 && 'setAppBadge' in navigator) {
+          await navigator.setAppBadge(badgeCount);
+          return;
+        }
+        if (badgeCount === 0 && 'clearAppBadge' in navigator) {
+          await navigator.clearAppBadge();
+          return;
+        }
+        const registration = serviceWorkerRegistration || await ensureChatServiceWorker();
+        const worker = registration?.active || registration?.waiting || registration?.installing;
+        if (worker) worker.postMessage({ type: 'SET_APP_BADGE', count: badgeCount });
+      } catch (error) {
+        // Badging API非対応でもトーク・Web Push本体は継続する。
+        console.error('App badge sync error:', error);
+      }
+    }
+
     async function savePushSubscription(subscription, activate) {
       return chatPushRequest('subscribe', {
         body: {
@@ -1401,6 +1429,11 @@
           (payload) => {
             pushNotificationsEnabled = payload.new?.notifications_enabled === true;
             renderNotificationStatus(pushNotificationsEnabled ? 'enabled' : 'disabled');
+            if (pushNotificationsEnabled) {
+              loadUnread();
+            } else {
+              syncAppBadge(0);
+            }
           })
         .subscribe();
     }
@@ -1411,6 +1444,7 @@
         const result = await chatPushRequest('preferences', { body: {} });
         pushNotificationsEnabled = result.found && result.notifications_enabled === true;
         renderNotificationStatus(pushNotificationsEnabled ? 'enabled' : 'disabled');
+        syncAppBadge();
       } catch (error) {
         console.error('Push preference sync error:', error);
       }
@@ -1436,6 +1470,7 @@
           });
           pushNotificationsEnabled = false;
           renderNotificationStatus('disabled');
+          await syncAppBadge(0);
           alert('新着通知をオフにしました');
           return;
         }
@@ -1457,6 +1492,7 @@
         pushNotificationsEnabled = true;
         subscribePushPreferenceChanges();
         renderNotificationStatus('enabled');
+        await syncAppBadge();
         alert('新しいトークが入るとスマホへ通知します');
       } catch (error) {
         console.error('Push enable error:', error);
@@ -1579,6 +1615,7 @@
         unread = counts;
         renderGroups();
         updateTitle();
+        syncAppBadge();
       } catch (error) {
         console.error('Load unread error:', error);
       }
@@ -1589,6 +1626,7 @@
       delete unread[groupId];
       renderGroups();
       updateTitle();
+      syncAppBadge();
       try {
         await sb.from('chat_read_states').upsert({
           group_id: groupId,
@@ -1601,7 +1639,7 @@
     }
 
     function updateTitle() {
-      const total = Object.values(unread).reduce((sum, n) => sum + n, 0);
+      const total = unreadTotal();
       document.title = total > 0 ? `(${total}) トーク` : 'トーク';
     }
 
@@ -2386,6 +2424,7 @@
         }
         pushSubscription = null;
       }
+      await syncAppBadge(0);
       try {
         await sb.auth.signOut();
       } catch (error) {
@@ -2424,6 +2463,7 @@
       applySavedCredentials();
       updateTitle();
       renderNotificationStatus('disabled');
+      syncAppBadge(0);
     }
 
     function applySavedCredentials() {
@@ -2443,6 +2483,13 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && currentUser) loadUnread();
     });
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data?.type === 'REFRESH_APP_BADGE' && currentUser && !document.hidden) {
+          loadUnread();
+        }
+      });
+    }
 
     function formatTalkTime(value) {
       const d = new Date(value);

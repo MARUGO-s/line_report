@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v1';
+const CHAT_CACHE = 'line-report-chat-v2';
 const CHAT_SHELL = [
   './chat.html',
   './chat.webmanifest',
@@ -14,6 +14,37 @@ const CHAT_SHELL = [
 ];
 const CHAT_ENTRY_URL = new URL('./chat.html', self.location.href).href;
 const CHAT_ASSET_URLS = new Set(CHAT_SHELL.map((path) => new URL(path, self.location.href).href));
+
+async function updateAppBadge(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return;
+  const count = Number(value);
+  if (!Number.isSafeInteger(count)) return;
+  try {
+    if (count > 0 && 'setAppBadge' in self.navigator) {
+      await self.navigator.setAppBadge(count);
+    } else if (count <= 0 && 'clearAppBadge' in self.navigator) {
+      await self.navigator.clearAppBadge();
+    }
+  } catch (error) {
+    // バッジ非対応・OS設定拒否でも通知本体は表示する。
+    console.error('App badge update error:', error);
+  }
+}
+
+async function updateAppBadgeAndRefreshVisibleClients(value) {
+  try {
+    await updateAppBadge(value);
+    const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windowClients) {
+      const url = new URL(client.url);
+      if (client.visibilityState !== 'visible' || !url.pathname.endsWith('/chat.html')) continue;
+      client.postMessage({ type: 'REFRESH_APP_BADGE' });
+    }
+  } catch (error) {
+    // クライアント同期失敗も通知表示を妨げない。
+    console.error('App badge client refresh error:', error);
+  }
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -93,7 +124,10 @@ self.addEventListener('push', (event) => {
       message_id: data.message_id || null,
     },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    updateAppBadgeAndRefreshVisibleClients(data.badge_count),
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -110,4 +144,9 @@ self.addEventListener('notificationclick', (event) => {
       return self.clients.openWindow ? self.clients.openWindow(target) : undefined;
     }),
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'SET_APP_BADGE') return;
+  event.waitUntil(updateAppBadge(event.data.count));
 });

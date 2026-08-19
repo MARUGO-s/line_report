@@ -32,11 +32,24 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /addEventListener\('push'/)
   assert.match(serviceWorker, /showNotification/)
   assert.match(serviceWorker, /notificationclick/)
+  assert.match(serviceWorker, /setAppBadge/)
+  assert.match(serviceWorker, /clearAppBadge/)
+  assert.match(serviceWorker, /data\.badge_count/)
+  assert.match(serviceWorker, /SET_APP_BADGE/)
+  assert.match(serviceWorker, /REFRESH_APP_BADGE/)
+  assert.match(serviceWorker, /client\.visibilityState !== 'visible'/)
   assert.match(serviceWorker, /chat\.html/)
   assert.match(serviceWorker, /if \(!isChatNavigation && !CHAT_ASSET_URLS\.has\(url\.href\)\) return/)
   assert.match(serviceWorker, /key\.startsWith\('line-report-chat-'\)/)
   assert.match(html, /Push sign out API cleanup error/)
   assert.match(html, /Push sign out local cleanup error/)
+  assert.match(html, /function unreadTotal\(\)/)
+  assert.match(html, /async function syncAppBadge/)
+  assert.match(html, /navigator\.setAppBadge/)
+  assert.match(html, /navigator\.clearAppBadge/)
+  assert.match(html, /syncAppBadge\(0\)/)
+  assert.match(html, /event\.data\?\.type === 'REFRESH_APP_BADGE'/)
+  assert.match(html, /if \(pushNotificationsEnabled\) \{\s+loadUnread\(\)/)
 })
 
 test("chat push schema protects device subscriptions and deduplicates dispatch", async () => {
@@ -59,6 +72,18 @@ test("chat push schema protects device subscriptions and deduplicates dispatch",
   assert.match(migration, /after insert on public\.chat_messages/)
   assert.match(migration, /net\.http_post/)
   assert.match(migration, /alter publication supabase_realtime add table public\.chat_push_user_preferences/)
+
+  const badgeMigration = await read(
+    "supabase/migrations/20260819015213_chat_app_icon_badges.sql",
+  )
+  assert.match(badgeMigration, /create or replace function public\.chat_push_unread_totals\(p_user_ids uuid\[\]\)/)
+  assert.match(badgeMigration, /m\.user_id <> recipients\.user_id/)
+  assert.match(badgeMigration, /m\.created_at > rs\.last_read_at/)
+  assert.match(badgeMigration, /select distinct value as user_id/)
+  assert.match(badgeMigration, /count\(m\.id\)::bigint as unread_count/)
+  assert.match(badgeMigration, /group by recipients\.user_id/)
+  assert.match(badgeMigration, /revoke all on function public\.chat_push_unread_totals\(uuid\[\]\) from public, anon, authenticated/)
+  assert.match(badgeMigration, /grant execute on function public\.chat_push_unread_totals\(uuid\[\]\) to service_role/)
 })
 
 test("chat push endpoint requires Supabase Auth and excludes the sender", async () => {
@@ -74,6 +99,9 @@ test("chat push endpoint requires Supabase Auth and excludes the sender", async 
   assert.match(edge, /chat_get_vapid_config/)
   assert.match(edge, /preview_enabled/)
   assert.match(edge, /action === "preferences"/)
+  assert.match(edge, /chat_push_unread_totals/)
+  assert.match(edge, /badge_count: unreadTotals\.get\(row\.user_id\) \?\? null/)
+  assert.match(edge, /バッジ件数の取得失敗でWeb Push本体を止めない/)
 })
 
 test("Web Push request uses VAPID and aes128gcm encryption", async () => {

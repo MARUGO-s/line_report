@@ -416,6 +416,27 @@ async function handleDispatch(
   if (subscriptionsError) throw new Error(`subscription load failed: ${subscriptionsError.message}`)
 
   const subscriptions = (subscriptionRows || []) as PushSubscriptionRow[]
+  const unreadTotals = new Map<string, number>()
+  const subscribedRecipientIds = [...new Set(subscriptions.map((row) => row.user_id))]
+  if (subscribedRecipientIds.length) {
+    const { data: unreadRows, error: unreadError } = await supabase.rpc(
+      "chat_push_unread_totals",
+      { p_user_ids: subscribedRecipientIds },
+    )
+    if (unreadError) {
+      // バッジ件数の取得失敗でWeb Push本体を止めない。
+      console.error("Chat push unread total error:", unreadError.message)
+    } else {
+      for (const row of (unreadRows || []) as Array<{ user_id?: unknown; unread_count?: unknown }>) {
+        const userId = String(row.user_id ?? "").trim()
+        const count = Number(row.unread_count)
+        if (userId && Number.isSafeInteger(count) && count >= 0) {
+          unreadTotals.set(userId, count)
+        }
+      }
+    }
+  }
+
   const group = Array.isArray(message.chat_groups)
     ? (message.chat_groups[0] ?? null)
     : message.chat_groups
@@ -449,6 +470,7 @@ async function handleDispatch(
         url: notificationUrl(message.group_id),
         group_id: message.group_id,
         message_id: message.id,
+        badge_count: unreadTotals.get(row.user_id) ?? null,
       }, vapid)
       if (response.ok) {
         sent += 1
