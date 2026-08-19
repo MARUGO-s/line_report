@@ -36,3 +36,28 @@ test('system map and evolution tabs wrap instead of clipping', async () => {
   assert.match(map, /\.tabs\{flex-wrap:wrap;overflow:visible\}/);
   assert.match(evo, /\.page-tabs\{gap:12px 16px;margin-top:27.6px;flex-wrap:wrap;overflow:visible;\}/);
 });
+
+test('chat mobile layout keeps controls inside phone safe areas and prevents page zoom', async () => {
+  const chat = await read('public/chat.html');
+  assert.match(chat, /minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover/);
+  assert.match(chat, /--mobile-safe-top: max\(12px, env\(safe-area-inset-top, 0px\)\)/);
+  assert.match(chat, /--mobile-safe-bottom: max\(12px, env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(chat, /--mobile-safe-left: max\(8px, env\(safe-area-inset-left, 0px\)\)/);
+  assert.match(chat, /--mobile-safe-right: max\(8px, env\(safe-area-inset-right, 0px\)\)/);
+  assert.match(chat, /touch-action: pan-x pan-y/);
+  assert.match(chat, /--chat-viewport-height: 100dvh/);
+  assert.match(chat, /height: var\(--chat-viewport-height\)/);
+  assert.match(chat, /max-height: 600px\) and \(pointer: coarse\)/);
+  assert.match(chat, /\.invite-overlay \{\s+position: absolute;\s+padding:/);
+  assert.match(chat, /\.login-screen \{\s+position: absolute;\s+padding:/);
+  assert.match(chat, /input\[type="search"\],[\s\S]*?font-size: 16px/);
+  assert.match(chat, /function syncChatViewport\(keepComposerVisible = false\)/);
+  assert.match(chat, /window\.visualViewport\.addEventListener\('resize'/);
+  assert.match(chat, /window\.visualViewport\.addEventListener\('scroll'/);
+  assert.match(chat, /messageInput'\)\.addEventListener\('focus'/);
+  assert.match(chat, /function preventMobileZoomGesture\(event\)/);
+  assert.match(chat, /event\.touches\.length > 1/);
+  assert.match(chat, /addEventListener\('gesturestart', preventMobileZoomGesture, \{ passive: false \}\)/);
+  assert.match(chat, /addEventListener\('gestureend', preventMobileZoomGesture, \{ passive: false \}\)/);
+  assert.match(chat, /addEventListener\('touchmove', preventMobileZoomGesture, \{ passive: false \}\)/);
+});

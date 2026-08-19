@@ -65,6 +65,7 @@
 - Android／PC: トーク一覧のベルを押し、ブラウザの通知許可を承認する。
 - 自分の送信は自分へ通知しない。通知を押すと対象トークを直接開く。
 - Badging API対応のホーム画面アプリでは、全トークの未読合計をアイコンの数字で表示する。既読・通知OFF・ログアウト時に更新／解除する。
+- スマホはsafe-areaとVisual Viewportへ追従し、ノッチ／Dynamic Island／角丸／ホームインジケータ、横向き、ソフトウェアキーボード表示を避ける。表示倍率は固定し、ピンチ拡大を抑止する。
 - 通知を止める場合はベルをもう一度押す。設定は同じユーザーの端末間で同期する。
 - サーバー設定: Supabase Vaultの`chat_vapid_config`へ`public_key` / `private_key` / `subject`をJSON保存する（Edge Secretsに空きがある環境では`CHAT_VAPID_*`でも可）。本番hocbnはEdge Secretsが上限のためVaultを使用する。
 - **AI/構成確認**:

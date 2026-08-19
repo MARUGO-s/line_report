@@ -30,6 +30,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
+  assert.match(serviceWorker, /line-report-chat-v3/)
   assert.match(serviceWorker, /showNotification/)
   assert.match(serviceWorker, /notificationclick/)
   assert.match(serviceWorker, /setAppBadge/)

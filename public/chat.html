@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#111111">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -12,6 +12,14 @@
   <title>トーク</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html {
+      width: 100%;
+      height: 100%;
+      background: #111;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
 
     :root {
       --line-green: #06c755;
@@ -25,6 +33,8 @@
       --search: #2c2c2e;
       --badge: #3b82f6;
       --chat-bg: #7494b3;
+      --chat-viewport-height: 100dvh;
+      --chat-viewport-top: 0px;
     }
 
     body {
@@ -757,21 +767,130 @@
 
     .hidden { display: none !important; }
 
-    @media (max-width: 768px) {
+    @media (max-width: 768px), (max-height: 600px) and (pointer: coarse) {
+      :root {
+        --mobile-safe-top: max(12px, env(safe-area-inset-top, 0px));
+        --mobile-safe-right: max(8px, env(safe-area-inset-right, 0px));
+        --mobile-safe-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+        --mobile-safe-left: max(8px, env(safe-area-inset-left, 0px));
+      }
+      html,
+      body {
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        touch-action: pan-x pan-y;
+      }
+      body {
+        position: fixed;
+        top: var(--chat-viewport-top);
+        left: 0;
+        width: 100%;
+        height: var(--chat-viewport-height);
+        padding:
+          var(--mobile-safe-top)
+          var(--mobile-safe-right)
+          var(--mobile-safe-bottom)
+          var(--mobile-safe-left);
+      }
       .nav-rail { display: none; }
-      .talk-tabs { gap: 6px; padding: 12px 12px 8px; font-size: 12px; align-items: center; }
-      .talk-list { width: 100%; max-width: none; border-right: 0; }
-      .main-content { display: none; }
+      .talk-tabs {
+        gap: 6px;
+        padding: 4px 4px 8px;
+        font-size: 12px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .talk-tab {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+      }
+      .talk-search-wrap { padding: 8px 8px 10px; }
+      .talk-list {
+        width: 100%;
+        max-width: none;
+        min-height: 0;
+        border-right: 0;
+        border-radius: 12px;
+      }
+      .groups-scroll,
+      .messages,
+      .invite-sheet,
+      .login-container {
+        min-height: 0;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      .main-content {
+        display: none;
+        min-height: 0;
+        border-radius: 12px;
+        overflow: hidden;
+      }
       body.chat-open .talk-list { display: none; }
       body.chat-open .main-content { display: flex; width: 100%; }
-      .back-btn { display: inline-flex; }
+      .chat-header { padding: 8px 10px; min-height: 56px; }
+      .back-btn {
+        display: inline-flex;
+        width: 44px;
+        height: 44px;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }
+      .header-icon-btn { width: 44px; height: 44px; border-radius: 22px; }
       .mobile-user-avatar {
         display: flex;
-        width: 32px;
-        height: 32px;
+        width: 40px;
+        height: 40px;
+        margin: 0;
       }
-      .mobile-notification-btn { display: inline-flex; align-items: center; justify-content: center; margin-left: auto; }
-      .input-area { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+      .mobile-notification-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin-left: auto;
+      }
+      .messages { padding: 14px 10px 16px; }
+      .input-area { padding: 8px 8px 12px; flex-shrink: 0; }
+      .input-area button { width: 44px; height: 44px; }
+      .fab { right: 16px; bottom: 16px; }
+      .new-group-pop { right: 8px; bottom: 80px; width: calc(100% - 16px); }
+      .login-screen {
+        position: absolute;
+        padding:
+          calc(var(--mobile-safe-top) + 12px)
+          calc(var(--mobile-safe-right) + 12px)
+          calc(var(--mobile-safe-bottom) + 12px)
+          calc(var(--mobile-safe-left) + 12px);
+      }
+      .login-container { max-height: 100%; overflow-y: auto; }
+      .invite-overlay {
+        position: absolute;
+        padding:
+          var(--mobile-safe-top)
+          var(--mobile-safe-right)
+          var(--mobile-safe-bottom)
+          var(--mobile-safe-left);
+      }
+      .invite-sheet {
+        max-height: 100%;
+        border-radius: 18px;
+        padding-bottom: 24px;
+      }
+      input[type="text"],
+      input[type="email"],
+      input[type="password"],
+      input[type="search"],
+      input[type="url"],
+      textarea,
+      select {
+        font-size: 16px;
+      }
     }
   </style>
 </head>
@@ -964,12 +1083,45 @@
     let pushPreferenceChannel = null;
     let pushNotificationsEnabled = false;
     let pendingOpenGroupId = null;
+    let chatViewportFrame = 0;
     const INVITE_KEY = 'chat_pending_invite';
     const CHAT_PUSH_PUBLIC_KEY = 'BBUr0ob7hbB-k5JguWO1LgACXgpSjwPYkeoGRwNhDBE88ynjbEyRlY02LA3RZXr_oQrOcu86djYWsEncbTKiLtE';
 
     const $ = (id) => document.getElementById(id);
     const CREDENTIAL_KEY = 'chat_saved_credentials';
     const AVATAR_COLORS = ['#7ac943', '#4fc3f7', '#ff8a65', '#ba68c8', '#ffd54f', '#4db6ac', '#f06292', '#7986cb'];
+
+    function syncChatViewport(keepComposerVisible = false) {
+      const isMobileLayout = window.matchMedia('(max-width: 768px), (max-height: 600px) and (pointer: coarse)').matches;
+      const root = document.documentElement;
+      if (!isMobileLayout) {
+        root.style.removeProperty('--chat-viewport-height');
+        root.style.removeProperty('--chat-viewport-top');
+        return;
+      }
+
+      const viewport = window.visualViewport;
+      const viewportHeight = Math.max(1, Math.round(viewport ? viewport.height : window.innerHeight));
+      const viewportTop = Math.max(0, Math.round(viewport ? viewport.offsetTop : 0));
+      root.style.setProperty('--chat-viewport-height', `${viewportHeight}px`);
+      root.style.setProperty('--chat-viewport-top', `${viewportTop}px`);
+
+      if (chatViewportFrame) cancelAnimationFrame(chatViewportFrame);
+      chatViewportFrame = requestAnimationFrame(() => {
+        chatViewportFrame = 0;
+        const input = $('messageInput');
+        if (!input || (!keepComposerVisible && document.activeElement !== input)) return;
+        const messages = $('messages');
+        if (messages) messages.scrollTop = messages.scrollHeight;
+        input.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+    }
+
+    function preventMobileZoomGesture(event) {
+      const isMobileLayout = window.matchMedia('(max-width: 768px), (max-height: 600px) and (pointer: coarse)').matches;
+      if (!isMobileLayout) return;
+      if (!event.touches || event.touches.length > 1) event.preventDefault();
+    }
 
     function loadSavedCredentials() {
       try {
@@ -2490,6 +2642,18 @@
         }
       });
     }
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => syncChatViewport());
+      window.visualViewport.addEventListener('scroll', () => syncChatViewport());
+    }
+    window.addEventListener('resize', () => syncChatViewport());
+    window.addEventListener('orientationchange', () => {
+      setTimeout(() => syncChatViewport(), 100);
+    });
+    document.addEventListener('gesturestart', preventMobileZoomGesture, { passive: false });
+    document.addEventListener('gesturechange', preventMobileZoomGesture, { passive: false });
+    document.addEventListener('gestureend', preventMobileZoomGesture, { passive: false });
+    document.addEventListener('touchmove', preventMobileZoomGesture, { passive: false });
 
     function formatTalkTime(value) {
       const d = new Date(value);
@@ -2526,6 +2690,10 @@
     $('signupPasswordConfirm').addEventListener('keypress', (e) => { if (e.key === 'Enter') signup(); });
     $('usernameInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createProfile(); });
     $('newGroupInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') createGroup(); });
+    $('messageInput').addEventListener('focus', () => {
+      syncChatViewport(true);
+      setTimeout(() => syncChatViewport(true), 180);
+    });
 
     $('userIconInput').addEventListener('change', async (e) => {
       const file = e.target.files && e.target.files[0];
@@ -2584,6 +2752,7 @@
 
     captureInviteFromUrl();
     captureRequestedGroup();
+    syncChatViewport();
     ensureChatServiceWorker();
 
     (async () => {
