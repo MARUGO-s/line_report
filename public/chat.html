@@ -718,6 +718,175 @@
       100% { box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08); }
     }
 
+    /* 既読 */
+    .read-mark {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.9);
+      white-space: nowrap;
+    }
+
+    /* 返信の引用 */
+    .quote {
+      white-space: normal;
+      border-left: 3px solid rgba(0, 0, 0, 0.28);
+      padding: 3px 0 3px 8px;
+      margin-bottom: 4px;
+      cursor: pointer;
+      max-width: 100%;
+    }
+    .quote-name { font-size: 11px; font-weight: 700; opacity: 0.75; }
+    .quote-text {
+      font-size: 12px;
+      opacity: 0.7;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+    }
+    .message.own .quote { border-left-color: rgba(0, 0, 0, 0.3); }
+
+    /* 入力欄の上に出る「返信中」バー */
+    .reply-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: #e3e3e3;
+      border-top: 1px solid #d0d0d0;
+      font-size: 12px;
+      color: #333;
+    }
+    .reply-bar-body { flex: 1; min-width: 0; }
+    .reply-bar-name { font-weight: 700; }
+    .reply-bar-text { color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .reply-bar-close {
+      border: 0;
+      background: none;
+      font-size: 18px;
+      line-height: 1;
+      color: #666;
+      cursor: pointer;
+      padding: 4px 6px;
+    }
+
+    /* メンション */
+    .mention { color: #0b66c3; font-weight: 700; }
+    .message.own .mention { color: #0a5a2f; }
+    .mention.me { background: rgba(6, 199, 85, 0.28); border-radius: 4px; padding: 0 3px; }
+
+    .mention-pop {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: 100%;
+      margin-bottom: 6px;
+      max-height: 200px;
+      overflow-y: auto;
+      background: #2c2c2e;
+      border-radius: 10px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+      z-index: 40;
+    }
+    .mention-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      cursor: pointer;
+      color: #fff;
+      font-size: 14px;
+    }
+    .mention-row:hover, .mention-row.active { background: #3a3a3c; }
+    .mention-row .talk-avatar { width: 28px; height: 28px; font-size: 12px; }
+
+    /* リアクション */
+    .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+    .message.own .reactions { justify-content: flex-end; }
+    .reaction-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 11px;
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      background: rgba(255, 255, 255, 0.92);
+      color: #111;
+      font-size: 12px;
+      line-height: 1.5;
+      cursor: pointer;
+    }
+    .reaction-chip.mine { border-color: var(--line-green); background: #e4f8ec; }
+    .reaction-chip .count { font-size: 11px; color: #555; }
+
+    /* 各メッセージの操作ボタン */
+    .msg-actions {
+      align-self: center;
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 0 4px;
+      opacity: 0;
+      transition: opacity .12s;
+    }
+    .message:hover .msg-actions { opacity: 1; }
+    @media (pointer: coarse) { .msg-actions { opacity: 0.55; } }
+    /* 操作ボタンを吹き出しの外側に置く。own は左右を反転するので、
+       右端に寄せる指定は flex-start 側になる。 */
+    .message.own { flex-direction: row-reverse; justify-content: flex-start; }
+    .message.own .message-content { align-items: flex-end; }
+
+    .msg-actions-btn {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.22);
+      color: #fff;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .msg-actions-btn:hover { background: rgba(0, 0, 0, 0.4); }
+
+    /* 操作メニュー（返信・リアクション） */
+    .msg-menu {
+      position: fixed;
+      z-index: 320;
+      background: #2c2c2e;
+      border-radius: 14px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .msg-menu-emojis { display: flex; gap: 2px; }
+    .msg-menu-emojis button {
+      width: 38px;
+      height: 38px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      font-size: 20px;
+      cursor: pointer;
+    }
+    .msg-menu-emojis button:hover { background: #3a3a3c; }
+    .msg-menu-reply {
+      border: 0;
+      background: transparent;
+      color: #fff;
+      font-size: 14px;
+      text-align: left;
+      padding: 9px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .msg-menu-reply:hover { background: #3a3a3c; }
+
     .attach-btn {
       width: 38px;
       height: 38px;
@@ -744,11 +913,15 @@
       padding: 8px 12px;
       border-radius: 16px;
       word-wrap: break-word;
-      white-space: pre-wrap;
+      white-space: normal;
       font-size: 15px;
       line-height: 1.45;
       box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
     }
+
+    /* 改行を活かすのは本文だけ。吹き出し全体を pre-wrap にすると、
+       引用ブロックを組み立てる際の改行やインデントまで表示される。 */
+    .bubble-text { display: block; white-space: pre-wrap; }
 
     .message.own .message-bubble {
       background: #8ced4a;
@@ -1186,7 +1359,15 @@
       <div class="history-spinner hidden" id="historySpinner">過去のメッセージを読み込み中…</div>
       <button class="jump-latest hidden" id="jumpLatestBtn" type="button" onclick="jumpToLatest()">最新へ ↓</button>
     </div>
-    <div class="input-area hidden" id="inputArea">
+    <div class="reply-bar hidden" id="replyBar">
+      <div class="reply-bar-body">
+        <div class="reply-bar-name" id="replyBarName"></div>
+        <div class="reply-bar-text" id="replyBarText"></div>
+      </div>
+      <button class="reply-bar-close" type="button" onclick="clearReplyTarget()" aria-label="返信をやめる">×</button>
+    </div>
+    <div class="input-area hidden" id="inputArea" style="position:relative;">
+      <div class="mention-pop hidden" id="mentionPop"></div>
       <button class="attach-btn" type="button" onclick="pickChatImage()" title="画像を送る" aria-label="画像を送る">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -1194,7 +1375,7 @@
           <path d="M21 15l-5-5L5 21"/>
         </svg>
       </button>
-      <input type="text" id="messageInput" placeholder="メッセージ" onkeypress="handleKeyPress(event)">
+      <input type="text" id="messageInput" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off">
       <button onclick="sendMessage()" aria-label="送信">➤</button>
     </div>
   </div>
@@ -1325,7 +1506,18 @@
     let uploadingImage = false;
     const signedImageUrls = new Map();
     const MESSAGE_PAGE_SIZE = 50;
-    const MESSAGE_COLUMNS = 'id, group_id, user_id, username, content, kind, payload, created_at';
+    const MESSAGE_COLUMNS =
+      'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, created_at';
+    // 開いているトークの参加者・既読時刻・リアクション。
+    let groupMembers = [];
+    let groupReadStates = [];
+    let reactionsByMessage = new Map();
+    // 引用元の本文（返信の表示用）。読み込み済みに無いものだけ後から取りに行く。
+    let quotedMessages = new Map();
+    let replyTarget = null;
+    let mentionCandidates = [];
+    let mentionActiveIndex = 0;
+    const REACTION_CHOICES = ['👍', '✅', '🙏', '😂', '❤️', '😮'];
     const INVITE_KEY = 'chat_pending_invite';
     const CHAT_PUSH_PUBLIC_KEY = 'BBUr0ob7hbB-k5JguWO1LgACXgpSjwPYkeoGRwNhDBE88ynjbEyRlY02LA3RZXr_oQrOcu86djYWsEncbTKiLtE';
 
@@ -1622,11 +1814,44 @@
           { event: 'INSERT', schema: 'public', table: 'chat_group_members' },
           (payload) => {
             if (payload.new.user_id === currentUser.id) loadGroups();
+            else if (Number(payload.new.group_id) === currentGroupId) loadGroupContext(currentGroupId);
           })
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_message_reactions' },
+          (payload) => handleReactionChange(payload))
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_read_states' },
+          (payload) => handleReadStateChange(payload.new || payload.old))
         .subscribe((status) => {
           const ok = status === 'SUBSCRIBED';
           $('connectionStatus').classList.toggle('disconnected', !ok);
         });
+    }
+
+    // 他の人のリアクション増減を画面へ反映する。
+    function handleReactionChange(payload) {
+      const row = payload.new && payload.new.message_id ? payload.new : payload.old;
+      if (!row || !row.message_id) return;
+      const messageId = Number(row.message_id);
+      if (!reactionsByMessage.has(messageId)) return;
+
+      const list = reactionsByMessage.get(messageId) || [];
+      const without = list.filter((r) => !(r.user_id === row.user_id && r.emoji === row.emoji));
+      // 自分の操作は楽観更新で反映済みなので、ここでは配列を作り直すだけにする。
+      reactionsByMessage.set(
+        messageId,
+        payload.eventType === 'DELETE' ? without : without.concat([{ user_id: row.user_id, emoji: row.emoji }])
+      );
+      refreshMessageNode(messageId);
+    }
+
+    // 他の人が読んだら既読表示を更新する。
+    function handleReadStateChange(row) {
+      if (!row || Number(row.group_id) !== currentGroupId) return;
+      groupReadStates = groupReadStates
+        .filter((entry) => entry.user_id !== row.user_id)
+        .concat([{ user_id: row.user_id, last_read_at: row.last_read_at }]);
+      refreshReadMarks();
     }
 
     function handleIncomingMessage(msg) {
@@ -2635,6 +2860,7 @@
       paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
       resetMessageView();
+      await loadGroupContext(groupId);
 
       try {
         const [olderRes, newerRes] = await Promise.all([
@@ -2650,7 +2876,7 @@
 
         const older = (olderRes.data || []).reverse();
         if (older.length < 25) historyExhausted = true;
-        setMessages(older.concat(newerRes.data || []));
+        await setMessages(older.concat(newerRes.data || []));
         // 新しい側を取り切れていなければ、この画面は最新まで届いていない。
         viewHasLatest = (newerRes.data || []).length < 25;
         followNewMessages = viewHasLatest;
@@ -2868,6 +3094,7 @@
       paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
       resetMessageView();
+      await loadGroupContext(group.id);
 
       try {
         const { data, error } = await sb
@@ -2880,7 +3107,7 @@
 
         const loaded = (data || []).reverse();
         if (loaded.length < MESSAGE_PAGE_SIZE) historyExhausted = true;
-        setMessages(loaded);
+        await setMessages(loaded);
         scrollMessagesToBottom();
       } catch (error) {
         console.error('Load messages error:', error);
@@ -2888,6 +3115,90 @@
 
       renderGroups();
       if (!isMobileLayout()) $('messageInput').focus();
+    }
+
+    // --- 参加者 / 既読 / リアクション / 引用元の読み込み ---
+
+    async function loadGroupContext(groupId) {
+      groupMembers = [];
+      groupReadStates = [];
+      try {
+        const [memberRes, readRes] = await Promise.all([
+          sb.from('chat_group_members')
+            .select('user_id, chat_users(id, username, icon_url)')
+            .eq('group_id', groupId),
+          sb.from('chat_read_states')
+            .select('user_id, last_read_at')
+            .eq('group_id', groupId)
+        ]);
+        if (memberRes.error) throw memberRes.error;
+        if (readRes.error) throw readRes.error;
+        groupMembers = (memberRes.data || []).map((row) => row.chat_users).filter(Boolean);
+        groupReadStates = readRes.data || [];
+      } catch (error) {
+        console.error('Load group context error:', error);
+      }
+    }
+
+    async function loadReactions(messageIds) {
+      const ids = messageIds.filter((id) => !reactionsByMessage.has(id));
+      if (!ids.length) return;
+      ids.forEach((id) => reactionsByMessage.set(id, []));
+      try {
+        const { data, error } = await sb
+          .from('chat_message_reactions')
+          .select('message_id, user_id, emoji')
+          .in('message_id', ids);
+        if (error) throw error;
+        (data || []).forEach((row) => {
+          const list = reactionsByMessage.get(row.message_id) || [];
+          list.push({ user_id: row.user_id, emoji: row.emoji });
+          reactionsByMessage.set(row.message_id, list);
+        });
+      } catch (error) {
+        console.error('Load reactions error:', error);
+      }
+    }
+
+    // 引用元が画面に読み込まれていない場合だけ、まとめて取りに行く。
+    async function loadQuotedMessages(list) {
+      const known = new Map(currentMessages.map((m) => [m.id, m]));
+      const wanted = [...new Set(
+        list.map((m) => m.reply_to_id).filter((id) => id && !known.has(id) && !quotedMessages.has(id))
+      )];
+      if (!wanted.length) return;
+      try {
+        const { data, error } = await sb
+          .from('chat_messages')
+          .select('id, username, content, kind')
+          .in('id', wanted);
+        if (error) throw error;
+        (data || []).forEach((row) => quotedMessages.set(row.id, row));
+      } catch (error) {
+        console.error('Load quoted messages error:', error);
+      }
+    }
+
+    function resolveQuoted(id) {
+      if (!id) return null;
+      return currentMessages.find((m) => m.id === id) || quotedMessages.get(id) || null;
+    }
+
+    // 自分の発言を、自分以外の何人が読んだか。
+    function readCountFor(msg) {
+      if (msg.user_id !== currentUser.id) return 0;
+      const sentAt = new Date(msg.created_at).getTime();
+      return groupReadStates.filter((row) => (
+        row.user_id !== currentUser.id && new Date(row.last_read_at).getTime() >= sentAt
+      )).length;
+    }
+
+    function readMarkHtml(msg) {
+      const count = readCountFor(msg);
+      if (count <= 0) return '';
+      // 1対1では人数を出さず「既読」だけにする（LINE と同じ見え方）。
+      const others = groupMembers.filter((u) => u.id !== currentUser.id).length;
+      return `<span class="read-mark">${others <= 1 ? '既読' : `既読 ${count}`}</span>`;
     }
 
     function isMobileLayout() {
@@ -2901,6 +3212,11 @@
       loadingHistory = false;
       viewHasLatest = true;
       followNewMessages = true;
+      reactionsByMessage = new Map();
+      quotedMessages = new Map();
+      clearReplyTarget();
+      closeMessageMenu();
+      $('mentionPop').classList.add('hidden');
       $('messages').innerHTML = '';
       $('jumpLatestBtn').classList.add('hidden');
     }
@@ -2909,9 +3225,15 @@
       $('jumpLatestBtn').classList.toggle('hidden', viewHasLatest && followNewMessages);
     }
 
-    function setMessages(list) {
+    async function setMessages(list) {
       currentMessages = list.slice();
       seenMessageIds = new Set(currentMessages.map((m) => m.id));
+      renderMessageList();
+      // リアクションと引用元は後追いで足して描き直す（本文の表示を待たせない）。
+      await Promise.all([
+        loadReactions(currentMessages.map((m) => m.id)),
+        loadQuotedMessages(currentMessages)
+      ]);
       renderMessageList();
     }
 
@@ -2941,6 +3263,62 @@
 
     // --- 1件分の DOM ---
 
+    // 本文中の @表示名 を、そのトークの参加者名と照合して強調する。
+    // 長い名前から先に照合しないと「@田中」が「@田中太郎」を食ってしまう。
+    function renderContentWithMentions(content, mentions) {
+      const text = String(content ?? '');
+      const names = groupMembers
+        .map((u) => u.username)
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+      if (!names.length) return escapeHtml(text);
+
+      const mentionSet = new Set(Array.isArray(mentions) ? mentions : []);
+      let out = '';
+      let i = 0;
+      while (i < text.length) {
+        if (text[i] === '@' || text[i] === '＠') {
+          const rest = text.slice(i + 1);
+          const hit = names.find((name) => rest.startsWith(name));
+          if (hit) {
+            const user = groupMembers.find((u) => u.username === hit);
+            const isMe = user && user.id === currentUser.id && mentionSet.has(currentUser.id);
+            out += `<span class="mention${isMe ? ' me' : ''}">@${escapeHtml(hit)}</span>`;
+            i += 1 + hit.length;
+            continue;
+          }
+        }
+        out += escapeHtml(text[i]);
+        i += 1;
+      }
+      return out;
+    }
+
+    function quotePreviewText(quoted) {
+      if (!quoted) return '（削除された発言）';
+      if (quoted.kind === 'image') return '[画像]';
+      return String(quoted.content ?? '');
+    }
+
+    function renderReactions(msg) {
+      const list = reactionsByMessage.get(msg.id) || [];
+      if (!list.length) return '';
+      const grouped = new Map();
+      list.forEach((row) => {
+        const entry = grouped.get(row.emoji) || { count: 0, mine: false };
+        entry.count += 1;
+        if (row.user_id === currentUser.id) entry.mine = true;
+        grouped.set(row.emoji, entry);
+      });
+      const chips = [...grouped.entries()].map(([emoji, entry]) => (
+        `<button class="reaction-chip ${entry.mine ? 'mine' : ''}" type="button"
+           data-emoji="${escapeHtml(emoji)}" data-message-id="${msg.id}">
+           <span>${escapeHtml(emoji)}</span><span class="count">${entry.count}</span>
+         </button>`
+      )).join('');
+      return `<div class="reactions">${chips}</div>`;
+    }
+
     function buildMessageNode(msg) {
       const div = document.createElement('div');
       const isOwn = msg.user_id === currentUser.id;
@@ -2956,16 +3334,38 @@
         const ratio = (image.w && image.h) ? ` style="aspect-ratio:${image.w}/${image.h}"` : '';
         bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像"${ratio} loading="lazy">`;
       } else {
-        bodyHtml = `<div class="message-bubble">${escapeHtml(msg.content)}</div>`;
+        bodyHtml = `<div class="message-bubble"><span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span></div>`;
+      }
+
+      let quoteHtml = '';
+      if (msg.reply_to_id) {
+        const quoted = resolveQuoted(msg.reply_to_id);
+        // 余計な空白が入らないよう1行で組み立てる。
+        quoteHtml = `<div class="quote" data-jump-to="${msg.reply_to_id}">`
+          + `<div class="quote-name">${escapeHtml(quoted ? quoted.username : '')}</div>`
+          + `<div class="quote-text">${escapeHtml(quotePreviewText(quoted))}</div>`
+          + `</div>`;
+        // 引用は吹き出しの中に入れる。画像・カードのときは上に置く。
+        if (!cards && !image) {
+          bodyHtml = `<div class="message-bubble">${quoteHtml}`
+            + `<span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span></div>`;
+          quoteHtml = '';
+        }
       }
 
       div.innerHTML = `
         <div class="message-content">
+          ${quoteHtml}
           ${bodyHtml}
+          ${renderReactions(msg)}
           <div class="message-meta">
             ${isOwn ? '' : `<span class="username">${escapeHtml(msg.username)}</span>`}
             <span>${formatTime(msg.created_at)}</span>
+            ${isOwn ? readMarkHtml(msg) : ''}
           </div>
+        </div>
+        <div class="msg-actions">
+          <button class="msg-actions-btn" type="button" data-menu-for="${msg.id}" aria-label="操作">⋯</button>
         </div>
       `;
       return div;
@@ -3006,6 +3406,10 @@
       }
       seenMessageIds.add(msg.id);
       currentMessages.push(msg);
+      if (!reactionsByMessage.has(msg.id)) reactionsByMessage.set(msg.id, []);
+      if (msg.reply_to_id) {
+        loadQuotedMessages([msg]).then(() => refreshMessageNode(msg.id));
+      }
 
       const el = $('messages');
       const dividers = el.querySelectorAll('.day-divider');
@@ -3015,6 +3419,209 @@
 
       hydrateMessageImages();
       if (followNewMessages) scrollMessagesToBottom();
+    }
+
+    // --- 操作メニュー（返信・リアクション） ---
+
+    function closeMessageMenu() {
+      const open = document.querySelector('.msg-menu');
+      if (open) open.remove();
+    }
+
+    function openMessageMenu(messageId, anchor) {
+      closeMessageMenu();
+      const msg = currentMessages.find((m) => m.id === Number(messageId));
+      if (!msg) return;
+
+      const menu = document.createElement('div');
+      menu.className = 'msg-menu';
+      menu.innerHTML = `
+        <div class="msg-menu-emojis">
+          ${REACTION_CHOICES.map((e) => `<button type="button" data-emoji="${escapeHtml(e)}">${escapeHtml(e)}</button>`).join('')}
+        </div>
+        <button class="msg-menu-reply" type="button" data-action="reply">↩ 返信する</button>
+      `;
+      document.body.appendChild(menu);
+
+      // アンカーの近くに出す。画面外へはみ出さないよう寄せる。
+      const rect = anchor.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const left = Math.min(
+        Math.max(8, rect.left - menuRect.width / 2),
+        window.innerWidth - menuRect.width - 8
+      );
+      const top = rect.top - menuRect.height - 8 < 8
+        ? rect.bottom + 8
+        : rect.top - menuRect.height - 8;
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+
+      menu.addEventListener('click', (e) => {
+        const emojiBtn = e.target.closest('[data-emoji]');
+        if (emojiBtn) {
+          toggleReaction(msg.id, emojiBtn.dataset.emoji);
+          closeMessageMenu();
+          return;
+        }
+        if (e.target.closest('[data-action="reply"]')) {
+          setReplyTarget(msg);
+          closeMessageMenu();
+        }
+      });
+    }
+
+    // --- リアクション ---
+
+    async function toggleReaction(messageId, emoji) {
+      const list = reactionsByMessage.get(messageId) || [];
+      const mine = list.find((r) => r.user_id === currentUser.id && r.emoji === emoji);
+
+      // 通信を待たずに見た目を先に変える。失敗したら元に戻す。
+      const rollback = list.slice();
+      reactionsByMessage.set(
+        messageId,
+        mine
+          ? list.filter((r) => !(r.user_id === currentUser.id && r.emoji === emoji))
+          : list.concat([{ user_id: currentUser.id, emoji }])
+      );
+      refreshMessageNode(messageId);
+
+      try {
+        const query = mine
+          ? sb.from('chat_message_reactions').delete()
+              .eq('message_id', messageId).eq('user_id', currentUser.id).eq('emoji', emoji)
+          : sb.from('chat_message_reactions')
+              .insert({ message_id: messageId, user_id: currentUser.id, emoji });
+        const { error } = await query;
+        if (error) throw error;
+      } catch (error) {
+        console.error('Reaction error:', error);
+        reactionsByMessage.set(messageId, rollback);
+        refreshMessageNode(messageId);
+      }
+    }
+
+    // 1件だけ差し替える（全体を描き直すとスクロールが飛ぶため）。
+    function refreshMessageNode(messageId) {
+      const node = $('messages').querySelector(`.message[data-message-id="${messageId}"]`);
+      const msg = currentMessages.find((m) => m.id === Number(messageId));
+      if (!node || !msg) return;
+      const replacement = buildMessageNode(msg);
+      node.replaceWith(replacement);
+      hydrateMessageImages();
+    }
+
+    function refreshReadMarks() {
+      currentMessages.forEach((msg) => {
+        if (msg.user_id !== currentUser.id) return;
+        const node = $('messages').querySelector(`.message[data-message-id="${msg.id}"] .read-mark`);
+        const html = readMarkHtml(msg);
+        if (!node && html) {
+          refreshMessageNode(msg.id);
+        } else if (node) {
+          const next = html.replace(/<[^>]*>/g, '');
+          if (node.textContent !== next) node.textContent = next;
+        }
+      });
+    }
+
+    // --- 返信 ---
+
+    function setReplyTarget(msg) {
+      replyTarget = msg;
+      $('replyBar').classList.remove('hidden');
+      $('replyBarName').textContent = `${msg.username} に返信`;
+      $('replyBarText').textContent = quotePreviewText(msg);
+      $('messageInput').focus();
+    }
+
+    function clearReplyTarget() {
+      replyTarget = null;
+      $('replyBar').classList.add('hidden');
+    }
+
+    function jumpToLoadedMessage(messageId) {
+      const node = $('messages').querySelector(`.message[data-message-id="${messageId}"]`);
+      if (node) {
+        node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        node.classList.remove('flash');
+        void node.offsetWidth;
+        node.classList.add('flash');
+        return;
+      }
+      // まだ読み込んでいない古い発言なら、その位置を読み直して飛ぶ。
+      const quoted = quotedMessages.get(Number(messageId));
+      if (quoted && quoted.created_at) openMessageAt(currentGroupId, quoted.created_at, messageId);
+    }
+
+    // --- メンション ---
+
+    // 本文を参加者名と突き合わせて、実際に名指しされた人のIDを拾う。
+    // サーバー側でも参加者で絞り直すので、ここは入力補助に過ぎない。
+    function collectMentions(text) {
+      const names = groupMembers
+        .filter((u) => u.id !== currentUser.id)
+        .sort((a, b) => b.username.length - a.username.length);
+      const found = new Set();
+      const body = String(text ?? '');
+      names.forEach((user) => {
+        if (body.includes(`@${user.username}`) || body.includes(`＠${user.username}`)) {
+          found.add(user.id);
+        }
+      });
+      return [...found];
+    }
+
+    // 入力欄のカーソル直前が「@なにか」なら、その断片を返す。
+    function currentMentionFragment() {
+      const input = $('messageInput');
+      const upto = input.value.slice(0, input.selectionStart ?? input.value.length);
+      const hit = upto.match(/[@＠]([^\s@＠]*)$/);
+      return hit ? { query: hit[1], start: upto.length - hit[0].length } : null;
+    }
+
+    function updateMentionPicker() {
+      const pop = $('mentionPop');
+      const fragment = currentMentionFragment();
+      if (!fragment) {
+        pop.classList.add('hidden');
+        mentionCandidates = [];
+        return;
+      }
+
+      const query = fragment.query.toLowerCase();
+      mentionCandidates = groupMembers
+        .filter((u) => u.id !== currentUser.id && u.username.toLowerCase().includes(query))
+        .slice(0, 8);
+
+      if (!mentionCandidates.length) {
+        pop.classList.add('hidden');
+        return;
+      }
+
+      mentionActiveIndex = Math.min(mentionActiveIndex, mentionCandidates.length - 1);
+      pop.innerHTML = mentionCandidates.map((user, index) => `
+        <div class="mention-row ${index === mentionActiveIndex ? 'active' : ''}" data-index="${index}">
+          <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+          <span>${escapeHtml(user.username)}</span>
+        </div>
+      `).join('');
+      pop.classList.remove('hidden');
+    }
+
+    function applyMention(index) {
+      const user = mentionCandidates[index];
+      const fragment = currentMentionFragment();
+      if (!user || !fragment) return;
+      const input = $('messageInput');
+      const caret = input.selectionStart ?? input.value.length;
+      input.value = `${input.value.slice(0, fragment.start)}@${user.username} ${input.value.slice(caret)}`;
+      const next = fragment.start + user.username.length + 2;
+      input.setSelectionRange(next, next);
+      input.focus();
+      $('mentionPop').classList.add('hidden');
+      mentionCandidates = [];
+      mentionActiveIndex = 0;
     }
 
     // --- 過去メッセージの読み込み（上端まで遡ったとき） ---
@@ -3043,6 +3650,10 @@
         if (older.length) {
           currentMessages = older.concat(currentMessages);
           older.forEach((m) => seenMessageIds.add(m.id));
+          await Promise.all([
+            loadReactions(older.map((m) => m.id)),
+            loadQuotedMessages(older)
+          ]);
           renderMessageList();
           // 読み込み前に見ていた位置を保つ。
           el.scrollTop = el.scrollHeight - prevHeight + prevTop;
@@ -3282,12 +3893,15 @@
             group_id: currentGroupId,
             user_id: currentUser.id,
             username: currentUser.username,
-            content
+            content,
+            reply_to_id: replyTarget ? replyTarget.id : null,
+            mentions: collectMentions(content)
           })
           .select(MESSAGE_COLUMNS)
           .single();
         if (error) throw error;
 
+        clearReplyTarget();
         lastMessages[data.group_id] = data;
         // 自分が送ったときは必ず最新が見えている状態にする。
         followNewMessages = true;
@@ -3303,6 +3917,30 @@
     }
 
     function handleKeyPress(e) {
+      // メンション候補が出ている間は、上下と Enter を候補選択に使う。
+      if (mentionCandidates.length && !$('mentionPop').classList.contains('hidden')) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const step = e.key === 'ArrowDown' ? 1 : -1;
+          mentionActiveIndex = (mentionActiveIndex + step + mentionCandidates.length) % mentionCandidates.length;
+          updateMentionPicker();
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          applyMention(mentionActiveIndex);
+          return;
+        }
+        if (e.key === 'Escape') {
+          $('mentionPop').classList.add('hidden');
+          mentionCandidates = [];
+          return;
+        }
+      }
+      if (e.key === 'Escape' && replyTarget) {
+        clearReplyTarget();
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
@@ -3493,10 +4131,42 @@
 
     $('messages').addEventListener('scroll', handleMessagesScroll, { passive: true });
 
-    // 画像はクリックで拡大。署名URLは hydrate 済みの src をそのまま使う。
     $('messages').addEventListener('click', (e) => {
-      const img = e.target.closest && e.target.closest('img.msg-image');
-      if (img && img.src) openImageViewer(img.src);
+      if (!e.target.closest) return;
+
+      // 画像はクリックで拡大。署名URLは hydrate 済みの src をそのまま使う。
+      const img = e.target.closest('img.msg-image');
+      if (img && img.src) { openImageViewer(img.src); return; }
+
+      const chip = e.target.closest('.reaction-chip');
+      if (chip) { toggleReaction(Number(chip.dataset.messageId), chip.dataset.emoji); return; }
+
+      const menuBtn = e.target.closest('[data-menu-for]');
+      if (menuBtn) { openMessageMenu(menuBtn.dataset.menuFor, menuBtn); return; }
+
+      const quote = e.target.closest('[data-jump-to]');
+      if (quote) jumpToLoadedMessage(Number(quote.dataset.jumpTo));
+    });
+
+    // メニューの外側を触ったら閉じる。
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest) return;
+      if (e.target.closest('.msg-menu') || e.target.closest('[data-menu-for]')) return;
+      closeMessageMenu();
+    });
+    $('messages').addEventListener('scroll', closeMessageMenu, { passive: true });
+
+    // メンション候補
+    $('messageInput').addEventListener('input', updateMentionPicker);
+    $('messageInput').addEventListener('blur', () => {
+      // 候補のクリックが先に走るよう、閉じるのを少し遅らせる。
+      setTimeout(() => $('mentionPop').classList.add('hidden'), 150);
+    });
+    $('mentionPop').addEventListener('mousedown', (e) => {
+      const row = e.target.closest('.mention-row');
+      if (!row) return;
+      e.preventDefault();
+      applyMention(Number(row.dataset.index));
     });
 
     $('rememberInput').addEventListener('change', (e) => {

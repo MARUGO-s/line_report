@@ -35,6 +35,7 @@ type ChatMessageRow = {
   username: string
   content: string
   created_at: string
+  mentions: string[] | null
   chat_groups: {
     group_name: string
     is_direct: boolean
@@ -182,7 +183,7 @@ async function loadMessage(
 ): Promise<ChatMessageRow | null> {
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("id, group_id, user_id, username, content, created_at, chat_groups(group_name, is_direct)")
+    .select("id, group_id, user_id, username, content, created_at, mentions, chat_groups(group_name, is_direct)")
     .eq("id", messageId)
     .maybeSingle()
   if (error) throw new Error(`message load failed: ${error.message}`)
@@ -451,6 +452,9 @@ async function handleDispatch(
     const title = group?.is_direct
       ? String(message.username || "トーク")
       : String(group?.group_name || "トーク")
+    // 名指しされた人には、通知本文の頭でそれと分かるようにする。
+    const mentioned = Array.isArray(message.mentions) && message.mentions.includes(row.user_id)
+    const mentionPrefix = mentioned ? "@あなた宛 " : ""
     const pushSubscription: WebPushSubscription = {
       endpoint: row.endpoint,
       p256dh: row.p256dh,
@@ -460,8 +464,8 @@ async function handleDispatch(
       const response = await sendWebPush(pushSubscription, {
         title,
         body: group?.is_direct
-          ? preview
-          : `${message.username}: ${preview}`,
+          ? `${mentionPrefix}${preview}`
+          : `${mentionPrefix}${message.username}: ${preview}`,
         icon: "/line_report/icons/chat-android-192x192-v2.png",
         badge: "/line_report/icons/chat-favicon-48x48.png",
         tag: `chat-group-${message.group_id}`,
