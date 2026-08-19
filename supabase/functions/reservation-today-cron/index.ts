@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
-import { type ChatCard, postChatCard, resolveChatGroupId } from "../_shared/chat_bridge.ts"
+import { type ChatCard, postChatCardIndependent, resolveChatGroupId } from "../_shared/chat_bridge.ts"
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
 import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_link_auth.ts"
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts"
@@ -136,35 +136,33 @@ Deno.serve(async (req) => {
       ?? null
     const calendarUrl = await buildTodayReservationCalendarUrl(supabase, storeKey, today)
 
-    // LINE は 0 件だとグループ人数分課金されるので送らない。
-    // トークは無料なので、0 件でも「本日のご予約はありません」を残す。
-    const postTodayChatCard = async () => {
-      const chatGroupId = await resolveChatGroupId(supabase, target.roomId)
-      if (!chatGroupId) return
-      const chatResult = await postChatCard(supabase, {
+    // トークは LINE と独立。同じトークへは1日1回だけ送る。
+    const chatGroupId = await resolveChatGroupId(supabase, target.roomId)
+    if (chatGroupId) {
+      const chatResult = await postChatCardIndependent(supabase, {
         groupId: chatGroupId,
         kind: "reservation_today",
+        dedupeKey: targetDate,
         text: buildTodayReservationChatText(storeDisplayName, today, matched),
         cards: [buildTodayReservationChatCard(storeDisplayName, today, matched, calendarUrl)],
       })
       if (!chatResult.ok) {
         console.error(`chat card post failed for ${target.roomId}:`, chatResult.error)
         chatErrors.push(`${target.roomId}: ${chatResult.error}`)
-      } else {
+      } else if (!chatResult.skipped) {
         chatPosted.push(target.roomId)
       }
     }
 
     if (matched.length === 0) {
       skipped.push({ room_id: target.roomId, reason: "zero_reservations" })
-      await postTodayChatCard()
       continue
     }
 
     const flex = buildTodayReservationFlex(storeDisplayName, today, matched, calendarUrl)
     const sendResult = await sendLinePushMessages(target.roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
     if (!sendResult.ok) {
-      // 送信失敗時は予約行を取り消し、次回起動で再送できるようにする。
+      // LINE 失敗時だけ LINE 用ログを取り消す。トークはすでに単独送信済み。
       try {
         await supabase
           .from("reservation_today_alert_logs")
@@ -176,9 +174,6 @@ Deno.serve(async (req) => {
       continue
     }
     sent.push(target.roomId)
-
-    // LINE 送信が成功した分だけ複製するので、再送時に二重投稿にならない。
-    await postTodayChatCard()
   }
 
   return json({
@@ -774,10 +769,32 @@ async function handleTestSend(
     ?? reservations.find((r) => r.storeName)?.storeName
     ?? null
   const calendarUrl = await buildTodayReservationCalendarUrl(supabase, storeKey, today)
+  const targetDate = toJstDateString(today.year, today.month, today.day)
+  const chatGroupId = await resolveChatGroupId(supabase, spec.roomId)
+  let chatPosted = false
+  let chatError: string | undefined
+  if (chatGroupId) {
+    const chatResult = await postChatCardIndependent(supabase, {
+      groupId: chatGroupId,
+      kind: "reservation_today",
+      dedupeKey: `test:${targetDate}:${Date.now()}`,
+      text: buildTodayReservationChatText(storeDisplayName, today, reservations),
+      cards: [buildTodayReservationChatCard(storeDisplayName, today, reservations, calendarUrl)],
+    })
+    chatPosted = Boolean(chatResult.ok && !chatResult.skipped)
+    if (!chatResult.ok) chatError = chatResult.error
+  }
+
   const flex = buildTodayReservationFlex(storeDisplayName, today, reservations, calendarUrl)
   const sendResult = await sendLinePushMessages(spec.roomId, [flex], resolveStoreLineToken(storeKey, deps.lineAccessToken), storeKey)
   if (!sendResult.ok) {
-    return json({ ok: false, error: sendResult.error, mode: "test_today_reservation" }, 502)
+    return json({
+      ok: chatPosted,
+      error: sendResult.error,
+      mode: "test_today_reservation",
+      chat_posted: chatPosted,
+      chat_error: chatError ?? null,
+    }, chatPosted ? 200 : 502)
   }
   return json({
     ok: true,
@@ -785,8 +802,10 @@ async function handleTestSend(
     note: "Preview send only. reservation_today_alert_logs was NOT updated.",
     room_id: spec.roomId,
     store_partition_key: storeKey,
-    target_date: toJstDateString(today.year, today.month, today.day),
+    target_date: targetDate,
     reservation_count: reservations.length,
+    chat_posted: chatPosted,
+    chat_error: chatError ?? null,
   }, 200)
 }
 

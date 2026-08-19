@@ -115,8 +115,67 @@ export async function resolveChatGroupIdByStore(
 }
 
 /**
+ * トークへ単独投稿する。同じ kind + group + dedupeKey は一度だけ送る。
+ * LINE の成否とは独立。投稿失敗時は予約を取り消して再送できるようにする。
+ */
+export async function postChatCardIndependent(
+  supabase: DbClient,
+  options: {
+    groupId: number
+    text: string
+    cards: ChatCard[]
+    kind: string
+    dedupeKey: string
+  },
+): Promise<{ ok: boolean; skipped?: boolean; messageId?: number; error?: string }> {
+  const groupId = Number(options.groupId)
+  const dedupeKey = String(options.dedupeKey ?? '').trim()
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+    return { ok: false, error: 'invalid chat group id' }
+  }
+  if (!dedupeKey) return { ok: false, error: 'missing dedupe key' }
+
+  const { error: claimError } = await supabase
+    .from('chat_alert_dispatches')
+    .insert({
+      kind: options.kind,
+      chat_group_id: groupId,
+      dedupe_key: dedupeKey,
+    })
+  if (claimError) {
+    if (String(claimError.code ?? '') === '23505') {
+      return { ok: true, skipped: true }
+    }
+    return { ok: false, error: `chat dispatch claim failed: ${claimError.message}` }
+  }
+
+  const posted = await postChatCard(supabase, options)
+  if (!posted.ok) {
+    try {
+      await supabase
+        .from('chat_alert_dispatches')
+        .delete()
+        .eq('kind', options.kind)
+        .eq('chat_group_id', groupId)
+        .eq('dedupe_key', dedupeKey)
+    } catch (_e) { /* noop */ }
+    return posted
+  }
+
+  if (posted.messageId) {
+    await supabase
+      .from('chat_alert_dispatches')
+      .update({ message_id: posted.messageId })
+      .eq('kind', options.kind)
+      .eq('chat_group_id', groupId)
+      .eq('dedupe_key', dedupeKey)
+  }
+  return posted
+}
+
+/**
  * カードを1件投稿し、続けて Web Push を配信する。
- * LINE 送信の成否とは独立に扱いたいので、失敗しても例外を投げず結果を返すだけにする。
+ * 失敗しても例外を投げず結果を返すだけにする。
  */
 export async function postChatCard(
   supabase: DbClient,

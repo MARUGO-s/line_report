@@ -10,7 +10,7 @@ import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";
 import { resolveGroqTextModel } from "../_shared/groq_model.ts";
 import {
   type ChatCard,
-  postChatCard,
+  postChatCardIndependent,
   resolveChatGroupId,
   resolveChatGroupIdByStore,
 } from "../_shared/chat_bridge.ts";
@@ -662,6 +662,28 @@ async function maybeSendGmailReservationAlerts(params: {
       batch.alerts,
     );
     const batchSuccessfulRoomIds: string[] = [];
+    const chatDedupeKey = batch.alerts.map((alert) => String(alert.id)).sort().join(",");
+    const chatGroupId = await resolveChatGroupId(
+      supabase,
+      batch.targets[0]?.roomId ?? "",
+    ) ?? await resolveChatGroupIdByStore(supabase, batch.storeKey);
+    if (chatGroupId && !postedChatGroupIds.has(chatGroupId)) {
+      const chatResult = await postChatCardIndependent(supabase, {
+        groupId: chatGroupId,
+        kind: "reservation_alert",
+        dedupeKey: chatDedupeKey || `batch:${batch.batchKey}`,
+        text: linePayload.text,
+        cards: linePayload.chatCards,
+      });
+      if (!chatResult.ok) {
+        console.error(
+          `chat card post failed for store ${batch.storeKey}:`,
+          chatResult.error,
+        );
+      } else if (!chatResult.skipped) {
+        postedChatGroupIds.add(chatGroupId);
+      }
+    }
 
     for (const target of batch.targets) {
       const targetRoomId = target.roomId;
@@ -705,26 +727,6 @@ async function maybeSendGmailReservationAlerts(params: {
 
       batchSuccessfulRoomIds.push(targetRoomId);
       successfulTargetRoomIds.add(targetRoomId);
-      // 同じ内容を chat.html のトークルームにもカードとして流す。
-      // ルーム直指定が無ければ、同じ店舗キーのトーク（マルゴセカンド予約など）へ落とす。
-      const chatGroupId = await resolveChatGroupId(supabase, targetRoomId)
-        ?? await resolveChatGroupIdByStore(supabase, batch.storeKey ?? target.storeKey);
-      if (chatGroupId && !postedChatGroupIds.has(chatGroupId)) {
-        const chatResult = await postChatCard(supabase, {
-          groupId: chatGroupId,
-          kind: "reservation_alert",
-          text: linePayload.text,
-          cards: linePayload.chatCards,
-        });
-        if (!chatResult.ok) {
-          console.error(
-            `chat card post failed for ${targetRoomId}:`,
-            chatResult.error,
-          );
-        } else {
-          postedChatGroupIds.add(chatGroupId);
-        }
-      }
       // 配信間隔スロットリングの起点を更新（このルームの次回対象タイミングをここから数える）。
       await markGmailAlertRoomSent(supabase, targetRoomId, now.toISOString());
       await writeDeliveryLog(supabase, {

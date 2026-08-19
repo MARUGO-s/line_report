@@ -48,15 +48,13 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 
 ## 予約通知の複製
 
-LINE へ送っている予約通知を、同じ内容のカードとしてトークにも流す。
+予約通知のトーク配信は LINE と **同じ cron で発火するが、送信は独立**。
+LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 
-- 対応付け: `room_summary_settings.chat_group_id`。null なら複製しない
-- 新規予約・変更・キャンセル: `gmail-alert-cron`
-- 本日の予約まとめ: `reservation-today-cron`
+- 対応付け: `room_summary_settings.chat_group_id`。無ければ同じ店舗キーのトーク
+- 新規予約・変更・キャンセル: `gmail-alert-cron`（先にトーク、続けて LINE）
+- 本日の予約まとめ: `reservation-today-cron`（トークは 0 件でも送る。LINE は 0 件だと送らない）
 - 共通処理: `supabase/functions/_shared/chat_bridge.ts`
-
-LINE 送信が成功した分だけ複製する。`reservation-today-cron` は送信失敗時に
-重複防止ログを消して再送するため、成功時のみ複製しないと二重投稿になる。
 
 投稿後は `chat-push?action=dispatch` を内部シークレットで叩き、Web Push まで配信する。
 
