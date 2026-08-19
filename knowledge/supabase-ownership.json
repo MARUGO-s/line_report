@@ -5,6 +5,7 @@
   "ownedFunctions": [
     "admin-api",
     "ai-analyze",
+    "chat-knowledge",
     "chat-push",
     "foodcourt-forecast-cron",
     "gmail-alert-cron",
