@@ -175,6 +175,7 @@
     .groups-scroll {
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;
     }
 
     .section-label {
@@ -183,6 +184,38 @@
       padding: 10px 18px 4px;
     }
 
+    .swipe-row {
+      position: relative;
+      overflow: hidden;
+    }
+    .swipe-actions {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      display: flex;
+    }
+    .swipe-actions-left { left: 0; }
+    .swipe-actions-right { right: 0; }
+    .swipe-btn {
+      width: 72px;
+      border: 0;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 0;
+    }
+    .swipe-btn svg { display: block; }
+    .swipe-pin { background: #8ee08a; }
+    .swipe-mute { background: #06c755; }
+    .swipe-hide { background: #3a3a3c; }
+    .swipe-delete { background: #ff3b30; }
+
     .group-item {
       display: flex;
       align-items: center;
@@ -190,6 +223,10 @@
       padding: 10px 16px;
       cursor: pointer;
       min-height: 72px;
+      position: relative;
+      z-index: 1;
+      background: var(--list-bg);
+      touch-action: pan-y;
     }
 
     .group-item:hover { background: var(--list-hover); }
@@ -348,7 +385,8 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .pin-mark {
+    .pin-mark,
+    .mute-mark {
       flex-shrink: 0;
       color: #8e8e93;
       display: inline-flex;
@@ -358,17 +396,7 @@
       margin: 4px 16px;
       background: #2c2c2e;
     }
-    .talk-sheet-action {
-      width: 100%;
-      border: 0;
-      background: #f2f2f2;
-      color: #111;
-      border-radius: 10px;
-      padding: 14px 12px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-    }
+
     .talk-time {
       font-size: 12px;
       color: var(--muted);
@@ -1493,13 +1521,6 @@
     </div>
   </div>
 
-  <div class="invite-overlay hidden" id="talkActionSheet" onclick="if (event.target === this) closeTalkMenu()">
-    <div class="invite-sheet" role="menu" aria-label="トーク操作">
-      <button class="talk-sheet-action" type="button" id="talkPinBtn" onclick="toggleTalkPin()"></button>
-      <button class="invite-close" type="button" onclick="closeTalkMenu()">キャンセル</button>
-    </div>
-  </div>
-
   <div class="account-menu-overlay hidden" id="accountMenu" onclick="if (event.target === this) closeAccountMenu()">
     <div class="account-menu" role="menu" aria-label="アカウントメニュー">
       <div class="account-menu-user" id="accountMenuUser"></div>
@@ -1605,10 +1626,10 @@
     let unread = {};
     let lastMessages = {};
     let talkTab = 'all';
-    let talkMenuGroup = null;
-    let talkPressTimer = null;
-    let talkPressOpenedMenu = false;
     const TALK_PIN_LIMIT = 5;
+    const SWIPE_BTN_W = 72;
+    const SWIPE_OPEN = SWIPE_BTN_W * 2;
+    let openSwipeWrap = null;
     let seenMessageIds = new Set();
     let channel = null;
     let pendingCredentials = null;
@@ -1991,6 +2012,13 @@
 
     function handleIncomingMessage(msg) {
       lastMessages[msg.group_id] = msg;
+      const group = myGroups.find((g) => Number(g.id) === Number(msg.group_id));
+      if (group && group.hidden_at && msg.user_id !== currentUser.id) {
+        group.hidden_at = null;
+        patchMineGroup(group.id, { hidden_at: null });
+        sb.rpc('chat_set_hidden', { p_group_id: group.id, p_hidden: false })
+          .then(({ error }) => { if (error) console.error('Unhide error:', error); });
+      }
       if (Number(msg.group_id) === currentGroupId) {
         addMessageToUI(msg);
         if (msg.user_id !== currentUser.id) markGroupRead(currentGroupId);
@@ -2005,7 +2033,7 @@
       try {
         const [mineRes, allRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('pinned_at, chat_groups(id, group_name, created_at, icon_url, is_direct, direct_key)')
+            .select('pinned_at, muted_at, hidden_at, chat_groups(id, group_name, created_at, icon_url, is_direct, direct_key)')
             .eq('user_id', currentUser.id),
           sb.from('chat_groups')
             .select('id, group_name, created_at, icon_url, is_direct, direct_key')
@@ -2017,7 +2045,11 @@
 
         const mine = (mineRes.data || [])
           .map((row) => row.chat_groups
-            ? Object.assign({}, row.chat_groups, { pinned_at: row.pinned_at || null })
+            ? Object.assign({}, row.chat_groups, {
+                pinned_at: row.pinned_at || null,
+                muted_at: row.muted_at || null,
+                hidden_at: row.hidden_at || null
+              })
             : null)
           .filter(Boolean);
         const mineIds = new Set(mine.map((g) => g.id));
@@ -3057,84 +3089,152 @@
         + `<path d="M16 3h-2V2h-4v1H8v2h1.1l1.2 8.1A3 3 0 0 0 12 16.9V22h2v-5.1a3 3 0 0 0 2.7-2.8L17.9 5H19V3h-3z"/></svg></span>`;
     }
 
+    function muteMarkHtml() {
+      return `<span class="mute-mark" title="非通知" aria-hidden="true">`
+        + `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">`
+        + `<path d="M4.3 3 3 4.3 7.7 9H4v6h4l5 5v-6.7l5.7 5.7 1.3-1.3L4.3 3zM16.5 12c0-.7-.2-1.4-.5-2l-1.5 1.5c.10.10.0.3.2.5H16.5zM14 3.2v2.1c1.8.7 3 2.5 3 4.7h2c0-3.2-1.9-6-5-7z"/></svg></span>`;
+    }
+
     function lastTalkAt(group) {
       return lastMessages[group.id] ? lastMessages[group.id].created_at : group.created_at;
     }
 
-    function bindTalkRowGestures(item, group) {
-      item.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        openTalkMenu(group);
-      });
-      item.addEventListener('touchstart', (e) => {
-        if (e.touches.length !== 1) return;
-        talkPressOpenedMenu = false;
-        clearTimeout(talkPressTimer);
-        talkPressTimer = setTimeout(() => {
-          talkPressOpenedMenu = true;
-          openTalkMenu(group);
-        }, 500);
-      }, { passive: true });
-      const cancelPress = () => {
-        clearTimeout(talkPressTimer);
-        talkPressTimer = null;
+    function patchMineGroup(groupId, patch) {
+      const mine = myGroups.find((g) => Number(g.id) === Number(groupId));
+      if (mine) Object.assign(mine, patch);
+      return mine;
+    }
+
+    function closeOpenSwipe() {
+      if (!openSwipeWrap) return;
+      setSwipeX(openSwipeWrap, 0, true);
+      openSwipeWrap = null;
+    }
+
+    function setSwipeX(wrap, x, animate) {
+      const front = wrap.querySelector('.swipe-front');
+      if (!front) return;
+      wrap._swipeX = x;
+      front.style.transition = animate ? 'transform 180ms ease' : 'none';
+      front.style.transform = `translateX(${x}px)`;
+    }
+
+    function bindTalkSwipe(wrap, group) {
+      const front = wrap.querySelector('.swipe-front');
+      let pid = null;
+      let x0 = 0;
+      let y0 = 0;
+      let startX = 0;
+      let axis = null;
+      let moved = false;
+
+      const onDown = (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        if (openSwipeWrap && openSwipeWrap !== wrap) closeOpenSwipe();
+        pid = e.pointerId;
+        x0 = e.clientX;
+        y0 = e.clientY;
+        startX = wrap._swipeX || 0;
+        axis = null;
+        moved = false;
+        try { front.setPointerCapture(pid); } catch (_err) { /* noop */ }
       };
-      item.addEventListener('touchend', cancelPress);
-      item.addEventListener('touchmove', cancelPress);
-      item.addEventListener('touchcancel', cancelPress);
-      item.onclick = () => {
-        if (talkPressOpenedMenu) {
-          talkPressOpenedMenu = false;
+
+      const onMove = (e) => {
+        if (pid == null || e.pointerId !== pid) return;
+        const dx = e.clientX - x0;
+        const dy = e.clientY - y0;
+        if (!axis) {
+          if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+          axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+          if (axis === 'y') {
+            try { front.releasePointerCapture(pid); } catch (_err) { /* noop */ }
+            pid = null;
+            return;
+          }
+        }
+        if (axis !== 'x') return;
+        e.preventDefault();
+        moved = Math.abs(dx) > 6;
+        const next = Math.max(-SWIPE_OPEN, Math.min(SWIPE_OPEN, startX + dx));
+        setSwipeX(wrap, next, false);
+      };
+
+      const onUp = (e) => {
+        if (pid == null || e.pointerId !== pid) return;
+        const x = wrap._swipeX || 0;
+        pid = null;
+        axis = null;
+        let snap = 0;
+        if (x > 48) snap = SWIPE_OPEN;
+        else if (x < -48) snap = -SWIPE_OPEN;
+        setSwipeX(wrap, snap, true);
+        openSwipeWrap = snap ? wrap : null;
+        if (moved) {
+          wrap._ignoreClick = true;
+          setTimeout(() => { wrap._ignoreClick = false; }, 250);
+        }
+      };
+
+      front.addEventListener('pointerdown', onDown);
+      front.addEventListener('pointermove', onMove, { passive: false });
+      front.addEventListener('pointerup', onUp);
+      front.addEventListener('pointercancel', onUp);
+      front.addEventListener('click', (e) => {
+        if (wrap._ignoreClick) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        if (wrap._swipeX) {
+          e.preventDefault();
+          closeOpenSwipe();
           return;
         }
         selectGroup(group);
-      };
+      });
     }
 
-    function openTalkMenu(group) {
-      if (!group || !currentUser) return;
-      talkMenuGroup = group;
-      const btn = $('talkPinBtn');
-      btn.textContent = group.pinned_at ? 'ピン留めを解除' : 'ピン留め';
-      $('talkActionSheet').classList.remove('hidden');
-    }
-
-    function closeTalkMenu() {
-      $('talkActionSheet').classList.add('hidden');
-      talkMenuGroup = null;
-    }
-
-    async function toggleTalkPin() {
-      const group = talkMenuGroup;
-      if (!group || !currentUser) return;
-      const nextPinned = !group.pinned_at;
-      if (nextPinned) {
+    async function setTalkPinned(group, pinned) {
+      if (pinned) {
         const pinnedCount = myGroups.filter((g) => g.pinned_at && g.id !== group.id).length;
         if (pinnedCount >= TALK_PIN_LIMIT) {
           alert('ピン留めは5件までです');
           return;
         }
       }
-      closeTalkMenu();
-      try {
-        const { error } = await sb.rpc('chat_set_pin', {
-          p_group_id: group.id,
-          p_pinned: nextPinned
-        });
-        if (error) throw error;
-        group.pinned_at = nextPinned ? new Date().toISOString() : null;
-        const mine = myGroups.find((g) => g.id === group.id);
-        if (mine) mine.pinned_at = group.pinned_at;
-        renderGroups();
-      } catch (error) {
-        console.error('Pin error:', error);
-        alert(error.message || 'ピン留めに失敗しました');
-      }
+      const { error } = await sb.rpc('chat_set_pin', { p_group_id: group.id, p_pinned: pinned });
+      if (error) throw error;
+      group.pinned_at = pinned ? new Date().toISOString() : null;
+      patchMineGroup(group.id, { pinned_at: group.pinned_at });
+    }
+
+    async function setTalkMuted(group, muted) {
+      const { error } = await sb.rpc('chat_set_mute', { p_group_id: group.id, p_muted: muted });
+      if (error) throw error;
+      group.muted_at = muted ? new Date().toISOString() : null;
+      patchMineGroup(group.id, { muted_at: group.muted_at });
+    }
+
+    async function setTalkHidden(group, hidden) {
+      const { error } = await sb.rpc('chat_set_hidden', { p_group_id: group.id, p_hidden: hidden });
+      if (error) throw error;
+      group.hidden_at = hidden ? new Date().toISOString() : null;
+      patchMineGroup(group.id, { hidden_at: group.hidden_at });
+    }
+
+    async function deleteTalk(group) {
+      if (!confirm('このトークを削除しますか？')) return;
+      if (Number(currentGroupId) === Number(group.id)) closeChat();
+      const { error } = await sb.from('chat_group_members')
+        .delete()
+        .eq('group_id', group.id)
+        .eq('user_id', currentUser.id);
+      if (error) throw error;
+      myGroups = myGroups.filter((g) => Number(g.id) !== Number(group.id));
     }
 
     function renderTalkRow(group, options) {
-      const item = document.createElement('div');
-      item.className = 'group-item' + (currentGroupId === group.id ? ' active' : '');
       const last = lastMessages[group.id];
       const title = roomTitle(group);
       const icon = roomIcon(group);
@@ -3144,11 +3244,15 @@
       const when = last ? last.created_at : group.created_at;
       const count = unread[group.id] || 0;
       const pinned = !options.joinable && group.pinned_at;
-      item.innerHTML = `
+      const muted = !options.joinable && group.muted_at;
+
+      const front = document.createElement('div');
+      front.className = 'group-item swipe-front' + (currentGroupId === group.id ? ' active' : '');
+      front.innerHTML = `
         <div class="talk-avatar" style="background:${icon ? '#2c2c2e' : avatarStyle(title)}">${avatarHtml(title, icon)}</div>
         <div class="talk-body">
           <div class="talk-row">
-            <div class="group-item-name">${pinned ? pinMarkHtml() : ''}<span>${escapeHtml(title)}</span></div>
+            <div class="group-item-name">${pinned ? pinMarkHtml() : ''}${muted ? muteMarkHtml() : ''}<span>${escapeHtml(title)}</span></div>
             <div class="talk-time">${formatTalkTime(when)}</div>
           </div>
           <div class="talk-preview-row">
@@ -3163,11 +3267,59 @@
         button.className = 'join-btn';
         button.textContent = '参加';
         button.onclick = (e) => { e.stopPropagation(); joinGroup(group.id); };
-        item.appendChild(button);
-      } else {
-        bindTalkRowGestures(item, group);
+        front.appendChild(button);
+        front.onclick = () => {};
+        return front;
       }
-      return item;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'swipe-row';
+      wrap.innerHTML = `
+        <div class="swipe-actions swipe-actions-left">
+          <button class="swipe-btn swipe-pin" type="button" aria-label="${pinned ? 'ピン留めを解除' : 'ピン留め'}">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3h-2V2h-4v1H8v2h1.1l1.2 8.1A3 3 0 0 0 12 16.9V22h2v-5.1a3 3 0 0 0 2.7-2.8L17.9 5H19V3h-3z"/></svg>
+          </button>
+          <button class="swipe-btn swipe-mute" type="button" aria-label="${muted ? '通知する' : '非通知'}">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="${muted
+              ? 'M4 9v6h4l5 5V4L8 9H4zm11.5 3A4.5 4.5 0 0 0 13 8.2v7.6a4.5 4.5 0 0 0 2.5-3.8z'
+              : 'M4.3 3 3 4.3 7.7 9H4v6h4l5 5v-6.7l5.7 5.7 1.3-1.3L4.3 3zM16.5 12c0-.7-.2-1.4-.5-2l-1.5 1.5c.10.10.0.3.2.5H16.5z'}"/></svg>
+          </button>
+        </div>
+        <div class="swipe-actions swipe-actions-right">
+          <button class="swipe-btn swipe-hide" type="button">非表示</button>
+          <button class="swipe-btn swipe-delete" type="button">削除</button>
+        </div>
+      `;
+      wrap.appendChild(front);
+
+      const run = async (fn) => {
+        closeOpenSwipe();
+        try {
+          await fn();
+          renderGroups();
+        } catch (error) {
+          console.error('Talk swipe error:', error);
+          alert(error.message || '操作に失敗しました');
+        }
+      };
+      wrap.querySelector('.swipe-pin').onclick = (e) => {
+        e.stopPropagation();
+        run(() => setTalkPinned(group, !group.pinned_at));
+      };
+      wrap.querySelector('.swipe-mute').onclick = (e) => {
+        e.stopPropagation();
+        run(() => setTalkMuted(group, !group.muted_at));
+      };
+      wrap.querySelector('.swipe-hide').onclick = (e) => {
+        e.stopPropagation();
+        run(() => setTalkHidden(group, true));
+      };
+      wrap.querySelector('.swipe-delete').onclick = (e) => {
+        e.stopPropagation();
+        run(() => deleteTalk(group));
+      };
+      bindTalkSwipe(wrap, group);
+      return wrap;
     }
 
     function renderGroups() {
@@ -3189,10 +3341,12 @@
       const showMine = talkTab === 'all' || talkTab === 'groups' || talkTab === 'friends';
       const showOther = talkTab === 'all';
 
+      const searchQ = ($('talkSearch').value || '').trim();
       const mineVisible = showMine
         ? myGroups.filter((g) => {
             if (talkTab === 'friends' && !g.is_direct) return false;
             if (talkTab === 'groups' && g.is_direct) return false;
+            if (g.hidden_at && !searchQ) return false;
             return matchesQuery(g, lastMessages[g.id] && lastMessages[g.id].content);
           })
         : [];
@@ -3323,6 +3477,10 @@
 
     async function selectGroup(group) {
       currentGroupId = group.id;
+      if (group.hidden_at) {
+        group.hidden_at = null;
+        setTalkHidden(group, false).catch((error) => console.error('Unhide error:', error));
+      }
       markGroupRead(group.id);
       document.body.classList.add('chat-open');
 
@@ -4189,7 +4347,7 @@
 
     async function logout() {
       closeAccountMenu();
-      closeTalkMenu();
+      closeOpenSwipe();
       if (channel) { sb.removeChannel(channel); channel = null; }
       if (pushPreferenceChannel) { sb.removeChannel(pushPreferenceChannel); pushPreferenceChannel = null; }
       if (pushSubscription) {
@@ -4412,10 +4570,9 @@
     });
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !$('talkActionSheet').classList.contains('hidden')) {
-        closeTalkMenu();
-      }
+      if (e.key === 'Escape') closeOpenSwipe();
     });
+    document.querySelector('.groups-scroll').addEventListener('scroll', closeOpenSwipe, { passive: true });
 
     $('rememberInput').addEventListener('change', (e) => {
       if (!e.target.checked) clearCredentials();
