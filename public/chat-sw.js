@@ -1,20 +1,21 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v4';
+const CHAT_CACHE = 'line-report-chat-v5';
 const CHAT_SHELL = [
   './chat.html',
   './chat.webmanifest',
   './pages-config.js',
   './vendor/supabase/supabase-2.110.9.min.js',
-  './icons/chat-android-192x192-v2.png',
-  './icons/chat-android-512x512-v2.png',
-  './icons/chat-maskable-192x192-v2.png',
-  './icons/chat-maskable-512x512-v2.png',
-  './icons/chat-apple-touch-icon-v2.png',
-  './icons/chat-favicon-v2.ico',
-  './icons/chat-favicon-32x32.png',
-  './icons/chat-favicon-16x16.png',
-  './icons/chat-favicon-48x48.png',
+  './icons/chat-logo-v3.svg',
+  './icons/chat-android-192x192-v3.png',
+  './icons/chat-android-512x512-v3.png',
+  './icons/chat-maskable-192x192-v3.png',
+  './icons/chat-maskable-512x512-v3.png',
+  './icons/chat-apple-touch-icon-v3.png',
+  './icons/chat-favicon-v3.ico',
+  './icons/chat-favicon-32x32-v3.png',
+  './icons/chat-favicon-16x16-v3.png',
+  './icons/chat-favicon-48x48-v3.png',
 ];
 const CHAT_ENTRY_URL = new URL('./chat.html', self.location.href).href;
 const CHAT_ASSET_URLS = new Set(CHAT_SHELL.map((path) => new URL(path, self.location.href).href));
@@ -117,8 +118,8 @@ self.addEventListener('push', (event) => {
   const title = String(data.title || 'トーク');
   const options = {
     body: String(data.body || '新しいメッセージがあります'),
-    icon: data.icon || './icons/chat-android-192x192-v2.png',
-    badge: data.badge || './icons/chat-favicon-48x48.png',
+    icon: data.icon || './icons/chat-android-192x192-v3.png',
+    badge: data.badge || './icons/chat-favicon-48x48-v3.png',
     tag: data.tag || 'line-report-chat',
     renotify: data.renotify !== false,
     timestamp: Number(data.timestamp) || Date.now(),

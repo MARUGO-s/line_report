@@ -21,24 +21,27 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.equal(parsedManifest.start_url, "/line_report/chat.html")
   assert.equal(parsedManifest.display, "standalone")
   assert.match(html, /rel="manifest" href="chat\.webmanifest"/)
-  assert.match(html, /rel="icon" href="icons\/chat-favicon-v2\.ico" sizes="any"/)
-  assert.match(html, /rel="icon" type="image\/png" sizes="48x48" href="icons\/chat-favicon-48x48\.png"/)
-  assert.match(html, /rel="icon" type="image\/png" sizes="32x32" href="icons\/chat-favicon-32x32\.png"/)
-  assert.match(html, /rel="icon" type="image\/png" sizes="16x16" href="icons\/chat-favicon-16x16\.png"/)
-  assert.match(html, /rel="apple-touch-icon" sizes="180x180" href="icons\/chat-apple-touch-icon-v2\.png"/)
+  assert.match(html, /rel="icon" type="image\/svg\+xml" href="icons\/chat-logo-v3\.svg"/)
+  assert.match(html, /rel="icon" href="icons\/chat-favicon-v3\.ico" sizes="any"/)
+  assert.match(html, /rel="icon" type="image\/png" sizes="48x48" href="icons\/chat-favicon-48x48-v3\.png"/)
+  assert.match(html, /rel="icon" type="image\/png" sizes="32x32" href="icons\/chat-favicon-32x32-v3\.png"/)
+  assert.match(html, /rel="icon" type="image\/png" sizes="16x16" href="icons\/chat-favicon-16x16-v3\.png"/)
+  assert.match(html, /rel="apple-touch-icon" sizes="180x180" href="icons\/chat-apple-touch-icon-v3\.png"/)
+  assert.match(html, /src="icons\/chat-logo-v3\.svg"/)
   assert.doesNotMatch(html, /line-report-favicon/)
   assert.match(indexHtml, /icons\/line-report-favicon\.ico/)
   assert.doesNotMatch(indexHtml, /chat-favicon/)
-  assert.equal(parsedManifest.icons[0].src, "icons/chat-android-192x192-v2.png")
-  assert.equal(parsedManifest.icons[1].src, "icons/chat-maskable-192x192-v2.png")
-  assert.equal(parsedManifest.icons[2].src, "icons/chat-android-512x512-v2.png")
-  assert.equal(parsedManifest.icons[3].src, "icons/chat-maskable-512x512-v2.png")
+  assert.equal(parsedManifest.icons[0].src, "icons/chat-android-192x192-v3.png")
+  assert.equal(parsedManifest.icons[1].src, "icons/chat-maskable-192x192-v3.png")
+  assert.equal(parsedManifest.icons[2].src, "icons/chat-android-512x512-v3.png")
+  assert.equal(parsedManifest.icons[3].src, "icons/chat-maskable-512x512-v3.png")
   const iconPaths = [
-    "public/icons/chat-favicon-v2.ico",
-    "public/icons/chat-favicon-16x16.png",
-    "public/icons/chat-favicon-32x32.png",
-    "public/icons/chat-favicon-48x48.png",
-    "public/icons/chat-apple-touch-icon-v2.png",
+    "public/icons/chat-logo-v3.svg",
+    "public/icons/chat-favicon-v3.ico",
+    "public/icons/chat-favicon-16x16-v3.png",
+    "public/icons/chat-favicon-32x32-v3.png",
+    "public/icons/chat-favicon-48x48-v3.png",
+    "public/icons/chat-apple-touch-icon-v3.png",
     ...parsedManifest.icons.map((icon: { src: string }) => `public/${icon.src}`),
   ]
   for (const path of iconPaths) {
@@ -54,13 +57,14 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v4/)
-  assert.match(serviceWorker, /chat-apple-touch-icon-v2\.png/)
-  assert.match(serviceWorker, /chat-android-192x192-v2\.png/)
-  assert.match(serviceWorker, /chat-favicon-v2\.ico/)
-  assert.match(serviceWorker, /chat-favicon-32x32\.png/)
-  assert.match(serviceWorker, /chat-favicon-16x16\.png/)
-  assert.match(serviceWorker, /chat-favicon-48x48\.png/)
+  assert.match(serviceWorker, /line-report-chat-v5/)
+  assert.match(serviceWorker, /chat-logo-v3\.svg/)
+  assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
+  assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
+  assert.match(serviceWorker, /chat-favicon-v3\.ico/)
+  assert.match(serviceWorker, /chat-favicon-32x32-v3\.png/)
+  assert.match(serviceWorker, /chat-favicon-16x16-v3\.png/)
+  assert.match(serviceWorker, /chat-favicon-48x48-v3\.png/)
   assert.match(serviceWorker, /showNotification/)
   assert.match(serviceWorker, /notificationclick/)
   assert.match(serviceWorker, /setAppBadge/)
@@ -132,8 +136,8 @@ test("chat push endpoint requires Supabase Auth and excludes the sender", async 
   assert.match(edge, /action === "preferences"/)
   assert.match(edge, /chat_push_unread_totals/)
   assert.match(edge, /badge_count: unreadTotals\.get\(row\.user_id\) \?\? null/)
-  assert.match(edge, /chat-android-192x192-v2\.png/)
-  assert.match(edge, /chat-favicon-48x48\.png/)
+  assert.match(edge, /chat-android-192x192-v3\.png/)
+  assert.match(edge, /chat-favicon-48x48-v3\.png/)
   assert.match(edge, /バッジ件数の取得失敗でWeb Push本体を止めない/)
 })
 
