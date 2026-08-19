@@ -13,7 +13,15 @@ if ! node scripts/check-graphify-sql-coverage.mjs; then
   graphify extract . --code-only --out . --force
   node scripts/check-graphify-sql-coverage.mjs
 fi
-graphify cluster-only . --no-label
+graph_node_count="$(
+  node -e "const fs=require('fs');const g=JSON.parse(fs.readFileSync('graphify-out/graph.json','utf8'));process.stdout.write(String((g.nodes||[]).length))"
+)"
+if (( graph_node_count > 5000 )); then
+  echo "[graphify] generating a large public graph (${graph_node_count} nodes)."
+  GRAPHIFY_VIZ_NODE_LIMIT="$((graph_node_count + 500))" graphify cluster-only . --no-label
+else
+  graphify cluster-only . --no-label
+fi
 
 mkdir -p public/system-map
 cp graphify-out/graph.html public/system-map/graph.html

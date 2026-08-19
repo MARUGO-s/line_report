@@ -127,6 +127,11 @@ if (!(await exists(manifestPath))) {
       errors.push(`Graphify manifest references missing file: ${file}`);
       continue;
     }
+    const extension = file.toLowerCase().split(".").pop();
+    // knowledge:update is intentionally code-only. Older manifests can still carry
+    // semantic hashes for Markdown/public HTML from full Graphify runs, so checking
+    // those against the code-only manifest makes every docs edit permanently stale.
+    if (extension === "md" || extension === "html") continue;
     const currentHash = await md5(path);
     if (entry.ast_hash && currentHash !== entry.ast_hash) {
       errors.push(`Graphify is stale for ${file}`);

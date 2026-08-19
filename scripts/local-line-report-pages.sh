@@ -26,6 +26,7 @@ fi
 echo "Serving ${SERVE_ROOT} at ${BASE_URL}"
 echo "  管理画面: ${BASE_URL}index.html"
 echo "  売上分析: ${BASE_URL}analytics.html"
+echo "  トーク:   ${BASE_URL}chat.html"
 echo "  システムマップ: ${BASE_URL}system-map.html"
 echo "  メディア:   ${BASE_URL}media.html"
 echo "  予約表:   ${BASE_URL}reservation.html"

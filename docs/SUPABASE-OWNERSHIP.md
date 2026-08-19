@@ -20,6 +20,7 @@ LINE Report はSupabaseプロジェクト `hocbnifuactbvmyjraxy` を使用しま
 3. `supabase/functions/` に新しいFunctionを追加した場合は、台帳にも明示的に追加する。
 4. 台帳に存在するFunctionのディレクトリが消えた場合はCIを失敗させる。
 5. Journal ReportのDB・Storageは公開Pagesから直接触らず、`admin-api` 経由を維持する。
+6. `chat-push` はチャット専用Web Push購読をservice_roleで管理し、ブラウザのSupabase Auth access tokenを関数内で検証する。
 
 ## 共有される影響範囲
 

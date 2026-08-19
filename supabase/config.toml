@@ -79,3 +79,8 @@ verify_jwt = false
 # 二重送信は last_alerted_rating_total（直近通知時点の累計口コミ数）で防止する冪等設計。
 [functions.review-alert-cron]
 verify_jwt = false
+
+# chat-push は Supabase Auth のaccess tokenを関数内で検証する。
+# gatewayのJWT検証に依存せず、購読登録・解除・送信者本人のdispatchを明示的に認可する。
+[functions.chat-push]
+verify_jwt = false

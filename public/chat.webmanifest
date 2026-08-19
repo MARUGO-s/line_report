@@ -1,0 +1,35 @@
+{
+  "id": "/line_report/chat.html",
+  "name": "LINE Report トーク",
+  "short_name": "トーク",
+  "description": "LINE Report のリアルタイムトーク",
+  "start_url": "/line_report/chat.html",
+  "scope": "/line_report/",
+  "display": "standalone",
+  "background_color": "#1c1c1e",
+  "theme_color": "#111111",
+  "icons": [
+    {
+      "src": "icons/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

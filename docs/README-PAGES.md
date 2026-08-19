@@ -23,6 +23,7 @@
 | 売上分析 | https://marugo-s.github.io/line_report/analytics.html |
 | メディア | https://marugo-s.github.io/line_report/media.html |
 | 会話検索 | https://marugo-s.github.io/line_report/message-search.html |
+| トーク | https://marugo-s.github.io/line_report/chat.html |
 | 予約表 | https://marugo-s.github.io/line_report/reservation.html |
 | システムマップ | https://marugo-s.github.io/line_report/system-map.html |
 
@@ -56,6 +57,15 @@
   店舗ごとの LINE 署名検証は Edge Secret `LINE_CHANNEL_SECRET__{STORE_KEY}`（例: `LINE_CHANNEL_SECRET__MARUGO`）または共通 `LINE_CHANNEL_SECRET`。
 - **本番反映**: `public/`を更新してcommit & push（GitHub ActionsがPagesへ自動配信）
 - **ローカル確認**: `./scripts/local-line-report-pages.sh`
+
+## トークのスマホ新着通知
+
+- トーク画面のベルを押して通知を許可すると、新着メッセージをWeb Pushで受信する。
+- iPhone／iPad: Safariの共有メニューから「ホーム画面に追加」→ ホーム画面の「トーク」を起動 → ベルを押す。
+- Android／PC: トーク一覧のベルを押し、ブラウザの通知許可を承認する。
+- 自分の送信は自分へ通知しない。通知を押すと対象トークを直接開く。
+- 通知を止める場合はベルをもう一度押す。設定は同じユーザーの端末間で同期する。
+- サーバー設定: Supabase Vaultの`chat_vapid_config`へ`public_key` / `private_key` / `subject`をJSON保存する（Edge Secretsに空きがある環境では`CHAT_VAPID_*`でも可）。本番hocbnはEdge Secretsが上限のためVaultを使用する。
 - **AI/構成確認**:
   ```bash
   npm run knowledge:search -- "<依頼・症状・機能名>"

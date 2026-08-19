@@ -37,10 +37,10 @@ line_report-main/
 
 次はGitHub PagesのURLそのものなので、`public/`直下の名前を維持します。
 
-- 公開ページ: `index.html`、`analytics.html`、`foodcourt*.html`、`media.html`、`message-search.html`、`petty_cash.html`、`reservation.html`、`reviews.html`、`room_settings.html`、`ai-usage.html`、`system-map.html`
+- 公開ページ: `index.html`、`analytics.html`、`chat.html`、`foodcourt*.html`、`media.html`、`message-search.html`、`petty_cash.html`、`reservation.html`、`reviews.html`、`room_settings.html`、`ai-usage.html`、`system-map.html`
 - Journal Report: `public/jnm/`（`jnl2txt.html` / `index.html` / `ai-chat-pdf-history.html` ほか）
 - 共通ブラウザコード: `pages-config.js`、`auth-session.js`、`app-theme.js`、`menu-logout.js`、`site-cache.js`
-- PWA: `line-report.webmanifest`
+- PWA: `line-report.webmanifest`、チャット専用 `chat.webmanifest` / `chat-sw.js`
 - Pages制御: `public/.nojekyll`
 
 ## 4. 端末ローカル状態

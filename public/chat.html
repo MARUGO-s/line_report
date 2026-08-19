@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="トーク">
+  <link rel="manifest" href="chat.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>トーク</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -26,6 +32,7 @@
       background: var(--list-bg);
       color: var(--text);
       height: 100vh;
+      height: 100dvh;
       display: flex;
       overflow: hidden;
     }
@@ -399,6 +406,29 @@
       justify-content: center;
     }
     .header-icon-btn:hover { background: #ececec; }
+    .notification-btn {
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .notification-btn.enabled { color: var(--line-green); }
+    .notification-btn.blocked { color: #ef4444; }
+    .notification-btn:disabled { opacity: 0.55; cursor: wait; }
+    .rail-btn.notification-btn { color: #8e8e93; }
+    .rail-btn.notification-btn.enabled { color: var(--line-green); }
+    .rail-btn.notification-btn.blocked { color: #ef4444; }
+    .mobile-notification-btn {
+      display: none;
+      width: 32px;
+      height: 32px;
+      border: 0;
+      border-radius: 50%;
+      background: #2c2c2e;
+      color: #8e8e93;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .mobile-notification-btn.enabled { color: var(--line-green); }
+    .mobile-notification-btn.blocked { color: #ef4444; }
 
     .invite-overlay {
       position: fixed;
@@ -729,6 +759,7 @@
 
     @media (max-width: 768px) {
       .nav-rail { display: none; }
+      .talk-tabs { gap: 6px; padding: 12px 12px 8px; font-size: 12px; align-items: center; }
       .talk-list { width: 100%; max-width: none; border-right: 0; }
       .main-content { display: none; }
       body.chat-open .talk-list { display: none; }
@@ -738,8 +769,9 @@
         display: flex;
         width: 32px;
         height: 32px;
-        margin-left: auto;
       }
+      .mobile-notification-btn { display: inline-flex; align-items: center; justify-content: center; margin-left: auto; }
+      .input-area { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
     }
   </style>
 </head>
@@ -753,6 +785,9 @@
     <button class="rail-btn active" title="トーク" aria-label="トーク">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/></svg>
     </button>
+    <button class="rail-btn notification-btn" type="button" data-notification-toggle title="新着通知をオンにする" aria-label="新着通知をオンにする" onclick="togglePushNotifications()">
+      <span class="notification-icon" aria-hidden="true">🔕</span>
+    </button>
     <div class="rail-spacer"></div>
     <button class="rail-btn logout" onclick="logout()" title="ログアウト">退出</button>
   </nav>
@@ -763,6 +798,9 @@
       <button class="talk-tab" data-tab="friends" onclick="setTalkTab('friends')">友だち</button>
       <button class="talk-tab" data-tab="groups" onclick="setTalkTab('groups')">グループ</button>
       <button class="talk-tab" data-tab="users" onclick="setTalkTab('users')">登録ユーザー</button>
+      <button class="mobile-notification-btn notification-btn" type="button" data-notification-toggle title="新着通知をオンにする" aria-label="新着通知をオンにする" onclick="togglePushNotifications()">
+        <span class="notification-icon" aria-hidden="true">🔕</span>
+      </button>
       <button class="rail-avatar mobile-user-avatar" id="mobileUserAvatar" type="button" title="アイコンを変更" onclick="pickUserIcon()"></button>
     </div>
     <div class="talk-search-wrap">
@@ -890,7 +928,7 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="vendor/supabase/supabase-2.110.9.min.js"></script>
   <script src="pages-config.js"></script>
   <script>
     'use strict';
@@ -920,7 +958,14 @@
     let invitePeople = [];
     let registeredUsers = [];
     let selectedUserIds = new Set();
+    let serviceWorkerRegistration = null;
+    let serviceWorkerPromise = null;
+    let pushSubscription = null;
+    let pushPreferenceChannel = null;
+    let pushNotificationsEnabled = false;
+    let pendingOpenGroupId = null;
     const INVITE_KEY = 'chat_pending_invite';
+    const CHAT_PUSH_PUBLIC_KEY = 'BBUr0ob7hbB-k5JguWO1LgACXgpSjwPYkeoGRwNhDBE88ynjbEyRlY02LA3RZXr_oQrOcu86djYWsEncbTKiLtE';
 
     const $ = (id) => document.getElementById(id);
     const CREDENTIAL_KEY = 'chat_saved_credentials';
@@ -1137,7 +1182,11 @@
       $('sidebar').classList.remove('hidden');
       $('mainContent').classList.remove('hidden');
       subscribeRealtime();
-      loadGroups().then(() => consumeInvite());
+      initializeChatPwa();
+      loadGroups().then(async () => {
+        await consumeInvite();
+        await openRequestedGroup();
+      });
     }
 
     function showLoginError(message) {
@@ -1226,6 +1275,227 @@
       } catch (error) {
         console.error('Load groups error:', error);
       }
+    }
+
+    function pushFunctionUrl(action) {
+      const suffix = action ? `?action=${encodeURIComponent(action)}` : '';
+      return `${SUPABASE_URL.replace(/\/+$/, '')}/functions/v1/chat-push${suffix}`;
+    }
+
+    function urlBase64ToUint8Array(value) {
+      const padding = '='.repeat((4 - value.length % 4) % 4);
+      const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const raw = atob(base64);
+      return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+    }
+
+    function isIosDevice() {
+      return /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+    }
+
+    function isStandaloneApp() {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    }
+
+    async function chatPushRequest(action, options = {}) {
+      const { data } = await sb.auth.getSession();
+      const token = data?.session?.access_token;
+      if (!token) throw new Error('ログインが必要です');
+      const response = await fetch(pushFunctionUrl(action), {
+        method: options.method || 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: options.body == null ? undefined : JSON.stringify(options.body)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result?.ok === false) {
+        throw new Error(result?.error || `通知API HTTP ${response.status}`);
+      }
+      return result;
+    }
+
+    async function initializeChatPwa() {
+      serviceWorkerRegistration = await ensureChatServiceWorker();
+      if (!serviceWorkerRegistration || !('PushManager' in window) || !('Notification' in window)) {
+        renderNotificationStatus('unsupported');
+        return;
+      }
+      try {
+        pushSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
+        renderNotificationStatus(
+          Notification.permission === 'denied'
+            ? 'blocked'
+            : (pushSubscription && Notification.permission === 'granted' ? 'enabled' : 'disabled')
+        );
+        if (pushSubscription && currentUser) {
+          await savePushSubscription(pushSubscription, false).catch((error) => {
+            console.error('Push subscription refresh error:', error);
+          });
+          subscribePushPreferenceChanges();
+          await syncPushPreference();
+        }
+      } catch (error) {
+        console.error('Service worker registration error:', error);
+        renderNotificationStatus('unsupported');
+      }
+    }
+
+    function ensureChatServiceWorker() {
+      if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+      if (!serviceWorkerPromise) {
+        serviceWorkerPromise = navigator.serviceWorker.register('chat-sw.js', { scope: './' })
+          .then(() => navigator.serviceWorker.ready)
+          .catch((error) => {
+            console.error('Service worker registration error:', error);
+            serviceWorkerPromise = null;
+            return null;
+          });
+      }
+      return serviceWorkerPromise;
+    }
+
+    function renderNotificationStatus(status) {
+      const states = {
+        enabled: ['🔔', '通知はオンです。押すとオフにできます'],
+        working: ['…', '通知を設定しています'],
+        blocked: ['🚫', 'ブラウザまたは端末の設定で通知を許可してください'],
+        unsupported: ['—', 'このブラウザでは通知を利用できません'],
+        disabled: ['🔕', '新着通知をオンにする']
+      };
+      const view = states[status] || states.disabled;
+      document.querySelectorAll('[data-notification-toggle]').forEach((button) => {
+        button.classList.toggle('enabled', status === 'enabled');
+        button.classList.toggle('blocked', status === 'blocked');
+        button.disabled = status === 'working';
+        const icon = button.querySelector('.notification-icon');
+        if (icon) icon.textContent = view[0];
+        button.title = view[1];
+        button.setAttribute('aria-label', view[1]);
+      });
+    }
+
+    async function savePushSubscription(subscription, activate) {
+      return chatPushRequest('subscribe', {
+        body: {
+          subscription: subscription.toJSON(),
+          preview_enabled: true,
+          activate: activate === true
+        }
+      });
+    }
+
+    function subscribePushPreferenceChanges() {
+      if (!currentUser || !pushSubscription) return;
+      if (pushPreferenceChannel) sb.removeChannel(pushPreferenceChannel);
+      pushPreferenceChannel = sb
+        .channel(`chat-push-preference-${currentUser.id}`)
+        .on('postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'chat_push_user_preferences',
+            filter: `user_id=eq.${currentUser.id}`
+          },
+          (payload) => {
+            pushNotificationsEnabled = payload.new?.notifications_enabled === true;
+            renderNotificationStatus(pushNotificationsEnabled ? 'enabled' : 'disabled');
+          })
+        .subscribe();
+    }
+
+    async function syncPushPreference() {
+      if (!pushSubscription) return;
+      try {
+        const result = await chatPushRequest('preferences', { body: {} });
+        pushNotificationsEnabled = result.found && result.notifications_enabled === true;
+        renderNotificationStatus(pushNotificationsEnabled ? 'enabled' : 'disabled');
+      } catch (error) {
+        console.error('Push preference sync error:', error);
+      }
+    }
+
+    async function togglePushNotifications() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+        alert('このブラウザでは新着通知を利用できません');
+        renderNotificationStatus('unsupported');
+        return;
+      }
+      if (isIosDevice() && !isStandaloneApp()) {
+        alert('iPhone／iPadでは、先に共有メニューから「ホーム画面に追加」し、ホーム画面のトークから開いてください。');
+        return;
+      }
+      renderNotificationStatus('working');
+      try {
+        serviceWorkerRegistration = serviceWorkerRegistration || await navigator.serviceWorker.ready;
+        pushSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
+        if (pushSubscription && Notification.permission === 'granted' && pushNotificationsEnabled) {
+          await chatPushRequest('preferences', {
+            body: { notifications_enabled: false }
+          });
+          pushNotificationsEnabled = false;
+          renderNotificationStatus('disabled');
+          alert('新着通知をオフにしました');
+          return;
+        }
+
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          renderNotificationStatus(permission === 'denied' ? 'blocked' : 'disabled');
+          alert('通知は許可されませんでした。端末の設定から変更できます。');
+          return;
+        }
+
+        if (!pushSubscription) {
+          pushSubscription = await serviceWorkerRegistration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(CHAT_PUSH_PUBLIC_KEY)
+          });
+        }
+        await savePushSubscription(pushSubscription, true);
+        pushNotificationsEnabled = true;
+        subscribePushPreferenceChanges();
+        renderNotificationStatus('enabled');
+        alert('新しいトークが入るとスマホへ通知します');
+      } catch (error) {
+        console.error('Push enable error:', error);
+        renderNotificationStatus(Notification.permission === 'denied' ? 'blocked' : 'disabled');
+        alert(error.message || '通知の設定に失敗しました');
+      }
+    }
+
+    async function dispatchPushForMessage(messageId) {
+      if (!messageId) return;
+      try {
+        await chatPushRequest('dispatch', { body: { message_id: messageId } });
+      } catch (error) {
+        // メッセージ送信自体は成功しているため、通知障害だけを画面送信失敗にはしない。
+        console.error('Push dispatch error:', error);
+      }
+    }
+
+    function captureRequestedGroup() {
+      try {
+        const url = new URL(location.href);
+        const raw = url.searchParams.get('group');
+        const groupId = Number(raw);
+        if (Number.isSafeInteger(groupId) && groupId > 0) pendingOpenGroupId = groupId;
+        if (raw) {
+          url.searchParams.delete('group');
+          history.replaceState(null, '', url.pathname + url.search + url.hash);
+        }
+      } catch (error) {
+        console.error('Requested group URL error:', error);
+      }
+    }
+
+    async function openRequestedGroup() {
+      if (!pendingOpenGroupId) return;
+      const requested = pendingOpenGroupId;
+      pendingOpenGroupId = null;
+      const group = myGroups.find((item) => Number(item.id) === requested);
+      if (group) await selectGroup(group);
     }
 
     async function attachDirectPeers(groups) {
@@ -2084,6 +2354,7 @@
         lastMessages[data.group_id] = data;
         addMessageToUI(data);
         renderGroups();
+        dispatchPushForMessage(data.id);
       } catch (error) {
         console.error('Send error:', error);
         input.value = content;
@@ -2100,6 +2371,21 @@
 
     async function logout() {
       if (channel) { sb.removeChannel(channel); channel = null; }
+      if (pushPreferenceChannel) { sb.removeChannel(pushPreferenceChannel); pushPreferenceChannel = null; }
+      if (pushSubscription) {
+        const endpoint = pushSubscription.endpoint;
+        try {
+          await chatPushRequest('subscribe', { method: 'DELETE', body: { endpoint } });
+        } catch (error) {
+          console.error('Push sign out API cleanup error:', error);
+        }
+        try {
+          await pushSubscription.unsubscribe();
+        } catch (error) {
+          console.error('Push sign out local cleanup error:', error);
+        }
+        pushSubscription = null;
+      }
       try {
         await sb.auth.signOut();
       } catch (error) {
@@ -2121,6 +2407,10 @@
       pendingCredentials = null;
       pendingUserIconFile = null;
       pendingGroupIconFile = null;
+      serviceWorkerRegistration = null;
+      pushSubscription = null;
+      pushPreferenceChannel = null;
+      pushNotificationsEnabled = false;
       document.body.classList.remove('chat-open');
       $('loginScreen').classList.remove('hidden');
       $('profileForm').classList.add('hidden');
@@ -2133,6 +2423,7 @@
       hideNotice();
       applySavedCredentials();
       updateTitle();
+      renderNotificationStatus('disabled');
     }
 
     function applySavedCredentials() {
@@ -2245,6 +2536,8 @@
     });
 
     captureInviteFromUrl();
+    captureRequestedGroup();
+    ensureChatServiceWorker();
 
     (async () => {
       const { data } = await sb.auth.getSession();
