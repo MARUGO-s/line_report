@@ -13,7 +13,7 @@
 ### 2026-08-19 - トークをPWA化し、新着をスマホへWeb Push通知
 
 - Request: `public/chat.html`へ新しいトークが入ったら、ホーム画面へ追加したスマホへ通知を出す。
-- Implementation: チャット専用manifest／Service Worker／通知ON-OFFを追加。`chat_push_subscriptions`とユーザー共通設定をservice-role専用で保存し、`chat_messages` INSERT後の非同期triggerから`chat-push` Edge Functionを呼ぶ。送信者本人を除外し、無効購読は自動停止、同一メッセージは重複送信しない。通知タップで対象グループを直接開く。ホーム画面アプリ対応端末では、全トークの未読合計をアプリアイコンの数字バッジへ表示し、既読・通知OFF・ログアウト時に更新／解除する。スマホ表示はノッチ／Dynamic Island／角丸／ホームインジケータのsafe-areaへ上下左右の最低余白を重ね、縦横・ソフトウェアキーボード時もVisual Viewport内へ固定する。ピンチ拡大とiOS入力自動ズームを抑止する。ブラウザのタブ／ブックマークも`chat.html`だけトーク専用faviconを明示し、他の管理画面のLINE Reportアイコンには影響させない。
+- Implementation: チャット専用manifest／Service Worker／通知ON-OFFを追加。`chat_push_subscriptions`とユーザー共通設定をservice-role専用で保存し、`chat_messages` INSERT後の非同期triggerから`chat-push` Edge Functionを呼ぶ。送信者本人を除外し、無効購読は自動停止、同一メッセージは重複送信しない。通知タップで対象グループを直接開く。ホーム画面アプリ対応端末では、全トークの未読合計をアプリアイコンの数字バッジへ表示し、既読・通知OFF・ログアウト時に更新／解除する。スマホ表示はノッチ／Dynamic Island／角丸／ホームインジケータのsafe-areaへ上下左右の最低余白を重ね、縦横・ソフトウェアキーボード時もVisual Viewport内へ固定する。ピンチ拡大とiOS入力自動ズームを抑止する。ブラウザのタブ／ブックマーク、iPhoneホーム画面、Android/PWA、通知アイコンは、キャッシュを避ける新しい`chat-*v2`系ファイル名の「緑地＋白い吹き出し＋3点」へ統一し、他の管理画面のLINE Reportアイコンには影響させない。
 - Security: 購読情報はData APIへ露出せず、ブラウザ操作はSupabase Auth本人確認、内部dispatchはDB生成シークレットで認可。VAPID秘密鍵はSupabase VaultまたはEdge Secretのみで管理する。
 - Operation: iPhone/iPadはホーム画面に追加したトークから通知を許可する。Android/PCはトーク一覧のベルから許可する。
 
