@@ -4,6 +4,8 @@ import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggre
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 import { type ChatCard, postChatCardIndependent, resolveChatGroupId } from "../_shared/chat_bridge.ts"
+import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
+import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
 import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_link_auth.ts"
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts"
@@ -138,13 +140,16 @@ Deno.serve(async (req) => {
 
     // トークは LINE と独立。同じトークへは1日1回だけ送る。
     const chatGroupId = await resolveChatGroupId(supabase, target.roomId)
+    const mtalkRoom = isMtalkSyntheticRoomId(target.roomId)
     if (chatGroupId) {
+      const asUser = mtalkRoom ? await loadMtalkStoreBot(supabase, storeKey) : null
       const chatResult = await postChatCardIndependent(supabase, {
         groupId: chatGroupId,
         kind: "reservation_today",
         dedupeKey: targetDate,
         text: buildTodayReservationChatText(storeDisplayName, today, matched),
         cards: [buildTodayReservationChatCard(storeDisplayName, today, matched, calendarUrl)],
+        asUser,
       })
       if (!chatResult.ok) {
         console.error(`chat card post failed for ${target.roomId}:`, chatResult.error)
@@ -156,6 +161,11 @@ Deno.serve(async (req) => {
 
     if (matched.length === 0) {
       skipped.push({ room_id: target.roomId, reason: "zero_reservations" })
+      continue
+    }
+
+    if (mtalkRoom) {
+      sent.push(target.roomId)
       continue
     }
 
@@ -634,6 +644,9 @@ function resolveStoreLineToken(storeKey: string, fallbackToken: string): string 
 }
 
 async function sendLinePushMessages(to: string, messages: unknown[], token: string, storeKey?: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (isMtalkSyntheticRoomId(to)) {
+    return { ok: true }
+  }
   if (isBlockedByMarugosecondLockdown(storeKey, to)) {
     if (storeKey) {
       void recordLineWebhookDeliveryLog({
@@ -774,12 +787,14 @@ async function handleTestSend(
   let chatPosted = false
   let chatError: string | undefined
   if (chatGroupId) {
+    const asUser = isMtalkSyntheticRoomId(spec.roomId) ? await loadMtalkStoreBot(supabase, storeKey) : null
     const chatResult = await postChatCardIndependent(supabase, {
       groupId: chatGroupId,
       kind: "reservation_today",
       dedupeKey: `test:${targetDate}:${Date.now()}`,
       text: buildTodayReservationChatText(storeDisplayName, today, reservations),
       cards: [buildTodayReservationChatCard(storeDisplayName, today, reservations, calendarUrl)],
+      asUser,
     })
     chatPosted = Boolean(chatResult.ok && !chatResult.skipped)
     if (!chatResult.ok) chatError = chatResult.error

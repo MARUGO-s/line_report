@@ -6,6 +6,11 @@ import {
   buildWebPushRequest,
 } from "../supabase/functions/_shared/web_push.ts"
 import { mtalkCardFromLineReply } from "../supabase/functions/_shared/chat_flex_card.ts"
+import {
+  isMtalkSyntheticRoomId,
+  mtalkSyntheticRoomId,
+  parseMtalkSyntheticRoomId,
+} from "../supabase/functions/_shared/mtalk_room_id.ts"
 
 const root = new URL("..", import.meta.url)
 const read = (relative: string) => readFile(new URL(relative, root), "utf8")
@@ -58,7 +63,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v32/)
+  assert.match(serviceWorker, /line-report-chat-v33/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -129,6 +134,9 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /msg-card-field dd.is-bold/)
   assert.match(html, /msg-card-empty.is-xs/)
   assert.match(html, /action\.style === 'primary'/)
+  assert.match(html, /function openRoomSettings/)
+  assert.match(html, /talkCtxSettings/)
+  assert.match(html, /set\('from', 'chat'\)/)
   assert.match(html, /function sendCardCommand/)
   assert.match(html, /data-card-command/)
   assert.match(html, /function snapshotRoomView/)
@@ -136,7 +144,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v32/)
+  assert.match(serviceWorker, /line-report-chat-v33/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -241,6 +249,35 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   const invitedBot = await read("supabase/migrations/20260820190000_chat_invited_bot_dispatch.sql")
   assert.match(invitedBot, /store_key', v_store_key/)
   assert.match(invitedBot, /u\.is_bot/)
+  const settingsDispatch = await read("supabase/migrations/20260820200000_chat_settings_command_dispatch.sql")
+  assert.match(settingsDispatch, /v_is_settings/)
+  assert.match(settingsDispatch, /せってい/)
+  assert.match(fn, /SETTINGS_TRIGGER_WORDS/)
+  assert.match(fn, /ensureMtalkRoomSettings/)
+  assert.match(fn, /from=chat&group_id=/)
+  const mtalkSettings = await read("supabase/functions/_shared/mtalk_room_settings.ts")
+  assert.match(mtalkSettings, /export async function ensureMtalkRoomSettings/)
+  assert.match(mtalkSettings, /mtalk-group-/)
+  assert.match(mtalkSettings, /today_reservation_alert_enabled: false/)
+  const adminApi = await read("supabase/functions/admin-api/index.ts")
+  assert.match(adminApi, /\/chat-room-config/)
+  assert.match(adminApi, /handleChatRoomConfig/)
+  assert.match(adminApi, /authenticateChatMember/)
+  const roomSettingsPage = await read("public/room_settings.html")
+  assert.match(roomSettingsPage, /fromChat/)
+  assert.match(roomSettingsPage, /chat-room-config/)
+  const todayCron = await read("supabase/functions/reservation-today-cron/index.ts")
+  assert.match(todayCron, /isMtalkSyntheticRoomId/)
+  assert.match(todayCron, /loadMtalkStoreBot/)
+  const gmailCron = await read("supabase/functions/gmail-alert-cron/index.ts")
+  assert.match(gmailCron, /isMtalkSyntheticRoomId/)
+})
+
+test("M-talk room ids map to room_summary_settings keys", () => {
+  assert.equal(mtalkSyntheticRoomId(31), "mtalk-group-31")
+  assert.equal(parseMtalkSyntheticRoomId("mtalk-group-31"), 31)
+  assert.equal(isMtalkSyntheticRoomId("mtalk-group-31"), true)
+  assert.equal(isMtalkSyntheticRoomId("Cb508b3d20f2d503739a2b0d30dc7274a"), false)
 })
 
 test("duplicate-date LINE Flex keeps explanations, bold values, and primary date-change", () => {

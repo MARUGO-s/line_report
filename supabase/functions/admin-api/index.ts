@@ -178,6 +178,8 @@ import {
 } from "../_shared/journal_product_index.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
+import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
+import { ensureMtalkRoomSettings } from "../_shared/mtalk_room_settings.ts"
 
 const ADMIN_SURFACE_LEGACY = "legacy"
 const ADMIN_SURFACE_LINE_REPORT = "line_report"
@@ -1266,6 +1268,16 @@ Deno.serve(async (req, info) => {
       }
     }
     // 内部キーが無い/不一致の場合は通常の管理者認証へフォールスルー
+  }
+
+  // M-talk のルーム設定。ログイン済みメンバーが自分のルームだけ触れる。
+  if ((req.method === "GET" || req.method === "PUT") && path === "/chat-room-config") {
+    try {
+      return await handleChatRoomConfig(req, workReq, url, supabase)
+    } catch (e) {
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
   }
 
   const fallbackAdminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
@@ -3896,6 +3908,80 @@ Deno.serve(async (req, info) => {
   }
 })
 
+async function authenticateChatMember(
+  req: Request,
+  supabase: ReturnType<typeof createClient>,
+  groupId: number,
+): Promise<string> {
+  const jwt = /^Bearer\s+(.+)$/i.exec(String(req.headers.get("Authorization") ?? "").trim())?.[1]?.trim() ?? ""
+  if (!jwt) {
+    throw { status: 401, message: "ログインしてください。" } satisfies AppError
+  }
+  const { data, error } = await supabase.auth.getUser(jwt)
+  const userId = String(data?.user?.id ?? "").trim()
+  if (error || !userId) {
+    throw { status: 401, message: "ログインしてください。" } satisfies AppError
+  }
+  const { data: member, error: memberError } = await supabase
+    .from("chat_group_members")
+    .select("user_id")
+    .eq("group_id", groupId)
+    .eq("user_id", userId)
+    .maybeSingle()
+  if (memberError) {
+    throw { status: 500, message: `メンバー確認に失敗しました: ${memberError.message}` } satisfies AppError
+  }
+  if (!member) {
+    throw { status: 403, message: "このルームのメンバーではありません。" } satisfies AppError
+  }
+  return userId
+}
+
+async function handleChatRoomConfig(
+  req: Request,
+  workReq: Request,
+  url: URL,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Response> {
+  let groupId = Number(url.searchParams.get("group_id") ?? "")
+  let putBody: Record<string, unknown> | null = null
+  if (req.method === "PUT") {
+    const body = await parseJson(workReq)
+    if (!isRecord(body)) {
+      throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+    }
+    putBody = body
+    if (Number.isSafeInteger(Number(body.group_id)) && Number(body.group_id) > 0) {
+      groupId = Number(body.group_id)
+    }
+  }
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+    throw { status: 400, message: "group_id is required." } satisfies AppError
+  }
+  await authenticateChatMember(req, supabase, groupId)
+  const ensured = await ensureMtalkRoomSettings(supabase, groupId)
+  if (!ensured) throw { status: 500, message: "ルーム設定を作れませんでした。" } satisfies AppError
+  if (req.method === "PUT") {
+    const safe = buildRoomConfigSafePayload(putBody ?? {})
+    const { data, error } = await supabase
+      .from("room_summary_settings")
+      .update({ ...safe, updated_at: new Date().toISOString() })
+      .eq("room_id", ensured.roomId)
+      .select(ROOM_CONFIG_SAFE_SELECT)
+      .maybeSingle()
+    if (error) throw { status: 500, message: `Failed to save room config: ${error.message}` } satisfies AppError
+    if (!data) throw { status: 404, message: "Room not found." } satisfies AppError
+    return json({ room_config: data }, 200)
+  }
+  const { data, error } = await supabase
+    .from("room_summary_settings")
+    .select(ROOM_CONFIG_SAFE_SELECT)
+    .eq("room_id", ensured.roomId)
+    .maybeSingle()
+  if (error) throw { status: 500, message: `Failed to load room config: ${error.message}` } satisfies AppError
+  return json({ room_config: data ?? null }, 200)
+}
+
 async function authenticate(
   req: Request,
   supabase: ReturnType<typeof createClient>,
@@ -4084,7 +4170,9 @@ async function fetchState(
   return {
     global_settings: globalSettings,
     console_settings: consoleSettings,
-    room_settings: (roomSettingsRes.data ?? []).map((r) => stripRoomConfigSecret(r as Record<string, unknown>)),
+    room_settings: (roomSettingsRes.data ?? [])
+      .filter((r) => !isMtalkSyntheticRoomId(String((r as { room_id?: unknown }).room_id ?? "")))
+      .map((r) => stripRoomConfigSecret(r as Record<string, unknown>)),
     user_permissions: sortLineUserPermissionsForAdminDisplay(userPermissionsRes.data ?? []).slice(
       0,
       USER_PERMISSION_LIST_MAX_LIMIT,
