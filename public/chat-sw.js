@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v43';
+const CHAT_CACHE = 'line-report-chat-v44';
 const CHAT_SHELL = [
   './chat.html',
   './chat.webmanifest',
@@ -69,7 +69,15 @@ self.addEventListener('activate', (event) => {
           .filter((key) => key.startsWith('line-report-chat-') && key !== CHAT_CACHE)
           .map((key) => caches.delete(key)),
       ))
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
+      .then((clients) => Promise.all(clients.map((client) => {
+        const url = new URL(client.url);
+        if (!url.pathname.endsWith('/chat.html') || !('navigate' in client)) return undefined;
+        // iOSのホーム画面アプリが旧HTMLを保持していても、新SW有効化時に
+        // network-firstのchat.htmlへ一度だけ遷移して最新UIへ切り替える。
+        return client.navigate(client.url).catch(() => undefined);
+      }))),
   );
 });
 
@@ -117,23 +125,35 @@ self.addEventListener('push', (event) => {
     data = { body: event.data ? event.data.text() : '新しいメッセージがあります' };
   }
 
-  const title = String(data.title || 'M-talk');
+  // 対応WebKitのDeclarative Web Push標準形式を優先する。対応ブラウザでは
+  // Service Workerが失敗してもOSがfallback通知を表示し、未対応ブラウザでは
+  // このハンドラーが従来どおりnotification辞書を表示する。
+  const declarative = data?.web_push === 8030 && data?.notification && typeof data.notification === 'object'
+    ? data.notification
+    : null;
+  const metadata = declarative?.data && typeof declarative.data === 'object'
+    ? declarative.data
+    : data;
+  const title = String(declarative?.title || data.title || 'M-talk');
+  const targetUrl = String(declarative?.navigate || metadata?.url || data.url || './chat.html');
   const options = {
-    body: String(data.body || '新しいメッセージがあります'),
-    icon: data.icon || './icons/chat-android-192x192-v3.png',
-    badge: data.badge || './icons/chat-favicon-48x48-v3.png',
-    tag: data.tag || 'line-report-chat',
-    renotify: data.renotify !== false,
-    timestamp: Number(data.timestamp) || Date.now(),
+    body: String(declarative?.body || data.body || '新しいメッセージがあります'),
+    icon: declarative?.icon || data.icon || './icons/chat-android-192x192-v3.png',
+    badge: declarative?.badge || data.badge || './icons/chat-favicon-48x48-v3.png',
+    tag: declarative?.tag || data.tag || 'line-report-chat',
+    renotify: true,
     data: {
-      url: data.url || './chat.html',
-      group_id: data.group_id || null,
-      message_id: data.message_id || null,
+      url: targetUrl,
+      group_id: metadata?.group_id || null,
+      message_id: metadata?.message_id || null,
     },
   };
+  const declarativeBadge = Number(data.app_badge);
+  const legacyBadge = Number(data.badge_count);
+  const badgeCount = Number.isSafeInteger(declarativeBadge) ? declarativeBadge : legacyBadge;
   event.waitUntil(Promise.all([
     self.registration.showNotification(title, options),
-    updateAppBadgeAndRefreshVisibleClients(data.badge_count),
+    updateAppBadgeAndRefreshVisibleClients(badgeCount),
   ]));
 });
 

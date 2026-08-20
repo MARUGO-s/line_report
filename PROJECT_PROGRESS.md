@@ -10,6 +10,14 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - Apple向け通知をDeclarative Web Pushへ切り替える
+
+- Symptom: iPhoneは新しいApple Push endpointへ再登録され、Apple側HTTP成功でも通知画面が出なかった。
+- Investigation: 独自`aes128gcm`暗号化は標準`http_ece`で復号でき、VAPID/暗号化は互換。残る失敗点はWebKitのService Worker通知処理。
+- Fix: ペイロードをWebKit Declarative Web Push (`web_push: 8030`)へ変更し、絶対HTTPS `notification.navigate`とトップレベル`app_badge`を送る。対応WebKitはService Worker失敗時もOSがfallback通知を表示し、未対応ブラウザは既存SWが同じ辞書を表示する。
+- Security: 遷移先は`https://marugo-s.github.io`同一originだけを許可し、外部URLは`/line_report/chat.html`へ固定する。
+- Verification: ペイロード形式・外部URL拒否・バッジ境界・通常Web Push暗号化のテストを追加。全chatテスト、Deno型チェック、静的チェック成功。
+
 ### 2026-08-20 - iOSホーム画面アプリで新UIが出ない問題に自動再読込を追加
 
 - Symptom: 通知テストを追加しても、iPhoneのホーム画面版M-talkに「通知テスト」ボタンが出ず、旧UIのままだった。

@@ -76,6 +76,12 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 - `chat-push?action=test`は認証ユーザー本人が提示した有効endpointだけへテスト通知を送る。
   ルーム参加、ミュート、送信者除外、メッセージ重複防止を通らない端末診断専用経路とする。
   ページ起動時や再購読直後には自動送信せず、「通知テスト」の明示操作時だけ送る。
+- Apple/WebKit向けを含むペイロードはDeclarative Web Push形式（`web_push: 8030`）にする。
+  `notification.navigate`は絶対HTTPSの同一origin URL、`app_badge`はトップレベル文字列。
+  対応WebKitはService Worker処理に失敗してもOSがfallback通知を表示する。
+- `chat-sw.js`は同じ宣言辞書を従来形式へ変換して`showNotification()`するため、
+  Declarative Web Push未対応ブラウザでも通知を維持する。
+- `navigatePath`に外部originを渡しても、`chat_push_payload.ts`でM-talkトップへ固定する。
 - iPhone/iPadはホーム画面のstandalone版M-talkだけを対象にする。通常Safariタブでは
   ホーム画面への追加を案内する。`Notification.permission === 'denied'`なら端末設定での
   許可が必要で、ページから再プロンプトはできない。

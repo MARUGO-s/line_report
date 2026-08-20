@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { sendWebPush, type VapidConfig, type WebPushSubscription } from "../_shared/web_push.ts"
+import { buildDeclarativeChatPushPayload } from "../_shared/chat_push_payload.ts"
 
 type DbClient = any
 
@@ -318,16 +319,16 @@ async function handleTest(
     auth: row.auth_secret,
   }
   try {
-    const response = await sendWebPush(pushSubscription, {
-      title: "M-talk 通知テスト",
-      body: "この通知が見えれば、この端末の新着通知は正常です。",
-      icon: "/line_report/icons/chat-android-192x192-v3.png",
-      badge: "/line_report/icons/chat-favicon-48x48-v3.png",
-      tag: `chat-push-test-${row.id}`,
-      renotify: true,
-      timestamp: Date.now(),
-      url: "/line_report/chat.html",
-    }, vapid)
+    const response = await sendWebPush(
+      pushSubscription,
+      buildDeclarativeChatPushPayload({
+        title: "M-talk 通知テスト",
+        body: "この通知が見えれば、この端末の新着通知は正常です。",
+        navigatePath: "/line_report/chat.html",
+        tag: `chat-push-test-${row.id}`,
+      }),
+      vapid,
+    )
     if (!response.ok) {
       const reason = await response.text().catch(() => "")
       await markSubscriptionFailure(supabase, row, response.status, reason)
@@ -541,21 +542,21 @@ async function handleDispatch(
       auth: row.auth_secret,
     }
     try {
-      const response = await sendWebPush(pushSubscription, {
-        title,
-        body: group?.is_direct
-          ? `${mentionPrefix}${preview}`
-          : `${mentionPrefix}${message.username}: ${preview}`,
-        icon: "/line_report/icons/chat-android-192x192-v3.png",
-        badge: "/line_report/icons/chat-favicon-48x48-v3.png",
-        tag: `chat-group-${message.group_id}`,
-        renotify: true,
-        timestamp: Date.parse(message.created_at) || Date.now(),
-        url: notificationUrl(message.group_id),
-        group_id: message.group_id,
-        message_id: message.id,
-        badge_count: unreadTotals.get(row.user_id) ?? null,
-      }, vapid)
+      const response = await sendWebPush(
+        pushSubscription,
+        buildDeclarativeChatPushPayload({
+          title,
+          body: group?.is_direct
+            ? `${mentionPrefix}${preview}`
+            : `${mentionPrefix}${message.username}: ${preview}`,
+          navigatePath: notificationUrl(message.group_id),
+          tag: `chat-group-${message.group_id}`,
+          groupId: message.group_id,
+          messageId: message.id,
+          badgeCount: unreadTotals.get(row.user_id) ?? null,
+        }),
+        vapid,
+      )
       if (response.ok) {
         sent += 1
         await supabase.from("chat_push_subscriptions").update({

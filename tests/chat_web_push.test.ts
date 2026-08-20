@@ -5,6 +5,7 @@ import {
   base64UrlEncode,
   buildWebPushRequest,
 } from "../supabase/functions/_shared/web_push.ts"
+import { buildDeclarativeChatPushPayload } from "../supabase/functions/_shared/chat_push_payload.ts"
 import { mtalkCardFromLineReply } from "../supabase/functions/_shared/chat_flex_card.ts"
 import {
   isMtalkSyntheticRoomId,
@@ -79,7 +80,10 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /SKIP_WAITING/)
   assert.match(html, /savePushSubscription\(pushSubscription, true\)/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v43/)
+  assert.match(serviceWorker, /data\?\.web_push === 8030/)
+  assert.match(serviceWorker, /declarative\?\.navigate/)
+  assert.match(serviceWorker, /data\.app_badge/)
+  assert.match(serviceWorker, /line-report-chat-v44/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -98,6 +102,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /chat\.html/)
   assert.match(serviceWorker, /if \(!isChatNavigation && !CHAT_ASSET_URLS\.has\(url\.href\)\) return/)
   assert.match(serviceWorker, /key\.startsWith\('line-report-chat-'\)/)
+  assert.match(serviceWorker, /client\.navigate\(client\.url\)/)
   assert.match(html, /Push sign out API cleanup error/)
   assert.match(html, /Push sign out local cleanup error/)
   assert.match(html, /function unreadTotal\(\)/)
@@ -174,7 +179,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v43/)
+  assert.match(serviceWorker, /line-report-chat-v44/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -551,7 +556,10 @@ test("chat push schema protects device subscriptions and deduplicates dispatch",
 })
 
 test("chat push endpoint requires Supabase Auth and excludes the sender", async () => {
-  const edge = await read("supabase/functions/chat-push/index.ts")
+  const [edge, serviceWorker] = await Promise.all([
+    read("supabase/functions/chat-push/index.ts"),
+    read("public/chat-sw.js"),
+  ])
   assert.match(edge, /authClient\.auth\.getUser\(token\)/)
   assert.match(edge, /internalDispatchAuthorized/)
   assert.match(edge, /secureEqual/)
@@ -566,14 +574,56 @@ test("chat push endpoint requires Supabase Auth and excludes the sender", async 
   assert.match(edge, /action === "test"/)
   assert.match(edge, /async function handleTest/)
   assert.match(edge, /M-talk 通知テスト/)
+  assert.match(edge, /buildDeclarativeChatPushPayload/)
   assert.match(edge, /cleanupQuery\.eq\("user_agent", userAgent\)/)
   assert.match(edge, /\.neq\("endpoint", subscription\.endpoint\)/)
   assert.match(edge, /chat_push_unread_totals/)
-  assert.match(edge, /badge_count: unreadTotals\.get\(row\.user_id\) \?\? null/)
+  assert.match(edge, /badgeCount: unreadTotals\.get\(row\.user_id\) \?\? null/)
   assert.match(edge, /muted_at/)
-  assert.match(edge, /chat-android-192x192-v3\.png/)
-  assert.match(edge, /chat-favicon-48x48-v3\.png/)
+  assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
+  assert.match(serviceWorker, /chat-favicon-48x48-v3\.png/)
   assert.match(edge, /バッジ件数の取得失敗でWeb Push本体を止めない/)
+})
+
+test("chat push payload uses the declarative Web Push format with safe navigation", () => {
+  const payload = buildDeclarativeChatPushPayload({
+    title: "予約通知",
+    body: "新しい予約があります",
+    navigatePath: "/line_report/chat.html?group=31",
+    tag: "chat-group-31",
+    groupId: 31,
+    messageId: 120,
+    badgeCount: 4,
+  }) as {
+    web_push: number
+    app_badge: string
+    notification: {
+      title: string
+      body: string
+      navigate: string
+      tag: string
+      data: { url: string; group_id: number; message_id: number }
+    }
+  }
+  assert.equal(payload.web_push, 8030)
+  assert.equal(payload.notification.title, "予約通知")
+  assert.equal(payload.notification.navigate, "https://marugo-s.github.io/line_report/chat.html?group=31")
+  assert.equal(payload.notification.data.url, payload.notification.navigate)
+  assert.equal(payload.notification.data.group_id, 31)
+  assert.equal(payload.notification.data.message_id, 120)
+  assert.equal(payload.app_badge, "4")
+  assert.equal(payload.notification.tag, "chat-group-31")
+
+  const unsafe = buildDeclarativeChatPushPayload({
+    title: "",
+    body: "",
+    navigatePath: "https://example.invalid/phishing",
+    badgeCount: -1,
+  }) as { notification: Record<string, unknown>; app_badge?: string }
+  assert.equal(unsafe.notification.title, "M-talk")
+  assert.equal(unsafe.notification.body, "新しいメッセージがあります")
+  assert.equal(unsafe.notification.navigate, "https://marugo-s.github.io/line_report/chat.html")
+  assert.equal("app_badge" in unsafe, false)
 })
 
 test("Web Push request uses VAPID and aes128gcm encryption", async () => {
