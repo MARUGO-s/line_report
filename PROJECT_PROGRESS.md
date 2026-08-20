@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 売上レポートカードの区切りと赤字を直す
+
+- Request: 08:34 のように、予算・前年比の区切りと赤字で返す。
+- Cause: LINE Flex をカードへ写すとき、見出しを先頭にまとめ、色と区切りを捨てていた。
+- Fix: Flex の順番どおりに項目・区切り・見出しを写し、赤字を残す。
+- Operation: レシート返信は店名〜客単価、月次、予算（赤字）、前年比（赤字）の順。
+
 ### 2026-08-20 - 招待ルームのレシート解析 500 を直す
 
 - Request: Botのいるルームへレシートを送っても無反応。
