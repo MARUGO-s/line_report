@@ -46,15 +46,63 @@
       font-family: inherit; cursor: pointer;
     }
     .tab.active { background: #06c755; color: #fff; }
+    .cal { padding: 0 10px 8px; }
+    .cal-weekdays, .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 2px;
+    }
+    .cal-weekdays span {
+      text-align: center;
+      font-size: 11px;
+      color: #8e8e93;
+      font-weight: 700;
+      padding: 4px 0 6px;
+    }
+    .cal-weekdays span:first-child { color: #ff453a; }
+    .cal-weekdays span:last-child { color: #5ac8fa; }
+    .cal-cell {
+      min-height: 46px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: #f2f2f2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 5px 0 4px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .cal-cell.out { color: #3a3a3c; cursor: default; }
+    .cal-cell.sun:not(.out):not(.selected) { color: #ff8f8a; }
+    .cal-cell.sat:not(.out):not(.selected) { color: #7ecbff; }
+    .cal-cell.today { background: #2c2c2e; }
+    .cal-cell.selected { background: #06c755; color: #fff; }
+    .cal-num { font-size: 13px; font-weight: 700; line-height: 1.1; }
+    .cal-marks { display: flex; gap: 3px; min-height: 7px; margin-top: 3px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .dot.resv { background: #06c755; }
+    .dot.evt { background: #5ac8fa; }
+    .cal-cell.selected .dot { background: #fff; }
+    .cal-legend {
+      display: flex; gap: 12px; justify-content: flex-end;
+      padding: 4px 4px 2px; font-size: 11px; color: #8e8e93;
+    }
+    .cal-legend i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+    .cal-legend .resv { background: #06c755; }
+    .cal-legend .evt { background: #5ac8fa; }
+    .timeline { padding-bottom: 24px; }
     .note, .empty, .error, .login {
       margin: 8px 12px 16px; color: #8e8e93; font-size: 13px; line-height: 1.6;
     }
     .error { color: #ff9f0a; }
-    .day { padding: 4px 12px 14px; }
+    .day { padding: 4px 12px 14px; scroll-margin-top: 8px; }
     .day h2 {
       font-size: 13px; color: #8e8e93; font-weight: 700;
       padding: 10px 2px 8px; border-top: 1px solid #2c2c2e;
     }
+    .day.selected-day h2 { color: #06c755; }
     .card {
       display: block; width: 100%; text-align: left;
       background: #2c2c2e; border: 0; border-radius: 12px;
@@ -103,7 +151,17 @@
     <p class="login hidden" id="loginNote">M-talk にログインしてから開いてください。</p>
     <p class="error hidden" id="errorNote"></p>
     <p class="note hidden" id="reservationNote"></p>
-    <div id="list"></div>
+    <div class="cal">
+      <div class="cal-weekdays">
+        <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-legend">
+        <span><i class="resv"></i>予約</span>
+        <span><i class="evt"></i>予定</span>
+      </div>
+    </div>
+    <div class="timeline" id="list"></div>
   </div>
   <div class="detail hidden" id="detail" onclick="if(event.target===this) closeDetail()">
     <div class="sheet" id="detailSheet"></div>
@@ -124,6 +182,7 @@
     let tab = 'reservations';
     let month = currentMonth();
     let payload = null;
+    let selectedDay = '';
 
     $('backLink').href = './chat.html' + (Number.isSafeInteger(groupId) && groupId > 0 ? ('?group=' + encodeURIComponent(String(groupId))) : '');
 
@@ -169,11 +228,11 @@
       btn.onclick = () => {
         tab = btn.getAttribute('data-tab') || 'reservations';
         document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el === btn));
-        renderList();
+        renderAll();
       };
     });
-    $('prevMonth').onclick = () => { month = shiftMonth(month, -1); load(); };
-    $('nextMonth').onclick = () => { month = shiftMonth(month, 1); load(); };
+    $('prevMonth').onclick = () => { month = shiftMonth(month, -1); selectedDay = ''; load(); };
+    $('nextMonth').onclick = () => { month = shiftMonth(month, 1); selectedDay = ''; load(); };
 
     async function load() {
       $('monthLabel').textContent = month.replace('-', '年') + '月';
@@ -182,6 +241,7 @@
       if (!Number.isSafeInteger(groupId) || groupId <= 0) {
         $('errorNote').textContent = 'ルームが指定されていません。M-talkから開き直してください。';
         $('errorNote').classList.remove('hidden');
+        $('calGrid').innerHTML = '';
         $('list').innerHTML = '';
         return;
       }
@@ -189,6 +249,7 @@
       const token = sessionData?.session?.access_token;
       if (!token) {
         $('loginNote').classList.remove('hidden');
+        $('calGrid').innerHTML = '';
         $('list').innerHTML = '';
         return;
       }
@@ -204,12 +265,78 @@
         payload = result;
         const storeName = STORE_NAMES[result.store_key] || result.store_key || '';
         $('roomSub').textContent = [result.room_name, storeName].filter(Boolean).join(' / ');
-        renderList();
+        renderAll();
       } catch (error) {
         $('errorNote').textContent = error.message || '読み込みに失敗しました。';
         $('errorNote').classList.remove('hidden');
+        $('calGrid').innerHTML = '';
         $('list').innerHTML = '';
       }
+    }
+
+    function collectMarks() {
+      const marks = new Map();
+      for (const row of payload?.reservations || []) {
+        const key = dayKey(row.visit_at);
+        if (!key) continue;
+        const cur = marks.get(key) || { resv: false, evt: false };
+        cur.resv = true;
+        marks.set(key, cur);
+      }
+      for (const row of payload?.events || []) {
+        const key = dayKey(row.starts_at);
+        if (!key) continue;
+        const cur = marks.get(key) || { resv: false, evt: false };
+        cur.evt = true;
+        marks.set(key, cur);
+      }
+      return marks;
+    }
+
+    function renderCalendar() {
+      const [year, monthNum] = month.split('-').map(Number);
+      const first = new Date(`${month}-01T12:00:00+09:00`);
+      const startPad = first.getUTCDay();
+      const days = new Date(year, monthNum, 0).getDate();
+      const todayKey = dayKey(new Date().toISOString());
+      const marks = collectMarks();
+      const cells = [];
+      for (let i = 0; i < startPad; i += 1) cells.push('<div class="cal-cell out"></div>');
+      for (let day = 1; day <= days; day += 1) {
+        const key = month + '-' + String(day).padStart(2, '0');
+        const mark = marks.get(key);
+        const wd = (startPad + day - 1) % 7;
+        const cls = [
+          'cal-cell',
+          wd === 0 ? 'sun' : '',
+          wd === 6 ? 'sat' : '',
+          key === todayKey ? 'today' : '',
+          key === selectedDay ? 'selected' : '',
+        ].filter(Boolean).join(' ');
+        cells.push(
+          '<button type="button" class="' + cls + '" data-day="' + key + '">' +
+          '<span class="cal-num">' + day + '</span>' +
+          '<span class="cal-marks">' +
+            (mark?.resv ? '<i class="dot resv"></i>' : '') +
+            (mark?.evt ? '<i class="dot evt"></i>' : '') +
+          '</span></button>'
+        );
+      }
+      $('calGrid').innerHTML = cells.join('');
+      $('calGrid').querySelectorAll('[data-day]').forEach((btn) => {
+        btn.onclick = () => {
+          selectedDay = btn.getAttribute('data-day') || '';
+          renderCalendar();
+          renderList();
+          const target = document.getElementById('day-' + selectedDay);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+      });
+    }
+
+    function renderAll() {
+      renderCalendar();
+      renderList();
     }
 
     function renderList() {
@@ -252,7 +379,10 @@
       }
       const html = [];
       for (const [key, rows] of groups) {
-        html.push('<section class="day"><h2>' + escapeHtml(key === 'none' ? '日時未設定' : dayLabel(rows[0].iso)) + '</h2>');
+        html.push(
+          '<section class="day' + (key === selectedDay ? ' selected-day' : '') + '" id="day-' + escapeHtml(key) + '">' +
+          '<h2>' + escapeHtml(key === 'none' ? '日時未設定' : dayLabel(rows[0].iso)) + '</h2>'
+        );
         rows.forEach((row, index) => {
           html.push(
             '<button type="button" class="card" data-kind="' + row.kind + '" data-key="' + escapeHtml(key) + '" data-index="' + index + '">' +
