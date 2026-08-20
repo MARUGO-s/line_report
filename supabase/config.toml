@@ -35,6 +35,12 @@ verify_jwt = false
 [functions.reservation-today-cron]
 verify_jwt = false
 
+# calendar-tomorrow-cron は pg_cron（毎分ゲート）から呼ばれる内部関数。
+# ルームごとの calendar_tomorrow_reminder_hour/minute（既定19:00）に一致したとき、
+# 翌日の line_room_calendar_events を1通で配信する。二重送信は calendar_tomorrow_reminder_logs で防止。
+[functions.calendar-tomorrow-cron]
+verify_jwt = false
+
 # reservation-ai-cache-cron は毎日 JST05:37 に過去予約を店舗別・日別キャッシュへ確定保存する内部関数。
 # 認可は関数内で CRON_AUTH_TOKEN / Vault のresolve_edge_cron_auth_tokenを定数時間比較する。
 [functions.reservation-ai-cache-cron]

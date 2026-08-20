@@ -131,6 +131,14 @@ test('LINE room settings can edit today-reservation alert time like the site Web
   assert.match(html, /サイト設定と連動/);
 });
 
+test('LINE room settings can edit tomorrow-reminder delivery time', async () => {
+  const html = await readFile(new URL('public/room_settings.html', root), 'utf8');
+  assert.match(html, /extra:'tomorrowReminder'/);
+  assert.match(html, /tomorrow-reminder-inp/);
+  assert.match(html, /calendar_tomorrow_reminder_hour/);
+  assert.match(html, /calendar_tomorrow_reminder_minute/);
+});
+
 test('Pages workflow deploys only the public directory', async () => {
   const workflow = await readFile(new URL('.github/workflows/deploy-pages.yml', root), 'utf8');
   assert.match(workflow, /actions\/configure-pages@v5/);

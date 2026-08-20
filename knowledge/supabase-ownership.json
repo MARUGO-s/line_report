@@ -5,6 +5,7 @@
   "ownedFunctions": [
     "admin-api",
     "ai-analyze",
+    "calendar-tomorrow-cron",
     "chat-knowledge",
     "chat-push",
     "foodcourt-forecast-cron",
