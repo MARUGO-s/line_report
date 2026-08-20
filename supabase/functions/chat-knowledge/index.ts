@@ -11,6 +11,8 @@ import {
 } from "../_shared/chat_store_file_bridge.ts"
 import { postChatCard } from "../_shared/chat_bridge.ts"
 import { ensureMtalkRoomSettings, loadMtalkRoomFlags } from "../_shared/mtalk_room_settings.ts"
+import { mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
+import { tryAutoRegisterRoomSchedule } from "../_shared/mtalk_schedule_register.ts"
 import { handleMtalkSearchText } from "../_shared/mtalk_search.ts"
 import { loadStoreRegistryRow } from "../_shared/chat_store_file_bridge.ts"
 
@@ -202,6 +204,29 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   const fromDispatch = String(body.store_key ?? "").trim()
   const resolved = await resolveRoomStoreKey(supabase, group, groupId)
   const text = String(message.content ?? "").trim()
+
+  const calendarRoomId = mtalkSyntheticRoomId(groupId)
+  const calendarFlags = await loadMtalkRoomFlags(supabase, groupId)
+  if (calendarRoomId && text && message.kind !== "image") {
+    const registered = await tryAutoRegisterRoomSchedule(supabase, {
+      roomId: calendarRoomId,
+      text,
+      source: "mtalk",
+      autoCreate: calendarFlags.calendar_ai_auto_create_enabled,
+      silent: calendarFlags.calendar_silent_auto_register_enabled,
+      replyEnabled: calendarFlags.calendar_registration_reply_enabled,
+      hardMute: calendarFlags.bot_reply_hard_mute_enabled,
+    })
+    if (registered.handled) {
+      if (registered.replyText) {
+        const storeBotForCal = (fromDispatch || resolved.storeKey)
+          ? await loadChatStoreBot(supabase, fromDispatch || String(resolved.storeKey ?? ""))
+          : null
+        await replyInRoom(supabase, groupId, registered.replyText, storeBotForCal)
+      }
+      return json({ ok: true, processed: true, kind: "schedule" }, 200)
+    }
+  }
 
   if (SETTINGS_TRIGGER_WORDS.has(text)) {
     const ensured = await ensureMtalkRoomSettings(supabase, groupId)

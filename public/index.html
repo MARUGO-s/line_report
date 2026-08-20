@@ -5648,8 +5648,8 @@
           <div id="roomConfigCalendarBulkTitle" class="room-config-calendar-section-title">店舗一括（全連携ルームへ保存時に反映）</div>
           <div class="room-scope-modal-list" style="margin-top:0;">
             <label class="room-scope-option"><input id="roomConfigTomorrowReminder" type="checkbox">明日予定配信</label>
-            <label class="room-scope-option" title="連携カレンダーへ、AIが予定と判断した場合の扱いです。信頼度が高いときは通常LINEで返信せず登録します（下の「登録内容をLINEで返信」で高確度でも返信可能）。信頼度が低いときは、さらに下の「低確度のときは確認の返信」がOFFなら無返信のまま件名に（仮）の仮登録、ONならLINEではい／いいえで確認します。"><input id="roomConfigGoogleCalendarAutoRegister" type="checkbox">会話から予定を検知したら「Googleカレンダー」へ無返信で自動登録する</label>
-            <label class="room-scope-option" title="無返信自動登録がONで、AIが高確度と判断してカレンダーに書き込んだあと、登録内容（日時・件名など）をこのトークに返信します。AI会話返信もONが必要です。低確度の確認返信とは別に設定できます。"><input id="roomConfigCalendarRegistrationReply" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
+            <label class="room-scope-option" title="会話から予定を検知したら、M-talkの予定カレンダーへ登録します。信頼度が高いときは通常返信せず登録します（下の「登録内容を返信」で高確度でも返信可能）。"><input id="roomConfigGoogleCalendarAutoRegister" type="checkbox">会話から予定を検知したら「M-talkの予定カレンダー」へ無返信で自動登録する</label>
+            <label class="room-scope-option" title="無返信自動登録がONで、予定をM-talkカレンダーに書き込んだあと、登録内容（日時・件名など）をこのトークに返信します。"><input id="roomConfigCalendarRegistrationReply" type="checkbox">会話から予定を検知したM-talkカレンダーへの登録内容をトークで返信する（高確度でも）</label>
             <label class="room-scope-option" title="無返信自動登録がONのときのみ有効です。AIの信頼度が「要確認」レンジのとき、LINEで「登録しますか？」と返信し、はい／いいえで確定します。OFFのときは無言のまま件名に（仮）を付けて登録します（AI会話返信もONが必要）。"><input id="roomConfigCalendarLowConfidenceConfirmReply" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
             <label class="room-scope-option"><input id="roomConfigGmailAlert" type="checkbox">Gmail予約通知</label>
             <div class="receipt-schedule-fields">
@@ -5724,8 +5724,8 @@
               <input id="roomConfigTomorrowReminderMaxItems" class="input schedule-num" type="number" min="1" max="50" step="1" aria-label="明日予定の最大件数">
             </div>
           </div>
-          <label class="room-scope-option store-permission-option" title="連携カレンダーへ、AIが予定と判断した場合の扱いです。"><input id="roomConfigGoogleCalendarAutoRegisterPerm" type="checkbox">会話から予定を検知したら「Googleカレンダー」へ無返信で自動登録する</label>
-          <label class="room-scope-option store-permission-option" title="無返信自動登録がONのあと、登録内容をLINEで返信します。"><input id="roomConfigCalendarRegistrationReplyPerm" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
+          <label class="room-scope-option store-permission-option" title="会話から予定を検知したら、M-talkの予定カレンダーへ登録します。"><input id="roomConfigGoogleCalendarAutoRegisterPerm" type="checkbox">会話から予定を検知したら「M-talkの予定カレンダー」へ無返信で自動登録する</label>
+          <label class="room-scope-option store-permission-option" title="無返信自動登録がONのあと、登録内容をトークで返信します。"><input id="roomConfigCalendarRegistrationReplyPerm" type="checkbox">会話から予定を検知したM-talkカレンダーへの登録内容をトークで返信する（高確度でも）</label>
           <label class="room-scope-option store-permission-option" title="低確度のときは確認の返信（はい／いいえ）を送ります。"><input id="roomConfigCalendarLowConfidenceConfirmReplyPerm" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
           <label class="room-scope-option store-permission-option"><input id="roomConfigGmailAlertPerm" type="checkbox">Gmail予約通知</label>
           <div class="receipt-schedule-fields">
@@ -5861,8 +5861,8 @@
             <input id="newRoomTomorrowReminderMaxItems" class="input schedule-num" type="number" min="1" max="50" step="1" aria-label="明日予定の最大件数">
           </div>
         </div>
-        <label class="room-scope-option" title="連携カレンダーへ、AIが予定と判断した場合の扱いです。"><input id="newRoomGoogleCalendarAutoRegister" type="checkbox">会話から予定を検知したら「Googleカレンダー」へ無返信で自動登録する</label>
-        <label class="room-scope-option" title="無返信自動登録がONで高確度登録のあと、登録内容をLINEで返信します。AI会話返信もONが必要です。"><input id="newRoomCalendarRegistrationReply" type="checkbox">会話から予定を検知したGoogleカレンダーへの登録内容をLINEで返信する（高確度でも）</label>
+        <label class="room-scope-option" title="会話から予定を検知したら、M-talkの予定カレンダーへ登録します。"><input id="newRoomGoogleCalendarAutoRegister" type="checkbox">会話から予定を検知したら「M-talkの予定カレンダー」へ無返信で自動登録する</label>
+        <label class="room-scope-option" title="無返信自動登録がONで高確度登録のあと、登録内容をトークで返信します。"><input id="newRoomCalendarRegistrationReply" type="checkbox">会話から予定を検知したM-talkカレンダーへの登録内容をトークで返信する（高確度でも）</label>
         <label class="room-scope-option" title="無返信自動登録がONのときのみ有効です。"><input id="newRoomCalendarLowConfidenceConfirmReply" type="checkbox">低確度のときは確認の返信を送る（はい／いいえ）</label>
         <label class="room-scope-option"><input id="newRoomGmailAlertEnabled" type="checkbox">Gmail予約通知</label>
         <label class="room-scope-option" title="毎日決まった時刻に「本日の予約状況」を1通のリッチメッセージで送ります（時刻は一括設定を使用）。Gmail予約通知とは別の権限です。"><input id="newRoomTodayReservationAlertEnabled" type="checkbox">本日の予約状況配信</label>
@@ -8949,7 +8949,7 @@
       if (media) enabledFeatures.push('LINE添付保存（ルーム）');
       if (media && imgReply) enabledFeatures.push('レシートの解析結果を送信');
       if (cal) {
-        enabledFeatures.push('会話から予定検知 → Googleカレンダーへ無返信で自動登録');
+        enabledFeatures.push('会話から予定検知 → M-talkの予定カレンダーへ無返信で自動登録');
         if (calRegReply) enabledFeatures.push('予定の登録内容をLINEで返信する（高確度でも）');
         if (calLowConf) enabledFeatures.push('低確度のとき確認返信（はい／いいえ）');
       }
@@ -9024,7 +9024,7 @@
           }
         }
       } else {
-        webhookReplies.push('会話からのGoogleカレンダー自動登録は無効です。');
+        webhookReplies.push('会話からのM-talk予定カレンダー自動登録は無効です。');
       }
 
       if (config.gmail_reservation_alert_enabled) {
