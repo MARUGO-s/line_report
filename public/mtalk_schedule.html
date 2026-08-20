@@ -24,7 +24,7 @@
       --warn: #ff9f0a;
       --resv-text: #ff9f0a;
       --allergy-text: #ff453a;
-      --birthday-text: #ff7ad9;
+      --birthday-text: #ff453a;
       --overlay: rgba(0,0,0,.55);
     }
     html[data-theme='light'], body[data-theme='light'] {
@@ -43,7 +43,7 @@
       --warn: #c93400;
       --resv-text: #c2410c;
       --allergy-text: #c0392b;
-      --birthday-text: #c2185b;
+      --birthday-text: #c0392b;
       --overlay: rgba(20,20,20,.4);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -153,14 +153,12 @@
       font-family: inherit; cursor: pointer;
     }
     .card .time { font-weight: 800; font-size: 15px; color: var(--text); }
-    .card .name { font-size: 15px; font-weight: 700; margin-top: 2px; }
+    .card .name { font-size: 15px; font-weight: 700; margin-top: 2px; color: var(--text); }
     .card .meta { font-size: 12px; color: var(--meta); margin-top: 4px; }
-    .card.card-resv .time,
-    .card.card-resv .name { color: var(--resv-text); }
-    .card.card-resv .meta { color: var(--resv-text); opacity: 0.86; }
-    .card .flag { font-size: 12.5px; font-weight: 800; margin-top: 6px; line-height: 1.45; }
-    .card .flag.allergy { color: var(--allergy-text); }
-    .card .flag.birthday { color: var(--birthday-text); }
+    .card .plan { font-size: 13px; font-weight: 800; color: var(--resv-text); margin-top: 4px; }
+    .card.card-evt .name { color: var(--resv-text); }
+    .card .flag { font-size: 12.5px; font-weight: 800; margin-top: 6px; line-height: 1.45; color: var(--allergy-text); }
+    .card .flag.allergy, .card .flag.birthday { color: var(--allergy-text); }
     .detail {
       position: fixed; inset: 0; background: var(--overlay); z-index: 20;
       display: flex; align-items: flex-end; justify-content: center;
@@ -171,15 +169,15 @@
       border-radius: 18px 18px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
       max-height: 92vh; overflow-y: auto;
     }
-    .sheet h3 { font-size: 17px; margin-bottom: 10px; }
-    .sheet.sheet-resv h3 { color: var(--resv-text); }
+    .sheet h3 { font-size: 17px; margin-bottom: 10px; color: var(--text); }
     .row { display: flex; gap: 10px; padding: 6px 0; font-size: 14px; }
     .row span { color: var(--muted); width: 88px; flex-shrink: 0; }
-    .row.resv div { color: var(--resv-text); font-weight: 700; }
-    .row.allergy span, .row.allergy div { color: var(--allergy-text); }
-    .row.allergy div { font-weight: 800; }
-    .row.birthday span, .row.birthday div { color: var(--birthday-text); }
-    .row.birthday div { font-weight: 800; }
+    .row div { color: var(--text); }
+    .row.plan div, .row.content div { color: var(--resv-text); font-weight: 700; }
+    .row.note span, .row.note div,
+    .row.allergy span, .row.allergy div,
+    .row.birthday span, .row.birthday div { color: var(--allergy-text); }
+    .row.note div, .row.allergy div, .row.birthday div { font-weight: 800; }
     .close {
       margin-top: 12px; width: 100%; height: 42px; border: 0; border-radius: 12px;
       background: var(--card); color: var(--text); font-weight: 700; font-family: inherit; cursor: pointer;
@@ -572,7 +570,8 @@
             iso: row.visit_at,
             time: row.visit_time_label || timeLabel(row.visit_at),
             title: row.customer_name || '予約',
-            meta: [row.party_size_label, sourceLabel(row.source), row.plan_label].filter(Boolean).join(' / '),
+            meta: [row.party_size_label, sourceLabel(row.source)].filter(Boolean).join(' / '),
+            plan: row.plan_label || '',
             raw: row,
           }));
       items.sort((a, b) => String(a.sort).localeCompare(String(b.sort)));
@@ -611,6 +610,7 @@
             '<div class="time">' + escapeHtml(row.time || '時間未設定') + '</div>' +
             '<div class="name">' + escapeHtml(row.title) + '</div>' +
             (row.meta ? '<div class="meta">' + escapeHtml(row.meta) + '</div>' : '') +
+            (row.plan ? '<div class="plan">' + escapeHtml(row.plan) + '</div>' : '') +
             (row.kind === 'reservation' ? reservationFlagsHtml(row.raw) : '') +
             '</button>'
           );
@@ -636,7 +636,7 @@
       const rows = kind === 'event'
         ? [
             { label: '日時', value: (timeLabel(raw.starts_at) || '') + (raw.ends_at ? ' – ' + timeLabel(raw.ends_at) : ''), cls: '' },
-            { label: '内容', value: raw.title || '', cls: '' },
+            { label: '内容', value: raw.title || '', cls: 'content' },
             { label: '詳細', value: raw.description || 'なし', cls: '' },
             { label: '登録元', value: raw.source || '', cls: '' },
           ]
@@ -663,24 +663,24 @@
       const requestNote = String(raw.request_note_label || '').trim();
       const dislikes = String(raw.dislikes_label || '').trim();
       const rows = [
-        { label: '来店', value: raw.visit_time_label || timeLabel(raw.visit_at), cls: 'resv' },
-        { label: '予約者', value: raw.customer_name || '', cls: 'resv' },
-        { label: '人数', value: raw.party_size_label || '', cls: 'resv' },
-        { label: '経路', value: raw.route_label || sourceLabel(raw.source), cls: 'resv' },
-        { label: 'コース', value: plan, cls: isBirthdayText(plan) ? 'birthday' : 'resv' },
-        { label: 'アレルギー', value: allergy || 'なし', cls: allergy ? 'allergy' : '' },
+        { label: '来店', value: raw.visit_time_label || timeLabel(raw.visit_at), cls: '' },
+        { label: '予約者', value: raw.customer_name || '', cls: '' },
+        { label: '人数', value: raw.party_size_label || '', cls: '' },
+        { label: '経路', value: raw.route_label || sourceLabel(raw.source), cls: '' },
+        { label: 'コース', value: plan, cls: 'plan' },
+        { label: 'アレルギー', value: allergy || 'なし', cls: allergy ? 'note' : '' },
       ];
       if (birthday && birthday !== plan) {
-        rows.push({ label: isBirthdayText(birthday) && !BIRTHDAY_RE.test(birthday) ? '記念日' : 'お誕生日', value: birthday, cls: 'birthday' });
+        rows.push({ label: isBirthdayText(birthday) && !BIRTHDAY_RE.test(birthday) ? '記念日' : 'お誕生日', value: birthday, cls: 'note' });
       }
-      if (dislikes) rows.push({ label: '苦手', value: dislikes, cls: 'allergy' });
+      if (dislikes) rows.push({ label: '苦手', value: dislikes, cls: 'note' });
       if (requestNote && requestNote !== birthday) {
-        rows.push({ label: '要望', value: requestNote, cls: isBirthdayText(requestNote) ? 'birthday' : 'resv' });
+        rows.push({ label: '要望', value: requestNote, cls: 'note' });
       }
       rows.push(
-        { label: 'TEL', value: raw.customer_phone || '', cls: 'resv' },
-        { label: '来店回数', value: raw.visit_count ? raw.visit_count + '回' : '', cls: 'resv' },
-        { label: '店舗', value: raw.store_name || '', cls: 'resv' },
+        { label: 'TEL', value: raw.customer_phone || '', cls: '' },
+        { label: '来店回数', value: raw.visit_count ? raw.visit_count + '回' : '', cls: '' },
+        { label: '店舗', value: raw.store_name || '', cls: '' },
       );
       return rows;
     }
