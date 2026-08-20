@@ -3948,6 +3948,16 @@ async function authenticateChatMember(
 }
 
 function slimChatScheduleReservation(item: Record<string, unknown>): Record<string, unknown> {
+  const parsed = parseReservationCalendarDetail(toSafeString(item.reservation_detail))
+  const anniversaryLabel = normalizeCalendarText(
+    parsed?.anniversary ?? parsed?.birthday ?? parsed?.celebration ?? parsed?.occasion,
+    120,
+  ) || ""
+  const requestNoteLabel = normalizeCalendarText(
+    parsed?.requestNote ?? parsed?.request_note ?? parsed?.notes ?? parsed?.note,
+    160,
+  ) || ""
+  const dislikesLabel = normalizeCalendarText(parsed?.dislikes, 120) || ""
   return {
     source: item.source ?? null,
     id: item.id ?? null,
@@ -3958,6 +3968,9 @@ function slimChatScheduleReservation(item: Record<string, unknown>): Record<stri
     party_size_label: item.party_size_label || "",
     plan_label: item.plan_label || "",
     allergy_label: item.allergy_label || "",
+    anniversary_label: anniversaryLabel,
+    request_note_label: requestNoteLabel,
+    dislikes_label: dislikesLabel,
     route_label: item.route_label || "",
     store_name: item.store_name || "",
     visit_count: Number(item.visit_count) || 0,
