@@ -365,6 +365,19 @@ export async function handleStoreRoomReceiptCommand(
   return true
 }
 
+type FlexWalkOut = {
+  pendingFields: { label: string; value: string; color?: string | null }[]
+  sections: NonNullable<ChatCard['sections']>
+  notes: string[]
+  actions: NonNullable<ChatCard['actions']>
+}
+
+function flushFlexFields(out: FlexWalkOut): void {
+  if (!out.pendingFields.length) return
+  out.sections.push({ type: 'fields', rows: out.pendingFields })
+  out.pendingFields = []
+}
+
 function mtalkCardFromLineReply(reply: unknown): { text: string; card?: ChatCard } {
   if (typeof reply === 'string') return { text: reply }
   if (Array.isArray(reply)) {
@@ -373,30 +386,31 @@ function mtalkCardFromLineReply(reply: unknown): { text: string; card?: ChatCard
   }
   if (!reply || typeof reply !== 'object') return { text: '操作を受け付けました。' }
   const rec = reply as Record<string, unknown>
-  const collected = {
-    texts: [] as string[],
-    fields: [] as { label: string; value: string }[],
-    headings: [] as string[],
-    actions: [] as NonNullable<ChatCard['actions']>,
+  const collected: FlexWalkOut = {
+    pendingFields: [],
+    sections: [],
+    notes: [],
+    actions: [],
   }
   walkLineFlex(rec, collected)
+  flushFlexFields(collected)
   const alt = String(rec.altText ?? '').trim()
-  const text = alt || collected.texts[0] || '操作を受け付けました。'
-  const used = new Set<string>([alt, ...collected.fields.flatMap((field) => [field.label, field.value])])
-  const notes = collected.texts.filter((item) => item && !used.has(item))
-  const sections: NonNullable<ChatCard['sections']> = []
-  for (const heading of collected.headings) sections.push({ type: 'heading', text: heading })
-  if (collected.fields.length) sections.push({ type: 'fields', rows: collected.fields })
-  if (notes.length) sections.push({ type: 'note', text: notes.join('\n') })
-  if (!sections.length && !collected.actions.length) return { text }
+  const text = alt || collected.notes[0] || '操作を受け付けました。'
   const looksLikeSalesReport = /売上レポート/.test(alt)
+    || collected.sections.some((section) => (
+      section.type === 'fields' && section.rows.some((row) => /総売上/.test(row.label))
+    ))
+  if (!looksLikeSalesReport && collected.notes.length) {
+    collected.sections.push({ type: 'note', text: collected.notes.join('\n') })
+  }
+  if (!collected.sections.length && !collected.actions.length) return { text }
   const title = (alt.split(' / ')[0] || alt || 'レシート').trim()
   return {
     text,
     card: {
       variant: looksLikeSalesReport ? 'line' : undefined,
       header: { title },
-      sections,
+      sections: collected.sections,
       actions: collected.actions.length ? collected.actions : null,
     },
   }
@@ -404,35 +418,42 @@ function mtalkCardFromLineReply(reply: unknown): { text: string; card?: ChatCard
 
 function walkLineFlex(
   node: unknown,
-  out: {
-    texts: string[]
-    fields: { label: string; value: string }[]
-    headings: string[]
-    actions: NonNullable<ChatCard['actions']>
-  },
-  ctx?: { inHeader?: boolean },
+  out: FlexWalkOut,
+  ctx?: { inHeader?: boolean; inFooter?: boolean },
 ): void {
   if (!node || typeof node !== 'object') return
   const rec = node as Record<string, unknown>
+  if (rec.type === 'separator') {
+    flushFlexFields(out)
+    out.sections.push({ type: 'separator' })
+    return
+  }
   if (rec.layout === 'horizontal' && Array.isArray(rec.contents) && rec.contents.length === 2) {
     const left = rec.contents[0] as Record<string, unknown> | undefined
     const right = rec.contents[1] as Record<string, unknown> | undefined
     if (left?.type === 'text' && right?.type === 'text') {
       const label = String(left.text ?? '').trim()
       const value = String(right.text ?? '').trim()
+      const color = String(right.color ?? '').trim()
       if (label && value) {
-        out.fields.push({ label, value })
+        out.pendingFields.push({
+          label,
+          value,
+          color: color && !/^#111111$/i.test(color) ? color : null,
+        })
         return
       }
     }
   }
   if (rec.type === 'text' && rec.text) {
     const text = String(rec.text)
-    if (ctx?.inHeader || (rec.weight === 'bold' && (text.startsWith('【') || text.startsWith('対象:')))) {
-      out.headings.push(text)
-    } else {
-      out.texts.push(text)
+    if (ctx?.inFooter || ctx?.inHeader) return
+    if (rec.weight === 'bold' && (text.startsWith('【') || text.startsWith('対象:'))) {
+      flushFlexFields(out)
+      out.sections.push({ type: 'heading', text })
+      return
     }
+    out.notes.push(text)
   }
   if (rec.type === 'button' && rec.action && typeof rec.action === 'object') {
     const action = rec.action as Record<string, unknown>
@@ -442,11 +463,14 @@ function walkLineFlex(
     if (url) out.actions.push({ label: label || '開く', url })
     else if (command) out.actions.push({ label: label || command, command })
   }
-  if (Array.isArray(rec.contents)) rec.contents.forEach((child) => walkLineFlex(child, out, ctx))
-  else if (rec.contents) walkLineFlex(rec.contents, out, ctx)
-  if (rec.body) walkLineFlex(rec.body, out, ctx)
-  if (rec.footer) walkLineFlex(rec.footer, out, ctx)
+  const hasParts = !!(rec.header || rec.body || rec.footer)
   if (rec.header) walkLineFlex(rec.header, out, { inHeader: true })
+  if (rec.body) walkLineFlex(rec.body, out, ctx)
+  if (rec.footer) walkLineFlex(rec.footer, out, { inFooter: true })
+  if (!hasParts) {
+    if (Array.isArray(rec.contents)) rec.contents.forEach((child) => walkLineFlex(child, out, ctx))
+    else if (rec.contents) walkLineFlex(rec.contents, out, ctx)
+  }
 }
 
 export async function postStoreRoomLineStyleReply(
