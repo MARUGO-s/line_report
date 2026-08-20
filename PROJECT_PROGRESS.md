@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 登録ユーザーの横に Bot タブを追加する
+
+- Request: 登録ユーザータブの横に Bot タブを作り、店舗Botをそこに表示する。
+- Implementation: `chat.html` のトーク一覧タブに Bot を追加。登録ユーザーは人だけ、Bot タブは店舗Botだけ。
+- Operation: Bot タブから店舗Botを選んで、ルームへ招待できる。
+
 ### 2026-08-20 - 店舗Botを登録ユーザーとして追加する
 
 - Request: 店舗用アカウントを LINE の Bot のようにする。登録ユーザーとして扱い、その Bot がいるルームの投稿を紐づいた店舗へ送る。
