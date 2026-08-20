@@ -63,7 +63,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v33/)
+  assert.match(serviceWorker, /line-report-chat-v34/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -144,7 +144,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v33/)
+  assert.match(serviceWorker, /line-report-chat-v34/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -266,6 +266,10 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   const roomSettingsPage = await read("public/room_settings.html")
   assert.match(roomSettingsPage, /fromChat/)
   assert.match(roomSettingsPage, /chat-room-config/)
+  assert.match(roomSettingsPage, /M-talk に戻る/)
+  assert.match(roomSettingsPage, /back-mtalk/)
+  assert.match(roomSettingsPage, /\?group=/)
+  assert.match(roomSettingsPage, /\.\/chat\.html/)
   const todayCron = await read("supabase/functions/reservation-today-cron/index.ts")
   assert.match(todayCron, /isMtalkSyntheticRoomId/)
   assert.match(todayCron, /loadMtalkStoreBot/)

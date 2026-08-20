@@ -105,6 +105,17 @@
   .theme-toggle{flex:none;font-family:inherit;font-size:11.5px;font-weight:600;color:var(--tx-3);
     background:var(--surface);border:1px solid var(--line-soft);border-radius:999px;padding:6px 12px;cursor:pointer;}
   .theme-toggle:active{background:var(--press);}
+  .tb-actions{display:flex;align-items:center;gap:8px;flex:none;}
+  .back-mtalk{
+    display:inline-flex;align-items:center;justify-content:center;gap:4px;
+    flex:none;font-family:inherit;font-size:12.5px;font-weight:700;
+    color:#fff;background:var(--accent);border:0;border-radius:999px;
+    padding:8px 12px;text-decoration:none;white-space:nowrap;cursor:pointer;
+  }
+  .back-mtalk:active{opacity:.88;}
+  .login .back-mtalk{margin:0 0 18px;width:auto;}
+  .back-mtalk-bar{display:flex;width:100%;margin-top:12px;padding:11px 14px;}
+  .footer .back-mtalk{display:flex;width:100%;max-width:100%;margin:0 auto 4px;padding:11px 14px;}
   .search{display:flex;align-items:center;gap:9px;margin-top:13px;background:var(--surface);
     border:1px solid var(--line-soft);border-radius:12px;padding:0 12px;}
   .search svg{color:var(--tx-3);flex:none;}
@@ -163,6 +174,7 @@
 
 <!-- ── ① パスワード認証 ── -->
 <div class="login" id="loginScreen">
+  <a class="back-mtalk" id="backMtalkLogin" hidden href="./chat.html">‹ M-talk に戻る</a>
   <h1>ルーム設定</h1>
   <div class="lsub" id="loginRoom">このルームの Bot 機能を設定します</div>
   <div class="card">
@@ -189,7 +201,9 @@
           </span>
         </div>
       </div>
-      <button id="themeToggleBtn" type="button" class="theme-toggle" aria-pressed="false">ライトモード</button>
+      <div class="tb-actions">
+        <button id="themeToggleBtn" type="button" class="theme-toggle" aria-pressed="false">ライトモード</button>
+      </div>
     </div>
     <div class="search" id="searchWrap">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -198,6 +212,7 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
       </button>
     </div>
+    <a class="back-mtalk back-mtalk-bar" id="backMtalkApp" hidden href="./chat.html">‹ M-talk に戻る</a>
   </header>
 
   <div class="summary">
@@ -207,7 +222,10 @@
 
   <div class="list" id="list"></div>
   <div class="no-result" id="noResult">一致する設定がありません</div>
-  <div class="footer">変更はその場で自動保存されます</div>
+  <div class="footer">
+    <a class="back-mtalk" id="backMtalkFooter" hidden href="./chat.html">‹ M-talk に戻る</a>
+    <div style="margin-top:12px;">変更はその場で自動保存されます</div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -231,6 +249,15 @@
   var roomId = String(params.get('room_id') || '').trim();
   if (fromChat && Number.isFinite(chatGroupId) && chatGroupId > 0) {
     roomId = 'mtalk-group-' + chatGroupId;
+  }
+  var chatHomeHref = './chat.html' + (Number.isFinite(chatGroupId) && chatGroupId > 0 ? ('?group=' + encodeURIComponent(String(chatGroupId))) : '');
+  function showBackToMtalk(){
+    ['backMtalkLogin','backMtalkApp','backMtalkFooter'].forEach(function(id){
+      var node = el(id);
+      if (!node) return;
+      node.hidden = false;
+      node.setAttribute('href', chatHomeHref);
+    });
   }
   var SESSION_KEY = 'lr_roomcfg_session::' + roomId;
   var sessionToken = '';
@@ -709,7 +736,10 @@
   }
 
   // 既存セッションがあればパスワード入力を飛ばす（同タブ内の再表示）。
-  if (fromChat) startChatSession();
+  if (fromChat) {
+    showBackToMtalk();
+    startChatSession();
+  }
   else if (sessionToken){ loadConfig(); }
 })();
 </script>
