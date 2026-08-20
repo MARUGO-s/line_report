@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - M-talk の予約・予定を画面から追加・変更・キャンセルする
+
+- Request: 予約も予定も、表示サイトから新規追加、変更、キャンセル、日付変更したい。
+- Implementation: `/chat-schedule/reservation` と `/chat-schedule/event` をチャットJWT＋メンバー確認で追加。予約は既存の手入力／取込編集と同じ店舗データ。予定は M-talk ルームのカレンダーへ保存。
+- Operation: 「予約・予定」で追加／カードの編集・日付変更／キャンセル。予約キャンセルは非表示、予定は削除。
+
 ### 2026-08-20 - M-talk 予約表示をオレンジ／アレルギー赤／お誕生日ピンクにする
 
 - Request: 予約内容はオレンジで視認しやすくし、アレルギーやお誕生日があるときは別色にする。

@@ -1280,10 +1280,23 @@ Deno.serve(async (req, info) => {
     }
   }
 
-  // M-talk の予約・予定。メンバーのみ。予約は取り込み済み店舗データ、予定はルーム／同店舗カレンダー。
-  if (req.method === "GET" && path === "/chat-schedule") {
+  // M-talk の予約・予定。メンバーのみ。閲覧と編集はチャットJWT。管理トークンは使わない。
+  if (
+    path === "/chat-schedule" ||
+    path === "/chat-schedule/reservation" ||
+    path === "/chat-schedule/event"
+  ) {
     try {
-      return await handleChatSchedule(req, url, supabase)
+      if (path === "/chat-schedule" && req.method === "GET") {
+        return await handleChatSchedule(req, url, supabase)
+      }
+      if (path === "/chat-schedule/reservation") {
+        return await handleChatScheduleReservation(req, workReq, url, supabase)
+      }
+      if (path === "/chat-schedule/event") {
+        return await handleChatScheduleEvent(req, workReq, url, supabase)
+      }
+      throw { status: 405, message: "Method not allowed." } satisfies AppError
     } catch (e) {
       const err = asAppError(e)
       return json({ error: err.message }, err.status)
@@ -3977,33 +3990,11 @@ function slimChatScheduleReservation(item: Record<string, unknown>): Record<stri
   }
 }
 
-async function handleChatSchedule(
-  req: Request,
-  url: URL,
+async function listChatScheduleRoomIds(
   supabase: ReturnType<typeof createClient>,
-): Promise<Response> {
-  const groupId = Number(url.searchParams.get("group_id") ?? "")
-  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
-    throw { status: 400, message: "group_id is required." } satisfies AppError
-  }
-  await authenticateChatMember(req, supabase, groupId)
-  const month = normalizeCalendarMonthParam(url.searchParams.get("month"))
-  const resolved = await resolveMtalkRoomStoreKey(supabase, groupId)
-  const storeKey = resolved.storeKey
-  let reservations: Array<Record<string, unknown>> = []
-  if (storeKey) {
-    const calendarUrl = new URL("https://mtalk.local/reservations/calendar")
-    calendarUrl.searchParams.set("month", month)
-    calendarUrl.searchParams.set("store_key", storeKey)
-    calendarUrl.searchParams.set("source", "all")
-    const calendar = await fetchReservationCalendarState(supabase, calendarUrl)
-    const items = Array.isArray(calendar.items) ? calendar.items : []
-    reservations = items
-      .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
-      .map((row) => slimChatScheduleReservation(row))
-  }
-
-  const range = buildJstMonthRange(month)
+  groupId: number,
+  storeKey: string | null,
+): Promise<Set<string>> {
   const roomIds = new Set<string>()
   const mtalkRoomId = mtalkSyntheticRoomId(groupId)
   if (mtalkRoomId) roomIds.add(mtalkRoomId)
@@ -4020,7 +4011,105 @@ async function handleChatSchedule(
       if (roomId) roomIds.add(roomId)
     }
   }
+  return roomIds
+}
 
+async function requireChatScheduleMember(
+  req: Request,
+  url: URL,
+  supabase: ReturnType<typeof createClient>,
+  body?: Record<string, unknown> | null,
+): Promise<{ groupId: number; storeKey: string | null; ambiguous: boolean; roomName: string | null }> {
+  const groupId = Number(body?.group_id ?? url.searchParams.get("group_id") ?? "")
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+    throw { status: 400, message: "group_id is required." } satisfies AppError
+  }
+  await authenticateChatMember(req, supabase, groupId)
+  const resolved = await resolveMtalkRoomStoreKey(supabase, groupId)
+  return {
+    groupId,
+    storeKey: resolved.storeKey,
+    ambiguous: Boolean(resolved.ambiguous),
+    roomName: resolved.roomName ?? null,
+  }
+}
+
+function requireChatScheduleStoreKey(ctx: { storeKey: string | null; ambiguous: boolean }): string {
+  if (ctx.storeKey) return ctx.storeKey
+  throw {
+    status: 400,
+    message: ctx.ambiguous
+      ? "複数店舗のBotがいるため、予約を編集できません。"
+      : "このルームに紐づく店舗予約がありません。",
+  } satisfies AppError
+}
+
+function buildChatScheduleReservationDetail(
+  body: Record<string, unknown>,
+  existing: Record<string, unknown> | null,
+): string {
+  const detail: Record<string, unknown> = existing ? { ...existing } : {
+    route: "手入力",
+    reservationSite: "手入力",
+  }
+  const assign = (key: string, value: string) => {
+    if (value) detail[key] = value
+    else delete detail[key]
+  }
+  assign("customerName", toSafeString(body.customer_name))
+  assign("partySize", toSafeString(body.party_size_label || body.party_size))
+  assign("plan", toSafeString(body.plan_label || body.plan))
+  assign("allergy", toSafeString(body.allergy_label || body.allergy))
+  assign("anniversary", toSafeString(body.anniversary_label || body.anniversary))
+  assign("requestNote", toSafeString(body.request_note_label || body.request_note))
+  assign("dislikes", toSafeString(body.dislikes_label || body.dislikes))
+  const visitAt = normalizeReservationVisitAtIso(body.visit_at)
+  if (visitAt) {
+    const time = buildCalendarVisitTimeLabel(null, visitAt)
+    const day = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(visitAt))
+    detail.visitDateTime = time ? `${day} ${time}` : day
+  }
+  if (!toSafeString(detail.route)) detail.route = "手入力"
+  return JSON.stringify(detail)
+}
+
+async function parseChatScheduleBody(req: Request, workReq: Request): Promise<Record<string, unknown>> {
+  if (req.method === "DELETE") return {}
+  const body = await parseJson(workReq)
+  if (!isRecord(body)) {
+    throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+  }
+  return body
+}
+
+async function handleChatSchedule(
+  req: Request,
+  url: URL,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Response> {
+  const ctx = await requireChatScheduleMember(req, url, supabase)
+  const month = normalizeCalendarMonthParam(url.searchParams.get("month"))
+  const storeKey = ctx.storeKey
+  let reservations: Array<Record<string, unknown>> = []
+  if (storeKey) {
+    const calendarUrl = new URL("https://mtalk.local/reservations/calendar")
+    calendarUrl.searchParams.set("month", month)
+    calendarUrl.searchParams.set("store_key", storeKey)
+    calendarUrl.searchParams.set("source", "all")
+    const calendar = await fetchReservationCalendarState(supabase, calendarUrl)
+    const items = Array.isArray(calendar.items) ? calendar.items : []
+    reservations = items
+      .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+      .map((row) => slimChatScheduleReservation(row))
+  }
+
+  const range = buildJstMonthRange(month)
+  const roomIds = await listChatScheduleRoomIds(supabase, ctx.groupId, storeKey)
   let events: Array<Record<string, unknown>> = []
   if (roomIds.size > 0) {
     const { data, error } = await supabase
@@ -4046,14 +4135,14 @@ async function handleChatSchedule(
 
   let reservationNote: string | null = null
   if (!storeKey) {
-    reservationNote = resolved.ambiguous
+    reservationNote = ctx.ambiguous
       ? "複数店舗のBotがいるため、予約を表示できません。"
       : "このルームに紐づく店舗予約がありません。"
   }
 
   return json({
-    group_id: groupId,
-    room_name: resolved.roomName,
+    group_id: ctx.groupId,
+    room_name: ctx.roomName,
     store_key: storeKey,
     month,
     reservation_available: Boolean(storeKey),
@@ -4061,6 +4150,172 @@ async function handleChatSchedule(
     reservations,
     events,
   }, 200)
+}
+
+async function handleChatScheduleReservation(
+  req: Request,
+  workReq: Request,
+  url: URL,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Response> {
+  const body = await parseChatScheduleBody(req, workReq)
+  const ctx = await requireChatScheduleMember(req, url, supabase, body)
+  const storeKey = requireChatScheduleStoreKey(ctx)
+
+  if (req.method === "POST") {
+    const visitAt = normalizeReservationVisitAtIso(body.visit_at)
+    if (!visitAt) throw { status: 400, message: "来店日時を入力してください。" } satisfies AppError
+    const name = toSafeString(body.customer_name)
+    if (!name) throw { status: 400, message: "予約者名を入力してください。" } satisfies AppError
+    const result = await createManualReservationEvent(supabase, {
+      customer_name: name,
+      customer_phone: toSafeString(body.customer_phone),
+      visit_at: visitAt,
+      reservation_type: toSafeString(body.reservation_type) || "unknown",
+      reservation_detail: buildChatScheduleReservationDetail(body, null),
+      manual_store_key: storeKey,
+    }, storeKey)
+    return json(result, 200)
+  }
+
+  const source = toSafeString(body.source || url.searchParams.get("source"))
+  const id = Number(body.id ?? url.searchParams.get("id") ?? "")
+  if (!reservationEventTableForSource(source) || !Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "予約を特定できません。" } satisfies AppError
+  }
+
+  if (req.method === "DELETE" || body.cancel === true || body.manual_hidden === true) {
+    const result = await updateReservationEvent(supabase, {
+      source,
+      id,
+      manual_hidden: true,
+      manual_hidden_reason: "cancel",
+    }, storeKey)
+    return json({ ...result, cancelled: true }, 200)
+  }
+
+  if (req.method !== "PATCH") {
+    throw { status: 405, message: "Method not allowed." } satisfies AppError
+  }
+
+  const visitAt = normalizeReservationVisitAtIso(body.visit_at)
+  if (!visitAt) throw { status: 400, message: "来店日時を入力してください。" } satisfies AppError
+  const name = toSafeString(body.customer_name)
+  if (!name) throw { status: 400, message: "予約者名を入力してください。" } satisfies AppError
+  const table = reservationEventTableForSource(source)
+  if (!table) throw { status: 400, message: "予約を特定できません。" } satisfies AppError
+  const existing = await fetchReservationEventRecordForScopeCheck(supabase, table, id)
+  const existingDetail = parseReservationCalendarDetail(toSafeString(existing.reservation_detail))
+  const patch: Record<string, unknown> = {
+    source,
+    id,
+    customer_name: name,
+    customer_phone: toSafeString(body.customer_phone),
+    visit_at: visitAt,
+    reservation_detail: buildChatScheduleReservationDetail(body, existingDetail),
+    manual_store_key: storeKey,
+  }
+  if (toSafeString(body.reservation_type)) patch.reservation_type = toSafeString(body.reservation_type)
+  const result = await updateReservationEvent(supabase, patch, storeKey)
+  return json(result, 200)
+}
+
+async function handleChatScheduleEvent(
+  req: Request,
+  workReq: Request,
+  url: URL,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Response> {
+  const body = await parseChatScheduleBody(req, workReq)
+  const ctx = await requireChatScheduleMember(req, url, supabase, body)
+  const mtalkRoomId = mtalkSyntheticRoomId(ctx.groupId)
+  if (!mtalkRoomId) {
+    throw { status: 400, message: "ルームが指定されていません。" } satisfies AppError
+  }
+  const roomIds = await listChatScheduleRoomIds(supabase, ctx.groupId, ctx.storeKey)
+
+  if (req.method === "POST") {
+    await ensureMtalkRoomSettings(supabase, ctx.groupId)
+    const title = toSafeString(body.title).slice(0, 120)
+    if (!title) throw { status: 400, message: "予定の内容を入力してください。" } satisfies AppError
+    const startsAt = normalizeReservationVisitAtIso(body.starts_at)
+    if (!startsAt) throw { status: 400, message: "開始日時を入力してください。" } satisfies AppError
+    const endsAt = body.ends_at ? normalizeReservationVisitAtIso(body.ends_at) : null
+    if (body.ends_at && !endsAt) throw { status: 400, message: "終了日時が不正です。" } satisfies AppError
+    if (endsAt && Date.parse(endsAt) < Date.parse(startsAt)) {
+      throw { status: 400, message: "終了日時は開始日時より後にしてください。" } satisfies AppError
+    }
+    const { data, error } = await supabase
+      .from("line_room_calendar_events")
+      .insert({
+        room_id: mtalkRoomId,
+        event_title: title,
+        event_description: toSafeString(body.description).slice(0, 500),
+        starts_at: startsAt,
+        ends_at: endsAt,
+        source: "mtalk",
+        updated_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single()
+    if (error) {
+      throw { status: 500, message: `Failed to create event: ${error.message}` } satisfies AppError
+    }
+    return json({ ok: true, id: (data as { id?: number } | null)?.id ?? null }, 200)
+  }
+
+  const id = Number(body.id ?? url.searchParams.get("id") ?? "")
+  if (!Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "予定を特定できません。" } satisfies AppError
+  }
+  const { data: existing, error: loadError } = await supabase
+    .from("line_room_calendar_events")
+    .select("id, room_id")
+    .eq("id", id)
+    .maybeSingle()
+  if (loadError) {
+    throw { status: 500, message: `Failed to load event: ${loadError.message}` } satisfies AppError
+  }
+  const roomId = toSafeString((existing as { room_id?: string } | null)?.room_id)
+  if (!isRecord(existing) || !roomId || !roomIds.has(roomId)) {
+    throw { status: 404, message: "対象の予定が見つかりません。" } satisfies AppError
+  }
+
+  if (req.method === "DELETE" || body.cancel === true) {
+    const { error } = await supabase.from("line_room_calendar_events").delete().eq("id", id)
+    if (error) {
+      throw { status: 500, message: `Failed to delete event: ${error.message}` } satisfies AppError
+    }
+    return json({ ok: true, id, cancelled: true }, 200)
+  }
+
+  if (req.method !== "PATCH") {
+    throw { status: 405, message: "Method not allowed." } satisfies AppError
+  }
+
+  const title = toSafeString(body.title).slice(0, 120)
+  if (!title) throw { status: 400, message: "予定の内容を入力してください。" } satisfies AppError
+  const startsAt = normalizeReservationVisitAtIso(body.starts_at)
+  if (!startsAt) throw { status: 400, message: "開始日時を入力してください。" } satisfies AppError
+  const endsAt = body.ends_at ? normalizeReservationVisitAtIso(body.ends_at) : null
+  if (body.ends_at && !endsAt) throw { status: 400, message: "終了日時が不正です。" } satisfies AppError
+  if (endsAt && Date.parse(endsAt) < Date.parse(startsAt)) {
+    throw { status: 400, message: "終了日時は開始日時より後にしてください。" } satisfies AppError
+  }
+  const { error } = await supabase
+    .from("line_room_calendar_events")
+    .update({
+      event_title: title,
+      event_description: toSafeString(body.description).slice(0, 500),
+      starts_at: startsAt,
+      ends_at: endsAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+  if (error) {
+    throw { status: 500, message: `Failed to update event: ${error.message}` } satisfies AppError
+  }
+  return json({ ok: true, id }, 200)
 }
 
 async function handleChatRoomConfig(
