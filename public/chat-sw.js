@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v41';
+const CHAT_CACHE = 'line-report-chat-v42';
 const CHAT_SHELL = [
   './chat.html',
   './chat.webmanifest',
@@ -54,7 +54,9 @@ async function updateAppBadgeAndRefreshVisibleClients(value) {
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CHAT_CACHE)
-      .then((cache) => cache.addAll(CHAT_SHELL))
+      .then((cache) => cache.addAll(CHAT_SHELL).catch(() => Promise.all(
+        CHAT_SHELL.map((path) => cache.add(path).catch(() => undefined)),
+      )))
       .then(() => self.skipWaiting()),
   );
 });
