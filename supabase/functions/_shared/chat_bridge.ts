@@ -25,6 +25,8 @@ export type ChatCardFieldRow = {
   paragraphs?: string[]
   /** LINE Flex と同じ赤字など。 */
   color?: string | null
+  /** LINE Flex の weight: 'bold'（同日確認の数値など）。 */
+  weight?: 'bold' | null
 }
 
 /** 予約1件分の行。Flex の buildReservationRow 相当。 */
@@ -40,7 +42,13 @@ export type ChatCardListItem = {
 export type ChatCardSection =
   | { type: 'fields'; rows: ChatCardFieldRow[] }
   | { type: 'list'; items: ChatCardListItem[] }
-  | { type: 'note'; text: string }
+  | {
+    type: 'note'
+    text: string
+    color?: string | null
+    weight?: 'bold' | null
+    size?: 'xs' | 'sm' | null
+  }
   | { type: 'separator' }
   | { type: 'heading'; text: string }
 
@@ -48,6 +56,7 @@ export type ChatCardAction = {
   label: string
   url?: string | null
   command?: string | null
+  style?: 'primary' | 'secondary' | null
 }
 
 export type ChatCard = {

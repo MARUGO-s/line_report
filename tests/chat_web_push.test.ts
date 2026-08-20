@@ -5,6 +5,7 @@ import {
   base64UrlEncode,
   buildWebPushRequest,
 } from "../supabase/functions/_shared/web_push.ts"
+import { mtalkCardFromLineReply } from "../supabase/functions/_shared/chat_flex_card.ts"
 
 const root = new URL("..", import.meta.url)
 const read = (relative: string) => readFile(new URL(relative, root), "utf8")
@@ -57,7 +58,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v31/)
+  assert.match(serviceWorker, /line-report-chat-v32/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -125,6 +126,9 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /今すぐ送る/)
   assert.match(html, /p_kind: 'image'/)
   assert.match(html, /msg-card-line/)
+  assert.match(html, /msg-card-field dd.is-bold/)
+  assert.match(html, /msg-card-empty.is-xs/)
+  assert.match(html, /action\.style === 'primary'/)
   assert.match(html, /function sendCardCommand/)
   assert.match(html, /data-card-command/)
   assert.match(html, /function snapshotRoomView/)
@@ -132,7 +136,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v31/)
+  assert.match(serviceWorker, /line-report-chat-v32/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -179,6 +183,10 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   assert.match(duplicate, /deleteReceiptsForDateExcludingLineMessageId/)
   assert.match(duplicate, /置き換え対象の日付が確定できないため/)
   assert.doesNotMatch(duplicate, /deleteReceiptsForDateByLineMessageIds/)
+  assert.match(duplicate, /同日のレシートが既に登録されています/)
+  assert.match(duplicate, /同じ店舗・同じレシート日/)
+  assert.match(duplicate, /weight: 'bold'/)
+  assert.match(duplicate, /style: 'primary'[\s\S]*4 日付変更/)
   const media = await read("supabase/functions/_shared/line_media_store.ts")
   assert.match(media, /export async function saveMediaBytesToLibrary/)
   const bridge = await read("supabase/functions/_shared/chat_store_file_bridge.ts")
@@ -188,11 +196,16 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   assert.match(bridge, /startsWith\('C'\)/)
   assert.match(bridge, /handleStoreReceiptTextMessage/)
   assert.doesNotMatch(bridge, /レシート\(修正\|解析削除\)/)
-  assert.match(bridge, /else if \(rec\.contents\) walkLineFlex/)
-  assert.match(bridge, /flushFlexFields/)
-  assert.match(bridge, /type === 'separator'/)
-  assert.match(bridge, /!collected.sections.length && !collected.actions.length/)
   assert.match(bridge, /cardHasBody/)
+  const flexCard = await read("supabase/functions/_shared/chat_flex_card.ts")
+  assert.match(flexCard, /export function mtalkCardFromLineReply/)
+  assert.match(flexCard, /else if \(rec\.contents\) walkLineFlex/)
+  assert.match(flexCard, /flushFlexFields/)
+  assert.match(flexCard, /type === 'separator'/)
+  assert.match(flexCard, /!collected.sections.length && !collected.actions.length/)
+  assert.match(flexCard, /weight: flexWeight\(right\.weight\)/)
+  assert.match(flexCard, /style === 'primary'/)
+  assert.doesNotMatch(flexCard, /総売上/)
   const config = await read("supabase/config.toml")
   assert.match(config, /\[functions\.chat-knowledge\][\s\S]*verify_jwt = false/)
   const timeoutMigration = await read("supabase/migrations/20260819240000_chat_knowledge_dispatch_timeout.sql")
@@ -228,6 +241,144 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   const invitedBot = await read("supabase/migrations/20260820190000_chat_invited_bot_dispatch.sql")
   assert.match(invitedBot, /store_key', v_store_key/)
   assert.match(invitedBot, /u\.is_bot/)
+})
+
+test("duplicate-date LINE Flex keeps explanations, bold values, and primary date-change", () => {
+  const flex = {
+    type: 'flex',
+    altText: 'レシート解析（同日重複の確認） / ビストロ サヴァサヴァ / ¥3,000 / 2026-08-19は登録済み',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '同日のレシートが既に登録されています。次のいずれかを選んでください。',
+            size: 'sm',
+            weight: 'bold',
+            wrap: true,
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'xs',
+            margin: 'md',
+            contents: [
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '店名', size: 'sm', color: '#7A7A7A', flex: 4 },
+                  { type: 'text', text: 'ビストロ サヴァサヴァ', size: 'sm', color: '#1F1F1F', flex: 6, weight: 'bold' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '総売上', size: 'sm', color: '#7A7A7A', flex: 4 },
+                  { type: 'text', text: '¥3,000', size: 'sm', color: '#1F1F1F', flex: 6, weight: 'bold' },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'text',
+            text: '同じ店舗・同じレシート日（2026-08-19）のデータがあります。',
+            size: 'xs',
+            color: '#B45309',
+            weight: 'bold',
+            wrap: true,
+          },
+          {
+            type: 'text',
+            text: 'ボタンまたは「加算」「中止」「置き換え」「日付変更」、番号 1／2／3／4 で返信できます。',
+            size: 'xs',
+            color: '#555555',
+            wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          { type: 'button', style: 'secondary', action: { type: 'message', label: '1 加算', text: '加算' } },
+          { type: 'button', style: 'secondary', action: { type: 'message', label: '2 中止', text: '中止' } },
+          { type: 'button', style: 'secondary', action: { type: 'message', label: '3 置き換え', text: '置き換え' } },
+          { type: 'button', style: 'primary', action: { type: 'message', label: '4 日付変更', text: '日付変更' } },
+        ],
+      },
+    },
+  }
+
+  const converted = mtalkCardFromLineReply(flex)
+  const card = converted.card
+  assert.ok(card)
+  assert.equal(card.variant, 'line')
+  assert.equal(card.sections[0]?.type, 'note')
+  assert.equal(card.sections[0].type === 'note' ? card.sections[0].text : '', '同日のレシートが既に登録されています。次のいずれかを選んでください。')
+  assert.equal(card.sections[0].type === 'note' ? card.sections[0].weight : null, 'bold')
+  assert.equal(card.sections[1]?.type, 'fields')
+  const rows = card.sections[1].type === 'fields' ? card.sections[1].rows : []
+  assert.equal(rows[0]?.label, '店名')
+  assert.equal(rows[0]?.weight, 'bold')
+  assert.equal(rows[1]?.label, '総売上')
+  assert.equal(rows[1]?.value, '¥3,000')
+  assert.equal(rows[1]?.weight, 'bold')
+  assert.equal(card.sections[2]?.type, 'note')
+  assert.equal(card.sections[2].type === 'note' ? card.sections[2].color : null, '#B45309')
+  assert.equal(card.sections[2].type === 'note' ? card.sections[2].weight : null, 'bold')
+  assert.equal(card.sections[3]?.type, 'note')
+  const actions = card.actions ?? []
+  assert.equal(actions.map((action) => action.label).join(','), '1 加算,2 中止,3 置き換え,4 日付変更')
+  assert.equal(actions[0]?.style, 'secondary')
+  assert.equal(actions[3]?.style, 'primary')
+  assert.equal(actions[3]?.command, '日付変更')
+})
+
+test("sales-report Flex still keeps headings, separators, and red values", () => {
+  const flex = {
+    type: 'flex',
+    altText: 'ビストロ サヴァサヴァ 2026年8月19日 売上レポート',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '総売上（税込）', color: '#666666' },
+              { type: 'text', text: '¥3,000', color: '#111111' },
+            ],
+          },
+          { type: 'separator', margin: 'md' },
+          { type: 'text', text: '【予算】', weight: 'bold', color: '#111111' },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '日次予算差', color: '#666666' },
+              { type: 'text', text: '-¥1,000', color: '#E53935' },
+            ],
+          },
+        ],
+      },
+    },
+  }
+  const converted = mtalkCardFromLineReply(flex)
+  const types = (converted.card?.sections ?? []).map((section) => section.type)
+  assert.deepEqual(types, ['fields', 'separator', 'heading', 'fields'])
+  const last = converted.card?.sections[3]
+  assert.equal(last?.type, 'fields')
+  assert.equal(last?.type === 'fields' ? last.rows[0]?.color : null, '#E53935')
+  assert.equal(converted.card?.sections[2]?.type === 'heading' ? converted.card.sections[2].text : '', '【予算】')
 })
 
 test("chat members can leave a room and owners can kick others", async () => {
