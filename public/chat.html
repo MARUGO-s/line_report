@@ -121,15 +121,37 @@
 
     .talk-tabs {
       display: flex;
-      gap: 18px;
+      align-items: center;
+      gap: 8px;
       padding: 16px 18px 8px;
       font-size: 14px;
       color: var(--muted);
+      overflow: hidden;
+      flex-wrap: nowrap;
+    }
+    .talk-tabs-scroll {
+      display: flex;
+      gap: 18px;
+      min-width: 0;
+      flex: 1;
       overflow-x: auto;
       flex-wrap: nowrap;
       scrollbar-width: none;
     }
-    .talk-tabs::-webkit-scrollbar { display: none; }
+    .talk-tabs-scroll::-webkit-scrollbar { display: none; }
+    .talk-tabs-actions {
+      display: none;
+      flex-shrink: 0;
+      align-items: center;
+      gap: 6px;
+    }
+    .talk-tabs-actions .push-test-btn {
+      flex-shrink: 0;
+      white-space: nowrap;
+      padding: 6px 10px;
+      font-size: 12px;
+      line-height: 1.2;
+    }
     .talk-tab { flex-shrink: 0; }
 
     .talk-tab {
@@ -1734,6 +1756,8 @@
         align-items: center;
         flex-shrink: 0;
       }
+      .talk-tabs-scroll { gap: 6px; }
+      .talk-tabs-actions { display: flex; }
       .talk-tab {
         min-height: 44px;
         display: inline-flex;
@@ -1800,7 +1824,7 @@
         justify-content: center;
         width: 44px;
         height: 44px;
-        margin-left: auto;
+        margin-left: 0;
       }
       .messages { padding: 14px 10px 16px; }
       .input-area {
@@ -1884,16 +1908,20 @@
       <button class="rail-avatar talk-user-avatar" id="talkUserAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
     </div>
     <div class="talk-tabs" id="talkTabs">
-      <button class="talk-tab active" data-tab="all" onclick="setTalkTab('all')">すべて</button>
-      <button class="talk-tab" data-tab="friends" onclick="setTalkTab('friends')">友だち</button>
-      <button class="talk-tab" data-tab="groups" onclick="setTalkTab('groups')">グループ</button>
-      <button class="talk-tab" data-tab="trash" onclick="setTalkTab('trash')">ゴミ箱</button>
-      <button class="talk-tab" data-tab="users" onclick="setTalkTab('users')">登録ユーザー</button>
-      <button class="talk-tab" data-tab="bots" onclick="setTalkTab('bots')">Bot</button>
-      <button class="mobile-notification-btn notification-btn" type="button" data-notification-toggle title="新着通知をオンにする" aria-label="新着通知をオンにする" onclick="togglePushNotifications()">
-        <span class="notification-icon" aria-hidden="true">🔕</span>
-      </button>
-      <button class="push-test-btn hidden" type="button" data-push-test onclick="sendPushTest()">通知テスト</button>
+      <div class="talk-tabs-scroll">
+        <button class="talk-tab active" data-tab="all" onclick="setTalkTab('all')">すべて</button>
+        <button class="talk-tab" data-tab="friends" onclick="setTalkTab('friends')">友だち</button>
+        <button class="talk-tab" data-tab="groups" onclick="setTalkTab('groups')">グループ</button>
+        <button class="talk-tab" data-tab="trash" onclick="setTalkTab('trash')">ゴミ箱</button>
+        <button class="talk-tab" data-tab="users" onclick="setTalkTab('users')">登録ユーザー</button>
+        <button class="talk-tab" data-tab="bots" onclick="setTalkTab('bots')">Bot</button>
+      </div>
+      <div class="talk-tabs-actions">
+        <button class="mobile-notification-btn notification-btn" type="button" data-notification-toggle title="新着通知をオンにする" aria-label="新着通知をオンにする" onclick="togglePushNotifications()">
+          <span class="notification-icon" aria-hidden="true">🔕</span>
+        </button>
+        <button class="push-test-btn hidden" type="button" data-push-test onclick="sendPushTest()">通知テスト</button>
+      </div>
     </div>
     <div class="talk-search-wrap">
       <input class="talk-search" id="talkSearch" type="search" placeholder="トークルームとメッセージ検索" oninput="handleTalkSearchInput()">
