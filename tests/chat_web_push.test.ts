@@ -219,6 +219,8 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   assert.match(fn, /resolveRoomStoreKey/)
   assert.match(fn, /loadChatStoreBot/)
   assert.match(fn, /fromDispatch/)
+  assert.match(fn, /chat_groups!group_id/)
+  assert.doesNotMatch(fn, /chat_users\(is_bot\)/)
   assert.match(bridge, /export async function loadChatStoreBot/)
   assert.match(bridge, /resolveRoomStoreKey members failed/)
   const invitedBot = await read("supabase/migrations/20260820190000_chat_invited_bot_dispatch.sql")
