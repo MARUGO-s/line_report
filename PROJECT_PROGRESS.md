@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 店舗Botの表示名を Bot にする
+
+- Request: 店舗Botのアイコン名を店名ではなく Bot にする。
+- Implementation: 画面上の名前とアイコン文字を Bot にする。メッセージ投稿名も Bot。店名は Bot タブの補足に残す。
+- Operation: メンバー・1対1・返信の名前が Bot になる。
+
 ### 2026-08-20 - Botをグループタブに出さない
 
 - Request: Botはグループに入れない。招待されたルームのメンバーか 1:1 だけ。グループタブに単独表示しない。

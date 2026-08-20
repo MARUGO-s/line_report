@@ -2066,6 +2066,25 @@
     function botMarkHtml() {
       return '<span class="bot-mark">Bot</span>';
     }
+    function storeBotName() {
+      return 'Bot';
+    }
+    function personName(user) {
+      return isStoreBot(user) ? storeBotName() : String((user && user.username) || '');
+    }
+    function personAvatarKey(user) {
+      return isStoreBot(user) ? storeBotName() : String((user && user.username) || '');
+    }
+    function isStoreBotId(id) {
+      const sid = String(id || '');
+      if (!sid) return false;
+      return (registeredUsers || []).some((u) => String(u.id) === sid && isStoreBot(u))
+        || (groupMembers || []).some((u) => String(u.id) === sid && isStoreBot(u))
+        || (inviteMembers || []).some((u) => String(u.id) === sid && isStoreBot(u));
+    }
+    function speakerName(userId, username) {
+      return isStoreBotId(userId) ? storeBotName() : String(username || '');
+    }
     // 開いているトークの参加者・既読時刻・リアクション。
     let groupMembers = [];
     let memberStripOpen = false;
@@ -2793,7 +2812,7 @@
     }
 
     function roomTitle(group) {
-      if (group && group.is_direct && group.peer) return group.peer.username;
+      if (group && group.is_direct && group.peer) return personName(group.peer);
       return (group && group.group_name) || 'M-talk';
     }
 
@@ -2940,7 +2959,9 @@
       const q = ($('talkSearch').value || '').trim().toLowerCase();
       return (registeredUsers || []).filter((u) => {
         if (!isDirectoryUser(u)) return false;
-        return !q || String(u.username || '').toLowerCase().includes(q);
+        if (!q) return true;
+        return String(u.username || '').toLowerCase().includes(q)
+          || personName(u).toLowerCase().includes(q);
       });
     }
 
@@ -2958,10 +2979,10 @@
           const row = document.createElement('div');
           row.className = 'user-row';
           row.innerHTML = `
-            <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+            <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
             <div class="talk-body">
-              <div class="group-item-name"><span>${escapeHtml(user.username)}</span>${botMarkHtml()}</div>
-              <div class="group-item-info">1対1、またはルームへ招待</div>
+              <div class="group-item-name"><span>${escapeHtml(personName(user))}</span>${botMarkHtml()}</div>
+              <div class="group-item-info">${escapeHtml(user.username || '')}</div>
             </div>
           `;
           const talkBtn = document.createElement('button');
@@ -3201,8 +3222,8 @@
           const bot = isBotUser(user);
           const lockedBot = isReservationBot(user) || (isStoreBot(user) && current && current.is_store_room);
           row.innerHTML = `
-            <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
-            <div>${escapeHtml(user.username)}${mine ? '（自分）' : ''}${bot ? botMarkHtml() : ''}</div>
+            <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
+            <div>${escapeHtml(personName(user))}${mine ? '（自分）' : ''}${bot ? botMarkHtml() : ''}</div>
           `;
           if (canKick && !mine && !lockedBot) {
             const button = document.createElement('button');
@@ -3222,7 +3243,11 @@
       const q = ($('inviteSearch').value || '').trim().toLowerCase();
       const list = $('invitePeopleList');
       list.innerHTML = '';
-      const people = invitePeople.filter((u) => !q || u.username.toLowerCase().includes(q));
+      const people = invitePeople.filter((u) => (
+        !q
+        || String(u.username || '').toLowerCase().includes(q)
+        || personName(u).toLowerCase().includes(q)
+      ));
       if (!people.length) {
         list.innerHTML = '<div class="empty-note">招待できる友だちはいません</div>';
         return;
@@ -3231,8 +3256,8 @@
         const row = document.createElement('div');
         row.className = 'invite-person';
         row.innerHTML = `
-          <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
-          <div>${escapeHtml(user.username)}${isBotUser(user) ? botMarkHtml() : ''}</div>
+          <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
+          <div>${escapeHtml(personName(user))}${isBotUser(user) ? botMarkHtml() : ''}</div>
         `;
         const button = document.createElement('button');
         button.type = 'button';
@@ -3245,7 +3270,7 @@
 
     async function kickMember(user) {
       if (!currentGroupId || !user) return;
-      if (!confirm(`${user.username} をルームから退出させますか？`)) return;
+      if (!confirm(`${personName(user)} をルームから退出させますか？`)) return;
       try {
         const { error } = await sb.rpc('chat_kick_member', {
           p_group_id: currentGroupId,
@@ -3254,7 +3279,7 @@
         if (error) throw error;
         await loadInviteLists();
         await loadGroupContext(currentGroupId);
-        showNotice(`${user.username} を退出しました`);
+        showNotice(`${personName(user)} を退出しました`);
       } catch (error) {
         alert(error.message || '退出させられませんでした');
       }
@@ -3409,8 +3434,8 @@
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'member-strip-item';
-        item.title = (user.username || '') + (isBotUser(user) ? '（Bot）' : '');
-        item.innerHTML = `<div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>`;
+        item.title = personName(user) + (isBotUser(user) ? '（Bot）' : '');
+        item.innerHTML = `<div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>`;
         strip.appendChild(item);
       });
     }
@@ -3956,7 +3981,7 @@
       const title = roomTitle(group);
       const icon = roomIcon(group);
       const preview = last
-        ? ((last.username && last.user_id !== currentUser.id ? last.username + ': ' : '') + last.content)
+        ? ((last.username && last.user_id !== currentUser.id ? speakerName(last.user_id, last.username) + ': ' : '') + last.content)
         : (options.preview || '');
       const when = last ? last.created_at : group.created_at;
       const count = unread[group.id] || 0;
@@ -4489,7 +4514,7 @@
     function renderContentWithMentions(content, mentions) {
       const text = String(content ?? '');
       const names = groupMembers
-        .map((u) => u.username)
+        .flatMap((u) => isStoreBot(u) ? [storeBotName(), u.username] : [u.username])
         .filter(Boolean)
         .sort((a, b) => b.length - a.length);
       if (!names.length) return escapeHtml(text);
@@ -4563,7 +4588,7 @@
         const quoted = resolveQuoted(msg.reply_to_id);
         // 余計な空白が入らないよう1行で組み立てる。
         quoteHtml = `<div class="quote" data-jump-to="${msg.reply_to_id}">`
-          + `<div class="quote-name">${escapeHtml(quoted ? quoted.username : '')}</div>`
+          + `<div class="quote-name">${escapeHtml(quoted ? speakerName(quoted.user_id || quoted.id, quoted.username) : '')}</div>`
           + `<div class="quote-text">${escapeHtml(quotePreviewText(quoted))}</div>`
           + `</div>`;
         // 引用は吹き出しの中に入れる。画像・カードのときは上に置く。
@@ -4580,7 +4605,7 @@
           ${bodyHtml}
           ${renderReactions(msg)}
           <div class="message-meta">
-            ${isOwn ? '' : `<span class="username">${escapeHtml(msg.username)}</span>`}
+            ${isOwn ? '' : `<span class="username">${escapeHtml(speakerName(msg.user_id, msg.username))}</span>`}
             <span>${formatTime(msg.created_at)}</span>
             ${isOwn ? readMarkHtml(msg) : ''}
           </div>
@@ -4770,7 +4795,7 @@
     function setReplyTarget(msg) {
       replyTarget = msg;
       $('replyBar').classList.remove('hidden');
-      $('replyBarName').textContent = `${msg.username} にリプライ`;
+      $('replyBarName').textContent = `${speakerName(msg.user_id, msg.username)} にリプライ`;
       $('replyBarText').textContent = quotePreviewText(msg);
       $('messageInput').focus();
     }
@@ -4969,7 +4994,10 @@
 
       const query = fragment.query.toLowerCase();
       mentionCandidates = groupMembers
-        .filter((u) => u.id !== currentUser.id && u.username.toLowerCase().includes(query))
+        .filter((u) => u.id !== currentUser.id && (
+          String(u.username || '').toLowerCase().includes(query)
+          || personName(u).toLowerCase().includes(query)
+        ))
         .slice(0, 8);
 
       if (!mentionCandidates.length) {
@@ -4980,8 +5008,8 @@
       mentionActiveIndex = Math.min(mentionActiveIndex, mentionCandidates.length - 1);
       pop.innerHTML = mentionCandidates.map((user, index) => `
         <div class="mention-row ${index === mentionActiveIndex ? 'active' : ''}" data-index="${index}">
-          <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
-          <span>${escapeHtml(user.username)}</span>
+          <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
+          <span>${escapeHtml(personName(user))}</span>
         </div>
       `).join('');
       pop.classList.remove('hidden');
