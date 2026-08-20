@@ -251,6 +251,22 @@ async function handleRegister(
     }, { onConflict: "endpoint" })
   if (error) return json({ ok: false, error: `subscription save failed: ${error.message}` }, 500)
 
+  // iOSでは壊れた購読を作り直すたびendpointが変わるため、同じユーザー・同じ
+  // User-Agentの旧購読を停止する。先に新購読を保存し、失敗時に正常購読を失わない。
+  const userAgent = String(req.headers.get("user-agent") ?? "").slice(0, 1000) || null
+  let cleanupQuery = supabase
+    .from("chat_push_subscriptions")
+    .update({ is_active: false, updated_at: now })
+    .eq("user_id", userId)
+    .neq("endpoint", subscription.endpoint)
+  cleanupQuery = userAgent === null
+    ? cleanupQuery.is("user_agent", null)
+    : cleanupQuery.eq("user_agent", userAgent)
+  const { error: deactivateError } = await cleanupQuery
+  if (deactivateError) {
+    return json({ ok: false, error: `old subscription cleanup failed: ${deactivateError.message}` }, 500)
+  }
+
   const preferenceRow = {
     user_id: userId,
     notifications_enabled: true,
@@ -268,6 +284,67 @@ async function handleRegister(
     return json({ ok: false, error: `notification preference save failed: ${preferenceResult.error.message}` }, 500)
   }
   return json({ ok: true, enabled: true, preview_enabled: previewEnabled }, 200)
+}
+
+async function handleTest(
+  req: Request,
+  supabase: DbClient,
+  vapid: VapidConfig,
+  userId: string,
+): Promise<Response> {
+  let endpoint = ""
+  try {
+    const body = await req.json()
+    endpoint = String(body?.endpoint ?? "").trim()
+  } catch {
+    return json({ ok: false, error: "Invalid JSON body." }, 400)
+  }
+  if (!endpoint) return json({ ok: false, error: "endpoint is required." }, 400)
+
+  const { data, error } = await supabase
+    .from("chat_push_subscriptions")
+    .select("id, user_id, endpoint, p256dh, auth_secret, failure_count")
+    .eq("user_id", userId)
+    .eq("endpoint", endpoint)
+    .eq("is_active", true)
+    .maybeSingle()
+  if (error) return json({ ok: false, error: `subscription load failed: ${error.message}` }, 500)
+  const row = data as PushSubscriptionRow | null
+  if (!row) return json({ ok: false, error: "Active subscription not found." }, 404)
+
+  const pushSubscription: WebPushSubscription = {
+    endpoint: row.endpoint,
+    p256dh: row.p256dh,
+    auth: row.auth_secret,
+  }
+  try {
+    const response = await sendWebPush(pushSubscription, {
+      title: "M-talk 通知テスト",
+      body: "この通知が見えれば、この端末の新着通知は正常です。",
+      icon: "/line_report/icons/chat-android-192x192-v3.png",
+      badge: "/line_report/icons/chat-favicon-48x48-v3.png",
+      tag: `chat-push-test-${row.id}`,
+      renotify: true,
+      timestamp: Date.now(),
+      url: "/line_report/chat.html",
+    }, vapid)
+    if (!response.ok) {
+      const reason = await response.text().catch(() => "")
+      await markSubscriptionFailure(supabase, row, response.status, reason)
+      return json({ ok: false, sent: 0, failed: 1, error: `Push service HTTP ${response.status}` }, 502)
+    }
+    await supabase.from("chat_push_subscriptions").update({
+      failure_count: 0,
+      is_active: true,
+      last_success_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", row.id)
+    return json({ ok: true, sent: 1, failed: 0 }, 200)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    await markSubscriptionFailure(supabase, row, 0, reason)
+    return json({ ok: false, sent: 0, failed: 1, error: reason }, 502)
+  }
 }
 
 async function handleUnregister(
@@ -553,6 +630,9 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && action === "preferences") {
       return await handlePreferenceSync(req, supabase, user.id)
+    }
+    if (req.method === "POST" && action === "test") {
+      return await handleTest(req, supabase, vapid, user.id)
     }
     if (req.method === "POST" && action === "dispatch") {
       try {

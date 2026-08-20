@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - M-talk の通知再開で購読が増殖する不具合を直し、端末テストを追加
+
+- Symptom: 通知再開後もスマホに表示されず、同じアカウントのiOS購読がタップのたびに増えた。
+- Cause: 正常な購読がある場合にも、最初の画面タップを「復旧操作」として扱って購読を破棄・再作成していた。Pushサービスは残った旧購読にも成功を返すため、サーバー上は成功でも端末表示を保証できなかった。
+- Fix: 自動の画面タップ復旧を廃止し、オレンジの再開バー／ベルを明示的に押した時だけ再購読する。新しい購読の保存時は、同じユーザー・同じUser-Agentの旧endpointを停止する。通知ON後は現在のendpointだけへテスト通知を送る「通知テスト」を表示する。
+- Operation: ホーム画面版M-talkでベルを押して通知ONにし、「通知テスト」を押す。届かなければ再開バーから1回だけ再登録し、もう一度通知テストを押す。
+
 ### 2026-08-20 - M-talk の切れたスマホ通知を再開できるようにする
 
 - Request: `chat.html` の新着をスマホへ通知したいが、通知ON後も届かない。
