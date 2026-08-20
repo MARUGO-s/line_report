@@ -61,3 +61,17 @@ test('chat mobile layout keeps controls inside phone safe areas and prevents pag
   assert.match(chat, /addEventListener\('gestureend', preventMobileZoomGesture, \{ passive: false \}\)/);
   assert.match(chat, /addEventListener\('touchmove', preventMobileZoomGesture, \{ passive: false \}\)/);
 });
+
+test('chat notification test button stays out of the talk tab row on desktop', async () => {
+  const chat = await read('public/chat.html');
+  assert.match(chat, /class="talk-tabs-scroll"/);
+  assert.match(chat, /class="talk-tabs-actions"/);
+  assert.match(chat, /\.talk-tabs-actions \{\s+display: none;/);
+  assert.match(chat, /\.talk-tabs-actions \{ display: flex; \}/);
+  assert.match(chat, /\.talk-tabs-actions \.push-test-btn \{[\s\S]*?white-space: nowrap;/);
+  const actionsAt = chat.indexOf('class="talk-tabs-actions"');
+  const actions = chat.slice(actionsAt, actionsAt + 900);
+  assert.match(actions, /data-push-test/);
+  assert.match(actions, /通知テスト/);
+  assert.doesNotMatch(chat.slice(chat.indexOf('class="talk-tabs-scroll"'), actionsAt), /data-push-test/);
+});

@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - 通知テストボタンがタブに重なる
+
+- Symptom: トーク一覧の「通知テスト」が縦に潰れて、タブの上に重なる。
+- Cause: ゴミ箱タブ追加後、タブ行の文字ボタンが縮んで1文字ずつ折り返していた。デスクトップは左レールにも同じボタンがある。
+- Fix: タブは横スクロール、通知ボタンは右に固定。デスクトップではタブ行の「通知テスト」を出さない。
+- Operation: 通知オンのPCは左の✓、スマホはタブ右の「通知テスト」。
+
 ### 2026-08-20 - ルーム削除はゴミ箱経由にする
 
 - Request: 完全削除は危険なので、先にゴミ箱へ入れて復元と完全削除の両方できるようにする。
