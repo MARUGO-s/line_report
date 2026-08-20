@@ -103,7 +103,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
   assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v45/)
+  assert.match(serviceWorker, /line-report-chat-v46/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -190,6 +190,9 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /function sendSearchFromMenu/)
   assert.match(html, /sendChatText\('検索'/)
   assert.match(html, /function openRoomSettings/)
+  assert.match(html, /function openReservationSchedule/)
+  assert.match(html, /mtalk_schedule\.html/)
+  assert.match(html, /予約・予定/)
   assert.match(html, /talkCtxSettings/)
   assert.match(html, /set\('from', 'chat'\)/)
   assert.match(html, /function sendCardCommand/)
@@ -199,7 +202,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v45/)
+  assert.match(serviceWorker, /line-report-chat-v46/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {

@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>予約・予定</title>
+  <link rel="icon" type="image/svg+xml" href="icons/chat-logo-v3.svg">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      min-height: 100%;
+      background: #111;
+      color: #f2f2f2;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Segoe UI", sans-serif;
+    }
+    body {
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    .wrap { max-width: 520px; margin: 0 auto; min-height: 100vh; background: #1c1c1e; }
+    header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; border-bottom: 1px solid #2c2c2e;
+      position: sticky; top: 0; background: #1c1c1e; z-index: 5;
+    }
+    .back {
+      color: #5ac8fa; text-decoration: none; font-size: 15px; font-weight: 700;
+      padding: 8px 4px; white-space: nowrap;
+    }
+    header h1 { font-size: 16px; font-weight: 700; flex: 1; min-width: 0; }
+    header .sub { color: #8e8e93; font-size: 12px; font-weight: 600; }
+    .month-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; gap: 8px;
+    }
+    .month-nav button {
+      border: 0; background: #2c2c2e; color: #fff;
+      width: 40px; height: 36px; border-radius: 10px; font-size: 18px; cursor: pointer;
+    }
+    .month-nav strong { font-size: 16px; }
+    .tabs { display: flex; gap: 8px; padding: 0 12px 12px; }
+    .tab {
+      flex: 1; height: 40px; border: 0; border-radius: 12px;
+      background: #2c2c2e; color: #d1d1d6; font-size: 15px; font-weight: 700;
+      font-family: inherit; cursor: pointer;
+    }
+    .tab.active { background: #06c755; color: #fff; }
+    .note, .empty, .error, .login {
+      margin: 8px 12px 16px; color: #8e8e93; font-size: 13px; line-height: 1.6;
+    }
+    .error { color: #ff9f0a; }
+    .day { padding: 4px 12px 14px; }
+    .day h2 {
+      font-size: 13px; color: #8e8e93; font-weight: 700;
+      padding: 10px 2px 8px; border-top: 1px solid #2c2c2e;
+    }
+    .card {
+      display: block; width: 100%; text-align: left;
+      background: #2c2c2e; border: 0; border-radius: 12px;
+      padding: 12px; margin-bottom: 8px; color: inherit;
+      font-family: inherit; cursor: pointer;
+    }
+    .card .time { font-weight: 800; font-size: 15px; color: #fff; }
+    .card .name { font-size: 15px; font-weight: 700; margin-top: 2px; }
+    .card .meta { font-size: 12px; color: #aeaeb2; margin-top: 4px; }
+    .detail {
+      position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 20;
+      display: flex; align-items: flex-end; justify-content: center;
+    }
+    .detail.hidden { display: none; }
+    .sheet {
+      width: 100%; max-width: 520px; background: #1c1c1e;
+      border-radius: 18px 18px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    }
+    .sheet h3 { font-size: 17px; margin-bottom: 10px; }
+    .row { display: flex; gap: 10px; padding: 6px 0; font-size: 14px; }
+    .row span { color: #8e8e93; width: 88px; flex-shrink: 0; }
+    .close {
+      margin-top: 12px; width: 100%; height: 42px; border: 0; border-radius: 12px;
+      background: #2c2c2e; color: #fff; font-weight: 700; font-family: inherit; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <a class="back" id="backLink" href="./chat.html">‹ 戻る</a>
+      <div style="min-width:0;flex:1;">
+        <h1>予約・予定</h1>
+        <div class="sub" id="roomSub"></div>
+      </div>
+    </header>
+    <div class="month-nav">
+      <button type="button" id="prevMonth" aria-label="前月">‹</button>
+      <strong id="monthLabel">—</strong>
+      <button type="button" id="nextMonth" aria-label="翌月">›</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" type="button" data-tab="reservations">予約</button>
+      <button class="tab" type="button" data-tab="events">予定</button>
+    </div>
+    <p class="login hidden" id="loginNote">M-talk にログインしてから開いてください。</p>
+    <p class="error hidden" id="errorNote"></p>
+    <p class="note hidden" id="reservationNote"></p>
+    <div id="list"></div>
+  </div>
+  <div class="detail hidden" id="detail" onclick="if(event.target===this) closeDetail()">
+    <div class="sheet" id="detailSheet"></div>
+  </div>
+  <script src="vendor/supabase/supabase-2.110.9.min.js"></script>
+  <script src="pages-config.js"></script>
+  <script>
+    const CONFIG = window.LINE_REPORT_PAGES || {};
+    const SUPABASE_URL = CONFIG.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co';
+    const SUPABASE_ANON_KEY = CONFIG.RECEIPT_ADMIN_ANON_KEY || '';
+    const STORE_NAMES = CONFIG.STORE_NAMES || {};
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true }
+    });
+    const params = new URLSearchParams(location.search);
+    const groupId = Number(params.get('group_id') || '');
+    const $ = (id) => document.getElementById(id);
+    let tab = 'reservations';
+    let month = currentMonth();
+    let payload = null;
+
+    $('backLink').href = './chat.html' + (Number.isSafeInteger(groupId) && groupId > 0 ? ('?group=' + encodeURIComponent(String(groupId))) : '');
+
+    function currentMonth() {
+      const parts = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+      return (parts.find((p) => p.type === 'year')?.value || '2026') + '-' + (parts.find((p) => p.type === 'month')?.value || '01');
+    }
+    function shiftMonth(value, delta) {
+      const [y, m] = String(value).split('-').map(Number);
+      const date = new Date(Date.UTC(y, m - 1 + delta, 1));
+      return date.getUTCFullYear() + '-' + String(date.getUTCMonth() + 1).padStart(2, '0');
+    }
+    function weekdayJa(iso) {
+      if (!iso) return '';
+      return new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', weekday: 'short' }).format(new Date(iso)).replace('曜日', '');
+    }
+    function dayKey(iso) {
+      if (!iso) return '';
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+    }
+    function dayLabel(iso) {
+      const key = dayKey(iso);
+      if (!key) return '日時未設定';
+      const [y, m, d] = key.split('-');
+      const wd = weekdayJa(iso);
+      return Number(m) + '月' + Number(d) + '日' + (wd ? '（' + wd + '）' : '');
+    }
+    function timeLabel(iso) {
+      if (!iso) return '';
+      return new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+    }
+    function escapeHtml(text) {
+      return String(text ?? '').replace(/[&<>"']/g, (ch) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[ch]));
+    }
+    function sourceLabel(source) {
+      if (source === 'tabelog') return '食べログ';
+      if (source === 'ikyu') return '一休';
+      if (source === 'manual') return '手入力';
+      return source || '';
+    }
+
+    document.querySelectorAll('.tab').forEach((btn) => {
+      btn.onclick = () => {
+        tab = btn.getAttribute('data-tab') || 'reservations';
+        document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el === btn));
+        renderList();
+      };
+    });
+    $('prevMonth').onclick = () => { month = shiftMonth(month, -1); load(); };
+    $('nextMonth').onclick = () => { month = shiftMonth(month, 1); load(); };
+
+    async function load() {
+      $('monthLabel').textContent = month.replace('-', '年') + '月';
+      $('errorNote').classList.add('hidden');
+      $('list').innerHTML = '<p class="empty">読み込み中…</p>';
+      if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+        $('errorNote').textContent = 'ルームが指定されていません。M-talkから開き直してください。';
+        $('errorNote').classList.remove('hidden');
+        $('list').innerHTML = '';
+        return;
+      }
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        $('loginNote').classList.remove('hidden');
+        $('list').innerHTML = '';
+        return;
+      }
+      try {
+        const url = CONFIG.adminApiUrl
+          ? CONFIG.adminApiUrl('/chat-schedule?group_id=' + encodeURIComponent(String(groupId)) + '&month=' + encodeURIComponent(month))
+          : (SUPABASE_URL.replace(/\/+$/, '') + '/functions/v1/admin-api/chat-schedule?group_id=' + encodeURIComponent(String(groupId)) + '&month=' + encodeURIComponent(month));
+        const response = await fetch(url, {
+          headers: { Authorization: 'Bearer ' + token, apikey: SUPABASE_ANON_KEY }
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || ('HTTP ' + response.status));
+        payload = result;
+        const storeName = STORE_NAMES[result.store_key] || result.store_key || '';
+        $('roomSub').textContent = [result.room_name, storeName].filter(Boolean).join(' / ');
+        renderList();
+      } catch (error) {
+        $('errorNote').textContent = error.message || '読み込みに失敗しました。';
+        $('errorNote').classList.remove('hidden');
+        $('list').innerHTML = '';
+      }
+    }
+
+    function renderList() {
+      const note = $('reservationNote');
+      if (tab === 'reservations' && payload?.reservation_note) {
+        note.textContent = payload.reservation_note;
+        note.classList.remove('hidden');
+      } else {
+        note.classList.add('hidden');
+      }
+      const items = tab === 'events'
+        ? (payload?.events || []).map((row) => ({
+            kind: 'event',
+            sort: row.starts_at || '',
+            iso: row.starts_at,
+            time: [timeLabel(row.starts_at), row.ends_at ? timeLabel(row.ends_at) : ''].filter(Boolean).join('–'),
+            title: row.title || '予定',
+            meta: row.description || row.source || '',
+            raw: row,
+          }))
+        : (payload?.reservations || []).map((row) => ({
+            kind: 'reservation',
+            sort: row.visit_at || '',
+            iso: row.visit_at,
+            time: row.visit_time_label || timeLabel(row.visit_at),
+            title: row.customer_name || '予約',
+            meta: [row.party_size_label, sourceLabel(row.source), row.plan_label].filter(Boolean).join(' / '),
+            raw: row,
+          }));
+      items.sort((a, b) => String(a.sort).localeCompare(String(b.sort)));
+      if (!items.length) {
+        $('list').innerHTML = '<p class="empty">' + (tab === 'events' ? 'この月の予定はありません。' : 'この月の予約はありません。') + '</p>';
+        return;
+      }
+      const groups = new Map();
+      for (const item of items) {
+        const key = dayKey(item.iso) || 'none';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+      }
+      const html = [];
+      for (const [key, rows] of groups) {
+        html.push('<section class="day"><h2>' + escapeHtml(key === 'none' ? '日時未設定' : dayLabel(rows[0].iso)) + '</h2>');
+        rows.forEach((row, index) => {
+          html.push(
+            '<button type="button" class="card" data-kind="' + row.kind + '" data-key="' + escapeHtml(key) + '" data-index="' + index + '">' +
+            '<div class="time">' + escapeHtml(row.time || '時間未設定') + '</div>' +
+            '<div class="name">' + escapeHtml(row.title) + '</div>' +
+            (row.meta ? '<div class="meta">' + escapeHtml(row.meta) + '</div>' : '') +
+            '</button>'
+          );
+        });
+        html.push('</section>');
+      }
+      $('list').innerHTML = html.join('');
+      $('list').querySelectorAll('.card').forEach((btn) => {
+        btn.onclick = () => {
+          const kind = btn.getAttribute('data-kind');
+          const key = btn.getAttribute('data-key');
+          const index = Number(btn.getAttribute('data-index'));
+          const rows = groups.get(key) || [];
+          const row = rows[index];
+          if (!row) return;
+          openDetail(kind, row.raw);
+        };
+      });
+    }
+
+    function openDetail(kind, raw) {
+      const rows = kind === 'event'
+        ? [
+            ['日時', (timeLabel(raw.starts_at) || '') + (raw.ends_at ? ' – ' + timeLabel(raw.ends_at) : '')],
+            ['内容', raw.title || ''],
+            ['詳細', raw.description || 'なし'],
+            ['登録元', raw.source || ''],
+          ]
+        : [
+            ['来店', raw.visit_time_label || timeLabel(raw.visit_at)],
+            ['予約者', raw.customer_name || ''],
+            ['人数', raw.party_size_label || ''],
+            ['経路', raw.route_label || sourceLabel(raw.source)],
+            ['コース', raw.plan_label || ''],
+            ['アレルギー', raw.allergy_label || 'なし'],
+            ['TEL', raw.customer_phone || ''],
+            ['来店回数', raw.visit_count ? raw.visit_count + '回' : ''],
+            ['店舗', raw.store_name || ''],
+          ];
+      $('detailSheet').innerHTML =
+        '<h3>' + escapeHtml(kind === 'event' ? (raw.title || '予定') : (raw.customer_name || '予約')) + '</h3>' +
+        rows.filter((row) => String(row[1] || '').trim()).map((row) =>
+          '<div class="row"><span>' + escapeHtml(row[0]) + '</span><div>' + escapeHtml(row[1]) + '</div></div>'
+        ).join('') +
+        '<button class="close" type="button" onclick="closeDetail()">閉じる</button>';
+      $('detail').classList.remove('hidden');
+    }
+    function closeDetail() { $('detail').classList.add('hidden'); }
+    window.closeDetail = closeDetail;
+    load();
+  </script>
+</body>
+</html>

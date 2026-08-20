@@ -178,8 +178,8 @@ import {
 } from "../_shared/journal_product_index.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
-import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
-import { ensureMtalkRoomSettings } from "../_shared/mtalk_room_settings.ts"
+import { isMtalkSyntheticRoomId, mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
+import { ensureMtalkRoomSettings, resolveMtalkRoomStoreKey } from "../_shared/mtalk_room_settings.ts"
 
 const ADMIN_SURFACE_LEGACY = "legacy"
 const ADMIN_SURFACE_LINE_REPORT = "line_report"
@@ -1274,6 +1274,16 @@ Deno.serve(async (req, info) => {
   if ((req.method === "GET" || req.method === "PUT") && path === "/chat-room-config") {
     try {
       return await handleChatRoomConfig(req, workReq, url, supabase)
+    } catch (e) {
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
+  }
+
+  // M-talk の予約・予定。メンバーのみ。予約は取り込み済み店舗データ、予定はルーム／同店舗カレンダー。
+  if (req.method === "GET" && path === "/chat-schedule") {
+    try {
+      return await handleChatSchedule(req, url, supabase)
     } catch (e) {
       const err = asAppError(e)
       return json({ error: err.message }, err.status)
@@ -3935,6 +3945,109 @@ async function authenticateChatMember(
     throw { status: 403, message: "このルームのメンバーではありません。" } satisfies AppError
   }
   return userId
+}
+
+function slimChatScheduleReservation(item: Record<string, unknown>): Record<string, unknown> {
+  return {
+    source: item.source ?? null,
+    id: item.id ?? null,
+    visit_at: item.visit_at ?? null,
+    customer_name: item.customer_name_label || item.customer_name || "",
+    customer_phone: item.customer_phone || "",
+    visit_time_label: item.visit_time_label || "",
+    party_size_label: item.party_size_label || "",
+    plan_label: item.plan_label || "",
+    allergy_label: item.allergy_label || "",
+    route_label: item.route_label || "",
+    store_name: item.store_name || "",
+    visit_count: Number(item.visit_count) || 0,
+  }
+}
+
+async function handleChatSchedule(
+  req: Request,
+  url: URL,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Response> {
+  const groupId = Number(url.searchParams.get("group_id") ?? "")
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+    throw { status: 400, message: "group_id is required." } satisfies AppError
+  }
+  await authenticateChatMember(req, supabase, groupId)
+  const month = normalizeCalendarMonthParam(url.searchParams.get("month"))
+  const resolved = await resolveMtalkRoomStoreKey(supabase, groupId)
+  const storeKey = resolved.storeKey
+  let reservations: Array<Record<string, unknown>> = []
+  if (storeKey) {
+    const calendarUrl = new URL("https://mtalk.local/reservations/calendar")
+    calendarUrl.searchParams.set("month", month)
+    calendarUrl.searchParams.set("store_key", storeKey)
+    calendarUrl.searchParams.set("source", "all")
+    const calendar = await fetchReservationCalendarState(supabase, calendarUrl)
+    const items = Array.isArray(calendar.items) ? calendar.items : []
+    reservations = items
+      .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+      .map((row) => slimChatScheduleReservation(row))
+  }
+
+  const range = buildJstMonthRange(month)
+  const roomIds = new Set<string>()
+  const mtalkRoomId = mtalkSyntheticRoomId(groupId)
+  if (mtalkRoomId) roomIds.add(mtalkRoomId)
+  if (storeKey) {
+    const { data: rooms, error: roomsError } = await supabase
+      .from("room_summary_settings")
+      .select("room_id")
+      .eq("receipt_report_store_partition_key", storeKey)
+    if (roomsError) {
+      throw { status: 500, message: `Failed to load linked rooms: ${roomsError.message}` } satisfies AppError
+    }
+    for (const row of rooms || []) {
+      const roomId = String((row as { room_id?: string }).room_id ?? "").trim()
+      if (roomId) roomIds.add(roomId)
+    }
+  }
+
+  let events: Array<Record<string, unknown>> = []
+  if (roomIds.size > 0) {
+    const { data, error } = await supabase
+      .from("line_room_calendar_events")
+      .select("id, room_id, event_title, event_description, starts_at, ends_at, source")
+      .in("room_id", [...roomIds])
+      .gte("starts_at", range.startIso)
+      .lt("starts_at", range.endIso)
+      .order("starts_at", { ascending: true })
+      .limit(2000)
+    if (error) {
+      throw { status: 500, message: `Failed to load calendar events: ${error.message}` } satisfies AppError
+    }
+    events = (data || []).map((row: Record<string, unknown>) => ({
+      id: row.id ?? null,
+      title: String(row.event_title ?? "").trim(),
+      description: String(row.event_description ?? "").trim(),
+      starts_at: row.starts_at ?? null,
+      ends_at: row.ends_at ?? null,
+      source: String(row.source ?? "").trim(),
+    }))
+  }
+
+  let reservationNote: string | null = null
+  if (!storeKey) {
+    reservationNote = resolved.ambiguous
+      ? "複数店舗のBotがいるため、予約を表示できません。"
+      : "このルームに紐づく店舗予約がありません。"
+  }
+
+  return json({
+    group_id: groupId,
+    room_name: resolved.roomName,
+    store_key: storeKey,
+    month,
+    reservation_available: Boolean(storeKey),
+    reservation_note: reservationNote,
+    reservations,
+    events,
+  }, 200)
 }
 
 async function handleChatRoomConfig(

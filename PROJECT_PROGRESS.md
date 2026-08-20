@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - M-talk から予約と予定をタブ切替で見る
+
+- Request: M-talk から使え、予約取り込みと同じ予約と同期し、予約／予定をタブで切り替える。
+- Implementation: トーク下部「予約・予定」から `mtalk_schedule.html` を開く。`GET /chat-schedule` はルームメンバーJWTのみ。予約は Gmail 取り込みと同じ店舗カレンダー、予定は同店舗のカレンダーイベント。
+- Operation: 店舗Botのいるルームで「予約・予定」→ 予約タブ／予定タブ。月送りで一覧。
+
 ### 2026-08-20 - iPhoneホーム画面アプリの通知表示を公式形式に合わせて直す
 
 - Symptom: Apple PushへはHTTP成功するが、ホーム画面のM-talkに通知バナーが出ない。別作業の診断実装が途中で止まっていた。
