@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - iPhoneホーム画面アプリの通知表示を公式形式に合わせて直す
+
+- Symptom: Apple PushへはHTTP成功するが、ホーム画面のM-talkに通知バナーが出ない。別作業の診断実装が途中で止まっていた。
+- Cause: ペイロードの`app_badge`をトップレベルに置いていた。WebKit公式（Meet Declarative Web Push）では`notification.app_badge`の文字列。形式がずれると宣言型通知が捨てられ、Service Worker失敗時に何も出ない。
+- Fix: `app_badge`と絶対URLの`icon`を`notification`内へ移す。iOS 18.4+は`window.pushManager`で購読する。テスト通知は4秒遅延し、ホームへ戻してから届くようにする。Apple送信／SW受信／表示の診断テーブルを追加する。
+- Operation: ホーム画面のM-talkを開き、ベルで通知ON→「通知テスト」→すぐにホームへ戻る。4秒後にバナーが出れば成功。
+
 ### 2026-08-20 - Apple向け通知をDeclarative Web Pushへ切り替える
 
 - Symptom: iPhoneは新しいApple Push endpointへ再登録され、Apple側HTTP成功でも通知画面が出なかった。

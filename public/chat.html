@@ -2225,6 +2225,7 @@
 
     const $ = (id) => document.getElementById(id);
     const CREDENTIAL_KEY = 'chat_saved_credentials';
+    const PUSH_TEST_PENDING_KEY = 'mtalk_push_test_pending_v1';
     const AVATAR_COLORS = ['#7ac943', '#4fc3f7', '#ff8a65', '#ba68c8', '#ffd54f', '#4db6ac', '#f06292', '#7986cb'];
 
     function syncChatViewport(keepComposerVisible = false) {
@@ -2269,6 +2270,15 @@
         if (messages) messages.scrollTop = messages.scrollHeight;
         focused.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
+    }
+
+    function randomUuid() {
+      if (crypto?.randomUUID) return crypto.randomUUID();
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     }
 
     function preventMobileZoomGesture(event) {
@@ -2489,6 +2499,8 @@
       $('mainContent').classList.remove('hidden');
       subscribeRealtime();
       initializeChatPwa();
+      void flushPushDiagnostics();
+      void resumePendingPushTest();
       loadGroups().then(async () => {
         await consumeInvite();
         await openRequestedGroup();
@@ -2692,12 +2704,18 @@
       return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
     }
 
+    function chatPushManager(registration) {
+      if (window.pushManager) return window.pushManager;
+      return registration?.pushManager || null;
+    }
+
     async function chatPushRequest(action, options = {}) {
       const { data } = await sb.auth.getSession();
       const token = data?.session?.access_token;
       if (!token) throw new Error('ログインが必要です');
       const response = await fetch(pushFunctionUrl(action), {
         method: options.method || 'POST',
+        keepalive: options.keepalive === true,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -2723,7 +2741,7 @@
           hidePushRestoreBar();
           return;
         }
-        pushSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
+        pushSubscription = await chatPushManager(serviceWorkerRegistration)?.getSubscription();
         if (!(currentUser && Notification.permission === 'granted')) {
           renderNotificationStatus(pushSubscription ? 'enabled' : 'disabled');
           hidePushRestoreBar();
@@ -2814,7 +2832,9 @@
         if (permission !== 'granted') {
           throw new Error('通知は許可されませんでした。端末の設定から変更できます。');
         }
-        const existing = await serviceWorkerRegistration.pushManager.getSubscription();
+        const manager = chatPushManager(serviceWorkerRegistration);
+        if (!manager) throw new Error('この端末では通知を利用できません');
+        const existing = await manager.getSubscription();
         if (existing) {
           await chatPushRequest('subscribe', {
             method: 'DELETE',
@@ -2824,7 +2844,7 @@
           });
           try { await existing.unsubscribe(); } catch (_) { /* 古い購読は破棄して作り直す */ }
         }
-        pushSubscription = await serviceWorkerRegistration.pushManager.subscribe({
+        pushSubscription = await manager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(CHAT_PUSH_PUBLIC_KEY)
         });
@@ -2923,23 +2943,46 @@
       renderNotificationStatus('working');
       try {
         serviceWorkerRegistration = await ensureChatServiceWorker();
-        pushSubscription = await serviceWorkerRegistration?.pushManager?.getSubscription();
+        pushSubscription = await chatPushManager(serviceWorkerRegistration)?.getSubscription();
         if (!pushSubscription || Notification.permission !== 'granted') {
           throw new Error('この端末の通知登録がありません。ベルを押して通知を再設定してください。');
         }
         await savePushSubscription(pushSubscription, true);
+        const testId = randomUuid();
+        try {
+          localStorage.setItem(PUSH_TEST_PENDING_KEY, JSON.stringify({
+            test_id: testId,
+            created_at: Date.now()
+          }));
+        } catch (_) {}
         const result = await chatPushRequest('test', {
-          body: { endpoint: pushSubscription.endpoint }
+          body: {
+            endpoint: pushSubscription.endpoint,
+            test_id: testId,
+            delay_ms: 4000,
+            client_state: {
+              permission: Notification.permission,
+              standalone: isStandaloneApp(),
+              controller: !!navigator.serviceWorker.controller,
+              visibility: document.visibilityState,
+              push_manager: 'PushManager' in window
+            }
+          },
+          keepalive: true
         });
-        if (Number(result.sent) !== 1 || Number(result.failed) !== 0) {
-          throw new Error('テスト通知を送信できませんでした。通知を再設定してください。');
+        if (result.ok !== true || Number(result.failed) !== 0) {
+          throw new Error('テスト通知を予約できませんでした。通知を再設定してください。');
         }
+        showChatToast('4秒後にこの端末へ通知を送ります。今すぐホーム画面へ戻ってください');
         pushNotificationsEnabled = true;
         renderNotificationStatus('enabled');
+        void flushPushDiagnostics();
+        void pollPushDiagnosticStatus(result.test_id || testId);
         if (!options.silentSuccess) {
-          alert('この端末へテスト通知を送りました。M-talkを閉じるかホーム画面へ戻って、通知が表示されるか確認してください。');
+          showChatToast('テスト通知を送信しました。届かなければM-talkを開き直すと診断結果を確認できます');
         }
       } catch (error) {
+        try { localStorage.removeItem(PUSH_TEST_PENDING_KEY); } catch (_) {}
         console.error('Push test error:', error);
         renderNotificationStatus(Notification.permission === 'denied' ? 'blocked' : 'needs-restore');
         if (Notification.permission !== 'denied') showPushRestoreBar();
@@ -2951,6 +2994,94 @@
           button.disabled = false;
         });
       }
+    }
+
+    async function flushPushDiagnostics() {
+      if (!currentUser || !('caches' in window)) return;
+      try {
+        const cache = await caches.open('line-report-chat-push-diagnostics');
+        const requests = await cache.keys();
+        for (const request of requests) {
+          const response = await cache.match(request);
+          if (!response) continue;
+          const row = await response.json().catch(() => null);
+          if (!row?.test_id || !row?.stage) {
+            await cache.delete(request);
+            continue;
+          }
+          try {
+            await chatPushRequest('diagnostic', {
+              body: {
+                test_id: row.test_id,
+                stage: row.stage,
+                detail: row.detail || null
+              }
+            });
+            await cache.delete(request);
+          } catch (error) {
+            console.error('Push diagnostic upload error:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Push diagnostic flush error:', error);
+      }
+    }
+
+    async function pollPushDiagnosticStatus(testId) {
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1200 : 1800));
+        await flushPushDiagnostics();
+        try {
+          const result = await chatPushRequest('diagnostic-status', { body: { test_id: testId } });
+          const stages = new Set((result.events || []).map((row) => row.stage));
+          if (stages.has('server_failed')) {
+            const failed = (result.events || []).find((row) => row.stage === 'server_failed');
+            alert(`Apple Pushへの送信に失敗しました。${failed?.detail ? `\n${failed.detail}` : ''}`);
+            try { localStorage.removeItem(PUSH_TEST_PENDING_KEY); } catch (_) {}
+            return;
+          }
+          if (stages.has('notification_failed')) {
+            const failed = (result.events || []).find((row) => row.stage === 'notification_failed');
+            alert(`iPhoneはPushを受信しましたが、通知表示に失敗しました。${failed?.detail ? `\n${failed.detail}` : ''}`);
+            try { localStorage.removeItem(PUSH_TEST_PENDING_KEY); } catch (_) {}
+            return;
+          }
+          if (stages.has('notification_shown')) {
+            const registration = serviceWorkerRegistration || await ensureChatServiceWorker();
+            const listed = registration && 'getNotifications' in registration
+              ? await registration.getNotifications({ tag: `chat-push-test-${testId}` }).catch(() => [])
+              : [];
+            showChatToast(
+              listed.length
+                ? 'iPhoneの通知センターへ登録済みです'
+                : 'iPhoneで通知表示処理まで成功しました',
+            );
+            try { localStorage.removeItem(PUSH_TEST_PENDING_KEY); } catch (_) {}
+            return;
+          }
+        } catch (error) {
+          console.error('Push diagnostic status error:', error);
+        }
+      }
+      showChatToast('Apple送信済みですが、Service Worker受信記録がありません。M-talkを開き直してください');
+      try { localStorage.removeItem(PUSH_TEST_PENDING_KEY); } catch (_) {}
+    }
+
+    async function resumePendingPushTest() {
+      let row = null;
+      try {
+        row = JSON.parse(localStorage.getItem(PUSH_TEST_PENDING_KEY) || 'null');
+      } catch (_) {
+        try { localStorage.removeItem(PUSH_TEST_PENDING_KEY); } catch (_) {}
+      }
+      const testId = String(row?.test_id || '');
+      const createdAt = Number(row?.created_at);
+      if (!testId || !Number.isFinite(createdAt) || Date.now() - createdAt > 10 * 60 * 1000) {
+        try { localStorage.removeItem(PUSH_TEST_PENDING_KEY); } catch (_) {}
+        return;
+      }
+      await flushPushDiagnostics();
+      void pollPushDiagnosticStatus(testId);
     }
 
     function subscribePushPreferenceChanges() {
@@ -3002,7 +3133,7 @@
       renderNotificationStatus('working');
       try {
         serviceWorkerRegistration = await ensureChatServiceWorker() || serviceWorkerRegistration || await navigator.serviceWorker.ready;
-        pushSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
+        pushSubscription = await chatPushManager(serviceWorkerRegistration)?.getSubscription();
         if (pushSubscription && Notification.permission === 'granted' && pushNotificationsEnabled) {
           await chatPushRequest('preferences', {
             body: { notifications_enabled: false }
@@ -6080,6 +6211,9 @@
         if (event.data?.type === 'REFRESH_APP_BADGE' && currentUser && !document.hidden) {
           loadUnread();
         }
+        if (event.data?.type === 'FLUSH_PUSH_DIAGNOSTICS' && currentUser) {
+          flushPushDiagnostics();
+        }
       });
       // 新しいService Workerが有効化されたら、古い画面を1回だけ自動再読込する。
       // iOSのホーム画面アプリは開いたままだと旧UIが残り、通知テストボタン等の
@@ -6107,6 +6241,7 @@
         if (!document.hidden) checkForServiceWorkerUpdate();
       });
       checkForServiceWorkerUpdate();
+      flushPushDiagnostics();
     }
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', () => syncChatViewport());
