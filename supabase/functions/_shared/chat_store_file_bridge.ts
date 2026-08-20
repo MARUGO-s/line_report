@@ -90,23 +90,34 @@ export async function resolveRoomStoreKey(
 ): Promise<{ storeKey: string | null; ambiguous?: boolean }> {
   const fromGroup = String(group?.store_key ?? '').trim()
   if (group?.is_store_room && fromGroup) return { storeKey: fromGroup }
-  const { data, error } = await supabase
+
+  const { data: members, error: memberError } = await supabase
     .from('chat_group_members')
-    .select('chat_users(is_bot, store_key)')
+    .select('user_id')
     .eq('group_id', groupId)
-  if (error) {
-    console.warn('resolveRoomStoreKey failed:', error.message)
+  if (memberError) {
+    console.warn('resolveRoomStoreKey members failed:', memberError.message)
+    return { storeKey: fromGroup || null }
+  }
+  const userIds = [...new Set(
+    (Array.isArray(members) ? members : [])
+      .map((row) => String((row as { user_id?: string }).user_id ?? '').trim())
+      .filter(Boolean),
+  )]
+  if (!userIds.length) return { storeKey: fromGroup || null }
+
+  const { data: users, error: userError } = await supabase
+    .from('chat_users')
+    .select('id, is_bot, store_key')
+    .in('id', userIds)
+  if (userError) {
+    console.warn('resolveRoomStoreKey users failed:', userError.message)
     return { storeKey: fromGroup || null }
   }
   const keys = [...new Set(
-    (Array.isArray(data) ? data : [])
-      .map((row) => {
-        const user = Array.isArray((row as { chat_users?: unknown }).chat_users)
-          ? (row as { chat_users: { is_bot?: boolean; store_key?: string }[] }).chat_users[0]
-          : (row as { chat_users?: { is_bot?: boolean; store_key?: string } }).chat_users
-        if (!user?.is_bot) return ''
-        return String(user.store_key ?? '').trim()
-      })
+    (Array.isArray(users) ? users : [])
+      .filter((row) => (row as { is_bot?: boolean }).is_bot)
+      .map((row) => String((row as { store_key?: string }).store_key ?? '').trim())
       .filter(Boolean),
   )]
   if (keys.length === 1) return { storeKey: keys[0] }

@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 招待した店舗Botがレシートを解析する
+
+- Request: Bistro CAVACAVA bot を招待したルームに日計レシートを落とすと、その店として解析・返信する。
+- Implementation: 店舗Botがいるルームの投稿は、その Bot の store_key で chat-knowledge を動かす。
+- Operation: Bot を招待したルームへレシート画像を送ると、その店舗の売上レポートが返る。
+
 ### 2026-08-20 - すべてタブからも店舗Botを外す
 
 - Request: グループだけでなく「すべて」にも Bot を出さない。

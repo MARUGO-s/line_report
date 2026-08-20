@@ -168,7 +168,7 @@ async function registerQuotedImage(
 }
 
 async function handleDispatch(req: Request, supabase: DbClient): Promise<Response> {
-  const body = await req.json().catch(() => ({})) as { message_id?: unknown }
+  const body = await req.json().catch(() => ({})) as { message_id?: unknown; store_key?: unknown }
   const messageId = Number(body.message_id)
   if (!Number.isSafeInteger(messageId) || messageId <= 0) {
     return json({ ok: false, error: "message_id is required" }, 400)
@@ -188,12 +188,13 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
 
   const group = Array.isArray(message.chat_groups) ? message.chat_groups[0] : message.chat_groups
   const groupId = Number(message.group_id)
+  const fromDispatch = String(body.store_key ?? "").trim()
   const resolved = await resolveRoomStoreKey(supabase, group, groupId)
-  if (resolved.ambiguous) {
+  if (!fromDispatch && resolved.ambiguous) {
     await replyInRoom(supabase, groupId, "このルームには複数の店舗Botがいるため処理できません。店舗Botは1つにしてください。")
     return json({ ok: true, skipped: true, reason: "ambiguous store bot" }, 200)
   }
-  const storeKey = String(resolved.storeKey ?? "").trim()
+  const storeKey = fromDispatch || String(resolved.storeKey ?? "").trim()
   if (!storeKey) {
     return json({ ok: true, skipped: true, reason: "not store room" }, 200)
   }
