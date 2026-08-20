@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 店舗Botを登録ユーザーとして追加する
+
+- Request: 店舗用アカウントを LINE の Bot のようにする。登録ユーザーとして扱い、その Bot がいるルームの投稿を紐づいた店舗へ送る。
+- Implementation: 店舗ごとに `chat_users` の Bot を作る。店舗ルームに入れ、他ルームへ招待もできる。返信はその店舗Bot名義。
+- Operation: 店舗ルームのメンバーに店舗Botが見える。別ルームへ招待すると、そのルームの画像・#メモも同じ店舗へ送る。
+
 ### 2026-08-20 - 同日レシートの返信カードが空になる
 
 - Request: レシート送信後の返信が空の白いカードになっていた。

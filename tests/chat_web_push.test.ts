@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v23/)
+  assert.match(serviceWorker, /line-report-chat-v24/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -127,7 +127,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /msg-card-line/)
   assert.match(html, /function sendCardCommand/)
   assert.match(html, /data-card-command/)
-  assert.match(serviceWorker, /line-report-chat-v23/)
+  assert.match(serviceWorker, /line-report-chat-v24/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -190,6 +190,17 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   assert.match(config, /\[functions\.chat-knowledge\][\s\S]*verify_jwt = false/)
   const timeoutMigration = await read("supabase/migrations/20260819240000_chat_knowledge_dispatch_timeout.sql")
   assert.match(timeoutMigration, /timeout_milliseconds := 60000/)
+  const bots = await read("supabase/migrations/20260820150000_chat_store_bots.sql")
+  assert.match(bots, /add column if not exists is_bot boolean not null default false/)
+  assert.match(bots, /chat_store_bot_id/)
+  assert.match(bots, /u\.is_bot\s+and u\.store_key is not null/)
+  assert.match(bots, /店舗Botは店舗ルームから退出させられません/)
+  const chatHtml = await read("public/chat.html")
+  assert.match(chatHtml, /isStoreBot/)
+  assert.match(chatHtml, /bot-mark/)
+  assert.match(fn, /resolveRoomStoreKey/)
+  assert.match(fn, /loadChatStoreBot/)
+  assert.match(bridge, /export async function loadChatStoreBot/)
 })
 
 test("chat members can leave a room and owners can kick others", async () => {
