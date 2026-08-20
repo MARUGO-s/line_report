@@ -701,6 +701,26 @@
     }
     .mobile-notification-btn.enabled { color: var(--line-green); }
     .mobile-notification-btn.blocked { color: #ef4444; }
+    .notification-btn.needs-restore,
+    .mobile-notification-btn.needs-restore { color: #ff9f0a; }
+    .push-restore-bar {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top, 0px));
+      left: 8px;
+      right: 8px;
+      z-index: 80;
+      padding: 12px 14px;
+      border: 0;
+      border-radius: 10px;
+      background: #ff9f0a;
+      color: #111;
+      font-size: 14px;
+      font-weight: 700;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .push-restore-bar.hidden { display: none !important; }
 
     .invite-overlay {
       position: fixed;
@@ -2053,6 +2073,10 @@
     </div>
   </div>
 
+  <button type="button" class="push-restore-bar hidden" id="pushRestoreBar" onclick="repairPushSubscriptionFromBar()">
+    通知が切れたので、ここをタップして再開
+  </button>
+
   <script src="vendor/supabase/supabase-2.110.9.min.js"></script>
   <script src="pages-config.js"></script>
   <script>
@@ -2096,6 +2120,8 @@
     let pushSubscription = null;
     let pushPreferenceChannel = null;
     let pushNotificationsEnabled = false;
+    let pushRestoreArmed = false;
+    let pushRepairing = false;
     let pendingOpenGroupId = null;
     let chatViewportFrame = 0;
     // 開いているトークの読み込み済みメッセージ（created_at 昇順）。
@@ -2678,38 +2704,46 @@
       try {
         if (Notification.permission === 'denied') {
           renderNotificationStatus('blocked');
+          hidePushRestoreBar();
           return;
         }
         pushSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
-        if (currentUser && Notification.permission === 'granted') {
-          let wantsPush = !!pushSubscription;
-          try {
-            const prefs = await chatPushRequest('preferences', { body: {} });
-            if (prefs.found === true) wantsPush = prefs.notifications_enabled === true;
-          } catch (error) {
-            console.error('Push preference restore error:', error);
-          }
-          if (wantsPush && !pushSubscription) {
-            pushSubscription = await serviceWorkerRegistration.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: urlBase64ToUint8Array(CHAT_PUSH_PUBLIC_KEY)
-            });
-          }
-          if (pushSubscription && wantsPush) {
-            await savePushSubscription(pushSubscription, true).catch((error) => {
-              console.error('Push subscription refresh error:', error);
-            });
-            subscribePushPreferenceChanges();
-            await syncPushPreference();
-            return;
-          }
+        if (!(currentUser && Notification.permission === 'granted')) {
+          renderNotificationStatus(pushSubscription ? 'enabled' : 'disabled');
+          hidePushRestoreBar();
+          return;
         }
-        renderNotificationStatus(
-          pushSubscription && Notification.permission === 'granted' ? 'enabled' : 'disabled'
-        );
+        let wantsPush = false;
+        try {
+          const prefs = await chatPushRequest('preferences', { body: {} });
+          wantsPush = prefs.found === true && prefs.notifications_enabled === true;
+        } catch (error) {
+          console.error('Push preference restore error:', error);
+          wantsPush = !!pushSubscription;
+        }
+        if (!wantsPush) {
+          pushNotificationsEnabled = false;
+          renderNotificationStatus('disabled');
+          hidePushRestoreBar();
+          return;
+        }
+        if (!pushSubscription) {
+          renderNotificationStatus('needs-restore');
+          showPushRestoreBar();
+          return;
+        }
+        armPushRestoreOnUserGesture();
+        await savePushSubscription(pushSubscription, true).catch((error) => {
+          console.error('Push subscription refresh error:', error);
+        });
+        subscribePushPreferenceChanges();
+        await syncPushPreference();
+        hidePushRestoreBar();
       } catch (error) {
         console.error('Service worker registration error:', error);
-        renderNotificationStatus('unsupported');
+        renderNotificationStatus('needs-restore');
+        showPushRestoreBar();
+        armPushRestoreOnUserGesture();
       }
     }
 
@@ -2717,7 +2751,19 @@
       if (!('serviceWorker' in navigator)) return Promise.resolve(null);
       if (!serviceWorkerPromise) {
         serviceWorkerPromise = navigator.serviceWorker.register('chat-sw.js', { scope: './' })
-          .then(() => navigator.serviceWorker.ready)
+          .then(async (registration) => {
+            const pending = registration.installing || registration.waiting;
+            if (pending && pending.state !== 'activated') {
+              await new Promise((resolve) => {
+                const done = () => resolve();
+                pending.addEventListener('statechange', () => {
+                  if (pending.state === 'activated' || pending.state === 'redundant') done();
+                });
+                setTimeout(done, 4000);
+              });
+            }
+            return registration.active ? registration : navigator.serviceWorker.ready;
+          })
           .catch((error) => {
             console.error('Service worker registration error:', error);
             serviceWorkerPromise = null;
@@ -2727,18 +2773,94 @@
       return serviceWorkerPromise;
     }
 
+    function showPushRestoreBar() {
+      const bar = $('pushRestoreBar');
+      if (bar) bar.classList.remove('hidden');
+    }
+
+    function hidePushRestoreBar() {
+      const bar = $('pushRestoreBar');
+      if (bar) bar.classList.add('hidden');
+    }
+
+    function armPushRestoreOnUserGesture() {
+      if (pushRestoreArmed) return;
+      pushRestoreArmed = true;
+      const onGesture = () => {
+        document.removeEventListener('pointerdown', onGesture, true);
+        void repairPushSubscription().catch((error) => {
+          console.error('Push subscription restore error:', error);
+          renderNotificationStatus('needs-restore');
+          showPushRestoreBar();
+        });
+      };
+      document.addEventListener('pointerdown', onGesture, true);
+    }
+
+    async function repairPushSubscription() {
+      if (pushRepairing) return pushSubscription;
+      if (isIosDevice() && !isStandaloneApp()) {
+        throw new Error('iPhone／iPadでは、ホーム画面のM-talkから開いて通知を再開してください。');
+      }
+      pushRepairing = true;
+      try {
+        serviceWorkerRegistration = await ensureChatServiceWorker();
+        if (!serviceWorkerRegistration || !('PushManager' in window)) {
+          throw new Error('この端末では通知を利用できません');
+        }
+        const permission = Notification.permission === 'granted'
+          ? 'granted'
+          : await Notification.requestPermission();
+        if (permission !== 'granted') {
+          throw new Error('通知は許可されませんでした。端末の設定から変更できます。');
+        }
+        const existing = await serviceWorkerRegistration.pushManager.getSubscription();
+        if (existing) {
+          try { await existing.unsubscribe(); } catch (_) { /* 古い購読は破棄して作り直す */ }
+        }
+        pushSubscription = await serviceWorkerRegistration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(CHAT_PUSH_PUBLIC_KEY)
+        });
+        await savePushSubscription(pushSubscription, true);
+        pushNotificationsEnabled = true;
+        subscribePushPreferenceChanges();
+        renderNotificationStatus('enabled');
+        hidePushRestoreBar();
+        await syncAppBadge();
+        return pushSubscription;
+      } finally {
+        pushRepairing = false;
+      }
+    }
+
+    async function repairPushSubscriptionFromBar() {
+      renderNotificationStatus('working');
+      try {
+        await repairPushSubscription();
+        alert('通知を再開しました。新しいトークが来ると届きます。');
+      } catch (error) {
+        console.error('Push repair error:', error);
+        renderNotificationStatus(Notification.permission === 'denied' ? 'blocked' : 'needs-restore');
+        if (Notification.permission !== 'denied') showPushRestoreBar();
+        alert(error.message || '通知の再開に失敗しました');
+      }
+    }
+
     function renderNotificationStatus(status) {
       const states = {
         enabled: ['🔔', '通知はオンです。押すとオフにできます'],
         working: ['…', '通知を設定しています'],
         blocked: ['🚫', 'ブラウザまたは端末の設定で通知を許可してください'],
         unsupported: ['—', 'このブラウザでは通知を利用できません'],
+        'needs-restore': ['🔕', '通知が切れたのでタップして再開'],
         disabled: ['🔕', '新着通知をオンにする']
       };
       const view = states[status] || states.disabled;
       document.querySelectorAll('[data-notification-toggle]').forEach((button) => {
         button.classList.toggle('enabled', status === 'enabled');
         button.classList.toggle('blocked', status === 'blocked');
+        button.classList.toggle('needs-restore', status === 'needs-restore');
         button.disabled = status === 'working';
         const icon = button.querySelector('.notification-icon');
         if (icon) icon.textContent = view[0];
@@ -2841,33 +2963,18 @@
           });
           pushNotificationsEnabled = false;
           renderNotificationStatus('disabled');
+          hidePushRestoreBar();
           await syncAppBadge(0);
           alert('新着通知をオフにしました');
           return;
         }
 
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') {
-          renderNotificationStatus(permission === 'denied' ? 'blocked' : 'disabled');
-          alert('通知は許可されませんでした。端末の設定から変更できます。');
-          return;
-        }
-
-        if (!pushSubscription) {
-          pushSubscription = await serviceWorkerRegistration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(CHAT_PUSH_PUBLIC_KEY)
-          });
-        }
-        await savePushSubscription(pushSubscription, true);
-        pushNotificationsEnabled = true;
-        subscribePushPreferenceChanges();
-        renderNotificationStatus('enabled');
-        await syncAppBadge();
+        await repairPushSubscription();
         alert('新しいトークが入るとスマホへ通知します');
       } catch (error) {
         console.error('Push enable error:', error);
-        renderNotificationStatus(Notification.permission === 'denied' ? 'blocked' : 'disabled');
+        renderNotificationStatus(Notification.permission === 'denied' ? 'blocked' : 'needs-restore');
+        if (Notification.permission !== 'denied') showPushRestoreBar();
         alert(error.message || '通知の設定に失敗しました');
       }
     }
