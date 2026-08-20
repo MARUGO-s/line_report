@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 予約カレンダーと予定カレンダーを分ける
+
+- Request: 予定のカレンダーには予定だけ、予約のカレンダーには予約だけ。
+- Implementation: 月カレンダーの印と凡例を、開いているタブの種類だけにする。
+- Operation: 「予約・予定」でタブを切り替えると、印が予約または予定だけになる。
+
 ### 2026-08-20 - 会話の予定登録先を M-talk カレンダーにする
 
 - Request: 会話から検知した予定を Googleカレンダーではなく M-talk の予定カレンダーへ登録する。

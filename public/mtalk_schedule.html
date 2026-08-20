@@ -140,6 +140,7 @@
       margin: 8px 12px 16px; color: var(--muted); font-size: 13px; line-height: 1.6;
     }
     .error { color: var(--warn); }
+    .hidden { display: none !important; }
     .day { padding: 4px 12px 14px; scroll-margin-top: 64px; }
     .day h2 {
       font-size: 13px; color: var(--muted); font-weight: 700;
@@ -240,8 +241,8 @@
       </div>
       <div class="cal-grid" id="calGrid"></div>
       <div class="cal-legend">
-        <span><i class="resv"></i>予約</span>
-        <span><i class="evt"></i>予定</span>
+        <span id="legendResv"><i class="resv"></i>予約</span>
+        <span id="legendEvt"><i class="evt"></i>予定</span>
       </div>
     </div>
     <div class="timeline" id="list"></div>
@@ -453,19 +454,18 @@
 
     function collectMarks() {
       const marks = new Map();
-      for (const row of payload?.reservations || []) {
-        const key = dayKey(row.visit_at);
-        if (!key) continue;
-        const cur = marks.get(key) || { resv: false, evt: false };
-        cur.resv = true;
-        marks.set(key, cur);
-      }
-      for (const row of payload?.events || []) {
-        const key = dayKey(row.starts_at);
-        if (!key) continue;
-        const cur = marks.get(key) || { resv: false, evt: false };
-        cur.evt = true;
-        marks.set(key, cur);
+      if (tab === 'reservations') {
+        for (const row of payload?.reservations || []) {
+          const key = dayKey(row.visit_at);
+          if (!key) continue;
+          marks.set(key, { resv: true, evt: false });
+        }
+      } else {
+        for (const row of payload?.events || []) {
+          const key = dayKey(row.starts_at);
+          if (!key) continue;
+          marks.set(key, { resv: false, evt: true });
+        }
       }
       return marks;
     }
@@ -503,6 +503,8 @@
       $('calGrid').querySelectorAll('[data-day]').forEach((btn) => {
         btn.onclick = () => selectDay(btn.getAttribute('data-day') || '');
       });
+      if ($('legendResv')) $('legendResv').classList.toggle('hidden', tab !== 'reservations');
+      if ($('legendEvt')) $('legendEvt').classList.toggle('hidden', tab !== 'events');
     }
 
     function dayHasKind(key, kind) {
@@ -513,15 +515,6 @@
     function selectDay(key) {
       if (!key) return;
       selectedDay = key;
-      const hasResv = dayHasKind(key, 'reservation');
-      const hasEvt = dayHasKind(key, 'event');
-      if (tab === 'reservations' && !hasResv && hasEvt) {
-        tab = 'events';
-        document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.getAttribute('data-tab') === 'events'));
-      } else if (tab === 'events' && !hasEvt && hasResv) {
-        tab = 'reservations';
-        document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.getAttribute('data-tab') === 'reservations'));
-      }
       renderAll();
       requestAnimationFrame(() => {
         requestAnimationFrame(() => scrollToSelectedDay());
