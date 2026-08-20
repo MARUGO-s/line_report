@@ -11962,7 +11962,8 @@
           ? '<button type="button" class="button primary webhook-room-individual-config" data-room-id="' + escapeHtml(roomId) + '">個別設定</button>'
           : '') +
         '<button type="button" class="button webhook-room-reset" data-room-id="' + escapeHtml(roomId) + '">継承</button>' +
-        '<button type="button" class="button warn webhook-room-delete" data-room-id="' + escapeHtml(roomId) + '">ルーム削除</button>' +
+        '<button type="button" class="button warn webhook-room-delete" data-room-id="' + escapeHtml(roomId) + '">一覧から外す</button>' +
+        '<button type="button" class="button warn webhook-room-purge" data-room-id="' + escapeHtml(roomId) + '">完全削除</button>' +
         '</div>' +
         '</li>'
       );
@@ -13797,6 +13798,34 @@
       await safeLoadState();
     }
 
+    async function purgeRoomRow(tr) {
+      const roomId = tr.dataset.roomId || '';
+      const nameInput = tr.querySelector('.room-name');
+      const roomName = nameInput ? nameInput.value.trim() : '';
+      const label = roomName || roomId;
+      if (!roomId) return;
+      if (String(roomId).indexOf('mtalk-group-') === 0) {
+        alert('M-talkのルームはトーク画面から、作成者が完全削除してください。');
+        return;
+      }
+      if (!window.confirm('ルーム「' + label + '」を完全に削除します。\nこのルームのメッセージ・メディア・予定は消えます。\n他のルームや店舗の予約・売上には影響しません。\nこの操作は取り消せません。')) {
+        return;
+      }
+      const typed = window.prompt('削除するにはルームIDを入力してください。\n' + roomId);
+      if (typed == null) return;
+      if (String(typed).trim() !== roomId) {
+        alert('ルームIDが一致しません。削除しませんでした。');
+        return;
+      }
+      await api('/rooms/purge', {
+        method: 'POST',
+        body: JSON.stringify({ room_id: roomId, confirm_room_id: roomId }),
+      });
+      isRoomDirty = false;
+      await safeLoadState();
+      alert('ルームを完全に削除しました。他のルームは変更していません。');
+    }
+
     async function changeAdminToken() {
       const newToken = dom.newTokenInput.value.trim();
       const confirmToken = dom.newTokenConfirmInput.value.trim();
@@ -14132,6 +14161,8 @@
         } else if (target.classList.contains('webhook-room-delete')) {
           await deleteRoomRow(tr);
           alert('ルームをこのサイトの一覧から外しました。（旧サイト・保存データはそのままです）');
+        } else if (target.classList.contains('webhook-room-purge')) {
+          await purgeRoomRow(tr);
         } else if (target.classList.contains('webhook-room-show-id')) {
           openRoomIdModal(tr);
         } else if (target.classList.contains('webhook-room-sync')) {

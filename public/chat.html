@@ -399,6 +399,10 @@
       color: #ff6b6b;
       font-weight: 700;
     }
+    .talk-ctx-purge {
+      color: #ff8a7a;
+      font-weight: 700;
+    }
 
     .talk-body { min-width: 0; flex: 1; }
     .talk-row {
@@ -1991,6 +1995,7 @@
       <button type="button" role="menuitem" id="talkCtxSettings">ルーム設定</button>
       <button type="button" role="menuitem" id="talkCtxHide">非表示</button>
       <button type="button" role="menuitem" id="talkCtxDelete" class="talk-ctx-delete">退出</button>
+      <button type="button" role="menuitem" id="talkCtxPurge" class="talk-ctx-purge">ルームを完全に削除</button>
     </div>
   </div>
 
@@ -4245,6 +4250,9 @@
       $('talkCtxPin').textContent = group.pinned_at ? 'ピン留めを解除' : 'ピン留め';
       $('talkCtxMute').textContent = group.muted_at ? '通知する' : '非通知';
       if ($('talkCtxDelete')) $('talkCtxDelete').classList.toggle('hidden', !!group.is_store_room);
+      if ($('talkCtxPurge')) {
+        $('talkCtxPurge').classList.toggle('hidden', !canPurgeTalk(group));
+      }
       const overlay = $('talkContextMenu');
       const panel = $('talkContextPanel');
       overlay.classList.remove('hidden');
@@ -4398,6 +4406,51 @@
         closeChat();
       }
       showNotice('ルームから退出しました');
+    }
+
+    function canPurgeTalk(group) {
+      return !!(group && !group.is_store_room && currentUser && group.created_by === currentUser.id);
+    }
+
+    async function purgeTalk(group) {
+      if (!canPurgeTalk(group)) {
+        alert('ルームを完全に削除できるのは作成者だけです');
+        return;
+      }
+      const title = roomTitle(group);
+      const confirmName = String(group.group_name || '').trim() || String(group.id);
+      if (!confirm('「' + title + '」を完全に削除します。\nメッセージ・画像・このルームの予定も消えます。\n他のルームや店舗の予約・売上には影響しません。\nこの操作は取り消せません。')) {
+        return;
+      }
+      const typed = window.prompt('削除するには次を入力してください。\n' + confirmName);
+      if (typed == null) return;
+      if (String(typed).trim() !== confirmName) {
+        alert('入力が一致しません。削除しませんでした。');
+        return;
+      }
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData && sessionData.session && sessionData.session.access_token;
+      if (!token) throw new Error('ログインしてください。');
+      const url = CONFIG.adminApiUrl
+        ? CONFIG.adminApiUrl('/chat-room-purge')
+        : (SUPABASE_URL.replace(/\/+$/, '') + '/functions/v1/admin-api/chat-room-purge');
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + token,
+          apikey: SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ group_id: group.id, confirm_name: confirmName }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || ('HTTP ' + response.status));
+      myGroups = myGroups.filter((g) => Number(g.id) !== Number(group.id));
+      if (Number(currentGroupId) === Number(group.id)) {
+        closeInvite();
+        closeChat();
+      }
+      showNotice('ルームを完全に削除しました');
     }
 
     function renderTalkRow(group, options) {
@@ -6495,6 +6548,11 @@
       if (!talkMenuGroup) return;
       const group = talkMenuGroup;
       runTalkAction(() => leaveTalk(group));
+    };
+    $('talkCtxPurge').onclick = () => {
+      if (!talkMenuGroup) return;
+      const group = talkMenuGroup;
+      runTalkAction(() => purgeTalk(group));
     };
 
     $('rememberInput').addEventListener('change', (e) => {
