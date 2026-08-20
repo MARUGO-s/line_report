@@ -3573,13 +3573,14 @@
       window.open(url.href, '_blank', 'noopener');
     }
 
-    function openReservationSchedule(groupId) {
+    function openReservationSchedule(groupId, tab) {
       const id = Number(groupId || (talkMenuGroup && talkMenuGroup.id) || currentGroupId);
       if (!Number.isSafeInteger(id) || id <= 0) return;
       closeTalkContextMenu();
       const url = new URL('mtalk_schedule.html', window.location.href);
       url.searchParams.set('from', 'chat');
       url.searchParams.set('group_id', String(id));
+      if (tab === 'events' || tab === 'reservations') url.searchParams.set('tab', tab);
       window.location.href = url.href;
     }
 
@@ -6403,6 +6404,22 @@
       if (commandBtn) {
         sendCardCommand(commandBtn.getAttribute('data-card-command'));
         return;
+      }
+
+      const cardLink = e.target.closest('a.msg-card-action[href]');
+      if (cardLink) {
+        try {
+          const url = new URL(cardLink.getAttribute('href'), window.location.href);
+          const path = url.pathname.replace(/\/+$/, '');
+          if (path.endsWith('/mtalk_schedule.html') || path.endsWith('mtalk_schedule.html')) {
+            const id = Number(url.searchParams.get('group_id') || url.searchParams.get('group') || '');
+            if (Number.isSafeInteger(id) && id > 0) {
+              e.preventDefault();
+              openReservationSchedule(id, url.searchParams.get('tab'));
+              return;
+            }
+          }
+        } catch (_err) { /* 通常のリンクとして開く */ }
       }
 
       const img = e.target.closest('img.msg-image');

@@ -261,9 +261,9 @@
       auth: { persistSession: true, autoRefreshToken: true }
     });
     const params = new URLSearchParams(location.search);
-    const groupId = Number(params.get('group_id') || '');
+    const groupId = Number(params.get('group_id') || params.get('group') || '');
     const $ = (id) => document.getElementById(id);
-    let tab = 'reservations';
+    let tab = params.get('tab') === 'events' ? 'events' : 'reservations';
     let month = currentMonth();
     let payload = null;
     let selectedDay = '';
@@ -403,6 +403,7 @@
         document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el === btn));
         renderAll();
       };
+      btn.classList.toggle('active', (btn.getAttribute('data-tab') || 'reservations') === tab);
     });
     $('addBtn').onclick = () => openEditForm(tab === 'events' ? 'event' : 'reservation', null);
     $('prevMonth').onclick = () => { month = shiftMonth(month, -1); selectedDay = ''; load(); };
