@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - ルーム切替をキャッシュして速くする
+
+- Request: ルームを選ぶたびに画像を読み直して遅い。キャッシュで軽く・速くする。
+- Implementation: 直近12ルームの本文をメモリに残し、切替時はすぐ描画してから差分更新。画像の署名URLは sessionStorage に残す。
+- Operation: 一度開いたルームは、次から本文と画像がすぐ出る。
+
 ### 2026-08-20 - 登録ユーザーの横に Bot タブを追加する
 
 - Request: 登録ユーザータブの横に Bot タブを作り、店舗Botをそこに表示する。
