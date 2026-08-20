@@ -2676,19 +2676,37 @@
         return;
       }
       try {
-        pushSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
-        renderNotificationStatus(
-          Notification.permission === 'denied'
-            ? 'blocked'
-            : (pushSubscription && Notification.permission === 'granted' ? 'enabled' : 'disabled')
-        );
-        if (pushSubscription && currentUser) {
-          await savePushSubscription(pushSubscription, false).catch((error) => {
-            console.error('Push subscription refresh error:', error);
-          });
-          subscribePushPreferenceChanges();
-          await syncPushPreference();
+        if (Notification.permission === 'denied') {
+          renderNotificationStatus('blocked');
+          return;
         }
+        pushSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
+        if (currentUser && Notification.permission === 'granted') {
+          let wantsPush = !!pushSubscription;
+          try {
+            const prefs = await chatPushRequest('preferences', { body: {} });
+            if (prefs.found === true) wantsPush = prefs.notifications_enabled === true;
+          } catch (error) {
+            console.error('Push preference restore error:', error);
+          }
+          if (wantsPush && !pushSubscription) {
+            pushSubscription = await serviceWorkerRegistration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(CHAT_PUSH_PUBLIC_KEY)
+            });
+          }
+          if (pushSubscription && wantsPush) {
+            await savePushSubscription(pushSubscription, true).catch((error) => {
+              console.error('Push subscription refresh error:', error);
+            });
+            subscribePushPreferenceChanges();
+            await syncPushPreference();
+            return;
+          }
+        }
+        renderNotificationStatus(
+          pushSubscription && Notification.permission === 'granted' ? 'enabled' : 'disabled'
+        );
       } catch (error) {
         console.error('Service worker registration error:', error);
         renderNotificationStatus('unsupported');
@@ -2698,7 +2716,7 @@
     function ensureChatServiceWorker() {
       if (!('serviceWorker' in navigator)) return Promise.resolve(null);
       if (!serviceWorkerPromise) {
-        serviceWorkerPromise = navigator.serviceWorker.register('chat-sw.js?v=40', { scope: './' })
+        serviceWorkerPromise = navigator.serviceWorker.register('chat-sw.js', { scope: './' })
           .then(() => navigator.serviceWorker.ready)
           .catch((error) => {
             console.error('Service worker registration error:', error);
@@ -2815,7 +2833,7 @@
       }
       renderNotificationStatus('working');
       try {
-        serviceWorkerRegistration = serviceWorkerRegistration || await navigator.serviceWorker.ready;
+        serviceWorkerRegistration = await ensureChatServiceWorker() || serviceWorkerRegistration || await navigator.serviceWorker.ready;
         pushSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
         if (pushSubscription && Notification.permission === 'granted' && pushNotificationsEnabled) {
           await chatPushRequest('preferences', {
