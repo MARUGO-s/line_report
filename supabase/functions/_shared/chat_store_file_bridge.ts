@@ -79,7 +79,7 @@ export async function loadChatStoreBot(supabase: DbClient, storeKey: string): Pr
   const id = String((data as { id?: string } | null)?.id ?? '').trim()
   const username = String((data as { username?: string } | null)?.username ?? '').trim()
   if (!id || !username) return null
-  return { id, username, storeKey: key }
+  return { id, username: 'Bot', storeKey: key }
 }
 
 export async function resolveRoomStoreKey(

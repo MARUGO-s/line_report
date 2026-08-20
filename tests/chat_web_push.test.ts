@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v27/)
+  assert.match(serviceWorker, /line-report-chat-v28/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -132,7 +132,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v27/)
+  assert.match(serviceWorker, /line-report-chat-v28/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -206,6 +206,9 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   assert.match(chatHtml, /setTalkTab\('bots'\)/)
   assert.match(chatHtml, /talkTab === 'bots'/)
   assert.match(chatHtml, /店舗Botはいません/)
+  assert.match(chatHtml, /function storeBotName/)
+  assert.match(chatHtml, /function personName/)
+  assert.match(bridge, /username: 'Bot'/)
   assert.match(chatHtml, /talkTab === 'groups' && \(g\.is_direct \|\| g\.is_store_room\)/)
   assert.match(chatHtml, /Botは新しいグループのメンバーにできません/)
   const botJoin = await read("supabase/migrations/20260820160000_chat_bots_not_auto_join_groups.sql")
