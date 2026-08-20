@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - ゴミ箱タブを一番右へ
+
+- Request: トーク一覧のゴミ箱タブを真ん中ではなく、Bot の右（一番右）にする。
+- Fix: タブ順を すべて／友だち／グループ／登録ユーザー／Bot／ゴミ箱 にする。
+- Operation: トーク一覧の右端がゴミ箱。
+
 ### 2026-08-21 - 通知テストボタンがタブに重なる
 
 - Symptom: トーク一覧の「通知テスト」が縦に潰れて、タブの上に重なる。
