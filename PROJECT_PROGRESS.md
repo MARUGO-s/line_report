@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - すべてタブからも店舗Botを外す
+
+- Request: グループだけでなく「すべて」にも Bot を出さない。
+- Implementation: 店舗ルームと店舗Botの1対1は、すべて／友だち／グループに出さない。Botタブから開く。検索すれば店舗ルームは出る。
+- Operation: ホームは通常のトークだけ。店舗Botは Bot タブ。
+
 ### 2026-08-20 - 店舗Botの名前を「店名 bot」にする
 
 - Request: Botタブは「Bot」ではなく「クラウディア2 bot」のように店名＋bot。
