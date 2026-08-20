@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - M-talk 予約表示をオレンジ／アレルギー赤／お誕生日ピンクにする
+
+- Request: 予約内容はオレンジで視認しやすくし、アレルギーやお誕生日があるときは別色にする。
+- Implementation: `mtalk_schedule.html` の予約カードと詳細を色分け。`/chat-schedule` は記念日・要望・苦手だけを slim して返し、生 JSON は返さない。Gmail 取込のカレンダー JSON に要望を追加。
+- Operation: 「予約・予定」の予約タブで、アレルギーは赤字、お誕生日／記念日はピンク。
+
 ### 2026-08-20 - M-talk から予約と予定をタブ切替で見る
 
 - Request: M-talk から使え、予約取り込みと同じ予約と同期し、予約／予定をタブで切り替える。

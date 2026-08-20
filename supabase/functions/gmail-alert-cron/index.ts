@@ -1259,6 +1259,7 @@ function buildReservationCalendarDetailPayload(
   const plan = normalizeCalendarDetailText(reservation?.plan, 180);
   const partySize = normalizeCalendarPartySize(reservation?.partySize);
   const allergy = normalizeCalendarAllergy(reservation?.allergy);
+  const requestNote = normalizeCalendarDetailText(reservation?.requestNote, 160);
   const storeName = normalizeCalendarDetailText(reservation?.storeName, 90);
   // 予約番号: 予約変更時に「元の予約」を照合するための安定キー（通知番号は通知ごとに変わるので使わない）。
   const reservationNo = normalizeCalendarDetailText(
@@ -1283,6 +1284,7 @@ function buildReservationCalendarDetailPayload(
     plan,
     partySize,
     allergy,
+    requestNote,
     storeName,
     reservationNo,
     eventType,

@@ -6,10 +6,11 @@ const root = new URL("..", import.meta.url)
 const read = (relative: string) => readFile(new URL(relative, root), "utf8")
 
 test("M-talk schedule page switches reservation and event tabs", async () => {
-  const [html, chat, api] = await Promise.all([
+  const [html, chat, api, gmail] = await Promise.all([
     read("public/mtalk_schedule.html"),
     read("public/chat.html"),
     read("supabase/functions/admin-api/index.ts"),
+    read("supabase/functions/gmail-alert-cron/index.ts"),
   ])
 
   assert.match(html, /data-tab="reservations"/)
@@ -27,6 +28,16 @@ test("M-talk schedule page switches reservation and event tabs", async () => {
   assert.match(html, /app-theme\.js/)
   assert.match(html, /html\[data-theme='light'\]/)
   assert.match(html, /--bg: #111/)
+  assert.match(html, /--resv-text/)
+  assert.match(html, /--allergy-text/)
+  assert.match(html, /--birthday-text/)
+  assert.match(html, /card-resv/)
+  assert.match(html, /function notableAllergy/)
+  assert.match(html, /function notableBirthday/)
+  assert.match(html, /function reservationFlagsHtml/)
+  assert.match(html, /function reservationDetailRows/)
+  assert.match(html, /flag allergy/)
+  assert.match(html, /flag birthday/)
   assert.match(html, /\/chat-schedule\?group_id=/)
   assert.match(html, /Authorization: 'Bearer '/)
   assert.match(html, /\?group='/)
@@ -40,6 +51,11 @@ test("M-talk schedule page switches reservation and event tabs", async () => {
   assert.match(api, /fetchReservationCalendarState/)
   assert.match(api, /line_room_calendar_events/)
   assert.match(api, /slimChatScheduleReservation/)
+  assert.match(api, /anniversary_label/)
+  assert.match(api, /request_note_label/)
+  assert.match(api, /dislikes_label/)
+  assert.match(gmail, /requestNote = normalizeCalendarDetailText\(\s*reservation\?\.requestNote/)
+  assert.doesNotMatch(api, /reservation_detail: item\.reservation_detail/)
   const roomConfigAt = api.indexOf('path === "/chat-room-config"')
   const scheduleAt = api.indexOf('path === "/chat-schedule"')
   const adminAuthAt = api.lastIndexOf("const authResult = await authenticate(")
