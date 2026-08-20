@@ -1653,11 +1653,8 @@
         left: 0;
         width: 100%;
         height: var(--chat-viewport-height);
-        padding:
-          var(--mobile-safe-top)
-          var(--mobile-safe-right)
-          var(--mobile-safe-bottom)
-          var(--mobile-safe-left);
+        padding: var(--mobile-safe-top) var(--mobile-safe-right) 0 var(--mobile-safe-left);
+        padding-bottom: var(--mobile-safe-bottom);
       }
       .nav-rail { display: none; }
       .talk-tabs {
@@ -1695,8 +1692,13 @@
         overflow: hidden;
       }
       body.chat-open .talk-list { display: none; }
-      body.chat-open .main-content { display: flex; width: 100%; }
+      body.chat-open .main-content {
+        display: flex;
+        width: 100%;
+        border-radius: 12px 12px 0 0;
+      }
       body.chat-open {
+        --mobile-safe-bottom: 0px;
         padding-top: var(--mobile-safe-top);
         padding-right: var(--mobile-safe-right);
         padding-bottom: 0;
@@ -1734,7 +1736,7 @@
       .messages { padding: 14px 10px 16px; }
       .input-area,
       body.chat-open .input-area {
-        padding: 6px 8px 4px;
+        padding: 6px 8px var(--chat-composer-bottom, 0px);
         flex-shrink: 0;
       }
       .composer-menu { padding: 0; }
@@ -2174,12 +2176,25 @@
     const CREDENTIAL_KEY = 'chat_saved_credentials';
     const AVATAR_COLORS = ['#7ac943', '#4fc3f7', '#ff8a65', '#ba68c8', '#ffd54f', '#4db6ac', '#f06292', '#7986cb'];
 
+    function measureSafeAreaBottomPx() {
+      let probe = document.getElementById('safeBottomProbe');
+      if (!probe) {
+        probe = document.createElement('div');
+        probe.id = 'safeBottomProbe';
+        probe.setAttribute('aria-hidden', 'true');
+        probe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:env(safe-area-inset-bottom,0px);overflow:hidden;pointer-events:none;';
+        document.body.appendChild(probe);
+      }
+      return Math.max(0, Math.round(probe.getBoundingClientRect().height || 0));
+    }
+
     function syncChatViewport(keepComposerVisible = false) {
       const isMobileLayout = window.matchMedia('(max-width: 768px), (max-height: 600px) and (pointer: coarse)').matches;
       const root = document.documentElement;
       if (!isMobileLayout) {
         root.style.removeProperty('--chat-viewport-height');
         root.style.removeProperty('--chat-viewport-top');
+        root.style.removeProperty('--chat-composer-bottom');
         return;
       }
 
@@ -2188,6 +2203,7 @@
       const viewportTop = Math.max(0, Math.round(viewport ? viewport.offsetTop : 0));
       root.style.setProperty('--chat-viewport-height', `${viewportHeight}px`);
       root.style.setProperty('--chat-viewport-top', `${viewportTop}px`);
+      root.style.setProperty('--chat-composer-bottom', `${Math.round(measureSafeAreaBottomPx() / 3)}px`);
 
       if (chatViewportFrame) cancelAnimationFrame(chatViewportFrame);
       chatViewportFrame = requestAnimationFrame(() => {
