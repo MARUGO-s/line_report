@@ -17,7 +17,7 @@ import {
 } from "../_shared/knowledge_file_extract.ts"
 import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from "../_shared/knowledge_memo_tag.ts"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
-import { purgeLineAdminRoom, purgeMtalkGroup } from "../_shared/room_hard_delete.ts"
+import { purgeLineAdminRoom, purgeMtalkGroup, restoreLineAdminRoom } from "../_shared/room_hard_delete.ts"
 import {
   isMarugoGroupStoreLabel,
   MARUGO_GROUP_STORE_OPTIONS,
@@ -3854,6 +3854,13 @@ Deno.serve(async (req, info) => {
       return json({ success: true, ...purged }, 200)
     }
 
+    if (req.method === "POST" && path === "/rooms/restore") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      const restored = await restoreLineAdminRoom(supabase, String(body.room_id ?? "").trim())
+      return json({ success: true, ...restored }, 200)
+    }
+
     if (req.method === "POST" && path === "/actions/run-summary") {
       const body = await parseJson(workReq)
       if (!isRecord(body)) {
@@ -4361,7 +4368,7 @@ async function handleChatRoomPurge(
   const userId = await authenticateChatMember(req, supabase, groupId)
   const { data: group, error } = await supabase
     .from("chat_groups")
-    .select("id, group_name, created_by, is_store_room")
+    .select("id, group_name, created_by, is_store_room, trashed_at")
     .eq("id", groupId)
     .maybeSingle()
   if (error) throw { status: 500, message: `ルームの確認に失敗しました: ${error.message}` } satisfies AppError
@@ -4555,7 +4562,7 @@ async function fetchState(
     webhookLogsQuery = webhookLogsQuery.eq("store_partition_key", webhookStoreKeyRaw)
   }
 
-  const [roomSettingsRes, roomOverviewRes, logsRes, webhookLogsRes, storageUsageState, userPermissionsRes, pushUsageSummary] =
+  const [roomSettingsRes, roomOverviewRes, logsRes, webhookLogsRes, storageUsageState, userPermissionsRes, pushUsageSummary, dismissedRes] =
     await Promise.all([
       supabase
         .from("room_summary_settings")
@@ -4574,6 +4581,11 @@ async function fetchState(
         .select("line_user_id, display_name, is_active, can_message_search, can_library_search, can_calendar_create, can_calendar_update, can_calendar_view, can_media_access, excluded_message_search_room_ids, assigned_store, assigned_job_title, registration_source_store, updated_at")
         .limit(USER_PERMISSION_SORT_FETCH_CAP),
       fetchMonthlyPushUsageSummary(supabase),
+      supabase
+        .from("line_room_dismissed")
+        .select("room_id, dismissed_at, previous_store_partition_key")
+        .eq("admin_surface", adminSurface)
+        .order("dismissed_at", { ascending: false }),
     ])
 
   if (roomSettingsRes.error) {
@@ -4591,6 +4603,9 @@ async function fetchState(
   if (userPermissionsRes.error) {
     throw { status: 500, message: `Failed to fetch user permissions: ${userPermissionsRes.error.message}` } satisfies AppError
   }
+  if (dismissedRes.error) {
+    throw { status: 500, message: `Failed to fetch trashed rooms: ${dismissedRes.error.message}` } satisfies AppError
+  }
 
   const filteredLogs = (logsRes.data ?? [])
     .filter((row) => isActionableDeliveryLogStatus(row.status, row.details))
@@ -4605,12 +4620,40 @@ async function fetchState(
     if (k) consoleSettings[k] = String((row as { setting_value?: unknown })?.setting_value ?? "")
   }
 
+  const roomSettingsAll = (roomSettingsRes.data ?? [])
+    .filter((r) => !isMtalkSyntheticRoomId(String((r as { room_id?: unknown }).room_id ?? "")))
+    .map((r) => stripRoomConfigSecret(r as Record<string, unknown>))
+  const roomNameById = new Map<string, string>()
+  const storeById = new Map<string, string>()
+  const liveSettingsIds = new Set<string>()
+  for (const row of roomSettingsAll) {
+    const rid = String((row as { room_id?: unknown }).room_id ?? "").trim()
+    if (!rid) continue
+    liveSettingsIds.add(rid)
+    const name = String((row as { room_name?: unknown }).room_name ?? "").trim()
+    const store = String((row as { receipt_report_store_partition_key?: unknown }).receipt_report_store_partition_key ?? "").trim()
+    if (name) roomNameById.set(rid, name)
+    if (store) storeById.set(rid, store)
+  }
+  const trashedRooms = (Array.isArray(dismissedRes?.data) ? dismissedRes.data : [])
+    .map((row) => {
+      const roomId = String((row as { room_id?: unknown }).room_id ?? "").trim()
+      if (!roomId || isMtalkSyntheticRoomId(roomId)) return null
+      if (!liveSettingsIds.has(roomId)) return null
+      const previousStore = String((row as { previous_store_partition_key?: unknown }).previous_store_partition_key ?? "").trim()
+      return {
+        room_id: roomId,
+        room_name: roomNameById.get(roomId) || roomId,
+        store_partition_key: previousStore || storeById.get(roomId) || "",
+        dismissed_at: (row as { dismissed_at?: unknown }).dismissed_at ?? null,
+      }
+    })
+    .filter(Boolean)
+
   return {
     global_settings: globalSettings,
     console_settings: consoleSettings,
-    room_settings: (roomSettingsRes.data ?? [])
-      .filter((r) => !isMtalkSyntheticRoomId(String((r as { room_id?: unknown }).room_id ?? "")))
-      .map((r) => stripRoomConfigSecret(r as Record<string, unknown>)),
+    room_settings: roomSettingsAll,
     user_permissions: sortLineUserPermissionsForAdminDisplay(userPermissionsRes.data ?? []).slice(
       0,
       USER_PERMISSION_LIST_MAX_LIMIT,
@@ -4619,6 +4662,7 @@ async function fetchState(
     receipt_store_options: await fetchStorePartitionReceiptOptions(supabase),
     job_title_options: [...JOB_TITLE_OPTIONS],
     room_overview: roomOverviewRes.data ?? [],
+    trashed_rooms: trashedRooms,
     delivery_logs: filteredLogs,
     webhook_delivery_logs: (webhookLogsRes.data ?? []).slice(0, logsLimit),
     push_usage_monthly: pushUsageSummary,
@@ -16835,12 +16879,14 @@ async function unregisterRoomFromAdmin(
   }
 
   const now = new Date().toISOString()
+  const previousStoreKey = String(roomSettingsRow?.receipt_report_store_partition_key ?? "").trim()
   const { error: dismissError } = await supabase
     .from("line_room_dismissed")
     .upsert({
       room_id: roomId,
       admin_surface: surface,
       dismissed_at: now,
+      previous_store_partition_key: previousStoreKey || null,
     }, { onConflict: "room_id,admin_surface" })
   if (dismissError) {
     return { ok: false, message: `Failed to dismiss room: ${dismissError.message}` }

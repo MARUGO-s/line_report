@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - ルーム削除はゴミ箱経由にする
+
+- Request: 完全削除は危険なので、先にゴミ箱へ入れて復元と完全削除の両方できるようにする。
+- Implementation: M-talkは `chat_groups.trashed_at`。作成者だけがゴミ箱へ／復元／完全削除。管理画面は「ゴミ箱へ」（dismiss）のあと、ゴミ箱一覧から復元または完全削除。完全削除はゴミ箱必須。店舗固定ルームは対象外。予約取込と店舗売上は対象外。
+- Operation: トークを長押し → ゴミ箱へ移動。ゴミ箱タブから復元または完全削除。管理画面はゴミ箱へ → 画面下のゴミ箱から復元／完全削除。
+
 ### 2026-08-20 - 不要ルームの完全削除
 
 - Request: 不要になったルームを完全削除し、関連データも消す。他ルームには影響しない。

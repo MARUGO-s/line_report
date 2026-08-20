@@ -99,7 +99,7 @@ export async function purgeMtalkGroup(
 
   const { data: group, error } = await supabase
     .from("chat_groups")
-    .select("id, group_name, created_by, is_store_room, is_direct")
+    .select("id, group_name, created_by, is_store_room, is_direct, trashed_at")
     .eq("id", id)
     .maybeSingle()
   if (error) throw { status: 500, message: `ルームの確認に失敗しました: ${error.message}` }
@@ -107,6 +107,9 @@ export async function purgeMtalkGroup(
   if (group.is_store_room) throw { status: 403, message: "店舗固定ルームは削除できません。" }
   if (String(group.created_by ?? "") !== actor) {
     throw { status: 403, message: "ルームを完全に削除できるのは作成者だけです。" }
+  }
+  if (!group.trashed_at) {
+    throw { status: 400, message: "先にゴミ箱へ入れてから完全削除してください。" }
   }
 
   const roomId = mtalkSyntheticRoomId(id)
@@ -143,6 +146,19 @@ export async function purgeLineAdminRoom(
     throw { status: 400, message: "M-talkのルームはトーク画面から作成者が削除してください。" }
   }
 
+  const { data: dismissed, error: dismissedError } = await supabase
+    .from("line_room_dismissed")
+    .select("room_id")
+    .eq("room_id", id)
+    .eq("admin_surface", "line_report")
+    .maybeSingle()
+  if (dismissedError) {
+    throw { status: 500, message: `ゴミ箱の確認に失敗しました: ${dismissedError.message}` }
+  }
+  if (!dismissed) {
+    throw { status: 400, message: "先にゴミ箱へ入れてから完全削除してください。" }
+  }
+
   const counts = await purgeRoomScopedData(supabase, id)
   const now = new Date().toISOString()
   const { error: dismissError } = await supabase
@@ -157,6 +173,55 @@ export async function purgeLineAdminRoom(
   }
   counts.dismissed = 1
   return { room_id: id, counts }
+}
+
+export async function restoreLineAdminRoom(
+  supabase: DbClient,
+  roomId: string,
+): Promise<{ room_id: string; restored_store_key: string | null }> {
+  const id = assertIsolatedRoomId(roomId)
+  if (isMtalkSyntheticRoomId(id)) {
+    throw { status: 400, message: "M-talkのルームはトーク画面から復元してください。" }
+  }
+  const { data: row, error: fetchError } = await supabase
+    .from("line_room_dismissed")
+    .select("room_id, previous_store_partition_key")
+    .eq("room_id", id)
+    .eq("admin_surface", "line_report")
+    .maybeSingle()
+  if (fetchError) {
+    throw { status: 500, message: `ゴミ箱の確認に失敗しました: ${fetchError.message}` }
+  }
+  if (!row) {
+    throw { status: 404, message: "ゴミ箱にそのルームはありません。" }
+  }
+
+  const { error, count } = await supabase
+    .from("line_room_dismissed")
+    .delete({ count: "exact" })
+    .eq("room_id", id)
+    .eq("admin_surface", "line_report")
+  if (error) {
+    throw { status: 500, message: `復元に失敗しました: ${error.message}` }
+  }
+  if ((count ?? 0) < 1) {
+    throw { status: 404, message: "ゴミ箱にそのルームはありません。" }
+  }
+
+  const storeKey = String(row.previous_store_partition_key ?? "").trim()
+  if (storeKey) {
+    const { error: restoreStoreError } = await supabase
+      .from("room_summary_settings")
+      .update({
+        receipt_report_store_partition_key: storeKey,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("room_id", id)
+    if (restoreStoreError) {
+      throw { status: 500, message: `店舗の再割当に失敗しました: ${restoreStoreError.message}` }
+    }
+  }
+  return { room_id: id, restored_store_key: storeKey || null }
 }
 
 async function deleteExact(

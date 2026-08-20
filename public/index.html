@@ -1904,6 +1904,16 @@
       display: none !important;
     }
 
+    .webhook-trash-pane {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(155, 220, 255, 0.16);
+    }
+    .webhook-trash-pane h3 {
+      margin: 0 0 6px;
+      font-size: 0.95rem;
+    }
+
     .room-config-badge {
       display: flex;
       align-items: center;
@@ -5368,6 +5378,11 @@
             <span id="newRoomConfigSummary" class="new-room-config-summary" hidden>-</span>
             <div id="webhookCardListBody" class="webhook-card-grid" style="margin-top:14px;"></div>
             <div id="webhookStoreListBody" class="webhook-store-list" hidden></div>
+            <div id="webhookTrashPane" class="webhook-trash-pane">
+              <h3>ゴミ箱</h3>
+              <p class="meta">ゴミ箱へ移したルームです。復元するか、完全削除できます。完全削除するとこのルームのメッセージは戻りません。</p>
+              <ul id="webhookTrashList" class="webhook-room-list"></ul>
+            </div>
             <div id="roomTablePane" class="room-table-hidden-wrap" aria-hidden="true">
               <table class="rooms-table">
                 <tbody id="roomTableBody"></tbody>
@@ -6058,6 +6073,8 @@
       webhookSettingsFilter: document.getElementById('webhookSettingsFilter'),
       webhookCardListBody: document.getElementById('webhookCardListBody'),
       webhookStoreListBody: document.getElementById('webhookStoreListBody'),
+      webhookTrashPane: document.getElementById('webhookTrashPane'),
+      webhookTrashList: document.getElementById('webhookTrashList'),
       webhookViewTabCards: document.getElementById('webhookViewTabCards'),
       webhookViewTabNames: document.getElementById('webhookViewTabNames'),
       webhookStorePopupModal: document.getElementById('webhookStorePopupModal'),
@@ -11843,10 +11860,20 @@
       return null;
     }
 
+    function trashedRoomIdSet() {
+      const rows = (currentState && Array.isArray(currentState.trashed_rooms)) ? currentState.trashed_rooms : [];
+      return new Set(rows.map(function(row) {
+        return String(row && row.room_id || '').trim();
+      }).filter(Boolean));
+    }
+
     function findRoomRowsByStoreKey(storeKey) {
       const key = canonicalStorePartitionKey(storeKey);
+      const trashed = trashedRoomIdSet();
       return Array.from(dom.roomTableBody.querySelectorAll('tr')).filter(function(tr) {
         if (!tr.dataset || !tr.dataset.roomId) return false;
+        const roomId = String(tr.dataset.roomId || '').trim();
+        if (trashed.has(roomId)) return false;
         const rowKey = getStoreKeyFromRoomRow(tr);
         if (key === UNASSIGNED_WEBHOOK_KEY) return !rowKey;
         return storePartitionKeysEqual(rowKey, key);
@@ -11962,8 +11989,7 @@
           ? '<button type="button" class="button primary webhook-room-individual-config" data-room-id="' + escapeHtml(roomId) + '">個別設定</button>'
           : '') +
         '<button type="button" class="button webhook-room-reset" data-room-id="' + escapeHtml(roomId) + '">継承</button>' +
-        '<button type="button" class="button warn webhook-room-delete" data-room-id="' + escapeHtml(roomId) + '">一覧から外す</button>' +
-        '<button type="button" class="button warn webhook-room-purge" data-room-id="' + escapeHtml(roomId) + '">完全削除</button>' +
+        '<button type="button" class="button warn webhook-room-delete" data-room-id="' + escapeHtml(roomId) + '">ゴミ箱へ</button>' +
         '</div>' +
         '</li>'
       );
@@ -12526,6 +12552,39 @@
     function renderWebhookSettingsSection(overview, settingsList, extraOptions) {
       renderRoomTableRows(overview, settingsList);
       renderWebhookCards(overview, settingsList, extraOptions);
+      renderWebhookTrash();
+    }
+
+    function buildWebhookTrashItemHtml(row) {
+      const roomId = String(row && row.room_id || '').trim();
+      const name = String(row && row.room_name || '').trim() || roomId;
+      const store = String(row && row.store_partition_key || '').trim();
+      const when = row && row.dismissed_at ? formatDate(row.dismissed_at) : '-';
+      return (
+        '<li class="webhook-room-item" data-room-id="' + escapeHtml(roomId) + '">' +
+        '<div class="webhook-room-item-title">' + escapeHtml(name) + '</div>' +
+        '<div class="webhook-room-item-meta">ID: ' + escapeHtml(roomId) +
+        (store ? ' ／ 店舗: ' + escapeHtml(store) : '') +
+        ' ／ ゴミ箱: ' + escapeHtml(when) + '</div>' +
+        '<div class="webhook-room-item-actions">' +
+        '<button type="button" class="button webhook-room-restore" data-room-id="' + escapeHtml(roomId) + '">復元</button>' +
+        '<button type="button" class="button warn webhook-room-purge" data-room-id="' + escapeHtml(roomId) + '" data-room-name="' + escapeHtml(name) + '">完全削除</button>' +
+        '</div>' +
+        '</li>'
+      );
+    }
+
+    function renderWebhookTrash() {
+      const list = dom.webhookTrashList;
+      const pane = dom.webhookTrashPane;
+      if (!list) return;
+      const rows = (currentState && Array.isArray(currentState.trashed_rooms)) ? currentState.trashed_rooms : [];
+      if (pane) pane.hidden = false;
+      if (!rows.length) {
+        list.innerHTML = '<li class="meta">ゴミ箱は空です</li>';
+        return;
+      }
+      list.innerHTML = rows.map(buildWebhookTrashItemHtml).join('');
     }
 
     function closeWebhookStorePopup() {
@@ -13791,39 +13850,57 @@
       const nameInput = tr.querySelector('.room-name');
       const roomName = nameInput ? nameInput.value.trim() : '';
       const label = roomName || roomId;
-      const ok = window.confirm('ルーム「' + label + '」をこのサイト（Webhook管理）の一覧から外します。\\n旧サイトのルーム一覧・保存データには影響しません。よろしいですか？');
+      const ok = window.confirm('ルーム「' + label + '」をゴミ箱へ移します。\nあとから復元できます。完全削除はゴミ箱から行います。');
       if (!ok) return;
       await api('/rooms/' + encodeURIComponent(roomId), { method: 'DELETE' });
       isRoomDirty = false;
       await safeLoadState();
     }
 
-    async function purgeRoomRow(tr) {
-      const roomId = tr.dataset.roomId || '';
-      const nameInput = tr.querySelector('.room-name');
-      const roomName = nameInput ? nameInput.value.trim() : '';
-      const label = roomName || roomId;
-      if (!roomId) return;
-      if (String(roomId).indexOf('mtalk-group-') === 0) {
+    async function restoreRoomById(roomId) {
+      const id = String(roomId || '').trim();
+      if (!id) return;
+      if (!window.confirm('このルームを一覧へ戻しますか？')) return;
+      await api('/rooms/restore', {
+        method: 'POST',
+        body: JSON.stringify({ room_id: id }),
+      });
+      isRoomDirty = false;
+      await safeLoadState();
+      alert('ルームを復元しました。');
+    }
+
+    async function purgeRoomById(roomId, roomName) {
+      const id = String(roomId || '').trim();
+      if (!id) return;
+      if (id.indexOf('mtalk-group-') === 0) {
         alert('M-talkのルームはトーク画面から、作成者が完全削除してください。');
         return;
       }
+      const label = String(roomName || '').trim() || id;
       if (!window.confirm('ルーム「' + label + '」を完全に削除します。\nこのルームのメッセージ・メディア・予定は消えます。\n他のルームや店舗の予約・売上には影響しません。\nこの操作は取り消せません。')) {
         return;
       }
-      const typed = window.prompt('削除するにはルームIDを入力してください。\n' + roomId);
+      const typed = window.prompt('削除するにはルームIDを入力してください。\n' + id);
       if (typed == null) return;
-      if (String(typed).trim() !== roomId) {
+      if (String(typed).trim() !== id) {
         alert('ルームIDが一致しません。削除しませんでした。');
         return;
       }
       await api('/rooms/purge', {
         method: 'POST',
-        body: JSON.stringify({ room_id: roomId, confirm_room_id: roomId }),
+        body: JSON.stringify({ room_id: id, confirm_room_id: id }),
       });
       isRoomDirty = false;
       await safeLoadState();
       alert('ルームを完全に削除しました。他のルームは変更していません。');
+    }
+
+    async function purgeRoomRow(tr) {
+      const roomId = tr.dataset.roomId || '';
+      const nameInput = tr.querySelector('.room-name');
+      const roomName = nameInput ? nameInput.value.trim() : '';
+      await purgeRoomById(roomId, roomName);
     }
 
     async function changeAdminToken() {
@@ -14150,6 +14227,15 @@
           || (target.closest('[data-room-id]') && target.closest('[data-room-id]').getAttribute('data-room-id'))
           || '',
         ).trim();
+        if (target.classList.contains('webhook-room-restore')) {
+          await restoreRoomById(roomId);
+          return;
+        }
+        if (target.classList.contains('webhook-room-purge')) {
+          const roomName = String(target.getAttribute('data-room-name') || '').trim();
+          await purgeRoomById(roomId, roomName);
+          return;
+        }
         const tr = findRoomTableRowById(roomId);
         if (!tr) {
           if (roomId) alert('対象ルームの行が見つかりません。再読込してください。');
@@ -14160,9 +14246,7 @@
           alert('ルーム設定を削除し、店舗・全体の設定を継承するよう戻しました（順位: 店舗）。');
         } else if (target.classList.contains('webhook-room-delete')) {
           await deleteRoomRow(tr);
-          alert('ルームをこのサイトの一覧から外しました。（旧サイト・保存データはそのままです）');
-        } else if (target.classList.contains('webhook-room-purge')) {
-          await purgeRoomRow(tr);
+          alert('ルームをゴミ箱へ移しました。ゴミ箱から復元できます。');
         } else if (target.classList.contains('webhook-room-show-id')) {
           openRoomIdModal(tr);
         } else if (target.classList.contains('webhook-room-sync')) {
@@ -14209,6 +14293,9 @@
     if (dom.webhookStorePopupBody) {
       dom.webhookStorePopupBody.addEventListener('click', handleWebhookCardContainerClick);
       dom.webhookStorePopupBody.addEventListener('change', handleWebhookCardContainerChange);
+    }
+    if (dom.webhookTrashPane) {
+      dom.webhookTrashPane.addEventListener('click', handleWebhookCardContainerClick);
     }
     if (dom.webhookStoreListBody) {
       dom.webhookStoreListBody.addEventListener('click', function(event) {
