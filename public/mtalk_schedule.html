@@ -154,9 +154,8 @@
     }
     .card .time { font-weight: 800; font-size: 15px; color: var(--text); }
     .card .name { font-size: 15px; font-weight: 700; margin-top: 2px; color: var(--text); }
-    .card .meta { font-size: 12px; color: var(--meta); margin-top: 4px; }
-    .card .plan { font-size: 13px; font-weight: 800; color: var(--resv-text); margin-top: 4px; }
-    .card.card-evt .name { color: var(--resv-text); }
+    .card .meta { font-size: 12px; color: var(--text); margin-top: 4px; opacity: 0.86; }
+    .card .plan { font-size: 13px; font-weight: 700; color: var(--text); margin-top: 4px; }
     .card .flag { font-size: 12.5px; font-weight: 800; margin-top: 6px; line-height: 1.45; color: var(--allergy-text); }
     .card .flag.allergy, .card .flag.birthday { color: var(--allergy-text); }
     .detail {
@@ -173,7 +172,6 @@
     .row { display: flex; gap: 10px; padding: 6px 0; font-size: 14px; }
     .row span { color: var(--muted); width: 88px; flex-shrink: 0; }
     .row div { color: var(--text); }
-    .row.plan div, .row.content div { color: var(--resv-text); font-weight: 700; }
     .row.note span, .row.note div,
     .row.allergy span, .row.allergy div,
     .row.birthday span, .row.birthday div { color: var(--allergy-text); }
@@ -636,7 +634,7 @@
       const rows = kind === 'event'
         ? [
             { label: '日時', value: (timeLabel(raw.starts_at) || '') + (raw.ends_at ? ' – ' + timeLabel(raw.ends_at) : ''), cls: '' },
-            { label: '内容', value: raw.title || '', cls: 'content' },
+            { label: '内容', value: raw.title || '', cls: '' },
             { label: '詳細', value: raw.description || 'なし', cls: '' },
             { label: '登録元', value: raw.source || '', cls: '' },
           ]
@@ -667,7 +665,7 @@
         { label: '予約者', value: raw.customer_name || '', cls: '' },
         { label: '人数', value: raw.party_size_label || '', cls: '' },
         { label: '経路', value: raw.route_label || sourceLabel(raw.source), cls: '' },
-        { label: 'コース', value: plan, cls: 'plan' },
+        { label: 'コース', value: plan, cls: '' },
         { label: 'アレルギー', value: allergy || 'なし', cls: allergy ? 'note' : '' },
       ];
       if (birthday && birthday !== plan) {

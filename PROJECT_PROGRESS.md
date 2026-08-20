@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 予約・予定は注意・特記だけ赤にする
+
+- Request: 注意事項や特記事項だけ赤。その他は黒または白。ダークでも注意・特記は赤。
+- Implementation: オレンジを外す。アレルギー・お誕生日・苦手・要望だけ赤。時刻・氏名・コースは通常色。
+- Operation: 「予約・予定」を開き直す。
+
 ### 2026-08-20 - 予約・予定のオレンジをコースと内容だけに戻す
 
 - Request: コースと予約内容だけオレンジ、注釈は赤、その他はダークで白／ライトで黒。
