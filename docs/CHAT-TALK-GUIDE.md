@@ -59,6 +59,20 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 
 投稿後は `chat-push?action=dispatch` を内部シークレットで叩き、Web Push まで配信する。
 
+## Web Push購読の復旧
+
+- Service Workerの登録URLは`chat-sw.js`へ固定する。`chat-sw.js?v=...`のようにURL自体を
+  変更すると、ブラウザが別Workerとして扱い、既存のWeb Push購読がHTTP 410になる端末がある。
+- Worker資産を更新するときは、登録URLではなく`chat-sw.js`内の`CHAT_CACHE`名を更新する。
+- ユーザー設定が通知ONで、通知権限も許可済みなのに`PushManager.getSubscription()`が
+  nullなら、自動で権限プロンプトを出さず、画面上部に
+  「通知が切れたので、ここをタップして再開」を表示する。
+- 再開はユーザー操作内で行い、残っている古い購読を`unsubscribe()`してから
+  `pushManager.subscribe()`し直す。新しい購読は`activate=true`で`chat-push`へ保存する。
+- iPhone/iPadはホーム画面のstandalone版M-talkだけを対象にする。通常Safariタブでは
+  ホーム画面への追加を案内する。`Notification.permission === 'denied'`なら端末設定での
+  許可が必要で、ページから再プロンプトはできない。
+
 ## 店舗固定ルームと #メモ
 
 全店舗に `is_store_room` の固定ルームがある。退出・削除はできない。
@@ -130,3 +144,5 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 5. 他ルームの発言を返信先に指定できない。
 6. メンションに非参加者を混ぜても保存されない。
 7. リアクションを他人の分として付けられない。
+8. 通知ONのまま購読が消えた端末で再開バーが出て、タップ後に新しい購読が保存される。
+9. Service Worker更新後も登録URLが`chat-sw.js`のままで、通知配信がHTTP 410にならない。

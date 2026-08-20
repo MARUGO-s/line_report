@@ -2,13 +2,21 @@
 
 ## Document information
 
-- Current date: 2026-08-19
+- Current date: 2026-08-20
 - Repository: `https://github.com/MARUGO-s/line_report`
 - Branch: `main`
 - Work-start HEAD: `74b44e6876ceaa226578426ab323e31b5d3dd356`
 - Production: `https://marugo-s.github.io/line_report/`
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
+
+### 2026-08-20 - M-talk の切れたスマホ通知を再開できるようにする
+
+- Request: `chat.html` の新着をスマホへ通知したいが、通知ON後も届かない。
+- Cause: Service Worker の登録URLへクエリ文字列を付けて変更したため、端末側で別Workerとして扱われ、既存Web Push購読がHTTP 410になった。切れた購読をそのまま再利用していた端末もあった。
+- Fix: Worker URLを安定した `chat-sw.js` へ戻し、通知希望が残っているのに購読が無い場合は「通知が切れたので、ここをタップして再開」を表示する。タップ時は古い購読を破棄し、同じVAPID公開鍵で新規購読してサーバーへ再登録する。
+- Verification: 2026-08-20 15:02 JSTにPages反映。反映後の本番Web Pushは2 dispatch・12端末送信・失敗0、再登録された有効購読7件すべてで送信成功を確認。
+- Operation: iPhone/iPadはホーム画面のM-talkを開き、オレンジの再開バーまたはベルを1回タップする。通常Safariからは設定せず、OS側で通知拒否なら端末設定からM-talkを許可する。
 
 ### 2026-08-20 - M-talk に LINE の「検索」メニューを載せる
 
