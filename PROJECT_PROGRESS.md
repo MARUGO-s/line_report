@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 予約・予定のオレンジをコースと内容だけに戻す
+
+- Request: コースと予約内容だけオレンジ、注釈は赤、その他はダークで白／ライトで黒。
+- Implementation: 時刻・氏名・人数は通常色。コースと予定の内容をオレンジ。アレルギー・お誕生日・要望は赤。
+- Operation: 「予約・予定」を開き直す。
+
 ### 2026-08-20 - M-talk の予約・予定を画面から追加・変更・キャンセルする
 
 - Request: 予約も予定も、表示サイトから新規追加、変更、キャンセル、日付変更したい。
