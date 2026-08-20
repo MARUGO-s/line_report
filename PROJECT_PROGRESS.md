@@ -10,6 +10,14 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - iOSホーム画面アプリで新UIが出ない問題に自動再読込を追加
+
+- Symptom: 通知テストを追加しても、iPhoneのホーム画面版M-talkに「通知テスト」ボタンが出ず、旧UIのままだった。
+- Cause: iOSのstandalone PWAは一度開くと旧HTMLがメモリに残り、Service Workerを更新しても再読込されない。
+- Fix: 新しいService Worker有効化(`controllerchange`)時に、`sessionStorage`で1回だけ自動再読込する。復帰時に`registration.update()`と待機SWの`SKIP_WAITING`で更新を早める。キャッシュ名を`v43`へ更新。
+- Verification: `npm test`全通過、`npm run check`、Deno型チェック、`knowledge:check`成功。Pages/Edge Function本番デプロイ確認。
+- Operation: 変更後は、ホーム画面のM-talkを開くと一度だけ自動で更新→「通知テスト」が表示される。出ない場合はアプリを完全終了して開き直す。
+
 ### 2026-08-20 - M-talk の通知再開で購読が増殖する不具合を直し、端末テストを追加
 
 - Symptom: 通知再開後もスマホに表示されず、同じアカウントのiOS購読がタップのたびに増えた。

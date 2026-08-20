@@ -73,9 +73,13 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /function sendPushTest/)
   assert.match(html, /chatPushRequest\('test'/)
   assert.match(html, /data-push-test/)
+  assert.match(html, /controllerchange/)
+  assert.match(html, /mtalk-sw-reloaded/)
+  assert.match(html, /SKIP_WAITING/)
+  assert.match(serviceWorker, /SKIP_WAITING/)
   assert.match(html, /savePushSubscription\(pushSubscription, true\)/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v42/)
+  assert.match(serviceWorker, /line-report-chat-v43/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -170,7 +174,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v42/)
+  assert.match(serviceWorker, /line-report-chat-v43/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {

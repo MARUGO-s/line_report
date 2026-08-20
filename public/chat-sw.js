@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v42';
+const CHAT_CACHE = 'line-report-chat-v43';
 const CHAT_SHELL = [
   './chat.html',
   './chat.webmanifest',
@@ -156,4 +156,9 @@ self.addEventListener('notificationclick', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data?.type !== 'SET_APP_BADGE') return;
   event.waitUntil(updateAppBadge(event.data.count));
+});
+
+self.addEventListener('message', (event) => {
+  // ページから明示的に要求された時だけ、待機中のSWを即時有効化する。
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
