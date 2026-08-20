@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
+import { parseScheduleFromText } from "../supabase/functions/_shared/mtalk_schedule_register.ts"
 
 const root = new URL("..", import.meta.url)
 const read = (relative: string) => readFile(new URL(relative, root), "utf8")
@@ -55,6 +56,12 @@ test("M-talk schedule page switches reservation and event tabs", async () => {
   assert.match(html, /chat-schedule\/reservation/)
   assert.match(html, /chat-schedule\/event/)
   assert.match(html, /編集・日付変更/)
+  const knowledge = await read("supabase/functions/chat-knowledge/index.ts")
+  const webhook = await read("supabase/functions/line-webhook/index.ts")
+  const settings = await read("public/room_settings.html")
+  assert.match(knowledge, /tryAutoRegisterRoomSchedule/)
+  assert.match(webhook, /tryAutoRegisterRoomSchedule/)
+  assert.match(settings, /M-talkの予定カレンダー/)
   assert.match(api, /path === "\/chat-schedule"/)
   assert.match(api, /path === "\/chat-schedule\/reservation"/)
   assert.match(api, /path === "\/chat-schedule\/event"/)
@@ -82,4 +89,17 @@ test("M-talk schedule page switches reservation and event tabs", async () => {
   assert.ok(reservationWriteAt > 0 && reservationWriteAt < adminAuthAt)
   assert.ok(eventWriteAt > 0 && eventWriteAt < adminAuthAt)
   assert.ok(adminAuthAt > scheduleAt)
+})
+
+test("conversation schedule parser extracts JST datetime for M-talk calendar", () => {
+  const now = new Date("2026-08-20T03:00:00.000Z")
+  const parsed = parseScheduleFromText("明日15時から仕込み", now)
+  assert.ok(parsed)
+  assert.equal(parsed.title.includes("仕込み"), true)
+  assert.equal(parsed.startsAt, "2026-08-21T06:00:00.000Z")
+  const explicit = parseScheduleFromText("予定登録 2026-08-22 10:30 試飲会", now)
+  assert.ok(explicit)
+  assert.equal(explicit.title, "試飲会")
+  assert.equal(explicit.startsAt, "2026-08-22T01:30:00.000Z")
+  assert.equal(parseScheduleFromText("こんにちは", now), null)
 })

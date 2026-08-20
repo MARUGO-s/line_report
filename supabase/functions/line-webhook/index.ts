@@ -86,6 +86,7 @@ import {
   shouldSkipLineSearchMessageRecording,
   shouldSkipPendingSearchKeywordRecording,
 } from '../_shared/line_search_bot.ts'
+import { tryAutoRegisterRoomSchedule } from '../_shared/mtalk_schedule_register.ts'
 import {
   createServiceClient,
   type StoreRegistryRow,
@@ -2972,6 +2973,7 @@ Deno.serve(async (req) => {
         errors.push(msg.slice(0, 160))
       }
 
+      let searchHandled = false
       if (!dailySalesTemplateHandled && !roomConfigHandled && !reservationCalendarLinkHandled && !budgetEntryHandled && !pettyCashHandled && !receiptHandled && isLineSearchGuideEnabled() && lineAccessTokenForSearch) {
         try {
           const searchResult = await handleLineSearchTextMessage(
@@ -2981,6 +2983,7 @@ Deno.serve(async (req) => {
             lineAccessTokenForSearch,
           )
           if (searchResult.handled) {
+            searchHandled = true
             searchGuideHandled += 1
             if (!isDirectMessage) {
               skipSearchMessageRecording = true
@@ -2990,6 +2993,47 @@ Deno.serve(async (req) => {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           console.error('handleLineSearchTextMessage failed:', msg)
+          errors.push(msg.slice(0, 160))
+        }
+      }
+
+      if (
+        !dailySalesTemplateHandled
+        && !roomConfigHandled
+        && !reservationCalendarLinkHandled
+        && !budgetEntryHandled
+        && !pettyCashHandled
+        && !receiptHandled
+        && !searchHandled
+        && text
+        && eventRoomId
+      ) {
+        try {
+          const calFlags = await loadRoomSearchFlagsCached(eventRoomId)
+          const calResult = await tryAutoRegisterRoomSchedule(supabase, {
+            roomId: eventRoomId,
+            text,
+            source: 'line',
+            autoCreate: !!calFlags?.calendar_ai_auto_create_enabled,
+            silent: !!calFlags?.calendar_silent_auto_register_enabled,
+            replyEnabled: !!calFlags?.calendar_registration_reply_enabled,
+            hardMute: roomHardMuted,
+          })
+          if (calResult.handled) {
+            textHandled += 1
+            if (calResult.replyText && lineAccessTokenForSearch && event.replyToken) {
+              const replied = await replyLineText(
+                event.replyToken,
+                calResult.replyText,
+                lineAccessTokenForSearch,
+                webhookReplyLog(registry as StoreRegistryRow, eventRoomId, 'mtalk_schedule_register'),
+              )
+              if (replied?.ok) receiptReplies += 1
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('tryAutoRegisterRoomSchedule failed:', msg)
           errors.push(msg.slice(0, 160))
         }
       }

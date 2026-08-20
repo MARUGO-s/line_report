@@ -179,6 +179,9 @@ export type MtalkRoomFlags = {
   media_save_enabled: boolean
   media_file_access_enabled: boolean
   petty_receipt_analysis_enabled: boolean
+  calendar_ai_auto_create_enabled: boolean
+  calendar_silent_auto_register_enabled: boolean
+  calendar_registration_reply_enabled: boolean
 }
 
 export async function loadMtalkRoomFlags(
@@ -193,11 +196,14 @@ export async function loadMtalkRoomFlags(
     media_save_enabled: true,
     media_file_access_enabled: true,
     petty_receipt_analysis_enabled: true,
+    calendar_ai_auto_create_enabled: false,
+    calendar_silent_auto_register_enabled: false,
+    calendar_registration_reply_enabled: false,
   }
   if (!roomId) return defaults
   const { data } = await supabase
     .from("room_summary_settings")
-    .select("bot_reply_hard_mute_enabled, image_analysis_reply_enabled, receipt_correction_reply_enabled, media_save_enabled, media_file_access_enabled, petty_receipt_analysis_enabled")
+    .select("bot_reply_hard_mute_enabled, image_analysis_reply_enabled, receipt_correction_reply_enabled, media_save_enabled, media_file_access_enabled, petty_receipt_analysis_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, calendar_registration_reply_enabled")
     .eq("room_id", roomId)
     .maybeSingle()
   if (!data) return defaults
@@ -209,5 +215,8 @@ export async function loadMtalkRoomFlags(
     media_save_enabled: row.media_save_enabled !== false,
     media_file_access_enabled: row.media_file_access_enabled !== false,
     petty_receipt_analysis_enabled: row.petty_receipt_analysis_enabled !== false,
+    calendar_ai_auto_create_enabled: row.calendar_ai_auto_create_enabled === true,
+    calendar_silent_auto_register_enabled: row.calendar_silent_auto_register_enabled === true,
+    calendar_registration_reply_enabled: row.calendar_registration_reply_enabled === true,
   }
 }

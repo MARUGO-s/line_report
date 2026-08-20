@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 会話の予定登録先を M-talk カレンダーにする
+
+- Request: 会話から検知した予定を Googleカレンダーではなく M-talk の予定カレンダーへ登録する。
+- Implementation: LINE / M-talk の「予定の自動登録」は `line_room_calendar_events` へ保存。Gmail予約のGoogleカレンダーは据え置き。
+- Operation: ルーム設定で予定の自動登録をON。「明日15時から仕込み」などと送ると、予約・予定の予定タブに出る。
+
 ### 2026-08-20 - 予約・予定は注意・特記だけ赤にする
 
 - Request: 注意事項や特記事項だけ赤。その他は黒または白。ダークでも注意・特記は赤。
