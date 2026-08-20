@@ -447,13 +447,7 @@
       padding: 1px 6px;
       margin-left: 6px;
     }
-    .store-room-hint {
-      padding: 7px 14px;
-      font-size: 12px;
-      line-height: 1.45;
-      background: #1f2d3d;
-      color: #fff;
-    }
+
     .pin-mark,
     .mute-mark {
       flex-shrink: 0;
@@ -1869,7 +1863,7 @@
       </div>
       <div class="member-strip hidden" id="memberStrip"></div>
     </div>
-    <div class="store-room-hint hidden" id="storeRoomHint">このルームには店舗Botがいます。画像はメディア閲覧へ、#メモ は Journal Report の資料へ保存されます。ドラッグ＆ドロップでも送れます。</div>
+
     <div class="messages-wrap hidden" id="messagesWrap">
       <div class="messages" id="messages"></div>
       <div class="history-spinner hidden" id="historySpinner">過去のメッセージを読み込み中…</div>
@@ -3442,7 +3436,6 @@
       if ($('scheduleBar')) $('scheduleBar').classList.add('hidden');
       closeScheduleSend();
       closeSendMode();
-      if ($('storeRoomHint')) $('storeRoomHint').classList.add('hidden');
       resetMessageView();
       renderGroups();
     }
@@ -3475,7 +3468,6 @@
       $('chatGroupName').textContent = roomTitle(group);
       paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
-      if ($('storeRoomHint')) $('storeRoomHint').classList.toggle('hidden', !roomHasStoreBot(group));
       if ($('messageInput') && roomHasStoreBot(group)) {
         $('messageInput').placeholder = isMobileLayout()
           ? 'メッセージ（#メモ で資料保存）'
