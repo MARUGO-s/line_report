@@ -268,6 +268,9 @@ export async function pushLineMessagesToTarget(
   logCtx?: LineWebhookDeliveryLogContext,
 ): Promise<{ ok: boolean; error?: string }> {
   const target = String(to ?? '').trim()
+  if (/^mtalk-group-\d+$/.test(target)) {
+    return { ok: true }
+  }
   if (!/^[UCR]/.test(target)) {
     return { ok: false, error: 'invalid push target' }
   }

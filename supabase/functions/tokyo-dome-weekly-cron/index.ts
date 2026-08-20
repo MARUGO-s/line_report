@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
+import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 
 // ドームシティ「週次イベント配信」cron。
 // 毎分起動し、ルームごとの設定（dome_weekly_enabled / 曜日 / 時刻）が「今この瞬間(JST)」に一致する
@@ -258,6 +259,7 @@ function resolveStoreLineToken(storeKey: string, fallbackToken: string): string 
 }
 async function sendLinePush(to: string, messages: unknown[], token: string, storeKey?: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!token) return { ok: false, error: "missing line token" }
+  if (isMtalkSyntheticRoomId(to)) return { ok: true }
   if (isBlockedByMarugosecondLockdown(storeKey, to)) {
     if (storeKey) {
       void recordLineWebhookDeliveryLog({

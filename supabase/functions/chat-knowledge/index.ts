@@ -9,6 +9,11 @@ import {
   loadChatStoreBot,
   resolveRoomStoreKey,
 } from "../_shared/chat_store_file_bridge.ts"
+import { postChatCard } from "../_shared/chat_bridge.ts"
+import { ensureMtalkRoomSettings, loadMtalkRoomFlags } from "../_shared/mtalk_room_settings.ts"
+
+const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
+const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/room_settings.html"
 
 const CHAT_BOT_USER_ID = "00000000-0000-4000-8000-00000000b071"
 const CHAT_BOT_USERNAME = "予約通知"
@@ -194,6 +199,35 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   const groupId = Number(message.group_id)
   const fromDispatch = String(body.store_key ?? "").trim()
   const resolved = await resolveRoomStoreKey(supabase, group, groupId)
+  const text = String(message.content ?? "").trim()
+
+  if (SETTINGS_TRIGGER_WORDS.has(text)) {
+    const ensured = await ensureMtalkRoomSettings(supabase, groupId)
+    const storeBotForSettings = (fromDispatch || resolved.storeKey)
+      ? await loadChatStoreBot(supabase, fromDispatch || String(resolved.storeKey ?? ""))
+      : null
+    const url = `${ROOM_SETTINGS_PAGE}?from=chat&group_id=${groupId}&v=20260820`
+    if (!ensured) {
+      await replyInRoom(supabase, groupId, "このルームの設定を開けませんでした。少し時間をおいて、もう一度「設定」と送ってください。", storeBotForSettings)
+      return json({ ok: false, error: "ensure settings failed" }, 500)
+    }
+    await postChatCard(supabase, {
+      groupId,
+      kind: "room_config",
+      text: "このルームの設定ページを開いて、Bot機能を ON/OFF できます。",
+      cards: [{
+        header: { title: "このルームの設定" },
+        sections: [{
+          type: "note",
+          text: "下のボタンから開き、このルームの機能を切り替えられます。変更はその場で保存されます。",
+        }],
+        action: { label: "設定ページを開く", url, style: "primary" },
+      }],
+      asUser: storeBotForSettings,
+    })
+    return json({ ok: true, processed: true, kind: "room-config" }, 200)
+  }
+
   if (!fromDispatch && resolved.ambiguous) {
     await replyInRoom(supabase, groupId, "このルームには複数の店舗Botがいるため処理できません。店舗Botは1つにしてください。")
     return json({ ok: true, skipped: true, reason: "ambiguous store bot" }, 200)
@@ -203,8 +237,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     return json({ ok: true, skipped: true, reason: "not store room" }, 200)
   }
   const storeBot = await loadChatStoreBot(supabase, storeKey)
-
-  const text = String(message.content ?? "").trim()
+  const flags = await loadMtalkRoomFlags(supabase, groupId)
   const senderName = String(message.username || "M-talk")
   const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()
 
@@ -229,6 +262,9 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
       contentType: file.type || "image/jpeg",
       bytes,
     })
+    if (flags.image_analysis_reply_enabled === false) {
+      return json({ ok: true, processed: true, kind: result.kind, reply: false }, 200)
+    }
     await postStoreRoomLineStyleReply(supabase, groupId, result, storeBot)
     return json({ ok: true, processed: true, kind: result.kind }, 200)
   }

@@ -14,6 +14,8 @@ import {
   resolveChatGroupId,
   resolveChatGroupIdByStore,
 } from "../_shared/chat_bridge.ts";
+import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts";
+import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts";
 import {
   isLikelyReservationNotificationMail,
   resolveReservationYear,
@@ -663,17 +665,32 @@ async function maybeSendGmailReservationAlerts(params: {
     );
     const batchSuccessfulRoomIds: string[] = [];
     const chatDedupeKey = batch.alerts.map((alert) => String(alert.id)).sort().join(",");
-    const chatGroupId = await resolveChatGroupId(
-      supabase,
-      batch.targets[0]?.roomId ?? "",
-    ) ?? await resolveChatGroupIdByStore(supabase, batch.storeKey);
-    if (chatGroupId && !postedChatGroupIds.has(chatGroupId)) {
+    const chatTargets = new Map<number, { mtalk: boolean; storeKey: string }>();
+    for (const target of batch.targets) {
+      const chatGroupId = await resolveChatGroupId(supabase, target.roomId);
+      if (chatGroupId) {
+        chatTargets.set(chatGroupId, {
+          mtalk: isMtalkSyntheticRoomId(target.roomId),
+          storeKey: String(target.storeKey ?? batch.storeKey ?? ""),
+        });
+      }
+    }
+    if (chatTargets.size === 0) {
+      const fallbackChatGroupId = await resolveChatGroupIdByStore(supabase, batch.storeKey);
+      if (fallbackChatGroupId) {
+        chatTargets.set(fallbackChatGroupId, { mtalk: false, storeKey: String(batch.storeKey ?? "") });
+      }
+    }
+    for (const [chatGroupId, meta] of chatTargets) {
+      if (postedChatGroupIds.has(chatGroupId)) continue;
+      const asUser = meta.mtalk ? await loadMtalkStoreBot(supabase, meta.storeKey) : null;
       const chatResult = await postChatCardIndependent(supabase, {
         groupId: chatGroupId,
         kind: "reservation_alert",
         dedupeKey: chatDedupeKey || `batch:${batch.batchKey}`,
         text: linePayload.text,
         cards: linePayload.chatCards,
+        asUser,
       });
       if (!chatResult.ok) {
         console.error(
@@ -687,6 +704,12 @@ async function maybeSendGmailReservationAlerts(params: {
 
     for (const target of batch.targets) {
       const targetRoomId = target.roomId;
+      if (isMtalkSyntheticRoomId(targetRoomId)) {
+        batchSuccessfulRoomIds.push(targetRoomId);
+        successfulTargetRoomIds.add(targetRoomId);
+        await markGmailAlertRoomSent(supabase, targetRoomId, now.toISOString());
+        continue;
+      }
       const roomToken = resolveRoomLineToken(target.storeKey, lineAccessToken);
       const sendResult = await sendLineMessage(
         targetRoomId,
@@ -3846,6 +3869,9 @@ async function sendLinePush(
   token: string,
   storeKey?: string,
 ) {
+  if (isMtalkSyntheticRoomId(to)) {
+    return { ok: true as const, status: 200 };
+  }
   if (isBlockedByMarugosecondLockdown(storeKey, to)) {
     if (storeKey) {
       void recordLineWebhookDeliveryLog({

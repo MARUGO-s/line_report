@@ -4,6 +4,7 @@ import { loadReceiptReportAggregateForRoom } from "./functions/_shared/receipt_r
 import { buildReceiptReportFlexMessages } from "./functions/_shared/receipt_report_flex.ts";
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";
+import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts";
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const RECEIPT_MID_REPORT_TITLE = "中間報告";
 const RECEIPT_MONTH_END_REPORT_TITLE = "月間報告";
@@ -558,6 +559,7 @@ function buildScheduleSliceForKind(kind, jst) {
   };
 }
 async function sendLinePushMessages(to, messages, token, storePartitionKey) {
+  if (isMtalkSyntheticRoomId(to)) return { ok: true };
   if (isBlockedByMarugosecondLockdown(storePartitionKey, to)) {
     if (storePartitionKey) {
       void recordLineWebhookDeliveryLog({

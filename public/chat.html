@@ -1822,6 +1822,12 @@
           </button>
         </div>
         <div class="chat-header-right">
+          <button class="header-icon-btn" id="roomSettingsHeaderBtn" type="button" title="ルーム設定" aria-label="ルーム設定" onclick="openRoomSettings()">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"/>
+            </svg>
+          </button>
           <button class="header-icon-btn" id="inviteHeaderBtn" type="button" title="招待" aria-label="招待" onclick="openInvite()">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
@@ -1898,6 +1904,7 @@
     <div class="talk-ctx" id="talkContextPanel" role="menu" aria-label="トークの設定">
       <button type="button" role="menuitem" id="talkCtxPin"></button>
       <button type="button" role="menuitem" id="talkCtxMute"></button>
+      <button type="button" role="menuitem" id="talkCtxSettings">ルーム設定</button>
       <button type="button" role="menuitem" id="talkCtxHide">非表示</button>
       <button type="button" role="menuitem" id="talkCtxDelete" class="talk-ctx-delete">退出</button>
     </div>
@@ -1945,6 +1952,7 @@
       <input class="invite-search" id="inviteSearch" type="search" placeholder="名前で検索" oninput="renderInvitePeople()">
       <div id="invitePeopleList"></div>
       <button class="invite-reset" type="button" onclick="rotateInvite()">招待リンクを再発行</button>
+      <button class="invite-copy" type="button" onclick="openRoomSettings()">ルーム設定</button>
       <button class="invite-leave" type="button" onclick="leaveCurrentRoom()">ルームを退出</button>
       <button class="invite-close" type="button" onclick="closeInvite()">閉じる</button>
     </div>
@@ -3183,6 +3191,18 @@
 
     function closeInvite() {
       $('inviteOverlay').classList.add('hidden');
+    }
+
+    function openRoomSettings(groupId) {
+      const id = Number(groupId || (talkMenuGroup && talkMenuGroup.id) || currentGroupId);
+      if (!Number.isSafeInteger(id) || id <= 0) return;
+      closeTalkContextMenu();
+      closeInvite();
+      const url = new URL('room_settings.html', window.location.href);
+      url.searchParams.set('from', 'chat');
+      url.searchParams.set('group_id', String(id));
+      url.searchParams.set('v', '20260820');
+      window.open(url.href, '_blank', 'noopener');
     }
 
     async function openInvite() {
@@ -6024,6 +6044,10 @@
       if (!talkMenuGroup) return;
       const group = talkMenuGroup;
       runTalkAction(() => setTalkMuted(group, !group.muted_at));
+    };
+    $('talkCtxSettings').onclick = () => {
+      if (!talkMenuGroup) return;
+      openRoomSettings(talkMenuGroup.id);
     };
     $('talkCtxHide').onclick = () => {
       if (!talkMenuGroup) return;

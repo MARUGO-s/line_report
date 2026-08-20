@@ -213,6 +213,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="./pages-config.js"></script>
+<script src="./vendor/supabase/supabase-2.110.9.min.js"></script>
 <script src="./app-theme.js?v=20260712"></script>
 <script>
 (function(){
@@ -220,14 +221,27 @@
   var CFG = window.LINE_REPORT_PAGES || {};
   var ANON = CFG.RECEIPT_ADMIN_ANON_KEY || '';
   var SURFACE = CFG.ADMIN_SURFACE || 'line_report';
+  var PROJECT_URL = CFG.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co';
   function apiUrl(p){ return CFG.receiptAdminApiUrl ? CFG.receiptAdminApiUrl(p) : ((CFG.PROJECT_URL||'') + '/functions/v1/admin-api' + p); }
 
   var params = new URLSearchParams(location.search);
   var lt = String(params.get('lt') || '').trim();
+  var fromChat = String(params.get('from') || '').trim() === 'chat';
+  var chatGroupId = Number(params.get('group_id') || '');
   var roomId = String(params.get('room_id') || '').trim();
+  if (fromChat && Number.isFinite(chatGroupId) && chatGroupId > 0) {
+    roomId = 'mtalk-group-' + chatGroupId;
+  }
   var SESSION_KEY = 'lr_roomcfg_session::' + roomId;
   var sessionToken = '';
+  var chatAccessToken = '';
   try { sessionToken = sessionStorage.getItem(SESSION_KEY) || ''; } catch(_e){}
+  var chatSb = null;
+  if (fromChat && window.supabase && ANON) {
+    chatSb = window.supabase.createClient(PROJECT_URL, ANON, {
+      auth: { persistSession: true, autoRefreshToken: true }
+    });
+  }
 
   var IC = {
     ai:'<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/>',
@@ -304,8 +318,21 @@
 
   function authHeaders(withSession){
     var h = { 'Content-Type':'application/json', 'apikey':ANON, 'Authorization':'Bearer '+ANON, 'x-admin-surface':SURFACE };
-    if (withSession && sessionToken) h['x-admin-token'] = sessionToken;
+    if (fromChat && chatAccessToken) h['Authorization'] = 'Bearer ' + chatAccessToken;
+    else if (withSession && sessionToken) h['x-admin-token'] = sessionToken;
     return h;
+  }
+
+  function configUrl(){
+    if (fromChat) return apiUrl('/chat-room-config?group_id=' + encodeURIComponent(String(chatGroupId)));
+    return apiUrl('/room-config?room_id=' + encodeURIComponent(roomId));
+  }
+
+  function saveBody(patch){
+    var body = fromChat ? { group_id: chatGroupId } : { room_id: roomId };
+    var k;
+    for (k in patch) { if (Object.prototype.hasOwnProperty.call(patch, k)) body[k] = patch[k]; }
+    return body;
   }
 
   /* ── 認証 ── */
@@ -316,6 +343,7 @@
   function login(){
     var pw = el('pw').value;
     if (!pw){ el('loginMsg').textContent='パスワードを入力してください。'; el('loginMsg').className='lmsg err'; return; }
+    if (fromChat){ el('loginMsg').textContent='M-talk にログインしてから開き直してください。'; el('loginMsg').className='lmsg err'; return; }
     if (!lt){ el('loginMsg').textContent='リンクが無効です。LINEからもう一度「設定」を送ってください。'; el('loginMsg').className='lmsg err'; return; }
     el('loginBtn').disabled = true;
     fetch(apiUrl('/auth/room-config-login'), { method:'POST', headers:authHeaders(false),
@@ -340,15 +368,18 @@
 
   function relogin(){
     sessionToken = '';
+    chatAccessToken = '';
     try { sessionStorage.removeItem(SESSION_KEY); } catch(_e){}
     el('appScreen').hidden = true; el('loginScreen').hidden = false;
-    el('loginMsg').textContent = 'セッションが切れました。もう一度パスワードを入力してください（リンク使用済みのときはLINEから再度「設定」を送ってください）。';
+    el('loginMsg').textContent = fromChat
+      ? 'セッションが切れました。M-talk にログインしてから、もう一度設定を開いてください。'
+      : 'セッションが切れました。もう一度パスワードを入力してください（リンク使用済みのときはLINEから再度「設定」を送ってください）。';
     el('loginMsg').className = 'lmsg err';
   }
 
   /* ── 設定の読み込み → 画面表示 ── */
   function loadConfig(){
-    fetch(apiUrl('/room-config?room_id=' + encodeURIComponent(roomId)), { headers: authHeaders(true) })
+    fetch(configUrl(), { headers: authHeaders(true) })
       .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } return r.json(); })
       .then(function(b){
         var cfg = (b && b.room_config) || {};
@@ -512,9 +543,7 @@
   // 「時」と「分」のように複数列を1回の操作で決めるものは、1リクエストにまとめて送る。
   // 分けて送るとトーストが二重に出るうえ、片方だけ失敗したときに時刻が半端に保存される。
   function savePatch(patch){
-    var body = { room_id: roomId }, k;
-    for (k in patch) { if (Object.prototype.hasOwnProperty.call(patch, k)) body[k] = patch[k]; }
-    fetch(apiUrl('/room-config'), { method:'PUT', headers:authHeaders(true), body:JSON.stringify(body) })
+    fetch(apiUrl(fromChat ? '/chat-room-config' : '/room-config'), { method:'PUT', headers:authHeaders(true), body:JSON.stringify(saveBody(patch)) })
       .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } if(!r.ok) throw new Error('save'); return r.json(); })
       .then(function(){ showToast('保存しました'); })
       .catch(function(e){
@@ -524,8 +553,8 @@
   }
 
   function saveField(key, value, inp, item){
-    var body = { room_id: roomId }; body[key] = value;
-    fetch(apiUrl('/room-config'), { method:'PUT', headers:authHeaders(true), body:JSON.stringify(body) })
+    var patch = {}; patch[key] = value;
+    fetch(apiUrl(fromChat ? '/chat-room-config' : '/room-config'), { method:'PUT', headers:authHeaders(true), body:JSON.stringify(saveBody(patch)) })
       .then(function(r){ if (r.status===401||r.status===403){ relogin(); throw new Error('auth'); } if(!r.ok) throw new Error('save'); return r.json(); })
       .then(function(){ showToast('保存しました'); })
       .catch(function(e){
@@ -658,8 +687,30 @@
     if(first){ first.classList.add('open'); first.querySelector('.sec-head').setAttribute('aria-expanded','true'); syncExpandAll(); }
   }
 
+  function startChatSession(){
+    el('loginBtn').textContent = 'M-talk から開き直す';
+    var pwCard = el('pw') && el('pw').closest('.card');
+    if (pwCard) pwCard.hidden = true;
+    el('loginRoom').textContent = 'このトークルームの Bot 機能を設定します';
+    if (!chatSb) { relogin(); return; }
+    chatSb.auth.getSession().then(function(res){
+      var token = res && res.data && res.data.session && res.data.session.access_token;
+      if (!token) {
+        el('loginScreen').hidden = false;
+        el('appScreen').hidden = true;
+        el('loginMsg').textContent = 'M-talk にログインした状態で、トークから「設定」を開いてください。';
+        el('loginMsg').className = 'lmsg err';
+        el('loginBtn').disabled = true;
+        return;
+      }
+      chatAccessToken = token;
+      loadConfig();
+    }).catch(function(){ relogin(); });
+  }
+
   // 既存セッションがあればパスワード入力を飛ばす（同タブ内の再表示）。
-  if (sessionToken){ loadConfig(); }
+  if (fromChat) startChatSession();
+  else if (sessionToken){ loadConfig(); }
 })();
 </script>
 </body>

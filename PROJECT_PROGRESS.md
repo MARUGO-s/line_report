@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - M-talk に LINE と同じルーム設定を載せる
+
+- Request: LINE の「設定」で開くルーム設定と全く同じ機能を、M-talk のルームにも載せて運用できる状態にする。
+- Implementation: トークごとに `room_summary_settings`（`mtalk-group-{id}`）を持ち、同じ画面で ON/OFF。ログイン済みメンバーだけが触れる。本日の予約と Gmail 予約通知は、ON にしたトークへ届く。
+- Operation: ルームで「設定」と送る、または右上の歯車／トーク設定から開く。マルゴセカンドの Bot がいるルームで「本日の予約状況配信」を ON にすると、そのルームへ当日分が届く。
+
 ### 2026-08-20 - 同日レシート確認を LINE と同じレイアウトにする
 
 - Request: すでにデータがある場合は、LINE と同じ説明文・同じ並び・数値は太字。

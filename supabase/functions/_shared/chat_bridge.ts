@@ -9,6 +9,8 @@
  * 本文はここを見るため、payload が読めないクライアントでも意味が通る。
  */
 
+import { parseMtalkSyntheticRoomId } from './mtalk_room_id.ts'
+
 // 20260819160000_chat_notification_cards.sql で作った Bot。
 const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071'
 const CHAT_BOT_USERNAME = '予約通知'
@@ -96,10 +98,11 @@ export async function resolveChatGroupId(
       return null
     }
     const groupId = Number(data?.chat_group_id)
-    return Number.isSafeInteger(groupId) && groupId > 0 ? groupId : null
+    if (Number.isSafeInteger(groupId) && groupId > 0) return groupId
+    return parseMtalkSyntheticRoomId(id)
   } catch (err) {
     console.error('resolveChatGroupId threw:', err instanceof Error ? err.message : String(err))
-    return null
+    return parseMtalkSyntheticRoomId(id)
   }
 }
 
@@ -148,6 +151,7 @@ export async function postChatCardIndependent(
     cards: ChatCard[]
     kind: string
     dedupeKey: string
+    asUser?: { id: string; username: string } | null
   },
 ): Promise<{ ok: boolean; skipped?: boolean; messageId?: number; error?: string }> {
   const groupId = Number(options.groupId)
