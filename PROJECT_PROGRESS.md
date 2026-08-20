@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 招待ルームのレシート解析 500 を直す
+
+- Request: Botのいるルームへレシートを送っても無反応。
+- Cause: chat-knowledge が chat_users を embed して PostgREST 500。
+- Fix: 送信者は user_id で別に取る。既存の日計画像は再処理済み。
+- Operation: 同じ日が登録済みなら加算／中止／置き換え／日付変更のカードが返る。
+
 ### 2026-08-20 - 招待した店舗Botがレシートを解析する
 
 - Request: Bistro CAVACAVA bot を招待したルームに日計レシートを落とすと、その店として解析・返信する。

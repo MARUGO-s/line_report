@@ -176,12 +176,16 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
 
   const { data: message, error } = await supabase
     .from("chat_messages")
-    .select("id, group_id, user_id, username, content, kind, payload, reply_to_id, created_at, chat_users(is_bot), chat_groups(store_key, is_store_room)")
+    .select("id, group_id, user_id, username, content, kind, payload, reply_to_id, created_at, chat_groups!group_id(store_key, is_store_room)")
     .eq("id", messageId)
     .maybeSingle()
   if (error) return json({ ok: false, error: error.message }, 500)
   if (!message) return json({ ok: true, skipped: true, reason: "missing" }, 200)
-  const sender = Array.isArray(message.chat_users) ? message.chat_users[0] : message.chat_users
+  const { data: sender } = await supabase
+    .from("chat_users")
+    .select("is_bot")
+    .eq("id", message.user_id)
+    .maybeSingle()
   if (String(message.user_id) === CHAT_BOT_USER_ID || sender?.is_bot) {
     return json({ ok: true, skipped: true, reason: "bot" }, 200)
   }
