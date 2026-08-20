@@ -6,6 +6,8 @@ import {
   postStoreRoomLineStyleReply,
   handleStoreRoomReceiptCommand,
   removeStoreRoomMediaForChatMessage,
+  loadChatStoreBot,
+  resolveRoomStoreKey,
 } from "../_shared/chat_store_file_bridge.ts"
 
 const CHAT_BOT_USER_ID = "00000000-0000-4000-8000-00000000b071"
@@ -54,11 +56,16 @@ async function internalDispatchAuthorized(supabase: DbClient, token: string): Pr
   return secureEqual(token, String(data.dispatch_secret))
 }
 
-async function replyInRoom(supabase: DbClient, groupId: number, text: string): Promise<void> {
+async function replyInRoom(
+  supabase: DbClient,
+  groupId: number,
+  text: string,
+  asUser?: { id: string; username: string } | null,
+): Promise<void> {
   const { error } = await supabase.from("chat_messages").insert({
     group_id: groupId,
-    user_id: CHAT_BOT_USER_ID,
-    username: CHAT_BOT_USERNAME,
+    user_id: asUser?.id || CHAT_BOT_USER_ID,
+    username: asUser?.username || CHAT_BOT_USERNAME,
     content: text,
     kind: "text",
   })
@@ -169,23 +176,30 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
 
   const { data: message, error } = await supabase
     .from("chat_messages")
-    .select("id, group_id, user_id, username, content, kind, payload, reply_to_id, created_at, chat_groups(store_key, is_store_room)")
+    .select("id, group_id, user_id, username, content, kind, payload, reply_to_id, created_at, chat_users(is_bot), chat_groups(store_key, is_store_room)")
     .eq("id", messageId)
     .maybeSingle()
   if (error) return json({ ok: false, error: error.message }, 500)
   if (!message) return json({ ok: true, skipped: true, reason: "missing" }, 200)
-  if (String(message.user_id) === CHAT_BOT_USER_ID) {
+  const sender = Array.isArray(message.chat_users) ? message.chat_users[0] : message.chat_users
+  if (String(message.user_id) === CHAT_BOT_USER_ID || sender?.is_bot) {
     return json({ ok: true, skipped: true, reason: "bot" }, 200)
   }
 
   const group = Array.isArray(message.chat_groups) ? message.chat_groups[0] : message.chat_groups
-  const storeKey = String(group?.store_key ?? "").trim()
-  if (!group?.is_store_room || !storeKey) {
+  const groupId = Number(message.group_id)
+  const resolved = await resolveRoomStoreKey(supabase, group, groupId)
+  if (resolved.ambiguous) {
+    await replyInRoom(supabase, groupId, "このルームには複数の店舗Botがいるため処理できません。店舗Botは1つにしてください。")
+    return json({ ok: true, skipped: true, reason: "ambiguous store bot" }, 200)
+  }
+  const storeKey = String(resolved.storeKey ?? "").trim()
+  if (!storeKey) {
     return json({ ok: true, skipped: true, reason: "not store room" }, 200)
   }
+  const storeBot = await loadChatStoreBot(supabase, storeKey)
 
   const text = String(message.content ?? "").trim()
-  const groupId = Number(message.group_id)
   const senderName = String(message.username || "M-talk")
   const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()
 
@@ -210,7 +224,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
       contentType: file.type || "image/jpeg",
       bytes,
     })
-    await postStoreRoomLineStyleReply(supabase, groupId, result)
+    await postStoreRoomLineStyleReply(supabase, groupId, result, storeBot)
     return json({ ok: true, processed: true, kind: result.kind }, 200)
   }
 
@@ -244,6 +258,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
         ok
           ? "✅ 引用元のファイルを店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。"
           : "⚠️ 引用元のファイルを登録できませんでした。少し時間をおいて、登録したい画像にリプライで #メモ と送ってください。",
+        storeBot,
       )
       return json({ ok, processed: ok, kind: "image" }, 200)
     }
@@ -254,6 +269,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
       supabase,
       groupId,
       "📝 #メモ の使い方\n・画像やファイルを登録する場合: 登録したい画像を長押し（PCでは右クリック）→「リプライ」を選び、#メモ と返信してください。\n・テキストメモの場合: #メモ に続けて本文を書いて送信してください。\n※画像を送っただけ、#メモ 単体を送っただけでは登録されません。",
+      storeBot,
     )
     return json({ ok: true, processed: false, reason: "usage" }, 200)
   }
@@ -282,6 +298,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     processed
       ? "✅ メモを店舗ナレッジ（資料）に登録しました。Journal Report の「資料」タブから確認できます。"
       : "⚠️ メモを登録できませんでした。本文を確認して、少し時間をおいてからもう一度送信してください。",
+    storeBot,
   )
   return json({ ok: processed, processed, kind: "text" }, processed ? 200 : 500)
 }

@@ -199,6 +199,8 @@ export async function postChatCard(
     cards: ChatCard[]
     /** payload.kind。'reservation_today' など通知の種類。 */
     kind: string
+    /** 店舗Botなど。省略時は予約通知Bot。 */
+    asUser?: { id: string; username: string } | null
   },
 ): Promise<{ ok: boolean; messageId?: number; error?: string }> {
   const groupId = Number(options.groupId)
@@ -212,14 +214,16 @@ export async function postChatCard(
   if (!content) return { ok: false, error: 'empty text fallback' }
 
   const payload: ChatCardPayload = { v: 1, kind: options.kind, cards }
+  const asUserId = String(options.asUser?.id ?? '').trim() || CHAT_BOT_USER_ID
+  const asUsername = String(options.asUser?.username ?? '').trim() || CHAT_BOT_USERNAME
 
   try {
     const { data, error } = await supabase
       .from('chat_messages')
       .insert({
         group_id: groupId,
-        user_id: CHAT_BOT_USER_ID,
-        username: CHAT_BOT_USERNAME,
+        user_id: asUserId,
+        username: asUsername,
         content,
         kind: 'card',
         payload,

@@ -57,6 +57,62 @@ export async function resolveStoreLineRoomId(supabase: DbClient, storeKey: strin
   return rooms.find((id) => id.startsWith('C')) || rooms[0] || null
 }
 
+export type ChatStoreBot = {
+  id: string
+  username: string
+  storeKey: string
+}
+
+export async function loadChatStoreBot(supabase: DbClient, storeKey: string): Promise<ChatStoreBot | null> {
+  const key = String(storeKey || '').trim()
+  if (!key) return null
+  const { data, error } = await supabase
+    .from('chat_users')
+    .select('id, username, store_key')
+    .eq('is_bot', true)
+    .eq('store_key', key)
+    .maybeSingle()
+  if (error) {
+    console.warn('loadChatStoreBot failed:', error.message)
+    return null
+  }
+  const id = String((data as { id?: string } | null)?.id ?? '').trim()
+  const username = String((data as { username?: string } | null)?.username ?? '').trim()
+  if (!id || !username) return null
+  return { id, username, storeKey: key }
+}
+
+export async function resolveRoomStoreKey(
+  supabase: DbClient,
+  group: { store_key?: string | null; is_store_room?: boolean | null } | null,
+  groupId: number,
+): Promise<{ storeKey: string | null; ambiguous?: boolean }> {
+  const fromGroup = String(group?.store_key ?? '').trim()
+  if (group?.is_store_room && fromGroup) return { storeKey: fromGroup }
+  const { data, error } = await supabase
+    .from('chat_group_members')
+    .select('chat_users(is_bot, store_key)')
+    .eq('group_id', groupId)
+  if (error) {
+    console.warn('resolveRoomStoreKey failed:', error.message)
+    return { storeKey: fromGroup || null }
+  }
+  const keys = [...new Set(
+    (Array.isArray(data) ? data : [])
+      .map((row) => {
+        const user = Array.isArray((row as { chat_users?: unknown }).chat_users)
+          ? (row as { chat_users: { is_bot?: boolean; store_key?: string }[] }).chat_users[0]
+          : (row as { chat_users?: { is_bot?: boolean; store_key?: string } }).chat_users
+        if (!user?.is_bot) return ''
+        return String(user.store_key ?? '').trim()
+      })
+      .filter(Boolean),
+  )]
+  if (keys.length === 1) return { storeKey: keys[0] }
+  if (keys.length > 1) return { storeKey: null, ambiguous: true }
+  return { storeKey: fromGroup || null }
+}
+
 export async function loadStoreRegistryRow(supabase: DbClient, storeKey: string): Promise<StoreRegistryRow | null> {
   const { data, error } = await supabase
     .from('store_webhook_tables')
@@ -292,7 +348,8 @@ export async function handleStoreRoomReceiptCommand(
   )
   if (!reply) return false
   const converted = mtalkCardFromLineReply(reply)
-  await postStoreRoomLineStyleReply(supabase, params.groupId, converted)
+  const bot = await loadChatStoreBot(supabase, params.storeKey)
+  await postStoreRoomLineStyleReply(supabase, params.groupId, converted, bot)
   return true
 }
 
@@ -384,6 +441,7 @@ export async function postStoreRoomLineStyleReply(
   supabase: DbClient,
   groupId: number,
   result: { text: string; card?: ChatCard },
+  asUser?: { id: string; username: string } | null,
 ): Promise<void> {
   const cardHasBody = !!(result.card && (
     (Array.isArray(result.card.sections) && result.card.sections.length > 0)
@@ -396,13 +454,14 @@ export async function postStoreRoomLineStyleReply(
       text: result.text,
       cards: [result.card],
       kind: 'receipt_image',
+      asUser,
     })
     if (posted.ok) return
   }
   const { error } = await supabase.from('chat_messages').insert({
     group_id: groupId,
-    user_id: '00000000-0000-4000-8000-00000000b071',
-    username: '予約通知',
+    user_id: asUser?.id || '00000000-0000-4000-8000-00000000b071',
+    username: asUser?.username || '予約通知',
     content: result.text,
     kind: 'text',
   })

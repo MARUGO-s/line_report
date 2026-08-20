@@ -432,6 +432,16 @@
       border-radius: 8px;
       padding: 1px 6px;
     }
+    .bot-mark {
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 700;
+      color: #16321f;
+      background: #8ee08a;
+      border-radius: 8px;
+      padding: 1px 6px;
+      margin-left: 6px;
+    }
     .store-room-hint {
       padding: 7px 14px;
       font-size: 12px;
@@ -1807,7 +1817,7 @@
       </div>
       <div class="member-strip hidden" id="memberStrip"></div>
     </div>
-    <div class="store-room-hint hidden" id="storeRoomHint">このルームは店舗固定です。画像はメディア閲覧へ、#メモ は Journal Report の資料へ保存されます。ドラッグ＆ドロップでも送れます。</div>
+    <div class="store-room-hint hidden" id="storeRoomHint">このルームには店舗Botがいます。画像はメディア閲覧へ、#メモ は Journal Report の資料へ保存されます。ドラッグ＆ドロップでも送れます。</div>
     <div class="messages-wrap hidden" id="messagesWrap">
       <div class="messages" id="messages"></div>
       <div class="history-spinner hidden" id="historySpinner">過去のメッセージを読み込み中…</div>
@@ -2033,6 +2043,19 @@
     const MESSAGE_COLUMNS =
       'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, created_at';
     const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
+    const CHAT_USER_COLUMNS = 'id, username, icon_url, is_bot, store_key';
+    function isReservationBot(user) {
+      return !!(user && (String(user.id) === CHAT_BOT_USER_ID || user.username === '予約通知'));
+    }
+    function isStoreBot(user) {
+      return !!(user && user.is_bot && user.store_key);
+    }
+    function isBotUser(user) {
+      return !!(user && (user.is_bot || isReservationBot(user)));
+    }
+    function botMarkHtml() {
+      return '<span class="bot-mark">Bot</span>';
+    }
     // 開いているトークの参加者・既読時刻・リアクション。
     let groupMembers = [];
     let memberStripOpen = false;
@@ -2214,7 +2237,7 @@
 
       const { data, error } = await sb
         .from('chat_users')
-        .select('id, username, icon_url')
+        .select(CHAT_USER_COLUMNS)
         .eq('id', userData.user.id)
         .maybeSingle();
 
@@ -2743,7 +2766,7 @@
       try {
         const { data, error } = await sb
           .from('chat_group_members')
-          .select('group_id, user_id, chat_users(id, username, icon_url)')
+          .select('group_id, user_id, chat_users(id, username, icon_url, is_bot, store_key)')
           .in('group_id', dms.map((g) => g.id));
         if (error) throw error;
         const peers = {};
@@ -2876,7 +2899,7 @@
       try {
         const { data, error } = await sb
           .from('chat_users')
-          .select('id, username, icon_url')
+          .select(CHAT_USER_COLUMNS)
           .order('username');
         if (error) throw error;
         registeredUsers = data || [];
@@ -2898,7 +2921,10 @@
       const list = $('registeredUsersList');
       list.innerHTML = '';
       const q = ($('talkSearch').value || '').trim().toLowerCase();
-      const users = registeredUsers.filter((u) => !q || u.username.toLowerCase().includes(q));
+      const users = registeredUsers.filter((u) => (
+        !isReservationBot(u)
+        && (!q || u.username.toLowerCase().includes(q))
+      ));
       if (!users.length) {
         list.innerHTML = '<div class="empty-note">登録ユーザーはいません</div>';
       } else {
@@ -2911,7 +2937,7 @@
             ${mine ? '' : '<div class="user-check"></div>'}
             <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
             <div class="talk-body">
-              <div class="group-item-name">${escapeHtml(user.username)}${mine ? '（自分）' : ''}</div>
+              <div class="group-item-name"><span>${escapeHtml(user.username)}</span>${mine ? '（自分）' : ''}${isBotUser(user) ? botMarkHtml() : ''}</div>
             </div>
           `;
           if (!mine) row.onclick = () => toggleUserSelect(user.id);
@@ -3067,15 +3093,17 @@
       try {
         const [memberRes, userRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('user_id, chat_users(id, username, icon_url)')
+            .select('user_id, chat_users(id, username, icon_url, is_bot, store_key)')
             .eq('group_id', currentGroupId),
-          sb.from('chat_users').select('id, username, icon_url').order('username')
+          sb.from('chat_users').select(CHAT_USER_COLUMNS).order('username')
         ]);
         if (memberRes.error) throw memberRes.error;
         if (userRes.error) throw userRes.error;
         inviteMembers = (memberRes.data || []).map((row) => row.chat_users).filter(Boolean);
         const memberIds = new Set(inviteMembers.map((u) => u.id));
-        invitePeople = (userRes.data || []).filter((u) => u.id !== currentUser.id && !memberIds.has(u.id));
+        invitePeople = (userRes.data || []).filter((u) => (
+          u.id !== currentUser.id && !memberIds.has(u.id) && !isReservationBot(u)
+        ));
         renderInviteLists();
       } catch (error) {
         console.error('Invite list error:', error);
@@ -3094,12 +3122,13 @@
           const row = document.createElement('div');
           row.className = 'invite-person';
           const mine = String(user.id) === String(currentUser.id);
-          const bot = String(user.id) === CHAT_BOT_USER_ID || user.username === '予約通知';
+          const bot = isBotUser(user);
+          const lockedBot = isReservationBot(user) || (isStoreBot(user) && current && current.is_store_room);
           row.innerHTML = `
             <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
-            <div>${escapeHtml(user.username)}${mine ? '（自分）' : ''}</div>
+            <div>${escapeHtml(user.username)}${mine ? '（自分）' : ''}${bot ? botMarkHtml() : ''}</div>
           `;
-          if (canKick && !mine && !bot) {
+          if (canKick && !mine && !lockedBot) {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'kick-btn';
@@ -3127,7 +3156,7 @@
         row.className = 'invite-person';
         row.innerHTML = `
           <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
-          <div>${escapeHtml(user.username)}</div>
+          <div>${escapeHtml(user.username)}${isBotUser(user) ? botMarkHtml() : ''}</div>
         `;
         const button = document.createElement('button');
         button.type = 'button';
@@ -3255,13 +3284,18 @@
       el.innerHTML = avatarHtml(name, iconUrl);
     }
 
+    function roomHasStoreBot(group) {
+      if (group && group.is_store_room) return true;
+      return (groupMembers || []).some(isStoreBot);
+    }
+
     function paintChatHeader(group) {
       if (!group) return;
       $('chatGroupName').textContent = roomTitle(group);
       paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
-      if ($('storeRoomHint')) $('storeRoomHint').classList.toggle('hidden', !group.is_store_room);
-      if ($('messageInput') && group.is_store_room) {
+      if ($('storeRoomHint')) $('storeRoomHint').classList.toggle('hidden', !roomHasStoreBot(group));
+      if ($('messageInput') && roomHasStoreBot(group)) {
         $('messageInput').placeholder = isMobileLayout()
           ? 'メッセージ（#メモ で資料保存）'
           : 'メッセージ（#メモ で資料保存・Shift+Enterで改行）';
@@ -3298,7 +3332,7 @@
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'member-strip-item';
-        item.title = user.username || '';
+        item.title = (user.username || '') + (isBotUser(user) ? '（Bot）' : '');
         item.innerHTML = `<div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>`;
         strip.appendChild(item);
       });
@@ -4116,7 +4150,7 @@
       try {
         const [memberRes, readRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('user_id, chat_users(id, username, icon_url)')
+            .select('user_id, chat_users(id, username, icon_url, is_bot, store_key)')
             .eq('group_id', groupId),
           sb.from('chat_read_states')
             .select('user_id, last_read_at')
@@ -4614,8 +4648,7 @@
       const q = ($('forwardSearch').value || '').trim().toLowerCase();
       const users = registeredUsers.filter((u) => (
         u.id !== currentUser.id
-        && String(u.id) !== CHAT_BOT_USER_ID
-        && u.username !== '予約通知'
+        && !isBotUser(u)
         && (!q || String(u.username || '').toLowerCase().includes(q))
       ));
       if (!users.length) {
