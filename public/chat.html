@@ -1948,6 +1948,7 @@
       </div>
       <div class="composer-menu" id="composerMenu">
         <button class="composer-menu-btn" type="button" onclick="sendSearchFromMenu()">検索</button>
+        <button class="composer-menu-btn" type="button" onclick="openReservationSchedule()">予約・予定</button>
         <button class="composer-menu-btn" type="button" onclick="openRoomSettings()">設定</button>
       </div>
     </div>
@@ -3570,6 +3571,16 @@
       url.searchParams.set('group_id', String(id));
       url.searchParams.set('v', '202608201340');
       window.open(url.href, '_blank', 'noopener');
+    }
+
+    function openReservationSchedule(groupId) {
+      const id = Number(groupId || (talkMenuGroup && talkMenuGroup.id) || currentGroupId);
+      if (!Number.isSafeInteger(id) || id <= 0) return;
+      closeTalkContextMenu();
+      const url = new URL('mtalk_schedule.html', window.location.href);
+      url.searchParams.set('from', 'chat');
+      url.searchParams.set('group_id', String(id));
+      window.location.href = url.href;
     }
 
     async function openInvite() {
