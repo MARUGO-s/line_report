@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - M-talk に LINE の「検索」メニューを載せる
+
+- Request: LINE で「検索」と送ると出る会話／予定／メディア／売上の操作を M-talk 専用に移植する。
+- Implementation: 店舗Botのいるルームで「検索」と送ると、同じカードが出る。ボタンのあとキーワード（売上は日付）を送ると LINE と同じ検索が走る。
+- Operation: マルゴセカンドのルームで「検索」→ 会話検索／予定検索／メディア検索／売上検索／使い方。
+
 ### 2026-08-20 - M-talk に LINE と同じルーム設定を載せる
 
 - Request: LINE の「設定」で開くルーム設定と全く同じ機能を、M-talk のルームにも載せて運用できる状態にする。
