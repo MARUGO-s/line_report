@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 不要ルームの完全削除
+
+- Request: 不要になったルームを完全削除し、関連データも消す。他ルームには影響しない。
+- Implementation: M-talkは作成者のみ。管理画面は「完全削除」を別名ボタンに。`room_id` 一致の行と、そのグループの画像だけ消す。予約取込と店舗売上は対象外。
+- Operation: トークを長押し → ルームを完全に削除。管理画面は完全削除。
+
 ### 2026-08-20 - 明日の予定カードからカレンダーが開かない
 
 - Symptom: カードの「予定カレンダーを開く」を押すと「ルームが指定されていません」。

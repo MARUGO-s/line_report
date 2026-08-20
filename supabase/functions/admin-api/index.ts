@@ -17,6 +17,7 @@ import {
 } from "../_shared/knowledge_file_extract.ts"
 import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from "../_shared/knowledge_memo_tag.ts"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
+import { purgeLineAdminRoom, purgeMtalkGroup } from "../_shared/room_hard_delete.ts"
 import {
   isMarugoGroupStoreLabel,
   MARUGO_GROUP_STORE_OPTIONS,
@@ -1277,6 +1278,16 @@ Deno.serve(async (req, info) => {
       }
     }
     // 内部キーが無い/不一致の場合は通常の管理者認証へフォールスルー
+  }
+
+  // M-talk のルーム完全削除。作成者のチャットJWTのみ。管理トークンは使わない。
+  if (req.method === "POST" && path === "/chat-room-purge") {
+    try {
+      return await handleChatRoomPurge(req, workReq, supabase)
+    } catch (e) {
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
   }
 
   // M-talk のルーム設定。ログイン済みメンバーが自分のルームだけ触れる。
@@ -3834,6 +3845,15 @@ Deno.serve(async (req, info) => {
       }, 200)
     }
 
+    if (req.method === "POST" && path === "/rooms/purge") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      const roomId = String(body.room_id ?? "").trim()
+      const confirmRoomId = String(body.confirm_room_id ?? "").trim()
+      const purged = await purgeLineAdminRoom(supabase, roomId, confirmRoomId)
+      return json({ success: true, ...purged }, 200)
+    }
+
     if (req.method === "POST" && path === "/actions/run-summary") {
       const body = await parseJson(workReq)
       if (!isRecord(body)) {
@@ -4325,6 +4345,34 @@ async function handleChatScheduleEvent(
     throw { status: 500, message: `Failed to update event: ${error.message}` } satisfies AppError
   }
   return json({ ok: true, id }, 200)
+}
+
+async function handleChatRoomPurge(
+  req: Request,
+  workReq: Request,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Response> {
+  const body = await parseJson(workReq)
+  if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+  const groupId = Number(body.group_id ?? "")
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+    throw { status: 400, message: "group_id is required." } satisfies AppError
+  }
+  const userId = await authenticateChatMember(req, supabase, groupId)
+  const { data: group, error } = await supabase
+    .from("chat_groups")
+    .select("id, group_name, created_by, is_store_room")
+    .eq("id", groupId)
+    .maybeSingle()
+  if (error) throw { status: 500, message: `ルームの確認に失敗しました: ${error.message}` } satisfies AppError
+  if (!group) throw { status: 404, message: "ルームが見つかりません。" } satisfies AppError
+  const confirmName = String(body.confirm_name ?? "").trim()
+  const roomName = String((group as { group_name?: string }).group_name ?? "").trim() || String(groupId)
+  if (!confirmName || confirmName !== roomName) {
+    throw { status: 400, message: "確認用のルーム名が一致しません。" } satisfies AppError
+  }
+  const purged = await purgeMtalkGroup(supabase, groupId, userId)
+  return json({ success: true, ...purged }, 200)
 }
 
 async function handleChatRoomConfig(
