@@ -5,6 +5,15 @@ import { buildDeclarativeChatPushPayload } from "../_shared/chat_push_payload.ts
 
 type DbClient = any
 
+function runInBackground(promise: Promise<unknown>): boolean {
+  const runtime = (globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil(value: Promise<unknown>): void }
+  }).EdgeRuntime
+  if (!runtime?.waitUntil) return false
+  runtime.waitUntil(promise)
+  return true
+}
+
 type SubscriptionInput = {
   endpoint?: unknown
   expirationTime?: unknown
@@ -293,14 +302,29 @@ async function handleTest(
   vapid: VapidConfig,
   userId: string,
 ): Promise<Response> {
-  let endpoint = ""
+  let body: Record<string, unknown> = {}
   try {
-    const body = await req.json()
-    endpoint = String(body?.endpoint ?? "").trim()
+    const parsed = await req.json()
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      body = parsed as Record<string, unknown>
+    }
   } catch {
     return json({ ok: false, error: "Invalid JSON body." }, 400)
   }
+  const endpoint = String(body.endpoint ?? "").trim()
   if (!endpoint) return json({ ok: false, error: "endpoint is required." }, 400)
+  const requestedTestId = String(body.test_id ?? "").trim()
+  const testId = requestedTestId || crypto.randomUUID()
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(testId)) {
+    return json({ ok: false, error: "test_id is invalid." }, 400)
+  }
+  const requestedDelay = Number(body.delay_ms)
+  const delayMs = Number.isFinite(requestedDelay)
+    ? Math.max(0, Math.min(5000, Math.trunc(requestedDelay)))
+    : 0
+  const clientState = body.client_state && typeof body.client_state === "object" && !Array.isArray(body.client_state)
+    ? body.client_state as Record<string, unknown>
+    : {}
 
   const { data, error } = await supabase
     .from("chat_push_subscriptions")
@@ -313,39 +337,156 @@ async function handleTest(
   const row = data as PushSubscriptionRow | null
   if (!row) return json({ ok: false, error: "Active subscription not found." }, 404)
 
-  const pushSubscription: WebPushSubscription = {
-    endpoint: row.endpoint,
-    p256dh: row.p256dh,
-    auth: row.auth_secret,
+  const safeClientState = {
+    permission: String(clientState.permission ?? "").slice(0, 20),
+    standalone: clientState.standalone === true,
+    controller: clientState.controller === true,
+    visibility: String(clientState.visibility ?? "").slice(0, 20),
+    push_manager: clientState.push_manager === true,
   }
-  try {
-    const response = await sendWebPush(
-      pushSubscription,
-      buildDeclarativeChatPushPayload({
-        title: "M-talk 通知テスト",
-        body: "この通知が見えれば、この端末の新着通知は正常です。",
-        navigatePath: "/line_report/chat.html",
-        tag: `chat-push-test-${row.id}`,
-      }),
-      vapid,
-    )
-    if (!response.ok) {
-      const reason = await response.text().catch(() => "")
-      await markSubscriptionFailure(supabase, row, response.status, reason)
-      return json({ ok: false, sent: 0, failed: 1, error: `Push service HTTP ${response.status}` }, 502)
+  const { error: queueError } = await supabase.from("chat_push_delivery_diagnostics").insert({
+    test_id: testId,
+    user_id: userId,
+    subscription_id: row.id,
+    stage: "server_queued",
+    detail: JSON.stringify(safeClientState).slice(0, 500),
+  })
+  if (queueError) {
+    return json({ ok: false, error: `diagnostic queue failed: ${queueError.message}` }, 500)
+  }
+
+  const sendPromise = (async () => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    const pushSubscription: WebPushSubscription = {
+      endpoint: row.endpoint,
+      p256dh: row.p256dh,
+      auth: row.auth_secret,
     }
-    await supabase.from("chat_push_subscriptions").update({
-      failure_count: 0,
-      is_active: true,
-      last_success_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq("id", row.id)
-    return json({ ok: true, sent: 1, failed: 0 }, 200)
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    await markSubscriptionFailure(supabase, row, 0, reason)
-    return json({ ok: false, sent: 0, failed: 1, error: reason }, 502)
+    try {
+      const response = await sendWebPush(
+        pushSubscription,
+        buildDeclarativeChatPushPayload({
+          title: "M-talk 通知テスト",
+          body: "この通知が見えれば、この端末の新着通知は正常です。",
+          navigatePath: "/line_report/chat.html",
+          testId,
+          tag: `chat-push-test-${testId}`,
+        }),
+        vapid,
+      )
+      if (!response.ok) {
+        const reason = await response.text().catch(() => "")
+        await supabase.from("chat_push_delivery_diagnostics").upsert({
+          test_id: testId,
+          user_id: userId,
+          subscription_id: row.id,
+          stage: "server_failed",
+          detail: `push_http_${response.status}:${reason}`.slice(0, 500),
+        }, { onConflict: "test_id,stage" })
+        await markSubscriptionFailure(supabase, row, response.status, reason)
+        return
+      }
+      await supabase.from("chat_push_subscriptions").update({
+        failure_count: 0,
+        is_active: true,
+        last_success_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", row.id)
+      await supabase.from("chat_push_delivery_diagnostics").upsert({
+        test_id: testId,
+        user_id: userId,
+        subscription_id: row.id,
+        stage: "server_sent",
+        detail: `push_http_${response.status}`,
+      }, { onConflict: "test_id,stage" })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      await supabase.from("chat_push_delivery_diagnostics").upsert({
+        test_id: testId,
+        user_id: userId,
+        subscription_id: row.id,
+        stage: "server_failed",
+        detail: reason.slice(0, 500),
+      }, { onConflict: "test_id,stage" })
+      await markSubscriptionFailure(supabase, row, 0, reason)
+    }
+  })()
+  if (runInBackground(sendPromise)) {
+    return json({ ok: true, queued: true, sent: 0, failed: 0, test_id: testId }, 202)
   }
+  await sendPromise
+  return json({ ok: true, queued: false, sent: 0, failed: 0, test_id: testId }, 200)
+}
+
+async function handleDiagnostic(
+  req: Request,
+  supabase: DbClient,
+  userId: string,
+): Promise<Response> {
+  let body: Record<string, unknown> = {}
+  try {
+    const parsed = await req.json()
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      body = parsed as Record<string, unknown>
+    }
+  } catch {
+    return json({ ok: false, error: "Invalid JSON body." }, 400)
+  }
+  const testId = String(body.test_id ?? "").trim()
+  const stage = String(body.stage ?? "").trim()
+  const detail = String(body.detail ?? "").trim().slice(0, 500) || null
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(testId)) {
+    return json({ ok: false, error: "test_id is invalid." }, 400)
+  }
+  if (!["sw_received", "notification_shown", "notification_failed"].includes(stage)) {
+    return json({ ok: false, error: "stage is invalid." }, 400)
+  }
+  const { data: sentRow, error: sentError } = await supabase
+    .from("chat_push_delivery_diagnostics")
+    .select("subscription_id")
+    .eq("test_id", testId)
+    .eq("user_id", userId)
+    .eq("stage", "server_queued")
+    .maybeSingle()
+  if (sentError || !sentRow) return json({ ok: false, error: "Unknown push test." }, 404)
+
+  const { error } = await supabase.from("chat_push_delivery_diagnostics").upsert({
+      test_id: testId,
+      user_id: userId,
+      subscription_id: sentRow.subscription_id,
+      stage,
+      detail,
+    }, { onConflict: "test_id,stage" })
+  if (error) return json({ ok: false, error: `diagnostic save failed: ${error.message}` }, 500)
+  return json({ ok: true }, 200)
+}
+
+async function handleDiagnosticStatus(
+  req: Request,
+  supabase: DbClient,
+  userId: string,
+): Promise<Response> {
+  let body: Record<string, unknown> = {}
+  try {
+    const parsed = await req.json()
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      body = parsed as Record<string, unknown>
+    }
+  } catch {
+    return json({ ok: false, error: "Invalid JSON body." }, 400)
+  }
+  const testId = String(body.test_id ?? "").trim()
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(testId)) {
+    return json({ ok: false, error: "test_id is invalid." }, 400)
+  }
+  const { data, error } = await supabase
+    .from("chat_push_delivery_diagnostics")
+    .select("stage, detail, created_at")
+    .eq("test_id", testId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true })
+  if (error) return json({ ok: false, error: `diagnostic load failed: ${error.message}` }, 500)
+  return json({ ok: true, test_id: testId, events: data || [] }, 200)
 }
 
 async function handleUnregister(
@@ -634,6 +775,12 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && action === "test") {
       return await handleTest(req, supabase, vapid, user.id)
+    }
+    if (req.method === "POST" && action === "diagnostic") {
+      return await handleDiagnostic(req, supabase, user.id)
+    }
+    if (req.method === "POST" && action === "diagnostic-status") {
+      return await handleDiagnosticStatus(req, supabase, user.id)
     }
     if (req.method === "POST" && action === "dispatch") {
       try {

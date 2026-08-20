@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v44';
+const CHAT_CACHE = 'line-report-chat-v45';
 const CHAT_SHELL = [
   './chat.html',
   './chat.webmanifest',
@@ -19,6 +19,25 @@ const CHAT_SHELL = [
 ];
 const CHAT_ENTRY_URL = new URL('./chat.html', self.location.href).href;
 const CHAT_ASSET_URLS = new Set(CHAT_SHELL.map((path) => new URL(path, self.location.href).href));
+const CHAT_PUSH_DIAGNOSTIC_QUEUE = 'line-report-chat-push-diagnostics';
+
+async function queuePushDiagnostic(testId, stage, detail) {
+  if (!testId) return;
+  try {
+    const cache = await caches.open(CHAT_PUSH_DIAGNOSTIC_QUEUE);
+    const key = new Request(new URL(`./__push-diagnostic__/${testId}/${stage}`, self.location.href).href);
+    await cache.put(key, new Response(JSON.stringify({
+      test_id: testId,
+      stage,
+      detail: String(detail || '').slice(0, 500) || null,
+      created_at: new Date().toISOString(),
+    }), { headers: { 'Content-Type': 'application/json' } }));
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of clients) client.postMessage({ type: 'FLUSH_PUSH_DIAGNOSTICS' });
+  } catch (error) {
+    console.error('Push diagnostic queue error:', error);
+  }
+}
 
 async function updateAppBadge(value) {
   if (typeof value !== 'number' && typeof value !== 'string') return;
@@ -66,7 +85,11 @@ self.addEventListener('activate', (event) => {
     caches.keys()
       .then((keys) => Promise.all(
         keys
-          .filter((key) => key.startsWith('line-report-chat-') && key !== CHAT_CACHE)
+          .filter((key) => (
+            key.startsWith('line-report-chat-')
+            && key !== CHAT_CACHE
+            && key !== CHAT_PUSH_DIAGNOSTIC_QUEUE
+          ))
           .map((key) => caches.delete(key)),
       ))
       .then(() => self.clients.claim())
@@ -136,6 +159,7 @@ self.addEventListener('push', (event) => {
     : data;
   const title = String(declarative?.title || data.title || 'M-talk');
   const targetUrl = String(declarative?.navigate || metadata?.url || data.url || './chat.html');
+  const testId = String(metadata?.test_id || '');
   const options = {
     body: String(declarative?.body || data.body || '新しいメッセージがあります'),
     icon: declarative?.icon || data.icon || './icons/chat-android-192x192-v3.png',
@@ -148,13 +172,33 @@ self.addEventListener('push', (event) => {
       message_id: metadata?.message_id || null,
     },
   };
-  const declarativeBadge = Number(data.app_badge);
+  const declarativeBadge = Number(declarative?.app_badge ?? data.app_badge);
   const legacyBadge = Number(data.badge_count);
   const badgeCount = Number.isSafeInteger(declarativeBadge) ? declarativeBadge : legacyBadge;
-  event.waitUntil(Promise.all([
-    self.registration.showNotification(title, options),
-    updateAppBadgeAndRefreshVisibleClients(badgeCount),
-  ]));
+  event.waitUntil((async () => {
+    // userVisibleOnlyを守るため、診断I/Oより先に通知表示を開始する。
+    const showPromise = self.registration.showNotification(title, options);
+    const receivedPromise = queuePushDiagnostic(testId, 'sw_received', 'push_event');
+    try {
+      await showPromise;
+      await Promise.all([
+        receivedPromise,
+        queuePushDiagnostic(testId, 'notification_shown', 'showNotification_resolved'),
+      ]);
+    } catch (error) {
+      await Promise.allSettled([
+        receivedPromise,
+        queuePushDiagnostic(
+          testId,
+          'notification_failed',
+          error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+        ),
+      ]);
+      throw error;
+    } finally {
+      await updateAppBadgeAndRefreshVisibleClients(badgeCount);
+    }
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile, stat } from "node:fs/promises"
 import test from "node:test"
+import vm from "node:vm"
 import {
   base64UrlEncode,
   buildWebPushRequest,
@@ -59,7 +60,9 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /navigator\.serviceWorker\.register\('chat-sw\.js', \{ scope: '\.\/' \}/)
   assert.doesNotMatch(html, /chat-sw\.js\?v=/)
   assert.match(html, /Notification\.requestPermission\(\)/)
-  assert.match(html, /pushManager\.subscribe\(/)
+  assert.match(html, /function chatPushManager/)
+  assert.match(html, /window\.pushManager/)
+  assert.match(html, /manager\.subscribe\(/)
   assert.match(html, /CHAT_PUSH_PUBLIC_KEY/)
   assert.match(html, /dispatchPushForMessage\(data\.id\)/)
   assert.match(html, /subscribePushPreferenceChanges/)
@@ -74,6 +77,23 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /function sendPushTest/)
   assert.match(html, /chatPushRequest\('test'/)
   assert.match(html, /data-push-test/)
+  assert.match(html, /function flushPushDiagnostics/)
+  assert.match(html, /function pollPushDiagnosticStatus/)
+  assert.match(html, /function randomUuid/)
+  assert.match(html, /PUSH_TEST_PENDING_KEY/)
+  assert.match(html, /function resumePendingPushTest/)
+  assert.match(html, /void flushPushDiagnostics\(\)/)
+  assert.match(html, /void resumePendingPushTest\(\)/)
+  assert.match(html, /delay_ms: 4000/)
+  assert.match(html, /client_state/)
+  assert.match(html, /keepalive: true/)
+  assert.match(html, /getNotifications/)
+  assert.match(html, /diagnostic-status/)
+  assert.match(serviceWorker, /line-report-chat-push-diagnostics/)
+  assert.match(serviceWorker, /key !== CHAT_PUSH_DIAGNOSTIC_QUEUE/)
+  assert.match(serviceWorker, /notification_shown/)
+  assert.match(serviceWorker, /notification_failed/)
+  assert.match(serviceWorker, /const showPromise = self\.registration\.showNotification/)
   assert.match(html, /controllerchange/)
   assert.match(html, /mtalk-sw-reloaded/)
   assert.match(html, /SKIP_WAITING/)
@@ -82,8 +102,8 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /addEventListener\('push'/)
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
-  assert.match(serviceWorker, /data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v44/)
+  assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
+  assert.match(serviceWorker, /line-report-chat-v45/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -179,7 +199,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v44/)
+  assert.match(serviceWorker, /line-report-chat-v45/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -553,6 +573,22 @@ test("chat push schema protects device subscriptions and deduplicates dispatch",
   assert.match(badgeMigration, /group by recipients\.user_id/)
   assert.match(badgeMigration, /revoke all on function public\.chat_push_unread_totals\(uuid\[\]\) from public, anon, authenticated/)
   assert.match(badgeMigration, /grant execute on function public\.chat_push_unread_totals\(uuid\[\]\) to service_role/)
+
+  const diagnosticMigration = await read(
+    "supabase/migrations/20260820210000_chat_push_delivery_diagnostics.sql",
+  )
+  assert.match(diagnosticMigration, /create table if not exists public\.chat_push_delivery_diagnostics/)
+  assert.match(diagnosticMigration, /unique \(test_id, stage\)/)
+  assert.match(diagnosticMigration, /'server_queued'/)
+  assert.match(diagnosticMigration, /'server_sent'/)
+  assert.match(diagnosticMigration, /'server_failed'/)
+  assert.match(diagnosticMigration, /'sw_received'/)
+  assert.match(diagnosticMigration, /'notification_shown'/)
+  assert.match(diagnosticMigration, /'notification_failed'/)
+  assert.match(diagnosticMigration, /alter table public\.chat_push_delivery_diagnostics enable row level security/)
+  assert.match(diagnosticMigration, /revoke all on table public\.chat_push_delivery_diagnostics from public, anon, authenticated/)
+  assert.match(diagnosticMigration, /grant select, insert, update, delete on table public\.chat_push_delivery_diagnostics to service_role/)
+  assert.match(diagnosticMigration, /grant usage, select on sequence public\.chat_push_delivery_diagnostics_id_seq to service_role/)
 })
 
 test("chat push endpoint requires Supabase Auth and excludes the sender", async () => {
@@ -572,6 +608,21 @@ test("chat push endpoint requires Supabase Auth and excludes the sender", async 
   assert.match(edge, /preview_enabled/)
   assert.match(edge, /action === "preferences"/)
   assert.match(edge, /action === "test"/)
+  assert.match(edge, /action === "diagnostic"/)
+  assert.match(edge, /action === "diagnostic-status"/)
+  const diagnosticMigration = await read(
+    "supabase/migrations/20260820210000_chat_push_delivery_diagnostics.sql",
+  )
+  assert.match(diagnosticMigration, /create table if not exists public\.chat_push_delivery_diagnostics/)
+  assert.match(diagnosticMigration, /notification_shown/)
+  assert.match(edge, /chat_push_delivery_diagnostics/)
+  assert.match(edge, /onConflict: "test_id,stage"/)
+  assert.match(edge, /stage: "server_queued"/)
+  assert.match(edge, /stage: "server_failed"/)
+  assert.match(edge, /Math\.min\(5000/)
+  assert.match(edge, /function runInBackground/)
+  assert.match(edge, /runtime\.waitUntil\(promise\)/)
+  assert.match(edge, /queued: true/)
   assert.match(edge, /async function handleTest/)
   assert.match(edge, /M-talk 通知テスト/)
   assert.match(edge, /buildDeclarativeChatPushPayload/)
@@ -596,34 +647,106 @@ test("chat push payload uses the declarative Web Push format with safe navigatio
     badgeCount: 4,
   }) as {
     web_push: number
-    app_badge: string
     notification: {
       title: string
       body: string
       navigate: string
       tag: string
-      data: { url: string; group_id: number; message_id: number }
+      app_badge?: string
+      icon: string
+      data: { url: string; test_id: string | null; group_id: number; message_id: number }
     }
   }
   assert.equal(payload.web_push, 8030)
   assert.equal(payload.notification.title, "予約通知")
   assert.equal(payload.notification.navigate, "https://marugo-s.github.io/line_report/chat.html?group=31")
   assert.equal(payload.notification.data.url, payload.notification.navigate)
+  assert.equal(payload.notification.data.test_id, null)
   assert.equal(payload.notification.data.group_id, 31)
   assert.equal(payload.notification.data.message_id, 120)
-  assert.equal(payload.app_badge, "4")
+  assert.equal(payload.notification.app_badge, "4")
+  assert.equal("app_badge" in payload, false)
   assert.equal(payload.notification.tag, "chat-group-31")
+  assert.equal(payload.notification.icon, "https://marugo-s.github.io/line_report/icons/chat-android-192x192-v3.png")
 
   const unsafe = buildDeclarativeChatPushPayload({
     title: "",
     body: "",
     navigatePath: "https://example.invalid/phishing",
     badgeCount: -1,
-  }) as { notification: Record<string, unknown>; app_badge?: string }
+  }) as { notification: Record<string, unknown> }
   assert.equal(unsafe.notification.title, "M-talk")
   assert.equal(unsafe.notification.body, "新しいメッセージがあります")
   assert.equal(unsafe.notification.navigate, "https://marugo-s.github.io/line_report/chat.html")
-  assert.equal("app_badge" in unsafe, false)
+  assert.equal("app_badge" in unsafe.notification, false)
+})
+
+test("chat service worker displays a declarative push and persists delivery diagnostics", async () => {
+  const serviceWorker = await read("public/chat-sw.js")
+  const listeners = new Map<string, (event: any) => void>()
+  const notifications: Array<{ title: string; options: Record<string, unknown> }> = []
+  const diagnostics: Array<Record<string, unknown>> = []
+  const cache = {
+    async add() {},
+    async addAll() {},
+    async put(_request: Request, response: Response) {
+      diagnostics.push(await response.json() as Record<string, unknown>)
+    },
+  }
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Promise,
+    setTimeout,
+    clearTimeout,
+    console,
+    caches: {
+      async open() { return cache },
+      async keys() { return [] },
+      async delete() { return true },
+      async match() { return undefined },
+    },
+    self: {
+      location: { href: "https://marugo-s.github.io/line_report/chat-sw.js", origin: "https://marugo-s.github.io" },
+      navigator: {},
+      registration: {
+        async showNotification(title: string, options: Record<string, unknown>) {
+          notifications.push({ title, options })
+        },
+      },
+      clients: {
+        async matchAll() { return [] },
+        async claim() {},
+      },
+      async skipWaiting() {},
+      addEventListener(type: string, listener: (event: any) => void) {
+        listeners.set(type, listener)
+      },
+    },
+  })
+  vm.runInContext(serviceWorker, context, { filename: "chat-sw.js" })
+
+  const payload = buildDeclarativeChatPushPayload({
+    title: "M-talk 通知テスト",
+    body: "受信確認",
+    navigatePath: "/line_report/chat.html",
+    testId: "123e4567-e89b-42d3-a456-426614174000",
+    tag: "chat-push-test-123e4567-e89b-42d3-a456-426614174000",
+  })
+  let pending: Promise<unknown> | null = null
+  listeners.get("push")?.({
+    data: { json: () => payload },
+    waitUntil(value: Promise<unknown>) { pending = value },
+  })
+  assert.ok(pending)
+  await pending
+
+  assert.equal(notifications.length, 1)
+  assert.equal(notifications[0].title, "M-talk 通知テスト")
+  assert.equal(notifications[0].options.body, "受信確認")
+  assert.deepEqual(diagnostics.map((row) => row.stage).sort(), ["notification_shown", "sw_received"])
+  assert.ok(diagnostics.every((row) => row.test_id === "123e4567-e89b-42d3-a456-426614174000"))
 })
 
 test("Web Push request uses VAPID and aes128gcm encryption", async () => {

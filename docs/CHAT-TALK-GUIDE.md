@@ -77,8 +77,10 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
   ルーム参加、ミュート、送信者除外、メッセージ重複防止を通らない端末診断専用経路とする。
   ページ起動時や再購読直後には自動送信せず、「通知テスト」の明示操作時だけ送る。
 - Apple/WebKit向けを含むペイロードはDeclarative Web Push形式（`web_push: 8030`）にする。
-  `notification.navigate`は絶対HTTPSの同一origin URL、`app_badge`はトップレベル文字列。
-  対応WebKitはService Worker処理に失敗してもOSがfallback通知を表示する。
+  `notification.navigate`は絶対HTTPSの同一origin URL。`app_badge`はWebKit公式どおり
+  `notification`内の文字列にする。対応WebKitはService Worker処理に失敗してもOSがfallback通知を表示する。
+- iPhoneの通知テストは、ホーム画面へ戻せるよう約4秒遅らせて送る。アプリを開いたままでは
+  バナーが出ないことがある。
 - `chat-sw.js`は同じ宣言辞書を従来形式へ変換して`showNotification()`するため、
   Declarative Web Push未対応ブラウザでも通知を維持する。
 - `navigatePath`に外部originを渡しても、`chat_push_payload.ts`でM-talkトップへ固定する。
