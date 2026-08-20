@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 店舗Botの名前を「店名 bot」にする
+
+- Request: Botタブは「Bot」ではなく「クラウディア2 bot」のように店名＋bot。
+- Implementation: 表示名・返信名を `${店名} bot` にする。アイコン文字は店名の頭文字。
+- Operation: Botタブに「クラウディア2 bot」と出る。
+
 ### 2026-08-20 - 店舗Botの表示名を Bot にする
 
 - Request: 店舗Botのアイコン名を店名ではなく Bot にする。

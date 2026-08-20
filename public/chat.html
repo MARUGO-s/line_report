@@ -2066,24 +2066,34 @@
     function botMarkHtml() {
       return '<span class="bot-mark">Bot</span>';
     }
-    function storeBotName() {
-      return 'Bot';
+    function storeBotDisplayName(storeName) {
+      const raw = String(storeName || '').trim();
+      const base = raw.replace(/[\s\u3000]*bot$/i, '').trim() || raw;
+      return base ? `${base} bot` : 'bot';
+    }
+    function findStoreBotUser(id) {
+      const sid = String(id || '');
+      if (!sid) return null;
+      return (registeredUsers || []).find((u) => String(u.id) === sid && isStoreBot(u))
+        || (groupMembers || []).find((u) => String(u.id) === sid && isStoreBot(u))
+        || (inviteMembers || []).find((u) => String(u.id) === sid && isStoreBot(u))
+        || null;
     }
     function personName(user) {
-      return isStoreBot(user) ? storeBotName() : String((user && user.username) || '');
+      return isStoreBot(user) ? storeBotDisplayName(user.username) : String((user && user.username) || '');
     }
     function personAvatarKey(user) {
-      return isStoreBot(user) ? storeBotName() : String((user && user.username) || '');
+      return isStoreBot(user)
+        ? String((user && user.username) || '').replace(/[\s\u3000]*bot$/i, '').trim() || storeBotDisplayName(user && user.username)
+        : String((user && user.username) || '');
     }
     function isStoreBotId(id) {
-      const sid = String(id || '');
-      if (!sid) return false;
-      return (registeredUsers || []).some((u) => String(u.id) === sid && isStoreBot(u))
-        || (groupMembers || []).some((u) => String(u.id) === sid && isStoreBot(u))
-        || (inviteMembers || []).some((u) => String(u.id) === sid && isStoreBot(u));
+      return !!findStoreBotUser(id);
     }
     function speakerName(userId, username) {
-      return isStoreBotId(userId) ? storeBotName() : String(username || '');
+      const bot = findStoreBotUser(userId);
+      if (bot) return personName(bot);
+      return String(username || '');
     }
     // 開いているトークの参加者・既読時刻・リアクション。
     let groupMembers = [];
@@ -2982,7 +2992,7 @@
             <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
             <div class="talk-body">
               <div class="group-item-name"><span>${escapeHtml(personName(user))}</span>${botMarkHtml()}</div>
-              <div class="group-item-info">${escapeHtml(user.username || '')}</div>
+              <div class="group-item-info">1対1、またはルームへ招待</div>
             </div>
           `;
           const talkBtn = document.createElement('button');
@@ -4514,7 +4524,7 @@
     function renderContentWithMentions(content, mentions) {
       const text = String(content ?? '');
       const names = groupMembers
-        .flatMap((u) => isStoreBot(u) ? [storeBotName(), u.username] : [u.username])
+        .flatMap((u) => isStoreBot(u) ? [personName(u), u.username] : [u.username])
         .filter(Boolean)
         .sort((a, b) => b.length - a.length);
       if (!names.length) return escapeHtml(text);
