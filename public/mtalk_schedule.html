@@ -97,7 +97,7 @@
       margin: 8px 12px 16px; color: #8e8e93; font-size: 13px; line-height: 1.6;
     }
     .error { color: #ff9f0a; }
-    .day { padding: 4px 12px 14px; scroll-margin-top: 8px; }
+    .day { padding: 4px 12px 14px; scroll-margin-top: 64px; }
     .day h2 {
       font-size: 13px; color: #8e8e93; font-weight: 700;
       padding: 10px 2px 8px; border-top: 1px solid #2c2c2e;
@@ -324,14 +324,41 @@
       }
       $('calGrid').innerHTML = cells.join('');
       $('calGrid').querySelectorAll('[data-day]').forEach((btn) => {
-        btn.onclick = () => {
-          selectedDay = btn.getAttribute('data-day') || '';
-          renderCalendar();
-          renderList();
-          const target = document.getElementById('day-' + selectedDay);
-          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        };
+        btn.onclick = () => selectDay(btn.getAttribute('data-day') || '');
       });
+    }
+
+    function dayHasKind(key, kind) {
+      if (kind === 'event') return (payload?.events || []).some((row) => dayKey(row.starts_at) === key);
+      return (payload?.reservations || []).some((row) => dayKey(row.visit_at) === key);
+    }
+
+    function selectDay(key) {
+      if (!key) return;
+      selectedDay = key;
+      const hasResv = dayHasKind(key, 'reservation');
+      const hasEvt = dayHasKind(key, 'event');
+      if (tab === 'reservations' && !hasResv && hasEvt) {
+        tab = 'events';
+        document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.getAttribute('data-tab') === 'events'));
+      } else if (tab === 'events' && !hasEvt && hasResv) {
+        tab = 'reservations';
+        document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.getAttribute('data-tab') === 'reservations'));
+      }
+      renderAll();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => scrollToSelectedDay());
+      });
+    }
+
+    function scrollToSelectedDay() {
+      if (!selectedDay) return;
+      const target = document.getElementById('day-' + selectedDay);
+      if (!target) return;
+      const header = document.querySelector('header');
+      const offset = (header ? header.getBoundingClientRect().height : 0) + 8;
+      const top = target.getBoundingClientRect().top + window.scrollY - offset;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }
 
     function renderAll() {
@@ -367,22 +394,35 @@
             raw: row,
           }));
       items.sort((a, b) => String(a.sort).localeCompare(String(b.sort)));
-      if (!items.length) {
-        $('list').innerHTML = '<p class="empty">' + (tab === 'events' ? 'この月の予定はありません。' : 'この月の予約はありません。') + '</p>';
-        return;
-      }
       const groups = new Map();
       for (const item of items) {
         const key = dayKey(item.iso) || 'none';
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(item);
       }
+      if (selectedDay && !groups.has(selectedDay)) groups.set(selectedDay, []);
+      if (!groups.size) {
+        $('list').innerHTML = '<p class="empty">' + (tab === 'events' ? 'この月の予定はありません。' : 'この月の予約はありません。') + '</p>';
+        return;
+      }
+      const orderedKeys = [...groups.keys()].sort((a, b) => {
+        if (a === 'none') return 1;
+        if (b === 'none') return -1;
+        return a.localeCompare(b);
+      });
       const html = [];
-      for (const [key, rows] of groups) {
+      for (const key of orderedKeys) {
+        const rows = groups.get(key) || [];
+        const heading = key === 'none'
+          ? '日時未設定'
+          : (rows[0] ? dayLabel(rows[0].iso) : dayLabel(key + 'T12:00:00+09:00'));
         html.push(
           '<section class="day' + (key === selectedDay ? ' selected-day' : '') + '" id="day-' + escapeHtml(key) + '">' +
-          '<h2>' + escapeHtml(key === 'none' ? '日時未設定' : dayLabel(rows[0].iso)) + '</h2>'
+          '<h2>' + escapeHtml(heading) + '</h2>'
         );
+        if (!rows.length) {
+          html.push('<p class="empty">' + (tab === 'events' ? 'この日の予定はありません。' : 'この日の予約はありません。') + '</p>');
+        }
         rows.forEach((row, index) => {
           html.push(
             '<button type="button" class="card" data-kind="' + row.kind + '" data-key="' + escapeHtml(key) + '" data-index="' + index + '">' +
