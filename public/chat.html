@@ -3718,6 +3718,7 @@
       paintChatHeader(group);
       resetMessageView();
       await loadGroupContext(groupId);
+      paintChatHeader(group);
       loadScheduledMessages();
 
       try {
@@ -4371,6 +4372,7 @@
 
       await contextPromise;
       if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
+      paintChatHeader(group);
       renderGroups();
       if (!isMobileLayout()) $('messageInput').focus();
     }
