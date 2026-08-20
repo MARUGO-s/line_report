@@ -132,7 +132,9 @@ function walkLineFlex(
   if (rec.type === 'button' && rec.action && typeof rec.action === 'object') {
     const action = rec.action as Record<string, unknown>
     const label = String(action.label || rec.label || '').trim()
-    const command = String(action.text || action.displayText || '').trim()
+    const command = action.type === 'postback'
+      ? String(action.data || action.displayText || '').trim()
+      : String(action.text || action.displayText || '').trim()
     const url = action.type === 'uri' ? String(action.uri || '') : ''
     const style = rec.style === 'primary' ? 'primary' : 'secondary'
     if (url) out.actions.push({ label: label || '開く', url, style })

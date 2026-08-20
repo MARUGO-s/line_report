@@ -128,7 +128,7 @@ export function isLineDirectMessageEvent(event: LineBotEvent): boolean {
 /** 招待グループ（C…）または複数人トーク（R…） */
 export function isLineInvitedChatRoomId(roomId: string): boolean {
   const id = String(roomId ?? '').trim()
-  return id.startsWith('C') || id.startsWith('R')
+  return id.startsWith('C') || id.startsWith('R') || id.startsWith('mtalk-group-')
 }
 
 /** 招待ルーム上のトークか（source.type / groupId を最優先。room_id の U 誤判定を防ぐ） */
@@ -148,8 +148,10 @@ export function isLineDirectMessageChat(event: LineBotEvent, roomId: string): bo
 
 /** 1対1の room_id（LINE ユーザーID = U…。C/R は常に false） */
 export function isDirectMessageRoomId(roomId: string): boolean {
-  if (isLineInvitedChatRoomId(roomId)) return false
-  return String(roomId ?? '').trim().startsWith('U')
+  const id = String(roomId ?? '').trim()
+  if (id.startsWith('mtalk-dm-')) return true
+  if (isLineInvitedChatRoomId(id)) return false
+  return id.startsWith('U')
 }
 
 /** 1対1からの検索は全会話検索ONルームを横断。グループ等は当該ルームのみ */
@@ -168,7 +170,7 @@ function isLineSearchIntentText(text: string, flags: RoomSearchFlags | null): bo
   return !!(salesInput && (flags.receipt_midreport_enabled || flags.receipt_monthend_report_enabled))
 }
 
-function parsePostbackKind(data: string): SearchKind | 'menu' | 'cancel' | 'help' | null {
+export function parsePostbackKind(data: string): SearchKind | 'menu' | 'cancel' | 'help' | null {
   const raw = String(data ?? '').trim()
   if (raw === POSTBACK_MENU) return 'menu'
   if (raw === POSTBACK_CANCEL) return 'cancel'
@@ -182,7 +184,7 @@ function parsePostbackKind(data: string): SearchKind | 'menu' | 'cancel' | 'help
   return null
 }
 
-function detectKindTrigger(text: string): SearchKind | null {
+export function detectKindTrigger(text: string): SearchKind | null {
   const compact = normalizeTriggerText(text)
   for (const [kind, triggers] of Object.entries(KIND_TRIGGERS) as Array<[SearchKind, string[]]>) {
     if (triggers.some((t) => compact === normalizeTriggerText(t))) return kind
@@ -190,12 +192,12 @@ function detectKindTrigger(text: string): SearchKind | null {
   return null
 }
 
-function isMenuTrigger(text: string): boolean {
+export function isMenuTrigger(text: string): boolean {
   const compact = normalizeTriggerText(text).toLowerCase()
   return MENU_TRIGGERS.has(compact) || MENU_TRIGGERS.has(normalizeTriggerText(text))
 }
 
-function isCancelText(text: string): boolean {
+export function isCancelText(text: string): boolean {
   const t = normalizeTriggerText(text)
   return t === 'キャンセル' || t === 'cancel' || t === 'やめる'
 }
@@ -483,7 +485,7 @@ async function setSearchPending(
   if (error) console.error('setSearchPending failed:', error.message)
 }
 
-async function clearSearchPending(
+export async function clearSearchPending(
   supabase: SupabaseClient,
   roomId: string,
   userId: string,
@@ -496,7 +498,7 @@ async function clearSearchPending(
   if (error) console.error('clearSearchPending failed:', error.message)
 }
 
-async function loadSearchPending(
+export async function loadSearchPending(
   supabase: SupabaseClient,
   roomId: string,
   userId: string,
@@ -710,7 +712,7 @@ function buildGroupSalesDatePromptFlex(): Record<string, unknown> {
   }
 }
 
-function buildSearchEntryReply(
+export function buildSearchEntryReply(
   flags: RoomSearchFlags,
   event: LineBotEvent,
   roomId: string,
@@ -728,7 +730,7 @@ function buildSearchEntryReply(
 }
 
 /** 全機能の使い方を1枚にまとめた案内（「使い方」ボタン／help postback で返す）。文脈に依らず安全な情報表示のみ。 */
-function buildAllFeaturesGuideFlex(): Record<string, unknown> {
+export function buildAllFeaturesGuideFlex(): Record<string, unknown> {
   const h = (text: string): Record<string, unknown> => ({ type: 'text', text, weight: 'bold', size: 'sm', wrap: true, margin: 'md' })
   const d = (text: string): Record<string, unknown> => ({ type: 'text', text, size: 'xs', color: '#666666', wrap: true, margin: 'xs' })
   return {
@@ -939,7 +941,7 @@ type SalesDateInput =
   | { mode: 'day'; iso: string; compact: string }
   | { mode: 'month'; year: number; month: number; yyyymm: string; fromIso: string; toIsoExclusive: string }
 
-function parseSalesDateInput(text: string): SalesDateInput | null {
+export function parseSalesDateInput(text: string): SalesDateInput | null {
   const compact = normalizeTriggerText(text)
   const dayIso = parseSalesDateYyyymmdd(compact)
   if (dayIso) return { mode: 'day', iso: dayIso, compact }
@@ -1268,7 +1270,7 @@ function dedupeSalesSearchRows(
   return out
 }
 
-async function executeSalesSearch(
+export async function executeSalesSearch(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
   roomId: string,
@@ -1639,7 +1641,7 @@ async function executeSalesSearch(
   }
 }
 
-async function startSearchKind(
+export async function startSearchKind(
   supabase: SupabaseClient,
   roomId: string,
   userId: string,
@@ -1690,7 +1692,7 @@ async function startSearchKind(
   return buildKindPromptFlex(kind)
 }
 
-async function runPendingSearch(
+export async function runPendingSearch(
   supabase: SupabaseClient,
   registry: StoreRegistryRow,
   roomId: string,

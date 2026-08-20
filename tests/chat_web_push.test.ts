@@ -275,6 +275,41 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   assert.match(todayCron, /loadMtalkStoreBot/)
   const gmailCron = await read("supabase/functions/gmail-alert-cron/index.ts")
   assert.match(gmailCron, /isMtalkSyntheticRoomId/)
+  assert.match(fn, /handleMtalkSearchText/)
+  assert.match(flexCard, /action\.type === 'postback'/)
+  const search = await read("supabase/functions/_shared/mtalk_search.ts")
+  assert.match(search, /export async function handleMtalkSearchText/)
+  assert.match(search, /mtalk-dm-/)
+  assert.match(search, /buildSearchEntryReply/)
+})
+
+test("LINE search menu Flex becomes M-talk commands", () => {
+  const flex = {
+    type: 'flex',
+    altText: '検索メニュー',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          { type: 'text', text: '過去データの検索（1対1）', weight: 'bold' },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          { type: 'button', style: 'primary', action: { type: 'postback', label: '会話検索', data: 'srch=msg', displayText: '会話検索' } },
+          { type: 'button', style: 'primary', action: { type: 'postback', label: '売上検索', data: 'srch=sal', displayText: '売上検索' } },
+          { type: 'button', style: 'secondary', action: { type: 'postback', label: '📖 使い方（全機能）', data: 'srch=help', displayText: '使い方' } },
+        ],
+      },
+    },
+  }
+  const converted = mtalkCardFromLineReply(flex)
+  const commands = (converted.card?.actions ?? []).map((action) => action.command)
+  assert.deepEqual(commands, ['srch=msg', 'srch=sal', 'srch=help'])
 })
 
 test("M-talk room ids map to room_summary_settings keys", () => {

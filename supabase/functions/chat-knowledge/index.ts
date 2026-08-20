@@ -11,6 +11,8 @@ import {
 } from "../_shared/chat_store_file_bridge.ts"
 import { postChatCard } from "../_shared/chat_bridge.ts"
 import { ensureMtalkRoomSettings, loadMtalkRoomFlags } from "../_shared/mtalk_room_settings.ts"
+import { handleMtalkSearchText } from "../_shared/mtalk_search.ts"
+import { loadStoreRegistryRow } from "../_shared/chat_store_file_bridge.ts"
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
 const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/room_settings.html"
@@ -240,6 +242,18 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   const flags = await loadMtalkRoomFlags(supabase, groupId)
   const senderName = String(message.username || "M-talk")
   const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()
+
+  const registry = await loadStoreRegistryRow(supabase, storeKey)
+  if (registry && message.kind !== "image" && !imagePathFromPayload(message.payload)) {
+    const searched = await handleMtalkSearchText(supabase, {
+      groupId,
+      senderUserId: String(message.user_id || ""),
+      text,
+      registry,
+      asUser: storeBot,
+    })
+    if (searched) return json({ ok: true, processed: true, kind: "search" }, 200)
+  }
 
   // LINE と同じ: #メモ が無い画像はメディア閲覧へ保存し、レシートなら解析して返す。
   if (message.kind === "image" || imagePathFromPayload(message.payload)) {
