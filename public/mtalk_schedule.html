@@ -169,6 +169,7 @@
     .sheet {
       width: 100%; max-width: 520px; background: var(--surface);
       border-radius: 18px 18px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+      max-height: 92vh; overflow-y: auto;
     }
     .sheet h3 { font-size: 17px; margin-bottom: 10px; }
     .sheet.sheet-resv h3 { color: var(--resv-text); }
@@ -183,6 +184,32 @@
       margin-top: 12px; width: 100%; height: 42px; border: 0; border-radius: 12px;
       background: var(--card); color: var(--text); font-weight: 700; font-family: inherit; cursor: pointer;
     }
+    .actions { padding: 0 12px 12px; }
+    .add-btn {
+      width: 100%; height: 42px; border: 0; border-radius: 12px;
+      background: var(--accent); color: #fff; font-weight: 800;
+      font-family: inherit; cursor: pointer; font-size: 15px;
+    }
+    .add-btn:disabled { opacity: 0.45; cursor: default; }
+    .add-btn.hidden { display: none; }
+    .sheet .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .sheet label { font-size: 12px; color: var(--muted); font-weight: 700; }
+    .sheet input, .sheet textarea {
+      width: 100%; border: 1px solid var(--line); background: var(--card);
+      color: var(--text); border-radius: 10px; padding: 10px 12px;
+      font-size: 16px; font-family: inherit;
+    }
+    .sheet textarea { min-height: 72px; resize: vertical; }
+    .sheet .actions-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .btn {
+      flex: 1; min-width: 90px; height: 42px; border: 0; border-radius: 12px;
+      font-weight: 700; font-family: inherit; cursor: pointer; font-size: 15px;
+    }
+    .btn.primary { background: var(--accent); color: #fff; }
+    .btn.danger { background: #b3382e; color: #fff; }
+    .btn.ghost { background: var(--card); color: var(--text); }
+    .btn:disabled { opacity: 0.55; }
+    .form-error { color: var(--warn); font-size: 13px; min-height: 16px; margin: 4px 0 0; }
   </style>
   <script src="app-theme.js"></script>
 </head>
@@ -204,6 +231,9 @@
     <div class="tabs">
       <button class="tab active" type="button" data-tab="reservations">予約</button>
       <button class="tab" type="button" data-tab="events">予定</button>
+    </div>
+    <div class="actions">
+      <button type="button" class="add-btn hidden" id="addBtn">＋ 予約を追加</button>
     </div>
     <p class="login hidden" id="loginNote">M-talk にログインしてから開いてください。</p>
     <p class="error hidden" id="errorNote"></p>
@@ -240,6 +270,7 @@
     let month = currentMonth();
     let payload = null;
     let selectedDay = '';
+    let editing = null;
 
     $('backLink').href = './chat.html' + (Number.isSafeInteger(groupId) && groupId > 0 ? ('?group=' + encodeURIComponent(String(groupId))) : '');
 
@@ -308,6 +339,56 @@
       if (isBirthdayText(value)) return value;
       return 'お誕生日: ' + value;
     }
+    function isoToLocalInput(iso) {
+      const date = new Date(iso);
+      if (!iso || Number.isNaN(date.getTime())) return '';
+      const pad = (n) => String(n).padStart(2, '0');
+      return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+    function localInputToIso(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const date = new Date(raw);
+      return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+    }
+    function isoToMonth(iso) {
+      const key = dayKey(iso);
+      return key ? key.slice(0, 7) : '';
+    }
+    function defaultDateTimeValue(hour) {
+      const key = selectedDay || dayKey(new Date().toISOString());
+      return (key || currentMonth() + '-01') + 'T' + String(hour || '18').padStart(2, '0') + ':00';
+    }
+    async function authHeaders() {
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error('ログインしてください。');
+      return { Authorization: 'Bearer ' + token, apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' };
+    }
+    function scheduleApiUrl(path) {
+      return CONFIG.adminApiUrl
+        ? CONFIG.adminApiUrl(path)
+        : (SUPABASE_URL.replace(/\/+$/, '') + '/functions/v1/admin-api' + path);
+    }
+    async function apiSend(path, method, body) {
+      const response = await fetch(scheduleApiUrl(path), {
+        method,
+        headers: await authHeaders(),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || ('HTTP ' + response.status));
+      return result;
+    }
+    function updateAddButton() {
+      const btn = $('addBtn');
+      if (!btn) return;
+      const loggedIn = $('loginNote').classList.contains('hidden');
+      const ready = loggedIn && !!payload;
+      btn.classList.toggle('hidden', !ready);
+      btn.textContent = tab === 'events' ? '＋ 予定を追加' : '＋ 予約を追加';
+      btn.disabled = tab === 'reservations' && payload && !payload.reservation_available;
+    }
     function reservationFlagsHtml(row) {
       const flags = [];
       const allergy = notableAllergy(row.allergy_label);
@@ -326,6 +407,7 @@
         renderAll();
       };
     });
+    $('addBtn').onclick = () => openEditForm(tab === 'events' ? 'event' : 'reservation', null);
     $('prevMonth').onclick = () => { month = shiftMonth(month, -1); selectedDay = ''; load(); };
     $('nextMonth').onclick = () => { month = shiftMonth(month, 1); selectedDay = ''; load(); };
 
@@ -338,6 +420,7 @@
         $('errorNote').classList.remove('hidden');
         $('calGrid').innerHTML = '';
         $('list').innerHTML = '';
+        updateAddButton();
         return;
       }
       const { data: sessionData } = await sb.auth.getSession();
@@ -346,6 +429,7 @@
         $('loginNote').classList.remove('hidden');
         $('calGrid').innerHTML = '';
         $('list').innerHTML = '';
+        updateAddButton();
         return;
       }
       try {
@@ -362,10 +446,12 @@
         $('roomSub').textContent = [result.room_name, storeName].filter(Boolean).join(' / ');
         renderAll();
       } catch (error) {
+        payload = null;
         $('errorNote').textContent = error.message || '読み込みに失敗しました。';
         $('errorNote').classList.remove('hidden');
         $('calGrid').innerHTML = '';
         $('list').innerHTML = '';
+        updateAddButton();
       }
     }
 
@@ -459,6 +545,7 @@
     function renderAll() {
       renderCalendar();
       renderList();
+      updateAddButton();
     }
 
     function renderList() {
@@ -545,6 +632,7 @@
     }
 
     function openDetail(kind, raw) {
+      editing = { kind, raw, mode: 'view' };
       const rows = kind === 'event'
         ? [
             { label: '日時', value: (timeLabel(raw.starts_at) || '') + (raw.ends_at ? ' – ' + timeLabel(raw.ends_at) : ''), cls: '' },
@@ -559,8 +647,14 @@
         rows.filter((row) => String(row.value || '').trim()).map((row) =>
           '<div class="row' + (row.cls ? ' ' + row.cls : '') + '"><span>' + escapeHtml(row.label) + '</span><div>' + escapeHtml(row.value) + '</div></div>'
         ).join('') +
+        '<div class="actions-row">' +
+          '<button class="btn primary" type="button" id="detailEditBtn">編集・日付変更</button>' +
+          '<button class="btn danger" type="button" id="detailCancelBtn">' + (kind === 'event' ? '削除' : 'キャンセル') + '</button>' +
+        '</div>' +
         '<button class="close" type="button" onclick="closeDetail()">閉じる</button>';
       $('detail').classList.remove('hidden');
+      $('detailEditBtn').onclick = () => openEditForm(kind, raw);
+      $('detailCancelBtn').onclick = () => cancelCurrentItem(kind, raw);
     }
     function reservationDetailRows(raw) {
       const allergy = notableAllergy(raw.allergy_label);
@@ -590,7 +684,158 @@
       );
       return rows;
     }
-    function closeDetail() { $('detail').classList.add('hidden'); }
+    function fieldHtml(id, label, type, value, extra) {
+      const input = type === 'textarea'
+        ? '<textarea id="' + id + '"' + (extra || '') + '>' + escapeHtml(value || '') + '</textarea>'
+        : '<input id="' + id + '" type="' + type + '" value="' + escapeHtml(value || '') + '"' + (extra || '') + '>';
+      return '<div class="field"><label for="' + id + '">' + escapeHtml(label) + '</label>' + input + '</div>';
+    }
+    function openEditForm(kind, raw) {
+      if (kind === 'reservation' && payload && !payload.reservation_available) {
+        $('errorNote').textContent = payload.reservation_note || 'このルームでは予約を編集できません。';
+        $('errorNote').classList.remove('hidden');
+        return;
+      }
+      editing = { kind, raw: raw || null, mode: raw ? 'edit' : 'create' };
+      const isEvent = kind === 'event';
+      const title = raw
+        ? (isEvent ? '予定を編集' : '予約を編集')
+        : (isEvent ? '予定を追加' : '予約を追加');
+      let fields = '';
+      if (isEvent) {
+        fields =
+          fieldHtml('ef_starts', '開始日時', 'datetime-local', raw ? isoToLocalInput(raw.starts_at) : defaultDateTimeValue('10')) +
+          fieldHtml('ef_ends', '終了日時（任意）', 'datetime-local', raw ? isoToLocalInput(raw.ends_at) : '') +
+          fieldHtml('ef_title', '内容', 'text', raw ? (raw.title || '') : '') +
+          fieldHtml('ef_desc', '詳細', 'textarea', raw ? (raw.description || '') : '');
+      } else {
+        fields =
+          fieldHtml('ef_visit', '来店日時', 'datetime-local', raw ? isoToLocalInput(raw.visit_at) : defaultDateTimeValue('18')) +
+          fieldHtml('ef_name', '予約者', 'text', raw ? (raw.customer_name || '') : '') +
+          fieldHtml('ef_phone', 'TEL', 'tel', raw ? (raw.customer_phone || '') : '') +
+          fieldHtml('ef_party', '人数', 'text', raw ? (raw.party_size_label || '') : '', ' placeholder="例: 2名"') +
+          fieldHtml('ef_plan', 'コース', 'text', raw ? (raw.plan_label || '') : '') +
+          fieldHtml('ef_allergy', 'アレルギー', 'text', notableAllergy(raw && raw.allergy_label) || '') +
+          fieldHtml('ef_anniversary', 'お誕生日・記念日', 'text', raw ? (raw.anniversary_label || '') : '') +
+          fieldHtml('ef_request', '要望', 'text', raw ? (raw.request_note_label || '') : '') +
+          fieldHtml('ef_dislikes', '苦手', 'text', raw ? (raw.dislikes_label || '') : '');
+      }
+      $('detailSheet').className = 'sheet' + (isEvent ? '' : ' sheet-resv');
+      $('detailSheet').innerHTML =
+        '<h3>' + escapeHtml(title) + '</h3>' +
+        fields +
+        '<p class="form-error" id="editError"></p>' +
+        '<div class="actions-row">' +
+          '<button class="btn primary" type="button" id="editSaveBtn">保存</button>' +
+          (raw ? '<button class="btn danger" type="button" id="editCancelBtn">' + (isEvent ? '削除' : 'キャンセル') + '</button>' : '') +
+        '</div>' +
+        '<button class="close" type="button" onclick="closeDetail()">閉じる</button>';
+      $('detail').classList.remove('hidden');
+      $('editSaveBtn').onclick = () => saveEditForm();
+      if (raw && $('editCancelBtn')) $('editCancelBtn').onclick = () => cancelCurrentItem(kind, raw);
+    }
+    async function saveEditForm() {
+      if (!editing) return;
+      const err = $('editError');
+      const saveBtn = $('editSaveBtn');
+      err.textContent = '';
+      saveBtn.disabled = true;
+      try {
+        if (editing.kind === 'event') {
+          const starts = localInputToIso($('ef_starts').value);
+          if (!starts) throw new Error('開始日時を入力してください。');
+          const title = String($('ef_title').value || '').trim();
+          if (!title) throw new Error('予定の内容を入力してください。');
+          const endsRaw = String($('ef_ends').value || '').trim();
+          const body = {
+            group_id: groupId,
+            title,
+            description: String($('ef_desc').value || '').trim(),
+            starts_at: starts,
+            ends_at: endsRaw ? localInputToIso(endsRaw) : '',
+          };
+          if (editing.raw && editing.raw.id) {
+            body.id = editing.raw.id;
+            await apiSend('/chat-schedule/event', 'PATCH', body);
+          } else {
+            await apiSend('/chat-schedule/event', 'POST', body);
+          }
+          const nextMonth = isoToMonth(starts);
+          if (nextMonth) month = nextMonth;
+          tab = 'events';
+          document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.getAttribute('data-tab') === 'events'));
+          selectedDay = dayKey(starts);
+        } else {
+          const visitAt = localInputToIso($('ef_visit').value);
+          if (!visitAt) throw new Error('来店日時を入力してください。');
+          const name = String($('ef_name').value || '').trim();
+          if (!name) throw new Error('予約者名を入力してください。');
+          const body = {
+            group_id: groupId,
+            visit_at: visitAt,
+            customer_name: name,
+            customer_phone: String($('ef_phone').value || '').trim(),
+            party_size_label: String($('ef_party').value || '').trim(),
+            plan_label: String($('ef_plan').value || '').trim(),
+            allergy_label: String($('ef_allergy').value || '').trim(),
+            anniversary_label: String($('ef_anniversary').value || '').trim(),
+            request_note_label: String($('ef_request').value || '').trim(),
+            dislikes_label: String($('ef_dislikes').value || '').trim(),
+          };
+          if (editing.raw && editing.raw.id) {
+            body.source = editing.raw.source;
+            body.id = editing.raw.id;
+            await apiSend('/chat-schedule/reservation', 'PATCH', body);
+          } else {
+            await apiSend('/chat-schedule/reservation', 'POST', body);
+          }
+          const nextMonth = isoToMonth(visitAt);
+          if (nextMonth) month = nextMonth;
+          tab = 'reservations';
+          document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.getAttribute('data-tab') === 'reservations'));
+          selectedDay = dayKey(visitAt);
+        }
+        closeDetail();
+        await load();
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => scrollToSelectedDay());
+        });
+      } catch (error) {
+        err.textContent = error.message || '保存に失敗しました。';
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+    async function cancelCurrentItem(kind, raw) {
+      if (!raw || !raw.id) return;
+      const isEvent = kind === 'event';
+      const ok = confirm(isEvent
+        ? 'この予定を削除します。よろしいですか？'
+        : 'この予約をキャンセルします。一覧からは消えますが、記録は残ります。よろしいですか？');
+      if (!ok) return;
+      try {
+        if (isEvent) {
+          await apiSend('/chat-schedule/event', 'PATCH', { group_id: groupId, id: raw.id, cancel: true });
+        } else {
+          await apiSend('/chat-schedule/reservation', 'PATCH', {
+            group_id: groupId,
+            source: raw.source,
+            id: raw.id,
+            cancel: true,
+          });
+        }
+        closeDetail();
+        await load();
+      } catch (error) {
+        const err = $('editError');
+        if (err) err.textContent = error.message || '処理に失敗しました。';
+        else alert(error.message || '処理に失敗しました。');
+      }
+    }
+    function closeDetail() {
+      $('detail').classList.add('hidden');
+      editing = null;
+    }
     window.closeDetail = closeDetail;
     load();
   </script>
