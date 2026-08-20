@@ -2045,6 +2045,10 @@
     let messageSearchHits = [];
     let uploadingImage = false;
     const signedImageUrls = new Map();
+    const SIGNED_URL_STORAGE_KEY = 'mtalk-signed-images-v1';
+    const ROOM_VIEW_CACHE_LIMIT = 12;
+    const roomViewCache = new Map();
+    let selectGroupSeq = 0;
     const MESSAGE_PAGE_SIZE = 50;
     const MESSAGE_COLUMNS =
       'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, created_at';
@@ -3277,6 +3281,7 @@
     }
 
     function closeChat() {
+      if (currentGroupId) snapshotRoomView(currentGroupId);
       currentGroupId = null;
       hideMemberStrip();
       document.body.classList.remove('chat-open');
@@ -3614,6 +3619,9 @@
     async function openMessageAt(groupId, createdAt, messageId) {
       const group = myGroups.find((g) => g.id === groupId);
       if (!group) return;
+      if (currentGroupId && Number(currentGroupId) !== Number(groupId)) {
+        snapshotRoomView(currentGroupId);
+      }
 
       currentGroupId = groupId;
       markGroupRead(groupId);
@@ -4129,8 +4137,100 @@
       }
     }
 
+    function pruneRoomViewCache() {
+      while (roomViewCache.size > ROOM_VIEW_CACHE_LIMIT) {
+        const first = roomViewCache.keys().next().value;
+        roomViewCache.delete(first);
+      }
+    }
+
+    function snapshotRoomView(groupId) {
+      const id = Number(groupId);
+      if (!id || !currentMessages.length) return;
+      roomViewCache.delete(id);
+      roomViewCache.set(id, {
+        messages: currentMessages.slice(),
+        reactions: new Map(reactionsByMessage),
+        quoted: new Map(quotedMessages),
+        members: (groupMembers || []).slice(),
+        readStates: (groupReadStates || []).slice(),
+        historyExhausted: !!historyExhausted,
+        viewHasLatest: !!viewHasLatest,
+      });
+      pruneRoomViewCache();
+    }
+
+    function applyRoomViewCache(groupId) {
+      const cached = roomViewCache.get(Number(groupId));
+      if (!cached || !cached.messages.length) return false;
+      currentMessages = cached.messages.slice();
+      reactionsByMessage = new Map(cached.reactions);
+      quotedMessages = new Map(cached.quoted);
+      groupMembers = cached.members.slice();
+      groupReadStates = cached.readStates.slice();
+      historyExhausted = cached.historyExhausted;
+      viewHasLatest = cached.viewHasLatest;
+      followNewMessages = true;
+      loadingHistory = false;
+      seenMessageIds = new Set(currentMessages.map((m) => m.id));
+      renderMessageList();
+      updateChatHeaderMeta();
+      return true;
+    }
+
+    function latestMessageFingerprint(list) {
+      if (!list || !list.length) return '';
+      const last = list[list.length - 1];
+      return `${list.length}:${last.id}:${last.created_at}`;
+    }
+
+    function mergeLatestPage(existing, latestPage) {
+      if (!latestPage.length) return (existing || []).slice();
+      const latestIds = new Set(latestPage.map((m) => m.id));
+      const firstNew = latestPage[0];
+      const older = (existing || []).filter((m) => (
+        !latestIds.has(m.id)
+        && String(m.created_at) < String(firstNew.created_at)
+      ));
+      return older.concat(latestPage);
+    }
+
+    function restoreSignedImageCache() {
+      try {
+        const raw = sessionStorage.getItem(SIGNED_URL_STORAGE_KEY);
+        if (!raw) return;
+        const now = Date.now();
+        const rows = JSON.parse(raw);
+        if (!Array.isArray(rows)) return;
+        rows.forEach((row) => {
+          if (row && row.path && row.url && Number(row.expiresAt) > now + 60000) {
+            signedImageUrls.set(row.path, { url: row.url, expiresAt: Number(row.expiresAt) });
+          }
+        });
+      } catch (_) { /* ignore */ }
+    }
+
+    function persistSignedImageCache() {
+      try {
+        const now = Date.now();
+        const rows = [];
+        signedImageUrls.forEach((value, path) => {
+          if (value && value.url && Number(value.expiresAt) > now + 60000) {
+            rows.push({ path, url: value.url, expiresAt: value.expiresAt });
+          }
+        });
+        sessionStorage.setItem(SIGNED_URL_STORAGE_KEY, JSON.stringify(rows.slice(-200)));
+      } catch (_) { /* ignore */ }
+    }
+
+    restoreSignedImageCache();
+
     async function selectGroup(group) {
+      if (currentGroupId && Number(currentGroupId) !== Number(group.id)) {
+        snapshotRoomView(currentGroupId);
+      }
       currentGroupId = group.id;
+      const seq = ++selectGroupSeq;
       if (group.hidden_at) {
         group.hidden_at = null;
         setTalkHidden(group, false).catch((error) => console.error('Unhide error:', error));
@@ -4144,8 +4244,18 @@
       $('inputArea').classList.remove('hidden');
       hideMemberStrip();
       paintChatHeader(group);
-      resetMessageView();
-      await loadGroupContext(group.id);
+      closeMessageMenu();
+      clearReplyTarget();
+      if ($('mentionPop')) $('mentionPop').classList.add('hidden');
+
+      const fromCache = applyRoomViewCache(group.id);
+      if (fromCache) {
+        scrollMessagesToBottom();
+      } else {
+        resetMessageView();
+      }
+
+      const contextPromise = loadGroupContext(group.id);
       loadScheduledMessages();
 
       try {
@@ -4156,15 +4266,25 @@
           .order('created_at', { ascending: false })
           .limit(MESSAGE_PAGE_SIZE);
         if (error) throw error;
+        if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
 
         const loaded = (data || []).reverse();
         if (loaded.length < MESSAGE_PAGE_SIZE) historyExhausted = true;
-        await setMessages(loaded);
-        scrollMessagesToBottom();
+        const merged = fromCache ? mergeLatestPage(currentMessages, loaded) : loaded;
+        const before = latestMessageFingerprint(currentMessages);
+        const after = latestMessageFingerprint(merged);
+        if (!fromCache || before !== after) {
+          await setMessages(merged);
+          if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
+          scrollMessagesToBottom();
+        }
+        snapshotRoomView(group.id);
       } catch (error) {
         console.error('Load messages error:', error);
       }
 
+      await contextPromise;
+      if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
       renderGroups();
       if (!isMobileLayout()) $('messageInput').focus();
     }
@@ -4279,6 +4399,7 @@
     }
 
     async function setMessages(list) {
+      const groupId = currentGroupId;
       currentMessages = list.slice();
       seenMessageIds = new Set(currentMessages.map((m) => m.id));
       renderMessageList();
@@ -4287,6 +4408,7 @@
         loadReactions(currentMessages.map((m) => m.id)),
         loadQuotedMessages(currentMessages)
       ]);
+      if (Number(currentGroupId) !== Number(groupId)) return;
       renderMessageList();
     }
 
@@ -4385,7 +4507,7 @@
         bodyHtml = cards.map(renderCard).join('');
       } else if (image) {
         const ratio = (image.w && image.h) ? ` style="aspect-ratio:${image.w}/${image.h}"` : '';
-        bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像"${ratio} loading="lazy">`;
+        bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像"${ratio} loading="lazy" decoding="async">`;
       } else {
         bodyHtml = `<div class="message-bubble"><span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span></div>`;
       }
@@ -4865,6 +4987,7 @@
             loadQuotedMessages(older)
           ]);
           renderMessageList();
+          snapshotRoomView(currentGroupId);
           // 読み込み前に見ていた位置を保つ。
           el.scrollTop = el.scrollHeight - prevHeight + prevTop;
         }
@@ -4941,6 +5064,7 @@
         const cached = signedImageUrls.get(node.dataset.path);
         if (cached && node.src !== cached.url) node.src = cached.url;
       });
+      persistSignedImageCache();
     }
 
     function pickChatImage() {
