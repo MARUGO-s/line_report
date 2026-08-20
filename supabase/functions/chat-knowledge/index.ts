@@ -206,7 +206,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     const storeBotForSettings = (fromDispatch || resolved.storeKey)
       ? await loadChatStoreBot(supabase, fromDispatch || String(resolved.storeKey ?? ""))
       : null
-    const url = `${ROOM_SETTINGS_PAGE}?from=chat&group_id=${groupId}&v=20260820`
+    const url = `${ROOM_SETTINGS_PAGE}?from=chat&group_id=${groupId}&v=202608201340`
     if (!ensured) {
       await replyInRoom(supabase, groupId, "このルームの設定を開けませんでした。少し時間をおいて、もう一度「設定」と送ってください。", storeBotForSettings)
       return json({ ok: false, error: "ensure settings failed" }, 500)
