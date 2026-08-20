@@ -56,6 +56,8 @@ test("room hard delete only touches exact room_id or one chat group", async () =
   assert.match(chat, /id="talkCtxTrash"/)
   assert.match(chat, /id="talkCtxRestore"/)
   assert.match(chat, /data-tab="trash"/)
+  const tabOrder = [...chat.matchAll(/class="talk-tab[^"]*" data-tab="([^"]+)"/g)].map((m) => m[1])
+  assert.deepEqual(tabOrder, ['all', 'friends', 'groups', 'users', 'bots', 'trash'])
   assert.match(chat, /function canPurgeTalk/)
   assert.match(chat, /function trashTalk/)
   assert.match(chat, /function restoreTalk/)
