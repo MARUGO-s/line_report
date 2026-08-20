@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 import {
   addJstDays,
+  buildMtalkSchedulePageUrl,
   buildTomorrowReminderChatText,
   CALENDAR_TOMORROW_REMINDER_DEFAULTS,
   eventTimeLabel,
@@ -54,4 +55,19 @@ test("room settings can edit tomorrow reminder time like today-reservation alert
   assert.match(cron, /from\("calendar_tomorrow_reminder_logs"\)/)
   assert.match(cron, /line_room_calendar_events/)
   assert.match(cron, /kind: "calendar_tomorrow"/)
+  assert.match(cron, /buildMtalkSchedulePageUrl\(chatGroupId, \{ tab: "events" \}\)/)
+  const url = buildMtalkSchedulePageUrl(31, { tab: "events" })
+  assert.match(String(url), /mtalk_schedule\.html\?/)
+  assert.match(String(url), /group_id=31/)
+  assert.match(String(url), /tab=events/)
+  assert.doesNotMatch(String(url), /[?&]group=31(?:&|$)/)
+})
+
+test("schedule page accepts group and group_id, and chat keeps the room when opening the card", async () => {
+  const html = await read("public/mtalk_schedule.html")
+  const chat = await read("public/chat.html")
+  assert.match(html, /params.get\('group_id'\) \|\| params.get\('group'\)/)
+  assert.match(html, /params.get\('tab'\) === 'events'/)
+  assert.match(chat, /openReservationSchedule\(id, url.searchParams.get\('tab'\)\)/)
+  assert.match(chat, /path.endsWith\('mtalk_schedule.html'\)/)
 })

@@ -55,7 +55,7 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 - 対応付け: `room_summary_settings.chat_group_id`。無ければ同じ店舗キーのトーク
 - 新規予約・変更・キャンセル: `gmail-alert-cron`（先にトーク、続けて LINE）
 - 本日の予約まとめ: `reservation-today-cron`（トークは 0 件でも送る。LINE は 0 件だと送らない）
-- 明日の予定まとめ: `calendar-tomorrow-cron`（ルーム設定の時刻。トークは 0 件でも送る。LINE は 0 件だと送らない）
+- 明日の予定まとめ: `calendar-tomorrow-cron`（ルーム設定の時刻。トークは 0 件でも送る。LINE は 0 件だと送らない。カードの「予定カレンダーを開く」は `group_id` 付きの `mtalk_schedule.html`）
 - 共通処理: `supabase/functions/_shared/chat_bridge.ts`
 
 投稿後は `chat-push?action=dispatch` を内部シークレットで叩き、Web Push まで配信する。

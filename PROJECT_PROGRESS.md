@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 明日の予定カードからカレンダーが開かない
+
+- Symptom: カードの「予定カレンダーを開く」を押すと「ルームが指定されていません」。
+- Cause: リンクが `?group=`、予定画面は `group_id` だけを読んでいた。
+- Fix: 予定画面は両方受け取る。新しいカードは `group_id`。トーク内のボタンは同じ画面で開く。
+- Operation: カードのボタン、または下部の「予約・予定」。
+
 ### 2026-08-20 - 明日の予定配信の時刻を設定ページから指定する
 
 - Request: ルーム設定の「明日の予定を配信」から、配信時刻も設定したい。

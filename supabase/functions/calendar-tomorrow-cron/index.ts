@@ -7,6 +7,7 @@ import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 import {
   addJstDays,
+  buildMtalkSchedulePageUrl,
   buildTomorrowReminderChatCard,
   buildTomorrowReminderChatText,
   CALENDAR_TOMORROW_REMINDER_MAX_ITEMS,
@@ -21,8 +22,6 @@ import {
 } from "../_shared/calendar_tomorrow_reminder.ts"
 
 type DbClient = ReturnType<typeof createClient>
-
-const PAGES_BASE = "https://marugo-s.github.io/line_report"
 
 Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
@@ -95,7 +94,7 @@ Deno.serve(async (req) => {
     const chatGroupId = await resolveChatGroupId(supabase, target.roomId)
     const mtalkRoom = isMtalkSyntheticRoomId(target.roomId)
     const scheduleUrl = chatGroupId
-      ? `${PAGES_BASE}/mtalk_schedule.html?group=${encodeURIComponent(String(chatGroupId))}`
+      ? buildMtalkSchedulePageUrl(chatGroupId, { tab: "events" })
       : null
 
     if (chatGroupId) {

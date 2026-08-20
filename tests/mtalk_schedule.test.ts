@@ -48,6 +48,7 @@ test("M-talk schedule page switches reservation and event tabs", async () => {
   assert.doesNotMatch(html, /\.card\.card-evt \.name \{ color: var\(--resv-text\)/)
   assert.doesNotMatch(html, /row\.plan div, \.row\.content div/)
   assert.match(html, /\/chat-schedule\?group_id=/)
+  assert.match(html, /params.get\('group_id'\) \|\| params.get\('group'\)/)
   assert.match(html, /Authorization: 'Bearer '/)
   assert.match(html, /\?group='/)
   assert.match(chat, /function openReservationSchedule/)

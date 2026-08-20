@@ -2,6 +2,18 @@
 
 export const CALENDAR_TOMORROW_REMINDER_DEFAULTS = { hour: 19, minute: 0 }
 export const CALENDAR_TOMORROW_REMINDER_MAX_ITEMS = 20
+const MTALK_SCHEDULE_PAGE = "https://marugo-s.github.io/line_report/mtalk_schedule.html"
+
+export function buildMtalkSchedulePageUrl(
+  groupId: number,
+  options?: { tab?: "events" | "reservations" },
+): string | null {
+  const id = Number(groupId)
+  if (!Number.isSafeInteger(id) || id <= 0) return null
+  const params = new URLSearchParams({ from: "chat", group_id: String(id) })
+  if (options?.tab) params.set("tab", options.tab)
+  return `${MTALK_SCHEDULE_PAGE}?${params.toString()}`
+}
 
 export type TomorrowCalendarEvent = {
   id: number | null
@@ -108,7 +120,7 @@ export function buildTomorrowReminderChatCard(
     | { type: "note"; text: string }
     | { type: "list"; items: Array<{ time: string; name: string; note: string | null }> }
   >
-  action: { label: string; url: string } | null
+  action: { label: string; url: string; style: "primary" } | null
 } {
   const dateLabel = jstDateLabel(target.year, target.month, target.day)
   const count = events.length
@@ -133,7 +145,7 @@ export function buildTomorrowReminderChatCard(
       subtitle: count > 0 ? `${dateLabel} ・ ${count}件` : dateLabel,
     },
     sections,
-    action: scheduleUrl ? { label: "予定カレンダーを開く", url: scheduleUrl } : null,
+    action: scheduleUrl ? { label: "予定カレンダーを開く", url: scheduleUrl, style: "primary" } : null,
   }
 }
 
