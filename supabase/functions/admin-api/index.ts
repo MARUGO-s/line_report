@@ -581,6 +581,7 @@ const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
 const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," +
   ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
   ",today_reservation_alert_hour,today_reservation_alert_minute" +
+  ",calendar_tomorrow_reminder_hour,calendar_tomorrow_reminder_minute" +
   ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute" +
   ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute" +
   ",review_alert_hour,review_alert_minute" +
@@ -602,6 +603,14 @@ function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<strin
   if ("today_reservation_alert_minute" in body) {
     const m = Number(body.today_reservation_alert_minute)
     out.today_reservation_alert_minute = (Number.isInteger(m) && m >= 0 && m <= 59) ? m : null
+  }
+  if ("calendar_tomorrow_reminder_hour" in body) {
+    const h = Number(body.calendar_tomorrow_reminder_hour)
+    out.calendar_tomorrow_reminder_hour = (Number.isInteger(h) && h >= 0 && h <= 23) ? h : null
+  }
+  if ("calendar_tomorrow_reminder_minute" in body) {
+    const m = Number(body.calendar_tomorrow_reminder_minute)
+    out.calendar_tomorrow_reminder_minute = (Number.isInteger(m) && m >= 0 && m <= 59) ? m : null
   }
   // 東京ドーム週次配信の曜日・時刻（NULL許容＝既定 土6/10時/0分）
   if ("dome_weekly_dow" in body) {
@@ -4612,7 +4621,7 @@ async function fetchMonthlyPushUsageSummary(
 }> {
   const bounds = getCurrentJstMonthUtcBounds()
   const lo = bounds.startUtcIso, hi = bounds.endUtcIso
-  const [webhookRes, summaryRes, gmailRes, resvTodayRes, domeRes, receiptRes, roomMapRes] = await Promise.all([
+  const [webhookRes, summaryRes, gmailRes, resvTodayRes, tomorrowRes, domeRes, receiptRes, roomMapRes] = await Promise.all([
     supabase.from("line_webhook_delivery_logs").select("method, target_room_id, store_partition_key, context")
       .eq("line_send_success", true).gte("created_at", lo).lt("created_at", hi),
     supabase.from("summary_delivery_logs").select("target_room_id, reason, details")
@@ -4620,6 +4629,7 @@ async function fetchMonthlyPushUsageSummary(
     supabase.from("gmail_reservation_alert_logs").select("line_target_room_id")
       .not("line_message_sent_at", "is", null).gte("line_message_sent_at", lo).lt("line_message_sent_at", hi),
     supabase.from("reservation_today_alert_logs").select("room_id, store_partition_key").gte("sent_at", lo).lt("sent_at", hi),
+    supabase.from("calendar_tomorrow_reminder_logs").select("room_id, store_partition_key").gte("sent_at", lo).lt("sent_at", hi),
     supabase.from("tokyo_dome_weekly_logs").select("room_id, store_partition_key").gte("sent_at", lo).lt("sent_at", hi),
     supabase.from("line_receipt_mid_reports").select("room_id, report_kind").gte("sent_at", lo).lt("sent_at", hi),
     supabase.from("room_summary_settings").select("room_id, room_name, receipt_report_store_partition_key"),
@@ -4683,6 +4693,9 @@ async function fetchMonthlyPushUsageSummary(
   }
   for (const r of dataOf(resvTodayRes)) {
     pushTotal += 1; add(r.room_id, storeOf(r.room_id, r.store_partition_key), "push", "本日の予約配信", "daily")
+  }
+  for (const r of dataOf(tomorrowRes)) {
+    pushTotal += 1; add(r.room_id, storeOf(r.room_id, r.store_partition_key), "push", "明日の予定配信", "daily")
   }
   for (const r of dataOf(domeRes)) {
     pushTotal += 1; add(r.room_id, storeOf(r.room_id, r.store_partition_key), "push", "東京ドーム週次配信", "weekly")

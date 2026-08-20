@@ -66,6 +66,8 @@ test("M-talk schedule page switches reservation and event tabs", async () => {
   assert.match(knowledge, /tryAutoRegisterRoomSchedule/)
   assert.match(webhook, /tryAutoRegisterRoomSchedule/)
   assert.match(settings, /M-talkの予定カレンダー/)
+  assert.match(settings, /extra:'tomorrowReminder'/)
+  assert.match(settings, /tomorrow-reminder-inp/)
   assert.match(api, /path === "\/chat-schedule"/)
   assert.match(api, /path === "\/chat-schedule\/reservation"/)
   assert.match(api, /path === "\/chat-schedule\/event"/)

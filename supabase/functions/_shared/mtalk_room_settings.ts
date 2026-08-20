@@ -156,6 +156,8 @@ export async function ensureMtalkRoomSettings(
     today_reservation_alert_hour: 18,
     today_reservation_alert_minute: 0,
     calendar_tomorrow_reminder_enabled: false,
+    calendar_tomorrow_reminder_hour: 19,
+    calendar_tomorrow_reminder_minute: 0,
     calendar_ai_auto_create_enabled: false,
     calendar_silent_auto_register_enabled: false,
     calendar_low_confidence_confirm_reply_enabled: false,

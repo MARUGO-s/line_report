@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 明日の予定配信の時刻を設定ページから指定する
+
+- Request: ルーム設定の「明日の予定を配信」から、配信時刻も設定したい。
+- Implementation: トグル下に本日の予約状況と同じ時刻欄。`calendar_tomorrow_reminder_hour/minute` を保存。`calendar-tomorrow-cron` が指定時刻に翌日の予定を配信。未設定は 19:00。
+- Operation: 設定 → 予約・カレンダー → 明日の予定を配信をON → 時刻を保存。
+
 ### 2026-08-20 - 予約カレンダーと予定カレンダーを分ける
 
 - Request: 予定のカレンダーには予定だけ、予約のカレンダーには予約だけ。
