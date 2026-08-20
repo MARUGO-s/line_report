@@ -125,7 +125,12 @@
       padding: 16px 18px 8px;
       font-size: 14px;
       color: var(--muted);
+      overflow-x: auto;
+      flex-wrap: nowrap;
+      scrollbar-width: none;
     }
+    .talk-tabs::-webkit-scrollbar { display: none; }
+    .talk-tab { flex-shrink: 0; }
 
     .talk-tab {
       background: none;
@@ -1758,6 +1763,7 @@
       <button class="talk-tab" data-tab="friends" onclick="setTalkTab('friends')">友だち</button>
       <button class="talk-tab" data-tab="groups" onclick="setTalkTab('groups')">グループ</button>
       <button class="talk-tab" data-tab="users" onclick="setTalkTab('users')">登録ユーザー</button>
+      <button class="talk-tab" data-tab="bots" onclick="setTalkTab('bots')">Bot</button>
       <button class="mobile-notification-btn notification-btn" type="button" data-notification-toggle title="新着通知をオンにする" aria-label="新着通知をオンにする" onclick="togglePushNotifications()">
         <span class="notification-icon" aria-hidden="true">🔕</span>
       </button>
@@ -2879,6 +2885,10 @@
         search.placeholder = '登録ユーザーを検索';
         $('fab').classList.add('hidden');
         loadRegisteredUsers();
+      } else if (tab === 'bots') {
+        search.placeholder = 'Botを検索';
+        $('fab').classList.add('hidden');
+        loadRegisteredUsers();
       } else if (tab === 'friends') {
         search.placeholder = '友だちを検索';
         $('fab').classList.add('hidden');
@@ -2890,7 +2900,7 @@
       }
       // タブを移ると検索の対象が変わるので、本文ヒットは出し直す。
       const query = (search.value || '').trim();
-      if (tab === 'users') renderMessageSearch('');
+      if (tab === 'users' || tab === 'bots') renderMessageSearch('');
       else runMessageSearch(query);
     }
 
@@ -2917,16 +2927,27 @@
       renderRegisteredUsers();
     }
 
+    function isDirectoryUser(user) {
+      if (talkTab === 'bots') return isStoreBot(user);
+      return !isBotUser(user);
+    }
+
+    function directoryUsers() {
+      const q = ($('talkSearch').value || '').trim().toLowerCase();
+      return (registeredUsers || []).filter((u) => {
+        if (!isDirectoryUser(u)) return false;
+        return !q || String(u.username || '').toLowerCase().includes(q);
+      });
+    }
+
     function renderRegisteredUsers() {
       const list = $('registeredUsersList');
       list.innerHTML = '';
-      const q = ($('talkSearch').value || '').trim().toLowerCase();
-      const users = registeredUsers.filter((u) => (
-        !isReservationBot(u)
-        && (!q || u.username.toLowerCase().includes(q))
-      ));
+      const users = directoryUsers();
       if (!users.length) {
-        list.innerHTML = '<div class="empty-note">登録ユーザーはいません</div>';
+        list.innerHTML = talkTab === 'bots'
+          ? '<div class="empty-note">店舗Botはいません</div>'
+          : '<div class="empty-note">登録ユーザーはいません</div>';
       } else {
         users.forEach((user) => {
           const mine = user.id === currentUser.id;
@@ -2937,7 +2958,7 @@
             ${mine ? '' : '<div class="user-check"></div>'}
             <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
             <div class="talk-body">
-              <div class="group-item-name"><span>${escapeHtml(user.username)}</span>${mine ? '（自分）' : ''}${isBotUser(user) ? botMarkHtml() : ''}</div>
+              <div class="group-item-name"><span>${escapeHtml(user.username)}</span>${mine ? '（自分）' : ''}${isStoreBot(user) ? botMarkHtml() : ''}</div>
             </div>
           `;
           if (!mine) row.onclick = () => toggleUserSelect(user.id);
@@ -2945,8 +2966,10 @@
         });
       }
 
-      const count = selectedUserIds.size;
-      $('userInviteCount').textContent = count + '人を選択';
+      const count = [...selectedUserIds].filter((id) => (
+        (registeredUsers || []).some((u) => u.id === id && isDirectoryUser(u))
+      )).length;
+      $('userInviteCount').textContent = talkTab === 'bots' ? `${count}件を選択` : `${count}人を選択`;
       $('userInviteBar').classList.toggle('hidden', count === 0);
     }
 
@@ -2980,7 +3003,10 @@
         return;
       }
       try {
-        const rows = [...selectedUserIds].map((user_id) => ({ group_id: group.id, user_id }));
+        const rows = [...selectedUserIds]
+          .filter((id) => (registeredUsers || []).some((u) => u.id === id && isDirectoryUser(u)))
+          .map((user_id) => ({ group_id: group.id, user_id }));
+        if (!rows.length) return;
         const { error } = await sb.from('chat_group_members').upsert(rows, { onConflict: 'group_id,user_id' });
         if (error) throw error;
         selectedUserIds = new Set();
@@ -3492,7 +3518,7 @@
     let talkSearchTimer = 0;
 
     function handleTalkSearchInput() {
-      if (talkTab === 'users') {
+      if (talkTab === 'users' || talkTab === 'bots') {
         renderRegisteredUsers();
         return;
       }
@@ -3554,7 +3580,7 @@
     function renderMessageSearch(query) {
       const wrap = $('messageSearchWrap');
       const list = $('messageSearchList');
-      const show = talkTab !== 'users' && !!query && query.length >= 2;
+      const show = talkTab !== 'users' && talkTab !== 'bots' && !!query && query.length >= 2;
       wrap.classList.toggle('hidden', !show);
       if (!show) {
         list.innerHTML = '';
@@ -3952,7 +3978,7 @@
     function renderGroups() {
       const usersWrap = $('registeredUsersWrap');
       const inviteBar = $('userInviteBar');
-      const showUsers = talkTab === 'users';
+      const showUsers = talkTab === 'users' || talkTab === 'bots';
       usersWrap.classList.toggle('hidden', !showUsers);
       if (!showUsers) inviteBar.classList.add('hidden');
       if (showUsers) {
@@ -4007,6 +4033,7 @@
         const q = ($('talkSearch').value || '').trim().toLowerCase();
         const candidates = registeredUsers.filter((u) => (
           u.id !== currentUser.id
+          && !isBotUser(u)
           && !peerIds.has(u.id)
           && (!q || u.username.toLowerCase().includes(q))
         ));

@@ -57,7 +57,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /subscribePushPreferenceChanges/)
   assert.match(html, /syncPushPreference/)
   assert.match(serviceWorker, /addEventListener\('push'/)
-  assert.match(serviceWorker, /line-report-chat-v24/)
+  assert.match(serviceWorker, /line-report-chat-v25/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -127,7 +127,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /msg-card-line/)
   assert.match(html, /function sendCardCommand/)
   assert.match(html, /data-card-command/)
-  assert.match(serviceWorker, /line-report-chat-v24/)
+  assert.match(serviceWorker, /line-report-chat-v25/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -198,6 +198,9 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   const chatHtml = await read("public/chat.html")
   assert.match(chatHtml, /isStoreBot/)
   assert.match(chatHtml, /bot-mark/)
+  assert.match(chatHtml, /setTalkTab\('bots'\)/)
+  assert.match(chatHtml, /talkTab === 'bots'/)
+  assert.match(chatHtml, /店舗Botはいません/)
   assert.match(fn, /resolveRoomStoreKey/)
   assert.match(fn, /loadChatStoreBot/)
   assert.match(bridge, /export async function loadChatStoreBot/)
