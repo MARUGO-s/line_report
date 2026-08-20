@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - 同日レシート確認を LINE と同じレイアウトにする
+
+- Request: すでにデータがある場合は、LINE と同じ説明文・同じ並び・数値は太字。
+- Cause: 「総売上」があるカードを売上レポート扱いし、説明文を捨てていた。太字と primary ボタンも写していなかった。
+- Fix: Flex の順番どおりに説明・項目・警告を残し、数値を太字、日付変更を緑ボタンにする。
+- Operation: 同じ日付の再送は、説明・太字の金額・オレンジの警告・加算／中止／置き換え／日付変更が出る。既に出ている古いカードは、もう一度送ると新しいレイアウトになる。
+
 ### 2026-08-20 - 売上レポートカードの区切りと赤字を直す
 
 - Request: 08:34 のように、予算・前年比の区切りと赤字で返す。
