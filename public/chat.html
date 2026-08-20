@@ -1333,6 +1333,7 @@
     }
 
     .input-area {
+      position: relative;
       padding: 8px 10px 8px;
       background: #eee;
       display: flex;
@@ -1695,14 +1696,13 @@
       body.chat-open .main-content {
         display: flex;
         width: 100%;
-        border-radius: 12px 12px 0 0;
+        border-radius: 0;
+        padding-bottom: var(--chat-composer-height, 92px);
       }
       body.chat-open {
         --mobile-safe-bottom: 0px;
-        padding-top: var(--mobile-safe-top);
-        padding-right: var(--mobile-safe-right);
-        padding-bottom: 0;
-        padding-left: var(--mobile-safe-left);
+        padding: var(--mobile-safe-top) 0 0 0 !important;
+        background: #eee;
       }
       .chat-header { padding: 0; }
       .chat-header-main { padding: 8px 10px; min-height: 56px; }
@@ -1734,9 +1734,18 @@
         margin-left: auto;
       }
       .messages { padding: 14px 10px 16px; }
-      .input-area,
+      .input-area {
+        padding: 6px 8px 0;
+        flex-shrink: 0;
+      }
       body.chat-open .input-area {
-        padding: 6px 8px var(--chat-composer-bottom, 0px);
+        position: fixed !important;
+        left: 0;
+        right: 0;
+        bottom: calc(0px - var(--chat-bottom-gap, 0px));
+        z-index: 25;
+        width: 100%;
+        padding: 6px 8px 0 !important;
         flex-shrink: 0;
       }
       .composer-menu { padding: 0; }
@@ -1887,7 +1896,7 @@
       <button class="reply-bar-close" type="button" onclick="clearReplyTarget()" aria-label="リプライをやめる">×</button>
     </div>
     <div class="schedule-bar hidden" id="scheduleBar"></div>
-    <div class="input-area hidden" id="inputArea" style="position:relative;">
+    <div class="input-area hidden" id="inputArea">
       <div class="mention-pop hidden" id="mentionPop"></div>
       <div class="input-row">
         <button class="attach-btn" type="button" onclick="pickChatImage()" title="画像を送る" aria-label="画像を送る">
@@ -2176,43 +2185,47 @@
     const CREDENTIAL_KEY = 'chat_saved_credentials';
     const AVATAR_COLORS = ['#7ac943', '#4fc3f7', '#ff8a65', '#ba68c8', '#ffd54f', '#4db6ac', '#f06292', '#7986cb'];
 
-    function measureSafeAreaBottomPx() {
-      let probe = document.getElementById('safeBottomProbe');
-      if (!probe) {
-        probe = document.createElement('div');
-        probe.id = 'safeBottomProbe';
-        probe.setAttribute('aria-hidden', 'true');
-        probe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:env(safe-area-inset-bottom,0px);overflow:hidden;pointer-events:none;';
-        document.body.appendChild(probe);
-      }
-      return Math.max(0, Math.round(probe.getBoundingClientRect().height || 0));
-    }
-
     function syncChatViewport(keepComposerVisible = false) {
       const isMobileLayout = window.matchMedia('(max-width: 768px), (max-height: 600px) and (pointer: coarse)').matches;
       const root = document.documentElement;
       if (!isMobileLayout) {
         root.style.removeProperty('--chat-viewport-height');
         root.style.removeProperty('--chat-viewport-top');
-        root.style.removeProperty('--chat-composer-bottom');
+        root.style.removeProperty('--chat-composer-height');
+        root.style.removeProperty('--chat-bottom-gap');
         return;
       }
 
       const viewport = window.visualViewport;
-      const viewportHeight = Math.max(1, Math.round(viewport ? viewport.height : window.innerHeight));
       const viewportTop = Math.max(0, Math.round(viewport ? viewport.offsetTop : 0));
+      const visualHeight = Math.max(1, Math.round(viewport ? viewport.height : window.innerHeight));
+      const layoutHeight = Math.max(1, Math.round(window.innerHeight));
+      const input = $('messageInput');
+      const keyboardOpen = keepComposerVisible || (input && document.activeElement === input);
+      const extraBottom = keyboardOpen ? 0 : Math.max(0, layoutHeight - viewportTop - visualHeight);
+      const viewportHeight = keyboardOpen
+        ? visualHeight
+        : Math.max(visualHeight, layoutHeight - viewportTop);
       root.style.setProperty('--chat-viewport-height', `${viewportHeight}px`);
       root.style.setProperty('--chat-viewport-top', `${viewportTop}px`);
-      root.style.setProperty('--chat-composer-bottom', `${Math.round(measureSafeAreaBottomPx() / 3)}px`);
+      root.style.setProperty('--chat-bottom-gap', `${extraBottom}px`);
+      const composer = $('inputArea');
+      if (composer && !composer.classList.contains('hidden')) {
+        root.style.setProperty('--chat-composer-height', `${Math.max(1, Math.round(composer.offsetHeight))}px`);
+      }
 
       if (chatViewportFrame) cancelAnimationFrame(chatViewportFrame);
       chatViewportFrame = requestAnimationFrame(() => {
         chatViewportFrame = 0;
-        const input = $('messageInput');
-        if (!input || (!keepComposerVisible && document.activeElement !== input)) return;
+        const composerEl = $('inputArea');
+        if (composerEl && !composerEl.classList.contains('hidden')) {
+          root.style.setProperty('--chat-composer-height', `${Math.max(1, Math.round(composerEl.offsetHeight))}px`);
+        }
+        const focused = $('messageInput');
+        if (!focused || (!keepComposerVisible && document.activeElement !== focused)) return;
         const messages = $('messages');
         if (messages) messages.scrollTop = messages.scrollHeight;
-        input.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        focused.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
     }
 
@@ -2685,7 +2698,7 @@
     function ensureChatServiceWorker() {
       if (!('serviceWorker' in navigator)) return Promise.resolve(null);
       if (!serviceWorkerPromise) {
-        serviceWorkerPromise = navigator.serviceWorker.register('chat-sw.js', { scope: './' })
+        serviceWorkerPromise = navigator.serviceWorker.register('chat-sw.js?v=40', { scope: './' })
           .then(() => navigator.serviceWorker.ready)
           .catch((error) => {
             console.error('Service worker registration error:', error);
@@ -3792,6 +3805,7 @@
       currentGroupId = groupId;
       markGroupRead(groupId);
       document.body.classList.add('chat-open');
+      syncChatViewport();
       $('placeholder').classList.add('hidden');
       $('chatHeader').classList.remove('hidden');
       $('messagesWrap').classList.remove('hidden');
@@ -4406,6 +4420,7 @@
       }
       markGroupRead(group.id);
       document.body.classList.add('chat-open');
+      syncChatViewport();
 
       $('placeholder').classList.add('hidden');
       $('chatHeader').classList.remove('hidden');
