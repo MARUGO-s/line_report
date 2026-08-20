@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-20 - Botをグループタブに出さない
+
+- Request: Botはグループに入れない。招待されたルームのメンバーか 1:1 だけ。グループタブに単独表示しない。
+- Implementation: グループタブから店舗ルームを外す。店舗Botの自動参加をやめる。Botタブは 1対1 と既存ルームへの招待だけ。
+- Operation: 店舗ルームは「すべて」。Botは Bot タブから 1対1 か招待。
+
 ### 2026-08-20 - ルーム切替をキャッシュして速くする
 
 - Request: ルームを選ぶたびに画像を読み直して遅い。キャッシュで軽く・速くする。

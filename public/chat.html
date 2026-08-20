@@ -1914,7 +1914,7 @@
     <div class="invite-sheet" role="dialog" aria-label="招待先">
       <h2>招待先のグループ</h2>
       <div id="userInviteGroupList"></div>
-      <button class="invite-reset" type="button" onclick="inviteSelectedToNewGroup()">新しいグループを作って招待</button>
+      <button class="invite-reset" type="button" id="inviteNewGroupBtn" onclick="inviteSelectedToNewGroup()">新しいグループを作って招待</button>
       <button class="invite-close" type="button" onclick="closeUserInviteTarget()">キャンセル</button>
     </div>
   </div>
@@ -2947,11 +2947,45 @@
     function renderRegisteredUsers() {
       const list = $('registeredUsersList');
       list.innerHTML = '';
+      if (talkTab === 'bots') {
+        $('userInviteBar').classList.add('hidden');
+        const users = directoryUsers();
+        if (!users.length) {
+          list.innerHTML = '<div class="empty-note">店舗Botはいません</div>';
+          return;
+        }
+        users.forEach((user) => {
+          const row = document.createElement('div');
+          row.className = 'user-row';
+          row.innerHTML = `
+            <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+            <div class="talk-body">
+              <div class="group-item-name"><span>${escapeHtml(user.username)}</span>${botMarkHtml()}</div>
+              <div class="group-item-info">1対1、またはルームへ招待</div>
+            </div>
+          `;
+          const talkBtn = document.createElement('button');
+          talkBtn.className = 'join-btn';
+          talkBtn.textContent = '1対1';
+          talkBtn.onclick = (e) => { e.stopPropagation(); registerDirectFriend(user); };
+          row.appendChild(talkBtn);
+          const inviteBtn = document.createElement('button');
+          inviteBtn.className = 'join-btn';
+          inviteBtn.textContent = '招待';
+          inviteBtn.onclick = (e) => {
+            e.stopPropagation();
+            selectedUserIds = new Set([user.id]);
+            openUserInviteTarget();
+          };
+          row.appendChild(inviteBtn);
+          list.appendChild(row);
+        });
+        return;
+      }
+
       const users = directoryUsers();
       if (!users.length) {
-        list.innerHTML = talkTab === 'bots'
-          ? '<div class="empty-note">店舗Botはいません</div>'
-          : '<div class="empty-note">登録ユーザーはいません</div>';
+        list.innerHTML = '<div class="empty-note">登録ユーザーはいません</div>';
       } else {
         users.forEach((user) => {
           const mine = user.id === currentUser.id;
@@ -2962,7 +2996,7 @@
             ${mine ? '' : '<div class="user-check"></div>'}
             <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
             <div class="talk-body">
-              <div class="group-item-name"><span>${escapeHtml(user.username)}</span>${mine ? '（自分）' : ''}${isStoreBot(user) ? botMarkHtml() : ''}</div>
+              <div class="group-item-name"><span>${escapeHtml(user.username)}</span>${mine ? '（自分）' : ''}</div>
             </div>
           `;
           if (!mine) row.onclick = () => toggleUserSelect(user.id);
@@ -2973,18 +3007,26 @@
       const count = [...selectedUserIds].filter((id) => (
         (registeredUsers || []).some((u) => u.id === id && isDirectoryUser(u))
       )).length;
-      $('userInviteCount').textContent = talkTab === 'bots' ? `${count}件を選択` : `${count}人を選択`;
+      $('userInviteCount').textContent = `${count}人を選択`;
       $('userInviteBar').classList.toggle('hidden', count === 0);
     }
 
     function openUserInviteTarget() {
       if (!selectedUserIds.size) return;
+      const invitingBots = [...selectedUserIds].some((id) => (
+        (registeredUsers || []).some((u) => u.id === id && isStoreBot(u))
+      ));
+      const newGroupBtn = $('inviteNewGroupBtn');
+      if (newGroupBtn) newGroupBtn.classList.toggle('hidden', invitingBots);
       const list = $('userInviteGroupList');
       list.innerHTML = '';
-      if (!myGroups.filter((group) => !group.is_direct).length) {
-        list.innerHTML = '<div class="empty-note">先にグループを作るか、下から新しいグループを作って招待してください</div>';
+      const rooms = myGroups.filter((group) => !group.is_direct);
+      if (!rooms.length) {
+        list.innerHTML = invitingBots
+          ? '<div class="empty-note">招待できるルームがありません</div>'
+          : '<div class="empty-note">先にグループを作るか、下から新しいグループを作って招待してください</div>';
       } else {
-        myGroups.filter((group) => !group.is_direct).forEach((group) => {
+        rooms.forEach((group) => {
           const button = document.createElement('button');
           button.type = 'button';
           button.className = 'target-group';
@@ -3026,6 +3068,10 @@
 
     async function inviteSelectedToNewGroup() {
       if (!selectedUserIds.size) return;
+      if ([...selectedUserIds].some((id) => (registeredUsers || []).some((u) => u.id === id && isBotUser(u)))) {
+        alert('Botは新しいグループのメンバーにできません。既存のルームへ招待するか、1対1で話してください。');
+        return;
+      }
       const name = prompt('新しいグループ名');
       if (!name || !name.trim()) return;
       try {
@@ -4006,7 +4052,7 @@
       const mineVisible = showMine
         ? myGroups.filter((g) => {
             if (talkTab === 'friends' && !g.is_direct) return false;
-            if (talkTab === 'groups' && g.is_direct) return false;
+            if (talkTab === 'groups' && (g.is_direct || g.is_store_room)) return false;
             if (g.hidden_at && !searchQ) return false;
             return matchesQuery(g, lastMessages[g.id] && lastMessages[g.id].content);
           })
