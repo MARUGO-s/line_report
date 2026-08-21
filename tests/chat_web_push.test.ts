@@ -8,6 +8,7 @@ import {
 } from "../supabase/functions/_shared/web_push.ts"
 import { buildDeclarativeChatPushPayload } from "../supabase/functions/_shared/chat_push_payload.ts"
 import { mtalkCardFromLineReply } from "../supabase/functions/_shared/chat_flex_card.ts"
+import { buildAllFeaturesGuideFlex } from "../supabase/functions/_shared/search_help_guide.ts"
 import {
   isMtalkSyntheticRoomId,
   mtalkSyntheticRoomId,
@@ -397,6 +398,15 @@ test("M-talk canned search controls use the lightweight search function", async 
   assert.match(searchFunction, /トークルームとメッセージ検索/)
   assert.match(searchFunction, /kind: reply\.card \? "card" : "text"/)
   assert.doesNotMatch(searchFunction, /kind: reply\.card \? "search"/)
+  assert.match(searchFunction, /buildAllFeaturesGuideFlex/)
+  assert.match(searchFunction, /await postReply\(supabase, groupId, bot, helpCard\(\)\)/)
+  assert.doesNotMatch(searchFunction, /from "\.\.\/_shared\/mtalk_search\.ts"/)
+
+  const guide = mtalkCardFromLineReply(buildAllFeaturesGuideFlex(false))
+  assert.ok(guide.card)
+  assert.match(guide.text, /使い方ガイド/)
+  assert.ok((guide.card?.sections ?? []).length >= 10)
+  assert.doesNotMatch(JSON.stringify(guide.card), /会話検索/)
 })
 
 test("M-talk room ids map to room_summary_settings keys", () => {

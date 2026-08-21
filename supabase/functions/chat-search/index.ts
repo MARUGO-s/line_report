@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { mtalkCardFromLineReply } from "../_shared/chat_flex_card.ts"
+import { buildAllFeaturesGuideFlex } from "../_shared/search_help_guide.ts"
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -90,6 +92,10 @@ function promptCard(kind: SearchKind) {
   }
 }
 
+function helpCard() {
+  return mtalkCardFromLineReply(buildAllFeaturesGuideFlex(false))
+}
+
 async function postReply(supabase: any, groupId: number, bot: { id: string; username: string } | null, reply: { text: string; card?: unknown }) {
   const payload = reply.card ? { v: 1, kind: "search", cards: [reply.card] } : null
   const { error } = await supabase.from("chat_messages").insert({
@@ -151,7 +157,7 @@ Deno.serve(async (req) => {
     await supabase.from("line_room_search_pending").delete().eq("room_id", roomId).eq("user_id", userId)
     await postReply(supabase, groupId, bot, { text: "検索をキャンセルしました。" })
   } else if (command === "help") {
-    await postReply(supabase, groupId, bot, { text: "検索は、予定・メディア・売上のボタンを選び、続けてキーワードを送ります。会話はトーク一覧上部の検索欄から検索してください。" })
+    await postReply(supabase, groupId, bot, helpCard())
   } else if (!enabled[command]) {
     await postReply(supabase, groupId, bot, { text: `${command === "calendar" ? "予定" : command === "media" ? "メディア" : "売上"}検索は現在この店舗で利用できません。` })
   } else {
