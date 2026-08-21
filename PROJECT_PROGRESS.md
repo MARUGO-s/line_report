@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-22 - リアクションの表情を15種類へ拡充
+
+- Request: 怒り・困惑・知らんぷりなど、リアクションの表情を増やしたい。
+- Fix: 😡 😓 🤔 🙄 😭 🎉 👏 👀 🤷 を追加。メニュー幅を維持したまま横スクロールで選択できるようにした。
+
 ### 2026-08-21 - メッセージ操作メニューをコンパクト化
 
 - Request: リアクション・返信・コピー・転送の操作メニューを、より洗練された見た目にしたい。

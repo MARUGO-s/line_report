@@ -46,7 +46,12 @@ test('reaction details identify each user with a transparent icon background', (
 
 test('message action menu stays compact with horizontal icon actions', () => {
   assert.match(chat, /\.msg-menu \{[\s\S]*?width: min\(292px, calc\(100vw - 24px\)\)/);
-  assert.match(chat, /\.msg-menu-emojis \{[\s\S]*?grid-template-columns: repeat\(6, 1fr\)/);
+  assert.match(chat, /\.msg-menu-emojis \{[\s\S]*?grid-auto-flow: column[\s\S]*?overflow-x: auto/);
   assert.match(chat, /class="msg-menu-actions"/);
   assert.match(chat, /msg-menu-action-icon/);
+});
+
+test('reaction menu includes varied emotions in a scrollable row', () => {
+  assert.match(chat, /const REACTION_CHOICES = \[[\s\S]*?'😡'[\s\S]*?'😓'[\s\S]*?'🤔'[\s\S]*?'🙄'[\s\S]*?'😭'[\s\S]*?'🎉'[\s\S]*?'👏'[\s\S]*?'👀'[\s\S]*?'🤷'/);
+  assert.match(chat, /\.msg-menu-emojis::-webkit-scrollbar \{ display: none; \}/);
 });

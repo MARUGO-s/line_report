@@ -1341,11 +1341,17 @@
     }
     .msg-menu-emojis {
       display: grid;
-      grid-template-columns: repeat(6, 1fr);
+      grid-auto-flow: column;
+      grid-auto-columns: 40px;
       gap: 3px;
       padding-bottom: 9px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: none;
+      -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 18px), transparent 100%);
     }
+    .msg-menu-emojis::-webkit-scrollbar { display: none; }
     .msg-menu-emojis button {
       width: 40px;
       height: 40px;
@@ -2499,7 +2505,10 @@
     let forwardMessage = null;
     let mentionCandidates = [];
     let mentionActiveIndex = 0;
-    const REACTION_CHOICES = ['👍', '✅', '🙏', '😂', '❤️', '😮'];
+    const REACTION_CHOICES = [
+      '👍', '✅', '🙏', '😂', '❤️', '😮',
+      '😡', '😓', '🤔', '🙄', '😭', '🎉', '👏', '👀', '🤷'
+    ];
     const INVITE_KEY = 'chat_pending_invite';
     const CHAT_PUSH_PUBLIC_KEY = 'BBUr0ob7hbB-k5JguWO1LgACXgpSjwPYkeoGRwNhDBE88ynjbEyRlY02LA3RZXr_oQrOcu86djYWsEncbTKiLtE';
 
