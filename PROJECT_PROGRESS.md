@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - 軽量検索カードが無反応になる不具合を修正
+
+- Incident: 「検索」送信後、軽量 `chat-search` は起動するが返信カードが表示されない。
+- Cause/Fix: `chat_messages.kind` に用途名 `search` を入れてDB制約に拒否されていた。表示形式を正しい `card` にし、用途は `payload.kind=search` のまま分離した。
+
 ### 2026-08-21 - ユーザーアイコン・感情イラストの表示軽量化
 
 - Request: ユーザーアイコンとメッセージ用感情イラストの表示・一覧読み込みを速くしたい。

@@ -388,6 +388,8 @@ test("M-talk canned search controls use the lightweight search function", async 
   assert.match(searchFunction, /commandKind/)
   assert.match(searchFunction, /line_room_search_pending/)
   assert.match(searchFunction, /トークルームとメッセージ検索/)
+  assert.match(searchFunction, /kind: reply\.card \? "card" : "text"/)
+  assert.doesNotMatch(searchFunction, /kind: reply\.card \? "search"/)
 })
 
 test("M-talk room ids map to room_summary_settings keys", () => {

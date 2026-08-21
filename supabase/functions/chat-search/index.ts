@@ -97,7 +97,9 @@ async function postReply(supabase: any, groupId: number, bot: { id: string; user
     user_id: bot?.id || FALLBACK_BOT_ID,
     username: bot?.username || "予約通知",
     content: reply.text,
-    kind: reply.card ? "search" : "text",
+    // chat_messages.kind は表示形式、payload.kind はカードの用途。
+    // DB制約で許可されるカード形式は必ず "card" にする。
+    kind: reply.card ? "card" : "text",
     payload,
   })
   if (error) throw new Error(error.message)
