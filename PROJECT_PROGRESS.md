@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-22 - リッチカードの行間をコンパクト化
+
+- Request: 予約通知などのリッチテキストの行間を現在の半分程度に詰めたい。
+- Fix: 項目間隔を10pxから5pxへ変更し、折り返し本文の行高を1.55から1.4へ調整。レシート解析結果にも共通適用した。
+
 ### 2026-08-22 - 予約通知・レシート解析カードの文字を拡大
 
 - Request: 予約通知とレシート解析結果のフォントを1段階だけ大きくしたい。

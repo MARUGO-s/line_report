@@ -71,3 +71,10 @@ test('rich cards use one-pixel larger type for reservations and receipt results'
   assert.match(chat, /\.msg-card-action \{[\s\S]*?font-size: 15px/);
   assert.match(chat, /\.msg-card-heading \{ font-size: 14px/);
 });
+
+test('rich cards use half-size row gaps with tighter readable line spacing', () => {
+  assert.match(chat, /\.msg-card-body \{[\s\S]*?gap: 5px/);
+  assert.match(chat, /\.msg-card-field \{[^}]*line-height: 1\.4/);
+  assert.match(chat, /\.msg-card-para \+ \.msg-card-para \{ margin-top: 3px; \}/);
+  assert.match(chat, /\.msg-card-line \.msg-card-body \{ gap: 1px/);
+});
