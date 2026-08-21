@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-22 - 予約通知・レシート解析カードの文字を拡大
+
+- Request: 予約通知とレシート解析結果のフォントを1段階だけ大きくしたい。
+- Fix: 共通リッチカードの見出し・項目・値・注記・ボタンを一律1px拡大し、両方へ同じ基準を適用した。
+
 ### 2026-08-22 - スマホのメッセージ入力注釈を1行表示
 
 - Symptom: 入力欄のPC向けShift+Enter注釈がスマホで折り返され、下側が見切れる。
