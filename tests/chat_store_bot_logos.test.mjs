@@ -34,3 +34,9 @@ test('store Bot logos use a white background without changing regular profile im
   assert.match(chat, /img\[src\*="icons\/store-bots\/"\][\s\S]*?background: #fff;[\s\S]*?object-fit: contain;[\s\S]*?padding: 4px;/);
   assert.match(chat, /\.rail-avatar img,[\s\S]*?object-fit: cover;/);
 });
+
+test('store Bot logos show a red bot mark inside the avatar', () => {
+  assert.match(chat, /isStoreBotLogo \? '<span class="store-bot-avatar-mark" aria-hidden="true">bot<\/span>' : ''/);
+  assert.match(chat, /\.store-bot-avatar-mark \{[\s\S]*?color: #d70015;[\s\S]*?font-size: 9px;/);
+  assert.match(chat, /right: 2px;[\s\S]*?bottom: 2px;/);
+});

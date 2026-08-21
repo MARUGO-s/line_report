@@ -97,6 +97,27 @@
       object-fit: contain;
       padding: 4px;
     }
+    .rail-avatar,
+    .talk-avatar,
+    .header-avatar,
+    .icon-preview {
+      position: relative;
+    }
+    .store-bot-avatar-mark {
+      position: absolute;
+      right: 2px;
+      bottom: 2px;
+      z-index: 1;
+      padding: 1px 2px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #d70015;
+      font-size: 9px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.2px;
+      pointer-events: none;
+    }
 
     .rail-btn {
       width: 44px;
@@ -3930,7 +3951,10 @@
 
     function avatarHtml(name, iconUrl) {
       const letter = escapeHtml((name || '?').trim().slice(0, 1) || '?');
-      if (iconUrl) return `<img src="${escapeHtml(iconUrl)}" alt="">`;
+      if (iconUrl) {
+        const isStoreBotLogo = String(iconUrl).includes('icons/store-bots/');
+        return `<img src="${escapeHtml(iconUrl)}" alt="">${isStoreBotLogo ? '<span class="store-bot-avatar-mark" aria-hidden="true">bot</span>' : ''}`;
+      }
       return letter;
     }
 

@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - 店舗ロゴ内へ赤いbotマークを表示
+
+- Request: 各店舗ロゴの中に、Botと分かる赤文字のマークを入れたい。
+- Implementation: 店舗Botロゴの円内右下へ、白い小型背景付きの赤文字 `bot` を表示する。SVG原本と一般ユーザー画像は変更しない。
+- Operation: M-talkを再読込すると、Bot一覧・トーク一覧・ヘッダー等の店舗ロゴ内に赤い `bot` が表示される。
+
 ### 2026-08-21 - M-talk店舗Botロゴを白背景に統一
 
 - Request: 各店舗Botロゴの背景をすべて白にして表示し直したい。
