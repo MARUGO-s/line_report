@@ -524,6 +524,17 @@
       border-radius: 8px;
       padding: 1px 6px;
     }
+    .room-bot-mark {
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      color: #dff6ff;
+      background: #1677a8;
+      border: 1px solid rgba(126, 220, 255, 0.55);
+      border-radius: 8px;
+      padding: 1px 6px;
+    }
     .trash-room-mark {
       flex-shrink: 0;
       font-size: 10px;
@@ -2492,6 +2503,7 @@
     let groupMembers = [];
     let memberStripOpen = false;
     let memberCounts = {};
+    let botRoomIds = new Set();
     let groupReadStates = [];
     let reactionsByMessage = new Map();
     // 引用元の本文（返信の表示用）。読み込み済みに無いものだけ後から取りに行く。
@@ -4567,23 +4579,33 @@
       const ids = myGroups.concat(otherGroups).map((g) => g.id).filter(Boolean);
       if (!ids.length) {
         memberCounts = {};
+        botRoomIds = new Set();
         return;
       }
       try {
         const { data, error } = await sb
           .from('chat_group_members')
-          .select('group_id')
+          .select('group_id, chat_users(is_bot)')
           .in('group_id', ids);
         if (error) throw error;
         const next = {};
+        const nextBotRoomIds = new Set();
         (data || []).forEach((row) => {
           const id = row.group_id;
           next[id] = (next[id] || 0) + 1;
+          if (row.chat_users && row.chat_users.is_bot === true) nextBotRoomIds.add(Number(id));
         });
         memberCounts = next;
+        botRoomIds = nextBotRoomIds;
       } catch (error) {
         console.error('Load member counts error:', error);
       }
+    }
+
+    function roomBotMarkHtml(group) {
+      return group && botRoomIds.has(Number(group.id))
+        ? '<span class="room-bot-mark" title="Bot参加ルーム" aria-label="Bot参加ルーム">BOT</span>'
+        : '';
     }
 
     function talkListCountLabel(group) {
@@ -4914,7 +4936,7 @@
         <div class="talk-avatar" style="background:${icon ? '#2c2c2e' : avatarStyle(title)}">${avatarHtml(title, icon)}</div>
         <div class="talk-body">
           <div class="talk-row">
-            <div class="group-item-name">${pinned ? pinMarkHtml() : ''}${muted ? muteMarkHtml() : ''}${group.is_store_room ? '<span class="store-room-mark">店舗</span>' : ''}${group.trashed_at ? '<span class="trash-room-mark">ゴミ箱</span>' : ''}<span>${escapeHtml(title)}</span>${talkListCountLabel(group) ? `<span class="talk-list-count">${escapeHtml(talkListCountLabel(group))}</span>` : ''}</div>
+            <div class="group-item-name">${pinned ? pinMarkHtml() : ''}${muted ? muteMarkHtml() : ''}${group.is_store_room ? '<span class="store-room-mark">店舗</span>' : ''}${roomBotMarkHtml(group)}${group.trashed_at ? '<span class="trash-room-mark">ゴミ箱</span>' : ''}<span>${escapeHtml(title)}</span>${talkListCountLabel(group) ? `<span class="talk-list-count">${escapeHtml(talkListCountLabel(group))}</span>` : ''}</div>
             <div class="talk-time">${formatTalkTime(when)}</div>
           </div>
           <div class="talk-preview-row">
