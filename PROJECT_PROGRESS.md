@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-22 - リアクション15種類を一画面に表示
+
+- Request: 横スライドでは追加アイコンに気付きにくいため、全種類を表示したい。
+- Fix: 横スクロールを廃止し、15種類を5列×3段で常時表示。メニューが画面下へはみ出さない位置補正も追加した。
+
 ### 2026-08-22 - リアクションの表情を15種類へ拡充
 
 - Request: 怒り・困惑・知らんぷりなど、リアクションの表情を増やしたい。

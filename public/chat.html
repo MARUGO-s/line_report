@@ -1341,17 +1341,12 @@
     }
     .msg-menu-emojis {
       display: grid;
-      grid-auto-flow: column;
-      grid-auto-columns: 40px;
-      gap: 3px;
+      grid-template-columns: repeat(5, 40px);
+      justify-content: space-between;
+      gap: 3px 6px;
       padding-bottom: 9px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      overflow-x: auto;
-      overscroll-behavior-x: contain;
-      scrollbar-width: none;
-      -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 18px), transparent 100%);
     }
-    .msg-menu-emojis::-webkit-scrollbar { display: none; }
     .msg-menu-emojis button {
       width: 40px;
       height: 40px;
@@ -5666,11 +5661,11 @@
         Math.max(8, rect.left - menuRect.width / 2),
         window.innerWidth - menuRect.width - 8
       );
-      const top = rect.top - menuRect.height - 8 < 8
+      const preferredTop = rect.top - menuRect.height - 8 < 8
         ? rect.bottom + 8
         : rect.top - menuRect.height - 8;
       menu.style.left = `${left}px`;
-      menu.style.top = `${top}px`;
+      menu.style.top = `${Math.min(preferredTop, window.innerHeight - menuRect.height - 8)}px`;
 
       menu.addEventListener('click', (e) => {
         const emojiBtn = e.target.closest('[data-emoji]');

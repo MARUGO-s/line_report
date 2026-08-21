@@ -1,10 +1,10 @@
 {
   "nodes": 4803,
   "edges": 9769,
-  "communities": 556,
-  "builtAtCommit": "2693a314fcf7c149ae03f8d5698924af0774bb54",
+  "communities": 557,
+  "builtAtCommit": "073cc0d60e53271ae67dab085e58aaa321db54f0",
   "sqlNodes": 572,
   "sqlFiles": 247,
-  "generatedAt": "2026-08-21T15:06:09.077Z",
+  "generatedAt": "2026-08-21T15:09:46.812Z",
   "modelVersion": 1
 }

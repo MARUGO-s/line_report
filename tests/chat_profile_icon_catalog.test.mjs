@@ -46,12 +46,13 @@ test('reaction details identify each user with a transparent icon background', (
 
 test('message action menu stays compact with horizontal icon actions', () => {
   assert.match(chat, /\.msg-menu \{[\s\S]*?width: min\(292px, calc\(100vw - 24px\)\)/);
-  assert.match(chat, /\.msg-menu-emojis \{[\s\S]*?grid-auto-flow: column[\s\S]*?overflow-x: auto/);
+  assert.match(chat, /\.msg-menu-emojis \{[\s\S]*?grid-template-columns: repeat\(5, 40px\)[\s\S]*?justify-content: space-between/);
   assert.match(chat, /class="msg-menu-actions"/);
   assert.match(chat, /msg-menu-action-icon/);
 });
 
-test('reaction menu includes varied emotions in a scrollable row', () => {
+test('reaction menu shows all varied emotions without scrolling', () => {
   assert.match(chat, /const REACTION_CHOICES = \[[\s\S]*?'😡'[\s\S]*?'😓'[\s\S]*?'🤔'[\s\S]*?'🙄'[\s\S]*?'😭'[\s\S]*?'🎉'[\s\S]*?'👏'[\s\S]*?'👀'[\s\S]*?'🤷'/);
-  assert.match(chat, /\.msg-menu-emojis::-webkit-scrollbar \{ display: none; \}/);
+  assert.doesNotMatch(chat, /\.msg-menu-emojis \{[^}]*overflow-x: auto/);
+  assert.match(chat, /Math\.min\(preferredTop, window\.innerHeight - menuRect\.height - 8\)/);
 });
