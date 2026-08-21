@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-08-21T04:48:24.394Z",
+  "generatedAt": "2026-08-21T06:14:19.468Z",
   "architectureHash": "b8389d8e0c5605bb002acc7a91498024d576b6526609ebbebcfb0d729f45dd76",
   "graph": {
-    "nodes": 4766,
-    "edges": 9754,
-    "communities": 551,
-    "builtAtCommit": "a84291407efd23004a89bc02c10a27ab2cd5bf1f",
-    "sqlNodes": 559,
-    "sqlFiles": 242
+    "nodes": 4768,
+    "edges": 9755,
+    "communities": 555,
+    "builtAtCommit": "84e50a1caaae7b57454aaa45162c1b5cced294da",
+    "sqlNodes": 561,
+    "sqlFiles": 243
   },
   "outputs": [
     "public/system-map/environment.html",
