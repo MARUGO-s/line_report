@@ -18,3 +18,10 @@ test('new and existing users can select bundled icons while uploads remain avail
   assert.match(chat, /update\(\{ icon_url: url \}\)\.eq\('id', currentUser\.id\)/);
   assert.match(chat, /insert\(\{ id: uid, username, icon_url: pendingPresetUserIconUrl \|\| null \}\)/);
 });
+
+test('profile icon choices stay large and spaced on mobile', () => {
+  assert.match(chat, /\.profile-icon-grid \{[\s\S]*?repeat\(4, minmax\(78px, 1fr\)\)[\s\S]*?gap: 14px/);
+  assert.match(chat, /@media \(max-width: 560px\) \{[\s\S]*?repeat\(3, minmax\(74px, 1fr\)\)/);
+  assert.match(chat, /\.profile-icon-option \{[\s\S]*?min-height: 84px/);
+  assert.match(chat, /\.profile-icon-option img \{[^}]*object-fit: contain/);
+});

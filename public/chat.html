@@ -423,26 +423,31 @@
     .profile-icon-upload { flex: 1; }
     .profile-icon-grid {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(4, minmax(78px, 1fr));
+      gap: 14px;
       max-height: min(58vh, 520px);
       overflow-y: auto;
-      padding: 2px;
+      padding: 6px 8px 16px;
+      scrollbar-gutter: stable;
     }
     .profile-icon-option {
       border: 2px solid transparent;
-      border-radius: 14px;
-      background: #f2f2f7;
-      padding: 3px;
-      aspect-ratio: 1;
+      border-radius: 16px;
+      background: #fff;
+      padding: 7px;
+      width: 100%;
+      min-width: 0;
+      min-height: 84px;
+      aspect-ratio: 1 / 1;
       overflow: hidden;
       cursor: pointer;
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.14);
     }
     .profile-icon-option:hover,
     .profile-icon-option:focus-visible { border-color: #0a84ff; }
-    .profile-icon-option img { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; display: block; }
+    .profile-icon-option img { width: 100%; height: 100%; object-fit: contain; border-radius: 9px; display: block; }
     @media (max-width: 560px) {
-      .profile-icon-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+      .profile-icon-grid { grid-template-columns: repeat(3, minmax(74px, 1fr)); gap: 12px; }
     }
 
     .talk-ctx-overlay {

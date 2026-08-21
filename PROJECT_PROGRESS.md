@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - ユーザーアイコン一覧の詰まりを修正
+
+- Symptom: 標準アイコン70点が狭い画面で詰まり、各イラストを判別できない。
+- Fix: 通常4列・スマホ3列へ減らし、各マス84px以上、12〜14pxの間隔、縦スクロールに変更。画像は `contain` で全体を表示する。
+
 ### 2026-08-21 - M-talkユーザー用の標準アイコン集
 
 - Request: 添付したイラストをプロフィール用に最適化し、新規・既存ユーザーが自分のアイコンとして選べるようにしたい。
