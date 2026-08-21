@@ -43,3 +43,10 @@ test('reaction details identify each user with a transparent icon background', (
   assert.match(chat, /reaction-detail-avatar[^}]*background: transparent/);
   assert.match(chat, /if \(chip\) \{ openReactionDetails\(Number\(chip\.dataset\.messageId\)\); return; \}/);
 });
+
+test('message action menu stays compact with horizontal icon actions', () => {
+  assert.match(chat, /\.msg-menu \{[\s\S]*?width: min\(292px, calc\(100vw - 24px\)\)/);
+  assert.match(chat, /\.msg-menu-emojis \{[\s\S]*?grid-template-columns: repeat\(6, 1fr\)/);
+  assert.match(chat, /class="msg-menu-actions"/);
+  assert.match(chat, /msg-menu-action-icon/);
+});

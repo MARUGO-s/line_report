@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - メッセージ操作メニューをコンパクト化
+
+- Request: リアクション・返信・コピー・転送の操作メニューを、より洗練された見た目にしたい。
+- Fix: 半透明の小型フローティングメニューへ変更し、リアクションは横一列、各操作は丸アイコン付きの横並びに整理した。
+
 ### 2026-08-21 - リアクションを1人1つに制限
 
 - Request: 同じメッセージには1人1リアクションとし、2つ目を選んだら1つ目を自動で消したい。

@@ -1322,37 +1322,72 @@
     .msg-menu {
       position: fixed;
       z-index: 320;
-      background: #2c2c2e;
-      border-radius: 14px;
-      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-      padding: 8px;
+      width: min(292px, calc(100vw - 24px));
+      background: rgba(35, 35, 38, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 20px;
+      box-shadow: 0 18px 46px rgba(0, 0, 0, 0.42);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      padding: 10px;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 9px;
+      animation: msgMenuIn .14s ease-out;
     }
-    .msg-menu-emojis { display: flex; gap: 2px; }
+    @keyframes msgMenuIn {
+      from { opacity: 0; transform: translateY(5px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .msg-menu-emojis {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 3px;
+      padding-bottom: 9px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
     .msg-menu-emojis button {
-      width: 38px;
-      height: 38px;
+      width: 40px;
+      height: 40px;
       border: 0;
       border-radius: 50%;
       background: transparent;
-      font-size: 20px;
+      font-size: 23px;
       cursor: pointer;
+      transition: transform .12s, background .12s;
     }
-    .msg-menu-emojis button:hover { background: #3a3a3c; }
+    .msg-menu-emojis button:hover { background: rgba(255, 255, 255, 0.1); transform: scale(1.12); }
+    .msg-menu-actions { display: flex; justify-content: space-around; gap: 4px; }
     .msg-menu-reply {
+      flex: 1;
+      min-width: 0;
       border: 0;
       background: transparent;
       color: #fff;
-      font-size: 14px;
-      text-align: left;
-      padding: 9px 12px;
-      border-radius: 8px;
+      font-size: 11px;
+      text-align: center;
+      padding: 7px 3px 6px;
+      border-radius: 12px;
       cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
     }
-    .msg-menu-reply:hover { background: #3a3a3c; }
+    .msg-menu-action-icon {
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      font-size: 18px;
+      line-height: 1;
+    }
+    .msg-menu-reply:hover { background: rgba(255, 255, 255, 0.08); }
     .msg-menu-delete { color: #ff6b6b; font-weight: 700; }
+    .msg-menu-delete .msg-menu-action-icon { background: rgba(255, 107, 107, 0.14); }
 
     .attach-btn {
       width: 38px;
@@ -5606,10 +5641,12 @@
         <div class="msg-menu-emojis">
           ${REACTION_CHOICES.map((e) => `<button type="button" data-emoji="${escapeHtml(e)}">${escapeHtml(e)}</button>`).join('')}
         </div>
-        <button class="msg-menu-reply" type="button" data-action="reply">↩ リプライ</button>
-        <button class="msg-menu-reply" type="button" data-action="copy">コピー</button>
-        <button class="msg-menu-reply" type="button" data-action="forward">転送</button>
-        ${canDelete ? '<button class="msg-menu-reply msg-menu-delete" type="button" data-action="delete">削除</button>' : ''}
+        <div class="msg-menu-actions">
+          <button class="msg-menu-reply" type="button" data-action="reply"><span class="msg-menu-action-icon">↩</span><span>返信</span></button>
+          <button class="msg-menu-reply" type="button" data-action="copy"><span class="msg-menu-action-icon">⧉</span><span>コピー</span></button>
+          <button class="msg-menu-reply" type="button" data-action="forward"><span class="msg-menu-action-icon">➜</span><span>転送</span></button>
+          ${canDelete ? '<button class="msg-menu-reply msg-menu-delete" type="button" data-action="delete"><span class="msg-menu-action-icon">⌫</span><span>削除</span></button>' : ''}
+        </div>
       `;
       document.body.appendChild(menu);
 
