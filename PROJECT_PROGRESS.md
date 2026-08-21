@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - 招待参加時点からの履歴と段階読み込み
+
+- Request: 新規招待ユーザーには参加前の発言を見せず、大量履歴を毎回全件通信しないようにしたい。
+- Security: `chat_group_members.joined_at` を境界に、本文RLS・検索・Realtime・リアクション・未読数・Pushバッジから参加前データを除外する。
+- Performance: 既存の最新50件取得、上スクロール時の50件ページング、最大12ルームのメモリキャッシュを維持し、自動テストで固定する。
+
 ### 2026-08-21 - ユーザーアイコン一覧の詰まりを修正
 
 - Symptom: 標準アイコン70点が狭い画面で詰まり、各イラストを判別できない。
