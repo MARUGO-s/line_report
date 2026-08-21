@@ -1327,6 +1327,12 @@
     }
     .attach-btn:hover { color: #111; background: rgba(0, 0, 0, 0.06); }
     .attach-btn:disabled { opacity: 0.4; cursor: default; }
+    .sticker-trigger-btn {
+      font-family: Arial, sans-serif;
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+    }
 
     .message {
       display: flex;
@@ -2070,7 +2076,7 @@
             <path d="M21 15l-5-5L5 21"/>
           </svg>
         </button>
-        <button class="attach-btn" type="button" onclick="toggleStickerPicker()" title="感情イラスト" aria-label="感情イラスト">☺</button>
+        <button class="attach-btn sticker-trigger-btn" type="button" onclick="toggleStickerPicker()" title="感情イラスト" aria-label="感情イラスト">☺</button>
         <textarea id="messageInput" rows="1" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
         <button class="schedule-btn" type="button" onclick="openTextScheduleSend()" title="予約配信" aria-label="予約配信">予約配信</button>
         <button class="send-btn" type="button" onclick="sendMessage()" aria-label="送信">➤</button>

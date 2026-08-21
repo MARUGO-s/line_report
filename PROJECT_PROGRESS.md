@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - 感情イラストボタンを見やすくする
+
+- Symptom: M-talk入力欄の `☺` が小さく、機能を見つけにくい。
+- Fix: タップ領域はそのまま、顔を28px・太字へ拡大。スマホの入力欄幅には影響しない。
+- Operation: トーク入力欄の大きな `☺` を押して感情イラストを選ぶ。
+
 ### 2026-08-21 - M-talk感情イラスト送信
 
 - Request: 提供した感情イラストをメッセージの代わりに入力欄から送り、DBへ保存したい。

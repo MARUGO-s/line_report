@@ -23,6 +23,8 @@ test('authenticated users can send only active catalog stickers', () => {
 
 test('composer picker sends and renders sticker messages', () => {
   assert.match(chat, /id="stickerPicker"/);
+  assert.match(chat, /class="attach-btn sticker-trigger-btn"/);
+  assert.match(chat, /\.sticker-trigger-btn \{[\s\S]*?font-size: 28px;/);
   assert.match(chat, /from\('chat_stickers'\)/);
   assert.match(chat, /kind: 'sticker'/);
   assert.match(chat, /function stickerFromMessage\(msg\)/);

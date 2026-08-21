@@ -55,7 +55,7 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 
 ## 感情イラスト
 
-- 入力欄の `☺` から39点の感情イラストを選び、テキストの代わりに送信できる。
+- 入力欄の大きな `☺`（28px）から39点の感情イラストを選び、テキストの代わりに送信できる。
 - `chat_stickers` がID・表示名・公開画像パス・並び順・有効状態のDB台帳。画像本体は `public/stickers/face/` に置く。
 - 送信履歴は `chat_messages.kind='sticker'` と正規化済みpayloadへ保存する。クライアント指定のパス・名称は信用せず、DBトリガが有効なIDから再構成する。
 - トーク一覧・検索・Web Pushには `content` の `[感情イラスト] 表示名` を使う。返信・転送にも対応する。
