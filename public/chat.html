@@ -2174,10 +2174,10 @@
   </div>
 
   <div class="invite-overlay hidden" id="profileIconOverlay" onclick="if (event.target === this) closeUserIconPicker()">
-    <div class="invite-sheet profile-icon-sheet" role="dialog" aria-modal="true" aria-label="ユーザーアイコンを選択">
-      <h2>アイコンを選ぶ</h2>
+    <div class="invite-sheet profile-icon-sheet" role="dialog" aria-modal="true" aria-label="アイコンを選択">
+      <h2 id="profileIconPickerTitle">アイコンを選ぶ</h2>
       <div class="profile-icon-actions">
-        <button type="button" class="invite-copy profile-icon-upload" onclick="pickUploadedUserIcon()">自分の画像を使う</button>
+        <button type="button" class="invite-copy profile-icon-upload" onclick="pickUploadedIcon()">自分の画像を使う</button>
       </div>
       <div class="profile-icon-grid" id="profileIconGrid" aria-live="polite"></div>
       <button class="invite-close" type="button" onclick="closeUserIconPicker()">キャンセル</button>
@@ -2308,6 +2308,7 @@
     let pendingUserIconFile = null;
     let pendingPresetUserIconUrl = '';
     let profileIconCatalog = null;
+    let iconPickerTarget = 'user';
     let pendingGroupIconFile = null;
     let inviteToken = '';
     let inviteMembers = [];
@@ -4207,8 +4208,12 @@
       $('accountMenu').classList.add('hidden');
     }
 
-    async function pickUserIcon() {
+    async function openPresetIconPicker(target = 'user') {
+      iconPickerTarget = target === 'group' ? 'group' : 'user';
       closeAccountMenu();
+      $('profileIconPickerTitle').textContent = iconPickerTarget === 'group'
+        ? 'トークルームのアイコンを選ぶ'
+        : 'アイコンを選ぶ';
       $('profileIconOverlay').classList.remove('hidden');
       const grid = $('profileIconGrid');
       grid.innerHTML = '<p class="login-note">読み込み中…</p>';
@@ -4220,7 +4225,7 @@
         }
         grid.innerHTML = profileIconCatalog.map((icon) => `
           <button type="button" class="profile-icon-option" title="${escapeHtml(icon.label)}"
-            aria-label="${escapeHtml(icon.label)}" onclick="choosePresetUserIcon('${escapeHtml(icon.path)}')">
+            aria-label="${escapeHtml(icon.label)}" onclick="choosePresetIcon('${escapeHtml(icon.path)}')">
             <img src="${escapeHtml(icon.path)}" alt="" loading="lazy" decoding="async">
           </button>`).join('');
       } catch (error) {
@@ -4228,17 +4233,30 @@
       }
     }
 
+    function pickUserIcon() {
+      return openPresetIconPicker('user');
+    }
+
     function closeUserIconPicker() {
       $('profileIconOverlay').classList.add('hidden');
     }
 
-    function pickUploadedUserIcon() {
+    function pickUploadedIcon() {
       closeUserIconPicker();
-      $('userIconInput').click();
+      $(iconPickerTarget === 'group' ? 'groupIconInput' : 'userIconInput').click();
     }
 
-    async function choosePresetUserIcon(url) {
+    async function choosePresetIcon(url) {
       closeUserIconPicker();
+      if (iconPickerTarget === 'group') {
+        if (!currentGroupId) return;
+        try {
+          await applyGroupIconUrl(currentGroupId, url);
+        } catch (error) {
+          alert(error.message || 'アイコンの保存に失敗しました');
+        }
+        return;
+      }
       pendingUserIconFile = null;
       if (!currentUser) {
         pendingPresetUserIconUrl = url;
@@ -4259,7 +4277,7 @@
       const group = myGroups.find((g) => g.id === currentGroupId);
       if (group && group.is_direct) return;
       if (isGroupTrashed(group)) return;
-      $('groupIconInput').click();
+      openPresetIconPicker('group');
     }
 
     async function saveUserIcon(file) {
@@ -4273,6 +4291,11 @@
 
     async function saveGroupIcon(groupId, file) {
       const url = await uploadIcon(`groups/${groupId}`, file);
+      await applyGroupIconUrl(groupId, url);
+      return url;
+    }
+
+    async function applyGroupIconUrl(groupId, url) {
       const { error } = await sb.from('chat_groups').update({ icon_url: url }).eq('id', groupId);
       if (error) throw error;
       const apply = (list) => {
@@ -4286,7 +4309,6 @@
         const group = myGroups.find((g) => g.id === groupId) || { group_name: $('chatGroupName').textContent, icon_url: url };
         paintAvatar($('chatGroupAvatar'), group.group_name, url);
       }
-      return url;
     }
 
     function previewLocalIcon(el, file, fallbackName) {

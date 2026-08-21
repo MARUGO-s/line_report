@@ -13,13 +13,20 @@ test('profile icon catalog exposes every optimized bundled icon', () => {
 });
 
 test('new and existing users can select bundled icons while uploads remain available', () => {
-  assert.match(chat, /function pickUploadedUserIcon\(\)/);
-  assert.match(chat, /function choosePresetUserIcon\(url\)/);
+  assert.match(chat, /function pickUploadedIcon\(\)/);
+  assert.match(chat, /function choosePresetIcon\(url\)/);
   assert.match(chat, /update\(\{ icon_url: url \}\)\.eq\('id', currentUser\.id\)/);
   assert.match(chat, /insert\(\{ id: uid, username, icon_url: pendingPresetUserIconUrl \|\| null \}\)/);
   assert.match(chat, /canvas\.toBlob\(resolve, 'image\/webp', 0\.82\)/);
   assert.match(chat, /cacheControl: '31536000'/);
   assert.match(chat, /profile-icons\/catalog\.json', \{ cache: 'force-cache' \}/);
+});
+
+test('talk room icons can use the same presets or an uploaded image', () => {
+  assert.match(chat, /openPresetIconPicker\('group'\)/);
+  assert.match(chat, /iconPickerTarget === 'group' \? 'groupIconInput' : 'userIconInput'/);
+  assert.match(chat, /await applyGroupIconUrl\(currentGroupId, url\)/);
+  assert.match(chat, /update\(\{ icon_url: url \}\)\.eq\('id', groupId\)/);
 });
 
 test('profile icon choices stay large and spaced on mobile', () => {

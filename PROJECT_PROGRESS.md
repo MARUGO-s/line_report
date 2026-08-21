@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - トークルームでも共通アイコン集を選択可能に
+
+- Request: トークルームのヘッダーアイコン変更時も、ユーザー設定と同じアイコン集を使いたい。
+- Fix: 複数人トークのアイコン変更画面に共通の標準アイコン70点を表示し、プリセット選択と従来の画像アップロードを両方利用可能にした。
+
 ### 2026-08-21 - 軽量検索カードが無反応になる不具合を修正
 
 - Incident: 「検索」送信後、軽量 `chat-search` は起動するが返信カードが表示されない。
