@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-22 - リアクションメニュー背景を60%透明化
+
+- Request: 操作メニューの背景を60%透過にしたい。
+- Fix: 背景色の不透明度を40%へ変更し、既存の背景ぼかしで文字・アイコンの視認性を維持した。
+
 ### 2026-08-22 - リアクション15種類を一画面に表示
 
 - Request: 横スライドでは追加アイコンに気付きにくいため、全種類を表示したい。

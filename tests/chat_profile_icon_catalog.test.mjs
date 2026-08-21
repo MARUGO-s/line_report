@@ -46,6 +46,7 @@ test('reaction details identify each user with a transparent icon background', (
 
 test('message action menu stays compact with horizontal icon actions', () => {
   assert.match(chat, /\.msg-menu \{[\s\S]*?width: min\(292px, calc\(100vw - 24px\)\)/);
+  assert.match(chat, /\.msg-menu \{[\s\S]*?background: rgba\(35, 35, 38, 0\.4\)/);
   assert.match(chat, /\.msg-menu-emojis \{[\s\S]*?grid-template-columns: repeat\(5, 40px\)[\s\S]*?justify-content: space-between/);
   assert.match(chat, /class="msg-menu-actions"/);
   assert.match(chat, /msg-menu-action-icon/);
