@@ -2824,7 +2824,7 @@
       if (!reactionsByMessage.has(messageId)) return;
 
       const list = reactionsByMessage.get(messageId) || [];
-      const without = list.filter((r) => !(r.user_id === row.user_id && r.emoji === row.emoji));
+      const without = list.filter((r) => r.user_id !== row.user_id);
       // 自分の操作は楽観更新で反映済みなので、ここでは配列を作り直すだけにする。
       reactionsByMessage.set(
         messageId,
@@ -5659,24 +5659,28 @@
 
     async function toggleReaction(messageId, emoji) {
       const list = reactionsByMessage.get(messageId) || [];
-      const mine = list.find((r) => r.user_id === currentUser.id && r.emoji === emoji);
+      const mine = list.find((r) => r.user_id === currentUser.id);
+      const removing = mine && mine.emoji === emoji;
 
       // 通信を待たずに見た目を先に変える。失敗したら元に戻す。
       const rollback = list.slice();
       reactionsByMessage.set(
         messageId,
-        mine
-          ? list.filter((r) => !(r.user_id === currentUser.id && r.emoji === emoji))
-          : list.concat([{ user_id: currentUser.id, emoji }])
+        removing
+          ? list.filter((r) => r.user_id !== currentUser.id)
+          : list.filter((r) => r.user_id !== currentUser.id).concat([{ user_id: currentUser.id, emoji }])
       );
       refreshMessageNode(messageId);
 
       try {
-        const query = mine
+        const query = removing
           ? sb.from('chat_message_reactions').delete()
-              .eq('message_id', messageId).eq('user_id', currentUser.id).eq('emoji', emoji)
+              .eq('message_id', messageId).eq('user_id', currentUser.id)
           : sb.from('chat_message_reactions')
-              .insert({ message_id: messageId, user_id: currentUser.id, emoji });
+              .upsert(
+                { message_id: messageId, user_id: currentUser.id, emoji },
+                { onConflict: 'message_id,user_id' }
+              );
         const { error } = await query;
         if (error) throw error;
       } catch (error) {

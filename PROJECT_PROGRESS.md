@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - リアクションを1人1つに制限
+
+- Request: 同じメッセージには1人1リアクションとし、2つ目を選んだら1つ目を自動で消したい。
+- Fix: DBの一意制約を `(message_id, user_id)` に変更。別絵文字はupsertで置換し、同じ絵文字の再選択は取り消しにした。
+
 ### 2026-08-21 - リアクションしたユーザーをLINE風に表示
 
 - Request: リアクションを付けた人が分かるようにし、LINEのような一覧表示へ揃えたい。
