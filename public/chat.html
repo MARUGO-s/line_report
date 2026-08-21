@@ -1259,23 +1259,34 @@
     .mention-row .talk-avatar { width: 28px; height: 28px; font-size: 12px; }
 
     /* リアクション */
-    .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+    .reactions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
     .message.own .reactions { justify-content: flex-end; }
     .reaction-chip {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 2px 8px;
-      border-radius: 11px;
-      border: 1px solid rgba(0, 0, 0, 0.12);
-      background: rgba(255, 255, 255, 0.92);
+      gap: 3px;
+      padding: 1px 2px;
+      border-radius: 8px;
+      border: 0;
+      background: transparent;
       color: #111;
       font-size: 12px;
       line-height: 1.5;
       cursor: pointer;
     }
-    .reaction-chip.mine { border-color: var(--line-green); background: #e4f8ec; }
-    .reaction-chip .count { font-size: 11px; color: #555; }
+    .reaction-chip:hover, .reaction-chip:focus-visible { background: rgba(255, 255, 255, 0.45); }
+    .reaction-chip.mine { background: rgba(255, 255, 255, 0.28); }
+    .reaction-chip .count { font-size: 11px; color: rgba(20, 20, 20, 0.72); }
+    .reaction-detail-sheet { max-width: 440px; background: #373739; color: #fff; }
+    .reaction-detail-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .reaction-detail-title h2 { margin: 0; color: #fff; }
+    .reaction-detail-close { border: 0; background: transparent; color: #ddd; font-size: 30px; cursor: pointer; }
+    .reaction-detail-list { display: flex; flex-direction: column; gap: 8px; max-height: min(55vh, 440px); overflow-y: auto; }
+    .reaction-detail-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) 44px; align-items: center; gap: 12px; min-height: 56px; }
+    .reaction-detail-avatar { width: 48px; height: 48px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; font-weight: 700; background: transparent; }
+    .reaction-detail-avatar img { width: 100%; height: 100%; object-fit: contain; background: transparent; }
+    .reaction-detail-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+    .reaction-detail-emoji { justify-self: center; font-size: 30px; line-height: 1; }
 
     /* 各メッセージの操作ボタン */
     .msg-actions {
@@ -2181,6 +2192,16 @@
       </div>
       <div class="profile-icon-grid" id="profileIconGrid" aria-live="polite"></div>
       <button class="invite-close" type="button" onclick="closeUserIconPicker()">キャンセル</button>
+    </div>
+  </div>
+
+  <div class="invite-overlay hidden" id="reactionDetailOverlay" onclick="if (event.target === this) closeReactionDetails()">
+    <div class="invite-sheet reaction-detail-sheet" role="dialog" aria-modal="true" aria-labelledby="reactionDetailHeading">
+      <div class="reaction-detail-title">
+        <h2 id="reactionDetailHeading">リアクション</h2>
+        <button class="reaction-detail-close" type="button" onclick="closeReactionDetails()" aria-label="閉じる">×</button>
+      </div>
+      <div class="reaction-detail-list" id="reactionDetailList"></div>
     </div>
   </div>
 
@@ -5439,6 +5460,28 @@
       return `<div class="reactions">${chips}</div>`;
     }
 
+    function closeReactionDetails() {
+      $('reactionDetailOverlay').classList.add('hidden');
+    }
+
+    function openReactionDetails(messageId) {
+      const list = reactionsByMessage.get(Number(messageId)) || [];
+      if (!list.length) return;
+      $('reactionDetailHeading').textContent = `リアクション ${list.length}`;
+      $('reactionDetailList').innerHTML = list.map((row) => {
+        const user = groupMembers.find((member) => String(member.id) === String(row.user_id));
+        const name = user ? personName(user) : '退出したユーザー';
+        const iconUrl = user ? personIconUrl(user) : '';
+        const avatarBackground = iconUrl ? 'transparent' : avatarStyle(name);
+        return `<div class="reaction-detail-row">
+          <div class="reaction-detail-avatar" style="background:${avatarBackground}">${avatarHtml(user ? personAvatarKey(user) : '?', iconUrl)}</div>
+          <div class="reaction-detail-name">${escapeHtml(name)}${user && String(user.id) === String(currentUser.id) ? '（自分）' : ''}</div>
+          <div class="reaction-detail-emoji" aria-label="${escapeHtml(row.emoji)}">${escapeHtml(row.emoji)}</div>
+        </div>`;
+      }).join('');
+      $('reactionDetailOverlay').classList.remove('hidden');
+    }
+
     function buildMessageNode(msg) {
       const div = document.createElement('div');
       const isOwn = currentUser && String(msg.user_id) === String(currentUser.id);
@@ -7017,7 +7060,7 @@
       if (img && img.src) { openImageViewer(img.src); return; }
 
       const chip = e.target.closest('.reaction-chip');
-      if (chip) { toggleReaction(Number(chip.dataset.messageId), chip.dataset.emoji); return; }
+      if (chip) { openReactionDetails(Number(chip.dataset.messageId)); return; }
 
       const menuBtn = e.target.closest('[data-menu-for]');
       if (menuBtn) { openMessageMenu(menuBtn.dataset.menuFor, menuBtn); return; }

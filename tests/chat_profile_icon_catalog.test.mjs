@@ -35,3 +35,11 @@ test('profile icon choices stay large and spaced on mobile', () => {
   assert.match(chat, /\.profile-icon-option \{[\s\S]*?min-height: 84px/);
   assert.match(chat, /\.profile-icon-option img \{[^}]*object-fit: contain/);
 });
+
+test('reaction details identify each user with a transparent icon background', () => {
+  assert.match(chat, /function openReactionDetails\(messageId\)/);
+  assert.match(chat, /groupMembers\.find\(\(member\) => String\(member\.id\) === String\(row\.user_id\)\)/);
+  assert.match(chat, /const iconUrl = user \? personIconUrl\(user\) : ''/);
+  assert.match(chat, /reaction-detail-avatar[^}]*background: transparent/);
+  assert.match(chat, /if \(chip\) \{ openReactionDetails\(Number\(chip\.dataset\.messageId\)\); return; \}/);
+});

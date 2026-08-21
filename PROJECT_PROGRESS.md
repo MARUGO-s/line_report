@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - リアクションしたユーザーをLINE風に表示
+
+- Request: リアクションを付けた人が分かるようにし、LINEのような一覧表示へ揃えたい。
+- Fix: メッセージ下のリアクションを透明背景へ変更。押すと、リアクション総数とユーザーのアイコン・名前・絵文字を一覧表示する。
+
 ### 2026-08-21 - トークルームでも共通アイコン集を選択可能に
 
 - Request: トークルームのヘッダーアイコン変更時も、ユーザー設定と同じアイコン集を使いたい。
