@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - M-talk店舗Botへ各店舗ロゴを表示
+
+- Request: `.chat.html` の各店舗Botアカウントに、提供された各店舗ロゴを表示したい。
+- Implementation: 22店舗のSVGを `public/icons/store-bots/` に追加。`chat.html` はBotの `store_key` からロゴを解決し、Bot一覧、1対1、ヘッダー、メンバー、招待、メンションで共通表示する。
+- Fallback: 未対応の店舗キーは既存 `icon_url`、それも無ければ店名の頭文字を表示する。
+- Operation: M-talkの「Bot」タブ、または店舗Botとのトークを開くと店舗ロゴが表示される。
+
 ### 2026-08-21 - ゴミ箱タブを一番右へ
 
 - Request: トーク一覧のゴミ箱タブを真ん中ではなく、Bot の右（一番右）にする。

@@ -14,6 +14,13 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
    載っていないと `chat_users` への insert がトリガで弾かれ、チャットを一切使えない。
 3. 初回のみ表示名とアイコンを決める。
 
+## 店舗Botのロゴ
+
+- `chat_users.is_bot=true` かつ `store_key` がある店舗Botは、`public/icons/store-bots/` の店舗ロゴを表示する。
+- `public/chat.html` の `STORE_BOT_LOGOS` が `store_key` とロゴファイルの対応表。Botタブ、1対1トーク、ヘッダー、メンバー、招待、メンションで共通利用する。
+- 店舗Botの `icon_url` より同梱ロゴを優先する。対応表にない新店舗だけ、従来どおり `icon_url` または店名の頭文字へフォールバックする。
+- 店舗を追加するときは、ロゴSVG、`STORE_BOT_LOGOS`、`tests/chat_store_bot_logos.test.mjs` の期待値を同時に追加する。
+
 ## テーブル
 
 | テーブル | 役割 |

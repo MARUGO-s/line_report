@@ -2238,11 +2238,47 @@
       'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, created_at';
     const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
     const CHAT_USER_COLUMNS = 'id, username, icon_url, is_bot, store_key';
+    const STORE_BOT_LOGOS = Object.freeze({
+      marugo: 'icons/store-bots/marugo.svg',
+      marugosecond: 'icons/store-bots/marugosecond.svg',
+      marugogrande: 'icons/store-bots/marugogrande.svg',
+      sannanaichi: 'icons/store-bots/sannanaichi.svg',
+      shenlong: 'icons/store-bots/shenlong.svg',
+      claudia2: 'icons/store-bots/claudia2.svg',
+      sauvage: 'icons/store-bots/sauvage.svg',
+      barpelota: 'icons/store-bots/barpelota.svg',
+      briccola: 'icons/store-bots/briccola.svg',
+      violette: 'icons/store-bots/violette.svg',
+      marugootto: 'icons/store-bots/marugootto.svg',
+      donaiya: 'icons/store-bots/donaiya.svg',
+      marugoyotsuya: 'icons/store-bots/marugoyotsuya.svg',
+      sushikoruri: 'icons/store-bots/sushikoruri.svg',
+      bistrocavacava: 'icons/store-bots/bistrocavacava.svg',
+      marugoS: 'icons/store-bots/marugo-s.svg',
+      marugoshinbashi: 'icons/store-bots/marugoshinbashi.svg',
+      marugomarunouchi: 'icons/store-bots/marugomarunouchi.svg',
+      yakinikumarugo: 'icons/store-bots/yakinikumarugo.svg',
+      erics: 'icons/store-bots/erics.svg',
+      mitan: 'icons/store-bots/mitan.svg',
+      marugoD: 'icons/store-bots/marugo-d.svg',
+    });
     function isReservationBot(user) {
       return !!(user && (String(user.id) === CHAT_BOT_USER_ID || user.username === '予約通知'));
     }
     function isStoreBot(user) {
       return !!(user && user.is_bot && user.store_key);
+    }
+    function storeBotLogoForKey(storeKey) {
+      const rawKey = String(storeKey || '').trim();
+      if (STORE_BOT_LOGOS[rawKey]) return STORE_BOT_LOGOS[rawKey];
+      const matchedKey = Object.keys(STORE_BOT_LOGOS).find((key) => key.toLowerCase() === rawKey.toLowerCase());
+      return matchedKey ? STORE_BOT_LOGOS[matchedKey] : '';
+    }
+    function storeBotLogoUrl(user) {
+      return isStoreBot(user) ? storeBotLogoForKey(user.store_key) : '';
+    }
+    function personIconUrl(user) {
+      return storeBotLogoUrl(user) || String((user && user.icon_url) || '');
     }
     function isStoreBotDirect(group) {
       return !!(group && group.is_direct && group.peer && isStoreBot(group.peer));
@@ -3292,7 +3328,8 @@
     }
 
     function roomIcon(group) {
-      if (group && group.is_direct && group.peer) return group.peer.icon_url;
+      if (group && group.is_direct && group.peer) return personIconUrl(group.peer);
+      if (group && group.is_store_room) return storeBotLogoForKey(group.store_key) || group.icon_url;
       return group && group.icon_url;
     }
 
@@ -3457,8 +3494,9 @@
         users.forEach((user) => {
           const row = document.createElement('div');
           row.className = 'user-row';
+          const iconUrl = personIconUrl(user);
           row.innerHTML = `
-            <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
+            <div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
             <div class="talk-body">
               <div class="group-item-name"><span>${escapeHtml(personName(user))}</span>${botMarkHtml()}</div>
               <div class="group-item-info">1対1、またはルームへ招待</div>
@@ -3727,8 +3765,9 @@
           const mine = String(user.id) === String(currentUser.id);
           const bot = isBotUser(user);
           const lockedBot = isReservationBot(user) || (isStoreBot(user) && current && current.is_store_room);
+          const iconUrl = personIconUrl(user);
           row.innerHTML = `
-            <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
+            <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
             <div>${escapeHtml(personName(user))}${mine ? '（自分）' : ''}${bot ? botMarkHtml() : ''}</div>
           `;
           if (canKick && !mine && !lockedBot) {
@@ -3761,8 +3800,9 @@
       people.forEach((user) => {
         const row = document.createElement('div');
         row.className = 'invite-person';
+        const iconUrl = personIconUrl(user);
         row.innerHTML = `
-          <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
+          <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
           <div>${escapeHtml(personName(user))}${isBotUser(user) ? botMarkHtml() : ''}</div>
         `;
         const button = document.createElement('button');
@@ -3940,7 +3980,8 @@
         item.type = 'button';
         item.className = 'member-strip-item';
         item.title = personName(user) + (isBotUser(user) ? '（Bot）' : '');
-        item.innerHTML = `<div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>`;
+        const iconUrl = personIconUrl(user);
+        item.innerHTML = `<div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>`;
         strip.appendChild(item);
       });
     }
@@ -5654,12 +5695,15 @@
       }
 
       mentionActiveIndex = Math.min(mentionActiveIndex, mentionCandidates.length - 1);
-      pop.innerHTML = mentionCandidates.map((user, index) => `
-        <div class="mention-row ${index === mentionActiveIndex ? 'active' : ''}" data-index="${index}">
-          <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), user.icon_url)}</div>
-          <span>${escapeHtml(personName(user))}</span>
-        </div>
-      `).join('');
+      pop.innerHTML = mentionCandidates.map((user, index) => {
+        const iconUrl = personIconUrl(user);
+        return `
+          <div class="mention-row ${index === mentionActiveIndex ? 'active' : ''}" data-index="${index}">
+            <div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
+            <span>${escapeHtml(personName(user))}</span>
+          </div>
+        `;
+      }).join('');
       pop.classList.remove('hidden');
     }
 
