@@ -10,6 +10,12 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - M-talk店舗Botロゴを白背景に統一
+
+- Request: 各店舗Botロゴの背景をすべて白にして表示し直したい。
+- Implementation: `icons/store-bots/` の画像だけ白背景、`object-fit: contain`、4px余白に統一。一般ユーザーと通常グループ画像の `cover` 表示は維持する。
+- Operation: M-talkを再読込すると、各店舗ロゴが白い円形背景の中に切れずに表示される。
+
 ### 2026-08-21 - M-talk店舗Botへ各店舗ロゴを表示
 
 - Request: `.chat.html` の各店舗Botアカウントに、提供された各店舗ロゴを表示したい。

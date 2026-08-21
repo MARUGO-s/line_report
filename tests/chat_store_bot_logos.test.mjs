@@ -29,3 +29,8 @@ test('store Bot logos override profile icons and are used for direct-room icons'
   assert.match(chat, /if \(group && group\.is_store_room\) return storeBotLogoForKey\(group\.store_key\) \|\| group\.icon_url/);
   assert.match(chat, /const iconUrl = personIconUrl\(user\)/);
 });
+
+test('store Bot logos use a white background without changing regular profile images', () => {
+  assert.match(chat, /img\[src\*="icons\/store-bots\/"\][\s\S]*?background: #fff;[\s\S]*?object-fit: contain;[\s\S]*?padding: 4px;/);
+  assert.match(chat, /\.rail-avatar img,[\s\S]*?object-fit: cover;/);
+});
