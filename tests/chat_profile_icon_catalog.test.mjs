@@ -57,3 +57,9 @@ test('reaction menu shows all varied emotions without scrolling', () => {
   assert.doesNotMatch(chat, /\.msg-menu-emojis \{[^}]*overflow-x: auto/);
   assert.match(chat, /Math\.min\(preferredTop, window\.innerHeight - menuRect\.height - 8\)/);
 });
+
+test('compact composer uses a short placeholder without desktop-only instructions', () => {
+  assert.match(chat, /const compactComposer = isMobileLayout\(\) \|\| window\.innerWidth <= 1024/);
+  assert.match(chat, /compactComposer[\s\S]*?'メッセージを入力（#メモ対応）'/);
+  assert.match(chat, /compactComposer[\s\S]*?'メッセージを入力'[\s\S]*?'メッセージ（Shift\+Enterで改行）'/);
+});

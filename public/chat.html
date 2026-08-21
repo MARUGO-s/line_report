@@ -4121,13 +4121,15 @@
       $('chatGroupName').textContent = roomTitle(group);
       paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
+      // スマホ・タブレット幅ではPC専用のShift+Enter注釈を出さず、1行で読める文言にする。
+      const compactComposer = isMobileLayout() || window.innerWidth <= 1024;
       if ($('messageInput') && roomHasStoreBot(group)) {
-        $('messageInput').placeholder = isMobileLayout()
-          ? 'メッセージ（#メモ で資料保存）'
+        $('messageInput').placeholder = compactComposer
+          ? 'メッセージを入力（#メモ対応）'
           : 'メッセージ（#メモ で資料保存・Shift+Enterで改行）';
       } else if ($('messageInput')) {
-        $('messageInput').placeholder = isMobileLayout()
-          ? 'メッセージ'
+        $('messageInput').placeholder = compactComposer
+          ? 'メッセージを入力'
           : 'メッセージ（Shift+Enterで改行）';
       }
       updateChatHeaderMeta();

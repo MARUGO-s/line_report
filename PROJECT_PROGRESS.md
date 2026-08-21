@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-22 - スマホのメッセージ入力注釈を1行表示
+
+- Symptom: 入力欄のPC向けShift+Enter注釈がスマホで折り返され、下側が見切れる。
+- Fix: 1024px以下では短い「メッセージを入力」へ切り替え、店舗Botルームのみ「#メモ対応」を併記する。
+
 ### 2026-08-22 - リアクションメニュー背景を60%透明化
 
 - Request: 操作メニューの背景を60%透過にしたい。
