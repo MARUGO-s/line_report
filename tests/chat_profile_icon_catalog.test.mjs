@@ -67,6 +67,8 @@ test('compact composer uses a short placeholder without desktop-only instruction
 test('rich cards use enlarged type for reservations and receipt results', () => {
   assert.match(chat, /\.msg-card-title \{\s*font-size: 18px/);
   assert.match(chat, /\.msg-card-field \{[^}]*font-size: 15px/);
+  assert.match(chat, /\.msg-card-field dt \{[\s\S]*?flex: 0 0 88px;[\s\S]*?min-width: max-content;[\s\S]*?white-space: nowrap;/);
+  assert.match(chat, /\.msg-card-line \.msg-card-field dt \{[^}]*min-width: max-content;[^}]*white-space: nowrap;/);
   assert.match(chat, /\.msg-card-line \.msg-card-field \{[^}]*font-size: 15px/);
   assert.match(chat, /\.msg-card-action \{[\s\S]*?font-size: 16px/);
   assert.match(chat, /\.msg-card-heading \{ font-size: 15px/);

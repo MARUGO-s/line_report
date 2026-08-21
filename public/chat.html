@@ -1505,7 +1505,12 @@
     }
 
     .msg-card-field { display: flex; gap: 10px; font-size: 15px; line-height: 1.4; margin: 0; }
-    .msg-card-field dt { flex: 0 0 68px; color: #6b7280; }
+    .msg-card-field dt {
+      flex: 0 0 88px;
+      min-width: max-content;
+      color: #6b7280;
+      white-space: nowrap;
+    }
     .msg-card-field dd {
       flex: 1;
       min-width: 0;
@@ -1549,7 +1554,7 @@
     .msg-card-line .msg-card-header { display: none; }
     .msg-card-line .msg-card-body { gap: 1px; padding: 16px 16px 10px; }
     .msg-card-line .msg-card-field { gap: 8px; font-size: 15px; line-height: 1.4; }
-    .msg-card-line .msg-card-field dt { flex: 0 0 42%; color: #666; }
+    .msg-card-line .msg-card-field dt { flex: 0 0 42%; min-width: max-content; color: #666; white-space: nowrap; }
     .msg-card-line .msg-card-field dd { color: #111; }
     .msg-card-line .msg-card-field dd.is-bold { font-weight: 700; color: #1f1f1f; }
     .msg-card-line .msg-card-empty {
