@@ -5,10 +5,11 @@ import test from 'node:test'
 const root = new URL('..', import.meta.url)
 
 test('reservation confirmation command issues a new store-scoped login link before search handling', async () => {
-  const [handler, webhook, guide] = await Promise.all([
+  const [handler, webhook, searchBot, guide] = await Promise.all([
     readFile(new URL('supabase/functions/_shared/reservation_calendar_link_request.ts', root), 'utf8'),
     readFile(new URL('supabase/functions/line-webhook/index.ts', root), 'utf8'),
     readFile(new URL('supabase/functions/_shared/line_search_bot.ts', root), 'utf8'),
+    readFile(new URL('supabase/functions/_shared/search_help_guide.ts', root), 'utf8'),
   ])
 
   assert.match(handler, /TRIGGER_WORDS = new Set\(\['予約確認'\]\)/)
@@ -18,6 +19,7 @@ test('reservation confirmation command issues a new store-scoped login link befo
   assert.match(handler, /24時間・1回のみ有効/)
   assert.match(webhook, /handleReservationCalendarLinkTextMessage/)
   assert.match(webhook, /!reservationCalendarLinkHandled.*isLineSearchGuideEnabled/s)
+  assert.match(searchBot, /buildAllFeaturesGuideFlex/)
   assert.match(guide, /予約カレンダーのログインリンクが期限切れ・使用済みになった場合/)
   assert.match(guide, /「予約確認」と送ると新しいリンクが届きます/)
 })
