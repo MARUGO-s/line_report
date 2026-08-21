@@ -377,6 +377,18 @@ test("M-talk search menu omits conversation search and keeps other commands", as
   assert.deepEqual(commands, ['srch=sal', 'srch=help'])
 })
 
+test("M-talk canned search controls use the lightweight search function", async () => {
+  const migration = await read("supabase/migrations/20260821162000_chat_search_fast_dispatch.sql")
+  const searchFunction = await read("supabase/functions/chat-search/index.ts")
+  assert.match(migration, /functions\/v1\/chat-search/)
+  assert.match(migration, /'検索'.*'検索ヘルプ'/s)
+  assert.match(migration, /'srch=menu'.*'srch=cal'.*'srch=med'.*'srch=sal'/s)
+  assert.match(migration, /functions\/v1\/chat-knowledge\?action=dispatch/)
+  assert.match(searchFunction, /commandKind/)
+  assert.match(searchFunction, /line_room_search_pending/)
+  assert.match(searchFunction, /トークルームとメッセージ検索/)
+})
+
 test("M-talk room ids map to room_summary_settings keys", () => {
   assert.equal(mtalkSyntheticRoomId(31), "mtalk-group-31")
   assert.equal(parseMtalkSyntheticRoomId("mtalk-group-31"), 31)

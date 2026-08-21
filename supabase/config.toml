@@ -97,3 +97,8 @@ verify_jwt = false
 # 認可は関数側で定数時間比較する。
 [functions.chat-knowledge]
 verify_jwt = false
+
+# 定型の検索メニュー／検索種別選択を重い chat-knowledge から分離する内部dispatch。
+# pg_net の共有シークレットを関数内で定数時間比較する。
+[functions.chat-search]
+verify_jwt = false

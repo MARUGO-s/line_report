@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - M-talk検索の定型応答を軽量処理へ分離
+
+- Request: 「検索」送信後と検索種別ボタン選択後の定型返信が遅いため、レスポンスを改善したい。
+- Fix: DB dispatchで検索制御メッセージを判定し、レシート・画像解析を含む `chat-knowledge` ではなく専用の `chat-search` へ直接送る。検索キーワードや検索以外のメッセージは従来経路を維持する。
+
 ### 2026-08-21 - M-talk店舗Botの会話検索を廃止
 
 - Request: 店舗Botとのトーク内で行う会話検索を削除し、トーク一覧上部の検索欄から検索する形へ統一したい。

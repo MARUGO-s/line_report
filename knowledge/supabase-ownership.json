@@ -8,6 +8,7 @@
     "calendar-tomorrow-cron",
     "chat-knowledge",
     "chat-push",
+    "chat-search",
     "foodcourt-forecast-cron",
     "gmail-alert-cron",
     "line-admin-webhook",
