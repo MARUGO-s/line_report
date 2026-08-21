@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - 店舗ロゴ内のbot文字見切れを修正
+
+- Symptom: 赤い `bot` マークの末尾が円形アイコンで切れていた。
+- Cause: 右下端から2pxの配置が円形クリップに近すぎた。
+- Fix: 右7px・下6pxへ内側移動し、文字を8pxに調整。3文字すべてを円内へ収める。
+- Operation: M-talkを再読込すると、各店舗ロゴ内に `bot` が欠けずに表示される。
+
 ### 2026-08-21 - 店舗ロゴ内へ赤いbotマークを表示
 
 - Request: 各店舗ロゴの中に、Botと分かる赤文字のマークを入れたい。
