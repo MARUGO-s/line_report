@@ -18,7 +18,7 @@
     "test:ci": "npm run test:structure && npm run test:chat && npm run test:foodcourt && npm run test:reservation && npm run test:receipt && npm run test:journal-ai && npm run test:pos-journal",
     "test:knowledge": "node --test tests/knowledge_system.test.mjs",
     "test:structure": "node --test tests/repository_structure.test.mjs tests/ux_mobile_layout.test.mjs",
-    "test:chat": "node --test tests/chat_web_push.test.ts tests/chat_store_bot_logos.test.mjs tests/mtalk_schedule.test.ts tests/calendar_tomorrow_reminder.test.ts tests/room_hard_delete.test.ts",
+    "test:chat": "node --test tests/chat_web_push.test.ts tests/chat_store_bot_logos.test.mjs tests/chat_emotion_stickers.test.mjs tests/mtalk_schedule.test.ts tests/calendar_tomorrow_reminder.test.ts tests/room_hard_delete.test.ts",
     "test:foodcourt": "node --test tests/foodcourt_*.test.ts",
     "test:reservation": "node --test tests/reservation_*.test.ts",
     "test:receipt": "deno test --no-lock --no-check --allow-read --allow-env tests/yamato_collect_expense.test.ts && node --test tests/receipt_*.test.ts",

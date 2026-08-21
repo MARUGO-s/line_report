@@ -50,7 +50,15 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 | --- | --- | --- |
 | `text` | なし | 全員 |
 | `image` | `{v,kind,image:{path,w,h}}` | 全員。ただしトリガが作り直す |
+| `sticker` | `{v,kind,sticker:{id,label,path}}` | 全員。ただし有効な `chat_stickers.id` だけをトリガが台帳から作り直す |
 | `card` | `{v,kind,cards:[{header,sections,action}]}` | `service_role` のみ |
+
+## 感情イラスト
+
+- 入力欄の `☺` から39点の感情イラストを選び、テキストの代わりに送信できる。
+- `chat_stickers` がID・表示名・公開画像パス・並び順・有効状態のDB台帳。画像本体は `public/stickers/face/` に置く。
+- 送信履歴は `chat_messages.kind='sticker'` と正規化済みpayloadへ保存する。クライアント指定のパス・名称は信用せず、DBトリガが有効なIDから再構成する。
+- トーク一覧・検索・Web Pushには `content` の `[感情イラスト] 表示名` を使う。返信・転送にも対応する。
 
 `chat_set_message_author` トリガが `auth.uid()` の有無で振り分ける。
 ブラウザからの insert は必ず `text` か `image` になり、`card` を詐称できない。

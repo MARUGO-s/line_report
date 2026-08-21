@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - M-talk感情イラスト送信
+
+- Request: 提供した感情イラストをメッセージの代わりに入力欄から送り、DBへ保存したい。
+- Implementation: PNG 39点、`chat_stickers` 台帳、`chat_messages.kind='sticker'`、入力欄の `☺` ピッカー、表示・返信・転送・検索・通知用contentを追加。
+- Security: クライアントの名称・パスは破棄し、有効なスタンプIDをDB台帳で照合してpayloadを再構成する。
+- Operation: M-talkのトークを開き、入力欄左の `☺` → イラストをタップすると送信される。
+
 ### 2026-08-21 - 店舗ロゴ内のbot文字見切れを修正
 
 - Symptom: 赤い `bot` マークの末尾が円形アイコンで切れていた。
