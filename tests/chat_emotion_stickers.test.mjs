@@ -4,17 +4,13 @@ import test from 'node:test';
 
 const chat = await readFile(new URL('../public/chat.html', import.meta.url), 'utf8');
 const migration = await readFile(new URL('../supabase/migrations/20260821123000_chat_emotion_stickers.sql', import.meta.url), 'utf8');
-const gifMigration = await readFile(new URL('../supabase/migrations/20260821140500_chat_emotion_sticker_gif.sql', import.meta.url), 'utf8');
-const stickerMigrations = migration + gifMigration;
 
 test('M-talk exposes all emotion illustrations from the database catalog', async () => {
-  const assets = (await readdir(new URL('../public/stickers/face/', import.meta.url))).filter((name) => /\.(png|gif)$/.test(name));
-  assert.equal(assets.length, 40);
+  const assets = (await readdir(new URL('../public/stickers/face/', import.meta.url))).filter((name) => name.endsWith('.png'));
+  assert.equal(assets.length, 39);
   assert.match(migration, /create table if not exists public\.chat_stickers/);
   assert.match(migration, /create policy chat_stickers_select_authenticated/);
-  for (const asset of assets) assert.match(stickerMigrations, new RegExp(`stickers/face/${asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-  assert.match(gifMigration, /check \(asset_path ~ '\^stickers\/face\/\.\+\\\.\(png\|gif\)\$'\)/);
-  assert.match(gifMigration, /'hello-character', 'こんにちは', 'stickers\/face\/rh4dx-0yp8a\.gif', 40/);
+  for (const asset of assets) assert.match(migration, new RegExp(`stickers/face/${asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 });
 
 test('authenticated users can send only active catalog stickers', () => {

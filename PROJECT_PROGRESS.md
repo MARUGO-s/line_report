@@ -10,12 +10,6 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
-### 2026-08-21 - 感情イラストへGIFを追加
-
-- Request: `rh4dx-0yp8a.gif` もM-talkの感情イラストへ追加したい。
-- Implementation: 「こんにちは」の40点目として追加し、`chat_stickers` の画像パス制約をPNG/GIF対応へ拡張。GIFアニメーションは一覧・送信後とも維持する。
-- Operation: 入力欄の `☺` を押し、一覧末尾の「こんにちは」をタップする。
-
 ### 2026-08-21 - 感情イラストボタンを見やすくする
 
 - Symptom: M-talk入力欄の `☺` が小さく、機能を見つけにくい。
