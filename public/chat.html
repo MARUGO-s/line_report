@@ -2327,6 +2327,8 @@
     let currentMessages = [];
     let stickerCatalog = [];
     let stickerCatalogLoaded = false;
+    const STICKER_CATALOG_CACHE_KEY = 'mtalk-sticker-catalog-v1';
+    const STICKER_CATALOG_CACHE_MS = 24 * 60 * 60 * 1000;
     let historyExhausted = false;
     let loadingHistory = false;
     // 読み込み済みの範囲が最新の発言まで届いているか。
@@ -2721,6 +2723,7 @@
       $('mainContent').classList.remove('hidden');
       subscribeRealtime();
       initializeChatPwa();
+      warmImageAssets();
       void flushPushDiagnostics();
       void resumePendingPushTest();
       loadGroups().then(async () => {
@@ -4036,7 +4039,7 @@
       const letter = escapeHtml((name || '?').trim().slice(0, 1) || '?');
       if (iconUrl) {
         const isStoreBotLogo = String(iconUrl).includes('icons/store-bots/');
-        return `<img src="${escapeHtml(iconUrl)}" alt="">${isStoreBotLogo ? '<span class="store-bot-avatar-mark" aria-hidden="true">bot</span>' : ''}`;
+        return `<img src="${escapeHtml(iconUrl)}" alt="" loading="lazy" decoding="async">${isStoreBotLogo ? '<span class="store-bot-avatar-mark" aria-hidden="true">bot</span>' : ''}`;
       }
       return letter;
     }
@@ -4124,7 +4127,8 @@
       paintAvatar($('profileIconPreview'), name || '?', pendingUserIconFile ? null : (pendingPresetUserIconUrl || icon));
     }
 
-    const ICON_SIZE = 256;
+    // アバター表示は最大80px程度。Retina分を含む192pxへ縮小し、WebPで保存する。
+    const ICON_SIZE = 192;
     const ICON_SOURCE_MAX_BYTES = 15 * 1024 * 1024;
 
     function assertIconFile(file) {
@@ -4170,9 +4174,9 @@
       const sy = (height - src) / 2;
       ctx.drawImage(img, sx, sy, src, src, 0, 0, ICON_SIZE, ICON_SIZE);
 
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
       if (!blob) throw new Error('画像の変換に失敗しました');
-      return new File([blob], 'icon.png', { type: 'image/png' });
+      return new File([blob], 'icon.webp', { type: 'image/webp' });
     }
 
     async function prepareIconFile(file) {
@@ -4182,11 +4186,11 @@
 
     async function uploadIcon(folder, file) {
       const prepared = await prepareIconFile(file);
-      const path = `${folder}/icon.png`;
+      const path = `${folder}/icon.webp`;
       const { error } = await sb.storage.from('chat-icons').upload(path, prepared, {
         upsert: true,
-        contentType: 'image/png',
-        cacheControl: '3600'
+        contentType: 'image/webp',
+        cacheControl: '31536000'
       });
       if (error) throw error;
       const { data } = sb.storage.from('chat-icons').getPublicUrl(path);
@@ -4210,14 +4214,14 @@
       grid.innerHTML = '<p class="login-note">読み込み中…</p>';
       try {
         if (!profileIconCatalog) {
-          const response = await fetch('profile-icons/catalog.json', { cache: 'no-cache' });
+          const response = await fetch('profile-icons/catalog.json', { cache: 'force-cache' });
           if (!response.ok) throw new Error('アイコン一覧を読み込めませんでした');
           profileIconCatalog = await response.json();
         }
         grid.innerHTML = profileIconCatalog.map((icon) => `
           <button type="button" class="profile-icon-option" title="${escapeHtml(icon.label)}"
             aria-label="${escapeHtml(icon.label)}" onclick="choosePresetUserIcon('${escapeHtml(icon.path)}')">
-            <img src="${escapeHtml(icon.path)}" alt="" loading="lazy">
+            <img src="${escapeHtml(icon.path)}" alt="" loading="lazy" decoding="async">
           </button>`).join('');
       } catch (error) {
         grid.innerHTML = `<p class="error">${escapeHtml(error.message || error)}</p>`;
@@ -5982,6 +5986,19 @@
 
     async function loadStickerCatalog() {
       if (stickerCatalogLoaded) return stickerCatalog;
+      try {
+        const cached = JSON.parse(localStorage.getItem(STICKER_CATALOG_CACHE_KEY) || 'null');
+        if (cached && Array.isArray(cached.items) && Date.now() - Number(cached.savedAt) < STICKER_CATALOG_CACHE_MS) {
+          stickerCatalog = cached.items;
+          stickerCatalogLoaded = true;
+          void refreshStickerCatalog().catch(() => {});
+          return stickerCatalog;
+        }
+      } catch (_) {}
+      return refreshStickerCatalog();
+    }
+
+    async function refreshStickerCatalog() {
       const { data, error } = await sb.from('chat_stickers')
         .select('id,label,asset_path,sort_order')
         .eq('is_active', true)
@@ -5989,7 +6006,29 @@
       if (error) throw error;
       stickerCatalog = data || [];
       stickerCatalogLoaded = true;
+      try {
+        localStorage.setItem(STICKER_CATALOG_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), items: stickerCatalog }));
+      } catch (_) {}
       return stickerCatalog;
+    }
+
+    function warmImageAssets() {
+      const run = async () => {
+        try {
+          if (!profileIconCatalog) {
+            const response = await fetch('profile-icons/catalog.json', { cache: 'force-cache' });
+            if (response.ok) profileIconCatalog = await response.json();
+          }
+          const stickers = await loadStickerCatalog();
+          stickers.slice(0, 8).forEach((sticker) => {
+            const image = new Image();
+            image.decoding = 'async';
+            image.src = sticker.asset_path;
+          });
+        } catch (_) { /* アイドル時の先読み失敗は、一覧を開く時に再試行する。 */ }
+      };
+      if ('requestIdleCallback' in window) requestIdleCallback(() => void run(), { timeout: 2500 });
+      else setTimeout(() => void run(), 800);
     }
 
     function renderStickerPicker() {
@@ -5997,7 +6036,7 @@
       if (!picker) return;
       picker.innerHTML = `<div class="sticker-grid">${stickerCatalog.map((sticker) => `
         <button class="sticker-option" type="button" data-sticker-id="${escapeHtml(sticker.id)}" title="${escapeHtml(sticker.label)}">
-          <img src="${escapeHtml(sticker.asset_path)}" alt=""><span>${escapeHtml(sticker.label)}</span>
+          <img src="${escapeHtml(sticker.asset_path)}" alt="" loading="lazy" decoding="async"><span>${escapeHtml(sticker.label)}</span>
         </button>
       `).join('')}</div>`;
     }

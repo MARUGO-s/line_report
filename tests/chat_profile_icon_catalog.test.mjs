@@ -17,6 +17,9 @@ test('new and existing users can select bundled icons while uploads remain avail
   assert.match(chat, /function choosePresetUserIcon\(url\)/);
   assert.match(chat, /update\(\{ icon_url: url \}\)\.eq\('id', currentUser\.id\)/);
   assert.match(chat, /insert\(\{ id: uid, username, icon_url: pendingPresetUserIconUrl \|\| null \}\)/);
+  assert.match(chat, /canvas\.toBlob\(resolve, 'image\/webp', 0\.82\)/);
+  assert.match(chat, /cacheControl: '31536000'/);
+  assert.match(chat, /profile-icons\/catalog\.json', \{ cache: 'force-cache' \}/);
 });
 
 test('profile icon choices stay large and spaced on mobile', () => {

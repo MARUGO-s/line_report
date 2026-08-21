@@ -30,4 +30,7 @@ test('composer picker sends and renders sticker messages', () => {
   assert.match(chat, /function stickerFromMessage\(msg\)/);
   assert.match(chat, /class="msg-sticker"/);
   assert.match(chat, /sendSticker\(button\.dataset\.stickerId\)/);
+  assert.match(chat, /STICKER_CATALOG_CACHE_KEY/);
+  assert.match(chat, /loading="lazy" decoding="async"/);
+  assert.match(chat, /warmImageAssets\(\)/);
 });

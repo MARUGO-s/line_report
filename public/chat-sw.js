@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v49';
+const CHAT_CACHE = 'line-report-chat-v50';
 const CHAT_SHELL = [
   './chat.html',
   './chat.webmanifest',
@@ -110,7 +110,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   const isChatNavigation = event.request.mode === 'navigate' && url.pathname.endsWith('/chat.html');
-  if (!isChatNavigation && !CHAT_ASSET_URLS.has(url.href)) return;
+  const isRuntimeImageAsset = url.pathname.includes('/profile-icons/') || url.pathname.includes('/stickers/face/');
+  if (!isChatNavigation && !CHAT_ASSET_URLS.has(url.href) && !isRuntimeImageAsset) return;
 
   if (isChatNavigation) {
     event.respondWith(

@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - ユーザーアイコン・感情イラストの表示軽量化
+
+- Request: ユーザーアイコンとメッセージ用感情イラストの表示・一覧読み込みを速くしたい。
+- Fix: 同梱画像を表示用解像度へ縮小し、遅延読み込み・非同期デコード・Service Workerキャッシュ・感情イラスト台帳の端末キャッシュを追加。新規アップロードアイコンは192px WebP＋長期キャッシュへ変更した。
+
 ### 2026-08-21 - M-talk検索の定型応答を軽量処理へ分離
 
 - Request: 「検索」送信後と検索種別ボタン選択後の定型返信が遅いため、レスポンスを改善したい。

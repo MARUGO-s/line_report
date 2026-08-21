@@ -103,7 +103,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
   assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v49/)
+  assert.match(serviceWorker, /line-report-chat-v50/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -120,7 +120,8 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /REFRESH_APP_BADGE/)
   assert.match(serviceWorker, /client\.visibilityState !== 'visible'/)
   assert.match(serviceWorker, /chat\.html/)
-  assert.match(serviceWorker, /if \(!isChatNavigation && !CHAT_ASSET_URLS\.has\(url\.href\)\) return/)
+  assert.match(serviceWorker, /isRuntimeImageAsset/)
+  assert.match(serviceWorker, /!CHAT_ASSET_URLS\.has\(url\.href\) && !isRuntimeImageAsset/)
   assert.match(serviceWorker, /key\.startsWith\('line-report-chat-'\)/)
   assert.match(serviceWorker, /client\.navigate\(client\.url\)/)
   assert.match(html, /Push sign out API cleanup error/)
@@ -205,7 +206,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v49/)
+  assert.match(serviceWorker, /line-report-chat-v50/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
