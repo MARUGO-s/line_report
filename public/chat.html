@@ -2925,7 +2925,11 @@
       }
       if (Number(msg.group_id) === currentGroupId) {
         addMessageToUI(msg);
-        if (msg.user_id !== currentUser.id) markGroupRead(currentGroupId);
+        if (msg.user_id !== currentUser.id) {
+          // 開いていてもバックグラウンド中は読んだ扱いにしない。
+          if (!document.hidden) markGroupRead(currentGroupId);
+          else loadUnread();
+        }
       } else {
         loadUnread();
       }
@@ -3553,11 +3557,10 @@
 
         const counts = {};
         (data || []).forEach((row) => { counts[row.group_id] = Number(row.unread_count) || 0; });
-        if (currentGroupId) delete counts[currentGroupId];
         unread = counts;
         renderGroups();
         updateTitle();
-        syncAppBadge();
+        await syncAppBadge();
       } catch (error) {
         console.error('Load unread error:', error);
       }
@@ -3565,18 +3568,23 @@
 
     async function markGroupRead(groupId) {
       if (!currentUser || !groupId) return;
+      // 先に画面を軽くしつつ、DB保存後は必ずサーバーの未読集計へ戻す。
+      // upsert失敗時も同じ再取得を行い、画面だけ既読になる乖離を残さない。
       delete unread[groupId];
       renderGroups();
       updateTitle();
-      syncAppBadge();
+      await syncAppBadge();
       try {
-        await sb.from('chat_read_states').upsert({
+        const { error } = await sb.from('chat_read_states').upsert({
           group_id: groupId,
           user_id: currentUser.id,
           last_read_at: new Date().toISOString()
         }, { onConflict: 'group_id,user_id' });
+        if (error) throw error;
       } catch (error) {
         console.error('Mark read error:', error);
+      } finally {
+        await loadUnread();
       }
     }
 
@@ -6896,12 +6904,16 @@
     }
 
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && currentUser) loadUnread();
+      if (!document.hidden && currentUser) {
+        if (currentGroupId) markGroupRead(currentGroupId);
+        else loadUnread();
+      }
     });
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data?.type === 'REFRESH_APP_BADGE' && currentUser && !document.hidden) {
-          loadUnread();
+          if (currentGroupId) markGroupRead(currentGroupId);
+          else loadUnread();
         }
         if (event.data?.type === 'FLUSH_PUSH_DIAGNOSTICS' && currentUser) {
           flushPushDiagnostics();
