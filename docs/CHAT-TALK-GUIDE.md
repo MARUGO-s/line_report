@@ -20,6 +20,8 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 - `public/chat.html` の `STORE_BOT_LOGOS` が `store_key` とロゴファイルの対応表。Botタブ、1対1トーク、ヘッダー、メンバー、招待、メンションで共通利用する。
 - 店舗Botの `icon_url` より同梱ロゴを優先する。対応表にない新店舗だけ、従来どおり `icon_url` または店名の頭文字へフォールバックする。
 - 店舗ロゴ画像は白背景・`object-fit: contain`・4px余白で表示し、円形アイコン内でロゴが切れないようにする。一般ユーザー画像は従来どおり `cover`。
+- ユーザーアイコンは、従来の画像アップロードに加えて、同梱の標準アイコン70点から選べる。素材は中央を正方形に切り出した256px PNGとして `public/profile-icons/` に保存する。
+- 標準アイコンの選択結果は `chat_users.icon_url` に保存するため、新規登録時・登録済みユーザーの変更時のどちらでも利用でき、端末を替えても維持される。
 - 店舗ロゴの円内右下には、赤文字の `bot` マークを白い小型背景付きで重ね、通常ユーザーと見分けられるようにする。円形クリップで文字が切れないよう、右7px・下6pxの内側へ配置する。
 - 店舗を追加するときは、ロゴSVG、`STORE_BOT_LOGOS`、`tests/chat_store_bot_logos.test.mjs` の期待値を同時に追加する。
 

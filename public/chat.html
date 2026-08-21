@@ -418,6 +418,32 @@
       color: #ff6b6b;
       font-weight: 700;
     }
+    .profile-icon-sheet { max-height: min(82vh, 720px); }
+    .profile-icon-actions { display: flex; gap: 10px; margin-bottom: 14px; }
+    .profile-icon-upload { flex: 1; }
+    .profile-icon-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      max-height: min(58vh, 520px);
+      overflow-y: auto;
+      padding: 2px;
+    }
+    .profile-icon-option {
+      border: 2px solid transparent;
+      border-radius: 14px;
+      background: #f2f2f7;
+      padding: 3px;
+      aspect-ratio: 1;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .profile-icon-option:hover,
+    .profile-icon-option:focus-visible { border-color: #0a84ff; }
+    .profile-icon-option img { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; display: block; }
+    @media (max-width: 560px) {
+      .profile-icon-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    }
 
     .talk-ctx-overlay {
       position: fixed;
@@ -2142,6 +2168,17 @@
     </div>
   </div>
 
+  <div class="invite-overlay hidden" id="profileIconOverlay" onclick="if (event.target === this) closeUserIconPicker()">
+    <div class="invite-sheet profile-icon-sheet" role="dialog" aria-modal="true" aria-label="ユーザーアイコンを選択">
+      <h2>アイコンを選ぶ</h2>
+      <div class="profile-icon-actions">
+        <button type="button" class="invite-copy profile-icon-upload" onclick="pickUploadedUserIcon()">自分の画像を使う</button>
+      </div>
+      <div class="profile-icon-grid" id="profileIconGrid" aria-live="polite"></div>
+      <button class="invite-close" type="button" onclick="closeUserIconPicker()">キャンセル</button>
+    </div>
+  </div>
+
   <div class="invite-overlay hidden" id="forwardOverlay" onclick="if (event.target === this) closeForward()">
     <div class="invite-sheet" role="dialog" aria-label="転送">
       <h2>転送</h2>
@@ -2264,6 +2301,8 @@
     let channel = null;
     let pendingCredentials = null;
     let pendingUserIconFile = null;
+    let pendingPresetUserIconUrl = '';
+    let profileIconCatalog = null;
     let pendingGroupIconFile = null;
     let inviteToken = '';
     let inviteMembers = [];
@@ -2630,7 +2669,7 @@
 
         const { data, error } = await sb
           .from('chat_users')
-          .insert({ id: uid, username })
+          .insert({ id: uid, username, icon_url: pendingPresetUserIconUrl || null })
           .select('id, username, icon_url')
           .single();
 
@@ -2653,6 +2692,7 @@
             console.error('Profile icon error:', iconError);
           }
           pendingUserIconFile = null;
+          pendingPresetUserIconUrl = '';
         }
 
         if (pendingCredentials && pendingCredentials.remember) {
@@ -4076,7 +4116,7 @@
       paintAvatar($('userAvatar'), name, icon);
       paintAvatar($('talkUserAvatar'), name, icon);
       paintAvatar($('headerUserAvatar'), name, icon);
-      paintAvatar($('profileIconPreview'), name || '?', pendingUserIconFile ? null : icon);
+      paintAvatar($('profileIconPreview'), name || '?', pendingUserIconFile ? null : (pendingPresetUserIconUrl || icon));
     }
 
     const ICON_SIZE = 256;
@@ -4158,8 +4198,51 @@
       $('accountMenu').classList.add('hidden');
     }
 
-    function pickUserIcon() {
+    async function pickUserIcon() {
+      closeAccountMenu();
+      $('profileIconOverlay').classList.remove('hidden');
+      const grid = $('profileIconGrid');
+      grid.innerHTML = '<p class="login-note">読み込み中…</p>';
+      try {
+        if (!profileIconCatalog) {
+          const response = await fetch('profile-icons/catalog.json', { cache: 'no-cache' });
+          if (!response.ok) throw new Error('アイコン一覧を読み込めませんでした');
+          profileIconCatalog = await response.json();
+        }
+        grid.innerHTML = profileIconCatalog.map((icon) => `
+          <button type="button" class="profile-icon-option" title="${escapeHtml(icon.label)}"
+            aria-label="${escapeHtml(icon.label)}" onclick="choosePresetUserIcon('${escapeHtml(icon.path)}')">
+            <img src="${escapeHtml(icon.path)}" alt="" loading="lazy">
+          </button>`).join('');
+      } catch (error) {
+        grid.innerHTML = `<p class="error">${escapeHtml(error.message || error)}</p>`;
+      }
+    }
+
+    function closeUserIconPicker() {
+      $('profileIconOverlay').classList.add('hidden');
+    }
+
+    function pickUploadedUserIcon() {
+      closeUserIconPicker();
       $('userIconInput').click();
+    }
+
+    async function choosePresetUserIcon(url) {
+      closeUserIconPicker();
+      pendingUserIconFile = null;
+      if (!currentUser) {
+        pendingPresetUserIconUrl = url;
+        paintAvatar($('profileIconPreview'), $('usernameInput').value.trim() || '?', url);
+        return;
+      }
+      const { error } = await sb.from('chat_users').update({ icon_url: url }).eq('id', currentUser.id);
+      if (error) {
+        alert(error.message || 'アイコンの保存に失敗しました');
+        return;
+      }
+      currentUser.icon_url = url;
+      renderUserAvatars();
     }
 
     function pickGroupIcon() {
@@ -6620,6 +6703,7 @@
       seenMessageIds = new Set();
       pendingCredentials = null;
       pendingUserIconFile = null;
+      pendingPresetUserIconUrl = '';
       pendingGroupIconFile = null;
       serviceWorkerRegistration = null;
       pushSubscription = null;
@@ -6754,6 +6838,7 @@
       if (!file) return;
       try {
         const prepared = await prepareIconFile(file);
+        pendingPresetUserIconUrl = '';
         if (currentUser) {
           await saveUserIcon(prepared);
         } else {

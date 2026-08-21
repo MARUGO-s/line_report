@@ -10,6 +10,13 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - M-talkユーザー用の標準アイコン集
+
+- Request: 添付したイラストをプロフィール用に最適化し、新規・既存ユーザーが自分のアイコンとして選べるようにしたい。
+- Implementation: 70点を中央正方形・256px PNGへ統一して `public/profile-icons/` に保存。アイコン変更画面へ一覧を追加し、従来の画像アップロードも同じ画面から利用可能にした。
+- Persistence: 選択した相対URLを `chat_users.icon_url` に保存するため、ユーザー単位で継続利用できる。
+- Verification: カタログ数・画像数・新規登録・既存ユーザー更新・アップロード併存を自動テストする。
+
 ### 2026-08-21 - 感情イラストボタンを見やすくする
 
 - Symptom: M-talk入力欄の `☺` が小さく、機能を見つけにくい。
