@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-22 - リッチカードの文字をさらに1px拡大
+
+- Request: リッチテキスト部分のフォントを、現在からもう1段階大きくしたい。
+- Fix: 見出し・項目・値・注記・ボタンをさらに1px拡大し、直前に詰めた行間と項目間隔は維持した。
+
 ### 2026-08-22 - リッチカードの行間をコンパクト化
 
 - Request: 予約通知などのリッチテキストの行間を現在の半分程度に詰めたい。

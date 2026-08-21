@@ -64,12 +64,12 @@ test('compact composer uses a short placeholder without desktop-only instruction
   assert.match(chat, /compactComposer[\s\S]*?'メッセージを入力'[\s\S]*?'メッセージ（Shift\+Enterで改行）'/);
 });
 
-test('rich cards use one-pixel larger type for reservations and receipt results', () => {
-  assert.match(chat, /\.msg-card-title \{\s*font-size: 17px/);
-  assert.match(chat, /\.msg-card-field \{[^}]*font-size: 14px/);
-  assert.match(chat, /\.msg-card-line \.msg-card-field \{[^}]*font-size: 14px/);
-  assert.match(chat, /\.msg-card-action \{[\s\S]*?font-size: 15px/);
-  assert.match(chat, /\.msg-card-heading \{ font-size: 14px/);
+test('rich cards use enlarged type for reservations and receipt results', () => {
+  assert.match(chat, /\.msg-card-title \{\s*font-size: 18px/);
+  assert.match(chat, /\.msg-card-field \{[^}]*font-size: 15px/);
+  assert.match(chat, /\.msg-card-line \.msg-card-field \{[^}]*font-size: 15px/);
+  assert.match(chat, /\.msg-card-action \{[\s\S]*?font-size: 16px/);
+  assert.match(chat, /\.msg-card-heading \{ font-size: 15px/);
 });
 
 test('rich cards use half-size row gaps with tighter readable line spacing', () => {
