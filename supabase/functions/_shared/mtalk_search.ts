@@ -1,6 +1,6 @@
 /**
- * LINE の「検索」メニューと会話／予定／メディア／売上検索を M-talk へ載せる。
- * 店舗Botのいるルームでは、LINE 1対1 と同じ4ボタンを出す。
+ * LINE の「検索」メニューから予定／メディア／売上検索を M-talk へ載せる。
+ * 会話検索は M-talk 画面上部の「トークルームとメッセージ検索」へ一本化する。
  */
 import type { LineReplyPayload } from './receipt_types.ts'
 import type { StoreRegistryRow } from './store_receipt.ts'
@@ -26,6 +26,9 @@ import {
 // deno-lint-ignore no-explicit-any
 type DbClient = any
 
+const MTALK_MESSAGE_SEARCH_GUIDANCE =
+  'M-talkの会話検索は、トーク一覧上部の「トークルームとメッセージ検索」を使ってください。'
+
 export function mtalkSearchRoomId(groupId: number): string {
   const id = Number(groupId)
   if (!Number.isSafeInteger(id) || id <= 0) return ''
@@ -38,8 +41,36 @@ function asMessages(payload: LineReplyPayload): Array<string | Record<string, un
   return [payload]
 }
 
+export function removeConversationSearchFromMtalk(payload: LineReplyPayload): LineReplyPayload {
+  if (typeof payload === 'string') {
+    return payload
+      .replaceAll('会話／予定／メディア／売上', '予定／メディア／売上')
+      .replaceAll('会話・予定・メディア・売上', '予定・メディア・売上')
+      .replaceAll('会話検索・予定検索・メディア検索', '予定検索・メディア検索')
+      .replaceAll('会話・予定・メディア', '予定・メディア')
+  }
+  if (Array.isArray(payload)) {
+    return payload.map((item) => removeConversationSearchFromMtalk(item) as string | Record<string, unknown>)
+  }
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value
+        .filter((item) => {
+          const action = item && typeof item === 'object' ? (item as { action?: { data?: unknown } }).action : null
+          return String(action?.data ?? '') !== 'srch=msg'
+        })
+        .map(walk)
+    }
+    if (!value || typeof value !== 'object') {
+      return typeof value === 'string' ? removeConversationSearchFromMtalk(value) : value
+    }
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, walk(item)]))
+  }
+  return walk(structuredClone(payload)) as Record<string, unknown>
+}
+
 function toChatReply(payload: LineReplyPayload): { text: string; card?: ChatCard } {
-  const first = asMessages(payload)[0]
+  const first = asMessages(removeConversationSearchFromMtalk(payload))[0]
   return mtalkCardFromLineReply(first)
 }
 
@@ -124,12 +155,23 @@ export async function handleMtalkSearchText(
     return true
   }
 
-  if (postback === 'message' || postback === 'calendar' || postback === 'media' || postback === 'sales') {
+  if (postback === 'message') {
+    if (pending === 'message') await clearSearchPending(supabase, roomId, userId)
+    await reply(MTALK_MESSAGE_SEARCH_GUIDANCE)
+    return true
+  }
+
+  if (postback === 'calendar' || postback === 'media' || postback === 'sales') {
     await reply(await startSearchKind(supabase, roomId, userId, postback, flags))
     return true
   }
 
   if (pending) {
+    if (pending === 'message') {
+      await clearSearchPending(supabase, roomId, userId)
+      await reply(MTALK_MESSAGE_SEARCH_GUIDANCE)
+      return true
+    }
     await reply(await runPendingSearch(
       supabase,
       params.registry,
@@ -144,6 +186,10 @@ export async function handleMtalkSearchText(
 
   const directKind = detectKindTrigger(text)
   if (directKind) {
+    if (directKind === 'message') {
+      await reply(MTALK_MESSAGE_SEARCH_GUIDANCE)
+      return true
+    }
     await reply(await startSearchKind(supabase, roomId, userId, directKind, flags))
     return true
   }

@@ -344,7 +344,7 @@ test("chat store rooms are locked and forward #メモ to Journal Report", async 
   assert.match(search, /buildSearchEntryReply/)
 })
 
-test("LINE search menu Flex becomes M-talk commands", () => {
+test("M-talk search menu omits conversation search and keeps other commands", async () => {
   const flex = {
     type: 'flex',
     altText: '検索メニュー',
@@ -361,16 +361,20 @@ test("LINE search menu Flex becomes M-talk commands", () => {
         type: 'box',
         layout: 'vertical',
         contents: [
-          { type: 'button', style: 'primary', action: { type: 'postback', label: '会話検索', data: 'srch=msg', displayText: '会話検索' } },
           { type: 'button', style: 'primary', action: { type: 'postback', label: '売上検索', data: 'srch=sal', displayText: '売上検索' } },
           { type: 'button', style: 'secondary', action: { type: 'postback', label: '📖 使い方（全機能）', data: 'srch=help', displayText: '使い方' } },
         ],
       },
     },
   }
+  const mtalkSearch = await read("supabase/functions/_shared/mtalk_search.ts")
+  assert.match(mtalkSearch, /トークルームとメッセージ検索/)
+  assert.match(mtalkSearch, /String\(action\?\.data \?\? ''\) !== 'srch=msg'/)
+  assert.match(mtalkSearch, /if \(postback === 'message'\)/)
+  assert.match(mtalkSearch, /if \(pending === 'message'\)/)
   const converted = mtalkCardFromLineReply(flex)
   const commands = (converted.card?.actions ?? []).map((action) => action.command)
-  assert.deepEqual(commands, ['srch=msg', 'srch=sal', 'srch=help'])
+  assert.deepEqual(commands, ['srch=sal', 'srch=help'])
 })
 
 test("M-talk room ids map to room_summary_settings keys", () => {

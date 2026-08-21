@@ -10,6 +10,11 @@
 - Supabase: `hocbnifuactbvmyjraxy`
 - Do not record secret values, customer data, message bodies, receipt images, or uploaded media here.
 
+### 2026-08-21 - M-talk店舗Botの会話検索を廃止
+
+- Request: 店舗Botとのトーク内で行う会話検索を削除し、トーク一覧上部の検索欄から検索する形へ統一したい。
+- Fix: M-talk専用検索メニューから会話検索を除外。予定・メディア・売上検索は維持し、古い会話検索ボタン・直接コマンド・残存する検索待ちには上部の「トークルームとメッセージ検索」を案内する。
+
 ### 2026-08-21 - 招待参加時点からの履歴と段階読み込み
 
 - Request: 新規招待ユーザーには参加前の発言を見せず、大量履歴を毎回全件通信しないようにしたい。
