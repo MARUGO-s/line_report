@@ -4157,6 +4157,8 @@
           ? 'メッセージを入力'
           : 'メッセージ（Shift+Enterで改行）';
       }
+      // プレースホルダーが折り返す幅では、注釈全体が見える行数まで入力欄を広げる。
+      resizeComposer();
       updateChatHeaderMeta();
     }
 
@@ -6813,7 +6815,23 @@
       const input = $('messageInput');
       if (!input) return;
       input.style.height = 'auto';
-      input.style.height = `${Math.min(120, Math.max(40, input.scrollHeight))}px`;
+      let placeholderHeight = 40;
+      if (!input.value && input.placeholder) {
+        const style = getComputedStyle(input);
+        const canvas = resizeComposer.canvas || (resizeComposer.canvas = document.createElement('canvas'));
+        const context = canvas.getContext('2d');
+        if (context) {
+          context.font = style.font;
+          const innerWidth = Math.max(1, input.clientWidth
+            - parseFloat(style.paddingLeft || 0)
+            - parseFloat(style.paddingRight || 0));
+          const lineHeight = parseFloat(style.lineHeight) || 21;
+          const verticalPadding = parseFloat(style.paddingTop || 0) + parseFloat(style.paddingBottom || 0);
+          const placeholderLines = Math.max(1, Math.ceil(context.measureText(input.placeholder).width / innerWidth));
+          placeholderHeight = Math.ceil(verticalPadding + (lineHeight * placeholderLines) + 2);
+        }
+      }
+      input.style.height = `${Math.min(120, Math.max(40, input.scrollHeight, placeholderHeight))}px`;
     }
 
     function composingKey(e) {
@@ -6978,7 +6996,10 @@
       window.visualViewport.addEventListener('resize', () => syncChatViewport());
       window.visualViewport.addEventListener('scroll', () => syncChatViewport());
     }
-    window.addEventListener('resize', () => syncChatViewport());
+    window.addEventListener('resize', () => {
+      resizeComposer();
+      syncChatViewport();
+    });
     window.addEventListener('orientationchange', () => {
       setTimeout(() => syncChatViewport(), 100);
     });

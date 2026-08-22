@@ -62,6 +62,10 @@ test('compact composer uses a short placeholder without desktop-only instruction
   assert.match(chat, /const compactComposer = isMobileLayout\(\) \|\| window\.innerWidth <= 1024/);
   assert.match(chat, /compactComposer[\s\S]*?'メッセージを入力（#メモ対応）'/);
   assert.match(chat, /compactComposer[\s\S]*?'メッセージを入力'[\s\S]*?'メッセージ（Shift\+Enterで改行）'/);
+  assert.match(chat, /プレースホルダーが折り返す幅では[\s\S]*?resizeComposer\(\);/);
+  assert.match(chat, /window\.addEventListener\('resize',[\s\S]*?resizeComposer\(\);[\s\S]*?syncChatViewport\(\);/);
+  assert.match(chat, /context\.measureText\(input\.placeholder\)\.width \/ innerWidth/);
+  assert.match(chat, /Math\.max\(40, input\.scrollHeight, placeholderHeight\)/);
 });
 
 test('rich cards use enlarged type for reservations and receipt results', () => {
