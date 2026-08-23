@@ -100,7 +100,10 @@ LINE の成否を待たない。重複は `chat_alert_dispatches` で防ぐ。
 - 対応付け: `room_summary_settings.chat_group_id`。無ければ同じ店舗キーのトーク
 - 新規予約・変更・キャンセル: `gmail-alert-cron`（先にトーク、続けて LINE）
 - 本日の予約まとめ: `reservation-today-cron`（トークは 0 件でも送る。LINE は 0 件だと送らない）
-- 明日の予定まとめ: `calendar-tomorrow-cron`（ルーム設定の時刻。トークは 0 件でも送る。LINE は 0 件だと送らない。カードの「予定カレンダーを開く」は `group_id` 付きの `mtalk_schedule.html`）
+- 予定まとめ: `calendar-tomorrow-cron`（`room_summary_settings.calendar_reminder_slots` の各スロットで判定。
+  1ルームあたり最大5スロットまで、対象日（前日＝明日の予定 / 当日＝本日の予定）と時刻をそれぞれ設定できる。
+  スロットごとに `calendar_tomorrow_reminder_logs.slot_id` で二重送信を防ぐ。トークは0件でも送る。LINE は0件だと送らない。
+  カードの「予定カレンダーを開く」は `group_id` 付きの `mtalk_schedule.html`）
 - 共通処理: `supabase/functions/_shared/chat_bridge.ts`
 
 投稿後は `chat-push?action=dispatch` を内部シークレットで叩き、Web Push まで配信する。
@@ -168,7 +171,25 @@ M-talk のトーク下部「予約・予定」から、同じルームの予約�
 - 閲覧はそのルームの`can_view`、保存は`can_send`が必要。update / delete のポリシーは作らない
 - 送信前に長辺1600px・JPEG品質0.82へ縮小する
 
+## サイレント送信（通知なし）
+
+入力欄の🔔/🔕トグルで、送信ごとに通知の有無を選べる。
+
+- 🔔（既定）は通常どおり Web Push を配信する。🔕をONにすると、そのメッセージだけ通知をスキップして静かに送る。
+- 保存先は `chat_messages.is_silent`。`chat-push` はこのフラグを見て、Web Push 配信自体を行わずに
+  `chat_push_dispatches` を `sent_count=0` で完了扱いにする。
+- 受信側の画面には、サイレント送信されたメッセージに🔕マークが付く。本文やトーク一覧のプレビューは通常と同じ。
+- LINE 側への複製配信（予約通知など）には影響しない。この設定は M-talk のメッセージ単位のトグルであり、
+  ルーム設定や全体の通知設定とは別。
+
 ## 検索
+
+トーク下部メニューの「検索」は、投稿せず自分だけに見えるダイアログ（検索ランチャー）を直接開く。
+ランチャーには次の3つがあり、どれもトーク発言や他メンバーへの通知を発生させない。
+
+- トーク履歴・メッセージ検索（下記の全文検索へ）
+- 予定・予約カレンダーを開く
+- 写真・メディアライブラリ
 
 M-talkの店舗Bot検索メニューでは、予定・メディア・売上検索だけを提供する。会話検索はBotとのコマンド形式では行わず、トーク一覧上部の「トークルームとメッセージ検索」に一本化する。古い会話検索ボタンや「会話検索」コマンドが使われた場合も、上部検索欄を案内する。
 
