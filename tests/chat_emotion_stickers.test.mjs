@@ -57,7 +57,7 @@ test('sticker picker separates emotion and symbol illustrations with swipeable t
 
 test('sticker picker lets users choose large or compact bubble display', () => {
   assert.match(chat, /data-sticker-mode="large">大きく送る/);
-  assert.match(chat, /data-sticker-mode="compact">小さく吹き出し内/);
+  assert.match(chat, /data-sticker-mode="compact">文章内に入れる/);
   assert.match(chat, /sticker\.display === 'compact'/);
   assert.match(chat, /class="message-bubble"><div class="inline-sticker-message">\$\{stickerImage\}/);
   assert.match(chat, /sticker: \{ id: stickerId, display \}/);
@@ -72,4 +72,11 @@ test('compact stickers attach to the composer and send with message text', () =>
   assert.match(chat, /sendSticker\(inlineSticker\.id, 'compact', content\)/);
   assert.match(chat, /class="inline-sticker-message">\$\{stickerImage\}\$\{inlineText\}/);
   assert.match(inlineTextMigration, /v_sticker_display = 'compact'[\s\S]*?new\.content := left\(new\.content, 2000\)/);
+});
+
+test('typing highlights the sticker button and opens focused on inline mode', () => {
+  assert.match(chat, /\.sticker-trigger-btn\.message-ready \{/);
+  assert.match(chat, /classList\.toggle\('message-ready', hasMessage\)/);
+  assert.match(chat, /アイコンを文章内に入れる/);
+  assert.match(chat, /stickerSendMode = \$\('messageInput'\)\?\.value\.trim\(\) \? 'compact' : 'large'/);
 });

@@ -1476,6 +1476,13 @@
       font-size: 28px;
       font-weight: 700;
       line-height: 1;
+      transition: color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
+    }
+    .sticker-trigger-btn.message-ready {
+      color: #fff;
+      background: var(--line-green);
+      box-shadow: 0 0 0 4px rgba(6, 199, 85, .2), 0 0 16px rgba(6, 199, 85, .65);
+      transform: scale(1.08);
     }
 
     .message {
@@ -6291,7 +6298,7 @@
           <button class="sticker-send-mode ${stickerSendMode === 'large' ? 'active' : ''}" type="button"
             aria-pressed="${stickerSendMode === 'large'}" data-sticker-mode="large">大きく送る</button>
           <button class="sticker-send-mode ${stickerSendMode === 'compact' ? 'active' : ''}" type="button"
-            aria-pressed="${stickerSendMode === 'compact'}" data-sticker-mode="compact">小さく吹き出し内</button>
+            aria-pressed="${stickerSendMode === 'compact'}" data-sticker-mode="compact">文章内に入れる</button>
         </div>
         <div class="sticker-tabs" role="tablist" aria-label="イラストのカテゴリ">
           ${STICKER_CATEGORIES.map((category) => `
@@ -6321,6 +6328,8 @@
         return;
       }
       try {
+        // 本文入力中に開いた場合だけ、文章内へ添付するモードを先に選ぶ。
+        stickerSendMode = $('messageInput')?.value.trim() ? 'compact' : 'large';
         await loadStickerCatalog();
         renderStickerPicker();
         picker.classList.remove('hidden');
@@ -6970,6 +6979,13 @@
     function resizeComposer() {
       const input = $('messageInput');
       if (!input) return;
+      const stickerButton = document.querySelector('.sticker-trigger-btn');
+      const hasMessage = Boolean(input.value.trim());
+      stickerButton?.classList.toggle('message-ready', hasMessage);
+      if (stickerButton) {
+        stickerButton.title = hasMessage ? 'アイコンを文章内に入れる' : '感情イラスト';
+        stickerButton.setAttribute('aria-label', stickerButton.title);
+      }
       input.style.height = 'auto';
       let placeholderHeight = 40;
       if (!input.value && input.placeholder) {
