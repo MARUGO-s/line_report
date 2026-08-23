@@ -75,3 +75,8 @@ test('chat notification test button stays out of the talk tab row on desktop', a
   assert.match(actions, /通知テスト/);
   assert.doesNotMatch(chat.slice(chat.indexOf('class="talk-tabs-scroll"'), actionsAt), /data-push-test/);
 });
+
+test('short chat histories stay next to the composer instead of leaving a middle gap', async () => {
+  const chat = await read('public/chat.html');
+  assert.match(chat, /\.messages::before \{[\s\S]*?margin-top: auto;/);
+});

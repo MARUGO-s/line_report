@@ -1055,6 +1055,11 @@
       gap: 8px;
       background: var(--chat-bg);
     }
+    /* 履歴が少ない時は入力欄の直上へ寄せ、中央に使われない空白を残さない。 */
+    .messages::before {
+      content: '';
+      margin-top: auto;
+    }
 
     .jump-latest {
       position: absolute;
