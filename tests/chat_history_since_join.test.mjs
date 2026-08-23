@@ -38,9 +38,11 @@ test('chat loads only the latest page, then paginates upward and caches room vie
   assert.match(chat, /const roomViewCache = new Map\(\)/);
 });
 
-test('visible last message is pulled down to remove the gap above the composer', () => {
-  assert.match(chat, /function removeVisibleMessageBottomGap\(\)/);
+test('reaching the end of an intermediate search window automatically loads latest messages', () => {
+  assert.match(chat, /function resolveUnloadedLatestGap\(\)/);
   assert.match(chat, /querySelector\('\.message:last-of-type'\)/);
   assert.match(chat, /const gap = viewport\.bottom - last\.bottom - 16/);
-  assert.match(chat, /messages\.scrollTop \+= gap/);
+  assert.match(chat, /if \(gap > 8\) void jumpToLatest\(\)/);
+  assert.match(chat, /!viewHasLatest && distanceFromBottom < 80/);
+  assert.match(chat, /if \(jumpingToLatest\) return/);
 });

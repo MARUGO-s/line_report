@@ -2494,6 +2494,7 @@
     // 検索から途中へジャンプすると false になり、そのまま新着を継ぎ足すと
     // 間が抜けた並びになるので、その場合は追記せず「最新へ」で読み直す。
     let viewHasLatest = true;
+    let jumpingToLatest = false;
     // 下端に張り付いているか（新着で自動スクロールするかの判断）。
     let followNewMessages = true;
     let messageSearchSeq = 0;
@@ -4638,6 +4639,7 @@
         if (target) {
           target.scrollIntoView({ block: 'center' });
           target.classList.add('flash');
+          requestAnimationFrame(resolveUnloadedLatestGap);
         } else {
           scrollMessagesToBottom();
         }
@@ -5545,9 +5547,11 @@
       el.scrollTop = el.scrollHeight;
     }
 
-    // 読み込み済みの最後の発言が見えているのに下側だけ空いている場合は、
-    // その発言を入力欄の直上へ寄せる。途中の履歴を読んでいる場合は動かさない。
-    function removeVisibleMessageBottomGap() {
+    // 検索などで最新まで届いていない範囲の末尾が見えたら、最新範囲へ切り替える。
+    // 末尾の先に未読込メッセージがある状態で止まると、DOM上には続きがないため
+    // 入力欄まで空白になる。「最新へ」と同じ再読込を自動で行い、その空白を作らない。
+    function resolveUnloadedLatestGap() {
+      if (viewHasLatest || jumpingToLatest) return;
       const messages = $('messages');
       const lastMessage = messages?.querySelector('.message:last-of-type');
       if (!messages || !lastMessage) return;
@@ -5555,7 +5559,7 @@
       const last = lastMessage.getBoundingClientRect();
       if (last.bottom <= viewport.top || last.bottom > viewport.bottom) return;
       const gap = viewport.bottom - last.bottom - 16;
-      if (gap > 8) messages.scrollTop += gap;
+      if (gap > 8) void jumpToLatest();
     }
 
     // 自分が送った感情イラストは、画像の読み込みで高さが確定した後も
@@ -5758,7 +5762,7 @@
         el.appendChild(buildMessageNode(msg));
       });
       hydrateMessageImages();
-      requestAnimationFrame(removeVisibleMessageBottomGap);
+      requestAnimationFrame(resolveUnloadedLatestGap);
     }
 
     // 新着1件だけを末尾に足す（全体を描き直さずスクロール位置を保つ）。
@@ -6218,16 +6222,28 @@
 
     function handleMessagesScroll() {
       const el = $('messages');
-      if (el.scrollTop < 120) loadOlderMessages();
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       // 下端付近にいるかどうかで、新着を自動追尾するか決める。
-      followNewMessages = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      followNewMessages = distanceFromBottom < 80;
       updateJumpLatestButton();
-      requestAnimationFrame(removeVisibleMessageBottomGap);
+      if (!viewHasLatest && distanceFromBottom < 80) {
+        void jumpToLatest();
+        return;
+      }
+      if (el.scrollTop < 120) loadOlderMessages();
+      requestAnimationFrame(resolveUnloadedLatestGap);
     }
 
     async function jumpToLatest() {
+      if (jumpingToLatest) return;
       const group = myGroups.find((g) => g.id === currentGroupId);
-      if (group) await selectGroup(group);
+      if (!group) return;
+      jumpingToLatest = true;
+      try {
+        await selectGroup(group);
+      } finally {
+        jumpingToLatest = false;
+      }
     }
 
     // 通知カードは Bot（service_role）だけが作れる。payload が壊れていたら
