@@ -35,6 +35,7 @@
 | [REPOSITORY_STRUCTURE.md](./REPOSITORY_STRUCTURE.md) | 開発・AI | ルート公開ファイルを残す理由、各ディレクトリの役割、`.local/`の配置ルール |
 | [AI_KNOWLEDGE_SYSTEM.md](./AI_KNOWLEDGE_SYSTEM.md) | AI・開発 | Graphify（コード/SQL）・Obsidian（手書き/既存文書ミラー）・AI作業循環・環境図・更新/検査コマンド |
 | [AI_CONTEXT.md](./AI_CONTEXT.md) | AI | `knowledge:update`で生成する短縮コンテキスト。作業開始時の情報源順位・必須フロー |
+| [M-TALK-COMPLETE-GUIDE.md](./M-TALK-COMPLETE-GUIDE.md) | 運用・開発・説明 | **M-talk統合版** — 概要／使い方／通知／権限／管理／セキュリティ／技術構成／トラブルシュートを1ファイルに。各領域の正本は CHAT-TALK-GUIDE・CHAT-ADMIN-PERMISSIONS・SECURITY |
 | [CHAT-TALK-GUIDE.md](./CHAT-TALK-GUIDE.md) | 運用・開発 | **トーク（chat.html）** — 利用条件、発言種別（text/card/image）、予約通知の複製、画像の非公開バケット、検索、既読・リアクション・返信・メンション |
 | [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md) | 運用・開発 | **M-talk専用管理** — ユーザー利用停止・論理削除、1対1／ルーム別の閲覧・送信・招待・管理権限、管理API、監査 |
 | [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | 運用・説明 | 利用許可・ルーム承認・管理 Bot・管理画面連携 |
@@ -106,4 +107,4 @@
 
 ---
 
-*最終更新: 2026-08-05（JOURNAL-AI-CHAT-RULES.md を追加。2026-07-26: Graphify・Obsidian・AI知識循環。2026-07-19: LINE-RECEIPT-ANALYSIS.md を現行ルーティングへ更新。）*
+*最終更新: 2026-08-24（M-TALK-COMPLETE-GUIDE.md を追加。2026-08-05: JOURNAL-AI-CHAT-RULES.md を追加。2026-07-26: Graphify・Obsidian・AI知識循環。2026-07-19: LINE-RECEIPT-ANALYSIS.md を現行ルーティングへ更新。）*
