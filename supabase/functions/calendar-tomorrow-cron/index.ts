@@ -8,13 +8,16 @@ import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 import {
   addJstDays,
   buildMtalkSchedulePageUrl,
-  buildTomorrowReminderChatCard,
-  buildTomorrowReminderChatText,
+  buildReminderChatCard,
+  buildReminderChatText,
   CALENDAR_TOMORROW_REMINDER_MAX_ITEMS,
+  CalendarReminderSlot,
+  CalendarReminderTarget,
   eventTimeLabel,
   jstDateLabel,
   jstDayUtcRange,
   normalizeEventTitle,
+  normalizeReminderSlots,
   reminderClockMatches,
   toJstDateParts,
   toJstDateString,
@@ -22,6 +25,13 @@ import {
 } from "../_shared/calendar_tomorrow_reminder.ts"
 
 type DbClient = ReturnType<typeof createClient>
+
+type TargetRoomTask = {
+  roomId: string
+  storeKey: string
+  roomName: string
+  slot: CalendarReminderSlot
+}
 
 Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
@@ -34,59 +44,72 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
   const now = new Date()
   const jst = toJstDateParts(now)
+  const today = { year: jst.year, month: jst.month, day: jst.day }
   const tomorrow = addJstDays(jst, 1)
-  const targetDate = toJstDateString(tomorrow.year, tomorrow.month, tomorrow.day)
   const nowJst = `${toJstDateString(jst.year, jst.month, jst.day)} ${pad2(jst.hour)}:${pad2(jst.minute)}`
 
   const { data: roomSettings, error: settingsError } = await supabase
     .from("room_summary_settings")
-    .select("room_id, is_enabled, calendar_tomorrow_reminder_enabled, calendar_tomorrow_reminder_hour, calendar_tomorrow_reminder_minute, receipt_report_store_partition_key, room_name")
+    .select("room_id, is_enabled, calendar_tomorrow_reminder_enabled, calendar_tomorrow_reminder_hour, calendar_tomorrow_reminder_minute, calendar_reminder_slots, receipt_report_store_partition_key, room_name")
   if (settingsError) {
     return json({ ok: false, error: `Failed to load room_summary_settings: ${settingsError.message}` }, 500)
   }
 
-  const targetRooms: Array<{ roomId: string; storeKey: string; roomName: string }> = []
+  const targetTasks: TargetRoomTask[] = []
   for (const row of (Array.isArray(roomSettings) ? roomSettings : [])) {
     const roomId = String(row.room_id ?? "").trim()
     if (!roomId) continue
     if (row.calendar_tomorrow_reminder_enabled !== true) continue
     if (row.is_enabled === false) continue
-    if (!reminderClockMatches(jst.hour, jst.minute, row.calendar_tomorrow_reminder_hour, row.calendar_tomorrow_reminder_minute)) {
-      continue
+
+    const slots = normalizeReminderSlots(
+      row.calendar_reminder_slots,
+      row.calendar_tomorrow_reminder_hour,
+      row.calendar_tomorrow_reminder_minute,
+    )
+    for (const slot of slots) {
+      if (slot.enabled && reminderClockMatches(jst.hour, jst.minute, slot.hour, slot.minute)) {
+        targetTasks.push({
+          roomId,
+          storeKey: String(row.receipt_report_store_partition_key ?? "").trim(),
+          roomName: String(row.room_name ?? "").trim(),
+          slot,
+        })
+      }
     }
-    targetRooms.push({
-      roomId,
-      storeKey: String(row.receipt_report_store_partition_key ?? "").trim(),
-      roomName: String(row.room_name ?? "").trim(),
-    })
   }
 
-  if (targetRooms.length === 0) {
+  if (targetTasks.length === 0) {
     return json({ ok: true, skipped: true, reason: "no_rooms_scheduled_now", now_jst: nowJst }, 200)
   }
 
   const sent: string[] = []
-  const skipped: Array<{ room_id: string; reason: string }> = []
+  const skipped: Array<{ room_id: string; slot_id: string; reason: string }> = []
   const errors: string[] = []
   const chatPosted: string[] = []
   const chatErrors: string[] = []
 
-  for (const target of targetRooms) {
-    const events = await loadTomorrowEvents(supabase, target.roomId, target.storeKey, tomorrow)
+  for (const target of targetTasks) {
+    const targetDateObj = target.slot.target === "today" ? today : tomorrow
+    const targetDate = toJstDateString(targetDateObj.year, targetDateObj.month, targetDateObj.day)
+    const slotId = target.slot.id || "default"
+
+    const events = await loadEventsForDate(supabase, target.roomId, target.storeKey, targetDateObj)
     const { error: insertError } = await supabase
       .from("calendar_tomorrow_reminder_logs")
       .insert({
         room_id: target.roomId,
         target_date: targetDate,
+        slot_id: slotId,
         store_partition_key: target.storeKey || null,
         event_count: events.length,
         sent_at: now.toISOString(),
       })
     if (insertError) {
       if (String(insertError.code ?? "") === "23505") {
-        skipped.push({ room_id: target.roomId, reason: "already_sent_today" })
+        skipped.push({ room_id: target.roomId, slot_id: slotId, reason: "already_sent_today" })
       } else {
-        errors.push(`${target.roomId}: failed to reserve log (${insertError.message})`)
+        errors.push(`${target.roomId} [${slotId}]: failed to reserve log (${insertError.message})`)
       }
       continue
     }
@@ -101,36 +124,36 @@ Deno.serve(async (req) => {
       const asUser = mtalkRoom && target.storeKey ? await loadMtalkStoreBot(supabase, target.storeKey) : null
       const chatResult = await postChatCardIndependent(supabase, {
         groupId: chatGroupId,
-        kind: "calendar_tomorrow",
-        dedupeKey: targetDate,
-        text: buildTomorrowReminderChatText(target.roomName || null, tomorrow, events),
-        cards: [buildTomorrowReminderChatCard(target.roomName || null, tomorrow, events, scheduleUrl) as ChatCard],
+        kind: target.slot.target === "today" ? "calendar_today" : "calendar_tomorrow",
+        dedupeKey: `${targetDate}_${slotId}`,
+        text: buildReminderChatText(target.roomName || null, targetDateObj, events, target.slot.target),
+        cards: [buildReminderChatCard(target.roomName || null, targetDateObj, events, scheduleUrl, target.slot.target) as ChatCard],
         asUser,
       })
       if (!chatResult.ok) {
         console.error(`chat card post failed for ${target.roomId}:`, chatResult.error)
-        chatErrors.push(`${target.roomId}: ${chatResult.error}`)
+        chatErrors.push(`${target.roomId} [${slotId}]: ${chatResult.error}`)
       } else if (!chatResult.skipped) {
-        chatPosted.push(target.roomId)
+        chatPosted.push(`${target.roomId}:${slotId}`)
       }
     }
 
     if (mtalkRoom) {
-      sent.push(target.roomId)
+      sent.push(`${target.roomId}:${slotId}`)
       continue
     }
 
     if (events.length === 0) {
-      skipped.push({ room_id: target.roomId, reason: "zero_events" })
+      skipped.push({ room_id: target.roomId, slot_id: slotId, reason: "zero_events" })
       continue
     }
 
     if (!lineAccessToken) {
-      skipped.push({ room_id: target.roomId, reason: "missing_line_channel_access_token" })
+      skipped.push({ room_id: target.roomId, slot_id: slotId, reason: "missing_line_channel_access_token" })
       continue
     }
 
-    const flex = buildTomorrowReminderFlex(target.roomName || null, tomorrow, events, scheduleUrl)
+    const flex = buildReminderFlex(target.roomName || null, targetDateObj, events, scheduleUrl, target.slot.target)
     const sendResult = await sendLinePushMessages(
       target.roomId,
       [flex],
@@ -144,34 +167,34 @@ Deno.serve(async (req) => {
           .delete()
           .eq("room_id", target.roomId)
           .eq("target_date", targetDate)
+          .eq("slot_id", slotId)
       } catch (_e) { /* noop */ }
-      errors.push(`${target.roomId}: ${sendResult.error}`)
+      errors.push(`${target.roomId} [${slotId}]: ${sendResult.error}`)
       continue
     }
-    sent.push(target.roomId)
+    sent.push(`${target.roomId}:${slotId}`)
   }
 
   return json({
     ok: true,
     now_jst: nowJst,
-    target_date: targetDate,
-    target_room_count: targetRooms.length,
-    sent_room_count: sent.length,
-    skipped_room_count: skipped.length,
+    target_task_count: targetTasks.length,
+    sent_task_count: sent.length,
+    skipped_task_count: skipped.length,
     error_count: errors.length,
-    sent_room_ids: sent,
-    chat_posted_room_ids: chatPosted,
+    sent_tasks: sent,
+    chat_posted_tasks: chatPosted,
     chat_errors: chatErrors,
     skipped,
     errors,
   }, 200)
 })
 
-async function loadTomorrowEvents(
+async function loadEventsForDate(
   supabase: DbClient,
   roomId: string,
   storeKey: string,
-  tomorrow: { year: number; month: number; day: number },
+  targetDate: { year: number; month: number; day: number },
 ): Promise<TomorrowCalendarEvent[]> {
   const roomIds = new Set<string>([roomId])
   if (isMtalkSyntheticRoomId(roomId) && storeKey) {
@@ -180,7 +203,7 @@ async function loadTomorrowEvents(
       .select("room_id")
       .eq("receipt_report_store_partition_key", storeKey)
     if (error) {
-      console.error("Failed to load linked rooms for tomorrow reminder:", error.message)
+      console.error("Failed to load linked rooms for reminder:", error.message)
     } else {
       for (const row of (Array.isArray(data) ? data : [])) {
         const id = String((row as { room_id?: string }).room_id ?? "").trim()
@@ -188,7 +211,7 @@ async function loadTomorrowEvents(
       }
     }
   }
-  const range = jstDayUtcRange(tomorrow.year, tomorrow.month, tomorrow.day)
+  const range = jstDayUtcRange(targetDate.year, targetDate.month, targetDate.day)
   const { data, error } = await supabase
     .from("line_room_calendar_events")
     .select("id, event_title, event_description, starts_at, ends_at")
@@ -221,16 +244,18 @@ async function loadTomorrowEvents(
   return out
 }
 
-function buildTomorrowReminderFlex(
+function buildReminderFlex(
   roomName: string | null,
   target: { year: number; month: number; day: number },
   events: TomorrowCalendarEvent[],
   scheduleUrl?: string | null,
+  targetType: CalendarReminderTarget = "tomorrow",
 ) {
   const dateLabel = jstDateLabel(target.year, target.month, target.day)
+  const targetLabel = targetType === "today" ? "本日の予定" : "明日の予定"
   const count = events.length
   const headerContents: Array<Record<string, unknown>> = [
-    { type: "text", text: "明日の予定", color: "#FFFFFFCC", size: "sm", weight: "bold" },
+    { type: "text", text: targetLabel, color: "#FFFFFFCC", size: "sm", weight: "bold" },
   ]
   if (roomName) {
     headerContents.push({ type: "text", text: roomName, color: "#FFFFFF", size: "lg", weight: "bold", wrap: true })

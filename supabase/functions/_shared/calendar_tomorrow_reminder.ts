@@ -2,7 +2,52 @@
 
 export const CALENDAR_TOMORROW_REMINDER_DEFAULTS = { hour: 19, minute: 0 }
 export const CALENDAR_TOMORROW_REMINDER_MAX_ITEMS = 20
+export const MAX_REMINDER_SLOTS = 3
 const MTALK_SCHEDULE_PAGE = "https://marugo-s.github.io/line_report/mtalk_schedule.html"
+
+export type CalendarReminderTarget = "tomorrow" | "today"
+
+export type CalendarReminderSlot = {
+  id: string
+  target: CalendarReminderTarget
+  hour: number
+  minute: number
+  enabled: boolean
+}
+
+export function normalizeReminderSlots(
+  raw: unknown,
+  fallbackHour?: number | null,
+  fallbackMinute?: number | null,
+): CalendarReminderSlot[] {
+  if (Array.isArray(raw) && raw.length > 0) {
+    const slots: CalendarReminderSlot[] = []
+    for (let i = 0; i < Math.min(raw.length, MAX_REMINDER_SLOTS); i++) {
+      const item = raw[i]
+      if (!item || typeof item !== "object") continue
+      const obj = item as Record<string, unknown>
+      const target: CalendarReminderTarget = obj.target === "today" ? "today" : "tomorrow"
+      const hour = Math.min(23, Math.max(0, Number.isInteger(Number(obj.hour)) ? Number(obj.hour) : CALENDAR_TOMORROW_REMINDER_DEFAULTS.hour))
+      const minute = Math.min(59, Math.max(0, Number.isInteger(Number(obj.minute)) ? Number(obj.minute) : CALENDAR_TOMORROW_REMINDER_DEFAULTS.minute))
+      const enabled = obj.enabled !== false
+      const id = String(obj.id || `slot_${i + 1}`).trim() || `slot_${i + 1}`
+      slots.push({ id, target, hour, minute, enabled })
+    }
+    if (slots.length > 0) return slots
+  }
+
+  const defaultHour = fallbackHour != null ? Number(fallbackHour) : CALENDAR_TOMORROW_REMINDER_DEFAULTS.hour
+  const defaultMin = fallbackMinute != null ? Number(fallbackMinute) : CALENDAR_TOMORROW_REMINDER_DEFAULTS.minute
+  return [
+    {
+      id: "default",
+      target: "tomorrow",
+      hour: Math.min(23, Math.max(0, Number.isInteger(defaultHour) ? defaultHour : 19)),
+      minute: Math.min(59, Math.max(0, Number.isInteger(defaultMin) ? defaultMin : 0)),
+      enabled: true,
+    },
+  ]
+}
 
 export function buildMtalkSchedulePageUrl(
   groupId: number,
@@ -89,14 +134,16 @@ export function normalizeEventTitle(value: unknown): string {
   return title || "（無題）"
 }
 
-export function buildTomorrowReminderChatText(
+export function buildReminderChatText(
   roomName: string | null,
   target: { year: number; month: number; day: number },
   events: TomorrowCalendarEvent[],
+  targetType: CalendarReminderTarget = "tomorrow",
 ): string {
   const dateLabel = jstDateLabel(target.year, target.month, target.day)
-  const header = [roomName, `明日の予定 ${events.length}件`, dateLabel].filter(Boolean).join(" / ")
-  if (events.length === 0) return `${header}\n明日の予定はありません。`
+  const targetLabel = targetType === "today" ? "本日の予定" : "明日の予定"
+  const header = [roomName, `${targetLabel} ${events.length}件`, dateLabel].filter(Boolean).join(" / ")
+  if (events.length === 0) return `${header}\n${targetLabel}はありません。`
 
   const lines = events.slice(0, CALENDAR_TOMORROW_REMINDER_MAX_ITEMS).map((event) => {
     const title = normalizeEventTitle(event.title)
@@ -107,6 +154,56 @@ export function buildTomorrowReminderChatText(
     lines.push(`ほか ${events.length - CALENDAR_TOMORROW_REMINDER_MAX_ITEMS} 件`)
   }
   return [header, ...lines].join("\n")
+}
+
+export function buildTomorrowReminderChatText(
+  roomName: string | null,
+  target: { year: number; month: number; day: number },
+  events: TomorrowCalendarEvent[],
+): string {
+  return buildReminderChatText(roomName, target, events, "tomorrow")
+}
+
+export function buildReminderChatCard(
+  roomName: string | null,
+  target: { year: number; month: number; day: number },
+  events: TomorrowCalendarEvent[],
+  scheduleUrl?: string | null,
+  targetType: CalendarReminderTarget = "tomorrow",
+): {
+  header: { eyebrow: string; title: string; subtitle: string }
+  sections: Array<
+    | { type: "note"; text: string }
+    | { type: "list"; items: Array<{ time: string; name: string; note: string | null }> }
+  >
+  action: { label: string; url: string; style: "primary" } | null
+} {
+  const dateLabel = jstDateLabel(target.year, target.month, target.day)
+  const targetLabel = targetType === "today" ? "本日の予定" : "明日の予定"
+  const count = events.length
+  const shown = events.slice(0, CALENDAR_TOMORROW_REMINDER_MAX_ITEMS)
+  const sections = count === 0
+    ? [{ type: "note" as const, text: `${targetLabel}はありません。` }]
+    : [{
+      type: "list" as const,
+      items: shown.map((event) => ({
+        time: eventTimeLabel(event.startsAt, event.endsAt),
+        name: normalizeEventTitle(event.title),
+        note: String(event.description ?? "").trim() || null,
+      })),
+    }]
+  if (count > CALENDAR_TOMORROW_REMINDER_MAX_ITEMS) {
+    sections.push({ type: "note", text: `ほか ${count - CALENDAR_TOMORROW_REMINDER_MAX_ITEMS} 件` })
+  }
+  return {
+    header: {
+      eyebrow: targetLabel,
+      title: roomName ?? targetLabel,
+      subtitle: count > 0 ? `${dateLabel} ・ ${count}件` : dateLabel,
+    },
+    sections,
+    action: scheduleUrl ? { label: "予定カレンダーを開く", url: scheduleUrl, style: "primary" } : null,
+  }
 }
 
 export function buildTomorrowReminderChatCard(
@@ -122,31 +219,7 @@ export function buildTomorrowReminderChatCard(
   >
   action: { label: string; url: string; style: "primary" } | null
 } {
-  const dateLabel = jstDateLabel(target.year, target.month, target.day)
-  const count = events.length
-  const shown = events.slice(0, CALENDAR_TOMORROW_REMINDER_MAX_ITEMS)
-  const sections = count === 0
-    ? [{ type: "note" as const, text: "明日の予定はありません。" }]
-    : [{
-      type: "list" as const,
-      items: shown.map((event) => ({
-        time: eventTimeLabel(event.startsAt, event.endsAt),
-        name: normalizeEventTitle(event.title),
-        note: String(event.description ?? "").trim() || null,
-      })),
-    }]
-  if (count > CALENDAR_TOMORROW_REMINDER_MAX_ITEMS) {
-    sections.push({ type: "note", text: `ほか ${count - CALENDAR_TOMORROW_REMINDER_MAX_ITEMS} 件` })
-  }
-  return {
-    header: {
-      eyebrow: "明日の予定",
-      title: roomName ?? "明日の予定",
-      subtitle: count > 0 ? `${dateLabel} ・ ${count}件` : dateLabel,
-    },
-    sections,
-    action: scheduleUrl ? { label: "予定カレンダーを開く", url: scheduleUrl, style: "primary" } : null,
-  }
+  return buildReminderChatCard(roomName, target, events, scheduleUrl, "tomorrow")
 }
 
 function jstHm(iso: string): string | null {

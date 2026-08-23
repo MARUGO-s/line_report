@@ -177,6 +177,9 @@ import {
   normalizePosProductSearchText as normalizePosProductSearchTextShared,
   type JournalProductLineItem,
 } from "../_shared/journal_product_index.ts"
+import {
+  normalizeReminderSlots,
+} from "../_shared/calendar_tomorrow_reminder.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
 import { isMtalkSyntheticRoomId, mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
@@ -582,7 +585,7 @@ const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
 const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," +
   ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
   ",today_reservation_alert_hour,today_reservation_alert_minute" +
-  ",calendar_tomorrow_reminder_hour,calendar_tomorrow_reminder_minute" +
+  ",calendar_tomorrow_reminder_hour,calendar_tomorrow_reminder_minute,calendar_reminder_slots" +
   ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute" +
   ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute" +
   ",review_alert_hour,review_alert_minute" +
@@ -612,6 +615,13 @@ function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<strin
   if ("calendar_tomorrow_reminder_minute" in body) {
     const m = Number(body.calendar_tomorrow_reminder_minute)
     out.calendar_tomorrow_reminder_minute = (Number.isInteger(m) && m >= 0 && m <= 59) ? m : null
+  }
+  if ("calendar_reminder_slots" in body) {
+    if (body.calendar_reminder_slots == null) {
+      out.calendar_reminder_slots = null
+    } else if (Array.isArray(body.calendar_reminder_slots)) {
+      out.calendar_reminder_slots = normalizeReminderSlots(body.calendar_reminder_slots)
+    }
   }
   // 東京ドーム週次配信の曜日・時刻（NULL許容＝既定 土6/10時/0分）
   if ("dome_weekly_dow" in body) {
@@ -18104,6 +18114,13 @@ function buildRoomSettingsPayload(body: unknown): {
     } satisfies AppError
   }
 
+  let calendarReminderSlots: unknown = undefined
+  if ("calendar_reminder_slots" in body) {
+    calendarReminderSlots = body.calendar_reminder_slots == null
+      ? null
+      : (Array.isArray(body.calendar_reminder_slots) ? normalizeReminderSlots(body.calendar_reminder_slots) : null)
+  }
+
   return {
     room_id: roomIdRaw,
     room_name: roomNameRaw || null,
@@ -18128,6 +18145,7 @@ function buildRoomSettingsPayload(body: unknown): {
     today_reservation_alert_enabled: todayReservationAlertEnabled,
     today_reservation_alert_hour: todayReservationAlertHour,
     today_reservation_alert_minute: todayReservationAlertMinute,
+    ...(calendarReminderSlots !== undefined ? { calendar_reminder_slots: calendarReminderSlots } : {}),
     gmail_alert_interval_minutes: gmailAlertIntervalMinutes,
     gmail_alert_anchor_hour: gmailAlertAnchorHour,
     gmail_alert_anchor_minute: gmailAlertAnchorMinute,
