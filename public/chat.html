@@ -872,7 +872,7 @@
       position: fixed;
       inset: 0;
       background: rgba(0, 0, 0, 0.45);
-      z-index: 20;
+      z-index: 100;
       display: flex;
       align-items: flex-end;
       justify-content: center;
@@ -2123,7 +2123,8 @@
       }
       .login-container { max-height: 100%; overflow-y: auto; }
       .invite-overlay {
-        position: absolute;
+        position: fixed;
+        z-index: 100;
         padding:
           var(--mobile-safe-top)
           var(--mobile-safe-right)
